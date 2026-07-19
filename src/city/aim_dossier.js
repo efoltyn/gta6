@@ -11,8 +11,21 @@
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.onAlways) return;
+  const THREE = window.THREE;
+
+  // OWNER DIRECTION: the HUD is not an information dump. Aiming at someone should
+  // read their LEVEL + TITLE hovering over their head — that's it (a low-level
+  // homeless man, a high-level CEO, a mid boxer). The full street read still
+  // EXISTS as data (CBZ.cityActorDossier) for a leaderboard / click-to-open
+  // profile, but it no longer paints a wall of stats across the screen. Flip
+  // CITY_AIM_OVERHEAD=false to restore the old right-side dossier card.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CITY_AIM_OVERHEAD == null) CBZ.CONFIG.CITY_AIM_OVERHEAD = true;
+  const OVERHEAD = () => CBZ.CONFIG.CITY_AIM_OVERHEAD !== false;
 
   let card = null, lastActor = null, lastHTML = "", sweep = 0;
+  let tag = null;                          // the floating overhead level pill
+  const _pv = THREE ? new THREE.Vector3() : null;
   function esc(v) {
     return String(v == null ? "—" : v).replace(/[&<>"']/g, function (c) {
       return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
@@ -106,22 +119,104 @@
       section("Hunting value", row("Pelt", sp.fur || "none") + row("Pelt value", sp.furValue ? money(sp.furValue) : "") + row("Meat", sp.meat || sp.meatValue ? (sp.meat || money(sp.meatValue)) : "")) +
       section("Trust", row("Tamed", a.tamed ? "yes" : "no", a.tamed ? "good" : "") + row("Ride state", a.ridden ? "mounted" : (a.tamed ? "available if large enough" : "wild")) + row("Legendary", a.legendary ? "unique" : "")) + "</div>";
   }
+  // The rich read stays available as DATA for a future profile panel / leaderboard
+  // (owner: "great in leaderboards or stuff the user can click to") — it just isn't
+  // sprayed onto the HUD any more. Returns the same card HTML the dossier used.
+  CBZ.cityActorDossier = function (a, dist) {
+    if (!a) return "";
+    return a.animal ? animalHTML(a, +dist || 0) : humanHTML(a, +dist || 0);
+  };
+
+  // ---- the floating overhead LEVEL + TITLE pill --------------------------------
+  function ensureTag() {
+    if (tag) return tag;
+    if (typeof document === "undefined" || !document.body) return null;
+    const style = document.createElement("style");
+    style.textContent =
+      "#cityAimTag{position:fixed;left:0;top:0;z-index:86;pointer-events:none;transform:translate(-50%,-100%);" +
+      "font:800 15px/1 Inter,system-ui,Arial,sans-serif;white-space:nowrap;padding:5px 11px;border-radius:999px;" +
+      "background:rgba(10,14,19,.82);border:1px solid rgba(183,207,225,.34);box-shadow:0 4px 14px rgba(0,0,0,.45);" +
+      "color:#f4f7fa;letter-spacing:.01em;display:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}" +
+      "#cityAimTag .lv{color:#e7bd55;font-weight:900;margin-right:5px}" +
+      "#cityAimTag.hot{border-color:rgba(255,120,110,.6)}#cityAimTag.hot .lv{color:#ff9a83}" +
+      "#cityAimTag.good{border-color:rgba(120,220,150,.55)}#cityAimTag.good .lv{color:#8fe0a2}";
+    document.head.appendChild(style);
+    tag = document.createElement("div");
+    tag.id = "cityAimTag";
+    tag.setAttribute("aria-live", "polite");
+    document.body.appendChild(tag);
+    return tag;
+  }
+  // human: Lv.N Title (CEO / Mobster / Boxer / Cashier / …). animal: species (+★).
+  function tagLabel(a) {
+    if (a.animal) {
+      const sp = a.species || {};
+      return (a.legendary ? "★ " : "") + (sp.name || sp.id || "Animal");
+    }
+    const lv = CBZ.cityLevel ? CBZ.cityLevel(a) : 1;
+    const title = CBZ.cityTitle ? CBZ.cityTitle(a) : (a.swat ? "SWAT" : a.kind === "cop" ? "Police" : "Civilian");
+    return '<span class="lv">Lv.' + lv + '</span>' + esc(title);
+  }
+  function tagTone(a) {
+    if (a.rage || a.curTarget === (CBZ.city && CBZ.city.playerActor) || (a.relPlayer && a.relPlayer.grudge > 50)) return "hot";
+    if (a.relPlayer && (a.relPlayer.loyalty > 55 || a.relPlayer.affection > 60)) return "good";
+    if (a.animal && (+(a.species && a.species.danger) || 0) >= 0.5) return "hot";
+    return "";
+  }
+  // project the actor's head to screen; null if behind camera or no data.
+  function headScreen(a) {
+    if (!_pv || !CBZ.camera) return null;
+    const p = a.pos || (a.group && a.group.position);
+    if (!p) return null;
+    const hy = (CBZ.charHeadY && !a.animal) ? CBZ.charHeadY(a) : (p.y + (a.animal ? 1.3 : 1.95));
+    _pv.set(p.x, hy + 0.34, p.z);
+    _pv.project(CBZ.camera);
+    if (_pv.z > 1) return null;                     // behind the camera
+    return { x: (_pv.x * 0.5 + 0.5) * window.innerWidth, y: (-_pv.y * 0.5 + 0.5) * window.innerHeight };
+  }
+
   function hide() {
     if (card) card.style.display = "none";
+    if (tag) tag.style.display = "none";
     lastActor = null; lastHTML = ""; CBZ.cityAimDossierTarget = null;
   }
   CBZ.onAlways(61.2, function (dt) {
     if (!CBZ.game || CBZ.game.mode !== "city" || CBZ.game.state !== "playing" || !CBZ.isAimingWeapon || !CBZ.isAimingWeapon() || !CBZ.aimedActor) { hide(); return; }
     sweep -= dt || 0;
-    if (sweep > 0 && lastActor && !lastActor.dead) return;
+    if (sweep > 0 && lastActor && !lastActor.dead) {
+      // keep the overhead pill glued to the (moving) head every frame, even
+      // between the 0.08s target re-scans.
+      if (OVERHEAD() && tag && lastActor && !lastActor.dead) {
+        const s = headScreen(lastActor);
+        if (s) { tag.style.left = s.x + "px"; tag.style.top = (s.y - 6) + "px"; }
+        else tag.style.display = "none";
+      }
+      return;
+    }
     sweep = 0.08;
     let hit = null;
     try { hit = CBZ.aimedActor(360); } catch (e) { hide(); return; }
     const a = hit && hit.actor;
     if (!a || a.isPlayer || (!a.animal && a.kind !== "cop" && !a.char && !a.relPlayer && !a.vendor)) { hide(); return; }
+    CBZ.cityAimDossierTarget = a; lastActor = a;
+
+    if (OVERHEAD()) {
+      if (card) card.style.display = "none";        // old wall-of-stats stays down
+      const el = ensureTag(); if (!el) return;
+      const s = headScreen(a);
+      if (!s) { el.style.display = "none"; return; }
+      const label = tagLabel(a);
+      if (label !== lastHTML) { el.innerHTML = label; lastHTML = label; }
+      el.className = tagTone(a);
+      el.style.left = s.x + "px"; el.style.top = (s.y - 6) + "px";
+      el.style.display = "block";
+      return;
+    }
+
+    // legacy full card (CITY_AIM_OVERHEAD=false)
     const html = a.animal ? animalHTML(a, hit.dist || 0) : humanHTML(a, hit.dist || 0);
     const el = ensureDom();
     if (a !== lastActor || html !== lastHTML) { el.innerHTML = html; lastHTML = html; }
-    lastActor = a; CBZ.cityAimDossierTarget = a; el.style.display = "block";
+    el.style.display = "block";
   });
 })();

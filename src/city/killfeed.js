@@ -18,7 +18,15 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  CBZ.cityRecentDeaths = CBZ.cityRecentDeaths || []; // [{name, cause, t, you?, gang?}]
+  // OWNER DIRECTION: the ONLY thing that pops on the HUD is the Fortnite-style
+  // kill line — WHO killed WHO, and how (airstrike / plane crash / car / …).
+  // Everything else that used to toast is already routed to the phone/logic.
+  // Flip CITY_KILLFEED_HUD=false to silence the on-screen feed (data + phone
+  // news still flow).
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CITY_KILLFEED_HUD == null) CBZ.CONFIG.CITY_KILLFEED_HUD = true;
+
+  CBZ.cityRecentDeaths = CBZ.cityRecentDeaths || []; // [{name, cause, t, you?, gang?, by?}]
   const CAP = 12;                                    // keep only the freshest dozen
 
   // generic names for the ambient instanced crowd (they carry no ped.name)
@@ -46,6 +54,10 @@
     // vehicle and the bare-fire checks, and gunfire is word-bounded.
     // terrorism (bombs) — most specific
     if (/terror|suicide bomb|car bomb|\bbomb\b|\bc4\b|detonat/.test(s)) return "terrorist attack";
+    // an aircraft going DOWN (distinct from a called-in airstrike ON you) — the
+    // owner wants "X killed Y in a plane crash" as its own line. Tested before the
+    // airstrike/car branches so "aircraft crash" never reads as either.
+    if (/plane crash|aircraft crash|air crash|heli(copter)? crash|crash[\s-]?land|went down/.test(s)) return "plane crash";
     // airstrikes / missiles
     if (/airstrike|air strike|missile|gunship|jet\b|rocket|drone|raked/.test(s)) return "airstrike";
     // generic explosions / blasts / being set on fire
@@ -71,6 +83,7 @@
     const e = { name: name || "Someone", cause: cause || "killed", t: (CBZ.now || 0) };
     if (opts.you) e.you = true;
     if (opts.gang) e.gang = opts.gang;
+    if (opts.by) e.by = opts.by;                 // the KILLER, for "X killed Y"
     const a = CBZ.cityRecentDeaths;
     a.push(e);
     if (a.length > CAP) a.splice(0, a.length - CAP);
@@ -108,7 +121,10 @@
         const byPlayer = imp.byPlayer !== false && !imp.attacker;
         let label = normCause(cause, imp);
         if (label === "gunfire" && byPlayer) label = "murder";
-        log(ped.name || crowdName(), label, { gang: ped.gang || null });
+        const by = byPlayer ? "You"
+          : (imp.attacker && (imp.attacker.name || (imp.attacker.kind === "cop" && "Police"))) ||
+            (label === "police" ? "Police" : null);
+        log(ped.name || crowdName(), label, { gang: ped.gang || null, by: by });
       }
       return r;
     };
@@ -127,8 +143,11 @@
         let label = opts.byCar ? "car crash"
           : normCause(opts.cause || "gunfire", opts);
         // a player shooting (not byCar, not an NPC/explosion you didn't cause) → "murder"
-        if (label === "gunfire" && !opts.noCrime && opts.byPlayer !== false && !opts.attacker) label = "murder";
-        log(crowdName(), label);
+        const byPlayer = !opts.noCrime && opts.byPlayer !== false && !opts.attacker;
+        if (label === "gunfire" && byPlayer) label = "murder";
+        const by = (opts.attacker && (opts.attacker.name || (opts.attacker.kind === "cop" && "Police"))) ||
+          (byPlayer ? "You" : (label === "police" ? "Police" : null));
+        log(crowdName(), label, { by: by });
       }
       return killed;
     };
@@ -154,7 +173,12 @@
         let label = normCause((reason || "") + " " + hint, imp);
         // a death at the hands of the law reads as "police", even if it was gunfire
         if ((label === "gunfire" || label === "murder") && /police|\bcop\b|swat|officer/.test(((reason || "") + " " + hint).toLowerCase())) label = "police";
-        log("You", label, { you: true });
+        // who killed YOU: a named actor, "Police", else the hint string if human.
+        let by = (killer && killer.name) ? killer.name
+          : (killer && killer.kind === "cop") ? "Police"
+          : label === "police" ? "Police"
+          : (typeof killer === "string" && killer && !/^(you were|killed)/i.test(killer)) ? killer : null;
+        log("You", label, { you: true, by: by });
       }
       return r;
     };
@@ -180,5 +204,78 @@
     let cut = 0;
     while (cut < a.length && (now - (a[cut].t || 0)) > MAX_AGE) cut++;
     if (cut > 0) a.splice(0, cut);
+  });
+
+  // ============================================================
+  //  ON-SCREEN KILL FEED — the ONE popup the owner keeps: a Fortnite-style
+  //  stack of "KILLER  killed  VICTIM  (method)" lines, newest on top, fading
+  //  out. Top-right, tucked under the wanted/cash chrome so it never overlaps.
+  // ============================================================
+  const SHOW_MS = 5600;   // a line is visible this long after the kill
+  const MAX_LINES = 4;    // never wallpaper the screen
+  let feedEl = null, feedFP = "";
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+  function ensureFeed() {
+    if (feedEl) return feedEl;
+    if (typeof document === "undefined" || !document.body) return null;
+    const style = document.createElement("style");
+    style.textContent =
+      "#cityKillFeed{position:fixed;right:14px;top:96px;z-index:70;pointer-events:none;display:flex;" +
+      "flex-direction:column;align-items:flex-end;gap:5px;font:800 13px/1.15 Inter,system-ui,Arial,sans-serif}" +
+      "#cityKillFeed .kf{background:rgba(10,14,19,.78);border:1px solid rgba(183,207,225,.26);border-radius:7px;" +
+      "padding:5px 10px;color:#e8edf2;box-shadow:0 3px 10px rgba(0,0,0,.4);letter-spacing:.01em;" +
+      "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:kfIn .16s ease-out}" +
+      "#cityKillFeed .kf.you{border-color:rgba(231,189,85,.6)}" +
+      "#cityKillFeed .kf.dead{border-color:rgba(255,120,110,.55)}" +
+      "#cityKillFeed .kf-by{color:#fff}#cityKillFeed .kf-v{color:#9fb0bf;font-weight:700;margin:0 5px}" +
+      "#cityKillFeed .kf-t{color:#ff9a83}#cityKillFeed .kf.you .kf-t{color:#e7bd55}" +
+      "#cityKillFeed .kf-m{color:#8fa0af;font-weight:700;margin-left:7px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}" +
+      "@keyframes kfIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}" +
+      "@media(max-width:720px){#cityKillFeed{top:84px;font-size:12px}}";
+    document.head.appendChild(style);
+    feedEl = document.createElement("div");
+    feedEl.id = "cityKillFeed";
+    feedEl.setAttribute("aria-live", "polite");
+    document.body.appendChild(feedEl);
+    return feedEl;
+  }
+  // "You killed Dave Smith" / "You ran over Sam Cruz" / "Police killed You · airstrike"
+  function lineHTML(e) {
+    const vic = esc(e.you ? "You" : e.name);
+    const cause = e.cause || "killed";
+    if (e.by && e.by !== e.name) {
+      const verb = cause === "car crash" ? "ran over"
+        : cause === "beaten" ? "beat down"
+        : (cause === "explosion" || cause === "terrorist attack") ? "blew up"
+        : "killed";
+      let chip = "";
+      if (verb === "killed" && /airstrike|plane crash|police/.test(cause)) chip = ' <span class="kf-m">' + esc(cause) + '</span>';
+      return '<span class="kf-by">' + esc(e.by) + '</span><span class="kf-v">' + verb + '</span><span class="kf-t">' + vic + '</span>' + chip;
+    }
+    // no attributed killer → environmental / unknown cause
+    return '<span class="kf-t">' + vic + '</span><span class="kf-m">' + esc(cause) + '</span>';
+  }
+  CBZ.onAlways(47.5, function () {
+    if (!g || g.mode !== "city" || CBZ.CONFIG.CITY_KILLFEED_HUD === false) {
+      if (feedEl && feedEl.childElementCount) { feedEl.innerHTML = ""; feedFP = ""; }
+      return;
+    }
+    const a = CBZ.cityRecentDeaths, now = (CBZ.now || 0);
+    // newest first, only the fresh ones, capped
+    const show = [];
+    for (let i = a.length - 1; i >= 0 && show.length < MAX_LINES; i--) {
+      if (now - (a[i].t || 0) <= SHOW_MS) show.push(a[i]);
+    }
+    const fp = show.map(function (e) { return (e.by || "") + ">" + e.name + ":" + e.cause + "@" + e.t; }).join("|");
+    if (fp === feedFP) return;                    // no change → no DOM churn
+    feedFP = fp;
+    const el = ensureFeed(); if (!el) return;
+    el.innerHTML = show.map(function (e) {
+      return '<div class="kf' + (e.you ? " you" : "") + (e.by === "You" ? " dead" : "") + '">' + lineHTML(e) + "</div>";
+    }).join("");
   });
 })();

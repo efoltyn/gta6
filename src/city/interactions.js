@@ -49,6 +49,16 @@
   const HYSTERESIS = 0.75;    // a rival candidate must beat the current one by this
   const KEYS = ["e", "i", "j", "k", "l"];   // E = primary, IJKL = the established slots
 
+  // OWNER DIRECTION: a RIDE never gets a popup. "AIRLINER — HIJACKABLE / Board
+  // the cabin? / YES / NO" is noise — the player already knows pressing E (or
+  // tapping it) takes it. These single-action vehicle/aircraft kinds are boarded
+  // by cityTryNearestRide (the E router) and by touch tap, both independent of
+  // this card, so we simply never SHOW it for them. Peds/vendors/animals keep
+  // their genuine choice menus. Flip CITY_RIDE_SILENT=false to restore the card.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CITY_RIDE_SILENT == null) CBZ.CONFIG.CITY_RIDE_SILENT = true;
+  const SILENT_RIDE = { vehicle: 1, "vehicle:inside": 1, milvehicle: 1 };
+
   // ---- storage -------------------------------------------------------------
   const layers = Object.create(null);   // layer name -> [option, ...]
   const sources = [];                    // candidate finders (peds, cars, zones…)
@@ -394,6 +404,14 @@
     }
     if (!pick) { if (current) hidePanel(); return; }
 
+    // RIDES: no card. You just press E / tap to take it (cityTryNearestRide and
+    // touch-tap both fire the board verb without this panel). Keeps the HUD from
+    // announcing "you may now board" like a tutorial.
+    if (SILENT_RIDE[pick.kind] && CBZ.CONFIG.CITY_RIDE_SILENT !== false) {
+      if (current) hidePanel();
+      return;
+    }
+
     // whoever the panel is offering interactions on turns to LOOK at you
     const t = pick.t;
     if (t && t.group && !t.dead && (t.kind || t.vendor)) t._faceT = 0.45;
@@ -410,9 +428,10 @@
     current = pick; currentRows = rows; currentScore = pick.score;
     dom();
     if (noteEl) {
-      const st = rows[0] && rows[0].standing;
-      const weight = st ? " · Lv." + st.playerLevel + "→" + st.targetLevel + " · " + st.tier : "";
-      noteEl.textContent = (rows[0].proposal || "Continue") + "?" + weight;
+      // Just the proposition. The old "· Lv.6→3 · heard" stat suffix was HUD
+      // clutter that read like a debug overlay; level now floats over the head
+      // (aim_dossier), and the standing still gates the verb underneath.
+      noteEl.textContent = (rows[0].proposal || "Continue") + "?";
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;
