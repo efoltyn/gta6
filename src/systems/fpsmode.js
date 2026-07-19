@@ -2704,6 +2704,76 @@
     lastElapsed = el;
   }
 
+  // ---- SOFT AIM-LOCK (GTA-style, on-foot) ----------------------------------
+  // When you aim down sights — even without a scope — the reticle eases onto the
+  // nearest target in a forward cone and tracks it. Modeled on the vehicle
+  // homing acquisition (cone-dot score + nearest), but instead of steering a
+  // projectile it nudges cam.yaw / pitch, so the muzzle ray (and the bullet)
+  // follow for free. One-line revert: CBZ.CONFIG.AIM_LOCK_ASSIST = false.
+  if (CBZ.CONFIG.AIM_LOCK_ASSIST == null) CBZ.CONFIG.AIM_LOCK_ASSIST = true;
+  let lockTarget = null, lockScanT = 0;
+  const _lockEye = new THREE.Vector3(), _lockDir = new THREE.Vector3(), _lockRay = new THREE.Vector3();
+  const _lockCands = [];
+  function lockValid(a) { return a && !a.dead && (a.ko || 0) <= 0 && !a.escaped && a.group && a.group.visible !== false; }
+  function pickLockActor(eye, fwd, range, coneCos) {
+    _lockCands.length = 0;
+    const consider = function (list) {
+      if (!list) return;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!lockValid(a)) continue;
+        const gp = a.group.position, gy = gp.y || 0;
+        const tx = gp.x - eye.x, ty = (gy + TORSO_Y) - eye.y, tz = gp.z - eye.z;
+        const dist = Math.hypot(tx, ty, tz); if (dist < 0.6 || dist > range) continue;
+        const dot = (tx * fwd.x + ty * fwd.y + tz * fwd.z) / dist;
+        if (dot < coneCos) continue;                       // outside the acquire cone
+        _lockCands.push({ a: a, dist: dist, nx: tx / dist, ny: ty / dist, nz: tz / dist,
+          score: (1 - dot) * 8 + (dist / range) * 0.08 }); // most on-axis wins, nearness breaks ties
+      }
+    };
+    consider(CBZ.cityPeds); consider(CBZ.cityCops); if (CBZ.cityMedics) consider(CBZ.cityMedics);
+    _lockCands.sort(function (p, q) { return p.score - q.score; });
+    // Best-first, first candidate with a clear line of sight wins — the same
+    // no-lock-through-walls contract as the rocket acquisition above. Capped
+    // raycasts (rescans run at 10Hz, so keep the per-tick cost bounded).
+    for (let i = 0; i < _lockCands.length && i < 4; i++) {
+      const c = _lockCands[i];
+      _lockRay.set(c.nx, c.ny, c.nz);
+      const cover = wallDistance(eye, _lockRay, c.dist);
+      if (cover && cover.distance < c.dist - 1.2) continue;   // behind a wall
+      return c.a;
+    }
+    return null;
+  }
+  // Ease the live aim toward the locked target's chest. Corrects against the
+  // ACTUAL aim direction, so it works identically in FPS and 3rd-person shoulder
+  // (both map an increasing cam.yaw to an increasing atan2(x,z) heading).
+  function applyAimLock(dt) {
+    if (CBZ.CONFIG.AIM_LOCK_ASSIST === false || !armed() || !CBZ.camera || !(CBZ.isADS && CBZ.isADS())) { lockTarget = null; return; }
+    aimForward(_lockDir);
+    CBZ.camera.getWorldPosition(_lockEye);
+    lockScanT -= dt;
+    if (!lockValid(lockTarget) || lockScanT <= 0) {
+      lockScanT = 0.1;
+      // The pick embeds the occlusion test, so re-running it every tick also
+      // BREAKS the lock when the held target ducks behind cover — no tracking
+      // people through walls (matches the dossier's aim contract).
+      lockTarget = pickLockActor(_lockEye, _lockDir, 55, Math.cos(0.45));   // ~26° cone, 55m
+    }
+    if (!lockValid(lockTarget)) return;
+    const gp = lockTarget.group.position, gy = gp.y || 0;
+    const dx = gp.x - _lockEye.x, dy = (gy + TORSO_Y) - _lockEye.y, dz = gp.z - _lockEye.z;
+    const dlen = Math.hypot(dx, dy, dz) || 1;
+    let dHead = Math.atan2(dx / dlen, dz / dlen) - Math.atan2(_lockDir.x, _lockDir.z);
+    while (dHead > Math.PI) dHead -= 2 * Math.PI; while (dHead < -Math.PI) dHead += 2 * Math.PI;
+    const dPitch = Math.asin(Math.max(-1, Math.min(1, dy / dlen))) - Math.asin(Math.max(-1, Math.min(1, _lockDir.y)));
+    const k = 1 - Math.pow(0.02, dt);                     // smooth ~fast settle onto target
+    if (CBZ.cam) CBZ.cam.yaw += dHead * k;
+    if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + dPitch * k));
+    else if (CBZ.cam) CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch + dPitch * k));
+  }
+  CBZ.aimLockTarget = function () { return lockTarget; };
+
   // ---- camera override and effects update ----
   // change-only style write: setting style.display every frame invalidates
   // style and measured milliseconds across a session (perf pass)
@@ -3077,6 +3147,10 @@
       if (muzzleT <= 0) muzzle.visible = false;
     }
 
+    // SOFT AIM-LOCK: ease the reticle onto the nearest target while ADS, before
+    // the held-fire + reticle sample below read the aim — so both track the lock.
+    applyAimLock(dt);
+
     // HELD-TRIGGER auto fire — AFTER this frame's camera + viewmodel +
     // carried-gun/arm pose are final, so every round of a burst samples the
     // SAME fresh matrices a single tap does (taps fire post-render from the
@@ -3143,6 +3217,7 @@
       cross.classList.toggle("hot", !muzzleBlocked && (!!aim || reticleDamageable(muzzleHit)));
       cross.classList.toggle("blocked", muzzleBlocked);
       cross.classList.toggle("dry", armed() && fps.ammo <= 0);
+      cross.classList.toggle("locked", !!lockTarget);   // soft aim-lock is tracking someone
     }
   });
 

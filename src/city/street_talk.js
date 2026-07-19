@@ -162,20 +162,20 @@
       kind = "charity";
       amount = Math.min(40, Math.max(10, Math.floor(myCash() * 0.05)));
       label = "Slip them " + money(amount);
-      yesLine = "You help them out. Instant soft-touch rep.";
+      yesLine = "You help them out. They won't forget it.";
       noLine = "You keep your wallet shut. They clock it.";
     } else if (broke && max >= 20) {
       kind = "handout";
       amount = Math.max(8, Math.floor(max * 0.4));
       label = "Take their " + money(amount) + " pity cash";
-      yesLine = "Charity from a stranger. Humbling. Useful.";
-      noLine = "Pride over rent money. Bold strategy.";
+      yesLine = "Charity from a stranger. You pocket it.";
+      noLine = "Pride over rent money. You walk.";
     } else if (p.job && /dealer|trap|runner/i.test(p.job)) {
       kind = "deal";
       amount = Math.min(80, Math.max(20, Math.floor(max * 0.5)));
       label = "Small street deal (" + money(amount) + ")";
       yesLine = "A little product changes hands. Quiet.";
-      noLine = "You pass on the bag. Smart or boring — time will tell.";
+      noLine = "You pass on the bag. Not tonight.";
     } else if (richMe && (p.wealth || 0) > 0.55) {
       kind = "flex";
       amount = 0;
@@ -351,13 +351,17 @@
   I.describe("ped", function (p) {
     if (!on() || !p) return { label: (p && p.name) || "—", note: "" };
     const o = offerOf(p);
-    const pl = myLvl(), tl = lvl(p);
-    if (!o) return { label: (p.name || "Someone") + " · Lv." + tl, note: "YES / NO" };
-    return {
-      label: (p.name || "Someone") + " · Lv." + tl,
-      note: "You Lv." + pl + " · gap " + (o.gap >= 0 ? "+" : "") + o.gap +
-        " · max offer " + money(o.max) + " · " + o.kind,
+    // The level now reads over their head (aim_dossier overhead label), so the
+    // card is just their name — and the note is an in-world cue, NOT a stat line
+    // ("You Lv.23 · gap +7 · max offer $180"). The action itself is the YES verb.
+    if (!o) return { label: (p.name || "Someone"), note: "" };
+    const CUE = {
+      tribute: "They're sizing you up — and folding.", tax: "They expect their cut.",
+      charity: "They could use a hand.", handout: "They're pressing cash on you.",
+      deal: "There's product to move here.", flex: "Old money, measuring you.",
+      chat: "Just street talk.",
     };
+    return { label: (p.name || "Someone"), note: CUE[o.kind] || "" };
   });
 
   CBZ.streetTalkOffer = offerOf;

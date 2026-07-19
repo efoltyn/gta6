@@ -2728,7 +2728,12 @@
   // ============================================================
   function citySayBark(ped, txt, secs) {
     // a brief player-facing line; cheap, throttled by the caller via reactCD.
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + ped.name + ": " + txt, secs || 1.6);
+    // Route through the ATTRIBUTED speech subtitle (#citySpeech) so the line
+    // carries a visible speaker name — you can always see WHO is talking to you.
+    // citySay handles the missing-name case (SWAT Officer / Police Officer /
+    // job / Stranger) and the near-camera gate. Falls back to the note channel.
+    if (CBZ.citySay && ped && ped.group) { CBZ.citySay(ped, txt, null, secs || 2.4); return; }
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + ((ped && ped.name) || "Stranger") + ": " + txt, secs || 1.6);
   }
   // a ped that reached the player lifts some cash (the NPC-initiated mirror of the
   // player's own pickpocket verb in interact.js). Light touch; turns you hot-ish.

@@ -225,6 +225,9 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
   top:50%; left:0; right:0; height:1.5px; margin-top:-.75px;
   background:linear-gradient(to right,currentColor 0 4px,transparent 4px calc(100% - 4px),currentColor calc(100% - 4px));
 }
+/* soft aim-lock is tracking a target (declared BEFORE .hot so the red
+   on-flesh read still wins once the reticle actually lands on them) */
+#crosshair.locked{color:#8fd0ff;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}
 #crosshair.hot{color:#ff4a42;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}
 #crosshair.blocked{color:#ffb33f;opacity:.94}
 #crosshair.dry{color:#ffd451;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}
