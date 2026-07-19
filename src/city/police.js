@@ -74,6 +74,16 @@
   // false restores the exact old instant-response behavior (immediate spool,
   // launch from the real precinct distance, no dispatch hold).
   if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE == null) CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE = true;
+  // POLICE HELI ALTITUDE (owner: "helicopters fly too low now — first they were
+  // too high, I asked to lower them, now they're too low"). Air-1's orbit height
+  // swung from an absolute y≈49 cruise (the old too-high) to 26 metres above
+  // ground (too low — it skims mid-rise rooftops). This is the MIDDLE GROUND, in
+  // metres ABOVE LOCAL GROUND: 38 reads clearly airborne (well over a 9-storey
+  // walk-up roof, ≈ y36 at FH 3.2) yet stays below the old cruise, so it holds a
+  // real down-angle without buzzing the blocks. Numeric config = a one-line tune
+  // (26 = old low, 49 = old high). CHOP_AGL below reads this; the roof-clear and
+  // player-height floors still lift it locally over a genuinely tall tower.
+  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_ALTITUDE == null) CBZ.CONFIG.POLICE_HELI_ALTITUDE = 38;
   function arrestFirst() { return !!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST); }
   function swatRedesign() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
   function heliSlowResponse() { return !!(CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE); }
@@ -978,11 +988,19 @@
     p.group.visible = true;
     if ((g.wanted | 0) === 0 && !p.swat) holsterGun(p);
   }
-  // Search at a local street altitude, not above the tallest object anywhere
-  // in the world. The old global skyline scan made Air-1 effectively
-  // unshootable whenever an unrelated city happened to contain a super-tall.
-  const CHOP_AGL = 26;
-  const CHOP_ROOF_CLEAR = 7;
+  // Orbit/search altitude ABOVE LOCAL GROUND (not above the tallest object
+  // anywhere — the old global skyline scan made Air-1 effectively unshootable
+  // whenever an unrelated city held a super-tall). Tunable via the numeric flag
+  // CBZ.CONFIG.POLICE_HELI_ALTITUDE (defaulted to 38 up top — the middle ground
+  // between the old y≈49 cruise "too high" and 26 AGL "too low"); the fallback
+  // stays 38 if config is stripped.
+  const CHOP_AGL = (CBZ.CONFIG && +CBZ.CONFIG.POLICE_HELI_ALTITUDE > 0) ? +CBZ.CONFIG.POLICE_HELI_ALTITUDE : 38;
+  const CHOP_ROOF_CLEAR = 9;   // (raised 7→9) a touch more standoff over a roof it hunts across, matching the higher cruise
+  // PER-BULLET hull damage = w.damage × this (owner: "they also can't be shot").
+  // Air-1 hp is 85, so a rifle (~34 dmg) needs a sustained burst (~10 rounds) and
+  // a sniper (130) a few shots — never a one-tap. Missile splash stays the fast
+  // kill; plain gunfire is the slower, committed option.
+  const POLICE_AIR_BULLET_MULT = 0.25;
   function groundYForChopper(x, z) {
     const y = CBZ.floorAt ? +CBZ.floorAt(x, z) : 0;
     return isFinite(y) ? y : 0;
@@ -1106,11 +1124,39 @@
     damageChopper(dmg * Math.max(0.3, 1 - hullD / radius));
     return true;
   };
-  function damageChopper(dmg) {
+  function damageChopper(dmg, quiet) {
     if (!chopper || chopper.downed || !(dmg > 0)) return;
     chopper.hp -= dmg;
-    if (CBZ.bulletImpact) { try { CBZ.bulletImpact({ x: chopper.pos.x, y: chopper.pos.y, z: chopper.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.2 }); } catch (e) {} }
+    // quiet = the caller already stamped the impact at the exact hull point
+    // (fpsmode's bullet path), so skip this center-of-mass spark to avoid doubling.
+    if (!quiet && CBZ.bulletImpact) { try { CBZ.bulletImpact({ x: chopper.pos.x, y: chopper.pos.y, z: chopper.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.2 }); } catch (e) {} }
     if (chopper.hp <= 0) downChopper();
+  }
+  // ---- PLAIN-GUNFIRE HULL HIT (owner: "they also can't be shot") -------------
+  // The splash seam above only caught the missile/blast fan-out; ordinary bullets
+  // whiffed straight through Air-1 because fpsmode's resolveShot never ray-tested
+  // this record (it only knew the military gunship + parked civil planes). Mirror
+  // aircraft.js's cityAircraftRayTest — a cheap ray-vs-sphere on the live airframe
+  // so the hitscan can strike it — then route the hit into the SAME damageChopper
+  // hp pool the splash uses, so the wounded-tier smoke and the shoot-down arc are
+  // shared and stay idempotent behind the `downed` guard. The returned record
+  // carries the per-bullet damage callback fpsmode invokes.
+  CBZ.cityPoliceAirRayTest = function (ox, oy, oz, dx, dy, dz, range) {
+    if (CBZ.CONFIG && CBZ.CONFIG.POLICE_AIR_DAMAGE === false) return null;
+    const c = chopper;
+    if (!c || c.downed || !c.pos || !c.group || !c.group.parent) return null;
+    const rad = 3.4;                                     // same generous hull radius the lock/splash seams quote
+    const cx = c.pos.x - ox, cy = c.pos.y - oy, cz = c.pos.z - oz;
+    const t = cx * dx + cy * dy + cz * dz;               // projection of the hull onto the ray
+    if (t < 0 || t > range) return null;
+    const ex = ox + dx * t - c.pos.x, ey = oy + dy * t - c.pos.y, ez = oz + dz * t - c.pos.z;
+    if (ex * ex + ey * ey + ez * ez > rad * rad) return null;
+    return { rec: c, x: ox + dx * t, y: oy + dy * t, z: oz + dz * t, dist: t, hitBullet: policeAirBullet };
+  };
+  // per-bullet chip into the shared pool (quiet: fpsmode stamped the hull impact).
+  function policeAirBullet(dmg, fromX, fromZ, rec) {
+    if (CBZ.CONFIG && CBZ.CONFIG.POLICE_AIR_DAMAGE === false) return;
+    damageChopper(Math.max(1.5, (dmg || 0) * POLICE_AIR_BULLET_MULT), true);
   }
   function downChopper() {
     if (!chopper || chopper.downed) return;                 // idempotent — one death per airframe

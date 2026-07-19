@@ -703,7 +703,13 @@
         { additive: true, base: 0.18 + rng() * 0.16, pop: 0.1, life: 1.0 + rng() * 1.1,
           maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + rng() * 4, vz: Math.sin(a) * sp });
     }
-    addChunks(x, z, Math.max(1, Math.round(10 * P * fxq)), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris (pool cap untouched — only the per-blast spawn rides the tier)
+    // AIRBURST (opts.airburst, set by fpsmode when a rocket detonates on an
+    // aircraft / high in open air): skip the solid chunk spray so debris cubes
+    // never rain out of empty sky (owner: "shooting cubes down" instead of real
+    // damage) — the fireball/smoke/spark layers above still fire, and the downed
+    // craft's crash arc provides the wreckage. Every ground/wall caller passes no
+    // airburst → debris is byte-for-byte unchanged.
+    if (!opts.airburst) addChunks(x, z, Math.max(1, Math.round(10 * P * fxq)), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris (pool cap untouched — only the per-blast spawn rides the tier)
     if (!elevated) {
       addScorch(x, z, R * 0.5);                                        // lasting ground scorch
       // big blasts leave a SMOKING crater: a thin column keeps seeping off the

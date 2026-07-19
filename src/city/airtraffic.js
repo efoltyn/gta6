@@ -367,12 +367,49 @@
     return hit;
   };
 
-  function damageTraffic(t, dmg) {
+  function damageTraffic(t, dmg, quiet) {
     if (!t || t.downed || !(dmg > 0)) return;
     if (t.hp == null) t.hp = trafficHP(t);     // lazy — untouched craft carry no combat state
     t.hp -= dmg;
-    if (CBZ.bulletImpact) { try { CBZ.bulletImpact({ x: t.grp.position.x, y: t.grp.position.y, z: t.grp.position.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.1 }); } catch (e) {} }
+    // quiet = fpsmode already stamped the impact at the exact hull point (bullets);
+    // skip this center spark so a sustained burst doesn't double every hit.
+    if (!quiet && CBZ.bulletImpact) { try { CBZ.bulletImpact({ x: t.grp.position.x, y: t.grp.position.y, z: t.grp.position.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.1 }); } catch (e) {} }
     if (t.hp <= 0) downTraffic(t);
+  }
+
+  // ---- PLAIN-GUNFIRE HULL HIT (owner: "they also can't be shot") -------------
+  // Like Air-1, the ambient fleet had a splash seam but no bullet ray-test, so
+  // ordinary rounds passed through. Mirror the police-air / gunship ray-vs-sphere
+  // idiom and route hits into the SAME damageTraffic pool → shared wounded-tier
+  // smoke + shoot-down arc, idempotent behind `downed`. Flimsy civilian airframes
+  // (hp 50/60) drop in a shorter burst than the police bird; a sniper takes one in
+  // a couple. Ring-culled craft (520u+ away, stale mesh) are skipped, same gate as
+  // the lock/splash seams. FX only → runtime Math.random elsewhere stays sanctioned.
+  const TRAFFIC_BULLET_MULT = 0.28;   // w.damage × this per bullet (see POLICE_AIR_BULLET_MULT rationale)
+  CBZ.cityAirTrafficRayTest = function (ox, oy, oz, dx, dy, dz, range) {
+    if (!fleet || (CBZ.CONFIG && CBZ.CONFIG.AIRTRAFFIC_DAMAGE === false)) return null;
+    let best = null, bestT = range, bestRec = null;
+    for (let i = 0; i < fleet.length; i++) {
+      const t = fleet[i];
+      if (!t || t.downed || !t.grp || !t.grp.parent || t.grp.visible === false) continue;
+      const p = t.grp.position;
+      const rad = t.kind === "heli" ? 2.6 : 3.2;         // same hull radii the lock/splash seams use
+      const cx = p.x - ox, cy = p.y - oy, cz = p.z - oz;
+      const tt = cx * dx + cy * dy + cz * dz;            // projection of the hull onto the ray
+      if (tt < 0 || tt >= bestT) continue;
+      const ex = ox + dx * tt - p.x, ey = oy + dy * tt - p.y, ez = oz + dz * tt - p.z;
+      if (ex * ex + ey * ey + ez * ez > rad * rad) continue;
+      bestT = tt; bestRec = t; best = { x: ox + dx * tt, y: oy + dy * tt, z: oz + dz * tt, dist: tt };
+    }
+    if (!best) return null;
+    best.rec = bestRec; best.hitBullet = trafficBullet;
+    return best;
+  };
+  // per-bullet chip into the shared pool for the craft the ray struck (rec is
+  // threaded from the hit record; quiet: fpsmode stamped the hull impact).
+  function trafficBullet(dmg, fromX, fromZ, rec) {
+    if (!rec || (CBZ.CONFIG && CBZ.CONFIG.AIRTRAFFIC_DAMAGE === false)) return;
+    damageTraffic(rec, Math.max(1.5, (dmg || 0) * TRAFFIC_BULLET_MULT), true);
   }
 
   function downTraffic(t) {

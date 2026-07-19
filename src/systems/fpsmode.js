@@ -1501,13 +1501,27 @@
     // the shoot loop / rocket splash applies it) and take it if it's the nearest.
     const policeAir = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
     const civilAir = (CBZ.game.mode === "city" && CBZ.cityCivilAircraftRayTest) ? CBZ.cityCivilAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    // Air-1 (police.js) and the ambient GA fleet (airtraffic.js) had splash seams
+    // but no bullet ray-test, so PLAIN GUNFIRE passed straight through them (owner:
+    // "they also can't be shot"). Ray-test both; each returns a hull hit carrying a
+    // per-bullet damage callback into its own module's hp pool. Nearest of the two
+    // takes the light-air slot, then competes on distance with gunship/civil/ped.
+    const polLightAir = (CBZ.game.mode === "city" && CBZ.cityPoliceAirRayTest) ? CBZ.cityPoliceAirRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    const trafLightAir = (CBZ.game.mode === "city" && CBZ.cityAirTrafficRayTest) ? CBZ.cityAirTrafficRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    let lightAir = polLightAir;
+    if (trafLightAir && (!lightAir || trafLightAir.dist < lightAir.dist)) lightAir = trafLightAir;
     let air = policeAir;
-    let civil = false;
+    let civil = false, light = false;
     if (civilAir && (!air || civilAir.dist < air.dist)) { air = civilAir; civil = true; }
+    if (lightAir && (!air || lightAir.dist < air.dist)) { air = lightAir; civil = false; light = true; }
     if (hit && (!air || hit.dist <= air.dist)) return hit;
-    if (air) return civil
-      ? { actor: null, civilAircraft: air.rec, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) }
-      : { actor: null, aircraft: true, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) };
+    if (air) {
+      const point = new THREE.Vector3(air.x, air.y, air.z);
+      if (light) return { actor: null, lightAir: air, dist: air.dist, point };
+      return civil
+        ? { actor: null, civilAircraft: air.rec, dist: air.dist, point }
+        : { actor: null, aircraft: true, dist: air.dist, point };
+    }
     // a DOWNED body in the path (city-only): only when NO live actor was hit, so a
     // corpse never shadows a living target. Competes on distance with car/wall —
     // shoot it for more holes + a jerk; wins only if it's nearer than those.
@@ -2016,6 +2030,11 @@
       // losBlockers raycast regardless of distance.
       const FAR = 450;
       const hit = resolveShot(w, fwd, origin);
+      // an aircraft hit in OPEN AIR (Air-1 / ambient fleet / airborne gunship) must
+      // not spray solid debris cubes out of empty sky (owner: "shooting cubes down"
+      // instead of real damage) — the craft's own crash arc is the wreckage. Flagged
+      // here, honoured by the airburst gate on the cityExplosion call below.
+      const airTarget = !!(hit && (hit.aircraft || hit.civilAircraft || hit.lightAir));
       // A DEDICATED long-range wall trace so a distant facade beyond w.range is
       // actually struck — resolveShot only looks out to w.range, so a far tower
       // returns wall:false and the rocket used to die at 200u in open air.
@@ -2025,7 +2044,7 @@
       // The ground-crossing is the original "far-away" fix; the far-wall trace is
       // the new one — together a rocket lands ON whatever it's pointed at, near or
       // far, and the big blast radius does the rest.
-      let detT = (hit.wall || hit.actor || hit.car || hit.aircraft || hit.civilAircraft) && hit.dist ? Math.max(0.1, hit.dist) : FAR;
+      let detT = (hit.wall || hit.actor || hit.car || hit.aircraft || hit.civilAircraft || hit.lightAir) && hit.dist ? Math.max(0.1, hit.dist) : FAR;
       if (farWall && farWall.distance < detT) detT = Math.max(0.1, farWall.distance);
       if (fwd.y < -0.01) { const gt = (0 - eye.y) / fwd.y; if (gt > 0 && gt < detT) detT = gt; }  // ground (street ≈ y0)
       detT = Math.max(MIN_DET, Math.min(detT, FAR));   // never on the shooter, never past the map
@@ -2051,7 +2070,16 @@
           // run the fracture chain (cityFracture.blastAt at opts.y, power-scaled), so
           // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
           // the same wall a second time — it only adds flavor (scar/debris/breach).
-          if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
+          // AIRBURST: suppress the falling-cube debris when the rocket detonates on
+          // an aircraft (or otherwise high in open air) with no wall/ground to couple
+          // to — crashfx then skips its chunk spray, leaving a clean fiery airburst;
+          // the downed craft's own fall arc (fireball/smoke/scorch on impact) is the
+          // real wreckage. Wall/ground blasts pass airburst:false → debris unchanged.
+          // pt.y > 12 is the backstop for a homing hit whose fire-time ray missed
+          // the hull sphere (airTarget false) yet still detonates up at aircraft
+          // altitude — clearly above street/low-ledge combat, below every craft.
+          const airburst = !groundHit && !wallStruck && (airTarget || pt.y > 12);
+          if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
           // a guest's blast never reaches the host's sim otherwise — the host
           // can't count structural HP for a detonation it never saw (mirrors
           // localGunHit's "hit" forwarding in net.js). FX stays local (above);
@@ -2296,6 +2324,15 @@
         // bullets chip the gunship — sparks off the hull, damage routed to the heli
         hitSomething = true;
         if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
+        spawnImpact(hit.point, false, true);
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
+      } else if (hit.lightAir) {
+        // plain gunfire on Air-1 / the ambient GA fleet: route the round into the
+        // module's own hp pool (police.js / airtraffic.js) via the callback the ray
+        // test attached — a small per-bullet chip, so it takes a burst. Same spark +
+        // decal feedback as the gunship; the module owns the wounded-smoke + down arc.
+        hitSomething = true;
+        if (hit.lightAir.hitBullet) hit.lightAir.hitBullet(w.damage, origin.x, origin.z, hit.lightAir.rec);
         spawnImpact(hit.point, false, true);
         if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
       } else if (hit.civilAircraft) {
