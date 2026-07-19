@@ -588,9 +588,16 @@
       const ci = w.composite && Array.isArray(w.composite.items) ? w.composite.items.join(",") : "";
       ws = (w.id || "") + "/" + (c.torso || 0) + "/" + (c.legs || 0) + "/" + (c.collar || 0) +
            "/" + (c.arms || 0) + "/" + (c.shoes || 0) + "/" + (c.gloss ? 1 : 0) + "/" + (w.gang || "") +
-           "/" + (w.cop ? 1 : 0) + "/" + ci;
+           "/" + (w.cop ? 1 : 0) + "/" + ci +
+           // pattern + name: two pinstripe/checked suits can share every hashed
+           // color — without these the portrait kept a stale flat-suit render
+           // while the body wore the patterned one (owner bug).
+           "/" + (w.pattern || "") + "/" + (w.name || "");
     }
-    return (f.shirt || 0) + ":" + (f.legs || 0) + ":" + items + ":" + lvl + ":" + j + ":" + ws + ":" + arm + ":" + eye;
+    // outfit revision (outfits.js applyPlayer bumps it on EVERY application) —
+    // catches swiped fits / same-record re-dresses the field hash can't see.
+    const rev = CBZ.cityOutfitRev || 0;
+    return (f.shirt || 0) + ":" + (f.legs || 0) + ":" + items + ":" + lvl + ":" + j + ":" + ws + ":" + arm + ":" + eye + ":" + rev;
   }
 
   // dress the portrait rig exactly like the player and render one frame
@@ -739,6 +746,8 @@
         return;
       }
       panel.classList.toggle("cpOpen");
+      // expanding the chip must never show a stale look — force a redraw pass
+      if (panel.classList.contains("cpOpen")) PORT.sig = "";
     });
   }
 

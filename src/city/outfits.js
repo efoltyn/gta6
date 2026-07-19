@@ -509,6 +509,12 @@
   let _appliedId = null;
   function applyPlayer() {
     const ch = CBZ.playerChar;
+    // OUTFIT REVISION: bump on every application so consumers that cache a
+    // "look signature" (the charpanel portrait) redraw even when a change
+    // isn't visible in the record fields they hash (patterns, swiped fits,
+    // same-id re-dresses). Owner bug: the corner portrait showed a flat
+    // blue/tan suit while the body wore pinstripe.
+    CBZ.cityOutfitRev = (CBZ.cityOutfitRev || 0) + 1;
     let w = worn();
     // a plain-civvie base record means "wear the COMPOSITE" — dress from
     // g.cityFit via cityApplyComposite (recolorRig routes rec.composite there).
