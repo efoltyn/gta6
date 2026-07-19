@@ -36,7 +36,8 @@
   const THREE = window.THREE;
 
   // ---- FOOTPRINT (owner-specified) ---------------------------------------
-  const CEN_X = -620, CEN_Z = -700;          // base centre
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
+  const CEN_X = -620 + _WOFF.dx, CEN_Z = -700 + _WOFF.dz;    // base centre
   const HX = 240, HZ = 250;                   // half-extents
   const MINX = CEN_X - HX, MAXX = CEN_X + HX; // -860 .. -380
   const MINZ = CEN_Z - HZ, MAXZ = CEN_Z + HZ; // -950 .. -450

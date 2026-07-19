@@ -36,7 +36,10 @@
   if (CFGS.SNOW_TERRAIN_V2 == null) CFGS.SNOW_TERRAIN_V2 = true;
 
   // ---- footprint (per spec): rect center (350,-1450), half (420,330) ------
-  const CX = 350, CZ = -1450, HX = 420, HZ = 330;
+  // Anchored through the world-layout dial (world/layout.js) — zero offset
+  // today; the map-enlargement pass moves whole biomes by raising it.
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
+  const CX = 350 + _WOFF.dx, CZ = -1450 + _WOFF.dz, HX = 420, HZ = 330;
   const MINX = CX - HX, MAXX = CX + HX;     // -70 .. 770
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;     // -1780 .. -1120
   // Buildings are laid out before landmass builders run.  Keep a per-build

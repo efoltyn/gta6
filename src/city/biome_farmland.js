@@ -45,7 +45,8 @@
   function pick(arr) { return arr[(rng() * arr.length) | 0]; }
 
   // ---- footprint -----------------------------------------------------------
-  const MINX = 780, MAXX = 1580, MINZ = -1280, MAXZ = -480;
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("farmland")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
+  const MINX = 780 + _WOFF.dx, MAXX = 1580 + _WOFF.dx, MINZ = -1280 + _WOFF.dz, MAXZ = -480 + _WOFF.dz;
   const CX = (MINX + MAXX) / 2, CZ = (MINZ + MAXZ) / 2;
 
   // causeway: a thin country-road rect running south from the farm's south

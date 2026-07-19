@@ -267,6 +267,9 @@
      buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
      CBZ.terrainHeight. terrain.js depends on BufferGeometryUtils (above). -->
 <script src="src/vendor/noise.js"></script>
+<!-- world layout dial: per-biome anchor offsets (map-enlargement stage 1;
+     all-zero today). Must load before terrain + every biome/island file. -->
+<script src="src/world/layout.js?v=stage1"></script>
 <script src="src/world/rockscliffs.js?v=rock1"></script>
 <script src="src/world/terrain.js?v=tiles2"></script>
 <!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID

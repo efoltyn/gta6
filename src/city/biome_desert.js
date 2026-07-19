@@ -50,7 +50,8 @@
   // Leave a real ten-metre shoreline between the speedway's east rim (x=670)
   // and the basin. The causeway spans that water; the old shared x=670 edge
   // let the desert feather render underneath almost a quarter of the stadium.
-  const CX = 1120, CZ = 150, HX = 440, HZ = 470;
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
+  const CX = 1120 + _WOFF.dx, CZ = 150 + _WOFF.dz, HX = 440, HZ = 470;
   const MINX = CX - HX, MAXX = CX + HX;   // 680 .. 1560
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -320 .. 620
 

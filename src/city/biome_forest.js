@@ -33,7 +33,8 @@
   const THREE = window.THREE;
 
   // ---- footprint (given) ------------------------------------------------
-  const CX = -560, CZ = -1350, HX = 390, HZ = 330;
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("forest")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
+  const CX = -560 + _WOFF.dx, CZ = -1350 + _WOFF.dz, HX = 390, HZ = 330;
   const MINX = CX - HX, MAXX = CX + HX;   // -950 .. -170
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -1680 .. -1020
 

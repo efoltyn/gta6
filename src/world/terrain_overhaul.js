@@ -141,7 +141,11 @@
   // Snow-country footprint (biome_snow.js: rect centre (350,-1450), half (420,330)).
   // The backdrop range is confined to this X-span so it stands only behind the
   // white country (owner: mountains snow-only).
-  const SNOW_CX = 350, SNOW_HX = 420;
+  // Follows the snow biome's world-layout offset (world/layout.js) so a
+  // stage-2 biome move keeps the mountain range standing behind the white
+  // country instead of behind its old empty spot.
+  const _SNOWOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
+  const SNOW_CX = 350 + _SNOWOFF.dx, SNOW_HX = 420;
   const SNOW_ONLY = () => CFG.TERRAIN_SNOW_ONLY_RANGES !== false;
   // 1 inside the snow country's X-span (feathered), 0 beyond.
   function snowWindowX(x) {

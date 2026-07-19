@@ -48,7 +48,8 @@
   // worse, the visual grass was accidentally left at world origin while the
   // track/region used these coordinates, laying a 400m green disc across the
   // airport.  One authoritative transform owns every speedway surface now.
-  const CX = 490, CZ = -350, R = 210;            // speedway/campus ownership radius
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
+  const CX = 490 + _WOFF.dx, CZ = -350 + _WOFF.dz, R = 210;   // speedway/campus ownership radius
   // The visible venue is deliberately not a circular island.  Its irregular,
   // elongated boundary follows the oval and grows a southern paddock shoulder,
   // so from an aircraft it reads as a motorsports campus cut into the country.

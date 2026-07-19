@@ -696,7 +696,8 @@
   // at x=-950, leaving a clean 50 m water/terrain seam before this footprint.
   // That unused land lets the airport carry a runway which actually reads at
   // aircraft scale without pushing east into Diamond Speedway.
-  const A_MINX = -900, A_MAXX = 290, A_MINZ = -280, A_MAXZ = 40;
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
+  const A_MINX = -900 + _WOFF.dx, A_MAXX = 290 + _WOFF.dx, A_MINZ = -280 + _WOFF.dz, A_MAXZ = 40 + _WOFF.dz;
   // causeway widened to the 24m highway deck (x∈[-12,12])
   const CW_MINX = -12, CW_MAXX = 12, CW_MINZ = -566, CW_MAXZ = -280;
 
