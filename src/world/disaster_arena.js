@@ -455,6 +455,10 @@
     const LAYERS = !CBZ.CONFIG || CBZ.CONFIG.SURV_ROAD_LAYERS !== false;
     const ROAD_Y_AVE = LAYERS ? 0.04 : 0.05;     // avenues (run along z)
     const ROAD_Y_CROSS = LAYERS ? 0.045 : 0.05;  // cross-streets (run along x)
+    const ROAD_Y_PAD = LAYERS ? 0.05 : 0.05;     // forecourt/apron pads — ABOVE both road
+                                                 // levels (owner: gas-station ground flickered
+                                                 // where the pad overlapped an avenue at the
+                                                 // same 0.04), below the 0.057 dashes
     const PAINT_Y = LAYERS ? 0.057 : 0.07;       // centre-line dashes
     const roadMat = LAYERS
       ? new THREE.MeshLambertMaterial({ color: 0x33363d })
@@ -527,9 +531,11 @@
       const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), LAYERS
         ? new THREE.MeshLambertMaterial({ color: 0x41464d })
         : new THREE.MeshLambertMaterial({ color: 0x41464d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-      // the forecourt apron rides the avenue level: pure geometric separation
-      // from the ground, same as every road plane (SURV_ROAD_LAYERS)
-      pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + (LAYERS ? ROAD_Y_AVE : 0.05), oz); pad.receiveShadow = true; root.add(pad);
+      // the forecourt apron rides its OWN level above both road planes — it
+      // can overlap an avenue, and coplanar overlap is exactly the TBDR
+      // z-fight the owner saw (SURV_ROAD_LAYERS)
+      pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + (LAYERS ? ROAD_Y_PAD : 0.05), oz); pad.receiveShadow = true; root.add(pad);
+      if (LAYERS) pad.renderOrder = 1;
       const CH = 5.2;
       [[-6, -3.4], [6, -3.4], [-6, 3.4], [6, 3.4]].forEach(([px, pz]) => box(ox + px, gy + CH / 2, oz + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
       box(ox, gy + CH + 0.45, oz, 14.5, 0.9, 9.5, 0xfbfcfe, { solid: true, y0: gy + CH, y1: gy + CH + 0.9 });
