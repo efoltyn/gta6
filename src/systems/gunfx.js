@@ -637,4 +637,40 @@
       f.spr.material.opacity = Math.max(0, f.life / f.max) * (f.spr.material.blending === THREE.NormalBlending ? 0.75 : 1);
     }
   });
+
+  // ---- FIRST-SHOT PREWARM (same de-spike as crashfx's first-blast block) ----
+  // The tracer Line, the muzzle-flash sprite and the impact textures were all
+  // minted lazily on the FIRST shot of a session — and r128 only compiles a
+  // material's shader program the first time an object using it actually
+  // renders, so the first trigger pull paid canvas bakes + allocations + a
+  // LineBasicMaterial/SpriteMaterial program compile inside one frame. Build
+  // them at load instead (visible=false, exactly the shape the pools recycle
+  // into); core/fxwarm.js compiles their programs during the play-start
+  // transition, so the first shot of the session hits warm caches.
+  flashTex = makeFlashTex();
+  sparkTex = makeSparkTex();
+  puffTex = makePuffTex();
+  // the impact-puff sprites above were built map-LESS (their map used to arrive
+  // with the first bulletImpact, without needsUpdate). That only worked because
+  // their first render happened after that assignment; with the play-start
+  // renderer.compile() pass (core/fxwarm.js) their program would be frozen in
+  // the no-map variant — r128 only re-keys a program on needsUpdate. Seat the
+  // map NOW so the material carries one from birth and every later swap at
+  // bulletImpact is texture↔texture (uniform rebind, never a program change).
+  for (let i = 0; i < puffs.length; i++) puffs[i].spr.material.map = puffTex;
+  for (let i = 0; i < 2; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flashTex, transparent: true, depthTest: false, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    s.renderOrder = 9; s.visible = false;
+    scene.add(s);
+    flashPool.push(s);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.95, depthWrite: false }));
+    m.frustumCulled = false; m.renderOrder = 8; m.visible = false;
+    scene.add(m);
+    linePool.push(m);
+  }
 })();

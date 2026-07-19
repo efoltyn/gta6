@@ -1112,4 +1112,10 @@
     later.length = 0; killCtx = null;
     flashV = 0; if (flashEl) flashEl.style.opacity = "0";
   };
+
+  // FIRST-BLOOD PREWARM: bake the shared blood texture at load instead of on
+  // the first kill — a rocket's first blast is also usually the session's
+  // first gore, and this canvas rasterisation used to land in that same
+  // already-overloaded impact frame (see crashfx.js's first-blast block).
+  bloodTexture();
 })();

@@ -499,6 +499,31 @@
   // rocket peppers a facade with openings (the wall `_breached` dedup keeps
   // same-face panes from carving twice → bounded cost, no cache/cleanup).
   const PER_BLAST_OPEN = 8;
+  // ---- DEFERRED WINDOW-OPENING CARVES (rocket-frame de-spike, part 2) -------
+  // tryWindowOpening runs the carveHole MONOLITH (collider scan + remnant
+  // geometry builds + a BufferGeometryUtils merge + full cityGlass/roomDeco
+  // sweeps) — and cityShatter used to fire up to PER_BLAST_OPEN(8) of them
+  // SYNCHRONOUSLY inside the rocket's impact frame, plus one more from
+  // cityShatterRay. fracture.js already deferred blastAt's single carve for
+  // exactly this cost (see its DEFERRED LOCAL CARVE header — the same monolith
+  // ballooned the impact frame ~200→350ms); the window-opening storm was the
+  // remaining synchronous copy of that work, ~8x over. Same fix, same flag
+  // (CBZ.carveDefer, fracture.js defaults it true): the panes still BURST on
+  // the impact frame (the visible feedback), only the cosmetic room-reveal
+  // carve drains at 1/frame afterwards — the boom/dust/shards mask the slip,
+  // and the openings appearing one-per-frame reads as progressive collapse.
+  // Every drained carve re-resolves from live state (carveHole returns null on
+  // a breached/missing wall), so stale entries self-cancel; the queue clears
+  // on mode exit and on cityGlassReset so a fresh arena never inherits one.
+  const winOpenQ = [];
+  const WINOPEN_BUDGET = 1;        // carves drained per city frame
+  const WINOPENQ_CAP = 24;         // a multi-blast salvo can't grow it unbounded
+  function queueWindowOpening(gp) {
+    if (!gp) return;
+    if (CBZ.carveDefer === false) { tryWindowOpening(gp); return; }   // flag off → old inline behaviour
+    if (winOpenQ.length >= WINOPENQ_CAP || winOpenQ.indexOf(gp) !== -1) return;
+    winOpenQ.push(gp);
+  }
   CBZ.cityShatter = function (x, z, r) {
     const r2 = r * r; let n = 0, near = null, nearD = 1e9;
     const cand = [];   // window-sized in-radius panes eligible to carve an opening
@@ -514,11 +539,13 @@
     }
     // open the nearest few as real holes/rooms; tryWindowOpening reads the
     // pane's stored x/y/z (it doesn't care that the pane is now "shattered"),
-    // and carveHole's wall `_breached` flag makes same-face panes a no-op carve
+    // and carveHole's wall `_breached` flag makes same-face panes a no-op carve.
+    // QUEUED, not inline (see winOpenQ above): eight carveHole monoliths in the
+    // impact frame were the filmed rocket stall — they drain 1/frame instead.
     cand.sort(function (a, b) { return a.dd - b.dd; });
     const lim = Math.min(PER_BLAST_OPEN, cand.length);
-    for (let i = 0; i < lim; i++) tryWindowOpening(cand[i].gp);
-    if (!lim && near) tryWindowOpening(near);   // fallback: nearest pane (sub-window slivers only)
+    for (let i = 0; i < lim; i++) queueWindowOpening(cand[i].gp);
+    if (!lim && near) queueWindowOpening(near);   // fallback: nearest pane (sub-window slivers only)
     if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
     // a hard impact (big radius shatter = a car ploughing a storefront) also
     // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
@@ -586,7 +613,9 @@
       CBZ.cityLastShatterDist = bestT;
       // a bullet (force) or a second hit — or a solid showroom pane — blows it
       // fully out; otherwise spider-crack it (and chip a shard off the point).
-      if (force || best.cracked || best.col) { burstPane(best); tryWindowOpening(best); if (CBZ.sfx) CBZ.sfx("glass"); }
+      // The pane bursts NOW (the feedback); the room-reveal carve queues (1-
+      // frame slip, same winOpenQ de-spike the blast path uses).
+      if (force || best.cracked || best.col) { burstPane(best); queueWindowOpening(best); if (CBZ.sfx) CBZ.sfx("glass"); }
       else { crackPane(best, bestHX, bestHY, bestHZ); if (CBZ.sfx) CBZ.sfx("glass"); spawnGlassChip(bestHX, bestHY, bestHZ); }
     }
     return best;
@@ -647,6 +676,7 @@
   CBZ._paneShow = paneShow;
   CBZ.cityGlassReset = function () {
     shatteredPanes = 0;
+    winOpenQ.length = 0;   // never carve a fresh arena from a stale pre-reset queue
     for (const gp of cityGlass) {
       if (gp.shattered) {
         gp.shattered = false;
@@ -1756,12 +1786,23 @@
     wrapBlast("cityAirstrikeExplosion");
   }
   CBZ.onUpdate(0.01, function () {
-    if (CBZ.game.mode !== "city") { if (glassNightOn) CBZ.cityGlassNight(false); return; }
+    if (CBZ.game.mode !== "city") {
+      if (glassNightOn) CBZ.cityGlassNight(false);
+      if (winOpenQ.length) winOpenQ.length = 0;   // arena gone — drop queued window carves
+      return;
+    }
     wrapExplosion();
     // fold any freshly-registered panes into instanced pools (first city frame
     // for the main build; later generations for the expansion island).
     if (pendingGlass.length) buildGlassPools();
     if (pendingDeco.length) buildRoomDecoPools();
+    // drain deferred window-opening carves (see winOpenQ at cityShatter) —
+    // WINOPEN_BUDGET carveHole monoliths per frame, off the blast frame's
+    // critical path. Each re-resolves against live walls, so stale entries
+    // (breached wall, demolished building, new run) are cheap no-ops.
+    for (let wq = WINOPEN_BUDGET; wq > 0 && winOpenQ.length; wq--) {
+      try { tryWindowOpening(winOpenQ.shift()); } catch (e) {}
+    }
     // the dusk/dawn LIT-PANE flip — the same hysteresis thresholds as
     // view.js's emissive night pass so the whole night look lands together.
     const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;

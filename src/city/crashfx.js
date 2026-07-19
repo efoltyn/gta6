@@ -110,7 +110,9 @@
   // never stolen mid-flight; on overrun the oldest slot is reused — exactly the
   // permanence the old path got from expiry, just without the allocation.
   const BURST_MAX = 256, RING_CAP = 48;
-  const burstPool = [];   // preallocated Points, lazily grown to RING_CAP
+  const burstPool = [];   // preallocated Points — fully prebuilt at load (see the
+                          // FIRST-BLAST PREWARM block at the bottom of this file),
+                          // so no slot is ever minted mid-fight
   let burstRing = 0;      // next slot to (re)use
   function makeBurstSlot() {
     const pos = new Float32Array(BURST_MAX * 3);
@@ -1656,4 +1658,35 @@
       else { s.mat.opacity = Math.max(0, 0.92 * (1 - (s.t - s.hold) / 4)); if (s.t - s.hold >= 4) { scene.remove(s.mesh); s.mat.dispose(); splats.splice(i, 1); } }
     }
   });
+
+  // ---- FIRST-BLAST PREWARM (the owner-filmed rocket freeze, part 1) ---------
+  // Everything here used to be minted LAZILY on the FIRST blast of a session:
+  // four canvas textures (scorch/splat/puff/smoke), the whole pooled point-burst
+  // ring, and ~a hundred fireball/smoke sprites — all in the impact frame, and
+  // (worse) all with r128 shader programs that only compile the first time an
+  // object actually RENDERS (invisible pools never compile). On an iPad that
+  // stacked canvas rasterisation + allocation + several synchronous
+  // compileShader/linkProgram calls into one frame: the "sometimes it takes SO
+  // LONG" hitch — 'sometimes' because it is exactly ONCE per session, on the
+  // first rocket/explosion. Build ALL of it at load instead; core/fxwarm.js
+  // then compiles the programs during the play-start transition so the first
+  // real blast hits fully warm caches. NOTE the eager texture bakes consume the
+  // module rng in a FIXED order at init — every client advances the stream
+  // identically, so cross-client FX determinism is preserved (it only shifts
+  // relative to older builds, which is fine: streams are per-version).
+  scorchTex = makeScorchTexture();
+  splatTex = makeSplatTexture();
+  puffTex = makePuffTexture();
+  smokeTex = makeSmokeTexture();
+  for (let i = 0; i < RING_CAP; i++) if (!burstPool[i]) burstPool[i] = makeBurstSlot();
+  // seed the fireball/smoke sprite pool with enough bodies for a full rocket
+  // blast (fireball+smoke+embers layers peak around this count) — same shape
+  // getPuff() builds, parked invisible exactly like updatePuffs() retires them.
+  for (let i = 0; i < 64; i++) {
+    const m = new THREE.SpriteMaterial({ map: puffTex, depthWrite: false, depthTest: true, transparent: true, opacity: 0 });
+    const p = new THREE.Sprite(m);
+    p.renderOrder = 9; p.visible = false;
+    scene.add(p);
+    puffPool.push(p);
+  }
 })();
