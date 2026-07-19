@@ -10,9 +10,16 @@
        WALKS the player there and triggers on arrival. Tapping a car gets
        you in / steals it, a plane boards it, a ped opens the contextual
        #interact card (whose YES/NO rows are already click-driven).
-     • On-screen buttons are ICONS ONLY — no words are ever added to the
-       HUD (fire reticle, jump arc, sprint chevrons, first-person eye,
-       weapon swap, reload). Weapon buttons appear only while armed.
+     • MOVEMENT/COMBAT buttons are ICONS (fire reticle, jump arc, walk
+       chevrons, first-person eye, weapon swap, reload, scope). But
+       INTERACTION prompts carry WORDS: the owner wants a button that
+       SAYS "HIJACK", so contextual verb pills (the #interact card, the
+       walk-up shop/property prompts) spell out the action itself —
+       never a keyboard letter. That supersedes the old "no words ever"
+       rule, which now applies only to the movement cluster.
+     • AUTO-SPRINT: on touch, moving defaults to a sprint whenever
+       stamina allows (the desktop shift-to-run doctrine assumes a key a
+       tablet doesn't have). The chevron button becomes a WALK toggle.
 
    WHY tap-to-interact can't drift from the keyboard: for rides it calls
    the very functions CBZ.cityTryNearestRide() terminates in
@@ -20,11 +27,20 @@
    aimed at the specific tapped record. For peds it only aims the camera
    and asks CBZ.interactions to refresh — the panel, its targeting and its
    YES/NO handlers are entirely owned by city/interactions.js, so the same
-   verbs the keyboard shows are the ones a tap fires.
+   verbs the keyboard shows are the ones a tap fires. The same doctrine
+   drives the verb pills: CBZ.touchActionPrompt / CBZ.touchPromptHTML
+   re-skin a module's prompt but FIRE the module's own key handler (a
+   synthesized keydown, the gamepad.js pattern) or a named CBZ function —
+   never a reimplementation.
 
    Everything here is gated to touch / coarse-pointer devices, so desktop
-   is byte-for-byte unchanged. Revert the new layer in one line:
-   CBZ.CONFIG.TOUCH_V2 = false (or ?cfg_TOUCH_V2=0).
+   is byte-for-byte unchanged. One-line reverts (all default ON, all
+   URL-overridable via ?cfg_X=0):
+     TOUCH_V2           — ped-tap + walk-to layer
+     TOUCH_VERB_PROMPTS — worded verb pills replacing key glyphs
+     TOUCH_AUTOSPRINT   — stamina-gated default sprint
+     TOUCH_HUD_TIDY     — body.touch-tidy declutter CSS (mobile.css)
+     TOUCH_VEHICLE      — drive/heli/wing button layer (touch_vehicle.js)
 ============================================================ */
 (function () {
   "use strict";
@@ -33,15 +49,23 @@
   // still honours a URL override before this runs). false → the new ped-tap +
   // walk-to layer is skipped and taps fall back to in-reach rides only.
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_V2 == null) CBZ.CONFIG.TOUCH_V2 = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_VERB_PROMPTS == null) CBZ.CONFIG.TOUCH_VERB_PROMPTS = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AUTOSPRINT == null) CBZ.CONFIG.TOUCH_AUTOSPRINT = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HUD_TIDY == null) CBZ.CONFIG.TOUCH_HUD_TIDY = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
 
   const SENS = 0.006, MAXR = 55, DEAD = 0.28;
   const WALK_MAX = 46;        // don't set off on a cross-map trek from one tap
   const WALK_TIMEOUT = 14;    // give up (moving target / stuck) after this many s
 
-  let built = false, enabled = false, sprint = false;
+  let built = false, enabled = false;
+  // AUTO-SPRINT state: on touch the default gait while the stick is deflected
+  // is a sprint, easing off when stamina runs dry (hysteresis so it never
+  // flaps at a threshold). walkMode is the chevron button's toggle — ON means
+  // the player asked to stay slow. Desktop never runs any of this.
+  let walkMode = false, stamOk = true, shiftOwned = false;
   const stick = { id: null, cx: 0, cy: 0, sx: 0, sy: 0, t0: 0, moved: 0 };
-  const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0, t0: 0, moved: 0 };
+  const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0, t0: 0, moved: 0, free: false };
   const walk = { on: false, kind: null, rec: null, t: 0 };
   let baseEl, knobEl;
   const tapRay = window.THREE ? new THREE.Raycaster() : null;
@@ -56,6 +80,8 @@
     eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
     swap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 12l-3 3 3 3"/></svg>',
     reload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/></svg>',
+    scope: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v6M12 16.5v6M1.5 12h6M16.5 12h6"/></svg>',
+    aim: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8"/><path d="M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8"/><path d="M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
   };
   function btn(id, cls, glyph, label) {
     return '<button class="' + cls + '" id="' + id + '" type="button" aria-label="' + label + '">' + glyph + "</button>";
@@ -65,6 +91,10 @@
     if (enabled) return;
     enabled = true; CBZ.touchMode = true;
     document.body.classList.add("touch");
+    // Declutter CSS (mobile.css) keys off this second class so the whole
+    // tidy-up is one flag: CBZ.CONFIG.TOUCH_HUD_TIDY = false restores the
+    // desktop-identical HUD arrangement while keeping the controls.
+    if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_HUD_TIDY !== false) document.body.classList.add("touch-tidy");
     build();
   }
 
@@ -78,10 +108,12 @@
       '<div id="tbtns">' +
       btn("tfire", "tbtn tbig tfire", SVG.fire, "Fire") +
       btn("tjump", "tbtn tjump", SVG.jump, "Jump") +
-      btn("tsprint", "tbtn tsprint", SVG.sprint, "Sprint") +
+      btn("tsprint", "tbtn tsprint", SVG.sprint, "Walk / auto-sprint toggle") +
       btn("tview", "tbtn tsm", SVG.eye, "First-person view") +
       btn("tswap", "tbtn tsm", SVG.swap, "Next weapon") +
       btn("treload", "tbtn tsm", SVG.reload, "Reload") +
+      btn("taim", "tbtn tsm", SVG.aim, "Aim") +
+      btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
       "</div>";
     document.body.appendChild(wrap);
     baseEl = document.getElementById("tstick");
@@ -100,10 +132,26 @@
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
-    // SPRINT toggle (Shift). The old build mislabelled this "SNEAK" while it
-    // actually held Shift = run; the chevrons now say what it does.
+    // WALK toggle. Auto-sprint (below) makes sprint the DEFAULT gait, so the
+    // chevron button flipped meaning: lit = "stay at a walk" (stealth, aiming,
+    // squeezing through a crowd). With TOUCH_AUTOSPRINT off it degrades to the
+    // old manual sprint-hold semantics.
     const sb = document.getElementById("tsprint");
-    tapBtn(sb, () => { sprint = !sprint; CBZ.keys["shift"] = sprint; sb.classList.toggle("on", sprint); });
+    tapBtn(sb, () => { walkMode = !walkMode; sb.classList.toggle("on", walkMode); });
+    // AIM (ADS) — the missing iPad right-mouse: hold pulls the camera in /
+    // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
+    // gamepad triggers use. Hold = aim, release = unaim.
+    holdBtn("taim", (down) => { if (CBZ.fpsSetAim) CBZ.fpsSetAim(down); });
+    // SCOPE — sibling system (sniper scope + lock-on) exposes feature-detected
+    // hooks; every call is guarded so this button is correct whether that API
+    // is present, absent, or lands under a slightly different shape. Hold =
+    // scope while pressed (CBZ.fpsScope(down)); tap with only a toggle API =
+    // CBZ.fpsScopeToggle(). Distinct from AIM: scope = true sniper zoom.
+    // Visibility for both is driven from the armed check below.
+    holdBtn("tscope", (down) => {
+      if (CBZ.fpsScope) CBZ.fpsScope(down);
+      else if (down && CBZ.fpsScopeToggle) CBZ.fpsScopeToggle();
+    });
   }
 
   // press-and-hold button (jump/fire)
@@ -122,11 +170,76 @@
     b.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
   }
 
+  // ---- verb-first prompts (the owner's "button that SAYS HIJACK") -----------
+  // Modules with a private walk-up prompt route their HTML through these.
+  // Desktop: strings come back unchanged ("[G] Vault — store"), byte-identical.
+  // Touch (+TOUCH_VERB_PROMPTS): the key glyph disappears and the prompt
+  // becomes a tappable pill that fires the module's OWN handler — either a
+  // synthesized keypress (the gamepad.js pattern; every module keydown reads
+  // e.key) or a named CBZ.* function for handlers a fake key can't reach.
+  const verbPills = () => enabled && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
+  function pillHTML(act, label, small) {
+    const attr = act.charAt(0) === "@" ? 'data-tfn="' + act.slice(1) + '"' : 'data-tkey="' + act + '"';
+    return '<button type="button" class="tpill' + (small ? " tpill-sm" : "") + '" ' + attr + ">" + label + "</button>";
+  }
+  // One action: act = "g" (a key) or "@cityFnName" (a CBZ function), a worded
+  // label, and an optional desktop string for prompts that aren't the plain
+  // "[G] label" form (e.g. the aircraft's bare "✈" glyph).
+  CBZ.touchActionPrompt = function (act, label, desktopHtml) {
+    if (!verbPills()) return desktopHtml != null ? desktopHtml : "[" + String(act).toUpperCase() + "] " + label;
+    return pillHTML(String(act), label);
+  };
+  // Rich prompt strings ("<b>[E]</b> Buy X · [F] next"): every [K] marker and
+  // the text that follows it becomes one pill (first = primary, rest small).
+  const KEYMARK = /(?:<b[^>]*>)?\[([A-Za-z])\](?:<\/b>)?\s*/g;
+  CBZ.touchPromptHTML = function (html) {
+    if (!verbPills() || typeof html !== "string") return html;
+    KEYMARK.lastIndex = 0;
+    let m; const marks = [];
+    while ((m = KEYMARK.exec(html))) marks.push({ key: m[1].toLowerCase(), s: m.index, e: KEYMARK.lastIndex });
+    if (!marks.length) return html;
+    let out = html.slice(0, marks[0].s);
+    for (let i = 0; i < marks.length; i++) {
+      const seg = html.slice(marks[i].e, i + 1 < marks.length ? marks[i + 1].s : html.length);
+      const label = seg.replace(/^\s*(?:[·|•]\s*)/, "").replace(/(?:\s*[·|•])\s*$/, "");
+      out += pillHTML(marks[i].key, label, i > 0);
+    }
+    return out;
+  };
+  // Fire the logical key a pill stands for: a real KeyboardEvent pair on
+  // document (the gamepad.js pattern) so capture- and bubble-phase module
+  // listeners both hear it, with e.code carried for handlers that check it.
+  CBZ.touchKeyTap = function (key) {
+    key = String(key || "").toLowerCase();
+    const init = { key: key, bubbles: true, cancelable: true };
+    if (/^[a-z]$/.test(key)) init.code = "Key" + key.toUpperCase();
+    try {
+      document.dispatchEvent(new KeyboardEvent("keydown", init));
+      document.dispatchEvent(new KeyboardEvent("keyup", init));
+    } catch (e) {}
+  };
+  // CAPTURE-phase so a pill tap fires exactly ONE action: several legacy
+  // prompt divs are themselves click-wired (bank/pawn/jewelry/…), and letting
+  // the tap bubble into them would fire the verb twice.
+  document.addEventListener("click", function (e) {
+    if (!enabled) return;
+    const p = e.target && e.target.closest && e.target.closest(".tpill[data-tkey],.tpill[data-tfn]");
+    if (!p) return;
+    e.preventDefault(); e.stopPropagation();
+    const fn = p.getAttribute("data-tfn");
+    if (fn) { if (typeof CBZ[fn] === "function") CBZ[fn](); return; }
+    CBZ.touchKeyTap(p.getAttribute("data-tkey"));
+  }, true);
+
   // Any UI a tap should reach natively (buttons/options/panels) — so a touch on
   // one never starts the joystick / look-drag or a world tap. .screen already
-  // covers title/pause/win/lose overlays.
-  const UI_SEL = "#tbtns, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
-    "#phone, #dashboard, button, [data-act], .iopt";
+  // covers title/pause/win/lose overlays. The walk-up prompt divs are listed
+  // by id: on touch they carry tappable verb pills (several were click-wired
+  // all along), and #cRadar / #minimap taps open the full map (fullmap.js).
+  const UI_SEL = "#tbtns, #tveh, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
+    "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, " +
+    "#bankPrompt, #pawnPrompt, #jewelryPrompt, #clothingPrompt, #gunstorePrompt, " +
+    "#shopliftPrompt, #cityStoragePrompt, #cityAircraftPrompt";
   const inUI = (t) => t && t.closest && t.closest(UI_SEL);
 
   function setMove(nx, ny) {
@@ -280,7 +393,7 @@
   function cancelWalk() {
     if (!walk.on) return;
     walk.on = false; walk.kind = null; walk.rec = null;
-    const k = CBZ.keys; k["w"] = false; k["shift"] = sprint;   // restore the sprint toggle
+    const k = CBZ.keys; k["w"] = false; k["shift"] = false;   // auto-sprint pump re-owns shift next frame
   }
   // Runs while playing, BEFORE physics (onUpdate 10) so the keys/yaw it writes
   // are consumed the same frame. Steers by pointing the camera at the target and
@@ -296,7 +409,7 @@
     walk.t += dt;
 
     if (reachDist(kind, rec) <= reachOf(kind)) {
-      const k = CBZ.keys; k["w"] = false; k["shift"] = sprint;
+      const k = CBZ.keys; k["w"] = false; k["shift"] = false;
       walk.on = false; walk.rec = null; walk.kind = null;
       triggerTarget(kind, rec);
       return;
@@ -310,6 +423,36 @@
     const k = CBZ.keys;
     k["w"] = true; k["a"] = k["s"] = k["d"] = false;
     k["shift"] = dist > 5;    // jog most of the way, ease to a walk for the last few metres
+  });
+
+  // ---- AUTO-SPRINT (the touch default gait) ---------------------------------
+  // Owns CBZ.keys["shift"] ON FOOT while the touch layer is live: deflecting
+  // the stick sprints whenever stamina is healthy (30/8 hysteresis so the gait
+  // never flaps at a threshold), the chevron button holds you to a walk, and
+  // away from foot travel shift is RELEASED — the old sprint TOGGLE left shift
+  // latched, which a heli reads as collective-down the moment you lift off.
+  // Registered after the walk-to updater (same order 9): while walk.on the
+  // walk-to steering owns the gait and this pump stands aside.
+  CBZ.onUpdate(9, function () {
+    if (!enabled || walk.on) return;
+    const k = CBZ.keys, P = CBZ.player;
+    const auto = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AUTOSPRINT !== false;
+    const onFoot = CBZ.game.state === "playing" && P && P.pos && !P.dead && !P.driving && !P._aircraft;
+    if (!auto) {
+      // flag off → the chevron degrades to the OLD manual sprint toggle (lit =
+      // hold shift), still released the moment you leave your feet.
+      const manual = onFoot && walkMode;
+      if (manual !== shiftOwned) { k["shift"] = manual; shiftOwned = manual; }
+      return;
+    }
+    if (!onFoot) {
+      if (shiftOwned) { k["shift"] = false; shiftOwned = false; }
+      return;
+    }
+    const st = P.stamina == null ? 100 : P.stamina;
+    stamOk = stamOk ? st > 8 : st > 30;
+    const moving = !!(k["w"] || k["a"] || k["s"] || k["d"]);
+    k["shift"] = shiftOwned = !!(moving && !walkMode && stamOk);
   });
 
   // ---- touch input -----------------------------------------------------------
@@ -326,6 +469,10 @@
       } else if (look.id === null) {
         look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
         look.sx = t.clientX; look.sy = t.clientY; look.t0 = performance.now(); look.moved = 0;
+        // in a vehicle, tell the camera agent to suspend auto-recenter while
+        // this finger drags (glancing sideways at speed); feature-detected.
+        const P = CBZ.player;
+        if (CBZ.camFreeLook && P && (P.driving || P._aircraft)) { look.free = true; CBZ.camFreeLook(true); }
       }
     }
   }, { passive: true });
@@ -352,7 +499,11 @@
         look.moved = Math.max(look.moved, Math.hypot(t.clientX - look.sx, t.clientY - look.sy));
         CBZ.cam.yaw -= (t.clientX - look.lx) * SENS;
         CBZ.cam.pitch -= (t.clientY - look.ly) * SENS;
-        CBZ.cam.pitch = Math.max(-0.18, Math.min(0.60, CBZ.cam.pitch));
+        // third-person pitch range: the camera agent's hook decides (it knows
+        // the collision-safe envelope); fallback still allows a REAL look-up —
+        // the old -0.18 floor meant an iPad could barely raise its eyes.
+        const pr = (CBZ.camTouchPitchRange && CBZ.camTouchPitchRange()) || [-0.6, 0.60];
+        CBZ.cam.pitch = Math.max(pr[0], Math.min(pr[1], CBZ.cam.pitch));
         // in first-person, vertical drag drives the (wider) FPS aim pitch
         if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - (t.clientY - look.ly) * SENS));
         look.lx = t.clientX; look.ly = t.clientY;
@@ -370,6 +521,7 @@
       } else if (t.identifier === look.id) {
         const wasTap = look.moved < 12 && performance.now() - look.t0 < 330;
         look.id = null;
+        if (look.free) { look.free = false; if (CBZ.camFreeLook) CBZ.camFreeLook(false); }
         if (wasTap) tapWorld(t.clientX, t.clientY);
       }
     }
@@ -395,5 +547,11 @@
     const sw = document.getElementById("tswap"), rl = document.getElementById("treload");
     if (sw) sw.style.display = armed ? "" : "none";
     if (rl) rl.style.display = armed ? "" : "none";
+    // AIM whenever armed (fpsSetAim ships today); SCOPE only when the sibling
+    // scope system says the held weapon can true-zoom. Both may show at once.
+    const am = document.getElementById("taim");
+    if (am) am.style.display = (armed && CBZ.fpsSetAim) ? "" : "none";
+    const sc = document.getElementById("tscope");
+    if (sc) sc.style.display = (armed && CBZ.fpsCanScope && CBZ.fpsCanScope()) ? "" : "none";
   });
 })();

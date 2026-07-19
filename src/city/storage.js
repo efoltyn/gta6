@@ -352,6 +352,13 @@
     panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;" +
       "min-width:360px;max-width:480px;background:rgba(14,18,24,.96);border:2px solid #2f3a44;border-radius:16px;" +
       "padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
+    // TOUCH ONLY: rows act on tap (desktop stays number-keys, byte-identical)
+    panel.addEventListener("click", function (e) {
+      if (!CBZ.touchMode || !open_) return;
+      if (e.target.closest && e.target.closest("[data-sclose]")) { close(); return; }
+      const r = e.target.closest ? e.target.closest("[data-si]") : null;
+      if (r) { const a = actions[+r.getAttribute("data-si")]; if (a) a.fn(); }
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -386,8 +393,15 @@
         actions.push({ label: "LOAD OUT — move the whole locker to your guns", fn: loadOut });
       }
     }
-    actions.forEach((a, i) => { html += "<div style='padding:3px 0;font-size:13px'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
-    html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[1–" + Math.min(9, actions.length) + "] select · [Esc] close</div>";
+    // TOUCH: no number/Esc key hints — rows are fat tap targets (data-si) and a
+    // CLOSE pill replaces [Esc]. Desktop branch is the original, byte-identical.
+    if (CBZ.touchMode) {
+      actions.forEach((a, i) => { html += "<div data-si='" + i + "' style='padding:10px 8px;margin:3px 0;font-size:14px;border:1px solid rgba(232,236,242,.16);border-radius:9px;background:rgba(255,255,255,.05)'>" + a.label + "</div>"; });
+      html += "<button type='button' class='tpill tpill-sm' data-sclose='1' style='margin-top:9px'>CLOSE</button>";
+    } else {
+      actions.forEach((a, i) => { html += "<div style='padding:3px 0;font-size:13px'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
+      html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[1–" + Math.min(9, actions.length) + "] select · [Esc] close</div>";
+    }
     el().innerHTML = html;
   }
   function open(spot) {
@@ -462,9 +476,11 @@
     const s = nearestSpot(x, z);
     if (s) {
       const prop = s.prop;
-      if (!owns(prop.id)) showPrompt("[G] " + prop.name + " — Buy " + money(prop.cost));
-      else if (prop.kind === "hangar") showPrompt("[G] " + prop.name + (g.cityOwnsJet ? "" : " — land a stolen F-22 here"));
-      else showPrompt("[G] " + prop.name + " — store / retrieve" + (prop.kind === "warehouse" ? " / ammo" : ""));
+      // CBZ.touchActionPrompt: desktop keeps the exact "[G] …" string; touch
+      // renders a tappable verb pill that synthesizes the same G press.
+      if (!owns(prop.id)) showPrompt(CBZ.touchActionPrompt("g", prop.name + " — Buy " + money(prop.cost)));
+      else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", prop.name + (g.cityOwnsJet ? "" : " — land a stolen F-22 here")));
+      else showPrompt(CBZ.touchActionPrompt("g", prop.name + " — store / retrieve" + (prop.kind === "warehouse" ? " / ammo" : "")));
       return;
     }
     hidePrompt();

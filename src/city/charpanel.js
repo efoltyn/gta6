@@ -726,6 +726,20 @@
       if (e.stopPropagation) e.stopPropagation();
       setHudHidden(true);
     });
+    // TOUCH presentation (css/mobile.css collapses the card to a compact chip
+    // under body.touch-tidy): tapping the chip expands/collapses it, and the
+    // INVENTORY pill (swapped in by refreshPanel) opens the same overlay the
+    // [I] key does. Desktop DOM and handlers above are untouched.
+    panel.addEventListener("click", function (e) {
+      if (!CBZ.touchMode) return;
+      if (e.target.closest && e.target.closest(".cpHide")) return;   // ✕ keeps its own handler
+      if (e.target.closest && e.target.closest(".cpInvBtn")) {
+        e.preventDefault(); if (e.stopPropagation) e.stopPropagation();
+        if (g.mode === "city" && g.state === "playing" && !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active)) openInv();
+        return;
+      }
+      panel.classList.toggle("cpOpen");
+    });
   }
 
   function starsHtml(w) {
@@ -737,6 +751,13 @@
   // refresh the panel's text + portrait (portrait only on signature change)
   function refreshPanel() {
     if (!panel) return;
+    // touch: swap the [I]/[O] key-hint chips for one tappable INVENTORY pill
+    // (done lazily here so it also catches touchMode enabling after build)
+    if (CBZ.touchMode && !panel._tHint) {
+      panel._tHint = 1;
+      const h = panel.querySelector(".cpHint");
+      if (h) h.innerHTML = "<button type='button' class='tpill tpill-sm cpInvBtn'>INVENTORY</button>";
+    }
     const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1;
     const title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "";
     const bty = CBZ.cityBounty ? CBZ.cityBounty() : 0;

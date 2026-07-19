@@ -273,6 +273,19 @@
       if (r && current) fire(r);
     });
   }
+  // The verb a touch pill wears: the proposal text itself, uppercased, cut at
+  // a word boundary when a long authored line would burst the card.
+  function verbText(r) {
+    let v = String(r.proposal || r.label || "Continue").trim();
+    if (v.length > 40) {
+      v = v.slice(0, 39);
+      const sp = v.lastIndexOf(" ");
+      if (sp > 18) v = v.slice(0, sp);
+      v += "…";
+    }
+    return v.toUpperCase();
+  }
+
   // NOTE: #interact's base style is opacity:0; only `.show` lifts it to 1.
   function hidePanel() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentRows = []; fingerprint = ""; currentScore = -1; }
   function showPanel() { dom(); if (panel) { panel.style.display = "block"; panel.classList.add("show"); } }
@@ -406,10 +419,21 @@
       if (nameEl) nameEl.textContent = desc.label;
       // Exactly two decisions everywhere.  The proposition lives in the note;
       // these rows never mutate into a hidden action wheel.
-      if (optsEl) optsEl.innerHTML = rows.map((r, i) =>
-        `<div class="iopt" data-i="${i}"><span class="ikey">${r.key.toUpperCase()}</span>` +
-        `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${r.label}</span></div>`
-      ).join("");
+      // TOUCH (TOUCH_VERB_PROMPTS): no keyboard letters — the YES row becomes
+      // ONE big pill carrying the VERB ITSELF ("HIJACK THE AIRLINER"), the NO
+      // row a small dismiss pill. Same .iopt/data-i contract, so the existing
+      // click dispatch above fires them; targeting/verb logic is untouched.
+      const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
+      if (optsEl) optsEl.innerHTML = touchVerbs
+        ? rows.map((r, i) => {
+            const yes = r.decision !== "no";
+            return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
+              `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${yes ? verbText(r) : "NO"}</span></div>`;
+          }).join("")
+        : rows.map((r, i) =>
+          `<div class="iopt" data-i="${i}"><span class="ikey">${r.key.toUpperCase()}</span>` +
+          `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${r.label}</span></div>`
+        ).join("");
       showPanel();
     }
   });
