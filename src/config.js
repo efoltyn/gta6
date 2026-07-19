@@ -602,6 +602,18 @@
   // The old wild-nature belt depended on that decorative terrain mesh.  With
   // the fake backdrop gone it would otherwise plant trees over open water.
   CBZ.WILD_NATURE = false;
+  // TERRAIN EROSION V3 (world/terrain_overhaul.js) — the owner's reference
+  // terrain algorithm (fbm + pingpong-folded erosion + river channels +
+  // biome-scale altitude + smoothLowerPlanes shaping) as OFFSHORE skyline
+  // ranges rising out of the real sea beyond the continent's coast. The
+  // physics floor never reads this field and CBZ.terrainHeight stays EXACTLY
+  // 0 over the whole live world + margin, so "decorative mountains are not
+  // geography" still holds: you can see them, never stand on them. When ON it
+  // re-enables the decorative pipeline (and its wildnature forest) that the
+  // two flags above park. One-line revert: set TERRAIN_EROSION_V3 = false
+  // (or ?cfg_TERRAIN_EROSION_V3=0) → exactly the shipped no-backdrop world.
+  if (CBZ.CONFIG.TERRAIN_EROSION_V3 == null) CBZ.CONFIG.TERRAIN_EROSION_V3 = true;
+  if (CBZ.CONFIG.TERRAIN_EROSION_V3) { CBZ.PROC_TERRAIN = true; CBZ.WILD_NATURE = true; }
   // DYNAMIC WEATHER (systems/weather.js). Default OFF: the pooled rain Points
   // cloud read as bright white dots stuck to the HUD, and because weather ticks
   // globally it also appeared inside jail. Flip true (or ?cfg_DYNAMIC_WEATHER=1)

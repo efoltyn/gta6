@@ -45,8 +45,11 @@
 ============================================================ */
 (function () {
   "use strict";
-  const CBZ = window.CBZ;
-  if (!CBZ || !window.THREE) return;
+  // Loads BEFORE config.js (index.html order) — self-create the namespace
+  // (core/seed.js's idiom). The old `if (!CBZ) return;` guard made this whole
+  // module dead code, which silently disabled every scatterRocks caller.
+  const CBZ = (window.CBZ = window.CBZ || {});
+  if (!window.THREE) return;
   const THREE = window.THREE;
 
   // ----------------------------------------------------------------------

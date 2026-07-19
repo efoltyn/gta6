@@ -122,9 +122,21 @@
       return x > pMinX - PAD && x < pMaxX + PAD && z > pMinZ - PAD && z < pMaxZ + PAD;
     }
 
+    // TERRAIN EROSION V3 ecology: when the offshore relief pipeline is live
+    // (world/terrain_overhaul.js exports terrainTreeInfo), the scatter reads
+    // ITS moisture/treeline/snowline fields — density follows the river
+    // valleys and moist lowlands, thins to nothing at the treeline, never
+    // crosses the snowline, and trees stunt near the top of their band. The
+    // legacy uniform-density rules below stay byte-identical when V3 is off.
+    const V3 = !!(CBZ.CONFIG && CBZ.CONFIG.TERRAIN_EROSION_V3 !== false &&
+      typeof CBZ.terrainTreeInfo === "function");
+
     // overall scatter window: the playfield AABB grown by a wide wilderness
-    // ring (this is where the backdrop relief lives).
-    const RING = 900;
+    // ring (this is where the backdrop relief lives). V3's relief band sits
+    // farther offshore and is wider, so the ring grows and the grid coarsens
+    // (same ~cap-sized forest, spread over the larger band — no west-side
+    // cap-exhaustion bunching).
+    const RING = V3 ? 1500 : 900;
     const wMinX = pMinX - RING, wMaxX = pMaxX + RING;
     const wMinZ = pMinZ - RING, wMaxZ = pMaxZ + RING;
 
@@ -229,7 +241,7 @@
     //  reject steep cliffs (normal.y<0.6). Survivors are sorted into species.
     // ============================================================
     const conifers = [], broadleaves = [], birches = [], snags = [], rockList = [], grasses = [];
-    const STEP = 26;                                  // grid pitch (jittered)
+    const STEP = V3 ? 48 : 26;                        // grid pitch (jittered)
     const J = STEP * 0.62;                            // jitter amplitude
     // Scatter caps are FIXED at the full-fat values now. They used to read
     // CBZ.qScale at build time, which (a) meant the slider couldn't touch a
@@ -252,6 +264,13 @@
       if (gy < 0.3) return null;                       // water (redundant w/ above, kept explicit)
       const ny = groundN(x, z).y;
       if (ny < 0.6) return null;                       // steep cliff face — nothing roots here
+      if (V3) {
+        // ecology from the relief field: moisture-driven density, treeline
+        // fade, snowline flag, altitude stunting. (Scratch object — copy.)
+        const ti = CBZ.terrainTreeInfo(x, z);
+        if (!ti) return { gy, ny, dens: 0.3, stunt: 0, alt: 0, snow: false };
+        return { gy, ny, dens: ti.dens, stunt: ti.stunt, alt: ti.alt, snow: ti.snow };
+      }
       return { gy, ny };
     }
 
@@ -264,52 +283,73 @@
         const y = hit.gy;
 
         // higher / steeper-but-still-rootable ground favours conifers; gentler
-        // lower foothills get more broadleaf + birch. Density also rises with
-        // height so the peaks read densely forested.
+        // lower foothills get more broadleaf + birch. Legacy: density rises
+        // with height. V3: density follows the MOISTURE field instead (river
+        // valleys and damp lowlands cluster dense, dry shoulders open up,
+        // the treeline fades to nothing, the snowline is absolute).
         const r = rng();
 
         // GRASS / SHRUB tuft (its own scatter density — many, but capped).
-        // ELEVATION CLAMP: grass only roots on LOW foothill ground (below the
-        // treeline). Above ~14u it would land on bare peak shoulders / the
-        // snowline and read as a flat green plane hanging in the air.
-        if (y < 14 && rng() < 0.55 && grasses.length < CAP_GRASS) {
+        // Legacy: below y=14 only. V3: the lower half of the vegetation band,
+        // denser where the tree density is (meadows share the moisture).
+        const grassOK = V3 ? (hit.alt < 0.5 && rng() < 0.30 + hit.dens * 0.40)
+          : (y < 14 && rng() < 0.55);
+        if (grassOK && grasses.length < CAP_GRASS) {
           grasses.push({ x, z, y, s: 0.6 + rng() * 1.3, rot: rng() * 6.28 });
         }
-        // ROCKS — sparse, more on steeper ground.
-        if (rng() < (hit.ny < 0.78 ? 0.10 : 0.045) && rockList.length < CAP_ROCKS) {
+        // ROCKS — sparse, more on steeper ground; V3 adds altitude scree
+        // (rockfields climb PAST the treeline where trees no longer root).
+        const rockP = V3 ? (0.045 + hit.alt * 0.10 + (hit.ny < 0.78 ? 0.05 : 0))
+          : (hit.ny < 0.78 ? 0.10 : 0.045);
+        if (rng() < rockP && rockList.length < CAP_ROCKS) {
           rockList.push({ x, z, y, s: 0.5 + rng() * 2.4, rot: rng() * 6.28, tilt: (rng() - 0.5) * 0.5 });
         }
 
-        // TREES — keep probability rises with elevation (lusher highlands).
-        const treeP = 0.34 + Math.min(0.5, (y - 0.5) * 0.012);
+        // TREES — legacy: keep probability rises with elevation. V3: the
+        // moisture/clearing density field decides (0 above the treeline).
+        if (V3 && hit.snow) continue;                    // absolute snowline
+        const treeP = V3 ? (hit.dens <= 0.03 ? 0 : 0.08 + 0.74 * hit.dens)
+          : (0.34 + Math.min(0.5, (y - 0.5) * 0.012));
         if (r > treeP) continue;
         if (conifers.length + broadleaves.length + birches.length + snags.length >= CAP_TREES) continue;
 
         const pick = rng();
         const rot = rng() * 6.28;
         const lean = (rng() - 0.5) * 0.06;
-        if (pick < 0.56) {
+        // species mix: V3 shifts composition with altitude — valley floors
+        // mix broadleaf/birch, the subalpine band goes conifer + snag.
+        let cP = 0.56, bP = 0.80, biP = 0.93;
+        if (V3) {
+          const a2 = hit.alt;
+          cP = 0.40 + 0.30 * a2;
+          bP = cP + (0.34 - 0.26 * a2);
+          biP = bP + (0.16 - 0.08 * a2);
+        }
+        // altitude stunting: trees shrink toward the treeline (krummholz)
+        const shrink = V3 ? (1 - 0.42 * hit.stunt) : 1;
+        if (pick < cP) {
           // CONIFER — taller, narrower; dominant on the high ground
-          const h = 7 + rng() * 13;
+          const h = (7 + rng() * 13) * shrink;
           conifers.push({ x, z, y, h, tr: 0.55 + rng() * 0.5, rot, lean,
-            cR: 0.7 + rng() * 0.5, cH: h * (0.9 + rng() * 0.25) });
-        } else if (pick < 0.80) {
+            cR: (0.7 + rng() * 0.5) * shrink, cH: h * (0.9 + rng() * 0.25) });
+        } else if (pick < bP) {
           // BROADLEAF — squat, round canopy
-          const h = 5 + rng() * 8;
+          const h = (5 + rng() * 8) * shrink;
           broadleaves.push({ x, z, y, h, tr: 0.7 + rng() * 0.6, rot, lean,
             cR: h * (0.42 + rng() * 0.16), cH: h * (0.5 + rng() * 0.2),
             cY: h * (0.7 + rng() * 0.1) });
-        } else if (pick < 0.93) {
+        } else if (pick < biP) {
           // BIRCH — thin, pale, airy
-          const h = 6 + rng() * 7;
+          const h = (6 + rng() * 7) * shrink;
           birches.push({ x, z, y, h, tr: 0.6 + rng() * 0.5, rot, lean,
             cR: h * (0.26 + rng() * 0.12), cH: h * (0.34 + rng() * 0.16),
             cY: h * (0.74 + rng() * 0.08) });
         } else {
           // SNAG — sparse dead/bare trees (4th species), a bit shorter on
           // average so a few gaunt silhouettes punctuate the canopy rather
-          // than dominate it.
-          const h = 5 + rng() * 9;
+          // than dominate it. (V3: their share RISES near the treeline —
+          // dead standing timber is the natural top-of-forest signature.)
+          const h = (5 + rng() * 9) * shrink;
           snags.push({ x, z, y, h, tr: 0.5 + rng() * 0.4, rot, lean });
         }
       }
