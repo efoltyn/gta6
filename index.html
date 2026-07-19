@@ -596,6 +596,12 @@
 <script src="src/city/vehicles.js?v=boostjump2"></script>
 <script src="src/city/playerair.js?v=air2"></script>
 <script src="src/city/playeraircraft.js?v=swepthull2"></script>
+<!-- elevator-grammar boarding doors for every flyable aircraft: the door
+     visibly opens, you walk in through the opening, it closes, THEN flight
+     control hands over (and the reverse on exit). Wired behind the existing
+     board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
+     island_airport.js panel/airstair easing honours its open flag. -->
+<script src="src/city/aircraft_doors.js?v=doorarc1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->

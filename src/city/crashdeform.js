@@ -293,7 +293,12 @@
     e.frosted = true;
     for (let i = 0; i < e.glass.length; i++) {
       const gl = e.glass[i];
-      gl.mesh.material = swappedMat(gl.mat, frostMats, { color: 0xaebdc6, emissive: 0x47525a, ei: 0.45 });
+      const fm = swappedMat(gl.mat, frostMats, { color: 0xaebdc6, emissive: 0x47525a, ei: 0.45 });
+      // REAL-GLASS aware: the frost clone inherits the clear pane's transparency
+      // — crazed safety glass reads nearly OPAQUE, so push the clone's opacity
+      // back up (once; the clone is cached/shared for the whole city).
+      if (fm !== gl.mat && fm.transparent && fm.opacity < 0.8) { fm.opacity = 0.85; fm.depthWrite = true; }
+      gl.mesh.material = fm;
     }
     if (CBZ.sfx) CBZ.sfx("glass");
   }

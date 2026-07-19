@@ -324,9 +324,23 @@
     // soft chin/nose cap blending the front (rounded, slightly dropped)
     const nose = new THREE.Mesh(taperBox(1.5, 1.0, 1.5, { nz: 0.35, tz: 1.0, top: 0.7, bot: 0.6 }), a.mBody);
     nose.position.set(0, 0.02, 2.5); grp.add(nose);
-    // BUBBLE CANOPY — reflective glass, domed (narrows top & nose) wrapping the cockpit
+    // BUBBLE CANOPY — REAL transparent glass (shared vehicle glass), domed
+    // (narrows top & nose) wrapping the cockpit. Tagged so aircraft_doors.js
+    // can pop it open for the boarding/exit arc.
     const canopy = new THREE.Mesh(taperBox(1.55, 1.0, 2.1, { nz: 0.55, tz: 0.85, top: 0.4, bot: 1.0 }), a.mGlass);
     canopy.position.set(0, 0.52, 1.55); grp.add(canopy);
+    grp.userData.canopy = canopy;
+    // visible COCKPIT through the clear canopy: seat back + a pilot silhouette
+    // (helmet + torso + stick) that appears only while someone's flying her.
+    const heliSeat = new THREE.Mesh(boxGeo(0.5, 0.5, 0.14), a.mDark);
+    heliSeat.position.set(0, 0.42, 1.1); grp.add(heliSeat);
+    const heliPilot = new THREE.Group();
+    const hpTorso = new THREE.Mesh(boxGeo(0.42, 0.46, 0.26), a.mDark); hpTorso.position.set(0, 0.38, 1.32); heliPilot.add(hpTorso);
+    const hpHead = new THREE.Mesh(boxGeo(0.22, 0.22, 0.22), a.mGrey); hpHead.position.set(0, 0.72, 1.32); heliPilot.add(hpHead);
+    const hpStick = new THREE.Mesh(boxGeo(0.05, 0.34, 0.05), a.mGrey); hpStick.position.set(0, 0.2, 1.62); hpStick.rotation.x = 0.35; heliPilot.add(hpStick);
+    heliPilot.visible = false;
+    grp.add(heliPilot);
+    grp.userData.pilot = heliPilot;
     // SLEEKER TAIL BOOM — long, tapering thinner toward the tail rotor
     const boom = new THREE.Mesh(taperBox(0.5, 0.5, 4.2, { nz: 1.0, tz: 0.5, top: 0.85, bot: 0.85 }), a.mBody);
     boom.position.set(0, 0.5, -3.5); grp.add(boom);
@@ -443,9 +457,19 @@
     // radome seam collar where the dark nosecone meets the skin — crisps the nose
     const seam = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.12, 10), a.mJetDk);
     seam.rotation.x = Math.PI / 2; seam.position.set(0, -0.01, 4.15); grp.add(seam);
-    // REFLECTIVE BUBBLE CANOPY — domed, raked, narrows toward the nose & top
+    // BUBBLE CANOPY — REAL transparent glass now; tagged for the door arc.
     const canopy = new THREE.Mesh(taperBox(0.9, 0.62, 2.4, { nz: 0.45, tz: 0.95, top: 0.45, bot: 1.0 }), a.mGlass);
     canopy.position.set(0, 0.5, 1.85); grp.add(canopy);
+    grp.userData.canopy = canopy;
+    // cockpit tub + ejection-seat back + pilot silhouette under the clear bubble
+    const jetSeat = new THREE.Mesh(boxGeo(0.4, 0.44, 0.12), a.mJetDk);
+    jetSeat.position.set(0, 0.38, 1.35); grp.add(jetSeat);
+    const jetPilot = new THREE.Group();
+    const jpTorso = new THREE.Mesh(boxGeo(0.34, 0.38, 0.22), a.mJetDk); jpTorso.position.set(0, 0.42, 1.55); jetPilot.add(jpTorso);
+    const jpHead = new THREE.Mesh(boxGeo(0.2, 0.2, 0.2), a.mGrey); jpHead.position.set(0, 0.7, 1.55); jetPilot.add(jpHead);
+    jetPilot.visible = false;
+    grp.add(jetPilot);
+    grp.userData.pilot = jetPilot;
     // chined forebody shoulders (LERX) — angular blends overlapping the body sides
     [-1, 1].forEach((s) => {
       const chine = new THREE.Mesh(taperBox(1.1, 0.4, 4.4, { nz: 0.25, tz: 0.85, top: 0.7 }), a.mJetDk);
@@ -958,6 +982,8 @@
     if (P._vehicle && CBZ.cityExitVehicle) CBZ.cityExitVehicle();   // can't fly from a car
     P.driving = true;                       // physics.js yields the transform
     P._aircraft = craft;
+    // someone's at the controls now — show the cockpit pilot through the glass
+    if (craft.group.userData && craft.group.userData.pilot) craft.group.userData.pilot.visible = true;
     P.vy = 0; P.grounded = false;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = false;
     // snap the player marker into the cockpit
@@ -998,6 +1024,7 @@
     const P = CBZ.player; if (!P) return;
     const craft = P._aircraft;
     P.driving = false; P._aircraft = null;
+    if (craft && craft.group && craft.group.userData && craft.group.userData.pilot) craft.group.userData.pilot.visible = false;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
     // ejecting from a still-HOT stolen jet loses it (you didn't keep it)
     if (craft && craft.hot) {
@@ -1036,7 +1063,18 @@
     }
     if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
   }
-  CBZ.cityPlayerAircraftExit = exitAircraft;
+  // PUBLIC EXIT — same call, same end state; when the craft is settled on the
+  // ground the door/canopy visibly opens FIRST (you see out through the
+  // opening), the normal exit places you beside it, and the door closes once
+  // you clear it (aircraft_doors.js). Crash/death/despawn callers use the
+  // internal exitAircraft directly and stay instant.
+  function exitAircraftWithDoors() {
+    const P = CBZ.player;
+    const craft = P && P._aircraft;
+    if (!craft || !CBZ.aircraftDoorArc) { exitAircraft(); return; }
+    CBZ.aircraftDoorArc.exitCraft(craft, exitAircraft);
+  }
+  CBZ.cityPlayerAircraftExit = exitAircraftWithDoors;
 
   // nearest owned, on-ground aircraft to the player (on foot)
   function nearestBoardable(x, z, maxd) {
@@ -1104,11 +1142,17 @@
     const k = (e.key || "").toLowerCase();
     const P = CBZ.player; if (!P) return;
     if (k === "f") {
-      // flying → eject; on foot → board nearest owned aircraft if close
-      if (P._aircraft) { e.preventDefault(); exitAircraft(); return; }
+      // flying → eject; on foot → board nearest owned aircraft if close.
+      // Both verbs run the elevator-grammar door arc when available: canopy
+      // pops open, you climb in/out through the opening, it closes.
+      if (P._aircraft) { e.preventDefault(); exitAircraftWithDoors(); return; }
       if (P.driving) return;                // in a car — vehicles.js owns [F]
       const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
-      if (c) { e.preventDefault(); enterAircraft(c); }
+      if (c) {
+        e.preventDefault();
+        const doors = CBZ.aircraftDoorArc;
+        if (!(doors && !doors.active && doors.boardCraft(c, enterAircraft))) enterAircraft(c);
+      }
     } else if (k === "b") {
       // the F-22 is no longer buyable here — at the hangar without one, point the
       // player at the steal-it path (storage.js owns the actual theft).

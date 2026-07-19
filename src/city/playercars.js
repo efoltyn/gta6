@@ -735,11 +735,24 @@
     // start the tumblehome at the beltline edge, so the tub base hugs it
     const cabBaseY = bodyTop - peakY * 0.08;
     addPrism(root, cabW, cabin, cabBaseY, dark);        // the glass tub
-    // CABIN INTERIOR: a matte-dark block filling the tub's lower half so a
-    // look through the glass shows a plausible cockpit mass (seats/dash),
-    // not the hollow inside of the far flank.
+    // CABIN INTERIOR: REAL furniture behind REAL glass (owner ask) — the old
+    // single "cockpit mass" block is now a legible interior you actually see
+    // through the transparent tub: a seat deck, two front seat BACKS, a rear
+    // bench back, a dash slab and a steering wheel. Everything uses the one
+    // shared interior material, so it all merges into the existing interior
+    // bucket — zero extra draw calls per car.
     const interior = sharedMat("interior", 0x2a2f36);
-    addBox(root, cabW * 0.88, Math.max(0.08, peakY * 0.45), Math.max(0.3, (cb + ct)) , 0, cabBaseY + peakY * 0.24, cabCx, interior);
+    addBox(root, cabW * 0.88, Math.max(0.06, peakY * 0.22), Math.max(0.3, (cb + ct)), 0, cabBaseY + peakY * 0.12, cabCx, interior);   // seat deck / floor mass
+    [1, -1].forEach(function (side) {
+      addBox(root, cabW * 0.3, peakY * 0.62, 0.1, side * cabW * 0.22, cabBaseY + peakY * 0.5, cabCx - 0.12, interior);               // front seat backs
+    });
+    addBox(root, cabW * 0.7, peakY * 0.5, 0.1, 0, cabBaseY + peakY * 0.42, cabCx - cb * 0.62, interior);                             // rear bench back
+    addBox(root, cabW * 0.8, 0.12, 0.24, 0, cabBaseY + peakY * 0.34, cabCx + cb * 0.62, interior);                                   // dash
+    const swheel = addBox(root, 0.3, 0.26, 0.05, cabW * 0.22, cabBaseY + peakY * 0.4, cabCx + cb * 0.42, interior);                  // steering wheel
+    swheel.rotation.x = -0.5;
+    // occupant anchor: vehicles.js seats a visible low-poly driver/passenger
+    // off this frame (baseY = tub base, peakY = tub height, cx = cabin centre)
+    root.userData.cabinInfo = { baseY: cabBaseY, peakY: peakY, cx: cabCx, w: cabW };
 
     // Decklid behind the cabin (not on fastbacks).
     const fastback = /^(ferrari|enzo|aventador|veyron)$/.test(style);

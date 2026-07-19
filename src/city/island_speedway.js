@@ -666,6 +666,33 @@
           const model = CARS[ci++];
           const x = -ixMax + 2 + rx * ((ixMax * 2 - 4) / Math.max(1, perRow - 1));
           const z = -izMax + 2 + rz * ((izMax * 2 - 4) / Math.max(1, rowsPerFloor - 1));
+          const heading = (ci * 0.7) % (Math.PI * 2);
+          // GROUND-FLOOR STOCK IS REAL (owner law: no dumb props): every
+          // showroom car on the drivable y=0 slab is a full cityCars record —
+          // walk in, get in, drive it off the floor (grand theft, obviously).
+          // Upper storeys stay display visuals: the car sim has no floor
+          // altitude (every car drives at y=0), so a "real" car up there
+          // would fall through the building the moment it moved.
+          if (fl === 0 && CBZ.cityAddParkedCar) {
+            let real = null;
+            try {
+              // world coords by parent-chain sum (build-time matrices are stale;
+              // shell/campus/root are all unrotated, so a position walk is exact)
+              let wx = x, wz = z;
+              for (let o = b.group; o; o = o.parent) { wx += o.position.x; wz += o.position.z; }
+              real = CBZ.cityAddParkedCar(wx, wz, heading, { modelName: model.name });
+            } catch (e) { real = null; }
+            if (real) {
+              if (CBZ.makeLabelSprite) {
+                const lab = CBZ.makeLabelSprite(model.name + " · $" + fmt(model.value), { color: "#eef4ff" });
+                lab.scale.set(4.5, 1.1, 1);
+                lab.position.set(x, fy + 1.9, z);
+                b.group.add(lab);
+              }
+              continue;
+            }
+            // fall through to the display visual when the car system is absent
+          }
           // display pad
           const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.12, 16), padMat);
           pad.position.set(x, fy + 0.06, z); b.group.add(pad);
@@ -677,7 +704,7 @@
           } catch (e) { vis = null; }
           if (vis) {
             vis.position.set(x, fy + 0.12, z);
-            vis.rotation.y = (ci * 0.7) % (Math.PI * 2);
+            vis.rotation.y = heading;
             const sc = (0.9 + (model.s || 1) * 0.0); vis.scale.multiplyScalar(sc);
             b.group.add(vis);
           }
