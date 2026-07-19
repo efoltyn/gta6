@@ -56,6 +56,7 @@
     eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
     swap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 12l-3 3 3 3"/></svg>',
     reload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/></svg>',
+    aim: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
   };
   function btn(id, cls, glyph, label) {
     return '<button class="' + cls + '" id="' + id + '" type="button" aria-label="' + label + '">' + glyph + "</button>";
@@ -77,6 +78,7 @@
       '<div id="tstick"><div id="tknob"></div></div>' +
       '<div id="tbtns">' +
       btn("tfire", "tbtn tbig tfire", SVG.fire, "Fire") +
+      btn("taim", "tbtn taim", SVG.aim, "Aim / lock on") +
       btn("tjump", "tbtn tjump", SVG.jump, "Jump") +
       btn("tsprint", "tbtn tsprint", SVG.sprint, "Sprint") +
       btn("tview", "tbtn tsm", SVG.eye, "First-person view") +
@@ -96,6 +98,13 @@
         if (CBZ.game.mode === "survival") { if (CBZ.grapple) CBZ.grapple.punch(); }
         else if (CBZ.punch) CBZ.punch();
       }
+    });
+    // AIM / LOCK-ON: hold to aim down sights (the touch equivalent of RMB). With
+    // a gun out this engages the soft aim-lock, snapping the reticle onto the
+    // nearest target — the GTA "scope to lock" feel, no scope required.
+    holdBtn("taim", (down) => {
+      if (CBZ.fpsSetAim) CBZ.fpsSetAim(down);
+      const b = document.getElementById("taim"); if (b) b.classList.toggle("on", down);
     });
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
@@ -392,8 +401,9 @@
       return;
     }
     const armed = !!((CBZ.cityHasGun && CBZ.cityHasGun()) || (CBZ.fps && CBZ.fps.active));
-    const sw = document.getElementById("tswap"), rl = document.getElementById("treload");
+    const sw = document.getElementById("tswap"), rl = document.getElementById("treload"), am = document.getElementById("taim");
     if (sw) sw.style.display = armed ? "" : "none";
     if (rl) rl.style.display = armed ? "" : "none";
+    if (am) am.style.display = armed ? "" : "none";
   });
 })();

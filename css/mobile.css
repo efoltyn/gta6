@@ -52,6 +52,8 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 .tbtn.tbig { width: 84px; height: 84px; }
 .tbtn.tjump { width: 72px; height: 72px; background: rgba(58,209,122,.42); border-color: rgba(58,209,122,.6); }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65); }
+.tbtn.taim { width: 60px; height: 60px; background: rgba(90,160,255,.34); border-color: rgba(150,195,255,.6); }
+.tbtn.taim.on { background: rgba(90,175,255,.72); border-color: rgba(200,225,255,.85); transform: translateY(2px); }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
 
 /* HUD tweaks while on touch: declutter + reachable interaction panel */
