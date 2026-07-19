@@ -727,6 +727,25 @@
   // tilting helicopter hover model. Flip false to restore the previous
   // flyHeli/flyJet feel — every V2 branch is gated on this flag.
   if (CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 == null) CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 = true;
+  // FLIGHT FEEL PASS (owner: "the plane can't go very fast — the altimeter only
+  // goes up to 110, and all the plane controls are stupid"). Three one-line
+  // reverts, all consumed by city/playeraircraft.js (+ touch_vehicle.js dial,
+  // camera.js chase follow):
+  //   FLIGHT_SPEED_V2      — real per-class top speeds + a higher altitude
+  //                          ceiling (was 220m absolute → ~110m AGL over the
+  //                          elevated city, which IS the "110" the owner saw).
+  //   FLIGHT_GAUGES_DERIVED— the touch airspeed dial range derives from the
+  //                          craft's actual top speed (published as perfVmax)
+  //                          instead of a hard-coded 90/40 that pinned early;
+  //                          ALT reads height-above-ground like the desktop HUD.
+  //   FLIGHT_CONTROLS_V2   — standard flight grammar: WS pitch, AD roll (yaw for
+  //                          helis), QE rudder/strafe, held throttle on
+  //                          Space/Ctrl, and the mouse is pure FREE-LOOK (it no
+  //                          longer secretly steers the nose — that camera-yaw→
+  //                          heading coupling was the "stupid controls").
+  if (CBZ.CONFIG.FLIGHT_SPEED_V2 == null) CBZ.CONFIG.FLIGHT_SPEED_V2 = true;
+  if (CBZ.CONFIG.FLIGHT_GAUGES_DERIVED == null) CBZ.CONFIG.FLIGHT_GAUGES_DERIVED = true;
+  if (CBZ.CONFIG.FLIGHT_CONTROLS_V2 == null) CBZ.CONFIG.FLIGHT_CONTROLS_V2 = true;
   // AMBIENT AIR TRAFFIC (city/airtraffic.js): a handful of deterministic
   // civilian aircraft (GA prop planes + a light heli) orbiting the city on
   // stacked altitude bands, banking into their turns. Pure atmosphere — no

@@ -109,12 +109,19 @@
   // flyJet/integrate below. The tunables here are the per-craft knobs that
   // feed that core (thrust, six-axis drag coefficients, ETL band, etc).
   const JET_PRICE   = 3000000;     // $3M for the F-22
-  const CEILING     = 220;         // hard altitude clamp (m)
+  // FLIGHT_SPEED_V2: the top-speed caps + altitude ceiling the owner asked for.
+  // Read at load (config.js runs first). The OLD numbers stay as the literal
+  // fallbacks so CBZ.CONFIG.FLIGHT_SPEED_V2=false is a true one-line revert.
+  // CEILING stays inside the fog / far-cull view envelope (quality.js: fog
+  // 420–1400m, cull 230–700m) — flying much higher would just bury you in the
+  // fog wall, so 600m is the ceiling, not thousands.
+  const FLIGHT_SPEED_V2 = !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_SPEED_V2 !== false;
+  const CEILING     = FLIGHT_SPEED_V2 ? 600 : 220;   // hard altitude clamp (m)
   const GROUND_PAD  = 1.2;         // never sink the belly below this over the floor
 
   // HELI feel
-  const HELI_THRUST = 26;          // forward accel (collective tilt → cyclic thrust)
-  const HELI_TOP    = 34;          // top forward speed
+  const HELI_THRUST = FLIGHT_SPEED_V2 ? 32 : 26;     // forward accel (collective tilt → cyclic thrust)
+  const HELI_TOP    = FLIGHT_SPEED_V2 ? 50 : 34;     // top forward speed (forward drag equilibrium sits above 50, so it's reachable)
   const HELI_VLIFT  = 16;          // ascend/descend speed (collective authority)
   const HELI_YAW    = 1.7;         // rad/s yaw from A/D (pedal authority)
   const HELI_DRAG   = 1.6;         // legacy hover drag scalar (kept as a floor under the 6-axis model)
@@ -159,6 +166,24 @@
     jet:      { vmax: 120, thrust: 46, dragK: 0.00042, vstall: 42, vminfly: 34, vr: 55, gacc: 14, rollMax: 0.80, rollRate: 2.0, turnK: 0.42, pitchMax: 0.85, pitchRate: 1.5, bleed: 16, autoLevel: 1.1, span: 10.8 },
     airliner: { vmax: 105, thrust: 28, dragK: 0.00040, vstall: 46, vminfly: 38, vr: 62, gacc: 9,  rollMax: 0.55, rollRate: 1.3, turnK: 0.30, pitchMax: 0.40, pitchRate: 1.0, bleed: 13, autoLevel: 1.6, span: 34 },
   };
+  // FLIGHT_SPEED_V2 top-speed lift. The old vmax/thrust above are the revert
+  // baseline; this raises the caps so each class flies its part — a brisk prop,
+  // a genuinely fast jet, a jetliner-quick airliner. Every craft was CAP-limited
+  // not thrust-limited (quadratic-drag equilibrium sits FAR above these caps:
+  // prop√(26/.00055)=217, jet√(54/.00042)=359, airliner√(34/.0004)=291), so
+  // lifting the cap directly lifts true top speed; the modest thrust bump on the
+  // fast movers just shortens the spool-up so "fast" arrives promptly. Handling
+  // stays controllable: attitude RATES are unchanged and turn radius simply
+  // widens with speed the way a real fast jet's does. High-speed collision is
+  // safe — integrateV2 sweeps the full segment (sweptAirframeImpact), so nothing
+  // tunnels a building/aircraft even at a spiky headless dt.
+  if (FLIGHT_SPEED_V2) {
+    WING_V2.prop.vmax = 82;      WING_V2.prop.thrust = 26;
+    WING_V2.jet.vmax = 210;      WING_V2.jet.thrust = 54;
+    WING_V2.airliner.vmax = 170; WING_V2.airliner.thrust = 34;
+  }
+  const RUDDER_RATE = 0.55;    // rad/s flat yaw from QE (fine align/crosswind; weaker than a bank turn)
+  const HELI_STRAFE = 18;      // m/s² lateral cyclic accel from QE on the heli
   // V2 helicopter hover feel: cyclic tilt is a VISUAL read of the body-frame
   // velocity (nose dips when accelerating forward, rolls into a lateral drift),
   // and vertical velocity EASES toward the collective command so the hover
@@ -167,6 +192,10 @@
   const HELI_TILT_K  = 0.012;  // tilt per m/s of body-frame velocity
   const HELI_VDAMP   = 3.0;    // vertical-velocity ease rate /s
   function flightV2() { return !CBZ.CONFIG || CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 !== false; }
+  // FLIGHT_CONTROLS_V2: standard flight grammar (WS pitch, AD roll/yaw, QE
+  // rudder/strafe, held throttle on Space/Ctrl) with the mouse as pure free-look.
+  // Flip false to restore the previous look-steers-the-nose bindings.
+  function controlsV2() { return !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_CONTROLS_V2 !== false; }
 
   // weapons
   const FIRE_CD     = 0.6;         // seconds between missiles
@@ -1986,10 +2015,21 @@
     if (craft.thr == null) craft.thr = (craft.kind === "jet" && !craft.civilian) ? 0.35 : 0;
     if (craft.airspeed == null) craft.airspeed = craft.speed || 0;
 
-    // throttle 0..1, ~1.6s idle→firewall sweep
+    craft.perfVmax = C.vmax;   // published for the derived airspeed gauge (touch dial)
+    // throttle 0..1, ~1.6s idle→firewall sweep. V2 CONTROLS: power is a HELD
+    // pair on Space(up)/Ctrl(down) — the same "power up/down" grammar the heli
+    // collective already uses — which frees W/S to become the PITCH axis below
+    // (and turns the touch stick, which writes WASD, into a real pitch+roll
+    // joystick). LEGACY put throttle on W/S. `thr` stays the throttle-input SIGN
+    // so the ground-brake / burner-plume reads downstream are unchanged.
     let thr = 0;
-    if (k["w"]) thr += 1;
-    if (k["s"]) thr -= 1;
+    if (controlsV2()) {
+      if (k[" "] || k["shift"]) thr += 1;
+      if (k["control"]) thr -= 1;
+    } else {
+      if (k["w"]) thr += 1;
+      if (k["s"]) thr -= 1;
+    }
     craft.thr = Math.max(0, Math.min(1, craft.thr + thr * 0.6 * dt));
 
     // ground state off the cached landing surface (terrain or rooftop) —
@@ -2008,7 +2048,7 @@
     craft.airspeed -= C.bleed * Math.sin(craft.pitch || 0) * dt;
     if (craft.onGround) {
       craft.airspeed -= 2.2 * dt;                          // rolling friction
-      if (thr < 0) craft.airspeed -= C.gacc * 0.6 * dt;    // wheel brakes on S
+      if (thr < 0) craft.airspeed -= C.gacc * 0.6 * dt;    // wheel brakes on throttle-down (Ctrl V2 / S legacy)
       // PARKING DEADBAND: with no throttle a slow rollout snaps dead still —
       // a parked/idle plane must never creep or dither on its own
       if (thr <= 0 && craft.airspeed < 0.6) craft.airspeed = 0;
@@ -2035,8 +2075,26 @@
       // nosewheel steering — sharper when slow, washing out toward Vr
       craft.heading += bank * 0.9 * Math.min(1, craft.airspeed / C.vr) * dt;
     }
-    // mouse look still eases the nose toward where you're looking (airborne)
-    if (CBZ.cam && !craft.onGround) {
+    // HEADING STEER. V2 CONTROLS: the mouse no longer touches the nose — it is
+    // pure free-look (camera.js) and the chase cam eases back behind the craft on
+    // its own (see the recenter in onUpdate). Heading comes from the coordinated
+    // bank-turn above plus a real QE RUDDER: a flat yaw for fine alignment,
+    // crosswind kicks and strafing runs, deliberately weaker than a full bank so
+    // it never becomes the primary turn. On the ground it steers the nosewheel
+    // alongside A/D. LEGACY eased the nose toward the camera yaw (the coupling
+    // the owner called "stupid").
+    if (controlsV2()) {
+      let rudder = 0;
+      if (k["q"]) rudder += 1;   // yaw left
+      if (k["e"]) rudder -= 1;   // yaw right
+      if (rudder) {
+        if (!craft.onGround && craft.airspeed > C.vminfly) {
+          craft.heading += rudder * RUDDER_RATE * authority * dt;
+        } else if (craft.onGround && craft.airspeed > 0.5) {
+          craft.heading += rudder * 0.9 * Math.min(1, craft.airspeed / C.vr) * dt;
+        }
+      }
+    } else if (CBZ.cam && !craft.onGround) {
       const camHeading = CBZ.cam.yaw + Math.PI;
       let dh = camHeading - craft.heading;
       while (dh > Math.PI) dh -= Math.PI * 2;
@@ -2044,10 +2102,19 @@
       craft.heading += dh * Math.min(1, dt * 1.6) * authority;
     }
 
-    // ---- pitch: SPACE/CTRL attitude command; can't rotate before Vr ----
+    // ---- pitch: the primary attitude axis. V2 CONTROLS put it on W/S (stick
+    // fore/aft): S pulls the nose UP, W pushes it DOWN. With no pitch input the
+    // target attitude is level (targetPitch→0 below), so hands-off flies level —
+    // the flag-gated auto-level assist. Can't rotate before Vr on the ground.
+    // LEGACY kept the attitude command on Space/Ctrl. ----
     let climb = 0;
-    if (k[" "]) climb += 1;
-    if (k["control"] || k["shift"]) climb -= 1;
+    if (controlsV2()) {
+      if (k["s"]) climb += 1;   // pull back → nose up
+      if (k["w"]) climb -= 1;   // push forward → nose down
+    } else {
+      if (k[" "]) climb += 1;
+      if (k["control"] || k["shift"]) climb -= 1;
+    }
     const targetPitch = (craft.onGround && craft.airspeed < C.vr)
       ? 0
       : climb * C.pitchMax * authority + pitchComp;
@@ -2099,27 +2166,51 @@
     const authority = controlAuthority(craft);
     craft.autorotating = craft.maxHp > 0 && (craft.hp / craft.maxHp) <= AUTOROTATE_AT;
 
-    if (CBZ.cam) craft.heading = CBZ.cam.yaw + Math.PI;
+    craft.perfVmax = HELI_TOP;   // published for the derived airspeed gauge (touch dial)
+    // V2 CONTROLS: the heli OWNS its heading — A/D are real pedals (applied to
+    // craft.heading below, with the tail-rotor torque) and the MOUSE is pure
+    // free-look, the camera recentering behind the tail on its own. LEGACY
+    // steered the whole airframe off the mouse yaw (look = heading), the exact
+    // "camera drives the aircraft" coupling we're removing.
+    if (!controlsV2() && CBZ.cam) craft.heading = CBZ.cam.yaw + Math.PI;
     let yaw = 0;
-    if (k["a"]) yaw += 1;
-    if (k["d"]) yaw -= 1;
+    if (k["a"]) yaw += 1;   // pedal left
+    if (k["d"]) yaw -= 1;   // pedal right
     let thr = 0;
-    if (k["w"]) thr += 1;
-    if (k["s"]) thr -= 1;
+    if (k["w"]) thr += 1;   // cyclic forward (nose down → accelerate)
+    if (k["s"]) thr -= 1;   // cyclic aft
     let liftIn = 0;
-    if (k[" "]) liftIn += 1;
-    if (k["shift"] || k["control"]) liftIn -= 1;
+    if (controlsV2()) {
+      if (k[" "] || k["shift"]) liftIn += 1;   // collective up
+      if (k["control"]) liftIn -= 1;           // collective down
+    } else {
+      if (k[" "]) liftIn += 1;
+      if (k["shift"] || k["control"]) liftIn -= 1;
+    }
+    let strafe = 0;
+    if (controlsV2()) {
+      if (k["e"]) strafe += 1;   // lateral cyclic right
+      if (k["q"]) strafe -= 1;   // lateral cyclic left
+    }
 
     // torque / tail-rotor coupling (same model as V1 — pulling power fights
     // the pedals until you trim it out)
     const powerLoad = Math.max(0, liftIn) * 0.7 + Math.max(0, thr) * 0.3;
     const targetTorqueYaw = -powerLoad * HELI_TORQUE_GAIN;
     craft.torqueYaw = (craft.torqueYaw || 0) + (targetTorqueYaw - (craft.torqueYaw || 0)) * Math.min(1, dt * HELI_TORQUE_DAMP);
-    if (CBZ.cam) CBZ.cam.yaw -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;
+    // pedal trim + reactive torque yaw: V2 turns the OWNED heading (mouse is
+    // free-look); legacy turned cam.yaw, which the heading then chased.
+    if (controlsV2()) craft.heading -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;
+    else if (CBZ.cam) CBZ.cam.yaw -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;
 
     const fx = Math.sin(craft.heading), fz = Math.cos(craft.heading);
     craft.vx += fx * thr * HELI_THRUST * authority * dt;
     craft.vz += fz * thr * HELI_THRUST * authority * dt;
+    if (strafe) {   // lateral cyclic (QE): push along the right-wing vector
+      const rx = Math.cos(craft.heading), rz = -Math.sin(craft.heading);
+      craft.vx += rx * strafe * HELI_STRAFE * authority * dt;
+      craft.vz += rz * strafe * HELI_STRAFE * authority * dt;
+    }
 
     // shared aero core: six-axis drag + ETL + ground effect (rooftop-aware AGL,
     // measured against the skids' REST height — see flyWingV2's note)
@@ -2299,7 +2390,12 @@
     // free off player.pos + cam.yaw. The HELI steers BY the mouse (look=heading)
     // so we leave cam.yaw to the mouse. The JET turns via A/D too, so gently ease
     // the cam back behind its nose so a long A/D turn doesn't lose the craft.
-    if (CBZ.cam && craft.kind === "jet" && CBZ.lerpAngle && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
+    // V2 CONTROLS recenter EVERY craft behind the nose (the mouse is free-look
+    // now, so nothing else pulls the view around); legacy kept it to the jet
+    // because the heli was steered BY the mouse. A deliberate mouse glance
+    // suspends it for ~0.8s via camRecenterSuspended.
+    if (CBZ.cam && CBZ.lerpAngle && (controlsV2() || craft.kind === "jet") &&
+        !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
       CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, craft.heading + Math.PI, 1 - Math.pow(0.15, dt));
     }
     // resupply if you settle back onto the base

@@ -492,12 +492,20 @@
       const up = craft && craft.cameraUp != null ? craft.cameraUp : 10.0;
       const ahead = craft && craft.cameraAhead != null ? craft.cameraAhead : 6.0;
       const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
-      camera.position.x = smoothDamp(camera.position.x, tx, camV.x, 0.12, fdt);
-      camera.position.y = smoothDamp(camera.position.y, ty, camV.y, 0.12, fdt);
-      camera.position.z = smoothDamp(camera.position.z, tz, camV.z, 0.12, fdt);
-      look.x = smoothDamp(look.x, player.pos.x + cfx * ahead, lookV.x, 0.10, fdt);
-      look.y = smoothDamp(look.y, player.pos.y + 0.6, lookV.y, 0.10, fdt);
-      look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, 0.10, fdt);
+      // AIRCRAFT FOLLOW AT SPEED (FLIGHT_SPEED_V2): a fixed 0.12s boom lags
+      // ~smoothTime·speed behind its target, so at the new jet top speeds the
+      // craft would drift toward the frame edge. Shrink the follow time as speed
+      // rises so the chase stays tight; cars (no craft published) keep 0.12/0.10.
+      const airSpd = craft ? (craft.speed || 0) : 0;
+      const fastAir = craft && (!CBZ.CONFIG || CBZ.CONFIG.FLIGHT_SPEED_V2 !== false);
+      const posS = fastAir ? Math.max(0.05, 0.12 - airSpd * 0.00035) : 0.12;
+      const lookSf = fastAir ? Math.max(0.05, 0.10 - airSpd * 0.00028) : 0.10;
+      camera.position.x = smoothDamp(camera.position.x, tx, camV.x, posS, fdt);
+      camera.position.y = smoothDamp(camera.position.y, ty, camV.y, posS, fdt);
+      camera.position.z = smoothDamp(camera.position.z, tz, camV.z, posS, fdt);
+      look.x = smoothDamp(look.x, player.pos.x + cfx * ahead, lookV.x, lookSf, fdt);
+      look.y = smoothDamp(look.y, player.pos.y + 0.6, lookV.y, lookSf, fdt);
+      look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, lookSf, fdt);
       camera.lookAt(look);
       if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }
       fov = smoothDamp(fov, 66, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }

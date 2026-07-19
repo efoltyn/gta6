@@ -21,11 +21,15 @@
                        on-foot sprint logic that owns "shift")
               FIRE   = tap   → CBZ.cityAircraftFireMissile() (armed craft)
               EXIT   = tap   → CBZ.cityPlayerAircraftExit() (the [F] path)
-     WING     stick = bank (a/d) as before; throttle moves to buttons so
-              the thumb can hold power through a whole climb:
-              THR+   = hold  → CBZ.keys["w"]
-              THR−   = hold  → CBZ.keys["s"] (wheel brakes on the ground)
-              FIRE / EXIT as heli.
+     WING     stick = a REAL joystick now (FLIGHT_CONTROLS_V2): left/right =
+              roll (a/d), up/down = PITCH (w/s — the stick writes WASD and the
+              flight model maps W/S to pitch), so the left thumb finally flies
+              the nose. Throttle is the right-thumb hold-pair, reusing the heli's
+              Space/Ctrl power grammar:
+              THR+   = hold  → CBZ.keys[" "]        (throttle up)
+              THR−   = hold  → CBZ.keys["control"]  (throttle down / wheel brakes)
+              FIRE / EXIT as heli. (QE rudder is a desktop fine-tune; touch turns
+              by banking, the natural mobile-flight feel — no extra pills.)
 
    Held buttons RE-ASSERT their key every frame from onUpdate(10) —
    just before vehicles (11) and aircraft (12) consume them — so a
@@ -135,8 +139,10 @@
     if (q("tvBrake")) holdBtn(q("tvBrake"), " ");
     if (q("tvUp")) holdBtn(q("tvUp"), " ");
     if (q("tvDown")) holdBtn(q("tvDown"), "control");
-    if (q("tvThrUp")) holdBtn(q("tvThrUp"), "w");
-    if (q("tvThrDn")) holdBtn(q("tvThrDn"), "s");
+    // throttle reuses the heli's power grammar (Space up / Ctrl down) so the
+    // stick is free to be the pitch+roll joystick (FLIGHT_CONTROLS_V2).
+    if (q("tvThrUp")) holdBtn(q("tvThrUp"), " ");
+    if (q("tvThrDn")) holdBtn(q("tvThrDn"), "control");
     if (q("tvFire")) tapBtn(q("tvFire"), doFire);
     // LOOK BACK: hold pins the chase cam over the shoulder (camera agent's
     // feature-detected API — the button only shows once that API exists).
@@ -254,13 +260,22 @@
       if (key !== lastSpeed) { lastSpeed = key; drawDial(kmh, 240, "km/h", "", false); }
     } else {
       const craft = P._aircraft; if (!craft) return;
+      const derived = !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_GAUGES_DERIVED !== false;
       const spd = craft.speed != null ? craft.speed : Math.hypot(craft.vx || 0, craft.vz || 0);
-      const alt = Math.max(0, Math.round(craft.pos ? craft.pos.y : 0));
+      // ALT reads height ABOVE GROUND (matching the desktop flight HUD) via the
+      // aircraft surface oracle — not raw world-Y over the elevated city, which
+      // is what made the readout look "capped" once you were up.
+      const surf = derived && CBZ.aircraftSurfaceY && craft.pos ? CBZ.aircraftSurfaceY(craft.pos.x, craft.pos.z) : 0;
+      const alt = Math.max(0, Math.round((craft.pos ? craft.pos.y : 0) - surf));
       const warn = !!(craft.stalled || craft.autorotating);
+      // Gauge RANGE derives from the craft's real top speed (perfVmax, published
+      // by the flight model) so a fast jet's needle can never pin at a hard-coded
+      // 90 again; the old fixed max is only the fallback.
+      const cap = derived && craft.perfVmax ? Math.max(20, craft.perfVmax * 1.06) : (mode === "heli" ? 40 : 90);
       const key = Math.round(spd), sub = "ALT " + alt + (warn ? " ⚠" : "");
       if (key !== lastSpeed || sub !== lastSub) {
         lastSpeed = key; lastSub = sub;
-        drawDial(spd, mode === "heli" ? 40 : 90, "SPD", sub, warn);
+        drawDial(spd, cap, "SPD", sub, warn);
       }
     }
   });
