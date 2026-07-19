@@ -781,6 +781,21 @@
   // quality tier keep the cost bounded. OFF → world.js's flat animated sea
   // renders exactly as before (waterfx never touches CBZ.citySea).
   if (CBZ.CONFIG.WATER_REFLECT == null) CBZ.CONFIG.WATER_REFLECT = true;
+  // ---- console movement tech (systems/physics.js stance machine) ----------
+  // PLAYER_SLIDE: sprint + a crouch press = a COD-style momentum slide (burst
+  // above sprint speed decaying over ~0.8s, crouch-height hitbox/camera,
+  // heavily damped steering; ends crouched, or pops straight back up into the
+  // sprint if you keep direction+sprint held; ~1s cooldown stops chaining).
+  // PLAYER_PRONE: a second crouch press within the tap window drops you PRONE
+  // (flat rig, ~0.45 hitbox, slow crawl; crouch press back to crouch, jump
+  // stands; steadies LMG recoil — CBZ.playerProneSteady in fpsmode's kick).
+  // Both are city+survival on-foot verbs (jail keeps its hold-to-sneak, and
+  // they never run while driving/flying/swimming). Desktop: Ctrl/C taps.
+  // Touch: the L3 stick-press grammar (touch.js routes presses to physics).
+  // Either flag false = that verb gone; both false = stance machine entirely
+  // dormant and desktop/touch behave exactly as before.
+  if (CBZ.CONFIG.PLAYER_SLIDE == null) CBZ.CONFIG.PLAYER_SLIDE = true;
+  if (CBZ.CONFIG.PLAYER_PRONE == null) CBZ.CONFIG.PLAYER_PRONE = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

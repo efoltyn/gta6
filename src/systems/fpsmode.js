@@ -1656,7 +1656,7 @@
     aimForward(fwd);
     const p = CBZ.player;
     if (shoulderActive()) eye.copy(CBZ.camera.position);
-    else eye.set(p.pos.x, p.pos.y + (p.crouch ? 1.18 : 1.65), p.pos.z);
+    else eye.set(p.pos.x, p.pos.y + (p.prone ? 0.55 : p.crouch ? 1.18 : 1.65), p.pos.z);
     const w = armed() ? weapon() : { range: maxRange, bodyRadius: BODY_R, headRadius: 0.32 };
     const wall = wallDistance(eye, fwd, maxRange);
     const lim = wall ? Math.max(0.1, wall.distance - 0.04) : maxRange;
@@ -1889,7 +1889,12 @@
     if (sinceShot > 0.25) shotsInBurst = 0;
     sinceShot = 0;
     const adsK = adsRecoilMul();
-    const supportK = bipodActive(w) ? 0.34 : 1;
+    // support ladder: a loaded bipod (crouch+ADS+still, above) is the deepest
+    // brace; otherwise PRONE steadies the LMG (~0.45x, physics.js's stance
+    // machine publishes the hook — feature-detected so this file stands alone).
+    // One choke point: supportK feeds the cosmetic recoil, side kick, bloom
+    // pump AND the real pitch/yaw view kicks below.
+    const supportK = bipodActive(w) ? 0.34 : (CBZ.playerProneSteady ? CBZ.playerProneSteady(w) : 1);
     // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
     // just softened under ADS so holding RMB visibly settles the gun.
     recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK * supportK * modRec);
@@ -2926,7 +2931,7 @@
     let bobY = 0, bobX = 0;
     const p = CBZ.player;
     if (fps.active) {
-      const eyeH = p.crouch ? 1.18 : 1.65;
+      const eyeH = p.prone ? 0.55 : p.crouch ? 1.18 : 1.65;   // prone (stance machine) hugs the deck
       if (p.grounded && p.speed > 0.6 && (p.stun || 0) <= 0) {
         bobPhase += dt * (6 + p.speed * 1.1);
         bobY = Math.sin(bobPhase * 2) * 0.035;

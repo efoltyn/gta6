@@ -52,6 +52,13 @@
      TOUCH_AIM_SLIDE    — hold AIM/SCOPE and SLIDE onto FIRE to shoot
                           while the hold stays down; also seats those two
                           buttons beside the trigger (mobile.css .tslide)
+     TOUCH_AIM_DRAG     — the console LT+right-stick grammar: while a finger
+                          HOLDS aim/scope, dragging that same finger FINE-
+                          AIMS the camera (identical math to the look-drag,
+                          via applyLookDelta). The drag never cancels the
+                          hold, works before/during/after a slide onto FIRE,
+                          and the finger stays a slide-touch — the look slot
+                          and its watchdog never claim or rob it.
      TOUCH_LOOK_WHILE_MOVE — two-thumb grammar: stick + look-drag work
                           TOGETHER. Pinch-zoom needs two FREE fingers;
                           a claimed finger (stick / slide-hold / UI) is
@@ -70,10 +77,12 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HUD_TIDY == null) CBZ.CONFIG.TOUCH_HUD_TIDY = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIXED_STICK == null) CBZ.CONFIG.TOUCH_FIXED_STICK = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_SLIDE == null) CBZ.CONFIG.TOUCH_AIM_SLIDE = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_DRAG == null) CBZ.CONFIG.TOUCH_AIM_DRAG = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE == null) CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
   const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
+  const AIMDRAG = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_DRAG !== false;
 
   const SENS = 0.006, MAXR = 74, DEAD = 0.28;   // MAXR matches the enlarged 168px disc (owner: bigger pad, less corner)
   const STICK_ZONE = 1.6;      // catch zone = this × the visible disc radius
@@ -244,7 +253,11 @@
       for (const t of e.changedTouches) {
         if (slideTouches.has(t.identifier)) continue;
         const tid = t.identifier;
-        const rec = { fireIn: false, rect: fr, release: null };
+        const rec = {
+          fireIn: false, rect: fr, release: null,
+          born: performance.now(),          // shields this fresh claim from the same event's window-level sweep (which sees our id as a "recycled newborn")
+          lx: t.clientX, ly: t.clientY,     // fine-aim drag anchor (TOUCH_AIM_DRAG)
+        };
         rec.release = function () {
           if (!slideTouches.delete(tid)) return;   // already gone (sweep vs touchend)
           if (rec.fireIn) { rec.fireIn = false; fireHold(false); }
@@ -258,7 +271,21 @@
       e.preventDefault();
       for (const t of e.changedTouches) {
         const rec = slideTouches.get(t.identifier);
-        if (!rec || !rec.rect) continue;
+        if (!rec) continue;
+        // TOUCH_AIM_DRAG — the console LT + right-stick grammar: the finger
+        // HOLDING aim/scope fine-aims by dragging, through the very same
+        // applyLookDelta the look slot uses (same sens/scoped scaling/pitch
+        // clamps). Runs for the touch's whole life — before, during AND after
+        // a roll across FIRE — and never affects the hold itself (implicit
+        // touch capture keeps these events on the button regardless of where
+        // the finger roams, so there is no slop that could cancel anything).
+        // This finger is a slide-touch, never the look slot: the look
+        // claim/adopt paths and the stale-watchdog all exclude slideTouches.
+        if (AIMDRAG()) {
+          applyLookDelta(t.clientX - rec.lx, t.clientY - rec.ly);
+          rec.lx = t.clientX; rec.ly = t.clientY;
+        }
+        if (!rec.rect) continue;
         const r = rec.rect, p = rec.fireIn ? SLIDE_PAD_OUT : SLIDE_PAD_IN;
         const inFire = t.clientX >= r.left - p && t.clientX <= r.right + p &&
                        t.clientY >= r.top - p && t.clientY <= r.bottom + p;
@@ -375,6 +402,25 @@
   function releaseLook() {
     look.id = null;
     if (look.free) { look.free = false; try { if (CBZ.camFreeLook) CBZ.camFreeLook(false); } catch (err) {} }
+  }
+
+  // THE camera-turn math, shared by the look-drag slot and the aim/scope
+  // finger's fine-aim drag (TOUCH_AIM_DRAG) so the two can never diverge:
+  // same SENS, same fpsLookSensMul scoped/ADS scaling (without it, scoped
+  // touch look moved ~4.7x the world angle per pixel vs desktop — the old
+  // weapons-agent finding), same camera-agent pitch envelope, same wider
+  // first-person aim-pitch ride.
+  function applyLookDelta(dx, dy) {
+    const sMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
+    CBZ.cam.yaw -= dx * SENS * sMul;
+    CBZ.cam.pitch -= dy * SENS * sMul;
+    // third-person pitch range: the camera agent's hook decides (it knows
+    // the collision-safe envelope); fallback still allows a REAL look-up —
+    // the old -0.18 floor meant an iPad could barely raise its eyes.
+    const pr = (CBZ.camTouchPitchRange && CBZ.camTouchPitchRange()) || [-0.6, 0.60];
+    CBZ.cam.pitch = Math.max(pr[0], Math.min(pr[1], CBZ.cam.pitch));
+    // in first-person, vertical drag drives the (wider) FPS aim pitch
+    if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - dy * SENS * sMul));
   }
 
   function note(s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, 1.5); }
@@ -554,6 +600,21 @@
     k["shift"] = dist > 5;    // jog most of the way, ease to a walk for the last few metres
   });
 
+  // Stance routing for the L3 stick-press: in city/survival (with the physics
+  // stance machine live) a press is a crouch INPUT EVENT — physics decides
+  // crouch / stand / SLIDE (press while sprinting) / PRONE (double press) with
+  // full frame context. The machine consumes press EDGES precisely because the
+  // touch latch can't express a double-tap as key edges (down,up,down collapses
+  // to one). Escape — and flags-off — keep the legacy keys["c"] latch, which
+  // feeds jail's hold-to-sneak exactly as before. Never both: when this routes,
+  // the latch is never set, so physics can't see a phantom keyboard edge too.
+  function stanceRoute() {
+    const P = CBZ.player, g = CBZ.game;
+    return !!(CBZ.playerCrouchPress && g && g.state === "playing" && g.mode !== "escape" &&
+      (!CBZ.CONFIG || CBZ.CONFIG.PLAYER_SLIDE !== false || CBZ.CONFIG.PLAYER_PRONE !== false) &&
+      P && P.pos && !P.dead && !P.driving && !P._aircraft);
+  }
+
   // ---- GAIT + STANCE PUMP (the stick IS the sprint button) ------------------
   // Owner: "hold the movement control all the way aggressively → sprint".
   // Deflection magnitude maps to gait: inside the rim nothing, RAMMED to the
@@ -572,11 +633,17 @@
     const auto = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AUTOSPRINT !== false;
     const onFoot = CBZ.game.state === "playing" && P && P.pos && !P.dead && !P.driving && !P._aircraft;
     if (!onFoot && crouchLatch) crouchLatch = false;
+    // a latch left over from jail must not follow into a stance-machine mode:
+    // its held "c" would read as a phantom keydown edge to physics' detector.
+    if (crouchLatch && stanceRoute()) crouchLatch = false;
     const wantC = onFoot && crouchLatch;
     if (wantC !== crouchOwned) {
       crouchOwned = wantC; k["c"] = wantC;
-      if (baseEl) baseEl.classList.toggle("tcrouch", wantC);   // amber knob = crouched
     }
+    // amber knob = low stance. Latch-crouched (jail), or the physics stance
+    // machine's crouch/slide/prone (city/survival, where the latch stays off
+    // and P.crouch is the machine's own truth).
+    if (baseEl) baseEl.classList.toggle("tcrouch", wantC || (onFoot && CBZ.game.mode !== "escape" && !!P.crouch));
     if (!auto || !onFoot) {
       if (shiftOwned) { k["shift"] = false; shiftOwned = false; }
       return;
@@ -687,19 +754,7 @@
       } else if (t.identifier === look.id) {
         look.seen = performance.now();
         look.moved = Math.max(look.moved, Math.hypot(t.clientX - look.sx, t.clientY - look.sy));
-        // scoped/ADS look is proportionally finer — the same fpsLookSensMul the
-        // desktop mousemove applies. Without it, scoped touch look moved ~4.7x
-        // the world angle per pixel vs desktop (weapons-agent finding).
-        const sMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
-        CBZ.cam.yaw -= (t.clientX - look.lx) * SENS * sMul;
-        CBZ.cam.pitch -= (t.clientY - look.ly) * SENS * sMul;
-        // third-person pitch range: the camera agent's hook decides (it knows
-        // the collision-safe envelope); fallback still allows a REAL look-up —
-        // the old -0.18 floor meant an iPad could barely raise its eyes.
-        const pr = (CBZ.camTouchPitchRange && CBZ.camTouchPitchRange()) || [-0.6, 0.60];
-        CBZ.cam.pitch = Math.max(pr[0], Math.min(pr[1], CBZ.cam.pitch));
-        // in first-person, vertical drag drives the (wider) FPS aim pitch
-        if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - (t.clientY - look.ly) * SENS * sMul));
+        applyLookDelta(t.clientX - look.lx, t.clientY - look.ly);   // shared with the aim-drag (one math)
         look.lx = t.clientX; look.ly = t.clientY;
       } else if (look.id === null && !inUI(t.target) && !slideTouches.has(t.identifier)) {
         // ADOPT a mid-flight drag: if the look slot freed while this finger
@@ -727,8 +782,10 @@
         const press = FIXED && stick.moved < 10 && dtms < 250;
         const wasTap = !FIXED && stick.moved < 12 && dtms < 330;   // dynamic stick keeps the legacy world-tap
         releaseStick();
-        if (press) crouchLatch = !crouchLatch;   // the gait/stance pump applies it
-        else if (wasTap) { try { tapWorld(t.clientX, t.clientY); } catch (err) {} }
+        if (press) {
+          if (stanceRoute()) CBZ.playerCrouchPress();   // physics stance machine: crouch/slide/prone
+          else crouchLatch = !crouchLatch;              // legacy latch (jail sneak / flags off)
+        } else if (wasTap) { try { tapWorld(t.clientX, t.clientY); } catch (err) {} }
       } else if (t.identifier === look.id) {
         const wasTap = look.moved < 12 && performance.now() - look.t0 < 330;
         releaseLook();
@@ -767,7 +824,16 @@
     };
     if (stick.id !== null && !alive(stick.id)) releaseStick();
     if (look.id !== null && !alive(look.id)) releaseLook();
-    if (slideTouches.size) { for (const [id, rec] of slideTouches) if (!alive(id)) rec.release(); }
+    if (slideTouches.size) {
+      // Slide claims are made by the BUTTON's own touchstart, which runs
+      // BEFORE this window-level sweep sees the very same event — so to the
+      // newborn-exclusion rule a fresh aim/scope finger looks like a recycled
+      // ghost id and would be released the instant it was claimed. A rec that
+      // was born within this event turn is real: spare it. Anything older
+      // that fails the live-list check is a true ghost and still dies.
+      const now = performance.now();
+      for (const [id, rec] of slideTouches) if (!alive(id) && now - (rec.born || 0) > 60) rec.release();
+    }
     if (look.id !== null && performance.now() - look.seen > LOOK_STALE_MS) {
       let own = false;
       const C = e.changedTouches;

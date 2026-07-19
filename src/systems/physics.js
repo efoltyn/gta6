@@ -265,7 +265,16 @@
   }
   CBZ.groundAt = groundAt;
 
-  function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + 0.25, player.pos.y + BODY_H); }
+  // Stance-aware collision height: prone squeezes under height-gated walls
+  // (window sills, half-walls), slide/stance-crouch duck the head band. Escape
+  // and flags-off recompute to exactly BODY_H every frame — nothing to restore,
+  // the height IS a pure function of the current stance.
+  function playerBodyH() {
+    if (player.prone) return PRONE_BODY_H;
+    if (player.crouch && CBZ.game.mode !== "escape") return CROUCH_BODY_H;
+    return BODY_H;
+  }
+  function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + 0.25, player.pos.y + playerBodyH()); }
 
   // ---- FEEL: local wall-clock player motion (slow-mo-under-load fix) --------
   // loop.js clamps the WORLD dt to ~0.05s so the 27ms sim can't spiral on the
@@ -397,16 +406,152 @@
     if (ped.hp != null) { ped.hp -= FALL_K * excess * excess; if (ped.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z }, "fell"); }
   };
 
+  // ============================================================
+  //  STANCE MACHINE — COD-style SLIDE + double-crouch PRONE
+  //  (PLAYER_SLIDE / PLAYER_PRONE, config.js — both default ON)
+  // ============================================================
+  // City + survival grow a real console stance vocabulary; jail (escape)
+  // keeps its hold-Ctrl/C sneak untouched. Crouch here is a PRESS-toggled
+  // latch (not a hold): tap = crouch, tap again = stand, double-tap = PRONE,
+  // tap while sprinting = SLIDE. Presses arrive two ways into one queue:
+  // desktop keydown edges of Ctrl/C (detected below from CBZ.keys), and the
+  // touch layer's L3 stick-press via CBZ.playerCrouchPress() — touch can't
+  // hold a key across a double-tap (its latch would collapse two taps into
+  // one edge), so the machine consumes press EVENTS, not key levels.
+  //
+  // The machine only ever runs on-foot in city/survival (driving, door arcs,
+  // aircraft, swimming, knockdowns and death all reset it), and with both
+  // flags off it is never stepped — desktop behaviour is byte-identical.
+  const SLIDE_DUR = 0.8;         // s the slide carries
+  const SLIDE_BOOST = 1.12;      // entry speed = carried sprint speed × this
+  const SLIDE_END = 1.4;         // m/s remaining when it runs out (≈ crouch walk)
+  const SLIDE_CD = 1.0;          // s after a slide before the next can start
+  const SLIDE_STEER = 1.5;       // rad/s max heading change mid-slide (heavy damp)
+  const SLIDE_GRACE = 0.45;      // s of "was just sprinting" that still slides —
+                                 // the touch thumb must LIFT the stick to tap L3,
+                                 // which drops sprint a beat before the press lands
+  const PRONE_WINDOW = 0.4;      // s after entering crouch in which a 2nd press = prone
+  const PRONE_SPEED = 0.35;      // × walkSpeed crawl (0.7 m/s)
+  const CROUCH_BODY_H = 1.2;     // stance-crouch/slide collision height (standing BODY_H 1.7)
+  const PRONE_BODY_H = 0.5;      // prone collision height — crawl under height-gated walls
+  const PRONE_SINK = 0.62;       // rig group drop so the hip-hinged plank lies ON the ground
+  const PRONE_LMG_STEADY = 0.45; // recoil × while prone with the LMG (the bipod-class bonus)
+  const st = {
+    mode: "stand",               // "stand" | "crouch" | "prone"
+    slideT: -1,                  // ≥0 = sliding (seconds elapsed)
+    slideV0: 0, dirX: 0, dirZ: -1,
+    cd: 0,                       // slide cooldown remaining
+    clock: 0,                    // machine's own accumulated time
+    crouchT: -9,                 // when crouch was ENTERED (opens the prone window)
+    pressT: -9,                  // last unconsumed crouch-press (0.3s shelf life)
+    prevSneak: false,            // desktop keydown edge detector
+    lastSprintT: -9, lastSprintV: 0,   // sprint memory for the slide grace
+    lastMoveX: 0, lastMoveZ: 0,  // last normalized move dir (slide heading fallback)
+    spaceLatch: false,           // swallows the jump that stood us up from prone
+  };
+  function stanceReset() {
+    st.mode = "stand"; st.slideT = -1; st.pressT = -9; st.crouchT = -9; st.spaceLatch = false;
+    player.prone = false;
+    if (playerChar) { playerChar.slidePose = false; playerChar.pronePose = false; }
+  }
+  // Crouch INPUT edge from the touch layer (the L3 stick-press). Queued, not
+  // acted on: the machine consumes it inside updatePlayer with full frame
+  // context (sprint state, ground, mode) so touch and keyboard share one brain.
+  CBZ.playerCrouchPress = function () { st.pressT = st.clock; };
+  // PRONE LMG STEADY — feature-detected by fpsmode.js at its recoil kick site.
+  // Scoped to the LMG class (weapon-data key "lmg"): prone braces the belt-fed
+  // gun bipod-style; other weapons keep their normal kick (fpsmode's crouch
+  // bipod already rewards the deliberate ADS-and-still setup, and it still
+  // outranks this while engaged). Returns a multiplier on the whole kick.
+  CBZ.playerProneSteady = function (w) {
+    if (!player.prone) return 1;
+    return (w && w.key === "lmg") ? PRONE_LMG_STEADY : 1;
+  };
+  // One stance step per frame. Returns true while a slide owns the run vector.
+  function updateStance(dt, c) {
+    st.clock += dt;
+    if (st.cd > 0) st.cd = Math.max(0, st.cd - dt);
+    if (player._swim || player._aircraft) { stanceReset(); return false; }
+    if (c.overlay || c.stunned) {           // map/overview/stun: drop presses, kill a live slide
+      st.pressT = -9;
+      if (st.slideT >= 0) { st.slideT = -1; st.cd = SLIDE_CD; }
+      return false;
+    }
+    // desktop crouch-key rising edge → the same press queue touch feeds
+    if (c.sneakHeld && !st.prevSneak) st.pressT = st.clock;
+    st.prevSneak = c.sneakHeld;
+
+    // sprint input breaks a crouch back to standing (console grammar: ram the
+    // stick / hold shift+direction and you pop up and go). Prone is deliberate
+    // ground game — it needs an explicit crouch press or jump to leave.
+    if (st.mode === "crouch" && st.slideT < 0 && keys["shift"] && c.len > 0 && c.staminaReady) st.mode = "stand";
+
+    const press = st.pressT >= 0 && (st.clock - st.pressT) < 0.3;
+    if (press) {
+      st.pressT = -9;                        // consumed (airborne presses just drop)
+      if (player.grounded && st.slideT < 0) {
+        const slideOK = CBZ.CONFIG.PLAYER_SLIDE !== false && st.cd <= 0 && st.mode !== "prone" &&
+          (player.sprint || (st.clock - st.lastSprintT) < SLIDE_GRACE);
+        if (slideOK) {
+          // SLIDE: carry the sprint you brought in, slightly hotter, along the
+          // direction you're pushing (else the one you were moving on, else facing).
+          const sMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
+          st.slideT = 0;
+          // floor = the wound-scaled sprint speed, for the same-frame desktop
+          // press where the memory hasn't sampled yet — a limping player must
+          // slide at a limping burst, not the healthy 6.4.
+          st.slideV0 = Math.max(st.lastSprintV, T.walkSpeed * sMul * (c.wound || 1)) * SLIDE_BOOST;
+          if (c.len > 0) { st.dirX = c.mx / c.len; st.dirZ = c.mz / c.len; }
+          else if (st.lastMoveX || st.lastMoveZ) { st.dirX = st.lastMoveX; st.dirZ = st.lastMoveZ; }
+          else { st.dirX = -Math.sin(CBZ.cam.yaw); st.dirZ = -Math.cos(CBZ.cam.yaw); }
+          st.mode = "stand";                 // exit stance resolves at slide end
+          if (CBZ.sfx) CBZ.sfx("whoosh");
+        } else if (st.mode === "prone") { st.mode = "crouch"; st.crouchT = -9; }  // window closed: next press stands
+        else if (st.mode === "crouch") {
+          if (CBZ.CONFIG.PLAYER_PRONE !== false && (st.clock - st.crouchT) < PRONE_WINDOW) st.mode = "prone";
+          else st.mode = "stand";
+        } else if (CBZ.CONFIG.PLAYER_PRONE !== false || CBZ.CONFIG.PLAYER_SLIDE !== false) {
+          st.mode = "crouch"; st.crouchT = st.clock;   // crouch is the shared substrate stance
+        }
+      }
+    }
+
+    if (st.slideT >= 0) {
+      st.slideT += dt;
+      if (st.slideT >= SLIDE_DUR || !player.grounded || player._swim) {
+        st.cd = SLIDE_CD; st.slideT = -1;
+        // hold sprint+direction through the end → pop straight back up running;
+        // otherwise settle into crouch (whose fresh window lets slide→tap = prone).
+        if (player.grounded && keys["shift"] && c.len > 0 && c.staminaReady) st.mode = "stand";
+        else if (player.grounded) { st.mode = "crouch"; st.crouchT = st.clock; }
+        else st.mode = "stand";              // slid off a ledge — fall standing
+      } else if (c.len > 0) {
+        // steering is heavily damped: ease the locked heading toward the stick,
+        // capped at SLIDE_STEER rad/s — a drift, never a pivot.
+        const cur = Math.atan2(st.dirX, st.dirZ);
+        const want = Math.atan2(c.mx / c.len, c.mz / c.len);
+        let d = want - cur;
+        if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+        const m = SLIDE_STEER * dt;
+        if (d > m) d = m; else if (d < -m) d = -m;
+        const a = cur + d;
+        st.dirX = Math.sin(a); st.dirZ = Math.cos(a);
+      }
+    }
+    return st.slideT >= 0;
+  }
+
   function updatePlayer(dt) {
     // ---- driving: a city vehicle owns the player's transform this frame.
     //      The city vehicle controller (city/vehicles.js) moves player.pos and
     //      the (hidden) character rig, so we bail out of on-foot physics. ----
-    if (player.driving) return;
+    if (player.driving) { if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset(); return; }
 
     // A live aircraft boarding-door arc (city/aircraft_doors.js) guides the
     // player through the opening exactly like a vehicle controller — on-foot
-    // input must not fight the guided walk for the ~1-2s beat.
-    if (player._doorArc) return;
+    // input must not fight the guided walk for the ~1-2s beat. A live slide is
+    // surrendered to the guided walk (a held crouch/prone stance survives it).
+    if (player._doorArc) { if (st.slideT >= 0) { st.slideT = -1; st.cd = SLIDE_CD; } return; }
 
     // A strapped-in snowboard owns the player transform just like a vehicle.
     // The controller is installed by city/snowboard.js after this module.
@@ -425,13 +570,13 @@
         resolveCollisions();
         playerChar.group.position.copy(player.pos);
         playerChar.group.rotation.x += ph.spin * dt;
-        player.speed = 0; player.crouch = false;
+        player.speed = 0; player.crouch = false; stanceReset();
         animChar(playerChar, 0, dt);
         return;
       }
       if (ph.down > 0) {
         ph.down -= dt;
-        player.speed = 0; player.crouch = false;
+        player.speed = 0; player.crouch = false; stanceReset();
         player.vy -= T.gravity * dt; player.pos.y += player.vy * dt;
         const fl = groundAt(player.pos.x, player.pos.z, player.pos.y);
         if (player.pos.y <= fl) { player.pos.y = fl; player.vy = 0; }
@@ -447,7 +592,7 @@
     // ---- SURVIVAL death: a dramatic spinning ragdoll launch, then sprawl ----
     const D = player._death;
     if (D && CBZ.game.mode !== "escape") {
-      player.speed = 0; player.crouch = false;
+      player.speed = 0; player.crouch = false; stanceReset();
       const floorY = groundAt(player.pos.x, player.pos.z, player.pos.y);
       if (!D.landed) {
         D.vy -= T.gravity * dt;
@@ -473,7 +618,7 @@
     if (player.dead || player.ko > 0) {
       if (!player.dead) player.ko = Math.max(0, (player.ko || 0) - dt);
       player.speed = 0;
-      player.crouch = false;
+      player.crouch = false; stanceReset();
       player.vy -= T.gravity * dt;
       player.pos.y += player.vy * dt;
       const floorD = groundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
@@ -516,6 +661,22 @@
     // city/survival (or written by the hunger system) must never turn Shift
     // back into a 2m/s walk. Stamina remains authoritative in modes that own it.
     const staminaReady = escape || player.stamina === undefined || player.stamina > 0;
+    // ---- stance machine (PLAYER_SLIDE / PLAYER_PRONE, city+survival only):
+    // crouch becomes a press-toggled stance, a press mid-sprint slides, a
+    // double press prones. It OWNS player.crouch/prone in these modes; escape
+    // above keeps its hold-to-sneak, and with both flags off nothing here runs.
+    const stanceOn = !escape &&
+      (CBZ.CONFIG.PLAYER_SLIDE !== false || CBZ.CONFIG.PLAYER_PRONE !== false);
+    let sliding = false;
+    if (stanceOn) {
+      sliding = updateStance(dt, {
+        len, mx, mz, sneakHeld, stunned, staminaReady,
+        overlay: overview || mapOpen || cine,   // scripted scenes freeze stance input too
+        wound: (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1),
+      });
+      player.crouch = sliding || st.mode !== "stand";
+      player.prone = st.mode === "prone" && !sliding;
+    } else if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
     player.sprint = !overview && !mapOpen && !stunned && !player.crouch &&
       !!keys["shift"] && len > 0 && staminaReady;
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
@@ -524,14 +685,44 @@
     // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
     // the mount's gait). It COMPOSES with the limp — a wounded rider still rides.
     const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1);
-    const moveSpeed = (player.crouch ? T.crouchSpeed : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale;
+    const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
+      : player.crouch ? T.crouchSpeed
+      : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale;
     let desX = 0, desZ = 0;
-    if (len > 0) { mx /= len; mz /= len; desX = mx * moveSpeed; desZ = mz * moveSpeed; }
+    if (len > 0) { mx /= len; mz /= len; }
+    if (sliding) {
+      // slide velocity: hold the burst early, bleed late — quadratic ease from
+      // the boosted entry speed down to a crouch-walk remainder over SLIDE_DUR.
+      // (slideV0 already carries the wound/limp scale via the captured speed.)
+      const u = Math.min(1, st.slideT / SLIDE_DUR);
+      const v = SLIDE_END + (st.slideV0 - SLIDE_END) * (1 - u * u);
+      desX = st.dirX * v; desZ = st.dirZ * v;
+    } else if (len > 0) { desX = mx * moveSpeed; desZ = mz * moveSpeed; }
     player.speed = Math.hypot(desX, desZ);
+    if (stanceOn) {
+      // sprint memory: the slide's entry speed + the grace window that lets the
+      // touch thumb lift off the stick to tap L3 without losing the sprint.
+      if (len > 0) { st.lastMoveX = mx; st.lastMoveZ = mz; }
+      if (player.sprint && player.speed > T.walkSpeed * 1.5) { st.lastSprintT = st.clock; st.lastSprintV = player.speed; }
+    }
 
     // jump is an EDGE event (impulse), not integrated — fire it once per frame
     // before the substep loop so a held key can't double-jump across slices.
-    if (!overview && !mapOpen && !stunned && keys[" "] && player.grounded) { player.vy = T.jumpVel; player.grounded = false; CBZ.sfx("jump"); }
+    // Stance: jump from PRONE only stands you up (no hop off your belly; the
+    // held key is latched so standing doesn't chain into a jump); jump from a
+    // crouch or mid-slide clears the stance and jumps normally.
+    if (!overview && !mapOpen && !stunned && keys[" "] && player.grounded) {
+      if (stanceOn && player.prone) {
+        if (!st.spaceLatch) { st.spaceLatch = true; st.mode = "stand"; player.prone = false; player.crouch = false; }
+      } else if (!stanceOn || !st.spaceLatch) {
+        if (stanceOn) {
+          if (st.slideT >= 0) { st.slideT = -1; st.cd = SLIDE_CD; sliding = false; }
+          st.mode = "stand"; player.crouch = false;
+        }
+        player.vy = T.jumpVel; player.grounded = false; CBZ.sfx("jump");
+      }
+    }
+    if (stanceOn && !keys[" "]) st.spaceLatch = false;
 
     // FEEL: integrate the LOCAL player on the real wall-clock delta so it moves
     // at correct speed under load (kills the slow-mo wade). fdt falls back to dt
@@ -594,9 +785,17 @@
     // fast — body-yaw turn and the leg-cycle phase advance with the real move.
     // These are exponential damps / a phase clock, so a larger fdt just reaches
     // the target a touch sooner; with the flag off fdt===dt = today exactly.
-    playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
-    if (len > 0) {
-      const tYaw = Math.atan2(mx, mz);
+    // prone sinks the whole rig group so the hip-hinged plank (character.js
+    // pronePose) lies ON the ground instead of planking at hip height; the
+    // blend `_proneB` is the pose's own ease, so sink and pose move together.
+    // Zero for every non-prone frame (and every NPC) — position is written
+    // absolutely each frame, so there is nothing to restore.
+    const proneB = playerChar._proneB || 0;
+    playerChar.group.position.set(player.pos.x, player.pos.y - PRONE_SINK * proneB, player.pos.z);
+    if (len > 0 || sliding) {
+      // mid-slide the body faces the LOCKED slide heading, not the stick — the
+      // feet-first pose must travel feet-first even while you pre-steer the exit.
+      const tYaw = sliding ? Math.atan2(st.dirX, st.dirZ) : Math.atan2(mx, mz);
       // CAM_FACING_BLEND: after a draw/holster the body-yaw owner changes; the
       // turn RATE ramps in over ~0.25s (camera.js camFacingEase) so the body
       // sweeps to its new target instead of whipping.
@@ -605,7 +804,11 @@
     }
     // crouch: a real pose (knees/hips fold — entities/character.js) instead of
     // the old scale.y accordion squash; ease any legacy squash back out.
+    // slide/prone hand the rig to their own animChar branches (lean-back
+    // feet-first power slide / flat weapon-forward crawl) the same way.
     playerChar.crouch = !!player.crouch;
+    playerChar.slidePose = sliding;
+    playerChar.pronePose = !!player.prone;
     playerChar.group.scale.y += (1 - playerChar.group.scale.y) * (1 - Math.pow(0.001, fdt));
     // get back up after a knockdown (ease the fall-over rotation out)
     if (playerChar.group.rotation.x) playerChar.group.rotation.x = CBZ.damp(playerChar.group.rotation.x, 0, 9, fdt);

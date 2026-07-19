@@ -374,6 +374,10 @@
     const setKnee = (j, x, rate) => { if (j) { j.rotation.x = damp(j.rotation.x, Math.max(0, x), rate, dt); j.rotation.y = damp(j.rotation.y, 0, 12, dt); j.rotation.z = damp(j.rotation.z, 0, 12, dt); } };
     const setElbow = (j, x, rate) => { if (j) { j.rotation.x = damp(j.rotation.x, Math.min(0, x), rate, dt); j.rotation.y = damp(j.rotation.y, 0, 12, dt); j.rotation.z = damp(j.rotation.z, 0, 12, dt); } };
 
+    // prone blend — physics.js reads this to sink the rig group; damped ABOVE
+    // every early-return branch so it always decays once pronePose clears.
+    ch._proneB = damp(ch._proneB || 0, ch.pronePose ? 1 : 0, 9, dt);
+
     // ---- SEATED (office-jobs): full-rig pose that OWNS the body ----
     if (ch.sitting) {
       const sr = 12;
@@ -392,6 +396,76 @@
       if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
       lockCharacterHips(ch);
       return;   // seated pose owns the whole rig
+    }
+
+    // ---- STANCE POSES (physics.js stance machine sets slidePose/pronePose
+    //      on the player rig only). Both OWN the whole rig like the seated
+    //      pose: every write is a damp toward an absolute target, so entering
+    //      /leaving flows and nothing can accumulate frame over frame (the
+    //      grapple.js brace-pose lesson). The bob/lean/sway accumulators are
+    //      kept in sync with what we wrote so the locomotion path's direct
+    //      assignments resume from OUR pose instead of snapping; the neck has
+    //      no locomotion owner, so _stanceNk arms a recovery damp below. ----
+    if (ch.slidePose) {
+      // COD power slide: lean-back torso, legs thrust FEET-FIRST down the
+      // travel line (lead leg long, trail leg tucked), trailing hand planted
+      // behind the hip, lead arm carried forward for balance, chin up.
+      const sr = 13;
+      ch.body.position.y = damp(ch.body.position.y, -0.52, sr, dt);    // hips drop toward the heels
+      ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+      ch.body.rotation.x = damp(ch.body.rotation.x, -0.42, sr, dt);    // shoulders pitched BACK off the hips
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0.14, sr, dt);     // quarter-turn onto the planted hand
+      ch.body.rotation.z = damp(ch.body.rotation.z, 0.10, sr, dt);
+      if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -1.28, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.10, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
+      setKnee(J.ll, 0.18, sr);                                         // lead leg near-straight
+      if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -0.82, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.08, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
+      setKnee(J.rl, 0.85, sr);                                         // trail knee tucked under
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.55, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.55, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); }
+      setElbow(J.ra, -0.15, sr);                                       // planted arm long behind
+      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.85, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.15, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); }
+      setElbow(J.la, -0.55, sr);                                       // balance arm reaching the line
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.30, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+      ch.bob = ch.body.position.y; ch.lean = ch.body.rotation.x; ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;
+      lockCharacterHips(ch);
+      return;   // the slide owns the whole rig
+    }
+    if (ch.pronePose) {
+      // PRONE: the upper body hinges flat at the hips (chest to the deck) and
+      // the legs sweep back level — a plank at hip height that physics.js
+      // sinks to the ground via _proneB. Arms carry the weapon FORWARD on
+      // planted elbows (the LMG firing position); a slow alternating paddle
+      // sells the crawl when moving.
+      const pr = 9;
+      if (speed > 0.2) ch.phase += dt * (2.2 + speed * 2.0);           // crawl cadence (gait phase is idle here)
+      const pad = speed > 0.2 ? Math.sin(ch.phase) : 0;
+      ch.body.position.y = damp(ch.body.position.y, 0.02, pr, dt);
+      ch.body.position.z = damp(ch.body.position.z, 0, pr, dt);
+      ch.body.rotation.x = damp(ch.body.rotation.x, 1.42, pr, dt);     // hinge flat, chest down
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, pr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, pad * 0.06, pr, dt);
+      if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, 1.52 + pad * 0.14, pr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.10, pr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, pr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, pr, dt); }
+      if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, 1.46 - pad * 0.14, pr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.10, pr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, pr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, pr, dt); }
+      setKnee(J.ll, 0.06, pr); setKnee(J.rl, 0.12, pr);                // legs lie flat, not folded
+      // weapon forward: gun arm out along the aim, support elbow planted wide
+      const rec = ch.aimRecoil || 0;
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.32 - rec * 0.12 - pad * 0.05, pr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.10, pr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.18, pr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.10, pr, dt); }
+      setElbow(J.ra, -0.35, pr);
+      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -1.40 + pad * 0.05, pr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.15, pr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.30, pr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.14, pr, dt); }
+      setElbow(J.la, -0.75, pr);                                       // support elbow dug in
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, -1.05, pr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, pr, dt); }
+      ch.bob = ch.body.position.y; ch.lean = ch.body.rotation.x; ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;
+      lockCharacterHips(ch);
+      return;   // prone owns the whole rig
+    }
+    // stance blend-out: the branches above own the neck while active and
+    // nothing in the locomotion path below ever writes it — recover it here
+    // (a few frames of damp) so an exited slide/prone can't park the chin.
+    // Armed only by the stance poses; every other rig skips at one falsy check.
+    if (ch._stanceNk) {
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0, 8, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, 8, dt); }
+      if (!ch.neck || Math.abs(ch.neck.rotation.x) < 0.01) ch._stanceNk = 0;
     }
 
     // Gait advances with DISTANCE TRAVELLED, not frame count. `phase` is an

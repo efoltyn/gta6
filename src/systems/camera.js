@@ -547,7 +547,7 @@
       }
       if (cc.fp && !player.dead && !player.driving) {   // first-person
         introT = 0; prev.copy(player.pos);
-        const eye = player.pos.y + (player.crouch ? 1.22 : 1.66);
+        const eye = player.pos.y + (player.prone ? 0.60 : player.crouch ? 1.22 : 1.66);   // prone (physics stance) = cheek on the deck
         const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
         const fX = -Math.sin(cam.yaw), fZ = -Math.cos(cam.yaw);
         // sit AT the head (not ahead of it) and keep horizontal follow tight so
@@ -646,7 +646,7 @@
     // sprinting lifts it a touch more instead of letting it sag low.
     const surv = CBZ.game.mode === "survival";
     const sprinting = surv && !!player.sprint;
-    const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82)))));
+    const baseHeight = player.prone ? 0.74 : (player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))))));
     height = smoothDamp(height, baseHeight, heightV, 0.18, fdt);
     const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
     // city: the rig yaw lazily chases the input yaw (frame-rate independent),
@@ -806,7 +806,7 @@
     const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
     const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
     const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
-    const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))
+    const lty = player.pos.y + (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88)))))))
       + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
