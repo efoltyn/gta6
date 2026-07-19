@@ -24,6 +24,12 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const damp = CBZ.damp || function (c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); };
+  // "Exploding ragdoll" fix: the limb springs are integrated with explicit
+  // Euler, which DIVERGES on clamped heavy frames (dt→0.10s under disaster
+  // load) — angles blow past ±π and the body reads as limbs detaching. The
+  // flag enables substepped integration + hard joint stops + impulse caps.
+  // false restores the raw integrator byte-for-byte.
+  if (CBZ.CONFIG.SURV_RAGDOLL_STABLE == null) CBZ.CONFIG.SURV_RAGDOLL_STABLE = true;
 
   const REACH = 3.1;          // arm's length for push / grab / punch
   const CONE = 0.25;          // forward-cone dot threshold for aiming
@@ -103,6 +109,15 @@
       L.vz += (d[2] * (0.8 + 0.9 * lift) + 0.7 * jit(i)) * energy; // splay sideways
       i += 1.3;
     }
+    // several same-frame kicks (wave + blast + debris) used to stack unbounded
+    // spring energy — the first beat of the limbs-detach blowup. Cap it.
+    if (CBZ.CONFIG.SURV_RAGDOLL_STABLE !== false) {
+      for (const k in r) {
+        const L = r[k];
+        if (L.vx > 16) L.vx = 16; else if (L.vx < -16) L.vx = -16;
+        if (L.vz > 16) L.vz = 16; else if (L.vz < -16) L.vz = -16;
+      }
+    }
   }
   // integrate the limb rig (advance the spring state only — no rig writes).
   // Each limb is a damped spring toward `rest` plus its own velocity; when the
@@ -123,11 +138,33 @@
     // upright recovering ped springs back briskly so it doesn't look broken.
     const kSpring = 14 + settle * 24 + (1 - rdoll) * 6;
     const kDamp = p.air ? 2.2 : (4 + settle * 10);
+    // STABILITY (the exploding-ragdoll fix): explicit Euler on this spring is
+    // only conditionally stable — on a clamped heavy frame (dt = 0.10s: a
+    // disaster + 100 actors, or a throttled tab) kSpring·dt and kDamp·dt
+    // overshoot, the update flips sign each step and DIVERGES: limb angles
+    // scream past ±π within frames and the rig looks dismembered. Substep to
+    // ≤1/30s (unconditionally stable at these gains), then hard-stop every
+    // joint at a physical range (±2.8 rad — a full dramatic sprawl still fits,
+    // a propeller doesn't) and kill velocity into the stop so the bound never
+    // adds energy. At 60fps nSub=1 and the flail is unchanged — the comedy
+    // stays, the dismemberment goes. SURV_RAGDOLL_STABLE=false → old math.
+    const stable = CBZ.CONFIG.SURV_RAGDOLL_STABLE !== false;
+    const nSub = stable ? Math.max(1, Math.ceil(dt / 0.033)) : 1;
+    const h = dt / nSub;
     function integ(node, restX, restZ) {
       const tx = restX * rdoll, tz = restZ * rdoll;        // neutral when upright
-      node.vx += (tx * slack - node.rx) * kSpring * dt - node.vx * kDamp * dt;
-      node.vz += (tz * slack - node.rz) * kSpring * dt - node.vz * kDamp * dt;
-      node.rx += node.vx * dt; node.rz += node.vz * dt;
+      for (let k = 0; k < nSub; k++) {
+        node.vx += (tx * slack - node.rx) * kSpring * h - node.vx * kDamp * h;
+        node.vz += (tz * slack - node.rz) * kSpring * h - node.vz * kDamp * h;
+        node.rx += node.vx * h; node.rz += node.vz * h;
+      }
+      if (!stable) return;
+      if (node.vx > 24) node.vx = 24; else if (node.vx < -24) node.vx = -24;
+      if (node.vz > 24) node.vz = 24; else if (node.vz < -24) node.vz = -24;
+      if (node.rx > 2.8) { node.rx = 2.8; if (node.vx > 0) node.vx = 0; }
+      else if (node.rx < -2.8) { node.rx = -2.8; if (node.vx < 0) node.vx = 0; }
+      if (node.rz > 2.8) { node.rz = 2.8; if (node.vz > 0) node.vz = 0; }
+      else if (node.rz < -2.8) { node.rz = -2.8; if (node.vz < 0) node.vz = 0; }
     }
     integ(r.body, 0.10 * Math.sin(s * 1.9), 0.08 * Math.sin(s * 2.5));
     integ(r.neck, -0.4 - 0.2 * Math.sin(s), 0.28 * Math.sin(s * 2.2));
@@ -226,8 +263,22 @@
       p.spinZ = (Math.random() * 2 - 1) * heavy * 0.6; // roll/windmill
       p.shock = Math.max(p.shock, sk + 0.6);
       kickRag(a, p, sk + 0.5, 1, a._deathSeed);     // lift=1 → limbs fly overhead
+      // stacked-launch cap: disasters can land several flings on one body in a
+      // single frame — unbounded p.v* rocketed bodies to orbit with the limb
+      // rig streaming behind (the other half of the exploding-ragdoll bug).
+      if (CBZ.CONFIG.SURV_RAGDOLL_STABLE !== false) {
+        const hv = Math.hypot(p.vx, p.vz);
+        if (hv > 30) { p.vx *= 30 / hv; p.vz *= 30 / hv; }
+        if (p.vy > 18) p.vy = 18;
+        if (p.spin > 12) p.spin = 12; else if (p.spin < -12) p.spin = -12;
+        if (p.spinZ > 12) p.spinZ = 12; else if (p.spinZ < -12) p.spinZ = -12;
+      }
     } else {
       p.kx += dx * f; p.kz += dz * f;
+      if (CBZ.CONFIG.SURV_RAGDOLL_STABLE !== false) {
+        const hk = Math.hypot(p.kx, p.kz);
+        if (hk > 24) { p.kx *= 24 / hk; p.kz *= 24 / hk; }
+      }
       p.shock = Math.max(p.shock, sk);
       kickRag(a, p, sk, 0, a._deathSeed);
       if (o.knockdown) {
