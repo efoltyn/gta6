@@ -146,8 +146,10 @@
   });
   document.addEventListener("mousemove", (e) => {
     if (!cam.locked) return;
-    cam.yaw -= e.movementX * SENS;
-    cam.pitch -= e.movementY * SENS;
+    // scoped look is proportionally finer (systems/lockon.js real sniper scope)
+    const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
+    cam.yaw -= e.movementX * SENS * sensMul;
+    cam.pitch -= e.movementY * SENS * sensMul;
     // soft tier clamp, then a hard safety so |pitch| can never reach π/2
     cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
     cam.pitch = Math.max(-PITCH_SAFETY, Math.min(PITCH_SAFETY, cam.pitch));

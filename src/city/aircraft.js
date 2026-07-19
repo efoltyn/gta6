@@ -444,7 +444,11 @@
     // HOMING: if the player's aim ray is roughly on a live police gunship/jet,
     // lock it (proportional-nav-lite, same as the AI's missiles) — otherwise
     // this stays the old straight shot (a building/ground strike never homes).
-    const seek = byPlayer ? pickPlayerLockSeek(x, y, z, nx, ny, nz) : null;
+    // LOCK-ON (systems/lockon.js): a RED on-screen vehicle lock overrides that
+    // — undefined means the system is absent/disabled (legacy path, byte-
+    // identical); null means it's on with no lock (straight, no auto-homing).
+    let seek = byPlayer ? (CBZ.lockonMissileSeek ? CBZ.lockonMissileSeek() : undefined) : null;
+    if (seek === undefined) seek = byPlayer ? pickPlayerLockSeek(x, y, z, nx, ny, nz) : null;
     const m = launchMissile(x, y, z, target, byPlayer, seek);
     return !!m;                                // false ⇒ pool was at MAX_MISSILES
   };
@@ -484,7 +488,8 @@
       if (m.seek && m.life > HOMING_ARM_T && CBZ.aeroPhysics) {
         const tp = m.seek();
         if (tp) {
-          const nd = CBZ.aeroPhysics.homingSteer(m.dir, tp.x - p.x, (tp.y != null ? tp.y : p.y) - p.y, tp.z - p.z, HOMING_TURN_RATE, dt);
+          // a lockon.js seek carries its own per-weapon turn-rate cap (air-to-air snappier)
+          const nd = CBZ.aeroPhysics.homingSteer(m.dir, tp.x - p.x, (tp.y != null ? tp.y : p.y) - p.y, tp.z - p.z, m.seek.turnRate || HOMING_TURN_RATE, dt);
           m.dir.set(nd.x, nd.y, nd.z);
           m.group.lookAt(p.x + nd.x, p.y + nd.y, p.z + nd.z);
         }
@@ -509,6 +514,9 @@
       if (p.y <= 0.6) { hit = true; hy = 0.4; }
       if (!hit && m.life > 3.2) hit = true;        // safety self-destruct
       if (!hit && hitsBlocker(p)) hit = true;
+      // proximity fuse (lockon.js seeks only): a near-miss on the locked
+      // vehicle still detonates instead of sailing past
+      if (!hit && m.seek && m.seek.prox && m.seek.prox(p.x, p.y, p.z)) hit = true;
       if (hit) { detonate(hx, hy, hz, m.byPlayer); freeMissile(m); missiles.splice(i, 1); }
     }
   }
