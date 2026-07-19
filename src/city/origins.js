@@ -4,12 +4,18 @@
    On the title screen (index.html #originSelect, wired in systems/state.js)
    the player picks ONE of three starting characters before hitting Play:
 
-     • THE EXEC     — THE main story beat. Top floor of the tallest office
-                       tower, suit + gold watch + sunglasses. Laptop + phone
-                       show the market crash; every dollar is gone. Objective:
-                       get down to level 1 / the street. Jail is still the
-                       real endgame if the cops cuff you later — not an
-                       instant scripted raid on frame one.
+     • THE EXEC     — THE main story beat. The executive floor at the crown
+                       of the TALLEST tower in the city (the 52-storey Spire,
+                       storey 50 — city/exec_office.js; falls back to the
+                       tallest office lot), suit + gold watch + sunglasses.
+                       With CBZ.CONFIG.EXEC_REAL_CRASH his brokerage is REAL
+                       share positions on sim/stocks.js and the beat executes
+                       a REAL market-wide collapse + margin-call liquidation
+                       — every readout (laptop, phone, charpanel, bank)
+                       agrees on the number lost. Objective: get down to
+                       level 1 / the street (the suite's express lift rides
+                       to the door). Jail is still the real endgame if the
+                       cops cuff you later — not a scripted raid on frame one.
      • THE BARFLY    — starts getting bounced out of a small-town bar by
                        the doorman: a shove, a tumble, a screen shake, and
                        he's in the gutter $45 to his name and $350 in debt.
@@ -68,9 +74,14 @@
   // ========================================================================
   const ORIGIN_TUNING = {
     exec: {
-      // Paper wealth flashes on the laptop, then dies in the crash beat.
+      // Opening wealth. With EXEC_REAL_CRASH the startBank figure is granted
+      // as REAL share positions on the exchange (sim/stocks.js) — the laptop,
+      // net worth and the phone all read the live portfolio; without stocks
+      // (or flag off) it stays a plain insured bank balance. Either way the
+      // crash beat destroys it through real state, not a printed line.
       startCash: 2000000,
       startBank: 8000000,
+      marginDebt: 250000,          // the margin loan still due after liquidation
       laptopSec: 5.5,              // stock-crash laptop + phone beat before free movement
       crashAfterSec: 2.2,          // when during laptop phase the numbers actually zero
       descendHintSec: 1.2,         // after crash, beat before "go downstairs" objective
@@ -124,7 +135,7 @@
     exec: {
       meta: { icon: "💼", name: "The Executive", blurb: "suit, gold watch, zero dollars" },
       get tuning() { return ORIGIN_TUNING.exec; },
-      findSpawn: function () { return findOfficeLot(); },
+      findSpawn: function () { return findExecTower(); },
       grants: function (game) { return grantExec(game); },
       scene: function (game) { return sceneExec(game); },
     },
@@ -434,6 +445,18 @@
     }
     return best;
   }
+  // THE EXEC'S TOWER: the flagship 52-storey mega-tower — the ACTUAL tallest
+  // building the city generates — when its executive floor was built
+  // (CBZ.CONFIG.EXEC_TOP_OFFICE → buildings.js makeMegaTower → exec_office.js
+  // stamps building.execOffice). A 12-storey office lot only ever "read" tall;
+  // the Spire is 3.5× that. Falls back to the old tallest-office pick when the
+  // flag is off / the flagship didn't build (headless minimal city).
+  function findExecTower() {
+    const mt = CBZ.cityMegaTower && CBZ.cityMegaTower();
+    const lot = mt && mt.lot;
+    if (lot && lot.building && lot.building.execOffice && lot.building.execOffice.floorY != null) return lot;
+    return findOfficeLot();
+  }
   // Derived from the LIVE town registry (city/citytemplates.js's
   // CBZ.CITY_TEMPLATES — the one place every themed town, present and
   // future, is defined) instead of a literal snapshot that goes stale the
@@ -512,14 +535,51 @@
   }
 
   // ---------------------------------------------------------------
-  // EXEC — top floor, suit/watch/shades, MARKET CRASH, descend to L1
+  // EXEC — top of the tallest tower, suit/watch/shades, REAL MARKET
+  // CRASH, descend to L1
   // ---------------------------------------------------------------
-  // GRANTS (defect #3): cash/bank/outfit/weapon-strip + ice apply
+  // THE REAL PORTFOLIO (EXEC_REAL_CRASH): spread `total` dollars across every
+  // listed ticker as GRANTED share positions (stocks.grant — the ipo() idiom:
+  // real qty + cost basis, no cash moved, no herd impact). Deterministic sym
+  // order. Returns the dollar value actually placed (0 → no exchange, caller
+  // falls back to a bank balance so the start is never silently poorer).
+  function grantExecPortfolio(total) {
+    const S = CBZ.stocks;
+    if (!S || !S.list || !S.grant) return 0;
+    let rows = [];
+    try { rows = S.list().filter(function (st) { return st && isFinite(st.price) && st.price > 0; }); } catch (e) { return 0; }
+    if (!rows.length) return 0;
+    rows.sort(function (a, b) { return a.sym < b.sym ? -1 : a.sym > b.sym ? 1 : 0; });
+    const per = total / rows.length;
+    let placed = 0;
+    for (const st of rows) {
+      const sh = Math.max(1, Math.round(per / st.price));
+      try { placed += S.grant(st.sym, sh) || 0; } catch (e) {}
+    }
+    return Math.round(placed);
+  }
+  // What the laptop's "Brokerage" cell shows: the LIVE portfolio value plus
+  // any swept bank balance — the same numbers netWorth()/charpanel read.
+  function execBrokerage() {
+    let v = g.cityBank || 0;
+    if (CBZ.stocks && CBZ.stocks.portfolioValue) { try { v += CBZ.stocks.portfolioValue(); } catch (e) {} }
+    return Math.round(v);
+  }
+  // GRANTS (defect #3): cash/portfolio/outfit/weapon-strip + ice apply
   // unconditionally, whether or not a real office lot can be found.
   function grantExec(game) {
     const T = ORIGIN_TUNING.exec;
     stripLoadout();                                 // a pen, not an RPG
-    game.cash = T.startCash; game.cityBank = T.startBank;
+    game.cash = T.startCash;
+    if (CBZ.CONFIG && CBZ.CONFIG.EXEC_REAL_CRASH) {
+      // the brokerage is REAL share positions on the exchange; whatever the
+      // exchange couldn't place (thin/absent roster) stays a real bank balance
+      // so his opening net worth is the same 10M either way.
+      const placed = grantExecPortfolio(T.startBank);
+      game.cityBank = Math.max(0, T.startBank - placed);
+    } else {
+      game.cityBank = T.startBank;
+    }
     if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("suit", { silent: true });
     // Gold watch + designer shades — owned + worn so bling + drip read live.
     try {
@@ -601,9 +661,42 @@
   }
 
   function fireExecCrash() {
-    g.cash = 0;
-    g.cityBank = 0;
-    if (g.cityDebt == null || g.cityDebt < 250000) g.cityDebt = 250000;  // margin loan still due
+    const T = ORIGIN_TUNING.exec;
+    const fmt$ = function (n) { return "$" + Math.round(Math.max(0, n || 0)).toLocaleString(); };
+    let lost = 0;
+    if (CBZ.CONFIG && CBZ.CONFIG.EXEC_REAL_CRASH) {
+      // THE CRASH IS REAL, end to end:
+      //  1) the MARKET collapses — stocks.crashAll() marks every listing down
+      //     ~97% in one print (every chart, ticker, adboard and phone STOCKS
+      //     row shows the same cliff, and stays red);
+      //  2) the MARGIN CALL — the broker force-liquidates every position at
+      //     the crashed prints through the real sell API (proceeds land in
+      //     cash via the canonical faucet);
+      //  3) the SEIZURE — proceeds, walking-around cash and the account sweep
+      //     all go against the margin loan; it STILL doesn't cover it. Balance
+      //     zero, residual loan due. Every readout (laptop, charpanel
+      //     netWorth, phone bank app) reads the same zeros because they all
+      //     read the same state this actually changed.
+      const S = CBZ.stocks;
+      const cash0 = g.cash || 0, bank0 = g.cityBank || 0;
+      let port0 = 0;
+      if (S && S.portfolioValue) { try { port0 = S.portfolioValue(); } catch (e) {} }
+      if (S && S.crashAll) { try { S.crashAll(0.97); } catch (e) {} }
+      if (S && S.sellAll && g.cityPortfolio) {
+        try { for (const sym of Object.keys(g.cityPortfolio)) S.sellAll(sym); } catch (e) {}
+      }
+      lost = Math.round(cash0 + bank0 + port0);
+      g.cash = 0;
+      g.cityBank = 0;
+      g.cityDebt = Math.max(g.cityDebt || 0, T.marginDebt || 250000);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    } else {
+      // legacy scripted zero-out (EXEC_REAL_CRASH off)
+      lost = (g.cash || 0) + (g.cityBank || 0);
+      g.cash = 0;
+      g.cityBank = 0;
+      if (g.cityDebt == null || g.cityDebt < 250000) g.cityDebt = 250000;  // margin loan still due
+    }
     paintLaptop(0, 0, true);
     if (CBZ.cityWorldCommit) try { CBZ.cityWorldCommit(); } catch (e) {}
     if (CBZ.cityPhoneNotify) {
@@ -611,31 +704,40 @@
         CBZ.cityPhoneNotify({
           app: "bank",
           from: "Apex Brokerage",
-          text: "MARGIN CALL: portfolio liquidated. Balance $0. Outstanding margin loan due immediately.",
+          text: "MARGIN CALL — positions liquidated at the low. " + fmt$(lost) +
+            " gone. Outstanding margin balance " + fmt$((T.marginDebt || 250000)) + " due immediately.",
         });
       } catch (e) {}
     }
     if (CBZ.city) {
-      CBZ.city.big("📉 EVERYTHING IS GONE");
-      CBZ.city.note("Phone buzzes. Brokerage. You just became the poorest man in a suit.", 3.2, { urgent: true });
+      CBZ.city.big("📉 −" + fmt$(lost));
+      CBZ.city.note("Phone buzzes. Brokerage. " + fmt$(lost) + " — gone. You just became the poorest man in a suit.", 3.2, { urgent: true });
     }
     if (CBZ.sfx) try { CBZ.sfx("empty"); } catch (e) {}
   }
 
-  // SCENE: top floor of the tallest office, laptop crash, then free-roam
-  // descent to street level (elevators/stairs already work in the city).
+  // SCENE: the executive floor at the crown of the tallest tower (storey 50
+  // of the Spire, ~160m — exec_office.js's suite; tallest-office fallback),
+  // laptop crash, then free-roam descent to street level (the suite's express
+  // lift rides straight to the door; the walk-in tower lift serves the roof).
   function sceneExec(game) {
-    const lot = findOfficeLot();
+    const lot = findExecTower();
     if (!lot || !lot.building) return null;
     const b = lot.building;
     const FH = b.FH || 4.6;
     const storeys = b.storeys || 1;
-    const floorY = (b.floorTops && b.floorTops[storeys - 1] != null) ? b.floorTops[storeys - 1] : (storeys - 1) * FH;
+    const eo = b.execOffice && b.execOffice.floorY != null ? b.execOffice : null;
+    const floorY = eo ? eo.floorY
+      : (b.floorTops && b.floorTops[storeys - 1] != null) ? b.floorTops[storeys - 1] : (storeys - 1) * FH;
     const groundY = (b.floorTops && b.floorTops[0] != null) ? b.floorTops[0] : 0;
     const w = b.w || (lot.w || 24);
     const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
-    const entry = clearSpot(b, floorY, bx - w / 2 + (b.stairW || 3.2) + 1.4, bz);
-    const spot = clearSpot(b, floorY, bx + w / 2 - 2.4, bz);
+    // In the suite he stands behind HIS desk facing the office door; the
+    // generic fallback keeps the old stairwell-facing placement.
+    const entry = (eo && eo.face) ? { x: eo.face.x, z: eo.face.z }
+      : clearSpot(b, floorY, bx - w / 2 + (b.stairW || 3.2) + 1.4, bz);
+    const spot = (eo && eo.spawn) ? clearSpot(b, floorY, eo.spawn.x, eo.spawn.z, 2.5)
+      : clearSpot(b, floorY, bx + w / 2 - 2.4, bz);
 
     const P = CBZ.player;
     P.pos.set(spot.x, floorY, spot.z); P.vy = 0; P.grounded = true;
@@ -649,10 +751,12 @@
       else g.citySpawnPoint = { x: lot.cx, z: lot.cz };
     } catch (e) {}
 
-    if (CBZ.city) CBZ.city.note("💼 Marcus Sterling. Top floor. Suit, gold watch, shades. On paper — a god.", 3.2);
+    if (CBZ.city) CBZ.city.note(eo
+      ? "💼 Marcus Sterling. Sterling Capital — floor 50 of the Spire, the tallest tower in the city. On paper — a god."
+      : "💼 Marcus Sterling. Top floor. Suit, gold watch, shades. On paper — a god.", 3.2);
 
     const T = ORIGIN_TUNING.exec;
-    paintLaptop(T.startCash, T.startBank, false);
+    paintLaptop(g.cash != null ? g.cash : T.startCash, execBrokerage() || T.startBank, false);
     showLaptop(true);
 
     scene = {
@@ -685,21 +789,25 @@
     const wt = execWallSec(s);
 
     if (s.phase === "laptop") {
-      // Pre-crash wobble on the numbers for a beat, then wipe.
+      // The laptop shows the REAL balances (live cash + live portfolio value —
+      // the same numbers charpanel/netWorth read) with a cosmetic pre-market
+      // flutter, then the real crash fires.
       if (!s.crashed && wt >= T.crashAfterSec) {
         s.crashed = true;
         fireExecCrash();
       } else if (!s.crashed) {
-        // soft red drift so the laptop feels live before the knife drops
-        const wobble = Math.max(0, 1 - wt / T.crashAfterSec);
-        paintLaptop(Math.floor(T.startCash * (0.7 + 0.3 * wobble)), Math.floor(T.startBank * (0.7 + 0.3 * wobble)), false);
+        const flut = 1 + Math.sin(wt * 9.1) * 0.004;   // deterministic display flutter only
+        paintLaptop(Math.round(g.cash || 0), Math.round(execBrokerage() * flut), false);
       }
       if (wt >= T.laptopSec) {
         showLaptop(false);
         s.phase = "descend"; s.t = 0;
         s.wall0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
         if (CBZ.city) {
-          CBZ.city.note("Take the elevator or stairs. Get to level 1. The street doesn't care who you were.", 4.0, { urgent: true });
+          const hasLift = !!(s.lot && s.lot.building && s.lot.building.execOffice && s.lot.building.execOffice.lift);
+          CBZ.city.note(hasLift
+            ? "Take the express lift by the core — or find your own way down. Get to level 1. The street doesn't care who you were."
+            : "Take the elevator or stairs. Get to level 1. The street doesn't care who you were.", 4.0, { urgent: true });
           if (CBZ.city.big) CBZ.city.big("↓ GROUND FLOOR");
         }
         // Waypoint the building door if we can.

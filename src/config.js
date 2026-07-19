@@ -624,6 +624,23 @@
   // jail chapter on every fresh run. The complete authored campaign remains
   // available by setting this flag true before Play.
   if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+  // THE EXECUTIVE — REAL MARKET CRASH. His opening stops being a fake "the
+  // numbers say zero" line: he STARTS with a real brokerage portfolio (real
+  // share positions on sim/stocks.js, counted by every net-worth readout) and
+  // the story beat executes a REAL market-wide price collapse + margin-call
+  // liquidation through the stocks/bank APIs, so the laptop, the phone,
+  // charpanel and the bank all agree on the actual number lost. Flip false to
+  // restore the old scripted cash/bank zero-out.
+  if (CBZ.CONFIG.EXEC_REAL_CRASH == null) CBZ.CONFIG.EXEC_REAL_CRASH = true;
+  // THE EXECUTIVE — TOP OF THE TALLEST TOWER. His opening moves to a dedicated
+  // EXECUTIVE FLOOR at the crown of the 52-storey flagship mega-tower (storey
+  // 50, directly under the penthouse), dressed by city/exec_office.js (one
+  // corner office / one meeting room / one reception — space first), with a
+  // private express lift back to street level, and the flagship's curtain
+  // wall goes CLEAR glass so the city reads far below from inside. Flip false
+  // to restore the old spawn (tallest office lot) and the mega-tower's mirror
+  // glass + natatorium-under-penthouse layout.
+  if (CBZ.CONFIG.EXEC_TOP_OFFICE == null) CBZ.CONFIG.EXEC_TOP_OFFICE = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;

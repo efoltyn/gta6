@@ -125,6 +125,11 @@
     }
     if (b.jewelry && b.jewelry.cases) for (const c of b.jewelry.cases) a.push({ x: c.x, z: c.z, r: 1.6 });
     if (b.club && b.club.insideSpot) a.push({ x: b.club.insideSpot.x, z: b.club.insideSpot.z, r: 1.8 });
+    // the mega-tower EXECUTIVE FLOOR (city/exec_office.js) stamps world-space
+    // keep-clear anchors (desk / meeting table / reception / express core) —
+    // the carved shaft column runs the full tower height through every floor,
+    // so the strict pass steers it into the suite's furniture-free wall slots.
+    if (b.execOffice && b.execOffice.keepClear) for (const c of b.execOffice.keepClear) a.push({ x: c.x, z: c.z, r: c.r || 2.0 });
     if (b.shop) {
       // the SOLID back counter: same placement math as worldgen (door-relative
       // back wall, shifted onto the solid half on climbable buildings)

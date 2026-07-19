@@ -359,6 +359,61 @@
     st.momentum += frac;
     return true;
   }
+  // ---- MARKET-WIDE CRASH: the "war/nationalization" class of external event
+  // at full scale — an IMMEDIATE multiplicative price collapse across every
+  // listing (shock() only nudges momentum, which the hourly tick applies far
+  // too slowly for a story beat). frac ∈ (0,1] = fraction of value destroyed
+  // (0.97 → prices keep 3%). Prices floor at PRICE_FLOOR, momentum is left
+  // deeply negative so the tape keeps reading red, the sparkline records the
+  // cliff, and the index re-marks instantly. Caller: THE EXECUTIVE's opening
+  // margin-call beat (city/origins.js, CBZ.CONFIG.EXEC_REAL_CRASH).
+  function crashAll(frac) {
+    ensureInit();
+    if (!isFinite(frac)) return false;
+    const f = Math.max(0, Math.min(1, frac));
+    let n = 0;
+    for (const sym in g.stocks.list) {
+      const st = g.stocks.list[sym];
+      st.price = clampNum(PRICE_FLOOR, PRICE_CAP, round2(st.price * (1 - f)));
+      st.momentum = Math.min(st.momentum, -0.25);        // the tape stays red after the cliff
+      st.history.push(st.price);
+      if (st.history.length > HIST_CAP) st.history.shift();
+      n++;
+    }
+    updateIndex();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return n > 0;
+  }
+  // ---- GRANTED POSITIONS (the ipo() grant idiom, exposed): mint `shares` of
+  // `sym` into the player's portfolio at the CURRENT price as cost basis — no
+  // cash changes hands (an opening-scene endowment, not a trade: no fee, no
+  // flowAcc herd impact). Returns the dollar value granted, 0 on failure.
+  function grant(sym, shares) {
+    shares = Math.floor(shares);
+    if (!(shares > 0)) return 0;
+    ensureInit();
+    const st = g.stocks.list[sym];
+    if (!st || !isFinite(st.price) || st.price <= 0) return 0;
+    const P = g.cityPortfolio, B = g.cityPortfolioBasis;
+    const prevQty = P[sym] || 0, prevBasis = B[sym] || 0;
+    const newQty = prevQty + shares;
+    B[sym] = (prevBasis * prevQty + st.price * shares) / newQty;
+    P[sym] = newQty;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return round2(shares * st.price);
+  }
+  // ---- portfolioValue(): total live market value of every held position.
+  // city/economy.js folds this into holdingsWorth()/netWorth() so brokerage
+  // wealth counts everywhere (charpanel, wealth tiers, bank offers).
+  function portfolioValue() {
+    ensureInit();
+    let s = 0;
+    for (const sym in g.cityPortfolio) {
+      const st = g.stocks.list[sym];
+      if (st && isFinite(st.price)) s += (g.cityPortfolio[sym] || 0) * st.price;
+    }
+    return s;
+  }
 
   // ---- reads ---------------------------------------------------------------
   function get(sym) { ensureInit(); return g.stocks.list[sym] || null; }
@@ -558,6 +613,9 @@
     quote: quote,
     tickerLine: tickerLine,
     shock: shock,
+    crashAll: crashAll,
+    grant: grant,
+    portfolioValue: portfolioValue,
     buy: buy,
     sell: sell,
     sellAll: sellAll,

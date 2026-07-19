@@ -167,6 +167,9 @@
       // skip the top home floor (the listed tier lives there); compare by Y so
       // a flagship penthouse on the very top slab is excluded precisely.
       if (topFloorY != null && Math.abs(fy - topFloorY) < 0.05) continue;
+      // skip the mega-tower's EXECUTIVE FLOOR (b.execOffice, exec_office.js) —
+      // the suite is a workplace, never leased out to a micro-flat tenant.
+      if (b.execOffice && b.execOffice.floorY != null && Math.abs(fy - b.execOffice.floorY) < 0.05) continue;
       // higher floors read as marginally nicer → a small upward bonus. Ground
       // (k=0) is cheapest; each storey adds a few percent. Keeps it MICRO.
       const floorBonus = 1 + Math.min(0.5, k * 0.04);

@@ -3261,6 +3261,11 @@
   // The connected island district reuses the exact same enterable shell and
   // stair rig, so every added tower behaves like the original city buildings.
   CBZ.cityMakeBuilding = makeBuilding;
+  // The ONE shared translucent glass material (windows/shards/awnings pool).
+  // Exported so interior builders outside this file (city/exec_office.js's
+  // meeting-room front) share the same cached material instance instead of
+  // minting a lookalike — one material, one batch bucket, zero extra state.
+  CBZ.cityGlassMat = glassMat;
 
   // ---- ELEVATOR-SHAFT CARVE ----------------------------------------------
   // city/elevators.js owns the lift cab + the visible enclosed shaft column,
@@ -4951,7 +4956,17 @@
     // the flagship always lands on a core/commercial lot (see the lux-lot pick
     // above) — kit it as "core" explicitly (makeMegaTower has no city/districtKind
     // in scope) so it keeps the glassiest, cleanest split-grammar mix.
-    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side, { garageGround: true, district: "core" });
+    // THE EXECUTIVE FLOOR (CBZ.CONFIG.EXEC_TOP_OFFICE): storey 50 — directly
+    // under the penthouse — is the Executive origin's suite, dressed by
+    // city/exec_office.js. The natatorium slides one storey down. The curtain
+    // wall goes CLEAR glass (the same pooled see-through panes office towers
+    // use — identical instanced draw calls) because the whole point of the
+    // suite is SEEING the city 160m below; the reflective mirror kit is
+    // near-opaque from inside. Flag off → the exact old layout + mirror skin.
+    const EXECF = !!(CBZ.CONFIG && CBZ.CONFIG.EXEC_TOP_OFFICE);
+    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side,
+      EXECF ? { garageGround: true, district: "core", glassKind: "clear" }
+            : { garageGround: true, district: "core" });
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
     furnishPenthouse(b, topY);
@@ -4959,11 +4974,23 @@
     // every floor between the garage deck and the penthouse is a dressed flat —
     // dozens of storeys of stairwell views into OTHER people's homes makes the
     // penthouse on top read as the apex (merged tris; no extra draw calls).
-    // the storey just below the penthouse is the mansion NATATORIUM (indoor pool);
+    // the storey just below the penthouse is the EXECUTIVE FLOOR (flag on) or
+    // the mansion NATATORIUM (flag off; the pool then rides one lower);
     // every other floor is a dressed flat (merged tris; no extra draw calls).
+    const execY = (STOREYS - 2) * FH;
     for (let k = 1; k < STOREYS - 1; k++) {
-      if (k === STOREYS - 2) furnishPoolFloor(b, k * FH);
+      if (EXECF && k === STOREYS - 2) continue;           // the executive suite — dressed below
+      if (k === STOREYS - (EXECF ? 3 : 2)) furnishPoolFloor(b, k * FH);
       else furnishApartmentFloor(b, k * FH, k);
+    }
+    if (EXECF) {
+      // exec_office.js (loads after this file; the city builds long after both)
+      // owns the suite: one corner office, one meeting room, one reception,
+      // acres of floor. It stamps b.execOffice = { floorY, spawn, … } which the
+      // Executive origin + the express lift + the rent-unit skips all read.
+      // Fallback: the generic office dresser, so the floor is never bare.
+      if (CBZ.cityFurnishExecOffice) CBZ.cityFurnishExecOffice(b, execY, lot);
+      else { furnishOfficeFloor(b, execY, 0); b.execOffice = { floorY: execY }; }
     }
 
     // A clean PENTHOUSE DOOR off the elevator landing on the top floor. The shell's
@@ -6287,6 +6314,9 @@
       // skip the top home floor precisely (compare by Y so a flagship penthouse on
       // the very top slab is excluded even when indexing differs).
       if (topFloorY != null && Math.abs(fy - topFloorY) < 0.05) continue;
+      // skip the EXECUTIVE FLOOR too (the mega-tower suite) — a corner office
+      // is not a rentable flat; without this a tenant would lease the suite.
+      if (b.execOffice && b.execOffice.floorY != null && Math.abs(fy - b.execOffice.floorY) < 0.05) continue;
       const lift = storeys > 1 ? f / (storeys - 1) : 0;     // 0 at ground → 1 near top
       for (let u = 0; u < perFloor; u++) {
         // the FIRST unit on the two lowest floors is the dirt-cheap MICRO tier so

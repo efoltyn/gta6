@@ -962,6 +962,10 @@
     else if (g.cityProps) { for (const p of g.cityProps) s += (p.equity || p.value || 0); }
     if (CBZ.cityEmpire && CBZ.cityEmpire.bizValue) s += CBZ.cityEmpire.bizValue() | 0;
     if (g.cityGarage) { for (const c of g.cityGarage) { const car = carByName(c.name || c); if (car) s += (car.value * 0.85) | 0; } }
+    // live market value of the exchange portfolio (sim/stocks.js) — brokerage
+    // wealth is real wealth: without this the Executive's opening portfolio
+    // (and any player stock position) was invisible to every net-worth readout.
+    if (CBZ.stocks && CBZ.stocks.portfolioValue) s += CBZ.stocks.portfolioValue() | 0;
     return s | 0;
   }
   function netWorth() {
