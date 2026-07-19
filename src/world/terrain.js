@@ -94,7 +94,29 @@
     if (!E) return;
     FLAT.minX = Math.min(FLAT.minX, E.minX); FLAT.maxX = Math.max(FLAT.maxX, E.maxX);
     FLAT.minZ = Math.min(FLAT.minZ, E.minZ); FLAT.maxZ = Math.max(FLAT.maxZ, E.maxZ);
+    // PLATE ⊆ relief-clear law. The continent plate extends
+    // CONTINENT_COUNTRY_MARGIN past the region union and every metre of it
+    // is WALKABLE backcountry — THIS file's hills must be exactly 0 there,
+    // or grassy foothills stand on wilds land (the mountains-outside-snow
+    // violation the math gate caught on the east/west/south dry belts).
+    // CRITICAL: the extra clearance is PRIVATE to this file's falloff and
+    // ring math (PLATE_G below) — it must NOT be folded into the shared
+    // FLAT rect, because terrain_overhaul.js anchors the whole snow massif
+    // to FLAT's edges (heroes at FLAT.minZ-720, range masks on
+    // FLAT.minZ - z, centre on FLAT's midpoint): growing the shared object
+    // teleported the massif field and dropped mountains on the city
+    // (city-on-mountain 2323 — the gate caught that too). Same PAD
+    // derivation as continent.js, kept in lockstep, +120u guard.
+    const CFG2 = CBZ.CONFIG || {};
+    const reqMargin = Number(CFG2.CONTINENT_COUNTRY_MARGIN);
+    const PAD = CFG2.CONTINENT_EXPANSION_V2 === false ? 40
+      : Math.max(180, Math.min(2400, Number.isFinite(reqMargin) ? reqMargin : 2200));
+    PLATE_G = PAD + 120;
   }
+  // Private plate clearance for this file's relief falloff + ring radii:
+  // 0 in the authored world (flag off → growToEnlargeSeed never runs), so
+  // the compact world stays byte-identical.
+  let PLATE_G = 0;
 
   // The backdrop ring radii, derived from the live FLAT so the mountains
   // stand clear of walkable land no matter how far the world spreads. The
@@ -104,7 +126,7 @@
   // Shared with terrain_overhaul.js's builders for CBZ.TERRAIN_RING_DEBUG.
   CBZ.terrainRingRadii = function (flat) {
     const f = flat || FLAT;
-    const half = Math.max((f.maxX - f.minX) / 2, (f.maxZ - f.minZ) / 2);
+    const half = Math.max((f.maxX - f.minX) / 2, (f.maxZ - f.minZ) / 2) + PLATE_G;
     const near = Math.max(1900, half + 380);
     const k = near / 1900;                    // keep the authored ratios
     const far = Math.round(2250 * k), colossus = Math.round(2050 * k),
@@ -167,8 +189,10 @@
   // signed-ish distance from a point to the FLAT rectangle: 0 inside,
   // grows positive as you move away (Chebyshev/box distance to the rect).
   function distOutsideFlat(x, z) {
-    const dx = Math.max(FLAT.minX - x, 0, x - FLAT.maxX);
-    const dz = Math.max(FLAT.minZ - z, 0, z - FLAT.maxZ);
+    // PLATE_G inflates the relief-clear zone past the walkable plate edge —
+    // private to this file; the shared FLAT rect itself is NOT grown.
+    const dx = Math.max((FLAT.minX - PLATE_G) - x, 0, x - (FLAT.maxX + PLATE_G));
+    const dz = Math.max((FLAT.minZ - PLATE_G) - z, 0, z - (FLAT.maxZ + PLATE_G));
     // Euclidean box distance (rounds the corners — no hard square ridge).
     return Math.sqrt(dx * dx + dz * dz);
   }
