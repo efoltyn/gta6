@@ -206,6 +206,16 @@
     actor.state = anchor.state || "sit";
     actor.speed = 0; actor.pause = Math.max(actor.pause || 0, 1);
     actor._parked = false;
+    // The street render-LOD (peds.js) hides rigs beyond ~95m, and cabin
+    // drafts deliberately claim FAR bodies (safeCabinDraft rejects anyone
+    // the player could watch vanish) — so a claimed actor usually arrives
+    // here with group.visible=false, and the peds tick used to skip
+    // _npcAttached actors before its visibility recompute. That produced
+    // live, hittable, talking but INVISIBLE passengers (r128 raycasts
+    // ignore visible=false). An anchor is an authored, meant-to-be-seen
+    // placement: force the rig visible. peds.js re-applies distance LOD
+    // to attached rigs every frame after this.
+    group.visible = true;
     if (actor.char) {
       actor.char.sitting = anchor.pose !== "stand";
       actor.char.handsUp = false;

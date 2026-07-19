@@ -4258,6 +4258,16 @@
       if (p._npcAttached) {
         p.speed = 0;
         if (p.tag) p.tag.visible = false;
+        // Attached rigs skip the walk/think path below, which also skipped
+        // the render-LOD recompute — an actor claimed while distance-hidden
+        // stayed invisible in its seat forever. Apply the same LOD here:
+        // seated passengers draw when you're at the aircraft (visible
+        // through the glass — the payoff of the real windows) and stop
+        // drawing across the map. p.pos is world-space (npclife.js syncs
+        // it before this tick); enterT is deliberately ignored — a seat is
+        // not a shop interior.
+        const ax = p.pos.x - camx, az = p.pos.z - camz;
+        p.group.visible = ax * ax + az * az < VIS_D2;
         continue;
       }
       if (p.inCar) continue;     // vehicles.js owns it while it drives
