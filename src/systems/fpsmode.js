@@ -1903,7 +1903,12 @@
     if (w.explosive) {
       const MIN_DET = 4;
       const ammoSpec = rocketAmmoSpec(w) || { id: "standard", homing: false };
-      const guidedTarget = ammoSpec.homing ? acquireHomingTarget(origin, fwd, ammoSpec) : null;
+      // LOCK-ON (systems/lockon.js): a RED on-screen lock overrides pull-time
+      // acquisition — undefined means that system is absent/disabled, so the
+      // legacy path below runs byte-identically; null means it's on with no
+      // lock, which flies dead straight (the owner's "no lock, no homing").
+      let guidedTarget = CBZ.lockonFireTarget ? CBZ.lockonFireTarget() : undefined;
+      if (guidedTarget === undefined) guidedTarget = ammoSpec.homing ? acquireHomingTarget(origin, fwd, ammoSpec) : null;
       // a rocket REACHES across the whole map — its detonation must not be capped
       // at the gun's per-pellet `range` (200), or a tower you aim at 250u down a
       // boulevard shows the fireball in empty air SHORT of the wall and the facade
@@ -2027,7 +2032,7 @@
           homing: true,
           seek: guidedTarget.seek,
           speed: projSpeed,
-          turnRate: ammoSpec.turnRate || 2.4,
+          turnRate: guidedTarget.turnRate || ammoSpec.turnRate || 2.4,   // lockon.js carries a per-weapon cap
           targetRadius: guidedTarget.radius || 2,
           maxLife: Math.max(3.8, Math.min(8, flightDur + 2.5)),
           impactPoint: pt,
@@ -2544,7 +2549,9 @@
   // ---- input ----
   document.addEventListener("mousemove", (e) => {
     if (!fps.active || document.pointerLockElement == null) return;
-    fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - e.movementY * SENS));
+    // scoped look is proportionally finer (systems/lockon.js real sniper scope)
+    const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
+    fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - e.movementY * SENS * sensMul));
   });
   document.addEventListener("mousedown", (e) => {
     if (CBZ.game.mode === "survival") return;   // disaster mode: grapple.js owns push/grab/punch
@@ -2823,7 +2830,9 @@
         if (fpsHipFov === 0) fpsHipFov = 75;   // FP hip → ADS lands ~50 (hip − ADS_FOV_DROP)
         // a mounted scope (city/gunmods.js) overrides the ADS target with a much
         // tighter lens — a red-dot barely nudges it, a sniper scope slams it to ~12°.
-        const scopeF = CBZ.cityScopeFov && CBZ.cityScopeFov();
+        // The factory sniper's REAL scope (systems/lockon.js) reads first; it
+        // returns null whenever a gunsmith optic is fitted, so exactly one wins.
+        const scopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
         const wantFov = scopeF ? scopeF : (ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov);
         if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
           CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);

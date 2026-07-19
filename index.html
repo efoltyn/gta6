@@ -606,6 +606,12 @@
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
 <script src="src/city/gunmods.js?v=optic3"></script>
 <script src="src/city/scopeview.js?v=mods1"></script>
+<!-- missile lock-on squares + homing hand-off + the factory sniper's REAL
+     scope. After fpsmode/weapons (whose fire paths it feeds) and after
+     scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
+     always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
+     CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
+<script src="src/systems/lockon.js?v=lockon1"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
 <script src="src/city/careers.js?v=citysec2"></script>
 <script src="src/city/activities.js?v=hub2"></script>
