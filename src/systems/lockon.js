@@ -590,6 +590,15 @@
     return true;
   }
 
+  // resolve the scoped state NOW (shared by the per-frame tick AND the touch
+  // API calls, so a button tap engages the very same call — no one-frame lag).
+  function resolveScope() {
+    const want = canScope() && (manualScope || (CBZ.fpsAimHeld && CBZ.fpsAimHeld()));
+    if (want && !scopedNow) scopeEngage();
+    else if (!want && scopedNow) scopeRelease();
+    return scopedNow;
+  }
+
   // ---- touch-layer API (mobile agent wires these to a button) ----
   CBZ.fpsCanScope = canScope;
   CBZ.fpsScoped = function () { return scopedNow; };
@@ -598,12 +607,14 @@
   CBZ.fpsScope = function (down) {
     manualScope = !!down && canScope();
     if (CBZ.fpsSetAim) CBZ.fpsSetAim(manualScope);
+    resolveScope();
     return manualScope;
   };
   // toggle-style: one tap in, one tap out.
   CBZ.fpsScopeToggle = function () {
     manualScope = !manualScope && canScope();
     if (CBZ.fpsSetAim) CBZ.fpsSetAim(manualScope);
+    resolveScope();
     return manualScope;
   };
   // fpsmode's single-owner FP FOV block reads this (takes precedence over the
@@ -693,10 +704,8 @@
   // runs BEFORE fpsmode's onAlways(52) so this frame's camera write already
   // includes the sway and fpsmode's FOV block reads a current fpsScopeFov.
   CBZ.onAlways(51.5, function (dt) {
-    const want = canScope() && (manualScope || (CBZ.fpsAimHeld && CBZ.fpsAimHeld()));
-    if (!want && manualScope) manualScope = false;      // weapon switched / context lost
-    if (want && !scopedNow) scopeEngage();
-    else if (!want && scopedNow) scopeRelease();
+    if (manualScope && !canScope()) manualScope = false;   // weapon switched / context lost
+    resolveScope();
     if (!scopedNow) return;
 
     // ---- idle sway: a slow figure-8 + a tiny random wander, applied to the
