@@ -392,10 +392,12 @@
     // headgear where the JOB wears one — a rig only grows a cap slot at build
     // time (that's how cops get theirs), so it's decided here, off the cast job:
     // construction = the yellow hardhat, deputy = the khaki campaign hat read,
-    // soldier = the olive patrol cap.
+    // soldier = the olive patrol cap, pilot = the navy captain's cap (pairs
+    // with the Captain's Stripes uniform jobFit casts).
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
-        : /soldier/i.test(opts.job || "") ? 0x44503a : null;
+        : /soldier/i.test(opts.job || "") ? 0x44503a
+          : /pilot|first officer|aviator/i.test(opts.job || "") ? 0x151c2e : null;
     // stashed on the ped below (_longHair) so schedule.js's ledger can persist
     // this roll — otherwise a woman who despawns and re-deals comes back bald.
     const longHair = gender === "f" && r() < 0.6;

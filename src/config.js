@@ -690,6 +690,14 @@
   // stacked altitude bands, banking into their turns. Pure atmosphere — no
   // colliders, no weapons, no wanted interaction. Flip false to clear the sky.
   if (CBZ.CONFIG.AIR_TRAFFIC_AMBIENT == null) CBZ.CONFIG.AIR_TRAFFIC_AMBIENT = true;
+  // REAL COCKPIT DOOR (city/island_airport.js): the airliner cockpit becomes
+  // a room you physically enter — the bulkhead gets a genuine doorway with a
+  // sliding pocket-door leaf that eases open as you approach (elevator
+  // grammar), the boarding doorway becomes a true hull aperture you can see
+  // through from both sides, the walkable cabin deck extends into the
+  // cockpit, and the captain's chair seats a live uniformed pilot NPC.
+  // Flip false to restore the painted bulkhead door + solid hull.
+  if (CBZ.CONFIG.COCKPIT_REAL_DOOR == null) CBZ.CONFIG.COCKPIT_REAL_DOOR = true;
 
   // NPC SCHEDULES (owner's rule: "at night they should almost all be in bed
   // except maybe gangsters and homeless… simple math and schedules… to give
