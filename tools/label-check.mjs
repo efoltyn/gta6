@@ -102,6 +102,30 @@ for (let ci = 0; ci < 6 && !locked; ci++) {
   console.log("candidate", ci, JSON.stringify(r), "locked:", !!locked);
 }
 
+if (!locked) {
+  const dbg = await evl(`(() => {
+    const C = window.CBZ, T = window.THREE; const p = (window.__cands||[])[0]; if (!p) return "no cand";
+    const cam = C.camera; const cp = cam ? cam.getWorldPosition(new T.Vector3()) : null; const cd = cam ? cam.getWorldDirection(new T.Vector3()) : null;
+    let hit = null; try { hit = C.aimedActor(360); } catch (e) { hit = "ERR " + e.message; }
+    const ap = C.aimedPed ? C.aimedPed(C.player.pos.x, C.player.pos.z) : "no fn";
+    const grp = p.char && p.char.group;
+    return JSON.stringify({
+      player: [+C.player.pos.x.toFixed(2), +C.player.pos.y.toFixed(2), +C.player.pos.z.toFixed(2)],
+      pedPos: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
+      pedGroupPos: grp ? [+grp.position.x.toFixed(2), +grp.position.y.toFixed(2), +grp.position.z.toFixed(2)] : null,
+      pedGroupParent: grp && grp.parent ? (grp.parent.name || grp.parent.type) : null,
+      pedVisible: grp ? grp.visible : null,
+      dist: +Math.hypot(p.pos.x - C.player.pos.x, p.pos.z - C.player.pos.z).toFixed(2),
+      camPos: cp ? [+cp.x.toFixed(2), +cp.y.toFixed(2), +cp.z.toFixed(2)] : null,
+      camDir: cd ? [+cd.x.toFixed(2), +cd.y.toFixed(2), +cd.z.toFixed(2)] : null,
+      camYaw: C.cam ? +C.cam.yaw.toFixed(3) : null, fpFp: C.fps ? +C.fps.fp.toFixed(3) : null,
+      aimedActor: hit && hit.actor ? { name: hit.actor.name, dist: +(hit.dist || 0).toFixed(2) } : hit,
+      aimedPedName: ap && ap.name ? ap.name : ap,
+    });
+  })()`);
+  console.log("DBG:", dbg);
+}
+
 const diag = await evl(`(() => {
   const C = window.CBZ;
   const t = C.cityAimDossierTarget;
