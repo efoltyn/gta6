@@ -56,11 +56,10 @@
 
   <!-- SURVIVAL mode HUD (shown only in disaster mode) -->
   <div id="survTop" class="panel"><b id="aliveCount">100</b><span>ALIVE</span></div>
-  <div id="survZone" class="panel"><span id="survZoneText"></span></div>
+  <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
   <div id="survBars">
     <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
     <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
-    <div class="sbar"><span class="slab">HUNGER</span><div class="sbarbg"><div id="hungerBarSurv"></div></div></div>
   </div>
   <div id="disasterBanner"></div>
 
@@ -135,7 +134,7 @@
 
     <!-- SURVIVAL mode -->
     <div class="mode-survival-only">
-      <div class="logo">DISASTER <span class="z">ZONE</span></div>
+      <div class="logo">DISASTER <span class="z">SURVIVAL</span></div>
       <div class="sub">Natural Disaster Survival</div>
       <details class="controls">
         <summary>Controls</summary>
@@ -421,7 +420,7 @@
 <script src="src/systems/inventory.js?v=loot1"></script>
 <script src="src/systems/state.js?v=arrest4"></script>
 <script src="src/systems/save.js"></script>
-<script src="src/systems/touch.js?v=ipad4"></script>
+<script src="src/systems/touch.js?v=ipad5"></script>
 <script src="src/systems/touch_vehicle.js?v=ipad4"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
@@ -436,14 +435,13 @@
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=glass1"></script>
-<script src="src/world/disaster_arena.js?v=samples1"></script>
-<script src="src/systems/grapple.js?v=hiplock1"></script>
-<script src="src/entities/survivorbot.js?v=notags1"></script>
-<script src="src/modes/survival.js?v=gore1"></script>
-<script src="src/systems/disasters.js?v=samples1"></script>
-<script src="src/systems/safezone.js?v=zone1"></script>
+<script src="src/world/disaster_arena.js?v=layers1"></script>
+<script src="src/systems/grapple.js?v=intact1"></script>
+<script src="src/entities/survivorbot.js?v=nozone1"></script>
+<script src="src/modes/survival.js?v=nozone1"></script>
+<script src="src/systems/disasters.js?v=nozone1"></script>
 <script src="src/systems/survival_interact.js?v=ctrl1"></script>
-<script src="src/systems/survivalhud.js?v=route1"></script>
+<script src="src/systems/survivalhud.js?v=nozone1"></script>
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
      registers its own updaters (gated by game.mode==="city") and builds its
@@ -832,7 +830,7 @@
 <script src="src/city/elections.js?v=pol1"></script>
 
 <!-- X-wave: the world -->
-<script src="src/systems/hunger.js?v=world1"></script>
+<script src="src/systems/hunger.js?v=nosurv1"></script>
 <!-- X5: the village hut/shack/well/market-stall kit (CBZ.assets.define +
      CBZ.CITY_TEMPLATES.village). Must load before countries.js CONSUMES it
      via buildTown/CBZ.cityTemplate — countries.js builds lazily through

@@ -117,6 +117,14 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
+  // SURV_NO_HUNGER (owner report): DISASTER SURVIVAL has no hunger stat at
+  // all — a short battle-royale round is about the disasters, not a food
+  // meter. With the flag on (default) the survival branch below is skipped
+  // entirely: no drain, no starvation, no hungry-sprint gate, and
+  // CBZ.player.hunger reads permanently full there. City and escape keep
+  // their loops exactly as documented above. false = the old survival drain.
+  if (CBZ.CONFIG && CBZ.CONFIG.SURV_NO_HUNGER == null) CBZ.CONFIG.SURV_NO_HUNGER = true;
+
   const HOUR = 150 / 24;   // seconds per in-game hour — matches market.js/npcecon.js/daynight.js's CYCLE exactly
 
   function clampNum(lo, hi, v) { return Math.max(lo, Math.min(hi, v)); }
@@ -150,6 +158,10 @@
       // g.hunger — just mirror it so CBZ.player.hunger reads correctly
       // in every mode without touching that file's own state machine.
       CBZ.player.hunger = g.hunger == null ? 100 : g.hunger;
+    } else if (g.mode === "survival" && (!CBZ.CONFIG || CBZ.CONFIG.SURV_NO_HUNGER !== false)) {
+      // disaster mode: hunger does not exist (SURV_NO_HUNGER). Read full so
+      // the cross-mode effects below (sprint gate / regen block) never fire.
+      CBZ.player.hunger = 100;
     } else if (g.mode === "survival" || g.mode === "escape") {
       if (g._oocHunger == null) g._oocHunger = PLAYER_START;
       const drain = (DRAIN_PER_HR / HOUR) * (P.sprint ? SPRINT_MULT : 1);

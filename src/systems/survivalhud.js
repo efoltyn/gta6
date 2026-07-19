@@ -1,10 +1,14 @@
 /* ============================================================
-   systems/survivalhud.js — the SURVIVAL battle-royale HUD.
+   systems/survivalhud.js — the SURVIVAL disaster HUD.
 
    Alive-count pill ("87 ALIVE"), HP + stamina bars, the big disaster
-   warning banner, a zone/disaster status line, the screen white-out
-   (lightning/nuke), and a zone-aware minimap drawn to the existing
-   #minimap canvas (the prison minimap is gated off in this mode).
+   warning banner, a disaster status line (incoming / active / over),
+   the screen white-out (lightning/nuke), and a minimap drawn to the
+   existing #minimap canvas (the prison minimap is gated off in this
+   mode): terrain, survivors, you — and the ACTUAL location of the
+   live hazard (CBZ.disasters.hazards(): tornado funnel, strike
+   markers, sinkholes, lava vent, the advancing wave front, the nuke
+   shockwave). There are no zones in this mode — just disasters.
 
    Most elements are hidden in escape mode via the body.mode-survival
    class (see hud.css), so this only writes data while survival is live.
@@ -18,9 +22,8 @@
     hp: document.getElementById("hpBar"),
     stam: document.getElementById("stamBar"),
     banner: document.getElementById("disasterBanner"),
-    zone: document.getElementById("survZoneText"),
+    status: document.getElementById("survStatusText"),
     flash: document.getElementById("survFlash"),
-    hunger: document.getElementById("hungerBarSurv"),   // X2: systems/hunger.js's survival-mode meter
   };
   const cv = document.getElementById("minimap");
   const ctx = cv ? cv.getContext("2d") : null;
@@ -36,7 +39,7 @@
 
   function drawMinimap() {
     if (!ctx) return;
-    const surv = CBZ.surv, A = surv.arena, zone = surv.zone;
+    const surv = CBZ.surv, A = surv.arena;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "rgba(10,18,30,.55)"; ctx.fillRect(0, 0, W, H);
     if (!A) return;
@@ -48,14 +51,44 @@
     // island
     ctx.fillStyle = "rgba(90,150,90,.30)";
     ctx.beginPath(); ctx.arc(W / 2, H / 2, A.radius * sc, 0, 7); ctx.fill();
+    // terrain: the refuge mountain + hills, so "get to high ground" is readable
+    if (A.hills) {
+      for (let i = 0; i < A.hills.length; i++) {
+        const h = A.hills[i];
+        ctx.fillStyle = i === 0 ? "rgba(160,150,132,.5)" : "rgba(110,150,90,.45)";
+        ctx.beginPath(); ctx.arc(mx(h.x), mz(h.z), Math.max(2, h.r * sc), 0, 7); ctx.fill();
+      }
+    }
 
-    // the shrinking safe zone: a ring that reddens as it closes (matches the
-    // 3D storm-wall tint in safezone.js)
-    if (zone) {
-      const closeK = 1 - Math.min(1, zone.radius / 60);
-      ctx.strokeStyle = "rgba(" + ((77 + closeK * 178) | 0) + "," + ((140 - closeK * 115) | 0) + "," + ((255 - closeK * 180) | 0) + ",.9)";
-      ctx.lineWidth = zone.shrinking ? 2 : 1.4;
-      ctx.beginPath(); ctx.arc(mx(zone.cx), mz(zone.cz), Math.max(2, zone.radius * sc), 0, 7); ctx.stroke();
+    // THE HAZARD, where it actually is (SURV_MAP_HAZARDS): red circles for
+    // point threats (funnel, strikes, sinkholes, vent, shockwave front), a
+    // sweeping chord for a wave front. No rings, no zones — the map shows the
+    // disaster itself.
+    if ((!CBZ.CONFIG || CBZ.CONFIG.SURV_MAP_HAZARDS !== false) && CBZ.disasters && CBZ.disasters.hazards) {
+      const marks = CBZ.disasters.hazards();
+      if (marks && marks.length) {
+        const pulse = 0.55 + 0.35 * Math.abs(Math.sin((CBZ.now || 0) * 0.006));
+        ctx.strokeStyle = "rgba(255,80,50," + pulse.toFixed(2) + ")";
+        ctx.fillStyle = "rgba(255,80,50,.22)";
+        ctx.lineWidth = 1.6;
+        for (let i = 0; i < marks.length; i++) {
+          const m = marks[i];
+          if (m.line) {
+            // a front line (tsunami/flood wall): the chord through (x,z)
+            // perpendicular to the travel direction (dx,dz)
+            const px = -m.dz, pz = m.dx, L = A.radius + 10;
+            ctx.beginPath();
+            ctx.moveTo(mx(m.x - px * L), mz(m.z - pz * L));
+            ctx.lineTo(mx(m.x + px * L), mz(m.z + pz * L));
+            ctx.stroke();
+          } else {
+            const r = Math.max(2.5, (m.r || 6) * sc);
+            ctx.beginPath(); ctx.arc(mx(m.x), mz(m.z), r, 0, 7);
+            if (m.fill !== false) ctx.fill();
+            ctx.stroke();
+          }
+        }
+      }
     }
 
     // bots
@@ -89,31 +122,16 @@
     if (el.alive) el.alive.textContent = surv.aliveCount();
     if (el.hp) { const h = Math.max(0, CBZ.player.hp); el.hp.style.width = h + "%"; el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d"); }
     if (el.stam) el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
-    if (el.hunger) {
-      const hg = Math.max(0, Math.min(100, CBZ.player.hunger == null ? 100 : CBZ.player.hunger));
-      el.hunger.style.width = hg + "%";
-      el.hunger.style.background = hg > 40 ? "#e0a030" : (hg > 15 ? "#ff9e4d" : "#ff4d4d");
-    }
 
-    // status line: active/incoming disaster + the safe-zone state (an
-    // out-of-zone player gets an explicit GET INSIDE warning)
-    if (el.zone) {
+    // status line: which disaster is coming / raging / just ended. That's the
+    // whole loop — announcement, the disaster, "it's over". Nothing else.
+    if (el.status) {
       const D = CBZ.disasters;
       let s = "";
-      if (D && D.state() === "warn" && D.current()) s = "⚠ " + D.current() + " · " + Math.ceil(D.timeLeft()) + "s";
+      if (D && D.state() === "warn" && D.current()) s = "⚠ " + D.current() + " incoming · " + Math.ceil(D.timeLeft()) + "s";
       else if (D && D.state() === "active" && D.current()) s = D.current() + " · " + Math.ceil(D.timeLeft()) + "s";
-      const Z = surv.zone;
-      if (Z) {
-        let zs;
-        const dx = CBZ.player.pos.x - Z.cx, dz = CBZ.player.pos.z - Z.cz;
-        if (!CBZ.player.dead && dx * dx + dz * dz > Z.radius * Z.radius) zs = "🚫 OUTSIDE ZONE — get inside!";
-        else if (Z.shrinking) zs = "⭕ zone closing · " + Math.round(Z.radius) + "m";
-        else if (Z.last) zs = "⭕ final zone";
-        else if (Z.t <= 0) zs = "⭕ zone closing soon…";   // holding for the active disaster to pass
-        else zs = "⭕ zone holds · " + Math.ceil(Z.t) + "s";
-        s = s ? s + "   " + zs : zs;
-      }
-      el.zone.textContent = s;
+      else if (D && D.justEnded && D.justEnded()) s = "✓ " + D.justEnded() + " is over";
+      el.status.textContent = s;
     }
 
     // screen flash (lightning / nuke white-out)
