@@ -397,9 +397,9 @@
     current = pick; currentRows = rows; currentScore = pick.score;
     dom();
     if (noteEl) {
-      const st = rows[0] && rows[0].standing;
-      const weight = st ? " · Lv." + st.playerLevel + "→" + st.targetLevel + " · " + st.tier : "";
-      noteEl.textContent = (rows[0].proposal || "Continue") + "?" + weight;
+      // Just the question — no "· Lv.5→3 · commands attention" stat tail. The
+      // prompt is an action, not a stat sheet; the standing read lives elsewhere.
+      noteEl.textContent = (rows[0].proposal || "Continue") + "?";
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;

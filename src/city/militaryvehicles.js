@@ -286,7 +286,7 @@
         const airliner = v.flightKind === "airliner";
         return {
           label: civil
-            ? "✈ " + (airliner ? "AIRLINER" : "PRIVATE JET") + " — HIJACKABLE"
+            ? "✈ " + (airliner ? "Airliner" : "Private Jet")
             : "🪖 " + (v.model ? v.model.name : (v.name || "Vehicle")),
           note: (civil ? (airliner ? "Hijack this commercial flight" : "Steal this aircraft")
             : v.kind === "tank" ? "Commandeer the tank"

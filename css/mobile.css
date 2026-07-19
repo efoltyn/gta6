@@ -76,6 +76,18 @@ body.touch .ikey { width: 24px; height: 24px; }
    Higher specificity + !important beats the city.css hide; desktop is untouched. */
 body.touch.mode-city.state-playing #interact.show { display: block !important; }
 
+/* ---- KEYBOARD HINTS ARE NOISE ON TOUCH -----------------------------------
+   There is no keyboard, and every one of these surfaces is already tap-driven,
+   so the [E]/[I] key badges, the "[I] Inventory [O] Hide" caption and the
+   hotbar slot digits are pure clutter on iPad. Hide them (higher specificity
+   than the base rules, so this wins regardless of inject order). The [x] button
+   on the player card is the touch way to hide the HUD; taps select hotbar slots
+   and open inventory. Desktop is untouched. */
+body.touch .ikey { display: none; }
+body.touch #interact .iopt { gap: 0; }                 /* no badge → no gap */
+body.touch #cpPanel .cpHint { display: none; }
+body.touch #cHud .cSlot .key { display: none; }
+
 /* ---- coarse-pointer (iPad / touch): every pop-up stays pressable ---------- */
 /* touch-action:manipulation removes the 300 ms tap delay + double-tap zoom on
    DOM controls; the click handlers these panels already use fire on tap. */
