@@ -37,6 +37,29 @@
 // twice, in case a future path change only needs to edit sqlitedb.js).
 var VENDOR_DIR = "../vendor/sqlite-wasm/jswasm/";
 
+// The vendored sqlite3.js Module.instantiateWasm hook calls
+// WebAssembly.instantiateStreaming with NO catch/fallback, so any server
+// that serves .wasm without the application/wasm MIME type kills init with
+// an unhandled "Incorrect response MIME type" rejection. The vendor file is
+// do-not-hand-edit, so wrap instantiateStreaming here (worker-global scope,
+// before importScripts) to fall back to arrayBuffer instantiation, which
+// ignores MIME entirely. devserver.py now pins the MIME too; this keeps db
+// init working behind any other host/tunnel.
+if (typeof WebAssembly !== "undefined" && WebAssembly.instantiateStreaming) {
+  const origInstantiateStreaming = WebAssembly.instantiateStreaming.bind(WebAssembly);
+  WebAssembly.instantiateStreaming = function (source, imports) {
+    return Promise.resolve(source).then(function (resp) {
+      // clone(): the streaming attempt consumes the body; the fallback
+      // needs a fresh one.
+      return origInstantiateStreaming(resp.clone(), imports).catch(function () {
+        return resp.arrayBuffer().then(function (bytes) {
+          return WebAssembly.instantiate(bytes, imports);
+        });
+      });
+    });
+  };
+}
+
 const SCHEMA_STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS blobs (" +
     "kind TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, chunk BLOB NOT NULL, " +

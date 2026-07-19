@@ -20,6 +20,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # was overwhelming the tunnel and causing 502s.
     protocol_version = "HTTP/1.1"
 
+    # WebAssembly.instantiateStreaming refuses anything that isn't served as
+    # application/wasm; the stdlib mimetypes guess is OS/Python-version
+    # dependent, so pin it here (sqlite3.wasm broke behind the tunnel).
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".wasm": "application/wasm",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
 
