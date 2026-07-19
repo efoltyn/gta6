@@ -758,15 +758,20 @@
           const fl = flocks[f];
           for (let i = 0; i < fl.birds.length; i++) {
             const b = fl.birds[i];
+            // proxy "group": a REAL (never-rendered, never-scene-added)
+            // THREE.Group — fpsmode's sphere scan reads .position/.visible,
+            // and systems/markers.js eagerly a.group.add()s an overhead
+            // marker into every wildlife record's group (a plain object here
+            // crashed its tick). The torso sphere sits at group.y + 1.0, so
+            // the proxy rides 1.0 BELOW the bird to land the sphere on it.
+            const gproxy = new THREE.Group();
+            gproxy.position.set(b.x, b.y - 1.0, b.z);
             const rec = {
               animal: true, external: true, bird: true, kind: "bird",
               species: BIRD_SPECIES, dead: false, hp: BIRD_SPECIES.hp, maxHp: BIRD_SPECIES.hp,
               ko: 0, escaped: false, state: "fly", alarm: 0,
               pos: { x: b.x, y: b.y, z: b.z },
-              // duck-typed "group" for fpsmode's sphere scan (the torso sphere
-              // sits at group.y + 1.0 — offset so it lands ON the bird body;
-              // wildlife.js's PT decoy proves plain objects are the contract).
-              group: { position: { x: b.x, y: b.y - 1.0, z: b.z }, visible: true },
+              group: gproxy,
             };
             rec.onShot = (function (bb) { return function (hit, w) { return birdShot(bb, hit, w); }; })(b);
             b.rec = rec;
