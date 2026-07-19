@@ -2671,8 +2671,23 @@
             // at night so a brick block reads inhabited, ~15% for offices.
             if (CBZ.cityInteriorGlow) {
               const wx = ox + cx, wz = oz + cz;
-              const hsh = Math.abs(Math.sin(wx * 12.9898 + cy * 4.137 + wz * 78.233) * 43758.5453) % 1;
-              const litFrac = punched ? 0.26 : 0.15;
+              // LIT-ROOM selection. Legacy: a flat ~26%/15% of windows lit via a
+              // Math.sin hash. FACADES_V2 (default ON): drive it off CBZ.hash01
+              // with a per-BUILDING occupancy bias + a per-FLOOR clustering nudge,
+              // so the night skyline reads as real lit ROOMS — some towers lit up,
+              // some dark, and a busy floor tends to stay lit — instead of uniform
+              // noise. Deterministic per seed (position + floor salt). Flag off →
+              // the legacy Math.sin set, byte-identical.
+              let lit;
+              if (!(CBZ.CONFIG && CBZ.CONFIG.FACADES_V2 === false) && CBZ.hash01) {
+                const occ = 0.10 + CBZ.hash01(ox, oz, 0x71c) * 0.28;        // building occupancy 0.10..0.38
+                const floorLit = CBZ.hash01(ox, oz, 0x33 + k * 101);        // is THIS floor busy?
+                const bias = occ * (0.55 + 0.9 * floorLit);                 // busy floors light more
+                lit = CBZ.hash01(wx + cy * 0.7, wz, 0x5ad + k * 7) < Math.min(0.62, bias);
+              } else {
+                const hsh = Math.abs(Math.sin(wx * 12.9898 + cy * 4.137 + wz * 78.233) * 43758.5453) % 1;
+                lit = hsh < (punched ? 0.26 : 0.15);
+              }
               // PER-WINDOW BULB TEMPERATURE (reference: warm/cool lit-room spread).
               // interiorlight.keyFor buckets warm>=0.5 → "warm" vs "cool", so a
               // hashed per-room draw costs no extra layers. Offices skew cool
@@ -2685,7 +2700,28 @@
                 const warmShare = punched ? 0.72 : 0.28;       // fraction of rooms lit warm
                 warm = CBZ.hash01(wx, wz, 0x3a7 + k * 17) < warmShare ? 0.8 : 0.22;
               }
-              CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: hsh < litFrac, warm: warm });
+              if (lit) _facadeLit++;                            // deterministic tally (gate)
+              CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: lit, warm: warm });
+            }
+            // WINDOW AC UNIT (FACADES_V2): a hashed minority of residential windows
+            // wear a chunky through-the-wall AC box on the outer sill. Merged deco
+            // (dbox → flushDeco, cast:false, no collider); ≥0.3u members so it never
+            // reads as floating trim. Wall-mounted flush to the pane face, below the
+            // opening. Deterministic (CBZ.hash01, position + floor salt).
+            if (punched && !(CBZ.CONFIG && CBZ.CONFIG.FACADES_V2 === false) && CBZ.hash01
+                && spanW > 0.7 && CBZ.hash01(ox + cx, oz + cz, 0x2ac1 + k * 13) < 0.22) {
+              const acW = Math.min(0.9, spanW * 0.66), acH = 0.42, acD = 0.4;   // chunky box
+              const acY = cy - spanH / 2 + acH / 2 + 0.04;                       // seated on the sill
+              const bodyOff = outSgn * (WT / 2 + acD / 2 - 0.04);                // proud of the outer face
+              const ventOff = outSgn * (WT / 2 + acD - 0.05);                    // the grille, a touch further out
+              if (f.horiz) {
+                dbox(cx, acY, cz + bodyOff, acW, acH, acD, 0x9aa0a8);            // AC body
+                dbox(cx, acY, cz + ventOff, acW - 0.12, acH - 0.12, 0.05, 0x5b626b);   // dark vent grille
+              } else {
+                dbox(cx + bodyOff, acY, cz, acD, acH, acW, 0x9aa0a8);
+                dbox(cx + ventOff, acY, cz, 0.05, acH - 0.12, acW - 0.12, 0x5b626b);
+              }
+              _facadeAC++;
             }
           }
 

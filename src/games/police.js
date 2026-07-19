@@ -999,6 +999,7 @@
       state: () => runView(),
       _state: () => S,                       // live object (mutable) for rig-and-observe
       near: () => near,
+      origin: () => (V ? { x: V.origin.x, z: V.origin.z } : null),
       cast: () => (V ? { staff: Object.keys(V.staff).length, decker: !!V.decker, lou: !!V.lou, rex: !!V.rex } : null),
 
       // advance the shift headlessly; charge meter + roster + endings step here.
