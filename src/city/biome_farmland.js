@@ -50,9 +50,18 @@
   const CX = (MINX + MAXX) / 2, CZ = (MINZ + MAXZ) / 2;
 
   // causeway: a thin country-road rect running south from the farm's south
-  // edge (z=-480) down to the desert biome's north edge (z=280) at x≈1180.
-  const ROAD_X = 1180, ROAD_HW = 7;        // half-width 7 → 14u drivable deck
-  const ROAD_MINZ = -480, ROAD_MAXZ = 280;
+  // edge down to the desert. RE-DERIVED (stage-2 dial): the spine sits on
+  // the farm's own centreline (CX, today 1180) and the deck spans farm MAXZ
+  // -> 600u past the Saltlands' north shore (today 280), meeting the desert
+  // road grid — both shores keep touching under any offset combination.
+  // The REGION stops at the desert's shore in the enlarged world so the two
+  // biomes' registered rects butt instead of overlapping; the compact
+  // (flag-off) world keeps its authored 280 overlap-and-all.
+  const ROAD_X = CX, ROAD_HW = 7;          // half-width 7 → 14u drivable deck
+  const _DOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };
+  const DESERT_MINZ = -320 + _DOFF.dz;     // Saltlands north shore (biome_desert.js CZ - HZ)
+  const ROAD_MINZ = MAXZ, ROAD_MAXZ = DESERT_MINZ + 600;
+  const ROAD_REGION_MAXZ = (CBZ.CONFIG && CBZ.CONFIG.WORLD_ENLARGE_V2 !== false) ? DESERT_MINZ : ROAD_MAXZ;
 
   // shared materials (one instance each → no per-mesh material churn)
   const M = {
@@ -125,7 +134,7 @@
     // generator + recipe are present (HAS_TOWN), so the biome is byte-identical
     // if towngen is absent (zero regression).
     const HAS_TOWN = typeof CBZ.buildTown === "function" && !!(CBZ.CITY_TEMPLATES && CBZ.CITY_TEMPLATES.harvestmarket);
-    const TOWN_CX = 1180, TOWN_CZ = -560, TOWN_HX = 130, TOWN_HZ = 70;
+    const TOWN_CX = CX, TOWN_CZ = MAXZ - 80, TOWN_HX = 130, TOWN_HZ = 70;
     const TOWN = { minX: TOWN_CX - TOWN_HX, maxX: TOWN_CX + TOWN_HX, minZ: TOWN_CZ - TOWN_HZ, maxZ: TOWN_CZ + TOWN_HZ };
     function inTown(x, z) {
       return HAS_TOWN && x > TOWN.minX - 8 && x < TOWN.maxX + 8 && z > TOWN.minZ - 8 && z < TOWN.maxZ + 8;
@@ -883,7 +892,7 @@
     // =====================================================================
     CBZ.registerCityRegion(city, { name: "Coyle Valley", subtitle: "Farm County", biome: "farmland", kind: "rect", minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, pad: 8 });
     // causeway widened to the 24m highway deck (x-span ±12 about the centreline)
-    CBZ.registerCityRegion(city, { name: "Coyle Causeway", subtitle: "Farm County", kind: "rect", minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: ROAD_MINZ, maxZ: ROAD_MAXZ, pad: 1 });
+    CBZ.registerCityRegion(city, { name: "Coyle Causeway", subtitle: "Farm County", kind: "rect", minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: ROAD_MINZ, maxZ: ROAD_REGION_MAXZ, pad: 1 });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
       city.roads.push({ x: ROAD_X, z: (ROAD_MINZ + ROAD_MAXZ) / 2, vertical: true, len: ROAD_MAXZ - ROAD_MINZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6 });

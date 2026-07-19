@@ -38,9 +38,16 @@
   const MINX = CX - HX, MAXX = CX + HX;   // -950 .. -170
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -1680 .. -1020
 
-  // causeway: a 14-wide dirt logging road from forest north edge up to the
-  // military island's south edge (z=-950). Centered on x=-560.
-  const CW_MINX = -567, CW_MAXX = -553, CW_MINZ = -1020, CW_MAXZ = -950;
+  // causeway: a 14-wide dirt logging road from the forest's north edge up
+  // to the military island's south edge. RE-DERIVED from the two anchors it
+  // connects (stage-2 dial): the lane tracks the base gate axis (military
+  // CEN_X + 60 — today -560) and the deck spans forest MAXZ -> military
+  // MINZ (CEN_Z - HZ, HZ=250 in island_military.js — keep in sync), so any
+  // offset combination keeps both shores touching; only the length changes.
+  const _MILOFF = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
+  const CW_CX = (-620 + _MILOFF.dx) + 60;
+  const CW_MINX = CW_CX - 7, CW_MAXX = CW_CX + 7;
+  const CW_MINZ = MAXZ, CW_MAXZ = (-700 + _MILOFF.dz) - 250;
   const LAKE_X = CX - 150, LAKE_Z = CZ + 90, LAKE_R = 95;
 
   // ---- a tiny local seeded RNG (owner rule #5) --------------------------
@@ -236,13 +243,13 @@
       }
     }
     // main spine from the causeway mouth down into the interior, plus branches.
-    trail(-560, -1015, lakeX, lakeZ - lakeR, 5.5, 26);
-    trail(-560, -1015, -820, -1500, 4.5, 34);
+    trail(CW_CX, MAXZ + 5, lakeX, lakeZ - lakeR, 5.5, 26);
+    trail(CW_CX, MAXZ + 5, CX - 260, CZ - 150, 4.5, 34);
     (function lakeShoreBranch() {
-      const tx = -300, tz = -1560, dx = tx - lakeX, dz = tz - lakeZ, inv = 1 / Math.hypot(dx, dz);
+      const tx = CX + 260, tz = CZ - 210, dx = tx - lakeX, dz = tz - lakeZ, inv = 1 / Math.hypot(dx, dz);
       trail(lakeX + dx * inv * (lakeR + 5), lakeZ + dz * inv * (lakeR + 5), tx, tz, 4.0, 30);
     })();
-    trail(-820, -1500, -360, -1300, 3.6, 28);
+    trail(CX - 260, CZ - 150, CX + 200, CZ + 50, 3.6, 28);
 
     function nearTrail(x, z) {
       for (let i = 0; i < trailPts.length; i++)
@@ -256,10 +263,10 @@
     // ================================================================
     const clearings = [
       { x: lakeX, z: lakeZ, r: lakeR + 18 },     // the lake
-      { x: -560, z: -1080, r: 34 },              // causeway mouth landing
-      { x: -300, z: -1180, r: 40 },              // cabin clearing
-      { x: -700, z: -1250, r: 30 },              // campsite clearing
-      { x: -460, z: -1560, r: 36 },              // deep-woods vista
+      { x: CW_CX, z: MAXZ - 60, r: 34 },         // causeway mouth landing
+      { x: CX + 260, z: CZ + 170, r: 40 },       // cabin clearing
+      { x: CX - 140, z: CZ + 100, r: 30 },       // campsite clearing
+      { x: CX + 100, z: CZ - 210, r: 36 },       // deep-woods vista
     ];
     if (layout) {
       layout.reserveCircle("forest:lake", lakeX, lakeZ, lakeR + 18, { pad: 2 });
@@ -583,7 +590,7 @@
     //  Warm timber tint, single storey, retail-style so the door is a real
     //  walk-in portal. This is the human anchor of the woods.
     // ================================================================
-    const cabX = -300, cabZ = -1180;
+    const cabX = CX + 260, cabZ = CZ + 170;
     if (CBZ.cityMakeBuilding) {
       try {
         CBZ.cityMakeBuilding(root, cabX, cabZ, 16, 12, 1, 0x6e5436, "south",
@@ -612,7 +619,7 @@
     //  decorative box), and a lookout/vista interaction fires once you're up
     //  there — the payoff the header comment promised.
     // ================================================================
-    const twX = -460, twZ = -1560, twH = 14;
+    const twX = CX + 100, twZ = CZ - 210, twH = 14;
     const towerWoodA = mat(0x7a5d38), towerWoodB = mat(0x4a3a22);
     const legR = 0.35;
     [[-3, -3], [3, -3], [-3, 3], [3, 3]].forEach(function (o) {
@@ -708,7 +715,7 @@
     // ================================================================
     //  CAMPSITE — tents + fire ring. Hikers stop here (gives peds a why).
     // ================================================================
-    const campX = -700, campZ = -1250;
+    const campX = CX - 140, campZ = CZ + 100;
     function tent(x, z, col) {
       const g = new THREE.Group();
       const body = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), mat(col));
@@ -746,7 +753,7 @@
         { x: campX + 3, z: campZ - 2, job: "hiker", name: "Hiker", outfit: 0xc25a2e },
         { x: campX - 3, z: campZ + 3, job: "hiker", name: "Hiker", outfit: 0x2e6db5 },
         { x: lakeX - 30, z: lakeZ + 30, job: "hunter", name: "Hunter", outfit: 0x5a4a2e, armed: true, weapon: "Shotgun", aggr: 0.55 },
-        { x: -560, z: -1060, job: "hiker", name: "Hiker", outfit: 0x4a7a32 },
+        { x: CW_CX, z: MAXZ - 40, job: "hiker", name: "Hiker", outfit: 0x4a7a32 },
       ];
       for (let i = 0; i < spawns.length; i++) {
         const s = spawns[i];
@@ -780,7 +787,7 @@
         home: { x: cabX, z: cabZ },                        // the ranger station
         spots: [
           { x: cabX, z: cabZ + 8 },                         // the station trailhead
-          { x: -560, z: -1080 },                            // the causeway-mouth landing
+          { x: CW_CX, z: MAXZ - 60 },                       // the causeway-mouth landing
           { x: campX, z: campZ + 6 },                       // past the campsite
           { x: lakeX - 20, z: lakeZ - lakeR + 10 },         // the lake shore trail
         ],
@@ -815,8 +822,8 @@
       deer.push({ g, heading, turnT: 0, spd: 1.2 + rng() * 1.0 });
     }
     const deerSpots = [
-      [lakeX + 40, lakeZ - 30], [-480, -1480], [-720, -1400],
-      [-360, -1300], [-620, -1180], [-820, -1560],
+      [lakeX + 40, lakeZ - 30], [CX + 80, CZ - 130], [CX - 160, CZ - 50],
+      [CX + 200, CZ + 50], [CX - 60, CZ + 170], [CX - 260, CZ - 210],
     ];
     if (!sharedDeer) {
       for (let i = 0; i < deerSpots.length; i++) makeDeer(deerSpots[i][0], deerSpots[i][1]);

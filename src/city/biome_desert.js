@@ -56,10 +56,14 @@
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -320 .. 620
 
   // ---- causeway (land-bridge to the speedway island) -----------------------
-  // speedway: circle center (470,-330) r200 → east edge ~ x670, z-330.
+  // The west end noses ~34u inside the speedway's east rim, so it tracks
+  // THAT island's dial entry (stage 2), not this biome's — any offset combo
+  // keeps both shores touching; only the water span changes. The east end
+  // (CW_X1) already rides this biome's own MINX.
+  const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
   const CW = 14;                          // road width
-  const CW_Z = -300;                      // causeway centerline z
-  const CW_X0 = 470 + 190;                // start just off the speedway edge (~660)
+  const CW_Z = -300 + _SPOFF.dz;          // causeway centerline z (speedway-side)
+  const CW_X0 = (490 + _SPOFF.dx) + 170;  // just inside the speedway edge (~660 today)
   const CW_X1 = MINX + 6;                 // tuck into the desert's west edge
 
   // ---- palette (warm tan basin; one shared material per color) -------------

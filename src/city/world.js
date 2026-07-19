@@ -505,13 +505,19 @@
     wall((EW + (cx - NGATE / 2)) / 2, EN, (cx - NGATE / 2) - EW, T);
     wall(((cx + NGATE / 2) + EE) / 2, EN, EE - (cx + NGATE / 2), T);
     // THE WEST CAUSEWAY GATE: city/island_military.js runs the 24m-wide highway
-    // causeway from the mainland's WEST edge (centred on cz, z=-700) out to the
-    // military base. Same fix as the north gate — open the seawall or the player
-    // hits an invisible knee-wall at the mouth while NPC cars (region-clamp, not
-    // colliders) drive through. The causeway's side curbs carry the fall-guard.
+    // causeway from the mainland's WEST edge (authored centred on cz, z=-700)
+    // out to the military base. Same fix as the north gate — open the seawall
+    // or the player hits an invisible knee-wall at the mouth while NPC cars
+    // (region-clamp, not colliders) drive through. The deck's z-band rides the
+    // military world-layout dial (island_military.js CW_* = CEN_Z ∓ 12), so
+    // the GATE rides the same dial — a gate fixed at cz would leave the wall
+    // solid across the moved mouth with a useless gap 150u away. The airport
+    // (north) gate stays on cx: that causeway's mainland lane never moves.
     const WGATE = 26;                                   // ≥ 24m deck width
-    wall(EW, (ES + (cz - WGATE / 2)) / 2, T, (cz - WGATE / 2) - ES);
-    wall(EW, ((cz + WGATE / 2) + EN) / 2, T, EN - (cz + WGATE / 2));
+    const _MILW = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
+    const wgz = cz + _MILW.dz;                          // deck centreline == CEN_Z
+    wall(EW, (ES + (wgz - WGATE / 2)) / 2, T, (wgz - WGATE / 2) - ES);
+    wall(EW, ((wgz + WGATE / 2) + EN) / 2, T, EN - (wgz + WGATE / 2));
     // The east wall has a real road gate. city/expansion.js continues this
     // centre cross-street across a bridge into the island district.
     const GATE = 22;

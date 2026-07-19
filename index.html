@@ -273,14 +273,14 @@
 <script src="src/vendor/noise.js"></script>
 <!-- world layout dial: per-biome anchor offsets (map-enlargement stage 1;
      all-zero today). Must load before terrain + every biome/island file. -->
-<script src="src/world/layout.js?v=stage1"></script>
+<script src="src/world/layout.js?v=stage2"></script>
 <script src="src/world/rockscliffs.js?v=rock1"></script>
-<script src="src/world/terrain.js?v=tiles2"></script>
+<script src="src/world/terrain.js?v=rings1"></script>
 <!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=2"></script>
+<script src="src/world/terrain_overhaul.js?v=3"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -298,7 +298,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=worldphysics2"></script>
+<script src="src/config.js?v=worldphysics3"></script>
 <script src="src/core/seed.js"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/interfaces.js?v=arch2"></script>
@@ -453,7 +453,7 @@
      world lazily far from the other two. Must load BEFORE loop.js so its
      frame-work is included in the sort. mode.js defines CBZ.city first; the
      rest augment it. -->
-<script src="src/city/world.js?v=terrain7"></script>
+<script src="src/city/world.js?v=terrain8"></script>
 <script src="src/city/buildings.js?v=rocketdespike1"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
@@ -462,7 +462,7 @@
 <script src="src/city/demolition.js?v=fall1"></script>
 <script src="src/city/elevators.js?v=seein1"></script>
 <script src="src/city/exec_office.js?v=suite1"></script>
-<script src="src/city/escalators.js?v=esc1"></script>
+<script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
 <script src="src/city/beach.js?v=beach1"></script>
 <script src="src/city/expansion.js?v=waterunify4"></script>
@@ -477,12 +477,12 @@
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=reflect1"></script>
-<script src="src/city/highways.js?v=openroads3"></script>
+<script src="src/city/highways.js?v=openroads4"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>
 <script src="src/city/placement.js?v=sims2"></script>
-<script src="src/city/official_assets.js?v=official3"></script>
+<script src="src/city/official_assets.js?v=official4"></script>
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
      sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
      findSupport built on top of it + the CBZ.assets/physics.js contracts
@@ -529,12 +529,12 @@
 <script src="src/city/settlements.js?v=settle1"></script>
 <script src="src/city/towngen.js?v=skylinecluster4"></script>
 <script src="src/city/island_speedway.js?v=diegetictext1"></script>
-<script src="src/city/island_airport.js?v=airfieldpaint3"></script>
-<script src="src/city/island_military.js?v=livebase4"></script>
-<script src="src/city/biome_desert.js?v=organicdesert7"></script>
-<script src="src/city/biome_forest.js?v=organicforest4"></script>
-<script src="src/city/biome_farmland.js?v=organicfields6"></script>
-<script src="src/city/biome_snow.js?v=organicmountain15"></script>
+<script src="src/city/island_airport.js?v=airfieldpaint4"></script>
+<script src="src/city/island_military.js?v=livebase5"></script>
+<script src="src/city/biome_desert.js?v=organicdesert8"></script>
+<script src="src/city/biome_forest.js?v=organicforest5"></script>
+<script src="src/city/biome_farmland.js?v=organicfields7"></script>
+<script src="src/city/biome_snow.js?v=organicmountain16"></script>
 <script src="src/city/snowboard.js?v=terrain2"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
@@ -591,9 +591,9 @@
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=citysec1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=localheli1"></script>
+<script src="src/city/police.js?v=localheli2"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
-<script src="src/city/aircraft.js?v=localheli1"></script>
+<script src="src/city/aircraft.js?v=localheli2"></script>
 <script src="src/city/traffic.js?v=air911-1"></script>
 <script src="src/city/carparts.js?v=brands1"></script>
 <script src="src/city/playercars.js?v=brands1"></script>
@@ -602,8 +602,8 @@
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/vehicles.js?v=boostjump2"></script>
-<script src="src/city/playerair.js?v=air2"></script>
-<script src="src/city/playeraircraft.js?v=swepthull2"></script>
+<script src="src/city/playerair.js?v=air3"></script>
+<script src="src/city/playeraircraft.js?v=swepthull3"></script>
 <!-- elevator-grammar boarding doors for every flyable aircraft: the door
      visibly opens, you walk in through the opening, it closes, THEN flight
      control hands over (and the reverse on exit). Wired behind the existing
@@ -613,7 +613,7 @@
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=air1"></script>
+<script src="src/city/airtraffic.js?v=air2"></script>
 <script src="src/city/shops.js?v=city3"></script>
 <script src="src/city/gunstore.js?v=mods1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
@@ -625,7 +625,7 @@
      scopeview.js (whose gamepad fine-aim hook it wraps; a bought optic
      always wins over the factory scope). Revert: CBZ.CONFIG.WEAPON_LOCKON /
      CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
-<script src="src/systems/lockon.js?v=lockon1"></script>
+<script src="src/systems/lockon.js?v=lockon2"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
 <script src="src/city/careers.js?v=citysec2"></script>
 <script src="src/city/activities.js?v=hub2"></script>
@@ -678,11 +678,11 @@
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=sim2"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
-<script src="src/city/minicities.js?v=sim3"></script>
+<script src="src/city/minicities.js?v=sim4"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=sim3"></script>
 <script src="src/city/race_livery.js?v=sim2"></script>
-<script src="src/city/racing.js?v=sim2"></script>
+<script src="src/city/racing.js?v=sim3"></script>
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <script src="src/city/racedrivers.js?v=race1"></script>
 <script src="src/city/racehud.js?v=race2"></script>
@@ -724,7 +724,7 @@
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=story3"></script>
-<script src="src/city/campaign.js?v=story7"></script>
+<script src="src/city/campaign.js?v=story8"></script>
 <script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
@@ -772,7 +772,7 @@
      BEFORE city/countries.js/polity.js/polwar.js/civilwar.js/migration.js —
      fine, every cross-module read it does is guarded and resolved at CALL
      time (its own onNewDay tick), not at parse time. See that file's header. -->
-<script src="src/sim/forex.js?v=cur1"></script>
+<script src="src/sim/forex.js?v=cur2"></script>
 <!-- M3: centralbank.js — governor NPCs, the policy rate feeding bank.js's
      RATES (a compatibility-accessor design so day one is byte-identical —
      see that file's own header) + the reserve-requirement credit cap.
@@ -823,7 +823,7 @@
 <script src="src/sim/motorsport.js?v=econ1"></script>
 
 <!-- P-wave: politics -->
-<script src="src/city/polity.js?v=pol1"></script>
+<script src="src/city/polity.js?v=pol2"></script>
 <!-- P5: the ONE protector system (secret service / hired security / gangs'
      read-only adapter) — loaded before officials.js, which consumes it for
      every office's guard lifecycle (officials.js's calls are runtime-lazy so
@@ -843,7 +843,7 @@
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
 <script src="src/city/villagekit.js?v=world1"></script>
-<script src="src/city/countries.js?v=world1"></script>
+<script src="src/city/countries.js?v=world2"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
@@ -851,7 +851,7 @@
 <script src="src/city/casino.js?v=casino1"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=ecotones15"></script>
+<script src="src/city/continent.js?v=ecotones16"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -910,7 +910,7 @@
      CBZ.hunger/CBZ.econState/CBZ.npcEcon/CBZ.demographics/CBZ.polwar
      (activeWarFor)/CBZ.COUNTRIES/CBZ.cityPopulation*/CBZ.cityMakePed,
      every one of those already live above. -->
-<script src="src/city/migration.js?v=pol1"></script>
+<script src="src/city/migration.js?v=pol2"></script>
 <!-- X6b: civil war — a cohort misery index (hunger + real wages + approval)
      past threshold in 2+ districts, sustained days, with low approval ->
      armed uprising; a seeded coup roll for authoritarian countries in
@@ -950,10 +950,10 @@
 <script src="src/core/packages.js?v=pkg4"></script>
 <script src="src/games/casino.js?v=pkg1"></script>
 <script src="src/games/ocean.js?v=pkg1"></script>
-<script src="src/games/racing.js?v=pkg1"></script>
+<script src="src/games/racing.js?v=pkg2"></script>
 <script src="src/games/boxing.js?v=pkg1"></script>
-<script src="src/games/airport.js?v=pkg1"></script>
-<script src="src/games/military.js?v=pkg1"></script>
+<script src="src/games/airport.js?v=pkg2"></script>
+<script src="src/games/military.js?v=pkg2"></script>
 <script src="src/games/government.js?v=pkg1"></script>
 <script src="src/games/police.js?v=pkg1"></script>
 <script src="src/games/jail.js?v=pkg1"></script>

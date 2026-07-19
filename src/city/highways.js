@@ -740,13 +740,21 @@
     //   • airport : causeway x=0 (avenue xLines[3]), z=-566..-280. Grid north
     //     cross-street is z=-550. Connector at x=0 spans z=-546..-570 → bridges
     //     the grid (z≈-550) to the causeway south end (z=-566).
-    //   • military: causeway z=-700 (cross-street zLines[3]), x=-380..-133. Grid
-    //     west avenue is x=-150. Connector at z=-700 spans x=-129..-153 → bridges
-    //     the grid (x≈-150) to the causeway east end (x=-133).
+    //   • military: causeway z=CEN_Z (authored -700, cross-street zLines[3]),
+    //     island end..x=-133. Grid west avenue is x=-150. Connector spans
+    //     x=-129..-153 → bridges the grid (x≈-150) to the causeway east end
+    //     (x=-133). The deck's z-band rides the world-layout dial with the
+    //     island (island_military.js CW_MINZ/CW_MAXZ = CEN_Z ∓ 12), so the
+    //     connector follows the SAME dial — a fixed -700 would leave it
+    //     freestanding on a deck that moved to another cross-street. The
+    //     military dz must stay a multiple of the 50u grid step so CEN_Z
+    //     lands ON a zLine (dz=-150 → -850 = zLines[0]); layout.js owns
+    //     that constraint.
     // (Speedway/other islands reached by their OWN bridges — already internally
     //  connected at their L-corner — are out of this connector's scope.)
-    CBZ.buildHighwayConnector({ x: 0, z: -558, vertical: true, len: 24, w: 24, district: "highway" }, roads);            // airport
-    CBZ.buildHighwayConnector({ x: -141, z: -700, vertical: false, len: 24, w: 24, district: "highway" }, roads);        // military
+    const _MILOFF = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
+    CBZ.buildHighwayConnector({ x: 0, z: -558, vertical: true, len: 24, w: 24, district: "highway" }, roads);            // airport (mainland lane — never moves)
+    CBZ.buildHighwayConnector({ x: -141, z: -700 + _MILOFF.dz, vertical: false, len: 24, w: 24, district: "highway" }, roads); // military
 
     // The desert is already connected by real, authored infrastructure:
     // city bridge -> commerce annex -> Diamond Speedway causeway -> Saltlands

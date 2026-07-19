@@ -120,7 +120,8 @@
   // constants FALLBACK — read from city/island_military.js (its module locals
   // CEN_X/CEN_Z/HX/HZ). resolve() prefers the live "Fort Brandt" region; this
   // is the byte-stable backstop when the region registry is not up yet.
-  const BASE = { cx: -620, cz: -700, hx: 240, hz: 250 };
+  const _MOFF = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
+  const BASE = { cx: -620 + _MOFF.dx, cz: -700 + _MOFF.dz, hx: 240, hz: 250 };
 
   const VIEW_DIST = 22, VIEW_HALF = 0.62;          // guard cone (~35°, 22u)
   const GATE_VIEW_DIST = 26;

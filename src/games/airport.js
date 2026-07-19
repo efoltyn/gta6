@@ -137,7 +137,13 @@
      honest. Each carries a lit beacon (built in build()) to aim for; a run
      "delivers" on proximity + low altitude (uncontrolled outstations).
   ============================================================ */
-  const APRON_REF = { x: 95, z: 20 };        // airfield reference the run distance is measured from
+  // Rides the airport's world-layout dial (world/layout.js): the apron spot
+  // this venue mounts on is BUILT at 95+dx (island_airport.js private-jet
+  // row), so a fixed 95 would mount the whole REDEYE venue on open sea after
+  // a stage-2 slide. The sea DESTS below stay absolute (they are open-water
+  // beacons, not landmass furniture); dist re-derives from the moved apron.
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
+  const APRON_REF = { x: 95 + _WOFF.dx, z: 20 + _WOFF.dz };   // airfield reference the run distance is measured from
   const DESTS = [
     { id: "salt",    name: "SALT CAY",     x: -40,   z: -2050, col: 0xffb03a },
     { id: "marlin",  name: "MARLIN ROCK",  x: -1650, z: -900,  col: 0x36e0c8 },
@@ -176,8 +182,10 @@
     sock: null,                // {pivot, cone}
     charterRec: null,          // the parked jet rec the clean board uses
   };
-  const AIM = { x: 170, z: -90 };            // RWY-27 touchdown aim point (overwritten from the real audit)
-  let HOME = { minX: -900, maxX: 290, minZ: -280, maxZ: 40 };
+  // Both fallbacks self-heal from the live airportAudit at build(), but they
+  // ride the dial too so even the audit-lag window points at the MOVED field.
+  const AIM = { x: 170 + _WOFF.dx, z: -90 + _WOFF.dz };  // RWY-27 touchdown aim point (overwritten from the real audit)
+  let HOME = { minX: -900 + _WOFF.dx, maxX: 290 + _WOFF.dx, minZ: -280 + _WOFF.dz, maxZ: 40 + _WOFF.dz };
   let RUN_HEADING = -Math.PI / 2;            // RWY 27 = land west
 
   /* -------- jobs -------- */
@@ -851,11 +859,12 @@
         const A = CBZ.city && CBZ.city.arena; if (!A) return null;
         if (A.airportAudit && A.airportAudit.bounds) {
           // apron east of the terminal, near the parked private jets & spawn
-          return { x: 95, z: 22 };
+          // (95+dx — the jets themselves ride the airport's world-layout dial)
+          return { x: 95 + _WOFF.dx, z: 22 + _WOFF.dz };
         }
         const regs = A.regions || (CBZ.city && CBZ.city.regions) || [];
         const has = regs.some((r) => r && (r.biome === "airport" || /airport|halloran/i.test(r.name || "")));
-        return has ? { x: 95, z: 22 } : null;
+        return has ? { x: 95 + _WOFF.dx, z: 22 + _WOFF.dz } : null;
       },
     },
     build: build,

@@ -119,13 +119,20 @@
     return { cx: cx, cz: cz, hx: half + ROAD / 2, hz: half + ROAD / 2 };
   }
 
-  // mirrors city/minicities.js's PLACEMENTS array (~lines 45-54) verbatim.
-  const GOLDSPIRE_RECT = { cx: 760, cz: 430, hx: 118, hz: 120 };
-  const CAPEHARBOR_RECT = { cx: 430, cz: 175, hx: 120, hz: 120 };
-  const NEONREEF_RECT = { cx: -1080, cz: -260, hx: 130, hz: 128 };
-  const FOUNDRY_RECT = { cx: -1080, cz: 225, hx: 135, hz: 130 };
+  // mirrors city/minicities.js's PLACEMENTS array (~lines 45-54), riding the
+  // same world-layout dial so a stage-2 spread keeps county rects on their
+  // cities. (Goldspire's authored base here predates its move off (760,430)
+  // — a standing desync left as-is: correcting it would reassign today's
+  // jurisdictions; the offset keeps the error constant instead of growing.)
+  const _POFF = function (id) { return (CBZ.worldOff && CBZ.worldOff(id)) || { dx: 0, dz: 0 }; };
+  const _PG = _POFF("goldspire"), _PC = _POFF("capeharbor"), _PN = _POFF("neonreef"),
+    _PF = _POFF("foundry"), _PM = _POFF("military");
+  const GOLDSPIRE_RECT = { cx: 760 + _PG.dx, cz: 430 + _PG.dz, hx: 118, hz: 120 };
+  const CAPEHARBOR_RECT = { cx: 430 + _PC.dx, cz: 175 + _PC.dz, hx: 120, hz: 120 };
+  const NEONREEF_RECT = { cx: -1080 + _PN.dx, cz: -260 + _PN.dz, hx: 130, hz: 128 };
+  const FOUNDRY_RECT = { cx: -1080 + _PF.dx, cz: 225 + _PF.dz, hx: 135, hz: 130 };
   // mirrors city/island_military.js's CEN_X/CEN_Z/HX/HZ (Fort Brandt footprint).
-  const FORTBRANDT_RECT = { cx: -620, cz: -700, hx: 240, hz: 250 };
+  const FORTBRANDT_RECT = { cx: -620 + _PM.dx, cz: -700 + _PM.dz, hx: 240, hz: 250 };
 
   // axis-aligned bounding union of a list of {cx,cz,hx,hz} rects — used to
   // derive each STATE's rect from its member cities (no hand-picked numbers).

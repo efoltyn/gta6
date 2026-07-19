@@ -124,7 +124,11 @@
   function buildIfcCampus(city) {
     const root = city && city.root;
     if (!root || root.getObjectByName("official-ifc-civic-campus")) return;
-    const CX = -100, CZ = 470, W = 260, D = 136;
+    // The campus is Goldspire's civic annex (its plaza link touches the
+    // city's west edge), so it rides Goldspire's world-layout offset — a
+    // stage-2 spread moves them as one block.
+    const _GOFF = (CBZ.worldOff && CBZ.worldOff("goldspire")) || { dx: 0, dz: 0 };
+    const CX = -100 + _GOFF.dx, CZ = 470 + _GOFF.dz, W = 260, D = 136;
     const padMat = new THREE.MeshLambertMaterial({ color: 0x8d9298, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const pad = new THREE.Mesh(new THREE.PlaneGeometry(W, D), padMat);
     pad.rotation.x = -Math.PI / 2; pad.position.set(CX, 0.012, CZ);
@@ -133,8 +137,9 @@
 
     // The campus touches Goldspire's west edge with a short, open plaza link.
     const link = new THREE.Mesh(new THREE.PlaneGeometry(16, 24), new THREE.MeshLambertMaterial({ color: 0x555a61 }));
-    link.rotation.x = -Math.PI / 2; link.position.set(35, 0.026, CZ); link.receiveShadow = true; root.add(link);
-    if (city.roads) city.roads.push({ x: 35, z: CZ, vertical: false, len: 16, district: "goldspire", w: 24, lanesPerDir: 1, laneW: 3.6 });
+    const linkX = 35 + _GOFF.dx;               // plaza link stays on Goldspire's west edge
+    link.rotation.x = -Math.PI / 2; link.position.set(linkX, 0.026, CZ); link.receiveShadow = true; root.add(link);
+    if (city.roads) city.roads.push({ x: linkX, z: CZ, vertical: false, len: 16, district: "goldspire", w: 24, lanesPerDir: 1, laneW: 3.6 });
     if (CBZ.registerCityRegion) CBZ.registerCityRegion(city, {
       name: "Goldspire Civic Campus", subtitle: "BIM Civic Complex", biome: "goldspire",
       kind: "rect", minX: CX - W / 2, maxX: CX + W / 2, minZ: CZ - D / 2, maxZ: CZ + D / 2,

@@ -524,6 +524,13 @@
       });
     }
   } catch (e) {}
+  // WORLD ENLARGE V2 (map-enlargement stage 2): non-zero world-layout offsets
+  // spread every biome/island/nation radially outward from the mainland and
+  // grow the FLAT terrain contract + continent margin to match. The flag is
+  // READ (and self-defaulted, plus URL-sniffed) in world/layout.js because
+  // that file parses before this one; the line below only documents the
+  // default for the one-line revert: false = the stage-1 compact world.
+  if (CBZ.CONFIG.WORLD_ENLARGE_V2 == null) CBZ.CONFIG.WORLD_ENLARGE_V2 = true;
   // ROADS OVERHAUL V2: real lane proportions (highways 3+3 with a hard median,
   // island/side streets widened to fit two cars), markings gapped at every
   // intersection (no centreline running through junction boxes), per-road
@@ -600,7 +607,13 @@
   // leaves about 1.2 km of real, driveable country beyond the authored POI
   // union; the old 360 m belt still made an aerial world read like a diorama.
   if (CBZ.CONFIG.CONTINENT_EXPANSION_V2 == null) CBZ.CONFIG.CONTINENT_EXPANSION_V2 = true;
-  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null) CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = 1200;
+  // The enlarged (WORLD_ENLARGE_V2) world needs the wider 2200 belt: the
+  // backdrop-relief band rises ≈2050u past the FLAT edge, and FLAT now hugs
+  // the spread region union — a 1200 belt would leave the ring's far side on
+  // unlabeled open-sea cells (reads as "city on mountain" in the terrain
+  // audit). Compact world keeps the authored 1200.
+  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null)
+    CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = (CBZ.CONFIG.WORLD_ENLARGE_V2 !== false) ? 2200 : 1200;
   // PROCEDURAL BACKDROP TERRAIN. Default OFF: decorative horizon mountains are
   // not geography. Real elevation belongs to registered, reachable landmasses
   // (Mount Mercy publishes an actual ground-height field); no fake skyline ring.

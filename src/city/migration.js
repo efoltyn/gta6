@@ -632,7 +632,12 @@
         }
       }
     }
-    return { x: -40, z: -120 };   // island_airport.js's own documented rect centre
+    // island_airport.js's own documented apron axis / rect z-centre — on the
+    // airport's world-layout dial so the pre-region fallback lands on the
+    // MOVED field, matching where the live "Halloran Field" lookup above
+    // resolves once the region registry is up.
+    const w = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
+    return { x: -40 + w.dx, z: -120 + w.dz };
   }
   function mintRealArrival(originId) {
     if (!CBZ.cityPopulation || !CBZ.cityPopulationBirth) return false;

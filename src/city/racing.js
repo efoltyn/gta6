@@ -48,7 +48,8 @@
   // ---- speedway anchor (mirrors island_speedway.js CX/CZ/R) ----------------
   // kept in sync by value; the per-frame maintainer also tries the live region
   // registry first so a moved island still anchors correctly.
-  const SPEED = { cx: 470, cz: -330, r: 200 };
+  const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
+  const SPEED = { cx: 470 + _SPOFF.dx, cz: -330 + _SPOFF.dz, r: 200 };
 
   // ============================================================
   //  POINTS — F1/NASCAR-style descending table by finishing order.

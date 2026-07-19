@@ -44,9 +44,12 @@
 
   // causeway deck (drivable bridge, widened to the 24m highway) from the
   // mainland west edge to the base gate. z-span = 24m about the centreline.
-  const CW_MINX = -380, CW_MAXX = -133;
-  const CW_MINZ = -712, CW_MAXZ = -688;
-  const CW_CZ = (CW_MINZ + CW_MAXZ) / 2;      // -700, lines up with base centre
+  // Island end = the base's east edge (tracks the world-layout dial); the
+  // MAINLAND end stays pinned at the authored shore point x=-133 — moving
+  // the island only stretches the deck, it never detaches either shore.
+  const CW_MINX = MAXX, CW_MAXX = -133;
+  const CW_MINZ = CEN_Z - 12, CW_MAXZ = CEN_Z + 12;
+  const CW_CZ = (CW_MINZ + CW_MAXZ) / 2;      // == CEN_Z, lines up with the base gate
 
   // ---- local seeded RNG (owner rule: deterministic world) ----------------
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)

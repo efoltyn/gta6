@@ -42,6 +42,16 @@
   const CX = 350 + _WOFF.dx, CZ = -1450 + _WOFF.dz, HX = 420, HZ = 330;
   const MINX = CX - HX, MAXX = CX + HX;     // -70 .. 770
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;     // -1780 .. -1120
+  // Mercy Causeway south terminus. The lane (x 458..482) runs from the snow
+  // shore toward the speedway; when the speedway's own annex causeway
+  // (island_speedway.js: horizontal leg at ACCESS_Z, x 336..ACCESS_X+12)
+  // has slid east across the lane (stage-2 dial), the lane ends BUTTED on
+  // that leg's north edge and hands traffic to it — two decks at one level
+  // must join, not overlap. Compact world (leg west of the lane): authored
+  // -530, byte-identical.
+  const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
+  const _SP_ACCESS_X = (490 + _SPOFF.dx) - 98, _SP_ACCESS_Z = (-350 + _SPOFF.dz) - 190;
+  const CAUSEWAY_MAXZ = (_SP_ACCESS_X + 12 > 458) ? (_SP_ACCESS_Z - 12) : -530;
   // Buildings are laid out before landmass builders run.  Keep a per-build
   // list of their occupied footprints so the terrain oracle can grade a real
   // shelf beneath them instead of letting a later mountain grow through a
@@ -406,7 +416,7 @@
       layout.reserve("snow:cabin", { minX: 590, maxX: 610, minZ: -1610, maxZ: -1590 }, { pad: 8 });
       layout.reserve("snow:ski-run", { minX: 448, maxX: 492, minZ: -1735, maxZ: -1285 }, { pad: 5 });
       layout.reserve("snow:lift", { minX: 226, maxX: 484, minZ: -1734, maxZ: -1166 }, { pad: 5 });
-      layout.reserve("snow:causeway", { minX: 458, maxX: 482, minZ: -1120, maxZ: -530 }, { pad: 3 });
+      layout.reserve("snow:causeway", { minX: 458, maxX: 482, minZ: -1120, maxZ: CAUSEWAY_MAXZ }, { pad: 3 });
       for (let i = 0; i < GREAT_MAJOR.length; i++) {
         const m = GREAT_MAJOR[i], scaled = Math.pow(m.s, 0.62);
         layout.reserveCircle("snow:massif-family:" + i, m.x, m.z,
@@ -1275,7 +1285,7 @@
     //  with instanced guardrail posts. rect minX=463..477 z -1120..-530.
     // ============================================================
     (function causeway() {
-      const rMinX = 463, rMaxX = 477, rMinZ = -1120, rMaxZ = -530;
+      const rMinX = 463, rMaxX = 477, rMinZ = -1120, rMaxZ = CAUSEWAY_MAXZ;
       const cxMid = (rMinX + rMaxX) / 2;
       if (CBZ.buildHighway) {
         // REAL wide plowed concrete highway over the water toward the speedway.
@@ -1466,11 +1476,11 @@
     // causeway widened to the 24m highway deck (x∈[458,482], centre x=470)
     CBZ.registerCityRegion(city, {
       name: "Mercy Causeway", subtitle: "Alpine Range", kind: "rect",
-      minX: 458, maxX: 482, minZ: -1120, maxZ: -530, pad: 1,
+      minX: 458, maxX: 482, minZ: -1120, maxZ: CAUSEWAY_MAXZ, pad: 1,
     });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: 470, z: -825, vertical: true, len: 590, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      city.roads.push({ x: 470, z: (-1120 + CAUSEWAY_MAXZ) / 2, vertical: true, len: CAUSEWAY_MAXZ - (-1120), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
   }, 30);
 })();

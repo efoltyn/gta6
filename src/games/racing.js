@@ -70,7 +70,11 @@
      clients (determinism law #12). Kept in one block so a drift is a
      one-line fix, exactly like racedrivers.js's carDynamics mirror.
   ============================================================ */
-  const CX = 490, CZ = -350, OVAL_RX = 150, OVAL_RZ = 103, TRIBULGE = 12, TRACK_W = 22, SF_T = 0.0;
+  // stage-2 dial: the speedway CAN move now — mirror its anchor exactly
+  // (island_speedway.js routes the same worldOff) so the centreline stays
+  // byte-identical to the island's own frame at any offset.
+  const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
+  const CX = 490 + _SPOFF.dx, CZ = -350 + _SPOFF.dz, OVAL_RX = 150, OVAL_RZ = 103, TRIBULGE = 12, TRACK_W = 22, SF_T = 0.0;
 
   // world-space frame at param t — MATCHES island_speedway CBZ_FRAME exactly
   // (race normal convention nx:-tz, nz:tx) so CBZ.raceDrivers line-mode and the

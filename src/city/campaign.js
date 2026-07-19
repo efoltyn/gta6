@@ -16,6 +16,11 @@
   "use strict";
 
   const CBZ = window.CBZ;
+  // Halloran Field set-pieces below (spy insertion/intel, the DEPARTURES
+  // arc) are staged at AUTHORED airport coordinates; the field itself rides
+  // the world-layout dial (world/layout.js), so every airport-space literal
+  // here rides the SAME dial or the missions mount 220u east of the island.
+  const _AIRW = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
   const THREE = window.THREE;
   if (!CBZ || !THREE || !CBZ.game) return;
   const g = CBZ.game;
@@ -813,7 +818,7 @@
   function stageSpyInsertion() {
     R.kind = "spy_insertion";
     R.transportReleased = false;
-    const point = { x: 205, z: -190 };
+    const point = { x: 205 + _AIRW.dx, z: -190 + _AIRW.dz };   // north infield, past the runway east end
     point.y = floorY(point.x, point.z);
     R.pad = point;
     const h = makeHelicopter();
@@ -872,7 +877,7 @@
       return;
     }
     R.kind = "spy_intel";
-    const point = { x: -160, z: -20 };
+    const point = { x: -160 + _AIRW.dx, z: -20 + _AIRW.dz };   // the taxiway connector beacon
     point.y = floorY(point.x, point.z);
     R.intelPoint = point;
     const relay = new THREE.Group();
@@ -1101,7 +1106,7 @@
   function stageAirportArrival() {
     R.kind = "airport_arrival";
     const c = state();
-    const point = { x: -40, y: 0, z: 18 };
+    const point = { x: -40 + _AIRW.dx, y: 0, z: 18 + _AIRW.dz };   // terminal landside
     makeMarker(null, point, 0xffc766);
     setMission({
       id: "departures",
@@ -1165,7 +1170,7 @@
       if (p) R.victims.push(p);
     }
     R.required = Math.min(6, R.victims.length);
-    makeMarker(null, { x: -40, y: 0, z: 22 }, 0xff776e);
+    makeMarker(null, { x: -40 + _AIRW.dx, y: 0, z: 22 + _AIRW.dz }, 0xff776e);   // concourse
     setMission({
       id: "black-gate",
       title: "BLACK GATE",
@@ -1209,7 +1214,7 @@
 
   function stageAirportRefuse() {
     R.kind = "airport_refuse";
-    const anchor = { x: -160, z: 18 };
+    const anchor = { x: -160 + _AIRW.dx, z: 18 + _AIRW.dz };   // by the control tower
     const target = castExisting("Handler Rook", anchor, { target: true, role: "handler", armed: true, weapon: "SMG", aggr: 0.98, hostile: true });
     R.target = target;
     makeMarker(target, target ? null : anchor, 0x82d7ff);

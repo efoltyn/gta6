@@ -100,6 +100,10 @@
   function rfbm(x, z) { return N && N.rangeRidgedFbm ? N.rangeRidgedFbm(x, z) : 0.3; }
 
   // ---- the flat contract (identical constants to terrain.js) ------------
+  // Stage-2 map enlargement grows this shared object at build time via
+  // CBZ.syncTerrainFlat (terrain.js merges CBZ.WORLD_ENLARGE_FLAT there);
+  // the literal below is only the last-resort seed and the module bails
+  // just under here anyway when terrain.js (orig.build) is absent.
   const FLAT = CBZ.TERRAIN_FLAT || { minX: -960, maxX: 1580, minZ: -1790, maxZ: 760 };
   CBZ.TERRAIN_FLAT = FLAT;
   const MARGIN = 150, RAMP = 460;
@@ -596,6 +600,10 @@
     if (CBZ.syncTerrainFlat) CBZ.syncTerrainFlat(CBZ.city && CBZ.city.arena);
     layoutV3();
     initSeeds();
+    // publish the FLAT-derived ring numbers for the closed-loop probes —
+    // V3's relief band is a distance ring off the flat EDGE, so the derived
+    // centre-based radii bound it from above (land can never reach relief).
+    if (CBZ.terrainRingRadii) CBZ.TERRAIN_RING_DEBUG = CBZ.terrainRingRadii(FLAT);
 
     // span: the live world + ~1.7 km of sea/relief on every side (the ring
     // masks guarantee the field is back under the sea before the tile edge;
@@ -706,6 +714,7 @@
   function buildV2(root) {
     if (CBZ.syncTerrainFlat) CBZ.syncTerrainFlat(CBZ.city && CBZ.city.arena);
     layoutRanges2();
+    if (CBZ.terrainRingRadii) CBZ.TERRAIN_RING_DEBUG = CBZ.terrainRingRadii(FLAT);
     const liveSpan = Math.max(FLAT.maxX - FLAT.minX, FLAT.maxZ - FLAT.minZ) + 1500;
     const SPAN = Math.max(6000, Math.ceil(liveSpan / 500) * 500);
     const TILES = 4, TSPAN = SPAN / TILES, TSEG = 76;

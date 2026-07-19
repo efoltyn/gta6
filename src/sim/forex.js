@@ -721,8 +721,12 @@
   // island_airport.js itself is NOT edited. The 4 check-in desks run at
   // dx = tx-tw/2+20+k*30 = -95,-65,-35,-5 (z=34) — this kiosk continues that
   // exact line as a "5th desk" (k=4 -> dx=25), still inside the terminal's
-  // own interior margin (ix1 = tx+tw/2-4 = 31).
-  const AIRPORT_KIOSK = { x: 25, z: 34 };
+  // own interior margin (ix1 = tx+tw/2-4 = 31). The whole terminal rides the
+  // airport's world-layout dial (world/layout.js), so the copied constants
+  // ride the SAME dial — a fixed 25 would leave the kiosk floating over sea
+  // 220u east of the moved desk row after a stage-2 slide.
+  const _AWOFF = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
+  const AIRPORT_KIOSK = { x: 25 + _AWOFF.dx, z: 34 + _AWOFF.dz };
 
   function buildAirportKiosk(root) {
     const m = vmats(), p = AIRPORT_KIOSK;

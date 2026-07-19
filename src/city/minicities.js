@@ -42,17 +42,31 @@
     //      desert(1115,150 ±445,470 → x[670,1560] z[-320,620], MASSIVE),
   //      forest(-560,-1350), snow(350,-1450), farmland(1180,-880)).
   //      Each city is its OWN biome string so crowd/regionlife populate it. The
-  //      `road` point is where its causeway plugs toward the existing network. ----
+  //      `road` point is where its causeway plugs toward the existing network.
+  //      STAGE-2 MAP ENLARGEMENT: each city rides the world-layout dial
+  //      (world/layout.js) like the biomes — neonreef/foundry slide west with
+  //      the airport (preserving the authored Neon Reef 50u seam), goldspire/
+  //      capeharbor slide south off the mainland shore. Mainland-side `road`
+  //      plug points stay authored; neonreef's plugs the AIRPORT's west edge,
+  //      so it re-derives from the airport anchor (butt-exact — the old fixed
+  //      -860 overlapped Halloran Field by 40u, a standing audit clash). ----
+  const _MOFF = function (id) { return (CBZ.worldOff && CBZ.worldOff(id)) || { dx: 0, dz: 0 }; };
+  const _OG = _MOFF("goldspire"), _OC = _MOFF("capeharbor"), _ON = _MOFF("neonreef"), _OF = _MOFF("foundry");
+  // Halloran Field west edge (island_airport.js A_MINX). Only the ENLARGED
+  // world butts the causeway to it — the compact world keeps its authored
+  // -860 plug (40u inside the field) so the flag-off world stays identical.
+  const _EN = !!(CBZ.CONFIG && CBZ.CONFIG.WORLD_ENLARGE_V2 !== false);
+  const _NR_PLUG_X = _EN ? (-900 + _MOFF("airport").dx) : -860;
   const PLACEMENTS = [
     // FINANCE — south-central plains, WEST of the (now much larger) desert.
     // Moved off its old SE spot (760,430), which the enlarged desert swallowed.
-    { id: "goldspire",  cx: 150,   cz: 470,  hx: 118, hz: 120, road: { x: 340, z: 470 } },
+    { id: "goldspire",  cx: 150 + _OG.dx,   cz: 470 + _OG.dz,  hx: 118, hz: 120, road: { x: 340, z: 470 } },
     // PORT — south coast, south of the speedway, west of the desert.
-    { id: "capeharbor", cx: 430,   cz: 175,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
+    { id: "capeharbor", cx: 430 + _OC.dx,   cz: 175 + _OC.dz,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
     // CASINO — west plains, west of the military base.
-    { id: "neonreef",   cx: -1080, cz: -260, hx: 130, hz: 128, road: { x: -860, z: -260 } },
+    { id: "neonreef",   cx: -1080 + _ON.dx, cz: -260 + _ON.dz, hx: 130, hz: 128, road: { x: _NR_PLUG_X, z: -260 + _ON.dz } },
     // FACTORY — SW plains, south of the casino strip.
-    { id: "foundry",    cx: -1080, cz: 225,  hx: 135, hz: 130, road: { x: -380, z: 225 } },
+    { id: "foundry",    cx: -1080 + _OF.dx, cz: 225 + _OF.dz,  hx: 135, hz: 130, road: { x: -380, z: 225 + _OF.dz } },
   ];
 
   // tiny local LCG factory so each city is deterministic + independent of any

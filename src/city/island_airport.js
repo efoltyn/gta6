@@ -724,8 +724,12 @@
   // aircraft scale without pushing east into Diamond Speedway.
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
   const A_MINX = -900 + _WOFF.dx, A_MAXX = 290 + _WOFF.dx, A_MINZ = -280 + _WOFF.dz, A_MAXZ = 40 + _WOFF.dz;
-  // causeway widened to the 24m highway deck (x∈[-12,12])
-  const CW_MINX = -12, CW_MAXX = 12, CW_MINZ = -566, CW_MAXZ = -280;
+  // causeway widened to the 24m highway deck (x∈[-12,12]). The NORTH end
+  // (CW_MINZ, mainland shore) is pinned; the south end lands on the field's
+  // north edge and tracks the dial with it. The x-lane never moves — it is
+  // the mainland's slip — which is what caps this island's dx (the field's
+  // east edge must keep a shoulder east of the deck).
+  const CW_MINX = -12, CW_MAXX = 12, CW_MINZ = -566, CW_MAXZ = A_MINZ;
 
   // ---- shared palette (one bucket per colour → batcher collapses them) ----
   const C_TARMAC = 0x3c3f44;   // apron / taxiway asphalt
@@ -797,12 +801,20 @@
       }
     }
 
-    const RWY_Z = -90;            // runway centre line (z)
+    // The airfield's own coordinate system (runway/taxiway/apron + all the
+    // hardware parked on it) rides the SAME dial as the A_* footprint, so
+    // the island translates as one rigid piece. The canvas paint mapping is
+    // (world - A_MINX)/gw — the offset cancels, so paint lands identically
+    // on the moved grass.
+    const ADX = _WOFF.dx, ADZ = _WOFF.dz;
+    const RWY_Z = -90 + ADZ;      // runway centre line (z)
     const RWY_W = 30;             // width
-    const RWY_X0 = -850, RWY_X1 = 240, RWY_LEN = RWY_X1 - RWY_X0;
+    const RWY_X0 = -850 + ADX, RWY_X1 = 240 + ADX, RWY_LEN = RWY_X1 - RWY_X0;
     const RWY_CX = (RWY_X0 + RWY_X1) / 2;
     const TAX_Z = RWY_Z + 50;     // taxiway centre
-    const APRON_Z = 0;            // ramp/apron centre (south, by terminal)
+    const APRON_Z = 0 + ADZ;      // ramp/apron centre (south, by terminal)
+    const APRON_X = -40 + ADX;    // apron/terminal centreline (x)
+    const CONN_XS = [-160 + ADX, 80 + ADX];   // runway->apron connector taxiways
 
     // =====================================================================
     //  1) ONE AIRFIELD SURFACE — grass, runway, taxiway and apron are baked
@@ -839,8 +851,8 @@
       ctx.globalAlpha = 1;
       rect(RWY_CX, RWY_Z, RWY_LEN, RWY_W, C_RUNWAY);
       rect(RWY_CX, TAX_Z, RWY_LEN - 20, 18, C_TARMAC);
-      rect(-40, APRON_Z + 6, 260, 80, C_TARMAC);
-      for (const cx of [-160, 80]) rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 16, TAX_Z - APRON_Z + 30, C_TARMAC);
+      rect(APRON_X, APRON_Z + 6, 260, 80, C_TARMAC);
+      for (const cx of CONN_XS) rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 16, TAX_Z - APRON_Z + 30, C_TARMAC);
 
       // runway white paint
       rect(RWY_CX, RWY_Z - RWY_W / 2 + 0.6, RWY_LEN - 8, 0.6, C_PAINT);
@@ -861,7 +873,7 @@
       runwayText("27", RWY_X1 - 29, RWY_Z, 9, -Math.PI / 2);
       // taxiway yellow centrelines and hold bars
       rect(RWY_CX, TAX_Z, RWY_LEN - 24, 0.5, C_YELLOW);
-      for (const cx of [-160, 80]) {
+      for (const cx of CONN_XS) {
         rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 0.5, TAX_Z - APRON_Z + 24, C_YELLOW);
         for (let i = 0; i < 4; i++) rect(cx, TAX_Z - 14 - i * 0.9, 14, 0.4, C_YELLOW);
       }
@@ -930,7 +942,7 @@
     // =====================================================================
     let terminal = null;
     (function buildTerminal() {
-      const tx = -40, tz = 24, tw = 150, td = 26;
+      const tx = APRON_X, tz = 24 + ADZ, tw = 150, td = 26;
       // doorSide 1 = +z (faces causeway/landside). retail glass = clear.
       terminal = CBZ.cityMakeBuilding(root, tx, tz, tw, td, 1, 0x6f8ba0, 1,
         { retail: true, glassKind: "clear", stairs: false });
@@ -991,7 +1003,7 @@
     //     the apron with a clear sightline down the runway. Solid collider.
     // =====================================================================
     (function controlTower() {
-      const cxp = -180, czp = 30, base = 4.5, H = 34;
+      const cxp = -180 + ADX, czp = 30 + ADZ, base = 4.5, H = 34;
       // shaft
       box(cxp, H / 2, czp, base, H, base, 0xb6bdc4, { cast: true });
       solid(cxp, czp, base, base, 0, H + 6);
@@ -1559,13 +1571,13 @@
     // STEALABLE aircraft (climb in and fly it off the gate).
     const liveries = [0x2d5fb0, 0xb33636, 0x1f7a4d, 0xc78a1f];
     for (let i = 0; i < 4; i++) {
-      const gx = -120 + i * 55;
+      const gx = -120 + ADX + i * 55;
       const hd = Math.PI / 2 + (rng() - 0.5) * 0.05;
       boardablePlane(buildAirliner(gx, APRON_Z - 14, hd, liveries[i]), gx, APRON_Z - 14, hd, 30, 22, "Airliner");
     }
     // private jets on the far apron — also stealable
-    boardablePlane(buildPrivateJet(95, APRON_Z - 6, Math.PI / 2 - 0.2, 0x355c8a), 95, APRON_Z - 6, Math.PI / 2 - 0.2, 14, 12, "Private Jet");
-    boardablePlane(buildPrivateJet(118, APRON_Z + 2, Math.PI / 2 + 0.4, 0x6a3a6a), 118, APRON_Z + 2, Math.PI / 2 + 0.4, 14, 12, "Private Jet");
+    boardablePlane(buildPrivateJet(95 + ADX, APRON_Z - 6, Math.PI / 2 - 0.2, 0x355c8a), 95 + ADX, APRON_Z - 6, Math.PI / 2 - 0.2, 14, 12, "Private Jet");
+    boardablePlane(buildPrivateJet(118 + ADX, APRON_Z + 2, Math.PI / 2 + 0.4, 0x6a3a6a), 118 + ADX, APRON_Z + 2, Math.PI / 2 + 0.4, 14, 12, "Private Jet");
 
     // =====================================================================
     //  8) ONE AIRLINER MID-PUSHBACK (scripted, purely visual) — a jet on a
@@ -1574,7 +1586,7 @@
     //     physics or collision churn. CBZ.onUpdate, alloc-free.
     // =====================================================================
     (function pushback() {
-      const jet = buildAirliner(-160, TAX_Z - 6, Math.PI / 2, 0x444b55);
+      const jet = buildAirliner(-160 + ADX, TAX_Z - 6, Math.PI / 2, 0x444b55);
       const jetCollider = jet.userData.worldCollider;
       let jetSolid = true;
       function setJetSolid(on) {
@@ -1590,7 +1602,7 @@
       // in CBZ.cityCars via cityRegisterVehicle, so you can hop in and drive it
       // around the apron. The pushback animation yields the moment it's taken.
       const tug = new THREE.Group();
-      tug.position.set(-160 + 16, 0, TAX_Z - 6);
+      tug.position.set(-160 + ADX + 16, 0, TAX_Z - 6);
       (function buildTug() {
         function tb(w, h, d, x, y, z, color, emissive) {
           const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
@@ -1659,7 +1671,7 @@
           if (jet.position.z < A_MINZ - 90) {
             jet.visible = false;
             jet.position.z = z0;
-            if (tugFree()) { tug.position.z = z0 + 16; tug.position.x = -160 + 16; }
+            if (tugFree()) { tug.position.z = z0 + 16; tug.position.x = -160 + ADX + 16; }
             phase = 0; dwellT = 45; state = "hidden";
           }
           return;
@@ -1686,7 +1698,7 @@
       box(bx, 3.4, 4.5, 3.0, 2.2, 13, 0x9fb4c4, { cast: true });     // corridor from the terminal
       box(bx, 3.4, -2.8, 3.6, 2.6, 2.6, 0x7d8894, { cast: true });   // gate-end head block
     }
-    jetBridge(-92.5); jetBridge(-37.5);
+    jetBridge(-92.5 + ADX); jetBridge(-37.5 + ADX);
 
     // =====================================================================
     //  10) PERIMETER FENCE — the WHY you can't drive into the sea except via
@@ -1848,8 +1860,8 @@
       }
       // passengers in the terminal (carry-on, low aggression travellers)
       for (let i = 0; i < 14; i++) {
-        const sx = -40 + (rng() - 0.5) * 130;
-        const sz = 24 + (rng() - 0.5) * 18;
+        const sx = APRON_X + (rng() - 0.5) * 130;
+        const sz = 24 + ADZ + (rng() - 0.5) * 18;
         airportActor("terminalTraveller", sx, sz, {
           kind: "civilian", archetype: "tourist", job: "traveller",
           wealth: 0.4 + rng() * 0.4, aggr: 0.06 + rng() * 0.08,
@@ -1857,7 +1869,7 @@
       }
       // ground crew in hi-vis on the apron near the jets
       for (let i = 0; i < 6; i++) {
-        const sx = -120 + rng() * 220;
+        const sx = -120 + ADX + rng() * 220;
         const sz = APRON_Z - 18 + (rng() - 0.5) * 18;
         airportActor("groundCrew", sx, sz, {
           kind: "worker", archetype: "laborer", job: "ground crew",
@@ -1873,7 +1885,7 @@
     if (CBZ.cityMakeCar && CBZ.cityEcon && CBZ.cityEcon.carByName) {
       const taxiModel = CBZ.cityEcon.carByName("Taxi") || CBZ.cityEcon.carByName("Sedan") || null;
       for (let i = 0; i < 3; i++) {
-        try { CBZ.cityMakeCar(-70 + i * 14, 42, Math.PI / 2, false, taxiModel, 0.2); } catch (e) {}
+        try { CBZ.cityMakeCar(-70 + ADX + i * 14, 42 + ADZ, Math.PI / 2, false, taxiModel, 0.2); } catch (e) {}
       }
     }
 
@@ -1887,13 +1899,13 @@
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "airport", kind: "terminal", role: "ground crew",
-        x: -40, z: APRON_Z - 16, cap: 6,
-        home: { x: -40, z: 24 },                            // the terminal concourse
+        x: APRON_X, z: APRON_Z - 16, cap: 6,
+        home: { x: APRON_X, z: 24 + ADZ },                  // the terminal concourse
         spots: [
-          { x: -120, z: APRON_Z - 14 },                     // gate 1 airliner
-          { x: -10, z: APRON_Z - 14 },                      // mid-apron gate
-          { x: 95, z: APRON_Z - 6 },                        // the private-jet apron
-          { x: -40, z: APRON_Z + 18 },                      // the baggage / GSE line
+          { x: -120 + ADX, z: APRON_Z - 14 },               // gate 1 airliner
+          { x: -10 + ADX, z: APRON_Z - 14 },                // mid-apron gate
+          { x: 95 + ADX, z: APRON_Z - 6 },                  // the private-jet apron
+          { x: APRON_X, z: APRON_Z + 18 },                  // the baggage / GSE line
         ],
       });
     }
@@ -1915,7 +1927,7 @@
     // outside every building/aircraft collider, and faces the airliners/runway.
     // Also replace the arena's old downtown fallback so every generic city
     // spawn consumer (origin fallback, rented room, no-hospital fallback) agrees.
-    city.airportSpawn = { x: -40, y: 0, z: 7, yaw: Math.PI, place: "Halloran Field apron" };
+    city.airportSpawn = { x: APRON_X, y: 0, z: 7 + ADZ, yaw: Math.PI, place: "Halloran Field apron" };
     city.spawn = { x: city.airportSpawn.x, z: city.airportSpawn.z };
     // NO-SPAWN keep-outs (owner: "NPCs spawning all over the runway and
     // inside the airport — they belong in terminal areas/curbs"). Every
@@ -1927,15 +1939,15 @@
     // Hand-placed staff (populate()'s ground crew/passengers) don't route
     // through the scatter paths, so the authored airport life is untouched.
     if (CBZ.registerNoSpawnZone) {
-      CBZ.registerNoSpawnZone(city, { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9, label: "airport-airside" });
-      CBZ.registerNoSpawnZone(city, { minX: -116, maxX: 36, minZ: 10, maxZ: 38, label: "airport-terminal" });
+      CBZ.registerNoSpawnZone(city, { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" });
+      CBZ.registerNoSpawnZone(city, { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" });
     }
     city.airportAudit = {
       bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
       runway: { minX: RWY_X0, maxX: RWY_X1, minZ: RWY_Z - RWY_W / 2, maxZ: RWY_Z + RWY_W / 2 },
       noSpawn: [
-        { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9, label: "airport-airside" },
-        { minX: -116, maxX: 36, minZ: 10, maxZ: 38, label: "airport-terminal" },
+        { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" },
+        { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" },
       ],
       aircraft: AIRCRAFT_DIMS,
     };

@@ -162,7 +162,16 @@
   //  to intersect, clearing the X envelope alone is sufficient regardless
   //  of Z; the X3 harness re-derives and asserts this pairwise at runtime
   //  (grep "x3harness" / see the reported output).
+  //
+  //  STAGE-2 MAP ENLARGEMENT: each nation now rides the world-layout dial
+  //  (world/layout.js) like the biomes do — the per-country offsets below
+  //  are added to every settlement's authored cx/cz, so the whole nation
+  //  (settlements, pads, regions, work anchors, econ records) translates
+  //  as one unit and moves OUTWARD at least as far as the biomes nearest
+  //  it. Zero offsets (flag off) reproduce the authored numbers above.
   // ============================================================
+  const _NOFF = function (id) { return (CBZ.worldOff && CBZ.worldOff(id)) || { dx: 0, dz: 0 }; };
+  const _OV = _NOFF("veridia"), _OK = _NOFF("kesh"), _OS = _NOFF("solara"), _OM = _NOFF("mbeya");
   const COUNTRIES = [
     {
       id: "veridia", name: "Republic of Veridia", wealthLevel: 0.85,
@@ -177,7 +186,7 @@
           // silently resolve to the COUNTRY record instead of creating a
           // city record (caught by the X3 harness — see its report).
           id: "veridiacity", name: "Veridia City", subtitle: "Capital", capital: true, tier: "capital",
-          cx: 2000, cz: -400, hx: 145, hz: 140,
+          cx: 2000 + _OV.dx, cz: -400 + _OV.dz, hx: 145, hz: 140,
           cols: 4, rows: 4, blockW: 50, blockD: 44, roadW: 14,
           baseTemplate: "goldspire", densityBase: 0.78,
           // base 13 * wealthFactor(.85)=1.1025 -> round(14.3)=14 (task's own "maxS 14")
@@ -185,7 +194,7 @@
         },
         {
           id: "lowport", name: "Veridia Lowport", subtitle: "Harbor Town", capital: false, tier: "town",
-          cx: 2000, cz: -680, hx: 95, hz: 75,
+          cx: 2000 + _OV.dx, cz: -680 + _OV.dz, hx: 95, hz: 75,
           cols: 3, rows: 2, blockW: 42, blockD: 38, roadW: 12,
           baseTemplate: "pinecrest", densityBase: 0.6,
           skylineBase: { minStoreys: 2, maxStoreys: 4, towerFrac: 0.15, megaChance: false, townMax: 4 },
@@ -205,7 +214,7 @@
         {
           // (distinct from the country id "kesh" — see veridiacity's note above)
           id: "keshtown", name: "Keshtown", subtitle: "Royal Capital", capital: true, tier: "capital",
-          cx: 1900, cz: -1600, hx: 100, hz: 95,
+          cx: 1900 + _OK.dx, cz: -1600 + _OK.dz, hx: 100, hz: 95,
           cols: 3, rows: 3, blockW: 42, blockD: 38, roadW: 13,
           baseTemplate: "harvestmarket", densityBase: 0.6,   // X5: capitals stay low-rise harvestmarket, not hut-village (task: "keep capitals as-is")
           // base 5 * wealthFactor(.35)=.7775 -> round(3.9)=4 (task's own "low-rise maxS 4")
@@ -213,7 +222,7 @@
         },
         {
           id: "kesh_north", name: "Nur Hollow", subtitle: "Village", capital: false, tier: "village",
-          cx: 1900, cz: -1380, hx: 70, hz: 62,
+          cx: 1900 + _OK.dx, cz: -1380 + _OK.dz, hx: 70, hz: 62,
           cols: 2, rows: 2, blockW: 36, blockD: 32, roadW: 11,
           baseTemplate: "village", densityBase: 0.63,  // X5: the real hut/mud-brick village kit (villagekit.js)
           // density .63*(.6+.55*.35)=.63*.7925=.499 ≈ task's own "density 0.5"
@@ -222,7 +231,7 @@
         },
         {
           id: "kesh_east", name: "Adar's Well", subtitle: "Village", capital: false, tier: "village",
-          cx: 2160, cz: -1600, hx: 70, hz: 62,
+          cx: 2160 + _OK.dx, cz: -1600 + _OK.dz, hx: 70, hz: 62,
           cols: 2, rows: 2, blockW: 36, blockD: 32, roadW: 11,
           baseTemplate: "village", densityBase: 0.63,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
@@ -241,7 +250,7 @@
         {
           // (distinct from the country id "solara" — see veridiacity's note above)
           id: "solaracity", name: "Solara", subtitle: "City-State", capital: true, tier: "capital",
-          cx: 2200, cz: 600, hx: 130, hz: 125,
+          cx: 2200 + _OS.dx, cz: 600 + _OS.dz, hx: 130, hz: 125,
           cols: 4, rows: 4, blockW: 44, blockD: 40, roadW: 13,
           baseTemplate: "capeharbor", densityBase: 0.68,
           skylineBase: { minStoreys: 4, maxStoreys: 9, towerFrac: 0.3, megaChance: true, townMax: 4 },
@@ -263,28 +272,28 @@
         {
           // (distinct from the country id "mbeya" — see veridiacity's note above)
           id: "mbeyacity", name: "Mbeya City", subtitle: "Federal Capital", capital: true, tier: "capital",
-          cx: -2200, cz: -1200, hx: 95, hz: 88,
+          cx: -2200 + _OM.dx, cz: -1200 + _OM.dz, hx: 95, hz: 88,
           cols: 3, rows: 3, blockW: 40, blockD: 36, roadW: 12,
           baseTemplate: "harvestmarket", densityBase: 0.55,  // X5: capitals stay low-rise harvestmarket, not hut-village (task: "keep capitals as-is")
           skylineBase: { minStoreys: 1, maxStoreys: 4, towerFrac: 0.06, megaChance: false, townMax: 3 },
         },
         {
           id: "mbeya_west", name: "Kolo Village", subtitle: "Village", capital: false, tier: "village",
-          cx: -2460, cz: -1200, hx: 66, hz: 58,
+          cx: -2460 + _OM.dx, cz: -1200 + _OM.dz, hx: 66, hz: 58,
           cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 11,
           baseTemplate: "village", densityBase: 0.58,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
         },
         {
           id: "mbeya_south", name: "Tende Village", subtitle: "Village", capital: false, tier: "village",
-          cx: -2200, cz: -1420, hx: 66, hz: 58,
+          cx: -2200 + _OM.dx, cz: -1420 + _OM.dz, hx: 66, hz: 58,
           cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 11,
           baseTemplate: "village", densityBase: 0.58,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
         },
         {
           id: "mbeya_east", name: "Ruvu Village", subtitle: "Village", capital: false, tier: "village",
-          cx: -1940, cz: -1200, hx: 66, hz: 58,
+          cx: -1940 + _OM.dx, cz: -1200 + _OM.dz, hx: 66, hz: 58,
           cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 11,
           baseTemplate: "village", densityBase: 0.58,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
@@ -427,11 +436,16 @@
     // own precise region, so cityAnyRegion's linear scan still returns the
     // SPECIFIC settlement biome for a point that's inside one — this region
     // only ever matches the open countryside BETWEEN settlements).
+    // underlay: it CONTAINS its settlement regions by construction, exactly
+    // like the Greater Mercy envelope / speedway ownership circle — an
+    // ownership envelope, not a peer landmass, so region-overlap audits must
+    // not read settlement-inside-country as a clash.
     const u = unionOfSettlements(settlements);
     if (isFinite(u.minX)) {
       CBZ.registerCityRegion(city, {
         name: cd.name, subtitle: "Country", biome: cd.id, kind: "rect",
         minX: u.minX - 20, maxX: u.maxX + 20, minZ: u.minZ - 20, maxZ: u.maxZ + 20, pad: 8,
+        underlay: true,
       });
     }
   }

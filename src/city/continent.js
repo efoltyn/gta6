@@ -50,7 +50,16 @@
   if (CFG.CONTINENT_COAST == null) CFG.CONTINENT_COAST = true;
   if (CFG.CONTINENT_HARBOR == null) CFG.CONTINENT_HARBOR = true;
   if (CFG.CONTINENT_EXPANSION_V2 == null) CFG.CONTINENT_EXPANSION_V2 = true;
-  if (CFG.CONTINENT_COUNTRY_MARGIN == null) CFG.CONTINENT_COUNTRY_MARGIN = 1200;
+  // Stage-2 map enlargement (world/layout.js) needs a wider country belt:
+  // the V3 backdrop-relief band rises MARGIN+60..MARGIN+1900 (≈2050u) past
+  // the FLAT edge, and FLAT now hugs the region union — so the plate (and
+  // its wilds/backcountry labeling) must reach ≥2094u past the union or the
+  // ring's mountains stand on unlabeled "open sea" cells that read as city
+  // in the terrain audit. config.js owns the authoritative default (2200
+  // enlarged / 1200 compact — it parses first); this guard only mirrors it
+  // for a build without config.js.
+  if (CFG.CONTINENT_COUNTRY_MARGIN == null)
+    CFG.CONTINENT_COUNTRY_MARGIN = (CFG.WORLD_ENLARGE_V2 !== false) ? 2200 : 1200;
   if (CFG.CONTINENT_RELIEF_V1 == null) CFG.CONTINENT_RELIEF_V1 = true;
   // Adopted terrain/forest techniques from the reference generators (see
   // tools/adoption-terrain-forest.md). Both default ON, one-line revert each.
@@ -86,8 +95,10 @@
     const authoredBounds = { minX, maxX, minZ, maxZ };
     const LEGACY_PAD = 40;
     const requestedMargin = Number(CFG.CONTINENT_COUNTRY_MARGIN);
+    // clamp roof 2400 (was 1800): the enlarged world's 2200 belt must fit —
+    // the W ≤ 12000 bail below still bounds the total plate.
     const PAD = CFG.CONTINENT_EXPANSION_V2 === false ? LEGACY_PAD
-      : Math.max(180, Math.min(1800, Number.isFinite(requestedMargin) ? requestedMargin : 1200));
+      : Math.max(180, Math.min(2400, Number.isFinite(requestedMargin) ? requestedMargin : 1200));
     minX -= PAD; maxX += PAD; minZ -= PAD; maxZ += PAD;
     const W = maxX - minX, D = maxZ - minZ;
     if (!isFinite(W) || W <= 0 || W > 12000) return;

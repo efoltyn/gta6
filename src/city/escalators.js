@@ -260,8 +260,13 @@
       const air = regionByBiome(A, "airport");
       if (air) {
         // terminal interior is well inside the region's south-centre; use the
-        // documented terminal centre (-40, 24) but clamp to the region.
-        let tx = -40, tz = 24;
+        // documented terminal centre (-40, 24) ON the airport's world-layout
+        // dial (world/layout.js — the terminal itself is built at -40+dx),
+        // then clamp to the region. Clamping alone can NOT correct a stale
+        // literal: the old spot stays inside the moved region's rect, so a
+        // fixed -40 would put the bank on open apron 220u east of the shell.
+        const w = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
+        let tx = -40 + w.dx, tz = 24 + w.dz;
         if (tx < air.minX + 8) tx = air.minX + 8; if (tx > air.maxX - 8) tx = air.maxX - 8;
         if (tz < air.minZ + 8) tz = air.minZ + 8; if (tz > air.maxZ - 8) tz = air.maxZ - 8;
         // a Z-aligned criss-cross bank along the concourse depth

@@ -84,12 +84,49 @@
   // expose the flat extents for tooling / other agents
   CBZ.TERRAIN_FLAT = FLAT;
 
+  // Map-enlargement stage 2: world/layout.js publishes the spread world's
+  // seed union (nations included) as CBZ.WORLD_ENLARGE_FLAT. Grow-only, so
+  // with the flag off (null) today's rect above survives byte-identical.
+  // Applied inside syncTerrainFlat (i.e. at BUILD time, after config.js has
+  // parsed URL overrides — this file itself loads before config.js).
+  function growToEnlargeSeed() {
+    const E = CBZ.WORLD_ENLARGE_FLAT;
+    if (!E) return;
+    FLAT.minX = Math.min(FLAT.minX, E.minX); FLAT.maxX = Math.max(FLAT.maxX, E.maxX);
+    FLAT.minZ = Math.min(FLAT.minZ, E.minZ); FLAT.maxZ = Math.max(FLAT.maxZ, E.maxZ);
+  }
+
+  // The backdrop ring radii, derived from the live FLAT so the mountains
+  // stand clear of walkable land no matter how far the world spreads. The
+  // stage-1 numbers (1900/2250/2050/2380, span 6000) return exactly when
+  // the flat is small (halfExtent+380 ≤ 1900) — today's compact world is
+  // byte-identical; the enlarged world pushes the ring out proportionally.
+  // Shared with terrain_overhaul.js's builders for CBZ.TERRAIN_RING_DEBUG.
+  CBZ.terrainRingRadii = function (flat) {
+    const f = flat || FLAT;
+    const half = Math.max((f.maxX - f.minX) / 2, (f.maxZ - f.minZ) / 2);
+    const near = Math.max(1900, half + 380);
+    const k = near / 1900;                    // keep the authored ratios
+    const far = Math.round(2250 * k), colossus = Math.round(2050 * k),
+      everest = Math.round(2380 * k);
+    // span: at the authored ring (k=1) return EXACTLY the authored 6000 —
+    // 2*(everest+900) alone would be 6560 there, silently resizing the
+    // compact world's tile field and breaking flag-off byte-identity. Only
+    // a ring that actually grew derives its span (everest + 900u of sea).
+    const span = (k <= 1) ? 6000 : Math.max(6000, 2 * (everest + 900));
+    return {
+      near: Math.round(near), far, colossus, everest,
+      span, halfExtent: Math.round(half),
+    };
+  };
+
   // The world no longer fits inside the original hand-written archipelago
   // rectangle: countries and settlements register live regions well beyond it.
   // Grow (never shrink) the flat oracle to the actual built world before the
   // visual terrain is sampled. Mutating this shared object is deliberate — both
   // this fallback terrain and terrain_overhaul.js close over the same bounds.
   CBZ.syncTerrainFlat = function (city) {
+    growToEnlargeSeed();               // stage-2 seed union first (grow-only)
     city = city || (CBZ.city && CBZ.city.arena);
     if (!city) return FLAT;
     function grow(x0, x1, z0, z1) {
@@ -260,7 +297,12 @@
     // per-face normals so there is no seam), each with a real bounding
     // sphere and default frustum culling: looking down a street submits
     // ~a third of the verts the monolith did, for +15 draw calls.
-    const SPAN = 6000, TILES = 4, TSPAN = SPAN / TILES, TSEG = 70; // 4×(70·4)=280 → same density
+    // Ring radii + tile span derive from the post-sync FLAT (see
+    // terrainRingRadii): a fixed 1900u ring would sit ON walkable coast once
+    // the world spreads. Identical to the old constants while FLAT is small.
+    const RING = CBZ.terrainRingRadii(FLAT);
+    CBZ.TERRAIN_RING_DEBUG = RING;            // probes assert land clears the ring
+    const SPAN = RING.span, TILES = 4, TSPAN = SPAN / TILES, TSEG = 70; // 4×(70·4)=280 → same density
     // centre the field over the archipelago (the sea plane sits ~(150,-900)).
     const CX = (FLAT.minX + FLAT.maxX) / 2;   // ~310
     const CZ = (FLAT.minZ + FLAT.maxZ) / 2;   // ~-750
@@ -377,11 +419,11 @@
       }
     }
     // near ring — the dominant craggy peaks
-    ringSpines(1900, 1.04, {
+    ringSpines(RING.near, 1.04, {
       cols: 40, rows: 7, depthLen: 280, peakAmp: 360, noiseScale: 0.0055, seedBase: 1000,
     }, 0.04, 0.10);
     // far ring — taller, pushed out, hazier (recedes into the sky)
-    ringSpines(2250, 1.04, {
+    ringSpines(RING.far, 1.04, {
       cols: 38, rows: 5, depthLen: 360, peakAmp: 470, noiseScale: 0.0045, seedBase: 5000,
     }, 0.22, 0.22);
 
@@ -416,7 +458,7 @@
     //  MOUNT COLOSSUS — the original narrow snow-capped titan, due north.
     // ====================================================================
     {
-      const c = heroPeak("Mount Colossus", -Math.PI / 2, 2050, 150, {
+      const c = heroPeak("Mount Colossus", -Math.PI / 2, RING.colossus, 150, {
         cols: 28, rows: 9, depthLen: 560, peakAmp: 1050, noiseScale: 0.006,
         seedOff: 90210, fogBase: 0.10, fogDepth: 0.12,
       });
@@ -432,7 +474,7 @@
     //  towers over everything. Pure backdrop — walkable ground stays y=0.
     // ====================================================================
     {
-      const e = heroPeak("Mount Everest", -Math.PI / 2 + 0.62, 2380, 360, {
+      const e = heroPeak("Mount Everest", -Math.PI / 2 + 0.62, RING.everest, 360, {
         cols: 52, rows: 11, depthLen: 820, peakAmp: 1500, noiseScale: 0.0048,
         seedOff: 29029, fogBase: 0.12, fogDepth: 0.16,
       });
