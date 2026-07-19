@@ -474,6 +474,31 @@
     strike = null;
   }
 
+  // systems/lockon.js UNIVERSAL-acquisition seam: the summoned taxi chopper
+  // and the airstrike jet are real craft in the sky, so they're lockable like
+  // every other vehicle (the player CAN waste a rocket on their own ride —
+  // that's the every-vehicle-is-real rule). Seek getters are cached per
+  // record (zero per-frame allocation) and go null on despawn, which breaks a
+  // live lock the same frame. cb(...) === false stops the walk (pool full).
+  function airLockSeek(rec) {
+    if (!rec._lockSeek) {
+      rec._lockSeek = function () {
+        return rec.pos && rec.group && rec.group.parent
+          ? { x: rec.pos.x, y: rec.pos.y, z: rec.pos.z }
+          : null;
+      };
+    }
+    return rec._lockSeek;
+  }
+  CBZ.cityPlayerAirEnumTargets = function (cb) {
+    if (chopper && chopper.pos && chopper.group && chopper.group.parent) {
+      if (cb(chopper, airLockSeek(chopper), chopper.pos.x, chopper.pos.y, chopper.pos.z, 3.0, "aircraft") === false) return;
+    }
+    if (strike && strike.pos && strike.group && strike.group.parent) {
+      cb(strike, airLockSeek(strike), strike.pos.x, strike.pos.y, strike.pos.z, 3.2, "aircraft");
+    }
+  };
+
   function dropBomb(j) {
     const r = arenaRoot(); if (!r) { detonateStrike(j.target); return; }
     const a = assets();

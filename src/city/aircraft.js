@@ -415,6 +415,33 @@
     };
   };
 
+  // PLURAL twin of the acquire API above, for systems/lockon.js UNIVERSAL
+  // acquisition: enumerate EVERY live military craft so each one wears its own
+  // candidate square — the single-best contract above hides all but one craft
+  // along the aim ray (it stays for the legacy pull-time homing callers).
+  // cb(obj, seek, x, y, z, radius, kind); returning false stops the walk
+  // (candidate pool full). Seek getters are cached per craft record so the
+  // per-frame enumeration allocates nothing.
+  function lockSeekFor(craft) {
+    if (!craft._lockSeek) {
+      craft._lockSeek = function () {
+        return craft.pos && !craft.downed
+          ? { x: craft.pos.x, y: craft.pos.y, z: craft.pos.z }
+          : null;
+      };
+    }
+    return craft._lockSeek;
+  }
+  CBZ.cityAircraftEnumTargets = function (cb) {
+    if (heli && !heli.downed && heli.pos &&
+        cb(heli, lockSeekFor(heli), heli.pos.x, heli.pos.y, heli.pos.z, craftRadius(heli, 3.6), "aircraft") === false) return;
+    for (let i = 0; i < jets.length; i++) {
+      const j = jets[i];
+      if (!j || j.downed || !j.pos) continue;
+      if (cb(j, lockSeekFor(j), j.pos.x, j.pos.y, j.pos.z, craftRadius(j, 3.2), "aircraft") === false) return;
+    }
+  };
+
   // ---- PUBLIC: player-fired missile (the F-22 / chopper salvo) --------------
   // Fire a REAL missile from (x,y,z) travelling along the direction (dx,dy,dz).
   // It reuses the exact gunship missile pool + trail + detonate(cityExplosion)

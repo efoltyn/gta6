@@ -1053,6 +1053,24 @@
     if (!chopper || !chopper.pos) return null;
     return { x: chopper.pos.x, z: chopper.pos.z, y: chopper.pos.y };
   };
+  // systems/lockon.js UNIVERSAL-acquisition seam (owner: "homing doesn't work
+  // for police helicopters"): expose Air-1 as a lockable craft — parked on its
+  // precinct pad or flying. LIST/ACQUIRE SEAM ONLY: damage and flight behavior
+  // stay with this module's owner. The seek getter is cached on the chopper
+  // record (zero per-frame allocation) and goes null the moment the record is
+  // despawned/replaced, which breaks any live lock/homing that frame.
+  CBZ.cityPoliceAirEnumTargets = function (cb) {
+    const c = chopper;
+    if (!c || !c.pos || !c.group || !c.group.parent) return;
+    if (!c._lockSeek) {
+      c._lockSeek = function () {
+        return chopper === c && c.pos && c.group && c.group.parent
+          ? { x: c.pos.x, y: c.pos.y, z: c.pos.z }
+          : null;
+      };
+    }
+    cb(c, c._lockSeek, c.pos.x, c.pos.y, c.pos.z, 3.4, "police-air");
+  };
   function despawnChopper() {
     if (!chopper) return;
     releaseChopperPilot();

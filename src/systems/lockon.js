@@ -6,8 +6,12 @@
    1) WEAPON LOCK-ON (CBZ.CONFIG.WEAPON_LOCKON, default ON)
       Whenever the player wields a missile-class weapon — the RPG on foot, a
       stolen armed aircraft's missiles, the tank's main gun, a modshop car
-      launcher — VEHICLES on screen grow a target square with a three-state
-      color grammar:
+      launcher — EVERY live craft on screen grows a target square: street
+      cars, military armor, police air (the 3★ Air-1 chopper included),
+      parked + ambient civil aircraft, the player's own parked birds
+      (CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS — list owners feed the pool via
+      plural cityXxxEnumTargets(cb) twins beside their old single-best
+      acquire APIs). Three-state color grammar, NO words on screen:
         GREEN  = candidate (in range, roughly on screen)
         YELLOW = acquiring (aim held near it — the square spins/tightens in)
         RED    = LOCKED (steady, hard corners, lock tone)
@@ -73,6 +77,13 @@
   // ---- feature flags (one-line revert each) --------------------------------
   if (CBZ.CONFIG.WEAPON_LOCKON == null) CBZ.CONFIG.WEAPON_LOCKON = true;
   if (CBZ.CONFIG.SNIPER_REAL_SCOPE == null) CBZ.CONFIG.SNIPER_REAL_SCOPE = true;
+  // UNIVERSAL ACQUISITION (owner: "homing works for vehicles and planes, but
+  // doesn't work for small planes / police helicopters / a lot of things like
+  // that"): every module that owns a craft list enumerates ALL its live craft
+  // into the candidate pool, instead of the old single-best-along-the-ray
+  // acquire calls that hid every craft but one (and covered no ambient/police
+  // air at all). false = the pre-universal two-acquire behaviour.
+  if (CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS == null) CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS = true;
 
   const DEG = Math.PI / 180;
 
@@ -116,8 +127,9 @@
   const order = [];                        // sort indices (persistent, ints only)
 
   // seek closures are allocated only when a slot BINDS a new object (rare),
-  // never per frame. Cars/military records are live objects; the police/civil
-  // aircraft acquire APIs hand us their own seek getters.
+  // never per frame. Cars/military records are live objects; every other
+  // craft registry hands us its own per-craft cached seek getters (see the
+  // EnumTargets contract below).
   function carSeek(c) {
     return function () {
       if (!c || c.dead || !c.pos || !c.group || c.group.visible === false) return null;
@@ -130,6 +142,51 @@
       if (!v || v.destroyed || !v.group || !v.group.parent || v.group.visible === false) return null;
       return { x: v.pos.x, y: (v.pos.y || 0) + 1.6, z: v.pos.z };
     };
+  }
+
+  // ---- universal craft enumeration (CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS) ----
+  // Contract: each list-owner module exposes cityXxxEnumTargets(cb) beside its
+  // older single-best acquire API (kept for the legacy pull-time homing path).
+  // The module calls cb(obj, seek, x, y, z, radius, kind) once per LIVE craft
+  // — obj is the stable record identity, seek a per-craft CACHED zero-arg
+  // getter (live {x,y,z} or null once the craft dies/despawns) — and stops
+  // walking when cb returns false (pool full). Modules do live-ness filtering;
+  // range/cone scoring happens here. Nothing in this path may allocate per
+  // frame: the callback below is built once, and the seek getters are cached
+  // on the craft records by their owners.
+  const ENUM_SOURCES = [
+    "cityAircraftEnumTargets",        // aircraft.js — 5★ military gunship + jets
+    "cityCivilAircraftEnumTargets",   // island_airport.js — parked airliner / private jets
+    "cityPoliceAirEnumTargets",       // police.js — the 3★ Air-1 searchlight chopper
+    "cityAirTrafficEnumTargets",      // airtraffic.js — ambient GA planes + light helis
+    "cityPlayerAircraftEnumTargets",  // playeraircraft.js — the player's parked birds
+    "cityPlayerAirEnumTargets",       // playerair.js — summoned taxi heli + strike jet
+  ];
+  let _enumT = null;                       // platform tuning for the running pass
+  // Stable per-craft slot keys. Object identity is the primary hysteresis
+  // match; the key only needs to be unique and STABLE so slot LOS state isn't
+  // reset by list-index churn the way the "car"+i keys are.
+  let _ukeyN = 0;
+  const _ukeys = typeof WeakMap === "function" ? new WeakMap() : null;
+  function ukey(obj) {
+    if (!_ukeys) return "u?";
+    let k = _ukeys.get(obj);
+    if (!k) { k = "u" + (_ukeyN++); _ukeys.set(obj, k); }
+    return k;
+  }
+  function enumCB(obj, seek, x, y, z, radius, kind) {
+    if (slotCount >= MAX_CANDS) return false;
+    if (!obj || typeof obj !== "object" || !seek) return true;
+    const P = CBZ.player;
+    if (P && obj === P._aircraft) return true;   // never square the craft you're flying
+    const dx = x - _aimO.x, dy = y - _aimO.y, dz = z - _aimO.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < MIN_LOCK_DIST || d > _enumT.range) return true;
+    const dot = (dx * _aimD.x + dy * _aimD.y + dz * _aimD.z) / d;
+    if (dot < LIST_CONE) return true;
+    const s = slots[slotCount++];
+    bindSlot(s, obj, ukey(obj), kind || "aircraft", seek, x, y, z, radius || 3.2, d, dot);
+    return slotCount < MAX_CANDS;
   }
 
   // ---- lock state ----
@@ -261,9 +318,24 @@
           Math.max(1.8, Math.min(4.0, (v.footL || 5) * 0.5)), d, dot);
       }
     }
-    // ---- live police air + civil aircraft: the acquire APIs surface the best
-    // one along our aim (they own those private entity lists) ----
-    if (CBZ.game.mode === "city" && slotCount < MAX_CANDS && CBZ.cityAircraftAcquireTarget) {
+    // ---- EVERY other craft registry (police air, civil aircraft, ambient GA
+    // traffic, the player's own parked/summoned birds): walk the plural
+    // EnumTargets twins so each live craft gets its own candidate square. The
+    // old single-best acquire calls surfaced ONE craft along the whole ray
+    // and covered no ambient/police air at all — the owner's "doesn't work
+    // for small planes / police helicopters" report.
+    const universal = CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS !== false;
+    if (CBZ.game.mode === "city" && universal) {
+      _enumT = T;
+      for (let i = 0; i < ENUM_SOURCES.length && slotCount < MAX_CANDS; i++) {
+        const fn = CBZ[ENUM_SOURCES[i]];
+        if (fn) { try { fn(enumCB); } catch (e) {} }
+      }
+    }
+    // Single-best acquire fallbacks: the whole pre-universal behaviour when
+    // the flag is off, and a safety net for a build missing an enum twin.
+    if (CBZ.game.mode === "city" && slotCount < MAX_CANDS && CBZ.cityAircraftAcquireTarget &&
+        (!universal || !CBZ.cityAircraftEnumTargets)) {
       const a = CBZ.cityAircraftAcquireTarget(_aimO.x, _aimO.y, _aimO.z, _aimD.x, _aimD.y, _aimD.z, T.range, LIST_CONE);
       if (a && a.seek) {
         const p = a.seek();
@@ -273,7 +345,8 @@
         }
       }
     }
-    if (CBZ.game.mode === "city" && slotCount < MAX_CANDS && CBZ.cityCivilAircraftAcquireTarget) {
+    if (CBZ.game.mode === "city" && slotCount < MAX_CANDS && CBZ.cityCivilAircraftAcquireTarget &&
+        (!universal || !CBZ.cityCivilAircraftEnumTargets)) {
       const a = CBZ.cityCivilAircraftAcquireTarget(_aimO.x, _aimO.y, _aimO.z, _aimD.x, _aimD.y, _aimD.z, T.range, LIST_CONE);
       if (a && a.seek) {
         const p = a.seek();
@@ -405,7 +478,7 @@
 
   /* ---- overlay: pooled DOM squares (built once, class-toggled) ------------ */
   let overlay = null;
-  const squares = [];                       // { el, lab, shown, cls, w }
+  const squares = [];                       // { el, shown, cls, w }
   function buildOverlay() {
     if (overlay || typeof document === "undefined" || !document.body) return;
     const st = document.createElement("style");
@@ -420,10 +493,10 @@
       ".lksq i.tl{left:-4px;top:-4px;border-left-width:3px;border-top-width:3px}" +
       ".lksq i.tr{right:-4px;top:-4px;border-right-width:3px;border-top-width:3px}" +
       ".lksq i.bl{left:-4px;bottom:-4px;border-left-width:3px;border-bottom-width:3px}" +
-      ".lksq i.br{right:-4px;bottom:-4px;border-right-width:3px;border-bottom-width:3px}" +
-      ".lksq b{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);display:none;" +
-        "font:700 10px/1 'Fredoka',sans-serif;letter-spacing:1.5px;color:#ff3b30;text-shadow:0 1px 2px rgba(0,0,0,.9)}" +
-      ".lksq.r b{display:block}";
+      ".lksq i.br{right:-4px;bottom:-4px;border-right-width:3px;border-bottom-width:3px}";
+    // NO text on any square (owner: "it shouldn't say lock") — lock state is
+    // carried entirely by color (green/yellow/red), the hard corner ticks, and
+    // the lock tone, per the word-free combat HUD doctrine.
     document.head.appendChild(st);
     overlay = document.createElement("div");
     overlay.id = "lockonOverlay";
@@ -435,9 +508,6 @@
         k.className = c;
         el.appendChild(k);
       }
-      const lab = document.createElement("b");
-      lab.textContent = "LOCK";
-      el.appendChild(lab);
       overlay.appendChild(el);
       squares.push({ el, shown: false, cls: "", w: -1 });
     }

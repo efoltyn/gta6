@@ -302,6 +302,34 @@
   CBZ.cityClearAirTraffic = teardown;
   CBZ.cityAirTrafficList = function () { return fleet ? fleet.slice() : []; };
 
+  // systems/lockon.js UNIVERSAL-acquisition seam (owner: "homing doesn't work
+  // for small planes"): every ambient GA plane / light heli is a lockable
+  // craft like any street car. Identity is the fleet record; the cached seek
+  // getter goes null once the craft is ring-culled or the fleet tears down,
+  // which breaks a live lock the same frame. cb(...) === false stops the walk
+  // (candidate pool full). NOTE these craft still carry no HP model — a
+  // homing hit proximity-detonates ON them; an actual shoot-down arc is a
+  // follow-up for this module.
+  function trafficLockSeek(t) {
+    if (!t._lockSeek) {
+      t._lockSeek = function () {
+        return t.grp && t.grp.parent && t.grp.visible !== false
+          ? { x: t.grp.position.x, y: t.grp.position.y, z: t.grp.position.z }
+          : null;
+      };
+    }
+    return t._lockSeek;
+  }
+  CBZ.cityAirTrafficEnumTargets = function (cb) {
+    if (!fleet) return;
+    for (let i = 0; i < fleet.length; i++) {
+      const t = fleet[i];
+      if (!t || !t.grp || !t.grp.parent || t.grp.visible === false) continue;
+      const p = t.grp.position;
+      if (cb(t, trafficLockSeek(t), p.x, p.y, p.z, t.kind === "heli" ? 2.6 : 3.2, "air-traffic") === false) return;
+    }
+  };
+
   CBZ.onUpdate(42.7, function (dt) {
     if (g.mode !== "city" || (CBZ.CONFIG && CBZ.CONFIG.AIR_TRAFFIC_AMBIENT === false)) {
       if (fleet) teardown();

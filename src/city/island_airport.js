@@ -257,6 +257,32 @@
     return best;
   };
 
+  // PLURAL twin for systems/lockon.js UNIVERSAL acquisition: every live parked
+  // aircraft becomes a candidate at once — the single-best acquire above only
+  // ever surfaced one of a whole apron row (it stays for the legacy pull-time
+  // homing callers). Anchor height + seek getter are cached per rec so the
+  // per-frame enumeration allocates nothing. cb(...) === false stops the walk.
+  function civilLockSeek(rec) {
+    if (!rec._lockSeek) {
+      const b = civilBodyBounds(rec);
+      rec._lockMidY = b ? (b.minY + b.maxY) * 0.5 : 2.5;   // fuselage mid-height
+      rec._lockSeek = function () {
+        if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || rec.group.visible === false) return null;
+        return { x: rec.group.position.x, y: rec.group.position.y + rec._lockMidY, z: rec.group.position.z };
+      };
+    }
+    return rec._lockSeek;
+  }
+  CBZ.cityCivilAircraftEnumTargets = function (cb) {
+    for (let i = 0; i < placed.length; i++) {
+      const rec = placed[i];
+      if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || rec.group.visible === false) continue;
+      const seek = civilLockSeek(rec);
+      if (cb(rec, seek, rec.group.position.x, rec.group.position.y + rec._lockMidY, rec.group.position.z,
+             rec.flightKind === "airliner" ? 3.4 : 2.1, "civil-aircraft") === false) return;
+    }
+  };
+
   function detachCivilCollider(rec) {
     const col = rec && rec.collider;
     if (!col || rec._colliderDetached) return;

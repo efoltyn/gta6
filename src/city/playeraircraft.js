@@ -755,6 +755,33 @@
     return craft ? { hp: craft.hp, maxHp: craft.maxHp, kind: craft.kind } : null;
   };
 
+  // systems/lockon.js UNIVERSAL-acquisition seam: the player's PARKED birds
+  // (owned heli/jet + an adopted stolen craft) are lockable like any parked
+  // car; the craft actually being FLOWN is the shooter platform, never a
+  // target. Seek getter + square radius are cached per craft record so the
+  // per-frame enumeration allocates nothing. cb(...) === false stops the walk.
+  function craftLockSeek(craft) {
+    if (!craft._lockSeek) {
+      const d = airframeDims(craft);
+      craft._lockRadius = Math.max(2.2, Math.min(6, (d && d.length ? d.length : 8) * 0.4));
+      craft._lockSeek = function () {
+        return !craft.destroyed && craft.pos && craft.group && craft.group.parent
+          ? { x: craft.pos.x, y: craft.pos.y + 1.0, z: craft.pos.z }
+          : null;
+      };
+    }
+    return craft._lockSeek;
+  }
+  CBZ.cityPlayerAircraftEnumTargets = function (cb) {
+    const flying = _aircraftFlying();
+    for (let k = 0; k < 3; k++) {
+      const craft = k === 0 ? heli : (k === 1 ? jet : stolenAir);
+      if (!craft || craft === flying || craft.destroyed || !craft.pos || !craft.group || !craft.group.parent) continue;
+      const seek = craftLockSeek(craft);
+      if (cb(craft, seek, craft.pos.x, craft.pos.y + 1.0, craft.pos.z, craft._lockRadius, "aircraft") === false) return;
+    }
+  };
+
   // park the helicopter on the rooftop helipad
   function placeHeli() {
     if (!g.cityOwnsHeli) { if (heli) { disposeGroup(heli.group); heli = null; } return; }
