@@ -52,6 +52,8 @@
      TOUCH_AIM_SLIDE    — hold AIM/SCOPE and SLIDE onto FIRE to shoot
                           while the hold stays down; also seats those two
                           buttons beside the trigger (mobile.css .tslide)
+     TOUCH_SCOPE_UP     — from SCOPE, an upward drag ALSO fires (owner: "drag
+                          UP, not right"); same hold/release as the FIRE slide
      TOUCH_AIM_DRAG     — the console LT+right-stick grammar: while a finger
                           HOLDS aim/scope, dragging that same finger FINE-
                           AIMS the camera (identical math to the look-drag,
@@ -77,11 +79,13 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HUD_TIDY == null) CBZ.CONFIG.TOUCH_HUD_TIDY = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIXED_STICK == null) CBZ.CONFIG.TOUCH_FIXED_STICK = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_SLIDE == null) CBZ.CONFIG.TOUCH_AIM_SLIDE = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_SCOPE_UP == null) CBZ.CONFIG.TOUCH_SCOPE_UP = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_DRAG == null) CBZ.CONFIG.TOUCH_AIM_DRAG = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE == null) CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
   const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
+  const SCOPEUP = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_SCOPE_UP !== false;
   const AIMDRAG = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_DRAG !== false;
 
   const SENS = 0.006, MAXR = 74, DEAD = 0.28;   // MAXR matches the enlarged 168px disc (owner: bigger pad, less corner)
@@ -269,6 +273,7 @@
           fireIn: false, rect: fr, release: null,
           born: performance.now(),          // shields this fresh claim from the same event's window-level sweep (which sees our id as a "recycled newborn")
           lx: t.clientX, ly: t.clientY,     // fine-aim drag anchor (TOUCH_AIM_DRAG)
+          sy: t.clientY,                    // stable start-Y for SCOPE drag-UP-to-fire (ly drifts w/ AIMDRAG)
         };
         rec.release = function () {
           if (!slideTouches.delete(tid)) return;   // already gone (sweep vs touchend)
@@ -299,8 +304,14 @@
         }
         if (!rec.rect) continue;
         const r = rec.rect, p = rec.fireIn ? SLIDE_PAD_OUT : SLIDE_PAD_IN;
-        const inFire = t.clientX >= r.left - p && t.clientX <= r.right + p &&
-                       t.clientY >= r.top - p && t.clientY <= r.bottom + p;
+        let inFire = t.clientX >= r.left - p && t.clientX <= r.right + p &&
+                     t.clientY >= r.top - p && t.clientY <= r.bottom + p;
+        // TOUCH_SCOPE_UP — the owner's "from SCOPE, drag UP, not right, to shoot":
+        // the roll-onto-FIRE trigger mirrored to the vertical axis. An upward slide
+        // from the start anchor past the pad engages FIRE with the rect's own
+        // hysteresis (harder to enter than to hold). SCOPE only — AIM's reach is
+        // untouched, and it flows through the same fireIn/release/stale-sweep path.
+        if (SCOPEUP && id === "tscope" && rec.sy - t.clientY >= (rec.fireIn ? SLIDE_PAD_IN : SLIDE_PAD_OUT)) inFire = true;
         if (inFire !== rec.fireIn) { rec.fireIn = inFire; fireHold(inFire); }
       }
     }, { passive: false });
