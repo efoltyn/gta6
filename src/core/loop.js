@@ -109,4 +109,33 @@
   }
 
   CBZ.startLoop = function () { requestAnimationFrame(loop); };
+
+  // ---- HEADLESS SIM STEP (tools only — inert in normal play) --------------
+  // Drives ONE update tick with a fixed dt and NO render: the whole updater +
+  // always chain runs exactly like loop() (same order, same per-updater
+  // try/catch so a throw surfaces as a console error without killing the
+  // burst), but nothing touches the renderer. This is what lets the math
+  // gate step thousands of sim ticks in seconds of CPU instead of waiting on
+  // software-rasterized frames — update-path crashes surface at full speed.
+  // CBZ.now advances synthetically so time-stamped systems (cooldowns,
+  // phases) actually progress across a burst.
+  CBZ.stepSim = function (dt) {
+    dt = dt || 1 / 60;
+    CBZ.now = (CBZ.now || performance.now()) + dt * 1000;
+    CBZ.wallDt = dt;
+    let scale = 1;
+    if (CBZ.hitstop > 0) { CBZ.hitstop = Math.max(0, CBZ.hitstop - dt); scale = 0.06; }
+    else if (CBZ.slowmo > 0) { CBZ.slowmo = Math.max(0, CBZ.slowmo - dt); scale = 0.32; }
+    const sdt = Math.min(dt, WORLD_MAX) * scale;
+    CBZ.feelDt = CBZ.feelMotion ? Math.min(dt, (g.mode === "city") ? FEEL_MAX_CITY : FEEL_MAX_OTHER) * scale : sdt;
+    if (g.state === "playing") {
+      g.elapsed += sdt;
+      for (const u of CBZ.updaters) {
+        try { u.fn(sdt); } catch (err) { console.error("[updater]", err); }
+      }
+    }
+    for (const a of CBZ.always) {
+      try { a.fn(sdt); } catch (err) { console.error("[always]", err); }
+    }
+  };
 })();

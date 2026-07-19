@@ -6,45 +6,46 @@ package.json. ~120k LOC across `src/`.
 
 ## HOW TO VERIFY WORK — the closed loop (read this first)
 
-There is NO test framework here and we don't want one. Verification is a
-closed loop of fast, cheap gates that render the actual game and look at it.
-Reasoning about visuals without rendering them is how bugs ship — every gate
-below runs in seconds to ~1 minute. Use them after EVERY change, in roughly
-this order:
+There is NO test framework here and we don't want one. Verification is
+MATH over live game state — never rendered frames. OWNER DOCTRINE: tests
+are numbers ("Sims testing"); how things LOOK is the owner's job, judged
+by playing. Headless rendering runs ~60x slow (SwiftShader), so any gate
+that waits on frames burns minutes to prove nothing — the fast loop reads
+state directly and steps the sim by hand. Use after EVERY change:
 
 1. **Syntax** — `node --check <file>` on every touched file. Free.
-2. **Smoke gate** — `node tools/smoke-play.mjs 10` boots the game headless,
-   presses PLAY, simulates input, checks generator invariants (lot/shop/road
-   counts, shop-door reachability, region bounds) and collects every console
-   error. Must print `invariants: ok`. This is the universal pass/fail.
-3. **Look at what you built** — screenshots are the point, not a nicety:
-   - `node tools/studio.mjs <subject>` — multi-angle turntable shots of any
-     asset (`rig`, `rig:walk`, `car:NAME`, `cars`, `expr:JS`), animation
-     filmstrips, `--video` WebM. THE tool for characters/vehicles/props.
-   - `node tools/street-shot.mjs [out.png]` — street-level scene shot at the
-     densest pedestrian cluster. For anything visible from the sidewalk.
-   - `node tools/city-atlas.mjs <seed>` — whole-world top-down render per
-     seed. For procgen/layout changes; farm several seeds for regressions.
-   - `node tools/demolition-check.mjs` — full destroy→rubble→cleared→
-     scaffold→rebuilt arc with phase screenshots + restore assertions, plus
-     a FLOATING-GEOMETRY invariant: every prop box must be support-connected
-     to the ground (AABB chain). Copy that pattern for any new structure
-     builder — screenshots judge aesthetics, connectivity checks judge
-     physics, and thin members can LOOK floating at distance even when
-     connected (make members chunky: ≥0.3u, this is a voxel-look game).
-   Shots land in `tools/shots/` (gitignored). READ the images — the loop has
-   repeatedly caught defects that numeric checks missed (inside-out geometry,
-   zombie-arm poses, floating trim), and numeric checks caught what images
-   missed. Use both.
-4. **Targeted in-page probes** — for behavior, write a throwaway CDP script
-   (copy the boot boilerplate from `tools/demolition-check.mjs` or
-   `smoke-play.mjs`): boot headless Chromium, `Runtime.evaluate` straight
-   into the live game, assert on real state (`CBZ.city.arena.lots`,
-   `CBZ.cityCrowdAgent(i)`, `CBZ.colliders.length`, `renderer.info`…).
+2. **Math gate** — `node tools/math-gate.mjs [--seeds 90210,1337]` — THE
+   universal pass/fail. One headless boot; per seed: builds the world,
+   asserts generator invariants (lot/shop/road counts, shop-door
+   reachability, region bounds), terrain/biome doctrine (city-on-mountain,
+   mountains-outside-snow, PEER-landmass region overlaps — nested venues
+   and causeway links are legitimately excluded), then drives the sim
+   DIRECTLY — `CBZ.stepSim(dt)` ticks the whole updater chain with no
+   rendering, so hundreds of full-speed sim ticks (peds spawn, systems run,
+   update-path crashes surface) cost seconds. Re-runs the first seed and
+   asserts byte-identical counts + biome histogram (determinism law).
+   Must print `MATHGATE: ok`. ~1-2 min for two seeds + determinism.
+3. **Targeted in-page probes** — for behavior, write a throwaway CDP script
+   (copy the boot boilerplate from `tools/math-gate.mjs`): boot headless
+   Chromium, wait for `CBZ.bootComplete`, `Runtime.evaluate` straight into
+   the live game, assert on real state (`CBZ.city.arena.lots`,
+   `CBZ.cityCrowdAgent(i)`, `CBZ.colliders.length`…), and use
+   `CBZ.stepSim(1/60)` bursts to advance time instantly instead of waiting.
    Minutes to write, seconds to run, tests the REAL game — never a mock.
 
-Escalate depth with risk: a color tweak needs (1)+(3); a generator or
-physics change needs all four. Never commit on (1) alone.
+VISUAL TOOLS — owner-request only, NEVER in the default loop (the owner
+judges appearance by playing; do not spend loop time on screenshots):
+`tools/studio.mjs` (asset turntables), `tools/street-shot.mjs` (street
+scene), `tools/city-atlas.mjs` (top-down world), `tools/demolition-check.mjs`
+(destroy→rebuild arc; its FLOATING-GEOMETRY AABB-chain invariant is still a
+good pattern to copy for structure builders), `tools/smoke-play.mjs` (full
+RENDERED boot + screenshot — the only gate that exercises the real render
+path; run it once before a big deploy or when render-path code changed,
+otherwise skip). `tools/terrain-map-audit.mjs` is the deep-dive superset of
+the math gate's terrain sweep for terrain-focused work.
+
+Escalate depth with risk: a color tweak needs (1); logic needs (1)+(2);
+behavior/systems work needs all three. Never commit on (1) alone.
 
 ## Headless environment facts (save yourself the debugging)
 
@@ -57,8 +58,10 @@ physics change needs all four. Never commit on (1) alone.
   pre-existing and acceptable; rare seed-dependent `computeBoundingSphere`
   NaN too. ANY other error is yours.
 - **Sim time crawls headless** (~60x slower: SwiftShader fps + clamped dt).
-  Don't wait wall-clock for game-time events — jump state directly
-  (`CBZ.dayCount(n)`, `CBZ.dayPhase(x)`) or sleep generously.
+  NEVER wait wall-clock for game-time events — jump state directly
+  (`CBZ.dayCount(n)`, `CBZ.dayPhase(x)`) or burst `CBZ.stepSim(1/60)` in a
+  loop (core/loop.js): each call ticks the full updater chain with no
+  rendering, so 600 ticks ≈ 10 sim-seconds run at CPU speed.
 - **Camera aiming from probes**: NEVER hand-roll teleport+yaw math — a
   sign-convention mistake once had a probe photographing the WRONG BUILDING
   for two rounds while every numeric check passed. Inject `tools/aimlib.js`
