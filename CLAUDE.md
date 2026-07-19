@@ -70,6 +70,48 @@ physics change needs all four. Never commit on (1) alone.
   demolition-check.mjs for the wiring; evl needs `awaitPromise: true`.)
 - Lots live at `CBZ.city.arena.lots` (the `arena` level, not `CBZ.city`).
 
+## Engine systems — REUSE these, never re-invent
+
+One conversation-long push turned several one-offs into shared grammar.
+Before building anything adjacent, wire into the existing system:
+
+- **Death/kill bus** — `src/city/killfeed.js`. EVERY death funnels through it
+  (it wraps `cityKillPed`/`cityCrowdKill`/player death; lazy-retry hooks).
+  New death sources call `CBZ.cityLogDeath(name, cause, {by})` or
+  `CBZ.cityKillFeed(by, name, cause)`. It owns the ONLY sanctioned HUD
+  popup (the Fortnite corner feed) — never toast a death yourself.
+- **Boarding-door grammar** — `src/city/aircraft_doors.js` (phased
+  walk→open→step→handover→close arcs; theft revert via onFail) and the
+  airliner cabin/cockpit door easing in `island_airport.js`. Anything with
+  a door the player passes through (vehicles, future rides) uses these
+  beats; `src/city/elevators.js` is the gold standard.
+- **Lock-on / scope** — `src/systems/lockon.js`. Missile-class weapons get
+  targets via `CBZ.lockonFireTarget()` / `CBZ.lockonMissileSeek()`;
+  scoping via `fpsScope/fpsCanScope/fpsScopeToggle`. ALL camera FOV
+  writers must yield to `CBZ.fpsScopeFov()` (precedence: fitted optic >
+  lockon scope) — a scope-blind FOV writer re-creates the "fake scope" bug.
+- **Touch layer** — `src/systems/touch.js` + `touch_vehicle.js`. Fixed
+  stick (rim = sprint, press = crouch), slide-holds (aim/scope→fire),
+  verb pills (words for interactions, icons for combat), stale-touch
+  sweepers. New on-screen controls join THIS layer; never add a parallel
+  touch handler. Interaction popups on touch are tappable pills, and
+  single-verb rides are SILENT (press/tap to take — see
+  `interactions.js` SILENT_RIDE; the airliner BOARD/HIJACK card is the
+  one sanctioned exception).
+- **HUD doctrine** — the only popup is the killfeed. Rich info lives in
+  logic/phone/leaderboards, not floating cards; aiming shows a floating
+  `Lv.N Title` overhead pill (`aim_dossier.js`), full data stays
+  available via `CBZ.cityActorDossier()`. Never render keyboard key
+  glyphs on touch (`CBZ.touchActionPrompt` re-skins prompts).
+- **Numeric world audits** — `tools/terrain-map-audit.mjs` (biome/relief
+  grid, mountains-outside-snow, city-on-mountain, region overlaps) and
+  `tools/world-audit.mjs` (object overlaps/lint). Terrain/layout changes
+  verify with THESE (no-visual closed loop), then the smoke gate.
+- **Camera polish flags** — `CAM_*` in `src/systems/camera.js` (occlusion
+  follow, FP↔TP blend, vehicle free-look/look-back via
+  `camFreeLook`/`camLookBack`/`camRecenterSuspended`, air bank, shoulder
+  swap). Vehicle-recenter writers must respect `camRecenterSuspended()`.
+
 ## Hard rules that keep the game correct
 
 - **Determinism**: world builds must be byte-identical per seed across
