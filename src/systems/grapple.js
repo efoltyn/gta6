@@ -30,6 +30,25 @@
   // flag enables substepped integration + hard joint stops + impulse caps.
   // false restores the raw integrator byte-for-byte.
   if (CBZ.CONFIG.SURV_RAGDOLL_STABLE == null) CBZ.CONFIG.SURV_RAGDOLL_STABLE = true;
+  // THROWN BODIES STAY IN ONE PIECE (owner report, round 2 — the substep/
+  // joint-stop pass above was the wrong lever for the THROW path). Root
+  // cause: while a body is grapple-OWNED (thrown/airborne, carried, downed)
+  // animChar is SKIPPED for it — but writeRag layers the limb springs
+  // ADDITIVELY (`rotation.x += ...`), a design that assumes animChar just
+  // rewrote an absolute base pose this frame. With no base rewrite the
+  // additions ACCUMULATE frame over frame: limbs wind up like propellers
+  // ("mangled while flying"), then snap back the instant the get-up hands
+  // the rig back to animChar ("just come back together"). Clamping the
+  // spring STATE (the stable-ragdoll pass) never bounded the accumulated
+  // WRITE. The fix is constructive, not tuned: a LIVE body in ballistic
+  // flight gets a rigid seeded BRACE pose written ABSOLUTELY every frame —
+  // one articulated piece, tumbling only via the whole-group spin (hard
+  // attachment beats spring tuning); a carried body gets a HANG pose; and
+  // only LANDING unlocks the loose limb ragdoll (kicked by the impact,
+  // written absolutely so it can never wind up either). Death paths
+  // (deathPose + gore/dismemberment) are untouched. false = old behaviour.
+  if (CBZ.CONFIG.SURV_THROW_INTACT == null) CBZ.CONFIG.SURV_THROW_INTACT = true;
+  const intactOn = () => CBZ.CONFIG.SURV_THROW_INTACT !== false;
 
   const REACH = 3.1;          // arm's length for push / grab / punch
   const CONE = 0.25;          // forward-cone dot threshold for aiming
@@ -171,28 +190,68 @@
     for (const d of LIMB_DEFS) integ(r[d[0]], d[1], d[2]);
     if (p.shock > 0) p.shock = Math.max(0, p.shock - dt * 1.6);
   }
-  // write the integrated rig onto the character (ADD to whatever
-  // animChar/deathPose already set this frame, so we layer on top). Split from
-  // integRag so it can run in a LATE pass for upright bodies — animChar (orders
-  // 30-46) writes the limbs after our order-24 step, so a fresh-hit walking ped
-  // must have its flail re-applied afterwards (same trick reactions.js uses).
-  function writeRag(a, p) {
+  // write the integrated rig onto the character. Two modes:
+  //   additive (default) — ADD to whatever animChar/deathPose already set
+  //     this frame (the upright late pass + dead bodies, whose deathPose
+  //     rewrites an absolute base each frame, so the layering is bounded).
+  //   abs — ASSIGN the spring state as the whole pose. For LIVE owned
+  //     bodies (downed/landed) animChar is skipped, so an additive write
+  //     would accumulate frame over frame with no base to layer on (the
+  //     propeller-limbs bug, see SURV_THROW_INTACT above); assignment keeps
+  //     the pose exactly the bounded spring state.
+  // Split from integRag so it can run in a LATE pass for upright bodies —
+  // animChar (orders 30-46) writes the limbs after our order-24 step, so a
+  // fresh-hit walking ped must have its flail re-applied afterwards (same
+  // trick reactions.js uses).
+  function writeRag(a, p, abs) {
     const ch = a.char; if (!ch || !ch.parts) return;
     const r = p.rag; if (!r) return;
     const s = a._deathSeed || 0;
     const lin = p.air ? Math.hypot(p.vx, p.vz, p.vy) : Math.hypot(p.kx, p.kz);
     const energy = Math.min(2.4, p.shock + lin * 0.06 + (Math.abs(p.spin) + Math.abs(p.spinZ)) * 0.05);
     const tr = energy * 0.12;                               // fresh flails tremble
-    if (ch.body) { ch.body.rotation.x += r.body.rx; ch.body.rotation.z += r.body.rz; }
-    if (ch.neck) { ch.neck.rotation.x += r.neck.rx; ch.neck.rotation.z += r.neck.rz; }
+    if (ch.body) {
+      if (abs) { ch.body.rotation.x = r.body.rx; ch.body.rotation.y = 0; ch.body.rotation.z = r.body.rz; }
+      else { ch.body.rotation.x += r.body.rx; ch.body.rotation.z += r.body.rz; }
+    }
+    if (ch.neck) {
+      if (abs) { ch.neck.rotation.x = r.neck.rx; ch.neck.rotation.y = 0; ch.neck.rotation.z = r.neck.rz; }
+      else { ch.neck.rotation.x += r.neck.rx; ch.neck.rotation.z += r.neck.rz; }
+    }
     let i = 0;
     for (const d of LIMB_DEFS) {
       const part = ch.parts[d[0]]; if (!part) continue;
       const node = r[d[0]];
-      part.rotation.x += node.rx + tr * Math.sin(s * 3 + i);
-      part.rotation.z += node.rz;
+      if (abs) { part.rotation.x = node.rx + tr * Math.sin(s * 3 + i); part.rotation.y = 0; part.rotation.z = node.rz; }
+      else { part.rotation.x += node.rx + tr * Math.sin(s * 3 + i); part.rotation.z += node.rz; }
       i++;
     }
+  }
+  // ---- POSE-LOCK poses (SURV_THROW_INTACT): rigid, seeded, written as
+  //      ABSOLUTE assignments every owned frame so nothing can accumulate.
+  //      The body reads as one held-together piece; all the drama comes from
+  //      the whole-group tumble (air) or the carry (held). ----
+  function bracePose(a) {
+    const ch = a.char; if (!ch || !ch.parts) return;
+    const s = a._deathSeed || 0, j = (k) => Math.sin(s * k);
+    if (ch.body) ch.body.rotation.set(0.16 + 0.06 * j(1.3), 0, 0.05 * j(2.1));   // slight curl
+    if (ch.neck) ch.neck.rotation.set(-0.18 + 0.05 * j(1.9), 0, 0.06 * j(2.7));  // chin tucked
+    const P = ch.parts;
+    if (P.la) P.la.rotation.set(-0.55 + 0.1 * j(3.1), 0, 0.42 + 0.08 * j(1.7));  // arms braced out
+    if (P.ra) P.ra.rotation.set(-0.40 + 0.1 * j(2.3), 0, -0.45 - 0.08 * j(1.2));
+    if (P.ll) P.ll.rotation.set(0.32 + 0.08 * j(2.9), 0, 0.12);                  // legs a light scissor
+    if (P.rl) P.rl.rotation.set(-0.12 + 0.08 * j(3.7), 0, -0.12);
+  }
+  function hangPose(a) {
+    const ch = a.char; if (!ch || !ch.parts) return;
+    const s = a._deathSeed || 0, j = (k) => Math.sin(s * k);
+    if (ch.body) ch.body.rotation.set(0.08, 0, 0.03 * j(2.1));
+    if (ch.neck) ch.neck.rotation.set(-0.1, 0, 0.04 * j(2.7));
+    const P = ch.parts;
+    if (P.la) P.la.rotation.set(-0.2, 0, 0.3);       // arms dangling slightly out
+    if (P.ra) P.ra.rotation.set(-0.16, 0, -0.3);
+    if (P.ll) P.ll.rotation.set(0.14 + 0.05 * j(2.9), 0, 0.08);  // legs hanging
+    if (P.rl) P.rl.rotation.set(-0.06, 0, -0.08);
   }
   // convenience for the owned (air/down) path: integrate AND write in one go,
   // since no animChar competes for the rig on a frame we own the actor.
@@ -262,7 +321,15 @@
       p.spin = (Math.random() * 2 - 1) * heavy;     // pitch tumble
       p.spinZ = (Math.random() * 2 - 1) * heavy * 0.6; // roll/windmill
       p.shock = Math.max(p.shock, sk + 0.6);
-      kickRag(a, p, sk + 0.5, 1, a._deathSeed);     // lift=1 → limbs fly overhead
+      if (!a.dead && intactOn()) {
+        // POSE-LOCK (SURV_THROW_INTACT): a LIVE thrown/flung body flies as
+        // ONE piece — no spring kick; zero the limb springs so the landing
+        // ragdoll unlocks from a clean state instead of stored flail energy.
+        const r = ensureRag(p);
+        for (const k in r) { const L = r[k]; L.rx = L.rz = L.vx = L.vz = 0; }
+      } else {
+        kickRag(a, p, sk + 0.5, 1, a._deathSeed);   // lift=1 → limbs fly overhead
+      }
       // stacked-launch cap: disasters can land several flings on one body in a
       // single frame — unbounded p.v* rocketed bodies to orbit with the limb
       // rig streaming behind (the other half of the exploding-ragdoll bug).
@@ -299,16 +366,29 @@
     flashHead(a);
   }
 
-  // ---- pose a downed / flung / flinching rig ----
+  // ---- pose a downed / flung / carried / flinching rig ----
   function poseActor(a, p, dt) {
     const ch = a.char, grp = a.group; if (!ch || !grp) return;
     if (a._deathSeed == null) a._deathSeed = Math.random() * 6.28;
+    const intact = !a.dead && intactOn();
+    if (p.heldBy && intact) {
+      // CARRIED (live): a rigid hang pose, written absolutely — the old path
+      // fell through to the upright flail below, whose additive late-write
+      // had no animChar base while held and wound the limbs up over time.
+      if (Math.abs(grp.rotation.x) > 0.01) grp.rotation.x = damp(grp.rotation.x, 0, 9, dt);
+      if (Math.abs(grp.rotation.z) > 0.01) grp.rotation.z = damp(grp.rotation.z, 0, 9, dt);
+      hangPose(a);
+      return;
+    }
     if (p.air) {
-      // a flung body windmills on BOTH axes — limbs splayed mid-air reads far
-      // more violent (euphoria intelligent-ragdoll: arms protect/reach, legs
-      // trail). The limb rig (applyRag) does the flailing; the group tumbles.
+      // a flung body tumbles as a whole on BOTH axes; the group spin carries
+      // all the violence. LIVE + intact: the limbs are POSE-LOCKED to the
+      // pelvis (bracePose, absolute) — one rigid articulated piece in flight,
+      // exactly the owner's spec; it unlocks into the loose ragdoll only on
+      // landing (see step()). Dead bodies keep the legacy deathPose + flail.
       grp.rotation.x += p.spin * dt;
       grp.rotation.z += p.spinZ * dt;
+      if (intact) { bracePose(a); return; }
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
       applyRag(a, p, dt);
       return;
@@ -326,6 +406,13 @@
       const roll = a.dead ? 0.6 * Math.sin(a._deathSeed * 1.7) : 0;   // ~±35° onto a shoulder
       grp.rotation.z = damp(grp.rotation.z, roll, 9, dt);
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
+      if (intact) {
+        // LIVE downed body: same loose spring ragdoll, but written ABSOLUTELY
+        // (animChar is skipped while owned, so the additive write had no base
+        // and accumulated — the wind-up half of the mangled-bodies bug).
+        integRag(a, p, dt); writeRag(a, p, true);
+        return;
+      }
       applyRag(a, p, dt);     // limbs jiggle as the body lands & settles, then still
       return;
     }
@@ -399,6 +486,10 @@
         p.down = a.dead ? 9999 : Math.max(p.down, 1.4);  // dead stay sprawled; living get up
         p.ddir = speed > 0.5 ? Math.atan2(p.kx, p.kz) : p.ddir; // sprawl along travel
         p.shock = Math.max(p.shock, Math.min(0.8, impact * 0.04 + speed * 0.03));
+        // UNLOCK on landing (SURV_THROW_INTACT): the pose-locked flight ends
+        // here — kick the limb springs with the impact so the body flops
+        // loose into the sprawl the moment it actually hits something.
+        if (!a.dead && intactOn()) kickRag(a, p, Math.min(1.6, 0.5 + impact * 0.05), 0, a._deathSeed);
         if (CBZ.shake && near(grp.position, 16)) CBZ.shake(Math.min(0.4, 0.12 + impact * 0.012));
         if (CBZ.sfx && impact > 9 && near(grp.position, 12)) CBZ.sfx("hit");
       }
