@@ -26,6 +26,9 @@
   const titleEl = document.getElementById("fullMapTitle");
   const readout = document.getElementById("fullMapReadout");
   const legend = document.getElementById("fullMapLegend");
+  const zoomWrap = document.getElementById("fullMapZoom");
+  const zoomInBtn = document.getElementById("fullMapZoomIn");
+  const zoomOutBtn = document.getElementById("fullMapZoomOut");
   const guide = document.getElementById("waypointGuide");
   const arrow = document.getElementById("waypointArrow");
   const distEl = document.getElementById("waypointDist");
@@ -321,6 +324,10 @@
     document.body.classList.add("full-map-open");
     // touch: no M key exists — the close chip drops the key hint
     if (CBZ.touchMode && closeBtn && closeBtn.textContent !== "✕ Close") closeBtn.textContent = "✕ Close";
+    // touch zoom chips: only the city map runs the pan/zoom view (other modes
+    // ignore map.view entirely), so the chips hide with it. Desktop never sees
+    // them regardless — CSS only reveals the stack under body.touch.
+    if (zoomWrap) zoomWrap.style.display = (mode() === "city" && (!CBZ.CONFIG || CBZ.CONFIG.MAP_ZOOM_BUTTONS !== false)) ? "" : "none";
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
     draw();
     updateGuide();
@@ -331,6 +338,7 @@
     if (!map.active) return;
     map.active = false;
     map._cursor = null;
+    zoomRepeatStop();   // a held zoom chip must never keep repeating past the map
     root.setAttribute("aria-hidden", "true");
     document.body.classList.remove("full-map-open");
     updateGuide();
@@ -1776,6 +1784,57 @@
     clampPan();
     draw();
   }, { passive: false });
+  // ---- TOUCH ZOOM CHIPS (owner ask: "zoom the map on my iPad") --------------
+  // The wheel above and the F fit key were the map's ONLY zoom inputs — neither
+  // exists on touch, and open() drops the city view zoomed-IN on the player, so
+  // an iPad could never zoom back out. The +/− chips (index.html, revealed only
+  // under body.touch) step map.view.z through the SAME clampZoom the wheel
+  // uses, with ox/oz untouched — zoom stays centred on the current view centre.
+  // Tap = one step; hold = repeat after a beat. ONE global timer, killed on
+  // touchend/touchcancel/mouseup/mouseleave AND in close(), so a lifted finger
+  // can never leave the map zooming by itself (the touch layer's stale rule).
+  const ZOOM_STEP = 1.25, ZOOM_HOLD_MS = 320, ZOOM_REPEAT_MS = 110;
+  let zoomHoldT = 0, zoomTickT = 0;
+  function zoomStep(dir) {
+    if (!map.active || mode() !== "city") return;
+    const nz = clampZoom(map.view.z * (dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
+    if (nz === map.view.z) return;   // pinned at the clamp — nothing to redraw
+    map.view.z = nz;
+    clampPan();
+    draw();
+  }
+  function zoomRepeatStop() {
+    if (zoomHoldT) { clearTimeout(zoomHoldT); zoomHoldT = 0; }
+    if (zoomTickT) { clearInterval(zoomTickT); zoomTickT = 0; }
+    if (zoomInBtn) zoomInBtn.classList.remove("on");
+    if (zoomOutBtn) zoomOutBtn.classList.remove("on");
+  }
+  function bindZoomBtn(b, dir) {
+    if (!b) return;
+    const start = function (e) {
+      e.preventDefault();   // no synthesized mouse events → the canvas never sees a phantom waypoint click
+      zoomRepeatStop();     // at most one live repeat loop, whichever chip was pressed last
+      b.classList.add("on");
+      zoomStep(dir);
+      zoomHoldT = setTimeout(function () {
+        zoomTickT = setInterval(function () {
+          if (!map.active) { zoomRepeatStop(); return; }
+          zoomStep(dir);
+        }, ZOOM_REPEAT_MS);
+      }, ZOOM_HOLD_MS);
+    };
+    const stop = function (e) { if (e.cancelable) e.preventDefault(); zoomRepeatStop(); };
+    b.addEventListener("touchstart", start, { passive: false });
+    b.addEventListener("touchend", stop, { passive: false });
+    b.addEventListener("touchcancel", stop, { passive: false });
+    // touch-first, but a touch-laptop's mouse press on the visible chip should
+    // behave identically (systems/touch.js holdBtn wires both the same way).
+    b.addEventListener("mousedown", start);
+    b.addEventListener("mouseup", stop);
+    b.addEventListener("mouseleave", stop);
+  }
+  bindZoomBtn(zoomInBtn, 1);
+  bindZoomBtn(zoomOutBtn, -1);
   if (closeBtn) closeBtn.addEventListener("click", function () { close(); });
   // TOUCH (owner ask): tapping the minimap opens the map. Covers the city
   // radar canvas (#cRadar, city/hud.js) and the jail minimap (#minimap) —

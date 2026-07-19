@@ -565,6 +565,12 @@
   // used to blow roof-lift glyphs up to ~12x). Flip false to restore the prior
   // plate-baked glyph map + the game.wanted read.
   if (CBZ.CONFIG.MAP_V2 == null) CBZ.CONFIG.MAP_V2 = true;
+  // TOUCH MAP ZOOM CHIPS: the full map's only zoom inputs were the mouse wheel
+  // and the F fit key — neither exists on an iPad, and the map opens zoomed-in
+  // on the player, so touch could never zoom back out. body.touch shows big
+  // +/− chips on the map (fullmap.js) stepping the SAME clampZoom path the
+  // wheel drives (tap = one step, hold = repeat). Flip false to hide them.
+  if (CBZ.CONFIG.MAP_ZOOM_BUTTONS == null) CBZ.CONFIG.MAP_ZOOM_BUTTONS = true;
   // BRIDGE WALL RULES: causeway guardrails + curb fall-guard colliders are
   // GAPPED wherever the deck crosses a registered road, so bridge walls only
   // exist over real water/gap spans — never across intersections/mouths.

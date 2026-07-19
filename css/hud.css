@@ -288,7 +288,7 @@ body.sim-view #interact{display:none !important;}
   padding:18px; box-sizing:border-box; background:rgba(3,8,15,.78); backdrop-filter:blur(6px);
 }
 body.full-map-open #fullMap{display:flex;}
-.fullmap-shell{width:min(1040px,96vw); padding:14px; box-sizing:border-box; background:rgba(13,23,36,.96);}
+.fullmap-shell{width:min(1040px,96vw); padding:14px; box-sizing:border-box; background:rgba(13,23,36,.96); position:relative;}
 .fullmap-head,.fullmap-foot{display:flex; align-items:center; justify-content:space-between; gap:14px;}
 .fullmap-head{padding:0 2px 11px;}
 .fullmap-head b{display:block; color:#7de7ff; font-size:18px; letter-spacing:2px;}
@@ -301,6 +301,20 @@ body.full-map-open #fullMap{display:flex;}
   display:block; width:100%; height:min(72vh,620px); border:1px solid rgba(125,231,255,.25);
   border-radius:9px; box-sizing:border-box; cursor:crosshair; background:#08111d; touch-action:none;
 }
+/* touch zoom chips (fullmap.js): the map's only zoom inputs were the wheel and
+   the F key — neither exists on an iPad. Hidden here; body.touch reveals them
+   (mobile.css). Mid-right over the canvas: clear of the close chip (head, top)
+   and the legend/foot (bottom), padded past the safe-area notch/corner. */
+#fullMapZoom{
+  display:none; position:absolute; right:calc(22px + env(safe-area-inset-right, 0px));
+  top:50%; transform:translateY(-50%); flex-direction:column; gap:10px; z-index:2;
+}
+#fullMapZoom button{
+  width:54px; height:54px; border:1px solid rgba(125,231,255,.5); border-radius:10px;
+  color:#dffaff; background:rgba(31,67,82,.72); font:700 30px/1 Fredoka,system-ui,sans-serif;
+  cursor:pointer; touch-action:none; -webkit-tap-highlight-color:transparent;
+}
+#fullMapZoom button.on,#fullMapZoom button:active{background:rgba(55,110,134,.9); border-color:rgba(125,231,255,.85);}
 .fullmap-legend{display:flex; flex-wrap:wrap; gap:8px 15px; padding:9px 2px 0; color:rgba(235,245,255,.72); font-size:11px;}
 .fullmap-legend span{display:inline-flex; align-items:center; gap:5px;}
 .fullmap-legend i{display:inline-block; width:9px; height:9px; border-radius:50%; box-shadow:0 0 7px rgba(255,255,255,.28);}

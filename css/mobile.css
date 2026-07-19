@@ -156,6 +156,9 @@ body.touch #cRadar {
   width: 128px !important; height: 128px !important;
   pointer-events: auto !important; cursor: pointer;
 }
+/* full map zoom chips: touch is the only surface without a wheel/F key, so
+   the +/− stack (hud.css styles it) exists only under body.touch. */
+body.touch #fullMapZoom { display: flex; }
 body.touch #interact {
   left: 50%; right: auto; margin-left: -135px; width: 270px;
   bottom: calc(224px + env(safe-area-inset-bottom, 0px));
