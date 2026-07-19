@@ -484,18 +484,22 @@
     // over the wall = a miss
     if (d <= RUNNER_REACH) { missRunner(); return; }
   }
+  // return a runner to its cell: re-home, re-pin, re-lock. The cell block never
+  // empties (a missed runner is a fresh arrival taking the bunk) so the shift
+  // keeps generating breaks.
+  function homeInmate(h) {
+    const ped = h && h.ped; if (!ped) return;
+    if (CBZ.cityRestrain && CBZ.cityRestrain.release) { try { CBZ.cityRestrain.release(ped, { silent: true }); } catch (e) {} }
+    ped.npcWanted = 0; ped._parked = false; if (ped.group) ped.group.visible = true;
+    const cell = V.cells[h._cellIdx];
+    if (cell) { const hw = W(-8.6, cell.lz); ped.pos.set(hw.x, 0, hw.z); if (ped.group) ped.group.position.set(hw.x, 0, hw.z); ped.staffPost = { x: hw.x, z: hw.z, face: Math.PI / 2 }; setDoor(cell, true); }
+  }
   function catchRunner() {
     if (!JOB || !JOB.escape) return;
     const h = JOB.escape.h, ped = h && h.ped;
-    // use the REAL restrain verbs when exposed, then the precinct intake.
+    // the REAL restrain verb makes the collar, then we walk them back inside.
     if (ped && CBZ.cityRestrain) { try { CBZ.cityRestrain.cuff(ped); } catch (e) {} }
-    // return the runner to its cell (re-home + re-pin), lock the cell.
-    if (ped) {
-      if (CBZ.cityRestrain && CBZ.cityRestrain.release) { try { CBZ.cityRestrain.release(ped, { silent: true }); } catch (e) {} }
-      ped.npcWanted = 0;
-      const cell = V.cells[h._cellIdx];
-      if (cell) { const hw = W(-8.6, cell.lz); ped.pos.set(hw.x, 0, hw.z); if (ped.group) ped.group.position.set(hw.x, 0, hw.z); ped.staffPost = { x: hw.x, z: hw.z, face: Math.PI / 2 }; setDoor(cell, true); }
-    }
+    homeInmate(h);
     JOB.escape = null; JOB.caught++; JOB.wage += WAGES.catch;
     if (C) C.wallet.give(WAGES.catch, "Runner caught");
     const s = bag(); s.catches++; s.breaksStopped++; save();
@@ -503,8 +507,8 @@
   }
   function missRunner() {
     if (!JOB || !JOB.escape) return;
-    const h = JOB.escape.h, ped = h && h.ped;
-    if (ped) { ped._parked = true; if (ped.group) ped.group.visible = false; ped.pos.set(-9999, 0, -9999); }
+    const h = JOB.escape.h;
+    homeInmate(h);                                   // gone over the wall — a replacement takes the cell
     JOB.escape = null; JOB.misses++;
     big("OVER THE WALL"); feed("One got away. Misses: " + JOB.misses + "/" + SHIFT_MISS_LIMIT, "#ff9a9a");
     if (JOB.misses >= SHIFT_MISS_LIMIT) endShift("disgrace");
@@ -534,8 +538,7 @@
     s.wagesEarned += JOB.wage + bonus; save();
     if (disgrace) { big("SHIFT OVER — DISGRACED"); feed("Three over the wall. The warden pulls your badge. Wages: " + fmt(JOB.wage), "#ff9a9a"); }
     else { big("SHIFT COMPLETE"); feed("Clocked off. Caught " + JOB.caught + " · wages " + fmt(JOB.wage + bonus) + (bonus ? " (bonus)" : ""), "#cfe8b0"); }
-    // send any live runner home
-    if (JOB.escape && JOB.escape.h && JOB.escape.h.ped) { const ped = JOB.escape.h.ped; ped._parked = true; if (ped.group) ped.group.visible = false; }
+    if (JOB.escape) homeInmate(JOB.escape.h);        // any live runner goes back inside
     JOB = null; if (C) C.hud.closePanel(); panelMode = null; menuLock(false);
   }
 
