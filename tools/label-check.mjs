@@ -74,33 +74,38 @@ const setup = await evl(`(() => {
 })()`);
 console.log("setup:", JSON.stringify(setup));
 
-// try each candidate: stand 3.2m south of it, face north (-z), aim down slightly
-let locked = null;
+// try each candidate: stand ~3.5m south of it, force it visible, and aim the
+// camera by COMPUTED yaw/pitch straight at its group torso (eye-height agnostic).
+// findActorHit skips group.visible===false and centres spheres on group.position.
+const PIN = (ci) => `(() => {
+  const C = window.CBZ, T = window.THREE; const p = (window.__cands||[])[${ci}]; if (!p) return false;
+  const grp = p.group || (p.char && p.char.group); if (!grp) return false;
+  p.dead = false; p.ko = 0; p.escaped = false; p.speed = 0; p.important = true;
+  grp.visible = true;
+  const gp = grp.position;
+  C.player.pos.x = gp.x; C.player.pos.z = gp.z + 3.5; C.player.pos.y = gp.y;
+  const cam = C.camera; const cp = cam ? cam.getWorldPosition(new T.Vector3()) : null;
+  if (cp) {
+    const dx = gp.x - cp.x, dy = (gp.y + 1.1) - cp.y, dz = gp.z - cp.z;
+    const dist = Math.hypot(dx, dy, dz) || 1;
+    if (C.cam) C.cam.yaw = Math.atan2(-dx, -dz);
+    if (C.fps) C.fps.fp = Math.asin(Math.max(-1, Math.min(1, dy / dist)));
+  }
+  return !!C.cityAimDossierTarget;
+})()`;
+let locked = null, lockedCi = -1;
 for (let ci = 0; ci < 6 && !locked; ci++) {
-  const r = await evl(`(() => {
-    const C = window.CBZ; const p = (window.__cands||[])[${ci}]; if (!p) return null;
-    const px = p.pos.x, pz = p.pos.z, py = p.pos.y;
-    C.player.pos.x = px; C.player.pos.z = pz + 3.2; C.player.pos.y = py;
-    p.speed = 0; p.state = "idle";
-    if (p.char && p.char.group) p.char.group.position.set(px, py, pz);
-    if (C.cam) { C.cam.yaw = 0; if (C.cam.pitch != null) C.cam.pitch = -0.12; }
-    if (C.fps) C.fps.fp = -0.12;
-    return { title: C.cityTitle(p), level: C.cityLevel(p), name: p.name || null };
-  })()`);
+  const r = await evl(`(() => { const C=window.CBZ; const p=(window.__cands||[])[${ci}]; return p?{title:C.cityTitle(p),level:C.cityLevel(p),name:p.name||null}:null; })()`);
   if (!r) break;
-  // let the dossier loop sample a few frames, re-pinning each time
-  for (let k = 0; k < 5; k++) {
-    await sleep(260);
-    const hit = await evl(`(() => {
-      const C = window.CBZ; const p = (window.__cands||[])[${ci}]; if (!p) return false;
-      C.player.pos.x = p.pos.x; C.player.pos.z = p.pos.z + 3.2; C.player.pos.y = p.pos.y;
-      if (C.cam) C.cam.yaw = 0; if (C.fps) C.fps.fp = -0.12;
-      return !!C.cityAimDossierTarget;
-    })()`);
-    if (hit) { locked = r; break; }
+  for (let k = 0; k < 6; k++) {
+    await evl(PIN(ci));
+    await sleep(240);
+    if (await evl(`!!window.CBZ.cityAimDossierTarget`)) { locked = r; lockedCi = ci; break; }
   }
   console.log("candidate", ci, JSON.stringify(r), "locked:", !!locked);
 }
+// hold the winning aim steady for the screenshot
+if (lockedCi >= 0) { for (let k = 0; k < 3; k++) { await evl(PIN(lockedCi)); await sleep(220); } }
 
 if (!locked) {
   const dbg = await evl(`(() => {
