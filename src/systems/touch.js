@@ -69,7 +69,7 @@
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
   const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
 
-  const SENS = 0.006, MAXR = 55, DEAD = 0.28;
+  const SENS = 0.006, MAXR = 74, DEAD = 0.28;   // MAXR matches the enlarged 168px disc (owner: bigger pad, less corner)
   const STICK_ZONE = 1.6;      // catch zone = this × the visible disc radius
   const SPRINT_HI = 0.85, SPRINT_LO = 0.70;   // stick-rim sprint band (on/off)
   const SLIDE_PAD_IN = 12;     // fire's hit-rect grows this much for ENTRY —

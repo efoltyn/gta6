@@ -38,21 +38,24 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
    so taps anywhere else on the left half (radar, HUD, world) never move you.
    Without .tfixed it's the legacy dynamic disc that recentres to the press. */
 #tstick {
-  position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px;
+  position: fixed; width: 168px; height: 168px; margin: -84px 0 0 -84px;
   border-radius: 50%; border: 2px solid rgba(255,255,255,.22);
   background: rgba(255,255,255,.06); opacity: 0; transition: opacity .1s;
   touch-action: none;
 }
 #tstick.on { opacity: 1; }
+/* owner: "the move pad should be much bigger and more close to center, less
+   corner" — 168px disc, pulled well in from the corner (radar lives top-left
+   on touch, so this floor space is free). */
 #tstick.tfixed {
   margin: 0; top: auto;
-  left: calc(26px + env(safe-area-inset-left, 0px));
-  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  left: calc(88px + env(safe-area-inset-left, 0px));
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   opacity: .35;
 }
 #tstick.tfixed.on { opacity: 1; }
 #tknob {
-  position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px;
+  position: absolute; left: 50%; top: 50%; width: 74px; height: 74px; margin: -37px;
   border-radius: 50%; background: rgba(255,255,255,.32);
   box-shadow: 0 2px 8px rgba(0,0,0,.4);
 }
