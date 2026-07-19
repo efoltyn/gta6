@@ -217,8 +217,106 @@
       for (let k = 0; k <= rows; k++) roadSeg(cx, zLines[k], false, maxX - minX);
     }
     mergeAdd(root, roadGeoms, cmat(pal.road != null ? pal.road : 0x5a4f3e), { receive: true });
-    // faded centre dashes on the spine (mainstreet) — one merged mesh
-    if (pattern === "mainstreet") {
+    // ---- ROAD MARKINGS (ROAD_MARKINGS_V1) --------------------------------
+    // Make town streets READ like streets. The mainland downtown grid (world.js)
+    // is already lane-painted under ROADS_V2; town streets were bare asphalt
+    // (only "mainstreet" had a faint centre dash). Reference technique #1
+    // (per-segment geometry): these streets are already per-segment planes, so
+    // the paint is thin decal quads — a yellow centreline (DASHED on ordinary
+    // 2-way lanes, SOLID on multi-lane), white DASHED lane dividers, white curb
+    // edge lines on wide streets, and continental (zebra) CROSSWALKS at every
+    // intersection. ALL fold into ONE vertex-coloured mesh → a whole town's
+    // markings cost +1 draw call (batch-exempt via userData.roadPaint, same
+    // guard world.js/highways.js use so core/batch.js can't re-material away the
+    // polygonOffset). Markings GAP at each junction box so no line runs through a
+    // crossing. Deterministic: positional only, ZERO rng() draws (the shared
+    // cfg.rng stream stays byte-identical to flag-OFF); paint wear is CBZ.hash01.
+    const ROAD_MARKINGS = !CBZ.CONFIG || CBZ.CONFIG.ROAD_MARKINGS_V1 !== false;
+    if (ROAD_MARKINGS) {
+      const PY = 0.075;                                   // paint just above the 0.05 road deck
+      const C_WHITE = [0.92, 0.94, 0.96], C_YELLOW = [0.95, 0.78, 0.22];
+      const paintGeoms = [];
+      function paintRect(px, pz, pw, pd, col, fade) {
+        const g = new THREE.PlaneGeometry(pw, pd);
+        g.rotateX(-Math.PI / 2); g.translate(px, PY, pz);
+        const cnt = g.attributes.position.count, ca = new Float32Array(cnt * 3);
+        for (let k = 0; k < cnt; k++) { ca[k * 3] = col[0] * fade; ca[k * 3 + 1] = col[1] * fade; ca[k * 3 + 2] = col[2] * fade; }
+        g.setAttribute("color", new THREE.BufferAttribute(ca, 3));
+        paintGeoms.push(g);
+      }
+      const verts = [], horzs = [];
+      for (const s of townRoads) (s.vertical ? verts : horzs).push(s);
+      // where the perpendicular streets actually cross this seg (grid/organic/mainstreet)
+      function crossingsOf(seg) {
+        const out = [], perp = seg.vertical ? horzs : verts;
+        for (const p of perp) {
+          const on = seg.vertical
+            ? (Math.abs(seg.x - p.x) <= p.len / 2 + 0.5 && Math.abs(p.z - seg.z) <= seg.len / 2 + 0.5)
+            : (Math.abs(seg.z - p.z) <= p.len / 2 + 0.5 && Math.abs(p.x - seg.x) <= seg.len / 2 + 0.5);
+          if (on) out.push({ at: seg.vertical ? (p.z - seg.z) : (p.x - seg.x), gap: Math.max(seg.w, p.w) / 2 + 2.8 });
+        }
+        out.sort((a, b) => a.at - b.at);
+        return out;
+      }
+      // clear spans of [-len/2, len/2] with ±gap removed around each crossing
+      function clearSpans(len, cr) {
+        const spans = []; let a = -len / 2;
+        for (const c of cr) { const b = c.at - c.gap; if (b > a) spans.push([a, b]); a = Math.max(a, c.at + c.gap); }
+        if (len / 2 > a) spans.push([a, len / 2]);
+        return spans;
+      }
+      // one line down a seg at lateral offset `off`, gapped at junctions
+      function line(seg, off, col, dashed, halfW, fade) {
+        for (const sp of clearSpans(seg.len, crossingsOf(seg))) {
+          const a = sp[0], b = sp[1], span = b - a; if (span < 0.4) continue;
+          if (dashed) {
+            const n = Math.max(1, Math.floor(span / 7)), step = span / n, dashL = Math.min(2.6, step * 0.55);
+            for (let i = 0; i < n; i++) {
+              const t = a + (i + 0.5) * step;
+              if (seg.vertical) paintRect(seg.x + off, seg.z + t, halfW * 2, dashL, col, fade);
+              else paintRect(seg.x + t, seg.z + off, dashL, halfW * 2, col, fade);
+            }
+          } else {
+            const t = (a + b) / 2;
+            if (seg.vertical) paintRect(seg.x + off, seg.z + t, halfW * 2, span, col, fade);
+            else paintRect(seg.x + t, seg.z + off, span, halfW * 2, col, fade);
+          }
+        }
+      }
+      for (const seg of townRoads) {
+        const w = seg.w, lanes = seg.lanesPerDir || (w >= 13 ? 2 : 1), lw = seg.laneW || Math.min(3.6, w / (lanes * 2));
+        const fade = 0.70 + 0.30 * CBZ.hash01(seg.x, seg.z, 613);          // deterministic paint wear
+        if (lanes >= 2) {
+          line(seg, 0, C_YELLOW, false, 0.10, fade);                       // solid yellow centre
+          for (let s = -1; s <= 1; s += 2) {
+            for (let k = 1; k < lanes; k++) line(seg, s * k * lw, C_WHITE, true, 0.09, fade);   // dashed white lane dividers
+            if (w >= 10) line(seg, s * (w / 2 - 0.4), C_WHITE, false, 0.07, fade * 0.9);        // solid white curb edge
+          }
+        } else {
+          line(seg, 0, C_YELLOW, true, 0.11, fade);                        // dashed yellow centre (2-way)
+        }
+      }
+      // continental crosswalks at every intersection (bars long in travel dir)
+      for (const v of verts) for (const h of horzs) {
+        if (Math.abs(h.z - v.z) > v.len / 2 + 0.5 || Math.abs(v.x - h.x) > h.len / 2 + 0.5) continue;
+        const ix = v.x, iz = h.z, boxH = Math.max(v.w, h.w) / 2;
+        const zkV = Math.max(1, Math.ceil(v.w / 1.2) >> 1);                // N/S arms cross the vertical road
+        for (let s = -1; s <= 1; s += 2) for (let k = -zkV; k <= zkV; k++) paintRect(ix + k * 1.1, iz + s * (boxH + 1.3), 0.6, 1.7, C_WHITE, 0.85);
+        const zkH = Math.max(1, Math.ceil(h.w / 1.2) >> 1);                // E/W arms cross the horizontal road
+        for (let s = -1; s <= 1; s += 2) for (let k = -zkH; k <= zkH; k++) paintRect(ix + s * (boxH + 1.3), iz + k * 1.1, 1.7, 0.6, C_WHITE, 0.85);
+      }
+      if (paintGeoms.length) {
+        const pmat = new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+        if (BGU && BGU.mergeBufferGeometries) {
+          const pm = new THREE.Mesh(BGU.mergeBufferGeometries(paintGeoms), pmat);
+          pm.castShadow = false; pm.receiveShadow = false; pm.matrixAutoUpdate = false; pm.updateMatrix();
+          pm.renderOrder = 1; pm.userData.roadPaint = true; root.add(pm);
+        } else {
+          for (const g of paintGeoms) { const m = new THREE.Mesh(g, pmat); m.matrixAutoUpdate = false; m.updateMatrix(); m.renderOrder = 1; m.userData.roadPaint = true; root.add(m); }
+        }
+      }
+    } else if (pattern === "mainstreet") {
+      // (flag OFF) original faded centre dashes on the spine — byte-identical
       const n = Math.max(6, ((maxX - minX) / 7) | 0);
       for (let i = 0; i < n; i++) lineGeoms.push(planeGeo(minX + 8 + i * ((maxX - minX - 16) / n), cz, 2.4, 0.3, 0.07));
       mergeAdd(root, lineGeoms, cmat(pal.line != null ? pal.line : 0xc9bf8e), { receive: false });

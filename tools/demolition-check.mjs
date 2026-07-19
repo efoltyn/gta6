@@ -182,6 +182,64 @@ const rt = await evl(`(() => {
   return JSON.stringify({ blob, clearedAfterReset: cleared, restoredFromBlob: back, phaseAfterApply: rec && rec.phase });
 })()`);
 console.log("roundtrip:", rt);
+
+// ---- TRANSITION INTERPOLATION ASSERTION (DEMO_MORPH_V1) ----------------------
+// The snap→transition change must actually INTERPOLATE, not jump. Proven
+// deterministically (no reliance on headless frame timing): pause the demo
+// auto-stepper, age the lot so the phase ticker won't revert our forced phase,
+// force rubble→cleared, then hand-step the tween by an explicit dt and read the
+// LIVE group scale. A snap would show no active tween / an instant 0→1 jump; a
+// real transition shows scale eased through the middle. Also asserts the flag
+// OFF path still snaps. (Adds a check — weakens none of the asserts above.)
+const interp = await evl(`(() => {
+  const lot = window.__lot, D = CBZ.cityDemolition;
+  D.reset();                                           // clean intact
+  const on = !!CBZ.CONFIG.DEMO_MORPH_V1;
+  D.destroy(lot, { quiet: true, silent: true });       // -> phase 1 (snap, from 0)
+  CBZ.dayCount(CBZ.dayCount() + 3);                     // age so phaseFor==2 → the ticker keeps our forced phase
+  D._tweenPause(true);
+  D._forcePhase(lot, 2);                                // start rubble→cleared (paused at t≈0)
+  const s0 = D._tweenState(lot);
+  D._tweenStep(0.6);                                    // advance ~half of the 1.2s tween
+  const sMid = D._tweenState(lot);
+  return JSON.stringify({ on, s0, sMid });
+})()`);
+console.log("interp:", interp);
+{
+  let ip = null; try { ip = JSON.parse(interp); } catch (e) {}
+  const m = ip && ip.sMid;
+  if (!ip || !ip.on) failures.push("interp: DEMO_MORPH_V1 not ON at test time");
+  else if (!m || !m.active) failures.push("interp: no active tween mid-transition (snapped?) " + interp);
+  else if (!(m.inScaleY > 0.05 && m.inScaleY < 0.95)) failures.push("interp: incoming scaleY not interpolating " + JSON.stringify(m));
+  else if (!(m.outScaleY > 0.05 && m.outScaleY < 0.95)) failures.push("interp: outgoing scaleY not interpolating " + JSON.stringify(m));
+}
+await aimAtLot("transition");
+await shot("demo-e2e-5-transition.png");                // mid-tween: rubble sinking away, cleared rising
+// finish the tween, assert it settles to nothing, then re-run the per-mesh
+// floating invariant on the SETTLED phase (identity transform → must still pass)
+const settled = await evl(`(() => {
+  const D = CBZ.cityDemolition;
+  D._tweenStep(3.0);                                    // run well past DUR → settle + dispose the outgoing group
+  const st = D._tweenState(window.__lot);
+  D._tweenPause(false);
+  return JSON.stringify({ settledActive: st.active, phase: (D.list()[0] || {}).phase, tweens: D._tweenCount() });
+})()`);
+console.log("settled:", settled);
+try { const s = JSON.parse(settled); if (s.settledActive || s.tweens) failures.push("interp: tween never settled " + settled); } catch (e) { failures.push("interp: settled parse " + settled); }
+await floatCheck("transition-settled");
+// flag OFF must SNAP (no tween created) — the one-line revert really reverts
+const offSnap = await evl(`(() => {
+  const lot = window.__lot, D = CBZ.cityDemolition;
+  D.reset(); CBZ.CONFIG.DEMO_MORPH_V1 = false;
+  D.destroy(lot, { quiet: true, silent: true });
+  D._forcePhase(lot, 2);
+  const st = D._tweenState(lot);
+  D.reset(); CBZ.CONFIG.DEMO_MORPH_V1 = true;
+  return JSON.stringify({ offActive: st.active, tweens: D._tweenCount() });
+})()`);
+console.log("offSnap:", offSnap);
+try { const o = JSON.parse(offSnap); if (o.offActive || o.tweens) failures.push("interp: flag-off did not snap " + offSnap); } catch (e) { failures.push("interp: offSnap parse " + offSnap); }
+
 const uniq = [...new Set(errors)];
 if (failures.length) console.log("GATE FAILURES:", failures.join(" | "));
 console.log(uniq.length ? "PAGE ERRORS (" + uniq.length + "):\n" + uniq.slice(0, 10).join("\n") : "PAGE ERRORS: none");

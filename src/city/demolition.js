@@ -37,6 +37,12 @@
   if (!CBZ) return;
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.CITY_DEMOLITION == null) CBZ.CONFIG.CITY_DEMOLITION = true;
+  // Smooth the phase changes instead of snapping intact→rubble→cleared→
+  // scaffold→rebuilt. Default ON; false = the byte-identical snap behaviour
+  // that predates this feature (one-line revert, owner rule). See the
+  // "transition FX" block below for WHY this is animated object-transform
+  // interpolation and NOT r128 morph targets.
+  if (CBZ.CONFIG.DEMO_MORPH_V1 == null) CBZ.CONFIG.DEMO_MORPH_V1 = true;
 
   // ---- tuning ------------------------------------------------------------
   // phases in in-game DAYS since collapse (1 day = 150s real — daynight.js)
@@ -188,18 +194,144 @@
       rec.propGroup.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
       rec.propGroup = null;
     }
+    releasePropCols(rec);
+  }
+  // colliders only (leave rec.propGroup ALIVE — the animated path keeps the
+  // retiring group in the scene for its exit tween while its physics is already
+  // gone: a lot that's mid-clear no longer blocks you).
+  function releasePropCols(rec) {
     if (rec.propCols && rec.propCols.length) {
       for (const c of rec.propCols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
       rec.propCols = [];
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
   }
+
+  // ========================================================================
+  //  TRANSITION FX (CBZ.CONFIG.DEMO_MORPH_V1) — smooth the phase changes.
+  //
+  //  Technique = ANIMATED OBJECT-TRANSFORM interpolation (the mission's
+  //  "dissolve": scale/position tween of the whole phase group), NOT r128
+  //  morph targets. That choice is grounded in what this file/engine really do:
+  //   • phase boxes render through CBZ.cmat SHARED cached Lambert materials —
+  //     flipping material.morphTargets=true (r128 needs the flag) mutates a
+  //     material other city meshes share (shader recompile + look bleed); the
+  //     reference "one merged geometry per state" also needs morph-enabled mats.
+  //   • the FLOATING-GEOMETRY gate asserts support PER MESH
+  //     (g.traverse(o=>o.isMesh) → Box3 each). One merged morph mesh = ONE Box3
+  //     = the whole footprint = trivially "grounded" → the invariant is gutted
+  //     though its code is untouched. Per-box meshes keep it meaningful.
+  //   • r128 Box3.expandByObject reads geometry.boundingBox (the BASE position
+  //     attribute) and applies matrixWorld — it NEVER applies morph deformation
+  //     (no `precise` path in r128). So a morph-grown member is INVISIBLE to that
+  //     very invariant, but a scale/position tween IS baked through matrixWorld —
+  //     settled states are judged on exactly what renders.
+  //   • the three phases have different topology AND box counts (rubble ~16-24
+  //     tilted slabs / cleared ~9-17 pad+barriers / scaffold ~40-60 members) —
+  //     no honest vertex correspondence to morph across.
+  //  Every transform is GROUND-ANCHORED (pivot y=0) so a box BOTTOM never lifts
+  //  off the ground mid-grow, and every settled state is reset to identity →
+  //  byte-identical to the snap build. The tween is pure local FX: no seeded
+  //  draws, nothing networked (world state — ledger/colliders/visibility —
+  //  still changes at transition START exactly as before).
+  const DUR = 1.2;                 // seconds per phase change (real wall-clock)
+  const tweens = [];
+  let _paused = false, _lastNow = 0;
+  function liveCity() {
+    return !!CBZ.CONFIG.DEMO_MORPH_V1 && CBZ.game && CBZ.game.mode === "city" && CBZ.game.state === "playing";
+  }
+  function ease(t) { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+  function disposeGroup(g) {
+    if (!g) return;
+    if (g.parent) g.parent.remove(g);
+    g.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+  }
+  // presence p∈[0,1]: 1 = fully built at rest, 0 = gone. "flat" is the rubble
+  // read (sink flat + shrink footprint toward the lot centre); "v" is the plain
+  // ground-anchored vertical grow/retract everything else uses.
+  function applyPresence(group, mode, p, pivot) {
+    const sy = p < 1e-3 ? 1e-3 : p;               // never a zero-scale matrix (NaN normals)
+    if (mode === "flat") {
+      const s = 0.4 + 0.6 * p;
+      group.scale.set(s, sy, s);
+      group.position.set(pivot.x * (1 - s), 0, pivot.z * (1 - s));
+    } else {
+      group.scale.set(1, sy, 1);
+      group.position.set(0, 0, 0);
+    }
+  }
+  function applyTween(tw) {
+    const e = ease(tw.t);
+    if (tw.inGroup) applyPresence(tw.inGroup, tw.inMode, e, tw.pivot);
+    if (tw.outGroup) applyPresence(tw.outGroup, tw.outMode, 1 - e, tw.pivot);
+  }
+  function finalizeTween(tw) {
+    if (tw.inGroup) { tw.inGroup.scale.set(1, 1, 1); tw.inGroup.position.set(0, 0, 0); }  // exact identity → settled == snap build
+    if (tw.outGroup) disposeGroup(tw.outGroup);
+    if (tw.rec && tw.rec._tw === tw) tw.rec._tw = null;
+  }
+  function finishTweenFor(rec) {                  // settle a rec's in-flight tween NOW (re-entrancy / skip-ahead)
+    const tw = rec && rec._tw;
+    if (!tw) return;
+    const i = tweens.indexOf(tw); if (i >= 0) tweens.splice(i, 1);
+    finalizeTween(tw);
+  }
+  function killAllTweens() {
+    for (const tw of tweens) finalizeTween(tw);
+    tweens.length = 0; _lastNow = 0;
+  }
+  // Advance by REAL wall-clock (CBZ.now = performance.now, set each frame in
+  // core/loop.js) so a 1.2s tween finishes in 1.2s of real time even when the
+  // headless world dt is clamped/slowed — the gate's real-time sleeps settle it.
+  // dtOverride lets the check step deterministically.
+  function stepTweens(dtOverride) {
+    if (!tweens.length) return;
+    let dt;
+    if (dtOverride != null) dt = dtOverride;
+    else {
+      if (_paused) return;
+      const now = CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : Date.now());
+      if (!_lastNow) _lastNow = now;
+      dt = (now - _lastNow) / 1000; _lastNow = now;
+      dt = dt < 0 ? 0 : dt > 0.25 ? 0.25 : dt;    // spike-cap
+    }
+    for (let i = tweens.length - 1; i >= 0; i--) {
+      const tw = tweens[i];
+      tw.t += dt / tw.dur;
+      if (tw.t >= 1) { tw.t = 1; finalizeTween(tw); tweens.splice(i, 1); }
+      else applyTween(tw);
+    }
+  }
+  function startTween(o) {
+    const outGroup = o.outGroup || null, inGroup = o.inGroup || null;
+    if (!outGroup && !inGroup) return;
+    const b = o.building;                         // pivot the horizontal scale on the lot centre, not the world origin
+    if (!tweens.length) _lastNow = 0;             // fresh clock for a fresh run
+    const tw = { rec: o.rec || null, t: 0, dur: DUR, from: o.from, to: o.to,
+      inGroup: inGroup, outGroup: outGroup, inMode: "v", outMode: o.outMode || "v",
+      pivot: { x: b.ox, z: b.oz } };
+    if (tw.rec) tw.rec._tw = tw;
+    tweens.push(tw);
+    applyTween(tw);                               // stamp the t=0 pose
+  }
+
+  // phase-pair choreography (which group animates how) — see the report:
+  //   1→2 rubble→cleared : rubble sinks flat + shrinks away, cleared rises
+  //   2→3 cleared→scaffold: barriers retract, scaffold frame+core rise
+  //   3→rebuilt          : scaffold retracts, revealing the finished building
+  //   0→x  (collapse / save-load): SNAP — the explosion FX sells the collapse,
+  //        and a load must not animate.
   function setPhase(rec, phase) {
     if (rec.phase === phase) return;
-    clearPhaseProps(rec);
+    const anim = liveCity() && rec.phase !== 0;
+    if (anim) finishTweenFor(rec);                // settle any in-flight tween → propGroup is the current settled group
+    const fromPhase = rec.phase;
+    const oldGroup = rec.propGroup;
+    if (anim) { releasePropCols(rec); rec.propGroup = null; }  // keep oldGroup alive for its exit tween
+    else clearPhaseProps(rec);
     rec.phase = phase;
     const A = arena();
-    if (!A || !A.root) return;
+    if (!A || !A.root) { if (anim && oldGroup) disposeGroup(oldGroup); return; }
     const built = phase === 1 ? buildRubble(rec) : phase === 2 ? buildCleared(rec) : phase === 3 ? buildScaffold(rec) : null;
     if (built) {
       A.root.add(built.group);
@@ -207,6 +339,13 @@
       rec.propCols = built.cols.concat(built.solids || []);
       for (const c of rec.propCols) CBZ.colliders.push(c);
       if (rec.propCols.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    if (anim && (oldGroup || built)) {
+      startTween({
+        rec: rec, building: rec.lot.building, from: fromPhase, to: phase,
+        outGroup: oldGroup, inGroup: built ? built.group : null,
+        outMode: fromPhase === 1 ? "flat" : "v",    // rubble is the only pile-shaped phase
+      });
     }
   }
 
@@ -267,7 +406,14 @@
   function rebuild(rec, opts) {
     opts = opts || {};
     const lot = rec.lot, b = lot.building;
-    clearPhaseProps(rec);
+    // A natural rebuild (ticker at T_REBUILT) reveals the finished building at
+    // once via batchShowGroup and lets the scaffold RETRACT into the ground over
+    // DUR, uncovering it. Save/net/reset rebuilds (silent/quiet) stay instant.
+    const anim = liveCity() && !opts.silent && !opts.quiet;
+    if (rec._tw) finishTweenFor(rec);
+    let retire = null;
+    if (anim && rec.propGroup) { retire = rec.propGroup; releasePropCols(rec); rec.propGroup = null; }
+    else clearPhaseProps(rec);
     ledger.delete(rec.k);
     hp.delete(lot);
     lot.demolished = false;
@@ -290,6 +436,7 @@
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     if (b.home && b.home._demoListed != null) { b.home.listed = b.home._demoListed; b.home._demoListed = null; }
+    if (retire) startTween({ rec: null, building: b, from: 3, to: -1, outGroup: retire, inGroup: null, outMode: "v" });
     if (typeof D.onEvent === "function" && !opts.silent) try { D.onEvent({ t: "rebuild", x: Math.round(lot.cx), z: Math.round(lot.cz) }); } catch (e) {}
   }
 
@@ -353,6 +500,7 @@
     if (!CBZ.game || CBZ.game.mode !== "city") return;
     wrapBoom("cityExplosion");
     wrapBoom("cityAirstrikeExplosion");
+    stepTweens();                    // advance transition FX (a final rebuild's scaffold retracts even after the ledger empties)
     if (!ledger.size) return;
     const now = CBZ.dayTime ? CBZ.dayTime() : 0;
     for (const rec of Array.from(ledger.values())) {
@@ -403,7 +551,27 @@
   D.netBlast = function (x, z, opts) { try { onBlast(x, z, opts || {}) } catch (e) {} };
   // full restore for a new run (called from cityGlassReset)
   D.reset = function () {
+    killAllTweens();
     for (const rec of Array.from(ledger.values())) rebuild(rec, { silent: true });
     hp.clear();
   };
+
+  // ---- transition tooling (tools/demolition-check.mjs interpolation assert) ---
+  // Prove a phase change actually INTERPOLATES rather than snaps, deterministically
+  // and independent of headless frame timing: pause the auto-stepper, force the
+  // next phase, step the tween by an explicit dt, and read the live scale.
+  D._tweenState = function (lot) {
+    const rec = ledger.get(keyOf(lot));
+    const tw = rec && rec._tw;
+    if (!tw) return { active: false };
+    return {
+      active: true, from: tw.from, to: tw.to, t: +tw.t.toFixed(4),
+      inScaleY: tw.inGroup ? +tw.inGroup.scale.y.toFixed(4) : null,
+      outScaleY: tw.outGroup ? +tw.outGroup.scale.y.toFixed(4) : null,
+    };
+  };
+  D._tweenCount = function () { return tweens.length; };
+  D._tweenPause = function (v) { _paused = !!v; _lastNow = 0; };
+  D._tweenStep = function (dt) { stepTweens(dt == null ? 0 : dt); return tweens.length; };
+  D._forcePhase = function (lot, phase) { const rec = ledger.get(keyOf(lot)); if (rec) setPhase(rec, phase); return rec ? rec.phase : -1; };
 })();

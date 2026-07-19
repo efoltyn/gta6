@@ -56,12 +56,32 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const mat = CBZ.mat;
+  // FEATURE FLAGS owned by this file (default ON; each a one-line revert).
+  //   SHOPS_ROBBABLE_V1 — shop shelves/gondolas become SHOPLIFT sources and the
+  //     bank vault becomes a heist SURFACE (the runtime blocks near the bottom
+  //     of this file + city/heists.js read it). Flag off → the shelves are inert
+  //     decor again and the vault is board-only, exactly as before.
+  //   FACADES_V2 — per-window lit-room variation at night, window AC units on a
+  //     hashed facade subset, and roofline/parapet trim for the plain tops the
+  //     BUILDING_MASSING_V2 pass leaves on low blocks. All deterministic
+  //     (CBZ.hash01), flat-Lambert, batch-mergeable, zero new colliders.
+  // Self-defaulted here (config.js may also set them); every read uses the
+  // `!== false` idiom so an unset value still counts as ON.
+  if (CBZ.CONFIG) {
+    if (CBZ.CONFIG.SHOPS_ROBBABLE_V1 == null) CBZ.CONFIG.SHOPS_ROBBABLE_V1 = true;
+    if (CBZ.CONFIG.FACADES_V2 == null) CBZ.CONFIG.FACADES_V2 = true;
+  }
   // Deterministic LCG (owner rule: no Math.random) for the runtime decal
   // helpers below (cityBulletHole/cityScorch) -- everything else in this file
   // is driven by a caller-supplied seeded rng, but these two fire at gameplay
   // time from arbitrary call sites with no rng of their own.
   let _decalSeed = 61819;
   function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
+  // FACADES_V2 build-time counters (deterministic per seed): how many windows the
+  // massing chose LIT at night + how many got an AC unit, accumulated as the world
+  // builds. Exposed for the determinism gate (two boots of one seed must agree).
+  let _facadeLit = 0, _facadeAC = 0, _facadeTrim = 0;
+  CBZ.cityFacadeStats = function () { return { lit: _facadeLit, ac: _facadeAC, trim: _facadeTrim }; };
 
   // FLOOR-TO-FLOOR — world units are metres and the converted character is
   // ~1.82m. 3.2m yields a plausible apartment/office floor with a 0.2m slab,
@@ -3510,6 +3530,19 @@
     // ---- wall SHELVES / cases along BOTH side walls (off the aisle) ----
     // returns the list of placed shelf tops so the stocker can fill them.
     const shelfTops = [];
+    // ---- SHOPLIFT anchors (SHOPS_ROBBABLE_V1) — each stocked shelf/gondola is
+    // recorded in WORLD coords so the shoplift runtime (near the bottom of this
+    // file) can offer a grab off it. The per-shelf item count is seeded via
+    // CBZ.hash01 (deterministic, never rng). Trades whose "stock" isn't sensibly
+    // pocketable (raceway betting slips) are skipped. Recording is pure data — no
+    // geometry, no colliders — so it never perturbs the deterministic build.
+    const shopStock = [];
+    function recordStock(p, topY, across, deep) {
+      if (!p || kind === "raceway") return;
+      const wx = abx + p.x, wz = abz + p.z;
+      const n0 = 3 + ((CBZ.hash01 ? CBZ.hash01(wx, wz, 0x5107) : 0.5) * 3 | 0);   // 3..5 units on the shelf
+      shopStock.push({ x: wx, z: wz, y: topY, across: across || 1.2, deep: deep || 0.7, kind: kind, n0: n0, taken: 0 });
+    }
     function wallShelves(opt) {
       opt = opt || {};
       const lat = halfTan - (opt.deep || 0.7) - 0.05;   // hug the wall
@@ -3524,6 +3557,7 @@
         decor(p, sh + 0.05, span, 0.1, deep, colTop);
         if (opt.glassFront) decor(p, sh * 0.62, span, sh * 0.7, 0.05, GLASS);
         shelfTops.push({ p, top: sh + 0.1, side, across: span, deep });
+        recordStock(p, sh + 0.1, span, deep);
       }
     }
     // a free-standing floor RACK/island (e.g. clothing rounders, produce tables)
@@ -4008,6 +4042,7 @@
             decor(g, 0.55, along ? 1.2 : 3.0, 1.1, along ? 3.0 : 1.2, 0x55606e);
             const gtop = { p: g, top: 1.16, across: along ? 1.0 : 2.6, deep: along ? 2.6 : 1.0 };
             stockRow(gtop, [0x4caf6e, 0xff9e6b, 0x6bb6ff], 5, 0.22, 0.3);
+            recordStock(g, 1.16, along ? 1.0 : 2.6, along ? 2.6 : 1.0);
           }
         }
       }
@@ -4087,6 +4122,7 @@
         if (op) decor(op, 0.5, along ? 0.9 : 1.6, 1.0, along ? 1.6 : 0.9, 0x6b4a2a);  // manager desk
       }
     }
+    return shopStock;   // SHOPLIFT anchors for the caller to stamp on lot.building
   }
 
   // a small accent colour per trade (register screen / glow tint)
@@ -4101,7 +4137,13 @@
   // public hook (and back-compat wrapper) — every shop building gets dressed
   function furnishShop(b, lot, door) {
     const kind = (lot.building && lot.building.shop && lot.building.shop.kind) || (lot.kind) || "store";
-    furnishInterior(b, kind, door);
+    const stock = furnishInterior(b, kind, door);
+    // SHOPS_ROBBABLE_V1: expose the shelf stock so the shoplift runtime can grab
+    // off it. The flagship gun/jewelry lots run their own richer smash/pry/buy
+    // (gunstore.js / jewelry.js), so the runtime skips whichever lots carry those
+    // tags — here we just record every shop's shelves.
+    if (lot.building && stock && stock.length && (!CBZ.CONFIG || CBZ.CONFIG.SHOPS_ROBBABLE_V1 !== false))
+      lot.building.shoplift = stock;
   }
   CBZ.cityFurnishInterior = function (b, kind, door) { furnishInterior(b, kind, door); };
 
@@ -6301,4 +6343,188 @@
     const lr = Math.round(r * 0.4 + 170 * 0.6), lg = Math.round(g * 0.4 + 174 * 0.6), lb = Math.round(b * 0.4 + 180 * 0.6);
     return (lr << 16) | (lg << 8) | lb;
   }
+
+  // ============================================================
+  //  SHOPLIFT (CBZ.CONFIG.SHOPS_ROBBABLE_V1, default ON) — the audit's #2 WIRE-IT:
+  //  "grab stock off a shelf when the clerk can't see you." Every shop's wall
+  //  shelves + gondolas (recorded on lot.building.shoplift during furnishShop)
+  //  become petty-theft SOURCES. Face a shelf, [E] to pocket one unit:
+  //    • CLEAR (the posted clerk can't see the shelf) → a seeded few dollars
+  //      (CBZ.hash01 per shelf) and the shelf DEPLETES for the session. No heat.
+  //    • MADE (the clerk's gaze cone covers the shelf, with a real
+  //      clearLineOfFire check — jewelry.js's clerkSees) → a real theft charge
+  //      (CBZ.cityCrime, reported so the clerk "calls it in") + a clerk/ped panic
+  //      (CBZ.cityPanic). Both ride the NORMAL wanted/ped flow — no bespoke code.
+  //  Flagship gun/jewelry lots run their own richer smash/pry/buy, so they're
+  //  skipped. Reuses: clerk-LOS + look-pick + [E]-capture (jewelry.js),
+  //  cityCrime + cityPanic (wanted + peds), CBZ.city.addCash (the econ faucet).
+  // ============================================================
+  (function shopliftSystem() {
+    const REACH = 2.4;          // arm's length at the shelf
+    const LOOK_DOT = 0.35;      // you act on the shelf you're facing
+    const CLERK_R = 14;         // the clerk's watch radius (matches jewelry)
+    // resale value band per trade (min,max $): ice/electronics pay, snacks don't.
+    const VAL = { electronics: [40, 190], jewelry: [140, 900], pawn: [30, 240], guns: [60, 300],
+      hardware: [6, 34], gas: [3, 16], food: [3, 15], clothing: [16, 110], drugs: [50, 260],
+      hospital: [14, 80], security: [24, 140], bar: [8, 44], casino: [8, 44], carlot: [18, 90],
+      chop: [18, 90], barber: [5, 24], gym: [7, 30], cityhall: [10, 60] };
+    // a flavour word for what you pocketed, per trade.
+    const ITEM = { electronics: "a gadget", jewelry: "a piece", pawn: "some swag", guns: "some ammo",
+      hardware: "some hardware", gas: "some snacks", food: "some food", clothing: "some threads",
+      drugs: "some product", hospital: "some meds", security: "some gear", bar: "a bottle",
+      casino: "some chips", carlot: "a part", chop: "a part", barber: "supplies", gym: "supplies",
+      cityhall: "some files" };
+    const S = { cur: null, curLot: null, prompt: null, lastTxt: "" };
+
+    function G() { return CBZ.game; }
+    function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+    function note(t, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s); }
+    function isOn() { return !CBZ.CONFIG || CBZ.CONFIG.SHOPS_ROBBABLE_V1 !== false; }
+    function remaining(sh) { return Math.max(0, (sh.n0 | 0) - (sh.taken | 0)); }
+    function clerkName(lot) { const v = lot.building && lot.building.vendor; return (v && v.name) || "The clerk"; }
+    // a lot a flagship module owns runs its own in-world verbs → skip it.
+    function flagship(lot) { return !!(lot.building && (lot.building.jewelry || lot.building.gunstore)); }
+
+    // the posted clerk's eyes on a shelf spot — alive, close, spot inside their
+    // forward cone, and nothing solid between (jewelry.js clerkSees shape).
+    function clerkSees(lot, x, z) {
+      const v = lot.building && lot.building.vendor;
+      if (!v || v.dead || !v.pos) return false;
+      const dx = x - v.pos.x, dz = z - v.pos.z, d = Math.hypot(dx, dz);
+      if (d > CLERK_R) return false;
+      if (d > 0.4) {
+        const ry = v.group ? v.group.rotation.y : 0;
+        const fx = Math.sin(ry), fz = Math.cos(ry);                 // ped forward
+        if ((dx / d) * fx + (dz / d) * fz < 0.25) return false;     // shelf is behind them
+      }
+      if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(v.pos.x, (v.pos.y || 0) + 1.6, v.pos.z, x, 1.2, z)) return false;
+      return true;
+    }
+    function seedVal(sh) {
+      const band = VAL[sh.kind] || [5, 30];
+      const h = CBZ.hash01 ? CBZ.hash01(sh.x, sh.z, 0x9e11 + (sh.taken | 0) * 7) : 0.5;
+      return Math.round(band[0] + h * (band[1] - band[0]));
+    }
+
+    // the shelf you're facing, within reach, of the nearest robbable shop.
+    function pick() {
+      const arena = CBZ.city && CBZ.city.arena;
+      const lots = arena && arena.lots; if (!lots) { S.curLot = null; return null; }
+      const P = CBZ.player; if (!P) { S.curLot = null; return null; }
+      const px = P.pos.x, pz = P.pos.z;
+      const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+      let best = null, bestLot = null, bestScore = -1;
+      for (let i = 0; i < lots.length; i++) {
+        const lot = lots[i];
+        if (!lot || !lot.building || lot.demolished) continue;
+        const shs = lot.building.shoplift; if (!shs || !shs.length || flagship(lot)) continue;
+        if (Math.abs(px - lot.cx) > 40 || Math.abs(pz - lot.cz) > 40) continue;   // cheap cull
+        for (let s = 0; s < shs.length; s++) {
+          const sh = shs[s];
+          const dx = sh.x - px, dz = sh.z - pz, d = Math.hypot(dx, dz);
+          if (d > REACH || d < 0.05) continue;
+          const dot = (dx / d) * fx + (dz / d) * fz;
+          if (dot < LOOK_DOT) continue;
+          const score = dot - d * 0.08;
+          if (score > bestScore) { bestScore = score; best = sh; bestLot = lot; }
+        }
+      }
+      S.curLot = bestLot;
+      return best;
+    }
+
+    function grab(sh, lot) {
+      if (!sh || !lot) return { took: false };
+      if (remaining(sh) <= 0) { note("Shelf's picked clean.", 1.4); return { took: false, empty: true }; }
+      // MADE: the clerk is watching this shelf → a real theft charge (reported,
+      // so the clerk "calls it in" → wanted) + a clerk/ped panic. No item lifted.
+      if (clerkSees(lot, sh.x, sh.z)) {
+        note("👀 " + clerkName(lot) + " saw you — put it back!", 2);
+        if (CBZ.cityCrime) CBZ.cityCrime(65, { type: "theft", x: sh.x, z: sh.z, instant: true });
+        const v = lot.building.vendor;
+        if (CBZ.cityPanic && v && v.pos) CBZ.cityPanic(v.pos.x, v.pos.z, 1.4, CBZ.city && CBZ.city.playerActor);
+        if (CBZ.sfx) CBZ.sfx("glass");
+        return { took: false, caught: true };
+      }
+      // CLEAR: pocket one unit for seeded petty cash; deplete the shelf.
+      const val = seedVal(sh);
+      sh.taken = (sh.taken | 0) + 1;
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(val);
+      if (CBZ.sfx) CBZ.sfx("coin");
+      const left = remaining(sh);
+      note("🫳 Pocketed " + (ITEM[sh.kind] || "some stock") + " — " + fmt$(val) +
+        (left > 0 ? " · " + left + " left on the shelf" : " · shelf cleared"), 2);
+      return { took: true, value: val, left: left };
+    }
+
+    function promptEl() {
+      if (S.prompt) return S.prompt;
+      if (typeof document === "undefined" || !document.body) return null;
+      const d = document.createElement("div");
+      d.id = "shopliftPrompt";
+      d.style.cssText = "position:fixed;left:50%;bottom:186px;transform:translateX(-50%);z-index:46;display:none;" +
+        "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
+        "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
+      d.addEventListener("click", function () { if (S.cur) grab(S.cur, S.curLot); });   // tap-to-act (mobile)
+      document.body.appendChild(d);
+      S.prompt = d;
+      return d;
+    }
+    function showPrompt(txt) {
+      const el = promptEl(); if (!el) return;
+      if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
+      if (el.style.display !== "block") el.style.display = "block";
+    }
+    function hidePrompt() { if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none"; S.cur = null; }
+    function promptText(sh, lot) {
+      const left = remaining(sh);
+      if (left <= 0) return "<span style='color:#7f8794'>Picked clean.</span>";
+      if (clerkSees(lot, sh.x, sh.z))
+        return "<span style='color:#ff9e9e'>" + clerkName(lot) + " is watching this shelf.</span> <span style='color:#7f8794'>· wait for them to look away</span>";
+      return "<b style='color:#ffd166'>[E]</b> Pocket it <span style='color:#7f8794'>· " + left + " on the shelf · they're not looking</span>";
+    }
+
+    CBZ.onUpdate(38.5, function () {
+      const g = G();
+      if (!isOn() || !g || g.mode !== "city") { hidePrompt(); return; }
+      if (g.state !== "playing" || !CBZ.player || CBZ.player.dead || CBZ.player.driving || CBZ.cityMenuOpen) { hidePrompt(); return; }
+      const sh = pick();
+      if (!sh) { hidePrompt(); return; }
+      S.cur = sh;
+      showPrompt(promptText(sh, S.curLot));
+    });
+
+    // [E] pockets the shelf you're facing. CAPTURE phase + stopImmediatePropagation
+    // so one press doesn't ALSO open the clerk's counter menu (the gunstore/jewelry
+    // pattern); only fires when a shelf is actually targeted (S.cur set above).
+    addEventListener("keydown", function (e) {
+      const g = G();
+      if (!S.cur || !isOn() || !g || g.mode !== "city" || g.state !== "playing") return;
+      if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
+      if ((e.key || "").toLowerCase() !== "e") return;
+      e.preventDefault();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      e.stopPropagation();
+      grab(S.cur, S.curLot);
+    }, true);
+
+    // ---- headless / harness handles (gunstore-style) ----
+    CBZ.cityShopliftState = function () {
+      const sh = S.cur;
+      return { target: sh ? { x: sh.x, z: sh.z, kind: sh.kind, left: remaining(sh) } : null,
+               watched: !!(sh && S.curLot && clerkSees(S.curLot, sh.x, sh.z)) };
+    };
+    // grab from the shelf currently in reach/aim (same as pressing [E]); returns
+    // {took, caught, value, left} so a probe can assert LOS + depletion.
+    CBZ.cityShopliftGrab = function () { const sh = pick(); return grab(sh, S.curLot); };
+    // enumerate the robbable shelves of the nearest shop (probes / tools).
+    CBZ.cityShopliftShelves = function () {
+      const arena = CBZ.city && CBZ.city.arena, lots = arena && arena.lots;
+      if (!lots || !CBZ.player) return [];
+      const px = CBZ.player.pos.x, pz = CBZ.player.pos.z; let bestLot = null, bd = 1e9;
+      for (let i = 0; i < lots.length; i++) { const lot = lots[i]; if (!lot || !lot.building || !lot.building.shoplift || flagship(lot)) continue; const d = Math.hypot(px - lot.cx, pz - lot.cz); if (d < bd) { bd = d; bestLot = lot; } }
+      if (!bestLot) return [];
+      return bestLot.building.shoplift.map(function (sh) { return { x: sh.x, z: sh.z, kind: sh.kind, n0: sh.n0, taken: sh.taken, left: remaining(sh) }; });
+    };
+  })();
 })();
