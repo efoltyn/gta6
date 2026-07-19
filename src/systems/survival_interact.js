@@ -41,6 +41,53 @@
 
   let verbs = [], shown = false, cd = 0;
 
+  // ---- TOUCH: the same verbs as tappable BUTTONS docked by the right-thumb
+  //      cluster (left of #tbtns), instead of a floating card you'd have to
+  //      reach across the screen for. Fixed spot + fixed order = muscle
+  //      memory. Desktop keeps the #interact card unchanged. ----
+  let dock = null, dockMode = "";        // "" hidden · "free" · "held"
+  function ensureDock() {
+    if (dock) return;
+    const style = document.createElement("style");
+    style.textContent =
+      "#survVerbs{position:fixed;right:calc(112px + env(safe-area-inset-right,0px));" +
+      "bottom:calc(34px + env(safe-area-inset-bottom,0px));z-index:23;display:none;" +
+      "flex-direction:column-reverse;gap:10px;pointer-events:none;}" +
+      "#survVerbs.show{display:flex;}" +
+      ".svbtn{pointer-events:auto;min-width:104px;height:48px;border-radius:24px;padding:0 18px;" +
+      "border:1.5px solid rgba(127,231,255,.5);background:rgba(10,20,32,.68);color:#eaf4ff;" +
+      "font-family:Fredoka,system-ui,sans-serif;font-weight:600;font-size:16px;letter-spacing:.6px;" +
+      "text-align:center;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);}" +
+      ".svbtn:active{background:rgba(127,231,255,.28);}";
+    document.head.appendChild(style);
+    dock = document.createElement("div");
+    dock.id = "survVerbs";
+    document.body.appendChild(dock);
+  }
+  function renderDock(held) {
+    ensureDock();
+    const mode = held ? "held" : "free";
+    if (dockMode !== mode) {
+      dockMode = mode;
+      dock.innerHTML = (held ? HOLD_VERBS : FREE_VERBS).map((v, i) =>
+        '<button class="svbtn" type="button" data-i="' + i + '">' + v.label + "</button>").join("");
+    }
+    dock.classList.add("show");
+  }
+  function hideDock() { if (dock) { dock.classList.remove("show"); dockMode = ""; } }
+  document.addEventListener("touchstart", (e) => {
+    const b = e.target && e.target.closest && e.target.closest("#survVerbs .svbtn");
+    if (!b) return;
+    e.preventDefault();
+    doAction(+b.dataset.i);
+  }, { passive: false });
+  document.addEventListener("mousedown", (e) => {
+    const b = e.target && e.target.closest && e.target.closest("#survVerbs .svbtn");
+    if (!b) return;
+    e.preventDefault();
+    doAction(+b.dataset.i);
+  });
+
   function lookDir() { const y = CBZ.cam ? CBZ.cam.yaw : 0; return { x: -Math.sin(y), z: -Math.cos(y) }; }
 
   // nearest living survivor within reach + roughly in front (for showing the menu)
@@ -92,14 +139,22 @@
     if (cd > 0) cd -= dt;
     if (CBZ.game.mode !== "survival") return;
     const t = (CBZ.game.state === "playing" && !CBZ.player.dead) ? target() : null;
-    if (!t) { if (shown) { shown = false; el.interact.classList.remove("show"); } return; }
-    render(t.held);
-    if (!shown) { shown = true; el.interact.classList.add("show"); }
+    if (!t) { if (shown) { shown = false; el.interact.classList.remove("show"); hideDock(); } return; }
+    verbs = t.held ? HOLD_VERBS : FREE_VERBS;
+    if (CBZ.touchMode) {
+      // touch: tappable verb buttons by the thumb cluster, no reach-across card
+      renderDock(t.held);
+      el.interact.classList.remove("show");
+    } else {
+      render(t.held);
+      el.interact.classList.add("show");
+    }
+    shown = true;
   });
 
   CBZ.onAlways(96, function () {
     if (CBZ.game.mode === "survival" && CBZ.game.state !== "playing" && shown) {
-      shown = false; el.interact.classList.remove("show");
+      shown = false; el.interact.classList.remove("show"); hideDock();
     }
   });
 })();

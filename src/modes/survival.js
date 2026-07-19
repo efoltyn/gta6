@@ -45,6 +45,7 @@
     const c = cause || "";
     if (/lava|burn|incinerat|nuclear|vaporiz|fallout|meteor|bomb/.test(c)) return "#ff8a3a";
     if (/lightning/.test(c)) return "#9fd0ff";
+    if (/ash|choked/.test(c)) return "#c9c2b6";
     if (/\bstorm\b|\bzone\b/.test(c)) return "#c792ea";
     if (/drown|swept|flood/.test(c)) return "#6fc6ff";
     if (/frozen|blizzard/.test(c)) return "#bfe6ff";
@@ -350,7 +351,7 @@
   CBZ.registerMode("survival", {
     id: "survival",
     label: "Disaster Survival",
-    objective: "Outlast every disaster. Get inside, take the stairs to the roof, reach high ground, dodge the strikes — and stay inside the shrinking safe zone. The disasters never stop. Be the last one standing.",
+    objective: "Outlast every disaster. Read the sky and run for the RIGHT kind of shelter — high ground when the sea comes, indoors when the air kills, open ground when the buildings fall. The disasters never stop. Be the last one standing.",
     build,
     reset(game) {
       build();
@@ -391,11 +392,19 @@
         flash: 0, flashColor: 0xffffff,
       });
 
-      // the shrinking storm ring (systems/safezone.js) runs ALONGSIDE the
-      // disasters: it prefers to close between waves, squeezes the field
-      // together as the hazards peak, and eliminates anyone caught outside.
-      // SURV_ZONE=false reverts to the old disasters-only island.
-      if (CBZ.safezone) { if (CBZ.CONFIG.SURV_ZONE !== false) CBZ.safezone.start(); else CBZ.safezone.stop(); }
+      // PHYSICAL SHELTER (default): no abstract storm ring — the hazards
+      // themselves are the pressure, and the right TYPE of place (altitude
+      // for water, indoors for ash/cold, distance from the vent) is what
+      // saves you. Everything zone-aware already null-checks CBZ.surv.zone,
+      // so stopping the ring reverts bots/HUD/minimap/targeting to the
+      // whole-island game with no further edits.
+      // SURV_PHYSICAL_SHELTER=false brings the legacy shrinking ring back
+      // (its own SURV_ZONE flag still applies then).
+      if (CBZ.CONFIG.SURV_PHYSICAL_SHELTER == null) CBZ.CONFIG.SURV_PHYSICAL_SHELTER = true;
+      if (CBZ.safezone) {
+        if (CBZ.CONFIG.SURV_PHYSICAL_SHELTER !== false || CBZ.CONFIG.SURV_ZONE === false) CBZ.safezone.stop();
+        else CBZ.safezone.start();
+      }
       if (CBZ.disasters) CBZ.disasters.start();
       // the prison "objective" panel becomes the survival KILL FEED instead of
       // a static paragraph — it fills in as people start dying. (survival's

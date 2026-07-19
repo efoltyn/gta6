@@ -73,20 +73,44 @@
     }
 
     // ---- island ground + ocean ----
-    // big ocean plane (static decor; the FLOOD raises its own plane)
+    // big ocean plane. Exposed on the descriptor (arena.ocean / arena.oceanY)
+    // so the tsunami can pull the whole sea OUT during its warning and surge
+    // it back in as the flood — reset() always parks it back at OCEAN_Y.
+    const OCEAN_Y = -0.8;
     const ocean = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400),
       new THREE.MeshLambertMaterial({ color: 0x2f6f9e }));
-    ocean.rotation.x = -Math.PI / 2; ocean.position.set(cx, -0.8, cz);
+    ocean.rotation.x = -Math.PI / 2; ocean.position.set(cx, OCEAN_Y, cz);
     ocean.receiveShadow = false; root.add(ocean);
+
+    // the SEABED shelf under the sea: invisible in normal play (the opaque
+    // ocean covers it), revealed as a shocking ring of wet sand when the
+    // tsunami recedes the ocean below it — the classic dread beat. Its own
+    // rng stream so the island layout stays byte-identical.
+    let _s2 = 424243;
+    const rng2 = () => { _s2 = (_s2 * 1103515245 + 12345) & 0x7fffffff; return _s2 / 0x7fffffff; };
+    const seabed = new THREE.Mesh(new THREE.CircleGeometry(R + 170, 48),
+      new THREE.MeshLambertMaterial({ color: 0xcdbb8f }));
+    seabed.rotation.x = -Math.PI / 2; seabed.position.set(cx, -1.35, cz);
+    seabed.receiveShadow = true; root.add(seabed);
+    // darker wet patches + shallow pools scattered across the exposed shelf
+    const wetM = new THREE.MeshLambertMaterial({ color: 0xa39572 });
+    const poolM = new THREE.MeshLambertMaterial({ color: 0x5e7d86 });
+    for (let i = 0; i < 14; i++) {
+      const a2 = rng2() * Math.PI * 2, d2 = R + 10 + rng2() * 148;
+      const pm = new THREE.Mesh(new THREE.CircleGeometry(3.5 + rng2() * 9, 12), i % 3 === 2 ? poolM : wetM);
+      pm.rotation.x = -Math.PI / 2;
+      pm.position.set(cx + Math.cos(a2) * d2, -1.15, cz + Math.sin(a2) * d2);
+      root.add(pm);
+    }
 
     // the island disc (grass) with a sandy beach ring
     const beach = new THREE.Mesh(new THREE.CircleGeometry(R + 14, 64),
       new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
     beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
     beach.receiveShadow = true; root.add(beach);
-    const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
+    // clean solid green — the old two-tone checker tiling read as a debug texture
     const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64),
-      new THREE.MeshLambertMaterial({ map: grassTex }));
+      new THREE.MeshLambertMaterial({ color: 0x53a84e }));
     island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz);
     island.receiveShadow = true; root.add(island);
 
@@ -415,8 +439,11 @@
     // ---- STREETS: dark asphalt running in flat, contiguous runs along grid
     // lines, with a dashed centre line. Hills/mountain break the runs so roads
     // never float. roadSegs feeds the car scatter below. ----
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0x33363d });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a });
+    // polygonOffset floats the road decals clear of the island disc so they
+    // don't shimmer/z-fight at distance (same numbers the city decals use);
+    // the dashes offset one step further so they win over the asphalt too.
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0x33363d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     const roadSegs = [];
     const ROADW = 7;
     function layRoadLine(fixed, vertical) {
@@ -476,7 +503,7 @@
     // roof is a height-gated collider so you drive/walk under it freely. ----
     function makeGasStation(ox, oz) {
       const gy = groundHeightAt(ox, oz);
-      const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), new THREE.MeshLambertMaterial({ color: 0x41464d }));
+      const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), new THREE.MeshLambertMaterial({ color: 0x41464d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
       pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + 0.05, oz); pad.receiveShadow = true; root.add(pad);
       const CH = 5.2;
       [[-6, -3.4], [6, -3.4], [-6, 3.4], [6, 3.4]].forEach(([px, pz]) => box(ox + px, gy + CH / 2, oz + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
@@ -513,7 +540,7 @@
     function makeShowroom(ox, oz) {
       const gy = groundHeightAt(ox, oz);
       const w = 18, d = 13, SH = 6.0, T = 0.35;
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.4, d - 0.4), new THREE.MeshLambertMaterial({ color: 0xd6dade }));
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.4, d - 0.4), new THREE.MeshLambertMaterial({ color: 0xd6dade, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
       floor.rotation.x = -Math.PI / 2; floor.position.set(ox, gy + 0.06, oz); floor.receiveShadow = true; root.add(floor);
       // shell: back + sides + roof (solid, height-gated)
       box(ox, gy + SH / 2, oz + d / 2 - T / 2, w, SH, T, 0x586a86, { solid: true, y0: gy, y1: gy + SH, los: true });
@@ -667,6 +694,7 @@
 
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
+      ocean, oceanY: OCEAN_Y,
       hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt,
       randomPoint(minD, maxD) {
         const a = rng() * Math.PI * 2;
@@ -682,6 +710,7 @@
       // restore the island between matches: un-collapse buildings (re-show the
       // group, re-register its walls/floors/roof), regrow trees, clear craters.
       reset() {
+        ocean.position.y = OCEAN_Y;   // a match can end mid-tsunami-warning with the sea pulled out
         for (const b of fragile) {
           if (b.fallen) {
             b.group.visible = true;
