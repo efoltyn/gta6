@@ -4,8 +4,10 @@
    100 players (you + ~99 bots) dropped on an island. Wave after wave of
    realistic, deadly disasters — earthquakes, tsunamis, tornadoes,
    lightning, wildfire, volcanic eruption, blizzard, meteor showers,
-   sinkholes, and a final nuke — plus a shrinking storm zone. No combat:
-   just survive longer than everyone else. Last one standing wins.
+   sinkholes, and a final nuke. No zones, no rings — each disaster is
+   announced, happens, and is declared over; the hazards themselves are
+   the whole pressure. No combat: just survive longer than everyone
+   else. Last one standing wins.
 
    This module owns the shared survival namespace CBZ.surv (the actor
    model + damage), the mode descriptor (build/reset), the arena lighting
@@ -46,7 +48,6 @@
     if (/lava|burn|incinerat|nuclear|vaporiz|fallout|meteor|bomb/.test(c)) return "#ff8a3a";
     if (/lightning/.test(c)) return "#9fd0ff";
     if (/ash|choked/.test(c)) return "#c9c2b6";
-    if (/\bstorm\b|\bzone\b/.test(c)) return "#c792ea";
     if (/drown|swept|flood/.test(c)) return "#6fc6ff";
     if (/frozen|blizzard/.test(c)) return "#bfe6ff";
     if (/rubble|sinkhole|crushed|fell/.test(c)) return "#cbb89a";
@@ -185,7 +186,6 @@
 
   const surv = {
     arena: null,
-    zone: null,            // set by safezone.js
     built: false,
     spectating: false,     // true after the player dies until they pick a button
     playerActor,
@@ -392,19 +392,12 @@
         flash: 0, flashColor: 0xffffff,
       });
 
-      // PHYSICAL SHELTER (default): no abstract storm ring — the hazards
-      // themselves are the pressure, and the right TYPE of place (altitude
-      // for water, indoors for ash/cold, distance from the vent) is what
-      // saves you. Everything zone-aware already null-checks CBZ.surv.zone,
-      // so stopping the ring reverts bots/HUD/minimap/targeting to the
-      // whole-island game with no further edits.
-      // SURV_PHYSICAL_SHELTER=false brings the legacy shrinking ring back
-      // (its own SURV_ZONE flag still applies then).
-      if (CBZ.CONFIG.SURV_PHYSICAL_SHELTER == null) CBZ.CONFIG.SURV_PHYSICAL_SHELTER = true;
-      if (CBZ.safezone) {
-        if (CBZ.CONFIG.SURV_PHYSICAL_SHELTER !== false || CBZ.CONFIG.SURV_ZONE === false) CBZ.safezone.stop();
-        else CBZ.safezone.start();
-      }
+      // PHYSICAL SHELTER: the hazards themselves are the whole pressure, and
+      // the right TYPE of place (altitude for water, indoors for ash/cold,
+      // distance from the vent) is what saves you. There is no zone system in
+      // this mode — the old shrinking-ring storm (systems/safezone.js) was
+      // purged outright; the flag (defaulted in disasters.js) only governs
+      // the shelter checks now.
       if (CBZ.disasters) CBZ.disasters.start();
       // the prison "objective" panel becomes the survival KILL FEED instead of
       // a static paragraph — it fills in as people start dying. (survival's

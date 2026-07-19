@@ -4,8 +4,8 @@
    Reuses the FPS engine's character rig (makeCharacter) and procedural
    locomotion (animChar) — proving the thesis that the movement/animation
    foundation makes a crowd game cheap. The 4800-line prison brain is NOT
-   loaded; bots run a lean 3-state FSM: WANDER → FLEE (disaster/zone) →
-   DEAD. They take damage from the same disasters and storm as the player,
+   loaded; bots run a lean 3-state FSM: WANDER → FLEE (disaster) →
+   DEAD. They take damage from the same disasters as the player,
    so eliminations happen naturally with no bot-vs-bot combat.
 
    Perf for 100 actors on r128/browser:
@@ -104,21 +104,13 @@
   // ---- the lean brain: decide target + state ----
   function think(b) {
     if (b.dead) return;
-    const surv = CBZ.surv, zone = surv && surv.zone;
     let fx = 0, fz = 0, urgent = 0;
 
-    // 1) run from the active disaster
+    // run from the active disaster (there are no zones — the hazard itself
+    // is the only pressure a survivor reacts to)
     if (CBZ.disasters) {
       const fv = CBZ.disasters.fleeVector(b.pos.x, b.pos.z);
       if (fv) { fx += fv.x * (0.6 + fv.w); fz += fv.z * (0.6 + fv.w); urgent = Math.max(urgent, fv.w); }
-    }
-    // 2) stay inside the shrinking safe zone
-    if (zone) {
-      const dx = zone.cx - b.pos.x, dz = zone.cz - b.pos.z, d = Math.hypot(dx, dz) || 1;
-      if (d > zone.radius * 0.78) {
-        const w = Math.min(1.3, (d - zone.radius * 0.78) / (zone.radius * 0.4 + 1) + 0.3);
-        fx += (dx / d) * w; fz += (dz / d) * w; urgent = Math.max(urgent, Math.min(1, w));
-      }
     }
 
     if (fx || fz) {
@@ -130,14 +122,13 @@
       b.target.set(b.pos.x + (fx / m) * reach, 0, b.pos.z + (fz / m) * reach);
       b.pause = 0;
     } else {
-      // wander inside the zone
+      // wander the island
       b.state = "wander";
       b.urg = 0;
       if (b.pause <= 0) {
-        const arena = CBZ.surv.arena, zr = zone ? zone.radius * 0.7 : arena.radius * 0.6;
-        const a = Math.random() * 6.28, d = Math.random() * zr;
-        const cxp = zone ? zone.cx : arena.center.x, czp = zone ? zone.cz : arena.center.z;
-        b.target.set(cxp + Math.cos(a) * d, 0, czp + Math.sin(a) * d);
+        const arena = CBZ.surv.arena;
+        const a = Math.random() * 6.28, d = Math.random() * arena.radius * 0.6;
+        b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
         b.pause = 0.6 + Math.random() * 2.2;
       }
     }

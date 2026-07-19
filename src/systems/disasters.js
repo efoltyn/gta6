@@ -54,8 +54,9 @@
   //      building floors, roofs, tower landings — counts as "indoors". The
   //      blizzard's warmth, the hurricane's windbreak and the volcano's ash
   //      fallout all test THIS, so the answer to a disaster is running to the
-  //      right KIND of place. SURV_PHYSICAL_SHELTER=false disables the checks
-  //      (and survival.js brings the legacy zone ring back). ----
+  //      right KIND of place. SURV_PHYSICAL_SHELTER=false disables the checks.
+  //      (There are no zones in this mode — just the disasters themselves.) ----
+  if (CBZ.CONFIG.SURV_PHYSICAL_SHELTER == null) CBZ.CONFIG.SURV_PHYSICAL_SHELTER = true;
   function underRoof(x, z, y) {
     const plats = CBZ.platforms; if (!plats) return false;
     const head = y + 2.1;
@@ -143,7 +144,7 @@
           ctx.st.cd = (0.9 - 0.5 * ctx.prog) * (0.6 + rnd());
           let tx, tz; const acts = surv().actors();
           if (acts.length && rnd() < 0.7) { const a = acts[(rnd() * acts.length) | 0]; tx = a.pos.x + (rnd() - 0.5) * 10; tz = a.pos.z + (rnd() - 0.5) * 10; }
-          else { const p = ctx.arena.randomPoint(0, ctx.zone ? ctx.zone.radius : ctx.R); tx = p.x; tz = p.z; }
+          else { const p = ctx.arena.randomPoint(0, ctx.R); tx = p.x; tz = p.z; }
           ctx.st.pending.push({ x: tx, z: tz, t: 0.95, m: CBZ.fx.groundMarker(tx, tz, 4.5, 0x9fd0ff) });
         }
         for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
@@ -323,9 +324,9 @@
         ctx.st.swirl.setActive(1);
       },
       active(dt, ctx) {
-        // wander, bounce off the zone edge
+        // wander, bounce off the island edge
         ctx.st.x += ctx.st.vx * dt; ctx.st.z += ctx.st.vz * dt;
-        const cx = ctx.zone ? ctx.zone.cx : ctx.cx, cz = ctx.zone ? ctx.zone.cz : ctx.cz, rr = (ctx.zone ? ctx.zone.radius : ctx.R) - 6;
+        const cx = ctx.cx, cz = ctx.cz, rr = ctx.R - 6;
         if (Math.hypot(ctx.st.x - cx, ctx.st.z - cz) > rr) { ctx.st.vx += (cx - ctx.st.x) * 0.05; ctx.st.vz += (cz - ctx.st.z) * 0.05; }
         if (rnd() < dt) { ctx.st.vx += (rnd() - 0.5) * 3; ctx.st.vz += (rnd() - 0.5) * 3; }
         const gy = floor(ctx.st.x, ctx.st.z);
@@ -386,7 +387,7 @@
         ctx.st.cd -= dt;
         if (ctx.st.cd <= 0) {
           ctx.st.cd = (0.8 - 0.4 * ctx.prog) * (0.6 + rnd());
-          const p = ctx.arena.randomPoint(0, ctx.zone ? ctx.zone.radius : ctx.R);
+          const p = ctx.arena.randomPoint(0, ctx.R);
           const r = 5 + scale(2, ctx);
           ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.2, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
         }
@@ -415,7 +416,7 @@
         ctx.st.cd -= dt;
         if (ctx.st.cd <= 0) {
           ctx.st.cd = 0.7 - 0.3 * ctx.prog;
-          const p = ctx.arena.randomPoint(0, ctx.zone ? ctx.zone.radius : ctx.R);
+          const p = ctx.arena.randomPoint(0, ctx.R);
           const r = 3 + scale(2, ctx);
           ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.0, m: CBZ.fx.groundMarker(p.x, p.z, r, 0x5a3a20) });
         }
@@ -439,7 +440,7 @@
         banner("☢ NUCLEAR STRIKE INCOMING ☢", true);
         if (CBZ.sfx) CBZ.sfx("alarm");
         sound("siren");
-        ctx.st.gx = ctx.zone ? ctx.zone.cx : ctx.cx; ctx.st.gz = ctx.zone ? ctx.zone.cz : ctx.cz;
+        ctx.st.gx = ctx.cx; ctx.st.gz = ctx.cz;
         ctx.st.warnMk = CBZ.fx.groundMarker(ctx.st.gx, ctx.st.gz, 8, 0xff3020); ctx.st.warnMk.set(1);
       },
       warnTick(dt, ctx) { ctx.env.sunInt = 0.5; ctx.env.fog = 0x2a2a30; if (rnd() < dt) sound("siren"); },
@@ -1328,12 +1329,12 @@
     return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
   }
 
-  const dir = { state: "idle", t: 6, cur: null, st: {}, idx: 0, occ: 0, intensity: 0.2, prog: 0 };
+  const dir = { state: "idle", t: 6, cur: null, curId: null, st: {}, idx: 0, occ: 0, intensity: 0.2, prog: 0, overT: 0, overName: null };
   let curCtx = null;
 
   function makeCtx(dt) {
     const A = CBZ.surv.arena;
-    return { dt, now: CBZ.now, arena: A, cx: A.center.x, cz: A.center.z, R: A.radius, zone: CBZ.surv.zone, surv: CBZ.surv, fx: CBZ.fx, env: CBZ.survEnv, st: dir.st, intensity: dir.intensity, prog: dir.prog };
+    return { dt, now: CBZ.now, arena: A, cx: A.center.x, cz: A.center.z, R: A.radius, surv: CBZ.surv, fx: CBZ.fx, env: CBZ.survEnv, st: dir.st, intensity: dir.intensity, prog: dir.prog };
   }
 
   // universal warn-phase ambience: as the countdown runs, the sun dims and
@@ -1361,7 +1362,8 @@
     const id = order[dir.idx % order.length];
     dir.idx++; dir.occ++;
     dir.intensity = Math.min(1.7, 0.2 + dir.occ * 0.16);
-    dir.cur = DEFS[id]; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
+    dir.cur = DEFS[id]; dir.curId = id; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
+    dir.overT = 0; dir.overName = null;   // a new warning supersedes the all-clear
     curCtx = makeCtx(0);
     banner(dir.cur.emoji + " " + dir.cur.name + " — INCOMING", true);
     // universal telegraph: every warning lands with a physical jolt on top of
@@ -1379,8 +1381,12 @@
     try { dir.cur.end(ctx); } catch (e) { console.error("[disaster end]", e); }
     if (!CBZ.player.dead) CBZ.surv.stats.disastersSurvived++;
     if (CBZ.surv) CBZ.surv._cause = null;
-    banner("", false);
-    dir.state = "idle"; dir.t = dir.cur.gap; dir.cur = null;
+    // the whole loop the owner asked for: it's announced, it happens, and
+    // then it SAYS it's over — a short all-clear banner riding into the gap.
+    dir.overName = dir.cur.name;
+    dir.overT = Math.min(4, dir.cur.gap || 4);
+    banner("✓ " + dir.cur.name + " — IT'S OVER", true);
+    dir.state = "idle"; dir.t = dir.cur.gap; dir.cur = null; dir.curId = null;
   }
 
   CBZ.disasters = {
@@ -1393,7 +1399,7 @@
       runNo++;
       orderRng = CBZ.seedStream ? CBZ.seedStream("surv-sequence-" + runNo) : null;
       order = buildOrder();
-      dir.state = "idle"; dir.t = 7; dir.cur = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
+      dir.state = "idle"; dir.t = 7; dir.cur = null; dir.curId = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; dir.overT = 0; dir.overName = null; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
     },
     threatAt(x, z) { return (dir.cur && curCtx && dir.cur.threat) ? dir.cur.threat(x, z, curCtx) : 0; },
     fleeVector(x, z) {
@@ -1408,6 +1414,45 @@
     current() { return dir.cur ? dir.cur.name : null; },
     state() { return dir.state; },
     timeLeft() { return Math.max(0, dir.t); },
+    // the name of the disaster that JUST finished, while its short "it's
+    // over" beat is still live (the HUD status line reads this in the gap)
+    justEnded() { return dir.overT > 0 ? dir.overName : null; },
+    // the ACTUAL location(s) of the live hazard for the minimap: circles
+    // ({x,z,r[,fill:false]}) and travelling fronts ({line:true,x,z,dx,dz}).
+    // Empty when the danger is everywhere (hurricane/blizzard) or when the
+    // def's telegraphs haven't materialised yet. No zones — the map marks
+    // the disaster itself, where it really is.
+    hazards() {
+      const A = CBZ.surv && CBZ.surv.arena;
+      if (!A || !dir.cur) return [];
+      const id = dir.curId, st = dir.st, out = [];
+      const warn = dir.state === "warn";
+      if (id === "tornado") {
+        if (!warn && st.x != null) out.push({ x: st.x, z: st.z, r: 18 });
+      } else if (id === "volcano") {
+        const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 });
+      } else if (id === "quake") {
+        if (st.erupting) { const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 }); }
+      } else if (id === "storm") {
+        (st.pending || []).forEach((p) => out.push({ x: p.x, z: p.z, r: 5 }));
+      } else if (id === "meteor") {
+        (st.pending || []).forEach((p) => out.push({ x: p.x, z: p.z, r: p.r || 6 }));
+      } else if (id === "sinkhole") {
+        (st.holes || []).forEach((h2) => out.push({ x: h2.x, z: h2.z, r: h2.r || 4 }));
+        (st.pending || []).forEach((p) => out.push({ x: p.x, z: p.z, r: p.r || 4 }));
+      } else if (id === "wildfire") {
+        const tr = A.flammable || [];
+        for (let i = 0, n = 0; i < tr.length && n < 24; i++) if (tr[i].burning) { out.push({ x: tr[i].x, z: tr[i].z, r: 4 }); n++; }
+      } else if (id === "nuke") {
+        if (st.gx != null) out.push(!st.r ? { x: st.gx, z: st.gz, r: 9 } : { x: st.gx, z: st.gz, r: st.r, fill: false });
+      } else if (id === "flashflood") {
+        if (!warn && st.wave && !st.passed && st.waveX != null) out.push({ line: true, x: st.waveX, z: A.center.z, dx: 1, dz: 0 });
+      } else if (id === "flood") {
+        if (st.phase === "sweep" && st.dx != null) out.push({ line: true, x: A.center.x + st.dx * st.frontS, z: A.center.z + st.dz * st.frontS, dx: st.dx, dz: st.dz });   // tsunami V2 wall
+        else if (!warn && st.wave && !st.passed && st.waveX != null) out.push({ line: true, x: st.waveX, z: A.center.z, dx: 1, dz: 0 });   // legacy wall
+      }
+      return out;
+    },
     // jump straight to a named disaster's warning (debug / verification aid)
     force(id) {
       const i = order.indexOf(id);   // this run's shuffled arc
@@ -1455,7 +1500,12 @@
     if (dir.state === "active" && dir.cur) dir.prog = 1 - dir.t / dir.cur.activeSecs;
     curCtx = ctx; // refresh for bot fleeVector (1-frame latency is fine)
 
-    if (dir.state === "idle") { dir.t -= dt; if (dir.t <= 0) beginWarn(); }
+    if (dir.state === "idle") {
+      dir.t -= dt;
+      // let the "IT'S OVER" all-clear breathe for a few seconds, then go quiet
+      if (dir.overT > 0) { dir.overT -= dt; if (dir.overT <= 0) { dir.overName = null; banner("", false); } }
+      if (dir.t <= 0) beginWarn();
+    }
     else if (dir.state === "warn") { dir.t -= dt; warnAmbience(); if (dir.cur.warnTick) try { dir.cur.warnTick(dt, ctx); } catch (e2) {} if (dir.t <= 0) beginActive(ctx); }
     else if (dir.state === "active") { dir.t -= dt; try { dir.cur.active(dt, ctx); } catch (e3) { console.error("[disaster active]", e3); } if (dir.t <= 0) endActive(ctx); }
   });
