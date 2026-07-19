@@ -283,6 +283,28 @@
         }
       }
     }
+    // DEDUPE (owner: "multiple green squares on one vehicle"): a single craft
+    // can surface from two registries at once — a parked airliner lives in the
+    // military list AND the civil-aircraft acquirer; police air can double
+    // with a mil record. Collapse any slots whose anchor points sit within a
+    // hull-ish radius of an earlier one (keep the earlier = closer-scored
+    // source). O(n²) over ≤MAX_CANDS slots — negligible.
+    let w = 0;
+    for (let i = 0; i < slotCount; i++) {
+      const a = slots[i];
+      let dup = false;
+      for (let j = 0; j < w; j++) {
+        const b = slots[j];
+        const ddx = a.x - b.x, ddy = a.y - b.y, ddz = a.z - b.z;
+        if (ddx * ddx + ddy * ddy + ddz * ddz < 3.2 * 3.2) { dup = true; break; }
+      }
+      if (dup) continue;
+      if (w !== i) {
+        const t = slots[w]; slots[w] = slots[i]; slots[i] = t;   // swap slot OBJECTS (pooled DOM stays owned by its slot)
+      }
+      w++;
+    }
+    slotCount = w;
     for (let i = slotCount; i < MAX_CANDS; i++) slots[i].used = false;
   }
 
