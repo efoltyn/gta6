@@ -224,7 +224,7 @@
     if (typeof document === "undefined" || !document.body) return null;
     const style = document.createElement("style");
     style.textContent =
-      "#cityKillFeed{position:fixed;right:14px;top:96px;z-index:70;pointer-events:none;display:flex;" +
+      "#cityKillFeed{position:fixed;right:14px;top:150px;z-index:70;pointer-events:none;display:flex;" +
       "flex-direction:column;align-items:flex-end;gap:5px;font:800 13px/1.15 Inter,system-ui,Arial,sans-serif}" +
       "#cityKillFeed .kf{background:rgba(10,14,19,.78);border:1px solid rgba(183,207,225,.26);border-radius:7px;" +
       "padding:5px 10px;color:#e8edf2;box-shadow:0 3px 10px rgba(0,0,0,.4);letter-spacing:.01em;" +
@@ -235,7 +235,10 @@
       "#cityKillFeed .kf-t{color:#ff9a83}#cityKillFeed .kf.you .kf-t{color:#e7bd55}" +
       "#cityKillFeed .kf-m{color:#8fa0af;font-weight:700;margin-left:7px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}" +
       "@keyframes kfIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}" +
-      "@media(max-width:720px){#cityKillFeed{top:84px;font-size:12px}}";
+      "@media(max-width:720px){#cityKillFeed{top:124px;font-size:12px}}" +
+      // touch zone map (css/mobile.css): top-right is the money+wanted column —
+      // the feed stacks BELOW it, clear of the tap targets.
+      "body.touch #cityKillFeed{top:170px}";
     document.head.appendChild(style);
     feedEl = document.createElement("div");
     feedEl.id = "cityKillFeed";

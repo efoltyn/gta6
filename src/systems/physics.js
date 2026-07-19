@@ -403,6 +403,11 @@
     //      the (hidden) character rig, so we bail out of on-foot physics. ----
     if (player.driving) return;
 
+    // A live aircraft boarding-door arc (city/aircraft_doors.js) guides the
+    // player through the opening exactly like a vehicle controller — on-foot
+    // input must not fight the guided walk for the ~1-2s beat.
+    if (player._doorArc) return;
+
     // A strapped-in snowboard owns the player transform just like a vehicle.
     // The controller is installed by city/snowboard.js after this module.
     if (CBZ.citySnowboardStep && CBZ.citySnowboardStep(dt)) return;
