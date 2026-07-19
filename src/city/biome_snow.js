@@ -322,6 +322,19 @@
     // ground and future builders are kept out by the massif reservations below.
     SNOW_BUILDING_CLEARINGS.length = 0;
     GREAT_BUILDING_CLEARINGS.length = 0;
+    // OWNER: "a mountain still overlaps with the town." Per-lot pads flattened
+    // each BUILDING, but the town's streets/space BETWEEN lots still rode the
+    // raw massif slope — the mountain visibly ran through the village. One
+    // whole-town clearing (feathered wide so the massif eases down around the
+    // village instead of a crater edge) fixes the overlap for the entire rect.
+    // Oracle + mesh share this field, so physics stays consistent. Flip
+    // SNOW_TOWN_CLEARING=false to restore the slope-through-town look.
+    if (CBZ.CONFIG.SNOW_TOWN_CLEARING == null) CBZ.CONFIG.SNOW_TOWN_CLEARING = true;
+    if (HAS_TOWN && CBZ.CONFIG.SNOW_TOWN_CLEARING !== false) {
+      const townPad = { cx: TOWN_CX, cz: TOWN_CZ, hx: TOWN_HX + 14, hz: TOWN_HZ + 14, feather: 90 };
+      SNOW_BUILDING_CLEARINGS.push(townPad);
+      GREAT_BUILDING_CLEARINGS.push(townPad);
+    }
     const builtLots = (city.lots || []).concat(city.annex && city.annex.lots || []);
     for (let i = 0; i < builtLots.length; i++) {
       const lot = builtLots[i];
