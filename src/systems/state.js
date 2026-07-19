@@ -325,6 +325,12 @@
   }
 
   function startRun() {
+    // Never start on a partially-parsed game: the PLAY button exists in the
+    // DOM long before the last script tag runs, and a start in that window
+    // builds a fraction of the world (late-tag landmasses never register)
+    // which main.js then stomps back to "title". main.js sets bootComplete
+    // as the very first thing it does.
+    if (!CBZ.bootComplete) return;
     CBZ.initAudio(); resetGame(); setState("playing");
     screens.title.classList.add("hidden");
     // CITY origin intro: city/mode.js's reset() (just run inside resetGame())

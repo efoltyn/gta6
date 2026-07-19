@@ -21,15 +21,24 @@ const tmark = (label) => console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)
 // same code paths. Full-res is one env var away when you want a pretty shot.
 const W = +(process.env.CBZ_SMOKE_W || 800), H = +(process.env.CBZ_SMOKE_H || 500);
 
-// wide random windows: parallel tool runs (worktree agents run their own
-// gates) must not collide on the http OR debug port — a bind clash reads as
-// a mysterious boot failure.
-const port = 8950 + Math.floor(Math.random() * 300);
+// Port discipline: worktree agents may run OLDER tool copies concurrently
+// (legacy windows: http 8700-8790/8950-8990, dbg 9700-9780/9950-9990), so
+// these windows are fully DISJOINT from those — and each port is pre-flight
+// checked: something already answering means the port is TAKEN and we'd
+// silently attach to someone else's server/browser, so re-roll instead.
+async function claimPort(lo, span, probe) {
+  for (let tries = 0; tries < 6; tries++) {
+    const p = lo + Math.floor(Math.random() * span);
+    try { await probe(p); } catch (_) { return p; }   // nothing answered → free
+  }
+  console.error("FAIL: no free port near " + lo); process.exit(1);
+}
+const port = await claimPort(9050, 200, (p) => fetch(`http://127.0.0.1:${p}/`));
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], {
   env: { ...process.env, PORT: String(port) }, stdio: "ignore",
 });
 const base = `http://127.0.0.1:${port}/`;
-const dbg = 9950 + Math.floor(Math.random() * 400);
+const dbg = await claimPort(10050, 250, (p) => fetch(`http://127.0.0.1:${p}/json/version`));
 const profile = `/tmp/cbz-smoke-${dbg}`;
 await rm(profile, { recursive: true, force: true });
 // poll the devserver instead of a blind grace sleep
@@ -75,18 +84,23 @@ const evl = async (expression) => {
 await send("Runtime.enable");
 await send("Page.enable");
 
-// wait for scripts, click play
-for (let i = 0; i < 200; i++) {
-  if (await evl("!!(window.CBZ && CBZ.game && document.getElementById('playBtn'))")) break;
+// Wait for the BOOT TO FINISH, not for an early DOM fragment: CBZ.game and
+// the PLAY button exist long before the last of ~241 script tags has parsed,
+// and clicking in that window starts a PARTIAL world (late-tag landmasses
+// missing — the 83-lot/57-lot anomalies) which main.js then stomps back to
+// "title". bootComplete (or state 'title', which only main.js sets) is the
+// ground truth that every module has registered.
+for (let i = 0; i < 400; i++) {
+  if (await evl("!!(window.CBZ && CBZ.game && (CBZ.bootComplete || CBZ.game.state === 'title') && document.getElementById('playBtn'))")) break;
   await sleep(150);
 }
-tmark("scripts ready");
+tmark("boot complete");
 let playing = false;
 for (let i = 0; i < 240 && !playing; i++) {
-  // re-click until the handler is attached and the state actually flips
-  await evl("(() => { const b = document.getElementById('playBtn'); if (b) { b.click(); b.dispatchEvent(new MouseEvent('mousedown', {bubbles:true})); b.dispatchEvent(new MouseEvent('mouseup', {bubbles:true})); } return true; })()");
-  await sleep(250);
-  playing = await evl("!!(window.CBZ && CBZ.game && CBZ.game.state === 'playing')");
+  // click-if-not-playing is ATOMIC in-page, so a queued duplicate activation
+  // can never restart the run (startRun is a full world reset every call).
+  playing = await evl("(() => { if (CBZ.game && CBZ.game.state === 'playing') return true; const b = document.getElementById('playBtn'); if (b) { b.click(); b.dispatchEvent(new MouseEvent('mousedown', {bubbles:true})); b.dispatchEvent(new MouseEvent('mouseup', {bubbles:true})); } return CBZ.game && CBZ.game.state === 'playing'; })()");
+  if (!playing) await sleep(250);
 }
 console.log("playing:", playing);
 tmark("world built, playing");
@@ -107,16 +121,36 @@ await evl(`(() => {
 })()`);
 // run window: >=4s wall (the scripted W-run/punch timers fire at 2.5/2.8s)
 // AND >=60 rendered frames, capped at RUN_S wall seconds (the old behavior).
+// The cap is re-checked after the evl too — on a starved page each evl can
+// block for seconds, and the loop used to overshoot the cap by that much.
 const runStart = Date.now();
 let frames = 0;
 while (Date.now() - runStart < RUN_S * 1000) {
   await sleep(400);
   frames = (await evl("window.__smokeFrames || 0")) || 0;
-  if (Date.now() - runStart >= 4000 && frames >= 60) break;
+  if (frames >= 60 && Date.now() - runStart >= 4000) break;
+  if (Date.now() - runStart >= RUN_S * 1000) break;
 }
 tmark(`run window done (${frames} frames)`);
+// ---- SETTLE + LIVENESS: never sample a world that isn't stable and live.
+// Staged/deferred build passes settle across frames, and any bounce back to
+// the title screen means the run is broken — a gate that prints "ok" over a
+// dead world is worse than a slow gate.
+let settled = null, prev = "";
+for (let i = 0; i < 20; i++) {
+  const s = await evl(`JSON.stringify([CBZ.game && CBZ.game.state, (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots || []).length, (CBZ.city && CBZ.city.arena && CBZ.city.arena.shopLots || []).length, (CBZ.city && CBZ.city.arena && CBZ.city.arena.roads || []).length])`);
+  if (s && s === prev && JSON.parse(s)[0] === "playing") { settled = JSON.parse(s); break; }
+  prev = s; await sleep(800);
+}
+if (!settled) {
+  console.log("invariants: FAIL — world never settled live (last sample: " + prev + ")");
+  chrome.kill("SIGTERM"); server.kill("SIGTERM");
+  process.exit(3);
+}
+tmark("world settled");
 // ---- GENERATOR INVARIANTS (PROCGEN.md #8): cheap per-seed sanity ----
 const inv = await evl(`(() => {
+  if (!CBZ.game || CBZ.game.state !== "playing") return "FAIL: state=" + (CBZ.game && CBZ.game.state) + " — game not live at sample time";
   const A = CBZ.city && CBZ.city.arena;
   if (!A) return "no arena";
   const out = [];

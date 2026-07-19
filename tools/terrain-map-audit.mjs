@@ -27,15 +27,22 @@ const SEED = argn("--seed", 90210), STEP = argn("--step", 40), MTN = argn("--mtn
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const tmark = (label) => console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)}s] ${label}`);
-// wide, mutually disjoint random port windows (smoke uses 8950+/9950+): parallel
-// tool runs — worktree agents run their own gates — must not collide on the http
-// OR debug port; a debug-port clash once cross-attached a probe to the WRONG
-// chromium's page (the 57-lot anomaly).
-const port = 8400 + Math.floor(Math.random() * 300);
+// Port discipline: windows fully disjoint from every legacy tool range AND
+// from the new smoke gate (9050+/10050+), plus a pre-flight probe — anything
+// already answering means the port is TAKEN (we'd silently talk to someone
+// else's server/browser), so re-roll instead.
+async function claimPort(lo, span, probe) {
+  for (let tries = 0; tries < 6; tries++) {
+    const p = lo + Math.floor(Math.random() * span);
+    try { await probe(p); } catch (_) { return p; }   // nothing answered → free
+  }
+  console.error("FAIL: no free port near " + lo); process.exit(1);
+}
+const port = await claimPort(8400, 280, (p) => fetch(`http://127.0.0.1:${p}/`));
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
 const origin = `http://127.0.0.1:${port}/`;
 const base = `${origin}?seed=${SEED}`;
-const dbg = 9550 + Math.floor(Math.random() * 300);
+const dbg = await claimPort(10350, 200, (p) => fetch(`http://127.0.0.1:${p}/json/version`));
 await rm(`/tmp/cbz-tmap-${dbg}`, { recursive: true, force: true });
 // poll the devserver instead of a blind grace sleep
 { let up = false;
@@ -55,10 +62,16 @@ ws.addEventListener("message", (ev) => { const m = JSON.parse(ev.data); if (m.id
 const send = (method, params = {}) => new Promise((r) => { const i = id++; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const evl = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true }); if (r.result && r.result.exceptionDetails) { console.error("EVAL ERR:", JSON.stringify(r.result.exceptionDetails).slice(0, 300)); } return r.result && r.result.result && r.result.result.value; };
 await send("Runtime.enable");
-for (let i = 0; i < 200; i++) { if (await evl("!!(window.CBZ && CBZ.game && document.getElementById('playBtn'))")) break; await sleep(150); }
+// Wait for the BOOT TO FINISH, not an early DOM fragment: CBZ.game + playBtn
+// exist long before the last of ~241 script tags parses, and a click in that
+// window builds a PARTIAL world which main.js then stomps back to "title"
+// (the 83/57-lot anomalies). bootComplete / state 'title' = every module in.
+for (let i = 0; i < 400; i++) { if (await evl("!!(window.CBZ && CBZ.game && (CBZ.bootComplete || CBZ.game.state === 'title') && document.getElementById('playBtn'))")) break; await sleep(150); }
 await evl("(() => { if (window.CBZ && CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false; return true; })()");
 let playing = false;
-for (let i = 0; i < 240 && !playing; i++) { await evl("(() => { const b = document.getElementById('playBtn'); if (b) b.click(); return true; })()"); await sleep(250); playing = await evl("!!(CBZ.game && CBZ.game.state === 'playing')"); }
+// click-if-not-playing is ATOMIC in-page: a duplicate activation would restart
+// the run (startRun is a full world reset every call).
+for (let i = 0; i < 240 && !playing; i++) { playing = await evl("(() => { if (CBZ.game && CBZ.game.state === 'playing') return true; const b = document.getElementById('playBtn'); if (b) b.click(); return CBZ.game && CBZ.game.state === 'playing'; })()"); if (!playing) await sleep(250); }
 if (!playing) { console.error("never reached playing"); process.exit(1); }
 tmark("world built, playing");
 // settle on FRAMES, not wall time — the audit reads build-time state + pure
@@ -67,6 +80,9 @@ tmark("world built, playing");
 await evl("(() => { window.__tmapFrames = 0; const loop = () => { window.__tmapFrames++; requestAnimationFrame(loop); }; requestAnimationFrame(loop); return true; })()");
 { const s = Date.now();
   while (Date.now() - s < 5000) { await sleep(250); if (Date.now() - s >= 1000 && ((await evl("window.__tmapFrames || 0")) || 0) >= 20) break; } }
+// liveness assert: a world that bounced back to the title screen would sample
+// as a fraction of the map — numbers from a dead run must never print.
+if ((await evl("CBZ.game && CBZ.game.state")) !== "playing") { console.error("FAIL: game not live at sample time"); process.exit(3); }
 tmark("settled");
 
 // ---- ONE in-page grid sweep: biome + relief at every cell ----
