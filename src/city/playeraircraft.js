@@ -2297,7 +2297,14 @@
     if (typeof document === "undefined" || !document.body) return null;
     const d = document.createElement("div");
     d.id = "cityFlightHud";
-    d.style.cssText = "position:fixed;left:50%;bottom:96px;transform:translateX(-50%);" +
+    // ZONE CHOICE (css/mobile.css zone map): the flight readout docks
+    // TOP-CENTER at 150px. Bottom-center is the player vitals/hotbar cluster
+    // (city hud MC) — the old bottom:96px strip sat right on top of it.
+    // Top-left is the charpanel chip, top-right is the money/wanted column
+    // with #cityKillFeed stacked under it (150/170px, right-anchored); the
+    // top-center objective/job lines end well above 150. A narrow centered
+    // one-line strip at 150 touches none of them at any viewport size.
+    d.style.cssText = "position:fixed;left:50%;top:150px;transform:translateX(-50%);" +
       "font:600 13px/1.4 ui-monospace,Menlo,monospace;color:#cfe6ff;text-align:center;" +
       "background:rgba(8,12,18,0.48);padding:4px 9px;border-radius:7px;border:1px solid rgba(120,180,255,0.20);" +
       "pointer-events:none;z-index:60;display:none;text-shadow:0 1px 2px #000";
