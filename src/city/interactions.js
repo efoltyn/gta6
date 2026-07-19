@@ -234,6 +234,30 @@
     if (rec.history.length > 40) rec.history.splice(0, rec.history.length - 40);
   }
 
+  // GRAMMAR LAW (owner): the target's NAME appears exactly ONCE — as the card
+  // title. An option label is a BUTTON: a bare verb phrase, never a sentence,
+  // never a question, and NEVER the name again ("Zip Marcus's wrists" → "Zip
+  // wrists"). This is the SHARED seam: every registered label — street verbs,
+  // restrain, packages, aircraft crew — passes through here, so a caller that
+  // still interpolates a name is corrected at display time. Possessives drop
+  // clean ("Marcus's wrists" → "wrists"); a bare name drops with its orphaned
+  // trailing preposition ("Talk to Marcus" → "Talk"), keeping any emoji tail.
+  function stripTargetName(text, t) {
+    let s = String(text || "");
+    const n = t && t.name ? String(t.name).trim() : "";
+    if (n) {
+      const parts = [n].concat(n.indexOf(" ") >= 0 ? n.split(/\s+/).filter((w) => w.length >= 3) : []);
+      for (const w of parts) {
+        const esc = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        s = s.replace(new RegExp("\\b" + esc + "['’]s\\s*", "gi"), "");
+        s = s.replace(new RegExp("\\s*\\b" + esc + "\\b", "gi"), "");
+      }
+      s = s.replace(/\s{2,}/g, " ").trim();
+      s = s.replace(/\s+(?:to|on|with|of|at|for|from)\s*([^\w\s]*)$/i, (m, tail) => (tail ? " " + tail : ""));
+    }
+    return s.trim() || String(text || "");
+  }
+
   // Resolve ONE context proposal.  Every interaction in the city now has the
   // same grammar: E = YES, I = NO.  Authored registries may still contribute
   // many possible verbs; priority/context chooses the one that makes sense now
@@ -262,7 +286,7 @@
       const s = choiceScore(pass[i], i);
       if (s > best) { best = s; chosen = pass[i]; }
     }
-    const proposal = String(labelOf(chosen, t, ctx) || "Continue").replace(/[?.!]+$/, "");
+    const proposal = stripTargetName(String(labelOf(chosen, t, ctx) || "Continue").replace(/[?.!]+$/, ""), t);
     const standing = standingGates(chosen, t) ? interactionStanding(t) : null;
     const rows = [
       { key: "e", hold: false, label: "YES", bad: false, opt: chosen, decision: "yes", proposal, standing },
@@ -475,9 +499,11 @@
       // the rows ARE the proposition. Same on TOUCH (owner: the card read
       // "Zip tie them?" with a ZIP TIE pill right under it — say it ONCE):
       // verb pills carry the proposal themselves, so the question line only
-      // exists for the keyboard's YES/NO rows.
+      // exists for the keyboard's YES/NO rows — and per the grammar law it is
+      // the bare verb phrase, not a "…?" question (the YES/NO rows already
+      // carry the decision; a button is a thing to do, not a sentence).
       const touchVerbsNote = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
-      noteEl.textContent = (rows.dualRide || touchVerbsNote) ? "" : (rows[0].proposal || "Continue") + "?";
+      noteEl.textContent = (rows.dualRide || touchVerbsNote) ? "" : (rows[0].proposal || "Continue");
       noteEl.style.display = (rows.dualRide || touchVerbsNote) ? "none" : "";
     }
     if (fp !== fingerprint || dirty) {

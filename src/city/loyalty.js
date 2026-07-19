@@ -294,7 +294,7 @@
     I.register("ped:civ", {
       id: "loyal-hand-gun", slot: "k", prio: 58,
       canShow: function (p) { return isCrew(p) && hasSpareGun(); },
-      label: function (p) { return "Hand " + nm(p) + " your " + heldGunLabel(); },
+      label: function () { return "Hand over " + heldGunLabel(); },
       onSelect: function (p) {
         const w = heldGunPedName();
         if (!w) { note("Nothing to hand them.", 1.4); return; }
@@ -309,7 +309,7 @@
     I.register("ped:civ", {
       id: "loyal-slip-cash", slot: "l", prio: 40,
       canShow: function (p) { return isCrew(p) && canAfford(cheapestGun()); },
-      label: function (p) { return "Slip " + nm(p) + " $" + slipAmount() + " for a piece"; },
+      label: function () { return "Slip $" + slipAmount(); },
       onSelect: function (p) {
         const amt = slipAmount();
         if (!canAfford(amt)) { note("Not enough on you.", 1.4); return; }

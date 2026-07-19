@@ -277,12 +277,14 @@
           npcSetPose(ped, spec.pose || (pinned ? "stand" : null));
           // [E] Talk — cycle the dialogue via the interaction registry (#14). It
           // rides the ped's own _iopts, so it dies with the ped, zero per-frame cost.
+          // GRAMMAR LAW (owner): the label is a bare verb — the ped's NAME is
+          // already the card title, so "Talk to <name>" said it twice.
           if (spec.dialogue && spec.dialogue.length && CBZ.interactions && CBZ.interactions.registerFor) {
             let di = 0;
             CBZ.interactions.registerFor(ped, {
               id: def.id + ":npc-talk:" + Math.round(wx) + ":" + Math.round(wz),
               slot: "e", prio: 20,
-              label: spec.talkLabel || ("Talk to " + (spec.name || role)),
+              label: spec.talkLabel || "Talk",
               canShow(t) { return t && !t.dead && !t.surrender; },
               onSelect(t) {
                 const line = spec.dialogue[di % spec.dialogue.length]; di++;
@@ -454,6 +456,16 @@
   let hooked = false;
   function hook() {
     if (hooked) return; hooked = true;
+    // Zone cards carry the VENUE TITLE at the top (name-once grammar law) —
+    // without a describe(), every package zone card was headed "—" and the
+    // whole story had to live in the option label (whence the old sentence
+    // labels). One shared describe covers every package's zones.
+    if (CBZ.interactions && CBZ.interactions.describe) {
+      CBZ.interactions.describe("gamepkg", function (t) {
+        const d = t && t.pkg ? defs.find((dd) => dd.id === t.pkg) : null;
+        return { label: (d && (d.title || d.id)) || "—", note: "" };
+      });
+    }
     // package venues claim lots at order 88 — BEFORE interior dressers (casino.js runs at 90)
     if (CBZ.addLandmass) CBZ.addLandmass(function (city) { claimAndMount(city); }, 88);
     if (CBZ.onUpdate && CBZ.PRIO) {

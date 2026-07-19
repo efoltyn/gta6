@@ -630,6 +630,12 @@
   // jail chapter on every fresh run. The complete authored campaign remains
   // available by setting this flag true before Play.
   if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+  // GTA convention: dying closes the manhunt. On player death the wanted
+  // stars, the heat AND the escaped-convict floor (g.escapedConvict) all
+  // clear — a corpse is as caught as it gets. city/wanted.js reads this at
+  // the death moment; arrest (busted) keeps its own jail funnel untouched.
+  // Flip false → the old behavior (the convict floor survived respawn).
+  if (CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH == null) CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH = true;
   // THE EXECUTIVE — REAL MARKET CRASH. His opening stops being a fake "the
   // numbers say zero" line: he STARTS with a real brokerage portfolio (real
   // share positions on sim/stocks.js, counted by every net-worth readout) and

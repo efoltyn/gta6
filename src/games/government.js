@@ -574,7 +574,9 @@
       (function (i) {
         const s = V.seats[i];
         ctx.zone({ id: "seat" + i, pos: [s.x, s.z + 0.9], r: 1.1,
-          label: function () { const m = COUNCIL[i]; return m ? "[E] Lobby " + m.title + " " + shortName(m.name) + " (" + m.stance.toUpperCase() + ")" : "[E] The council bench"; },
+          // GRAMMAR LAW (owner): no names inside an option label — the member's
+          // name belongs to the panel that opens; title + stance identify the seat.
+          label: function () { const m = COUNCIL[i]; return m ? "[E] Lobby the " + m.title + " (" + m.stance.toUpperCase() + ")" : "[E] The council bench"; },
           onUse: function () { if (!ensureCouncil()) { C.hud.feed("The council hasn't taken their seats yet."); return; } openMember(i); } });
       })(i);
     }

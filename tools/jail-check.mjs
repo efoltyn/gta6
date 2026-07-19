@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-/* tools/jail-check.mjs — LOCKUP (games/jail.js) behavior gate.
+/* tools/jail-check.mjs — CITY JAIL (games/jail.js) behavior gate.
    Boots the game headless into CITY mode, mounts the jail package, and
    asserts EVERY rule through CBZ.games.api.jail: the arrest funnel engages
-   the inmate arc with a sentence scaled to wanted, bribe math, the lockpick
-   → escape sets wanted HIGH, the jailor shift (checkpoints/catch/3-miss end),
-   and the flag-OFF byte-identical fallback. Numeric-only; never eyeball. */
+   the inmate arc with a sentence scaled to wanted, bribe math, the PHYSICAL
+   pry-escape (time-based, guard-sightline-gated — no minigame) → wanted HIGH,
+   the jailor shift (catch pays; misses never end it — no disgrace rule), the
+   panel-button grammar law (one-word verbs + optional number, no "?"), death
+   clearing the convict floor, and the flag-OFF byte-identical fallback.
+   Numeric-only; never eyeball. */
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -73,11 +76,11 @@ function check(name, cond, detail) { results.push({ name, ok: !!cond, detail });
 // ---- 1. mount + cast + pure rules ----
 const cast = await evl("return CBZ.games.api.jail.cast();");
 check("cast: 3 guards", cast && cast.guards >= 3, JSON.stringify(cast));
-check("cast: 2 inmates + sarge + 3 cells", cast && cast.inmates >= 2 && cast.sarge && cast.cells === 3, JSON.stringify(cast));
-const rules = await evl("var a=CBZ.games.api.jail; return { s1:a.rules.sentenceFor(1), s3:a.rules.sentenceFor(3), s5:a.rules.sentenceFor(5), b3:a.rules.bribeCost(3), jHit:a.rules.lockpickJudge(0.5,0.5,0.1), jMiss:a.rules.lockpickJudge(0.9,0.5,0.1) };");
+check("cast: 2 inmates + sarge + 3 cells + 4-post ring", cast && cast.inmates >= 2 && cast.sarge && cast.cells === 3 && cast.posts === 4, JSON.stringify(cast));
+const rules = await evl("var a=CBZ.games.api.jail; return { s1:a.rules.sentenceFor(1), s3:a.rules.sentenceFor(3), s5:a.rules.sentenceFor(5), b3:a.rules.bribeCost(3), pry:a.rules.PRY_TIME, recap:a.rules.RECAP_PENALTY };");
 check("rule sentenceFor(3)=52 scales with wanted", rules.s3 === 52 && rules.s1 === 28 && rules.s5 === 76, JSON.stringify(rules));
 check("rule bribeCost(3)=3050 (steep)", rules.b3 === 3050);
-check("rule lockpickJudge band", rules.jHit === true && rules.jMiss === false);
+check("rule pry: pure time-under-observation (no sweet spots)", rules.pry === 24 && rules.recap === 14);
 
 // ---- 2. ARREST via the REAL seam → inmate arc, sentence scaled to wanted ----
 const arrest = await evl(`
@@ -89,13 +92,29 @@ const arrest = await evl(`
   var arc=a.arc(), anchor=a.anchor(), P=CBZ.player.pos;
   var cellW={x:anchor.x-8.3, z:anchor.z};
   var dist=Math.hypot(P.x-cellW.x, P.z-cellW.z);
-  return { eng:eng, before:before, busted0:busted0, arc:arc, locked:a.cellLocked(1), dist:+dist.toFixed(2), bustedAfter:!!CBZ.game.busted };
+  return { eng:eng, before:before, busted0:busted0, arc:arc, locked:a.cellLocked(1), dist:+dist.toFixed(2), bustedAfter:!!CBZ.game.busted, pending:a.pending() };
 `);
 check("flag ON: seam engages (no campaign)", arrest.eng === true);
-check("arrest engages inmate arc (was idle)", arrest.before === null && arrest.arc && arrest.arc.phase === "held");
+check("arrest engages inmate arc (was idle, none pending)", arrest.before === null && arrest.arc && arrest.arc.phase === "held" && arrest.pending === false);
 check("sentence scaled to 3★ (52s), wanted0=3", arrest.arc && arrest.arc.sentence === 52 && arrest.arc.wanted0 === 3, JSON.stringify(arrest.arc));
 check("player teleported into the locked cell", arrest.locked === true && arrest.dist < 2.5, "dist=" + arrest.dist);
 check("package path does NOT set g.busted (own arc)", arrest.bustedAfter === false);
+
+// ---- 2b. GRAMMAR LAW: panel buttons are one-word verbs (+ number), no "?" --
+const gram = await evl(`
+  var el=document.getElementById('pkgPanel');
+  var spans=el?Array.prototype.slice.call(el.querySelectorAll('[data-act]')):[];
+  var labels=spans.map(function(s){return (s.textContent||'').trim();});
+  var bad=labels.filter(function(L){
+    if (L.indexOf('?')>=0) return true;
+    var toks=L.split(/\\s+/);
+    if (toks.length>2) return true;
+    if (toks.length===2 && !/^\\$?[\\d,.]+s?$/.test(toks[1])) return true;
+    return false;
+  });
+  return { labels:labels, bad:bad };
+`);
+check("panel buttons: bare verbs + optional number, no '?'", gram.labels && gram.labels.length >= 2 && gram.bad.length === 0, JSON.stringify(gram));
 
 // ---- 3. SERVE ----
 const serve = await evl("var a=CBZ.games.api.jail; a.serve(); return { phase:a.phase(), done:a._serveComplete(), arc:a.arc() };");
@@ -116,40 +135,46 @@ const bribe = await evl(`
 check("bribe cost = bribeCost(2)=2200", bribe.cost === 2200, "cost=" + bribe.cost);
 check("bribe spends exactly the price, releases", bribe.spent === 2200 && bribe.arc === null, "spent=" + bribe.spent);
 
-// ---- 5. ESCAPE: lockpick rig → breakout → out the wall → wanted HIGH ----
+// ---- 5. ESCAPE: the PHYSICAL pry (time, not rhythm) → breakout → out the
+//         wall → wanted HIGH + convict floor ----
 const escape = await evl(`
   var a=CBZ.games.api.jail;
   try{CBZ.cityWantedReset&&CBZ.cityWantedReset();}catch(e){}
   CBZ.cityForceStars(2);
   a.bust({});
-  a.startLock();
+  var pryOn=a.pry();                    // start working the door plate
   var p0=a.phase();
-  var picks=[];
-  for(var i=0;i<3;i++){ a.setLock(0.5,0.5,0.5); picks.push(a.pick()); }
-  var afterPick=a.arc(), locked=a.cellLocked(1);
+  var arcMid=a.arc();
+  var popped=a._pryComplete();          // rig: the plate gives
+  var afterPop=a.phase(), locked=a.cellLocked(1);
   var reached=a.reachGap();
-  return { p0:p0, picks:picks, phase:afterPick?afterPick.phase:null, locked:locked, reached:reached, arc:a.arc(), wanted:CBZ.game.wanted|0, convict:!!CBZ.game.escapedConvict };
+  return { pryOn:pryOn, p0:p0, pryField:arcMid?arcMid.pry:null, popped:popped, phase:afterPop, locked:locked, reached:reached, arc:a.arc(), wanted:CBZ.game.wanted|0, convict:!!CBZ.game.escapedConvict };
 `);
-check("lockpick starts (phase picking)", escape.p0 === "picking");
-check("3 rigged picks pop the lock (last='open')", escape.picks[2] === "open", JSON.stringify(escape.picks));
-check("cell door opens, phase→breakout", escape.phase === "breakout" && escape.locked === false);
+check("pry starts (phase prying — no minigame panel)", escape.pryOn === true && escape.p0 === "prying" && escape.pryField != null);
+check("plate pops: phase→breakout, cell door open", escape.popped === true && escape.phase === "breakout" && escape.locked === false);
 check("reaching the wall gap frees you", escape.reached === true && escape.arc === null);
 check("escape sets wanted HIGH + convict floor", escape.wanted >= 4 && escape.convict === true, "wanted=" + escape.wanted + " convict=" + escape.convict);
 
-// ---- 6. JAILOR shift: checkpoints advance + pay; catch pays; 3 misses end it
+// ---- 5b. DEATH closes the manhunt (CITY_WANTED_CLEARS_ON_DEATH): the convict
+//          floor dies with you — a corpse is as caught as it gets ----
+const death = await evl(`
+  try{CBZ.cityWantedReset&&CBZ.cityWantedReset();}catch(e){}
+  CBZ.game.escapedConvict = true;
+  CBZ.cityForceStars(3);
+  if (CBZ.cityInfamyResetOnDeath) CBZ.cityInfamyResetOnDeath();
+  return { flag: CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH, convict: !!CBZ.game.escapedConvict, wanted: CBZ.game.wanted|0, heat: CBZ.game.heat||0 };
+`);
+check("death clears stars, heat AND the convict floor", death.flag === true && death.convict === false && death.wanted === 0 && death.heat === 0, JSON.stringify(death));
+
+// ---- 6. JAILOR shift: catches pay; misses NEVER end it (no disgrace rule) --
 const shiftA = await evl(`
   var a=CBZ.games.api.jail;
   try{CBZ.cityWantedReset&&CBZ.cityWantedReset();CBZ.cityClearConvict&&CBZ.cityClearConvict();}catch(e){}
   CBZ.game.escapedConvict=false;
   var on=a.startShift(); var s0=a.shift();
-  var cash0=CBZ.game.cash;
-  var i1=a.hitCheckpoint(); var i2=a.hitCheckpoint();   // two beats
-  var cashCp=CBZ.game.cash;
-  return { on:on, active:s0&&s0.active, cp1:i1, cp2:i2, cpIdx:a.shift().cpIdx, cpPay:cashCp-cash0 };
+  return { on:on, active:s0&&s0.active };
 `);
 check("shift signs on (active)", shiftA.on === true && shiftA.active === true);
-check("checkpoints advance the beat", shiftA.cpIdx >= 2 && shiftA.cp2 > shiftA.cp1);
-check("checkpoints pay wages (2×120)", shiftA.cpPay === 240, "pay=" + shiftA.cpPay);
 
 const shiftB = await evl(`
   var a=CBZ.games.api.jail;
@@ -157,7 +182,7 @@ const shiftB = await evl(`
   var anc=a.anchor(); CBZ.player.pos.x=anc.x; CBZ.player.pos.z=anc.z+7;
   var cash0=CBZ.game.cash;
   var rig=a.rigEscape(); var hasEsc=!!a.shift().escape;
-  var caught=a.catch();                 // grab the runner
+  var caught=a.catch();                 // grab the runner (the real cityRestrain collar)
   var s=a.shift();
   return { rig:rig, hasEsc:hasEsc, caught:caught, caughtN:s.caught, catchPay:CBZ.game.cash-cash0, escAfter:s.escape };
 `);
@@ -169,9 +194,12 @@ const shiftC = await evl(`
   var anc=a.anchor(); CBZ.player.pos.x=anc.x; CBZ.player.pos.z=anc.z+7;
   var misses=[];
   for(var i=0;i<3;i++){ a.rigEscape(); misses.push(a.missEscape()); }
-  return { misses:misses, shift:a.shift() };
+  var aliveAfter=a.shift();
+  var off=a.endShift('clocked off');
+  return { misses:misses, aliveAfter:aliveAfter, off:off, after:a.shift() };
 `);
-check("three misses end the shift (disgrace)", shiftC.misses.every((m) => m === true) && shiftC.shift === null, JSON.stringify(shiftC.shift));
+check("misses never end the shift (disgrace rule removed)", shiftC.misses.every((m) => m === true) && shiftC.aliveAfter && shiftC.aliveAfter.active === true, JSON.stringify(shiftC.aliveAfter));
+check("clocking off ends the shift", shiftC.off === true && shiftC.after === null);
 
 // ---- 7. FLAG OFF → the ORIGINAL arrest outcome, byte-identical ----
 const off = await evl(`
@@ -194,6 +222,7 @@ check("flag OFF: package arc never engages", off.arcBefore === null && off.arcAf
 check("flag OFF: ORIGINAL bust runs (g.busted=true, the fallback state)", off.busted === true);
 
 // ---- summary ----
+await mkdir(path.join(ROOT, "tools/shots"), { recursive: true });
 const shot = await send("Page.captureScreenshot", { format: "png" });
 await (await import("node:fs/promises")).writeFile(path.join(ROOT, "tools/shots/jail-check.png"), Buffer.from(shot.result.data, "base64"));
 const uniq = [...new Set(errors)].filter((e) => !/ProgressEvent/.test(e) && !/computeBoundingSphere/.test(e));

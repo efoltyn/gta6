@@ -345,25 +345,27 @@
   //  you're looking at.
   // ============================================================
 
+  // GRAMMAR LAW (owner): labels are bare verbs — the person's name is the
+  // card TITLE, never repeated inside an option.
   // SLOT E (free for a stranger) — the HEADLINE social verb, contextual by who
   // they are: fan-a-VIP > tip-from-a-friend > give-to-the-broke > compliment.
   // Each gate is mutually narrowing so exactly one wins for any given person.
   I.register("ped:civ", {
     id: "rich-e-fan", slot: "e", prio: 24,
     canShow: (p) => isStrangerish(p) && !isYours(p) && isVip(p) && !hatesYou(p),
-    label: (p) => "Get a photo with " + (p.name || vipTitle(p)) + " 📸",
+    label: "Take a photo 📸",
     onSelect: (p) => fanMoment(p),
   });
   I.register("ped:civ", {
     id: "rich-e-give", slot: "e", prio: 22,
     canShow: (p) => isStrangerish(p) && !isYours(p) && looksBroke(p) && myCash() >= HANDOUT,
-    label: (p) => "Give " + nm(p) + " " + money(HANDOUT) + " 🤲",
+    label: () => "Give " + money(HANDOUT) + " 🤲",
     onSelect: (p) => giveMoney(p),
   });
   I.register("ped:civ", {
     id: "rich-e-compliment", slot: "e", prio: 20,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p),
-    label: (p) => "Compliment " + nm(p),
+    label: "Compliment",
     onSelect: (p) => compliment(p),
   });
 
@@ -373,13 +375,13 @@
   I.register("ped:civ", {
     id: "rich-k-lead", slot: "k", prio: 8,
     canShow: (p) => isStrangerish(p) && !isYours(p) && canTip(p),
-    label: (p) => "Ask " + nm(p) + " what's good 👂",
+    label: "Ask around 👂",
     onSelect: (p) => askLead(p),
   });
   I.register("ped:civ", {
     id: "rich-k-directions", slot: "k", prio: 7,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p),
-    label: (p) => "Ask " + nm(p) + " for directions 🧭",
+    label: "Ask directions 🧭",
     onSelect: (p) => askDirections(p),
   });
 
@@ -390,13 +392,13 @@
   I.register("ped:civ", {
     id: "rich-j-intimidate", slot: "j", prio: 12, bad: true,
     canShow: (p) => isStrangerish(p) && !isYours(p) && readsMeAsSmaller(p) && !isVip(p),
-    label: (p) => "Intimidate " + nm(p) + " 😠",
+    label: "Intimidate 😠",
     onSelect: (p) => intimidate(p),
   });
   I.register("ped:civ", {
     id: "rich-j-smoke", slot: "j", prio: 11,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !readsMeAsSmaller(p),
-    label: (p) => "Ask " + nm(p) + " for a light 🔥",
+    label: "Ask a light 🔥",
     onSelect: (p) => bumSmoke(p),
   });
 
@@ -406,7 +408,7 @@
   I.register("ped:civ", {
     id: "rich-j-insult", slot: "j", hold: true, prio: 11, bad: true,
     canShow: (p) => isStrangerish(p) && !isYours(p),
-    label: (p) => "Insult " + nm(p),
+    label: "Insult",
     onSelect: (p) => insult(p),
   });
 })();

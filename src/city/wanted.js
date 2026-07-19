@@ -848,6 +848,14 @@
   function infamyResetOnDeath() {
     if (g.mode !== "city") return;
     g.heat = 0; g.wanted = 0; g.cityCopTarget = 0;
+    // GTA convention (CITY_WANTED_CLEARS_ON_DEATH): death closes the manhunt —
+    // the escaped-convict floor dies with you too (a corpse is as caught as it
+    // gets; without this, convictFloor() re-asserted 3★ the frame after the
+    // heat wipe and the stars visibly SURVIVED the respawn). Arrest keeps its
+    // own funnel (games/jail.js); this is the DEATH path only.
+    if (CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH !== false && g.escapedConvict) {
+      if (CBZ.cityClearConvict) CBZ.cityClearConvict(); else g.escapedConvict = false;
+    }
     milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9;   // the sensor lock dies with you (respawn is outside the wire)
     g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null;
     g.cityBounty = 0;                       // the price on your head dies with you

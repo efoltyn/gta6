@@ -891,42 +891,47 @@
   // ---- LIVING PED, slot I: your soldier > NPC crew-mate > anyone (mug) ----
   // Slot exclusivity does the branch work: per key the highest-prio PASSING
   // option wins, so "Mug" can't surface on your own soldier.
+  // GRAMMAR LAW (owner): an option label is a BUTTON — a bare verb phrase,
+  // never the target's name (the card TITLE already says it once; "Mug Marcus"
+  // under a card titled Marcus said it twice). Names live only in describe()
+  // titles and in dialogue/notes, which are exempt.
   I.register("ped:civ", {
     id: "ped-promote", slot: "i", prio: 60, canShow: (p) => inMyGang(p),
-    label: (p) => (p.rank === "lt" ? nm(p) + " (Lieutenant)" : "Promote " + nm(p) + " → Lt."),
+    label: (p) => (p.rank === "lt" ? "Lieutenant" : "Promote → Lt."),
     onSelect: (p) => (p.rank === "lt" ? talk() : CBZ.cityPlayerGangPromote(p)),
   });
-  I.register("ped:civ", { id: "ped-swing-crew", slot: "i", prio: 50, bad: true, canShow: (p) => crewmate(p), label: (p) => "Swing on " + nm(p), onSelect: (p) => attack(p) });
-  I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: (p) => "Mug " + nm(p), onSelect: (p) => mug(p) });
+  I.register("ped:civ", { id: "ped-swing-crew", slot: "i", prio: 50, bad: true, canShow: (p) => crewmate(p), label: "Swing on", onSelect: (p) => attack(p) });
+  I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: "Mug", onSelect: (p) => mug(p) });
 
   // ---- LIVING PED, slot J ----
   I.register("ped:civ", {
     id: "ped-hold-corner", slot: "j", prio: 60, canShow: (p) => inMyGang(p),
-    label: (p) => nm(p) + ", hold this corner",
+    label: "Hold corner",
     onSelect: (p, ctx) => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: ctx.pos.x, z: ctx.pos.z }; p.homeGuard = { x: ctx.pos.x, z: ctx.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); CBZ.city.note(nm(p) + " holds this spot.", 1.6); } },
   });
-  I.register("ped:civ", { id: "ped-put-in-work", slot: "j", prio: 50, canShow: (p) => crewmate(p), label: (p) => "Put in work with " + nm(p), onSelect: (p) => prospectOrWork(p) });
-  I.register("ped:civ", { id: "ped-swing", slot: "j", prio: 10, bad: true, label: (p) => "Swing on " + nm(p), onSelect: (p) => attack(p) });
+  I.register("ped:civ", { id: "ped-put-in-work", slot: "j", prio: 50, canShow: (p) => crewmate(p), label: "Put in work", onSelect: (p) => prospectOrWork(p) });
+  I.register("ped:civ", { id: "ped-swing", slot: "j", prio: 10, bad: true, label: "Swing on", onSelect: (p) => attack(p) });
 
   // ---- LIVING PED, slot K: the contextual relationship ladder. Prios encode
   //      the old else-chain order exactly (partner > claim-crew > prospect >
   //      shakedown > patch-in > runs-with > payroll > sell > hire > flirt > talk).
-  I.register("ped:civ", { id: "ped-roll", slot: "k", prio: 60, canShow: (p) => inMyGang(p), label: (p) => nm(p) + ", roll with me", onSelect: (p) => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm(p) + " falls in.", 1.4); } });
+  I.register("ped:civ", { id: "ped-roll", slot: "k", prio: 60, canShow: (p) => inMyGang(p), label: "Follow me", onSelect: (p) => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm(p) + " falls in.", 1.4); } });
   I.register("ped:civ", {
     id: "ped-crew-favor", slot: "k", prio: 50, canShow: (p) => crewmate(p),
-    label: (p) => (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) ? "Do " + nm(p) + " a favor 🤝" : "Talk to " + nm(p),
+    label: (p) => (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) ? "Do a favor 🤝" : "Talk",
     onSelect: (p) => { if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) CBZ.cityDoFavor(p); else { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } },
   });
   I.register("ped:civ", {
     id: "ped-propose", slot: "k", prio: 45, canShow: (p) => p === g.cityPartner,
-    label: (p) => (g.citySpouse ? "Sweet-talk " + nm(p) : "Propose to " + nm(p) + " 💍"),
+    label: (p) => (g.citySpouse ? "Sweet-talk" : "Propose 💍"),
     onSelect: (p) => (g.citySpouse ? talk() : CBZ.cityPropose(p)),
   });
-  // a rival whose BOSS you dropped: claim the whole crew
+  // a rival whose BOSS you dropped: claim the whole crew (their colors are
+  // already in the card title — "(Vipers)" — so the label stays generic)
   I.register("ped:civ", {
     id: "ped-claim-crew", slot: "k", prio: 44,
     canShow: (p) => !!(p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled),
-    label: (p) => "Claim the " + p.gang + " 👑",
+    label: "Claim the crew 👑",
     onSelect: (p) => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone — the crew's yours to claim. · O", 2.2); },
   });
   // PROSPECT / JOIN this ped's crew — the PRIMARY progression path, ranked
@@ -935,11 +940,10 @@
   I.register("ped:civ", {
     id: "ped-prospect", slot: "k", prio: 43, canShow: (p) => !!joinableGangOf(p),
     label: function (p) {
-      const rec = joinableGangOf(p);
       const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
-      if (myProspectStanding() >= 1) return "Get initiated with " + nm(p);
-      if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) return "Do " + nm(p) + " a favor 🤝";
-      return "Prospect the " + ((rec && rec.name) || "crew") + " 🩸";
+      if (myProspectStanding() >= 1) return "Get initiated 🩸";
+      if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) return "Do a favor 🤝";
+      return "Prospect the crew 🩸";
     },
     onSelect: function (p) {
       const rec = joinableGangOf(p);
@@ -949,43 +953,43 @@
     },
   });
   // a feared ped hands over cash without a fight
-  I.register("ped:civ", { id: "ped-shakedown", slot: "k", prio: 42, bad: true, canShow: (p) => fearsYou(p), label: (p) => "Shake " + nm(p) + " down 💵", onSelect: (p) => demandRansom(p) });
+  I.register("ped:civ", { id: "ped-shakedown", slot: "k", prio: 42, bad: true, canShow: (p) => fearsYou(p), label: "Shake down 💵", onSelect: (p) => demandRansom(p) });
   I.register("ped:civ", {
     id: "ped-patch-in", slot: "k", prio: 41,
     canShow: (p) => tightWithYou(p) && !p.gang && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !!CBZ.cityRecruit,
-    label: (p) => "Patch " + nm(p) + " in 🤝",
+    label: "Patch in 🤝",
     onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); },
   });
-  I.register("ped:civ", { id: "ped-runs-with", slot: "k", prio: 40, canShow: (p) => tightWithYou(p) && !p.recruited && !p.gang, label: (p) => nm(p) + " runs with you 🤝", onSelect: (p) => CBZ.cityRecruit && CBZ.cityRecruit(p) });
+  I.register("ped:civ", { id: "ped-runs-with", slot: "k", prio: 40, canShow: (p) => tightWithYou(p) && !p.recruited && !p.gang, label: "Recruit 🤝", onSelect: (p) => CBZ.cityRecruit && CBZ.cityRecruit(p) });
   // recruit straight into YOUR founded gang
   I.register("ped:civ", {
     id: "ped-payroll", slot: "k", prio: 39,
     canShow: (p) => !!(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && !hatesYou(p) && canAfford100()),
-    label: (p) => "Put " + nm(p) + " on the payroll 🔫",
+    label: "Put on payroll 🔫",
     onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); },
   });
-  I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: (p) => "Sell " + nm(p) + " product", onSelect: (p) => CBZ.cityDealTo(p) });
+  I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: "Sell product", onSelect: (p) => CBZ.cityDealTo(p) });
   I.register("ped:civ", {
     id: "ped-hire", slot: "k", prio: 37,
     canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100(),
-    label: (p) => "Hire " + nm(p) + " 🔫", onSelect: (p) => CBZ.cityRecruit(p),
+    label: "Hire 🔫", onSelect: (p) => CBZ.cityRecruit(p),
   });
-  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: (p) => "Chat " + nm(p) + " up 💕", onSelect: (p) => CBZ.cityFlirt(p) });
-  I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: (p) => "Talk to " + nm(p), onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
+  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Chat up 💕", onSelect: (p) => CBZ.cityFlirt(p) });
+  I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
 
   // ---- LIVING PED, slot L ----
-  I.register("ped:civ", { id: "ped-talk-gang", slot: "l", prio: 60, canShow: (p) => inMyGang(p), label: (p) => "Talk to " + nm(p), onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
+  I.register("ped:civ", { id: "ped-talk-gang", slot: "l", prio: 60, canShow: (p) => inMyGang(p), label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
   I.register("ped:civ", { id: "ped-leave-crew", slot: "l", prio: 50, bad: true, canShow: (p) => crewmate(p), label: "Leave the crew", onSelect: () => CBZ.cityLeaveGang && CBZ.cityLeaveGang() });
-  I.register("ped:civ", { id: "ped-pickpocket", slot: "l", prio: 10, bad: true, label: (p) => "Pick " + nm(p) + "'s pocket", onSelect: (p) => pickpocket(p) });
+  I.register("ped:civ", { id: "ped-pickpocket", slot: "l", prio: 10, bad: true, label: "Pick pocket", onSelect: (p) => pickpocket(p) });
 
   // ---- COPS: the menu is built from the SITUATION, not a fixed list ----
   // surrender is also live whenever a cop is mid-CHALLENGE (police.js
   // arrest-first stamps c._challenged) — the FREEZE hint points here.
-  I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1 || !!(c && c._challenged && !c.dead), label: "Put your hands up — surrender", onSelect: (c) => copSurrender(c) });
-  I.register("ped:cop", { id: "cop-alibi", slot: "j", canShow: (c, ctx) => ctx.wanted >= 1 && ctx.wanted <= 2, label: "Give the officer an alibi", onSelect: (c) => copAlibi(c) });
-  I.register("ped:cop", { id: "cop-directions", slot: "k", canShow: (c, ctx) => ctx.wanted < 1, label: (c) => "Ask " + c.name + " for directions", onSelect: () => talk() });
+  I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1 || !!(c && c._challenged && !c.dead), label: "Surrender", onSelect: (c) => copSurrender(c) });
+  I.register("ped:cop", { id: "cop-alibi", slot: "j", canShow: (c, ctx) => ctx.wanted >= 1 && ctx.wanted <= 2, label: "Give alibi", onSelect: (c) => copAlibi(c) });
+  I.register("ped:cop", { id: "cop-directions", slot: "k", canShow: (c, ctx) => ctx.wanted < 1, label: "Ask directions", onSelect: () => talk() });
   // the design rule: there's ALWAYS a malicious option — here, assault
-  I.register("ped:cop", { id: "cop-punch", slot: "l", bad: true, label: (c) => "Sucker-punch " + c.name, onSelect: (c) => copAssault(c) });
+  I.register("ped:cop", { id: "cop-punch", slot: "l", bad: true, label: "Sucker-punch", onSelect: (c) => copAssault(c) });
 
   // ---- VENDOR COUNTER ----
   // CONTEXTUAL VERBS: the old flat "Shop here" said nothing about WHY you'd

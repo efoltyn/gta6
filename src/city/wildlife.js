@@ -993,7 +993,7 @@
     });
     I.register("carcass", {
       id: "carcass-skin", slot: "e", hold: true, prio: 20,
-      label: function (a) { return "Skin the " + (a.species ? a.species.name : "animal"); },
+      label: "Skin",
       canShow: function (a) { return !!(a && a.skinnable); },
       onSelect: function (a) { skin(a); },
     });

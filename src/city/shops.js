@@ -1100,7 +1100,7 @@
     I.register("ped:civ", {
       id: "ped-mechanic-fix", slot: "k", prio: 44,
       canShow: (p, ctx) => !ctx.driving && !p.dead && /mechanic/i.test(_jobOf(p)) && !!fixableCar(p),
-      label: (p) => { const c = fixableCar(p); return "Pay " + _first(p.name) + " to fix your ride — " + fmt$(c ? fixPrice(c) : 0); },
+      label: (p) => { const c = fixableCar(p); return "Fix ride — " + fmt$(c ? fixPrice(c) : 0); },
       onSelect: (p) => {
         const c = fixableCar(p); if (!c) return;
         const price = fixPrice(c);
@@ -1117,14 +1117,14 @@
       id: "ped-cab-ride", slot: "k", prio: 43,
       canShow: (p, ctx) => !ctx.driving && !p.dead && !p.rage && p.state !== "flee" &&
         _jobOf(p) === "cab driver" && (ctx.wanted | 0) < 2,
-      label: () => "Flag a ride across town — " + fmt$(cabFare()),
+      label: () => "Flag a cab — " + fmt$(cabFare()),
       onSelect: (p) => cabRide(p),
     });
     // a cart vendor sells off the cart — cheap calories without a counter
     I.register("ped:civ", {
       id: "ped-cart-bite", slot: "k", prio: 41,
       canShow: (p) => !p.dead && !p.rage && p.state !== "flee" && _jobOf(p) === "street vendor",
-      label: (p) => "Buy a bite off " + _first(p.name) + "'s cart — $8",
+      label: "Buy a bite — $8",
       onSelect: (p) => {
         if (!CBZ.city.spend(8)) { CBZ.city.note("Even the cart wants $8.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 30);
@@ -1138,7 +1138,7 @@
     I.register("ped:civ", {
       id: "ped-guard-grease", slot: "l", prio: 30, bad: true,
       canShow: (p) => !p.dead && !p.rage && !p.gang && _jclass(p) === "law",
-      label: (p) => "Slip " + _first(p.name) + " a fifty — eyes elsewhere",
+      label: "Slip a fifty",
       onSelect: (p) => {
         if (!CBZ.city.spend(50)) { CBZ.city.note("You need a whole fifty to grease anyone.", 1.4); return; }
         p.snitch = 0; p.reactCD = Math.max(p.reactCD || 0, 90);

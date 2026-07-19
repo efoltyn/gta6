@@ -507,19 +507,23 @@
 
   // ---- CUFF: earned two ways — at gunpoint on raised hands, or bare-handed
   //      on a body that's already down/broken. Same verb, two gates. ----
+  // GRAMMAR LAW (owner): a label is a BUTTON — a bare verb phrase, one or two
+  // words, NEVER the target's name (the card title already says it once).
+  // "Zip Marcus's wrists" under a card titled Marcus was the canonical bug
+  // (sighted on the airliner crew card, which rides these very options).
   I.register("ped", {
     id: "rs-cuff-gp", slot: "e", prio: 80, needsGunDrawn: true, bad: true,
     canShow: (p) => cuffablePed(p) && subdued(p),
-    label: (p) => "Zip " + nm(p) + "'s wrists",
+    label: "Zip wrists",
     onSelect: (p) => cuff(p),
   });
   I.register("ped", {
     id: "rs-cuff", slot: "e", prio: 80, bad: true,
     // slot-e prio beats the grapple record, so a downed/broken fighter reads
-    // "Zip their wrists" while one still swinging reads "Grab hold" — no
+    // "Zip wrists" while one still swinging reads "Grapple" — no
     // loose-boolean cross-gating (the framework bug this file exists to avoid).
     canShow: (p, ctx) => !ctx.gunDrawn && cuffablePed(p) && subdued(p),
-    label: (p) => "Zip " + nm(p) + "'s wrists",
+    label: "Zip wrists",
     onSelect: (p) => cuff(p),
   });
 
@@ -527,52 +531,52 @@
   I.register("ped", {
     id: "rs-grapple", slot: "e", prio: 78, bad: true,
     canShow: (p, ctx) => cuffablePed(p) && fightingYou(p) && canClinch(ctx),
-    label: (p) => "Grab hold of " + nm(p),
+    label: "Grapple",
     onSelect: (p) => grapple(p),
   });
   // clinched: wear them down to tie, or end it ugly
   I.register("ped", {
     id: "rs-clinch-cuff", slot: "e", prio: 90, bad: true,
     canShow: (p) => st(p) === "grappled" && p.restraint.t >= WEAR_T,
-    label: (p) => "Tie " + nm(p) + " up",
+    label: "Zip wrists",
     onSelect: (p) => { if (st(p) === "grappled") { p.restraint = null; untrack(p); cuff(p); } },
   });
   I.register("ped", {
     id: "rs-slam", slot: "i", prio: 90, bad: true,
     canShow: (p) => st(p) === "grappled",
-    label: "Slam them into the pavement",
+    label: "Slam",
     onSelect: (p) => slam(p),
   });
   I.register("ped", {
     id: "rs-shove", slot: "j", prio: 90, bad: true,
     canShow: (p) => st(p) === "grappled",
-    label: "Throw them off",
+    label: "Shove",
     onSelect: (p) => shove(p),
   });
 
-  // ---- CUFFED: march / stand / stuff / cut loose ----
+  // ---- CUFFED: march / halt / stuff / cut loose ----
   I.register("ped", {
     id: "rs-march", slot: "e", prio: 85,
     canShow: (p, ctx) => st(p) === "cuffed" && !ctx.driving,
-    label: (p) => "March " + nm(p),
+    label: "March",
     onSelect: (p) => escort(p),
   });
   I.register("ped", {
     id: "rs-stand", slot: "e", prio: 85,
     canShow: (p) => st(p) === "escorted",
-    label: "Stand them there",
+    label: "Halt",
     onSelect: (p) => stand(p),
   });
   I.register("ped", {
     id: "rs-stuff", slot: "i", prio: 85, bad: true,
     canShow: (p, ctx) => (st(p) === "escorted" || st(p) === "cuffed") && !ctx.driving && !!nearOwnCar(ctx.pos.x, ctx.pos.z),
-    label: "Stuff them in the back",
+    label: "Stuff in",
     onSelect: (p, ctx) => { const car = nearOwnCar(ctx.pos.x, ctx.pos.z); if (car) seat(p, car); },
   });
   I.register("ped", {
     id: "rs-cut-loose", slot: "l", prio: 85,
     canShow: (p) => st(p) === "cuffed" || st(p) === "escorted",
-    label: "Cut the ties",
+    label: "Cut loose",
     onSelect: (p) => release(p),
   });
 
@@ -580,7 +584,7 @@
   I.register("vehicle", {
     id: "rs-unseat", slot: "i", prio: 85, bad: true,
     canShow: (car, ctx) => !ctx.driving && !!car._captive && st(car._captive) === "in_vehicle",
-    label: (car) => "Drag " + nm(car._captive) + " out of the back",
+    label: "Drag out",
     onSelect: (car) => { if (car._captive) unseat(car._captive); },
   });
 
@@ -598,10 +602,7 @@
     },
     options: [{
       id: "rs-turn-in", slot: "i", prio: 20,
-      label: function (t, ctx) {
-        const p = deskCaptive(ctx.pos.x, ctx.pos.z);
-        return p && isWanted(p) ? "Hand " + nm(p) + " over" : "Hand them over";
-      },
+      label: "Hand over",
       onSelect: function (t, ctx) {
         const p = deskCaptive(ctx.pos.x, ctx.pos.z);
         if (p) turnIn(p);

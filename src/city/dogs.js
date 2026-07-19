@@ -285,28 +285,28 @@
     I.register("dog", {
       id: "dog-tame", slot: "e", hold: true, prio: 20,
       canShow: function (d) { return d && !d.tamed && !!haveFeed(); },
-      label: function (d) { return "Feed & tame the " + d.breed.name; },
+      label: "Feed & tame",
       onSelect: function (d) { tameStray(d); },
     });
     // PET (your dog)
     I.register("dog", {
       id: "dog-pet", slot: "e", prio: 18,
       canShow: function (d) { return d && d.tamed; },
-      label: function (d) { return "Pet " + d.name; },
+      label: "Pet",
       onSelect: function (d) { pet(d); },
     });
     // SIT / HEEL toggle (your dog)
     I.register("dog", {
       id: "dog-sit", slot: "i", prio: 16,
       canShow: function (d) { return d && d.tamed; },
-      label: function (d) { return d.sit ? "Tell " + d.name + " to heel" : "Tell " + d.name + " to sit & stay"; },
+      label: function (d) { return d.sit ? "Heel" : "Sit & stay"; },
       onSelect: function (d) { toggleSit(d); },
     });
     // FEED (your dog, heals)
     I.register("dog", {
       id: "dog-feed", slot: "k", prio: 14,
       canShow: function (d) { return d && d.tamed && !!haveFeed(); },
-      label: function (d) { return "Feed " + d.name; },
+      label: "Feed",
       onSelect: function (d) { feedOwn(d); },
     });
     // SEND (go-to command, ANIMALS_ALL_CONTROLLABLE): point where you're
@@ -314,7 +314,7 @@
     I.register("dog", {
       id: "dog-send", slot: "l", prio: 15,
       canShow: function (d) { return d && d.tamed && !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false); },
-      label: function (d) { return d.goTo ? (d.name + ", forget it — heel") : ("Send " + d.name + " ahead"); },
+      label: function (d) { return d.goTo ? "Heel" : "Send ahead"; },
       onSelect: function (d) {
         if (d.goTo) { d.goTo = null; d.sit = false; if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + " falls back in.", 1.4); return; }
         const P = CBZ.player && CBZ.player.pos; if (!P) return;

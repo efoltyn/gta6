@@ -483,7 +483,7 @@
     I.register("ped:civ", {
       id: "racer-sizeup", slot: "e", prio: 3,
       canShow: (p) => isRacer(p),
-      label: (p) => "Size up " + (p._racer ? p._racer.name : "the racer"),
+      label: "Size up",
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         const pos = cityRacing.positionOf(r);

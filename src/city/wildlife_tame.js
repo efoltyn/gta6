@@ -355,27 +355,27 @@
     I.register("animal", {
       id: "animal-dismount", slot: "e", prio: 40,
       canShow: function (a) { return !!a.ridden; },
-      label: function (a) { return "Dismount " + (a.petName || a.species.name); },
+      label: "Dismount",
       onSelect: function () { dismount(); },
     });
     // FEED & TAME (wild) / FEED (tamed heal) — hold E
     I.register("animal", {
       id: "animal-tame", slot: "e", hold: true, prio: 20,
       canShow: function (a) { return !a.ridden && !a.tamed && !!feedItemFor(a.species); },
-      label: function (a) { return "Feed & tame the " + a.species.name; },
+      label: "Feed & tame",
       onSelect: function (a) { tameFeed(a); },
     });
     I.register("animal", {
       id: "animal-pet", slot: "e", prio: 18,
       canShow: function (a) { return a.tamed && !a.ridden; },
-      label: function (a) { return "Pet " + a.petName; },
+      label: "Pet",
       onSelect: function (a) { note("❤ " + a.petName + " leans into you.", 1.6); },
     });
     // MOUNT
     I.register("animal", {
       id: "animal-mount", slot: "i", prio: 22,
       canShow: function (a) { return canRide(a) && !ride.mount; },
-      label: function (a) { return "Ride " + a.petName; },
+      label: "Ride",
       onSelect: function (a) { mount(a); },
     });
     // BRONCO-BREAK a WILD mount (ANIMALS_ALL_CONTROLLABLE): same gamble the
@@ -387,7 +387,7 @@
         return ALLCTL() && !ride.mount && a && !a.tamed && !a.dead && !a.species.aquatic &&
           !!rideDef(a.species) && a.grow == null;
       },
-      label: function (a) { return "Try to mount the " + a.species.name; },
+      label: "Mount",
       onSelect: function (a) { attemptMount(a); },
     });
     // SEND (go-to command): point where you're looking, the companion runs
@@ -395,7 +395,7 @@
     I.register("animal", {
       id: "animal-send", slot: "l", prio: 15,
       canShow: function (a) { return ALLCTL() && a.tamed && !a.ridden && !a.species.aquatic; },
-      label: function (a) { return a.goTo ? (a.petName + ", forget it — heel") : ("Send " + a.petName + " ahead"); },
+      label: function (a) { return a.goTo ? "Heel" : "Send ahead"; },
       onSelect: function (a) {
         if (a.goTo) { a.goTo = null; a.stay = false; note(a.petName + " falls back in.", 1.4); return; }
         const P = CBZ.player && CBZ.player.pos; if (!P) return;
@@ -409,14 +409,14 @@
     I.register("animal", {
       id: "animal-stay", slot: "j", prio: 16,
       canShow: function (a) { return a.tamed && !a.ridden; },
-      label: function (a) { return a.stay ? (a.petName + ", follow me") : (a.petName + ", stay here"); },
+      label: function (a) { return a.stay ? "Follow" : "Stay"; },
       onSelect: function (a) { a.stay = !a.stay; note(a.petName + (a.stay ? " stays put." : " falls in behind you."), 1.6); },
     });
     // FEED a tamed animal (heals it)
     I.register("animal", {
       id: "animal-feed", slot: "k", prio: 14,
       canShow: function (a) { return a.tamed && !a.ridden && !!feedItemFor(a.species) && a.hp < a.maxHp; },
-      label: function (a) { return "Feed " + a.petName; },
+      label: "Feed",
       onSelect: function (a) {
         const item = feedItemFor(a.species); if (!item) return;
         if (CBZ.cityEcon && CBZ.cityEcon.take) CBZ.cityEcon.take(item, 1);
