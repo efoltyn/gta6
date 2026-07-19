@@ -644,15 +644,19 @@
       } else if (t.identifier === look.id) {
         look.seen = performance.now();
         look.moved = Math.max(look.moved, Math.hypot(t.clientX - look.sx, t.clientY - look.sy));
-        CBZ.cam.yaw -= (t.clientX - look.lx) * SENS;
-        CBZ.cam.pitch -= (t.clientY - look.ly) * SENS;
+        // scoped/ADS look is proportionally finer — the same fpsLookSensMul the
+        // desktop mousemove applies. Without it, scoped touch look moved ~4.7x
+        // the world angle per pixel vs desktop (weapons-agent finding).
+        const sMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
+        CBZ.cam.yaw -= (t.clientX - look.lx) * SENS * sMul;
+        CBZ.cam.pitch -= (t.clientY - look.ly) * SENS * sMul;
         // third-person pitch range: the camera agent's hook decides (it knows
         // the collision-safe envelope); fallback still allows a REAL look-up —
         // the old -0.18 floor meant an iPad could barely raise its eyes.
         const pr = (CBZ.camTouchPitchRange && CBZ.camTouchPitchRange()) || [-0.6, 0.60];
         CBZ.cam.pitch = Math.max(pr[0], Math.min(pr[1], CBZ.cam.pitch));
         // in first-person, vertical drag drives the (wider) FPS aim pitch
-        if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - (t.clientY - look.ly) * SENS));
+        if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - (t.clientY - look.ly) * SENS * sMul));
         look.lx = t.clientX; look.ly = t.clientY;
       } else if (look.id === null && !inUI(t.target) && !slideTouches.has(t.identifier)) {
         // ADOPT a mid-flight drag: if the look slot freed while this finger
