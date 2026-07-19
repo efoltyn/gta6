@@ -12,6 +12,13 @@
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.onAlways) return;
 
+  // OVERHEAD LABEL vs the old right-side dossier panel. Default: a compact
+  // "Lv.N Title" tag floats over the aimed person's head (all the rich data
+  // still lives on the actor and in aim_dossier's panel builders below — this
+  // just changes what SHOWS). Flip false to restore the full street-read card.
+  if (CBZ.CONFIG && CBZ.CONFIG.HUD_OVERHEAD_LABEL == null) CBZ.CONFIG.HUD_OVERHEAD_LABEL = true;
+  function overheadOn() { return !(CBZ.CONFIG && CBZ.CONFIG.HUD_OVERHEAD_LABEL === false); }
+
   let card = null, lastActor = null, lastHTML = "", sweep = 0;
   function esc(v) {
     return String(v == null ? "—" : v).replace(/[&<>"']/g, function (c) {
@@ -106,8 +113,86 @@
       section("Hunting value", row("Pelt", sp.fur || "none") + row("Pelt value", sp.furValue ? money(sp.furValue) : "") + row("Meat", sp.meat || sp.meatValue ? (sp.meat || money(sp.meatValue)) : "")) +
       section("Trust", row("Tamed", a.tamed ? "yes" : "no", a.tamed ? "good" : "") + row("Ride state", a.ridden ? "mounted" : (a.tamed ? "available if large enough" : "wild")) + row("Legendary", a.legendary ? "unique" : "")) + "</div>";
   }
+  // ---- OVERHEAD LABEL -------------------------------------------------------
+  // A single billboarded sprite re-pointed onto whichever person the crosshair
+  // is on. Reuses the exact level/title engine the tags/panel already use, so
+  // "Lv.29 Mob Boss" / "Lv.1 Cashier" reads are identical everywhere.
+  const THREE = window.THREE;
+  let labelSprite = null, labelActor = null, labelKey = "";
+  const texCache = new Map();
+  function groupOf(a) { return (a && (a.group || (a.char && a.char.group))) || null; }
+  function readColor(a) {
+    if (a.kind === "cop") return a.swat ? "#b9d4ff" : "#8fc1ff";
+    if (a.bounty > 0) return "#ff6a5e";                       // wanted blood-red
+    if (a.companion || a.recruited) return "#7ed957";         // yours
+    if (a.gang && CBZ.CITY && CBZ.CITY.gangs) {
+      const defs = CBZ.CITY.gangs;
+      for (let i = 0; i < defs.length; i++) if (defs[i].id === a.gang) return "#" + ("000000" + ((defs[i].color >>> 0).toString(16))).slice(-6);
+    }
+    return "#eef4ff";
+  }
+  function roundRect(x, rx, ry, w, h, r) {
+    x.beginPath(); x.moveTo(rx + r, ry);
+    x.arcTo(rx + w, ry, rx + w, ry + h, r); x.arcTo(rx + w, ry + h, rx, ry + h, r);
+    x.arcTo(rx, ry + h, rx, ry, r); x.arcTo(rx, ry, rx + w, ry, r); x.closePath();
+  }
+  function labelTexture(text, color) {
+    const key = text + "|" + color;
+    let tex = texCache.get(key);
+    if (tex) return tex;
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    const x = c.getContext("2d");
+    x.fillStyle = "rgba(9,13,18,.82)"; roundRect(x, 3, 15, 250, 34, 10); x.fill();
+    x.lineWidth = 2; x.strokeStyle = "rgba(235,244,255,.30)"; roundRect(x, 3, 15, 250, 34, 10); x.stroke();
+    let fs = 29;
+    x.font = "bold 29px Fredoka, sans-serif";
+    const tw = x.measureText(text).width;
+    if (tw > 230) { fs = Math.max(14, Math.floor(29 * 230 / tw)); x.font = "bold " + fs + "px Fredoka, sans-serif"; }
+    x.textAlign = "center"; x.textBaseline = "middle";
+    x.lineWidth = Math.max(4, fs * 0.22); x.strokeStyle = "rgba(0,0,0,.85)"; x.strokeText(text, 128, 33);
+    x.fillStyle = color; x.fillText(text, 128, 33);
+    tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = Math.min(8, (CBZ.renderer && CBZ.renderer.capabilities) ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+    if (texCache.size > 240) { const k0 = texCache.keys().next().value; const t0 = texCache.get(k0); if (t0 && t0.dispose) t0.dispose(); texCache.delete(k0); }
+    texCache.set(key, tex);
+    return tex;
+  }
+  function hideOverhead() {
+    if (!labelSprite) return;
+    labelSprite.visible = false;
+    const og = groupOf(labelActor);
+    if (og) og.remove(labelSprite);
+    labelActor = null; labelKey = "";
+  }
+  function showOverhead(a) {
+    if (!THREE) return false;
+    const grp = groupOf(a);
+    if (!grp) return false;
+    const lvl = CBZ.cityLevel ? CBZ.cityLevel(a) : 1;
+    const title = CBZ.cityTitle ? CBZ.cityTitle(a) : (a.kind || "Person");
+    const col = readColor(a);
+    if (!labelSprite) {
+      labelSprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, depthWrite: false, transparent: true, toneMapped: false }));
+      labelSprite.renderOrder = 999;
+      labelSprite.scale.set(2.5, 0.62, 1);
+    }
+    if (a !== labelActor) {
+      const og = groupOf(labelActor);
+      if (og) og.remove(labelSprite);
+      grp.add(labelSprite);
+      labelSprite.position.set(0, CBZ.charHeadY(a.char || a) + 0.32, 0);
+      labelActor = a; labelKey = "";
+    }
+    const key = lvl + "|" + title + "|" + col;
+    if (key !== labelKey) { labelSprite.material.map = labelTexture("Lv." + lvl + " " + title, col); labelSprite.material.needsUpdate = true; labelKey = key; }
+    labelSprite.visible = true;
+    return true;
+  }
+
   function hide() {
     if (card) card.style.display = "none";
+    hideOverhead();
     lastActor = null; lastHTML = ""; CBZ.cityAimDossierTarget = null;
   }
   CBZ.onAlways(61.2, function (dt) {
@@ -119,9 +204,18 @@
     try { hit = CBZ.aimedActor(360); } catch (e) { hide(); return; }
     const a = hit && hit.actor;
     if (!a || a.isPlayer || (!a.animal && a.kind !== "cop" && !a.char && !a.relPlayer && !a.vendor)) { hide(); return; }
+    CBZ.cityAimDossierTarget = a;
+    // People → quiet overhead "Lv.N Title" tag. Animals (no humanoid rig / no
+    // level read) keep the descriptive card. Flag off → everyone gets the card.
+    if (overheadOn() && !a.animal && showOverhead(a)) {
+      if (card) card.style.display = "none";
+      lastActor = a; lastHTML = "";
+      return;
+    }
+    hideOverhead();
     const html = a.animal ? animalHTML(a, hit.dist || 0) : humanHTML(a, hit.dist || 0);
     const el = ensureDom();
     if (a !== lastActor || html !== lastHTML) { el.innerHTML = html; lastHTML = html; }
-    lastActor = a; CBZ.cityAimDossierTarget = a; el.style.display = "block";
+    lastActor = a; el.style.display = "block";
   });
 })();
