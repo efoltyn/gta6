@@ -59,31 +59,47 @@ console.log("playing:", playing);
 await sleep(2500);
 
 // ---- set up the REAL aim path: FPS + gun up + a ped in the crosshair -------
+// Teleport the player right behind a street-cluster ped (open ground, no glass
+// wall between) and aim with a slight downward pitch. Try several candidates.
 const setup = await evl(`(() => {
   const C = window.CBZ, g = C.game;
   g.cityHolstered = false; g.cityMeleeWeapon = null;      // ensure armed reads true
   if (!C.fpsActive || !C.fpsActive()) { try { C.toggleFPS(); } catch(e){} }
-  const P = C.player.pos;
-  // pick a live humanoid ped with a rig group
-  const cand = (C.cityPeds || []).filter(p => p && !p.dead && !p.vendor && p.char && p.char.group);
-  // prefer a non-"Civilian" read so the screenshot shows a role
-  cand.sort((a,b) => (C.cityTitle(b) !== "Civilian") - (C.cityTitle(a) !== "Civilian"));
-  const p = cand[0];
-  if (!p) return { none:true, peds:(C.cityPeds||[]).length };
-  // drop them 4m in front (yaw 0 faces -z), freeze, face them
-  p.pos.x = P.x; p.pos.z = P.z - 4; p.pos.y = P.y;
-  p.speed = 0; p.state = "idle";
-  if (p.char && p.char.group) p.char.group.position.set(p.pos.x, p.pos.y, p.pos.z);
-  if (C.cam) { C.cam.yaw = 0; if (C.cam.pitch != null) C.cam.pitch = 0; }
-  return { none:false, armed: C.playerArmed && C.playerArmed(), aiming: C.isAimingWeapon && C.isAimingWeapon(),
-           fps: C.fpsActive && C.fpsActive(), pedLevel: C.cityLevel(p), pedTitle: C.cityTitle(p), pedName: p.name || null };
+  const peds = (C.cityPeds || []).filter(p => p && !p.dead && !p.vendor && p.char && p.char.group);
+  // rank by neighbour density (a street cluster is outdoors) then by a non-Civilian read
+  const near = (p) => peds.reduce((n,q)=> n + (q!==p && Math.hypot(q.pos.x-p.pos.x, q.pos.z-p.pos.z) < 12 ? 1 : 0), 0);
+  peds.sort((a,b) => (near(b) - near(a)) || ((C.cityTitle(b)!=="Civilian") - (C.cityTitle(a)!=="Civilian")));
+  window.__cands = peds.slice(0, 6);
+  return { none: !peds.length, peds: (C.cityPeds||[]).length, top: peds.slice(0,3).map(p=>({t:C.cityTitle(p),l:C.cityLevel(p),near:near(p)})) };
 })()`);
 console.log("setup:", JSON.stringify(setup));
 
-// keep the ped pinned in front for a few frames while the dossier loop samples
-for (let i = 0; i < 6; i++) {
-  await evl(`(() => { const C=window.CBZ,P=C.player.pos; const t=C.cityAimDossierTarget; const p=t||((C.cityPeds||[]).find(x=>x&&!x.dead&&!x.vendor&&x.char&&x.char.group)); if(p){ p.pos.x=P.x;p.pos.z=P.z-4;p.pos.y=P.y;p.speed=0; if(p.char&&p.char.group)p.char.group.position.set(p.pos.x,p.pos.y,p.pos.z);} if(C.cam)C.cam.yaw=0; return true; })()`);
-  await sleep(300);
+// try each candidate: stand 3.2m south of it, face north (-z), aim down slightly
+let locked = null;
+for (let ci = 0; ci < 6 && !locked; ci++) {
+  const r = await evl(`(() => {
+    const C = window.CBZ; const p = (window.__cands||[])[${ci}]; if (!p) return null;
+    const px = p.pos.x, pz = p.pos.z, py = p.pos.y;
+    C.player.pos.x = px; C.player.pos.z = pz + 3.2; C.player.pos.y = py;
+    p.speed = 0; p.state = "idle";
+    if (p.char && p.char.group) p.char.group.position.set(px, py, pz);
+    if (C.cam) { C.cam.yaw = 0; if (C.cam.pitch != null) C.cam.pitch = -0.12; }
+    if (C.fps) C.fps.fp = -0.12;
+    return { title: C.cityTitle(p), level: C.cityLevel(p), name: p.name || null };
+  })()`);
+  if (!r) break;
+  // let the dossier loop sample a few frames, re-pinning each time
+  for (let k = 0; k < 5; k++) {
+    await sleep(260);
+    const hit = await evl(`(() => {
+      const C = window.CBZ; const p = (window.__cands||[])[${ci}]; if (!p) return false;
+      C.player.pos.x = p.pos.x; C.player.pos.z = p.pos.z + 3.2; C.player.pos.y = p.pos.y;
+      if (C.cam) C.cam.yaw = 0; if (C.fps) C.fps.fp = -0.12;
+      return !!C.cityAimDossierTarget;
+    })()`);
+    if (hit) { locked = r; break; }
+  }
+  console.log("candidate", ci, JSON.stringify(r), "locked:", !!locked);
 }
 
 const diag = await evl(`(() => {
