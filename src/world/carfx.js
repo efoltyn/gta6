@@ -66,6 +66,9 @@
 
   const THREE = window.THREE;
 
+  // REAL GLASS feature flag — one-line revert to the old opaque vehicle glass.
+  if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS == null) CBZ.CONFIG.VEHICLE_REAL_GLASS = true;
+
   // Registry of EVERY material this factory has produced, so we can back-fill
   // .envMap once CBZ.ENV exists (and bump .needsUpdate to recompile shaders).
   const envClients = [];
@@ -213,13 +216,25 @@
 
     if (role === "glass") {
       return shared("glass", function () {
+        // REAL GLASS (owner ask): the ONE shared vehicle glass game-wide is now
+        // genuinely transparent — a light smoke-blue automotive tint you can see
+        // seats/occupants THROUGH (and the world through, from inside). Every
+        // car greenhouse, canopy and airliner pane shares THIS instance, and
+        // each vehicle merges its panes into ~one mesh, so the transparent-sort
+        // cost is ~1 draw per vehicle (same class as the building panes).
+        // COLOR STAYS INSIDE crashdeform.js's frost-glass detector window
+        // (b - r > 0.045, b < 0.4, r < 0.25) so crash frosting keeps working.
+        // Flag CBZ.CONFIG.VEHICLE_REAL_GLASS=false reverts to the opaque slab.
+        const clear = !CBZ.CONFIG || CBZ.CONFIG.VEHICLE_REAL_GLASS !== false;
         return new THREE.MeshStandardMaterial({
-          color: 0x10161c,
-          metalness: num(opts.metalness, 0.9),
+          color: clear ? 0x1d3a4a : 0x10161c,
+          metalness: num(opts.metalness, clear ? 0.55 : 0.9),
           roughness: num(opts.roughness, 0.07),
           envMap: CBZ.ENV || null,
           envMapIntensity: num(opts.envMapIntensity, 1.0),
-          // OPAQUE on purpose: transparent glass at 100s of cars = sort cost.
+          transparent: clear,
+          opacity: clear ? 0.34 : 1,
+          depthWrite: !clear,
         });
       });
     }

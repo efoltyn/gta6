@@ -559,8 +559,17 @@
     // dropped/narrowed a touch to read as a taper rather than a step.
     const nose = new THREE.Mesh(a.heliNose, a.matGrey);
     nose.position.set(0, -0.12, 2.55); grp.add(nose);   // geom already tapers — no compensating scale
-    // tandem BUBBLE canopy in reflective glass, overlapping the cabin top
+    // tandem BUBBLE canopy in REAL transparent glass, overlapping the cabin top
     const canopy = new THREE.Mesh(a.heliCanopy, a.matGlass); canopy.position.set(0, 0.6, 0.65); grp.add(canopy);
+    grp.userData.canopy = canopy;
+    // TANDEM CREW visible through the clear canopy: two helmeted silhouettes
+    // (pilot aft-high, gunner forward-low — classic gunship stagger)
+    [[0.02, 0.14], [0.46, 1.02]].forEach(function (seat) {
+      const torso = new THREE.Mesh(a.doorPanel, a.matDark);          // doorPanel is 0.06×0.72×0.95 — rescale per-axis
+      torso.scale.set(7, 0.68, 0.3); torso.position.set(0, 0.42 + seat[0] * 0.4, seat[1]); grp.add(torso);
+      const head = new THREE.Mesh(a.navBead, a.matGrey);
+      head.scale.setScalar(1.6); head.position.set(0, 0.74 + seat[0] * 0.4, seat[1]); grp.add(head);
+    });
     // tapered tail boom — its front sinks INTO the rear of the fuselage (no gap)
     const boom = new THREE.Mesh(a.heliBoom, a.matDark);
     boom.position.set(0, 0.32, -3.4); grp.add(boom);    // geom already tapers aft
@@ -1176,8 +1185,13 @@
     // rotation.x = +PI/2 maps the cone's +Y apex to +Z — apex FORWARD (the old
     // -PI/2 flew base-first, a flat disc leading the aircraft).
     const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = Math.PI / 2; nose.position.z = 4.45; grp.add(nose);
-    // REFLECTIVE bubble canopy
+    // REAL transparent bubble canopy with a helmeted pilot silhouette inside
     const canopy = new THREE.Mesh(a.jetCanopy, a.matGlass); canopy.position.set(0, 0.58, 1.7); grp.add(canopy);
+    grp.userData.canopy = canopy;
+    const jpTorso = new THREE.Mesh(a.doorPanel, a.matGrey);          // doorPanel is 0.06×0.72×0.95 — rescale per-axis
+    jpTorso.scale.set(6, 0.58, 0.27); jpTorso.position.set(0, 0.44, 1.5); grp.add(jpTorso);
+    const jpHead = new THREE.Mesh(a.navBead, a.matGrey);
+    jpHead.scale.setScalar(1.5); jpHead.position.set(0, 0.7, 1.5); grp.add(jpHead);
     // LERX CHINES — thin strakes blending the wing roots up the forward
     // fuselage; slanted inward so their tips ride the narrowing nose taper
     const chL = new THREE.Mesh(a.jetChine, a.matJet); chL.position.set(-0.45, 0.1, 1.9); chL.rotation.y = 0.13; grp.add(chL);

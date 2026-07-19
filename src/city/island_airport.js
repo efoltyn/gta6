@@ -135,6 +135,20 @@
       cab.passengerCabin = hook;
       passengerCabins.push(hook);
       emitPassengerCabin("registered", hook, rec);
+    } else if (rec.flightKind === "privatejet" && cab && cab.seats && cab.seats.length) {
+      // private jets carry live passengers too (visible through the new clear
+      // cabin panes) — seats only, no walk-in boarding zone.
+      const hook = {
+        id: "airport-privatejet-" + passengerCabins.length,
+        provider: "airport", kind: "privatejet", group: grp, rec,
+        active: true, state: "parked", floorTop: cab.floorTop,
+        door: { x: cab.doorX, z: cab.doorZ },
+        seats: cab.seats,
+        passengerSeats: cab.seats.filter(function (seat) { return !!seat.reservedForNpc; }),
+      };
+      cab.passengerCabin = hook;
+      passengerCabins.push(hook);
+      emitPassengerCabin("registered", hook, rec);
     }
     return grp;
   }
@@ -568,9 +582,33 @@
           emitPassengerCabin(state, hook, rec);
         }
       }
+      // AIRSTAIR rig (private jets): ease the hinged stair door open near the
+      // player / while a boarding arc holds it (rec._doorArcOpen — set by
+      // aircraft_doors.js during the walk-in choreography).
+      const rig = rec.group && rec.group.userData && rec.group.userData.doorRig;
+      if (rig && rig.panel && rec.group.parent) {
+        let rigOpen = false;
+        // the boarding arc marks the rec taken the moment the theft commits,
+        // so the arc's open-flag must win over the taken gate
+        if (rec._doorArcOpen) rigOpen = true;
+        else if (!rec.taken) {
+          if (P && !P.dead && !P.driving && !P._aircraft) {
+            const dw = cabinWorld(rec, rig.doorX, rig.doorZ);
+            rigOpen = Math.hypot(P.pos.x - dw.x, P.pos.z - dw.z) < 3.2;
+          }
+        }
+        const rt = rigOpen ? 1 : 0;
+        if (Math.abs(rig.t - rt) > 0.001) {
+          rig.t += (rt - rig.t) * Math.min(1, dt * 2.8);
+          rig.panel.rotation.x = rig.closedRot + (rig.openRot - rig.closedRot) * rig.t;
+        }
+      }
       if (!cab || !cab.panel) continue;
       let wantOpen = false;
-      if (!rec.taken && rec.group.parent) {
+      // aircraft_doors.js boarding arc: holds the panel open even though the
+      // rec is already marked taken (the theft commits at door-open)
+      if (rec._doorArcOpen && rec.group.parent) wantOpen = true;
+      else if (!rec.taken && rec.group.parent) {
         if ((cabinState.inside && cabinState.rec === rec) ||
             (cabinState.pending && cabinState.pending.rec === rec)) wantOpen = true;
         else if (P && !P.dead && !P.driving && !P._aircraft) {
@@ -1047,17 +1085,24 @@
     const cabinLightMat = mat(0xfff2d8, { emissive: 0xffe9b8, ei: 0.75 });
 
     function buildCabin(K, g, acc) {
-      // liner shell + deck + aisle carpet
-      K.put(linerMat, new THREE.BoxGeometry(25.2, 2.9, 3.2), -0.2, 3.9, 0);
+      // liner shell + deck + aisle carpet. REAL WINDOWS: the BackSide liner is
+      // split into belly/crown slabs (plus fore/aft caps) leaving the SAME open
+      // band the hull leaves at y 3.99..4.41, so sightlines pass hull pane →
+      // cavity → liner band → cabin in BOTH directions. (The old one-box liner
+      // walled the cabin off from its own windows; the old fake dark interior
+      // "window strips" are gone — the real panes replace them.)
+      K.put(linerMat, new THREE.BoxGeometry(25.2, 1.54, 3.2), -0.2, 3.22, 0);    // liner belly (2.45..3.99)
+      K.put(linerMat, new THREE.BoxGeometry(25.2, 0.94, 3.2), -0.2, 4.88, 0);    // liner crown (4.41..5.35)
+      K.put(linerMat, new THREE.BoxGeometry(2.35, 0.44, 3.2), -11.625, 4.2, 0);  // aft band cap
+      K.put(linerMat, new THREE.BoxGeometry(0.95, 0.44, 3.2), 11.925, 4.2, 0);   // fwd band cap
       K.put(cabinFloorMat, new THREE.BoxGeometry(25.2, 0.14, 3.1), -0.2, CABIN_FLOOR - 0.07, 0);
       K.put(FLEET.navy, new THREE.BoxGeometry(23.4, 0.03, 0.8), -0.2, CABIN_FLOOR + 0.02, 0);
       // aft pressure wall + cockpit bulkhead with a dark cockpit door
       K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), -12.7, 3.9, 0);
       K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), 12.1, 3.9, 0);
       K.put(FLEET.dark, new THREE.BoxGeometry(0.08, 1.78, 0.8), 12.0, 3.42, 0);
-      // interior window strips + ceiling light strips
+      // ceiling light strips (interior fake window strips removed — see above)
       for (const sgn of [-1, 1]) {
-        K.put(FLEET.dark, new THREE.BoxGeometry(21, 0.5, 0.05), -0.7, 4.15, sgn * 1.55);
         K.put(cabinLightMat, new THREE.BoxGeometry(22, 0.05, 0.28), -0.5, 5.24, sgn * 0.5);
       }
       // cockpit behind the bulkhead: console block + two pilot seats
@@ -1094,6 +1139,16 @@
           addSeat(rx, s * 0.72, 0.3);   // aisle
         }
       }
+      // FLIGHT CREW: two live-NPC pilot anchors on the existing cockpit seats
+      // (visible through the bulkhead door). Pushed directly — NO rng draws, so
+      // the airport stream stays byte-identical to before.
+      for (const sgn of [-1, 1]) {
+        seats.push({
+          id: "pilot-" + (sgn > 0 ? "r" : "l"), x: 13.1, y: CABIN_FLOOR + 0.42, z: sgn * 0.58,
+          heading: Math.PI / 2, kind: "aircraft-seat", cockpit: true, role: "pilot",
+          reservedForNpc: true, occupant: null,
+        });
+      }
       // DOORWAY (port, forward): dark recess in the hull + warm sill light
       K.put(FLEET.dark, new THREE.BoxGeometry(1.14, 1.92, 0.1), CABIN_DOOR_X, 3.46, -1.64);
       K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.06, 0.06), CABIN_DOOR_X, 4.48, -1.68);
@@ -1125,18 +1180,34 @@
       const CY = R + 1.6;         // fuselage centreline height — UNCHANGED (flight/camera anchors)
       const BELLY = CY - FH / 2;  // 1.6 — struts rise to here, wheels touch y=0
 
-      // fuselage: white barrel + sculpted drooped nose + upswept tailcone
-      // (pieces butt-join at full cross-section with a 0.05 overlap — seamless)
-      K.put(FLEET.white, new THREE.BoxGeometry(L, FH, FW, 2, 1, 1), 0, CY, 0);
+      // fuselage: white barrel + sculpted drooped nose + upswept tailcone.
+      // REAL WINDOWS (owner ask): the barrel is SPLIT into a belly slab and a
+      // crown slab leaving an OPEN band at cabin-window height, and the cabin
+      // liner (buildCabin) is split the same way — so the transparent pane
+      // strip genuinely looks INTO the lit cabin (seats, passengers, ceiling
+      // lights) from the tarmac, and OUT of it from the aisle. Band ends are
+      // capped so the hull stays airtight fore/aft of the glass.
+      const WIN_Y0 = CY + 0.49, WIN_Y1 = CY + 0.91;          // band 3.99..4.41 (pane strip is CY+0.7 ± 0.21)
+      const WIN_X0 = 0.5 - (L - 6) / 2, WIN_X1 = 0.5 + (L - 6) / 2;   // pane strip x extent
+      const HULL_Y0 = CY - FH / 2, HULL_Y1 = CY + FH / 2;
+      K.put(FLEET.white, new THREE.BoxGeometry(L, WIN_Y0 - HULL_Y0, FW, 2, 1, 1), 0, (WIN_Y0 + HULL_Y0) / 2, 0);   // belly slab
+      K.put(FLEET.white, new THREE.BoxGeometry(L, HULL_Y1 - WIN_Y1, FW, 2, 1, 1), 0, (HULL_Y1 + WIN_Y1) / 2, 0);   // crown slab
+      K.put(FLEET.white, new THREE.BoxGeometry(WIN_X0 + L / 2, WIN_Y1 - WIN_Y0 + 0.02, FW), (-L / 2 + WIN_X0) / 2, CY + 0.7, 0);  // aft band cap
+      K.put(FLEET.white, new THREE.BoxGeometry(L / 2 - WIN_X1, WIN_Y1 - WIN_Y0 + 0.02, FW), (WIN_X1 + L / 2) / 2, CY + 0.7, 0);   // fwd band cap
       K.put(FLEET.white, fuseGeo(4.2, FH, FW, { nose: 0.24, noseY: -1.0 }), L / 2 + 2.05, CY, 0);
       K.put(FLEET.white, fuseGeo(5.6, FH, FW, { tail: 0.16, tailY: 1.25 }), -L / 2 - 2.75, CY, 0);
-      // dark cockpit glass band wrapping the nose root
-      K.put(FLEET.glass, new THREE.BoxGeometry(2.4, 0.95, FW + 0.1), L / 2 + 0.6, CY + 0.8, 0);
+      // cockpit band: kept OPAQUE-dark on purpose — the sculpted nose behind it
+      // is solid, so a clear pane here would read as glass painted on bodywork.
+      K.put(FLEET.dark, new THREE.BoxGeometry(2.4, 0.95, FW + 0.1), L / 2 + 0.6, CY + 0.8, 0);
       // livery: coloured belly stripe wrapping under the white upper fuselage,
-      // and the cabin windows as ONE long inset glass strip per side
+      // and the cabin windows as ONE long CLEAR pane strip per side over the
+      // open band, with white window-frame pillars at seat pitch behind it.
       K.put(acc, new THREE.BoxGeometry(L, 0.95, FW + 0.12), 0, BELLY + 0.42, 0);
       for (const sgn of [-1, 1]) {
         K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, sgn * (FW / 2 + 0.02));
+        for (let px = WIN_X0 + 0.25; px < WIN_X1 - 0.2; px += 2.0) {
+          K.put(FLEET.white, new THREE.BoxGeometry(0.34, WIN_Y1 - WIN_Y0 + 0.04, 0.12), px, CY + 0.7, sgn * (FW / 2 - 0.015));
+        }
       }
 
       // ONE swept tapered wing pair + upturned accent winglets
@@ -1195,22 +1266,78 @@
       const CY = R + 1.0;         // centreline height — UNCHANGED (2.1)
       const BELLY = CY - FH / 2;  // 1.0
 
-      // fuselage: white barrel + LOW drooped nose taper + upswept tailcone
-      K.put(FLEET.white, new THREE.BoxGeometry(L, FH, FW, 2, 1, 1), 0, CY, 0);
+      // fuselage: white barrel + LOW drooped nose taper + upswept tailcone.
+      // REAL WINDOWS (airliner pattern, scaled down): the barrel splits into
+      // belly + crown slabs with an OPEN band at window height (x -2.7..2.7),
+      // so the clear pane strip looks into a real lit mini-cabin.
+      const JW_Y0 = CY + 0.4, JW_Y1 = CY + 0.7;              // band 2.5..2.8
+      const JW_X0 = -2.7, JW_X1 = 2.7;
+      const JH_Y0 = CY - FH / 2, JH_Y1 = CY + FH / 2;
+      K.put(FLEET.white, new THREE.BoxGeometry(L, JW_Y0 - JH_Y0, FW, 2, 1, 1), 0, (JW_Y0 + JH_Y0) / 2, 0);   // belly slab
+      K.put(FLEET.white, new THREE.BoxGeometry(L, JH_Y1 - JW_Y1, FW, 2, 1, 1), 0, (JH_Y1 + JW_Y1) / 2, 0);   // crown slab
+      K.put(FLEET.white, new THREE.BoxGeometry(JW_X0 + L / 2, JW_Y1 - JW_Y0 + 0.02, FW), (-L / 2 + JW_X0) / 2, CY + 0.55, 0);  // aft band cap
+      K.put(FLEET.white, new THREE.BoxGeometry(L / 2 - JW_X1, JW_Y1 - JW_Y0 + 0.02, FW), (JW_X1 + L / 2) / 2, CY + 0.55, 0);   // fwd band cap
       K.put(FLEET.white, fuseGeo(3.6, FH, FW, { nose: 0.22, noseY: -0.62 }), L / 2 + 1.75, CY, 0);
       K.put(FLEET.white, fuseGeo(3.8, FH, FW, { tail: 0.18, tailY: 0.8 }), -L / 2 - 1.85, CY, 0);
-      // dark cockpit glass band at the nose root
-      K.put(FLEET.glass, new THREE.BoxGeometry(1.5, 0.72, FW + 0.08), L / 2 + 0.55, CY + 0.42, 0);
+      // cockpit band: opaque-dark on purpose (solid sculpted nose behind it)
+      K.put(FLEET.dark, new THREE.BoxGeometry(1.5, 0.72, FW + 0.08), L / 2 + 0.55, CY + 0.42, 0);
+      // MINI CABIN behind the panes: split BackSide liner (visible only from
+      // outside-through-glass / inside), floor, and a club-four of seats.
+      K.put(linerMat, new THREE.BoxGeometry(5.8, 1.25, 1.7), 0, 1.875, 0);       // liner belly (1.25..2.5)
+      K.put(linerMat, new THREE.BoxGeometry(5.8, 0.25, 1.7), 0, 2.925, 0);       // liner crown (2.8..3.05)
+      K.put(linerMat, new THREE.BoxGeometry(0.2, 0.32, 1.7), -2.8, 2.65, 0);     // aft band cap
+      K.put(linerMat, new THREE.BoxGeometry(0.2, 0.32, 1.7), 2.8, 2.65, 0);      // fwd band cap
+      K.put(cabinFloorMat, new THREE.BoxGeometry(5.6, 0.1, 1.6), 0, 1.32, 0);    // deck
+      const jetSeats = [];
+      let jsIdx = 0;
+      // club-four: two facing pairs, port and starboard. Occupancy by position-
+      // hash (never the shared rng stream — order-safe for the airport build).
+      for (const side of [-1, 1]) {
+        for (const fx of [-1, 1]) {
+          const sx = fx * 1.2, sz = side * 0.45;
+          K.put(FLEET.navy, new THREE.BoxGeometry(0.5, 0.14, 0.5), sx, 1.44, sz);                 // cushion
+          K.put(FLEET.navy, new THREE.BoxGeometry(0.14, 0.62, 0.5), sx + fx * 0.28, 1.78, sz);    // back (facing inward)
+          const occ = (CBZ.hash01 ? CBZ.hash01(x + jsIdx, z - jsIdx, 9101) : ((jsIdx * 0.37) % 1)) < 0.62;
+          jetSeats.push({
+            id: "jetseat-" + (jsIdx++), x: sx, y: 1.32 + 0.42, z: sz,
+            heading: fx > 0 ? -Math.PI / 2 : Math.PI / 2, kind: "aircraft-seat",
+            reservedForNpc: occ, occupant: null,
+          });
+        }
+      }
       // exec livery: angled accent swoosh rising to the nose + thin midnight
-      // echo line under it; oval-ish cabin windows as ONE inset strip a side
+      // echo line under it; the cabin windows are a CLEAR pane strip over the
+      // open band with white frame pillars behind it.
       for (const sgn of [-1, 1]) {
         const fz = sgn * (FW / 2 + 0.02);
         K.put(acc, new THREE.BoxGeometry(7.5, 0.5, 0.06), 0.8, CY - 0.25, fz, 0, 0, 0.09);
         K.put(FLEET.navy, new THREE.BoxGeometry(6.2, 0.16, 0.05), 0.2, CY - 0.62, fz, 0, 0, 0.09);
-        K.put(FLEET.glass, new THREE.BoxGeometry(6.4, 0.3, 0.06), 0.9, CY + 0.55, fz);
+        K.put(FLEET.glass, new THREE.BoxGeometry(5.4, 0.3, 0.06), 0, CY + 0.55, fz);
+        for (let px = -2.0; px <= 2.0; px += 1.0) {
+          K.put(FLEET.white, new THREE.BoxGeometry(0.24, 0.34, 0.1), px, CY + 0.55, sgn * (FW / 2 - 0.02));
+        }
       }
-      // stair-door hint: inset dark panel on the front-left (port) flank
+      // AIRSTAIR DOOR (port, forward): a REAL hinged panel that tips outward-
+      // down into boarding stairs (aircraft_doors.js eases it via doorRig).
+      // Dark recess behind it = the doorway; dynamic-tagged for the freezer.
       K.put(FLEET.dark, new THREE.BoxGeometry(0.95, 1.3, 0.07), 3.5, CY - 0.1, -(FW / 2 + 0.03));
+      const stairGeo = new THREE.BoxGeometry(0.95, 1.3, 0.07);
+      stairGeo.translate(0, 0.65, 0);                          // pivot at the sill (bottom edge)
+      const stair = new THREE.Mesh(stairGeo, FLEET.white);
+      stair.position.set(3.5, CY - 0.75, -(FW / 2 + 0.06));
+      stair.userData.dynamic = true;
+      for (const sy of [0.35, 0.75, 1.1]) {                    // tread strips on the inner face
+        const tread = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.07, 0.05), FLEET.dark);
+        tread.position.set(0, sy, 0.05);
+        stair.add(tread);
+      }
+      g.add(stair);
+      g.userData.doorRig = {
+        panel: stair, t: 0, mode: "stair",
+        closedRot: 0, openRot: -1.72,                          // tips outboard-down into a stair
+        doorX: 3.5, doorZ: -(FW / 2 + 0.06),
+      };
+      g.userData.cabin = g.userData.cabin || { floorTop: 1.37, doorX: 3.5, doorZ: -(FW / 2 + 0.06), seats: jetSeats, panel: null, doorT: 0 };
 
       // low swept wing pair + accent winglets
       K.put(FLEET.white, wingGeo(13.5, 3.0, 1.2, 0.32, 2.4, 0.5), -0.6, BELLY + 0.35, 0);
@@ -1285,12 +1412,51 @@
         jetSolid = on;
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       }
-      // a baggage tug shoved up against the nose
-      const tug = box(-160 + 16, 0.8, TAX_Z - 6, 3, 1.4, 2, 0xe8c020, { cast: true });
+      // a baggage tug shoved up against the nose — a REAL VEHICLE (owner law:
+      // no dumb props): a proper little machine (cab, wheels, hitch) registered
+      // in CBZ.cityCars via cityRegisterVehicle, so you can hop in and drive it
+      // around the apron. The pushback animation yields the moment it's taken.
+      const tug = new THREE.Group();
+      tug.position.set(-160 + 16, 0, TAX_Z - 6);
+      (function buildTug() {
+        function tb(w, h, d, x, y, z, color, emissive) {
+          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+            emissive ? mat(color, { emissive: emissive, ei: 0.6 }) : mat(color));
+          m.position.set(x, y, z); m.castShadow = true; tug.add(m);
+          return m;
+        }
+        tb(2.6, 0.7, 1.9, 0.2, 0.75, 0, 0xe8c020);              // deck / hood
+        tb(1.4, 0.9, 1.7, -0.5, 1.5, 0, 0xe8c020);              // cab back
+        tb(0.9, 0.5, 0.12, 0.35, 1.35, 0, 0x2a2e33);            // dash
+        tb(0.5, 0.6, 0.5, -0.5, 1.25, 0, 0x2a2e33);             // seat
+        tb(0.5, 0.1, 1.7, 1.55, 0.55, 0, 0x6b7178);             // tow hitch
+        tb(0.3, 0.18, 0.1, 1.45, 0.9, 0, 0xfff2cc, 0xffe9b8);   // work lamp
+        const wgeo = new THREE.CylinderGeometry(0.34, 0.34, 0.3, 10);
+        wgeo._shared = true;
+        for (const wx of [0.85, -0.85]) for (const wz of [0.72, -0.72]) {
+          const wh = new THREE.Mesh(wgeo, mat(0x17191d));
+          wh.rotation.x = Math.PI / 2; wh.position.set(wx, 0.34, wz);
+          wh.userData.playerWheel = true;                        // spins when driven
+          tug.add(wh);
+        }
+      })();
+      root.add(tug);
       // the tug ANIMATES (position.z below): tag it so the static batcher /
-      // matrix freeze never bake it (an untagged plain mesh gets merged and
-      // the pushback would visibly freeze).
+      // matrix freeze never bake it (an untagged group gets merged and the
+      // pushback would visibly freeze).
       tug.userData.dynamic = true;
+      let tugRec = null;
+      if (CBZ.cityRegisterVehicle) {
+        try {
+          tugRec = CBZ.cityRegisterVehicle(tug, {
+            body: "van", style: "van", persist: true, color: 0xe8c020,
+            model: { name: "Baggage Tug", value: 9000, rarity: 0.1, body: "van" },
+            dims: { width: 2.0, length: 3.4, height: 2.0, wheelbase: 1.7 },
+          });
+        } catch (e) { tugRec = null; }
+      }
+      // the pushback choreography must never fight the player for the tug
+      function tugFree() { return !tugRec || (!tugRec.player && !tugRec.stolen && !tugRec.owned); }
       // One-way ground operation: dwell → push once → taxi away → reset only
       // while hidden. The old implementation eventually reversed the visible
       // airliner back into its start pose, even after a long pause.
@@ -1308,8 +1474,9 @@
           phase = Math.min(1, phase + dt / pushSeconds);
           const e = phase * phase * (3 - 2 * phase);
           const z = z0 + (z1 - z0) * e;
-          jet.position.z = z; tug.position.z = z + 16;
-          if (phase >= 1) { state = "taxi"; tug.visible = false; }
+          jet.position.z = z;
+          if (tugFree()) tug.position.z = z + 16;
+          if (phase >= 1) state = "taxi";   // tug stays parked in view — it's a real, enterable vehicle now
           return;
         }
         if (state === "taxi") {
@@ -1318,14 +1485,15 @@
           // begins parked, never driving backward through the player's view.
           if (jet.position.z < A_MINZ - 90) {
             jet.visible = false;
-            jet.position.z = z0; tug.position.z = z0 + 16;
+            jet.position.z = z0;
+            if (tugFree()) { tug.position.z = z0 + 16; tug.position.x = -160 + 16; }
             phase = 0; dwellT = 45; state = "hidden";
           }
           return;
         }
         if (state === "hidden") {
           dwellT -= dt;
-          if (dwellT <= 0) { jet.visible = true; tug.visible = true; setJetSolid(true); dwellT = 18; state = "dwell"; }
+          if (dwellT <= 0) { jet.visible = true; setJetSolid(true); dwellT = 18; state = "dwell"; }
         }
       });
     })();

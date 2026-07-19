@@ -352,7 +352,35 @@
     // dispatch FIRST — only commit the theft/heat if a controller actually took it
     let took = false;
     if (air) {
-      if (CBZ.citySpawnFlyableFromProp) { try { took = !!CBZ.citySpawnFlyableFromProp(rec); } catch (e) { took = false; } }
+      if (CBZ.citySpawnFlyableFromProp) {
+        // ELEVATOR-GRAMMAR BOARDING (aircraft_doors.js): the door visibly
+        // opens, the player walks IN through the opening, the door closes,
+        // and only THEN does the flight controller take over. The arc runs
+        // the same citySpawnFlyableFromProp at its end; if that spawn fails
+        // (or the arc is cancelled — death/mode flip), the theft reverts.
+        // boardVehicle's public return semantics are unchanged: true =
+        // boarding committed. Flag off / module missing → the old instant
+        // teleport path below.
+        const doors = CBZ.aircraftDoorArc;
+        if (doors && !doors.active) {
+          took = doors.boardProp(rec,
+            function handover() {
+              let c = null;
+              try { c = CBZ.citySpawnFlyableFromProp(rec); } catch (e) { c = null; }
+              return !!c;
+            },
+            function onFail() {
+              // arc cancelled or the engine wouldn't start — hand the airframe
+              // back (untake + re-solidify the parked hull)
+              rec.taken = false;
+              restoreParkedCollider(rec);
+              note("It won't start — try again.", 1.6);
+            });
+        } else if (doors && doors.active) {
+          return false;                       // one boarding at a time
+        }
+        if (!took) { try { took = !!CBZ.citySpawnFlyableFromProp(rec); } catch (e) { took = false; } }
+      }
     } else {
       took = driveArmor(rec);
     }

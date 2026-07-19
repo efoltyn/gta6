@@ -336,6 +336,7 @@
       const m = o.material;
       if (!o.geometry || !m || Array.isArray(m) || (o.userData && o.userData.playerWheel)) continue;
       if (!m.color || m.color.r == null) continue;
+      if (m.transparent) continue;   // REAL GLASS: never build the opaque shell from a see-through pane
       // skip lamps: judge by actual GLOW (emissive luminance × intensity) —
       // dark trim has default intensity 1 but a black emissive, so it passes.
       const glow = m.emissive && m.emissive.r != null
@@ -462,6 +463,149 @@
       const sw = boxMesh(0.04, cabinH * 0.6, cabinD * 0.84, glass);
       sw.position.set(xx, cabinY, 0); grp.add(sw);
     });
+  }
+
+  // ---- REAL-GLASS CABIN FURNITURE (box rig) -------------------------------
+  // With the shared vehicle glass genuinely transparent, an empty greenhouse
+  // reads as a hollow shell. Give the legacy box rig a legible interior: two
+  // front seat backs, a rear bench back, a dash slab and a steering wheel.
+  // Everything reuses the trim material, so it all merges into the trim
+  // bucket that already exists on every car — zero extra draw calls.
+  function addCabinFurniture(grp, roofW, roofH, roofD, roofY, roofZ, trim) {
+    if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS === false) return;
+    const seatY = roofY - roofH * 0.12;
+    [0.34, -0.34].forEach(function (sx) {
+      const back = boxMesh(0.5, roofH * 0.62, 0.12, trim);
+      back.position.set(sx * roofW, seatY, roofZ - roofD * 0.06); grp.add(back);
+    });
+    const bench = boxMesh(roofW * 0.74, roofH * 0.52, 0.12, trim);
+    bench.position.set(0, seatY - roofH * 0.05, roofZ - roofD * 0.36); grp.add(bench);
+    const dash = boxMesh(roofW * 0.8, 0.14, 0.28, trim);
+    dash.position.set(0, roofY - roofH * 0.22, roofZ + roofD * 0.4); grp.add(dash);
+    const wheel = boxMesh(0.3, 0.24, 0.05, trim);
+    wheel.position.set(0.34 * roofW, roofY - roofH * 0.2, roofZ + roofD * 0.26);
+    wheel.rotation.x = -0.55; grp.add(wheel);
+  }
+
+  // ---- VISIBLE OCCUPANTS ---------------------------------------------------
+  // Owner ask: through real glass you must SEE the driver (and sometimes a
+  // passenger). One shared vertex-coloured material + a small pool of merged
+  // seated-body geometries (shirt × skin variants), ONE mesh per visible
+  // occupant. Deterministic per car via position-hash — never the shared rng
+  // stream. Hidden the moment the car is stolen/parked/dead.
+  const OCC_SHIRTS = [0x8c3b3b, 0x3b5a8c, 0x3f7a4c, 0x8a793a, 0x5b4a78, 0x394048];
+  const OCC_SKINS = [0xe8c39e, 0xc98e63, 0x8d5b3a, 0xf0d0b0];
+  const OCC_GEOS = new Map();
+  let OCC_MAT = null;
+  function occMat() {
+    if (!OCC_MAT) {
+      OCC_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+      OCC_MAT._shared = true;
+    }
+    return OCC_MAT;
+  }
+  // merged seated body: lap + torso + two arms + head, facing +z, origin at
+  // the seat surface. Per-part flat vertex colour bakes shirt/skin/trouser.
+  function occGeo(variant) {
+    let geo = OCC_GEOS.get(variant);
+    if (geo) return geo;
+    const shirt = new THREE.Color(OCC_SHIRTS[variant % OCC_SHIRTS.length]);
+    const skin = new THREE.Color(OCC_SKINS[(variant / OCC_SHIRTS.length | 0) % OCC_SKINS.length]);
+    const pants = shirt.clone().multiplyScalar(0.45);
+    const parts = [];
+    function part(w, h, d, x, y, z, col) {
+      const b = new THREE.BoxGeometry(w, h, d);
+      b.translate(x, y, z);
+      const n = b.attributes.position.count, cols = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { cols[i * 3] = col.r; cols[i * 3 + 1] = col.g; cols[i * 3 + 2] = col.b; }
+      b.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+      parts.push(b.toNonIndexed ? b.toNonIndexed() : b);
+    }
+    part(0.46, 0.16, 0.44, 0, 0.1, 0.12, pants);      // lap / thighs
+    part(0.44, 0.52, 0.26, 0, 0.44, -0.05, shirt);    // torso
+    part(0.1, 0.4, 0.12, 0.27, 0.42, 0.02, shirt);    // arms
+    part(0.1, 0.4, 0.12, -0.27, 0.42, 0.02, shirt);
+    part(0.2, 0.22, 0.2, 0, 0.84, -0.03, skin);       // head
+    // concat (positions + normals + colours) into one buffer
+    let verts = 0;
+    for (const p of parts) verts += p.attributes.position.count;
+    const pos = new Float32Array(verts * 3), nrm = new Float32Array(verts * 3), col = new Float32Array(verts * 3);
+    let o = 0;
+    for (const p of parts) {
+      pos.set(p.attributes.position.array, o);
+      nrm.set(p.attributes.normal.array, o);
+      col.set(p.attributes.color.array, o);
+      o += p.attributes.position.array.length;
+      p.dispose && p.dispose();
+    }
+    geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.computeBoundingSphere();
+    geo._shared = true;
+    OCC_GEOS.set(variant, geo);
+    return geo;
+  }
+  function carHash(x, z, salt) {
+    if (CBZ.hash01) return CBZ.hash01(x, z, salt);
+    const s = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453;
+    return s - Math.floor(s);
+  }
+  // seat anchor inside THIS car's cabin (unified visuals export cabinInfo;
+  // the box rig gets an equivalent; a registered custom group has neither and
+  // simply gets no occupant).
+  function occSeatAnchor(grp) {
+    const vis = grp.userData && grp.userData.carVisual;
+    const ci = (vis && vis.userData && vis.userData.cabinInfo) || (grp.userData && grp.userData.cabinInfo);
+    if (ci) return ci;
+    // styles without an exported cabin frame (SUV/van/cybertruck templates):
+    // derive a serviceable seat anchor from the vehicle dims so every driven
+    // car still shows its driver. Proportions follow the road-car law
+    // (greenhouse base ≈ 55% of H, slightly rear-of-centre cabin).
+    const dims = (vis && vis.userData && vis.userData.vehicleDims) || (grp.userData && grp.userData.vehicleDims);
+    if (!dims || !dims.height) return null;
+    return {
+      baseY: dims.height * 0.55,
+      peakY: dims.height * 0.36,
+      cx: -(dims.length || 4.4) * 0.04,
+      w: (dims.width || 2) * 0.9,
+    };
+  }
+  function addOccupants(c) {
+    if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS === false) return;
+    const grp = c.group; if (!grp) return;
+    // bikes model their own rider (moto_rider); boats/helis are open frames
+    if (/motorcycle|helicopter|boat/.test(grp.userData && grp.userData.carStyle || "")) return;
+    const ci = occSeatAnchor(grp); if (!ci) return;
+    const roomY = Math.max(0.3, ci.peakY + 0.08);              // seat surface → roofline
+    const s = Math.max(0.6, Math.min(1.0, roomY / 0.98));      // scale the body to fit the cabin
+    const seatY = ci.baseY - 0.1;
+    const seatX = Math.min(0.45, ci.w * 0.22);
+    const h = carHash(c.pos.x, c.pos.z, 101);
+    function seatBody(x, z, variant) {
+      const m = new THREE.Mesh(occGeo(variant), occMat());
+      m.position.set(x, seatY, z);
+      m.scale.setScalar(s);
+      m.castShadow = false; m.receiveShadow = false;
+      m.userData.occupant = true;                              // spare from any merge/batch pass
+      grp.add(m);
+      return m;
+    }
+    c._occDriver = seatBody(seatX, ci.cx + 0.12, (h * 24) | 0);
+    if (carHash(c.pos.x, c.pos.z, 102) < 0.3) {
+      c._occPass = seatBody(-seatX, ci.cx + 0.12, (carHash(c.pos.x, c.pos.z, 103) * 24) | 0);
+    }
+    syncOccupants(c);
+  }
+  function occWanted(c) {
+    return !!(c && !c.player && !c.dead && (c.ai || c.npcDriver));
+  }
+  function syncOccupants(c) {
+    if (!c._occDriver) return;
+    const on = occWanted(c);
+    if (c._occDriver.visible !== on) c._occDriver.visible = on;
+    if (c._occPass && c._occPass.visible !== on) c._occPass.visible = on;
   }
 
   // Per-model trim on the LEGACY BOX RIG. The branch table moved to
@@ -606,6 +750,9 @@
 
     // glass on the greenhouse
     addGlass(grp, roofW, roofD, roofY, roofH, raked);
+    // legible interior behind the (now genuinely transparent) glass
+    addCabinFurniture(grp, roofW, roofH, roofD, roofY, roofZ, trim);
+    grp.userData.cabinInfo = { baseY: roofY - roofH / 2, peakY: roofH, cx: roofZ, w: roofW };
 
     // a contrasting belt-line / bumpers so the body isn't one flat colour
     const beltY = 0.78 + (hullY - 0.72) - hullH * 0.18;
@@ -730,6 +877,7 @@
     // not random clutter: only the top catalog tier can roll it.
     if (model && model.rarity >= 0.975 && rng() < 0.10) c.mods = { booster: true, factoryBooster: true };
     tagTailMeshes(c);                     // one traverse per car, at build time
+    addOccupants(c);                      // visible driver (+ sometimes a passenger) through the real glass
     CBZ.cityCars.push(c);
     return c;
   }
@@ -846,6 +994,40 @@
     c._persist = !!opts.persist;
     tagTailMeshes(c);
     if (CBZ.cityCars.indexOf(c) < 0) CBZ.cityCars.push(c);
+    return c;
+  };
+
+  // ---- EVERY CAR CONTROLLABLE (owner law: no dumb props) -------------------
+  // A deterministic PARKED-but-REAL car for world/template builders: a full
+  // cityCars record (enterable, drivable, damageable) that starts stationary
+  // and survives traffic resets (world fixture). Model picked by position-hash
+  // from the catalog (never the shared rng stream — order-safe), or by name.
+  // Stale fixtures from a previous arena build are purged on the next spawn.
+  if (CBZ.CONFIG && CBZ.CONFIG.CARS_ALL_DRIVABLE == null) CBZ.CONFIG.CARS_ALL_DRIVABLE = true;
+  CBZ.cityAddParkedCar = function (x, z, heading, opts) {
+    if (!CBZ.city || !CBZ.city.arena) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.CARS_ALL_DRIVABLE === false) return null;
+    opts = opts || {};
+    const root = CBZ.city.arena.root;
+    // purge fixtures whose group belongs to a torn-down arena root
+    for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
+      const old = CBZ.cityCars[i];
+      if (old._propParked && old._arenaRoot !== root) CBZ.cityCars.splice(i, 1);
+    }
+    const econ = CBZ.cityEcon;
+    let model = null;
+    if (opts.modelName && econ && econ.carByName) model = econ.carByName(opts.modelName);
+    if (!model && econ && econ.CARS && econ.CARS.length) {
+      model = econ.CARS[(carHash(x, z, 77) * econ.CARS.length) | 0] || null;
+    }
+    const c = makeCar(x, z, heading || 0, false, model, 0.2);
+    c.ai = false; c.v = 0; c.baseV = 0; c.stolen = false;
+    c._persist = true; c._propParked = true; c._arenaRoot = root;
+    if (opts.color != null && c.group) {
+      // repaint deterministically via the shared recolor hook when present
+      if (CBZ.cityRecolorCar) { try { CBZ.cityRecolorCar(c, opts.color); } catch (e) {} }
+    }
+    syncOccupants(c);                       // parked = empty; no ghost driver
     return c;
   };
 
@@ -1168,6 +1350,7 @@
     const cars = CBZ.cityCars;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
+      syncOccupants(c);                      // driver body appears/vanishes with control state
       if (c.player || c.dead || c.engineHp == null) continue;
       tickDamageStage(c, dt);
     }
