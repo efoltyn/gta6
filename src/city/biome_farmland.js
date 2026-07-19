@@ -520,14 +520,28 @@
     const coopX = HX + 30, coopZ = HZ - 24;
     box(coopX, 1.2, coopZ, 5, 2.4, 4, M.woodLt, true);
     box(coopX, 3.2, coopZ, 5.4, 1.2, 4.4, M.houseRoof, false);
-    // a handful of chickens (instanced)
+    // LIVESTOCK HANDOFF (ANIMALS_ALL_CONTROLLABLE): the wildlife engine stocks
+    // farmland with REAL chickens/cows/sheep — live records you can hunt, feed,
+    // tame (and ride, for the big ones) — so the old static instanced
+    // lookalikes stay OFF: no dumb prop animal ships next to a living twin.
+    // The rng draws below are kept EITHER WAY so this file's seeded stream
+    // stays byte-identical per seed (never add/remove draws). The statics
+    // return only as a fallback when the live system/species are absent
+    // (or the flag is off) — same pattern as biome_forest's fallback deer.
+    const liveStock = !!(CBZ.WILDLIFE !== false && CBZ.cityWildlife && CBZ.WILDLIFE_SPECIES &&
+      CBZ.WILDLIFE_SPECIES.cow && CBZ.WILDLIFE_SPECIES.chicken &&
+      !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false));
+    // a handful of chickens (instanced) — fallback-only, see liveStock above
     const chickMats = [];
     for (let i = 0; i < 8; i++) {
       _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rng() * Math.PI * 2);
       _p.set(coopX + rr(-3, 3), 0.3, coopZ + rr(-3, 3)); _scl.set(1, 1, 1);
       _m.compose(_p, _q, _scl); chickMats.push(_m.clone());
     }
-    buildInstanced(new THREE.BoxGeometry(0.4, 0.4, 0.6), M.chick, chickMats, false);
+    if (!liveStock) {
+      buildInstanced(new THREE.BoxGeometry(0.4, 0.4, 0.6), M.chick, chickMats, false);
+      CBZ.cityDecorAnimals = (CBZ.cityDecorAnimals || 0) + 8;   // audit: decorative animal count
+    }
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "farmland", kind: "coop", role: "farmhand",
@@ -645,7 +659,12 @@
         _p.set(cx + rr(-spread, spread), sy / 2 + 0.05, cz + rr(-spread, spread));
         _scl.set(1, 1, 1); _m.compose(_p, _q, _scl); mats.push(_m.clone());
       }
-      buildInstanced(new THREE.BoxGeometry(sx, sy, sz), material, mats, true);
+      // fallback-only (see liveStock): the LIVE wildlife herds own the pasture
+      // when the engine is present — rng draws above always run regardless.
+      if (!liveStock) {
+        buildInstanced(new THREE.BoxGeometry(sx, sy, sz), material, mats, true);
+        CBZ.cityDecorAnimals = (CBZ.cityDecorAnimals || 0) + count;
+      }
       return mats;
     }
     // cows graze a pasture parcel (find one tagged pasture, else use a corner)
