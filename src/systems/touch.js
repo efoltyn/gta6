@@ -52,6 +52,11 @@
      TOUCH_AIM_SLIDE    — hold AIM/SCOPE and SLIDE onto FIRE to shoot
                           while the hold stays down; also seats those two
                           buttons beside the trigger (mobile.css .tslide)
+     TOUCH_LOOK_WHILE_MOVE — two-thumb grammar: stick + look-drag work
+                          TOGETHER. Pinch-zoom needs two FREE fingers;
+                          a claimed finger (stick / slide-hold / UI) is
+                          never half a pinch. false = legacy gate (any
+                          two touches pinched, killing move+look).
 ============================================================ */
 (function () {
   "use strict";
@@ -65,6 +70,7 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HUD_TIDY == null) CBZ.CONFIG.TOUCH_HUD_TIDY = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIXED_STICK == null) CBZ.CONFIG.TOUCH_FIXED_STICK = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_SLIDE == null) CBZ.CONFIG.TOUCH_AIM_SLIDE = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE == null) CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
   const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
@@ -628,12 +634,49 @@
   let pinchPrev = 0;
   window.addEventListener("touchmove", (e) => {
     sweepStale(e);
-    // two fingers = pinch-zoom the third-person camera
+    // two FREE fingers = pinch-zoom the third-person camera.
+    // TOUCH_LOOK_WHILE_MOVE (default on): the old gate counted EVERY touch on
+    // the page, so the basic two-thumb grammar — left thumb on the fixed stick,
+    // right thumb dragging to look — was read as a pinch: clearMove() killed
+    // the stick's WASD and the early return starved the look slot. You
+    // literally had to STOP to look around (the survival play-report; city
+    // mostly masked it because first-person skips this branch and vehicles
+    // steer via UI buttons, but the bug was mode-agnostic). A finger that owns
+    // the stick, an aim/scope slide-hold, or any UI button is CLAIMED — it is
+    // never half a pinch. Flag off = the legacy any-two-touches gate, byte-
+    // for-byte (pinch clears movement and returns).
+    const strict = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE !== false;
+    let pa = null, pb = null;
     if (e.touches.length >= 2 && !(CBZ.fps && CBZ.fps.active)) {
-      const a = e.touches[0], b = e.touches[1];
-      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      if (!strict) { pa = e.touches[0]; pb = e.touches[1]; }
+      else {
+        for (let i = 0; i < e.touches.length && !pb; i++) {
+          const t = e.touches[i];
+          if (t.identifier === stick.id || slideTouches.has(t.identifier) || inUI(t.target)) continue;
+          if (!pa) pa = t; else pb = t;
+        }
+        if (!pb) pa = null;
+      }
+    }
+    if (pa && pb) {
+      const d = Math.hypot(pa.clientX - pb.clientX, pa.clientY - pb.clientY);
       if (pinchPrev && CBZ.camZoom) CBZ.camZoom((pinchPrev - d) * 0.03);
-      pinchPrev = d; clearMove();
+      pinchPrev = d;
+      if (!strict) { clearMove(); return; }
+      // strict pinch: both pinch fingers are free/world fingers, so the stick
+      // (if a third finger holds it) KEEPS driving movement. The look slot may
+      // be one of the pinching fingers — re-anchor it (and poison its tap
+      // window) each move so the view neither swings during the pinch nor
+      // jumps the frame after it ends.
+      for (const t of e.changedTouches) {
+        if (t.identifier === stick.id) {
+          stick.moved = Math.max(stick.moved, Math.hypot(t.clientX - stick.sx, t.clientY - stick.sy));
+          stickDeflect(t.clientX, t.clientY);
+        } else if (t.identifier === look.id) {
+          look.lx = t.clientX; look.ly = t.clientY;
+          look.seen = performance.now(); look.moved = 999;
+        }
+      }
       return;
     }
     pinchPrev = 0;
