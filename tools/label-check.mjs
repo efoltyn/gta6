@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /* tools/label-check.mjs — verify the overhead "Lv.N Title" label replaces the
-   big street-read panel. Boots the game, enters first-person with a gun up,
-   drops a live ped into the crosshair, and asserts the REAL aim_dossier loop
-   surfaces an overhead label sprite (not the side panel). Screenshots the view.
-   Usage: node tools/label-check.mjs [out.png] */
+   big street-read panel. Boots the game, then makes the REAL aim_dossier loop
+   lock a chosen ped by stubbing ONLY the pre-existing target selector
+   (CBZ.aimedActor) — the loop, my showOverhead(), the sprite and the panel-vs-
+   label branch all run for real. Frames the ped with an independent render
+   camera and screenshots. Usage: node tools/label-check.mjs [out.png] */
 import { spawn } from "node:child_process";
 import { rm, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -58,98 +59,65 @@ for (let i = 0; i < 120 && !playing; i++) {
 console.log("playing:", playing);
 await sleep(2500);
 
-// ---- set up the REAL aim path: FPS + gun up + a ped in the crosshair -------
-// Teleport the player right behind a street-cluster ped (open ground, no glass
-// wall between) and aim with a slight downward pitch. Try several candidates.
+// pick a ped, force it real+visible, and stub ONLY the pre-existing target
+// selector so the real dossier loop locks it (isAimingWeapon() is already true
+// from the default city loadout / shoulder stance).
 const setup = await evl(`(() => {
   const C = window.CBZ, g = C.game;
-  g.cityHolstered = false; g.cityMeleeWeapon = null;      // ensure armed reads true
-  if (!C.fpsActive || !C.fpsActive()) { try { C.toggleFPS(); } catch(e){} }
-  const peds = (C.cityPeds || []).filter(p => p && !p.dead && !p.vendor && p.char && p.char.group);
-  // rank by neighbour density (a street cluster is outdoors) then by a non-Civilian read
-  const near = (p) => peds.reduce((n,q)=> n + (q!==p && Math.hypot(q.pos.x-p.pos.x, q.pos.z-p.pos.z) < 12 ? 1 : 0), 0);
-  peds.sort((a,b) => (near(b) - near(a)) || ((C.cityTitle(b)!=="Civilian") - (C.cityTitle(a)!=="Civilian")));
-  window.__cands = peds.slice(0, 6);
-  return { none: !peds.length, peds: (C.cityPeds||[]).length, top: peds.slice(0,3).map(p=>({t:C.cityTitle(p),l:C.cityLevel(p),near:near(p)})) };
+  g.cityHolstered = false; g.cityMeleeWeapon = null;
+  const peds = (C.cityPeds || []).filter(p => p && !p.dead && !p.vendor && (p.group || (p.char && p.char.group)));
+  peds.sort((a,b) => (C.cityTitle(b) !== "Civilian") - (C.cityTitle(a) !== "Civilian") || C.cityLevel(b) - C.cityLevel(a));
+  const p = peds[0]; if (!p) return { none:true, peds:(C.cityPeds||[]).length };
+  p.dead = false; p.ko = 0; p.escaped = false; p.speed = 0; p.important = true;
+  const grp = p.group || (p.char && p.char.group); grp.visible = true;
+  window.__lc = { p, grp };
+  const orig = C.aimedActor;
+  C.aimedActor = function () { return { actor: window.__lc.p, crowd: null, dist: 3.5, head: false, point: null }; };
+  C.__aimedActorOrig = orig;
+  return { none:false, armed: C.playerArmed && C.playerArmed(), aiming: C.isAimingWeapon && C.isAimingWeapon(),
+           level: C.cityLevel(p), title: C.cityTitle(p), name: p.name || null,
+           pos: [ +grp.position.x.toFixed(1), +grp.position.y.toFixed(1), +grp.position.z.toFixed(1) ], headY: +C.charHeadY(p.char || p).toFixed(2) };
 })()`);
 console.log("setup:", JSON.stringify(setup));
 
-// try each candidate: stand ~3.5m south of it, force it visible, and aim the
-// camera by COMPUTED yaw/pitch straight at its group torso (eye-height agnostic).
-// findActorHit skips group.visible===false and centres spheres on group.position.
-const PIN = (ci) => `(() => {
-  const C = window.CBZ, T = window.THREE; const p = (window.__cands||[])[${ci}]; if (!p) return false;
-  const grp = p.group || (p.char && p.char.group); if (!grp) return false;
-  p.dead = false; p.ko = 0; p.escaped = false; p.speed = 0; p.important = true;
-  grp.visible = true;
-  const gp = grp.position;
-  C.player.pos.x = gp.x; C.player.pos.z = gp.z + 3.5; C.player.pos.y = gp.y;
-  const cam = C.camera; const cp = cam ? cam.getWorldPosition(new T.Vector3()) : null;
-  if (cp) {
-    const dx = gp.x - cp.x, dy = (gp.y + 1.1) - cp.y, dz = gp.z - cp.z;
-    const dist = Math.hypot(dx, dy, dz) || 1;
-    if (C.cam) C.cam.yaw = Math.atan2(-dx, -dz);
-    if (C.fps) C.fps.fp = Math.asin(Math.max(-1, Math.min(1, dy / dist)));
-  }
-  return !!C.cityAimDossierTarget;
-})()`;
-let locked = null, lockedCi = -1;
-for (let ci = 0; ci < 6 && !locked; ci++) {
-  const r = await evl(`(() => { const C=window.CBZ; const p=(window.__cands||[])[${ci}]; return p?{title:C.cityTitle(p),level:C.cityLevel(p),name:p.name||null}:null; })()`);
-  if (!r) break;
-  for (let k = 0; k < 6; k++) {
-    await evl(PIN(ci));
-    await sleep(240);
-    if (await evl(`!!window.CBZ.cityAimDossierTarget`)) { locked = r; lockedCi = ci; break; }
-  }
-  console.log("candidate", ci, JSON.stringify(r), "locked:", !!locked);
-}
-// hold the winning aim steady for the screenshot
-if (lockedCi >= 0) { for (let k = 0; k < 3; k++) { await evl(PIN(lockedCi)); await sleep(220); } }
-
-if (!locked) {
-  const dbg = await evl(`(() => {
-    const C = window.CBZ, T = window.THREE; const p = (window.__cands||[])[0]; if (!p) return "no cand";
-    const cam = C.camera; const cp = cam ? cam.getWorldPosition(new T.Vector3()) : null; const cd = cam ? cam.getWorldDirection(new T.Vector3()) : null;
-    let hit = null; try { hit = C.aimedActor(360); } catch (e) { hit = "ERR " + e.message; }
-    const ap = C.aimedPed ? C.aimedPed(C.player.pos.x, C.player.pos.z) : "no fn";
-    const grp = p.char && p.char.group;
-    return JSON.stringify({
-      player: [+C.player.pos.x.toFixed(2), +C.player.pos.y.toFixed(2), +C.player.pos.z.toFixed(2)],
-      pedPos: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
-      pedGroupPos: grp ? [+grp.position.x.toFixed(2), +grp.position.y.toFixed(2), +grp.position.z.toFixed(2)] : null,
-      pedGroupParent: grp && grp.parent ? (grp.parent.name || grp.parent.type) : null,
-      pedVisible: grp ? grp.visible : null,
-      dist: +Math.hypot(p.pos.x - C.player.pos.x, p.pos.z - C.player.pos.z).toFixed(2),
-      camPos: cp ? [+cp.x.toFixed(2), +cp.y.toFixed(2), +cp.z.toFixed(2)] : null,
-      camDir: cd ? [+cd.x.toFixed(2), +cd.y.toFixed(2), +cd.z.toFixed(2)] : null,
-      camYaw: C.cam ? +C.cam.yaw.toFixed(3) : null, fpFp: C.fps ? +C.fps.fp.toFixed(3) : null,
-      aimedActor: hit && hit.actor ? { name: hit.actor.name, dist: +(hit.dist || 0).toFixed(2) } : hit,
-      aimedPedName: ap && ap.name ? ap.name : ap,
-    });
-  })()`);
-  console.log("DBG:", dbg);
-}
+// let the real loop run and build the label sprite
+await sleep(1200);
 
 const diag = await evl(`(() => {
   const C = window.CBZ;
-  const t = C.cityAimDossierTarget;
+  const t = C.cityAimDossierTarget, grp = window.__lc && window.__lc.grp;
   const panel = document.getElementById("cityAimDossier");
   const panelShown = !!(panel && panel.style.display !== "none" && panel.offsetParent !== null);
-  let sprite = null, grp = t && (t.group || (t.char && t.char.group));
-  if (grp) { for (const c of grp.children) { if (c && c.type === "Sprite" && c.material && c.material.map) { sprite = c; break; } } }
+  let sprite = null;
+  if (grp) for (const c of grp.children) { if (c && c.type === "Sprite" && c.material && c.material.map) { sprite = c; break; } }
   return JSON.stringify({
-    hasTarget: !!t,
-    targetLevel: t ? C.cityLevel(t) : null,
-    targetTitle: t ? C.cityTitle(t) : null,
+    hasTarget: !!t, targetIsChosen: t === (window.__lc && window.__lc.p),
     labelString: t ? ("Lv." + C.cityLevel(t) + " " + C.cityTitle(t)) : null,
-    spriteFound: !!sprite,
-    spriteVisible: !!(sprite && sprite.visible),
+    spriteFound: !!sprite, spriteVisible: !!(sprite && sprite.visible),
+    spriteY: sprite ? +sprite.position.y.toFixed(2) : null,
     spriteScale: sprite ? [ +sprite.scale.x.toFixed(2), +sprite.scale.y.toFixed(2) ] : null,
     panelShown,
   });
 })()`);
 console.log("diag:", diag);
+
+// frame the ped with an independent render camera (does not touch game aim)
+await evl(`(() => {
+  const C = window.CBZ, T = window.THREE, grp = window.__lc.grp;
+  if (!C.renderer.__lc) {
+    const o = C.renderer.render.bind(C.renderer);
+    C.renderer.render = function (s, cam) {
+      const t = window.__lcCam;
+      if (t && cam && cam.position) { cam.position.set(t.px, t.py, t.pz); cam.lookAt(t.lx, t.ly, t.lz); if (cam.fov){cam.fov=42;cam.updateProjectionMatrix();} cam.updateMatrixWorld(); }
+      return o(s, cam);
+    };
+    C.renderer.__lc = true;
+  }
+  const gp = grp.position, hy = C.charHeadY(window.__lc.p.char || window.__lc.p);
+  window.__lcCam = { px: gp.x + 0.6, py: gp.y + hy + 0.1, pz: gp.z + 3.6, lx: gp.x, ly: gp.y + hy - 0.1, lz: gp.z };
+  return true;
+})()`);
+await sleep(600);
 
 const shot = await send("Page.captureScreenshot", { format: "png" });
 await writeFile(OUT, Buffer.from(shot.result.data, "base64"));
