@@ -54,7 +54,9 @@ const SAMPLER = `(() => {
   const biomeAt = CBZ.cityBiomeAt || (()=> "?");
   const th = CBZ.terrainHeight || (()=>0);
   const sh = CBZ.snowTerrainHeightAt || (()=>0);
+  const fl = CBZ.floorAt || (()=>0);
   const flat = CBZ.TERRAIN_FLAT || null;
+  const src = (x,z) => { let a=0,b=0,c=0; try{a=th(x,z)||0}catch(e){} try{b=sh(x,z)||0}catch(e){} try{c=fl(x,z)||0}catch(e){} return {th:Math.round(a),sh:Math.round(b),fl:Math.round(c)}; };
   const B = {};                    // biome -> {n, minX,maxX,minZ,maxZ}
   let cells=0, mtnCells=0, reliefMax=0, reliefSum=0;
   const mtnOutSnow=[], cityOnMtn=[];
@@ -65,13 +67,15 @@ const SAMPLER = `(() => {
       let b = "?"; try { b = biomeAt(x,z) || "?"; } catch(e){}
       const bb = B[b] || (B[b]={n:0,minX:1e9,maxX:-1e9,minZ:1e9,maxZ:-1e9});
       bb.n++; if(x<bb.minX)bb.minX=x; if(x>bb.maxX)bb.maxX=x; if(z<bb.minZ)bb.minZ=z; if(z>bb.maxZ)bb.maxZ=z;
-      let h=0; try { h=Math.max(th(x,z)||0, sh(x,z)||0); } catch(e){}
-      reliefSum+=h; if(h>reliefMax)reliefMax=h;
-      if (h>MTN) {
+      // relief = the visible/walkable ground the player sees. Sample all three
+      // oracles so a violation names its SOURCE (backdrop vs snow vs floor).
+      let hh=0; try { hh=Math.max(th(x,z)||0, sh(x,z)||0, fl(x,z)||0); } catch(e){}
+      reliefSum+=hh; if(hh>reliefMax)reliefMax=hh;
+      if (hh>MTN) {
         mtnCells++; mtnBiome[b]=(mtnBiome[b]||0)+1;
         const snowy = /snow/i.test(b);
-        if (!snowy) { if (mtnOutSnow.length<40) mtnOutSnow.push({x,z,h:Math.round(h),biome:b}); }
-        if (/city|down|urban|commerc|resid/i.test(b)) { if (cityOnMtn.length<40) cityOnMtn.push({x,z,h:Math.round(h),biome:b}); }
+        if (!snowy) { if (mtnOutSnow.length<40) mtnOutSnow.push(Object.assign({x,z,h:Math.round(hh),biome:b}, src(x,z))); }
+        if (/city|down|urban|commerc|resid/i.test(b)) { if (cityOnMtn.length<40) cityOnMtn.push(Object.assign({x,z,h:Math.round(hh),biome:b}, src(x,z))); }
       }
     }
   }

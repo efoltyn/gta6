@@ -79,6 +79,13 @@
   // The whole new relief pipeline in one flag (defaulted HERE; config.js also
   // flips PROC_TERRAIN/WILD_NATURE on when it is true). One-line revert.
   if (CFG.TERRAIN_EROSION_V3 == null) CFG.TERRAIN_EROSION_V3 = true;
+  // OWNER: "mountains only in a fully white area — cities should not spawn on a
+  // giant mountain." The backdrop range used to span the whole northern edge,
+  // so it stood behind forest / kesh / mbeya too. This confines the grand range
+  // to the X-span of the SNOW COUNTRY (biome_snow footprint: centre x=350,
+  // half=420), so relief rises ONLY behind the white country and the rest of the
+  // horizon reads as open sea. Flip false to restore the map-wide range.
+  if (CFG.TERRAIN_SNOW_ONLY_RANGES == null) CFG.TERRAIN_SNOW_ONLY_RANGES = true;
 
   // originals (terrain.js loaded just before this file)
   const orig = {
@@ -131,6 +138,17 @@
 
   let CX = (FLAT.minX + FLAT.maxX) / 2;
   let CZ = (FLAT.minZ + FLAT.maxZ) / 2;
+  // Snow-country footprint (biome_snow.js: rect centre (350,-1450), half (420,330)).
+  // The backdrop range is confined to this X-span so it stands only behind the
+  // white country (owner: mountains snow-only).
+  const SNOW_CX = 350, SNOW_HX = 420;
+  const SNOW_ONLY = () => CFG.TERRAIN_SNOW_ONLY_RANGES !== false;
+  // 1 inside the snow country's X-span (feathered), 0 beyond.
+  function snowWindowX(x) {
+    const f = 240;
+    return smooth(SNOW_CX - SNOW_HX - f, SNOW_CX - SNOW_HX, x) *
+      (1 - smooth(SNOW_CX + SNOW_HX, SNOW_CX + SNOW_HX + f, x));
+  }
   let RANGE_WEST_X = CX - 850;
   let RANGE_EAST_X = CX + 1050;
   const HEROES2 = [
@@ -141,8 +159,15 @@
     CX = (FLAT.minX + FLAT.maxX) / 2;
     CZ = (FLAT.minZ + FLAT.maxZ) / 2;
     const width = FLAT.maxX - FLAT.minX;
-    RANGE_WEST_X = CX - Math.min(980, width * 0.2);
-    RANGE_EAST_X = CX + Math.min(1180, width * 0.24);
+    if (SNOW_ONLY()) {
+      // Both signature giants stand INSIDE the snow country's X-span so the two
+      // hero bumps (and their gaussian tails) never bleed over non-snow biomes.
+      RANGE_WEST_X = SNOW_CX - SNOW_HX * 0.5;   // ~140
+      RANGE_EAST_X = SNOW_CX + SNOW_HX * 0.5;   // ~560
+    } else {
+      RANGE_WEST_X = CX - Math.min(980, width * 0.2);
+      RANGE_EAST_X = CX + Math.min(1180, width * 0.24);
+    }
     HEROES2[0].x = RANGE_WEST_X; HEROES2[0].z = FLAT.minZ - 720;
     HEROES2[1].x = RANGE_EAST_X; HEROES2[1].z = FLAT.minZ - 820;
     CBZ.MOUNT_COLOSSUS = { name: HEROES2[0].name, x: HEROES2[0].x, z: HEROES2[0].z, height: HEROES2[0].amp };
@@ -170,7 +195,9 @@
       bell(x, RANGE_WEST_X, 500),
       bell(x, RANGE_EAST_X, 430) * 0.96
     );
-    return depth * smooth(0.16, 0.58, lobes);
+    let m = depth * smooth(0.16, 0.58, lobes);
+    if (SNOW_ONLY()) m *= snowWindowX(x);   // relief only behind the white country
+    return m;
   }
   CBZ.terrainRangeMask = rangeMask2;
 
@@ -180,6 +207,7 @@
     const range = rangeMask2(x, z);
     let hero = 0;
     for (let i = 0; i < HEROES2.length; i++) hero += heroBump2(x, z, HEROES2[i]);
+    if (SNOW_ONLY()) hero *= snowWindowX(x);   // giants stay behind the white country
     if (range <= 0 && hero <= 0.01) return 0;
     const north = Math.max(0, FLAT.minZ - z);
     const outer = 1 - smooth(1450, 1950, north);
@@ -207,7 +235,7 @@
   const COL2_GRASS2 = new THREE.Color(0x354637);
   const COL2_ROCK = new THREE.Color(0x4b4845);
   const COL2_ROCKH = new THREE.Color(0x756f67);
-  const COL2_SNOW = new THREE.Color(0xd9e0e5);
+  const COL2_SNOW = new THREE.Color(0xeef2f5);   // brighter, harmonized with the snow-biome white (0xf8fafb/0xd4dfe2)
   function bandColor2(y, slope, wob, out) {
     const j = (wob - 0.5) * 26;
     if (y < -0.2) { out.copy(COL2_DEEP); return; }
