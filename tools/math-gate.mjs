@@ -48,8 +48,8 @@ const CALIBRATE = argv.includes("--calibrate");
 // `node tools/math-gate.mjs --calibrate --seeds 90210,1337` and paste.
 const BIOMES_ALL = ["airport","arena","capeharbor","city","desert","farmland","forest","foundry","goldspire","kesh","kesh_east","kesh_north","keshtown","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
 const GOLDEN = {
-  90210: { lots: 329, shops: 182, roads: 162, biomes: BIOMES_ALL },
-  1337:  { lots: 337, shops: 194, roads: 162, biomes: BIOMES_ALL },
+  90210: { lots: 329, shops: 182, roads: 178, biomes: BIOMES_ALL },   // roads +16: HIGHWAY_NET_V2 routes
+  1337:  { lots: 337, shops: 194, roads: 178, biomes: BIOMES_ALL },
 };
 const BAND = 0.12;
 const MTN_OUT_SNOW_MAX = 60;   // backdrop-ring cells the audit reports on a clean world
