@@ -80,12 +80,14 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIXED_STICK == null) CBZ.CONFIG.TOUCH_FIXED_STICK = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_SLIDE == null) CBZ.CONFIG.TOUCH_AIM_SLIDE = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_SCOPE_UP == null) CBZ.CONFIG.TOUCH_SCOPE_UP = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_UP == null) CBZ.CONFIG.TOUCH_AIM_UP = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_DRAG == null) CBZ.CONFIG.TOUCH_AIM_DRAG = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE == null) CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
   const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
   const SCOPEUP = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_SCOPE_UP !== false;
+  const AIMUP = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_UP !== false;
   const AIMDRAG = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_DRAG !== false;
 
   const SENS = 0.006, MAXR = 74, DEAD = 0.28;   // MAXR matches the enlarged 168px disc (owner: bigger pad, less corner)
@@ -172,6 +174,7 @@
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
       btn("thoming", "tbtn tsm", SVG.homing, "Homing on/off") +
+      '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" +
       "</div>";
     document.body.appendChild(wrap);
     baseEl = document.getElementById("tstick");
@@ -268,8 +271,14 @@
   function slideHoldBtn(id, fn) {
     const b = document.getElementById(id);
     let holds = 0;   // fingers currently holding THIS button's verb
-    const down = () => { if (++holds === 1) { b.classList.add("on"); fn(true); } };
-    const up = () => { if (holds > 0 && --holds === 0) { b.classList.remove("on"); fn(false); } };
+    const wrap = () => document.getElementById("tbtns");
+    const down = () => { if (++holds === 1) { b.classList.add("on"); fn(true);
+      if (id === "taim" && AIMUP) { const w = wrap(); if (w) { w.classList.add("aimup-live");
+        const sc = document.getElementById("tscope");
+        w.classList.toggle("scope-shown", !!(sc && sc.style.display !== "none")); } } } };
+    const up = () => { if (holds > 0 && --holds === 0) { b.classList.remove("on"); fn(false);
+      if (id === "taim") { const w = wrap(); if (w) w.classList.remove("aimup-live");
+        const fp = document.getElementById("tfireup"); if (fp) fp.classList.remove("fireon"); } } };
     b.addEventListener("touchstart", (e) => {
       e.preventDefault();
       const fb = document.getElementById("tfire");
@@ -319,8 +328,9 @@
         // from the start anchor past the pad engages FIRE with the rect's own
         // hysteresis (harder to enter than to hold). SCOPE only — AIM's reach is
         // untouched, and it flows through the same fireIn/release/stale-sweep path.
-        if (SCOPEUP && id === "tscope" && rec.sy - t.clientY >= (rec.fireIn ? SLIDE_PAD_IN : SLIDE_PAD_OUT)) inFire = true;
-        if (inFire !== rec.fireIn) { rec.fireIn = inFire; fireHold(inFire); }
+        if (((SCOPEUP && id === "tscope") || (AIMUP && id === "taim")) && rec.sy - t.clientY >= (rec.fireIn ? SLIDE_PAD_IN : SLIDE_PAD_OUT)) inFire = true;   // TOUCH_AIM_UP: same natural up-drag from AIM (owner: "much more natural feeling motion")
+        if (inFire !== rec.fireIn) { rec.fireIn = inFire; fireHold(inFire);
+          if (id === "taim") { const fp = document.getElementById("tfireup"); if (fp) fp.classList.toggle("fireon", inFire); } }
       }
     }, { passive: false });
     const end = (e) => {

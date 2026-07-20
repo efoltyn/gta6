@@ -91,6 +91,18 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 #tbtns.tslide #taim, #tbtns.tslide #tscope { position: absolute; right: calc(100% + 12px); }
 #tbtns.tslide #taim { bottom: 16px; }     /* shoulder-to-shoulder with FIRE  */
 #tbtns.tslide #tscope { bottom: 80px; }   /* stacked just above AIM          */
+/* TOUCH_AIM_UP ghost pad: a drag-UP target that appears above AIM while the
+   aim finger is down (pointer-events none — the up-drag gesture is the input,
+   this just shows where it lands). .fireon lights it while fire is engaged. */
+#tfireup { display: none; position: absolute; right: calc(100% + 12px); bottom: 80px;
+  width: 48px; height: 48px; border-radius: 50%; align-items: center; justify-content: center;
+  background: rgba(30,34,44,.42); border: 1.5px dashed rgba(255,255,255,.35);
+  pointer-events: none; opacity: .75; }
+#tfireup svg { width: 22px; height: 22px; stroke: rgba(255,255,255,.7); fill: none; stroke-width: 2; }
+#tbtns.aimup-live #tfireup { display: flex; }
+#tbtns.aimup-live.scope-shown #tfireup { bottom: 144px; }
+#tbtns.aimup-live #tfireup.fireon { border-style: solid; border-color: #ff6a5e;
+  background: rgba(255,80,60,.30); opacity: 1; }
 .tbtn.tjump { width: 72px; height: 72px; background: rgba(58,209,122,.42); border-color: rgba(58,209,122,.6); }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65); }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
