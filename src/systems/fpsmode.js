@@ -3181,11 +3181,16 @@
         // scope FOV owns the view (sniper / gunsmith optic overlay) so a centered
         // receiver can't intrude into the scope glass.
         const scopeUp = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
-        const wantSight = CBZ.CONFIG.FPS_ADS_SIGHTS !== false && aimHeld && !scopeUp;
+        // DEFAULT OFF (owner report, with screenshots): the centered pose put
+        // the voxel receiver IN the sight line — the player stared at the back
+        // of their own gun, and any zoom magnified it into a screen-filling
+        // box. Re-enable only after per-weapon sight-plane tuning; the rest of
+        // the aim package (recoil settle, pitch, assist) is unaffected.
+        const wantSight = CBZ.CONFIG.FPS_ADS_SIGHTS === true && aimHeld && !scopeUp;
         adsSightK += ((wantSight ? 1 : 0) - adsSightK) * Math.min(1, dt * 12);
         if (adsSightK < 1e-3) adsSightK = 0;
         const sightX = 0.36 * (1 - adsSightK);      // 0.36 → 0.00 (centered)
-        const sightY = -0.34 + 0.29 * adsSightK;    // -0.34 → -0.05 (up to line of sight)
+        const sightY = -0.34 + 0.12 * adsSightK;    // -0.34 → -0.22: origin stays LOW so the slide top sits just under the crosshair (at -0.05 the receiver blocked the view)
         // Sustained-fire climb stays small; bullets now use the exact live
         // muzzle socket, so the rendered barrel and projectile remain welded
         // together through the kick instead of diverging under an origin clamp.
