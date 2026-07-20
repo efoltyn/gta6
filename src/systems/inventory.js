@@ -23,18 +23,18 @@
   const N_MAIN = 27, N_HOT = 9, N = N_MAIN + N_HOT; // 0..26 main, 27..35 hotbar
   const STACK = 64;
   const ICON = {
-    "Lighter": "🔥", "Soap": "🧼", "Shiv": "🔪", "Energy Bar": "🍫",
-    "Burner Phone": "📱", "Ramen": "🍜", "Gun-Room Key": "🗝️", "Gun": "🔫",
-    "Pills": "💊", "Powder": "❄️", "Pruno Hooch": "🍺",
-    "Razor Blade": "🪒", "Phone Charger": "🔌", "Brass Knuckles": "🥊",
-    "Energy Drink": "🥤", "Burner SIM": "📇", "Tattoo Gun": "🖊️",
-    "Cigarette Carton": "📦", "Painkillers": "💉", "Lockpick": "🪛",
-    "Handcuff Key": "🔑", "Bedsheet Rope": "🪢", "Hacksaw Blade": "🪚",
-    "Contraband Map": "🗺️", "Stolen Wallet": "👛", "Cash Roll": "💵",
-    "Gold Tooth": "🦷", "Gold Chain": "📿", "Luxury Watch": "⌚",
+    "Lighter": "", "Soap": "", "Shiv": "", "Energy Bar": "",
+    "Burner Phone": "", "Ramen": "", "Gun-Room Key": "", "Gun": "",
+    "Pills": "", "Powder": "", "Pruno Hooch": "",
+    "Razor Blade": "", "Phone Charger": "", "Brass Knuckles": "",
+    "Energy Drink": "", "Burner SIM": "", "Tattoo Gun": "",
+    "Cigarette Carton": "", "Painkillers": "", "Lockpick": "",
+    "Handcuff Key": "", "Bedsheet Rope": "", "Hacksaw Blade": "",
+    "Contraband Map": "", "Stolen Wallet": "", "Cash Roll": "",
+    "Gold Tooth": "", "Gold Chain": "", "Luxury Watch": "",
     // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
     // + city/charpanel.js for the city-mode equivalents.
-    "Wood": "🪵", "Stone": "🪨", "Scrap": "⚙️", "Hatchet": "🪓", "Pickaxe": "⛏️",
+    "Wood": "", "Stone": "", "Scrap": "", "Hatchet": "", "Pickaxe": "",
   };
   // items you can FENCE for their cigarette value straight from the bag
   const FENCEABLE = new Set(["Cash Roll", "Cigarette Carton", "Stolen Wallet", "Gold Tooth", "Gold Chain", "Luxury Watch"]);
@@ -147,16 +147,16 @@
     if (FENCEABLE.has(name)) {
       const v = (CBZ.econ && CBZ.econ.ITEMS[name] && CBZ.econ.ITEMS[name].value) || 10;
       CBZ.econ && CBZ.econ.addCigs(v);
-      CBZ.flashHint && CBZ.flashHint("💰 Fenced " + name + " for " + v + " 🚬", 1.8);
+      CBZ.flashHint && CBZ.flashHint("Fenced " + name + " for " + v + "", 1.8);
       CBZ.sfx && CBZ.sfx("coin"); return;
     }
-    if (name === "Painkillers") { CBZ.player.stun = 0; CBZ.player.hp = Math.min(100, (CBZ.player.hp || 100) + 35); CBZ.addHeat && CBZ.addHeat(-10); CBZ.flashHint && CBZ.flashHint("💉 Patched up — no pain.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
-    if (name === "Energy Drink") { CBZ.player.stun = 0; CBZ.player.stamina = 100; CBZ.addHeat && CBZ.addHeat(-8); CBZ.flashHint && CBZ.flashHint("🥤 Wired — wide awake.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
-    if (name === "Ramen") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-40); CBZ.flashHint && CBZ.flashHint("🍜 Slurp — calm and clear-headed.", 1.6); }
-    else if (name === "Energy Bar") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-25); CBZ.flashHint && CBZ.flashHint("🍫 Sugar rush — shake it off.", 1.6); }
-    else if (name === "Pruno Hooch") { CBZ.addHeat && CBZ.addHeat(-20); CBZ.flashHint && CBZ.flashHint("🍺 Liquid courage.", 1.6); }
-    else if (name === "Pills") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("💊 Numb to it all.", 1.6); }
-    else if (name === "Powder") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("❄️ Wired and jittery.", 1.6); }
+    if (name === "Painkillers") { CBZ.player.stun = 0; CBZ.player.hp = Math.min(100, (CBZ.player.hp || 100) + 35); CBZ.addHeat && CBZ.addHeat(-10); CBZ.flashHint && CBZ.flashHint("Patched up — no pain.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
+    if (name === "Energy Drink") { CBZ.player.stun = 0; CBZ.player.stamina = 100; CBZ.addHeat && CBZ.addHeat(-8); CBZ.flashHint && CBZ.flashHint("Wired — wide awake.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
+    if (name === "Ramen") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-40); CBZ.flashHint && CBZ.flashHint("Slurp — calm and clear-headed.", 1.6); }
+    else if (name === "Energy Bar") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-25); CBZ.flashHint && CBZ.flashHint("Sugar rush — shake it off.", 1.6); }
+    else if (name === "Pruno Hooch") { CBZ.addHeat && CBZ.addHeat(-20); CBZ.flashHint && CBZ.flashHint("Liquid courage.", 1.6); }
+    else if (name === "Pills") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("Numb to it all.", 1.6); }
+    else if (name === "Powder") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("Wired and jittery.", 1.6); }
     CBZ.sfx && CBZ.sfx("coin");
   }
   function useItem(name) {

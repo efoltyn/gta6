@@ -97,20 +97,20 @@
 
   const ICON = {
     // weapons / tools
-    Pistol: "🔫", Revolver: "🔫", "Desert Eagle": "🔫", SMG: "🔫", Uzi: "🔫",
-    Shotgun: "🔫", Rifle: "🔫", "AK-47": "🔫", LMG: "🔫", Sniper: "🔫",
-    Bazooka: "🚀", "Rocket Launcher": "🚀", Taser: "⚡", Bat: "🏏", Knife: "🔪",
-    Grenade: "🧨", "Ammo Box": "📦", Medkit: "🩹", "Body Armor": "🦺",
-    Lockpick: "🪛", Crowbar: "🔧", "Burner Phone": "📱", Chest: "🧰",
-    Wood: "🪵", Stone: "🪨", Scrap: "⚙️", Hatchet: "🪓", Pickaxe: "⛏️",
+    Pistol: "", Revolver: "", "Desert Eagle": "", SMG: "", Uzi: "",
+    Shotgun: "", Rifle: "", "AK-47": "", LMG: "", Sniper: "",
+    Bazooka: "", "Rocket Launcher": "", Taser: "", Bat: "", Knife: "",
+    Grenade: "", "Ammo Box": "", Medkit: "", "Body Armor": "",
+    Lockpick: "", Crowbar: "", "Burner Phone": "", Chest: "",
+    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
     // food / drugs
-    Burger: "🍔", Hotdog: "🌭", "Pizza Slice": "🍕", Soda: "🥤", Fries: "🍟",
-    "Energy Drink": "🥤", Weed: "🌿", Coke: "❄️", Meth: "🧪", Pills: "💊",
+    Burger: "", Hotdog: "", "Pizza Slice": "", Soda: "", Fries: "",
+    "Energy Drink": "", Weed: "", Coke: "", Meth: "", Pills: "",
     // valuables
-    Wallet: "👛", Phone: "📱", Laptop: "💻", "Cash Stack": "💵", "Gold Bar": "🥇",
-    "Briefcase of Cash": "💼",
+    Wallet: "", Phone: "", Laptop: "", "Cash Stack": "", "Gold Bar": "",
+    "Briefcase of Cash": "",
   };
-  const TAG_ICON = { weapon: "🔫", food: "🍔", drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", ammo: "📦", resource: "📦" };
+  const TAG_ICON = { weapon: "", food: "", drug: "", wearable: "", valuable: "", throwable: "", tool: "", ammo: "", resource: "" };
   function iconFor(name) { return ICON[name] || TAG_ICON[itemTag(name)] || "▪"; }
   function weaponFace(id, name, className) {
     let src = "";
@@ -730,7 +730,7 @@
     let paid = false;
     if (E.count("Chest") > 0) { E.take("Chest", 1); }
     else if (opts.buy) {
-      if ((g.cash || 0) < CHEST_COST) { note("⛔ A chest costs $" + CHEST_COST + ".", 2); sfx("hit"); return false; }
+      if ((g.cash || 0) < CHEST_COST) { note("A chest costs $" + CHEST_COST + ".", 2); sfx("hit"); return false; }
       g.cash -= CHEST_COST; paid = true;
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     } else { note("You don't own a chest.", 1.6); return false; }
@@ -743,7 +743,7 @@
     }
     const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, slots: new Array(CHEST_N).fill(null), mesh: buildChestMesh(x, z) };
     chests.push(c);
-    note("🧰 Chest placed — walk up and press [E] to open it.", 2.4);
+    note("Chest placed — walk up and press [E] to open it.", 2.4);
     sfx("door");
     persistChests(); commit();
     return true;
@@ -755,7 +755,7 @@
     chests.splice(at, 1);
     registerChestItem();
     if (econ()) econ().add("Chest", 1);
-    note("🧰 Chest packed up.", 1.6);
+    note("Chest packed up.", 1.6);
     sfx("clank");
     persistChests(); commit();
     return true;
@@ -1058,7 +1058,7 @@
     chestPanel = document.createElement("div");
     chestPanel.id = "ci2Chest";
     chestPanel.innerHTML =
-      "<div class='ttl'>🧰 Chest</div><div class='ci2Grid' data-grid='c'></div>" +
+      "<div class='ttl'>Chest</div><div class='ci2Grid' data-grid='c'></div>" +
       "<div class='ttl'>Inventory</div><div class='ci2Grid' data-grid='p'></div>" +
       "<div class='ci2Hint'>Shift-click: quick-move · [E]/[Esc] close · empty chest: [Pick up] below</div>" +
       "<div style='display:flex;gap:6px'><button type='button' class='ci2Btn' data-act='pickup'>Pick up chest</button>" +

@@ -130,7 +130,7 @@
     //    a clean, felt number rather than a full accounting split).
     const cut = Math.round((g.cash || 0) * 0.3);
     if (cut > 0 && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(-cut);
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("💔 " + name + " left you — she took $" + cut.toLocaleString());
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + name + " left you — she took $" + cut.toLocaleString());
 
     // 3) HOME — if the player owns a place, the plan calls for her moving out
     //    (no property transfer this wave; a later refinement, per the build
@@ -218,7 +218,7 @@
       if (!_warnedUnhappy) {
         _warnedUnhappy = true;
         if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note("💍 " + ((spouse && spouse.name) || nameOf(g.citySpouseSid)) + " is unhappy — come home, bring a gift", 3.2);
+          CBZ.city.note("" + ((spouse && spouse.name) || nameOf(g.citySpouseSid)) + " is unhappy — come home, bring a gift", 3.2);
         }
       }
     } else {

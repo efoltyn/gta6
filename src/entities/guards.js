@@ -793,7 +793,7 @@
     const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
     if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
     barkCD = 6;
-    if (CBZ.flashHint) CBZ.flashHint(`🗣 ${nameOf(g)}: “${pool[(Math.random() * pool.length) | 0]}”`, 1.7);
+    if (CBZ.flashHint) CBZ.flashHint(`${nameOf(g)}: “${pool[(Math.random() * pool.length) | 0]}”`, 1.7);
   }
 
   function noteState(g, s) {

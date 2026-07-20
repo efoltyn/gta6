@@ -237,7 +237,7 @@
     if (d.feeds >= TAME_FEEDS || rng() < 0.34) {
       d.tamed = true; d.name = NAMES[(rng() * NAMES.length) | 0];
       d.hp = d.maxHp; addCollar(d);
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("❤ " + d.name + " is now your dog! Heel · Sit · Feed via [E]", 3.4);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " is now your dog! Heel · Sit · Feed via [E]", 3.4);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);
     } else if (CBZ.city && CBZ.city.note) {
       CBZ.city.note("The " + d.breed.name + " takes the food… warming up to you.", 2.2);
@@ -247,9 +247,9 @@
   function feedOwn(d) {
     if (!consumeFeed()) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No food to give — hunt some meat or buy a Bone.", 2); return; }
     d.hp = Math.min(d.maxHp, d.hp + 18);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("❤ " + d.name + " wolfs it down (+health).", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " wolfs it down (+health).", 1.8);
   }
-  function pet(d) { if (CBZ.city && CBZ.city.note) CBZ.city.note("❤ " + d.name + " wags happily.", 1.4); d.wagBoost = 2.2; }
+  function pet(d) { if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " wags happily.", 1.4); d.wagBoost = 2.2; }
   function toggleSit(d) { d.sit = !d.sit; if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + (d.sit ? " sits and stays." : " is at your heel."), 1.6); }
 
   // register a Bone + Dog Treat into the economy so they're real, buyable items.
@@ -279,7 +279,7 @@
       find: function (px, pz, ctx, push) { const h = nearestDog(px, pz); if (h) push(h.d, h.dist); },
     });
     I.describe && I.describe("dog", function (d) {
-      return { label: (d.tamed ? "🐕 " + d.name : "🐕 " + d.name), note: d.tamed ? (d.sit ? "sitting · yours" : "your loyal dog") : (haveFeed() ? "hold food out to tame" : "a wary stray — bring food") };
+      return { label: (d.tamed ? "" + d.name : "" + d.name), note: d.tamed ? (d.sit ? "sitting · yours" : "your loyal dog") : (haveFeed() ? "hold food out to tame" : "a wary stray — bring food") };
     });
     // TAME (stray, needs food)
     I.register("dog", {
@@ -421,7 +421,7 @@
     d._dieZ0 = d.group.rotation.z;
     d.fadeT = 26;
     if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note(d.tamed ? ("💔 " + d.name + " is gone.") : (d.name + " goes down."), d.tamed ? 3.4 : 2, d.tamed ? { urgent: true } : undefined);
+      CBZ.city.note(d.tamed ? ("" + d.name + " is gone.") : (d.name + " goes down."), d.tamed ? 3.4 : 2, d.tamed ? { urgent: true } : undefined);
     }
   }
   function removeDog(d) {

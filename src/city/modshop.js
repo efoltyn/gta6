@@ -710,7 +710,7 @@
     }
     if (k === "r" && !e.repeat && car.mods && car.mods.turret && car.mods.launcher) {
       car._modWeapon = (activeWeapon(car) === "turret") ? "launcher" : "turret";
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Weapon: " + (car._modWeapon === "turret" ? "🔫 roof turret" : "🚀 rocket launcher"), 1.0);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Weapon: " + (car._modWeapon === "turret" ? "roof turret" : "rocket launcher"), 1.0);
       e.preventDefault();
     }
   });
@@ -1010,19 +1010,19 @@
     let parts = [];
     if (m.wedge) {
       const sp = wedgeVmag(car);
-      parts.push(sp >= TUNE.wedgeMinSpeed ? "🔺 WEDGE ARMED" : "🔺 wedge " + (sp | 0) + "/" + TUNE.wedgeMinSpeed);
+      parts.push(sp >= TUNE.wedgeMinSpeed ? "WEDGE ARMED" : "wedge " + (sp | 0) + "/" + TUNE.wedgeMinSpeed);
     }
     if (m.booster) {
       const r = (car._boostReady == null ? 1 : car._boostReady);
       const pct = Math.round(r * 100);
       const bars = Math.round(r * 10);
-      parts.push("🚀 BOOST [" + "█".repeat(bars) + "·".repeat(10 - bars) + "] " + (r >= 1 ? "READY" : pct + "%"));
+      parts.push("BOOST [" + "█".repeat(bars) + "·".repeat(10 - bars) + "] " + (r >= 1 ? "READY" : pct + "%"));
     }
     const w = activeWeapon(car);
     if (m.turret || m.launcher) {
       let ws = "";
-      if (w === "turret") ws = "🔫 TURRET";
-      else if (w === "launcher") ws = "🚀 ROCKETS x" + ((m.launcher && m.launcher.ammo) | 0);
+      if (w === "turret") ws = "TURRET";
+      else if (w === "launcher") ws = "ROCKETS x" + ((m.launcher && m.launcher.ammo) | 0);
       if (m.turret && m.launcher) ws += "  ·  [R] swap";
       parts.push(ws);
     }
@@ -1147,7 +1147,7 @@
     const d = panelEl(); if (!d) return;
     const car = liveCar();
     if (!car) { closePanel(); return; }
-    let html = "<div style='font-weight:700;font-size:18px;margin-bottom:2px;color:#bfe39a'>🔧 Mod Garage</div>";
+    let html = "<div style='font-weight:700;font-size:18px;margin-bottom:2px;color:#bfe39a'>Mod Garage</div>";
     html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:10px'>Keep the ride — build a war machine. " +
       "<span style='color:#7ed957'>" + fmt$(cash()) + "</span> on hand</div>";
     // tab bar (keys [1]-[7])
@@ -1216,7 +1216,7 @@
     }
     cityApplyCarMod(car, modId, tier);
     if (CBZ.sfx) CBZ.sfx("clank");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🔧 Installed — your ride's meaner now.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Installed — your ride's meaner now.", 1.6);
   }
   function doResupply(car) {
     const m = car.mods && car.mods.launcher; if (!m) return;
@@ -1227,7 +1227,7 @@
     }
     m.ammo = TUNE.launcherAmmoMax;
     if (CBZ.sfx) CBZ.sfx("reload");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🚀 Rockets loaded — " + m.ammo + " ready.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded — " + m.ammo + " ready.", 1.6);
   }
   function doRespray(car) {
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(PRICE.respray))) {
@@ -1245,7 +1245,7 @@
     // a visual swap orphaned our attachments — re-dress.
     if (car.mods) applyMods(car);
     if (CBZ.sfx) CBZ.sfx("switch");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🎨 Fresh paint" + (restyled ? " + new lines" : "") + " — looks clean.", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + " — looks clean.", 1.8);
     renderPanelSafe();
   }
   function recolor(car, col) {
@@ -1303,7 +1303,7 @@
       },
       options: [{
         id: "modshop-open", slot: "i",
-        label: function () { return "🔧 Open the mod garage"; },
+        label: function () { return "Open the mod garage"; },
         onSelect: function () { openPanel(); },
       }],
     });

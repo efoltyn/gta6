@@ -117,14 +117,14 @@
       n.intimidMode = "draw";
       n.intimidDrawT = 0.4 + rng() * 0.3;
       n.poseHandsUp = false; n.poseAimBack = false;
-      if (CBZ.npcEmote) CBZ.npcEmote(n, "😠");
+      if (CBZ.npcEmote) CBZ.npcEmote(n, "");
     } else {
       n.intimidMode = "scared";
       n.poseHandsUp = true; n.poseAimBack = false;
-      if (CBZ.npcEmote) CBZ.npcEmote(n, "🙌");
+      if (CBZ.npcEmote) CBZ.npcEmote(n, "");
       if (!n._reactHinted) {
         n._reactHinted = true;
-        CBZ.flashHint && CBZ.flashHint("🙌 " + shortName(n) + " freezes up — [G] to rob", 1.7);
+        CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " freezes up — [G] to rob", 1.7);
       }
     }
   }
@@ -140,7 +140,7 @@
     CBZ.sfx && CBZ.sfx("shoot_pistol");
     if (CBZ.shootPlayer) CBZ.shootPlayer(52, g.x, g.z, {
       heat: 16, shake: 0.62, stun: 0.22,
-      haulMsg: "🔫 SHOT DOWN — DRAGGED TO YOUR CELL",
+      haulMsg: "SHOT DOWN — DRAGGED TO YOUR CELL",
       hint: shortName(n) + " shoots back!",
     });
   }
@@ -201,7 +201,7 @@
             n.poseAimBack = true;
             n.intimidFireT = 0.8 + ((n.personality && n.personality.nerve) || 0.5) * 1.7;
             CBZ.sfx && CBZ.sfx("switch");
-            CBZ.flashHint && CBZ.flashHint("😠 " + shortName(n) + " pulls a gun on you!", 1.5);
+            CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " pulls a gun on you!", 1.5);
           }
         } else if (n.intimidMode === "standoff") {
           if (aimedHere) {

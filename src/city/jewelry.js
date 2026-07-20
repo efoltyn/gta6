@@ -386,13 +386,13 @@
     }
     const P = CBZ.player;
     if (P && Math.hypot(P.pos.x - cs.x, P.pos.z - cs.z) < 30)
-      note("💎 Fresh ice under new glass at " + S.jw.name + ".", 2.2);
+      note("Fresh ice under new glass at " + S.jw.name + ".", 2.2);
   }
 
   // ---- the ALARM + the charge (normal wanted flow, no special cop code) ------
   function startAlarm(cs) {
     if (S.alarmT <= 0) {
-      note("🚨 ALARM — " + S.jw.name + "! Every head on the block just turned.", 2.2);
+      note("ALARM — " + S.jw.name + "! Every head on the block just turned.", 2.2);
       if (CBZ.sfx) CBZ.sfx("alarm");
       S.beepT = 1.4;
     }
@@ -485,7 +485,7 @@
     setTaken(p, true);
     if (piecesLeft(cs) === 0) caseEmptied(cs);
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("💎 Bought the " + p.label + " — " + fmt$(price) + ". " + dripWord(p.drip) + ". (pawn it later)", 2.6);
+    note("Bought the " + p.label + " — " + fmt$(price) + ". " + dripWord(p.drip) + ". (pawn it later)", 2.6);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(p.drip >= 20 ? 3 : 1);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
@@ -506,9 +506,9 @@
       total += p.value; names.push(p.name);
     }
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("💎 Scooped: " + names.join(" + ") + " — " + fmt$(total) + " in ice.", 2.6);
+    note("Scooped: " + names.join(" + ") + " — " + fmt$(total) + " in ice.", 2.6);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(total >= 90000 ? 8 : 3);   // the grab IS the flex
-    if (total >= 200000 && CBZ.city && CBZ.city.big) CBZ.city.big("💎 " + fmt$(total) + " SMASH-AND-GRAB!");
+    if (total >= 200000 && CBZ.city && CBZ.city.big) CBZ.city.big("" + fmt$(total) + " SMASH-AND-GRAB!");
     caseEmptied(cs);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -517,7 +517,7 @@
   function startPry(cs) {
     const P = CBZ.player;
     S.pry = { cs, t: 0, px: P.pos.x, pz: P.pos.z };
-    note("🤫 Working the lock — stay still, stay quiet…", 1.4);
+    note("Working the lock — stay still, stay quiet…", 1.4);
   }
   function cancelPry(why) {
     if (!S.pry) return;
@@ -534,14 +534,14 @@
     setTaken(best, true);
     e.add(best.name, 1);
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("🤫 Slipped the " + best.name + " (" + fmt$(best.value) + ") out clean — no alarm.", 2.4);
+    note("Slipped the " + best.name + " (" + fmt$(best.value) + ") out clean — no alarm.", 2.4);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(best.value >= 90000 ? 6 : 2);
     if (piecesLeft(cs) === 0) caseEmptied(cs);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // every pull risks the clerk turning around mid-lift
     const v = S.lot.building && S.lot.building.vendor;
     if (v && !v.dead && Math.random() < PRY_RISK) {
-      note("👀 The " + (v.name || "Jeweler") + " spun around — you're MADE!", 2.2);
+      note("The " + (v.name || "Jeweler") + " spun around — you're MADE!", 2.2);
       startAlarm(cs);
     }
   }

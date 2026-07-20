@@ -110,7 +110,7 @@
     "“Respect. You carry yourself right.”",
     "“That's a clean look, no lie.”",
   ];
-  const COMP_BACK = ["“Ha — appreciate that.”", "“Aw, thanks. 🙂”", "“You're alright, you know that?”", "“Means a lot, stranger.”"];
+  const COMP_BACK = ["“Ha — appreciate that.”", "“Aw, thanks. ”", "“You're alright, you know that?”", "“Means a lot, stranger.”"];
   function compliment(p) {
     meet(p);
     note(COMPLIMENTS[(Math.random() * COMPLIMENTS.length) | 0], 1.8);
@@ -174,7 +174,7 @@
     relShift(p, "intimidated", readsMeAsSmaller(p) ? 1.3 : 1);   // a big gap lands harder
     p.alarmed = Math.max(p.alarmed || 0, 4);
     p.fear = Math.min(10, (p.fear || 0) + 3);
-    say(p, ["😨", "“O-okay, okay…”", "“I don't want trouble.”"][(Math.random() * 3) | 0], "#ffd1c4", 2.2);
+    say(p, ["", "“O-okay, okay…”", "“I don't want trouble.”"][(Math.random() * 3) | 0], "#ffd1c4", 2.2);
     sfx("blip");
   }
 
@@ -252,7 +252,7 @@
     const truck = (CBZ.cityArmored && CBZ.cityArmored.active && CBZ.cityArmored.active() && CBZ.cityArmored.truck) ? CBZ.cityArmored.truck() : null;
     if (truck && truck.pos && Math.random() < 0.85) {
       note("“Word is an armored truck's rolling. You didn't hear it from me.”", 3.2);
-      say(p, "🤐", "#bfe0ff", 1.8);
+      say(p, "", "#bfe0ff", 1.8);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(truck.pos.x, truck.pos.z, "ARMORED TRUCK");
       sfx("blip");
       return;
@@ -274,7 +274,7 @@
       "“People talk about you, you know.”",
     ];
     note("“" + lines[(Math.random() * lines.length) | 0].replace(/^"|"$/g, "") + "”", 2.6);
-    say(p, "🙂", "#cdeccd", 1.6);
+    say(p, "", "#cdeccd", 1.6);
   }
 
   // ---- BUM A SMOKE / ASK FOR A LIGHT (free slot — the smallest icebreaker).
@@ -284,13 +284,13 @@
     meet(p);
     const warm = bond(p) > -0.1 && !(rel(p) && rel(p).fear > 60);
     if (warm) {
-      note("“Here.” " + nm(p) + " flicks you a light. 🔥", 2);
+      note("“Here.” " + nm(p) + " flicks you a light.", 2);
       relShift(p, "greeted", 0.5);
       if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.15);
-      say(p, "🚬", "#dfe7ff", 1.8);
+      say(p, "", "#dfe7ff", 1.8);
     } else {
       note("“Buy your own.” " + nm(p) + " waves you off.", 2);
-      say(p, "😒", "#cfd6e6", 1.8);
+      say(p, "", "#cfd6e6", 1.8);
     }
     sfx("blip");
   }
@@ -307,7 +307,7 @@
     note("You slip " + nm(p) + " " + money(HANDOUT) + ". They light up.", 2.4);
     relShift(p, "gift", 1);                // affection + loyalty + respect, ripples to their circle
     if (p.mood != null) p.mood = 1;
-    say(p, ["“God bless you.”", "“You're a real one. 🙏”", "“I won't forget this.”"][(Math.random() * 3) | 0], "#cdeccd", 2.4);
+    say(p, ["“God bless you.”", "“You're a real one. ”", "“I won't forget this.”"][(Math.random() * 3) | 0], "#cdeccd", 2.4);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);   // a public soft touch reads on the street
     sfx("coin");
   }
@@ -317,11 +317,11 @@
   function fanMoment(p) {
     meet(p);
     const photo = Math.random() < 0.5;
-    if (photo) note("📸 You grab a photo with " + (p.name || vipTitle(p)) + " — that's one for the story.", 2.6);
-    else note("✒️ " + (p.name || vipTitle(p)) + " signs an autograph for you.", 2.6);
+    if (photo) note("You grab a photo with " + (p.name || vipTitle(p)) + " — that's one for the story.", 2.6);
+    else note("" + (p.name || vipTitle(p)) + " signs an autograph for you.", 2.6);
     relShift(p, "greeted", 0.6);
     if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.3);
-    say(p, photo ? "😎📷" : "“Stay classy.”", "#ffe9a8", 2.2);
+    say(p, photo ? "" : "“Stay classy.”", "#ffe9a8", 2.2);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);   // being SEEN with a name buys cred
     sfx("blip");
   }
@@ -353,13 +353,13 @@
   I.register("ped:civ", {
     id: "rich-e-fan", slot: "e", prio: 24,
     canShow: (p) => isStrangerish(p) && !isYours(p) && isVip(p) && !hatesYou(p),
-    label: "Take a photo 📸",
+    label: "Take a photo",
     onSelect: (p) => fanMoment(p),
   });
   I.register("ped:civ", {
     id: "rich-e-give", slot: "e", prio: 22,
     canShow: (p) => isStrangerish(p) && !isYours(p) && looksBroke(p) && myCash() >= HANDOUT,
-    label: () => "Give " + money(HANDOUT) + " 🤲",
+    label: () => "Give " + money(HANDOUT) + "",
     onSelect: (p) => giveMoney(p),
   });
   I.register("ped:civ", {
@@ -375,13 +375,13 @@
   I.register("ped:civ", {
     id: "rich-k-lead", slot: "k", prio: 8,
     canShow: (p) => isStrangerish(p) && !isYours(p) && canTip(p),
-    label: "Ask around 👂",
+    label: "Ask around",
     onSelect: (p) => askLead(p),
   });
   I.register("ped:civ", {
     id: "rich-k-directions", slot: "k", prio: 7,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p),
-    label: "Ask directions 🧭",
+    label: "Ask directions",
     onSelect: (p) => askDirections(p),
   });
 
@@ -392,13 +392,13 @@
   I.register("ped:civ", {
     id: "rich-j-intimidate", slot: "j", prio: 12, bad: true,
     canShow: (p) => isStrangerish(p) && !isYours(p) && readsMeAsSmaller(p) && !isVip(p),
-    label: "Intimidate 😠",
+    label: "Intimidate",
     onSelect: (p) => intimidate(p),
   });
   I.register("ped:civ", {
     id: "rich-j-smoke", slot: "j", prio: 11,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !readsMeAsSmaller(p),
-    label: "Ask a light 🔥",
+    label: "Ask a light",
     onSelect: (p) => bumSmoke(p),
   });
 

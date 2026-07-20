@@ -81,7 +81,7 @@
     if (!state.mounted) return;
     const kph = Math.round(speed() * 3.6);
     const mode = state.grounded ? (Math.abs(state.steer) > 0.15 ? "CARVING" : "RIDING") : ("AIR " + state.airT.toFixed(1) + "s");
-    hudText.innerHTML = "🏂 " + mode + " &nbsp;·&nbsp; " + kph + " km/h &nbsp;·&nbsp; " + state.points + " pts<br><span style=\"font-weight:600;color:#bfe8ff\">A/D carve · W tuck · S brake · Space ollie · X dismount</span>";
+    hudText.innerHTML = "" + mode + " &nbsp;·&nbsp; " + kph + " km/h &nbsp;·&nbsp; " + state.points + " pts<br><span style=\"font-weight:600;color:#bfe8ff\">A/D carve · W tuck · S brake · Space ollie · X dismount</span>";
   }
 
   function setFacing(dx, dz) {
@@ -106,7 +106,7 @@
     P._snowboard = state; P._rideScale = 0;
     board.visible = true;
     ensureHud(); showHud();
-    note(opts.summit ? "🏂 Lift drop: Mount Mercy summit. Point downhill and send it." : "🏂 Snowboard strapped in.", 2.7);
+    note(opts.summit ? "Lift drop: Mount Mercy summit. Point downhill and send it." : "Snowboard strapped in.", 2.7);
     return true;
   }
   function dismount(silent) {
@@ -127,7 +127,7 @@
     ph.spin = (state.steer || 0.6) * 4.2; ph.spinZ = -ph.spin * 0.55;
     ph.down = Math.max(ph.down || 0, 1.4); ph.kx = ph.kz = 0;
     if (CBZ.shake) CBZ.shake(0.7);
-    note("💥 " + (reason || "Wipeout") + " — you lost the edge.", 2.4);
+    note("" + (reason || "Wipeout") + " — you lost the edge.", 2.4);
   }
 
   function pose() {
@@ -237,7 +237,7 @@
           const earned = Math.round(state.airT * 120 + Math.abs(state.airSpin) * 90 + speed() * 2);
           state.points += earned; state.bestAir = Math.max(state.bestAir, state.airT);
           state.justLanded = 0.55;
-          if (state.airT > 0.28) note("🏂 Landed · +" + earned + " · " + state.airT.toFixed(1) + "s air", 1.5);
+          if (state.airT > 0.28) note("Landed · +" + earned + " · " + state.airT.toFixed(1) + "s air", 1.5);
           if (CBZ.shake && impact > 7) CBZ.shake(Math.min(0.42, impact * 0.022));
           state.airT = 0; state.airSpin = 0;
         }

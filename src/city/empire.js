@@ -129,7 +129,7 @@
     const owns = CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot);
     if (!owns && !CBZ.city.spend(RENT_DEPOSIT)) { CBZ.city.note("Renting a yard costs " + money(RENT_DEPOSIT) + ".", 2); return; }
     b.open = true; b.owned = !!owns; b.cap = owns ? OWN_CAP : RENT_CAP;
-    CBZ.city.big("🚗 Car-resale yard is OPEN at Premium Autos");
+    CBZ.city.big("Car-resale yard is OPEN at Premium Autos");
     CBZ.city.note(owns ? "You own the lot — bigger yard, better resale." : "Yard rented. Drive cars into the lot to stock it.", 3.2);
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.cityCarBizMenu();
@@ -148,8 +148,8 @@
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
     if (CBZ.sfx) CBZ.sfx("door");
     const stocked = b.cars[b.cars.length - 1];
-    CBZ.city.note("🚗 Stocked " + model.name + " (" + condWord(cond) + ") — resale " + money(resaleOf(stocked)) +
-      (hot ? " · hot" : "") + (isHot(model.name) ? " · 🔥 in demand" : ""), 2.4);
+    CBZ.city.note("Stocked " + model.name + " (" + condWord(cond) + ") — resale " + money(resaleOf(stocked)) +
+      (hot ? " · hot" : "") + (isHot(model.name) ? " · in demand" : ""), 2.4);
     if (menuOpen) renderMenu();
   }
 
@@ -167,7 +167,7 @@
     CBZ.city.spend(cost); car.cond = 1;
     const after = resaleOf(car);
     if (CBZ.sfx) CBZ.sfx("door");
-    CBZ.city.note("🔧 Reconditioned " + car.name + " (−" + money(cost) + ") · resale " + money(before) + " → " + money(after), 2.6);
+    CBZ.city.note("Reconditioned " + car.name + " (−" + money(cost) + ") · resale " + money(before) + " → " + money(after), 2.6);
     renderMenu();
   }
 
@@ -231,7 +231,7 @@
       if (rebate > 0) { g.cityBank = (g.cityBank || 0) + rebate; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
       b.launderCredit = Math.max(0, credit - amount);
       if (CBZ.cityWealth && g.cityWealthLog) g.cityWealthLog.laundered = (g.cityWealthLog.laundered || 0) + (r.banked || 0) + rebate;
-      CBZ.city.big("🧺 Washed " + money(amount) + " → " + money((r.banked || 0) + rebate) + " clean");
+      CBZ.city.big("Washed " + money(amount) + " → " + money((r.banked || 0) + rebate) + " clean");
       CBZ.city.note((rebate > 0 ? "Turf rebate +" + money(rebate) + " · " : "") + "cut −" + money((r.lost || 0) - rebate) + ". Buy fronts (Shift+B) to shrink it.", 2.8);
       if (CBZ.sfx) CBZ.sfx("coin");
     } else {
@@ -242,7 +242,7 @@
       g.cityBank = (g.cityBank || 0) + banked;
       b.launderCredit = Math.max(0, credit - amount);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      CBZ.city.big("🧺 Washed " + money(amount) + " → " + money(banked) + " clean (−" + money(lost) + ")");
+      CBZ.city.big("Washed " + money(amount) + " → " + money(banked) + " clean (−" + money(lost) + ")");
       if (CBZ.sfx) CBZ.sfx("coin");
     }
     renderMenu();
@@ -258,7 +258,7 @@
     for (let i = 0; i < squad; i++) { const c = CBZ.citySpawnCop && CBZ.citySpawnCop(z.x, z.z, i % 3 === 0); if (c) cops.push(c); }
     if (CBZ.cityForceStars) CBZ.cityForceStars(Math.min(5, 3 + Math.floor(b.notoriety / 60)));
     b.raid = { t: RAID_DURATION, cops: cops };
-    CBZ.city.big("🚨 POLICE RAID on your yard!");
+    CBZ.city.big("POLICE RAID on your yard!");
     CBZ.city.note("Hold them off or they'll seize your stock — defend the yard!", 3.2);
     if (CBZ.sfx) CBZ.sfx("alarm");
   }
@@ -287,15 +287,15 @@
     if (repelled) {
       b.notoriety = Math.max(0, b.notoriety * 0.35 - 10);
       CBZ.city.addRespect(12);
-      CBZ.city.big("🚓 Raid repelled — yard secured!");
+      CBZ.city.big("Raid repelled — yard secured!");
     } else {
       b.notoriety = Math.max(0, b.notoriety * 0.5);
       if (b.cars.length) {
         const lost = b.cars.splice(0, Math.max(1, Math.floor(b.cars.length / 2)));
-        CBZ.city.big("🚔 Police seized " + lost.length + " car" + (lost.length === 1 ? "" : "s") + " from the yard");
+        CBZ.city.big("Police seized " + lost.length + " car" + (lost.length === 1 ? "" : "s") + " from the yard");
         CBZ.city.note("They cleaned out part of your stock. Lay low for a while.", 2.8);
       } else {
-        CBZ.city.big("🚔 Police tore through your yard");
+        CBZ.city.big("Police tore through your yard");
         CBZ.city.note("Nothing for them to seize this time. Lay low for a while.", 2.6);
       }
     }
@@ -318,7 +318,7 @@
     if (b.raid) { tickRaid(b, dt); return; }
     if (b.notoriety > 0) b.notoriety = Math.max(0, b.notoriety - dt * 0.6);   // cools when you lie low
     // a heads-up as the heat builds
-    if (b.notoriety > RAID_BASE * 0.7 && !warnedHeat) { warnedHeat = true; CBZ.city.note("⚠️ Your chop operation is drawing police attention…", 2.4); }
+    if (b.notoriety > RAID_BASE * 0.7 && !warnedHeat) { warnedHeat = true; CBZ.city.note("Your chop operation is drawing police attention…", 2.4); }
     if (b.notoriety < RAID_BASE * 0.5) warnedHeat = false;
     b.raidT -= dt; if (b.raidT > 0) return;
     b.raidT = RAID_TICK;
@@ -349,7 +349,7 @@
         const pick = CARS[(rng() * CARS.length) | 0];
         b.hotModel = pick.name; b.hotT = 25 + rng() * 30; b.hotBonus = 0.35 + rng() * 0.4;
         setMkt(pick.name, mktLevel(pick.name) + 0.3);
-        if (CBZ.city && CBZ.city.note) CBZ.city.note("📈 Word from the auctions: " + pick.name + "s are HOT right now — flip yours.", 2.8);
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Word from the auctions: " + pick.name + "s are HOT right now — flip yours.", 2.8);
         if (menuOpen) renderMenu();
       } else { b.hotModel = null; }
     }
@@ -407,7 +407,7 @@
     clampPage();
     const cap = effCap();
     const tf = turfFrac();
-    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:1px'>🚗 Car-Resale Yard</div>";
+    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:1px'>Car-Resale Yard</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:7px'>Cash " + money(g.cash || 0) +
       " · Yard " + b.cars.length + "/" + cap + (b.owned ? " · owned" : " · rented") +
       " · Crew " + crewCount() + (tf > 0 ? " · Turf " + Math.round(tf * 100) + "%" : "") + "</div>";
@@ -430,7 +430,7 @@
           "<span><b style='color:#ffd166'>" + (k + 1) + "</b> " + c.name +
           " <span style='color:" + condColor(cond) + ";font-size:11px'>" + condWord(cond) + "</span>" +
           (c.hot ? " <span style='color:#ff8a7a;font-size:10px'>hot</span>" : "") +
-          (isHot(c.name) ? " <span style='color:#ffb454;font-size:10px'>🔥</span>" : "") +
+          (isHot(c.name) ? " <span style='color:#ffb454;font-size:10px'></span>" : "") +
           "</span><span style='color:#7ed957'>" + money(resaleOf(c)) + "</span></div>";
       });
       if (np > 1) html += "<div style='font-size:11px;color:#8a93a3;text-align:center;margin-top:3px'>◀ <b style='color:#cdd6e0'>[ ]</b> ▶ page " + (pg + 1) + "/" + np + (b.cars.length > start + PAGE ? " · +" + (b.cars.length - start - slice.length) + " more" : "") + "</div>";
@@ -440,7 +440,7 @@
 
     // laundering front line
     const credit = Math.floor(b.launderCredit || 0);
-    html += "<div style='font-size:12px;margin-top:8px;color:#cdb8ff'>🧺 Launder front · <b style='color:#cdd6e0'>L</b> wash dirty cash — capacity " + money(credit) +
+    html += "<div style='font-size:12px;margin-top:8px;color:#cdb8ff'>Launder front · <b style='color:#cdd6e0'>L</b> wash dirty cash — capacity " + money(credit) +
       (credit < 100 ? " <span style='color:#8a93a3'>(sell cars to build it)</span>" : "") + "</div>";
 
     html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>Recruit a crew ([K] near a person) — they fight cops in a raid. [Esc] close</div>";

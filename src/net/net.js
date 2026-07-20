@@ -107,7 +107,7 @@
       net.serverWorld = null;
       net.players.clear();
       emit(net._handlers, "_offline", {});
-      if (was && CBZ.city && CBZ.city.note) CBZ.city.note("⚠ Disconnected from server — world is now local", 4);
+      if (was && CBZ.city && CBZ.city.note) CBZ.city.note("Disconnected from server — world is now local", 4);
     };
     net.ws.onerror = function () { opts.onError && opts.onError("Connection failed."); };
   };
@@ -164,7 +164,7 @@
     emit(net._handlers, "_clearPuppets", {});
     if (CBZ.spawnCityPeds) try { CBZ.spawnCityPeds(CBZ.CITY.peds); } catch (e) { console.error(e); }
     if (CBZ.spawnCityTraffic) try { CBZ.spawnCityTraffic(CBZ.CITY.traffic); } catch (e) { console.error(e); }
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("⭐ You are now the world host", 3.5);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("You are now the world host", 3.5);
   }
 
   // ---- own avatar state broadcast (12 Hz) ---------------------------------

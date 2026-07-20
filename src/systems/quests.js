@@ -35,7 +35,7 @@
       return { type: "steal", need, start: g.stealsDone || 0, text: `Pull off ${need} clean heist${need > 1 ? "s" : ""}.`, reward: 10 };
     }
     const need = 6 + Math.floor(econ.rng() * 8);
-    return { type: "gift", need, text: `Bring me ${need} 🚬 as tribute.`, reward: 0 };
+    return { type: "gift", need, text: `Bring me ${need} as tribute.`, reward: 0 };
   }
 
   function questDone(actor) {
@@ -55,7 +55,7 @@
     actor.quest = null;
     CBZ.sfx("key");
     if (actor.rep >= FRIEND) return `${actor.data.name} grins: "You're alright. Come find me — I'll get you out."`;
-    return `${actor.data.name}: "Nice work." (+34 rep${q.reward ? ", +" + q.reward + " 🚬" : ""})`;
+    return `${actor.data.name}: "Nice work." (+34 rep${q.reward ? ", +" + q.reward + " " : ""})`;
   }
 
   // the [1] Talk handler

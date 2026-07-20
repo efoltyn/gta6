@@ -161,7 +161,7 @@
     // a real crew first (prospect → initiation → membership is the primary path).
     if (!g.cityWasMember) { CBZ.city.note("Prove yourself first — get patched into a crew before you found your own. · O prospect", 3); return false; }
     const crew = CBZ.cityPeds.filter((p) => p.companion && p.recruited && !p.dead && p.kind === "crew");
-    if (crew.length < 3) { CBZ.city.note("Need 3 crew to found a gang (you have " + crew.length + "). Recruit more 🔫.", 2.6); return false; }
+    if (crew.length < 3) { CBZ.city.note("Need 3 crew to found a gang (you have " + crew.length + "). Recruit more .", 2.6); return false; }
     pg.name = name || (pick(NAME_A) + " " + pick(NAME_B));
     pg.color = color != null ? color : pick(FOUND_COLORS).hex;
     pg.founded = true;
@@ -174,7 +174,7 @@
     g.career = "gangster";
     pg.order = "follow"; applyOrder();
     g.cityCrew = liveMembers().length;
-    CBZ.city.big("🩸 " + pg.name + " FOUNDED");
+    CBZ.city.big("" + pg.name + " FOUNDED");
     CBZ.city.note("You run the " + pg.name + " now. · O orders", 3.2);
     CBZ.city.addRespect(15);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-founded", { members: crew.length });
@@ -292,7 +292,7 @@
   CBZ.cityPlayerGangBossKilled = function (gangRec) {
     if (!gangRec || gangRec.isPlayer || gangRec.id === "player") return;
     pendingClaim = { rec: gangRec, t: 20 };
-    CBZ.city.big("👑 " + (gangRec.name || "Gang") + " BOSS DOWN");
+    CBZ.city.big("" + (gangRec.name || "Gang") + " BOSS DOWN");
     CBZ.city.note("Claim the " + (gangRec.name || "gang") + " — their crew defects to you. · O", 4);
   };
 
@@ -322,7 +322,7 @@
     g.career = "gangster";
     g.cityCrew = liveMembers().length;
     pendingClaim = null;
-    CBZ.city.big("🩸 " + pg.name + " TAKEOVER");
+    CBZ.city.big("" + pg.name + " TAKEOVER");
     CBZ.city.note("You took over the " + rec.name + ". " + defected + " soldiers ride with you now.", 3.4);
     CBZ.city.addRespect(25);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("takeover", { gang: rec, defected });
@@ -557,7 +557,7 @@
       n++;
     }
     jumpedIn = { gangId: rec.id, t: 12, need: n, startHp: CBZ.player.hp || 100 };
-    CBZ.city.big("🥊 JUMPED IN — SURVIVE");
+    CBZ.city.big("JUMPED IN — SURVIVE");
     CBZ.city.note("Take the beating. Stay on your feet for the count. Don't fight back to death.", 3.6);
     if (CBZ.sfx) CBZ.sfx("punch");
   }
@@ -589,7 +589,7 @@
     if (!mark) { CBZ.city.note("No rival mark around. Find a rival gang member to hit.", 2.6); return false; }
     workContract = { gangId: rec.id, target: mark, t: 90 };
     if (CBZ.cityMarkTarget) CBZ.cityMarkTarget(mark);   // beacon the mark (gangs.js sets a 'HIT:' waypoint)
-    CBZ.city.big("🎯 PUT IN WORK");
+    CBZ.city.big("PUT IN WORK");
     CBZ.city.note("Hit " + (mark.name || "the marked rival") + " (" + gangShort(gangRecById(mark.gang)) + ") to earn your patch.", 4);
     return true;
   }
@@ -605,7 +605,7 @@
     // your standing with this crew flips friendly: make them stop seeing you as prey
     if (CBZ.cityGangSetPlayerFriendly) CBZ.cityGangSetPlayerFriendly(rec.id, true);
     g.career = g.career || "gangster";
-    CBZ.city.big("🩸 PATCHED IN — " + (rec.name || "gang"));
+    CBZ.city.big("PATCHED IN — " + (rec.name || "gang"));
     CBZ.city.note("You're a Prospect in the " + (rec.name || "gang") + " (" + (how === "jumped" ? "jumped in" : "put in work") + "). Climb on merit. · O", 4.5);
     CBZ.city.addRespect(12);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-joined", { gang: rec, how });
@@ -813,7 +813,7 @@
       if (st.mesh && st.mesh.material && st.mesh.material.color) { try { st.mesh.material.color.setHex(0x202020); } catch (e) {} }
     }
     if (take > 0) { g.cityBank = (g.cityBank || 0) + take; }
-    CBZ.city.big("🎒 STASH RAIDED" + (take ? " +$" + take : ""));
+    CBZ.city.big("STASH RAIDED" + (take ? " +$" + take : ""));
     CBZ.city.note(take ? "Your crew cracked the stash — $" + take + " banked. They hold the block." : "The stash was already empty — the crew holds the block anyway.", 3);
     CBZ.city.addRespect(8);
     if (foe && CBZ.cityGangProvoke) CBZ.cityGangProvoke(foe.id, 1);
@@ -955,7 +955,7 @@
         const rec = gangRecById(M.gangId);
         const pip = CBZ.cityRankName ? CBZ.cityRankName(M.rank) : M.rank;
         hudEl.innerHTML =
-          "<div style='font-weight:700;color:" + hex6(rec ? rec.color : 0x8a93a3) + "'>🩸 " + (rec ? rec.name : "Crew") + "</div>" +
+          "<div style='font-weight:700;color:" + hex6(rec ? rec.color : 0x8a93a3) + "'>" + (rec ? rec.name : "Crew") + "</div>" +
           "<div style='color:#aeb6c2'>You: <b style='color:#e8eef7'>" + pip + "</b> · Bodies " + M.bodies + "</div>" +
           "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>Put in work to climb · [O] crew</div>";
         hudEl.style.display = "block"; return;
@@ -967,7 +967,7 @@
         const step = T ? Math.min(T.idx + 1, T.list.length) : 1, n = T ? T.list.length : 4;
         const ready = initiationReady();
         hudEl.innerHTML =
-          "<div style='font-weight:700;color:#ffd166'>🤝 Prospecting " + (rec ? shortGang(rec.name) : "a crew") + "</div>" +
+          "<div style='font-weight:700;color:#ffd166'>Prospecting " + (rec ? shortGang(rec.name) : "a crew") + "</div>" +
           "<div style='color:#aeb6c2'>Task <b style='color:#e8eef7'>" + step + "/" + n + "</b>" + (ready ? " — initiation ready!" : "") + "</div>" +
           "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>" + (ready ? "[O] → get patched in" : (task ? task.label : "Work the tasks") + " · [O]") + "</div>";
         hudEl.style.display = "block"; return;
@@ -978,7 +978,7 @@
     const lts = mem.filter((m) => m.rank === "lt").length;
     const orderName = { follow: "FOLLOW", attack: "ATTACK", hold: "HOLD", disperse: "DISPERSE", raid: "RAID STASH", fortify: "FORTIFY" }[pg.order] || "—";
     hudEl.innerHTML =
-      "<div style='font-weight:700;color:" + hex6(pg.color) + "'>🩸 " + (pg.name || "Your Gang") + "</div>" +
+      "<div style='font-weight:700;color:" + hex6(pg.color) + "'>" + (pg.name || "Your Gang") + "</div>" +
       "<div style='color:#aeb6c2'>Crew <b style='color:#e8eef7'>" + mem.length + "</b> · Lts " + lts + " · Turf " + pg.turf.length + "</div>" +
       "<div style='color:#ffd166'>Order: <b>" + orderName + "</b></div>" +
       "<div style='color:#8a93a3;font-size:11px;margin-top:2px'>[O] orders menu</div>";
@@ -1006,19 +1006,19 @@
     buildMenu();
     const pg = ensure();
     menuActs = [];
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:8px'>🎖 Gang Orders</div>";
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:8px'>Gang Orders</div>";
     const add = (act, label, color) => { menuActs.push(act); const i = menuActs.length; html += "<div class='oopt' data-act='" + act + "' style='padding:5px 0;cursor:pointer'><b style='color:#ffd166'>" + i + "</b> <span style='color:" + (color || "#e8eef7") + "'>" + label + "</span></div>"; };
     if (pendingClaim && pendingClaim.rec && !pendingClaim.rec.absorbed) {
-      add("claim", "👑 CLAIM the " + pendingClaim.rec.name + " (take over)", "#ffd166");
+      add("claim", "CLAIM the " + pendingClaim.rec.name + " (take over)", "#ffd166");
     }
     const M = memb();
     if (M && !pg.founded) {
       // YOU are a patched member of someone else's crew — show your standing
       const rec = gangRecById(M.gangId);
       const pip = CBZ.cityRankName ? CBZ.cityRankName(M.rank) : M.rank;
-      html += "<div style='color:" + hex6(rec ? rec.color : 0x8a93a3) + ";font-weight:700;margin:-2px 0 6px'>🩸 " + (rec ? rec.name : "Your crew") + " — you're a " + pip + "</div>";
+      html += "<div style='color:" + hex6(rec ? rec.color : 0x8a93a3) + ";font-weight:700;margin:-2px 0 6px'>" + (rec ? rec.name : "Your crew") + " — you're a " + pip + "</div>";
       html += "<div style='color:#aeb6c2;font-size:12px;margin:-4px 0 8px'>Bodies " + M.bodies + " · Kicked up $" + Math.round(M.contrib) + "</div>";
-      add("leavegang", "🚪 LEAVE the crew", "#ff9a9a");
+      add("leavegang", "LEAVE the crew", "#ff9a9a");
     } else if (prospecting && !pg.founded) {
       const rec = gangRecById(prospecting.gangId);
       const T = prospecting.tasks;
@@ -1037,49 +1037,49 @@
         html += "<div style='margin:-2px 0 8px'>" + lines + "</div>";
       }
       if (ready) {
-        add("jumpin", "🥊 GET JUMPED IN (survive the beating)", "#ff9a9a");
-        add("putwork", "🎯 PUT IN WORK (hit a rival mark)", "#ffd166");
+        add("jumpin", "GET JUMPED IN (survive the beating)", "#ff9a9a");
+        add("putwork", "PUT IN WORK (hit a rival mark)", "#ffd166");
       } else {
-        add("stopprospect", "✖ Stop prospecting", "#aeb6c2");
+        add("stopprospect", "Stop prospecting", "#aeb6c2");
       }
     }
     if (!pg.founded && !M && !prospecting) {
       // FREE AGENT: lead with PROSPECTING the nearest crew — the primary path.
       const pr = prospectableGang();
-      if (pr) add("prospect", "🤝 PROSPECT the " + shortGang(pr.name) + " (join them) 🩸", "#9be564");
+      if (pr) add("prospect", "PROSPECT the " + shortGang(pr.name) + " (join them)", "#9be564");
       // FOUND-your-own is now a LATE-game option: gated behind having first been
       // patched into a crew (g.cityWasMember). Until then, you prospect & earn it.
       const crew = CBZ.cityPeds.filter((p) => p.companion && p.recruited && !p.dead && p.kind === "crew").length;
       if (g.cityWasMember) {
-        add("found", "🩸 FOUND your own gang (" + crew + "/3 crew)", crew >= 3 ? "#7ed957" : "#ff9a9a");
+        add("found", "FOUND your own gang (" + crew + "/3 crew)", crew >= 3 ? "#7ed957" : "#ff9a9a");
       } else {
         html += "<div style='color:#8a93a3;font-size:11px;margin:4px 0 2px'>Found your own crew later — get patched into one first.</div>";
       }
     }
     if (pg.founded) {
-      add("attack", "⚔ ATTACK — target your aim", "#ff9a9a");
-      add("hold", "🛡 HOLD HERE — claim + defend this block");
-      add("follow", "🏃 FOLLOW me");
-      add("disperse", "🚶 DISPERSE to turf");
+      add("attack", "ATTACK — target your aim", "#ff9a9a");
+      add("hold", "HOLD HERE — claim + defend this block");
+      add("follow", "FOLLOW me");
+      add("disperse", "DISPERSE to turf");
       // RAID STASH: only offered when a rival stash is actually out there
       if (nearestRivalStashLot(CBZ.player.pos.x, CBZ.player.pos.z)) {
-        add("raidstash", "🎒 RAID the nearest rival stash — crew hits it", "#ffd166");
+        add("raidstash", "RAID the nearest rival stash — crew hits it", "#ffd166");
       }
-      if (pg.turf.length) add("fortify", "🏰 FORTIFY — post crew across your turf", "#7fd0ff");
+      if (pg.turf.length) add("fortify", "FORTIFY — post crew across your turf", "#7fd0ff");
       add("promote", "⬆ PROMOTE nearest crew → Lieutenant", "#7fd0ff");
-      add("claimturf", "📍 CLAIM this block as turf");
+      add("claimturf", "CLAIM this block as turf");
       // ---- takeover meta (turf.js): buy a weakly-held district, broker pacts ----
       if (CBZ.cityPlayerBuyZone) {
         const z = CBZ.cityZoneAt && CBZ.cityZoneAt(CBZ.player.pos.x, CBZ.player.pos.z);
-        if (z && z.owner !== "player") add("buyzone", "💰 BUY OUT this district (" + (z.name || "?") + ")", "#ffd166");
+        if (z && z.owner !== "player") add("buyzone", "BUY OUT this district (" + (z.name || "?") + ")", "#ffd166");
       }
       // ally with / declare war on the nearest rival gang
       const rivalNear = nearestRival();
       if (rivalNear && CBZ.cityAreAllied) {
         if (CBZ.cityAreAllied("player", rivalNear.id))
-          add("warrival", "⚔ DECLARE WAR on " + shortGang(rivalNear.name), "#ff9a9a");
+          add("warrival", "DECLARE WAR on " + shortGang(rivalNear.name), "#ff9a9a");
         else
-          add("allyrival", "🤝 ALLY with " + shortGang(rivalNear.name), "#9be564");
+          add("allyrival", "ALLY with " + shortGang(rivalNear.name), "#9be564");
       }
     }
     html += "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
@@ -1215,7 +1215,7 @@
             rec.bossDead = false;
             claimRivalGang(rec);
             g.cityMembership = null;
-            CBZ.city.big("👑 YOU TOOK THE CROWN");
+            CBZ.city.big("YOU TOOK THE CROWN");
             CBZ.city.note("The boss is dead. You stepped up — the " + (rec.name || "gang") + " is YOURS.", 4);
           } else {
             // you already run your own crew → you PASS on the throne: clear your

@@ -243,8 +243,8 @@
   };
   function feedTransition(rec, oldGov, newGov) {
     const lbl = GOV_LABEL[newGov] || newGov;
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🏛️ " + rec.name.toUpperCase() + ": " + lbl.toUpperCase());
-    if (CBZ.cityFeed) CBZ.cityFeed("🏛️ " + rec.name + " shifts from " + (GOV_LABEL[oldGov] || oldGov) + " to " + lbl + ".", "#ffd76a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + rec.name.toUpperCase() + ": " + lbl.toUpperCase());
+    if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " shifts from " + (GOV_LABEL[oldGov] || oldGov) + " to " + lbl + ".", "#ffd76a");
   }
   // neighbors of a new dictatorship: every OTHER democracy loses standing.
   function rippleDictatorship(rec) {
@@ -383,7 +383,7 @@
       if (c.dead) continue;
       if (convertCop(c)) n++;
     }
-    if (n && CBZ.cityFeed) CBZ.cityFeed("👮 The force collapses — " + n + " officers walk away, guns in hand.", "#ff9e6b");
+    if (n && CBZ.cityFeed) CBZ.cityFeed("The force collapses — " + n + " officers walk away, guns in hand.", "#ff9e6b");
     return n;
   }
 
@@ -442,7 +442,7 @@
       const w = politics();
       if (w && w.politics) {
         w.politics.emergencyPowers = clampNum(0, EMERGENCY_MAX, (w.politics.emergencyPowers || 0) + EMERGENCY_GAIN);
-        if (CBZ.cityFeed) CBZ.cityFeed("⚠ Emergency powers rising in " + rec.name + " (" + Math.round(w.politics.emergencyPowers) + "%)", "#ffb35e");
+        if (CBZ.cityFeed) CBZ.cityFeed("Emergency powers rising in " + rec.name + " (" + Math.round(w.politics.emergencyPowers) + "%)", "#ffb35e");
         if (w.politics.emergencyPowers >= EMERGENCY_MAX) { transition(rec, "dictatorship", day, -10); return; }
       }
       if ((rec.approval || 0) > REPEAL_APPROVAL) {
@@ -504,7 +504,7 @@
     const day = CBZ.worldDay ? CBZ.worldDay() : 0;
     if (s.curfewWarnedNight !== day) {
       s.curfewWarnedNight = day;
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("🚨 Curfew in effect — get off the streets.", 2.4);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Curfew in effect — get off the streets.", 2.4);
     }
   });
 
@@ -565,15 +565,15 @@
       if (!newHolder) { const m = mintFigure("dictator"); newHolder = m && m._sid; }
       rec.office.holder = newHolder || null; rec.office.deputy = null; rec.vacuum = null;
       if (newHolder && CBZ.cityLedgerEntry) { const e = CBZ.cityLedgerEntry(newHolder); if (e) e.job = "dictator"; }
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("⚔️ LOYALIST SUCCESSION — THE REGIME HOLDS");
-      if (CBZ.cityFeed) CBZ.cityFeed("⚔️ A loyalist deputy seizes power in " + rec.name + " after " + victimName + "'s death — the dictatorship continues.", "#ff9e6b");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("LOYALIST SUCCESSION — THE REGIME HOLDS");
+      if (CBZ.cityFeed) CBZ.cityFeed("A loyalist deputy seizes power in " + rec.name + " after " + victimName + "'s death — the dictatorship continues.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -4);
     } else if (roll < 0.75) {
       // JUNTA — stays dictatorship, military flavor.
       const m = mintFigure("junta general");
       rec.office.holder = m ? m._sid : null; rec.office.deputy = null; rec.vacuum = null;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("🎖️ MILITARY JUNTA SEIZES POWER");
-      if (CBZ.cityFeed) CBZ.cityFeed("🎖️ The generals move in — a junta rules " + rec.name + " now.", "#ff9e6b");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("MILITARY JUNTA SEIZES POWER");
+      if (CBZ.cityFeed) CBZ.cityFeed("The generals move in — a junta rules " + rec.name + " now.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -8);
     } else {
       // DEMOCRATIC RESTORATION — govType flips, a snap election is queued
@@ -582,8 +582,8 @@
       rec.office.holder = null; rec.office.deputy = null;
       rec.govType = "democracy";
       rec.vacuum = day;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("🕊️ THE REGIME FALLS — DEMOCRACY RESTORED");
-      if (CBZ.cityFeed) CBZ.cityFeed("🕊️ " + rec.name + " restores democracy after " + victimName + "'s fall.", "#8fe08a");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE REGIME FALLS — DEMOCRACY RESTORED");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " restores democracy after " + victimName + "'s fall.", "#8fe08a");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, 15);
     }
   }
@@ -636,8 +636,8 @@
     rec.office.holder = holderSid; rec.office.deputy = null; rec.vacuum = null;
     rec.approval = 40;   // the strongman's own honeymoon baseline — no longer frozen
     applyEffects(rec, "dictatorship", day);
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 " + name.toUpperCase() + " SEIZES THE STATE");
-    if (CBZ.cityFeed) CBZ.cityFeed("👑 " + name + ", a gang boss, crowns himself over the ashes of anarchy.", "#ffd76a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + name.toUpperCase() + " SEIZES THE STATE");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + name + ", a gang boss, crowns himself over the ashes of anarchy.", "#ffd76a");
     if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -5);
     rippleDictatorship(rec);
   }

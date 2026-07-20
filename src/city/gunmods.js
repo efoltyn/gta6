@@ -357,7 +357,7 @@
     const id = equippedGunId();
     const eq = id ? CBZ.gunModsEquipped(id) : null;
     let html = "<div style='display:flex;justify-content:space-between;align-items:baseline;gap:10px'>" +
-      "<div style='font-size:22px;font-weight:700'>🔧 Gunsmith Bench</div>" +
+      "<div style='font-size:22px;font-weight:700'>Gunsmith Bench</div>" +
       "<div style='color:#9fb0c3;cursor:pointer' id='gsmithClose'>Close [Esc]</div></div>";
     if (!id) {
       html += "<p style='color:#ffb35b;margin:12px 0 4px'>You're not holding a firearm. Buy a gun off the wall (or draw one with the number keys), then step back to the bench — mods fit the weapon in your hands.</p>";

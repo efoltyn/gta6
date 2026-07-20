@@ -598,7 +598,7 @@
     // mark ("☠ WANTED · Marcus V." / "☠ WANTED TERRORIST · …"). Cheap: rebuild the
     // one sprite once at spawn. Pure cosmetic — the bounty itself is the payoff.
     if (ped.bounty > 0 && ped.tag && CBZ.makeLabelSprite) {
-      const label = "☠ " + (ped.bountyTag || "WANTED") + " · " + nm;
+      const label = "" + (ped.bountyTag || "WANTED") + " · " + nm;
       const old = ped.tag;
       const ns = CBZ.makeLabelSprite(label);
       if (ns) {
@@ -1528,8 +1528,8 @@
       }
     }
     if (CBZ.city && CBZ.city.big) {
-      CBZ.city.big(lethal ? "☠ You killed the boss's family — the crew is coming"
-                          : "⚠ You crossed the boss's family");
+      CBZ.city.big(lethal ? "You killed the boss's family — the crew is coming"
+                          : "You crossed the boss's family");
     }
     return true;
   };
@@ -1725,7 +1725,7 @@
         const amt = ped.bounty | 0; ped.bounty = 0;
         if (CBZ.city) {
           CBZ.city.addCash(amt);
-          CBZ.city.big("🎯 BOUNTY CLAIMED: $" + amt.toLocaleString() + " — " + (ped.bountyTag || "WANTED") + " " + (ped.name || ""));
+          CBZ.city.big("BOUNTY CLAIMED: $" + amt.toLocaleString() + " — " + (ped.bountyTag || "WANTED") + " " + (ped.name || ""));
           CBZ.city.addRespect(amt >= 1000000 ? 25 : 5);
         }
         if (CBZ.sfx) CBZ.sfx("coin");
@@ -2639,12 +2639,12 @@
     if (cop && (vendetta ? dCop < 40 : (dCop < 45 && rng() < 0.7))) {
       ped.reportState = "run"; ped.reportTarget = cop; ped.reportT = 16;   // hard cap
       ped._vendetta = vendetta;                                            // lands as a point-out
-      showTell(ped, "🏃");
+      showTell(ped, "");
       if (vendetta && CBZ.citySay) CBZ.citySay(ped, "“Officer! OFFICER!”", "#ffd27b", 2.2);
     } else {
       ped.reportState = "phone"; ped.reportTarget = null;
       ped.reportT = 2.6 + rng() * 2.2;                                     // dialing time
-      showTell(ped, "📱");
+      showTell(ped, "");
       ped.speed = 0;   // stand and dial
     }
     // (no "👀 … saw that" narration toast — an ambient caption over the world
@@ -2666,9 +2666,9 @@
         const P = CBZ.player;
         if (P && !P.dead) ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
         if (CBZ.citySay) CBZ.citySay(ped, "“Right there. That's the one.”", "#ffd27b", 2.4);
-        CBZ.city && CBZ.city.note("🗣️ " + ped.name + " pointed you out to the law!", 1.8);
+        CBZ.city && CBZ.city.note("" + ped.name + " pointed you out to the law!", 1.8);
       } else {
-        CBZ.city && CBZ.city.note("🗣️ " + ped.name + " reported you!", 1.5);
+        CBZ.city && CBZ.city.note("" + ped.name + " reported you!", 1.5);
       }
     } else if (off && CBZ.cityNpcOffense) {
       CBZ.cityNpcOffense(off, 14, "reported");
@@ -2743,7 +2743,7 @@
     // citySay handles the missing-name case (SWAT Officer / Police Officer /
     // job / Stranger) and the near-camera gate. Falls back to the note channel.
     if (CBZ.citySay && ped && ped.group) { CBZ.citySay(ped, txt, null, secs || 2.4); return; }
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + ((ped && ped.name) || "Stranger") + ": " + txt, secs || 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + ((ped && ped.name) || "Stranger") + ": " + txt, secs || 1.6);
   }
   // a ped that reached the player lifts some cash (the NPC-initiated mirror of the
   // player's own pickpocket verb in interact.js). Light touch; turns you hot-ish.
@@ -2753,7 +2753,7 @@
     const take = Math.max(5, Math.min(have, 15 + ((rng() * 60) | 0)));
     if (take > 0 && CBZ.city) { CBZ.city.addCash(-take); ped.cash = (ped.cash || 0) + take; }
     ped.stoleT = 0;
-    CBZ.city && CBZ.city.note("💸 " + ped.name + " lifted $" + take + " off you!", 1.8);
+    CBZ.city && CBZ.city.note("" + ped.name + " lifted $" + take + " off you!", 1.8);
     if (CBZ.sfx) CBZ.sfx("coin");
     // now they BOLT with your money; chase them down to get it back
     ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z); ped.reactCD = 8;
@@ -2799,7 +2799,7 @@
         if (ped.loot === item) ped.loot = null;
         else if (ped.valuables) { const idx = ped.valuables.indexOf(item); if (idx >= 0) ped.valuables.splice(idx, 1); }
         ped.cash = (ped.cash || 0) + price;
-        CBZ.city && CBZ.city.note("🤝 Bought " + item + " off " + (ped.name || "a local") + " for $" + price, 2);
+        CBZ.city && CBZ.city.note("Bought " + item + " off " + (ped.name || "a local") + " for $" + price, 2);
         if (CBZ.sfx) CBZ.sfx("coin");
         if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       } else { citySayBark(ped, "Can't do it for that.", 1.6); }
@@ -2808,7 +2808,7 @@
       const offer = Math.max(5, Math.round((econ.sellPrice ? econ.sellPrice(buyTarget) : ((it && it.value) || 20) * 0.45) * (0.7 + rng() * 0.3)));
       if (econ.take(buyTarget, 1)) {
         if (CBZ.city) CBZ.city.addCash(offer);
-        CBZ.city && CBZ.city.note("🤝 Sold " + buyTarget + " to " + (ped.name || "a local") + " for $" + offer, 2);
+        CBZ.city && CBZ.city.note("Sold " + buyTarget + " to " + (ped.name || "a local") + " for $" + offer, 2);
         if (CBZ.sfx) CBZ.sfx("coin");
         if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       }

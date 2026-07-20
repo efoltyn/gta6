@@ -350,7 +350,7 @@
     if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(visualId)) {
       if (CBZ.cityWear) CBZ.cityWear(visualId);
       if (CBZ.sfx) CBZ.sfx("door");
-      note("🧥 Pulled the " + (label || name) + " on.", 1.6);
+      note("Pulled the " + (label || name) + " on.", 1.6);
       return;
     }
     const price = e_buy(name);
@@ -364,7 +364,7 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     const drip = (CBZ.cityComposableSpec && CBZ.cityComposableSpec(visualId) || {}).drip || 0;
     if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 600 ? 3 : 1);
-    if (price >= 600 && CBZ.city.big) CBZ.city.big("🧥 " + (label || name) + " — fresh fit off the rack!");
+    if (price >= 600 && CBZ.city.big) CBZ.city.big("" + (label || name) + " — fresh fit off the rack!");
     note("Bought the " + (label || name) + " for " + fmt$(price) + (drip ? " (+" + drip + " drip)." : "."), 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }

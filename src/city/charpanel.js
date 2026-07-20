@@ -67,15 +67,15 @@
   // ============================================================
   // panel slot -> { cloth: COMP slot name } OR { bling: bling slot key }
   const SLOTS = [
-    { key: "hat",     name: "Hat",     icon: "🎩", cloth: "head" },
-    { key: "top",     name: "Top",     icon: "👕", cloth: "shirt" },
-    { key: "outer",   name: "Outer",   icon: "🧥", cloth: "jacket" },
-    { key: "bottom",  name: "Bottom",  icon: "👖", cloth: "legs" },
-    { key: "shoes",   name: "Shoes",   icon: "👟", cloth: "shoes" },
-    { key: "glasses", name: "Glasses", icon: "🕶️", bling: "eyes" },
-    { key: "chain",   name: "Chain",   icon: "📿", bling: "neck" },
-    { key: "watch",   name: "Watch",   icon: "⌚", bling: "wristL" },
-    { key: "ring",    name: "Ring",    icon: "💍", bling: "ring" },
+    { key: "hat",     name: "Hat",     icon: "", cloth: "head" },
+    { key: "top",     name: "Top",     icon: "", cloth: "shirt" },
+    { key: "outer",   name: "Outer",   icon: "", cloth: "jacket" },
+    { key: "bottom",  name: "Bottom",  icon: "", cloth: "legs" },
+    { key: "shoes",   name: "Shoes",   icon: "", cloth: "shoes" },
+    { key: "glasses", name: "Glasses", icon: "", bling: "eyes" },
+    { key: "chain",   name: "Chain",   icon: "", bling: "neck" },
+    { key: "watch",   name: "Watch",   icon: "", bling: "wristL" },
+    { key: "ring",    name: "Ring",    icon: "", bling: "ring" },
   ];
 
   // the composable spec for a worn visualId (clothes.js owns the table)
@@ -792,14 +792,14 @@
   let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invHot = null, invBuild = null;
   let invOpen = false, invBigSig = "";
 
-  const LOOT_ICON = { drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔", weapon: "🔫", ammo: "📦", resource: "📦" };
+  const LOOT_ICON = { drug: "", wearable: "", valuable: "", throwable: "", tool: "", food: "", weapon: "", ammo: "", resource: "" };
   const ITEM_ICON = {
-    Grenade: "🧨", "C4 Charge": "🧨", Rolex: "⌚", Omega: "⌚", "Audemars Piguet": "⌚", "Patek Philippe": "⌚",
-    "Richard Mille": "⌚", "Gold Bar": "🥇", "Gold Chain": "📿", "Diamond Ring": "💍", "Engagement Ring": "💍",
-    Medkit: "🩹", "Body Armor": "🦺", Weed: "🌿", Coke: "❄️", "Cash Stack": "💵", "Briefcase of Cash": "💼",
-    Phone: "📱", Laptop: "💻", Wallet: "👛", Burger: "🍔", Soda: "🥤",
+    Grenade: "", "C4 Charge": "", Rolex: "", Omega: "", "Audemars Piguet": "", "Patek Philippe": "",
+    "Richard Mille": "", "Gold Bar": "", "Gold Chain": "", "Diamond Ring": "", "Engagement Ring": "",
+    Medkit: "", "Body Armor": "", Weed: "", Coke: "", "Cash Stack": "", "Briefcase of Cash": "",
+    Phone: "", Laptop: "", Wallet: "", Burger: "", Soda: "",
     // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
-    Wood: "🪵", Stone: "🪨", Scrap: "⚙️", Hatchet: "🪓", Pickaxe: "⛏️",
+    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
   };
 
   function buildInv() {
@@ -898,7 +898,7 @@
       if (n <= 0) continue;
       const it = items && items[name];
       const tag = it && it.tag;
-      const icon = ITEM_ICON[name] || (tag && LOOT_ICON[tag]) || "📦";
+      const icon = ITEM_ICON[name] || (tag && LOOT_ICON[tag]) || "";
       rows.push({ name, n, icon, val: (it && it.value) || 0 });
     }
     if (!rows.length) { invGrid.innerHTML = "<div class='cpEmpty'>Empty — nothing carried.</div>"; return; }

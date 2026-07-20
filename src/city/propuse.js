@@ -261,7 +261,7 @@
       const skipped = skipToMorning();
       const g = CBZ.game;
       if (g && g.tired != null) g.tired = 0;                 // rested
-      if (CBZ.city && CBZ.city.note) CBZ.city.note(skipped ? "😴 Slept until morning." : "😴 Resting…", 2.4);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note(skipped ? "Slept until morning." : "Resting…", 2.4);
       return true;
     }
     // NPC lie-down: sit-state pin at mattress height + the roll flag; the

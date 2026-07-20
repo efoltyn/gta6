@@ -576,7 +576,7 @@
             nextEggT = (CBZ.now || 0) + 180000;        // ~3 min — a real coop refills slowly
             if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(12);
             if (CBZ.sfx) CBZ.sfx("coin");
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("🥚 Collected a basket of eggs — sold for $12.", 2.0);
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("Collected a basket of eggs — sold for $12.", 2.0);
           },
         }],
       });

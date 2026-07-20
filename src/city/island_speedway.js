@@ -1171,7 +1171,7 @@
     if (RC && RC.round === 0 && RC.standings) {
       const champ = RC.standings()[0];
       if (champ) {
-        const banner = "🏆 SEASON " + (RC.season - 1) + " CHAMPION: " + champ.name + " #" + champ.number +
+        const banner = "SEASON " + (RC.season - 1) + " CHAMPION: " + champ.name + " #" + champ.number +
           " (" + champ.points + " pts, " + champ.wins + " wins)";
         if (CBZ.city && CBZ.city.big) CBZ.city.big(banner); else note(banner, 4.5);
       }
@@ -1248,7 +1248,7 @@
     if (RC && RC.round === 0 && RC.standings) {
       const champ = RC.standings()[0];
       if (champ) {
-        const banner = "🏆 SEASON " + (RC.season - 1) + " CHAMPION: " + champ.name + " #" + champ.number +
+        const banner = "SEASON " + (RC.season - 1) + " CHAMPION: " + champ.name + " #" + champ.number +
           " (" + champ.points + " pts, " + champ.wins + " wins)";
         if (CBZ.city && CBZ.city.big) CBZ.city.big(banner); else note(banner, 4.5);
       }
@@ -1350,7 +1350,7 @@
     const rows = RC.standings();
     const cols = "26px 26px 1.4fr 70px 56px 74px";
     let h = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px'>" +
-      "<div style='font-size:18px;font-weight:700'>🏁 Championship</div>" +
+      "<div style='font-size:18px;font-weight:700'>Championship</div>" +
       "<div style='font-size:12px;color:#8a93a3'>Season " + RC.season + " · Round " + (RC.round + 1) + "/" + RC.ROUNDS + "</div></div>";
     h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
       "<span>#</span><span>No</span><span>Driver</span><span style='text-align:right'>Points</span><span style='text-align:right'>Wins</span><span style='text-align:right'>Worth</span></div>";
@@ -1407,9 +1407,9 @@
     if (won) {
       const pay = Math.round(bet.stake * bet.odds);
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay);
-      note("🎫 RACE BOOK: " + bet.label + " WINS — ticket pays $" + fmt(pay) + "!", 3.6);
+      note("RACE BOOK: " + bet.label + " WINS — ticket pays $" + fmt(pay) + "!", 3.6);
     } else {
-      note("🎫 RACE BOOK: " + bet.label + " didn't win. Ticket's a coaster (−$" + fmt(bet.stake) + ").", 3.0);
+      note("RACE BOOK: " + bet.label + " didn't win. Ticket's a coaster (−$" + fmt(bet.stake) + ").", 3.0);
     }
   }
 
@@ -1434,7 +1434,7 @@
         const odds = parseFloat(t.dataset.odds);
         if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(-BOOK.stake);
         BOOK.bet = { number: num, label: t.dataset.name, stake: BOOK.stake, odds: odds };
-        note("🎫 Ticket placed: $" + fmt(BOOK.stake) + " on " + t.dataset.name + " @ " + odds + "x. Settles at the next checkered flag.", 3.2);
+        note("Ticket placed: $" + fmt(BOOK.stake) + " on " + t.dataset.name + " @ " + odds + "x. Settles at the next checkered flag.", 3.2);
         renderBook();
       } else if (act === "close") toggleBook(false);
     });
@@ -1446,7 +1446,7 @@
     const RC = CBZ.cityRacing;
     const rows = RC && RC.standings ? RC.standings().slice(0, 8) : [];
     let h = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px'>" +
-      "<div style='font-size:18px;font-weight:700'>🎫 Speedway Race Book</div>" +
+      "<div style='font-size:18px;font-weight:700'>Speedway Race Book</div>" +
       "<div style='font-size:12px;color:#8a93a3'>" + (RC ? "Season " + RC.season + " · next: Round " + (RC.round + 1) + "/" + RC.ROUNDS : "next race") + "</div></div>";
     h += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:8px'>Back a driver to WIN the next race at Diamond Speedway. Ticket settles at the flag.</div>";
     h += "<div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>" +
@@ -1506,11 +1506,11 @@
       },
       options: [{
         id: "speedway-join", slot: "i",
-        label: function () { return RACE.active ? "Racing — finish your laps" : "🏁 JOIN THE RACE"; },
+        label: function () { return RACE.active ? "Racing — finish your laps" : "JOIN THE RACE"; },
         onSelect: function () { if (!RACE.active) startRace(); },
       }, {
         id: "speedway-standings", slot: "e",
-        label: function () { return "🏆 View championship standings"; },
+        label: function () { return "View championship standings"; },
         onSelect: function () { toggleStandings(true); },
       }],
     });
@@ -1526,7 +1526,7 @@
       },
       options: [{
         id: "speedway-board-view", slot: "e",
-        label: function () { return "🏆 Championship standings"; },
+        label: function () { return "Championship standings"; },
         onSelect: function () { toggleStandings(true); },
       }],
     });
@@ -1546,26 +1546,26 @@
       options: [{
         id: "raceway-bet", slot: "i",
         label: function () {
-          return BOOK.bet ? ("🎫 Ticket live: " + BOOK.bet.label + " @ " + BOOK.bet.odds + "x") : "🎫 Bet on the next speedway race";
+          return BOOK.bet ? ("Ticket live: " + BOOK.bet.label + " @ " + BOOK.bet.odds + "x") : "Bet on the next speedway race";
         },
         onSelect: function () { toggleBook(true); },
       }, {
         id: "raceway-standings", slot: "e",
-        label: function () { return "🏆 Championship standings"; },
+        label: function () { return "Championship standings"; },
         onSelect: function () { toggleStandings(true); },
       }],
     });
     if (I.describe) {
       I.describe("speedway", function () {
-        return { label: "🏁 Start / Finish", note: RACE.active ? "On track · " + RACE.laps + " laps" : "Grid start · 3-lap purse" };
+        return { label: "Start / Finish", note: RACE.active ? "On track · " + RACE.laps + " laps" : "Grid start · 3-lap purse" };
       });
       I.describe("speedway-board", function () {
         const RC = CBZ.cityRacing;
-        return { label: "🏆 Championship", note: RC ? "Season " + RC.season + " · Round " + (RC.round + 1) + "/" + RC.ROUNDS : "Race standings" };
+        return { label: "Championship", note: RC ? "Season " + RC.season + " · Round " + (RC.round + 1) + "/" + RC.ROUNDS : "Race standings" };
       });
       I.describe("raceway-book", function () {
         const RC = CBZ.cityRacing;
-        return { label: "🎫 Speedway Race Book", note: RC ? "Round " + (RC.round + 1) + " odds board · bets settle at the flag" : "Race betting" };
+        return { label: "Speedway Race Book", note: RC ? "Round " + (RC.round + 1) + " odds board · bets settle at the flag" : "Race betting" };
       });
     }
   }

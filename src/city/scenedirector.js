@@ -388,7 +388,7 @@
     SCENE.kind = "shooter"; SCENE.actors = [shooter];
     SCENE.anchor = { x: sp.x, z: sp.z };
     SCENE.t = 0; SCENE.ttl = 28; SCENE.beatCD = 0.4;
-    feed("🔫 Gunfire reported — get clear!", "#ff7a5a");
+    feed("Gunfire reported — get clear!", "#ff7a5a");
     return true;
   }
 
@@ -534,7 +534,7 @@
           SCENE._popped = true;
           gunshotAt(vs.x, vs.z, 26, 1.0);
           if (CBZ.cityCrime) { try { CBZ.cityCrime(0, { x: vs.x, z: vs.z, type: "robbery", silent: true }); } catch (e) {} }
-          feed("🚨 Store robbery in progress!", "#ff9a5a");
+          feed("Store robbery in progress!", "#ff9a5a");
           a0._goalKind = null;
         } else if (a0.state === "idle" || (a0.target && hyp(a0.target.x - vs.x, a0.target.z - vs.z) > 1)) {
           a0.state = "walk"; if (a0.target && a0.target.set) a0.target.set(vs.x, 0, vs.z); a0.path = null;

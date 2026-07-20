@@ -100,7 +100,7 @@
     e.add(name, 1);
     const luxe = isLuxe(name), v = itemVal(name);
     if (luxe || v >= 20000) {
-      const head = (opts && opts.head) || "💎 You bagged a " + name;
+      const head = (opts && opts.head) || "You bagged a " + name;
       if (CBZ.city && CBZ.city.big) CBZ.city.big(head + " — " + money(pawnPay(name)) + "!");
       if (CBZ.sfx) CBZ.sfx("coin");
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(luxe ? 6 : 2);
@@ -149,7 +149,7 @@
   function pedVibe(p) {
     if (p.robbed) return "robbed";
     const w = p.wealth || 0;
-    return w >= 0.985 ? "looks loaded 💰" : w >= 0.85 ? "flashing money" : w >= 0.55 ? "well-dressed" : w < 0.18 ? "looks broke" : "";
+    return w >= 0.985 ? "looks loaded" : w >= 0.85 ? "flashing money" : w >= 0.55 ? "well-dressed" : w < 0.18 ? "looks broke" : "";
   }
   function ped$(p) {
     const flavor = p.archetype === "tweaker" ? "tweaking"
@@ -168,7 +168,7 @@
       const ps = myProspectStanding();   // 0 when not yet courting (public read can't say -1)
       standing = ps > 0 ? "they're warming to you" : "prospect this crew";
     } else if (CBZ.cityRelLabel) { const lbl = CBZ.cityRelLabel(p); if (lbl && lbl !== "neutral") standing = lbl; }
-    const bits = [pedVibe(p), p.job || "", flavor, p.gang || "", p.recruited ? p.kind : "", p === g.cityPartner ? "💕 partner" : "", standing].filter(Boolean);
+    const bits = [pedVibe(p), p.job || "", flavor, p.gang || "", p.recruited ? p.kind : "", p === g.cityPartner ? "partner" : "", standing].filter(Boolean);
     return bits.length ? bits.join(" · ") : "—";
   }
 
@@ -302,7 +302,7 @@
     if (res.item) got.push(res.item + " " + pawnHint(res.item));
     let topVal = 0, topName = "";
     for (const name of vals) {
-      const frag = takeValuable(name, { head: "💎 You ripped off a " + name });
+      const frag = takeValuable(name, { head: "You ripped off a " + name });
       if (frag) got.push(frag);
       if (itemVal(name) > topVal) { topVal = itemVal(name); topName = name; }
     }
@@ -341,7 +341,7 @@
           ? vals.reduce((bi, n, i) => (itemVal(n) > itemVal(vals[bi]) ? i : bi), 0)
           : (Math.random() * vals.length) | 0;
         const name = vals.splice(idx, 1)[0];
-        lifted = takeValuable(name, { head: "👀 Lifted a " + name });
+        lifted = takeValuable(name, { head: "Lifted a " + name });
         if (!isLuxe(name) && itemVal(name) < 20000)
           CBZ.city.note("Lifted a " + name + " " + pawnHint(name) + " — fence it at the pawn shop.", 2.6);
       }
@@ -504,7 +504,7 @@
   function copHunting(c) { return c.curTarget === CBZ.city.playerActor || (c.sees && (g.wanted | 0) >= 1); }
   function copNote(c) {
     const stars = g.wanted | 0;
-    if (copHunting(c)) return "👁 Onto you — give up, talk fast, or run";
+    if (copHunting(c)) return "Onto you — give up, talk fast, or run";
     if (stars >= 1) return "On alert · " + "★".repeat(stars);
     return "Keeping the peace";
   }
@@ -639,15 +639,15 @@
   // a kind-aware verb label for the pickup action.
   function gigPickupLabel(a) {
     const k = a ? String(a.kind || a.line || "") : "";
-    if (k === "taxi" || k === "uber" || k === "rideshare") return "Pick up the fare 🚕";
-    if (k === "smuggling" || k === "smuggle") return "Load the shipment 📦";
-    return "Grab the bag 📦";
+    if (k === "taxi" || k === "uber" || k === "rideshare") return "Pick up the fare";
+    if (k === "smuggling" || k === "smuggle") return "Load the shipment";
+    return "Grab the bag";
   }
   function gigDropLabel(a) {
     const k = a ? String(a.kind || a.line || "") : "";
-    if (k === "taxi" || k === "uber" || k === "rideshare") return "Drop the fare off 🏁";
-    if (k === "smuggling" || k === "smuggle") return "Hand over the shipment 🤝";
-    return "Drop off the delivery 🤝";
+    if (k === "taxi" || k === "uber" || k === "rideshare") return "Drop the fare off";
+    if (k === "smuggling" || k === "smuggle") return "Hand over the shipment";
+    return "Drop off the delivery";
   }
   // HAIL-A-CAB: while driving a taxi/empty car, a waiting fare nearby you can
   // pick up. gigs.js may auto-zone fares; this verb is the manual hand-off so a
@@ -739,7 +739,7 @@
       if (!c._izTarget) c._izTarget = { x: s.x, z: s.z, club: c };
       return c._izTarget;
     },
-    options: [{ id: "club-enter", slot: "i", label: "Step to the bouncer 🪩", onSelect: function () { clubTryEnter(); } }],
+    options: [{ id: "club-enter", slot: "i", label: "Step to the bouncer", onSelect: function () { clubTryEnter(); } }],
   });
   I.registerZone({
     id: "zone-stash", kind: "stash", prio: 10, driving: false,
@@ -834,7 +834,7 @@
       note: ped$(p),
     };
   });
-  I.describe("ped:gunpoint", function (p) { return { label: "🔫 " + p.name, note: "Hands up · make your demand" }; });
+  I.describe("ped:gunpoint", function (p) { return { label: "" + p.name, note: "Hands up · make your demand" }; });
   I.describe("vendor", function (v) {
     const name = (v.vendor && v.vendor.building && v.vendor.building.name) || "Counter";
     // the card subtitle = the contextual reason for THIS trade (VERB[kind].sub),
@@ -845,39 +845,39 @@
     const d = VERB[vendorKind(v)];
     return { label: name, note: (d && d.sub) || "Vendor · cash register" };
   });
-  I.describe("cop", function (c) { return { label: "👮 " + c.name, note: copNote(c) }; });
-  I.describe("corpse", function (b) { const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null; return { label: "🧥 " + (b.name || "A body"), note: bodyFitNote(fit) }; });
+  I.describe("cop", function (c) { return { label: "" + c.name, note: copNote(c) }; });
+  I.describe("corpse", function (b) { const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null; return { label: "" + (b.name || "A body"), note: bodyFitNote(fit) }; });
   I.describe("vehicle", function (car) {
     const cond = CBZ.cityVehicleCondition ? CBZ.cityVehicleCondition(car) : null;
     const why = car.owned ? "Your ride" : car.npcDriver ? "Someone's at the wheel" : "Boost it · chop shop pays by condition";
-    return { label: "🚗 " + (car.model ? car.model.name : "Car"), note: (cond ? cond.label + " · " : "") + why };
+    return { label: "" + (car.model ? car.model.name : "Car"), note: (cond ? cond.label + " · " : "") + why };
   });
   I.describe("vehicle:inside", function (car) {
     const cond = CBZ.cityVehicleCondition ? CBZ.cityVehicleCondition(car) : null;
-    return { label: "🚗 " + (car.model ? car.model.name : "Car"), note: "Behind the wheel" + (cond ? " · " + cond.label : "") };
+    return { label: "" + (car.model ? car.model.name : "Car"), note: "Behind the wheel" + (cond ? " · " + cond.label : "") };
   });
-  I.describe("club", function (t) { return { label: "🪩 " + ((t.club && t.club.name) || "The Velvet Club"), note: clubNote() }; });
-  I.describe("stash", function (lot) { return { label: "🎒 Gang Stash", note: ((lot.building && lot.building.gang) || "gang") + " cache" }; });
+  I.describe("club", function (t) { return { label: "" + ((t.club && t.club.name) || "The Velvet Club"), note: clubNote() }; });
+  I.describe("stash", function (lot) { return { label: "Gang Stash", note: ((lot.building && lot.building.gang) || "gang") + " cache" }; });
   I.describe("streetprop", function (sp) {
     const isBox = sp.type === "newsbox";
     const now = (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0);
     const picked = (sp._searchT || 0) > now;
-    return { label: (isBox ? "📰 News box" : "🗑 Trash can"), note: picked ? "Picked through recently" : "Might be worth a look" };
+    return { label: (isBox ? "News box" : "Trash can"), note: picked ? "Picked through recently" : "Might be worth a look" };
   });
   I.describe("gig", function (t) {
     const a = (t && t.gig) || gigActive();
     const k = a ? String(a.kind || a.line || "gig") : "gig";
     const at = gigAtDropoff() ? "drop-off" : "pickup";
     const pay = a && a.pay ? " · " + money(a.pay) : "";
-    return { label: "💼 " + (k.charAt(0).toUpperCase() + k.slice(1)) + " gig", note: "At the " + at + pay };
+    return { label: "" + (k.charAt(0).toUpperCase() + k.slice(1)) + " gig", note: "At the " + at + pay };
   });
-  I.describe("modshop", function () { return { label: "🔧 Mod Garage", note: "Sell · respray · armor · booster · turret · rockets" }; });
+  I.describe("modshop", function () { return { label: "Mod Garage", note: "Sell · respray · armor · booster · turret · rockets" }; });
   I.describe("self", function () { return { label: "Your pockets", note: "what you're carrying" }; });
   const SEAT_NAMES = { stool: "Bar stool", bench: "Bench", sofa: "Couch", couch: "Couch", booth: "Booth", patio: "Patio chair", waiting: "Waiting chair", chair: "Chair" };
-  I.describe("seat", function (s) { return { label: "🪑 " + (SEAT_NAMES[s.kind] || "Chair"), note: "Take a seat" }; });
-  I.describe("bed", function (b) { return { label: "🛏 " + (b.kind === "bedroll" ? "Bedroll" : "Bed"), note: b.kind === "bedroll" ? "A rough sleep — til morning" : "Sleep until morning" }; });
-  I.describe("wantedposter", function (p) { return { label: "📋 Wanted poster", note: "Bounty $" + ((p && p.bounty) || 0).toLocaleString() }; });
-  I.describe("propself", function () { return { label: CBZ.player._propBed ? "😴 Lying down" : "🪑 Seated", note: "take a load off" }; });
+  I.describe("seat", function (s) { return { label: "" + (SEAT_NAMES[s.kind] || "Chair"), note: "Take a seat" }; });
+  I.describe("bed", function (b) { return { label: "" + (b.kind === "bedroll" ? "Bedroll" : "Bed"), note: b.kind === "bedroll" ? "A rough sleep — til morning" : "Sleep until morning" }; });
+  I.describe("wantedposter", function (p) { return { label: "Wanted poster", note: "Bounty $" + ((p && p.bounty) || 0).toLocaleString() }; });
+  I.describe("propself", function () { return { label: CBZ.player._propBed ? "Lying down" : "Seated", note: "take a load off" }; });
 
   // ================== OPTIONS ==================
   const nm = (p) => p.name || "them";
@@ -918,12 +918,12 @@
   I.register("ped:civ", { id: "ped-roll", slot: "k", prio: 60, canShow: (p) => inMyGang(p), label: "Follow me", onSelect: (p) => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm(p) + " falls in.", 1.4); } });
   I.register("ped:civ", {
     id: "ped-crew-favor", slot: "k", prio: 50, canShow: (p) => crewmate(p),
-    label: (p) => (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) ? "Do a favor 🤝" : "Talk",
+    label: (p) => (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) ? "Do a favor" : "Talk",
     onSelect: (p) => { if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) CBZ.cityDoFavor(p); else { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } },
   });
   I.register("ped:civ", {
     id: "ped-propose", slot: "k", prio: 45, canShow: (p) => p === g.cityPartner,
-    label: (p) => (g.citySpouse ? "Sweet-talk" : "Propose 💍"),
+    label: (p) => (g.citySpouse ? "Sweet-talk" : "Propose"),
     onSelect: (p) => (g.citySpouse ? talk() : CBZ.cityPropose(p)),
   });
   // a rival whose BOSS you dropped: claim the whole crew (their colors are
@@ -931,7 +931,7 @@
   I.register("ped:civ", {
     id: "ped-claim-crew", slot: "k", prio: 44,
     canShow: (p) => !!(p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled),
-    label: "Claim the crew 👑",
+    label: "Claim the crew",
     onSelect: (p) => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone — the crew's yours to claim. · O", 2.2); },
   });
   // PROSPECT / JOIN this ped's crew — the PRIMARY progression path, ranked
@@ -941,9 +941,9 @@
     id: "ped-prospect", slot: "k", prio: 43, canShow: (p) => !!joinableGangOf(p),
     label: function (p) {
       const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
-      if (myProspectStanding() >= 1) return "Get initiated 🩸";
-      if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) return "Do a favor 🤝";
-      return "Prospect the crew 🩸";
+      if (myProspectStanding() >= 1) return "Get initiated";
+      if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) return "Do a favor";
+      return "Prospect the crew";
     },
     onSelect: function (p) {
       const rec = joinableGangOf(p);
@@ -953,28 +953,28 @@
     },
   });
   // a feared ped hands over cash without a fight
-  I.register("ped:civ", { id: "ped-shakedown", slot: "k", prio: 42, bad: true, canShow: (p) => fearsYou(p), label: "Shake down 💵", onSelect: (p) => demandRansom(p) });
+  I.register("ped:civ", { id: "ped-shakedown", slot: "k", prio: 42, bad: true, canShow: (p) => fearsYou(p), label: "Shake down", onSelect: (p) => demandRansom(p) });
   I.register("ped:civ", {
     id: "ped-patch-in", slot: "k", prio: 41,
     canShow: (p) => tightWithYou(p) && !p.gang && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !!CBZ.cityRecruit,
-    label: "Patch in 🤝",
+    label: "Patch in",
     onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); },
   });
-  I.register("ped:civ", { id: "ped-runs-with", slot: "k", prio: 40, canShow: (p) => tightWithYou(p) && !p.recruited && !p.gang, label: "Recruit 🤝", onSelect: (p) => CBZ.cityRecruit && CBZ.cityRecruit(p) });
+  I.register("ped:civ", { id: "ped-runs-with", slot: "k", prio: 40, canShow: (p) => tightWithYou(p) && !p.recruited && !p.gang, label: "Recruit", onSelect: (p) => CBZ.cityRecruit && CBZ.cityRecruit(p) });
   // recruit straight into YOUR founded gang
   I.register("ped:civ", {
     id: "ped-payroll", slot: "k", prio: 39,
     canShow: (p) => !!(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && !hatesYou(p) && canAfford100()),
-    label: "Put on payroll 🔫",
+    label: "Put on payroll",
     onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); },
   });
   I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: "Sell product", onSelect: (p) => CBZ.cityDealTo(p) });
   I.register("ped:civ", {
     id: "ped-hire", slot: "k", prio: 37,
     canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100(),
-    label: "Hire 🔫", onSelect: (p) => CBZ.cityRecruit(p),
+    label: "Hire", onSelect: (p) => CBZ.cityRecruit(p),
   });
-  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Chat up 💕", onSelect: (p) => CBZ.cityFlirt(p) });
+  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Chat up", onSelect: (p) => CBZ.cityFlirt(p) });
   I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
 
   // ---- LIVING PED, slot L ----
@@ -1097,7 +1097,7 @@
       const took = CBZ.cityLootArmorFromCorpse(b);   // equips it onto the player + returns what was taken
       b._armorTaken = true;
       const nm = corpseArmorKitName(b) || "their armor";
-      if (CBZ.city && CBZ.city.note) CBZ.city.note(took === false ? "Nothing to strip." : "🛡 Stripped " + nm + " — armor equipped.", 1.8);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note(took === false ? "Nothing to strip." : "Stripped " + nm + " — armor equipped.", 1.8);
     },
   });
 
@@ -1124,7 +1124,7 @@
   I.register("vehicle:inside", {
     id: "car-pickup-fare", slot: "i",
     canShow: (car, ctx) => !!gig() && !!gigWaitingFare(ctx.pos.x, ctx.pos.z),
-    label: "Pick up the fare 🚕",
+    label: "Pick up the fare",
     onSelect: (car, ctx) => { const p = gigWaitingFare(ctx.pos.x, ctx.pos.z); if (p) gigHailFare(p); },
   });
 
@@ -1187,7 +1187,7 @@
         let topName = "", topVal = 0;
         for (const it of dl.items) { const v = itemVal(it); if (v > topVal) { topVal = v; topName = it; } }
         if (topName && (isLuxe(topName) || topVal >= 20000) && CBZ.city && CBZ.city.big) {
-          CBZ.city.big("💎 You looted a " + topName + " — " + money(pawnPay(topName)) + " at the pawn!");
+          CBZ.city.big("You looted a " + topName + " — " + money(pawnPay(topName)) + " at the pawn!");
           if (CBZ.city.addRespect) CBZ.city.addRespect(isLuxe(topName) ? 6 : 2);
         }
       }

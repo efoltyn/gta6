@@ -158,7 +158,7 @@
     // re-open the yard door ONLY if the player actually has the keycard
     if (g && g.hasKey && CBZ.openDoor) {
       try { CBZ.openDoor(); } catch (e) {}
-      if (CBZ.flashHint) try { CBZ.flashHint("🔑 Your keycard pops the gate back open.", 2.0); } catch (e) {}
+      if (CBZ.flashHint) try { CBZ.flashHint("Your keycard pops the gate back open.", 2.0); } catch (e) {}
     }
   }
 

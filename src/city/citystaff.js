@@ -217,7 +217,7 @@
     const busy = lines.filter(function (l) { return l.co && l.members.length >= 5; });
     if (!busy.length) return;
     const ln = busy[(Math.random() * busy.length) | 0];
-    try { if (CBZ.cityFlavor) CBZ.cityFlavor("🛍️ Line out the door at " + ln.co.name + "'s store in " + ln.dname, "#bcd0ff"); } catch (e) {}
+    try { if (CBZ.cityFlavor) CBZ.cityFlavor("Line out the door at " + ln.co.name + "'s store in " + ln.dname, "#bcd0ff"); } catch (e) {}
   }
 
   CBZ.cityStaff = {

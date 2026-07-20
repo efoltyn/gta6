@@ -78,7 +78,7 @@
 
     // ---- EARTHQUAKE: shake + toppling buildings + crushing debris ----
     quake: {
-      name: "EARTHQUAKE", emoji: "🌋", warnSecs: 5, activeSecs: 15, gap: 7, cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
+      name: "EARTHQUAKE", emoji: "", warnSecs: 5, activeSecs: 15, gap: 7, cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("The ground is rumbling…", 2.2); sound("rumble"); },
       start(ctx) {
         ctx.st.dust = CBZ.fx.particleCloud({ mode: "rise", color: 0xb6a892, count: 160, radius: ctx.R, top: 8, size: 0.32, opacity: 0.34, vMin: 1, vMax: 3 });
@@ -129,7 +129,7 @@
 
     // ---- LIGHTNING STORM: telegraphed strikes that instakill ----
     storm: {
-      name: "LIGHTNING STORM", emoji: "⚡", warnSecs: 4, activeSecs: 16, gap: 6, cause: "struck by lightning", tint: 0x3a4150,
+      name: "LIGHTNING STORM", emoji: "", warnSecs: 4, activeSecs: 16, gap: 6, cause: "struck by lightning", tint: 0x3a4150,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("Storm rolling in — keep moving!", 2.4); sound("thunder"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0xaebfd0, count: 360, radius: 20, top: 22, size: 0.14, opacity: 0.5, vMin: 30, vMax: 46, drift: 6 });
@@ -167,7 +167,7 @@
     //      rising flood pool). Less wall-of-doom than the tsunami; the rain is
     //      the mood. ----
     flashflood: {
-      name: "FLASH FLOOD", emoji: "🌧️", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flood surge", tint: 0x59636b,
+      name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flood surge", tint: 0x59636b,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("FLASH FLOOD — water rising, get HIGH!", 3); sound("alarm"); sound("water"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0x9fb4c4, count: 460, radius: ctx.R, top: 26, size: 0.13, opacity: 0.55, vMin: 34, vMax: 52, drift: 10 });
@@ -225,7 +225,7 @@
     //      swirling debris, and violent gusts that knock you flat. The wind
     //      direction slowly veers, so high ground alone won't save you. ----
     hurricane: {
-      name: "HURRICANE", emoji: "🌀", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
+      name: "HURRICANE", emoji: "", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("HURRICANE inbound — brace and hold on!", 3); sound("alarm"); sound("wind"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0xb3c4d2, count: 520, radius: ctx.R, top: 24, size: 0.12, opacity: 0.5, vMin: 40, vMax: 60, drift: 22 });
@@ -269,7 +269,7 @@
 
     // ---- WILDFIRE: fire spreads tree to tree, burns on contact ----
     wildfire: {
-      name: "WILDFIRE", emoji: "🔥", warnSecs: 5, activeSecs: 18, gap: 6, cause: "burned alive in the wildfire", tint: 0x4a2814,
+      name: "WILDFIRE", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "burned alive in the wildfire", tint: 0x4a2814,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("Wildfire spreading — don't get cornered!", 2.6); sound("fire"); },
       start(ctx) {
         ctx.st.embers = CBZ.fx.particleCloud({ mode: "rise", color: 0xff7a1a, count: 320, radius: 28, top: 16, size: 0.26, opacity: 0.7, vMin: 5, vMax: 12, drift: 6 });
@@ -312,7 +312,7 @@
 
     // ---- TORNADO: a wandering funnel that sucks in and flings ----
     tornado: {
-      name: "TORNADO", emoji: "🌪️", warnSecs: 5, activeSecs: 18, gap: 6, cause: "torn apart by the tornado", tint: 0x6a6f7a,
+      name: "TORNADO", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "torn apart by the tornado", tint: 0x6a6f7a,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("TORNADO touching down!", 2.6); sound("wind"); },
       start(ctx) {
         const grp = new THREE.Group();
@@ -348,7 +348,7 @@
 
     // ---- VOLCANO: ash-out, lava flows from the mountain, lava bombs ----
     volcano: {
-      name: "VOLCANIC ERUPTION", emoji: "🌋", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
+      name: "VOLCANIC ERUPTION", emoji: "", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("THE VOLCANO IS WAKING — off the mountain, out of the ash!", 3); sound("rumble"); if (CBZ.shake) CBZ.shake(0.5); },
       start(ctx) { startEruption(ctx); },
       active(dt, ctx) { tickEruption(dt, ctx); tick0(ctx, dt); },
@@ -359,7 +359,7 @@
 
     // ---- BLIZZARD: whiteout; freeze if you stop moving ----
     blizzard: {
-      name: "BLIZZARD", emoji: "❄️", warnSecs: 5, activeSecs: 17, gap: 6, cause: "frozen solid in the blizzard", tint: 0xdbe6f0,
+      name: "BLIZZARD", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "frozen solid in the blizzard", tint: 0xdbe6f0,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("Blizzard incoming — get INDOORS or keep moving!", 2.8); sound("wind"); },
       start(ctx) { ctx.st.snow = CBZ.fx.particleCloud({ mode: "fall", color: 0xffffff, count: 380, radius: 22, top: 22, size: 0.2, opacity: 0.8, vMin: 10, vMax: 20, drift: 8 }); ctx.st.snow.setActive(1); },
       active(dt, ctx) {
@@ -379,7 +379,7 @@
 
     // ---- METEOR SHOWER: telegraphed impacts, big blast ----
     meteor: {
-      name: "METEOR SHOWER", emoji: "☄️", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
+      name: "METEOR SHOWER", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("METEORS — watch the shadows!", 2.6); sound("rumble"); },
       start(ctx) { ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = []; },
       active(dt, ctx) {
@@ -408,7 +408,7 @@
 
     // ---- SINKHOLES: ground gives way; fall in = death ----
     sinkhole: {
-      name: "SINKHOLES", emoji: "🕳️", warnSecs: 5, activeSecs: 16, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
+      name: "SINKHOLES", emoji: "", warnSecs: 5, activeSecs: 16, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("The ground is giving way!", 2.6); sound("rumble"); },
       start(ctx) { ctx.st.holes = []; ctx.st.pending = []; ctx.st.cd = 0.4; },
       active(dt, ctx) {
@@ -434,10 +434,10 @@
 
     // ---- NUKE: the finale. Blinding flash, expanding lethal shockwave ----
     nuke: {
-      name: "NUCLEAR STRIKE", emoji: "☢️", warnSecs: 7, activeSecs: 12, gap: 8, cause: "vaporized by the nuclear blast", tint: 0x2a2a30,
+      name: "NUCLEAR STRIKE", emoji: "", warnSecs: 7, activeSecs: 12, gap: 8, cause: "vaporized by the nuclear blast", tint: 0x2a2a30,
       warn(ctx) {
-        CBZ.flashToast && CBZ.flashToast("☢ INCOMING ☢");
-        banner("☢ NUCLEAR STRIKE INCOMING ☢", true);
+        CBZ.flashToast && CBZ.flashToast("INCOMING");
+        banner("NUCLEAR STRIKE INCOMING", true);
         if (CBZ.sfx) CBZ.sfx("alarm");
         sound("siren");
         ctx.st.gx = ctx.cx; ctx.st.gz = ctx.cz;
@@ -507,7 +507,7 @@
   //            back at its resting level.
   // ============================================================
   const TSUNAMI_LEGACY = {
-    name: "TSUNAMI", emoji: "🌊", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
+    name: "TSUNAMI", emoji: "", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
     warn(ctx) { CBZ.flashHint && CBZ.flashHint("TSUNAMI — get to HIGH GROUND!", 3); sound("alarm"); sound("water"); },
     start(ctx) {
       // the rising flood pool that ultimately drowns the low ground
@@ -715,7 +715,7 @@
         CBZ.player.vy = Math.max(CBZ.player.vy, 6.5); CBZ.player.grounded = false;
         if (CBZ.shake) CBZ.shake(1.1);
         if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
-        CBZ.flashToast && CBZ.flashToast("🌊 SWEPT AWAY");
+        CBZ.flashToast && CBZ.flashToast("SWEPT AWAY");
       } else if (CBZ.body) {
         CBZ.body.hit(a, { dir: { x: st.dx, z: st.dz }, force: 15 + 6 * ctx.intensity, fling: 6.5 + rnd() * 3.5 });
       }
@@ -771,7 +771,7 @@
       if (CBZ.playerChar) CBZ.playerChar.swimming = true;
       if (CBZ.shake) CBZ.shake(0.3);
       sound("water");
-      CBZ.flashHint && CBZ.flashHint("🏊 SWIM — stamina is your air. Get to high ground!", 2.6);
+      CBZ.flashHint && CBZ.flashHint("SWIM — stamina is your air. Get to high ground!", 2.6);
     }
     const S = tsuSwim;
     // heavy water: drag this frame's walk step, ride the current downstream
@@ -839,11 +839,11 @@
     if (st.wave) st.wave.visible = false;
     if (st.spray) st.spray.setActive(0);
     const o = ctx.arena.ocean; if (o) o.position.y = st.floodY - 0.35;
-    CBZ.flashHint && CBZ.flashHint("🌊 THE ISLAND IS UNDER — swim, climb, survive", 3);
+    CBZ.flashHint && CBZ.flashHint("THE ISLAND IS UNDER — swim, climb, survive", 3);
   }
 
   const TSUNAMI_V2 = {
-    name: "TSUNAMI", emoji: "🌊", warnSecs: 10, activeSecs: 26, gap: 8,
+    name: "TSUNAMI", emoji: "", warnSecs: 10, activeSecs: 26, gap: 8,
     cause: "swept away by the tsunami", tint: 0x2c5a78,
     warn(ctx) {
       const st = ctx.st, a = rnd() * Math.PI * 2;
@@ -851,7 +851,7 @@
       st.from = tsuFrom(st.dx, st.dz);
       st.oceanY0 = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
       st.warnT = 0; st.phase = "warn";
-      CBZ.flashHint && CBZ.flashHint("🌊 TSUNAMI from the " + st.from + " — the sea is PULLING BACK. GET HIGH!", 3.6);
+      CBZ.flashHint && CBZ.flashHint("TSUNAMI from the " + st.from + " — the sea is PULLING BACK. GET HIGH!", 3.6);
       sound("alarm"); sound("siren");
       if (CBZ.shake) CBZ.shake(0.3);
     },
@@ -915,7 +915,7 @@
         if (!st.landfall && st.frontS > -(ctx.R - 6)) {
           st.landfall = true;
           CBZ.fx.blast(fx0, fz0, { maxR: 26, color: 0xd9f2ff, shake: 1.15, life: 0.8 });
-          CBZ.flashToast && CBZ.flashToast("🌊 BRACE!");
+          CBZ.flashToast && CBZ.flashToast("BRACE!");
           sound("collapse"); sound("water");
         }
         const pd = Math.abs(tsuS(ctx, CBZ.player.pos.x, CBZ.player.pos.z) - st.frontS);
@@ -1059,7 +1059,7 @@
   function startEruption(ctx) {
     if (ctx.st.erupting) return; ctx.st.erupting = true;
     const h = ctx.arena.hills[0];
-    banner("🌋 VOLCANIC ERUPTION", true);
+    banner("VOLCANIC ERUPTION", true);
     CBZ.flashHint && CBZ.flashHint("THE MOUNTAIN ERUPTS — stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent

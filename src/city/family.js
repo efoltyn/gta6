@@ -251,7 +251,7 @@
         }
       }
     }
-    if (families.length && CBZ.cityFlavor) CBZ.cityFlavor("🏠 The big houses are lived in now. Families, pools — leverage.", "#9fd0ff");
+    if (families.length && CBZ.cityFlavor) CBZ.cityFlavor("The big houses are lived in now. Families, pools — leverage.", "#9fd0ff");
   }
 
   // ---- DAILY ROUTINE -------------------------------------------------------
@@ -346,8 +346,8 @@
             if (reactCD <= 0 && (playerHurt || playerHot)) {
               reactCD = 12;
               if (CBZ.cityFlavor) CBZ.cityFlavor(playerHurt
-                ? "🏠 " + (m.name || "Family") + ": “You're bleeding — get inside.”"
-                : "🏠 " + (m.name || "Family") + ": “The whole block's watching you. Be careful.”", "#9fd0ff");
+                ? "" + (m.name || "Family") + ": “You're bleeding — get inside.”"
+                : "" + (m.name || "Family") + ": “The whole block's watching you. Be careful.”", "#9fd0ff");
             }
             continue;
           }
@@ -385,10 +385,10 @@
           // there, exactly matching "mine" families having no tree presence).
           if (m._sid && CBZ.cityFamilyTree) CBZ.cityFamilyTree.markDeath(m._sid);
           if (fam.mine) {
-            if (CBZ.cityFeed) CBZ.cityFeed("🕯 They got " + (m.name || "your people") + " at the house. This can't stand.", "#ff7a7a");
+            if (CBZ.cityFeed) CBZ.cityFeed("They got " + (m.name || "your people") + " at the house. This can't stand.", "#ff7a7a");
             if (CBZ.city && CBZ.city.note) CBZ.city.note("They hit your HOME. " + (m.name || "Family") + " is gone.", 4);
           } else if (CBZ.cityFlavor) {
-            CBZ.cityFlavor("🕯 " + (m.name || "Someone") + " — somebody's whole world — is gone. The set won't forget.", "#ffce7a");
+            CBZ.cityFlavor("" + (m.name || "Someone") + " — somebody's whole world — is gone. The set won't forget.", "#ffce7a");
           }
         }
       }
@@ -436,8 +436,8 @@
     const ransom = Math.max(2000, Math.round((g.cash || 0) * 0.12 / 100) * 100);
     ped.ransom = ransom; ped.captiveT = 180;
     kidnap = { ped, gangId: gang.id, captors, ransom, t: 180, x: hx, z: hz, authored: !!opts.authored };
-    if (CBZ.cityFeed) CBZ.cityFeed("📞 The " + gang.name + " took " + (ped.name || "your girl") + ". They want $" + ransom.toLocaleString() + ".", "#ff7a7a");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("📞 They have " + (ped.name || "your family") + ". $" + ransom.toLocaleString() + " — or come take them back.", 5);
+    if (CBZ.cityFeed) CBZ.cityFeed("The " + gang.name + " took " + (ped.name || "your girl") + ". They want $" + ransom.toLocaleString() + ".", "#ff7a7a");
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("They have " + (ped.name || "your family") + ". $" + ransom.toLocaleString() + " — or come take them back.", 5);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(hx, hz, "THEY HAVE " + (ped.name || "FAMILY").toUpperCase());
   }
 
@@ -458,7 +458,7 @@
   function tickKidnap() {
     const k = kidnap, P = CBZ.player;
     if (!k) return;
-    if (k.ped.dead) { endKidnap(false, "🕯 They didn't wait. " + (k.ped.name || "Family") + " is gone.", "#ff7a7a"); return; }
+    if (k.ped.dead) { endKidnap(false, "They didn't wait. " + (k.ped.name || "Family") + " is gone.", "#ff7a7a"); return; }
     k.t -= 1.2;
     k.ped.captiveT = Math.max(0, k.t);     // keep the public clock in sync
     let live = 0;
@@ -473,7 +473,7 @@
         return;
       }
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(5);
-      endKidnap(true, "🏠 You took " + (k.ped.name || "them") + " back the hard way. The street saw it.", "#7fe0a0");
+      endKidnap(true, "You took " + (k.ped.name || "them") + " back the hard way. The street saw it.", "#7fe0a0");
       return;
     }
     // standing close with the money: pay the number
@@ -486,7 +486,7 @@
             g.cash -= k.ransom;
             if (CBZ.cityHudDirty) CBZ.cityHudDirty();
             for (const c of k.captors) if (c && !c.dead) { c.rage = null; c.state = "walk"; }
-            endKidnap(true, "💸 You paid. " + (k.ped.name || "They") + " walks home. The number is a memory now.", "#ffce7a");
+            endKidnap(true, "You paid. " + (k.ped.name || "They") + " walks home. The number is a memory now.", "#ffce7a");
             return;
           }
         } else if (CBZ.city && CBZ.city.note) {
@@ -496,7 +496,7 @@
     }
     if (k.t <= 0) {
       if (CBZ.cityKillPed) CBZ.cityKillPed(k.ped, { fromX: k.x + 1, fromZ: k.z, force: 4, fling: 1 }, "executed");
-      endKidnap(false, "🕯 The clock ran out. They put " + (k.ped.name || "your family") + " down.", "#ff7a7a");
+      endKidnap(false, "The clock ran out. They put " + (k.ped.name || "your family") + " down.", "#ff7a7a");
     }
   }
 

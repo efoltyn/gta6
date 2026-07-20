@@ -373,7 +373,7 @@
       const nameCol = r.dead ? "#8a93a3" : "#e8eef7";
       h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px;" + (r.dead ? "opacity:.6" : "") + "'>" +
         "<span style='color:#8a93a3'>" + (i + 1) + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + (r.dead ? "💀 " : "") + "<b style='color:" + nameCol + "'>" + esc(r.name) + "</b> <span style='color:#8a93a3'>" + esc(r.title) + "</span></span>" +
+        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + (r.dead ? "" : "") + "<b style='color:" + nameCol + "'>" + esc(r.name) + "</b> <span style='color:#8a93a3'>" + esc(r.title) + "</span></span>" +
         "<span style='text-align:right;color:" + tierCol + ";font-weight:700;font-size:10px'>" + esc(level) + "</span>" +
         "<span style='text-align:right;color:" + (r.dead ? "#8a93a3" : "#7ed957") + ";font-weight:700'>" + money(nw) + "</span>" +
         "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (r.dead ? "#ff8a8a" : "#aeb6c2") + "'>" + esc(r.why) + "</span>" +

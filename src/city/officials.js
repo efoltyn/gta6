@@ -336,18 +336,18 @@
       const depName = nameOf(depSid);
       rec.office.holder = depSid;
       rec.office.deputy = null;
-      if (CBZ.cityFeed) CBZ.cityFeed("⚖️ Deputy " + depName + " sworn in as " + title + " of " + rec.name, "#8fc1ff");
+      if (CBZ.cityFeed) CBZ.cityFeed("Deputy " + depName + " sworn in as " + title + " of " + rec.name, "#8fc1ff");
     } else {
       rec.office.holder = null;
       const day = CBZ.worldDay ? CBZ.worldDay() : 0;
       rec.vacuum = day;
       ensureState().vacantSince[rec.id] = day;
       rec.approval = Math.max(0, (rec.approval || 0) - 15);
-      if (CBZ.cityFeed) CBZ.cityFeed("🏛️ POWER VACUUM in " + rec.name, "#ff6a5e");
+      if (CBZ.cityFeed) CBZ.cityFeed("POWER VACUUM in " + rec.name, "#ff6a5e");
     }
 
     // (c) headline
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("💀 " + title + " " + victimName + " ASSASSINATED");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + title + " " + victimName + " ASSASSINATED");
 
     // (d) max heat — same call shape worldstate.js's own crimeHeat routes through.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(300, { type: "murder" }); } catch (e) {} }
@@ -401,7 +401,7 @@
         if (day - since >= CARETAKER_DAYS) {
           mintHolder(rec, false);
           delete S.vacantSince[id];
-          if (CBZ.cityFeed) CBZ.cityFeed("🏛️ " + nameOf(rec.office.holder) + " appointed caretaker " + titleFor(rec) + " of " + rec.name, "#ffd76a");
+          if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(rec.office.holder) + " appointed caretaker " + titleFor(rec) + " of " + rec.name, "#ffd76a");
         }
       }
     });
@@ -566,7 +566,7 @@
     if (det && CBZ.protection.spawnMembers) CBZ.protection.spawnMembers(det, A, sp.x, sp.z, rng);
 
     pr.state = "live"; pr.principal = p; pr.mode = phase; pr.mournT = 0;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🏛️ " + titleFor(rec) + " " + (id.name || "") + " is out, flanked by security.", 2.4);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + titleFor(rec) + " " + (id.name || "") + " is out, flanked by security.", 2.4);
   }
 
   function tickOffice(rec, kind, door, A, phase, dt) {

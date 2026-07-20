@@ -95,10 +95,10 @@
   // ---- announce tier step-ups with a subtle hint ----
   const TIER_HINTS = [
     "The block is settling in for a long shift…",
-    "⚠ The guards are getting restless.",
-    "⚠ Patrols sharpen up — eyes everywhere.",
-    "⚠ Lockdown footing. They're hunting harder now.",
-    "⚠ Maximum vigilance — the whole block is on edge.",
+    "The guards are getting restless.",
+    "Patrols sharpen up — eyes everywhere.",
+    "Lockdown footing. They're hunting harder now.",
+    "Maximum vigilance — the whole block is on edge.",
   ];
   function checkTier() {
     // tiers spread across the ramp; the final tier lands at full difficulty

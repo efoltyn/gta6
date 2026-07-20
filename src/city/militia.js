@@ -297,8 +297,8 @@
     detail.memberCount = 0;
 
     const label = mrec.playerOwned ? "Your hired security has grown into a real militia" : "A protection detail has grown into a real militia";
-    if (CBZ.cityFeed) CBZ.cityFeed("🪖 " + label + ": " + gang.name + " (" + bodies.length + " strong).", "#ffd76a");
-    if (mrec.playerOwned && CBZ.city && CBZ.city.big) CBZ.city.big("🪖 MILITIA FORMED: " + gang.name.toUpperCase());
+    if (CBZ.cityFeed) CBZ.cityFeed("" + label + ": " + gang.name + " (" + bodies.length + " strong).", "#ffd76a");
+    if (mrec.playerOwned && CBZ.city && CBZ.city.big) CBZ.city.big("MILITIA FORMED: " + gang.name.toUpperCase());
 
     // formation-time regime reaction ("on formation, or on regime entry" —
     // one code path: lastGov starts null, so this always reads as "entry").
@@ -323,7 +323,7 @@
   // ============================================================
   function onGovChange(gid, gang, mrec, gov, day) {
     if (gov === "democracy") {
-      if (CBZ.cityFeed) CBZ.cityFeed("🪖 " + gang.name + " registers as a private security force — legal, but watched.", "#ffd76a");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " registers as a private security force — legal, but watched.", "#ffd76a");
       const home = homeCityId(mrec, gang);
       if (home && CBZ.approvalShock) CBZ.approvalShock(home, -DEMOCRACY_APPROVAL_DIP);
     } else if (gov === "fascism" || gov === "dictatorship") {
@@ -331,12 +331,12 @@
         absorbLoyalist(gid, gang, mrec);
       } else {
         mrec.crackdownArmed = true; mrec.crackdownArmedDay = day;
-        if (CBZ.cityFeed) CBZ.cityFeed("⚠ " + gang.name + " is now an unsanctioned militia — the regime is watching.", "#ff9e6b");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " is now an unsanctioned militia — the regime is watching.", "#ff9e6b");
       }
     } else if (gov === "communism") {
       nationalize(gid, gang, mrec);
     } else if (gov === "anarchism") {
-      if (CBZ.cityFeed) CBZ.cityFeed("🏴 " + gang.name + " thrives in the vacuum — recruits are lining up.", "#ffd76a");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " thrives in the vacuum — recruits are lining up.", "#ffd76a");
     }
   }
   function tickGovEffects(gid, gang, mrec, gov, day) {
@@ -365,7 +365,7 @@
     if (country) country.treasury = (country.treasury || 0) + Math.round(gang.treasury || 0);
     releaseTurf(gang);
     removeFromCityGangs(gid);
-    if (CBZ.cityFeed) CBZ.cityFeed("🎖️ " + gang.name + " folds loyally into the state's own protection detail.", "#8fe08a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " folds loyally into the state's own protection detail.", "#8fe08a");
   }
   function nationalize(gid, gang, mrec) {
     mrec.disbanded = true; mrec.nationalized = true;
@@ -380,7 +380,7 @@
     if (country) country.treasury = (country.treasury || 0) + Math.round(gang.treasury || 0);
     releaseTurf(gang);
     removeFromCityGangs(gid);
-    if (CBZ.cityFeed) CBZ.cityFeed("🚩 " + gang.name + " nationalized — " + n + " personnel fold into the police, its treasury seized.", "#8fe08a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " nationalized — " + n + " personnel fold into the police, its treasury seized.", "#8fe08a");
   }
   function crackdown(gid, gang, mrec) {
     mrec.disbanded = true; mrec.crackedDown = true;
@@ -391,7 +391,7 @@
     removeFromCityGangs(gid);
     const home = homeCityId(mrec, gang);
     if (home && CBZ.approvalShock) CBZ.approvalShock(home, -CRACKDOWN_APPROVAL_DIP);
-    if (CBZ.cityFeed) CBZ.cityFeed("🚨 The regime cracks down on " + gang.name + " — scattered, but " + bossName + " won't forget this.", "#ff6a5e");
+    if (CBZ.cityFeed) CBZ.cityFeed("The regime cracks down on " + gang.name + " — scattered, but " + bossName + " won't forget this.", "#ff6a5e");
   }
   function disband(gid, gang, mrec, reason) {
     mrec.disbanded = true;
@@ -399,7 +399,7 @@
     releaseMembers(members, gang, [{ p: 0.4, flavor: "security" }, { p: 0.3, flavor: "gang" }]);   // remaining 30% -> civilian
     releaseTurf(gang);
     removeFromCityGangs(gid);
-    if (CBZ.cityFeed) CBZ.cityFeed("🪖 " + gang.name + " disbands (" + (reason === "employer" ? "employer gone" : "treasury exhausted") + ") — its people scatter, never vanish.", "#ff9e6b");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " disbands (" + (reason === "employer" ? "employer gone" : "treasury exhausted") + ") — its people scatter, never vanish.", "#ff9e6b");
   }
   function checkDisband(gid, gang, mrec, day) {
     let employerGone = false;

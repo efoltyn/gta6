@@ -48,9 +48,9 @@
     return { txt: "Loner", cls: "f-loner" };
   }
   function behaviorCell(a) {
-    if (a === CBZ.player) return { e: "🎮", l: "Player" };
+    if (a === CBZ.player) return { e: "", l: "Player" };
     const b = CBZ.BEHAVIORS && CBZ.BEHAVIORS[a.behavior];
-    return b ? { e: b.emoji, l: b.label } : { e: "🌀", l: "Wildcard" };
+    return b ? { e: b.emoji, l: b.label } : { e: "", l: "Wildcard" };
   }
   function statusCell(a) {
     if (a.escaped) return { txt: "ESCAPED", cls: "s-esc" };

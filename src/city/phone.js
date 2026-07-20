@@ -1,5 +1,5 @@
 /* ============================================================
-   city/phone.js — "📱 PHONE": a read-only status / info hub for city mode.
+   city/phone.js — "PHONE": a read-only status / info hub for city mode.
 
    Press [P] in city mode to open a modal full of "apps" (cards) that mirror
    real game systems so every stat answers a "why":
@@ -9,10 +9,10 @@
      • MARKETS  — sim/market.js's 6 category prices + sim/econstate.js's CPI/
                   activity/employment/treasury, each row with a tiny inline
                   sparkline (E3 legibility: the invisible economy, on your phone);
-                  sibling cards 💱 CURRENCY EXCHANGE (M2), 🏦 CENTRAL BANKS
+                  sibling cards CURRENCY EXCHANGE (M2), CENTRAL BANKS
                   (M3: policy rate/independence/governor per country),
-                  📉 INFLATION (M4: real π%/yr per country + sparkline,
-                  republic sorted first), and 🏛 SOVEREIGN BONDS (M5: active
+                  INFLATION (M4: real π%/yr per country + sparkline,
+                  republic sorted first), and SOVEREIGN BONDS (M5: active
                   series by country — coupon, days to maturity, $ on offer —
                   BUY at par, your holdings) all ride here too
      • CREW     — your founded gang: name, live members, turf held
@@ -133,7 +133,7 @@
         "<b style='color:" + (n.app === "news" ? CYAN : "#c9d2df") + "'>" + esc(n.from) + "</b><span>" + esc(n.time) + "</span></div>" +
         "<div style='font-size:13px;color:#e8eef7;line-height:1.3;margin-top:2px'>" + esc(n.text) + "</div></div>";
     }
-    return card("📰 NEWS & MESSAGES", inner);
+    return card("NEWS & MESSAGES", inner);
   }
   function stars(n) {
     n = Math.max(0, Math.min(5, Math.round(num(n))));
@@ -150,7 +150,7 @@
     if (g.cityCrimeLabel) inner += row("Last crime", esc(g.cityCrimeLabel), RED);
     inner += row("Murders", num(g.cityMurders), RED);
     inner += row("Cop kills", num(g.cityCopKills), RED);
-    inner += row("Identity", g.cityMasked ? "🎭 Masked (no ID)" : "Face showing", g.cityMasked ? GREEN : DIM);
+    inner += row("Identity", g.cityMasked ? "Masked (no ID)" : "Face showing", g.cityMasked ? GREEN : DIM);
 
     // heat progress to the next star
     if (w < 5) {
@@ -164,10 +164,10 @@
     // line was assigned first and then ALWAYS overwritten by this if/else —
     // a dead branch. Folded into the 4★ arm so the chopper actually shows.)
     let flavor = "";
-    if (w >= 5) flavor = "✈️ AIRSTRIKE inbound — 5★ takes relentless carnage to hold.";
-    else if (w === 4) flavor = "🚁 Helicopter circling overhead — one more spree and they call in an airstrike (5★).";
+    if (w >= 5) flavor = "AIRSTRIKE inbound — 5★ takes relentless carnage to hold.";
+    else if (w === 4) flavor = "Helicopter circling overhead — one more spree and they call in an airstrike (5★).";
     if (flavor) inner += "<div style='font-size:11px;color:" + DIM + ";margin-top:4px'>" + esc(flavor) + "</div>";
-    return card("🚨 WANTED", inner);
+    return card("WANTED", inner);
   }
 
   function territoryApp() {
@@ -198,7 +198,7 @@
           "<span style='color:" + DIM + ";font-weight:600'>" + held + "</span></div>";
       });
     }
-    return card("🗺️ TERRITORY", inner);
+    return card("TERRITORY", inner);
   }
 
   function empireApp() {
@@ -225,7 +225,7 @@
     } else {
       inner += row("Car yard", "Not running", DIM);
     }
-    return card("🏙️ EMPIRE", inner);
+    return card("EMPIRE", inner);
   }
 
   // ---- MARKETS: the phone's window into the invisible economy (E3 legibility) -
@@ -282,7 +282,7 @@
         row(co.tickerSym + " · " + co.name, money(co.dailyEarnings) + "/day " + coArrow, coCol) + "</div>";
       if (tradable && stockOpen === co.tickerSym) inner += stockDetailHtml(co.tickerSym);
     });
-    return card("📈 MARKETS", inner);
+    return card("MARKETS", inner);
   }
   // ---- STOCK DETAIL — sim/stocks.js's data layer (quote()/position()) laid
   // out the same card-with-rows way every other app here does. A tiny
@@ -393,7 +393,7 @@
   function fmtFxRate(r) { return r >= 1 ? r.toFixed(2) : r.toFixed(4); }
   function fxHtml(rowsData) {
     if (!rowsData || !rowsData.length) {
-      return card("💱 CURRENCY EXCHANGE", "<div style='font-size:13px;color:" + DIM + "'>No exchange data available.</div>");
+      return card("CURRENCY EXCHANGE", "<div style='font-size:13px;color:" + DIM + "'>No exchange data available.</div>");
     }
     let inner = "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Quoted vs the Liberty Dollar — trade at an airport FX counter or the exchange desk.</div>";
     rowsData.forEach(function (r) {
@@ -411,7 +411,7 @@
         perDollar.toFixed(perDollar >= 100 ? 0 : (perDollar >= 1 ? 2 : 4)) + " " + esc(r.id) + "</div>" +
         "</div>";
     });
-    return card("💱 CURRENCY EXCHANGE", inner);
+    return card("CURRENCY EXCHANGE", inner);
   }
   // paints each currency's sparkline canvas from its history ring — same
   // DOM/canvas-only split as drawSparklines()/drawStockSpark() above (a
@@ -448,23 +448,23 @@
   //      the phone (not city/bank.js's own branch UI) because that branch
   //      is ONE physical building serving only the republic, while the
   //      phone already aggregates every country in one glanceable list —
-  //      the same reasoning M2's own "💱 CURRENCY EXCHANGE" card documents
+  //      the same reasoning M2's own "CURRENCY EXCHANGE" card documents
   //      for why IT lives here instead of only at the FX kiosks.
   function cbHtml(rowsData) {
     if (!rowsData || !rowsData.length) {
-      return card("🏦 CENTRAL BANKS", "<div style='font-size:13px;color:" + DIM + "'>No central bank data available.</div>");
+      return card("CENTRAL BANKS", "<div style='font-size:13px;color:" + DIM + "'>No central bank data available.</div>");
     }
     let inner = "";
     rowsData.forEach(function (r) {
-      const flag = r.suspended ? " <span style='color:" + RED + "'>🔒 SUSPENDED</span>"
-        : r.decreed ? " <span style='color:" + GOLD + "'>⚡ DECREED</span>" : "";
+      const flag = r.suspended ? " <span style='color:" + RED + "'>SUSPENDED</span>"
+        : r.decreed ? " <span style='color:" + GOLD + "'>DECREED</span>" : "";
       const indColor = r.independence >= 0.6 ? GREEN : (r.independence >= 0.35 ? GOLD : RED);
       const label = esc(r.name) + (r.governorName ? " · " + esc(r.governorName) : "");
       inner += row(label, (r.policyRate * 100).toFixed(2) + "%" + flag) +
         "<div style='font-size:10px;color:" + DIM + ";text-align:right;margin:-2px 0 4px'>" +
         "independence <span style='color:" + indColor + "'>" + Math.round(r.independence * 100) + "%</span></div>";
     });
-    return card("🏦 CENTRAL BANKS", inner);
+    return card("CENTRAL BANKS", inner);
   }
 
   // ---- M4: INFLATION — read-only, one row per country: π%/yr + a trailing
@@ -474,7 +474,7 @@
   //      sim/inflation.js's own list() order.
   function inflHtml(rowsData) {
     if (!rowsData || !rowsData.length) {
-      return card("📉 INFLATION", "<div style='font-size:13px;color:" + DIM + "'>No inflation data available.</div>");
+      return card("INFLATION", "<div style='font-size:13px;color:" + DIM + "'>No inflation data available.</div>");
     }
     const sorted = rowsData.slice().sort(function (a, b) {
       if (a.id === "republic") return -1;
@@ -493,7 +493,7 @@
         "<canvas id='inflSpark_" + esc(r.id) + "' width='56' height='18' style='display:block'></canvas>" +
         "</span></div>";
     });
-    return card("📉 INFLATION", inner);
+    return card("INFLATION", inner);
   }
   // paints each country's π sparkline canvas — same DOM/canvas-only split as
   // drawSparklines()/drawFxSparklines() above (a no-op outside a real DOM).
@@ -540,7 +540,7 @@
   function bondsHtml(rowsData, holdings) {
     if (!rowsData || !rowsData.length) {
       let inner = "<div style='font-size:13px;color:" + DIM + "'>No sovereign bonds on offer right now — auctions open when a country's treasury runs a deficit.</div>";
-      return card("🏛 SOVEREIGN BONDS", inner);
+      return card("SOVEREIGN BONDS", inner);
     }
     let inner = "";
     rowsData.forEach(function (r) {
@@ -565,7 +565,7 @@
       });
     }
     if (bondMsg) inner += "<div style='font-size:11px;color:" + GOLD + ";margin-top:4px'>" + esc(bondMsg) + "</div>";
-    return card("🏛 SOVEREIGN BONDS", inner);
+    return card("SOVEREIGN BONDS", inner);
   }
 
   function crewApp() {
@@ -581,9 +581,9 @@
       inner += row("Members", members, members > 0 ? GREEN : DIM);
       inner += row("Turf held", (pg.turf && pg.turf.length) || 0);
       if (pg.treasury != null) inner += row("Treasury", money(pg.treasury), GOLD);
-      return card("👥 CREW", inner);
+      return card("CREW", inner);
     }
-    return card("👥 CREW",
+    return card("CREW",
       "<div style='font-size:13px;color:" + DIM + "'>No crew yet.</div>");
   }
 
@@ -607,17 +607,17 @@
     const s = (typeof CBZ.cityAirServices === "function") ? CBZ.cityAirServices() : null;
     let inner = "";
     if (s && s.riding) {
-      inner += "<div style='font-size:12px;color:" + GREEN + ";margin-bottom:4px'>🚁 In the air — enjoy the ride.</div>";
+      inner += "<div style='font-size:12px;color:" + GREEN + ";margin-bottom:4px'>In the air — enjoy the ride.</div>";
     }
     // CHOPPER — comes free with the penthouse
     if (!s || !s.helipad) {
-      inner += svcBtn("", "🚁 Call Chopper", false, "Locked — own the APEX PENTHOUSE; a chopper comes parked on its rooftop pad.");
+      inner += svcBtn("", "Call Chopper", false, "Locked — own the APEX PENTHOUSE; a chopper comes parked on its rooftop pad.");
     } else if (s.chopperActive) {
-      inner += svcBtn("", "🚁 Chopper inbound…", false, "Walk under it to board. It flies you to your waypoint (or home).");
+      inner += svcBtn("", "Chopper inbound…", false, "Walk under it to board. It flies you to your waypoint (or home).");
     } else if (s.chopperCD > 0) {
-      inner += svcBtn("", "🚁 Chopper refueling", false, "Ready in " + s.chopperCD + "s.");
+      inner += svcBtn("", "Chopper refueling", false, "Ready in " + s.chopperCD + "s.");
     } else {
-      inner += svcBtn("chopper", "🚁 Call Chopper", true, "Aerial pickup → flies you to your map waypoint, else home.");
+      inner += svcBtn("chopper", "Call Chopper", true, "Aerial pickup → flies you to your map waypoint, else home.");
     }
     // HANGAR — the home a stolen F-22 needs. Two ways to own one: the penthouse
     //   deck hangar (bought at home [H]) OR the standalone airport Private Hangar
@@ -627,21 +627,21 @@
     const hangarProp = (CBZ.cityStorage && CBZ.cityStorage.PROPERTIES) ? CBZ.cityStorage.PROPERTIES.find(function (p) { return p.id === "hangar"; }) : null;
     if (!s || !s.hangar) {
       if (ownsAirportHangar) {
-        inner += svcBtn("", "🛩 Private Hangar — owned", false, "Empty hangar at the airport apron. STEAL the F-22 from the military base, then land it inside to keep it.");
+        inner += svcBtn("", "Private Hangar — owned", false, "Empty hangar at the airport apron. STEAL the F-22 from the military base, then land it inside to keep it.");
       } else if (CBZ.cityStorage && CBZ.cityStorage.buy) {
-        inner += svcBtn("buyhangar", "🛩 Buy Private Hangar — " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar — the home a stolen F-22 needs. The penthouse also offers a deck hangar.");
+        inner += svcBtn("buyhangar", "Buy Private Hangar — " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar — the home a stolen F-22 needs. The penthouse also offers a deck hangar.");
       }
     }
     // AIRSTRIKE — needs a based F-22 (own a hangar, then steal & land the jet)
     if (!s || !s.hangar) {
-      inner += svcBtn("", "🎯 Call Airstrike", false,
+      inner += svcBtn("", "Call Airstrike", false,
         "Locked — buy a private or penthouse hangar, steal the F-22, and land it inside to base it.");
     } else if (s.strikeCD > 0) {
-      inner += svcBtn("", "🎯 Jet rearming", false, "Ready in " + s.strikeCD + "s.");
+      inner += svcBtn("", "Jet rearming", false, "Ready in " + s.strikeCD + "s.");
     } else {
-      inner += svcBtn("strike", "🎯 Call Airstrike", true, "Bombs your waypoint (else your aim). " + money(s.strikeCost) + " · draws police heat.");
+      inner += svcBtn("strike", "Call Airstrike", true, "Bombs your waypoint (else your aim). " + money(s.strikeCost) + " · draws police heat.");
     }
-    return card("📡 SERVICES", inner);
+    return card("SERVICES", inner);
   }
 
   // ---- GIG WORK: the phone's honest-money app. The WHY: not every dollar has
@@ -658,9 +658,9 @@
   //        CBZ.cityGig.lines()         → [{kind,label,sub,pay?}] available gig lines
   //        CBZ.cityGig.cancel()        → drop the active gig
   const GIG_LINES = [
-    { kind: "delivery", label: "📦 Delivery", sub: "grab a package · run it across town" },
-    { kind: "taxi", label: "🚕 Rideshare", sub: "pick up a fare · drop them at their stop" },
-    { kind: "smuggling", label: "🕶️ Smuggle run", sub: "off-book cargo · hot money, hotter heat" },
+    { kind: "delivery", label: "Delivery", sub: "grab a package · run it across town" },
+    { kind: "taxi", label: "Rideshare", sub: "pick up a fare · drop them at their stop" },
+    { kind: "smuggling", label: "Smuggle run", sub: "off-book cargo · hot money, hotter heat" },
   ];
   // a clickable gig row. mode "offer" lists a line to fetch work for; mode
   // "accept" is a concrete offered def the player can take right now.
@@ -693,7 +693,7 @@
   function gigApp() {
     const G = CBZ.cityGig;
     if (!G || typeof G !== "object") {
-      return card("💼 GIG WORK",
+      return card("GIG WORK",
         "<div style='font-size:13px;color:" + DIM + "'>No gig dispatch available right now.</div>");
     }
     let inner = "";
@@ -703,11 +703,11 @@
     if (active) {
       const k = String(active.kind || active.line || "gig");
       const line = GIG_LINES.find(function (l) { return l.kind === k; });
-      const title = (line ? line.label : "💼 " + k) + (active.pay ? " · " + money(active.pay) : "");
+      const title = (line ? line.label : "" + k) + (active.pay ? " · " + money(active.pay) : "");
       inner += "<div style='font-size:13px;color:" + GREEN + ";font-weight:700;margin-bottom:2px'>" + esc(title) + "</div>";
       inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:6px'>" + esc(gigStageHint(active)) + "</div>";
-      if (typeof G.cancel === "function") inner += gigBtn("cancel", k, "✖ Drop this gig", true, "Forfeit the run — no pay.");
-      return card("💼 GIG WORK", inner);
+      if (typeof G.cancel === "function") inner += gigBtn("cancel", k, "Drop this gig", true, "Forfeit the run — no pay.");
+      return card("GIG WORK", inner);
     }
     // 2) FRESH OFFERS — if the player has fetched offers for a line, list them.
     if (gigOffers.length) {
@@ -715,10 +715,10 @@
       gigOffers.forEach(function (def, i) {
         const lbl = (def && (def.label || def.title)) || "Job #" + (i + 1);
         const sub = (def && (def.sub || def.desc)) || (def && def.pay ? money(def.pay) : "");
-        inner += gigBtn("accept", String(i), "✔ " + lbl, true, sub);
+        inner += gigBtn("accept", String(i), "" + lbl, true, sub);
       });
       inner += gigBtn("clear", "", "↩ Back to gig lines", true, "");
-      return card("💼 GIG WORK", inner);
+      return card("GIG WORK", inner);
     }
     // 3) DEFAULT — the menu of gig lines to fetch work for.
     inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Clock in — pick a line of work:</div>";
@@ -735,7 +735,7 @@
     lines.forEach(function (l) {
       inner += gigBtn("offer", l.kind, l.label, typeof G.offer === "function", l.sub);
     });
-    return card("💼 GIG WORK", inner);
+    return card("GIG WORK", inner);
   }
 
   function vitalsApp() {
@@ -750,10 +750,10 @@
       inner += row("Tiredness", pct(g.tired), num(g.tired) > 70 ? RED : DIM);
     }
     const injuries = [];
-    if (p._legWound) injuries.push("🦵 Leg wound");
-    if (p._bleeding) injuries.push("🩸 Bleeding");
+    if (p._legWound) injuries.push("Leg wound");
+    if (p._bleeding) injuries.push("Bleeding");
     if (injuries.length) inner += row("Injuries", injuries.join(", "), RED);
-    return card("❤️ VITALS", inner);
+    return card("VITALS", inner);
   }
 
   // ---- render ---------------------------------------------------------------
@@ -815,7 +815,7 @@
 
     const head = document.createElement("div");
     head.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px";
-    head.innerHTML = "<div style='display:flex;align-items:center;gap:8px;font-size:20px;font-weight:800;letter-spacing:.5px'>📱 PHONE" +
+    head.innerHTML = "<div style='display:flex;align-items:center;gap:8px;font-size:20px;font-weight:800;letter-spacing:.5px'>PHONE" +
       "<span id='cityPhoneUnread' style='display:none;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;box-sizing:border-box;border-radius:10px;background:#d64545;color:white;font-size:10px'>0</span></div>" +
       "<div style='font-size:12px;color:" + DIM + "'>" + esc(clockLabel()) + "</div>";
     panel.appendChild(head);

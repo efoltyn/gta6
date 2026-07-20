@@ -259,8 +259,8 @@
 
   // ---- the city feed line on big moves (throttled) -----------------------
   const FEED_LABEL = {
-    food: "🍜 Food", goods: "📦 Goods", guns: "🔫 Gun",
-    materials: "🧱 Materials", fuel: "⛽ Fuel", luxury: "💎 Luxury",
+    food: "Food", goods: "Goods", guns: "Gun",
+    materials: "Materials", fuel: "Fuel", luxury: "Luxury",
   };
   let _lastFeedAt = -1e9;
   function checkBigMoves(m) {

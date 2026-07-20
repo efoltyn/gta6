@@ -51,7 +51,7 @@
     if (padIndex < 0) padIndex = e.gamepad.index;
     if (!announced) {
       announced = true;
-      const msg = "🎮 Controller connected — GTA-style layout ready.";
+      const msg = "Controller connected — GTA-style layout ready.";
       if (CBZ.city && CBZ.city.note && g.mode === "city") CBZ.city.note(msg, 3);
       else if (CBZ.flashHint) CBZ.flashHint(msg, 3);
     }

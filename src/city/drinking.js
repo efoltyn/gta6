@@ -196,7 +196,7 @@
   function beginBlackout() {
     ensureEls();
     phase = "fadeout"; phaseT = FADE_OUT_DUR; state.blackout = true;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🥴 The room's spinning...", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("The room's spinning...", 1.8);
   }
   function stepBlackout(dt) {
     ensureEls();
@@ -285,9 +285,9 @@
     applyVignette(state.level, t);
 
     // quiet one-shot flavor notes on the way up — no persistent HUD edit
-    if (state.level >= 0.5 && !warnedTipsy) { warnedTipsy = true; if (CBZ.city && CBZ.city.note) CBZ.city.note("🍺 Feeling that.", 1.6); }
+    if (state.level >= 0.5 && !warnedTipsy) { warnedTipsy = true; if (CBZ.city && CBZ.city.note) CBZ.city.note("Feeling that.", 1.6); }
     else if (state.level < 0.4) warnedTipsy = false;
-    if (state.level >= 3 && !warnedDrunk) { warnedDrunk = true; if (CBZ.city && CBZ.city.note) CBZ.city.note("🍻 Properly drunk now — footing's going.", 2); }
+    if (state.level >= 3 && !warnedDrunk) { warnedDrunk = true; if (CBZ.city && CBZ.city.note) CBZ.city.note("Properly drunk now — footing's going.", 2); }
     else if (state.level < 2.5) warnedDrunk = false;
   });
 })();

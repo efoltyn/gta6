@@ -388,7 +388,7 @@
     // in the house's stock — tiny per-dollar effect, but a real one.
     if (profit > 25000 && CBZ.stocks && typeof CBZ.stocks.shock === "function") {
       CBZ.stocks.shock("RYL", -profit / 2000000);
-      if (CBZ.cityFeed) CBZ.cityFeed("🎰 Casino floor jackpot rattles Royale Casino Corp — RYL dips", "#ffd166");
+      if (CBZ.cityFeed) CBZ.cityFeed("Casino floor jackpot rattles Royale Casino Corp — RYL dips", "#ffd166");
     }
     CBZ.cityEvent && CBZ.cityEvent("casino", { profit, faction: "casino", factionDelta: profit > 0 ? -1 : 1 }, { silent: true });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -608,7 +608,7 @@
     modalBtns.betmin = function () { casino.bet = 25; reRenderCasinoGame(); };
     modalBtns.betmax = function () { casino.bet = Math.max(25, Math.min(stakeCap(), Math.floor(bankroll() / 25) * 25)) || 25; reRenderCasinoGame(); };
     modalBtns.hiroll = function () {
-      if (!casino.hr && !highRoller()) { note("⛔ Members only — VIP tables need Baller wealth or max DRIP.", 2.4); return; }
+      if (!casino.hr && !highRoller()) { note("Members only — VIP tables need Baller wealth or max DRIP.", 2.4); return; }
       casino.hr = !casino.hr;
       casino.bet = Math.min(stakeCap(), casino.bet);
       reRenderCasinoGame();

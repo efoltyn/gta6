@@ -294,13 +294,13 @@
     if (q) {
       const bankTail = (q.viaBank && q.payment > 0) ? ", about " + fmt$(Math.round(q.payment)) + "/cycle" : "";
       const ratePct = (Math.round((q.rate || 0.06) * 1000) / 10) + "%";
-      msg = "🤝 Agent: pre-approved. " + ratePct + " on a mortgage — "
+      msg = "Agent: pre-approved. " + ratePct + " on a mortgage — "
         + "as little as " + fmt$(q.down) + " down" + bankTail + " on " + shortName(qName) + ". "
         + (topCash ? "You could pay cash for the " + shortName(topCash.name) + " today." : "Read the wall and pick a place.");
     } else if (topCash) {
-      msg = "🤝 Agent: \"" + fmt$(cash) + " on hand — you could buy the " + shortName(topCash.name) + " outright. Have a look at the wall.\"";
+      msg = "Agent: \"" + fmt$(cash) + " on hand — you could buy the " + shortName(topCash.name) + " outright. Have a look at the wall.\"";
     } else {
-      msg = "🤝 Agent: \"Save a deposit and we'll talk financing — 20% down opens most doors. The listings are on the wall.\"";
+      msg = "Agent: \"Save a deposit and we'll talk financing — 20% down opens most doors. The listings are on the wall.\"";
     }
     note(msg, 3.4);
     if (CBZ.sfx) CBZ.sfx("door");
@@ -366,7 +366,7 @@
     const slice = S.rows.slice(S.page * PAGE, S.page * PAGE + PAGE);
 
     let html = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px'>"
-      + "<div style='font-size:19px;font-weight:700'>🏠 Keystone Realty — Listings</div>"
+      + "<div style='font-size:19px;font-weight:700'>Keystone Realty — Listings</div>"
       + "<button data-ract='close' style='background:none;border:0;color:#9fb0c6;font-size:18px;cursor:pointer'>✕</button></div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + fmt$(cash) + " · Bank " + fmt$(bank)
       + (g.cityHome ? " · Home: " + shortName(g.cityHome.name) : "") + "</div>";
@@ -376,10 +376,10 @@
     }
     for (const rec of slice) {
       const tags = (rec.sqft ? rec.sqft.toLocaleString() + " sqft" : (rec.storeys || 1) + " fl")
-        + (rec.flagship ? " · 👑 flagship" : "") + (rec.zone ? " · " + esc(rec.zone) : "");
+        + (rec.flagship ? " · flagship" : "") + (rec.zone ? " · " + esc(rec.zone) : "");
       html += "<div style='padding:6px 0;border-top:1px solid #232a30'>"
         + "<div style='display:flex;justify-content:space-between;gap:10px'>"
-        + "<span style='font-size:14px;font-weight:600'>" + (rec.flagship ? "👑 " : "") + esc(rec.name) + "</span>"
+        + "<span style='font-size:14px;font-weight:600'>" + (rec.flagship ? "" : "") + esc(rec.name) + "</span>"
         + "<span style='font-size:14px;color:#7df0c4'>" + fmt$(rec.value) + "</span></div>"
         + "<div style='font-size:11px;color:#8a93a3;margin:1px 0 4px'>" + esc(tags) + (rec.blurb ? " — " + esc(trim(rec.blurb)) : "") + "</div>"
         + "<div style='display:flex;flex-wrap:wrap;gap:6px;align-items:center'>";
@@ -429,9 +429,9 @@
     P.pos.set(door.x, 0, door.z); P.vy = 0; P.grounded = true;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(door.x, door.z, rec.name);
-    note((rec.owned ? "🏠 Home — " : "🚪 Touring ") + shortName(rec.name)
+    note((rec.owned ? "Home — " : "Touring ") + shortName(rec.name)
       + (rec.owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.0);
-    if (rec.flagship && CBZ.city && CBZ.city.big) CBZ.city.big("👑 " + rec.name);
+    if (rec.flagship && CBZ.city && CBZ.city.big) CBZ.city.big("" + rec.name);
     if (CBZ.sfx) CBZ.sfx("door");
   }
   function actBtn(act, idx, label, bg) {

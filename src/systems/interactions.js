@@ -74,7 +74,7 @@
       } else {
         const bdx = player.pos.x - breaker.x, bdz = player.pos.z - breaker.z;
         if (bdx * bdx + bdz * bdz < 1.8) {
-          CBZ.showHint("⚡ Press [E] to Sabotage Power");
+          CBZ.showHint("Press [E] to Sabotage Power");
           hintTimer = 0.2;
           if (CBZ.keys && CBZ.keys["e"]) {
             breaker.sabotaged = true;
@@ -87,7 +87,7 @@
             }
             CBZ.sfx("door"); // Clank sound
             CBZ.flashToast("POWER OUT!");
-            CBZ.flashHint("⚡ Sabotaged power! All cameras and Cell Block lights are deactivated for 20s.", 3.2);
+            CBZ.flashHint("Sabotaged power! All cameras and Cell Block lights are deactivated for 20s.", 3.2);
           }
         }
       }
@@ -105,7 +105,7 @@
         if (dist < 2.0 && CBZ.playerChar && CBZ.playerChar.punchT > 0) {
           cam.destroyed = true;
           CBZ.sfx("punch");
-          CBZ.flashHint("💥 Security camera destroyed!", 2.2);
+          CBZ.flashHint("Security camera destroyed!", 2.2);
           continue;
         }
 
@@ -121,7 +121,7 @@
           if (diff < 0.32) {
             // inside detection field
             CBZ.addHeat(dt * 38);
-            CBZ.showHint("⚠️ CAMERA DETECTING YOU!");
+            CBZ.showHint("CAMERA DETECTING YOU!");
             hintTimer = 0.2;
             // Blink lens rapidly
             cam.lens.material.color.setHex(CBZ.now % 200 < 100 ? 0xffea00 : 0xff3b3b);
@@ -141,7 +141,7 @@
         const vdx = player.pos.x - vent.x, vdz = player.pos.z - vent.z;
         if (vdx * vdx + vdz * vdz < 1.6) {
           if (player.crouch) {
-            CBZ.showHint(`💨 Press [E] to Crawl to ${vent.dest.name}`);
+            CBZ.showHint(`Press [E] to Crawl to ${vent.dest.name}`);
             hintTimer = 0.2;
             if (CBZ.keys && CBZ.keys["e"]) {
               CBZ.crawling = true;

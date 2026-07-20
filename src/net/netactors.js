@@ -105,7 +105,7 @@
   // proximity-voice 🔊 pip over the speaker's head (netvoice.js drives this)
   CBZ.netSetSpeaking = function (R, on) {
     if (on && !R.speakTag && R.group && CBZ.makeLabelSprite) {
-      R.speakTag = CBZ.makeLabelSprite("🔊", { color: "#7fe0a0" });
+      R.speakTag = CBZ.makeLabelSprite("", { color: "#7fe0a0" });
       R.speakTag.position.y = CBZ.charHeadY ? CBZ.charHeadY(R) : 1.97;
       R.speakTag.scale.set(0.9, 0.9, 1);
       R.group.add(R.speakTag);

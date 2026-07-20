@@ -83,7 +83,7 @@
       c.collected = true; c.anim = 0;
       if (c.ring) c.ring.visible = false;
       CBZ.econ.addCigs(c.value);
-      CBZ.flashHint(`+${c.value} 🚬`, 1.0);
+      CBZ.flashHint(`+${c.value}`, 1.0);
       CBZ.sfx("coin");
       return false;   // never structurally removed — state.js resets it on respawn
     },

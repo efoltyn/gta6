@@ -135,7 +135,7 @@
       const victimName = ped.name || "Someone";
       const heirName = nameOf(heirSid) || "their heir";
       if (CBZ.city && CBZ.city.note) {
-        CBZ.city.note("💀 Estate of " + victimName + " passes to " + heirName, 2.4);
+        CBZ.city.note("Estate of " + victimName + " passes to " + heirName, 2.4);
       }
       // NOTE: no cityGossip seed here — the closest existing TOPIC is
       // "heroKilled" (grief/anger at the KILLER), which doesn't fit an estate

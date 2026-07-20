@@ -376,7 +376,7 @@
           rideBusyUntil = nowMs() + 1800;
           const d = towerDoor(r.b);
           const gy = CBZ.floorAt ? CBZ.floorAt(d.x, d.z) : 0.14;
-          relocate(d.x, gy, d.z, "🛗 Fifty floors in nine seconds. Street level.");
+          relocate(d.x, gy, d.z, "Fifty floors in nine seconds. Street level.");
         },
       }],
     });
@@ -397,7 +397,7 @@
         onSelect: function () {
           const r = eo(); if (!r) return;
           rideBusyUntil = nowMs() + 1800;
-          relocate(r.e.lift.x, r.e.floorY, r.e.lift.z, "🛗 " + FIRM + " — the 50th floor.");
+          relocate(r.e.lift.x, r.e.floorY, r.e.lift.z, "" + FIRM + " — the 50th floor.");
         },
       }],
     });

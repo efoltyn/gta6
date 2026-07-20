@@ -268,7 +268,7 @@
     // for pure STATUS only (meters, "armed", "clean/risk"), never a price echo.
     if (v === "accept" || v === "join" || v === "trade" || v === "bribe" ||
         v === "payoff" || v === "pay" || v === "paySilence" || v === "respect") return "";
-    if (v === "romance") return "💘 " + Math.round(a.love || 0);
+    if (v === "romance") return "" + Math.round(a.love || 0);
     if (v === "befriend") {
       if ((a.playerTrust || 0) >= 6) return "trust+";
       if ((a.playerGrudge || 0) >= 6) return "repair";
@@ -284,11 +284,11 @@
       if ((a.playerFear || 0) >= 7) return "scared";
       return CBZ.econ.hasItem("Shiv") ? "armed" : "";
     }
-    if (v === "trade") return a.data.offer ? (CBZ.econ.offerLine ? CBZ.econ.offerLine(a) : `${a.data.offer.item}·${a.data.offer.price}🚬`) : "";
-    if (v === "bribe") return a.kind === "warden" ? "25🚬" : (a.corrupt ? "5🚬" : "10🚬");
-    if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : Math.max(6, Math.ceil((CBZ.game.detection || 0) / 8) + Math.ceil((CBZ.game.complaints || 0) / 12) + (CBZ.game.gangJob ? 4 : 0) + (a.kind === "warden" ? 14 : 5))) + "🚬";
-    if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "🚬" : "";
-    if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "🚬" : "";
+    if (v === "trade") return a.data.offer ? (CBZ.econ.offerLine ? CBZ.econ.offerLine(a) : `${a.data.offer.item}·${a.data.offer.price}`) : "";
+    if (v === "bribe") return a.kind === "warden" ? "25" : (a.corrupt ? "5" : "10");
+    if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : Math.max(6, Math.ceil((CBZ.game.detection || 0) / 8) + Math.ceil((CBZ.game.complaints || 0) / 12) + (CBZ.game.gangJob ? 4 : 0) + (a.kind === "warden" ? 14 : 5))) + "";
+    if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "" : "";
+    if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
     if (v === "haggle") return a.approach && a.approach.haggled ? "done" : ((a.playerTrust || 0) >= 6 ? "trust helps" : "");
     if (v === "threaten" || v === "threatenSnitch") return CBZ.playerArmed && CBZ.playerArmed() ? "armed" : "";
     if (v === "confrontReport") return a.reportedPlayerCred != null ? `cred ${Math.round(a.reportedPlayerCred * 100)}%` : "";
@@ -306,14 +306,14 @@
       if (a.blockRead && a.blockRead.kind === "wealth" && (a.blockRead.t || 0) > 0) return "hot";
       return "";
     }
-    if (v === "accept" && a.approach && a.approach.kind === "favor") return "+" + (a.approach.gift || 3) + "🚬";
-    if (v === "accept" && a.approach && a.approach.kind === "buyItem") return "+" + (a.approach.price || 0) + "🚬";
-    if (v === "accept" && a.approach && a.approach.kind === "copBribe") return "+" + (a.approach.price || 0) + "🚬";
+    if (v === "accept" && a.approach && a.approach.kind === "favor") return "+" + (a.approach.gift || 3) + "";
+    if (v === "accept" && a.approach && a.approach.kind === "buyItem") return "+" + (a.approach.price || 0) + "";
+    if (v === "accept" && a.approach && a.approach.kind === "copBribe") return "+" + (a.approach.price || 0) + "";
     if (v === "accept" && a.approach && a.approach.kind === "copTip") return "intel";
     if (v === "accept" && a.approach && a.approach.kind === "copPlea") return "case";
     if (v === "respect" && a.approach && a.approach.kind === "turfWarning") return "+respect";
     if (v === "respect" && a.approach && a.approach.kind === "gangParley") return "+respect";
-    if (v === "accept" && a.approach && a.approach.kind === "gangJob") return "+" + ((a.approach.job && a.approach.job.reward) || 5) + "🚬";
+    if (v === "accept" && a.approach && a.approach.kind === "gangJob") return "+" + ((a.approach.job && a.approach.job.reward) || 5) + "";
     if (v === "accept" && a.approach && a.approach.kind === "gangParley") return a.approach.parleyMode || "terms";
     if (v === "accept" && a.approach && a.approach.kind === "crewBackup") return "backup";
     if (v === "accept" && a.approach && a.approach.kind === "coverStory") return "cover";
@@ -329,12 +329,12 @@
   function acceptLine(a) {
     const ap = a.approach || {};
     switch (ap.kind) {
-      case "favor":      return `Do the favor (+${ap.gift || 3}🚬)`;
-      case "buyItem":    return `Buy it — ${ap.price || 0}🚬`;
-      case "copBribe":   return `Pocket the ${ap.price || 0}🚬`;
+      case "favor":      return `Do the favor (+${ap.gift || 3})`;
+      case "buyItem":    return `Buy it — ${ap.price || 0}`;
+      case "copBribe":   return `Pocket the ${ap.price || 0}`;
       case "copTip":     return "Take the tip";
       case "copPlea":    return "Hear the plea out";
-      case "gangJob":    return `Take the job (+${(ap.job && ap.job.reward) || 5}🚬)`;
+      case "gangJob":    return `Take the job (+${(ap.job && ap.job.reward) || 5})`;
       case "gangParley": return "Agree to their terms";
       case "crewBackup": return "Call in the backup";
       case "coverStory": return "Take the cover story";
@@ -355,15 +355,15 @@
       case "insult":   return `Talk trash to ${nm}`;
       case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
-      case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)} — ${o.price}🚬` : "Browse their goods"; }
-      case "bribe":    { const c = a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10); return `Slip ${c}🚬 to look away`; }
-      case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c}🚬 to clear your heat`; }
+      case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)} — ${o.price}` : "Browse their goods"; }
+      case "bribe":    { const c = a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
+      case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;
       case "join":     return `Run with the ${gangShort(a) || "crew"}`;
       case "listen":   return "Hear them out";
       case "accept":   return acceptLine(a);
       case "respect":  return "Show respect, back off";
-      case "pay":      { const c = a.approach && a.approach.cost; return c ? `Pay the ${c}🚬` : "Settle up"; }
+      case "pay":      { const c = a.approach && a.approach.cost; return c ? `Pay the ${c}` : "Settle up"; }
       case "haggle":   return "Haggle them down";
       case "threaten": return (CBZ.playerArmed && CBZ.playerArmed()) ? `Pull on ${nm}` : `Threaten ${nm}`;
       case "refuse":   return "Wave them off";
@@ -372,7 +372,7 @@
       case "search":   return `Shake ${nm} down`;
       case "question": return `Question ${nm}`;
       case "confrontReport": return `Press ${nm} on the snitch`;
-      case "paySilence":     { const c = CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) : 0; return `Pay ${c}🚬 to keep ${nm} quiet`; }
+      case "paySilence":     { const c = CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) : 0; return `Pay ${c} to keep ${nm} quiet`; }
       case "threatenSnitch": return `Lean on ${nm} to drop it`;
       default: return (VERB[v] && VERB[v].label) || v;
     }

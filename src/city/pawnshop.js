@@ -269,7 +269,7 @@
     CBZ.city.addCash(p);
     if (e.bumpFenceRep) e.bumpFenceRep(1);
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (p >= 50000 && CBZ.city.big) CBZ.city.big("💰 PAWNED " + name + " for " + fmt$(p) + "!");
+    if (p >= 50000 && CBZ.city.big) CBZ.city.big("PAWNED " + name + " for " + fmt$(p) + "!");
     else note("Fenced the " + name + " for " + fmt$(p) + ". (Pawn pays the lowball — that's the price of fast cash.)", 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -395,7 +395,7 @@
     t.forfeit = true;                                          // the broker keeps the collateral
     const P = CBZ.player;
     if (P && CBZ.city && Math.hypot(P.pos.x - S.cx, P.pos.z - S.cz) < 60)
-      note("⏳ The " + t.name + " ticket lapsed — forfeited to the broker.", 2.4);
+      note("The " + t.name + " ticket lapsed — forfeited to the broker.", 2.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   // drop redeemed/forfeited tickets older than a grace window so the array

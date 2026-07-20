@@ -194,7 +194,7 @@
     if (roll < 0.34) {
       P._legSide = Math.random() < 0.5 ? 1 : -1;
       P._legWound = Math.min(1, (P._legWound || 0) + 0.35 + sev * 0.55);
-      if (CBZ.flashHint && (P._legWound > 0.45)) CBZ.flashHint("🦵 LEG HIT — you're limping", 1.6);
+      if (CBZ.flashHint && (P._legWound > 0.45)) CBZ.flashHint("LEG HIT — you're limping", 1.6);
     } else if (roll < 0.55) {
       P._armWound = Math.min(1, (P._armWound || 0) + 0.3 + sev * 0.5);
     } else {
@@ -621,13 +621,13 @@
   }
   function killerStateText(k) {
     if (!k) return "";
-    if (k.dead) return "💀 Down — dropped right after they got you";
-    if (k.rampage) return "🔫 On a rampage";
-    if (k.state === "fight" || k.rage) return "🔫 In a firefight";
-    if (k.state === "flee") return "🏃 On the run";
-    if (k.kind === "cop") return "🚔 Back on patrol";
-    if (k.armed) return "🔫 Armed & roaming";
-    return "🚶 Walking it off";
+    if (k.dead) return "Down — dropped right after they got you";
+    if (k.rampage) return "On a rampage";
+    if (k.state === "fight" || k.rage) return "In a firefight";
+    if (k.state === "flee") return "On the run";
+    if (k.kind === "cop") return "Back on patrol";
+    if (k.armed) return "Armed & roaming";
+    return "Walking it off";
   }
   // a killer is watchable while it still exists on the map: not culled, not parked
   // off-map in the crowd pool (crowd.js banishes promoted peds to (-4000,-4000) the
@@ -719,7 +719,7 @@
       CBZ.setFPS(!campaignTP);            // campaign returns to its shoulder camera; legacy city keeps FP
     }
     if (CBZ.requestLock) CBZ.requestLock();
-    if (CBZ.city) CBZ.city.note(atHome ? "🏡 You wake up at home, patched up." : ("🏥 City Hospital. Bill: $" + (g._lastBill || 0)), 2.4);
+    if (CBZ.city) CBZ.city.note(atHome ? "You wake up at home, patched up." : ("City Hospital. Bill: $" + (g._lastBill || 0)), 2.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 

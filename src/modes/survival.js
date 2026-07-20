@@ -113,7 +113,7 @@
     overlay.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;flex-direction:column;align-items:center;gap:10px;padding:18px 0 26px;pointer-events:none;font-family:Fredoka,system-ui,sans-serif;text-align:center;background:linear-gradient(to top,rgba(8,10,16,.82),rgba(8,10,16,0))";
     titleEl = document.createElement("div");
     titleEl.style.cssText = "font-size:clamp(30px,6vw,52px);font-weight:700;color:#ff5b5b;letter-spacing:2px;text-shadow:0 4px 0 #7c0c1a,0 6px 14px rgba(0,0,0,.5);opacity:0;transition:opacity .8s ease,transform .8s ease;transform:translateY(14px)";
-    titleEl.textContent = "💀 ELIMINATED";
+    titleEl.textContent = "ELIMINATED";
     subEl = document.createElement("div");
     subEl.style.cssText = "color:#dfe6f0;font-size:15px;opacity:0;transition:opacity .9s ease .25s";
     btnRow = document.createElement("div");

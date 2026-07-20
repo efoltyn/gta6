@@ -82,7 +82,7 @@
     // slot; systems/resources.js reads it back via CBZ.cityCurrentWeaponName
     // for the harvest multiplier).
     if (g.mode === "city" && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(id);
-    if (CBZ.flashHint) CBZ.flashHint("🔨 Crafted " + id, 1.4);
+    if (CBZ.flashHint) CBZ.flashHint("Crafted " + id, 1.4);
     if (CBZ.sfx) CBZ.sfx("coin");
     return true;
   }
@@ -127,7 +127,7 @@
       "width:min(340px,90vw);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;color:#eef;" +
       "background:rgba(14,16,22,0.95);border:1px solid rgba(120,150,200,0.35);" +
       "border-radius:12px;padding:14px;display:none;box-shadow:0 18px 60px rgba(0,0,0,0.7);");
-    panel.appendChild(el("div", "font:700 15px system-ui;color:#fff;margin-bottom:8px;", "🔨 CRAFT"));
+    panel.appendChild(el("div", "font:700 15px system-ui;color:#fff;margin-bottom:8px;", "CRAFT"));
     bodyEl = el("div");
     panel.appendChild(bodyEl);
     panel.appendChild(el("div", "margin-top:10px;font:12px system-ui;color:#9aa6bd;", "[1-9] craft  ·  C / Esc close"));

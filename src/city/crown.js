@@ -304,7 +304,7 @@
       registerPerson(predSid, { born: day - 70, relation: "predecessor", house: cid, gender: predGender });
     }
 
-    if (CBZ.cityFeed) CBZ.cityFeed("👑 The House of " + dynastyName + " is chronicled in " + rec.name + ".", "#ffd76a");
+    if (CBZ.cityFeed) CBZ.cityFeed("The House of " + dynastyName + " is chronicled in " + rec.name + ".", "#ffd76a");
   }
   function seedAllHouses() {
     if (!CBZ.polity) return;
@@ -420,8 +420,8 @@
       house.legitimacy = 20;
       if (CBZ.regimes && CBZ.regimes.transition) CBZ.regimes.transition(rec, "emergencyRule", day, 0);
       else rec.govType = "emergencyRule";
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 THE LINE ENDS — " + rec.name.toUpperCase() + " IN CRISIS");
-      if (CBZ.cityFeed) CBZ.cityFeed("💀 " + oldTitle + " " + deadName + " dies without heir — " + rec.name + " descends into crisis.", "#ff6a5e");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE LINE ENDS — " + rec.name.toUpperCase() + " IN CRISIS");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + oldTitle + " " + deadName + " dies without heir — " + rec.name + " descends into crisis.", "#ff6a5e");
       return;
     }
 
@@ -438,9 +438,9 @@
     else { shock = 5; styleLabel = "a smooth, undisputed succession"; }
     house.legitimacy = clampNum(0, 100, (house.legitimacy || 0) + shock);
 
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 THE " + oldTitle.toUpperCase() + " IS DEAD — LONG LIVE " + newTitle.toUpperCase() + " " + heir.name.toUpperCase());
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE " + oldTitle.toUpperCase() + " IS DEAD — LONG LIVE " + newTitle.toUpperCase() + " " + heir.name.toUpperCase());
     if (CBZ.cityFeed) {
-      let line2 = "👑 " + oldTitle + " " + deadName + " has died — " + newTitle + " " + heir.name + " ascends (" + styleLabel + ").";
+      let line2 = "" + oldTitle + " " + deadName + " has died — " + newTitle + " " + heir.name + " ascends (" + styleLabel + ").";
       if (heir.regentName) line2 += " " + heir.regentName + " governs as regent.";
       CBZ.cityFeed(line2, "#ffd76a");
     }
@@ -489,8 +489,8 @@
     if (house.pretender && house.pretender.active) {
       if (house.legitimacy > RECOVER_T) {
         house.pretender.active = false;
-        if (CBZ.cityFeed) CBZ.cityFeed("🕊️ " + house.pretender.name + " stands down — the crown holds.", "#8fe08a");
-        if (CBZ.city && CBZ.city.big) CBZ.city.big("🕊️ THE PRETENDER STANDS DOWN");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + house.pretender.name + " stands down — the crown holds.", "#8fe08a");
+        if (CBZ.city && CBZ.city.big) CBZ.city.big("THE PRETENDER STANDS DOWN");
       }
       return;   // an already-active pretender doesn't re-declare
     }
@@ -511,8 +511,8 @@
         try { CBZ.relations.event(rec.id, others[i].id, "insult", PRETENDER_REL_HIT); } catch (e) {}
       }
     }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("⚔️ " + claimant.name.toUpperCase() + " DECLARES FOR THE THRONE");
-    if (CBZ.cityFeed) CBZ.cityFeed("⚔️ " + claimant.name + " declares against the crown of " + rec.name + ".", "#ff9e6b");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + claimant.name.toUpperCase() + " DECLARES FOR THE THRONE");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + claimant.name + " declares against the crown of " + rec.name + ".", "#ff9e6b");
   }
 
   // ============================================================
@@ -556,8 +556,8 @@
     house.allianceMarriages.push({ royalSid: royalSid, foreignSid: nobleSid, foreignCountryId: target.id, since: day });
     if (CBZ.relations) { try { CBZ.relations.event(rec.id, target.id, "trade", MARRIAGE_AFFINITY); } catch (e) {} }
     const royalName = nameOf(royalSid);
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("💍 A ROYAL WEDDING SEALS AN ALLIANCE");
-    if (CBZ.cityFeed) CBZ.cityFeed("💍 " + royalName + " weds " + nobleName + " of " + target.name + " — an alliance is sealed.", "#ffd1e8");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("A ROYAL WEDDING SEALS AN ALLIANCE");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + royalName + " weds " + nobleName + " of " + target.name + " — an alliance is sealed.", "#ffd1e8");
     return true;
   }
 
@@ -588,8 +588,8 @@
         try { CBZ.relations.event(rec.id, o.id, "insult", 10); } catch (e) {}
       }
     }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 " + info.name.toUpperCase() + " CROWNS " + (info.gender === "f" ? "HERSELF" : "HIMSELF"));
-    if (CBZ.cityFeed) CBZ.cityFeed("👑 " + info.name + " declares the House of " + dynastyName + " — " + rec.name + " is a monarchy now.", "#ffd76a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + info.name.toUpperCase() + " CROWNS " + (info.gender === "f" ? "HERSELF" : "HIMSELF"));
+    if (CBZ.cityFeed) CBZ.cityFeed("" + info.name + " declares the House of " + dynastyName + " — " + rec.name + " is a monarchy now.", "#ffd76a");
     return house;
   }
   function tickDictatorWatch(rec, day, force) {
@@ -623,8 +623,8 @@
     house.anarchyDays = 0;
     house.restoredDay = day;
     if (rec.office) rec.office.holder = claimant.sid;
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 THE THRONE IS RESTORED");
-    if (CBZ.cityFeed) CBZ.cityFeed("👑 " + claimant.name + " restores the House of " + house.dynastyName + " in " + rec.name + ".", "#ffd76a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE THRONE IS RESTORED");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + claimant.name + " restores the House of " + house.dynastyName + " in " + rec.name + ".", "#ffd76a");
     return true;
   }
 

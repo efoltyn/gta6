@@ -64,10 +64,10 @@
   //        · "hangar" the F-22 keep-home. vehCap = stored-vehicle cap; ammoCap =
   //        per-weapon stash cap (warehouse only). anchor = how we place it.
   const PROPERTIES = [
-    { id: "garage1",   name: "Two-Bay Garage",   emoji: "🅿️", kind: "garage",    cost: 35000,   vehCap: 2,  anchor: "carlot",  off: { dx: -7, dz: 0 }, blurb: "A lock-up off the car lot. Two stalls — stash a hot ride and it's yours." },
-    { id: "garage2",   name: "Ten-Car Block",    emoji: "🏢", kind: "garage",    cost: 140000,  vehCap: 10, anchor: "carlot",  off: { dx: 7, dz: 0 },  blurb: "A whole storage block. Ten bays for the collection." },
-    { id: "warehouse", name: "Dockside Warehouse", emoji: "🏭", kind: "warehouse", cost: 450000,  vehCap: 6, ammoCap: 600, anchor: "beach", blurb: "A waterfront unit — six vehicle bays AND a steel AMMO LOCKER. Your armory." },
-    { id: "hangar",    name: "Private Hangar",   emoji: "🛩️", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-22 needs — land it inside to keep it." },
+    { id: "garage1",   name: "Two-Bay Garage",   emoji: "", kind: "garage",    cost: 35000,   vehCap: 2,  anchor: "carlot",  off: { dx: -7, dz: 0 }, blurb: "A lock-up off the car lot. Two stalls — stash a hot ride and it's yours." },
+    { id: "garage2",   name: "Ten-Car Block",    emoji: "", kind: "garage",    cost: 140000,  vehCap: 10, anchor: "carlot",  off: { dx: 7, dz: 0 },  blurb: "A whole storage block. Ten bays for the collection." },
+    { id: "warehouse", name: "Dockside Warehouse", emoji: "", kind: "warehouse", cost: 450000,  vehCap: 6, ammoCap: 600, anchor: "beach", blurb: "A waterfront unit — six vehicle bays AND a steel AMMO LOCKER. Your armory." },
+    { id: "hangar",    name: "Private Hangar",   emoji: "", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-22 needs — land it inside to keep it." },
   ];
   const PROP_BY_ID = {}; for (const p of PROPERTIES) PROP_BY_ID[p.id] = p;
 
@@ -239,7 +239,7 @@
   // ============================================================
   function buy(prop) {
     if (owns(prop.id)) { note("You already own the " + prop.name + ".", 1.6); return; }
-    if (!canAfford(prop.cost)) { note("⛔ Need " + money(prop.cost) + " (cash + bank) for the " + prop.name + ".", 2.4); sfx("hit"); return; }
+    if (!canAfford(prop.cost)) { note("Need " + money(prop.cost) + " (cash + bank) for the " + prop.name + ".", 2.4); sfx("hit"); return; }
     charge(prop.cost);
     state().owned[prop.id] = true;
     big(prop.emoji + " ACQUIRED " + prop.name);
@@ -275,7 +275,7 @@
     if (CBZ.cityExitVehicle) CBZ.cityExitVehicle();
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     if (CBZ.cityCars) { const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1); }
-    big("🅿️ Stored your " + model);
+    big("Stored your " + model);
     note(car.stolen ? "A hot ride, laundered — it's yours now." : "Safely stored.", 2.4);
     sfx("door");
     persist();
@@ -300,7 +300,7 @@
     if (!spawned) { note("Couldn't pull that out right now.", 1.8); return; }
     s.vehicles.splice(i, 1);
     s.lastRetrieve = now();
-    note("🔑 Your " + (v.kind === "jet" ? "F-22" : v.model) + " is out front.", 2.4);
+    note("Your " + (v.kind === "jet" ? "F-22" : v.model) + " is out front.", 2.4);
     sfx("door");
     persist();
     close();
@@ -320,9 +320,9 @@
     const have = stashCount(crate.id);
     if (have >= cap) { note(crate.label + " locker is full (" + cap + ").", 1.6); return; }
     const spend = CBZ.city && CBZ.city.spend ? CBZ.city.spend(crate.cost) : (canAfford(crate.cost) && charge(crate.cost));
-    if (!spend) { note("⛔ " + crate.label + " costs " + money(crate.cost) + ".", 2); sfx("hit"); return; }
+    if (!spend) { note("" + crate.label + " costs " + money(crate.cost) + ".", 2); sfx("hit"); return; }
     state().ammo[crate.id] = Math.min(cap, have + crate.qty);
-    note("📦 Stocked " + crate.label + " — locker " + stashCount(crate.id) + "/" + cap + ".", 2);
+    note("Stocked " + crate.label + " — locker " + stashCount(crate.id) + "/" + cap + ".", 2);
     sfx("coin");
     persist();
     if (open_) render();
@@ -335,7 +335,7 @@
       if (n > 0 && CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(n, id); moved += n; s.ammo[id] = 0; } catch (e) {} }
     }
     if (moved <= 0) { note("Locker's empty — buy crates first.", 1.8); return; }
-    big("🔫 Loaded out — " + moved + " rounds from the locker");
+    big("Loaded out — " + moved + " rounds from the locker");
     sfx("coin");
     persist();
     if (open_) render();
@@ -386,7 +386,7 @@
         html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:6px'>" + (g.cityOwnsJet ? "Your F-22 lives here." : "Land a STOLEN F-22 inside to keep it.") + "</div>";
       }
       if (prop.kind === "warehouse") {
-        html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>🔒 AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";
+        html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";
         for (const c of AMMO_CRATES) {
           actions.push({ label: "Buy " + c.label + " (+" + c.qty + ") — " + money(c.cost) + "  [have " + stashCount(c.id) + "]", fn: () => buyAmmo(c) });
         }

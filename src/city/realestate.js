@@ -66,11 +66,11 @@
     const entries = [];
     if (!g.cityRentTier && !g.cityHome) {
       const room = (C().homes || [])[0];
-      if (room) entries.push({ html: "🛏️ Rent " + room.name + " — " + money(room.rent) + "/period", fns: [{ key: "rent room", fn: () => rentRoom() }] });
+      if (room) entries.push({ html: "Rent " + room.name + " — " + money(room.rent) + "/period", fns: [{ key: "rent room", fn: () => rentRoom() }] });
     }
     for (const lot of homes) {
       const h = lot.building.home;
-      const tags = (h.sqft ? " ·" + h.sqft.toLocaleString() + "sqft" : "") + (h.garage ? " ·🚗×" + h.garage : "") + (h.elevator ? " ·🛗" : "");
+      const tags = (h.sqft ? " ·" + h.sqft.toLocaleString() + "sqft" : "") + (h.garage ? " · " + h.garage + "-car garage" : "") + (h.elevator ? " · elevator" : "");
       // show the LIVE Zillow price (market + your turf-control discount) so the
       // realtor and Zillow never disagree — buyHome charges this same number.
       const zp = (CBZ.cityZillow && CBZ.cityZillow.buyPriceForLot) ? CBZ.cityZillow.buyPriceForLot(lot) : null;
@@ -94,14 +94,14 @@
       }
       const rentPer = zillowRentEstimate(lot);
       if (rentPer != null) fns.push({ key: "Rent ~" + money(rentPer), fn: () => rentResidence(lot) });
-      entries.push({ html: "🏠 " + h.name + tags + zoneChip(lot) + finNote, fns });
+      entries.push({ html: "" + h.name + tags + zoneChip(lot) + finNote, fns });
     }
 
     const pages = Math.max(1, Math.ceil(entries.length / RPAGE));
     rpage = Math.max(0, Math.min(pages - 1, rpage));
     const slice = entries.slice(rpage * RPAGE, rpage * RPAGE + RPAGE);
 
-    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:4px'>🏠 Keystone Realty</div>";
+    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:4px'>Keystone Realty</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(g.cash) + " · Bank " + money(g.cityBank || 0) + (g.cityHome ? " · Home: " + g.cityHome.name : "") + "</div>";
 
     let n = 0;
@@ -151,13 +151,13 @@
     // hangar (→ F-22) is a separate add-on offered here once you own the tower.
     const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
     if (isPent && g.cityOwnsHangar) {
-      actions.push({ label: "🛩 Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
+      actions.push({ label: "Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
     } else if (isPent) {
-      actions.push({ label: "🛩 Buy the rooftop Hangar — " + money(hangarPrice()) + " (a home for a stolen F-22)", fn: buyHangar });
+      actions.push({ label: "Buy the rooftop Hangar — " + money(hangarPrice()) + " (a home for a stolen F-22)", fn: buyHangar });
     }
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>🏡 " + home.name + "</div>";
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>" + home.name + "</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + " · [Esc] leave</div>";
-    if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>🚁 Helicopter ready on the pad" + (g.cityOwnsHangar ? " · 🛩 F-22 in the hangar" : "") + "</div>";
+    if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>Helicopter ready on the pad" + (g.cityOwnsHangar ? " · F-22 in the hangar" : "") + "</div>";
     actions.forEach((a, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
     open(html);
   };
@@ -203,7 +203,7 @@
     if (g.cityOwnsPenthouse && g.cityOwnsHeli) return;   // already armed (Zillow path) — don't re-banner
     g.cityOwnsPenthouse = true;
     g.cityOwnsHeli = true;          // the chopper comes with the penthouse
-    CBZ.city.big("🚁 The missile helicopter is yours — parked on the pad.");
+    CBZ.city.big("The missile helicopter is yours — parked on the pad.");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   function buyHome(lot) {
@@ -230,7 +230,7 @@
     if (g.cityHome) g.cityHome.lot.building.home.owned = false;     // moving up: release the old one
     g.cityHome = { lot, tier: h.tier, id: h.id, name: h.name };
     g.citySpawnPoint = { x: lot.building.door.x, z: lot.building.door.z };
-    CBZ.city.big("🏠 You bought " + h.name + "!");
+    CBZ.city.big("You bought " + h.name + "!");
     CBZ.city.addRespect(Math.ceil(h.tier * 4));
     armPenthouse(lot);                                // penthouse → helicopter + flags
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -275,7 +275,7 @@
     if (total < cost) { CBZ.city.note("Need " + money(cost) + " (cash+bank) for the hangar.", 2.4); return; }
     let owe = cost; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
     g.cityOwnsHangar = true;
-    CBZ.city.big("🛩 HANGAR ACQUIRED — now STEAL an F-22 and land it here to keep it.");
+    CBZ.city.big("HANGAR ACQUIRED — now STEAL an F-22 and land it here to keep it.");
     CBZ.city.addRespect(40);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -310,7 +310,7 @@
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("😴 Slept it off — full health, fed, rested, patched up." + laid + " Respawn set to home.", 3.2);
+    CBZ.city.note("Slept it off — full health, fed, rested, patched up." + laid + " Respawn set to home.", 3.2);
     close();
   }
   function storeCar() {
@@ -360,7 +360,7 @@
     P.vy = 0; P.grounded = true;
     CBZ.playerChar.group.position.copy(P.pos);
     if (CBZ.sfx) CBZ.sfx("door");
-    CBZ.city.note(home.loftY != null ? "🛗 The Spire loft — top of the world." : "🛗 Penthouse — top of the world.", 2);
+    CBZ.city.note(home.loftY != null ? "The Spire loft — top of the world." : "Penthouse — top of the world.", 2);
     close();
   }
 
@@ -487,7 +487,7 @@
     if (g.cityRentTier != null) {
       const room = (C().homes || [])[g.cityRentTier];
       if (room && room.rent) {
-        if (CBZ.city.spend(room.rent)) CBZ.city.note("🏠 Rent due: -" + money(room.rent), 2);
+        if (CBZ.city.spend(room.rent)) CBZ.city.note("Rent due: -" + money(room.rent), 2);
         else { g.cityRentTier = null; g.citySpawnPoint = null; CBZ.city.note("Evicted — couldn't make rent.", 2.4); }
       }
     }

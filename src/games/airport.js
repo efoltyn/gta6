@@ -736,9 +736,9 @@
     tryDrainCast(ctx, venue);
 
     // ---- ZONES (interactions) ----
-    ctx.zone({ id: "desk", label: () => (R.job && R.delivered ? "📋 Collect at the charter desk" : "📋 REDEYE charter desk"), pos: [0, 1.6], r: 2.4, onUse: openBoard });
-    ctx.zone({ id: "fuel", label: "⛽ Fueler — wind & heat brief", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
-    ctx.zone({ id: "customs", label: "🛡️ Customs booth", pos: [14, 1.4], r: 2.4, onUse: () => note("Inspector Vann only cares when you come home heavy.", 2.4) });
+    ctx.zone({ id: "desk", label: () => (R.job && R.delivered ? "Collect at the charter desk" : "REDEYE charter desk"), pos: [0, 1.6], r: 2.4, onUse: openBoard });
+    ctx.zone({ id: "fuel", label: "Fueler — wind & heat brief", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
+    ctx.zone({ id: "customs", label: "Customs booth", pos: [14, 1.4], r: 2.4, onUse: () => note("Inspector Vann only cares when you come home heavy.", 2.4) });
 
     // walkaround stations around the parked charter jet — only when a run is
     // accepted, on foot, pre-delivery. Positions key off the nearest charter
@@ -747,7 +747,7 @@
 
     // board zone at the charter jet
     ctx.zone({
-      id: "boardjet", label: "✈️ Board N407RD & fly the run", r: 5.5,
+      id: "boardjet", label: "Board N407RD & fly the run", r: 5.5,
       pos: stationBasePos(),
       canShow: () => !!(R.job && !R.delivered && CBZ.player && !CBZ.player._aircraft),
       onUse: boardCharter,
@@ -792,7 +792,7 @@
   function registerStation(ctx, i) {
     ctx.zone({
       id: "walk" + i,
-      label: () => "🔍 Inspect " + STATION_NAMES[i] + (R.job && R.job.stations[i] ? " (checked)" : ""),
+      label: () => "Inspect " + STATION_NAMES[i] + (R.job && R.job.stations[i] ? " (checked)" : ""),
       // position is recomputed live via a getter-like find isn't available;
       // stations sit at build-time-resolved local offsets around the jet.
       pos: (function () { const w = stationWorld(i); return [w.x - (VENUE ? VENUE.origin.x : 0), w.z - (VENUE ? VENUE.origin.z : 0)]; })(),

@@ -524,13 +524,13 @@
       if (jolt > 0) {
         const dmg = clamp(jolt * 0.018, 0, 0.5);
         gig.intact = clamp(gig.intact - dmg / (gig.insulated ? 2 : 1), 0, 1);
-        if (dmg > 0.08) note("⚠ Cargo took a hit (" + Math.round(gig.intact * 100) + "% intact)", 1.4);
+        if (dmg > 0.08) note("Cargo took a hit (" + Math.round(gig.intact * 100) + "% intact)", 1.4);
       }
       gig.intact = clamp(gig.intact - dt * 0.0018, 0, 1);   // soft time factor
       const car = drivenCar(); if (car) gig.topSpeed = Math.max(gig.topSpeed, Math.abs(car.v || 0));
-      showBar("📦 " + Math.round(gig.intact * 100) + "%", gig.intact,
+      showBar("" + Math.round(gig.intact * 100) + "%", gig.intact,
         gig.intact > 0.66 ? "#7ed957" : gig.intact > 0.33 ? "#ffd166" : "#ff6b6b",
-        (streak() > 1 ? "×" + streak().toFixed(1) : "") + (gig.insulated ? "  ❄" : ""));
+        (streak() > 1 ? "×" + streak().toFixed(1) : "") + (gig.insulated ? " " : ""));
 
     } else if (gig.kind === "taxi" || gig.kind === "uber") {
       // TIP BAR decays ~3%/30s and on every crash/damage; near-misses build a
@@ -539,7 +539,7 @@
       if (jolt > 0) {
         gig.tip = clamp(gig.tip - clamp(jolt * 0.02, 0.04, 0.4), 0, 1);
         gig.combo = 0;
-        note("😱 The rider grabs the door — tip drops.", 1.2);
+        note("The rider grabs the door — tip drops.", 1.2);
       } else {
         const nm = nearMiss(P);
         if (nm) { gig.combo = Math.min(99, gig.combo + 1); gig.lastNearT = now(); }
@@ -556,7 +556,7 @@
           if (gig.passenger.group) gig.passenger.group.visible = true;
         }
       }
-      showBar("💵 " + Math.round(gig.tip * 100) + "%", gig.tip,
+      showBar("" + Math.round(gig.tip * 100) + "%", gig.tip,
         gig.tip > 0.6 ? "#7ed957" : gig.tip > 0.3 ? "#ffd166" : "#ff6b6b",
         gig.combo >= 2 ? "×" + gig.combo : "");
 
@@ -572,9 +572,9 @@
       } else {
         gig.heat = clamp(gig.heat - dt * 0.02, 0, 1);
       }
-      showBar((gig.stashed ? "▣  " : "") + "♨ " + Math.round(gig.heat * 100) + "%", gig.heat,
+      showBar((gig.stashed ? "▣  " : "") + "" + Math.round(gig.heat * 100) + "%", gig.heat,
         gig.heat < 0.4 ? "#7ed957" : gig.heat < 0.75 ? "#ffd166" : "#ff6b6b",
-        gig.stashed ? "" : (isNight() ? "🌙" : ""));
+        gig.stashed ? "" : (isNight() ? "" : ""));
     }
   }
 
@@ -603,7 +603,7 @@
     gig._searchCD = 0;
     const chance = clamp(0.10 + gig.heat * 0.55, 0.1, 0.7) * (isNight() ? 0.7 : 1);
     if (rng() < chance) bustSmuggle(gig);
-    else note("👮 A cop eyeballs you… you keep it together.", 1.6);
+    else note("A cop eyeballs you… you keep it together.", 1.6);
   }
   function bustSmuggle(gig) {
     const econ = CBZ.cityEcon;
@@ -613,7 +613,7 @@
     spend(Math.min(fine, g.cash || 0));
     const P = playerPos();
     if (CBZ.cityCrime) CBZ.cityCrime(80, { x: P.x, z: P.z, type: "dealing", instant: true });
-    note("🚨 SEARCHED — they found the load. Lost it + a $" + fine + " fine.", 3);
+    note("SEARCHED — they found the load. Lost it + a $" + fine + " fine.", 3);
     big("BUSTED · load gone");
     failInternal(gig, "you got searched");
   }

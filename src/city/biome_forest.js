@@ -705,7 +705,7 @@
           options: [{
             id: "lookout-scan", slot: "e", label: "Scan the treeline",
             onSelect: function () {
-              if (CBZ.city && CBZ.city.note) CBZ.city.note("🔭 From up here the whole of Redhollow Woods spreads out below.", 2.6);
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("From up here the whole of Redhollow Woods spreads out below.", 2.6);
             },
           }],
         });

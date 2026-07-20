@@ -267,8 +267,8 @@
     P._armorKit = { chest: null, head: null };
     P._armorAbsorb = BASE_ABSORB; P._armorHeadFrac = BASE_HEADFRAC;
     unmountPlayer();
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🛡️ ARMOR GONE", 1.8);
-    else if (CBZ.city && CBZ.city.big) CBZ.city.big("🛡️ ARMOR GONE");
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("ARMOR GONE", 1.8);
+    else if (CBZ.city && CBZ.city.big) CBZ.city.big("ARMOR GONE");
     if (CBZ.sfx) try { CBZ.sfx("hit"); } catch (e) {}
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   };
@@ -329,8 +329,8 @@
     if (body._armorMeshes) { for (let i = 0; i < body._armorMeshes.length; i++) releaseMesh(body._armorMeshes[i]); body._armorMeshes = null; }
     if (took.length) {
       const names = took.map(function (id) { const k = kit(id); return k ? k.name : id; });
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("🛡️ Took their armor — " + names.join(" + "));
-      else if (CBZ.city && CBZ.city.note) CBZ.city.note("🛡️ Took their armor", 2);
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("Took their armor — " + names.join(" + "));
+      else if (CBZ.city && CBZ.city.note) CBZ.city.note("Took their armor", 2);
       if (CBZ.sfx) try { CBZ.sfx("loot"); } catch (e) {}
     }
     return took.length ? took : null;

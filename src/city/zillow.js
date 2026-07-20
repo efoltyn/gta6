@@ -516,7 +516,7 @@
       if (isPenthouseHome(home)) {
         g.cityOwnsPenthouse = true;
         g.cityOwnsHeli = true;
-        if (CBZ.city && CBZ.city.big) CBZ.city.big("🚁 The missile helicopter is yours — on the pad.");
+        if (CBZ.city && CBZ.city.big) CBZ.city.big("The missile helicopter is yours — on the pad.");
       }
     }
   }
@@ -540,9 +540,9 @@
     teleportPlayer(door.x, door.z);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(door.x, door.z, rec.name);
     if (CBZ.city) {
-      CBZ.city.note((owned ? "🏠 Home — " : "🚪 Touring ") + rec.name
+      CBZ.city.note((owned ? "Home — " : "Touring ") + rec.name
         + (owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.2);
-      if (rec.flagship && CBZ.city.big) CBZ.city.big("👑 " + rec.name);
+      if (rec.flagship && CBZ.city.big) CBZ.city.big("" + rec.name);
     }
     if (CBZ.sfx) CBZ.sfx("door");
   }
@@ -1189,7 +1189,7 @@
           // a missile helicopter that comes WITH the home, plus a deck HANGAR you
           // can buy to base a fighter jet. That perk line is the WHY behind the price.
           const perks = rec.flagship
-            ? " · the city's tallest mega-tower · wraparound sky-deck garage + glass loft · 🚁 rooftop HELIPAD (missile helicopter included) · 🛩 deck HANGAR available (fighter jet)"
+            ? " · the city's tallest mega-tower · wraparound sky-deck garage + glass loft · rooftop HELIPAD (missile helicopter included) · deck HANGAR available (fighter jet)"
             : "";
           extra = "<div class='zsub'>" + rec.sqft.toLocaleString() + " sqft"
             + perks
@@ -1221,7 +1221,7 @@
     const sqftChip = rec.sqft
       ? " <span class='ztier' style='color:#7ed957'>" + rec.sqft.toLocaleString() + " sqft</span>"
       : "";
-    const crown = rec.flagship ? "👑 " : "";
+    const crown = rec.flagship ? "" : "";
     // Every home (listed residence) gets a one-tap TOUR — teleport over to walk
     // through it before you buy; once it's yours the same button reads "Go home".
     const visitBtn = (rec.category === "residence" && rec.homeListed)

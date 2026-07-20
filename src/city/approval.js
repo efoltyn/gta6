@@ -391,12 +391,12 @@
     if (rec.approval < FEED_LOW) {
       if (!flags.low) {
         flags.low = true; flags.high = false;
-        if (CBZ.cityFeed) CBZ.cityFeed("📉 " + holderNameOf(rec) + " approval collapsing", "#ff6a5e");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + holderNameOf(rec) + " approval collapsing", "#ff6a5e");
       }
     } else if (rec.approval > FEED_HIGH) {
       if (!flags.high) {
         flags.high = true; flags.low = false;
-        if (CBZ.cityFeed) CBZ.cityFeed("📈 " + holderNameOf(rec) + " riding high", "#8fe08a");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + holderNameOf(rec) + " riding high", "#8fe08a");
       }
     } else {
       flags.low = false; flags.high = false; // back in the neutral band — rearm both edges
@@ -631,7 +631,7 @@
     const head = el("div",
       "display:flex;align-items:center;justify-content:space-between;" +
       "padding:13px 16px;border-bottom:1px solid rgba(120,150,200,0.22);");
-    head.appendChild(el("div", "font:700 15px system-ui;letter-spacing:0.3px;color:#fff;", "🏛️ Politics"));
+    head.appendChild(el("div", "font:700 15px system-ui;letter-spacing:0.3px;color:#fff;", "Politics"));
     const close = el("div", "cursor:pointer;font:700 18px system-ui;color:#9aa6bd;padding:0 4px;", "✕");
     close.addEventListener("click", function () { hide(); });
     head.appendChild(close);
@@ -704,7 +704,7 @@
     const elStatus = CBZ.elections && CBZ.elections.status ? CBZ.elections.status(rec.id) : null;
     if (elStatus) {
       const eBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(143,193,255,0.08);border-radius:7px;");
-      eBox.appendChild(el("div", "font:700 11px system-ui;color:#8fc1ff;text-transform:uppercase;letter-spacing:0.4px;", "🗳️ Election in " + elStatus.daysLeft + " day(s)"));
+      eBox.appendChild(el("div", "font:700 11px system-ui;color:#8fc1ff;text-transform:uppercase;letter-spacing:0.4px;", "Election in " + elStatus.daysLeft + " day(s)"));
       for (let k = 0; k < elStatus.candidates.length; k++) {
         const cd = elStatus.candidates[k];
         eBox.appendChild(row(cd.name + " (" + cd.type + ")", "chr " + cd.charisma.toFixed(2) + " · mom " + cd.momentum.toFixed(1)));
@@ -753,7 +753,7 @@
       const un = CBZ.civilwar.unrest ? CBZ.civilwar.unrest(rec.id) : 0;
       if (fr || un > 0.15) {
         const wBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(255,77,77,0.08);border-radius:7px;");
-        wBox.appendChild(el("div", "font:700 11px system-ui;color:#ff6a5e;text-transform:uppercase;letter-spacing:0.4px;", fr ? "🚩 Civil War" : "⚠ Unrest"));
+        wBox.appendChild(el("div", "font:700 11px system-ui;color:#ff6a5e;text-transform:uppercase;letter-spacing:0.4px;", fr ? "Civil War" : "Unrest"));
         if (fr) wBox.appendChild(row("Rebel faction", ((CBZ.polity.get(fr.rebelId) || {}).name) || fr.rebelId, "#ff9e6b"));
         else wBox.appendChild(row("Unrest level", Math.round(un * 100) + "%"));
         c.appendChild(wBox);
@@ -766,7 +766,7 @@
       const cs = CBZ.crown.summary(rec.id);
       if (cs) {
         const cBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(255,215,106,0.08);border-radius:7px;");
-        cBox.appendChild(el("div", "font:700 11px system-ui;color:#ffd76a;text-transform:uppercase;letter-spacing:0.4px;", "👑 House of " + cs.dynasty));
+        cBox.appendChild(el("div", "font:700 11px system-ui;color:#ffd76a;text-transform:uppercase;letter-spacing:0.4px;", "House of " + cs.dynasty));
         cBox.appendChild(row("Legitimacy", cs.legitimacy + "%", cs.legitimacy >= 40 ? "#8fe08a" : "#ff9e6b"));
         if (cs.regent) cBox.appendChild(row("Regent", cs.regent));
         if (cs.line.length) cBox.appendChild(row("Line of succession", cs.line.join(" → ")));

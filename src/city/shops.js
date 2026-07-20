@@ -228,7 +228,7 @@
     if (equipItem(nm)) {
       const after = playerDrip();
       if (CBZ.sfx) CBZ.sfx("door");
-      CBZ.city.note("👕 Put on " + nm + " — sharper already.", 1.6);
+      CBZ.city.note("Put on " + nm + " — sharper already.", 1.6);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
     render();
@@ -279,7 +279,7 @@
 
     // the walk-in routing line: the WALL sells the guns, the counter the rest.
     if (wallLive) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>🔫 The pieces are <b style='color:#ffd166'>on the wall</b> — " +
+      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> — " +
         "walk up to one and press <b style='color:#ffd166'>E</b> to take it off the rack. The counter's got the ammo.</div>";
     }
 
@@ -386,7 +386,7 @@
         const meta = econ.ITEMS[s.name];
         const luxe = meta && meta.luxe;
         const tag = "<span style='color:" + (luxe ? "#ffd166" : "#7ed957") + "'>" + fmt$(ea) + (s.n > 1 ? "×" + s.n : "") + "</span>";
-        return (luxe ? "💎 " : "") + s.name + " " + tag;
+        return (luxe ? "" : "") + s.name + " " + tag;
       }).join(" · ") + "</div>";
     }
     // ROB THE TILL — every shop with a register (not banks/services-only) can be
@@ -575,11 +575,11 @@
     const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
     // crossing a threshold by buying this piece is a moment — headline it.
     if (before < CLUB && after >= CLUB && after < VIP && CBZ.city.big) {
-      CBZ.city.big("💎 That fit turns heads — the Velvet's rope would open for you.");
+      CBZ.city.big("That fit turns heads — the Velvet's rope would open for you.");
     } else if (before < VIP && after >= VIP && CBZ.city.big) {
       CBZ.city.big("✦ Dressed like money — the Velvet's elite lounge would wave you up.");
     } else {
-      CBZ.city.note("💎 Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
+      CBZ.city.note("Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
     }
   }
 
@@ -596,7 +596,7 @@
       const cut = 0.05 + Math.random() * 0.13 + Math.min(0.05, swag / 300);
       haggle = Math.min(0.18, cut);
       if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("🤝 Talked them down −" + Math.round(haggle * 100) + "% on the whole counter.", 2);
+      CBZ.city.note("Talked them down −" + Math.round(haggle * 100) + "% on the whole counter.", 2);
     } else if (roll > 0.93 && rep < 40) {
       haggle = 0;
       CBZ.city.note("The clerk's insulted — no deal today.", 1.8);
@@ -668,8 +668,8 @@
       CBZ.citySpawnCop(x + Math.cos(ang) * r, z + Math.sin(ang) * r, false);
       if (CBZ.sfx) CBZ.sfx("siren");
     }
-    if (resisted) CBZ.city.big("🔫 Clerk resisted! Grabbed " + fmt$(take) + " — cops rolling!");
-    else CBZ.city.big("💸 Robbed the till: " + fmt$(take) + " — WANTED!");
+    if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " — cops rolling!");
+    else CBZ.city.big("Robbed the till: " + fmt$(take) + " — WANTED!");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // the store kicks you out after a stick-up
     close();
@@ -690,7 +690,7 @@
     if (kind === "barber") look().hair = s.name; else look().outfit = s.name;
     CBZ.city.addRespect(Math.max(1, Math.round(s.swag / 2)));
     if (CBZ.sfx) CBZ.sfx("coin");   // real payment-confirm sound (was a DIY "whoosh" for cuts)
-    CBZ.city.note((kind === "barber" ? "💈 Fresh cut: " : "🧥 New fit: ") + s.name, 2);
+    CBZ.city.note((kind === "barber" ? "Fresh cut: " : "New fit: ") + s.name, 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -708,7 +708,7 @@
     if (!CBZ.city.spend(cost)) { CBZ.city.note("Need " + fmt$(cost) + ".", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
     g.cityPhoneTier = (g.cityPhoneTier || 0) + 1;
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("📱 New phone — better deals & street intel.", 2.2);
+    CBZ.city.note("New phone — better deals & street intel.", 2.2);
     render();
   }
 
@@ -721,14 +721,14 @@
     const set = ["Gold Chain", "Diamond Ring", "Rolex", "Diamond Grill"];   // chain · ring · watch · glasses
     const toBuy = set.filter((s) => econ.count(s) <= 0);   // only charge for what you don't own
     const notWorn = set.filter((s) => !isWorn(s));
-    if (!notWorn.length) { CBZ.city.note("You're already fully iced out. 💎", 1.8); return; }
+    if (!notWorn.length) { CBZ.city.note("You're already fully iced out.", 1.8); return; }
     let raw = 0; for (const m of toBuy) raw += econ.buyPrice(m);
     const price = Math.round(raw * 0.82);   // 18% bundle deal (may be $0 if you already own them)
     if (price > 0 && !CBZ.city.spend(price)) { CBZ.city.note("The full set runs " + fmt$(price) + " right now.", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
     if (CBZ.sfx) CBZ.sfx("coin");
     for (const m of toBuy) econ.add(m, 1);
     for (const m of set) if (!isWorn(m)) equip(m);          // wear the whole set
-    CBZ.city.big("💎💎 ICED OUT — full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
+    CBZ.city.big("ICED OUT — full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -744,7 +744,7 @@
     if (!CBZ.city.spend(cost)) { CBZ.city.note("A bribe costs " + fmt$(cost) + " right now.", 1.8); return; }
     const T = CBZ.CITY.starHeat; g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
     if (CBZ.city.addHeat) CBZ.city.addHeat(0);
-    CBZ.city.note("💰 Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
+    CBZ.city.note("Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
     if (CBZ.sfx) CBZ.sfx("coin"); render();
   }
   function train() { if (CBZ.city.spend(100)) { CBZ.player.maxHp = (CBZ.player.maxHp || 100) + 10; CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained — max HP " + CBZ.player.maxHp, 1.8); render(); } }
@@ -763,7 +763,7 @@
     CBZ.player._boost = 12;
     if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + 8);
     if (CBZ.cityDrink) CBZ.cityDrink(1);
-    CBZ.city.note("🍸 Drink — loosened up. That's gonna add up...", 1.8);
+    CBZ.city.note("Drink — loosened up. That's gonna add up...", 1.8);
     render();
   }
   const MAKER_CORP_ID = { KAI: "kaido", VLT: "volante" };   // economy.js CARS .maker -> sim/corporations.js id
@@ -792,7 +792,7 @@
     // a clerk you've ROBBED remembers (social.js shopkeeper memory) — the till
     // stays shut to YOU until the heat of it fades.
     const _v = lot && lot.building && lot.building.vendor;
-    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { CBZ.city.note("🚫 “We're closed. To YOU. Get out.”", 2.2); return; }
+    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { CBZ.city.note("“We're closed. To YOU. Get out.”", 2.2); return; }
     openLot = lot; CBZ.cityMenuOpen = true;
     qty = 1; haggle = 0; haggleTried = false; closetOpen = false;   // reset per visit
     el().style.display = "block";
@@ -910,7 +910,7 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     const d = lot.building && lot.building.door;
     if (CBZ.cityCrime) CBZ.cityCrime(40, { x: d ? d.x : CBZ.player.pos.x, z: d ? d.z : CBZ.player.pos.z, type: "till grab" });
-    CBZ.city.note("🤫 Cleaned the drawer — " + fmt$(take) + ". Nobody watching.", 2);
+    CBZ.city.note("Cleaned the drawer — " + fmt$(take) + ". Nobody watching.", 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
@@ -958,7 +958,7 @@
     P.pos.x = it.x + 2; P.pos.z = it.z + 2;
     if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
     if (CBZ.sfx) CBZ.sfx("door");
-    CBZ.city.note("🚕 Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
+    CBZ.city.note("Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
   }
 
   const TOOLBAG = ["Crowbar", "Lockpick", "Medkit"];   // the hardware counter's working bundle
@@ -1036,7 +1036,7 @@
         g.hunger = Math.min(100, (g.hunger || 0) + 50);
         if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 18);
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("🍛 Hot plate, straight off the grill.", 1.8);
+        CBZ.city.note("Hot plate, straight off the grill.", 1.8);
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       },
     });
@@ -1050,7 +1050,7 @@
         const lk = look(); lk.swagger = (lk.swagger || 0) + 1;
         CBZ.city.addRespect(1);
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("💈 Edges cleaned up — sharper already.", 1.6);
+        CBZ.city.note("Edges cleaned up — sharper already.", 1.6);
       },
     });
     // the hardware counter: the working TOOL BAG, bundled under list price
@@ -1068,7 +1068,7 @@
           if (m && (m.melee || m.gun) && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(n);
         }
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("🧰 Tool bag over the counter — ready to work.", 1.8);
+        CBZ.city.note("Tool bag over the counter — ready to work.", 1.8);
       },
     });
     // the pawnbroker: one press fences the whole haul (the haggle's built into
@@ -1109,7 +1109,7 @@
         p.cash = (p.cash | 0) + price;
         if (CBZ.sfx) CBZ.sfx("coin");
         if (CBZ.citySay) CBZ.citySay(p, "“Runs better than it looks. We're square.”", "#cfe6ff", 2.2);
-        CBZ.city.note("🔧 Engine patched — she'll run.", 1.8);
+        CBZ.city.note("Engine patched — she'll run.", 1.8);
       },
     });
     // a cab driver takes a fare across town (they won't carry a hot one)

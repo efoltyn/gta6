@@ -108,31 +108,31 @@
   //   kinds     : which shop lot kinds this score can target (null = special)
   const TIERS = [
     {
-      id: "store", name: "Corner-Store Stick-Up", icon: "🏪", tier: 1,
+      id: "store", name: "Corner-Store Stick-Up", icon: "", tier: 1,
       take: 900, setup: 0, stars: 1, grabTime: 5, heatRate: 22, minCrew: 0, gun: false,
       kinds: ["food", "gas", "barber", "gym", "hardware"],
       desc: "Quick register grab. Low take, low heat (1-2★). No crew needed.",
     },
     {
-      id: "liquor", name: "Liquor / Pawn Smash-&-Grab", icon: "🥃", tier: 2,
+      id: "liquor", name: "Liquor / Pawn Smash-&-Grab", icon: "", tier: 2,
       take: 2600, setup: 120, stars: 2, grabTime: 7, heatRate: 30, minCrew: 1, gun: false,
       kinds: ["bar", "pawn", "drugs", "clothing", "electronics"],
       desc: "Smash the cases, fill the bag. 2-3★. A second body speeds the grab.",
     },
     {
-      id: "jewelry", name: "Jewelry-Store Heist", icon: "💎", tier: 3,
+      id: "jewelry", name: "Jewelry-Store Heist", icon: "", tier: 3,
       take: 7500, setup: 400, stars: 3, grabTime: 10, heatRate: 40, minCrew: 2, gun: true,
       kinds: ["jewelry", "casino"],
       desc: "Armed smash-and-grab on the cases. 3★, armed guards, crew strongly advised.",
     },
     {
-      id: "armored", name: "Armored-Truck Crack", icon: "🚚", tier: 4,
+      id: "armored", name: "Armored-Truck Crack", icon: "", tier: 4,
       take: 14000, setup: 600, stars: 3, grabTime: 9, heatRate: 55, minCrew: 1, gun: true,
       kinds: null,            // spawns its own truck near you
       desc: "Pop the cash truck. Any hit = instant 3★. Crack it, grab the cases, vanish.",
     },
     {
-      id: "bank", name: "BANK JOB", icon: "🏦", tier: 5,
+      id: "bank", name: "BANK JOB", icon: "", tier: 5,
       // VAULT is the real prize: a branch realistically holds tens of thousands to
       // a couple hundred grand in its cash vault (small branches ~$50k, larger up
       // to ~$200k+; teller drawers add a few thousand). `take` here is the bag you
@@ -383,10 +383,10 @@
         const gpct = Math.round((h.getaway / h.getawayMax) * 100);
         dyeLine = bar("DYE-PACK CLOCK (break line of sight!)", gpct, gpct < 35 ? "#ff5b5b" : "#ff9a4d");
       } else if (tier && tier.bank && h.dyed) {
-        dyeLine = "<div style='margin-top:6px;font-weight:500;color:#ff7a7a'>💥 Dye pack blew — stained cash lost.</div>";
+        dyeLine = "<div style='margin-top:6px;font-weight:500;color:#ff7a7a'>Dye pack blew — stained cash lost.</div>";
       }
       html =
-        "<div style='font-size:16px;color:#ff5b5b'>🏃 GET CLEAR WITH " + fmt$(h.bag) + "</div>" +
+        "<div style='font-size:16px;color:#ff5b5b'>GET CLEAR WITH " + fmt$(h.bag) + "</div>" +
         dyeLine +
         "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>" +
         (stars > 0 ? "Lose the cops (" + "★".repeat(stars) + ") to BANK the score." : "You're clean — banking the take…") +
@@ -455,7 +455,7 @@
     }).join("");
     board.innerHTML =
       "<div style='display:flex;justify-content:space-between;align-items:flex-start'>" +
-      "<div><div style='font-size:18px;color:#ffd479'>🎯 SCORE BOARD</div>" +
+      "<div><div style='font-size:18px;color:#ffd479'>SCORE BOARD</div>" +
       "<div style='font-weight:500;color:#9fb0c6;font-size:12px;margin-top:2px'>Case a target, hit it, lose the heat, bank the bag.</div></div>" +
       "<button class='hb-close' style='background:none;border:1px solid #2c3140;color:#aeb8c6;border-radius:8px;padding:6px 12px;cursor:pointer'>Close</button></div>" +
       "<div style='margin-top:6px;font-size:12px;color:#8a93a3'>Crew on hand: <b style='color:#7fd0ff'>" + crew + "</b>" +
@@ -577,7 +577,7 @@
         h.guards.push(gd);
       }
     }
-    if (h.guards.length) note("🛡 Bank security is resisting — deal with the guards.", 2.2);
+    if (h.guards.length) note("Bank security is resisting — deal with the guards.", 2.2);
   }
 
   // ------------------------------------------------------------ phase: EXECUTE
@@ -597,7 +597,7 @@
       // the wanted level (force to the engine's 4★ ceiling over a beat) and roll
       // an immediate response so the clock is real from second one.
       h.silent = true;
-      big("🏦 THIS IS A ROBBERY — DRILL THE VAULT!");
+      big("THIS IS A ROBBERY — DRILL THE VAULT!");
       if (CBZ.cityAlarm) CBZ.cityAlarm(x, z, 40, 1.8, CBZ.city.playerActor);
       if (CBZ.cityPanic) CBZ.cityPanic(x, z, 2.0, CBZ.city.playerActor);
       // a robbery report (caps at 2★ on its own) PLUS forceStars to push the
@@ -635,7 +635,7 @@
     const tier = tierById(h.tierId);
     if (truckObj && truckObj.doorMat) truckObj.doorMat.emissive.setHex(0x000000);
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
-    big("🏃 GO GO GO — " + fmt$(h.bag) + " in the bag!");
+    big("GO GO GO — " + fmt$(h.bag) + " in the bag!");
     sfx("whoosh");
     if (tier && tier.bank) {
       // ARM the dye-pack/bait clock: a chunk of the bag is rigged. You have a
@@ -671,7 +671,7 @@
     if (CBZ.city.addRespect) CBZ.city.addRespect(resp);
     h.completed = (h.completed || 0) + 1;
     if (take > (h.biggest || 0)) h.biggest = take;
-    big("💰 SCORE BANKED: " + fmt$(yourCut) + (crewCut > 0 ? " (+" + fmt$(crewCut) + " crew cut)" : ""));
+    big("SCORE BANKED: " + fmt$(yourCut) + (crewCut > 0 ? " (+" + fmt$(crewCut) + " crew cut)" : ""));
     note("+" + resp + " respect · biggest take: " + fmt$(h.biggest), 2.6);
     if (CBZ.cityEvent) CBZ.cityEvent("heist-banked", { tier: tier ? tier.id : "?", take: take, crew: h.crew }, { silent: true, noWanted: true });
     // a brief cooldown so you can't chain bank jobs back-to-back
@@ -691,7 +691,7 @@
   function fail(reason) {
     const h = ensure();
     cleanupTruck();
-    big("💥 SCORE BLOWN — " + reason);
+    big("SCORE BLOWN — " + reason);
     note("Lost the bag (" + fmt$(h.bag) + "). Heal up and try again.", 2.8);
     sfx("glass");
     finish(10);
@@ -734,7 +734,7 @@
         if (h.cooldown <= 0) {
           const here = availableHere();
           const ready = here.find((a) => a.ready && a.tier.id !== "armored" && (!a.tier.gun || hasGun()));
-          if (ready && Math.random() < 0.5) note("💡 You could case this " + (ready.tier.kinds[0]) + " — press [H].", 1.6);
+          if (ready && Math.random() < 0.5) note("You could case this " + (ready.tier.kinds[0]) + " — press [H].", 1.6);
         }
       }
       return;
@@ -771,7 +771,7 @@
           if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0.15 + 0.85 * h.drilled); } catch (e) {}
           if (CBZ.shake && Math.random() < dt * 2.0) CBZ.shake(0.1);
           if (Math.random() < dt * 0.8) sfx("report");   // drill bite
-          if (h.drilled >= 1) { big("🔓 VAULT BREACHED — GRAB THE CASH!"); sfx("alarm"); }
+          if (h.drilled >= 1) { big("VAULT BREACHED — GRAB THE CASH!"); sfx("alarm"); }
         } else {
           // STAGE 2 — GRAB. Bag fills from the breached vault; crew speeds it.
           const dGrab = (dt / tier.grabTime) * crewSpeed;
@@ -853,13 +853,13 @@
             const burn = Math.round(h.bag * clamp(h.dyeFrac, 0, 0.5));
             h.bag = Math.max(0, h.bag - burn);
             h.dyed = true;
-            big("💥 DYE PACK! " + fmt$(burn) + " ruined red — " + fmt$(h.bag) + " left clean.");
+            big("DYE PACK! " + fmt$(burn) + " ruined red — " + fmt$(h.bag) + " left clean.");
             note("Stained money's worthless. Get the rest clear.", 2.6);
             sfx("glass"); if (CBZ.shake) CBZ.shake(0.3);
           }
         } else if (h.getaway < (h.getawayMax || tier.getaway)) {
           // you broke LOS in time — defuse it: out of sight = the pack's beaten.
-          if (!h._defused) { h._defused = true; note("🕶 Out of sight — dye pack beaten. Now lose them entirely.", 2.2); }
+          if (!h._defused) { h._defused = true; note("Out of sight — dye pack beaten. Now lose them entirely.", 2.2); }
         }
       }
       // banking still requires SHAKING the cops (stars → 0), same as every score.

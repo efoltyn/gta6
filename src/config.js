@@ -140,14 +140,14 @@
   //   picksWeak preference for only fighting weaker targets (0..1)
   //   guts      general boldness, used for flavour/sorting
   CBZ.BEHAVIORS = {
-    pacifist:     { label: "Pacifist",    emoji: "🕊️", init: 0.00, retaliate: 0.05, fleeHurt: 0.92, picksWeak: 0.0, guts: 0.08, desc: "Won't throw a punch — runs from any trouble." },
-    defensive:    { label: "Defensive",   emoji: "🛡️", init: 0.02, retaliate: 0.97, fleeHurt: 0.20, picksWeak: 0.0, guts: 0.70, desc: "Never starts it — but finishes whoever does." },
-    protector:    { label: "Protector",   emoji: "🤝", init: 0.07, retaliate: 0.95, fleeHurt: 0.12, picksWeak: 0.0, guts: 0.85, desc: "Wades in to defend friends and underdogs." },
-    opportunist:  { label: "Opportunist", emoji: "🎲", init: 0.12, retaliate: 0.62, fleeHurt: 0.55, picksWeak: 0.95, guts: 0.40, desc: "Only swings when the fight's already won." },
-    hothead:      { label: "Hothead",     emoji: "🔥", init: 0.30, retaliate: 0.92, fleeHurt: 0.18, picksWeak: 0.15, guts: 0.78, desc: "Quick to rage, slow to think it through." },
-    bully:        { label: "Bully",       emoji: "😈", init: 0.24, retaliate: 0.55, fleeHurt: 0.60, picksWeak: 1.0, guts: 0.45, desc: "Hunts the weak, folds against the strong." },
-    predator:     { label: "Predator",    emoji: "🦈", init: 0.42, retaliate: 0.97, fleeHurt: 0.05, picksWeak: 0.55, guts: 0.96, desc: "Looks for a fight and rarely backs down." },
-    unpredictable:{ label: "Wildcard",    emoji: "🌀", init: 0.18, retaliate: 0.60, fleeHurt: 0.40, picksWeak: 0.30, guts: 0.50, desc: "Nobody — including them — knows what's next." },
+    pacifist:     { label: "Pacifist",    emoji: "", init: 0.00, retaliate: 0.05, fleeHurt: 0.92, picksWeak: 0.0, guts: 0.08, desc: "Won't throw a punch — runs from any trouble." },
+    defensive:    { label: "Defensive",   emoji: "", init: 0.02, retaliate: 0.97, fleeHurt: 0.20, picksWeak: 0.0, guts: 0.70, desc: "Never starts it — but finishes whoever does." },
+    protector:    { label: "Protector",   emoji: "", init: 0.07, retaliate: 0.95, fleeHurt: 0.12, picksWeak: 0.0, guts: 0.85, desc: "Wades in to defend friends and underdogs." },
+    opportunist:  { label: "Opportunist", emoji: "", init: 0.12, retaliate: 0.62, fleeHurt: 0.55, picksWeak: 0.95, guts: 0.40, desc: "Only swings when the fight's already won." },
+    hothead:      { label: "Hothead",     emoji: "", init: 0.30, retaliate: 0.92, fleeHurt: 0.18, picksWeak: 0.15, guts: 0.78, desc: "Quick to rage, slow to think it through." },
+    bully:        { label: "Bully",       emoji: "", init: 0.24, retaliate: 0.55, fleeHurt: 0.60, picksWeak: 1.0, guts: 0.45, desc: "Hunts the weak, folds against the strong." },
+    predator:     { label: "Predator",    emoji: "", init: 0.42, retaliate: 0.97, fleeHurt: 0.05, picksWeak: 0.55, guts: 0.96, desc: "Looks for a fight and rarely backs down." },
+    unpredictable:{ label: "Wildcard",    emoji: "", init: 0.18, retaliate: 0.60, fleeHurt: 0.40, picksWeak: 0.30, guts: 0.50, desc: "Nobody — including them — knows what's next." },
   };
   CBZ.BEHAVIOR_KEYS = Object.keys(CBZ.BEHAVIORS);
 

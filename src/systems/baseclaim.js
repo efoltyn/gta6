@@ -404,7 +404,7 @@
     if (soonest === Infinity) return;
     if (playClock - lastWarnAt < UPKEEP_WARN_COOLDOWN) return;
     lastWarnAt = playClock;
-    if (CBZ.flashHint) CBZ.flashHint("🏚 base upkeep low — deposit Wood at the cupboard", 3.0);
+    if (CBZ.flashHint) CBZ.flashHint("base upkeep low — deposit Wood at the cupboard", 3.0);
   }
   // The tick itself: CITY-mode only (see file header's scope note), right
   // beside city/economy.js's own 30/30.2/.../30.8 ladder (CBZ.PRIO.ECON)
@@ -451,7 +451,7 @@
           onSelect: function (t) {
             const rec = recFor(t); if (!rec) return;
             const who = pid();
-            if (rec.authorized.indexOf(who) < 0) { rec.authorized.push(who); CBZ.flashHint && CBZ.flashHint("✅ Authorized on this base", 1.4); }
+            if (rec.authorized.indexOf(who) < 0) { rec.authorized.push(who); CBZ.flashHint && CBZ.flashHint("Authorized on this base", 1.4); }
             else CBZ.flashHint && CBZ.flashHint("Already authorized", 1.2);
           },
         },
@@ -470,13 +470,13 @@
             const rec = recFor(t); if (!rec) return;
             const res = depositUpkeep(rec);
             if (!res.ok) CBZ.flashHint && CBZ.flashHint("Need " + res.cost + " Wood for upkeep", 1.8);
-            else CBZ.flashHint && CBZ.flashHint("🧰 Upkeep paid (" + res.cost + " Wood) — +24h", 1.8);
+            else CBZ.flashHint && CBZ.flashHint("Upkeep paid (" + res.cost + " Wood) — +24h", 1.8);
           },
         },
         {
           id: "tc-demolish", slot: "j", prio: 1, bad: true, label: "Demolish base",
           canShow: function (t) { const rec = recFor(t); return !!(rec && rec.ownerPid === pid()); },
-          onSelect: function (t) { CBZ.building.remove(t.id); CBZ.flashHint && CBZ.flashHint("💥 Base demolished", 1.4); CBZ.sfx && CBZ.sfx("hit"); },
+          onSelect: function (t) { CBZ.building.remove(t.id); CBZ.flashHint && CBZ.flashHint("Base demolished", 1.4); CBZ.sfx && CBZ.sfx("hit"); },
         },
       ],
     });
@@ -487,9 +487,9 @@
       options: [
         {
           id: "container-open", slot: "e", prio: 1,
-          label: function (t) { return canAccess(t, pid()) ? "Open" : "🔒 Locked"; },
+          label: function (t) { return canAccess(t, pid()) ? "Open" : "Locked"; },
           onSelect: function (t) {
-            if (!canAccess(t, pid())) { CBZ.flashHint && CBZ.flashHint("🔒 Locked", 1.2); return; }
+            if (!canAccess(t, pid())) { CBZ.flashHint && CBZ.flashHint("Locked", 1.2); return; }
             openContainerPanel(t);
           },
         },
@@ -497,7 +497,7 @@
           id: "container-lock", slot: "i", prio: 1,
           canShow: function (t) { return isAuthorizedOwner(t, pid()); },
           label: function (t) { return t.locked ? "Unlock" : "Lock"; },
-          onSelect: function (t) { t.locked = !t.locked; CBZ.flashHint && CBZ.flashHint(t.locked ? "🔒 Locked" : "🔓 Unlocked", 1.2); },
+          onSelect: function (t) { t.locked = !t.locked; CBZ.flashHint && CBZ.flashHint(t.locked ? "Locked" : "Unlocked", 1.2); },
         },
       ],
     });
@@ -510,7 +510,7 @@
           id: "door-toggle", slot: "e", prio: 1,
           label: function (t) { return t.open ? "Close" : "Open"; },
           onSelect: function (t) {
-            if (!t.open && !canAccess(t, pid())) { CBZ.flashHint && CBZ.flashHint("🔒 Locked", 1.2); return; }
+            if (!t.open && !canAccess(t, pid())) { CBZ.flashHint && CBZ.flashHint("Locked", 1.2); return; }
             t.open = !t.open; syncDoorCollider(t); CBZ.sfx && CBZ.sfx("door");
           },
         },
@@ -518,7 +518,7 @@
           id: "door-lock", slot: "i", prio: 1,
           canShow: function (t) { return isAuthorizedOwner(t, pid()); },
           label: function (t) { return t.locked ? "Unlock" : "Lock"; },
-          onSelect: function (t) { t.locked = !t.locked; CBZ.flashHint && CBZ.flashHint(t.locked ? "🔒 Locked" : "🔓 Unlocked", 1.2); },
+          onSelect: function (t) { t.locked = !t.locked; CBZ.flashHint && CBZ.flashHint(t.locked ? "Locked" : "Unlocked", 1.2); },
         },
       ],
     });
@@ -565,27 +565,27 @@
     if (piece.kind === "cupboard") {
       if (e.shiftKey) {
         const rec = recFor(piece);
-        if (rec && rec.ownerPid === who) { CBZ.building.remove(piece.id); CBZ.flashHint && CBZ.flashHint("💥 Base demolished", 1.4); }
-        else CBZ.flashHint && CBZ.flashHint("🚫 Not your base", 1.2);
+        if (rec && rec.ownerPid === who) { CBZ.building.remove(piece.id); CBZ.flashHint && CBZ.flashHint("Base demolished", 1.4); }
+        else CBZ.flashHint && CBZ.flashHint("Not your base", 1.2);
       } else {
         const rec = recFor(piece);
         if (rec) {
-          if (rec.authorized.indexOf(who) < 0) { rec.authorized.push(who); CBZ.flashHint && CBZ.flashHint("✅ Authorized on this base", 1.4); }
+          if (rec.authorized.indexOf(who) < 0) { rec.authorized.push(who); CBZ.flashHint && CBZ.flashHint("Authorized on this base", 1.4); }
           else CBZ.flashHint && CBZ.flashHint("Already authorized", 1.2);
         }
       }
     } else if (piece.kind === "container") {
       if (e.shiftKey) {
-        if (isAuthorizedOwner(piece, who)) { piece.locked = !piece.locked; CBZ.flashHint && CBZ.flashHint(piece.locked ? "🔒 Locked" : "🔓 Unlocked", 1.2); }
-        else CBZ.flashHint && CBZ.flashHint("🚫 Not authorized", 1.2);
+        if (isAuthorizedOwner(piece, who)) { piece.locked = !piece.locked; CBZ.flashHint && CBZ.flashHint(piece.locked ? "Locked" : "Unlocked", 1.2); }
+        else CBZ.flashHint && CBZ.flashHint("Not authorized", 1.2);
       } else if (canAccess(piece, who)) openContainerPanel(piece);
-      else CBZ.flashHint && CBZ.flashHint("🔒 Locked", 1.2);
+      else CBZ.flashHint && CBZ.flashHint("Locked", 1.2);
     } else if (piece.kind === "door") {
       if (e.shiftKey) {
-        if (isAuthorizedOwner(piece, who)) { piece.locked = !piece.locked; CBZ.flashHint && CBZ.flashHint(piece.locked ? "🔒 Locked" : "🔓 Unlocked", 1.2); }
-        else CBZ.flashHint && CBZ.flashHint("🚫 Not authorized", 1.2);
+        if (isAuthorizedOwner(piece, who)) { piece.locked = !piece.locked; CBZ.flashHint && CBZ.flashHint(piece.locked ? "Locked" : "Unlocked", 1.2); }
+        else CBZ.flashHint && CBZ.flashHint("Not authorized", 1.2);
       } else {
-        if (!piece.open && !canAccess(piece, who)) { CBZ.flashHint && CBZ.flashHint("🔒 Locked", 1.2); return; }
+        if (!piece.open && !canAccess(piece, who)) { CBZ.flashHint && CBZ.flashHint("Locked", 1.2); return; }
         piece.open = !piece.open; syncDoorCollider(piece); CBZ.sfx && CBZ.sfx("door");
       }
     }
@@ -620,7 +620,7 @@
       "border-radius:12px;padding:0;display:none;box-shadow:0 18px 60px rgba(0,0,0,0.7);");
     const head = el("div", "display:flex;align-items:center;justify-content:space-between;" +
       "padding:12px 14px;border-bottom:1px solid rgba(120,150,200,0.22);");
-    head.appendChild(el("div", "font:700 14px system-ui;color:#fff;", "📦 Container"));
+    head.appendChild(el("div", "font:700 14px system-ui;color:#fff;", "Container"));
     const close = el("div", "cursor:pointer;font:700 16px system-ui;color:#9aa6bd;", "✕");
     close.addEventListener("click", closeContainerPanel);
     head.appendChild(close);

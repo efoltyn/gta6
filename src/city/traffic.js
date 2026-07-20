@@ -124,7 +124,7 @@
         // only a problem if a cop is around to see it (unseen = no narration —
         // the red light you blew through tells its own story)
         const seen = anyCopNear(P.pos.x, P.pos.z, 34);
-        if (seen) { CBZ.cityCrime && CBZ.cityCrime(22, { type: "red-light" }); CBZ.city && CBZ.city.note("🚦 A cop saw you run the light.", 2); }
+        if (seen) { CBZ.cityCrime && CBZ.cityCrime(22, { type: "red-light" }); CBZ.city && CBZ.city.note("A cop saw you run the light.", 2); }
       }
     }
     prevInside = inside;

@@ -641,7 +641,7 @@
     if (!CBZ.cityOwnsLot || !CBZ.cityOwnsLot(lot)) { if (CBZ.city && CBZ.city.note) CBZ.city.note("That parcel isn't on your deeds — put an offer in first.", 2.2, { from: "Zillow" }); return; }
     T.active = true; T.lot = lot; T.basis = lotBasis(lot);
     ensureGhost();
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🔨 Build mode — [1-5] piece, LMB place, Shift+LMB remove, [N] exit.", 2.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Build mode — [1-5] piece, LMB place, Shift+LMB remove, [N] exit.", 2.6);
   }
   function exitBuild() {
     T.active = false; T.lot = null; T.basis = null; T.target = null;

@@ -477,7 +477,7 @@
     const names = race.candidates.map(function (c) {
       return (c.type === "incumbent" ? nameOf(c.sid) + " (incumbent)" : nameOf(c.sid) + " (" + c.type + ")");
     }).join(" vs ");
-    if (CBZ.cityFeed) CBZ.cityFeed("🗳️ Election called for " + title + " of " + rec.name + ": " + names, "#8fc1ff");
+    if (CBZ.cityFeed) CBZ.cityFeed("Election called for " + title + " of " + rec.name + ": " + names, "#8fc1ff");
   }
 
   function campaignDay(id, rec, race, day) {
@@ -488,7 +488,7 @@
     const blocs = buildBlocs(rec);
     const place = blocs.length ? blocs[(rng() * blocs.length) | 0].name : rec.name;
     cand.momentum += 0.3 + rng() * 0.9;
-    if (CBZ.cityFeed) CBZ.cityFeed("🎤 " + nameOf(cand.sid) + " rallies supporters in " + place + ".", "#e8c84a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(cand.sid) + " rallies supporters in " + place + ".", "#e8c84a");
 
     // the player's OWN Campaign Event activity credits the INCUMBENT (a
     // snap election has none — player-as-candidate is V.2's own future
@@ -505,7 +505,7 @@
       const poll = pollFor(rec, race.candidates);
       race.lastPoll = poll;
       const a = race.candidates[0], b = race.candidates[1];
-      if (CBZ.cityFeed) CBZ.cityFeed("📊 Poll: " + nameOf(a.sid) + " " + poll.aPct + " - " + nameOf(b.sid) + " " + poll.bPct, "#9aa6bd");
+      if (CBZ.cityFeed) CBZ.cityFeed("Poll: " + nameOf(a.sid) + " " + poll.aPct + " - " + nameOf(b.sid) + " " + poll.bPct, "#9aa6bd");
     }
   }
 
@@ -525,7 +525,7 @@
     if (incumbent && !winnerIsIncumbent) {
       const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(incumbent.sid);
       if (e) e.job = "politician";
-      if (CBZ.cityFeed) CBZ.cityFeed("🎙️ " + nameOf(incumbent.sid) + " concedes defeat.", "#ff9a6a");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(incumbent.sid) + " concedes defeat.", "#ff9a6a");
     }
 
     if (winner) {
@@ -537,7 +537,7 @@
 
     if (CBZ.approvalShock) CBZ.approvalShock(rec.id, winnerIsIncumbent ? 4 : 0);
 
-    const headline = (winnerIsIncumbent ? "🏆 " + winnerName + " RE-ELECTED " : "🏆 " + winnerName + " ELECTED ")
+    const headline = (winnerIsIncumbent ? "" + winnerName + " RE-ELECTED " : "" + winnerName + " ELECTED ")
       + title.toUpperCase() + " OF " + rec.name.toUpperCase();
     if (CBZ.city && CBZ.city.big) CBZ.city.big(headline);
     if (CBZ.cityFeed) CBZ.cityFeed(headline, "#8fe08a");

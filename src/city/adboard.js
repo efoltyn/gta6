@@ -151,8 +151,8 @@
     glowNow(m);
     if (CBZ.city.addRespect) CBZ.city.addRespect(4);   // the block SEES the board go up
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (brand.bizId) note("📢 " + brand.bizName + " is on the board — its take climbs while this runs. " + money(per) + "/wk to " + ownerOf(b) + ".", 3);
-    else note("📢 Your name is up over " + districtLabel(b) + ". " + money(per) + "/wk to " + ownerOf(b) + " — clout has a rate.", 3);
+    if (brand.bizId) note("" + brand.bizName + " is on the board — its take climbs while this runs. " + money(per) + "/wk to " + ownerOf(b) + ".", 3);
+    else note("Your name is up over " + districtLabel(b) + ". " + money(per) + "/wk to " + ownerOf(b) + " — clout has a rate.", 3);
   }
 
   function endLease(b, lapsed) {
@@ -161,7 +161,7 @@
     if (b.mat0) b.mesh.material = b.mat0;
     b.mesh.userData.adLease = false;
     if (b.mesh2) { if (b.mat0b) b.mesh2.material = b.mat0b; b.mesh2.userData.adLease = false; }
-    if (lapsed) note("📉 " + ownerOf(b) + " pulled your board — the rent went unpaid.", 2.6);
+    if (lapsed) note("" + ownerOf(b) + " pulled your board — the rent went unpaid.", 2.6);
     else note("Board released back to " + ownerOf(b) + ".", 2);
   }
 

@@ -200,7 +200,7 @@
     officeManagers.delete(lot);
     if (best) {
       promoteManager(lot, best);
-      try { if (CBZ.cityFeed) CBZ.cityFeed("📈 " + (best.name || "A worker") + " is promoted to floor manager.", "#ffd166"); } catch (e) {}
+      try { if (CBZ.cityFeed) CBZ.cityFeed("" + (best.name || "A worker") + " is promoted to floor manager.", "#ffd166"); } catch (e) {}
     }
     return best;
   }
@@ -509,7 +509,7 @@
     }
     // a single ambient feed line so the disturbance reads in the ticker (no popup).
     if (evicted >= 2 && CBZ.cityFeed && Math.random() < 0.5) {
-      try { CBZ.cityFlavor && CBZ.cityFlavor("🏢 Workers scatter as the floor is stormed", "#ffce8f"); } catch (e) {}
+      try { CBZ.cityFlavor && CBZ.cityFlavor("Workers scatter as the floor is stormed", "#ffce8f"); } catch (e) {}
     }
 
     // ---- optional cash carrot: lazily place ONE stack, grab on walk-over ----

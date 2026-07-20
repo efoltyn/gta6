@@ -277,7 +277,7 @@
       racer.retired = true;
       const rookie = promoteRookie();
       if (CBZ.cityIdentities.setSuccessor) CBZ.cityIdentities.setSuccessor(rec.id, rookie._identityId);
-      const msg = "🏁 Racer #" + racer.number + " (" + racer.name + ") has died — rookie #" + rookie.number + " (" + rookie.name + ") enters the field.";
+      const msg = "Racer #" + racer.number + " (" + racer.name + ") has died — rookie #" + rookie.number + " (" + rookie.name + ") enters the field.";
       if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) { /* */ } }
       else note(msg, 4.0);
     });
@@ -488,7 +488,7 @@
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         const pos = cityRacing.positionOf(r);
-        note("🏁 " + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ").", 3.0);
+        note("" + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ").", 3.0);
       },
     });
     // challenge to a street race → route to the speedway join flow if it exists,
@@ -502,10 +502,10 @@
         const PA = CBZ.player;
         if (PA && PA.driving && CBZ.cityStartSpeedwayRace) {
           // they're at the wheel and the track flow is live → drop the green flag.
-          note("🏁 " + r.name + " takes the challenge — to the line!", 2.4);
+          note("" + r.name + " takes the challenge — to the line!", 2.4);
           try { CBZ.cityStartSpeedwayRace(); } catch (e) { /* */ }
         } else {
-          note("🏁 \"" + r.name + ": Meet me at the speedway and we'll settle it.\"", 3.0);
+          note("\"" + r.name + ": Meet me at the speedway and we'll settle it.\"", 3.0);
         }
       },
     });

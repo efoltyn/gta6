@@ -273,7 +273,7 @@
     c.e.lb = now();   // stamp the cooldown on the LIVE edge object (persists — see header)
     const nameA = nameOf(c.a), nameB = nameOf(c.b);
     if (CBZ.cityFeed) {
-      CBZ.cityFeed("👶 " + nameA + " & " + nameB + " welcomed " + (kid.name || "a baby"), "#ffd1e8");
+      CBZ.cityFeed("" + nameA + " & " + nameB + " welcomed " + (kid.name || "a baby"), "#ffd1e8");
     }
     // a happy, opinion-neutral ripple — reuses "proposal" (see header: we
     // don't own social.js's TOPIC table, and it already encodes this beat).

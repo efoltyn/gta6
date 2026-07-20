@@ -321,7 +321,7 @@
       if (e.name) p.name = e.name;
       if (e.sex != null) p.gender = e.sex ? "f" : "m";
       _embodied[rec.sid] = p;
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("💼 " + (e.name || "Someone") + " is working the block in person tonight.", 2.2);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("" + (e.name || "Someone") + " is working the block in person tonight.", 2.2);
     }
   });
 
@@ -345,7 +345,7 @@
       CBZ.stocks.shock(sym, -(DEATH_SHOCK_MIN + rng() * DEATH_SHOCK_SPAN));
     }
     if (CBZ.city && CBZ.city.big) {
-      CBZ.city.big("💀 " + victimName + ", founder of " + coName + ", assassinated — " + sym + " plunges");
+      CBZ.city.big("" + victimName + ", founder of " + coName + ", assassinated — " + sym + " plunges");
     }
     if (heir) {
       // SUCCESSION: shares move to the heir, who becomes founder-of-record.
@@ -356,14 +356,14 @@
       rec.sid = heir;                       // this RECORD now tracks the heir going forward
       rec.spouseSid = FT ? FT.spouseOf(heir) : null;
       rec.kidSids = FT ? FT.kidsOf(heir) : [];
-      if (CBZ.cityFeed) CBZ.cityFeed("👑 " + nameOf(heir) + " inherits control of " + coName, "#ffd76a");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(heir) + " inherits control of " + coName, "#ffd76a");
     } else {
       // NO HEIR: shares dissolve into "the estate" (left unreachable on the
       // dead sid's page — nobody left to claim founder-of-record) + a bigger
       // shock than the succession case.
       if (co) co.founderSid = null;
       if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(sym, -NO_HEIR_SHOCK);
-      if (CBZ.cityFeed) CBZ.cityFeed("⚠️ " + sym + " in chaos — founder dies without heir", "#ff6a5e");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + sym + " in chaos — founder dies without heir", "#ff6a5e");
       const list = ensureState().founders;
       const idx = list.indexOf(rec);
       if (idx >= 0) list.splice(idx, 1);

@@ -103,7 +103,7 @@
     // last on-land spot (a bail-out/teleport into water would snap you back)
     if (CBZ.sfx) { try { CBZ.sfx("splash"); } catch (e) { try { CBZ.sfx("step"); } catch (e2) {} } }
     if (CBZ.shake) CBZ.shake(0.35);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🌊 In the drink — swim to the seawall before you tire out", 2.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("In the drink — swim to the seawall before you tire out", 2.6);
   }
 
   function exitWater(P, spot) {
@@ -204,7 +204,7 @@
     const spot = climbSpot(A, P.pos.x, P.pos.z, 4.6);
     if (spot) {
       hintT -= dt;
-      if (hintT <= 0 && CBZ.city && CBZ.city.note) { hintT = 1.6; CBZ.city.note("🧗 [Space] climb out", 1.4); }
+      if (hintT <= 0 && CBZ.city && CBZ.city.note) { hintT = 1.6; CBZ.city.note("[Space] climb out", 1.4); }
       if (CBZ.keys && CBZ.keys[" "]) exitWater(P, spot);
     }
   });

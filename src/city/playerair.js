@@ -334,7 +334,7 @@
       }
       if (dl < 6) c.pos.y += Math.max(-vstep, Math.min(vstep, dy));
       c.group.rotation.y = Math.atan2(dx, dz);
-      if (dl < 0.8 && Math.abs(dy) < 0.6) { c.phase = "landed"; c.waitT = LAND_WAIT; note("🚁 Chopper down — walk under it to board.", 3); }
+      if (dl < 0.8 && Math.abs(dy) < 0.6) { c.phase = "landed"; c.waitT = LAND_WAIT; note("Chopper down — walk under it to board.", 3); }
       return;
     }
 
@@ -352,7 +352,7 @@
           return;
         }
       }
-      if (c.waitT <= 0) { c.phase = "leaving"; note("🚁 Chopper left without you.", 2.2); }
+      if (c.waitT <= 0) { c.phase = "leaving"; note("Chopper left without you.", 2.2); }
       return;
     }
 
@@ -565,13 +565,13 @@
   // ============================================================ API ===========
   CBZ.cityCallChopper = function () {
     if (g.mode !== "city" || g.state !== "playing") return false;
-    if (!canChopper()) { note("🚁 No chopper. Own THE APEX PENTHOUSE — a personal chopper comes parked on its rooftop pad.", 3.6); return false; }
-    if (chopper) { note("🚁 Your chopper is already on the way.", 2); return false; }
-    if (chopperCD > 0) { note("🚁 Chopper refueling — " + Math.ceil(chopperCD) + "s.", 2); return false; }
+    if (!canChopper()) { note("No chopper. Own THE APEX PENTHOUSE — a personal chopper comes parked on its rooftop pad.", 3.6); return false; }
+    if (chopper) { note("Your chopper is already on the way.", 2); return false; }
+    if (chopperCD > 0) { note("Chopper refueling — " + Math.ceil(chopperCD) + "s.", 2); return false; }
     const P = player(); if (!P) return false;
     chopper = makeChopper(P);
-    if (!chopper) { note("🚁 Chopper unavailable right now.", 2); return false; }
-    note("🚁 Personal chopper inbound — stand clear, then walk under it to board.", 3.6);
+    if (!chopper) { note("Chopper unavailable right now.", 2); return false; }
+    note("Personal chopper inbound — stand clear, then walk under it to board.", 3.6);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     return true;
   };
@@ -579,13 +579,13 @@
   CBZ.cityCallAirstrike = function (tgt) {
     if (g.mode !== "city" || g.state !== "playing") return false;
     if (!canStrike()) {
-      note("🎯 No F-22 yet. Buy a hangar (penthouse deck [H] or the airport Private Hangar [P]→Services), STEAL the F-22 from the military base, then land it in your hangar to keep it.", 4.2);
+      note("No F-22 yet. Buy a hangar (penthouse deck [H] or the airport Private Hangar [P]→Services), STEAL the F-22 from the military base, then land it in your hangar to keep it.", 4.2);
       return false;
     }
-    if (strikeCD > 0) { note("🎯 Jet rearming — " + Math.ceil(strikeCD) + "s.", 2); return false; }
+    if (strikeCD > 0) { note("Jet rearming — " + Math.ceil(strikeCD) + "s.", 2); return false; }
     tgt = tgt || strikeTarget();
-    if (!tgt) { note("🎯 No target — set a waypoint [M] or aim at the ground.", 2.6); return false; }
-    if (((g.cash || 0) + (g.cityBank || 0)) < STRIKE_COST) { note("🎯 An airstrike costs " + money(STRIKE_COST) + ".", 2.6); return false; }
+    if (!tgt) { note("No target — set a waypoint [M] or aim at the ground.", 2.6); return false; }
+    if (((g.cash || 0) + (g.cityBank || 0)) < STRIKE_COST) { note("An airstrike costs " + money(STRIKE_COST) + ".", 2.6); return false; }
     charge(STRIKE_COST);
     strikeCD = STRIKE_CD;
     strike = makeStrikeJet(tgt);
@@ -596,7 +596,7 @@
     // swelling engine roar from the moment it crosses the city edge. The only
     // words are the read-back below — YOUR pilot confirming YOUR tasking, a
     // notification from a person, on the quiet feed.)
-    note("📻 Pilot: \"Copy — running in on " + (tgt.label || "the mark") + ". Keep your head down.\"", 3);
+    note("Pilot: \"Copy — running in on " + (tgt.label || "the mark") + ". Keep your head down.\"", 3);
     return true;
   };
 

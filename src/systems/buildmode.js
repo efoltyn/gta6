@@ -229,7 +229,7 @@
     if (afford && afford.cost) {
       const parts = Object.keys(afford.cost).map(function (m) { return afford.cost[m] + " " + m; });
       s += "  ·  cost " + parts.join(", ");
-      if (!afford.ok) s += "  ⚠ need " + afford.cost[afford.short] + " " + afford.short;
+      if (!afford.ok) s += "  need " + afford.cost[afford.short] + " " + afford.short;
     }
     if (!v.ok) s += "  —  " + (v.reason || "invalid");
     return s;
@@ -432,12 +432,12 @@
   /* ================= actions ================= */
   function tryPlace() {
     if (!bm.active) return;
-    if (bm.gx == null) { CBZ.flashHint && CBZ.flashHint("🚫 No target", 1.0); return; }
+    if (bm.gx == null) { CBZ.flashHint && CBZ.flashHint("No target", 1.0); return; }
     // B7: check affordability BEFORE B.place() (check-then-place — a failed
     // placement below never costs you anything either way).
     const afford = affordability(bm.kind);
     if (!afford.ok) {
-      CBZ.flashHint && CBZ.flashHint("🚫 Need " + afford.cost[afford.short] + " " + afford.short, 1.4);
+      CBZ.flashHint && CBZ.flashHint("Need " + afford.cost[afford.short] + " " + afford.short, 1.4);
       return;
     }
     // B6: thread the builder's stable pid through so every piece carries
@@ -459,14 +459,14 @@
       updateTarget();
     } else {
       const v = B.validate(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
-      CBZ.flashHint && CBZ.flashHint("🚫 " + (v.reason || "Can't place there"), 1.4);
+      CBZ.flashHint && CBZ.flashHint("" + (v.reason || "Can't place there"), 1.4);
     }
   }
   function tryDemolish() {
     if (!bm.active) return;
     raycaster.setFromCamera(NDC_CENTER, CBZ.camera);
     const hit = raycastNearbyPiece();
-    if (!hit) { CBZ.flashHint && CBZ.flashHint("🚫 Nothing in range to demolish", 1.0); return; }
+    if (!hit) { CBZ.flashHint && CBZ.flashHint("Nothing in range to demolish", 1.0); return; }
     const piece = CBZ.pieces.get(hit.pieceId);
     // B6 OWNERSHIP GATE: X only works on (a) ownerless pieces — legacy/
     // pre-B6 saves and anything spawned outside the build system, same
@@ -476,14 +476,14 @@
     // the pieces you personally placed). Raiders demolish someone else's
     // base through DAMAGE (systems/structdamage.js), never through this
     // verb — there is no "break in and demolish" shortcut.
-    if (!piece) { CBZ.flashHint && CBZ.flashHint("🚫 Can't demolish that", 1.0); return; }
+    if (!piece) { CBZ.flashHint && CBZ.flashHint("Can't demolish that", 1.0); return; }
     const me = CBZ.netPid ? CBZ.netPid() : null;
     const ownedByMe = piece.ownerId == null || piece.ownerId === me;
     const inMyBase = !ownedByMe && CBZ.baseAt && (function () {
       const rec = CBZ.baseAt(piece.pos.x, piece.pos.z);
       return !!(rec && rec.authorized.indexOf(me) >= 0);
     })();
-    if (!ownedByMe && !inMyBase) { CBZ.flashHint && CBZ.flashHint("🚫 Can't demolish that", 1.0); return; }
+    if (!ownedByMe && !inMyBase) { CBZ.flashHint && CBZ.flashHint("Can't demolish that", 1.0); return; }
     const idx = bm.placedStack.indexOf(hit.pieceId);
     if (idx >= 0) bm.placedStack.splice(idx, 1);
     B.remove(hit.pieceId);
@@ -528,7 +528,7 @@
     if (CBZ.game.mode === "city" && CBZ.cityHolster) CBZ.cityHolster(true);
     showUI();
     updateTarget();
-    CBZ.flashHint && CBZ.flashHint("🛠 Build mode", 1.0);
+    CBZ.flashHint && CBZ.flashHint("Build mode", 1.0);
   }
   function exitBuildMode() {
     bm.active = false;

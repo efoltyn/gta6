@@ -76,7 +76,7 @@
   const B = CBZ.BEHAVIORS || {};
   const BK = CBZ.BEHAVIOR_KEYS || ["unpredictable"];
   function behaviorOf(n) {
-    return (n && B[n.behavior]) || B.unpredictable || { init: 0.14, retaliate: 0.8, fleeHurt: 0.4, picksWeak: 0.3, guts: 0.5, label: "Wildcard", emoji: "🌀" };
+    return (n && B[n.behavior]) || B.unpredictable || { init: 0.14, retaliate: 0.8, fleeHurt: 0.4, picksWeak: 0.3, guts: 0.5, label: "Wildcard", emoji: "" };
   }
   // pick a temperament with light role bias — but capability is rolled
   // separately, so a brute can still be a pacifist and vice-versa.
@@ -2541,7 +2541,7 @@
     const rivalGang = CBZ.player.gang != null && target.gang >= 0 && target.gang !== CBZ.player.gang;
     const standing = target.gang >= 0 ? gangStanding(target.gang) : 0;
     const tp = target.personality || {};
-    emote(target, sameGang && standing > -10 ? "🤐" : "!");
+    emote(target, sameGang && standing > -10 ? "" : "!");
 
     if (sameGang && standing > -10) {
       addGangStanding(target.gang, 1);
@@ -2609,7 +2609,7 @@
         foe.aiState = "fight"; foe.foe = n; foe.hitCD = 0.3;
       } else {
         foe.aiState = "flee"; foe.fleeT = 2.2 + rng() * 2.2; foe.foe = null;
-        emote(foe, "💨");
+        emote(foe, "");
       }
     } else if (foe.alert != null) {
       foe.alert = 2.5; // a guard turns to face the attacker
@@ -2729,11 +2729,11 @@
       snitch.fleeT = 2.8 + rng() * 2;
       snitch.foe = null;
       snitch.target.set((rng() - 0.5) * 48, 0, 8 + rng() * 38);
-      emote(ally, "🤐");
+      emote(ally, "");
       emote(snitch, "!");
     } else {
       startFight(ally, snitch);
-      emote(ally, "✊");
+      emote(ally, "");
     }
 
     if (CBZ.flashHint && (playerDist(ally) < 20 || playerDist(snitch) < 20)) {
@@ -2783,7 +2783,7 @@
     ally.interceptT = mode === "snitch" ? 7.5 : 5.5;
     ally.foe = null;
     ally.social = null;
-    emote(ally, mode === "snitch" ? "🤐" : "✊");
+    emote(ally, mode === "snitch" ? "" : "");
     return true;
   }
 
@@ -3157,7 +3157,7 @@
     // tell the player if it happened in view
     if (!opts.quiet && CBZ.player && Math.hypot(CBZ.player.pos.x - victim.group.position.x, CBZ.player.pos.z - victim.group.position.z) < 22) {
       const who = victim.data ? victim.data.name.replace(/^the |^a |^an /, "") : "someone";
-      CBZ.flashHint(`💀 ${who} was taken out!`, 2.2);
+      CBZ.flashHint(`${who} was taken out!`, 2.2);
     }
   }
 
@@ -3263,7 +3263,7 @@
       if (n.aiState === "wander" && d > 4 && d < 13 && ((CBZ.game.detection || 0) > 28 || CBZ.econ.rng() < 0.006)) {
         const side = (n.personality && n.personality.loyalty > 0.5) ? -1 : 1;
         n.target.set(CBZ.player.pos.x + side * (1.8 + rng() * 1.5), 0, CBZ.player.pos.z - 1.6 - rng());
-        if (rng() < 0.02) emote(n, "✊");
+        if (rng() < 0.02) emote(n, "");
         return n.baseSpeed * 1.25;
       }
     }
@@ -3479,7 +3479,7 @@
             target.snitchHeat = 0; target.snitchT = 0; target.snitchMeta = null;
             if ((p.nerve || 0.5) + (p.loyalty || 0.5) * 0.35 > ((target.personality && target.personality.nerve) || 0.45) + 0.12 || rng() < 0.45) {
               target.aiState = "flee"; target.fleeT = 2.4 + rng() * 2.2; target.foe = null;
-              emote(n, "🤐"); emote(target, "!");
+              emote(n, ""); emote(target, "!");
               addBuzz("snitch", -9, "crew-block");
               addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
               n.aiState = "shadowPlayer"; n.shadowT = Math.max(n.shadowT || 0, 5 + rng() * 4);
@@ -3559,7 +3559,7 @@
           if (other.aiState === "snitch" && dist(n, other) < 9 && other.gang !== n.gang) {
             other.aiState = "flee"; other.fleeT = 2.8; other.snitchT = 0; other.snitchHeat = 0;
             other.snitchMeta = null;
-            emote(n, "🤐"); emote(other, "!");
+            emote(n, ""); emote(other, "!");
             addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
             if (CBZ.flashHint && playerDist(n) < 16) CBZ.flashHint(`${n.data.name.replace(/^the |^a |^an /, "")} scares off a snitch.`, 1.5);
             break;
@@ -3600,11 +3600,11 @@
           n.target.set(n.group.position.x, 0, n.group.position.z); // stop and chat
           if (n.aiTimer <= 0) {
             n.aiTimer = 1.4 + rng() * 2;
-            emote(n, rng() < 0.4 ? "💬" : rng() < 0.5 ? "😂" : "♥");
+            emote(n, rng() < 0.4 ? "" : rng() < 0.5 ? "" : "♥");
             gossip(n, p);
             if (n.aiState === "snitch") return n.baseSpeed * 1.85;
             // a neutral drifter sometimes gets recruited
-            if (n.gang < 0 && p.gang >= 0 && rng() < 0.3) { n.gang = p.gang; addBand(n, n.gang); emote(n, "✊"); }
+            if (n.gang < 0 && p.gang >= 0 && rng() < 0.3) { n.gang = p.gang; addBand(n, n.gang); emote(n, ""); }
             if (rng() < 0.45) { n.aiState = "wander"; n.social = null; }
           }
         } else n.target.set(p.group.position.x, 0, p.group.position.z);
@@ -3618,7 +3618,7 @@
         if (dist(n, f) < 1.8) { if (n.hitCD <= 0) { n.hitCD = 0.7; exchangeBlows(n, f); } }
         // break off when badly hurt — how readily depends on temperament
         if (n.hp < (n.maxHp || 100) * 0.3 && rng() < behaviorOf(n).fleeHurt * 0.06) {
-          n.aiState = "flee"; n.fleeT = 2.5; n.foe = null; emote(n, "💨");
+          n.aiState = "flee"; n.fleeT = 2.5; n.foe = null; emote(n, "");
         }
         return n.baseSpeed * 1.45;
       }
@@ -3635,7 +3635,7 @@
         if (n.group.position.z > ez - 2) {
           n.escaped = true; n.group.visible = false;
           if (CBZ.player && Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 26)
-            CBZ.flashHint(`🏃 ${n.data.name.replace(/^the |^a |^an /, "")} broke out!`, 2.4);
+            CBZ.flashHint(`${n.data.name.replace(/^the |^a |^an /, "")} broke out!`, 2.4);
         }
         return n.baseSpeed * 1.6;
       }

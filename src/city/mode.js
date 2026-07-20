@@ -48,8 +48,8 @@
   // "police"/"cops", which NOTE_URGENT would otherwise promote to a centre flash.
   const NOTE_FOURTH_WALL = new RegExp([
     // --- witnesses / snitching (peds.js, jewelry.js) ---
-    "saw that", "reported you", "pointed you out", "Reported:", "🗣️",
-    "👀.*(saw|spun around|made)", "is a narc", "rival-affiliated",
+    "saw that", "reported you", "pointed you out", "Reported:", "",
+    ".*(saw|spun around|made)", "is a narc", "rival-affiliated",
     // --- traffic flavor (vehicles.js) ---
     "Traffic stop", "ticketed", "fleeing the police", "running from (the )?police",
     // --- gang movement / ambient gang life (turf.js, gangs.js) ---

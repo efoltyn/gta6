@@ -989,7 +989,7 @@
       },
     });
     I.describe && I.describe("carcass", function (a) {
-      return { label: "🦌 " + (a.species ? a.species.name : "Carcass"), note: a.legendary ? "LEGENDARY pelt" : "field-dress the hide" };
+      return { label: "" + (a.species ? a.species.name : "Carcass"), note: a.legendary ? "LEGENDARY pelt" : "field-dress the hide" };
     });
     I.register("carcass", {
       id: "carcass-skin", slot: "e", hold: true, prio: 20,
@@ -1009,7 +1009,7 @@
     v.t = Math.max(v.t, sp.venom === true ? 6 : 4);   // refresh/extend
     v.dps = Math.max(v.dps, sp.venomDps || 5);
     v.name = sp.name;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("☠ VENOM — " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("VENOM — " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
   }
   function venomTick(dt) {
     const v = g._venom; if (!v || v.t <= 0) return;

@@ -128,7 +128,7 @@
     if (el.status) {
       const D = CBZ.disasters;
       let s = "";
-      if (D && D.state() === "warn" && D.current()) s = "⚠ " + D.current() + " incoming · " + Math.ceil(D.timeLeft()) + "s";
+      if (D && D.state() === "warn" && D.current()) s = "" + D.current() + " incoming · " + Math.ceil(D.timeLeft()) + "s";
       else if (D && D.state() === "active" && D.current()) s = D.current() + " · " + Math.ceil(D.timeLeft()) + "s";
       else if (D && D.justEnded && D.justEnded()) s = "✓ " + D.justEnded() + " is over";
       el.status.textContent = s;

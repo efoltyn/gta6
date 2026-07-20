@@ -129,7 +129,7 @@
     if (a.feeds >= need) {
       a.tamed = true; a.petName = NAMES[(Math.random() * NAMES.length) | 0];
       a.stay = false;
-      note("❤ The " + sp.name + " is yours! Meet " + a.petName +
+      note("The " + sp.name + " is yours! Meet " + a.petName +
         (rideDef(sp) ? (a.grow != null ? " — rideable once it grows up." : " — you can RIDE it.") : "."),
         3.6, sp.rarity === "legendary" ? { urgent: true } : undefined);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(sp.rarity === "legendary" ? 10 : 2);
@@ -344,8 +344,8 @@
     I.describe && I.describe("animal", function (a) {
       const sp = a.species;
       const baby = a.grow != null ? "baby " : "";
-      if (a.ridden) return { label: "🐎 Riding " + (a.petName || sp.name), note: "hold on" };
-      if (a.tamed) return { label: "❤ " + a.petName + " the " + baby + sp.name, note: rideDef(sp) ? (a.grow != null ? "too young to ride" : "your loyal mount") : "your companion" };
+      if (a.ridden) return { label: "Riding " + (a.petName || sp.name), note: "hold on" };
+      if (a.tamed) return { label: "" + a.petName + " the " + baby + sp.name, note: rideDef(sp) ? (a.grow != null ? "too young to ride" : "your loyal mount") : "your companion" };
       return {
         label: (a.legendary ? "★ " : "") + "A " + baby + sp.name,
         note: feedItemFor(sp) ? ("hold food out to tame (" + (a.feeds || 0) + "/" + feedsNeeded(sp) + ")") : (isPredator(sp) ? "tameable — bring MEAT" : "tameable — bring food"),
@@ -369,7 +369,7 @@
       id: "animal-pet", slot: "e", prio: 18,
       canShow: function (a) { return a.tamed && !a.ridden; },
       label: "Pet",
-      onSelect: function (a) { note("❤ " + a.petName + " leans into you.", 1.6); },
+      onSelect: function (a) { note("" + a.petName + " leans into you.", 1.6); },
     });
     // MOUNT
     I.register("animal", {
@@ -421,7 +421,7 @@
         const item = feedItemFor(a.species); if (!item) return;
         if (CBZ.cityEcon && CBZ.cityEcon.take) CBZ.cityEcon.take(item, 1);
         a.hp = Math.min(a.maxHp, a.hp + Math.round(a.maxHp * 0.25));
-        note("❤ " + a.petName + " eats the " + item + " (+health).", 1.8);
+        note("" + a.petName + " eats the " + item + " (+health).", 1.8);
       },
     });
   }

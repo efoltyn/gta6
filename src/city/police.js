@@ -194,7 +194,7 @@
     const P = CBZ.player; if (!P || P.dead) return;
     if (Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z) > 13) return;   // overheard, not broadcast
     barkCD = 26 + rng() * 20;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + (c.name || "Officer") + ": " + lines[(rng() * lines.length) | 0], 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + (c.name || "Officer") + ": " + lines[(rng() * lines.length) | 0], 1.8);
   }
 
   // ---- ARREST-FIRST CHALLENGE (city-arrest-first) ---------------------------
@@ -213,7 +213,7 @@
     if (challengeNoteCD > 0) return;
     challengeNoteCD = 4.5;
     if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note(c.swat ? "🚔 \"POLICE! DOWN — HANDS BEHIND YOUR HEAD!\"" : "🚔 \"FREEZE! Hands where I can see them!\"", 2.0);
+      CBZ.city.note(c.swat ? "\"POLICE! DOWN — HANDS BEHIND YOUR HEAD!\"" : "\"FREEZE! Hands where I can see them!\"", 2.0);
       if (CBZ.now - surrenderHintT > 30000) {
         surrenderHintT = CBZ.now;
         CBZ.city.note("Stand still to be cuffed — or walk up and surrender. Fighting back gets you shot.", 3.2);
@@ -370,7 +370,7 @@
     const c = STOP.cop; if (!c) return;
     STOP.optList = stopOpts();
     const note = stopNote();
-    if (STOP.name) STOP.name.textContent = "👮 " + (c.name || "Officer");
+    if (STOP.name) STOP.name.textContent = "" + (c.name || "Officer");
     if (STOP.note) STOP.note.textContent = note;
     if (STOP.opts) STOP.opts.innerHTML = STOP.optList.map((o, i) =>
       `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
@@ -385,7 +385,7 @@
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("👮 \"Hey! Hold up — is that a firearm?\"", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("\"Hey! Hold up — is that a firearm?\"", 1.8);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
     stopShow();
@@ -636,7 +636,7 @@
     _stopReassertT -= dt; if (_stopReassertT > 0) { stopShow(); return; }
     _stopReassertT = 0.1;
     // re-stamp the rows + force-show (interact.js @39 may have overwritten them)
-    if (STOP.name) STOP.name.textContent = "👮 " + (STOP.cop.name || "Officer");
+    if (STOP.name) STOP.name.textContent = "" + (STOP.cop.name || "Officer");
     if (STOP.note) STOP.note.textContent = stopNote();
     if (STOP.opts && STOP.optList) STOP.opts.innerHTML = STOP.optList.map((o, i) =>
       `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
@@ -1786,7 +1786,7 @@
     van.npcDriver = null;
     if (n && !forced && CBZ.city && CBZ.city.note && CBZ.player &&
         Math.hypot(van.pos.x - CBZ.player.pos.x, van.pos.z - CBZ.player.pos.z) < 90) {
-      CBZ.city.note("🚨 A SWAT van arrives — the entry team deploys.", 2.2);
+      CBZ.city.note("A SWAT van arrives — the entry team deploys.", 2.2);
     }
     return n;
   }
@@ -1902,7 +1902,7 @@
     // (convictHailed reset in cityPoliceForceReset). chooseTarget() does the rest.
     if (g.escapedConvict && !convictHailed && g.state === "playing") {
       convictHailed = true;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("⚠ ALL UNITS — ESCAPED CONVICT AT LARGE");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("ALL UNITS — ESCAPED CONVICT AT LARGE");
     }
     const ambientWant = CBZ.CITY.ambientCops || 0;
     const playerWant = g.cityCopTarget || 0;
@@ -2648,7 +2648,7 @@
               if (!c.sees && (c.lostT || 0) > 8) c._challenged = false;   // long blind spell → fresh challenge on re-contact
             }
             if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
-              if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("🚔 \"Easy now — hold still.\"", 1.2); }
+              if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("\"Easy now — hold still.\"", 1.2); }
               c.arrestT += dt;
               if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; }
               // close the last stretch slowly, cuffs out; square up on top
@@ -2660,7 +2660,7 @@
         } else if (wantArrest && c.sees && dist < 1.9) {
           if (isPlayer) {
             if (P.speed < 2.4 && !P._fighting) {
-              if (c.arrestT === 0 && CBZ.city && CBZ.city.note) CBZ.city.note("🚔 \"FREEZE! Hands where I can see them!\"", 1.0);
+              if (c.arrestT === 0 && CBZ.city && CBZ.city.note) CBZ.city.note("\"FREEZE! Hands where I can see them!\"", 1.0);
               c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; } if (near) animChar(c.char, 0, dt); continue;
             } else c.arrestT = 0;
           } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
@@ -2784,7 +2784,7 @@
           if (pd < 30 && (painted || losClear(c.pos.x, c.pos.z, CBZ.player.pos.x, CBZ.player.pos.z))) {
             c.searchT = 0; c.searchGoal = null; c._sweepGoal = null; c.curTarget = CBZ.city.playerActor; c.retarget = 0.5; c.sees = true; c.lostT = 0;
             // a SHOUT, not radio-speak — he's within 30u, you'd genuinely hear it
-            if (CBZ.city && CBZ.city.note && rng() < 0.4) CBZ.city.note("👮 \"There he is!\"", 0.9);
+            if (CBZ.city && CBZ.city.note && rng() < 0.4) CBZ.city.note("\"There he is!\"", 0.9);
             continue;
           }
         }

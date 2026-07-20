@@ -225,12 +225,12 @@
     if (v <= T_LOW) {
       if (!flags.low) {
         flags.low = true; flags.high = false;
-        if (CBZ.cityFeed) CBZ.cityFeed("🛑 " + nameOf(a) + " recalls its ambassador from " + nameOf(b), "#ff6a5e");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(a) + " recalls its ambassador from " + nameOf(b), "#ff6a5e");
       }
     } else if (v >= T_HIGH) {
       if (!flags.high) {
         flags.high = true; flags.low = false;
-        if (CBZ.cityFeed) CBZ.cityFeed("🤝 " + nameOf(a) + " signs a trade pact with " + nameOf(b), "#8fe08a");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(a) + " signs a trade pact with " + nameOf(b), "#8fe08a");
       }
     } else {
       flags.low = false; flags.high = false;   // neutral band — rearm both edges
@@ -300,7 +300,7 @@
         if (donor.id === needy.id) continue;
         if (capitalActivity(donor.id) <= AID_DONOR_T) continue;
         event(needy.id, donor.id, "aid", AID_BUMP);
-        if (CBZ.cityFeed) CBZ.cityFeed("📦 " + nameOf(donor.id) + " sends aid to " + nameOf(needy.id), "#8fc1ff");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(donor.id) + " sends aid to " + nameOf(needy.id), "#8fc1ff");
       }
     }
   }
@@ -317,7 +317,7 @@
       const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
       if (!w || !w.economy) continue;
       w.economy.confidence = Math.max(0, (w.economy.confidence == null ? 100 : w.economy.confidence) - TARIFF_CONFIDENCE_HIT);
-      if (CBZ.cityFeed) CBZ.cityFeed("📉 Embargo flavor: " + nameOf(c.id) + "-Republic relations drag confidence", "#ff9a5e");
+      if (CBZ.cityFeed) CBZ.cityFeed("Embargo flavor: " + nameOf(c.id) + "-Republic relations drag confidence", "#ff9a5e");
       // deeper trade/tariff pricing (real import friction through sim/market.js)
       // is M-stage forex depth — comment only, no call site.
     }
@@ -337,7 +337,7 @@
         if (!active[k]) {
           active[k] = true;
           if (CBZ.approvalShock) { CBZ.approvalShock(a, RALLY_SHOCK); CBZ.approvalShock(b, RALLY_SHOCK); }
-          if (CBZ.cityFeed) CBZ.cityFeed("⚔️ " + nameOf(a) + " and " + nameOf(b) + " rally 'round the flag", "#ffb27a");
+          if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(a) + " and " + nameOf(b) + " rally 'round the flag", "#ffb27a");
         } else if (CBZ.approvalShock) {
           CBZ.approvalShock(a, -GRIND_SHOCK); CBZ.approvalShock(b, -GRIND_SHOCK);   // war-weariness grind
         }
@@ -385,7 +385,7 @@
         const soil = soilRec ? CBZ.polity.countryOf(soilRec.id) : null;
         if (!soil || soil.id !== "republic") return;   // "if it happened on republic soil"
         event(victim.id, "republic", "insult", 15);
-        if (CBZ.cityFeed) CBZ.cityFeed("🕊️ " + nameOf(victim.id) + "-Republic relations sour after the killing", "#ff9a5e");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(victim.id) + "-Republic relations sour after the killing", "#ff9a5e");
       } catch (e) {}
     });
   }

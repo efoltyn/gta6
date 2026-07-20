@@ -556,7 +556,7 @@
     }
     const s = memStats(m); s.loyalty = 0.5; s.joined = "defect"; s.bodies = 0; s.contrib = 0;
     if (nearPlayer(m.pos.x, m.pos.z, 90)) {
-      CBZ.city && CBZ.city.note("🏳 " + (m.name || "A soldier") + " defected from " + fromGang.name + " to " + toGang.name + ".", 2.4);
+      CBZ.city && CBZ.city.note("" + (m.name || "A soldier") + " defected from " + fromGang.name + " to " + toGang.name + ".", 2.4);
     }
     return true;
   }
@@ -599,7 +599,7 @@
     const moraleHit = wasStrong ? 0.05 : 0.22;
     for (const m of live) disciplineHit(gang, m, moraleHit);
     if (nearPlayer(gang.center.x, gang.center.z, 160)) {
-      CBZ.city && CBZ.city.note("👑 " + heir.name + " seized control of " + gang.name + (wasStrong ? "." : " — the crew's shaky."), 3);
+      CBZ.city && CBZ.city.note("" + heir.name + " seized control of " + gang.name + (wasStrong ? "." : " — the crew's shaky."), 3);
     }
   }
   CBZ.cityGangSucceed = succeedBoss;
@@ -724,14 +724,14 @@
         if (!b.isPlayer && !b._wevDef) b._wevDef = { t: 4 + rng() * 4, done: 0, lot: targetLot, foe: a.id };
       }
       const big = sent >= 5;
-      CBZ.city && CBZ.city.note((big ? "⚔ TURF WAR: " : "Gang war: ") + a.name + " hit " + b.name + " turf (" + sent + ").", big ? 3 : 2.4);
+      CBZ.city && CBZ.city.note((big ? "TURF WAR: " : "Gang war: ") + a.name + " hit " + b.name + " turf (" + sent + ").", big ? 3 : 2.4);
       // a war push rolls a drive-by car into the rival block — common on a heavy
       // assault, a real chance on any raid (capped in spawnDriveby so it's safe).
       if ((big && rng() < 0.8) || (!big && rng() < 0.35)) spawnDriveby(a, { x: targetLot.cx, z: targetLot.cz }, b);
       // raiding YOUR block? rally your gang to defend it
       if (b.isPlayer && CBZ.cityPlayerGangDefendTurf) {
         CBZ.cityPlayerGangDefendTurf(targetLot.cx, targetLot.cz);
-        CBZ.city && CBZ.city.big("⚠ " + a.name + " RAIDING YOUR TURF");
+        CBZ.city && CBZ.city.big("" + a.name + " RAIDING YOUR TURF");
         if (CBZ.sfx) CBZ.sfx("siren");
       }
     } else {
@@ -779,7 +779,7 @@
     if (!(best.raidT > 0)) best.raidT = 24 + rng() * 8;
     wbark(gang, best, BARK_DEFEND);
     if (nearPlayer(lot.cx, lot.cz, 130)) {
-      CBZ.city && CBZ.city.note("🛡 " + (best.name || "A veteran") + " is holding the " + gang.name + " block.", 2.4);
+      CBZ.city && CBZ.city.note("" + (best.name || "A veteran") + " is holding the " + gang.name + " block.", 2.4);
     }
   }
 
@@ -802,7 +802,7 @@
       sent++;
     }
     if ((rolled || sent) && nearPlayer(lot.cx, lot.cz, 150)) {
-      CBZ.city && CBZ.city.note("🚙 " + gang.name + " reinforcements rolling in.", 2.2);
+      CBZ.city && CBZ.city.note("" + gang.name + " reinforcements rolling in.", 2.2);
     }
   }
 
@@ -813,7 +813,7 @@
     if (b.turf.indexOf(lot) < 0) return;                  // already flipped / moved on
     const sent = launchWar(a, b, { lot, free: true });
     if (sent && nearPlayer(lot.cx, lot.cz, 160)) {
-      CBZ.city && CBZ.city.note("⚔ " + a.name + " commits a second wave (" + sent + ").", 2.4);
+      CBZ.city && CBZ.city.note("" + a.name + " commits a second wave (" + sent + ").", 2.4);
     }
   }
 
@@ -888,7 +888,7 @@
       if (crier) wbark(winner, crier, BARK_TAKEN);
     }
     if (nearPlayer(lot.cx, lot.cz, 90)) {
-      CBZ.city && CBZ.city.note("🚩 " + winner.name + " seized a block from " + loser.name + ".", 2.6);
+      CBZ.city && CBZ.city.note("" + winner.name + " seized a block from " + loser.name + ".", 2.6);
     }
     if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
     return true;
@@ -997,7 +997,7 @@
     };
     drivebys.push(db); activeDrivebys++;
     if (nearPlayer(sx, sz, 70)) {
-      CBZ.city && CBZ.city.note("🚙 " + gang.name + " rolling up...", 1.6);
+      CBZ.city && CBZ.city.note("" + gang.name + " rolling up...", 1.6);
       // no engine sample in the bank; the first drive-by burst (shoot_smg) is the
       // real audio cue, so we don't fake a roll-up with an unrelated "whoosh".
     }
@@ -1193,7 +1193,7 @@
     gang.hostility = Math.min(5, Math.max(gang.hostility || 0, 3 * dW)); // the WHOLE set hunts
     gang.provoke = 1;
     gang.strikeT = 0;                                                    // first squad rolls NOW
-    if (CBZ.cityFlavor) CBZ.cityFlavor("🔪 Word reached the " + gang.name + ". The whole set is out for you.", "#ff7a7a");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("Word reached the " + gang.name + ". The whole set is out for you.", "#ff7a7a");
   }
   function startSnitchRun(gang, w, victim) {
     w._snitchT = 20 + Math.random() * 18;    // word travels even if he hides
@@ -1202,7 +1202,7 @@
     w.alarmed = Math.max(w.alarmed || 0, 9);
     if (gang.hq && w.target && w.target.set) { w.target.set(gang.hq.x, 0, gang.hq.z); w.finalGoal = null; }
     snitches.push(w);
-    if (CBZ.cityFlavor) CBZ.cityFlavor("👁 " + (w.name || "One of theirs") + " saw it — he's running to tell the " + gang.name + ".", "#ffce7a");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("" + (w.name || "One of theirs") + " saw it — he's running to tell the " + gang.name + ".", "#ffce7a");
   }
   function loyaltyBattle(gang, victim) {
     const PA = playerActor(); if (!PA) return;
@@ -1223,7 +1223,7 @@
     }
     avengers.victim = victim.name || "him";
     if (CBZ.cityFlavor) {
-      if (turned) CBZ.cityFlavor("⚔ " + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect — settle it.", "#ffce7a");
+      if (turned) CBZ.cityFlavor("" + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect — settle it.", "#ffce7a");
       else CBZ.cityFlavor("The crew looks away. " + (victim.name || "He") + " didn't have the love.", "#9aa6bd");
     }
   }
@@ -1235,7 +1235,7 @@
       if (!w || w._snitchGangId == null) { snitches.splice(i, 1); continue; }
       if (w.dead || w.ko > 0) {
         snitches.splice(i, 1); w._snitchGangId = null;
-        if (CBZ.cityFlavor) CBZ.cityFlavor("🤫 The witness never made it. The street stays quiet.", "#9aa6bd");
+        if (CBZ.cityFlavor) CBZ.cityFlavor("The witness never made it. The street stays quiet.", "#9aa6bd");
         continue;
       }
       const sg = gangById(w._snitchGangId);
@@ -1255,7 +1255,7 @@
         const who = avengers.victim || "him";
         avengers.list.length = 0; avengers.victim = null;
         if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(6);
-        if (CBZ.cityFlavor) CBZ.cityFlavor("👑 You buried everyone who rode for " + who + ". The set falls in line.", "#7fe0a0");
+        if (CBZ.cityFlavor) CBZ.cityFlavor("You buried everyone who rode for " + who + ". The set falls in line.", "#7fe0a0");
       }
     }
   });
@@ -1352,7 +1352,7 @@
       sent++;
     }
     if (sent && nearPlayer(gang.center.x, gang.center.z, 220)) {
-      CBZ.city && CBZ.city.big("⚠ " + gang.name + " sent a hit squad after you");
+      CBZ.city && CBZ.city.big("" + gang.name + " sent a hit squad after you");
     }
     return sent;
   }
@@ -2282,7 +2282,7 @@
             // payday reads as takeover PROGRESS: blocks collected + districts held
             const zc = CBZ.cityZoneControl ? CBZ.cityZoneControl() : null;
             const zHeld = zc && zc.byGang ? (zc.byGang.player || 0) : 0;
-            CBZ.city && CBZ.city.note("💵 Turf payday: +$" + pay + " (" + lots + " blocks" +
+            CBZ.city && CBZ.city.note("Turf payday: +$" + pay + " (" + lots + " blocks" +
               (zc && zc.total ? " · " + zHeld + "/" + zc.total + " districts" : "") + ") → bank", 2.2);
           }
           // credit each soldier's "earned" by their rank cut so YOUR crew also

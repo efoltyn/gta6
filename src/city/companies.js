@@ -243,7 +243,7 @@
     co._deaths = (co._deaths || 0) + 1;
     co.stockMult = Math.max(0.35, (co.stockMult || 1) * (1 - frac));
     co.cash = Math.round((co.cash || 0) * (1 - frac * 0.5));   // confidence run on the treasury
-    try { if (CBZ.cityFeed) CBZ.cityFeed("📉 " + co.name + " craters " + Math.round(frac * 100) + "% after its owner was killed", "#ff8a6b"); } catch (e) {}
+    try { if (CBZ.cityFeed) CBZ.cityFeed("" + co.name + " craters " + Math.round(frac * 100) + "% after its owner was killed", "#ff8a6b"); } catch (e) {}
   }
   function succeedCompanyOwner(co) {
     if (!co) return;
@@ -263,7 +263,7 @@
       // folding, since it still owns real, valuable real estate).
       const fresh = spawnOwner(co, A);
       co.owner = fresh;
-      if (fresh) announce("🏢 " + co.name + " names a new owner after the old one was killed.");
+      if (fresh) announce("" + co.name + " names a new owner after the old one was killed.");
       return;
     }
     // promote the heir IN PLACE — leave their desk/anchor claim alone if any
@@ -281,7 +281,7 @@
     if (prevIdentityId && CBZ.cityIdentities && CBZ.cityIdentities.setSuccessor) {
       CBZ.cityIdentities.setSuccessor(prevIdentityId, heir._identityId || null);
     }
-    announce("🏢 " + (heir.name || "An understudy") + " takes over " + co.name + " after the owner was killed.");
+    announce("" + (heir.name || "An understudy") + " takes over " + co.name + " after the owner was killed.");
   }
   CBZ.citySucceedCompanyOwner = succeedCompanyOwner;   // exposed for tests / other systems
 
@@ -389,7 +389,7 @@
         const lot = free[0], cost = lotValue(lot);
         if (co.cash >= cost) {
           co.cash -= cost; co.lots.push(lot); lot._company = co; tagOwner(lot, co); co.growth++;
-          note("📈 " + co.name + " acquired a property in " + districtName(arena, lot.district));
+          note("" + co.name + " acquired a property in " + districtName(arena, lot.district));
         }
       }
     } else if (roll < 0.64 && co.lots.length > 2) {
@@ -399,16 +399,16 @@
       const i = co.lots.indexOf(lot); if (i > 0) co.lots.splice(i, 1);
       lot._company = null; restoreOwner(lot);
       co.cash += v * 0.9;
-      note("📉 " + co.name + " sold off a " + districtName(arena, lot.district) + " property");
+      note("" + co.name + " sold off a " + districtName(arena, lot.district) + " property");
     } else if (roll < 0.72 && co.cash < 45000 && co.lots.length > 3) {
       // BUST — the firm collapses, its portfolio dumped on the market
       const n = co.lots.length - 1;
       for (let i = co.lots.length - 1; i > 0; i--) { co.lots[i]._company = null; restoreOwner(co.lots[i]); }
       co.lots.length = 1; co.cash = 60000 + rint(120000); co.growth = 0;
-      note("💥 " + co.name + " COLLAPSED — " + n + " properties dumped on the market", "#ff9a6b");
+      note("" + co.name + " COLLAPSED — " + n + " properties dumped on the market", "#ff9a6b");
     }
     if (co.growth > 0 && co.growth % 4 === 0) {
-      note("🏢 " + co.name + " is booming — " + co.lots.length + " properties under management");
+      note("" + co.name + " is booming — " + co.lots.length + " properties under management");
       co.growth++;
     }
   }

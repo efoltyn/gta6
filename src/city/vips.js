@@ -384,7 +384,7 @@
     if (!rec._vipAnnounced) {
       rec._vipAnnounced = true;
       const title = (slot && slot.def && slot.def.title) || rec.title || "VIP";
-      const msg = "💀 " + title + " " + (rec.name || "") + " has been killed — the title passes to someone new.";
+      const msg = "" + title + " " + (rec.name || "") + " has been killed — the title passes to someone new.";
       if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) {} }
       else if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 3.6);
     }
@@ -409,7 +409,7 @@
     CBZ.cityIdentities.onDeathRegister("vip", function (rec) {
       if (rec._vipAnnounced) return;          // our own scan already announced this one
       rec._vipAnnounced = true;
-      const msg = "💀 " + (rec.title || "VIP") + " " + (rec.name || "") + " has been killed — the title passes to someone new.";
+      const msg = "" + (rec.title || "VIP") + " " + (rec.name || "") + " has been killed — the title passes to someone new.";
       if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) {} }
       else if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 3.6);
     });
@@ -678,7 +678,7 @@
           p.target.set(wp.clubRef.insideSpot.x, 0, wp.clubRef.insideSpot.z);
           if (!slot.clubNoted && camD2(p.pos.x, p.pos.z) < 45 * 45 && CBZ.city && CBZ.city.note) {
             slot.clubNoted = true;
-            CBZ.city.note("🥂 Bouncer: \"Evening.\" — the rope unclips; the party walks straight past the line.", 2.2);
+            CBZ.city.note("Bouncer: \"Evening.\" — the rope unclips; the party walks straight past the line.", 2.2);
           }
         } else if (wp.enter) {
           p.enterT = wp.t || 9;                       // through the door — detail posts outside

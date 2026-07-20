@@ -342,7 +342,7 @@
         const payout = round2(divTotal * (qty / (co.sharesOutstanding || 1)));
         if (payout >= 0.01) {
           if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(payout); else g.cash = (g.cash || 0) + payout;
-          if (CBZ.cityFeed) CBZ.cityFeed("💵 " + sym + " paid a dividend — +$" + payout.toFixed(2), "#7ed957");
+          if (CBZ.cityFeed) CBZ.cityFeed("" + sym + " paid a dividend — +$" + payout.toFixed(2), "#7ed957");
           if (CBZ.cityHudDirty) CBZ.cityHudDirty();
         }
       }
@@ -554,7 +554,7 @@
     g.cityPortfolio[sym] = (g.cityPortfolio[sym] || 0) + shares;
     g.cityPortfolioBasis[sym] = anchor;   // granted, not bought — a fair paper cost basis at the IPO price
     rec.ipo = true;                        // wealth.js's bizRate() guard: this biz's passive income now flows THROUGH the company instead
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("📈 " + b.name + " went PUBLIC as " + sym + " — you keep " + Math.round(IPO_PLAYER_FRAC * 100) + "% of the float");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + b.name + " went PUBLIC as " + sym + " — you keep " + Math.round(IPO_PLAYER_FRAC * 100) + "% of the float");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return { ok: true, sym: sym, shares: shares, price: anchor };
   }

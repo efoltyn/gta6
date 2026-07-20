@@ -286,8 +286,8 @@
         const airliner = v.flightKind === "airliner";
         return {
           label: civil
-            ? "✈ " + (airliner ? "Airliner" : "Private Jet")
-            : "🪖 " + (v.model ? v.model.name : (v.name || "Vehicle")),
+            ? "" + (airliner ? "Airliner" : "Private Jet")
+            : "" + (v.model ? v.model.name : (v.name || "Vehicle")),
           note: (civil ? (airliner ? "Hijack this commercial flight" : "Steal this aircraft")
             : v.kind === "tank" ? "Commandeer the tank"
             : v.kind === "heli" ? "Steal the helicopter"
@@ -457,7 +457,7 @@
       const ctrl = rec.kind === "tank"
         ? "W/S drive · A/D turn hull · mouse aims turret · L-click FIRE · [E] out"
         : "W/S drive · A/D turn · mouse look · [E] out";
-      note("🪖 Driving the " + vehName(rec) + " — " + ctrl, 3.2);
+      note("Driving the " + vehName(rec) + " — " + ctrl, 3.2);
     }
     return true;
   }

@@ -207,7 +207,7 @@
             if (!announced) {
               announced = true;
               if (CBZ.flashToast) { try { CBZ.flashToast("REINFORCEMENTS!"); } catch (e) {} }
-              if (CBZ.flashHint) { try { CBZ.flashHint("🚨 The towers called it in — riot squad incoming!", 2.4); } catch (e) {} }
+              if (CBZ.flashHint) { try { CBZ.flashHint("The towers called it in — riot squad incoming!", 2.4); } catch (e) {} }
             }
           }
         }

@@ -154,7 +154,7 @@
   //  it) and GTA Online crew/sell-mission structure.
   // ============================================================
   let gcOffered = [];
-  const GC_ICON = { gcHit: "🔫", gcTake: "🚩", gcCollect: "💵", gcRun: "🎒", gcDefend: "🛡️" };
+  const GC_ICON = { gcHit: "", gcTake: "", gcCollect: "", gcRun: "", gcDefend: "" };
 
   // who do you ride with? returns { kind:"member"|"boss", gangId, rank, name }
   // — works whether you JOINED an NPC crew or FOUNDED your own.
@@ -374,7 +374,7 @@
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     gcOffered = rollGangContracts();
     offered = gcOffered.slice();   // share the [1-9] accept handler
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>🩸 " + c.name + " · Contracts</div>";
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>" + c.name + " · Contracts</div>";
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>You: " +
       (CBZ.cityRankName ? CBZ.cityRankName(c.rank) : c.rank) +
       " <span style='color:#8a93a3'>· finish jobs to climb the ranks</span></div>";
@@ -483,7 +483,7 @@
     return board;
   }
   let offered = [];
-  const ICON = { hit: "🎯", delivery: "📦", heist: "💰", smuggle: "🚚", getaway: "🏎️", protection: "💼", deaddrop: "🪜" };
+  const ICON = { hit: "", delivery: "", heist: "", smuggle: "", getaway: "", protection: "", deaddrop: "" };
   CBZ.cityJobBoard = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     // if you ride with a crew, the board opens straight onto YOUR set's
@@ -493,7 +493,7 @@
     offered = rollJobs();
     if (board) board._gang = false;
     const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>📋 Contract Board</div>";
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>Contract Board</div>";
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
       (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ", pay ×" + r.cut.toFixed(2) + ")</span>" : " <span style='color:#7ed957'>· MAX · pay ×" + r.cut.toFixed(2) + "</span>") + "</div>";
     offered.forEach((j, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
@@ -530,7 +530,7 @@
     offered = rollJobs();
     if (board) board._gang = false;
     const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>📋 Freelance Hustles</div>";
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>Freelance Hustles</div>";
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
       (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ")</span>" : " <span style='color:#7ed957'>· MAX</span>") +
       (myCrew() ? " <span style='color:#8a93a3'>· [0] crew contracts</span>" : "") + "</div>";
@@ -1019,7 +1019,7 @@
       if (crew.length) {
         const wage = crew.length * (E.crewSalary || 14);
         if ((g.cash || 0) >= wage) { g.cash -= wage; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("💸 Couldn't make payroll — " + q.name + " walked off.", 2.6); }
+        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("Couldn't make payroll — " + q.name + " walked off.", 2.6); }
       }
       if (g.career === "security") {
         if ((g.wanted | 0) === 0) {

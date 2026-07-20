@@ -459,7 +459,7 @@
       }
       const w1 = ctx.box(V.group, midx, gy + 1.9, midz, 0.06, 0.06, len, ctx.emat(0x66ffff, 0.4)); w1.rotation.y = ang;
       const w2 = ctx.box(V.group, midx, gy + 1.2, midz, 0.06, 0.06, len, ctx.emat(0x66ffff, 0.4)); w2.rotation.y = ang;
-      signPlate(ctx, midx, gy + 1.7, midz, "⚡ ELECTRIFIED FENCE", ang);
+      signPlate(ctx, midx, gy + 1.7, midz, "ELECTRIFIED FENCE", ang);
       V.fence.push(r);
     }
   }
@@ -668,7 +668,7 @@
         setAlarm(RT.alarm + 18);
         if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8, null, null, "electrified fence", false, null, true);
         if (CBZ.shake) CBZ.shake(0.4);
-        hint("⚡ ELECTRIFIED FENCE — bad idea", "#ff5a4a");
+        hint("ELECTRIFIED FENCE — bad idea", "#ff5a4a");
         return;
       }
     }
@@ -702,7 +702,7 @@
       const clear = near && losClear(P.pos.x, P.pos.y + 1.4, P.pos.z, V.proto.wx, V.proto.y, V.proto.wz);
       if (clear) {
         RT.photoT += dt;
-        hint("📷 Framing the prototype… " + Math.min(100, Math.round(RT.photoT / PHOTO_HOLD * 100)) + "%");
+        hint("Framing the prototype… " + Math.min(100, Math.round(RT.photoT / PHOTO_HOLD * 100)) + "%");
         if (RT.photoT >= PHOTO_HOLD) { RT.photoT = 0; completeJob("photo"); }
       } else { if (near && !clear) hint("No clean shot — get past the revetment wall"); RT.photoT = Math.max(0, RT.photoT - dt * 1.5); }
     }
@@ -713,7 +713,7 @@
         if (RT.seen) { hint("Spotted — can't work the mast now"); RT.tapT = Math.max(0, RT.tapT - dt * 0.8); }
         else {
           RT.tapT += dt;
-          hint("🛰 Installing tap… " + Math.min(100, Math.round(RT.tapT / TAP_HOLD * 100)) + "%");
+          hint("Installing tap… " + Math.min(100, Math.round(RT.tapT / TAP_HOLD * 100)) + "%");
           if (RT.tapT >= TAP_HOLD) { RT.tapT = 0; completeJob("tap"); }
         }
       } else RT.tapT = Math.max(0, RT.tapT - dt);
@@ -851,7 +851,7 @@
   const BTN = "display:inline-block;margin:4px 8px 4px 0;padding:9px 15px;border-radius:11px;cursor:pointer;font-weight:800;font-size:14px;";
   function openBriefing() {
     const nb = nightBag();
-    const jrow = (done, label) => "<div style='margin:2px 0'>" + (done ? "✅" : "▫️") + " " + label + "</div>";
+    const jrow = (done, label) => "<div style='margin:2px 0'>" + (done ? "" : "▫") + " " + label + "</div>";
     const html =
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
       "<b style='letter-spacing:2px;color:#d8e6b0;font-size:17px'>FORT HALSTEAD — RESTRICTED AREA</b>" +

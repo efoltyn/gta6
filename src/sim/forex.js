@@ -859,7 +859,7 @@
     const el = V.panel; if (!el) return;
     const spread = SPREAD[V.venue] != null ? SPREAD[V.venue] : SPREAD.airport;
     let html = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>" +
-      "<div style='font-weight:800;font-size:16px'>💱 " + (V.venue === "desk" ? "Exchange Desk" : "Airport FX Counter") + "</div>" +
+      "<div style='font-weight:800;font-size:16px'>" + (V.venue === "desk" ? "Exchange Desk" : "Airport FX Counter") + "</div>" +
       "<div style='font-size:11px;color:#7f8794'>" + Math.round(spread * 100) + "% spread</div></div>";
     html += "<div style='font-size:12px;color:#9fb0c8;margin-bottom:10px'>Wallet — " + fmt$(CBZ.currency ? CBZ.currency.walletGet("LBD") : 0) + " LBD</div>";
     const rows = list();

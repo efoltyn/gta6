@@ -627,7 +627,7 @@
     const note = p
       ? (isWanted(p) ? "They've got paper on this one — the desk pays cash" : "This one's clean — the desk doesn't pay for citizens")
       : "The desk takes collars";
-    return { label: "🚓 Precinct Desk", note };
+    return { label: "Precinct Desk", note };
   });
 
   // ---- exports: the net layer calls these, same as the keys do --------------

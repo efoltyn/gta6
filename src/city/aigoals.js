@@ -961,7 +961,7 @@
     ped._paceN = 2 + ((rng() * 3) | 0);
     routeTo(ped, A, { x: ped._paceA.x, z: ped._paceA.z });
     ped._goalKind = "phone";
-    if (rng() < 0.5) bark(ped, pickLine(PHONE_LINES) + "📱", "#dfe7ff", 2.4);
+    if (rng() < 0.5) bark(ped, pickLine(PHONE_LINES) + "", "#dfe7ff", 2.4);
     _moments.push({ t: 12 }); ped._momCD = now() + (50 + rng() * 50) * 1000;
     return true;
   }
@@ -1589,7 +1589,7 @@
           const swap = ped._paceB; ped._paceB = ped._paceA; ped._paceA = swap;
           ped.target.set(ped._paceA.x, 0, ped._paceA.z); ped.path = null;
           ped.pause = Math.max(ped.pause, 0.5 + rng() * 0.8);
-          if (rng() < 0.25) bark(ped, pickLine(PHONE_LINES) + "📱", "#dfe7ff", 2.2);
+          if (rng() < 0.25) bark(ped, pickLine(PHONE_LINES) + "", "#dfe7ff", 2.2);
         } else {
           satisfy(N, "social", 0.15);
           ped._paceA = ped._paceB = null; ped._goalKind = null; ped._goalCD = 2 + rng() * 3;
@@ -1939,7 +1939,7 @@
     _rampTipT = t;
     const E = CBZ.cityEcon;
     const where = (E && E.districtAt && E.districtName) ? E.districtName(E.districtAt(ped.pos.x, ped.pos.z)) : "the city";
-    if (CBZ.cityFlavor) CBZ.cityFlavor("📱 " + who + ": somebody's spraying up " + where + " — stay clear.", "#9fb0c6");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("" + who + ": somebody's spraying up " + where + " — stay clear.", "#9fb0c6");
   }
 
   // expose a manual trigger (debug / scripted events can force a spree on a ped)
@@ -2086,7 +2086,7 @@
     }
     _evicted++;
     if (CBZ.cityFeed && CBZ.player && Math.hypot(ped.pos.x - CBZ.player.pos.x, ped.pos.z - CBZ.player.pos.z) < 60) {
-      CBZ.cityFlavor && CBZ.cityFlavor("🏚️ Evicted — another soul put out on the street.", "#9a8d7a");
+      CBZ.cityFlavor && CBZ.cityFlavor("Evicted — another soul put out on the street.", "#9a8d7a");
     }
   }
 
@@ -2163,7 +2163,7 @@
       try { CBZ.cityEvent("crime", { crime: label || "Robbery", severity: sev, x: x, z: z, panic: Math.min(5, sev / 30) }, { silent: true, noWanted: true }); } catch (e) {}
     }
     if (CBZ.cityFeed && CBZ.player && Math.hypot(x - CBZ.player.pos.x, z - CBZ.player.pos.z) < 90) {
-      CBZ.cityFeed("🚨 " + (label || "Robbery") + " in progress!", "#ff9a5a");
+      CBZ.cityFeed("" + (label || "Robbery") + " in progress!", "#ff9a5a");
     }
   }
 
@@ -2346,7 +2346,7 @@
         _jobCracked = true;
         try { AR.crack(); } catch (e) {}
         if (CBZ.cityFeed && CBZ.player && Math.hypot(tx - CBZ.player.pos.x, tz - CBZ.player.pos.z) < 120) {
-          CBZ.cityFeed("💥 The truck's cracked — cash everywhere!", "#ffd451");
+          CBZ.cityFeed("The truck's cracked — cash everywhere!", "#ffd451");
         }
       }
       if (!_npcJobCrew.length) endNpcJob();

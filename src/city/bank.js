@@ -381,9 +381,9 @@
         rec.paidTicks = num(rec.paidTicks, 0) + 1;
         if (paid < want && CBZ.player && !CBZ.player.dead && CBZ.city) {
           // a missed/partial note — surfaced quietly, once per cycle per loan
-          note("⚠ Short on your " + rec.kind + " payment — interest is compounding (" + fmt$(rec.balance) + " owed).", 2.2);
+          note("Short on your " + rec.kind + " payment — interest is compounding (" + fmt$(rec.balance) + " owed).", 2.2);
         }
-        if (rec.balance <= 1) { closeLoan(rec); big("✅ " + (rec.kind === "mortgage" ? "Mortgage" : rec.kind === "auto" ? "Auto loan" : "Loan") + " paid off!"); }
+        if (rec.balance <= 1) { closeLoan(rec); big("" + (rec.kind === "mortgage" ? "Mortgage" : rec.kind === "auto" ? "Auto loan" : "Loan") + " paid off!"); }
       }
     }
   }
@@ -497,7 +497,7 @@
     const e = econ(); if (e && e.add) e.add(t.item, 1);
     T.splice(idx, 1);
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("🎟 Redeemed your " + t.item + " for " + fmt$(t.redeem) + ".", 2);
+    note("Redeemed your " + t.item + " for " + fmt$(t.redeem) + ".", 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
   }
@@ -517,7 +517,7 @@
       t.t = num(t.t, PAWN_TERM_SECS) - num(dt, 0);
       if (t.t <= 0) {
         T.splice(i, 1);
-        note("⌛ Pawn ticket lapsed — the broker kept your " + t.item + ".", 2.4);
+        note("Pawn ticket lapsed — the broker kept your " + t.item + ".", 2.4);
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       }
     }
@@ -760,7 +760,7 @@
     const T = CBZ.CITY && CBZ.CITY.starHeat;
     if (T) g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
     if (CBZ.city && CBZ.city.addHeat) CBZ.city.addHeat(0);
-    note("💰 Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ").", 2.2);
+    note("Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ").", 2.2);
     if (CBZ.sfx) CBZ.sfx("coin");
   }
 
@@ -814,7 +814,7 @@
         "<div style='color:#9fb0c8;font-size:13px;margin-bottom:6px'>Your loans (auto-paid each cycle from cash → bank):</div>";
       for (const r of open) {
         openRows += "<div style='display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:3px 0'>" +
-          "<span>" + (r.kind === "mortgage" ? "🏠 Mortgage" : r.kind === "auto" ? "🚗 Auto" : "💵 Personal") +
+          "<span>" + (r.kind === "mortgage" ? "Mortgage" : r.kind === "auto" ? "Auto" : "Personal") +
           " · " + fmt$(Math.round(r.balance)) + " left</span>" +
           "<button data-pay='" + r.id + "' style='cursor:pointer;background:#2b3340;border:1px solid #3a4150;color:#bcffd0;border-radius:8px;padding:2px 8px;font-family:inherit'>Pay $500</button></div>";
       }
@@ -844,7 +844,7 @@
         "</div>" +
       "</div>" +
       "<div style='background:#161b22;border:1px solid #2a313c;border-radius:10px;padding:10px;font-size:13px;color:#9fb0c8'>" +
-        "🏠 <b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or property market books it through us — 20% down, ~6% on the balance, auto-paid each cycle." +
+        "<b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or property market books it through us — 20% down, ~6% on the balance, auto-paid each cycle." +
       "</div>" +
       openRows +
       "<div style='display:flex;justify-content:flex-end;gap:8px;margin-top:16px'>" +
@@ -864,7 +864,7 @@
     o.purpose = "personal"; o.termTicks = S.pTerm; o.payment = paymentFor(o.principal, o.rate, S.pTerm);
     const id = take(o);
     if (id) {
-      big("💵 Loan funded — " + fmt$(o.principal) + " in your pocket.");
+      big("Loan funded — " + fmt$(o.principal) + " in your pocket.");
       note("Borrowed " + fmt$(o.principal) + " at " + Math.round(o.rate * 100) + "% — " + fmt$(o.payment) + "/cycle auto-paid.", 2.6);
       renderPanel();
     }

@@ -242,7 +242,7 @@
     if (!offer) return "";
     const p = offerPrice(actor);
     const tag = priceTag(p.reasons);
-    return `${offer.item}·${p.price}🚬${tag ? " " + tag : ""}`;
+    return `${offer.item}·${p.price}${tag ? " " + tag : ""}`;
   }
   function payoffCost(actor) {
     const heat = g.detection || 0;
@@ -272,7 +272,7 @@
     if (!offer) return { ok: false, msg: "Nothing to trade." };
     const priced = offerPrice(actor);
     const price = priced.price;
-    if (g.cigs < price) return { ok: false, msg: `Need ${price} 🚬 for ${offer.item}${priceTag(priced.reasons) ? " (" + priceTag(priced.reasons) + ")" : ""}.` };
+    if (g.cigs < price) return { ok: false, msg: `Need ${price} for ${offer.item}${priceTag(priced.reasons) ? " (" + priceTag(priced.reasons) + ")" : ""}.` };
     addCigs(-price);
     addItem(offer.item, 1);
     g.trades++;
@@ -289,14 +289,14 @@
     actor.data.offer = pickOffer(actor.data.pool);
     CBZ.sfx("coin");
     const why = priceTag(priced.reasons);
-    return { ok: true, msg: `Bought ${offer.item} for ${price} 🚬${why ? " (" + why + ")" : ""}` };
+    return { ok: true, msg: `Bought ${offer.item} for ${price} ${why ? " (" + why + ")" : ""}` };
   }
 
   // ---------- BRIBE: pay cigarettes to make a guard look away ----------
   function bribe(actor) {
     if (actor.kind === "guard" || actor.kind === "warden") {
       const cost = actor.kind === "warden" ? 25 : (actor.corrupt ? 5 : 10); // bent cops come cheap
-      if (g.cigs < cost) return { ok: false, msg: `Bribe costs ${cost} 🚬.` };
+      if (g.cigs < cost) return { ok: false, msg: `Bribe costs ${cost} .` };
       addCigs(-cost);
       actor.bribed = actor.kind === "warden" ? 22 : 14; // seconds of blindness
       actor.alert = 0;
@@ -321,7 +321,7 @@
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
-    if (g.cigs < cost) return { ok: false, msg: `Gift costs ${cost} 🚬.` };
+    if (g.cigs < cost) return { ok: false, msg: `Gift costs ${cost} .` };
     addCigs(-cost);
     actor.playerTrust = (actor.playerTrust || 0) + 1.2;
     nudgeGang(actor, 4, -2);
@@ -344,7 +344,7 @@
     const heat = g.detection || 0;
     const complaints = g.complaints || 0;
     const cost = payoffCost(actor);
-    if (g.cigs < cost) return { ok: false, msg: `Payoff costs ${cost} 🚬.` };
+    if (g.cigs < cost) return { ok: false, msg: `Payoff costs ${cost} .` };
 
     addCigs(-cost);
     actor.bribed = Math.max(actor.bribed || 0, actor.kind === "warden" ? 28 : 20);
@@ -407,7 +407,7 @@
         }
         lifted = load.items.splice(bi, 1)[0]; addItem(lifted, 1);
       }
-      return { ok: true, msg: lifted ? `Lifted a ${lifted}${loot ? ` + ${loot}🚬` : ""} clean.` : `Lifted ${loot}🚬 unseen.` };
+      return { ok: true, msg: lifted ? `Lifted a ${lifted}${loot ? ` + ${loot}` : ""} clean.` : `Lifted ${loot} unseen.` };
     }
     // caught in the act
     if (guardish) {
@@ -438,7 +438,7 @@
     }
     if (rng() < 0.22) { actor.love = Math.max(0, actor.love - 7); return { ok: false, msg: `${nm(actor)} brushes you off.` }; }
     CBZ.sfx("coin");
-    return { ok: true, msg: `${nm(actor)} blushes 💘 (${Math.round(actor.love)}/100)` };
+    return { ok: true, msg: `${nm(actor)} blushes (${Math.round(actor.love)}/100)` };
   }
 
   // ---------- INSULT: lower rep, maybe start a fight / a hunt ----------
@@ -521,7 +521,7 @@
     actor.playerGrudge = (actor.playerGrudge || 0) + 0.7;
     noteRead("wealth", Math.min(8, 2 + taken * 1.4), nm(actor), 10);
     CBZ.sfx("jump");
-    return `A thief swiped ${taken} 🚬 from your pocket!`;
+    return `A thief swiped ${taken} from your pocket!`;
   }
 
   // ---------- LOADOUTS: what each actor is realistically carrying ----------
@@ -588,10 +588,10 @@
     }
     if (!opts.silent && (cigs > 0 || got.length)) {
       const parts = [];
-      if (cigs > 0) parts.push(cigs + "🚬");
+      if (cigs > 0) parts.push(cigs + "");
       parts.push(...got);
       if (parts.length) {
-        CBZ.flashHint && CBZ.flashHint("🧤 Looted: " + parts.join(", "), 2.2);
+        CBZ.flashHint && CBZ.flashHint("Looted: " + parts.join(", "), 2.2);
         CBZ.sfx && CBZ.sfx("loot");
         const rare = got.find((n) => ITEMS[n] && (ITEMS[n].rarity === "rare" || ITEMS[n].rarity === "epic"));
         if (rare) { CBZ.flashToast && CBZ.flashToast(rare.toUpperCase() + "!"); CBZ.sfx && CBZ.sfx("key"); }

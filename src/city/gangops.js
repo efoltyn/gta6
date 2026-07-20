@@ -425,7 +425,7 @@
       // it's still extortion — a witness can phone it in (low heat, existing path)
       if (CBZ.cityCrime) CBZ.cityCrime(16, { x: mark.pos.x, z: mark.pos.z, type: "extortion" });
       if (CBZ.cityFeed && nearPlayer(mark.pos.x, mark.pos.z, 55) && rng() < 0.5) {
-        try { CBZ.cityFlavor && CBZ.cityFlavor("💰 " + gang.name + " is shaking down the block", "#ffce8f"); } catch (e) {}
+        try { CBZ.cityFlavor && CBZ.cityFlavor("" + gang.name + " is shaking down the block", "#ffce8f"); } catch (e) {}
       }
       // mark paid — let them off, they hurry away once the pose relaxes
       m._exMark = null; endOp(m); gang._extorter = null;
@@ -678,9 +678,9 @@
     if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
     // 5) the moment, made loud. One big banner — no hidden stat, no dumb UI.
     if (live.length) {
-      if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("☠ EVERY CREW IN THE CITY IS HUNTING YOU"); } catch (e) {} }
+      if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("EVERY CREW IN THE CITY IS HUNTING YOU"); } catch (e) {} }
       if (CBZ.city && CBZ.city.note) { try { CBZ.city.note("You've made enemies of every set in town. There's nowhere left to lie low.", 4); } catch (e) {} }
-      if (CBZ.cityFeed) { try { CBZ.cityFeed("☠ The whole city has united against you.", "#ff6a6a"); } catch (e) {} }
+      if (CBZ.cityFeed) { try { CBZ.cityFeed("The whole city has united against you.", "#ff6a6a"); } catch (e) {} }
     }
     _unified = live.length > 0;
     return _unified;
@@ -752,8 +752,8 @@
       if (CBZ.cityFeed) {
         try {
           CBZ.cityFeed(reprisal
-            ? "🩸 You wiped out " + wipes + " whole crews. The rest are closing ranks."
-            : "🔥 Your name rings out too loud — the whole city wants you gone.", "#ffb37b");
+            ? "You wiped out " + wipes + " whole crews. The rest are closing ranks."
+            : "Your name rings out too loud — the whole city wants you gone.", "#ffb37b");
         } catch (e) {}
       }
       CBZ.cityUnifyGangsAgainstPlayer(reprisal ? 1 : 0.85);

@@ -295,7 +295,7 @@
     // owning EVERY zone wins the city for the player
     if (owned >= zones.length && zones.length > 0) {
       won = true;
-      if (CBZ.city) { CBZ.city.big("👑 YOU OWN THE CITY"); CBZ.city.note("Every district flies your colours. The city is yours.", 5); }
+      if (CBZ.city) { CBZ.city.big("YOU OWN THE CITY"); CBZ.city.note("Every district flies your colours. The city is yours.", 5); }
       // no jingle here (no-jingle rule); cityWin owns the real victory payoff/fanfare.
       if (CBZ.cityWin) CBZ.cityWin("takeover");
     }
@@ -581,10 +581,10 @@
     }
     if (launched && (nearPlayer(leadGang.center.x, leadGang.center.z, 240) ||
         nearPlayer((CBZ.player && CBZ.player.pos && CBZ.player.pos.x) || 0, (CBZ.player && CBZ.player.pos && CBZ.player.pos.z) || 0, 1))) {
-      CBZ.city && CBZ.city.note("⚔ The other crews are uniting against " + ldr.name + ".", 3.0);
-      if (CBZ.cityFlavor) { try { CBZ.cityFlavor("⚔ " + ldr.name + " is running away with the city — the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
+      CBZ.city && CBZ.city.note("The other crews are uniting against " + ldr.name + ".", 3.0);
+      if (CBZ.cityFlavor) { try { CBZ.cityFlavor("" + ldr.name + " is running away with the city — the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
     } else if (launched && CBZ.cityFeed) {
-      try { CBZ.cityFlavor && CBZ.cityFlavor("⚔ The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
+      try { CBZ.cityFlavor && CBZ.cityFlavor("The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
     }
     hudDirty = true;
   }
@@ -664,9 +664,9 @@
     }
     if (nearPlayer(a.center.x, a.center.z, 220) || nearPlayer(b.center.x, b.center.z, 220)) {
       if (word === "money-truce") {
-        CBZ.city && CBZ.city.note("🕊 " + a.name + " & " + b.name + " called a truce to chase paper.", 2.6);
+        CBZ.city && CBZ.city.note("" + a.name + " & " + b.name + " called a truce to chase paper.", 2.6);
       } else {
-        const icon = word === "alliance" ? "🤝" : word === "war" ? "⚔" : "🕊";
+        const icon = word === "alliance" ? "" : word === "war" ? "" : "";
         CBZ.city && CBZ.city.note(icon + " " + a.name + " & " + b.name + ": " + (word === "war" ? "war" : word === "alliance" ? "alliance" : "truce") + ".", 2.4);
       }
     }
@@ -768,7 +768,7 @@
       }
     }
     if (nearPlayer(target.cx, target.cz, 200))
-      CBZ.city && CBZ.city.note("💰 " + rich.name + " bought out " + target.name + ".", 2.4);
+      CBZ.city && CBZ.city.note("" + rich.name + " bought out " + target.name + ".", 2.4);
     hudDirty = true;
   }
 
@@ -795,7 +795,7 @@
       for (const l of z.lots) { const d = Math.hypot(l.cx - P.pos.x, l.cz - P.pos.z); if (d < bd) { bd = d; lot = l; } }
       if (lot) CBZ.cityPlayerGangClaimTurf(lot.cx, lot.cz);
     }
-    CBZ.city && CBZ.city.big("💰 BOUGHT " + z.name);
+    CBZ.city && CBZ.city.big("BOUGHT " + z.name);
     CBZ.city && CBZ.city.addRespect(10);
     recomputeZones(false);
     hudDirty = true;
@@ -807,7 +807,7 @@
     if (!CBZ.cityPlayerGangExists || !CBZ.cityPlayerGangExists()) return false;
     CBZ.citySetRelation("player", gangId, status);
     const nm = gangName(gangId) || "them";
-    CBZ.city && CBZ.city.note(status === "ally" ? "🤝 Allied with " + nm + "." : status === "war" ? "⚔ At war with " + nm + "." : "🕊 Neutral with " + nm + ".", 2.4);
+    CBZ.city && CBZ.city.note(status === "ally" ? "Allied with " + nm + "." : status === "war" ? "At war with " + nm + "." : "Neutral with " + nm + ".", 2.4);
     return true;
   };
 

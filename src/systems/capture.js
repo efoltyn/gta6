@@ -154,10 +154,10 @@
     CBZ.sfx && CBZ.sfx("hit");
     if (player.hp <= 0) {
       player.hp = 100;
-      haulToCell(opts.haulMsg || "🔫 SHOT — DRAGGED TO YOUR CELL");
+      haulToCell(opts.haulMsg || "SHOT — DRAGGED TO YOUR CELL");
       return true;
     }
-    CBZ.flashHint && CBZ.flashHint(opts.hint || "🔫 You're hit — get to cover!", 1.1);
+    CBZ.flashHint && CBZ.flashHint(opts.hint || "You're hit — get to cover!", 1.1);
     return false;
   };
 
@@ -218,7 +218,7 @@
       else { best.dead = true; best.ko = 0; best.hp = 0; best.hunt = 0; best.alert = 0; }
       if (g.koLog && best.data && best.data.name) g.koLog[best.data.name] = true;
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(best, "panic-fire");
-      CBZ.flashHint(`💥 You dropped ${best.data.name}!`, 1.6);
+      CBZ.flashHint(`You dropped ${best.data.name}!`, 1.6);
     }
     CBZ.addHeat(45); // gunfire brings the whole block down on you
   }
@@ -245,7 +245,7 @@
       if (confineT > 0) {
         player.stun = Math.max(player.stun || 0, Math.min(confineT, 0.4));
         const s = Math.ceil(confineT);
-        if (s !== confineShown) { confineShown = s; CBZ.showHint(`🔒 Confined to your cell — ${s}s`); }
+        if (s !== confineShown) { confineShown = s; CBZ.showHint(`Confined to your cell — ${s}s`); }
       } else {
         confineT = 0; confineShown = -1;
         CBZ.hideHint();
@@ -341,20 +341,20 @@
       if (towerSeq === 1 && towerShotCD <= 0) {
         towerBurst(towerSrc, 6.0, 3);                                   // warning shots, WIDE
         CBZ.shake && CBZ.shake(0.3);
-        CBZ.flashHint && CBZ.flashHint("⚠ TOWER — WARNING SHOTS! TURN BACK!", 1.6);
+        CBZ.flashHint && CBZ.flashHint("TOWER — WARNING SHOTS! TURN BACK!", 1.6);
         towerShotCD = 1.1;
         if (towerT > 1.4) towerSeq = 2;
       } else if (towerSeq === 2 && towerShotCD <= 0) {
         towerBurst(towerSrc, 2.4, 4);                                   // final volley, CLOSE
         CBZ.shake && CBZ.shake(0.5);
         if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-        CBZ.flashHint && CBZ.flashHint("⚠⚠ LAST WARNING — GET OUT OF THE OPEN!", 1.6);
+        CBZ.flashHint && CBZ.flashHint("LAST WARNING — GET OUT OF THE OPEN!", 1.6);
         CBZ.sfx && CBZ.sfx("alarm");
         towerShotCD = 1.3;
         if (towerT > 3.2) towerSeq = 3;
       } else if (towerSeq === 3 && towerShotCD <= 0) {
         towerBurst(towerSrc, 0.8, 5);                                   // dead-to-rights
-        haulToCell("🔫 TOWER OPENS FIRE!");
+        haulToCell("TOWER OPENS FIRE!");
         towerSeq = 0; towerT = 0;
       }
     } else if (towerSeq !== 0) {

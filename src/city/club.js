@@ -221,11 +221,11 @@
       p.state = "walk"; p.path = null; p.pause = 0;
       if (p.target) p.target.set(S.club.insideSpot.x, 0, S.club.insideSpot.z);
       p._clubGoingIn = 3.0;
-      note("🍷 The bouncer waves a sharp-dressed guest past the rope.", 1.4);
+      note("The bouncer waves a sharp-dressed guest past the rope.", 1.4);
     } else {
       // TURNED AWAY — the whole point. Dejected walk-off.
       release(p, true);
-      note('🚫 Bouncer: "Not tonight." — turned away at the rope.', 1.3);
+      note('Bouncer: "Not tonight." — turned away at the rope.', 1.3);
     }
     S.line.shift();
   }
@@ -292,7 +292,7 @@
   function admitPlayer(drip) {
     setAdmitted(true);
     const vip = drip >= vipDrip();
-    big(vip ? "👑 WELCOME TO THE VELVET — VIP" : "🍷 WELCOME TO THE VELVET");
+    big(vip ? "WELCOME TO THE VELVET — VIP" : "WELCOME TO THE VELVET");
     if (vip) note("The bouncer unhooks the rope and nods you toward the elite lounge.", 2.2);
     else note('Bouncer: "Welcome to the Velvet, VIP." — the rope opens.', 2.0);
     // one-time entry bonus: drip is a STATUS signal → respect. VIP pays more.
@@ -307,7 +307,7 @@
 
   function rejectPlayer(drip, need) {
     S.rejectCD = 3.2;
-    big("🚫 NOT TONIGHT");
+    big("NOT TONIGHT");
     note('"Not in those rags." Come back sharper.', 3.2);
   }
 
@@ -325,7 +325,7 @@
       if (CBZ.city.addHeat) CBZ.city.addHeat(-18 * dt);       // bleed heat fast inside
       if ((g.wanted | 0) <= 1 && (g.heat || 0) <= 0 && CBZ.city.clearWanted) {
         CBZ.city.clearWanted();
-        note("🍷 You melt into the crowd — the heat loses you inside the Velvet.", 2.0);
+        note("You melt into the crowd — the heat loses you inside the Velvet.", 2.0);
       }
     }
     // BOTTLE SERVICE: your drip flexes into cash + respect on a slow cadence —
@@ -337,7 +337,7 @@
       const flex = Math.round(40 + drip * 12);               // bigger fit → bigger flex
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(flex);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);
-      note("🍾 Bottle service — your drip pulls $" + flex + " in tips & a respect nod.", 2.0);
+      note("Bottle service — your drip pulls $" + flex + " in tips & a respect nod.", 2.0);
       if (S.admitted_vip) offerConnect();
     }
   }
@@ -360,9 +360,9 @@
     if (best) {
       best._clubConnect = true;     // interact.js / your crew code can read this as "rich lead"
       best.tightWithYou = true;     // warmer to recruiting (guarded read elsewhere)
-      note("🤝 A high-roller in the VIP lounge — " + (best.name || "a big earner") + " — is worth knowing.", 2.4);
+      note("A high-roller in the VIP lounge — " + (best.name || "a big earner") + " — is worth knowing.", 2.4);
     } else {
-      note("🤝 The VIP lounge is full of money — work the room.", 2.0);
+      note("The VIP lounge is full of money — work the room.", 2.0);
     }
   }
 
@@ -416,7 +416,7 @@
         // kill against the finite headcount). Leave the post EMPTY rather than
         // cloning instantly: arm the long re-hire clock. This is the fix.
         if (S.bouncerDownT <= 0) S.bouncerDownT = BOUNCER_REHIRE;
-        if (!S.unmannedNoted) { S.unmannedNoted = true; note("🚪 The Velvet's door stands unmanned tonight.", 2.0); }
+        if (!S.unmannedNoted) { S.unmannedNoted = true; note("The Velvet's door stands unmanned tonight.", 2.0); }
       } else if (!inPool) {
         // Bouncer ref went stale WITHOUT a death (the ped pool was wiped for a new
         // run / city rebuild). That's not a kill — restaff immediately, no penalty.
@@ -431,7 +431,7 @@
 
     // delay elapsed + budget remains → hire ONE slow replacement.
     makeBouncer();
-    if (S.bouncer) { S.bouncerHires++; S.unmannedNoted = false; note("🕴️ The Velvet hired a new doorman.", 2.0); }
+    if (S.bouncer) { S.bouncerHires++; S.unmannedNoted = false; note("The Velvet hired a new doorman.", 2.0); }
     return true;
   }
 

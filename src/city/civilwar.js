@@ -532,8 +532,8 @@
     };
     S.fractures[parentId] = rec;
 
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🚩 CIVIL WAR: " + rebelRec.name.toUpperCase() + " BREAKS AWAY");
-    if (CBZ.cityFeed) CBZ.cityFeed("🚩 " + rebelRec.name + " declares independence from " + nameOf(parentId) + " — the country fractures.", "#ff4d4d");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CIVIL WAR: " + rebelRec.name.toUpperCase() + " BREAKS AWAY");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + rebelRec.name + " declares independence from " + nameOf(parentId) + " — the country fractures.", "#ff4d4d");
     return rec;
   }
 
@@ -553,8 +553,8 @@
     if (!meets) { S.unrestDays.republic = 0; return; }
     S.unrestDays.republic = (S.unrestDays.republic || 0) + 1;
     const d = S.unrestDays.republic;
-    if (d === 1 && CBZ.cityFeed) CBZ.cityFeed("📢 Protests spread across " + triggers.length + " districts.", "#ffb27a");
-    else if (d === 2 && CBZ.cityFeed) CBZ.cityFeed("🔥 Unrest hardens — militants are arming in the streets.", "#ff6a5e");
+    if (d === 1 && CBZ.cityFeed) CBZ.cityFeed("Protests spread across " + triggers.length + " districts.", "#ffb27a");
+    else if (d === 2 && CBZ.cityFeed) CBZ.cityFeed("Unrest hardens — militants are arming in the streets.", "#ff6a5e");
     if (d >= UNREST_DAYS) { S.unrestDays.republic = 0; fracture("republic", { cause: "uprising" }); }
   }
   function statisticalCheck(day) {
@@ -614,16 +614,16 @@
     const plotterSid = mintFigure("junta general");
     if (kind === "success") {
       rec.office.holder = plotterSid; rec.office.deputy = null;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("🎖️ COUP: " + rec.name.toUpperCase() + " FALLS TO THE JUNTA");
-      if (CBZ.cityFeed) CBZ.cityFeed("🎖️ A military coup succeeds in " + rec.name + " — the junta rules now.", "#ff9e6b");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("COUP: " + rec.name.toUpperCase() + " FALLS TO THE JUNTA");
+      if (CBZ.cityFeed) CBZ.cityFeed("A military coup succeeds in " + rec.name + " — the junta rules now.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -6);
       return { outcome: "success", plotterSid: plotterSid };
     }
     if (kind === "failure") {
       const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(plotterSid);
       if (e) e.dead = true;   // no live body this wave for a shadow plotter — see header
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("⚔️ COUP CRUSHED IN " + rec.name.toUpperCase());
-      if (CBZ.cityFeed) CBZ.cityFeed("⚔️ The plot against " + rec.name + " is crushed — the plotters are purged.", "#ff6a5e");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("COUP CRUSHED IN " + rec.name.toUpperCase());
+      if (CBZ.cityFeed) CBZ.cityFeed("The plot against " + rec.name + " is crushed — the plotters are purged.", "#ff6a5e");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -4);
       rippleCoupFailure(rec.id);
       return { outcome: "failure", plotterSid: plotterSid };
@@ -699,7 +699,7 @@
       const missiles = Math.floor(amt / T.COST_PER_MISSILE);
       if (missiles > 0) {
         rebelMil.missiles += missiles;
-        if (CBZ.cityFeed) CBZ.cityFeed("📦 " + o.name + " arms the rebels against " + nameOf(rec.parentId), "#8fc1ff");
+        if (CBZ.cityFeed) CBZ.cityFeed("" + o.name + " arms the rebels against " + nameOf(rec.parentId), "#8fc1ff");
       }
     }
   }
@@ -722,7 +722,7 @@
     mil.conscriptedCohort = (mil.conscriptedCohort || 0) + REBEL_CONSCRIPT_COHORT_HIT;
     const per = REBEL_CONSCRIPT_COHORT_HIT / rec.districts.length;
     for (let i = 0; i < rec.districts.length; i++) CBZ.npcEcon.adjustEmployedFracForDistrict(rec.districts[i], -per);
-    if (CBZ.cityFeed) CBZ.cityFeed("📯 " + nameOf(rec.rebelId) + " conscripts " + batch + " more from the rebel-held streets.", "#ffb27a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(rec.rebelId) + " conscripts " + batch + " more from the rebel-held streets.", "#ffb27a");
   }
   function tickAtrocity(rec) {
     const parentMil = CBZ.polwar.militaryOf(rec.parentId), rebelMil = CBZ.polwar.militaryOf(rec.rebelId);
@@ -786,8 +786,8 @@
     const S = state();
     S.cooldownUntil[rec.parentId] = day + REPRESSION_COOLDOWN_DAYS;
     delete S.fractures[rec.parentId];
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🏳 RECONQUEST: " + (parentRec ? parentRec.name : rec.parentId).toUpperCase() + " REUNITES THE COUNTRY");
-    if (CBZ.cityFeed) CBZ.cityFeed("🏳 The uprising is crushed — " + (parentRec ? parentRec.name : rec.parentId) + " reconquers the rebel territory.", "#8fe08a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("RECONQUEST: " + (parentRec ? parentRec.name : rec.parentId).toUpperCase() + " REUNITES THE COUNTRY");
+    if (CBZ.cityFeed) CBZ.cityFeed("The uprising is crushed — " + (parentRec ? parentRec.name : rec.parentId) + " reconquers the rebel territory.", "#8fe08a");
   }
   function endPartition(rec, day, reason) {
     const rebelRec = CBZ.polity.get(rec.rebelId);
@@ -802,8 +802,8 @@
     const S = state();
     delete S.fractures[rec.parentId];
     S.partitions[rec.rebelId] = { parentId: rec.parentId, day: day };
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🗺️ PARTITION: " + (rebelRec ? rebelRec.name : rec.rebelId).toUpperCase() + " IS BORN");
-    if (CBZ.cityFeed) CBZ.cityFeed("🗺️ The war ends in " + reason + " — " + (rebelRec ? rebelRec.name : rec.rebelId) + " is recognized as a new country. The map has changed forever.", "#ffd76a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("PARTITION: " + (rebelRec ? rebelRec.name : rec.rebelId).toUpperCase() + " IS BORN");
+    if (CBZ.cityFeed) CBZ.cityFeed("The war ends in " + reason + " — " + (rebelRec ? rebelRec.name : rec.rebelId) + " is recognized as a new country. The map has changed forever.", "#ffd76a");
   }
   function strongestGangsIn(districts, n) {
     const live = (CBZ.cityGangs || []).filter(function (gg) { return gg && !gg.isPlayer && !gg.absorbed && gg.boss && !gg.boss.dead; });
@@ -859,8 +859,8 @@
     }
     const S = state();
     delete S.fractures[rec.parentId];
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("💀 WARLORDISM: " + (parentRec ? parentRec.name : rec.parentId).toUpperCase() + " COLLAPSES");
-    if (CBZ.cityFeed) CBZ.cityFeed("💀 Both sides burn out — " + (parentRec ? parentRec.name : rec.parentId) + " dissolves into warlord territory.", "#ff3b3b");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("WARLORDISM: " + (parentRec ? parentRec.name : rec.parentId).toUpperCase() + " COLLAPSES");
+    if (CBZ.cityFeed) CBZ.cityFeed("Both sides burn out — " + (parentRec ? parentRec.name : rec.parentId) + " dissolves into warlord territory.", "#ff3b3b");
   }
   function resolveEndingIfDue(rec, day) {
     const w = findWar(rec);
@@ -916,7 +916,7 @@
           if (w && !w.ended) w.fatigue[fr.rebelId] = (w.fatigue[fr.rebelId] || 0) + LEADER_DEATH_FATIGUE_SPIKE;
           const rMil = CBZ.polwar.militaryOf(fr.rebelId);
           rMil.readiness = clampNum(0.05, 1, rMil.readiness - LEADER_DEATH_READINESS_HIT);
-          if (CBZ.cityFeed) CBZ.cityFeed("💀 Rebel leader " + ((ped && ped.name) || "?") + " is dead — the uprising reels.", "#ff6a5e");
+          if (CBZ.cityFeed) CBZ.cityFeed("Rebel leader " + ((ped && ped.name) || "?") + " is dead — the uprising reels.", "#ff6a5e");
         }
       } catch (e) {}
     });

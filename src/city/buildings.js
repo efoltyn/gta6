@@ -6651,7 +6651,7 @@
       // MADE: the clerk is watching this shelf → a real theft charge (reported,
       // so the clerk "calls it in" → wanted) + a clerk/ped panic. No item lifted.
       if (clerkSees(lot, sh.x, sh.z)) {
-        note("👀 " + clerkName(lot) + " saw you — put it back!", 2);
+        note("" + clerkName(lot) + " saw you — put it back!", 2);
         if (CBZ.cityCrime) CBZ.cityCrime(65, { type: "theft", x: sh.x, z: sh.z, instant: true });
         const v = lot.building.vendor;
         if (CBZ.cityPanic && v && v.pos) CBZ.cityPanic(v.pos.x, v.pos.z, 1.4, CBZ.city && CBZ.city.playerActor);
@@ -6664,7 +6664,7 @@
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(val);
       if (CBZ.sfx) CBZ.sfx("coin");
       const left = remaining(sh);
-      note("🫳 Pocketed " + (ITEM[sh.kind] || "some stock") + " — " + fmt$(val) +
+      note("Pocketed " + (ITEM[sh.kind] || "some stock") + " — " + fmt$(val) +
         (left > 0 ? " · " + left + " left on the shelf" : " · shelf cleared"), 2);
       return { took: true, value: val, left: left };
     }

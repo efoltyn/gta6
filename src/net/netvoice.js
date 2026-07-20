@@ -79,10 +79,10 @@
       }
       // late mic grant: add the track to any already-open peer connections
       for (const [id, p] of voice.peers) addMicTo(p.pc);
-      hud("🎙 voice on — [Y] to mute");
+      hud("voice on — [Y] to mute");
     } catch (e) {
       voice.enabled = false;
-      hud("🔇 mic blocked — you can hear others (listen-only)");
+      hud("mic blocked — you can hear others (listen-only)");
     }
   }
 
@@ -97,8 +97,8 @@
   function setMuted(m) {
     voice.muted = m;
     if (voice.micTrack) voice.micTrack.enabled = !m;
-    hud(m ? "🔇 mic muted — [Y] to unmute" : "🎙 mic live");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(m ? "🔇 Mic muted" : "🎙 Mic live", 1.4);
+    hud(m ? "mic muted — [Y] to unmute" : "mic live");
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(m ? "Mic muted" : "Mic live", 1.4);
   }
 
   addEventListener("keydown", function (e) {

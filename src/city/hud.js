@@ -278,8 +278,8 @@
       // sits just under HP, shown ONLY when the player is wearing armor (driven by
       // CBZ.player._armor / ._armorMax). The 🛡 label carries the equipped tier name
       // (+ a ⛑ helmet glyph when _armorKit.head is set). Hidden whole when no armor.
-      "  <div id='cArmRow' class='vRow' style='display:none'><span class='vLab' id='cArmLab' style='color:#a9c7ff'>🛡</span><div class='vSlot' style='height:7px'><div id='cArm' style='height:100%;width:100%;background:linear-gradient(90deg,#5b86c9,#a9c7ff);transition:width .12s linear'></div></div></div>" +
-      "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'>🍖</span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
+      "  <div id='cArmRow' class='vRow' style='display:none'><span class='vLab' id='cArmLab' style='color:#a9c7ff'></span><div class='vSlot' style='height:7px'><div id='cArm' style='height:100%;width:100%;background:linear-gradient(90deg,#5b86c9,#a9c7ff);transition:width .12s linear'></div></div></div>" +
+      "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'></span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
       "  <div class='vRow'><span class='vLab' style='color:#a8e0ff'>↯</span><div class='vSlot' style='height:5px'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div></div>" +
       "</div>" +
       // WEAPON HOTBAR + carried-loot readout (bottom-centre). The hotbar is the
@@ -1086,7 +1086,7 @@
           if (e.kind === "holster") {
             // Leading empty-hand chip. Slot number + pose glyph, no label.
             html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              "<span class='key'>" + (bi + 1) + "</span><span class='ic'>✊</span></div>";
+              "<span class='key'>" + (bi + 1) + "</span><span class='ic'></span></div>";
           } else if (e.kind === "gun") {
             // Weapon silhouette + slot number. Empty is ∅; live rounds stay in
             // the numeric ammo instrument below.
@@ -1129,7 +1129,7 @@
           break;
         }
         const armorU = (CBZ.player && CBZ.player._armor) || 0;
-        if (armorU > 0) line += (line ? " " : "") + "<span class='arm'>🛡 " + Math.round(armorU) + "</span>";
+        if (armorU > 0) line += (line ? " " : "") + "<span class='arm'>" + Math.round(armorU) + "</span>";
         if (ammoLineEl) ammoLineEl.innerHTML = line;
         return;
       }
@@ -1145,17 +1145,17 @@
     const fistsHeld = !melee && !heldGun;
     if (!inv.length && !melee) {
       html += minimalCity
-        ? "<div class='cSlot held'><span class='ic'>✊</span></div>"
+        ? "<div class='cSlot held'><span class='ic'></span></div>"
         : "<div class='cSlot held'><span class='s'>Fists</span></div>";
     } else {
       // melee chip first (it's the one in hand when set) so the loadout reads L→R
       if (melee) {
         html += minimalCity
-          ? "<div class='cSlot melee held'><span class='ic'>⚔</span></div>"
+          ? "<div class='cSlot melee held'><span class='ic'></span></div>"
           : "<div class='cSlot melee held'><span class='s'>" + esc(melee) + "</span></div>";
       } else if (fistsHeld) {
         html += minimalCity
-          ? "<div class='cSlot held'><span class='ic'>✊</span></div>"
+          ? "<div class='cSlot held'><span class='ic'></span></div>"
           : "<div class='cSlot held'><span class='s'>Fists</span></div>";
       }
       for (let k = 0; k < inv.length; k++) {
@@ -1196,7 +1196,7 @@
     // "Bat — melee" caption under a lit Bat chip was the HUD reading itself
     // aloud (F6).
     const armor = (CBZ.player && CBZ.player._armor) || 0;
-    if (armor > 0) line += (line ? " " : "") + "<span class='arm'>🛡 " + Math.round(armor) + "</span>";
+    if (armor > 0) line += (line ? " " : "") + "<span class='arm'>" + Math.round(armor) + "</span>";
     if (ammoLineEl) ammoLineEl.innerHTML = line;
   }
 
@@ -1206,17 +1206,17 @@
   //      tools and food so your loot reads at a glance without cluttering. Compact
   //      chips, value-sorted so the jackpot (a lifted Rolex / Gold Bar) leads. ------
   const LOOT_ICON = {
-    drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔",
-    resource: "📦",   // B7: harvest-node materials (Wood/Stone/Scrap) fallback
+    drug: "", wearable: "", valuable: "", throwable: "", tool: "", food: "",
+    resource: "",   // B7: harvest-node materials (Wood/Stone/Scrap) fallback
   };
   // a handful of nicer per-item glyphs so the row reads instantly
   const LOOT_ITEM_ICON = {
-    Grenade: "🧨", Rolex: "⌚", Omega: "⌚", "Audemars Piguet": "⌚", "Patek Philippe": "⌚",
-    "Richard Mille": "⌚", "Gold Bar": "🥇", "Gold Chain": "📿", "Diamond Ring": "💍",
-    "Engagement Ring": "💍", Medkit: "🩹", "Body Armor": "🦺", Weed: "🌿", Coke: "❄️",
-    "Cash Stack": "💵", "Briefcase of Cash": "💼", Phone: "📱", Laptop: "💻", Wallet: "👛",
+    Grenade: "", Rolex: "", Omega: "", "Audemars Piguet": "", "Patek Philippe": "",
+    "Richard Mille": "", "Gold Bar": "", "Gold Chain": "", "Diamond Ring": "",
+    "Engagement Ring": "", Medkit: "", "Body Armor": "", Weed: "", Coke: "",
+    "Cash Stack": "", "Briefcase of Cash": "", Phone: "", Laptop: "", Wallet: "",
     // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
-    Wood: "🪵", Stone: "🪨", Scrap: "⚙️", Hatchet: "🪓", Pickaxe: "⛏️",
+    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
   };
   function renderLoot() {
     if (!lootEl) return;
@@ -1300,7 +1300,7 @@
   // panel names the kit; live play only needs the chest/helmet glyphs.
   function armorLabel(P) {
     const kit = P._armorKit || null;
-    return "🛡" + (kit && kit.head ? "⛑" : "");
+    return "" + (kit && kit.head ? "" : "");
   }
   // flip the skin (root .mc class drives ALL the CSS swaps) + reset the render
   // guards so every MC surface repaints on the next frame.
@@ -1465,7 +1465,7 @@
       else if ((j.type === "hit" || j.type === "hitman") && j.target && !j.target.dead) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.target.pos.x, CBZ.player.pos.z - j.target.pos.z)) + "m";
       // Full contract prose/pay lives in the phone. The live HUD only carries
       // the one piece of navigation state that matters while moving.
-      jobEl.innerHTML = "🎯" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : "");
+      jobEl.innerHTML = "" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : "");
       jobEl.style.display = "block";
       if (objEl) objEl.style.display = "none";   // a real job pre-empts the gang-join objective
     } else {

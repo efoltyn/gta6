@@ -1318,7 +1318,7 @@
     // exploding (a fuel-tank fireball is the exception, not the rule).
     car._fuse = crashFire ? (14 + Math.random() * 12) : (2.4 + Math.random() * 2.2);
     car._burnsOut = crashFire && Math.random() < 0.5;   // crash fire that never detonates
-    if (CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("🔥 The car's on fire — bail out!", 1.1);
+    if (CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire — bail out!", 1.1);
   }
   function explodeCar(car) {
     if (car._exploded) return;
@@ -1582,7 +1582,7 @@
     if (!car.stolen && !car.owned) {
       car.stolen = true;
       CBZ.cityCrime && CBZ.cityCrime(60, { x: car.pos.x, z: car.pos.z, type: "gta" });
-      if (anyWitness(car.pos.x, car.pos.z, 22)) CBZ.city && CBZ.city.note("🚗 Grand Theft Auto!", 1.6);
+      if (anyWitness(car.pos.x, car.pos.z, 22)) CBZ.city && CBZ.city.note("Grand Theft Auto!", 1.6);
       // EMERGENCY_STEALABLE: boosting a marked unit (police cruiser, ambulance,
       // fire engine) is instant heat — the force notices its own ride leaving.
       // cityAddStars is the star API another system publishes; fall back to the
@@ -2412,7 +2412,7 @@
         const dec = Math.pow(0.05, dt);
         car.v *= dec; car.vx *= dec; car.vz *= dec;
         sinkY = DEPTH * Math.min(1, (car._waterT - GRACE) / SINK_T);
-        if (CBZ.carAudio && !car._engineCutNoted) { car._engineCutNoted = true; CBZ.carAudio.stop(); CBZ.city && CBZ.city.note("🌊 Engine flooded!", 1.4); }
+        if (CBZ.carAudio && !car._engineCutNoted) { car._engineCutNoted = true; CBZ.carAudio.stop(); CBZ.city && CBZ.city.note("Engine flooded!", 1.4); }
         if (car._waterT > GRACE + BAIL) {
           // driver bails: the car is a drowned wreck for good
           car.dead = true;
@@ -2813,7 +2813,7 @@
     if (inZone && vmag < 1.5 && (car.stolen || car.owned)) {
       car.dwell = (car.dwell || 0) + dt;
       if (car.dwell > 1.2) { sellToChop(car); }
-      else if (CBZ.city) CBZ.city.note("🔧 Hold still to chop this " + (car.model ? car.model.name : "car") + "…", 0.5);
+      else if (CBZ.city) CBZ.city.note("Hold still to chop this " + (car.model ? car.model.name : "car") + "…", 0.5);
     } else car.dwell = 0;
   }
   function sellToChop(car) {
@@ -3034,7 +3034,7 @@
       if (c.pullover === 2 || c.pullover === 3) {
         target = 0;
         const enf = copNear(c.pos.x, c.pos.z, 7);
-        if (enf) { c.pullover = 3; c.stopT += dt; if (c.stopT > 3) { c.pullover = 0; c.stopT = 0; CBZ.city && CBZ.city.note("🎫 " + (c.model ? c.model.name : "Driver") + " ticketed", 0.8); } }
+        if (enf) { c.pullover = 3; c.stopT += dt; if (c.stopT > 3) { c.pullover = 0; c.stopT = 0; CBZ.city && CBZ.city.note("" + (c.model ? c.model.name : "Driver") + " ticketed", 0.8); } }
         else { c.stopT += dt; if (c.stopT > 6) { c.pullover = 0; c.stopT = 0; } }   // no cop showed — drive on
       }
       if (c.pullover === 4) {
@@ -3328,7 +3328,7 @@
         // not more than once every several seconds (complements the feed cooldown).
         if (nearCam(c, 60) && (CBZ.now || 0) - _trafficStopNoteT > 6000) {
           _trafficStopNoteT = CBZ.now || 0;
-          CBZ.city && CBZ.city.note("🚓 Traffic stop nearby", 0.8);
+          CBZ.city && CBZ.city.note("Traffic stop nearby", 0.8);
         }
       }
     }
@@ -3336,7 +3336,7 @@
   function startFlee(c) {
     if (c.pullover === 4) return;
     c.pullover = 4; c.npcWanted = Math.max(1, c.npcWanted); c.fleeT = 12 + rng() * 6;
-    CBZ.city && CBZ.city.note("🚨 " + (c.model ? c.model.name : "A driver") + " is fleeing the police!", 1.2);
+    CBZ.city && CBZ.city.note("" + (c.model ? c.model.name : "A driver") + " is fleeing the police!", 1.2);
     // register the fleeing driver as an NPC offender the cops will chase
     if (CBZ.cityRegisterCarSuspect) CBZ.cityRegisterCarSuspect(c);
   }

@@ -49,7 +49,7 @@
     if (!info) return;
     const roles = info.roles && info.roles.length ? info.roles : [{ id: "civ", label: "Civilian" }];
     panel.innerHTML =
-      '<h3>🌆 ' + esc(info.name) + "</h3>" +
+      '<h3>' + esc(info.name) + "</h3>" +
       '<div class="motd">' + esc(info.motd || "") + "</div>" +
       '<div class="cnt">● ' + info.players + "/" + info.maxPlayers + " online · live RP server</div>" +
       "<label>Character name</label>" +
@@ -118,7 +118,7 @@
   document.body.appendChild(online);
   function refreshOnline() {
     if (!net.active) { online.style.display = "none"; return; }
-    online.textContent = "🌐 " + (net.server ? net.server.name : "server") + " · " + (net.players.size + 1) + " online";
+    online.textContent = "" + (net.server ? net.server.name : "server") + " · " + (net.players.size + 1) + " online";
   }
 
   function addLine(kind, html) {
@@ -141,7 +141,7 @@
   net.on("sys", function (m) { addLine("k-sys", esc(m.text)); });
   net.on("join", function (m) {
     addLine("k-sys", esc(m.name) + " arrived in the city");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("👤 " + m.name + " joined", 2.2);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + m.name + " joined", 2.2);
     refreshOnline();
   });
   net.on("leave", function (m) {
@@ -150,8 +150,8 @@
     refreshOnline();
   });
   net.on("host", function (m) { refreshOnline(); });
-  net.on("deny", function (m) { addLine("k-sys", "⚠ " + esc(m.reason || "Removed from server")); });
-  net.on("_offline", function () { refreshOnline(); addLine("k-sys", "⚠ Connection lost"); });
+  net.on("deny", function (m) { addLine("k-sys", "" + esc(m.reason || "Removed from server")); });
+  net.on("_offline", function () { refreshOnline(); addLine("k-sys", "Connection lost"); });
 
   let chatOpen = false;
   function openChat() {

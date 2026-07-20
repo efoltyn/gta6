@@ -370,8 +370,8 @@ function recordWin(opp,box,ko,war,purse){
   var room=Math.max(0.02,1-c.fame/AUDIENCE);      // market saturation, never quite zero
   c.fame+=(30+opp.fame*0.28)*(ko?1.3:1)*(title?1.35:1)*room;
   if(title){
-    if(box){ if(c.beltBox){c.defenses++;} else {c.beltBox=true;c.defenses=0;note("🏆 NEW "+(box?"BOXING":"MMA")+" CHAMPION OF IRONJAW!",6,{urgent:true});} }
-    else { if(c.beltMMA){c.defenses++;} else {c.beltMMA=true;c.defenses=0;note("🏆 NEW MMA CHAMPION OF IRONJAW!",6,{urgent:true});} }
+    if(box){ if(c.beltBox){c.defenses++;} else {c.beltBox=true;c.defenses=0;note("NEW "+(box?"BOXING":"MMA")+" CHAMPION OF IRONJAW!",6,{urgent:true});} }
+    else { if(c.beltMMA){c.defenses++;} else {c.beltMMA=true;c.defenses=0;note("NEW MMA CHAMPION OF IRONJAW!",6,{urgent:true});} }
   }
   if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(purse);
   if(CBZ.city&&CBZ.city.addRespect)CBZ.city.addRespect(title?12:6);
@@ -380,7 +380,7 @@ function recordWin(opp,box,ko,war,purse){
   if(war&&Math.random()<0.55){
     var bonus=Math.max(1500,Math.round(purse*0.45));
     if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(bonus);
-    note("🔥 FIGHT OF THE NIGHT — bonus "+money(bonus),5,{urgent:true});
+    note("FIGHT OF THE NIGHT — bonus "+money(bonus),5,{urgent:true});
   }
   var newRank=rankLabel(c.fame);
   if(newRank!==oldRank)note("Your name is growing — the papers call you a "+newRank.toUpperCase()+".",5,{urgent:true});
@@ -811,12 +811,12 @@ if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
   if(typeof CBZ.interactions.describe==="function"){
     CBZ.interactions.describe("arena_ring",function(){
       var c=careerState();
-      return {label:"Ironjaw Ring"+(c.beltBox?" · 🏆 BOXING CHAMP":""),
+      return {label:"Ironjaw Ring"+(c.beltBox?" · BOXING CHAMP":""),
         note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Live bout — bet ringside"};
     });
     CBZ.interactions.describe("arena_cage",function(){
       var c=careerState();
-      return {label:"Ironjaw Cage"+(c.beltMMA?" · 🏆 MMA CHAMP":""),
+      return {label:"Ironjaw Cage"+(c.beltMMA?" · MMA CHAMP":""),
         note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Open card — step in"};
     });
     CBZ.interactions.describe("arena_pit",function(){return{label:"Beast Pit",note:"Where animals settle it"};});

@@ -136,23 +136,23 @@
   //   • some need a wealth TIER to even buy (endgame gating).
   // ============================================================
   const BUSINESSES = [
-    { id: "carwash",   name: "Sudz Car Wash",        emoji: "🧼", kind: "front",   cost: 45000,   rate: 22,  cap: 4500,   maxTier: 3, upgradeMul: 1.9, launder: true,  minTier: 1, blurb: "A legit front. Quietly washes dirty cash and prints a trickle." },
+    { id: "carwash",   name: "Sudz Car Wash",        emoji: "", kind: "front",   cost: 45000,   rate: 22,  cap: 4500,   maxTier: 3, upgradeMul: 1.9, launder: true,  minTier: 1, blurb: "A legit front. Quietly washes dirty cash and prints a trickle." },
     // ---- GIG COMPANIES -------------------------------------------------------
     // The two-stream model: a `gig:true` company runs on EMPLOYEES (a `workers`
     // tier-track adds NPC drivers + scales the passive rate) AND on REPUTATION
     // that DECAYS unless you personally run active gigs for the brand. Let the
     // rep slide and the passive faucet chokes — you have to keep the brand alive.
-    { id: "delivery",  name: "RapidGig Courier",     emoji: "📦", kind: "front",   cost: 55000,   rate: 26,  cap: 5500,   maxTier: 3, upgradeMul: 1.9,  launder: true,  minTier: 1, gig: true, gigLabel: "deliveries", blurb: "A courier front. Your driver fleet runs parcels while you cook the books." },
-    { id: "rideshare", name: "Downtown Cab Co.",     emoji: "🚕", kind: "front",   cost: 70000,   rate: 30,  cap: 6500,   maxTier: 3, upgradeMul: 1.9,  launder: true,  minTier: 1, gig: true, gigLabel: "fares", blurb: "A medallion + rideshare fleet — cash business, easy to cook the books." },
-    { id: "smuggle",   name: "Harbor Freight (Front)",emoji: "🚢", kind: "supply", cost: 180000,  rate: 78,  cap: 16000,  maxTier: 4, upgradeMul: 1.85, launder: false, minTier: 3, gig: true, gigLabel: "runs", blurb: "A dockside 'freight' front. Driver crews move contraband — fat haul, real bust risk." },
-    { id: "weed",      name: "Green Room Dispensary",emoji: "🌿", kind: "supply",  cost: 95000,   rate: 44,  cap: 9000,   maxTier: 4, upgradeMul: 1.85, launder: false, minTier: 2, blurb: "Half-legal grow-op. Steady product, steady money." },
-    { id: "pawn",      name: "Iron City Pawn",       emoji: "💍", kind: "front",   cost: 120000,  rate: 50,  cap: 11000,  maxTier: 3, upgradeMul: 1.95, launder: true,  minTier: 2, blurb: "Fences hot goods and launders through 'sales'. Cops rarely look." },
-    { id: "club",      name: "Vault Nightclub",      emoji: "🍾", kind: "club",    cost: 240000,  rate: 95,  cap: 24000,  maxTier: 5, upgradeMul: 1.8,  launder: true,  minTier: 3, blurb: "The GTA classic. Popularity drives huge passive income & bottle cash." },
-    { id: "lab",       name: "Cook Lab (Bunker)",    emoji: "⚗️", kind: "supply",  cost: 320000,  rate: 130, cap: 30000,  maxTier: 5, upgradeMul: 1.85, launder: false, minTier: 3, blurb: "Off-grid bunker. High output product — high heat if it's hit." },
-    { id: "arcade",    name: "Pixel Palace Arcade",  emoji: "🕹️", kind: "front",   cost: 410000,  rate: 150, cap: 34000,  maxTier: 4, upgradeMul: 1.85, launder: true,  minTier: 3, blurb: "The most hands-off earner. A perfect base for the whole empire." },
-    { id: "dealer",    name: "Apex Auto Dealership", emoji: "🏎️", kind: "lux",     cost: 650000,  rate: 230, cap: 52000,  maxTier: 4, upgradeMul: 1.9,  launder: true,  minTier: 4, blurb: "Sell supercars to suckers. Margins are obscene." },
-    { id: "casino",    name: "Royale Casino Floor",  emoji: "🎰", kind: "casino",  cost: 1200000, rate: 420, cap: 110000, maxTier: 5, upgradeMul: 1.85, launder: true,  minTier: 4, blurb: "The house always wins. The single best passive machine in the city." },
-    { id: "tower",     name: "Vinewood Tower (REIT)",emoji: "🏙️", kind: "invest",  cost: 3500000, rate: 980, cap: 280000, maxTier: 3, upgradeMul: 2.1,  launder: false, minTier: 5, blurb: "You own a skyline now. Rent rolls in while you sleep. Kingpin only." },
+    { id: "delivery",  name: "RapidGig Courier",     emoji: "", kind: "front",   cost: 55000,   rate: 26,  cap: 5500,   maxTier: 3, upgradeMul: 1.9,  launder: true,  minTier: 1, gig: true, gigLabel: "deliveries", blurb: "A courier front. Your driver fleet runs parcels while you cook the books." },
+    { id: "rideshare", name: "Downtown Cab Co.",     emoji: "", kind: "front",   cost: 70000,   rate: 30,  cap: 6500,   maxTier: 3, upgradeMul: 1.9,  launder: true,  minTier: 1, gig: true, gigLabel: "fares", blurb: "A medallion + rideshare fleet — cash business, easy to cook the books." },
+    { id: "smuggle",   name: "Harbor Freight (Front)",emoji: "", kind: "supply", cost: 180000,  rate: 78,  cap: 16000,  maxTier: 4, upgradeMul: 1.85, launder: false, minTier: 3, gig: true, gigLabel: "runs", blurb: "A dockside 'freight' front. Driver crews move contraband — fat haul, real bust risk." },
+    { id: "weed",      name: "Green Room Dispensary",emoji: "", kind: "supply",  cost: 95000,   rate: 44,  cap: 9000,   maxTier: 4, upgradeMul: 1.85, launder: false, minTier: 2, blurb: "Half-legal grow-op. Steady product, steady money." },
+    { id: "pawn",      name: "Iron City Pawn",       emoji: "", kind: "front",   cost: 120000,  rate: 50,  cap: 11000,  maxTier: 3, upgradeMul: 1.95, launder: true,  minTier: 2, blurb: "Fences hot goods and launders through 'sales'. Cops rarely look." },
+    { id: "club",      name: "Vault Nightclub",      emoji: "", kind: "club",    cost: 240000,  rate: 95,  cap: 24000,  maxTier: 5, upgradeMul: 1.8,  launder: true,  minTier: 3, blurb: "The GTA classic. Popularity drives huge passive income & bottle cash." },
+    { id: "lab",       name: "Cook Lab (Bunker)",    emoji: "", kind: "supply",  cost: 320000,  rate: 130, cap: 30000,  maxTier: 5, upgradeMul: 1.85, launder: false, minTier: 3, blurb: "Off-grid bunker. High output product — high heat if it's hit." },
+    { id: "arcade",    name: "Pixel Palace Arcade",  emoji: "", kind: "front",   cost: 410000,  rate: 150, cap: 34000,  maxTier: 4, upgradeMul: 1.85, launder: true,  minTier: 3, blurb: "The most hands-off earner. A perfect base for the whole empire." },
+    { id: "dealer",    name: "Apex Auto Dealership", emoji: "", kind: "lux",     cost: 650000,  rate: 230, cap: 52000,  maxTier: 4, upgradeMul: 1.9,  launder: true,  minTier: 4, blurb: "Sell supercars to suckers. Margins are obscene." },
+    { id: "casino",    name: "Royale Casino Floor",  emoji: "", kind: "casino",  cost: 1200000, rate: 420, cap: 110000, maxTier: 5, upgradeMul: 1.85, launder: true,  minTier: 4, blurb: "The house always wins. The single best passive machine in the city." },
+    { id: "tower",     name: "Vinewood Tower (REIT)",emoji: "", kind: "invest",  cost: 3500000, rate: 980, cap: 280000, maxTier: 3, upgradeMul: 2.1,  launder: false, minTier: 5, blurb: "You own a skyline now. Rent rolls in while you sleep. Kingpin only." },
   ];
   const BIZ_BY_ID = {}; for (const b of BUSINESSES) BIZ_BY_ID[b.id] = b;
 
@@ -168,10 +168,10 @@
     const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return;
     if ((r.secLevel | 0) >= SEC_MAX) { note(b.name + " security is already maxed.", 1.8); return; }
     const cost = secCost(id);
-    if (!canAfford(cost)) { note("⛔ Security upgrade costs " + money(cost) + ".", 2); sfx("hit"); return; }
+    if (!canAfford(cost)) { note("Security upgrade costs " + money(cost) + ".", 2); sfx("hit"); return; }
     charge(cost);
     r.secLevel = (r.secLevel | 0) + 1;
-    big("🛡️ " + b.name + " — security Lvl " + r.secLevel);
+    big("" + b.name + " — security Lvl " + r.secLevel);
     note("Reinforced doors & paid guards. Far less likely to get hit now.", 2.6);
     sfx("coin");
     persist(); if (open_) render();
@@ -215,10 +215,10 @@
     if (!isGig(id)) { note(b.name + " doesn't run a driver fleet.", 1.8); return; }
     if ((r.workers | 0) >= WORKER_MAX) { note(b.name + " fleet is fully staffed (" + WORKER_MAX + " drivers).", 1.8); return; }
     const cost = workerCost(id);
-    if (!canAfford(cost)) { note("⛔ Hiring a driver costs " + money(cost) + ".", 2); sfx("hit"); return; }
+    if (!canAfford(cost)) { note("Hiring a driver costs " + money(cost) + ".", 2); sfx("hit"); return; }
     charge(cost);
     r.workers = (r.workers | 0) + 1;
-    big("🧑‍✈️ " + b.name + " — hired driver #" + r.workers);
+    big("" + b.name + " — hired driver #" + r.workers);
     note("Fleet now " + r.workers + " driver" + (r.workers === 1 ? "" : "s") + " · output " + money(bizRate(id)) + "/sec. They roll the streets in your livery.", 2.8);
     sfx("coin");
     // tell the fleet glue to (re)spawn the right number of livery cars.
@@ -262,8 +262,8 @@
     const b = BIZ_BY_ID[id]; if (!b) return;
     if (owns(id)) { note("You already own " + b.name + ".", 1.6); return; }
     const ti = tierIndex();
-    if (ti < (b.minTier || 0)) { note("⛔ " + b.name + " needs " + tierName(b.minTier) + " status to acquire.", 2.4); sfx("hit"); return; }
-    if (!canAfford(b.cost)) { note("⛔ Need " + money(b.cost) + " (cash + bank) to acquire " + b.name + ".", 2.4); sfx("hit"); return; }
+    if (ti < (b.minTier || 0)) { note("" + b.name + " needs " + tierName(b.minTier) + " status to acquire.", 2.4); sfx("hit"); return; }
+    if (!canAfford(b.cost)) { note("Need " + money(b.cost) + " (cash + bank) to acquire " + b.name + ".", 2.4); sfx("hit"); return; }
     charge(b.cost);
     state().cityEmpireBiz[id] = { tier: 0, supply: 0, lastTick: now(), workers: 0, rep: b.gig ? 1 : undefined };
     const rep = clamp(Math.round(b.cost / 9000), 3, 60);
@@ -280,10 +280,10 @@
     const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return;
     if (r.tier >= b.maxTier) { note(b.name + " is already maxed out.", 1.8); return; }
     const cost = upgradeCost(id);
-    if (!canAfford(cost)) { note("⛔ Upgrade costs " + money(cost) + ".", 2); sfx("hit"); return; }
+    if (!canAfford(cost)) { note("Upgrade costs " + money(cost) + ".", 2); sfx("hit"); return; }
     charge(cost);
     r.tier++;
-    big("⬆️ " + b.name + " upgraded — Tier " + r.tier);
+    big("⬆ " + b.name + " upgraded — Tier " + r.tier);
     note("Output now " + money(bizRate(id)) + "/sec, cap " + money(bizCap(id)) + ".", 2.6);
     sfx("coin");
     if (CBZ.city) CBZ.city.addRespect(2);
@@ -301,7 +301,7 @@
     if (!ipoEligible(id)) { note(b.name + " isn't ready to IPO — max out every tier first.", 2); return; }
     if (!CBZ.stocks || typeof CBZ.stocks.ipo !== "function") { note("The exchange isn't open yet.", 1.8); return; }
     const r = CBZ.stocks.ipo(id);
-    if (!r || !r.ok) { note("⛔ IPO failed (" + ((r && r.reason) || "unknown") + ").", 2.2); return; }
+    if (!r || !r.ok) { note("IPO failed (" + ((r && r.reason) || "unknown") + ").", 2.2); return; }
     persist(); if (open_) render();
   }
   // COLLECT the accrued product/cash pool from one business (the active step).
@@ -327,7 +327,7 @@
     if (total < 1) { note("Nothing to collect across the empire yet.", 1.6); return; }
     if (CBZ.city) { CBZ.city.addCash(total); CBZ.city.addRespect(Math.min(8, n)); }
     state().cityWealthLog.passiveEarned += total;
-    big("💰 Collected " + money(total) + " across " + n + " business" + (n === 1 ? "" : "es"));
+    big("Collected " + money(total) + " across " + n + " business" + (n === 1 ? "" : "es"));
     sfx("coin");
     persist(); if (open_) render();
   }
@@ -342,13 +342,13 @@
   //  can stack (jewellery, supercars in the collection).
   // ============================================================
   const LUXURY = [
-    { id: "watch",   name: "Diamond-Iced Watch",  emoji: "⌚", base: 35000,   flex: 6,   stack: true,  blurb: "Iced out. People notice." },
-    { id: "chain",   name: "Solid-Gold Chains",   emoji: "📿", base: 60000,   flex: 9,   stack: true,  blurb: "Drip that screams new money." },
-    { id: "super",   name: "Supercar (collection)",emoji: "🏎️", base: 180000, flex: 14,  stack: true,  blurb: "Add a hypercar to the collection. Pure status." },
-    { id: "vip",     name: "Lifetime VIP Membership",emoji: "🎟️", base: 250000,flex: 18,  stack: false, blurb: "Velvet rope opens everywhere. The city knows your name." },
-    { id: "mansion", name: "Vinewood Hills Mansion",emoji: "🏰", base: 1500000,flex: 40,  stack: false, minTier: 4, blurb: "20-car garage, infinity pool, helipad. The ultimate flex address." },
-    { id: "yacht",   name: "Superyacht 'Leviathan'",emoji: "🛥️", base: 4000000,flex: 70,  stack: false, minTier: 5, blurb: "Floating palace. Throw the party the whole city talks about." },
-    { id: "jet",     name: "Private Jet",          emoji: "✈️", base: 7500000, flex: 110, stack: false, minTier: 5, blurb: "Skip the traffic, skip the cops, skip the line. Kingpin air travel." },
+    { id: "watch",   name: "Diamond-Iced Watch",  emoji: "", base: 35000,   flex: 6,   stack: true,  blurb: "Iced out. People notice." },
+    { id: "chain",   name: "Solid-Gold Chains",   emoji: "", base: 60000,   flex: 9,   stack: true,  blurb: "Drip that screams new money." },
+    { id: "super",   name: "Supercar (collection)",emoji: "", base: 180000, flex: 14,  stack: true,  blurb: "Add a hypercar to the collection. Pure status." },
+    { id: "vip",     name: "Lifetime VIP Membership",emoji: "", base: 250000,flex: 18,  stack: false, blurb: "Velvet rope opens everywhere. The city knows your name." },
+    { id: "mansion", name: "Vinewood Hills Mansion",emoji: "", base: 1500000,flex: 40,  stack: false, minTier: 4, blurb: "20-car garage, infinity pool, helipad. The ultimate flex address." },
+    { id: "yacht",   name: "Superyacht 'Leviathan'",emoji: "", base: 4000000,flex: 70,  stack: false, minTier: 5, blurb: "Floating palace. Throw the party the whole city talks about." },
+    { id: "jet",     name: "Private Jet",          emoji: "", base: 7500000, flex: 110, stack: false, minTier: 5, blurb: "Skip the traffic, skip the cops, skip the line. Kingpin air travel." },
   ];
   const LUX_BY_ID = {}; for (const l of LUXURY) LUX_BY_ID[l.id] = l;
 
@@ -367,9 +367,9 @@
   function buyLux(id) {
     const l = LUX_BY_ID[id]; if (!l) return;
     if (!l.stack && ownsLux(id)) { note("You already own the " + l.name + ".", 1.6); return; }
-    if (l.minTier != null && tierIndex() < l.minTier) { note("⛔ " + l.name + " is " + tierName(l.minTier) + "-only.", 2.4); sfx("hit"); return; }
+    if (l.minTier != null && tierIndex() < l.minTier) { note("" + l.name + " is " + tierName(l.minTier) + "-only.", 2.4); sfx("hit"); return; }
     const price = luxPrice(id);
-    if (!canAfford(price)) { note("⛔ Need " + money(price) + " to buy " + l.name + ".", 2.4); sfx("hit"); return; }
+    if (!canAfford(price)) { note("Need " + money(price) + " to buy " + l.name + ".", 2.4); sfx("hit"); return; }
     charge(price);
     state().cityLuxury[id] = l.stack ? luxCount(id) + 1 : true;
     state().cityWealthLog.flexSpent += price;
@@ -386,13 +386,13 @@
   // draws a crowd vibe (elastic via SINKS.bottleService in economy.js).
   function partySpend() {
     const e = E(); const cost = e.SINKS && e.SINKS.bottleService ? e.SINKS.bottleService() : Math.max(250, Math.round(netWorth() * 0.01));
-    if (!canAfford(cost)) { note("⛔ Bottle service runs " + money(cost) + " tonight.", 2); sfx("hit"); return; }
+    if (!canAfford(cost)) { note("Bottle service runs " + money(cost) + " tonight.", 2); sfx("hit"); return; }
     charge(cost);
     state().cityWealthLog.flexSpent += cost;
     const rep = clamp(Math.round(cost / 400), 2, 40);
     if (CBZ.city) CBZ.city.addRespect(rep);
     bumpNotoriety(3);
-    big("🍾 You bought out the bar — +" + rep + " respect");
+    big("You bought out the bar — +" + rep + " respect");
     note("Everyone wants to be in your section tonight.", 2.4);
     sfx("coin");
     if (open_) render();
@@ -457,10 +457,10 @@
   //  stops spamming. These are the "endgame jobs" the super-rich chase.
   // ============================================================
   const OPS = [
-    { id: "stocks",  name: "Insider Stock Play",   emoji: "📈", stake: 50000,   odds: 0.58, lo: 0.4, hi: 2.2, heat: 0, minTier: 2, cd: 45, blurb: "A tip from the trading floor. Front the position, ride the spike." },
-    { id: "fight",   name: "Fix the Big Fight",    emoji: "🥊", stake: 120000,  odds: 0.5, lo: 0.0, hi: 2.2, heat: 1, minTier: 3, cd: 60, blurb: "Bribe the fighters, bet the house. If it leaks, you're exposed." },
-    { id: "heist",   name: "Casino Vault Heist",   emoji: "💎", stake: 400000,  odds: 0.46, lo: 0.0, hi: 2.6, heat: 3, minTier: 4, cd: 120, blurb: "Front the crew & gear. Hit the vault. Cops come HARD if it goes loud." },
-    { id: "cartel",  name: "Cartel Shipment",      emoji: "🚢", stake: 900000,  odds: 0.44, lo: 0.0, hi: 2.8, heat: 4, minTier: 5, cd: 150, blurb: "Finance a freighter of product. The biggest score — or the DEA's." },
+    { id: "stocks",  name: "Insider Stock Play",   emoji: "", stake: 50000,   odds: 0.58, lo: 0.4, hi: 2.2, heat: 0, minTier: 2, cd: 45, blurb: "A tip from the trading floor. Front the position, ride the spike." },
+    { id: "fight",   name: "Fix the Big Fight",    emoji: "", stake: 120000,  odds: 0.5, lo: 0.0, hi: 2.2, heat: 1, minTier: 3, cd: 60, blurb: "Bribe the fighters, bet the house. If it leaks, you're exposed." },
+    { id: "heist",   name: "Casino Vault Heist",   emoji: "", stake: 400000,  odds: 0.46, lo: 0.0, hi: 2.6, heat: 3, minTier: 4, cd: 120, blurb: "Front the crew & gear. Hit the vault. Cops come HARD if it goes loud." },
+    { id: "cartel",  name: "Cartel Shipment",      emoji: "", stake: 900000,  odds: 0.44, lo: 0.0, hi: 2.8, heat: 4, minTier: 5, cd: 150, blurb: "Finance a freighter of product. The biggest score — or the DEA's." },
   ];
   const OP_BY_ID = {}; for (const o of OPS) OP_BY_ID[o.id] = o;
   function opCooldown(id) {
@@ -470,9 +470,9 @@
   }
   function runOp(id) {
     const o = OP_BY_ID[id]; if (!o) return;
-    if (tierIndex() < o.minTier) { note("⛔ " + o.name + " is " + tierName(o.minTier) + "+ only.", 2.4); sfx("hit"); return; }
+    if (tierIndex() < o.minTier) { note("" + o.name + " is " + tierName(o.minTier) + "+ only.", 2.4); sfx("hit"); return; }
     if (opCooldown(id) > 0) { note(o.name + " on cooldown — " + Math.ceil(opCooldown(id)) + "s.", 1.8); return; }
-    if (!canAfford(o.stake)) { note("⛔ This needs " + money(o.stake) + " up front. Come back richer.", 2.6); sfx("hit"); return; }
+    if (!canAfford(o.stake)) { note("This needs " + money(o.stake) + " up front. Come back richer.", 2.6); sfx("hit"); return; }
     charge(o.stake);
     if (!g.cityOpCD) g.cityOpCD = {};
     g.cityOpCD[id] = now() + o.cd * 1000;   // o.cd is SECONDS, CBZ.now is ms
@@ -489,7 +489,7 @@
         payout = Math.round(ryl ? Math.min(ryl.cash * 0.25, 150000) : 0);
         if (ryl) ryl.cash = Math.max(0, ryl.cash - payout);
         if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock("RYL", -0.15);
-        if (CBZ.cityFeed) CBZ.cityFeed("💎 ROYALE VAULT HIT — the crew hits the cage for " + money(payout), "#ffd166");
+        if (CBZ.cityFeed) CBZ.cityFeed("ROYALE VAULT HIT — the crew hits the cage for " + money(payout), "#ffd166");
       } else {
         mult = o.lo > 0 ? (o.lo + rng() * (o.hi - o.lo)) : (1 + rng() * (o.hi - 1));
         payout = Math.round(o.stake * mult);
@@ -522,7 +522,7 @@
     if (e.launder) {
       const r = e.launder(dirty);
       state().cityWealthLog.laundered += (r.banked || 0);
-      big("🧺 Laundered " + money(dirty) + " → " + money(r.banked) + " clean (−" + money(r.lost) + " cut)");
+      big("Laundered " + money(dirty) + " → " + money(r.banked) + " clean (−" + money(r.lost) + " cut)");
       note(laundromats() ? "Your " + laundromats() + " fronts shaved the cut down." : "Buy laundering businesses to shrink the cut.", 2.6);
       sfx("coin");
     }
@@ -577,7 +577,7 @@
     // probabilistic hold: your defense vs their attack (logistic-ish)
     const hold = rng() < clamp(def / (def + atk), 0.08, 0.94);
     if (hold) {
-      big("🛡️ Crew held off the raid on " + b.name + "!");
+      big("Crew held off the raid on " + b.name + "!");
       note("Your people protected the stock. Respect on the street.", 2.8);
       if (CBZ.shake) CBZ.shake(0.18);
       if (CBZ.city) CBZ.city.addRespect(clamp(Math.round(b.cost / 18000), 3, 40));
@@ -588,7 +588,7 @@
       const sevFrac = clamp(0.45 + (atk - def) * 0.06, 0.3, 0.9);
       const lost = Math.floor((r.supply || 0) * sevFrac);
       r.supply = Math.max(0, (r.supply || 0) - lost);
-      big("🚨 " + b.name + " GOT HIT — lost " + money(lost) + " in stock");
+      big("" + b.name + " GOT HIT — lost " + money(lost) + " in stock");
       note(secLevel(id) < SEC_MAX ? "Buy a Security upgrade (Empire menu) to harden it." : "Even maxed security can't stop everything when you run this hot.", 3.2);
       sfx("explosion"); if (CBZ.shake) CBZ.shake(0.32);
       bumpNotoriety(3);
@@ -653,7 +653,7 @@
     // a gentle nudge when a business is overflowing (you're leaving money on table)
     if (anyFull) {
       warnedFull -= dt;
-      if (warnedFull <= 0) { warnedFull = 28; note("💼 A business is at capacity — collect from the Empire menu (Shift+B).", 2.2); }
+      if (warnedFull <= 0) { warnedFull = 28; note("A business is at capacity — collect from the Empire menu (Shift+B).", 2.2); }
     }
     // ---- RAID ROLL (throttled): when you run hot, your earning fronts get hit.
     // One roll every ~18s of play; at most one business raided per roll so it's
@@ -709,13 +709,13 @@
     const e0 = E();
     if (e0.turfIncomeInfo) {
       const ti = e0.turfIncomeInfo();
-      if (ti.zones > 0) h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:8px'>🏴 Turf tax — <b style='color:#ff9e6b'>" + money(ti.perSec) + "/sec</b> from <b>" + ti.zones + "</b> block" + (ti.zones === 1 ? "" : "s") + " held · ×" + tierPerk("turfMul").toFixed(2) + " status</div>";
-      else h += "<div style='font-size:12px;color:#8a7d5a;margin-bottom:8px'>🏴 Take turf with your crew to collect street tax (passive $/sec).</div>";
+      if (ti.zones > 0) h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:8px'>Turf tax — <b style='color:#ff9e6b'>" + money(ti.perSec) + "/sec</b> from <b>" + ti.zones + "</b> block" + (ti.zones === 1 ? "" : "s") + " held · ×" + tierPerk("turfMul").toFixed(2) + " status</div>";
+      else h += "<div style='font-size:12px;color:#8a7d5a;margin-bottom:8px'>Take turf with your crew to collect street tax (passive $/sec).</div>";
     }
     // raid-pressure banner — connect HIGH HEAT to the risk on your fronts.
     if ((g.wanted | 0) >= 3) {
       let exposed = 0; for (const id in state().cityEmpireBiz) if (raidChance(id) > 0) exposed++;
-      if (exposed > 0) h += "<div style='font-size:12px;color:#ff6b6b;margin-bottom:8px;background:rgba(120,30,30,.18);border:1px solid #5a2a2a;border-radius:8px;padding:6px 9px'>🚨 You're at " + (g.wanted | 0) + "★ — " + exposed + " front" + (exposed === 1 ? "" : "s") + " can be RAIDED. Collect stock, lay low, or buy 🛡️ Security. Your crew (" + liveCrew() + ") will defend.</div>";
+      if (exposed > 0) h += "<div style='font-size:12px;color:#ff6b6b;margin-bottom:8px;background:rgba(120,30,30,.18);border:1px solid #5a2a2a;border-radius:8px;padding:6px 9px'>You're at " + (g.wanted | 0) + "★ — " + exposed + " front" + (exposed === 1 ? "" : "s") + " can be RAIDED. Collect stock, lay low, or buy Security. Your crew (" + liveCrew() + ") will defend.</div>";
     }
     h += "<div style='text-align:right;margin-bottom:4px'>" + btn("C", "COLLECT ALL", "#1f4a2a") + " " + btn("L", "Launder cash", "#3a2a4a") + " " + btn("P", "Bottle service", "#4a2a3a") + "</div>";
     let i = 1;
@@ -735,14 +735,14 @@
           "<div style='font-size:11px;color:#a99b78'>" + money(bizRate(b.id)) + "/s · T" + r.tier + "/" + b.maxTier + "</div>";
         const sl = secLevel(b.id);
         sub = "Pool " + pct + "% of " + money(bizCap(b.id)) + (r.tier < b.maxTier ? " · upgrade " + money(upgradeCost(b.id)) : " · MAXED") +
-          (b.launder ? " · 🧺 front" : "") + " · 🛡️" + sl + "/" + SEC_MAX +
-          ((g.wanted | 0) >= 3 && raidChance(b.id) > 0 ? " · ⚠️ raid risk " + Math.round(raidChance(b.id) * 100) + "%" : "");
+          (b.launder ? " · front" : "") + " · sec " + sl + "/" + SEC_MAX +
+          ((g.wanted | 0) >= 3 && raidChance(b.id) > 0 ? " · raid risk " + Math.round(raidChance(b.id) * 100) + "%" : "");
         // gig company: surface fleet size + brand health (rep) and how it feeds rate.
         if (b.gig) {
           const rp = Math.round(bizRep(b.id) * 100);
           const repCol = rp >= 66 ? "#7ed957" : rp >= 33 ? "#ffd166" : "#ff6b6b";
-          sub += "<br>🧑‍✈️ " + workerCount(b.id) + "/" + WORKER_MAX + " drivers · brand <b style='color:" + repCol + "'>" + rp + "%</b> (×" + repMul(b.id).toFixed(2) + " rate)" +
-            (rp < 50 ? " · ⚠️ run " + (b.gigLabel || "gigs") + " to revive the brand!" : "");
+          sub += "<br>" + workerCount(b.id) + "/" + WORKER_MAX + " drivers · brand <b style='color:" + repCol + "'>" + rp + "%</b> (×" + repMul(b.id).toFixed(2) + " rate)" +
+            (rp < 50 ? " · run " + (b.gigLabel || "gigs") + " to revive the brand!" : "");
         }
         const acts = (Math.floor(r.supply) >= 1 ? btn(keyLabel(i), "collect", "#1f4a2a") : "") +
           (r.tier < b.maxTier ? btn("U", "upgrade", "#2a3a4a") : "") +
@@ -753,7 +753,7 @@
       } else {
         const locked = tierIndex() < (b.minTier || 0);
         right = "<div style='color:" + (locked ? "#a06b6b" : "#ffd166") + "'>" + money(b.cost) + "</div>" +
-          "<div style='font-size:11px;color:#a99b78'>" + (locked ? "🔒 " + tierName(b.minTier) : money(b.rate) + "/s base") + "</div>";
+          "<div style='font-size:11px;color:#a99b78'>" + (locked ? "" + tierName(b.minTier) : money(b.rate) + "/s base") + "</div>";
         if (!locked) right += "<div style='margin-top:3px'>" + btn(keyLabel(i), "buy", "#4a3a1a") + "</div>";
       }
       h += row(b.emoji + " <b>" + b.name + "</b>", right, sub, have ? "#7ed957" : "#5a4a2a");
@@ -772,7 +772,7 @@
       if (!l.stack && cnt > 0) right = "<div style='color:#7ed957'>OWNED ✓</div><div style='font-size:11px;color:#a99b78'>+" + l.flex + " flex</div>";
       else {
         right = "<div style='color:" + (locked ? "#a06b6b" : "#ffd166") + "'>" + money(price) + "</div>" +
-          "<div style='font-size:11px;color:#a99b78'>" + (locked ? "🔒 " + tierName(l.minTier) : "+" + l.flex + " flex" + (cnt ? " · own " + cnt : "")) + "</div>";
+          "<div style='font-size:11px;color:#a99b78'>" + (locked ? "" + tierName(l.minTier) : "+" + l.flex + " flex" + (cnt ? " · own " + cnt : "")) + "</div>";
         if (!locked) right += "<div style='margin-top:3px'>" + btn(keyLabel(i), "buy", "#4a3a1a") + "</div>";
       }
       h += row(l.emoji + " <b>" + l.name + "</b>", right, l.blurb, cnt ? "#ffd166" : "#5a4a2a");
@@ -790,12 +790,12 @@
     h += "<div style='height:9px;background:#241f16;border-radius:6px;overflow:hidden;margin:6px 0 4px'><div style='height:100%;width:" + Math.round(prog * 100) + "%;background:linear-gradient(90deg,#ffd166,#ff9e6b)'></div></div>";
     h += "<div style='font-size:11px;color:#a99b78;margin-bottom:12px'>" + (next ? Math.round(prog * 100) + "% to " + next.name + " (" + money(next.min) + ")" : "Top tier reached — you run this city.") + "</div>";
     h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:6px'>YOUR PERKS AT THIS TIER</div>";
-    h += row("💰 " + PERK_LABELS.passiveMul, "<b style='color:#7ed957'>×" + tierPerk("passiveMul").toFixed(2) + "</b>", "Multiplies all business output", "#7ed957");
-    h += row("🏴 " + PERK_LABELS.turfMul, "<b style='color:#7ed957'>×" + tierPerk("turfMul").toFixed(2) + "</b>", "Bigger cut of the turf you hold", "#ff9e6b");
-    h += row("🛍️ " + PERK_LABELS.luxDiscount, "<b style='color:#7ed957'>−" + Math.round(tierPerk("luxDiscount") * 100) + "%</b>", "Off every luxury purchase", "#ffd166");
-    h += row("👮 " + PERK_LABELS.bribeDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bribeDisc") * 100) + "%</b>", "Cheaper to pay off the cops", "#7fd0ff");
-    h += row("🛡️ " + PERK_LABELS.bodyguardDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bodyguardDisc") * 100) + "%</b>", "Cheaper crew & bodyguards", "#9fd07e");
-    h += row("🎟️ " + PERK_LABELS.vip, hasVIP() ? "<b style='color:#7ed957'>UNLOCKED ✓</b>" : "<b style='color:#a06b6b'>locked</b>", "Casino high-roller & club back rooms", hasVIP() ? "#7ed957" : "#5a4a2a");
+    h += row("" + PERK_LABELS.passiveMul, "<b style='color:#7ed957'>×" + tierPerk("passiveMul").toFixed(2) + "</b>", "Multiplies all business output", "#7ed957");
+    h += row("" + PERK_LABELS.turfMul, "<b style='color:#7ed957'>×" + tierPerk("turfMul").toFixed(2) + "</b>", "Bigger cut of the turf you hold", "#ff9e6b");
+    h += row("" + PERK_LABELS.luxDiscount, "<b style='color:#7ed957'>−" + Math.round(tierPerk("luxDiscount") * 100) + "%</b>", "Off every luxury purchase", "#ffd166");
+    h += row("" + PERK_LABELS.bribeDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bribeDisc") * 100) + "%</b>", "Cheaper to pay off the cops", "#7fd0ff");
+    h += row("" + PERK_LABELS.bodyguardDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bodyguardDisc") * 100) + "%</b>", "Cheaper crew & bodyguards", "#9fd07e");
+    h += row("" + PERK_LABELS.vip, hasVIP() ? "<b style='color:#7ed957'>UNLOCKED ✓</b>" : "<b style='color:#a06b6b'>locked</b>", "Casino high-roller & club back rooms", hasVIP() ? "#7ed957" : "#5a4a2a");
     // P5: a tiny UI seam onto city/protection.js's ProtectionDetail — the SAME
     // hire() the bodyguardDisc perk above already discounts. One row, one
     // hotkey (G — unused elsewhere in this menu); it always hires the next
@@ -811,7 +811,7 @@
       const right = n >= HIRE_CAP
         ? "<b style='color:#7ed957'>FULL STRENGTH</b>"
         : "<div style='color:#ffd166'>" + money(cost) + "</div><div style='margin-top:3px'>" + btn("G", "hire (SMG)", "#4a3a1a") + "</div>";
-      h += row("🕴️ Hire Security", right, "Own detail: " + n + "/" + HIRE_CAP + " guards, wages drain daily — grudge or missed payroll and they walk.", n ? "#7ed957" : "#5a4a2a");
+      h += row("Hire Security", right, "Own detail: " + n + "/" + HIRE_CAP + " guards, wages drain daily — grudge or missed payroll and they walk.", n ? "#7ed957" : "#5a4a2a");
     }
     return h;
   }
@@ -821,8 +821,8 @@
     for (const o of OPS) {
       const locked = tierIndex() < o.minTier, cd = opCooldown(o.id);
       let right = "<div style='color:" + (locked ? "#a06b6b" : "#ff9e6b") + "'>stake " + money(o.stake) + "</div>";
-      right += "<div style='font-size:11px;color:#a99b78'>" + Math.round(o.odds * 100) + "% · up to ×" + o.hi + (o.heat ? " · 🔥" + o.heat : "") + "</div>";
-      if (locked) right += "<div style='font-size:11px;color:#a06b6b'>🔒 " + tierName(o.minTier) + "</div>";
+      right += "<div style='font-size:11px;color:#a99b78'>" + Math.round(o.odds * 100) + "% · up to ×" + o.hi + (o.heat ? " · heat " + o.heat : "") + "</div>";
+      if (locked) right += "<div style='font-size:11px;color:#a06b6b'>" + tierName(o.minTier) + "</div>";
       else if (cd > 0) right += "<div style='font-size:11px;color:#a99b78'>cooldown " + Math.ceil(cd) + "s</div>";
       else right += "<div style='margin-top:3px'>" + btn(keyLabel(i), "RUN", "#5a2a1a") + "</div>";
       h += row(o.emoji + " <b>" + o.name + "</b>", right, o.blurb, locked ? "#5a4a2a" : "#ff9e6b");
@@ -833,9 +833,9 @@
 
   function render() {
     state();
-    const tabs = [["biz", "💼 Empire"], ["lux", "💎 Luxury"], ["ops", "🎲 High Stakes"], ["perks", "👑 Status"]];
+    const tabs = [["biz", "Empire"], ["lux", "Luxury"], ["ops", "High Stakes"], ["perks", "Status"]];
     let head = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<div style='font-size:22px;font-weight:700;letter-spacing:.5px'>👑 EMPIRE</div>" +
+      "<div style='font-size:22px;font-weight:700;letter-spacing:.5px'>EMPIRE</div>" +
       "<div style='font-size:12px;color:#c9b98a'>Cash " + money(g.cash || 0) + " · Bank " + money(g.cityBank || 0) + " · " + wealthTier().name + "</div></div>";
     let bar = "<div style='display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap'>";
     tabs.forEach((t) => {

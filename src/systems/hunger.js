@@ -176,7 +176,7 @@
           P.hp = (P.hp == null ? 100 : P.hp) - dmg;
           if (P.hp <= 0) {
             P.hp = 100;
-            if (CBZ.haulToCell) CBZ.haulToCell("🍞 STARVED — DRAGGED TO YOUR CELL");
+            if (CBZ.haulToCell) CBZ.haulToCell("STARVED — DRAGGED TO YOUR CELL");
           }
         }
       }
@@ -360,7 +360,7 @@
   function theftEvent(dk) {
     const ped = pickPedIn(dk);
     const name = (ped && ped.name) || "someone hungry";
-    if (CBZ.cityFeed) CBZ.cityFeed("🍞 " + name + " stole bread in " + districtName(dk), "#ffb27a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + name + " stole bread in " + districtName(dk), "#ffb27a");
     if (ped && CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 6, "shoplift");
     // "cohort wallet +0" per the plan — only hungerAvg ticks up (they ate).
     const cls = ped ? (CBZ.npcEcon && CBZ.npcEcon.classFor ? CBZ.npcEcon.classFor(ped.wealth) : "poor") : "poor";
@@ -380,7 +380,7 @@
     if (M.riotActive) {
       if (!M.riotFeedShown) {
         M.riotFeedShown = true;
-        if (CBZ.cityFeed) CBZ.cityFeed("🔥 FOOD RIOTS breaking out across the city", "#ff4d4d");
+        if (CBZ.cityFeed) CBZ.cityFeed("FOOD RIOTS breaking out across the city", "#ff4d4d");
       }
       M.feedT = (M.feedT || 0) + dt;
       if (M.feedT >= 3) {

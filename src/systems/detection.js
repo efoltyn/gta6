@@ -672,7 +672,7 @@
         (!player.captureState || player.captureState === "normal") &&
         CBZ.litBySearchlight && CBZ.litBySearchlight(player.pos, player.crouch)) {
       CBZ.addHeat((player.crouch ? 16 : 30) * dt);
-      if (!litNow && CBZ.flashHint) CBZ.flashHint("💡 SEARCHLIGHT — you're lit up!", 1.5);
+      if (!litNow && CBZ.flashHint) CBZ.flashHint("SEARCHLIGHT — you're lit up!", 1.5);
       litNow = true;
       if (litPingT <= 0) {
         litPingT = 3.0;

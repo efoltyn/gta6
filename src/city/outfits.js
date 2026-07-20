@@ -613,11 +613,11 @@
     }
     if (!opts.silent && CBZ.city) {
       const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
-      if (rec.cop) CBZ.city.note("👮 The uniform's on — at a distance, the city reads a cop.", 2.6);
-      else if (rec.gang) CBZ.city.note("🩸 " + rec.name + " on your back — their corners read kin, their rivals read TARGET.", 3);
-      else if (before < CLUB && after >= CLUB && CBZ.city.big) CBZ.city.big("🥂 " + rec.name + " — cloth like this opens velvet ropes.");
+      if (rec.cop) CBZ.city.note("The uniform's on — at a distance, the city reads a cop.", 2.6);
+      else if (rec.gang) CBZ.city.note("" + rec.name + " on your back — their corners read kin, their rivals read TARGET.", 3);
+      else if (before < CLUB && after >= CLUB && CBZ.city.big) CBZ.city.big("" + rec.name + " — cloth like this opens velvet ropes.");
       else if (before < VIP && after >= VIP && CBZ.city.big) CBZ.city.big("✦ " + rec.name + " — dressed like money; the elite lounge waves you up.");
-      else CBZ.city.note("🧥 Now wearing " + rec.name + ".", 1.8);
+      else CBZ.city.note("Now wearing " + rec.name + ".", 1.8);
     }
     if (CBZ.cityLook) { CBZ.cityLook().outfit = rec.name; }          // legacy style read stays true
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

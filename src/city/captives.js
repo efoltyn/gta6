@@ -119,10 +119,10 @@
   }
   function holdIcon(state) {
     switch (state) {
-      case "in_vehicle": return "🚗";
-      case "escorted": return "🚶";
-      case "grappled": return "🤼";
-      default: return "🔒";
+      case "in_vehicle": return "";
+      case "escorted": return "";
+      case "grappled": return "";
+      default: return "";
     }
   }
 
@@ -281,7 +281,7 @@
       "padding:13px 16px;border-bottom:1px solid rgba(120,150,200,0.22);");
     head.appendChild(el("div",
       "font:700 15px system-ui;letter-spacing:0.3px;color:#fff;",
-      "🔒 Custody"));
+      "Custody"));
     var close = el("div",
       "cursor:pointer;font:700 18px system-ui;color:#9aa6bd;padding:0 4px;",
       "✕");
@@ -311,11 +311,11 @@
     var b = el("button",
       "margin-left:auto;cursor:pointer;font:600 12px system-ui;color:#cfe;" +
       "background:rgba(80,140,220,0.22);border:1px solid rgba(120,170,230,0.5);" +
-      "border-radius:6px;padding:4px 9px;white-space:nowrap;", "📍 Locate");
+      "border-radius:6px;padding:4px 9px;white-space:nowrap;", "Locate");
     b.addEventListener("click", function (ev) {
       ev.stopPropagation();
       if (!isFinite(x) || !isFinite(z)) { toast("No fix on their location yet.", 2.5); return; }
-      if (setWaypoint(x, z, label)) toast("📍 Waypoint set: " + label, 3);
+      if (setWaypoint(x, z, label)) toast("Waypoint set: " + label, 3);
       else toast("Map waypoints unavailable.", 2.5);
     });
     return b;
@@ -341,7 +341,7 @@
 
     // FAMILY TAKEN first — it's the higher-stakes, time-critical list.
     if (taken.length) {
-      panelBody.appendChild(sectionTitle("🕯 Your people taken", "#ff8a8a"));
+      panelBody.appendChild(sectionTitle("Your people taken", "#ff8a8a"));
       for (var i = 0; i < taken.length; i++) {
         var t = taken[i];
         var c = card();
@@ -351,7 +351,7 @@
         var sub = [];
         if (t.crew) sub.push("by the " + t.crew);
         if (t.ransom > 0) sub.push("ransom " + fmtMoney(t.ransom));
-        if (isFinite(t.timeLeft)) sub.push("⏱ " + fmtClock(t.timeLeft) + " left");
+        if (isFinite(t.timeLeft)) sub.push("" + fmtClock(t.timeLeft) + " left");
         info.appendChild(el("div", "font:12px system-ui;color:#d99;", sub.join(" · ") || "Snatched off the street"));
         c.appendChild(info);
         c.appendChild(locateBtn(t.x, t.z, "GET " + (t.name || "FAMILY").toUpperCase() + " BACK"));
@@ -361,7 +361,7 @@
 
     // PEOPLE YOU'RE HOLDING.
     if (held.length) {
-      panelBody.appendChild(sectionTitle("🔒 People you're holding", "#9fd6a0"));
+      panelBody.appendChild(sectionTitle("People you're holding", "#9fd6a0"));
       for (var j = 0; j < held.length; j++) {
         var h = held[j];
         var hc = card();
@@ -418,7 +418,7 @@
     var inVehNow = 0;
     for (var i = 0; i < held.length; i++) if (held[i].state === "in_vehicle") inVehNow++;
     if (inVehNow > lastInVehicle) {
-      toast("📦 Captive in the trunk — press [" + KEY_LABEL + "] to track them.", 4.5);
+      toast("Captive in the trunk — press [" + KEY_LABEL + "] to track them.", 4.5);
     }
     lastInVehicle = inVehNow;
     lastHeldCount = held.length;
@@ -426,7 +426,7 @@
     if (taken.length > lastTakenCount) {
       // family.js already fires its own line on snatch; we add the "press U"
       // affordance so the player learns the panel exists at the exact moment.
-      toast("⚠ Family taken — press [" + KEY_LABEL + "] to see who & where.", 5);
+      toast("Family taken — press [" + KEY_LABEL + "] to see who & where.", 5);
     }
     lastTakenCount = taken.length;
 
@@ -436,7 +436,7 @@
         // A captive count looked exactly like a failed vehicle-lock counter.
         // Ordinary custody remains in its panel; only the urgent family-
         // abduction state earns persistent HUD space.
-        badge.textContent = "⚠ " + taken.length;
+        badge.textContent = "" + taken.length;
         badge.style.display = "block";
         badge.style.borderLeftColor = "#ff3030";
       } else {

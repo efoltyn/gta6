@@ -325,7 +325,7 @@
     if (!C.wallet.spend(BRIBE_COST, "Envelope to " + shortName(m.name))) return false;
     G.ledger.push({ member: i, name: m.name, amount: BRIBE_COST, day: worldDayNow() });
     flip(i, "bribed");
-    C.hud.feed("💵 " + shortName(m.name) + " pockets the envelope. It's on the ledger now — shred it before the auditor reads it.", "#ffd166");
+    C.hud.feed("" + shortName(m.name) + " pockets the envelope. It's on the ledger now — shred it before the auditor reads it.", "#ffd166");
     return true;
   }
   function tradeWant(i) {
@@ -334,7 +334,7 @@
     if (!G.satchel[m.want.id]) { C.hud.feed("You're not carrying " + m.want.name + ".", "#ff9aa2"); return false; }
     G.satchel[m.want.id] = false;
     flip(i, "traded");
-    C.hud.feed("🤝 You hand over " + m.want.name + ". " + shortName(m.name) + " is an AYE.", "#8fe08a");
+    C.hud.feed("You hand over " + m.want.name + ". " + shortName(m.name) + " is an AYE.", "#8fe08a");
     return true;
   }
   function blackmailMember(i) {
@@ -342,7 +342,7 @@
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
     if (!G.dirt[m.key]) { C.hud.feed("You've got nothing on " + shortName(m.name) + " yet — try the records room.", "#ff9aa2"); return false; }
     flip(i, "blackmailed");
-    C.hud.feed("🗂️ You slide the file across. " + shortName(m.name) + " won't cross you tonight.", "#8fe08a");
+    C.hud.feed("You slide the file across. " + shortName(m.name) + " won't cross you tonight.", "#8fe08a");
     return true;
   }
   function pressLeak(i) {
@@ -350,7 +350,7 @@
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
     flip(i, "pressured");
     G.scandal += SCANDAL_PER_LEAK;
-    C.hud.feed("📰 The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE — but the room reeks.", "#e8c84a");
+    C.hud.feed("The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE — but the room reeks.", "#e8c84a");
     redrawBoard();
     if (G.scandal >= SCANDAL_CAP) postpone();
     return true;
@@ -360,7 +360,7 @@
     if (G.satchel[itemId]) { C.hud.feed("Already in your bag."); return false; }
     G.satchel[itemId] = true;
     const it = WANT_ITEMS.filter(function (w) { return w.id === itemId; })[0];
-    C.hud.feed("🎒 You take " + (it ? it.name : "the item") + ".", "#cfe8ff");
+    C.hud.feed("You take " + (it ? it.name : "the item") + ".", "#cfe8ff");
     return true;
   }
   function searchShelf(i) {
@@ -371,10 +371,10 @@
     sh.searched = true;
     if (sh.member >= 0 && COUNCIL[sh.member]) {
       const m = COUNCIL[sh.member]; G.dirt[m.key] = true; m.dirtLine = sh.line;
-      C.hud.feed("🔦 Buried in the files: " + sh.line + " — on " + m.name + ".", "#ffd166");
+      C.hud.feed("Buried in the files: " + sh.line + " — on " + m.name + ".", "#ffd166");
       return true;
     }
-    C.hud.feed("🔦 Dust, old zoning maps, nothing you can use.");
+    C.hud.feed("Dust, old zoning maps, nothing you can use.");
     return false;
   }
   function shredPage() {
@@ -384,11 +384,11 @@
     const jam = Math.random() < JAM_CHANCE;              // runtime FX RNG is allowed
     if (jam) {
       G.scandal += JAM_SCANDAL; pullGuardToShredder();
-      C.hud.feed("🌀 The shredder JAMS — a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
+      C.hud.feed("The shredder JAMS — a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
       redrawBoard();
       if (G.active && G.scandal >= SCANDAL_CAP) postpone();
     } else {
-      C.hud.feed("🗑️ " + n + " ledger page(s) shredded — clean and quiet.", "#8fe08a");
+      C.hud.feed("" + n + " ledger page(s) shredded — clean and quiet.", "#8fe08a");
     }
     return { cleared: true, jammed: jam };
   }
@@ -407,26 +407,26 @@
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:indicted";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("💼 INDICTED — THE AUDITOR FOUND THE LEDGER");
-    C.hud.feed("💼 The auditor photographs your ledger page. The rezoning is dead and so is your night.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED — THE AUDITOR FOUND THE LEDGER");
+    C.hud.feed("The auditor photographs your ledger page. The rezoning is dead and so is your night.", "#ff6a5e");
   }
   function postpone() {
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:scandal";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("📰 VOTE POSTPONED — SCANDAL ENGULFS THE CHAMBER");
-    C.hud.feed("📰 Too much stink. The chair gavels the session closed — the rezoning is tabled indefinitely.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED — SCANDAL ENGULFS THE CHAMBER");
+    C.hud.feed("Too much stink. The chair gavels the session closed — the rezoning is tabled indefinitely.", "#ff6a5e");
   }
   function win(t) {
     G.result = "win";
     C.wallet.give(WIN_PAYOUT, "Docklands rezoning — developer kickback");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🏗️ DOCKLANDS REZONING PASSES " + t.for + "–" + t.against);
-    C.hud.feed("🏗️ The gavel falls. Rezoning carries " + t.for + "–" + t.against + " — the Docklands waterfront is your crew's turf now.", "#8fe08a");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("DOCKLANDS REZONING PASSES " + t.for + "–" + t.against);
+    C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " — the Docklands waterfront is your crew's turf now.", "#8fe08a");
   }
   function lose(t) {
     G.result = t.for === t.against ? "lose:tie" : "lose:vote";
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🔨 REZONING FAILS " + t.for + "–" + t.against);
-    C.hud.feed("🔨 " + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " — a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING FAILS " + t.for + "–" + t.against);
+    C.hud.feed("" + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " — a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
   }
   // the gavel: a dirty ledger indicts first; otherwise roll call → result.
   function gavel(trigger) {
@@ -475,8 +475,8 @@
     G = idleGame(); G.active = true; G.clockLeft = NIGHT_SECONDS;
     V.wpIdx = 0; V.guardAlertT = 0;
     redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🏛️ CITY HALL AFTER DARK — PASS THE DOCKLANDS REZONING BY THE GAVEL");
-    C.hud.feed("🏛️ Session convened. FOR must beat AGAINST when the gavel falls — flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK — PASS THE DOCKLANDS REZONING BY THE GAVEL");
+    C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls — flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
     return true;
   }
 
@@ -502,7 +502,7 @@
       if (wp.desk && G.active && !G.result) auditorCheck();      // she reads the ledger at the records desk
       V.wpIdx = (V.wpIdx + 1) % V.waypoints.length;
       const nxt = V.waypoints[V.wpIdx];
-      if (nxt && nxt.desk && G.active && !G.result) C.hud.feed("🕵️ The auditor turns toward the records desk. If a bribe's on the ledger, shred it now.", "#e8c84a");
+      if (nxt && nxt.desk && G.active && !G.result) C.hud.feed("The auditor turns toward the records desk. If a bribe's on the ledger, shred it now.", "#e8c84a");
     }
   }
   function pullGuardToShredder() { if (V) V.guardAlertT = 6; }

@@ -133,7 +133,7 @@
 
     panel.innerHTML =
       "<div class='stg-head'>" +
-        "<div class='stg-title'>⚙️ SETTINGS</div>" +
+        "<div class='stg-title'>SETTINGS</div>" +
         "<div class='stg-hint'>Close <b>[Esc]</b></div>" +
       "</div>" +
       "<div class='stg-section'>" +

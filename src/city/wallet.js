@@ -149,7 +149,7 @@
       const t = nowMs();
       if (t - noteAt >= C.CITY_WALLET_NOTE_GAP && CBZ.city && CBZ.city.note) {
         noteAt = t;
-        CBZ.city.note("🏠 Rent from a tenant: +$" + pay + ".", 3);
+        CBZ.city.note("Rent from a tenant: +$" + pay + ".", 3);
       }
       // (addCash already flags the HUD dirty + commits world state for us.)
       return pay;

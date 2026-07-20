@@ -879,7 +879,7 @@
         if (CBZ.sfx) { CBZ.sfx("blip"); CBZ.sfx("door"); }
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note(m.end === "r" ? ("🛗 " + ST + " floors up — the roof is yours.") : "🛗 Ground floor.", 2);
+          CBZ.city.note(m.end === "r" ? ("" + ST + " floors up — the roof is yours.") : "Ground floor.", 2);
         }
         return null;
       }

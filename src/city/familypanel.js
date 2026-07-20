@@ -168,16 +168,16 @@
       if (e.k === "pc") {
         if (seenBirth[e.b]) continue;   // bearChild() writes one pc edge per
         seenBirth[e.b] = true;          // parent — collapse to one birth line
-        out.push({ t: e.since, text: "👶 " + bn + " born to " + an });
+        out.push({ t: e.since, text: "" + bn + " born to " + an });
       } else if (e.k === "sp") {
         if (e.end == null) {
-          out.push({ t: e.since, text: "💍 " + an + " married " + bn });
+          out.push({ t: e.since, text: "" + an + " married " + bn });
         } else if (e.why === "death") {
           var dead = deadSet.has(e.a) ? e.a : (deadSet.has(e.b) ? e.b : null);
           var live = dead === e.a ? e.b : e.a;
-          out.push({ t: e.end, text: "💀 " + (dead ? nameOf(dead) : an) + " passed — " + (dead ? nameOf(live) : bn) + " mourns" });
+          out.push({ t: e.end, text: "" + (dead ? nameOf(dead) : an) + " passed — " + (dead ? nameOf(live) : bn) + " mourns" });
         } else {
-          out.push({ t: e.end, text: "💔 " + an + " and " + bn + " divorced" });
+          out.push({ t: e.end, text: "" + an + " and " + bn + " divorced" });
         }
       }
     }
@@ -225,7 +225,7 @@
     var head = el("div",
       "display:flex;align-items:center;justify-content:space-between;" +
       "padding:13px 16px;border-bottom:1px solid rgba(120,150,200,0.22);");
-    head.appendChild(el("div", "font:700 15px system-ui;letter-spacing:0.3px;color:#fff;", "👪 Family"));
+    head.appendChild(el("div", "font:700 15px system-ui;letter-spacing:0.3px;color:#fff;", "Family"));
     var close = el("div", "cursor:pointer;font:700 18px system-ui;color:#9aa6bd;padding:0 4px;", "✕");
     close.addEventListener("click", function () { hide(); });
     head.appendChild(close);
@@ -248,9 +248,9 @@
     var c1 = card();
     if (g.citySpouse && g.citySpouseSid) {
       var alive = !deadSet.has(g.citySpouseSid);
-      c1.appendChild(row("💍 Married to " + nameOf(g.citySpouseSid) + (alive ? "" : " (deceased)")));
+      c1.appendChild(row("Married to " + nameOf(g.citySpouseSid) + (alive ? "" : " (deceased)")));
     } else if (g.cityPartner && g.cityPartner.name) {
-      c1.appendChild(row("💗 Seeing " + g.cityPartner.name + (g.cityPartner.dead ? " (deceased)" : "")));
+      c1.appendChild(row("Seeing " + g.cityPartner.name + (g.cityPartner.dead ? " (deceased)" : "")));
     } else {
       c1.appendChild(row("No partner yet.", "color:#8a93a8;"));
     }
@@ -263,7 +263,7 @@
       for (var i = 0; i < fam.members.length; i++) {
         var m = fam.members[i];
         if (!m) continue;
-        c2.appendChild(row((m._role === "kid" ? "👶 " : "🏠 ") + (m.name || "Someone") + " — " + (m.famRole || m._role || "") + (m.dead ? " (deceased)" : "")));
+        c2.appendChild(row((m._role === "kid" ? "" : "") + (m.name || "Someone") + " — " + (m.famRole || m._role || "") + (m.dead ? " (deceased)" : "")));
       }
     } else {
       c2.appendChild(row("No household record yet.", "color:#8a93a8;"));
@@ -279,7 +279,7 @@
     for (var i = 0; i < top.length; i++) {
       var d = top[i];
       var c = card();
-      c.appendChild(row("👑 House " + d.surname, "font:600 14px system-ui;color:#ffd;"));
+      c.appendChild(row("House " + d.surname, "font:600 14px system-ui;color:#ffd;"));
       c.appendChild(row(d.size + " members · " + d.alive + " alive", "color:#9aa6bd;font:12px system-ui;"));
       if (d.notable.length) c.appendChild(row("★ " + d.notable.join(", "), "color:#e8c84a;font:12px system-ui;"));
       if (i === 0) {

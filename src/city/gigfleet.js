@@ -196,14 +196,14 @@
     const amt = info.rep != null ? info.rep : REP_PER_GIG;
     const r = w.bumpRep(id, amt);
     const pct = Math.round((r == null ? 0 : r) * 100);
-    big("📈 " + (LIVERY[id].name) + " brand revived — " + pct + "%");
+    big("" + (LIVERY[id].name) + " brand revived — " + pct + "%");
     note("Running " + (kind || "gigs") + " keeps your fleet's reputation (and passive rate) alive.", 2.6);
     // SMUGGLE BUST RISK: a smuggle run while you're hot draws extra heat, like the
     // lab/raid pressure in wealth.js. Only fires for the smuggle company.
     if (id === "smuggle" && (info.busted || (g.wanted | 0) >= 1 && rng() < 0.4)) {
       const stars = Math.min(5, (g.wanted | 0) + SMUGGLE_HEAT);
       if (CBZ.cityForceStars) CBZ.cityForceStars(stars); else g.wanted = stars;
-      note("🚨 The freight run drew the law — heat up.", 2.4);
+      note("The freight run drew the law — heat up.", 2.4);
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }

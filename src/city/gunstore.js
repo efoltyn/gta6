@@ -247,7 +247,7 @@
       const vise = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), m.glow);
       vise.position.set(wx, 1.06, wz); vise.castShadow = false; group.add(vise);
       const bench = { name: "Gunsmith Bench", mod: true, sold: false, x: wx, y: 1.06, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 };
-      bench.tag = tagSprite("🔧 Gunsmith Bench · scopes · mags · silencer", "#7ed957", 3.2, 0.52);
+      bench.tag = tagSprite("Gunsmith Bench · scopes · mags · silencer", "#7ed957", 3.2, 0.52);
       if (bench.tag) { bench.tag.position.set(wx, 1.55, wz); group.add(bench.tag); }
       S.slots.push(bench);
     }
@@ -384,7 +384,7 @@
     setSold(s, true);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 3000 ? 3 : 1);   // walking out heavy IS the flex
-    if (price >= 3000 && CBZ.city.big) CBZ.city.big("🔫 " + s.name + " — straight off the wall!");
+    if (price >= 3000 && CBZ.city.big) CBZ.city.big("" + s.name + " — straight off the wall!");
     CBZ.city.note("Bought the " + s.name + " for " + fmt$(price) + " (+" + rounds + " starter rounds).", 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -498,7 +498,7 @@
         setSold(s, false);
         const P = CBZ.player;
         if (P && CBZ.city && Math.hypot(P.pos.x - s.x, P.pos.z - s.z) < 30)
-          CBZ.city.note("🚚 Fresh steel on the rack — the " + s.name + " is back in stock.", 2.2);
+          CBZ.city.note("Fresh steel on the rack — the " + s.name + " is back in stock.", 2.2);
       }
     }
     // distance VIS-GATE: the dozen display models draw only when you're near

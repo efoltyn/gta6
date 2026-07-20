@@ -751,7 +751,7 @@
     panelMode = "main"; const s = bag();
     const idx = nextBoutIdx(), B = BOUTS[idx];
     const fh = "<div style='font-size:12px;opacity:.85;margin:4px 0 8px'>Record <b>" + s.wins + "-" + s.losses + "</b> · " + s.kos + " KO · " +
-      rank().toUpperCase() + " · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (s.belt ? " · <span style='color:#e8b64c'>🏆 CHAMPION</span>" : "") + "</div>";
+      rank().toUpperCase() + " · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (s.belt ? " · <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>";
     const fightRow = s.belt
       ? "<div style='opacity:.8;font-size:13px;margin:6px 0'>You hold the strap. Defend it (title purse):</div>" + btn("fight", "DEFEND vs " + DEFS.vega.name + " — " + fmt(BOUTS[2].purse), "#8a1f1f")
       : "<div style='font-size:13px;margin:6px 0'>" + B.label + ": <b>you</b> vs " + DEFS[B.opp].name + " (" + DEFS[B.opp].blurb + ")<br>your odds <b>" + oddsFromProb(B.youWinProb).toFixed(2) + "</b> · purse <b>" + fmt(B.purse) + "</b></div>" + btn("fight", "SIGN — " + B.label, "#8a1f1f");
@@ -809,7 +809,7 @@
     let tell = "";
     if (a.act === "down") tell = "DOWN! Mash a punch button to rise (" + a.riseHits + "/" + a.riseNeed + ")";
     else if (a.counterT > 0) tell = "COUNTER WINDOW — punch NOW for DOUBLE!";
-    else if (b.act === "punch" && b.pT < PUNCH[b.punch].wu * windupMult(b.st / 100)) tell = "⚠ " + DEFS[LIVE.bKey].short + " loads a " + b.punch.toUpperCase() + " — SLIP or BLOCK!";
+    else if (b.act === "punch" && b.pT < PUNCH[b.punch].wu * windupMult(b.st / 100)) tell = "" + DEFS[LIVE.bKey].short + " loads a " + b.punch.toUpperCase() + " — SLIP or BLOCK!";
     else if (a.swell >= 2) tell = "Your eye is closing — see the cutman between rounds.";
     set("bx_tell", tell, "h");
   }
@@ -891,13 +891,13 @@
     C.hud.panel(
       head("SOUTHPAW PALACE", title + " · " + (bout.method || "")) +
       "<div style='font-size:12px;margin:4px 0'>" + cardTable(bout) + "</div>" +
-      "<div style='font-size:13px;margin:6px 0'>Record " + s.wins + "-" + s.losses + " · " + s.kos + " KO · earned " + fmt(s.earned) + (s.belt ? " · <span style='color:#e8b64c'>🏆 CHAMPION</span>" : "") + "</div>" +
+      "<div style='font-size:13px;margin:6px 0'>Record " + s.wins + "-" + s.losses + " · " + s.kos + " KO · earned " + fmt(s.earned) + (s.belt ? " · <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>" +
       next + btn("done", "Leave the ring", "#26343c"),
       { again: () => { LIVE = null; openMain(); }, done: () => { LIVE = null; panelMode = null; C.hud.closePanel(); },
         close: () => { LIVE = null; panelMode = null; C.hud.closePanel(); } });
   }
 
-  function openBelt() { C.hud.toast("🏆 SOUTHPAW PALACE CHAMPION — the case is yours."); }
+  function openBelt() { C.hud.toast("SOUTHPAW PALACE CHAMPION — the case is yours."); }
 
   // redraw the judges' held scorecards onto the ringside board (per round)
   function drawCards(bout) {

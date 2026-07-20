@@ -326,7 +326,7 @@
     if (!rec._milliAnnounced) {
       rec._milliAnnounced = true;
       const title = (p._milliTitle) || rec.title || "Tycoon";
-      big("💀 " + title + " " + (rec.name || "") + " has been killed — their fortune is up for grabs, and a new face fills the rich list.");
+      big("" + title + " " + (rec.name || "") + " has been killed — their fortune is up for grabs, and a new face fills the rich list.");
     }
   }
   // death callback for kind 'tycoon' — registered so the identity still flips
@@ -337,7 +337,7 @@
     CBZ.cityIdentities.onDeathRegister("tycoon", function (rec) {
       if (rec._milliAnnounced) return;
       rec._milliAnnounced = true;
-      big("💀 " + (rec.title || "Tycoon") + " " + (rec.name || "") + " has been killed — their fortune is up for grabs, and a new face fills the rich list.");
+      big("" + (rec.title || "Tycoon") + " " + (rec.name || "") + " has been killed — their fortune is up for grabs, and a new face fills the rich list.");
     });
   }
 
@@ -574,8 +574,8 @@
       p.chatT = Math.max(p.chatT || 0, 1.4 + rng() * 1.6);
       p.reactCD = Math.max(p.reactCD || 0, 7);
       if (rng() < 0.35) {
-        if (loaded) note("💼 " + (p._milliTitle || "A tycoon") + " gives you a respectful nod — they know real money.", 2.0);
-        else if (broke) note("💼 " + (p._milliTitle || "A tycoon") + " looks you up and down and steps wide.", 2.0);
+        if (loaded) note("" + (p._milliTitle || "A tycoon") + " gives you a respectful nod — they know real money.", 2.0);
+        else if (broke) note("" + (p._milliTitle || "A tycoon") + " looks you up and down and steps wide.", 2.0);
       }
       n++;
     }
@@ -620,7 +620,7 @@
     // a lasting philanthropy flex bump (additive to wealth.js's recomputed flex)
     g.cityFlexBonus = (g.cityFlexBonus || 0) + 2;
     g.cityMilliGala = (g.cityMilliGala || 0) + 1;
-    big("🥂 You headline the Charity Gala — " + money(amt) + " donated. The city's elite raise a glass to you.");
+    big("You headline the Charity Gala — " + money(amt) + " donated. The city's elite raise a glass to you.");
     note("+" + resp + " respect · the philanthropist's flex sticks.", 2.8);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.shake) CBZ.shake(0.2);
@@ -639,12 +639,12 @@
     const nw = netWorth();
     if (nw >= BILLION) {
       M.crowned = true; g.cityBillionaire = true;
-      big("👑 BILLIONAIRE. The whole city knows your name now — you're not rich, you OWN this place.");
+      big("BILLIONAIRE. The whole city knows your name now — you're not rich, you OWN this place.");
       note("There's nothing left to prove with money. Buy the marquee. Run the skyline.", 3.4);
       if (CBZ.sfx) CBZ.sfx("coin"); if (CBZ.shake) CBZ.shake(0.4);
     } else if (!M.billionaireNoted && nw >= BILLION * 0.5) {
       M.billionaireNoted = true;
-      note("💵 Half a billion. The billionaire's club is in sight — " + money(BILLION - nw) + " to go.", 3.0);
+      note("Half a billion. The billionaire's club is in sight — " + money(BILLION - nw) + " to go.", 3.0);
     }
   }
 
@@ -666,7 +666,7 @@
         guard.rage = PA; guard.state = "fight";
         p._milliThreat = PA; p._milliThreatT = 12;
       } else {
-        note("💼 \"You think my security lets that happen?\" — the bodyguard goes for his gun.", 2.4);
+        note("\"You think my security lets that happen?\" — the bodyguard goes for his gun.", 2.4);
         if (guard) { guard.rage = PA; guard.state = "fight"; }
         p._milliThreat = PA; p._milliThreatT = 12;
         p.fear = 4; p.state = "flee"; if (CBZ.cityFleeFrom && PA) CBZ.cityFleeFrom(p, PA.pos.x, PA.pos.z);
@@ -678,7 +678,7 @@
     const bag = p._milliBag || 200000;
     p._milliShaken = true; p.robbed = true; p.valuables = p.valuables || [];
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(bag); else g.cash = (g.cash || 0) + bag;
-    big("💎 You shook down the " + (p._milliTitle || "tycoon") + " — " + money(bag) + ".");
+    big("You shook down the " + (p._milliTitle || "tycoon") + " — " + money(bag) + ".");
     note("The ultra-rich pay to make you disappear. Cops will be looking.", 2.6);
     // real heat: this is grand extortion of a high-profile mark
     if (CBZ.cityCrime) CBZ.cityCrime(170, { x: p.pos.x, z: p.pos.z, type: "armed-robbery" });
@@ -707,9 +707,9 @@
         // building IS the money, which is why he's such a fat mark.
         if (p._milliLedgerLot && CBZ.cityNpcAcct) {
           const till = CBZ.cityNpcAcct(p._milliLedgerLot) | 0;
-          if (till > 0) { note("💼 " + (p._milliTitle || "Tycoon") + " — " + job + ". His tower's books carry " + money(till) + "; squeeze him and a slice of that is yours.", 3.0); return; }
+          if (till > 0) { note("" + (p._milliTitle || "Tycoon") + " — " + job + ". His tower's books carry " + money(till) + "; squeeze him and a slice of that is yours.", 3.0); return; }
         }
-        note("💼 " + (p._milliTitle || "Tycoon") + " — " + job + ". Worth a small fortune in cash and ice.", 2.6);
+        note("" + (p._milliTitle || "Tycoon") + " — " + job + ". Worth a small fortune in cash and ice.", 2.6);
       },
     });
 
@@ -723,11 +723,11 @@
       },
       options: [{
         id: "milli-gala-sponsor", slot: "e", prio: 10,
-        label: () => "🥂 Headline the Charity Gala (" + money(galaDonation()) + ")",
+        label: () => "Headline the Charity Gala (" + money(galaDonation()) + ")",
         onSelect: () => sponsorGala(),
       }],
     });
-    if (I.describe) I.describe("milli-gala", () => ({ label: "🥂 Charity Gala", note: "Donate big · buy the city's respect" }));
+    if (I.describe) I.describe("milli-gala", () => ({ label: "Charity Gala", note: "Donate big · buy the city's respect" }));
   }
 
   // ============================================================

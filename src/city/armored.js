@@ -246,7 +246,7 @@
     }
     // armed crew engaging IS a reported armed robbery in progress — light it up
     spikeHeat(reason);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🚨 Armored crew bailing out — they're shooting back!", 2.2);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored crew bailing out — they're shooting back!", 2.2);
   }
 
   // ---- the heat spike: armed robbery of an armored truck ----------------------

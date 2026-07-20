@@ -430,7 +430,7 @@
     if ((e.key || "").toLowerCase() !== "t") return;
     e.preventDefault();
     g.cityMasked = !g.cityMasked;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(g.cityMasked ? "🎭 Mask up — witnesses can't ID you." : "Mask off — your face is showing.", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(g.cityMasked ? "Mask up — witnesses can't ID you." : "Mask off — your face is showing.", 1.8);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   });
   // talk your stars DOWN by `levels` (a bought alibi) without fully clearing them
@@ -490,7 +490,7 @@
   function waypointBusy() { return !!(g.cityJob || g.cityGig); }
   function contractWaypoint(t) {
     if (waypointBusy()) return;
-    if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(t.pos.x, t.pos.z, "🎯 " + (t.name || "MARK")); } catch (e) {} }
+    if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(t.pos.x, t.pos.z, "" + (t.name || "MARK")); } catch (e) {} }
   }
   function dropContractWaypoint() {
     if (waypointBusy()) return;   // never clear a gig's pin
@@ -511,7 +511,7 @@
     bountyBoard.push({ id: "bo" + (offerSeq++), kind: kind, tag: tag, reward: Math.round(reward), ref: p, name: p.name || tag, massive: !!massive, _weSetBounty: !(p.bounty > 0) });
     if (massive) {
       const dk = districtNameAt(p.pos.x, p.pos.z);
-      if (CBZ.cityFeed) { try { CBZ.cityFeed("🩸 Word on the street: a " + bMoney(reward) + " contract is out on " + (p.name || "a big name") + " (" + dk + ")", "#ff6a5e"); } catch (e) {} }
+      if (CBZ.cityFeed) { try { CBZ.cityFeed("Word on the street: a " + bMoney(reward) + " contract is out on " + (p.name || "a big name") + " (" + dk + ")", "#ff6a5e"); } catch (e) {} }
     }
   }
   // top the board up to 5 open offers from live city sources (throttled ~4s)
@@ -584,14 +584,14 @@
     };
     for (let i = bountyBoard.length - 1; i >= 0; i--) if (bountyBoard[i].id === o.id) bountyBoard.splice(i, 1);
     contractWaypoint(t);
-    bNotify("🎯 Contract accepted: " + contract.targetName + " (" + bMoney(contract.reward) + ") — last seen in " + dk + ". The map ping refreshes as they move.");
+    bNotify("Contract accepted: " + contract.targetName + " (" + bMoney(contract.reward) + ") — last seen in " + dk + ". The map ping refreshes as they move.");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return contract;
   }
   function completeContract() {
     const c = contract; if (!c) return;
     // peds.js already PAID the cash + announced "BOUNTY CLAIMED" — bookkeeping only here.
-    if (CBZ.cityFeed) { try { CBZ.cityFeed("🎯 Contract fulfilled: " + c.targetName + " · +" + bMoney(c.reward), "#7ed957"); } catch (e) {} }
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract fulfilled: " + c.targetName + " · +" + bMoney(c.reward), "#7ed957"); } catch (e) {} }
     if (CBZ.city) CBZ.city.addRespect(c.reward >= 1000000 ? 20 : 6);
     // CONSEQUENCE: a sanctioned hit on a KNOWN CRIMINAL earns a partial pardon
     // ("the law looks the other way"); murdering a respectable tycoon/exec
@@ -607,7 +607,7 @@
     clearOurBounty(c);
     dropContractWaypoint();
     bNotify("Contract failed — " + why + ".");
-    if (CBZ.cityFeed) { try { CBZ.cityFeed("❌ Contract failed — " + why, "#ff8a8a"); } catch (e) {} }
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract failed — " + why, "#ff8a8a"); } catch (e) {} }
     contract = null; bountyCooldown = 60;
   }
   function pingContract(manual) {
@@ -702,7 +702,7 @@
     const inside = x > B.minX + inset && x < B.maxX - inset && z > B.minZ + inset && z < B.maxZ - inset;
     if (!inside) { if (milLock) releaseMilZone(); else milWarnT = 0; return; }
     if (!milLock) {
-      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("⚠ RESTRICTED AREA — TURN BACK");
+      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("RESTRICTED AREA — TURN BACK");
       milWarnT += dt;
       // a fresh crime reported INSIDE the wire (report() stamps _milHostileT)
       // = hostile incursion, no grace. 10s window: generous enough that a

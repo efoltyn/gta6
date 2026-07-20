@@ -133,21 +133,21 @@
   // ========================================================================
   const ORIGINS = {
     exec: {
-      meta: { icon: "💼", name: "The Executive", blurb: "suit, gold watch, zero dollars" },
+      meta: { icon: "", name: "The Executive", blurb: "suit, gold watch, zero dollars" },
       get tuning() { return ORIGIN_TUNING.exec; },
       findSpawn: function () { return findExecTower(); },
       grants: function (game) { return grantExec(game); },
       scene: function (game) { return sceneExec(game); },
     },
     barfly: {
-      meta: { icon: "🍺", name: "The Barfly", blurb: "last call regular" },
+      meta: { icon: "", name: "The Barfly", blurb: "last call regular" },
       get tuning() { return ORIGIN_TUNING.barfly; },
       findSpawn: function () { return findBarLot(); },
       grants: function (game) { return grantBarfly(game); },
       scene: function (game) { return sceneBarfly(game); },
     },
     tenant: {
-      meta: { icon: "🔫", name: "The Tenant", blurb: "one room, one way out" },
+      meta: { icon: "", name: "The Tenant", blurb: "one room, one way out" },
       get tuning() { return ORIGIN_TUNING.tenant; },
       findSpawn: function () { return findTenantTower(); },
       grants: function (game) { return grantTenant(game); },
@@ -621,7 +621,7 @@
       "<div style='background:#0a0d12;border:1px solid #232a36;border-radius:8px;padding:8px 10px'><div style='color:#8a93a3'>Brokerage</div><div id='olBank'>$8,000,000</div></div>" +
       "</div>" +
       "<div id='olAlert' style='margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(255,91,91,.08);border:1px solid rgba(255,91,91,.25);color:#ff9e9e;font-size:12px;display:none'>" +
-      "⚠ MARGIN CALL · positions liquidated · accounts frozen</div>" +
+      "MARGIN CALL · positions liquidated · accounts frozen</div>" +
       "<div style='margin-top:10px;color:#5c6573;font-size:10px'>Not financial advice. Definitely financial ruin.</div>" +
       "</div>";
     document.body.appendChild(laptopEl);
@@ -710,7 +710,7 @@
       } catch (e) {}
     }
     if (CBZ.city) {
-      CBZ.city.big("📉 −" + fmt$(lost));
+      CBZ.city.big("−" + fmt$(lost));
       CBZ.city.note("Phone buzzes. Brokerage. " + fmt$(lost) + " — gone. You just became the poorest man in a suit.", 3.2, { urgent: true });
     }
     if (CBZ.sfx) try { CBZ.sfx("empty"); } catch (e) {}
@@ -752,8 +752,8 @@
     } catch (e) {}
 
     if (CBZ.city) CBZ.city.note(eo
-      ? "💼 Marcus Sterling. Sterling Capital — floor 50 of the Spire, the tallest tower in the city. On paper — a god."
-      : "💼 Marcus Sterling. Top floor. Suit, gold watch, shades. On paper — a god.", 3.2);
+      ? "Marcus Sterling. Sterling Capital — floor 50 of the Spire, the tallest tower in the city. On paper — a god."
+      : "Marcus Sterling. Top floor. Suit, gold watch, shades. On paper — a god.", 3.2);
 
     const T = ORIGIN_TUNING.exec;
     paintLaptop(g.cash != null ? g.cash : T.startCash, execBrokerage() || T.startBank, false);
@@ -858,7 +858,7 @@
     stripLoadout();                                // he drank the gun money
     game.cash = T.startCash; game.cityDebt = T.startDebt;   // cityOriginApply commits right after
     if (CBZ.cityDrink) { try { CBZ.cityDrink(T.drunkLevel); } catch (e) {} }
-    if (CBZ.city) CBZ.city.note("🍺 Last call came early tonight.", 2.6);
+    if (CBZ.city) CBZ.city.note("Last call came early tonight.", 2.6);
   }
   // SCENE (may fail — no bar lot AND no arena spawn to fall back to, which
   // only happens if the arena itself never built): the door + bouncer toss.
@@ -1012,7 +1012,7 @@
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.34; }
 
     if (A && A.root) buildAirMattress(A.root, mx, floorY, mz, facing + Math.PI);
-    if (CBZ.city) CBZ.city.note("🔫 One room, one mattress, one way out.", 2.8);
+    if (CBZ.city) CBZ.city.note("One room, one mattress, one way out.", 2.8);
 
     scene = null;   // static dressing only — no ongoing scripted beat
     return { compact: true };
@@ -1200,7 +1200,7 @@
     const P = CBZ.player;
     if (!P || P.dead || g.busted) return;
     if (P.driving) { if (CBZ.city) CBZ.city.note("Park it first — no switching from the driver's seat.", 1.8); return; }
-    if ((g.wanted | 0) > 0) { if (CBZ.city) CBZ.city.note("🚔 Can't switch while the heat's on.", 1.8); return; }
+    if ((g.wanted | 0) > 0) { if (CBZ.city) CBZ.city.note("Can't switch while the heat's on.", 1.8); return; }
     // a live origin beat can't be walked out on — switching mid-crash would
     // let the exec keep the paper millions forever.
     if (scene) { if (CBZ.city) CBZ.city.note("Not now — see it through.", 1.8); return; }

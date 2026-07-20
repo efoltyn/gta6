@@ -306,7 +306,7 @@
     NIGHT.qualLast = paramAt(car.pos.x, car.pos.z);
     if (CBZ.raceHud) CBZ.raceHud.hide();
     towerDraw(["QUALIFY", "flying lap"], "RACE " + (NIGHT.raceIx + 1) + "/" + ECON.RACES);
-    note("🏁 QUALIFYING — one flying lap. Cross the line and give it everything!", 3.2);
+    note("QUALIFYING — one flying lap. Cross the line and give it everything!", 3.2);
     C.hud.closePanel();
   }
   function finishQualify(car) {
@@ -426,7 +426,7 @@
 
     // podium toast + checkered flag wave
     waveFlag(2);
-    if (place === 1 && !pRow.dnf) { C.hud.toast("🏆 P1 — CHECKERED FLAG!"); if (CBZ.sfx) CBZ.sfx("coin"); }
+    if (place === 1 && !pRow.dnf) { C.hud.toast("P1 — CHECKERED FLAG!"); if (CBZ.sfx) CBZ.sfx("coin"); }
     else C.hud.toast(pRow.dnf ? "DNF — out of the race" : "Finished P" + place);
 
     // tear the field down
@@ -490,7 +490,7 @@
       if (CBZ.raceHud) CBZ.raceHud.lights(c > 2.4 ? 1 : c > 1.4 ? 2 : 3);
       // JUMP START: throttle before lights-out (past the settle window)
       if (!NIGHT.jumped && NIGHT.settleT <= 0 && Math.abs(car.v) > 0.6) {
-        NIGHT.jumped = true; note("🚦 JUMP START! +" + ECON.JUMP_PENALTY + "s penalty.", 2.6);
+        NIGHT.jumped = true; note("JUMP START! +" + ECON.JUMP_PENALTY + "s penalty.", 2.6);
       }
       if (c <= 0) {
         NIGHT.phase = "race"; NIGHT.greenT = 1.4;
@@ -657,13 +657,13 @@
         ],
       });
       if (CBZ.interactions.describe) CBZ.interactions.describe("apexpaddock", function () {
-        return { label: "🏁 APEX NIGHT", note: NIGHT.active ? "Race " + (NIGHT.raceIx + 1) + "/" + ECON.RACES : ECON.RACES + " races · entry " + fmtCash(ECON.entry) };
+        return { label: "APEX NIGHT", note: NIGHT.active ? "Race " + (NIGHT.raceIx + 1) + "/" + ECON.RACES : ECON.RACES + " races · entry " + fmtCash(ECON.entry) };
       });
     }
     // ---- BOOKMAKER zone (ctx service): the stand's [E] opens the book.
-    ctx.zone({ id: "book", label: "🎫 APEX bookmaker — side bets", pos: [bmAt.x, bmAt.z + 1.0], r: 2.6, onUse: function () { openBetPanel(true); } });
+    ctx.zone({ id: "book", label: "APEX bookmaker — side bets", pos: [bmAt.x, bmAt.z + 1.0], r: 2.6, onUse: function () { openBetPanel(true); } });
   }
-  function paddockLabel() { return NIGHT.active ? "🏁 APEX NIGHT — continue" : "🏁 APEX NIGHT — enter the paddock"; }
+  function paddockLabel() { return NIGHT.active ? "APEX NIGHT — continue" : "APEX NIGHT — enter the paddock"; }
 
   // NPC cast draining (mirrors casino.js: real peds need the live arena; a
   // site venue usually mounts after the world is up, so this drains at once).
@@ -782,7 +782,7 @@
     C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + " · " + odds + "x"), body, {
       stake: function (el) {
         const s = el && el.getAttribute ? (el.getAttribute("data-s") | 0) : 0;
-        if (s > 0) { if (!C.wallet.spend(s, "Side bet on yourself")) return; NIGHT.bet = { stake: s }; NIGHT.night$ -= s; note("🎫 " + fmtCash(s) + " on YOU @ " + odds + "x.", 2.2); }
+        if (s > 0) { if (!C.wallet.spend(s, "Side bet on yourself")) return; NIGHT.bet = { stake: s }; NIGHT.night$ -= s; note("" + fmtCash(s) + " on YOU @ " + odds + "x.", 2.2); }
         else NIGHT.bet = null;
         beginGrid();
       },
