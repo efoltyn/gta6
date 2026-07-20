@@ -57,6 +57,14 @@
   // their genuine choice menus. Flip CITY_RIDE_SILENT=false to restore the card.
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.CITY_RIDE_SILENT == null) CBZ.CONFIG.CITY_RIDE_SILENT = true;
+  // SEATS obey the same single-verb, no-popup grammar (owner: "press chairs to
+  // sit, like you press airplanes to steal them — you don't need a popup for a
+  // chair"). Unlike a ride a seat has no external E-router (cityTryNearestRide)
+  // and no tappable mesh, so the card is suppressed on DESKTOP only — press E
+  // to sit — while TOUCH keeps the tappable pill as the sit control (HUD
+  // doctrine: interaction popups are pills). Flip CITY_SEAT_SILENT=false to
+  // restore the card.
+  if (CBZ.CONFIG.CITY_SEAT_SILENT == null) CBZ.CONFIG.CITY_SEAT_SILENT = true;
   const SILENT_RIDE = { vehicle: 1, "vehicle:inside": 1, milvehicle: 1 };
   // THE ONE RIDE EXCEPTION (owner spec): a parked CIVIL AIRLINER genuinely
   // offers two verbs — walk-in cabin boarding (island_airport.js
@@ -470,6 +478,22 @@
     if (SILENT_RIDE[pick.kind] && CBZ.CONFIG.CITY_RIDE_SILENT !== false) {
       rows = dualRideRows(pick, rows);
       if (!rows) { if (current) hidePanel(); return; }
+    }
+
+    // SEATS — same single-verb "no popup" grammar as a ride, but a seat has no
+    // external router (cityTryNearestRide is vehicles only) and no tappable
+    // mesh. So keep the candidate LIVE — E (and the touch pill) still fire
+    // seat-sit through the panel's own input paths below — and merely suppress
+    // the VISUAL card on DESKTOP: walk up, press E, you sit, no popup. On TOUCH
+    // the pill IS the control, so it stays. Only the single-verb case goes
+    // silent (_pass holds exactly one option); a second seat verb brings the
+    // card back. Standing up rides a separate 'propself' kind and is untouched.
+    if (pick.kind === "seat" && rows._pass && rows._pass.length === 1 &&
+        CBZ.CONFIG.CITY_SEAT_SILENT !== false && !CBZ.touchMode) {
+      current = pick; currentRows = rows; currentScore = pick.score;
+      fingerprint = "seat-silent:" + (pick.t && pick.t.x) + "," + (pick.t && pick.t.z);
+      dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); }
+      return;
     }
 
     // whoever the panel is offering interactions on turns to LOOK at you
