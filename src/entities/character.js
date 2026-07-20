@@ -213,7 +213,14 @@
       (body.userData.stripes || (body.userData.stripes = [])).push(s);
     }
     const beltParts = [], badgeParts = [], capParts = [], hairParts = [];
-    if (c.belt) {
+    // BELTS ARE PAINTED, NOT GEOMETRY (owner). With CHAR_BELT_PAINTED on
+    // (default) the geometric band+buckle is skipped entirely — no hidden
+    // meshes, beltParts stays empty (so every skinSlots.belt recolor call site
+    // safely no-ops) — and the belt read comes from the painted garment
+    // textures in city/clothes.js. Flip CHAR_BELT_PAINTED false to rebuild the
+    // geometric belt: CHAR_BELT_V2 then chooses the build-aware band (default)
+    // or the legacy fixed band, exactly as before.
+    if (c.belt && CBZ.CONFIG.CHAR_BELT_PAINTED === false) {
       if (CBZ.CONFIG.CHAR_BELT_V2 !== false) {
         // Build-aware waist band straddling the torso→pelvis seam, so it is
         // sized off BOTH boxes of the CURRENT build: a hair NARROWER than the

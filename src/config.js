@@ -960,6 +960,23 @@
   // seats the buckle half-in/half-proud of the band's front face so it can't
   // float. Build-path only, deterministic. OFF → the legacy fixed band.
   if (CBZ.CONFIG.CHAR_BELT_V2 == null) CBZ.CONFIG.CHAR_BELT_V2 = true;
+  // CHAR_BELT_PAINTED (entities/character.js) — OWNER: "Belts are painted on
+  // shirts. Why are we trying to geometrically make belts?" A belt is a texture
+  // band, not a box. When ON (default) the geometric c.belt band+buckle are NOT
+  // built at all (no hidden meshes — the block is skipped), so the belt read
+  // comes entirely from the PAINTED garment textures in city/clothes.js, where
+  // the flagship belt-bearing outfits already paint their own band+buckle
+  // (suit, police, swat, sheriff, ems, security). This also RETIRES the old
+  // player double-belt (a geometric ring sitting on top of the painted police/
+  // suit belt whenever the protagonist wore a painted fit). Flat prison rigs
+  // (player jumpsuit, guards/warden) simply go beltless — acceptable, and far
+  // cheaper than re-texturing a recolor-driven flat rig. Takes PRECEDENCE over
+  // CHAR_BELT_V2. Flag matrix: PAINTED=true → no geometry (painted only);
+  // PAINTED=false + V2=true → the current build-aware geometric band; PAINTED=
+  // false + V2=false → the legacy fixed band. Purely visual, no rng, headless-
+  // identical (build path adds/removes no meshes the math gate counts on the
+  // painted side). Flip false to bring geometric belts back in one line.
+  if (CBZ.CONFIG.CHAR_BELT_PAINTED == null) CBZ.CONFIG.CHAR_BELT_PAINTED = true;
   // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
   // person must never BRIGHTEN ("they turn super white, which is dumb") —
   // the hit read becomes a brief blood-dark tint on the struck head while
