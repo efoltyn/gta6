@@ -585,6 +585,16 @@
   // Highway deck streetlights (the owner called them dumb): default OFF —
   // real highways here run unlit; flip true to restore the old 40m poles.
   if (CBZ.CONFIG.HWY_LAMPS == null) CBZ.CONFIG.HWY_LAMPS = false;
+  // HIGHWAY NETWORK V2 (owner: "completely redo the highway and road system
+  // to make it significantly significantly bigger, and extendable and
+  // natural"). On → city/highwaynet.js builds the 7-route, ~19km continental
+  // highway system as DATA (a named-route table, dial-derived coordinates):
+  // filleted sweeping bends, one merged deck + 2 paint meshes per route,
+  // per-leg drivable city.roads records + "Link" map regions, and country
+  // relief flattened under every corridor (continent.js reads the gate).
+  // The hand-placed causeways keep their decks — routes dock flush into
+  // them. Flip false for today's causeway-only network, byte-identical.
+  if (CBZ.CONFIG.HIGHWAY_NET_V2 == null) CBZ.CONFIG.HIGHWAY_NET_V2 = true;
   // MAP RESERVE V1 (owner's #1 map gripe: "tons of terrain overlaps each other").
   // Each hand-authored landmass (biome floor + feather skirt + mountain massif +
   // island POI) registers its true footprint into a map-level AABB ledger

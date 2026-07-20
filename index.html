@@ -478,7 +478,12 @@
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=reflect1"></script>
-<script src="src/city/highways.js?v=openroads4"></script>
+<script src="src/city/highways.js?v=hwynet1"></script>
+<!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
+     builder. Loads right after the ribbon builder it drives; registers its
+     own landmass pass (order 91 — after every causeway, before the
+     continent plate reads its relief-corridor gate). -->
+<script src="src/city/highwaynet.js?v=hwynet1"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>

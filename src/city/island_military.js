@@ -759,12 +759,32 @@
     shackWin.castShadow = false; shackWin.receiveShadow = true;
     root.add(shackWin);
     col(gx, CW_MAXZ + 4, 3, 3, 0, 2.8);
-    // boom barrier (a striped bar across the lane), raised slightly so it reads
-    const boom = box(root, cx, 1.1, CW_CZ, w * 0.9, 0.18, 0.18, M.warn);
-    boom.rotation.z = 0.04;
-    col(cx, CW_CZ, w * 0.9, 0.4, 0.9, 1.3);              // low collider (chest height)
-    // red/white pylon posts flanking the lane
-    [CW_MINZ + 1, CW_MAXZ - 1].forEach(function (z) { cyl(root, cx + 4, 0.7, z, 0.16, 0.2, 1.4, M.red, 8); });
+    // boom barriers — one raised arm per carriageway at the GATE. THE FLOATING-
+    // YELLOW-LINE FIX (owner: "still a floating yellow line at the highway near
+    // Fort Brandt"): the old code sized the bar with `w` — the causeway LENGTH
+    // (~547m post-move), not the road width — so a single amber box spanned 90%
+    // of the causeway along its centreline at y=1.1 with a 0.04 roll that
+    // floated its far tip ~10m in the air over the deck: THE floating yellow
+    // line. It also dropped a `w*0.9`-long chest-height collider down the whole
+    // median (an invisible wall against lane changes). Real checkpoint grammar
+    // instead: a short striped arm per side pivoting at the kerb, parked RAISED
+    // (the base is open to traffic — matching the old behaviour, where the
+    // median collider never actually blocked the travel lanes), with the pivot
+    // posts as the only (tiny) colliders. Geometry-only + fixed constants —
+    // deterministic, and paint/deck stay solely owned by buildHighway above.
+    const ARM_L = 9.5, ARM_A = 1.15;            // arm length / raised angle (rad)
+    [[CW_MINZ + 1.2, 1], [CW_MAXZ - 1.2, -1]].forEach(function (pv) {
+      const pz = pv[0], toward = pv[1];         // arm reaches toward the median
+      cyl(root, gx, 0.7, pz, 0.16, 0.2, 1.4, M.red, 8);           // pivot post
+      col(gx, pz, 0.5, 0.5, 0, 1.4);
+      const arm = box(root, gx,
+        0.9 + Math.sin(ARM_A) * ARM_L / 2,
+        pz + toward * Math.cos(ARM_A) * ARM_L / 2,
+        0.16, 0.16, ARM_L, M.warn);
+      // rotation.x = r maps the box's +Z to (0, -sin r, cos r): the +Z-reaching
+      // arm raises with r = -a, the -Z-reaching one with r = +a (box symmetry).
+      arm.rotation.x = -toward * ARM_A;         // raised — the gate reads manned but open
+    });
     // sandbag stack beside the gate (bunkered guard post)
     sandbagBunker(root, gx + 4, CW_MINZ - 3);
     return { gx: gx };

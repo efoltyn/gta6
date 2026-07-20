@@ -348,6 +348,11 @@
       // their visible planes never hover over a noisy heightfield.
       const fd = frontierDistance(x, z);
       h *= smooth01((fd - 10) / 36);
+      // Same cut for the highway NETWORK (city/highwaynet.js): relief flattens
+      // under every route corridor so the flat decks never hover over hills.
+      // The gate is 1 everywhere when the network is off/absent — identical
+      // relief to before.
+      if (CBZ.highwayNetReliefGate) h *= CBZ.highwayNetReliefGate(x, z);
       return Math.max(0, h);
     }
     function smooth01(v) { v = v < 0 ? 0 : (v > 1 ? 1 : v); return v * v * (3 - 2 * v); }

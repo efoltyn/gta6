@@ -2,9 +2,12 @@
    city/highways.js — the shared REAL-highway builder.
 
    CBZ.buildHighway(root, opts) lays a multi-lane highway ribbon along a
-   centreline polyline (straight or L-shaped). It is the one builder the
-   island causeways CALL — the island module owns placement + region
-   registration; this file only knows how to make ONE highway cheaply.
+   centreline polyline (straight, L-shaped, or — with opts.smooth — a full
+   multi-leg route whose bends are FILLETED into arcs and built as
+   mitre-joined strips). It is the one builder the island causeways AND
+   the highway network (city/highwaynet.js) CALL — the caller owns
+   placement + region registration; this file only knows how to make ONE
+   highway cheaply.
 
    WHY draw-call discipline (the engine is draw-call bound): everything that
    repeats is MERGED or INSTANCED, and ALL lane markings are BAKED into the
@@ -124,6 +127,77 @@
     return pts;
   }
 
+  // ============================================================
+  //  HWY-NET POLYLINE SUPPORT (highwaynet.js is the caller).
+  //
+  //  highwaySmoothPath(pts, radius, step): fillet every interior corner of a
+  //  polyline into a circular ARC (tangent to both legs, radius auto-shrunk
+  //  when a leg is short), sampled every ~step metres — "natural" sweeping
+  //  bends instead of hard L-corners. Pure closed-form math over the input
+  //  points: no rng, no state — deterministic by construction.
+  //
+  //  ribbonFrames(path): per-point MITRE frames (bisector perpendicular ×
+  //  1/cos(halfTurn)) shared by the deck strip AND the solid lane paint in
+  //  smooth mode, so both surfaces derive from the SAME per-point offsets and
+  //  can never gap/desync at a bend — the floating-yellow-line doctrine
+  //  (paint and deck read one record) applied to geometry.
+  // ============================================================
+  CBZ.highwaySmoothPath = function (pts, radius, step) {
+    radius = radius || 60; step = step || 9;
+    if (!pts || pts.length < 3) return (pts || []).map(function (p) { return { x: p.x, z: p.z }; });
+    const out = [{ x: pts[0].x, z: pts[0].z }];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1];
+      let ax = p1.x - p0.x, az = p1.z - p0.z, bx = p2.x - p1.x, bz = p2.z - p1.z;
+      const la = Math.hypot(ax, az) || 1e-6, lb = Math.hypot(bx, bz) || 1e-6;
+      ax /= la; az /= la; bx /= lb; bz /= lb;
+      const dot = Math.max(-1, Math.min(1, ax * bx + az * bz));
+      const turn = Math.acos(dot);
+      if (turn < 0.02) { out.push({ x: p1.x, z: p1.z }); continue; }   // effectively straight
+      // tangent offset t = r·tan(turn/2), clamped to 45% of each adjacent leg
+      // (never let two corners' fillets collide mid-leg); r re-derives from a
+      // clamped t so the arc stays tangent to both legs.
+      let r = radius, t = r * Math.tan(turn / 2);
+      const tMax = Math.min(la * 0.45, lb * 0.45);
+      if (t > tMax) { t = tMax; r = t / Math.tan(turn / 2); }
+      const Ax = p1.x - ax * t, Az = p1.z - az * t;      // arc start (on leg a)
+      const Bx = p1.x + bx * t, Bz = p1.z + bz * t;      // arc end   (on leg b)
+      const s = (ax * bz - az * bx) >= 0 ? 1 : -1;       // turn handedness
+      const Cx = Ax + (-az * s) * r, Cz = Az + (ax * s) * r;   // arc centre (inside the turn)
+      const a0 = Math.atan2(Az - Cz, Ax - Cx);
+      let sweep = Math.atan2(Bz - Cz, Bx - Cx) - a0;
+      while (sweep > Math.PI) sweep -= 2 * Math.PI;      // |sweep| = turn < π, so this
+      while (sweep < -Math.PI) sweep += 2 * Math.PI;     // normalization is exact
+      const n = Math.max(2, Math.ceil(Math.abs(sweep) * r / step));
+      for (let k = 0; k <= n; k++) {
+        const ang = a0 + sweep * (k / n);
+        out.push({ x: Cx + Math.cos(ang) * r, z: Cz + Math.sin(ang) * r });
+      }
+    }
+    out.push({ x: pts[pts.length - 1].x, z: pts[pts.length - 1].z });
+    return out;
+  };
+
+  function ribbonFrames(path) {
+    const n = path.length, frames = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = path[i], pPrev = path[i > 0 ? i - 1 : i], pNext = path[i < n - 1 ? i + 1 : i];
+      let d0x = p.x - pPrev.x, d0z = p.z - pPrev.z, d1x = pNext.x - p.x, d1z = pNext.z - p.z;
+      const l0 = Math.hypot(d0x, d0z), l1 = Math.hypot(d1x, d1z);
+      if (l0 > 1e-6) { d0x /= l0; d0z /= l0; } else { d0x = d1x; d0z = d1z; }
+      if (l1 > 1e-6) { d1x /= l1; d1z /= l1; } else { d1x = d0x; d1z = d0z; }
+      let tx = d0x + d1x, tz = d0z + d1z;
+      const tl = Math.hypot(tx, tz);
+      if (tl > 1e-6) { tx /= tl; tz /= tl; } else { tx = d1x; tz = d1z; }
+      // mitre: offset along the bisector perpendicular, scaled 1/cos(halfTurn)
+      // so the joined edges stay parallel to BOTH legs (clamped ×2 — a fillet-
+      // subdivided arc turns ≤ ~12°/joint, so the clamp only guards bad input).
+      const cosHalf = Math.max(0.5, tx * d1x + tz * d1z);
+      frames[i] = { x: p.x, z: p.z, px: -tz / cosHalf, pz: tx / cosHalf };
+    }
+    return frames;
+  }
+
   // seeded LCG for the grain speckle below — FIX: this used to call
   // Math.random() directly, so the asphalt texture's grain pattern differed
   // every reload (determinism contract violation). Seeded per theme deck
@@ -167,8 +241,13 @@
   // how long the road — every dash/line accumulates into shared arrays then builds
   // once (the world.js paintMesh discipline). Lane offsets match the lanes the
   // traffic AI drives (±k·laneW dividers, ±(width/2−0.4) edge lines).
-  function buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt, medianW) {
+  function buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt, medianW, miter) {
     const white = [], yellow = [], yOff = 0.015;
+    // smooth/mitre mode (multi-segment polyline routes): SOLID lines ride the
+    // same per-point ribbon frames as the deck strip — shared offsets, so the
+    // paint can never gap or drift off the deck at a bend. Dashes stay the
+    // per-segment walker below (each dash is short and never spans a joint).
+    const frames = miter ? ribbonFrames(path) : null;
     // half-width of the physical median band: every lane offset shifts outward
     // by this, so lane 1 is a full laneW wide instead of being squeezed between
     // the median edge and a divider still sitting at ±1·laneW (the old bug).
@@ -187,6 +266,18 @@
       arr.push(aLx, aLy, aLz, aRx, aRy, aRz, bRx, bRy, bRz, aLx, aLy, aLz, bRx, bRy, bRz, bLx, bLy, bLz);
     }
     function solid(arr, off, hw) {
+      if (frames) {              // mitre strip: joint offsets shared with the deck
+        for (let i = 0; i < frames.length - 1; i++) {
+          const a = frames[i], b = frames[i + 1];
+          const aLx = a.x + a.px * (off - hw), aLz = a.z + a.pz * (off - hw);
+          const aRx = a.x + a.px * (off + hw), aRz = a.z + a.pz * (off + hw);
+          const bLx = b.x + b.px * (off - hw), bLz = b.z + b.pz * (off - hw);
+          const bRx = b.x + b.px * (off + hw), bRz = b.z + b.pz * (off + hw);
+          const aLy = hAt(aLx, aLz), aRy = hAt(aRx, aRz), bLy = hAt(bLx, bLz), bRy = hAt(bRx, bRz);
+          arr.push(aLx, aLy, aLz, aRx, aRy, aRz, bRx, bRy, bRz, aLx, aLy, aLz, bRx, bRy, bRz, bLx, bLy, bLz);
+        }
+        return;
+      }
       for (let i = 0; i < path.length - 1; i++) {
         const a = path[i], b = path[i + 1]; let dx = b.x - a.x, dz = b.z - a.z;
         const L = Math.hypot(dx, dz) || 1e-3; dx /= L; dz /= L;
@@ -246,10 +337,15 @@
   // mainland — which is dead flat by contract — is completely unaffected
   // (terrainHeight is itself exactly 0 there, so even a caller that DID pass
   // it would see no change inside the flat region).
-  function buildDeck(path, width, y, mat, vRepeatPerM, heightAt) {
+  function buildDeck(path, width, y, mat, vRepeatPerM, heightAt, miter) {
     const hAt = typeof heightAt === "function" ? heightAt : function () { return y; };
     const pos = [], uv = [], nrm = [];
     let vAcc = 0;
+    // smooth/mitre mode: consecutive quads SHARE their joint edge (per-point
+    // bisector frames), so a fillet-subdivided bend is a watertight strip —
+    // the old per-segment quads would leave sliver gaps on the outside of
+    // every arc step. Default (miter falsy) is byte-identical to before.
+    const frames = miter ? ribbonFrames(path) : null;
     for (let i = 0; i < path.length - 1; i++) {
       const a = path[i], b = path[i + 1];
       let dx = b.x - a.x, dz = b.z - a.z;
@@ -258,8 +354,13 @@
       const px = -dz * width / 2, pz = dx * width / 2;   // half-width perpendicular
       const v0 = vAcc, v1 = vAcc + segLen * vRepeatPerM; vAcc = v1;
       // corners: left/right at a and b, each sampled for its own grade height
-      const aLx = a.x - px, aLz = a.z - pz, aRx = a.x + px, aRz = a.z + pz;
-      const bLx = b.x - px, bLz = b.z - pz, bRx = b.x + px, bRz = b.z + pz;
+      let aLx = a.x - px, aLz = a.z - pz, aRx = a.x + px, aRz = a.z + pz;
+      let bLx = b.x - px, bLz = b.z - pz, bRx = b.x + px, bRz = b.z + pz;
+      if (frames) {
+        const fa = frames[i], fb = frames[i + 1], h = width / 2;
+        aLx = fa.x - fa.px * h; aLz = fa.z - fa.pz * h; aRx = fa.x + fa.px * h; aRz = fa.z + fa.pz * h;
+        bLx = fb.x - fb.px * h; bLz = fb.z - fb.pz * h; bRx = fb.x + fb.px * h; bRz = fb.z + fb.pz * h;
+      }
       const aLy = hAt(aLx, aLz), aRy = hAt(aRx, aRz), bLy = hAt(bLx, bLz), bRy = hAt(bRx, bRz);
       const aL = [aLx, aLy, aLz], aR = [aRx, aRy, aRz];
       const bL = [bLx, bLy, bLz], bR = [bRx, bRy, bRz];
@@ -413,7 +514,13 @@
     // cached buildHighway revision with HWY-3 still referencing a variable
     // that no longer existed.  Keep road publication independent of scenery.
     const cityRoads = opts.cityRoads || (CBZ.city && CBZ.city.roads) || null;
-    const path = (opts.path && opts.path.length >= 2) ? opts.path : [{ x: 0, z: 0 }, { x: 0, z: 100 }];
+    let path = (opts.path && opts.path.length >= 2) ? opts.path : [{ x: 0, z: 0 }, { x: 0, z: 100 }];
+    // SMOOTH POLYLINE MODE (highwaynet.js): fillet every bend into an arc and
+    // build deck + solid paint as mitre-joined strips over shared per-point
+    // frames. Opt-in only — every existing 2-point/L causeway caller stays
+    // byte-identical on the per-segment path below.
+    const smooth = !!opts.smooth;
+    if (smooth && path.length > 2) path = CBZ.highwaySmoothPath(path, opts.filletRadius || 60, opts.filletStep || 9);
     const width = opts.width != null ? opts.width : 24;
     // ROADS_V2 (owner: "never many lanes or wide highways"): a paved highway
     // defaults to a REAL 3+3 cross-section with a hard median — 6×3.6m lanes +
@@ -471,10 +578,10 @@
     if (tex) { tex.repeat.set(width / 8, 1); deckMat = new THREE.MeshLambertMaterial({ map: tex }); }
     else deckMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(theme.deck) });
     const vRepeatPerM = tex ? (1 / 8) : 0.0625;        // tile every ~8m along (U tiles via tex.repeat.x)
-    const deck = buildDeck(path, width, deckY, deckMat, vRepeatPerM, heightAt);
+    const deck = buildDeck(path, width, deckY, deckMat, vRepeatPerM, heightAt, smooth);
     group.add(deck.mesh);
     if (markings) {
-      const lanePaint = buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt, medianW);
+      const lanePaint = buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt, medianW, smooth);
       for (let i = 0; i < lanePaint.length; i++) group.add(lanePaint[i]);
     }
     // per-point grade sample used by every prop below (colliders/rails/poles/
