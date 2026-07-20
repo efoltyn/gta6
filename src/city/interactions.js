@@ -258,10 +258,11 @@
     return s.trim() || String(text || "");
   }
 
-  // Resolve ONE context proposal.  Every interaction in the city now has the
-  // same grammar: E = YES, I = NO.  Authored registries may still contribute
-  // many possible verbs; priority/context chooses the one that makes sense now
-  // instead of dumping a five-key action list on the player.
+  // Resolve ONE context proposal.  OWNER DOCTRINE: a card lists ONLY doable
+  // actions — the single verb that fits right now (E = do it). Declining is
+  // walking away / not tapping; "NO" is never a rendered row. Authored
+  // registries may still contribute many verbs; priority/context chooses the
+  // one that makes sense instead of dumping a five-key action list.
   function resolveRows(cand, ctx) {
     const t = cand.t, gp = !!cand.gunpoint;
     let pool = [];
@@ -289,8 +290,9 @@
     const proposal = stripTargetName(String(labelOf(chosen, t, ctx) || "Continue").replace(/[?.!]+$/, ""), t);
     const standing = standingGates(chosen, t) ? interactionStanding(t) : null;
     const rows = [
+      // ONLY the doable verb. No decline row: walking away (look off / don't
+      // tap) is how you decline — owner doctrine, "NO is not an option".
       { key: "e", hold: false, label: "YES", bad: false, opt: chosen, decision: "yes", proposal, standing },
-      { key: "i", hold: false, label: "NO", bad: false, opt: chosen, decision: "no", proposal, standing },
     ];
     rows._pass = pass;   // the full gated pool — the airliner verb card picks from it
     return rows;
@@ -372,15 +374,9 @@
     // from the cached panel or a held key.
     if (!campaignAllows(r.opt, current.t, current)) { dirty = true; return; }
     const t = current.t, verb = r.proposal || labelOf(r.opt, t, ctx);
-    if (r.decision === "no") {
-      rememberChoice(t, verb, false);
-      if (isHuman(t) && CBZ.cityRelShift) CBZ.cityRelShift(t, current.gunpoint ? "spared" : "snubbed", current.gunpoint ? 0.35 : 0.12);
-      if (r.opt.onDecline) r.opt.onDecline(t, ctx);
-      dismissedTarget = t; dismissT = 1.35;
-      hidePanel();
-      dirty = true;
-      return;
-    }
+    // Every row is a doable action now — there is no decline branch. The old
+    // decision:"no" path (snub/spare rel-shift + onDecline dispatch) is gone
+    // with the NO row; declining is walking away, not a keypress.
     const standing = standingGates(r.opt, t) ? interactionStanding(t) : null;
     // Force / violence / deal-taking options always land (punch is separate;
     // tribute/tax/handouts are economic, not "please listen to my speech").
@@ -513,12 +509,13 @@
       if (nameEl) nameEl.textContent = rows.dualRide
         ? String(desc.label || "").replace(/\s*—\s*HIJACKABLE\s*$/i, "")
         : desc.label;
-      // Exactly two decisions everywhere.  The proposition lives in the note;
-      // these rows never mutate into a hidden action wheel.
-      // TOUCH (TOUCH_VERB_PROMPTS): no keyboard letters — the YES row becomes
-      // ONE big pill carrying the VERB ITSELF ("HIJACK THE AIRLINER"), the NO
-      // row a small dismiss pill. Same .iopt/data-i contract, so the existing
-      // click dispatch above fires them; targeting/verb logic is untouched.
+      // ONE doable verb per card (the airliner BOARD/HIJACK is the lone
+      // two-ACTION exception — never a YES/NO). The proposition lives in the
+      // note; these rows never mutate into a hidden action wheel.
+      // TOUCH (TOUCH_VERB_PROMPTS): no keyboard letters — each row becomes a
+      // pill carrying the VERB ITSELF ("HIJACK THE AIRLINER"). Same .iopt/
+      // data-i contract, so the existing click dispatch above fires them;
+      // targeting/verb logic is untouched.
       const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
       if (optsEl) optsEl.innerHTML = touchVerbs
         ? rows.map((r, i) => {

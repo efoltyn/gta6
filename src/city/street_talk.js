@@ -281,6 +281,9 @@
     p._streetDone = nowSec() + 2.5;
   }
 
+  // ORPHANED (owner "NO is not an option"): street-offer's decline row is gone,
+  // so nothing wires onDecline anymore — doNo no longer runs. Kept to avoid a
+  // literal-heavy delete mid emoji-sweep; safe to remove once that merge lands.
   function doNo(p) {
     if (!p) return;
     meet(p);
@@ -344,7 +347,6 @@
       return o ? o.label : "Talk";
     },
     onSelect: (p) => doYes(p),
-    onDecline: (p) => doNo(p),
   });
 
   // Describe ped approaches with the level/offer read (panel note uses this).
