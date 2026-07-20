@@ -1004,7 +1004,11 @@
   // (unchanged) and the depth-clear viewmodel can't wall-clip; forward travel is
   // capped (Z held at the carry depth) so the gun never crosses the near plane.
   // Skipped while a real optic (sniper scope / fitted gunsmith optic) owns the
-  // view. Flip false → the gun stays corner-pinned while aiming (prior look).
+  // view, AND for explosive launchers (w.explosive — the RPG): the fat
+  // bore-axis tube centered on the eye filled the zoomed frame with its own
+  // dark silhouette (owner-filmed), so launchers hold the corner carry and
+  // keep only the ADS FOV punch-in.
+  // Flip false → every gun stays corner-pinned while aiming (prior look).
   if (CBZ.CONFIG.FPS_ADS_SIGHTS == null) CBZ.CONFIG.FPS_ADS_SIGHTS = true;
   // CAM_ADS_PITCH_WIDE (systems/camera.js): while AIMING on TOUCH, open the
   // third-person touch pitch clamp from [-0.85,0.75] toward desktop's [-1.0,0.9]

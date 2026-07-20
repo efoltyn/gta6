@@ -3197,12 +3197,23 @@
         // scope FOV owns the view (sniper / gunsmith optic overlay) so a centered
         // receiver can't intrude into the scope glass.
         const scopeUp = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
-        // DEFAULT OFF (owner report, with screenshots): the centered pose put
-        // the voxel receiver IN the sight line — the player stared at the back
-        // of their own gun, and any zoom magnified it into a screen-filling
-        // box. Re-enable only after per-weapon sight-plane tuning; the rest of
-        // the aim package (recoil settle, pitch, assist) is unaffected.
-        const wantSight = CBZ.CONFIG.FPS_ADS_SIGHTS === true && aimHeld && !scopeUp;
+        // LIVE BY DEFAULT: an earlier "default OFF" pass flipped only this gate
+        // to `=== true`, but config.js still seeds FPS_ADS_SIGHTS = true before
+        // this ever reads it — the sighted pose never actually went away, and
+        // with the -0.22 sight plane below the owner has since approved it for
+        // GUNS ("the AR-15 looking gun looks amazing while scoped").
+        // LAUNCHER-CLASS EXCLUDED (owner screenshot: scoped RPG = near-black
+        // screen with a peaked silhouette): the bazooka's bore axis is authored
+        // HIGH (model y=+0.05, tube r=0.11, ~2.3 units long), so the centered
+        // pose parks the tube's top edge ON the camera axis with the warhead
+        // bulb + cone dead in the sight line, and the ADS FOV punch-in
+        // magnifies that dark mass until it swallows the frame. A shoulder tube
+        // has no eye-line iron sights: it HOLDS the corner carry (same pose the
+        // owner already sees hip-firing), keeps the same ADS FOV zoom, and aims
+        // by crosshair/lock-on — and the rocket still visibly soft-launches
+        // from the rendered muzzle socket (muzzleWorld reads the live model).
+        // Gated on w.explosive so any future launcher is excluded with it.
+        const wantSight = CBZ.CONFIG.FPS_ADS_SIGHTS === true && aimHeld && !scopeUp && !w.explosive;
         adsSightK += ((wantSight ? 1 : 0) - adsSightK) * Math.min(1, dt * 12);
         if (adsSightK < 1e-3) adsSightK = 0;
         const sightX = 0.36 * (1 - adsSightK);      // 0.36 → 0.00 (centered)
