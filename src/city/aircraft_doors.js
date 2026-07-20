@@ -59,11 +59,14 @@
     const ud = grp && grp.userData;
     if (ud && ud.cabin && ud.cabin.panel) {
       const cab = ud.cabin;
+      // the airliner walk-in offsets track the up-scaled cabin (cab.scale,
+      // stashed by island_airport.js); doorX/doorZ/floorTop are already scaled.
+      const sc = cab.scale || 1;
       return {
         kind: "panel",
         doorLocal: { x: cab.doorX, z: cab.doorZ },
-        outLocal: { x: cab.doorX, z: cab.doorZ - 1.6 },
-        inLocal: { x: cab.doorX - 1.1, z: -0.6 },
+        outLocal: { x: cab.doorX, z: cab.doorZ - 1.6 * sc },
+        inLocal: { x: cab.doorX - 1.1 * sc, z: -0.6 * sc },
         inY: (grp.position.y || 0) + (cab.floorTop || 0),
       };
     }

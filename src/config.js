@@ -767,6 +767,32 @@
   // cockpit, and the captain's chair seats a live uniformed pilot NPC.
   // Flip false to restore the painted bulkhead door + solid hull.
   if (CBZ.CONFIG.COCKPIT_REAL_DOOR == null) CBZ.CONFIG.COCKPIT_REAL_DOOR = true;
+  // COCKPIT GLASS V2 (city/island_airport.js): the airliner cockpit gets the
+  // SAME building-grade see-through glass the cabin strips use — real
+  // windscreen panes + side quarter windows over OPEN hull/liner apertures
+  // (no opaque windscreen band, no opaque cockpit-room side walls), so the
+  // uniformed pilot is visible from the apron exactly like the seated
+  // passengers and the runway is visible from the pilot seats. Flip false to
+  // restore the opaque dark windscreen band + solid cockpit shell.
+  if (CBZ.CONFIG.AIRLINER_COCKPIT_GLASS_V2 == null) CBZ.CONFIG.AIRLINER_COCKPIT_GLASS_V2 = true;
+  // COCKPIT DOOR SOLID (city/island_airport.js): the (owner-approved) sliding
+  // cockpit-bulkhead leaf gets a real physical collider that tracks its
+  // open/close easing — a closed cockpit door now physically stops you and
+  // opening it is a real passage beat (elevator-grammar y-gated door collider;
+  // the door-easing arc owns the collider's solid state). Flip false to restore
+  // the pass-through leaf (soft-clamp only). Door look/feel/timing are unchanged.
+  if (CBZ.CONFIG.AIRLINER_COCKPIT_DOOR_SOLID == null) CBZ.CONFIG.AIRLINER_COCKPIT_DOOR_SOLID = true;
+  // AIRLINER CABIN CREW (city/island_airport.js): one standing uniformed crew
+  // member in the forward cabin aisle of each parked airliner, facing aft over
+  // the seats — reuses the npclife cabin fill + lifecycle (spawned fresh via the
+  // flight-crew profile, attached → frozen). Flip false to remove.
+  if (CBZ.CONFIG.AIRLINER_CABIN_CREW == null) CBZ.CONFIG.AIRLINER_CABIN_CREW = true;
+  // AIRLINER SCALE (city/island_airport.js): a single up-scale for the walk-in
+  // airliner (fuselage, window bands, door aperture, cabin rows, cockpit — every
+  // derived interior coordinate follows this one number, and the parked planes
+  // shift south so the longer tails stay clear of the terminal). 1.0 reverts to
+  // the original size; the shipped default makes it a genuinely large airliner.
+  if (CBZ.CONFIG.AIRLINER_SCALE == null) CBZ.CONFIG.AIRLINER_SCALE = 1.45;
 
   // NPC SCHEDULES (owner's rule: "at night they should almost all be in bed
   // except maybe gangsters and homeless… simple math and schedules… to give
