@@ -195,6 +195,13 @@ const PASS = `(() => {
   out.overlaps = overlaps; out.overlapSamples = oSamples;
   if (overlaps) out.fails.push("REGION OVERLAPS: " + overlaps + " [" + oSamples.join("; ") + "]");
   if (out.nonFinite) out.fails.push("NON-FINITE terrain samples: " + out.nonFinite);
+  // ---- tree connection law (treeaudit.js): every planted tree seated on its
+  // ground oracle, every part transitively supported — pinned at zero forever.
+  if (CBZ.treeAudit) { try { const ta = CBZ.treeAudit();
+    out.trees = ta.trees;
+    if (ta.unseatedTrunks) out.fails.push("UNSEATED TRUNKS: " + ta.unseatedTrunks);
+    if (ta.floatingCanopies) out.fails.push("FLOATING TREE PARTS: " + ta.floatingCanopies + " across " + ta.brokenChains + " trees");
+  } catch (e) { out.fails.push("treeAudit threw: " + (e && e.message)); } }
   out.peds = (CBZ.cityPeds || []).length;
   return out;
 })()`;
@@ -224,7 +231,7 @@ async function runSeed(seed, label) {
   }
   r.newErrors = errors.slice(errBefore).filter((e) => !/ProgressEvent/.test(e));
   if (r.newErrors.length) r.fails.push(r.newErrors.length + " console errors");
-  tmark(`${label}: ${r.lots}/${r.shops}/${r.roads} lots/shops/roads | sim ${TICKS} ticks in ${r.simMs}ms | mtnOutSnow ${r.mtnOutSnow} cityOnMtn ${r.cityOnMtn} overlaps ${r.overlaps} | peds ${r.peds}`);
+  tmark(`${label}: ${r.lots}/${r.shops}/${r.roads} lots/shops/roads | sim ${TICKS} ticks in ${r.simMs}ms | mtnOutSnow ${r.mtnOutSnow} cityOnMtn ${r.cityOnMtn} overlaps ${r.overlaps} | trees ${r.trees == null ? "-" : r.trees} | peds ${r.peds}`);
   return r;
 }
 
