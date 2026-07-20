@@ -40,6 +40,18 @@ const SEEDS = argS("--seeds", "90210").split(",").map((s) => +s.trim()).filter((
 // ~10s/run. Bump to 600 pre-deploy for extra tail headroom. (See tools/TESTING-LOOPS.md.)
 const TICKS = +argS("--ticks", 400), STEP = +argS("--step", 50), MTN = +argS("--mtn", 25);
 const DET = !argv.includes("--nodet");
+const CALIBRATE = argv.includes("--calibrate");
+// GOLDEN BASELINES (per seed) — closes the benchmark's F4/F8 blind spots
+// (missing landmass, silent world shrink): counts must stay within BAND of
+// the stored golden, and the BIOME NAME SET must match exactly. Update these
+// deliberately when a world-content merge intends to change them — run
+// `node tools/math-gate.mjs --calibrate --seeds 90210,1337` and paste.
+const BIOMES_ALL = ["airport","arena","capeharbor","city","desert","farmland","forest","foundry","goldspire","kesh","kesh_east","kesh_north","keshtown","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
+const GOLDEN = {
+  90210: { lots: 329, shops: 182, roads: 162, biomes: BIOMES_ALL },
+  1337:  { lots: 337, shops: 194, roads: 162, biomes: BIOMES_ALL },
+};
+const BAND = 0.12;
 const MTN_OUT_SNOW_MAX = 60;   // backdrop-ring cells the audit reports on a clean world
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
@@ -141,7 +153,14 @@ const PASS = `(() => {
   for (let x = cx - span; x <= cx + span; x += STEP) for (let z = cz - span; z <= cz + span; z += STEP) {
     cells++;
     let b = "?"; try { b = biomeAt(x, z) || "?"; } catch (_) {}
-    let h = 0; try { h = Math.max(th(x, z) || 0, sh(x, z) || 0); } catch (_) {}
+    // NaN-STRICT (benchmark F7): ||0 masked NaN leaks in every loop — count
+    // non-finite samples explicitly and fail on any.
+    let h = 0;
+    try {
+      const h1 = th(x, z), h2 = sh(x, z);
+      if (!Number.isFinite(h1) || !Number.isFinite(h2)) { out.nonFinite = (out.nonFinite || 0) + 1; }
+      h = Math.max(h1 || 0, h2 || 0);
+    } catch (_) { out.nonFinite = (out.nonFinite || 0) + 1; }
     hist[b] = (hist[b] || 0) + 1;
     if (h > MTN) {
       if (b !== "snow" && b !== "?") mtnOutSnow++;
@@ -175,6 +194,7 @@ const PASS = `(() => {
   }
   out.overlaps = overlaps; out.overlapSamples = oSamples;
   if (overlaps) out.fails.push("REGION OVERLAPS: " + overlaps + " [" + oSamples.join("; ") + "]");
+  if (out.nonFinite) out.fails.push("NON-FINITE terrain samples: " + out.nonFinite);
   out.peds = (CBZ.cityPeds || []).length;
   return out;
 })()`;
@@ -192,6 +212,16 @@ async function runSeed(seed, label) {
   if (!playing) return { fails: ["never reached playing"] };
   tmark(`${label}: world built`);
   const r = (await evl(PASS)) || { fails: ["pass expression returned nothing"] };
+  // GOLDEN assertions (skipped in --calibrate, which prints paste-ready values)
+  const gold = GOLDEN[seed];
+  if (CALIBRATE) {
+    console.log('  GOLDEN[' + seed + '] = { lots: ' + r.lots + ', shops: ' + r.shops + ', roads: ' + r.roads + ', biomes: ' + JSON.stringify((JSON.parse(r.hist || "[]")).map((e) => e.split(":")[0]).sort()) + ' };');
+  } else if (gold) {
+    const off = (v, gv, name) => { if (Math.abs(v - gv) > gv * BAND) r.fails.push("GOLDEN " + name + " " + v + " vs " + gv + " (band " + Math.round(BAND * 100) + "%)"); };
+    off(r.lots, gold.lots, "lots"); off(r.shops, gold.shops, "shops"); off(r.roads, gold.roads, "roads");
+    const seen = (JSON.parse(r.hist || "[]")).map((e) => e.split(":")[0]).sort();
+    if (JSON.stringify(seen) !== JSON.stringify(gold.biomes)) r.fails.push("GOLDEN biome set " + JSON.stringify(seen) + " vs " + JSON.stringify(gold.biomes));
+  }
   r.newErrors = errors.slice(errBefore).filter((e) => !/ProgressEvent/.test(e));
   if (r.newErrors.length) r.fails.push(r.newErrors.length + " console errors");
   tmark(`${label}: ${r.lots}/${r.shops}/${r.roads} lots/shops/roads | sim ${TICKS} ticks in ${r.simMs}ms | mtnOutSnow ${r.mtnOutSnow} cityOnMtn ${r.cityOnMtn} overlaps ${r.overlaps} | peds ${r.peds}`);
