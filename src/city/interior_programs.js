@@ -167,6 +167,7 @@
   function progDeskFarm(r, h) {
     shell(h, r);
     const anchors = [];
+    let feedReg = 0;              // CCTV: cap live-feed monitor faces per floor (city/cctv.js)
     const y = r.y;
     const spanX = (r.x1 - r.x0) - 2.0, spanZ = (r.z1 - r.z0) - 2.8;
     if (spanX < 0.5 || spanZ < 0.5) return { anchors: anchors };
@@ -189,6 +190,10 @@
       h.b.lbox(dx, y + 0.78, seatZ + 0.26, 0.6, 0.7, 0.12, P.chair, { cast: false }); // backrest
       h.b.lbox(dx, y + 0.2, seatZ, 0.1, 0.4, 0.1, P.bezel, { cast: false });       // post
       anchors.push({ x: h.ox + dx, y: y, z: h.oz + seatZ, face: Math.PI, lx: dx, lz: seatZ });
+      // CCTV: a bounded few of these terminals show a live camera feed. The lit
+      // face sits at world (h.ox+dx, y+1.04, h.oz+monZ+0.04) looking +z at the
+      // seat, so the outward screen normal is (0,1). Runtime-visual only.
+      if (feedReg < 3 && CBZ.cctvAddScreen) { CBZ.cctvAddScreen(h.ox + dx, y + 1.04, h.oz + monZ + 0.04, 0, 1); feedReg++; }
     }
     return { anchors: anchors };
   }

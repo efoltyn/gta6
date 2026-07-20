@@ -676,6 +676,20 @@
   // to restore the old spawn (tallest office lot) and the mega-tower's mirror
   // glass + natatorium-under-penthouse layout.
   if (CBZ.CONFIG.EXEC_TOP_OFFICE == null) CBZ.CONFIG.EXEC_TOP_OFFICE = true;
+  // CCTV V1 (owner: "Computers on desks — one of the purposes of them is
+  // cameras. Add cameras to the game… Put footage from the cameras."). On →
+  // city/cctv.js places voxel security cameras deterministically at the bank/
+  // gun/jewelry fronts, the jail gate, military gate, airport terminal, exec
+  // lobby and a hashed handful of street lamps (2 static draw calls total,
+  // registered in CBZ.cctvCameras), and the interior desk terminals + exec
+  // office monitors show a LIVE feed: ONE shared 256x144 render target rendered
+  // from ONE camera at a time (round-robin), mapped onto the nearest monitor
+  // faces — but ONLY while the player is near an interior with monitors, on the
+  // real animation frame, at quality tier >= 2 (off at tiers 0-1, like the
+  // backdrop). Zero render cost otherwise. Placement is build-path hash01 only;
+  // the feed is runtime-visual. Flip false for a one-line revert (no cameras,
+  // no feed). URL A/B: ?cfg_CCTV_V1=0.
+  if (CBZ.CONFIG.CCTV_V1 == null) CBZ.CONFIG.CCTV_V1 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;

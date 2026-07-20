@@ -213,6 +213,9 @@
       glow(dsk.x - 0.39, 1.03, dsk.z + mz, 0.02, 0.34, 0.5, SCREEN, 0.4); // lit pane
       lb(dsk.x - 0.42, 0.8, dsk.z + mz, 0.1, 0.1, 0.12, BEZEL);       // stand
     }
+    // CCTV: the terminal cluster carries a live camera feed (the lit panes face
+    // +x toward the chair). World coords + outward normal (1,0). Runtime-visual.
+    if (CBZ.cctvAddScreen) for (const mz of [-0.66, 0, 0.66]) CBZ.cctvAddScreen(ox + dsk.x - 0.39, Y + 1.03, oz + dsk.z + mz, 1, 0);
     lb(dsk.x - 0.02, 0.81, dsk.z, 0.34, 0.03, 0.9, PALE);             // keyboard slab
     lb(dsk.x + 0.34, 0.86, dsk.z - 1.2, 0.16, 0.22, 0.16, BEZEL);     // phone dock
     glow(dsk.x + 0.3, 1.06, dsk.z + 1.22, 0.2, 0.34, 0.2, WARM, 0.45);// desk lamp
