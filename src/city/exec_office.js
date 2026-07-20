@@ -123,8 +123,23 @@
       if (gg) lb(gapX, WALLH - 0.16, z, gapW, 0.32, PWT, WALLC);
     }
     // a floor-to-ceiling GLASS partition run along Z at fixed x, with slim
-    // mullion posts — real see-through panes on the pooled city glass material.
+    // mullion posts. Each pane registers as CITY GLASS (cityRegisterGlass — the
+    // same shared registry the facade panes and jewelry cases use) so a bullet or
+    // blast SHATTERS it exactly like an exterior window (owner: "the windows in
+    // offices should shatter like the exterior windows do — they don't at all").
+    // cityRegisterGlass builds an individual transparent mesh, which core/batch.js
+    // SPARES (transparent → never merged), so burstPane's visible-flip still hides
+    // it. ox/oz convert b-local → world so the shatter ray hits the pane where it
+    // renders; no collider (o.solid) — the partition stays walk-through as before,
+    // it just breaks now. Fallback keeps the plain pane if the API is absent.
     const gmat = CBZ.cityGlassMat ? CBZ.cityGlassMat() : new THREE.MeshLambertMaterial({ color: 0xbfe9f7, transparent: true, opacity: 0.6 });
+    function glassPane(x, py, pz, pd) {
+      if (CBZ.cityRegisterGlass) { CBZ.cityRegisterGlass(b.group, x, py, pz, 0.06, WALLH - 0.1, pd, ox, oz); return; }
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.06, WALLH - 0.1, pd), gmat);
+      pane.position.set(x, py, pz);
+      pane.castShadow = false; pane.receiveShadow = false;
+      b.group.add(pane);
+    }
     function glassZ(x, z0, z1, gapZ, gapW) {
       gapW = gapW || 1.7;
       const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
@@ -132,10 +147,7 @@
       const segs = gg ? [[lo, gapZ - gapW / 2], [gapZ + gapW / 2, hi]] : [[lo, hi]];
       for (const s of segs) {
         const len = s[1] - s[0]; if (len < 0.25) continue;
-        const pane = new THREE.Mesh(new THREE.BoxGeometry(0.06, WALLH - 0.1, len), gmat);
-        pane.position.set(x, Y + (WALLH - 0.1) / 2 + 0.05, (s[0] + s[1]) / 2);
-        pane.castShadow = false; pane.receiveShadow = false;
-        b.group.add(pane);
+        glassPane(x, Y + (WALLH - 0.1) / 2 + 0.05, (s[0] + s[1]) / 2, len);
       }
       // mullion posts at the ends + doorway jambs; header over the doorway
       const posts = gg ? [lo, gapZ - gapW / 2, gapZ + gapW / 2, hi] : [lo, hi];

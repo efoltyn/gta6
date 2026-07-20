@@ -2313,12 +2313,28 @@
       // — different frames; the pane's world point is origin+shotDir*lastShatterDist.
       let glassPockSuppress = false;
       if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
-        const reach = hit.dist != null ? hit.dist + 0.5 : w.range;
-        CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z, reach, true);
+        // POINT-BLANK FIX (owner: "shoot a window close-up → it shoots through
+        // it"). The muzzle `origin` sits ~0.6-0.9m FORWARD of the eye, so pressing
+        // the barrel to a pane puts the muzzle PAST the glass. cityShatterRay only
+        // breaks a pane the ray CROSSES going forward, so a pane entirely behind
+        // the muzzle is never tested and survives the shot. Start the glass ray at
+        // the EYE instead — always on the near side of whatever the player is up
+        // against — and extend the reach by the same pull-back so the far endpoint
+        // is unchanged. FP: the camera IS the eye, so back up exactly to it (a pane
+        // BEHIND the eye then lands at negative t and is correctly ignored). TP
+        // (shoulder cam — the lens hangs metres back, so it is NOT the eye): a
+        // bounded pull-back behind the muzzle reaches the near side without reaching
+        // a pane behind the player. Backing up ALONG -shotDir keeps the ray colinear
+        // with the shot (no parallax onto a neighbouring pane).
+        let gback = 1.0;
+        if (fps.active && CBZ.camera) gback = Math.min(6.5, origin.distanceTo(CBZ.camera.position));
+        const gox = origin.x - shotDir.x * gback, goy = origin.y - shotDir.y * gback, goz = origin.z - shotDir.z * gback;
+        const reach = (hit.dist != null ? hit.dist + 0.5 : w.range) + gback;
+        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach, true);
         const sd = CBZ.cityLastShatterDist;
         if (sd != null && sd >= 0 && hit.wall && hit.point) {
-          // pane world impact along the muzzle ray
-          const gpx = origin.x + shotDir.x * sd, gpy = origin.y + shotDir.y * sd, gpz = origin.z + shotDir.z * sd;
+          // pane world impact along the (eye-anchored) glass ray
+          const gpx = gox + shotDir.x * sd, gpy = goy + shotDir.y * sd, gpz = goz + shotDir.z * sd;
           const ddx = hit.point.x - gpx, ddy = hit.point.y - gpy, ddz = hit.point.z - gpz;
           // wall sits within the pane's offset + a wall depth (≈0.62) past it (or
           // essentially coincident) → it's the wall behind the just-broken glass.
