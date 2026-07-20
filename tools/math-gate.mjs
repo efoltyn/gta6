@@ -21,7 +21,7 @@
    Then re-runs the FIRST seed and asserts byte-identical counts + biome
    histogram (multiplayer determinism law).
 
-   Usage: node tools/math-gate.mjs [--seeds 90210,1337] [--ticks 600]
+   Usage: node tools/math-gate.mjs [--seeds 90210,1337] [--ticks 400]
           [--step 50] [--mtn 25] [--nodet]
    Exit 0 = MATHGATE: ok. Anything else = FAIL (exit 1).
    Visual tools (studio/street-shot/smoke screenshot) still exist for
@@ -35,7 +35,10 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
 const argS = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
 const SEEDS = argS("--seeds", "90210").split(",").map((s) => +s.trim()).filter((n) => Number.isFinite(n));
-const TICKS = +argS("--ticks", 600), STEP = +argS("--step", 50), MTN = +argS("--mtn", 25);
+// --ticks default is 400, not 600: the delayed-updater-crash class saturates at
+// tick 300 (5 sim-s @ 60/s), so 400 clears it with 33% headroom while trimming
+// ~10s/run. Bump to 600 pre-deploy for extra tail headroom. (See tools/TESTING-LOOPS.md.)
+const TICKS = +argS("--ticks", 400), STEP = +argS("--step", 50), MTN = +argS("--mtn", 25);
 const DET = !argv.includes("--nodet");
 const MTN_OUT_SNOW_MAX = 60;   // backdrop-ring cells the audit reports on a clean world
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
