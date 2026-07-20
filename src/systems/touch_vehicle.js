@@ -189,6 +189,21 @@
       c.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
       c.stroke();
     }
+    // tick LABELS at the quarter marks (0, ¼, ½, ¾, full). With a grand ~1000+
+    // scale a label per tick would crowd, so round quarters keep it legible;
+    // values come straight off `max`, so a future rocket's dial re-numbers itself
+    // for free. The 0 / full endpoints ride out toward the rim corners so they
+    // clear the big centre readout that sits in the dial's bottom gap.
+    c.save();
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "600 13px Fredoka, system-ui, sans-serif";
+    c.fillStyle = "rgba(159,176,198,.9)";
+    for (let i = 0; i <= 8; i += 2) {
+      const a = A0 + (A1 - A0) * (i / 8);
+      const rl = (i === 0 || i === 8) ? R - 22 : R - 40;
+      c.fillText(String(Math.round(max * i / 8)), cx + Math.cos(a) * rl, cy + Math.sin(a) * rl);
+    }
+    c.restore();
     // needle
     const na = A0 + (A1 - A0) * n;
     c.beginPath();
@@ -268,11 +283,15 @@
       const surf = derived && CBZ.aircraftSurfaceY && craft.pos ? CBZ.aircraftSurfaceY(craft.pos.x, craft.pos.z) : 0;
       const alt = Math.max(0, Math.round((craft.pos ? craft.pos.y : 0) - surf));
       const warn = !!(craft.stalled || craft.autorotating);
-      // Gauge RANGE derives from the craft's real top speed (perfVmax, published
-      // by the flight model) so a fast jet's needle can never pin at a hard-coded
-      // 90 again; the old fixed max is only the fallback.
-      const cap = derived && craft.perfVmax ? Math.max(20, craft.perfVmax * 1.06) : (mode === "heli" ? 40 : 90);
-      const key = Math.round(spd), sub = "ALT " + alt + (warn ? " ⚠" : "");
+      // Gauge RANGE is a fixed GRAND scale (owner: "it should go up to THOUSANDS
+      // — what if it's a military plane, or a rocket?"). max(1000, perfVmax·1.25)
+      // keeps the dial reading in the thousands with headroom, so a 170 airliner
+      // or a 420 jet sits LOW on the gauge instead of hugging its own cap, and a
+      // future rocket fits without ever touching the gauge again. Needle + centre
+      // readout stay linear and TRUE — only the SCALE is grand. FLIGHT_GAUGES_
+      // DERIVED=false still reverts to the old fixed 40/90 fallback.
+      const cap = derived && craft.perfVmax ? Math.max(1000, craft.perfVmax * 1.25) : (mode === "heli" ? 40 : 90);
+      const key = Math.round(spd), sub = "ALT " + alt + (warn ? " !" : "");
       if (key !== lastSpeed || sub !== lastSub) {
         lastSpeed = key; lastSub = sub;
         drawDial(spd, cap, "SPD", sub, warn);

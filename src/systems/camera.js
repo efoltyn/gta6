@@ -501,10 +501,15 @@
       // ~smoothTime·speed behind its target, so at the new jet top speeds the
       // craft would drift toward the frame edge. Shrink the follow time as speed
       // rises so the chase stays tight; cars (no craft published) keep 0.12/0.10.
+      // The floor dropped 0.05→0.03 when the jet cap doubled to 420: the old
+      // floor was reached by ~200 m/s, so 200→420 got NO extra tightening and the
+      // lag doubled (~21m). The 0.03 floor (reached ~250 m/s, slopes unchanged so
+      // ≤200 m/s is byte-identical) halves that back to ~12m — 420 frames about
+      // as tightly as 210 used to. A rocket only shrinks it further, still clamped.
       const airSpd = craft ? (craft.speed || 0) : 0;
       const fastAir = craft && (!CBZ.CONFIG || CBZ.CONFIG.FLIGHT_SPEED_V2 !== false);
-      const posS = fastAir ? Math.max(0.05, 0.12 - airSpd * 0.00035) : 0.12;
-      const lookSf = fastAir ? Math.max(0.05, 0.10 - airSpd * 0.00028) : 0.10;
+      const posS = fastAir ? Math.max(0.03, 0.12 - airSpd * 0.00035) : 0.12;
+      const lookSf = fastAir ? Math.max(0.03, 0.10 - airSpd * 0.00028) : 0.10;
       camera.position.x = smoothDamp(camera.position.x, tx, camV.x, posS, fdt);
       camera.position.y = smoothDamp(camera.position.y, ty, camV.y, posS, fdt);
       camera.position.z = smoothDamp(camera.position.z, tz, camV.z, posS, fdt);

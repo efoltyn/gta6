@@ -166,21 +166,30 @@
     jet:      { vmax: 120, thrust: 46, dragK: 0.00042, vstall: 42, vminfly: 34, vr: 55, gacc: 14, rollMax: 0.80, rollRate: 2.0, turnK: 0.42, pitchMax: 0.85, pitchRate: 1.5, bleed: 16, autoLevel: 1.1, span: 10.8 },
     airliner: { vmax: 105, thrust: 28, dragK: 0.00040, vstall: 46, vminfly: 38, vr: 62, gacc: 9,  rollMax: 0.55, rollRate: 1.3, turnK: 0.30, pitchMax: 0.40, pitchRate: 1.0, bleed: 13, autoLevel: 1.6, span: 34 },
   };
-  // FLIGHT_SPEED_V2 top-speed lift. The old vmax/thrust above are the revert
-  // baseline; this raises the caps so each class flies its part — a brisk prop,
-  // a genuinely fast jet, a jetliner-quick airliner. Every craft was CAP-limited
-  // not thrust-limited (quadratic-drag equilibrium sits FAR above these caps:
-  // prop√(26/.00055)=217, jet√(54/.00042)=359, airliner√(34/.0004)=291), so
-  // lifting the cap directly lifts true top speed; the modest thrust bump on the
-  // fast movers just shortens the spool-up so "fast" arrives promptly. Handling
-  // stays controllable: attitude RATES are unchanged and turn radius simply
-  // widens with speed the way a real fast jet's does. High-speed collision is
-  // safe — integrateV2 sweeps the full segment (sweptAirframeImpact), so nothing
-  // tunnels a building/aircraft even at a spiky headless dt.
+  // FLIGHT_SPEED_V2 top-speed lift (GRAND scale). The old vmax/thrust above are
+  // the revert baseline; this raises the caps HARD so each class flies its part —
+  // a brisk prop, a genuinely FAST military jet, a jetliner-quick airliner. The
+  // touch dial now reads on a fixed ~1000 grand scale (touch_vehicle.js), so
+  // these true speeds sit LOW on the gauge with headroom for a future rocket —
+  // the gauge never hugs the craft's cap again. A craft only REACHES its cap if
+  // quadratic-drag equilibrium √(thrust/dragK) sits above it; at the new caps the
+  // jet's old thrust equilibrium (359) fell UNDER 420, so the fast movers get a
+  // thrust bump to put equilibrium back above the cap (prop√(30/.00055)=233 > 110,
+  // jet√(90/.00042)=463 > 420, airliner√(42/.0004)=324 > 240 — all reachable, and
+  // above the vmax·1.05 airspeed clamp so full-throttle level flight actually
+  // pins the top). Handling stays controllable: attitude RATES (roll/pitch/turnK)
+  // are UNCHANGED, so turn radius simply widens with speed the way a real fast
+  // jet's does. High-speed collision is safe — integrateV2 sweeps the FULL frame
+  // segment through the analytic slab test sweptAirframeImpact (no per-step
+  // marching / no distance assumption), so nothing tunnels a building or aircraft
+  // even at 420 m/s on a spiky headless dt. The chase cam's airspeed-scaled
+  // follow (camera.js) is tightened in step so 420 stays framed. Helis stay at
+  // HELI_TOP (~50, already in the owner's 50–55 band) — the complaint was the
+  // fixed-wing speeds, and 50 is a good rooftop-gunship cruise.
   if (FLIGHT_SPEED_V2) {
-    WING_V2.prop.vmax = 82;      WING_V2.prop.thrust = 26;
-    WING_V2.jet.vmax = 210;      WING_V2.jet.thrust = 54;
-    WING_V2.airliner.vmax = 170; WING_V2.airliner.thrust = 34;
+    WING_V2.prop.vmax = 110;     WING_V2.prop.thrust = 30;
+    WING_V2.jet.vmax = 420;      WING_V2.jet.thrust = 90;
+    WING_V2.airliner.vmax = 240; WING_V2.airliner.thrust = 42;
   }
   const RUDDER_RATE = 0.55;    // rad/s flat yaw from QE (fine align/crosswind; weaker than a bank turn)
   const HELI_STRAFE = 18;      // m/s² lateral cyclic accel from QE on the heli
@@ -2372,7 +2381,7 @@
       if (CBZ.cityClearWanted) CBZ.cityClearWanted();
       else if (CBZ.city && CBZ.city.clearWanted) CBZ.city.clearWanted();
       if (campaignActive()) aircraftNote("The Raptor is yours.", 2.8, "Flight Ops");
-      else if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 THE RAPTOR IS YOURS");
+      else if (CBZ.city && CBZ.city.big) CBZ.city.big("THE RAPTOR IS YOURS");
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(60);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
@@ -2441,7 +2450,7 @@
     const alt = Math.max(0, craft.pos.y - floorY(craft.pos.x, craft.pos.z));
     el.style.display = "block";
     const hpPct = craft.maxHp > 0 ? Math.round(100 * craft.hp / craft.maxHp) : 100;
-    const warning = craft.autorotating ? "  ⚠↻" : (craft.stalled ? "  ⚠↘" : "");
+    const warning = craft.autorotating ? "  ↻" : (craft.stalled ? "  ↘" : "");
     // Instrument grammar, not a sentence: altitude, speed, ordnance, integrity.
     // No craft-name/ALT/SPD/MISSILES/HP label wall across the playfield.
     el.textContent = "↥" + alt.toFixed(0) + "m  ›" + (craft.speed || 0).toFixed(0) +
@@ -2479,7 +2488,7 @@
     const x = P.pos.x, z = P.pos.z;
     const c = nearestBoardable(x, z, 6.5);
     // touch: the glyph becomes a BOARD pill (desktop keeps the bare "✈")
-    if (c) { showPrompt(CBZ.touchActionPrompt ? CBZ.touchActionPrompt("@cityAircraftBoardNearest", "BOARD ✈", "✈") : "✈"); return; }
+    if (c) { showPrompt(CBZ.touchActionPrompt ? CBZ.touchActionPrompt("@cityAircraftBoardNearest", "BOARD", "") : ""); return; }
     // A correct, in-place note ONLY when you're standing AT a hangar you OWN
     // (penthouse deck OR the airport Private Hangar) but haven't bagged the jet
     // yet — it tells you the next step. No persistent nag for the unowned case:
