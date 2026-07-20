@@ -1800,7 +1800,7 @@ function updateHUD(dt) {
   document.getElementById("hulltxt").textContent = Math.max(0, Math.round(boat.hull)) + "/" + hullMax();
   document.getElementById("kitBolts").textContent = "HARPOON ×" + bolts;
   document.getElementById("kitChum").textContent = "CHUM ×" + chum;
-  document.getElementById("kitAnchor").textContent = mode === "boat" ? (boat.anchored ? "⚓ DOWN" : "⚓ UP") : "";
+  document.getElementById("kitAnchor").textContent = mode === "boat" ? (boat.anchored ? "ANCHOR DOWN" : "ANCHOR UP") : "";
   const depth = mode === "dive" ? Math.max(0, -diver.pos.y) : 0;
   document.getElementById("depth").textContent = mode === "dive" ? depth.toFixed(0) + " m" : (isNight() ? "NIGHT ×2" : "DAY");
   document.getElementById("reticle").classList.toggle("show", (mode === "dive" || mode === "boat") && bolts > 0 && !kioskOpen);
