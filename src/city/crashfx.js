@@ -207,6 +207,11 @@
     bursts.push(b);
   }
 
+  // owner: "the fake ring that comes around at first is stupid and should be
+  // gone" — the ground shockwave rings on explosions are OFF unless
+  // CBZ.CONFIG.FX_EXPLOSION_RINGS === true (one-line restore). The car-crash
+  // glass ring and the dust skirt are different effects and keep running.
+  function ringsOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.FX_EXPLOSION_RINGS === true); }
   function ring(x, z, radius, color, opt) {
     opt = opt || {};
     const inner = opt.inner == null ? 0.7 : opt.inner;
@@ -603,8 +608,12 @@
 
     // ---- LAYER 1: FLASH (t=0) — a blinding white-hot core that snaps in and
     // dies in ~0.1s; this is the muzzle of the blast that backlights everything.
-    spawnPuff(x, cy + 0.3, z, { additive: true, base: 7 * P, pop: 7.5 * P, life: 0.1, maxOp: 1 });
-    spawnPuff(x, cy + 0.3, z, { additive: true, base: 1, pop: 4.5 * P, life: 0.22, maxOp: 1 }); // bright inner pop
+    // FB: fireball boost (owner: "the explosion should be even bigger") —
+    // grows the FLASH + FIREBALL reads ~35% while smoke/debris counts stay
+    // put (size-led growth, not particle spam).
+    const FB = 1.35;
+    spawnPuff(x, cy + 0.3, z, { additive: true, base: 7 * P, pop: 7.5 * P * FB, life: 0.1, maxOp: 1 });
+    spawnPuff(x, cy + 0.3, z, { additive: true, base: 1, pop: 4.5 * P * FB, life: 0.22, maxOp: 1 }); // bright inner pop
 
     // ---- LAYER 2: FIREBALL — a cluster of soft additive puffs that punch
     // outward and ramp white→yellow→orange→deep-red. Overlap sums toward
@@ -613,11 +622,11 @@
     // the fireball core now visibly burns for a couple of seconds, same as the
     // ramp/fade math in updatePuffs already supports — only the spawn-side
     // `life` was too short. Background smoke (LAYER 3 below) was already long.
-    const nFire = Math.round(14 * P);
+    const nFire = Math.round(16 * P);
     for (let i = 0; i < nFire; i++) {
       const a = rng() * 6.2832, rr = rng() * 0.9 * P, sp = (1.0 + rng() * 2.2);
       spawnPuff(x + Math.cos(a) * rr, cy + (rng() - 0.15) * P, z + Math.sin(a) * rr,
-        { additive: true, base: 0.6, pop: (3.4 + rng() * 1.8) * P, life: 1.9 + rng() * 1.3,
+        { additive: true, base: 0.6, pop: (3.4 + rng() * 1.8) * P * FB, life: 1.9 + rng() * 1.3,
           maxOp: 1, spin: (rng() - 0.5) * 3,
           vx: Math.cos(a) * sp, vy: 0.4 + rng() * 1.2, vz: Math.sin(a) * sp });
     }
@@ -625,7 +634,7 @@
     // meaningless 30u up a facade, so elevated blasts skip the road wash)
     if (!elevated) for (let i = 0; i < Math.round(5 * P); i++) {
       const a = rng() * 6.2832, sp = 3 + rng() * 4 * P;
-      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + rng()) * P, life: 1.4 + rng() * 0.9,
+      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + rng()) * P * FB, life: 1.4 + rng() * 0.9,
         maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.2, vz: Math.sin(a) * sp });
     }
     // lingering FLAMES that keep licking up from the blast seat for a beat
@@ -676,8 +685,10 @@
     // that races out JUST AFTER the flash, plus a slower glowing hot rim.
     // (an elevated blast never touched the road — no ground ring/scorch)
     if (!elevated) {
-      ring(x, z, R * 1.15, 0xffe7b0, { additive: true, opacity: 0.85, inner: 1.05, spd: 5.0, life: 0.42, flat: true, y: 0.06, r0: 0.6 });
-      ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.6, inner: 0.78, spd: 2.4, life: 0.55, y: 0.1 });
+      if (ringsOn()) {
+        ring(x, z, R * 1.15, 0xffe7b0, { additive: true, opacity: 0.85, inner: 1.05, spd: 5.0, life: 0.42, flat: true, y: 0.06, r0: 0.6 });
+        ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.6, inner: 0.78, spd: 2.4, life: 0.55, y: 0.1 });
+      }
       // ---- LAYER 4b: GROUND DUST — the pressure wave SLAPS the street: a pale
       // dust skirt races outward just behind the bright ring (fast, low, short-
       // lived) plus a kicked-up dust haze that hangs a beat. This is what makes
@@ -906,9 +917,11 @@
     }
 
     // ---- SHOCKWAVE: a bigger, faster bright ground ring + a slower glowing rim ----
-    ring(x, z, R * 1.2, 0xffe7b0, { additive: true, opacity: 0.9, inner: 1.05, spd: 6.0, life: 0.5, flat: true, y: 0.06, r0: 0.7 });
-    ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.65, inner: 0.78, spd: 2.8, life: 0.7, y: 0.1 });
-    ring(x, z, R * 0.7, 0xfff2cc, { additive: true, opacity: 0.7, inner: 0.9, spd: 7.5, life: 0.4, flat: true, y: 0.08, r0: 0.5 });
+    if (ringsOn()) {
+      ring(x, z, R * 1.2, 0xffe7b0, { additive: true, opacity: 0.9, inner: 1.05, spd: 6.0, life: 0.5, flat: true, y: 0.06, r0: 0.7 });
+      ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.65, inner: 0.78, spd: 2.8, life: 0.7, y: 0.1 });
+      ring(x, z, R * 0.7, 0xfff2cc, { additive: true, opacity: 0.7, inner: 0.9, spd: 7.5, life: 0.4, flat: true, y: 0.08, r0: 0.5 });
+    }
 
     // ---- SPARKS + EMBERS + DEBRIS ----
     pointBurst(x, z, Math.round(40 * P), 0xffe08a, 0.18, 12 + 8 * power, 0.7, false); // fast bright sparks
