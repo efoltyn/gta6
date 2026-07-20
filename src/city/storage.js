@@ -478,9 +478,9 @@
       const prop = s.prop;
       // CBZ.touchActionPrompt: desktop keeps the exact "[G] …" string; touch
       // renders a tappable verb pill that synthesizes the same G press.
-      if (!owns(prop.id)) showPrompt(CBZ.touchActionPrompt("g", prop.name + " — Buy " + money(prop.cost)));
-      else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", prop.name + (g.cityOwnsJet ? "" : " — land a stolen F-22 here")));
-      else showPrompt(CBZ.touchActionPrompt("g", prop.name + " — store / retrieve" + (prop.kind === "warehouse" ? " / ammo" : "")));
+      if (!owns(prop.id)) showPrompt(CBZ.touchActionPrompt("g", "Buy " + money(prop.cost)));
+      else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", g.cityOwnsJet ? "Hangar" : "Hangar — needs a jet"));
+      else showPrompt(CBZ.touchActionPrompt("g", "Storage"));
       return;
     }
     hidePrompt();

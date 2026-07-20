@@ -876,9 +876,9 @@
     // station. Use only a quiet symbol—account details live in the bank panel
     // and phone, not in a paragraph pasted over the world. On touch the symbol
     // becomes a worded verb pill (tap fires the same [E] handler below).
-    if (st.kind === "teller") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "USE TELLER", "◆") : "◆";
-    if (st.kind === "atm") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "USE ATM", "▣") : "▣";
-    if (st.kind === "loan") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "LOAN DESK", "◇") : "◇";
+    if (st.kind === "teller") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "Teller", "◆") : "◆";
+    if (st.kind === "atm") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "ATM", "▣") : "▣";
+    if (st.kind === "loan") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "Loan", "◇") : "◇";
     return "";
   }
   function actOn(st) {
