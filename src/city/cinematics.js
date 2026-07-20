@@ -383,7 +383,7 @@
           const w = seatWorld(rideCtx.car, seatLocal.frontP);
           return Math.hypot(px - w.x, pz - w.z) < 3.4 ? { x: w.x, z: w.z, pos: new THREE.Vector3(w.x, 1, w.z) } : null;
         },
-        options: [{ id: "cine-front-e", slot: "e", label: "Take the FRONT seat (as told)", onSelect: () => beginRide("front") }],
+        options: [{ id: "cine-front-e", slot: "e", label: "Front seat", onSelect: () => beginRide("front") }],
       });
       I.registerZone({
         id: "cine-ride-back", kind: "cine-back", prio: 9, radius: 3.4,
@@ -392,7 +392,7 @@
           const w = seatWorld(rideCtx.car, seatLocal.rearP);
           return Math.hypot(px - w.x, pz - w.z) < 2.6 ? { x: w.x, z: w.z, pos: new THREE.Vector3(w.x, 1, w.z) } : null;
         },
-        options: [{ id: "cine-back-i", slot: "i", label: "Slide into the BACK seat", onSelect: () => beginRide("back") }],
+        options: [{ id: "cine-back-i", slot: "i", label: "Back seat", onSelect: () => beginRide("back") }],
       });
       S.zones.push("cine-ride-front", "cine-ride-back");
     }

@@ -1091,7 +1091,7 @@
     canShow: function (b) {
       return g.mode === "city" && !!b && !!b._armorLoot && !b._armorTaken && !!CBZ.cityLootArmorFromCorpse;
     },
-    label: function (b) { const nm = corpseArmorKitName(b); return "Take their armor" + (nm ? " — " + nm : ""); },
+    label: function (b) { return "Take armor"; },
     onSelect: function (b) {
       if (!b || b._armorTaken || !CBZ.cityLootArmorFromCorpse) return;
       const took = CBZ.cityLootArmorFromCorpse(b);   // equips it onto the player + returns what was taken

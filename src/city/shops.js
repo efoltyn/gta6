@@ -433,39 +433,39 @@
 
   function services(kind) {
     const s = [];
-    if (kind === "hospital") s.push({ key: "h", label: "Heal to full — $200", fn: healFull });
-    if (kind === "bank") { s.push({ key: "d", label: "Deposit all cash (safe on death)", fn: deposit }); s.push({ key: "w", label: "Withdraw $500", fn: withdraw }); }
-    if (kind === "gas" && CBZ.player.driving) s.push({ key: "r", label: "Refuel car", fn: () => CBZ.city.note("Tank filled.", 1.2) });
-    if (kind === "gym") s.push({ key: "t", label: "Train — +10 max HP ($100)", fn: train });
-    if (kind === "carlot") s.push({ key: "c", label: "Buy a car — $1,500", fn: buyCar });
-    if (kind === "carlot") s.push({ key: "y", label: (g.cityCarBiz && g.cityCarBiz.open) ? "Manage your car-resale yard" : "Open a car-resale yard — $2,000 (free if you own this lot)", fn: () => CBZ.cityOpenCarBiz && CBZ.cityOpenCarBiz() });
-    if (kind === "realtor") s.push({ key: "h", label: "Browse homes — rent or buy", fn: () => CBZ.cityHomeMenu && CBZ.cityHomeMenu() });
-    if (kind === "chop") s.push({ key: "c", label: "Sell a car — drive it into the bay out front", fn: () => CBZ.city.note("Drive a (stolen) car into the chop bay out front to cash it out.", 2.4) });
-    if (kind === "bank") s.push({ key: "p", label: "Pay off the cops — bribe down 1 star", fn: bribe });
-    if (kind === "security") s.push({ key: "j", label: "Apply: Security Guard job", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("security") });
-    if (kind === "drugs") s.push({ key: "j", label: "Become a dealer (street sales)", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("dealer") });
-    if (kind === "bar") s.push({ key: "j", label: "Run the night crew (pimp/entrepreneur)", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("pimp") });
+    if (kind === "hospital") s.push({ key: "h", label: "Heal $200", fn: healFull });
+    if (kind === "bank") { s.push({ key: "d", label: "Deposit", fn: deposit }); s.push({ key: "w", label: "Withdraw $500", fn: withdraw }); }
+    if (kind === "gas" && CBZ.player.driving) s.push({ key: "r", label: "Refuel", fn: () => CBZ.city.note("Tank filled.", 1.2) });
+    if (kind === "gym") s.push({ key: "t", label: "Train $100", fn: train });
+    if (kind === "carlot") s.push({ key: "c", label: "Buy $1,500", fn: buyCar });
+    if (kind === "carlot") s.push({ key: "y", label: (g.cityCarBiz && g.cityCarBiz.open) ? "Yard" : "Open yard $2,000", fn: () => CBZ.cityOpenCarBiz && CBZ.cityOpenCarBiz() });
+    if (kind === "realtor") s.push({ key: "h", label: "Homes", fn: () => CBZ.cityHomeMenu && CBZ.cityHomeMenu() });
+    if (kind === "chop") s.push({ key: "c", label: "Sell car", fn: () => CBZ.city.note("Drive a (stolen) car into the chop bay out front to cash it out.", 2.4) });
+    if (kind === "bank") s.push({ key: "p", label: "Bribe", fn: bribe });
+    if (kind === "security") s.push({ key: "j", label: "Apply", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("security") });
+    if (kind === "drugs") s.push({ key: "j", label: "Deal", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("dealer") });
+    if (kind === "bar") s.push({ key: "j", label: "Run crew", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("pimp") });
     // the OTHER half of the "drinks · run the night crew" verb: an actual round.
     // The bar has no SHOP_STOCK (so no BUY list) and the food heal path is gated
     // to kind==="food", so a drink would otherwise do nothing — give it a real,
     // kind-local effect here (mirrors the food heal+boost, sized for a quick one).
     // [K] is free at the bar: 'j'/'b' are taken, and the closet's [K] only ever
     // arms in a boutique (bar isn't one), so it can't collide.
-    if (kind === "bar") s.push({ key: "k", label: "Buy a round — $12 (drink up)", fn: buyDrink });
-    if (kind === "casino") s.push({ key: "g", label: "Casino, sportsbook, fight and race betting", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Betting") });
-    if (kind === "raceway") s.push({ key: "r", label: "Racing board: legal, street, drag", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
-    if (kind === "racepark") s.push({ key: "r", label: "Horse and greyhound betting", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
-    if (kind === "arena" || kind === "gym") s.push({ key: "f", label: "Fight card: boxing and MMA", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
-    if (kind === "paintball") s.push({ key: "p", label: "Paintball match board", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
-    if (kind === "transit") s.push({ key: "t", label: "Bus and train routes", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Transit") });
-    if (kind === "cityhall") s.push({ key: "p", label: "Politics, permits, civic contracts", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Civic") });
-    if (kind === "airfield") s.push({ key: "w", label: "War, air support and emergency contracts", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Emergency") });
+    if (kind === "bar") s.push({ key: "k", label: "Round $12", fn: buyDrink });
+    if (kind === "casino") s.push({ key: "g", label: "Bet", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Betting") });
+    if (kind === "raceway") s.push({ key: "r", label: "Race", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
+    if (kind === "racepark") s.push({ key: "r", label: "Bet", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
+    if (kind === "arena" || kind === "gym") s.push({ key: "f", label: "Fight", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
+    if (kind === "paintball") s.push({ key: "p", label: "Paintball", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Combat") });
+    if (kind === "transit") s.push({ key: "t", label: "Routes", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Transit") });
+    if (kind === "cityhall") s.push({ key: "p", label: "Civic", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Civic") });
+    if (kind === "airfield") s.push({ key: "w", label: "Contracts", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Emergency") });
     // electronics: spend on a phone upgrade that pings nearby loot/cash on people
-    if (kind === "electronics") s.push({ key: "u", label: (g.cityPhoneTier ? "Upgrade your phone (tier " + g.cityPhoneTier + ")" : "Buy a smartphone — track marks & deals") + " — $" + phoneUpgCost(), fn: phoneUpgrade });
+    if (kind === "electronics") s.push({ key: "u", label: (g.cityPhoneTier ? "Upgrade $" : "Phone $") + phoneUpgCost(), fn: phoneUpgrade });
     // jewelry: ICE OUT — buy the whole chain+ring+grill set at a bundle discount
-    if (kind === "jewelry") s.push({ key: "u", label: "Ice out — buy the full set (bundle deal)", fn: iceOut });
+    if (kind === "jewelry") s.push({ key: "u", label: "Ice out", fn: iceOut });
     // every shop offers the job board if careers exist
-    if (CBZ.cityJobBoard) s.push({ key: "b", label: "Job board (hustles for cash)", fn: () => CBZ.cityJobBoard() });
+    if (CBZ.cityJobBoard) s.push({ key: "b", label: "Jobs", fn: () => CBZ.cityJobBoard() });
     return s;
   }
 

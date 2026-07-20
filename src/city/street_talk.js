@@ -149,43 +149,43 @@
     if (gap >= 12 && max >= 15) {
       kind = "tribute";
       amount = Math.max(5, Math.floor(max * (0.35 + Math.min(0.45, gap * 0.02))));
-      label = "Take their " + money(amount) + " (they fold)";
+      label = "Take " + money(amount);
       yesLine = "They peel off " + money(amount) + ". Eyes on the ground.";
       noLine = "You wave them off. They look grateful and confused.";
     } else if (gap <= -12) {
       kind = "tax";
       amount = Math.max(10, Math.min(myCash() || 10, 20 + Math.floor((-gap) * 3)));
-      label = "Pay their tax (" + money(amount) + ")";
+      label = "Pay " + money(amount);
       yesLine = "You hand over " + money(amount) + ". They smirk.";
       noLine = "You refuse the tax. They clock the disrespect.";
     } else if (pedBroke && !broke && myCash() >= 25) {
       kind = "charity";
       amount = Math.min(40, Math.max(10, Math.floor(myCash() * 0.05)));
-      label = "Slip them " + money(amount);
+      label = "Slip " + money(amount);
       yesLine = "You help them out. They won't forget it.";
       noLine = "You keep your wallet shut. They clock it.";
     } else if (broke && max >= 20) {
       kind = "handout";
       amount = Math.max(8, Math.floor(max * 0.4));
-      label = "Take their " + money(amount) + " pity cash";
+      label = "Take " + money(amount);
       yesLine = "Charity from a stranger. You pocket it.";
       noLine = "Pride over rent money. You walk.";
     } else if (p.job && /dealer|trap|runner/i.test(p.job)) {
       kind = "deal";
       amount = Math.min(80, Math.max(20, Math.floor(max * 0.5)));
-      label = "Small street deal (" + money(amount) + ")";
+      label = "Deal " + money(amount);
       yesLine = "A little product changes hands. Quiet.";
       noLine = "You pass on the bag. Not tonight.";
     } else if (richMe && (p.wealth || 0) > 0.55) {
       kind = "flex";
       amount = 0;
-      label = "Flex / network with them";
+      label = "Flex";
       yesLine = "You talk money. They clock the suit that used to mean something.";
       noLine = "You ghost the networking. Cold.";
     } else {
       kind = "chat";
       amount = 0;
-      label = "Talk / vibe with them";
+      label = "Talk";
       yesLine = "You trade a few lines. City noise fills the gaps.";
       noLine = "You shut it down. They shrug.";
     }

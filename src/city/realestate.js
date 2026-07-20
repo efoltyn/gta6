@@ -139,21 +139,21 @@
     if (!g.cityHome) return;
     mode = "home"; actions = [];
     const home = g.cityHome.lot.building.home;
-    actions.push({ label: "Sleep & heal (set respawn here)", fn: sleepHeal });
-    actions.push({ label: "Deposit all cash to home safe", fn: () => { if (CBZ.cityBankDeposit) CBZ.cityBankDeposit(); else { g.cityBank = (g.cityBank || 0) + (g.cash || 0); g.cash = 0; } CBZ.cityHomeMenuRefresh(); } });
+    actions.push({ label: "Sleep", fn: sleepHeal });
+    actions.push({ label: "Deposit", fn: () => { if (CBZ.cityBankDeposit) CBZ.cityBankDeposit(); else { g.cityBank = (g.cityBank || 0) + (g.cash || 0); g.cash = 0; } CBZ.cityHomeMenuRefresh(); } });
     if (home.garage > 0) {
-      actions.push({ label: "Store current car in garage", fn: storeCar });
-      if ((g.cityGarage || []).length) actions.push({ label: "Pull a car from garage (" + g.cityGarage.length + "/" + home.garage + ")", fn: retrieveCar });
+      actions.push({ label: "Store car", fn: storeCar });
+      if ((g.cityGarage || []).length) actions.push({ label: "Pull car " + g.cityGarage.length + "/" + home.garage, fn: retrieveCar });
     }
-    if (home.elevator) actions.push({ label: "Take the elevator to the penthouse", fn: elevatorUp });
+    if (home.elevator) actions.push({ label: "Penthouse", fn: elevatorUp });
     // ---- AIRBASE: the penthouse's rooftop helipad + deck hangar (the WHY behind
     // the apex price). The helicopter comes WITH the home (g.cityOwnsHeli); the
     // hangar (→ F-22) is a separate add-on offered here once you own the tower.
     const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
     if (isPent && g.cityOwnsHangar) {
-      actions.push({ label: "Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
+      actions.push({ label: "Hangar", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
     } else if (isPent) {
-      actions.push({ label: "Buy the rooftop Hangar — " + money(hangarPrice()) + " (a home for a stolen F-22)", fn: buyHangar });
+      actions.push({ label: "Buy hangar " + money(hangarPrice()), fn: buyHangar });
     }
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>" + home.name + "</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + " · [Esc] leave</div>";

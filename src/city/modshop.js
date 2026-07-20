@@ -1117,7 +1117,7 @@
       case "launcher": {
         const rows = [{ label: "Twin rocket launcher", price: PRICE.launcher, sub: "L-click · " + TUNE.launcherAmmoMax + " rockets",
           owned: !!m.launcher, action: function () { doMod(car, "launcher", null, PRICE.launcher); } }];
-        if (m.launcher) rows.push({ label: "Resupply rockets (full " + TUNE.launcherAmmoMax + ")",
+        if (m.launcher) rows.push({ label: "Resupply",
           price: PRICE.launcherAmmo, sub: "currently " + ((m.launcher.ammo) | 0) + " loaded",
           action: function () { doResupply(car); } });
         return rows;
