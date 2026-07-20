@@ -38,6 +38,16 @@
   // one-line revert for the military-theft swap fix (commandeered base jets/
   // bombers/helis fly their REAL parked model instead of a generic stand-in)
   if (CBZ.CONFIG && CBZ.CONFIG.AIR_MILITARY_REUSE == null) CBZ.CONFIG.AIR_MILITARY_REUSE = true;
+  // CAM_AIRCRAFT_FIT — derive the flyer's chase-camera boom from the craft's
+  // ACTUAL published envelope so a rescaled airframe reframes itself. The civilian
+  // chase constants (spawnFlyableFromProp) were tuned for the ORIGINAL airliner;
+  // the airframe pass up-scaled the airliner (AIRLINER_SCALE, 1.45x) and it now
+  // publishes a per-plane userData.aircraftDims copy, so the enlarged tail fin
+  // filled the frame. Under this flag the boom scales by live-dims / frozen-table-
+  // dims (=1 for any craft at stock size, so the business jet / military / owned
+  // craft stay byte-for-byte on their old booms). false restores the old fixed
+  // constants.
+  if (CBZ.CONFIG && CBZ.CONFIG.CAM_AIRCRAFT_FIT == null) CBZ.CONFIG.CAM_AIRCRAFT_FIT = true;
 
   // ---- NEW MATERIAL API (carfx.js) — fake-reflection env-mapped vehicle mats
   // for instant shine. Falls back to the flat cached cmat() if carfx hasn't
@@ -977,6 +987,25 @@
     // camera pull-back scales with the airframe footprint, so a bomber gets the
     // airliner-style frame while a fighter keeps the tight default chase cam.
     const foot = Math.max(rec.footW || 3, rec.footL || 5);
+    // CAM_AIRCRAFT_FIT: the civilian chase booms below are tuned for each class's
+    // STOCK envelope (airliner 30/14/18, business jet 16/10/10). Scale them by how
+    // far the LIVE airframe deviates from its frozen CITY_AIRCRAFT_DIMS entry — the
+    // up-scaled airliner (AIRLINER_SCALE) publishes a larger per-plane aircraftDims,
+    // so length→boom/look-ahead and height→camera-height both grow with it (the
+    // 1.45x craft frames exactly as the original did, tail fin dropping back below
+    // the sightline). A stock-size craft (the business jet, whose aircraftDims IS
+    // the frozen table entry — or any craft with no per-plane copy → fall back to
+    // the table) divides to 1.0 and is byte-identical; fit stays 1 when the flag is
+    // off too. Military / owned craft carry no aircraftDims and keep their own booms.
+    let fitBack = 1, fitUp = 1;
+    if (civil && (!CBZ.CONFIG || CBZ.CONFIG.CAM_AIRCRAFT_FIT !== false)) {
+      const dimTbl = CBZ.CITY_AIRCRAFT_DIMS && CBZ.CITY_AIRCRAFT_DIMS[rec.flightKind];
+      const dimLive = rec.aircraftDims || dimTbl;
+      if (dimLive && dimTbl && dimTbl.length > 0 && dimTbl.height > 0) {
+        if (dimLive.length > 0) fitBack = dimLive.length / dimTbl.length;   // boom + look-ahead ∝ length
+        if (dimLive.height > 0) fitUp = dimLive.height / dimTbl.height;     // camera height ∝ tail height
+      }
+    }
     const craft = makeCraft(kind, civil ? {
       group: rec.group,
       sourceRec: rec,
@@ -988,9 +1017,9 @@
       groundOffset: rec.groundOffset != null ? rec.groundOffset : 0,
       speed: 0,
       throttle: 0,
-      cameraBack: rec.flightKind === "airliner" ? 30 : 16,
-      cameraUp: rec.flightKind === "airliner" ? 14 : 10,
-      cameraAhead: rec.flightKind === "airliner" ? 18 : 10,
+      cameraBack: (rec.flightKind === "airliner" ? 30 : 16) * fitBack,
+      cameraUp: (rec.flightKind === "airliner" ? 14 : 10) * fitUp,
+      cameraAhead: (rec.flightKind === "airliner" ? 18 : 10) * fitBack,
     } : milGroup ? {
       group: milGroup,
       sourceRec: rec,
