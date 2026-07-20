@@ -76,6 +76,21 @@
 
   // ---- feature flags (one-line revert each) --------------------------------
   if (CBZ.CONFIG.WEAPON_LOCKON == null) CBZ.CONFIG.WEAPON_LOCKON = true;
+
+  // ---- HOMING ON/OFF (owner: "make homing something you can turn off and
+  // on, even on the iPad"). Runtime session state, default ON. OFF = rockets
+  // dumb-fire straight even with a red lock, and the whole square UI stands
+  // down (dumb-fire mode is visually quiet). fpsmode's [H] key and the touch
+  // pill both drive it through this one setter.
+  let homingOn = true;
+  CBZ.lockonHomingOn = function () { return homingOn; };
+  CBZ.lockonHomingSet = function (v) {
+    v = v !== false;
+    if (v === homingOn) return homingOn;
+    homingOn = v;
+    if (!homingOn) resetAll();
+    return homingOn;
+  };
   if (CBZ.CONFIG.SNIPER_REAL_SCOPE == null) CBZ.CONFIG.SNIPER_REAL_SCOPE = true;
   // UNIVERSAL ACQUISITION (owner: "homing works for vehicles and planes, but
   // doesn't work for small planes / police helicopters / a lot of things like
@@ -402,6 +417,7 @@
     const prevPlat = platKey;
     platKey = platform();
     if (!platKey) { if (prevPlat) resetAll(); hideSquares(); return; }
+    if (!homingOn) { if (prevPlat) resetAll(); hideSquares(); return; }   // dumb-fire mode: no squares, no locks
     if (platKey !== prevPlat) resetAll();   // switching seat/weapon drops the lock
     const T = PLATFORMS[platKey];
     gatherCandidates(T);
@@ -613,6 +629,7 @@
   // runs its byte-identical legacy path. NULL = system on, no red lock →
   // straight flight. Record = red lock → home on it.
   CBZ.lockonFireTarget = function () {
+    if (!homingOn) return null;   // dumb-fire mode: red lock or not, no guidance
     if (CBZ.CONFIG.WEAPON_LOCKON === false) return undefined;
     const r = lockedRecord();
     if (r) { launchAt = (CBZ.now || Date.now()); launchKind = platKey; lockFlash = Math.max(lockFlash, 0.3); }
@@ -623,6 +640,7 @@
   // seek getter carries .turnRate (air-to-air snappier than the pool default)
   // and .prox (proximity fuse — near-misses still detonate).
   CBZ.lockonMissileSeek = function () {
+    if (!homingOn) return null;   // dumb-fire mode
     if (CBZ.CONFIG.WEAPON_LOCKON === false) return undefined;
     const r = lockedRecord();
     if (!r) return null;

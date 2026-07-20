@@ -748,13 +748,30 @@
     r.detonate = null; r.seek = null; r.onImpact = null; r.impactPoint = null; r.homing = false;
     if (fn) fn();
   }
+  // SOFT LAUNCH (owner: "start kind of slow just at the very start, just so
+  // you can see the rocket — beautiful and very satisfying"): the round
+  // leaves the tube at 35% authority, holds ~0.3s, then eases to full by
+  // 0.7s. Homing rockets scale their position advance AND turn authority
+  // together (a slow rocket must not out-turn its own speed and orbit);
+  // ballistic rockets remap their arc progress with a power curve — same
+  // arrival time, slow ignition, fast cruise. Theater, not a nerf.
+  if (CBZ.CONFIG.WEAPON_ROCKET_SOFTLAUNCH == null) CBZ.CONFIG.WEAPON_ROCKET_SOFTLAUNCH = true;
+  const SOFT_T0 = 0.3, SOFT_T1 = 0.7, SOFT_K0 = 0.35;
+  function softOn() { return CBZ.CONFIG.WEAPON_ROCKET_SOFTLAUNCH !== false; }
+  function softRamp(t) {
+    if (t <= SOFT_T0) return SOFT_K0;
+    if (t >= SOFT_T1) return 1;
+    const u = (t - SOFT_T0) / (SOFT_T1 - SOFT_T0);
+    return SOFT_K0 + (1 - SOFT_K0) * u * u * (3 - 2 * u);
+  }
   function updateRockets(dt) {
     for (let i = 0; i < rockets.length; i++) {
       const r = rockets[i];
       if (!r.active) continue;
       _rocketPrev.copy(r.mesh.position);
       r.smokeT += dt;
-      if (r.smokeT >= 0.035) { r.smokeT = 0; emitRocketSmoke(_rocketPrev); }
+      // denser trail during the slow phase — the visible-launch beauty beat
+      if (r.smokeT >= ((softOn() && r.t < SOFT_T1) ? 0.018 : 0.035)) { r.smokeT = 0; emitRocketSmoke(_rocketPrev); }
       if (r.homing) {
         r.t += dt; r.life += dt;
         const target = r.seek ? r.seek() : null;
@@ -764,13 +781,13 @@
           if (_rocketWant.lengthSq() > 1e-6) {
             _rocketWant.normalize();
             const dot = Math.max(-1, Math.min(1, _rocketDir.dot(_rocketWant)));
-            const angle = Math.acos(dot), maxTurn = r.turnRate * dt;
+            const angle = Math.acos(dot), maxTurn = r.turnRate * dt * (softOn() ? softRamp(r.life) : 1);
             if (angle <= maxTurn || angle < 1e-4) _rocketDir.copy(_rocketWant);
             else _rocketDir.lerp(_rocketWant, maxTurn / angle).normalize();
             r.velocity.copy(_rocketDir).multiplyScalar(r.speed);
           }
         }
-        r.mesh.position.addScaledVector(r.velocity, dt);
+        r.mesh.position.addScaledVector(r.velocity, dt * (softOn() ? softRamp(r.life) : 1));
         _rocketPos.copy(r.mesh.position);
         _rocketDir.copy(_rocketPos).sub(_rocketPrev);
         const stepLen = _rocketDir.length();
@@ -794,7 +811,9 @@
         continue;
       }
       r.t += dt;
-      const k = Math.min(1, r.t / r.dur);
+      const kLin = Math.min(1, r.t / r.dur);
+      // power remap: slow start, same arrival (pow(1,x)=1) — the soft launch
+      const k = softOn() ? Math.pow(kLin, 1.55) : kLin;
       const sag = r.sagY * 4 * k * (1 - k);
       _rocketPos.set(
         r.ox + (r.dx - r.ox) * k,
@@ -2790,6 +2809,13 @@
     // mashing. Instead we read the live key state once per frame below
     // (rising-edge + cooldown), so buffered duplicates collapse to nothing.
     else if (k === "f" && (fps.active || shoulderActive()) && CBZ.game.mode !== "survival") fireControl(true);
+    // H: homing on/off (owner toggle). Missile-class contexts only; state
+    // cue is the rack sfx pitch + the lock squares standing down — no HUD.
+    else if (k === "h" && CBZ.lockonHomingSet &&
+      ((fps.active || shoulderActive()) && weapon().explosive || (CBZ.player && CBZ.player._aircraft))) {
+      CBZ.lockonHomingSet(!CBZ.lockonHomingOn());
+      if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn() ? 1.25 : 0.8 });
+    }
   });
   addEventListener("keyup", (e) => {
     if (e.key.toLowerCase() === "f") fireControl(false);

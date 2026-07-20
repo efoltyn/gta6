@@ -139,6 +139,7 @@
     reload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/></svg>',
     scope: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v6M12 16.5v6M1.5 12h6M16.5 12h6"/></svg>',
     aim: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8"/><path d="M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8"/><path d="M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
+    homing: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M12 4v-2.5M12 22.5V20M4 12H1.5M22.5 12H20"/></svg>',
   };
   function btn(id, cls, glyph, label) {
     return '<button class="' + cls + '" id="' + id + '" type="button" aria-label="' + label + '">' + glyph + "</button>";
@@ -170,6 +171,7 @@
       btn("treload", "tbtn tsm", SVG.reload, "Reload") +
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
+      btn("thoming", "tbtn tsm", SVG.homing, "Homing on/off") +
       "</div>";
     document.body.appendChild(wrap);
     baseEl = document.getElementById("tstick");
@@ -182,6 +184,12 @@
     holdBtn("tfire", fireHold);
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
+    // homing on/off (owner: toggleable "even on the iPad"). State reads as
+    // lit vs dim + the lock squares standing down — no words, no popup.
+    tapBtn(document.getElementById("thoming"), () => {
+      if (CBZ.lockonHomingSet) CBZ.lockonHomingSet(!CBZ.lockonHomingOn());
+      if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn && CBZ.lockonHomingOn() ? 1.25 : 0.8 });
+    });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
     // AIM (ADS) — the missing iPad right-mouse: hold pulls the camera in /
     // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
@@ -974,5 +982,14 @@
     if (am) am.style.display = (armed && CBZ.fpsSetAim) ? "" : "none";
     const sc = document.getElementById("tscope");
     if (sc) sc.style.display = (armed && CBZ.fpsCanScope && CBZ.fpsCanScope()) ? "" : "none";
+    // HOMING pill: only while the lock-on system has a live missile platform
+    // (RPG in hand, armed aircraft, tank...). Lit = homing on, dim = dumb-fire.
+    const hm = document.getElementById("thoming");
+    if (hm) {
+      // active reads the live platform (platKey), which lockTick still sets
+      // in dumb-fire mode — so the pill stays visible to toggle back ON.
+      hm.style.display = (CBZ.lockonState && CBZ.lockonState().active) ? "" : "none";
+      hm.style.opacity = (CBZ.lockonHomingOn && CBZ.lockonHomingOn()) ? "" : "0.38";
+    }
   });
 })();
