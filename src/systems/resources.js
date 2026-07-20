@@ -56,14 +56,29 @@
   //  rest of city/assets.js's registry even though this file only ever
   //  goes through the pool path.
   // ============================================================
+  // TREES_V2 (config.js): the old harvest tree's canopy base sat at EXACTLY
+  // the trunk top (both at y=1.6 — a zero-margin knife-edge). V2 sinks the
+  // canopy 0.25 onto the trunk and the trunk base 0.05 under the ground
+  // plane, and stacks a small second tier into the same merged geo (still
+  // ONE pooled InstancedMesh — zero draw-call change). Nodes register with
+  // world/treeaudit.js through an alive() gate so a chopped tree never
+  // reads as "missing parts".
+  const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
   if (A && !A.has("harvest-tree")) {
     A.define("harvest-tree", {
       footprint: { hx: 0.6, hz: 0.6 }, clearance: 0.6, y1: 6, zone: "nature",
       instanceable: true,
       geom: function () {
+        const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+        if (TREES2) {
+          const trunk = new THREE.CylinderGeometry(0.18, 0.26, 1.65, 6); trunk.translate(0, 0.775, 0);   // [-0.05 .. 1.6]
+          const canopy = new THREE.ConeGeometry(1.0, 2.2, 7); canopy.translate(0, 2.45, 0);              // [1.35 .. 3.55] — trunk top buried 0.25
+          const tip = new THREE.ConeGeometry(0.62, 1.3, 7); tip.translate(0, 3.35, 0);                   // [2.70 .. 4.00] — second tier, overlaps 0.85
+          if (merge) { const m = merge([trunk, canopy, tip], false); if (m) return m; }
+          return canopy;
+        }
         const trunk = new THREE.CylinderGeometry(0.18, 0.26, 1.6, 6); trunk.translate(0, 0.8, 0);
         const canopy = new THREE.ConeGeometry(1.0, 2.2, 7); canopy.translate(0, 2.7, 0);
-        const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
         if (merge) { const m = merge([trunk, canopy], false); if (m) return m; }
         return canopy;                          // fallback: a bare canopy still reads as "a tree"
       },
@@ -73,7 +88,8 @@
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * s, 0.26 * s, 1.6 * s, 6), cmat(0x5a3d22));
         trunk.position.y = 0.8 * s; ctx.group.add(trunk);
         const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.0 * s, 2.2 * s, 7), cmat(0x3f7a3f));
-        canopy.position.y = 2.7 * s; ctx.group.add(canopy);
+        canopy.position.y = TREES2 ? 2.45 * s : 2.7 * s;   // V2: base 1.35s — the trunk top (1.6s) is buried 0.25s
+        ctx.group.add(canopy);
       },
     });
   }
@@ -147,6 +163,7 @@
   function build() {
     built = true;                       // never retry every frame even if something below bails
     if (!A || !CBZ.placement || !CBZ.CITY) return;
+    if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("harvest");
     const C = CBZ.CITY, cx = C.center.x, cz = C.center.z;
     const N = C.blocks, BLK = C.block, ROAD = C.road;
     const step = BLK + ROAD, half = (N * step) / 2;
@@ -204,6 +221,17 @@
             depleted: false, respawnAt: 0,
           };
           if (!acquireAndSet(node)) continue;    // pool at capacity — skip this candidate
+          if (TREES2 && kind === "tree") {
+            // register with the connection-law audit. The V2 merged geo is one
+            // rigid part (tiers overlap by authored construction — see geom()
+            // above: trunk [-0.05..1.6], canopy [1.35..3.55], tip [2.7..4.0]),
+            // so the audit applies the seat law; alive() skips chopped trees.
+            const parts = [];
+            CBZ.treeAabbPush(parts, _m4, -1.0, -0.05, -1.0, 1.0, 4.0, 1.0);   // _m4 still holds this node's matrix
+            CBZ.treeRegisterTree("harvest", 0, parts, (function (nd) {
+              return function () { return !nd.depleted && nd.slot >= 0; };
+            })(node));
+          }
           CBZ.placement.reserve(rect);
           placed.push(node);
           need[kind]--;

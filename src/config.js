@@ -1052,6 +1052,20 @@
   // lock tone are untouched). Flip true to restore the old 135°→0° acquisition
   // SPIN.
   if (CBZ.CONFIG.LOCKON_SQUARE_SPIN == null) CBZ.CONFIG.LOCKON_SQUARE_SPIN = false;
+  // TREES_V2 (every tree/vegetation builder + world/treeaudit.js): the tree
+  // CONNECTION LAW — trees may be voxel-simple but never physically
+  // impossible. ON (default): every canopy piece OVERLAPS its trunk by a real
+  // embed margin (no air gap, verified at per-instance jitter extremes), every
+  // trunk is SEATED below the LOWEST terrain sample under its footprint (so a
+  // vertical trunk on a relief slope sinks to the DOWNHILL side), multi-part
+  // trees are support-connected to the ground as an AABB chain (the
+  // demolition-check invariant), and builders register their planted parts so
+  // CBZ.treeAudit() can prove { floatingCanopies:0, unseatedTrunks:0,
+  // brokenChains:0 } forever. Also gates the cheap canopy upgrades (tiered
+  // pine crowns, palm frond hubs at the TRUE leaned trunk top, saguaro arm
+  // ring). OFF = the old builders byte-for-byte, and nothing registers (the
+  // audit reports zeros trivially) — the one-line revert.
+  if (CBZ.CONFIG.TREES_V2 == null) CBZ.CONFIG.TREES_V2 = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

@@ -838,6 +838,16 @@
     }
     if (spots.length) {
       const V2 = CFG.CONTINENT_FOREST_V2 !== false;
+      // TREES_V2 (config.js): the blob-canopy tree was physically impossible
+      // at the margins — the trunk sank only 0.06 into relief that allows
+      // ~40° slopes (the downhill edge floated), and the blob's base pole
+      // touched the trunk top at literally ONE POINT (zero embed). V2 seats
+      // the trunk below the LOWEST footprint sample and sinks the blob base
+      // 0.55·sc into the trunk top, then registers every tree with
+      // world/treeaudit.js. Same 3 InstancedMeshes; zero new hash01/rng
+      // structure (hash-driven placement is untouched).
+      const TREES2 = V2 && !!(CFG.TREES_V2 !== false && CBZ.treeRegisterTree);
+      if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("continent");
       const dummy = new THREE.Object3D();
       const col = new THREE.Color();
       function isTreeSpot(s) {
@@ -891,6 +901,8 @@
       const tCol = V2 ? new Float32Array(Math.max(1, nTree) * 3) : null;
       const cCol = V2 ? new Float32Array(Math.max(1, nTree) * 3) : null;
       const rCol = V2 ? new Float32Array(nRock * 3) : null;
+      const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkG) : null;
+      const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(canopyG) : null;
       let ti = 0, ri = 0;
       for (const s of spots) {
         const scale = 0.8 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8806) : 0.5) * 0.7;
@@ -901,16 +913,39 @@
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8808) : 0.5;
             const sc = 0.75 + hs * hs * 1.15;                // squared-bias scale (biases small)
             const trunkH = 2.6 * sc;
-            dummy.position.set(s.x, gy + trunkH * 0.5 - 0.06, s.z);
-            dummy.rotation.set(0, rot, 0);
-            dummy.scale.set(sc * 0.9, sc, sc * 0.9);
+            const trunkTop = gy + trunkH - 0.06;
+            let seatRef = gy - 0.06, parts = null;
+            if (TREES2) {
+              // SEATED: base below the lowest footprint sample on the slope
+              const gu = CBZ.treeGroundUnder(countryHeightAt, s.x, s.z, Math.max(0.32 * sc, 0.6));
+              seatRef = Math.min(gy, gu.min);
+              const seatY = seatRef - 0.25;
+              const span = trunkTop - seatY;
+              dummy.position.set(s.x, (seatY + trunkTop) / 2, s.z);
+              dummy.rotation.set(0, rot, 0);
+              dummy.scale.set(sc * 0.9, span / 2.6, sc * 0.9);
+            } else {
+              dummy.position.set(s.x, gy + trunkH * 0.5 - 0.06, s.z);
+              dummy.rotation.set(0, rot, 0);
+              dummy.scale.set(sc * 0.9, sc, sc * 0.9);
+            }
             dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
+            if (TREES2 && tbb) {
+              parts = [];
+              CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+            }
             const cr = (1.9 + hs * 1.1) * (0.85 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8809) : 0.5) * 0.3);
             const ch = 3.6 + hs * 2.0;
-            dummy.position.set(s.x, gy + trunkH - 0.06, s.z); // blob base sits on the trunk top
+            // blob base: V2-legacy sat ON the trunk top (a one-point touch);
+            // the law sinks it 0.55·sc INTO the trunk so the top is embedded.
+            dummy.position.set(s.x, TREES2 ? trunkTop - 0.55 * sc : gy + trunkH - 0.06, s.z);
             dummy.rotation.set(0, rot, 0);
             dummy.scale.set(cr, ch, cr);
             dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
+            if (parts && cbb) {
+              CBZ.treeAabbPush(parts, dummy.matrix, cbb.min.x, cbb.min.y, cbb.min.z, cbb.max.x, cbb.max.y, cbb.max.z);
+              CBZ.treeRegisterTree("continent", seatRef, parts);
+            }
             // per-instance colour: low-freq regional green drift + hash jitter
             const drift = noise2(s.x, s.z, 520, 8817);
             const gr = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8818) : 0.5;

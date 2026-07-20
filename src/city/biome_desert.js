@@ -488,21 +488,57 @@
     const armGeo = new THREE.CylinderGeometry(0.22, 0.24, 1, 6);
     const armIM = new THREE.InstancedMesh(armGeo, cmat(CACTUS), Math.max(1, armCount));
     armIM.castShadow = true;
+    // TREES_V2 (config.js): the saguaro base sat at EXACTLY the centre dune
+    // sample (the downhill edge floated on dune slopes) and both arms hung on
+    // the world ±x axis with a ~0.1 overlap that tilt nearly consumed. V2
+    // seats the trunk below the LOWEST footprint sample, hangs each arm on a
+    // hash01 radial angle (deterministic variety, ZERO new rng draws — the
+    // rr()/rng() sequence below is byte-identical) at a 0.42 offset so the
+    // arm root is buried in the trunk, and registers every cactus with
+    // world/treeaudit.js. Same 2 InstancedMeshes.
+    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("desert");
+    const ctbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
+    const cabb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(armGeo) : null;
     let ti = 0, ai = 0;
     cactusSpots.forEach(c => {
       const gy = CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(c.x, c.z) : 0;
-      dummy.position.set(c.x, gy + c.h / 2, c.z);
-      dummy.scale.set(1, c.h, 1); dummy.rotation.set(0, rng() * Math.PI, 0);
+      const yaw = rng() * Math.PI;                    // drawn HERE like before (stream order)
+      let seatRef = gy, parts = null;
+      if (TREES2) {
+        const oracle = CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt : function () { return 0; };
+        const gu = CBZ.treeGroundUnder(oracle, c.x, c.z, 0.6);
+        seatRef = Math.min(gy, gu.min);
+        const seatY = seatRef - 0.25, top = gy + c.h;
+        dummy.position.set(c.x, (seatY + top) / 2, c.z);
+        dummy.scale.set(1, top - seatY, 1); dummy.rotation.set(0, yaw, 0);
+      } else {
+        dummy.position.set(c.x, gy + c.h / 2, c.z);
+        dummy.scale.set(1, c.h, 1); dummy.rotation.set(0, yaw, 0);
+      }
       dummy.updateMatrix(); trunkIM.setMatrixAt(ti++, dummy.matrix);
+      if (TREES2 && ctbb) {
+        parts = [];
+        CBZ.treeAabbPush(parts, dummy.matrix, ctbb.min.x, ctbb.min.y, ctbb.min.z, ctbb.max.x, ctbb.max.y, ctbb.max.z);
+      }
       for (let a = 0; a < c.arms; a++) {
         const side = a === 0 ? 1 : -1;
         const ay = c.h * rr(0.45, 0.62);
         const len = c.h * rr(0.3, 0.45);
-        // vertical arm offset to the side (low-poly elbow read)
-        dummy.position.set(c.x + side * 0.5, gy + ay + len / 2, c.z);
-        dummy.scale.set(1, len, 1); dummy.rotation.set(0, 0, side * 0.15);
+        if (TREES2) {
+          // arm hangs at a deterministic radial angle, root buried in the trunk
+          const ang = (CBZ.hash01 ? CBZ.hash01(c.x, c.z, 9102 + a) : (side + 1) * 0.25) * Math.PI * 2;
+          dummy.position.set(c.x + Math.cos(ang) * 0.42, gy + ay + len / 2, c.z + Math.sin(ang) * 0.42);
+          dummy.scale.set(1, len, 1); dummy.rotation.set(0, -ang, 0.15);
+        } else {
+          // vertical arm offset to the side (low-poly elbow read)
+          dummy.position.set(c.x + side * 0.5, gy + ay + len / 2, c.z);
+          dummy.scale.set(1, len, 1); dummy.rotation.set(0, 0, side * 0.15);
+        }
         dummy.updateMatrix(); armIM.setMatrixAt(ai++, dummy.matrix);
+        if (parts && cabb) CBZ.treeAabbPush(parts, dummy.matrix, cabb.min.x, cabb.min.y, cabb.min.z, cabb.max.x, cabb.max.y, cabb.max.z);
       }
+      if (parts) CBZ.treeRegisterTree("desert", seatRef, parts);
       solid(c.x, c.z, 0.7, 0.7, c.h);
     });
     trunkIM.instanceMatrix.needsUpdate = true; armIM.instanceMatrix.needsUpdate = true;

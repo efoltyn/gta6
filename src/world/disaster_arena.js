@@ -699,11 +699,24 @@
       if (onBuilding) continue;
       const gy = groundHeightAt(x, z);
       const th = 2 + rng() * 1.5;
+      // TREES_V2 (config.js): the trunk base sat at EXACTLY the centre
+      // terrain sample (downhill edge floated on arena relief) and the
+      // foliage overlapped the trunk by a hair (0.1). V2 seats the base
+      // below the LOWEST footprint sample and buries the trunk top 0.4 into
+      // the canopy. No registry entry: arena trees are mode-scoped and BURN
+      // (runtime-mutable), so the world audit doesn't track them. rng draw
+      // order below is untouched.
+      const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeGroundUnder);
+      let trunkBase = gy, trunkTop = gy + th;
+      if (TREES2) {
+        const gu = CBZ.treeGroundUnder(groundHeightAt, x, z, 0.6);
+        trunkBase = Math.min(gy, gu.min) - 0.25;
+      }
       // trunk is a thin SOLID collider you can weave around; foliage is open air
-      const trunk = box(x, gy + th / 2, z, 0.5, th, 0.5, 0x6b4a2a, { solid: true });
+      const trunk = box(x, (trunkBase + trunkTop) / 2, z, 0.5, trunkTop - trunkBase, 0.5, 0x6b4a2a, { solid: true });
       // thin trunks must NOT shove the third-person camera around
       if (trunk.userData.collider) trunk.userData.collider.noCam = true;
-      const foliage = box(x, gy + th + 1.2, z, 2.4 + rng(), 2.6, 2.4 + rng(), 0x3f9a4f);
+      const foliage = box(x, TREES2 ? gy + th + 0.9 : gy + th + 1.2, z, 2.4 + rng(), 2.6, 2.4 + rng(), 0x3f9a4f);
       flammable.push({ x, z, trunk, foliage, trunkCol: trunk.userData.collider, burning: 0, burnt: false });
     }
 

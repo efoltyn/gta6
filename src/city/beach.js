@@ -167,25 +167,66 @@
       if (Math.abs(x - pierX) < 4.5) continue;            // keep the pier approach clear
       palms.push({ x, z, h: 4.2 + rng() * 1.4, lean: (rng() - 0.5) * 0.24, yaw: rng() * Math.PI * 2 });
     }
-    const trunkIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.42, 1, 0.42), cmat(0x7a5a33), palms.length);
-    const frondIM = new THREE.InstancedMesh(new THREE.BoxGeometry(2.7, 0.1, 0.62), cmat(0x3f9a4f), palms.length * 6);
+    // TREES_V2 (config.js): the old crown hub was computed with the WRONG
+    // lean sign and NO yaw term (tx = p.x + sin(lean)·h/2 while the true
+    // leaned top is p.x − sin(lean)·cos(yaw)·h/2, z-shifted too), so for many
+    // yaw/lean combos the whole frond ring hovered BESIDE the trunk top —
+    // floating shit, the exact defect class this law exists for. V2 reads
+    // the true top straight from the trunk's own instance matrix (local
+    // (0, 0.5, 0) through the matrix — no hand-rolled trig to get wrong
+    // again), parks a fibrous CROWN HUB there (an extra instance in the SAME
+    // trunk InstancedMesh — zero new draw calls), sinks every frond's inner
+    // end through the hub, seats the trunk 0.18 under the sand, and
+    // registers each palm with world/treeaudit.js. rng draw order untouched.
+    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("beach");
+    const palmTrunkGeo = new THREE.BoxGeometry(0.42, 1, 0.42);
+    const palmFrondGeo = new THREE.BoxGeometry(2.7, 0.1, 0.62);
+    const trunkIM = new THREE.InstancedMesh(palmTrunkGeo, cmat(0x7a5a33), TREES2 ? palms.length * 2 : palms.length);
+    const frondIM = new THREE.InstancedMesh(palmFrondGeo, cmat(0x3f9a4f), palms.length * 6);
+    const ptbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(palmTrunkGeo) : null;
+    const pfbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(palmFrondGeo) : null;
     let fi = 0;
     palms.forEach((p, i) => {
-      dummy.position.set(p.x, p.h / 2, p.z);
+      dummy.position.set(p.x, TREES2 ? p.h / 2 - 0.18 : p.h / 2, p.z);   // V2: base seated under the sand
       dummy.rotation.set(0, p.yaw, p.lean);
       dummy.scale.set(1, p.h, 1);
       dummy.updateMatrix(); trunkIM.setMatrixAt(i, dummy.matrix);
-      const tx = p.x + Math.sin(p.lean) * p.h * 0.5, tz = p.z;   // crown rides the lean
+      let parts = null;
+      let tx = p.x + Math.sin(p.lean) * p.h * 0.5, ty = p.h + 0.15, tz = p.z;   // legacy "crown rides the lean"
+      if (TREES2) {
+        // TRUE trunk-top centre = instance matrix * local (0, 0.5, 0)
+        const e = dummy.matrix.elements;
+        tx = e[4] * 0.5 + e[12]; ty = e[5] * 0.5 + e[13]; tz = e[6] * 0.5 + e[14];
+        if (ptbb) {
+          parts = [];
+          CBZ.treeAabbPush(parts, dummy.matrix, ptbb.min.x, ptbb.min.y, ptbb.min.z, ptbb.max.x, ptbb.max.y, ptbb.max.z);
+        }
+        // crown hub: the fibrous boss real palm fronds grow from — an extra
+        // instance of the trunk geo (same IM/draw call), wrapping the top.
+        dummy.position.set(tx, ty - 0.05, tz);
+        dummy.rotation.set(0, p.yaw, p.lean);
+        dummy.scale.set(2.0, 0.55, 2.0);
+        dummy.updateMatrix(); trunkIM.setMatrixAt(palms.length + i, dummy.matrix);
+        if (parts) CBZ.treeAabbPush(parts, dummy.matrix, ptbb.min.x, ptbb.min.y, ptbb.min.z, ptbb.max.x, ptbb.max.y, ptbb.max.z);
+      }
       for (let k = 0; k < 6; k++) {
         const a = p.yaw + k * (Math.PI / 3) + rng() * 0.3;
-        dummy.position.set(tx + Math.cos(a) * 1.1, p.h + 0.15 - 0.18, tz + Math.sin(a) * 1.1);
+        if (TREES2) {
+          // frond centre pulled in so its inner end runs THROUGH the hub
+          dummy.position.set(tx + Math.cos(a) * 1.05, ty + 0.02, tz + Math.sin(a) * 1.05);
+        } else {
+          dummy.position.set(tx + Math.cos(a) * 1.1, ty - 0.18, tz + Math.sin(a) * 1.1);
+        }
         dummy.rotation.set(0, -a, 0.34);                  // droop outward
         dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); frondIM.setMatrixAt(fi++, dummy.matrix);
+        if (parts && pfbb) CBZ.treeAabbPush(parts, dummy.matrix, pfbb.min.x, pfbb.min.y, pfbb.min.z, pfbb.max.x, pfbb.max.y, pfbb.max.z);
       }
+      if (parts) CBZ.treeRegisterTree("beach", 0, parts);   // flat sand band above y=0
       solid(p.x, p.z, 0.7, 0.7, trunkIM, null);
     });
-    trunkIM.count = palms.length; frondIM.count = fi;
+    trunkIM.count = TREES2 ? palms.length * 2 : palms.length; frondIM.count = fi;
     trunkIM.instanceMatrix.needsUpdate = frondIM.instanceMatrix.needsUpdate = true;
     trunkIM.castShadow = frondIM.castShadow = false;
     trunkIM.receiveShadow = frondIM.receiveShadow = true;

@@ -569,19 +569,36 @@
       const dummy = new THREE.Object3D();
       const col = new THREE.Color();
       const tCol = new Float32Array(N * 3), cCol = new Float32Array(N * 3);
+      // TREES_V2 (config.js): island trunks sat exactly ON y=0 — V2 sinks
+      // the base 0.2 under the island floor (top of trunk unchanged) and
+      // registers every tree with world/treeaudit.js. Crown math already
+      // obeyed the overlap law at every jitter extreme — verified, untouched.
+      const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+      if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("island");
+      const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
+      const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(crownGeo) : null;
       for (let i = 0; i < N; i++) {
         const t = trees[i];
         // trunk
-        dummy.position.set(t.x, 0, t.z);
+        dummy.position.set(t.x, TREES2 ? -0.2 : 0, t.z);
         dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-        dummy.scale.set(t.tr, t.h, t.tr);
+        dummy.scale.set(t.tr, TREES2 ? t.h + 0.2 : t.h, t.tr);
         dummy.updateMatrix(); trunkIM.setMatrixAt(i, dummy.matrix);
+        let parts = null;
+        if (TREES2 && tbb) {
+          parts = [];
+          CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+        }
         // crown (broadleaf = round; conifer = stretched tall+narrow)
         dummy.position.set(t.x, t.cY, t.z);
         dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
         if (t.broad) dummy.scale.set(t.cR, t.cH * 0.9, t.cR);
         else dummy.scale.set(t.cR, t.cH, t.cR * 0.92);
         dummy.updateMatrix(); crownIM.setMatrixAt(i, dummy.matrix);
+        if (parts && cbb) {
+          CBZ.treeAabbPush(parts, dummy.matrix, cbb.min.x, cbb.min.y, cbb.min.z, cbb.max.x, cbb.max.y, cbb.max.z);
+          CBZ.treeRegisterTree("island", 0, parts);
+        }
         // colours
         const s = 0.32 + rng() * 0.14; col.setRGB(s, s * 0.62, s * 0.36);    // bark
         tCol[i * 3] = col.r; tCol[i * 3 + 1] = col.g; tCol[i * 3 + 2] = col.b;

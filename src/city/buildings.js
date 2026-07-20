@@ -6532,21 +6532,50 @@
       }
     }
     // TWO TREE VARIANTS in the lawn quadrants (clear of paths/fountain):
-    // a conifer (cone canopy) and a broadleaf (double-cube canopy), alternating
+    // a conifer (cone canopy) and a broadleaf (double-cube canopy), alternating.
+    // TREES_V2 (config.js): the conifer's single cone becomes a 2-tier stack
+    // with a deeper trunk embed (0.45 instead of 0.2), canopy widths take a
+    // per-tree hash01 jitter (the 12-draw rng budget above is untouched), the
+    // trunk base sinks 0.15 under the lawn plane (y≈0.10), and every park
+    // tree registers with world/treeaudit.js. The extra tier is one more
+    // shared-material mesh the batcher collapses — zero draw-call change.
+    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    if (TREES2 && makePark._regRoot !== root && CBZ.treeAuditResetSite) {
+      CBZ.treeAuditResetSite("park"); makePark._regRoot = root;   // reset once per world build
+    }
     let vi = 0;
     for (const [qx, qz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
       const x = cx + qx * w * 0.28 + (rng() - 0.5) * 2.0;
       const z = cz + qz * d * 0.28 + (rng() - 0.5) * 2.0;
       const th = 2.2 + rng() * 1.0;
-      const trunk = add(new THREE.BoxGeometry(0.45, th, 0.45), 0x6b4a2a, x, th / 2 + 0.1, z);
+      const hv = TREES2 && CBZ.hash01 ? CBZ.hash01(x, z, 9103) : 0.5;   // per-tree variety, zero rng draws
+      // trunk: V2 grows it 0.15 downward (base −0.05, under the lawn top at
+      // 0.10) while the top stays at th + 0.1 so the canopy anchors hold.
+      const trunkH = TREES2 ? th + 0.15 : th;
+      const trunk = add(new THREE.BoxGeometry(0.45, trunkH, 0.45), 0x6b4a2a, x, TREES2 ? th / 2 + 0.025 : th / 2 + 0.1, z);
       trunk.castShadow = true;
       CBZ.colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3, ref: trunk, noCam: true });
+      const parts = TREES2 ? [x - 0.225, -0.05, z - 0.225, x + 0.225, th + 0.1, z + 0.225] : null;
       if (vi++ % 2 === 0) {
-        add(new THREE.ConeGeometry(1.6, 3.4, 7), 0x35854a, x, th + 1.6, z).castShadow = true;
+        if (TREES2) {
+          const r1 = 1.5 + hv * 0.5, r2 = 0.95 + hv * 0.3;
+          add(new THREE.ConeGeometry(r1, 2.6, 7), 0x35854a, x, th + 0.95, z).castShadow = true;
+          add(new THREE.ConeGeometry(r2, 1.9, 7), 0x2f7a44, x, th + 2.6, z).castShadow = true;
+          parts.push(x - r1, th - 0.35, z - r1, x + r1, th + 2.25, z + r1);
+          parts.push(x - r2, th + 1.65, z - r2, x + r2, th + 3.55, z + r2);
+        } else {
+          add(new THREE.ConeGeometry(1.6, 3.4, 7), 0x35854a, x, th + 1.6, z).castShadow = true;
+        }
       } else {
-        add(new THREE.BoxGeometry(2.6, 2.2, 2.6), 0x3f9a4f, x, th + 0.9, z).castShadow = true;
-        add(new THREE.BoxGeometry(1.7, 1.4, 1.7), 0x4cab5c, x, th + 2.3, z).castShadow = true;
+        const b1 = TREES2 ? 2.3 + hv * 0.7 : 2.6, b2 = TREES2 ? 1.5 + hv * 0.5 : 1.7;
+        add(new THREE.BoxGeometry(b1, 2.2, b1), 0x3f9a4f, x, th + 0.9, z).castShadow = true;
+        add(new THREE.BoxGeometry(b2, 1.4, b2), 0x4cab5c, x, th + 2.3, z).castShadow = true;
+        if (parts) {
+          parts.push(x - b1 / 2, th - 0.2, z - b1 / 2, x + b1 / 2, th + 2.0, z + b1 / 2);
+          parts.push(x - b2 / 2, th + 1.6, z - b2 / 2, x + b2 / 2, th + 3.0, z + b2 / 2);
+        }
       }
+      if (parts) CBZ.treeRegisterTree("park", 0.1, parts);
     }
   }
 

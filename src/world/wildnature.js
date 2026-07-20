@@ -142,6 +142,19 @@
 
     const haveTerrain = !!CBZ.terrainHeight;
 
+    // TREES_V2 — the tree connection law (config.js + world/treeaudit.js).
+    // The old builder set every trunk base at the CENTRE terrain sample with
+    // zero sink, so on relief slopes (normal.y down to 0.6 ≈ 53°) the
+    // DOWNHILL edge of the trunk hovered in the air. V2 seats each trunk
+    // below the LOWEST sample under its footprint (position drops, the
+    // trunk's Y-scale grows by the same amount — everything above ground is
+    // byte-identical) and registers every planted part so CBZ.treeAudit()
+    // proves the whole backdrop forest obeys the law. No new rng draws —
+    // seat depth is a pure function of terrain (determinism intact).
+    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    const SEAT = 0.35;                               // embed margin below the downhill sample
+    if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("wildnature");
+
     // ============================================================
     //  GEOMETRY — unit-sized, base at y=0 so per-instance Y-scale grows
     //  upward (exactly the biome_forest pattern). Low radial segment counts
@@ -419,15 +432,32 @@
       trunkIM.receiveShadow = crownIM.receiveShadow = true;
       trunkIM.frustumCulled = false; crownIM.frustumCulled = false;   // r128 instanced cull bug
       const tCol = new Float32Array(N * 3), cCol = new Float32Array(N * 3);
+      const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
+      const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(crownGeo) : null;
 
       for (let i = 0; i < N; i++) {
         const t = list[i];
-        // TRUNK — unit cylinder scaled to (radius, height, radius), base on ground
-        dummy.position.set(t.x, t.y, t.z);
+        // TRUNK — unit cylinder scaled to (radius, height, radius), base on
+        // ground. V2: base drops to (lowest footprint sample − SEAT); the top
+        // stays at t.y + t.h so every crown reads exactly as before.
+        let ty = t.y, th = t.h, seatRef = t.y;
+        if (TREES2) {
+          const fr = Math.max((tbb ? tbb.max.x : 0.4) * t.tr, 0.6);
+          const gu = CBZ.treeGroundUnder(groundY, t.x, t.z, fr);
+          seatRef = Math.min(t.y, gu.min);             // the DOWNHILL surface
+          ty = seatRef - SEAT;
+          th = (t.y + t.h) - ty;
+        }
+        dummy.position.set(t.x, ty, t.z);
         dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-        dummy.scale.set(t.tr, t.h, t.tr);
+        dummy.scale.set(t.tr, th, t.tr);
         dummy.updateMatrix();
         trunkIM.setMatrixAt(i, dummy.matrix);
+        let parts = null;
+        if (TREES2 && tbb) {
+          parts = [];
+          CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+        }
 
         // CROWN — sits atop the trunk. opts.crownAtTop controls how the unit
         // crown geo maps onto the tree (conifer crown sits from ~55% up the
@@ -447,6 +477,10 @@
         }
         dummy.updateMatrix();
         crownIM.setMatrixAt(i, dummy.matrix);
+        if (parts && cbb) {
+          CBZ.treeAabbPush(parts, dummy.matrix, cbb.min.x, cbb.min.y, cbb.min.z, cbb.max.x, cbb.max.y, cbb.max.z);
+          CBZ.treeRegisterTree("wildnature", seatRef, parts);
+        }
 
         // ---- per-instance COLOUR (instanceColor — still one draw call) ----
         opts.tint(col, rng, t);                 // sets `col` for the crown
@@ -493,13 +527,28 @@
       snagIM.castShadow = true; snagIM.receiveShadow = true;
       snagIM.frustumCulled = false;
       const sCol = new Float32Array(N * 3);
+      const sbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(snagGeo) : null;
       for (let i = 0; i < N; i++) {
         const t = snags[i];
-        dummy.position.set(t.x, t.y, t.z);
+        // V2 seat (same law as buildSpecies): base below the downhill sample.
+        let ty = t.y, th = t.h, seatRef = t.y;
+        if (TREES2) {
+          const fr = Math.max((sbb ? sbb.max.x : 0.3) * t.tr, 0.6);
+          const gu = CBZ.treeGroundUnder(groundY, t.x, t.z, fr);
+          seatRef = Math.min(t.y, gu.min);
+          ty = seatRef - SEAT;
+          th = (t.y + t.h) - ty;
+        }
+        dummy.position.set(t.x, ty, t.z);
         dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-        dummy.scale.set(t.tr, t.h, t.tr);
+        dummy.scale.set(t.tr, th, t.tr);
         dummy.updateMatrix();
         snagIM.setMatrixAt(i, dummy.matrix);
+        if (TREES2 && sbb) {
+          const parts = [];
+          CBZ.treeAabbPush(parts, dummy.matrix, sbb.min.x, sbb.min.y, sbb.min.z, sbb.max.x, sbb.max.y, sbb.max.z);
+          CBZ.treeRegisterTree("wildnature", seatRef, parts);
+        }
         const g = 0.30 + rng() * 0.14;               // grey-brown weathered wood
         col.setRGB(g, g * 0.86, g * 0.72);
         sCol[i * 3] = col.r; sCol[i * 3 + 1] = col.g; sCol[i * 3 + 2] = col.b;

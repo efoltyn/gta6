@@ -304,12 +304,34 @@
     //  when they approach. O(1) per check (one distance test), not per-tree.
     // ================================================================
     // shared low-poly geometries (small radial segment counts = cheap).
+    // TREES_V2 (config.js): the shared cone canopy becomes a TWO-TIER stack
+    // baked into one unit geo (same InstancedMesh, same draw call) — a tall
+    // narrow per-instance scale reads as a stepped fir, a squat wide scale as
+    // a two-lobe broadleaf, so one geometry stops reading as a flat traffic
+    // cone in both roles. Trunk bases also sink 0.2 below the forest floor
+    // (they sat exactly ON y=0 under a floor plane at 0.02) and every tree
+    // registers with world/treeaudit.js. Off = the old single cone.
+    const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("forest");
     const trunkGeo = new THREE.CylinderGeometry(0.22, 0.42, 1, 5); // unit height; scaled per-instance
-    const conGeo = new THREE.ConeGeometry(1, 1, 6);                // unit cone; scaled per-instance
+    const conGeo = (function () {
+      if (!TREES2) return new THREE.ConeGeometry(1, 1, 6);         // unit cone; scaled per-instance
+      const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+      if (merge) {
+        // two stacked cones in unit space (total height 1, base at y=0);
+        // tier 2's base sinks 0.17 into tier 1 — connected by construction.
+        const a = new THREE.ConeGeometry(1.0, 0.62, 6); a.translate(0, 0.31, 0);
+        const b = new THREE.ConeGeometry(0.70, 0.55, 6); b.translate(0, 0.45 + 0.275, 0);
+        const g = merge([a, b], false);
+        if (g) return g;
+      }
+      return new THREE.ConeGeometry(1, 1, 6);
+    })();
     const roundGeo = new THREE.IcosahedronGeometry(1, 0);          // unit round canopy; scaled per-instance
     trunkGeo.translate(0, 0.5, 0);  // base at y=0 so scaling grows upward
-    conGeo.translate(0, 0.5, 0);
+    if (!TREES2) conGeo.translate(0, 0.5, 0);                      // V2 geo is already base-at-0
     roundGeo.translate(0, 0.5, 0);
+    const V2SINK = 0.2;             // trunk base below the floor plane (seated, not flush)
 
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // tinted via instanceColor
     const foliMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -394,20 +416,31 @@
     trunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(trunkColors), 3);
     foliInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(foliColors), 3);
 
+    const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
+    const fbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(conGeo) : null;
     for (let i = 0; i < N; i++) {
       const t = trees[i];
-      // trunk
-      dummy.position.set(t.x, 0, t.z);
+      // trunk (V2: base sunk V2SINK below the floor, top unchanged at t.h)
+      dummy.position.set(t.x, TREES2 ? -V2SINK : 0, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-      dummy.scale.set(t.tr, t.h, t.tr);
+      dummy.scale.set(t.tr, TREES2 ? t.h + V2SINK : t.h, t.tr);
       dummy.updateMatrix();
       trunkInst.setMatrixAt(i, dummy.matrix);
+      let parts = null;
+      if (TREES2 && tbb) {
+        parts = [];
+        CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+      }
       // foliage cone (rides above, same lean)
       dummy.position.set(t.x, t.folY, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
       dummy.scale.set(t.folR, t.folH, t.folR);
       dummy.updateMatrix();
       foliInst.setMatrixAt(i, dummy.matrix);
+      if (parts && fbb) {
+        CBZ.treeAabbPush(parts, dummy.matrix, fbb.min.x, fbb.min.y, fbb.min.z, fbb.max.x, fbb.max.y, fbb.max.z);
+        CBZ.treeRegisterTree("forest", 0, parts);      // flat biome floor (plane top at 0.02)
+      }
     }
     trunkInst.instanceMatrix.needsUpdate = true;
     foliInst.instanceMatrix.needsUpdate = true;
@@ -429,18 +462,29 @@
     roundTrunkInst.receiveShadow = true; roundCrownInst.receiveShadow = true;
     roundTrunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundTrunkColors), 3);
     roundCrownInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundColors), 3);
+    const rtbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(roundTrunkGeo) : null;
+    const rcbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(roundGeo) : null;
     for (let i = 0; i < RN; i++) {
       const t = roundTrees[i];
-      dummy.position.set(t.x, 0, t.z);
+      dummy.position.set(t.x, TREES2 ? -V2SINK : 0, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-      dummy.scale.set(t.tr, t.h, t.tr);
+      dummy.scale.set(t.tr, TREES2 ? t.h + V2SINK : t.h, t.tr);
       dummy.updateMatrix();
       roundTrunkInst.setMatrixAt(i, dummy.matrix);
+      let parts = null;
+      if (TREES2 && rtbb) {
+        parts = [];
+        CBZ.treeAabbPush(parts, dummy.matrix, rtbb.min.x, rtbb.min.y, rtbb.min.z, rtbb.max.x, rtbb.max.y, rtbb.max.z);
+      }
       dummy.position.set(t.x, t.folY, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
       dummy.scale.set(t.folR, t.folR, t.folR);
       dummy.updateMatrix();
       roundCrownInst.setMatrixAt(i, dummy.matrix);
+      if (parts && rcbb) {
+        CBZ.treeAabbPush(parts, dummy.matrix, rcbb.min.x, rcbb.min.y, rcbb.min.z, rcbb.max.x, rcbb.max.y, rcbb.max.z);
+        CBZ.treeRegisterTree("forest", 0, parts);
+      }
     }
     roundTrunkInst.instanceMatrix.needsUpdate = true;
     roundCrownInst.instanceMatrix.needsUpdate = true;

@@ -996,11 +996,49 @@
     // Frozen-lake colour/crack bands are baked into the single snow terrain.
 
     // ---- instanced SNOWY PINES (one draw call: trunk + canopy each) ------
+    // TREES_V2 (config.js): the old pine was PHYSICALLY IMPOSSIBLE at the
+    // margins — trunk geo centred and placed so its base sat at EXACTLY the
+    // centre terrain sample (on alpine slopes up to ~46° the downhill edge
+    // hovered in the air), and the canopy cone's base touched the trunk top
+    // with ZERO overlap. V2: (a) the trunk is SEATED — its base drops below
+    // the LOWEST sample under its footprint; (b) a 3-tier fir canopy (one
+    // merged geo — still one IM) whose base sinks 0.5·sc INTO the trunk top;
+    // (c) the snow cap rides the top tier and still crowns the tip; (d) a
+    // per-tree hash01 vertical stretch (NO new rng draws) so the stand stops
+    // reading as 130 clones. Every planted pine registers with
+    // world/treeaudit.js. Draw calls unchanged: 3 InstancedMeshes.
     (function pines() {
       const COUNT = 130;
+      const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+      if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("snow");
       const trunkG = new THREE.CylinderGeometry(0.22, 0.32, 1.6, 5);
-      const canopyG = new THREE.ConeGeometry(1.5, 4.2, 6);
-      const capG = new THREE.ConeGeometry(0.75, 1.9, 6);       // snow capping the upper canopy (conformal)
+      const canopyG = (function () {
+        if (!TREES2) return new THREE.ConeGeometry(1.5, 4.2, 6);
+        // 3 stacked cones, base at y=0, total height 4.2 — each tier's base
+        // sinks into the tier below (support-connected by construction).
+        const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+        const layers = [
+          { r: 1.55, h: 2.0, y: 0 },
+          { r: 1.18, h: 1.7, y: 1.5 },
+          { r: 0.80, h: 1.45, y: 2.75 },
+        ];
+        if (merge) {
+          const parts = [];
+          for (const L of layers) {
+            const c = new THREE.ConeGeometry(L.r, L.h, 6);
+            c.translate(0, L.y + L.h / 2, 0);
+            parts.push(c);
+          }
+          const g = merge(parts, false);
+          if (g) return g;
+        }
+        const f = new THREE.ConeGeometry(1.5, 4.2, 6); f.translate(0, 2.1, 0); return f;
+      })();
+      // snow cap: V2 authors it base-at-y=0 so it can hug the TOP TIER of the
+      // stacked canopy (overlapping it — chain-connected) and crown the tip.
+      const capG = TREES2 ? new THREE.ConeGeometry(0.88, 1.6, 6)
+        : new THREE.ConeGeometry(0.75, 1.9, 6);      // legacy: snow capping the upper canopy (conformal)
+      if (TREES2) capG.translate(0, 0.8, 0);
       const trunkIM = new THREE.InstancedMesh(trunkG, mTrunk, COUNT);
       const canopyIM = new THREE.InstancedMesh(canopyG, mPine, COUNT);
       const capIM = new THREE.InstancedMesh(capG, mSnow, COUNT);
@@ -1010,6 +1048,9 @@
       const pts = CBZ.cityScatterInRegion(region, COUNT, rng, 60);
       let n = 0;
       const terrainN = new THREE.Vector3();
+      const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkG) : null;
+      const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(canopyG) : null;
+      const kbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(capG) : null;
       for (let i = 0; i < COUNT; i++) {
         const p = pts[i];
         // keep pines off the lake + the causeway mouth
@@ -1022,6 +1063,33 @@
         const gy = mountainHeightAt(p.x, p.z);
         const ry = rng() * Math.PI * 2;
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry);
+        if (TREES2) {
+          // per-tree vertical stretch (hash01 — zero extra rng draws)
+          const vst = 0.85 + (CBZ.hash01 ? CBZ.hash01(p.x, p.z, 9101) : 0.5) * 0.4;
+          const trunkTop = gy + 1.6 * sc;
+          const gu = CBZ.treeGroundUnder(mountainHeightAt, p.x, p.z, Math.max(0.32 * sc, 0.6));
+          const seatRef = Math.min(gy, gu.min);
+          const seatY = seatRef - 0.3;                 // SEATED below the downhill surface
+          const span = trunkTop - seatY;
+          // trunk (centred unit-1.6 geo): scale y so it spans [seatY, trunkTop]
+          s.set(sc, span / 1.6, sc); v.set(p.x, (seatY + trunkTop) / 2, p.z);
+          m4.compose(v, q, s); trunkIM.setMatrixAt(n, m4);
+          const parts = [];
+          if (tbb) CBZ.treeAabbPush(parts, m4, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+          // canopy (base-at-0 geo): base sinks 0.5·sc INTO the trunk top
+          const canopyBase = trunkTop - 0.5 * sc;
+          s.set(sc, sc * vst, sc); v.set(p.x, canopyBase, p.z);
+          m4.compose(v, q, s); canopyIM.setMatrixAt(n, m4);
+          if (cbb) CBZ.treeAabbPush(parts, m4, cbb.min.x, cbb.min.y, cbb.min.z, cbb.max.x, cbb.max.y, cbb.max.z);
+          // snow cap rides the top tier (local base 2.75): overlaps it and
+          // pokes ~0.1 past the tip — a crown of snow, chain-connected.
+          v.set(p.x, canopyBase + 2.7 * sc * vst, p.z);
+          m4.compose(v, q, s); capIM.setMatrixAt(n, m4);
+          if (kbb) CBZ.treeAabbPush(parts, m4, kbb.min.x, kbb.min.y, kbb.min.z, kbb.max.x, kbb.max.y, kbb.max.z);
+          if (tbb && cbb && kbb) CBZ.treeRegisterTree("snow", seatRef, parts);
+          n++;
+          continue;
+        }
         // trunk
         s.set(sc, sc, sc); v.set(p.x, gy + 0.8 * sc, p.z);
         m4.compose(v, q, s); trunkIM.setMatrixAt(n, m4);
