@@ -521,7 +521,7 @@
         ? rows.map((r, i) => {
             const yes = r.decision !== "no";
             return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-              `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${yes ? verbText(r) : "NO"}</span></div>`;
+              `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${verbText(r)}</span></div>`;
           }).join("")
         : rows.map((r, i) =>
           `<div class="iopt" data-i="${i}"><span class="ikey">${r.key.toUpperCase()}</span>` +

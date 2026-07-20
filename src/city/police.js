@@ -357,7 +357,7 @@
   function stopOpts() {
     return [
       { key: "e", label: "YES", fn: stopComply },
-      { key: "i", label: "NO", bad: true, fn: stopRefuse },
+      { key: "i", label: "REFUSE", bad: true, fn: stopRefuse },
     ];
   }
   function stopNote() {

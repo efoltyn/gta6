@@ -793,7 +793,7 @@
   function openResultsPanel(order, place, purse, betMsg, dnf) {
     if (!C) return;
     let tbl = "<div style='display:grid;grid-template-columns:24px 30px 1fr 60px 40px;gap:4px;font-size:11px;margin:6px 0'>" +
-      "<span style='color:#8a93a3'>#</span><span style='color:#8a93a3'>No</span><span style='color:#8a93a3'>Driver</span><span style='color:#8a93a3;text-align:right'>Gap</span><span style='color:#8a93a3;text-align:right'>Pts</span>";
+      "<span style='color:#8a93a3'>#</span><span style='color:#8a93a3'>Car</span><span style='color:#8a93a3'>Driver</span><span style='color:#8a93a3;text-align:right'>Gap</span><span style='color:#8a93a3;text-align:right'>Pts</span>";
     order.forEach((r) => {
       let gap = "";
       if (r.dnf) gap = "DNF";

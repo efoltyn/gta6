@@ -402,7 +402,7 @@
       "<div style='font-size:13px;font-weight:700;margin-bottom:3px'>Racing Championship " +
       "<span style='font-size:11px;color:#8a93a3;font-weight:400'>· S" + RC.season + " R" + (RC.round + 1) + "/" + RC.ROUNDS + "</span></div>" +
       "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
-      "<span>#</span><span>No</span><span>Driver</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Wins</span></div>";
+      "<span>#</span><span>Car</span><span>Driver</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Wins</span></div>";
     rows.forEach(function (r, i) {
       h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px'>" +
         "<span style='color:" + (i === 0 ? "#ffd166" : "#8a93a3") + "'>" + (i + 1) + "</span>" +

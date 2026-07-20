@@ -158,7 +158,7 @@
       let h = "<div class='hd'><div class='ttl'>" + esc(opts.title || "RACE RESULTS") + "</div>" +
         "<div class='sub'>" + esc(opts.sub || "") + "</div></div>";
       h += "<div class='row' style='font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140'>" +
-        "<span>#</span><span>No</span><span>Driver</span><span style='text-align:right'>Time / Gap</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Purse</span></div>";
+        "<span>#</span><span>Car</span><span>Driver</span><span style='text-align:right'>Time / Gap</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Purse</span></div>";
       (rows || []).forEach(function (r) {
         h += "<div class='row" + (r.you ? " you" : "") + "'>" +
           "<span class='" + (r.pos === 1 ? "p1" : "") + "'>" + r.pos + "</span>" +
