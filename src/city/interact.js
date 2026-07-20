@@ -1066,7 +1066,7 @@
   // ---- CORPSE: take the fit (loot is automatic — see the walk-over loop) ----
   I.register("corpse", {
     id: "corpse-clothes", slot: "i", bad: true,
-    label: function (b) { const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null; return "Take their clothes" + (fit ? " — " + fit.name : ""); },
+    label: "Take clothes",   // bare verb (owner: never "take their clothes — <outfit>")
     onSelect: function (b) { CBZ.cityOutfitSwapWithCorpse && CBZ.cityOutfitSwapWithCorpse(b); },
   });
 

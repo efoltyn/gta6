@@ -382,7 +382,7 @@
       },
       options: [{
         id: "exec-lift-ride-down", slot: "e",
-        label: function () { return "Ride the " + FIRM + " express lift — ground"; },
+        label: "Lift — ground",
         onSelect: function () {
           const r = eo(); if (!r) return;
           rideBusyUntil = nowMs() + 1800;
@@ -405,7 +405,7 @@
       },
       options: [{
         id: "exec-lift-ride-up", slot: "e",
-        label: function () { return "Ride the express lift — " + FIRM + ", floor 50"; },
+        label: "Lift — floor 50",
         onSelect: function () {
           const r = eo(); if (!r) return;
           rideBusyUntil = nowMs() + 1800;
