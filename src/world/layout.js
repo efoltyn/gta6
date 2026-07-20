@@ -11,10 +11,17 @@
    CBZ.WORLD_ENLARGE_FLAT below, consumed by world/terrain.js).
 
    HOW THE NUMBERS WERE CHOSEN (constraints, not taste):
-   • snow stays at 0,0 — its interior (lodge/lift/piste/Greater Mercy) and
-     the exported oracles snowTerrainHeightAt/snowRunXAt/greaterMercy*
-     bake absolute coordinates; translating it is its own stage. The north
-     is anchored by it; everything else spreads away from the city.
+   • snow is UN-PINNED (owner: "mountains need to be on a snow area on an
+     island very far from regular shit"): biome_snow.js now authors its
+     interior in the stage-1 frame and maps world→authored inside every
+     exported oracle (snowTerrainHeightAt/snowRunXAt/greaterMercy*), and
+     terrain_overhaul's snow window/sector ride the dial too — so the
+     whole alpine island + its Greater Mercy envelope + every backdrop
+     range translate RIGIDLY with this one offset. dz -800 parks the
+     island ~1 km of open sea north of the nearest landmass; the Mercy
+     Causeway re-derives from the anchors and stretches to the fixed
+     speedway handoff. dx stays 0 so the causeway lane (x 458..482)
+     keeps meeting the speedway annex leg.
    • speedway/snow keep dx aligned with the Mercy Causeway lane (x≈470)
      and the Ironjaw Arena plug at x=482 — the arena approach must keep
      touching the lane, and the lane must stay west of the arena rect.
@@ -60,7 +67,7 @@
   // Zero = the stage-1 authored spot. Flag off = ALL zero (old world).
   const SPREAD = {
     // biomes / islands (anchor consts in their own files)
-    snow:     { dx: 0,    dz: 0 },      // pinned — see header
+    snow:     { dx: 0,    dz: -800 },   // FAR north — alpine island alone in open sea (see header)
     forest:   { dx: -300, dz: -200 },   // NW, keeps 120u strait to military
     desert:   { dx: 450,  dz: 100 },    // E/SE, opens the speedway strait
     farmland: { dx: 450,  dz: -200 },   // NE, tracks the desert eastward
@@ -95,11 +102,12 @@
   // so relief/backdrop rings stand clear of ALL land — including the far
   // nation sites, which the (no-op — CBZ.city is unset during landmass
   // build) live sync never actually covered; mbeya used to sit on 60u of
-  // backdrop ring because of that. The north edge deliberately stays near
-  // the snow core (-1890): the Greater Mercy envelope overhangs FLAT on
-  // purpose so the northern backdrop ring keeps rising inside snow-labeled
-  // cover, exactly like the stage-1 world.
+  // backdrop ring because of that. The north edge tracks the SNOW CORE
+  // (authored -1890 + the snow dial's dz) so the seed rect hugs the moved
+  // island exactly like it hugged the authored one; the Greater Mercy
+  // envelope still overhangs FLAT on purpose (its live-synced rect pushes
+  // the ring even further out behind snow-labeled cover).
   CBZ.WORLD_ENLARGE_FLAT = ON
-    ? { minX: -3160, maxX: 3060, minZ: -1890, maxZ: 1030 }
+    ? { minX: -3160, maxX: 3060, minZ: -1890 + SPREAD.snow.dz, maxZ: 1030 }
     : null;
 })();

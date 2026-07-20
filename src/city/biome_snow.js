@@ -35,13 +35,21 @@
   // flag so a low-end/debug build can still compare the previous path.
   if (CFGS.SNOW_TERRAIN_V2 == null) CFGS.SNOW_TERRAIN_V2 = true;
 
-  // ---- footprint (per spec): rect center (350,-1450), half (420,330) ------
-  // Anchored through the world-layout dial (world/layout.js) — zero offset
-  // today; the map-enlargement pass moves whole biomes by raising it.
+  // ---- footprint (per spec): authored rect center (350,-1450), half (420,330)
+  // Anchored through the world-layout dial (world/layout.js). The dial is
+  // UN-PINNED: the biome's interior is authored in the STAGE-1 frame (every
+  // peak/piste/lake/lodge/lift/town literal below), builders add (DX,DZ) to
+  // each authored anchor, and the exported oracles map world → authored at
+  // entry — so the interior math is byte-identical at zero offset and the
+  // snow island translates RIGIDLY wherever the dial sends it (owner:
+  // mountains on the snow island, very far from everything else).
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
-  const CX = 350 + _WOFF.dx, CZ = -1450 + _WOFF.dz, HX = 420, HZ = 330;
-  const MINX = CX - HX, MAXX = CX + HX;     // -70 .. 770
-  const MINZ = CZ - HZ, MAXZ = CZ + HZ;     // -1780 .. -1120
+  const DX = _WOFF.dx, DZ = _WOFF.dz;
+  const CX = 350 + DX, CZ = -1450 + DZ, HX = 420, HZ = 330;
+  const MINX = CX - HX, MAXX = CX + HX;     // world (authored -70 .. 770)
+  const MINZ = CZ - HZ, MAXZ = CZ + HZ;     // world (authored -1780 .. -1120)
+  const A_MINX = MINX - DX, A_MAXX = MAXX - DX;   // authored-frame bounds
+  const A_MINZ = MINZ - DZ, A_MAXZ = MAXZ - DZ;
   // Mercy Causeway south terminus. The lane (x 458..482) runs from the snow
   // shore toward the speedway; when the speedway's own annex causeway
   // (island_speedway.js: horizontal leg at ACCESS_Z, x 336..ACCESS_X+12)
@@ -51,7 +59,7 @@
   // -530, byte-identical.
   const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
   const _SP_ACCESS_X = (490 + _SPOFF.dx) - 98, _SP_ACCESS_Z = (-350 + _SPOFF.dz) - 190;
-  const CAUSEWAY_MAXZ = (_SP_ACCESS_X + 12 > 458) ? (_SP_ACCESS_Z - 12) : -530;
+  const CAUSEWAY_MAXZ = (_SP_ACCESS_X + 12 > 458 + _WOFF.dx) ? (_SP_ACCESS_Z - 12) : -530;
   // Buildings are laid out before landmass builders run.  Keep a per-build
   // list of their occupied footprints so the terrain oracle can grade a real
   // shelf beneath them instead of letting a later mountain grow through a
@@ -90,13 +98,18 @@
   // The authored snowboard trail meanders very slightly instead of reading
   // as a ruler-straight decal.  Both terrain carving and trail geometry call
   // this exact function, so there can be no floating/cutting strip.
-  function snowRunXAt(z) {
+  // (…AtA = authored frame; the exported snowRunXAt is world frame.)
+  function snowRunXAtA(z) {
     const t = clamp01((-z - 1290) / 400);
     return 470 + Math.sin(t * Math.PI * 1.35) * 9 + Math.sin(t * Math.PI * 3.2) * 3;
   }
+  function snowRunXAt(z) { return snowRunXAtA(z - DZ) + DX; }
 
-  function snowTerrainHeightAt(x, z) {
-    if (x < MINX || x > MAXX || z < MINZ || z > MAXZ) return 0;
+  // AUTHORED-frame field — every constant in the body is stage-1
+  // coordinates; the world-facing snowTerrainHeightAt below maps through
+  // the dial, so the whole massif translates rigidly with the biome.
+  function snowTerrainHeightAtA(x, z) {
+    if (x < A_MINX || x > A_MAXX || z < A_MINZ || z > A_MAXZ) return 0;
 
     // Domain-warped ridged lobes form several summits and real saddles.  A
     // max-composition retains the silhouette of individual peaks; the broad
@@ -154,7 +167,7 @@
         // a discontinuity.  Snowboard ground-snap releases at the curvature.
         trail += j.a * Math.exp(-0.5 * dz * dz) * (dz > 0 ? 0.72 : 1);
       }
-      const trailBlend = 1 - smooth01((Math.abs(x - snowRunXAt(z)) - 11) / 25);
+      const trailBlend = 1 - smooth01((Math.abs(x - snowRunXAtA(z)) - 11) / 25);
       h = mix(h, trail, trailBlend);
     }
 
@@ -171,10 +184,12 @@
     }
 
     // The terrain itself dies into the surrounding continent on every edge.
-    const edge = Math.min(x - MINX, MAXX - x, z - MINZ, MAXZ - z);
+    const edge = Math.min(x - A_MINX, A_MAXX - x, z - A_MINZ, A_MAXZ - z);
     h *= smooth01(edge / 30);
     return Math.max(0, h);
   }
+  // world-facing oracle (physics/audit/consumers) — dial-mapped.
+  function snowTerrainHeightAt(x, z) { return snowTerrainHeightAtA(x - DX, z - DZ); }
 
   function snowTerrainNormalAt(x, z, out) {
     out = out || new THREE.Vector3();
@@ -196,8 +211,12 @@
   // as the foreground hero/run and joins this range at its zero-height north
   // edge.
   // -----------------------------------------------------------------------
-  const GREAT_MINX = -1450, GREAT_MAXX = 1750;
-  const GREAT_MINZ = -4100, GREAT_MAXZ = MINZ;
+  // authored-frame envelope; the world-frame GREAT_* below ride the dial so
+  // the whole ten-family range translates rigidly with the snow island.
+  const GREAT_A_MINX = -1450, GREAT_A_MAXX = 1750;
+  const GREAT_A_MINZ = -4100, GREAT_A_MAXZ = A_MINZ;
+  const GREAT_MINX = GREAT_A_MINX + DX, GREAT_MAXX = GREAT_A_MAXX + DX;
+  const GREAT_MINZ = GREAT_A_MINZ + DZ, GREAT_MAXZ = GREAT_A_MAXZ + DZ;
   const GREAT_MAJOR = [
     { x: -1120, z: -2200, s: 1.0 },
     { x: -790,  z: -2580, s: 1.4 },
@@ -241,8 +260,10 @@
     }
   }
 
-  function greaterMercyHeightAt(x, z) {
-    if (x < GREAT_MINX || x > GREAT_MAXX || z < GREAT_MINZ || z > GREAT_MAXZ) return 0;
+  // AUTHORED-frame field (lobes/erosion constants are stage-1 coordinates);
+  // the world-facing greaterMercyHeightAt below maps through the dial.
+  function greaterMercyHeightAtA(x, z) {
+    if (x < GREAT_A_MINX || x > GREAT_A_MAXX || z < GREAT_A_MINZ || z > GREAT_A_MAXZ) return 0;
     let sum2 = 0;
     for (let i = 0; i < GREAT_LOBES.length; i++) {
       const l = GREAT_LOBES[i];
@@ -276,8 +297,8 @@
     const detail = ridgedAt(x * 0.0105 - 18, z * 0.0105 + 43);
     const erosion = 0.64 + Math.min(1, macro * 0.68 + detail * 0.32) * 0.36;
     const soft = 0.95 + 0.08 * noiseAt(x * 0.0017 + 61, z * 0.0017 - 27);
-    const southJoin = smooth01((GREAT_MAXZ - z) / 155);
-    const edge = Math.min(x - GREAT_MINX, GREAT_MAXX - x, z - GREAT_MINZ);
+    const southJoin = smooth01((GREAT_A_MAXZ - z) / 155);
+    const edge = Math.min(x - GREAT_A_MINX, GREAT_A_MAXX - x, z - GREAT_A_MINZ);
     h *= erosion * soft * southJoin * smooth01(edge / 125);
     for (let i = 0; i < GREAT_BUILDING_CLEARINGS.length; i++) {
       const c = GREAT_BUILDING_CLEARINGS[i];
@@ -285,6 +306,8 @@
     }
     return Math.max(0, h);
   }
+  // world-facing oracle — dial-mapped.
+  function greaterMercyHeightAt(x, z) { return greaterMercyHeightAtA(x - DX, z - DZ); }
 
   function greaterMercyNormalAt(x, z, out) {
     out = out || new THREE.Vector3();
@@ -343,13 +366,16 @@
       const w = Math.max(8, +lot.w || +b.w || +b.width || 12);
       const d = Math.max(8, +lot.d || +b.d || +b.depth || 12);
       const pad = { cx: +lot.cx, cz: +lot.cz, hx: w * 0.5 + 10, hz: d * 0.5 + 10, feather: 52 };
+      // the clearing lists live in the AUTHORED frame (the oracle bodies map
+      // world → authored at entry) — translate each world lot before storing.
+      const padA = { cx: pad.cx - DX, cz: pad.cz - DZ, hx: pad.hx, hz: pad.hz, feather: pad.feather };
       if (pad.cx >= MINX && pad.cx <= MAXX && pad.cz >= MINZ && pad.cz <= MAXZ &&
           snowTerrainHeightAt(pad.cx, pad.cz) > 0.8) {
-        SNOW_BUILDING_CLEARINGS.push(pad);
+        SNOW_BUILDING_CLEARINGS.push(padA);
       }
       if (pad.cx >= GREAT_MINX && pad.cx <= GREAT_MAXX && pad.cz >= GREAT_MINZ && pad.cz <= GREAT_MAXZ &&
           greaterMercyHeightAt(pad.cx, pad.cz) > 0.8) {
-        GREAT_BUILDING_CLEARINGS.push(pad);
+        GREAT_BUILDING_CLEARINGS.push(padA);
       }
     }
 
@@ -385,7 +411,7 @@
     // via inTown so trees don't grow in the village — gated on HAS_TOWN so the
     // biome is byte-identical if towngen is absent (zero regression).
     const HAS_TOWN = typeof CBZ.buildTown === "function" && !!(CBZ.CITY_TEMPLATES && CBZ.CITY_TEMPLATES.pinecrest);
-    const TOWN_CX = 640, TOWN_CZ = -1230, TOWN_HX = 110, TOWN_HZ = 80;
+    const TOWN_CX = 640 + DX, TOWN_CZ = -1230 + DZ, TOWN_HX = 110, TOWN_HZ = 80;
     const TOWN = { minX: TOWN_CX - TOWN_HX, maxX: TOWN_CX + TOWN_HX, minZ: TOWN_CZ - TOWN_HZ, maxZ: TOWN_CZ + TOWN_HZ };
     function inTown(x, z) {
       return HAS_TOWN && x > TOWN.minX - 8 && x < TOWN.maxX + 8 && z > TOWN.minZ - 8 && z < TOWN.maxZ + 8;
@@ -401,7 +427,8 @@
     // Flip SNOW_TOWN_CLEARING=false to restore the slope-through-town look.
     if (CBZ.CONFIG.SNOW_TOWN_CLEARING == null) CBZ.CONFIG.SNOW_TOWN_CLEARING = true;
     if (HAS_TOWN && CBZ.CONFIG.SNOW_TOWN_CLEARING !== false) {
-      const townPad = { cx: TOWN_CX, cz: TOWN_CZ, hx: TOWN_HX + 14, hz: TOWN_HZ + 14, feather: 90 };
+      // authored frame (see the clearing-list contract above)
+      const townPad = { cx: TOWN_CX - DX, cz: TOWN_CZ - DZ, hx: TOWN_HX + 14, hz: TOWN_HZ + 14, feather: 90 };
       SNOW_BUILDING_CLEARINGS.push(townPad);
       GREAT_BUILDING_CLEARINGS.push(townPad);
     }
@@ -411,15 +438,17 @@
     // lodge, lake, lift, ski run, village, and causeway.
     if (layout) {
       if (HAS_TOWN) layout.reserve("snow:pinecrest", TOWN, { pad: 12 });
-      layout.reserveCircle("snow:lake", 180, -1380, 104, { pad: 2 });
-      layout.reserve("snow:lodge", { minX: 344, maxX: 376, minZ: -1264, maxZ: -1236 }, { pad: 8 });
-      layout.reserve("snow:cabin", { minX: 590, maxX: 610, minZ: -1610, maxZ: -1590 }, { pad: 8 });
-      layout.reserve("snow:ski-run", { minX: 448, maxX: 492, minZ: -1735, maxZ: -1285 }, { pad: 5 });
-      layout.reserve("snow:lift", { minX: 226, maxX: 484, minZ: -1734, maxZ: -1166 }, { pad: 5 });
-      layout.reserve("snow:causeway", { minX: 458, maxX: 482, minZ: -1120, maxZ: CAUSEWAY_MAXZ }, { pad: 3 });
+      layout.reserveCircle("snow:lake", 180 + DX, -1380 + DZ, 104, { pad: 2 });
+      layout.reserve("snow:lodge", { minX: 344 + DX, maxX: 376 + DX, minZ: -1264 + DZ, maxZ: -1236 + DZ }, { pad: 8 });
+      layout.reserve("snow:cabin", { minX: 590 + DX, maxX: 610 + DX, minZ: -1610 + DZ, maxZ: -1590 + DZ }, { pad: 8 });
+      layout.reserve("snow:ski-run", { minX: 448 + DX, maxX: 492 + DX, minZ: -1735 + DZ, maxZ: -1285 + DZ }, { pad: 5 });
+      layout.reserve("snow:lift", { minX: 226 + DX, maxX: 484 + DX, minZ: -1734 + DZ, maxZ: -1166 + DZ }, { pad: 5 });
+      // north end = the snow shore (rides the dial); south end stays butted
+      // on the speedway leg — the deck STRETCHES as the island moves away.
+      layout.reserve("snow:causeway", { minX: 458 + DX, maxX: 482 + DX, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ }, { pad: 3 });
       for (let i = 0; i < GREAT_MAJOR.length; i++) {
         const m = GREAT_MAJOR[i], scaled = Math.pow(m.s, 0.62);
-        layout.reserveCircle("snow:massif-family:" + i, m.x, m.z,
+        layout.reserveCircle("snow:massif-family:" + i, m.x + DX, m.z + DZ,
           120 + 115 * scaled, { pad: 24, kind: "massif", source: "snow-terrain" });
       }
     }
@@ -498,9 +527,9 @@
         // The frozen lake is the terrain skin itself. The old ice disc and
         // three nearly-coplanar crack rings stacked above this flat basin and
         // shimmered from aircraft altitude.
-        const iceD = Math.hypot(wx - 180, wz + 1380);
+        const iceD = Math.hypot(wx - (180 + DX), wz - (-1380 + DZ));
         if (iceD < 92) {
-          const ring = 0.5 + 0.5 * Math.sin(iceD * 0.19 + Math.atan2(wz + 1380, wx - 180) * 5.0);
+          const ring = 0.5 + 0.5 * Math.sin(iceD * 0.19 + Math.atan2(wz - (-1380 + DZ), wx - (180 + DX)) * 5.0);
           c.copy(lakeIce).lerp(lakeIceDeep, 0.12 + ring * 0.10);
         }
         // Eighty metres of tundra -> snow transition prevents the playable
@@ -658,7 +687,7 @@
           owner: "snow", name: "Greater Mercy alpine catchments",
           sources: GREAT_MAJOR.map(function (m) {
             const scaled = Math.pow(m.s, 0.62);
-            return { x: m.x, z: m.z, rx: 350 + 180 * scaled, rz: 310 + 165 * scaled };
+            return { x: m.x + DX, z: m.z + DZ, rx: 350 + 180 * scaled, rz: 310 + 165 * scaled };
           }),
           inner: 0xe8eef0, outer: 0xaebfba,
           roundness: 2.75, featherNorm: 0.30, seed: 0x6a4e91,
@@ -984,8 +1013,8 @@
       for (let i = 0; i < COUNT; i++) {
         const p = pts[i];
         // keep pines off the lake + the causeway mouth
-        if (Math.hypot(p.x - 180, p.z - (-1380)) < 100) continue;
-        if (Math.abs(p.x - 470) < 26 && p.z > MAXZ - 120) continue;
+        if (Math.hypot(p.x - (180 + DX), p.z - (-1380 + DZ)) < 100) continue;
+        if (Math.abs(p.x - (470 + DX)) < 26 && p.z > MAXZ - 120) continue;
         if (inTown(p.x, p.z)) continue;          // T8 — no pines in the resort village
         if (CFGS.SNOW_TERRAIN_V2 !== false && snowTerrainNormalAt(p.x, p.z, terrainN).y < 0.69) continue;
         if (!claimNature(p.x, p.z, 2.2)) continue;
@@ -1052,7 +1081,7 @@
 
     // ---- SKI LODGE (enterable; fireplace + warm interior) ----------------
     (function lodge() {
-      const lx = 360, lz = -1250, w = 22, d = 16, storeys = 2;
+      const lx = 360 + DX, lz = -1250 + DZ, w = 22, d = 16, storeys = 2;
       let b = null;
       if (CBZ.cityMakeBuilding) {
         b = CBZ.cityMakeBuilding(root, lx, lz, w, d, storeys, COL.timber, 0, { stairs: true });
@@ -1092,7 +1121,7 @@
     // its artificial flat shelf so this face is uninterrupted geology again.
     (function mountainCabin() {
       // ---- a small log cabin tucked near the trees — enterable, one room ----
-      const cx = 600, cz = -1600, cw = 9, cd = 7;
+      const cx = 600 + DX, cz = -1600 + DZ, cw = 9, cd = 7;
       let cb = null;
       if (CBZ.cityMakeBuilding) {
         try {
@@ -1144,7 +1173,7 @@
 
     // ---- CHAIRLIFT line up a slope (towers + cable + moving chairs) ------
     // WHY: it carries skiers up to the ski run; chairs glide on the cable.
-    const lift = { chairIM: null, baseX: 300, baseZ: -1275, topX: 470, topZ: -1655, towerTopY: 16, chairY: 10, n: 8, t: 0 };
+    const lift = { chairIM: null, baseX: 300 + DX, baseZ: -1275 + DZ, topX: 470 + DX, topZ: -1655 + DZ, towerTopY: 16, chairY: 10, n: 8, t: 0 };
     (function chairlift() {
       const dx = lift.topX - lift.baseX, dz = lift.topZ - lift.baseZ;
       const span = Math.hypot(dx, dz);
@@ -1201,7 +1230,7 @@
 
     // ---- SKI RUN with slalom gates (red/blue poles down the slope) -------
     (function skiRun() {
-      const sx = 470, sz0 = -1680, sz1 = -1295;     // summit to resort valley
+      const sx = 470 + DX, sz0 = -1680 + DZ, sz1 = -1295 + DZ;     // summit to resort valley
       // A segmented groomed strip follows the exact real-ground oracle. It is
       // world-space geometry, so there is no flat plane cutting through the hill.
       const segZ = 48, halfW = 13;
@@ -1282,10 +1311,12 @@
 
     // ============================================================
     //  CAUSEWAY: winding snowy road deck south toward the speedway,
-    //  with instanced guardrail posts. rect minX=463..477 z -1120..-530.
+    //  with instanced guardrail posts. North end = the snow shore (MAXZ,
+    //  rides the dial); south end = the speedway-derived CAUSEWAY_MAXZ —
+    //  the deck stretches to cover however far the island moves.
     // ============================================================
     (function causeway() {
-      const rMinX = 463, rMaxX = 477, rMinZ = -1120, rMaxZ = CAUSEWAY_MAXZ;
+      const rMinX = 463 + DX, rMaxX = 477 + DX, rMinZ = MAXZ, rMaxZ = CAUSEWAY_MAXZ;
       const cxMid = (rMinX + rMaxX) / 2;
       if (CBZ.buildHighway) {
         // REAL wide plowed concrete highway over the water toward the speedway.
@@ -1341,9 +1372,9 @@
     (function life() {
       if (!CBZ.cityMakePed || !CBZ.cityPeds) return;
       const spots = [
-        { x: 360, z: -1232 }, { x: 250, z: -1190 },      // near the lodge / lift base
-        { x: 470, z: -1320 }, { x: 590, z: -1585 },      // ski run / cabin
-        { x: 190, z: -1430 },                            // by the lake
+        { x: 360 + DX, z: -1232 + DZ }, { x: 250 + DX, z: -1190 + DZ },      // near the lodge / lift base
+        { x: 470 + DX, z: -1320 + DZ }, { x: 590 + DX, z: -1585 + DZ },      // ski run / cabin
+        { x: 190 + DX, z: -1430 + DZ },                                      // by the lake
       ];
       const lr = mulberry(0xA17 ^ (CX | 0));
       const populationEntries = [];
@@ -1448,13 +1479,13 @@
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "snow", kind: "slope", role: "ski instructor",
-        x: 240, z: -1180, cap: 4,
-        home: { x: 360, z: -1250 },                        // the ski lodge
+        x: 240 + DX, z: -1180 + DZ, cap: 4,
+        home: { x: 360 + DX, z: -1250 + DZ },              // the ski lodge
         spots: [
-          { x: 240, z: -1180 },                             // the chairlift base
-          { x: 470, z: -1320 },                             // bottom of the ski run
-          { x: 470, z: -1700 },                             // top of the ski run
-          { x: 360, z: -1232 },                             // back by the lodge
+          { x: 240 + DX, z: -1180 + DZ },                   // the chairlift base
+          { x: 470 + DX, z: -1320 + DZ },                   // bottom of the ski run
+          { x: 470 + DX, z: -1700 + DZ },                   // top of the ski run
+          { x: 360 + DX, z: -1232 + DZ },                   // back by the lodge
         ],
       });
     }
@@ -1473,14 +1504,15 @@
       // Let the continent render between its sparse connected summits.
       underlay: true,
     });
-    // causeway widened to the 24m highway deck (x∈[458,482], centre x=470)
+    // causeway widened to the 24m highway deck (authored x∈[458,482], centre
+    // x=470; lane + span ride the snow dial — north end is the live shore)
     CBZ.registerCityRegion(city, {
       name: "Mercy Causeway", subtitle: "Alpine Range", kind: "rect",
-      minX: 458, maxX: 482, minZ: -1120, maxZ: CAUSEWAY_MAXZ, pad: 1,
+      minX: 458 + DX, maxX: 482 + DX, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ, pad: 1,
     });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: 470, z: (-1120 + CAUSEWAY_MAXZ) / 2, vertical: true, len: CAUSEWAY_MAXZ - (-1120), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      city.roads.push({ x: 470 + DX, z: (MAXZ + CAUSEWAY_MAXZ) / 2, vertical: true, len: CAUSEWAY_MAXZ - MAXZ, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
   }, 30);
 })();

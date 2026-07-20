@@ -649,10 +649,12 @@
     });
 
     // ---- SITE 2: MOUNTAIN EARLY-WARNING POST (outpost). East shoulder of
-    // the snow massif (snow rect -70..770 × -1780..-1120), hash-jittered,
-    // seated on the sampled grade of the massif height field.
-    const m2x = 560 + Math.round((h01(11, 71, 0xb11) - 0.5) * 60);
-    const m2z = -1600 + Math.round((h01(23, 47, 0xb12) - 0.5) * 60);
+    // the snow massif (authored rect -70..770 × -1780..-1120, riding the
+    // world-layout snow dial), hash-jittered, seated on the sampled grade of
+    // the massif height field.
+    const _SNW = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
+    const m2x = 560 + _SNW.dx + Math.round((h01(11, 71, 0xb11) - 0.5) * 60);
+    const m2z = -1600 + _SNW.dz + Math.round((h01(23, 47, 0xb12) - 0.5) * 60);
     const gm = gradeFor(CBZ.snowTerrainHeightAt, m2x, m2z, 22, 18);
     buildBunker(city, root, {
       id: "ridge", name: "Ridge Line Station", subtitle: "Early-Warning Post",

@@ -12,6 +12,11 @@
   if (!CBZ || !THREE || !CBZ.player || !CBZ.playerChar) return;
 
   const P = CBZ.player, ch = CBZ.playerChar, keys = CBZ.keys || {};
+  // Mount Mercy rides the world-layout snow dial (world/layout.js): every
+  // authored coordinate below shifts by (SNX,SNZ) so the controller follows
+  // the island wherever the map-enlargement pass parks it.
+  const _SN = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
+  const SNX = _SN.dx, SNZ = _SN.dz;
   const state = {
     mounted: false, grounded: true,
     vx: 0, vz: 0, vy: 0, dirX: 0, dirZ: 1,
@@ -24,7 +29,7 @@
 
   function floorAt(x, z) { return CBZ.floorAt ? (+CBZ.floorAt(x, z) || 0) : 0; }
   function normalAt(x, z, out) {
-    if (CBZ.snowTerrainNormalAt && x >= -80 && x <= 780 && z >= -1790 && z <= -1110) {
+    if (CBZ.snowTerrainNormalAt && x >= -80 + SNX && x <= 780 + SNX && z >= -1790 + SNZ && z <= -1110 + SNZ) {
       return CBZ.snowTerrainNormalAt(x, z, out);
     }
     const e = 1.5;
@@ -38,7 +43,7 @@
       const b = CBZ.cityBiomeAt(P.pos.x, P.pos.z);
       if (b === "snow" || (b && b.biome === "snow")) return true;
     }
-    return P.pos.x >= -80 && P.pos.x <= 780 && P.pos.z >= -1790 && P.pos.z <= -1110;
+    return P.pos.x >= -80 + SNX && P.pos.x <= 780 + SNX && P.pos.z >= -1790 + SNZ && P.pos.z <= -1110 + SNZ;
   }
 
   // Visible board: low-poly enough to match the game, curved at both ends so
@@ -92,8 +97,8 @@
     opts = opts || {};
     if (P.dead || P.driving || (CBZ.game && CBZ.game.mode !== "city")) return false;
     if (opts.summit) {
-      P.pos.x = CBZ.snowRunXAt ? CBZ.snowRunXAt(-1670) : 470;
-      P.pos.z = -1670;
+      P.pos.x = CBZ.snowRunXAt ? CBZ.snowRunXAt(-1670 + SNZ) : 470 + SNX;
+      P.pos.z = -1670 + SNZ;
     }
     const gy = floorAt(P.pos.x, P.pos.z);
     P.pos.y = gy + RIDE_Y; P.vy = 0; P.grounded = true;
@@ -280,13 +285,14 @@
       const b = new THREE.Mesh(new THREE.BoxGeometry(0.26, 1.75, 0.08), blue);
       b.position.set(-0.72 + i * 0.72, 0.92, 0.12); b.rotation.z = (i - 1) * 0.07; rack.add(b);
     }
-    rack.position.set(325, floorAt(325, -1272), -1272); root.add(rack);
+    const rackX = 325 + SNX, rackZ = -1272 + SNZ;
+    rack.position.set(rackX, floorAt(rackX, rackZ), rackZ); root.add(rack);
     if (CBZ.makeLabelSprite) {
       const label = CBZ.makeLabelSprite("SNOWBOARD + LIFT");
-      if (label) { label.position.set(325, rack.position.y + 3.4, -1272); label.scale.set(10, 2.2, 1); root.add(label); }
+      if (label) { label.position.set(rackX, rack.position.y + 3.4, rackZ); label.scale.set(10, 2.2, 1); root.add(label); }
     }
     if (CBZ.interactions && CBZ.interactions.registerZone) {
-      const target = { x: 325, z: -1272, kind: "snowboard-rental" };
+      const target = { x: rackX, z: rackZ, kind: "snowboard-rental" };
       CBZ.interactions.registerZone({
         id: "mount-mercy-snowboard-rental", kind: "snowboard-rental", radius: 4.2, prio: 24, driving: false,
         find: function (x, z) { return Math.hypot(x - target.x, z - target.z) <= 4.2 ? target : null; },

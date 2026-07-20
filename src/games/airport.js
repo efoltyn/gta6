@@ -145,7 +145,12 @@
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
   const APRON_REF = { x: 95 + _WOFF.dx, z: 20 + _WOFF.dz };   // airfield reference the run distance is measured from
   const DESTS = [
-    { id: "salt",    name: "SALT CAY",     x: -40,   z: -2050, col: 0xffb03a },
+    // SALT CAY moved west (-40 → -520): the snow island now parks at
+    // z≈-1920..-2580 (world/layout.js snow dial), and the old spot put this
+    // "open-water" beacon on the alpine tundra. (-520,-2050) is the permanent
+    // sea channel between the forest's north shore and the Greater Mercy
+    // envelope — open water at every dial setting.
+    { id: "salt",    name: "SALT CAY",     x: -520,  z: -2050, col: 0xffb03a },
     { id: "marlin",  name: "MARLIN ROCK",  x: -1650, z: -900,  col: 0x36e0c8 },
     { id: "pelican", name: "PELICAN REEF", x: 980,   z: -1650, col: 0xff5ad0 },
   ];

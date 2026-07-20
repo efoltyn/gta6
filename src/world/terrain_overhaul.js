@@ -37,13 +37,15 @@
      EXACTLY 0 over FLAT + MARGIN — byte-identical physics contract — and
      relief exists only OFFSHORE, beyond the continent's own carved coast,
      rising out of the real animated sea (world.js SEA_OVERHAUL spans 16 km,
-     so every range stands in true water). North (behind the snow country's
-     real Greater Mercy Range) carries the grand ranges + the two signature
-     giants — layered depth: white reachable alpine range in front, huge
-     hazy eroded titans behind. West/east get lower coastal ranges; south a
-     low archipelago. The physics floor NEVER reads this field (mode.js
-     groundHeightAt only consults registered providers), so nothing here can
-     ever be walked on — pure skyline geography.
+     so every range stands in true water). ALL relief is confined to the ONE
+     sector due north of the snow country (snowSector: its X-window × past
+     its north shore, both riding the snow world-layout dial) — layered
+     depth: white reachable alpine range in front, hazy eroded ranges
+     behind. Every other bearing is open sea; the bespoke titans (Mount
+     Colossus / Mount Everest) are REMOVED by owner order. The physics floor
+     NEVER reads this field (mode.js groundHeightAt only consults registered
+     providers), so nothing here can ever be walked on — pure skyline
+     geography.
 
      COLOR LANGUAGE is unified with the snow biome (the one range the owner
      already likes): identical granite (0x5f5b54/0x293033) and snow
@@ -152,14 +154,15 @@
 
   let CX = (FLAT.minX + FLAT.maxX) / 2;
   let CZ = (FLAT.minZ + FLAT.maxZ) / 2;
-  // Snow-country footprint (biome_snow.js: rect centre (350,-1450), half (420,330)).
-  // The backdrop range is confined to this X-span so it stands only behind the
-  // white country (owner: mountains snow-only).
-  // Follows the snow biome's world-layout offset (world/layout.js) so a
-  // stage-2 biome move keeps the mountain range standing behind the white
-  // country instead of behind its old empty spot.
+  // Snow-country footprint (biome_snow.js: authored rect centre (350,-1450),
+  // half (420,330)). The backdrop range is confined to this X-span so it
+  // stands only behind the white country (owner: mountains snow-only).
+  // FOLLOWS THE SNOW DIAL FULLY (world/layout.js CBZ.worldOff("snow") — both
+  // axes): the window and the north-shore line ride the offset, so moving the
+  // snow island drags every backdrop range with it.
   const _SNOWOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
   const SNOW_CX = 350 + _SNOWOFF.dx, SNOW_HX = 420;
+  const SNOW_NZ = -1780 + _SNOWOFF.dz;   // the snow country's NORTH shore (world z)
   const SNOW_ONLY = () => CFG.TERRAIN_SNOW_ONLY_RANGES !== false;
   // 1 inside the snow country's X-span (feathered), 0 beyond.
   function snowWindowX(x) {
@@ -167,38 +170,34 @@
     return smooth(SNOW_CX - SNOW_HX - f, SNOW_CX - SNOW_HX, x) *
       (1 - smooth(SNOW_CX + SNOW_HX, SNOW_CX + SNOW_HX + f, x));
   }
+  // 1 only in the sector due NORTH of the snow country (inside its X-window,
+  // past its north shore) — the one bearing allowed to carry offshore relief.
+  // Everything else on the horizon stays open sea (owner: mountains only on
+  // the snow island's side, far from every city, from any angle).
+  function snowSector(x, z) {
+    if (!SNOW_ONLY()) return 1;
+    return snowWindowX(x) * smooth(60, 420, SNOW_NZ - z);
+  }
   let RANGE_WEST_X = CX - 850;
   let RANGE_EAST_X = CX + 1050;
-  const HEROES2 = [
-    { name: "Mount Colossus", x: RANGE_WEST_X, z: FLAT.minZ - 720, amp: 650, sig: 260, ns: 0.006 },
-    { name: "Mount Everest", x: RANGE_EAST_X, z: FLAT.minZ - 820, amp: 900, sig: 350, ns: 0.0048 },
-  ];
+  // NOTE: the two bespoke titans (HEROES2 "Mount Colossus"/"Mount Everest"
+  // gaussian bumps) are REMOVED by owner order — V2 relief is ONLY the
+  // standard rangeMask2 ridged lobes below, snow-window confined.
   function layoutRanges2() {
     CX = (FLAT.minX + FLAT.maxX) / 2;
     CZ = (FLAT.minZ + FLAT.maxZ) / 2;
     const width = FLAT.maxX - FLAT.minX;
     if (SNOW_ONLY()) {
-      // Both signature giants stand INSIDE the snow country's X-span so the two
-      // hero bumps (and their gaussian tails) never bleed over non-snow biomes.
+      // Both range lobes stand INSIDE the snow country's X-span so the ridges
+      // (and their bell tails) never bleed over non-snow biomes.
       RANGE_WEST_X = SNOW_CX - SNOW_HX * 0.5;   // ~140
       RANGE_EAST_X = SNOW_CX + SNOW_HX * 0.5;   // ~560
     } else {
       RANGE_WEST_X = CX - Math.min(980, width * 0.2);
       RANGE_EAST_X = CX + Math.min(1180, width * 0.24);
     }
-    HEROES2[0].x = RANGE_WEST_X; HEROES2[0].z = FLAT.minZ - 720;
-    HEROES2[1].x = RANGE_EAST_X; HEROES2[1].z = FLAT.minZ - 820;
-    CBZ.MOUNT_COLOSSUS = { name: HEROES2[0].name, x: HEROES2[0].x, z: HEROES2[0].z, height: HEROES2[0].amp };
-    CBZ.MOUNT_EVEREST = { name: HEROES2[1].name, x: HEROES2[1].x, z: HEROES2[1].z, height: HEROES2[1].amp };
   }
   layoutRanges2();
-  function heroBump2(x, z, P) {
-    const dx = x - P.x, dz = z - P.z;
-    const g = Math.exp(-(dx * dx + dz * dz) / (2 * P.sig * P.sig));
-    if (g < 1e-3) return 0;
-    const crag = 0.55 + 0.45 * rfbm(x * P.ns + SO1, z * P.ns - SO2);
-    return P.amp * g * crag;
-  }
   function bell(x, centre, sigma) {
     const q = (x - centre) / sigma;
     return Math.exp(-0.5 * q * q);
@@ -223,16 +222,13 @@
     const d = distOutsideFlat(x, z);
     if (d <= MARGIN) return 0;
     const range = rangeMask2(x, z);
-    let hero = 0;
-    for (let i = 0; i < HEROES2.length; i++) hero += heroBump2(x, z, HEROES2[i]);
-    if (SNOW_ONLY()) hero *= snowWindowX(x);   // giants stay behind the white country
-    if (range <= 0 && hero <= 0.01) return 0;
+    if (range <= 0) return 0;
     const north = Math.max(0, FLAT.minZ - z);
     const outer = 1 - smooth(1450, 1950, north);
     if (outer <= 0) return 0;
     const hills = Math.max(0, 18 + fbm2(x, z) * 0.72) * range;
     const mtn = ridged2(x, z) * range;
-    return Math.max(0, hills + mtn + hero) * outer;
+    return Math.max(0, hills + mtn) * outer;
   }
   function visualHeight2(x, z) {
     const h = CBZ.terrainHeight(x, z);
@@ -374,10 +370,9 @@
   function ringMask(d) {
     return smooth(MARGIN + 60, MARGIN + 560, d) * (1 - smooth(MARGIN + 1300, MARGIN + 1900, d));
   }
-  // side weights: the grand ranges live NORTH (layered behind the snow
-  //      country's real white Greater Mercy Range); west/east get lower
-  //      coastal ranges; south a low archipelago. Blended by each side's
-  //      excess so corners transition smoothly.
+  // side weights: kept for the corner blend, but snowSector (in v3Field)
+  //      zeroes every bearing except the north snow window — the W/E/S
+  //      weights only matter inside that sector's feathered corners.
   const SIDE_N = 1.0, SIDE_W = 0.68, SIDE_E = 0.68, SIDE_S = 0.40;
   function sideWeight(x, z) {
     const g = plateClear();
@@ -388,37 +383,17 @@
     return (eW * SIDE_W + eE * SIDE_E + eN * SIDE_N + eS * SIDE_S) / sum;
   }
 
-  // ---- the two signature giants: ALTITUDE bumps (not surface bumps) — fed
-  //      through the same erosion/rivers/shaping as everything else, so the
-  //      titans erode like real geology instead of sitting on it. Laid out
-  //      from the LIVE flat bounds at build time (countries/continent regs).
-  const HEROES3 = [
-    { name: "Mount Colossus", x: 0, z: 0, amp: 0.78, sig: 470 },
-    { name: "Mount Everest", x: 0, z: 0, amp: 1.25, sig: 680 },
-  ];
+  // ---- NO SIGNATURE GIANTS. The bespoke V3 titans (Mount Colossus / Mount
+  //      Everest altitude bumps) are REMOVED by owner order: "the giant one
+  //      just needs to be gone — I wanted bigger versions of the small one,
+  //      EXACT big versions, not new stupid ones." V3 relief is ONLY the one
+  //      standard ring-altitude recipe below; a taller crest, if ever wanted,
+  //      is the SAME field with a larger ALT_RING — never a one-off bump.
   function layoutV3() {
     CX = (FLAT.minX + FLAT.maxX) / 2;
     CZ = (FLAT.minZ + FLAT.maxZ) / 2;
-    // titans anchor to the RECEDED ring (plate clearance included), not the
-    // raw flat edge — otherwise they'd stand where ringMask is now zero.
-    HEROES3[0].x = CX - 1250; HEROES3[0].z = FLAT.minZ - plateClear() - 780;
-    HEROES3[1].x = CX + 950;  HEROES3[1].z = FLAT.minZ - plateClear() - 1150;
-    // exported peak info (crest heights measured from the shaped field —
-    // ±10% by seed since the fbm crest rides on the altitude bump)
-    CBZ.MOUNT_COLOSSUS = { name: HEROES3[0].name, x: HEROES3[0].x, z: HEROES3[0].z, height: 950 };
-    CBZ.MOUNT_EVEREST = { name: HEROES3[1].name, x: HEROES3[1].x, z: HEROES3[1].z, height: 1250 };
   }
   if (CFG.TERRAIN_EROSION_V3 !== false) layoutV3();
-  function heroAlt(x, z) {
-    let a = 0;
-    for (let i = 0; i < 2; i++) {
-      const P = HEROES3[i];
-      const dx = x - P.x, dz = z - P.z;
-      const q = (dx * dx + dz * dz) / (2 * P.sig * P.sig);
-      if (q < 9) a += P.amp * Math.exp(-q);
-    }
-    return a;
-  }
 
   // ---- THE FIELD — the reference pipeline, one evaluation ----------------
   // Returns world height h (signed: <0 = under the sea shelf) plus the
@@ -449,28 +424,36 @@
     r = clamp01((r - V3P.RIVER_W) / V3P.RIVER_F * (0 - 1) + 1);   // mapLinear(r, W, W+F, 1, 0)
     r = (1 - smooth01(r)) * 0.5;
 
-    // regional altitude: biome noise + the offshore ring + the two giants.
-    // The giants locally override the regional noise (a titan is not allowed
-    // to be talled-down by an unlucky biome sample at its own summit).
+    // regional altitude: biome noise + the offshore ring, CONFINED to the
+    // sector behind the snow country. snowSector gates BOTH the ring lift
+    // and the positive biome excursions, so no range and no stray island
+    // ever rises off the west/east/south coasts — the whole horizon there
+    // is open sea; the negative excursions survive everywhere (the sea
+    // keeps its varying depth). Owner: nothing mountainous near the city
+    // from any angle; relief only on the far snow side.
     const d = distOutsideFlat(x, z);
-    const ring = ringMask(d);
+    const sec = snowSector(x, z);
+    const ring = ringMask(d) * sec;
     const biomeA = fbm01(x, z, SM, V3P.B_FREQ) * 1.4 - 0.75;   // ∈ [-0.75, 0.65]
-    const hero = heroAlt(x, z);
-    const altShape = ring * (V3P.ALT_RING * sideWeight(x, z) + hero);
-    const alt = V3P.ALT_BASE + biomeA * 0.7 * (1 - Math.min(0.75, hero)) + altShape;
+    const altShape = ring * V3P.ALT_RING * sideWeight(x, z);
+    const alt = V3P.ALT_BASE + (biomeA > 0 ? biomeA * sec : biomeA) * 0.7 + altShape;
     t = t + alt;
 
     // smoothLowerPlanes: signed-square vs cube (flat calm lowlands/shelf,
     // exaggerated peaks)
     t = lerp(t * Math.abs(t), t * t * t, V3P.SMOOTH_LOWER);
 
-    // subtract the rivers, scale to world units
+    // subtract the rivers, scale to world units. HARD sector law: positive
+    // relief exists ONLY behind the snow country — on every other bearing
+    // the field may carve the sea deeper but never raise land, so no stray
+    // fbm island can surface off the city/nation coasts.
     const carve = r;                       // 0..0.5 (0.5 = full channel)
     t = t - carve * V3P.RIVERS;
-    const h = t * V3P.AMP;
+    let h = t * V3P.AMP;
+    if (h > 0) h *= sec;
 
-    // snowline: wobbled band, dropping toward the cold north — giants cap
-    // deep white (harmonizing with the snow country), side crests only dust
+    // snowline: wobbled band, dropping toward the cold north — the high
+    // crests cap deep white (harmonizing with the snow country)
     const wob = vn(x * 0.0011 + SW, z * 0.0011 - SW);
     const northness = clamp01((FLAT.minZ - z) / 2200);
     const snowY = 235 + wob * 90 - northness * 50;

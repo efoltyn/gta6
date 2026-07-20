@@ -121,24 +121,25 @@
 
   // The backdrop ring radii, derived from the live FLAT so the mountains
   // stand clear of walkable land no matter how far the world spreads. The
-  // stage-1 numbers (1900/2250/2050/2380, span 6000) return exactly when
-  // the flat is small (halfExtent+380 ≤ 1900) — today's compact world is
-  // byte-identical; the enlarged world pushes the ring out proportionally.
+  // stage-1 numbers (1900/2250, span 6000) return exactly when the flat is
+  // small (halfExtent+380 ≤ 1900) — today's compact world is byte-identical;
+  // the enlarged world pushes the ring out proportionally. The bespoke titan
+  // radii (colossus/everest) are GONE with their peaks — owner order: the
+  // super-tall one-off mountains die entirely, no consumer reads them.
   // Shared with terrain_overhaul.js's builders for CBZ.TERRAIN_RING_DEBUG.
   CBZ.terrainRingRadii = function (flat) {
     const f = flat || FLAT;
     const half = Math.max((f.maxX - f.minX) / 2, (f.maxZ - f.minZ) / 2) + PLATE_G;
     const near = Math.max(1900, half + 380);
     const k = near / 1900;                    // keep the authored ratios
-    const far = Math.round(2250 * k), colossus = Math.round(2050 * k),
-      everest = Math.round(2380 * k);
+    const far = Math.round(2250 * k);
     // span: at the authored ring (k=1) return EXACTLY the authored 6000 —
-    // 2*(everest+900) alone would be 6560 there, silently resizing the
-    // compact world's tile field and breaking flag-off byte-identity. Only
-    // a ring that actually grew derives its span (everest + 900u of sea).
-    const span = (k <= 1) ? 6000 : Math.max(6000, 2 * (everest + 900));
+    // deriving it there would silently resize the compact world's tile field
+    // and break flag-off byte-identity. Only a ring that actually grew
+    // derives its span (the far ring + 900u of sea).
+    const span = (k <= 1) ? 6000 : Math.max(6000, 2 * (far + 900));
     return {
-      near: Math.round(near), far, colossus, everest,
+      near: Math.round(near), far,
       span, halfExtent: Math.round(half),
     };
   };
@@ -453,58 +454,13 @@
     }, 0.22, 0.22);
 
     // ====================================================================
-    //  MOUNT COLOSSUS — the ONE super-super-tall signature mountain. A single
-    //  narrow spine with a MASSIVE peakAmp (~2x the far ring) placed due north,
-    //  so a lone snow-capped titan looms over the whole range and the snow
-    //  country beneath it. Pure backdrop like every other peak — you look AT
-    //  it, never on it (terrainHeight stays 0 over all walkable ground).
+    //  NO BESPOKE TITANS. Mount Colossus ("one super tall super skinny
+    //  mountain") and Mount Everest (the bespoke wide giant) are REMOVED by
+    //  owner order — the range is ONLY the standard near/far ring spines
+    //  above, all built from the one shared buildRidgedRange recipe. If a
+    //  taller accent is ever wanted, scale a ring segment's peakAmp on the
+    //  SAME cfg — never a new one-off shape.
     // ====================================================================
-    //  A shared helper so both signature titans are built the RIGHT way — the
-    //  ring code passes (THREE, p0, p1, dir, cfg) and reads .geo/.spine; the
-    //  old Colossus block dropped the THREE arg and the palette and pushed the
-    //  raw {geo,spine} object, which threw a TypeError inside an un-guarded IIFE
-    //  and silently killed EVERY hero peak + the boulder scatter (world went
-    //  flat-backdrop-only). This routes both through buildRidge correctly.
-    function heroPeak(name, bearing, R, half, cfg) {
-      if (!buildRidge) return;
-      const cx0 = CX + Math.cos(bearing) * R, cz0 = CZ + Math.sin(bearing) * R;
-      const perp = { x: -Math.sin(bearing), z: Math.cos(bearing) };
-      const p0 = { x: cx0 - perp.x * half, z: cz0 - perp.z * half };
-      const p1 = { x: cx0 + perp.x * half, z: cz0 + perp.z * half };
-      const dir = { x: Math.cos(bearing), z: Math.sin(bearing) };
-      const built = buildRidge(THREE, p0, p1, dir, Object.assign({
-        footGuard: 0.16, palette: heroPalette,
-      }, cfg));
-      if (built) { heroGeoms.push(built.geo); if (built.spine) heroSpines.push(built.spine); }
-      return { x: cx0, z: cz0, height: cfg.peakAmp };
-    }
-
-    // ====================================================================
-    //  MOUNT COLOSSUS — the original narrow snow-capped titan, due north.
-    // ====================================================================
-    {
-      const c = heroPeak("Mount Colossus", -Math.PI / 2, RING.colossus, 150, {
-        cols: 28, rows: 9, depthLen: 560, peakAmp: 1050, noiseScale: 0.006,
-        seedOff: 90210, fogBase: 0.10, fogDepth: 0.12,
-      });
-      CBZ.MOUNT_COLOSSUS = { name: "Mount Colossus", x: c.x, z: c.z, height: c.height };
-    }
-
-    // ====================================================================
-    //  MOUNT EVEREST — the ROOF OF THE WORLD. Taller than Colossus (peakAmp
-    //  1500 vs 1050) and set on a WIDE footprint so its shoulders read as a
-    //  true Himalayan massif, not a lone spire. Placed north-north-east so it
-    //  and Colossus both loom on the skyline as two distinct giants instead of
-    //  overlapping. Snowline is shared (45% of peak) → a huge white summit that
-    //  towers over everything. Pure backdrop — walkable ground stays y=0.
-    // ====================================================================
-    {
-      const e = heroPeak("Mount Everest", -Math.PI / 2 + 0.62, RING.everest, 360, {
-        cols: 52, rows: 11, depthLen: 820, peakAmp: 1500, noiseScale: 0.0048,
-        seedOff: 29029, fogBase: 0.12, fogDepth: 0.16,
-      });
-      CBZ.MOUNT_EVEREST = { name: "Mount Everest", x: e.x, z: e.z, height: e.height };
-    }
 
     // The distant range is authored entirely by its vertex palette. Lambert
     // lighting made it depend on one-sided normals and a sun that can be below
