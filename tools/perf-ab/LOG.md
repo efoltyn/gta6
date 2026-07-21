@@ -145,3 +145,63 @@ city-atlas seed 1 structurally intact ✓ · zero console errors in every run �
   car paint = per-car MeshStandardMaterial (heaviest shader) — palette-cache for parked/traffic.
 - Per-tile instanced pools for wildnature/biome scatter (farcull can only cull whole pools).
 - Emissive statics beyond lamps/signals (beacons/neon) still individual draws.
+
+## ROUND 3 — 2026-07-21 (fresh owner-requested teardown: "what's the pie chart")
+Owner asked for a data-driven attribution + owner-flippable feel toggles, framed around an
+observability-first north star ("reality is only what's observable — prioritize the view frustum").
+New tooling (kept, committed): `tools/perf-ab/attribute.mjs` (one-boot full pie chart: shadow tax,
+category hides, top-level subtree attribution, quality-tier sweep, per-updater sim ranking) and
+`tools/perf-ab/abmatrix.mjs` (rAF-FROZEN clean A/B of every RUNTIME lever — shadows, shadow-res,
+pixel-ratio, draw-distance, category hides). Results JSON in this dir (attr-calm-q4, abmatrix-{calm,
+chaos,seed1337}). Ran calm/90210 + 5★-chaos/90210 + calm/1337; 3 web-research agents (render cost,
+procgen CPU, headless attribution) captured in the session.
+
+### BOOT/METHOD GOTCHAS (save the next run time)
+- `setMode("city")+resetGame()` alone builds a STUB world (25 draws, 121 colliders). The full
+  continent only builds via the title `playBtn` click path (math-gate's route). Use that.
+- World streams in over ~150s headless (SwiftShader). Poll `CBZ.colliders.length` to stability before
+  measuring — a fixed sleep under-measures.
+- The game's own rAF loop mutates the scene between measurement renders → pollutes category/shadow
+  deltas (negative dCalls, drifting visibleMeshes). abmatrix FIXES this by swallowing
+  `requestAnimationFrame` during measurement. attribute.mjs does NOT freeze → trust only its huge
+  signals. Also: abmatrix's draw-distance test runs BEFORE the category hides and farcull doesn't
+  fully re-expand in time, so its per-category dCalls are unreliable — only `hide_staticCity` (a 99%
+  signal) survives the drift. Fix next time: freeze farcull or reorder.
+- r128 does NOT count shadow-map draws in `renderer.info.render.calls` (passCalls came back 0 on every
+  run). Shadow magnitude must come from map size/type + relative refresh ms + design intent, not info.
+
+### FINDINGS (consistent across calm / chaos / both seeds)
+| metric | calm 90210 | chaos 90210 | calm 1337 |
+|---|---|---|---|
+| draw calls / frame (q4) | 5,622 | 6,061 | 7,212 |
+| hide static city → calls | **22** | **22** | **23** |
+| ⇒ static world = share of draws | **99.6%** | **99.6%** | **99.7%** |
+| triangles / frame | 2.16M | 2.52M | 2.18M |
+| visible meshes walked | 54k | 47k | 55k |
+| JS heap | 1.05 GB | 1.10 GB | 1.02 GB |
+| unique materials / programs | 39k / 259 | — | — / 262 |
+| peds (calm ambient / chaos) | 507 | 477+6 | 509 |
+
+- **Draw-call submission of the STATIC procedural world = the bottleneck (~99%), unchanged even in a
+  5★ riot.** Dynamic actors are a tiny share of *draws* (big share of *triangles* + the #1 *CPU* cost).
+  Ambient instanced crowd ≈ free (prior rounds confirmed ~11 draws). Cutting draw distance ×0.5 moved
+  draws <2% — the calls are LOCAL block density, not the skyline. Fill-rate is NOT it (¼-res ratio 1.07
+  → CPU/draw-call bound, classic weak-GPU profile).
+- **Shadows = #2 GPU cost, cheapest big win.** Sun = 2048 PCFSoft, re-renders casters 10-18Hz; a
+  refresh added ~200ms relative render (~⅓ of a shadowed frame). quality.js already calls the tier-0
+  shadow-off "the single biggest GPU cost in the scene."
+- **Sim: ped AI (`peds.js:4233`, onUpdate 34) = 15.8ms/tick, 3× the next system**, scales with ~500
+  peds on/off screen. stepSim ~51ms/tick total (SwiftShader-relative). #2 vehicle sim ~5.7, aigoals ~4.8.
+- **Memory: ~1GB heap / 44k geoms / 39k materials** → GC-hitch + crash risk on weak machines; 39k
+  materials also defeats the renderer's draw-call sort.
+
+### PLAN (delivered to owner as an artifact; NOT yet built — awaiting go-ahead)
+Observability-first: spend draws/tris/shadows/AI-ticks only on the view-frustum slice.
+1. Per-chunk InstancedMesh pools + merge + frustum/occlusion gating for the LOCAL static world
+   (target 5,600→<1,500 draws). The big one.
+2. Independent Shadows setting (Off/Low/High) + near-only casters + `?cfg_SHADOWS=off` feel flag.
+3. Ped-AI LOD: full brain only for near+on-screen peds; puppet/freeze the rest (16→<5ms).
+4. Material/geometry dedup cache (heap→<600MB, fewer state changes).
+5. Prioritized frustum-first streaming (no observable pop-in).
+6. Owner toggle panel + URL flags for every lever (feel > numbers).
+Feel-it-today (already shipped): Quality slider Fastest, `?qforce=N`, `?cfg_CITY_FAR_CULL=0`.

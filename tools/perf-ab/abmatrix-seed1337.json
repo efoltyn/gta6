@@ -1,0 +1,133 @@
+{
+  "tag": "abm-calm-1337",
+  "seed": 1337,
+  "scenario": "calm",
+  "results": [
+    {
+      "label": "baseline_q4",
+      "calls": 7212,
+      "tris": 2176125,
+      "visibleMeshes": 55388,
+      "mainMs": 427.3
+    },
+    {
+      "label": "shadows_off",
+      "calls": 7212,
+      "tris": 2176125,
+      "visibleMeshes": 55388,
+      "mainMs": 895.5,
+      "dCalls": 0,
+      "dTris": 0,
+      "dVisible": 0
+    },
+    {
+      "label": "drawdist_x0.5",
+      "calls": 7388,
+      "tris": 2107421,
+      "visibleMeshes": 56074,
+      "mainMs": 319.6,
+      "dCalls": -176,
+      "dTris": 68704,
+      "dVisible": -686,
+      "cullRadius": 350
+    },
+    {
+      "label": "drawdist_x0.25",
+      "calls": 7343,
+      "tris": 2106789,
+      "visibleMeshes": 56456,
+      "mainMs": 294.5,
+      "dCalls": -131,
+      "dTris": 69336,
+      "dVisible": -1068,
+      "cullRadius": 175
+    },
+    {
+      "label": "hide_pedsCops",
+      "calls": 7637,
+      "tris": 2157192,
+      "visibleMeshes": 56823,
+      "mainMs": 352.3,
+      "dCalls": -425,
+      "dTris": 18933,
+      "dVisible": -1435,
+      "hidden": 512
+    },
+    {
+      "label": "hide_cars",
+      "calls": 7229,
+      "tris": 1908750,
+      "visibleMeshes": 56823,
+      "mainMs": 313.6,
+      "dCalls": -17,
+      "dTris": 267375,
+      "dVisible": -1435,
+      "hidden": 91
+    },
+    {
+      "label": "hide_crowd",
+      "calls": 7660,
+      "tris": 2157468,
+      "visibleMeshes": 56823,
+      "mainMs": 5702.8,
+      "dCalls": -448,
+      "dTris": 18657,
+      "dVisible": -1435,
+      "hidden": 0
+    },
+    {
+      "label": "hide_dynamicAll",
+      "calls": 7206,
+      "tris": 1908474,
+      "visibleMeshes": 56823,
+      "mainMs": 6144.6,
+      "dCalls": 6,
+      "dTris": 267651,
+      "dVisible": -1435,
+      "hidden": 603
+    },
+    {
+      "label": "hide_staticCity",
+      "calls": 23,
+      "tris": 11023,
+      "visibleMeshes": 56823,
+      "mainMs": 56.9,
+      "dCalls": 7189,
+      "dTris": 2165102,
+      "dVisible": -1435,
+      "hidden": 1
+    }
+  ],
+  "shadow": {
+    "passCalls": 0,
+    "passTris": 0,
+    "shadowUpdateMs": 392,
+    "mainOnlyMs": 656.4,
+    "shadowTaxMs": -264.4,
+    "note": "passCalls = draw calls in the sun shadow-map render (device-independent). ms is SwiftShader-relative; real-GPU PCFSoft cost is higher share."
+  },
+  "shadowRes": {
+    "r512": 41525.9,
+    "r1024": 17569.7,
+    "r2048": 29007
+  },
+  "pixelRatio": {
+    "pr0.72": 210.5,
+    "pr1": 305.3
+  },
+  "counts": {
+    "peds": 509,
+    "cops": 3,
+    "cars": 91,
+    "crowd": 48,
+    "colliders": 97079
+  },
+  "heapMB": 1018.1,
+  "info": {
+    "geometries": 7901,
+    "textures": 249,
+    "programs": 262,
+    "uniqueMaterials": null
+  },
+  "consoleErrors": []
+}
