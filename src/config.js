@@ -524,6 +524,29 @@
       });
     }
   } catch (e) {}
+  // ---- PERF LEVERS (owner-facing, feel-testable via URL) ----------------------
+  // Round-3 teardown (tools/perf-ab/LOG.md) named the three biggest costs and
+  // gave each its own reversible switch so the owner can flip it and PLAY the
+  // A/B. All default to today's behaviour (byte-identical off).
+  //
+  // CITY_SHADOW_MODE: "auto" (tier decides, = today) | "off" (no sun shadow at
+  // any tier) | "low" (cap the sun map at 1024) | "high" (force 2048). Applied in
+  // core/quality.js:applyQuality so it composes with the tier without dropping it.
+  // Shadows are the #2 GPU cost; this isolates them. URL: ?cfg_CITY_SHADOW_MODE=off
+  if (CBZ.CONFIG.CITY_SHADOW_MODE == null) CBZ.CONFIG.CITY_SHADOW_MODE = "auto";
+  // CITY_PED_AI_LOD: extend the existing invisible-mass move()/think() throttle
+  // (today only q0-q2) up to the HIGH tiers, so off-screen peds integrate less
+  // often at q3/q4 too. The ped update (peds.js onUpdate 34) is the #1 CPU cost
+  // and scales with ~500 bodies regardless of visibility. On-screen/important
+  // peds are UNTOUCHED (observability-first). URL: ?cfg_CITY_PED_AI_LOD=1
+  if (CBZ.CONFIG.CITY_PED_AI_LOD == null) CBZ.CONFIG.CITY_PED_AI_LOD = false;
+  // LOCAL_INSTANCING: per-chunk InstancedMesh pooling of repeated static props in
+  // the block around the player (the ~99%-of-draw-calls bottleneck). This is the
+  // biggest lever but also the one prior rounds REGRESSED on (batch.js already
+  // merges statics — a naive second pass double-processed them). Gated off and
+  // built census-first so it targets only geometry batch.js leaves individual.
+  // URL: ?cfg_LOCAL_INSTANCING=1
+  if (CBZ.CONFIG.LOCAL_INSTANCING == null) CBZ.CONFIG.LOCAL_INSTANCING = false;
   // WORLD ENLARGE V2 (map-enlargement stage 2): non-zero world-layout offsets
   // spread every biome/island/nation radially outward from the mainland and
   // grow the FLAT terrain contract + continent margin to match. The flag is

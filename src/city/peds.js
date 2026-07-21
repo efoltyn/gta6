@@ -4349,7 +4349,13 @@
       // trick as the think() stride above). Visible/important peds are
       // untouched — this only trims the invisible mass.
       const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
-      const moveStride = (active || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : 1);
+      // CITY_PED_AI_LOD (round-3 teardown): the invisible off-screen mass is the
+      // bulk of this update's cost, but the throttle above only bit at q0-q2 — at
+      // q3/q4 every unseen ped still integrated every frame. With the flag on,
+      // unseen (not active, not vis) peds get a 2x move stride at high tiers too.
+      // Observability-first: active/visible/important peds are UNTOUCHED.
+      const pedLOD = CBZ.CONFIG && CBZ.CONFIG.CITY_PED_AI_LOD;
+      const moveStride = (active || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : (pedLOD ? 2 : 1));
       if (moveStride === 1 || (frame + p.slice) % moveStride === 0) {
         move(p, dt * moveStride, visAnim);
       }

@@ -85,6 +85,15 @@
   }
   CBZ.setQualityLevel = setQualityLevel;
   CBZ.qualityLabels = QUALITY_LABELS;
+  // Owner-facing shadow override (auto|off|low|high) — re-applies live so a
+  // settings toggle or console call takes effect without a reload. applyQuality
+  // (hoisted below) owns the actual sun.castShadow / mapSize write.
+  CBZ.setShadowMode = function (mode) {
+    CBZ.CONFIG = CBZ.CONFIG || {};
+    CBZ.CONFIG.CITY_SHADOW_MODE = mode;
+    try { applyQuality(); } catch (e) { console.error("[setShadowMode]", e); }
+    return CBZ.CONFIG.CITY_SHADOW_MODE;
+  };
 
   // ---- QUALITY-V2 (smarter FEEL-aware tier control) -----------------------
   // Gated behind CBZ.qualityV2 (default ON). When OFF we retain the legacy
@@ -187,14 +196,23 @@
     renderer.setPixelRatio(q.pr);
     // Three r128 setPixelRatio() already reapplies the cached logical size.
     // A second setSize() repeated the drawing-buffer reset/allocation work.
-    if (sun.shadow.mapSize.x !== q.shadow) {
-      sun.shadow.mapSize.set(q.shadow, q.shadow);
+    // Shadow policy: the quality tier sets the baseline (tier 0 kills the sun
+    // shadow outright — a full shadow-map render every frame is the single
+    // biggest GPU cost, way more impactful than shrinking its resolution). The
+    // owner-facing CBZ.CONFIG.CITY_SHADOW_MODE then OVERRIDES it without dropping
+    // the whole tier, so shadows can be tuned in isolation (the #2 GPU cost per
+    // the round-3 teardown). Keep the PCFSoft type fixed — flipping shadowMap.type
+    // at runtime would force a recompile of every material (39k of them).
+    let wantShadow = q.sunShadow !== false, wantMap = q.shadow;
+    const smode = CBZ.CONFIG && CBZ.CONFIG.CITY_SHADOW_MODE;
+    if (smode === "off") wantShadow = false;
+    else if (smode === "low") { wantShadow = true; wantMap = Math.min(wantMap, 1024); }
+    else if (smode === "high") { wantShadow = true; wantMap = 2048; }
+    if (sun.shadow.mapSize.x !== wantMap) {
+      sun.shadow.mapSize.set(wantMap, wantMap);
       if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     }
-    // tier 0: kill the sun's shadow pass outright — this is the single biggest
-    // GPU cost in the scene (a full shadow-map render every frame), way more
-    // impactful than shrinking its resolution.
-    sun.castShadow = q.sunShadow !== false;
+    sun.castShadow = wantShadow;
     if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
     else renderer.shadowMap.needsUpdate = true;
     // per-tier draw distance: city fog range + the farcull radius. Published
