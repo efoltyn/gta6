@@ -205,3 +205,27 @@ Observability-first: spend draws/tris/shadows/AI-ticks only on the view-frustum 
 5. Prioritized frustum-first streaming (no observable pop-in).
 6. Owner toggle panel + URL flags for every lever (feel > numbers).
 Feel-it-today (already shipped): Quality slider Fastest, `?qforce=N`, `?cfg_CITY_FAR_CULL=0`.
+
+### SHIPPED this round (levers 2 + 3; each flag-gated, default off = byte-identical)
+- **CITY_SHADOW_MODE** (auto|off|low|high) — quality.js:applyQuality override + `CBZ.setShadowMode()`
+  live setter. URL `?cfg_CITY_SHADOW_MODE=off`. Verified live: URL-off → sun.castShadow false at boot;
+  high/low/off/auto → castShadow+mapSize 2048/1024/off/2048. math-gate green.
+- **CITY_PED_AI_LOD** — peds.js onUpdate 34: extends the invisible-mass move() stride (was q0-q2) to
+  q3/q4 (2x). On/off-screen/important peds untouched. URL `?cfg_CITY_PED_AI_LOD=1`. math-gate green.
+
+### LOCAL_INSTANCING — CENSUS DONE (tools/perf-ab/census.mjs → census-90210.json), NOT yet built
+Census of frustum-visible STATIC meshes under arena.root (dynamic actors excluded), rAF frozen:
+- 14,730 visible draw-meshes; **9,366 are FREE repeated instanceable** (≥4 copies, no collider/userData/
+  LOS ref on the prop) across just **374 geom+material pairs** — tiny 2-40 tri MeshLambert props
+  (trim/sills/fixtures). Naive instancing would collapse ~9,366 draws → ~374. This CONTRADICTS the
+  round-2 "static headroom is low" note (that was the smaller pre-continent world).
+- **WHY NOT SHIPPED YET:** most of those 9,366 are CHILDREN of demolishable, collider-bearing building
+  groups. A naive InstancedMesh pass breaks `CBZ.batchHideGroup`/demolition (a destroyed building's trim
+  would float in a shared instance mesh — the exact class of bug ITER3 hit, +428%). It also must respect
+  farcull (round-2 fixed it to aggregate instance bounds — good), matrix-freeze, and MP determinism.
+- **SAFE BUILD PLAN (next):** (1) filter to prop meshes with NO collider-bearing ANCESTOR (standalone
+  street props), OR make demolition instance-aware (per-instance zero-scale on hide, like buildings.js
+  glass shatter); (2) group by geom+material, one InstancedMesh per pair, per-chunk so farcull culls
+  pools; (3) hook after `batchStaticUnder(A.root)` in city/mode.js:488, flag-gated; (4) A/B draw calls
+  ON vs OFF + demolition-check.mjs (float invariants) + smoke + math-gate before default-on. chunks.js
+  rebuildChunkBatch is still a documented STUB — the per-chunk instancer is its real implementation.
