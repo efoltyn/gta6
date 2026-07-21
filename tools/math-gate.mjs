@@ -74,7 +74,11 @@ const origin = `http://127.0.0.1:${port}/`;
 const dbg = await claimPort(10650, 200, (p) => fetch(`http://127.0.0.1:${p}/json/version`));
 const profile = `/tmp/cbz-mathgate-${dbg}`;
 await rm(profile, { recursive: true, force: true });
-const chrome = spawn("/opt/pw-browsers/chromium", [
+const CHROME_BIN = process.env.CBZ_CHROME ||
+  (process.platform === "darwin"
+    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    : "/opt/pw-browsers/chromium");
+const chrome = spawn(CHROME_BIN, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=480,300",
