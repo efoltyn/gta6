@@ -1,12 +1,12 @@
 /* ============================================================
-   systems/badwords.js — censored street language.
+   systems/custom_dialogue.js — customizable street language.
 
    Dialogue templates use {{TOKEN}} placeholders. In-game text is ALWAYS
    readable without raw slurs: empty env slots fall back to FILL_* or ****.
-   Locally, edit badwords.env and flip CBZ.CONFIG.BADWORDS_UNCENSORED to
+   Locally, edit custom.env and flip CBZ.CONFIG.BADWORDS_UNCENSORED to
    substitute the real strings you typed there.
 
-   Loads asynchronously from /badwords.env (static file). Until it lands,
+   Loads asynchronously from /custom.env (static file). Until it lands,
    every token resolves to a safe fill. Never throws.
 ============================================================ */
 (function () {
@@ -31,7 +31,7 @@
     FILL_D: "d***", FILL_C: "c***", FILL_P: "p***", FILL_SLUR: "****",
   };
   // Built-in uncensored defaults so the first frame is already raw even
-  // before badwords.env finishes fetching (env still wins when it lands).
+  // before custom.env finishes fetching (env still wins when it lands).
   const RAW = {
     F_WORD: "fuck", S_WORD: "shit", B_WORD: "bitch", A_WORD: "asshole",
     D_WORD: "damn", C_WORD: "cunt", P_WORD: "piss",
@@ -81,7 +81,7 @@
   function load() {
     if (typeof fetch !== "function") return;
     try {
-      fetch("badwords.env", { cache: "no-store" }).then(function (r) {
+      fetch("custom.env", { cache: "no-store" }).then(function (r) {
         if (!r || !r.ok) return null;
         return r.text();
       }).then(function (txt) {

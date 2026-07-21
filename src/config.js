@@ -693,7 +693,7 @@
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;
-  // BADWORDS: dialogue uses {{TOKEN}} placeholders resolved from badwords.env.
+  // CUSTOM DIALOGUE: {{TOKEN}} placeholders resolved from custom.env.
   // Default ON for the full uncensored street voice. Flip false (or
   // ?cfg_BADWORDS_UNCENSORED=0) to force the censored FILL_* masks.
   if (CBZ.CONFIG.BADWORDS_UNCENSORED == null) CBZ.CONFIG.BADWORDS_UNCENSORED = true;

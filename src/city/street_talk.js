@@ -7,7 +7,7 @@
 
    This file only owns WHAT the proposal is for a stranger: one offer derived
    from live variables (your level, their level, max cash they can spare,
-   job, wealth). Funny equal-opportunity look jokes + badwords tokens ride
+   job, wealth). Funny equal-opportunity look jokes + custom.env tokens ride
    on the lines. No extra keys, no second panel.
 
    Feature flag: CBZ.CONFIG.STREET_TALK_V2 (default ON).
@@ -80,7 +80,7 @@
   }
 
   // Equal-opportunity roast lines — every look bucket gets it, including you.
-  // Tokens resolve live from badwords.env (uncensored by default).
+  // Tokens resolve live from custom.env (uncensored by default).
   const RACE_LINES = {
     pale: [
       "You {{F_WORD}}ing {{SLUR_WHITE}} glow like a flashlight in a dark alley.",
