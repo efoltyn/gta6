@@ -1,0 +1,15 @@
+{
+  "seed": 90210,
+  "cfg": "",
+  "mainCalls": 5441,
+  "mainTris": 2020150,
+  "meshes": 153897,
+  "visibleMeshes": 53853,
+  "instancedMeshes": 288,
+  "localInstStats": null,
+  "flag": false,
+  "heapMB": 1030.2,
+  "programs": 180,
+  "geometries": 5981,
+  "consoleErrors": []
+}

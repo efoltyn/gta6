@@ -1,0 +1,19 @@
+{
+  "seed": 90210,
+  "cfg": "LOCAL_INSTANCING=1",
+  "mainCalls": 6854,
+  "mainTris": 2393822,
+  "meshes": 154376,
+  "visibleMeshes": 50083,
+  "instancedMeshes": 642,
+  "localInstStats": {
+    "pools": 354,
+    "collapsed": 4205,
+    "buckets": 7448
+  },
+  "flag": true,
+  "heapMB": 1029.9,
+  "programs": 182,
+  "geometries": 5192,
+  "consoleErrors": []
+}

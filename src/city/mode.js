@@ -486,6 +486,11 @@
       // load-time batch pass (core/batch.js) can't reach the city: it's built
       // lazily, long after the page-load event that triggers that pass.
       if (CBZ.batchStaticUnder) CBZ.batchStaticUnder(A.root);
+      // LOCAL_INSTANCING (city/localinst.js): collapse the repeated static props
+      // batch LEFT (emissive/transparent/textured trim) into per-tile
+      // InstancedMesh pools. Runs AFTER batch (only sees leftovers) and BEFORE
+      // freeze (its pools inherit matrixAutoUpdate=false). Flag-gated + inert off.
+      if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(A.root);
       // Freeze matrix recompute for everything provably static under the root
       // (core/staticfreeze.js) — after the batch pass (its merged output is
       // already frozen), before actors spawn (they arrive with live matrices).

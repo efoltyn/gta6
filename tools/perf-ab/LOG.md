@@ -229,3 +229,42 @@ Census of frustum-visible STATIC meshes under arena.root (dynamic actors exclude
   pools; (3) hook after `batchStaticUnder(A.root)` in city/mode.js:488, flag-gated; (4) A/B draw calls
   ON vs OFF + demolition-check.mjs (float invariants) + smoke + math-gate before default-on. chunks.js
   rebuildChunkBatch is still a documented STUB — the per-chunk instancer is its real implementation.
+
+## ROUND 3b — 2026-07-21 (LOCAL_INSTANCING BUILT, A/B'd, tuned, SHIPPED default-off)
+Built src/city/localinst.js (CBZ.instanceStaticUnder, hooked in city/mode.js after batchStaticUnder,
+before freezeStaticUnder). Collapses repeated static props batch left (emissive/transparent/textured
+trim) into per-CELL InstancedMesh pools. Demolition-safe: each instance mapped to its top group; wraps
+batchHideGroup/batchShowGroup to zero-scale a collapsing building's instanced trim. Tools: abinst.mjs
+(paired draw-call A/B), demo-inst-safety.mjs (exact zero-on-demolish invariant via CBZ.localInstGroupLive).
+
+### A/B (calm q4, seed 90210; draw calls EXACT, device-independent)
+| config | draw calls | tris | pools/collapsed | verdict |
+|---|---|---|---|---|
+| OFF (2 runs) | 5,441 / 6,407 | 2.02M/2.56M | — | baseline (OFF varies +-~1k run-to-run) |
+| ON 112u cell | 5,358 | 2.55M | 354 / 4,205 | WASH — in-view props scatter thin per 112u tile |
+| ON 336u cell | 5,730 | 1.96M | 567 / 5,995 | ~noise |
+| ON 672u cell | 3,826 / 3,851 | 2.32M/2.13M | 542 / 6,097 | -30%, STABLE across repeats |
+| ON 672u seed 1337 | 5,120 | 2.15M | 586 / 6,112 | -29% vs ~7.2k baseline — generalises |
+
+- KEY BUG FOUND + FIXED BY A/B: v1 set frustumCulled=false on pools + relied on farcull (distance, 360deg)
+  -> drew all within-radius pools instead of a view cone -> +26% WORSE. Fix: pools live under one container
+  (farcull sees it as one node) + a manual onAlways(3.7) frustum sweep culls each pool by its real world
+  sphere. That flipped it from regression to win.
+- Cell size matters non-obviously: 112u (=batch tile) is a wash (few copies of a prop type per small tile);
+  672u collapses in-view props ~1:many. Default 672/min-4. Tunable via ?cfg_LOCAL_INST_TILE / _MIN.
+- Bonus: ON draw calls are far MORE STABLE (3,826 vs 3,851) than OFF (5,441 vs 6,407) — instancing removes
+  the per-frame in-view-prop-count variance too.
+
+### GATES (all green)
+- math-gate seed 90210: ok (flag OFF default path byte-identical; determinism ok).
+- demo-inst-safety (EXACT, via localInstGroupLive): target building owned 654 instances, liveBefore 654,
+  liveAfter 0 -> the batchHideGroup wrap zero-scales exactly the demolished building's trim. PASS.
+  (An earlier geometric-box test FALSE-FAILED: setFromObject(b.group) inflated the footprint to 1,329u wide
+  and counted NEIGHBOURS' standing trim — switched to the exact instance-map test.)
+- 0 console errors across every ON run.
+
+### DECISION — SHIP default-OFF (owner opt-in)
+Real ~30% draw-call win on the #1 GPU bottleneck, demolition-safe, MP-deterministic, reversible. Kept
+default OFF because enabling it changes what renders and visual parity is the OWNER's call (doctrine: looks
+are judged by playing). Owner flips ?cfg_LOCAL_INSTANCING=1, plays, eyeballs; if identical, flip the config
+default to true. All three round-3 levers now shipped + flag-gated + verified.
