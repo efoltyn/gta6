@@ -26,6 +26,16 @@
   // AND in interact.js — idempotent, whichever script loads first wins.
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PROPS_WIRED_V1 == null) CBZ.CONFIG.PROPS_WIRED_V1 = true;
+  // JUNCTION_DETAIL (owner: "roads meet at intersections right now feeling very
+  // unintentional") — kerb returns, junction resurfacing, stop lines and
+  // crosswalks at every crossing city.roads knows about. One line back to
+  // square corners. JUNCTION_CURB_TRIM is the half of it that reaches into
+  // geometry world.js already built (the straight kerbs the return replaces);
+  // it is separately revertible because it is the only part that depends on
+  // another file's shape rather than on the road record.
+  if (CBZ.CONFIG.JUNCTION_DETAIL == null) CBZ.CONFIG.JUNCTION_DETAIL = true;
+  if (CBZ.CONFIG.JUNCTION_CURB_TRIM == null) CBZ.CONFIG.JUNCTION_CURB_TRIM = true;
+  if (CBZ.CONFIG.JUNCTION_MAX == null) CBZ.CONFIG.JUNCTION_MAX = 260;
 
   // ---- shared cached DIEGETIC sign panel ---------------------------------
   // Historical callers still use the makeLabelSprite name, but this is no
@@ -92,6 +102,126 @@
 
   // lamp emissive material factory
   function lampMat(color) { return new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.2 }); }
+
+  /* ======================================================================
+     CBZ.lampMast — ONE SOLVE FOR POLE -> ARM -> HEAD.
+     ======================================================================
+     OWNER: "lightposts all suck, don't connect."
+
+     He is right, and the proximate cause was one character. The street lamp
+     below rotated its mast arm about Z, which lays a Y-axis cylinder along the
+     fixture's local X — while the head was offset along local +Z. The arm
+     therefore crossed the pole SIDEWAYS and the luminaire floated 1.45 m away
+     from the end of it with nothing in between: a bare cylinder with a box
+     hanging in the air beside it, which is exactly what the screenshot shows.
+     towngen.js was worse — a bare 4.6 m cylinder with a cube balanced on top,
+     no arm at all, and the head over the PAVEMENT instead of the road.
+
+     But the character is not the bug. The bug is that the arm and the head
+     were authored as two independent constants, so nothing could stop them
+     disagreeing. Here they come out of ONE solve: hand it a shaft height and
+     an overhang and it hands back the arm's length, tilt and centre AND the
+     head/bulb/glow positions AT THE ARM'S TIP. They cannot drift, because
+     there is only one of them.
+
+     LOCAL FRAME: the fixture's +Z points at the carriageway. A caller yaws the
+     whole thing by atan2(faceX, faceZ) — the vector from the lamp toward the
+     road centre, which every caller already has from the side of the road it
+     placed the lamp on — and the head overhangs the ROAD by construction.
+
+       o.poleH  shaft height (m)          o.reach  overhang from the axis (m)
+       o.rise   arm climb, root->tip (m)  o.poleR  shaft radius at the top (m)
+
+     Degrade-safe by construction: a pure function of four numbers returning
+     plain floats, so `CBZ.lampMast ? CBZ.lampMast(o) : <old inline consts>`
+     is a real fallback and adopting can never break a caller.
+     Consumers: this file's street lamps, city/towngen.js's town lamps,
+     world/utility_lines.js's cobra mast arms. */
+  CBZ.lampMast = function (o) {
+    o = o || {};
+    const poleH = o.poleH != null ? +o.poleH : 5.6;
+    const reach = o.reach != null ? +o.reach : 1.45;
+    const rise = o.rise != null ? +o.rise : 0.30;
+    const poleR = o.poleR != null ? +o.poleR : 0.11;
+    // The arm springs from the shaft just under its cap and climbs to the tip.
+    const z0 = poleR * 0.5, y0 = poleH - 0.12;
+    const z1 = reach, y1 = poleH + rise;
+    const dz = Math.max(0.05, z1 - z0), dy = y1 - y0;
+    return {
+      poleH: poleH, poleCY: poleH / 2, poleR: poleR, reach: reach,
+      armLen: Math.hypot(dz, dy),
+      // A Y-axis cylinder lies along +Z at rotation.x = PI/2; subtracting the
+      // climb angle lifts the far end. (Rotating about Z — the bug — lays the
+      // same cylinder along X, across the pole, pointing at nothing.)
+      armRotX: Math.PI / 2 - Math.atan2(dy, dz),
+      armCY: (y0 + y1) / 2, armCZ: (z0 + z1) / 2,
+      tipY: y1, tipZ: z1,
+      headY: y1 - 0.10, headZ: z1,     // luminaire body, hung on the tip
+      bulbY: y1 - 0.20, bulbZ: z1,     // the lens, on its underside
+      glowY: y1 - 0.26,                // the light comes off the HEAD, never the base
+    };
+  };
+
+  /* ======================================================================
+     CBZ.streetAudit() — THE RATCHET FOR "THE STREET LOOKS DELIBERATE".
+     ======================================================================
+     Two of these may only ever reach and hold ZERO:
+
+       wiresDisconnected   a conductor whose endpoint is not ON the insulator
+                           it hangs from. Measured, not asserted: the wire
+                           builder derives every endpoint by pushing the
+                           prototype's own insulator offset through the pole's
+                           own instance matrix, then re-measures the gap. Any
+                           number above zero means the two have drifted apart
+                           again, which is precisely the bug the owner
+                           photographed.
+       paintThroughJunction  a crossing with lane paint still visibly running
+                           across the box. Reported beside `junctionPaintRaw`
+                           (how many junctions a builder painted through in the
+                           first place) so a "fix" that just stops drawing
+                           anything cannot pass.
+
+     Everything else is context that must not be allowed to hide a regression:
+     poles / junctions / drawCalls fall if the layer is quietly turned off.
+     `wiresThroughGeometry` counts spans DROPPED because their straight line
+     crossed a building — those are deletions, and a rising number is the wire
+     pass correctly refusing to draw through a wall.
+
+     Exported, never called from here. utility_lines.js publishes its half
+     through CBZ.streetPoleCensus (the CBZ.heliFleet pattern), so a future pole
+     source costs this function no edit. */
+  CBZ.streetAudit = function () {
+    // CBZ.city is the MODE SHELL; the built world is CBZ.city.arena (mode.js
+    // only assigns it after buildCity returns). Reading the shell is how a
+    // dozen callers in this repo have quietly measured nothing.
+    const c0 = CBZ.city;
+    const c = (c0 && c0.arena && c0.arena.roads) ? c0.arena : c0;
+    const J = (c && c._junctionStats) || null;
+    const P = (typeof CBZ.streetPoleCensus === "function" ? CBZ.streetPoleCensus() : null) || {};
+    const L = (c && c._lampCensus) || { lamps: 0, noCollider: 0 };
+    return {
+      // POLES standing in the world: utility poles + lamp posts, minus the
+      // cobra heads bolted onto utility poles (those are luminaires on a pole
+      // that is already counted, not a second pole).
+      poles: (P.poles | 0) + (L.lamps | 0) - (P.mastLamps | 0),
+      wiresDisconnected: P.wiresDisconnected | 0,
+      wiresThroughGeometry: P.wiresDropped | 0,
+      polesNoCollider: (P.noCollider | 0) + (L.noCollider | 0),
+      // junctions
+      junctions: J ? J.junctions : 0,
+      junctionsDetailed: J ? J.detailed : 0,
+      paintThroughJunction: J ? J.uncovered : 0,
+      drawCalls: (J ? J.drawCalls : 0) + (P.drawCalls | 0),
+      // printed BESIDE the ratchets so neither can quietly absorb a violation
+      junctionPaintRaw: J ? J.through : 0,
+      junctionApproachesMarked: J ? J.marked : 0,
+      curbsTrimmed: J ? J.trimmed : 0,
+      wireSpans: P.spans | 0,
+      wiresAreColliders: P.wireColliders | 0,
+      lamps: L.lamps | 0,
+      lampsOverRoad: L.overRoad | 0,
+    };
+  };
 
   // LAMP_INSTANCED street-lamp bulb/glow pools (filled by cityProps once the
   // posts are placed; read by hitProp when a lamp is shot out). _zeroM4 is the
@@ -940,6 +1070,369 @@
       return false;
     }
 
+    // =====================================================================
+    //  JUNCTION DETAIL — the corner is what makes a crossing read as designed.
+    // =====================================================================
+    //  OWNER: "roads meet at intersections right now feeling very
+    //  unintentional." Two grey slabs crossed, the kerb met at a square point,
+    //  and on every road built outside the mainland grid the centreline ran
+    //  straight through the box.
+    //
+    //  NOTHING HERE IS AUTHORED. `city.roads` is the record every road builder
+    //  in this game already pushes; city/roadrules.js now derives the crossings
+    //  from it (CBZ.roadJunctions) and solves the kerb-return radius from the
+    //  road's OWN cross-section — AASHTO design vehicle off `lanesPerDir`,
+    //  minus the parking/clear zone the road already declares, capped by the
+    //  footway the lots leave. So a village lane gets a tight 3 m corner and a
+    //  four-lane arterial gets a 5 m one without a single number typed per
+    //  place, and towns/causeways/minicity links — none of which appear in the
+    //  grid's private `city.intersections` array — are junctions for the first
+    //  time.
+    //
+    //  DRAW-CALL BUDGET: 3 for every junction in the world. One merged mesh of
+    //  corner asphalt + resurfacing (batch-exempt: it carries polygonOffset,
+    //  and core/batch.js's V2 merge re-materials its buckets and would silently
+    //  drop it — the floating-yellow-line regression world.js documents), one
+    //  merged mesh of kerb returns (plain Lambert, EMPTY userData, so the
+    //  batcher may fold it further), one merged mesh of stop bars + crosswalks.
+    //  Nothing here gets a collider: a kerb you cannot mount is a wall.
+    const JUNCTIONS = (function junctionDetail() {
+      if (!CBZ.roadJunctions) return [];
+      // The flag turns off the DRAWING, not the MEASURING. With it off the
+      // world is byte-identical to before this pass existed AND
+      // CBZ.streetAudit() still reports the true before-state — which is the
+      // only way `paintThroughJunction` means anything as a ratchet.
+      const DRAW = CBZ.CONFIG.JUNCTION_DETAIL !== false;
+      const all = CBZ.roadJunctions(city) || [];
+      if (!all.length) return [];
+      const MAX = Math.max(0, CBZ.CONFIG.JUNCTION_MAX | 0);
+      const list = [];
+      for (let i = 0; i < all.length && list.length < MAX; i++) {
+        const J = all[i];
+        // The same access law the lamp walk and every dressing pass obey: a
+        // road reserved to one vehicle class (the apron's service lanes, a
+        // compound's gate spur) is not a street and does not get a city corner.
+        if (CBZ.roadPropRoadOk && (!CBZ.roadPropRoadOk(J.a) || !CBZ.roadPropRoadOk(J.b))) continue;
+        list.push(J);
+      }
+      if (!list.length) return list;
+
+      const FILL_Y = 0.086;      // over world.js's 0.08 sidewalk slab, under its 0.10 lot pad
+      const PAINT_Y = 0.092;
+      const KERB_TOP = 0.22;     // world.js's own kerb height — the arc continues those strips
+      const KERB_W = 0.34;       // ...and their width
+
+      // ---- geometry sinks: three flat arrays, three meshes ---------------
+      const fillP = [], fillN = [], kerbP = [], kerbN = [], paintP = [], paintN = [];
+      // Winding is computed, never assumed. detail_kit.js's own comment records
+      // what the mirrored order costs: the whole sheet silently renders
+      // back-faces and vanishes. One cross-product per triangle removes the
+      // entire class of bug.
+      function tri(P, N, ax, ay, az, bx, by, bz, cx2, cy, cz2, nx, ny, nz) {
+        const ux = bx - ax, uy = by - ay, uz = bz - az;
+        const vx = cx2 - ax, vy = cy - ay, vz = cz2 - az;
+        const wx = uy * vz - uz * vy, wy = uz * vx - ux * vz, wz = ux * vy - uy * vx;
+        if (wx * nx + wy * ny + wz * nz < 0) P.push(ax, ay, az, cx2, cy, cz2, bx, by, bz);
+        else P.push(ax, ay, az, bx, by, bz, cx2, cy, cz2);
+        for (let i = 0; i < 3; i++) N.push(nx, ny, nz);
+      }
+      function flatQuad(P, N, ax, az, bx, bz, cx2, cz2, dx2, dz2, y) {
+        tri(P, N, ax, y, az, bx, y, bz, cx2, y, cz2, 0, 1, 0);
+        tri(P, N, ax, y, az, cx2, y, cz2, dx2, y, dz2, 0, 1, 0);
+      }
+      // a painted rect on the road, axis-aligned
+      function paintRect(cx2, cz2, w, d, y) {
+        flatQuad(paintP, paintN, cx2 - w / 2, cz2 - d / 2, cx2 - w / 2, cz2 + d / 2,
+          cx2 + w / 2, cz2 + d / 2, cx2 + w / 2, cz2 - d / 2, y);
+      }
+
+      // ---- WHAT DOES THIS JUNCTION ALREADY HAVE ---------------------------
+      // The world tells the pass what it is missing. Every road-paint mesh in
+      // this game is already marked `userData.roadPaint` (world.js, towngen.js
+      // and highways.js all set it so core/batch.js cannot re-material away
+      // their polygonOffset), so the paint IS queryable — nobody had queried
+      // it. Two questions per junction, one scan:
+      //   inBox   — lane paint running THROUGH the crossing. That is the
+      //             "unintentional" tell, and it is what the resurfacing patch
+      //             is for; junctions without it are left alone.
+      //   approach— a crosswalk/stop bar already exists on that leg. The
+      //             mainland grid has both; towns have crosswalks. Drawing a
+      //             second set 0.8 m from the first would be worse than
+      //             drawing none, so this pass only fills what is MISSING.
+      const CELL = 96;
+      const jgrid = new Map();
+      function jkey(ix, iz) { return ix * 8192 + iz; }
+      for (let i = 0; i < list.length; i++) {
+        const J = list[i];
+        J._inBox = 0; J._appr = [0, 0, 0, 0];   // -z, +z, -x, +x
+        const reach = Math.max(J.ha, J.hb) + 10;
+        const i0 = Math.floor((J.x - reach) / CELL), i1 = Math.floor((J.x + reach) / CELL);
+        const k0 = Math.floor((J.z - reach) / CELL), k1 = Math.floor((J.z + reach) / CELL);
+        for (let a = i0; a <= i1; a++) for (let b = k0; b <= k1; b++) {
+          const k = jkey(a, b);
+          let arr = jgrid.get(k); if (!arr) { arr = []; jgrid.set(k, arr); }
+          arr.push(J);
+        }
+      }
+      const _pv = new THREE.Vector3();
+      let paintTris = 0;
+      root.traverse(function (o) {
+        if (!o.isMesh || !o.userData || !o.userData.roadPaint) return;
+        const g = o.geometry, pa = g && g.attributes && g.attributes.position;
+        if (!pa) return;
+        o.updateWorldMatrix(true, false);
+        const mw = o.matrixWorld, n = pa.count;
+        const idx = g.index;
+        const triN = idx ? idx.count / 3 : n / 3;
+        for (let t = 0; t < triN; t++) {
+          let sx = 0, sz = 0;
+          for (let v = 0; v < 3; v++) {
+            const vi = idx ? idx.getX(t * 3 + v) : t * 3 + v;
+            _pv.fromBufferAttribute(pa, vi).applyMatrix4(mw);
+            sx += _pv.x; sz += _pv.z;
+          }
+          sx /= 3; sz /= 3;
+          paintTris++;
+          const bucket = jgrid.get(jkey(Math.floor(sx / CELL), Math.floor(sz / CELL)));
+          if (!bucket) continue;
+          for (let q = 0; q < bucket.length; q++) {
+            const J = bucket[q];
+            const dx = sx - J.x, dz = sz - J.z;
+            const adx = Math.abs(dx), adz = Math.abs(dz);
+            if (adx < J.ha - 0.5 && adz < J.hb - 0.5) { J._inBox++; continue; }
+            // APPROACH BAND, deliberately only 4 m deep. That is where a
+            // crosswalk and a stop bar live; a lane line that RESUMES after a
+            // junction gap starts further out than that (world.js sets back
+            // ROAD/2+3 and its first dash centre lands ~6.5 m past the box,
+            // towngen's ~6.6 m), so a gapped centreline cannot be mistaken for
+            // crossing furniture and suppress the markings this pass adds.
+            if (adx <= J.ha && adz > J.hb + 0.2 && adz < J.hb + 4.0) J._appr[dz < 0 ? 0 : 1]++;
+            else if (adz <= J.hb && adx > J.ha + 0.2 && adx < J.ha + 4.0) J._appr[dx < 0 ? 2 : 3]++;
+          }
+        }
+      });
+
+      // ---- 1) KERB RETURNS -----------------------------------------------
+      // The single change that does more than everything else here. The arc is
+      // tangent to BOTH kerb lines by construction (centre at (h+R, h+R), so
+      // its ends land exactly on x = h and z = h), which is what makes it read
+      // as a road corner instead of a chamfer.
+      let detailed = 0;
+      for (let i = 0; i < list.length; i++) {
+        const J = list[i], R = J.r, ha = J.ha, hb = J.hb;
+        if (!(R > 0.5)) continue;
+        // the junction's own deck height, so a raised causeway crossing gets
+        // its corner at ITS level rather than at the mainland's
+        const jy = J.y || 0, FY = FILL_Y + jy, KY = KERB_TOP + jy, PY = PAINT_Y + jy;
+        const segs = Math.max(3, Math.min(8, Math.round(R * 1.1)));
+        let corners = 0;
+        for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
+          // A CORNER NEEDS TWO LEGS. At a T-junction — a spur ending on a
+          // street, which is most of what govcomplex, the towns and the
+          // causeway network build — the two corners on the far side of the
+          // through road are not corners at all: the kerb there runs straight.
+          // Carving a return into it would be a notch cut out of nothing.
+          if (!(sz > 0 ? J.nz : J.sz)) continue;
+          if (!(sx > 0 ? J.px : J.mx)) continue;
+          const ccx = J.x + sx * (ha + R), ccz = J.z + sz * (hb + R);
+          // arc, plus one point pushed onto each carriageway so the new asphalt
+          // overlaps the old and cannot leave a hairline at the joint
+          const ax = [J.x + sx * (ha - 0.25)], az = [J.z + sz * (hb + R)];
+          for (let k = 0; k <= segs; k++) {
+            const th = (k / segs) * (Math.PI / 2);
+            ax.push(ccx - sx * R * Math.cos(th));
+            az.push(ccz - sz * R * Math.sin(th));
+          }
+          ax.push(J.x + sx * (ha + R)); az.push(J.z + sz * (hb - 0.25));
+          // asphalt fan from the square corner out to the arc
+          const px = J.x + sx * (ha - 0.25), pz = J.z + sz * (hb - 0.25);
+          for (let k = 0; k + 1 < ax.length; k++) {
+            tri(fillP, fillN, px, FY, pz, ax[k], FY, az[k], ax[k + 1], FY, az[k + 1], 0, 1, 0);
+          }
+          // the kerb itself: a top strip running outward from the arc, and the
+          // vertical face the road sees. 4 triangles a segment — a box per
+          // segment would be three times the vertices for the two faces nobody
+          // can see.
+          for (let k = 1; k + 1 < ax.length - 1; k++) {
+            const x0 = ax[k], z0 = az[k], x1 = ax[k + 1], z1 = az[k + 1];
+            let o0x = ccx - x0, o0z = ccz - z0; const l0 = Math.hypot(o0x, o0z) || 1; o0x /= l0; o0z /= l0;
+            let o1x = ccx - x1, o1z = ccz - z1; const l1 = Math.hypot(o1x, o1z) || 1; o1x /= l1; o1z /= l1;
+            flatQuad(kerbP, kerbN, x0, z0, x0 + o0x * KERB_W, z0 + o0z * KERB_W,
+              x1 + o1x * KERB_W, z1 + o1z * KERB_W, x1, z1, KY);
+            // inner face, normal pointing back into the junction
+            const fnx = -(o0x + o1x) / 2, fnz = -(o0z + o1z) / 2;
+            tri(kerbP, kerbN, x0, FY, z0, x1, FY, z1, x1, KY, z1, fnx, 0, fnz);
+            tri(kerbP, kerbN, x0, FY, z0, x1, KY, z1, x0, KY, z0, fnx, 0, fnz);
+          }
+          corners++;
+        }
+        // counted on CORNERS ACTUALLY BUILT, so a junction whose legs all fail
+        // cannot pad the ratchet with a return nobody drew
+        if (corners) { detailed++; J._corners = corners; }
+
+        // ---- 2) RESURFACE, but only where paint actually runs through -----
+        // A junction whose builder already stops its markings (the mainland
+        // grid under ROADS_V2, every town) is left exactly as it was.
+        if (J._inBox > 0) {
+          if (DRAW) {
+            flatQuad(fillP, fillN, J.x - ha, J.z - hb, J.x - ha, J.z + hb,
+              J.x + ha, J.z + hb, J.x + ha, J.z - hb, FY);
+            J._patched = true;
+          }
+        }
+
+        // ---- 3) STOP LINE + CROSSWALK on legs that have neither ----------
+        // MUTCD geometry: the crosswalk sits tight to the throat, and the stop
+        // line is set back 1.2 m (4 ft) BEHIND it — not the 0.2 m the mainland
+        // grid uses. Crosswalk width scales with the road it crosses (1.8 m
+        // minimum, 3.0 m where the road is wide enough to warrant it).
+        const legs = [
+          { on: J.sz, ax: 0, s: -1, h: J.hb, cross: J.ha },
+          { on: J.nz, ax: 0, s: 1, h: J.hb, cross: J.ha },
+          { on: J.mx, ax: 1, s: -1, h: J.ha, cross: J.hb },
+          { on: J.px, ax: 1, s: 1, h: J.ha, cross: J.hb },
+        ];
+        for (let L = 0; L < 4; L++) {
+          const leg = legs[L];
+          if (!leg.on) continue;                      // no oncoming road on this side
+          if (J._appr[L] > 0) continue;               // already marked by its builder
+          const halfRoad = leg.cross;
+          const xw = Math.max(1.8, Math.min(3.0, 0.16 * halfRoad * 2));
+          const near = leg.h + 0.6;
+          const stopAt = near + xw + 1.2 + 0.22;      // + half the bar
+          // zebra bars, long in the direction of travel, across the full width
+          const nb = Math.max(2, Math.ceil(halfRoad / 1.1));
+          for (let k = -nb; k <= nb; k++) {
+            const lat = k * 1.1;
+            if (Math.abs(lat) > halfRoad - 0.5) continue;
+            if (leg.ax === 0) paintRect(J.x + lat, J.z + leg.s * (near + xw / 2), 0.6, xw, PY);
+            else paintRect(J.x + leg.s * (near + xw / 2), J.z + lat, xw, 0.6, PY);
+          }
+          // stop bar — the DRIVER'S half only (right-hand traffic: the lane
+          // group approaching this leg is the one on the driver's right)
+          const barC = halfRoad / 2, barW = halfRoad - 0.6;
+          if (leg.ax === 0) paintRect(J.x + (leg.s > 0 ? -barC : barC), J.z + leg.s * stopAt, barW, 0.45, PY);
+          else paintRect(J.x + leg.s * stopAt, J.z + (leg.s > 0 ? barC : -barC), 0.45, barW, PY);
+          J._marked = (J._marked || 0) + 1;
+        }
+      }
+
+      // ---- 4) the straight kerbs the return REPLACES ----------------------
+      // world.js rings every block with 0.34 x 0.22 kerb boxes that run to the
+      // square corner. A return drawn inside them is just a second kerb, so the
+      // straight run is shortened to the arc's tangent point — which is what a
+      // kerb return IS. This is the one part of this pass that keys off another
+      // file's geometry rather than off the road record, so it matches on that
+      // exact signature, only ever SHRINKS, and is separately revertible.
+      let trimmed = 0;
+      if (DRAW && CBZ.CONFIG.JUNCTION_CURB_TRIM !== false) {
+        const kerbs = [];
+        root.traverse(function (o) {
+          if (!o.isMesh || !o.geometry || o.geometry.type !== "BoxGeometry") return;
+          const p = o.geometry.parameters;
+          if (!p || Math.abs(p.height - 0.22) > 1e-6) return;
+          if (Math.abs(o.position.y - 0.11) > 1e-6) return;
+          const alongX = Math.abs(p.depth - 0.34) < 1e-6 && p.width > 2;
+          const alongZ = Math.abs(p.width - 0.34) < 1e-6 && p.depth > 2;
+          if (!alongX && !alongZ) return;
+          kerbs.push({ m: o, vert: alongZ, len: alongZ ? p.depth : p.width });
+        });
+        for (let i = 0; i < kerbs.length; i++) {
+          const K = kerbs[i], m = K.m;
+          const c = K.vert ? m.position.z : m.position.x;
+          const lat = K.vert ? m.position.x : m.position.z;
+          const lo = c - K.len / 2, hi = c + K.len / 2;
+          let cut0 = 0, cut1 = 0;                     // low end, high end
+          for (let j = 0; j < list.length; j++) {
+            const J = list[j];
+            // jl = the junction coordinate ACROSS the kerb (which road's edge
+            // this kerb lines); jc = the junction coordinate ALONG it (where on
+            // the kerb the crossing sits); hAl = the half-width of the crossing
+            // road, i.e. how far the kerb currently runs into the junction box.
+            const jl = K.vert ? J.x : J.z, jc = K.vert ? J.z : J.x;
+            const hLat = K.vert ? J.ha : J.hb, hAl = K.vert ? J.hb : J.ha;
+            if (Math.abs(lat - jl) > hLat + 1.6) continue;        // not this road's kerb
+            const want = hAl + J.r + 0.1;                          // the arc's tangent point
+            // ...and only where a return was ACTUALLY drawn. A T-junction's far
+            // corners get none (see above), so their kerbs must stay whole —
+            // shortening one there would leave a gap with nothing in it.
+            const latS = (lat - jl) >= 0 ? 1 : -1;
+            const drawn = function (endS) {
+              const sx = K.vert ? latS : endS, sz = K.vert ? endS : latS;
+              return (sx > 0 ? J.px : J.mx) && (sz > 0 ? J.nz : J.sz);
+            };
+            if (jc < c && drawn(-1) && Math.abs(lo - (jc + hAl)) < 3.0) cut0 = Math.max(cut0, (jc + want) - lo);
+            if (jc > c && drawn(1) && Math.abs(hi - (jc - hAl)) < 3.0) cut1 = Math.max(cut1, hi - (jc - want));
+          }
+          if (cut0 < 0) cut0 = 0;
+          if (cut1 < 0) cut1 = 0;
+          if (cut0 <= 0.05 && cut1 <= 0.05) continue;
+          const newLen = K.len - cut0 - cut1;
+          if (newLen < 1.0) { m.visible = false; trimmed++; continue; }
+          const shift = (cut0 - cut1) / 2;
+          if (K.vert) { m.scale.z = newLen / K.len; m.position.z += shift; }
+          else { m.scale.x = newLen / K.len; m.position.x += shift; }
+          trimmed++;
+        }
+      }
+
+      // ---- build: three meshes for every junction in the world ------------
+      function sink(P, N, material, name, exempt, order) {
+        if (!P.length) return null;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+        g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(N), 3));
+        g.computeBoundingSphere();
+        const m = new THREE.Mesh(g, material);
+        m.name = name;
+        m.castShadow = false;
+        m.receiveShadow = !exempt;
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        if (order != null) m.renderOrder = order;
+        // roadPaint == "core/batch.js must not re-material this": the V2 merge
+        // drops polygonOffset and the decal starts z-fighting the asphalt. The
+        // kerb mesh deliberately does NOT set it — it is plain lit geometry and
+        // the batcher is welcome to fold it into the rest of the static world.
+        if (exempt) m.userData.roadPaint = true;
+        root.add(m);
+        return m;
+      }
+      const fillM = new THREE.MeshLambertMaterial({
+        color: 0x282a30, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      });
+      fillM._shared = true;
+      const paintM = new THREE.MeshBasicMaterial({
+        color: 0xeef1f5, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
+      });
+      paintM._shared = true;
+      if (DRAW) {
+        sink(fillP, fillN, fillM, "junction-surface", true, 2);
+        sink(kerbP, kerbN, smat(0xb9ad88), "junction-kerbs", false, null);
+        sink(paintP, paintN, paintM, "junction-markings", true, 3);
+      }
+
+      // THE RATCHET'S EVIDENCE, and both halves are reported so neither can
+      // absorb the other: `through` is how many junctions a road builder ran
+      // its lane paint straight across (the owner's "unintentional" tell,
+      // measured over the real geometry, not asserted), `uncovered` is how many
+      // of those are still VISIBLE after this pass resurfaced the box.
+      let through = 0, uncovered = 0, marked = 0;
+      for (let i = 0; i < list.length; i++) {
+        const J = list[i];
+        if (J._inBox > 0) { through++; if (!J._patched) uncovered++; }
+        marked += (J._marked || 0);
+      }
+      city._junctionStats = {
+        junctions: list.length, detailed: detailed, trimmed: trimmed,
+        through: through, uncovered: uncovered, marked: marked,
+        paintTris: paintTris,
+        drawCalls: DRAW ? ((fillP.length ? 1 : 0) + (kerbP.length ? 1 : 0) + (paintP.length ? 1 : 0)) : 0,
+      };
+      // Only a world that was actually DRAWN moves the signal poles onto the
+      // rounded corner — flag off, the heads stay exactly where they were.
+      return DRAW ? list : [];
+    })();
+
     // ---- traffic-light heads at every intersection ----
     // A REAL 4-way reads by APPROACH, not by axis-on-one-corner: a driver
     // rolling up to the stop line must see a lit face turned square AT them.
@@ -986,7 +1479,9 @@
       pole.position.y = 2.6; pole.castShadow = true; head.add(pole);
       // VEH_COLLIDE_FIX: the pole is solid street furniture like the lamppost
       // below — without this, cars drove straight through every signal.
-      if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) solidCollider(px + sx, pz + sz, 0.25, pole);
+      // Slim, and matched to the mast: the shaft is r=0.14 at the butt, so a
+      // 0.25 half-extent was a 0.5 m block around a 0.28 m pole.
+      if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) solidCollider(px + sx, pz + sz, 0.16, pole);
       const box = new THREE.Mesh(sigBoxG, sigBoxM);
       box.position.set(0, 4.6, 0); head.add(box);
       // lamp world position: head's world xz + its face offset (local z=0.28
@@ -1022,9 +1517,29 @@
       lightCandidates.push({ x: wx, y: 4.6, z: wz, kind: "signal", head: { red, yel, grn }, spots: { red: redSpot, yel: yelSpot, grn: grnSpot } });
       return { red, yel, grn };
     }
-    const off = city.ROAD / 2 + 0.6;
+    // THE POLE STANDS ON THE CORNER THE CORNER ACTUALLY HAS. This offset used
+    // to be a flat ROAD/2 + 0.6 — 0.6 m outside the square kerb, which is
+    // exactly the ground the kerb RETURN above turns into carriageway. Rounding
+    // the corner without moving the signals would leave every head standing in
+    // the road. The arc bites 0.2929*R diagonally into the corner (the same
+    // constant roadrules.js solves the radius against), so the pole goes just
+    // outside that, on the footway, where a real one is bolted.
+    const juncOff = (function () {
+      const by = new Map();
+      for (let i = 0; i < JUNCTIONS.length; i++) {
+        const J = JUNCTIONS[i];
+        by.set(Math.round(J.x) + "," + Math.round(J.z), J);
+      }
+      const BITE = CBZ.roadCornerBite != null ? CBZ.roadCornerBite : (1 - Math.SQRT1_2);
+      return function (it) {
+        const J = by.get(Math.round(it.x) + "," + Math.round(it.z));
+        if (!J) return city.ROAD / 2 + 0.6;
+        return Math.max(J.ha, J.hb) + BITE * J.r + 0.55;
+      };
+    })();
     const NL = city.N != null ? city.N : ((city.xLines || [1]).length - 1);
     for (const it of city.intersections) {
+      const off = juncOff(it);
       const ns = [], ew = [];
       // N–S travel runs along the avenue at this xLine. Its SOUTH (-z) approach
       // exists unless this is the southmost line (j==0); the NORTH (+z) approach
@@ -1093,43 +1608,66 @@
     if (CBZ.CONFIG && CBZ.CONFIG.LAMP_INSTANCED == null) CBZ.CONFIG.LAMP_INSTANCED = true;
     const lampInstanced = !!(CBZ.CONFIG && CBZ.CONFIG.LAMP_INSTANCED && THREE.InstancedMesh);
     const lampBulbSpots = [];                     // {x,z,ang} per post, world space
+    // LAMP CENSUS — every luminaire in this world and whether its head actually
+    // overhangs the carriageway. towngen.js writes into the SAME record (its
+    // towns are built earlier in the same buildCity), so CBZ.streetAudit reads
+    // ONE count for the whole map and a future lamp source costs it no edit.
+    const lampCensus = city._lampCensus = city._lampCensus || { lamps: 0, noCollider: 0, overRoad: 0 };
+    // THE ONE SOLVE (CBZ.lampMast, top of this file). Pole 5.6 m, 1.45 m of
+    // overhang, 0.30 m of climb — the same three numbers as before, except the
+    // arm and the head are now derived FROM them together instead of being
+    // typed independently and drifting apart. The `: {…}` arm is the literal
+    // old geometry, so this file still builds a lamp if lampMast is ever gone.
+    const LM = CBZ.lampMast ? CBZ.lampMast({ poleH: 5.6, reach: 1.45, rise: 0.30, poleR: 0.11 })
+      : { poleCY: 2.8, armLen: 1.6, armRotX: Math.PI / 2, armCY: 5.69, armCZ: 0.75,
+          headY: 5.80, headZ: 1.45, bulbY: 5.70, bulbZ: 1.45, glowY: 5.64, reach: 1.45 };
     function makeLampPost(x, z, faceX, faceZ) {
       const g = new THREE.Group();
       g.position.set(x, 0, z);
       const ang = Math.atan2(faceX, faceZ);       // arm reaches toward road centre
       g.rotation.y = ang;
-      const pole = new THREE.Mesh(lampPoleG, poleM); pole.position.y = 2.8; pole.castShadow = true; g.add(pole);
+      const pole = new THREE.Mesh(lampPoleG, poleM); pole.position.y = LM.poleCY; pole.castShadow = true; g.add(pole);
       const base = new THREE.Mesh(lampBaseG, darkM); base.position.y = 0.25; g.add(base);
-      const arm = new THREE.Mesh(lampArmG, poleM); arm.rotation.z = Math.PI / 2; arm.position.set(0, 5.5, 0.7); g.add(arm);
-      const head = new THREE.Mesh(lampHeadG, darkM); head.position.set(0, 5.45, 1.45); g.add(head);
+      // ARM: rotation.X (not Z) lays the cylinder along the fixture's +Z, i.e.
+      // out over the carriageway, and armRotX also tilts it up to meet the tip.
+      // scale.y stretches the cached 1.6 m cylinder to the solved length, so
+      // the arm literally ENDS where the head begins.
+      const arm = new THREE.Mesh(lampArmG, poleM);
+      arm.rotation.x = LM.armRotX; arm.scale.y = LM.armLen / 1.6;
+      arm.position.set(0, LM.armCY, LM.armCZ); g.add(arm);
+      const head = new THREE.Mesh(lampHeadG, darkM); head.position.set(0, LM.headY, LM.headZ); g.add(head);
       let bulb = null, glow = null, lampIdx = null;
       if (lampInstanced) {
         lampIdx = lampBulbSpots.length;
         lampBulbSpots.push({ x, z, ang });
       } else {
         bulb = new THREE.Mesh(geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5)), headLampM);
-        bulb.position.set(0, 5.33, 1.45); g.add(bulb);
-        glow = new THREE.Mesh(lampGlowG, glowM); glow.rotation.x = -Math.PI / 2; glow.position.set(0, 5.27, 1.45); g.add(glow);
+        bulb.position.set(0, LM.bulbY, LM.bulbZ); g.add(bulb);
+        glow = new THREE.Mesh(lampGlowG, glowM); glow.rotation.x = -Math.PI / 2; glow.position.set(0, LM.glowY, LM.bulbZ); g.add(glow);
         nightLamps.push(glow);
       }
       root.add(g);
-      solidCollider(x, z, 0.3, pole);
+      // SLIM COLLIDER, matched to the trunk. The shaft is r=0.11 at the top and
+      // 0.15 at the butt; the old 0.3 box was a 0.6 m obstacle around a 0.3 m
+      // pole — twice the pole, standing in the gutter, catching cars on nothing.
+      solidCollider(x, z, 0.17, pole);
       city.streetProps.push({ x, z, type: "lamp" });
-      // SMARTER STREET-LIGHT RENDERING: this bulb's world position (head local
-      // (0,5.33,1.45) rotated by `ang`, same rotation the group itself uses)
+      // SMARTER STREET-LIGHT RENDERING: this bulb's world position (the solved
+      // bulb offset rotated by `ang`, the same rotation the group itself uses)
       // gets a Fresnel glow-shell spot AND is a candidate for the small real
-      // THREE.PointLight pool below. Shot-out lamps are handled at push time
-      // by wiring the SAME record's `.glowSpot` — hitProp (above) dims it
-      // through setGlowOn when it goes dark.
-      const bwx = x + Math.sin(ang) * 1.45, bwz = z + Math.cos(ang) * 1.45;
-      const glowSpot = { x: bwx, y: 5.33, z: bwz, r: 0.42 };
+      // THREE.PointLight pool below — so the light a lamp casts comes off the
+      // HEAD, out over the road, never off the base. Shot-out lamps are handled
+      // at push time by wiring the SAME record's `.glowSpot` — hitProp (above)
+      // dims it through setGlowOn when it goes dark.
+      const bwx = x + Math.sin(ang) * LM.bulbZ, bwz = z + Math.cos(ang) * LM.bulbZ;
+      const glowSpot = { x: bwx, y: LM.bulbY, z: bwz, r: 0.42 };
       lampGlowSpots.push(glowSpot);
       // shoot the HEAD and the light dies (the pole just sparks via walls/ground)
-      const shootRec = { type: "lamp", x, z, y: 5.35, r: 0.7, bulb, glow, lampIdx, broken: false, glowSpot };
+      const shootRec = { type: "lamp", x, z, y: LM.bulbY, r: 0.7, bulb, glow, lampIdx, broken: false, glowSpot };
       shootables.push(shootRec);
       // `ref` lets the pool driver below skip a shot-out lamp (shootRec.broken
       // flips true in hitProp) without a separate "is this lamp dead" lookup.
-      lightCandidates.push({ x: bwx, y: 5.33, z: bwz, kind: "lamp", ref: shootRec });
+      lightCandidates.push({ x: bwx, y: LM.bulbY, z: bwz, kind: "lamp", ref: shootRec });
       return g;
     }
     for (const r of city.roads) {
@@ -1167,6 +1705,13 @@
         // arm reaches toward the road centre (opposite the sidewalk side)
         const fx = r.vertical ? -sgn : 0, fz = r.vertical ? 0 : -sgn;
         makeLampPost(x, z, fx, fz);
+        // CENSUS, measured not asserted: where did the head actually land? A
+        // luminaire over the pavement lights the shopfront and leaves the lane
+        // dark, which is what towngen.js's lamps did for their whole life.
+        lampCensus.lamps++;
+        const hx = x + fx * LM.reach, hz = z + fz * LM.reach;
+        const half = (r.w != null ? r.w : city.ROAD) / 2;
+        if (r.vertical ? Math.abs(hx - r.x) < half : Math.abs(hz - r.z) < half) lampCensus.overRoad++;
       }
     }
     // build the pooled bulb + glow InstancedMesh (LAMP_INSTANCED) now that
@@ -1184,14 +1729,16 @@
       const _Y = new THREE.Vector3(0, 1, 0), _X = new THREE.Vector3(1, 0, 0);
       for (let i = 0; i < lampBulbSpots.length; i++) {
         const sp = lampBulbSpots[i];
-        const bx = sp.x + Math.sin(sp.ang) * 1.45, bz = sp.z + Math.cos(sp.ang) * 1.45;
+        // SAME solve as the mesh path above — the instanced lens sits under the
+        // instanced head, not at a second hand-typed offset.
+        const bx = sp.x + Math.sin(sp.ang) * LM.bulbZ, bz = sp.z + Math.cos(sp.ang) * LM.bulbZ;
         _qy.setFromAxisAngle(_Y, sp.ang);
-        _p.set(bx, 5.33, bz);
+        _p.set(bx, LM.bulbY, bz);
         _m4.compose(_p, _qy, _s);
         bulbIM.setMatrixAt(i, _m4);
         _qx.setFromAxisAngle(_X, -Math.PI / 2);
         _q.copy(_qy).multiply(_qx);
-        _p.set(bx, 5.27, bz);
+        _p.set(bx, LM.glowY, bz);
         _m4.compose(_p, _q, _s);
         glowIM.setMatrixAt(i, _m4);
       }

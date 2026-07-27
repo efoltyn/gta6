@@ -848,7 +848,11 @@
       }
 
       // ---- 2) painted STOP-BAR at every intersection approach --------------
-      const stopOff = ROAD / 2 + 2.6;
+      // ROAD/2 + 3.6, not 2.6: at 2.6 the bar sat 0.2 m behind the zebra, and
+      // MUTCD wants a stop line set back at least 1.2 m from a crosswalk so a
+      // stopped car does not overhang the people crossing in front of it.
+      // (line ~933's aOff = stopOff + 1.7 follows this for free.)
+      const stopOff = ROAD / 2 + 3.6;
       intersections.forEach((it) => {
         // thick white bar across each of the four entries, set back behind the zebra
         decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.065, true);

@@ -526,7 +526,7 @@
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
 <script src="src/world/water_spec.js?v=waterv2"></script>
-<script src="src/city/world.js?v=waterv2"></script>
+<script src="src/city/world.js?v=waterv2t"></script>
 <script src="src/city/interior_programs.js?v=fortress1"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
@@ -611,7 +611,7 @@
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=settle1"></script>
-<script src="src/city/towngen.js?v=skylinecluster4"></script>
+<script src="src/city/towngen.js?v=skylinecluster4t"></script>
 <!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
      raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
      hoardings, marshal posts, tyre walls, paddock. Authored against the track
@@ -661,7 +661,7 @@
      so either order works — keep them adjacent, still landmass order 40. -->
 <script src="src/city/arena_venue.js?v=ironjaw1yz"></script>
 <script src="src/city/arena_fights.js?v=ironjaw1y"></script>
-<script src="src/city/props.js?v=diegetictext1x"></script>
+<script src="src/city/props.js?v=diegetictext1xt"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=purpose1w9"></script>
@@ -712,7 +712,7 @@
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=boostjump2w9y"></script>
+<script src="src/city/vehicles.js?v=boostjump2w9yt"></script>
 <script src="src/city/playerair.js?v=air3"></script>
 <script src="src/city/playeraircraft.js?v=swepthull3w9w11"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -807,7 +807,7 @@
      consume them; pops once per context and stays until dismissed; [?] reopens.
      Revert with ?cfg_CONTROLS_CARD=0. -->
 <script src="src/systems/controls.js?v=ctrl1"></script>
-<script src="src/city/roadrules.js?v=rules2w9x"></script>
+<script src="src/city/roadrules.js?v=rules2w9xt"></script>
 <!-- AIRSIDE GROUND TRAFFIC (owner: "cars spawning randomly inside airport near
      runway — it's dumb"). Two halves of one fix. roadrules.js now CLOSES the
      airfield to ambient city traffic; this file gives the airfield the traffic
@@ -1299,7 +1299,7 @@
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
 <script src="src/world/detail_kit.js?v=detail1x"></script>
-<script src="src/world/utility_lines.js?v=detail1"></script>
+<script src="src/world/utility_lines.js?v=detail1t"></script>
 <script src="src/world/street_furniture.js?v=detail1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=detail1"></script>

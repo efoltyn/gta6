@@ -3291,9 +3291,30 @@
       const redLookahead = stopGap + 5 + Math.min(11, c.v * 0.75);
       // calm drivers ANTICIPATE the red — ease to a smooth stop at the line from
       // further out (reads clearly as obeying the signal). Reckless ones gamble.
+      // WHERE THE STOP LINE ACTUALLY IS. `distToInt` is measured to the
+      // junction's CENTRE, and 1.6 m short of a centre is ~7.4 m INSIDE an 18 m
+      // box — cars were halting in the middle of the crossing. Nobody noticed
+      // while a junction was an unmarked square; now that props.js paints a
+      // real stop bar and crosswalk there, the paint said one thing and the
+      // traffic did another. Derived from the junction's own geometry (half
+      // widths + corner return + crosswalk + the MUTCD 1.2 m setback), so it
+      // is right on an 18 m street and a 12 m town lane without a second
+      // number. Degrade-safe: no junction record, or the street work reverted,
+      // and it falls back to the old 1.6.
+      let stopBack = 1.6;
+      if (CBZ.roadJunctionAt) {
+        try {
+          const J = CBZ.roadJunctionAt(it.x, it.z);
+          if (J) {
+            const h = r.vertical ? J.hb : J.ha;
+            const xw = Math.max(1.8, Math.min(3.0, 0.16 * 2 * (r.vertical ? J.ha : J.hb)));
+            stopBack = h + 0.6 + xw + 1.2;
+          }
+        } catch (e) {}
+      }
       if (red && distToInt > 1.2 && distToInt < redLookahead) {
         if (!c.reckless || c.driver.aggr < 0.8) {
-          target = Math.min(target, Math.max(0, (distToInt - 1.6) * 1.25));
+          target = Math.min(target, Math.max(0, (distToInt - stopBack) * 1.25));
           // IDM_V2: a red light is a STATIONARY VIRTUAL LEADER parked on the
           // stop line. This is the textbook treatment (SUMO does exactly this)
           // and it is strictly better than the linear speed ramp above,
@@ -3301,7 +3322,7 @@
           // makes it ARRIVE smoothly — decelerating hard while far and fast,
           // easing off as it settles, instead of tracking a ruler-straight
           // ramp down to the line.
-          if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, distToInt - 1.6), c.v, c));
+          if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, distToInt - stopBack), c.v, c));
         }
       }
 

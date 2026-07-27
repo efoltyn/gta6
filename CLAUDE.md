@@ -676,6 +676,67 @@ Before building anything adjacent, wire into the existing system:
   perimeter road runs at `A_MAXX - 22`, i.e. 22 m INSIDE it for its whole length
   — the file's own comment claims the opposite. `zoneCrossings` is pinned at
   **1** for exactly that road and drops to 0 the day the rect stops at the kerb.
+- **A JUNCTION IS DERIVED, NEVER AUTHORED** — `CBZ.roadJunctions(world)` /
+  `CBZ.roadCornerRadius(a, b, footway)` / `CBZ.roadJunctionAt(x,z)` in
+  `city/roadrules.js`, drawn by `city/props.js` under `JUNCTION_DETAIL`. OWNER:
+  "roads meet at intersections right now feeling very unintentional." The
+  mainland grid kept a private `city.intersections` array keyed on its own
+  `xLines`/`zLines` indices, so **every crossing outside the 7x7 grid — every
+  town street, causeway, minicity link and govcomplex spur — was invisible to
+  the whole game.** A junction is not a thing to author: it is what you get when
+  a vertical and a horizontal record in `city.roads` overlap, and both facts
+  were already there. **The kerb-return radius is solved, not tasted**:
+  AASHTO's design-vehicle ladder read off the road's own `lanesPerDir`
+  (7.5 m car / +3.6 m a lane), MINUS the parking-and-clear zone the road
+  already declares (`w/2 - lanes*laneW` — NACTO's effective-radius rule),
+  CAPPED by the footway `city.lots` actually leaves (the arc bites
+  `R*(1-cos45)` diagonally into the corner, so a 2 m footway pins the mainland
+  at 4.78 m and a town at the 3 m floor). No number is typed per place.
+  What props.js draws from it: corner asphalt + kerb return, a resurfacing
+  patch **only where a builder's paint really does run through the box**,
+  and stop bars/crosswalks **only on legs that have none** — it scans the
+  existing `userData.roadPaint` meshes and lets the world say what it is
+  missing, rather than double-drawing over `world.js`'s zebras. A T-junction's
+  two far corners get no return (a corner needs two legs), and the straight
+  kerbs a return replaces are SHORTENED to the tangent point rather than left
+  standing in the new carriageway (`JUNCTION_CURB_TRIM`, separately revertible
+  because it is the one part keyed to another file's geometry). Budget: **3
+  draw calls for every junction in the world.** Ratchet: `CBZ.streetAudit()`.
+- **A LUMINAIRE IS A POLE, AN ARM AND A HEAD ON THE ARM'S TIP** —
+  `CBZ.lampMast({poleH, reach, rise, poleR})` in `city/props.js`. OWNER:
+  "lightposts all suck, don't connect." props.js rotated its mast arm about
+  **Z**, which lays a Y-axis cylinder along the fixture's local X — across the
+  pole — while the head was offset along local +Z, so the luminaire floated
+  1.45 m from the end of an arm pointing somewhere else. towngen.js had no arm
+  at all: a bare 4.6 m cylinder with a cube on top, over the PAVEMENT, with no
+  collider. The character was not the bug; **two constants describing one
+  object were authored independently**. `lampMast` returns the arm's length,
+  tilt and centre AND the head/bulb/glow positions from one solve, in a frame
+  where local +Z is the carriageway — so yawing by `atan2(faceX, faceZ)` puts
+  the head over the ROAD by construction. Three consumers migrated in the same
+  change: props.js's street lamps, towngen.js's town lamps (now on real town
+  roads, with colliders, joined to the existing `_nightLamps` dusk driver) and
+  `world/utility_lines.js`'s cobra mast arms.
+- **A WIRE ENDS ON THE HARDWARE IT HANGS FROM** — `ATTACH` +
+  `worldAt(pole, …)` in `world/utility_lines.js`, flag `STREET_WIRES_V2`. Same
+  disease as the lamp and it is the owner's screenshot: the crossarm was drawn
+  from the prototype's numbers and the conductor endpoints were **re-typed** as
+  world-axis offsets that knew nothing about the pole's per-instance yaw jitter
+  or its lean — 0.022 rad at 8.7 m is 0.19 m against an 0.11 m insulator, so
+  the wire hung in the air beside the pin. Every hard point is now declared ONCE
+  in the pole's local frame and BOTH the prototype geometry and the wire ends
+  are built from it, through the pole's own instance matrix. Consequences that
+  fell out: three pins now carry three conductors (it drew three and strung
+  two), the comms bundle hangs on its BRACKET instead of through the timber,
+  sag goes as the SQUARE of the span with a real ground-clearance clamp,
+  **a span whose straight line crosses a building is deleted rather than
+  drawn**, and a guy leaves the pole's real surface and lands on a drawn anchor
+  rod with a high-vis guard — instead of running off to nothing.
+  Ratchet: `CBZ.streetAudit()` → **`wiresDisconnected` and
+  `paintThroughJunction` pinned at 0**, with `junctionPaintRaw`, `wireSpans`,
+  `poles`, `junctions` and `drawCalls` printed beside them so a "fix" that just
+  stops drawing cannot pass. NOT YET MEASURED — whoever runs it first writes
+  the numbers in (do not repeat the `propUseAudit` mistake of pinning a guess).
 - **Traffic follows one equation, not a stack of thresholds** —
   `CBZ.cityTrafficIDM(v, v0, s, dv, car)` in `city/vehicles.js`, the
   Intelligent Driver Model (Treiber/Hennecke/Helbing). Ambient speed used to be

@@ -652,6 +652,185 @@
   };
 
   /* ======================================================================
+     WHERE TWO ROADS MEET — THE JUNCTION, DERIVED, NEVER AUTHORED.
+     ======================================================================
+     OWNER: "roads meet at intersections right now feeling very unintentional."
+
+     He is describing a hole in the same place every other hole in this file
+     was: `city.roads` is the registry EVERY road builder pushes to, and NOT
+     ONE consumer had ever asked it where two segments cross. The mainland
+     grid keeps a hand-built `city.intersections` array — but that array is
+     the GRID's private bookkeeping (`i`/`j` indices into xLines/zLines) and
+     it does not know that a town street, a causeway, a govcomplex spur or a
+     minicity link exists. Every junction outside the 7x7 mainland grid was
+     invisible to the whole game.
+
+     A junction is not a thing to author. It is what you get when a vertical
+     segment and a horizontal segment overlap, and both facts are already in
+     the record. So this derives them, and carries the ONE number every piece
+     of junction detail needs — the KERB RETURN RADIUS.
+
+     THE RADIUS IS SOLVED, NOT TASTED. Three real constraints, in order:
+
+       1. THE DESIGN VEHICLE. AASHTO's minimum simple-curve radius for a 90
+          turn is ~7.5 m for a passenger car (P), ~15 m for a single-unit
+          truck (SU-30). The road already declares which of those it serves:
+          `lanesPerDir`. One lane per direction is a local street (cars);
+          each extra lane is a road that carries the heavier vehicle. Hence
+          R_design = 7.5 + 3.6*(lanes-1) — and it is keyed off the MINOR of
+          the two roads, because the turn is constrained by the road you are
+          turning INTO, not the one you are leaving.
+       2. THE OFFSET LANE. The swept path does not start at the kerb. Every
+          road here declares `w` and `lanesPerDir*laneW`; the difference is
+          the parking/clear zone (1.8 m on the 18 m mainland street, per
+          config.js's own comment). NACTO calls the sum the EFFECTIVE radius,
+          and it is the effective radius the design vehicle needs — so the
+          built kerb radius is R_design MINUS that offset.
+       3. THE FOOTWAY. A return that swallows the pavement is not a return,
+          it is a demolition. The arc's deepest bite into the corner is
+          R*(1-cos45) = 0.2929*R, so a footway of width F caps R at
+          (F-0.6)/0.2929. The mainland's footway is 2 m (world.js insets the
+          lot pad by exactly that), which alone pins the grid at ~4.8 m — a
+          tight, correct, NACTO-scale downtown corner.
+
+     Floor 3.0 m (below that the corner reads square anyway), ceiling 15 m
+     (the SU-30 number; nothing here is a motorway interchange).
+
+       CBZ.roadJunctions()            every crossing in the world, once
+       CBZ.roadCornerRadius(a,b,F)    the solve above, callable on its own
+       CBZ.roadJunctionAt(x,z,pad)    the junction under a point, or null
+
+     Cached on the road-list LENGTH, exactly like the segment grid above: the
+     list only changes when the world is rebuilt. */
+
+  // AASHTO P / SU ladder off the lane count the road already declares.
+  function designRadius(r) {
+    const n = Math.max(1, (r && r.lanesPerDir != null ? r.lanesPerDir : 2) | 0);
+    return 7.5 + 3.6 * (n - 1);
+  }
+  // The parking/clear zone between the outermost travel lane and the kerb.
+  function kerbOffset(r) {
+    const w = (r && r.w != null ? r.w : (CBZ.CITY && CBZ.CITY.road) || 18);
+    const n = Math.max(1, (r && r.lanesPerDir != null ? r.lanesPerDir : 2) | 0);
+    const lw = (r && r.laneW != null ? r.laneW : 3.6);
+    return Math.max(0, w / 2 - n * lw);
+  }
+  const R_FLOOR = 3.0, R_CEIL = 15.0;
+  // 1 - cos(45deg): the fraction of R the arc bites diagonally into the corner.
+  const BITE = 1 - Math.SQRT1_2;
+
+  CBZ.roadCornerRadius = function (a, b, footway) {
+    const minor = designRadius(a) <= designRadius(b) ? a : b;
+    let R = designRadius(minor) - Math.min(kerbOffset(a), kerbOffset(b));
+    if (footway != null && footway > 0) R = Math.min(R, (footway - 0.6) / BITE);
+    else if (footway != null) R = R_FLOOR;
+    return Math.max(R_FLOOR, Math.min(R_CEIL, R));
+  };
+  CBZ.roadCornerBite = BITE;
+
+  let junc = null, juncN = -1;
+
+  function halfW(r) { return (r.w != null ? r.w : (r.width != null ? r.width : (CBZ.CITY && CBZ.CITY.road) || 18)) / 2; }
+
+  function buildJunctions(R) {
+    const V = [], H = [];
+    for (let i = 0; i < R.length; i++) {
+      const r = R[i];
+      if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.z) || !Number.isFinite(r.len)) continue;
+      if (r.elevated) continue;                 // a flyover is not a junction
+      (r.vertical ? V : H).push(r);
+    }
+    const out = [];
+    for (let i = 0; i < V.length; i++) {
+      const a = V[i], ha = halfW(a), la = a.len / 2;
+      for (let j = 0; j < H.length; j++) {
+        const b = H[j], hb = halfW(b), lb = b.len / 2;
+        // OVERLAP, not "near": the vertical road's x must lie within the
+        // horizontal road's span and vice versa. This is the containment test
+        // roadCross was missing, applied to the other question.
+        if (Math.abs(a.x - b.x) > lb + hb) continue;
+        if (Math.abs(b.z - a.z) > la + ha) continue;
+        // A deck sitting metres above the other road is a crossing, not a
+        // junction — only pair segments on (roughly) the same plane.
+        if (Math.abs((a.y || 0) - (b.y || 0)) > 1.2) continue;
+        out.push({
+          x: a.x, z: b.z, a: a, b: b,
+          ha: ha, hb: hb,
+          y: Math.max(a.y || 0, b.y || 0),
+          // LEGS: does the road actually continue past the box on this side?
+          // An approach with no oncoming road is not an approach, and a stop
+          // line facing a dead end is the kind of detail that reads as noise.
+          // N/S run on the VERTICAL road (a), E/W on the HORIZONTAL road (b);
+          // each is measured against the OTHER road's half-width, because that
+          // is how deep the junction box is on that axis.
+          nz: (a.z + la) - b.z > hb + 2, sz: b.z - (a.z - la) > hb + 2,
+          px: (b.x + lb) - a.x > ha + 2, mx: a.x - (b.x - lb) > ha + 2,
+          r: 0,
+        });
+      }
+    }
+    return out;
+  }
+
+  // FOOTWAY: how much walkable ground sits between the kerb and the nearest
+  // built lot pad at this corner. Measured against city.lots — the record the
+  // world already holds — rather than assumed, because the mainland's is 2 m
+  // and a town's is zero and a corner radius that ignores the difference paves
+  // somebody's yard.
+  function footwayAt(J, lots) {
+    if (!lots || !lots.length) return 2.0;
+    let best = 1e9;
+    const hx = J.ha, hz = J.hb;
+    for (let i = 0; i < lots.length; i++) {
+      const L = lots[i];
+      if (!L || !Number.isFinite(L.cx)) continue;
+      const lw = (L.w != null ? L.w : 0) / 2, ld = (L.d != null ? L.d : L.w || 0) / 2;
+      const dx = Math.abs(L.cx - J.x) - lw, dz = Math.abs(L.cz - J.z) - ld;
+      if (dx > 60 || dz > 60) continue;         // only the four corner lots matter
+      const gap = Math.max(0, Math.min(dx - hx, dz - hz));
+      if (gap < best) best = gap;
+    }
+    return best < 1e9 ? best : 2.0;
+  }
+
+  // `world` is the in-progress descriptor when called from inside buildCity
+  // (CBZ.city.arena is not assigned until buildCity RETURNS — the same trap
+  // worldRef documents below). Callers outside a build pass nothing.
+  let juncRef = null;
+  CBZ.roadJunctions = function (world) {
+    if (!on()) return [];
+    const A = (world && world.roads) ? world : null;
+    const R = A ? A.roads : roadsList();
+    if (!R || !R.length) return [];
+    if (juncN !== R.length || juncRef !== R || !junc) {
+      junc = buildJunctions(R);
+      let lots = A ? A.lots : null;
+      if (!lots) { const c = CBZ.city; const B = (c && c.arena && c.arena.lots) ? c.arena : c; lots = (B && B.lots) || null; }
+      for (let i = 0; i < junc.length; i++) {
+        const J = junc[i];
+        J.footway = footwayAt(J, lots);
+        J.r = CBZ.roadCornerRadius(J.a, J.b, J.footway);
+      }
+      juncN = R.length; juncRef = R;
+    }
+    return junc;
+  };
+
+  CBZ.roadJunctionAt = function (x, z, pad) {
+    const list = CBZ.roadJunctions();
+    const p = pad || 0;
+    let best = null, bd = 1e18;
+    for (let i = 0; i < list.length; i++) {
+      const J = list[i];
+      const dx = Math.abs(x - J.x), dz = Math.abs(z - J.z);
+      if (dx > J.ha + J.r + p || dz > J.hb + J.r + p) continue;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = J; }
+    }
+    return best;
+  };
+
+  /* ======================================================================
      ROAD CLEARANCE — MAY A ROAD BE BUILT HERE, AND WHERE MUST IT STOP.
      The full doctrine is in this file's header. Everything below is pure
      geometry over records the world already holds: no rng draw is taken

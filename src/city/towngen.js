@@ -778,19 +778,106 @@
     //     spine, and a couple of parked cars at the kerb. Bounded count.
     // =====================================================================
     const dummy2 = new THREE.Object3D();
-    const lampN = Math.min(20, cols * 4);
-    const lampIM = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.16, 4.6, 6), cmat(ACCENT), lampN);
-    const headIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), cmat(pal.lamp != null ? pal.lamp : 0xf3e3a6), lampN);
-    for (let i = 0; i < lampN; i++) {
-      const t = (i + 0.5) / lampN;
-      const x = lerp(minX + 6, maxX - 6, t);
-      const z = cz + (i % 2 ? 1 : -1) * (ROAD / 2 + 2.2);
-      dummy2.position.set(x, 2.3, z); dummy2.scale.set(1, 1, 1); dummy2.rotation.set(0, 0, 0);
-      dummy2.updateMatrix(); lampIM.setMatrixAt(i, dummy2.matrix);
-      dummy2.position.set(x, 4.6, z); dummy2.updateMatrix(); headIM.setMatrixAt(i, dummy2.matrix);
+    // ---- STREET LAMPS -----------------------------------------------------
+    // OWNER, with a screenshot: "street lamps stand as bare cylinders."
+    // They did, and it was worse than that. This was a 4.6 m cylinder with a
+    // 0.5 m CUBE balanced on top of it — no arm, no luminaire, the "head"
+    // directly over the pole so it lit the PAVEMENT and left the lane dark,
+    // NO COLLIDER at all (you walked through every one), and marched down
+    // `cz` — which for any town with an odd row count is not a street at all,
+    // so a whole row of them stood in the middle of a block.
+    //
+    // All four are fixed by using what the file already has: the town's own
+    // road records, and city/props.js's shared CBZ.lampMast solve — the same
+    // one the mainland's lamps and utility_lines.js's cobra heads run on, so a
+    // town lamp is now the same object as a city lamp at a village's scale.
+    // Determinism: positional only. No cfg.rng draw is taken here, so the
+    // shared stream stays byte-identical whatever this does.
+    // 6 m shaft, 2 m arm: a small-town street light. (The old 4.6 m stub was
+    // shorter than the buildings' ground floor and its "head" never left the
+    // pavement.) The offset below is the kerb + 1 m, so head = kerb - 1 m,
+    // i.e. genuinely over the near travel lane on a 7 m lane or a 12 m street.
+    const LM = CBZ.lampMast ? CBZ.lampMast({ poleH: 6.0, reach: 2.0, rise: 0.32, poleR: 0.12 })
+      : { poleH: 6.0, poleCY: 3.0, armLen: 2.01, armRotX: Math.PI / 2, armCY: 6.10,
+          armCZ: 1.03, headY: 6.22, headZ: 2.0, reach: 2.0 };
+    // POLE + ARM AS ONE PROTOTYPE, so a real fixture still costs the two
+    // InstancedMesh this town always spent — the arm is free.
+    const lampGeoms = [];
+    {
+      const gp = new THREE.CylinderGeometry(0.12, 0.16, LM.poleH, 6);
+      gp.translate(0, LM.poleCY, 0); lampGeoms.push(gp);
+      const ga = new THREE.CylinderGeometry(0.06, 0.06, LM.armLen, 5);
+      ga.rotateX(LM.armRotX); ga.translate(0, LM.armCY, LM.armCZ); lampGeoms.push(ga);
     }
-    lampIM.instanceMatrix.needsUpdate = true; lampIM.matrixAutoUpdate = false; lampIM.castShadow = true; root.add(lampIM);
-    headIM.instanceMatrix.needsUpdate = true; headIM.matrixAutoUpdate = false; root.add(headIM);
+    const lampProto = (BGU && BGU.mergeBufferGeometries) ? BGU.mergeBufferGeometries(lampGeoms) : lampGeoms[0];
+    // The head gets its OWN material (not the shared cmat cache) because it is
+    // pushed into the city's dusk driver, which writes emissiveIntensity — on a
+    // cached material that would light every other prop sharing that colour.
+    const headMat = new THREE.MeshLambertMaterial({
+      color: pal.lamp != null ? pal.lamp : 0xf3e3a6,
+      emissive: pal.lamp != null ? pal.lamp : 0xffd9a0, emissiveIntensity: 0,
+    });
+    // WHERE: on the kerb of a real town street, alternating sides, never inside
+    // a junction box, and never where the ground is already claimed.
+    const lampSpots = [];
+    const LAMP_MAX = Math.min(24, cols * rows * 3);
+    for (let si = 0; si < townRoads.length && lampSpots.length < LAMP_MAX; si++) {
+      const seg = townRoads[si];
+      const half = seg.w / 2;
+      const n = Math.max(1, Math.floor(seg.len / 26));
+      for (let k = 1; k < n && lampSpots.length < LAMP_MAX; k++) {
+        const t = -seg.len / 2 + k * (seg.len / n);
+        const sgn = (k % 2 === 0 ? 1 : -1);
+        const off = half + 1.0;                  // on the kerb, arm out over the lane
+        const lx = seg.vertical ? seg.x + sgn * off : seg.x + t;
+        const lz = seg.vertical ? seg.z + t : seg.z + sgn * off;
+        // never in the mouth of a cross street
+        let clash = false;
+        for (let q = 0; q < townRoads.length; q++) {
+          const o = townRoads[q];
+          if (o === seg || o.vertical === seg.vertical) continue;
+          const oh = o.w / 2 + 2.0;
+          if (o.vertical ? Math.abs(lx - o.x) < oh : Math.abs(lz - o.z) < oh) { clash = true; break; }
+        }
+        if (clash) continue;
+        // the arm reaches toward the carriageway; +Z is the road in lampMast's
+        // frame, so the yaw is just the bearing from the lamp to the centreline
+        const fx = seg.vertical ? -sgn : 0, fz = seg.vertical ? 0 : -sgn;
+        lampSpots.push({ x: lx, z: lz, ang: Math.atan2(fx, fz), fx: fx, fz: fz, half: half, off: off });
+      }
+    }
+    const lampN = lampSpots.length;
+    const lampIM = lampN ? new THREE.InstancedMesh(lampProto, cmat(ACCENT), lampN) : null;
+    const headIM = lampN ? new THREE.InstancedMesh(new THREE.BoxGeometry(0.26, 0.16, 0.56), headMat, lampN) : null;
+    const townLampCensus = A ? (A._lampCensus = A._lampCensus || { lamps: 0, noCollider: 0, overRoad: 0 }) : null;
+    for (let i = 0; i < lampN; i++) {
+      const sp = lampSpots[i];
+      dummy2.position.set(sp.x, 0, sp.z); dummy2.scale.set(1, 1, 1);
+      dummy2.rotation.set(0, sp.ang, 0);
+      dummy2.updateMatrix(); lampIM.setMatrixAt(i, dummy2.matrix);
+      // the head sits on the arm's TIP, out over the lane — derived, never
+      // authored beside it
+      dummy2.position.set(sp.x + sp.fx * LM.headZ, LM.headY, sp.z + sp.fz * LM.headZ);
+      dummy2.updateMatrix(); headIM.setMatrixAt(i, dummy2.matrix);
+      // A POLE YOU CAN WALK THROUGH IS SCENERY. Slim, matched to the 0.16 butt.
+      if (CBZ.colliders) {
+        CBZ.colliders.push({ minX: sp.x - 0.18, maxX: sp.x + 0.18, minZ: sp.z - 0.18, maxZ: sp.z + 0.18, ref: null, noCam: true });
+      } else if (townLampCensus) townLampCensus.noCollider++;
+      if (townLampCensus) {
+        townLampCensus.lamps++;
+        // measured, not asserted: where the head landed relative to the kerb
+        if (sp.off - LM.headZ < sp.half) townLampCensus.overRoad++;
+      }
+    }
+    if (lampIM) {
+      lampIM.instanceMatrix.needsUpdate = true; lampIM.matrixAutoUpdate = false; lampIM.castShadow = true; root.add(lampIM);
+      headIM.instanceMatrix.needsUpdate = true; headIM.matrixAutoUpdate = false; root.add(headIM);
+      // Join the city's EXISTING dusk driver instead of inventing a second one
+      // (props.js walks city._nightLamps every frame writing emissiveIntensity).
+      // Town lamps have never lit at night; this is one push.
+      if (A) { (A._nightLamps = A._nightLamps || []).push(headIM); }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
     // hitching rails (frontier flavour) — two posts + a top bar, instanced bars
     const railN = Math.min(8, lots.length);
     if (railN > 0) {
