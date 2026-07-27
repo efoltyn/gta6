@@ -132,6 +132,10 @@
     //      Revert: CBZ.CONFIG.SEA_OVERHAUL = false (old plane returns). ----
     const CFGW = (CBZ.CONFIG = CBZ.CONFIG || {});
     if (CFGW.SEA_OVERHAUL == null) CFGW.SEA_OVERHAUL = true;
+    // SEA_HORIZON_FUSE — the far sea converges on the live fog colour before
+    // the flight far plane clips the disc, closing the hard sea/sky edge seen
+    // from any altitude. `?cfg_SEA_HORIZON_FUSE=0` reverts.
+    if (CFGW.SEA_HORIZON_FUSE == null) CFGW.SEA_HORIZON_FUSE = true;
     const SEA_Y = -0.48;                 // mean surface (three swells ride ±0.355)
     CBZ.SEA_Y = SEA_Y;                   // single source of truth for tooling
     // Publish the actual rendered sea footprint before cityWorldGeo runs.
@@ -1340,6 +1344,17 @@
         "  vec3 underCol = mix(body * 0.72, sky * 1.20 + uSunColor * 0.16, clamp(fres * 1.45, 0.0, 1.0));",
         "  outColor = mix(outColor, underCol, under);",
         "  outColor = mix(outColor, uFoamColor, foam);",
+        // HORIZON FUSE (aerial seam): airborne, the camera far plane cuts this
+        // 16km disc at 7km while the ocean is still mostly unfogged — its fog
+        // runs at 0.66x AND the height fog thins to ~43% at altitude, so the
+        // sea slammed into the sky dome as a hard teal-on-grey edge mid-frame.
+        // Converge on fogColor before the clip: the pixel then rides the SAME
+        // tonemap+encode the graded fog does, landing exactly on the dome's
+        // below-horizon band (core/sky.js's seam law), so the edge vanishes.
+        // Saturates far beyond ground-level fog range — invisible on foot.
+        (CFGW.SEA_HORIZON_FUSE !== false
+          ? "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaDist));\n  #endif"
+          : ""),
         "  gl_FragColor = vec4(outColor, 1.0);",
         "  #include <tonemapping_fragment>",
         "  #include <encodings_fragment>",
