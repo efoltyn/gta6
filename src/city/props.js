@@ -1139,6 +1139,14 @@
       // walked EVERY road including causeways. Real highways/spans here run
       // unlit, so skip those districts outright.
       if (r.district === "highway" || r.district === "bridge") continue;
+      // NO CITY STREET FURNITURE ON RESTRICTED GROUND (owner: "all the props
+      // that surround roads overlap with places like the airport"). A road the
+      // builder reserved to one vehicle class — the apron service lanes, a
+      // compound's gate spur — is not a street, and marching lamp posts down it
+      // is how streetlights ended up standing on a live airfield. One call,
+      // and it is the SAME law city/roadrules.js applies to the roads
+      // themselves. Degrade-safe: no roadrules.js, old behaviour exactly.
+      if (CBZ.roadPropRoadOk && !CBZ.roadPropRoadOk(r)) continue;
       const n = Math.max(2, Math.floor(r.len / 26));
       for (let i = 0; i <= n; i++) {
         const t = -r.len / 2 + i * (r.len / n);
@@ -1150,6 +1158,10 @@
         const x = r.vertical ? r.x + side : r.x + t;
         const z = r.vertical ? r.z + t : r.z + side;
         if (Math.abs(x) > 9999) continue;
+        // ...and never INSIDE a place this road is only passing, nor inside any
+        // declared keep-out. The lamp belongs to the road; the road does not
+        // own the airfield it drives past.
+        if (CBZ.roadPropClear && !CBZ.roadPropClear(x, z, r)) continue;
         if (inOtherTravelLane(x, z, r)) continue;
         if (nearDoor(x, z, 1.8)) continue;
         // arm reaches toward the road centre (opposite the sidewalk side)

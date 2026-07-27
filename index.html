@@ -556,12 +556,12 @@
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=waterv2"></script>
-<script src="src/city/highways.js?v=hwynet1"></script>
+<script src="src/city/highways.js?v=hwynet1x"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=hwynet1w9"></script>
+<script src="src/city/highwaynet.js?v=hwynet1w9x"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>
@@ -619,7 +619,7 @@
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
 <script src="src/city/island_speedway.js?v=circuit1"></script>
-<script src="src/city/island_airport.js?v=airfieldpaint4w9w11"></script>
+<script src="src/city/island_airport.js?v=airfieldpaint4w9w11x"></script>
 <script src="src/city/island_military.js?v=livebase5w11"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=organicforest5"></script>
@@ -661,7 +661,7 @@
      so either order works — keep them adjacent, still landmass order 40. -->
 <script src="src/city/arena_venue.js?v=ironjaw1"></script>
 <script src="src/city/arena_fights.js?v=ironjaw1"></script>
-<script src="src/city/props.js?v=diegetictext1"></script>
+<script src="src/city/props.js?v=diegetictext1x"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=purpose1w9"></script>
@@ -807,7 +807,7 @@
      consume them; pops once per context and stays until dismissed; [?] reopens.
      Revert with ?cfg_CONTROLS_CARD=0. -->
 <script src="src/systems/controls.js?v=ctrl1"></script>
-<script src="src/city/roadrules.js?v=rules2w9"></script>
+<script src="src/city/roadrules.js?v=rules2w9x"></script>
 <!-- AIRSIDE GROUND TRAFFIC (owner: "cars spawning randomly inside airport near
      runway — it's dumb"). Two halves of one fix. roadrules.js now CLOSES the
      airfield to ambient city traffic; this file gives the airfield the traffic
@@ -896,7 +896,7 @@
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=sim2"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
-<script src="src/city/minicities.js?v=sim4w9"></script>
+<script src="src/city/minicities.js?v=sim4w9x"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=sim3"></script>
 <script src="src/city/race_livery.js?v=sim2"></script>
@@ -947,7 +947,7 @@
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=binary3w10"></script>
+<script src="src/city/origins.js?v=binary3w10x"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=story3"></script>
@@ -1216,7 +1216,7 @@
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=gov2"></script>
+<script src="src/city/govcomplex.js?v=gov2x"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -1286,7 +1286,7 @@
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/world/detail_kit.js?v=detail1"></script>
+<script src="src/world/detail_kit.js?v=detail1x"></script>
 <script src="src/world/utility_lines.js?v=detail1"></script>
 <script src="src/world/street_furniture.js?v=detail1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>

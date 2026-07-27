@@ -789,6 +789,14 @@
           if (Math.abs(r.x - seg.x) < 1.0 && Math.abs(r.z - seg.z) < 1.0) { dup = true; break; }
         }
         if (dup) continue;
+        // THE CLEARANCE LAW (city/roadrules.js) — a highway may DOCK at a
+        // registered place and may END inside the one it is going to, but it
+        // may never cross a place it is merely passing. `dest` is the PATH's
+        // final point, so every caller that already hands buildHighway a route
+        // (govcomplex's compound approaches, the mini-city links, the biome
+        // causeways) gets the law for free and none of them changed a line.
+        // Degrade-safe: no roadrules.js, no clamp, original behaviour.
+        if (CBZ.roadClamp) CBZ.roadClamp(seg, { dest: path[path.length - 1], origin: path[0], owner: opts.owner });
         roads.push(seg);
         builtRoads.push(seg);
       }

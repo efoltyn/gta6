@@ -1316,6 +1316,27 @@
         const lr = legRect(a, b);
         // the first leg legitimately starts ON our own gate; only judge the rest
         if (i > 0 && hit(lr, site.rect, -4)) bad += 2;
+        // AND IT MUST NOT CROSS ANOTHER COMPLEX. The whole reason these things
+        // stand on their own land is that putting them in a city overlapped —
+        // but govComplexAudit only ever measured the complex RECTS, never the
+        // access roads this function builds, so `overlaps: 0` was a true
+        // statement about the wrong thing. On seed 1337 the Governor's
+        // approach ran 124 m straight through The Executive Mansion and the
+        // audit reported a clean world.
+        //
+        // roadrules.js's clearance law already knows how to answer this, and
+        // its DESTINATION rule is what makes it usable here: a road may end in
+        // the place it is going to, so passing our own gate coordinates as
+        // `dest` keeps the legitimate final approach legal while a path that
+        // merely passes THROUGH somebody else's grounds is scored out.
+        if (CBZ.roadClearance) {
+          try {
+            const rc = CBZ.roadClearance(a.x, a.z, b.x, b.z, {
+              w: 18, owner: "gov-" + site.id, dest: { x: g.x, z: g.z },     // `g` is `site.gate` (declared above)
+            });
+            if (rc && !rc.ok) bad += 4;
+          } catch (e) {}
+        }
         for (let k = 0; k < zones.length; k++) {
           const s = zones[k];
           if (!s || (s.label && s.label === "gov-" + site.id)) continue;   // our own

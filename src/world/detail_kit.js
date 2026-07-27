@@ -641,6 +641,19 @@
   DK.free = function (x, z, o) {
     o = o || {};
     if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    // NOTHING GENERIC STANDS ON RESTRICTED GROUND. Every dressing pass funnels
+    // through this oracle, and three of them (utility_lines, street_furniture,
+    // world_grime) walk DK.streetRoads with their OWN loops rather than
+    // eachKerb — which is how a line of utility poles ended up marching down
+    // the airport's east perimeter INSIDE the airside keep-out. One call here
+    // and all of them inherit the law (city/roadrules.js) instead of each
+    // growing its own test. `o.keepOut = false` opts a pass out; no caller
+    // does today. Degrade-safe: no roadrules.js, original behaviour.
+    // NOTE the null: `o.road` here is an existing BOOLEAN switch for the
+    // carriageway test, not a road record. The road-aware half of the law
+    // (a place this road is merely passing) runs in eachKerb above, which is
+    // the only walker that knows which road a point belongs to.
+    if (o.keepOut !== false && CBZ.roadPropClear && !CBZ.roadPropClear(x, z, null)) return false;
     if (o.road !== false && DK.onRoad(x, z, o.roadMargin)) return false;
     if (o.door !== false && DK.nearDoor(x, z, o.doorR)) return false;
     if (o.build !== false && DK.insideBuilding(x, z, o.buildPad)) return false;
@@ -699,6 +712,13 @@
       if (d === "highway" || d === "bridge" || d === "link" || d === "ramp" || d === "goldspire") continue;
       if (r.w != null && r.w > 20) continue;
       if (r.elevated || (r.y != null && r.y > 0.6)) continue;
+      // NOT restricted ground either (city/roadrules.js). A road reserved to a
+      // vehicle class — the airport apron's service lanes, a compound's gate
+      // spur — is not a street, and this walker is what strung city kerb
+      // furniture down the middle of a live airfield. One call, shared law,
+      // and it fixes utility_lines / street_furniture / world_grime at once
+      // because all three iterate THIS list. Degrade-safe.
+      if (CBZ.roadPropRoadOk && !CBZ.roadPropRoadOk(r)) continue;
       out.push(r);
     }
     return out;
@@ -725,6 +745,12 @@
           const x = r.vertical ? r.x + s * off : r.x + t;
           const z = r.vertical ? r.z + t : r.z + s * off;
           const nx = r.vertical ? s : 0, nz = r.vertical ? 0 : s;
+          // ROADS CONNECT PLACES, THEY DO NOT OVERLAP THEM — and neither does
+          // their furniture. A kerb point inside a place this road is merely
+          // passing, or inside any declared keep-out, is refused before any
+          // pass ever sees it (city/roadrules.js). Every DK dressing pass
+          // inherits it here; none of them changed a line. Degrade-safe.
+          if (CBZ.roadPropClear && !CBZ.roadPropClear(x, z, r)) continue;
           if (!DK.free(x, z, opts.free)) continue;
           const yaw = Math.atan2(-nx, -nz);
           const res = cb({

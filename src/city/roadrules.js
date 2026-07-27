@@ -99,10 +99,76 @@
    CBZ.roadCross(A, vertical, x, z) is the corrected query and vehicles.js now
    uses it: same signature, plus the one containment test that was missing.
 
+   AND — NEWEST — WHERE A ROAD MAY BE BUILT AT ALL
+   -----------------------------------------------
+   OWNER REPORT: "roads rn and all the props that surround roads overlap with
+   places like the airport. roads should connect places but never overlap with
+   them. that's so simple."
+
+   He is right on both counts. `city.regions` has been the registry of PLACES
+   since worldmap.js shipped, and roughly twenty separate files push segments
+   onto `city.roads` — and NOT ONE of them has ever tested its segment against
+   that registry. The nearest thing to a check was highwaynet.js's build-time
+   `clearanceSweep`, which detects a route crossing a registered footprint and
+   `console.warn`s. It has been correctly reporting real collisions and
+   changing nothing, which is the exact failure CLAUDE.md names by name: an
+   audit nobody enforces is not a measurement.
+
+   So this file now answers the question one layer earlier than roadPick's
+   "may a car be here": MAY A ROAD BE HERE.
+
+     CBZ.roadClearance(x0,z0,x1,z1,opts) -> {ok, blockedBy, clampedTo, depth}
+     CBZ.roadClamp(seg, opts)            -> metres removed (0 = already legal)
+     CBZ.roadPropClear(x, z, road)       -> may road-side scatter stand here
+     CBZ.roadClearanceAudit()            -> the ratchet
+
+   THE LAW, in the owner's own sentence: a road may TOUCH a place and it may
+   END in one, but it may never CROSS one it is merely passing. Formally, a
+   region blocks a segment unless one of these is true — and every one of them
+   is derived from data the world already carries, so adoption costs one line
+   and no builder declares anything:
+
+     • the region is an UNDERLAY (continent.js's "wilds" ownership bands: they
+       cover the whole map and a road that could not cross them could not exist)
+     • the region is a CONNECTOR by name — causeway / bridge / link / ramp /
+       approach / spur / corridor. Those ARE roads; the established link
+       semantics polwar and the shore field already key off.
+     • THE DESTINATION RULE. The segment's far endpoint lies inside it. That is
+       what "connect" means: a road is allowed to reach where it is going. It
+       is the whole difference between the airport causeway (which ends at the
+       airfield) and a highway that happens to cut the corner off a town.
+     • the segment's ORIGIN lies inside it (the same rule run backwards — a
+       town's own street starts and ends at home).
+     • ownership: the segment's `owner` / `_govOwner` / `district` matches the
+       region's `owner` / `_govOwner` / `biome`. govcomplex.js already stamps
+       `_govOwner` on both sides and towngen already stamps its district; this
+       costs those files nothing and they were never edited for it.
+     • the along-axis penetration is within the DOCK BAND (24 m). 24 is not a
+       taste knob: it is one full deck width of the widest road in this game
+       (the 3+3 divided highway, half-width 12), which is the deepest a road
+       can legitimately be inside a place — a T-junction onto a perimeter road
+       running along the boundary must overlap that road's whole width or the
+       junction is not continuous. Measured over the shipped world, NO segment
+       lands between 24 m and 48 m of penetration: the distribution is bimodal,
+       so the threshold is not balanced on a knife-edge.
+
+   WHAT IS DELIBERATELY *NOT* ENFORCED, and why. `arena.noSpawn` keep-outs (the
+   airside, the runway, the bunker shells, the gov compounds) are AUDITED and
+   warned, never clamped. Refusing a PROP costs nothing, so props are refused
+   inside a keep-out outright; but clamping a ROAD out of a keep-out can strand
+   the facility it serves — island_airport.js's landside perimeter road runs
+   inside the airside rect for its whole length, and cutting it would leave the
+   terminal with no road at all. A road-vs-keep-out conflict is a bug in the
+   FACILITY'S OWN FOOTPRINT and has to be fixed there; `roadClearanceAudit()`
+   names each one so it cannot hide.
+
    Flags: ROAD_RULES (the whole file) · ROAD_SPEED_ENFORCE (the ticket only,
    so you can keep the honest roundel and turn the consequence off) ·
    ROAD_TRAFFIC_ACCESS (the keep-out/water/weighting law — one-line revert to
-   the old flat-list behaviour).
+   the old flat-list behaviour) · ROAD_CLEARANCE (the whole build-time
+   clearance law) · ROAD_CLEARANCE_ENFORCE (the post-build clamp only, so the
+   audit can keep measuring with the enforcement off) · ROAD_CLEARANCE_PROPS
+   (the road-side scatter gate only).
 ============================================================ */
 (function () {
   "use strict";
@@ -120,6 +186,19 @@
   // false => roadPick/roadOpen answer exactly as the old flat-list code did,
   // so every migrated caller reverts to its pre-change behaviour in one line.
   if (CBZ.CONFIG.ROAD_TRAFFIC_ACCESS == null) CBZ.CONFIG.ROAD_TRAFFIC_ACCESS = true;
+  // The build-time clearance law: where a road may BE, as distinct from who may
+  // DRIVE on it. One-line revert to "any builder may put a road anywhere".
+  if (CBZ.CONFIG.ROAD_CLEARANCE == null) CBZ.CONFIG.ROAD_CLEARANCE = true;
+  // The post-build clamp. Turn this off and roadClearanceAudit() still reports
+  // every violation — the measurement survives the enforcement being disabled,
+  // which is what lets a regression be seen before it is fixed.
+  if (CBZ.CONFIG.ROAD_CLEARANCE_ENFORCE == null) CBZ.CONFIG.ROAD_CLEARANCE_ENFORCE = true;
+  // The road-side scatter gate (streetlights, kerb furniture, signs).
+  if (CBZ.CONFIG.ROAD_CLEARANCE_PROPS == null) CBZ.CONFIG.ROAD_CLEARANCE_PROPS = true;
+  // How deep a road may sit inside a place before it stops "docking" and starts
+  // "crossing". One full deck width of the widest road in the game — see the
+  // header for why this is derived and not a taste knob.
+  if (CBZ.CONFIG.ROAD_CLEARANCE_DOCK == null) CBZ.CONFIG.ROAD_CLEARANCE_DOCK = 24;
 
   const MPH_PER_UNIT = 2.4;          // vehicles.js:68 — the repo's own figure
   function on() { return CBZ.CONFIG.ROAD_RULES !== false; }
@@ -572,6 +651,341 @@
     return best;
   };
 
+  /* ======================================================================
+     ROAD CLEARANCE — MAY A ROAD BE BUILT HERE, AND WHERE MUST IT STOP.
+     The full doctrine is in this file's header. Everything below is pure
+     geometry over records the world already holds: no rng draw is taken
+     anywhere in this section, so it is safe in every generation path.
+     ====================================================================== */
+
+  // A region that is a CONNECTOR, not a place. These names are the established
+  // link semantics in this repo (highwaynet.js's isLinkName, polwar's causeway
+  // front search, the shore field's land-holding all key off the same words);
+  // "approach"/"spur"/"corridor" join them because govcomplex.js registers its
+  // access corridors under exactly those names.
+  const CONNECTOR_RE = /bridge|causeway|link|ramp|approach|spur|connector|corridor/i;
+  function lc(s) { return String(s == null ? "" : s).toLowerCase(); }
+  function clearanceOn() { return on() && CBZ.CONFIG.ROAD_CLEARANCE !== false; }
+
+  /* WHICH WORLD ARE WE ASKING ABOUT. This is NOT arena() and the difference is
+     load-bearing: `CBZ.city.arena` is only assigned AFTER buildCity RETURNS
+     (city/mode.js:274-277), so during the landmass builders — which is exactly
+     when roads are pushed — arena() answers with an object that has no regions
+     at all and every clearance test would silently pass. worldmap.js hands the
+     in-progress descriptor to every landmass builder, so we take delivery of it
+     through the ordinary CBZ.addLandmass door at the earliest possible order
+     rather than inventing a new global or wrapping cityWorldGeo. */
+  let boundCity = null;
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) { boundCity = city || null; }, -1e6);
+  function worldRef(opts) {
+    if (opts && opts.city) return opts.city;
+    // boundCity FIRST, and the order matters on a REBUILD: `CBZ.city.arena`
+    // still points at the PREVIOUS world until the new buildCity returns, so
+    // preferring it would test a rebuilt world's roads against the old world's
+    // regions. boundCity is re-bound at the top of every build.
+    if (boundCity && boundCity.regions) return boundCity;
+    const c = CBZ.city;
+    if (c && c.arena && c.arena.regions) return c.arena;
+    if (c && c.regions) return c;
+    return null;
+  }
+
+  // Flattened, cached shape tables. Invalidated on the descriptor identity plus
+  // list LENGTH, the same rule the bucket grid above uses — the lists only grow
+  // while the world is being built, and a per-candidate rescan of ~100 shapes
+  // across the tens of thousands of prop points detail_kit walks is exactly the
+  // cost that gets a good rule deleted later for being slow.
+  let places = null, placesFor = -1, placesRef = null;
+  let keepOuts = null, keepOutsFor = -1, keepOutsRef = null;
+
+  function shapeOf(g, name) {
+    let minX, maxX, minZ, maxZ, circle = false;
+    if (g.kind === "circle" || (g.r != null && g.cx != null && g.minX == null)) {
+      if (!isFinite(g.cx) || !isFinite(g.cz) || !isFinite(g.r)) return null;
+      circle = true; minX = g.cx - g.r; maxX = g.cx + g.r; minZ = g.cz - g.r; maxZ = g.cz + g.r;
+    } else {
+      if (!isFinite(g.minX) || !isFinite(g.maxX) || !isFinite(g.minZ) || !isFinite(g.maxZ)) return null;
+      minX = g.minX; maxX = g.maxX; minZ = g.minZ; maxZ = g.maxZ;
+    }
+    return {
+      src: g, name: name, circle: circle, cx: g.cx, cz: g.cz, r: g.r,
+      minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ,
+      k1: lc(g.owner), k2: lc(g._govOwner), k3: lc(g.biome), civ: !!g.civ,
+    };
+  }
+  function placeTable(opts) {
+    const A = worldRef(opts); const regs = (A && A.regions) || null;
+    if (!regs) return (places = []);
+    if (places && placesRef === regs && placesFor === regs.length) return places;
+    const out = [];
+    for (let i = 0; i < regs.length; i++) {
+      const g = regs[i];
+      if (!g || g.underlay) continue;                       // ownership underlay, not a place
+      if (CONNECTOR_RE.test(g.name || "")) continue;        // a causeway IS a road
+      const s = shapeOf(g, g.name || "?");
+      if (s) out.push(s);
+    }
+    places = out; placesFor = regs.length; placesRef = regs; return out;
+  }
+  function keepOutTable(opts) {
+    const A = worldRef(opts); const zs = (A && A.noSpawn) || null;
+    if (!zs) return (keepOuts = []);
+    if (keepOuts && keepOutsRef === zs && keepOutsFor === zs.length) return keepOuts;
+    const out = [];
+    for (let i = 0; i < zs.length; i++) {
+      const s = shapeOf(zs[i], zs[i].label || "?");
+      if (s) out.push(s);
+    }
+    keepOuts = out; keepOutsFor = zs.length; keepOutsRef = zs; return out;
+  }
+  function ptIn(p, x, z) {
+    if (!(x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ)) return false;
+    if (p.circle) { const dx = x - p.cx, dz = z - p.cz; return dx * dx + dz * dz <= p.r * p.r; }
+    return true;
+  }
+  // Does this road/opts bundle OWN the place? Derived from fields the world
+  // already stamps — never a new declaration.
+  function ownsPlace(o, p) {
+    if (!o) return false;
+    const k = lc(o.owner || o._govOwner || o.district);
+    if (!k) return false;
+    return (k === p.k1 && !!p.k1) || (k === p.k2 && !!p.k2) || (k === p.k3 && !!p.k3);
+  }
+  // The two ends of a road RECORD.
+  function segEnds(r) {
+    const h = (r.len || 0) / 2;
+    return r.vertical
+      ? { x0: r.x, z0: r.z - h, x1: r.x, z1: r.z + h }
+      : { x0: r.x - h, z0: r.z, x1: r.x + h, z1: r.z };
+  }
+  CBZ.roadSegEnds = segEnds;
+
+  let clampedSegs = 0, clampedMetres = 0, propTested = 0, propRefused = 0;
+
+  /* THE QUERY. Returns a pass, or the SHORTENED segment that docks at the
+     boundary instead of crossing it — never a half-answer the caller has to
+     finish.
+       opts.w        deck width (default city.ROAD)
+       opts.owner    ownership key; `district`/`_govOwner` are read too
+       opts.dest     {x,z} where the road is GOING (default: its far end).
+                     A multi-leg route passes its FINAL point here, so an
+                     intermediate leg that clips the destination is fine and
+                     one that cuts an unrelated town is not.
+       opts.origin   {x,z} where it comes FROM (default: its near end)
+       opts.dock     penetration allowance (default ROAD_CLEARANCE_DOCK)
+       opts.zones    true => also refuse HARD keep-outs (default false; see the
+                     header for why a road is never clamped out of one) */
+  CBZ.roadClearance = function (x0, z0, x1, z1, opts) {
+    const PASS = { ok: true, blockedBy: null, clampedTo: null, depth: 0, kind: null };
+    opts = opts || {};
+    if (!clearanceOn()) return PASS;
+    if (!isFinite(x0) || !isFinite(z0) || !isFinite(x1) || !isFinite(z1)) return PASS;
+    const A = worldRef(opts); if (!A) return PASS;
+    const dock = opts.dock != null ? opts.dock : (CBZ.CONFIG.ROAD_CLEARANCE_DOCK || 24);
+    const hw = (opts.w != null ? opts.w : (A.ROAD || 18)) / 2;
+    const vertical = Math.abs(x1 - x0) < Math.abs(z1 - z0);
+    const a0 = vertical ? z0 : x0, a1 = vertical ? z1 : x1;
+    const cl = vertical ? (x0 + x1) / 2 : (z0 + z1) / 2;   // lateral centreline
+    if (Math.abs(a1 - a0) < 1e-6) return PASS;             // degenerate
+    const dir = a1 >= a0 ? 1 : -1;
+    const dest = opts.dest || { x: x1, z: z1 };
+    const origin = opts.origin || { x: x0, z: z0 };
+    const segLo = Math.min(a0, a1), segHi = Math.max(a0, a1);
+
+    let stop = a1, blocked = null, depth = 0, kind = null;
+    function consider(tab, tag, allowCiv) {
+      for (let i = 0; i < tab.length; i++) {
+        const p = tab[i];
+        if (!allowCiv && p.civ) continue;             // bars civilians, not roads
+        // LATERAL: the centreline must actually run INSIDE the footprint. A
+        // road whose shoulder grazes an edge is running ALONGSIDE the place —
+        // which is exactly where a perimeter road belongs.
+        const lLo = vertical ? p.minX : p.minZ, lHi = vertical ? p.maxX : p.maxZ;
+        if (cl <= lLo || cl >= lHi) continue;
+        const aLo = vertical ? p.minZ : p.minX, aHi = vertical ? p.maxZ : p.maxX;
+        const ov = Math.min(segHi, aHi) - Math.max(segLo, aLo);
+        if (ov <= 0) continue;
+        if (p.circle) {
+          const rminX = vertical ? cl - hw : segLo, rmaxX = vertical ? cl + hw : segHi;
+          const rminZ = vertical ? segLo : cl - hw, rmaxZ = vertical ? segHi : cl + hw;
+          const cdx = Math.max(rminX - p.cx, 0, p.cx - rmaxX);
+          const cdz = Math.max(rminZ - p.cz, 0, p.cz - rmaxZ);
+          if (cdx * cdx + cdz * cdz >= p.r * p.r) continue;
+        }
+        if (ptIn(p, dest.x, dest.z)) continue;        // THE DESTINATION RULE
+        if (ptIn(p, origin.x, origin.z)) continue;    // ...and its mirror
+        if (ownsPlace(opts, p)) continue;
+        if (ov <= dock) continue;                     // docking at the edge
+        const nearEdge = dir > 0 ? aLo : aHi;
+        const cand = nearEdge + dir * dock;
+        if (dir > 0 ? cand < stop : cand > stop) { stop = cand; blocked = p.name; depth = ov; kind = tag; }
+      }
+    }
+    consider(placeTable(opts), "region", false);
+    if (opts.zones) consider(keepOutTable(opts), "keepout", false);
+    if (blocked == null) return PASS;
+    // Never invert the segment. A road whose ORIGIN is already inside cannot be
+    // salvaged from this end; hand back the degenerate clamp and let the caller
+    // decide (roadClamp keeps a short stub rather than deleting a record).
+    const keep = dir > 0 ? Math.max(a0, stop) : Math.min(a0, stop);
+    return {
+      ok: false, blockedBy: blocked, depth: depth, kind: kind,
+      len: Math.abs(keep - a0),
+      clampedTo: vertical
+        ? { x0: x0, z0: z0, x1: x1, z1: keep }
+        : { x0: x0, z0: z0, x1: keep, z1: z1 },
+    };
+  };
+
+  /* THE ONE-LINE ADOPTION. Give it the road RECORD you were about to push and
+     it either leaves it alone or shortens it so it docks at the boundary.
+     Returns the metres removed (0 = it was already legal), so a builder can
+     log or skip on its own terms. Never deletes: a record clamped to nothing
+     keeps an 8 m stub at its origin, because deleting would change
+     city.roads.length and every downstream count with it. */
+  CBZ.roadClamp = function (seg, opts) {
+    if (!seg || !clearanceOn()) return 0;
+    if (!isFinite(seg.x) || !isFinite(seg.z) || !(seg.len > 0)) return 0;
+    const e = segEnds(seg);
+    const o = Object.assign({}, opts || {});
+    // The RECORD's own fields are the defaults, and an explicit `undefined` in
+    // opts must not erase them (Object.assign would). Every caller passes at
+    // most a dest/owner it actually knows.
+    if (o.w == null) o.w = seg.w;
+    if (o.district == null) o.district = seg.district;
+    if (o.owner == null) o.owner = seg.owner || seg._govOwner;
+    const res = CBZ.roadClearance(e.x0, e.z0, e.x1, e.z1, o);
+    if (res.ok) return 0;
+    const c = res.clampedTo;
+    const nx = (c.x0 + c.x1) / 2, nz = (c.z0 + c.z1) / 2;
+    let nlen = seg.vertical ? Math.abs(c.z1 - c.z0) : Math.abs(c.x1 - c.x0);
+    const removed = Math.max(0, (seg.len || 0) - nlen);
+    if (removed < 0.5) return 0;
+    if (nlen < 8) {
+      // stub at the origin end, pointing the way it used to run
+      const sgn = seg.vertical ? (c.z1 >= c.z0 ? 1 : -1) : (c.x1 >= c.x0 ? 1 : -1);
+      nlen = 8;
+      if (seg.vertical) { seg.x = c.x0; seg.z = c.z0 + sgn * 4; }
+      else { seg.x = c.x0 + sgn * 4; seg.z = c.z0; }
+    } else {
+      seg.x = nx; seg.z = nz;
+    }
+    seg.len = nlen;
+    seg._clearance = { blockedBy: res.blockedBy, removed: Math.round(removed), depth: Math.round(res.depth) };
+    seg._openCache = null;                  // roadOpen's span cache is now stale
+    clampedSegs++; clampedMetres += removed;
+    return removed;
+  };
+
+  /* MAY ROAD-SIDE SCATTER STAND HERE — the props half of the owner's report.
+     A streetlight, sign, signal, bin or bollard belongs to the road it was
+     walked along. It may stand in that road's own place; it may never stand
+     inside a place the road is only passing, and it may NEVER stand inside a
+     declared keep-out (that is the airfield). Pass the road record so the
+     ownership and destination rules apply; pass nothing and only the keep-out
+     half is enforced, which is the safe answer for an unaffiliated prop. */
+  CBZ.roadPropClear = function (x, z, road) {
+    if (!clearanceOn() || CBZ.CONFIG.ROAD_CLEARANCE_PROPS === false) return true;
+    if (!isFinite(x) || !isFinite(z)) return true;
+    propTested++;
+    const zs = keepOutTable();
+    for (let i = 0; i < zs.length; i++) {
+      if (ptIn(zs[i], x, z)) { propRefused++; return false; }
+    }
+    if (!road) return true;
+    const tab = placeTable();
+    if (!tab.length) return true;
+    let e = road._ends;
+    if (!e || e._len !== road.len) { e = segEnds(road); e._len = road.len; road._ends = e; }
+    for (let i = 0; i < tab.length; i++) {
+      const p = tab[i];
+      if (!ptIn(p, x, z)) continue;
+      if (ownsPlace(road, p)) continue;
+      if (ptIn(p, e.x0, e.z0) || ptIn(p, e.x1, e.z1)) continue;   // its own destination
+      propRefused++; return false;
+    }
+    return true;
+  };
+  // Convenience for a scatter loop that wants to skip a whole road up front:
+  // restricted ground (an apron service lane, a compound spur) never carries
+  // ordinary city street furniture, whatever the geometry says.
+  CBZ.roadPropRoadOk = function (r) {
+    if (!r) return false;
+    if (!clearanceOn() || CBZ.CONFIG.ROAD_CLEARANCE_PROPS === false) return true;
+    return !r.access && !r.noTraffic;
+  };
+
+  /* ---- THE POST-BUILD ENFORCEMENT PASS -----------------------------------
+     Order 98: after every landmass/biome/island/mini-city/gov builder (≤42),
+     after highwaynet (91) and the continent plate (97), before detail_kit's
+     dressing passes (99) — so the props that follow already see clamped roads.
+
+     This is what makes the law a LAW rather than a guideline: it does not
+     depend on any builder cooperating. What it clamps is the RECORD, and the
+     record is what traffic, roadPick, roadSegmentAt, roadCross, the navmesh,
+     the map and every prop walker read — so a clamped segment is one no car
+     and no streetlight will ever occupy again. A deck already drawn past the
+     boundary stays drawn; that is scenery, and the warning below names the
+     exact leg so its builder can be retuned. */
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
+    if (!clearanceOn() || CBZ.CONFIG.ROAD_CLEARANCE_ENFORCE === false) return;
+    const R = (city && city.roads) || null;
+    if (!R || !R.length) return;
+    places = null; keepOuts = null;                  // world just changed shape
+    clampedSegs = 0; clampedMetres = 0;
+    for (let i = 0; i < R.length; i++) {
+      const seg = R[i];
+      if (!seg || seg._clearance) continue;
+      const cut = CBZ.roadClamp(seg, { city: city });
+      if (cut > 0) {
+        try {
+          console.warn("[roadrules] clamped " + (seg.district || "road") + " segment " +
+            (seg.route ? seg.route + " " : "") + "at (" + Math.round(seg.x) + "," + Math.round(seg.z) +
+            ") — it crossed '" + seg._clearance.blockedBy + "' by " + seg._clearance.depth +
+            " m; " + Math.round(cut) + " m removed. Fix the builder so the DECK stops there too.");
+        } catch (e) {}
+      }
+    }
+    /* THE HALF WE DELIBERATELY DO NOT CLAMP — say it out loud every build.
+       A road running inside a HARD keep-out cannot be shortened from here
+       without risking stranding the facility it serves (island_airport.js's
+       landside perimeter road lies inside the airside rect for its whole
+       length, and cutting it would leave the terminal with no road at all).
+       That is a bug in the FACILITY'S OWN FOOTPRINT, so the only honest thing
+       this pass can do is refuse to be silent about it. Props are already
+       refused there unconditionally by roadPropClear. */
+    const zt = keepOutTable({ city: city });
+    const dockB = CBZ.CONFIG.ROAD_CLEARANCE_DOCK || 24;
+    for (let i = 0; i < R.length; i++) {
+      const seg = R[i];
+      if (!seg || seg.access || !(seg.len > 0)) continue;
+      for (let j = 0; j < zt.length; j++) {
+        const p = zt[j];
+        if (p.civ) continue;                        // bars civilians, not roads
+        const cl = seg.vertical ? seg.x : seg.z;
+        const lLo = seg.vertical ? p.minX : p.minZ, lHi = seg.vertical ? p.maxX : p.maxZ;
+        if (cl <= lLo || cl >= lHi) continue;
+        const aLo = seg.vertical ? p.minZ : p.minX, aHi = seg.vertical ? p.maxZ : p.maxX;
+        const a0 = (seg.vertical ? seg.z : seg.x) - seg.len / 2;
+        const a1 = a0 + seg.len;
+        const ov = Math.min(a1, aHi) - Math.max(a0, aLo);
+        if (ov <= dockB) continue;
+        // Same test as the audit: an approach that STOPS inside is a gate road;
+        // one that goes in one side and out the other is a through-route across
+        // a restricted facility. Only the second is worth shouting about.
+        const span = seg.vertical ? (p.maxZ - p.minZ) : (p.maxX - p.minX);
+        if (ov < span - 2) continue;
+        try {
+          console.warn("[roadrules] " + (seg.district || "road") + " segment at (" +
+            Math.round(seg.x) + "," + Math.round(seg.z) + ") crosses keep-out '" + p.name +
+            "' end to end (" + Math.round(ov) + " m) — NOT clamped, because clamping a road " +
+            "out of a keep-out can strand the facility it serves. Shrink that zone (or move " +
+            "the road) in the builder that owns it.");
+        } catch (e2) {}
+      }
+    }
+  }, 98);
+
   /* ---- ENFORCEMENT -------------------------------------------------------
      The red-light ticket in city/traffic.js is the precedent and this
      deliberately copies its shape: a cooldown, a "was it actually seen"
@@ -697,6 +1111,164 @@
       segments: roads.length, segmentsClosed: closed,
       placedByBlock: placed, crossRejected: crossRejected, spacingRejects: spacingRejects,
       adopted: Object.keys(sites).length, adoptedIds: Object.keys(sites).sort(),
+    };
+  };
+
+  /* ---- THE CLEARANCE RATCHET (CLAUDE.md BLOCK LAW #5) --------------------
+     A LIVE measurement of the built world, not a count of call sites. Every
+     number is recomputed from city.roads × city.regions × city.noSpawn on each
+     call, so it cannot go stale and it cannot be satisfied by a comment.
+
+       violations      roads CROSSING a place they neither own nor end in.
+                       THE RATCHET. Pinned at its measured baseline; may only
+                       go DOWN.
+       propsInside     kerb-adjacent street furniture standing inside a place
+                       its road is only passing, or inside ANY keep-out. THE
+                       SECOND RATCHET, and the owner's actual sentence.
+       dockedInside    roads that TERMINATE inside a place (the destination
+                       rule). EVIDENCE, NOT A PIN — a legal shape, but if this
+                       number or `deepestDocked` grows a lot somebody has
+                       started calling a 600 m cross-country run a "dock", and
+                       that is exactly the quiet redefinition CLAUDE.md warns
+                       about. It is reported separately so it can never absorb
+                       a real violation, the way govComplexAudit's
+                       `urbanAdjacent` does.
+       zoneCrossings   roads that enter a HARD keep-out through one side and
+                       leave through the other — a through-route across a
+                       restricted facility, as distinct from an approach that
+                       ends at its gate. Deliberately NOT clamped (see the
+                       header): each one is a bug in a FACILITY'S OWN
+                       footprint, and `zoneWhere` names it so it cannot hide.
+       civZoneRoads    the same, for `civ` zones (govcomplex's residences),
+                       which bar civilians rather than roads. */
+  CBZ.roadClearanceAudit = function () {
+    const A = worldRef();
+    const R = (A && A.roads) || [];
+    const tab = placeTable(), zs = keepOutTable();
+    let violations = 0, links = 0, dockedInside = 0, internal = 0, owned = 0;
+    let deepestIntrusion = 0, deepestDocked = 0, zoneCrossings = 0, civZoneRoads = 0;
+    const where = {}, zoneWhere = {}, dockWhere = {};
+    const dock = CBZ.CONFIG.ROAD_CLEARANCE_DOCK || 24;
+
+    function scan(seg, p, isZone) {
+      const vertical = !!seg.vertical;
+      const hw = (seg.w != null ? seg.w : (A && A.ROAD) || 18) / 2;
+      const h = (seg.len || 0) / 2;
+      const cl = vertical ? seg.x : seg.z;
+      const a0 = (vertical ? seg.z : seg.x) - h, a1 = (vertical ? seg.z : seg.x) + h;
+      const lLo = vertical ? p.minX : p.minZ, lHi = vertical ? p.maxX : p.maxZ;
+      const aLo = vertical ? p.minZ : p.minX, aHi = vertical ? p.maxZ : p.maxX;
+      const ov = Math.min(a1, aHi) - Math.max(a0, aLo);
+      if (ov <= 0) return null;
+      if (p.circle) {
+        const rminX = vertical ? cl - hw : a0, rmaxX = vertical ? cl + hw : a1;
+        const rminZ = vertical ? a0 : cl - hw, rmaxZ = vertical ? a1 : cl + hw;
+        const cdx = Math.max(rminX - p.cx, 0, p.cx - rmaxX);
+        const cdz = Math.max(rminZ - p.cz, 0, p.cz - rmaxZ);
+        if (cdx * cdx + cdz * cdz >= p.r * p.r) return null;
+      }
+      if (cl <= lLo || cl >= lHi) return { graze: true, ov: ov };
+      const e = segEnds(seg);
+      const endsIn = ptIn(p, e.x0, e.z0) || ptIn(p, e.x1, e.z1);
+      const wholly = ov >= (seg.len || 0) - 1;
+      return { ov: ov, endsIn: endsIn, wholly: wholly, owns: !isZone && ownsPlace(seg, p) };
+    }
+
+    for (let i = 0; i < R.length; i++) {
+      const seg = R[i];
+      if (!seg || !isFinite(seg.x) || !(seg.len > 0)) continue;
+      for (let j = 0; j < tab.length; j++) {
+        const hit = scan(seg, tab[j], false);
+        if (!hit) continue;
+        if (hit.graze || hit.ov <= dock) { links++; continue; }
+        if (hit.wholly || hit.owns) { hit.wholly ? internal++ : owned++; continue; }
+        if (hit.endsIn) {
+          dockedInside++;
+          if (hit.ov > deepestDocked) deepestDocked = hit.ov;
+          dockWhere[tab[j].name] = (dockWhere[tab[j].name] || 0) + 1;
+          continue;
+        }
+        violations++;
+        if (hit.ov > deepestIntrusion) deepestIntrusion = hit.ov;
+        where[tab[j].name] = (where[tab[j].name] || 0) + 1;
+      }
+      for (let j = 0; j < zs.length; j++) {
+        if (seg.access) continue;                    // a service lane belongs on restricted ground
+        const p = zs[j];
+        const hit = scan(seg, p, true);
+        if (!hit || hit.graze || hit.ov <= dock) continue;
+        // A `civ` zone bars CIVILIANS, not roads (govcomplex's residences), so
+        // it is reported apart from the hard perimeters — a road through the
+        // Governor's drive is not the same offence as one across a runway.
+        if (p.civ) { civZoneRoads++; continue; }
+        // THE TEST THAT SEPARATES A GATE FROM A TRESPASS, and it deliberately
+        // does NOT use the destination rule. An approach road ending at a
+        // compound's gate is 100+ m inside a hard perimeter and that is what a
+        // gate road IS. What is never right is a road that enters a restricted
+        // perimeter through one side and leaves through the other: that is a
+        // through-route across the facility, and it is exactly what
+        // island_airport.js's landside perimeter road does to the airside rect.
+        // Using "endsIn" here would have scored the airport 0 — the quiet
+        // redefinition this audit exists to prevent.
+        const span = seg.vertical ? (p.maxZ - p.minZ) : (p.maxX - p.minX);
+        if (hit.ov < span - 2) continue;              // stops inside: a gate road
+        zoneCrossings++;
+        zoneWhere[p.name] = (zoneWhere[p.name] || 0) + 1;
+      }
+    }
+
+    /* propsInside — a LIVE geometric read, no bookkeeping added anywhere. A
+       piece of street furniture is a SMALL collider standing at a road's kerb;
+       colliders, roads and regions are all already in the world, so this asks
+       the world rather than trusting a counter a scatter loop kept. */
+    let props = 0, propsInside = 0, propsInZone = 0;
+    const cols = CBZ.colliders || [];
+    const defW = (A && A.ROAD) || 18;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || !isFinite(c.minX)) continue;
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+      if (!(w <= 3.2 && d <= 3.2)) continue;         // street-furniture sized
+      const x = (c.minX + c.maxX) / 2, z = (c.minZ + c.maxZ) / 2;
+      let road = null;
+      for (let k = 0; k < R.length; k++) {
+        const r = R[k];
+        if (!r || !(r.len > 0)) continue;
+        const hw = (r.w != null ? r.w : defW) / 2;
+        if (r.vertical) {
+          if (Math.abs(z - r.z) > r.len / 2) continue;
+          const dx = Math.abs(x - r.x); if (dx >= hw - 1 && dx <= hw + 6) { road = r; break; }
+        } else {
+          if (Math.abs(x - r.x) > r.len / 2) continue;
+          const dz = Math.abs(z - r.z); if (dz >= hw - 1 && dz <= hw + 6) { road = r; break; }
+        }
+      }
+      if (!road) continue;
+      props++;
+      let bad = false;
+      for (let j = 0; j < zs.length && !bad; j++) if (ptIn(zs[j], x, z)) { bad = true; propsInZone++; }
+      if (!bad) {
+        const e = segEnds(road);
+        for (let j = 0; j < tab.length && !bad; j++) {
+          const p = tab[j];
+          if (!ptIn(p, x, z)) continue;
+          if (ownsPlace(road, p)) continue;
+          if (ptIn(p, e.x0, e.z0) || ptIn(p, e.x1, e.z1)) continue;
+          bad = true;
+        }
+      }
+      if (bad) propsInside++;
+    }
+
+    return {
+      segments: R.length, places: tab.length, keepOuts: zs.length,
+      violations: violations, deepestIntrusion: Math.round(deepestIntrusion), where: where,
+      propsInside: propsInside, kerbProps: props, propsInKeepOut: propsInZone,
+      links: links, internal: internal, owned: owned,
+      dockedInside: dockedInside, deepestDocked: Math.round(deepestDocked), dockWhere: dockWhere,
+      zoneCrossings: zoneCrossings, zoneWhere: zoneWhere, civZoneRoads: civZoneRoads,
+      clampedSegs: clampedSegs, clampedMetres: Math.round(clampedMetres),
+      propTested: propTested, propRefused: propRefused,
     };
   };
 })();

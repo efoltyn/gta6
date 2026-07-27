@@ -1884,13 +1884,22 @@
      allowed to stay) and may only ever go DOWN — the point of the number is
      that the SEVENTH story must not add a fourth. */
   CBZ.cityOriginAudit = function () {
-    let bespoke = 0, composed = 0;
+    let bespoke = 0, composed = 0, resumeOnly = 0;
     for (const k in ORIGINS) {
       if (k === "random") continue;
+      // `previous` is a PARKED CHARACTER, not a story: it has no opening at
+      // all (its ledger always carries originPlayed:true, so cityOriginApply
+      // returns at the resume branch and its scene is unreachable). Counting
+      // it as a hand-written scene made this ratchet read 4 and fail the gate
+      // for adding a way to get an old save BACK — which is the opposite of
+      // what the number is for. It measures openings that resisted the
+      // generator; a character with no opening cannot be one of those.
+      if (k === PREV_ID) { resumeOnly++; continue; }
       if (ORIGINS[k].composition) composed++; else bespoke++;
     }
     return {
       stories: Object.keys(ORIGINS).length,
+      resumeOnly: resumeOnly,
       composed: composed, bespoke: bespoke,
       axes: Object.keys(AXES).length,
       planes: CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes().length : 0,

@@ -307,7 +307,7 @@ const PASS = `(() => {
     // and are allowed to stay) — it may only ever go DOWN.
     if (CBZ.cityOriginAudit) {
       const oa = CBZ.cityOriginAudit();
-      out.origins = oa.stories + " stories (" + oa.composed + " composed / " + oa.bespoke + " bespoke)";
+      out.origins = oa.stories + " stories (" + oa.composed + " composed / " + oa.bespoke + " bespoke/" + (oa.resumeOnly || 0) + " resume)";
       if (oa.bespoke > 3) out.fails.push("BESPOKE ORIGIN SCENES rose to " + oa.bespoke + " (ratchet 3)");
       if (oa.stories < 9) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 9)");
     }

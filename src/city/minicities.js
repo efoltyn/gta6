@@ -224,7 +224,17 @@
         name: tpl.name + " Causeway", subtitle: tpl.subtitle || "Mini-City", biome: place.id, kind: "rect",
         minX: cMinX, maxX: cMaxX, minZ: cMinZ, maxZ: cMaxZ, pad: 1,
       });
-      if (city.roads) city.roads.push({ x: midX, z: midZ, vertical: vertical, len: len, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      if (city.roads) {
+        const link = { x: midX, z: midZ, vertical: vertical, len: len, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 };
+        // THE CLEARANCE LAW (city/roadrules.js): this causeway runs from the
+        // mini-city's own edge out to an existing road, so both its ends are
+        // legitimate destinations — but nothing says the straight line between
+        // them is empty, and the ring placer above only checked the CITY rect,
+        // never the corridor. One line and the link docks at any place it
+        // would otherwise have driven through. Degrade-safe.
+        if (CBZ.roadClamp) CBZ.roadClamp(link, { owner: place.id });
+        city.roads.push(link);
+      }
     }
 
     // (f) WORK-ANCHORS — the central shops are jobs people commute to (the SAME

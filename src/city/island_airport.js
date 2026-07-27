@@ -2848,14 +2848,14 @@
     // Hand-placed staff (populate()'s ground crew/passengers) don't route
     // through the scatter paths, so the authored airport life is untouched.
     if (CBZ.registerNoSpawnZone) {
-      CBZ.registerNoSpawnZone(city, { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" });
+      CBZ.registerNoSpawnZone(city, { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" });
       CBZ.registerNoSpawnZone(city, { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" });
     }
     city.airportAudit = {
       bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
       runway: { minX: RWY_X0, maxX: RWY_X1, minZ: RWY_Z - RWY_W / 2, maxZ: RWY_Z + RWY_W / 2 },
       noSpawn: [
-        { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" },
+        { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" },
         { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" },
       ],
       aircraft: AIRCRAFT_DIMS,
@@ -2881,10 +2881,25 @@
          speed limits and roadPick all understand it with no special case.
 
          Both are tagged `district: "airport"`, which roadrules.js weights low
-         (a service perimeter is not Main Street) but leaves OPEN, and both lie
-         OUTSIDE the airside keep-out by construction: the spur runs at
-         x = A_MAXX - 22, east of the runway; the kerb runs at z = 38.5, north
-         of the keep-out's z <= 9 + ADZ ceiling. */
+         (a service perimeter is not Main Street) but leaves OPEN.
+
+         THE KERB LEG is outside the keep-out by construction: z = 38.5, north
+         of the zone's z <= 9 + ADZ ceiling.
+
+         THE PERIMETER SPUR WAS NOT, and the earlier version of this comment
+         claimed it was. The airside zone was declared out to A_MAXX while this
+         road sits at A_MAXX - 22 — so it ran 22 m INSIDE the keep-out for its
+         whole 289 m length, which is precisely the "roads overlap places like
+         the airport" the owner reported, introduced by the very change that
+         was meant to stop traffic crossing the runway. Caught by
+         roadClearance's zoneCrossings, not by reading.
+
+         Fixed on the ZONE side rather than by moving the road, because the
+         zone was the thing that was wrong: an airfield's landside perimeter
+         service road is not airside. The east edge is now A_MAXX - 32
+         (= 258 + ADX), which still sits 18 m EAST of RWY_X1 (240 + ADX), so
+         the runway and its full strip stay inside the keep-out while the road
+         (centreline 268, kerbs 261-275) falls outside it. */
       const PERIM_X = A_MAXX - 22;              // east perimeter, clear of RWY_X1
       const TERM_X = -40 + ADX;                 // terminal centreline (APRON_X, which is scoped to the paint pass)
       const KERB_Z = 38.5 + ADZ;                // the departures kerb strip

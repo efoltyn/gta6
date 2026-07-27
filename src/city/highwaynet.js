@@ -240,11 +240,32 @@
   }
 
   // ============================================================
-  //  BUILD-TIME CLEARANCE SWEEP (deterministic; warns, never mutates).
-  //  Every leg rect must clear all NON-link regions, all water bodies,
-  //  the annex disc/bridge and the mainland's harbor bay band. A dock
-  //  point must land on a link (causeway) region — the drift alarm that
-  //  fires the day a landmass moves without this table following it.
+  //  BUILD-TIME CLEARANCE SWEEP (deterministic).
+  //
+  //  IT NOW ENFORCES. For its whole life this function detected routes
+  //  crossing registered footprints and only console.warn'd — and it was
+  //  RIGHT: "R1 leg 3 overlaps region 'Defence Headquarters Approach 1'"
+  //  has been true and ignored. CLAUDE.md names that failure mode exactly
+  //  ("an audit nobody has executed is not a measurement"), and a warning
+  //  that has been true for months and changed nothing is worse than no
+  //  check, because it teaches the next reader to scroll past it.
+  //
+  //  Two things changed:
+  //    • the REGION test is no longer this file's private rect math. It
+  //      calls CBZ.roadClearance (city/roadrules.js), the ONE definition of
+  //      "may a road be here" that props, mini-cities, buildHighway and the
+  //      post-build law all share. That instantly retires the false alarm
+  //      above: an "Approach" corridor is a road, not a place, and the
+  //      shared law knows it — this file's private isLinkName never did.
+  //    • a leg that genuinely crosses a place has its drivable RECORD
+  //      clamped to the boundary (CBZ.roadClamp), so no car, no spawn and
+  //      no streetlight can enter even if the table is never retuned.
+  //  Degrade-safe: with roadrules.js absent, every branch falls back to the
+  //  original warn-only rect test, byte for byte.
+  //
+  //  Water bodies, the annex disc, the east bridge, the harbor-bay band and
+  //  the dock drift alarm stay as warnings — those are table-authoring
+  //  mistakes with no safe automatic repair.
   // ============================================================
   function isLinkName(n) { return /bridge|causeway|link/i.test(n || ""); }
   function legRects(route) {
@@ -270,10 +291,26 @@
   function clearanceSweep(city, routes) {
     const regs = city.regions || [], waters = city.waterBodies || [];
     const warn = function (msg) { console.warn("[highwaynet] " + msg); };
+    let blocked = 0;
     for (const route of routes) {
+      const dest = route.pts[route.pts.length - 1];
       for (const leg of legRects(route)) {
         const tag = route.id + " leg " + leg.i;
-        for (const rg of regs) {
+        // THE SHARED LAW (roadrules.js) — one line, and it replaces the whole
+        // private rect sweep below it. `dest` is the ROUTE's final point, so a
+        // leg that clips the place the route is going to is legal and one that
+        // cuts an unrelated town is not.
+        if (CBZ.roadClearance) {
+          const res = CBZ.roadClearance(leg.a.x, leg.a.z, leg.b.x, leg.b.z, {
+            w: route.width, owner: route.id, dest: dest, city: city,
+          });
+          if (!res.ok) {
+            blocked++;
+            warn(tag + " crosses '" + res.blockedBy + "' by " + Math.round(res.depth) +
+              " m — the drivable record is CLAMPED to the boundary; retune the table so the DECK stops there too");
+            leg.blockedBy = res.blockedBy;
+          }
+        } else for (const rg of regs) {
           if (isLinkName(rg.name)) continue;                  // causeway decks are dock targets
           const pad = (rg.pad || 0);
           const hit = rg.kind === "circle"
@@ -309,6 +346,7 @@
         if (!ok) warn(route.id + " dock (" + d.x + "," + d.z + ") [" + d.note + "] found no causeway/link region — a landmass moved without this table");
       }
     }
+    return blocked;
   }
 
   // ============================================================
@@ -378,6 +416,10 @@
         seg.district = "highway";
         seg.w = route.width; seg.lanesPerDir = route.lanesPerDir; seg.laneW = 3.6;
         seg.median = true; seg.medianW = 1.2; seg.route = route.id;
+        // ENFORCE (roadrules.js): dock at a place's edge, never cross it. The
+        // route's FINAL point is the destination, so the leg that arrives is
+        // allowed in and a leg that merely passes a town is cut at the kerb.
+        if (CBZ.roadClamp) CBZ.roadClamp(seg, { dest: pts[pts.length - 1], owner: route.id, city: city });
         if (roads) { roads.push(seg); route.roads.push(seg); }
         // map/waterfield region — "Link" name: fullmap draws it as road,
         // polwar's front search (/causeway|bridge/) and the shore field's
