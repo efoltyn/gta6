@@ -677,14 +677,14 @@
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
-<script src="src/city/factions.js?v=faction2"></script>
-<script src="src/city/gangs.js?v=fortress1"></script>
+<script src="src/city/factions.js?v=faction2r"></script>
+<script src="src/city/gangs.js?v=fortress1r"></script>
 <script src="src/city/social.js?v=subtitle1"></script>
 <script src="src/city/realestate.js?v=fortress1"></script>
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=notags2y"></script>
+<script src="src/city/peds.js?v=notags2yr"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -693,7 +693,7 @@
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
 <script src="src/city/childhood.js?v=child1"></script>
-<script src="src/city/level.js?v=lvl2w9y"></script>
+<script src="src/city/level.js?v=lvl2w9yr"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=fortress1"></script>
@@ -702,7 +702,7 @@
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=fortress1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=localheli2w9w11"></script>
+<script src="src/city/police.js?v=localheli2w9w11r"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=localheli2w11"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -779,7 +779,7 @@
      CBZ.CONFIG.SNIPER_REAL_SCOPE = false. -->
 <script src="src/systems/lockon.js?v=lockon2"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
-<script src="src/city/careers.js?v=citysec3"></script>
+<script src="src/city/careers.js?v=citysec3r"></script>
 <script src="src/city/activities.js?v=hub3"></script>
 <script src="src/city/heists.js?v=night6"></script>
 <script src="src/city/interactions.js?v=binary3"></script>
@@ -930,7 +930,7 @@
 <script src="src/city/gigs.js?v=gig5"></script>
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=gunthumb3y"></script>
+<script src="src/city/hud.js?v=gunthumb3yr"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
@@ -1126,7 +1126,7 @@
      details(), CBZ.cityGangs/cityGangById, CBZ.polity/regimes' govType, and
      CBZ.cityLedgerEntry/cityPoliceForceAdd — every one of those already live
      above. -->
-<script src="src/city/militia.js?v=pol2"></script>
+<script src="src/city/militia.js?v=pol2r"></script>
 <!-- JOB GIVERS. The rule is binding: the generator picks the VERB, the WORLD
      supplies the specifics — never spawn a target for a contract, bind to the
      officeholder/lot/vehicle the simulation was already running. Loads last of

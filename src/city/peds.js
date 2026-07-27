@@ -349,6 +349,41 @@
   ];
 
   // ============================================================
+  //  A UNIT IS A PYRAMID, AND A PYRAMID IS A ROSTER — NOT A DICE ROLL.
+  //
+  //  The old military-rank line rolled ONE number per body against a ladder of
+  //  thresholds, with General at r() > 0.997. That is 3 bodies in a thousand,
+  //  drawn off the SEEDED stream — so a seed whose garrison never happened to
+  //  roll it produced no general AT ALL, no matter how long you played. The top
+  //  rung of the largest ladder in the repo was unreachable by construction,
+  //  which is the stat-fiction ban applied to ranks.
+  //
+  //  A real unit is not staffed by luck. It is staffed by SLOT: the first
+  //  bodies a garrison stands up ARE its command element, and then a line
+  //  pattern repeats — one sergeant and two corporals to roughly a dozen
+  //  riflemen. So rank comes off the roster ordinal and the pyramid is exact at
+  //  any garrison size: a base has a commander the moment it has bodies, and he
+  //  is somebody you can walk up to.
+  //
+  //  DETERMINISM: the ordinal advances only for POSTED military bodies, in
+  //  world-build order, and is reset by clearCityPeds — so the same seed builds
+  //  the same chain of command. The r() draw below is KEPT (one draw, in the
+  //  same position it always occupied) so no downstream draw shifts.
+  //
+  //  The rank KEYS are militia.js's declared "army" ladder. This table holds no
+  //  rank names of its own beyond them, and there is deliberately no Captain,
+  //  Major or Colonel here any more — see ARMY_LADDER for why they were cut.
+  const MIL_STAFF = ["general", "lieutenant", "sergeant"];
+  const MIL_LINE = [
+    "corporal", "private", "private", "private", "recruit", "private", "private", "sergeant",
+    "private", "private", "corporal", "private", "private", "private", "recruit", "private",
+  ];
+  let _milSlot = 0;
+  function milSlotRank(n) {
+    return n < MIL_STAFF.length ? MIL_STAFF[n] : MIL_LINE[(n - MIL_STAFF.length) % MIL_LINE.length];
+  }
+
+  // ============================================================
   //  CBZ.cityDealRole(ped) — THE CASTING REPAIR. "CIVILIAN ISN'T A ROLE."
   //
   //  OWNER (2026-07-27): "there's roles 'the kid' 'in between jobs' — deeply
@@ -717,17 +752,20 @@
     }
     // MILITARY RANK: a soldier-costumed ped (island base troops, biome guards —
     // anyone cast with the soldier/military job that paints the camo + olive cap)
-    // gets a real rank so level.js reads "Lv.36 Lieutenant", not "Civilian". A
-    // unit is a PYRAMID, so this roll is weighted hard to privates with a thin
-    // officer corps and a rare general — a base reads like a real chain of
-    // command. Keyed off opts.job (the same signal that chose the costume) so the
-    // stripes always match the uniform. Deterministic from the spawn stream.
+    // gets a real rank so level.js reads "Lv.36 Lieutenant", not "Civilian".
+    // Keyed off opts.job (the same signal that chose the costume) so the stripes
+    // always match the uniform. See §A UNIT IS A PYRAMID above for why this is a
+    // roster slot and no longer a probability ladder.
     let milRank = null;
     if (/soldier|military|marine/i.test(opts.job || "")) {
-      const mr = r();
-      milRank = mr < 0.52 ? "private" : mr < 0.72 ? "corporal" : mr < 0.85 ? "sergeant"
-        : mr < 0.92 ? "lieutenant" : mr < 0.96 ? "captain" : mr < 0.985 ? "major"
-          : mr < 0.997 ? "colonel" : "general";
+      const mr = r();                 // ONE draw, in the exact place the old one was
+      // A SOLDIER ON LEAVE IS NOT IN THIS UNIT'S CHAIN OF COMMAND. He is a
+      // professional the city casts at random (see the rare-archetype pass
+      // below), so he must never consume a garrison slot — otherwise the first
+      // one built anywhere becomes the General of a base he has never seen.
+      milRank = /leave|reserv/i.test(opts.job)
+        ? (mr < 0.78 ? "private" : "corporal")
+        : milSlotRank(_milSlot++);
     }
     // Any body minted after Play is already live must first exist somewhere
     // the player cannot see. The normal city LOD will reveal it on a later
@@ -1955,6 +1993,9 @@
     CBZ.cityPeds.length = 0;
     CBZ.cityDrops.length = 0;
     if (CBZ.citySecurity) CBZ.citySecurity.length = 0;
+    // the garrison's chain of command rebuilds with the world — badge zero
+    // again, so the same seed stands the same unit up (determinism law).
+    _milSlot = 0;
   };
 
   // ===== LAZY VENDOR STAFFING (proximity + NPC_SPAWN_HIDE + day/night) =========

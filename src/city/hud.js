@@ -481,14 +481,37 @@
 
   // gang-membership badge: gang name (its colour) + your RANK + a thin sliver of
   // progress toward the next rung. Hidden whole when you ride with no crew.
-  // Promotion needs mirror playergang.js's member ladder; we read the player's
-  // tracked bodies/contrib off the membership record (the exact promotion
-  // currency) and degrade gracefully if any of it is absent.
-  const MEMB_LADDER = ["prospect", "lookout", "runner", "soldier", "enforcer", "lt"];
-  const MEMB_NEED = { lookout: { body: 1, contrib: 80 }, runner: { body: 2, contrib: 220 }, soldier: { body: 4, contrib: 520 }, enforcer: { body: 8, contrib: 1100 }, lt: { body: 14, contrib: 2200 } };
+  //
+  // DELETED (2026-07-27): a local MEMB_LADDER + MEMB_NEED pair used to live
+  // here — the fourth copy of gangs.js's rank order, and it DISAGREED with the
+  // authority. gangs.js's RANKS needs 1 body / $180 for Runner; this bar was
+  // charging 2 / $220. Every threshold was wrong the same way, so the sliver
+  // filled at a different rate than the promotion that actually fires: you were
+  // promoted with the bar at ~80%, or watched it sit full and nothing happen.
+  // A progress bar that lies about its own condition is worse than no bar.
+  //
+  // Both tables are gone. factions.js is the ONE tier table and gangs.js hands
+  // it the canonical RANKS verbatim, so the bar is now reading the very numbers
+  // the promotion check reads. `need.bodies`/`need.contrib` are normRanks()'
+  // normalised spelling of needBody/needContrib. Degrade-safe: no role layer
+  // and the sliver simply hides, which is what it already did at the top rung.
+  function membLadder() {
+    return (CBZ.factions && CBZ.factions.ladder) ? (CBZ.factions.ladder("gang") || []) : [];
+  }
+  // ladder + membership both migrated onto the role layer in one change.
+  if (CBZ.factionMigrated) CBZ.factionMigrated("memb:hud");
   function renderMemb() {
     if (!membEl) return;
-    const m = (CBZ.cityMembership && CBZ.cityMembership()) || null;
+    // ONE membership query (CLAUDE.md: never re-derive g.playerGang again).
+    // factions.js normalises the record whether it came from g.cityMembership
+    // or a founded crew, so the badge shows a founded outfit too — which the
+    // old cityMembership() read could not see at all.
+    let m = null;
+    if (CBZ.factions && CBZ.factions.membership) {
+      const f = CBZ.factions.membership("gang");
+      if (f) m = { gangId: f.org, rank: f.rank, bodies: f.credits.bodies, contrib: f.credits.contrib };
+    }
+    if (!m) m = (CBZ.cityMembership && CBZ.cityMembership()) || null;
     if (!m || !m.gangId) { membEl.style.display = "none"; return; }
     // resolve the crew record for its name + colour (several lookup names exist)
     let rec = null;
@@ -500,14 +523,20 @@
     membEl.querySelector("#cMembDot").style.background = col;
     const nmEl = membEl.querySelector("#cMembNm"); nmEl.textContent = name; nmEl.style.color = col;
     membEl.querySelector("#cMembRnk").textContent = rank;
-    // promotion sliver toward the next rung (min of the two earned currencies)
+    // promotion sliver toward the next rung (min of the two earned currencies),
+    // read off the SAME thresholds the promotion check reads.
     const slot = membEl.querySelector("#cMembSlot");
-    const idx = MEMB_LADDER.indexOf(m.rank);
+    const L = membLadder();
+    let idx = -1;
+    for (let i = 0; i < L.length; i++) if (L[i].key === m.rank) { idx = i; break; }
     let pct = -1;
-    if (idx >= 0 && idx < MEMB_LADDER.length - 1) {
-      const need = MEMB_NEED[MEMB_LADDER[idx + 1]];
+    // a LOCKED next rung (gangs.js: only succession makes a Boss) is not
+    // something you can fill a bar toward, so the sliver hides — the same
+    // answer it already gave at the top of the ladder.
+    if (idx >= 0 && idx < L.length - 1 && !L[idx + 1].locked) {
+      const need = L[idx + 1].need;
       if (need) {
-        const bP = need.body > 0 ? Math.min(1, (m.bodies || 0) / need.body) : 1;
+        const bP = need.bodies > 0 ? Math.min(1, (m.bodies || 0) / need.bodies) : 1;
         const cP = need.contrib > 0 ? Math.min(1, (m.contrib || 0) / need.contrib) : 1;
         pct = Math.round(Math.min(bP, cP) * 100);
       }

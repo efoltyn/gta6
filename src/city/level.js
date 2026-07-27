@@ -62,10 +62,49 @@
   // "Soldier" rank (which hangs off a.gang) and the player's street ladder —
   // those are untouched. Brass reads HEAVY: a sergeant outreads a beat cop, a
   // captain outreads SWAT, a general walks near kingpin air.
-  const MIL_NAME = { private: "Private", corporal: "Corporal", sergeant: "Sergeant", lieutenant: "Lieutenant", captain: "Captain", major: "Major", colonel: "Colonel", general: "General" };
-  const MIL_LVL  = { private: 15, corporal: 20, sergeant: 27, lieutenant: 36, captain: 45, major: 55, colonel: 67, general: 85 };
+  //
+  //  RETIRED AS A LADDER (2026-07-27). These two tables used to BE the military
+  //  rank ladder — eight rungs that existed nowhere else, while militia.js
+  //  separately declared a five-rung "army" faction with four of the same names
+  //  in it. Two military ladders, neither aware of the other. The declared one
+  //  won: `CBZ.factions` is the ONE place an organisation is declared, so the
+  //  pip and the street read now come from `factions.rankDef("army", key)` and
+  //  the literals below survive only as the degrade-safe fallback for a build
+  //  with the role layer off. Major and Colonel are GONE from both, and that is
+  //  deliberate — see militia.js's ARMY_LADDER: I could not name a verb either
+  //  rung unlocks that its neighbours do not, and CLAUDE.md's rule is to cut a
+  //  rung rather than ship a number.
+  const MIL_NAME = { recruit: "Recruit", private: "Private", corporal: "Corporal", sergeant: "Sergeant", lieutenant: "Lieutenant", captain: "Captain", general: "General" };
+  const MIL_LVL  = { recruit: 12, private: 15, corporal: 20, sergeant: 27, lieutenant: 36, captain: 45, general: 85 };
+  // ONE resolver for "what does org O call rung K, and how heavy does it read".
+  // Validates the key against the declared ladder rather than trusting
+  // factions.rankName(), which answers with the BOTTOM rung for an unknown key
+  // — a silent wrong answer is worse than no answer.
+  function orgRank(org, key) {
+    if (!key || !CBZ.factions || !CBZ.factions.rankDef || !CBZ.factions.exists) return null;
+    if (!CBZ.factions.exists(org)) return null;
+    const r = CBZ.factions.rankDef(org, key);
+    return (r && r.key === key) ? r : null;
+  }
+  function orgPip(org, key, fallback) { const r = orgRank(org, key); return (r && r.pip) || fallback[key] || null; }
+  function orgLvl(org, key, fallback, dflt) {
+    const r = orgRank(org, key);
+    if (r && r.lvl > 0) return r.lvl;
+    return fallback[key] || dflt;
+  }
+  function milValid(k) { return !!(k && (orgRank("army", k) || MIL_NAME[k])); }
   function milRankOf(a) {
-    if (a.milRank && MIL_NAME[a.milRank]) return a.milRank;        // the stamped rank (peds.js)
+    if (a.milRank && milValid(a.milRank)) return a.milRank;        // the stamped rank (peds.js)
+    // THE CHIEF OF THE GENERAL STAFF IS AN OFFICEHOLDER, NOT A TROOPER.
+    // govcomplex.js stands him up at the Defence HQ with job "official" and
+    // org "army", so the /soldier/ test below has never seen him — which is
+    // half of why the top of this ladder had no holder anywhere in the world.
+    // The rank is DERIVED from the power tier he was already declared at, so
+    // there is no table here and govcomplex.js needs no edit: tier IS seniority.
+    if (CBZ.powerOrgOf && CBZ.powerOrgOf(a) === "army") {
+      const t = CBZ.powerTierOf ? (CBZ.powerTierOf(a) | 0) : 0;
+      return t >= 5 ? "general" : t >= 3 ? "captain" : "lieutenant";
+    }
     if (a.job && /soldier|military|marine/i.test(a.job)) return "private"; // costumed but unstamped → green grunt
     return null;
   }
@@ -75,15 +114,24 @@
   // soldier reads by his stripes; a cop was ONE word for the whole force
   // (police.js has exactly one boolean, `swat`, in 3058 lines).
   //
-  // THERE IS NO PRODUCER FOR `copRank` YET, ON PURPOSE. police.js is outside
-  // this change's territory, and inventing a rank here that only changes a pill
-  // would be precisely the vanity ladder CLAUDE.md forbids — "every rung must
-  // unlock a VERB, not just a bigger number". So this is the receiving end,
-  // waiting for one line in police.js, and `roleAudit().emptyRanks` reports
-  // every unheld rung as the outstanding debt rather than letting it hide. An
-  // unstamped officer reads "Officer" exactly as before, so nothing regresses.
+  // THE PRODUCER EXISTS NOW (2026-07-27). police.js declares the department as
+  // a real faction — `CBZ.factions.declare({id:"police", rankField:"copRank",
+  // ranks:[…]})` — stamps the rung off the roster slot, and, crucially, gives
+  // every rung an ORDER the rung below cannot give (Corporal: move-along;
+  // Sergeant: the roadblock; Lieutenant: SWAT; Captain: Air-1; Chief: the
+  // arrest-first stand-down). So this table stopped being the ladder and became
+  // the degrade-safe fallback, exactly like MIL_NAME above: the pip and the
+  // street read come from the declared rung, and an unstamped officer still
+  // reads "Officer" so nothing regresses when the role layer is off.
   const COP_NAME = { patrol: "Officer", corporal: "Corporal", sergeant: "Sergeant", lieutenant: "Lieutenant", captain: "Captain", chief: "Chief" };
   const COP_LVL  = { patrol: 20, corporal: 24, sergeant: 29, lieutenant: 37, captain: 46, chief: 62 };
+  // a cop with no stamp is the BOTTOM rung, not rankless — the same convention
+  // factions.js's tierOf() uses, and it is why police.js can leave `copRank`
+  // unset on a plain beat officer.
+  function copRankOf(a) {
+    const k = a && a.copRank;
+    return (k && (orgRank("police", k) || COP_NAME[k])) ? k : "patrol";
+  }
 
   // ---- the one read: any actor → integer level (1..100) -------------------
   // THE NUMBER LIES WITH THE TITLE. OWNER: "there can be fake level and role."
@@ -95,9 +143,19 @@
     if (!a) return 1;
     { const cl = CBZ.cityCoverLevel && CBZ.cityCoverLevel(a, viewer); if (cl) return cl; }
     if (a.isPlayer) return playerLevel();
-    if (a.kind === "cop") return a.swat ? 35 : (COP_LVL[a.copRank] || 20); // trained, armed, backed by the state
+    // trained, armed, backed by the state — and now backed by a RUNG. A SWAT
+    // operator reads by the heavier of his unit and his stripes, so a SWAT
+    // sergeant does not read lighter than the man he is running.
+    if (a.kind === "cop") {
+      const cl = orgLvl("police", copRankOf(a), COP_LVL, 20);
+      return a.swat ? Math.max(35, cl) : cl;
+    }
     if (a.kind === "security") return 14;               // uniform + sidearm, no cavalry
-    { const mr = milRankOf(a); if (mr) return MIL_LVL[mr] || 15; }   // the stripes ARE the read
+    // the stripes ARE the read — but never LIGHTER than the whale read power.js
+    // stamped. The Chief of the General Staff now resolves a rank here (see
+    // milRankOf), and a bare `return` would have dropped him from the tier-5
+    // principal's Lv.100 to the ladder's 85. max() keeps both true.
+    { const mr = milRankOf(a); if (mr) return Math.max(orgLvl("army", mr, MIL_LVL, 15), a.vipLvl || 0); }
     let lvl = 1 + wealthLvl(a.wealth || 0);
     if (a.armed) lvl += a.weapon && HEAVY[a.weapon] ? 12 : 9; // a gun jumps a civilian into the teens
     else if (a.weapon) lvl += 3;                        // bat / blade tucked away
@@ -126,8 +184,17 @@
     }
     lvl += Math.min(15, ((g.kills | 0) / 2) | 0);
     lvl += Math.min(15, (g.cityCrew | 0) * 2);
-    if (g.playerGang) lvl += 35;                                   // you run your own set
-    else if (g.cityMembership) lvl += Math.min(30, RANK_LVL[g.cityMembership.rank] || 13); // borrowed colors never outread your own flag
+    // ONE membership query (CLAUDE.md: never re-derive g.playerGang again).
+    // factions.js normalises whichever record the crew layer is keeping, and
+    // `isOwner` is the founded-your-own-set case the raw field read was doing
+    // by hand. Degrade-safe fallback to the old two fields.
+    const F = CBZ.factions;
+    if (F && F.membership) {
+      const m = F.membership("gang");
+      if (m && m.owner) lvl += 35;                                 // you run your own set
+      else if (m) lvl += Math.min(30, RANK_LVL[m.rank] || 13);     // borrowed colors never outread your own flag
+    } else if (g.playerGang) lvl += 35;
+    else if (g.cityMembership) lvl += Math.min(30, RANK_LVL[g.cityMembership.rank] || 13);
     lvl += Math.min(10, ((g.respect | 0) / 25) | 0);
     lvl += (g.wanted | 0) * 2;                                     // infamy reads too
     // a PRICE on your head reads heavy on the street — same as it does for an NPC
@@ -139,6 +206,10 @@
     return Math.max(1, Math.min(100, Math.round(lvl)));
   }
   CBZ.cityPlayerLevel = playerLevel;
+  // the last direct g.cityMembership read in this file is gone (playerLevel
+  // above), and both rank tables here are now degrade-safe fallbacks behind the
+  // declared ladders rather than ladders of their own.
+  if (CBZ.factionMigrated) CBZ.factionMigrated("memb:level");
 
   // ---- the street TITLE: what the number is attached to --------------------
   // Same physics as the level: derived from real state, never stored. Every
@@ -247,6 +318,22 @@
     "farmer": "Farmer", "farmhand": "Farmhand", "rancher": "Rancher",
     "ski instructor": "Ski Instructor", "ski patrol": "Ski Patrol",
     "hiker": "Hiker", "skier": "Skier", "biker": "Biker", "gambler": "Gambler",
+    // OWNER: "every place should have the people who work there." Each of
+    // these is now a REAL trade in aigoals.js's CITY_JOBS (registered by
+    // citystaff.js's TRADES table — a shift, a wage and a workplace), so it is
+    // a role and not a costume. "boat mechanic" resolves through the generic
+    // title-case path to "Boat Mechanic", which reads correctly; it is listed
+    // here anyway so the vocabulary is legible in ONE place.
+    "boat mechanic": "Boat Mechanic", "fuel attendant": "Fuel Attendant",
+    "lift operator": "Lift Operator", "lifeguard": "Lifeguard",
+    "fishmonger": "Fishmonger", "angler": "Fisherman",
+    // the airfield. A ramp is a workplace with six distinct trades on it, and
+    // "ground crew" was standing in for all of them.
+    "baggage handler": "Baggage Handler", "ramp agent": "Ramp Agent",
+    "aircraft marshaller": "Marshaller", "marshaller": "Marshaller",
+    "refueller": "Refueller", "refueler": "Refueller",
+    "catering driver": "Catering Driver", "pushback driver": "Tug Driver",
+    "airfield driver": "Airside Driver",
     // --- the household. A mansion with nobody in it but guards is a stage set.
     "servant": "Servant", "housekeeper": "Housekeeper", "butler": "Butler",
     "groundskeeper": "Groundskeeper", "chauffeur": "Chauffeur", "cook": "Cook",
@@ -379,7 +466,7 @@
       // still reads "Officer", so this can never regress a cop to a shrug.
       _r.kind = "org";
       if (a.swat) { _r.title = "SWAT"; return _r; }     // SWAT stays an acronym — "Swat" reads like a typo
-      _r.title = (a.copRank && COP_NAME[a.copRank]) || "Officer";
+      _r.title = orgPip("police", copRankOf(a), COP_NAME) || "Officer";
       return _r;
     }
     if (a.kind === "security") {
@@ -388,7 +475,7 @@
       _r.title = (a.job === "close protection" || a.bodyguard || a._principal) ? "Bodyguard" : "Security Guard";
       return _r;
     }
-    { const mr = milRankOf(a); if (mr) { _r.title = MIL_NAME[mr] || "Private"; _r.kind = "org"; return _r; } }
+    { const mr = milRankOf(a); if (mr) { _r.title = orgPip("army", mr, MIL_NAME) || "Private"; _r.kind = "org"; return _r; } }
     if (a.rampage) { _r.title = "Maniac"; _r.kind = "status"; return _r; }   // mid-snap, nothing else matters
     if (a.bounty > 0) { _r.title = BOUNTY_TITLE[a.bountyTag] || "Wanted"; _r.kind = "status"; return _r; }
     if (a.gang) {
@@ -549,8 +636,21 @@
     if (!isPlayer) {
       // NPC-on-NPC: an actor in the SAME org sees its own. Cheap and rare.
       if (!c.org || !viewer) return 0;
-      if (viewer.gang && ("gang:" + viewer.gang) === c.org) return 2;
-      if (viewer.kind === "cop" && c.org === "police") return 2;
+      // RANK IS WHAT KNOWS THE ROSTER. This used to read "any cop sees through
+      // any police cover", which made a rookie on his first shift exactly as
+      // dangerous to a stolen uniform as the watch commander. It is a RANK test
+      // now — the same shape the player branch below already used through
+      // factions.tier — and it is org-agnostic, so the garrison and the crews
+      // get it for free the moment they declare a "vouch" rung.
+      // A crew cover names the CONCRETE set ("gang:bloods"); the declared
+      // ladder is the archetype ("gang"), so membership is proved by the colours
+      // and seniority by the rung, which is exactly the split factions.js draws.
+      const sameGang = viewer.gang && ("gang:" + viewer.gang) === c.org;
+      const org = sameGang ? "gang" : c.org;
+      if ((sameGang || c.org.indexOf("gang:") !== 0) &&
+          CBZ.rankCan && CBZ.rankCan(viewer, org, "vouch")) return 2;
+      if (sameGang) return 1;                                  // one of ours, not brass
+      if (viewer.kind === "cop" && c.org === "police") return 1;
       return 0;
     }
     if (!c.org) return 0;                     // only a burn opens this one
@@ -737,9 +837,12 @@
     // this is nonzero a venue is still stamping its activity onto `job`.
     const ACTIVITY = { "Fight Fan": 1, "Race Fan": 1, Spectator: 1, Fan: 1,
                        Audience: 1, Attendee: 1, Crowd: 1, Punter: 1, Passenger: 1 };
-    function org(id, rank) {
+    // `alsoTag` records a second bucket for the SAME body (a SWAT operator is
+    // one member holding one rung, additionally counted as heavy-column) —
+    // without it the member tally would double-count him.
+    function org(id, rank, alsoTag) {
       const o = orgs[id] || (orgs[id] = { members: 0, byRank: Object.create(null) });
-      o.members++;
+      if (!alsoTag) o.members++;
       const k = rank || "—";
       o.byRank[k] = (o.byRank[k] | 0) + 1;
     }
@@ -768,7 +871,13 @@
         if (ACTIVITY[r.title]) activityTitles++;
       } else roleless++;
       // org membership, read off the fields the world already keeps
-      if (a.kind === "cop") org("police", a.swat ? "swat" : (a.copRank || "patrol"));
+      // A SWAT OPERATOR HOLDS A RUNG TOO. The old line bucketed every SWAT body
+      // under a bare "swat" key, which is not a rank in any ladder — so a SWAT
+      // sergeant counted toward NOTHING and the department's own sergeant rung
+      // could read empty while three of them were on the street. `swat` is a
+      // UNIT, `copRank` is the rank; bucket by the rank and keep the unit as a
+      // separate tally so the census still shows the heavy column.
+      if (a.kind === "cop") { org("police", copRankOf(a)); if (a.swat) org("police", "swat", true); }
       else if (milRankOf(a)) org("army", milRankOf(a));
       // BOTH the concrete set AND the "gang" archetype factions.js declares —
       // otherwise the declared org reads zero members and every one of its
@@ -777,12 +886,14 @@
       else if (a.kind === "security") org("security", a.job === "close protection" ? "bodyguard" : "guard");
     }
     // declared-but-unheld rungs: the stat-fiction test, applied to ladders.
+    //
+    // DELETED (2026-07-27): a second loop over `{police: COP_NAME, army:
+    // MIL_NAME}` used to run here. It was a THIRD copy of both ladders — the
+    // literals above, militia.js's declared "army", and this — and it is exactly
+    // the duplication CLAUDE.md's census counts. Now that police.js and
+    // militia.js both DECLARE their org, the loop below reads the one declared
+    // ladder and covers both, with no table of its own.
     const empty = [];
-    const ladders = { police: COP_NAME, army: MIL_NAME };
-    for (const id in ladders) {
-      const o = orgs[id]; const tbl = ladders[id];
-      for (const k in tbl) if (!o || !o.byRank[k]) empty.push(id + ":" + k);
-    }
     // factions.js is the ONE place an org is declared — read its roster rather
     // than re-deriving one (CLAUDE.md: never re-derive g.playerGang again).
     if (CBZ.factions && CBZ.factions.ids) {

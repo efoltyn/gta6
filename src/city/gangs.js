@@ -116,7 +116,14 @@
     { key: "lookout",  pip: "Lookout",  tier: 1, needBody: 0, needContrib: 60,  cut: 0.5,  hp: 110, weapon: "Pistol" },
     { key: "runner",   pip: "Runner",   tier: 2, needBody: 1, needContrib: 180, cut: 0.7,  hp: 120, weapon: "Pistol" },
     { key: "soldier",  pip: "Soldier",  tier: 3, needBody: 2, needContrib: 420, cut: 1.0,  hp: 140, weapon: "Pistol" },
-    { key: "enforcer", pip: "Enforcer", tier: 4, needBody: 5, needContrib: 900, cut: 1.5,  hp: 175, weapon: "SMG" },
+    // `grants` is the rank-VERB layer (factions.js §RANK IS A VERB). Every rung
+    // on this ladder ALREADY unlocks something real — more hp and a better gun
+    // — which is why only Enforcer carries named verbs: from that rung up you
+    // KNOW THE CREW (so you are the one who clocks a stranger wearing our
+    // colours) and you are IN LINE FOR THE CHAIR. Both of those were hardcoded
+    // rank-string lists elsewhere in the codebase; they are ladder questions
+    // now, answered by the ladder.
+    { key: "enforcer", pip: "Enforcer", tier: 4, needBody: 5, needContrib: 900, cut: 1.5,  hp: 175, weapon: "SMG", grants: ["vouch", "succeed"] },
     { key: "lt",       pip: "Lt.",      tier: 5, needBody: 9, needContrib: 1700, cut: 2.4, hp: 210, weapon: "SMG" },
     // locked: only SUCCESSION makes a Boss — never merit (see succeedBoss).
     { key: "boss",     pip: "Boss",     tier: 6, needBody: 0, needContrib: 0,   cut: 5.0,  hp: 260, weapon: "SMG", locked: true },
@@ -147,6 +154,10 @@
       heat: 1.25,                         // wearing colours makes witnesses louder (police react)
       hostileTo: ["army", "agency"],
       npcTag: { field: "faction", value: "gang" },
+      // NO PARALLEL BOOKKEEPING: a member's rank stays where it has always
+      // lived, on `ped.rank`. Naming the field is the whole adoption cost of
+      // the rank-verb layer (factions.js §RANK IS A VERB).
+      rankField: "rank",
       lore: "Street sets own the abandoned blocks. Climb on merit: bodies and cash kicked up.",
       bind: {
         get: function () {
@@ -741,8 +752,17 @@
     // if the PLAYER rides with this crew as a senior member, the succession is
     // theirs to seize — defer to playergang.js (don't crown an NPC out from under
     // them). g.cityMembership is the player's patch into an NPC gang.
+    // SUCCESSION IS A RUNG, not a two-name string list. RANKS grants "succeed"
+    // at Enforcer, so this asks the ladder instead of restating it — and it
+    // keeps working if the ladder ever changes shape. Degrade-safe fallback to
+    // the exact pair it used to test.
     const pm = g.cityMembership;
-    if (pm && pm.gangId === gang.id && (pm.rank === "lt" || pm.rank === "enforcer")) return;
+    if (pm && pm.gangId === gang.id) {
+      const heirApparent = (CBZ.rankKnows && CBZ.rankKnows("gang", "succeed"))
+        ? CBZ.rankCan(null, "gang", "succeed")
+        : (pm.rank === "lt" || pm.rank === "enforcer");
+      if (heirApparent) return;
+    }
     const live = gang.members.filter((m) => m && !m.dead && m !== gang.boss);
     if (!live.length) { gang.boss = null; gang.leaderless = true; return; }
     // rank the bench: tier, then bodies, then loyalty, then contribution

@@ -91,10 +91,28 @@
   //  system: the shift counter stays exactly where it was, g.citySecurityShifts,
   //  owned by this file. factions.js reads and writes THAT number as the
   //  "served" credit. Nothing is mirrored, so nothing can desync.
+  //  EVERY RUNG NOW OPENS A VERB (2026-07-27). CLAUDE.md named this ladder by
+  //  name as one of two that failed the law outright: "careers.js's `secco`
+  //  (Guard → Senior Guard → Shift Manager) is three rungs of `wageMul` and
+  //  nothing else". It was true — the ONLY difference between the top and the
+  //  bottom of this career was a number multiplying the same paycheque. Two
+  //  real differences now, both cheap because the engines already existed:
+  //
+  //    Senior Guard  `carry`  — the company issues you a SIDEARM. Not a stat: a
+  //                  real pistol, through CBZ.cityGiveWeapon, the same call the
+  //                  gun store uses. A Guard walks the shift empty-handed.
+  //    Shift Manager `cover`  — one star no longer costs you the job. A Guard is
+  //                  fired the instant he goes wanted; a Shift Manager is put ON
+  //                  NOTICE (no shift pay that tick, career intact) and only
+  //                  loses the badge at 2★. Seniority buying the benefit of the
+  //                  doubt is the whole content of being senior.
+  //
+  //  The wage multipliers stay — they were never the problem; being the ONLY
+  //  thing was.
   const SECURITY_RANKS = [
-    { key: "guard",   pip: "Guard",         shifts: 0,  wageMul: 1.0 },
-    { key: "senior",  pip: "Senior Guard",  shifts: 6,  wageMul: 1.4 },
-    { key: "shiftmgr",pip: "Shift Manager", shifts: 16, wageMul: 1.9 },
+    { key: "guard",   pip: "Guard",         shifts: 0,  wageMul: 1.0, grants: ["shift"] },
+    { key: "senior",  pip: "Senior Guard",  shifts: 6,  wageMul: 1.4, grants: ["carry"] },
+    { key: "shiftmgr",pip: "Shift Manager", shifts: 16, wageMul: 1.9, grants: ["cover"] },
   ];
   if (CBZ.factions && CBZ.factions.declare) {
     CBZ.factions.declare({
@@ -103,7 +121,7 @@
       short: "Bayfront",
       kind: "job",
       color: 0x5a7fb0,
-      ranks: SECURITY_RANKS.map((r) => ({ key: r.key, pip: r.pip, needServed: r.shifts, cut: r.wageMul })),
+      ranks: SECURITY_RANKS.map((r) => ({ key: r.key, pip: r.pip, needServed: r.shifts, cut: r.wageMul, grants: r.grants, lvl: 12 + r.shifts })),
       needScale: { served: 0, orders: 0, bodies: 0, contrib: 0 },
       heat: 0.85,                    // a guard's uniform is a quiet one
       lore: "Straight work. Clean shifts bank toward the next tier's wage.",
@@ -171,10 +189,29 @@
     const after = securityRankIdx();
     if (after > before) {
       const r = rungs()[after];
+      // THE PROMOTION HANDS YOU SOMETHING. factions.js's promote() normally
+      // issues a rung's weapon, but this ladder is DERIVED from a shift count
+      // and its setRank is deliberately inert, so promote() never fires here —
+      // the issue happens where the rank actually changes. One sidearm, once,
+      // through the same call the gun store uses.
+      // No "already issued" flag: `after > before` is true on the CROSSING tick
+      // and no other, and being fired resets the shift count to zero, so a
+      // re-hire has to earn the rung again before it earns the gun again.
+      if (secCan("carry") && CBZ.cityGiveWeapon) {
+        try { CBZ.cityGiveWeapon("Pistol"); } catch (e) {}
+        CBZ.city.note("Promoted to " + r.pip + " — sidearm issued, and the new wage starts today.", 3, { from: "Payroll", app: "bank" });
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+        return;
+      }
       CBZ.city.note("Promoted to " + r.pip + " — the new wage starts today.", 2.4, { from: "Payroll", app: "bank" });
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
+  // may the player, at their current guard rung, do this? Degrade-safe: with no
+  // role layer nothing is granted, which is the pre-change behaviour (no
+  // sidearm, no tolerance) rather than everything being granted — a career
+  // perk that silently turns ON when a system is missing is the wrong default.
+  function secCan(verb) { return !!(CBZ.rankCan && CBZ.rankCan(null, "secco", verb)); }
 
   /* ============================================================
      THE OBJECTIVE MARK — MIGRATED to core/mission.js (2026-07-26).
@@ -1278,10 +1315,23 @@
         else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("Couldn't make payroll — " + q.name + " walked off.", 2.6); }
       }
       if (g.career === "security") {
-        if ((g.wanted | 0) === 0) {
+        const stars = g.wanted | 0;
+        // SENIORITY BUYS THE BENEFIT OF THE DOUBT — the Shift Manager's rung
+        // ("cover"). Below it, one star ends the career on the spot, exactly as
+        // it always did.
+        const tolerated = secCan("cover") ? 1 : 0;
+        if (stars === 0) {
           const wage = Math.round((E.securityWage || 14) * securityRankInfo().wageMul);
           CBZ.city.addCash(wage);
           securityClockShift();
+        } else if (stars <= tolerated) {
+          // ON NOTICE, not fired: the badge survives, the shift does not. No
+          // pay, no seniority credit, and the streak is untouched rather than
+          // reset — the rung bought you the job, not the paycheque.
+          if (!g._seccoNoticeT || (CBZ.now - g._seccoNoticeT) > 40000) {
+            g._seccoNoticeT = CBZ.now;
+            CBZ.city.note("Heat on your name — no shift today. Don't make it two stars.", 2.6, { from: "Payroll", app: "bank" });
+          }
         } else {
           g.career = null; g.citySecurityShifts = 0;   // busted record — back to the bottom if rehired
           CBZ.city.note("Security: you went wanted — you're FIRED.", 2.2);

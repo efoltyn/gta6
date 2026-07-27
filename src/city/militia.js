@@ -280,9 +280,18 @@
       rosterCap: bodies.length + 2,
       recruitInterval: 30, recruitT: 30, lastDownT: 0,
     };
+    // THE GANG LADDER IS gangs.js's, NOT OURS. `"lt"` and `"soldier"` were
+    // hand-typed here — the ninth and tenth copies of an order CLAUDE.md's
+    // census already counts eight times across six files. Read the declared
+    // ladder; keep the literals only as the degrade-safe fallback.
+    const gl = (CBZ.factions && CBZ.factions.ladderKeys) ? (CBZ.factions.ladderKeys("gang") || []) : [];
+    // second from the top that merit can reach (gangs.js locks "boss" to
+    // succession), and the middle of the ladder for everyone else.
+    const LEAD = gl.length >= 2 ? gl[gl.length - 2] : "lt";
+    const RANKER = gl.length >= 4 ? gl[Math.max(0, Math.floor((gl.length - 1) / 2))] : "soldier";
     for (let i = 0; i < bodies.length; i++) {
       const ped = bodies[i];
-      ped.gang = gangId; ped.faction = gangId; ped.rank = i === 0 ? "lt" : "soldier";
+      ped.gang = gangId; ped.faction = gangId; ped.rank = i === 0 ? LEAD : RANKER;
       ped.homeGuard = { x: anchor.x, z: anchor.z }; ped.guard = { x: anchor.x, z: anchor.z };
       const ms = CBZ.cityMemberStats ? CBZ.cityMemberStats(ped) : null;
       if (ms) ms.joined = "militia";
@@ -339,9 +348,19 @@
       if (CBZ.cityFeed) CBZ.cityFeed("" + gang.name + " thrives in the vacuum — recruits are lining up.", "#ffd76a");
     }
   }
+  // A CRACKDOWN NEEDS SOMEBODY WHO CAN ORDER ONE. This is the General's rung
+  // (ARMY_LADDER grants "crackdown"), and it is the only verb on the ladder
+  // above Lieutenant — which is why the Chief of the General Staff standing at
+  // the Defence HQ is a person worth finding, and worth killing. With the chair
+  // empty, an unsanctioned militia simply is not broken up. Degrade-safe: with
+  // the rank layer absent the answer is the old unconditional yes.
+  function crackdownAuthorised() {
+    if (!CBZ.rankHolder || !CBZ.rankKnows || !CBZ.rankKnows(ARMY_ID, "crackdown")) return true;
+    return !!CBZ.rankHolder(ARMY_ID, "crackdown");
+  }
   function tickGovEffects(gid, gang, mrec, gov, day) {
     if ((gov === "fascism" || gov === "dictatorship") && mrec.crackdownArmed) {
-      if (day > (mrec.crackdownArmedDay || 0) && rng() < CRACKDOWN_DAILY_CHANCE) crackdown(gid, gang, mrec);
+      if (day > (mrec.crackdownArmedDay || 0) && rng() < CRACKDOWN_DAILY_CHANCE && crackdownAuthorised()) crackdown(gid, gang, mrec);
     } else if (gov === "anarchism") {
       gang.recruitPool = (gang.recruitPool || 0) + ANARCHY_TRICKLE_MIN + Math.floor(rng() * (ANARCHY_TRICKLE_MAX - ANARCHY_TRICKLE_MIN + 1));
     }
@@ -467,6 +486,67 @@
   //  a menu that claims one.
   // ============================================================
   const ARMY_ID = "army";
+  // ============================================================
+  //  THE ARMY LADDER — ONE ladder, and every rung on it opens a verb.
+  //
+  //  WHAT WAS HERE BEFORE, AND WHAT WAS IN level.js: two military ladders that
+  //  had never met. This file declared five bare strings (Recruit…Lieutenant)
+  //  for the PLAYER's career; level.js separately carried MIL_NAME/MIL_LVL, an
+  //  EIGHT-rung display table (…Captain, Major, Colonel, General) stamped onto
+  //  NPCs by peds.js, unlocking nothing whatsoever — CLAUDE.md's census called
+  //  it "the largest ladder in the repo is pure display". They shared four rank
+  //  NAMES and no code.
+  //
+  //  They are one ladder now, declared here, and level.js reads it. Which
+  //  forced the honest question on every rung the merge inherited, because
+  //  CLAUDE.md's rule is binding: "every rung must unlock a VERB, not just a
+  //  bigger number." Three rungs could not answer it and are DELETED:
+  //
+  //    Captain · Major · Colonel — CUT. Between "leads a platoon" and "commands
+  //    the army" there is no verb in this game that one of them has and the
+  //    others do not, and every candidate I could name (a sortie, an air
+  //    request, a district lockdown) lives in island_military.js /
+  //    strategic.js / checkpoints.js — files this change does not own, so
+  //    declaring the rung here would have been a promise made in someone else's
+  //    file. Three numbers deleted beats three numbers shipped.
+  //
+  //  What each surviving rung actually opens (all enforced, none aspirational):
+  //    Recruit     army:sweep        contracts.js minRank 0
+  //    Private     army:armour       contracts.js minRank 1
+  //    Corporal    army:ferry        contracts.js minRank 2
+  //    Sergeant    army:strike       contracts.js minRank 3
+  //                enlist            THIS FILE — the recruiting desk needs an
+  //                                  NCO; a private cannot swear you in
+  //                vouch             level.js — sees through a military cover
+  //    Lieutenant  army:carpet       contracts.js minRank 4
+  //    General     crackdown         THIS FILE — the ONE rung that can order an
+  //                                  unsanctioned militia disarmed. He is a
+  //                                  real, findable person: govcomplex.js's
+  //                                  Defence HQ principal, the Chief of the
+  //                                  General Staff. Kill him and private
+  //                                  armies stop being broken up.
+  //
+  //  REACHABILITY. The old General was drawn at 0.3% PER BODY off the seeded
+  //  stream, so a seed whose garrison never rolled r() > 0.997 had no general
+  //  at all, forever — the top of the biggest ladder in the game was unreachable
+  //  BY CONSTRUCTION. peds.js now assigns military rank by ROSTER SLOT (a unit
+  //  is a pyramid, and a pyramid is a roster), so a garrison has a commander the
+  //  moment it has bodies; and level.js derives the rung of the Defence HQ
+  //  officeholder from the power tier he was already declared at.
+  //
+  //  `locked` on General is factions.js's own vocabulary for "never granted by
+  //  merit" — the same rule that makes gangs.js's Boss a succession, not a
+  //  grind. You do not get four stars for running errands.
+  // ============================================================
+  const ARMY_LADDER = [
+    { key: "recruit",    pip: "Recruit",    lvl: 12 },
+    { key: "private",    pip: "Private",    lvl: 15 },
+    { key: "corporal",   pip: "Corporal",   lvl: 20 },
+    { key: "sergeant",   pip: "Sergeant",   lvl: 27, grants: ["enlist", "vouch"] },
+    { key: "lieutenant", pip: "Lieutenant", lvl: 36 },
+    { key: "general",    pip: "General",    lvl: 85, locked: true, grants: ["crackdown", "vouch"],
+      unlock: "Command authority: an unsanctioned militia can be ordered disarmed." },
+  ];
   // ARMY_ENLIST — the player-facing half of this file: the declared Garrison
   // faction and its recruiting post. Off -> no declare(), no zone, no enlist
   // verb, and city/contracts.js's four army templates simply never post
@@ -485,10 +565,13 @@
       short: "Garrison",
       kind: "military",
       color: 0x6b8e23,
-      // Bare-string rungs — the cheapest declaration factions.js accepts.
-      // normRanks() derives the climb (served/orders thresholds) from
-      // needScale, so five words buy a real five-rung career.
-      ranks: ["Recruit", "Private", "Corporal", "Sergeant", "Lieutenant"],
+      // ONE ladder for the whole army — the player's career AND the chain of
+      // command the world casts. See ARMY_LADDER above for what each rung
+      // opens and which three were cut for opening nothing.
+      ranks: ARMY_LADDER,
+      // NO PARALLEL BOOKKEEPING: an NPC's rank stays in `milRank`, the field
+      // peds.js has always written and level.js has always read.
+      rankField: "milRank",
       // seniority (seconds in uniform) AND carried-out orders — you cannot
       // wait your way up and you cannot shoot your way up alone.
       needScale: { served: 240, orders: 2, bodies: 0, contrib: 0 },
@@ -562,11 +645,19 @@
         // walking recruiting desk. Enlistment happens at the post.
         const pad = 40;
         if (px < B.minX - pad || px > B.maxX + pad || pz < B.minZ - pad || pz > B.maxZ + pad) return null;
+        // SWEARING SOMEBODY IN IS AN NCO'S JOB (ARMY_LADDER grants "enlist" at
+        // Sergeant). A private standing on the apron cannot enlist you — he can
+        // point you at the desk, which is exactly what the token fallback below
+        // is. So the desk still always works and nobody is ever locked out; what
+        // changed is that the BODY you talk to has to be somebody whose rank
+        // means something, which is the whole point of having ranks.
         const troops = CBZ.cityMilitaryPersonnel || [];
         let best = null, bestD = R * R;
         for (let i = 0; i < troops.length; i++) {
           const t = troops[i];
           if (!t || t.dead || !t.pos) continue;
+          if (CBZ.rankKnows && CBZ.rankKnows(ARMY_ID, "enlist") &&
+              !CBZ.rankCan(t, ARMY_ID, "enlist")) continue;
           const dx = t.pos.x - px, dz = t.pos.z - pz;
           const d = dx * dx + dz * dz;
           if (d < bestD) { bestD = d; best = t; }

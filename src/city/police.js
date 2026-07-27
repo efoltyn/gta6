@@ -90,7 +90,18 @@
   // owner's existing dial is intact; ?cfg_AIR_HELI_REALISM=0 reverts every
   // rotorcraft in the game in one line.
   if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_ALTITUDE == null) CBZ.CONFIG.POLICE_HELI_ALTITUDE = 0;
-  function arrestFirst() { return !!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST); }
+  // POLICE_RANKS — the department stops being ONE boolean (`swat`) and becomes
+  // an org with six rungs, each of which opens an ORDER the rung below cannot
+  // give. Off -> no rank is stamped, no order is gated, and every dispatch path
+  // below behaves exactly as it did (each gate is written `!ranksOn() || …`).
+  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_RANKS == null) CBZ.CONFIG.POLICE_RANKS = true;
+  // POLICE_COMMAND — the three rungs that give orders (Lieutenant, Captain,
+  // Chief) stand a watch at the precinct instead of being a lucky roll on a
+  // street body. Off -> no watch is posted; the gated orders then fall back to
+  // "whoever is on the street", which is the POLICE_RANKS behaviour minus the
+  // findable brass.
+  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_COMMAND == null) CBZ.CONFIG.POLICE_COMMAND = true;
+  function ranksOn() { return !CBZ.CONFIG || CBZ.CONFIG.POLICE_RANKS !== false; }
   function swatRedesign() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
   function heliSlowResponse() { return !!(CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE); }
   // MORE BOOTS ON THE BEAT: a city this big read EMPTY of police with only 3
@@ -102,6 +113,164 @@
   // how many PATROL CRUISERS cruise the streets (a separate, capped pool — these
   // are DRIVING cop cars, not the foot beat). Mutable so config can override.
   if (CBZ.CITY && CBZ.CITY.patrolCars == null) CBZ.CITY.patrolCars = 4;
+
+  // ============================================================
+  //  §THE DEPARTMENT IS AN ORG WITH RUNGS
+  //
+  //  OWNER (2026-07-27): "different levels in orgs etc etc — roles can be
+  //  greatly expanded."
+  //
+  //  This file ran a whole police force off ONE boolean, `swat`, in 3300 lines.
+  //  level.js already had the receiving end — COP_NAME/COP_LVL, a six-rung
+  //  table with a comment saying, correctly, that shipping it with no producer
+  //  would be the vanity ladder CLAUDE.md forbids. This is the producer, and it
+  //  arrives with the verbs, because the rule is binding: **every rung must
+  //  unlock a VERB, not just a bigger number.**
+  //
+  //  Each rung below opens an order the rung below it cannot give, and every
+  //  one of those orders is a dispatch path THIS FILE ALREADY HAD and nobody
+  //  had to authorise:
+  //
+  //    Officer     stop · arrest · pursue      — the baseline: the gun stop and
+  //                                              the cuff (updateGunStop/ARREST)
+  //    Corporal    moveon · partner · vouch    — may issue the move-along
+  //                                              (scanDuty/disperse) and take a
+  //                                              partner (pairUp); knows the
+  //                                              roster well enough to blow a
+  //                                              police disguise (outfits.js's
+  //                                              seniorSees already tested
+  //                                              `a.copRank` — with no producer
+  //                                              that test could never fire)
+  //    Sergeant    roadblock                   — may close a road (rbMaintain)
+  //    Lieutenant  swat                        — may commit the tactical unit
+  //                                              (the SWAT ramp + the van)
+  //    Captain     air                         — may put Air-1 up
+  //    Chief       standdown                   — holds the arrest-first order
+  //                                              for the whole department
+  //
+  //  The Chief's rung is the one worth reading twice. ARREST-FIRST used to be a
+  //  config flag with no author: the force simply had that posture. It is a
+  //  STANDING ORDER now, and somebody has to be alive to hold it — kill the
+  //  Chief at the precinct and the department stops trying to take you in.
+  //  That is a rank consequence you can play, not a number that went up.
+  // ============================================================
+  const POLICE_ID = "police";
+  const COP_LADDER = [
+    { key: "patrol",     pip: "Officer",    lvl: 20, grants: ["stop", "arrest", "pursue"] },
+    { key: "corporal",   pip: "Corporal",   lvl: 24, grants: ["moveon", "partner", "vouch"] },
+    { key: "sergeant",   pip: "Sergeant",   lvl: 29, grants: ["roadblock"] },
+    { key: "lieutenant", pip: "Lieutenant", lvl: 37, grants: ["swat"] },
+    { key: "captain",    pip: "Captain",    lvl: 46, grants: ["air"] },
+    // locked: a Chief is APPOINTED, never promoted on merit — the same rule
+    // gangs.js's Boss rung uses (only succession makes one).
+    // ONE verb, not two. "amnesty" was in this list for a draft and nothing in
+    // the game enforced it — which is the stat fiction this whole change exists
+    // to delete, so it is deleted.
+    { key: "chief",      pip: "Chief",      lvl: 62, grants: ["standdown"], locked: true },
+  ];
+  if (CBZ.factions && CBZ.factions.declare && !CBZ.factions.exists(POLICE_ID)) {
+    CBZ.factions.declare({
+      id: POLICE_ID, name: "Metro Police Department", short: "MPD",
+      kind: "law", color: 0x2d6bff,
+      ranks: COP_LADDER,
+      // NO PARALLEL BOOKKEEPING: the rank stays on the cop record, in the field
+      // level.js and outfits.js were already reading.
+      rankField: "copRank",
+      // `kind === "cop"` is the marker EVERY police body in this game already
+      // carries, so CBZ.factions.of(officer) -> ["police"] with no tagging pass.
+      npcTag: { field: "kind", value: "cop" },
+      heat: 0.55,
+      hostileTo: ["gang", "cell"],
+      friendlyTo: ["army", "agency"],
+      // There is no police academy in this game and inventing one here would be
+      // a door that opens onto nothing. Refuse with the reason rather than
+      // letting canJoin() return a cheerful yes nobody can act on.
+      admission: { test: function () { return "The department doesn't take walk-ins."; } },
+      lore: "Six rungs. Each one gives an order the rung below it cannot.",
+    });
+  }
+  // may THIS officer do this? Degrade-safe both ways: flag off, or the rank
+  // layer absent, and every officer can do everything — exactly as before.
+  // `rankKnows` is the degrade-safe guard: if the ladder does not declare this
+  // verb (flag off, factions.js absent, declare() inert) the answer is the old
+  // ungated YES. Without it, flipping FACTION_V1 off would CLOSE every gate
+  // below instead of removing it — a one-line revert that makes things worse.
+  function copCan(c, verb) {
+    if (!ranksOn() || !CBZ.rankCan || !CBZ.rankKnows || !CBZ.rankKnows(POLICE_ID, verb)) return true;
+    return CBZ.rankCan(c, POLICE_ID, verb);
+  }
+  // is there ANYBODY on the force who may? This is what turns a rung into a
+  // consequence: an order with nobody left alive to give it does not happen.
+  //
+  // NO PRECINCT, NO CHAIN OF COMMAND TO GATE. `cityPoliceStation()` needs the
+  // arena to have built a city-hall/bank/door lot, and a world that never did
+  // cannot post a watch — so a force that silently lost its roadblocks, its
+  // SWAT and its helicopter would be a regression wearing a feature's clothes.
+  // Every gate therefore degrades OPEN until the department has actually stood
+  // its command up at least once, which is also true for the first second or
+  // two of every run.
+  function forceHas(verb) {
+    if (!ranksOn() || !CBZ.rankHolder || !commandPosted) return true;
+    if (!CBZ.rankKnows || !CBZ.rankKnows(POLICE_ID, verb)) return true;
+    return !!CBZ.rankHolder(POLICE_ID, verb, { pool: CBZ.cityCops });
+  }
+
+  // A FORCE IS A PYRAMID, AND A PYRAMID IS A ROSTER, NOT A DICE ROLL.
+  // peds.js rolled military stripes off a probability per body, which is why
+  // its top rung was unreachable on most seeds. A shift is not staffed that
+  // way: a department assigns ONE supervisor per squad, so rank comes off the
+  // badge number and the pyramid is exact at any force size (5 patrol : 2
+  // corporals : 1 sergeant, repeating).
+  //
+  // `null` means a plain patrol officer who carries NO `copRank` at all, and
+  // that is deliberate: outfits.js's seniorSees() blows a police disguise when
+  // anyone with `a.copRank` is within 12 m, so stamping a word on every beat
+  // cop would have made a rookie as dangerous to a stolen uniform as a watch
+  // commander. "patrol" is the implicit bottom rung (factions.js's tierOf()
+  // reads an unstamped marked member as tier 0).
+  const COP_SLOTS = [null, null, "corporal", null, null, "sergeant", null, "corporal"];
+  let _badge = 0;
+  function rosterRank() { return COP_SLOTS[(_badge++) % COP_SLOTS.length]; }
+
+  // ---- THE COMMAND WATCH -----------------------------------------------
+  // The three rungs that give orders stand at the precinct door. WHY they are
+  // posted bodies and not a flag: a rank whose holder can never be found is the
+  // stat fiction this repo bans by name, and "Lieutenant" drawn as a 3% roll on
+  // a street cop is one — you could play for hours and the department would
+  // have no one who could authorise SWAT. Posted, they are three people you can
+  // walk up to, talk past, or shoot; and shooting the Chief has a consequence
+  // the whole city feels (see arrestFirst below).
+  //
+  // They ride police.js's OWN standing-officer brain (`_post`, `relaxed:true` —
+  // holstered until you actually have stars), which is the same primitive
+  // checkpoints.js and power.js already stand officers on. No new AI.
+  const COMMAND = [
+    { key: "lieutenant", pip: "Lieutenant", off: -2.7 },
+    { key: "captain",    pip: "Captain",    off: 0 },
+    { key: "chief",      pip: "Chief",      off: 2.7 },
+  ];
+  const watch = [];
+  const vacancy = Object.create(null);   // rung -> seconds the chair stays empty
+  let watchStood = false;                // a CHIEF has been appointed at least once
+  let commandPosted = false;             // ANY watch body has stood — the gates arm
+  function watchAlive(key) {
+    for (let i = 0; i < watch.length; i++) {
+      const c = watch[i];
+      if (c && !c.dead && c.copRank === key) return c;
+    }
+    return null;
+  }
+  function commandOn() { return ranksOn() && (!CBZ.CONFIG || CBZ.CONFIG.POLICE_COMMAND !== false); }
+  // ARREST-FIRST IS A STANDING ORDER SOMEBODY HOLDS.
+  // Degrade-safe in the strongest sense available: until the watch has actually
+  // been posted (no precinct in this world, flag off, spawn still deferred by
+  // the never-spawn-in-view guard) the answer is the old unconditional one, so
+  // nothing can silently turn the whole force lethal because a spawn failed.
+  function arrestFirst() {
+    if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST)) return false;
+    if (!commandOn() || !watchStood) return true;
+    return !!watchAlive("chief");
+  }
 
   const carSuspects = [];     // fleeing cars the police are after
   const pursuers = [];        // traffic cars drafted into PIT pursuit of the player car
@@ -309,6 +478,11 @@
     const cops = CBZ.cityCops; if (!cops.length) return;
     const c = cops[dutyIdx++ % cops.length];   // ONE candidate per tick — bounded
     if (!c || c.dead || !c.ambient || c.gunstop || c.giveUp || c.curTarget || c.npcTarget || c.chaseCar || c.searchT > 0 || c._radioT > 0 || c._duty) return;
+    // "MOVE ALONG" IS AN ORDER, NOT A REFLEX. Rousting a doorway or breaking up
+    // a street scrap is a CORPORAL's call (COP_LADDER) — a rookie on his first
+    // beat walks past. It is also why the streets feel different when the whole
+    // NCO layer is dead: nobody is moving anybody on.
+    if (!copCan(c, "moveon")) return;
     if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) return;
     const issue = findIssueNear(c);
     if (issue) { c._duty = issue; dutyCop = c; }
@@ -688,6 +862,11 @@
       shootCD: 0.6 + rng() * 0.6, arrestT: 0, slice: (rng() * 6) | 0, tag, isPlayer: false,
       npcTarget: null, patrolGoal: null, retarget: 0, armed: true, weapon: swat ? "SMG" : "Pistol",
     };
+    // THE STRIPES. One line, off the roster slot — see §THE DEPARTMENT IS AN
+    // ORG WITH RUNGS. A SWAT operator gets a rung too (a tactical team has
+    // NCOs); his TITLE still reads "SWAT", because that is the louder read on
+    // the street and level.js resolves it first.
+    if (ranksOn()) { const rk = rosterRank(); if (rk) cop.copRank = rk; }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
     // BODY ARMOR (armor.js, feature-detected): SWAT wear a full plate carrier +
     // helmet; a regular beat cop sometimes wears a concealable soft vest. The API
@@ -742,6 +921,73 @@
     return c;
   }
 
+  // ---- stand the COMMAND WATCH at the precinct door ---------------------
+  // Called on maintain's 1.1 s beat; a rung whose body is missing (never
+  // posted, or killed) is re-posted, so the department repairs its own chain of
+  // command exactly the way the academy replenishes the ranks. Deliberately NOT
+  // drawn from `forcePool`: brass is not a response unit, and `_post` already
+  // keeps them out of liveCops(), so posting them can never starve a chase.
+  function standWatch() {
+    if (!commandOn() || g.state !== "playing") return;
+    const A = CBZ.city && CBZ.city.arena; if (!A || !A.root) return;
+    const st = CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+    if (!st) return;                                   // no precinct, no watch
+    // prune bodies the world has reaped
+    for (let i = watch.length - 1; i >= 0; i--) {
+      const c = watch[i];
+      if (!c || c.culled || CBZ.cityCops.indexOf(c) < 0) watch.splice(i, 1);
+    }
+    const lot = st.lot || {};
+    let ox = st.x - (lot.cx == null ? st.x : lot.cx), oz = st.z - (lot.cz == null ? st.z : lot.cz);
+    let ol = Math.hypot(ox, oz);
+    if (!(ol > 0.01)) { ox = 0; oz = 1; ol = 1; }      // door dead-centre on the lot — face +z
+    ox /= ol; oz /= ol;
+    const lx = -oz, lz = ox;                           // across the forecourt
+    for (let i = 0; i < COMMAND.length; i++) {
+      const spec = COMMAND[i];
+      if (watchAlive(spec.key)) continue;
+      // A VACANCY IS THE POINT. Without this, killing the Chief cost you 1.1
+      // seconds — the next maintain beat would post a fresh one and the
+      // stand-down order would never actually lapse. A dead commander leaves
+      // the chair EMPTY for a real window, and that window is the consequence.
+      if (vacancy[spec.key] == null) vacancy[spec.key] = 0;
+      if (vacancy[spec.key] > 0) { vacancy[spec.key] -= 1.1; continue; }
+      const px = st.x + ox * 3.0 + lx * spec.off;
+      const pz = st.z + oz * 3.0 + lz * spec.off;
+      // NEVER LET THE PLAYER SEE A SPAWN — config.js's shared padded-screen
+      // contract, the same one crowd.js promotion honours. A refused slot is
+      // retried on the next beat; an empty patch of forecourt for a second is
+      // the correct trade.
+      if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(px, pz, { minDistance: 24, maxDistance: 1e6 })) continue;
+      const c = makeCop(px, pz, false, false);
+      if (!c) continue;
+      c.copRank = spec.key;                            // the roster slot does not decide brass
+      c.name = spec.pip;                               // the killfeed says who you dropped
+      c._watch = true;
+      c._post = { x: px, z: pz, fx: ox, fz: oz, mount: null, mountT: 0, relaxed: true };
+      holsterGun(c);                                   // a watch commander is not gunned up
+      A.root.add(c.group);
+      CBZ.cityCops.push(c);
+      watch.push(c);
+      commandPosted = true;              // the department has a command post — arm the gates
+      // the standing order only EXISTS once a Chief has actually been appointed
+      // — a lieutenant posting first must never make arrestFirst() start
+      // answering "no chief, go lethal".
+      if (spec.key === "chief") watchStood = true;
+    }
+  }
+  // a commander went down: start the vacancy clock ONCE, and let the city hear
+  // it. cityHurtCop already routes the kill through the shared death bus; this
+  // only records that the chair is empty.
+  function watchLost(c) {
+    if (!c || !c._watch || c._watchLost) return;
+    c._watchLost = true;
+    const key = c.copRank;
+    vacancy[key] = (key === "chief") ? 150 : 60;       // seconds without a holder
+    if (key === "chief" && CBZ.city && CBZ.city.big) CBZ.city.big("THE CHIEF IS DOWN — NO STAND-DOWN ORDER");
+    else if (CBZ.cityFeed) CBZ.cityFeed("MPD command post vacant — " + (c.name || "an officer") + " is down.", "#ff9e6b");
+  }
+
   // spawn a cop at a specific spot (used by the car-biz police RAID in empire.js)
   CBZ.citySpawnCop = function (x, z, swat) {
     const A = CBZ.city.arena; if (!A) return null;
@@ -772,6 +1018,11 @@
     chopperRebuildT = 0;   // full teardown (city rebuild) — never delay the fresh city's bird
     dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; responseDeployT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
     convictHailed = false;   // re-arm the escaped-convict APB for the next run
+    // the department's own chain of command resets with the city: badge numbers
+    // start at zero again (so the same seed builds the same pyramid) and the
+    // command watch is re-posted from scratch on the next maintain beat.
+    watch.length = 0; watchStood = false; commandPosted = false; _badge = 0;
+    for (const k in vacancy) delete vacancy[k];
   };
 
   // posted roadblock officers don't count toward the response total: the wall is
@@ -1517,7 +1768,12 @@
       chopper.group.rotation.z = 0; chopper.rotor.rotation.y += dt * 1.5;
       chopper.pool.visible = false; chopper.cone.visible = false;
       chopper.launchCeilY = null;
-      if (stars >= 3 && g.state === "playing") {
+      // AIR SUPPORT IS A CAPTAIN'S CALL (COP_LADDER). No captain alive, no bird
+      // — the airframe sits on its pad through the whole chase. Once she IS up
+      // the flight is hers to finish: the phases below are deliberately NOT
+      // re-gated, because a helicopter does not fall out of the sky because an
+      // officer at a desk was shot.
+      if (stars >= 3 && g.state === "playing" && forceHas("air")) {
         if (heliSlowResponse()) {
           // DISPATCH (a): the call just came in — Air-1 sits on the pad, rotor
           // idle, for a real dispatch beat before anyone even boards it. This is
@@ -1840,6 +2096,10 @@
     cop.hp -= dmg;
     if (cop.hp <= 0) {
       cop.dead = true; cop.deadT = 0;
+      // A COMMANDER'S CHAIR STAYS EMPTY. Killing the Chief lapses the whole
+      // department's stand-down order until a successor is appointed — see
+      // §THE DEPARTMENT IS AN ORG WITH RUNGS. No-op for the other 99% of cops.
+      if (cop._watch) watchLost(cop);
       // CORPSE ARMOR LOOT: stamp the kit pieces this cop wore so the body offers
       // "Take their armor" (read by interact.js). Only when they actually had a kit.
       if (cop._armorKit && cop._armorKit.length) cop._armorLoot = cop._armorKit.slice();
@@ -2109,6 +2369,7 @@
   // drivable lane to the precinct door and carries the real roster officers.
   function maintainSwatVan(stars) {
     if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_VAN)) return;
+    if (!forceHas("swat")) return;      // no lieutenant, no entry team (see COP_LADDER)
     if (swatVanCD > 0) swatVanCD -= 1.1;
     if (swatVan && (swatVan.dead || swatVan._exploded || swatVan.player || CBZ.cityCars.indexOf(swatVan) < 0)) {
       deploySwatTeam(swatVan, true); swatVan = null;
@@ -2209,6 +2470,7 @@
     // P6: anarchist collapse — no spawn, no replenish, no roadblocks/patrol
     // top-ups while it holds (city/regimes.js already zeroed forcePool).
     if (CBZ.regimes && CBZ.regimes.policeAllowed && !CBZ.regimes.policeAllowed()) return;
+    standWatch();               // the chain of command repairs itself, like the roster
     const stars = g.wanted | 0;
     // ESCAPED CONVICT all-points bulletin: the first maintain tick after you hit
     // the street as a jailbreaker, dispatch puts your description out — sells WHY
@@ -2266,7 +2528,10 @@
         // part of the wanted response and remain ordinary random patrol origins.
         spawnCop(false, true);
       } else if (dispatchHoldT <= 0 && responseDeployT <= 0) {
-        const newIsSwat = !fillAmbient && stars >= 2 && wantSwat < swatTarget;
+        // COMMITTING THE TACTICAL UNIT IS A LIEUTENANT'S CALL. With no
+        // lieutenant alive to make it, dispatch fills the slot with an ordinary
+        // response officer — the force still comes, it just comes lighter.
+        const newIsSwat = !fillAmbient && stars >= 2 && wantSwat < swatTarget && forceHas("swat");
         if (spawnCop(newIsSwat, false)) {
           // One real body leaves the precinct at a time.  Higher tiers dispatch
           // faster, but even 5★ cannot manufacture two officers every 1.1 sec.
@@ -2641,6 +2906,12 @@
     if (stars < 3) { RB.armed = false; return; }
     if (!RB.armed) { RB.armed = true; RB.cd = 26 + rng() * 14; }   // first wall ~30s into a sustained chase
     if (!P || !P.driving || !P._vehicle || g.state !== "playing") return;
+    // A WALL IS AN ORDER, AND SOMEBODY HAS TO GIVE IT. Closing a public road is
+    // a SERGEANT's call (COP_LADDER). Kill every sergeant on the force and the
+    // walls stop going up — not because a counter fell, because there is nobody
+    // left who can authorise one. The cadence keeps ticking, so a wall lands the
+    // moment the next NCO reaches the street.
+    if (!forceHas("roadblock")) return;
     RB.cd -= 1.1;
     if (RB.cd <= 0 && !rbStage(stars)) RB.cd = 7;       // bad geometry (off-grid/edge) — retry shortly
   }
@@ -3192,10 +3463,14 @@
 
       // PAIR UP: foot beats walk in twos (real procedure). Lead strolls the
       // route; the partner holds the right-shoulder slot and stops when he stops.
+      // THE PAIRING IS THE CORPORAL'S: `pairUp` makes the caller the LEAD and
+      // the other body his partner, which is a field-training relationship, not
+      // two rookies deciding to walk together. Gating the INITIATOR (COP_LADDER
+      // "partner") is what makes a two-officer beat read as somebody's squad.
       if (c.ambient && !c.swat) {
         if (c._mate && (c._mate.dead || c._mate.giveUp || c._mate.culled)) { c._mate = null; c._lead = false; }
         c._pairT = (c._pairT || 0) - dt;
-        if (!c._mate && c._pairT <= 0) { c._pairT = 3; pairUp(c); }
+        if (!c._mate && c._pairT <= 0) { c._pairT = 3; if (copCan(c, "partner")) pairUp(c); }
       }
       const M = c._mate;
       const mateBusy = M && (M.curTarget || M.npcTarget || M.chaseCar || M.searchT > 0 || M.gunstop || M._radioT > 0 || M._duty || (CBZ.body && CBZ.body.busy && CBZ.body.busy(M)));

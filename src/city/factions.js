@@ -183,6 +183,15 @@
         hp: src.hp != null ? +src.hp : null,
         weapon: src.weapon || null,     // REAL: issued via CBZ.cityGiveWeapon
         unlock: src.unlock || null,     // free-text, shown on rank-up
+        // THE VERBS THIS RUNG OPENS (§RANK IS A VERB, below). Cumulative up the
+        // ladder — a Chief can still make an arrest. A rung with an empty list
+        // is a vanity rung and CBZ.rankAudit() names it.
+        grants: Array.isArray(src.grants) ? src.grants.slice()
+          : (src.grants ? [String(src.grants)] : []),
+        // how heavy this rung reads on the street (level.js's 1-100 scale). It
+        // lives HERE so a ladder cannot disagree with the number over the head
+        // of the person holding it. 0 = "this org does not set the read".
+        lvl: src.lvl != null ? (+src.lvl | 0) : 0,
         // a LOCKED rung is never granted by merit — only by an explicit
         // promote() from the owning system (gangs.js: only succession makes a
         // Boss). Without this a zero-threshold top tier would auto-grant.
@@ -213,6 +222,12 @@
       friendlyTo: def.friendlyTo || [],
       bind: def.bind || null,
       npcTag: def.npcTag || null,      // a ped field that marks NPC members
+      // WHERE AN NPC'S RANK ALREADY LIVES. police.js keeps it in `copRank`,
+      // peds.js in `milRank`, gangs.js in `rank`. Naming the field is the whole
+      // adoption cost of the rank-verb layer, and it is what keeps this a
+      // migration instead of parallel bookkeeping: this file never stores an
+      // NPC's rank, it reads the field the world was already writing.
+      rankField: def.rankField || null,
       proto: def.proto || null,        // founded-from lineage ("start your own")
       onJoin: def.onJoin || null,
       onLeave: def.onLeave || null,
@@ -316,6 +331,208 @@
   }
   function playerRank(id) { const m = memb(id); return m ? m.rank : null; }
   function playerTier(id) { const m = memb(id); return m ? rankTier(id, m.rank) : -1; }
+  function rankLvl(id, key) { const r = rankDef(id, key); return r ? (r.lvl | 0) : 0; }
+
+  // ============================================================
+  //  §RANK IS A VERB
+  //
+  //  CLAUDE.md, verbatim: "Every rung must unlock a VERB, not just a bigger
+  //  number — a rank that only raises a payout is a vanity XP bar."
+  //
+  //  That law shipped with no ANSWER FUNCTION. contracts.js enforces it for the
+  //  PLAYER by gating job templates on `minRank`, but nothing could answer it
+  //  for an NPC — which is exactly why `police.js` ran a whole force off ONE
+  //  boolean (`swat`) and `level.js`'s eight military rungs were pure display.
+  //  Two questions were missing, and they are the whole of this block:
+  //
+  //      CBZ.rankCan(actor, org, verb)    — may THIS person do this?
+  //      CBZ.rankHolder(org, verb)        — is there ANYBODY who may?
+  //
+  //  The second is the one that gives an org a shape: a roadblock is an ORDER,
+  //  and an order needs somebody alive to give it. Kill every sergeant and the
+  //  walls stop going up — not because a counter fell, because nobody left can
+  //  authorise one.
+  //
+  //  BLOCK LAW COMPLIANCE:
+  //   1. ONE-LINE ADOPTION — a declaration writes `grants:["roadblock"]` on the
+  //      rung that opens it and `rankField:"copRank"` once for the org. Every
+  //      caller then REPLACES its own hardcoded test with one call.
+  //   2. DEGRADE-SAFE — and the guard is `CBZ.rankKnows(org, verb)`, NOT a bare
+  //      null check on rankCan. rankCan answers FALSE for an org that was never
+  //      declared, which is correct as an answer and catastrophic as a gate: a
+  //      caller written `if (!rankCan(…)) return` would CLOSE every order in the
+  //      game the moment FACTION_V1 was flipped off. `rankKnows` asks "does the
+  //      ladder even have this verb", so a revert removes the gate instead of
+  //      slamming it.
+  //   3. THREE REAL CONSUMERS, same change: police.js (six rungs, five gated
+  //      orders), militia.js/peds.js (the army chain of command), careers.js
+  //      (the guard ladder), plus level.js's cover reveal.
+  //   5. RATCHET — CBZ.rankAudit(), below. `emptyRanks` and `verblessRungs`
+  //      may only ever go DOWN.
+  // ============================================================
+
+  // an NPC's rank key, read out of the field the world already keeps it in
+  function npcRankKey(actor, id) {
+    const f = DEFS[id];
+    if (!f || !actor || !f.rankField) return null;
+    const k = actor[f.rankField];
+    return (k && f.byKey[k]) ? k : null;
+  }
+  // is this NPC one of theirs AT ALL? Two independent proofs, either is enough:
+  // the org's declared marker field, or a rank key from its own ladder.
+  function npcInOrg(actor, id) {
+    const f = DEFS[id];
+    if (!f || !actor) return false;
+    if (f.npcTag && actor[f.npcTag.field] === (f.npcTag.value != null ? f.npcTag.value : f.id)) return true;
+    return !!npcRankKey(actor, id);
+  }
+  // THE tier read for ANY subject. Player -> the membership record (never
+  // re-derive g.playerGang); NPC -> the field the world already wrote.
+  // -1 means "not one of theirs" and is the only falsy answer callers need.
+  function tierOf(actor, id) {
+    if (!DEFS[id]) return -1;
+    if (isPlayer(actor)) return playerTier(id);
+    if (!npcInOrg(actor, id)) return -1;
+    const k = npcRankKey(actor, id);
+    // a marked member with no rank stamped is at the BOTTOM rung, not outside
+    // the org — that is what lets police.js leave `copRank` unset on a plain
+    // beat officer instead of stamping a word on every body.
+    return k ? rankTier(id, k) : (DEFS[id].ranks[0] ? DEFS[id].ranks[0].tier : 0);
+  }
+  // every verb open at (or below) a rung — cumulative, because seniority never
+  // takes a verb away.
+  function grantsFor(id, key) {
+    const f = DEFS[id]; if (!f) return [];
+    const cur = f.byKey[key];
+    const top = cur ? cur.idx : -1;
+    const out = [];
+    for (let i = 0; i <= top && i < f.ranks.length; i++) {
+      const gs = f.ranks[i].grants;
+      for (let k = 0; k < gs.length; k++) if (out.indexOf(gs[k]) < 0) out.push(gs[k]);
+    }
+    return out;
+  }
+  // the LOWEST rung that opens `verb`, or -1 if this outfit never opens it.
+  // Everything else here is derived from this one lookup, so a verb and the
+  // rung that grants it can never drift apart.
+  function verbTier(id, verb) {
+    const f = DEFS[id]; if (!f || !verb) return -1;
+    for (let i = 0; i < f.ranks.length; i++) if (f.ranks[i].grants.indexOf(verb) >= 0) return f.ranks[i].tier;
+    return -1;
+  }
+  function rankCan(actor, id, verb) {
+    if (!CFG.FACTION_V1) return false;
+    const need = verbTier(id, verb);
+    if (need < 0) return false;                 // this outfit has no such verb
+    return tierOf(actor, id) >= need;
+  }
+
+  // IS THERE ANYBODY WHO MAY? One throttled scan per (org, verb) — the answer
+  // only has to be as fresh as a dispatch beat, and every caller in the repo
+  // asks it on a >=1 s tick. `opts.pool` lets an org that knows where its
+  // people live (police -> CBZ.cityCops) skip the crowd entirely.
+  const _holderCache = Object.create(null);
+  const HOLDER_TTL = 900;                        // ms
+  function rankHolder(id, verb, opts) {
+    if (!CFG.FACTION_V1 || !DEFS[id]) return null;
+    const need = verbTier(id, verb);
+    if (need < 0) return null;
+    const now = (CBZ.now || 0);
+    const ck = id + "|" + verb;
+    const hit = _holderCache[ck];
+    if (hit && !(opts && opts.fresh) && (now - hit.t) < HOLDER_TTL) {
+      const a = hit.a;
+      // a cached YES is only good while that person is still alive and still
+      // holds the rung — a cached NO expires on the clock like everything else.
+      if (a && !a.dead && tierOf(a, id) >= need) return a;
+      if (!a) return null;
+    }
+    const pools = (opts && opts.pool) ? [opts.pool] : [CBZ.cityCops, CBZ.cityPeds];
+    let found = null;
+    for (let q = 0; q < pools.length && !found; q++) {
+      const arr = pools[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i];
+        if (!a || a.dead || a._parked || a.isPlayer) continue;
+        if (tierOf(a, id) >= need) { found = a; break; }
+      }
+    }
+    _holderCache[ck] = { a: found, t: now };
+    return found;
+  }
+
+  // ============================================================
+  //  CBZ.rankAudit() — THE RATCHET (BLOCK LAW #5)
+  //
+  //  Per org: rungs DECLARED, rungs HELD by somebody alive, rungs that open a
+  //  VERB. The two lists are the ratchets and both may only ever go DOWN:
+  //
+  //    emptyRanks     — a declared rung nobody in the world holds. That is the
+  //                     stat-fiction ban applied to ladders (a rank that names
+  //                     a person who does not exist). Player-only ladders
+  //                     (agency, cell, secco) are excluded by construction:
+  //                     they declare neither `rankField` nor `npcTag`, so the
+  //                     world was never supposed to cast them.
+  //    verblessRungs  — a declared rung that opens nothing: no granted verb, no
+  //                     issued weapon, no named unlock, and no contracts.js
+  //                     template gated at its tier. That is the vanity XP bar,
+  //                     counted.
+  //
+  //  Read entirely off LIVE data (the declared ladders, the ped fields the
+  //  world writes, contracts.js's own live templates), so it can never claim a
+  //  rung is covered when the gate is not actually there.
+  // ============================================================
+  CBZ.rankAudit = function () {
+    const out = { orgs: Object.create(null), rungs: 0, held: 0, verbed: 0,
+                  emptyRanks: [], verblessRungs: [] };
+    // ONE pass over the world, bucketed by org — never one pass per org.
+    const holders = Object.create(null);
+    const pools = [CBZ.cityCops, CBZ.cityPeds];
+    for (let q = 0; q < pools.length; q++) {
+      const arr = pools[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i];
+        if (!a || a.dead || a._parked || a.isPlayer) continue;
+        for (let k = 0; k < ORDER.length; k++) {
+          const id = ORDER[k], f = DEFS[id];
+          if (!f.rankField && !f.npcTag) continue;
+          if (!npcInOrg(a, id)) continue;
+          const key = npcRankKey(a, id) || (f.ranks[0] ? f.ranks[0].key : null);
+          if (!key) continue;
+          const b = holders[id] || (holders[id] = Object.create(null));
+          b[key] = (b[key] | 0) + 1;
+        }
+      }
+    }
+    for (let k = 0; k < ORDER.length; k++) {
+      const id = ORDER[k], f = DEFS[id];
+      const b = holders[id] || Object.create(null);
+      const pr = playerRank(id);
+      if (pr) b[pr] = (b[pr] | 0) + 1;           // you count as a holder too
+      const street = !!(f.rankField || f.npcTag);
+      const rec = { name: f.name, declared: f.ranks.length, held: 0, verbed: 0,
+                    street: street, byRank: b, empty: [], verbless: [] };
+      // contracts.js gates PLAYER jobs on `minRank`; a rung that opens one of
+      // those is covered even though this file never saw the template. Read
+      // live, guard-called — no second table.
+      let ext = null;
+      if (CBZ.cityOrders && CBZ.cityOrders.unlocks) {
+        try { ext = CBZ.cityOrders.unlocks(id) || null; } catch (e) { ext = null; }
+      }
+      for (let i = 0; i < f.ranks.length; i++) {
+        const r = f.ranks[i];
+        out.rungs++;
+        if (b[r.key]) { rec.held++; out.held++; }
+        else if (street) { rec.empty.push(r.key); out.emptyRanks.push(id + ":" + r.key); }
+        let verb = r.grants.length > 0 || !!r.weapon || !!r.unlock;
+        if (!verb && ext) for (let e = 0; e < ext.length; e++) if ((ext[e].tier | 0) === r.tier) { verb = true; break; }
+        if (verb) { rec.verbed++; out.verbed++; }
+        else { rec.verbless.push(r.key); out.verblessRungs.push(id + ":" + r.key); }
+      }
+      out.orgs[id] = rec;
+    }
+    return out;
+  };
 
   // ============================================================
   //  ADMISSION — reputation, a fee, a sponsor, a mission, a rank elsewhere.
@@ -1018,7 +1235,16 @@
     rankDef: rankDef,
     rankName: rankName,
     rankTier: rankTier,
+    rankLvl: rankLvl,
     nextRank: nextRank,
+
+    // --- §RANK IS A VERB (see the block above) ---
+    npcRank: npcRankKey,          // an NPC's rank key, off the org's own field
+    tierOf: tierOf,               // ANY subject -> tier, or -1
+    grants: grantsFor,            // every verb open at a rung (cumulative)
+    verbTier: verbTier,           // the lowest rung that opens a verb
+    can: rankCan,                 // may THIS person do this?
+    holder: rankHolder,           // is there ANYBODY who may?
 
     // membership
     membership: memb,
@@ -1121,4 +1347,16 @@
   CBZ.factionReactionTo = reactionTo;
   CBZ.factionHostile = hostile;
   CBZ.factionsReset = api.reset;
+  // THE TWO RANK QUESTIONS, at the top level — every consumer in the repo calls
+  // them in the degrade-safe form `CBZ.rankCan ? CBZ.rankCan(…) : <old value>`.
+  CBZ.rankCan = rankCan;
+  CBZ.rankHolder = rankHolder;
+  CBZ.rankTierOf = tierOf;
+  // DOES THE LADDER EVEN KNOW THIS VERB? The degrade-safe guard every gate in
+  // the repo is written against: `CBZ.rankKnows(org, verb) ? <gate> : <old
+  // ungated behaviour>`. Without it a caller that wrote `if (!rankCan(...))
+  // return` would silently CLOSE its gate the moment FACTION_V1 was flipped off
+  // — the exact "one-line revert makes it worse" trap. rankCan answering false
+  // for an undeclared org is correct; treating that as a refusal is not.
+  CBZ.rankKnows = function (id, verb) { return verbTier(id, verb) >= 0; };
 })();
