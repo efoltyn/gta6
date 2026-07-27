@@ -2357,7 +2357,12 @@
         // the body CARRIES the hit: a dark entry wound stamped on the struck
         // part + blood soaking into the clothing (systems/wounds.js). Per
         // pellet — a shotgun blast scatters wounds (wounds.js caps the burst).
-        if (CBZ.bodyWound && !w.nonlethal && !hit.actor.animal && (!r.down || hit.actor.kind === "cop")) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal });
+        // `dir` is what lets wounds.js work out where the round came OUT.
+        // shotDir is the normalised ray this shot was fired along and was
+        // already in scope — it just was not handed over, so the player's own
+        // shots produced entry marks only while SWAT fire (the one caller that
+        // did pass a direction) got exits.
+        if (CBZ.bodyWound && !w.nonlethal && !hit.actor.animal && (!r.down || hit.actor.kind === "cop")) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal, dir: shotDir });
       } else if (hit.corpse) {
         // DOWNED BODY (city-only): keep shooting it — it accumulates holes AND
         // jerks. cityCorpseHit (ragdoll.js) wakes the verlet slot on-hit only,
@@ -2367,7 +2372,7 @@
         hitSomething = true;
         const force = (w.pellets ? 5.2 : 4.4) * (0.65 + 0.42 * cal) * (w.knock || 1);
         if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
-        else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal });
+        else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
         spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
         if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir);
         // Only a muzzle-close shotgun headshot can sever even post-mortem

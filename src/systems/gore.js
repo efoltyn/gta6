@@ -1262,8 +1262,12 @@
       const wcal = (ctx.imp && ctx.imp.cal != null) ? ctx.imp.cal : amt;
       // opts.jaw (bite radius in metres) rides through so a great white leaves
       // a great white's jaw print, not the 0.22 default a dog would leave.
+      // opts.dir rides through for the same reason opts.jaw does: wounds.js
+      // needs the through-line to place an EXIT mark on the far face. It is
+      // read seven lines below to fan the spray, so it was already here — it
+      // simply was not handed to the thing that stamps the body.
       CBZ.bodyWound(ctx.ped, wp, {
-        head, cal: wcal, jaw: opts.jaw,
+        head, cal: wcal, jaw: opts.jaw, dir: opts.dir,
         melee: blunt ? "blunt" : (blade ? "blade" : (bitten ? "bite" : null)),
       });
     }

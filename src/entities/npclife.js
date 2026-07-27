@@ -397,6 +397,34 @@
       }
       return;
     }
+    /* ---- THE SEAT IS RE-ASSERTED, NOT SET ONCE ---------------------------
+       attach() writes the anchor's position/rotation exactly once, and this
+       tick then re-asserted `speed`, `state` and `char.sitting` every frame
+       but never the TRANSFORM. That was the bug behind "plane passengers sit
+       sideways": an attached actor is still a full member of CBZ.cityPeds, and
+       41 files iterate that list and write `group.rotation.y` with no
+       `_npcAttached` guard (peds.js is the only one that guards). Those writes
+       are WORLD-space bearings — atan2(target.x - ped.pos.x, ...) — landing on
+       a group parented to the aircraft, so the body settled at
+       (worldBearing - planeHeading) and ended up aimed at a lot across the map,
+       rotated by the parked heading. The seat's yaw was right; nothing
+       defended it.
+
+       Defending it HERE rather than in the airliner fixes every host at once —
+       cars, taxis, and any future moving seat — which is why it is one write
+       in the shared file instead of a hold loop per venue. It is also cheap:
+       three scalar assignments per attached actor per frame, before the matrix
+       update that was already happening.
+
+       A live prop arc (propuse's walk→perch→swing) owns the transform while it
+       runs, so it is skipped; `_seatHold === false` lets a caller opt out. */
+    const a = rec.anchor;
+    if (a && actor._seatHold !== false && !actor._propArc) {
+      actor.group.position.set(a.x || 0, a.y || 0, a.z || 0);
+      if (actor.group.rotation && actor.group.rotation.set) {
+        actor.group.rotation.set(a.pitch || 0, a.yaw || 0, a.roll || 0);
+      } else if (actor.group.rotation) actor.group.rotation.y = a.yaw || 0;
+    }
     if (actor.group.updateMatrixWorld) actor.group.updateMatrixWorld(true);
     if (actor.group.getWorldPosition) actor.group.getWorldPosition(actor.pos);
     else {

@@ -231,7 +231,18 @@ const PASS = `(() => {
       // and a change that walls in more furniture fails the gate.
       // 487 -> 6 when the masonry/civic building type was purged: those podium
       // interiors were most of the furniture nobody could walk to. Ratchet down.
-      if (pa.blocked > 6) out.fails.push("UNREACHABLE FURNITURE ANCHORS rose to " + pa.blocked + " (ratchet 6)");
+      // 6 -> 5 when the airliner cabin declared real seat cushions and
+      // propuse.js gained requireEntry (an anchor whose every approach is
+      // blocked is now REFUSED at registration rather than merely counted).
+      //
+      // PINNED AT THE WORST SEED, NOT THE FIRST ONE. This was briefly set to 3
+      // off a single 90210 run and 1337 promptly read 5 — the count is
+      // seed-dependent because it depends on what the generator happened to
+      // wall in. That is this file's own lesson about the 487 (an audit nobody
+      // has executed is not a measurement) arriving one layer up: a ratchet
+      // pinned on one sample is not a measurement either. 90210 reads 3, 1337
+      // reads 5; the pin is 5.
+      if (pa.blocked > 5) out.fails.push("UNREACHABLE FURNITURE ANCHORS rose to " + pa.blocked + " (ratchet 5)");
     }
     // road rules: carcluster.js's district-of-the-nearest-lot stopgap must be
     // dead. True here means roadrules.js failed to load or loaded too late.
@@ -241,6 +252,102 @@ const PASS = `(() => {
       if (ra.fallback) out.fails.push("SPEED LIMIT STILL ON THE CARCLUSTER FALLBACK");
     }
     if (CBZ.clusterAudit && CBZ.clusterAudit().limitIsFallback) out.fails.push("clusterAudit: limit is still the fallback");
+    // TRAFFIC ACCESS (roadrules.js's new law). trespassing is the owner's
+    // own bug report turned into a number — ambient cars standing inside a
+    // declared keep-out (the runway, the airside, the military perimeter).
+    // It is a HARD invariant, not an adoption counter: a car on the runway is
+    // never acceptable, so this is pinned at ZERO rather than at a baseline.
+    // onWater likewise. Both are measured AFTER the sim burst above, so a
+    // car that DRIVES onto the airfield fails the gate too, not just one that
+    // spawns there — which matters, because the original defect was a turn,
+    // not a spawn (see CBZ.roadCross).
+    if (CBZ.roadTrafficAudit) {
+      const ta = CBZ.roadTrafficAudit();
+      out.traffic = ta.ambient + "amb trespass=" + ta.trespassing + " water=" + ta.onWater +
+        " offSeg=" + ta.offSegment + " closed=" + ta.segmentsClosed + "/" + ta.segments +
+        " adopted=" + ta.adopted;
+      if (ta.trespassing > 0) out.fails.push("CARS INSIDE KEEP-OUT ZONES: " + ta.trespassing + " " + JSON.stringify(ta.where));
+      // ARE THEY ACTUALLY DRIVING. The car-following model is the change most
+      // able to freeze traffic SILENTLY — a braking term that never releases
+      // leaves every other number in this audit looking perfect while the
+      // streets are a car park. Measured after the sim burst, so it is real
+      // motion and not the initial 0.6x cruise the spawner writes.
+      let n = 0, sum = 0, moving = 0;
+      for (const c of (CBZ.cityCars || [])) {
+        if (!c || !c.ai || c.player || c.owned || c.dead) continue;
+        n++; const v = Math.abs(c.v || 0); sum += v; if (v > 2) moving++;
+      }
+      const meanV = n ? sum / n : 0;
+      out.motion = n + " cars meanV=" + meanV.toFixed(2) + " moving=" + moving;
+      if (n >= 20 && moving < n * 0.35) out.fails.push("TRAFFIC HAS SEIZED: only " + moving + "/" + n + " cars moving (meanV " + meanV.toFixed(2) + ")");
+      if (ta.onWater > 0) out.fails.push("CARS ON WATER: " + ta.onWater);
+      // adoption ratchet: the four placement sites that were migrated onto
+      // CBZ.roadPick. May only go UP; a regression means a site went back to
+      // hand-rolling its own road draw.
+      if (ta.adopted < 3) out.fails.push("roadPick adoption fell to " + ta.adopted + " sites (ratchet 3)");
+    }
+    // origins: the story roster. bespoke counts openings still carrying a
+    // hand-written scene instead of running the six-axis composition
+    // generator. Baseline 3 (exec/barfly/tenant, which are better hand-written
+    // and are allowed to stay) — it may only ever go DOWN.
+    if (CBZ.cityOriginAudit) {
+      const oa = CBZ.cityOriginAudit();
+      out.origins = oa.stories + " stories (" + oa.composed + " composed / " + oa.bespoke + " bespoke)";
+      if (oa.bespoke > 3) out.fails.push("BESPOKE ORIGIN SCENES rose to " + oa.bespoke + " (ratchet 3)");
+      if (oa.stories < 9) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 9)");
+    }
+    // airside: service vehicles must never be on the active runway.
+    // onRunwayRaw is printed beside it deliberately — the ratchet must not be
+    // satisfiable by widening what counts as "cleared for the runway".
+    if (CBZ.airsideAudit) {
+      const aa = CBZ.airsideAudit();
+      out.airside = aa.vehicles + "veh onRunway=" + aa.onRunway + "/" + aa.onRunwayRaw +
+        " hold=" + aa.holdEvents + " bail=" + aa.bailouts;
+      if (aa.onRunway > 0) out.fails.push("SERVICE VEHICLES ON THE RUNWAY: " + aa.onRunway);
+    }
+    // gov complexes: they exist BECAUSE putting them in a city overlapped.
+    // overlaps excludes the one declared exception (City Hall, edgeOfCity),
+    // which is reported separately as urbanAdjacent so it cannot hide a real
+    // collision. Both overlaps and roadless are pinned at 0 — a complex
+    // you cannot drive to is as broken as one inside a housing block.
+    if (CBZ.govComplexAudit) {
+      const gc = CBZ.govComplexAudit();
+      out.gov = gc.placed + "/" + gc.complexes + " placed rejected=" + gc.rejected +
+        " overlap=" + gc.overlaps + " urban=" + gc.urbanAdjacent + " staffed=" + gc.staffed;
+      if (gc.overlaps > 0) out.fails.push("GOV COMPLEX OVERLAPS: " + gc.overlaps);
+      if (gc.roadless > 0) out.fails.push("GOV COMPLEXES WITH NO ACCESS ROAD: " + gc.roadless);
+      if (gc.placed < gc.complexes) out.fails.push("GOV COMPLEXES UNPLACED: " + (gc.complexes - gc.placed));
+    }
+    // cockpit: the forward sightline is a NUMBER, not a screenshot. A pilot
+    // must be able to see at least 15 degrees below the horizon over the
+    // glareshield (the certification floor) or the cockpit is the broken one
+    // the owner photographed.
+    if (CBZ.cockpitSightAudit) {
+      const ca = CBZ.cockpitSightAudit();
+      out.cockpit = "down=" + (ca.downVisionDeg || 0).toFixed(1) + "deg up=" + (ca.upVisionDeg || 0).toFixed(1) + "deg";
+      if (ca.downVisionDeg != null && ca.downVisionDeg < 15) out.fails.push("COCKPIT FORWARD VIEW BLOCKED: only " + ca.downVisionDeg.toFixed(1) + "deg down-vision (need 15)");
+    }
+    // wounds: a bullet decal wider than the body part it landed on is the
+    // "sticker" the owner photographed. Pinned at zero.
+    if (CBZ.woundDecalAudit) {
+      const wa = CBZ.woundDecalAudit();
+      out.wounds = wa.decals + " decals oversized=" + wa.oversized;
+      if (wa.oversized > 0) out.fails.push("OVERSIZED BULLET DECALS: " + wa.oversized);
+    }
+    // cabin: a seated passenger facing across the aisle instead of forward.
+    if (CBZ.cabinAudit) {
+      const cb = CBZ.cabinAudit();
+      out.cabin = cb.occupied + "/" + cb.seats + " seated misaligned=" + cb.misaligned + " roleless=" + cb.roleless;
+      if (cb.misaligned > 0) out.fails.push("PASSENGERS SEATED SIDEWAYS: " + cb.misaligned);
+    }
+    // power: legacyGuardSites is the classic adoption ratchet — hand-rolled
+    // guard/escort AI still living outside the protection layer. Counted
+    // file-by-file, baseline 9, may only ever go DOWN.
+    if (CBZ.powerAudit) {
+      const pw = CBZ.powerAudit();
+      out.power = pw.principals + "p/" + pw.guarded + "g legacy=" + pw.legacyGuardSites;
+      if (pw.legacyGuardSites > 9) out.fails.push("LEGACY GUARD SITES rose to " + pw.legacyGuardSites + " (ratchet 9)");
+    }
     // sea level: nothing may leave a surge standing at world build.
     if (CBZ.waterSurge && Math.abs(CBZ.waterSurge()) > 1e-6) out.fails.push("SEA SURGE NONZERO AT BUILD: " + CBZ.waterSurge());
     // ---- evidence only (adoption counters / world census) ------------------
@@ -283,6 +390,12 @@ async function runSeed(seed, label) {
   tmark(`${label}: ${r.lots}/${r.shops}/${r.roads} lots/shops/roads | sim ${TICKS} ticks in ${r.simMs}ms | mtnOutSnow ${r.mtnOutSnow} cityOnMtn ${r.cityOnMtn} overlaps ${r.overlaps} | trees ${r.trees == null ? "-" : r.trees} | peds ${r.peds}`);
   // adoption/census evidence — printed, never asserted (see the PASS block)
   tmark(`${label}: furnish ${r.furnish || "-"} | anchors ${r.anchors || "-"} | roads ${r.roadSegs == null ? "-" : r.roadSegs} | predator ${r.predator || "-"} | checkpoints ${r.checkpoints || "-"} | beach ${r.beachSeats || "-"}`);
+  // The evidence lines for this wave. Assertions already ran above and would
+  // have failed the gate; this is so a passing run still SHOWS its numbers —
+  // an audit whose output nobody can see is one nobody will notice regressing.
+  tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
+  tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
+  tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   return r;
 }
 

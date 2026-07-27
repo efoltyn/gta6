@@ -51,6 +51,13 @@
    order 42, AFTER peds.js at 34 and physics at 10, so it wins the frame).
 
    ---- SEAT GEOMETRY -----------------------------------------------------
+   SEAT_H is the kit's SOURCE OF TRUTH for "how high is a seat of this kind",
+   and it is meant to be READ, not copied: a builder that draws a cushion at
+   propSeatHeight(kind) and then declares that same number can never drift out
+   of agreement with the body it seats. island_airport.js's airliner cabin and
+   gate lounge both do exactly that ("aircraft-seat", "waiting"); a builder that
+   retypes a literal is one edit away from burying a body in its own furniture.
+
    entities/character.js has a real feet-on-the-floor chair solve gated on
    `ch.seatRef = {cushion, floorBelow}` — but until now ONLY the airliner
    passed that data, so every other chair in the game fell back to the
@@ -84,6 +91,10 @@
                                   rig's chair solve. null for an undeclared
                                   seat (see its comment — this is deliberate).
      CBZ.propSeatHeight(kind)   — the kit's real-world cushion heights.
+     CBZ.propRegisterSeat(...,geom) — geom.requireEntry refuses to register an
+                                  anchor nothing can walk to, so a builder in an
+                                  interior it doesn't own can only push
+                                  propUseAudit().blocked DOWN, never up.
      CBZ.propEntryPoint(rec)    — the walkable standing spot for a piece.
      CBZ.propArcActive(actor)   — true while a transition owns the body.
                                   Neighbours: don't retarget or re-pose a
@@ -156,6 +167,16 @@
     deck: 0.38, deckchair: 0.38, patiochair: 0.42,
     throne: 0.50, boss: 0.50, exec: 0.48,
     cabin: 0.45, bedside: 0.55, cell: 0.42,
+    // TRANSPORT seating. An economy airliner seat's cushion sits 0.43 above the
+    // cabin floor (the published narrowbody figure that goes with a 0.79 m /
+    // 31" pitch and a 0.44 m / 17.5" width); a flight-deck seat is a proper
+    // adjustable chair and rides slightly higher. `waiting` above is the gate
+    // lounge / departure bench. These are here so island_airport.js's cabin can
+    // READ the number instead of retyping it — the seat is drawn at exactly the
+    // height the rig is posed against, and one edit moves both.
+    "aircraft-seat": 0.43, aircraft: 0.43, airline: 0.43, economy: 0.43,
+    "cockpit-seat": 0.45, cockpit: 0.45, flightdeck: 0.45,
+    gate: 0.44, lounge_gate: 0.44,
   };
   const SEAT_H_DEFAULT = 0.45;
   function cushionOf(kind) {
@@ -237,9 +258,20 @@
   // drew: it is the only way the body gets the real chair solve. Absent is a
   // legitimate answer ("I don't know what my mesh looks like") and keeps the
   // legacy pose; CBZ.propUseAudit().noGeom counts those.
+  //
+  // geom.requireEntry (OPTIONAL): refuse to register at all when every approach
+  // to this spot is blocked, instead of adding one more record to
+  // propUseAudit().blocked. THE OTHER HALF OF THAT RATCHET: the audit counts
+  // anchors nothing can walk to (487 of ~6000 at the last census) and until now
+  // there was no way for a caller to stop MAKING them. A builder placing
+  // furniture into an interior it does not control — a procedurally furnished
+  // room, a concourse, a shop floor — should pass it, so its pieces can only
+  // ever push that number down. Costs one collider probe per anchor at build
+  // time and nothing afterwards (the entry solve is cached on the rec either
+  // way). Omitted = today's behaviour, byte-identical, for every caller that
+  // authored its own floor and knows the spot is clear.
   CBZ.propRegisterSeat = function (x, y, z, face, kind, lot, geom) {
     if (!on()) return null;
-    if (dedupe(seatKeys, x, y || 0, z)) return null;
     const rec = {
       x, y: y || 0, z, face: face || 0, kind: kind || "chair", lot: lot || null, occupant: null,
       // DECLARED geometry only — see CBZ.propSeatRef's note on why an inferred
@@ -249,6 +281,11 @@
       floorBelow: (geom && geom.floorBelow) || 0,
       _reg: 1,
     };
+    // Checked BEFORE the dedupe claim: a refused anchor must not burn its
+    // coordinate key, or a later builder that CAN reach the same spot would be
+    // silently turned away by a registration that never happened.
+    if (geom && geom.requireEntry && !entryOf(rec)._eok) return null;
+    if (dedupe(seatKeys, x, y || 0, z)) return null;
     seats.push(rec);
     return rec;
   };

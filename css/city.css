@@ -23,19 +23,47 @@ body.mode-city .mode-survival-only { display: none; }
   margin: 14px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
   text-transform: uppercase; color: #7c5a3a; text-align: center;
 }
+/* Nine stories, not three. A stacked full-width column ran off the bottom of
+   a laptop screen the moment the roster grew, so the cards are a two-up grid
+   that collapses to one column on a phone — same card look, a third of the
+   height. `auto-fit` + a 210px floor means a future tenth story just flows in. */
 .origin-select {
-  display: flex; flex-direction: column; gap: 8px;
-  width: min(460px, 100%); margin: 0 auto 4px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px; width: min(560px, 100%); margin: 0 auto 4px;
 }
 .origin-btn {
   pointer-events: auto; cursor: pointer; font-family: inherit; text-align: left;
   border: 2px solid #2a2622; border-bottom-width: 5px; border-radius: 12px;
-  background: #fff; color: #2a2622; padding: 10px 14px 9px;
-  display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap;
+  background: #fff; color: #2a2622; padding: 9px 12px 8px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   transition: transform .08s, border-color .12s, box-shadow .12s, background .12s;
 }
-.origin-btn b { font-size: 15px; letter-spacing: .3px; }
-.origin-btn span { color: #7c5a3a; font-weight: 600; font-size: 13px; }
+.origin-btn b { font-size: 14px; letter-spacing: .3px; }
+.origin-btn span { color: #7c5a3a; font-weight: 600; font-size: 11.5px; line-height: 1.25; }
+/* the generated story reads as the odd one out on purpose */
+.origin-btn-roll { border-style: dashed; }
+.origin-btn-roll.active { border-style: solid; }
+
+/* PILOT sub-select: the airframe list, filled at runtime from the LIVE
+   aircraft registry (CBZ.cityOriginPlanes) — never a hand-kept list. Compact
+   chips rather than cards, because the only thing to say is the name. */
+.origin-sublabel { margin-top: 10px; font-size: 11px; }
+.origin-plane-wrap { width: min(560px, 100%); margin: 0 auto; }
+.origin-plane-select {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+}
+.origin-plane-btn {
+  pointer-events: auto; cursor: pointer; font-family: inherit;
+  border: 2px solid #2a2622; border-bottom-width: 4px; border-radius: 9px;
+  background: #fff; color: #2a2622; padding: 5px 10px 4px;
+  font-size: 12px; font-weight: 700; letter-spacing: .2px;
+  transition: transform .08s, border-color .12s, box-shadow .12s, background .12s;
+}
+.origin-plane-btn.active {
+  border-color: var(--orange-d); box-shadow: 0 0 0 3px rgba(255,122,26,.2);
+  background: linear-gradient(180deg,#fff6ee,#ffe9d6);
+}
+.origin-plane-btn:active { transform: translateY(2px); border-bottom-width: 2px; }
 .origin-btn.active {
   border-color: var(--orange-d); box-shadow: 0 0 0 3px rgba(255,122,26,.2);
   background: linear-gradient(180deg,#fff6ee,#ffe9d6);

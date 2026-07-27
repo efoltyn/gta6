@@ -125,6 +125,30 @@ Before building anything adjacent, wire into the existing system:
   `Lv.N Title` overhead pill (`aim_dossier.js`), full data stays
   available via `CBZ.cityActorDossier()`. Never render keyboard key
   glyphs on touch (`CBZ.touchActionPrompt` re-skins prompts).
+- **The map is laid out on purpose** — `CBZ.CONFIG.WORLD_LAYOUT_V2` +
+  `SPREAD_V3` in `src/world/layout.js`, the rim-relief law in
+  `city/continent.js`, and `CBZ.worldLayoutAudit()`. OWNER: "the cities and
+  mountains are good but they are much too close together. The mountains should
+  be on all snowy area and should be on the edges of the map with just small
+  cities. The map should be much more intentionally laid out." Measured before:
+  the tightest strait in the shipped world was **69 u** (Goldspire↔Cape Harbor)
+  and the country hills stood the same height 200 m from downtown as 5 km out
+  (**167 inner-half hill cells**). After: playable area **+26%**, mean
+  nearest-neighbour gap **617→828**, inner-half hill cells **167→3**, relief
+  mean **3.5→1.0** — with `mountainCellsOutsideSnow` and `cityOnMountain` both
+  held. The METHOD matters: the existing snow-sector relief law was NOT
+  re-engineered (that would have weakened a working gate) — the RECT it keys
+  off was grown, so the whole backdrop ring walks outward and nothing else is
+  told. `city/continent.js`'s backcountry hills now run through a box-metric
+  rim gate with a **hard 23 u ceiling strictly under the 25 u doctrine line**,
+  so backcountry can no longer produce a mountains-outside-snow cell BY
+  CONSTRUCTION rather than by luck. `skylineForPlace` bends only the
+  silhouette, never the footprint, so a rim town is short without losing lots
+  or jobs. **`city/highwaynet.js`'s seven free-country lane constants are raw
+  literals, not dial-derived** — every DOCK follows `CBZ.worldOff` but those
+  seven did not, so a world move silently routed the loop through Fort Brandt
+  and the Saltlands while `clearanceSweep` only `console.warn`ed. Re-measured
+  now; if you move a landmass again, re-check them.
 - **Numeric world audits** — `tools/terrain-map-audit.mjs` (biome/relief
   grid, mountains-outside-snow, city-on-mountain, region overlaps) and
   `tools/world-audit.mjs` (object overlaps/lint). Terrain/layout changes
@@ -301,6 +325,141 @@ Before building anything adjacent, wire into the existing system:
   load order alone (`CBZ.clusterAudit().limitIsFallback` reads false). It also
   killed a stat fiction: wanted.js's `"speed"`/Reckless Driving crime had zero
   callers for its whole life.
+- **Roads know WHO MAY USE THEM** — `CBZ.roadPick(opts)` / `CBZ.roadPlace(car,
+  spot)` / `CBZ.roadOpen(r, cls)` / `CBZ.roadPointOpen(x,z,cls)` /
+  `CBZ.roadCross(A,vertical,x,z)`, same file. **`roadPick` IS THE ONLY
+  SANCTIONED WAY TO PUT A VEHICLE ON A ROAD.** FOUR sites used to re-type the
+  same eight-line road/lane/x/z/heading draw against the flat `city.roads`
+  list, and because that list is flat, none of them knew the airport airside,
+  the military perimeter or a bunker shell existed — every PED path had
+  honoured `arena.noSpawn` since the owner complained about people on the
+  runway; cars had never been told. Adoption is one call and buys: keep-out
+  refusal, water refusal, **an actual view-cone test** (the old code asked only
+  "is it 62 m from the camera", which says nothing about where the camera is
+  LOOKING), and district-weighted density so a farm track stops carrying Main
+  Street's traffic. Pass your SEEDED stream as `opts.rng` in any build path.
+  `opts.cls` is the vehicle-class filter — `"ambient"` (default, refused by
+  every keep-out), `"service"` (the apron IS where a baggage tug belongs),
+  `"emergency"`; a builder may also set `r.access`/`r.noTraffic` on its own
+  segment. **`roadCross` is `vehicles.js`'s old `findRoad` with the missing
+  containment test**: it took the nearest perpendicular segment within 9 m of a
+  junction and never checked the junction was ON it, so a downtown
+  intersection at x≈0 matched the AIRPORT CAUSEWAY record hundreds of metres
+  south — the car adopted a road it was nowhere near, U-turned at the "end",
+  and drove the length of the airfield across runway 09/27. That, not any
+  spawn, was the owner's "cars inside the airport near the runway". Ratchet:
+  `CBZ.roadTrafficAudit()` — `trespassing` and `onWater` are pinned at **0**
+  (hard invariants, measured after the sim burst so a car that DRIVES in fails
+  too), `adopted` may only go UP from **4**.
+- **Traffic follows one equation, not a stack of thresholds** —
+  `CBZ.cityTrafficIDM(v, v0, s, dv, car)` in `city/vehicles.js`, the
+  Intelligent Driver Model (Treiber/Hennecke/Helbing). Ambient speed used to be
+  a pile of independent caps — "if the gap is under X target the leader's speed
+  × 0.85", "if red, target distance × 1.25" — and threshold rules do NOTHING
+  until they trip and then act at full strength, which is why our traffic
+  coasted, braked in unison and concertina'd. IDM's braking term is
+  **continuous** (always slightly on, growing as the square of how far inside
+  your desired gap you are), so queues compress and release smoothly and
+  stop-and-go waves damp instead of amplifying. It is also **collision-free by
+  construction**. **EVERY HAZARD IS A LEADER**: a red light is a stationary car
+  on the stop line, a pedestrian in the lane is a stationary car where they
+  stand — one equation applied three times, `Math.min` across them, replacing
+  three unrelated heuristics. Integration is **ballistic** (`v' = v + a·dt`,
+  then advance by the AVERAGE of old and new speed) — not a nicety: naive Euler
+  under-integrates every braking step and the jitter worsens as frame rate
+  drops. Personality (`driver.aggr`, `reckless`) bends `T` and `a`, so a maniac
+  runs a 0.5 s headway and a cautious driver 1.8 s. Flag `TRAFFIC_IDM`. There
+  is also a **junction deadlock valve** — a car stopped inside an intersection
+  for 6 s is granted right of way and forced to move; it is the one traffic
+  failure class no shipped game has published a fix for, and it can only ever
+  unstick.
+- **An airfield has its own traffic** — `src/city/airside.js`. The other half of
+  the runway fix: roadrules.js CLOSES the airfield to ambient city traffic, and
+  this gives it the traffic it should have had instead — pushback tugs, baggage
+  trains, catering lifts, fuel bowsers and a follow-me car on real service loops,
+  plus the landside kerb, which IS ordinary traffic and should be busy. Every
+  vehicle registers through `CBZ.cityRegisterVehicle`, so they are enterable,
+  drivable and damageable like anything else — **never scenery** (owner law: no
+  dumb props; stealing a baggage tug on a live apron works). AIRCRAFT OUTRANK
+  GROUND VEHICLES: a service vehicle holds short if anything is moving on its
+  next waypoint, and that one behaviour is most of what makes an airport read as
+  an airport. Ratchet: `CBZ.airsideAudit().onRunway`, pinned at **0**.
+- **Seats of power stand on their own land** — `src/city/govcomplex.js`. OWNER:
+  "add gov buildings but NOT inside cities, because when you do that it overlaps
+  — like the pentagon and white house... those type of massive buildings that
+  have their own land plot." Nine complexes (Capitol · Executive Mansion ·
+  Governor's Residence · Bureau HQ · Defence HQ · City Hall · and the PRIVATE
+  estates: a mob compound, a cartel finca, a tech-money cliff house) each claim
+  a rectangle of EMPTY land, tested against every existing region and lot before
+  it is taken, register their own region + keep-out, and push a real access road
+  so you can drive there. They staff themselves through `power.js` — this file
+  authors no guards — and bind to the officeholders `officialdom.js` already
+  models (`polity.list(kind)`, stamped as `p._sid`, which is the field
+  `officialdom.seatOf` matches on) rather than inventing duplicate people, so
+  PETITION / GREASE / ENDORSE / LEAN ON light up at these doors for free and an
+  election moves who is inside. **The next standalone-complex-on-its-own-land
+  feature adds a `COMPLEXES` row — never a second placer.** Ratchet:
+  `CBZ.govComplexAudit()`, `overlaps` and `roadless` pinned at **0**;
+  `urbanAdjacent` is the ONE declared exception (City Hall, which `edgeOfCity`
+  lets touch the grid because a real city hall does) and is reported separately
+  so it can never quietly absorb an accidental collision.
+- **A seated body holds its seat** — `syncAttached` in `src/entities/npclife.js`.
+  `attach()` wrote the anchor transform ONCE and the per-frame tick re-asserted
+  `speed`/`state`/`char.sitting` but never the TRANSFORM. An attached actor is
+  still a full member of `CBZ.cityPeds`, and **41 files iterate that list and
+  write `group.rotation.y` with no `_npcAttached` guard** (peds.js is the only
+  one that guards) — world-space bearings landing on a group parented to a
+  moving aircraft, so the body settled at `worldBearing - planeHeading`, aimed
+  at a lot across the map. That is the owner's "plane passengers sit sideways",
+  and it was never about planes. The re-assert lives in the SHARED file, so cars,
+  taxis and every future moving seat are fixed by the same three writes. Skipped
+  during a live propuse arc; `actor._seatHold = false` opts out.
+- **Power / protection** — `src/city/power.js`. ONE declaration,
+  `CBZ.powerPrincipal(actor, {tier, org, role, seat, family})`, turns any actor
+  the world already runs into a PRINCIPAL: a ring of guards, the `Lv.N Role`
+  pill, a reaction rule, a floor ladder and a death response. **`CBZ.powerKit(tier)`
+  IS HOW YOU ADOPT IT** — it writes the whole bundle (detail size, weapons off
+  protection.js's GEAR, armour, standoff, challenge/warn/shove/draw radii,
+  escalation rate, stars-on-death, floors owned, family size) from ONE number,
+  through power laws solved against vips.js's five authored CAST rows. **No role
+  name appears in the table, and adding a Mayor/Don/CEO must never mean adding a
+  row.** `CBZ.powerReactionTo(actor)` → `welcome|watch|challenge|hostile` is the
+  ONE answer to "how does this person's security treat me", computed from the
+  GAP (your rank in HIS org via `factions.tier`, allegiance via
+  `factions.reactionTo`, the level gap, armed, wanted, how far up his building
+  you are) — never a hardcoded list. **A tier-0 nobody is not a principal**, so
+  the ordinary interaction card is byte-identical; walk up to a cartel head and
+  his detail answers instead. That difference IS the owner's ask. The intercept
+  is three `I.register` calls on the existing `ped:civ` layer, so the detail's
+  verb REPLACES the principal's by slot exclusivity and no new popup exists. The
+  floor ladder is `cityOccupyBuilding` with occupy.js's OWN preset re-stamped by
+  tier — power.js authors no interior, no stairs, no alarm. It is the THIRD
+  consumer of police.js's `_post` (and finding that third consumer exposed a
+  live bug: a citywide roadblock standing down used to march EVERY posted
+  officer in the world to its cruiser — `RB.cops.indexOf(c) >= 0` now gates it).
+  Ratchet: `CBZ.powerAudit().legacyGuardSites`, baseline **9**.
+- **Stories are a composition, not a script** — `city/origins.js`. The three
+  hand-written openings were ~120 lines of bespoke scene code EACH, so a fourth
+  cost a fourth 120 lines and a random one was impossible. Underneath they only
+  differ along SIX AXES — **who / where / purse / arms / heat / verb** — so the
+  axes are now the data and a story is a frozen roll of them (`PRESETS`).
+  `CBZ.cityOriginRoll()` rolls a fresh one with three coherence rules (an
+  address the person would actually have, hunted people are armed, the
+  objective must be answerable from the purse). Nine stories ship; a tenth is a
+  ROW. Same binding rule as `contracts.js` and it is binding: **the generator
+  picks the verb, the WORLD supplies the specifics** — a `where` FINDS a lot
+  the city built, a `heat` flips `huntPlayer` on peds the sim was already
+  running (which lights every threat surface free via `cityTargetsPlayer`), a
+  `verb` runs through `core/mission.js` and builds no HUD of its own.
+  `CBZ.cityAirborneStart(rec, {alt,speed,heading})` in `playeraircraft.js` is
+  the PILOT opening — spawnFlyableFromProp plus the four state writes that turn
+  a parked airframe into a cruising one, kept in the file that owns the
+  heading/velocity convention. The plane picker reads the LIVE registry
+  (`CBZ.cityOriginPlanes()` off `cityMilitaryVehicles`), so **every future
+  airframe appears with no edit** — and it is DEFERRED, because that registry
+  is populated by an `onUpdate(55.1)` pass that has not run when a mode reset
+  applies the origin. Ratchet: `CBZ.cityOriginAudit()`, `bespoke` pinned at
+  **3** and may only go DOWN — the seventh story must not add a fourth.
 
   HONEST STATUS (2026-07-26, after the predators wave): `bodyBite` and the gore
   medium have real adoption (3 consumers / every existing gore caller).

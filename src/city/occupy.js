@@ -834,7 +834,12 @@
             for (let i = 0; i < more.length; i++) pts.push(more[i]);
           }
         }
-        const postRole = (fs.vip && fs.guardRole) ? (ROLES[fs.guardRole] || role) : role;
+        // A floor's GUARD role should apply whenever the floor declares one —
+        // the `fs.vip` conjunct meant that a floor with guards but no VIP on
+        // it cast its posted officers in the FLOOR's role instead of the guard
+        // role, so a boss's security landed dressed and titled as more bosses.
+        // (city/power.js hit this the moment it stamped floors with vip:false.)
+        const postRole = fs.guardRole ? (ROLES[fs.guardRole] || role) : role;
         for (let i = 0; i < pts.length && i < n; i++) {
           if (used >= MAX) break;
           const ped = spawnPost(rec, fs, postRole, k, room, pts[i], exterior, rng, spec, {});

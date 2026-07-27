@@ -82,6 +82,212 @@
   //   22/90u colour cells whose hard edges dissolved into orange/green
   //   confetti from any altitude. `?cfg_CONTINENT_LANDCOVER_V2=0` reverts.
   if (CFG.CONTINENT_LANDCOVER_V2 == null) CFG.CONTINENT_LANDCOVER_V2 = true;
+  // WORLD_LAYOUT_V2 (declared in world/layout.js, which parses first) — the
+  // stage-3 world re-lay. This file is one of its four consumers; the guard
+  // below only mirrors the default for a build without layout.js.
+  if (CFG.WORLD_LAYOUT_V2 == null) CFG.WORLD_LAYOUT_V2 = true;
+  const LAYOUT_V2 = function () { return CFG.WORLD_LAYOUT_V2 !== false; };
+
+  /* ==================================================================
+     CBZ.worldLayoutAudit() — THE WORLD LAYOUT AS NUMBERS.
+
+     The owner's complaint ("the cities and mountains … are much too
+     close together") is a SPACING complaint, and spacing had no
+     measurement anywhere in this repo. This is it, and it is the ONE
+     place that answers all four of the layout questions:
+
+       • how far apart are the landmasses, really (edge gap, not centre
+         distance — centre distance flatters a big region);
+       • is the relief a RIM or is it lumps in the middle
+         (mountainCellsInnerHalf + the relief means either side of the
+         half-extent line);
+       • are the two standing doctrines still true
+         (mountainCellsOutsideSnow, cityOnMountain — both RATCHETS that
+         may only ever go DOWN; they use the math gate's own strict
+         predicates so this number is an upper bound on the gate's);
+       • how big is the world at all (span/centre/halfExtent).
+
+     Sampling matches tools/terrain-map-audit.mjs: the same three height
+     oracles maxed together (backdrop / snow massif / registered ground),
+     the same 25u mountain threshold, and a span derived from the live
+     FLAT contract so it scales with the world instead of being pinned to
+     a literal that silently stops covering the map.
+
+     Pass {step, mtn, span} to override. Pure read — mutates nothing.
+  ================================================================== */
+  CBZ.worldLayoutAudit = function (opts) {
+    opts = opts || {};
+    const MTN = Number.isFinite(+opts.mtn) ? +opts.mtn : 25;
+    const STEP = Number.isFinite(+opts.step) && +opts.step > 0 ? +opts.step : 60;
+    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+    const F = CBZ.TERRAIN_FLAT || { minX: -1600, maxX: 1600, minZ: -1600, maxZ: 1600 };
+    const ccx = (F.minX + F.maxX) / 2, ccz = (F.minZ + F.maxZ) / 2;
+    const chx = Math.max(1, (F.maxX - F.minX) / 2), chz = Math.max(1, (F.maxZ - F.minZ) / 2);
+    const span = Number.isFinite(+opts.span) ? +opts.span : Math.max(chx, chz) + 400;
+
+    // ---- 1. the PEER landmasses -------------------------------------
+    // Same filter the math gate's overlap test uses: a biome-bearing,
+    // non-underlay, non-link region. Causeways/bridges deliberately touch
+    // two shores, and the wilds underlay covers everything, so neither is
+    // a landmass and neither may set the spacing floor.
+    // UNDERLAYS: the gate's overlap test drops them all, because an
+    // ownership disc that contains a venue is not a clash. Spacing is a
+    // different question — Diamond Speedway and the Greater Mercy Range
+    // are marked underlay and they are unmistakably PLACES, so they stay;
+    // only the `wilds` backcountry (which covers the whole map by
+    // construction) is dropped.
+    const isLink = function (r) { return /causeway|bridge|link/i.test((r && r.name) || ""); };
+    const raw = ((A && A.regions) || []).filter(function (r) {
+      return r && r.biome && r.biome !== "wilds" && !isLink(r) &&
+        (Number.isFinite(r.minX) || (r.kind === "circle" && Number.isFinite(r.cx) && Number.isFinite(r.r)));
+    }).map(function (r) {
+      const b = (r.kind === "circle")
+        ? { minX: r.cx - r.r, maxX: r.cx + r.r, minZ: r.cz - r.r, maxZ: r.cz + r.r }
+        : { minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ };
+      return {
+        name: r.name || r.biome, biome: r.biome,
+        cx: (b.minX + b.maxX) / 2, cz: (b.minZ + b.maxZ) / 2,
+        hx: (b.maxX - b.minX) / 2, hz: (b.maxZ - b.minZ) / 2,
+        minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ,
+        area: Math.max(0, (b.maxX - b.minX) * (b.maxZ - b.minZ)),
+      };
+    });
+    // THE MAINLAND IS NOT A REGION. It lives on city.minX/maxX and has
+    // never been in any region sweep — which meant the single biggest
+    // landmass in the world was invisible to every spacing question ever
+    // asked about it. Synthesise it here; the commerce annex (a disc on
+    // city.annex, same story) rides in with it.
+    if (A && Number.isFinite(A.minX)) {
+      raw.push({ name: "Mainland (downtown)", biome: "city",
+        cx: (A.minX + A.maxX) / 2, cz: (A.minZ + A.maxZ) / 2,
+        hx: (A.maxX - A.minX) / 2, hz: (A.maxZ - A.minZ) / 2,
+        minX: A.minX, maxX: A.maxX, minZ: A.minZ, maxZ: A.maxZ,
+        area: (A.maxX - A.minX) * (A.maxZ - A.minZ) });
+    }
+    const AN = A && A.annex;
+    if (AN && Number.isFinite(AN.cx) && Number.isFinite(AN.radius)) {
+      raw.push({ name: "Commerce Annex", biome: "annex",
+        cx: AN.cx, cz: AN.cz, hx: AN.radius, hz: AN.radius,
+        minX: AN.cx - AN.radius, maxX: AN.cx + AN.radius,
+        minZ: AN.cz - AN.radius, maxZ: AN.cz + AN.radius,
+        area: 4 * AN.radius * AN.radius });
+    }
+    // NESTED VENUES ARE NOT LANDMASSES. The jail compound sits inside the
+    // city and the pit lane inside the speedway ON PURPOSE (the gate's own
+    // 85% nesting rule). Left in, their zero gap would pin
+    // minPairDistance at 0 forever and the metric would be dead.
+    const regions = raw.filter(function (r) {
+      for (let i = 0; i < raw.length; i++) {
+        const o = raw[i];
+        if (o === r || o.area <= r.area) continue;
+        const w = Math.min(r.maxX, o.maxX) - Math.max(r.minX, o.minX);
+        const d = Math.min(r.maxZ, o.maxZ) - Math.max(r.minZ, o.minZ);
+        if (w > 0 && d > 0 && w * d >= 0.85 * r.area) return false;
+      }
+      return true;
+    });
+
+    // ---- 2. spacing: EDGE gaps, not centre distances ----------------
+    // minPairDistance  = the tightest strait anywhere in the world.
+    // meanPairDistance = the mean of each landmass's NEAREST-neighbour
+    //   gap ("how much open country is around a place"), which is the
+    //   number that tracks the owner's complaint. The mean over ALL
+    //   pairs grows for free whenever the map does, so it is reported
+    //   separately as evidence and is not the headline.
+    // SAME-BIOME PAIRS ARE SKIPPED, for the reason the math gate's own
+    // overlap test skips them: "same biome = sibling, fine". A civic
+    // campus butted onto its own city, or three villages of one nation
+    // clustered together, is DESIGN — counting those would have pinned
+    // minPairDistance at 2u (Goldspire <-> its civic campus, measured)
+    // and the metric would never have moved again.
+    let minPair = Infinity, allSum = 0, allPairs = 0, closest = null;
+    const nearest = new Array(regions.length).fill(Infinity);
+    const tight = [];
+    for (let i = 0; i < regions.length; i++) {
+      for (let j = i + 1; j < regions.length; j++) {
+        const a = regions[i], b = regions[j];
+        if (a.biome === b.biome) continue;
+        const dx = Math.max(a.minX - b.maxX, 0, b.minX - a.maxX);
+        const dz = Math.max(a.minZ - b.maxZ, 0, b.minZ - a.maxZ);
+        const g = Math.sqrt(dx * dx + dz * dz);
+        allSum += g; allPairs++;
+        if (g < nearest[i]) nearest[i] = g;
+        if (g < nearest[j]) nearest[j] = g;
+        tight.push({ g: g, n: a.name + " <-> " + b.name });
+        if (g < minPair) { minPair = g; closest = a.name + " <-> " + b.name; }
+      }
+    }
+    let nnSum = 0, nnN = 0;
+    for (let i = 0; i < nearest.length; i++) if (isFinite(nearest[i])) { nnSum += nearest[i]; nnN++; }
+    // the eight tightest straits, named — a bare minimum is not actionable
+    tight.sort(function (p, q) { return p.g - q.g; });
+    const tightest = tight.slice(0, 8).map(function (t) { return Math.round(t.g) + "u  " + t.n; });
+
+    // ---- 3. the relief grid ------------------------------------------
+    const biomeAt = CBZ.cityBiomeAt || function () { return "?"; };
+    const th = CBZ.terrainHeight || function () { return 0; };
+    const sh = CBZ.snowTerrainHeightAt || function () { return 0; };
+    const fl = CBZ.floorAt || function () { return 0; };
+    const INNER = 0.5;                       // "the middle half of the map"
+    let cells = 0, mtnCells = 0, outSnow = 0, innerMtn = 0, cityMtn = 0;
+    let reliefSum = 0, reliefMax = 0, nonFinite = 0;
+    let innerCells = 0, innerSum = 0, innerHill = 0, outerCells = 0, outerSum = 0;
+    for (let x = ccx - span; x <= ccx + span; x += STEP) {
+      for (let z = ccz - span; z <= ccz + span; z += STEP) {
+        cells++;
+        let b = "?"; try { b = biomeAt(x, z) || "?"; } catch (e) {}
+        let h = 0;
+        try {
+          const h1 = th(x, z), h2 = sh(x, z), h3 = fl(x, z);
+          if (!Number.isFinite(h1) || !Number.isFinite(h2) || !Number.isFinite(h3)) nonFinite++;
+          h = Math.max(h1 || 0, h2 || 0, h3 || 0);
+        } catch (e) { nonFinite++; }
+        if (!Number.isFinite(h)) { h = 0; }
+        reliefSum += h; if (h > reliefMax) reliefMax = h;
+        const tx = Math.abs(x - ccx) / chx, tz = Math.abs(z - ccz) / chz;
+        const isInner = (tx > tz ? tx : tz) <= INNER;
+        if (isInner) { innerCells++; innerSum += h; if (h > 8) innerHill++; }
+        else { outerCells++; outerSum += h; }
+        if (h > MTN) {
+          mtnCells++;
+          // the math gate's OWN predicates, so these are upper bounds on it
+          if (b !== "snow" && b !== "?") outSnow++;
+          if (/city|urban|downtown|commerce/i.test(b)) cityMtn++;
+          if (isInner) innerMtn++;
+        }
+      }
+    }
+    const r1 = function (v) { return Math.round(v * 10) / 10; };
+    return {
+      // --- the seven the layout contract names ---
+      regions: regions.map(function (r) {
+        return { name: r.name, biome: r.biome, cx: Math.round(r.cx), cz: Math.round(r.cz),
+          hx: Math.round(r.hx), hz: Math.round(r.hz) };
+      }),
+      minPairDistance: isFinite(minPair) ? Math.round(minPair) : null,
+      meanPairDistance: nnN ? Math.round(nnSum / nnN) : null,
+      mountainCells: mtnCells,
+      mountainCellsOutsideSnow: outSnow,      // RATCHET — may only go DOWN
+      mountainCellsInnerHalf: innerMtn,       // the owner's "no lumps in the middle"
+      cityOnMountain: cityMtn,                // RATCHET — pinned at 0 forever
+      // --- evidence (never a ratchet; makes the seven readable) ---
+      regionCount: regions.length,
+      closestPair: closest,
+      tightestStraits: tightest,
+      meanAllPairs: allPairs ? Math.round(allSum / allPairs) : null,
+      cells: cells, step: STEP, mtn: MTN, span: Math.round(span),
+      center: { x: Math.round(ccx), z: Math.round(ccz) },
+      halfExtent: { x: Math.round(chx), z: Math.round(chz) },
+      reliefMax: Math.round(reliefMax),
+      reliefMean: r1(cells ? reliefSum / cells : 0),
+      reliefMeanInnerHalf: r1(innerCells ? innerSum / innerCells : 0),
+      reliefMeanOuterHalf: r1(outerCells ? outerSum / outerCells : 0),
+      hillCellsInnerHalf: innerHill,          // relief > 8u inside the middle half
+      nonFinite: nonFinite,
+      stage: CBZ.WORLD_LAYOUT_STAGE == null ? 1 : CBZ.WORLD_LAYOUT_STAGE,
+      layoutV2: LAYOUT_V2(),
+    };
+  };
 
   CBZ.addLandmass(function (city) {
     if (CFG.CITY_CONTINENT === false) return;
@@ -112,7 +318,16 @@
       : Math.max(180, Math.min(2400, Number.isFinite(requestedMargin) ? requestedMargin : 1200));
     minX -= PAD; maxX += PAD; minZ -= PAD; maxZ += PAD;
     const W = maxX - minX, D = maxZ - minZ;
-    if (!isFinite(W) || W <= 0 || W > 12000) return;
+    // Sanity roof on the plate, NOT a design constraint — it exists so a
+    // runaway region can never ask for a kilometre-scale PlaneGeometry. The
+    // stage-3 layout (world/layout.js) puts the region union at 7756u wide,
+    // which with the 2200u country belt is 12156 — over the old 12000 roof,
+    // and blowing it would silently delete the entire continent. Raised to
+    // 13500 with the layout flag (still ~1.3k of headroom, and the plate's
+    // vertex count is fixed at (SEG+1)^2 regardless of W, so a wider plate
+    // costs resolution, never memory). Flag off = the authored 12000.
+    const W_ROOF = LAYOUT_V2() ? 13500 : 12000;
+    if (!isFinite(W) || W <= 0 || W > W_ROOF) return;
 
     function insideAnything(x, z, margin) {
       margin = margin || 0;
@@ -342,6 +557,39 @@
       if (z >= futureZ0 - 28 && z <= futureZ1 + 28) best = Math.min(best, Math.abs(x - futureX0), Math.abs(x - futureX1));
       return best;
     }
+    // ---- THE RIM LAW (WORLD_LAYOUT_V2) ----------------------------------
+    // Owner: "the mountains … should be on the EDGES of the map"; the relief
+    // must read as a RIM, not as lumps scattered through the middle. The old
+    // field was flat in `rimT` — the same 0-22u hill country stood 200m from
+    // downtown and 5km out at the frontier, which is exactly the "cities and
+    // mountains are much too close together" complaint at ground level.
+    //
+    // rimT is a BOX metric (Chebyshev in normalised half-extents) over the
+    // plate rect: 0 dead centre, 1 at the plate edge. Using the box metric
+    // rather than a radius is deliberate — the plate is a rectangle, and a
+    // radial gate would put a circular bald spot in a rectangular map.
+    //
+    // The gate NEVER lifts a sample above RIM_CEIL, and RIM_CEIL is set
+    // strictly UNDER the 25u mountain threshold both the math gate and
+    // tools/terrain-map-audit.mjs test. That is a proof, not a hope: the
+    // backcountry is `wilds` biome, so a single 25u sample out here would be
+    // a mountains-outside-snow violation. This clamp makes it impossible —
+    // the doctrine gets MORE true, never less.
+    const RIM_IN = 0.42;      // inside this: quiet open country you drive across
+    const RIM_OUT = 0.88;     // by here: the full rim swell
+    const RIM_LO = 0.20;      // interior keeps a fifth of the swell (not a tabletop)
+    const RIM_HI = 1.85;      // the rim gets nearly 2x — then meets the ceiling
+    const RIM_CEIL = 23;      // hard ceiling, strictly under the 25u doctrine line
+    const rimCX = (minX + maxX) * 0.5, rimCZ = (minZ + maxZ) * 0.5;
+    const rimHX = Math.max(1, (maxX - minX) * 0.5), rimHZ = Math.max(1, (maxZ - minZ) * 0.5);
+    function rimT(x, z) {
+      const tx = Math.abs(x - rimCX) / rimHX, tz = Math.abs(z - rimCZ) / rimHZ;
+      return tx > tz ? tx : tz;
+    }
+    function rimGain(x, z) {
+      const g = smooth01((rimT(x, z) - RIM_IN) / (RIM_OUT - RIM_IN));
+      return RIM_LO + (RIM_HI - RIM_LO) * g;
+    }
     function countryHeightAt(x, z) {
       if (CFG.CONTINENT_RELIEF_V1 === false) return 0;
       if (x < minX || x > maxX || z < minZ || z > maxZ) return 0;
@@ -361,15 +609,30 @@
       // texture, not geography (a terrain with no octave near the map's own
       // scale cannot have macro structure, by construction). One continent-
       // wavelength uplift field now organises the same hills into broad
-      // uplands and plains. The tanh SOFT-SATURATES the result under 24u, so
-      // backcountry relief can approach but NEVER cross the math gate's 25u
-      // mountain threshold — "mountains outside snow" stays impossible here
-      // no matter what the uplift multiplies to. Deterministic (hash01 salt
-      // 8905), per-point, and zero wherever h is already 0, so every existing
-      // flat gate (coasts, pads, highways below) is untouched.
+      // uplands and plains. Deterministic (hash01 salt 8905), per-point, and
+      // zero wherever h is already 0, so every existing flat gate (coasts,
+      // pads, highways below) is untouched.
+      //
+      // ORDER MATTERS, and this is the merge of two laws that both scale h.
+      // The MACRO runs first: it decides the SHAPE of the backcountry — where
+      // the uplands and the plains are. WORLD_LAYOUT_V2's rim gain runs second,
+      // because it decides WHERE THAT SHAPE IS ALLOWED TO BE TALL (interior
+      // 0.20x, rim 1.85x). Reversing them would let the macro's tanh re-inflate
+      // the interior the rim law had just flattened, which is exactly the
+      // "hills as tall 200m from downtown as 5km out" the owner complained of.
+      //
+      // Both laws independently keep the result under the math gate's 25u
+      // mountain threshold — the macro soft-saturates at 24u, the rim law hard-
+      // ceilings at RIM_CEIL (23u). Applying the STRICTER of the two last means
+      // "mountains outside snow" stays impossible here by construction, not by
+      // luck, whichever flag is on.
       if (CFG.CONTINENT_RELIEF_MACRO !== false && h > 0) {
         const upl = noise2(x + 940, z - 2600, 2900, 8905);
         h = 24 * Math.tanh((h * (1.25 + 2.15 * upl * upl)) / 24);
+      }
+      if (LAYOUT_V2()) {
+        h *= rimGain(x, z);
+        if (h > RIM_CEIL) h = RIM_CEIL;
       }
       // Frontier highways are cut into the landscape with broad shoulders;
       // their visible planes never hover over a noisy heightfield.

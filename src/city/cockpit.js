@@ -1064,6 +1064,351 @@
     };
   };
 
+  // ============================================================
+  //  THE SIGHTLINE RATCHET — CBZ.cockpitSightAudit()
+  //
+  //  OWNER: "the controls go too high and the window starts too high, you
+  //  can't see in front of you." That complaint took a screenshot to make and
+  //  an argument to settle, which is precisely the kind of thing CLAUDE.md
+  //  says must become a NUMBER. So it is one.
+  //
+  //  WHAT IT MEASURES, and why it is not just an echo of the solve:
+  //  city/cockpit_shapes.js solves the panel drop, the glareshield rake and
+  //  the nose-deck height ANALYTICALLY against a down-vision line. This does
+  //  not read any of that back. It sweeps real rays out of the pilot's eye
+  //  through the real built triangles — the hood's taper, the coaming roll,
+  //  the bezel, the nose deck, the yoke, whatever a future costume adds —
+  //  and reports where they actually stop. If the solve and the geometry ever
+  //  disagree, THIS is the number that moves, and the gate fails.
+  //
+  //  THE READING:
+  //    downVisionDeg  degrees below the horizon you can see straight ahead
+  //                   over the nose. NEGATIVE means you cannot see the
+  //                   horizon at all — you have to look UP to find sky, which
+  //                   is what the owner's screenshot was. PASS: >= 15.
+  //    upVisionDeg    degrees above the horizon before structure cuts in.
+  //    eyeY/glareY/sillY   body-local heights, so "is the glareshield below
+  //                   the pilot's eye" is answerable without a raycast at
+  //                   all. Real cockpits: glareY sits 0.10-0.20 m under eyeY.
+  //    panelTopDeg/panelBotDeg   where the instruments are, measured the same
+  //                   way. THIS IS THE OTHER HALF OF THE GATE: the cheap way
+  //                   to buy down-vision is to delete the panel, and these
+  //                   two numbers make that show up instead of pass.
+  //    blocked        downVisionDeg < the shared floor (cockpit_shapes SIGHT.MIN).
+  //    hostDownDeg    the same measurement taken against the AIRFRAME's own
+  //                   forward structure (null when there is no live craft, or
+  //                   the craft has none). seatDownDeg is the worse of the two
+  //                   — what the pilot can genuinely see. See hostBlockers.
+  //
+  //  With aircraft in the world it measures THOSE cockpits. With none — the
+  //  math gate boots an empty world — it builds one of each costume off the
+  //  same synthetic probes cockpitAudit() uses, measures, and disposes them,
+  //  so the ratchet is available in a headless boot with no player and no
+  //  aeroplane.
+  // ============================================================
+  const SIGHT_LO = -50, SIGHT_HI = 70;   // sweep bounds, degrees
+  const SIGHT_STEP = 1;                  // coarse step, then 7 bisections (~0.008°)
+  const SIGHT_MIN_RUN = 4;               // degrees — narrower than this is a slot,
+                                         // not a window (see sightSweep)
+  const SIGHT_BAND = 0.11;               // half-width (m) of the forward cone we
+                                         // call "straight ahead" — a door pillar
+                                         // 0.9 m off the centreline is not what
+                                         // stops you seeing the runway.
+  const _sr = new THREE.Raycaster();
+  const _so = new THREE.Vector3(), _sd = new THREE.Vector3();
+
+  // Collect the meshes that can actually STOP light. Glass and the HUD
+  // combiner are tagged by the builder and skipped; so is anything whose
+  // material is transparent, because the raycaster does not know or care.
+  function sightBlockers(root, out) {
+    root.updateWorldMatrix(true, true);
+    root.traverse(function (o) {
+      if (!o.isMesh || !o.geometry) return;
+      const ud = o.userData || {};
+      if (ud.glass || ud.seeThrough) return;
+      const m = o.material;
+      const arr = Array.isArray(m) ? m : [m];
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i] && arr[i].transparent && arr[i].opacity < 0.9) return;
+      }
+      out.push(o);
+    });
+    return out;
+  }
+
+  // Is the forward ray at `deg` (negative = down) blocked? Cast three rays
+  // across the eye's forward cone rather than one down the exact centreline:
+  // a windscreen centre post is a real obstruction that a single axial ray
+  // would walk straight through, and on the costumes that have one it is
+  // 0.11-0.16 m wide.
+  function sightHit(root, list, eye, deg) {
+    if (!list.length) return false;
+    const a = deg * Math.PI / 180, sy = Math.sin(a), sz = Math.cos(a);
+    for (let k = -1; k <= 1; k++) {
+      _so.set(eye.x + k * SIGHT_BAND, eye.y, eye.z);
+      _so.applyMatrix4(root.matrixWorld);
+      _sd.set(0, sy, sz).transformDirection(root.matrixWorld);
+      _sr.set(_so, _sd);
+      _sr.near = 0; _sr.far = 40;
+      let hit = null;
+      try { hit = _sr.intersectObjects(list, false); } catch (e) { hit = null; }
+      if (hit && hit.length) return true;
+    }
+    return false;
+  }
+
+  // Sweep, then take the CLEAR RUN nearest the horizon and bisect its two
+  // edges. Taking the run nearest zero (rather than "sweep down from level")
+  // is what lets this report a broken cockpit honestly: when the shelf sits
+  // above the eye there is no clear ray at 0° at all, the nearest run starts
+  // somewhere above it, and downVisionDeg comes back NEGATIVE — the exact
+  // reading the pre-fix airliner gives and a plain "first blocked angle going
+  // down" sweep would have reported as 0.
+  //
+  // SIGHT_MIN_RUN is not fussiness, it is the lesson from the first reading
+  // this function ever produced. The pre-fix airliner floats its glareshield
+  // 0.18 m ABOVE the panel's top edge, and that gap is a real, open,
+  // one-degree-tall LETTERBOX you can see the world through. Scored naively,
+  // peering through a slot between the dashboard and the hood counted as 6°
+  // of down-vision. A window you cannot fly an approach through is not a
+  // window; a run has to be wide enough to be a view before it counts as one.
+  function sightSweep(root, list, eye) {
+    const n = Math.round((SIGHT_HI - SIGHT_LO) / SIGHT_STEP) + 1;
+    const clear = new Array(n);
+    for (let i = 0; i < n; i++) clear[i] = !sightHit(root, list, eye, SIGHT_LO + i * SIGHT_STEP);
+    // pick the run whose interval is closest to the horizon; longest wins ties.
+    // Two passes: real views first, and only if there are none at all do we
+    // fall back to reporting whatever slot exists (so a hopeless cockpit gets
+    // a number instead of a shrug).
+    let bi = -1, bj = -1;
+    for (let pass = 0; pass < 2 && bi < 0; pass++) {
+      let bDist = Infinity, bLen = -1;
+      for (let i = 0; i < n; i++) {
+        if (!clear[i]) continue;
+        const s = i;
+        let j = i; while (j + 1 < n && clear[j + 1]) j++;
+        i = j;                                   // the outer loop resumes past this run
+        const lo = SIGHT_LO + s * SIGHT_STEP, hi = SIGHT_LO + j * SIGHT_STEP;
+        const len = hi - lo;
+        if (pass === 0 && len < SIGHT_MIN_RUN) continue;
+        const d = (lo <= 0 && hi >= 0) ? 0 : Math.min(Math.abs(lo), Math.abs(hi));
+        if (d < bDist - 1e-9 || (Math.abs(d - bDist) < 1e-9 && len > bLen)) { bDist = d; bLen = len; bi = s; bj = j; }
+      }
+    }
+    if (bi < 0) return { down: -90, up: -90, ok: false };
+    // bisect each edge into the neighbouring blocked step
+    function edge(clearDeg, blockedDeg) {
+      let c = clearDeg, b = blockedDeg;
+      for (let k = 0; k < 7; k++) {
+        const mid = (c + b) / 2;
+        if (sightHit(root, list, eye, mid)) b = mid; else c = mid;
+      }
+      return c;
+    }
+    const loDeg = SIGHT_LO + bi * SIGHT_STEP, hiDeg = SIGHT_LO + bj * SIGHT_STEP;
+    const down = bi > 0 ? edge(loDeg, loDeg - SIGHT_STEP) : loDeg;
+    const up = bj < n - 1 ? edge(hiDeg, hiDeg + SIGHT_STEP) : hiDeg;
+    return { down: -down, up: up, ok: true };
+  }
+
+  // ---- the AIRFRAME's own forward structure ------------------------------
+  // A cockpit that measures only ITS OWN furniture is a stat fiction the
+  // moment `spec.minimal` is true, because minimal exists precisely for the
+  // airframes that brought their own modelled flight deck (the airport
+  // airliner: island_airport.js buildCabin puts a console block and a front
+  // wall in there). Reporting "17° of down-vision" while the player is
+  // looking at somebody else's bulkhead is exactly the kind of number
+  // CLAUDE.md bans. So when there is a real craft we sweep its body too and
+  // publish hostDownDeg beside ours.
+  //
+  // It is deliberately NOT folded into `blocked`: these four files cannot fix
+  // another builder's geometry, and a ratchet nobody can make pass is a
+  // ratchet everybody learns to ignore. hostBlocked is the separate flag, and
+  // the two together say WHOSE geometry is in the way.
+  const HOST_CAP = 64;          // meshes; the nose box is small, this is slack
+  const HOST_FWD = 14;          // m ahead of the eye worth testing
+  const HOST_SIDE = 1.8, HOST_VERT = 3.2;
+  const _hb = new THREE.Box3(), _hm = new THREE.Matrix4(), _hi = new THREE.Matrix4();
+  function litUp(o, stop) {      // visible, and every ancestor up to `stop` too
+    let n = o;
+    while (n && n !== stop) { if (n.visible === false) return false; n = n.parent; }
+    return true;
+  }
+  function hostBlockers(craft, anchor, eye) {
+    const out = [];
+    const grp = craft && craft.group;
+    if (!grp || !anchor) return out;
+    grp.updateWorldMatrix(true, true);
+    anchor.updateWorldMatrix(true, false);
+    _hi.copy(anchor.matrixWorld).invert();
+    grp.traverse(function (o) {
+      if (out.length >= HOST_CAP) return;
+      if (!o.isMesh || !o.geometry) return;
+      const ud = o.userData || {};
+      // our own furniture (measured separately), real glass, the combiner, and
+      // the cosmetic pilot silhouette — which cockpit_view.js hides while you
+      // are sitting in his head, and which the raycaster would happily hit
+      // anyway because r128's raycast ignores `visible`.
+      if (ud.cockpit || ud.glass || ud.seeThrough || ud.pilot) return;
+      if (!litUp(o, grp)) return;
+      const m = o.material, arr = Array.isArray(m) ? m : [m];
+      for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].transparent && arr[i].opacity < 0.9) return;
+      if (!o.geometry.boundingBox) { try { o.geometry.computeBoundingBox(); } catch (e) { return; } }
+      if (!o.geometry.boundingBox) return;
+      _hb.copy(o.geometry.boundingBox);
+      _hm.copy(_hi).multiply(o.matrixWorld);
+      _hb.applyMatrix4(_hm);                       // into the canonical body frame
+      if (!Number.isFinite(_hb.max.z)) return;
+      if (_hb.max.z < eye.z + 0.05 || _hb.min.z > eye.z + HOST_FWD) return;
+      if (_hb.max.x < eye.x - HOST_SIDE || _hb.min.x > eye.x + HOST_SIDE) return;
+      if (_hb.max.y < eye.y - HOST_VERT || _hb.min.y > eye.y + HOST_VERT) return;
+      out.push(o);
+    });
+    return out;
+  }
+
+  // Highest / lowest body-local Y of a named mesh, within the forward cone.
+  // Read off the GEOMETRY (through the mesh's own matrix relative to the
+  // cockpit root), never off `position` — a taper and a rotation both move
+  // the edge that matters and neither shows up in a position vector.
+  const _eb = new THREE.Box3(), _em = new THREE.Matrix4(), _ei = new THREE.Matrix4();
+  function partExtent(root, name) {
+    let hi = null, lo = null;
+    _ei.copy(root.matrixWorld).invert();
+    root.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || o.name !== name) return;
+      if (!o.geometry.boundingBox) { try { o.geometry.computeBoundingBox(); } catch (e) { return; } }
+      if (!o.geometry.boundingBox) return;
+      _eb.copy(o.geometry.boundingBox);
+      _em.copy(_ei).multiply(o.matrixWorld);
+      _eb.applyMatrix4(_em);
+      if (!Number.isFinite(_eb.max.y) || !Number.isFinite(_eb.min.y)) return;
+      hi = hi == null ? _eb.max.y : Math.max(hi, _eb.max.y);
+      lo = lo == null ? _eb.min.y : Math.min(lo, _eb.min.y);
+    });
+    return { hi: hi, lo: lo };
+  }
+
+  function sightOne(id, root, spec, live1) {
+    const eye = spec.eye;
+    const list = sightBlockers(root, []);
+    const sw = sightSweep(root, list, eye);
+    const rec = (root.userData && root.userData.sight) || {};
+    // the airframe's own forward structure, swept in the ANCHOR's frame — the
+    // cockpit root may be living in the overlay scene at identity while the
+    // aeroplane is three kilometres away, and the two frames only agree
+    // body-locally. Both are the same body-local coordinates, so the two
+    // sweeps are directly comparable.
+    let hostDeg = null, hostN = 0;
+    if (live1 && live1.craft && live1.anchor) {
+      try {
+        const hl = hostBlockers(live1.craft, live1.anchor, eye);
+        hostN = hl.length;
+        if (hl.length) hostDeg = +sightSweep(live1.anchor, hl, eye).down.toFixed(2);
+      } catch (e) { hostDeg = null; }
+    }
+    // measured first, solved only as the fallback for a costume that skipped
+    // the part entirely (spec.minimal builds no windscreen)
+    const gl = partExtent(root, "cockpit-glareshield");
+    const ws = partExtent(root, "cockpit-windscreen");
+    const pn = partExtent(root, "cockpit-panel");
+    const glareY = gl.hi != null ? gl.hi : fin(rec.glareY, eye.y);
+    const sillY = ws.lo != null ? ws.lo : fin(rec.sillY, glareY);
+    const panelTopDeg = pn.hi != null
+      ? -Math.atan2(pn.hi - eye.y, Math.max(0.01, fin(rec.panelCz, eye.z + 0.8) - eye.z)) * R2D : null;
+    const panelBotDeg = pn.lo != null
+      ? -Math.atan2(pn.lo - eye.y, Math.max(0.01, fin(rec.panelCz, eye.z + 0.8) - eye.z)) * R2D : null;
+    return {
+      id: id,
+      downVisionDeg: +sw.down.toFixed(2),
+      upVisionDeg: +sw.up.toFixed(2),
+      eyeY: +eye.y.toFixed(4),
+      glareY: +glareY.toFixed(4),
+      sillY: +sillY.toFixed(4),
+      glareBelowEye: +(eye.y - glareY).toFixed(4),   // real cockpits: 0.10-0.20 m
+      panelTopDeg: panelTopDeg == null ? null : +panelTopDeg.toFixed(2),
+      panelBotDeg: panelBotDeg == null ? null : +panelBotDeg.toFixed(2),
+      panelVisible: pn.hi != null && pn.lo != null && (pn.hi - pn.lo) > 0.05,
+      wantDownDeg: fin(rec.wantDownDeg, 0),
+      solved: !!rec.on,
+      blockers: list.length,
+      // null = nothing measured (no live craft, or a craft with no forward
+      // structure of its own). A NUMBER is what the airframe itself allows.
+      hostDownDeg: hostDeg,
+      hostBlockers: hostN,
+      // what the pilot can ACTUALLY see, which is whichever of the two is worse
+      seatDownDeg: hostDeg == null ? +sw.down.toFixed(2) : +Math.min(sw.down, hostDeg).toFixed(2),
+    };
+  }
+
+  CBZ.cockpitSightAudit = function () {
+    const SH = CBZ.cockpitShapes;
+    const MIN = (SH && SH.SIGHT && SH.SIGHT.MIN) || 15;
+    const per = [];
+    let temp = [];
+    if (live.length) {
+      for (let i = 0; i < live.length; i++) {
+        const r = live[i];
+        if (r && r.root && r.spec) { try { per.push(sightOne(r.spec.id + ":" + (r.spec.name || "craft"), r.root, r.spec, r)); } catch (e) {} }
+      }
+    }
+    if (!per.length && SH && SH.build) {
+      // no aeroplane in the world: build one of each costume, measure, bin it.
+      const probes = [
+        { airClass: "jet", displayName: "PROBE JET" },
+        { airClass: "heli", displayName: "PROBE HELI" },
+        { airClass: "airliner", displayName: "PROBE LINER", modelYawOffset: -Math.PI / 2 },
+        { airClass: "jet", displayName: "B-2 SPIRIT" },
+        { airClass: "prop", displayName: "PROBE PROP" },
+      ];
+      for (let i = 0; i < probes.length; i++) {
+        let spec = null, built = null;
+        try { spec = CBZ.cockpitSpec(probes[i]); built = SH.build(spec, {}); } catch (e) { built = null; }
+        if (!built || !built.root) continue;
+        try { per.push(sightOne(spec.id, built.root, spec)); } catch (e) {}
+        temp.push(built.root);
+      }
+    }
+    for (let i = 0; i < temp.length; i++) {
+      if (SH && SH.dispose) { try { SH.dispose(temp[i]); } catch (e) {} }
+    }
+    temp = null;
+    if (!per.length) {
+      return { ok: false, measured: 0, blocked: true, minDeg: MIN,
+        downVisionDeg: null, upVisionDeg: null, eyeY: null, glareY: null, sillY: null, per: [] };
+    }
+    // report the WORST cockpit at the top level — a ratchet that averages is a
+    // ratchet that hides the one broken costume.
+    let w = per[0];
+    for (let i = 1; i < per.length; i++) if (per[i].downVisionDeg < w.downVisionDeg) w = per[i];
+    return {
+      ok: true,
+      measured: per.length,
+      minDeg: MIN,
+      worst: w.id,
+      downVisionDeg: w.downVisionDeg,
+      upVisionDeg: w.upVisionDeg,
+      eyeY: w.eyeY,
+      glareY: w.glareY,
+      sillY: w.sillY,
+      panelTopDeg: w.panelTopDeg,
+      panelBotDeg: w.panelBotDeg,
+      // THE PASS CONDITION. `blocked` false + downVisionDeg >= 15 is the pin.
+      blocked: !(w.downVisionDeg >= MIN),
+      // the airframe's half of the answer, reported apart from the pin because
+      // it lives in somebody else's builder (see hostBlockers above). null
+      // when nothing was measurable.
+      hostDownDeg: w.hostDownDeg,
+      seatDownDeg: w.seatDownDeg,
+      hostBlocked: per.some(function (p) { return p.hostDownDeg != null && p.hostDownDeg < MIN; }),
+      // ...and the guard on the cheap fix: every cockpit must still HAVE a
+      // readable panel below the sightline. Deleting the panel would take
+      // downVisionDeg up and this straight to false.
+      panelsIntact: per.every(function (p) { return p.panelVisible; }),
+      per: per,
+    };
+  };
+
   // exposed for cockpit_view.js and for probes
   CBZ.cockpitLive = function () { return live; };
   CBZ.cockpitClasses = CLASS;

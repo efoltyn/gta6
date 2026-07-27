@@ -319,7 +319,13 @@
   I.define("nuke", {
     power: 9, radius: 14, struct: 55, pen: 0, fire: 1, fx: "nuke",
     quake: 14, flashbang: true, sfx: "explosion",
-    wave: { speed: 190, maxR: 620 },
+    // thermal 1.25: the ignition ring outranges the destruction ring, because
+    // thermal radius goes as Y^0.41 and blast radius as Y^0.33. This is the
+    // ONE row that declares it — a chemical warhead's fireball and its blast
+    // are the same event and do not diverge. It is also the number
+    // city/nukefx.js draws its burn annulus at, so the ring you SEE burning
+    // and the ring that actually lights buildings are the same radius.
+    wave: { speed: 190, maxR: 620, thermal: 1.25 },
   });
 
   // ---- environmental (city/disasters wiring) ------------------------------
@@ -750,6 +756,11 @@
       // multiplier is built on, which is why one wave and one fireball always
       // stay in proportion however hard the thing that made them arrived.
       maxR: row.wave.maxR * q * fxScale,
+      // THERMAL REACH. A row may declare `wave.thermal` as a MULTIPLE of maxR
+      // (1.25 for the nuke — the Y^0.41 / Y^0.33 divergence). Absent, it is 0
+      // and the extra sweep in stepWaves never fires, so every existing row is
+      // byte-for-byte unchanged.
+      thermal: row.wave.thermal ? row.wave.maxR * q * fxScale * row.wave.thermal : 0,
       speed: row.wave.speed,
       power: row.power * fxScale,
       struct: row.struct * (strScale / fxScale),       // the ledger's 2/3 power, net of the power term below
@@ -777,6 +788,32 @@
       w.acc = 0;
       w.r = r1;
       try { sweepRing(w, r0, r1); } catch (e) {}
+      // ---- THE THERMAL FRONT OUTRUNS THE BLAST FRONT --------------------
+      // Blast radius scales as Y^0.33 and thermal as Y^0.41 (Glasstone &
+      // Dolan), so at nuclear yield the two genuinely diverge and the IGNITION
+      // ring is meaningfully WIDER than the destruction ring — at very high
+      // yield a burn victim is out where the blast can do little more than
+      // break windows. city/nukefx.js already draws that outer ring; until
+      // now it was light with no consequence, because the wave carries `fire`
+      // only as far as maxR, so the game's burn zone WAS its blast zone and
+      // the two rings could never disagree.
+      //
+      // A row that declares `thermal` gets one extra sweep past its own reach:
+      // amount ~0 (nothing out there is knocked down — that is the whole
+      // point) with the fire term intact. It IGNITES without wounding, which
+      // is what a thermal pulse does, and it is what leaves a burning outer
+      // band around a flattened core instead of a clean edge.
+      if (w.thermal > w.maxR && !w.burned && r1 >= w.maxR) {
+        w.burned = true;
+        if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
+          try {
+            CBZ.structure.sweep(w.x, w.z, w.maxR, w.thermal, 0.001, {
+              kind: w.kind, fire: w.fire * 0.5, by: w.by, byPlayer: w.byPlayer,
+              waveId: w.id, y: w.y, dirx: 0, dirz: 0, radial: true,
+            });
+          } catch (e) {}
+        }
+      }
       if (r1 >= w.maxR) waves.splice(i, 1);
     }
   }

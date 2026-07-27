@@ -1036,6 +1036,57 @@
   }
   CBZ.citySpawnFlyableFromProp = spawnFlyableFromProp;
 
+  // ---- START THE RUN ALREADY IN THE AIR -----------------------------------
+  // Every path into an aircraft in this game has, until now, begun on the
+  // ground: you walk up to a parked airframe and board it. The PILOT origin
+  // (city/origins.js) needs the opposite — the owner's b2code.html opens with
+  // the player already at 1,750 m doing 232 m/s, and the reason that reads so
+  // well is that it drops you INTO a situation instead of next to one.
+  //
+  // This is deliberately NOT a second boarding path. It is spawnFlyableFromProp
+  // followed by the four state writes that turn a parked airframe into a
+  // cruising one — altitude, heading, speed, and the velocity vector that
+  // matches them — using the SAME forward convention the V2 integrator uses
+  // (forward = sin(heading)·cos(pitch), sin(pitch), cos(heading)·cos(pitch),
+  // flyWingV2 above). Doing it here rather than in origins.js keeps that
+  // convention in the one file that owns it; a mission that wants to open in
+  // the air gets it for free.
+  //
+  // opts: {alt} metres ASL (default 1200) · {speed} m/s (default the craft's
+  // own cruise) · {heading} radians · {pitch} radians (default level).
+  CBZ.cityAirborneStart = function (rec, opts) {
+    opts = opts || {};
+    const craft = spawnFlyableFromProp(rec);
+    if (!craft) return null;
+    const h = opts.heading != null ? opts.heading : craft.heading;
+    const pitch = opts.pitch != null ? opts.pitch : 0;
+    // Ground clearance is not optional: the airfield sits on terrain and a
+    // "1,200 m" that is 1,200 m ASL over a 900 m mountain is 300 m AGL. Take
+    // whichever of the two is higher so the opening shot is always sky.
+    const gy = floorY(craft.pos.x, craft.pos.z);
+    const alt = Math.max(opts.alt != null ? opts.alt : 1200, gy + 400);
+    const spd = opts.speed != null ? opts.speed
+      : (craft.kind === "heli" ? 18 : Math.max(JET_MIN, craft.cruise || 90));
+    craft.pos.y = alt;
+    craft.heading = h; craft.pitch = pitch; craft.roll = 0;
+    craft.speed = spd;
+    craft.throttle = spd;
+    const cp = Math.cos(pitch);
+    craft.vx = Math.sin(h) * cp * spd;
+    craft.vy = Math.sin(pitch) * spd;
+    craft.vz = Math.cos(h) * cp * spd;
+    craft.group.position.copy(craft.pos);
+    setCraftRotation(craft, craft.pitch, craft.heading, craft.roll);
+    // the player marker rides the craft; re-sync it now that we have moved it
+    const P = CBZ.player;
+    if (P && P.pos) { P.pos.set(craft.pos.x, craft.pos.y, craft.pos.z); P.vy = 0; P.grounded = false; }
+    // A craft entered on the apron has its gear down and its landing lights
+    // on; one at cruise does not. Feature-detected — a craft with no gear
+    // model simply skips it.
+    if (craft.gearDown !== undefined) craft.gearDown = false;
+    return craft;
+  };
+
   // ============================================================
   //  ENTER / EXIT (the vehicles.js board pattern)
   // ============================================================

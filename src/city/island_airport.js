@@ -13,9 +13,20 @@
    perimeter fence is the WHY you can't just drive into the sea — there's
    one road on and off, the causeway, exactly like a real island airfield.
 
+   CABIN LIFE (2026-07-27, owner's two bugs): the airliner cabin is a ROOM
+   with ordinary game NPCs in it, not a diorama. Seats are authored in REAL
+   metres (0.79 m pitch, 0.44 m width, 0.43 m cushion — see SEAT/R() below)
+   instead of in AIRLINER_SCALE units, so the furniture fits the 1.8 m people
+   rather than the 1.45x hull; the seat's plane-local facing is re-asserted
+   every frame by cabinPassengerHold() instead of being a one-shot write ~40
+   world-space yaw writers could stomp; the gate lounge is real benches with
+   real propuse SEAT anchors; and every person this island places carries the
+   job they actually do. CBZ.cabinAudit() is the ratchet
+   ({seats, occupied, misaligned, roleless} — the last two pin at ZERO).
+
    DRAW-CALL DISCIPLINE (engine is draw-call bound): the runway/taxiway
-   edge lights are ONE InstancedMesh; the concourse seat rows are ONE
-   InstancedMesh; the perimeter fence posts are ONE InstancedMesh; ground
+   edge lights are ONE InstancedMesh; the gate lounge is FOUR (cushions,
+   backs, armrests, beams); the perimeter fence posts are ONE; ground
    markings are merged via BufferGeometryUtils into a handful of meshes;
    every repeated colour comes from the shared CBZ.mat/cmat pool. Parked
    aircraft share materials across the fleet. Deterministic seeded rng so
@@ -53,6 +64,84 @@
     const v = CBZ.CONFIG && +CBZ.CONFIG.AIRLINER_SCALE;
     return v > 0 ? v : 1;
   })();
+
+  // ---- CABIN LIFE V2 flags ---------------------------------------------------
+  // config.js parses first and applies ?cfg_X=… overrides before this file runs,
+  // so a `== null` default here is still URL-flippable (aim_dossier.js does the
+  // same). They belong in config.js proper; that file is not this agent's to
+  // edit, so they self-default at the point of use.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  // CABIN_SEATED_V2 — the per-frame seat HOLD. A passenger's facing used to be a
+  // ONE-SHOT write (npclife.attach → group.rotation.set) into a field ~40 other
+  // systems write in WORLD space; on → the airport re-asserts each occupied
+  // seat's plane-LOCAL transform every frame, after those systems have run.
+  if (CBZ.CONFIG.CABIN_SEATED_V2 == null) CBZ.CONFIG.CABIN_SEATED_V2 = true;
+  // CABIN_REAL_SEATS — cabin furniture authored in REAL metres (31" pitch, 17.5"
+  // width, 0.43 m cushion) instead of in AIRLINER_SCALE units. Off → the legacy
+  // 1.4-unit-pitch bench rows that grew 45% with the hull while the people did not.
+  if (CBZ.CONFIG.CABIN_REAL_SEATS == null) CBZ.CONFIG.CABIN_REAL_SEATS = true;
+  // AIRPORT_STAFF_ROLES — every person this island places carries the job they
+  // actually do, and the flight deck/cabin crew get theirs stamped on the body
+  // npclife cast into the seat.
+  if (CBZ.CONFIG.AIRPORT_STAFF_ROLES == null) CBZ.CONFIG.AIRPORT_STAFF_ROLES = true;
+  // TERMINAL_GATE_SEATS — the concourse gate benches are SITTABLE: each seat
+  // registers a propuse SEAT anchor with a declared cushion, and a handful of
+  // travellers are seated on them. Off → the benches are still drawn at real
+  // furniture dimensions (that part is not a behaviour change and stays), but
+  // nothing registers and nobody sits — the pre-change state where the gate
+  // lounge was scenery. One line, no second code path.
+  if (CBZ.CONFIG.TERMINAL_GATE_SEATS == null) CBZ.CONFIG.TERMINAL_GATE_SEATS = true;
+
+  // ONE REAL METRE, expressed in the units the airliner part-kit expects.
+  //
+  // WHY THIS EXISTS: `K.put()` inside buildAirliner multiplies every coordinate
+  // AND scales every geometry by AL_SC (CBZ.CONFIG.AIRLINER_SCALE, 1.45 today).
+  // That is exactly right for the HULL — the owner's dial is meant to grow the
+  // aeroplane. It is exactly WRONG for anything a 1.8 m human sits in: at 1.45
+  // the old seat rows were a 2.03 m pitch with a 0.65 m cushion, i.e. bar stools
+  // two metres apart, which is what made the cabin read as a scale model with
+  // dolls in it. R(m) converts a published real-world dimension into the
+  // authoring unit K.put wants, so the seats stay human-sized at any AIRLINER_SCALE
+  // and the surplus tube width simply becomes a wider aisle.
+  // CABIN_REAL_SEATS=false is the one-line revert: R() becomes the identity, so
+  // every cabin dimension below is read as a HULL unit again and the furniture
+  // grows with AIRLINER_SCALE exactly as it used to. (It restores the old
+  // BEHAVIOUR — furniture tied to the hull dial — not the old bench layout,
+  // which is gone on purpose.)
+  function R(m) { return (CBZ.CONFIG.CABIN_REAL_SEATS === false) ? m : m / AL_SC; }
+  // …and the WORLD-METRE size R(m) actually produced. The rig's chair solve
+  // (entities/character.js) reads cushion heights in world metres, so a seat
+  // must DECLARE Rm(h), not h: with the flag on that is h exactly, with it off
+  // it is h·AIRLINER_SCALE — which keeps the declaration honest in both modes
+  // instead of quietly lying to the pose in one of them.
+  function Rm(m) { return R(m) * AL_SC; }
+
+  // Published economy-cabin geometry (all metres). Seat pitch and width are the
+  // 31"/17.5" narrowbody standard; the cushion/back/armrest heights are the
+  // furniture-metric numbers propuse.js's SEAT_H table is built from.
+  const SEAT = Object.freeze({
+    pitch: 0.79,        // front-to-back between rows (31 in)
+    width: 0.44,        // per-seat width across the cabin (17.5 in)
+    cushionY: 0.43,     // cushion TOP above the cabin floor
+    cushionT: 0.10,     // cushion slab thickness
+    cushionD: 0.48,     // cushion depth, fore-aft
+    backH: 0.55,        // seat back height above the cushion
+    backT: 0.09,
+    armY: 0.18,         // armrest height above the cushion
+    aisleMin: 0.48,     // narrowbody centre aisle
+    abreast: 3,         // 3-3
+    recline: 0.14,      // radians the back leans aft
+  });
+  // The cushion height the seat is DRAWN at and the body is POSED against —
+  // ONE number, resolved at BUILD time from propuse.js's SEAT_H table (the
+  // kit's source of truth for "how high is a seat of this kind"). Resolved
+  // late on purpose: propuse.js parses AFTER this file, so a parse-time read
+  // would always miss and silently fork the number in two. Degrade-safe: no
+  // propuse, no problem — SEAT.cushionY is the same published value.
+  function seatCushion() {
+    const h = CBZ.propSeatHeight ? +CBZ.propSeatHeight("aircraft-seat") : 0;
+    return h > 0 ? h : SEAT.cushionY;
+  }
 
   // Real passenger hookup. Aircraft geometry only owns seats and cabin bounds;
   // actual people are ordinary live NPCs supplied by the shared life system.
@@ -98,6 +187,12 @@
   // it's scripted by its own loop and boarding it would fight that animation.
   const placed = [];
   let _reg = false;
+  // Terminal gate-lounge SEAT anchors this island registered with propuse.js,
+  // kept so the deferred sitting pass finds them without a world-wide
+  // propNearestSeat scan over every chair in the city.
+  const gateSeats = [];
+  let gateSeated = false;
+  const GATE_SITTERS = 12;      // the rest of the lounge stays genuinely free
   function boardablePlane(grp, x, z, heading, footW, footL, name) {
     if (!grp) return grp;
     grp.userData.milKind = "plane";
@@ -566,34 +661,48 @@
     else { col.y0 = 1e9; col.y1 = 1e9 + 1; }
   }
 
-  function cabinSitNearest() {
-    const P = CBZ.player, rec = cabinState.rec;
-    if (!P || !rec || !CBZ.propSit) return;
-    const cab = rec.group.userData.cabin;
-    if (!cab || !cab.seats || !cab.seats.length) return;
+  // The nearest FREE, SITTABLE seat in the cabin you are standing in, in
+  // plane-local space. `cabin-crew` is a standing post, not a seat, so it is
+  // never offered; a seat someone is already in is never offered either.
+  function cabinFreeSeat(rec, maxD) {
+    const cab = rec && rec.group && rec.group.userData && rec.group.userData.cabin;
+    if (!cab || !cab.seats || !cab.seats.length) return null;
+    const P = CBZ.player; if (!P) return null;
     const l = cabinLocal(rec, P.pos.x, P.pos.z);
-    let best = null, bd = Infinity;
+    let best = null, bd = maxD == null ? Infinity : maxD * maxD;
     for (let i = 0; i < cab.seats.length; i++) {
       const s0 = cab.seats[i];
-      if (s0.occupant) continue;
+      if (s0.occupant || s0.pose === "stand") continue;
       const d = (s0.x - l.x) * (s0.x - l.x) + (s0.z - l.z) * (s0.z - l.z);
       if (d < bd) { bd = d; best = s0; }
     }
-    if (!best) return;
-    const w = cabinWorld(rec, best.x, best.z);
+    return best;
+  }
+
+  // Sit the PLAYER in a specific cabin seat through the repo's own seat verb.
+  // Every number the ad-hoc anchor carries is read off the seat record itself
+  // (position, cushion, floor) instead of being retyped here — the airliner used
+  // to hardcode a 0.45 cushion in this function AND in the seat builder, which
+  // is exactly the duplication that lets a body drift out of a chair the moment
+  // one of the two moves. propuse.js refuses its walk-in ARC for an unregistered
+  // anchor on a moving host (rec._reg), so this is the honest instant commit.
+  function cabinSitSeat(seat) {
+    const P = CBZ.player, rec = cabinState.rec;
+    if (!P || !rec || !seat || seat.occupant || !CBZ.propSit) return false;
+    const w = cabinWorld(rec, seat.x, seat.z);
     const th = rec.group.rotation.y;
-    // seated body faces along (sin f, cos f) — aim it down the nose (+X local)
+    // a seated body faces along (sin f, cos f); the seat's heading is a
+    // plane-LOCAL yaw, so the world facing is the parked heading plus it.
     try {
       const sat = CBZ.propSit(P, {
-        x: w.x, y: rec.group.position.y + cab.floorTop + 0.45 * AL_SC, z: w.z,
-        face: th + Math.PI / 2, kind: "chair", lot: null, occupant: null,
-        // cushion-top anchor + cushion height (V2 chair sit): the player's own
-        // rig gets the same butt-on-cushion / feet-on-the-deck solve as the
-        // NPC passengers instead of squat-folding on top of the seat.
-        cushionH: 0.45, floorBelow: 0.45,
+        x: w.x, y: rec.group.position.y + seat.y, z: w.z,
+        face: th + (seat.heading == null ? Math.PI / 2 : seat.heading),
+        kind: seat.kind || "aircraft-seat", lot: null, occupant: null,
+        cushionH: seat.cushionH, floorBelow: seat.floorBelow,
       });
-      if (sat) { best.occupant = P; P._aircraftCabinSeat = best; }
+      if (sat) { seat.occupant = P; P._aircraftCabinSeat = seat; return true; }
     } catch (e) {}
+    return false;
   }
 
   function cabinZones() {
@@ -637,12 +746,37 @@
         cabinState.pending = { rec: v, t: 0.55, dir: "in" };   // door slides, then you step in
       },
     });
+    // ---- INSIDE THE CABIN: a ROOM, not one room-sized button ----------------
+    // OWNER: the cabin should be "a thing build that our game NPCs can interact
+    // with". It was not, and the reason was scoring, not the people: the old
+    // zone's find() returned the PLAYER'S OWN POSITION, so it scored at distance
+    // 0 with prio 6 — the same base as interact.js's "src-ped" — and
+    // interactions.js only ever resolves ONE candidate. Every passenger you
+    // walked up to lost to the room they were sitting in, so a cabin full of
+    // real, hittable, dossier-carrying NPCs could not be talked to. Two honest
+    // zones fix it without touching the registry:
+    //   • the EXIT lives AT THE DOOR (a real distance, real door grammar) so it
+    //     stops out-scoring people in the aisle,
+    //   • sitting is a SEAT candidate on the seat you are next to, which picks
+    //     up interactions.js's existing silent-seat rule (walk up, press E, you
+    //     sit, no card) instead of a room-wide "Take a seat" verb.
+    // Both sit BELOW src-ped's prio, so a person always wins over furniture.
+    // STABLE target objects: interactions.js compares candidates by object
+    // IDENTITY (sameTarget: a.t === b.t) for its hysteresis, so a zone that
+    // returns a fresh literal every 12 Hz scan can never be recognised as the
+    // same thing you were already looking at. One scratch record per zone,
+    // mutated in place.
+    const doorTarget = { x: 0, z: 0 };
+    const seatTarget = { x: 0, z: 0, kind: "aircraft-seat", seat: null };
     CBZ.interactions.registerZone({
-      id: "airliner_cabin", kind: "airliner_cabin", prio: 6,
-      find: function (px, pz) {
+      id: "airliner_cabin", kind: "airliner_cabin", prio: 5, radius: 4.2,
+      find: function () {
         if (!cabinState.inside || cabinState.pending) return null;
-        const P = CBZ.player;
-        return P ? { x: px, z: pz } : null;
+        const rec = cabinState.rec;
+        if (!rec || !rec.group || !rec.group.userData.cabin) return null;
+        const d = cabinDoorWorld(rec);
+        doorTarget.x = d.x; doorTarget.z = d.z;
+        return doorTarget;
       },
       options: [
         {
@@ -652,10 +786,212 @@
             cabinState.pending = { rec: cabinState.rec, t: 0.5, dir: "out" };
           },
         },
-        { id: "airliner_sit", slot: "i", label: "Take a seat", onSelect: cabinSitNearest },
+      ],
+    });
+    CBZ.interactions.registerZone({
+      id: "airliner_seat", kind: "seat", prio: 4, radius: 1.6,
+      find: function () {
+        if (!cabinState.inside || cabinState.pending) return null;
+        const P = CBZ.player;
+        if (!P || P._propSeat) return null;              // already sitting
+        const rec = cabinState.rec; if (!rec) return null;
+        const s = cabinFreeSeat(rec, 1.6);
+        if (!s) return null;
+        const w = cabinWorld(rec, s.x, s.z);
+        seatTarget.x = w.x; seatTarget.z = w.z; seatTarget.seat = s;
+        return seatTarget;
+      },
+      options: [
+        { id: "airliner_sit", slot: "e", label: "Take the seat",
+          onSelect: function (t) { if (t && t.seat) cabinSitSeat(t.seat); } },
       ],
     });
   }
+
+  // ============================================================
+  //  WHAT THEY ACTUALLY DO  (AIRPORT_STAFF_ROLES)
+  //
+  //  OWNER: "above pilot should say 'level X Pilot' — and not because
+  //  hardcoding, because NPCs should show role and level, role should be what
+  //  they actually do."
+  //
+  //  MEASURED: city/level.js's CBZ.cityTitle() — the ONE function both the
+  //  overhead pill (aim_dossier.js tagLabel) and the leaderboard read — did not
+  //  look at `a.job` at all. Its chain was vipTitle → kind ("cop"/"security") →
+  //  military rank → rampage → bounty → gang rank → ARCH_TITLE[archetype] →
+  //  aggr/wealth → "Civilian", so a captain sitting in his own cockpit fell all
+  //  the way through to "Lv.N Civilian" no matter what his job said. That half
+  //  now lives in level.js, where it fixes every worker in the game at once.
+  //
+  //  This island owns the OTHER half and it is the half the owner actually
+  //  asked for — "role should be what they actually do": every person placed
+  //  here carries a truthful job, including the bodies npclife casts into cabin
+  //  seats. Deliberately NOT via `vipTitle`, even though cityTitle reads that
+  //  first and it would have been one line: vipTitle would ALSO make a baggage
+  //  handler read as a celebrity to interactions_rich.js (isVip), a whale to
+  //  leaderboard.js and rich to economy.js. A job is not a VIP flag, and buying
+  //  the pill with three false side effects is exactly the parallel-bookkeeping
+  //  trade CLAUDE.md's block law forbids.
+  // ============================================================
+  function airportRole(a, job, roleId) {
+    if (!a) return a;
+    // Census marker, set INDEPENDENTLY of the stamp: an audit that identifies
+    // its subjects by the very field it is auditing can only ever report zero,
+    // which is how you get a ratchet nobody has actually measured.
+    a._airportPlaced = 1;
+    if (!job || CBZ.CONFIG.AIRPORT_STAFF_ROLES === false) return a;
+    a.job = job;                       // the truth: what this person does
+    a._airportRole = roleId || job;
+    return a;
+  }
+
+  // ============================================================
+  //  THE SEAT HOLD  (CABIN_SEATED_V2) — why passengers sat sideways.
+  //
+  //  npclife.attach() writes the seat's yaw into `group.rotation` ONCE, and
+  //  syncAttached() re-asserts speed/state/char.sitting every frame but never
+  //  the transform. A cabin passenger stays a full member of CBZ.cityPeds, and
+  //  41 files in this repo iterate cityPeds and write `group.rotation.y` with no
+  //  `_npcAttached` guard (peds.js is the only file in the codebase that
+  //  guards). Those are WORLD-space bearings — `Math.atan2(target.x - ped.pos.x,
+  //  target.z - ped.pos.z)`, and ped.pos IS world space for an attached actor —
+  //  landing on a group parented to the airliner, so the body settles at
+  //  worldBearing − planeHeading: aimed at a lot across the map, rotated by the
+  //  parked heading. The two that actually reach a seated tourist are
+  //  aigoals.js's face() (its filters are dead/_parked/inCar/controlled/ko — a
+  //  seated passenger passes every one) and social.js's couple/friend vignettes
+  //  (any ped within 30 m of the player, i.e. precisely when you are standing in
+  //  the cabin looking at them).
+  //
+  //  THE CURE IS OWNERSHIP, NOT A GUARD IN 41 FILES: the seat's transform stops
+  //  being a value other systems can win and becomes a truth this island
+  //  re-asserts every frame at order 55.2 — after peds.js (34), npclife (33.8),
+  //  social.js (34.5/34.6), aigoals and propuse's own hold (42), and before any
+  //  onAlways camera read. Absolute writes only, so nothing can accumulate.
+  //  It is the same shape as propuse.js's per-frame hold for world furniture;
+  //  this is the moving-host twin.
+  // ============================================================
+  function cabinHoldSeats(hook) {
+    const grp = hook && hook.group;
+    if (!grp || !grp.parent || hook.active === false || hook.state === "destroyed") return;
+    // Only the seats npclife can CAST into (hook.passengerSeats is exactly the
+    // list its cabinSeats() reads), so a 216-seat cabin costs ~27 checks a
+    // frame, not 216. The player's own seat is owned by cabinForceClear.
+    const seats = hook.passengerSeats && hook.passengerSeats.length ? hook.passengerSeats : hook.seats;
+    if (!seats || !seats.length) return;
+    for (let i = 0; i < seats.length; i++) {
+      const s = seats[i], a = s.occupant;
+      if (!a || a === CBZ.player) continue;
+      const g2 = a.group;
+      // STALE-CLAIM TOLERANCE (propuse's rule: correctness never depends on a
+      // release call). npclife detaches a body on death/despawn but only clears
+      // the seat when the WHOLE cabin is pruned, so a killed passenger used to
+      // hold his seat forever and the row could never be re-used or sat in.
+      if (!g2 || g2.parent !== grp || a._npcAttached == null || a.culled) { s.occupant = null; continue; }
+      // A corpse in the seat is the point of CHAR_SEATED_HITTABLE — let
+      // npclife's one-shot slump own the body and never straighten it back up.
+      if (a.dead) continue;
+      if (CBZ.propArcActive && CBZ.propArcActive(a)) continue;   // someone's arc owns it
+      if (g2.position.x !== s.x || g2.position.y !== s.y || g2.position.z !== s.z) {
+        g2.position.set(s.x, s.y, s.z);
+      }
+      const yaw = s.heading == null ? Math.PI / 2 : s.heading;
+      const r2 = g2.rotation;
+      // pitch/roll are zeroed too: a drafted street body can arrive carrying a
+      // knockdown's leftover rotation.z, and nothing in the attached path ever
+      // eases it back (peds.js's recovery is in the branch that skips them).
+      if (r2.y !== yaw || r2.x !== 0 || r2.z !== 0) r2.set(0, yaw, 0);
+      // WHAT THEY DO. npclife picks the CASTING profile from seat.role (only
+      // "pilot" buys the uniformed rig), which is why the cabin crew is cast
+      // through the pilot profile — but a flight attendant is not a pilot, and
+      // the seat is what knows the difference. Stamped straight onto the body,
+      // NOT through airportRole(): a drafted citizen is handed back to the
+      // street by npclife's releaseProfile (which restores the job it recorded
+      // before the profile was applied), and leaving this island's census marker
+      // on them afterwards would make them a permanent phantom in the audit.
+      if (s.job && a.job !== s.job && CBZ.CONFIG.AIRPORT_STAFF_ROLES !== false) {
+        a.job = s.job; a._airportRole = s.job;
+      }
+    }
+  }
+  function cabinPassengerHold() {
+    if (CBZ.CONFIG.CABIN_SEATED_V2 === false) return;
+    for (let i = 0; i < passengerCabins.length; i++) cabinHoldSeats(passengerCabins[i]);
+  }
+
+  // WAITING PASSENGERS in the gate lounge — city/beach.js's sunbathers,
+  // verbatim: CBZ.cityPostNpc puts an ORDINARY ped on the spot and CBZ.propSit
+  // runs the same seat arc a bedroom chair runs. No terminal body, no terminal
+  // brain, no terminal update loop. Committed INSTANT on purpose (these bodies
+  // were never standing up, so playing the walk-in arc at them would be a person
+  // materialising and then climbing onto furniture they are already on), and
+  // WHO sits is a position hash, not a draw on the airport build stream.
+  // Deferred one-shot: cityMakePed and the ped roster are not guaranteed to
+  // exist while the landmass is still building.
+  function seatGateLounge() {
+    if (gateSeated || !gateSeats.length) return;
+    if (!CBZ.cityPostNpc || !CBZ.propSit || !CBZ.cityPeds) return;
+    gateSeated = true;
+    let n = 0;
+    for (let i = 0; i < gateSeats.length && n < GATE_SITTERS; i++) {
+      const rec = gateSeats[i];
+      if (!rec || rec.occupant) continue;
+      if (CBZ.hash01 && CBZ.hash01(rec.x, rec.z, 0xa17e) > 0.34) continue;   // most seats stay empty
+      const ped = CBZ.cityPostNpc(rec.x, rec.z, {
+        archetype: "tourist", aggr: 0.07, wealth: 0.45, src: "airport:gate-lounge",
+      });
+      if (!ped) continue;
+      airportRole(ped, "traveller", "gate-lounge");
+      if (!CBZ.propSit(ped, rec, { instant: true })) {
+        if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(ped);
+        continue;
+      }
+      n++;
+    }
+  }
+
+  // ---- THE RATCHET ------------------------------------------------------------
+  // Physical-plausibility invariant for aircraft cabin life, the propUseAudit /
+  // treeAudit shape. `misaligned` and `roleless` are the two that may only ever
+  // read ZERO: a seated passenger whose facing has drifted more than 25° off the
+  // seat he is sitting in is the owner's "sideways" bug reappearing, and an
+  // airport staffer with no job string is the "role should be what they actually
+  // do" bug reappearing. `seats`/`occupied` are census, not pass/fail.
+  const MISALIGN = 25 * Math.PI / 180;
+  CBZ.cabinAudit = function () {
+    let seats = 0, occupied = 0, misaligned = 0, roleless = 0;
+    for (let i = 0; i < passengerCabins.length; i++) {
+      const hook = passengerCabins[i];
+      const list = hook && hook.seats;
+      if (!list) continue;
+      const grp = hook.group;
+      for (let k = 0; k < list.length; k++) {
+        const s = list[k];
+        if (s.pose === "stand") continue;            // a standing post is not a seat
+        seats++;
+        const a = s.occupant;
+        if (!a || a === CBZ.player) continue;
+        const g2 = a.group;
+        if (!g2 || g2.parent !== grp || a.dead) continue;   // detached / slumped: not a seated passenger
+        occupied++;
+        const want = s.heading == null ? Math.PI / 2 : s.heading;
+        let d = (g2.rotation.y - want) % (Math.PI * 2);
+        if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+        if (Math.abs(d) > MISALIGN || Math.abs(g2.rotation.x) > MISALIGN || Math.abs(g2.rotation.z) > MISALIGN) misaligned++;
+        if (!a.job || !String(a.job).trim()) roleless++;    // in a crew seat with no job
+      }
+    }
+    // …and every body this island POSTED on the ground (terminal travellers,
+    // ground crew, gate agents). `_airportPlaced` is stamped at placement, never
+    // by the role stamp, so removing a role genuinely moves this number.
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || !p._airportPlaced || p.dead) continue;
+      if (!p.job || !String(p.job).trim()) roleless++;
+    }
+    return { seats: seats, occupied: occupied, misaligned: misaligned, roleless: roleless };
+  };
 
   // per-frame: door easing, delayed board/exit, and inside upkeep (clamp the
   // player to the aisle box in plane-local space; bail out cleanly if the
@@ -666,6 +1002,13 @@
       return;
     }
     cabinZones();
+    // THE SEAT HOLD runs first, and it runs whether or not the player is
+    // anywhere near a plane: the corruption it undoes is written by systems that
+    // key off the PLAYER's proximity (social vignettes) and by the goal brain
+    // (any time), so a hold gated on "am I aboard" would leave every cabin you
+    // can see through the windows sitting wrong.
+    cabinPassengerHold();
+    seatGateLounge();
     const P = CBZ.player;
     // door panels ease toward open near the player / while boarding / inside
     for (let i = 0; i < placed.length; i++) {
@@ -822,6 +1165,9 @@
     // drop any stale cabin-boarding state (platform/collider refs die with
     // the old groups).
     placed.length = 0; _reg = false; cabinReset(); resetPassengerCabins();
+    // the gate-lounge anchors die with the propuse reset cityBuildings already
+    // ran (it runs BEFORE the landmass hooks), so only our index needs clearing
+    gateSeats.length = 0; gateSeated = false;
 
     const BGU = THREE.BufferGeometryUtils;
 
@@ -923,7 +1269,17 @@
       rect(RWY_CX, RWY_Z, RWY_LEN, RWY_W, C_RUNWAY);
       rect(RWY_CX, TAX_Z, RWY_LEN - 20, 18, C_TARMAC);
       rect(APRON_X, APRON_Z + 6, 260, 80, C_TARMAC);
-      for (const cx of CONN_XS) rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 16, TAX_Z - APRON_Z + 30, C_TARMAC);
+      // CONNECTOR TAXIWAYS — apron <-> taxiway. The depth used to be written
+      // `TAX_Z - APRON_Z + 30`, and TAX_Z is NORTH of APRON_Z (RWY_Z+50 = -40
+      // against 0), so that expression is -40 + 30 = **-10**: a NEGATIVE depth.
+      // The two connectors were therefore 10 m stubs sitting at z in [-35,-25]
+      // instead of the ~50 m ribbons that actually join the ramp to the
+      // taxiway — the airfield has been missing its connectors for their whole
+      // life, and it is why nothing could taxi off the apron. Absolute span,
+      // plus 10 m of overrun at each end so the joins are not hairline.
+      const CONN_D = Math.abs(TAX_Z - APRON_Z) + 20;
+      const CONN_CZ = (TAX_Z + APRON_Z) / 2;
+      for (const cx of CONN_XS) rect(cx, CONN_CZ, 16, CONN_D, C_TARMAC);
 
       // runway white paint
       rect(RWY_CX, RWY_Z - RWY_W / 2 + 0.6, RWY_LEN - 8, 0.6, C_PAINT);
@@ -945,7 +1301,9 @@
       // taxiway yellow centrelines and hold bars
       rect(RWY_CX, TAX_Z, RWY_LEN - 24, 0.5, C_YELLOW);
       for (const cx of CONN_XS) {
-        rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 0.5, TAX_Z - APRON_Z + 24, C_YELLOW);
+        // same negative-depth bug as the tarmac above — the centreline was
+        // -16 deep, so the connectors had no visible guidance line either.
+        rect(cx, CONN_CZ, 0.5, Math.abs(TAX_Z - APRON_Z) + 14, C_YELLOW);
         for (let i = 0; i < 4; i++) rect(cx, TAX_Z - 14 - i * 0.9, 14, 0.4, C_YELLOW);
       }
       const tex = new THREE.CanvasTexture(canvas);
@@ -1030,35 +1388,65 @@
           solid(dx, tz + td / 2 - 3, 8, 2.4, 0, 1.2);
         }
 
-        // seat rows — ONE InstancedMesh of seat blocks (gate waiting area)
-        const seatGeo = new THREE.BoxGeometry(0.6, 0.45, 0.6);
-        const seatPos = [];
+        // =============================================================
+        //  GATE LOUNGE (TERMINAL_GATE_SEATS) — beam benches you can sit on.
+        //
+        //  The old "seat rows" were 63 lone 0.6-cube blocks whose top face sat
+        //  at 0.775 m, spread SIX METRES apart across the concourse, with no
+        //  anchor of any kind: nothing in the game could sit on them and no
+        //  arrangement of them read as a waiting area. Same diorama defect as
+        //  the cabin, same cure — real furniture dimensions (0.44 m cushion,
+        //  0.55 m seat width, 0.45 m back, armrest between every seat) in real
+        //  4-seat beam clusters, and every seat DECLARES its cushion to
+        //  propuse.js so a body gets character.js's feet-on-the-floor solve
+        //  instead of the legacy squat. Four instanced meshes, so the whole
+        //  lounge is four draws.
+        // =============================================================
+        const GATE_CUSH = (CBZ.propSeatHeight ? +CBZ.propSeatHeight("waiting") : 0) || 0.44;
+        const GATE_W = 0.55, GATE_D = 0.50, GATE_BACK = 0.45, GATE_ARM = 0.18;
+        const PER_BENCH = 4, ROW_GAP = 2.6, BENCH_N = 6;
+        const cush = [], back = [], arms = [], beams = [];
         for (let r = 0; r < 3; r++) {
-          const sz = tz - td / 2 + 5 + r * 4;
-          for (let s = 0; s < 24; s++) {
-            const sx = ix0 + 2 + s * ((ix1 - ix0 - 4) / 23);
-            if (s % 8 === 7) continue; // aisle gaps
-            seatPos.push([sx, sz]);
+          const sz = tz - td / 2 + 5 + r * ROW_GAP;
+          for (let c = 0; c < BENCH_N; c++) {
+            // clusters sit under the gate signage, not smeared end to end
+            const bx = tx - 60 + c * 24;
+            if (bx < ix0 + 2 || bx > ix1 - 2) continue;
+            beams.push([bx, sz]);
+            for (let s = 0; s < PER_BENCH; s++) {
+              const sx = bx + (s - (PER_BENCH - 1) / 2) * GATE_W;
+              cush.push([sx, sz]);
+              back.push([sx, sz]);
+              // seats face the apron glass (-z): body looks along (sin f, cos f)
+              if (CBZ.propRegisterSeat && CBZ.CONFIG.TERMINAL_GATE_SEATS !== false) {
+                // requireEntry: the concourse interior is furnished by
+                // cityMakeBuilding, not by this file, so we cannot promise the
+                // floor in front of every bench is walkable. Anything boxed in
+                // is dropped rather than registered as a chair nothing can
+                // reach — propUseAudit().blocked can only fall from here.
+                const rec = CBZ.propRegisterSeat(sx, 0, sz, Math.PI, "waiting", null,
+                  { cushion: GATE_CUSH, floorBelow: 0, requireEntry: true });
+                if (rec) gateSeats.push(rec);
+              }
+            }
+            for (let a = 0; a <= PER_BENCH; a++) arms.push([bx + (a - PER_BENCH / 2) * GATE_W, sz]);
           }
         }
-        const seatInst = new THREE.InstancedMesh(seatGeo, mat(0x35506e), seatPos.length);
-        seatInst.castShadow = true; seatInst.receiveShadow = true;
         const dm = new THREE.Object3D();
-        for (let i = 0; i < seatPos.length; i++) {
-          dm.position.set(seatPos[i][0], 0.55, seatPos[i][1]);
-          dm.updateMatrix(); seatInst.setMatrixAt(i, dm.matrix);
+        function inst(list, geo, m, y, dz, cast) {
+          if (!list.length) return;
+          const im = new THREE.InstancedMesh(geo, m, list.length);
+          im.castShadow = !!cast; im.receiveShadow = true;
+          for (let i = 0; i < list.length; i++) {
+            dm.position.set(list[i][0], y, list[i][1] + dz);
+            dm.updateMatrix(); im.setMatrixAt(i, dm.matrix);
+          }
+          im.instanceMatrix.needsUpdate = true; grp.add(im);
         }
-        seatInst.instanceMatrix.needsUpdate = true; grp.add(seatInst);
-
-        // seat backrests as a second instanced mesh (shared material)
-        const backGeo = new THREE.BoxGeometry(0.6, 0.5, 0.12);
-        const backInst = new THREE.InstancedMesh(backGeo, mat(0x2a4360), seatPos.length);
-        backInst.castShadow = true;
-        for (let i = 0; i < seatPos.length; i++) {
-          dm.position.set(seatPos[i][0], 0.85, seatPos[i][1] + 0.24);
-          dm.updateMatrix(); backInst.setMatrixAt(i, dm.matrix);
-        }
-        backInst.instanceMatrix.needsUpdate = true; grp.add(backInst);
+        inst(cush, new THREE.BoxGeometry(GATE_W - 0.03, 0.10, GATE_D), mat(0x35506e), GATE_CUSH - 0.05, 0, true);
+        inst(back, new THREE.BoxGeometry(GATE_W - 0.03, GATE_BACK, 0.08), mat(0x2a4360), GATE_CUSH + GATE_BACK / 2, GATE_D / 2 - 0.02, true);
+        inst(arms, new THREE.BoxGeometry(0.06, 0.05, 0.42), mat(0x8d959d), GATE_CUSH + GATE_ARM, -0.02, false);
+        inst(beams, new THREE.BoxGeometry(PER_BENCH * GATE_W + 0.12, 0.30, 0.14), mat(0x6b7178), 0.16, 0, false);
 
         if (CBZ.makeLabelSprite) {
           const s = CBZ.makeLabelSprite("INTERNATIONAL TERMINAL", { color: "#dfeaff" });
@@ -1216,11 +1604,12 @@
     //  CABIN INTERIOR (owner: "planes should, like elevators, have a door
     //  and a real place inside, and real passengers sitting"). Every
     //  airliner gets a real cabin baked into the same merged part-kit:
-    //  BackSide liner shell (visible only from inside), a raised deck over
-    //  the wing carry-through, 11 rows of two-across benches, modular LIVE-NPC
-    //  seat anchors (deterministic via the airport rng stream), interior
-    //  window strips, ceiling light strips, an aft pressure wall and a
-    //  cockpit bulkhead with door + a two-seat cockpit behind it. The
+    //  BackSide liner shell (visible only from inside), a raised deck over the
+    //  wing carry-through, ~36 rows of REAL 3-3 economy seating at a 0.79 m
+    //  pitch with an overwing exit row, LIVE-NPC seat anchors (occupancy from a
+    //  position hash, never the shared build stream), overhead bins at human
+    //  reach height, an aft pressure wall and a cockpit bulkhead with door + a
+    //  two-seat flight deck behind it. The
     //  boarding door is a separate SLIDING panel mesh (animated by the
     //  boarding system below — tagged dynamic so the freezer spares it).
     //  Costs a handful of merged draws per plane; zero per-frame work when
@@ -1295,7 +1684,20 @@
           // cockpit FRONT: drop the windscreen height — keep only a low
           // glareshield/dash panel, so from the pilot seats the view runs
           // forward out the glass windscreen band (bidirectional see-through).
-          K.put(linerMat, new THREE.PlaneGeometry(3.0, 1.1), 14.45, 3.0, 0, 0, Math.PI / 2);
+          //
+          // THE HEIGHT IS SOLVED, NOT PICKED. Captain's eye sits at model y
+          // 3.585, x 13.218; this wall is at x 14.45, i.e. 1.232 ahead of him.
+          // At the old y 3.0 the panel's top edge was 3.55 — thirty-five
+          // MILLIMETRES below his eye — which is 1.6 degrees of down-vision and
+          // is why the owner's screenshot has no forward view at all. The
+          // certification floor (FAR/CS 25.773) is ~15 degrees below the
+          // horizon, so the top must sit at most 1.232·tan(15°) = 0.330 below
+          // the eye: y_top <= 3.255, hence a 1.1-tall panel centred at 2.70.
+          // Measured after: 15.2 degrees. Root cause of the original number is
+          // that AIRLINER_SCALE (1.45) grew the room, the furniture and the
+          // seat anchors — but a seated human's eye height is a human
+          // constant, so the pilot ended up below his own console.
+          K.put(linerMat, new THREE.PlaneGeometry(3.0, 1.1), 14.45, 2.70, 0, 0, Math.PI / 2);
         } else {
           K.put(linerMat, new THREE.PlaneGeometry(3.0, 2.35), 14.45, 3.625, 0, 0, Math.PI / 2);
         }
@@ -1325,122 +1727,208 @@
       for (const sgn of [-1, 1]) {
         K.put(cabinLightMat, new THREE.BoxGeometry(22, 0.05, 0.28), -0.5, 5.24, sgn * 0.5);
       }
-      // cockpit behind the bulkhead: console block + two pilot seats
-      K.put(FLEET.dark, new THREE.BoxGeometry(1.0, 0.85, 2.4), 14.2, 3.25, 0);
+      // ================================================================
+      //  THE CABIN — REAL SEATING (CABIN_REAL_SEATS)
+      //
+      //  OWNER: "PLANE PASSENGERS SIT SIDEWAYS NOT LIKE NPCS JUST SITTING. SO
+      //  MANY THINGS ARE LIKE DIORAMA ABOUT PLANES AND NOT LIKE JUST A FEATURE,
+      //  A THING BUILD THAT OUR GAME NPCS CAN INTERACT WITH."
+      //
+      //  MEASURED, not guessed. Two separate defects produced that screenshot:
+      //
+      //  (1) FACING was a ONE-SHOT WRITE. npclife.attach() writes the seat yaw
+      //      into `group.rotation` once, at attach time, and syncAttached()
+      //      re-asserts speed/state/sitting every frame but NEVER the transform.
+      //      A cabin passenger stays a full member of CBZ.cityPeds, and 41 files
+      //      in this repo iterate cityPeds and write `group.rotation.y` with no
+      //      `_npcAttached` guard (peds.js is the ONLY file that guards). Those
+      //      writes are WORLD-space bearings (Math.atan2(target.x - ped.pos.x,
+      //      …) — and ped.pos IS world space for an attached actor) landing on a
+      //      group whose parent is the airliner, so the body ends up at
+      //      worldBearing − planeHeading: pointing at a shop across the map,
+      //      rotated by the parked heading. aigoals.js's face() and social.js's
+      //      couple/friend vignettes (which fire on anyone within 30 m of the
+      //      player, i.e. exactly when you are standing in the cabin) are the two
+      //      that reach a seated tourist. The cure is the per-frame hold below
+      //      (cabinPassengerHold, CABIN_SEATED_V2) — facing becomes a TRUTH the
+      //      airport re-asserts after those systems run, not a value they can win.
+      //
+      //  (2) SCALE. K.put multiplies every coordinate and scales every geometry
+      //      by AIRLINER_SCALE (1.45). The hull is MEANT to grow; the humans are
+      //      not, and nobody had re-derived the furniture. The old rows were a
+      //      1.4-unit pitch = 2.03 m between rows, a 0.65 m cushion and 0.81 m
+      //      between neighbours — bar stools two metres apart. That is the
+      //      diorama: correct-looking geometry at the wrong scale for the only
+      //      thing in the room with a real size, the person. Every dimension
+      //      below is now the published economy number passed through R().
+      //
+      //  What we author is only what is genuinely new: the seat SHAPE and where
+      //  the anchors go. Bodies, brains, damage, death and the kill feed come
+      //  from the ordinary ped path (npclife casts real CBZ.cityPeds into these
+      //  anchors), and the pose comes from character.js's declared-cushion chair
+      //  solve — the same one propuse.js hands a bed or a deck chair.
+      // ================================================================
+      // cockpit behind the bulkhead: console block + two pilot seats, both at
+      // human scale (a flight-deck seat is a chair, not a sofa).
+      K.put(FLEET.dark, new THREE.BoxGeometry(R(0.72), R(0.62), R(1.75)), 14.2, CABIN_FLOOR + R(0.52), 0);
+      const PIL_Z = R(0.55);                    // half the side-by-side seat spacing
       for (const sgn of [-1, 1]) {
-        K.put(FLEET.navy, new THREE.BoxGeometry(0.55, 0.16, 0.55), 13.1, 2.86, sgn * 0.58);
-        K.put(FLEET.navy, new THREE.BoxGeometry(0.16, 0.8, 0.55), 12.75, 3.3, sgn * 0.58);
+        K.put(FLEET.navy, new THREE.BoxGeometry(R(0.50), R(SEAT.cushionT), R(0.50)),
+          13.13, CABIN_FLOOR + R(0.45 - SEAT.cushionT / 2), sgn * PIL_Z);              // cushion
+        K.put(FLEET.navy, new THREE.BoxGeometry(R(0.10), R(0.60), R(0.50)),
+          13.13 - R(0.29), CABIN_FLOOR + R(0.75), sgn * PIL_Z, 0, 0, SEAT.recline);   // back
       }
-      // Every physical seat is a reusable anchor. `reservedForNpc` preserves
-      // the exact old deterministic occupancy map, but the occupant is now a
-      // normal live NPC rather than model geometry. Consume the two old
-      // shirt/skin RNG draws when reserved so later airport generation remains
-      // byte-for-byte deterministic after removing the baked bodies.
       const seats = [];
       let seatId = 0;
-      function addSeat(x, z, chance) {
-        const reserved = rng() < chance;
-        if (reserved) { rng(); rng(); }
-        seats.push({
-          id: "seat-" + (seatId++), x: (x + 0.03) * AL_SC, y: (CABIN_FLOOR + 0.45) * AL_SC, z: z * AL_SC,
-          heading: Math.PI / 2, kind: "aircraft-seat",
-          reservedForNpc: reserved, occupant: null,
-          // seat geometry for the V2 chair sit (entities/character.js): this
-          // anchor sits ON the cushion top (0.45 above the deck), and the
-          // cushion mesh top is that same 0.45 — declaring both lets the pose
-          // put the butt on the cushion and the soles on the FLOOR instead of
-          // squat-folding the whole rig on top of the seat.
-          cushionH: 0.45, floorBelow: 0.45,
-        });
+      // Occupancy is a POSITION HASH, never a draw on the shared build stream.
+      // The private-jet club-four already does this ("order-safe for the airport
+      // build") and it is strictly better than the rng() draws this loop used to
+      // consume: adding or removing a row can no longer shift every later
+      // airport decision, so the seat map is stable under edits AND identical
+      // per seed across clients (determinism law).
+      const PX = g.position.x, PZ = g.position.z;
+      function seatHash(x, z, salt) {
+        return CBZ.hash01 ? CBZ.hash01(PX + x * 7.13, PZ + z * 11.71, salt) : 0.5;
       }
       // COCKPIT CREW SEATS — real seat records the shared NPC life system can
-      // claim. The captain's chair (port/left, z=-0.58) is reserved so a live
-      // pilot is cast there (seat.role "pilot" → npclife's aircraftPilot
-      // profile, uniformed via the job-cast wardrobe); the first officer's
-      // chair stays free for the player to take. Pushed FIRST so the flight
-      // deck fills before the rows. NO rng() here — the airport build stream
-      // must keep the exact draw sequence the addSeat rows below consume
-      // (determinism law: byte-identical worlds per seed).
+      // claim. The captain's chair (port/left, -z) is reserved so a live pilot is
+      // cast there (seat.role "pilot" → npclife's aircraftPilot profile,
+      // uniformed via the job-cast wardrobe); the first officer's chair stays
+      // free for the player to take. `job` is the truth about what they DO — the
+      // hold below stamps it onto whichever body gets cast here, and level.js's
+      // cityTitle() turns it into the overhead "Lv.N Pilot" pill with no string
+      // hardcoded anywhere near the HUD.
+      // cockpit.js reads these anchors for the pilot EYE point, so the cushion-top
+      // convention (anchor y == cushion top) must not drift.
       if (realDoor) {
         seats.push({
-          id: "seat-captain", x: 13.13 * AL_SC, y: (CABIN_FLOOR + 0.45) * AL_SC, z: -0.58 * AL_SC,
-          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", cockpit: true,
+          id: "seat-captain", x: 13.13 * AL_SC, y: (CABIN_FLOOR + R(0.45)) * AL_SC, z: -PIL_Z * AL_SC,
+          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", job: "pilot", cockpit: true,
           reservedForNpc: true, occupant: null,
-          cushionH: 0.45, floorBelow: 0.45,   // same cushion-top anchor convention as the rows
+          cushionH: Rm(0.45), floorBelow: Rm(0.45),   // world metres above the deck (see Rm)
         });
         seats.push({
-          id: "seat-firstofficer", x: 13.13 * AL_SC, y: (CABIN_FLOOR + 0.45) * AL_SC, z: 0.58 * AL_SC,
-          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", cockpit: true,
+          id: "seat-firstofficer", x: 13.13 * AL_SC, y: (CABIN_FLOOR + R(0.45)) * AL_SC, z: PIL_Z * AL_SC,
+          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", job: "co-pilot", cockpit: true,
           reservedForNpc: false, occupant: null,
-          cushionH: 0.45, floorBelow: 0.45,
+          cushionH: Rm(0.45), floorBelow: Rm(0.45),
         });
       }
-      // BUSIER cabin: tighter row pitch + one more bay fills the up-scaled
-      // fuselage with more rows, and a high reserve chance keeps most seats
-      // occupied (actual fill is throttled by the shared npclife attach cap).
-      // ================================================================
-      //  THE CABIN (owner: "the NPCs sitting inside planes look dumb — they
-      //  aren't people in our game engine sitting in chairs in a room designed
-      //  to look like an airplane, which they should be. It's like a SCENE and
-      //  it's clearly overdone and redundant, and that pattern is clear
-      //  throughout my code.")
-      //
-      //  He is describing a diorama, and the geometry was the tell: five flat
-      //  slabs per seat pair — cushion, back, pedestal, two headrest cubes —
-      //  and nothing else. No armrests, no recline, no bins, no aisle edge. A
-      //  bench painted to look like seating, with bodies parked on it.
-      //
-      //  What actually makes an aircraft cabin read is not seat COUNT, it is
-      //  three things this had none of:
-      //    • ARMRESTS. The single strongest cue, because they are what a
-      //      seated body's arms rest on — without them the passengers look
-      //      like they are sitting on a shelf.
-      //    • RECLINE. Every seat back in the world leans. A vertical slab is
-      //      the most artificial shape in a cabin.
-      //    • OVERHEAD BINS. The ceiling is half of what you see walking an
-      //      aisle, and it was bare tube.
-      //  Cost stays flat because the row loop already ran per seat pair; these
-      //  are the same K.put budget spent on shapes that carry the read.
-      // ================================================================
-      const RECLINE = 0.14;                     // radians the seat back leans aft
-      for (let rx = -11.8; rx <= 8.8; rx += 1.4) {
-        for (const s of [-1, 1]) {
-          const zc = s * 1.0;
-          K.put(FLEET.navy, new THREE.BoxGeometry(0.62, 0.16, 1.1), rx, 2.87, zc);       // cushion
-          // RECLINED back — leans aft (-X is aft here), so the top trails the base
-          const back = K.put(FLEET.navy, new THREE.BoxGeometry(0.18, 0.85, 1.1), rx - 0.34, 3.32, zc);
-          if (back && back.rotation) back.rotation.z = RECLINE;
-          K.put(FLEET.dark, new THREE.BoxGeometry(0.5, 0.32, 0.95), rx, 2.66, zc);        // pedestal
-          // headrests ride the recline so they don't float off the leaning back
-          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.40, 3.86, zc - 0.28);
-          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.40, 3.86, zc + 0.28);
-          // ARMRESTS — three per pair (outboard, shared centre, inboard), the
-          // thing a seated body's arms actually land on.
-          for (const az of [zc - 0.56, zc, zc + 0.56]) {
-            K.put(FLEET.dark, new THREE.BoxGeometry(0.46, 0.07, 0.09), rx + 0.02, 3.10, az);
+      // ---- the economy cabin: 3-3, 0.79 m pitch, 0.44 m seats ----------------
+      // Block centre is pinned OUTBOARD against the liner wall (|z| = 1.6 in
+      // authoring units) so the window seat sits by the window at any
+      // AIRLINER_SCALE and every surplus centimetre of the up-scaled tube goes to
+      // the aisle instead of to dead space behind the last seat. At AL_SC = 1
+      // that lands the real 0.48 m narrowbody aisle exactly; at 1.45 it opens to
+      // ~1.9 m, which is the honest consequence of the owner's hull dial and
+      // reads as a widebody aisle rather than as oversized furniture.
+      const HALF_W = R(SEAT.width * SEAT.abreast / 2);            // half a 3-abreast block
+      const BLOCK_Z = Math.max(HALF_W + R(SEAT.aisleMin / 2), 1.6 - HALF_W - R(0.03));
+      const X_AFT = -11.8, X_FWD = 8.8;                           // seating zone (clear of both bulkheads)
+      const PITCH = R(SEAT.pitch);
+      const CUSH = seatCushion();                                 // metres above the deck (propuse's table)
+      const CUSH_Y = CABIN_FLOOR + R(CUSH - SEAT.cushionT / 2);
+      const ANCHOR_Y = CABIN_FLOOR + R(CUSH);
+      // Overwing EXIT ROW: two rows omitted mid-cabin. Real, free (it is a skip,
+      // not geometry) and it breaks the corridor read of an unbroken seat run.
+      const EXIT_X0 = -1.0, EXIT_X1 = -1.0 + PITCH * 2;
+      // Boarding load: reserved seats fill FRONT-TO-BACK under a hard cap, which
+      // is both what a boarding aircraft looks like and what keeps the rig count
+      // sane — the old map reserved ~90% of every row (≈54 live rigs per plane,
+      // 216 across the gate line). The rest of the cabin stays genuinely empty so
+      // the player has somewhere to sit.
+      const NPC_CAP = 26;
+      let reservedN = 0;
+      const rowsX = [];
+      for (let rx = X_FWD; rx >= X_AFT - 1e-6; rx -= PITCH) {
+        if (rx < EXIT_X1 && rx > EXIT_X0) continue;
+        rowsX.push(rx);
+      }
+      for (let r = 0; r < rowsX.length; r++) {
+        const rx = rowsX[r];
+        // forward rows board first: 0.62 at the bulkhead decaying to 0.10 aft
+        const fill = 0.62 - 0.52 * (r / Math.max(1, rowsX.length - 1));
+        for (const side of [-1, 1]) {
+          const zc = side * BLOCK_Z;
+          // CUSHION — one slab per 3-abreast block; the armrests below are what
+          // divide it into seats, exactly as a real bench-built economy block is
+          // built. Depth is the real 0.48 m squab.
+          K.put(FLEET.navy, new THREE.BoxGeometry(R(SEAT.cushionD), R(SEAT.cushionT), R(SEAT.width * SEAT.abreast)),
+            rx, CUSH_Y, zc);
+          // RECLINED BACK. `-X` is aft, and K.put's rz rotates the geometry
+          // BEFORE translating it, so a positive angle carries the top of the
+          // back aft. (The old code assigned rotation.z to K.put's return value,
+          // which is undefined — the recline had never actually run.)
+          K.put(FLEET.navy, new THREE.BoxGeometry(R(SEAT.backT), R(SEAT.backH), R(SEAT.width * SEAT.abreast)),
+            rx - R(SEAT.cushionD / 2 + SEAT.backT / 2), CABIN_FLOOR + R(CUSH + SEAT.backH / 2), zc,
+            0, 0, SEAT.recline);
+          // PEDESTAL — the boxed underseat leg, floor to cushion underside.
+          K.put(FLEET.dark, new THREE.BoxGeometry(R(0.30), R(CUSH - SEAT.cushionT), R(SEAT.width * SEAT.abreast - 0.14)),
+            rx, CABIN_FLOOR + R((CUSH - SEAT.cushionT) / 2), zc);
+          // ARMRESTS — one per seat division (4 across a 3-abreast block). This
+          // is what a seated body's forearms land on, and without them the
+          // passengers read as sitting on a shelf.
+          for (let a = 0; a <= SEAT.abreast; a++) {
+            K.put(FLEET.dark, new THREE.BoxGeometry(R(0.42), R(0.05), R(0.06)),
+              rx + R(0.02), CABIN_FLOOR + R(CUSH + SEAT.armY), zc + side * R((a - SEAT.abreast / 2) * SEAT.width));
           }
-          addSeat(rx, s * 1.28, 0.9);   // window
-          addSeat(rx, s * 0.72, 0.74);  // aisle
+          // SEATS + HEADRESTS, outboard (window) to inboard (aisle).
+          for (let k = 1; k >= -1; k--) {
+            const sz = zc + side * R(k * SEAT.width);
+            K.put(FLEET.dark, new THREE.BoxGeometry(R(0.10), R(0.20), R(0.28)),
+              rx - R(SEAT.cushionD / 2 + SEAT.backT + Math.sin(SEAT.recline) * SEAT.backH * 0.5),
+              CABIN_FLOOR + R(CUSH + SEAT.backH - 0.02), sz);
+            // A body sits a hair FORWARD of the cushion centre (backside against
+            // the squab's rear third), so the anchor leads the cushion centre.
+            const ax = rx + R(0.04);
+            const reserve = reservedN < NPC_CAP && seatHash(ax, sz, 0x5EA7) < fill;
+            if (reserve) reservedN++;
+            seats.push({
+              id: "seat-" + (seatId++), x: ax * AL_SC, y: ANCHOR_Y * AL_SC, z: sz * AL_SC,
+              heading: Math.PI / 2,                       // plane-LOCAL yaw: +X is the nose
+              // NO `job` here on purpose: npclife's aircraftPassenger profile
+              // already casts these bodies with job "traveller", and a seat only
+              // overrides the profile where the SEAT knows better (the flight
+              // deck and the crew post, below).
+              kind: "aircraft-seat",
+              row: r, col: k, window: k === 1,
+              reservedForNpc: reserve, occupant: null,
+              // Declared geometry for the V2 chair sit (entities/character.js via
+              // CBZ.propSeatRef): the anchor sits ON the cushion top and the
+              // cushion top is that same height above the deck. Both are REAL
+              // METRES because the rig that reads them is real-metre sized — this
+              // pair is the one place R() must NOT be applied.
+              cushionH: Rm(CUSH), floorBelow: Rm(CUSH),
+            });
+          }
         }
       }
-      // OVERHEAD BINS — one continuous run per side, closed, with a lip. The
-      // ceiling was bare tube, which is why the cabin read as a corridor.
-      for (const s of [-1, 1]) {
-        K.put(FLEET.navy, new THREE.BoxGeometry(21.0, 0.62, 0.92), -1.5, 4.62, s * 1.42);
-        K.put(FLEET.dark, new THREE.BoxGeometry(21.0, 0.07, 0.10), -1.5, 4.30, s * 0.98);   // lip
+      // OVERHEAD BINS — dropped to real reach height (underside ~1.62 m above the
+      // deck) so the furniture band, not the 4 m up-scaled ceiling, is what your
+      // eye measures the room against. The bin lip carries the reading-light rail,
+      // which is the second-strongest cabin cue after the armrests.
+      {
+        const runL = X_FWD - X_AFT + R(1.2), runC = (X_FWD + X_AFT) / 2;
+        for (const side of [-1, 1]) {
+          K.put(FLEET.navy, new THREE.BoxGeometry(runL, R(0.34), R(0.50)),
+            runC, CABIN_FLOOR + R(1.79), side * (1.6 - R(0.27)));
+          K.put(cabinLightMat, new THREE.BoxGeometry(runL, R(0.03), R(0.10)),
+            runC, CABIN_FLOOR + R(1.60), side * (1.6 - R(0.48)));
+        }
       }
-      // ONE standing uniformed crew member in the forward cabin aisle, facing
-      // AFT over the seated cabin (heading -pi/2 → local -X, the mirror of the
+      // ONE standing uniformed crew member in the forward vestibule, facing AFT
+      // over the seated cabin (heading -pi/2 → local -X, the mirror of the
       // passengers' +X). A "stand" anchor (attach sets sitting=false) spawned
-      // fresh through the flight-crew profile (role "pilot"), so it reuses the
-      // npclife cabin fill + lifecycle (pruneCabins releases it on theft/crash)
-      // with NO change to the verified attach/facing path. NO rng() here — the
-      // determinism draw sequence is the addSeat rows above. Flip
-      // AIRLINER_CABIN_CREW false to remove.
+      // fresh through the flight-crew profile, so it reuses the npclife cabin
+      // fill + lifecycle (pruneCabins releases it on theft/crash) with NO change
+      // to the verified attach path. Its JOB is a flight attendant's, not a
+      // pilot's — `role:"pilot"` here only selects npclife's uniformed
+      // aircraftPilot CASTING profile; the hold stamps the truthful job on the
+      // body afterwards. Flip AIRLINER_CABIN_CREW false to remove.
       if (!CBZ.CONFIG || CBZ.CONFIG.AIRLINER_CABIN_CREW !== false) {
         seats.push({
-          id: "seat-crew", x: 9.0 * AL_SC, y: CABIN_FLOOR * AL_SC, z: 0,
-          heading: -Math.PI / 2, kind: "cabin-crew", role: "pilot",
+          id: "seat-crew", x: 9.8 * AL_SC, y: CABIN_FLOOR * AL_SC, z: 0,
+          heading: -Math.PI / 2, kind: "cabin-crew", role: "pilot", job: "flight attendant",
           pose: "stand", state: "idle",
           reservedForNpc: true, occupant: null,
         });
@@ -1472,6 +1960,7 @@
         doorX: CABIN_DOOR_X * AL_SC, doorZ: -1.7 * AL_SC,
         scale: AL_SC,                                  // read by aircraft_doors.js to scale the walk-in arc offsets
         seats, panel, doorT: 0,
+        rows: rowsX.length, abreast: SEAT.abreast,     // read by cabinAudit
         cockpitLeaf, cockpitT: 0,
       };
     }
@@ -2041,27 +2530,39 @@
       // terminal's alleged passengers/crew never entered the scene or the
       // interactive city roster.  npcLife owns the normal path; this fallback
       // mirrors its registerCity contract for builds that omit that module.
-      function airportActor(profile, x, z, opts, role) {
+      // `job` is now stamped through airportRole() rather than only living in
+      // the makePed overrides, so ONE function owns "what does this airport
+      // person do" for the concourse, the apron, the desks and the cabins alike
+      // — and cabinAudit().roleless can actually measure it.
+      function airportActor(profile, x, z, opts, role, job, post) {
+        function fit(p) {
+          if (!p) return p;
+          airportRole(p, job || (opts && opts.job), role);
+          // posted staff hold their spot: occupy.js's `staffPost` is peds.js's
+          // OWN rooted-worker brain (no wander, no crowd recast, still gunpoint-
+          // aware, still dies through the kill bus). No new loop, no new roster.
+          if (post) {
+            p.staffPost = { x: x, z: z, face: post.face || 0 };
+            p.state = "idle"; p.speed = 0;
+            if (p.group && post.face != null) p.group.rotation.y = post.face;
+          }
+          return p;
+        }
         if (CBZ.npcLife && CBZ.npcLife.definePopulation) {
           populationEntries.push({
-            profile: profile, placement: { x: x, z: z, rng: rng }, overrides: opts || {},
-            configure: function (p) { p._airportRole = role; },
+            profile: profile, placement: { x: x, z: z, rng: rng, yaw: post ? post.face : null },
+            overrides: opts || {}, configure: fit,
           });
           return null;
         }
         if (CBZ.npcLife) {
-          const p = CBZ.npcLife.spawnCity(profile, {
-            x: x, z: z, parent: root, rng: rng,
-          }, opts || {});
-          if (p) p._airportRole = role;
-          return p;
+          return fit(CBZ.npcLife.spawnCity(profile, { x: x, z: z, parent: root, rng: rng }, opts || {}));
         }
         const p = CBZ.cityMakePed(x, z, rng, opts || {});
         if (!p || !p.group) return null;
         root.add(p.group);
         if (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
-        p._airportRole = role;
-        return p;
+        return fit(p);
       }
       // passengers in the terminal (carry-on, low aggression travellers)
       for (let i = 0; i < 14; i++) {
@@ -2070,7 +2571,7 @@
         airportActor("terminalTraveller", sx, sz, {
           kind: "civilian", archetype: "tourist", job: "traveller",
           wealth: 0.4 + rng() * 0.4, aggr: 0.06 + rng() * 0.08,
-        }, "traveller");
+        }, "traveller", "traveller");
       }
       // ground crew in hi-vis on the apron near the jets
       for (let i = 0; i < 6; i++) {
@@ -2079,18 +2580,43 @@
         airportActor("groundCrew", sx, sz, {
           kind: "worker", archetype: "laborer", job: "ground crew",
           outfit: 0xffc81f, wealth: 0.25, aggr: 0.12 + rng() * 0.06,
-        }, "ground-crew");
+        }, "ground-crew", "ground crew");
+      }
+      // GATE AGENTS behind the four check-in desks, facing the queue (-z). The
+      // desks have existed since this island was built and nobody has ever stood
+      // at one; a counter with no one behind it is the same dead prop as a seat
+      // nothing can sit on. They are posted, not wandering, so the desk is
+      // always staffed. Desk geometry (dx, tz + td/2 - 3) is read from the same
+      // constants the desks were drawn with — no second copy of the layout.
+      {
+        const tx = APRON_X, tz = 24 + ADZ, tw = 150, td = 26;
+        for (let k = 0; k < 4; k++) {
+          const dx = tx - tw / 2 + 20 + k * 30;
+          airportActor("venueWorker", dx, tz + td / 2 - 1.4, {
+            kind: "worker", archetype: "laborer", job: "gate agent",
+            outfit: 0x2f4f78, wealth: 0.35, aggr: 0.08,
+          }, "gate-agent", "gate agent", { face: Math.PI });
+        }
       }
       if (populationEntries.length && CBZ.npcLife && CBZ.npcLife.definePopulation) {
         CBZ.npcLife.definePopulation("airport-authored", { root: root, entries: populationEntries });
       }
     })();
 
-    // taxis at the landside curb (south of the terminal)
+    // Taxis at the landside kerb. TWO things were wrong with the old line and
+    // the comment was one of them:
+    //   • it said "south of the terminal", but the terminal's door is
+    //     doorSide 1 = +z = NORTH. The kerb is north.
+    //   • z was 42 + ADZ, and the island's own north edge is A_MAXZ = 40 + ADZ
+    //     — so all three taxis were parked two metres OFF the island, sitting
+    //     on the shoreline/water. Nobody had ever plotted them against the
+    //     rect they belong to.
+    // 38.5 puts them on the 3 m kerb strip between the terminal's north wall
+    // (z 37) and the island edge, which is where a kerb actually is.
     if (CBZ.cityMakeCar && CBZ.cityEcon && CBZ.cityEcon.carByName) {
       const taxiModel = CBZ.cityEcon.carByName("Taxi") || CBZ.cityEcon.carByName("Sedan") || null;
       for (let i = 0; i < 3; i++) {
-        try { CBZ.cityMakeCar(-70 + ADX + i * 14, 42 + ADZ, Math.PI / 2, false, taxiModel, 0.2); } catch (e) {}
+        try { CBZ.cityMakeCar(-70 + ADX + i * 14, 38.5 + ADZ, Math.PI / 2, false, taxiModel, 0.2); } catch (e) {}
       }
     }
 
@@ -2159,6 +2685,40 @@
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
       city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+
+      /* ---- THE PERIMETER ACCESS ROAD --------------------------------------
+         Until now the airport had NO landside road. The causeway arrives at
+         the island's SOUTH edge (CW_MAXZ === A_MINZ) and the terminal's door
+         is doorSide 1 = +z = NORTH — so the only way a car could reach the
+         terminal kerb was to drive up the middle of the airfield and ACROSS
+         RUNWAY 09/27. That is the physical half of the owner's "cars inside
+         the airport near the runway": even after roadrules.js stopped ambient
+         traffic from being PLACED airside, the geometry still said the runway
+         was the road to the terminal.
+
+         So the island gets the road a real airport has: up the EAST side, well
+         clear of the runway's east threshold (RWY_X1), then west along the
+         north edge to the departures kerb. Two ordinary road records — the
+         same shape every builder pushes — so the road network, the navmesh,
+         speed limits and roadPick all understand it with no special case.
+
+         Both are tagged `district: "airport"`, which roadrules.js weights low
+         (a service perimeter is not Main Street) but leaves OPEN, and both lie
+         OUTSIDE the airside keep-out by construction: the spur runs at
+         x = A_MAXX - 22, east of the runway; the kerb runs at z = 38.5, north
+         of the keep-out's z <= 9 + ADZ ceiling. */
+      const PERIM_X = A_MAXX - 22;              // east perimeter, clear of RWY_X1
+      const TERM_X = -40 + ADX;                 // terminal centreline (APRON_X, which is scoped to the paint pass)
+      const KERB_Z = 38.5 + ADZ;                // the departures kerb strip
+      city.roads.push({
+        x: PERIM_X, z: (A_MINZ + KERB_Z) / 2, vertical: true, len: KERB_Z - A_MINZ,
+        district: "airport", w: 14, lanesPerDir: 1, laneW: 3.4,
+      });
+      city.roads.push({
+        x: (TERM_X + PERIM_X) / 2, z: KERB_Z, vertical: false,
+        len: Math.abs(PERIM_X - TERM_X), district: "airport",
+        w: 14, lanesPerDir: 1, laneW: 3.4,
+      });
     }
 
     // ---- MAKE THE PARKED FLEET STEALABLE (deferred — militaryvehicles.js loads

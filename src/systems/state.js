@@ -295,17 +295,83 @@
   // origins.js reads it once per city reset and stamps its own choice onto
   // the world ledger the first time a character is actually started.
   const originButtons = Array.from(document.querySelectorAll(".origin-btn"));
+  const planeWrap = document.getElementById("originPlaneWrap");
+  const planeSelect = document.getElementById("originPlaneSelect");
+  const rollLine = document.getElementById("originRollLine");
+
+  // THE ROSTER IS THE REGISTRY, NOT A LITERAL. This used to read
+  // `(id === "barfly" || id === "tenant") ? id : "exec"` — a hand-kept list of
+  // exactly the three stories that existed the day it was written, which
+  // silently swallowed every story added afterwards and dropped the player
+  // back onto the exec. city/origins.js exports cityOriginNormalize() off its
+  // OWN registry keys, so a tenth story is valid here the moment it registers.
+  function normalize(id) {
+    if (CBZ.cityOriginNormalize) return CBZ.cityOriginNormalize(id);
+    return (id === "barfly" || id === "tenant") ? id : "exec";
+  }
+
+  // THE AIRCRAFT SUB-SELECT — only the PILOT story opens in the air, so the
+  // list only appears for it. Filled from CBZ.cityOriginPlanes(), which reads
+  // the live registry militaryvehicles.js keeps; at the TITLE SCREEN the world
+  // has not been built yet and that registry is empty, so we show the canonical
+  // set as labels and let origins.js resolve a name to a real airframe at
+  // run-start (it falls back to any flyable if the pick did not build).
+  // These strings must match what the builders actually register as
+  // `model.name` — strategic.js "B-2 SPIRIT", island_military.js "Fighter Jet"
+  // / "Heavy Bomber" / "Helicopter", island_airport.js "Airliner" / "Private
+  // Jet". They are only the TITLE-SCREEN labels (the world is not built yet);
+  // origins.js resolves the chosen name against the live registry at
+  // run-start and matches case-insensitively, so a casing drift here costs a
+  // fallback to another airframe rather than a crash.
+  const FALLBACK_PLANES = ["B-2 SPIRIT", "Heavy Bomber", "Fighter Jet", "Airliner", "Private Jet", "Helicopter"];
+  function renderPlanes() {
+    if (!planeSelect) return;
+    const live = CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes() : [];
+    const names = live.length ? live.map((p) => p.name) : FALLBACK_PLANES;
+    const chosen = (CBZ.cityOriginPlane && CBZ.cityOriginPlane()) || names[0];
+    planeSelect.innerHTML = "";
+    names.forEach((n) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "origin-plane-btn" + (n === chosen ? " active" : "");
+      b.textContent = n;
+      b.addEventListener("click", () => {
+        if (CBZ.setCityOriginPlane) CBZ.setCityOriginPlane(n);
+        Array.from(planeSelect.children).forEach((c) => c.classList.toggle("active", c === b));
+      });
+      planeSelect.appendChild(b);
+    });
+    if (CBZ.setCityOriginPlane && !(CBZ.cityOriginPlane && CBZ.cityOriginPlane())) CBZ.setCityOriginPlane(chosen);
+  }
+
   function setOrigin(id) {
-    // Exec is the main story path (crash → street → jail risk).
-    g.cityOrigin = (id === "barfly" || id === "tenant") ? id : "exec";
+    g.cityOrigin = normalize(id);
     originButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.origin === g.cityOrigin));
+    if (planeWrap) {
+      const wantPlane = g.cityOrigin === "pilot";
+      planeWrap.style.display = wantPlane ? "" : "none";
+      if (wantPlane) renderPlanes();
+    }
   }
   CBZ.setCityOrigin = setOrigin;
   originButtons.forEach((btn) => {
     // picking another character here is a GTA5-style SWITCH (city/origins.js
     // vaults the active character's ledger and activates this one) — never a
     // reset, so a plain click is all the intent we need.
-    btn.addEventListener("click", () => setOrigin(btn.dataset.origin));
+    btn.addEventListener("click", () => {
+      // RE-ROLL: clicking "Roll The Dice" while it is ALREADY selected rolls a
+      // new life rather than doing nothing, so the player can shop for a start
+      // they like. The roll is persisted by origins.js onto the character's
+      // ledger, so it is only re-rollable until the run actually begins.
+      if (btn.dataset.origin === "random" && g.cityOrigin === "random" && CBZ.cityOriginRoll) {
+        const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
+        const comp = CBZ.cityOriginRoll();
+        if (w) w.originRoll = comp;
+        if (rollLine && CBZ.cityOriginDescribe) rollLine.textContent = CBZ.cityOriginDescribe(comp);
+        return;
+      }
+      setOrigin(btn.dataset.origin);
+    });
   });
   setOrigin(g.cityOrigin || "exec");
 

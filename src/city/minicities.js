@@ -57,17 +57,77 @@
   // -860 plug (40u inside the field) so the flag-off world stays identical.
   const _EN = !!(CBZ.CONFIG && CBZ.CONFIG.WORLD_ENLARGE_V2 !== false);
   const _NR_PLUG_X = _EN ? (-900 + _MOFF("airport").dx) : -860;
+  // WORLD_LAYOUT_V2 (world/layout.js owns the flag; this only mirrors the
+  // default for a build without it). Two behaviours ride it here — see
+  // buildMiniCity: AUTHORED-FRAME SEEDING and the SIZE GRADIENT.
+  if (CBZ.CONFIG && CBZ.CONFIG.WORLD_LAYOUT_V2 == null) CBZ.CONFIG.WORLD_LAYOUT_V2 = true;
+  const LAYOUT_V2 = function () { return !!(CBZ.CONFIG && CBZ.CONFIG.WORLD_LAYOUT_V2 !== false); };
+  // `ax`/`az` are the STAGE-1 AUTHORED anchors — the same literals cx/cz are
+  // built from, before the dial. They exist so a city's INTERIOR can be
+  // seeded from where it was DESIGNED rather than from where it currently
+  // stands (see buildMiniCity). Keep them in lockstep with cx/cz.
   const PLACEMENTS = [
     // FINANCE — south-central plains, WEST of the (now much larger) desert.
     // Moved off its old SE spot (760,430), which the enlarged desert swallowed.
-    { id: "goldspire",  cx: 150 + _OG.dx,   cz: 470 + _OG.dz,  hx: 118, hz: 120, road: { x: 340, z: 470 } },
+    { id: "goldspire",  ax: 150,   az: 470,  cx: 150 + _OG.dx,   cz: 470 + _OG.dz,  hx: 118, hz: 120, road: { x: 340, z: 470 } },
     // PORT — south coast, south of the speedway, west of the desert.
-    { id: "capeharbor", cx: 430 + _OC.dx,   cz: 175 + _OC.dz,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
+    { id: "capeharbor", ax: 430,   az: 175,  cx: 430 + _OC.dx,   cz: 175 + _OC.dz,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
     // CASINO — west plains, west of the military base.
-    { id: "neonreef",   cx: -1080 + _ON.dx, cz: -260 + _ON.dz, hx: 130, hz: 128, road: { x: _NR_PLUG_X, z: -260 + _ON.dz } },
+    { id: "neonreef",   ax: -1080, az: -260, cx: -1080 + _ON.dx, cz: -260 + _ON.dz, hx: 130, hz: 128, road: { x: _NR_PLUG_X, z: -260 + _ON.dz } },
     // FACTORY — SW plains, south of the casino strip.
-    { id: "foundry",    cx: -1080 + _OF.dx, cz: 225 + _OF.dz,  hx: 135, hz: 130, road: { x: -380, z: 225 + _OF.dz } },
+    { id: "foundry",    ax: -1080, az: 225,  cx: -1080 + _OF.dx, cz: 225 + _OF.dz,  hx: 135, hz: 130, road: { x: -380, z: 225 + _OF.dz } },
   ];
+
+  // ---- WHERE IS THIS PLACE, AS A FRACTION OF THE MAP? -----------------------
+  // 0 = dead centre, 1 = the map rim. Box metric over the published layout
+  // rect (the same metric continent.js's rim relief uses, so the "rim" a
+  // town is judged against is the SAME rim the mountains rise on).
+  // DELIBERATELY reads ONLY CBZ.WORLD_ENLARGE_FLAT — a parse-time constant
+  // that nothing mutates. CBZ.TERRAIN_FLAT looks like the same rect but is
+  // GROWN in place at build time (terrain.js syncTerrainFlat), so reading it
+  // from a landmass builder would make the answer depend on build ORDER,
+  // i.e. non-deterministic in the one way this repo cannot tolerate. No
+  // rect -> 0 -> no gradient: degrade-safe, never a broken town.
+  function rimFraction(cx, cz) {
+    const F = CBZ.WORLD_ENLARGE_FLAT;
+    if (!F || !isFinite(F.minX)) return 0;
+    const fx = (F.minX + F.maxX) / 2, fz = (F.minZ + F.maxZ) / 2;
+    const hx = Math.max(1, (F.maxX - F.minX) / 2), hz = Math.max(1, (F.maxZ - F.minZ) / 2);
+    const t = Math.max(Math.abs(cx - fx) / hx, Math.abs(cz - fz) / hz);
+    return t < 0 ? 0 : (t > 1 ? 1 : t);
+  }
+  // OWNER: "mountains … on the edges of the map with just small cities."
+  // A town's FABRIC (lots, roads, shops, its economy) is untouched — only its
+  // SILHOUETTE bends: the further out a place sits, the lower its skyline and
+  // the fewer of its lots grow towers. Downtown stays the one tall place,
+  // which is what makes the rim read as frontier instead of as more suburb.
+  // Deliberately NOT a footprint scale: shrinking the rect would delete lots,
+  // shops and jobs, and "small" is a look, not a missing economy.
+  //
+  // The curve is tuned so a mid-map economy is UNTOUCHED and only genuinely
+  // rim-side places bend. Measured against the stage-3 rect:
+  //   Neon Reef  t=0.43 -> k=1.00  (casino strip keeps its 38-storey crown)
+  //   Foundry    t=0.65 -> k=0.85  (already low-rise; barely moves)
+  //   Cape Harbor t=0.72 -> k=0.76 (port softens)
+  //   Goldspire  t=0.84 -> k=0.60  (finance city at the south rim: 44 -> 27)
+  // The floor is 0.55, not 0.42, on purpose: a rim city should read SMALLER
+  // than downtown, not be demolished into a hamlet.
+  const SIZE_IN = 0.45, SIZE_OUT = 0.95, SIZE_FLOOR = 0.55;
+  function skylineForPlace(tpl, cx, cz) {
+    const sky = tpl && tpl.skyline;
+    if (!sky || !LAYOUT_V2()) return sky;
+    let t = (rimFraction(cx, cz) - SIZE_IN) / (SIZE_OUT - SIZE_IN);
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    const k = 1 - (1 - SIZE_FLOOR) * (t * t * (3 - 2 * t));    // 1 central -> 0.55 at the rim
+    if (k >= 0.999) return sky;
+    const minS = sky.minStoreys || 1;
+    const out = Object.assign({}, sky);
+    out.maxStoreys = Math.max(minS, Math.round((sky.maxStoreys || 8) * k));
+    if (sky.landmarkStoreys) out.landmarkStoreys = Math.max(out.maxStoreys, Math.round(sky.landmarkStoreys * k));
+    if (sky.towerFrac) out.towerFrac = sky.towerFrac * k;
+    if (k < 0.8) out.megaChance = false;
+    return out;
+  }
 
   // tiny local LCG factory so each city is deterministic + independent of any
   // global rng (no Math.random in layout — owner rule #5).
@@ -97,7 +157,17 @@
     const root = city.root; if (!root) return;
     const cx = place.cx, cz = place.cz, hx = place.hx, hz = place.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
-    const rng = lcg((Math.abs(cx) * 73856093) ^ (Math.abs(cz) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
+    // AUTHORED-FRAME SEEDING (WORLD_LAYOUT_V2). This stream used to be keyed
+    // on the town's WORLD centre, so the world-layout dial doubled as a
+    // re-roll button: sliding a city 300m re-dealt its whole street plan and
+    // moved the math gate's golden lot/shop counts with it (the gate's own
+    // comment — "recal: snow move re-rolled Pinecrest" — is the scar). Keying
+    // on the AUTHORED anchor decouples WHERE a place is from WHAT it is:
+    // layout work is now free of generator churn, and the flag-off world is
+    // byte-identical because at zero offset authored == world.
+    const seedX = (LAYOUT_V2() && place.ax != null) ? place.ax : cx;
+    const seedZ = (LAYOUT_V2() && place.az != null) ? place.az : cz;
+    const rng = lcg((Math.abs(seedX) * 73856093) ^ (Math.abs(seedZ) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
 
     // (a) GROUND PAD — a settled town floor under the whole footprint, a touch
     //     above grade so it reads as reclaimed land/plaza, then seed placement so
@@ -110,6 +180,9 @@
     const town = CBZ.buildTown(root, Object.assign({}, tpl, {
       cx: cx, cz: cz, rng: rng, region: rect,
       name: tpl.name, district: place.id,
+      // SIZE GRADIENT: a fresh skyline block (never a mutation of the shared
+      // template — CITY_TEMPLATES is pure data every other consumer reads).
+      skyline: skylineForPlace(tpl, cx, cz),
       // towngen chooses central skyline lots before it creates geometry. This
       // replaces the former post-build pass that constructed a second shell at
       // the exact same lot centre and guaranteed interpenetrating buildings.

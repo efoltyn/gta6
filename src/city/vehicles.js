@@ -143,6 +143,84 @@
   const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
   const laneOffset = (r, dir, idx) => (CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidth() * (idx + 0.5));
 
+  /* ======================================================================
+     THE INTELLIGENT DRIVER MODEL (Treiber, Hennecke & Helbing 2000)
+
+     WHY THIS AND NOT MORE HEURISTICS. Ambient traffic here used to decide its
+     speed with a stack of independent caps — "if the gap is under X, target
+     the leader's speed times 0.85", "if the light is red, target
+     distance × 1.25" — each reasonable alone and collectively the reason the
+     owner reads our traffic as dumb. Threshold rules do nothing at all until
+     their threshold trips and then act at full strength, so a queue of cars
+     coasts, stamps on the brakes together, releases together, and concertinas.
+     That is a real phenomenon in the WORLD (the phantom jam), but in the world
+     it DAMPS OUT and here it amplified, because nothing in the rule set was
+     continuous.
+
+     IDM is one continuous equation and it is the standard answer:
+
+         vdot = a · [ 1 − (v/v0)^delta − (sStar / s)² ]
+         sStar = s0 + v·T + (v·dv) / (2·sqrt(a·b))
+
+     v0 desired speed · s actual bumper gap · Δv closing rate (v − v_lead).
+     The braking term is ALWAYS slightly on and grows as the square of how far
+     inside your desired gap you are, so following looks like following.
+
+     It is also COLLISION-FREE BY CONSTRUCTION: as s → s0 the braking term
+     diverges, so the model cannot drive into the car in front as long as the
+     integrator keeps up — which removes a whole class of shunt bug rather than
+     patching it.
+
+     EVERY HAZARD IS A LEADER. A red light is a stationary car on the stop
+     line; a pedestrian in the lane is a stationary car where they stand. One
+     equation, applied three times, replaces three unrelated heuristics — and
+     each caller takes the MINIMUM acceleration, which is just "obey the
+     scariest thing you can see".
+
+     PARAMETERS are the published calibration, then bent by the driver
+     personality this file already carries (`driver.aggr`, `reckless`): a
+     maniac runs a 0.5 s headway and accelerates harder; a cautious driver runs
+     1.8 s. δ = 4 is the canonical exponent (it controls how acceleration
+     tapers as v → v0).
+
+     Flag: CBZ.CONFIG.TRAFFIC_IDM — false restores the original cap stack and
+     the original Euler step exactly, in one line.
+     ====================================================================== */
+  if (CBZ.CONFIG && CBZ.CONFIG.TRAFFIC_IDM == null) CBZ.CONFIG.TRAFFIC_IDM = true;
+  const IDM = {
+    s0: 2.0,        // jam distance — bumper gap at a dead stop
+    T: 1.5,         // desired time headway (s), published calibration
+    a: 1.9,         // max acceleration (m/s²) — above the 0.73 highway figure:
+                    //   this is a city at game pace, and a car that pulls away
+                    //   from a green like a real one feels better than one that
+                    //   is technically correct on a motorway
+    b: 2.6,         // comfortable deceleration (m/s²)
+    bMax: 9.0,      // physical limit — the only hard clamp in the model
+    delta: 4,       // acceleration exponent (canonical)
+  };
+  function IDM_ON() { return !CBZ.CONFIG || CBZ.CONFIG.TRAFFIC_IDM !== false; }
+
+  // One IDM evaluation. `s` is the bumper gap to the hazard (pass 1e6 for the
+  // free road), `dv` the closing rate. `c` supplies the personality.
+  function idmAccel(v, v0, s, dv, c) {
+    const aggr = (c && c.driver && c.driver.aggr) || 0.3;
+    // a maniac tailgates and accelerates hard; a cautious driver leaves room.
+    const T = c && c.reckless ? 0.5 : (1.9 - aggr * 1.1);
+    const a = IDM.a * (c && c.reckless ? 1.35 : (0.85 + aggr * 0.5));
+    const b = IDM.b * (c && c.reckless ? 1.25 : 1);
+    const free = 1 - Math.pow(v / Math.max(0.5, v0), IDM.delta);
+    // s* may not go below the jam distance, and a NEGATIVE closing rate (the
+    // leader pulling away) must not be allowed to shrink the desired gap below
+    // s0 — that is the classic IDM sign trap and it makes cars creep forward
+    // into a moving leader.
+    const sStar = Math.max(IDM.s0, IDM.s0 + v * T + (v * dv) / (2 * Math.sqrt(a * b)));
+    const ratio = sStar / Math.max(0.3, s);
+    const acc = a * (free - ratio * ratio);
+    return Math.max(-IDM.bMax, Math.min(a, acc));
+  }
+  CBZ.cityTrafficIDM = idmAccel;      // exported so the airside/service AI can share it
+  let brakeAt = 1e9;                  // per-car scratch: distance to a body in lane
+
   // ---- ambient car MODEL builder ----------------------------------------
   // Cars read as real vehicles: a low body with a chamfered roof/hood, a
   // separate glass-tinted greenhouse (windshield + side windows), four dark
@@ -916,15 +994,41 @@
     const econ = CBZ.cityEcon;
     const reckFrac = TR().recklessFrac != null ? TR().recklessFrac : 0.18;
     const [cLo, cHi] = TR().cruise || [7, 12];
+    // ADOPTED: city/roadrules.js's CBZ.roadPick is the ONE placement query
+    // (see its header). It replaces the eight-line road/lane/x/z/heading draw
+    // that used to live here — and with it we stop putting ambient cars inside
+    // the airport keep-out, on the military apron and in open water, which is
+    // what the owner was looking at when he said the spawning was dumb.
+    // We pass OUR SEEDED STREAM (`rng`), so worldgen stays byte-identical per
+    // seed; roadPick makes a bounded, fixed number of draws off it. The `:`
+    // arm is the original body verbatim — one-line revert, and the only thing
+    // that runs if roadrules.js is absent.
+    if (CBZ.roadPickUsed) CBZ.roadPickUsed("vehicles:spawnCityTraffic");
     for (let i = 0; i < n; i++) {
-      const r = A.roads[(rng() * A.roads.length) | 0];
-      const along = (rng() - 0.5) * r.len * 0.85;
-      const dirSign = rng() < 0.5 ? 1 : -1;
-      const laneIdx = (rng() * lanesPerDir(r)) | 0;
-      const lane = laneOffset(r, dirSign, laneIdx);
-      const x = r.vertical ? r.x + lane : r.x + along;
-      const z = r.vertical ? r.z + along : r.z + lane;
-      const heading = r.vertical ? (dirSign > 0 ? 0 : Math.PI) : (dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
+      let r, x, z, lane, laneIdx, dirSign, heading;
+      const spot = CBZ.roadPick ? CBZ.roadPick({ rng: rng, tries: 10, spread: 90 }) : null;
+      if (spot) {
+        r = spot.road; x = spot.x; z = spot.z;
+        lane = spot.lane; laneIdx = spot.laneIdx; dirSign = spot.dirSign; heading = spot.heading;
+      } else {
+        // roadPick exhausted its tries (a dense map where every candidate was
+        // already occupied, or roadrules.js absent). The original body follows
+        // — but it is wrapped in a few redraws that still refuse a keep-out
+        // point, because falling back must not mean falling back INTO the
+        // airfield. With roadrules absent roadPointOpen is undefined and this
+        // degrades to exactly one pass of the original code.
+        for (let t = 0; t < 6; t++) {
+          r = A.roads[(rng() * A.roads.length) | 0];
+          const along = (rng() - 0.5) * r.len * 0.85;
+          dirSign = rng() < 0.5 ? 1 : -1;
+          laneIdx = (rng() * lanesPerDir(r)) | 0;
+          lane = laneOffset(r, dirSign, laneIdx);
+          x = r.vertical ? r.x + lane : r.x + along;
+          z = r.vertical ? r.z + along : r.z + lane;
+          heading = r.vertical ? (dirSign > 0 ? 0 : Math.PI) : (dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
+          if (!CBZ.roadPointOpen || CBZ.roadPointOpen(x, z)) break;
+        }
+      }
       const reckless = rng() < reckFrac;
       const aggr = reckless ? 0.65 + rng() * 0.35 : 0.15 + rng() * 0.35;
       const model = econ ? econ.pickCar(rng() < 0.12) : null;
@@ -1008,6 +1112,17 @@
     if (!CBZ.city || !CBZ.city.arena) return null;
     if (CBZ.CONFIG && CBZ.CONFIG.CARS_ALL_DRIVABLE === false) return null;
     opts = opts || {};
+    // A parked car IN THE SEA is never anything but a bug, whoever placed it.
+    // Deliberately only the WATER half of roadPointOpen's test and not the
+    // keep-out half: these are AUTHORED positions, and a builder parking staff
+    // cars inside its own airside or motor pool is doing the right thing —
+    // refusing those would silently delete legitimate world content to fix a
+    // problem that lives in the AMBIENT paths (see roadrules.js). `force`
+    // exists for a builder that genuinely means to put a car in the water
+    // (a boat ramp, a flood set-piece).
+    if (!opts.force && CBZ.cityWaterAt) {
+      try { if (CBZ.cityWaterAt(x, z)) return null; } catch (e) {}
+    }
     const root = CBZ.city.arena.root;
     // purge fixtures whose group belongs to a torn-down arena root
     for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
@@ -3036,6 +3151,15 @@
 
       // ---- desired speed: cruise, modulated by lights, following, stops ----
       let target = c.baseV;
+      // IDM_V2 collects the frame's most restrictive constraint as an
+      // ACCELERATION rather than as a speed cap (see the block above idmAccel).
+      // Each hazard below folds its own virtual-leader term in with Math.min;
+      // the FREE-ROAD term is evaluated last, at the integrator, because the
+      // desired speed itself can still change (a car that starts fleeing wants
+      // to exceed its cruise, and a free term pinned to cruise would cap it).
+      const useIdm = IDM_ON();
+      let idmA = 1e9;                    // most restrictive hazard so far
+      let idmDesired = c.baseV;          // v0 for the free-road term
 
       // red-light stop (calm drivers; the reckless gamble on it). HIGHWAY +
       // arterial roads (the new mini-city/island network) have NO city-grid
@@ -3049,18 +3173,39 @@
       // calm drivers ANTICIPATE the red — ease to a smooth stop at the line from
       // further out (reads clearly as obeying the signal). Reckless ones gamble.
       if (red && distToInt > 1.2 && distToInt < redLookahead) {
-        if (!c.reckless || c.driver.aggr < 0.8) target = Math.min(target, Math.max(0, (distToInt - 1.6) * 1.25));
+        if (!c.reckless || c.driver.aggr < 0.8) {
+          target = Math.min(target, Math.max(0, (distToInt - 1.6) * 1.25));
+          // IDM_V2: a red light is a STATIONARY VIRTUAL LEADER parked on the
+          // stop line. This is the textbook treatment (SUMO does exactly this)
+          // and it is strictly better than the linear speed ramp above,
+          // because the same equation that makes a car follow smoothly now
+          // makes it ARRIVE smoothly — decelerating hard while far and fast,
+          // easing off as it settles, instead of tracking a ruler-straight
+          // ramp down to the line.
+          if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, distToInt - 1.6), c.v, c));
+        }
       }
 
-      // Car-following uses bumper gap + speed headway. Fixed centre-to-centre
-      // spacing made long vans overlap and made fast cautious drivers brake late.
+      // Car-following. THE LEADER GAP AND CLOSING RATE ARE THE SAME TWO
+      // NUMBERS EITHER WAY — what changed is what we do with them (see
+      // idmAccel). The legacy arm is the original speed-cap heuristic; it
+      // braked on a threshold (`gap < follow`) and so did nothing at all until
+      // the gap was already short, which is what produced the concertina of
+      // cars alternately coasting and stamping on the brakes. IDM's braking
+      // term is continuous — it is always a little bit on — so a queue
+      // compresses and releases smoothly and stop-and-go waves damp out
+      // instead of amplifying.
       const ahead = carAhead(c);
       if (ahead) {
         const gap = ahead.gap;
-        const staticGap = Math.max(2.4, (TR().follow || 8) * 0.45);
-        const headway = c.reckless ? 0.3 : (c.driver.aggr < 0.25 ? 0.9 : 0.62);
-        const follow = staticGap + c.v * headway;
-        if (gap < follow) target = Math.min(target, Math.max(0, ahead.v * (gap < follow * 0.4 ? 0.3 : 0.85)));
+        if (useIdm) {
+          idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.3, gap), c.v - ahead.v, c));
+        } else {
+          const staticGap = Math.max(2.4, (TR().follow || 8) * 0.45);
+          const headway = c.reckless ? 0.3 : (c.driver.aggr < 0.25 ? 0.9 : 0.62);
+          const follow = staticGap + c.v * headway;
+          if (gap < follow) target = Math.min(target, Math.max(0, ahead.v * (gap < follow * 0.4 ? 0.3 : 0.85)));
+        }
       }
 
       // a signalled pull-over: comply (stop) unless fleeing
@@ -3072,7 +3217,7 @@
         else { c.stopT += dt; if (c.stopT > 6) { c.pullover = 0; c.stopT = 0; } }   // no cop showed — drive on
       }
       if (c.pullover === 4) {
-        target = c.baseV * 1.15;                                    // fleeing flat-out
+        target = c.baseV * 1.15; idmDesired = target;              // fleeing flat-out
         c.fleeT -= dt;
         if (c.fleeT <= 0) { c.pullover = 0; c.npcWanted = 0; c.stopT = 0; }   // lost them
       }
@@ -3085,27 +3230,77 @@
         const pedLookahead = Math.min(19, 7 + c.v * 0.7);
         const dangerGap = 2.5 + c.v * 0.22;
         let brake = 0;
+        brakeAt = 1e9;                       // distance to the nearest body in lane
         for (let i = 0; i < CBZ.cityPeds.length && brake < 1; i++) {
           const p = CBZ.cityPeds[i]; if (p.dead || p.inCar) continue;
           const dx = p.pos.x - c.pos.x, dz = p.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
-          if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
+          if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) {
+            brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
+            if (ah < brakeAt) brakeAt = ah;
+          }
         }
         if (brake < 1 && !CBZ.player.driving && !CBZ.player.dead) {
           const dx = CBZ.player.pos.x - c.pos.x, dz = CBZ.player.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
-          if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
+          if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) {
+            brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
+            if (ah < brakeAt) brakeAt = ah;
+          }
         }
         if (brake >= 1) target = 0; else if (brake > 0) target = Math.min(target, c.v * 0.3);
+        // IDM_V2: the person in the road is a third virtual leader, at the
+        // distance they actually are. `brakeAt` is set alongside `brake` above.
+        if (useIdm && brake > 0 && brakeAt < 1e8) {
+          idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.3, brakeAt - 1.4), c.v, c));
+        }
       }
 
-      // approach the target speed (real city pace: pulls away from a green
-      // briskly, brakes hard when it must)
-      const accel = (target > c.v ? 12 : 22) * (c.reckless ? 1.3 : 1);
-      c.v += Math.max(-accel * dt, Math.min(accel * dt, target - c.v));
-      c.v = Math.max(0, c.v);
+      // ---- THE INTEGRATOR ---------------------------------------------------
+      // Legacy: a symmetric clamp toward `target` — a bang-bang controller that
+      // is either flat out or flat off, which is most of why traffic read as
+      // robotic.
+      // IDM_V2: BALLISTIC integration — v' = v + a·dt, then advance by the
+      // AVERAGE of the old and new speed rather than by either one. This is not
+      // a nicety: naive Euler under-integrates every braking step and leaves a
+      // residual jitter that gets worse as the frame rate drops, and the
+      // trapezoidal form costs one extra add. It is also what every serious
+      // traffic simulator uses (SUMO included) in preference to both Euler and
+      // RK4 — RK4's higher order buys nothing across the discrete events (lane
+      // changes, turns) that a driving sim is full of.
+      const vPrev = c.v;
+      if (useIdm) {
+        // THE FREE-ROAD TERM, evaluated now that the desired speed is final,
+        // then the scariest hazard wins. This is just "obey whichever of the
+        // open road, the leader, the red light and the body in the road gives
+        // you the least acceleration".
+        const acc = Math.min(idmA, idmAccel(c.v, Math.max(0.5, idmDesired), 1e6, 0, c));
+        c.v = Math.max(0, c.v + acc * dt);
+        // hard caps still win: a pull-over that says STOP means stop, and no
+        // driver exceeds what the lights/peds block computed for them.
+        if (target <= 0.05) c.v = Math.max(0, Math.min(c.v, vPrev - IDM.bMax * dt));
+        else if (c.v > target) c.v = Math.max(target, vPrev - IDM.bMax * dt);
+      } else {
+        const accel = (target > c.v ? 12 : 22) * (c.reckless ? 1.3 : 1);
+        c.v += Math.max(-accel * dt, Math.min(accel * dt, target - c.v));
+        c.v = Math.max(0, c.v);
+      }
+
+      // ---- JUNCTION DEADLOCK VALVE -----------------------------------------
+      // The one failure class every source on traffic AI agrees is real and
+      // that no shipped game has published a fix for: two cars each waiting for
+      // the other inside a box, forever. A car that has been stopped INSIDE an
+      // intersection long enough to be a bug rather than a queue is granted
+      // right of way and forced to move. Cheap, unconditional, and it can only
+      // ever unstick — it never creates a stop.
+      if (c.v < 0.35 && distToInt > -14 && distToInt < 14) {
+        c._jamT = (c._jamT || 0) + dt;
+        if (c._jamT > 6) { c.v = Math.max(c.v, 2.2); c._mustTurn = true; c._jamT = 0; }
+      } else if (c._jamT) c._jamT = 0;
 
       // ---- advance along the road ----
       const moveAxisZ = r.vertical;
-      if (moveAxisZ) c.pos.z += c.dirSign * c.v * dt; else c.pos.x += c.dirSign * c.v * dt;
+      // ballistic position update: average of the two speeds across the step
+      const vAdv = useIdm ? (vPrev + c.v) * 0.5 : c.v;
+      if (moveAxisZ) c.pos.z += c.dirSign * vAdv * dt; else c.pos.x += c.dirSign * vAdv * dt;
 
       // lane-keeping: EASE toward the lane line instead of pinning to it, so a
       // lane flip (overtake, U-turn, post-crash recovery) reads as a real
@@ -3289,6 +3484,15 @@
     let t = its[(rng() * its.length) | 0];
     // prefer somewhere actually worth driving to (2 tries for a far one)
     if (Math.hypot(t.x - c.pos.x, t.z - c.pos.z) < 90) t = its[(rng() * its.length) | 0];
+    // ...and never AIM a car at a keep-out. The destination is what the
+    // staircase router steers toward at every junction, so a destination
+    // inside the airfield is a standing instruction to drive onto it.
+    if (CBZ.roadPointOpen && !CBZ.roadPointOpen(t.x, t.z)) {
+      for (let k = 0; k < 4; k++) {
+        const t2 = its[(rng() * its.length) | 0];
+        if (CBZ.roadPointOpen(t2.x, t2.z)) { t = t2; break; }
+      }
+    }
     c.destX = t.x; c.destZ = t.z;
   }
 
@@ -3298,7 +3502,9 @@
   // sweeps the turn instead of teleporting + snapping its heading.
   function beginTurn(c, it, A, prefDir) {
     const wantVertical = !c.vertical;
-    const road = findRoad(A, wantVertical, wantVertical ? it.x : it.z);
+    // pass the junction's ALONG coordinate too: roadCross needs both to prove
+    // the segment it returns actually reaches this intersection.
+    const road = findRoad(A, wantVertical, wantVertical ? it.x : it.z, wantVertical ? it.z : it.x);
     if (!road) return;
     let newDir = prefDir != null ? prefDir : (rng() < 0.5 ? 1 : -1);
     // don't turn INTO a dead end: if this direction runs out of road in a couple
@@ -3344,7 +3550,19 @@
     const dz = 2 * u * (T.P1.z - T.P0.z) + 2 * t * (T.P2.z - T.P1.z);
     c.heading = Math.atan2(dx, dz);                   // nose follows the arc tangent
   }
-  function findRoad(A, vertical, coord) {
+  // Nearest perpendicular road at a junction. THE BUG THIS CARRIED FOR ITS
+  // WHOLE LIFE: it matched purely on the cross coordinate and never checked
+  // the junction actually lies ON the segment — so a downtown intersection at
+  // x≈0 matched the AIRPORT CAUSEWAY record (x=0, vertical) hundreds of metres
+  // south, the turning car adopted a road it was nowhere near, U-turned at the
+  // "end" and drove the length of the airfield across runway 09/27. That is
+  // the owner's "cars inside the airport near the runway", and it was never a
+  // spawn. roadrules.js's CBZ.roadCross is this query with the containment
+  // test restored (and closed segments skipped); the `:` arm is the original.
+  function findRoad(A, vertical, coord, along) {
+    if (CBZ.roadCross && along != null) {
+      return CBZ.roadCross(A, vertical, vertical ? coord : along, vertical ? along : coord);
+    }
     let best = null, bd = 9;
     for (const r of A.roads) { if (!!r.vertical !== !!vertical) continue; const v = vertical ? r.x : r.z; const d = Math.abs(v - coord); if (d < bd) { bd = d; best = r; } }
     return best;

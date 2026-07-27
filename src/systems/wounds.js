@@ -38,9 +38,13 @@
 
    Public API:
      CBZ.bodyWound(actor, worldPoint, opts) — opts:
-        { head:bool, cal|caliber:0.7..1.6, melee:"blunt"|"blade"|true,
+        { head:bool, cal|caliber:0.7..1.6, mm:<bore in millimetres>,
+          melee:"blunt"|"blade"|true, dir:{x,y,z} through-direction,
           fromX, fromZ }  (fromX/Z bias a synthetic centre-point toward
-          the attacker so the wound lands on the facing surface)
+          the attacker so the wound lands on the facing surface, AND are
+          the fallback source of the through-direction)
+     CBZ.bodyBite(actor, worldPoint, {jaw, sev, sever})
+     CBZ.woundDecalAudit() → {decals, oversized, cameraFacing} — the ratchet.
      CBZ.clearWounds() — also chained automatically onto CBZ.clearGore.
 ============================================================ */
 (function () {
@@ -70,6 +74,84 @@
   const PROUD = 0.013;      // how far the disc sits off the surface (no z-fight)
   const PROUD_SOAK = 0.008; // the stain sits UNDER its wound disc
 
+  // ============================================================
+  //  WOUND_DECAL_V2 — THE HOLE IS THE SIZE OF THE ROUND, NOT OF THE DAMAGE.
+  //
+  //  THE BUG, MEASURED (owner: "it looks like a sticker … it is WIDER THAN THE
+  //  FACE"). Nothing here was ever sized against the body. `bodyWound` computed
+  //  a RADIUS of `0.045 + 0.032*cal`, multiplied it by 1.15 for a head and by a
+  //  0.85..1.15 jitter, and stamped it. That is a DIAMETER of 0.138 m for a
+  //  9 mm and 0.308 m for the sniper — on an adult head that is a 0.60-unit
+  //  cube, i.e. 23% to 51% of the whole skull, and `seat()` was free to centre
+  //  it 0.78 of the way to the edge, so the biggest rounds physically hung off
+  //  both sides. Worse, the SOAK stain that rides under it capped itself by
+  //  comparing its RADIUS against the part's FULL WIDTH (`min(w,h,d)*1.05`) —
+  //  an off-by-two that let a head stain reach 0.98 m across on a 0.60 m head:
+  //  163% of the face. That capped-and-still-oversized stain IS the disc in
+  //  the screenshot.
+  //
+  //  THE PHYSICAL TRUTH. A 9 mm entry wound is about 9 mm; 5.56 and 7.62 are
+  //  smaller still. A skull is ~137 mm across. So an entry hole is ~1/15th of
+  //  a face — a dark POINT. What is actually big is the blood that runs out of
+  //  it, the abrasion ring around it, and the EXIT, which is far larger and
+  //  messier than the entry. Those are three different things and this file
+  //  used to draw all of them as one disc.
+  //
+  //  Flip WOUND_DECAL_V2 false and every number below reverts to the old ones.
+  // ============================================================
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.WOUND_DECAL_V2 == null) CBZ.CONFIG.WOUND_DECAL_V2 = true;
+  function v2() { return CBZ.CONFIG.WOUND_DECAL_V2 !== false; }
+
+  // THE RIG IS A CARICATURE AND THE WOUND HAS TO LIVE ON IT. A real entry hole
+  // is ~9 mm on a ~137 mm skull. This game's adult head is a 0.60-unit CUBE
+  // (entities/character.js, P.headSize), so the rig draws a head 4.4x life
+  // size and a literally-9-millimetre hole would be a third of a pixel.
+  // RIG_MAG is that caricature factor and NOTHING ELSE — 0.60 / 0.137 — so a
+  // 9 mm round comes out 0.040 units across on a 0.60 head: exactly the 1-in-15
+  // the physical truth demands, and 3.5x-7.6x smaller than what shipped.
+  const RIG_MAG = 4.4;
+  // THE CLAMP THAT KILLS "WIDER THAN THE FACE". A hole's DIAMETER may never
+  // exceed this fraction of the WIDTH of the box face it landed on, so the same
+  // .50 that leaves a real mark on a chest leaves a small one on a forearm, and
+  // no decal can ever approach the silhouette of the part carrying it. 1/15th
+  // of a face is 0.067; 0.085 leaves the heaviest round in the game room to
+  // read heavier without ever getting near the edge. This is the ratchet.
+  // (Both are quoted as face-WIDTH fractions and must be turned into radii by
+  // capR() below, which divides out the decal geometry's own rim wobble.)
+  const ENTRY_MAX_FRAC = 0.085;
+  const EXIT_MAX_FRAC = 0.34;      // a blowout is a third of the panel, not more
+  // fpsmode.js's own heavyRound() line is `cal >= 1.0`; we use STRICTLY greater
+  // so the untyped default (`cal` omitted → 1) does not punch through — a
+  // caller that never named a round has not told us it was a rifle.
+  const EXIT_MIN_CAL = 1.0;
+  const EXIT_MIN_TRAVEL = 0.04;    // <4 cm inside the part = a graze, not a through-shot
+
+  // THE GAME'S `cal` DIAL IS ENERGY, NOT BORE, AND IT CANNOT BE INVERTED INTO
+  // ONE. fpsmode's table ranks sniper 1.9 > ak 1.6 > shotgun 1.5 > deagle 1.3,
+  // while by DIAMETER the deagle (12.7 mm) beats the sniper (8.6) and the ak
+  // (7.62), and the carbine's 5.56 is the smallest thing on the list. So we do
+  // not pretend to recover a bore from it: `cal` moves the hole only gently
+  // (every round in this game bores between 5.5 and 12.7 mm — a 2.3x span,
+  // against a 7.6x damage span), and a caller that actually KNOWS its bore says
+  // so in millimetres. That is the bodyBite `jaw` contract exactly: the caller
+  // passes a real physical measurement in real units and nothing here ever
+  // learns a weapon name.
+  function mmFor(opts, cal) {
+    if (opts.mm != null) return Math.max(2, Math.min(30, opts.mm));
+    return 7.0 + 2.8 * Math.max(0.2, Math.min(2.4, cal));
+  }
+
+  // A DECAL THAT HOVERS IS A STICKER. The fixed 0.013 stand-off was a THIRD of
+  // the new hole's radius — from any oblique angle that is a chip floating off
+  // the skin. Scale the offset with the mark instead and let polygonOffset (on
+  // every wound material below) do the z-fight work it exists for.
+  // (Ceiling at the old PROUD so this can only ever pull a decal CLOSER to the
+  // skin — a broad bruise patch standing further off than before would be the
+  // same bug wearing a different number.)
+  function proudFor(r) { return Math.min(PROUD, Math.max(0.0045, r * 0.12)); }
+  const PROUD_SOAK_V2 = 0.0022;   // the stain still sits UNDER its hole
+
   // ---- shared geometry + materials ------------------------------------------
   //
   //  WHY THE OLD HOLE LOOKED FAKE (owner: "the bullet hole and blood shit looks
@@ -92,6 +174,22 @@
   //  the outer edge is still today's exact colour and nothing can wash out.
   //  A bullet hole, a bite and a bruise all become pits from one change, and
   //  none of them needed a new material, a texture, or a second mesh.
+  //
+  //  HONEST CORRECTION (2026-07-27, measured against the vendored r128 source):
+  //  MOST OF THE PARAGRAPH ABOVE NEVER REACHED THE SCREEN. r128's
+  //  CircleGeometry emits exactly TWO radii — one centre vertex at r=0 and one
+  //  rim ring at r=1 (`s.push(0,0,0)` then a single loop of `segments+1` rim
+  //  vertices) — so there is no vertex anywhere in between for a ramp to shape.
+  //  Consequences, both verifiable by hand: the `r*r` that was supposed to
+  //  "keep the dark core tight" evaluates to r*r at r=0 and r=1, which is
+  //  IDENTICAL to r, i.e. a plain linear fade; and the `raw` band centred on
+  //  r=0.72 computes `max(0, 1 - |r-0.72|*4)` = 0 at BOTH radii that exist, so
+  //  the raw red ring was multiplied by zero on every vertex, always. What
+  //  actually shipped was a flat linear centre→rim gradient. That is the second
+  //  half of "it looks like a sticker", and it is why the bullet path below now
+  //  builds its own ring-subdivided disc (discGeo) instead of this one. This
+  //  geometry is left byte-identical because the bite/blade/bruise arcs are
+  //  tuned around it; only its true outer radius is now recorded for the clamp.
   function rampGeo(seg, jitter, floor) {
     const g = new THREE.CircleGeometry(1, seg);
     g._shared = true;
@@ -122,7 +220,20 @@
     }
     pos.needsUpdate = true;
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g._maxR = maxRadiusOf(g);
     return g;
+  }
+  // The TRUE outer radius of a jittered disc (the rim wobble pushes vertices
+  // past 1.0). Every size clamp and the audit measure against THIS, not the
+  // nominal 1.0, or a stain could still overhang by its own wobble.
+  function maxRadiusOf(g) {
+    const p = g.attributes.position;
+    let mx = 0;
+    for (let i = 0; i < p.count; i++) {
+      const r = Math.hypot(p.getX(i), p.getY(i));
+      if (r > mx) mx = r;
+    }
+    return mx || 1;
   }
   // 14 segments reads as round at contact range; the 0.30 floor is the pit.
   const G_WOUND = rampGeo(14, 0.10, 0.30);
@@ -159,26 +270,117 @@
     }
     pos.needsUpdate = true;
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g._maxR = maxRadiusOf(g);
     return g;
   }
   const G_SOAK = [blobGeo(), blobGeo(), blobGeo()];
-  function unlit(color) {
+
+  // ---- A DISC WITH ACTUAL RINGS IN IT (the pit the comment above promised) --
+  //
+  //  Everything the old ramp wanted needs vertices at the radii being shaded,
+  //  and CircleGeometry has none, so build the fan by hand. `stops` are ordered
+  //  outward from the centre as [radius, brightness, warm]:
+  //    brightness MULTIPLIES the material's authored hex, so every wound TYPE
+  //      keeps its own colour and only the SHADING lives here (same law as the
+  //      old ramp — the geometry never introduces a hue of its own);
+  //    warm scales green/blue only, so a band can go RAW RED rather than merely
+  //      lighter — which is what an abraded margin actually looks like.
+  //  `jitter` wobbles every ring by one shared randomly-phased sine sum, so the
+  //  silhouette is torn but the bands stay concentric inside it.
+  //
+  //  Cost: one shared indexed BufferGeometry per wound TYPE, built once at
+  //  load. A hit still draws exactly one mesh; only its triangle count moves,
+  //  from 14 to ~130 on a decal that is four centimetres across.
+  function discGeo(stops, seg, jitter) {
+    const n = stops.length;
+    const vN = 1 + (n - 1) * (seg + 1);
+    const pos = new Float32Array(vN * 3);
+    const nrm = new Float32Array(vN * 3);
+    const col = new Float32Array(vN * 3);
+    const idx = [];
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    pos[0] = 0; pos[1] = 0; pos[2] = 0; nrm[2] = 1;
+    col[0] = stops[0][1]; col[1] = stops[0][1] * stops[0][2]; col[2] = stops[0][1] * stops[0][2];
+    let maxR = 0, v = 1;
+    for (let s = 1; s < n; s++) {
+      const r0 = stops[s][0], val = stops[s][1], warm = stops[s][2];
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * Math.PI * 2;
+        const k = jitter
+          ? 1 + jitter * (Math.sin(a * 3 + p1) * 0.5 + Math.sin(a * 5 + p2) * 0.33 + Math.sin(a * 7 + p3) * 0.2)
+          : 1;
+        const rr = r0 * k;
+        pos[v * 3] = Math.cos(a) * rr; pos[v * 3 + 1] = Math.sin(a) * rr; pos[v * 3 + 2] = 0;
+        nrm[v * 3 + 2] = 1;
+        col[v * 3] = val; col[v * 3 + 1] = val * warm; col[v * 3 + 2] = val * warm;
+        if (rr > maxR) maxR = rr;
+        v++;
+      }
+    }
+    for (let i = 0; i < seg; i++) idx.push(0, 1 + i, 2 + i);            // centre fan
+    for (let s = 1; s < n - 1; s++) {                                   // ring strips
+      const a0 = 1 + (s - 1) * (seg + 1), b0 = 1 + s * (seg + 1);
+      for (let i = 0; i < seg; i++) {
+        idx.push(a0 + i, b0 + i, b0 + i + 1, a0 + i, b0 + i + 1, a0 + i + 1);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g._shared = true;
+    g._maxR = maxR || 1;
+    return g;
+  }
+  // ENTRY: a bore you look INTO, ringed by one narrow raw margin and a low-
+  // contrast bruise collar that dissolves into skin (a bright hard rim is what
+  // read as a sticker). Nearly round — a punched hole is not ragged.
+  const G_ENTRY = discGeo([
+    [0.00, 0.05, 1.00],   // the bore itself — near-black at any wound colour
+    [0.34, 0.09, 1.00],   // pit wall, still dark
+    [0.60, 0.85, 0.72],   // the raw torn margin: THE one bright band
+    [0.80, 0.44, 0.80],   // abrasion / stippling
+    [1.00, 0.20, 0.88],   // bruising, low contrast against skin
+  ], 16, 0.07);
+  // EXIT: a cavity, not a bore. Brightest just off centre (wet, open tissue),
+  // fading out, and TORN — the heavy rim jitter is the whole silhouette.
+  const G_EXIT = discGeo([
+    [0.00, 0.58, 0.85],
+    [0.30, 0.95, 0.72],
+    [0.55, 0.62, 0.78],
+    [0.78, 0.34, 0.85],
+    [1.00, 0.13, 0.90],
+  ], 18, 0.30);
+
+  function unlit(color, po) {
     // unlit = the wound reads as a HOLE (no light catch), and it's the
     // cheapest material in the renderer. _shared → rig-disposal sweeps skip it.
     // vertexColors MULTIPLIES this colour by the geometry's baked radial ramp,
     // which is what turns a flat fill into a pit. Every material here keeps its
     // authored hex — the ramp only shades within it. (r128 takes a boolean.)
-    const m = new THREE.MeshBasicMaterial({ color, vertexColors: true });
+    //
+    // polygonOffset is what lets the mark sit nearly FLUSH with the skin
+    // instead of standing 13 mm proud of it: the decal wins the depth test on
+    // shading distance rather than on a physical gap you can see edge-on. The
+    // stack is deliberately ordered — holes (-3) beat their soak stain (-1)
+    // beats the body — so a stain can never swallow the hole it belongs to.
+    const m = new THREE.MeshBasicMaterial({
+      color, vertexColors: true,
+      polygonOffset: true, polygonOffsetFactor: po != null ? po : -3, polygonOffsetUnits: po != null ? po : -3,
+    });
     m._shared = true;
     return m;
   }
   const MAT_FRESH = unlit(0x4e070b);   // fresh entry wound: near-black red
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
   const MAT_BRUISE = unlit(0x3a2334);  // blunt trauma: purple-dark, no hole
-  const MAT_SOAK = unlit(0x310609);    // wet cloth around the hole: near-black
+  const MAT_SOAK = unlit(0x310609, -1); // wet cloth around the hole: near-black
   // TORN flesh (a bite) is WETTER and brighter than a bullet's cauterised-looking
   // entry hole — a tooth tears the skin open rather than punching through it.
   const MAT_TORN = unlit(0x6b0d10);
+  // An EXIT is wetter and redder still: it is not a hole, it is an opening.
+  const MAT_EXIT = unlit(0x8a1014);
 
   // WOUNDS_BITE — the one-line revert for the bite/maul wound type below.
   // OFF: a bite falls back to the ordinary "shot" wound it used to leave.
@@ -242,12 +444,47 @@
     if (ry > rz + 0.02 && ry > rx) return "y";
     return "z";                                   // front/back wins ties
   }
-  // spinOverride/axOverride are optional; omitted = the original behaviour.
-  function seat(m, part, lp, proud, spinOverride, axOverride) {
+  // The NARROW half-span of the panel a decal seated on face `ax` actually has
+  // to fit inside — i.e. half of "how wide is the thing it hit". This is the
+  // one number every size clamp below measures against, and it is read off the
+  // real rig mesh the hit resolved to, so nothing here ever has to know that a
+  // head, a forearm and a chest are different (BLOCK LAW: no part is named).
+  function faceMin(part, ax) {
+    const prm = part.geometry.parameters || {};
+    const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
+    if (ax === "x") return Math.min(hz, hy);
+    if (ax === "y") return Math.min(hx, hz);
+    return Math.min(hx, hy);
+  }
+  // THE CLAMP. A decal's true outer radius (its scale times its geometry's own
+  // wobble) may never reach the half-span of the face it sits on, so its
+  // DIAMETER can never reach that face's WIDTH. 0.96 keeps a hair of margin so
+  // the audit below reads a clean zero rather than sitting on the boundary.
+  function fitR(geo, r, minHalf) {
+    const mr = (geo && geo._maxR) || 1;
+    return Math.min(r, (minHalf * 0.96) / mr);
+  }
+  // The radius at which a decal's DIAMETER is exactly `frac` of the face's
+  // WIDTH. Every design cap below is quoted that way ("a third of the panel"),
+  // so it must divide out the geometry's own rim wobble — quoting a cap as a
+  // radius and reading it as a diameter is how 0.34 silently became 0.43.
+  function capR(geo, minHalf, frac) {
+    return (minHalf * frac) / ((geo && geo._maxR) || 1);
+  }
+  // spinOverride/axOverride/padR are optional; omitted = the original behaviour.
+  // padR is the decal's true outer radius: the centre is pulled in by it so the
+  // mark cannot HANG OFF the edge of the part (the old 0.78 clamp let a wide
+  // disc centred near the edge overhang by its own radius — half the reason a
+  // head wound read as a sticker pasted over the face).
+  function seat(m, part, lp, proud, spinOverride, axOverride, padR) {
     const prm = part.geometry.parameters || {};
     const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
     const ax = axOverride || faceAxis(part, lp);
-    const cl = (v, h) => Math.max(-h * 0.78, Math.min(h * 0.78, v));
+    const pad = padR || 0;
+    const cl = (v, h) => {
+      const lim = Math.max(0, Math.min(h * 0.78, h - pad));
+      return Math.max(-lim, Math.min(lim, v));
+    };
     const spin = spinOverride != null ? spinOverride : Math.random() * 6.28;   // decal spin in its own plane
     if (ax === "x") {
       const s = lp.x >= 0 ? 1 : -1;
@@ -294,21 +531,103 @@
   // active, then it costs nothing).
   function spawnSoak(actor, part, lp, size, growT) {
     const m = meshFor(actor);
-    m.geometry = G_SOAK[(Math.random() * 3) | 0];
+    const geo = G_SOAK[(Math.random() * 3) | 0];
+    m.geometry = geo;
     m.material = MAT_SOAK;
-    seat(m, part, lp, PROUD_SOAK);
-    // a stain can never outgrow the panel it's soaked into — bigger than the
-    // face it reads as a rigid sheet hovering off the body (user-filmed)
-    const pp = part.geometry && part.geometry.parameters || {};
-    const cap = Math.max(0.16, Math.min(pp.width || 0.5, pp.height || 0.7, pp.depth || 0.4) * 1.05);
-    const gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
-    const gy = Math.min(cap * 1.25, size * (0.8 + Math.random() * 0.5));
+    const ax = faceAxis(part, lp);         // one face for the clamp AND the seat
+    // A stain can never outgrow the panel it's soaked into — bigger than the
+    // face, it reads as a rigid sheet hovering off the body (user-filmed).
+    //
+    // THE OLD CAP DID NOT DO THAT, and it is the disc in the screenshot. It
+    // compared a RADIUS against the part's FULL WIDTH (`min(w,h,d)*1.05`), an
+    // off-by-two that let a head stain grow to 0.98 m across on a 0.60 m head —
+    // 163% of the face — while the comment above it claimed it was capped. The
+    // cap now measures against the HALF-span of the face the stain is seated
+    // on, through the same fitR() every other decal uses, and folds in the blob
+    // geometry's own ±41% rim wobble so a stain cannot overhang by its wobble
+    // either.
+    let gx, gy;
+    if (v2()) {
+      const mh = faceMin(part, ax);
+      const cap = fitR(geo, mh, mh);
+      gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
+      gy = Math.min(cap, size * (0.8 + Math.random() * 0.5));
+    } else {
+      const pp = part.geometry && part.geometry.parameters || {};
+      const cap = Math.max(0.16, Math.min(pp.width || 0.5, pp.height || 0.7, pp.depth || 0.4) * 1.05);
+      gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
+      gy = Math.min(cap * 1.25, size * (0.8 + Math.random() * 0.5));
+    }
+    seat(m, part, lp, v2() ? PROUD_SOAK_V2 : PROUD_SOAK, undefined, ax,
+         v2() ? Math.max(gx, gy) * geo._maxR : 0);
     m.scale.set(gx * 0.35, gy * 0.35, 1);
     part.add(m);
     const r = { m, actor, age: 0, kind: "soak", dried: true, gx, gy, gt: growT, t: 0 };
     wounds.push(r);
     growing.push(r);
     actor._woundN = (actor._woundN || 0) + 1;
+  }
+
+  // ---- ENTRY vs EXIT: where was the round GOING? ----------------------------
+  //
+  //  The whole point of an exit wound is that it is on the OTHER SIDE, so it
+  //  cannot be faked from the hit point alone — and we do not fake it. Two
+  //  honest sources, in order:
+  //    1. opts.dir — the shot direction, if the caller has a ray. NOTHING in
+  //       the game passes this yet (fpsmode.js and gore.js both have the vector
+  //       in scope at their bodyWound call and simply don't thread it); the
+  //       argument exists so they can, in one word each.
+  //    2. opts.fromX/fromZ — the ATTACKER'S OWN POSITION, which police.js,
+  //       peds.js, ragdoll.js and predator.js already pass to bias the wound
+  //       onto the facing surface. Attacker → hit point IS the shot line. It is
+  //       horizontal-only (no muzzle height), which is why y is left at 0
+  //       rather than guessed.
+  //  No direction from either source means NO EXIT MARK. A wound stamped on a
+  //  side the round never came out of would be a worse lie than the sticker.
+  function throughDir(opts, wp) {
+    const d = opts.dir;
+    if (d) {
+      const l = Math.hypot(d.x || 0, d.y || 0, d.z || 0);
+      if (l > 1e-4) return { x: (d.x || 0) / l, y: (d.y || 0) / l, z: (d.z || 0) / l };
+    }
+    if (opts.fromX != null && opts.fromZ != null) {
+      const dx = wp.x - opts.fromX, dz = wp.z - opts.fromZ;
+      const l = Math.hypot(dx, dz);
+      if (l > 0.05) return { x: dx / l, y: 0, z: dz / l };
+    }
+    return null;
+  }
+  const _ld1 = new THREE.Vector3(), _ld2 = new THREE.Vector3();
+  // world direction → the part's local frame (two transformed points, so the
+  // part's own scale is honoured exactly the way worldToLocal honours it for
+  // the hit point itself).
+  function localDir(part, wp, d) {
+    _ld1.set(wp.x, wp.y, wp.z); part.worldToLocal(_ld1);
+    _ld2.set(wp.x + d.x, wp.y + d.y, wp.z + d.z); part.worldToLocal(_ld2);
+    _ld2.sub(_ld1);
+    const l = _ld2.length();
+    return l > 1e-6 ? _ld2.multiplyScalar(1 / l) : null;
+  }
+  // Where does a ray from `lp` along `dl` LEAVE the part's box? Slab test in
+  // the part's own local frame: the nearest positive face crossing wins, and it
+  // hands back the face axis so seat() can put the mark there without any
+  // notion of front/back/side.
+  const _ex = { ax: "z", x: 0, y: 0, z: 0, t: 0 };
+  function boxExit(part, lp, dl) {
+    const prm = part.geometry.parameters || {};
+    const h = { x: (prm.width || 0.6) * 0.5, y: (prm.height || 0.9) * 0.5, z: (prm.depth || 0.45) * 0.5 };
+    const A = ["x", "y", "z"];
+    let bt = Infinity, ba = null;
+    for (let i = 0; i < 3; i++) {
+      const a = A[i], d = dl[a];
+      if (Math.abs(d) < 1e-5) continue;
+      const t = ((d > 0 ? h[a] : -h[a]) - lp[a]) / d;
+      if (t > 1e-4 && t < bt) { bt = t; ba = a; }
+    }
+    if (!ba) return null;
+    _ex.ax = ba; _ex.t = bt;
+    _ex.x = lp.x + dl.x * bt; _ex.y = lp.y + dl.y * bt; _ex.z = lp.z + dl.z * bt;
+    return _ex;
   }
 
   // ============================================================
@@ -395,6 +714,12 @@
     const prm = part.geometry.parameters || {};
     const fit = Math.max(0.12, Math.min(prm.width || 0.5, prm.height || 0.8, prm.depth || 0.4));
     const R = Math.min(jawR, fit * 0.85);
+    // Individual TEETH obey the same clamp everything else does. A megalodon
+    // puncture is 0.135 across before this, which clears a 0.60 head but is
+    // wider than a 0.27 forearm — the exact failure the bullet hole had, just
+    // rarer. One line, and CBZ.woundDecalAudit().oversized stays at zero for
+    // bites as well as bullets.
+    const biteHalf = faceMin(part, ax);
 
     const roll = Math.random() * 6.28;                      // the jaw's angle of attack
     const cosR = Math.cos(roll), sinR = Math.sin(roll);
@@ -430,11 +755,17 @@
         // jitter: teeth are not evenly spaced and a couple always tear wider
         _bl[t1] += (Math.random() - 0.5) * R * 0.16;
         _bl[t2] += (Math.random() - 0.5) * R * 0.16;
+        const s0 = (0.030 + 0.030 * sev) * (0.75 + Math.random() * 0.7);
+        let tw = s0 * 0.72, th = s0 * 1.55;                 // a tooth tears long, not round
+        if (v2()) {
+          const k = fitR(G_WOUND, th, biteHalf) / th;       // shrink BOTH axes together
+          tw *= k; th *= k;
+        }
         // every puncture rakes the same way (the jaw dragged) — a coherent row
         // reads as one bite; individually-spun discs read as random buckshot.
-        seat(m, part, _bl, PROUD, roll + (Math.random() - 0.5) * 0.5, ax);
-        const s0 = (0.030 + 0.030 * sev) * (0.75 + Math.random() * 0.7);
-        m.scale.set(s0 * 0.72, s0 * 1.55, 1);               // a tooth tears long, not round
+        seat(m, part, _bl, v2() ? proudFor(th) : PROUD, roll + (Math.random() - 0.5) * 0.5, ax,
+             v2() ? th * G_WOUND._maxR : 0);
+        m.scale.set(tw, th, 1);
         part.add(m);
         wounds.push({ m, actor, age: 0, kind: "bite", dried: false });
         actor._woundN = (actor._woundN || 0) + 1;
@@ -543,39 +874,154 @@
     }
 
     const m = meshFor(actor);
-    m.geometry = G_WOUND;
-    m.material = kind === "bruise" ? MAT_BRUISE : MAT_FRESH;
 
     // world hit → part-local, snapped to the box face the round came through
     part.updateWorldMatrix(true, false);
     const lp = tmpV.set(px, py, pz);
     part.worldToLocal(lp);
-    seat(m, part, lp, PROUD);
+    const ax = faceAxis(part, lp);        // ONE face for the hole AND its stain
+    const minHalf = faceMin(part, ax);    // half the WIDTH of the panel it hit
+    const v2on = v2();
+    const shotV2 = v2on && kind === "shot";
 
-    // severity → size: caliber widens the hole; the head wound reads a touch
-    // bigger (it's the kill tell); a bruise is a broad flat patch; a blade
-    // leaves a thin slash. Every wound carries its own jitter — no two match.
-    let s0 = 0.045 + 0.032 * cal;
-    if (pick.region === "head") s0 *= 1.15;
-    if (kind === "bruise") {
-      const b = s0 * 2.2;
-      m.scale.set(b * (0.85 + Math.random() * 0.3), b * (0.7 + Math.random() * 0.3), 1);
-    } else if (kind === "blade") {
-      m.scale.set(s0 * (0.45 + Math.random() * 0.2), s0 * (1.7 + Math.random() * 0.4), 1);
+    let geo = G_WOUND;
+    let mat = kind === "bruise" ? MAT_BRUISE : MAT_FRESH;
+    let sx, sy, s0 = 0;
+    if (shotV2) {
+      // ---- THE ROUND SIZES THE HOLE, AND THE PART CAPS IT ------------------
+      //  Two inputs and nothing else. The BORE (millimetres, from the caller if
+      //  it knows one) fixes the hole's real size; the FACE it landed on caps
+      //  it. No body part is named and no damage number is consulted, so a
+      //  9 mm is a 9 mm whether it lands on a skull, a chest or a wrist — it
+      //  simply cannot exceed 8.5% of whichever of those it hit.
+      //
+      //  Worked and measured, on the adult 0.60-unit head (minHalf 0.30) —
+      //  DIAMETERS, against 0.205 / 0.280 / 0.308 for the same three before:
+      //    9 mm sidearm  → 0.043 across, 1 face in 14   (4.8x smaller)
+      //    7.62 ak       → 0.051, capped by ENTRY_MAX_FRAC (5.5x smaller)
+      //    sniper        → 0.051, capped                 (6.0x smaller)
+      //  On a 0.27 forearm the same ak clamps to 0.023 — ten times smaller than
+      //  it used to be, because the FOREARM said so and not because anything
+      //  here knows what a forearm is.
+      //  The head no longer gets the old 1.15x "kill tell" bonus: a bore does
+      //  not grow because it hit a skull. The headshot read now comes from the
+      //  stain and the collar run-down below, which is where it belongs.
+      geo = G_ENTRY;
+      const want = mmFor(opts, cal) * 0.0005 * RIG_MAG;   // radius, in rig units
+      const cap = capR(G_ENTRY, minHalf, ENTRY_MAX_FRAC);
+      // the jitter goes on the BORE (no two holes tear identically) and the cap
+      // lands AFTER it — a jitter applied to an already-capped size is exactly
+      // how an oversized decal sneaks back in.
+      sx = Math.min(want * (0.90 + Math.random() * 0.20), cap);
+      sy = Math.min(want * (0.90 + Math.random() * 0.20), cap);
     } else {
-      m.scale.set(s0 * (0.85 + Math.random() * 0.3), s0 * (0.85 + Math.random() * 0.3), 1);
+      // severity → size: caliber widens the hole; the head wound reads a touch
+      // bigger (it's the kill tell); a bruise is a broad flat patch; a blade
+      // leaves a thin slash. Every wound carries its own jitter — no two match.
+      s0 = 0.045 + 0.032 * cal;
+      if (pick.region === "head") s0 *= 1.15;
+      if (kind === "bruise") {
+        const b = s0 * 2.2;
+        sx = b * (0.85 + Math.random() * 0.3); sy = b * (0.7 + Math.random() * 0.3);
+      } else if (kind === "blade") {
+        sx = s0 * (0.45 + Math.random() * 0.2); sy = s0 * (1.7 + Math.random() * 0.4);
+      } else {
+        sx = s0 * (0.85 + Math.random() * 0.3); sy = s0 * (0.85 + Math.random() * 0.3);
+      }
     }
 
+    // ---- ONE CLAMP, AND IT IS THE LAST WORD ---------------------------------
+    // Every kind runs through it, including the bruise and the slash: a blunt
+    // patch wider than the forearm it sits on reads exactly as fake as an
+    // oversized bullet hole did. It measures the decal's TRUE outer radius (its
+    // scale times its own geometry's rim wobble) against the half-span of the
+    // face, so its diameter can never reach that face's width — which is the
+    // single invariant CBZ.woundDecalAudit().oversized pins at zero.
+    if (v2on) {
+      const mx = Math.max(sx, sy), k = fitR(geo, mx, minHalf) / mx;
+      if (k < 1) { sx *= k; sy *= k; }
+    }
+
+    const rad = Math.max(sx, sy);
+    m.geometry = geo;
+    m.material = mat;
+    seat(m, part, lp, v2on ? proudFor(rad) : PROUD, undefined, ax, v2on ? rad * geo._maxR : 0);
+    m.scale.set(sx, sy, 1);
     part.add(m);   // rides the part: animates, ragdolls and despawns with the rig
     wounds.push({ m, actor, age: 0, kind, dried: false });
     actor._woundN = (actor._woundN || 0) + 1;
+
+    // ---- THE EXIT IS THE BIG ONE ---------------------------------------------
+    //  A rifle round that goes through leaves a small tidy hole where it went in
+    //  and a torn cavity where it came out — the asymmetry IS the read, and it
+    //  is why a single mark on the near side always looked like a decal. Only
+    //  fired when the round genuinely went through: heavy enough (strictly
+    //  above fpsmode's own heavyRound line, so an untyped default does not),
+    //  a real direction available (never guessed — see throughDir), and at
+    //  least EXIT_MIN_TRAVEL of part crossed rather than a graze.
+    let exitAt = null;
+    if (shotV2 && cal > EXIT_MIN_CAL) {
+      const dir = throughDir(opts, wp);
+      const dl = dir ? localDir(part, wp, dir) : null;
+      const ex = dl ? boxExit(part, lp, dl) : null;
+      if (ex && ex.t > EXIT_MIN_TRAVEL) {
+        // An exit runs 3.5x (pistol-plus) to 6.2x (rifle) the entry bore before
+        // the panel caps it — the real ratio is wider still, but a third of the
+        // face is where a mark stops being a wound and starts being a sticker.
+        const eHalf = faceMin(part, ex.ax);
+        const eWant = rad * (1.6 + 2.4 * Math.min(2.4, cal));
+        const eCap = capR(G_EXIT, eHalf, EXIT_MAX_FRAC);
+        let esx = Math.min(eWant * (0.85 + Math.random() * 0.35), eCap);
+        let esy = Math.min(eWant * (0.85 + Math.random() * 0.35), eCap);
+        const emx = Math.max(esx, esy), ek = fitR(G_EXIT, emx, eHalf) / emx;
+        if (ek < 1) { esx *= ek; esy *= ek; }
+        const er = Math.max(esx, esy);
+        const em = meshFor(actor);
+        em.geometry = G_EXIT;
+        em.material = MAT_EXIT;
+        seat(em, part, ex, proudFor(er), undefined, ex.ax, er * G_EXIT._maxR);
+        em.scale.set(esx, esy, 1);
+        part.add(em);
+        wounds.push({ m: em, actor, age: 0, kind: "shot", dried: false });
+        actor._woundN = (actor._woundN || 0) + 1;
+        exitAt = ex;
+      }
+    }
 
     // ---- LOCAL SOAK STAIN (a bruise doesn't bleed) ----
     // the cloth around the hole goes dark and keeps spreading for a few
     // seconds — local, irregular, anchored to THIS wound. Headshot = heavy
     // fast splatter on the head PLUS a run-down stain seated at the collar.
     if (kind !== "bruise") {
-      if (pick.region === "head") {
+      if (shotV2) {
+        // THE STAIN IS NOW THE VISIBLE WOUND, so it is sized off the ENERGY and
+        // the PART rather than off the (correctly tiny) hole — otherwise
+        // shrinking the hole by 4x would have silently shrunk the blood by 4x
+        // and left the body looking untouched. gore.js still owns the spray,
+        // the pool and the underwater bloom; this is only the local soak.
+        //
+        // Sized so the FINISHED stain (after spawnSoak's own 0.8-1.3 growth
+        // jitter and the blob's ±33% rim wobble) lands at 49% of the panel's
+        // width for a 9 mm and 66% for a rifle round — heavy, obviously blood,
+        // and never near the 96% rail. It used to reach 159% on a head and
+        // 350% on an arm. Deliberately NOT cap-bound: a design number that only
+        // works because the safety rail catches it is not a design number.
+        const soakR = minHalf * (0.19 + 0.12 * Math.min(2.4, cal));
+        // blood runs from the EXIT, not the entry — when we know where that is,
+        // the heavy stain goes there and the entry keeps only its own seep.
+        spawnSoak(actor, part, exitAt || lp, soakR * (exitAt ? 1.25 : 1), exitAt ? 1.6 : 2.4);
+        if (pick.region === "head") {
+          const torso = ch.skinSlots.torso && ch.skinSlots.torso[0];
+          if (torso && torso.geometry) {
+            torso.updateWorldMatrix(true, false);
+            tmpV.set(px, py, pz);
+            torso.worldToLocal(tmpV);                     // same side the round came from
+            const tp = torso.geometry.parameters || {};
+            tmpV.y = (tp.height || 0.9) * 0.5 * 0.72;     // up at the collar line
+            spawnSoak(actor, torso, tmpV, soakR * 1.2, 1.1);
+          }
+        }
+      } else if (pick.region === "head") {
         spawnSoak(actor, part, lp, s0 * 3.4, 0.6);
         const torso = ch.skinSlots.torso && ch.skinSlots.torso[0];
         if (torso && torso.geometry) {
@@ -591,6 +1037,46 @@
         spawnSoak(actor, part, lp, s0 * (heavy ? 3.4 : 2.6), heavy ? 2.2 : 3.2);
       }
     }
+  };
+
+  // ---- RATCHET: CBZ.woundDecalAudit() ---------------------------------------
+  //
+  //  {decals, oversized, cameraFacing} over every wound mesh LIVE on a body
+  //  right now. Two of the three are the owner's bug expressed as numbers, so
+  //  they can never come back without the gate saying so:
+  //
+  //    oversized — decals whose true outer DIAMETER (scale x the geometry's own
+  //      rim wobble) reaches the WIDTH of the box face they are seated on. This
+  //      is literally "wider than the face". It read 1 per head shot and 1 per
+  //      heavy soak before this change; it must read 0 and may only go DOWN.
+  //    cameraFacing — decals that billboard instead of lying on the surface.
+  //      Sprites are the way that regression would arrive; it has always been 0
+  //      here (seat() writes an axis-aligned rotation on the part's own face)
+  //      and this is the tripwire that keeps it 0.
+  //
+  //  Measured against the LIVE rig, not against the spawn code: it reads the
+  //  geometry parameters of whatever mesh the decal actually got parented to,
+  //  so a future part with different proportions is checked for free.
+  CBZ.woundDecalAudit = function () {
+    let decals = 0, oversized = 0, cameraFacing = 0;
+    for (let i = 0; i < wounds.length; i++) {
+      const r = wounds[i], m = r && r.m;
+      if (!m || !m.parent) continue;
+      decals++;
+      if (m.isSprite || (m.material && m.material.isSpriteMaterial)) cameraFacing++;
+      const prm = m.parent.geometry && m.parent.geometry.parameters;
+      if (!prm) continue;
+      const hx = (prm.width || 0) * 0.5, hy = (prm.height || 0) * 0.5, hz = (prm.depth || 0) * 0.5;
+      if (!(hx > 0 && hy > 0 && hz > 0)) continue;
+      // which face is it on? seat() pushes the decal PAST the box on exactly
+      // one axis and clamps the other two inside, so the answer is unambiguous.
+      const ax = Math.abs(m.position.x) >= hx ? "x" : (Math.abs(m.position.y) >= hy ? "y" : "z");
+      const tan = ax === "x" ? Math.min(hz, hy) : (ax === "y" ? Math.min(hx, hz) : Math.min(hx, hy));
+      const mr = (m.geometry && m.geometry._maxR) || 1;
+      const rad = Math.max(Math.abs(m.scale.x), Math.abs(m.scale.y)) * mr;
+      if (rad > tan) oversized++;     // its diameter meets/exceeds the face's width
+    }
+    return { decals: decals, oversized: oversized, cameraFacing: cameraFacing };
   };
 
   // ---- reset: detach everything ---------------------------------------------

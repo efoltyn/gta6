@@ -149,6 +149,10 @@
     if (!a) return "Civilian";
     if (a.isPlayer) return ladderTitle(playerLevel());
     if (a.vipTitle) return a.vipTitle;                  // vips.js: Magnate / Don / Senator...
+    // A PRINCIPAL's role is the most specific true thing about them (city/
+    // power.js: "Cartel Head", "Mayor", "CEO"). Guard-called so this file has
+    // no dependency on the protection layer being present.
+    if (CBZ.powerRoleOf) { const pr = CBZ.powerRoleOf(a); if (pr) return pr; }
     if (a.kind === "cop") return a.swat ? "SWAT" : "Officer"; // SWAT stays an acronym — "Swat" reads like a typo
     if (a.kind === "security") return "Security";
     { const mr = milRankOf(a); if (mr) return MIL_NAME[mr] || "Private"; }  // Private … General (NOT the gang "Soldier")
@@ -161,6 +165,23 @@
       }
       return RANK_TITLE[a.rank] || "Soldier";
     }
+    // THE JOB IS THE ROLE. OWNER DOCTRINE: "above [the] pilot should say
+    // 'Lv.X Pilot' — and not because [of] hardcoding, because NPCs should show
+    // role and level, role should be what they actually do."
+    //
+    // He was looking at a real defect, and it was a disagreement between two
+    // readouts of the same person: the DOSSIER panel (aim_dossier.js) has read
+    // `a.job` — the field peds.js has always filled with the actual occupation
+    // ("dock worker", "paramedic", "security guard", "pilot") — while the
+    // overhead PILL called this function, which never looked at `a.job` at all
+    // and fell through to a personality guess off aggr/wealth. So the airline
+    // captain sitting in his own cockpit read as "Civilian", and the fix was
+    // never to hardcode "Pilot" at the pill; it was to let the job speak.
+    //
+    // Ranked BELOW uniform/rank/gang (a cop moonlighting as a dock worker is
+    // still an Officer to anyone looking at him) and ABOVE the archetype,
+    // because the job is the more specific of the two.
+    if (a.job) { const j = titleCase(String(a.job)); if (j) return j; }
     const t = ARCH_TITLE[a.archetype];
     if (t) return t;
     // plain civilians still read: the eyes, the temper, the coat.

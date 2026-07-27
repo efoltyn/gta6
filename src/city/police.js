@@ -2508,7 +2508,16 @@
         if (post.relaxed && (stars | 0) === 0 && !c.sees) { if (c.armed) holsterGun(c); }
         else if (!c.armed) drawGun(c);
         if (c.shootCD > 0) c.shootCD -= dt;
-        if (RB.state === 2) {                                  // mounting up — the wall is leaving
+        // MOUNTING UP is THIS roadblock's officers only. `_post` began life
+        // private to the pursuit roadblock, so "the wall is leaving" could
+        // safely mean "everyone holding a post walks to the cruiser". It is
+        // not private any more — city/checkpoints.js and city/power.js both
+        // stand officers on `_post` now — and without this membership test a
+        // citywide roadblock standing down MARCHES EVERY POSTED OFFICER IN THE
+        // WORLD to its cruiser and rbDetachCop's them out of CBZ.cityCops. A
+        // highway checkpoint 800 m away silently loses its crew to a chase it
+        // was never part of.
+        if (RB.state === 2 && RB.cops.indexOf(c) >= 0) {        // mounting up — the wall is leaving
           post.mountT += dt;
           const m = post.mount;
           const mx = m && m.pos ? m.pos.x : RB.x, mz = m && m.pos ? m.pos.z : RB.z;

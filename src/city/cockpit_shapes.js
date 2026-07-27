@@ -43,6 +43,15 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+
+  // COCKPIT_SIGHTLINE (city/cockpit_shapes.js) — lay the glareshield, the
+  // instrument panel and the nose deck out against the pilot's DOWN-VISION
+  // LINE instead of against each other, so you can see over the nose. OFF →
+  // the panel sits at its costume's authored `panel.drop` and the hood at its
+  // authored `hoodTilt`, i.e. byte-identical to the geometry that shipped
+  // before this flag existed. One-line revert; `?cfg_COCKPIT_SIGHTLINE=0` too.
+  if (CFG.COCKPIT_SIGHTLINE == null) CFG.COCKPIT_SIGHTLINE = true;
 
   const MAX_MESHES = 26;                 // hard draw-call budget per cockpit
 
@@ -153,6 +162,13 @@
   // palette (so a repaint stays one edit), and the booleans are the dressing
   // beats: a fighter's ejection rails, a helicopter's door pillars, an
   // airliner's coaming lip.
+  // `sightDown` is the OVER-THE-NOSE DOWN-VISION ANGLE in degrees this costume
+  // is laid out against — how far below the horizon the pilot can see straight
+  // ahead before his own aeroplane gets in the way. It is a certification
+  // quantity, not a taste one (FAR/CS 25.773 + SAE AS580/ARP4101 define the
+  // binocular vision polygon a transport flight deck must deliver from the
+  // DESIGN EYE POSITION), and 15° is the floor CBZ.cockpitSightAudit() pins.
+  // A new costume that omits it inherits SIGHT.DOWN and is still legal.
   const DRESS = {
     // tight, cramped, near-black; one prominent hoop; ejection rails in the
     // corner of both eyes; low hood so the HUD owns the view.
@@ -160,6 +176,7 @@
       shell: 0.70, floor: 0.58, hood: 0.38, lip: true, hoodTilt: 0.05,
       frame: 0.50, console: 0.76, seat: 0.60, ctrl: 0.42,
       soloBow: 0.50, seatRails: true, pillars: false, lamp2: false, lampEi: 0.75,
+      sightDown: 17,      // the F-16's famous over-the-nose figure is 15°
     },
     // greenhouse: airy, minimal structure, thick door pillars at the shoulders,
     // an overhead strip, and a hood that barely exists (you look OVER the panel
@@ -168,6 +185,7 @@
       shell: 0.95, floor: 0.70, hood: 0.50, lip: false, hoodTilt: 0.02,
       frame: 0.62, console: 0.90, seat: 0.80, ctrl: 0.50,
       soloBow: 0.40, seatRails: false, pillars: true, lamp2: true, lampEi: 0.70,
+      sightDown: 22,      // a chin-bubble cabin sees far further down than a jet
     },
     // flight deck: roomy, blue-grey/beige, a BIG deep glareshield, heavy centre
     // post between two windscreen panes, overhead panel, crew seat (no rails).
@@ -175,6 +193,7 @@
       shell: 1.00, floor: 0.72, hood: 0.46, lip: true, hoodTilt: -0.06,
       frame: 0.80, console: 1.05, seat: 0.90, ctrl: 0.55,
       soloBow: 0.45, seatRails: false, pillars: false, lamp2: false, lampEi: 0.80,
+      sightDown: 17,      // 737-class: you see the runway threshold on the flare
     },
     // dark and closed: small windows, very deep hood, near-black everything,
     // the backlight (green, per palette) doing all the work.
@@ -182,6 +201,7 @@
       shell: 0.55, floor: 0.45, hood: 0.30, lip: true, hoodTilt: 0.03,
       frame: 0.42, console: 0.60, seat: 0.50, ctrl: 0.38,
       soloBow: 0.55, seatRails: true, pillars: false, lamp2: false, lampEi: 0.90,
+      sightDown: 16,      // heads-down by design, but still a certified cockpit
     },
     // light GA: tan plastic, honest exposed tube frame, thick plexiglass centre
     // bar, a yoke on a column and one throttle knob on a shaft.
@@ -189,8 +209,179 @@
       shell: 1.05, floor: 0.80, hood: 0.72, lip: false, hoodTilt: -0.03,
       frame: 0.90, console: 1.00, seat: 0.95, ctrl: 0.60,
       soloBow: 0.42, seatRails: false, pillars: false, lamp2: false, lampEi: 0.65,
+      sightDown: 17,      // a high-wing single is nearly all window forward
     },
   };
+
+  // ==========================================================================
+  //  THE SIGHTLINE  —  why this exists, and what was actually wrong
+  // ==========================================================================
+  //  OWNER: "the controls go too high and the window starts too high, you
+  //  can't see in front of you."  He is right, and the cause is arithmetic
+  //  rather than art. Measure the airliner costume as it shipped:
+  //
+  //    panel.drop 0.44 × scale 1.15            = 0.506 m below the eye
+  //    panel.h    (DERIVED from the layout's
+  //                1024×384 canvas, not the
+  //                0.52 fallback in CLASS)     = 0.655 m tall
+  //    glare.rise 0.16 × 1.15                  = 0.184 m above the panel top
+  //
+  //    panel top  = -0.506 + (0.655/2)·cos(0.22)   = -0.186 m
+  //    hood sits  = -0.186 + 0.184                 = -0.002 m  ← EYE LEVEL
+  //
+  //  The windscreen sill is the hood's own height, so the aperture began at
+  //  the pilot's eye and everything below it — half a metre of glareshield,
+  //  bezel and panel spanning the full width of the deck — sat in the middle
+  //  of the frame. The forward-most top edge of the hood measured +2.8°
+  //  ABOVE the horizon: you had to look UP to see the sky, which is exactly
+  //  the screenshot. Every other costume was broken the same way (fighter
+  //  +2.4°, bomber +2.3°, prop +0.4°, heli the only one in the black at
+  //  ~13°, and even that misses the 15° floor).
+  //
+  //  Three compounding mistakes, all of them fixed below:
+  //
+  //  1. `panel.drop` was authored against `panel.h`'s FALLBACK (0.52) but the
+  //     generator derives the real height from the layout canvas aspect
+  //     (0.655) and nobody re-checked the drop. Worth ~2.4° on its own.
+  //  2. `glare.rise` floats the shelf a further 0.18 m ABOVE the panel's top
+  //     edge. A real glareshield's underside IS the top of the panel; every
+  //     centimetre of float is a centimetre the whole stack has to fall to
+  //     buy the sightline back, and it steals it from the panel.
+  //  3. `hoodTilt` was NEGATIVE on the airliner and the prop, i.e. the front
+  //     lip of the shelf was tipped UP into the view. A real glareshield
+  //     slopes down and away, roughly parallel to the vision line — which is
+  //     WHY the limiting edge of a shelf is its FAR edge, not its near one
+  //     (from above a table you lose the floor beyond the far edge first).
+  //
+  //  THE FIX IS TO STOP AUTHORING HEIGHTS AND START AUTHORING THE ANGLE.
+  //  A cockpit is laid out from the design eye position against a vision
+  //  line — y(z) = -tan(θ)·z in front of the pilot — and the glareshield, the
+  //  coaming roll, the nose deck and the wiper all live UNDER that line. So
+  //  that is what solveSight does: it takes the costume's θ (DRESS.sightDown)
+  //  and solves for the ONE number the layout actually needs, `drop`, plus
+  //  the tilts and the nose-deck height that keep the rest of the forward
+  //  structure below the line. `drop` is only ever INCREASED (never reduced),
+  //  so an airframe's `userData.cockpit = { panel: { drop: … } }` override
+  //  that asks for a LOWER panel still wins — the sightline is a floor, not a
+  //  replacement.
+  //
+  //  CBZ.cockpitSightAudit() (city/cockpit.js) re-measures the result by
+  //  raycasting the built triangles, so the solve below is checked rather
+  //  than trusted, and downVisionDeg >= 15 is the ratchet.
+  // ==========================================================================
+  const SIGHT = {
+    DOWN: 17,          // default down-vision (deg) for a costume with no sightDown
+    MIN: 15,           // the floor cockpitSightAudit() pins — never lower this
+    RISE_MAX: 0.075,   // m × spec.scale — how far the shelf may float above the
+                       // panel top. Above this it is stealing panel, not shading it.
+    RISE_MIN: 0.048,   // m — the hood is 0.085 thick; below this its own body
+                       // swallows the panel's top edge instead of overhanging it.
+    HOOD_H: 0.085,     // the hood box's authored height (see the taper call below)
+    HOOD_NZ: 0.94,     // ...and its taper factors, which scale the box's HALF-HEIGHT
+    HOOD_TZ: 0.99,     // at the nose/tail ends (taperBox scales Y by the z factor)
+    LIP_H: 0.075,      // the coaming roll's height
+    DECK_LEN: 0.62,    // default nose-deck length
+    DECK_H: 0.05, DECK_NZ: 0.55, DECK_TZ: 0.34,
+    MARGIN: 0.006,     // m of slack under the vision line, so a rounding
+                       // difference between this solve and the audit's
+                       // raycast can never be the thing that fails the gate.
+  };
+
+  // The two TOP corners of a box, in the box's own frame, after rotation.x = a.
+  // `tFwd`/`tAft` are its half-heights at the two ends (taperBox shrinks a box's
+  // height with depth, so they differ), `hd` is its half-depth. Returns offsets
+  // from the box CENTRE. The forward corner is listed first because it is
+  // almost always the binding one: a shelf hides the ground beyond its FAR
+  // edge, so the far edge is what limits how far down you can see.
+  function topCorners(tFwd, tAft, hd, a) {
+    const ca = Math.cos(a), sa = Math.sin(a);
+    return [
+      { dy: tFwd * ca - hd * sa, dz: tFwd * sa + hd * ca },
+      { dy: tAft * ca + hd * sa, dz: tAft * sa - hd * ca },
+    ];
+  }
+
+  // solveSight(S, D, g) — g is { pH, pTilt, pDist, gDepth, rise0, drop0 }, all
+  // already scaled, all in metres. Everything it returns is EYE-RELATIVE (the
+  // frame the whole builder works in) so the caller just adds ey/ez.
+  function solveSight(S, D, g) {
+    const sc = num(S.scale, 1);
+    const halfTop = (g.pH / 2) * Math.cos(g.pTilt);   // panel top edge above panel centre
+    const out = {
+      on: false,
+      downDeg: num(D.sightDown, SIGHT.DOWN),
+      drop: g.drop0, rise: g.rise0, hoodTilt: num(D.hoodTilt, 0),
+      deckTilt: 0.09, deckY: null, wiperY: null, sillY: 0,
+    };
+    // OFF → hand back exactly what the costume authored. `sillY` is still
+    // computed, because userData.sight/the audit must be able to report the
+    // broken geometry as faithfully as the fixed geometry.
+    if (CFG.COCKPIT_SIGHTLINE === false) {
+      out.sillY = -out.drop + halfTop + out.rise;
+      return out;
+    }
+    out.on = true;
+    const td = Math.tan(clamp(out.downDeg, 0, 40) * Math.PI / 180);
+
+    // 1. THE SHELF SITS ON THE PANEL. Clamp the float first, because the solve
+    //    below pays for it twice: once in how far the panel must fall, and
+    //    once in how far down you must look to read it.
+    out.rise = clamp(g.rise0, SIGHT.RISE_MIN, SIGHT.RISE_MAX * sc);
+
+    // 2. THE SHELF FOLLOWS THE LINE. Tilting the hood to the vision angle is
+    //    the single cheapest degree in here: a level shelf trades its whole
+    //    depth against the line, a raked one trades only its thickness.
+    out.hoodTilt = td > 0 ? Math.atan(td) : num(D.hoodTilt, 0);
+
+    // 3. SOLVE THE SILL. topZ (the panel's top edge, and the shelf's forward
+    //    edge) does not depend on `drop`, so this is closed-form: put the
+    //    higher of the hood's two top corners exactly on the vision line.
+    const topZ = g.pDist + (g.pH / 2) * Math.sin(g.pTilt);
+    const hoodZ = topZ - g.gDepth / 2;
+    const hc = topCorners(SIGHT.HOOD_H / 2 * SIGHT.HOOD_NZ,
+                          SIGHT.HOOD_H / 2 * SIGHT.HOOD_TZ,
+                          g.gDepth / 2, out.hoodTilt);
+    let sill = Infinity;
+    for (let i = 0; i < hc.length; i++) {
+      const z = hoodZ + hc[i].dz;
+      if (z <= 0.02) continue;                      // behind the eye: cannot block
+      sill = Math.min(sill, -td * z - hc[i].dy - SIGHT.MARGIN);
+    }
+    if (!isFinite(sill)) sill = -out.drop + halfTop + out.rise;
+    out.sillY = sill;
+    // drop is what the builder consumes; NEVER raise the panel, only lower it,
+    // so an airframe override asking for a deeper panel keeps its wish.
+    out.drop = Math.max(g.drop0, halfTop + out.rise - sill);
+    out.sillY = -out.drop + halfTop + out.rise;     // re-read after the max()
+
+    // 4. THE NOSE DECK. The skin ahead of the windscreen is the SECOND thing
+    //    that can eat the view, and at ~1.2-1.8 m out it eats it fast — the
+    //    old fixed "0.10 m below the sill" put it at 13.5° on the airliner,
+    //    under the floor all by itself. Rake it along the vision line like
+    //    the shelf, then drop it until both its ends are under the line.
+    out.deckTilt = out.hoodTilt;
+    const dLen = num(D.noseLen, SIGHT.DECK_LEN);
+    const deckZ = topZ + dLen * 0.5 + 0.10;
+    const dc = topCorners(SIGHT.DECK_H / 2 * SIGHT.DECK_NZ,
+                          SIGHT.DECK_H / 2 * SIGHT.DECK_TZ,
+                          dLen / 2, out.deckTilt);
+    // out.sillY, not the local `sill` — an airframe override may have pushed
+    // the panel DEEPER than the solve asked for, and the deck follows the sill
+    // that was actually built rather than the one that was requested.
+    let deckY = out.sillY - 0.10;                   // never HIGHER than the old placement
+    for (let i = 0; i < dc.length; i++) {
+      const z = deckZ + dc[i].dz;
+      if (z <= 0.02) continue;
+      deckY = Math.min(deckY, -td * z - dc[i].dy - SIGHT.MARGIN);
+    }
+    out.deckY = deckY;
+
+    // 5. THE WIPER parks at the base of the screen, i.e. tucked under the
+    //    shelf's forward lip. It used to sit 0.03 m ABOVE the sill, which put
+    //    a black bar across the view of anyone glancing off-centre.
+    out.wiperY = out.sillY + hc[0].dy - 0.055;
+    return out;
+  }
 
   // ==========================================================================
   //  BUILD
@@ -286,10 +477,22 @@
     //      shape in here, so it is built from the panel's real top edge.
     // -----------------------------------------------------------------
     const pn = S.panel || {};
+    const gl = S.glare || {};
     const pW = num(pn.w, 0.9), pH = num(pn.h, 0.4);
     const pTilt = num(pn.tilt, 0.35);
-    const pCz = ez + num(pn.dist, 0.72);
-    const pCy = ey - num(pn.drop, 0.42);
+    const pDist = num(pn.dist, 0.72);
+    // THE SIGHTLINE SOLVE (see the block above build()). This is the ONE call
+    // that decides how high the whole forward mass sits, and it runs before a
+    // single vertex is placed — `drop`, the hood's rake, the nose deck's
+    // height and the wiper all come out of it together, because they are all
+    // the same question: what is below the pilot's down-vision line?
+    const SS = solveSight(S, D, {
+      pH: pH, pTilt: pTilt, pDist: pDist,
+      gDepth: num(gl.depth, 0.22),
+      rise0: num(gl.rise, 0.1), drop0: num(pn.drop, 0.42),
+    });
+    const pCz = ez + pDist;
+    const pCy = ey - SS.drop;
     // The panel's own local axes after the tilt. +Y of a plane reclined by
     // `tilt` about the lateral axis points (0, cos, sin) — the top edge leans
     // AWAY from the pilot (+Z) for a positive tilt, which is the spec's sign.
@@ -322,18 +525,33 @@
 
     // GLARESHIELD — the dark horizontal mass over the panel. `depth` juts AFT
     // over the panel top toward the pilot, `rise` lifts it above the top edge.
-    const gl = S.glare || {};
-    const gDepth = num(gl.depth, 0.22), gRise = num(gl.rise, 0.1), gW = num(gl.w, pW + 0.2);
-    const hood = put(taper(gW, 0.085, gDepth, { nz: 0.94, tz: 0.99, top: 0.7, bot: 0.94, segD: 3 }), mHood);
+    // Both `rise` and the rake come from the sightline solve now: this shelf is
+    // the single object standing between the pilot and the ground ahead, so its
+    // top surface is laid parallel to (and just under) his down-vision line.
+    const gDepth = num(gl.depth, 0.22), gRise = SS.rise, gW = num(gl.w, pW + 0.2);
+    const hood = put(taper(gW, SIGHT.HOOD_H, gDepth, { nz: SIGHT.HOOD_NZ, tz: SIGHT.HOOD_TZ, top: 0.7, bot: 0.94, segD: 3 }), mHood);
     hood.position.set(ex, topY + gRise, topZ - gDepth * 0.5);
-    hood.rotation.x = D.hoodTilt;         // + tips the forward edge down
+    hood.rotation.x = SS.hoodTilt;        // + tips the forward edge down
     hood.name = "cockpit-glareshield";
     // COAMING LIP — the padded roll along the hood's aft edge. This is the
     // silhouette line the eye actually locks onto, so the deep-hood classes get
-    // it as its own slightly darker mass.
+    // it as its own slightly darker mass. It RIDES the hood's aft edge rather
+    // than sitting at a fixed offset below the sill: once the hood is raked to
+    // the vision line its aft edge is the high one, and a lip left behind at
+    // the old offset would float in mid-air under it.
     if (D.lip) {
-      const lip = put(taper(gW * 0.99, 0.075, 0.075, { top: 0.6, bot: 0.7 }), lam(shade(TRIM, D.hood * 0.72)));
-      lip.position.set(ex, topY + gRise - 0.022, topZ - gDepth + 0.03);
+      const lip = put(taper(gW * 0.99, SIGHT.LIP_H, 0.075, { top: 0.6, bot: 0.7 }), lam(shade(TRIM, D.hood * 0.72)));
+      if (SS.on) {
+        // centre of the hood's aft FACE, then down by half the roll, so the
+        // roll's top is flush with the corner the solve already placed on the
+        // line — the lip can never become the new blocker.
+        const ca = Math.cos(SS.hoodTilt), sa = Math.sin(SS.hoodTilt);
+        lip.position.set(ex,
+          topY + gRise + (gDepth / 2) * sa - SIGHT.LIP_H / 2,
+          topZ - gDepth * 0.5 - (gDepth / 2) * ca + 0.03);
+      } else {
+        lip.position.set(ex, topY + gRise - 0.022, topZ - gDepth + 0.03);
+      }
       lip.name = "cockpit-coaming";
     }
 
@@ -373,12 +591,28 @@
 
     // Windscreen centre post — leans BACK from vertical, i.e. its top is aft
     // (toward the pilot, -Z), so the rotation about the lateral axis is negative.
+    //
+    // ...AND IT DOES NOT GO IN FRONT OF THE PILOT'S NOSE. This bar spans the
+    // whole height of the windscreen and it used to be built at `ex`, which is
+    // the pilot's own centreline — so on every costume that has one (all four
+    // but the fighter) the player was looking straight AT a mullion. It is the
+    // second half of the owner's "you can't see in front of you", and it is
+    // the half nothing analytic would have caught: the first thing
+    // CBZ.cockpitSightAudit() ever printed was that the helicopter and the
+    // bomber had NO clear ray at ANY angle between 50° down and 70° up,
+    // because the post covered everything the panel didn't.
+    //
+    // A real narrowbody's centre post divides two windscreen panes and the
+    // captain sits OUTBOARD of it — he flies looking through the left pane,
+    // which is exactly what the owner's reference photo shows. The pilot's
+    // right is -X (see the handedness note in cockpit.js), so the post moves
+    // to his right and the primary sightline runs through glass.
     if (S.frame && postW > 0.001) {
       const postBaseY = topY + gRise + 0.02;
       const postH = (railY + railHW * 0.5) - postBaseY;
       if (postH > 0.06) {
         const post = put(taper(postW, postH, 0.075, { top: 0.85, bot: 1.0 }), mFrame);
-        post.position.set(ex,
+        post.position.set(SS.on ? ex - railHW * 0.42 : ex,
           postBaseY + (postH / 2) * Math.cos(wsTilt),
           topZ + 0.06 - (postH / 2) * Math.sin(wsTilt));
         post.rotation.x = -wsTilt;
@@ -424,6 +658,7 @@
     // is bad, and doubling a windscreen is worse.
     // -----------------------------------------------------------------
     const glassMats = [];
+    let wsMesh = null, deckMesh = null;      // handles for CBZ.cockpitSightAudit()
     if (S.frame && CBZ.glass && D.glaze !== false) {
       const gMat = CBZ.glass({
         opacity: num(D.glazeOpacity, 0.17),
@@ -445,6 +680,7 @@
       ws.name = "cockpit-windscreen";
       ws.renderOrder = 6;               // after the opaque interior, always
       ws.userData.glass = true;
+      wsMesh = ws;
 
       // THE NOSE, FROM THE INSIDE (owner: "the front of planes looks good from
       // outside, not from inside" / "the front of planes needs some redoing").
@@ -455,24 +691,40 @@
       // outside read fine and the inside did not. These are the three parts you
       // genuinely see over the panel of a real aeroplane.
       const noseW = gW * 0.94;
-      // the coaming rail capping the top of the windscreen — closes the frame
+      // the rail capping the TOP of the windscreen — closes the frame. (Named
+      // apart from the glareshield's own coaming roll; two meshes called
+      // "cockpit-coaming" used to make a probe's name lookup a coin toss.)
       const coam = put(taper(noseW, 0.05, 0.10, { top: 0.7, bot: 0.9 }), mFrame);
       coam.position.set(ex,
         topY + gRise + wsH * Math.cos(wsTilt) + 0.02,
         topZ + 0.055 - wsH * Math.sin(wsTilt));
       coam.rotation.x = -wsTilt;
-      coam.name = "cockpit-coaming";
+      coam.name = "cockpit-screencap";
       // the NOSE DECK visible beyond the glass — the sloping skin ahead of the
-      // windscreen that tells you where the aircraft ENDS
-      const deck = put(taper(noseW * 0.86, 0.05, D.noseLen != null ? D.noseLen : 0.62,
-        { nz: 0.55, tz: 0.34, top: 0.8, bot: 0.8, segD: 3 }), mHood);   // the hull skin ahead of the screen wears the hood tone
-      deck.position.set(ex, topY + gRise - 0.10, topZ + (D.noseLen != null ? D.noseLen : 0.62) * 0.5 + 0.10);
-      deck.rotation.x = 0.09;                    // falls away toward the nose
+      // windscreen that tells you where the aircraft ENDS. It sits at 1.2-1.8 m
+      // out, which is far enough that a few centimetres of height is several
+      // degrees of view: at its old fixed "sill minus 0.10" it cut the airliner
+      // off at 13.5° all by itself, under the floor even with a clear shelf. So
+      // it is raked along the vision line and solved to sit under it (§4 of
+      // solveSight). You are meant to SEE this thing — just not to see it
+      // instead of the runway.
+      const dLen = D.noseLen != null ? D.noseLen : SIGHT.DECK_LEN;
+      const deck = put(taper(noseW * 0.86, SIGHT.DECK_H, dLen,
+        { nz: SIGHT.DECK_NZ, tz: SIGHT.DECK_TZ, top: 0.8, bot: 0.8, segD: 3 }), mHood);   // the hull skin ahead of the screen wears the hood tone
+      deck.position.set(ex,
+        SS.deckY != null ? ey + SS.deckY : topY + gRise - 0.10,
+        topZ + dLen * 0.5 + 0.10);
+      deck.rotation.x = SS.deckTilt;             // falls away toward the nose
       deck.name = "cockpit-nosedeck";
+      deckMesh = deck;
       // one wiper parked at the base of the screen — tiny, and it is the detail
-      // that says "this glass is real and someone maintains it"
+      // that says "this glass is real and someone maintains it". PARKED means
+      // below the shelf's forward lip: at its old sill+0.03 it stood proud of
+      // the glareshield and drew a black bar across the off-centre view.
       const wip = put(taper(0.02, 0.02, 0.30, { top: 0.7, bot: 0.7 }), mFrame);
-      wip.position.set(ex - noseW * 0.22, topY + gRise + 0.03, topZ + 0.08);
+      wip.position.set(ex - noseW * 0.22,
+        SS.wiperY != null ? ey + SS.wiperY : topY + gRise + 0.03,
+        topZ + 0.08);
       wip.rotation.x = -wsTilt + 0.12;
       wip.name = "cockpit-wiper";
 
@@ -699,6 +951,11 @@
       hudMesh.rotation.set(-0.14, Math.PI, 0);
       hudMesh.renderOrder = 4;
       hudMesh.name = "cockpit-hud";
+      // A combiner is GLASS you shoot symbology at — it is deliberately in
+      // front of your eye and it must never count as an obstruction. The tag
+      // is what keeps CBZ.cockpitSightAudit()'s raycast honest (the side
+      // panes carry userData.glass for the same reason).
+      hudMesh.userData.seeThrough = true;
       const bracket = put(taper(hW + 0.06, 0.05, 0.1, { top: 0.7, bot: 0.9 }), mFrame);
       bracket.position.set(ex, hy - hH / 2 - 0.03, hz + 0.01);
       bracket.name = "cockpit-hud-bracket";
@@ -709,6 +966,24 @@
         " meshes (budget " + MAX_MESHES + ")");
     }
     root.userData.cockpitMeshCount = count;
+    // THE SIGHTLINE RECORD, in the frame the audit wants: body-local absolute
+    // Y for the three heights a human argument is actually about ("is the
+    // glareshield below the pilot's eye or not"), plus what the solve asked
+    // for. cockpitSightAudit() reports the MEASURED angle beside `wantDownDeg`
+    // so a solve that silently stops working shows up as a disagreement
+    // rather than as a screenshot somebody has to notice.
+    root.userData.sight = {
+      on: SS.on,
+      wantDownDeg: SS.downDeg,
+      eyeY: ey,
+      sillY: ey + SS.sillY,               // the windscreen's lower edge
+      glareY: ey + SS.sillY + (SIGHT.HOOD_H / 2) * SIGHT.HOOD_TZ * Math.cos(SS.hoodTilt)
+                            + (num(S.glare && S.glare.depth, 0.22) / 2) * Math.sin(SS.hoodTilt),
+      panelTopY: topY, panelBotY: pCy - (pH / 2) * upY,
+      panelCz: pCz, topZ: topZ,
+      drop: SS.drop, rise: SS.rise, hoodTilt: SS.hoodTilt,
+      deckY: SS.deckY != null ? ey + SS.deckY : null,
+    };
 
     return {
       root: root,
@@ -722,6 +997,9 @@
         yoke: yoke,
         lampMats: lampMats,
         glassMats: glassMats,             // REAL panes now — see section 4b
+        glareMesh: hood,                  // the three the sightline audit reads
+        windscreenMesh: wsMesh,
+        deckMesh: deckMesh,
       },
     };
   }
@@ -742,5 +1020,8 @@
     if (r.parent) r.parent.remove(r);
   }
 
-  CBZ.cockpitShapes = { build: build, dispose: dispose };
+  // SIGHT rides along so city/cockpit.js's audit pins the SAME floor this file
+  // solved against — two copies of "15" that can drift is exactly the stat
+  // fiction CLAUDE.md bans.
+  CBZ.cockpitShapes = { build: build, dispose: dispose, SIGHT: SIGHT, solveSight: solveSight };
 })();

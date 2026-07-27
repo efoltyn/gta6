@@ -137,13 +137,22 @@
     //      registered footprint incl. Greater Mercy (z≤-1780) and the
     //      nations (kesh towns x≥2255, solara x≥2770) — the build-time
     //      clearance sweep below re-proves this every build) ---------------
-    const timberX = -400;                      // forest(maxX -470)/snow(minX -70) corridor
-    const corridorZ = -1160;                   // forest(maxZ -1220)/military(minZ -1100) gap
-    const westX = -1560;                       // west of neonreef/foundry (minX ≈ -1495)
-    const southZ = 880;                        // south of goldspire (maxZ 840)/desert (720)
-    const eastX = 2130;                        // east of desert/farmland (maxX 2030)
-    const foothillZ = -1750;                   // south of Greater Mercy (maxZ -1780)
-    const dunesX = 1000;                       // snow(maxX 770)/desert(minX 1130) gap
+    // WORLD_LAYOUT_V2 MOVED THE LAND UNDERNEATH THESE. Every DOCK in this file
+    // derives from CBZ.worldOff and therefore followed its landmass when the
+    // stage-3 spread pushed the regions apart — but these seven free-country
+    // lane constants are raw literals measured against the stage-2 gaps, so
+    // they stayed put while the continents moved out from under them. The
+    // build-time clearanceSweep below only console.warns, so nothing threw:
+    // route R1 simply began cutting through Fort Brandt, the Saltlands, Coyle
+    // Valley and the speedway, silently. Re-measured against the final
+    // geometry (the six new sweep warnings are what found them).
+    const timberX = -400;                      // forest(maxX -470)/snow(minX -70) corridor — unmoved
+    const corridorZ = -1415;                   // forest/military gap (was -1160)
+    const westX = -1960;                       // west of neonreef/foundry (was -1560)
+    const southZ = 1230;                       // south of goldspire/desert (was 880)
+    const eastX = 2560;                        // east of desert/farmland (was 2130)
+    const foothillZ = -3250;                   // south of Greater Mercy, now 2.06km north (was -1750)
+    const dunesX = 1200;                       // snow/desert gap (was 1000)
 
     // Deck endpoints stop FLUSH at the docked deck's edge (±HALF); the road
     // RECORD extends to the docked road's centreline (recA/recB) so
@@ -198,8 +207,10 @@
         id: "R5", name: "West Shore Highway", width: 24, lanesPerDir: 3, fillet: 60,
         pts: [
           { x: westX + HALF, z: -700 },                  // T flush onto Route 1's west deck
-          { x: -1200, z: -700 },
-          { x: -1200, z: -420 },
+          // -1500, not -1200: WORLD_LAYOUT_V2 widened Fort Brandt's span to
+          // x[-1420,-940], so the old dog-leg ran straight through the base.
+          { x: -1500, z: -700 },
+          { x: -1500, z: -420 },
           { x: halloranX - HALF, z: -420 },              // dock: Halloran causeway west edge
         ],
         recA: westX, recB: halloranX,
@@ -208,8 +219,10 @@
       {
         id: "R6", name: "Southgate Spur", width: 24, lanesPerDir: 3, fillet: 60,
         pts: [
-          { x: -240, z: southZ - HALF },                 // T flush onto Route 1's south deck
-          { x: -240, z: foundryRowZ + HALF },            // T flush onto Foundry Row's deck
+          // -280, not -240: clears the Goldspire Civic Campus, whose minX is
+          // -230 after the spread. The old x cut its western edge.
+          { x: -280, z: southZ - HALF },                 // T flush onto Route 1's south deck
+          { x: -280, z: foundryRowZ + HALF },            // T flush onto Foundry Row's deck
         ],
         recA: southZ, recB: foundryRowZ,
         docks: [],

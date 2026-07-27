@@ -59,6 +59,10 @@
   // mountains on the snow island, very far from everything else).
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
   const DX = _WOFF.dx, DZ = _WOFF.dz;
+  // WORLD_LAYOUT_V2 (world/layout.js owns the flag; this only mirrors the
+  // default for a build without it). Consumed once, at the Pinecrest seed.
+  if (CFGS.WORLD_LAYOUT_V2 == null) CFGS.WORLD_LAYOUT_V2 = true;
+  const LAYOUT_V2 = function () { return CFGS.WORLD_LAYOUT_V2 !== false; };
   const CX = 350 + DX, CZ = -1450 + DZ, HX = 420, HZ = 330;
   const MINX = CX - HX, MAXX = CX + HX;     // world (authored -70 .. 770)
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;     // world (authored -1780 .. -1120)
@@ -635,7 +639,18 @@
     const root = city.root;
     if (!root) return;
     const mat = CBZ.mat, cmat = CBZ.cmat || CBZ.mat;
-    const rng = mulberry((CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170) ^ ((CX * 73856093) ^ (CZ * 19349663)));
+    // AUTHORED-FRAME SEEDING (WORLD_LAYOUT_V2). Everything in this file is
+    // already authored in the stage-1 frame and mapped world<->authored at the
+    // oracle boundary — except this stream, which was keyed on the WORLD
+    // centre. That made the world-layout dial a re-roll button: sliding the
+    // alpine island re-dealt Pinecrest's entire street plan, which is exactly
+    // the recalibration the math gate's golden table still carries a comment
+    // about ("snow move re-rolled Pinecrest"). Keying on the authored anchor
+    // (CX-DX, CZ-DZ — i.e. the literal 350,-1450) finishes the rigid-translate
+    // contract the rest of the file already keeps. At zero offset authored ==
+    // world, so the flag-off build is byte-identical.
+    const _SEEDX = LAYOUT_V2() ? (CX - DX) : CX, _SEEDZ = LAYOUT_V2() ? (CZ - DZ) : CZ;
+    const rng = mulberry((CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170) ^ ((_SEEDX * 73856093) ^ (_SEEDZ * 19349663)));
 
     // shared materials (one instance each — draw-call friendly)
     const mSnow = cmat(COL.snow), mSnowShade = cmat(COL.snowShade);

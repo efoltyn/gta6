@@ -45,10 +45,16 @@
                                    quality tier, oldest recycled).
                                    o.parent mounts it on a car body
                                    so the hole RIDES the car.
+                                   o.mm = the round's BORE in millimetres
+                                   (the honest input); o.size is the
+                                   legacy metres-wide dial, rescaled onto
+                                   the same law by WOUND_DECAL_V2.
 
    WHY the holes: the evidence a firefight leaves is half its drama —
    a wall you magdumped must STAY pocked, and a 7.62 hole must read
-   bigger than a 9mm (o.size carries the caliber).
+   bigger than a 9mm (o.mm / o.size carries the caliber). What it must
+   NOT do is read bigger than the thing it hit: see holeSize() for the
+   25-46 cm craters this used to stamp for a pistol round.
 
    `from`/`to` are any {x,y,z}. opts: {color, life, muzzle:false,
    muzzleScale, scale}.
@@ -458,6 +464,39 @@
   function holeCap()    { return (CBZ.qScale ? CBZ.qScale(32, 128) : 64) | 0; }
   function holeLod()    { return CBZ.qScale ? CBZ.qScale(30, 90) : 50; }
   function holePerCar() { return (CBZ.qScale ? CBZ.qScale(6, 18) : 10) | 0; }
+
+  // ---- HOW BIG IS A BULLET HOLE, ACTUALLY (WOUND_DECAL_V2) -----------------
+  //
+  //  MEASURED BUG, the world-side twin of the body-decal one systems/wounds.js
+  //  documents: `opts.size` is the quad's WIDTH IN METRES and fpsmode.js passes
+  //  `0.15 + cal*0.13` for walls and `0.12 + cal*0.1` for cars, then this
+  //  function jitters it up to another 1.15x. That is a 25-46 cm crater per
+  //  round on a wall and 20-36 cm on a car door — a mark the size of a human
+  //  HEAD, from a 9 mm. It is the same mistake in the same class: a decal sized
+  //  off the damage dial instead of off the projectile.
+  //
+  //  THE PHYSICAL TRUTH. A 9 mm bore leaves a ~9 mm hole. What you actually SEE
+  //  on masonry is the SPALL — the pale chipped crater and soot ring around it,
+  //  roughly 4-5 bore radii out. So the quad's width is the spall diameter,
+  //  about 10x the bore, and the dark core inside the texture is the hole
+  //  itself. 9 mm → a 9 cm mark with a ~3.5 cm black centre.
+  //
+  //  Two ways in, matching the wounds.js contract exactly: a caller that knows
+  //  its bore passes `mm` and gets the honest answer; a caller still on the
+  //  legacy `size` dial gets it scaled by HOLE_V2_MUL, which is not a taste
+  //  number — 0.36 is precisely the factor that lands fpsmode's 9 mm wall hole
+  //  (0.25) on the bore law's answer (0.090), so both doors agree.
+  //  CBZ.CONFIG.WOUND_DECAL_V2 = false restores the old craters.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.WOUND_DECAL_V2 == null) CBZ.CONFIG.WOUND_DECAL_V2 = true;
+  const HOLE_SPALL = 10;      // quad width ÷ bore
+  const HOLE_V2_MUL = 0.36;   // legacy `size` dial → the same law
+  function holeSize(opts) {
+    const v2 = CBZ.CONFIG.WOUND_DECAL_V2 !== false;
+    if (opts.mm != null) return Math.max(0.02, opts.mm * 0.001 * HOLE_SPALL);
+    const legacy = opts.size || 0.24;
+    return v2 ? legacy * HOLE_V2_MUL : legacy;
+  }
   const holes = [];
   let holeIdx = 0, holeSeq = 0, holeGeo = null, holeMat = null;
   const _zAxis = new THREE.Vector3(0, 0, 1);
@@ -466,15 +505,26 @@
   const _hn = new THREE.Vector3();
   const _ray = new THREE.Raycaster();
   const _nm = new THREE.Matrix3();
+  // The pock had no CRATER, only a dark smudge fading out — which is the other
+  // half of "it looks like a sticker": a hole in a surface is dark because you
+  // are looking INTO it, and it is ringed by the pale broken material the round
+  // knocked loose. Without that lip a decal is just a stain. The bore is now a
+  // tight near-opaque black core out to 0.22, then a PALE SPALL LIP, then soot
+  // dust dissolving to nothing — which reads correctly on light masonry and on
+  // dark car paint alike (chipped paint shows pale primer either way). 64px so
+  // the lip survives a close-up; still one shared texture for every hole in the
+  // game, so this costs one canvas at load and nothing per shot.
   function makeHoleMat() {
-    const c = document.createElement("canvas"); c.width = c.height = 32;
+    const c = document.createElement("canvas"); c.width = c.height = 64;
     const x = c.getContext("2d");
-    const g = x.createRadialGradient(16, 16, 1, 16, 16, 15);
-    g.addColorStop(0, "rgba(6,6,8,0.96)");
-    g.addColorStop(0.42, "rgba(16,16,20,0.85)");
-    g.addColorStop(0.72, "rgba(36,36,42,0.3)");
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    const g = x.createRadialGradient(32, 32, 1, 32, 32, 31);
+    g.addColorStop(0.00, "rgba(4,4,6,0.98)");     // the bore
+    g.addColorStop(0.20, "rgba(9,9,11,0.94)");
+    g.addColorStop(0.30, "rgba(122,118,112,0.55)"); // spall lip — chipped material
+    g.addColorStop(0.48, "rgba(74,70,66,0.30)");
+    g.addColorStop(0.75, "rgba(46,44,42,0.12)");    // soot / dust halo
+    g.addColorStop(1.00, "rgba(30,30,30,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
     const m = new THREE.MeshBasicMaterial({
       map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
@@ -573,10 +623,16 @@
       parent.getWorldQuaternion(_hq);
       _hn.applyQuaternion(_hq.invert()).normalize();
     }
-    m.position.copy(_hp).addScaledVector(_hn, 0.025);  // nudge off the surface — no z-fight
+    const s = holeSize(opts) * (0.85 + rng() * 0.3);
+    // A FIXED 25 mm stand-off on a 90 mm mark is a chip floating in front of
+    // the wall the moment you look at it edge-on. Scale it with the mark and
+    // let polygonOffset (already on the material) win the depth test instead —
+    // same law as the body decals' proudFor(). Never below 4 mm: the car path
+    // mounts in a moving parent whose transform is a frame behind the panel.
+    m.position.copy(_hp).addScaledVector(_hn,
+      CBZ.CONFIG.WOUND_DECAL_V2 !== false ? Math.max(0.004, s * 0.05) : 0.025);
     m.quaternion.setFromUnitVectors(_zAxis, _hn);
     m.rotateZ(rng() * Math.PI);
-    const s = (opts.size || 0.24) * (0.85 + rng() * 0.3);
     m.scale.set(s, s, 1);
     return m;
   };

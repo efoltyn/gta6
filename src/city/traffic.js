@@ -321,6 +321,20 @@
       if (d > pd) { pd = d; pick = c; }
     }
     if (!pick) return false;
+    // ADOPTED: roadrules.js's CBZ.roadPick + CBZ.roadPlace. The annulus, the
+    // camera distance and the field writes were all hand-rolled here; the
+    // block does them, and adds the three tests this loop never had — the
+    // keep-out zones (so a recycle can no longer drop a car on the runway),
+    // open water, and — the one that actually mattered — WHETHER THE CAMERA IS
+    // LOOKING AT IT. `dc < 62*62` only asked how FAR the camera was, so a car
+    // could pop into existence dead ahead at 63 m and pass the test.
+    if (CBZ.roadPickUsed) CBZ.roadPickUsed("traffic:recycleOne");
+    if (CBZ.roadPick && CBZ.roadPlace) {
+      const spot = CBZ.roadPick({
+        near: P, minDist: 50, maxDist: 120, camMin: 62, unseen: true, tries: 14, spread: 90,
+      });
+      return spot ? CBZ.roadPlace(pick, spot) : false;
+    }
     // find a destination road point that's out of sight but reachable soon
     for (let tries = 0; tries < 8; tries++) {
       const r = A.roads[(Math.random() * A.roads.length) | 0];
@@ -362,6 +376,10 @@
   // are pushed WITHOUT a district in world.js; everything outlying is tagged).
   function isOutlying(r) {
     const d = r && r.district;
+    // ADOPTED: a segment the traffic-access law has CLOSED (its span lies
+    // inside the airport airside / military perimeter / a bunker shell) is not
+    // an outlying road that deserves seeding — it is a road nobody may use.
+    if (CBZ.roadOpen && !CBZ.roadOpen(r)) return false;
     return d === "highway" || d === "island" || d === "town" || d === "bridge" ||
            d === "desert" || d === "snow" || d === "forest" || d === "farmland";
   }
@@ -383,6 +401,17 @@
   // at a clamped along-offset (long highways get spread out, not bunched at one
   // end). Returns true. Keeps vehicles.js order-37 in sync.
   function placeOnRoad(c, r) {
+    // ADOPTED: roadrules.js. `filter` pins the pick to the ONE segment this
+    // seeder chose (it already decided WHICH road is empty and deserves a
+    // car); everything else — the lane draw, the spread clamp, the keep-out
+    // and water refusals, and the field writes order-37 reads — is the block's.
+    if (CBZ.roadPickUsed) CBZ.roadPickUsed("traffic:placeOnRoad");
+    if (CBZ.roadPick && CBZ.roadPlace && CBZ.roadOpen) {
+      if (!CBZ.roadOpen(r)) return false;                 // never seed a closed road
+      const spot = CBZ.roadPick({ tries: 8, spread: 90, filter: function (s) { return s === r; } });
+      if (spot) return CBZ.roadPlace(c, spot);
+      return false;
+    }
     const dir = Math.random() < 0.5 ? 1 : -1;
     const laneIdx = (Math.random() * lanesPerDir(r)) | 0;
     const lane = laneOffset(r, dir, laneIdx);
@@ -449,6 +478,7 @@
     for (let i = 0; i < A.roads.length && seeded < cap; i++) {
       const r = A.roads[i];
       if (r.district !== "highway") continue;
+      if (CBZ.roadOpen && !CBZ.roadOpen(r)) continue;            // closed to ambient traffic
       if (Math.random() > 0.34) continue;                        // ~1 in 3 highways
       if (segHasCar(r, 60 * 60)) continue;
       const pick = farIdleCar(0);                                // any idle car (none are near a fresh arena)

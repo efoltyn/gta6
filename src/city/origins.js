@@ -1018,6 +1018,526 @@
     return { compact: true };
   }
 
+  /* ==================================================================
+     THE ORIGIN GENERATOR — a story is a COMPOSITION, not a script.
+
+     OWNER DIRECTION: "the stories should be changed to random — which we
+     have 3 right now that could be made into presets but could be
+     generatable as random."
+
+     That is exactly the right shape, and it is the BLOCK LAW applied to
+     narrative: the three hand-written openings above are each ~120 lines of
+     bespoke scene code, so a fourth cost a fourth ~120 lines and a random one
+     was impossible. Underneath, though, they only ever differ along SIX AXES:
+
+       WHO    you are            -> outfit, title, the level you start at
+       WHERE  you wake up        -> a place the world ALREADY BUILT
+       PURSE  what you have      -> cash / bank / debt
+       ARMS   what you carry     -> the loadout, or nothing
+       HEAT   who wants you dead -> nobody / a shark / a crew / everyone
+       VERB   the opening beat   -> get down / get out / get paid / stay alive
+
+     So the axes are the data and the presets are frozen rolls of them. THE
+     EXECUTIVE is {exec, tower_top, rich_broke, none, none, descend}. A random
+     origin is the same generator with the dice unpinned. Adding a seventh
+     story is a row, not a file.
+
+     THE BINDING RULE is contracts.js's, and it is binding here too: THE
+     GENERATOR PICKS THE VERB, THE WORLD SUPPLIES THE SPECIFICS. A `where`
+     never builds a room — it FINDS one the city generated. A `heat` never
+     spawns an enemy — it makes somebody the simulation was already running
+     hostile. If the world cannot supply the specifics, the axis degrades to
+     a street corner and says so in the feed, exactly as the three hand-
+     written scenes already do through missedLotFeed.
+
+     DETERMINISM: this is NOT a world-build path — it grants money and places
+     a body, it does not generate terrain — so the roll may use Math.random.
+     It is rolled ONCE and PERSISTED onto the character's ledger (w.originRoll),
+     so reloading that character replays the same person rather than rerolling
+     them into somebody else.
+     ================================================================== */
+
+  const AXES = {
+    // ---- WHO: the costume, the title, and where you sit in the world -----
+    who: {
+      exec:    { name: "The Executive", outfit: "suit",       title: "Executive",     blurb: "suit, gold watch, zero dollars" },
+      barfly:  { name: "The Barfly",    outfit: "street",     title: "Regular",       blurb: "last call, every call" },
+      tenant:  { name: "The Tenant",    outfit: "wifebeater", title: "Tenant",        blurb: "one room, one way out" },
+      hitman:  { name: "The Hitman",    outfit: "suit",       title: "Contractor",    blurb: "somebody paid for a name" },
+      pilot:   { name: "The Pilot",     outfit: "pilot",      title: "Pilot",         blurb: "already airborne, already committed" },
+      hustler: { name: "The Hustler",   outfit: "street",     title: "Hustler",       blurb: "a corner and a mouth on you" },
+      debtor:  { name: "The Debtor",    outfit: "street",     title: "Mark",          blurb: "you are three weeks late" },
+      wick:    { name: "The Marked",    outfit: "suit",       title: "Open Contract", blurb: "every single person wants the money" },
+    },
+
+    // ---- WHERE: a lot the CITY BUILT. Never a room this file authors. ----
+    // Each returns {lot|null, kind} and the placer below reads `kind` to
+    // decide the beat. The finders are the ones the three original openings
+    // already used, so a new story reuses proven lot searches instead of
+    // inventing a seventh way to ask "where is a tall building".
+    where: {
+      tower_top:  { find: findExecTower,   feed: "The firm's tower is locked for the night — you ride the freight elevator down broke." },
+      barfront:   { find: findBarLot,      feed: "The bar's shuttered — you wake up in the gutter anyway." },
+      unit:       { find: findTenantTower, feed: "Your building's stairwell is roped off — you crash on a friend's floor instead." },
+      airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
+      corner:     { find: null,            feed: "" },   // the street IS the place — never fails
+      motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
+    },
+
+    // ---- PURSE: cash / bank / debt. The three numbers a start is made of.
+    purse: {
+      rich_broke: { cash: 2000000, bank: 8000000, debt: 250000 },   // the exec: it is all about to be gone
+      broke:      { cash: 45,      bank: 0,       debt: 350 },
+      nothing:    { cash: 12,      bank: 0,       debt: 0 },
+      pro:        { cash: 4500,    bank: 22000,   debt: 0 },        // the hitman: paid, quiet, liquid
+      wages:      { cash: 900,     bank: 3200,    debt: 0 },        // the pilot: a salary, not a fortune
+      street:     { cash: 60,      bank: 0,       debt: 0 },
+      underwater: { cash: 0,       bank: 0,       debt: 48000 },    // the debtor
+      warchest:   { cash: 15000,   bank: 0,       debt: 0 },        // the marked man
+    },
+
+    // ---- ARMS: what is on you when the camera hands over control. --------
+    // Names must be REAL catalog entries (city/economy.js's `guns` list). A
+    // "Silenced Pistol" is not one and never was — a suppressor is an
+    // ATTACHMENT in this game (city/gunmods.js), so `quiet` grants an ordinary
+    // pistol and FITS the muzzle device, which is both the truthful model and
+    // the one that actually makes the hitman quiet (fpsmode.js reads
+    // CBZ.gunModsSuppressed every shot).
+    arms: {
+      none:     { guns: [] },
+      pistol:   { guns: ["Pistol"] },
+      quiet:    { guns: ["Pistol"], mods: { pistol: { muzzle: "suppressor" } } },
+      sidearms: { guns: ["Pistol", "SMG"] },
+      full:     { guns: ["Pistol", "SMG", "Shotgun"] },
+    },
+
+    // ---- HEAT: who wants you dead. Binds to actors ALREADY IN THE WORLD. -
+    heat: {
+      none:     { hunters: 0, bounty: 0 },
+      shark:    { hunters: 1, bounty: 0,      collector: true },  // one collector walks at you
+      crew:     { hunters: 3, bounty: 25000 },
+      everyone: { hunters: 12, bounty: 250000, open: true },      // the John Wick rule
+    },
+
+    // ---- VERB: the opening objective, through core/mission.js. -----------
+    // No new objective UI: CLAUDE.md's mission block already owns the HUD
+    // line, the waypoint, the beacon, the phone card and the payout.
+    verb: {
+      descend: { id: "origin_descend", title: "Get to the street", goal: "reach",   reward: 0 },
+      survive: { id: "origin_survive", title: "Stay alive",        goal: "survive", reward: 5000, seconds: 180 },
+      contract:{ id: "origin_hit",     title: "Fulfil the contract", goal: "kill",  reward: 25000 },
+      landit:  { id: "origin_land",    title: "Put it on the ground", goal: "custom", reward: 0 },
+      earn:    { id: "origin_earn",    title: "Make your first $500", goal: "custom", reward: 0 },
+      settle:  { id: "origin_settle",  title: "Pay what you owe",   goal: "custom", reward: 0 },
+      none:    null,
+    },
+  };
+
+  // A motel/cheap-room lot: the hitman's and the debtor's address. Falls back
+  // through the shapes the generator actually produces, so a city that built
+  // no motel still supplies a room rather than dropping the whole story.
+  function findMotelLot() {
+    const A = arena(); if (!A || !A.lots) return null;
+    let motel = null, home = null;
+    for (const lot of A.lots) {
+      if (!lot || !lot.building) continue;
+      const k = lot.kind;
+      if (k === "motel") { motel = lot; break; }
+      if (!home && (k === "home" || k === "house" || k === "tower")) home = lot;
+    }
+    return motel || home;
+  }
+
+  /* ---- THE PRESETS ------------------------------------------------------
+     Frozen rolls. Read one row and you know the whole story — which is the
+     point: the three originals were 120 lines each and you could not. */
+  const PRESETS = {
+    exec:    { who: "exec",    where: "tower_top", purse: "rich_broke", arms: "none",     heat: "none",     verb: "descend" },
+    barfly:  { who: "barfly",  where: "barfront",  purse: "broke",      arms: "none",     heat: "none",     verb: "none" },
+    tenant:  { who: "tenant",  where: "unit",      purse: "nothing",    arms: "pistol",   heat: "none",     verb: "none" },
+    hitman:  { who: "hitman",  where: "motel",     purse: "pro",        arms: "quiet",    heat: "none",     verb: "contract" },
+    pilot:   { who: "pilot",   where: "airborne",  purse: "wages",      arms: "pistol",   heat: "none",     verb: "landit" },
+    hustler: { who: "hustler", where: "corner",    purse: "street",     arms: "none",     heat: "none",     verb: "earn" },
+    debtor:  { who: "debtor",  where: "motel",     purse: "underwater", arms: "none",     heat: "shark",    verb: "settle" },
+    wick:    { who: "wick",    where: "unit",      purse: "warchest",   arms: "full",     heat: "everyone", verb: "survive" },
+  };
+
+  /* ---- THE ROLL ---------------------------------------------------------
+     A random origin is not a random NOISE — an unconstrained roll produces
+     nonsense like a penniless executive with an open contract in a cockpit.
+     The axes are drawn, then three coherence rules run, which is the whole
+     difference between "generated" and "generated and worth playing":
+       1. WHERE follows WHO where the who implies an address (a pilot is in a
+          cockpit, an executive is in a tower) — otherwise it is free.
+       2. HEAT buys ARMS. Nobody is hunted by twelve people and unarmed.
+       3. The VERB must be answerable from the PURSE — you are not asked to
+          settle a debt you do not have. */
+  function pick(obj, rnd) { const k = Object.keys(obj); return k[(rnd() * k.length) | 0]; }
+  function rollOrigin(rnd) {
+    rnd = rnd || Math.random;
+    const comp = {
+      who: pick(AXES.who, rnd), where: pick(AXES.where, rnd), purse: pick(AXES.purse, rnd),
+      arms: pick(AXES.arms, rnd), heat: pick(AXES.heat, rnd), verb: pick(AXES.verb, rnd),
+      generated: true,
+    };
+    // 1. an address the person would actually have
+    if (comp.who === "pilot") comp.where = "airborne";
+    else if (comp.who === "exec") comp.where = "tower_top";
+    else if (comp.where === "airborne") comp.where = "corner";   // only a pilot starts in the air
+    // 2. hunted people are armed
+    const h = AXES.heat[comp.heat];
+    if (h.hunters >= 3 && comp.arms === "none") comp.arms = h.hunters >= 12 ? "full" : "sidearms";
+    // 3. the objective must be answerable
+    const p = AXES.purse[comp.purse];
+    if (comp.verb === "settle" && !(p.debt > 0)) comp.verb = "earn";
+    if (comp.verb === "descend" && comp.where !== "tower_top") comp.verb = "earn";
+    if (comp.verb === "landit" && comp.where !== "airborne") comp.verb = "earn";
+    if (comp.verb === "contract" && comp.arms === "none") comp.arms = "quiet";
+    return comp;
+  }
+  CBZ.cityOriginRoll = rollOrigin;             // exposed for the title screen's re-roll
+  CBZ.cityOriginAxes = function () { return AXES; };
+
+  // A one-line human description of a rolled composition, for the picker card.
+  CBZ.cityOriginDescribe = function (comp) {
+    if (!comp) return "";
+    const w = AXES.who[comp.who] || {}, p = AXES.purse[comp.purse] || {}, h = AXES.heat[comp.heat] || {};
+    const money = p.debt > 0 && !p.cash ? "$" + p.debt.toLocaleString() + " in the hole"
+      : "$" + (p.cash || 0).toLocaleString();
+    const chased = h.open ? "everyone wants you" : h.hunters >= 3 ? "a crew wants you"
+      : h.hunters ? "somebody wants paying" : "nobody knows you";
+    return money + " · " + chased;
+  };
+
+  /* ---- THE PLANE PICKER -------------------------------------------------
+     The PILOT origin opens in the air, and the owner asked for "EVERY PLANE
+     IN GAME AS OPTIONS". This does not maintain a list — a hand-kept list is
+     exactly the thing that goes stale the day somebody adds an airframe. It
+     reads the LIVE registry militaryvehicles.js already keeps
+     (CBZ.cityMilitaryVehicles: the airport's airliners and private jets, the
+     base's fighters, the heavy bomber, the helicopters, and strategic.js's
+     B-2), and every future aircraft appears in the picker the moment it
+     registers, with no edit here. */
+  CBZ.cityOriginPlanes = function () {
+    const out = [];
+    const seen = {};
+    const recs = CBZ.cityMilitaryVehicles || [];
+    for (let i = 0; i < recs.length; i++) {
+      const r = recs[i];
+      if (!r || (r.kind !== "plane" && r.kind !== "heli")) continue;
+      const name = (r.model && r.model.name) || (r.kind === "heli" ? "Helicopter" : "Aircraft");
+      if (seen[name]) continue;
+      seen[name] = 1;
+      out.push({ id: name, name: name, kind: r.kind, rec: r });
+    }
+    return out;
+  };
+  // The title screen stores a NAME, not a record — records do not exist until
+  // the world is built, and the pick is made before that.
+  CBZ.setCityOriginPlane = function (name) { g.cityOriginPlane = name || null; };
+  CBZ.cityOriginPlane = function () { return g.cityOriginPlane || null; };
+
+  /* ---- APPLYING A COMPOSITION -------------------------------------------
+     One function replaces the six grant* functions a six-story registry would
+     otherwise need. */
+  function applyGrants(comp, game) {
+    const W = AXES.who[comp.who] || AXES.who.tenant;
+    const P = AXES.purse[comp.purse] || AXES.purse.nothing;
+    game.cash = P.cash; game.cityBank = P.bank;
+    if (P.debt) game.cityDebt = Math.max(game.cityDebt || 0, P.debt);
+
+    const cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
+    const outfitId = (cat && cat[W.outfit]) ? W.outfit : "street";
+    if (CBZ.cityWearOutfit) CBZ.cityWearOutfit(outfitId, { silent: true });
+
+    // Loadout: the exact reset -> unlock -> fpsReset order mode.js itself
+    // uses, so weapons arrive with clean base mags.
+    const A = AXES.arms[comp.arms] || AXES.arms.none;
+    const guns = A.guns || [];
+    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
+    for (let i = 0; i < guns.length; i++) {
+      if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(guns[i]);
+      else if (CBZ.unlockWeapon) CBZ.unlockWeapon("sidearm", { select: i === 0 });
+    }
+    // Fitted attachments ride the SAME store the mod bench writes
+    // (g.cityGunMods[weaponId] = {scope, mag, muzzle, under}), so a story that
+    // starts you with a suppressed pistol and one you assembled at the bench
+    // are the same state — no second "story weapons" ledger.
+    if (A.mods) {
+      g.cityGunMods = g.cityGunMods || {};
+      for (const wid in A.mods) {
+        const cur = g.cityGunMods[wid] || { scope: null, mag: null, muzzle: null, under: null };
+        const want = A.mods[wid];
+        for (const slot in want) cur[slot] = want[slot];
+        g.cityGunMods[wid] = cur;
+      }
+      if (CBZ.gunModsDressAll) { try { CBZ.gunModsDressAll(); } catch (e) {} }
+    }
+    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
+
+    // HEAT is a real price on your head, on the existing wanted.js channel —
+    // no second bounty ledger (CLAUDE.md bans the parallel-bookkeeping trap).
+    const H = AXES.heat[comp.heat] || AXES.heat.none;
+    if (H.bounty) game.cityBounty = Math.max(game.cityBounty || 0, H.bounty);
+    game._originHunters = H.hunters || 0;
+    game._originOpenContract = !!H.open;
+  }
+
+  /* HEAT, made real. THE BINDING RULE: this never spawns a hunter. It walks
+     the peds the simulation is ALREADY running and flips the ONE field every
+     tactical surface in the game reads — `huntPlayer`, the field
+     systems/markers.js's cityTargetsPlayer() publishes from. Flipping it
+     lights the minimap threat blip, the overhead marker, the HUD and the
+     fullmap for free, and costs no new AI. If the world has not populated
+     yet, the tick below keeps trying until it has. */
+  let heatPending = 0, heatOpen = false, heatT = 0;
+  function armHeat(game) {
+    heatPending = game._originHunters || 0;
+    heatOpen = !!game._originOpenContract;
+    heatT = 0;
+  }
+  function tickHeat(dt) {
+    if (heatPending <= 0 && !heatOpen) return;
+    heatT -= dt;
+    if (heatT > 0) return;
+    // An OPEN contract keeps topping itself up — that is what "everyone is
+    // trying to kill you" means: not twelve enemies, but a world in which
+    // anyone near you may decide today is the day. A closed one arms its
+    // hunters once and is done.
+    heatT = heatOpen ? 6 : 0.5;
+    const peds = CBZ.cityPeds || [];
+    if (!peds.length) { heatT = 1; return; }
+    const P = CBZ.player; if (!P || !P.pos) return;
+    let armed = 0;
+    const want = heatOpen ? 2 : heatPending;
+    for (let i = 0; i < peds.length && armed < want; i++) {
+      const p = peds[(i * 7 + ((heatT * 991) | 0)) % peds.length];
+      if (!p || p.dead || p.huntPlayer > 0 || p.vendor || p.isFamily) continue;
+      if (p._campaignTarget || p._campaignCaptive) continue;
+      const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d2 = dx * dx + dz * dz;
+      // near enough to matter, far enough that they arrive rather than appear
+      if (d2 < 14 * 14 || d2 > 110 * 110) continue;
+      p.huntPlayer = 1;
+      p.hunt = Math.max(p.hunt || 0, 1);
+      // Arm them the way the rest of the game arms an NPC — the four fields
+      // peds.js writes (armed/weapon/ammo) plus the viewmodel sync. There is
+      // no "give an NPC a gun" helper; this IS the idiom (peds.js:2635,3220,
+      // gangs.js:855). A man who already has a gun keeps the one he has.
+      if (!p.armed) {
+        p.armed = true;
+        p.weapon = p.weapon || "Pistol";
+        p.ammo = p.ammo || (12 + ((heatT * 37) | 0) % 18);
+        if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(p); } catch (e) {} }
+      }
+      armed++;
+    }
+    if (!heatOpen) heatPending = Math.max(0, heatPending - armed);
+  }
+
+  /* THE AIRBORNE LAUNCH, retried until an airframe exists.
+
+     `pendingAir` is armed by the PILOT placement below and drained by the
+     origins tick. It gives up after PENDING_AIR_SEC and leaves the player on
+     the ground with a feed line rather than hanging forever on a world that
+     built no aircraft at all (a minimal/headless city). */
+  const PENDING_AIR_SEC = 6;
+  let pendingAir = null;
+
+  function tryAirborne() {
+    if (!pendingAir || !CBZ.cityAirborneStart) return false;
+    const comp = pendingAir.comp;
+    const want = CBZ.cityOriginPlane && CBZ.cityOriginPlane();
+    const planes = CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes() : [];
+    if (!planes.length) return false;
+    // Name match first (the title-screen pick), then a same-class fallback, then
+    // anything that flies — the player asked for a bomber, and being handed a
+    // helicopter because the bomber did not build is better than being handed
+    // a street corner.
+    let choice = null;
+    const wantLc = want ? String(want).toLowerCase() : null;
+    if (wantLc) for (let i = 0; i < planes.length; i++) {
+      if (String(planes[i].id).toLowerCase() === wantLc) { choice = planes[i]; break; }
+    }
+    if (!choice) for (let i = 0; i < planes.length; i++) if (planes[i].kind === "plane") { choice = planes[i]; break; }
+    if (!choice) choice = planes[0];
+    const rec = choice.rec;
+    if (!rec || !rec.pos || rec.destroyed || rec.taken) return false;
+    // Heading: aim at the city, so the opening shot is the skyline coming at
+    // you rather than empty ocean. The arena's own spawn IS the city centre.
+    const A = arena();
+    const tx = (A && A.spawn) ? A.spawn.x : 0, tz = (A && A.spawn) ? A.spawn.z : 0;
+    const hdg = Math.atan2(tx - rec.pos.x, tz - rec.pos.z);
+    const craft = CBZ.cityAirborneStart(rec, {
+      // b2code.html opens at 1,750 m doing 232 m/s. We keep the altitude — it
+      // is what makes the opening read — and pull the speed back to something
+      // a player can actually think inside of on frame one.
+      alt: choice.kind === "heli" ? 420 : 1750,
+      speed: choice.kind === "heli" ? 22 : 150,
+      heading: hdg,
+    });
+    if (!craft) return false;
+    pendingAir = null;
+    if (CBZ.city) CBZ.city.note(choice.name + " · airborne, inbound on the city.", 3.4);
+    try { startVerb(comp); } catch (e) {}
+    return true;
+  }
+
+  function tickAirborne(dt) {
+    if (!pendingAir) return;
+    pendingAir.t += dt;
+    if (tryAirborne()) return;
+    if (pendingAir.t > PENDING_AIR_SEC) {
+      pendingAir = null;
+      if (CBZ.city) CBZ.city.note((AXES.where.airborne.feed) || "You start on the apron.", 3.4);
+    }
+  }
+
+  /* WHERE, made real. Returns the intro opts the camera wants, or null so the
+     caller falls back to the street exactly as the originals do. */
+  function placeComposition(comp, game) {
+    const WH = AXES.where[comp.where] || AXES.where.corner;
+
+    // AIRBORNE — the owner's headline: "you literally start the game in air in
+    // a B2 bomber." Delegated to playeraircraft.js's CBZ.cityAirborneStart so
+    // the heading/velocity convention stays in the file that owns it.
+    if (comp.where === "airborne") {
+      // THE REGISTRY IS NOT UP YET. Aircraft become flyable when
+      // militaryvehicles.js adopts the parked props, and island_airport.js /
+      // island_military.js / strategic.js all do that from a DEFERRED
+      // onUpdate(55.1) pass that has not run when a mode reset applies the
+      // origin. Asking for the plane list here always returned an empty array,
+      // so the pilot silently fell through to a street corner.
+      //
+      // So we do not race it. Stand the player somewhere safe now, arm a
+      // pending launch, and the tick below fires the moment an airframe
+      // exists — which is the very next frame, before the player has control.
+      genericSafeSpawn();
+      pendingAir = { comp: comp, t: 0 };
+      if (!tryAirborne()) return { compact: false, aerial: true, pending: true };
+      return { compact: false, aerial: true };
+    }
+
+    // GROUND — find the lot this story wants and stand the player in it.
+    const lot = WH.find ? WH.find() : null;
+    if (WH.find && !lot) return null;                 // caller prints WH.feed
+    const A = arena(); const P = CBZ.player;
+    let px, pz, floorY = 0.14;
+    if (lot && lot.building) {
+      const b = lot.building;
+      const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
+      // Inside a building we must land on a REAL floor: tower_top rides the
+      // executive floor if the flagship built one, otherwise the ground plate.
+      if (comp.where === "tower_top" && b.execOffice && b.execOffice.floorY != null) floorY = b.execOffice.floorY;
+      else if (comp.where === "unit" && CBZ.cityFloorUnits) {
+        const units = CBZ.cityFloorUnits(lot) || [];
+        if (units.length) floorY = units[0].floorY;
+      }
+      const sp = clearSpot(b, floorY, bx + 1.2, bz + 0.8);
+      px = sp.x; pz = sp.z;
+    } else if (A && A.spawn) {
+      px = A.spawn.x; pz = A.spawn.z;
+      floorY = CBZ.floorAt ? CBZ.floorAt(px, pz) : 0;
+    } else return null;
+
+    P.pos.set(px, floorY, pz); P.vy = 0; P.grounded = true;
+    if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, 0, 0); }
+    if (CBZ.cam) { CBZ.cam.yaw = 0; CBZ.cam.pitch = 0.3; }
+    scene = null;
+    return { compact: comp.where !== "corner" };
+  }
+
+  /* VERB, made real — through core/mission.js, which CLAUDE.md is explicit
+     about: ONE tracked, paid objective primitive that already owns completion
+     detection, the HUD distance line, the map waypoint, the world beacon, the
+     phone card and the payout. We build none of those. And per contracts.js's
+     rule, a `kill` objective BINDS to a ped the world already had — it never
+     spawns a mark. */
+  function startVerb(comp) {
+    const V = AXES.verb[comp.verb];
+    if (!V || !CBZ.mission || !CBZ.mission.start) return;
+    const A = arena();
+    const opts = { id: V.id, title: V.title, goal: V.goal, reward: V.reward || 0 };
+    if (V.goal === "reach") {
+      // the street: the lot's own door at ground level
+      const s = (A && A.spawn) || { x: 0, z: 0 };
+      opts.at = { x: s.x, z: s.z };
+    } else if (V.goal === "survive") {
+      opts.seconds = V.seconds || 180;
+    } else if (V.goal === "kill") {
+      const peds = CBZ.cityPeds || [];
+      let mark = null;
+      for (let i = 0; i < peds.length; i++) {
+        const p = peds[i];
+        if (!p || p.dead || p.vendor || p.isFamily || p._campaignTarget) continue;
+        mark = p; break;
+      }
+      if (!mark) return;                     // the world could not supply one — no fake contract
+      opts.actor = mark;
+      opts.title = "Contract: " + (mark.name || "the mark");
+    }
+    try { CBZ.mission.start(opts); } catch (e) {}
+  }
+
+  // The ONE entry a composed origin runs through. Grants land unconditionally
+  // (defect #3 above — the character's story must survive a failed lot roll),
+  // the placement is best-effort, and the verb only arms once we are somewhere.
+  function runComposition(comp, game) {
+    applyGrants(comp, game);
+    armHeat(game);
+    let opts = null;
+    try { opts = placeComposition(comp, game); } catch (e) { try { console.error("[origin] place failed", e); } catch (e2) {} }
+    if (opts) { try { startVerb(comp); } catch (e) {} }
+    return opts;
+  }
+
+  // Register every preset into the SAME registry the three originals live in,
+  // so the vault, the [U] wheel and the dispatcher — all of which already walk
+  // Object.keys(ORIGINS) — pick them up with no further edit. The three
+  // originals keep their hand-written scenes (they are better than a generated
+  // one and the owner likes them); the new stories run the generator.
+  (function registerComposed() {
+    const NEW = ["hitman", "pilot", "hustler", "debtor", "wick"];
+    for (let i = 0; i < NEW.length; i++) {
+      const id = NEW[i], comp = PRESETS[id], W = AXES.who[comp.who];
+      ORIGINS[id] = {
+        meta: { icon: "", name: W.name, blurb: W.blurb },
+        composition: comp,
+        get tuning() { return { missedLotFeed: (AXES.where[comp.where] || {}).feed || "" }; },
+        findSpawn: function () { const f = (AXES.where[comp.where] || {}).find; return f ? f() : null; },
+        grants: function (game) { applyGrants(comp, game); armHeat(game); },
+        scene: function (game) {
+          let o = null;
+          try { o = placeComposition(comp, game); } catch (e) { o = null; }
+          if (o) { try { startVerb(comp); } catch (e) {} }
+          return o;
+        },
+      };
+      IDS[id] = 1;
+    }
+    // RANDOM: not a preset — a fresh roll every time it is selected, persisted
+    // onto the character's ledger so the person you rolled stays that person.
+    ORIGINS.random = {
+      meta: { icon: "", name: "Roll The Dice", blurb: "a life this city has not run before" },
+      get tuning() { return { missedLotFeed: "However it was meant to start, it starts on the street." }; },
+      findSpawn: function () { return null; },
+      grants: function (game) {
+        const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
+        let comp = (w && w.originRoll) || null;
+        if (!comp) { comp = rollOrigin(); if (w) w.originRoll = comp; }
+        game._originComp = comp;
+        applyGrants(comp, game); armHeat(game);
+      },
+      scene: function (game) {
+        const comp = game._originComp || rollOrigin();
+        let o = null;
+        try { o = placeComposition(comp, game); } catch (e) { o = null; }
+        if (o) { try { startVerb(comp); } catch (e) {} }
+        return o;
+      },
+    };
+    IDS.random = 1;
+  })();
+
   // ---------------------------------------------------------------
   // dispatch + public contract
   // ---------------------------------------------------------------
@@ -1141,7 +1661,10 @@
     wheelEl.id = "originWheel";
     wheelEl.style.cssText =
       "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
-      "min-width:340px;background:rgba(12,14,18,.94);border:1px solid #2c3340;border-radius:14px;" +
+      // max-height + scroll: the roster went from three lives to nine, and a
+      // fixed-height modal centred on the viewport simply ran off the top and
+      // bottom of a laptop screen once it did.
+      "min-width:340px;max-height:78vh;overflow-y:auto;background:rgba(12,14,18,.94);border:1px solid #2c3340;border-radius:14px;" +
       "padding:14px 16px;color:#e8edf4;font:600 14px/1.35 system-ui,sans-serif;box-shadow:0 18px 60px rgba(0,0,0,.55);";
     document.body.appendChild(wheelEl);
     fadeEl = document.createElement("div");
@@ -1262,10 +1785,35 @@
   //      — irrelevant here since our raid cops are deliberately spliced OUT
   //      of CBZ.cityCops so the live police AI never touches them). ----
   CBZ.onUpdate(37, function (dt) {
+    // HEAT runs whether or not a scripted scene is live — a hunted origin is
+    // a standing condition of the character, not a beat that finishes. It is
+    // its own guard clause so a story with no heat costs one comparison.
+    if (g.mode === "city" && g.state === "playing") { tickHeat(dt); tickAirborne(dt); }
     if (!scene) return;
     if (g.mode !== "city") { clearScene(); return; }
     if (g.state !== "playing") return;
     if (scene.kind === "exec") tickExec(dt);
     else if (scene.kind === "barfly") tickBarfly(dt);
   });
+
+  /* ---- THE ORIGIN RATCHET ------------------------------------------------
+     `bespoke` counts stories still carrying a hand-written scene function
+     instead of running through the composition generator. It started at 3
+     (exec / barfly / tenant, which are genuinely better hand-written and are
+     allowed to stay) and may only ever go DOWN — the point of the number is
+     that the SEVENTH story must not add a fourth. */
+  CBZ.cityOriginAudit = function () {
+    let bespoke = 0, composed = 0;
+    for (const k in ORIGINS) {
+      if (k === "random") continue;
+      if (ORIGINS[k].composition) composed++; else bespoke++;
+    }
+    return {
+      stories: Object.keys(ORIGINS).length,
+      composed: composed, bespoke: bespoke,
+      axes: Object.keys(AXES).length,
+      planes: CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes().length : 0,
+      heatPending: heatPending, heatOpen: heatOpen,
+    };
+  };
 })();
