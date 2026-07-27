@@ -2098,7 +2098,28 @@
           const rr = Math.hypot(nx - FIELD_CX, nz - FIELD_CZ);
           if (rr < AQUATIC_R0 || rr > AQUATIC_R1) a.heading += Math.PI * 0.6;
           else { grp.position.x = nx; grp.position.z = nz; }
-          grp.position.y = Math.sin(a.bob) * 0.12 * (sp.scale || 1);
+          // THE FLOATING SHARK (owner: "sharks go out of water, they float
+          // OVER water instead of being under it — the fins look real but then
+          // the shark looks like it is FLYING ABOVE ITS FIN, it's dumb
+          // physics"). This line was the whole bug.
+          //
+          // It bobs the body around y = 0 and never asks where the water is or
+          // how deep this species swims. Mean sea level is -0.48, so y ~= 0 is
+          // roughly half a metre ABOVE the waterline — the body rides on top of
+          // the sea. Meanwhile wildlife_shark.js's fin proxy draws itself at the
+          // REAL surface, correctly. Two different answers to "where is the
+          // water", so the body hovers above its own fin.
+          //
+          // The branch above (the navigable-water path) always had it right:
+          // surface minus swimDepth. This fallback simply never got the same
+          // treatment. Same law both sides now — a shark is UNDER the sea by
+          // its own body depth, wherever the sea happens to be this frame,
+          // surge included (CBZ.waterSeaY is live).
+          const fbSurf = CBZ.citySeaHeightAt
+            ? CBZ.citySeaHeightAt(grp.position.x, grp.position.z)
+            : (CBZ.waterSeaY ? CBZ.waterSeaY() : -0.48);
+          grp.position.y = fbSurf - (a.swimDepth || aquaticBodyDepth(sp))
+            + Math.sin(a.bob) * 0.12 * (sp.scale || 1);
         }
         faceAnimalHeading(grp, a.heading);
         if (LIVE()) animateSwim(a, dt);               // the shared tail/fluke beat

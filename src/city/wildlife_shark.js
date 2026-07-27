@@ -63,7 +63,14 @@
   const CIRCLE_R = 26;          // u — inside this it stops closing and starts orbiting
   const ORBIT_R = 18;           // u — the orbit it holds while it decides
   const CIRCLE_T = 6.5;         // s  — base time spent circling (predatorHunt jitters it)
-  const SHOW_F = 0.18;          // fraction of SENSE_R inside which the BODY is visible
+  // OWNER: "I want to see scary ass sharks." At 0.18 the BODY only rendered
+  // inside 110 * 0.18 = 20 units — so unless a shark was practically on top of
+  // you, all you ever got was a fin and an empty sea. The fin is the dread cue,
+  // but you have to eventually SEE the animal or the dread never pays off; a
+  // horror that never shows the monster is just an empty room. 0.62 puts the
+  // body on screen from ~68u, which is far enough to watch one come at you and
+  // still short enough that the LOD budget holds.
+  const SHOW_F = 0.62;          // fraction of SENSE_R inside which the BODY is visible
   const FIN_F = 1.25;           // fin/wake proxy draws inside SENSE_R * this
   const BUMP_DMG = 6;           // the investigatory shoulder-nudge
   const HOLD_S = 2.6;           // seize duration
