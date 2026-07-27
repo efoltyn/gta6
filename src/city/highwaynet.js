@@ -134,9 +134,8 @@
     const foundryMouthX = -380, foundryRowZ = 225 + FND.dz;  // minicities foundry road plug
 
     // ---- the loop's free-country lanes (verified ≥40m clear of every
-    //      registered footprint incl. Greater Mercy (z≤-1780) and the
-    //      nations (kesh towns x≥2255, solara x≥2770) — the build-time
-    //      clearance sweep below re-proves this every build) ---------------
+    //      registered footprint incl. Greater Mercy and the nations — the
+    //      build-time clearance sweep below re-proves this every build) -----
     // WORLD_LAYOUT_V2 MOVED THE LAND UNDERNEATH THESE. Every DOCK in this file
     // derives from CBZ.worldOff and therefore followed its landmass when the
     // stage-3 spread pushed the regions apart — but these seven free-country
@@ -144,15 +143,42 @@
     // they stayed put while the continents moved out from under them. The
     // build-time clearanceSweep below only console.warns, so nothing threw:
     // route R1 simply began cutting through Fort Brandt, the Saltlands, Coyle
-    // Valley and the speedway, silently. Re-measured against the final
-    // geometry (the six new sweep warnings are what found them).
-    const timberX = -400;                      // forest(maxX -470)/snow(minX -70) corridor — unmoved
-    const corridorZ = -1415;                   // forest/military gap (was -1160)
-    const westX = -1960;                       // west of neonreef/foundry (was -1560)
-    const southZ = 1230;                       // south of goldspire/desert (was 880)
-    const eastX = 2560;                        // east of desert/farmland (was 2130)
-    const foothillZ = -3250;                   // south of Greater Mercy, now 2.06km north (was -1750)
-    const dunesX = 1200;                       // snow/desert gap (was 1000)
+    // Valley and the speedway, silently.
+    //
+    // WORLD_SCALE_V4 MOVED IT AGAIN — AND THIS TIME THE BIOMES GREW TOO, so a
+    // lane that was 40 m clear of a rect could be inside it without the rect
+    // having moved at all. All seven are re-measured below against the stage-4
+    // geometry, each showing the two edges it threads between; the eighth
+    // literal (R5's dog-leg) and R7's crossing z are re-derived further down.
+    // A lane is chosen as the MIDPOINT of the corridor it runs in wherever the
+    // corridor has two sides, so the next world move has the largest possible
+    // margin before it needs this table again.
+    // The STAGE layout.js resolved to, not the raw flag — WORLD_SCALE_V4 rides
+    // on top of WORLD_LAYOUT_V2, and a stage-2 world must keep stage-2 lanes.
+    const V4 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 4;
+    //  name        stage-4 value   the corridor it threads (stage-4 world AABBs)
+    //  timberX      -560   forest maxX -894 .. snow minX -196; also >= 273 off
+    //                      the mainland harbour band (x -165 +- 97) and inside
+    //                      the Brandt deck's x-span (-1280 .. -133).
+    //  corridorZ   -1600   forest maxZ -1771 .. military minZ -1430 (midpoint
+    //                      -1600.5): 151 m clear of the trees, 150 of the base.
+    //  westX       -2380   west of foundry minX -2245 and neonreef minX -2240
+    //                      by 115/120 m, and 1734 m east of mbeya_east -4114.
+    //  southZ       1650   south of goldspire maxZ 1490 by 140 m (the civic
+    //                      campus ends at 1378) and 448 m south of the desert.
+    //  eastX        3700   east of farmland maxX 3200 (480 m) and desert maxX
+    //                      3124 (556), west of keshtown minX 4200 (488).
+    //  foothillZ   -3400   south of Greater Mercy maxZ -4279 by 879 m, north of
+    //                      farmland minZ -2570 by 810.
+    //  dunesX       1300   snow maxX 896 .. desert minX 1716: 392 m of dune and
+    //                      404 m of snowfield either side.
+    const timberX = V4 ? -560 : -400;          // forest/snow corridor
+    const corridorZ = V4 ? -1600 : -1415;      // forest/military gap
+    const westX = V4 ? -2380 : -1960;          // west of neonreef/foundry
+    const southZ = V4 ? 1650 : 1230;           // south of goldspire/desert
+    const eastX = V4 ? 3700 : 2560;            // east of desert/farmland
+    const foothillZ = V4 ? -3400 : -3250;      // south of Greater Mercy
+    const dunesX = V4 ? 1300 : 1200;           // snow/desert gap
 
     // Deck endpoints stop FLUSH at the docked deck's edge (±HALF); the road
     // RECORD extends to the docked road's centreline (recA/recB) so
@@ -209,6 +235,12 @@
           { x: westX + HALF, z: -700 },                  // T flush onto Route 1's west deck
           // -1500, not -1200: WORLD_LAYOUT_V2 widened Fort Brandt's span to
           // x[-1420,-940], so the old dog-leg ran straight through the base.
+          // RE-MEASURED for WORLD_SCALE_V4 and deliberately UNCHANGED: the base
+          // moved to x[-1760,-1280] z[-1430,-930], so -1500 is now inside its
+          // x-span — but this leg runs z -700..-420, which is 230 m SOUTH of
+          // the base's southern edge, so it never meets it. What the leg does
+          // have to clear is the airport (x[-1120,70] z[-280,40]): the turn
+          // east at z -420 passes 120 m north of its apron. Both hold.
           { x: -1500, z: -700 },
           { x: -1500, z: -420 },
           { x: halloranX - HALF, z: -420 },              // dock: Halloran causeway west edge
@@ -229,12 +261,19 @@
       },
       {
         id: "R7", name: "Mercy Connector", width: 24, lanesPerDir: 3, fillet: 60,
+        // THE EIGHTH LITERAL, NOW DERIVED. This crossing was authored as
+        // z = -1000, which is the value `brandtZ` happened to have when it was
+        // written — i.e. it is the Brandt causeway's own centreline, the south
+        // end of Route 1's first leg, and it only looked like a constant. Left
+        // as -1000 a world move would have floated this connector off the leg
+        // it T's into and off the Mercy lane it docks against. It is the same
+        // number in the stage-3 world, so this changes nothing there.
         pts: [
-          { x: timberX + HALF, z: -1000 },               // T flush onto Route 1's first leg
-          { x: mercyX - HALF, z: -1000 },                // dock: Mercy causeway west edge
+          { x: timberX + HALF, z: brandtZ },             // T flush onto Route 1's first leg
+          { x: mercyX - HALF, z: brandtZ },              // dock: Mercy causeway west edge
         ],
         recA: timberX, recB: mercyX,
-        docks: [{ x: mercyX, z: -1000, note: "Mercy causeway" }],
+        docks: [{ x: mercyX, z: brandtZ, note: "Mercy causeway" }],
       },
     ];
   }

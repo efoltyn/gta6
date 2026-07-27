@@ -63,7 +63,24 @@
   // default for a build without it). Consumed once, at the Pinecrest seed.
   if (CFGS.WORLD_LAYOUT_V2 == null) CFGS.WORLD_LAYOUT_V2 = true;
   const LAYOUT_V2 = function () { return CFGS.WORLD_LAYOUT_V2 !== false; };
-  const CX = 350 + DX, CZ = -1450 + DZ, HX = 420, HZ = 330;
+  // The half-extents come from world/layout.js (CBZ.worldFoot), which owns the
+  // authored anchor, the dial AND the stage-4 footprint scale. This biome is
+  // the one that had a hand-copy living somewhere else: terrain_overhaul.js
+  // re-typed `SNOW_CX = 350 + dx, SNOW_HX = 420, SNOW_NZ = -1780 + dz` to aim
+  // the whole backdrop range, and that copy would have gone stale the moment
+  // the snow country scaled — the mountains would stand behind a country that
+  // had grown out from under them. It reads the same published rect now.
+  //
+  // SNOW TAKES THE SMALLEST SCALE IN THE WORLD (1.30) on purpose: every peak,
+  // piste knuckle, lift line and lodge pad in Mount Mercy is an authored
+  // literal in the stage-1 frame, so growing this rect grows the WHITE COUNTRY
+  // around a fixed massif — which is what we want (more snowfield, same
+  // mountain) but is not something to be greedy with. It also drags the
+  // Greater Mercy envelope, whose south edge IS this rect's north edge.
+  const _SFOOT = (CBZ.worldFoot && CBZ.worldFoot("snow")) ||
+    { cx: 350 + DX, cz: -1450 + DZ, hx: 420, hz: 330 };
+  const CX = _SFOOT.cx, CZ = _SFOOT.cz, HX = _SFOOT.hx, HZ = _SFOOT.hz;
+  const FSC = (CBZ.worldFootScale && CBZ.worldFootScale("snow")) || 1;   // linear footprint scale
   const MINX = CX - HX, MAXX = CX + HX;     // world (authored -70 .. 770)
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;     // world (authored -1780 .. -1120)
   const A_MINX = MINX - DX, A_MAXX = MAXX - DX;   // authored-frame bounds
@@ -1192,7 +1209,10 @@
       if (CBZ.makeBiomeEdgeRing) {
         CBZ.makeBiomeEdgeRing(root, {
           cx: CX, cz: CZ, hx: HX + 20, hz: HZ + 20, feather: 20, segments: 20,
-          spread: { west: 220, east: 230, north: 430, south: 220 },
+          // Rides the footprint scale: with BIOME_ORGANIC_EDGES on this field
+          // is what says "snow" outside the rect, and it is what the backdrop
+          // ranges (world/terrain_overhaul.js snowSector) stand behind.
+          spread: { west: 220 * FSC, east: 230 * FSC, north: 430 * FSC, south: 220 * FSC },
           inner: 0xe1e8e8, outer: 0x9fb2a8, featherNorm: 0.30,
           y: 0.006, seed: 0x53170, owner: "snow",
         });
@@ -2075,11 +2095,19 @@
           guardrail: false, elevated: false, rng: rng,
           heightAt: CBZ.terrainHeight,
         });
-        // snow berms flanking the wider deck (visual edge + read)
+        // snow berms flanking the wider deck (visual edge + read). The EAST
+        // berm is split around z=-950: the Ironjaw causeway (arena_fights.js)
+        // T-junctions into this deck there, and an unbroken berm would stand
+        // 0.2 m proud across the junction mouth.
         for (const ex of [cxMid - 13.2, cxMid + 13.2]) {
-          const berm = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, rMaxZ - rMinZ), mSnowShade);
-          berm.position.set(ex, 0.3, (rMinZ + rMaxZ) / 2);
-          berm.receiveShadow = true; root.add(berm);
+          const runs = (ex > cxMid) ? [[rMinZ, -966], [-934, rMaxZ]] : [[rMinZ, rMaxZ]];
+          for (const seg of runs) {
+            const z0 = seg[0], z1 = seg[1];
+            if (z1 - z0 <= 0) continue;
+            const berm = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, z1 - z0), mSnowShade);
+            berm.position.set(ex, 0.3, (z0 + z1) / 2);
+            berm.receiveShadow = true; root.add(berm);
+          }
         }
         return;
       }

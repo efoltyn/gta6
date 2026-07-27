@@ -1135,11 +1135,47 @@
       hx: (rg.maxX - rg.minX) / 2, hz: (rg.maxZ - rg.minZ) / 2, round: 0.72,
     };
   }
+  // ---- THE DRAWN COAST IS THE REAL ONE (BIOME_ORGANIC_EDGES) --------------
+  // A natural biome's functional edge is a domain-warped contour, not its
+  // rect (city/worldmap.js cityBiomeAt). This outline used to be a
+  // superellipse with a 5.5% cosmetic wobble — decorative irregularity over
+  // a shape the world no longer uses, so the chart and the ground disagreed
+  // about where the desert stops. Where the biome declared an organic
+  // footprint we trace the SAME field the world reads, at the SAME 0.42
+  // threshold, so a player reading the map is reading the terrain.
+  function coastSpecFor(rg) {
+    if (CBZ.CONFIG && CBZ.CONFIG.BIOME_ORGANIC_EDGES === false) return null;
+    if (!CBZ.biomeBlendWeightAt || !rg || !rg.biome || rg.kind === "circle") return null;
+    const A = CBZ.city && CBZ.city.arena;
+    const specs = (A && A.biomeBlends) || CBZ._biomeBlendSpecs;
+    if (!specs) return null;
+    for (let i = 0; i < specs.length; i++) if (specs[i] && specs[i].biome === rg.biome) return specs[i];
+    return null;
+  }
+  // How far out along this bearing does the biome still win? Bisection on the
+  // live weight, floored at the rect (worldmap's law: the authored floor mesh
+  // is always its own biome, so the drawn coast may bulge OUT of the rect and
+  // never bite into it) and capped at 1.55x so a biome whose land-cover spread
+  // runs for kilometres still draws as a landmass and not a smear over its
+  // neighbours — the FILL layer already carries the full spread.
+  const COAST_REACH = 1.55, COAST_STEPS = 9;
+  function coastOut(spec, cx, cz, ux, uz, hx, hz) {
+    function w(m) { return CBZ.biomeBlendWeightAt(spec, cx + ux * hx * m, cz + uz * hz * m); }
+    if (w(COAST_REACH) >= 0.42) return COAST_REACH;
+    if (w(1) < 0.42) return 1;
+    let lo = 1, hi = COAST_REACH;
+    for (let k = 0; k < COAST_STEPS; k++) {
+      const mid = (lo + hi) * 0.5;
+      if (w(mid) >= 0.42) lo = mid; else hi = mid;
+    }
+    return lo;
+  }
   function coastPath(rg, p) {
     let path = coastCache.get(rg);
     if (path) return path;
     const g = regionGeo(rg);
     const noise = coastNoise(hashStr(rg.name || rg.biome || (g.cx + "," + g.cz)));
+    const spec = coastSpecFor(rg);
     const N = 150;
     path = new Path2D();
     for (let i = 0; i <= N; i++) {
@@ -1148,7 +1184,10 @@
       // superellipse: round=1 → circle, round≈0.72 → rounded rectangle
       const ux = Math.sign(co) * Math.pow(Math.abs(co), g.round);
       const uz = Math.sign(si) * Math.pow(Math.abs(si), g.round);
-      const wob = 1 + 0.055 * (noise(t) + 0.18);   // biased outward so edge POIs stay on land
+      // biased outward so edge POIs stay on land; the traced contour supplies
+      // its own irregularity, so the cosmetic wobble is only the fallback's.
+      const wob = spec ? coastOut(spec, g.cx, g.cz, ux, uz, g.hx, g.hz)
+        : 1 + 0.055 * (noise(t) + 0.18);
       const x = p.x(g.cx + ux * g.hx * wob), y = p.z(g.cz + uz * g.hz * wob);
       if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
     }

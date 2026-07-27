@@ -321,10 +321,37 @@
   // FOLLOWS THE SNOW DIAL FULLY (world/layout.js CBZ.worldOff("snow") — both
   // axes): the window and the north-shore line ride the offset, so moving the
   // snow island drags every backdrop range with it.
+  // THE SNOW COUNTRY'S RECT, ASKED FOR RATHER THAN RE-TYPED. These three
+  // numbers were biome_snow.js's `CX`, `HX` and `CZ - HZ` copied by hand into
+  // this file — the whole backdrop composition is aimed with them, and this
+  // file parses ~300 script tags BEFORE biome_snow.js, which is exactly why
+  // the copy existed. world/layout.js (which parses FIRST, and which owns the
+  // dial and the footprint scale that produce the rect) publishes it instead,
+  // so the ranges follow a snow country that moves OR grows. The old literals
+  // are the degrade-safe fallback and nothing else reads them.
   const _SNOWOFF = (CBZ.worldOff && CBZ.worldOff("snow")) || { dx: 0, dz: 0 };
-  const SNOW_CX = 350 + _SNOWOFF.dx, SNOW_HX = 420;
-  const SNOW_NZ = -1780 + _SNOWOFF.dz;   // the snow country's NORTH shore (world z)
+  const _SNOWFOOT = (CBZ.worldFoot && CBZ.worldFoot("snow")) || null;
+  const SNOW_CX = _SNOWFOOT ? _SNOWFOOT.cx : (350 + _SNOWOFF.dx);
+  const SNOW_HX = _SNOWFOOT ? _SNOWFOOT.hx : 420;
+  const SNOW_NZ = _SNOWFOOT ? _SNOWFOOT.minZ : (-1780 + _SNOWOFF.dz);   // north shore (world z)
   const SNOW_ONLY = () => CFG.TERRAIN_SNOW_ONLY_RANGES !== false;
+  // ---- BIOME_ORGANIC_EDGES MARGIN ----------------------------------------
+  // With organic edges on, "is this cell snow" stops being a rectangle test
+  // and becomes a domain-warped one (city/worldmap.js). The whole doctrine
+  // this file enforces — relief exists ONLY where the world reads snow — is
+  // therefore keyed to a boundary that now moves, so the margin is stated
+  // rather than assumed: the first metre of offshore relief starts one warp
+  // amplitude FURTHER NORTH than it used to. 110 u against a 7.4 km ring
+  // radius is free, and the direction is the safe one (less relief, further
+  // out) whichever way the warp happens to fall on a given seed.
+  //
+  // The X WINDOW IS DELIBERATELY NOT NARROWED. worldmap.js's law is that the
+  // warp may hand a rect point to a NEIGHBOURING biome that genuinely
+  // dominates it, or extend a biome outward — never punch a hole — and the
+  // nearest other biome to this one is Redhollow Forest, 982 u away. Snow
+  // classification inside and around this window can therefore only ever GROW,
+  // so narrowing the window would cost visible backdrop for no safety at all.
+  const SNOW_WARP = (CFG.BIOME_ORGANIC_EDGES === false) ? 0 : 110;
   // 1 inside the snow country's X-span (feathered), 0 beyond.
   function snowWindowX(x) {
     const f = 240;
@@ -337,7 +364,7 @@
   // the snow island's side, far from every city, from any angle).
   function snowSector(x, z) {
     if (!SNOW_ONLY()) return 1;
-    return snowWindowX(x) * smooth(60, 420, SNOW_NZ - z);
+    return snowWindowX(x) * smooth(60 + SNOW_WARP, 420 + SNOW_WARP, SNOW_NZ - z);
   }
   let RANGE_WEST_X = CX - 850;
   let RANGE_EAST_X = CX + 1050;

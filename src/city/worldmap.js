@@ -392,16 +392,99 @@
     return best;
   };
 
+  /* ==================================================================
+     BIOME_ORGANIC_EDGES — "i want to make them more intentional"
+
+     OWNER: "right now we have these square biomes basically."
+
+     He is describing something exact. The ORGANIC field has existed for a
+     long time (registerBiomeBlend / biomeBlendWeightAt above): a
+     domain-warped superellipse per biome, deterministic off CBZ.hash01,
+     and it already decides the LAND COVER COLOUR baked into the continent
+     plate and the fill on the full map. But the FUNCTIONAL edge — the
+     answer this function gives to traction, weather, wildlife, snowfall,
+     spawn homes and every audit — came off `cityAnyRegion`, a rectangle
+     test. So the world was painted with an irregular coastline of biomes
+     and then simulated as four rectangles, and where those two disagreed
+     the rectangle won. That disagreement IS the complaint.
+
+     THE LAW, and both halves matter:
+
+       OUTSIDE a rect, the blend claims land out to its own reach. This is
+       what makes a biome big and irregular, and it is where nearly all the
+       visible change is: every biome is surrounded by wilds, so its outer
+       boundary becomes the warp's contour instead of a ruler line.
+
+       INSIDE a rect, the blend may hand the point to a NEIGHBOURING biome
+       that genuinely dominates it — that is what makes a shared seam warp
+       BOTH ways — but it may never hand it to nothing. A biome's rect is a
+       real, authored, painted floor mesh; a hole punched in it by a noise
+       field would be a lie about ground the player can see, and it would
+       let a cell carrying that biome's own terrain (Mount Mercy's massif
+       is the live example) report as unclassified. So the rect answer is
+       the FLOOR, never the ceiling.
+
+     Cost is one blend evaluation on points that already fell through to
+     one, plus one on points inside a biome rect — the same call the land
+     cover makes per plate vertex, so it is a known price. Degrade-safe:
+     no blend registry, or the flag off, and this is the old function.
+     Revert: CBZ.CONFIG.BIOME_ORGANIC_EDGES = false.
+  ================================================================== */
+  const CFGW = (CBZ.CONFIG = CBZ.CONFIG || {});
+  if (CFGW.BIOME_ORGANIC_EDGES == null) CFGW.BIOME_ORGANIC_EDGES = true;
+  // A "natural" biome is one that owns ground rather than a facility: only
+  // those register a blend, so the test is simply "did this biome declare an
+  // organic footprint" — no name list, and a new biome is covered for free.
+  function blendFor(specs, biome) {
+    if (!biome || !specs) return null;
+    for (let i = 0; i < specs.length; i++) if (specs[i] && specs[i].biome === biome) return specs[i];
+    return null;
+  }
+  // How far INSIDE its own rect is this point? (0 on the boundary.) The
+  // neighbour test only runs inside a band of the edge — deep interior keeps
+  // the single-compare rect answer, which is what keeps this affordable in a
+  // function every ped, weather tick and audit sweep calls.
+  function insideDepth(reg, x, z) {
+    if (reg.kind === "circle") return (reg.r + (reg.pad || 0)) - Math.hypot(x - reg.cx, z - reg.cz);
+    const p = reg.pad || 0;
+    return Math.min(x - (reg.minX - p), (reg.maxX + p) - x,
+                    z - (reg.minZ - p), (reg.maxZ + p) - z);
+  }
+  // The band is the warp's own reach — biomeBlendWeightAt displaces the query
+  // point by up to `min(hx,hz)*0.13` and jitters the contour by another ~0.11
+  // of it, so a seam can only wander that far. Clamped to 90..260 u: below the
+  // floor a small biome would get a hard edge again, above the ceiling we
+  // would be paying for interior samples no neighbour can ever reach (the
+  // closest two biomes in this world are 600 u apart).
+  function seamBand(spec) {
+    if (!spec) return 0;
+    const s = Math.min(spec.hx || 300, spec.hz || 300);
+    return Math.max(90, Math.min(260, s * 0.24 + 40));
+  }
+
   // which biome is a point in? (peds/weather/ambient can flavour by terrain)
   CBZ.cityBiomeAt = function (x, z) {
     const A = CBZ.city && CBZ.city.arena; if (!A) return "city";
     const reg = CBZ.cityAnyRegion(A, x, z, 0);
+    const specs = A.biomeBlends || CBZ._biomeBlendSpecs;
     // Authored facilities/biome cores keep priority. The late continent's
     // "wilds" bands are only ownership underlay, so allow the organic biome
     // influence to extend through them. This makes the enlarged land cover
     // real to traction, weather, wildlife and snowfall—not merely a paint job.
-    if (reg && reg.biome && reg.biome !== "wilds") return reg.biome;
-    const hit = CBZ.biomeBlendDominantAt(A.biomeBlends || CBZ._biomeBlendSpecs, x, z);
+    if (reg && reg.biome && reg.biome !== "wilds") {
+      // INSIDE A RECT: only a NEIGHBOUR may take it, and only if it genuinely
+      // dominates here. A facility with no organic footprint of its own (an
+      // airport, a speedway, a town) is never overruled — those are buildings,
+      // not ground cover, and the warp has no business inside them.
+      if (CFGW.BIOME_ORGANIC_EDGES === false || !CBZ.biomeBlendDominantAt) return reg.biome;
+      const own = blendFor(specs, reg.biome);
+      if (!own) return reg.biome;
+      if (insideDepth(reg, x, z) > seamBand(own)) return reg.biome;   // deep interior: fast path
+      const near = CBZ.biomeBlendDominantAt(specs, x, z);
+      if (near && near.biome !== reg.biome && near.weight >= 0.42) return near.biome;
+      return reg.biome;
+    }
+    const hit = CBZ.biomeBlendDominantAt(specs, x, z);
     if (hit && hit.weight >= 0.42) return hit.biome;
     return reg && reg.biome ? reg.biome : "city";
   };

@@ -184,6 +184,18 @@
   // below only mirrors the default for a build without layout.js.
   if (CFG.WORLD_LAYOUT_V2 == null) CFG.WORLD_LAYOUT_V2 = true;
   const LAYOUT_V2 = function () { return CFG.WORLD_LAYOUT_V2 !== false; };
+  // WORLD_SCALE_V4 (same owner, world/layout.js) — the biomes themselves grew.
+  // Two numbers in this file are answerable for it: the plate's sanity roof and
+  // its segment count. Same mirror-only guard.
+  if (CFG.WORLD_SCALE_V4 == null) CFG.WORLD_SCALE_V4 = true;
+  // The STAGE layout.js resolved to when it is present (it rides on top of
+  // WORLD_LAYOUT_V2 and WORLD_ENLARGE_V2, so the raw flag is not the answer);
+  // the flag pair is the fallback for a build without layout.js.
+  const SCALE_V4 = function () {
+    return CBZ.WORLD_LAYOUT_STAGE != null
+      ? CBZ.WORLD_LAYOUT_STAGE >= 4
+      : (LAYOUT_V2() && CFG.WORLD_SCALE_V4 !== false);
+  };
 
   /* ==================================================================
      CBZ.worldLayoutAudit() — THE WORLD LAYOUT AS NUMBERS.
@@ -428,7 +440,13 @@
     // 13500 with the layout flag (still ~1.3k of headroom, and the plate's
     // vertex count is fixed at (SEG+1)^2 regardless of W, so a wider plate
     // costs resolution, never memory). Flag off = the authored 12000.
-    const W_ROOF = LAYOUT_V2() ? 13500 : 12000;
+    //
+    // STAGE 4 (WORLD_SCALE_V4) re-measures it, because "silently delete the
+    // entire continent" is exactly what a stale roof does and this world got
+    // 1.6x wider. The union is now mbeya_west (-4766) to solara (4730) =
+    // 9496 u, so W = 9496 + 2x2200 = 13896 and D = 8245 + 4400 = 12645.
+    // 15500 keeps the same ~1.6k of headroom the stage-3 roof had.
+    const W_ROOF = SCALE_V4() ? 15500 : (LAYOUT_V2() ? 13500 : 12000);
     if (!isFinite(W) || W <= 0 || W > W_ROOF) return;
 
     function insideAnything(x, z, margin) {
@@ -697,7 +715,23 @@
     // whole point of the flat band is that it is at least one PLATE CELL wide,
     // so BOTH vertices of a triangle straddling a kerb read zero relief and the
     // green can no longer climb through the asphalt between them.
-    const PLATE_SEG = COAST ? 320 : 72;
+    // THE SEGMENT COUNT IS DERIVED FROM THE CELL, NOT TYPED. 320 was measured
+    // against a 12156 u plate — i.e. it is really the statement "a plate cell
+    // is ~38 m". Left as a literal it would silently COARSEN as the world grew
+    // (stage 4's 13896 u plate would run 43 m cells), and everything downstream
+    // rides the cell: BUILT_FLAT below is one cell wide by construction, the
+    // physics floor samples this grid, and the drawn ground's faceting IS this
+    // number. So the cell is the constant and the segments follow it, rounded
+    // to a multiple of 8 and capped so a runaway region can never ask for a
+    // million-triangle plate.
+    //   stage 3: max(12156, 11365)/38 = 320  (byte-identical — the cap and the
+    //            rounding both land exactly on the authored value)
+    //   stage 4: max(13896, 12645)/38 = 366  ->  368  (cells 37.8 x 34.4 m,
+    //            369^2 = 136k verts, 271k triangles)
+    const PLATE_CELL = 38;
+    const PLATE_SEG = COAST
+      ? Math.max(320, Math.min(448, Math.ceil(Math.max(W, D) / PLATE_CELL / 8) * 8))
+      : 72;
     const BUILT_FLAT = Math.hypot(W / PLATE_SEG, D / PLATE_SEG) + 6;
     const BUILT_FADE = 110;    // then the country rises back over ~one block
     const BUILT_REACH = BUILT_FLAT + BUILT_FADE;   // past this a surface cannot matter
@@ -1315,7 +1349,8 @@
     // whatever a late region (the Greater Mercy Range) dragged it out by. Those
     // two numbers disagreed by 2.1 km after the world re-lay, which is precisely
     // how a 1441 m backdrop range ended up standing on driveable backcountry.
-    CBZ.CONTINENT_PLATE = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ };
+    CBZ.CONTINENT_PLATE = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, seg: SEG };
+    CBZ.CONTINENT_PLATE_SEG = SEG;
     plate.receiveShadow = true;
     plate.name = "continent-underlay";
     plate.renderOrder = -10;

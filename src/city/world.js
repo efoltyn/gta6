@@ -144,7 +144,16 @@
     // Keep the sole ocean mesh beyond the longest city camera frustum. The old
     // 7km square ended inside aircraft sight range, so its hard edge exposed
     // the fog-coloured background and read as a second, flat kind of water.
-    const SEA_WORLD_SPAN = CFGW.SEA_OVERHAUL !== false ? 16000 : 12000;
+    // WORLD_SCALE_V4: the 16000 was measured against a world whose plate
+    // reached x +-6100; a plate that outgrows this record gets land the water
+    // system does not know is coastline. world/layout.js derives the span from
+    // the FLAT rect it also derives (see CBZ.WORLD_SEA_SPAN there) — the
+    // literal stays as the degrade-safe fallback, so a build without layout.js
+    // (or with the flag off) is byte-identical. Costs nothing: the rendered
+    // ocean is a camera-centred disc (world/water_spec.js), so this sizes the
+    // published BOUNDS record and the geometry's bounding box, not a mesh.
+    const SEA_WORLD_SPAN = CFGW.SEA_OVERHAUL !== false
+      ? (CBZ.WORLD_SEA_SPAN || 16000) : 12000;
     const SEA_WORLD_CX = CFGW.SEA_OVERHAUL !== false ? 310 : cx + 150;
     const SEA_WORLD_CZ = CFGW.SEA_OVERHAUL !== false ? -750 : cz - 200;
     CBZ.SEA_WORLD_BOUNDS = {

@@ -14,8 +14,10 @@
    ARCHIPELAGO CONTRACT (worldmap.js):
      CBZ.addLandmass(builder, order)  — builder gets the live `city`.
      CBZ.registerCityRegion(city, reg) — declare the walkable land.
-   Footprint: rect center (1115,150), half-extents (445,470):
-     minX 670  maxX 1560  minZ -320  maxZ 620  (a MASSIVE south basin).
+   Footprint: PUBLISHED BY world/layout.js (CBZ.worldFoot("desert")) — the
+   authored rect is centre (1120,150), half-extents (440,470), and the world
+   dial plus the stage-4 footprint scale are applied there, in the one place
+   that holds all three. Do not re-type a half-extent from this file; ask.
    Causeway: a ~14-wide desert highway deck from the desert's west
    edge (~x670, z-300) to the speedway island's east edge (~x670,
    z-330, the circle center 470,-330 r200). Registered as its own
@@ -40,30 +42,65 @@
   const cmat = CBZ.cmat || CBZ.mat;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.DESERT_TERRAIN_V2 == null) CFG.DESERT_TERRAIN_V2 = true;
+  // ---- DESERT_ROCK_SCATTER (owner: "the desert region little gray rocks are
+  // removed entirely") — DEFAULT FALSE, which is the removal. Two scatters
+  // answer to it: the 140-candidate icosahedron boulder field (5) and the 22
+  // fractured clusters ringing Dry Gulch (5b). Both were grey (ROCK_GREY
+  // 0x8c7d68) basin clutter that read as gravel dropped on sand. THE RED-ROCK
+  // MESAS ARE NOT ROCKS IN THIS SENSE and stay: they are the basin's only
+  // orientation cues and its only collidered landmarks.
+  if (CFG.DESERT_ROCK_SCATTER == null) CFG.DESERT_ROCK_SCATTER = false;
+  // ---- DESERT_DUNES_V3 (owner: "the desert region hills are varied in size
+  // more, some massive like the dunes im saying") — see desertDuneHeightAt.
+  if (CFG.DESERT_DUNES_V3 == null) CFG.DESERT_DUNES_V3 = true;
 
   // ---- footprint (MASSIVE basin) -------------------------------------------
-  // North edge stays anchored at z-320 (the causeway tuck to the speedway
-  // island) and the west edge at x670 (speedway's east shore); the desert
-  // sprawls EAST to the flat limit and DEEP to the south (flat maxZ was
-  // pushed to 760 in terrain.js to hold it). ~1.8x the old footprint — a
-  // genuinely vast empty tan basin you drive across, not a lobby.
-  // Leave a real ten-metre shoreline between the speedway's east rim (x=670)
-  // and the basin. The causeway spans that water; the old shared x=670 edge
-  // let the desert feather render underneath almost a quarter of the stadium.
-  const _WOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
-  const CX = 1120 + _WOFF.dx, CZ = 150 + _WOFF.dz, HX = 440, HZ = 470;
-  const MINX = CX - HX, MAXX = CX + HX;   // 680 .. 1560
-  const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -320 .. 620
+  // North edge is the causeway tuck to the speedway island and the west edge
+  // is open country east of it; the desert sprawls EAST and DEEP to the south.
+  // A genuinely vast empty tan basin you drive across, not a lobby.
+  //
+  // THE RECT IS NOT TYPED HERE ANY MORE. world/layout.js owns the anchor, the
+  // world-layout dial AND the stage-4 footprint scale, and publishes the three
+  // composed (CBZ.worldFoot). This file was one of two that another file
+  // hand-copied a half-extent from (biome_farmland.js re-typed our north shore
+  // as `-320 + dz`), so a scale applied here would have gone stale there. The
+  // authored literals stay as the degrade-safe fallback — a build without
+  // layout.js gets exactly the old rect.
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("desert")) || { dx: 0, dz: 0 };   // world-layout dial
+  const _FOOT = (CBZ.worldFoot && CBZ.worldFoot("desert")) ||
+    { cx: 1120 + _WOFF.dx, cz: 150 + _WOFF.dz, hx: 440, hz: 470 };
+  const CX = _FOOT.cx, CZ = _FOOT.cz, HX = _FOOT.hx, HZ = _FOOT.hz;
+  const FSC = (CBZ.worldFootScale && CBZ.worldFootScale("desert")) || 1;        // linear footprint scale
+  const MINX = CX - HX, MAXX = CX + HX;   // authored 680 .. 1560
+  const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // authored -320 .. 620
 
   // ---- causeway (land-bridge to the speedway island) -----------------------
-  // The west end noses ~34u inside the speedway's east rim, so it tracks
-  // THAT island's dial entry (stage 2), not this biome's — any offset combo
-  // keeps both shores touching; only the water span changes. The east end
-  // (CW_X1) already rides this biome's own MINX.
+  // IT HAS TO LAND ON BOTH SHORES, AND FOR TWO STAGES IT DID NOT. The deck's
+  // z was the literal `-300 + speedway.dz` and its west end the literal
+  // `speedwayCX + 170`, both measured when the basin's north shore sat at
+  // z -320. Stage 3 then slid the desert 300 u SOUTH and nothing told this
+  // line: the east end has been ending 280 u short of its own biome, in open
+  // country, ever since.
+  //
+  // So both ends derive from the shapes they dock into. The centreline is the
+  // authored z CLAMPED into the basin's own z-span (45 u inside the edge, so
+  // the deck's 12 u half-width plus the region pad still sits on land), and the
+  // west end is the speedway CIRCLE's east rim AT THAT z — a chord, not a
+  // radius, which is what the old +170 was silently assuming.
   const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
+  const _SPD_CX = 490 + _SPOFF.dx, _SPD_CZ = -350 + _SPOFF.dz, _SPD_R = 210;  // island_speedway CX/CZ/R
   const CW = 14;                          // road width
-  const CW_Z = -300 + _SPOFF.dz;          // causeway centerline z (speedway-side)
-  const CW_X0 = (490 + _SPOFF.dx) + 170;  // just inside the speedway edge (~660 today)
+  // Gated on the STAGE layout.js actually resolved to, never on the flag
+  // alone: WORLD_SCALE_V4 rides on top of WORLD_LAYOUT_V2, so reading the raw
+  // flag would re-derive this deck in a world that is otherwise stage 2.
+  const _CW_DERIVE = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 4;
+  const CW_Z = _CW_DERIVE
+    ? Math.max(MINZ + 45, Math.min(MAXZ - 45, -300 + _SPOFF.dz))
+    : (-300 + _SPOFF.dz);                 // causeway centerline z
+  const _CW_CHORD = Math.sqrt(Math.max(0, _SPD_R * _SPD_R - (CW_Z - _SPD_CZ) * (CW_Z - _SPD_CZ)));
+  const CW_X0 = _CW_DERIVE
+    ? (_SPD_CX + _CW_CHORD - 34)          // noses 34u inside the speedway's east rim at THIS z
+    : ((490 + _SPOFF.dx) + 170);          // authored: rim-at-the-equator + a guess
   const CW_X1 = MINX + 6;                 // tuck into the desert's west edge
 
   // ---- palette (warm tan basin; one shared material per color) -------------
@@ -92,6 +129,13 @@
   const TOWN_HX = 130, TOWN_HZ = 70;                // half-extents
   const TOWN = { minX: TOWN_CX - TOWN_HX, maxX: TOWN_CX + TOWN_HX, minZ: TOWN_CZ - TOWN_HZ, maxZ: TOWN_CZ + TOWN_HZ };
   const HWY_Z = CZ - 40;
+  // PUBLISHED, because somebody else has to hit it. biome_farmland.js's Coyle
+  // causeway drops south out of the farm county and is supposed to T onto this
+  // spine; it used to reach it by the coincidence that "our north shore + 600"
+  // landed near it, which stopped being true the moment this basin's HZ grew
+  // (the spine sits HZ-40 south of the shore, not 600). One published number,
+  // one junction, and the deck follows any future scale.
+  CBZ.DESERT_HWY_Z = HWY_Z;
   // The town generator's three 64m blocks + road shoulders occupy this exact
   // stretch. The regional highway stops at its two edges, then Dry Gulch owns
   // the main street itself—no duplicate asphalt/decal planes fighting at y=0.
@@ -104,14 +148,18 @@
   // These are data, not late geometry. Keeping the landmark footprints here
   // lets the placement layer protect their future sites BEFORE cactus/rock
   // scatter runs, instead of hoping the random passes miss them.
+  // The offsets ride the footprint scale (their SIZES do not): a mesa is a
+  // landmark, so when the basin doubles they have to spread with it or seven
+  // buttes cluster in the middle of an empty rectangle. Heights are authored
+  // and stay authored — a bigger basin is not a reason for taller rock.
   const MESAS = [
-    { x: CX - 220, z: CZ - 150, w: 70, d: 55, h: 24 },
-    { x: CX + 180, z: CZ + 120, w: 95, d: 70, h: 30 },
-    { x: CX + 120, z: CZ - 200, w: 55, d: 60, h: 20 },
-    { x: CX - 140, z: CZ + 180, w: 60, d: 48, h: 22 },
-    { x: CX - 260, z: CZ + 340, w: 84, d: 66, h: 38 },
-    { x: CX + 250, z: CZ + 300, w: 62, d: 74, h: 28 },
-    { x: CX + 40, z: CZ + 400, w: 100, d: 80, h: 44 },
+    { x: CX - 220 * FSC, z: CZ - 150 * FSC, w: 70, d: 55, h: 24 },
+    { x: CX + 180 * FSC, z: CZ + 120 * FSC, w: 95, d: 70, h: 30 },
+    { x: CX + 120 * FSC, z: CZ - 200 * FSC, w: 55, d: 60, h: 20 },
+    { x: CX - 140 * FSC, z: CZ + 180 * FSC, w: 60, d: 48, h: 22 },
+    { x: CX - 260 * FSC, z: CZ + 340 * FSC, w: 84, d: 66, h: 38 },
+    { x: CX + 250 * FSC, z: CZ + 300 * FSC, w: 62, d: 74, h: 28 },
+    { x: CX + 40 * FSC, z: CZ + 400 * FSC, w: 100, d: 80, h: 44 },
   ];
   const HAS_TOWN = typeof CBZ.buildTown === "function";
   function inTown(x, z) {
@@ -179,21 +227,151 @@
     // those groups, giving roads and settlements visual breathing room.
     const scallopA = 0.5 + 0.5 * Math.sin(vA * (Math.PI * 2 / 255) + warpB * 0.018);
     const scallopB = 0.5 + 0.5 * Math.sin(vB * (Math.PI * 2 / 310) - warpA * 0.014);
-    const duneField = 0.52 + 0.48 * smooth01(terrainNoise(x * 0.00235 - 11, z * 0.00235 + 7));
-    const macro = 0.72 + terrainNoise(x * 0.0061 + 19, z * 0.0061 - 23) * 0.62;
-    // Real landforms, still bounded for driving: roughly 7-30m dune crests,
-    // with the same analytic function shared by rendering and ground physics.
-    // Each wind family tapers independently before the domain cross-fade.
-    // That lets ridges end in horns and basins instead of keeping every stripe
-    // alive across the full allocation rectangle.
-    const groupA = 0.12 + 0.88 * Math.pow(smooth01(scallopA), 1.55);
-    const groupB = 0.12 + 0.88 * Math.pow(smooth01(scallopB), 1.55);
-    const hA = Math.pow(clamp01(ridgeA), 1.72) * groupA;
-    const hB = Math.pow(clamp01(ridgeB), 1.72) * groupB;
-    const transverse = (hA * (1 - turn) + hB * turn) * (10 + 16 * macro) * duneField;
+
+    /* ---- DESERT_DUNES_V3 — THE ERG HAS A CHARACTER, NOT AN AMPLITUDE ------
+       OWNER: "the desert region hills are varied in size more, some massive
+       like the dunes im saying."
+
+       The ridge MECHANICS above are not the problem and are not touched: the
+       two crossing wind families, the slip-face harmonic, the barchan
+       scallops and the interdune basins all read correctly. What was wrong is
+       the ENVELOPE. Every crest in an 880x940 m erg was drawn from
+       `(10 + 16*macro) * duneField`, a ~165 m-wavelength field times a ~425 m
+       one — so the whole sea ran 7-30 m with no landform larger than a city
+       block. Sand does not work that way: an erg is mostly low sheets with a
+       few DRAA, and the draa are big because they are OLD, which is to say
+       they are long as well as tall.
+
+       Three changes, all to the envelope:
+
+       (1) ERG CHARACTER — two very long fields (~850 m and ~1410 m) sum into
+           one macro field; its top band becomes `core`, so two or three
+           isolated megadune complexes exist per basin instead of an even
+           corduroy. Over a stage-4 basin (1408 x 1504 m) the primary
+           wavelength fits ~1.7 times across, which is what makes them
+           complexes rather than a pattern.
+
+       (2) A 50 m DUNE NEEDS A 500 m WAVELENGTH, or it is a spike, not a dune.
+           The wavelength is NOT scaled pointwise — `uA * 2pi/(72*k)` makes the
+           phase gradient depend on grad(k), which at these amplitudes
+           dominates the ridge direction and shreds the field. Instead the SAME
+           domain (same warp, same wind bearing) is evaluated at a second,
+           long wavelength and cross-faded by `core`. Phase-correct everywhere,
+           two extra sines, and the megadune inherits the exact ridge geometry
+           of the small dunes it grows out of.
+
+       (3) SOME FLATS GO NEARLY BARE. duneField's floor drops 0.52 -> 0.14, so
+           interdune sheets really are sheets and the megadunes have something
+           to stand out of.
+
+       RENORMALISED, on purpose: the shape changes, the mean does not.
+         before  E[amp] = E[(10+16*macro)] x E[duneField] = 26.5 x 0.76 = 20.1
+         after   E[amp] = E[erg](13.0) x (1-E[core]) + E[mega](47.5) x E[core]
+                        = 13.0 x 0.87 + 47.5 x 0.13 = 17.5
+       i.e. ~13% under the old mean while the CEILING goes 31 -> 55 m. A shape
+       change that also raised the average would move every downstream sample
+       (drivability, the dune camera, the ground-match audit) for a reason
+       that has nothing to do with the owner's ask.
+       Revert: CBZ.CONFIG.DESERT_DUNES_V3 = false -> the exact field above.  */
+    if (CFG.DESERT_DUNES_V3 === false) {
+      const duneField0 = 0.52 + 0.48 * smooth01(terrainNoise(x * 0.00235 - 11, z * 0.00235 + 7));
+      const macro0 = 0.72 + terrainNoise(x * 0.0061 + 19, z * 0.0061 - 23) * 0.62;
+      const groupA0 = 0.12 + 0.88 * Math.pow(smooth01(scallopA), 1.55);
+      const groupB0 = 0.12 + 0.88 * Math.pow(smooth01(scallopB), 1.55);
+      const hA0 = Math.pow(clamp01(ridgeA), 1.72) * groupA0;
+      const hB0 = Math.pow(clamp01(ridgeB), 1.72) * groupB0;
+      return (hA0 * (1 - turn) + hB0 * turn) * (10 + 16 * macro0) * duneField0
+        + terrainNoise(x * 0.019 + 2, z * 0.019 - 5) * 1.15;
+    }
+    // (1) erg character: where the sand has piled up for a long time.
+    const ergA = terrainNoise(x * 0.00118 + 61, z * 0.00118 - 44);   // ~850u
+    const ergB = terrainNoise(x * 0.00071 - 29, z * 0.00071 + 17);   // ~1410u
+    const ergMix = ergA * 0.55 + ergB * 0.45;
+    const core = smooth01((ergMix - 0.62) / 0.26);                   // 0 sheet .. 1 draa
+    // (2) the same wind, read at draa wavelength. 72 -> 620 and 104 -> 880 is
+    //     8.6x for a 3.2x height rise, i.e. DELIBERATELY gentler than a
+    //     constant slip angle (which would only want ~230 m): mean flank slope
+    //     falls from atan(2*17/72) = 25 deg on the small dunes to
+    //     atan(2*55/620) = 10 deg on a draa. That is both what a real draa is
+    //     — kilometre-scale swells with small dunes riding on them, which is
+    //     exactly what the cross-fade produces at partial `core` — and the
+    //     only version of a 55 m dune you can drive over instead of into.
+    const ridgeAm = slipFace(uA * (Math.PI * 2 / 620), 0.72);
+    const ridgeBm = slipFace(uB * (Math.PI * 2 / 880), 1.18);
+    const rA = ridgeA + (ridgeAm - ridgeA) * core;
+    const rB = ridgeB + (ridgeBm - ridgeB) * core;
+    // the barchan scallops lengthen with them, or a 600 m ridge gets chopped
+    // into 255 m horns and stops reading as one landform.
+    const scallopAm = 0.5 + 0.5 * Math.sin(vA * (Math.PI * 2 / 900) + warpB * 0.018);
+    const scallopBm = 0.5 + 0.5 * Math.sin(vB * (Math.PI * 2 / 1100) - warpA * 0.014);
+    const sA = scallopA + (scallopAm - scallopA) * core;
+    const sB = scallopB + (scallopBm - scallopB) * core;
+    // (3) bare sheets between them.
+    const duneField = 0.14 + 0.86 * smooth01(terrainNoise(x * 0.00235 - 11, z * 0.00235 + 7));
+    const ergAmp = 5 + 14 * duneField;          //  7.0 .. 19.0 m of ordinary erg
+    const megaAmp = 40 + 15 * ergA;             // 40.0 .. 55.0 m at a draa crest
+    const amp = ergAmp + (megaAmp - ergAmp) * core;
+    const groupA = 0.12 + 0.88 * Math.pow(smooth01(sA), 1.55);
+    const groupB = 0.12 + 0.88 * Math.pow(smooth01(sB), 1.55);
+    const hA = Math.pow(clamp01(rA), 1.72) * groupA;
+    const hB = Math.pow(clamp01(rB), 1.72) * groupB;
+    const transverse = (hA * (1 - turn) + hB * turn) * amp;
     const rippledFloor = terrainNoise(x * 0.019 + 2, z * 0.019 - 5) * 1.15;
     return transverse + rippledFloor;
   }
+
+  // A 55 m DUNE MAY NOT STAND ON A ROAD. The basin's own benches (in
+  // desertHeightAt below) were sized for 30 m crests and only ever covered
+  // THIS biome's own highway spine and its four buildings — every road that
+  // ARRIVES from somewhere else crossed raw dune field, which was survivable
+  // at 30 m and is not at 55.
+  //   This is not a second corridor system. It is the same distance grammar
+  // CBZ.highwayNetReliefGate already uses (flat inside a band, smoothly back
+  // to full relief over a fade), applied to the two hand-placed causeway decks
+  // this biome docks with — the two roads that arrive from outside and that
+  // the basin's own benches never covered.
+  //   FLAT within half-width + 26 m of a centreline, back to full relief over
+  //   the next 150 m — nearly four times the road gate's 40 m fade, because
+  //   the thing being eased down is nearly four times as tall.
+  const CORRIDOR_FLAT = CW / 2 + 26, CORRIDOR_FADE = 150;
+  // The Coyle causeway drops out of the farm county and runs 600 m INTO this
+  // basin before it meets the desert highway. biome_farmland.js owns that deck
+  // but it parses AFTER this file, so its geometry is re-derived here from the
+  // published rects both files read (x = the farm county's centreline; the deck
+  // ends 600 m inside our north shore) rather than waiting for a record that
+  // does not exist yet. Null when the farm county is absent.
+  const _FARM = (CBZ.worldFoot && CBZ.worldFoot("farmland")) || null;
+  const COYLE_X = _FARM ? _FARM.cx : null, COYLE_Z1 = MINZ + 600;
+  function bandGate(d) {
+    if (d <= CORRIDOR_FLAT) return 0;
+    if (d >= CORRIDOR_FLAT + CORRIDOR_FADE) return 1;
+    return smooth01((d - CORRIDOR_FLAT) / CORRIDOR_FADE);
+  }
+  function corridorGate(x, z) {
+    if (CFG.DESERT_DUNES_V3 === false) return 1;
+    // (a) the Saltlands causeway: horizontal, docking on our west shore
+    let g = 1;
+    if (x > Math.min(CW_X0, CW_X1) - CORRIDOR_FADE) {
+      g = bandGate(Math.abs(z - CW_Z));
+      if (g <= 0) return 0;
+    }
+    // (b) the Coyle causeway: vertical, dropping in from the north
+    if (COYLE_X != null && z < COYLE_Z1 + CORRIDOR_FADE) {
+      const t = bandGate(Math.abs(x - COYLE_X));
+      if (t <= 0) return 0;
+      if (t < g) g = t;
+    }
+    return g;
+  }
+  // NOT CONSULTED HERE, AND THE REASON IS LOAD ORDER: CBZ.highwayNetReliefGate
+  // is empty until city/highwaynet.js builds at order 91 and this biome bakes
+  // its mesh at order 31, so reading it would flatten the PHYSICS oracle under
+  // a corridor the DRAWN dune still stands in — precisely the mesh/oracle
+  // divergence CBZ.groundMatchAudit() exists to catch. It also is not needed:
+  // roadrules.js's clearance law forbids a route from crossing a registered
+  // place it is not going to, so a highway cannot legally enter this basin.
+  // The two decks above are parse-time constants and therefore identical to
+  // the bake and to every later query.
 
   function desertHeightAt(x, z) {
     if (x < MINX || x > MAXX || z < MINZ || z > MAXZ) return 0;
@@ -201,11 +379,18 @@
 
     // Roads and settlements sit on broad graded benches, not on hovering
     // planes.  The terrain eases into every bench over tens of metres.
-    h *= smooth01((Math.abs(z - HWY_Z) - 9) / 35);
-    h *= flatRectFactor(x, z, TOWN_CX, TOWN_CZ, TOWN_HX + 8, TOWN_HZ + 8, 42);
+    // The highway bench widens with the dunes: 35 m of easing off a 30 m crest
+    // is a 40-degree bank, off a 55 m crest it is a wall.
+    h *= smooth01((Math.abs(z - HWY_Z) - 9) / (CFG.DESERT_DUNES_V3 === false ? 35 : 62));
+    h *= flatRectFactor(x, z, TOWN_CX, TOWN_CZ, TOWN_HX + 8, TOWN_HZ + 8, CFG.DESERT_DUNES_V3 === false ? 42 : 90);
     h *= flatRectFactor(x, z, GAS_X + 10, GAS_Z, 42, 30, 34);
     h *= flatRectFactor(x, z, MOTEL_X, MOTEL_Z, 36, 26, 38);
+    // the played-out mine's bench. NOT scaled by FSC: the mine head, its
+    // layout reservation and its MINE label are authored at (CX-230, CZ+60)
+    // further down this file, and a pad that moved out from under them is
+    // precisely the drift this file's footprint comment warns about.
     h *= flatRectFactor(x, z, CX - 220, CZ + 60, 48, 36, 34);
+    h *= corridorGate(x, z);
     const edge = Math.min(x - MINX, MAXX - x, z - MINZ, MAXZ - z);
     h *= smooth01(edge / 34);
     return Math.max(0, h);
@@ -360,8 +545,22 @@
     // The main sand plane keeps its own UVs for the low-frequency canvas
     // surface above. Built directly rather than through mergeAdd because it
     // is one mesh and needs its repeatable texture coordinates intact.
+    // 176 x 188 was measured against an 880 x 940 m basin — i.e. it is really
+    // the statement "a dune vertex every 5 m", which is what resolves a 72 m
+    // ridge without stairstepping. Left as literals the stage-4 basin would
+    // draw 8 m cells and the erg would go faceted, so the CELL is the constant
+    // and the segments follow the footprint.
+    //   THE CAP IS A VERTEX BUDGET, not a taste: every vertex here costs FIVE
+    // evaluations of the height field (one for y, four for the central-
+    // difference normal), so 264 -> 265^2 = 70k verts is ~2.1x the authored
+    // plane's 33k and is where this bake stops being cheap. At the stage-4
+    // footprint the cap binds and the cells come out 5.3 x 5.7 m, which still
+    // puts 13 vertices across the shortest (72 m) ridge. At the authored size
+    // the floors bind and the expressions return 176/188 exactly.
+    const GSEG_X = Math.min(264, Math.max(176, Math.round(HX * 2 / 5)));
+    const GSEG_Z = Math.min(264, Math.max(188, Math.round(HZ * 2 / 5)));
     const groundGeo = CFG.DESERT_TERRAIN_V2 !== false
-      ? new THREE.PlaneGeometry(HX * 2, HZ * 2, 176, 188)
+      ? new THREE.PlaneGeometry(HX * 2, HZ * 2, GSEG_X, GSEG_Z)
       : plane(CX, CZ, HX * 2, HZ * 2, 0.02);
     if (CFG.DESERT_TERRAIN_V2 !== false) {
       groundGeo.rotateX(-Math.PI / 2);
@@ -443,7 +642,12 @@
         // The core stays tucked against the speedway to the west, while the
         // actual erg now sprawls into the expanded eastern/southern country.
         // This is land-cover influence baked into the continent, not a plane.
-        spread: { west: 70, east: 620, north: 170, south: 520 },
+        // THE SPREAD RIDES THE FOOTPRINT SCALE, and with BIOME_ORGANIC_EDGES
+        // on it is no longer only paint: cityBiomeAt reads this field outside
+        // the rect, so this is the number that actually makes the Saltlands a
+        // desert you cross rather than a tan tile. Left absolute it would have
+        // become proportionally SMALLER every time the basin grew.
+        spread: { west: 70 * FSC, east: 620 * FSC, north: 170 * FSC, south: 520 * FSC },
         inner: 0x9b8b5f, outer: 0x68744e, featherNorm: 0.23,
         y: 0.005, seed: 0x5dec7,
       });
@@ -577,10 +781,19 @@
     root.add(trunkIM); if (armCount) root.add(armIM);
 
     // =====================================================================
-    //  5) BOULDER FIELDS — instanced low-poly rocks (one icosa geo, varied
-    //     scale/rot), ONE InstancedMesh, shared grey cmat. The big ones get
-    //     a collider; small ones are pure scatter you step over.
+    //  5) BOULDER FIELDS — REMOVED BY OWNER ORDER ("the desert region little
+    //     gray rocks are removed entirely"), behind DESERT_ROCK_SCATTER.
+    //
+    //     THE RNG DRAWS STAY. Every candidate is still drawn and every
+    //     accepted one still consumes its five transform draws, because this
+    //     is a SHARED seeded stream: deleting the loop would re-deal every
+    //     scrub, tumbleweed and bone in the basin for no reason connected to
+    //     the owner's ask. The claims stay too, so the rest of the scatter
+    //     keeps the spacing it was laid out with. What goes is the geometry
+    //     and the colliders — which is what "removed entirely" means to a
+    //     player. Flip the flag true and the field returns byte for byte.
     // =====================================================================
+    const ROCKS = CFG.DESERT_ROCK_SCATTER === true;
     const boulders = [];
     for (let i = 0; i < 140; i++) {
       const x = rr(MINX + 12, MAXX - 12), z = rr(MINZ + 12, MAXZ - 12);
@@ -588,18 +801,23 @@
       if (inTown(x, z) || !claimNature(x, z, Math.max(0.8, s * 0.8))) continue; // no boulders on authored space or each other
       boulders.push({ x, z, s });
     }
-    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
-    const rockIM = new THREE.InstancedMesh(rockGeo, cmat(ROCK_GREY), boulders.length);
-    rockIM.castShadow = true; rockIM.receiveShadow = true;
+    const rockGeo = ROCKS ? new THREE.IcosahedronGeometry(1, 0) : null;
+    const rockIM = ROCKS ? new THREE.InstancedMesh(rockGeo, cmat(ROCK_GREY), boulders.length) : null;
+    if (rockIM) { rockIM.castShadow = true; rockIM.receiveShadow = true; }
     boulders.forEach((b, i) => {
       dummy.position.set(b.x, (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(b.x, b.z) : 0) + b.s * 0.4, b.z);
       dummy.scale.set(b.s, b.s * rr(0.6, 0.9), b.s * rr(0.8, 1.2));
       dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+      if (!rockIM) return;                          // rng consumed, geometry skipped
       dummy.updateMatrix(); rockIM.setMatrixAt(i, dummy.matrix);
       if (b.s > 2.2) solid(b.x, b.z, b.s * 1.4, b.s * 1.4, b.s);
     });
-    rockIM.instanceMatrix.needsUpdate = true; rockIM.matrixAutoUpdate = false;
-    root.add(rockIM);
+    if (rockIM) {
+      rockIM.instanceMatrix.needsUpdate = true; rockIM.matrixAutoUpdate = false;
+      root.add(rockIM);
+    }
+    // published for CBZ.worldScaleAudit(): 0 is the owner's answer.
+    CBZ.desertRockScatterCount = ROCKS ? boulders.length : 0;
 
     // =====================================================================
     //  5b) FRACTURED ROCK CLUSTERS (world/rockscliffs.js) — a handful of
@@ -619,7 +837,12 @@
     //      flat basin; it exists so a future sloped desert edge inherits the
     //      same angle-of-repose safety for free.
     // =====================================================================
-    if (CBZ.scatterRocks) {
+    //      REMOVED WITH (5) under DESERT_ROCK_SCATTER — same owner order, and
+    //      these are the same grey stone. Skipping the whole block costs this
+    //      biome's stream nothing: scatterRocks runs on its OWN seed
+    //      (0x5dec7 ^ 0x2222), so the only side effect dropped is the handful
+    //      of layout claims it made around Dry Gulch.
+    if (CBZ.scatterRocks && ROCKS) {
       function pickTownOutskirt(r) {
         // Ring around the town rect, biased just outside its edge. Unlike the
         // old helper, it also obeys the shared layout so these final rocks
@@ -761,7 +984,11 @@
     // Dashed centre line follows the regional road only; Dry Gulch supplies
     // its own main-street paint over the town-owned segment.
     const dashXs = [];
-    const nDash = 60;
+    // COUNT rides the footprint: 60 dashes over the authored 880 m basin is a
+    // dash every 14.3 m, which is the ROAD MARKING, not a budget. Left fixed it
+    // would stretch to 23 m on a stage-4 basin and read as ticks. No rng here,
+    // so this is free of the seeded stream.
+    const nDash = Math.round(60 * FSC);
     for (let i = 0; i < nDash; i++) {
       const x = MINX + 12 + i * ((HX * 2 - 24) / nDash);
       if (HAS_TOWN && x >= TOWN_SPINE_MIN && x <= TOWN_SPINE_MAX) continue;
@@ -809,7 +1036,9 @@
     //     to nowhere reads as "civilization once reached out here," and
     //     gives the empty road scale + rhythm.
     // =====================================================================
-    const nPole = 26;
+    // Same reasoning as the centre-line dashes: 26 poles over 880 m is a span
+    // of ~32 m, which is what gives the empty road its rhythm. Rides the scale.
+    const nPole = Math.round(26 * FSC);
     const poleSpots = [];
     for (let i = 0; i < nPole; i++) {
       const x = MINX + 18 + i * ((HX * 2 - 36) / nPole);

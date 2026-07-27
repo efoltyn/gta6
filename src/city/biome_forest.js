@@ -33,10 +33,16 @@
   const THREE = window.THREE;
 
   // ---- footprint (given) ------------------------------------------------
-  const _WOFF = (CBZ.worldOff && CBZ.worldOff("forest")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
-  const CX = -560 + _WOFF.dx, CZ = -1350 + _WOFF.dz, HX = 390, HZ = 330;
-  const MINX = CX - HX, MAXX = CX + HX;   // -950 .. -170
-  const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -1680 .. -1020
+  // The rect comes from world/layout.js (CBZ.worldFoot) — one place holds the
+  // authored anchor, the world-layout dial and the stage-4 footprint scale.
+  // Authored literals are the degrade-safe fallback.
+  const _WOFF = (CBZ.worldOff && CBZ.worldOff("forest")) || { dx: 0, dz: 0 };   // world-layout dial
+  const _FOOT = (CBZ.worldFoot && CBZ.worldFoot("forest")) ||
+    { cx: -560 + _WOFF.dx, cz: -1350 + _WOFF.dz, hx: 390, hz: 330 };
+  const CX = _FOOT.cx, CZ = _FOOT.cz, HX = _FOOT.hx, HZ = _FOOT.hz;
+  const FSC = (CBZ.worldFootScale && CBZ.worldFootScale("forest")) || 1;
+  const MINX = CX - HX, MAXX = CX + HX;   // authored -950 .. -170
+  const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // authored -1680 .. -1020
 
   // causeway: a 14-wide dirt logging road from the forest's north edge up
   // to the military island's south edge. RE-DERIVED from the two anchors it
@@ -100,7 +106,12 @@
     // baked hash-colour variation (moss / fern / leaf-litter / duff patches)
     // so kilometres of floor stop reading as one flat slab. Deterministic per
     // seed (position hash only — the biome's rng stream is untouched).
-    const floorGeo = new THREE.PlaneGeometry(HX * 2 + 16, HZ * 2 + 16, 80, 68);
+    // 80 x 68 over the authored 796 x 676 m floor is a ~10 m colour cell; the
+    // cell is the constant, so the segment counts follow the footprint rather
+    // than letting the moss/fern patches stretch as the forest grows.
+    const floorGeo = new THREE.PlaneGeometry(HX * 2 + 16, HZ * 2 + 16,
+      Math.max(80, Math.round((HX * 2 + 16) / 9.95)),
+      Math.max(68, Math.round((HZ * 2 + 16) / 9.94)));
     floorGeo.rotateX(-Math.PI / 2);
     {
       const fpos = floorGeo.attributes.position;
@@ -161,7 +172,10 @@
         cx: CX, cz: CZ, hx: HX + 8, hz: HZ + 8, feather: 20, segments: 18,
         // Redhollow can grow mostly west into open country and feather into
         // the alpine foothills north/east without swallowing their core.
-        spread: { west: 600, east: 90, north: 320, south: 280 },
+        // Rides the footprint scale: with BIOME_ORGANIC_EDGES on this field IS
+        // the woods' functional edge outside the rect, so an absolute spread
+        // would shrink in proportion every time the forest grew.
+        spread: { west: 600 * FSC, east: 90 * FSC, north: 320 * FSC, south: 280 * FSC },
         inner: 0x4b6338, outer: 0x45684e, featherNorm: 0.22,
         y: 0.008, seed: 0x0f02e57, owner: "forest",
       });
@@ -342,7 +356,15 @@
     // before allocating the InstancedMesh buffers — InstancedMesh needs a
     // fixed capacity at construction).
     const trees = [], roundTrees = [];
-    const STEP = 11;                                  // grid pitch (jittered)
+    // GRID PITCH, RE-RATED WITH THE FOOTPRINT. 11 m is a real density and it
+    // stays a real density — but the loop below is a GRID, so tree count goes
+    // as AREA: a 1.45x wider Redhollow at a fixed pitch is 2.1x the trees, 2.1x
+    // the claimNature calls and 2.1x the build. Scaling the pitch by
+    // sqrt(scale) makes the count grow LINEARLY with the footprint instead
+    // (1.45x the trees at 1.20x the spacing), which is still unmistakably
+    // closed canopy — the density falloff and the 12%/10% species split are
+    // untouched. sqrt(1) = 1, so the authored forest is byte-identical.
+    const STEP = 11 * Math.sqrt(FSC);                 // grid pitch (jittered)
     const dummy = new THREE.Object3D();
     const colTrunk = new THREE.Color(), colFoli = new THREE.Color();
     const trunkColors = [], foliColors = [];
