@@ -548,6 +548,10 @@
     if (k === "e") { e.preventDefault(); exitArmor(); }
   });
 
+  // Declared at LOAD so the ordnance census counts a wired launcher, not a used
+  // one (see aircraft.js's ordnance law).
+  if (CBZ.ordnanceSite) { try { CBZ.ordnanceSite("armor:tank-main", "missile"); } catch (e) {} }
+
   // L-click fires the tank's main gun while in a tank (pointer-locked, in city).
   addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
@@ -572,9 +576,13 @@
     else { wp = new THREE.Vector3(rec.pos.x, (rec.pos.y || 0) + 1.6, rec.pos.z); }
     const turWorldY = rec.heading + (turret ? turret.rotation.y : 0);
     const dx = Math.sin(turWorldY), dz = Math.cos(turWorldY), dy = 0;
+    // The main gun acquires through aircraft.js's ONE ordnance law — the same
+    // sentence the RPG and the jet rails speak (lockon.js red lock ⇒ homing, no
+    // lock ⇒ a dead-straight shell). Declaring the site by name is the whole
+    // adoption; CBZ.ordnanceAudit() counts this launcher because of this word.
     let fired = false;
     if (CBZ.cityFireMissile) {
-      try { fired = !!CBZ.cityFireMissile(wp.x, wp.y, wp.z, dx, dy, dz, { byPlayer: true }); } catch (e) { fired = false; }
+      try { fired = !!CBZ.cityFireMissile(wp.x, wp.y, wp.z, dx, dy, dz, { byPlayer: true, site: "armor:tank-main" }); } catch (e) { fired = false; }
     }
     if (!fired) {
       const reach = 30;

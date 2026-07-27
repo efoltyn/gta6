@@ -1366,9 +1366,22 @@
     let dz = Math.cos(craft.heading) * cp;
     const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
 
+    // THE MILITARY MISSILE HOMES LIKE THE RPG. OWNER: "missiles on the military
+    // jets and helicopters should have the same homing as the rpg." Every craft
+    // the player flies armed — the stolen base jet, the gunship, the B-2's
+    // defensive load — leaves through THIS one call, so declaring the site here
+    // is the whole adoption: aircraft.js's ordnance law asks lockon.js the same
+    // question the RPG asks (red lock ⇒ proportional homing, no lock ⇒ dead
+    // straight) and CBZ.ordnanceAudit() counts this launcher by name. Distinct
+    // ids for rotary and fixed wing because they are different fire geometries
+    // and the audit should be able to say which one a player actually used.
     let fired = false;
     if (CBZ.cityFireMissile) {
-      try { CBZ.cityFireMissile(mx, my, mz, dx, dy, dz, { byPlayer: true }); fired = true; } catch (e) { fired = false; }
+      const site = craft.kind === "heli" ? "air:heli-missile" : "air:jet-missile";
+      // `fired` must be the launcher's OWN answer: a saturated missile pool
+      // returns false, and the old `fired = true` swallowed that, so the
+      // graceful fallback below could never run and the shot vanished.
+      try { fired = !!CBZ.cityFireMissile(mx, my, mz, dx, dy, dz, { byPlayer: true, site: site }); } catch (e) { fired = false; }
     }
     if (!fired) {
       // graceful fallback: throw a forward-leading explosion so the weapon still
@@ -1383,6 +1396,12 @@
     if (CBZ.sfx) { try { CBZ.sfx("whoosh"); } catch (e) {} }
     // firing in the city is a crime → raises heat (guarded)
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { x: craft.pos.x, z: craft.pos.z, type: "shots-fired" }); } catch (e) {} }
+  }
+
+  // Declared at LOAD, not on the first trigger pull, so CBZ.ordnanceAudit()
+  // reports what the world is WIRED with rather than what has been shot.
+  if (CBZ.ordnanceSite) {
+    try { CBZ.ordnanceSite("air:jet-missile", "missile"); CBZ.ordnanceSite("air:heli-missile", "missile"); } catch (e) {}
   }
 
   // left-click fires while flying (pointer-locked)

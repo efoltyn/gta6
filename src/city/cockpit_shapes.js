@@ -53,7 +53,13 @@
   // before this flag existed. One-line revert; `?cfg_COCKPIT_SIGHTLINE=0` too.
   if (CFG.COCKPIT_SIGHTLINE == null) CFG.COCKPIT_SIGHTLINE = true;
 
-  const MAX_MESHES = 26;                 // hard draw-call budget per cockpit
+  // Hard draw-call budget per cockpit. 26 was authored before the bomber
+  // costume existed; that costume builds ~34 and the B-2 deck's two mission
+  // stacks make 36, so 26 had become a warn on EVERY bomber build — a warning
+  // that always fires is a warning nobody reads (this repo has been burned by
+  // exactly that once already, in clearanceSweep). 40 is the measured heaviest
+  // costume plus small headroom; a NEW costume that trips it is still a bug.
+  const MAX_MESHES = 40;
 
   // ---- small numeric helpers ----------------------------------------------
   function num(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
@@ -202,6 +208,7 @@
       frame: 0.42, console: 0.60, seat: 0.50, ctrl: 0.38,
       soloBow: 0.55, seatRails: true, pillars: false, lamp2: false, lampEi: 0.90,
       sightDown: 16,      // heads-down by design, but still a certified cockpit
+      stacks: true,       // the two lit mission blocks — see MISSION STACKS below
     },
     // light GA: tan plastic, honest exposed tube frame, thick plexiglass centre
     // bar, a yoke on a column and one throttle knob on a shaft.
@@ -795,6 +802,29 @@
         const strip = put(taper(0.14, 0.022, 0.24, { nz: 0.9, tz: 0.9 }), lampMat());
         strip.position.set(host.position.x, host.position.y - 0.055, host.position.z);
         strip.name = "cockpit-lampstrip";
+      }
+    }
+
+    // ---- MISSION STACKS (bomber dressing only) ------------------------------
+    // b2code.html's front office is not a wall of gauges — it is two LIT BLOCKS
+    // flanking the crew: a stores list on one side, a BDA readout on the other,
+    // both in the same phosphor the flight symbology uses. That contrast is most
+    // of why a strategic cockpit reads differently from a fighter's, and it is
+    // two faces, not a system. They ride the consoles the spec ALREADY declares
+    // (no new spec fields, no new material family), sit on each console's own
+    // top surface and cant up toward the crew's eyeline. Being minted through
+    // lampMat() means the caller's existing CBZ.nightAmount ramp drives them for
+    // free — there is no second lighting path here and there must not be one.
+    if (D.stacks) {
+      const hosts = [S.consoleL, S.consoleR];
+      for (let i = 0; i < hosts.length; i++) {
+        const c = hosts[i];
+        if (!c) continue;
+        const cw = num(c.w, 0.2), cd = num(c.d, 0.5), chh = num(c.h, 0.2);
+        const face = put(taper(cw * 0.78, 0.022, cd * 0.62, { nz: 0.94, tz: 0.94 }), lampMat());
+        face.position.set(ex + num(c.x, 0), ey + num(c.y, 0) + chh / 2 + 0.014, ez + num(c.z, 0));
+        face.rotation.x = -0.10;          // canted up out of the console top
+        face.name = "cockpit-stack-" + (i ? "R" : "L");
       }
     }
 

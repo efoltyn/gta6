@@ -215,8 +215,14 @@
       pedals: { x: 0, y: -0.96, z: 0.94, sep: 0.28, travel: 0.070 },
       seat: { w: 0.60, h: 0.74, d: 0.26, backDrop: 0.62, railH: 0.32 },
       hud: { w: 0.34, h: 0.28, dist: 0.42, drop: 0.10 },
-      pal: { hull: 0x15181b, trim: 0x0a0c0e, panelTop: 0x111519, panelBot: 0x07090b,
-             bezel: 0x1c2126, dialFace: 0x03080a, ink: 0x5ce08a, backlight: 0x1d5c38 },
+      // PHOSPHOR TEAL, off b2code.html's own stylesheet (--phos #7fe9e1, and
+      // --phos-dim #3f7d79 for the backlight that washes the faces). The old
+      // ink was a generic CRT green shared with nothing; the reference speaks
+      // ALL of its flight symbology in one colour and that single decision is
+      // most of why its front office reads as a strategic aircraft rather than
+      // a fighter. Nothing else in the costume changes — a palette is a palette.
+      pal: { hull: 0x15181b, trim: 0x0a0c0e, panelTop: 0x0e1519, panelBot: 0x06090b,
+             bezel: 0x1c2126, dialFace: 0x03080a, ink: 0x7fe9e1, backlight: 0x3f7d79 },
     },
     prop: {
       layout: "prop",

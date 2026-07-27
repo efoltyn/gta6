@@ -104,11 +104,17 @@
   // only for the accents that SHOULD catch light: canopy glass, gun steel,
   // rubber. All three roles are shared carfx singletons → zero extra material
   // cost per vehicle. Falls back to flat Lambert when carfx is absent.
-  function vmat(role, fallbackHex) {
+  // The second argument is the COLOUR — it was only ever used as the no-carfx
+  // fallback and was never handed to the factory, so M.canopy (0x2a3b4d) and
+  // M.glassDark (0x223044) never reached a single pane: every canopy on the
+  // base wore whatever tint the first vehicle in the world happened to pick.
+  // Forwarding it is the whole fix; every other vmat wrapper in the game
+  // (aircraft.js, playeraircraft.js, airtraffic.js, vehicles.js…) already did.
+  function vmat(role, hex, opts) {
     if (CBZ.vehicleMat) {
-      try { const m = CBZ.vehicleMat(role); if (m && m.isMaterial) return m; } catch (e) {}
+      try { const m = CBZ.vehicleMat(role, hex, opts); if (m && m.isMaterial) return m; } catch (e) {}
     }
-    return cm(fallbackHex != null ? fallbackHex : M.dark);
+    return cm(hex != null ? hex : M.dark);
   }
   // box/cylinder with an EXPLICIT material (glass, gun steel, rubber)
   function mbox(parent, x, y, z, w, h, d, material) {
@@ -485,11 +491,71 @@
     // windscreen, quarter lights down the flanks — and a heavy graphite BROW
     // overhanging the glass. That overhang is the scowl: seen from the tarmac
     // the aeroplane is frowning at you.
-    tbox(g, 0, cy + 1.28, 8.85, 2.05, 1.00, 3.90, { nz: 0.60, tz: 0.90, top: 0.62, segD: 6 }, HULL);
-    tbox(g, 0, cy + 1.30, 10.40, 1.40, 0.72, 1.00, { nz: 0.72, tz: 1.0, top: 0.66, bot: 0.92, segD: 4 }, GLASS);
-    const brow = tbox(g, 0, cy + 1.62, 10.35, 1.42, 0.26, 1.50, { nz: 0.72, tz: 1.0, top: 0.60, segD: 4 }, SHADE);
+    //
+    // THE WINDSCREEN IS AN APERTURE NOW, NOT A SKIN, AND THE FOREBODY IS WHY
+    // THAT TOOK TWO CHANGES. Measured before: the deck was ONE solid tbox over
+    // z 6.90-10.80 with the glass block laid across its forward metre, and the
+    // volume behind that pane was 92.4% hull — a 0.06 m³ sliver of air. You saw
+    // the tint and nothing through it. island_airport.js's buildCabin solved
+    // exactly this for the airliner and the technique transfers: split the shell
+    // into a ROOF slab and a BELLY slab with SIDE BAND-CAPS around an OPEN
+    // window band, then furnish the room the split creates.
+    //
+    // But splitting the shell alone bought nothing here, and the arithmetic says
+    // why: the forebody is a taperBox with nz 0.66, so its ROOF runs from y 4.34
+    // at z 7.05 down to 3.89 at z 10.02, and the old shell's interior band
+    // (3.80-4.30) sat almost entirely INSIDE it. The room has to be above the
+    // forebody or it is not a room. So the band is lifted to 4.30-4.82 — 0.52
+    // model / 0.78 world metres of genuine air, ~9 m³ against 0.06 — and the
+    // glass, the brow and the quarter lights are lifted with it so they still
+    // frame it. The deck crown goes 4.48 -> 5.00 model (+0.78 world), which is a
+    // taller greenhouse standing 1.0 world m over the spine: what a strategic
+    // bomber's flight deck actually looks like from the apron, and still 27%
+    // below the fin tip so the silhouette's hierarchy is unchanged.
+    // Revert: CBZ.CONFIG.MIL_BOMBER_DECK = false restores the solid shell.
+    if (CBZ.CONFIG && CBZ.CONFIG.MIL_BOMBER_DECK == null) CBZ.CONFIG.MIL_BOMBER_DECK = true;
+    const deckV2 = !CBZ.CONFIG || CBZ.CONFIG.MIL_BOMBER_DECK !== false;
+    const BAND0 = 4.30, BAND1 = 4.82;                       // the open window band, model-local
+    if (deckV2) {
+      tbox(g, 0, (BAND1 + 5.00) / 2, 8.85, 2.05, 0.18, 3.90, { nz: 0.60, tz: 0.90, top: 0.62, segD: 6 }, HULL);   // roof slab
+      tbox(g, 0, (3.48 + BAND0) / 2, 8.85, 2.05, BAND0 - 3.48, 3.90, { nz: 0.60, tz: 0.90, segD: 6 }, HULL);      // belly slab / deck sole
+      tbox(g, 0, (BAND0 + BAND1) / 2, 7.05, 2.00, BAND1 - BAND0, 0.30, { nz: 0.88, tz: 0.90, segD: 3 }, HULL);    // rear bulkhead
+      [-1, 1].forEach(function (s) {                        // side band-caps, AFT of the quarter lights only
+        tbox(g, s * 0.72, (BAND0 + BAND1) / 2, 7.75, 0.22, BAND1 - BAND0, 1.60, { nz: 0.86, tz: 0.96, segD: 3 }, HULL);
+      });
+    } else {
+      tbox(g, 0, cy + 1.28, 8.85, 2.05, 1.00, 3.90, { nz: 0.60, tz: 0.90, top: 0.62, segD: 6 }, HULL);
+    }
+    const GY = deckV2 ? (BAND0 + BAND1) / 2 : cy + 1.30;    // glazing centreline
+    tbox(g, 0, GY, 10.40, 1.40, 0.72, 1.00, { nz: 0.72, tz: 1.0, top: 0.66, bot: 0.92, segD: 4 }, GLASS);
+    const brow = tbox(g, 0, GY + 0.32, 10.35, 1.42, 0.26, 1.50, { nz: 0.72, tz: 1.0, top: 0.60, segD: 4 }, SHADE);
     brow.rotation.x = 0.10;                                 // the lip tips DOWN over the glass
-    [-1, 1].forEach(function (s) { mbox(g, s * 0.80, cy + 1.35, 9.40, 0.14, 0.44, 1.70, GLASS); });
+    [-1, 1].forEach(function (s) { mbox(g, s * 0.80, GY + 0.05, 9.40, 0.14, 0.44, 1.70, GLASS); });
+    // ---- WHAT IS BEHIND THE GLASS -------------------------------------------
+    // The SAME minimal set and the SAME rules as the helicopter tub below —
+    // static boxes in the TRIM bucket, no collider, no new material, no rng —
+    // because that is this file's established idiom bar and a flight deck built
+    // to a different one would read as a second grammar. What is here is what
+    // you can actually see through a bomber's windscreen, front to back: the
+    // raked main panel at the base of the screen, the glareshield capping it,
+    // two multifunction faces flanking the centreline, the pedestal between the
+    // crew and the two seat backs standing against the bulkhead. Every part is
+    // sized against the band above (worst clearance: the seat backs top out at
+    // 4.74 against a roof underside of 4.82).
+    if (deckV2) {
+      const DECK = vmat("interior", 0x0d0e10);
+      const GLOW = cm(0x0c1a1c, { emissive: 0x2f6f6a, ei: 0.5 });   // phosphor instrument faces
+      mbox(g, 0, BAND0 + 0.20, 10.02, 1.28, 0.38, 0.09, GLOW).rotation.x = -0.30;    // main panel, raked to the crew
+      mbox(g, 0, BAND0 + 0.44, 9.84, 1.24, 0.10, 0.30, DECK);                        // glareshield coaming
+      [-1, 1].forEach(function (s) {
+        mbox(g, s * 0.40, BAND0 + 0.22, 9.93, 0.34, 0.20, 0.06, GLOW).rotation.x = -0.30;   // MFD / stores bezels
+      });
+      mbox(g, 0, BAND0 + 0.16, 9.28, 0.30, 0.30, 0.70, DECK);                        // centre pedestal
+      mbox(g, 0, BAND0 + 0.34, 9.55, 0.24, 0.08, 0.24, GLOW).rotation.x = -0.20;     // throttle quadrant face
+      [-1, 1].forEach(function (s) {
+        mbox(g, s * 0.36, BAND0 + 0.22, 8.66, 0.44, 0.52, 0.12, DECK).rotation.x = -0.14;   // crew seat backs
+      });
+    }
 
     // ===================== SPINE & DORSAL FILLET =====================
     // A raised spine running back from the deck, then a fillet that RISES aft
@@ -607,6 +673,22 @@
     tbox(g, 0, 1.55, 0.2, 1.9, 1.6, 4.4, { nz: 0.75, tz: 0.8, bot: 0.85 }, cm(M.olive));
     tbox(g, 0, 1.5, 2.5, 1.6, 1.2, 1.8, { nz: 0.5, top: 0.6 }, GLASS);
     box(g, 0, 0.95, 2.6, 1.2, 0.55, 1.2, M.oliveD);       // chin/avionics block
+    // COCKPIT — the greenhouse is REAL glass now, and forward of the cabin's
+    // front face (z 2.4) it enclosed a metre of nothing: from the tarmac you
+    // looked through the windscreen and out the far side of its own inner wall.
+    // Same cure and the same TRIM bucket as the fighter tub above — static
+    // boxes, no collider, no new material, no rng. What is here is what you
+    // actually see through a helicopter windscreen, front to back: a raked
+    // instrument panel at the base of the screen, the glareshield capping it,
+    // the centre pedestal between the seats, and the crew seat backs standing
+    // against the cabin bulkhead. Every box is sized against the canopy's own
+    // taper (half-width 0.8·zt·(1−0.4·vy), zt = 1−0.5f) so nothing pokes out
+    // through the glass it is meant to sit behind.
+    const TRIM = vmat("interior", 0x0d0e10);
+    mbox(g, 0, 1.55, 2.92, 0.90, 0.44, 0.09, TRIM).rotation.x = -0.25;   // instrument panel, raked toward the crew
+    mbox(g, 0, 1.84, 2.78, 0.86, 0.08, 0.26, TRIM);                      // glareshield coaming
+    mbox(g, 0, 1.36, 2.60, 0.24, 0.30, 0.52, TRIM);                      // centre pedestal (sits on the chin block)
+    [-1, 1].forEach(function (s) { mbox(g, s * 0.30, 1.66, 2.48, 0.40, 0.56, 0.10, TRIM); });   // crew seat backs
     // engine deck + twin exhaust stubs
     box(g, 0, 2.55, -0.3, 1.5, 0.55, 2.8, M.oliveD);
     [-1, 1].forEach(function (s) { mcyl(g, s * 0.62, 2.62, -1.5, 0.15, 0.15, 0.5, GUN, 8).rotation.x = Math.PI / 2; });

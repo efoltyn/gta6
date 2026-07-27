@@ -683,6 +683,157 @@
     }
   };
 
+  /* ==========================================================================
+     THE ORDNANCE LAW — CBZ.ordnanceSite / ordnanceDropVel / ordnanceSeek.
+
+     OWNER (2026-07-27, verbatim): "bombs should drop straight down and missiles
+     on the military jets and helicopters should have the same homing as the
+     rpg."
+
+     Two questions, and until now EVERY release in this game answered them
+     privately, in its own file, in its own words:
+
+       1. WHAT VELOCITY does a store leave the aircraft with?
+          strategic.js wrote `vx: c.vx, vy: c.vy - 1.5, vz: c.vz` in dropPayload
+          and then RE-TYPED the identical triple in predictWalk — which is the
+          same class of bug that file already documents and fixed once (the
+          walk FX guessing the fall with a different formula than the rounds
+          flew). Two copies of one rule is one rule waiting to disagree.
+       2. WHO does a missile chase?
+          Four launchers each re-type the same undefined/null/value dance over
+          CBZ.lockonMissileSeek, and every one of them has to remember that
+          UNDEFINED means "the lock system is off, run your legacy acquire" and
+          NULL means "the system is on and you have no red lock, fly straight."
+          Get that inverted once and homing either never fires or never stops.
+
+     So both are one function each, and adoption REPLACES the line the caller
+     already wrote (BLOCK LAW rule 1). Every call also REGISTERS its site, so
+     CBZ.ordnanceAudit() counts what the world actually wired rather than what a
+     comment claims — and a site that registers is a site that ran.
+
+     WHY BOMBS FALL STRAIGHT (BOMBS_DROP_STRAIGHT). Real ordnance keeps the
+     aeroplane's velocity, and that IS what strategic.js modelled: from a 300 m
+     release at its GRAV 14 the fall takes 6.55 s, so a 105 m/s bomber threw its
+     bombs 688 m downrange and the crater arrived at 49 degrees off vertical —
+     a glide-in, a kilometre ahead of where you were looking. The owner's law
+     overrides the ballistics: a bomb belongs UNDER the bomber. The residual is
+     not zero, and that is deliberate — at literal zero the store separates aft
+     at the full airframe speed and after six frames it is 10 m behind the bay,
+     which reads as a round EJECTED BACKWARD out of the tail rather than one
+     that fell out. DROP_RESIDUAL 0.08 gives 55 m of downrange over that same
+     6.55 s fall and an impact 5.2 degrees off vertical (was 48.9) — the first
+     half-second still reads as "it left the bay", and everything after it is a
+     vertical drop. THE RESIDUAL ONLY EVER REMOVES MOTION THAT IS NOT DOWNWARD:
+     a DIVE is inherited in full (it pushes the store down, which is the
+     direction the owner asked for), a CLIMB is scaled by the same residual so a
+     zoom-climb release cannot toss a bomb upward first.
+
+     WHY MISSILES HOME LIKE THE RPG (MIL_MISSILE_HOMING). systems/lockon.js has
+     been the ONE targeting path since it shipped, and its own header names the
+     two hooks. This block does not add a third: ordnanceSeek is a THIN wrapper
+     that calls the CBZ.* exports live (never a cached local — childsafe.js
+     wraps both of them, and a cached reference would silently outlive the wrap)
+     and preserves the contract exactly. `legacy` is the caller's own pull-time
+     acquire, run only on UNDEFINED, so a lock-off world is byte-identical.
+
+     Flags: CBZ.CONFIG.BOMBS_DROP_STRAIGHT · CBZ.CONFIG.MIL_MISSILE_HOMING —
+     one-line reverts, both defaulted here rather than in src/config.js.
+  ========================================================================== */
+  if (CBZ.CONFIG.BOMBS_DROP_STRAIGHT == null) CBZ.CONFIG.BOMBS_DROP_STRAIGHT = true;
+  if (CBZ.CONFIG.MIL_MISSILE_HOMING == null) CBZ.CONFIG.MIL_MISSILE_HOMING = true;
+  const DROP_RESIDUAL = 0.08;        // fraction of airframe velocity a released store keeps
+  const DROP_EJECT = 1.5;            // m/s the bay physically pushes it down (was inline in strategic.js)
+  function dropStraight() { return CBZ.CONFIG.BOMBS_DROP_STRAIGHT !== false; }
+  function milHoming() { return CBZ.CONFIG.MIL_MISSILE_HOMING !== false; }
+
+  // ---- the site registry. Sites declare themselves the first time they ask a
+  // question; the audit reports them. Registering is idempotent by id.
+  const ORD_SITES = [];
+  function ordSite(id, cls) {
+    for (let i = 0; i < ORD_SITES.length; i++) if (ORD_SITES[i].id === id) return ORD_SITES[i];
+    const s = { id: String(id || "?"), cls: cls === "missile" ? "missile" : "bomb", calls: 0, homed: 0 };
+    ORD_SITES.push(s);
+    return s;
+  }
+  CBZ.ordnanceSite = function (id, cls) { return ordSite(id, cls); };
+
+  // THE RELEASE VELOCITY. Replaces the {vx, vy, vz} triple a bomb-bay site
+  // writes. `out` is a caller-owned scratch object (no allocation per release);
+  // omit it and one is made. `craft` is any record carrying vx/vy/vz — the
+  // flight model's real world velocity, so this always agrees with what the
+  // airframe is doing.
+  //   opts.eject   — m/s of downward bay kick (default DROP_EJECT)
+  //   opts.residual— override the horizontal keep-fraction (guided kits want more)
+  CBZ.ordnanceDropVel = function (id, craft, out, opts) {
+    const s = ordSite(id, "bomb"); s.calls++;
+    out = out || { vx: 0, vy: 0, vz: 0 };
+    opts = opts || {};
+    const ax = (craft && craft.vx) || 0, ay = (craft && craft.vy) || 0, az = (craft && craft.vz) || 0;
+    const eject = opts.eject == null ? DROP_EJECT : +opts.eject;
+    if (!dropStraight()) {                       // legacy ballistic release, byte-identical
+      out.vx = ax; out.vy = ay - eject; out.vz = az;
+      return out;
+    }
+    const k = opts.residual == null ? DROP_RESIDUAL : Math.max(0, Math.min(1, +opts.residual));
+    out.vx = ax * k;
+    out.vz = az * k;
+    // a DIVE is kept whole (it is downward); a CLIMB is scaled by the residual
+    out.vy = (ay < 0 ? ay : ay * k) - eject;
+    return out;
+  };
+
+  // WHO THE MISSILE CHASES. One wrapper over systems/lockon.js, with the RPG's
+  // exact three-state contract intact:
+  //   undefined ⇒ the lock system is absent/disabled → run opts.legacy (the
+  //               caller's own pull-time acquire); byte-identical old behaviour
+  //   null      ⇒ system on, no RED lock → fly straight (owner: "no lock, no homing")
+  //   function  ⇒ RED lock → proportional homing on a live seek getter
+  // `hand` picks which of lockon's two twins to ask: "missile" (the pooled
+  // military round, with .turnRate + a proximity fuse) or "rocket" (the RPG's
+  // record shape). Both are read off CBZ every call so childsafe.js's wraps hold.
+  CBZ.ordnanceSeek = function (id, opts) {
+    const s = ordSite(id, "missile"); s.calls++;
+    opts = opts || {};
+    if (!milHoming()) return typeof opts.legacy === "function" ? opts.legacy() : null;
+    const fn = opts.hand === "rocket" ? CBZ.lockonFireTarget : CBZ.lockonMissileSeek;
+    let seek;
+    if (typeof fn === "function") { try { seek = fn(); } catch (e) { seek = undefined; } }
+    if (seek === undefined) return typeof opts.legacy === "function" ? opts.legacy() : null;
+    if (seek) s.homed++;
+    return seek || null;
+  };
+
+  // The DEFAULT channel: any launcher that calls cityFireMissile without naming
+  // itself lands here (today that is city/modshop.js's fitted car launcher).
+  // Declared at LOAD so the audit reports the world's real wiring before a shot
+  // is fired — an audit you have to shoot to populate is a test, not a census.
+  ordSite("aircraft:fire-missile", "missile");
+
+  // RATCHET. bombSites/missileSites are how many release sites in the world have
+  // adopted the shared law; bombsStraight/missilesHoming are how many of them the
+  // live flags actually put on the owner's behaviour, so flipping a flag OFF is
+  // visible in the number rather than hidden behind it. `unguidedResidual` is the
+  // horizontal keep-fraction in force (1 = the old full-lead ballistic release).
+  // bombSites and missileSites may only ever go UP.
+  CBZ.ordnanceAudit = function () {
+    let bombSites = 0, bombsStraight = 0, missileSites = 0, missilesHoming = 0;
+    const sites = [];
+    for (let i = 0; i < ORD_SITES.length; i++) {
+      const s = ORD_SITES[i];
+      if (s.cls === "missile") { missileSites++; if (milHoming()) missilesHoming++; }
+      else { bombSites++; if (dropStraight()) bombsStraight++; }
+      sites.push({ id: s.id, cls: s.cls, calls: s.calls, homed: s.homed });
+    }
+    return {
+      bombSites: bombSites, bombsStraight: bombsStraight,
+      missileSites: missileSites, missilesHoming: missilesHoming,
+      unguidedResidual: dropStraight() ? DROP_RESIDUAL : 1,
+      ejectMs: DROP_EJECT,
+      lockon: typeof CBZ.lockonMissileSeek === "function",
+      sites: sites,
+    };
+  };
+
   // ---- PUBLIC: player-fired missile (the F-22 / chopper salvo) --------------
   // Fire a REAL missile from (x,y,z) travelling along the direction (dx,dy,dz).
   // It reuses the exact gunship missile pool + trail + detonate(cityExplosion)
@@ -714,11 +865,18 @@
     // HOMING: if the player's aim ray is roughly on a live police gunship/jet,
     // lock it (proportional-nav-lite, same as the AI's missiles) — otherwise
     // this stays the old straight shot (a building/ground strike never homes).
-    // LOCK-ON (systems/lockon.js): a RED on-screen vehicle lock overrides that
-    // — undefined means the system is absent/disabled (legacy path, byte-
-    // identical); null means it's on with no lock (straight, no auto-homing).
-    let seek = byPlayer ? (CBZ.lockonMissileSeek ? CBZ.lockonMissileSeek() : undefined) : null;
-    if (seek === undefined) seek = byPlayer ? pickPlayerLockSeek(x, y, z, nx, ny, nz) : null;
+    // LOCK-ON (systems/lockon.js) through the ONE ordnance law above, so the
+    // jet, the helicopter, the tank and the rocket car all acquire by the same
+    // sentence the RPG does. `opts.site` is the caller's one-word adoption: it
+    // is what makes CBZ.ordnanceAudit() count THIS launcher instead of lumping
+    // every player round under one anonymous entry. The legacy branch is this
+    // module's own pull-time cone acquire, run only when the lock system is
+    // absent/disabled — so a lock-off world is byte-identical.
+    const seek = byPlayer
+      ? CBZ.ordnanceSeek(opts.site || "aircraft:fire-missile", {
+          legacy: function () { return pickPlayerLockSeek(x, y, z, nx, ny, nz); },
+        })
+      : null;
     const m = launchMissile(x, y, z, target, byPlayer, seek);
     return !!m;                                // false ⇒ pool was at MAX_MISSILES
   };
