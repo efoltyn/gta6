@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:pages": "npm run build && node tools/test-pages-build-browser.mjs"
   },
   "devDependencies": {
     "three": "^0.164.1",

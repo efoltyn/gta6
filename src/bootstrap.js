@@ -7,7 +7,7 @@
    page is served through Vite (`npm run dev` / a `vite build` bundle) —
    see vite.config.js's `cbzLegacyBridge` plugin, which injects
    `<script type="module" src="/src/bootstrap.js"></script>` (dev) or the
-   built equivalent (`/assets/bootstrap.js`, build) right before `</body>`
+   built equivalent (`assets/bootstrap.js`, build) right before `</body>`
    IN MEMORY / IN THE BUILD OUTPUT ONLY. The index.html FILE ON DISK is
    never touched, so a dumb static server (`python3 -m http.server`) still
    serves the exact byte-identical legacy game and never loads this file —

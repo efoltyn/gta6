@@ -77,10 +77,22 @@ function injectBeforeBodyClose(html, tag) {
 // server/ (a separate Node process, untouched by this wave) and not
 // node_modules (ignored/managed by npm).
 const LEGACY_COPY_DIRS = ["css", "assets", "src"];
-// Files under those dirs that are intentionally NOT copied raw because
+// Files under those dirs that are intentionally NOT copied raw, either because
 // they're already emitted by Rollup at a fixed path (see build.rollupOptions
-// below) — copying both would leave two divergent copies on disk.
-const SKIP_RAW_COPY = new Set(["src/bootstrap.js"]);
+// below — copying both would leave two divergent copies on disk), or because
+// they are AUTHORING SOURCES that no client ever fetches.
+//
+//   src/bootstrap.js ............ emitted by Rollup as assets/bootstrap.js
+//   ...ifc/rac_advanced_sample_project.ifc (40.8 MB) — the BIM source that
+//       tools/bake-official-ifc.mjs bakes into the .glb sitting next to it.
+//       city/official_assets.js loads ONLY the .glb ("Runtime IFC parsing is
+//       intentionally avoided"), so shipping the .ifc put 40.8 MB of
+//       never-fetched bytes in every deploy. The file stays in the repo — it
+//       is how the .glb gets re-baked — it just no longer rides to dist/.
+const SKIP_RAW_COPY = new Set([
+  "src/bootstrap.js",
+  "assets/official/ifc/rac_advanced_sample_project.ifc",
+]);
 
 function copyRecursive(srcDir, destDir, relBase) {
   if (!existsSync(srcDir)) return;
@@ -122,13 +134,19 @@ function cbzLegacyBridge() {
         copyRecursive(join(root, dir), join(outDir, dir), dir);
       }
       const sourceHtml = readFileSync(join(root, "index.html"), "utf8");
-      const builtHtml = injectBeforeBodyClose(sourceHtml, bootScriptTag("/assets/bootstrap.js"));
+      // Keep this relative: project Pages sites are hosted at /<repo>/, not
+      // the domain root. A leading slash worked in local preview but asked
+      // GitHub Pages for https://<owner>.github.io/assets/bootstrap.js.
+      const builtHtml = injectBeforeBodyClose(sourceHtml, bootScriptTag("assets/bootstrap.js"));
       writeFileSync(join(outDir, "index.html"), builtHtml);
     },
   };
 }
 
 export default defineConfig({
+  // Relative emitted URLs let the copied-through build run at /gta6/ on
+  // GitHub Pages as well as at / locally. Dev still serves from Vite's root.
+  base: "./",
   plugins: [cbzLegacyBridge()],
   build: {
     rollupOptions: {
@@ -137,7 +155,7 @@ export default defineConfig({
       // entry chunk's own exports, so Rollup would tree-shake them away —
       // verified empirically: without this, dist/assets/bootstrap.js loses
       // every `export` statement, silently breaking `import {registerModule}
-      // from "/assets/bootstrap.js"` for O2+). "strict" forces Rollup to
+      // from "assets/bootstrap.js"` for O2+). "strict" forces Rollup to
       // keep this chunk's exports exactly as declared, same as dev/source.
       preserveEntrySignatures: "strict",
       output: {
