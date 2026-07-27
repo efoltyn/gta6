@@ -3,8 +3,12 @@
 //
 // WHY THIS EXISTS: fighting used to live only in a hidden betting menu — a
 // feature you couldn't SEE. This puts it physically on the map, mirroring how
-// the speedway island works: a landmass you can drive/boat/walk to, with
-// on-map interaction prompts. It has a boxing ring with a LIVE, self-running
+// the speedway island works: a landmass you can DRIVE or WALK to, with
+// on-map interaction prompts. (This line used to say "drive/boat/walk" and
+// two thirds of it were false: there was no road record and there is no water
+// within 220 m of this place. Driving is real now — see THE SITE below. There
+// is no boat and there must not be one; a pier on dry land is a lie.)
+// It has a boxing ring with a LIVE, self-running
 // NPC bout (the showcase for the improved fight poses: kicks, blocks, dodges,
 // staggers, KO crumples), an MMA cage the player can step into, a beast pit
 // that stages creature-vs-creature bouts via CBZ.creatureFight, and a bounded
@@ -60,6 +64,18 @@ if(CFG.ARENA_CROWD_EVENT==null)CFG.ARENA_CROWD_EVENT=true;
 // ARENA_CROWD_PANIC — a seated spectator can get OUT of the seat and run.
 // OFF → the old behaviour where a body in a chair is stuck in it forever.
 if(CFG.ARENA_CROWD_PANIC==null)CFG.ARENA_CROWD_PANIC=true;
+// ARENA_SITE — THE ARRIVAL. OWNER: "the fight arena is not very intentional
+// feeling right now." The BUILDING was finished (a 20-tier bowl, a concourse,
+// a roof) and the SITE was never built at all: the header three lines above
+// promises a landmass "you can drive/boat/walk to" and only WALK was ever
+// true, there was no perimeter, no gate, no parking, no keep-out over the
+// beast pit, and the entire ~30 m ring of flat paved apron between the facade
+// and the island edge held nothing whatsoever. This flag owns all of it —
+// the drivable causeway and its road record, the perimeter fence, the gate,
+// the monument, the car park, the site lamps, the service yard and the people
+// who work the front door. Off → the pre-fix walk-in island, exactly as it
+// shipped.
+if(CFG.ARENA_SITE==null)CFG.ARENA_SITE=true;
 // (arena_venue.js self-defaults ARENA_VENUE_V2 / ARENA_CROWD_PROXY /
 //  ARENA_LIGHT_RIG / ARENA_JUMBOTRON — the building half of the same feature.)
 
@@ -109,7 +125,38 @@ var VENUE_REACH = 118;
 var RING_SIM    = Math.hypot(RX-CX,RZ-CZ)+VENUE_REACH+8;   // ~158
 var PIT_SIM     = Math.hypot(PX-CX,PZ-CZ)+VENUE_REACH+8;   // ~180
 
+// ============================================================== THE SITE
+// VEHICLE ACCESS IS HONEST HERE, AND THAT WAS CHECKED, NOT ASSUMED. The file
+// header calls this an island reachable by "drive/boat/walk"; none of those
+// three words survives contact with the map. (a) There is NO WATER anywhere
+// near it — the coastline at z = -950 runs at x ~ +/-260 (city/continent.js's
+// bay ring) and everything east of that is dry backcountry, so the "island" is
+// a 120 m concrete disc standing on land and a BOAT ARRIVAL WOULD BE A LIE.
+// (b) The Mercy Causeway — a real 24 m, 3+3, divided concrete highway
+// (city/biome_snow.js) — runs north-south at x = 470 and its EAST KERB IS
+// x = 482, which is exactly where CW_X0, the arena causeway's west end, already
+// sat. The two decks have been butt-jointed for the venue's whole life with no
+// road record between them, which is why no car has ever driven here and why
+// roadPick, roadSegmentAt, the junction pass and the utility/lamp walk have all
+// been blind to the approach. So the causeway becomes a REAL ROAD: one record
+// from the highway centreline to inside the venue's own region (the
+// destination rule in roadrules.js covers the venue end; the Mercy Causeway and
+// Ironjaw Causeway regions are CONNECTORS by name and are exempt by
+// construction), plus a short ramp so the 0.40 deck meets the highway at grade.
+// KNOWN, NOT FIXED, AND NOT OURS: biome_snow.js flanks the Mercy deck with two
+// 2.2 m x 0.6 m snow berms running its whole length, and the east one (x
+// 482.1..484.3) crosses the mouth of this junction 0.2 m proud of our 0.40 deck.
+// It is a visual mesh with no collider. The one-line fix is a z-gap in that
+// berm at the junction and it belongs in biome_snow.js.
+var ROAD_X0=470;                     // Mercy Causeway centreline (the T-junction)
+var ROAD_X1=CX-98;                   // stops 22 m inside the venue region (a dock)
+var RAMP_X0=477.5;                   // where the deck lifts off the highway
+var SITE_INSET=3.5;                  // how far inside the walkable apron the site sits
+var APRON_FALLBACK=[[30,107],[60,94],[82,75],[98,53],[107,30]];
+var FACE_FALLBACK={x:76.7,z:85.7};   // recomputed from venue.metrics when present
+
 var arenaRoot=null, venue=null;
+var siteInfo=null;                   // {fencePanels, gates, bays, keepouts, park:[…]}
 var redCh=null, blueCh=null, refCh=null;
 
 function note(msg,secs,opts){ if(CBZ.city&&typeof CBZ.city.note==="function")CBZ.city.note(msg,secs||3,opts); }
@@ -286,6 +333,19 @@ CBZ.addLandmass(function(city){
   // approach ramp: causeway deck (CW_Y) up onto the arena apron (PY)
   concrete.push({x:CW_X1+3,y:(CW_Y+PY)/2-0.5,z:CZ,sx:14,sy:1.1,sz:15,rz:0.05});
   plat(CW_X1-6,CZ-7.4,CW_X1+8,CZ+7.4,PY,{axis:"x",x0:CW_X1-6,x1:CW_X1+8,y0:CW_Y,y1:PY});
+  // WEST TRANSITION — the deck used to simply STOP at x = 482 with a 0.40 lip
+  // against the Mercy highway (the header comment above called it "a 0.40 step
+  // off the water road"; the thing west of it is not water, it is a six-lane
+  // road). A road meets a road at grade, so a 4.5 m wedge takes the deck down
+  // to the highway surface and a ramp platform makes the physics agree with it.
+  if(CFG.ARENA_SITE){
+    concrete.push({x:(RAMP_X0+CW_X0)/2,y:CW_Y/2-0.28,z:CZ,sx:CW_X0-RAMP_X0,sy:0.62,sz:16,
+                   rz:Math.atan2(CW_Y,CW_X0-RAMP_X0)});
+    plat(RAMP_X0,CZ-7.4,CW_X0+0.6,CZ+7.4,CW_Y,{axis:"x",x0:RAMP_X0,x1:CW_X0+0.6,y0:0,y1:CW_Y});
+    // kerbs either side of the throat, so the junction has an edge
+    dark.push({x:(RAMP_X0+CW_X0)/2,y:CW_Y*0.5,z:CZ-8.1,sx:CW_X0-RAMP_X0,sy:0.34,sz:0.6});
+    dark.push({x:(RAMP_X0+CW_X0)/2,y:CW_Y*0.5,z:CZ+8.1,sx:CW_X0-RAMP_X0,sy:0.34,sz:0.6});
+  }
 
   // ---- THE BUILDING (raked bowl, concourse, roof, lights, crowd) ----------
   if(CBZ.arenaVenue&&typeof CBZ.arenaVenue.build==="function"){
@@ -518,6 +578,297 @@ CBZ.addLandmass(function(city){
     }
   })();
 
+  // ============================================================== THE SITE ==
+  // The arrival sequence, built OUTWARD from the building on ground that was
+  // already there. arena_venue.js flattens and paves a disc of radius 112 and
+  // registers a walkable platform staircase over it, while the bowl's facade
+  // only reaches 76.7 (x) / 85.7 (z) — so there is a 26-35 m deep paved ring
+  // all the way around the venue, terrain-gated, colliderless and completely
+  // empty. Everything below stands on THAT ring; not one new square metre of
+  // terrain work is done, and every extent is READ OFF venue.metrics (faceX /
+  // faceZ / apron) rather than re-typed, so re-tiering the bowl moves the
+  // fence, the gate and the car park with it.
+  (function(){
+    if(!CFG.ARENA_SITE)return;
+    var VS=CBZ.venueSite;
+    var M=(venue&&venue.metrics)||null;
+    siteInfo={fencePanels:0,gates:0,bays:0,keepouts:0,park:[]};
+
+    // ---- 0. KEEP-OUTS come first because they are the one part that does not
+    //         depend on the building existing. A wandering civilian has no
+    //         business standing in the beast pit, in the ring or on the cage
+    //         mat, and until now nothing said so: registerNoSpawnZone had
+    //         never been called from this file. They are `civ`, so posted
+    //         staff, fighters and the referee are unaffected — and a `civ`
+    //         zone is reported apart from a hard perimeter by
+    //         roadClearanceAudit, which is right: this bars people, not roads.
+    if(typeof CBZ.registerNoSpawnZone==="function"){
+      var ko=[[RX,RZ,RING_APRON+1.4,"ironjaw-ring"],
+              [CGX,CGZ,CAGE_MAT_R+1.4,"ironjaw-cage"],
+              [PX,PZ,PIT_WALL_R+1.4,"ironjaw-pit"]];
+      for(var ki=0;ki<ko.length;ki++){
+        CBZ.registerNoSpawnZone(city,{cx:ko[ki][0],cz:ko[ki][1],r:ko[ki][2],
+          civ:true,label:ko[ki][3]});
+        siteInfo.keepouts++;
+      }
+    }
+    // THE RING ONLY EXISTS IF THE BOWL DID. arena_venue.js is what paves the
+    // 112 m apron and registers the platform staircase this whole site stands
+    // on; with ARENA_VENUE_V2 off the fallback is a 70 m octagon plaza, and a
+    // perimeter at 103.5 would hang in the air. Degrade to the keep-outs.
+    if(!M)return;
+    var APRON=M.apron||APRON_FALLBACK;
+    var FACE_X=M.faceX||FACE_FALLBACK.x;
+    var MARQ=M.marqueeX||(FACE_X+9);
+
+    // THE RING IS A STAIRCASE, NOT A CIRCLE. The apron's walkable platforms are
+    // a stack of rectangles (107 wide on the +/-x axis, only 30 at the poles),
+    // so a perimeter drawn as a circle would leave a third of itself hanging
+    // over a 0.9 m drop onto the island top. This walks the same bands the
+    // platforms were registered from, inset one body-width.
+    function ringPath(inset){
+      var i,p=[],hx=[],zz=[],n=APRON.length;
+      for(i=0;i<n;i++){ hx.push(APRON[i][1]-inset); zz.push(APRON[i][0]-inset); }
+      p.push({x:CX+hx[0],z:CZ-zz[0]});
+      for(i=0;i<n-1;i++){ p.push({x:CX+hx[i],z:CZ+zz[i]}); p.push({x:CX+hx[i+1],z:CZ+zz[i]}); }
+      p.push({x:CX+hx[n-1],z:CZ+zz[n-1]});
+      p.push({x:CX-hx[n-1],z:CZ+zz[n-1]});                       // north cap
+      for(i=n-1;i>=1;i--){ p.push({x:CX-hx[i],z:CZ+zz[i-1]}); p.push({x:CX-hx[i-1],z:CZ+zz[i-1]}); }
+      p.push({x:CX-hx[0],z:CZ-zz[0]});
+      for(i=0;i<n-1;i++){ p.push({x:CX-hx[i],z:CZ-zz[i]}); p.push({x:CX-hx[i+1],z:CZ-zz[i]}); }
+      p.push({x:CX-hx[n-1],z:CZ-zz[n-1]});
+      p.push({x:CX+hx[n-1],z:CZ-zz[n-1]});                       // south cap
+      for(i=n-1;i>=1;i--){ p.push({x:CX+hx[i],z:CZ-zz[i-1]}); p.push({x:CX+hx[i-1],z:CZ-zz[i-1]}); }
+      return p;
+    }
+    var RING_X=APRON[0][1]-SITE_INSET;      // 103.5 — the west/east faces
+    var GATE_X=CX-RING_X, SVC_X=CX+RING_X;
+
+    // ---- 1. the perimeter, and the TWO places you cross it -----------------
+    if(VS&&VS.fence){
+      var fr=VS.fence({
+        root:root, name:"ironjaw-perimeter", path:ringPath(SITE_INSET), closed:true,
+        y:PY, h:2.6, pitch:4.0, colliderPitch:12, solid:solid,
+        post:0x39404a, fabric:0xa8b0ba,
+        gaps:[{x:GATE_X,z:CZ,half:11},{x:SVC_X,z:CZ,half:7}]
+      });
+      if(fr)siteInfo.fencePanels=fr.panels;
+    }
+    // ---- 2. the gate. It stands 1.5 m past the top of the causeway ramp, so
+    //         you come up the ramp and the venue BEGINS. -------------------
+    var gate=null;
+    if(VS&&VS.gatehouse){
+      gate=VS.gatehouse({
+        root:root, x:GATE_X, z:CZ, y:PY, yaw:-Math.PI/2, half:8, h:5.4,
+        booth:true, arms:true, arch:true, title:"Ironjaw Arena",
+        bg:0x0c0f14, fg:0xffd24a, conc:0x8b9199, solid:solid, name:"ironjaw-gate"
+      });
+      if(gate)siteInfo.gates=1;
+      // the service gate at the BACK: piers only, no booth, no beam. A back of
+      // house that looks like a front of house is what makes a venue read fake.
+      VS.gatehouse({root:root,x:SVC_X,z:CZ,y:PY,yaw:Math.PI/2,half:5,h:4.2,
+        arch:false,booth:false,arms:false,conc:0x7c8189,solid:solid,name:"ironjaw-service-gate"});
+    }
+    // ---- 3. the sign you read at the JUNCTION, not at the door -------------
+    if(VS&&VS.monument){
+      // 22 m south of the road centreline: the board is 20 m long and it runs
+      // ALONG z at this yaw, so anything closer would stand in the causeway.
+      VS.monument({root:root,x:490,z:CZ-22,y:0,yaw:-Math.PI/2,
+        w:18,h:4.8,lift:1.6,title:"Ironjaw Arena",
+        sub:"Boxing · MMA · The Beast Pit",bg:0x0c0f14,fg:0xffd24a,accent:0xd8a020,
+        solid:solid,name:"ironjaw-monument"});
+    }
+    // ---- 4. THE CAR PARK, and its size is the GROUND's answer, not a wish.
+    //         The lot is boxed on three sides by things that were already
+    //         there: the perimeter to the west (the apron's 94-unit band once
+    //         |z| passes 30), the bowl's own facade to the east (a corner arc
+    //         at this bearing, so it comes no further west than CX-76.7), and
+    //         arena_venue.js's marquee + ticket booths to the north, which own
+    //         z = CZ +/- 16. Four stalls wide by four rows is what is left:
+    //         SIXTEEN bays, not the sixty a bigger rectangle would have
+    //         painted and never filled. --------------------------------------
+    var PARK_COLS=4, PARK_ROWS=4;
+    var PARK_X0=CX-89, PARK_Z0=CZ-58;
+    var lot=(VS&&VS.bays)?VS.bays({x0:PARK_X0,z0:PARK_Z0,cols:PARK_COLS,rows:PARK_ROWS,
+                                   stallW:2.7,stallD:5.2,aisle:6.3}):null;
+    if(lot){
+      siteInfo.bays=lot.slots.length;
+      siteInfo.park=lot.slots;
+      var st;
+      for(var si2=0;si2<lot.stripes.length;si2++){
+        st=lot.stripes[si2];
+        white.push({x:st.x,y:PY+0.015,z:(st.z0+st.z1)/2,sx:0.12,sy:0.03,sz:st.z1-st.z0});
+      }
+      dark.push({x:PARK_X0+lot.w/2,y:PY+0.02,z:PARK_Z0-0.25,sx:lot.w+1.4,sy:0.16,sz:0.3});
+      dark.push({x:PARK_X0+lot.w/2,y:PY+0.02,z:PARK_Z0+lot.d+0.25,sx:lot.w+1.4,sy:0.16,sz:0.3});
+    }
+    // ---- 5. lamps: down the causeway, across the forecourt, over the lot ---
+    if(VS&&VS.lampRow){
+      var lp=[],i2;
+      for(i2=0;i2<5;i2++){                                  // the causeway deck
+        var lxc=CW_X0+8+i2*8;
+        lp.push({x:lxc,z:CZ-7.0,fx:0,fz:1});
+        lp.push({x:lxc,z:CZ+7.0,fx:0,fz:-1});
+      }
+      VS.lampRow({root:root,pts:lp,y:CW_Y,poleH:5.6,reach:1.9,rise:0.30,poleR:0.11,solid:solid});
+      lp=[];
+      for(i2=-1;i2<=1;i2+=2){                               // the forecourt
+        lp.push({x:CX-96,z:CZ+i2*11,fx:0,fz:-i2});
+        lp.push({x:CX-84,z:CZ+i2*11,fx:0,fz:-i2});
+      }
+      lp.push({x:CX-96,z:CZ+24,fx:0,fz:-1});
+      // Over the lot: on the NORTH kerb and on the back-to-back line between
+      // rows 1 and 2. Never in an aisle — that is where the cars turn.
+      // Over the lot: on its two KERBS, never on the back-to-back line between
+      // rows (that divider is 0 m wide here, so a pole there stands in the
+      // noses of two rows of cars) and never in an aisle.
+      if(lot)for(i2=0;i2<3;i2++){
+        var plx=PARK_X0+lot.w*(i2+0.5)/3;
+        lp.push({x:plx,z:PARK_Z0+lot.d+1.4,fx:0,fz:-1});                 // north kerb
+        lp.push({x:plx,z:PARK_Z0-1.4,fx:0,fz:1});                        // south kerb
+      }
+      VS.lampRow({root:root,pts:lp,y:PY,poleH:6.4,reach:2.1,rise:0.32,poleR:0.12,solid:solid});
+    }
+    // ---- 6. banner masts on the forecourt (the venue's colours, standing up)
+    for(var bm=0;bm<6;bm++){
+      var bz=CZ-27+bm*10.8, bx=CX-94;
+      if(Math.abs(bz-CZ)<9){continue;}                     // keep the entry axis clear
+      steel.push({x:bx,y:PY+4.6,z:bz,sx:0.16,sy:9.2,sz:0.16});
+      gold.push({x:bx,y:PY+9.3,z:bz,sx:0.34,sy:0.34,sz:0.34});
+      (CBZ.hash01(bx,bz,0x1A)<0.5?redP:blueP).push(
+        {x:bx+0.55,y:PY+7.0,z:bz,sx:1.05,sy:3.4,sz:0.06});
+      solid(bx-0.2,bz-0.2,bx+0.2,bz+0.2,PY,PY+2.2);
+    }
+    // ---- 7. stalls on the north forecourt, benches, planters --------------
+    function stall(sx2,sz2,face,tone){
+      dark.push({x:sx2,y:PY+1.35,z:sz2,sx:3.6,sy:2.7,sz:2.4});        // kiosk body
+      (tone?redP:blueP).push({x:sx2,y:PY+2.85,z:sz2,sx:4.4,sy:0.22,sz:3.4}); // awning
+      steel.push({x:sx2,y:PY+2.0,z:sz2+face*1.35,sx:3.0,sy:0.12,sz:0.5});    // counter
+      white.push({x:sx2,y:PY+2.62,z:sz2+face*1.7,sx:3.4,sy:0.5,sz:0.08});    // menu board
+      solid(sx2-1.9,sz2-1.3,sx2+1.9,sz2+1.3,PY,PY+2.8);
+      // the vendor stands BEHIND the counter, facing the customer side
+      return {x:sx2,z:sz2+face*0.85,face:face>0?0:Math.PI};
+    }
+    var merch=stall(CX-95,CZ+16,1,true);
+    var food =stall(CX-95,CZ+25,1,false);
+    if(CBZ.furnish){
+      // benches face the entry axis; the boxes go into THIS file's root and
+      // this file's collider ledger, never materials.js's global scene.
+      var furnBox=function(fx,fy,fz,fw,fh,fd,fc,fo){
+        fo=fo||{};
+        var mo=(fo.emissive!=null)?{emissive:fo.emissive,ei:fo.ei!=null?fo.ei:0.5}:null;
+        var mm=new THREE.Mesh(new THREE.BoxGeometry(fw,fh,fd),mat(fc,mo));
+        mm.position.set(fx,fy,fz); mm.castShadow=!!fo.cast; mm.receiveShadow=true;
+        // deliberately NO userData: these are plain static scenery, so
+        // core/batch.js is allowed to fold all of them into the city merge
+        // (a bench is ~5 boxes and 4 benches spared would be 20 draw calls).
+        root.add(mm);
+        if(fo.solid)solid(fx-fw/2,fz-fd/2,fx+fw/2,fz+fd/2,fo.y0,fo.y1);
+        return mm;
+      };
+      // The north forecourt is the one part of the ring the car park does NOT
+      // want, so it gets the seating: four benches facing back down the entry
+      // axis, between the stalls and the facade.
+      for(var bi=0;bi<4;bi++){
+        var byz=CZ+13+bi*8;
+        try{ CBZ.furnish.bench(CX-86,PY,byz,Math.PI,
+          {box:furnBox,solid:true,len:2.2,tone:{wood:0x6b5a42,frame:0x3a3f47}}); }catch(e){}
+      }
+    }
+    // planters, in a straight run down the forecourt's west edge — inside the
+    // 107-unit apron band, so every one of them stands on real platform
+    var PLANT=[-22,-14,14,22,29];
+    for(var pl2=0;pl2<PLANT.length;pl2++){
+      var px2=CX-99, pz2=CZ+PLANT[pl2];
+      concrete.push({x:px2,y:PY+0.35,z:pz2,sx:2.2,sy:0.7,sz:2.2});
+      dark.push({x:px2,y:PY+0.76,z:pz2,sx:1.9,sy:0.16,sz:1.9});
+      solid(px2-1.1,pz2-1.1,px2+1.1,pz2+1.1,PY,PY+0.7);
+    }
+    // ---- 8. THE BACK OF HOUSE. A venue whose every side looks like the front
+    //         has no front. The east ring gets what an arena's east ring has:
+    //         skips, stillages, a loading dock and nobody's idea of a plaza. --
+    (function serviceYard(){
+      var yx=CX+FACE_X+9;
+      concrete.push({x:yx+5,y:PY+0.06,z:CZ,sx:22,sy:0.12,sz:30});     // yard slab
+      for(var d2=0;d2<5;d2++){
+        var dz2=CZ-13+d2*6.5;
+        dark.push({x:yx,y:PY+0.9,z:dz2,sx:2.2,sy:1.8,sz:4.4});         // skip
+        steel.push({x:yx,y:PY+1.85,z:dz2,sx:2.4,sy:0.14,sz:4.6});      // lid
+        solid(yx-1.2,dz2-2.3,yx+1.2,dz2+2.3,PY,PY+1.9);
+      }
+      for(var cr=0;cr<7;cr++){
+        var cx2=yx+7+(cr%3)*2.4, cz2=CZ-9+Math.floor(cr/3)*7.5;
+        var ch2=0.9+CBZ.hash01(cx2,cz2,0x2B)*0.7;
+        concrete.push({x:cx2,y:PY+ch2/2,z:cz2,sx:1.8,sy:ch2,sz:1.8,
+                       ry:CBZ.hash01(cx2,cz2,0x2C)*0.5-0.25});
+        solid(cx2-1.0,cz2-1.0,cx2+1.0,cz2+1.0,PY,PY+ch2);
+      }
+      // Loading dock: a raised platform OUTSIDE the facade with a roller door
+      // on it. It has to stand clear of CX+FACE_X — that is the facade's OUTER
+      // face and the concourse begins 2 units behind it, so a dock authored
+      // inward would be a truck bay inside the building.
+      concrete.push({x:CX+FACE_X+2.4,y:PY+0.6,z:CZ,sx:4.4,sy:1.2,sz:9});
+      plat(CX+FACE_X+0.2,CZ-4.5,CX+FACE_X+4.6,CZ+4.5,PY+1.2);
+      // A 1.2 m dock is well over physics.js's 0.45 STEP_UP, so it needs steps
+      // or it is a platform nothing can reach. Three treads at 0.4 each.
+      for(var tr=0;tr<3;tr++){
+        var ty=PY+0.4*(tr+1), tx2=CX+FACE_X+5.0+(2-tr)*0.9;
+        concrete.push({x:tx2,y:ty-0.2,z:CZ+5.6,sx:0.9,sy:0.4,sz:2.6});
+        plat(tx2-0.45,CZ+4.3,tx2+0.45,CZ+6.9,ty);
+      }
+      steel.push({x:CX+FACE_X+0.15,y:PY+2.9,z:CZ,sx:0.3,sy:3.4,sz:6.4});
+      dark.push({x:CX+FACE_X+0.6,y:PY+4.75,z:CZ,sx:1.4,sy:0.4,sz:7.2});
+    })();
+    // ---- 9. queue switchbacks feeding arena_venue.js's ticket booths -------
+    // The booths are at CX - MARQ + 2.5 and their rails now run OUTWARD (see
+    // arena_venue.js); this adds the cross-runs that turn two straight rails
+    // into a queue, on the gate side where the people arriving actually are.
+    for(var qs=0;qs<3;qs++){
+      var qx2=CX-MARQ-4.4-qs*4.8;
+      steel.push({x:qx2,y:PY+0.55,z:CZ-3.1,sx:0.09,sy:1.1,sz:0.09});
+      steel.push({x:qx2,y:PY+0.55,z:CZ+3.1,sx:0.09,sy:1.1,sz:0.09});
+      gold.push({x:qx2,y:PY+1.0,z:CZ-4.65,sx:0.07,sy:0.07,sz:3.1});
+      gold.push({x:qx2,y:PY+1.0,z:CZ+4.65,sx:0.07,sy:0.07,sz:3.1});
+    }
+    // ---- 10. the people who work the front door ---------------------------
+    if(CBZ.cityStaffVenue&&CBZ.cityStaffPost){
+      var posts=[];
+      if(gate&&gate.boothAt){
+        posts.push({id:"ironjaw:gate",job:"security guard",archetype:"security",
+          x:gate.boothAt.x,z:gate.boothAt.z,face:gate.boothAt.face,
+          opts:{wealth:0.3,aggr:0.2,floorY:PY}});
+      }
+      // AT the booths arena_venue.js already drew, not near them: the booth
+      // bodies are at mx + 2.5 (its own marquee solve), so the clerk stands on
+      // the plaza side of the window.
+      for(var tb2=-1;tb2<=1;tb2+=2){
+        posts.push({id:"ironjaw:tickets:"+(tb2>0?"n":"s"),job:"ticket seller",
+          archetype:"worker",x:CX-MARQ+2.5,z:CZ+tb2*13.5,
+          face:-Math.PI/2,pose:"table",           // facing the queue, out at -x
+          opts:{wealth:0.32,aggr:0.05,floorY:PY}});
+      }
+      posts.push({id:"ironjaw:merch",job:"street vendor",archetype:"merchant",
+        x:merch.x,z:merch.z,face:merch.face,pose:"table",
+        opts:{wealth:0.4,aggr:0.05,floorY:PY}});
+      posts.push({id:"ironjaw:food",job:"street vendor",archetype:"merchant",
+        x:food.x,z:food.z,face:food.face,pose:"table",
+        opts:{wealth:0.36,aggr:0.05,floorY:PY}});
+      if(lot){
+        // at the lot MOUTH — the north kerb, where the forecourt feeds it —
+        // rather than standing in the middle of somebody's stall.
+        posts.push({id:"ironjaw:park",job:"security guard",archetype:"worker",
+          x:PARK_X0+lot.w+2.4,z:PARK_Z0+lot.d-2.0,face:-Math.PI/2,
+          opts:{wealth:0.24,aggr:0.06,floorY:PY}});
+      }
+      CBZ.cityStaffVenue("ironjaw",{stations:posts.length,
+        note:"gate booth, 2 ticket windows, merch + food stalls, car park"});
+      for(var pi2=0;pi2<posts.length;pi2++){
+        posts[pi2].venue="ironjaw";
+        try{ CBZ.cityStaffPost(posts[pi2]); }catch(e){}
+      }
+    }
+  })();
+
   // ---- flush the shared instanced pools -----------------------------------
   instBoxes(concrete,mat(0x9aa0aa));
   instBoxes(gold,mat(0xd8a020));
@@ -575,10 +926,91 @@ CBZ.addLandmass(function(city){
     CBZ.registerCityRegion(city,{name:"Ironjaw Arena",subtitle:"Fight Complex",biome:"arena",
       kind:"circle",cx:CX,cz:CZ,r:R,pad:6});
     CBZ.registerCityRegion(city,{name:"Ironjaw Causeway",subtitle:"Arena Approach",biome:"arena",
-      kind:"rect",minX:CW_X0,maxX:CW_X1,minZ:CZ-10,maxZ:CZ+10,cx:CW_CX,cz:CZ,pad:4});
+      kind:"rect",minX:RAMP_X0,maxX:CW_X1,minZ:CZ-10,maxZ:CZ+10,cx:CW_CX,cz:CZ,pad:4});
+  }
+
+  // ---- the approach becomes a ROAD ----------------------------------------
+  // ONE record, and it buys everything a record buys in this codebase: ambient
+  // traffic through roadPick, a DERIVED T-junction with the Mercy Causeway
+  // (roadrules.js pairs a vertical and a horizontal record that overlap — the
+  // highway spans x 458..482 and this starts at its centreline, so the
+  // junction, its kerb returns and its stop bars are drawn for free by
+  // props.js), a posted limit, and the utility/lamp walk that only ever
+  // followed roads. It is legal by construction under the roads-connect-places
+  // law: its far end sits inside the venue's OWN region, which is the
+  // destination rule, and both causeway regions are CONNECTORS by name.
+  if(CFG.ARENA_SITE&&city.roads){
+    // ONE lane each way with a WIDE median, and both numbers are load-bearing
+    // rather than taste: CBZ.roadLanes puts lane 0 at medianHalf + laneW/2, so
+    // a 3.6 m median holds the gate's control island (half-width 2.5) clear of
+    // the innermost lane centre at 3.5 — an ordinary 1.2 m median would have
+    // traffic driving through the booth. Two lanes each way would not fit the
+    // 16 m deck at that median, and a venue approach does not need them.
+    city.roads.push({x:(ROAD_X0+ROAD_X1)/2,z:CZ,vertical:false,len:ROAD_X1-ROAD_X0,
+      district:"causeway",w:12,lanesPerDir:1,laneW:3.4,median:true,medianW:3.6,
+      venueSite:"ironjaw"});
   }
   return null;
 },40);
+
+// ================================================== THE CARS IN THE CAR PARK
+// DEFERRED, and not by preference: CBZ.cityMakeCar dereferences
+// CBZ.city.arena.root, and city/mode.js only assigns CBZ.city.arena AFTER
+// buildCity() RETURNS — so a car spawned from inside a landmass builder throws.
+// (island_speedway.js had exactly that bug for its whole life and its park has
+// been empty ever since; airside.js:1261 documents the same one-shot trick.)
+// `parkRoot` rather than a done-flag, because cityAddParkedCar purges every
+// fixture whose arena root is stale, so a world rebuild has to re-fill.
+var ARENA_PARK_FILL=0.65;
+var parkRoot=null;
+CBZ.onUpdate(55.44,function(){
+  if(!CFG.ARENA_FIGHTS||!CFG.ARENA_SITE)return;
+  if(!CBZ.game||CBZ.game.mode!=="city")return;
+  if(!CBZ.city||!CBZ.city.arena||!CBZ.cityAddParkedCar)return;
+  if(!siteInfo||!siteInfo.park.length)return;
+  if(parkRoot===CBZ.city.arena.root)return;
+  parkRoot=CBZ.city.arena.root;
+  // WHICH BAYS ARE TAKEN IS A POSITION HASH. This runs long after the build,
+  // so a draw on any shared seeded stream here would be order-dependent and
+  // could not be byte-identical per seed; hash01 is position-pure and is.
+  for(var i=0;i<siteInfo.park.length;i++){
+    var s=siteInfo.park[i];
+    if(CBZ.hash01&&CBZ.hash01(s.x,s.z,0x1A7)>ARENA_PARK_FILL)continue;
+    var c=null;
+    try{ c=CBZ.cityAddParkedCar(s.x,s.z,s.heading,{}); }catch(e){ c=null; }
+    if(!c)continue;
+    c._venueSite="ironjaw";
+    if(c.group)c.group.userData.arenaPark=true;
+  }
+});
+
+// ------------------------------------------------- the shared site census
+// One function pushed into CBZ.venueSite, which is what CBZ.venueSiteAudit()
+// reads — so a third venue never costs an edit to the audit (same shape as
+// CBZ.heliFleet). Everything here is a LIVE read off cityCars /
+// cityStaffPosts / city.noSpawn / city.roads: a counter kept by a build loop
+// would keep passing after the build stopped running.
+if(CBZ.venueSite&&CBZ.venueSite.census){
+  CBZ.venueSite.census("ironjaw",function(){
+    var i,parked=0,staff=0,posts=0,keepouts=0,roads=0;
+    var cars=CBZ.cityCars||[];
+    for(i=0;i<cars.length;i++)if(cars[i]&&cars[i]._venueSite==="ironjaw")parked++;
+    var sp=CBZ.cityStaffPosts?CBZ.cityStaffPosts():[];
+    for(i=0;i<sp.length;i++){
+      if(!sp[i]||sp[i].venue!=="ironjaw")continue;
+      posts++; if(sp[i].ped&&!sp[i].ped.dead)staff++;
+    }
+    var A=CBZ.city&&CBZ.city.arena;
+    var ns=(A&&A.noSpawn)||[];
+    for(i=0;i<ns.length;i++)if(ns[i]&&/^ironjaw-/.test(ns[i].label||""))keepouts++;
+    var rd=(A&&A.roads)||[];
+    for(i=0;i<rd.length;i++)if(rd[i]&&rd[i].venueSite==="ironjaw")roads++;
+    return {parked:parked,bays:siteInfo?siteInfo.bays:0,staff:staff,posts:posts,
+      keepouts:keepouts,roadRecords:roads,gates:siteInfo?siteInfo.gates:0,
+      fencePanels:siteInfo?siteInfo.fencePanels:0,
+      fill:(siteInfo&&siteInfo.bays)?+(parked/siteInfo.bays).toFixed(2):0};
+  });
+}
 
 // ============================================================ BET OVERLAY UI
 var overlayEl=null;
@@ -1035,7 +1467,12 @@ function finishPit(w,l){
   var P=pitBout; if(!P||P.done)return;
   P.done=true; P.over=5;
   l.dead=true; l.hp=0;
-  if(!l.isPet&&l.group)l.group.rotation.z=1.35; // spawned loser keels over
+  // Spawned loser dies the way every animal in the game now dies — through the
+  // shared death physics (quad ragdoll or rigid tumble), never a pose snap. The
+  // rotation.z snap is the model-local PITCH axis on these rigs: 1.35 rad was
+  // literally "sit with the head pointed at the sky". Degrade path keeps it.
+  if(!l.isPet&&l.group&&CBZ.wildlifeDeathPhysics)CBZ.wildlifeDeathPhysics(l,(w&&w.pos&&l.pos)?{x:l.pos.x-w.pos.x,y:0.1,z:l.pos.z-w.pos.z}:null,5.4,null);
+  else if(!l.isPet&&l.group)l.group.rotation.z=1.35; // degrade only
   board("PIT WINNER",(w.isPet?"YOUR ":"")+prettySpecies(w.species).toUpperCase(),"IRONJAW ARENA");
   note((w.isPet?"YOUR ":"")+prettySpecies(w.species).toUpperCase()+" WINS THE PIT!",4,{urgent:true});
   if(P.kind==="pet"){

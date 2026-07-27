@@ -980,35 +980,452 @@
     box(grp, lineM, hx, 0.08, hz + 2.6, 4.4, 0.03, 1.1);
 
     // --- perimeter fence with a gate ---
-    const fIM = makeIM(fenceM, 260, { noShadow: true });
-    const meshMat = new THREE.MeshLambertMaterial({
-      map: chainLink(), transparent: false, alphaTest: 0.45, side: THREE.DoubleSide, color: 0xb9c0c8,
+    // MIGRATED onto the shared site kit (CBZ.venueSite.fence, below). This was
+    // three PlaneGeometry meshes + a private post loop whose "gate" was a
+    // fraction of a run (0.44..0.56) rather than a place — so moving the
+    // paddock entrance meant editing a percentage. The gap is now a world
+    // POINT, and the whole perimeter is one merged panel geometry instead of
+    // three. Same silhouette, two draw calls, and it is the same code the two
+    // venue frontages run.
+    fence({
+      root: grp, name: "speedway-paddock-fence",
+      path: [{ x: x0, z: z1 }, { x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }],
+      h: 2.4, pitch: 3.0, post: 0x8f969e,
+      gaps: [{ x: (x0 + x1) / 2, z: z0, half: (x1 - x0) * 0.06 }],
     });
-    function fenceRun(ax, az, bx, bz, gate) {
-      const len = Math.hypot(bx - ax, bz - az);
-      const n = Math.max(2, Math.round(len / 3.0));
-      for (let i = 0; i <= n; i++) {
-        const f = i / n;
-        if (gate && f > 0.44 && f < 0.56) continue;
-        const px = ax + (bx - ax) * f, pz = az + (bz - az) * f;
-        pushStrut(fIM, px, 0, pz, px, 2.4, pz, 0.1);
-      }
-      const geo = new THREE.PlaneGeometry(len, 2.3);
-      const m = new THREE.Mesh(geo, meshMat);
-      m.position.set((ax + bx) / 2, 1.2, (az + bz) / 2);
-      m.rotation.y = Math.atan2(bx - ax, bz - az) + Math.PI / 2;
-      const rep = m.geometry.attributes.uv;
-      const tiles = Math.max(1, Math.round(len / 2.4));
-      for (let i = 0; i < rep.count; i++) rep.setXY(i, rep.getX(i) * tiles, rep.getY(i) * 1.6);
-      rep.needsUpdate = true;
-      grp.add(m);
-    }
-    fenceRun(x0, z0, x1, z0, true);
-    fenceRun(x0, z0, x0, z1, false);
-    fenceRun(x1, z0, x1, z1, false);
-    finishIM(grp, fIM);
     return grp;
   }
+
+  // ==================================================================== //
+  //  THE SITE KIT — CBZ.venueSite                                        //
+  //                                                                       //
+  //  OWNER: "the fight arena is not very intentional feeling right now,   //
+  //  neither is the racing arena." Both BUILDINGS were already good. What //
+  //  neither had was a SITE — the designed arrival that tells you where   //
+  //  the venue starts: a perimeter you cross at ONE point, a gate         //
+  //  somebody staffs, a sign that names the place BEFORE you reach it,    //
+  //  lamps down the approach, and a car park whose painted bays and whose //
+  //  parked cars come out of the SAME solve so they can never disagree    //
+  //  (the speedway's did: 264 m of painted stalls against ten cars, and   //
+  //  those ten never spawned — see island_speedway.js).                   //
+  //                                                                       //
+  //  WHY IT LIVES IN THIS FILE: the fence / instancing / chain-link       //
+  //  machinery it needs was already here. `paddock`'s private `fenceRun`  //
+  //  is its FIRST consumer and is deleted in the same change — this is a  //
+  //  migration, not a parallel system. Every entry point is a pure draw   //
+  //  against numbers the caller already holds: nothing is registered,     //
+  //  nothing is mirrored, the caller keeps its own collider ledger (pass  //
+  //  `solid`), and every consumer guards with `CBZ.venueSite ? … : skip`  //
+  //  so adopting can never break a build.                                 //
+  //                                                                       //
+  //  DRAW-CALL BUDGET, because a site is a lot of small repeated things:  //
+  //  a whole fence (any length) is 2 — one InstancedMesh of posts and ONE //
+  //  merged panel geometry. A whole lamp row is 4, whatever its length. A //
+  //  monument is 3. A gatehouse is ~16 and is the ONE thing that spends:  //
+  //  it is the landmark you arrive AT, and there are two in the world.    //
+  //  Emissive goes on lamp lenses and the gate canopy soffit only —       //
+  //  never on a fence post.                                               //
+  // ==================================================================== //
+  //  COLLIDER CONTRACT: every entry point takes `o.solid` and calls it as
+  //  solid(minX, minZ, maxX, maxZ, y0, y1) — the (x,z,x,z) order city/ uses
+  //  everywhere. island_speedway.js's own solidBox is (minX, maxX, minZ,
+  //  maxZ) and therefore adapts; passing it in raw would swap two axes and
+  //  silently put every gate and fence collider in the wrong place.
+  const SITE_POST = 0x8f969e, SITE_MESH = 0xb9c0c8, SITE_CONC = 0x9aa0aa,
+    SITE_DARK = 0x1b1f26, SITE_STEEL = 0x2a2f38;
+
+  // Is this point inside one of the declared openings? A gap is authored in
+  // WORLD coordinates ("the road crosses here"), never as a path index, so a
+  // caller can move its road without re-counting fence panels.
+  function inGap(gaps, x, z) {
+    if (!gaps) return false;
+    for (let i = 0; i < gaps.length; i++) {
+      const g = gaps[i]; if (!g) continue;
+      const h = g.half == null ? 6 : g.half;
+      if (Math.abs(x - g.x) <= h && Math.abs(z - g.z) <= h) return true;
+    }
+    return false;
+  }
+
+  /* A PERIMETER IS A POLYLINE WITH HOLES IN IT.
+       o.root       parent
+       o.path       [{x,z}…] (>= 2 points)
+       o.closed     close the loop back to path[0]
+       o.y          ground height the fence stands on (default 0)
+       o.h          fabric height (default 2.4)
+       o.pitch      post spacing (default 3.0)
+       o.gaps       [{x,z,half}] world-space openings (gate, service road)
+       o.solid      fn(minX,minZ,maxX,maxZ,y0,y1) — the CALLER's collider ledger
+       o.colliderPitch  AABB length along the run (default 12)
+       o.post/o.fabric  colours
+     Returns {group, posts, panels, colliders, length}. */
+  function fence(o) {
+    if (!o || !o.root || !o.path || o.path.length < 2) return null;
+    const grp = new THREE.Group(); grp.name = o.name || "venue-fence";
+    o.root.add(grp);
+    const y0 = o.y || 0, h = o.h == null ? 2.4 : o.h;
+    const pitch = o.pitch || 3.0, cp = o.colliderPitch || 12;
+    const pts = o.path.slice(0);
+    if (o.closed) pts.push({ x: pts[0].x, z: pts[0].z });
+    // panel geometry is merged: ONE draw call for the whole perimeter
+    const pos = [], nor = [], uv = [], idx = [];
+    let quads = 0, posts = 0, cols = 0, total = 0;
+    // Size the post pool off the PATH, not off a round number: an InstancedMesh
+    // allocates its whole matrix buffer up front (16 floats an instance), so a
+    // blanket 4096 would hand the GPU a megabyte per fence to draw 200 posts.
+    let want = 8;
+    for (let s0 = 0; s0 + 1 < pts.length; s0++) {
+      want += Math.max(1, Math.round(Math.hypot(pts[s0 + 1].x - pts[s0].x, pts[s0 + 1].z - pts[s0].z) / pitch)) + 1;
+    }
+    const fIM = makeIM(cmat(o.post || SITE_POST), want, { noShadow: true });
+    // one contiguous stretch of standing fence, flushed into AABBs on a break
+    let runX = null, runZ = null;
+    function flushRun(ex, ez) {
+      if (runX == null || !o.solid) { runX = null; return; }
+      const len = Math.hypot(ex - runX, ez - runZ);
+      if (len < 0.5) { runX = null; return; }
+      const n = Math.max(1, Math.round(len / cp));
+      for (let i = 0; i < n; i++) {
+        const a = i / n, b = (i + 1) / n;
+        const ax = runX + (ex - runX) * a, az = runZ + (ez - runZ) * a;
+        const bx = runX + (ex - runX) * b, bz = runZ + (ez - runZ) * b;
+        o.solid(Math.min(ax, bx) - 0.16, Math.min(az, bz) - 0.16,
+                Math.max(ax, bx) + 0.16, Math.max(az, bz) + 0.16, y0, y0 + h);
+        cols++;
+      }
+      runX = null;
+    }
+    for (let s = 0; s + 1 < pts.length; s++) {
+      const a = pts[s], b = pts[s + 1];
+      const segLen = Math.hypot(b.x - a.x, b.z - a.z);
+      if (segLen < 0.01) continue;
+      total += segLen;
+      const n = Math.max(1, Math.round(segLen / pitch));
+      const yaw = Math.atan2(b.x - a.x, b.z - a.z);
+      const nx = Math.cos(yaw), nz = -Math.sin(yaw);      // panel normal
+      for (let i = 0; i < n; i++) {
+        const t0 = i / n, t1 = (i + 1) / n;
+        const x0 = a.x + (b.x - a.x) * t0, z0 = a.z + (b.z - a.z) * t0;
+        const x1 = a.x + (b.x - a.x) * t1, z1 = a.z + (b.z - a.z) * t1;
+        const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+        if (inGap(o.gaps, mx, mz)) { flushRun(x0, z0); continue; }
+        if (runX == null) { runX = x0; runZ = z0; }
+        // post at the leading edge of every panel (+ the closing one below)
+        pushStrut(fIM, x0, y0, z0, x0, y0 + h + 0.12, z0, 0.11); posts++;
+        const w = Math.hypot(x1 - x0, z1 - z0), tiles = Math.max(1, w / 2.4);
+        const px = [x0, x1, x1, x0], pz = [z0, z1, z1, z0];
+        const py = [y0 + 0.04, y0 + 0.04, y0 + h, y0 + h];
+        const us = [0, tiles, tiles, 0], vs = [0, 0, 1.6, 1.6];
+        for (let k = 0; k < 4; k++) {
+          pos.push(px[k], py[k], pz[k]); nor.push(nx, 0, nz); uv.push(us[k], vs[k]);
+        }
+        idx.push(quads * 4, quads * 4 + 1, quads * 4 + 2,
+                 quads * 4, quads * 4 + 2, quads * 4 + 3);
+        quads++;
+        if (i === n - 1) { pushStrut(fIM, x1, y0, z1, x1, y0 + h + 0.12, z1, 0.11); posts++; }
+      }
+      flushRun(b.x, b.z);
+    }
+    finishIM(grp, fIM);
+    if (quads) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx); geo.computeBoundingSphere();
+      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+        map: chainLink(), alphaTest: 0.45, side: THREE.DoubleSide,
+        color: o.fabric || SITE_MESH,
+      }));
+      m.userData.venueFence = true;              // non-empty userData: batch.js spares it
+      grp.add(m);
+    }
+    return { group: grp, posts: posts, panels: quads, colliders: cols, length: total };
+  }
+
+  /* THE ONE PLACE YOU CROSS THE PERIMETER. Authored in a LOCAL frame where
+     +X runs across the opening and +Z points OUTWARD at whoever is arriving,
+     so a caller only ever supplies a yaw — the same convention CBZ.lampMast
+     uses, and for the same reason (two constants describing one object must
+     never be typed independently).
+       o.root,o.x,o.z,o.yaw   placement; yaw = atan2(outX, outZ)
+       o.half                 half-width of the opening (carriageway half)
+       o.h                    portal clear height (default 5.4)
+       o.booth                a staffed control booth on the centre island
+       o.arms                 two barrier arms, drawn RAISED (traffic passes)
+       o.arch                 a beam across the opening carrying the name
+       o.title/o.sub          words on the beam
+       o.solid                the caller's collider ledger
+     Returns {group, boothAt:{x,z,face}, ...} — boothAt is where the steward
+     stands, so the caller never has to re-derive it for cityStaffPost. */
+  function gatehouse(o) {
+    if (!o || !o.root) return null;
+    const grp = new THREE.Group(); grp.name = o.name || "venue-gatehouse";
+    grp.position.set(o.x, o.y || 0, o.z);
+    grp.rotation.y = o.yaw || 0;
+    o.root.add(grp);
+    const c = Math.cos(o.yaw || 0), s = Math.sin(o.yaw || 0);
+    // local (lx,lz) -> world. grp yaw rotates +X toward (cos, -sin)… r128's
+    // Y rotation maps local (x,z) to (x·c + z·s, -x·s + z·c).
+    function wx(lx, lz) { return o.x + lx * c + lz * s; }
+    function wz(lx, lz) { return o.z - lx * s + lz * c; }
+    function solidLocal(lx, lz, w, d, y0, y1) {
+      if (!o.solid) return;
+      const ax = Math.abs(c) * w / 2 + Math.abs(s) * d / 2;
+      const az = Math.abs(s) * w / 2 + Math.abs(c) * d / 2;
+      const X = wx(lx, lz), Z = wz(lx, lz);
+      o.solid(X - ax, Z - az, X + ax, Z + az, y0, y1);
+    }
+    const half = o.half == null ? 10 : o.half, H = o.h == null ? 5.4 : o.h;
+    const conc = cmat(o.conc || SITE_CONC), dark = cmat(SITE_DARK),
+      steel = cmat(SITE_STEEL), glass = cmat(0x2c3a46),
+      warm = cmat(0xffe6a8, { emissive: 0xffd98a, ei: 0.55 });
+    // --- piers, one either side of the opening ---
+    for (const sgn of [-1, 1]) {
+      const px = sgn * (half + 1.3);
+      box(grp, conc, px, H / 2, 0, 2.0, H, 2.0);
+      box(grp, dark, px, H + 0.22, 0, 2.5, 0.44, 2.5);
+      solidLocal(px, 0, 2.0, 2.0, 0, H);
+    }
+    // --- the beam, and the name on it ---
+    if (o.arch !== false) {
+      box(grp, conc, 0, H + 0.55, 0, half * 2 + 4.0, 1.1, 1.5);
+      box(grp, dark, 0, H + 1.18, 0, half * 2 + 4.6, 0.22, 1.9);
+      if (o.title) {
+        const W = 1024, Hh = 128, cv = canvas(W, Hh), g2 = cv.getContext("2d");
+        g2.fillStyle = css(o.bg == null ? 0x0c0f14 : o.bg); g2.fillRect(0, 0, W, Hh);
+        g2.fillStyle = css(o.fg == null ? 0xffd24a : o.fg);
+        g2.font = "bold 74px Arial"; g2.textAlign = "center"; g2.textBaseline = "middle";
+        g2.fillText(String(o.title).toUpperCase(), W / 2, Hh / 2 + 2);
+        const bt = texFrom(cv, false, false);
+        for (const face of [1, -1]) {
+          const pl = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 3.2, 1.0),
+            new THREE.MeshBasicMaterial({ map: bt }));
+          pl.position.set(0, H + 0.55, face * 0.78);
+          pl.rotation.y = face > 0 ? 0 : Math.PI;
+          grp.add(pl);
+        }
+      }
+    }
+    // --- the booth. `boothX` is a LOCAL-X offset and it is not decoration:
+    //     a control island only works where the road's INNER LANE clears it.
+    //     CBZ.roadLanes puts lane 0 at medianHalf + laneW/2, so a 1.2 m median
+    //     (every highway record in this game) leaves the inner lane 2.4 m off
+    //     the axis and a 5 m island would have cars driving through the hut.
+    //     Pass boothX = half + 3 on a highway-cross-section gate and the hut
+    //     stands outside the kerb where a real one does; pass 0 only when the
+    //     approach was authored with a median wide enough to hold it. ---
+    let boothAt = null;
+    if (o.booth) {
+      const bX = o.boothX == null ? 0 : o.boothX, island = Math.abs(bX) < 0.01;
+      if (island) box(grp, conc, 0, 0.09, 0, 5.0, 0.18, 4.4);      // kerbed island
+      else box(grp, conc, bX, 0.09, 0, 3.6, 0.18, 4.0);            // hut plinth
+      box(grp, conc, bX, 1.55, 0, 2.7, 2.9, 2.7);
+      box(grp, glass, bX, 2.05, 1.37, 2.4, 1.3, 0.1);              // service window
+      box(grp, glass, bX, 2.05, -1.37, 2.4, 1.3, 0.1);
+      box(grp, dark, bX, 3.15, 0, 3.3, 0.3, 3.3);                  // roof cap
+      box(grp, steel, bX, 3.9, 0, 0.16, 1.5, 0.16);
+      box(grp, dark, 0, 4.75, 0, half * 2 + 1.0, 0.28, 5.2);       // canopy over the lanes
+      box(grp, warm, 0, 4.58, 0, half * 1.6, 0.10, 3.4);           // canopy soffit light
+      solidLocal(bX, 0, 2.9, 2.9, 0, 3.2);
+      // Where the steward stands: at the OUTWARD service window (local +Z is
+      // the arriving side, which is why the window is drawn there), facing the
+      // way the traffic comes from. Handed back so no caller ever has to
+      // re-derive a gate's own geometry to put a body in it.
+      boothAt = { x: wx(bX, 1.9), z: wz(bX, 1.9), face: (o.yaw || 0) };
+    }
+    // --- barrier arms, RAISED. A lowered arm with no animation is a wall you
+    //     drive through; a raised one is a gate that has already let you in.
+    //     Pivots sit AT THE KERB and the arm leans in over the carriageway,
+    //     which is both where a real barrier is bolted and the only mounting
+    //     that works whether or not there is an island to stand it on. 4.2 m
+    //     is capped, not scaled: an arm as long as a six-lane carriageway,
+    //     stood up, is taller than the portal beam it hangs under. ---
+    if (o.arms) {
+      const armL = Math.min(4.2, half * 0.75), TILT = 0.22;    // ~78 deg up
+      const ca2 = Math.cos(TILT), sa2 = Math.sin(TILT);
+      for (const sgn of [-1, 1]) {
+        const bx = sgn * (half - 0.9);
+        box(grp, steel, bx, 0.55, 2.2, 0.36, 1.1, 0.36);           // pivot post
+        // rotation.z = sgn·TILT sends the free end toward the axis; the centre
+        // is walked back by half the arm so the BASE lands on the pivot.
+        const arm = new THREE.Mesh(boxGeo(0.16, armL, 0.16), cmat(0xd8dde2));
+        arm.position.set(bx - sgn * sa2 * armL / 2, 1.05 + ca2 * armL / 2, 2.2);
+        arm.rotation.z = sgn * TILT;
+        grp.add(arm);
+        const nb = Math.max(2, Math.round(armL / 1.1));
+        for (let b2 = 0; b2 < nb; b2++) {
+          const along = (b2 + 0.5) * armL / nb;
+          box(grp, cmat(0xc23a36), bx - sgn * sa2 * along, 1.05 + ca2 * along,
+            2.2, 0.19, armL / nb * 0.5, 0.19, 0, sgn * TILT);
+        }
+      }
+    }
+    return { group: grp, boothAt: boothAt, half: half, h: H };
+  }
+
+  /* THE SIGN THAT NAMES THE PLACE BEFORE YOU REACH IT. Two plinths and one
+     double-sided board — a monument, not a HUD card. */
+  function monument(o) {
+    if (!o || !o.root) return null;
+    const grp = new THREE.Group(); grp.name = o.name || "venue-monument";
+    grp.position.set(o.x, o.y || 0, o.z);
+    grp.rotation.y = o.yaw || 0;
+    o.root.add(grp);
+    const W = o.w == null ? 17 : o.w, H = o.h == null ? 4.6 : o.h, LIFT = o.lift == null ? 1.5 : o.lift;
+    const conc = cmat(o.conc || SITE_CONC);
+    box(grp, conc, 0, 0.3, 0, W + 2.4, 0.6, 2.4);
+    for (const sgn of [-1, 1]) box(grp, conc, sgn * (W / 2 + 0.5), (LIFT + H) / 2, 0, 1.1, LIFT + H, 1.4);
+    if (o.solid) {
+      const c = Math.abs(Math.cos(o.yaw || 0)), s = Math.abs(Math.sin(o.yaw || 0));
+      const ax = c * (W / 2 + 1.2) + s * 1.2, az = s * (W / 2 + 1.2) + c * 1.2;
+      o.solid(o.x - ax, o.z - az, o.x + ax, o.z + az, o.y || 0, (o.y || 0) + LIFT + H);
+    }
+    const cw = 1024, ch = Math.round(1024 * H / W), cv = canvas(cw, ch), g2 = cv.getContext("2d");
+    g2.fillStyle = css(o.bg == null ? 0x101520 : o.bg); g2.fillRect(0, 0, cw, ch);
+    g2.strokeStyle = css(o.accent == null ? 0xd8a020 : o.accent);
+    g2.lineWidth = 14; g2.strokeRect(20, 20, cw - 40, ch - 40);
+    g2.fillStyle = css(o.fg == null ? 0xffd24a : o.fg);
+    g2.font = "bold " + Math.round(ch * 0.34) + "px Arial";
+    g2.textAlign = "center"; g2.textBaseline = "middle";
+    g2.fillText(String(o.title || "").toUpperCase(), cw / 2, ch * 0.42);
+    if (o.sub) {
+      g2.fillStyle = css(o.sub2 == null ? 0x9fb0c4 : o.sub2);
+      g2.font = "bold " + Math.round(ch * 0.13) + "px Arial";
+      g2.fillText(String(o.sub).toUpperCase(), cw / 2, ch * 0.76);
+    }
+    const tex = texFrom(cv, false, false);
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(W, H),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+    board.position.set(0, LIFT + H / 2, 0);
+    board.userData.venueSign = true;
+    grp.add(board);
+    return { group: grp, tex: tex };
+  }
+
+  /* LAMPS DOWN THE APPROACH. Every mast is solved by CBZ.lampMast — the ONE
+     pole/arm/head solve in this repo — and the whole row is 4 draw calls no
+     matter how many masts, because poles, arms, heads and lenses are each one
+     InstancedMesh of struts.
+       o.pts   [{x,z,fx,fz}] position + the direction the head must hang over */
+  function lampRow(o) {
+    if (!o || !o.root || !o.pts || !o.pts.length) return null;
+    const grp = new THREE.Group(); grp.name = o.name || "venue-lamps";
+    o.root.add(grp);
+    const poleH = o.poleH == null ? 6.0 : o.poleH;
+    const LM = CBZ.lampMast
+      ? CBZ.lampMast({ poleH: poleH, reach: o.reach == null ? 2.0 : o.reach,
+                       rise: o.rise == null ? 0.32 : o.rise, poleR: o.poleR == null ? 0.12 : o.poleR })
+      : { poleH: poleH, armLen: 2.0, tipY: poleH + 0.32, tipZ: 2.0,
+          headY: poleH + 0.22, headZ: 2.0, bulbY: poleH + 0.12, bulbZ: 2.0 };
+    const n = o.pts.length;
+    const pole = makeIM(cmat(o.color || SITE_STEEL), n, {});
+    const arm = makeIM(cmat(o.color || SITE_STEEL), n, {});
+    const head = makeIM(cmat(SITE_DARK), n, {});
+    const bulb = makeIM(cmat(0xfff2c8, { emissive: 0xffe9a8, ei: 0.9 }), n, { noShadow: true });
+    const y0 = o.y || 0;
+    for (let i = 0; i < n; i++) {
+      const p = o.pts[i];
+      const a = Math.atan2(p.fx || 0, p.fz || 1);      // local +Z over the carriageway
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const tz = LM.tipZ == null ? 2.0 : LM.tipZ, ty = LM.tipY == null ? LM.poleH + 0.32 : LM.tipY;
+      const tX = p.x + tz * sa, tZ = p.z + tz * ca;
+      const hX = p.x + LM.headZ * sa, hZ = p.z + LM.headZ * ca;
+      const bX = p.x + LM.bulbZ * sa, bZ = p.z + LM.bulbZ * ca;
+      pushStrut(pole, p.x, y0, p.z, p.x, y0 + LM.poleH, p.z, 0.22);
+      pushStrut(arm, p.x, y0 + LM.poleH, p.z, tX, y0 + ty, tZ, 0.15);
+      pushStrut(head, hX, y0 + LM.headY - 0.11, hZ, hX, y0 + LM.headY + 0.11, hZ, 0.62);
+      pushStrut(bulb, bX, y0 + LM.bulbY - 0.03, bZ, bX, y0 + LM.bulbY + 0.03, bZ, 0.46);
+      if (o.solid) o.solid(p.x - 0.22, p.z - 0.22, p.x + 0.22, p.z + 0.22, y0, y0 + LM.poleH);
+    }
+    finishIM(grp, pole); finishIM(grp, arm); finishIM(grp, head); finishIM(grp, bulb);
+    return { group: grp, count: n, mast: LM };
+  }
+
+  /* A CAR PARK IS A SOLVE, NOT A TEXTURE AND A SEPARATE CAR LOOP. Both venues
+     drew their stalls in one place and spawned their cars in another, which is
+     how the speedway ended up with 264 m of painted bays and ten cars — that
+     never spawned. `bays` returns the stall CENTRES and the stripe lines from
+     ONE layout, so the paint and the metal can never disagree again.
+       o.x0,o.z0   min corner of the block
+       o.cols      stalls along x
+       o.rows      stall rows (2 = one double-loaded aisle)
+     Returns {slots:[{x,z,heading,row,col}], stripes:[{x,z0,z1}], w, d}. */
+  function bays(o) {
+    const sw = o.stallW == null ? 2.7 : o.stallW;
+    const sd = o.stallD == null ? 5.2 : o.stallD;
+    const ai = o.aisle == null ? 6.3 : o.aisle;
+    const cols = Math.max(1, o.cols | 0), rows = Math.max(1, o.rows | 0);
+    const slots = [], stripes = [];
+    let z = o.z0, d = 0;
+    for (let r = 0; r < rows; r++) {
+      const z0 = z, z1 = z + sd;
+      for (let ccol = 0; ccol < cols; ccol++) {
+        slots.push({
+          x: o.x0 + (ccol + 0.5) * sw, z: (z0 + z1) / 2,
+          // odd rows face the far kerb, even rows face the near one, so a
+          // double-loaded aisle reads as two rows nose-to-nose.
+          heading: (r % 2) ? 0 : Math.PI, row: r, col: ccol,
+        });
+      }
+      for (let k = 0; k <= cols; k++) stripes.push({ x: o.x0 + k * sw, z0: z0, z1: z1 });
+      z = z1 + ((r % 2) ? 0 : ai);
+      d = z1 - o.z0;
+      if (r % 2 === 0) d += ai;
+    }
+    return { slots: slots, stripes: stripes, w: cols * sw, d: d,
+             stallW: sw, stallD: sd, aisle: ai };
+  }
+
+  // ---- the audit registry. Every site pushes ONE census function, so a third
+  //      venue costs no edit to CBZ.venueSiteAudit(). (Same shape as
+  //      CBZ.heliFleet: the audit never learns a venue's name.)
+  const _sites = {};
+  function census(id, fn) { if (id && typeof fn === "function") _sites[id] = fn; }
+
+  CBZ.venueSite = {
+    fence: fence, gatehouse: gatehouse, monument: monument,
+    lampRow: lampRow, bays: bays, census: census, sites: _sites,
+  };
+
+  /* ---- CBZ.venueSiteAudit() — THE RATCHET (BLOCK LAW #5) ------------------
+     Everything here is read from LIVE state (cityCars / cityStaffPosts /
+     city.noSpawn / city.roads), never from a counter a build loop kept, so a
+     site that stops building can never keep passing.
+       <venue>Parked    real, enterable, PERSISTENT cars standing in the site's
+                        own bays. A painted bay with no metal in it is what
+                        "reads abandoned" means numerically.
+       <venue>Staff     manned posts (a body actually minted / adopted), with
+                        `posts` beside it so a site that "fixes" the count by
+                        declaring fewer jobs cannot pass.
+       <venue>Keepouts  registered no-spawn zones the site owns.
+       roadRecords      city.roads records the sites pushed — the arena's is
+                        the one that turns a walk-only causeway into an
+                        approach traffic and roadPick can both see.
+     None of these is pinned yet: MEASURE FIRST (this file has already been
+     burned once by a pinned guess — see CLAUDE.md's propUseAudit note). */
+  CBZ.venueSiteAudit = function () {
+    const out = { sites: {}, parked: 0, staff: 0, posts: 0, keepouts: 0,
+                  roadRecords: 0, bays: 0, gates: 0, fencePanels: 0 };
+    for (const id in _sites) {
+      let r = null;
+      try { r = _sites[id](); } catch (e) { r = { error: String(e && e.message || e) }; }
+      if (!r) continue;
+      out.sites[id] = r;
+      out.parked += r.parked | 0; out.staff += r.staff | 0; out.posts += r.posts | 0;
+      out.keepouts += r.keepouts | 0; out.roadRecords += r.roadRecords | 0;
+      out.bays += r.bays | 0; out.gates += r.gates | 0; out.fencePanels += r.fencePanels | 0;
+      const k = String(id).replace(/[^a-z0-9]/gi, "");
+      out[k + "Parked"] = r.parked | 0;
+      out[k + "Staff"] = r.staff | 0;
+      out[k + "Keepouts"] = r.keepouts | 0;
+    }
+    return out;
+  };
+
+  // ---- shared counters the two site builders fill through venueSite --------
+  // (a live read still beats a counter, so these are only for the numbers a
+  //  live read genuinely cannot recover: how much fence was DRAWN.)
 
   // ------------------------------------------------------------------ //
   //  PUBLIC SURFACE                                                     //

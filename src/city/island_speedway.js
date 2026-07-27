@@ -89,6 +89,16 @@
   // garages, scoring pylon, jumbotron, floodlights, hoardings, marshal posts,
   // tyre walls, paddock) from city/speedway_structures.js. Off → track only.
   if (CBZ.CONFIG.SPEEDWAY_STRUCTURES == null) CBZ.CONFIG.SPEEDWAY_STRUCTURES = true;
+  // SPEEDWAY_SITE — THE ARRIVAL. OWNER: "the racing arena … is not very
+  // intentional feeling right now." The circuit was finished and the SITE was
+  // not: the approach ran out onto an unfenced apron, nothing named the place
+  // before you reached it, nobody worked the entrance, the racing surface had
+  // no keep-out so a wandering pedestrian could stand on the racing line, and
+  // the "public car park" was 264 m of painted stalls holding TEN cars — which
+  // never existed, because the loop that made them ran inside a landmass
+  // builder where CBZ.city.arena does not exist yet and every call threw into
+  // a swallowing catch. Off → the pre-fix campus, exactly as it shipped.
+  if (CBZ.CONFIG.SPEEDWAY_SITE == null) CBZ.CONFIG.SPEEDWAY_SITE = true;
 
   // ---- footprint -----------------------------------------------------------
   // One authoritative transform owns every speedway surface. The campus is
@@ -103,8 +113,77 @@
   // if you resize the track (TRACK_HX / TRACK_DZ below) check it still
   // contains the outer embankment plus the grandstands.
   const SITE_HX = 205, SITE_HZ = 182, SITE_DZ = -23;
+  const SITE_POW = 2.45;               // the superellipse exponent (see stadiumSiteGeometry)
   const ACCESS_X = CX - 98, ACCESS_Z = CZ - 190;
   const ANNEX = { cx: 348.5, cz: -700, r: 120 }; // existing commerce island (DO NOT TOUCH)
+
+  // ---- THE SITE (arrival) --------------------------------------------------
+  // ONE point on the campus boundary, inset by `m` metres, derived from the
+  // SAME four constants stadiumSiteGeometry() sweeps. The perimeter fence, the
+  // gate and the sign are all placed through this, so a resize of the campus
+  // moves the whole arrival with it and there is nothing left to hand-sync —
+  // the mistake the file's own comment warns about above SITE_HX.
+  function siteEdge(a, m) {
+    const ca = Math.cos(a), sa = Math.sin(a), p = 2 / SITE_POW;
+    return {
+      x: CX + Math.sign(ca) * Math.pow(Math.abs(ca), p) * (SITE_HX - m),
+      z: CZ + SITE_DZ + Math.sign(sa) * Math.pow(Math.abs(sa), p) * (SITE_HZ - m),
+    };
+  }
+  const FENCE_INSET = 5;
+  // The landside rim, west flank round to east flank. The public arrives on
+  // this half; the far side is the circuit and its own walls.
+  function sitePerimeter() {
+    const pts = [];
+    for (let d = 184; d <= 356; d += 6) pts.push(siteEdge(d * Math.PI / 180, FENCE_INSET));
+    return pts;
+  }
+  // WHERE THE APPROACH CROSSES THE PERIMETER — solved off the polyline, never
+  // typed. That crossing IS the gate, and the causeway is extended to run
+  // through it (it used to stop 22 m short, on open apron, at ACCESS_X).
+  function gateOnPerimeter() {
+    const pts = sitePerimeter();
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (a.x > CX || b.x > CX) continue;                  // west flank only
+      if ((a.z - ACCESS_Z) * (b.z - ACCESS_Z) > 0) continue;
+      const t = (ACCESS_Z - a.z) / ((b.z - a.z) || 1e-6);
+      return { x: a.x + (b.x - a.x) * t, z: ACCESS_Z };
+    }
+    return { x: ACCESS_X, z: ACCESS_Z };
+  }
+  const GATE = gateOnPerimeter();
+  // Half-width of the opening in the fence. Sized off what has to fit inside
+  // it, not picked: the 24 m carriageway (12), the gate piers (13.3), and the
+  // control hut standing outside them (16.5 +/- 1.35) — so 19 clears the lot
+  // and the fence can never be drawn through the gate's own hardware.
+  const GATE_GAP = 19;
+  // The approach runs THROUGH the gate and stops on campus — clamped short of
+  // the point where the perimeter comes back across the road line, so the deck
+  // can never dead-end into its own fence.
+  const ROAD_END_X = Math.min(GATE.x + 10, CX - 74);
+
+  // ---- the public car park: ONE solve for the paint AND the metal ----------
+  // The old lot painted stalls 14 m wide across 264 m of apron (a truck bay,
+  // not a car bay) and filled them from an unrelated loop. Both now come from
+  // CBZ.venueSite.bays, so the stripes and the cars are the same numbers.
+  // Its footprint is boxed by three things it must not touch: the 24 m
+  // approach deck to the south (z <= CZ-178), the glass showroom's west wall
+  // to the east (buildComplex puts it at CX-72), and the perimeter fence to
+  // the west — which is why the lot is 15 bays wide and not 97.
+  const PARK_COLS = 15, PARK_ROWS = 2;
+  const PARK_X0 = CX - 119, PARK_Z0 = CZ - 176;
+  const PARK_FILL = 0.68;              // how full a mid-week race day looks
+  let _parkLayout = null;
+  function parkLayout() {
+    if (_parkLayout) return _parkLayout;
+    if (!CBZ.venueSite || !CBZ.venueSite.bays) return null;
+    _parkLayout = CBZ.venueSite.bays({
+      x0: PARK_X0, z0: PARK_Z0, cols: PARK_COLS, rows: PARK_ROWS,
+      stallW: 2.7, stallD: 5.2, aisle: 6.3,
+    });
+    return _parkLayout;
+  }
 
   // ---- deterministic LCG (no Math.random per owner rule) -------------------
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
@@ -661,23 +740,46 @@
       sx.globalAlpha = 1;
     }
     // south side: spectator concourse, paddock apron and the public car park
-    function court(mx0, mz0, mx1, mz1, col, bays) {
+    // (the old `bays` argument is gone: stall paint is no longer a stroke over
+    //  a whole apron, it comes off the car park's own layout — see paintBays.)
+    function court(mx0, mz0, mx1, mz1, col) {
       const a = cvx(mx0), b = cvz(mz0), c2 = cvx(mx1), d = cvz(mz1);
       sx.fillStyle = css(col); sx.fillRect(a, b, c2 - a, d - b);
-      if (!bays) return;
-      sx.strokeStyle = css(C.LINE); sx.globalAlpha = 0.55; sx.lineWidth = 2;
-      for (let x = mx0 + 7; x <= mx1 - 7; x += 14) {
-        sx.beginPath(); sx.moveTo(cvx(x), b + 5); sx.lineTo(cvx(x), d - 5); sx.stroke();
+    }
+    court(CX - 122, CZ - 126, CX + 122, CZ - 97, 0x8b8f94);   // stand concourse
+    court(CX - 124, CZ - 158, CX + 124, CZ - 126, C.APRON);   // paddock apron
+    court(CX - 132, CZ - 204, CX + 132, CZ - 158, C.APRON);   // public apron + car park
+    // THE CAR PARK IS AS BIG AS THE CARS IN IT. The old `bays:true` stroke
+    // painted a stripe every 14 m across the whole 264 m apron — 18 stalls
+    // wide enough to park a semi in — and the fill loop offered ten cars. The
+    // stripes now come from the SAME layout the parked cars are placed on, so
+    // the lot is exactly as large as it is used, and the apron either side of
+    // it stays plain tarmac (overflow / coach standing, which is what an empty
+    // race-day apron actually is).
+    (function paintBays() {
+      const L = CBZ.CONFIG.SPEEDWAY_SITE !== false ? parkLayout() : null;
+      if (!L) return;
+      // aisle band, so the lot reads as circulation + stalls rather than paint
+      sx.fillStyle = css(0x33363b);
+      sx.fillRect(cvx(PARK_X0 - 3), cvz(PARK_Z0 + L.stallD),
+        cvx(PARK_X0 + L.w + 3) - cvx(PARK_X0 - 3),
+        cvz(PARK_Z0 + L.stallD + L.aisle) - cvz(PARK_Z0 + L.stallD));
+      sx.strokeStyle = css(C.LINE); sx.globalAlpha = 0.72; sx.lineWidth = 1.8;
+      for (let i = 0; i < L.stripes.length; i++) {
+        const s2 = L.stripes[i];
+        sx.beginPath();
+        sx.moveTo(cvx(s2.x), cvz(s2.z0)); sx.lineTo(cvx(s2.x), cvz(s2.z1));
+        sx.stroke();
       }
       sx.globalAlpha = 1;
-    }
-    court(CX - 122, CZ - 126, CX + 122, CZ - 97, 0x8b8f94, false);   // stand concourse
-    court(CX - 124, CZ - 158, CX + 124, CZ - 126, C.APRON, false);   // paddock apron
-    court(CX - 132, CZ - 204, CX + 132, CZ - 182, C.APRON, true);    // public car park
-    // access lane from the causeway into the car park
+    })();
+    // The spine lane from the gate up to the spectator concourse. It used to
+    // run at ACCESS_X, which is now the middle of the car park; it runs up the
+    // lot's east edge instead, between the stalls and the showroom, which is
+    // the walk a person actually makes: gate → park → concourse.
     sx.fillStyle = css(0x4a4e53);
-    sx.fillRect(cvx(ACCESS_X - 7), cvz(CZ - 204), cvx(ACCESS_X + 7) - cvx(ACCESS_X - 7),
-      cvz(CZ - 124) - cvz(CZ - 204));
+    sx.fillRect(cvx(CX - 77.5), cvz(ACCESS_Z), cvx(CX - 72.5) - cvx(CX - 77.5),
+      cvz(CZ - 124) - cvz(ACCESS_Z));
 
     const surfaceTex = new THREE.CanvasTexture(surfaceCanvas);
     if (THREE.sRGBEncoding != null) surfaceTex.encoding = THREE.sRGBEncoding;
@@ -1262,6 +1364,7 @@
     // ====================================================================
     buildCauseway(root, mat, { C_DECK, C_CURB, C_STEEL }, rng);
     buildComplex(root, rng);
+    buildSite(root, city);
     populate(root, rng, city, grandstandAudience);
 
     // ---- the banked surface becomes real walkable ground -----------------
@@ -1278,10 +1381,219 @@
     CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: 360, minZ: -585, maxZ: causewayZ + 12, pad: 1 });
     CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: ACCESS_X + 12, minZ: causewayZ - 12, maxZ: causewayZ + 12, pad: 1 });
     if (city.roads) {
+      const endX = CBZ.CONFIG.SPEEDWAY_SITE !== false ? ROAD_END_X : ACCESS_X;
       city.roads.push({ x: 348, z: (-585 + causewayZ) / 2, vertical: true, len: causewayZ - (-585), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
-      city.roads.push({ x: (348 + ACCESS_X) / 2, z: causewayZ, vertical: false, len: ACCESS_X - 348, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      // THE APPROACH NOW RUNS THROUGH THE GATE. It used to stop at ACCESS_X,
+      // 22 m short of the campus boundary, on open apron — which is why the
+      // arrival had no threshold: there was nothing for a gate to stand on.
+      city.roads.push({ x: (348 + endX) / 2, z: causewayZ, vertical: false, len: endX - 348, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2, venueSite: "speedway" });
     }
   }, 20);
+
+  // ====================================================================== //
+  //  THE SITE — the arrival nobody had built.                              //
+  //                                                                        //
+  //  A circuit is not a venue until you can tell where it BEGINS. Four      //
+  //  things say so and this file had none of them: a monument that names    //
+  //  the place before you reach it, a perimeter you cross at exactly one    //
+  //  point, a gate somebody is standing in, and lamps down the approach so  //
+  //  the threshold reads at night. Every one is drawn by CBZ.venueSite —    //
+  //  the shared site kit in speedway_structures.js — and every position is  //
+  //  derived from siteEdge()/GATE, so moving the campus moves the arrival.  //
+  // ====================================================================== //
+  let SITE = null;
+  function buildSite(root, city) {
+    if (CBZ.CONFIG.SPEEDWAY_SITE === false) return;
+    const VS = CBZ.venueSite;
+    if (!VS) return;                                   // degrade: campus as before
+    SITE = { fencePanels: 0, gates: 0, bays: 0, keepouts: 0 };
+    const grp = new THREE.Group(); grp.name = "speedway-site";
+    root.add(grp);
+    // ARGUMENT-ORDER ADAPTER, and it is not a nicety: this file's solidBox is
+    // (minX, maxX, minZ, maxZ, …) while the shared kit — like every other
+    // collider helper in city/ — is (minX, minZ, maxX, maxZ, …). Handing
+    // solidBox straight in would silently swap two axes and put every gate and
+    // fence collider somewhere else entirely.
+    function siteSolid(minX, minZ, maxX, maxZ, y0, y1) {
+      solidBox(minX, maxX, minZ, maxZ, y0, y1);
+    }
+
+    // --- the perimeter, one gap where the approach crosses it ---------------
+    const f = VS.fence({
+      root: grp, name: "speedway-perimeter", path: sitePerimeter(),
+      h: 2.5, pitch: 4.0, colliderPitch: 12, solid: siteSolid,
+      gaps: [{ x: GATE.x, z: GATE.z, half: GATE_GAP }],
+    });
+    if (f) SITE.fencePanels = f.panels;
+
+    // --- the gate itself ----------------------------------------------------
+    // yaw faces the outward normal (-x): whoever is arriving is driving east.
+    const gate = VS.gatehouse({
+      root: grp, x: GATE.x, z: GATE.z, yaw: -Math.PI / 2, half: 12, h: 5.6,
+      booth: true, arms: true, arch: true,
+      // the approach is a 3+3 divided highway: its inner lane runs 2.4 m off
+      // the axis, so the control hut stands OUTSIDE the kerb, not on an island
+      // the traffic would drive through.
+      boothX: 16.5,
+      title: "Diamond Speedway", bg: 0x121722, fg: 0xffd451,
+      solid: siteSolid, name: "speedway-gate",
+    });
+    if (gate) SITE.gates = 1;
+
+    // --- the sign you read BEFORE the gate, on the south verge --------------
+    VS.monument({
+      root: grp, x: GATE.x - 62, z: ACCESS_Z - 17, yaw: -0.6,
+      w: 19, h: 5.0, lift: 1.6, title: "Diamond Speedway",
+      sub: "Motorsports Park · Turn 1 Gate", bg: 0x121722, fg: 0xffd451,
+      accent: 0xc23a36, solid: siteSolid, name: "speedway-monument",
+    });
+
+    // --- lamps down the approach and along the car park face ---------------
+    const lamps = [];
+    const L = parkLayout();
+    for (let i = 0; i < 7; i++) {
+      const lx = GATE.x - 76 + i * 13;
+      lamps.push({ x: lx, z: ACCESS_Z - 14.5, fx: 0, fz: 1 });     // heads over the road
+      // the NORTH verge is the car park's south kerb for its whole length, so
+      // a lamp there would stand in the first row of stalls
+      if (!L || lx < PARK_X0 - 2 || lx > PARK_X0 + L.w + 2) {
+        lamps.push({ x: lx, z: ACCESS_Z + 14.5, fx: 0, fz: -1 });
+      }
+    }
+    if (L) {
+      // along the lot's BACK kerb, heads hung out over the stalls — never in
+      // the aisle, which is where the cars turn.
+      for (let i = 0; i <= 4; i++) {
+        lamps.push({ x: PARK_X0 + (L.w / 4) * i, z: PARK_Z0 + L.d + 0.6, fx: 0, fz: -1 });
+      }
+    }
+    VS.lampRow({ root: grp, pts: lamps, poleH: 7.2, reach: 2.4, rise: 0.34, poleR: 0.14, solid: siteSolid });
+
+    // --- painted stalls are geometry too: a low kerb backs each row so the
+    //     lot has a form when the paint is edge-on to the camera -------------
+    if (L) {
+      SITE.bays = L.slots.length;
+      const kerb = mat(0xa8adb4);
+      for (let r = 0; r < PARK_ROWS; r++) {
+        const zk = (r % 2) ? (PARK_Z0 + L.stallD * 2 + L.aisle + 0.15) : (PARK_Z0 - 0.15);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(L.w + 1.2, 0.16, 0.3), kerb);
+        m.position.set(PARK_X0 + L.w / 2, 0.08, zk);
+        m.receiveShadow = true; m.userData.speedway = true; grp.add(m);
+      }
+    }
+
+    // --- KEEP-OUT: nobody wanders onto the racing line ----------------------
+    // A track is a RIBBON and a keep-out is a rect or a circle, so the band is
+    // covered by a ring of overlapping discs sampled off the ONE racing frame.
+    // r = 27 is derived, not tasted: it reaches from the inside apron edge
+    // (-20) out past the SAFER wall (+12.6), and stops SHORT of the pit lane
+    // (-26.7 out / -36.5 in), the garages (-38.5) and the marshal posts
+    // (+30.8) — the three places where people are supposed to be standing.
+    if (CBZ.registerNoSpawnZone) {
+      const N = 20;
+      for (let i = 0; i < N; i++) {
+        const fr = trackFrame(i / N);
+        CBZ.registerNoSpawnZone(city, {
+          cx: fr.x, cz: fr.z, r: 27, civ: true, label: "speedway-track",
+        });
+        SITE.keepouts++;
+      }
+    }
+
+    // --- the people who work the front door --------------------------------
+    if (CBZ.cityStaffVenue && CBZ.cityStaffPost) {
+      const posts = [];
+      if (gate && gate.boothAt) {
+        posts.push({ id: "speedway:gate", job: "security guard", archetype: "security",
+          x: gate.boothAt.x, z: gate.boothAt.z, face: gate.boothAt.face,
+          opts: { wealth: 0.3, aggr: 0.18 } });
+      }
+      if (L) {
+        // at the lot MOUTH (its east end, where the spine lane meets it), not
+        // in the middle of a row where nobody would stand.
+        posts.push({ id: "speedway:park", job: "security guard", archetype: "worker",
+          x: PARK_X0 + L.w + 3, z: PARK_Z0 + L.stallD + L.aisle / 2, face: -Math.PI / 2,
+          opts: { wealth: 0.24, aggr: 0.08 } });
+      }
+      // THE SHOWROOM HAS STOCK AND HAD NOBODY SELLING IT. The glass hall is at
+      // campus-local x = -51 (buildComplex), campus origin (CX, CZ-169).
+      posts.push({ id: "speedway:sales:0", job: "shopkeeper", archetype: "merchant",
+        x: CX - 62, z: CZ - 161, face: Math.PI, pose: "foldarms",
+        opts: { wealth: 0.62, aggr: 0.05, floorY: 0.2 } });   // the shell's slab top
+      posts.push({ id: "speedway:sales:1", job: "shopkeeper", archetype: "merchant",
+        x: CX - 40, z: CZ - 161, face: Math.PI,
+        opts: { wealth: 0.58, aggr: 0.05, floorY: 0.2 } });
+      CBZ.cityStaffVenue("speedway", {
+        stations: posts.length,
+        note: "gate booth, car park, showroom floor",
+      });
+      for (let i = 0; i < posts.length; i++) {
+        const p = posts[i];
+        p.venue = "speedway";
+        try { CBZ.cityStaffPost(p); } catch (e) { /* staff layer absent */ }
+      }
+    }
+
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+
+    // --- the census the shared audit reads (BLOCK LAW #5) ------------------
+    if (CBZ.venueSite && CBZ.venueSite.census) {
+      CBZ.venueSite.census("speedway", function () {
+        let parked = 0, staff = 0, posts = 0, keepouts = 0, roads = 0;
+        const cars = CBZ.cityCars || [];
+        for (let i = 0; i < cars.length; i++) if (cars[i] && cars[i]._venueSite === "speedway") parked++;
+        const sp = CBZ.cityStaffPosts ? CBZ.cityStaffPosts() : [];
+        for (let i = 0; i < sp.length; i++) {
+          if (!sp[i] || sp[i].venue !== "speedway") continue;
+          posts++; if (sp[i].ped && !sp[i].ped.dead) staff++;
+        }
+        const A = CBZ.city && CBZ.city.arena;
+        const ns = (A && A.noSpawn) || [];
+        for (let i = 0; i < ns.length; i++) if (ns[i] && ns[i].label === "speedway-track") keepouts++;
+        const rd = (A && A.roads) || [];
+        for (let i = 0; i < rd.length; i++) if (rd[i] && rd[i].venueSite === "speedway") roads++;
+        return {
+          parked: parked, bays: SITE ? SITE.bays : 0, staff: staff, posts: posts,
+          keepouts: keepouts, roadRecords: roads,
+          gates: SITE ? SITE.gates : 0, fencePanels: SITE ? SITE.fencePanels : 0,
+          fill: (SITE && SITE.bays) ? +(parked / SITE.bays).toFixed(2) : 0,
+        };
+      });
+    }
+  }
+
+  // ---- THE CARS IN THE CAR PARK ------------------------------------------
+  // DEFERRED ON PURPOSE, and this is the whole bug the lot had: cityMakeCar
+  // dereferences CBZ.city.arena.root, and city/mode.js only assigns
+  // CBZ.city.arena AFTER buildCity() returns — so the old ten-car loop, which
+  // ran inside the landmass builder, threw on the FIRST call every single time
+  // and its catch swallowed it. The park has been empty since it was written.
+  // (island_airport.js:2167 and airside.js:1261 use the same one-shot trick.)
+  // `parkRoot`, not a done-flag: a world REBUILD makes a new arena root and
+  // cityAddParkedCar purges every fixture whose root is stale, so the lot has
+  // to be re-filled or it would come back empty on the second world.
+  let parkRoot = null;
+  CBZ.onUpdate(55.42, function () {
+    if (CBZ.CONFIG.SPEEDWAY_SITE === false) return;
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    if (!CBZ.city || !CBZ.city.arena || !CBZ.cityAddParkedCar) return;
+    if (parkRoot === CBZ.city.arena.root) return;
+    const L = parkLayout();
+    if (!L) return;
+    parkRoot = CBZ.city.arena.root;
+    // WHICH BAYS ARE TAKEN IS A POSITION HASH, never a draw on the shared
+    // build stream: this runs long after the build, so a stream draw here
+    // would be order-dependent and could not be deterministic per seed.
+    for (let i = 0; i < L.slots.length; i++) {
+      const s = L.slots[i];
+      if (CBZ.hash01 && CBZ.hash01(s.x, s.z, 0x5D1) > PARK_FILL) continue;
+      let c = null;
+      try { c = CBZ.cityAddParkedCar(s.x, s.z, s.heading, {}); } catch (e) { c = null; }
+      if (!c) continue;
+      c._venueSite = "speedway";
+      if (c.group) c.group.userData.speedwayPark = true;
+    }
+  });
 
   // ====================================================================== //
   //  CAUSEWAY                                                               //
@@ -1293,9 +1605,13 @@
     // guardrails/lights + continuous curb colliders). Falls back to the old
     // bespoke deck if the builder isn't present.
     const joinZ = ACCESS_Z;
+    // The deck runs THROUGH the gate line now, not to a point 22 m short of
+    // it: an approach that ends on open apron is exactly why the campus had no
+    // threshold. ROAD_END_X is solved off the campus boundary (see GATE).
+    const endX = CBZ.CONFIG.SPEEDWAY_SITE !== false ? ROAD_END_X : ACCESS_X;
     if (CBZ.buildHighway) {
       CBZ.buildHighway(root, {
-        path: [{ x: 348, z: -585 }, { x: 348, z: joinZ }, { x: ACCESS_X, z: joinZ }],
+        path: [{ x: 348, z: -585 }, { x: 348, z: joinZ }, { x: endX, z: joinZ }],
         width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
         guardrail: false, elevated: false, rng: rng,
       });
@@ -1572,16 +1888,17 @@
       }
     }
     if (modular) CBZ.npcLife.definePopulation("speedway-authored", { root: root, entries: populationEntries });
-    // The public car park south of the campus actually holds cars.
-    if (CBZ.cityMakeCar && CBZ.cityEcon && CBZ.cityEcon.CARS) {
-      const CARS = CBZ.cityEcon.CARS;
-      for (let i = 0; i < 10; i++) {
-        const x = CX - 100 + (i % 5) * 44 + (rng() - 0.5) * 4;
-        const z = CZ - 199 + Math.floor(i / 5) * 13;
-        const model = CARS[(rng() * CARS.length) | 0];
-        try { CBZ.cityMakeCar(x, z, Math.PI / 2, false, model, 0.1); } catch (e) { /* */ }
-      }
-    }
+    // THE CAR PARK IS NO LONGER FILLED FROM HERE. Ten cityMakeCar calls used
+    // to sit at this line and every one of them THREW — CBZ.city.arena is not
+    // assigned until buildCity() RETURNS, and this is inside a landmass
+    // builder — with the catch eating it, so the lot has been empty for its
+    // whole life. It is filled by the deferred one-shot next to buildSite,
+    // on the same bays the paint is drawn from.
+    // STREAM NOTE (the order-fragile rule): that loop DID take 20 draws off
+    // the shared 'speedway' stream before each throw, and they are gone. It is
+    // safe only because they were the LAST build-time draws on it — populate()
+    // is the final call in the builder and nothing after it consumes rng. If
+    // you add a build-time rng consumer after this point, it will shift.
   }
 
   // ====================================================================== //

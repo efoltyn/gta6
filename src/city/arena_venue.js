@@ -518,8 +518,16 @@ CBZ.arenaVenue = {
     if (CBZ.terrainFlattenUnder) {
       CBZ.terrainFlattenUnder({ name: "Ironjaw Arena deck", cx: CX, cz: CZ, r: DECK_R + 3, pad: 4 });
     }
+    // THE WALKABLE APRON IS A STAIRCASE, AND THE SITE HAS TO KNOW ITS SHAPE.
+    // These bands are a coarse rectangular approximation of the round deck —
+    // out to 107 on the ±x axis but only 30 at the poles — and anything the
+    // SITE builder puts on the ring (fence, car park, lamps) has to stay
+    // inside them or the player walks off the platform stack onto the island
+    // top 0.9 units below. They are published on the handle (metrics.apron)
+    // so arena_fights.js measures the free ring instead of re-typing it.
+    var APRON_BANDS = [[30, 107], [60, 94], [82, 75], [98, 53], [107, 30]];
     (function () {
-      var bands = [[30, 107], [60, 94], [82, 75], [98, 53], [107, 30]];
+      var bands = APRON_BANDS;
       var prev = 0;
       for (var i = 0; i < bands.length; i++) {
         var z1 = bands[i][0], hx = bands[i][1];
@@ -1188,12 +1196,18 @@ CBZ.arenaVenue = {
         put("lamp", { x: mx + 0.72, y: PY + 2.1, z: bz, sx: 0.1, sy: 1.0, sz: 2.2 });
         solid(mx + 0.8, bz - 1.7, mx + 4.2, bz + 1.7, PY, PY + 3.4);
       }
+      // A QUEUE FORMS OUTSIDE. These rails used to march from the booths
+      // EASTWARD — mx + 3.0 + 7·1.6 ends at CX − 71.5, which is 5 units INSIDE
+      // the facade wall at CX − (A + D_FACE) — so the last two ran through the
+      // building and the queue pointed at the wrong side of the ticket booth.
+      // They run outward now, toward the causeway, which is where the people
+      // arriving from actually stand.
       for (var qi = 0; qi < 8; qi++) {
-        var qx = mx + 3.0 + qi * 1.6;
+        var qx = mx - 2.2 - qi * 1.6;
         put("steel", { x: qx, y: PY + 0.55, z: CZ - 6.2, sx: 0.1, sy: 1.1, sz: 0.1 });
         put("steel", { x: qx, y: PY + 0.55, z: CZ + 6.2, sx: 0.1, sy: 1.1, sz: 0.1 });
-        put("rail", { x: qx + 0.8, y: PY + 1.0, z: CZ - 6.2, sx: 1.6, sy: 0.07, sz: 0.07 });
-        put("rail", { x: qx + 0.8, y: PY + 1.0, z: CZ + 6.2, sx: 1.6, sy: 0.07, sz: 0.07 });
+        put("rail", { x: qx - 0.8, y: PY + 1.0, z: CZ - 6.2, sx: 1.6, sy: 0.07, sz: 0.07 });
+        put("rail", { x: qx - 0.8, y: PY + 1.0, z: CZ + 6.2, sx: 1.6, sy: 0.07, sz: 0.07 });
       }
     })();
 
@@ -1381,6 +1395,14 @@ CBZ.arenaVenue = {
         // below 0.06 a row has been built that cannot see the floor.
         minCValue: +MIN_C.toFixed(3), targetC: C_VALUE,
         floorX: +((A + D0) * 2).toFixed(1), floorZ: +((B + D0) * 2).toFixed(1),
+        // ---- THE SITE MEASURES THE BUILDING, IT DOES NOT GUESS IT ----------
+        // Where the facade actually stands (half-extents from the venue
+        // centre) and how far the walkable apron reaches. arena_fights.js's
+        // arrival ring is the gap between them, so re-tiering the bowl moves
+        // the fence, the car park and the gate with it — nothing to re-sync.
+        faceX: +(A + D_FACE).toFixed(2), faceZ: +(B + D_FACE).toFixed(2),
+        coreA: A, coreB: B, faceD: +D_FACE.toFixed(2),
+        deckR: DECK_R, apron: APRON_BANDS, marqueeX: +(A + D_FACE + 9).toFixed(2),
         crowdTotal: crowdTotal, crowdCap: crowdCap,
         colliders: colliders.length, standColliders: standColliders,
         platforms: platforms.length,
