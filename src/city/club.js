@@ -47,6 +47,24 @@
   //   and only after a LONG delay — the player can stay ahead of it and even
   //   permanently clear the door. The club still runs its line with NO bouncer
   //   present (the door just stands unmanned). ----
+  // THE SHARED POST (city/occupy.js) — the four lines this file used to write
+  // by hand (make ped, parent, roster, stamp the post). Degrade-safe: without
+  // occupy.js the inline fallback is the byte-for-byte prior behaviour.
+  function post(x, z, o) {
+    if (CBZ.cityPostNpc) return CBZ.cityPostNpc(x, z, o);
+    if (!CBZ.cityMakePed || !CBZ.cityPeds || !o.parent) return null;
+    const p = CBZ.cityMakePed(x, z, o.rng || Math.random, o);
+    if (!p) return null;
+    if (o.face != null) p.group.rotation.y = o.face;
+    o.parent.add(p.group); CBZ.cityPeds.push(p);
+    if (o.pin) { p.staffPost = { x: x, z: z, face: o.face || 0 }; p.state = "idle"; p.speed = 0; }
+    return p;
+  }
+  // the door/line cast used raw Math.random — the one determinism outlier the
+  // census found in the nine spawners. A named stream costs nothing and makes
+  // the same club produce the same doorman on every client.
+  const lineRng = (CBZ.seedStream ? CBZ.seedStream("club:cast") : Math.random);
+
   const BOUNCER_REHIRE = 135;   // seconds the post stands EMPTY before one replacement is hired
   const BOUNCER_MAX_HIRES = 2;  // total replacement bouncers the club will ever hire per run (after the original)
 
@@ -150,12 +168,9 @@
     if (best) return best;
     // nobody handy → spawn one at the back of the line (guarded)
     const root = arenaRoot();
-    if (CBZ.cityMakePed && CBZ.cityPeds && root) {
+    if (root) {
       const s = club.queue[club.queue.length - 1];
-      const ped = CBZ.cityMakePed(s.x, s.z, Math.random, {});
-      root.add(ped.group);
-      CBZ.cityPeds.push(ped);
-      return ped;
+      return post(s.x, s.z, { src: "club:line", parent: root, rng: lineRng });
     }
     return null;
   }
@@ -171,21 +186,30 @@
     const root = arenaRoot();
     if (!root) return;
     const bs = club.bouncerSpot;
-    const ped = CBZ.cityMakePed(bs.x, bs.z, Math.random, {
+    // `pin` is occupy.js's word for peds.js's OWN staffPost brain: rooted at
+    // the spot, facing the street, still gunpoint-aware, still dies through
+    // the kill bus — which is exactly what the four hand-written lines below
+    // were emulating with `controlled` + a zeroed target.
+    // NOT `pin` — holdBouncer() re-plants him with state="walk" when a car or
+    // a blast shoves him off the rope, and peds.js's staffPost branch returns
+    // from move() before any movement integration, which would strand him
+    // wherever he was knocked to. `controlled` already keeps him off the
+    // wander path, which is all this post ever needed.
+    const ped = post(bs.x, bs.z, {
+      src: "club:bouncer", parent: root, rng: lineRng,
+      face: bs.face != null ? bs.face : 0, pose: "foldarms",
       name: "Bouncer", kind: "civilian", wealth: 0.6,
       archetype: "merchant", job: "doorman", aggr: 0.5,
       // a big, intimidating doorman who packs heat but doesn't wander
       hp: 200, armed: true, weapon: "Pistol",
     });
+    if (!ped) return;
     ped.controlled = true;          // never wanders — the door is the post
     ped._clubBouncer = true;
     ped.nerve = 0.95;
     ped.guard = null; ped.companion = false;
-    ped.group.rotation.y = bs.face != null ? bs.face : 0;
     if (ped.target) ped.target.set(bs.x, 0, bs.z);
     ped.state = "idle"; ped.speed = 0;
-    root.add(ped.group);
-    CBZ.cityPeds.push(ped);
     S.bouncer = ped;
   }
 

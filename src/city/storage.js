@@ -291,16 +291,29 @@
     // spawn it just beside the player so it appears at the property
     const ox = Math.sin((P.heading || 0)) * 3 + 3, oz = Math.cos((P.heading || 0)) * 3;
     const sx = P.pos.x + ox, sz = P.pos.z + oz;
-    let spawned = false;
+    let spawned = false, berthed = null;
     if (v.kind === "jet") {
       if (CBZ.citySpawnStolenJet) { try { CBZ.citySpawnStolenJet(sx, sz, 0, { owned: true }); spawned = true; } catch (e) {} }
+    } else if (CBZ.cityBerth && CBZ.cityBerth.isMarine && CBZ.cityBerth.isMarine(v.model)) {
+      // A BERTH, not a bay. Every storage spot in this file is on LAND, so a
+      // boat pulled out of the Dockside Warehouse used to appear beached in a
+      // car park. city/marina.js's CBZ.cityBerth owns water-side spots; ask it
+      // for one that fits, and tell the player where she actually went.
+      const dims = CBZ.cityBerth.dimsFor(v.model);
+      const b = CBZ.cityBerth.free(dims.loa, dims.beam) || CBZ.cityBerth.nearest(sx, sz);
+      if (b && CBZ.cityBerth.spawn) { try { spawned = !!CBZ.cityBerth.spawn(b, v.model); berthed = b; } catch (e) {} }
+      // degrade-safe: no berth anywhere -> the old inline behaviour, unchanged
+      if (!spawned && CBZ.citySpawnOwnedCar) { try { CBZ.citySpawnOwnedCar(sx, sz, v.model); spawned = true; } catch (e) {} }
     } else {
       if (CBZ.citySpawnOwnedCar) { try { CBZ.citySpawnOwnedCar(sx, sz, v.model); spawned = true; } catch (e) {} }
     }
     if (!spawned) { note("Couldn't pull that out right now.", 1.8); return; }
     s.vehicles.splice(i, 1);
     s.lastRetrieve = now();
-    note("Your " + (v.kind === "jet" ? "F-22" : v.model) + " is out front.", 2.4);
+    if (berthed) {
+      note("Your " + v.model + " is in the water at " + (berthed.label || berthed.id) + ".", 2.8);
+      if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(berthed.x, berthed.z, v.model); } catch (e) {} }
+    } else note("Your " + (v.kind === "jet" ? "F-22" : v.model) + " is out front.", 2.4);
     sfx("door");
     persist();
     close();

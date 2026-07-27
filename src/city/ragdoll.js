@@ -20,6 +20,22 @@
    Contract kept: starting a ragdoll pins _phys.down=9999 (CBZ.body.busy
    stays true forever → peds.js never re-grounds the corpse) and zeroes
    the grapple fling so only ONE simulation moves the body.
+
+   PINNING (CBZ.ragdollPin/ragdollUnpin/ragdollPinned): one point of the
+   skeleton is held at a world position that something else owns — a jaw,
+   a hand, a hook — and the other twelve whip off it. In verlet this is
+   nearly free (write p=q at the held point after the constraint pass, so
+   the accumulated velocity can't fight the hold), and it is the whole
+   difference between a corpse being carried and a corpse being SHAKEN.
+
+   BUOYANCY (CBZ.CONFIG.RAGDOLL_BUOYANCY): a body in the sea used to keep
+   the full 22 u/s² and sink straight through the seabed clamp into the
+   dark, which is exactly the wrong read — a corpse in water rises and
+   floats splayed. Per point, the gravity term ramps toward net-upward and
+   the velocity damps hard once it is under the live surface. It is a
+   strict no-op on land: the water test is one query per body per frame and
+   answers "dry" for every land kill, so every existing land behaviour is
+   byte-identical.
 ============================================================ */
 (function () {
   "use strict";
@@ -40,6 +56,23 @@
   const ITER = 3;             // constraint relaxation passes per substep
   const KICK_DT = 1 / 120, VK = 0.52;   // velocities live per-SUBSTEP (two substeps/frame)
   function GRAV() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
+
+  // ---- WATER (flag declared here; we do not edit src/config.js) -------------
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  if (CFG.RAGDOLL_BUOYANCY == null) CFG.RAGDOLL_BUOYANCY = true;
+  function buoyOn() { return CBZ.CONFIG.RAGDOLL_BUOYANCY !== false; }
+  const BUOY_G = -0.35;      // gravity multiplier at full submersion → net UP
+  const BUOY_DRAG = 0.86;    // per-substep velocity retention in water (viscous)
+  const FLOAT_BAND = 1.6;    // pelvis this close to the surface = floating, not sunk
+
+  // ---- PIN: which mass points a named grab holds ----------------------------
+  // "torso"/"hips" hold BOTH points of the pair and are moved together, so the
+  // pair keeps its own rest separation and the sticks never fight the hold.
+  const PIN_PTS = {
+    head: [0], torso: [1, 2], hips: [3, 4],
+    la: [7], ra: [8], ll: [11], rl: [12],       // hands and feet — what a jaw actually closes on
+  };
+  const PIN_MAX = 8;         // seconds, hard safety cap: a pin can never own a body forever
 
   // 13 points, rig-local rest offsets (character.js joint positions)
   const OFF = [
@@ -184,6 +217,9 @@
       //      dyt counts down; while >0 the solver bends the legs to a brace
       //      then a collapse and shoves the hips along dyx/dyz.
       dyt: 0, dyMax: 0, dyx: 0, dyz: 0, dyForce: 0, dyHead: false,
+      // ---- held by something (see applyPin) and the water column this body
+      //      is in (see waterProbe). wet=false is the land path, byte-identical.
+      pin: null, wet: false, seaY: 0, seaDy: 0,
     };
   }
   const slots = [];
@@ -217,6 +253,7 @@
     s.asleep = false; s.still = 0; s.life = 0; s.thud = false;
     s.kicked = false; s.kv.fill(0);
     s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false;
+    s.pin = null; s.wet = false; s.seaY = 0; s.seaDy = 0;
   }
 
   // grounded-corpse contract: down=9999 keeps CBZ.body.busy true forever (peds.js
@@ -366,6 +403,81 @@
     return true;
   }
 
+  // ============================================================
+  //  PIN — one point of the skeleton is owned by something else.
+  //
+  //  Run AFTER the stick relaxation and the ground clamp, so nothing gets a
+  //  later say than the hold: the sticks then relax the other twelve points
+  //  around a fixed anchor on the next iteration, which is exactly the whip we
+  //  want. Setting q alongside p is the whole trick — leave q behind and the
+  //  verlet integrator reads a huge implicit velocity at the held point and
+  //  spends the next frames trying to fling the body away from the thing
+  //  holding it, which looks like a physics bug rather than a grip.
+  // ============================================================
+  const _pinAt = { x: 0, y: 0, z: 0 };
+  function applyPin(s) {
+    const pin = s.pin;
+    if (!pin) return;
+    _pinAt.x = pin.x; _pinAt.y = pin.y; _pinAt.z = pin.z;
+    if (pin.at) {
+      // the anchor is another system's callback (a jaw socket that moves every
+      // substep). It is not allowed to allocate and it is not allowed to take
+      // the frame down with it if it throws.
+      try { pin.at(_pinAt); } catch (e) { return; }
+    }
+    if (!(isFinite(_pinAt.x) && isFinite(_pinAt.y) && isFinite(_pinAt.z))) return;
+    pin.x = _pinAt.x; pin.y = _pinAt.y; pin.z = _pinAt.z;
+    const p = s.p, q = s.q, pts = pin.pts, n = pts.length;
+    let mx = 0, my = 0, mz = 0;
+    for (let k = 0; k < n; k++) { const i = pts[k] * 3; mx += p[i]; my += p[i + 1]; mz += p[i + 2]; }
+    const inv = 1 / n;
+    // translate the held point(s) as a unit: a pair keeps its own separation,
+    // so pinning a torso never squeezes the shoulders together.
+    const st = pin.stiff;
+    const ox = (_pinAt.x - mx * inv) * st, oy = (_pinAt.y - my * inv) * st, oz = (_pinAt.z - mz * inv) * st;
+    const keep = 1 - st;                       // stiff 1 = the hold is absolute
+    for (let k = 0; k < n; k++) {
+      const i = pts[k] * 3;
+      const vx = p[i] - q[i], vy = p[i + 1] - q[i + 1], vz = p[i + 2] - q[i + 2];
+      p[i] += ox; p[i + 1] += oy; p[i + 2] += oz;
+      q[i] = p[i] - vx * keep; q[i + 1] = p[i + 1] - vy * keep; q[i + 2] = p[i + 2] - vz * keep;
+    }
+  }
+
+  // ONE water query per body per frame — never per point, never per substep.
+  // Taken 3m BELOW the pelvis on purpose: a probe at the pelvis reads "dry"
+  // the moment a floating body's hips clear the surface, the body sinks, the
+  // probe reads "wet" again, and the corpse oscillates at the waterline. From
+  // under the surface the query always finds the column, and every per-point
+  // test is a comparison against the ONE surface height it returns (exact to
+  // well under a centimetre across a 2m body).
+  //
+  // CBZ.waterSubmergence (systems/gore.js) is the single shared water query —
+  // guarded, coerced, and 0 rather than NaN when the water system is absent or
+  // mid-rebuild, so a bad read degrades to the dry land path instead of
+  // poisoning p[] with NaN and taking out computeBoundingSphere downstream.
+  function waterProbe(s) {
+    s.seaDy = 0;
+    if (!buoyOn() || !CBZ.waterSubmergence) { s.wet = false; return; }
+    const py = s.cy - 3;
+    const d = CBZ.waterSubmergence(s.cx, py, s.cz);
+    if (!(d > 0)) { s.wet = false; return; }
+    const ny = py + d;
+    if (s.wet) { const dy = ny - s.seaY; if (dy > -1 && dy < 1) s.seaDy = dy; }
+    s.wet = true; s.seaY = ny;
+  }
+  // a FROZEN body still has to ride the swell. Its pose is locked, but the sea
+  // it settled on keeps rolling, and a corpse pinned at a fixed Y while the
+  // surface moves under it is the same tell world/water_buoyancy.js fixed for
+  // boat hulls. Only a body actually at the waterline moves; one resting on
+  // the seabed stays exactly where it fell.
+  function bobAsleep(s) {
+    const dy = s.seaDy;
+    if (!dy || Math.abs(s.cy - s.seaY) > FLOAT_BAND) return;
+    const p = s.p, q = s.q;
+    for (let i = 1; i < 39; i += 3) { p[i] += dy; q[i] += dy; }
+  }
+
   function solve(s, dt) {
     if (dt <= 0) return;
     const p = s.p, q = s.q;
@@ -416,6 +528,7 @@
       }
     }
     const gh2 = GRAV() * h * h;
+    const wet = s.wet, seaTop = s.seaY;
     let maxd2 = 0;
     for (let sub = 0; sub < 2; sub++) {
       for (let i = 0; i < 13; i++) {
@@ -425,7 +538,24 @@
         if (sp2 > 0.2025) { const k = 0.45 / Math.sqrt(sp2); vx *= k; vy *= k; vz *= k; } // anti-tunnel step cap
         if (sp2 > maxd2) maxd2 = sp2;
         q[ix] = p[ix]; q[iy] = p[iy]; q[iz] = p[iz];
-        p[ix] += vx; p[iy] += vy - gh2; p[iz] += vz;
+        // BUOYANCY — RAMPED over the point's own thickness, never stepped. A
+        // hard "below the surface → push up" test makes every point flip state
+        // as it crosses the waterline and the whole corpse jitters like a cork;
+        // ramping means a shoulder half out of the water gets half the lift, so
+        // the body settles LOW and splayed, which is what a body in water does.
+        // `wet` is false for every land kill, so this costs one branch there
+        // and the land path is byte-identical.
+        let g = gh2;
+        if (wet) {
+          const dep = seaTop - p[iy];
+          if (dep > 0) {
+            const k = dep < RAD[i] ? dep / RAD[i] : 1;
+            g = gh2 * (1 + (BUOY_G - 1) * k);          // k=1 → net upward
+            const dr = 1 - (1 - BUOY_DRAG) * k;        // water drag, same ramp
+            vx *= dr; vy *= dr; vz *= dr;
+          }
+        }
+        p[ix] += vx; p[iy] += vy - g; p[iz] += vz;
       }
       for (let it = 0; it < ITER; it++) {
         for (let c = 0; c < NS; c++) {
@@ -469,6 +599,9 @@
           }
         }
       }
+      // the hold gets the LAST word of the substep — after the sticks and
+      // after the ground, so nothing can drag the held point off the jaw.
+      if (s.pin) applyPin(s);
     }
     // walls: extremities get the shared circle-vs-box push (height-gated)
     if (CBZ.collide) {
@@ -479,12 +612,16 @@
         p[i] = _c.x; p[i + 2] = _c.z;
       }
     }
+    if (s.pin) applyPin(s);          // the wall pusher doesn't get to move the grip either
     // sleep: kinetic energy stayed low → freeze the pose where it lies. Never
     // let the body sleep mid dying-beat (a near-vertical headshot collapse moves
     // slowly but must NOT freeze upright before it folds to the ground).
     if (s.dyt <= 0 && Math.sqrt(maxd2) / h < SLEEP_V) s.still += dt; else s.still = 0;
     s.life += dt;
-    if (s.still > SLEEP_T || s.life > MAX_LIFE) s.asleep = true;
+    // a held body never freezes — but the pin's own `until` (hard-capped at
+    // PIN_MAX) is what bounds that, so a pin can never keep a body awake
+    // forever. The frame the pin expires, MAX_LIFE takes it straight to sleep.
+    if (!s.pin && (s.still > SLEEP_T || s.life > MAX_LIFE)) s.asleep = true;
   }
 
   // re-orient the EXISTING rig from the points (assign, never add — we run after
@@ -557,7 +694,16 @@
       } else if (!t.dead || t.culled || (t.group && !t.group.parent)) {
         releaseSlot(s); continue;                   // culled/picked-up → timeline owns it
       }
+      // the pin's clock runs on frame time, not substep time, and a held body
+      // is never allowed to be asleep (the thing holding it is still moving).
+      if (s.pin) {
+        s.pin.t -= dt;
+        if (s.pin.t <= 0) s.pin = null;
+        else { s.asleep = false; s.still = 0; }
+      }
+      waterProbe(s);
       if (!s.asleep) solve(s, dt);
+      else if (s.wet) bobAsleep(s);
       writePose(s);
       // the death cam orbits player.pos — follow the pelvis down the stairs
       if (s.isPlayer && CBZ.player && CBZ.player.pos) CBZ.player.pos.set(s.cx, s.cy, s.cz);
@@ -565,6 +711,58 @@
   });
 
   CBZ.cityRagdoll = function (target, point, dir, imp) { return start(target, point, dir, imp, false); };
+
+  // ============================================================
+  //  PUBLIC PIN API — "something else owns this point of the body now".
+  //
+  //  CBZ.ragdollPin(target, {point, at, until, stiff}) -> bool
+  //     point : "head"|"torso"|"hips"|"la"|"ra"|"ll"|"rl"   (default "torso")
+  //     at    : function(out){ out.x=..; out.y=..; out.z=..; } — called every
+  //             substep, MUST NOT allocate. Omitted → the body is held exactly
+  //             where it is right now (a snag, not a carry).
+  //     until : seconds (default 3, hard max PIN_MAX)
+  //     stiff : 0..1, 1 = the hold always wins (default 1)
+  //  A target with no live slot gets one spun up through the SAME start()
+  //  path as any other kill, so RANGE2 / MAX_ACTIVE / LRU still bound the
+  //  solve budget — a hundred things grabbing corpses can't blow it open.
+  //  Returns false rather than throwing when no body can be given.
+  // ============================================================
+  CBZ.ragdollPin = function (target, opts) {
+    if (!target) return false;
+    opts = opts || {};
+    let s = target._ragSlot != null ? slots[target._ragSlot] : null;
+    if (!s || !s.used || s.ped !== target) {
+      // imp 1 = the smallest legal kick: spinning the body up must not add an
+      // impulse the caller never asked for.
+      if (!start(target, null, null, 1, false)) return false;
+      s = target._ragSlot != null ? slots[target._ragSlot] : null;
+      if (!s || !s.used || s.ped !== target) return false;
+    }
+    const pts = PIN_PTS[opts.point] || PIN_PTS.torso;
+    const p = s.p;
+    let mx = 0, my = 0, mz = 0;
+    for (let k = 0; k < pts.length; k++) { const i = pts[k] * 3; mx += p[i]; my += p[i + 1]; mz += p[i + 2]; }
+    const inv = 1 / pts.length;
+    s.pin = {
+      pts,
+      at: typeof opts.at === "function" ? opts.at : null,
+      t: Math.max(0.05, Math.min(PIN_MAX, opts.until == null ? 3 : opts.until)),
+      stiff: Math.max(0, Math.min(1, opts.stiff == null ? 1 : opts.stiff)),
+      x: mx * inv, y: my * inv, z: mz * inv,       // where it is held if there's no at()
+    };
+    s.asleep = false; s.still = 0; s.age = ++seq;  // freshen LRU: a held body is the interesting one
+    return true;
+  };
+  CBZ.ragdollUnpin = function (target) {
+    if (!target) return;
+    const s = target._ragSlot != null ? slots[target._ragSlot] : null;
+    if (s && s.used && s.ped === target) s.pin = null;
+  };
+  CBZ.ragdollPinned = function (target) {
+    if (!target) return false;
+    const s = target._ragSlot != null ? slots[target._ragSlot] : null;
+    return !!(s && s.used && s.ped === target && s.pin);
+  };
 
   // ============================================================
   //  WAKE-ON-HIT: a DOWNED body shouldn't lose physics. When the hitscan

@@ -92,16 +92,28 @@
    armed:false} — no opts.name, so makePed's own internal name(r,gender)
    mints a gender-correct first name off the SAME rng we hand it (the exact
    contract family.js's famPed and social.js's spawnFamilyMember both rely
-   on). Scaled 0.62 / hp 40 afterward, matching family.js's famPed(kid=true)
-   exactly. Added to the live world (arena root + CBZ.cityPeds) so — unlike
+   on) — plus `age: 0`, which is what makes the body an actual INFANT rather
+   than a shrunken adult (see GROWING UP below). Added to the live world
+   (arena root + CBZ.cityPeds) so — unlike
    family.js's yard-bound kids — this child is a REAL simulated ped from
    birth: routable by aigoals.js, stash-able by schedule.js, killable,
    robbable, all of it. bearChild() links it into the family tree,
    cityHouseholdJoin seats it in the family's own unit, cityPedStash banks it
    immediately so a page exists before anything can despawn/recycle it away.
 
-   GROWING UP: NOT in scope for W11. The kid spawns at kid scale/hp and stays
-   that way — no aging pass exists yet. A later wave owns "kids grow up."
+   GROWING UP (W13 — this is now DONE; the note below used to say it wasn't):
+   the baby is minted with `age: 0` and the body is built at real infant
+   proportions by entities/character.js. Its BIRTHDAY is stamped by the
+   bearChild() call this function already made — familytree.js records
+   born[sid] = CBZ.dayTime() (core/daynight.js's continuous calendar, already
+   carried by the world save), and AGE IS DERIVED ON READ. Nothing here ticks
+   an age, which is precisely why a baby that gets parked by crowd.js, stashed
+   to an offline ledger page, or saved and reloaded still comes back older.
+   city/childhood.js owns the rate, the growth bands, the rig swap when the
+   body crosses one, and the behaviour (a baby is carried or in its cot; it is
+   never a toddler walking the boulevard alone). One thing this file must NOT
+   do again: fake the body with group.scale — CBZ.childBodyAudit() counts that
+   and it is pinned in the math gate.
 
    GOSSIP: reused the existing "proposal" TOPIC (op:0, mood:+0.6 — a happy,
    opinion-neutral ripple) rather than adding a new "birth" key to social.js's
@@ -248,6 +260,13 @@
       kid = CBZ.cityMakePed(x, z, rng, {
         gender, archetype: "resident", job: "the kid", aggr: 0, armed: false,
         name: kidName || undefined,
+        // W13 GROWING UP: `age` is the whole migration. It replaces the
+        // `char.group.scale.setScalar(0.62)` fake this file used to apply
+        // after the fact — peds.js forwards it to makeCharacter, which builds
+        // REAL infant proportions (near-adult head, a torso that is most of
+        // the body, no neck) instead of a 62%-size adult. A baby born in-sim
+        // starts at 0 and childhood.js grows it from there.
+        age: 0,
       });
     } catch (err) { return false; }
     if (!kid) return false;
@@ -256,9 +275,6 @@
     // defensive re-check, see peds.js's cityPopulationBirth doc).
     const funded = CBZ.cityPopulationBirth ? CBZ.cityPopulationBirth(1) : 1;
     if (!funded) return false;
-    // kid scale/hp — matches family.js's famPed(kid=true) exactly.
-    if (kid.char && kid.char.group) kid.char.group.scale.setScalar(0.62);
-    kid.hp = 40; kid.maxHp = 40;
     kid.famRole = "the kid";
     // enter the live world: arena root (rendering) + cityPeds (simulation) —
     // the vips.js/millionaires.js/scenedirector.js "spawn into the running
@@ -267,7 +283,17 @@
     if (A && A.root && kid.group) A.root.add(kid.group);
     if (CBZ.cityPeds) CBZ.cityPeds.push(kid);
     // family tree + household + the offline book, in that order.
+    // bearChild() also stamps the PERSISTED BIRTHDAY (familytree.js W13): the
+    // birth day comes off CBZ.dayTime(), the one monotonic calendar the world
+    // save already carries, so this baby keeps ageing while it's parked, while
+    // its identity sits on an offline ledger page, and across a reload. Age is
+    // derived on read (today − bornDay), so nothing has to tick it.
     if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.bearChild(c.a, c.b, kid);
+    // …and this is the one guarded line that finishes the job: hp sized to the
+    // body, band tagged, birthday forced onto the (now-minted) sid. No-op and
+    // harmless if childhood.js isn't loaded — the kid is simply a small person
+    // who never grows, which is exactly where this file was before.
+    if (CBZ.cityChildAge) CBZ.cityChildAge(kid, 0);
     if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(kid, c.parent);
     if (CBZ.cityPedStash) CBZ.cityPedStash(kid);
     c.e.lb = now();   // stamp the cooldown on the LIVE edge object (persists — see header)

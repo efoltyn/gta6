@@ -132,14 +132,72 @@
      (careers.js owns its own beacon for g.cityJob; we keep ours
       separate so the two never fight over the same mesh.)
   ========================================================= */
+  /* MIGRATED to core/mission.js (2026-07-26).
+     The block below was one of FIVE independent objective UIs in the repo —
+     this file's beacon+ring+waypoint+g.cityJob writer was byte-for-byte the
+     same idea as careers.js's, activities.js's checkpoint beacons and the
+     column core/mission.js now owns (mission.js's header says so: "ONE light
+     column + ground ring for the focused objective. Lifted out of
+     city/gigs.js"). It was lifted, but the original stayed here.
+
+     It is gone now. A gig holds ONE mission handle and moves it per leg with
+     m.retarget(); the beacon, the ring, the map waypoint, the HUD distance
+     line and the phone checklist all come from that one call. gigs.js keeps
+     what is genuinely its own — the fare/heat/cargo economics — and pays its
+     own money (`pay:false`, so mission.js does not double-pay and still
+     reports the true figure to the phone card and the faction hook).
+
+     The functions keep their names and signatures so the ~14 call sites in
+     this file did not have to change; the raw-THREE fallback below is the
+     degrade-safe path for a build without the mission block. */
+  let gigMission = null;
+  function missionBlock() { return (CBZ.mission && CBZ.CONFIG.MISSION_BLOCK !== false) ? CBZ.mission : null; }
   let beacon = null, ring = null;
   function clearMarker() {
+    // RETIRE, not cancel. This runs on the way out of EVERY gig — including the
+    // ones the player just finished — so calling it a cancellation posted a
+    // "FAILED" card to the phone after a clean drop and reported a botched job
+    // to the faction layer. completeInternal()/failInternal() below state the
+    // real verdict first; by the time we get here the handle is already closed
+    // or genuinely has no verdict to give.
+    if (gigMission) { try { (gigMission.retire || gigMission.cancel).call(gigMission, "wrapped"); } catch (e) {} gigMission = null; }
+    clearMarkerRaw();
+  }
+  function setMarker(x, z, color, label) {
+    const MB = missionBlock();
+    if (!MB) { setMarkerRaw(x, z, color, label); return; }
+    clearMarkerRaw();                       // never both
+    const gig = g.cityGig;
+    const desc = gig ? (gig.phase === "carry" ? carryDesc(gig) : pickupDesc(gig)) : (label || "Job");
+    if (gigMission && gigMission.alive()) {
+      gigMission.retarget([x, z], label, color).brief(desc);
+      return;
+    }
+    gigMission = MB.start({
+      id: "gig:" + (gig ? gig.kind : "job"),
+      title: gig ? gigLabel(gig) : "Gig",
+      giver: gig ? gigLabel(gig) : "Dispatch",
+      brief: desc,
+      reward: gig ? (gig.reward || 0) : 0,
+      pay: false,                           // gigs.js already pays; no second wallet
+      announce: false,                      // this file has its own accepted/note lines
+      goal: "manual",                       // the gig's phase machine drives the legs
+      at: [x, z], label: label, color: color,
+      failOnDeath: false, failOnBust: false, // gigs.js's own fail() owns those rules
+    });
+  }
+  function moveMarker(x, z) {
+    if (gigMission && gigMission.alive()) { gigMission.retarget([x, z]); return; }
+    moveMarkerRaw(x, z);
+  }
+
+  function clearMarkerRaw() {
     if (beacon) { if (beacon.parent) beacon.parent.remove(beacon); if (beacon.geometry) beacon.geometry.dispose(); if (beacon.material) beacon.material.dispose(); beacon = null; }
     if (ring) { if (ring.parent) ring.parent.remove(ring); if (ring.geometry) ring.geometry.dispose(); if (ring.material) ring.material.dispose(); ring = null; }
     if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
   }
-  function setMarker(x, z, color, label) {
-    clearMarker();
+  function setMarkerRaw(x, z, color, label) {
+    clearMarkerRaw();
     const a = arena(); if (!a || !a.root) return;
     const hgt = 34;
     beacon = new THREE.Mesh(
@@ -154,10 +212,11 @@
     a.root.add(ring);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint && label) { try { CBZ.fullMap.setWaypoint(x, z, label); } catch (e) {} }
   }
-  function moveMarker(x, z) {
+  function moveMarkerRaw(x, z) {
     if (beacon) beacon.position.set(x, beacon.position.y, z);
     if (ring) ring.position.set(x, 0.12, z);
   }
+  if (CBZ.mission && CBZ.mission.adopt) CBZ.mission.adopt("city/gigs.js");
 
   /* =========================================================
      THE SHARED SKILL-METER HUD BAR. One small bar, bottom-center,
@@ -370,7 +429,12 @@
       return false;
     }
     if (g.cityGig) { note("Finish your current gig first.", 1.8); return false; }
-    if (g.cityJob) { note("Wrap your current job first.", 1.8); return false; }
+    // the HUD job line is now painted by core/mission.js for gigs too, so
+    // "is a job showing" is no longer the same question as "am I busy".
+    // Ask the mission block directly when it is present.
+    if (missionBlock() ? (CBZ.mission.busy && CBZ.mission.busy()) : !!g.cityJob) {
+      note("Wrap your current job first.", 1.8); return false;
+    }
     const gig = {
       kind: def.kind, phase: "pickup",
       pickup: def.pickup, dest: def.dest,
@@ -408,10 +472,15 @@
       : gig.kind === "delivery" ? "GRAB THE ORDER"
       : "PICK UP";
     setMarker(gig.pickup.x, gig.pickup.z, col, verb);
-    g.cityJob = {
-      type: "gig", desc: pickupDesc(gig), reward: gig.reward || 0,
-      dest: { x: gig.pickup.x, z: gig.pickup.z }, _gig: true,
-    };
+    // ONE writer: with the mission block loaded, setMarker() above already
+    // owns the HUD line, the waypoint and the beacon. Without it, we still
+    // write the legacy job object ourselves.
+    if (!gigMission) {
+      g.cityJob = {
+        type: "gig", desc: pickupDesc(gig), reward: gig.reward || 0,
+        dest: { x: gig.pickup.x, z: gig.pickup.z }, _gig: true,
+      };
+    }
     big(gigLabel(gig) + " · accepted");
     note(pickupDesc(gig), 2.6);
     hudDirty();
@@ -429,7 +498,7 @@
     else if (gig.kind === "delivery") label = "DROP: " + (gig.to || "the address");
     else label = "DROP OFF RIDER";
     setMarker(gig.dest.x, gig.dest.z, col, label);
-    g.cityJob = { type: "gig", desc: carryDesc(gig), reward: gig.reward || 0, dest: { x: gig.dest.x, z: gig.dest.z }, _gig: true };
+    if (!gigMission) g.cityJob = { type: "gig", desc: carryDesc(gig), reward: gig.reward || 0, dest: { x: gig.dest.x, z: gig.dest.z }, _gig: true };
     note(carryDesc(gig), 2.4);
     hudDirty();
   }
@@ -718,12 +787,22 @@
   function teardown() {
     clearMarker(); hideBar();
     if (g.cityJob && g.cityJob._gig) g.cityJob = null;
+    if (gigMission) { try { gigMission.cancel("gig ended"); } catch (e) {} gigMission = null; }
     _lastV = 0; _lastHp = null;
     g.cityGig = null;
     hudDirty();
   }
   function completeInternal(gig) {
     gig.phase = "done";
+    // Close the shared mission handle as DONE before teardown(): teardown()
+    // routes through clearMarker() -> cancel(), which would archive a
+    // "failed" card on the phone for a gig the player just finished.
+    // pay:false means mission.js pays nothing here; we report the real figure
+    // so the phone card and the faction hook see the true number.
+    if (gigMission) {
+      try { gigMission.complete({ cash: gig.paidOut || gig.reward || 0 }); } catch (e) {}
+      gigMission = null;
+    }
     if (CBZ.cityGigOnComplete) { try { CBZ.cityGigOnComplete(gig); } catch (e) {} }   // company-system hook
     teardown();
   }

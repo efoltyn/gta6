@@ -1,12 +1,67 @@
 /* ============================================================
-   core/lights.js — sun (shadow-casting) + sky/ground hemisphere
+   core/lights.js — THE LIGHT RIG. One key, one sky/ground ambient,
+   one bounce fill, and the single API every writer routes through.
+
+   WHAT WAS WRONG: the whole game was lit by exactly two lights — a
+   directional sun at 1.05 and a hemisphere at 0.85. Nothing bounced.
+   A wall facing away from the sun received only the hemisphere's flat
+   ground colour, so every shadow side of every building read as the
+   same dead grey slab regardless of what it was standing next to, and
+   interiors went to mud. Real daylight has three terms: the sun, the
+   sky dome, and the LIGHT THE GROUND THROWS BACK UP. We now ship the
+   third one — a cheap, shadow-less "bounce" directional aimed UP and
+   roughly opposite the sun, tinted by the ground the player is standing
+   on and scaled by how high the sun is. It costs nothing measurable
+   (MeshLambertMaterial in r128 is Gouraud — extra directional lights are
+   evaluated per VERTEX, not per pixel) and it is what makes the shadow
+   side of a building read as "in shade" instead of "unlit".
+
+   THE THREE-WRITER PROBLEM (and how it is resolved):
+   core/daynight.js (@2), modes/survival.js (@93) and city/mode.js (@94)
+   all used to write CBZ.sun.intensity / CBZ.hemi.intensity / sun.position
+   directly, each clobbering the last, each with its own hard-coded 1.05
+   and 0.95 literals. Adding a fourth writer for tone-mapped exposure
+   would have been unmaintainable, so instead:
+
+     * CBZ.lightRig.daylight(dayness, duskness, sunColor) is now THE
+       function that sets sun + hemi + bounce from the day clock. It is
+       idempotent, it owns every literal, and it is what daynight.js
+       calls. A mode that wants the same look with a different focus
+       point calls it too — see CBZ.lightRig.cityFrame() below, which is
+       the exact one-line replacement for city/mode.js's inline block.
+     * CBZ.lightRig.finalize() (driven by core/gfx.js at order 94.5,
+       i.e. AFTER every mode override) converts the LOGICAL intensities
+       any writer left behind into PHYSICAL ones for the currently
+       installed tone map, and re-aims/re-tints the bounce light from
+       whatever the final sun state turned out to be. So a mode that
+       still writes sun.intensity by hand (city/mode.js today) is
+       corrected rather than fought.
+
+   SHADOWS: one 2048 PCFSoft ortho cascade, texel-snapped onto the
+   player by daynight.js. The frustum HALF-SIZE is now owned here
+   (CBZ.lightRig.setShadowFrustum) instead of being poked directly by
+   each mode, so core/quality.js can hand it a per-tier value and every
+   consumer of CBZ.shadowFrustumInfo() stays consistent.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const scene = CBZ.scene;
+  CBZ.CONFIG = CBZ.CONFIG || {};
 
-  // warm/cool ambient fill from sky above, grass below
+  // GFX_BOUNCE_LIGHT — the ground-bounce fill described above. Flip false
+  // (or ?cfg_GFX_BOUNCE_LIGHT=0) to return to the exact two-light rig; the
+  // light object still exists but is held at zero intensity so no shader
+  // permutation churns when the flag or the quality tier moves.
+  if (CBZ.CONFIG.GFX_BOUNCE_LIGHT == null) CBZ.CONFIG.GFX_BOUNCE_LIGHT = true;
+  // GFX_SKY_AMBIENT — drive hemisphere sky/ground COLOURS from the day cycle
+  // (instead of the fixed 0xeaf4ff / 0x6f7a55 pair). Off = old constant tint.
+  if (CBZ.CONFIG.GFX_SKY_AMBIENT == null) CBZ.CONFIG.GFX_SKY_AMBIENT = true;
+
+  /* ---------------- the rig ------------------------------------------- */
+
+  // Sky/ground ambient. The colours below are the DAY keyframe; daynight.js
+  // drives them across the cycle when GFX_SKY_AMBIENT is on.
   const hemi = new THREE.HemisphereLight(0xeaf4ff, 0x6f7a55, 0.85);
   scene.add(hemi);
 
@@ -15,11 +70,18 @@
   sun.position.set(48, 90, -10);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048); // retuned live by core/quality.js
-  const sc = 70;
-  sun.shadow.camera.left = -sc; sun.shadow.camera.right = sc;
-  sun.shadow.camera.top = sc;  sun.shadow.camera.bottom = -sc;
+  const SC0 = 70;
+  sun.shadow.camera.left = -SC0; sun.shadow.camera.right = SC0;
+  sun.shadow.camera.top = SC0;  sun.shadow.camera.bottom = -SC0;
   sun.shadow.camera.near = 1;  sun.shadow.camera.far = 260;
-  sun.shadow.bias = -0.0004;
+  // A tighter frustum (core/quality.js now shrinks it per tier) buys real
+  // shadow texels, and a tight frustum lets us trade depth bias for NORMAL
+  // bias: offsetting the shadow lookup along the surface normal instead of
+  // along depth kills acne without the peter-panning gap that a big depth
+  // bias opens under every object's feet. That gap is exactly what made
+  // contact shadows read as "floating decal" before.
+  sun.shadow.bias = -0.00015;
+  if ("normalBias" in sun.shadow) sun.shadow.normalBias = 0.022;
   scene.add(sun);
 
   const sunTarget = new THREE.Object3D();
@@ -27,7 +89,160 @@
   scene.add(sunTarget);
   sun.target = sunTarget;
 
+  // GROUND BOUNCE. Aimed from below/behind relative to the sun so it fills
+  // exactly the faces the sun cannot reach. Never casts (a shadow-casting
+  // fill would double the single most expensive pass in the scene).
+  const bounce = new THREE.DirectionalLight(0x8a7f68, 0.0);
+  bounce.position.set(-30, -34, 22);
+  bounce.castShadow = false;
+  const bounceTarget = new THREE.Object3D();
+  bounceTarget.position.set(0, 6, 0);
+  scene.add(bounceTarget);
+  bounce.target = bounceTarget;
+  scene.add(bounce);
+
   CBZ.hemi = hemi;
   CBZ.sun = sun;
   CBZ.sunTarget = sunTarget;
+  CBZ.bounce = bounce;
+  CBZ.bounceTarget = bounceTarget;
+
+  /* ---------------- authored day keyframes ----------------------------
+     Every magic number the old three writers each carried their own copy
+     of now lives here, once. `si`/`hi`/`bi` are LOGICAL intensities —
+     core/gfx.js scales them for the installed tone map in finalize(). */
+  const KEY = {
+    day:   { sun: 0xfff4e0, si: 1.18, hi: 0.72, bi: 0.34, sky: 0xdcecff, gnd: 0x8b8a72 },
+    dusk:  { sun: 0xff8a3a, si: 0.78, hi: 0.54, bi: 0.30, sky: 0xffcaa0, gnd: 0x6d5a4c },
+    night: { sun: 0x6f86c0, si: 0.20, hi: 0.34, bi: 0.10, sky: 0x2c3c62, gnd: 0x161c2c },
+  };
+  CBZ.lightKeys = KEY;
+
+  const _c1 = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color();
+  const _sunDir = new THREE.Vector3();
+
+  // Tier knobs, published by core/quality.js through CBZ.gfxTier. Defaults are
+  // the "everything on" values so the rig is correct before quality.js parses.
+  function tier() { return CBZ.gfxTier || { bounce: 1, shadowHalf: 0, lightGain: 1 }; }
+
+  /* setShadowFrustum(half, far) — the ONLY sanctioned way to resize the ortho
+     shadow box. Idempotent (a no-op when nothing changed), updates the
+     projection matrix, and forces a shadow refresh so the old projection can
+     never linger for a cadence interval after a mode switch. */
+  let _half = SC0, _far = 260;
+  function setShadowFrustum(half, far) {
+    half = Math.max(12, +half || _half);
+    far = Math.max(half * 2 + 20, +far || _far);
+    if (half === _half && far === _far) return false;
+    _half = half; _far = far;
+    const cam = sun.shadow.camera;
+    cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half;
+    cam.far = far;
+    if (cam.updateProjectionMatrix) cam.updateProjectionMatrix();
+    if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
+    else if (CBZ.renderer) CBZ.renderer.shadowMap.needsUpdate = true;
+    return true;
+  }
+
+  /* daylight(dayness, duskness, sunColorOut)
+     Blends night→day→dusk across the authored keyframes above and writes
+     sun colour/intensity, hemisphere intensity + sky/ground colours, and the
+     bounce fill's colour/intensity. Returns the blended sun colour so the
+     caller can publish it (core/sky.js reads CBZ.sunTint, not sun.color,
+     because a mode override may have clobbered the light).                */
+  function daylight(dayness, duskness, out) {
+    const k = dayness < 0 ? 0 : dayness > 1 ? 1 : dayness;
+    const d = duskness < 0 ? 0 : duskness > 1 ? 1 : duskness;
+    const N = KEY.night, D = KEY.day, K = KEY.dusk;
+
+    // sun colour
+    _c1.setHex(N.sun); _c2.setHex(D.sun);
+    const sc = out || _c3;
+    sc.copy(_c1).lerp(_c2, k);
+    if (d > 0) { _c1.setHex(K.sun); sc.lerp(_c1, d * 0.7); }
+    sun.color.copy(sc);
+
+    // logical intensities (gfx.finalize() applies the tone-map gain)
+    let si = N.si + (D.si - N.si) * k;
+    if (d > 0) si += (K.si - si) * (d * 0.45);   // the low sun is dimmer AND warmer
+    sun.intensity = si;
+    let hi = N.hi + (D.hi - N.hi) * k;
+    if (d > 0) hi += (K.hi - hi) * (d * 0.4);
+    hemi.intensity = hi;
+
+    // sky/ground ambient colour across the cycle — this is the cheap
+    // "sky-tinted GI" term: at dusk the up-facing ambient goes peach and the
+    // down-facing goes warm brown, so every roof and every kerb shifts with
+    // the sky instead of staying the same two constants all day.
+    if (CBZ.CONFIG.GFX_SKY_AMBIENT) {
+      _c1.setHex(N.sky); _c2.setHex(D.sky);
+      hemi.color.copy(_c1).lerp(_c2, k);
+      if (d > 0) { _c1.setHex(K.sky); hemi.color.lerp(_c1, d * 0.6); }
+      _c1.setHex(N.gnd); _c2.setHex(D.gnd);
+      hemi.groundColor.copy(_c1).lerp(_c2, k);
+      if (d > 0) { _c1.setHex(K.gnd); hemi.groundColor.lerp(_c1, d * 0.55); }
+    }
+
+    // bounce: the ground throwing the sun back up. Tinted by the hemisphere's
+    // ground colour (which IS the local ground) warmed toward the sun colour,
+    // because bounced light carries the colour of what it bounced off.
+    const bi = N.bi + (D.bi - N.bi) * k;
+    bounce.color.copy(hemi.groundColor).lerp(sc, 0.45);
+    bounce.intensity = CBZ.CONFIG.GFX_BOUNCE_LIGHT ? bi * (tier().bounce != null ? tier().bounce : 1) : 0;
+    return sc;
+  }
+
+  /* aimBounce() — park the bounce light under/behind the sun, pointing back
+     up at the geometry. Called from finalize() with the FINAL sun position so
+     it tracks whichever writer won this frame. */
+  function aimBounce(focusX, focusY, focusZ) {
+    if (!CBZ.CONFIG.GFX_BOUNCE_LIGHT) return;
+    _sunDir.copy(sun.position).sub(sunTarget.position);
+    const len = _sunDir.length() || 1;
+    _sunDir.multiplyScalar(1 / len);
+    // mirror the sun through the ground plane and swing it round: light
+    // arriving from below and roughly opposite the key.
+    bounceTarget.position.set(focusX, focusY, focusZ);
+    bounce.position.set(
+      focusX - _sunDir.x * 60,
+      focusY - Math.abs(_sunDir.y) * 45 - 6,
+      focusZ - _sunDir.z * 60
+    );
+  }
+
+  /* aimSun(fx, fy, fz, ox, oy, oz) — put the key light at focus+offset and
+     point it at the focus. Used by the mode overrides. */
+  function aimSun(fx, fy, fz, ox, oy, oz) {
+    sun.position.set(fx + ox, fy + oy, fz + oz);
+    sunTarget.position.set(fx, fy, fz);
+  }
+
+  /* cityFrame(focus) — the ENTIRE per-frame light override city/mode.js
+     needs, in one call. It reproduces mode.js's behaviour exactly (re-aim the
+     sun onto the player, ride CBZ.dayness for intensity/colour, widen the
+     shadow box for the city) while routing through the shared keyframes and
+     the tier-driven shadow frustum, so the tone-map gain and the bounce fill
+     apply in city mode too instead of being clobbered.
+     ONE-LINE CHANGE for city/mode.js: replace the body of its @94 sun/hemi/
+     shadow block with `CBZ.lightRig.cityFrame(focus);`.                     */
+  function cityFrame(focus) {
+    if (!focus) return;
+    const k = CBZ.dayness != null ? CBZ.dayness : 1;
+    const d = CBZ.duskness || 0;
+    daylight(k, d, CBZ.sunTint || (CBZ.sunTint = new THREE.Color()));
+    aimSun(focus.x, 4, focus.z, 70, 146, -50);
+    setShadowFrustum(tier().shadowHalf || 190, (tier().shadowHalf || 190) * 2.6 + 40);
+    aimBounce(focus.x, 6, focus.z);
+  }
+
+  CBZ.lightRig = {
+    sun: sun, hemi: hemi, bounce: bounce, target: sunTarget,
+    keys: KEY,
+    daylight: daylight,
+    aimSun: aimSun,
+    aimBounce: aimBounce,
+    cityFrame: cityFrame,
+    setShadowFrustum: setShadowFrustum,
+    shadowHalf: function () { return _half; },
+  };
 })();

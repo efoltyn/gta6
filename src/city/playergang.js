@@ -236,6 +236,18 @@
   //      against the same deterministic city.arena.lots. Members are FRESH
   //      bodies through the shared ped factory + the normal enlist path (the
   //      exact pipeline a live recruit takes) — never revived ped refs. ----
+  // THE SHARED POST (city/occupy.js) — exactly the four lines the restore path
+  // wrote by hand. Degrade-safe: the inline branch is the prior behaviour.
+  function crewPost(x, z, o) {
+    if (CBZ.cityPostNpc) return CBZ.cityPostNpc(x, z, o);
+    if (!CBZ.cityMakePed || !CBZ.cityPeds || !o.parent) return null;
+    const p = CBZ.cityMakePed(x, z, o.rng, o);
+    if (!p) return null;
+    o.parent.add(p.group); CBZ.cityPeds.push(p);
+    if (o.homeGuard) p.homeGuard = o.homeGuard;
+    return p;
+  }
+
   CBZ.cityPlayerGangRestore = function (rec) {
     if (!rec || !rec.founded) return false;
     const A = CBZ.city && CBZ.city.arena; if (!A || !A.lots || !A.lots.length) return false;
@@ -262,17 +274,17 @@
           const lot = pg.turf.length ? pg.turf[k % pg.turf.length] : null;
           const cx = lot ? lot.cx : (pg.center ? pg.center.x : 0);
           const cz = lot ? lot.cz : (pg.center ? pg.center.z : 0);
-          const ped = CBZ.cityMakePed(cx + (rnd() - 0.5) * 6, cz + (rnd() - 0.5) * 6, rnd, {
+          // THE SHARED POST (city/occupy.js) — the same four lines, one call.
+          const ped = crewPost(cx + (rnd() - 0.5) * 6, cz + (rnd() - 0.5) * 6, {
+            src: "playergang:crew", rng: rnd, parent: A.root,
             kind: "gang", gang: pg.id, faction: "player",
             guard: lot ? { x: lot.cx, z: lot.cz } : null,
+            homeGuard: lot ? { x: lot.cx, z: lot.cz } : null,
             outfit: pg.color, aggr: 0.92, archetype: "gangster", job: "crew",
             armed: true, weapon: "Pistol", hp: 160,
           });
           if (!ped) continue;
-          A.root.add(ped.group);
-          CBZ.cityPeds.push(ped);
           enlist(ped, rk);
-          if (lot) ped.homeGuard = { x: lot.cx, z: lot.cz };
         }
       }
     }
@@ -597,7 +609,9 @@
   // patch the player into the crew as the lowest rank — now a real member
   function patchIn(rec, how) {
     if (!rec || rec.absorbed) return;
-    g.cityMembership = { gangId: rec.id, rank: "prospect", standing: 0, bodies: 0, contrib: 0, loyalty: 0.6, how: how };
+    // served/orders are the two ladder currencies factions.js credits through
+    // gangs.js's `bind` — same record, no second store.
+    g.cityMembership = { gangId: rec.id, rank: "prospect", standing: 0, bodies: 0, contrib: 0, served: 0, orders: 0, loyalty: 0.6, how: how };
     prospecting = null; workContract = null; jumpedIn = null;
     clearProspectWaypoint();       // the HQ / hit beacon's job is done
     g.playerGangId = rec.id;       // peds.js / turf can read which crew you ride with
@@ -626,16 +640,35 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   };
 
+  // ---- MIGRATED to city/factions.js ----------------------------------------
+  // This file used to hand-type the tier order `prospect,lookout,runner,
+  // soldier,enforcer,lt` as a literal string array THREE times (here, in
+  // cityPlayerGangPromote, and in autoPromotePlayerCrew) next to a fourth
+  // threshold table (MEMBER_NEED) — none of which read gangs.js's canonical
+  // RANKS. All four are gone: the order and the thresholds now live in exactly
+  // one place, gangs.js's RANKS, declared once as CBZ.factions "gang".
+  // The literal below is the DEGRADE-SAFE fallback if factions.js is absent.
+  const FALLBACK_LADDER = ["prospect", "lookout", "runner", "soldier", "enforcer", "lt"];
+  if (CBZ.factionMigrated) {
+    CBZ.factionMigrated("ladder:playergang-member");   // MEMBER_LADDER + MEMBER_NEED
+    CBZ.factionMigrated("ladder:playergang-crew");     // the two `ladder` literals
+  }
+  function ladderKeys() {
+    const L = (CBZ.factions && CBZ.factions.ladderKeys) ? CBZ.factions.ladderKeys("gang") : null;
+    // drop "boss" — boss is succession-only, never a merit rung for a member
+    if (L && L.length) return L.filter((k) => k !== "boss");
+    return FALLBACK_LADDER;
+  }
   // promote the PLAYER inside the crew they're a member of, on earned merit.
-  // rank ladder mirrors gangs.js: prospect->lookout->runner->soldier->enforcer->lt.
-  const MEMBER_LADDER = ["prospect", "lookout", "runner", "soldier", "enforcer", "lt"];
-  const MEMBER_NEED = { lookout: { body: 1, contrib: 80 }, runner: { body: 2, contrib: 220 }, soldier: { body: 4, contrib: 520 }, enforcer: { body: 8, contrib: 1100 }, lt: { body: 14, contrib: 2200 } };
   function tryMemberPromote() {
     const m = memb(); if (!m) return;
-    const idx = MEMBER_LADDER.indexOf(m.rank);
-    if (idx < 0 || idx >= MEMBER_LADDER.length - 1) return;
-    const next = MEMBER_LADDER[idx + 1], need = MEMBER_NEED[next];
-    if (!need) return;
+    if (CBZ.factions && CBZ.factions.tryPromote) { CBZ.factions.tryPromote("gang"); return; }
+    const L = ladderKeys();
+    const idx = L.indexOf(m.rank);
+    if (idx < 0 || idx >= L.length - 1) return;
+    const next = L[idx + 1];
+    // fallback thresholds only — the live rule is gangs.js's RANKS via factions
+    const need = { body: idx + 1, contrib: 80 * (idx + 1) * (idx + 1) };
     if (m.bodies >= need.body && m.contrib >= need.contrib) {
       m.rank = next;
       const rec = gangRecById(m.gangId);
@@ -646,11 +679,22 @@
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
-  // other systems credit the player's in-crew work here (kills/cash kicked up)
+  // other systems credit the player's in-crew work here (kills/cash kicked up).
+  // ONE writer now: CBZ.factions.credit routes into this same g.cityMembership
+  // record (gangs.js's `bind`) and runs the promotion check itself.
   CBZ.cityMemberPutInWork = function (kind, amount) {
     const m = memb(); if (!m) return;
+    const F = CBZ.factions;
+    if (F && F.credit && F.isMember && F.isMember("gang")) {
+      if (kind === "body") { F.credit("gang", "bodies", amount || 1); F.addStanding("gang", 0.04); }
+      else if (kind === "cash") F.credit("gang", "contrib", amount || 0);
+      else if (kind === "order") F.credit("gang", "orders", amount || 1);
+      else if (kind === "standing") F.addStanding("gang", amount || 0.1);
+      return;
+    }
     if (kind === "body") { m.bodies += (amount || 1); m.loyalty = Math.min(1, m.loyalty + 0.04); }
     else if (kind === "cash") { m.contrib += (amount || 0); }
+    else if (kind === "order") { m.orders = (m.orders || 0) + (amount || 1); }
     else if (kind === "standing") { m.standing = Math.min(2, m.standing + (amount || 0.1)); }
     tryMemberPromote();
   };
@@ -724,7 +768,7 @@
   CBZ.cityPlayerGangPromote = function (ped) {
     if (!CBZ.cityPlayerGangIsMember(ped)) { CBZ.city.note("They're not in your gang.", 1.6); return; }
     if (ped.rank === "lt") { CBZ.city.note(ped.name + " is already your Lieutenant — the top under you.", 2); return; }
-    const ladder = ["prospect", "lookout", "runner", "soldier", "enforcer", "lt"];
+    const ladder = ladderKeys();          // ONE source (gangs.js RANKS via factions)
     const i = ladder.indexOf(ped.rank); const next = ladder[Math.max(0, i) + 1] || "lt";
     if (CBZ.cityGangRankUp) CBZ.cityGangRankUp(ped, next);
     else { ped.rank = next; ped.maxHp = Math.max(ped.maxHp || 160, 200); ped.hp = ped.maxHp; }
@@ -741,11 +785,20 @@
   // so a long-running gang grows real veterans without micromanagement.
   function autoPromotePlayerCrew() {
     const pg = g.playerGang; if (!pg || !pg.founded || !CBZ.cityMemberStats) return;
-    const ladder = ["prospect", "lookout", "runner", "soldier", "enforcer", "lt"];
-    const need = { lookout: { b: 1, c: 60 }, runner: { b: 2, c: 180 }, soldier: { b: 3, c: 380 }, enforcer: { b: 6, c: 800 }, lt: { b: 10, c: 1600 } };
+    // ONE ladder + ONE threshold table: gangs.js's RANKS, read through factions.
+    // (Before: a third hand-typed copy of the tier order plus a fourth private
+    // threshold table that disagreed with both gangs.js and MEMBER_NEED.)
+    const ladder = ladderKeys();
+    const F = CBZ.factions;
+    const needOf = (key) => {
+      const rd = (F && F.rankDef) ? F.rankDef("gang", key) : null;
+      if (rd) return { b: rd.need.bodies, c: rd.need.contrib };
+      const i = FALLBACK_LADDER.indexOf(key);
+      return { b: Math.max(0, i), c: 60 * i * i };
+    };
     for (const m of liveMembers()) {
       const i = ladder.indexOf(m.rank); if (i < 0 || i >= ladder.length - 1) continue;
-      const nx = ladder[i + 1], rq = need[nx]; if (!rq) continue;
+      const nx = ladder[i + 1], rq = needOf(nx); if (!rq) continue;
       const s = CBZ.cityMemberStats(m);
       if (s.bodies >= rq.b && s.earned >= rq.c) {
         if (CBZ.cityGangRankUp && CBZ.cityGangRankUp(m, nx)) { styleMember(m, pg.color); }

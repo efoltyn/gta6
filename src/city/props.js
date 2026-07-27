@@ -1537,10 +1537,16 @@
       for (const lx of [-1.1, 1.1]) { const l = new THREE.Mesh(legG, shelterPostM); l.position.set(lx, 0.25, -0.35); g.add(l); }
       // PROPS_PURPOSE: 3 SEAT anchors along the bench, facing out of the
       // shelter (local +z → world (sin yaw, cos yaw), i.e. face = yaw).
+      // GEOMETRY: this bench's slab is a TALL one — box centre 0.55 + half of
+      // its 0.1 thickness = a 0.60 cushion top, 16cm above the generic "bench"
+      // default. Declare it so the rig's feet-on-the-floor solve
+      // (entities/character.js via CBZ.propSeatRef) lands the body ON the slab
+      // instead of 16cm inside it.
       if (CBZ.propRegisterSeat) {
         const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const SHELTER_BENCH = { cushion: 0.60, floorBelow: 0 };
         for (const lx of [-0.8, 0, 0.8]) {
-          CBZ.propRegisterSeat(x + lx * cy + (-0.35) * sy, 0, z - lx * sy + (-0.35) * cy, yaw, "bench", null);
+          CBZ.propRegisterSeat(x + lx * cy + (-0.35) * sy, 0, z - lx * sy + (-0.35) * cy, yaw, "bench", null, SHELTER_BENCH);
         }
       }
       // lit advertising panel on one end (glows at night). Bus shelters carry

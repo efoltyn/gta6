@@ -655,7 +655,6 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
 }
 .campaign-takeover-sub { margin-top: 10px; color: var(--campaign-amber); font-size: 14px; letter-spacing: .3em; }
 .campaign-takeover-body { max-width: 520px; margin: 18px auto 0; color: #c9d3d9; font-size: 15px; line-height: 1.55; }
-.campaign-takeover-hint { margin-top: 26px; color: #697680; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; }
 
 @media (prefers-reduced-motion: reduce) {
   .campaign-takeover { transition: none; }

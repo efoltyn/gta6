@@ -252,7 +252,7 @@
     const truck = (CBZ.cityArmored && CBZ.cityArmored.active && CBZ.cityArmored.active() && CBZ.cityArmored.truck) ? CBZ.cityArmored.truck() : null;
     if (truck && truck.pos && Math.random() < 0.85) {
       note("“Word is an armored truck's rolling. You didn't hear it from me.”", 3.2);
-      say(p, "", "#bfe0ff", 1.8);
+      say(p, "“Go on. I said nothing.”", "#bfe0ff", 1.8);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(truck.pos.x, truck.pos.z, "ARMORED TRUCK");
       sfx("blip");
       return;
@@ -274,7 +274,7 @@
       "“People talk about you, you know.”",
     ];
     note("“" + lines[(Math.random() * lines.length) | 0].replace(/^"|"$/g, "") + "”", 2.6);
-    say(p, "", "#cdeccd", 1.6);
+    say(p, "“Heh.”", "#cdeccd", 1.6);
   }
 
   // ---- BUM A SMOKE / ASK FOR A LIGHT (free slot — the smallest icebreaker).
@@ -287,10 +287,10 @@
       note("“Here.” " + nm(p) + " flicks you a light.", 2);
       relShift(p, "greeted", 0.5);
       if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.15);
-      say(p, "", "#dfe7ff", 1.8);
+      say(p, "“Appreciate it.”", "#dfe7ff", 1.8);
     } else {
       note("“Buy your own.” " + nm(p) + " waves you off.", 2);
-      say(p, "", "#cfd6e6", 1.8);
+      say(p, "“Tch.”", "#cfd6e6", 1.8);
     }
     sfx("blip");
   }

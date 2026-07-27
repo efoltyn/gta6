@@ -206,6 +206,9 @@
   }
 
   function reset() {
+    // a fresh city life wipes a mid-job score. RETIRE it: the run is over, not
+    // botched — nobody should get a FAILED card for a life they didn't live.
+    scoreEnd("retire", "new run");
     cleanupTruck();
     cleanupGuards();
     const h = ensure();
@@ -484,6 +487,98 @@
   // more than makes up for it — classic GTA crew-cut math.
   function cutForCrew(crew) { return clamp(0.78 - 0.06 * (crew || 0), 0.5, 0.9); }
 
+  /* ============================================================
+     THE MISSION BLOCK (core/mission.js) — MIGRATED 2026-07-26.
+
+     A score is a tracked, paid objective like every other job in the game, and
+     it was re-inventing the half of one that is NOT about robbery: the map
+     waypoint, the world mark, the phone card, the completion report. Those move
+     to the shared block. Everything that is genuinely a heist STAYS here — the
+     phase machine, the bag/heat/drill math, the setup fee, the crew cut, the
+     [H] board and this file's own floating progress HUD.
+
+     ONE handle, one leg per phase (case → execute → escape), stepped BY HAND
+     with m.advance() from the exact transitions that already move h.phase —
+     mission.js supports a caller that drives its own machine precisely so a
+     file like this one does not have to give it up.
+
+     pay:false — bankScore() below is still the only thing in this file that
+     moves a dollar, and it reports the REAL cut to m.complete() so the phone
+     card and the faction hook see the true figure, never a quoted one.
+
+     Every call site is null-guarded and start() is checked for an inert handle,
+     so with core/mission.js absent (or CBZ.CONFIG.MISSION_BLOCK = false) this
+     file behaves exactly as it did before.
+  ============================================================ */
+  let score = null;                     // the live mission handle, or null
+  function missionBlock() { return (CBZ.mission && CBZ.CONFIG.MISSION_BLOCK !== false) ? CBZ.mission : null; }
+  // Tag a CREWED score for the ROLE layer so factions.js credits an order on the
+  // gang ladder — riding with a crew IS putting in work. Feature-detected in
+  // BOTH directions: with no factions module the tag is inert, but with one
+  // loaded we must NOT tag a job the player is not a member for, because
+  // mission.start() gates member-only defs and would hand back an inert handle
+  // (no mark, no card) for a solo score pulled with hired bodyguards — which is
+  // exactly what crewOnHand() counts and gang membership does not.
+  function scoreFaction(crew) {
+    if (!crew) return null;
+    const F = CBZ.factions;
+    if (F && typeof F.isMember === "function") { try { return F.isMember("gang") ? "gang" : null; } catch (e) { return null; } }
+    return "gang";
+  }
+  function startScoreMission(tier, h) {
+    const MB = missionBlock(); if (!MB || !h.target) return null;
+    const at = [h.target.x, h.target.z];
+    const m = MB.start({
+      id: "heist:" + tier.id,
+      title: tier.name,
+      giver: "The Score",
+      brief: tier.desc,
+      // the PLANNED cut (this job's bag × your share) — the same estimate the
+      // score board quotes. The figure that actually lands is reported to
+      // m.complete() when it banks, so the card never invents a payout.
+      reward: Math.round(h.bagMax * h.cut),
+      pay: false,                        // bankScore() owns the wallet
+      announce: false,                   // this file's big()/note() lines carry it
+      faction: scoreFaction(h.crew),
+      // this file's phase machine is the ONE authority on whether a score is
+      // blown: the loop below already fails on death/bust with its own message
+      // and its own cooldown. The shared sweeper must not race it.
+      failOnDeath: false, failOnBust: false, failOnModeExit: false,
+      stages: [
+        { id: "case", text: "Case " + tier.name, goal: "manual", at: at, label: "CASE", color: 0xffd479 },
+        { id: "execute", text: tier.bank ? "Drill the vault, bag the cash" : "Grab the bag", goal: "manual", at: at, label: "TAKE THE BAG", color: 0xff9e6b },
+        // the escape leg has no LOCATION — "get clear" is a state, not a place.
+        { id: "escape", text: "Lose the cops and bank the take", goal: "manual", label: "GET CLEAR", color: 0xff5b5b },
+      ],
+    });
+    // start() hands back an INERT handle when the block is flagged off or a
+    // faction gate refuses. Treat that as "no mission" so nothing calls into it
+    // and this file keeps running on its own HUD alone.
+    return (m && !m.inert) ? m : null;
+  }
+  // step the shared handle in lock-step with h.phase (never past the LAST leg —
+  // advancing off the end would complete the mission behind bankScore's back).
+  function scoreAdvance() { if (score) { try { score.advance(); } catch (e) {} } }
+  /* THE VERDICT SPLIT — the one thing that has to be right.
+       done   → complete(): pays nothing (pay:false), posts the completion card,
+                credits the faction with the REAL cut.
+       fail   → a score that actually blew: a fail card + a standing hit.
+       retire → silent teardown. Pays nothing, posts nothing, tells the faction
+                layer nothing. This is what generic cleanup must use: routing a
+                wrapped-up job through cancel() archives a "FAILED" card for a
+                score the player just banked and reports a botched job to
+                factions.js (standing loss — enough of them expel you). */
+  function scoreEnd(how, arg) {
+    if (!score) return;
+    const m = score; score = null;
+    try {
+      if (how === "done") m.complete({ cash: arg || 0 });
+      else if (how === "fail") m.fail(arg || "the score blew up");
+      else (m.retire || m.cancel).call(m, arg || "score wrapped");
+    } catch (e) {}
+  }
+  if (CBZ.mission && CBZ.mission.adopt) CBZ.mission.adopt("city/heists.js");
+
   // ------------------------------------------------------------ phase: CASE
   function startCase(tierId) {
     const h = ensure();
@@ -544,12 +639,20 @@
       h.bagMax = Math.min(h.bagMax, h.vaultTotal);
     }
 
+    // take the shared handle now that the bag/cut/crew are locked in — the CASE
+    // leg marks the target, the map waypoint and the phone card follow. Retire
+    // first so two handles can never stack (a leaked one would keep painting a
+    // mark for a score that no longer exists).
+    scoreEnd("retire", "replanned");
+    score = startScoreMission(tier, h);
+
     sfx("door");
     big(tier.icon + " CASING: " + tier.name);
     note("In position? Press [H] to GO LOUD. Crew on hand: " + crew + ".", 2.6);
     renderHud();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
+  if (CBZ.factionMigrated) CBZ.factionMigrated("memb:heists");
   CBZ.cityStartHeist = function (tierId) {
     if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
       if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
@@ -588,6 +691,7 @@
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
     if (h.target && dist2(px, pz, h.target.x, h.target.z) > 14) { note("Get closer to the target first.", 1.6); return; }
     h.phase = "execute"; h.t = 0;
+    scoreAdvance();                       // CASE leg done → the shared mark moves to the TAKE leg
     sfx(tier.id === "store" ? "report" : "alarm");
     const x = h.target.x, z = h.target.z;
 
@@ -632,6 +736,13 @@
   function grabAndGo() {
     const h = ensure(); if (h.phase !== "execute") return;
     h.phase = "escape"; h.t = 0;
+    scoreAdvance();                       // TAKE leg done → the ESCAPE leg
+    // The escape leg carries no target, and mission.js only repaints the shared
+    // surface for a leg that HAS one — so drop the map waypoint by hand or it
+    // keeps pointing back at the spot you are running away from. (The light
+    // column holds its last position over the scene until the score resolves;
+    // the score's own HUD panel owns the getaway from here.)
+    if (score && CBZ.fullMap && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
     const tier = tierById(h.tierId);
     if (truckObj && truckObj.doorMat) truckObj.doorMat.emissive.setHex(0x000000);
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
@@ -658,13 +769,34 @@
     const yourCut = Math.round(take * h.cut);
     const crewCut = take - yourCut;
     CBZ.city.addCash(yourCut);
+    // what ACTUALLY lands in the player's wallet — the crew share below comes
+    // back to you on two of its branches, and the mission card must report the
+    // money that moved, not the money we planned to move.
+    let cashToYou = yourCut;
     sfx("coin");
     // crew cut → up to the player's gang treasury (funds wars/expansion)
-    if (crewCut > 0 && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && g.playerGang) {
+    // MIGRATED to the ONE membership query + the ONE contribution writer
+    // (city/factions.js). Kicking the crew's share upstairs is now the same
+    // call every other "put in work" path makes, so it also counts toward the
+    // rank ladder instead of quietly topping up a treasury field. The inline
+    // g.playerGang read below is the degrade-safe fallback.
+    const FX = CBZ.factions;
+    const inCrew = !!(crewCut > 0 && FX && FX.isMember && FX.isMember("gang"));
+    if (inCrew) {
+      // credit the ladder either way — kicking up IS the work
+      FX.credit("gang", "contrib", crewCut);
+      // ...but the MONEY must still land somewhere. A player who FOUNDED a
+      // set has a treasury; a player patched into someone else's set does
+      // not, and the old code's `else if` fallback paid them the cut in cash.
+      // Keeping both branches is what stops this from being a money
+      // regression for every non-boss member.
+      if (g.playerGang) g.playerGang.treasury = (g.playerGang.treasury || 0) + crewCut;
+      else { CBZ.city.addCash(crewCut); cashToYou += crewCut; }
+    } else if (crewCut > 0 && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && g.playerGang) {
       g.playerGang.treasury = (g.playerGang.treasury || 0) + crewCut;
     } else if (crewCut > 0) {
       // no gang yet — the crew share still comes to you (you ARE the crew)
-      CBZ.city.addCash(crewCut);
+      CBZ.city.addCash(crewCut); cashToYou += crewCut;
     }
     // respect + lifetime stats scale with the tier
     const resp = (tier ? tier.tier : 1) * 6 + Math.round(take / 1200);
@@ -674,6 +806,11 @@
     big("SCORE BANKED: " + fmt$(yourCut) + (crewCut > 0 ? " (+" + fmt$(crewCut) + " crew cut)" : ""));
     note("+" + resp + " respect · biggest take: " + fmt$(h.biggest), 2.6);
     if (CBZ.cityEvent) CBZ.cityEvent("heist-banked", { tier: tier ? tier.id : "?", take: take, crew: h.crew }, { silent: true, noWanted: true });
+    // CLOSE THE HANDLE AS DONE BEFORE finish() — finish() is generic teardown
+    // and retires it, which pays nothing and posts nothing, so a banked score
+    // would leave the player with no completion card at all. The figure is the
+    // cash that actually landed, not the quote.
+    scoreEnd("done", cashToYou);
     // a brief cooldown so you can't chain bank jobs back-to-back
     const cd = tier ? 6 + tier.tier * 4 : 8;
     finish(cd);
@@ -681,6 +818,12 @@
 
   function abort(msg) {
     const h = ensure();
+    // A plan you back out of BEFORE going loud is not a blown job — nobody ever
+    // knew it was on, so it retires SILENTLY (no fail card, no standing hit).
+    // Only a score that actually went loud and then fell apart counts against
+    // you. Read h.phase first: finish() below resets it.
+    if (h.phase === "case") scoreEnd("retire", "plan's off");
+    else scoreEnd("fail", msg || "the score fell apart");
     cleanupTruck();
     if (msg) note(msg, 2);
     finish(4);
@@ -690,6 +833,7 @@
   // failed: busted/downed mid-job → you LOSE the bag entirely
   function fail(reason) {
     const h = ensure();
+    scoreEnd("fail", reason);             // a REAL bust: the card and the faction hook both hear it
     cleanupTruck();
     big("SCORE BLOWN — " + reason);
     note("Lost the bag (" + fmt$(h.bag) + "). Heal up and try again.", 2.8);
@@ -699,6 +843,11 @@
 
   function finish(cooldown) {
     const h = ensure();
+    // GENERIC teardown — every terminal path funnels through here, including the
+    // one that just banked. RETIRE, never cancel: bankScore()/abort()/fail()
+    // have already stated the real verdict, so by the time we arrive the handle
+    // is closed and this is a no-op.
+    scoreEnd("retire", "score wrapped");
     cleanupTruck();
     cleanupGuards();
     h.phase = "idle"; h.tierId = null; h.target = null;

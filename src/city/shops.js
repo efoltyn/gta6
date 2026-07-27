@@ -464,6 +464,21 @@
     if (kind === "electronics") s.push({ key: "u", label: (g.cityPhoneTier ? "Upgrade $" : "Phone $") + phoneUpgCost(), fn: phoneUpgrade });
     // jewelry: ICE OUT — buy the whole chain+ring+grill set at a bundle discount
     if (kind === "jewelry") s.push({ key: "u", label: "Ice out", fn: iceOut });
+    // THE CIVIC DESKS (city/civic.js): the seven government trades
+    // (courthouse/federal/library/cityannex/postoffice/dmv/firestation) keep
+    // their service rows next to their own logic and splice in HERE, so this
+    // chain never learns a civic kind. Keys are filtered against everything
+    // already taken — the generic [B]jobs, the buy/haggle/rob letters and any
+    // row above — so a drifting civic key can never shadow an existing verb.
+    // Degrade-safe: no civic.js, no rows, this function is exactly as before.
+    if (CBZ.civic && CBZ.civic.services) {
+      const taken = { b: 1, x: 1, v: 1, r: 1, e: 1 };
+      for (const r0 of s) taken[r0.key] = 1;
+      for (const r of CBZ.civic.services(kind)) {
+        if (!r || !r.key || taken[r.key]) continue;
+        taken[r.key] = 1; s.push(r);
+      }
+    }
     // every shop offers the job board if careers exist
     if (CBZ.cityJobBoard) s.push({ key: "b", label: "Jobs", fn: () => CBZ.cityJobBoard() });
     return s;
@@ -808,6 +823,12 @@
   CBZ.cityOpenShop = open;
   CBZ.cityShopOpen = function () { return !!openLot; };
   CBZ.cityCloseShop = close;
+  // repaint the counter that is ALREADY up (never opens one, never resets the
+  // per-visit haggle/qty state that open() owns). city/civic.js's DMV queue
+  // advances on the sim clock, so the NOW-SERVING line has to move while you
+  // are standing at the window. No-op when no counter is open.
+  CBZ.cityShopRender = function () { if (openLot) render(); };
+  CBZ.cityShopLot = function () { return openLot; };
 
   addEventListener("keydown", function (e) {
     if (!openLot) return;
@@ -893,8 +914,15 @@
   // come off the same sun clock the keepers' timetables run on.
   const SHUT_KINDS = { bank: 1, cityhall: 1, realtor: 1, clothing: 1, barber: 1, electronics: 1, jewelry: 1, carlot: 1 };
   function shopShut(lot) {
-    if (!lot || !SHUT_KINDS[lot.kind]) return false;
+    if (!lot) return false;
     const h = CBZ.citySunHour ? CBZ.citySunHour() : 12;
+    // GOVERNMENT HOURS first (city/civic.js): a courthouse is not a diner, and
+    // 9-to-5 is both the joke and the truth. The fire house returns null there
+    // and falls through to the line below — where it isn't listed, so it never
+    // closes. Degrade-safe: no civic.js → the original two lines, byte-for-byte.
+    const ch = (CBZ.civic && CBZ.civic.hours) ? CBZ.civic.hours(lot.kind) : null;
+    if (ch) return h < ch.open || h >= ch.close;
+    if (!SHUT_KINDS[lot.kind]) return false;
     return h < 7 || h >= 21;
   }
 

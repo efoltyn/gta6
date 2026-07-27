@@ -429,9 +429,26 @@
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.6, 0.12), mat(0x5a626d));
         post.position.set(cx2 * (s - 0.12), 0.9, cz2 * (s - 0.12)); carMesh.add(post);
       }
-      const carPlat = { minX: ox - s + 0.05, maxX: ox + s - 0.05, minZ: oz - s + 0.05, maxZ: oz + s - 0.05, top: gy + 0.22 };
-      CBZ.platforms.push(carPlat); plats.push(carPlat);
-      elevators.push({ b, mesh: carMesh, plat: carPlat, gy, lo: 0.12, hi: realH, t: rng() * 8, slabTop: 0.1 });
+      // The car's deck is a MOVING PLATFORM (systems/platforms_moving.js), not a
+      // static CBZ.platforms record whose `.top` we poke each frame. That old
+      // shape was wrong in two ways: the record was driven at onUpdate(29),
+      // NINETEEN priority steps AFTER updatePlayer(10) had already resolved
+      // against last frame's height (the one-frame sink/pop), and a rider who
+      // jumped off inherited nothing. The rig ticks at 9.5 — before the player —
+      // and carries riders properly. `yaw:false`: this is a pure vertical lift.
+      // The parent is the FUNCTION form, because carMesh.position is local to
+      // the building group and the rig needs world coordinates.
+      let carPlat = null, carRig = null;
+      const carSpec = { decks: [{ x: 0, z: 0, w: 2 * s - 0.1, d: 2 * s - 0.1, top: 0.1 }], yaw: false, id: "arena-lift" };
+      if (CBZ.movingPlatform) {
+        carRig = CBZ.movingPlatform(function (o) {
+          o.x = ox; o.y = gy + carMesh.position.y; o.z = oz; o.yaw = 0; return o;
+        }, carSpec);
+      } else {
+        carPlat = { minX: ox - s + 0.05, maxX: ox + s - 0.05, minZ: oz - s + 0.05, maxZ: oz + s - 0.05, top: gy + 0.22 };
+        CBZ.platforms.push(carPlat); plats.push(carPlat);
+      }
+      elevators.push({ b, mesh: carMesh, plat: carPlat, rig: carRig, gy, lo: 0.12, hi: realH, t: rng() * 8, slabTop: 0.1 });
 
       return b;
     }
@@ -797,10 +814,18 @@
     // The car is a moving CBZ.platform, so the player's vertical physics simply
     // rides it (rise rate stays under the auto-step height). Collapsed towers
     // park their lift. ----
-    CBZ.onUpdate(29, function (dt) {
+    // PRIORITY 9.4, was 29. A platform must move BEFORE the character resolves
+    // against it (systems/platforms_moving.js ticks at 9.5, updatePlayer at 10);
+    // driving the car at 29 meant the rider spent every frame standing on last
+    // frame's height — the one-frame sink/pop. Nothing else reads these meshes,
+    // so moving the drive earlier in the frame is inert for every other system.
+    CBZ.onUpdate(9.4, function (dt) {
       if (CBZ.game.mode !== "survival") return;
       for (let i = 0; i < elevators.length; i++) {
         const e = elevators[i];
+        // a collapsed tower parks its lift: the rig stands down with the mesh
+        // (one line — it replaces the platform-splice the collapse used to need)
+        if (e.rig) e.rig.setActive(!e.b.fallen);
         if (e.b.fallen) { if (e.mesh.visible) e.mesh.visible = false; continue; }
         const span = e.hi - e.lo;
         const upT = span / 4.5;          // ~4.5 m/s — slow enough to ride
@@ -813,7 +838,9 @@
         else if (tt < upT * 2 + dwell) yl = e.hi - ((tt - upT - dwell) / upT) * span;
         else yl = e.lo;
         e.mesh.position.y = yl;
-        e.plat.top = e.gy + yl + e.slabTop;
+        // the rig reads carMesh.position.y itself at 9.5; only the legacy
+        // fallback record still needs poking
+        if (e.plat) e.plat.top = e.gy + yl + e.slabTop;
       }
     });
 

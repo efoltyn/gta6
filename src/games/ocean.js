@@ -25,7 +25,9 @@
                          over the trench (the gold) — the meg's water.
      · OXYGEN .......... the dive clock: drain scales with local depth,
                          refills at the dock; tank tiers buy trench time.
-     · GREAT WHITES .... the fear (FSM). Blood/night escalate them.
+     · GREAT WHITES .... the fear. They hunt on the SHARED predator brain
+                         (systems/predator.js), not on a private FSM — see
+                         the GREAT WHITE block below. Blood/night escalate them.
      · DOLPHINS ........ the allies: pods arc-jump and CHARGE sharks off.
      · ORCAS ........... the apex event: they hunt the whites on screen.
      · MEGALODON ....... the legend: never leaves the trench; you don't
@@ -44,6 +46,7 @@
    Determinism: build paths use ctx.rand/ctx.stream only (multiplayer
    law). Runtime creature wandering may use Math.random (FX only).
    Revert: CBZ.CONFIG.PKG_OCEAN = false (or the master GAME_PACKAGES).
+   Shark brain revert: CBZ.CONFIG.OCEAN_PREDATOR = false.
 ============================================================ */
 (function () {
   "use strict";
@@ -53,6 +56,22 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PKG_OCEAN == null) CBZ.CONFIG.PKG_OCEAN = true;
+  // THE GREAT WHITES HUNT ON THE SHARED BRAIN. Flag off (or load without
+  // systems/predator.js at all) and the ecology is untouched — they still
+  // patrol blood and bait balls, still flee orcas, still die to the pod — they
+  // simply stop hunting the diver. One-line revert, no second FSM to fall back
+  // to, because a second FSM is exactly what this migration deleted.
+  if (CBZ.CONFIG.OCEAN_PREDATOR == null) CBZ.CONFIG.OCEAN_PREDATOR = true;
+  const HUNT_ON = () => CBZ.CONFIG.OCEAN_PREDATOR !== false && typeof CBZ.predatorHunt === "function";
+
+  // THE RATCHET (BLOCK LAW #5). Script-order-proof: ocean.js loads LAST, so the
+  // first branch is what actually runs today — the buffer is there so a future
+  // reorder can never silently un-declare an honest migration.
+  if (typeof CBZ.predatorAdopt === "function") {
+    try { CBZ.predatorAdopt("ocean:shark-fsm"); } catch (e) {}
+  } else {
+    try { (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push("ocean:shark-fsm"); } catch (e) {}
+  }
 
   /* ------------------------------------------------------------ helpers -- */
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -458,7 +477,18 @@
      the great-white FSM (patrol→circle→bump→strike/flee), dolphin charge-
      repulsion, orca predation, and the megalodon lurk→run arc. Adapted to
      the engine's water sampling and the real player as the diver. */
-  function addBlood(x, z, amt, life) { chain.blood.push({ x, z, amt, life: life || 40 }); }
+  function addBlood(x, z, amt, life) {
+    chain.blood.push({ x, z, amt, life: life || 40 });
+    // ...and a REAL slick, not just a private number. predatorHunt scents
+    // CBZ.goreChumList() — that is how a bleeding diver pulls a shark in from
+    // outside its sense radius — so ocean's blood now feeds the same nose the
+    // wildlife sharks use instead of being invisible to the shared brain.
+    // Only the big spills (a strike, a kill, a thrown chum bucket) register:
+    // gore.js caps the list at 12 and a bait-ball nick must not evict a corpse.
+    if (amt >= 1.5 && CBZ.goreChum) {
+      try { CBZ.goreChum(x, SEA_Y() - 1.2, z, Math.min(1, amt * 0.25), Math.min(60, life || 40)); } catch (e) {}
+    }
+  }
   function bloodAt(x, z) {
     let b = 0;
     for (const s of chain.blood) b += s.amt * clamp(1 - d2(x, z, s.x, s.z) / 120, 0, 1);
@@ -485,6 +515,22 @@
   function preyPos() {
     if (RT.diving && RT.role === "salvage" && CBZ.player) return CBZ.player.pos;
     if (RT.simDrive && RT.simFocus) return RT.simFocus;
+    return null;
+  }
+  // ...and the ACTOR the shared driver hunts. The live diver is CBZ.player
+  // itself (so isPlayerActor() is true and the seize takes the real body, the
+  // real camera and the real kill bus). The headless focus gets a decoy whose
+  // .pos IS the focus — the same reusable-decoy trick wildlife.js uses, so the
+  // probe path allocates nothing and never fabricates a person.
+  const SIMTGT = { pos: null, group: { position: null }, dead: false, hp: 1e9,
+    animal: true, name: "the focus" };
+  function preyActor() {
+    if (RT.diving && RT.role === "salvage" && CBZ.player) return CBZ.player;
+    if (RT.simDrive && RT.simFocus) {
+      SIMTGT.pos = RT.simFocus; SIMTGT.group.position = RT.simFocus;
+      SIMTGT.dead = false; SIMTGT.hp = 1e9;
+      return SIMTGT;
+    }
     return null;
   }
 
@@ -561,18 +607,245 @@
     s.mesh.instanceMatrix.needsUpdate = true;
   }
 
-  /* ---- GREAT WHITE ---- */
+  /* ---- GREAT WHITE ---------------------------------------------------------
+     THIS FILE NO LONGER OWNS A SHARK BRAIN.
+
+     It used to run a private FSM — patrol → circle → bump → strike → flee —
+     which was the SECOND independent shark AI in the repo and the stated reason
+     city/wildlife_shark.js refused to write a third ("18-25 update loops, only
+     2 share code"). All of the stalking now comes from ONE call to
+     CBZ.predatorHunt: the menace gauge (nothing may camp on you), the FAKE-OUTS
+     (45% of all circling ends in nothing — the anti-habituation law that a
+     hand-written circle→strike ladder can never have), line of sight, chum
+     scenting, the drop-out before a committed rush, and a real SEIZE where the
+     diver is held in the jaws, thrashed and eaten. The old FSM had no grab at
+     all: its "strike" was a flat 16-damage proximity ping.
+
+     What stays here is what is genuinely the ocean sim's, and nothing else:
+       · THE LOCOMOTION SEAM (huntSwim) — this creature's yaw convention, its
+         depth beat, the surface/seabed/bounds clamps.
+       · AGGRESSION — blood and night escalation, the dolphin calm. It no longer
+         gates a private FSM; it TUNES the shared one, every frame (huntKit).
+       · FLEE — an orca, a dolphin charge, a harpoon bolt. Not a hunt state at
+         all: it overrides the driver and tells it to let go.
+       · the minigame's bookkeeping: sharkStrikes / sharkBumps, blood, claimed.
+  ------------------------------------------------------------------------- */
+
+  // Species FACADES, the same pattern city/dogs.js uses for its strays:
+  // PHYSICAL NUMBERS ONLY. CBZ.predatorKit() derives the entire opts bundle
+  // from scale/spd/bite/danger through the `lunge` archetype — which is itself
+  // wildlife_shark.js's hand-tuned great white, solved for. That is why there
+  // is no longer a single tuned radius, speed or hold left in this file.
+  //
+  // THE NUMBERS ARE THE AUTHORED ONES, COPIED EXACTLY from the bestiary
+  // (src/city/wildlife/aquatic.js). Not "about right": `spd` in particular is a
+  // species field the archetype MULTIPLIES, so a locally-invented 4.5 would
+  // silently derive a 39 u/s rush. Copying the bestiary is also what makes the
+  // wreck-field shark and the open-coast shark the same animal.
+  // (species.hp is the creature's real hp; the minigame's own 3-bolt harpoon
+  //  counter stays on the actor as s.hp and is a different thing entirely.)
+  const WHITE_SP = { id: "great_white_shark", name: "great white", danger: 0.6,
+    scale: 1.2, spd: 2.6, bite: 30, hp: 140, aquatic: true };
+  const MEG_SP = { id: "megalodon", name: "megalodon", danger: 0.8,
+    scale: 2.6, spd: 2.4, bite: 60, hp: 1200, aquatic: true };
+
   function spawnShark(x, z) {
     if (chain.sharks.length >= CAP.sharks) return null;
-    const s = { kind: "shark", mesh: acquire("shark"), pos: { x, y: SEA_Y() - 3, z }, yaw: Math.random() * 6.28, pitch: 0,
-      state: "patrol", aggr: 0, stateT: 0, tailT: Math.random() * 6, hp: 3, alive: true,
-      circleDir: Math.random() < 0.5 ? -1 : 1, bumpCd: 0, strikeCd: 0, calmT: 0, fleeFrom: null,
-      wx: x, wz: z, sinkT: 0, claimed: false };
+    const mesh = acquire("shark");
+    // group === mesh IS THE ALIAS THE SHARED DRIVER NEEDS, and it is the one
+    // real impedance mismatch in this migration. predatorHunt/predatorSeize read
+    // hunter.group.position/.rotation/.matrixWorld (the jaw anchor is solved
+    // through matrixWorld), while ocean creatures keep their authority in a
+    // plain s.pos and only push it into the mesh in syncFish(). actorPos()
+    // prefers a.pos, so the two can never disagree about WHERE it is: s.pos
+    // says where it is, s.group says where it is DRAWN.
+    const s = { kind: "shark", mesh: mesh, group: mesh, species: WHITE_SP, meg: false,
+      pos: { x, y: SEA_Y() - 3, z }, yaw: Math.random() * 6.28, pitch: 0, heading: 0,
+      state: "patrol", hunt: "cruise", aggr: 0, tailT: Math.random() * 6, hp: 3, alive: true,
+      calmT: 0, fleeT: 0, fleeFrom: { x: 0, z: 0 },
+      wx: x, wz: z, sinkT: 0, claimed: false, kit: null };
     chain.sharks.push(s); return s;
+  }
+
+  // The three things that are NOT a hunt: an orca in the water, a dolphin
+  // charge, a harpoon bolt. Each overrides the driver — and TELLS it so through
+  // predatorDisengage, which parks the hunt while leaving the menace gauge and
+  // the commit count alone. (Wiping the hunt instead would hand the diver a
+  // fresh, un-escalated shark every time a dolphin did its job, which is the
+  // exact anti-habituation bug wildlife_shark.js documents.)
+  function sharkFlee(s, from, secs) {
+    if (secs <= s.fleeT) return;
+    s.fleeT = secs; s.fleeFrom.x = from.x; s.fleeFrom.z = from.z;
+    if (CBZ.predatorDisengage) { try { CBZ.predatorDisengage(s, secs); } catch (e) {} }
+    // and if it had you in its jaws, it drops you: a dolphin arriving mid-grab
+    // is the single best moment this sim can produce and it costs one line.
+    if (s._seizing && CBZ.predatorRelease) { try { CBZ.predatorRelease(s, "released"); } catch (e) {} }
+  }
+
+  // ---- THE LOCOMOTION SEAM ------------------------------------------------
+  // predatorHunt says WHERE (a heading in the repo-wide convention: the
+  // direction is (cos h, sin h) over x/z). ocean.js says HOW, in its own yaw
+  // convention (direction (sin y, cos y)) with its own turn rate, depth beat
+  // and clamps. Converting ONCE, here, at the seam is the whole reason a shark
+  // written for a wreck field and a shark written for the open coast can share
+  // a brain without either of them knowing the other exists.
+  //
+  // Depth by state, as metres BELOW the surface. Anything not listed
+  // (circle/bump/rush/seize) rides the PREY's own depth — a committed shark
+  // comes from where you are, not from a fixed layer.
+  const HUNT_DIVE = { cruise: 2.5, scent: 3.2, vanish: 14, disengage: 6 };
+  function huntSwim(s, want, speed, dt) {
+    if (!(dt > 0)) return false;
+    const wantYaw = Math.PI * 0.5 - (want == null ? Math.PI * 0.5 - s.yaw : want);
+    // a shark turns with its whole body, and a megalodon turns like a bus
+    const turn = (s.meg ? 0.9 : 2.2) * dt;
+    s.yaw += clamp(wrapA(wantYaw - s.yaw), -turn, turn);
+    const spd = Math.max(0, speed || 0);
+    s.pos.x += Math.sin(s.yaw) * spd * dt;
+    s.pos.z += Math.cos(s.yaw) * spd * dt;
+    const off = HUNT_DIVE[s.hunt];
+    const pl = preyPos();
+    let ty;
+    if (off != null) ty = SEA_Y() - off;
+    else if (pl) ty = pl.y + (s.hunt === "circle" ? Math.sin(simT + s.tailT) * 1.2 : 0);
+    else ty = SEA_Y() - 2.5;
+    if (s.hunt === "vanish") ty = Math.max(floorY(s.pos.x, s.pos.z) + 3, ty);
+    const dy = ty - s.pos.y;
+    s.pos.y += clamp(dy, -spd * 0.55 * dt, spd * 0.55 * dt);
+    s.pitch = lerp(s.pitch || 0, clamp(dy * 0.22, -0.55, 0.55), Math.min(1, dt * 3));
+    // the shared thrash reads attacker.heading for its judder direction and
+    // falls back to -group.rotation.y, which in THIS creature's convention is
+    // sideways. One line keeps the fallback honest.
+    s.heading = Math.PI * 0.5 - s.yaw;
+    clampSwim(s);
+    return true;
+  }
+
+  // ---- the per-shark opts bundle, built ONCE and frozen (never per frame) --
+  function huntKit(s) {
+    if (s.kit) return s.kit;
+    const sp = s.species;
+    // the four seams the driver hands back to us: how it moves, whether it can
+    // get at you at all, what happens when it lands a hit, and state changes.
+    const over = {
+      medium: "water",
+      move: function (h, want, speed, dt) { return huntSwim(h, want, speed, dt); },
+      // A SHARK CANNOT BITE SOMEONE ON THE PIER. Same law as wildlife_shark.js,
+      // ocean-flavoured: swimming, inside the play bounds — or a headless probe.
+      canReach: function () { return RT.simDrive || playerInWater(); },
+      onState: function (ns, os) { onHuntState(s, ns, os); },
+      onHit: function (dm) { onHuntHit(s, dm); },
+    };
+    let k = null;
+    if (CBZ.predatorKit) { try { k = CBZ.predatorKit(s, over); } catch (e) { k = null; } }
+    if (!k) {
+      // DEGRADE: a predator.js old enough to have predatorHunt but not
+      // predatorKit. We do NOT re-hand-author twenty radii here — that bundle is
+      // precisely what this migration exists to delete, and predatorHunt's own
+      // documented defaults cover every number we leave unset. Just the seams,
+      // the archetype and the scale-derived reach/damage.
+      k = Object.assign({ style: "lunge", reach: 2.2 + sp.scale * 1.6, dmg: sp.bite,
+        cruiseSpeed: sp.spd * 2.4, rushSpeed: sp.spd * 8.7,
+        seize: { dps: 10 + sp.bite * 0.4, thrash: 1, style: "shake" } }, over);
+    }
+    k.seize = k.seize || {};
+    // THE ONE NUMBER predatorKit CANNOT DERIVE. creatureJawPoint discovers the
+    // frontmost mesh along +X because that is the repo's model convention; these
+    // voxel creatures are authored nose-toward +Z (see sharkParts/syncFish), so
+    // the discovered jaw would sit in the shark's flank. Local, PRE-scale units:
+    // the mesh's own group.scale is already in matrixWorld.
+    k.seize.jaw = { x: 0, y: -0.2, z: 1.95 };
+    k.seize.medium = "water";
+    k.seize.cause = "eaten by a " + sp.name;
+    k.seize.onEnd = function (res) { onHuntEnd(s, res); };
+    // the two knobs aggression rides (see tuneKit). They MUST be finite: an
+    // undefined senseR multiplied by anything is NaN, and predatorHunt's
+    // `opts.senseR != null` test would happily accept it — a NaN sense radius
+    // is a shark that can never notice you and never says why.
+    s.escBase = k.seize.escape;   // undefined is fine: predatorSeize defaults it
+    s.senseR0 = (k.senseR != null && isFinite(k.senseR)) ? k.senseR : 110;
+    s.circleT0 = (k.circleT != null && isFinite(k.circleT)) ? k.circleT : 6.5;
+    s.kit = k;
+    return k;
+  }
+
+  // AGGRESSION, KEPT WHOLE — it just drives the shared knobs now instead of a
+  // private state ladder. Blood and darkness widen the nose and shorten the
+  // circle; a calmed shark barely notices you. Two writes, no allocation.
+  function tuneKit(s, k) {
+    k.senseR = s.senseR0 * (0.5 + s.aggr);
+    k.circleT = s.circleT0 * (1.45 - 0.75 * s.aggr);
+    // A HEADLESS FOCUS IS A MEASUREMENT, NOT A PERSON: it can be grabbed (that
+    // is what simChain measures) but it always slips the jaws, so a probe can
+    // never push a phantom death through the kill bus.
+    k.seize.escape = RT.simDrive ? 1 : s.escBase;
+  }
+
+  function onHuntState(s, ns, os) {
+    s.hunt = ns || "cruise";
+    // THE BUMP counts and warns on the way OUT of the nudge — that transition
+    // is the contact itself (or the timeout), and the driver owns the contact.
+    if (os === "bump" && ns !== "bump") {
+      const pl = preyPos();
+      if (pl && d3(s.pos, pl) < 6) {
+        chain.events.sharkBumps++;
+        if (!RT.simDrive) warn("Something just brushed you", true);
+      }
+    }
+  }
+  // the strike sink: the driver landed teeth on the diver. Damage keeps going
+  // through hurtDiver (the hurt cooldown + the drag-ashore rule are the
+  // minigame's, not the block's), and the wound feeds the chain as fresh blood.
+  function onHuntHit(s, dm) {
+    chain.events.sharkStrikes++;
+    if (RT.simDrive) return;
+    const pl = preyPos();
+    if (pl) addBlood(pl.x, pl.z, 1.6, 30);
+    hurtDiver(dm, s.pos, "mauled by a " + s.species.name);
+  }
+  // the seize let go. A death is the kill bus's business and is never announced
+  // here; surviving one is the minigame's, and it ends the dive.
+  function onHuntEnd(s, res) {
+    if (res === "killed" || RT.simDrive) return;
+    chain.events.sharkStrikes++;
+    addBlood(s.pos.x, s.pos.z, 2.4, 30);
+    const P = CBZ.player;
+    if (P && P.hp != null && P.hp < 34 && !P.dead) dragAshore("It let go. You were dragged ashore.");
+  }
+
+  // tail beat, jaw gape and the transform push — the trailer every branch ends
+  // on, so no branch can forget one of them.
+  function finishShark(s, dt, spd) {
+    clampSwim(s);
+    s.tailT += dt * (2.2 + spd * 0.9);
+    if (s.mesh.userData.tail) s.mesh.userData.tail.rotation.y = Math.sin(s.tailT) * 0.5;
+    if (s.mesh.userData.jaw) {
+      s.mesh.userData.jaw.rotation.x = (s.hunt === "rush" || s.hunt === "seize") ? 0.75
+        : (s.aggr > 0.7 || s.hunt === "bump") ? 0.25 : 0.05;
+    }
+    // THE THRASH INTEGRATES ONTO THE MESH; READ IT BACK BEFORE WE OVERWRITE IT.
+    // Game packages tick at PRIO 40.5 and the seize machine at 47.35, so the
+    // thrash does win the frame it runs in — but `shake` and `drag` are `+=` on
+    // position, and the whole point of an integrated push is that it
+    // ACCUMULATES. syncFish writes s.pos back onto the mesh next frame, so
+    // without this the drag was silently zeroed every tick and a great white
+    // held the diver perfectly still while it ate him. Fold the thrash into the
+    // authoritative s.pos first, then sync as usual.
+    if (s._seizing) {
+      const mp = s.mesh.position;
+      if (isFinite(mp.x) && isFinite(mp.z)) { s.pos.x = mp.x; s.pos.z = mp.z; }
+      if (isFinite(mp.y)) s.pos.y = mp.y;
+    }
+    syncFish(s);
   }
   function killShark(s, by) {
     if (!s.alive) return;
-    s.alive = false; s.sinkT = 0; s.state = "dead";
+    // s.dead mirrors s.alive for the SHARED machinery: predator.js's seize
+    // watchdog aborts on attacker.dead, and without it an orca could kill a
+    // great white while it still had the diver in its jaws and the corpse would
+    // sink to the seabed holding him. s.alive stays this file's own authority.
+    s.alive = false; s.dead = true; s.sinkT = 0; s.state = "dead";
+    if (s._seizing && CBZ.predatorRelease) { try { CBZ.predatorRelease(s, "released"); } catch (e) {} }
     addBlood(s.pos.x, s.pos.z, 5, 50);
     if (by === "orca") {
       chain.events.orcaKills++;
@@ -586,80 +859,62 @@
       if (s.sinkT > 22) { release("shark", s.mesh); chain.sharks.splice(chain.sharks.indexOf(s), 1); }
       return;
     }
-    s.bumpCd -= dt; s.strikeCd -= dt; s.stateT -= dt;
     const pl = preyPos();
     const bl = bloodAt(s.pos.x, s.pos.z);
+
+    // ---- AGGRESSION (ocean's own escalation, unchanged) -------------------
     let orcaNear = null;
     for (const o of chain.orcas) if (o.alive && d3(o.pos, s.pos) < 75) { orcaNear = o; break; }
-    if (orcaNear && s.state !== "flee") { s.state = "flee"; s.fleeFrom = orcaNear.pos; s.stateT = 5; }
+    if (orcaNear) sharkFlee(s, orcaNear.pos, 5);
     let rise = Math.min(0.3, 0.07 * bl);
     if (pl) { const dp = d3(s.pos, pl); if (dp < 60 + bl * 30) rise += 0.045; }
     if (isNight()) rise *= 1.6;
     if (s.calmT > 0) { s.calmT -= dt; rise = 0; s.aggr = Math.max(0, s.aggr - dt * 0.6); }
     s.aggr = clamp(s.aggr + rise * dt - 0.006 * dt, 0, 1);
 
-    let spd = 4, turn = 1.4, ty = SEA_Y() - 2.5 + Math.sin(simT * 0.3 + s.tailT) * 1.4, tx = s.wx, tz = s.wz;
-    switch (s.state) {
-      case "patrol": {
-        let best = null, bestW = 0.6;
-        for (const b of chain.blood) { const w = b.amt * clamp(1 - d2(s.pos.x, s.pos.z, b.x, b.z) / 300, 0, 1); if (w > bestW) { bestW = w; best = b; } }
-        if (best) { tx = best.x; tz = best.z; }
-        else {
-          let sc = null, sd = 200;
-          for (const c of chain.schools) { const dd = d2(s.pos.x, s.pos.z, c.x, c.z); if (dd < sd) { sd = dd; sc = c; } }
-          if (sc && Math.random() < 0.7) { tx = sc.x; tz = sc.z; }
-          else if (d2(s.pos.x, s.pos.z, s.wx, s.wz) < 15) {
-            const a = Math.random() * 6.28, dd = 70 + Math.random() * 150;
-            s.wx = clamp(s.pos.x + Math.sin(a) * dd, V.bounds.minX, V.bounds.maxX);
-            s.wz = clamp(s.pos.z + Math.cos(a) * dd, V.bounds.minZ, V.bounds.maxZ);
-          }
-        }
-        if (pl && d3(s.pos, pl) < 60 + bl * 30 && s.aggr > 0.25) { s.state = "circle"; s.stateT = 99; }
-        break;
-      }
-      case "circle": {
-        if (!pl) { s.state = "patrol"; break; }
-        const r = lerp(24, 8, s.aggr);
-        const a = Math.atan2(s.pos.x - pl.x, s.pos.z - pl.z) + s.circleDir * (1.15 * dt);
-        tx = pl.x + Math.sin(a) * r; tz = pl.z + Math.cos(a) * r; ty = pl.y + Math.sin(simT + s.tailT) * 1.2;
-        spd = 6.5; turn = 2.4;
-        if (s.aggr > 0.55 && s.bumpCd <= 0 && s.aggr <= 0.82) { s.state = "bump"; s.stateT = 5; }
-        if (s.aggr > 0.82 && s.strikeCd <= 0) { s.state = "strike"; s.stateT = 6; }
-        break;
-      }
-      case "bump": {
-        if (!pl) { s.state = "patrol"; break; }
-        tx = pl.x; tz = pl.z; ty = pl.y; spd = 9; turn = 2.6;
-        if (d3(s.pos, pl) < 2.8) { chain.events.sharkBumps++; s.bumpCd = 6; s.state = "circle"; s.stateT = 99; warn("Something just brushed you", true); }
-        if (s.stateT <= 0) { s.state = "circle"; s.bumpCd = 4; }
-        break;
-      }
-      case "strike": {
-        if (!pl) { s.state = "patrol"; break; }
-        tx = pl.x; tz = pl.z; ty = pl.y; spd = 13; turn = 3.0;
-        if (d3(s.pos, pl) < 2.0) {
-          chain.events.sharkStrikes++;
-          addBlood(pl.x, pl.z, 1.6, 30);
-          if (!RT.simDrive) hurtDiver(16, s.pos, "mauled by a great white");
-          s.strikeCd = 8; s.aggr *= 0.8; s.state = "circle"; s.stateT = 99;
-        }
-        if (s.stateT <= 0) { s.state = "circle"; s.strikeCd = 5; }
-        break;
-      }
-      case "flee": {
-        const f = s.fleeFrom || { x: 0, z: 0 };
-        const a = Math.atan2(s.pos.x - f.x, s.pos.z - f.z);
-        tx = s.pos.x + Math.sin(a) * 60; tz = s.pos.z + Math.cos(a) * 60; ty = SEA_Y() - 6;
-        spd = 8.5; turn = 2.2;
-        if (s.stateT <= 0) s.state = "patrol";
-        break;
+    // ---- FLEE: overrides everything. Not a hunt state (sharkFlee already told
+    //      the driver to let go), so it steers itself out and back to patrol.
+    if (s.fleeT > 0) {
+      s.fleeT -= dt;
+      s.hunt = "cruise";
+      const a = Math.atan2(s.pos.x - s.fleeFrom.x, s.pos.z - s.fleeFrom.z);
+      steer(s, s.pos.x + Math.sin(a) * 60, SEA_Y() - 6, s.pos.z + Math.cos(a) * 60, 8.5, 2.2, dt);
+      finishShark(s, dt, 8.5);
+      return;
+    }
+
+    // ---- THE HUNT — one call, and everything the old ladder never had.
+    let st = null;
+    if (HUNT_ON() && pl) {
+      const k = huntKit(s);
+      tuneKit(s, k);
+      try { st = CBZ.predatorHunt(s, preyActor(), dt, k); } catch (e) { st = null; }
+    }
+    s.hunt = st || "cruise";
+    if (st && st !== "cruise") {
+      // the driver owns the body: it already moved through huntSwim this frame.
+      finishShark(s, dt, st === "rush" ? 13 : st === "bump" ? 9 : 6.5);
+      return;
+    }
+
+    // ---- PATROL: what a shark does when it is not hunting you. Blood first
+    //      (the chain's own escalation), then bait balls, then a long wander.
+    let tx = s.wx, tz = s.wz;
+    let best = null, bestW = 0.6;
+    for (const b of chain.blood) { const w = b.amt * clamp(1 - d2(s.pos.x, s.pos.z, b.x, b.z) / 300, 0, 1); if (w > bestW) { bestW = w; best = b; } }
+    if (best) { tx = best.x; tz = best.z; }
+    else {
+      let sc = null, sd = 200;
+      for (const c of chain.schools) { const dd = d2(s.pos.x, s.pos.z, c.x, c.z); if (dd < sd) { sd = dd; sc = c; } }
+      if (sc && Math.random() < 0.7) { tx = sc.x; tz = sc.z; }
+      else if (d2(s.pos.x, s.pos.z, s.wx, s.wz) < 15) {
+        const a = Math.random() * 6.28, dd = 70 + Math.random() * 150;
+        s.wx = clamp(s.pos.x + Math.sin(a) * dd, V.bounds.minX, V.bounds.maxX);
+        s.wz = clamp(s.pos.z + Math.cos(a) * dd, V.bounds.minZ, V.bounds.maxZ);
       }
     }
-    steer(s, tx, ty, tz, spd, turn, dt); clampSwim(s);
-    s.tailT += dt * (2.2 + spd * 0.9);
-    if (s.mesh.userData.tail) s.mesh.userData.tail.rotation.y = Math.sin(s.tailT) * 0.5;
-    if (s.mesh.userData.jaw) s.mesh.userData.jaw.rotation.x = s.state === "strike" ? 0.75 : (s.aggr > 0.7 ? 0.25 : 0.05);
-    syncFish(s);
+    steer(s, tx, SEA_Y() - 2.5 + Math.sin(simT * 0.3 + s.tailT) * 1.4, tz, 4, 1.4, dt);
+    finishShark(s, dt, 4);
   }
 
   /* ---- DOLPHIN pods ---- */
@@ -705,7 +960,9 @@
         else {
           steer(m, s.pos.x, s.pos.y, s.pos.z, 11, 3.2, dt);
           if (d3(m.pos, s.pos) < 3.4) {
-            s.aggr = 0; s.calmT = 7; s.state = "flee"; s.fleeFrom = { x: m.pos.x, z: m.pos.z }; s.stateT = 6;
+            // the dolphin wins the argument: calm it, break the hunt, and if it
+            // had the diver in its jaws, make it let go (see sharkFlee).
+            s.aggr = 0; s.calmT = 7; sharkFlee(s, m.pos, 6);
             chain.events.dolphinRepels++;
             if (!RT.simDrive) feedNear(s.pos, "A dolphin drove the shark off!", 160);
             m.charging = null; m.chargeCd = 3;
@@ -790,14 +1047,36 @@
   function forceMeg() {
     if (chain.meg) return chain.meg;
     const T = V.deep;
-    chain.meg = { kind: "meg", mesh: acquire("meg"), pos: { x: T.x + 85, y: floorY(T.x + 85, T.z) + 9, z: T.z },
-      yaw: 0, pitch: 0, tailT: 0, phase: "lurk", lurkT: 0, runCd: 4, enraged: false, running: false, passHit: false, alive: true };
+    const mesh = acquire("meg");
+    // The meg keeps its authored lurk→run arc (it is a set-piece, not a stalk),
+    // but it gets the same group alias + species facade as the whites so its
+    // pass can hand you to CBZ.predatorSeize. See updateMeg's pass branch.
+    chain.meg = { kind: "meg", mesh: mesh, group: mesh, species: MEG_SP, meg: true,
+      pos: { x: T.x + 85, y: floorY(T.x + 85, T.z) + 9, z: T.z },
+      yaw: 0, pitch: 0, heading: 0, tailT: 0, hunt: "rush",
+      phase: "lurk", lurkT: 0, runCd: 4, enraged: false, running: false, passHit: false, alive: true };
     if (!RT.simDrive) C.hud.toast("SOMETHING ENORMOUS IS MOVING BELOW");
     return chain.meg;
+  }
+  // the seize the meg offers on a pass. Built once; the jaw is this creature's
+  // own +Z nose (creatureJawPoint discovers along +X — see huntKit) and the
+  // numbers are the megalodon's own scale/bite through the documented laws.
+  let megSeize = null;
+  function megSeizeOpts() {
+    if (megSeize) return megSeize;
+    megSeize = { jaw: { x: 0, y: -0.2, z: 1.95 }, medium: "water", style: "shake",
+      dps: 10 + MEG_SP.bite * 0.4, hold: 2.23 * Math.pow(MEG_SP.scale, 0.9),
+      escape: 0.41 / Math.pow(MEG_SP.scale, 0.9), thrash: 1,
+      cause: "eaten by a megalodon" };
+    return megSeize;
   }
   function updateMeg(m, dt) {
     const T = V.deep;
     const ref = refPos();
+    // WHILE IT HAS YOU THE RUN IS OVER. The seize machine owns the body from
+    // 47.35; letting the pass keep integrating would tow the anchored diver
+    // across the trench and trip the seize's own 26u abort.
+    if (m._seizing) { m.running = false; clampSwim(m); syncFish(m); return; }
     const inTrench = (RT.diving || RT.simDrive) && d2(ref.x, ref.z, T.x, T.z) < 190;
     if (m.phase === "lurk") {
       m.lurkT += dt;
@@ -816,8 +1095,22 @@
         const spd = 16;
         m.pos.x += Math.sin(m.yaw) * spd * dt; m.pos.z += Math.cos(m.yaw) * spd * dt;
         m.pos.y += clamp((ref.y || SEA_Y() - 2) - m.pos.y, -6 * dt, 6 * dt);
+        m.heading = Math.PI * 0.5 - m.yaw;
         const dd = d3(m.pos, ref);
-        if (!m.passHit && dd < 4.6) { m.passHit = true; if (!RT.simDrive) hurtDiver(55, m.pos, "THE MEGALODON HIT YOU"); addBlood(ref.x, ref.z, 3, 30); }
+        if (!m.passHit && dd < 4.6) {
+          m.passHit = true;
+          // IT TAKES YOU. The pass used to be a flat 55-damage ping past a
+          // creature the size of a bus. Now it offers the diver to the shared
+          // grab — held, thrashed, one forgiving window — and only falls back
+          // to the ping when the block refuses (flag off, already holding
+          // someone, a headless focus). Never both: the seize owns the damage.
+          let took = null;
+          if (!RT.simDrive && CBZ.predatorSeize && CBZ.player) {
+            try { took = CBZ.predatorSeize(m, CBZ.player, megSeizeOpts()); } catch (e) { took = null; }
+          }
+          if (!took && !RT.simDrive) hurtDiver(55, m.pos, "THE MEGALODON HIT YOU");
+          addBlood(ref.x, ref.z, 3, 30);
+        }
         if (d2(m.pos.x, m.pos.z, ref.x, ref.z) > 85) { m.running = false; m.runCd = (m.enraged ? 3.5 : 7) + Math.random() * (m.enraged ? 3 : 6); }
       }
     }
@@ -866,6 +1159,15 @@
     for (let i = 0; i < CAP.seals; i++) spawnSeal();
   }
   function despawnAll() {
+    // NOTHING MAY BE DESPAWNED WITH THE DIVER IN ITS MOUTH. The seize machine
+    // has its own watchdogs (mode change, attacker.dead), but a pooled mesh
+    // handed back while a hold is live would leave the camera possessed by a
+    // creature that no longer exists. One explicit release, before anything is
+    // released to the pool.
+    if (CBZ.predatorRelease) {
+      for (const s of chain.sharks) if (s._seizing) { try { CBZ.predatorRelease(s, "released"); } catch (e) {} }
+      if (chain.meg && chain.meg._seizing) { try { CBZ.predatorRelease(chain.meg, "released"); } catch (e) {} }
+    }
     for (const s of chain.sharks) release("shark", s.mesh); chain.sharks.length = 0;
     for (const p of chain.pods) for (const m of p.members) release("dolphin", m.mesh); chain.pods.length = 0;
     for (const o of chain.orcas) release("orca", o.mesh); chain.orcas.length = 0;
@@ -961,7 +1263,7 @@
     for (const s of chain.sharks) { if (!s.alive) continue; const dd = d3(s.pos, P.pos); if (dd < bd) { bd = dd; best = s; } }
     if (!best) { C.hud.feed("Harpoon fired — nothing in range", "#9adcb8"); return; }
     bag().bolts--; save();
-    best.hp--; best.state = "flee"; best.fleeFrom = { x: P.pos.x, z: P.pos.z }; best.stateT = 5;
+    best.hp--; sharkFlee(best, P.pos, 5);
     addBlood(best.pos.x, best.pos.z, 2, 35);
     if (best.hp <= 0) { killShark(best, "bolt"); chain.sharkTimer = Math.min(chain.sharkTimer, 8); C.hud.feed("Shark killed — the blood is calling MORE", "#ff5a4a"); }
     else C.hud.feed("Harpoon hit — it's bleeding and fleeing", "#9adcb8");
@@ -1120,7 +1422,9 @@
     const F = RT.simFocus;
     despawnAll(); RT.seeded = true;
     for (let i = 0; i < CAP.schools; i++) spawnSchool(F.x + Math.sin(i) * 120, F.z + Math.cos(i) * 120);
-    for (let i = 0; i < 5; i++) { const a = (i / 5) * 6.28; const s = spawnShark(F.x + Math.sin(a) * 24, F.z + Math.cos(a) * 24); if (s) { s.aggr = 0.85; s.state = "circle"; s.stateT = 99; } }
+    // aggr is the ONLY stage knob now: it widens the nose and shortens the
+    // circle, and the shared driver decides the rest (the point of the wave).
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * 6.28; const s = spawnShark(F.x + Math.sin(a) * 24, F.z + Math.cos(a) * 24); if (s) s.aggr = 0.85; }
     for (let i = 0; i < 2; i++) spawnDolphins(F.x + Math.sin(i * 2) * 16, F.z + Math.cos(i * 2) * 16);
     addBlood(F.x, F.z, 4, seconds + 5);
     // orcas start well out so the pod's first dolphin repels land before the

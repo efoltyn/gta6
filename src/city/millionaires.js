@@ -617,8 +617,11 @@
     }
     const resp = Math.max(40, Math.min(400, Math.round(amt / 4000)));
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(resp);
-    // a lasting philanthropy flex bump (additive to wealth.js's recomputed flex)
-    g.cityFlexBonus = (g.cityFlexBonus || 0) + 2;
+    // a lasting philanthropy flex bump — route through wealth.js so it is also
+    // PERSISTED (a bare += is lost on the next reload); fall back to the raw
+    // bump if wealth.js isn't loaded.
+    if (CBZ.cityAddFlex) CBZ.cityAddFlex(2);
+    else g.cityFlexBonus = (g.cityFlexBonus || 0) + 2;
     g.cityMilliGala = (g.cityMilliGala || 0) + 1;
     big("You headline the Charity Gala — " + money(amt) + " donated. The city's elite raise a glass to you.");
     note("+" + resp + " respect · the philanthropist's flex sticks.", 2.8);

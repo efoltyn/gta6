@@ -4,28 +4,100 @@
    exist without purpose").
 
    The design is an ANCHORS-ONLY registry: furniture builders
-   (buildings.js furniture sets, props.js patio/shelter/camps) register
-   a seat/bed ANCHOR (world position + facing yaw) as they place each
-   piece. The mesh itself is never touched — it stays batch-folded
-   (core/batch.js) and costs nothing; sitting is a pose + a position
-   pin, not a mesh mutation. city/interact.js surfaces the verbs
-   ("Sit down" / "Sleep til morning" / "Stand up") through the ONE
-   interaction registry.
+   (buildings.js furniture sets, props.js patio/shelter/camps,
+   city/furniture.js's shared kit) register a seat/bed ANCHOR (world
+   position + facing yaw) as they place each piece. The mesh itself is
+   never touched — it stays batch-folded (core/batch.js) and costs
+   nothing; sitting is a pose + a position pin, not a mesh mutation.
+   city/interact.js surfaces the verbs ("Sit down" / "Sleep til morning"
+   / "Stand up") through the ONE interaction registry.
 
-   Poses: SIT rides the rig's existing `ch.sitting` flag (the exact
-   office-worker mechanism, entities/character.js animChar). LIE has no
-   rig pose — it's the KO/death precedent: the char GROUP rolls
-   rotation.z → π/2 while a per-frame hold pins the body on the
-   mattress (systems/physics.js:464 does the same for a downed player).
+   ---- BODY ARCS V2 (owner: "fix sitting and lying in bed" — sitting
+   down must not be a teleport with a pose) ---------------------------
+   Sitting, standing, lying down and getting up are now ARCS, not state
+   flips. Every transition runs a phased walk→turn→settle machine (the
+   aircraft_doors.js / elevators.js boarding grammar, generalised):
 
-   NPC API (for the schedules agent): CBZ.propSit(ped, seat) sets the
-   ped up so peds.js's OWN `state==="sit"` branch holds it seated (it
-   re-pins from ped._deskAnchor every frame — the office-desk idiom,
-   peds.js ~3984); CBZ.propStand(ped) releases. Seats are single-
-   occupancy with stale-claim tolerance (a dead/recycled occupant frees
-   the seat lazily — correctness never depends on a release call).
+     SIT   walk to the seat's ENTRY POINT → turn to the seat facing →
+           lower (crouch dip, then the seated pose folds in as the body
+           backs onto the cushion).                       ~0.6s + walk
+     STAND push  (anticipation: lean forward over the knees, weight
+           shifts onto the feet) → rise (legs extend, body travels
+           forward off the cushion) → settle.  Deliberately SLOWER than
+           sitting down — getting up costs effort.               ~0.78s
+     LIE   walk to the BEDSIDE → perch (sit on the mattress edge, feet
+           on the floor) → swing (legs up, body rolls flat onto the
+           pillow).                                        ~0.94s + walk
+     RISE  unroll back to a perch on the edge → stand up.       ~1.34s
 
-   Revert: CBZ.CONFIG.PROPS_PURPOSE = false (everything no-ops).
+   The phase proportions are the four-phase sit-to-stand model from the
+   kinesiology literature (flexion-momentum ≈ a third of the cycle, then
+   momentum-transfer + extension, then a short stabilisation): our push is
+   28% of the stand arc, rise 51%, settle 21%. Standing up is ~25% longer
+   than sitting down because it genuinely is. Skipping the bed perch is
+   the exact defect Cyberpunk 2077 shipped, was mocked for, and patched.
+
+   REFUSE, NEVER SNAP: beyond ARC_MAX the arc declines and the caller gets
+   the honest instant commit. A half-played approach that teleports the
+   remainder is worse than no approach at all.
+
+   Nothing about the arc is new machinery: the player's body is owned via
+   the SAME `player._doorArc` early-return systems/physics.js already
+   honours for aircraft boarding (no new freeze flag), the rig is posed
+   through fields entities/character.js already reads (`ch.sitting`,
+   `ch.seatRef`, `ch.crouch`), and NPCs ride peds.js's own `state==="sit"`
+   branch exactly as before — the arc only overrides the visual transform
+   for the handful of frames the transition lasts (this updater runs at
+   order 42, AFTER peds.js at 34 and physics at 10, so it wins the frame).
+
+   ---- SEAT GEOMETRY -----------------------------------------------------
+   entities/character.js has a real feet-on-the-floor chair solve gated on
+   `ch.seatRef = {cushion, floorBelow}` — but until now ONLY the airliner
+   passed that data, so every other chair in the game fell back to the
+   legacy "squat on top of the cushion" fake. `propRegisterSeat` now takes
+   an optional `geom = {cushion, floorBelow}` 7th argument, and any seat
+   that declares one gets the real solve. Seats that don't keep the legacy
+   pose byte-identically — deliberately: most legacy furniture is a single
+   tall block whose TOP FACE is the seating surface, nothing like the
+   real-world cushion height its `kind` implies, so inferring the number
+   would bury bodies inside sofas (the full survey is in propSeatRef's
+   comment). SEAT_H holds the real-world numbers for builders that DO draw
+   real furniture — `CBZ.furnish` (city/furniture.js) declares on every
+   piece, so the fix lands exactly as fast as callers move onto the shared
+   kit, and `CBZ.propUseAudit().noGeom` counts what's left.
+
+   NPC API (for the schedules / occupied-building / roles agents):
+     CBZ.propSeatNpc(ped, r, prefer) — THE ONE-LINER. "Seat this NPC at
+                                  whatever is nearby, on its own floor."
+                                  `prefer` is a kind substring tried first —
+                                  pass "throne" for a gang boss so he takes
+                                  the high-backed chair, not a guest seat.
+     CBZ.propGoSit(ped, seat)   — route a ped to a specific seat: walks it
+                                  there via peds.js's OWN finalGoal.sitDesk
+                                  machinery (no new brain, no new loop) and
+                                  reserves the seat for the walk.
+     CBZ.propSeatsIn(x0,x1,z0,z1,y) — every seat in a rect on one floor.
+     CBZ.propSit / propStand    — seat/release now (arc; claim is instant)
+     CBZ.propSleep / propWake   — the bed pair
+     CBZ.propSeatRef(rec|kind)  — {cushion, floorBelow} → ch.seatRef, the one
+                                  seam between "what seat is this" and the
+                                  rig's chair solve. null for an undeclared
+                                  seat (see its comment — this is deliberate).
+     CBZ.propSeatHeight(kind)   — the kit's real-world cushion heights.
+     CBZ.propEntryPoint(rec)    — the walkable standing spot for a piece.
+     CBZ.propArcActive(actor)   — true while a transition owns the body.
+                                  Neighbours: don't retarget or re-pose a
+                                  body while this is true.
+     CBZ.propUseAudit()         — the ratchet counter (see below)
+   Seats are single-occupancy with stale-claim tolerance (a dead/recycled
+   occupant frees the seat lazily — correctness never depends on a release
+   call), and a walk-claim expires on its own if its owner never arrives.
+
+   Revert: CBZ.CONFIG.PROPS_PURPOSE = false (everything no-ops; live arcs
+             abort cleanly rather than stranding the body).
+           CBZ.CONFIG.PROPS_BODY_ARC = false (instant commit, V1 exactly).
+           CBZ.CONFIG.PROPS_SEAT_GEOM = false (legacy squat pose everywhere,
+             aircraft cabins included).
 ============================================================ */
 (function () {
   "use strict";
@@ -34,17 +106,97 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PROPS_PURPOSE == null) CBZ.CONFIG.PROPS_PURPOSE = true;
+  // PROPS_BODY_ARC — owner: "fix sitting and lying in bed ... not a teleport
+  // with a pose". On → sit/stand/lie/rise run a phased walk-turn-settle arc
+  // that owns the body for ~0.6-1.0s. Flip false (or ?cfg_PROPS_BODY_ARC=0)
+  // for a one-line revert to the instant V1 teleport.
+  if (CBZ.CONFIG.PROPS_BODY_ARC == null) CBZ.CONFIG.PROPS_BODY_ARC = true;
+  // PROPS_SEAT_GEOM — on → a seat whose builder DECLARED its cushion height
+  // gets entities/character.js's real feet-on-the-floor chair solve. Flip false
+  // (or ?cfg_PROPS_SEAT_GEOM=0) and NO seat gets it — every body in the game,
+  // aircraft cabins included, falls back to the legacy squat pose. That is the
+  // one-line revert for the whole seated-pose change.
+  if (CBZ.CONFIG.PROPS_SEAT_GEOM == null) CBZ.CONFIG.PROPS_SEAT_GEOM = true;
   // wake-up time as a dayPhase fraction: sun y = sin(t·2π)·95, noon = 0.25,
   // so 0.08 ≈ climbing morning sun (~7:50am), clearly lit.
   if (CBZ.CONFIG.PROPS_MORNING_PHASE == null) CBZ.CONFIG.PROPS_MORNING_PHASE = 0.08;
 
   function on() { return CBZ.CONFIG.PROPS_PURPOSE !== false; }
+  function arcOn() { return CBZ.CONFIG.PROPS_BODY_ARC !== false; }
+  function geomOn() { return CBZ.CONFIG.PROPS_SEAT_GEOM !== false; }
+
+  const HALF = Math.PI / 2;
+  function lerpA(a, b, t) {
+    if (CBZ.lerpAngle) return CBZ.lerpAngle(a, b, t);
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  }
+  function eOut(u) { const k = 1 - u; return 1 - k * k * k; }              // decelerate in
+  function eInOut(u) { return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; }
+
+  // ---- SEAT GEOMETRY ---------------------------------------------------------
+  // Cushion height in metres ABOVE the anchor's floor y, keyed on the seat KIND
+  // every registration site already passes. This is the whole retrofit: the rig
+  // solve exists, it was only ever starved of data.
+  const SEAT_H = {
+    chair: 0.45, seat: 0.45, dining: 0.46, table: 0.46, kitchen: 0.46,
+    desk: 0.47, office: 0.47, work: 0.47, terminal: 0.47,
+    patio: 0.45, park: 0.45, bench: 0.45, pew: 0.45, booth: 0.44, waiting: 0.44,
+    // counter/bar heights from the standard furniture metric tables: a 0.65m
+    // stool pairs with a 0.90m counter, a 0.75m stool with a 1.10m bar.
+    // Counter/bar stools: the standard tables give 0.65 for a 0.90 counter and
+    // 0.75 for a 1.10 bar. These are held at what CBZ.furnish actually DRAWS so
+    // propSeatHeight() can't disagree with the kit it documents.
+    stool: 0.68, counter: 0.68, bar: 0.75,
+    sofa: 0.40, couch: 0.40, armchair: 0.42, lounge: 0.40,
+    lounger: 0.34, recliner: 0.36,
+    // outdoor seating sits lower than indoor seating — a folding deck chair
+    // slings its canvas well below a dining chair's 0.45.
+    deck: 0.38, deckchair: 0.38, patiochair: 0.42,
+    throne: 0.50, boss: 0.50, exec: 0.48,
+    cabin: 0.45, bedside: 0.55, cell: 0.42,
+  };
+  const SEAT_H_DEFAULT = 0.45;
+  function cushionOf(kind) {
+    const h = SEAT_H[String(kind || "chair").toLowerCase()];
+    return h != null ? h : SEAT_H_DEFAULT;
+  }
+  CBZ.propSeatHeight = cushionOf;      // the kit's source of truth for a kind
+
+  // The ONE way anything in the game turns a seat into the rig's chair-solve
+  // input. One line, degrade-safe:  ch.seatRef = CBZ.propSeatRef(seatRec);
+  //
+  // THE MESH IS TRUTH, NOT THE KIND. An earlier draft of this inferred every
+  // seat's cushion height from its `kind` so the whole world would get the V2
+  // solve for free. A survey of the real geometry killed that: most legacy
+  // furniture is a SINGLE TALL BLOCK whose top face IS the seating surface —
+  // buildings.js draws "chairs" at 0.90 (:5304), bar stools at 0.90 (:5294),
+  // waiting chairs at 0.62 (:3927), sofas at 0.70-0.83 (:3882, :5075, :5287) —
+  // while the real-world numbers in SEAT_H are 0.45/0.75/0.44/0.40. Handing the
+  // rig a 0.40 cushion for a block whose top is 0.83 would bury the body inside
+  // the sofa. So: a seat gets the real solve ONLY when its builder DECLARED the
+  // geometry it actually drew. Everything else keeps the legacy pose,
+  // byte-identical. `CBZ.furnish` declares on every piece, so the fix arrives
+  // exactly as fast as callers migrate onto the shared kit — and
+  // CBZ.propUseAudit().noGeom counts what's left, which is the ratchet.
+  //
+  // A bare kind STRING is an explicit opt-in and does return the table value.
+  CBZ.propSeatRef = function (src) {
+    if (!geomOn()) return null;
+    if (src && typeof src === "object") {
+      if (src.cushionH == null) return null;        // undeclared → legacy pose
+      return { cushion: src.cushionH, floorBelow: src.floorBelow || 0 };
+    }
+    if (src == null) return null;
+    return { cushion: cushionOf(src), floorBelow: 0 };
+  };
 
   // ---- registries -----------------------------------------------------------
-  // Seat rec: { x,y,z, face, kind, lot, occupant }  (y = FLOOR level the sitter
-  //   stands on — the pose fakes the seat height, exactly like the desk anchors)
-  // Bed rec:  { x,y,z, face, len, lieY, kind, lot, occupant }  (lieY = pinned
-  //   body height when lying = mattressTop + 0.3, the KO-lie offset)
+  // Seat rec: { x,y,z, face, kind, lot, occupant, cushionH, floorBelow }
+  //   (y = FLOOR level the sitter's FEET rest on; cushionH = cushion top above it)
+  // Bed rec:  { x,y,z, face, hx,hz, len, lieY, kind, lot, occupant }
+  //   (lieY = pinned body height when lying = mattressTop + 0.3, the KO-lie offset)
   // Poster rec: { mesh, x,y,z, entry }  (entry = props.js's dynAds record; its
   //   lastKey tells whether the board is CURRENTLY showing a wanted ad)
   const seats = CBZ.propSeats = CBZ.propSeats || [];
@@ -58,6 +210,16 @@
   CBZ.propPurposeReset = function () {
     seats.length = 0; beds.length = 0; posters.length = 0;
     seatKeys.clear(); bedKeys.clear();
+    // END live arcs, never truncate: `arcs.length = 0` orphaned `_doorArc`,
+    // leaving the player permanently un-simulated through a world rebuild.
+    for (let i = arcs.length - 1; i >= 0; i--) endArc(arcs[i]);
+    arcs.length = 0;
+    claimed.length = 0;
+    // the furniture kit's own ledger rebuilds in lockstep. A direct feature-
+    // detected CALL, not a wrapper: it works no matter which of the two files
+    // parses first, so city/furniture.js is free to load early enough for the
+    // parse-time world/* room builders to use it.
+    if (CBZ.furnishReset) { try { CBZ.furnishReset(); } catch (e) {} }
   };
 
   // ---- registration (build-time, deterministic: piggybacks placement) -------
@@ -70,10 +232,23 @@
   }
   // face = yaw the seated body faces (ped convention: body looks along
   // (sin face, cos face) — same as peds' _deskAnchor.face).
-  CBZ.propRegisterSeat = function (x, y, z, face, kind, lot) {
+  // geom (OPTIONAL, additive): {cushion, floorBelow} in metres — the cushion's
+  // real top above this anchor's floor y. PASS IT whenever you know what you
+  // drew: it is the only way the body gets the real chair solve. Absent is a
+  // legitimate answer ("I don't know what my mesh looks like") and keeps the
+  // legacy pose; CBZ.propUseAudit().noGeom counts those.
+  CBZ.propRegisterSeat = function (x, y, z, face, kind, lot, geom) {
     if (!on()) return null;
     if (dedupe(seatKeys, x, y || 0, z)) return null;
-    const rec = { x, y: y || 0, z, face: face || 0, kind: kind || "chair", lot: lot || null, occupant: null };
+    const rec = {
+      x, y: y || 0, z, face: face || 0, kind: kind || "chair", lot: lot || null, occupant: null,
+      // DECLARED geometry only — see CBZ.propSeatRef's note on why an inferred
+      // cushion would be a regression. null = "this builder didn't say", which
+      // the audit counts and the rig reads as "use the legacy pose".
+      cushionH: (geom && geom.cushion != null) ? geom.cushion : null,
+      floorBelow: (geom && geom.floorBelow) || 0,
+      _reg: 1,
+    };
     seats.push(rec);
     return rec;
   };
@@ -85,11 +260,13 @@
   CBZ.propRegisterBed = function (x, y, z, hx, hz, len, topY, kind, lot) {
     if (!on()) return null;
     if (dedupe(bedKeys, x, y || 0, z)) return null;
+    const hl = Math.hypot(hx || 0, hz || 0) || 1;
     const rec = {
       x, y: y || 0, z,
+      hx: (hx || 0) / hl, hz: (hz || 0) / hl,
       face: Math.atan2(hz || 0, -(hx || 0) || 0),
-      len: len || 2.0, lieY: (topY || 0.6) + 0.3,
-      kind: kind || "bed", lot: lot || null, occupant: null,
+      len: len || 2.0, top: (topY || 0.6), lieY: (topY || 0.6) + 0.3,
+      kind: kind || "bed", lot: lot || null, occupant: null, _reg: 1,
     };
     beds.push(rec);
     return rec;
@@ -104,6 +281,74 @@
     return rec;
   };
 
+  // ---- ENTRY POINTS ----------------------------------------------------------
+  // "Entry point matching" (the Sims smart-object / navmesh action-point idea):
+  // furniture advertises WHERE you stand to use it. A chair is approached from
+  // the front and backed into; a bed is approached from whichever long side is
+  // actually walkable. Solved lazily against the live collider set and cached,
+  // so it costs nothing until something sits.
+  const ENTRY_R = 0.78;      // how far out from the cushion the stander's feet go
+  const BED_SIDE = 0.95;     // half a mattress + a body
+  const BODY_R = 0.30;
+  const probe = [];
+  function clearAt(x, z, y) {
+    if (!CBZ.queryCollidersNear || !CBZ.colliders || !CBZ.colliders.length) return true;
+    const list = CBZ.queryCollidersNear(x, z, BODY_R + 0.05, probe);
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.y1 != null && c.y1 <= y + 0.30) continue;    // a kerb/step you walk over
+      if (c.y0 != null && c.y0 >= y + 1.75) continue;    // overhead, not in the way
+      if (x > c.minX - BODY_R && x < c.maxX + BODY_R && z > c.minZ - BODY_R && z < c.maxZ + BODY_R) return false;
+    }
+    return true;
+  }
+  // Resolves rec._ex/_ez (world standing spot) and rec._eok (0 = every candidate
+  // was blocked; the anchor is unreachable and the audit counts it).
+  function entryOf(rec) {
+    if (rec._ex != null) return rec;
+    const built = CBZ.colliders && CBZ.colliders.length;
+    let cand;
+    if (rec.lieY != null) {
+      // BED: both long sides, then a WIDER pass on both sides, then the foot.
+      // The second pass matters: a bed with a real solid frame (CBZ.furnish
+      // draws a 1.4m-wide one) is wider than a single fixed offset assumes, so
+      // a one-shot 0.95 probe hits the frame and falls through to the foot end
+      // — which makes the perch beat ease the body diagonally across the corner
+      // of the mattress. Widening keeps the approach on the long side, which is
+      // how anyone actually gets into a bed.
+      const sx = rec.hz, sz = -rec.hx;
+      const wide = BED_SIDE + 0.42;
+      cand = [
+        [rec.x + sx * BED_SIDE, rec.z + sz * BED_SIDE],
+        [rec.x - sx * BED_SIDE, rec.z - sz * BED_SIDE],
+        [rec.x + sx * wide, rec.z + sz * wide],
+        [rec.x - sx * wide, rec.z - sz * wide],
+        [rec.x - rec.hx * (rec.len * 0.5 + 0.5), rec.z - rec.hz * (rec.len * 0.5 + 0.5)],
+      ];
+    } else {
+      // SEAT: straight out front (back into it), then either side, then behind.
+      const f = rec.face;
+      cand = [f, f + HALF, f - HALF, f + Math.PI].map(function (a) {
+        return [rec.x + Math.sin(a) * ENTRY_R, rec.z + Math.cos(a) * ENTRY_R];
+      });
+    }
+    for (let i = 0; i < cand.length; i++) {
+      if (clearAt(cand[i][0], cand[i][1], rec.y)) {
+        if (built) { rec._ex = cand[i][0]; rec._ez = cand[i][1]; rec._eok = 1; }
+        return built ? rec : { _ex: cand[i][0], _ez: cand[i][1], _eok: 1, x: rec.x, z: rec.z, y: rec.y };
+      }
+    }
+    if (built) { rec._ex = cand[0][0]; rec._ez = cand[0][1]; rec._eok = 0; }
+    return rec._ex != null ? rec : { _ex: cand[0][0], _ez: cand[0][1], _eok: 0, x: rec.x, z: rec.z, y: rec.y };
+  }
+  function entryX(rec) { const e = entryOf(rec); return e._ex != null ? e._ex : rec.x; }
+  function entryZ(rec) { const e = entryOf(rec); return e._ez != null ? e._ez : rec.z; }
+  CBZ.propEntryPoint = function (rec) {
+    if (!rec) return null;
+    const e = entryOf(rec);
+    return { x: e._ex, z: e._ez, y: rec.y, ok: !!e._eok };
+  };
+
   // ---- occupancy -------------------------------------------------------------
   function isStale(a) {
     if (!a) return true;
@@ -111,7 +356,25 @@
     if (a !== CBZ.player && !a.group) return true;
     return false;
   }
-  function isFree(rec) { return !rec.occupant || isStale(rec.occupant); }
+  // A WALK-CLAIM (propGoSit) reserves a seat while its owner walks over, so two
+  // NPCs never converge on the same chair. It expires on its own if the walker
+  // gets distracted — as everywhere in this file, correctness never depends on a
+  // release call.
+  // The short list of records that currently have an occupant. Every claim path
+  // pushes here; the per-frame hold compacts it. Without it the hold's NPC pass
+  // is an O(every seat + every bed) sweep that finds nothing.
+  const claimed = [];
+  function markClaimed(rec) { if (rec && claimed.indexOf(rec) < 0) claimed.push(rec); }
+
+  const CLAIM_TTL = 45;
+  function claimExpired(rec) {
+    if (!rec._claimT) return false;
+    const o = rec.occupant;
+    if (o && o.char && o.char.sitting) { rec._claimT = 0; return false; }   // arrived
+    if (o && o._propLie) { rec._claimT = 0; return false; }
+    return ((CBZ.now || 0) - rec._claimT) > CLAIM_TTL;
+  }
+  function isFree(rec) { return !rec.occupant || isStale(rec.occupant) || claimExpired(rec); }
 
   // lazily resolve the lot an interior anchor sits in (so demolished buildings
   // stop offering their furniture — mirrors officejobs' demolished-desk skip).
@@ -178,9 +441,78 @@
     return best;
   };
 
+  // Every seat inside a rect on one floor — the query the occupied-building /
+  // roles agents need to staff a storey ("who sits where on floor 7").
+  CBZ.propSeatsIn = function (x0, x1, z0, z1, y, out) {
+    out = out || [];
+    out.length = 0;
+    if (!on()) return out;
+    const lo = Math.min(x0, x1), hi = Math.max(x0, x1), lz = Math.min(z0, z1), hz = Math.max(z0, z1);
+    for (let i = 0; i < seats.length; i++) {
+      const r = seats[i];
+      if (r.x < lo || r.x > hi || r.z < lz || r.z > hz) continue;
+      if (y != null && Math.abs(r.y - y) > 2.0) continue;
+      out.push(r);
+    }
+    return out;
+  };
+
+  // ---- THE ONE-LINE NPC SEATING VERB ----------------------------------------
+  // "Send this NPC to sit in that chair." Walks them to the seat's entry point
+  // and hands off to peds.js's OWN `finalGoal.sitDesk` routing, which already
+  // knows how to arrive, snap, pose and hold a seat for a whole shift — no new
+  // brain, no new update loop, no new roster. This is the primitive the census
+  // said was missing: `ped.guard = {x,z}` posts a body, this one seats it.
+  //   CBZ.propGoSit(ped, CBZ.propNearestSeat(x, z, 20, floorY));
+  CBZ.propGoSit = function (ped, seat) {
+    if (!on() || !ped || !seat || ped === CBZ.player) return false;
+    if (!isFree(seat) || ped.dead || ped.driving || (ped.ko | 0) > 0) return false;
+    CBZ.propSeatRelease(ped);
+    seat.occupant = ped;                     // reserve for the walk (TTL-expiring)
+    markClaimed(seat);
+    seat._claimT = CBZ.now || 0;
+    ped._propSeat = seat;
+    const anc = { x: seat.x, y: seat.y, z: seat.z, face: seat.face, lot: seat.lot, kind: seat.kind };
+    const e = CBZ.propEntryPoint(seat);
+    ped.finalGoal = { x: anc.x, z: anc.z, sitDesk: true, anchor: anc };
+    ped.path = (e && e.ok) ? [{ x: e.x, z: e.z }, ped.finalGoal] : [ped.finalGoal];
+    if (ped.target && ped.target.set) ped.target.set(ped.path[0].x, 0, ped.path[0].z);
+    ped.state = "walk"; ped.pause = 0; ped.rage = null;
+    return true;
+  };
+
+  // The whole verb in ONE line, for the occupied-building / roles / schedules
+  // agents: "seat this NPC at whatever is nearby, on its own floor."
+  //   CBZ.propSeatNpc && CBZ.propSeatNpc(ped, 8, "throne");
+  // `prefer` (optional) is a kind substring tried first — pass "throne"/"boss"
+  // for the gang boss so he takes the high-backed chair behind the desk and not
+  // a guest seat. Returns the seat taken, or null. Degrade-safe: never throws,
+  // never leaves the ped in a broken state.
+  CBZ.propSeatNpc = function (ped, radius, prefer) {
+    if (!on() || !ped || ped === CBZ.player || !ped.pos) return null;
+    const r = radius || 8, y = ped.pos.y;
+    let best = null, bd = r * r;
+    if (prefer) {
+      const p = String(prefer).toLowerCase();
+      for (let i = 0; i < seats.length; i++) {
+        const s = seats[i];
+        if (String(s.kind).toLowerCase().indexOf(p) < 0) continue;
+        const dx = s.x - ped.pos.x, dz = s.z - ped.pos.z, d = dx * dx + dz * dz;
+        if (d >= bd || !usable(s, y)) continue;
+        bd = d; best = s;
+      }
+    }
+    if (!best) best = nearestIn(seats, ped.pos.x, ped.pos.z, r, y);
+    if (!best) return null;
+    return CBZ.propGoSit(ped, best) ? best : null;
+  };
+
   // ---- claim / release --------------------------------------------------------
   function releaseFrom(list, actor) {
-    for (let i = 0; i < list.length; i++) if (list[i].occupant === actor) list[i].occupant = null;
+    for (let i = 0; i < list.length; i++) if (list[i].occupant === actor) {
+      list[i].occupant = null; list[i]._claimT = 0;
+      const k = claimed.indexOf(list[i]); if (k >= 0) claimed.splice(k, 1);
+    }
   }
   CBZ.propSeatRelease = function (actor) {
     if (!actor) return;
@@ -188,50 +520,387 @@
     actor._propSeat = null; actor._propBed = null;
   };
 
+  /* =====================================================================
+     THE ARC ENGINE — one phased transition machine for every furniture
+     mount/dismount. Phases are just {name, dur} rows; stepArc reads the
+     phase name and writes an absolute transform + absolute rig-flag state
+     for that frame. Nothing accumulates, so an arc can be abandoned at any
+     instant (death, KO, demolition) with a single splice.
+  ===================================================================== */
+  const arcs = [];
+  const PLAN = {
+    // sitting down: brisk, decelerating into the cushion
+    sit: [["walk", 0], ["turn", 0.20], ["lower", 0.42]],
+    // standing up: anticipation first, then the push — deliberately the
+    // longest arc. Getting out of a chair costs more than falling into one.
+    stand: [["push", 0.22], ["rise", 0.40], ["settle", 0.16]],
+    // going to bed: you sit on the edge first, THEN swing your legs up.
+    // The perch is deliberately long enough to READ as a seated beat. Cyberpunk
+    // 2077 shipped a bed animation without one, got publicly mocked for it, and
+    // patched it back in — skipping straight from standing to horizontal is the
+    // failure mode this whole arc exists to avoid.
+    lie: [["walk", 0], ["perch", 0.42], ["swing", 0.52]],
+    // getting out of bed: roll up to the edge, sit a beat, then stand.
+    rise: [["unroll", 0.46], ["edge", 0.20], ["push", 0.16], ["riseUp", 0.38], ["settle", 0.14]],
+  };
+  const WALK_CAP = 1.8;        // seconds the walk-in leg is allowed
+  const WALK_SPD = 3.4;
+  // REFUSE, NEVER SNAP. If the body is further from the furniture than the walk
+  // leg can cover, we do NOT play a partial approach and teleport the remainder
+  // — a half-walk that ends in a jump is the exact defect this whole change
+  // exists to remove. Beyond this radius the caller gets the honest instant
+  // commit instead (and an NPC that wants to walk over properly uses
+  // CBZ.propGoSit, which routes through the ped brain's own pathfinding).
+  const ARC_MAX = WALK_CAP * WALK_SPD * 0.95;   // ≈ 6.1m (interaction REACH is 3.8m)
+  const DISMOUNT_MAX = 1.6;                     // how far off its seat a body may be and still "get up"
+
+  function arcOf(a) { for (let i = 0; i < arcs.length; i++) if (arcs[i].actor === a) return arcs[i]; return null; }
+  function dropArc(a) { for (let i = arcs.length - 1; i >= 0; i--) if (arcs[i].actor === a) arcs.splice(i, 1); }
+  // Seam for neighbours (occupied-buildings / roles agents): true while a
+  // transition owns this body — don't retarget, don't re-pose, don't shoot a
+  // screenshot. Degrade-safe: `CBZ.propArcActive ? CBZ.propArcActive(p) : false`.
+  CBZ.propArcActive = function (actor) { return !!arcOf(actor || CBZ.player); };
+
+  function charOf(actor) { return actor === CBZ.player ? CBZ.playerChar : actor.char; }
+  function groupOf(actor) { const ch = charOf(actor); return ch && ch.group ? ch.group : actor.group; }
+
+  function place(actor, x, y, z, yaw) {
+    if (actor.pos && actor.pos.set) actor.pos.set(x, y, z);
+    const grp = groupOf(actor);
+    if (grp) { grp.position.set(x, y, z); if (yaw != null) grp.rotation.y = yaw; }
+  }
+
+  function beginArc(actor, kind, rec) {
+    if (!arcOn()) return false;
+    // Arcs are for REGISTERED WORLD anchors only. Ad-hoc seat literals (the
+    // airliner cabin's per-row seats, any future scripted seat) belong to a
+    // moving/parented host and keep the instant V1 commit — walking a body
+    // through world space toward a seat that is itself moving is a lie.
+    if (!rec || !rec._reg) return false;
+    const ch = charOf(actor);
+    if (!ch || !ch.group) return false;
+    const isP = actor === CBZ.player;
+    // Somebody else's arc already owns this body (aircraft boarding, a cutscene
+    // walk) — never fight it; fall back to the instant path.
+    if (isP && actor._doorArc && !actor._propOwnsBody) return false;
+    const g = ch.group;
+    const A = {
+      actor: actor, kind: kind, rec: rec, isP: isP,
+      i: 0, t: 0,
+      plan: PLAN[kind],
+      sx: g.position.x, sy: g.position.y, sz: g.position.z, syaw: g.rotation.y, sroll: g.rotation.z,
+      mode: (CBZ.game && CBZ.game.mode) || null,
+      lean: 0,
+      // the yaw a standing body leaves with. A seat's is its own facing; a bed's
+      // is the outward perch facing, resolved when the perch beat runs.
+      outFace: (rec.lieY != null) ? g.rotation.y : rec.face,
+    };
+    // dynamic walk-in leg: only if we're actually away from the entry point
+    if (A.plan[0][0] === "walk") {
+      const ex = entryX(rec), ez = entryZ(rec);
+      const d = Math.hypot(ex - A.sx, ez - A.sz);
+      if (d > ARC_MAX) return false;          // too far to walk it honestly — refuse
+      A.walkTo = { x: ex, z: ez };
+      A.skipWalk = d < 0.34;
+    } else if (Math.hypot(rec.x - A.sx, rec.z - A.sz) > DISMOUNT_MAX) {
+      // A dismount arc eases the body from where it IS to the furniture's entry
+      // point. If the body isn't actually on the furniture any more (something
+      // else moved it — a blast, a script, a net correction) that ease would be
+      // a long slide across the room. Refuse; the instant release is honest.
+      return false;
+    }
+    // Only NOW is the arc certain to run. Every `return false` above must leave
+    // the previous state untouched — an earlier draft dropped the running arc
+    // first, so a refused second request stranded `_doorArc` true with an empty
+    // arcs[], invisible to both the hold and the dead-man switch.
+    dropArc(actor);
+    if (isP) {
+      actor._doorArc = true;
+      actor._propOwnsBody = true;
+      // OWNER TOKEN. `_doorArc` is a shared boolean (city/aircraft_doors.js sets
+      // it too). Sharing a flag is not sharing ownership: without a token, an
+      // aircraft boarding beat started during a sit arc would have its
+      // `_doorArc` cleared out from under it when our arc ended, handing WASD
+      // back mid-walk. We only ever clear what we still own.
+      actor._doorArcOwner = "prop";
+      actor._propArcT = (CBZ.now || 0);
+    }
+    arcs.push(A);
+    return true;
+  }
+
+  function endArc(A) {
+    dropArc(A.actor);
+    const a = A.actor;
+    if (A.isP && a._propOwnsBody) {
+      a._propOwnsBody = false;
+      // Hand the flag back ONLY if nobody else has taken the body since. The
+      // aircraft door arc is the other writer of this boolean and publishes its
+      // own liveness, so we ask it directly rather than trusting a token it
+      // never sets. Clearing `_doorArc` out from under a live boarding beat
+      // would resume WASD mid-walk and fight its guide().
+      const other = CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active;
+      if (a._doorArcOwner === "prop" && !other) { a._doorArc = false; }
+      if (a._doorArcOwner === "prop") a._doorArcOwner = null;
+    }
+    const ch = charOf(A.actor);
+    if (ch) ch.crouch = false;
+  }
+
+  // walk the body toward (tx,tz); returns true on arrival. Animates the rig with
+  // the REAL step speed so the walk-in is a walk, not a slide (the one thing
+  // aircraft_doors.js's own guide() never got to do).
+  const walkScratch = { x: 0, y: 0, z: 0 };
+  function guide(actor, tx, tz, y, dt) {
+    const grp = groupOf(actor);
+    const cx = grp.position.x, cz = grp.position.z;
+    const dx = tx - cx, dz = tz - cz;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.22) { if (actor.speed != null) actor.speed = 0; return true; }
+    const step = Math.min(d, WALK_SPD * dt);
+    walkScratch.x = cx + (dx / d) * step;
+    walkScratch.z = cz + (dz / d) * step;
+    walkScratch.y = y;
+    // The APPROACH obeys walls (systems/physics.js's gold-standard slide) — an
+    // arc that walks a body through a partition is worse than the teleport it
+    // replaced. The SETTLE beats deliberately do NOT collide: the anchor is an
+    // authored seat point and a seated body must never be shoved around by the
+    // desk/sofa colliders it is sitting in (the same rule peds.js's own sit
+    // branch states).
+    if (CBZ.collideSlide) { try { CBZ.collideSlide(walkScratch, 0.30, y, y + 1.7, 3); } catch (e) {} }
+    place(actor, walkScratch.x, y, walkScratch.z, Math.atan2(dx, dz));
+    if (actor.speed != null) actor.speed = WALK_SPD;
+    return false;
+  }
+
+  // one arc, one frame. Returns true when the whole arc is finished.
+  function stepArc(A, dt) {
+    const actor = A.actor, rec = A.rec, ch = charOf(actor);
+    if (!ch || !ch.group) return true;
+    const grp = ch.group;
+    let row = A.plan[A.i];
+    if (!row) return true;
+    const name = row[0];
+    let spd = 0;
+
+    // ---- WALK-IN (dynamic length) ----
+    if (name === "walk") {
+      // Wedged against something for the whole walk leg and still far away.
+      // REFUSE, NEVER SNAP: dropping the claim leaves the body where it stalled.
+      // (Merely ending the arc would hand it to the pin below, which hard-
+      // teleports onto the seat — measured at 4.45m in one frame. That is the
+      // exact defect this file exists to delete, so it must not be the failure
+      // mode of the fix.)
+      if (A.t > WALK_CAP && Math.hypot(A.walkTo.x - grp.position.x, A.walkTo.z - grp.position.z) > 1.6) {
+        A.abandon = true;
+        return true;
+      }
+      if (A.skipWalk || guide(actor, A.walkTo.x, A.walkTo.z, rec.y, dt) || A.t > WALK_CAP) {
+        A.i++; A.t = 0;
+        const g2 = groupOf(actor);
+        A.sx = g2.position.x; A.sy = g2.position.y; A.sz = g2.position.z; A.syaw = g2.rotation.y;
+        if (A.skipWalk) { A.sx = g2.position.x; A.sz = g2.position.z; }
+        return false;
+      }
+      A.t += dt;
+      if (CBZ.animChar) CBZ.animChar(ch, WALK_SPD, dt);
+      return false;
+    }
+
+    const dur = row[1] || 0.001;
+    const u = Math.min(1, A.t / dur);
+    const ex = entryX(rec), ez = entryZ(rec);
+
+    switch (name) {
+      // ---------- SIT ----------
+      case "turn":
+        // plant and turn to the seat's facing (you turn your back on the chair)
+        place(actor, A.sx, rec.y, A.sz, lerpA(A.syaw, rec.face, eInOut(u)));
+        ch.crouch = false; ch.sitting = false;
+        break;
+      case "lower": {
+        // back onto the cushion. The crouch dip carries the weight; the seated
+        // pose folds in at 35% so the legs are already bending as the hips land.
+        const e = eOut(u);
+        place(actor, A.sx + (rec.x - A.sx) * e, rec.y, A.sz + (rec.z - A.sz) * e, rec.face);
+        ch.crouch = u > 0.08 && u < 0.55;
+        if (u >= 0.35 && !ch.sitting) { ch.sitting = true; ch.seatRef = CBZ.propSeatRef(rec); }
+        break;
+      }
+      // ---------- STAND ----------
+      case "push": {
+        // ANTICIPATION: still seated, but the torso comes forward over the knees
+        // and the head drops — the weight moving onto the feet. A small forward
+        // creep off the back of the cushion sells it. The origin is ALWAYS where
+        // the body actually is at phase start (A.sx/A.sz), so this beat is
+        // identical whether we're leaving a chair or the edge of a bed.
+        const e = eInOut(u);
+        place(actor, A.sx + (ex - A.sx) * 0.09 * e, rec.y, A.sz + (ez - A.sz) * 0.09 * e, A.outFace);
+        ch.sitting = true; ch.crouch = false;
+        A.lean = 0.10 + 0.34 * e;
+        break;
+      }
+      case "rise":
+      case "riseUp": {
+        // THE PUSH: legs extend (crouch → stand blend does the work), body
+        // travels forward off the seat. character.js's own _seatSunk recovery
+        // damps the model back up out of the cushion over the same beat.
+        const e = eOut(u);
+        place(actor, A.sx + (ex - A.sx) * e, rec.y, A.sz + (ez - A.sz) * e, A.outFace);
+        if (ch.sitting) { ch.sitting = false; ch.seatRef = null; }
+        ch.crouch = u < 0.75;
+        A.lean = 0.44 * (1 - eInOut(u)) + 0.06;
+        spd = 0.6 * (1 - u);
+        break;
+      }
+      case "settle":
+        place(actor, ex, rec.y, ez, A.outFace);
+        ch.crouch = false; ch.sitting = false;
+        A.lean *= 0.6;
+        break;
+      // ---------- LIE ----------
+      case "perch":
+      case "edge": {
+        // sit on the mattress EDGE, feet on the floor, facing out of the bed.
+        const sx = rec.hz, sz = -rec.hx;
+        const side = ((ex - rec.x) * sx + (ez - rec.z) * sz) >= 0 ? 1 : -1;
+        const px = rec.x + sx * side * (0.34), pz = rec.z + sz * side * (0.34);
+        const outFace = Math.atan2(sx * side, sz * side);
+        const e = eOut(u);
+        if (name === "perch") {
+          place(actor, A.sx + (px - A.sx) * e, rec.y, A.sz + (pz - A.sz) * e, lerpA(A.syaw, outFace, e));
+          ch.crouch = u > 0.06 && u < 0.35;
+          if (u >= 0.24 && !ch.sitting) { ch.sitting = true; ch.seatRef = { cushion: Math.max(0.30, rec.top - rec.y), floorBelow: 0 }; }
+          grp.rotation.z = 0;
+        } else {
+          place(actor, px, rec.y, pz, outFace);
+          ch.sitting = true; ch.seatRef = { cushion: Math.max(0.30, rec.top - rec.y), floorBelow: 0 };
+          grp.rotation.z = 0;
+          // the arc that follows is a plain stand-up FROM the edge: hand the
+          // stand phases the perch position and the outward facing so they
+          // never reach back for the bed's own centre/lying yaw.
+          A.sx = px; A.sz = pz; A.outFace = outFace;
+        }
+        break;
+      }
+      case "swing": {
+        // legs come up, body rolls flat onto the pillow. Releasing `sitting` at
+        // the top of the beat lets the idle pose straighten the legs exactly as
+        // the roll carries them off the floor.
+        const sx = rec.hz, sz = -rec.hx;
+        const side = ((ex - rec.x) * sx + (ez - rec.z) * sz) >= 0 ? 1 : -1;
+        const px = rec.x + sx * side * 0.34, pz = rec.z + sz * side * 0.34;
+        const e = eInOut(u);
+        if (ch.sitting && u > 0.16) { ch.sitting = false; ch.seatRef = null; }   // hold the perch a beat into the swing
+        ch.crouch = false;
+        place(actor, px + (rec.x - px) * e, rec.y + (rec.lieY - rec.y) * e, pz + (rec.z - pz) * e,
+          lerpA(A.syaw, rec.face, e));
+        grp.rotation.z = HALF * e;
+        break;
+      }
+      // ---------- RISE (out of bed) ----------
+      case "unroll": {
+        // reverse of `swing`: roll up off the pillow onto the edge of the bed.
+        const sx = rec.hz, sz = -rec.hx;
+        const side = ((ex - rec.x) * sx + (ez - rec.z) * sz) >= 0 ? 1 : -1;
+        const px = rec.x + sx * side * 0.34, pz = rec.z + sz * side * 0.34;
+        const outFace = Math.atan2(sx * side, sz * side);
+        const e = eInOut(u);
+        ch.sitting = false; ch.crouch = false;
+        place(actor, rec.x + (px - rec.x) * e, rec.lieY + (rec.y - rec.lieY) * e, rec.z + (pz - rec.z) * e,
+          lerpA(rec.face, outFace, e));
+        grp.rotation.z = HALF * (1 - e);
+        break;
+      }
+      default: break;
+    }
+
+    // rig update — the arc drives animChar itself so the transition animates
+    // even while physics.js is handing us the body.
+    if (CBZ.animChar) CBZ.animChar(ch, spd, dt);
+    // POST-anim absolute writes: the lean is the "weight" in the stand-up and
+    // is applied after animChar so it wins the frame (absolute, never additive
+    // — the grapple brace-pose lesson).
+    if (A.lean) {
+      if (ch.body) ch.body.rotation.x = A.lean;
+      if (ch.neck) ch.neck.rotation.x = 0.04 + A.lean * 0.28;
+      // Publish what we wrote, exactly as character.js's own stance poses do
+      // (slidePose/pronePose keep ch.lean in sync and arm ch._stanceNk so the
+      // neck recovers). Without this an arc aborted mid-push parks a lean the
+      // locomotion path has to walk off — and the KO/death branches blend
+      // RELATIVELY from the current value, so a parked lean biases the corpse.
+      ch.lean = A.lean;
+      ch._stanceNk = 1;
+    }
+
+    A.t += dt;
+    if (A.t >= dur) {
+      A.i++; A.t = 0;
+      const g2 = groupOf(actor);
+      A.sx = g2.position.x; A.sy = g2.position.y; A.sz = g2.position.z; A.syaw = g2.rotation.y;
+      if (A.i >= A.plan.length) return true;
+    }
+    return false;
+  }
+
   // ---- SIT / STAND ------------------------------------------------------------
   // actor = CBZ.player or a peds.js ped (anything with .char + .pos + .group).
-  CBZ.propSit = function (actor, seat) {
+  // opts.instant → the V1 teleport (used by force-exits and by callers that
+  // genuinely need the body there this frame).
+  CBZ.propSit = function (actor, seat, opts) {
     if (!on() || !actor || !seat || !isFree(seat)) return false;
     if (actor.dead || (actor.ko | 0) > 0 || actor.driving) return false;
     CBZ.propSeatRelease(actor);            // moving off a previous seat/bed
-    seat.occupant = actor;
+    seat.occupant = actor;                 // the CLAIM is instant; only the body takes time
+    markClaimed(seat);
     actor._propSeat = seat;
-    // V2 chair-sit geometry (entities/character.js): only seats that DECLARE
-    // cushion/floor data (the airliner cabin passes it) get the real
-    // feet-on-the-floor solve; street benches/chairs stay legacy untouched.
-    const seatRef = (seat.cushionH != null || seat.floorBelow != null)
-      ? { cushion: seat.cushionH != null ? seat.cushionH : 0.45, floorBelow: seat.floorBelow || 0 }
-      : null;
+    // The rig's real chair solve (entities/character.js): every seat now
+    // declares its cushion, so the feet land on the floor instead of the body
+    // squatting on top of the cushion. PROPS_SEAT_GEOM=0 restores the legacy fake.
+    const seatRef = CBZ.propSeatRef(seat);
     if (actor === CBZ.player) {
       const P = CBZ.player, ch = CBZ.playerChar;
+      if (!(opts && opts.instant) && beginArc(actor, "sit", seat)) return true;
       P.pos.set(seat.x, seat.y, seat.z);
       P.vy = 0; P.grounded = true;
       if (ch) { ch.sitting = true; ch.group.rotation.y = seat.face; ch.seatRef = seatRef; }
       return true;                         // the onUpdate(42) hold does the rest
     }
     // NPC: the exact office-worker sit mechanism — peds.js's state==="sit"
-    // branch re-pins from _deskAnchor every frame and zeroes speed.
-    actor._deskAnchor = { x: seat.x, y: seat.y, z: seat.z, face: seat.face, lot: seat.lot };
+    // branch re-pins from _deskAnchor every frame and zeroes speed. The arc
+    // (when it runs) only overrides the VISUAL transform for the settle beat,
+    // so the brain's bookkeeping is identical either way.
+    // carry the DECLARED cushion onto the anchor so peds.js's own sit branch
+    // can hand the rig the same solve without knowing anything about seats.
+    actor._deskAnchor = {
+      x: seat.x, y: seat.y, z: seat.z, face: seat.face, lot: seat.lot, kind: seat.kind,
+      cushionH: seat.cushionH, floorBelow: seat.floorBelow,
+    };
     actor.state = "sit";
     actor.speed = 0; actor.path = null;
+    if (actor.char) { actor.char.sitting = true; actor.char.seatRef = seatRef; }
+    if (!(opts && opts.instant) && beginArc(actor, "sit", seat)) return true;
     if (actor.pos && actor.pos.set) actor.pos.set(seat.x, seat.y, seat.z);
     if (actor.group) { actor.group.position.set(seat.x, seat.y, seat.z); actor.group.rotation.y = seat.face; }
-    if (actor.char) { actor.char.sitting = true; actor.char.seatRef = seatRef; }
     return true;
   };
-  CBZ.propStand = function (actor) {
+  CBZ.propStand = function (actor, opts) {
     if (!actor) return;
     const had = actor._propSeat || actor._propBed;
+    const seat = actor._propSeat;
     CBZ.propSeatRelease(actor);
+    if (had) actor._deskAnchor = null;     // only clear OUR anchor, never an office desk claim
+    if (actor !== CBZ.player && actor.state === "sit") actor.state = "walk";
+    if (!(opts && opts.instant) && seat && beginArc(actor, "stand", seat)) return;
+    dropArc(actor);
     if (actor === CBZ.player) {
       const ch = CBZ.playerChar;
-      if (ch) { ch.sitting = false; ch.seatRef = null; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
+      if (actor._propOwnsBody) { actor._doorArc = false; actor._propOwnsBody = false; }
+      if (ch) { ch.sitting = false; ch.seatRef = null; ch.crouch = false; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
       CBZ.player.stun = 0;
       return;
     }
-    if (had) actor._deskAnchor = null;     // only clear OUR anchor, never an office desk claim
-    if (actor.state === "sit") actor.state = "walk";
-    if (actor.char) { actor.char.sitting = false; actor.char.seatRef = null; if (actor.group) { actor.group.rotation.z = 0; } }
+    if (actor.char) { actor.char.sitting = false; actor.char.seatRef = null; actor.char.crouch = false; if (actor.group) { actor.group.rotation.z = 0; } }
   };
 
   // ---- SLEEP / WAKE -----------------------------------------------------------
@@ -245,23 +914,31 @@
     CBZ.dayPhase(MORNING);
     return true;
   }
-  CBZ.propSleep = function (actor, bed) {
+  // the time-skip fires ONCE, and only when the body has actually finished
+  // lying down — you sleep after you're in the bed, not on the way to it.
+  function bedDown(actor, bed) {
+    if (actor !== CBZ.player) return;
+    const skipped = skipToMorning();
+    const g = CBZ.game;
+    if (g && g.tired != null) g.tired = 0;                 // rested
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(skipped ? "Slept until morning." : "Resting…", 2.4);
+  }
+  CBZ.propSleep = function (actor, bed, opts) {
     if (!on() || !actor || !bed || !isFree(bed)) return false;
     if (actor.dead || (actor.ko | 0) > 0 || actor.driving) return false;
     CBZ.propSeatRelease(actor);
     bed.occupant = actor;
+    markClaimed(bed);
     actor._propBed = bed;
     if (actor === CBZ.player) {
       const P = CBZ.player, ch = CBZ.playerChar;
+      if (!(opts && opts.instant) && beginArc(actor, "lie", bed)) { arcOf(actor).onDone = bedDown; return true; }
       P.pos.set(bed.x, bed.lieY, bed.z);
       P.vy = 0; P.grounded = true;
       if (ch) { ch.sitting = false; ch.group.rotation.y = bed.face; }
-      // the time-skip fires ONCE at lie-down (not per-frame). No heal, no heat
-      // change — the owned-safehouse sleepHeal stays the special full reset.
-      const skipped = skipToMorning();
-      const g = CBZ.game;
-      if (g && g.tired != null) g.tired = 0;                 // rested
-      if (CBZ.city && CBZ.city.note) CBZ.city.note(skipped ? "Slept until morning." : "Resting…", 2.4);
+      // No heal, no heat change — the owned-safehouse sleepHeal stays the
+      // special full reset.
+      bedDown(actor, bed);
       return true;
     }
     // NPC lie-down: sit-state pin at mattress height + the roll flag; the
@@ -270,63 +947,200 @@
     actor.state = "sit";
     actor.speed = 0; actor.path = null;
     actor._propLie = true;
+    if (actor.char) actor.char.sitting = false;
+    if (!(opts && opts.instant) && beginArc(actor, "lie", bed)) return true;
     if (actor.pos && actor.pos.set) actor.pos.set(bed.x, bed.lieY, bed.z);
     if (actor.group) { actor.group.position.set(bed.x, bed.lieY, bed.z); actor.group.rotation.y = bed.face; }
-    if (actor.char) actor.char.sitting = false;
     return true;
   };
-  CBZ.propWake = function (actor) {
+  CBZ.propWake = function (actor, opts) {
     if (!actor) return;
+    const bed = actor._propBed;
     CBZ.propSeatRelease(actor);
+    if (!(opts && opts.instant) && bed && beginArc(actor, "rise", bed)) {
+      actor._propLie = false;
+      actor._deskAnchor = null;
+      if (actor !== CBZ.player && actor.state === "sit") actor.state = "walk";
+      return;
+    }
+    dropArc(actor);
     if (actor === CBZ.player) {
       const ch = CBZ.playerChar;
-      if (ch) { ch.sitting = false; ch.seatRef = null; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
+      if (actor._propOwnsBody) { actor._doorArc = false; actor._propOwnsBody = false; }
+      if (ch) { ch.sitting = false; ch.seatRef = null; ch.crouch = false; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
       CBZ.player.stun = 0;
       return;
     }
     actor._propLie = false;
     actor._deskAnchor = null;
     if (actor.state === "sit") actor.state = "walk";
+    if (actor.char) { actor.char.sitting = false; actor.char.seatRef = null; actor.char.crouch = false; }
     if (actor.group) actor.group.rotation.z = 0;
   };
 
-  // ---- the per-frame HOLD -----------------------------------------------------
-  // onUpdate(42): AFTER physics (10, writes player.pos/group) and the
-  // interaction scan (39), BEFORE the camera reads the group (onAlways 50) —
-  // so the pin wins the frame. Runs only while g.state === "playing".
-  if (CBZ.onUpdate) CBZ.onUpdate(42, function (dt) {
-    if (!on()) return;
-    const P = CBZ.player, ch = CBZ.playerChar, g = CBZ.game;
-    if (!P || !ch) return;
-    const seat = P._propSeat, bed = P._propBed;
-
-    // NPC lie-hold: peds' own sit branch pins x/z + yaw but forces y=0 and
-    // char.sitting=true every frame — re-pin the height onto the mattress and
-    // apply the roll AFTER peds ran (this updater is later in the order).
+  // ---- THE RATCHET ------------------------------------------------------------
+  // Physical-plausibility invariant, the tree-connection-law shape
+  // (world/treeaudit.js): every seat/bed anchor must (a) declare its cushion
+  // geometry so the rig can solve feet-on-the-floor, and (b) have at least one
+  // walkable standing spot, or the body can never legitimately reach it.
+  // CORRECTION (2026-07-26, the first time anyone actually MEASURED it): this
+  // said `blocked` was a hard invariant to pin at 0, because an anchor nothing
+  // can walk to is furniture that lies. A live build reads 487 blocked out of
+  // ~6000 anchors — so zero was an aspiration that had never been checked, and
+  // pinning it there would have failed the gate on day one for reasons nobody
+  // had introduced. It is pinned in tools/math-gate.mjs at 487 as a RATCHET
+  // that may only go DOWN. Driving it to zero is real outstanding work; it is
+  // not a property this file may claim.
+  // `noGeom` is an ADOPTION counter, nonzero by design
+  // today: pin it at whatever the current build reports, and it may only ever
+  // go DOWN as builders move onto CBZ.furnish. Do NOT pin noGeom at 0.
+  CBZ.propUseAudit = function () {
+    let noGeom = 0, blocked = 0;
+    for (let i = 0; i < seats.length; i++) {
+      const r = seats[i];
+      if (r.cushionH == null) noGeom++;      // builder never declared its cushion
+      if (!entryOf(r)._eok) blocked++;
+    }
     for (let i = 0; i < beds.length; i++) {
-      const rec = beds[i], o = rec.occupant;
-      if (o && o !== P && o._propLie && o.group && !isStale(o)) {
-        if (o.pos) o.pos.y = rec.lieY;
-        o.group.position.y = rec.lieY;
-        o.group.rotation.z = Math.PI / 2;
-        if (o.char) o.char.sitting = false;
+      const r = beds[i];
+      if (r.lieY == null || r.top == null) noGeom++;
+      if (!entryOf(r)._eok) blocked++;
+    }
+    return { seats: seats.length, beds: beds.length, noGeom: noGeom, blocked: blocked };
+  };
+
+  // ---- the DEAD-MAN SWITCH ----------------------------------------------------
+  // The hold below is an onUpdate, so it only runs while g.state === "playing".
+  // An arc owns the player's body through `_doorArc` (systems/physics.js's early
+  // return) — if the state leaves "playing" mid-transition (pause, menu, death
+  // screen, mode change) the hold would never run again and the flag would
+  // strand the player permanently un-simulated. onAlways runs regardless of
+  // state, so this is the one place that can always let go. Cheap: one truthy
+  // check per frame in the common case.
+  if (CBZ.onAlways) CBZ.onAlways(52, function () {
+    if (!arcs.length) return;
+    const g = CBZ.game;
+    if (g && g.state === "playing") return;      // the hold owns it, nothing to do
+    for (let i = arcs.length - 1; i >= 0; i--) {
+      const A = arcs[i];
+      endArc(A);
+      const ch = charOf(A.actor);
+      if (ch) {
+        ch.crouch = false;
+        if (A.kind === "stand" || A.kind === "rise") { ch.sitting = false; ch.seatRef = null; }
+        if (ch.group && (A.kind === "stand" || A.kind === "rise")) { ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
       }
     }
-    if (!seat && !bed) return;
+    arcs.length = 0;
+  });
 
+  // ---- the per-frame HOLD -----------------------------------------------------
+  // onUpdate(42): AFTER physics (10, writes player.pos/group), peds.js's brain
+  // (34, which re-pins seated NPCs) and the interaction scan (39), BEFORE the
+  // camera reads the group (onAlways 50) — so both the arc and the pin win the
+  // frame. Runs only while g.state === "playing".
+  if (CBZ.onUpdate) CBZ.onUpdate(42, function (dt) {
+    const P = CBZ.player, ch = CBZ.playerChar, g = CBZ.game;
+    if (!P || !ch) return;
+    // NOTE: the `on()` gate lives INSIDE the loop below, never above it.
+    // Flipping PROPS_PURPOSE off mid-arc used to skip the whole updater, which
+    // left the arc un-advanced and `_doorArc` latched true forever — the
+    // documented one-line revert was a hard player freeze. The revert now
+    // ABORTS live arcs instead of orphaning them.
+
+    // ---- 1. advance every live transition -------------------------------
+    for (let i = arcs.length - 1; i >= 0; i--) {
+      const A = arcs[i];
+      const actor = A.actor;
+      // an arc never survives the body being claimed by something bigger
+      const bad = !on() || !g || g.state !== "playing" || g.mode !== A.mode
+        || actor.dead || (actor.ko | 0) > 0 || actor.driving || actor._death
+        || (A.isP && (P._aircraft || P._swim))            // another mount claimed the body
+        || (A.isP && ((P._phys && (P._phys.air || (P._phys.down | 0) > 0)) || (CBZ.cineActive && CBZ.cineActive())))
+        || (A.isP && P._doorArcOwner && P._doorArcOwner !== "prop")   // someone else took the body
+        || (A.isP && CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active) // a boarding beat started: yield
+        || (!A.isP && isStale(actor));
+      if (bad) {
+        // An abandoned arc must never leave a half-posed body behind: clear
+        // every rig flag it could have set, then drop any claim it was mid-way
+        // through making. Absolute writes only — nothing to unwind.
+        endArc(A);
+        const cb = charOf(actor);
+        if (cb) {
+          cb.sitting = false; cb.seatRef = null; cb.crouch = false;
+          if (cb.group) { cb.group.rotation.z = 0; cb.group.rotation.x = 0; }
+        }
+        if (actor._propSeat) CBZ.propStand(actor, { instant: true });
+        else if (actor._propBed) CBZ.propWake(actor, { instant: true });
+        continue;
+      }
+      let done = false;
+      try { done = stepArc(A, dt); } catch (e) { done = true; }
+      // the stun top-up holds the body still DURING the arc — it must not be
+      // re-applied on the frame the arc completes, or a stand-up hands control
+      // back 0.15s late (and the `P.stun = 0` below was silently overwritten).
+      if (A.isP && !done) { P.vy = 0; P.grounded = true; P.stun = Math.max(P.stun || 0, 0.15); }
+      if (done) {
+        endArc(A);
+        if (A.abandon) {                    // the body never reached the furniture
+          if (actor._propSeat) CBZ.propStand(actor, { instant: true });
+          else if (actor._propBed) CBZ.propWake(actor, { instant: true });
+          continue;
+        }
+        if (A.onDone) { try { A.onDone(actor, A.rec); } catch (e) {} }
+        if (A.kind === "stand" || A.kind === "rise") {
+          const c2 = charOf(actor);
+          if (c2) { c2.sitting = false; c2.seatRef = null; c2.crouch = false; if (c2.group) { c2.group.rotation.z = 0; c2.group.rotation.x = 0; } }
+          if (actor === P) P.stun = 0;
+        }
+      }
+    }
+
+    const pArc = arcOf(P);
+    const seat = P._propSeat, bed = P._propBed;
+
+    // ---- 2. NPC holds ---------------------------------------------------
+    // These used to sweep EVERY seat and EVERY bed in the world once a frame
+    // looking for occupants — thousands of records, almost always none of them
+    // claimed. `claimed` is the short list of records that actually have an
+    // occupant, compacted in place as claims lapse, so the common case is a
+    // zero-length loop.
+    for (let i = claimed.length - 1; i >= 0; i--) {
+      const rec = claimed[i], o = rec.occupant;
+      if (!o || isStale(o)) { claimed.splice(i, 1); continue; }
+      if (o === P || arcOf(o)) continue;
+      if (rec.lieY != null) {
+        // peds' own sit branch pins x/z + yaw but forces char.sitting=true and
+        // y=0 every frame — re-pin the height onto the mattress and apply the
+        // roll AFTER peds ran (this updater is later in the order).
+        if (o._propLie && o.group) {
+          if (o.pos) o.pos.y = rec.lieY;
+          o.group.position.y = rec.lieY;
+          o.group.rotation.z = Math.PI / 2;
+          if (o.char) o.char.sitting = false;
+        }
+      } else if (geomOn() && o.char && o.char.sitting && !o.char.seatRef) {
+        // a seated NPC whose seat DECLARED its geometry gets the real chair
+        // solve; an undeclared one gets null back and keeps the legacy pose.
+        o.char.seatRef = CBZ.propSeatRef(rec);
+      }
+    }
+    if (pArc || (!seat && !bed)) return;
+
+    // ---- 3. the player pin ----------------------------------------------
     // force-exit: anything else claiming the body wins (shot, KO'd, died,
     // thrown, entered a car, a cutscene grabbed the camera, mode change).
     if (!g || g.mode !== "city" || g.state !== "playing"
         || P.dead || (P.ko | 0) > 0 || P.driving || P._death
         || (P._phys && (P._phys.air || (P._phys.down | 0) > 0))
         || (CBZ.cineActive && CBZ.cineActive())) {
-      if (seat) CBZ.propStand(P); else CBZ.propWake(P);
+      if (seat) CBZ.propStand(P, { instant: true }); else CBZ.propWake(P, { instant: true });
       return;
     }
     const a = seat || bed;
     const l = a.lot || (a._lotR ? null : lotOf(a));
     if (l && l.demolished) {               // the building came down around you
-      if (seat) CBZ.propStand(P); else CBZ.propWake(P);
+      if (seat) CBZ.propStand(P, { instant: true }); else CBZ.propWake(P, { instant: true });
       return;
     }
     const y = seat ? a.y : a.lieY;
@@ -336,6 +1150,7 @@
     ch.group.rotation.y = a.face;
     if (seat) {
       ch.sitting = true;
+      if (!ch.seatRef) ch.seatRef = CBZ.propSeatRef(a);
     } else {
       ch.sitting = false;
       // damp the roll toward the lie (the KO-lie look) — matches physics.js's

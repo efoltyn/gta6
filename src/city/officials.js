@@ -111,6 +111,26 @@
        deputy -> auto-appoint a caretaker (mint a fresh holder identity) —
        "the world heals" (comment: P4 replaces this with snap elections).
 
+   GOV WAVE — A PLAYER MAY NOW HOLD THE SEAT. `rec.office.holder` gained one
+   legal non-sid value, the sentinel string "player" (CBZ.officials.PLAYER_SID
+   — assigned here for the first time; city/elections.js:275 has read it off
+   this file since the day it shipped and always fell through to its own
+   literal). Four things changed and nothing else did:
+     · identityOf("player") answers with the real player name instead of
+       "Someone", so every headline, feed line and contract dossier in the
+       game reads correctly the moment the player wins.
+     · mintHolder() refuses a player-held seat (it already did, via
+       truthiness; the guard is now explicit).
+     · PHYSICAL PRESENCE skips embodiment entirely for a player-held seat —
+       the player IS the body; a second one wearing your name is not flavour,
+       it is a bug you would have to look at.
+     · PERMADEATH: CBZ.cityKillPlayer (city/death.js, the one real player
+       death funnel) is wrapped with this file's own guard/retry discipline,
+       and a player who dies in office runs the SAME succession path as any
+       assassinated officeholder — deputy sworn in, else power vacuum for
+       elections.js's snap election. The single difference is that the
+       max-heat murder charge is suppressed; see succeed()'s `selfInflicted`.
+
    PERSISTENCE: two riders, familytree.js/polity.js's own exact pattern.
    Office holder/deputy/termDay already ride polity.js's OWN serialize() (its
    header says so verbatim) — this file's serialize() only carries what IT
@@ -170,6 +190,37 @@
   const officialDeathSubs = [];
   CBZ.onOfficialDeath = function (fn) { if (typeof fn === "function") officialDeathSubs.push(fn); };
 
+  // ============================================================
+  //  THE PLAYER SENTINEL (GOV wave).
+  //  `rec.office.holder` is normally a schedule.js ledger sid. It may now
+  //  also be the literal string "player", because city/candidacy.js can put
+  //  the player on the ballot and city/elections.js's resolve() writes the
+  //  winner's sid straight onto the record. elections.js has ALWAYS read this
+  //  constant off this file — `const PLAYER = (CBZ.officials &&
+  //  CBZ.officials.PLAYER_SID) || "player"` (elections.js:275) — and it was
+  //  never assigned anywhere in the repo, so that read fell through to its
+  //  literal every time. It is assigned here now, where it belongs: this file
+  //  loads first and owns the office record's holder field.
+  //
+  //  The player is NOT a ledger identity and is never minted as one. Putting
+  //  a second, fake "you" in the population would corrupt every census the
+  //  economy runs. Everything below therefore branches on the sentinel
+  //  instead: identityOf() answers with the real player name, mintHolder()
+  //  refuses to paper over a player-held seat, and PHYSICAL PRESENCE skips
+  //  embodiment entirely — the player IS the body standing in city hall, and
+  //  spawning a second one would have you watching yourself work.
+  // ============================================================
+  const PLAYER_SID = "player";
+  function isPlayer(sid) { return sid === PLAYER_SID; }
+  function playerIdentity() {
+    const P = CBZ.player;
+    let n = null;
+    if (CBZ.cityPlayerName) { try { n = CBZ.cityPlayerName(); } catch (e) { n = null; } }
+    if (!n) n = (P && P.name) || (g && g.playerName) || "You";
+    const gd = (P && P.gender) || (g && g.playerGender) || "m";
+    return { name: n, gender: gd === "f" ? "f" : "m", player: true };
+  }
+
   // ---- state: g.officials (own guard for the one-shot mint pass) ----------
   function reset() {
     g.officials = { inited: false, mayorSid: null, deputySid: null, govSids: {}, presidentSid: null, vacantSince: {} };
@@ -199,6 +250,10 @@
   // real through the normal ledger.
   function identityOf(sid) {
     if (!sid) return { name: "Someone", gender: "f" };
+    // the player holds this seat — there is no ledger page to read, and
+    // falling through to one would name the officeholder "Someone" on every
+    // headline, feed line and contract dossier in the game.
+    if (isPlayer(sid)) return playerIdentity();
     const live = CBZ.cityLedgerLive && CBZ.cityLedgerLive(sid);
     if (live && live.name) return { name: live.name, gender: live.gender === "f" ? "f" : "m" };
     const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(sid);
@@ -214,6 +269,12 @@
   // ============================================================
   function mintHolder(rec, founding) {
     if (!rec || rec.office.holder) return;   // already minted or restored from a save
+    // belt and braces on top of the truthiness check above: a player-held seat
+    // must NEVER be papered over with a minted NPC, and the caretaker path
+    // below calls this with a record it only half-inspected. "player" is
+    // truthy so the guard above already covers it — this line is here so the
+    // intent survives the next edit to that condition.
+    if (isPlayer(rec.office.holder)) return;
     const id = rec.id;
     const isMayor = id === MAYOR_ID;
     // MASTER-PLAN promotes worldstate.js:70's dormant stub verbatim — but only
@@ -312,12 +373,17 @@
     return null;
   }
 
-  function handleOfficialDeath(ped, sid) {
-    const info = officeOf(sid);
-    if (!info) return;
+  // THE SUCCESSION MACHINE, factored out of the cityKillPed wrap so the
+  // PLAYER's death can run the identical path. There is exactly one
+  // difference and it is named: `selfInflicted` suppresses the max-heat
+  // murder charge, because charging the player with their own murder is not
+  // a thing. Everything else — the assassination world-event, the deputy
+  // swearing-in, the power vacuum, the headline, the onOfficialDeath
+  // broadcast every other system listens on — is the same code, so a dead
+  // player Mayor and a dead NPC Mayor leave the world in the same state.
+  function succeed(info, sid, victimName, selfInflicted) {
     const rec = info.rec;
     const title = titleFor(rec);
-    const victimName = (ped && ped.name) || nameOf(sid);
 
     // (a) worldstate: the EXISTING "assassination" path (scandal/emergencyPowers
     // already applied there — see header, worldstate.js:265-271) + max heat.
@@ -349,15 +415,28 @@
     // (c) headline
     if (CBZ.city && CBZ.city.big) CBZ.city.big("" + title + " " + victimName + " ASSASSINATED");
 
-    // (d) max heat — same call shape worldstate.js's own crimeHeat routes through.
-    if (CBZ.cityCrime) { try { CBZ.cityCrime(300, { type: "murder" }); } catch (e) {} }
+    // (d) max heat — same call shape worldstate.js's own crimeHeat routes
+    // through. Skipped when the victim IS the player: a corpse does not get
+    // charged with its own murder, and leaving a 5-star bounty on a fresh
+    // respawn is the "stranded state" this whole path exists to avoid.
+    if (!selfInflicted && CBZ.cityCrime) { try { CBZ.cityCrime(300, { type: "murder" }); } catch (e) {} }
 
     // (e) X6: notify relations.js (and any future subscriber) — the actual
     // country-degradation logic lives entirely over there, not here.
-    for (let i = 0; i < officialDeathSubs.length; i++) { try { officialDeathSubs[i](rec, sid, ped); } catch (e) {} }
+    // contracts.js's protective-detail contract and city/candidacy.js's own
+    // run-sweeper both hang off this, so a player officeholder's death
+    // resolves every downstream system exactly like an NPC's.
+    for (let i = 0; i < officialDeathSubs.length; i++) { try { officialDeathSubs[i](rec, sid, info.ped || null); } catch (e) {} }
 
     // if this was the mayor's own physical body, let the presence tick's
     // "principal.dead" branch handle the mourn/despawn — nothing more to do here.
+  }
+
+  function handleOfficialDeath(ped, sid) {
+    const info = officeOf(sid);
+    if (!info) return;
+    info.ped = ped || null;
+    succeed(info, sid, (ped && ped.name) || nameOf(sid), false);
   }
 
   if (typeof CBZ.cityKillPed === "function" && !CBZ.cityKillPed._offWrap) {
@@ -374,6 +453,62 @@
     wrapped._offWrap = true;
     CBZ.cityKillPed = wrapped;
   }
+
+  // ============================================================
+  //  PERMADEATH IN OFFICE — the player dies holding a seat.
+  //
+  //  THE SIGNAL IS REAL AND EXISTING: city/death.js owns CBZ.cityKillPlayer
+  //  (death.js:392), the ONE funnel every player death in the game passes
+  //  through — city/killfeed.js already wraps it for the same reason (and
+  //  documents the retry, because wanted.js and inventory.js wrap it too).
+  //  We wrap the same entry with the same discipline as this file's
+  //  cityKillPed wrap: capture BEFORE, act AFTER, one shot ever.
+  //
+  //  Doctrine (CLAUDE.md permadeath): the world keeps going without you. A
+  //  dead player Mayor is succeeded exactly like a dead NPC Mayor — the
+  //  deputy is sworn in, or the seat goes to a power vacuum that
+  //  elections.js's snap-election machinery picks up on the next day tick.
+  //  There is no special player branch beyond the murder-charge suppression
+  //  named in succeed(): a player who wins an election and then gets shot
+  //  leaves behind a functioning government, not a corrupted one.
+  // ============================================================
+  function handlePlayerHolderDeath() {
+    const recs = allOfficeRecords();
+    const name = playerIdentity().name;
+    for (let i = 0; i < recs.length; i++) {
+      const r = recs[i];
+      if (!r || !r.office) continue;
+      // both slots: a player who lost the seat but stayed on as deputy (a
+      // conceded incumbent, a running mate) still vacates it by dying.
+      if (isPlayer(r.office.holder)) { try { succeed({ rec: r, asDeputy: false, ped: null }, PLAYER_SID, name, true); } catch (e) {} }
+      else if (isPlayer(r.office.deputy)) { try { succeed({ rec: r, asDeputy: true, ped: null }, PLAYER_SID, name, true); } catch (e) {} }
+    }
+  }
+  let _playerDeathWrapped = false;
+  function wrapPlayerDeath() {
+    if (_playerDeathWrapped) return true;
+    const orig = CBZ.cityKillPlayer;
+    if (typeof orig !== "function") return false;      // death.js not parsed yet — retried below
+    if (orig._offPlayerWrap) { _playerDeathWrapped = true; return true; }
+    const w = function (reason, imp) {
+      const wasDead = !!(CBZ.player && CBZ.player.dead);
+      const ret = orig.apply(this, arguments);
+      if (!wasDead && CBZ.player && CBZ.player.dead) {
+        try { handlePlayerHolderDeath(); } catch (e) {}
+      }
+      void reason; void imp;
+      return ret;
+    };
+    w._offPlayerWrap = true;
+    // the explosion-wrapper law (CLAUDE.md): carry EVERY marker a previous
+    // wrapper stamped forward, or killfeed.js/wanted.js/inventory.js will each
+    // re-wrap this chain on their own retry timer.
+    for (const k in orig) { if (/Wrap(ped)?$/.test(k)) w[k] = orig[k]; }
+    CBZ.cityKillPlayer = w;
+    _playerDeathWrapped = true;
+    return true;
+  }
+  wrapPlayerDeath();   // retried from the 46.06 install tick below
 
   // ============================================================
   //  NEW-DAY HOOK: term auto-extend (no elections yet) + caretaker healing.
@@ -574,6 +709,20 @@
     if (!pr) pr = presences[rec.id] = { recId: rec.id, state: "none", principal: null, mode: null, mournT: 0, _rollPhase: null, _rollShow: true };
     const holderSid = rec.office.holder;
 
+    // THE PLAYER HOLDS THIS SEAT — the player IS the body. Manufacturing a
+    // second one would put a controlled NPC wearing your own name in the
+    // lobby, walking a schedule you are standing in the middle of. Tear down
+    // anything already live (the seat changed hands to you mid-window) and
+    // spawn nothing. The protection.js detail is deliberately NOT spawned
+    // either: a bodyguard escort for a player officeholder is real, but it is
+    // city/statecraft.js's deploy() to grant, not an ambient consequence of
+    // winning. Everything else in this file — succession, the kill wraps, the
+    // ledger — is untouched by this branch.
+    if (isPlayer(holderSid)) {
+      if (pr.state !== "none") despawnPresence(pr);
+      return;
+    }
+
     if (pr.state === "mourn") {
       pr.mournT -= dt;
       const det = CBZ.protection && CBZ.protection.get ? CBZ.protection.get("off_" + rec.id) : null;
@@ -646,9 +795,16 @@
   //  PUBLIC API + PERSISTENCE
   // ============================================================
   CBZ.officials = {
+    // THE PLAYER SENTINEL — city/elections.js:275 has read this since it
+    // shipped; this is the assignment that was missing. Never change the
+    // literal: `rec.office.holder === "player"` is persisted inside
+    // polity.js's own serialize(), so an old save would lose its government.
+    PLAYER_SID: PLAYER_SID,
+    isPlayer: isPlayer,
     mayorSid: function () { ensureState(); return g.officials.mayorSid; },
     officeOf: officeOf,
     identityOf: identityOf,
+    titleFor: titleFor,   // contracts.js and city/candidacy.js both re-derived this; one copy is enough
     reset: reset,
     serialize: function () {
       ensureState();
@@ -729,6 +885,11 @@
     CBZ.onUpdate(46.06, function () {
       if (!g) return;
       ensureOfficialsSaveWraps();
+      // death.js parses at a different index than this file in index.html and
+      // three other modules wrap the same entry on their own retry timers, so
+      // the parse-time attempt above can legitimately miss. One-shot boolean
+      // inside; this is a no-op the moment it lands.
+      wrapPlayerDeath();
       hydrateFromLedger();
     });
   }

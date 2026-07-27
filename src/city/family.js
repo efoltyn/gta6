@@ -33,6 +33,19 @@
        ped.captiveX, ped.captiveZ    // where they're held (the fullmap waypoint)
        ped.captiveT  : number        // seconds left on the clock
      CBZ.cityFamilyReset() : re-casts on a fresh run.
+
+   W13 — THE KIDS ARE REAL CHILDREN NOW. famPed's `kid` parameter used to be a
+   boolean meaning "shrink the rig to 62% and give it 40hp": a shrunken adult,
+   wrong in every ratio, frozen at that size forever. It is now an AGE IN
+   YEARS, passed straight to cityMakePed as opts.age so entities/character.js
+   builds the correct body for it, and handed to CBZ.cityChildAge which starts
+   a PERSISTED birthday (familytree.js) so the child actually grows up while
+   you play. Cast ages come from CBZ.hash01 on the kid's spawn point — NOT
+   from this module's rng() — because adding a draw to a seeded stream shifts
+   every value after it (CLAUDE.md's order-fragility law). city/childhood.js
+   owns growth, the rig swap at each band, and the "no unaccompanied child
+   outdoors at night" rule; the home-life tick below yields to it via the
+   _kidHeld/_kidInside skip.
 ============================================================ */
 (function () {
   "use strict";
@@ -113,11 +126,19 @@
     return parts.length > 1 ? firstName + " " + parts[parts.length - 1] : firstName;
   }
 
-  function famPed(x, z, name, role, gangId, kid, gender) {
+  // W13 GROWING UP: `kid` used to be a boolean that meant "shrink this body
+  // to 62% and give it 40hp". It is now an AGE IN YEARS (or null for a grown
+  // woman) and it goes straight into cityMakePed as opts.age, so
+  // entities/character.js builds a real child — near-adult head, short legs,
+  // pot belly, no neck, wide-base toddler gait — instead of a scaled adult.
+  // A child is NOT a scaled adult; never reach for group.scale here again
+  // (CBZ.childBodyAudit() counts it, and it is pinned in the math gate).
+  function famPed(x, z, name, role, gangId, kidAge, gender) {
     if (!CBZ.cityMakePed) return null;
     const p = CBZ.cityMakePed(x, z, rng, {
       name, aggr: 0, armed: false, archetype: "resident", gender,
       job: role, behavior: "timid", cash: 20 + ((rng() * 60) | 0),
+      age: (kidAge != null && isFinite(kidAge)) ? kidAge : undefined,
     });
     if (!p) return null;
     registerPed(p);
@@ -126,7 +147,12 @@
     // ped.family is an ARRAY of kin refs; the two collided under one name. See
     // schedule.js's worth() for the matching read-side migration.
     p.famRole = role;                   // and the SET takes it personally (gangs.js)
-    if (kid && p.char && p.char.group) { p.char.group.scale.setScalar(0.62); p.hp = 40; p.maxHp = 40; }
+    // one guarded line replaces the old scale/hp couplet: starts the persisted
+    // birthday, sizes hp to the actual body, tags the growth band. Degrades to
+    // nothing if city/childhood.js isn't loaded (the kid is then a correctly
+    // PROPORTIONED child who simply never grows — still strictly better than
+    // the shrunken adult this used to build).
+    if (kidAge != null && isFinite(kidAge) && CBZ.cityChildAge) CBZ.cityChildAge(p, kidAge);
     return p;
   }
 
@@ -208,7 +234,7 @@
       const wifeFirst = WIVES[(rng() * WIVES.length) | 0];
       const wifeName = gang && gang.boss ? withSurname(wifeFirst, gang.boss.name) : wifeFirst;
       const wife = famPed(fam.homeX, fam.homeZ, wifeName,
-        mine ? "your wife" : (boss + "'s wife"), fam.gangId, false, "f");
+        mine ? "your wife" : (boss + "'s wife"), fam.gangId, null, "f");
       if (wife) { wife._fam = fam; wife._role = "wife"; fam.members.push(wife); }
       // W7: link a BOSS family into the persistent family tree — gang.boss is
       // a real ped ref (gangs.js), reachable right here, so marry() has an
@@ -221,8 +247,18 @@
       }
       const nKids = 1 + ((rng() * 2) | 0);
       for (let k = 0; k < nKids; k++) {
-        const kid = famPed(fam.homeX + 1.5 + k, fam.homeZ + 1.2,
-          KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, true, rng() < 0.5 ? "f" : "m");
+        const kx = fam.homeX + 1.5 + k, kz = fam.homeZ + 1.2;
+        // W13 CAST AGE. A mansion kid isn't born during play — they were born
+        // BEFORE the run started, so they need a plausible age (2..15) rather
+        // than a birthday of "now". It MUST NOT come off this module's shared
+        // rng(): adding a draw to a seeded stream shifts every value drawn
+        // after it, which is the exact order-fragility CLAUDE.md's determinism
+        // law bans. CBZ.hash01 is position-hashed and therefore ORDER-FREE —
+        // same seed, same world, same ages, and inserting/removing this line
+        // can never perturb the wife's name or the mistress's lot.
+        const kidAge = 2 + (CBZ.hash01 ? CBZ.hash01(kx, kz, 0x6b1d + k) : 0.5) * 13;
+        const kid = famPed(kx, kz,
+          KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, kidAge, rng() < 0.5 ? "f" : "m");
         if (kid) { kid._fam = fam; kid._role = "kid"; fam.members.push(kid); }
         if (kid && gang && gang.boss && !gang.boss.dead && CBZ.cityFamilyTree) {
           CBZ.cityFamilyTree.bearChild(gang.boss, wife, kid);
@@ -236,7 +272,7 @@
       if (gang && gi === 1 && sideLot) {
         const sby = backyardOf(sideLot), spool = lotPool.get(sideLot) || null;
         const her = famPed(sby.bx, sby.bz, SIDE[(rng() * SIDE.length) | 0],
-          "a friend of " + boss, fam.gangId, false, "f");
+          "a friend of " + boss, fam.gangId, null, "f");
         if (her) {
           const sf = {
             gangId: fam.gangId, mine: false,
@@ -295,7 +331,10 @@
       }
       return { x: p.x + (rng() - 0.5) * (p.w + 1), z: p.z + p.d / 2 + 1.0 };
     }
-    // KIDS PLAY OUT (09-17 when not eating): roam the yard, not the street
+    // KIDS PLAY OUT (09-17 when not eating): roam the yard, not the street.
+    // W13: `_role` is flipped to "grown" by city/childhood.js the day a cast
+    // kid turns 18, so an adult son stops being yard-bound automatically — no
+    // extra check needed here, the role test just stops matching.
     if (role === "kid") return { x: fam.homeX + (rng() - 0.5) * 7, z: fam.homeZ + (rng() - 0.5) * 7 };
     // WIFE / MISTRESS daytime: pootle near the house
     return { x: (fam.houseX + fam.homeX) / 2 + (rng() - 0.5) * 4, z: (fam.houseZ + fam.homeZ) / 2 + (rng() - 0.5) * 4 };
@@ -328,6 +367,14 @@
         if (!m || m.dead) continue;
         if (m.kidnapped) continue;
         if (m.state === "flee" || m.alarmed > 0) continue;   // panic owns the legs
+        // W13: city/childhood.js is actively driving this body (a baby being
+        // carried, a toddler on its parent's heels, a child walked home past
+        // curfew and held indoors). It runs at order 34.9 and we run at 36.2,
+        // so without this line our yard goal would be written LAST every frame
+        // and would quietly undo the curfew. One flag, one skip — the same
+        // "whoever holds the legs owns them" convention `controlled` already
+        // encodes everywhere else in this codebase.
+        if (m._kidHeld || m._kidInside) continue;
         // routine target for this hour
         const goal = dayGoalFor(m, fam);
         // RELAX: hand a calm member to the lounger sit-rig (reuses peds.js seat)

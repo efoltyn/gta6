@@ -93,11 +93,21 @@
   }
 
   // ---- apply persisted prefs on THIS boot (the live-applicable ones only) --
-  // Quality: only force a manual tier if the player previously chose Manual;
-  // default (no saved prefs, or auto:true) leaves today's adaptive behaviour
-  // completely untouched — byte-identical for anyone who never opens the panel.
+  // The newest explicit surface wins. A title preset already loaded by
+  // core/quality.js must not be overwritten by an older Settings tier; when no
+  // preset exists, restore Settings' Auto/manual choice normally.
   function applyStartupPrefs() {
-    if (prefs.auto === false && typeof prefs.qLevel === "number" && CBZ.setQualityLevel) {
+    let savedPreset = false;
+    try { savedPreset = !!localStorage.getItem("cbz_qualityPreset"); } catch (e) {}
+    if (savedPreset) {
+      prefs.auto = false;
+      prefs.qLevel = CBZ.getQualityLevel ? CBZ.getQualityLevel() : prefs.qLevel;
+      savePrefs(prefs);
+    } else if (prefs.auto === true) {
+      CBZ.qualityLocked = false;
+      CBZ.qualityAuto = true;
+      if (CBZ.syncQualityPresetUI) CBZ.syncQualityPresetUI();
+    } else if (prefs.auto === false && typeof prefs.qLevel === "number" && CBZ.setQualityLevel) {
       CBZ.qualityLocked = true;
       CBZ.setQualityLevel(prefs.qLevel);
     }
@@ -106,12 +116,19 @@
       if (CBZ.refreshCrowdBudget) CBZ.refreshCrowdBudget();
     }
   }
+  // A title click happens after this module has loaded. Mirror it into the
+  // Settings record so a stale manual/Auto value cannot win on the next boot.
+  addEventListener("cbzqualitypreset", function (e) {
+    const level = e && e.detail && e.detail.level;
+    prefs.auto = false;
+    if (typeof level === "number") prefs.qLevel = level;
+    savePrefs(prefs);
+  });
   applyStartupPrefs();
 
   // ---- quality tier labels ----------------------------------------------
-  // Match core/quality.js's QUALITY_LABELS — this panel is now the ONLY
-  // performance surface (the old pause-card slider was removed), so the two
-  // vocabularies must not diverge.
+  // Match core/quality.js's QUALITY_LABELS. The title owns three approachable
+  // presets; this panel keeps the five-tier expert vocabulary in sync.
   const TIER_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
   function tierLabel(i) { return TIER_LABELS[i] || ("Tier " + i); }
 
@@ -200,7 +217,10 @@
       // flipping back to Auto must release BOTH and clear the persisted pin.
       if (auto) {
         CBZ.qualityAuto = true;
-        try { localStorage.removeItem("cbz_qualityLevel"); } catch (e) {}
+        try {
+          localStorage.removeItem("cbz_qualityLevel");
+          localStorage.removeItem("cbz_qualityPreset");
+        } catch (e) {}
       }
       prefs.auto = auto;
       if (!auto) {
@@ -211,6 +231,7 @@
         prefs.qLevel = lvl;
       }
       savePrefs(prefs);
+      if (CBZ.syncQualityPresetUI) CBZ.syncQualityPresetUI();
       refreshQualityUI();
     });
     elQ.addEventListener("input", function () {

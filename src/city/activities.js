@@ -293,6 +293,73 @@
     CBZ.cityMenuOpen = true;
     if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
   }
+  /* ============================================================
+     THE SOFT-LOCK CURE (confirmed bug, fixed 2026-07-26).
+
+     REPRO: open the street-race setup modal (Activities → Illegal Street
+     Race), then die or get arrested while it is open. `raceRun` is assigned
+     in openRaceSetup() (`raceRun = { setup, stage:"menu" }`) and is only ever
+     cleared by the modal's own buttons — the "Back out" handler, endLiveRace()
+     or simulateRace(). A death never touches it. start() then hard-refuses
+     with "Finish the current activity first." on the guard
+     `if (active || g.cityActivity || raceRun)` — and since nothing else can
+     clear raceRun, ALL 20 activities are dead for the rest of the session.
+     The same leak strands the fight-night, casino and sportsbook modals, the
+     `active` timer, the checkpoint beacons, the race HUD and the spawned
+     rival drivers.
+
+     THE FIX IS NOT A LOCAL FLAG. core/mission.js owns exactly one
+     death/arrest/mode-exit edge detector for the whole game
+     (CBZ.mission.onInterrupt) precisely so that no module has to grow its own
+     — this file becomes its first consumer. The self-watch below is the
+     degrade-safe fallback for a build without the mission block, so the bug
+     stays fixed either way.
+  ============================================================ */
+  function abortEverything(reason) {
+    const wasBusy = !!(raceRun || active || g.cityActivity || fight || (modal && modal.style.display === "block"));
+    if (!wasBusy) return;
+    // race: state, beacons, rival field, the shared race HUD
+    if (raceRun) {
+      raceRun = null;
+      try { clearRaceBeacons(); } catch (e) {}
+      if (CBZ.raceHud && CBZ.raceHud.hide) { try { CBZ.raceHud.hide(); } catch (e) {} }
+      if (CBZ.raceDrivers && CBZ.raceDrivers.despawnAll) { try { CBZ.raceDrivers.despawnAll("street"); } catch (e) {} }
+    }
+    // timed activity + its HUD job line
+    active = null;
+    if (g.cityActivity) g.cityActivity = null;
+    if (g.cityJob && (g.cityJob.type === "activity" || g.cityJob.type === "hitman")) g.cityJob = null;
+    // any sub-modal (fight night, casino, sportsbook) and the board itself
+    fight = null;
+    try { closeModal(); } catch (e) {}
+    try { hide(); } catch (e) {}
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    void reason;
+  }
+  CBZ.cityActivitiesAbort = abortEverything;   // probes/gates + other modules
+
+  // abortEverything() is idempotent (it early-returns when nothing is open), so
+  // hooking BOTH paths is safe and removes any dependence on <script> order:
+  // whichever edge fires first does the cleanup and the other finds nothing.
+  let hookedMission = false;
+  function hookMission() {
+    if (hookedMission || !CBZ.mission || !CBZ.mission.onInterrupt) return;
+    hookedMission = true;
+    CBZ.mission.onInterrupt(abortEverything);
+    if (CBZ.mission.adopt) CBZ.mission.adopt("city/activities.js");
+  }
+  hookMission();
+  if (CBZ.onAlways) {
+    let wasDead = false, wasBusted = false, lastMode = g.mode;
+    CBZ.onAlways(CBZ.PRIO ? CBZ.PRIO.after(CBZ.PRIO.LATE, 2) : 90.02, function () {
+      if (!hookedMission) hookMission();
+      const dead = !!(CBZ.player && CBZ.player.dead), busted = !!g.busted;
+      if ((dead && !wasDead) || (busted && !wasBusted)) abortEverything(dead ? "death" : "bust");
+      if (g.mode !== lastMode) { lastMode = g.mode; abortEverything("mode"); }
+      wasDead = dead; wasBusted = busted;
+    });
+  }
+
   function closeModal() {
     if (modal) modal.style.display = "none";
     modalBtns = {};

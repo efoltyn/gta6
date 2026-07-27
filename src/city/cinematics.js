@@ -42,7 +42,7 @@
   CBZ.cineActive = function () { return cineCam.active; };
 
   // ---- director -------------------------------------------------------------
-  const CINE = { playing: null, step: -1, t: 0, ctx: null, prevHolster: null };
+  const CINE = { playing: null, step: -1, t: 0, ctx: null, prevHolster: null, noHolster: false };
 
   function camTo(shot, ctx) {
     const s = typeof shot === "function" ? shot(ctx) : shot;
@@ -61,16 +61,41 @@
     if (st.enter) { try { st.enter(CINE.ctx); } catch (e) {} }
   }
 
-  function startScene(steps, ctx, onEnd) {
+  // startScene(steps, ctx, onEnd, opts)
+  //   opts.noHolster — DON'T disarm the player for this scene.
+  //
+  // WHY THE OPTION EXISTS: this director was written for authored dialogue
+  // scenes, where force-holstering is exactly right (a jumpy trigger finger
+  // must not shoot the boss mid-sentence). But the same shot grammar — hold the
+  // body, move a deliberate camera — is what a COMBAT beat wants too: a
+  // predator kill-cam, an execution, a takedown. Those must not rip the weapon
+  // out of the player's hands and re-holster it on exit; that reads as a bug and
+  // it silently changes what every witness system thinks it is looking at.
+  // Without this flag the only way to stage a combat shot was to bypass the
+  // director entirely and hand-roll a second camera channel — i.e. exactly the
+  // parallel-system duplication this codebase is trying to stop.
+  //
+  // NOTE (honest limitation): `opts` cannot currently restore player MOVEMENT.
+  // systems/physics.js zeroes WASD off `CBZ.cineActive()`, which is simply
+  // `cineCam.active`, and physics.js is not ours to change. So a scene still
+  // parks the body. For a predator hold that is correct anyway — you are being
+  // held — and key PRESSES still register in `CBZ.keys`, so a timed
+  // struggle-input beat reads fine. Anything needing real movement under a
+  // scripted camera needs a physics.js change first; see the report.
+  function startScene(steps, ctx, onEnd, opts) {
     if (CINE.playing) return false;
+    opts = opts || {};
     CINE.playing = steps; CINE.ctx = ctx || {}; CINE.step = -1; CINE.onEnd = onEnd || null;
     cineCam.active = true;
+    CINE.noHolster = !!opts.noHolster;
     // the scene owns the hands: holster (restored on end) so a jumpy trigger
     // finger can't shoot the boss mid-sentence, and every witness system
     // reads the player as unarmed for the duration.
     CINE.prevHolster = !!g.cityHolstered;
-    g.cityHolstered = true;
-    if (CBZ.fpsActive && CBZ.fpsActive() && CBZ.setFPS) CBZ.setFPS(false);
+    if (!CINE.noHolster) {
+      g.cityHolstered = true;
+      if (CBZ.fpsActive && CBZ.fpsActive() && CBZ.setFPS) CBZ.setFPS(false);
+    }
     CINE.step = 0; stepEnter();
     return true;
   }
@@ -79,7 +104,11 @@
     if (!CINE.playing) return;
     CINE.playing = null; CINE.ctx = null;
     cineCam.active = false;
-    g.cityHolstered = CINE.prevHolster;
+    // only restore the holster we actually took (a noHolster scene never
+    // touched it, so writing prevHolster back would clobber a real change the
+    // player made mid-scene).
+    if (!CINE.noHolster) g.cityHolstered = CINE.prevHolster;
+    CINE.noHolster = false;
     if (CBZ.playerChar && !CBZ.player.dead) CBZ.playerChar.group.visible = true;
     if (CBZ.campaignUI && CBZ.campaignUI.clearDialogue) { try { CBZ.campaignUI.clearDialogue(); } catch (e) {} }
     const onEnd = CINE.onEnd; CINE.onEnd = null;
@@ -88,6 +117,9 @@
 
   CBZ.cinePlay = startScene;
   CBZ.cineAbort = function () { endScene(true); };
+  // is a scene running right now? Combat/AI systems ask this before starting
+  // their own staged beat so two directors can never fight over the lens.
+  CBZ.cineBusy = function () { return !!CINE.playing; };
 
   CBZ.onUpdate(14.5, function (dt) {
     if (!CINE.playing) return;

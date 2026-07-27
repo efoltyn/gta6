@@ -1115,10 +1115,24 @@
   function launder(amount) {
     amount = Math.max(0, amount | 0);
     if (amount <= 0) return { banked: 0, lost: 0 };
+    // MONEY-CREATION GUARD: the debit and the credit used to be independent.
+    // CBZ.city.spend() returns FALSE and deducts nothing when the wallet can't
+    // cover `amount`, and the no-spend fallback clamped the debit at zero — but
+    // `g.cityBank += banked` ran unconditionally either way, so laundering more
+    // than you were carrying minted clean money out of nothing. Today's two
+    // callers (wealth.js launderAll, empire.js launderHere) both pre-clamp to
+    // g.cash so the exploit isn't reachable from the menus, but the hole was in
+    // the primitive, not the callers. Take the cash FIRST; bank only what
+    // actually left the wallet. Both callers already handle a {banked:0}
+    // result, so the failure path is strictly safer and the success path is
+    // byte-identical to before.
+    const paid = (CBZ.city && CBZ.city.spend)
+      ? CBZ.city.spend(amount)
+      : ((g.cash || 0) >= amount ? ((g.cash = (g.cash || 0) - amount), true) : false);
+    if (!paid) return { banked: 0, lost: 0 };
     const cut = SINKS.launderCut();
     const lost = Math.round(amount * cut);
     const banked = amount - lost;
-    if (CBZ.city && CBZ.city.spend) CBZ.city.spend(amount); else g.cash = Math.max(0, (g.cash || 0) - amount);
     g.cityBank = (g.cityBank || 0) + banked;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return { banked, lost };

@@ -337,16 +337,33 @@
     if (selectAcc < 0.82) return;
     selectAcc = 0;
     const want = desiredRigs(), p = CBZ.player.pos;
+    selected.fill(0);
+
+    // Never demote a live body while it is close/on camera. A temporary budget
+    // overage is preferable to a person blinking out; it naturally converges
+    // as pinned actors walk out of the padded view.
+    let pinned = 0;
+    if (!force) {
+      for (let slot = 0; slot < activeCount; slot++) {
+        const id = activeId[slot];
+        if (S.dead[id] || S.parked[id]) continue;
+        if (!seatSafe(S.posX[id], S.posZ[id])) { selected[id] = 1; pinned++; }
+      }
+    }
+    const remaining = Math.max(0, want - pinned);
     let size = 0;
     for (let id = 0; id < TOTAL; id++) {
       if (S.dead[id]) continue;                         // killed inmates leave the live crowd
       if (S.parked[id]) continue;                       // locked down in a cell → never selected
       if (!S.explicit[id]) S.materialize(id, simTime);
+      if (selected[id]) continue;                       // pinned visible actor already owns a slot
+      // A new analytical row may only become a real body off camera. Existing
+      // actors can compete normally; dropping one is guarded by the pin pass.
+      if (!force && slotOf[id] < 0 && !seatSafe(S.posX[id], S.posZ[id])) continue;
       const dx = S.posX[id] - p.x, dz = S.posZ[id] - p.z, d2 = dx * dx + dz * dz;
-      if (size < want) { heapId[size] = id; heapD2[size] = d2; heapUp(size++); }
-      else if (want && d2 < heapD2[0]) { heapId[0] = id; heapD2[0] = d2; heapDown(0, size); }
+      if (size < remaining) { heapId[size] = id; heapD2[size] = d2; heapUp(size++); }
+      else if (remaining && d2 < heapD2[0]) { heapId[0] = id; heapD2[0] = d2; heapDown(0, size); }
     }
-    selected.fill(0);
     for (let i = 0; i < size; i++) selected[heapId[i]] = 1;
     for (let slot = 0; slot < activeCount; slot++) {
       const id = activeId[slot];
@@ -792,6 +809,7 @@
   // and anything inside peripheral range — mirrors city/crowd.js placeSafe.
   function seatSafe(x, z) {
     if (!CBZ.CONFIG || !CBZ.CONFIG.NPC_SPAWN_HIDE) return true;
+    if (CBZ.npcTransitionSafe) return CBZ.npcTransitionSafe(x, z, { minDistance: 12, maxDistance: 90 });
     const P = CBZ.player; if (!P) return true;
     const rx = x - P.pos.x, rz = z - P.pos.z, d2 = rx * rx + rz * rz;
     if (d2 < 12 * 12) return false;              // too close even off-camera
@@ -948,6 +966,9 @@
     if (S.respawnAll) S.respawnAll();       // revive the killed + re-roll pockets
     for (let slot = 0; slot < activeCount; slot++) { const id = activeId[slot]; S.demote(id, simTime); slotOf[id] = -1; }
     activeCount = 0; selectAcc = 99; fixedAcc = societyAcc = 0; chooseNearby(true); refreshRenderMode(true);
+    // resetGame still runs beneath the opaque title card. Allocate and place
+    // the real rigs now, before setState("playing") exposes the prison.
+    renderRigs(0); syncFaceRigs(0, 0);
     if (societyWorker) { societyWorker.postMessage({ type: "reset" }); syncSociety(); }
   };
   chooseNearby(true); refreshRenderMode(true);

@@ -222,6 +222,11 @@
   function build(ctx, venue) {
     C = ctx;
     const g = venue.group;
+    // Site venues do not claim a generated lot. Reserve the verified precinct
+    // footprint now so later wildlife/nature passes cannot grow through it.
+    if (venue.anchor && venue.anchor.bounds && CBZ.worldLayout && CBZ.worldLayout.reserve) {
+      CBZ.worldLayout.reserve("pkg:precinct13", venue.anchor.bounds, { pad: 3, kind: "venue", source: "games/police" });
+    }
     V = { origin: venue.origin, _venue: venue, pending: [], staff: {}, decker: null, lou: null, rex: null,
       rosterCanvas: null, rosterTex: null, plateCanvas: null, plateTex: null, cageGate: null, fireDoor: null,
       flickTubes: [], detLamp: null, coffeeLamp: null };
@@ -961,17 +966,47 @@
       resolve(CBZ) {
         const A = (CBZ.city && CBZ.city.arena) || CBZ._settlementArena;
         if (!A || !A.root) return null;                     // wait until the world can answer
-        // Prefer a real civic anchor if the engine already publishes one, then
-        // offset the precinct onto OPEN GROUND east of the city footprint so
-        // its block never intersects a lot. Constant fallback keeps it byte-stable.
-        let cx = 0, cz = 0;
-        if (typeof A.maxX === "number" && typeof A.minZ === "number" && typeof A.maxZ === "number") {
-          cx = A.maxX + 46;                                  // east backcountry apron (walkable underlay)
-          cz = (A.minZ + A.maxZ) / 2;
-        } else if (CBZ.cityPoliceStation && CBZ.cityPoliceStation()) {
-          const st = CBZ.cityPoliceStation(); cx = st.x + 60; cz = st.z;
-        } else { cx = 760; cz = 40; }                        // hard constant fallback (open ground)
-        return { x: cx, z: cz };
+        // The world-layout expansion moved the old `A.maxX + 46` apron into
+        // open sea. Resolve the whole 48x50m block against the live coast,
+        // shared height oracle and placement ledger instead of trusting one
+        // legacy bounds number. The scan is a fixed grid sorted nearest-first:
+        // deterministic on every client and cheap (only during world build).
+        const terrain = A.mapTerrain, shore = terrain && terrain.shoreAt;
+        const ground = A.groundHeightAt || CBZ.cityGroundHeightAt;
+        const placement = CBZ.placement;
+        function boundsAt(x, z) {
+          return { minX: x - 24, maxX: x + 24, minZ: z - 30, maxZ: z + 20 };
+        }
+        function fits(x, z) {
+          const b = boundsAt(x, z);
+          if (terrain && terrain.bounds && (b.minX < terrain.bounds.minX || b.maxX > terrain.bounds.maxX || b.minZ < terrain.bounds.minZ || b.maxZ > terrain.bounds.maxZ)) return false;
+          if (placement && placement.isFree && !placement.isFree(b)) return false;
+          const xs = [b.minX + 2, x, b.maxX - 2], zs = [b.minZ + 2, z - 5, b.maxZ - 2];
+          let lo = Infinity, hi = -Infinity;
+          for (let iz = 0; iz < zs.length; iz++) for (let ix = 0; ix < xs.length; ix++) {
+            if (shore && +shore(xs[ix], zs[iz]) < 8) return false;
+            const h = ground ? (+ground(xs[ix], zs[iz]) || 0) : 0;
+            if (h < lo) lo = h; if (h > hi) hi = h;
+          }
+          return hi <= 0.65 && hi - lo <= 0.35;
+        }
+        const centerX = A.center && Number.isFinite(A.center.x) ? A.center.x : ((A.minX + A.maxX) * 0.5 || 0);
+        const centerZ = A.center && Number.isFinite(A.center.z) ? A.center.z : ((A.minZ + A.maxZ) * 0.5 || 0);
+        const candidates = [];
+        // Preserve the old preferred side when it is genuinely valid.
+        if (Number.isFinite(A.maxX) && Number.isFinite(A.minZ) && Number.isFinite(A.maxZ)) {
+          candidates.push({ x: A.maxX + 46, z: (A.minZ + A.maxZ) * 0.5, rank: -1 });
+        }
+        const extent = 1800, step = 36;
+        for (let dz = -extent; dz <= extent; dz += step) for (let dx = -extent; dx <= extent; dx += step) {
+          candidates.push({ x: centerX + dx, z: centerZ + dz, rank: dx * dx + dz * dz });
+        }
+        candidates.sort(function (a, b) { return a.rank - b.rank || a.z - b.z || a.x - b.x; });
+        for (let i = 0; i < candidates.length; i++) {
+          const p = candidates[i];
+          if (fits(p.x, p.z)) return { x: p.x, z: p.z, bounds: boundsAt(p.x, p.z) };
+        }
+        return null;                                         // retry after later land registrars
       },
     },
     build(ctx, venue) { build(ctx, venue); },

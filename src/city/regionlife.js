@@ -278,6 +278,12 @@
   var mine = [];     // refs to peds we spawned (still alive + ours)
   var spawnCD = 0;
 
+  function transitionSafe(x, z) {
+    return !CBZ.npcTransitionSafe || CBZ.npcTransitionSafe(x, z, {
+      minDistance: 22, maxDistance: DESPAWN_RAD + 45
+    });
+  }
+
   // ---- region geometry pick: a {x,z} inside `reg`, near the player ----------
   function spawnPointNear(reg, px, pz) {
     // try a few candidate points on the spawn ring around the player that also
@@ -291,6 +297,7 @@
       var d = SPAWN_RING_IN + Math.random() * (SPAWN_RING_OUT - SPAWN_RING_IN);
       var x = px + Math.cos(a) * d, z = pz + Math.sin(a) * d;
       if (blocked && blocked(x, z, 1, true)) continue;
+      if (!transitionSafe(x, z)) continue;
       if (CBZ.cityRegionHit && CBZ.cityRegionHit(reg, x, z, 1.5)) return { x: x, z: z };
     }
     // fallback: any scattered region point that's at least SPAWN_RING_IN away.
@@ -299,7 +306,7 @@
       for (var j = 0; j < pts.length; j++) {
         if (blocked && blocked(pts[j].x, pts[j].z, 1, true)) continue;
         var dx = pts[j].x - px, dz = pts[j].z - pz;
-        if (dx * dx + dz * dz >= SPAWN_RING_IN * SPAWN_RING_IN) return pts[j];
+        if (dx * dx + dz * dz >= SPAWN_RING_IN * SPAWN_RING_IN && transitionSafe(pts[j].x, pts[j].z)) return pts[j];
       }
     }
     return null;
@@ -358,6 +365,7 @@
     // ~40% of the time, bias toward filling an open work-anchor in this biome.
     var pt = null;
     if (Math.random() < 0.4) pt = unfilledAnchorPoint(biome, px, pz);
+    if (pt && !transitionSafe(pt.x, pt.z)) pt = null;
     if (!pt) pt = spawnPointNear(reg, px, pz);
     if (!pt) return false;
     var castFn = CAST[biome]; if (!castFn) return false;
@@ -434,7 +442,7 @@
       for (var i = mine.length - 1; i >= 0; i--) {
         var p = mine[i];
         var dx = p.pos.x - px, dz = p.pos.z - pz;
-        if (dx * dx + dz * dz > DESPAWN_RAD * DESPAWN_RAD) {
+        if (dx * dx + dz * dz > DESPAWN_RAD * DESPAWN_RAD && transitionSafe(p.pos.x, p.pos.z)) {
           despawn(p);
           mine.splice(i, 1);
         }

@@ -16,6 +16,7 @@
   box-shadow:var(--shadow); border:3px solid #ffffff;
   position:relative;
 }
+#title .card-box{max-height:calc(100vh - 32px); overflow-y:auto;}
 .logo{
   font-size:clamp(40px,8vw,64px); font-weight:700; line-height:.92; letter-spacing:1px;
   color:var(--orange);
@@ -68,28 +69,6 @@
 #pause .card-box{background:rgba(255,247,236,.97);}
 @media (max-width:520px){ .keys{grid-template-columns:1fr;} }
 
-/* performance/quality slider — pause screen */
-.qslider-row{width:min(360px,100%); margin:20px auto 0;}
-.qslider-ends{
-  display:flex; justify-content:space-between; font-size:11px; font-weight:700;
-  letter-spacing:1px; text-transform:uppercase; color:#9a8a76; margin-bottom:6px;
-}
-.qslider{
-  -webkit-appearance:none; appearance:none; width:100%; height:8px; border-radius:6px;
-  background:linear-gradient(90deg,var(--green) 0%,var(--orange) 100%);
-  outline:none; pointer-events:auto; cursor:pointer;
-}
-.qslider::-webkit-slider-thumb{
-  -webkit-appearance:none; appearance:none; width:24px; height:24px; border-radius:50%;
-  background:#fff; border:3px solid #2a2622; box-shadow:0 3px 0 rgba(0,0,0,.2); cursor:pointer;
-}
-.qslider::-moz-range-thumb{
-  width:24px; height:24px; border-radius:50%; background:#fff; border:3px solid #2a2622;
-  box-shadow:0 3px 0 rgba(0,0,0,.2); cursor:pointer;
-}
-.qslider-current{
-  text-align:center; margin-top:8px; font-size:14px; font-weight:700; color:#3a3026;
-}
 
 /* ============================================================
    game-mode selector (title) + per-mode title blocks
@@ -111,6 +90,36 @@
   background:linear-gradient(180deg,#fff6ee,#ffe9d6);
 }
 .mode-btn:active{transform:translateY(3px); border-bottom-width:2px;}
+
+/* Three honest start-screen presets. Fast keeps a sharp render target and
+   spends its budget on the materially expensive levers: horizon, shadows and
+   actor density. The five-tier expert control remains in Settings. */
+.quality-preset{width:min(460px,100%); margin:16px auto 0;}
+.quality-preset-label{
+  margin-bottom:7px; color:#7c5a3a; font-size:11px; font-weight:700;
+  letter-spacing:1.5px; text-transform:uppercase;
+}
+.quality-select{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+.quality-btn{
+  pointer-events:auto; cursor:pointer; font-family:inherit; text-align:center;
+  border:2px solid #2a2622; border-bottom-width:4px; border-radius:11px;
+  background:#fff; color:#2a2622; padding:8px 6px 7px;
+  transition:transform .08s,border-color .12s,box-shadow .12s,background .12s;
+}
+.quality-btn span{display:block; font-size:13px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;}
+.quality-btn small{display:block; margin-top:2px; color:#7c5a3a; font-size:10px; font-weight:600; white-space:nowrap;}
+.quality-btn.active{
+  border-color:var(--green-d); box-shadow:0 0 0 3px rgba(58,209,122,.16);
+  background:linear-gradient(180deg,#f6fff9,#e5ffe9);
+}
+.quality-btn:active{transform:translateY(2px); border-bottom-width:2px;}
+#qualityPreset + #playBtn{margin-top:16px;}
+
+@media (max-width:520px){
+  .quality-select{gap:5px;}
+  .quality-btn{padding-inline:3px;}
+  .quality-btn small{font-size:9px;}
+}
 
 /* show only the active mode's title copy */
 .mode-survival-only{display:none;}

@@ -443,9 +443,206 @@
   }
   function isMilitia(gid) { const S = state(); return !!(S.byGangId[gid] && !S.byGangId[gid].disbanded); }
 
+  // ============================================================
+  //  THE ARMY — "join the military" (owner's ask, 2026-07-26).
+  //
+  //  Before this block the repo had NO enlist path of any kind: grepping
+  //  `join.*milit|enlist` across src/ returned zero hits, and militia.js
+  //  itself set ped.rank ONCE at formation (line ~285) with no promotion
+  //  function anywhere in the file. The census called this out as "has to be
+  //  built from scratch, most naturally by copying gangs.js's RANKS a SEVENTH
+  //  time unless a shared primitive exists first."
+  //
+  //  It does now. This is the whole thing — a declare() call and a zone:
+  //  no new ladder array, no new membership field, no new promotion function,
+  //  no new pay path, no new HUD. The ladder is factions.js's; the pay is
+  //  CBZ.city.addCash; the verb is interactions.js; the jobs come from
+  //  city/contracts.js. What is genuinely NEW here is a recruiting post at
+  //  a REAL world position and five rank names.
+  //
+  //  ANCHOR (no stat fictions): the enlist zone exists only if
+  //  CBZ._militaryBase does — the actual Fort Brandt build in
+  //  city/island_military.js, which publishes {center,minX,maxX,minZ,maxZ}
+  //  at :1256. No base in the loaded world → no recruiting post, rather than
+  //  a menu that claims one.
+  // ============================================================
+  const ARMY_ID = "army";
+  // ARMY_ENLIST — the player-facing half of this file: the declared Garrison
+  // faction and its recruiting post. Off -> no declare(), no zone, no enlist
+  // verb, and city/contracts.js's four army templates simply never post
+  // (their faction stops existing). The NPC militia-escalation sim above is
+  // untouched either way. Flip false (or ?cfg_ARMY_ENLIST=0) for a one-line
+  // revert to the exact prior behaviour.
+  if (CBZ.CONFIG) { if (CBZ.CONFIG.ARMY_ENLIST == null) CBZ.CONFIG.ARMY_ENLIST = true; }
+  function armyOn() { return !CBZ.CONFIG || CBZ.CONFIG.ARMY_ENLIST !== false; }
+  function declareArmy() {
+    if (!armyOn()) return;
+    if (!CBZ.factions || !CBZ.factions.declare) return;
+    if (CBZ.factions.exists(ARMY_ID)) return;
+    CBZ.factions.declare({
+      id: ARMY_ID,
+      name: "Fort Brandt Garrison",
+      short: "Garrison",
+      kind: "military",
+      color: 0x6b8e23,
+      // Bare-string rungs — the cheapest declaration factions.js accepts.
+      // normRanks() derives the climb (served/orders thresholds) from
+      // needScale, so five words buy a real five-rung career.
+      ranks: ["Recruit", "Private", "Corporal", "Sergeant", "Lieutenant"],
+      // seniority (seconds in uniform) AND carried-out orders — you cannot
+      // wait your way up and you cannot shoot your way up alone.
+      needScale: { served: 240, orders: 2, bodies: 0, contrib: 0 },
+      wage: 220,                    // REAL cash, paid on CBZ.onNewDay
+      heat: 0.7,                    // a uniform makes witnesses quieter
+      hostileTo: ["cell", "gang"],
+      friendlyTo: ["agency"],
+      // the REAL field the world already stamps on every garrison body:
+      // island_military.js:1061 sets `p.organization = "military"` on each
+      // trooper it spawns. So CBZ.factions.of(thatSoldier) -> ["army"] and
+      // reactionTo(player, soldier) is a live query against real NPCs with no
+      // extra tagging pass anywhere.
+      npcTag: { field: "organization", value: "military" },
+      admission: {
+        cleanRecord: true,          // they don't take you with stars up
+        test: function (F) {
+          if (F.isMember("cell")) return "Not with your file. Word travels.";
+          return true;
+        },
+      },
+      lore: "A standing garrison. Enlist, take orders, get paid on the first of every day.",
+      onJoin: function () {
+        // Say where the work comes from. "Orders come by phone" was a lie —
+        // there is no inbound channel; orders come off the ORDERS BOARD at
+        // this same desk (contracts.js's openBoard), and a recruit who does
+        // not know that never credits an order and never leaves Recruit.
+        // opts.from is mandatory: mode.js's phoneWorthy() deletes any note
+        // without a named sender or an "important" keyword (mode.js:101-115).
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Sworn in. Orders are posted at this desk — report in whenever you want work.", 3.4, { from: "GARRISON OPS", app: "missions" });
+      },
+      onLeave: function () {
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Discharged. Hand the rifle back.", 2.4, { from: "GARRISON OPS", app: "missions" });
+      },
+    });
+  }
+
+  // The recruiting post: one interactions.js zone at the base's own centre.
+  // No keybinding, no menu, no HUD — the same registerZone every venue in the
+  // repo already uses (18 adopter files).
+  let armyZoneUp = false;
+  function wireArmyZone() {
+    if (armyZoneUp || !armyOn()) return;
+    if (!CBZ.interactions || !CBZ.interactions.registerZone) return;
+    const B = CBZ._militaryBase;
+    if (!B || !B.center) return;                 // no base built → no post
+    const F = function () { return CBZ.factions; };
+    // The fallback token IS the base centre (island_military.js publishes
+    // {center,minX..maxZ} and nothing finer). In practice you almost never
+    // meet it: find() prefers any live garrison body within R, and the base is
+    // staffed. It is the "the yard is empty" backstop, not the desk.
+    const tok = { x: B.center.x, z: B.center.z, kind: "recruiter" };
+    const R = 8.0;
+    CBZ.interactions.registerZone({
+      id: "army-recruiter", kind: "recruiter", radius: R,
+      // prio feeds interactions.js's candidate score directly (`base: z.prio`,
+      // interactions.js:454). The recruiter returns the SAME ped object the
+      // street-verb source is already pushing, so without a prio above the ped
+      // layer the enlist card loses the coin-flip to "Talk" and the only door
+      // into the army in the game is invisible. 14 clears interact.js's own
+      // highest zone (zone-club, prio 11).
+      prio: 14,
+      // The recruiter is a REAL soldier when the base has one standing near
+      // you (island_military.js publishes its garrison as
+      // CBZ.cityMilitaryPersonnel) and the apron itself otherwise. Either way
+      // it is a place that exists in the world, never a menu entry — and you
+      // are talking to a body whenever the world supplies one.
+      find: function (px, pz) {
+        // ON THE BASE, or nowhere. Troops are not confined to Fort Brandt —
+        // island_military.js sorties a squad into the city at 5 stars, and
+        // without this rect test a soldier hunting you through a manhunt was a
+        // walking recruiting desk. Enlistment happens at the post.
+        const pad = 40;
+        if (px < B.minX - pad || px > B.maxX + pad || pz < B.minZ - pad || pz > B.maxZ + pad) return null;
+        const troops = CBZ.cityMilitaryPersonnel || [];
+        let best = null, bestD = R * R;
+        for (let i = 0; i < troops.length; i++) {
+          const t = troops[i];
+          if (!t || t.dead || !t.pos) continue;
+          const dx = t.pos.x - px, dz = t.pos.z - pz;
+          const d = dx * dx + dz * dz;
+          if (d < bestD) { bestD = d; best = t; }
+        }
+        if (best) return best;
+        const dx = tok.x - px, dz = tok.z - pz;
+        return (dx * dx + dz * dz) < R * R ? tok : null;
+      },
+      options: [
+        {
+          id: "army-enlist", slot: "e",
+          // forceYes BYPASSES THE SOCIAL STANDING GATE, and it has to.
+          // interactions.js:235 standingGates() applies to any HUMAN target
+          // whose id+label matches SOCIAL_ID — which includes /recruit/. Our
+          // find() prefers a live trooper over the apron token, `label` is a
+          // FUNCTION so String(label) stringifies its source (containing
+          // "Recruiting desk"), and the match fires. interactions.js:392 then
+          // refuses onSelect entirely unless canInfluence, i.e. score
+          // 50 + (playerLv - targetLv) * 2.25 >= 25. A trooper reads Lv.15
+          // (level.js:66-71) and a fresh unarmed player Lv.1 → 18.5. So a new
+          // player standing in front of a soldier was silently refused, while
+          // the same player standing on empty tarmac (token target, not human)
+          // enlisted fine. Enlisting is paperwork, not a charisma check.
+          forceYes: true,
+          label: function () {
+            const f = F(); if (!f) return "Recruiting desk";
+            if (f.isMember(ARMY_ID)) return "Report in — " + f.rankName(ARMY_ID, f.rank(ARMY_ID));
+            return "Enlist — Fort Brandt Garrison";
+          },
+          canShow: function () { return !!F(); },
+          onSelect: function () {
+            const f = F(); if (!f) return;
+            if (f.isMember(ARMY_ID)) {
+              // Reporting in = asking for work. contracts.js answers with the
+              // ORDERS BOARD — every job this rank opens, plus the ones the
+              // next rung will, greyed with the rank that opens them. It used
+              // to call brief(), which took ONE job chosen by a per-day hash:
+              // a Sergeant asking for work got the same perimeter sweep all
+              // day and never saw the airstrike his rank had just unlocked.
+              if (CBZ.cityOrderBoard) CBZ.cityOrderBoard(ARMY_ID);
+              else if (CBZ.cityOrders && CBZ.cityOrders.brief) CBZ.cityOrders.brief(ARMY_ID);
+              else if (CBZ.city && CBZ.city.note) CBZ.city.note("Nothing on the board today.", 2, { from: "GARRISON OPS", app: "missions" });
+              return;
+            }
+            const c = f.canJoin(ARMY_ID);
+            if (!c.ok) { if (CBZ.city && CBZ.city.note) CBZ.city.note(c.why, 2.6, { from: "GARRISON OPS", app: "missions" }); return; }
+            f.join(ARMY_ID, "enlisted");
+          },
+        },
+        // (No discharge option here. `slot:"j"` cannot be pressed:
+        //  interactions.js builds exactly one row and hard-codes its key to
+        //  "e" (interactions.js:300-306) — `slot` is a +18 tiebreak, not a
+        //  keybinding — and `bad:true` costs a further -240 on the choice
+        //  score. This verb was the ONLY caller of factions.leave("army") in
+        //  the repo, so enlistment was a one-way door that also permanently
+        //  locked you out of every gang via ARMY's hostileTo. Discharge is on
+        //  the orders board now, which has a working click handler.)
+      ],
+    });
+    armyZoneUp = true;
+  }
+  declareArmy();
+  // the base is built during world generation, which may land after this file
+  // parses — retry on the cheap until it exists, then never again.
+  if (CBZ.onUpdate) {
+    CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.after(CBZ.PRIO.INTERACT, 60) : 39.6, function () {
+      if (armyZoneUp) return;
+      declareArmy();
+      wireArmyZone();
+    });
+  }
+
   CBZ.militia = {
     MILITIA_HEADCOUNT,
     tryEscalate, tick: tickAll, list, isMilitia, reset,
+    ARMY_ID: ARMY_ID,
     // harness/test-only hooks — not part of the public contract (mirrors
     // regimes.js's own _forceGov/_st precedent).
     _state: state, _anchorFor: anchorFor, _govFor: govFor, _countryRecFor: countryRecFor,

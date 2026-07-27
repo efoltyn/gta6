@@ -126,7 +126,7 @@
       : col(cx - t / 2 - 0.1, cx + t / 2 + 0.1, cz - hw - pad, cz + hw + pad, 0, height);
     const rec = {
       leaves, colRec: c, open: 0, target: 0, holdT: 0,
-      cx, cz, y0: 0, y1: height, trav: hw + 0.12, disabled: false,
+      cx, cz, y0: 0, y1: height, trav: hw + 0.12, disabled: false, freezeT: 0,
     };
     doors.push(rec);
     return rec;
@@ -144,6 +144,13 @@
     const P = CBZ.player;
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
+      // a blast-jammed door finishes its travel on GAME time, then locks in
+      // that pose forever (the setTimeout this replaces ran on wall-clock and
+      // could freeze a leaf halfway through its ease under a headless burst)
+      if (d.freezeT > 0) {
+        d.freezeT -= dt;
+        if (d.freezeT <= 0) { d.freezeT = 0; d.disabled = true; }
+      }
       if (d.disabled) continue;
       // hold open while someone stands in the doorway (elevator no-crush rule)
       if (d.target === 1) {
@@ -193,12 +200,48 @@
     }
     return null;
   };
-  // BREACH — the bunker-buster's structural verdict: the entrance is blown
-  // open for good, a crater caps the mound, and the shelter guarantee ends.
+  // How hard is this roof, in metres of CONCRETE-EQUIVALENT? This is the
+  // number that makes a bunker-buster a skill rather than a button: the
+  // weapon's penetration is computed from its real impact energy
+  // (city/strategic.js: depth ∝ sqrt(E), GBU-28's published ~6 m at a nominal
+  // release) and compared against THIS. A civil-defense shelter is a slab of
+  // concrete and a hill; a command shelter is built to survive exactly this
+  // attack, so it demands a full-throttle release from real altitude.
+  //   command 8.5 CE  → needs ≈2x nominal energy: 240 m/s and ~220 m AGL
+  //   outpost 3.2 CE  → almost any competent release opens it
+  const ROOF_CE = { command: 8.5, outpost: 3.2 };
+  CBZ.strategicBunkerRoof = function (b) {
+    if (!b) return 0;
+    return b.roofCE != null ? b.roofCE : (ROOF_CE[b.tier] || ROOF_CE.outpost);
+  };
+  // BREACH — the bunker-buster's structural verdict.
+  //   opts.penCE : concrete-equivalent metres the round actually achieved.
+  //                Omitted (a caller from before penetration existed) ⇒ treat
+  //                as a clean breach, so nothing that used to work stops.
+  // Returns { verdict: "breach" | "crack" | "held", roofCE, penCE }.
+  //   breach — the entrance hangs open for good, a crater caps the mound, and
+  //            the shelter guarantee ends.
+  //   crack  — through most of the roof: spall inside, the doors jam OPEN
+  //            (the pressure wave takes them), but the structure still shelters.
+  //   held   — spent on the berm.
   // (Killing whoever is inside is the WEAPON's job — strategic.js sweeps the
   // interior bounds through the kill bus; this handles only the structure.)
-  CBZ.strategicBunkerBreach = function (b) {
-    if (!b || b.breached) return false;
+  CBZ.strategicBunkerBreach = function (b, opts) {
+    if (!b) return { verdict: "held", roofCE: 0, penCE: 0 };
+    const roofCE = CBZ.strategicBunkerRoof(b);
+    const penCE = (opts && opts.penCE != null) ? +opts.penCE : Infinity;
+    if (b.breached) return { verdict: "breach", roofCE: roofCE, penCE: penCE };
+    if (!(penCE >= roofCE)) {
+      // not through. A near miss still wrecks the entrance — 60% of the way
+      // through a hardened roof is a survivable room, not an untouched one.
+      const crack = penCE >= roofCE * 0.6;
+      if (crack) {
+        b.cracked = true;
+        for (const d of b.doors) { d.target = 1; d.holdT = 9e9; d.freezeT = 1.4; }
+        if (CBZ.cityScorch) { try { CBZ.cityScorch((b.shell.minX + b.shell.maxX) / 2, (b.shell.minZ + b.shell.maxZ) / 2, 4); } catch (e) {} }
+      }
+      return { verdict: crack ? "crack" : "held", roofCE: roofCE, penCE: penCE };
+    }
     b.breached = true;
     for (const d of b.doors) {
       d.target = 1; d.holdT = 9e9;               // hangs open…
@@ -221,11 +264,13 @@
           .rotation.y = a;
       }
       if (CBZ.cityScorch) CBZ.cityScorch(cx, cz, 6);
-      // sustain the door-open pose once the ease lands, then freeze the door
-      for (const d of b.doors) d.disabled = false;
-      setTimeout(function () { for (const d of b.doors) d.disabled = true; }, 1400);
+      // Sustain the door-open pose until the ease lands, then freeze it.
+      // This used to be a setTimeout: real wall-clock, so it fired 60x early
+      // relative to a headless sim burst and could freeze a door mid-travel.
+      // freezeT is ticked by the ONE door updater below, on game dt.
+      for (const d of b.doors) { d.disabled = false; d.freezeT = 1.4; }
     } catch (e) {}
-    return true;
+    return { verdict: "breach", roofCE: roofCE, penCE: penCE };
   };
 
   // ============================================================
@@ -236,6 +281,7 @@
   const doorTokens = [];     // {x, z, door, name}
   const crateTokens = [];    // {x, z, kind:"armory"|"cache", site, nextRestock, taken}
   const vaultTokens = [];    // {x, z, site, taken, deviceMesh}
+  const strikeTokens = [];   // {x, z, site}  — the command map table
   let _zonesWired = false;
   function nearestTok(list, px, pz, r) {
     let best = null, bd = r * r;
@@ -324,7 +370,64 @@
     if (I.describe) I.describe("nukevault", function () {
       return { label: "Weapons Vault", note: "One device. One per world. No second chances." };
     });
+
+    /* ---- THE STRIKE CONSOLE ------------------------------------------------
+       "Call a strike" without inventing a strike system. Every part of this is
+       already in the game and stays there:
+         the aimpoint   = fullmap.js's waypoint (CBZ.fullMap.waypoint())
+         the sortie     = city/strategic.js's CBZ.strategicCallStrike — the same
+                          bomb run the player flies, flown off-map
+         the impacts    = nukefx.js's CBZ.cityBombWalk in detonate mode, which
+                          fires each one through CBZ.detonate exactly once
+         the verb + pill= this registry
+       Zero new bookkeeping, and the heat is the real cost: ordering a bombing
+       run out of a stolen command shelter is a five-star act.               */
+    I.registerZone({
+      id: "bunker-strike", kind: "bunkerstrike", radius: 2.6,
+      find: function (px, pz) {
+        if (!CBZ.strategicCallStrike) return null;
+        return nearestTok(strikeTokens, px, pz, 2.6);
+      },
+      options: [{
+        id: "bunkerstrike-call", slot: "e", bad: true,
+        label: function () {
+          const wp = waypoint();
+          return wp ? "Call a B-2 strike on your waypoint" : "Mark a waypoint on the map first";
+        },
+        onSelect: function (t) {
+          const wp = waypoint();
+          if (!wp) {
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("Open the map and mark the grid you want flattened.", 2.6);
+            return;
+          }
+          const ok = CBZ.strategicCallStrike({
+            x: wp.x, z: wp.z, count: 12, kind: "bomb",
+            heading: Math.atan2(wp.x - t.x, wp.z - t.z),   // the bomber runs in from here
+            byPlayer: true,
+          });
+          if (!ok) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No sortie available.", 1.8); return; }
+          if (CBZ.sfx) { try { CBZ.sfx("clank"); } catch (e) {} }
+          // ordering a bombing run is not a misdemeanour
+          if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: wp.x, z: wp.z, type: "terrorism", instant: true }); } catch (e) {} }
+          if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Airstrike called on a civilian grid"); } catch (e) {} }
+        },
+      }],
+    });
+    if (I.describe) I.describe("bunkerstrike", function (t) {
+      const wp = waypoint();
+      return {
+        label: "Strike Console",
+        note: wp ? "Tasks the B-2 against your marked waypoint" : "Needs a map waypoint to task",
+      };
+    });
     _zonesWired = true;
+  }
+  // the ONE waypoint in the game (systems/fullmap.js) — never a second one
+  function waypoint() {
+    try {
+      const w = CBZ.fullMap && CBZ.fullMap.waypoint && CBZ.fullMap.waypoint();
+      return (w && isFinite(w.x) && isFinite(w.z)) ? w : null;
+    } catch (e) { return null; }
   }
 
   // ============================================================
@@ -460,7 +563,10 @@
     // ---- FURNISH by tier ---------------------------------------------------
     const rec = {
       id: site.id, name: site.name, tier: site.tier, root: g, doors: [door],
-      breached: false, moundTop,
+      breached: false, cracked: false, moundTop,
+      // hardness, in metres of concrete-equivalent — what a bunker-buster's
+      // penetration is tested against (see CBZ.strategicBunkerBreach)
+      roofCE: ROOF_CE[site.tier] || ROOF_CE.outpost,
       shell: { minX: cx - W / 2, maxX: cx + W / 2, minZ: cz - D / 2, maxZ: cz + D / 2 },
       interior: { minX: ix0, maxX: ix1, minZ: iz0, maxZ: iz1, floorY: FY, ceilY: CEIL, cx, cz },
       troopSpecs: [],
@@ -510,6 +616,13 @@
     box(g, cx + 2.5, FY + 0.85, iz0 + 4.2, 2.6, 0.1, 1.7, M.map);
     box(g, cx + 2.5, FY + 0.45, iz0 + 4.2, 2.2, 0.8, 1.3, M.steelD);
     col(cx + 1.2, cx + 3.8, iz0 + 3.3, iz0 + 5.1, FY, FY + 0.95);
+    // THE MAP TABLE IS THE STRIKE CONSOLE. It is the one place in the world
+    // that can reach the B-2 without you being in its seat, which is what
+    // makes CBZ.strategicBombRun's documented "start one headlessly" seam a
+    // thing the PLAYER can touch and not just an API. No new machinery: the
+    // verb is one interaction option, the aimpoint is fullmap.js's existing
+    // waypoint, and the sortie itself is strategic.js's called run.
+    strikeTokens.push({ x: cx + 2.5, z: iz0 + 5.4, site: rec.name });
     const deskZ = iz0 + 1.9;
     for (const dxo of [-4.5, -1.5]) {
       const dx = cx + dxo;
@@ -637,7 +750,7 @@
     // a rebuild re-runs this builder — fresh lists (stale doors/records would
     // point at removed groups; the zones' find() walks these live lists)
     doors.length = 0; bunkers.length = 0;
-    doorTokens.length = 0; crateTokens.length = 0; vaultTokens.length = 0;
+    doorTokens.length = 0; crateTokens.length = 0; vaultTokens.length = 0; strikeTokens.length = 0;
     _npcCursor = 0; _npcSpawned.length = 0;
 
     // ---- SITE 1: FORT BRANDT DEEP SHELTER (command tier). NW quadrant of

@@ -357,8 +357,13 @@
     if (door && door.x != null) return { x: door.x + (door.nx || 0) * 2.4, z: door.z + (door.nz || 0) * 2.4 };
     return { x: bb.ox != null ? bb.ox : 0, z: (bb.oz != null ? bb.oz : 0) + (bb.d || 20) / 2 + 2.0 };
   }
+  // THE SHARED LIFT RIDE (city/occupy.js). The census found this exact
+  // fade+reposition+sfx+note hand-rolled THREE times (here, realestate.js's
+  // elevatorUp, and elevators.js's cab machine). This is now the one copy;
+  // the local `fade` path below stays only as the degrade-safe fallback.
   function relocate(x, y, z, note) {
     const P = CBZ.player; if (!P || !P.pos) return;
+    if (CBZ.cityLiftRide && CBZ.cityLiftRide(x, y, z, { note: note, force: true })) return;
     fade(function () {
       P.pos.set(x, y, z); P.vy = 0; P.grounded = true;
       if (P._phys) { P._phys.air = false; P._phys.vx = P._phys.vz = P._phys.vy = 0; }

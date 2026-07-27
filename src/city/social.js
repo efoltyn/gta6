@@ -864,9 +864,9 @@
         // grief turns to either rage (bold) or flight (meek); a big grudge will
         // also keep them hunting you long after they've calmed from this moment.
         if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; r.ambushT = 0; say(m, "“YOU KILLED THEM!”", "#ff6b6b", 2.6); }
-        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "", "#9bb0ff", 2.6); }
+        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "“Oh god — oh god…”", "#9bb0ff", 2.6); }
       } else {
-        m.fear = Math.max(m.fear || 0, 6); say(m, "", "#9bb0ff", 2.2);
+        m.fear = Math.max(m.fear || 0, 6); say(m, "“…what did you do?”", "#9bb0ff", 2.2);
       }
     }
     if (byPlayer && victim.pos) CBZ.cityGossip(victim.pos.x, victim.pos.z, "heroKilled", 0.8);
@@ -1101,7 +1101,7 @@
       if (rng() < 0.4 && a.archetype !== "merchant") {
         // busker: stop and "perform"; nearby peds drift over
         a.speed = 0; a.pause = 4; a.state = "idle";
-        say(a, "", "#ffd27b", 2.6);
+        say(a, "“…and I'm still walkin' this road…”", "#ffd27b", 2.6);
         gatherAt({ cx: a.pos.x, cz: a.pos.z }, 4, 4, null);
       } else {
         say(a, ["“…uh huh, yeah.”", "“Nice day out.”", "“Where's that bus ”", "“So tired.”"][(rng() * 4) | 0], "#dfe7ff", 2.2);

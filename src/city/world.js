@@ -142,8 +142,7 @@
       maxZ: SEA_WORLD_CZ + SEA_WORLD_SPAN / 2,
     };
     let seaMat2 = null;                  // the animated sea material (below)
-    let seaNormalTex = null;             // one tiny generated, tiled ripple normal
-    const seaTimeU = { value: 0 };       // shared shader clock (runtime-only FX)
+    let seaUniforms = null;              // its LIVE uniform block (by reference)
     if (CFGW.SEA_OVERHAUL === false) {
       // legacy path: one giant flat plane, widened to 6200 so the whole
       // archipelago sits ON open water, not past the plane's edge.
@@ -152,23 +151,26 @@
       sea.receiveShadow = false; root.add(sea);
     }
     const seaDay = new THREE.Color(0x0d3b58), seaNight = new THREE.Color(0x04131d), seaDusk = new THREE.Color(0x34364d);
+    // THE SEA WAS FROZEN. This block used to write the wave clock into a local
+    // `seaTimeU` object and scroll `seaNormalTex.offset` — but the material's
+    // uniforms had been built with THREE.UniformsUtils.merge(), and r128's
+    // cloneUniforms() rebuilds every uniform object and CLONES every texture.
+    // Both references were therefore severed at construction: uSeaTime stayed
+    // 0.0 for the whole session and the ripple map never moved a pixel, so the
+    // "animated" ocean was a still photograph of one instant of wave noise.
+    // The uniform block below is now attached BY REFERENCE (see buildSea), and
+    // world/water_spec.js's shared driver advances the clock, the sun vector
+    // and the weather-driven chop for BOTH sea surfaces from one place.
     CBZ.onAlways(93, function () {
       if (!root.visible) return;                 // city hidden → other modes untouched
       const k = CBZ.dayness != null ? CBZ.dayness : 1;
       seaMat.color.copy(seaNight).lerp(seaDay, k);
       if (CBZ.duskness) seaMat.color.lerp(seaDusk, CBZ.duskness * 0.5);
       if (seaMat2) {
-        // the animated sea follows the same day/night tone (one colour copy)
-        // and advances the wave clock. Wrapped so sin() args stay small.
+        // the animated sea follows the same day/night tone (one colour copy;
+        // seaMat2.color IS the uSeaColor uniform value, aliased below)
         seaMat2.color.copy(seaMat.color);
-        const tNow = (typeof performance !== "undefined" ? performance.now() : Date.now());
-        seaTimeU.value = (tNow * 0.001) % 3600;
-        // Drift the small normal field across the large geometric swells. Two
-        // unequal axes avoid a conveyor-belt read; the texture is only 96².
-        if (seaNormalTex) {
-          seaNormalTex.offset.x = (seaTimeU.value * 0.0075) % 1;
-          seaNormalTex.offset.y = (seaTimeU.value * -0.0048) % 1;
-        }
+        if (CBZ.waterDriveCommonUniforms) CBZ.waterDriveCommonUniforms(seaUniforms);
       }
     });
 
@@ -1100,82 +1102,122 @@
     if (CBZ.cityBuildBeach) try { CBZ.cityBuildBeach(city); } catch (e) { console.error("[city beach]", e); }
 
     // =====================================================================
-    //  THE SEA, REBUILT (CBZ.CONFIG.SEA_OVERHAUL, default on). Runs LAST so
-    //  every landmass/region exists and the shore tint can be baked from the
-    //  real land extent. One indexed grid mesh (~21k verts), ONE Phong
-    //  material with a tiny onBeforeCompile vertex program:
-    //    • baked per-vertex DEPTH TINT (bright turquoise shallows at the
-    //      coast → open-sea mid tone → dark deep water) as a multiplier
-    //      around 1.0, so the existing day/night material.color lerp still
-    //      drives the whole sea;
-    //    • three world-space sine swells (λ ≈ 120/155/570u, total ±0.355u)
-    //      displace the surface and tilt the per-vertex normal (exaggerated
-    //      ×48 — enough to catch light without turning swells into chrome) so
-    //      the water
-    //      MOVES under the sun instead of sitting like painted glass;
-    //    • wave crests brighten vColor slightly while Phong supplies a single
-    //      physically legible sun glint.
-    //  Determinism: vertex bake uses CBZ.hash01 only; the wave clock is
-    //  runtime-only FX (allowed). userData.terrain spares it from the batch
-    //  pass and farcull. Costs 1 draw call.
+    //  THE SEA, REBUILT AGAIN (CBZ.CONFIG.SEA_OVERHAUL + WATER_V2, both on
+    //  by default). Runs LAST so every landmass/region/lake exists and the
+    //  shore field can be baked from the real coastline. ONE draw call.
+    //
+    //  WHAT CHANGED vs. the previous pass, and why:
+    //
+    //  1. THE WAVES ACTUALLY MOVE NOW. The old uniform block was built with
+    //     THREE.UniformsUtils.merge(), whose r128 implementation rebuilds
+    //     every uniform object and clones every texture — so the `uSeaTime`
+    //     object this file kept writing to each frame was NOT the one the
+    //     shader read. uSeaTime sat at 0.0 for the entire session: every
+    //     swell, every ripple flow, every foam band was frozen mid-stride.
+    //     The block below is assembled by hand (only the fog chunk is
+    //     cloned, and nothing holds a reference into that) so the clock,
+    //     the sun vector and the weather chop reach the GPU.
+    //
+    //  2. TESSELLATION WHERE THE PLAYER IS. The old mesh was a uniform 16km
+    //     grid at 144 segments — 111 metres per quad, while the SHORTEST
+    //     swell is 105 metres long. Every wave sat exactly at the Nyquist
+    //     limit and aliased into noise; up close the sea was geometrically
+    //     a flat sheet. world/water_spec.js now builds a camera-centred
+    //     RADIAL disc with geometrically growing rings (~0.15m at your feet,
+    //     ~9m a hundred metres out, ~100m at a kilometre) for FEWER total
+    //     vertices than before. The disc is re-centred in the vertex program
+    //     from `cameraPosition.xz`, so the mesh transform never moves: the
+    //     batch/farcull contract, Box3.setFromObject (city/playeraircraft.js
+    //     sizes the flyable airspace from it) and matrixAutoUpdate=false all
+    //     behave exactly as they did — and it stays correct inside the
+    //     planar-mirror pass, because mirroring a camera through a horizontal
+    //     plane leaves its XZ untouched.
+    //
+    //  3. A REAL SHORELINE. The baked field texture gained a smooth land
+    //     RAMP instead of a binary stencil (bilinear filtering now puts the
+    //     discard boundary on a sub-texel iso-line rather than a texel
+    //     staircase — that staircase WAS the hard shoreline seam), a
+    //     depth-graded colour ramp from turquoise shallows to deep blue, an
+    //     advancing surf band that travels up the beach instead of a static
+    //     painted ring that only pulsed, whitecaps that break on real crests,
+    //     and an inland-water channel so a registered lake renders calmer,
+    //     greener and far less specular than the open ocean.
+    //
+    //  4. DOUBLE SIDED. You can now be UNDER it and see a surface overhead.
+    //
+    //  Determinism: no rng anywhere — the field bake reads the shoreline
+    //  oracle, the geometry is closed-form trigonometry, and the wave clock
+    //  is runtime-only FX (explicitly allowed). userData.terrain spares the
+    //  mesh from the batch pass and farcull.
     // =====================================================================
     if (CFGW.SEA_OVERHAUL !== false) (function buildSea() {
-      // land union = every registered region + the mainland (same math the
-      // continent plate uses, recomputed here so there's no load-order tie).
-      let lminX = minX, lmaxX = maxX, lminZ = minZ, lmaxZ = maxZ;
-      const regsAll = city.regions || [];
-      for (const r of regsAll) {
-        if (r.minX < lminX) lminX = r.minX; if (r.maxX > lmaxX) lmaxX = r.maxX;
-        if (r.minZ < lminZ) lminZ = r.minZ; if (r.maxZ > lmaxZ) lmaxZ = r.maxZ;
+      // LOAD-ORDER INSURANCE: world/water_spec.js owns the swell table, the
+      // shared GLSL and the surface geometry, and its <script> tag MUST come
+      // before this file's. If it somehow did not, fall back to a plain flat
+      // ocean plane rather than throwing — a world with dull water is
+      // recoverable, a world that fails to build is not.
+      if (!CBZ.waterCommonUniforms || !CBZ.waterBuildSeaGeometry) {
+        console.error("[sea] world/water_spec.js did not load before city/world.js — falling back to the flat ocean plane");
+        // drop the expansion island's own ocean plane first — it shares seaMat
+        // and would z-fight this one (same sweep the real path does below)
+        const stale = [];
+        root.traverse(function (o) { if (o.isMesh && o.material === seaMat) stale.push(o); });
+        for (const o of stale) if (o.parent) o.parent.remove(o);
+        const fb = new THREE.Mesh(new THREE.PlaneGeometry(SEA_WORLD_SPAN, SEA_WORLD_SPAN), seaMat);
+        fb.rotation.x = -Math.PI / 2;
+        fb.position.set(SEA_WORLD_CX, SEA_Y, SEA_WORLD_CZ);
+        fb.name = "world-sea";
+        fb.receiveShadow = false; fb.castShadow = false;
+        fb.frustumCulled = false;
+        fb.userData.terrain = true;
+        fb.userData.waterSurface = true;
+        fb.userData.surfaceOwner = "world-water";
+        fb.userData.unifiedSurface = true;
+        root.add(fb);
+        CBZ.citySea = fb;
+        return;
       }
-      const SPAN = SEA_WORLD_SPAN, SEG = 144;
-      const CXs = SEA_WORLD_CX, CZs = SEA_WORLD_CZ; // world/terrain.js relief-field centre
-      const geo = new THREE.PlaneGeometry(SPAN, SPAN, SEG, SEG);
-      geo.rotateX(-Math.PI / 2);
-      geo.translate(CXs, SEA_Y, CZs);   // verts are FINAL world coords (mesh at identity)
-      const pos = geo.attributes.position;
-      const colors = new Float32Array(pos.count * 3);
+      // Registered inland lakes must be known before the field bake (their
+      // footprint becomes the mask's alpha channel) and before the first
+      // frame (they damp the swells over a pond).
+      if (CBZ.waterSyncInlandBodies) CBZ.waterSyncInlandBodies(city);
+      const inlandAt = CBZ.waterInlandFactorAt || function () { return 0; };
+
       const shoreAt = city.mapTerrain && typeof city.mapTerrain.shoreAt === "function"
         ? city.mapTerrain.shoreAt : null;
-      // One ocean means one colour treatment. Depth still exists for movement
-      // and shore foam, but it no longer selects a second cyan/dark palette.
-      // Natural view-angle reflection and fog can vary; the material cannot.
-      for (let i = 0; i < pos.count; i++) {
-        colors[i * 3] = 1; colors[i * 3 + 1] = 1; colors[i * 3 + 2] = 1;
-      }
-      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      // Depth offsets correctly keep the country underlay behind authored
-      // roads/runways, but at a 2.8km flight frustum they can also quantise
-      // valid land behind the sea. Bake the SAME shore oracle into one small
-      // mask and reject sea fragments over dry land outright. Water and ground
-      // no longer fight for depth ownership, so there is no green flicker and
-      // no apparent ocean growing around correctly placed trees.
+
+      // ---- the baked shore field -----------------------------------------
+      // R: smooth land ramp centred 1.5m inland over a 9m band. The shader
+      //    discards R > 0.5, and because R interpolates the cut follows the
+      //    real coast smoothly instead of stepping texel to texel.
+      // G: waterline proximity, 1 at the shore falling to 0 at 22m out.
+      // B: normalised distance into deep water (the depth colour ramp).
+      // A: inland-water flag (lake vs. ocean look).
+      // 640² over the map bounds: ~1.5x the old texel density for ~1.5x the
+      // bake cost, which is the one part of this that is not free.
       let seaLandMaskTex = null;
       const seaLandBounds = new THREE.Vector4(0, 0, 1, 1);
       if (shoreAt && city.mapTerrain && city.mapTerrain.bounds) {
         const mb = city.mapTerrain.bounds;
         seaLandBounds.set(mb.minX, mb.minZ, mb.maxX, mb.maxZ);
-        const MS = 512;
+        const MS = 640;
         const mask = new Uint8Array(MS * MS * 4);
         for (let mz = 0; mz < MS; mz++) {
           const wz = mb.minZ + (mb.maxZ - mb.minZ) * (mz + 0.5) / MS;
           for (let mx = 0; mx < MS; mx++) {
             const wx = mb.minX + (mb.maxX - mb.minX) * (mx + 0.5) / MS;
             const signed = +shoreAt(wx, wz);
-            // R: hard land ownership; G: water-side shore proximity (surf);
-            // B: normalized deep-water distance. One texture now drives the
-            // cutout, shallows and foam instead of being a binary stencil.
-            const land = signed >= 3 ? 255 : 0;
-            // Surf is a narrow waterline treatment, not a 58m-wide second
-            // pale-water band. The wider field covered most of Redhollow Lake
-            // and visibly split it into alternating blue/white slabs.
+            const land = Math.max(0, Math.min(1, 0.5 + (signed - 1.5) / 9));
+            // Surf is a narrow waterline treatment, not a wide second pale
+            // band — a wider field used to cover most of Redhollow Lake and
+            // visibly split it into alternating blue/white slabs.
             const shoreNear = signed < 0 ? Math.max(0, Math.min(1, 1 - (-signed) / 22)) : 1;
             const deep = signed < 0 ? Math.max(0, Math.min(1, (-signed) / 420)) : 0;
             const q = (mz * MS + mx) * 4;
-            mask[q] = land;
+            mask[q] = Math.round(land * 255);
             mask[q + 1] = Math.round(shoreNear * 255);
             mask[q + 2] = Math.round(deep * 255);
-            mask[q + 3] = 255;
+            mask[q + 3] = Math.round(Math.max(0, Math.min(1, inlandAt(wx, wz))) * 255);
           }
         }
         seaLandMaskTex = new THREE.DataTexture(mask, MS, MS, THREE.RGBAFormat);
@@ -1184,163 +1226,152 @@
         seaLandMaskTex.generateMipmaps = false;
         seaLandMaskTex.needsUpdate = true;
         CBZ.citySeaFieldTexture = seaLandMaskTex;
+        CBZ.citySeaFieldBounds = seaLandBounds;
       }
-      // A periodic procedural normal map supplies metre-scale ripples between
-      // the 48m grid vertices. It is generated once, tiles cleanly and moves by
-      // changing two texture offsets—no particles, extra meshes or draw calls.
-      (function buildSeaNormal() {
-        const N = 256, data = new Uint8Array(N * N * 4); // power-of-two for Safari/WebGL1 repeat+mips
-        const waves = [
-          [2, 1, 0.34, 0.2], [3, -2, 0.23, 1.1], [5, 4, 0.14, 2.4],
-          [7, -3, 0.09, 0.7], [11, 5, 0.055, 1.8], [13, -8, 0.035, 2.9],
-        ];
-        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-          const u = x / N * Math.PI * 2, v = y / N * Math.PI * 2;
-          // A multi-directional periodic height field. Integer vectors keep
-          // every edge seamless, while six incommensurate directions prevent
-          // the obvious repeating circular cells made by the old three waves.
-          let dx = 0, dz = 0;
-          for (let k = 0; k < waves.length; k++) {
-            const w = waves[k], c = Math.cos(w[0] * u + w[1] * v + w[3]) * w[2];
-            dx += w[0] * c; dz += w[1] * c;
-          }
-          const nx = -dx * 0.12, nz = -dz * 0.12, inv = 1 / Math.sqrt(nx * nx + 1 + nz * nz);
-          const q = (y * N + x) * 4;
-          data[q] = Math.round((nx * inv * 0.5 + 0.5) * 255);
-          data[q + 1] = Math.round((nz * inv * 0.5 + 0.5) * 255);
-          data[q + 2] = Math.round((inv * 0.5 + 0.5) * 255);
-          data[q + 3] = 255;
-        }
-        seaNormalTex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
-        seaNormalTex.wrapS = seaNormalTex.wrapT = THREE.RepeatWrapping;
-        seaNormalTex.repeat.set(72, 72);
-        seaNormalTex.magFilter = THREE.LinearFilter;
-        seaNormalTex.minFilter = THREE.LinearMipmapLinearFilter;
-        seaNormalTex.generateMipmaps = true;
-        seaNormalTex.needsUpdate = true;
-      })();
-      // One custom ocean draw, adapted to the same ingredients used by the
-      // official Three.js Water/Water2 examples: dual scrolling normal fields,
-      // view-angle Fresnel, sun specular, flow, refraction-like depth colour
-      // and a shore mask. It avoids Water2's extra reflector/refractor passes
-      // (too costly for this full 7km world) while retaining the cues that make
-      // water read as water rather than a blue floor.
-      const seaUniforms = THREE.UniformsUtils.merge([
-        THREE.UniformsLib.fog,
-        {
-          uSeaTime: seaTimeU,
-          uSeaColor: { value: new THREE.Color(0x0d3b58) },
-          uSeaNormal: { value: seaNormalTex },
-          uSeaLandMask: { value: seaLandMaskTex },
-          uSeaLandBounds: { value: seaLandBounds },
-          uSeaHasLandMask: { value: seaLandMaskTex ? 1 : 0 },
-        },
-      ]);
+
+      // ---- uniforms: BY REFERENCE, never through UniformsUtils.merge ------
+      const U = CBZ.waterCommonUniforms();
+      U.uSeaLandMask.value = seaLandMaskTex;
+      U.uSeaLandBounds.value.copy(seaLandBounds);
+      U.uSeaHasLandMask.value = seaLandMaskTex ? 1 : 0;
+      U.uSeaY.value = SEA_Y;
+      seaUniforms = U;
+      CBZ.citySeaUniforms = U;
+
+      const vs = [
+        CBZ.waterVertexDecl(),
+        "varying vec3 vSeaWorld;",
+        "varying vec3 vSeaNormal;",
+        "varying float vSeaHeight;",
+        "varying float vSeaDist;",
+        "varying float vSeaFade;",
+        "varying float vSeaInland;",
+        "#include <fog_pars_vertex>",
+        "void main() {",
+        CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)"),
+        "  vSeaWorld = wWorld;",
+        "  vSeaNormal = wNormal;",
+        "  vSeaHeight = wHeightN;",
+        "  vSeaDist = wDist;",
+        "  vSeaFade = wFade;",
+        "  vSeaInland = wInland;",
+        "  vec4 mvPosition = viewMatrix * vec4(wWorld, 1.0);",
+        "  gl_Position = projectionMatrix * mvPosition;",
+        "  #include <fog_vertex>",
+        // Ocean atmosphere accumulates more slowly than city-block fog.
+        // Without this, near water stayed richly shaded while the same mesh
+        // became a flat baby-blue sheet only a kilometre away.
+        "  #ifdef USE_FOG",
+        "    fogDepth *= 0.66;",
+        "  #endif",
+        "}",
+      ].join("\n");
+
+      const fs = [
+        CBZ.waterFragmentDecl(),
+        "varying vec3 vSeaWorld;",
+        "varying vec3 vSeaNormal;",
+        "varying float vSeaHeight;",
+        "varying float vSeaDist;",
+        "varying float vSeaFade;",
+        "varying float vSeaInland;",
+        "#include <fog_pars_fragment>",
+        "void main() {",
+        "  vec4 field = cbzWaterField(vSeaWorld.xz);",
+        // Depth offsets keep the country underlay behind authored roads and
+        // runways, but at a 2.8km flight frustum they can also quantise valid
+        // land BEHIND the sea. Rejecting sea fragments over dry land outright
+        // means water and ground never fight for depth ownership, so there is
+        // no green flicker and no apparent ocean growing around trees.
+        "  if (uSeaHasLandMask > 0.5 && field.r > 0.5) discard;",
+        "  float inland = max(vSeaInland, field.a);",
+        // Two scrolling ripple fields supply the metre-scale detail that even
+        // the radial mesh cannot tessellate. Detail is faded with distance so
+        // the far ocean settles instead of boiling into aliased sparkle.
+        "  vec2 flow0 = vSeaWorld.xz * 0.036 + vec2(uSeaTime * 0.027, -uSeaTime * 0.018);",
+        "  vec2 flow1 = vec2(vSeaWorld.z, -vSeaWorld.x) * 0.061 + vec2(-uSeaTime * 0.019, uSeaTime * 0.023);",
+        "  vec3 n0s = texture2D(uSeaNormal, flow0).rgb * 2.0 - 1.0;",
+        "  vec3 n1s = texture2D(uSeaNormal, flow1).rgb * 2.0 - 1.0;",
+        "  float detail = mix(0.60, 0.16, smoothstep(90.0, 1500.0, vSeaDist)) * mix(1.0, 0.42, inland) * (1.0 + uChop * 0.5);",
+        "  vec3 fineN = normalize(vec3((n0s.r + n1s.r) * 0.34, 1.0, (n0s.g + n1s.g) * 0.34));",
+        "  vec3 N = normalize(vSeaNormal + fineN * detail - vec3(0.0, detail, 0.0));",
+        "  vec3 V = normalize(cameraPosition - vSeaWorld);",
+        "  float under = gl_FrontFacing ? 0.0 : 1.0;",
+        "  N = mix(N, -N, under);",             // looking up from below
+        "  vec3 L = normalize(uSunDir);",
+        "  float ndl = max(dot(N, L), 0.0);",
+        "  float fres = 0.028 + 0.972 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 4.6);",
+        "  vec3 body = cbzDepthColor(uSeaColor, field, inland);",
+        "  vec3 base = body * vec3(0.96, 1.04, 1.09) + vec3(0.003, 0.012, 0.020);",
+        "  base *= 0.63 + ndl * 0.37;",
+        "  vec3 sky = uSeaColor * 1.34 + vec3(0.060, 0.125, 0.190);",
+        "  sky = mix(sky, uSunColor * 0.34 + sky * 0.70, 0.22);",
+        "  vec3 outColor = mix(base, sky, fres * 0.66 * mix(1.0, 0.55, inland));",
+        "  outColor += cbzSunGlitter(N, V, L, fres, vSeaFade) * mix(1.0, 0.30, inland);",
+        // The old foam was a static bake whose only motion was a brightness
+        // pulse. cbzSurf() phases the band by DISTANCE-TO-SHORE minus TIME, so
+        // white water advances up the beach and dies at the waterline.
+        "  float surf = cbzSurf(vSeaWorld.xz, field, vSeaHeight, vSeaFade);",
+        "  float cap = cbzWhitecap(vSeaWorld.xz, vSeaHeight, vSeaFade, inland);",
+        "  float foam = clamp(surf * 0.66 + cap * 0.60, 0.0, 0.92) * (1.0 - under * 0.72);",
+        // Seen from underneath the surface reads as a bright silvery ceiling
+        // that goes mirror-like at grazing angles (total internal reflection).
+        "  vec3 underCol = mix(body * 0.72, sky * 1.20 + uSunColor * 0.16, clamp(fres * 1.45, 0.0, 1.0));",
+        "  outColor = mix(outColor, underCol, under);",
+        "  outColor = mix(outColor, uFoamColor, foam);",
+        "  gl_FragColor = vec4(outColor, 1.0);",
+        "  #include <tonemapping_fragment>",
+        "  #include <encodings_fragment>",
+        "  #include <fog_fragment>",
+        "}",
+      ].join("\n");
+
       seaMat2 = new THREE.ShaderMaterial({
         name: "CBZ Ocean Water",
-        uniforms: seaUniforms,
-        vertexColors: true,
+        uniforms: U,
         fog: true,
         depthWrite: true,
         depthTest: true,
         transparent: false,
-        vertexShader: [
-          "uniform float uSeaTime;",
-          "varying vec3 vSeaWorld;",
-          "varying vec3 vSeaNormal;",
-          "varying vec3 vSeaColor;",
-          "varying float vSeaHeight;",
-          "#include <fog_pars_vertex>",
-          "void main() {",
-          "  float p1 = position.x * 0.052 + position.z * 0.030 + uSeaTime * 1.1;",
-          "  float p2 = position.x * -0.020 + position.z * 0.041 + uSeaTime * 0.7;",
-          "  float p3 = (position.x + position.z) * 0.011 - uSeaTime * 0.4;",
-          "  float wy = sin(p1) * 0.145 + sin(p2) * 0.125 + sin(p3) * 0.085;",
-          "  float dx = 0.145*cos(p1)*0.052 - 0.125*cos(p2)*0.020 + 0.085*cos(p3)*0.011;",
-          "  float dz = 0.145*cos(p1)*0.030 + 0.125*cos(p2)*0.041 + 0.085*cos(p3)*0.011;",
-          "  vec3 displaced = position + vec3(0.0, wy, 0.0);",
-          "  vec4 world = modelMatrix * vec4(displaced, 1.0);",
-          "  vSeaWorld = world.xyz;",
-          "  vSeaNormal = normalize(mat3(modelMatrix) * vec3(-dx * 15.0, 1.0, -dz * 15.0));",
-          "  vSeaColor = color * (1.0 + max(wy, 0.0) * 0.52);",
-          "  vSeaHeight = wy;",
-          "  vec4 mvPosition = viewMatrix * world;",
-          "  gl_Position = projectionMatrix * mvPosition;",
-          "  #include <fog_vertex>",
-          // Ocean atmosphere accumulates more slowly than city-block fog.
-          // Without this, near water stayed richly shaded while the same mesh
-          // became a flat baby-blue sheet only a kilometre away.
-          "  #ifdef USE_FOG",
-          "    fogDepth *= 0.66;",
-          "  #endif",
-          "}",
-        ].join("\n"),
-        fragmentShader: [
-          "uniform float uSeaTime;",
-          "uniform vec3 uSeaColor;",
-          "uniform sampler2D uSeaNormal;",
-          "uniform sampler2D uSeaLandMask;",
-          "uniform vec4 uSeaLandBounds;",
-          "uniform float uSeaHasLandMask;",
-          "varying vec3 vSeaWorld;",
-          "varying vec3 vSeaNormal;",
-          "varying vec3 vSeaColor;",
-          "varying float vSeaHeight;",
-          "#include <fog_pars_fragment>",
-          "void main() {",
-          "  vec2 fieldUV = (vSeaWorld.xz - uSeaLandBounds.xy) / max(vec2(1.0), uSeaLandBounds.zw - uSeaLandBounds.xy);",
-          "  vec4 field = vec4(0.0, 0.0, 1.0, 1.0);",
-          "  if (uSeaHasLandMask > 0.5 && all(greaterThanEqual(fieldUV, vec2(0.0))) && all(lessThanEqual(fieldUV, vec2(1.0)))) {",
-          "    field = texture2D(uSeaLandMask, fieldUV);",
-          "    if (field.r > 0.5) discard;",
-          "  }",
-          "  vec2 flow0 = vSeaWorld.xz * 0.036 + vec2(uSeaTime * 0.027, -uSeaTime * 0.018);",
-          "  vec2 flow1 = vec2(vSeaWorld.z, -vSeaWorld.x) * 0.061 + vec2(-uSeaTime * 0.019, uSeaTime * 0.023);",
-          "  vec3 n0s = texture2D(uSeaNormal, flow0).rgb * 2.0 - 1.0;",
-          "  vec3 n1s = texture2D(uSeaNormal, flow1).rgb * 2.0 - 1.0;",
-          "  vec3 fineN = normalize(vec3((n0s.r + n1s.r) * 0.34, 1.0, (n0s.g + n1s.g) * 0.34));",
-          "  vec3 N = normalize(vSeaNormal + fineN * 0.46 - vec3(0.0, 0.46, 0.0));",
-          "  vec3 V = normalize(cameraPosition - vSeaWorld);",
-          "  vec3 L = normalize(vec3(-0.34, 0.84, 0.42));",
-          "  float ndl = max(dot(N, L), 0.0);",
-          "  float fresnel = 0.035 + 0.965 * pow(1.0 - max(dot(N, V), 0.0), 4.2);",
-          "  float spec = pow(max(dot(reflect(-L, N), V), 0.0), 92.0);",
-          "  vec3 base = uSeaColor * vec3(0.96, 1.04, 1.09) + vec3(0.003, 0.012, 0.020);",
-          "  base *= clamp(vSeaColor, vec3(0.24), vec3(1.22));",
-          "  base *= 0.67 + ndl * 0.33;",
-          "  vec3 skyReflection = uSeaColor * 1.28 + vec3(0.055, 0.115, 0.175);",
-          "  vec3 outColor = mix(base, skyReflection, fresnel * 0.62);",
-          "  outColor += vec3(1.0, 0.88, 0.66) * spec * (0.42 + fresnel * 0.75);",
-          "  float rip = sin(vSeaWorld.x * 0.19 + vSeaWorld.z * 0.083 + uSeaTime * 1.05) * 0.52",
-          "            + sin(vSeaWorld.x * -0.071 + vSeaWorld.z * 0.23 + uSeaTime * 0.73) * 0.31",
-          "            + sin(vSeaWorld.x * 0.37 - vSeaWorld.z * 0.29 + uSeaTime * 1.48) * 0.17;",
-          "  outColor *= 0.94 + rip * 0.035;",
-          "  float surfBand = 0.5 + 0.5 * sin(vSeaWorld.x * 0.29 + vSeaWorld.z * 0.17 + uSeaTime * 1.62 + rip * 0.7);",
-          "  float shoreFoam = pow(field.g, 7.5) * smoothstep(0.72, 0.94, surfBand);",
-          "  float whitecap = smoothstep(0.305, 0.352, vSeaHeight + rip * 0.018) * smoothstep(0.62, 0.94, surfBand) * (0.20 + fresnel * 0.80);",
-          "  outColor = mix(outColor, vec3(0.70, 0.86, 0.89), clamp(shoreFoam * 0.38 + whitecap * 0.10, 0.0, 0.42));",
-          "  gl_FragColor = vec4(outColor, 1.0);",
-          "  #include <tonemapping_fragment>",
-          "  #include <encodings_fragment>",
-          "  #include <fog_fragment>",
-          "}",
-        ].join("\n"),
+        side: THREE.DoubleSide,          // you can swim UNDER the sea now
+        vertexShader: vs,
+        fragmentShader: fs,
       });
       // Preserve the old material.color update contract used by the day/night
       // loop above; it aliases the actual shader uniform.
-      seaMat2.color = seaUniforms.uSeaColor.value;
+      seaMat2.color = U.uSeaColor.value;
       seaMat2.userData.waterMode = "fresnel-flow-shore";
-      const sea = new THREE.Mesh(geo, seaMat2);
+
+      const sea = new THREE.Mesh(CBZ.waterBuildSeaGeometry(), seaMat2);
       sea.name = "world-sea";
       sea.receiveShadow = false; sea.castShadow = false;
       sea.frustumCulled = false;                   // the horizon is everywhere
-      sea.matrixAutoUpdate = false;                // identity — verts are world-space
+      sea.position.set(0, SEA_Y, 0);               // mean level; XZ comes from the shader
+      sea.updateMatrix();
+      sea.matrixAutoUpdate = false;                // static transform, always
       sea.userData.terrain = true;                 // batch + farcull exempt
       sea.userData.waterSurface = true;
       sea.userData.surfaceOwner = "world-water";
       sea.userData.unifiedSurface = true;
       root.add(sea);
       CBZ.citySea = sea;
+      CBZ.citySeaMaterial = seaMat2;
+
+      // A live quality-tier change re-tessellates the disc (cheap: ~10k verts,
+      // no texture work, no material rebuild). Tier 0 drops to 56 rings.
+      let seaTier = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
+      if (CBZ.onQualityChange) CBZ.onQualityChange(function (tier) {
+        if (tier == null || tier === seaTier) return;
+        const a = CBZ.waterTierParams(seaTier), b = CBZ.waterTierParams(tier);
+        seaTier = tier;
+        if (a.rings === b.rings && a.sectors === b.sectors) return;
+        try {
+          const old = sea.geometry;
+          sea.geometry = CBZ.waterBuildSeaGeometry(tier);
+          if (old && old.dispose) old.dispose();
+        } catch (e) { console.error("[sea retessellate]", e); }
+      });
+
       // the island annex's own flat ocean plane (expansion.js, y=-0.44) sat
       // ABOVE parts of the wave band — with the real sea in place it could
       // only ever show through as a dead calm disk. REMOVE it (not just

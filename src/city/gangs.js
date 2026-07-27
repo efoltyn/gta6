@@ -36,6 +36,16 @@
   if (CFG.GANG_SEEDED == null) CFG.GANG_SEEDED = true;
   if (CFG.GANG_PERSIST == null) CFG.GANG_PERSIST = true;
   if (CFG.GANG_WAR_EVENTS == null) CFG.GANG_WAR_EVENTS = true;
+  // GANG_HQ_FORTRESS (owner: "gangs own a building and the boss is sitting in
+  // an office in an apt on the top floor, with floors of the building filled
+  // with security on each floor, then boss top floor with family"). On → each
+  // crew's HQ lot is handed to city/occupy.js: a real staircase is cut through
+  // the tower, every floor is programmed and garrisoned, and the boss sits in
+  // his suite up top with his family. Flip false (or ?cfg_GANG_HQ_FORTRESS=0)
+  // for a one-line revert to the single street-level boss ped.
+  // The flag is declared here rather than config.js because this file owns the
+  // behaviour; config.js only needs the pointer comment.
+  if (CFG.GANG_HQ_FORTRESS == null) CFG.GANG_HQ_FORTRESS = true;
 
   // GANG_SEEDED: a named world-seed stream replaces the magic literal. The
   // draw ORDER is identical either way (every rng() call site is untouched —
@@ -108,9 +118,71 @@
     { key: "soldier",  pip: "Soldier",  tier: 3, needBody: 2, needContrib: 420, cut: 1.0,  hp: 140, weapon: "Pistol" },
     { key: "enforcer", pip: "Enforcer", tier: 4, needBody: 5, needContrib: 900, cut: 1.5,  hp: 175, weapon: "SMG" },
     { key: "lt",       pip: "Lt.",      tier: 5, needBody: 9, needContrib: 1700, cut: 2.4, hp: 210, weapon: "SMG" },
-    { key: "boss",     pip: "Boss",     tier: 6, needBody: 0, needContrib: 0,   cut: 5.0,  hp: 260, weapon: "SMG" },
+    // locked: only SUCCESSION makes a Boss — never merit (see succeedBoss).
+    { key: "boss",     pip: "Boss",     tier: 6, needBody: 0, needContrib: 0,   cut: 5.0,  hp: 260, weapon: "SMG", locked: true },
   ];
   const RANK_BY_KEY = {}; RANKS.forEach((r, i) => { RANK_BY_KEY[r.key] = r; r.idx = i; });
+
+  // ============================================================
+  //  FACTIONS (city/factions.js) — THIS table is now the ONE gang ladder.
+  //  Before: playergang.js hand-typed the same tier order as a literal string
+  //  array THREE times (:631, :727, :744) and careers.js kept a fourth copy as
+  //  GC_RANK_TIER. They all read CBZ.factions.ladderKeys("gang") now, so the
+  //  order lives in exactly one place — here.
+  //
+  //  `bind` is why this is a migration and not a second bookkeeping system:
+  //  the player's gang membership STAYS in g.cityMembership / g.playerGang,
+  //  owned by playergang.js. factions.js reads and writes THAT record; it
+  //  never mirrors it.
+  // ============================================================
+  if (CBZ.factions) {
+    CBZ.factions.declare({
+      id: "gang",
+      name: "Street Set",
+      short: "Set",
+      kind: "gang",
+      color: 0xff4d4d,
+      ranks: RANKS,                       // verbatim — no retyping, that is the point
+      needScale: { served: 8, orders: 0 },// mirrors eligibleForPromotion's 18+tier*8 seniority
+      heat: 1.25,                         // wearing colours makes witnesses louder (police react)
+      hostileTo: ["army", "agency"],
+      npcTag: { field: "faction", value: "gang" },
+      lore: "Street sets own the abandoned blocks. Climb on merit: bodies and cash kicked up.",
+      bind: {
+        get: function () {
+          const m = g.cityMembership;
+          if (m && m.gangId) {
+            return { org: m.gangId, rank: m.rank, standing: m.standing, how: m.how,
+              bodies: m.bodies, contrib: m.contrib, served: m.served, orders: m.orders };
+          }
+          const pg = g.playerGang;
+          if (pg && pg.founded) {
+            return { org: pg.id, rank: "boss", owner: true, standing: 1, how: "founded",
+              bodies: pg.bodies || 0, contrib: pg.treasury || 0, served: pg.served || 0, orders: pg.orders || 0 };
+          }
+          return null;
+        },
+        setRank: function (k) { if (g.cityMembership) g.cityMembership.rank = k; },
+        addCredit: function (kind, n) {
+          const m = g.cityMembership; if (!m) return;
+          const f = kind === "bodies" ? "bodies" : kind === "contrib" ? "contrib" : kind === "served" ? "served" : "orders";
+          m[f] = (m[f] || 0) + n;
+        },
+        addStanding: function (n) {
+          const m = g.cityMembership; if (!m) return;
+          m.standing = Math.max(-1, Math.min(2, (m.standing || 0) + n));
+        },
+        leave: function () { if (CBZ.cityLeaveGang) CBZ.cityLeaveGang(); },
+      },
+    });
+    if (CBZ.factionMigrated) {
+      CBZ.factionMigrated("ladder:gangs");
+      // myGangId() (below) is the only membership QUERY in this file; the two
+      // remaining g.playerGang reads (serializeGangs/applyGangsBlob) are this
+      // file saving playergang.js's own record, not deriving membership.
+      CBZ.factionMigrated("memb:gangs");
+    }
+  }
   function rankDef(key) { return RANK_BY_KEY[key] || RANK_BY_KEY.soldier; }
   function rankTier(ped) { return ped ? (rankDef(ped.rank).tier) : 0; }
   CBZ.cityRankLadder = function () { return RANKS.map((r) => ({ key: r.key, pip: r.pip, tier: r.tier })); }; // read-only view
@@ -218,6 +290,35 @@
   //      wealth / aggression / naming are IDENTICAL on both paths — a recruit
   //      is just another body, never a parallel cheaper unit. Returns the ped
   //      (already added to the scene + gang.members + cityPeds) or null.
+  // THE SHARED POST (city/occupy.js) — exactly the four lines this file wrote
+  // by hand twice (make the ped, parent it, roster it, stamp the post).
+  // Degrade-safe: without occupy.js the inline branch is the prior behaviour.
+  function gangPost(x, z, o) {
+    if (CBZ.cityPostNpc) return CBZ.cityPostNpc(x, z, o);
+    if (!CBZ.cityMakePed || !CBZ.cityPeds || !o.parent) return null;
+    const p = CBZ.cityMakePed(x, z, o.rng, o);
+    if (!p) return null;
+    o.parent.add(p.group); CBZ.cityPeds.push(p);
+    if (o.homeGuard) p.homeGuard = o.homeGuard;
+    return p;
+  }
+
+  // WHICH lot is the HQ. It used to be turf[0] unconditionally, which put the
+  // boss wherever the round-robin landed — often a single-storey shopfront.
+  // A fortress needs FLOORS, so prefer the tallest enterable building on this
+  // crew's turf and fall back to turf[0] exactly as before.
+  function pickHqLot(gang) {
+    const t = gang.turf || [];
+    let best = t[0] || null, bestN = -1;
+    for (let i = 0; i < t.length; i++) {
+      const b = t[i] && t[i].building;
+      if (!b || !b.group || b.park) continue;
+      const n = (b.storeys | 0);
+      if (n > bestN) { bestN = n; best = t[i]; }
+    }
+    return best;
+  }
+
   function spawnGangMember(gang, lot, rk) {
     if (!gang || !lot) return null;
     const A = CBZ.city && CBZ.city.arena; if (!A) return null;
@@ -244,9 +345,10 @@
     } else {
       armed = false; weapon = tt.melee || null; ammo = 0;
     }
-    const ped = CBZ.cityMakePed(x, z, rng, {
+    const ped = gangPost(x, z, {
+      src: "gangs:crew", rng: rng, parent: A.root,
       kind: "gang", gang: gang.id, faction: gang.id,
-      guard: { x: lot.cx, z: lot.cz },
+      guard: { x: lot.cx, z: lot.cz }, homeGuard: { x: lot.cx, z: lot.cz },
       outfit: gang.color, wealth: Math.min(0.97, (0.3 + rd.tier * 0.08) * tt.wealthMul),
       aggr: clamp(rollGang(ag) + tt.aggrAdd, 0.6, 1),
       archetype: "gangster", job: "gang " + rd.pip.toLowerCase().replace(".", ""),
@@ -254,14 +356,12 @@
       hp: Math.round(rd.hp * tt.hpMul),
       name: makeName(gang.ethnicity),
     });
+    if (!ped) return null;
     ped.rank = rk;
     ped.ammo = ammo;
     ped.maxHp = Math.round(rd.hp * tt.hpMul);
-    ped.homeGuard = { x: lot.cx, z: lot.cz };
     const ms = memStats(ped); ms.bodies = (rd.tier) + ((rng() * 2) | 0); ms.contrib = rd.tier * 120 * rng(); ms.served = 30 + rng() * 120;
     tagWithRank(ped, gang.color);   // "<Name> · Lt." etc.
-    A.root.add(ped.group);
-    CBZ.cityPeds.push(ped);
     gang.members.push(ped);
     return ped;
   }
@@ -334,28 +434,93 @@
       // ---- the gang BOSS: a named, tougher, always-armed lieutenant anchoring
       //      the crew's main turf. Defeating one is a real prize + heavy heat. ----
       {
-        const blot = gang.turf[0];
+        // THE HQ IS A BUILDING NOW. The owner's ask, verbatim: "gangs own a
+        // building and the boss is sitting in an office in an apt on the top
+        // floor, with floors of the building filled with security on each
+        // floor, then boss top floor with family."
+        // city/occupy.js is that capability — one call cuts a real staircase
+        // through the tower, programs every floor (checkpoint / quarters /
+        // boss suite), posts the garrison up it, puts the boss behind his desk
+        // facing the way in with his family around him, and stamps the
+        // per-floor access model the trespass alarm reads. Everything below is
+        // the GANG-SPECIFIC dressing that a generic occupier cannot know:
+        // archetype loadout, the name, the succession identity, the rank pip.
+        const blot = pickHqLot(gang);
         const bossHp = Math.round(240 * tt.hpMul);
-        const boss = CBZ.cityMakePed(blot.cx + 1.5, blot.cz, rng, {
-          kind: "gang", gang: gang.id, faction: gang.id, guard: { x: blot.cx, z: blot.cz },
-          outfit: gang.color, wealth: Math.min(0.99, 0.96 * tt.wealthMul), // top of the ladder — rich, robbing him is a real score
-          aggr: clamp(rollGang(ag) + 0.08 + tt.aggrAdd, 0.8, 1),
-          archetype: "gangster", job: "gang boss",
-          armed: true, weapon: tt.bossWeapon, hp: bossHp, // strapped per the crew's archetype (cartel/syndicate boss = rifle)
-          name: makeBossName(gang.ethnicity),
-        });
-        boss.homeGuard = { x: blot.cx, z: blot.cz };
-        boss.isBoss = true; boss.rank = "boss"; boss.maxHp = bossHp; boss.ammo = 50;
+        let boss = null, occ = null;
+        if (CBZ.cityOccupyBuilding && CFG.GANG_HQ_FORTRESS !== false) {
+          occ = CBZ.cityOccupyBuilding(blot, {
+            id: "gang:" + gang.id, preset: "gang", src: "gangs:hq",
+            faction: gang.id, gang: gang.id, outfit: gang.color,
+            label: gang.name + " HQ", crime: "trespass",
+            // NOTE deliberately NOT passing this file's `rng`: occupy.js
+            // derives its own named stream per building, so the ~20 draws a
+            // garrison costs can never reflow gang generation downstream of
+            // here (the order-fragility rule, CLAUDE.md §Determinism).
+            // every body the block casts is a real member of THIS crew
+            configure: function (p, info) {
+              p.kind = "gang"; p.gang = gang.id; p.faction = gang.id;
+              // GARRISON, not street crew. The war director (launchWar) and
+              // the roster review (reviewGang) both iterate gang.members and
+              // would otherwise commit posted bodies to raids they physically
+              // cannot walk to, and promote/defect/clip the boss's children.
+              p._occupyGarrison = true;
+              if (info.family) {
+                p.isFamily = true; p.gangFamily = gang.id;
+                p.rank = null;                      // a man's kids are not lieutenants
+              } else {
+                p.rank = info.vip ? "boss" : (info.floor >= 2 ? "lt" : "soldier");
+                p.aggr = clamp((p.aggr || 0.7) + tt.aggrAdd, 0.6, 1);
+                p.ammo = p.ammo || 40;
+              }
+              // family are residents of the HQ, never members of the crew
+              if (!info.family) gang.members.push(p);
+            },
+          });
+          if (occ) boss = occ.vip || null;
+        }
+        if (!boss) {
+          // no tower on this turf (a single-storey shopfront, a park stub) —
+          // the crew still has a boss, on the street, exactly as before.
+          boss = gangPost(blot.cx + 1.5, blot.cz, {
+            src: "gangs:hq", rng: rng, parent: A.root,
+            kind: "gang", gang: gang.id, faction: gang.id,
+            guard: { x: blot.cx, z: blot.cz }, homeGuard: { x: blot.cx, z: blot.cz },
+            outfit: gang.color, wealth: Math.min(0.99, 0.96 * tt.wealthMul),
+            aggr: clamp(rollGang(ag) + 0.08 + tt.aggrAdd, 0.8, 1),
+            archetype: "gangster", job: "gang boss",
+            armed: true, weapon: tt.bossWeapon, hp: bossHp,
+            name: makeBossName(gang.ethnicity),
+          });
+          if (boss) gang.members.push(boss);
+        }
+        if (boss) {
+          // the archetype loadout the occupier can't know (cartel boss = rifle)
+          boss.name = boss.name || makeBossName(gang.ethnicity);
+          boss.wealth = Math.min(0.99, 0.96 * tt.wealthMul);
+          boss.aggr = clamp(rollGang(ag) + 0.08 + tt.aggrAdd, 0.8, 1);
+          boss.armed = true; boss.weapon = tt.bossWeapon;
+          boss.hp = bossHp; boss.maxHp = bossHp; boss.ammo = 50;
+          boss.isBoss = true; boss.rank = "boss";
+          boss.gang = gang.id; boss.faction = gang.id; boss.kind = "gang";
+          const bs = memStats(boss); bs.loyalty = 1; bs.bodies = 12 + ((rng() * 8) | 0); bs.joined = "founder";
+          gang.boss = boss; gang.bossName = boss.name;
+          tagWithRank(boss, gang.color);   // "<Name> '<Nick>' <Last> · Boss"
+          registerBossIdentity(gang, boss);   // cityIdentities plug-in (feature-detected; see above)
+        }
         // the gang's HQ anchors on the boss's home lot — a real map target for
         // waypoints / rival-HQ hunts. boss.pos overrides this while he's alive.
-        gang.hq = { x: blot.cx, z: blot.cz, lot: blot, name: gang.name + " HQ" };
-        const bs = memStats(boss); bs.loyalty = 1; bs.bodies = 12 + ((rng() * 8) | 0); bs.joined = "founder";
-        gang.boss = boss; gang.bossName = boss.name;
-        tagWithRank(boss, gang.color);   // "<Name> '<Nick>' <Last> · Boss"
-        A.root.add(boss.group);
-        CBZ.cityPeds.push(boss);
-        gang.members.push(boss);
-        registerBossIdentity(gang, boss);   // cityIdentities plug-in (feature-detected; see above)
+        // floorY is new: the HQ finally knows which STOREY the boss is on, which
+        // is what every "go get him" caller was missing (census §2).
+        gang.hq = {
+          x: blot.cx, z: blot.cz, lot: blot, name: gang.name + " HQ",
+          floorY: (boss && boss._occupyY) || 0,
+          floor: (boss && boss._occupyFloor) || 0,
+          fortified: !!occ, stairs: !!(occ && occ.core),
+        };
+        // (rosterCap is computed from STREET members only, further down — the
+        // garrison is deliberately excluded there rather than compensated for
+        // here, which the later `gang.rosterCap = ...` would have overwritten.)
       }
       // recolour this turf's graffiti hint (stash glow) toward the gang colour
       for (const lot of gang.turf) {
@@ -387,7 +552,14 @@
       //      when recruitPool hits 0 the crew can NEVER grow again. Drain the pool
       //      AND clear the street and the gang is permanently WIPED. The recruit
       //      cadence rides a little faster for land-hungry (expandW) archetypes.
-      gang.rosterCap = gang.members.length;
+      // STREET roster only. The HQ garrison (city/occupy.js) is real bodies in
+      // gang.members — they fight, they die, they count for headcount — but
+      // they are POSTED, not the crew that walks the block, so folding them
+      // into the finite ceiling would roughly double every gang's cap and its
+      // recruiting pool, quietly gutting the "FINITE + WIPEABLE" doctrine.
+      let street = 0;
+      for (let m = 0; m < gang.members.length; m++) if (!gang.members[m]._occupyGarrison) street++;
+      gang.rosterCap = street;
       gang.recruitPool = Math.round(gang.rosterCap * 0.6);
       gang.recruitInterval = 25 / (gang.expandW || 1);
       gang.recruitT = gang.recruitInterval;
@@ -613,6 +785,10 @@
     const roster = gang.members.slice();
     for (const m of roster) {
       if (!m || m.dead || m === gang.boss) continue;
+      // the HQ garrison (city/occupy.js) is POSTED, not on the promotion
+      // ladder — it must not be promoted out of its post, poached by a rival,
+      // or clipped by the discipline pass while it holds a floor.
+      if (m._occupyGarrison) continue;
       const s = memStats(m);
       s.served += dt;
       // earn loyalty just by being paid + winning; lose it during a losing war
@@ -667,6 +843,10 @@
     for (const m of a.members) {
       if (sent >= count) break;
       if (m.dead || m.rage || m.inCar || m.raidT > 0) continue;
+      // the HQ garrison HOLDS THE HOUSE — it never rolls out on a raid. It
+      // physically can't (posted bodies don't walk), so committing one would
+      // silently field half a squad and leave the raid short.
+      if (m._occupyGarrison) continue;
       // WAR FOOTING: the chest the raid already spent cracks the heavy crates —
       // a made man (Enforcer/Lt) rolls on a rival block with the AK-47, so a war
       // VISIBLY escalates the hardware on the street, and every raider you drop
@@ -915,7 +1095,10 @@
   // ONE canonical read: CBZ.cityPlayerGangId() (playergang.js) — the old
   // g.playerGangAffiliation orphan is gone (turf.js's defect path now writes
   // the canonical membership fields instead).
+  // MIGRATED to the ONE faction query (city/factions.js). The old three-field
+  // re-derivation stays as the degrade-safe fallback per the BLOCK LAW.
   function myGangId() {
+    if (CBZ.factions && CBZ.factions.orgIn) { const o = CBZ.factions.orgIn("gang"); if (o) return o; }
     if (CBZ.cityPlayerGangId) return CBZ.cityPlayerGangId();
     const m = g.cityMembership;
     return (m && m.gangId) || g.playerGangId || null;
@@ -1851,6 +2034,10 @@
   CBZ.cityRefreshTurfHud = CBZ.cityRefreshTurfHud || function () {};
 
   CBZ.cityGangsReset = function () {
+    // the occupancy registry (city/occupy.js) holds the HQ garrisons + the
+    // floor-lift roster; without this it survives a city rebuild and keeps
+    // writing Y to orphaned bodies from the previous run, forever.
+    if (CBZ.cityOccupyReset) CBZ.cityOccupyReset();
     // wipe per-gang standing + HQ before the roster clears (spawn rebuilds hq).
     // archetype-derived fields (type/archLabel/defendW/expandW/roamW) are
     // re-stamped from config on the next spawn, but clear them here too so a

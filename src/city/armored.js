@@ -431,7 +431,14 @@
       return r;
     };
     wrapped._armoredWrapped = true;
-    wrapped._structWrapped = orig._structWrapped;   // preserve buildings.js's flag if present
+    // THE EXPLOSION-WRAPPER LAW (CLAUDE.md): copy EVERY `*Wrapped` marker
+    // forward, not just one. This used to hand-copy only `_structWrapped`,
+    // which silently stripped `_demoWrapped`, `_wildlifeWrapped` and the
+    // impact bus's markers. Because this file installs LAST (order 54.3),
+    // every sibling then failed its own idempotence guard, re-wrapped an
+    // already-wrapped chain, and double-counted its damage for the rest of
+    // the session. Three separate domains independently reported it.
+    for (const k in orig) if (/Wrapped$/.test(k)) wrapped[k] = orig[k];
     wrapped._origArmored = orig;
     CBZ.cityExplosion = wrapped;
   }

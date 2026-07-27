@@ -82,6 +82,421 @@
   const ARM_UP = 0.46, ARM_LO = 0.46;
   const LEG_UP = 0.48, LEG_LO = 0.47;
 
+  /* ============================================================
+     BODY PROFILE — the ONE place a body's proportions live.
+
+     Before this, every dimension in makeCharacter was a `fem ? a : b`
+     ternary scattered through 200 lines of geometry, which is why the
+     only two bodies this game could ever build were "man" and "slightly
+     smaller man". A profile is a flat record of every authored number;
+     makeCharacter now READS one instead of branching. Adding a body
+     (child, toddler, a heavier build later) is a table row, not new
+     geometry code, and all ~15 makeCharacter call sites get it for free.
+
+     ADOPTION IS ONE FIELD: `makeCharacter({..., age: 7})`. Omit it and
+     you get the adult profile for c.build, which is byte-identical to
+     the pre-profile rig for "m" (every male number below is the literal
+     that used to be inline). Degrade-safe: an unknown build/age clamps
+     into the table, never throws.
+
+     WHY WOMEN DIDN'T READ AS WOMEN (owner: "women look like men with
+     different colours"). The old fem path scaled EVERY box down by the
+     same ~0.85: shoulders 0.85x, hips 0.857x. Shoulder:hip therefore
+     stayed 1.10 — a MALE ratio — so the silhouette was a small man.
+     Real anthropometry (ANSUR II): female biacromial breadth is ~0.87x
+     male, but bi-iliac/hip breadth is ~0.95x — hips barely shrink. Male
+     shoulder:hip runs ~1.15-1.20, female ~0.95-1.05. Fixed below: the
+     shoulders keep their 0.85, the hips come back OUT (pelvisW 0.72 ->
+     0.80, depth 0.43 -> 0.46), and a real WAIST box (WHR ~0.7-0.8 in
+     women vs ~0.85-0.95 in men) tapers between them. Chest/hip/waist,
+     not size, is what reads female at 30m.
+
+     CHILDREN ARE NOT SCALED ADULTS. The old child (births.js/family.js)
+     was `group.scale.setScalar(0.62)` — a shrunken adult, wrong in every
+     ratio. Real children carry a near-adult head on a short torso and
+     much shorter legs: sitting-height/stature runs 0.63 at age 2 vs 0.52
+     adult, so legs are ~37% of a toddler's height and ~48% of an adult's.
+     GROWTH below encodes stature, head fraction, leg share, shoulder and
+     hip growth per age; every segment is derived from it.
+  ============================================================ */
+
+  // Authored (pre-humanScale) height of the reference adult male rig:
+  // neck socket 1.88 + head 0.60. Every stature number below is a
+  // fraction of this, so the whole table stays unit-free.
+  const ADULT_TOP = 2.48;
+  const WAIST_TUCK = 0.06;      // waist box tucks UP into the chest box (limb-joint trick)
+
+  // A gait style is a set of MULTIPLIERS on animChar's existing literals.
+  // All 1 = the motion this game has always had; nothing here adds a new
+  // animation state, so a rig with no style is bit-for-bit unchanged.
+  function gaitStyle(o) {
+    return {
+      step: 1,        // stride length (smaller -> higher cadence for the same speed)
+      hipAmp: 1,      // hip swing amplitude
+      knee: 1,        // knee flexion amplitude
+      stanceKnee: 0,  // ADDED stance-phase knee flexion (toddlers never straighten)
+      armAmp: 1,      // arm counter-swing amplitude
+      sway: 1,        // lateral body sway (pelvic obliquity)
+      yaw: 1,         // shoulder counter-rotation
+      bob: 1,         // vertical CoM bob
+      guard: 0,       // 0..1 "high guard" toddler arms (raised + out to the sides)
+      ...o,
+    };
+  }
+
+  const GAIT_NEUTRAL = gaitStyle({});
+
+  function profileBase() {
+    return {
+      key: "m", fem: false, child: false, ageYears: null, band: "adult",
+      statureMul: 1,
+      // segments
+      legUp: LEG_UP, legLo: LEG_LO, legW: 0.34, hipX: 0.23, shoeH: 0.20,
+      armUp: ARM_UP, armLo: ARM_LO, armW: 0.30, armX: 0.62, handH: 0.20,
+      pelvisW: 0.84, pelvisH: 0.20, pelvisD: 0.48,
+      torsoH: 0.95, torsoW: 0.92, torsoD: 0.50,
+      waistShare: 0, waistW: 0, waistD: 0,   // waistShare 0 = no waist box at all
+      collarW: 0.94, collarH: 0.18, collarD: 0.52,
+      headSize: 0.60, neckDrop: 0,
+      jacketW: 0.98, jacketH: 1.00, jacketD: 0.60,
+      // posture
+      stanceZ: 0,      // per-leg z-splay: + converges the knees (narrow step width), - splays (toddler wide base)
+      // Idle arm carry, SIGNED: NEGATIVE tucks the hand in against the ribs
+      // (the male default — and the literal this rig has always used);
+      // POSITIVE swings it clear of the hip. See ADULT_F for why it's a cheat.
+      armOutZ: -0.08,
+      gait: GAIT_NEUTRAL,
+    };
+  }
+
+  // ---- ADULT MALE: every number is the literal that used to be inline ----
+  const ADULT_M = profileBase();
+
+  // ---- ADULT FEMALE -----------------------------------------------------
+  // Shoulders stay narrow (0.85x, as before). Hips come back out to ~0.95x
+  // male so shoulder:hip lands at 0.975 (female band) instead of 1.10
+  // (male band). A waist box at 0.85x the chest and 0.83x the hips carves
+  // the taper. Chest box is DEEPER than male (0.46 vs the old 0.44) and
+  // shorter, so the profile carries chest volume without a separate bust
+  // mesh that painted clothing would immediately erase.
+  const ADULT_F = Object.assign(profileBase(), {
+    key: "f", fem: true,
+    statureMul: 0.958,                       // ~1.74m beside the male 1.82m
+    legUp: 0.465, legLo: 0.455, legW: 0.30, hipX: 0.27,
+    armUp: 0.45, armLo: 0.45, armW: 0.26, armX: 0.54,
+    pelvisW: 0.80, pelvisH: 0.20, pelvisD: 0.46,
+    torsoH: 0.92, torsoW: 0.78, torsoD: 0.46,
+    waistShare: 0.325, waistW: 0.66, waistD: 0.40,
+    collarW: 0.80, collarH: 0.17, collarD: 0.46,
+    headSize: 0.55,
+    jacketW: 0.86, jacketH: 0.98, jacketD: 0.56,
+    // Step width: male stance sits ~12-15% of hip breadth off the midline,
+    // female ~4-8% — the "walks on one line" read (Cho 2004: women walk with a
+    // significantly narrower step width). stanceZ converges the knees toward
+    // that line.
+    stanceZ: 0.055,
+    // HONEST NOTE: the folk claim that women carry a wider elbow angle does NOT
+    // survive the literature — studies disagree on the direction and one
+    // measured men LARGER (14.2° vs 8.2°). This number is therefore a deliberate
+    // ART CHEAT, not biomechanics: a wider hip needs the hands to hang clear of
+    // it, and that gap between arm and body silhouette is what reads at 30m.
+    armOutZ: 0.06,
+    /* GAIT (Cho 2004, Clin Biomech 19(2):145-152, 98 adults; Bruening 2015,
+       Gait & Posture 41(2)). What the data actually says, which is NOT the
+       folklore: cadence is essentially the SAME between sexes at preferred
+       speed — women take SHORTER STRIDES, and cadence simply falls out of
+       speed/stride, which is exactly how gaitPhaseDelta already works, so
+       `step` alone buys the correct quicker footfall. The genuinely
+       sex-inherent differences are in the joint pattern: women carry more
+       PELVIC obliquity while keeping a MORE STABLE torso and head, and men
+       recruit the shoulders and arms more. So sway goes UP while yaw and arm
+       swing go DOWN — the earlier guess had the upper body backwards. */
+    gait: gaitStyle({ step: 0.86, hipAmp: 0.94, armAmp: 0.88, sway: 1.35, yaw: 0.82 }),
+  });
+
+  /* ---- GROWTH CURVE -----------------------------------------------------
+     a   age in years
+     h   stature as a fraction of the adult rig (CDC/WHO growth charts,
+         normalised against a 175.7cm adult male)
+     hf  head as a fraction of TOTAL height. NOTE this is not the real-world
+         "heads tall" figure: this rig's adult head is already 24% of its
+         height (a real adult's is 13%), i.e. the avatar is stylised
+         big-headed to start with. Applying the real curve on top would
+         make a bobblehead, so hf moves ~55% of the way toward the real
+         relative change (real head fraction rises 1.50x from adult to
+         toddler; here it rises 1.28x). Direction right, stylisation kept.
+     ls  legs' share of (legs + torso), from sitting-height ratio by age
+     sw  shoulder width vs adult   hw  hip width vs adult
+     gw  limb girth vs adult       bl  belly depth multiplier (toddler pot belly)
+     nk  neck development 0..1 (a toddler has no visible neck at all)
+     st  step length as a fraction of leg length vs the adult ratio
+  ------------------------------------------------------------------------ */
+  const GROWTH = [
+    { a: 0,    h: 0.30, hf: 0.400, ls: 0.300, sw: 0.32, hw: 0.36, gw: 0.60, bl: 1.35, nk: 0.00, st: 0.55 },
+    { a: 1,    h: 0.43, hf: 0.345, ls: 0.365, sw: 0.37, hw: 0.41, gw: 0.66, bl: 1.30, nk: 0.05, st: 0.62 },
+    { a: 2.5,  h: 0.53, hf: 0.309, ls: 0.418, sw: 0.45, hw: 0.50, gw: 0.70, bl: 1.24, nk: 0.15, st: 0.72 },
+    { a: 4,    h: 0.60, hf: 0.292, ls: 0.440, sw: 0.52, hw: 0.56, gw: 0.73, bl: 1.14, nk: 0.35, st: 0.86 },
+    { a: 7,    h: 0.683, hf: 0.275, ls: 0.472, sw: 0.60, hw: 0.62, gw: 0.78, bl: 1.05, nk: 0.62, st: 0.95 },
+    { a: 10,   h: 0.780, hf: 0.264, ls: 0.487, sw: 0.68, hw: 0.71, gw: 0.84, bl: 1.00, nk: 0.82, st: 0.98 },
+    { a: 12,   h: 0.848, hf: 0.257, ls: 0.498, sw: 0.75, hw: 0.78, gw: 0.88, bl: 1.00, nk: 0.90, st: 1.00 },
+    { a: 15,   h: 0.950, hf: 0.250, ls: 0.500, sw: 0.90, hw: 0.90, gw: 0.95, bl: 1.00, nk: 0.97, st: 1.00 },
+    { a: 18,   h: 1.000, hf: 0.242, ls: 0.500, sw: 1.00, hw: 1.00, gw: 1.00, bl: 1.00, nk: 1.00, st: 1.00 },
+  ];
+  const CHILD_ADULT_AGE = 18;
+
+  function growthAt(age) {
+    const a = age < 0 ? 0 : age;
+    let i = 0;
+    while (i < GROWTH.length - 1 && GROWTH[i + 1].a <= a) i++;
+    const lo = GROWTH[i], hi = GROWTH[Math.min(i + 1, GROWTH.length - 1)];
+    const span = hi.a - lo.a;
+    const t = span > 0.0001 ? Math.min(1, Math.max(0, (a - lo.a) / span)) : 0;
+    const out = {};
+    for (const k in lo) out[k] = lo[k] + (hi[k] - lo[k]) * t;
+    return out;
+  }
+
+  function bandOf(age) {
+    if (age == null || age >= CHILD_ADULT_AGE) return "adult";
+    if (age < 1.1) return "baby";
+    if (age < 4) return "toddler";
+    if (age < 10) return "child";
+    if (age < 13) return "preteen";
+    return "teen";
+  }
+
+  /* Build a child profile at `age`, optionally blended toward an adult
+     female shape. Sexual dimorphism does not exist before puberty, so a
+     6-year-old girl and boy share one body — the read comes from hair and
+     dress, which is exactly how it works in life. From ~11 the female
+     deltas (hips, waist, narrower shoulders, Q-angle, gait) fade in. */
+  function childProfile(build, age) {
+    const G = growthAt(age);
+    const fem = build === "f";
+    // female shape blends in across 11 -> 16
+    const fb = fem ? Math.min(1, Math.max(0, (age - 11) / 5)) : 0;
+    const mix = (m, f) => m + (f - m) * fb;
+
+    const total = G.h * ADULT_TOP;
+    const headSize = G.hf * total;
+    const stack = total - headSize;                 // feet -> neck socket
+    const legLen = G.ls * stack;
+    const torsoTotal = stack - legLen;
+
+    const p = profileBase();
+    p.key = "c" + (Math.round(age * 10) / 10);
+    p.child = true; p.fem = fem; p.ageYears = age; p.band = bandOf(age);
+    p.statureMul = G.h;
+
+    p.legUp = legLen * 0.505; p.legLo = legLen * 0.495;
+    p.legW = mix(0.34, 0.30) * G.gw;
+    p.hipX = mix(0.23, 0.27) * G.hw;
+    p.shoeH = 0.20 * (0.55 + 0.45 * G.h);           // feet shrink slower than legs
+
+    const armLen = mix(0.92, 0.90) * (0.40 + 0.60 * G.h) * (0.55 + 0.45 * G.ls / 0.5);
+    p.armUp = armLen * 0.5; p.armLo = armLen * 0.5;
+    p.armW = mix(0.30, 0.26) * G.gw;
+    p.armX = mix(0.62, 0.54) * G.sw;
+    p.handH = 0.20 * (0.60 + 0.40 * G.h);
+
+    p.pelvisW = mix(0.84, 0.80) * G.hw;
+    p.pelvisH = 0.20 * (0.45 + 0.55 * G.h);
+    p.pelvisD = mix(0.48, 0.46) * G.hw * (0.85 + 0.15 * G.bl);
+
+    p.torsoW = mix(0.92, 0.78) * G.sw;
+    p.torsoD = mix(0.50, 0.46) * G.gw * (0.55 + 0.45 * G.bl);
+    // Every child gets a waist box: on a toddler it is the pot belly (wider
+    // and much deeper than the chest), on a pre-teen it is the beginning of
+    // a real waist. Same two boxes either way — the numbers do the work.
+    /* The waist box has to LAND on the adult it is growing into, or a 16-year-
+       old boy keeps a pot belly (the child waist is authored WIDER than the
+       chest — that is the toddler belly — and adult males have no waist box at
+       all). So the childhood share fades into whichever adult this body is
+       becoming across roughly 10 -> 18: zero for a man, 0.325 for a woman. */
+    const childWaist = 0.30 + 0.14 * Math.max(0, Math.min(1, (5 - age) / 5));
+    const adultWaist = fb * ADULT_F.waistShare;          // male adult carries none
+    const grown = Math.max(0, Math.min(1, (age - 10) / 8));
+    p.waistShare = childWaist + (adultWaist - childWaist) * grown;
+    // torsoH is the WHOLE hip→neck column (chest + waist), exactly as it is for
+    // the adults above; waistShare then splits it. Keeping one meaning for the
+    // field is what lets makeCharacter run a single un-branched stacking pass.
+    p.torsoH = torsoTotal;
+    p.waistW = p.torsoW * mix(1.02, 0.86) * (0.90 + 0.10 * G.bl);
+    p.waistD = p.torsoD * (0.86 + 0.30 * (G.bl - 1)) * mix(1.10, 0.92);
+
+    p.collarW = mix(0.94, 0.80) * G.sw;
+    p.collarH = 0.18 * (0.5 + 0.5 * G.h);
+    p.collarD = mix(0.52, 0.46) * G.gw;
+
+    p.headSize = headSize;
+    // A young child has no neck: the head sits straight on the shoulders.
+    p.neckDrop = headSize * 0.17 * (1 - G.nk);
+
+    p.jacketW = p.torsoW + 0.06; p.jacketD = p.torsoD + 0.09;
+    p.jacketH = torsoTotal * 1.05;
+
+    // Toddlers walk with a wide base of support that narrows to an adult
+    // line by ~3 yrs; the female knee-converge fades in with the hips.
+    const splay = -0.13 * Math.max(0, Math.min(1, (3.2 - age) / 2.4));
+    p.stanceZ = splay + 0.055 * fb;
+    // Small children carry the arms visibly away from the body (the tail end of
+    // the toddler high guard); gait.guard below owns the full raised pose.
+    p.armOutZ = mix(-0.08, 0.06) + 0.16 * Math.max(0, Math.min(1, (4 - age) / 3));
+
+    // GAIT (Sutherland 1980, "The Development of Mature Gait"): cadence runs
+    // ~175 steps/min in a new walker vs ~115 adult, step length is only
+    // ~30-35% of leg length at gait onset vs ~48% adult, new walkers never
+    // extend the knee through stance, reciprocal arm swing does not appear
+    // until ~18 months (before that the arms ride in "high guard"), and
+    // trunk sway is pronounced and damps out over the first year of walking.
+    // Gait is visually adult-like by ~4 and fully mature by ~7.
+    const young = Math.max(0, Math.min(1, (4.5 - age) / 3.5));   // 1 at ~1yr, 0 by 4.5
+    const legMul = (p.legUp + p.legLo) / (LEG_UP + LEG_LO);
+    p.gait = gaitStyle({
+      step: legMul * G.st,
+      hipAmp: 1 - 0.18 * young,
+      knee: 1 - 0.25 * young,
+      stanceKnee: 0.22 * young,
+      // fb terms track ADULT_F's corrected direction: as the female shape
+      // fades in, arm swing and shoulder counter-rotation go DOWN and pelvic
+      // sway goes UP (see the ADULT_F gait note).
+      armAmp: (1 - 0.62 * young) * (1 - 0.12 * fb),
+      sway: 1 + 0.55 * young + 0.35 * fb,
+      yaw: (1 - 0.5 * young) * (1 - 0.18 * fb),
+      bob: 1 + 0.25 * young,
+      guard: Math.max(0, Math.min(1, (2.0 - age) / 1.2)),
+    });
+    return p;
+  }
+
+  const profileCache = Object.create(null);
+  // CBZ.charProfile(build, age) — the public read. Cached: the crowd asks
+  // this per body, and a profile is pure data derived from two numbers.
+  function charProfile(build, age) {
+    const b = build === "f" ? "f" : "m";
+    let a = (age == null || !isFinite(age)) ? null : +age;
+    if (a != null) {
+      a = Math.max(0, Math.min(40, a));
+      if (a >= CHILD_ADULT_AGE) a = null;
+      else a = Math.round(a * 4) / 4;              // quantised: 160 possible child bodies, not infinite
+    }
+    const key = b + "|" + (a == null ? "A" : a);
+    let p = profileCache[key];
+    if (p) return p;
+    p = a == null ? (b === "f" ? ADULT_F : ADULT_M) : childProfile(b, a);
+    profileCache[key] = p;
+    return p;
+  }
+
+  /* ---- HAIR SHELL -------------------------------------------------------
+     OWNER BUG: "the back-of-head hair reads as two separate blocks."
+     It did, and no amount of tucking two boxes together fixes it, because
+     the old rig showed hair-lid / BARE SKIN / hair-plank stacked down the
+     back of the skull from any 3/4-rear angle — the gap was the sides of
+     the head, not the seam. Low-poly practice (and every stylised asset
+     pack) models hair as ONE continuous shell spanning crown -> nape ->
+     tail, never a skull cap plus a floating tail.
+
+     So hair is now literally one mesh: the boxes are merged into a single
+     cached BufferGeometry per (style, head size). Draw calls go DOWN — a
+     long-haired woman was 2 meshes and is now 1 — and the seam cannot
+     exist because there is no seam.
+
+     The nape/lower-back-of-skull volume is the highest-leverage female cue
+     at gameplay distance: it reads from front, side AND behind, unlike a
+     fringe or hairline which only reads face-on. That is why every style
+     below is defined by how far its mass hangs BELOW the crown line. */
+  const HAIR_STYLES = {
+    buzz:  { crownH: 0.13, backH: 0.24, sideW: 0.05, sideH: 0.18, tail: 0, bun: 0 },
+    short: { crownH: 0.21, backH: 0.34, sideW: 0.09, sideH: 0.25, tail: 0, bun: 0 },
+    crop:  { crownH: 0.24, backH: 0.30, sideW: 0.08, sideH: 0.21, tail: 0, bun: 0 },
+    bob:   { crownH: 0.22, backH: 0.60, sideW: 0.11, sideH: 0.54, tail: 0, bun: 0 },
+    long:  { crownH: 0.22, backH: 0.98, sideW: 0.115, sideH: 0.66, tail: 0, bun: 0 },
+    pony:  { crownH: 0.21, backH: 0.34, sideW: 0.085, sideH: 0.26, tail: 0.62, bun: 0 },
+    bun:   { crownH: 0.21, backH: 0.30, sideW: 0.085, sideH: 0.24, tail: 0, bun: 1 },
+    pigtail: { crownH: 0.21, backH: 0.36, sideW: 0.13, sideH: 0.46, tail: 0, bun: 0 },
+  };
+  const hairGeoCache = Object.create(null);
+
+  function hairGeometry(styleId, S) {
+    const st = HAIR_STYLES[styleId] || HAIR_STYLES.short;
+    const key = styleId + "|" + S.toFixed(3);
+    const hit = hairGeoCache[key];
+    if (hit) return hit;
+    const k = S / 0.60;                       // every offset scales with the head
+    const hw = S + 0.04, hd = S + 0.04;
+    const crownH = st.crownH * k, backH = st.backH * k, sideH = st.sideH * k;
+    const sideW = st.sideW * k;
+    const crownTop = S + 0.06 * k;            // sits proud of the skull crown
+    const crownBot = crownTop - crownH;
+    const shellTop = crownBot + 0.07 * k;     // everything else tucks UP into the crown
+    const parts = [];
+    const put = (w, h, d, x, y, z) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      g.translate(x, y, z);
+      parts.push(g);
+    };
+    // crown: pulled back off the brow so a hairline reads instead of a helmet
+    put(hw, crownH, hd * 0.92, 0, (crownTop + crownBot) / 2, -0.03 * k);
+    // back of the skull down to the nape (and past it, for long styles)
+    put(hw * 0.97, backH, 0.17 * k, 0, shellTop - backH / 2, -(S / 2 + 0.025 * k));
+    // OCCIPITAL WEDGE. A shell that wraps the skull as a smooth even layer is
+    // exactly what reads as a HELMET — the tell is the perfectly round rear
+    // silhouette. Real hair carries extra mass over the occipital bone, so one
+    // short proud block at the back-upper skull breaks that circle. It is the
+    // cheapest single fix for helmet-head and it costs nothing (same merge).
+    // Offset so its rear face stands a clear ~0.03 PROUD of the back panel: a
+    // 5mm bulge is invisible at 30m and close enough to shimmer against the
+    // panel's parallel face, while its front stays buried inside the panel so
+    // no seam can open between them.
+    put(hw * 0.80, crownH * 0.85, 0.11 * k, 0, crownBot + 0.01 * k, -(S / 2 + 0.085 * k));
+    // sides: temple -> ear -> jaw. THIS is what closes the old skin gap.
+    const sx = S / 2 + sideW / 2 - 0.02 * k;
+    put(sideW, sideH, hd * 0.72, -sx, shellTop - sideH / 2, -0.05 * k);
+    put(sideW, sideH, hd * 0.72, sx, shellTop - sideH / 2, -0.05 * k);
+    if (st.tail) {
+      const tH = st.tail * k;
+      put(0.17 * k, tH, 0.17 * k, 0, shellTop - 0.05 * k - tH / 2, -(S / 2 + 0.15 * k));
+    }
+    if (st.bun) put(0.26 * k, 0.24 * k, 0.26 * k, 0, crownTop - 0.02 * k, -(S / 2 + 0.02 * k));
+    if (styleId === "pigtail") {
+      const tH = 0.34 * k;
+      put(0.14 * k, tH, 0.14 * k, -(S / 2 + 0.08 * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
+      put(0.14 * k, tH, 0.14 * k, (S / 2 + 0.08 * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
+    }
+    let geo;
+    const U = THREE.BufferGeometryUtils;
+    if (U && U.mergeBufferGeometries && parts.length > 1) {
+      geo = U.mergeBufferGeometries(parts, false);
+      for (let i = 0; i < parts.length; i++) parts[i].dispose();
+    }
+    if (!geo) geo = parts[0];                 // degrade-safe: no merge util -> the crown alone
+    geo._shared = true;
+    hairGeoCache[key] = geo;
+    return geo;
+  }
+
+  /* Pick a style. NO RNG LIVES HERE — this file has no seeded stream in scope
+     (the Math.random below is runtime-only gait desync, never appearance), and
+     appearance must stay byte-identical per seed for multiplayer. So the roll
+     stays the caller's (peds.js rolls it seeded) and this is a pure function of
+     what the caller asked for plus the body it is building.
+
+     `c.hairStyle` is the new explicit control. `c.longHair` is the LEGACY
+     boolean and still works untouched, which is why every existing call site
+     (player.js, peds.js, entities/crowd.js) keeps behaving without an edit. */
+  function hairStyleFor(c, P) {
+    if (c.hairStyle && HAIR_STYLES[c.hairStyle]) return c.hairStyle;
+    if (c.bald) return "buzz";
+    if (P.band === "baby") return "buzz";                  // wispy, barely there
+    // Before puberty a boy and a girl share one body — the read comes from hair
+    // and dress, exactly as it does in life. So childhood is where hair carries
+    // the MOST signal, not the least.
+    if (P.child) return P.fem ? (c.longHair ? "pigtail" : "bob") : "crop";
+    if (P.fem) return c.longHair ? "long" : "bob";
+    return "short";
+  }
+
   function makeCharacter(c) {
     const g = new THREE.Group();
     // Keep the world/physics root at scale 1: ragdoll, KO, child rigs and mode
@@ -103,73 +518,110 @@
     g.userData.humanScale = humanScale;
     g.add(model);
 
-    // ---- BUILD param (c.build: "m" default | "f") -----------------------
-    // A single boolean gate read at every dimension below. Every fem-only
-    // number sits behind `fem ? … : …` (or `if (fem)`) so the untouched
-    // default path — c.build undefined/"m" — produces byte-identical
-    // geometry to before this feature existed: same widths, same offsets,
-    // same leg height (gait math in animChar is keyed off leg height, so
-    // that one stays fixed for both builds). fem only narrows/tapers the
-    // silhouette (shoulders, torso, legs, head) and hip-flares the leg
-    // pivots slightly; it does not restructure the rig — no part is
-    // renamed or added/removed except the optional long-hair mesh below.
-    const fem = c.build === "f";
+    // ---- BODY PROFILE (c.build: "m" default | "f"; c.age: years | null) ----
+    // ONE table read replaces the ~20 `fem ? a : b` ternaries that used to be
+    // smeared through this function — the reason the only two bodies this rig
+    // could ever build were "man" and "slightly smaller man". Every dimension
+    // below now comes from the profile record and NOTHING here branches on sex
+    // or age again. ADULT_M holds the exact literals this rig has always used,
+    // so the untouched default path (c.build undefined/"m", no c.age) is
+    // byte-identical to before this change: same widths, same offsets, same
+    // leg height. Adding a body is a row in GROWTH, not new geometry code.
+    const P = charProfile(c.build, c.age);
+    // Stamped on the ROOT so any system holding only an Object3D can ask what
+    // it is looking at — systems/childsafe.js reads exactly these to keep
+    // children out of weapons, gore and the kill feed.
+    g.userData.charBand = P.band;
+    g.userData.charAge = P.ageYears;
+    g.userData.charChild = !!P.child;
     const metric = {
-      height: 2.60 * humanScale * (fem ? 0.97 : 1),
-      width: (fem ? 1.34 : 1.54) * humanScale,
-      depth: 0.70 * humanScale,
+      height: 2.60 * P.statureMul * humanScale,
+      width: (P.armX * 2 + P.armW) * humanScale,
+      depth: (Math.max(P.torsoD, P.pelvisD) + 0.20) * humanScale,
     };
     g.userData.characterMetric = metric;
 
     // ---- legs (children of root: feet stay planted) ----
-    const legW = fem ? 0.30 : 0.34;
-    const hipX = fem ? 0.26 : 0.23; // hip flare: pivots a touch wider when fem
-    const ll = limb(legW, LEG_UP, LEG_LO, legW, c.legs, c.shoes, 0.2);
-    const rl = limb(legW, LEG_UP, LEG_LO, legW, c.legs, c.shoes, 0.2);
-    ll.position.set(-hipX, 0.95, 0); rl.position.set(hipX, 0.95, 0);
+    // The hip pivot is wherever the legs actually END. It used to be the
+    // constant 0.95, which is precisely why a child could only ever be a
+    // shrunken adult: short legs had nowhere to put the hips. Everything above
+    // is stacked off this, so a toddler's hips sit at a toddler's height.
+    const hipY = P.legUp + P.legLo;
+    const ll = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH);
+    const rl = limb(P.legW, P.legUp, P.legLo, P.legW, c.legs, c.shoes, P.shoeH);
+    ll.position.set(-P.hipX, hipY, 0); rl.position.set(P.hipX, hipY, 0);
+    // STEP WIDTH, from frame zero. animChar damps this channel toward the same
+    // value every frame, but a rig that never animates (the charpanel portrait,
+    // a paused cinematic) would otherwise stand in a stance it never had.
+    ll.rotation.z = P.stanceZ; rl.rotation.z = -P.stanceZ;
     model.add(ll, rl);
     // A shallow pelvis overlaps both leg caps and the bottom of the torso.
     // Besides reading anatomically, it hides sub-frame gaps when gait, hit
     // reaction and body lean all blend on the same frame.
-    const pelvis = new THREE.Mesh(boxGeom(fem ? 0.72 : 0.84, 0.20, fem ? 0.43 : 0.48), cmat(c.legs));
-    pelvis.position.set(0, 0.98, 0); pelvis.castShadow = pelvis.receiveShadow = true;
+    const pelvis = new THREE.Mesh(boxGeom(P.pelvisW, P.pelvisH, P.pelvisD), cmat(c.legs));
+    pelvis.position.set(0, hipY + 0.03, 0); pelvis.castShadow = pelvis.receiveShadow = true;
     model.add(pelvis);
 
-    // subtle overall height trim for fem builds. Safe for foot-planting:
-    // the legs are the ONLY thing that reaches this group's local y=0
-    // (foot bottom = ll.position.y − leg height = 0.95 − 0.95 = 0), and
-    // scaling g.scale.y multiplies every child's local y by the same
-    // factor about that same local origin — a point already at y=0 stays
-    // at y=0 regardless of scale, so feet neither sink nor float.
-    model.scale.set(humanScale, humanScale * (fem ? 0.97 : 1), humanScale);
+    // Stature is BAKED INTO THE SEGMENTS now (a female rig is shorter because
+    // her femur and torso boxes are shorter, a toddler because all of them
+    // are), so this node does nothing but the metre conversion. The old
+    // non-uniform `scale.y * 0.97` fem squash is gone: squashing a body is what
+    // made women read as compressed men rather than differently proportioned.
+    model.scale.setScalar(humanScale);
 
     // ---- body (everything above the hips) ----
     const body = new THREE.Group();
     body.position.y = 0; // bob/sway/lean applied here
     model.add(body);
 
-    const torso = new THREE.Mesh(boxGeom(fem ? 0.78 : 0.92, 0.95, fem ? 0.44 : 0.5), cmat(c.torso));
-    torso.position.y = 1.42; torso.castShadow = torso.receiveShadow = true;
-    const collar = new THREE.Mesh(boxGeom(fem ? 0.80 : 0.94, 0.18, fem ? 0.46 : 0.52), cmat(c.collar || c.torso));
-    collar.position.y = 1.84;
-    body.add(torso, collar);
+    // ---- torso column: chest, plus an optional WAIST box ----------------
+    // base sits a whisker below the hip pivot so the column overlaps the pelvis
+    // and no sub-frame gap can open. neckY then FALLS OUT of the stack instead
+    // of being an adult constant — this single line is what lets a short child
+    // torso put the shoulders where they anatomically belong.
+    const base = hipY - 0.005;
+    const neckY = base + P.torsoH - 0.015;
+    const waistH = P.waistShare > 0 ? P.waistShare * P.torsoH : 0;
+    const chestBot = base + waistH;
+    const chestH = P.torsoH - waistH;
+    const torso = new THREE.Mesh(boxGeom(P.torsoW, chestH, P.torsoD), cmat(c.torso));
+    torso.position.y = chestBot + chestH / 2;
+    torso.castShadow = torso.receiveShadow = true;
+    body.add(torso);
+    // THE WAIST is the highest-value cheap female cue at gameplay distance.
+    // Shoulder:hip alone still reads "small man" until something carves the
+    // taper between them (WHR ~0.7-0.8 female vs ~0.85-0.95 male). The SAME box
+    // is the toddler's pot belly — there it is WIDER and DEEPER than the chest
+    // instead of narrower. Two boxes either way; the profile numbers do all the
+    // work, which is the whole point of the table.
+    let waist = null;
+    if (waistH > 0) {
+      waist = new THREE.Mesh(boxGeom(P.waistW, waistH + WAIST_TUCK, P.waistD), cmat(c.torso));
+      // The top tucks UP into the chest box (the same overlap trick the limb
+      // joints use), so leaning or a hit reaction can never open a seam.
+      waist.position.y = base + (waistH + WAIST_TUCK) / 2;
+      waist.castShadow = waist.receiveShadow = true;
+      body.add(waist);
+    }
+    const collar = new THREE.Mesh(boxGeom(P.collarW, P.collarH, P.collarD), cmat(c.collar || c.torso));
+    collar.position.y = neckY - 0.04;
+    body.add(collar);
 
-    // short-sleeve opt-in: the forearm reads as bare skin (peds.js tees);
-    // fem builds narrow the arm and pull the shoulder socket in a touch.
-    const armW = fem ? 0.26 : 0.3;
-    const armX = fem ? 0.54 : 0.62;
-    const la = limb(armW, ARM_UP, ARM_LO, armW, c.arms, c.skin, 0.2, c.shortSleeve ? c.skin : null);
-    const ra = limb(armW, ARM_UP, ARM_LO, armW, c.arms, c.skin, 0.2, c.shortSleeve ? c.skin : null);
+    // short-sleeve opt-in: the forearm reads as bare skin (peds.js tees).
+    const shoulderY = neckY - 0.04;
+    const la = limb(P.armW, P.armUp, P.armLo, P.armW, c.arms, c.skin, P.handH, c.shortSleeve ? c.skin : null);
+    const ra = limb(P.armW, P.armUp, P.armLo, P.armW, c.arms, c.skin, P.handH, c.shortSleeve ? c.skin : null);
     // The chase camera sees the old +X "right" socket on the player's visible
     // left flank. Mirror the arm roots so the semantic right hand — and every
     // weapon attached to it — is actually on the player's right in third person.
-    la.position.set(armX, 1.84, 0); ra.position.set(-armX, 1.84, 0);
+    la.position.set(P.armX, shoulderY, 0); ra.position.set(-P.armX, shoulderY, 0);
+    la.rotation.z = P.armOutZ; ra.rotation.z = -P.armOutZ;   // idle carry, frame zero
     body.add(la, ra);
     const leftHand = new THREE.Group();
     const rightHand = new THREE.Group();
-    // wrist, in the ELBOW group's frame (upper 0.46 already spent above it)
-    leftHand.position.set(0, -ARM_LO - 0.01, 0.035);
-    rightHand.position.set(0, -ARM_LO - 0.01, 0.035);
+    // wrist, in the ELBOW group's frame (the upper segment is spent above it)
+    leftHand.position.set(0, -P.armLo - 0.01, 0.035);
+    rightHand.position.set(0, -P.armLo - 0.01, 0.035);
     leftHand.userData.isSocket = rightHand.userData.isSocket = true;
     la.userData.low.add(leftHand); ra.userData.low.add(rightHand);
     const thirdPersonWeapon = new THREE.Group();
@@ -177,23 +629,34 @@
     thirdPersonWeapon.userData.isSocket = true;
     rightHand.add(thirdPersonWeapon);
 
-    // neck pivot so the head can turn/tilt independently
+    // neck pivot so the head can turn/tilt independently. neckDrop sinks the
+    // head toward the shoulders for the young: a toddler has no visible neck at
+    // all, and that "head sitting straight on the shoulders" read is half of
+    // what makes a small body look like a CHILD instead of a distant adult.
     const neck = new THREE.Group();
-    neck.position.y = 1.88;
+    neck.position.y = neckY - P.neckDrop;
     // head keeps a FRESH (unshared) material — systems/reactions.js flashes
     // its emissive per-actor on hits, so it must not be a shared cache entry.
-    const headSize = fem ? 0.55 : 0.6;
+    const headSize = P.headSize;
     const head = new THREE.Mesh(boxGeom(headSize, headSize, headSize), mat(c.skin));
     head.position.y = headSize / 2; head.castShadow = true;
+    neck.add(head);
     // FACE READS AT RANGE: slightly bigger, darker, prouder features so a face
     // is legible at 20-40u (street distance), not just in a close-up. Deeper
     // boxes wrap back into the head so the features hold up at oblique angles
-    // instead of vanishing edge-on. facial.js owns eye x/y + mouth y at runtime
-    // (it rewrites them every frame); z and geometry size are ours to set here.
-    // faceZ tracks headSize/2 (+ the original 0.015 protrusion) so the smaller
-    // fem head still sits its features flush on the surface instead of the
-    // fixed 0.315 floating past a shrunk face.
-    const faceZ = headSize / 2 + 0.015;
+    // instead of vanishing edge-on.
+    //
+    // FACE SCALE NODE: systems/facial.js owns eye x/y and mouth y at runtime and
+    // writes them as ABSOLUTE numbers tuned for the 0.60 adult head — it would
+    // stamp adult-spaced eyes onto a toddler's small skull every frame. Parenting
+    // the features to a group scaled by headSize/0.60 means those writes land in
+    // a frame that shrinks WITH the head, so every face is correct and facial.js
+    // never has to learn that children exist. At adult size the factor is 1 and
+    // every literal below is the one that was here before.
+    const face = new THREE.Group();
+    face.scale.setScalar(headSize / 0.60);
+    neck.add(face);
+    const faceZ = 0.315;                       // 0.60/2 + the 0.015 protrusion
     const eyeMat = cmat(0x101010);
     const le = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
     const re = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
@@ -203,7 +666,7 @@
     brow.position.set(0, 0.46, faceZ);
     const mouth = new THREE.Mesh(boxGeom(0.22, 0.06, 0.06), cmat(0x4a2528));
     mouth.position.set(0, 0.16, faceZ);
-    neck.add(head, le, re, brow, mouth);
+    face.add(le, re, brow, mouth);
     body.add(neck);
 
     // ---- accessories (all on the body so they move with it) ----
@@ -230,15 +693,21 @@
         // the torso/pelvis faces it overlaps (TBDR z-fight guard) — and the band
         // follows the collar/stripe grammar (H 0.14) instead of a fat 0.16 slab.
         // The old fixed 0.96 band ignored `fem` entirely (see CHAR_BELT_V2).
-        const beltW = fem ? 0.76 : 0.90;
-        const beltD = fem ? 0.46 : 0.52;
-        const belt = new THREE.Mesh(boxGeom(beltW, 0.14, beltD), cmat(c.belt));
-        belt.position.y = 1.02; body.add(belt); beltParts.push(belt);
+        // Sized off the CURRENT build's boxes: a hair narrower than the shirt so
+        // it tucks in, proud of the hips so it hugs. Profile-driven now, so a
+        // child's belt is a child's belt instead of a hula hoop.
+        const beltW = (waist ? P.waistW : P.torsoW) * 0.98;
+        const beltD = (waist ? P.waistD : P.torsoD) * 1.04;
+        const beltY = base + Math.max(0.06, waistH * 0.45);
+        const belt = new THREE.Mesh(boxGeom(beltW, 0.14 * P.statureMul, beltD), cmat(c.belt));
+        belt.position.y = beltY; body.add(belt); beltParts.push(belt);
         // Buckle plate: shorter than the band (H 0.10, seated within it) and
         // straddling the band's front face (beltD/2 → half its depth buried in
         // the band, half proud) so it reads raised and never floats off.
-        const buckle = new THREE.Mesh(boxGeom(fem ? 0.16 : 0.18, 0.10, 0.06), cmat(0xffd451));
-        buckle.position.set(0, 1.02, beltD / 2); body.add(buckle); beltParts.push(buckle);
+        // Derived from the band, not from sex — the last `fem ?` in this
+        // function is gone, which was the whole point of the profile table.
+        const buckle = new THREE.Mesh(boxGeom(beltW * 0.20, 0.10, 0.06), cmat(0xffd451));
+        buckle.position.set(0, beltY, beltD / 2); body.add(buckle); beltParts.push(buckle);
       } else {
         const belt = new THREE.Mesh(boxGeom(0.96, 0.16, 0.54), cmat(c.belt));
         belt.position.y = 1.02; body.add(belt); beltParts.push(belt);
@@ -248,58 +717,72 @@
     }
     if (c.badge) {
       const badge = new THREE.Mesh(boxGeom(0.16, 0.16, 0.05), cmat(0xffd451));
-      badge.position.set(-0.28, 1.55, 0.27); body.add(badge); badgeParts.push(badge);
+      badge.position.set(-0.28, chestBot + chestH * 0.64, P.torsoD / 2 + 0.02);
+      body.add(badge); badgeParts.push(badge);
     }
     if (c.cap) {
-      const cap = new THREE.Mesh(boxGeom(0.66, 0.22, 0.66), cmat(c.cap));
-      cap.position.y = 0.67; neck.add(cap); capParts.push(cap);
-      const brim = new THREE.Mesh(boxGeom(0.66, 0.1, 0.3), cmat(c.cap));
-      brim.position.set(0, 0.58, 0.42); neck.add(brim); capParts.push(brim);
+      const ck = headSize / 0.60;
+      const cap = new THREE.Mesh(boxGeom(0.66 * ck, 0.22 * ck, 0.66 * ck), cmat(c.cap));
+      cap.position.y = headSize + 0.07 * ck; neck.add(cap); capParts.push(cap);
+      const brim = new THREE.Mesh(boxGeom(0.66 * ck, 0.1 * ck, 0.3 * ck), cmat(c.cap));
+      brim.position.set(0, headSize - 0.02 * ck, 0.42 * ck); neck.add(brim); capParts.push(brim);
     } else {
-      const hair = new THREE.Mesh(boxGeom(0.64, 0.18, 0.64), cmat(c.hair || 0x4a3526));
-      hair.position.y = 0.62; neck.add(hair); hairParts.push(hair);
-      // LONG HAIR (fem builds only): a second box hanging off the BACK of the
-      // head down the neck, same material as the top hair box. Gated on an
-      // explicit c.longHair flag rather than a coin-flip in here — this file
-      // has no rng in scope (Math.random() below is only used to desync gait
-      // phase, not appearance), so the short/long split is left as a
-      // deterministic decision for the caller (e.g. a seeded roll in
-      // city/peds.js), same pattern as c.cap gating the whole hair block.
-      if (fem && c.longHair) {
-        // ONE CONTINUOUS HAIR MASS (owner bug: "block on top + separate block
-        // on the back"). The old back panel (0.5w, top y=0.495, back z=-0.38)
-        // missed the top slab (bottom y=0.53, back z=-0.32) on all three axes:
-        // a 0.035 skin gap below the slab, a 0.07-per-side width step, and a
-        // 0.06 rear jut. The panel now TUCKS UP INTO the slab (top y=0.62,
-        // 0.09 overlap — same trick as the limb joints), tapers only 0.02 per
-        // side (0.60 vs 0.64), and sits 0.015 proud of the slab's back face
-        // (-0.335..-0.175: flush-reading, but never co-planar → no z-fight;
-        // front edge stays buried inside the head so no head/hair gap).
-        const longHair = new THREE.Mesh(boxGeom(0.6, 0.68, 0.16), cmat(c.hair || 0x4a3526));
-        longHair.position.set(0, 0.28, -0.255); neck.add(longHair); hairParts.push(longHair);
-      }
+      // ONE MERGED SHELL — see the HAIR SHELL block above for the owner bug and
+      // why a skull-cap-plus-back-plank can never be fixed by tucking. The
+      // boxes are merged into a single cached BufferGeometry, so the seam
+      // cannot exist (there is no seam) and a long-haired woman now costs ONE
+      // draw call where she used to cost two.
+      const styleId = hairStyleFor(c, P);
+      const hairMesh = new THREE.Mesh(hairGeometry(styleId, headSize), cmat(c.hair || 0x4a3526));
+      hairMesh.castShadow = true;
+      hairMesh.userData.hairStyle = styleId;
+      neck.add(hairMesh); hairParts.push(hairMesh);
     }
 
     // painted-clothing atlas metadata: which vertical band of the garment row
     // each segment shows (0=hem/wrist, 1=shoulder/waist). city/clothes.js
     // reads these to UV-map split limbs; absent tags = whole row (legacy).
+    // Profile-driven, so a painted sleeve lands on a child's short arm in the
+    // same place it lands on an adult's instead of running off the end of it.
+    // At adult-male numbers every value below is the literal that was here.
     const tagCloth = (mesh, dims, band) => { mesh.userData.clothDims = dims; mesh.userData.clothBand = band; };
-    tagCloth(la.userData.main, [0.3, ARM_UP, 0.3], [1 - ARM_UP / 0.92, 1]);
-    tagCloth(ra.userData.main, [0.3, ARM_UP, 0.3], [1 - ARM_UP / 0.92, 1]);
-    tagCloth(la.userData.lower, [0.27, ARM_LO + 0.06, 0.27], [0, (ARM_LO + 0.06) / 0.92]);
-    tagCloth(ra.userData.lower, [0.27, ARM_LO + 0.06, 0.27], [0, (ARM_LO + 0.06) / 0.92]);
-    tagCloth(ll.userData.main, [0.34, LEG_UP, 0.34], [1 - LEG_UP / 0.95, 1]);
-    tagCloth(rl.userData.main, [0.34, LEG_UP, 0.34], [1 - LEG_UP / 0.95, 1]);
-    tagCloth(ll.userData.lower, [0.31, LEG_LO + 0.06, 0.31], [0, (LEG_LO + 0.06) / 0.95]);
-    tagCloth(rl.userData.lower, [0.31, LEG_LO + 0.06, 0.31], [0, (LEG_LO + 0.06) / 0.95]);
+    // THE TORSO COLUMN IS TWO BOXES NOW for any body with a waist, and a
+    // garment row painted across it must be SPLIT or every horizontal feature
+    // in it (hem, belt, waistband, print) draws twice — once on the chest and
+    // again on the waist, which is exactly the doubled belt line you would see.
+    // Tagged here, at the only place that knows the real split, so city/
+    // clothes.js never has to re-derive it from a copy of WAIST_TUCK that can
+    // silently drift out of step with this file.
+    if (waist) {
+      const wh = waistH + WAIST_TUCK;
+      tagCloth(torso, [P.torsoW, chestH, P.torsoD], [waistH / P.torsoH, 1]);          // TOP of the row
+      tagCloth(waist, [P.waistW, wh, P.waistD], [0, Math.min(1, wh / P.torsoH)]);     // BOTTOM of the row
+    }
+    const armLen = P.armUp + P.armLo, legLen = P.legUp + P.legLo;
+    const alw = P.armW * 0.9, llw = P.legW * 0.9;
+    tagCloth(la.userData.main, [P.armW, P.armUp, P.armW], [1 - P.armUp / armLen, 1]);
+    tagCloth(ra.userData.main, [P.armW, P.armUp, P.armW], [1 - P.armUp / armLen, 1]);
+    tagCloth(la.userData.lower, [alw, P.armLo + 0.06, alw], [0, (P.armLo + 0.06) / armLen]);
+    tagCloth(ra.userData.lower, [alw, P.armLo + 0.06, alw], [0, (P.armLo + 0.06) / armLen]);
+    tagCloth(ll.userData.main, [P.legW, P.legUp, P.legW], [1 - P.legUp / legLen, 1]);
+    tagCloth(rl.userData.main, [P.legW, P.legUp, P.legW], [1 - P.legUp / legLen, 1]);
+    tagCloth(ll.userData.lower, [llw, P.legLo + 0.06, llw], [0, (P.legLo + 0.06) / legLen]);
+    tagCloth(rl.userData.lower, [llw, P.legLo + 0.06, llw], [0, (P.legLo + 0.06) / legLen]);
 
     const rig = {
       group: g, model, metric, body, neck, head,
       parts: { ll, rl, la, ra },
       low: { ll: ll.userData.low, rl: rl.userData.low, la: la.userData.low, ra: ra.userData.low },
       sockets: { leftHand, rightHand, weapon: rightHand, thirdPersonWeapon },
+      // The body this rig was BUILT from. Every downstream system that used to
+      // guess an adult constant (seated hip height, mount points, gait
+      // multipliers, child protection) reads it from here instead.
+      profile: P, hipY, band: P.band, child: !!P.child, ageYears: P.ageYears,
+      stanceZ: P.stanceZ, armOutZ: P.armOutZ, gait: P.gait || GAIT_NEUTRAL,
       skinSlots: {
-        torso: [torso],
+        // torso[0] stays the CHEST box — clothes.js and wounds.js both index
+        // [0] and would otherwise start painting/bleeding on a waistband.
+        torso: waist ? [torso, waist] : [torso],
         collar: [collar],
         legs: [ll.userData.main, rl.userData.main],
         legsLower: [ll.userData.lower, rl.userData.lower],
@@ -347,7 +830,13 @@
   // helpers make that rotation happen around the hip in full 3D. Compensation
   // is delta-tracked so reaction/grapple layers can safely re-lock after they
   // add their own pitch/roll without accumulating translation frame to frame.
+  // The hip socket is wherever THIS body's legs end. It was a hard 0.95 (the
+  // adult male), which silently pinned every child and every shorter body to an
+  // adult's hips — the rotation would pivot around a point floating above a
+  // toddler's actual waist. rig.hipY carries the real value; a legacy rig with
+  // no profile falls back to the old constant, so nothing can regress.
   const CHARACTER_HIP_Y = 0.95;
+  const hipYOf = (ch) => (ch && ch.hipY > 0 ? ch.hipY : CHARACTER_HIP_Y);
   const _hipPivot = new THREE.Vector3();
   function beginCharacterHipFrame(ch) {
     if (!ch || !ch.body) return;
@@ -358,9 +847,10 @@
   }
   function lockCharacterHips(ch) {
     if (!ch || !ch.body) return;
-    _hipPivot.set(0, CHARACTER_HIP_Y, 0).applyEuler(ch.body.rotation);
+    const hy = hipYOf(ch);
+    _hipPivot.set(0, hy, 0).applyEuler(ch.body.rotation);
     const nx = -_hipPivot.x;
-    const ny = CHARACTER_HIP_Y - _hipPivot.y;
+    const ny = hy - _hipPivot.y;
     const nz = -_hipPivot.z;
     ch.body.position.x += nx - (ch._hipCompX || 0);
     ch.body.position.y += ny - (ch._hipCompY || 0);
@@ -371,12 +861,19 @@
   // Shared by full character rigs and the instanced jail crowd. Phase is in
   // radians; PI radians is one alternating footfall. Distance, not frame count,
   // owns cadence so a metre travelled looks the same at every refresh rate.
-  function gaitPhaseDelta(speed, dt, walkRef) {
+  function gaitPhaseDelta(speed, dt, walkRef, stepMul) {
     walkRef = walkRef || ((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4);
     const moving = speed > 0.2;
     const norm = Math.min(speed / walkRef, 1);
     const run = clamp01((speed - walkRef) / (walkRef * 0.7));
-    const stepLen = 1.15 + 0.10 * norm + 0.55 * run;
+    // CADENCE IS NOT AUTHORED — it falls out of speed ÷ stride, which is
+    // exactly right: the gait literature (Cho 2004) finds cadence essentially
+    // EQUAL between the sexes at preferred speed, with women taking SHORTER
+    // STRIDES. So shortening the stride here is the whole female cadence
+    // effect, and a short-legged child gets a child's quick patter for free.
+    // Omitted stepMul = 1 = the motion this game has always had (the external
+    // caller in entities/crowd.js passes two args and is unaffected).
+    const stepLen = (1.15 + 0.10 * norm + 0.55 * run) * (stepMul > 0 ? stepMul : 1);
     return moving ? (speed * dt / stepLen) * Math.PI : dt * 0.9;
   }
 
@@ -428,13 +925,18 @@
       const ref = ch.seatRef && (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SEAT_POSE_V2 !== false) ? ch.seatRef : null;
       if (ref && ch.model) {
         const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
-        const THIGH = 0.46 * hs, SHIN = 0.50 * hs;   // hip→knee pivot, knee→sole
+        // Profile-driven so a child folds at a child's knee: the segment
+        // lengths ARE the rig's own (plus the shoe cap for the sole). Legacy
+        // rigs with no profile keep the authored adult constants exactly.
+        const pf = ch.profile;
+        const THIGH = (pf ? pf.legUp : 0.46) * hs;
+        const SHIN = (pf ? pf.legLo + 0.03 : 0.50) * hs;   // hip→knee pivot, knee→sole
         // hip pivot above the FLOOR: cushion + a whisker less than the thigh's
         // half-thickness (~0.12·hs) so the thigh presses INTO the cushion a
         // touch — a sat-in seat, never a hover. Floor for the low clamp: the
         // hips can't drop below what a near-vertical shin can span.
         const hipF = Math.max((ref.cushion != null ? ref.cushion : 0.45) + 0.10 * hs, SHIN * 0.55);
-        const sink = hipF - 0.95 * hs - (ref.floorBelow || 0);
+        const sink = hipF - hipYOf(ch) * hs - (ref.floorBelow || 0);
         ch.model.position.y = damp(ch.model.position.y, sink, sr, dt);
         ch._seatSunk = 1;
         const drop = Math.max(0.05, hipF - 0.03 * hs);   // hip → sole, soles a hair above the floor
@@ -573,14 +1075,22 @@
     // footfalls, which made every actor read as a slow-motion jogger at full FPS.
     // Convert travelled steps to radians, and lengthen the step modestly as a
     // run opens up so sprint cadence stays quick without turning into a buzz.
-    ch.phase += gaitPhaseDelta(speed, dt, walkRef);
+    // GAIT STYLE: a set of MULTIPLIERS on the literals below, carried by the
+    // body profile the rig was built from (character profile → rig.gait).
+    // Every multiplier is 1 for the adult male, so an un-profiled or legacy rig
+    // is bit-for-bit the motion this game has always had. Nothing here adds an
+    // animation STATE — a woman and a toddler run the same code as everyone
+    // else, weighted differently. That is why all ~15 makeCharacter call sites
+    // get the new motion without a line of change.
+    const GA = ch.gait || GAIT_NEUTRAL;
+    ch.phase += gaitPhaseDelta(speed, dt, walkRef, GA.step);
     const sinP = Math.sin(ch.phase), cosP = Math.cos(ch.phase);
     // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
     // not the old whole-group scale.y accordion squash. cb eases 0→1 so
     // entering/leaving a crouch flows through the same damped targets.
     ch._cb = damp(ch._cb || 0, ch.crouch ? 1 : 0, 12, dt);
     const cb = ch._cb;
-    const hipAmp = (0.30 + 0.26 * norm + 0.16 * run2) * (1 - 0.35 * cb);
+    const hipAmp = (0.30 + 0.26 * norm + 0.16 * run2) * (1 - 0.35 * cb) * GA.hipAmp;
     const swing = sinP * hipAmp;
 
     // ---- LEG WOUND / LIMP STATE ----
@@ -612,8 +1122,13 @@
     ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, rSwing - rBend - crouchHip, legRate, dt);
     // CROSS-LEG GUARD: pose layers own z/y; recycled corpse splay must not
     // ride into a fresh walker (animChar only runs on live upright actors).
-    ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0, 12, dt);
-    ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, 0, 12, dt);
+    // STEP WIDTH lives on this channel: the guard damps toward the body's OWN
+    // stance instead of a flat zero, so a woman keeps her narrow near-midline
+    // walk and a toddler keeps its wide base every frame. Absent (legacy rig)
+    // reads 0 — the exact old behaviour.
+    const stZ = ch.stanceZ || 0;
+    ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, stZ, 12, dt);
+    ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -stZ, 12, dt);
     ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, 12, dt);
     ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, 12, dt);
     // the old scale.y foot-lift fake dies — real knees carry the clearance
@@ -623,8 +1138,11 @@
     // knees: flex through the swing phase (left swings forward while cosθ<0,
     // peaking mid-swing), carry a small stance flexion so legs never look
     // hyper-extended, plus a load-response dip right after heel strike.
-    const kneeAmp = 0.62 + 0.55 * norm + 0.55 * run2;   // sprint kicks heels up
-    const stanceK = moving ? 0.10 + 0.10 * norm : 0.04;
+    const kneeAmp = (0.62 + 0.55 * norm + 0.55 * run2) * GA.knee;   // sprint kicks heels up
+    // stanceKnee is ADDED, not multiplied: a new walker never straightens the
+    // knee through stance at all (Sutherland 1980), which is a large part of
+    // why a toddler's walk reads as a toddler's and not a small adult's.
+    const stanceK = (moving ? 0.10 + 0.10 * norm : 0.04) + GA.stanceKnee;
     const kneeL = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, -cosP), 1.3) * (hurtSide < 0 ? 1 - sev * 0.7 : 1) : 0.04;
     const kneeR = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, cosP), 1.3) * (hurtSide > 0 ? 1 - sev * 0.7 : 1) : 0.04;
     setKnee(J.ll, kneeL + lBend * 1.4 + cb * 1.00, legRate);
@@ -727,18 +1245,30 @@
       // idle, a soft 35-45° at a walk, a real ~90° runner's pump at sprint.
       // The elbow also folds a little extra as the arm swings FORWARD (a
       // straight back-swing + bent fore-swing is what reads "human").
-      const armAmp = hipAmp * (0.95 + 0.25 * run2);
+      // Men recruit the shoulders and arms more; women hold the upper body
+      // quieter and let the pelvis do the work (Bruening 2015). GA.armAmp
+      // carries that, and it is also what silences a new walker's arms —
+      // reciprocal arm swing does not appear until ~18 months.
+      const armAmp = hipAmp * (0.95 + 0.25 * run2) * GA.armAmp;
       const laTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
       const raTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
-      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, raTarget, armRate, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.08, 6, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.08, 6, dt);
+      // HIGH GUARD: before a toddler can balance, the arms ride up and out to
+      // the sides like a tightrope walker. It is the single most recognisable
+      // thing about a new walker and it costs one blend on channels the idle
+      // carry already owns. guard is 0 for every other body, so this whole
+      // block collapses to exactly the old targets.
+      const gd = GA.guard || 0;
+      const carryZ = ch.armOutZ != null ? ch.armOutZ : -0.08;
+      const outZ = carryZ + gd * 0.85;                 // arms swing wide of the ribs
+      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget * (1 - gd) - gd * 0.55, armRate, dt);
+      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, raTarget * (1 - gd) - gd * 0.55, armRate, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, outZ, 6, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -outZ, 6, dt);
       const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
       const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;   // forward swing folds
       const foldR = moving ? Math.max(0, -raTarget) * 0.8 : 0;
-      setElbow(J.la, -(elbBase + foldL), armRate - 2);
-      setElbow(J.ra, -(elbBase + foldR), armRate - 2);
+      setElbow(J.la, -(elbBase + foldL + gd * 0.55), armRate - 2);
+      setElbow(J.ra, -(elbBase + foldR + gd * 0.55), armRate - 2);
     }
     if (!ch.aimingPose) {
       if (!(ch.carryPose && ch.aimLong === true)) {
@@ -751,7 +1281,7 @@
 
     // ---- body: bob (2× stride), side sway, forward lean, counter-rotation --
     // CoM is lowest at double support (feet furthest apart, |sinθ| max).
-    const bobTarget = (moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) : 0) - cb * 0.38;
+    const bobTarget = (moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) * GA.bob : 0) - cb * 0.38;
     const idleBreath = moving ? 0 : Math.sin(ch.breath * 2.2) * 0.012;
     ch.bob = damp(ch.bob, bobTarget, 12, dt);
     ch.body.position.y = ch.bob + idleBreath;
@@ -779,7 +1309,12 @@
       }
       ch._prevYaw = yaw;
     }
-    const swayTarget = (moving ? sinP * (0.015 + 0.03 * norm) : Math.sin(ch.breath * 0.9) * 0.012) + turnBank;
+    // GA.sway scales only the GAIT term — turn-bank is physics and must not be
+    // sexed. This channel is the rig's stand-in for pelvic obliquity (there is
+    // no separate pelvis pivot), and it is the loudest female cue in motion:
+    // women carry markedly more pelvic obliquity than men (Cho 2004), and it
+    // reads from every angle at 30m where a waistline does not.
+    const swayTarget = (moving ? sinP * (0.015 + 0.03 * norm) * GA.sway : Math.sin(ch.breath * 0.9) * 0.012) + turnBank;
     ch.sway = damp(ch.sway, swayTarget, 10, dt);
     ch.body.rotation.z = ch.sway;
 
@@ -789,7 +1324,7 @@
     // shoulders counter-rotate the stride (right shoulder leads the left
     // foot): subtle at a walk, pronounced at a sprint. The punch layer OWNS
     // body.rotation.y while active, so only write it here when not punching.
-    const yGait = moving ? sinP * (0.05 + 0.05 * norm + 0.05 * run2) : 0;
+    const yGait = moving ? sinP * (0.05 + 0.05 * norm + 0.05 * run2) * GA.yaw : 0;
 
     // ---- LIMP: the body dips toward the hurt leg as it bears weight ----
     if (sev > 0.02 && moving && !legGone) {
@@ -1243,15 +1778,53 @@
       rig.body.add(m);
       return m;
     };
+    // Mount heights were authored against the adult male torso. Re-anchor them
+    // on THIS body's torso column so a stowed rifle rides a shorter back
+    // instead of hovering behind the head; s is 1 for the adult, so every
+    // existing rig keeps the exact hand-tuned numbers above.
+    const pf = rig.profile;
+    const s = pf ? (pf.legUp + pf.legLo + pf.torsoH) / (0.95 + 0.95) : 1;
     rig._mounts = {
-      back:  mk(-0.14, 1.44, -0.36, 1.571, -0.698, -1.271),
-      back2: mk( 0.14, 1.38, -0.42, 1.571,  0.698, -1.271),
-      hip:   mk( 0.46, 1.05, -0.20, -1.781, -0.26, Math.PI),
+      back:  mk(-0.14 * s, 1.44 * s, -0.36 * s, 1.571, -0.698, -1.271),
+      back2: mk( 0.14 * s, 1.38 * s, -0.42 * s, 1.571,  0.698, -1.271),
+      hip:   mk( 0.46 * s, 1.05 * s, -0.20 * s, -1.781, -0.26, Math.PI),
     };
     return rig._mounts;
   }
 
+  /* THE RATCHET for "a character is a BODY, never a resized adult" lives in
+     city/childhood.js as CBZ.childBodyAudit() — `faked` counts live peds whose
+     group.scale still deviates from 1, and it is pinned at zero in the math
+     gate. It is deliberately NOT duplicated here: this file had a rig-level
+     version of the same count for a while, and two ratchets measuring one
+     invariant is precisely the parallel bookkeeping the BLOCK LAW kills. The
+     rig's job is to make the real body cheap to build; childhood.js's job is to
+     prove nobody is faking one. */
+
   CBZ.makeCharacter = makeCharacter;
+  CBZ.charProfile = charProfile;
+  // Published so city/clothes.js can stop keeping its own copy of it — a
+  // duplicated geometry constant that drifts is a seam nobody notices until
+  // a hemline is 6cm wrong on every woman in the city.
+  CBZ.CHAR_WAIST_TUCK = WAIST_TUCK;
+  CBZ.charBands = { CHILD_ADULT_AGE, bandOf };
+  // One cheap question every other system asks: "is this a child?" Answers for
+  // a rig, a ped, or a bare Object3D (the root carries userData.charBand), and
+  // never throws on something unexpected.
+  CBZ.charIsChild = function (t) {
+    if (!t) return false;
+    if (t.child === true) return true;
+    if (typeof t.ageYears === "number") return t.ageYears < CHILD_ADULT_AGE;
+    if (t.profile && t.profile.child) return true;
+    if (t.char) return CBZ.charIsChild(t.char);
+    let o = t.isObject3D ? t : (t.group || null);
+    for (let i = 0; o && i < 6; i++, o = o.parent) {
+      const u = o.userData;
+      if (u && u.charBand) return u.charBand !== "adult";
+      if (u && u.charChild) return true;
+    }
+    return false;
+  };
   CBZ.animChar = animChar;
   CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;

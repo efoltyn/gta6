@@ -61,6 +61,10 @@
     }
     CBZ.buildVehicleEnv = CBZ.buildVehicleEnv || function () {};
     if (CBZ.ENV === undefined) CBZ.ENV = null;
+    // taperBox is pure geometry, NOT a material/env concern — the six aircraft
+    // builders call it unconditionally, so it must survive this kill switch too
+    // (function declarations hoist, so the definition below is already bound).
+    CBZ.taperBox = taperBox;
     return;
   }
 
@@ -333,9 +337,49 @@
     return registerForEnv(gm);
   }
 
+  // ---- SHARED VEHICLE/AIRCRAFT GEOMETRY SCULPTOR ---------------------------
+  //  taperBox() was hand-copied into SIX builders (aircraft.js, airtraffic.js,
+  //  island_military.js, playerair.js, playeraircraft.js, strategic.js). Five
+  //  copies were byte-identical; the sixth differed only in variable names and
+  //  comments — same math, same defaults, same return. Verified by extracting
+  //  each brace-matched body and diffing (2026-07-26 duplication census), then
+  //  collapsed here. carfx.js is the natural home: it is already the shared
+  //  vehicle-construction module (CBZ.vehicleMat/CBZ.ENV) and it loads at
+  //  index.html:344, well before every consumer (585-739), so the handle always
+  //  exists by the time a builder runs.
+  //
+  //  Scales each vertex's X/Y by a factor that depends on its Z (nose=+Z → nz,
+  //  tail=-Z → tz), with optional roofline (top) / keel (bot) narrowing.
+  //  Returns a BoxGeometry; callers flag it _shared so the cache disposer
+  //  leaves it alone. Pure function of its arguments — no external state.
+  function taperBox(w, h, d, opt) {
+    opt = opt || {};
+    // Resolve THREE off window, NOT the module-scoped `const THREE` below: on
+    // the CBZ.VEHICLE_FX === false kill-switch path this function is exported
+    // before that const is ever evaluated, so touching it would throw a
+    // temporal-dead-zone ReferenceError. (Verified by executing both paths.)
+    const T = window.THREE;
+    const nz = opt.nz != null ? opt.nz : 1, tz = opt.tz != null ? opt.tz : 1;
+    const top = opt.top != null ? opt.top : 1, bot = opt.bot != null ? opt.bot : 1;
+    const geo = new T.BoxGeometry(w, h, d, opt.segW || 2, opt.segH || 2, opt.segD || 6);
+    const pos = geo.attributes.position, hd = d / 2, hh = h / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const f = z / hd, zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
+      let sx = zt, sy = zt;
+      const vy = hh > 0 ? y / hh : 0;
+      if (vy > 0) sx *= (1 + (top - 1) * vy);
+      if (vy < 0) sx *= (1 + (bot - 1) * -vy);
+      pos.setX(i, x * sx); pos.setY(i, y * sy);
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals();
+    return geo;
+  }
+
   // ---- wire up exports + readiness backstops ------------------------------
   CBZ.buildVehicleEnv = buildVehicleEnv;
   CBZ.vehicleMat = vehicleMat;
+  CBZ.taperBox = taperBox;
   if (CBZ.ENV === undefined) CBZ.ENV = null;
 
   // Try once at load (renderer usually already exists here).

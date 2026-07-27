@@ -331,6 +331,9 @@
   }
   const scorchGeo = new THREE.PlaneGeometry(1, 1); scorchGeo._shared = true;
   function addScorch(x, z, radius, hold) {
+    // Never stamp a burn decal on open water — it floated on the sea as a flat
+    // black disc. Guarding the single builder covers all three call sites.
+    if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;
     if (!scorchTex) scorchTex = makeScorchTexture();
     while (scorches.length > 12) { const o = scorches.shift(); scene.remove(o.mesh); o.mesh.material.dispose(); }
     const mat = new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
@@ -1708,4 +1711,100 @@
     scene.add(p);
     puffPool.push(p);
   }
+
+  // ============================================================
+  // CBZ.cityEjectaCone(x, y, z, nx, nz, power, opts) — PENETRATION EXIT.
+  //
+  // The one facade read this file did not have. cityWallRuin / cityBlastWall
+  // describe a wound the ordnance stopped AT: an avalanche pouring DOWN the
+  // face, a heap on the pavement below, rebar off the header. A penetrator
+  // that goes THROUGH does the opposite — whatever energy survived the
+  // structure (E(x) = E0*e^-x/L; city/structural.js computes the survivor and
+  // calls this) leaves the far side as a directed JET: spall and pulverised
+  // slab thrown DOWNRANGE in a cone, a lance of hot gas ahead of it, and a
+  // sheet of pale concrete dust chasing both. Nothing pours down; everything
+  // goes out. That difference is the whole tell that a wing/bomb/tank round
+  // passed clean through the building.
+  //
+  // x,y,z = the EXIT point on the far face; nx,nz = the travel direction
+  // (already downrange, not the outward normal); power ~0.5 (a spent round
+  // barely breaking daylight) .. 3 (an airframe leaving a room-sized hole).
+  // Pure composition on the pools this file already owns — chunk pool +
+  // CHUNK_CAP recycle, the pooled sprite puffs, the pooled point-burst ring —
+  // so it adds no pool, no draw call class, and cannot flood. Headless-safe.
+  // ============================================================
+  CBZ.cityEjectaCone = function (x, y, z, nx, nz, power, opts) {
+    opts = opts || {};
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const P = Math.min(3, Math.max(0.3, power || 1));
+    // FX budget rides the perf/quality slider (tier0 sheds ~65%), sampled ONCE
+    const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
+    // unit travel axis in the ground plane + its tangent (the cone's spread)
+    const gn = nNorm(nx, nz); const ax = gn.x, az = gn.y;
+    let tx = -az, tz = ax;
+    const spread = opts.spread == null ? 0.62 : opts.spread;   // cone half-angle, radians
+    const y0 = Math.max(0.4, y == null ? 1.2 : y);
+
+    // ---- (1) SPALL: chunks thrown along the axis inside the cone. Speed is
+    // highest on the axis and falls off toward the rim (a real ejecta cone is
+    // a jet with a skirt, not an even fan).
+    const n = Math.min(CHUNK_CAP, Math.max(1, Math.round((5 + 7 * P) * fxq)));
+    while (chunks.length > CHUNK_CAP - n) recycleChunk();
+    const fall = Math.sqrt(Math.max(0.5, y0) / 8.8);
+    for (let i = 0; i < n; i++) {
+      const off = (rng() - 0.5) * 2;                 // -1..1 across the cone
+      const a = off * spread;
+      const axis = 1 - Math.abs(off) * 0.55;         // core is faster than the rim
+      const glow = rng() < 0.4;
+      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
+      const sc = (0.6 + rng() * 1.0) * (0.8 + P * 0.2);
+      const dx = ax * Math.cos(a) + tx * Math.sin(a);
+      const dz = az * Math.cos(a) + tz * Math.sin(a);
+      mesh.position.set(x + dx * 0.5, y0 + (rng() - 0.4) * 1.2, z + dz * 0.5);
+      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+      mesh.scale.setScalar(sc);
+      scene.add(mesh);
+      const sp = (5 + 7 * P) * axis * (0.6 + rng() * 0.8);
+      chunks.push({
+        mesh, hh: CHUNK_HH * sc,
+        vx: dx * sp, vy: 0.8 + rng() * 2.6 * P, vz: dz * sp,
+        spin: (rng() - 0.5) * 15, t: 0, life: fall + 1.3 + rng() * 1.0,
+        rest: 0, settled: false, trail: glow ? 0 : -1,
+      });
+    }
+
+    // ---- (2) the LANCE: hot gas punching out ahead of the debris, staggered
+    // along the axis so it reads as a jet leaving the hole, not a puff at it.
+    const nl = Math.max(2, Math.round(3 + P * 2));
+    for (let i = 0; i < nl; i++) {
+      const f = i / nl;
+      spawnPuff(x + ax * (0.6 + f * 3.5 * P), y0 + (rng() - 0.3) * 0.8, z + az * (0.6 + f * 3.5 * P), {
+        additive: true, base: 0.5 + f * 0.6, pop: (1.6 + rng() * 1.4) * P,
+        life: 0.9 + rng() * 0.9, maxOp: 0.9 - f * 0.35, spin: (rng() - 0.5) * 2,
+        vx: ax * (3 + rng() * 4 * P), vy: 0.4 + rng() * 0.8, vz: az * (3 + rng() * 4 * P),
+        delay: f * 0.09,
+      });
+    }
+
+    // ---- (3) pulverised SLAB DUST chasing the jet: pale, directed, lingering
+    pointBurst(x + ax * 0.8, z + az * 0.8, Math.max(1, Math.round((14 + 12 * P) * fxq)),
+      0xa39a8c, 0.46, 3 + P * 1.4, 1.2, true, y0);
+    const nd = Math.round(3 + P * 3);
+    for (let i = 0; i < nd; i++) {
+      const off = (rng() - 0.5) * 2, a = off * spread * 1.3;
+      const dx = ax * Math.cos(a) + tx * Math.sin(a);
+      const dz = az * Math.cos(a) + tz * Math.sin(a);
+      const sp = 1.6 + rng() * 2.4 * P;
+      spawnPuff(x + dx * (0.8 + rng() * 1.6), y0 + (rng() - 0.35) * 1.4, z + dz * (0.8 + rng() * 1.6), {
+        additive: false, smoke: true, base: 1.2, pop: (3.6 + rng() * 2.6) * P,
+        life: 1.9 + rng() * 1.4, maxOp: 0.42, shade: 0.37 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: dx * sp, vy: 0.3 + rng() * 0.9, vz: dz * sp,
+        delay: rng() * 0.22,
+      });
+    }
+    // (4) the exit mouth keeps smoking like any other wound (pooled emitter,
+    // hard cap 3) — the far face has to remember it too.
+    if (P >= 1) addBlastWound(x, y0, z, ax, 0, az, 30 + rng() * 25);
+  };
 })();

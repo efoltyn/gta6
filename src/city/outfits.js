@@ -91,6 +91,39 @@
                  colors: { legs: 0x16171c, torso: 0x6e1f2b, collar: 0x4a141d, arms: 0x6e1f2b, shoes: 0x16171c } },
     sundress:  { id: "sundress",  name: "Summer Dress",     tier: "fit",    who: "day strollers",    price: 240,  drip: 4,
                  colors: { legs: 0xe9d8c8, torso: 0xd98aa6, collar: 0xe2b2c2, arms: 0xd98aa6, shoes: 0xf2f2f2 } },
+    // The everyday womenswear the rack never had: before this row the ONLY
+    // female-read garments in the whole catalog were two dresses, so a woman
+    // who wasn't dressed for a party had nothing but a man's shirt. The
+    // painter (clothes.js PAINT.blouse) darts to the waist BOX the rig now
+    // actually has — cloth reinforcing the body, not faking it.
+    // price 0 ON PURPOSE: shops.js's boutique rack is the NINE CHEAPEST priced
+    // fits, so a $90 blouse would silently push the Leather Jacket off a rack
+    // I don't own. The player buys blouses as composables (clothes.js ships
+    // blouse_white/blush/navy/olive) once economy.js racks them — see report.
+    blouse:    { id: "blouse",    name: "Blouse",           tier: "fit",    who: "the everyday",     price: 0,    drip: 2,
+                 colors: { legs: 0x39414f, torso: 0xeceef0, collar: 0xeceef0, arms: 0xeceef0, shoes: 0x2b2b2b } },
+    // ---- CHILDREN — never sold, never cast on an adult. The age gate in
+    //      cityOutfitFor routes every non-adult band here BEFORE the cop /
+    //      gang / job / archetype ladder can put a badge, a hi-vis vest,
+    //      crew colors or a tailored suit on a four-year-old. These rows are
+    //      TEMPLATES: kidFit clones each one with a per-body palette, so a
+    //      playground isn't six identical children. ----
+    onesie:    { id: "onesie",    name: "Babygrow",         tier: "kid",    who: "babies",           price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0xbfd8e8, torso: 0xbfd8e8, collar: 0x8aa8c8, arms: 0xbfd8e8, shoes: 0xbfd8e8 } },
+    pyjamas:   { id: "pyjamas",   name: "Stripey Pyjamas",  tier: "kid",    who: "the very young",   price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0xe8e2f0, torso: 0xe8e2f0, collar: 0x6a7ac0, arms: 0xe8e2f0, shoes: 0xe8e4dc } },
+    romper:    { id: "romper",    name: "Dungaree Romper",  tier: "kid",    who: "toddlers",         price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0x4a6a92, torso: 0x4a6a92, collar: 0xf0e9dc, arms: 0xf0e9dc, shoes: 0xd84a4a } },
+    kidtee:    { id: "kidtee",    name: "Tee & Shorts",     tier: "kid",    who: "kids",             price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0x39414f, torso: 0x4aa8d8, collar: 0xf2c53d, arms: 0x4aa8d8, shoes: 0xe8e8e8 } },
+    kidhoodie: { id: "kidhoodie", name: "Kid's Hoodie",     tier: "kid",    who: "kids",             price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0x39414f, torso: 0x3a8fd0, collar: 0x2f6ea8, arms: 0x3a8fd0, shoes: 0x2b2b2b } },
+    school:    { id: "school",    name: "School Uniform",   tier: "kid",    who: "schoolkids",       price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0x23283a, torso: 0x2b3a5a, collar: 0xeceee8, arms: 0x2b3a5a, shoes: 0x1c1c20 } },
+    schoolgirl:{ id: "schoolgirl", name: "School Uniform",  tier: "kid",    who: "schoolkids",       price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0x23283a, torso: 0x2b3a5a, collar: 0xeceee8, arms: 0x2b3a5a, shoes: 0x1c1c20 } },
+    pinafore:  { id: "pinafore",  name: "Pinafore Dress",   tier: "kid",    who: "little girls",     price: 0,    drip: 0, kid: 1,
+                 colors: { legs: 0xe2a2b8, torso: 0xe2a2b8, collar: 0xf4efe4, arms: 0xf4efe4, shoes: 0xf2f2f2 } },
     // ---- work uniforms (a JOB on your back — casting wears these) ----
     vendor:    { id: "vendor",    name: "Vendor Apron",     tier: "work",   who: "counter clerks",   price: 0,    drip: 0,
                  colors: { legs: 0x2e3138, torso: 0xc8553a, collar: 0xf0ead8, arms: 0xf0ead8, shoes: 0x2b2b2b } },
@@ -691,6 +724,291 @@
   CBZ.cityBuyOutfit = buyOutfit;
 
   // ============================================================
+  //  AGE + SEX AXES OF THE WARDROBE
+  //
+  //  entities/character.js builds a REAL body now: a profile per (build, age)
+  //  with bands baby/toddler/child/preteen/teen/adult. The wardrobe has to
+  //  answer to that, because the casting ladder below is otherwise blind: a
+  //  six-year-old standing on a construction lot got the hi-vis vest, a kid
+  //  cast "mobster" got the pinstripe suit, and every child in the city was a
+  //  small adult in adult cloth.
+  //
+  //  DEGRADE-SAFE: absent band/age reads ADULT, which is exactly the behavior
+  //  every existing caller had before these fields existed.
+  //  DETERMINISM: no rng() draws are taken here — appearance rides seed
+  //  ARITHMETIC only (CBZ.hashN off spec.seed). Adding a draw to the shared
+  //  ped stream would re-deal every later appearance roll (CLAUDE.md), and
+  //  taking one only on SOME paths is exactly how that stream gets reordered.
+  //  Flags: CITY_CHILD_WARDROBE / CITY_FEM_WARDROBE / CITY_HAIR_CASTING —
+  //  each a one-line revert to the pre-change casting.
+  // ============================================================
+  const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
+  if (CFG.CITY_CHILD_WARDROBE == null) CFG.CITY_CHILD_WARDROBE = true;
+  if (CFG.CITY_FEM_WARDROBE == null) CFG.CITY_FEM_WARDROBE = true;
+  if (CFG.CITY_HAIR_CASTING == null) CFG.CITY_HAIR_CASTING = true;
+  const on = (k) => { const C = CBZ.CONFIG; return !C || C[k] == null || !!C[k]; };
+
+  // deterministic per-body channels off spec.seed. hashN is the repo's own
+  // position hash (core/seed.js); the inline fallback keeps this working in a
+  // harness that loads outfits.js without seed.js.
+  function h32(seed, salt) {
+    if (CBZ.hashN) return CBZ.hashN(seed | 0, salt | 0, 0) >>> 0;
+    let h = ((seed | 0) ^ Math.imul(salt | 0, 0x9e3779b1)) | 0;
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b) | 0;
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) | 0;
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+  function pickBy(list, seed, salt) { return list[h32(seed, salt) % list.length]; }
+  function rollBy(seed, salt) { return h32(seed, salt) % 100; }        // 0..99
+
+  // The band thresholds MIRROR entities/character.js's bandOf() — spec.band is
+  // the rig's own answer and always wins; age is only the fallback for callers
+  // that have a number but no rig yet.
+  const KID_BANDS = { baby: 1, toddler: 1, child: 1, preteen: 1, teen: 1 };
+  function bandOf(spec) {
+    const b = spec && spec.band;
+    if (b && KID_BANDS[b]) return b;
+    if (b === "adult") return "adult";
+    const a = spec && spec.age;
+    if (a == null || !isFinite(a) || a >= 18) return "adult";
+    if (a < 1.1) return "baby";
+    if (a < 4) return "toddler";
+    if (a < 10) return "child";
+    if (a < 13) return "preteen";
+    return "teen";
+  }
+  function isFem(spec) {
+    const s = spec && (spec.sex || spec.gender);
+    return s === "f" || s === "female" || !!(spec && spec.fem);
+  }
+
+  // ---- CHILDREN --------------------------------------------------------
+  // Palettes, not garments: every kid record is a CAT template cloned with a
+  // per-body color set, so the same eight rows dress a whole school without
+  // repeating. Kids' clothing is SATURATED and high-contrast in life — that
+  // is most of why a child reads as a child from across the street.
+  //
+  // COLOR PAIRS, NOT TWO INDEPENDENT PICKS: clothes.js caches one painted
+  // atlas per (torso, collar) — independent picks would multiply a handful of
+  // children into a hundred 128x256 textures. A pair table is one atlas per
+  // LOOK, and it lets the accent be CHOSEN to go with the base instead of
+  // rolled against it. Anything NOT in the cache key (legs on a garment whose
+  // painter doesn't touch the leg row, shoes) is free to vary per body.
+  const KID_TEE_PAIRS = [                                    // [tee, motif]
+    [0xe0574a, 0xf2c53d], [0x3a8fd0, 0xf0ece2], [0x5aa85a, 0xf2c53d], [0xef8f3a, 0x2f3a4a],
+    [0x6f5ad0, 0x35bfb0], [0xd86aa8, 0xf0ece2], [0xf2c53d, 0xe0574a], [0x35bfb0, 0x2f3a4a],
+  ];
+  const KID_SOFT_PAIRS = [                                   // [pastel ground, binding/stripe]
+    [0xbfd8e8, 0x3a6aa0], [0xe8d8ea, 0xb05a90], [0xd8e8c8, 0x4a8a3a],
+    [0xf0dcc0, 0xc07a3a], [0xe6e2f0, 0x6a5ad0], [0xcfe6e2, 0x2f8a80],
+  ];
+  const KID_HOODIE_HUES = [0xe0574a, 0x3a8fd0, 0x5aa85a, 0xef8f3a, 0x6f5ad0, 0x35bfb0, 0x4a4d54, 0x2f3a4a];
+  const ROMPER_HUES = [0x4a6a92, 0x8a5a3a, 0x5a7a4a, 0x9a4a5a, 0x6a5a8a, 0x3a6a72];
+  const PINAFORE_HUES = [0xe2a2b8, 0x9ac0d8, 0xd8c070, 0x8ab88a, 0xc0a0d0, 0xe0a080, 0xd05a6a, 0x70a8b0];
+  const SCHOOL_KNITS = [0x2b3a5a, 0x4a1c28, 0x24402f, 0x2f3238];        // navy / maroon / bottle / charcoal
+  const KID_LEGS = [0x39414f, 0x2f3a4a, 0x4a3f36, 0x2b2f36, 0x5a6b7a, 0x6a5a48];
+  const KID_SHOES = [0xe8e8e8, 0x2b2b2b, 0xd84a4a, 0x3a6ad0, 0xf0c040];
+  const CREAM = 0xf0e9dc;
+  function kidColors(id, seed) {
+    const legs = pickBy(KID_LEGS, seed, 43), shoes = pickBy(KID_SHOES, seed, 57);
+    // NOTE on `collar`: recolorRig flat-tints the NECK BOX with it and the
+    // painter reads it as the garment's accent — so every value below has to
+    // make sense as a neckline (a tee's contrast rib, a shirt collar, the
+    // binding on a babygrow), never as a floating colored ring.
+    switch (id) {
+      case "onesie": case "pyjamas": {
+        const p = pickBy(KID_SOFT_PAIRS, seed, 31);
+        return { legs: p[0], torso: p[0], collar: p[1], arms: p[0], shoes: id === "onesie" ? p[0] : 0xe8e4dc };
+      }
+      case "romper":   { const h = pickBy(ROMPER_HUES, seed, 37);
+        return { legs: h, torso: h, collar: CREAM, arms: CREAM, shoes: shoes }; }
+      case "kidtee":   { const p = pickBy(KID_TEE_PAIRS, seed, 11);
+        // legs is the FLAT fallback only — PAINT.kidtee derives the shorts from
+        // the tee color, because c.legs is not part of the cache key.
+        return { legs: tone(p[0], -0.6), torso: p[0], collar: p[1], arms: p[0], shoes: shoes }; }
+      case "kidhoodie": { const h = pickBy(KID_HOODIE_HUES, seed, 23);
+        return { legs: legs, torso: h, collar: tone(h, -0.22), arms: h, shoes: shoes }; }   // hoodie paints no legs → free
+      case "school": case "schoolgirl": {
+        const knit = pickBy(SCHOOL_KNITS, seed, 67);
+        // legs is FIXED for the school fit (PAINT.school paints the leg row from
+        // it and it is not in the key) — one grey short/skirt for the uniform.
+        return { legs: 0x23283a, torso: knit, collar: 0xeceee8, arms: knit, shoes: 0x1c1c20 };
+      }
+      case "pinafore": { const h = pickBy(PINAFORE_HUES, seed, 47);
+        return { legs: h, torso: h, collar: 0xf4efe4, arms: 0xf4efe4, shoes: shoes }; }
+    }
+    return null;
+  }
+  // clone a catalog template with a fresh color set (catalog rows are SHARED —
+  // never mutate one; the whole street would change clothes).
+  function recolored(base, colors, extra) {
+    if (!base) return null;
+    const r = Object.assign({}, base, extra || null);
+    r.colors = Object.assign({}, base.colors, colors || null);
+    return r;
+  }
+  // Which garments each band actually wears. Before puberty the BODY carries no
+  // sex signal at all (character.js: dimorphism fades in from ~11), so for a
+  // child the clothes and the hair ARE the read — which is why the pools split
+  // by sex earlier and harder than the adult ones do.
+  const KID_POOL = {
+    baby:    { m: ["onesie", "onesie", "pyjamas"],                 f: ["onesie", "onesie", "pyjamas"] },
+    toddler: { m: ["romper", "kidtee", "romper", "pyjamas"],       f: ["romper", "pinafore", "kidtee", "pyjamas"] },
+    child:   { m: ["kidtee", "kidtee", "school", "kidhoodie"],     f: ["kidtee", "pinafore", "schoolgirl", "kidhoodie"] },
+    preteen: { m: ["kidtee", "school", "kidhoodie", "kidhoodie"],  f: ["kidtee", "schoolgirl", "kidhoodie", "pinafore"] },
+  };
+  function kidFit(spec, band, seed) {
+    const pool = KID_POOL[band];
+    if (!pool) return null;
+    const list = (isFem(spec) ? pool.f : pool.m).filter(function (id) { return !!CAT[id]; });
+    if (!list.length) return null;
+    const id = list[h32(seed, 7) % list.length];
+    // NOTE: hair is deliberately NOT stamped on the record. A fit record is
+    // null for every plain civilian, so a `fit.hairStyle` read would silently
+    // give hair to some bodies and not others — CBZ.cityHairStyleFor(spec) is
+    // the ONE total answer, and it is what a spawner should call.
+    return recolored(CAT[id], kidColors(id, seed));
+  }
+
+  // ---- TEENAGERS -------------------------------------------------------
+  // A teen is old enough for the street's own clothes, so the adult ladder
+  // runs first and only its RESULT is vetoed: a 15-year-old can wear the
+  // hoodie, the tracksuit, a summer dress, an apron at a counter job — but
+  // never a badge, crew colors, turnout gear or a $7500 tuxedo.
+  const MINOR_BAN_ID = {
+    police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, firefighter: 1, ems: 1,
+    doctor: 1, scrubs: 1, hivis: 1, construction: 1, coveralls: 1, janitor: 1, valet: 1,
+    busdriver: 1, mailman: 1, pilot: 1, office: 1, chef: 1, dress: 1,
+    leather: 1, tactical: 1, designer: 1, suit: 1, tuxedo: 1,
+  };
+  function minorBanned(rec) {
+    if (!rec) return false;                      // null = plain civvies, always fine
+    if (rec.cop || rec.gang || rec.formal) return true;
+    const t = rec.tier;
+    if (t === "law" || t === "money" || t === "apex") return true;
+    return !!MINOR_BAN_ID[rec.id];
+  }
+  // RATCHET (CLAUDE.md law #5) — a pure, live-state-free sweep of the ONE
+  // invariant this whole age axis exists to hold: no non-adult band may ever
+  // be cast into adult cloth, no matter what job/gang/cop flags the spawner
+  // hands it. Returns the number of VIOLATIONS; it may only ever be ZERO.
+  // (`CBZ.cityWardrobeAudit()` — pin it at 0 in tools/math-gate.mjs.)
+  CBZ.cityWardrobeAudit = function () {
+    buildGangOutfits();
+    let bad = 0;
+    const bands = [["baby", 0.5], ["toddler", 3], ["child", 7], ["preteen", 11], ["teen", 15]];
+    const jobs = [null, "construction worker", "police officer", "nurse", "banker", "dock laborer", "lawyer"];
+    const gang = (CBZ.CITY && CBZ.CITY.gangs && CBZ.CITY.gangs[0] && CBZ.CITY.gangs[0].id) || "x";
+    for (let bi = 0; bi < bands.length; bi++) for (const sex of ["m", "f"]) for (let ji = 0; ji < jobs.length; ji++) {
+      for (let s = 0; s < 64; s++) {
+        const rec = CBZ.cityOutfitFor({
+          band: bands[bi][0], age: bands[bi][1], sex: sex, job: jobs[ji], archetype: "resident",
+          gang: gang, vendor: true, kind: "cop", cop: true, swat: !!(s & 1), seed: s,
+        });
+        if (minorBanned(rec)) bad++;
+      }
+    }
+    return bad;
+  };
+  function teenFit(spec, seed) {
+    const roll = rollBy(seed, 73);
+    if (isFem(spec)) {
+      if (roll < 20) return femGarment("sundress", seed);
+      if (roll < 40) return femGarment("blouse", seed);
+      if (roll < 56) return CAT.hoodie || null;
+      if (roll < 70) return CAT.denim_jacket || null;
+      if (roll < 82) return CAT.varsity || null;
+      return null;                               // plain tee + jeans
+    }
+    if (roll < 22) return CAT.hoodie || null;
+    if (roll < 40) return CAT.tracksuit || null;
+    if (roll < 56) return CAT.denim_jacket || null;
+    if (roll < 68) return CAT.varsity || null;
+    return null;
+  }
+
+  // ---- WOMEN -----------------------------------------------------------
+  // The body does the heavy lifting now (narrow shoulders, real hips, a waist
+  // box, a shorter stature, a different gait), so clothing's job is to
+  // REINFORCE the read rather than carry it — and to stop being three hex
+  // values away from the man standing next to her. Two things were wrong:
+  // the old branch fired for ~34% of women (seed%5 / seed%7) and always in
+  // the SAME pink sundress / same wine dress, and it was reachable from only
+  // four archetype strings.
+  const SUNDRESS_HUES = [
+    [0xf0d9a0, 0xd86a8a], [0xbcd6ea, 0x3a6aa0], [0xe8c6d8, 0xb04a7a],
+    [0xd8e8c8, 0x5a8a3a], [0xf2dcd0, 0xc06a4a], [0xe4e0f0, 0x6a5ad0],
+    [0xeae4d4, 0x3a8a80], [0xf0c8b8, 0x8a3a4a],
+  ];
+  const DRESS_HUES = [0x8a2050, 0x1c2438, 0x1d5a44, 0x6e1f2b, 0x2b2f36, 0x7a3a6a, 0xa03a3a, 0x3a4a7a];
+  const BLOUSE_HUES = [0xeceef0, 0xe8c6cc, 0x2b3a5a, 0x6a7050, 0xd8dce4, 0xc8a8d0, 0xe8d8b8, 0x4a6a7a];
+  const FEM_LEGS = [0x39414f, 0x2b3038, 0x4a4a56, 0x2f3a4a, 0x6a5a48, 0x1c1d22];
+  const FEM_SHOES = [0xf2f2f2, 0x2b2b2b, 0xc8a08a, 0x8a3a4a, 0xe0d8c8];
+  function femGarment(id, seed) {
+    const base = CAT[id];
+    if (!base) return null;
+    if (id === "sundress") {
+      const h = pickBy(SUNDRESS_HUES, seed, 83);
+      return recolored(base, { torso: h[0], collar: h[1], arms: h[0], legs: h[0], shoes: pickBy(FEM_SHOES, seed, 84) });
+    }
+    if (id === "dress") {
+      const h = pickBy(DRESS_HUES, seed, 89);
+      return recolored(base, { torso: h, collar: tone(h, -0.22), arms: h, legs: h, shoes: 0x16171c });
+    }
+    if (id === "blouse") {
+      const h = pickBy(BLOUSE_HUES, seed, 97);
+      return recolored(base, { torso: h, collar: h, arms: h, legs: pickBy(FEM_LEGS, seed, 101), shoes: pickBy(FEM_SHOES, seed, 103) });
+    }
+    return base;
+  }
+  // the ordinary-woman roll. ~55% wear something explicitly female, the rest
+  // stay PLAIN (a solid shirt + jeans is what most people wear, and a street
+  // where every woman is in a dress is its own kind of wrong).
+  function femCivvieFit(spec, seed) {
+    const roll = rollBy(seed, 109);
+    if (roll < 24) return femGarment("sundress", seed);      // 24% summer dress
+    if (roll < 46) return femGarment("blouse", seed);        // 22% blouse over jeans
+    if (roll < 52) return femGarment("dress", seed);         //  6% a day dress
+    return null;                                             // 48% plain
+  }
+  // archetypes that are "an ordinary person on the street" — the old list had
+  // four entries and missed every crowd/tourist/shopper label a spawner uses.
+  const CIVVIE_ARCH = {
+    "": 1, civilian: 1, resident: 1, tourist: 1, shopper: 1, student: 1,
+    pedestrian: 1, local: 1, worker: 1, crowd: 1, beachgoer: 1, jogger: 1,
+  };
+
+  // ---- HAIR ------------------------------------------------------------
+  // At 30m the back-of-head hair MASS is the single strongest and cheapest sex
+  // cue there is — it reads from behind, which no garment detail does. This is
+  // the natural place to pick it: the caster already knows sex, age and job,
+  // and character.js takes `hairStyle` but deliberately owns no RNG.
+  //   CBZ.cityHairStyleFor(spec) → one of character.js's HAIR_STYLES keys.
+  // Jobs that legally tie hair back (kitchen, medical, uniformed services) get
+  // a bun or a ponytail — free realism, and it keeps long hair off a fry cook.
+  const TIED_BACK = /chef|line cook|cook\b|kitchen|nurse|scrubs|doctor|surgeon|paramedic|ambulance|\bems\b|waiter|waitress|server|barista|soldier|military|firefight/i;
+  const SHORN = /police|officer|soldier|military|marine|swat/i;
+  function hairStyleFor(spec) {
+    if (!on("CITY_HAIR_CASTING")) return null;
+    spec = spec || {};
+    const seed = Math.abs((spec.seed | 0) || 0), band = bandOf(spec), fem = isFem(spec);
+    const job = spec.job || "";
+    if (band === "baby") return "buzz";                       // barely any hair yet
+    if (fem) {
+      if (band === "toddler") return pickBy(["pigtail", "bob", "bob"], seed, 131);
+      if (band === "child" || band === "preteen") return pickBy(["pigtail", "bob", "pony", "bun", "pony"], seed, 137);
+      if (TIED_BACK.test(job) || (spec.kind === "cop" || spec.cop)) return pickBy(["bun", "pony"], seed, 139);
+      // adults + teens: long/pony/bun dominate — the silhouette cue — with a
+      // bob for variety and a rare crop so short-haired women exist too.
+      return pickBy(["long", "long", "pony", "bun", "bob", "pony", "long", "crop"], seed, 141);
+    }
+    if (band !== "adult") return pickBy(["crop", "crop", "short", "buzz"], seed, 143);
+    if (SHORN.test(job) || spec.cop || spec.kind === "cop" || spec.swat) return "buzz";
+    return pickBy(["short", "short", "crop", "buzz"], seed, 149);
+  }
+  CBZ.cityHairStyleFor = hairStyleFor;
+
+  // ============================================================
   //  CASTING HOOK — what should THIS person be wearing? peds.js (and any
   //  spawner) can adopt the canonical wardrobe with one line:
   //    const fit = CBZ.cityOutfitFor(opts);            // in makePed
@@ -731,9 +1049,29 @@
     if (/accountant|office|banker|analyst|lawyer/i.test(job)) return CAT.office;
     return null;
   }
+  // THE GATE: age first, everything else after. A child must never reach the
+  // cop/gang/job/archetype ladder at all — the ladder has no idea how old
+  // anybody is, and that is exactly how a four-year-old ends up in a hi-vis
+  // vest. Teens DO run the ladder; their result is vetoed (see minorBanned).
   CBZ.cityOutfitFor = function (spec) {
     buildGangOutfits();
     spec = spec || {};
+    const band = bandOf(spec);
+    if (band !== "adult" && on("CITY_CHILD_WARDROBE")) {
+      const seed = Math.abs((spec.seed | 0) || 0);
+      if (band === "teen") {
+        const cast = adultFitFor(spec);
+        if (cast && !minorBanned(cast)) return cast;   // a teen-appropriate cast stands
+        return teenFit(spec, seed);                    // banned, or nothing cast → the teen pool
+      }
+      const kf = kidFit(spec, band, seed);
+      if (kf) return kf;
+      // no template available (a stripped catalog) → PLAIN, never an adult fit
+      return null;
+    }
+    return adultFitFor(spec);
+  };
+  function adultFitFor(spec) {
     if (spec.kind === "cop" || spec.cop) return spec.swat ? CAT.swat : CAT.police;
     if (spec.gang && CAT["gang:" + spec.gang]) return CAT["gang:" + spec.gang];
     if (spec.vendor || spec.job === "vendor") return CAT.vendor;
@@ -760,7 +1098,12 @@
       return (seed & 1) ? CAT.tuxedo : suitRecord(spec);
     }
     if (a === "mobster" || a === "made") return suitRecord(spec);    // pinstripe family
-    if (a === "socialite") return suitRecord(spec);                  // colored / DB family
+    // a SOCIALITE is as often a woman in a gown as a man in a coloured DB suit
+    // — the old line put every one of them in a men's tailored suit.
+    if (a === "socialite") {
+      if (isFem(spec) && on("CITY_FEM_WARDROBE") && CAT.dress) return femGarment("dress", seed);
+      return suitRecord(spec);                                       // colored / DB family
+    }
     if (a === "boss" || a === "exec") return suitRecord(spec);       // charcoal/navy notch
     // generic desk workers → the COMPOSED suit (blazer + collared shirt + tie).
     if (a === "office" || a === "professional" || a === "businessman" || a === "suit") return bizRecord(spec);
@@ -771,25 +1114,30 @@
       const street = streetwearFor(seed);
       if (street) return street;
     }
-    // ---- NIGHTLIFE DRESSES: sprinkle dress/sundress onto a fraction of
-    //      civilians. Honor an explicit sex flag if the ped carries one; else
-    //      use a "nightlife" archetype (peds near the club). Deterministic. ----
+    // ---- NIGHTLIFE: the club crowd. The old line handed CAT.dress to
+    //      EVERYBODY with a nightlife archetype — men included, which is how a
+    //      bouncer's queue filled up with men in wine-red cocktail dresses.
+    //      Women get a varied evening dress; men get the night's own uniform. ----
     if (a === "nightlife" || a === "clubber" || a === "partygoer") {
-      const d = (seed % 3 === 0) ? null : CAT.dress;   // ~2/3 dressed, rest stays plain/suited
-      if (d) return d;
+      if (isFem(spec)) {
+        if (rollBy(seed, 61) < 78 && CAT.dress) return femGarment("dress", seed);
+        return CAT.blouse ? femGarment("blouse", seed) : null;
+      }
+      const night = [CAT.leather, CAT.tactical, CAT.varsity, CAT.denim_jacket].filter(Boolean);
+      if (rollBy(seed, 62) < 45) return suitRecord(spec);            // half the room is suited
+      if (night.length) return night[h32(seed, 63) % night.length];
     }
-    const sex = spec.sex || spec.gender || null;
-    // "resident" is peds.js's default archetype for the ordinary civilian mass
-    // (makePed: `let archetype = opts.archetype || "resident"`) — the literal
-    // ""/"civilian" cases below are never actually cast by any spawner, so
-    // without "resident" this branch was effectively dead outside "tourist".
-    if ((sex === "f" || sex === "female" || spec.fem) && (a === "" || a === "civilian" || a === "tourist" || a === "resident")) {
-      // a small deterministic fraction of women get a dress/sundress.
-      if (seed % 5 === 0 && CAT.sundress) return CAT.sundress;
-      if (seed % 7 === 0 && CAT.dress) return CAT.dress;
+    // ---- ORDINARY WOMEN. The body reads female on its own now (waist box,
+    //      hips, stature, gait), so this is REINFORCEMENT: a wider civilian
+    //      archetype set, real color variety, and a garment mix that isn't
+    //      "everyone in the same pink sundress". ~55% wear something
+    //      explicitly female; the rest stay plain, which is also true to life. ----
+    if (isFem(spec) && on("CITY_FEM_WARDROBE") && CIVVIE_ARCH[a]) {
+      const f = femCivvieFit(spec, seed);
+      if (f) return f;
     }
     return null;                                                     // ORDINARY civilians → PLAIN (peds.js paints a solid shirt + jeans)
-  };
+  }
   // deterministic streetwear pick for the corner archetypes — cycles the new
   // painted ids (and the old tracksuit) so the block reads varied. compFilter
   // logic via CAT presence keeps it crash-proof if an id is absent.
@@ -838,6 +1186,26 @@
     }
     return ped._fitSeed;
   }
+  // WHO the body is, age/sex-wise — read off the ped, then off the rig it was
+  // actually built from (character.js stamps band/ageYears/profile on it), so
+  // a re-dress can never lose a child's age and put them back in adult cloth.
+  function pedBand(p) {
+    if (!p) return "adult";
+    if (p.band) return p.band;
+    if (p.char && p.char.band) return p.char.band;
+    return bandOf({ age: pedAge(p) });
+  }
+  function pedAge(p) {
+    if (!p) return null;
+    if (p.ageYears != null) return p.ageYears;
+    return (p.char && p.char.ageYears != null) ? p.char.ageYears : null;
+  }
+  function pedSex(p) {
+    if (!p) return null;
+    if (p.gender) return p.gender;
+    const pf = p.char && p.char.profile;
+    return pf ? (pf.fem ? "f" : "m") : null;
+  }
   function redressPed(ped) {
     if (!ped || ped.isPlayer || ped.dead || !ped.char || !ped.char.skinSlots) return;
     const opts = ped._crowd ? { iso: true } : null;   // pooled rigs get isolated materials (setLook tints in place)
@@ -845,6 +1213,9 @@
     const fit = CBZ.cityOutfitFor({
       archetype: ped.archetype, job: ped.job, gang: ped.gang, vendor: ped.vendor,
       kind: ped.kind, cop: ped.kind === "cop", swat: ped.swat, seed: pedSeed(ped),
+      // the age/sex axes ride along on EVERY re-dress too (crowd promotion, the
+      // hour recast, a schedule deal-in) — the grey-tycoon bug's age twin.
+      sex: pedSex(ped), age: pedAge(ped), band: pedBand(ped),
     });
     if (fit && fit.colors) { recolorRig(ped.char, fit.colors, fit, opts); ped._castFit = fit.id; return; }
     if (ped._castFit || ped._crowd) {
@@ -887,6 +1258,16 @@
   function baseRecordOf(p) {
     if (!p) return null;
     if (p._wornOutfit) return p._wornOutfit;
+    // AGE FIRST, same law as the casting hook: what a child is wearing is a
+    // child's clothes, so the corpse-swap NAME and the formal-kit read can
+    // never resolve to a badge, a tux or crew colors on a nine-year-old.
+    const band = pedBand(p);
+    if (band !== "adult" && on("CITY_CHILD_WARDROBE")) {
+      return CBZ.cityOutfitFor({
+        archetype: p.archetype, job: p.job, seed: pedSeed(p),
+        sex: pedSex(p), age: pedAge(p), band: band,
+      });
+    }
     if (p.kind === "cop") return p.swat ? CAT.swat : CAT.police;
     if (p.gang && CAT["gang:" + p.gang]) return CAT["gang:" + p.gang];
     if (p.vendor) return CAT.vendor;

@@ -17,6 +17,13 @@
    flash flood · hurricane · wildfire · tornado · volcanic eruption ·
    blizzard · meteor shower · sinkholes · and a finale NUKE.
 
+   NOTE — the TORNADO slot no longer implements a funnel. It delegates to
+   systems/tornado.js (CBZ.tornado), the ONE vortex in the game, which the
+   city mode uses too. That file owns the Rankine wind field, the EF scale,
+   roof-first building damage through CBZ.structure, thrown vehicles priced
+   through CBZ.detonate's `kinetic` row, and the funnel mesh. Ratchet:
+   CBZ.tornadoAudit() — baseline 1, now 0.
+
    Flags: CBZ.CONFIG.SURV_SHUFFLE (seeded per-run order, default on) ·
    CBZ.CONFIG.SURV_TELEGRAPH (warn tint/shake/cue, default on) ·
    CBZ.CONFIG.SURV_TSUNAMI_V2 (the rebuilt tsunami event arc, default on;
@@ -310,40 +317,44 @@
       safeDir(x, z, ctx) { let bx = 0, bz = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const dx = x - tr[i].x, dz = z - tr[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } } return (bx || bz) ? { x: bx, z: bz } : null; },
     },
 
-    // ---- TORNADO: a wandering funnel that sucks in and flings ----
+    // ---- TORNADO: DELEGATED to systems/tornado.js (CBZ.tornado) ----------
+    //      This slot used to own a second, weaker vortex: six translucent
+    //      cylinders, a swirl particle cloud, a random-walk wander and a
+    //      suck-and-hurt loop that touched ACTORS ONLY — it could not move a
+    //      car, tip a prop or scratch a building, and none of that arithmetic
+    //      was shared with anything. CBZ.tornado is now the ONE vortex in the
+    //      game (Rankine field, EF scale, roof-first structural damage,
+    //      thrown vehicles priced through CBZ.detonate's `kinetic` row), so
+    //      this def authors only what is genuinely survival-specific: the
+    //      banner copy, the EF class the round's intensity earns, and the
+    //      island bounds it must bounce off. Everything else it gets free.
+    //      Deleting the duplicate is the point — see CBZ.tornadoAudit().
     tornado: {
       name: "TORNADO", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "torn apart by the tornado", tint: 0x6a6f7a,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("TORNADO touching down!", 2.6); sound("wind"); },
       start(ctx) {
-        const grp = new THREE.Group();
-        for (let i = 0; i < 6; i++) { const r = 1.2 + i * 1.5; const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, 4, 14, 1, true), new THREE.MeshBasicMaterial({ color: 0x6a6f7a, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false })); m.position.y = 2 + i * 3.6; grp.add(m); }
-        root().add(grp);
         const p = ctx.arena.randomPoint(0, ctx.R * 0.5);
-        ctx.st.fx = grp; ctx.st.x = p.x; ctx.st.z = p.z; ctx.st.vx = (rnd() - 0.5) * 6; ctx.st.vz = (rnd() - 0.5) * 6;
-        ctx.st.swirl = CBZ.fx.particleCloud({ mode: "swirl", color: 0x8a8f9a, count: 160, radius: 12, top: 20, size: 0.3, opacity: 0.6, vMin: 4, vMax: 10 });
-        ctx.st.swirl.setActive(1);
+        ctx.st.x = p.x; ctx.st.z = p.z;              // hazards() reads these
+        // the round's escalating intensity picks the EF class: EF1 on the
+        // first pass, up to EF4 late. EF5 is reserved for the city.
+        const ef = Math.max(1, Math.min(4, Math.round(1 + ctx.intensity * 2)));
+        ctx.st.tw = CBZ.tornado ? CBZ.tornado.spawn({
+          x: p.x, z: p.z, ef: ef,
+          life: this.activeSecs + 1.5,
+          // no `by`: nobody is credited for the weather (see tornado.js's
+          // note — a non-null `by` makes structural.js blame the player)
+          bounds: { x: ctx.cx, z: ctx.cz, r: ctx.R - 6 },   // bounce off the island edge
+        }) : null;
       },
       active(dt, ctx) {
-        // wander, bounce off the island edge
-        ctx.st.x += ctx.st.vx * dt; ctx.st.z += ctx.st.vz * dt;
-        const cx = ctx.cx, cz = ctx.cz, rr = ctx.R - 6;
-        if (Math.hypot(ctx.st.x - cx, ctx.st.z - cz) > rr) { ctx.st.vx += (cx - ctx.st.x) * 0.05; ctx.st.vz += (cz - ctx.st.z) * 0.05; }
-        if (rnd() < dt) { ctx.st.vx += (rnd() - 0.5) * 3; ctx.st.vz += (rnd() - 0.5) * 3; }
-        const gy = floor(ctx.st.x, ctx.st.z);
-        ctx.st.fx.position.set(ctx.st.x, gy, ctx.st.z); ctx.st.fx.rotation.y += dt * 3;
-        ctx.st.swirl.update(dt, ctx.st.x, gy, ctx.st.z);
-        if (CBZ.shake) { const dp = Math.hypot(CBZ.player.pos.x - ctx.st.x, CBZ.player.pos.z - ctx.st.z); if (dp < 30) CBZ.shake(0.3 * (1 - dp / 30)); }
-        if (rnd() < dt * 4) sound("wind");
-        const suck = 18, kill = 4.5;
-        surv().forEachActor(function (a) {
-          const dx = ctx.st.x - a.pos.x, dz = ctx.st.z - a.pos.z, d = Math.hypot(dx, dz);
-          if (d < kill) { surv().hurt(a, 1e6); }
-          else if (d < suck) { const pull = (1 - d / suck) * 9 * dt; a.pos.x += dx / d * pull; a.pos.z += dz / d * pull; surv().hurt(a, scale(5, ctx) * dt); }
-        });
+        // CBZ.tornado owns the field, the funnel, the deaths and the debris.
+        // All this def does is mirror the live position for the minimap.
+        const a = CBZ.tornado && CBZ.tornado.active()[0];
+        if (a) { ctx.st.x = a.x; ctx.st.z = a.z; }
       },
-      end(ctx) { if (ctx.st.fx) { ctx.st.fx.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(ctx.st.fx); } if (ctx.st.swirl) ctx.st.swirl.dispose(); },
-      threat(x, z, ctx) { const d = Math.hypot(x - (ctx.st.x || 0), z - (ctx.st.z || 0)); return d < 22 ? 1 - d / 22 : 0; },
-      safeDir(x, z, ctx) { const dx = x - (ctx.st.x || 0), dz = z - (ctx.st.z || 0), d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
+      end(ctx) { if (CBZ.tornado && ctx.st.tw) CBZ.tornado.stop(ctx.st.tw); ctx.st.tw = null; },
+      threat(x, z, ctx) { return CBZ.tornado ? CBZ.tornado.threat(x, z) : 0; },
+      safeDir(x, z, ctx) { return CBZ.tornado ? CBZ.tornado.safeDir(x, z) : null; },
     },
 
     // ---- VOLCANO: ash-out, lava flows from the mountain, lava bombs ----
@@ -1390,6 +1401,12 @@
   }
 
   CBZ.disasters = {
+    // RATCHET MARKER (systems/tornado.js's CBZ.tornadoAudit reads this). The
+    // roster's `tornado` slot no longer owns a vortex of its own — it calls
+    // CBZ.tornado.spawn/stop and reads CBZ.tornado.threat/safeDir. If this
+    // file ever grows a second funnel again, delete this line and the audit
+    // will count it. The number may only go DOWN.
+    _tornadoDelegated: true,
     start() {
       // if a previous match ended mid-disaster, tear its meshes down cleanly
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }

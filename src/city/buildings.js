@@ -325,6 +325,102 @@
       root.add(im); glassPools.push(im);   // rides the same lifecycle as the pane pools
     });
   }
+  // ---- MASONRY VENEER POOLS (BLD_MASONRY_TEXTURE) -------------------------
+  // THE BATCHING PROBLEM, stated plainly: core/batch.js refuses to merge ANY
+  // mesh whose material carries a `map` (batch.js:171/:196). Brick is the most
+  // object-dense material in the game, so texturing the STRUCTURAL walls would
+  // opt hundreds of collider-bearing wall boxes per building out of the
+  // city-wide merge — the single worst draw-call trade available.
+  //
+  // THE ANSWER: structural masonry stays flat-Lambert + untextured (fully
+  // mergeable, unchanged); the brick/stone COURSING rides thin VENEER TILES on
+  // InstancedMesh pools, exactly like the window panes above. Pools partition
+  // by (colourway, 320u sector) — with world/textures_masonry.js's fixed SIX
+  // colourways that is at most 6 draw calls per populated sector, for the whole
+  // city's brickwork. Tiles are ~1.6m × 0.8m so ONE tile == ONE texture repeat
+  // (r128 BoxGeometry UVs run 0..1 per face), which is why the consumer stamps
+  // a grid of tiles instead of one stretched panel per band.
+  const masonryPools = [];
+  let pendingMasonry = [];
+  function addMasonryTile(group, lx, ly, lz, bw, bh, bd, cwid, ox, oz) {
+    pendingMasonry.push({ x: ox + lx, y: ly, z: oz + lz, hw: bw / 2, hh: bh / 2, hd: bd / 2, cw: cwid, _grp: group });
+  }
+  // like pooledIM, but the veneer is a LIT surface that must take the sun's
+  // shadow (a brick band that ignores shadows reads as a decal), and it draws
+  // in the opaque pass (renderOrder 0) since it is fully opaque.
+  function masonryIM(recs, matM) {
+    const geo = unitBox().clone();
+    // veneer tiles are vertical sheets: drop the ±Y slivers exactly as the
+    // pane pools do (a third of the triangles, invisible either way).
+    const idx = geo.index.array;
+    const kept = new idx.constructor(24);
+    kept.set(idx.subarray(0, 12), 0);      // +X, -X
+    kept.set(idx.subarray(24, 36), 12);    // +Z, -Z
+    geo.setIndex(new THREE.BufferAttribute(kept, 1));
+    geo.clearGroups();
+    let nx = 1e9, xx = -1e9, ny = 1e9, xy = -1e9, nz = 1e9, xz = -1e9, span = 0;
+    for (const r of recs) {
+      if (r.x < nx) nx = r.x; if (r.x > xx) xx = r.x;
+      if (r.y < ny) ny = r.y; if (r.y > xy) xy = r.y;
+      if (r.z < nz) nz = r.z; if (r.z > xz) xz = r.z;
+      const s = Math.max(r.hw, r.hh, r.hd); if (s > span) span = s;
+    }
+    geo.boundingSphere = new THREE.Sphere(
+      new THREE.Vector3((nx + xx) / 2, (ny + xy) / 2, (nz + xz) / 2),
+      Math.hypot(xx - nx, xy - ny, xz - nz) / 2 + span + 1);
+    const im = new THREE.InstancedMesh(geo, matM, recs.length);
+    im.castShadow = false; im.receiveShadow = true; im.renderOrder = 0;
+    im.frustumCulled = true;
+    im.userData.masonryPool = true;    // non-empty userData → core/batch.js skips it
+    return im;
+  }
+  function buildMasonryPools() {
+    if (!pendingMasonry.length) return;
+    const batch = pendingMasonry; pendingMasonry = [];
+    if (!CBZ.masonryMat) return;                       // textures module absent → geometry-only masonry
+    let root = null;
+    for (const r of batch) { if (r._grp && r._grp.parent) { root = r._grp.parent; break; } }
+    if (!root) root = CBZ.scene;
+    const byKS = new Map();
+    for (const r of batch) {
+      const k = r.cw + "|" + sectorKey(r);
+      let a = byKS.get(k); if (!a) { a = []; byKS.set(k, a); } a.push(r);
+      r._grp = null;
+    }
+    byKS.forEach(function (recs, k) {
+      const id = k.slice(0, k.indexOf("|"));
+      let matM = null;
+      try { matM = CBZ.masonryMat(id); } catch (e) { matM = null; }
+      if (!matM) return;
+      const im = masonryIM(recs, matM);
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        _pPos.set(r.x, r.y, r.z); _pScl.set(r.hw * 2, r.hh * 2, r.hd * 2);
+        im.setMatrixAt(i, _pM.compose(_pPos, _pQ, _pScl));
+      }
+      im.instanceMatrix.needsUpdate = true;
+      root.add(im); masonryPools.push(im);
+    });
+    hookMasonryQuality();
+    if (CBZ.getQualityLevel && CBZ.getQualityLevel() <= 0)
+      for (let i = 0; i < masonryPools.length; i++) masonryPools[i].visible = false;
+  }
+  // Tier gate: at the lowest quality tier the veneer is pure decoration on top
+  // of an already-correct flat wall, so drop it wholesale rather than paying
+  // its vertex cost. (Texture RESOLUTION is tiered separately, inside
+  // world/textures_masonry.js, at first-use.)
+  // Registered LAZILY on the first pool build — core/quality.js loads AFTER
+  // this file (index.html: buildings.js ~470, quality.js ~988), so
+  // CBZ.onQualityChange does not exist at parse time.
+  let _masonryQHooked = false;
+  function hookMasonryQuality() {
+    if (_masonryQHooked || !CBZ.onQualityChange) return;
+    _masonryQHooked = true;
+    CBZ.onQualityChange(function (lvl) {
+      for (let i = 0; i < masonryPools.length; i++) masonryPools[i].visible = lvl > 0;
+    });
+  }
+
   // PUBLIC: swap the ~15% "someone's home" panes between their day tint and
   // the warm lit pool. Idempotent; self-driven below on view.js's hysteresis
   // thresholds, but exposed so the dusk pass can call it directly too.
@@ -1796,6 +1892,7 @@
     // for the main build; later generations for the expansion island).
     if (pendingGlass.length) buildGlassPools();
     if (pendingDeco.length) buildRoomDecoPools();
+    if (pendingMasonry.length) buildMasonryPools();
     // drain deferred window-opening carves (see winOpenQ at cityShatter) —
     // WINOPEN_BUDGET carveHole monoliths per frame, off the blast frame's
     // critical path. Each re-resolves against live walls, so stale entries
@@ -2191,27 +2288,71 @@
     const GKIND = opts.glassKind ? opts.glassKind : ((opts.retail || opts.showroom) ? "clear" : "reflective");
 
     // ===== FACADE TYPE =======================================================
-    // Only the proven glass shells remain. The later residential/fortified
-    // archetypes generated the giant brown/solid punched-window envelopes seen
-    // intersecting the normal curtain-wall skyline. Treat those legacy requests
-    // as aliases for the clean office shell instead of creating another visual
-    // class. This preserves the one real building's rooms, stairs, doors,
-    // ownership and colliders; only the offending exterior grammar is gone.
+    // FIVE archetypes now, not two (BLD_MASONRY_V1 — owner: "make new building
+    // types like gov buildings and brick buildings"):
+    //   office / retail  — the proven glass curtain-wall shells (unchanged)
+    //   brick            — punched masonry: brick piers between real punched
+    //                      windows, stone sills + lintels, muntins. This is the
+    //                      grammar that has sat DEAD in this file behind
+    //                      `const punched = false` since the giant brown
+    //                      envelopes were pulled; it is revived here in a
+    //                      DISCIPLINED form (see the punched branch below: a
+    //                      curated masonry colourway, real string courses and a
+    //                      corbelled cornice instead of a flat brown box).
+    //   civic            — government/monumental: ashlar stone, tall
+    //                      symmetrical bays on a pilaster order, entablature.
+    //   fortified        — bank/security: heavier wall, narrow security slots.
+    // `residential` remains an accepted alias, now routed to brick rather than
+    // silently downgraded to office.
+    //
+    // ONE-LINE REVERT: CBZ.CONFIG.BLD_MASONRY_V1 = false (or
+    // ?cfg_BLD_MASONRY_V1=0) collapses every masonry request back to the exact
+    // prior office/retail shell — the hard-off guard the old code had, kept as
+    // a flag instead of a literal.
+    const MASONRY_ON = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false);
     let FACADE = opts.facade ||
       (opts.retail || opts.showroom ? "retail"
         : "office");
-    if (FACADE === "residential" || FACADE === "fortified") FACADE = "office";
-    // Keep the old branches hard-off as a second guard: no caller can resurrect
-    // the punched masonry or mostly-solid facade through an option value.
-    const punched = false;
-    const fortified = false;
+    if (FACADE === "residential") FACADE = MASONRY_ON ? "brick" : "office";
+    if (!MASONRY_ON && (FACADE === "brick" || FACADE === "civic" || FACADE === "fortified")) FACADE = "office";
+    // Callers that express NO facade preference at all — town/village prefabs
+    // routed through towngen.js, island annex shells, minicity fill — get a
+    // deterministic masonry SHARE, so the brick vocabulary reaches the whole
+    // world instead of only the mainland lots that ask for it by name. Every
+    // caller with an opinion (retail / showroom / office / garage / an explicit
+    // opts.facade) is untouched; low-rise only, position-hashed, no rng draw.
+    if (MASONRY_ON && !opts.facade && !opts.retail && !opts.showroom && !opts.office
+        && !opts.garageGround && !opts.boarded && storeys <= 5
+        && CBZ.hash01 && CBZ.hash01(ox, oz, 0xb21f) < 0.45) FACADE = "brick";
+    const punched = FACADE === "brick";
+    const civicF = FACADE === "civic";
+    const fortified = FACADE === "fortified";
+    const MASONRY = punched || civicF || fortified;
+    // MASONRY PALETTE — a SMALL fixed colourway set (world/textures_masonry.js)
+    // deliberately shared city-wide so the flat structural walls still bucket
+    // together for core/batch.js. Position-hashed pick (never rng), so lot #23's
+    // brick colour is decidable without building lots 0..22.
+    const civicSpec = opts.civic || null;
+    let MPAL = null;
+    if (MASONRY && CBZ.masonryPalette) {
+      // ashlar STONE for the monumental trades; the humbler civic kinds that
+      // declare stone:false (a records office, a fire house) are brick, because
+      // that is what the real ones are built of.
+      const fam = (civicSpec && civicSpec.stone === false) ? "brick"
+        : ((civicF || fortified || (civicSpec && civicSpec.stone)) ? "ashlar" : "brick");
+      const cwid = opts.masonry || (CBZ.masonryPick ? CBZ.masonryPick(fam, ox, oz, 0xb21c) : null);
+      if (cwid) MPAL = CBZ.masonryPalette(cwid);
+    }
     // DISTRICT WALL KIT: hue-locked jitter so buildings in the same district
     // read as a coherent palette family (core cool/clean, projects/industrial
     // grimier/desaturated) while still varying building-to-building. Applied
     // only when a district was actually threaded in, so callers that don't
     // pass one (island buildings, the flagship's raw 0x223040, etc.) render
-    // exactly as before.
-    if (opts.district) color = districtWallColor(color, DKIT, ox, oz);
+    // exactly as before. MASONRY buildings skip it: their colourway IS the
+    // curated family, and jittering it would break the wall↔veneer colour match
+    // the batching split depends on.
+    if (MPAL) color = MPAL.wall;
+    else if (opts.district) color = districtWallColor(color, DKIT, ox, oz);
     // trim palette: darks derived from the wall colour (shared palettes →
     // shared colour buckets, so the batcher still collapses trim city-wide)
     const MULL = 0x262b31;                 // mullion-frame dark
@@ -2220,9 +2361,14 @@
     // window reads as blank wall from INSIDE the room. One extra colour bucket
     // in the merged deco pass (≈1 mesh/building pre-batch), it scene-lights
     // down with the sun so night interiors dim naturally.
-    const TRIM = shadeHex(color, 0.72);    // cornice / sill / parapet coping
-    const BASE = shadeHex(color, 0.55);    // ground-floor plinth
-    const PIL = shadeHex(color, 0.85);     // corner pilasters
+    // MASONRY swaps the trim family from "a darker shade of the wall" to a
+    // genuinely CONTRASTING stone — the single strongest cue that a wall is
+    // brick with stone dressings rather than one painted colour. Still a
+    // SHARED palette entry (six colourways, six trim buckets), so the batcher
+    // collapses trim city-wide exactly as before.
+    const TRIM = MPAL ? MPAL.stone : shadeHex(color, 0.72);    // cornice / sill / parapet coping
+    const BASE = MPAL ? shadeHex(MPAL.stone, 0.80) : shadeHex(color, 0.55);   // ground-floor plinth
+    const PIL = MPAL ? shadeHex(MPAL.stone, 0.92) : shadeHex(color, 0.85);    // corner pilasters
     const REVEAL = shadeHex(color, 1.12);  // bright window-reveal liner (catches light in the recess)
 
     // FACADE DECO accumulator: every flat opaque dressing box (mullion frames,
@@ -2257,6 +2403,39 @@
         }
       });
       decoGeos.clear();
+    }
+
+    // ---- MASONRY VENEER (BLD_MASONRY_TEXTURE) -------------------------------
+    // Stamps a grid of ~1.6×0.8m brick/ashlar tiles across ONE solid face band.
+    // Tiles ride the shared InstancedMesh pools (see addMasonryTile at the top
+    // of this file) — the ONLY textured surfaces a building emits, precisely
+    // because core/batch.js cannot merge a textured material. They sit 0.03
+    // proud of the wall's outer plane, so nothing is coplanar (no z-fighting)
+    // and the stone string courses / sills stay proud of the brick, as built.
+    const VENEER_ON = !!MPAL && !!CBZ.masonryTile && !!CBZ.masonryMat
+      && !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_TEXTURE === false);
+    // solid band heights the masonry branches below share with the veneer, so
+    // the brick always lands exactly on wall and never across a window.
+    const MSILL = civicF ? 1.15 : 1.05;    // solid spandrel, floor → window sill
+    const MHDR = fortified ? 0.45 : (civicF ? 0.85 : 0.7);   // solid header, window head → ceiling
+    function veneerBand(s, y0, y1, skipHalf) {
+      if (!VENEER_ON || y1 - y0 < 0.25) return;
+      const TL = CBZ.masonryTile;
+      const horiz = (s === 0 || s === 1), outS = (s === 0 || s === 2) ? -1 : 1;
+      const span = horiz ? w : d, halfN = (horiz ? d : w) / 2;
+      const cols = Math.max(1, Math.round(span / TL.w));
+      const rows = Math.max(1, Math.round((y1 - y0) / TL.h));
+      const tw = span / cols, th = (y1 - y0) / rows;
+      const nOff = outS * (halfN + 0.03);
+      for (let i = 0; i < cols; i++) {
+        const t = -span / 2 + (i + 0.5) * tw;
+        if (skipHalf && Math.abs(t) < skipHalf + tw * 0.5) continue;   // keep the doorway clear
+        for (let r = 0; r < rows; r++) {
+          const cy = y0 + (r + 0.5) * th;
+          if (horiz) addMasonryTile(bgroup, t, cy, nOff, tw, th, 0.06, MPAL.id, ox, oz);
+          else addMasonryTile(bgroup, nOff, cy, t, 0.06, th, tw, MPAL.id, ox, oz);
+        }
+      }
     }
 
     // Interior decoration is allowed only outside the entrance aisle and the
@@ -2682,7 +2861,11 @@
             // returns, so the glass now sits in a real pocket that self-shadows.
             // The collider rides the pane, still comfortably inside the WT wall.
             const revealsOn = !(CBZ.CONFIG && CBZ.CONFIG.WINDOW_REVEALS_V2 === false);
-            const REV = 0.09;                                 // reveal depth (m)
+            // MASONRY doubles the reveal: a load-bearing brick or ashlar wall is
+            // genuinely thick, and the deep shadow pocket around a punched window
+            // is the #1 tell that separates real masonry from a painted box.
+            // 0.17 of a 0.40 wall still leaves the pane comfortably inside.
+            const REV = MASONRY ? 0.17 : 0.09;                // reveal depth (m)
             const paneOff = outSgn * (WT / 2 - (revealsOn ? REV : -0.01));  // face-normal seat of the pane plane
             for (let gx = 0; gx < nx; gx++) {
               for (let gy = 0; gy < ny; gy++) {
@@ -2800,7 +2983,9 @@
             const winW = Math.min(2.0, cell * 0.68);  // the punched opening width
             // vertical: a generous sill (apartments aren't floor-to-ceiling) up
             // to a header lip — a tall-ish punched window, head-height view in.
-            const sillH = 1.05, hdrH = 0.7;
+            // MSILL/MHDR are shared with veneerBand so the brick veneer always
+            // lands on solid wall and never crosses an opening.
+            const sillH = MSILL, hdrH = MHDR;
             const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
             const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
             // FRAME the masonry around REAL gaps (never a solid plate — that
@@ -2829,20 +3014,122 @@
               faceBox(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
               faceBox(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
               glazeOpening(cx, winCy, cz, winW, winPh);
-              // thin punched-window frame proud of the street face: a sill lip, a
-              // header lintel, and a single muntin bar (the classic two-over-two).
+              // ---- PUNCHED-WINDOW DRESSING (the brick-building grammar) ----
+              // A real brick opening carries, from bottom up: a projecting STONE
+              // SILL with a drip nose; brick JAMB reveals; and a head that is
+              // either a flat stone LINTEL or a SEGMENTAL ARCH of header bricks
+              // with a keystone. Which head a building uses is one deterministic
+              // per-building draw (CBZ.hash01, never rng), so a block reads as
+              // one builder's work rather than a random mix window to window.
+              // Everything is merged deco (dbox) — zero extra draw calls.
+              const arched = CBZ.hash01 ? CBZ.hash01(ox, oz, 0x4a2c) < 0.45 : false;
+              const SILLC = TRIM, HEADC = arched ? shadeHex(color, 0.88) : TRIM;
               if (f.horiz) {
                 const faceZ = f.z + outSgn * (WT / 2 + 0.05);
-                dbox(cx, winY0 - 0.06, faceZ, winW + 0.22, 0.12, 0.12, TRIM);   // stone sill
-                dbox(cx, winY1 + 0.06, faceZ, winW + 0.22, 0.1, 0.1, TRIM);     // lintel
+                dbox(cx, winY0 - 0.07, faceZ, winW + 0.30, 0.14, 0.16, SILLC);            // stone sill
+                dbox(cx, winY0 - 0.17, faceZ + outSgn * 0.03, winW + 0.22, 0.07, 0.10, shadeHex(SILLC, 0.82));   // drip nose
+                if (arched) {
+                  // five voussoir blocks stepping up to a keystone
+                  for (let v = -2; v <= 2; v++) {
+                    const rise = 0.10 * (2 - Math.abs(v));
+                    dbox(cx + v * (winW / 4.6), winY1 + 0.10 + rise / 2, faceZ,
+                      winW / 4.4, 0.22 + rise, 0.11, HEADC);
+                  }
+                  dbox(cx, winY1 + 0.30, faceZ + outSgn * 0.02, 0.22, 0.34, 0.13, SILLC);  // keystone
+                } else {
+                  dbox(cx, winY1 + 0.10, faceZ, winW + 0.34, 0.18, 0.13, HEADC);           // flat stone lintel
+                  dbox(cx, winY1 + 0.22, faceZ, winW + 0.18, 0.07, 0.09, shadeHex(SILLC, 1.06));
+                }
                 dbox(cx, winCy, faceZ, winW + 0.12, 0.07, 0.06, MULL);          // muntin (horiz bar)
-                dbox(cx, winCy, faceZ, 0.06, winPh, 0.06, MULL);               // muntin (vert bar)
+                dbox(cx, winCy, faceZ, 0.06, winPh, 0.06, MULL);                // muntin (vert bar)
               } else {
                 const faceX = f.x + outSgn * (WT / 2 + 0.05);
-                dbox(faceX, winY0 - 0.06, cz, 0.12, 0.12, winW + 0.22, TRIM);
-                dbox(faceX, winY1 + 0.06, cz, 0.1, 0.1, winW + 0.22, TRIM);
+                dbox(faceX, winY0 - 0.07, cz, 0.16, 0.14, winW + 0.30, SILLC);
+                dbox(faceX + outSgn * 0.03, winY0 - 0.17, cz, 0.10, 0.07, winW + 0.22, shadeHex(SILLC, 0.82));
+                if (arched) {
+                  for (let v = -2; v <= 2; v++) {
+                    const rise = 0.10 * (2 - Math.abs(v));
+                    dbox(faceX, winY1 + 0.10 + rise / 2, cz + v * (winW / 4.6),
+                      0.11, 0.22 + rise, winW / 4.4, HEADC);
+                  }
+                  dbox(faceX + outSgn * 0.02, winY1 + 0.30, cz, 0.13, 0.34, 0.22, SILLC);
+                } else {
+                  dbox(faceX, winY1 + 0.10, cz, 0.13, 0.18, winW + 0.34, HEADC);
+                  dbox(faceX, winY1 + 0.22, cz, 0.09, 0.07, winW + 0.18, shadeHex(SILLC, 1.06));
+                }
                 dbox(faceX, winCy, cz, 0.06, 0.07, winW + 0.12, MULL);
                 dbox(faceX, winCy, cz, 0.06, winPh, 0.06, MULL);
+              }
+            }
+          } else if (civicF) {
+            // ===== CIVIC / GOVERNMENT: ashlar stone, TALL SYMMETRICAL BAYS ====
+            // A courthouse or federal building does not glaze like an office and
+            // does not punch like a tenement: it runs a small number of tall,
+            // evenly-spaced openings separated by full-height engaged PIERS, each
+            // opening capped with a stone architrave and set on a bracketed sill.
+            // The bay count is derived from the face width at a ~4.0m civic pitch
+            // (roughly 13ft, the classic monumental bay), and — crucially — the
+            // bays are laid out SYMMETRICALLY about the face centre, because a
+            // government facade that isn't symmetrical reads instantly wrong.
+            const span = (f.horiz ? w : d);
+            const endPier = Math.max(1.0, span * 0.075);      // heavy corner pier
+            const usableC = span - 2 * endPier;
+            const nBay = Math.max(1, Math.round(usableC / 4.0));
+            const cellC = usableC / nBay;
+            const winW = Math.min(2.6, cellC * 0.56);          // tall, generous opening
+            const sillH = MSILL, hdrH = MHDR;
+            const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
+            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
+            const fBoxC = (centerT, segLen, cy, ch) => {
+              if (segLen <= 0.02) return;
+              if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
+              else lbox(f.x, cy, centerT, f.dd, ch, segLen, color, wallOpt);
+            };
+            fBoxC(0, span, fy0 + sillH / 2, sillH);            // podium/spandrel course
+            fBoxC(0, span, fy1 - hdrH / 2, hdrH);              // frieze course
+            fBoxC(-span / 2 + endPier / 2, endPier, winCy, winPh);
+            fBoxC(span / 2 - endPier / 2, endPier, winCy, winPh);
+            const faceN = f.horiz ? f.z + outSgn * (WT / 2 + 0.05) : f.x + outSgn * (WT / 2 + 0.05);
+            for (let i = 0; i < nBay; i++) {
+              const t = -usableC / 2 + (i + 0.5) * cellC;
+              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
+              const pierW = (cellC - winW) / 2;
+              fBoxC(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
+              fBoxC(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
+              glazeOpening(cx, winCy, cz, winW, winPh);
+              // ENGAGED PILASTER on the pier between bays: a shallow flat pier
+              // with a bright reveal, running the full storey, plus a moulded
+              // cap where it meets the frieze. Merged deco — no draw cost.
+              const pw2 = Math.min(0.85, pierW * 0.72);
+              const pT = t + winW / 2 + pierW / 2;
+              if (i < nBay - 1 && pw2 > 0.2) {
+                if (f.horiz) {
+                  dbox(pT, fy0 + FH / 2, faceN, pw2, FH - 0.1, 0.11, PIL);
+                  dbox(pT, fy1 - hdrH - 0.10, faceN, pw2 + 0.24, 0.20, 0.17, TRIM);   // capital
+                  dbox(pT, fy0 + sillH + 0.10, faceN, pw2 + 0.20, 0.16, 0.15, TRIM);  // base
+                } else {
+                  dbox(faceN, fy0 + FH / 2, pT, 0.11, FH - 0.1, pw2, PIL);
+                  dbox(faceN, fy1 - hdrH - 0.10, pT, 0.17, 0.20, pw2 + 0.24, TRIM);
+                  dbox(faceN, fy0 + sillH + 0.10, pT, 0.15, 0.16, pw2 + 0.20, TRIM);
+                }
+              }
+              // ARCHITRAVE + BRACKETED SILL around the opening (stone dressings)
+              if (f.horiz) {
+                dbox(cx, winY1 + 0.13, faceN, winW + 0.56, 0.24, 0.16, TRIM);         // architrave / cornice
+                dbox(cx, winY1 + 0.29, faceN, winW + 0.30, 0.10, 0.20, shadeHex(TRIM, 1.06));
+                dbox(cx, winY0 - 0.10, faceN, winW + 0.44, 0.18, 0.18, TRIM);         // sill slab
+                for (const sg of [-1, 1])
+                  dbox(cx + sg * (winW / 2 - 0.06), winY0 - 0.34, faceN, 0.20, 0.34, 0.16, shadeHex(TRIM, 0.88));  // console brackets
+                for (const sg of [-1, 1])
+                  dbox(cx + sg * (winW / 2 + 0.14), winCy, faceN, 0.14, winPh, 0.10, shadeHex(TRIM, 0.94));        // jamb architrave
+              } else {
+                dbox(faceN, winY1 + 0.13, cz, 0.16, 0.24, winW + 0.56, TRIM);
+                dbox(faceN, winY1 + 0.29, cz, 0.20, 0.10, winW + 0.30, shadeHex(TRIM, 1.06));
+                dbox(faceN, winY0 - 0.10, cz, 0.18, 0.18, winW + 0.44, TRIM);
+                for (const sg of [-1, 1])
+                  dbox(faceN, winY0 - 0.34, cz + sg * (winW / 2 - 0.06), 0.16, 0.34, 0.20, shadeHex(TRIM, 0.88));
+                for (const sg of [-1, 1])
+                  dbox(faceN, winCy, cz + sg * (winW / 2 + 0.14), 0.10, winPh, 0.14, shadeHex(TRIM, 0.94));
               }
             }
           } else if (fortified) {
@@ -3153,7 +3440,11 @@
     // street-reading cornice + pilasters. Window panes (cityGlass) are untouched
     // and collision/LOS (solid()/los boxes) are unaffected (these were deco-only
     // dbox→flushDeco merged meshes), so this is draw-call NEUTRAL or BETTER.
-    const masonryTrim = (FACADE === "residential" || FACADE === "fortified");
+    // MASONRY earns its street-reading trim. When buildings_civic.js is loaded
+    // the RICH dressing (string courses, quoins, water table, corbelled cornice,
+    // parapet piers, weathering) replaces this legacy per-floor cornice lip
+    // wholesale — running both would double every floor line.
+    const masonryTrim = MASONRY && !CBZ.bldMasonryDress;
     if (masonryTrim) {
       // cornice lip at every floor line so masonry storeys read from the street
       for (let L = 1; L < storeys; L++) {
@@ -3169,7 +3460,10 @@
     // ground floor is drive-in bays). Sits below the lowest window band. This
     // is a GROUND grounding band only (not part of the per-floor cage), so it
     // stays on every facade so a tower meets the street instead of floating.
-    if (!opts.garageGround) {
+    // (MASONRY skips this band: its base is a real grade plinth + water table +
+    // the textured veneer, all emitted by bldMasonryDress/veneerBand, and a flat
+    // painted plinth on top of them would just z-fight the brick.)
+    if (!opts.garageGround && !(MASONRY && CBZ.bldMasonryDress)) {
       if (doorSide !== 0) dbox(0, 0.33, -d / 2 - 0.025, w + 0.1, 0.66, 0.09, BASE);
       if (doorSide !== 1) dbox(0, 0.33, d / 2 + 0.025, w + 0.1, 0.66, 0.09, BASE);
       if (doorSide !== 2) dbox(-w / 2 - 0.025, 0.33, 0, 0.09, 0.66, d + 0.1, BASE);
@@ -3179,6 +3473,9 @@
       // corner PILASTERS tying the floors to the parapet line (masonry only)
       for (const sxp of [-1, 1]) for (const szp of [-1, 1])
         dbox(sxp * (w / 2 - 0.02), (rTop + pp) / 2, szp * (d / 2 - 0.02), 0.5, rTop + pp, 0.5, PIL);
+    } else if (MASONRY) {
+      // masonry corners are QUOINED (alternating long/short corner stones) by
+      // bldMasonryDress — neither a fat pilaster nor a glass-tower hairline.
     } else {
       // glass tower: a HAIRLINE corner reveal (a thin pinstripe, not a cage
       // post) so the curtain-wall edge still catches light without framing the
@@ -3281,6 +3578,117 @@
         }
       }
     }
+    // ============================================================
+    //  MASONRY / CIVIC / ROOF-CLUTTER DRESSING (buildings_civic.js)
+    // ============================================================
+    // Everything below is emitted BEFORE flushDeco so it folds into this
+    // building's merged trim buckets (and then into core/batch.js's city-wide
+    // merge). The helper module owns the vocabulary; this block owns the
+    // plumbing — a small ctx of closures + the building's real dimensions, so
+    // buildings_civic.js never touches the scene graph, colliders or rng.
+    {
+      const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
+      const addMesh = (geo, col, lx, ly, lz, emissive) => {
+        const mm = emissive ? mat(col, { emissive: col, ei: 0.8 }) : (CBZ.cmat ? CBZ.cmat(col) : mat(col));
+        const m = new THREE.Mesh(geo, mm);
+        m.position.set(lx, ly, lz);
+        m.castShadow = !emissive; m.receiveShadow = true;
+        bgroup.add(m);
+        return m;
+      };
+      const ctxC = {
+        ox, oz, w, d, storeys, FH, WT, rTop, pp, doorSide,
+        slabCx, slabCz, slabW, slabD,
+        garageGround: !!opts.garageGround,
+        showroom: !!opts.showroom,
+        civic: civicSpec,
+        pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
+        color, TRIM, BASE, PIL, MULL,
+        hash: bhash,
+        dbox: dbox,
+        lbox: lbox,
+        // building-local rect → a real walk PLATFORM (mirrored into b.platforms
+        // so demolition can splice it back out). NO collider: a monumental
+        // stair must never be able to seal a building's own front door.
+        plat: function (lx0, lx1, lz0, lz1, top, ramp) {
+          const p = { minX: ox + lx0, maxX: ox + lx1, minZ: oz + lz0, maxZ: oz + lz1, top: top };
+          if (ramp) p.ramp = ramp;
+          CBZ.platforms.push(p); plats.push(p);
+        },
+        ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
+        column: function (lx, ly, lz, r, h, col, seg) {
+          addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
+        },
+        cone: function (lx, ly, lz, r, h, col) { addMesh(new THREE.ConeGeometry(r, h, 14), col, lx, ly + h / 2, lz); },
+        // r128 SphereGeometry(radius, wSeg, hSeg, phiStart, phiLength, thetaStart, thetaLength)
+        // — thetaLength = PI/2 gives the upper hemisphere (a real dome shell).
+        dome: function (lx, ly, lz, r, col) {
+          addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
+        },
+        lamp: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
+        // a clock face on one side of a belfry: disc + bezel + two hands
+        disc: function (lx, ly, lz, r, horiz, sg, faceCol, handCol) {
+          const bez = addMesh(new THREE.CylinderGeometry(r * 1.12, r * 1.12, 0.12, 20), handCol, lx, ly, lz);
+          const fc = addMesh(new THREE.CylinderGeometry(r, r, 0.16, 20), faceCol, lx, ly, lz);
+          for (const m of [bez, fc]) { if (horiz) m.rotation.x = Math.PI / 2; else m.rotation.z = Math.PI / 2; }
+          const hOff = horiz ? [0, 0, sg * 0.11] : [sg * 0.11, 0, 0];
+          const hr = addMesh(new THREE.BoxGeometry(horiz ? 0.09 : 0.06, r * 1.15, horiz ? 0.06 : 0.09), handCol,
+            lx + hOff[0], ly + r * 0.34, lz + hOff[2]);
+          const mn = addMesh(new THREE.BoxGeometry(horiz ? r * 1.2 : 0.06, 0.09, horiz ? 0.06 : r * 1.2), handCol,
+            lx + hOff[0], ly - r * 0.12, lz + hOff[2]);
+          hr.castShadow = mn.castShadow = false;
+        },
+        // ---- the ONLY textured (canvas `map`) meshes a building emits, and
+        // only on civic anchors: core/batch.js spares anything with a map, so
+        // this is 2 extra draw calls on ~4-6 buildings city-wide. Deliberate.
+        plaque: function (f, cy, pw, ph, text, stoneHex) {
+          if (!CBZ.civicPlaqueTex || pw < 1.2) return;
+          const halfN = (f.horiz ? d : w) / 2;
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph),
+            new THREE.MeshBasicMaterial({ map: CBZ.civicPlaqueTex(text, stoneHex) }));
+          if (f.horiz) { m.position.set(0, cy, f.out * (halfN + 0.38)); m.rotation.y = f.out > 0 ? 0 : Math.PI; }
+          else { m.position.set(f.out * (halfN + 0.38), cy, 0); m.rotation.y = f.out > 0 ? Math.PI / 2 : -Math.PI / 2; }
+          m.renderOrder = 2; bgroup.add(m);
+        },
+        seal: function (f, cy, r, kind) {
+          if (!CBZ.civicSealTex || r < 0.4) return;
+          const halfN = (f.horiz ? d : w) / 2;
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2),
+            new THREE.MeshBasicMaterial({ map: CBZ.civicSealTex(kind), transparent: true }));
+          if (f.horiz) { m.position.set(0, cy, f.out * (halfN + 0.62)); m.rotation.y = f.out > 0 ? 0 : Math.PI; }
+          else { m.position.set(f.out * (halfN + 0.62), cy, 0); m.rotation.y = f.out > 0 ? Math.PI / 2 : -Math.PI / 2; }
+          m.renderOrder = 3; bgroup.add(m);
+        },
+      };
+      if (MASONRY) {
+        // BRICK/STONE VENEER — the spandrel band under every storey's sills plus
+        // the header band under each floor line (never the TOP one: the corbelled
+        // cornice covers it, so those tiles would be pure waste). Bounded by
+        // construction: solid bands only, so brick never crosses a window.
+        if (VENEER_ON) {
+          for (let k = 0; k < storeys; k++) {
+            if (opts.garageGround && k === 0) continue;
+            for (let s = 0; s < 4; s++) {
+              const isFront = (k === 0 && s === doorSide);
+              if (isFront && (opts.showroom || opts.retail)) continue;   // storefront owns that band
+              veneerBand(s, k * FH + 0.12, k * FH + MSILL - 0.05, isFront ? (DOORW / 2 + 0.4) : 0);
+              if (k < storeys - 1) veneerBand(s, (k + 1) * FH - MHDR + 0.06, (k + 1) * FH - 0.10, 0);
+            }
+          }
+        }
+        if (CBZ.bldMasonryDress) CBZ.bldMasonryDress(ctxC);
+        if (CBZ.bldGhostSign && punched) CBZ.bldGhostSign(ctxC);
+      }
+      if (civicF && civicSpec) {
+        if (CBZ.bldCivicOrder) CBZ.bldCivicOrder(ctxC);
+        if (CBZ.bldCivicCrown) CBZ.bldCivicCrown(ctxC);
+      }
+      // ROOF CLUTTER on every real building (not just masonry) — flat empty
+      // roofs are the second-biggest "this is a box" tell after flat facades.
+      // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
+      // roof centre, and a water tank next to a courthouse dome is comedy.
+      if (CBZ.bldRoofClutter && !opts.boarded && !(civicF && civicSpec)) CBZ.bldRoofClutter(ctxC);
+    }
     flushDeco();
 
     // PER-FLOOR ARRIVAL HEIGHTS (ground..roof) for the elevator agent's multi-
@@ -3292,7 +3700,9 @@
     const floorTops = [0.14];
     for (let L = 1; L <= storeys; L++) floorTops.push(L * FH);
 
-    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
+    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE,
+      wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
+      boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
@@ -3604,14 +4014,20 @@
     const FLOOR_TINT = { bar: 0x2a1f2a, casino: 0x2a2418, drugs: 0x2e2c24, bank: 0x3a4250,
       cityhall: 0x3a4250, hospital: 0x3f4a52, gym: 0x24282e, guns: 0x303529, jewelry: 0x342c1c,
       pawn: 0x342c1c, electronics: 0x232a2c, security: 0x282e34, food: 0x3a322a, clothing: 0x352e38,
-      barber: 0x2c3036, hardware: 0x342e26, gas: 0x2c3138 };
+      barber: 0x2c3036, hardware: 0x342e26, gas: 0x2c3138,
+      // civic trades: polished stone / terrazzo lobbies, a green library floor,
+      // and a bare painted apparatus-bay slab for the fire house.
+      courthouse: 0x3d4249, federal: 0x394049, cityannex: 0x3a4250, postoffice: 0x35404c,
+      dmv: 0x323a34, library: 0x33403a, firestation: 0x2e3238 };
     const ftint = FLOOR_TINT[kind] || 0x2e3238;
     b.lbox(0, 0.02, 0, W - 1.2, 0.04, D - 1.2, ftint, { cast: false });
     // mood-tinted ceiling fixture per trade — bars/casinos run a moody saturated
     // glow, clinical trades (bank/hospital) cold-white, the rest warm shop light.
     const MOOD = { bar: [0xe85d8a, 0.6], casino: [0xc9a227, 0.62], drugs: [0x4caf6e, 0.4], bank: [0xdfe8ff, 0.5],
       cityhall: [0xdfe8ff, 0.5], hospital: [0xf2faff, 0.55], gym: [0x66d9c0, 0.45], guns: [0xbfd0a8, 0.4],
-      jewelry: [0xffe08a, 0.55], pawn: [0xffe08a, 0.5], electronics: [0x39d0c0, 0.45], security: [0x49a0c0, 0.45] };
+      jewelry: [0xffe08a, 0.55], pawn: [0xffe08a, 0.5], electronics: [0x39d0c0, 0.45], security: [0x49a0c0, 0.45],
+      courthouse: [0xe8ecf5, 0.5], federal: [0xdfe8ff, 0.5], cityannex: [0xdfe8ff, 0.5],
+      postoffice: [0xe6eef8, 0.48], dmv: [0xeef3e8, 0.5], library: [0xffe6b8, 0.5], firestation: [0xffd0b0, 0.5] };
     const mood = MOOD[kind] || [0xffcf66, 0.42];
     b.lbox(0, FHl - 0.32, 0, along ? 0.5 : 3.2, 0.08, along ? 3.2 : 0.5, mood[0], { emissive: mood[0], ei: mood[1], cast: false });
     // a second, dimmer back-of-room fixture so deep rooms aren't black
@@ -3703,7 +4119,9 @@
     // wall), with a ≥1.6u doorway gap so the clerk can reach the back. The back
     // band holds a small back OFFICE (setBackroom). Showroom trades
     // (carlot/chop/realtor) keep their open display floor — they return early below.
-    const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor"
+    // (firestation joins the showroom exclusions: its ground floor IS the
+    //  apparatus bay — an engine has to be able to roll straight out of it.)
+    const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor" && kind !== "firestation"
       && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
     if (backWalled) {
       const WALLH = FHl - 0.05;
@@ -3857,12 +4275,22 @@
         break;
       }
       case "bank":
-      case "cityhall": {
-        // a row of TELLER windows — CITYHALL ONLY now (space doctrine): the real
-        // bank branch (bank.js) builds its own teller counter + glass + screens
-        // just behind where this deco row stood, so on bank lots the deco row
-        // doubled the counter and walled off its own approach.
-        if (kind === "cityhall") {
+      case "cityhall":
+      // ---- THE CIVIC COUNTER FAMILY (city/buildings_civic.js trades) --------
+      // Every government office in the game is, inside, the same thing: a
+      // public hall with a screened counter you queue at. They share the
+      // cityhall dressing and then add their ONE distinguishing fixture below,
+      // rather than each re-inventing a room.
+      case "courthouse":
+      case "federal":
+      case "cityannex":
+      case "postoffice":
+      case "dmv": {
+        // a row of TELLER/CLERK windows — every civic kind EXCEPT the bank
+        // (space doctrine): the real bank branch (bank.js) builds its own teller
+        // counter + glass + screens just behind where this deco row stood, so on
+        // bank lots the deco row doubled the counter and walled off its approach.
+        if (kind !== "bank") {
           const lat0 = -(halfTan - 1.8);
           for (let i = 0; i < 3; i++) {
             const p = pt(2 * halfIn - 3.0, lat0 + i * 1.8, 0.5);
@@ -3880,6 +4308,140 @@
         //  the drill point) in that same corner, and the partition accents below
         //  wall it into a proper vault room. Three vault reads in one corner
         //  was cram, not security.)
+        // ---- the ONE fixture that tells the civic kinds apart --------------
+        if (kind === "courthouse") {
+          // a raised JUDGE'S BENCH across the back, flanked by counsel tables,
+          // with two rows of gallery pews facing it (real seat anchors, so peds
+          // can actually sit in the public gallery).
+          const jb = pt(2 * halfIn - 2.4, 0, 0.5);
+          if (jb) {
+            solidBox(jb, 0.55, Math.min(halfTan * 1.4, 5.0), 1.10, 1.0, 0x4a3626);   // bench body
+            decor(jb, 1.18, Math.min(halfTan * 1.4, 5.0) + 0.2, 0.14, 1.2, 0x6b4a2a); // bench cap
+            decor({ x: jb.x, z: jb.z }, 2.55, 1.0, 1.1, 0.08, 0x2a2f37);              // wall crest panel
+            glow({ x: jb.x, z: jb.z }, 2.55, 0.45, 0.5, 0.05, 0xd8c98a, 0.55);        // gilded seal
+          }
+          for (const sg of [-1, 1]) {
+            const ct = pt(2 * halfIn - 5.6, sg * 2.1, 0.7);
+            if (ct) { decor(ct, 0.72, 2.0, 0.10, 0.9, 0x5a4433); for (const e of [-1, 1]) { const lx = ct.x + tx * e * 0.85, lz = ct.z + tz * e * 0.85; b.lbox(lx, 0.35, lz, 0.1, 0.7, 0.1, 0x3a2f24, { cast: false }); } }
+          }
+          for (let r = 0; r < 2; r++) {
+            const pw = pt(6.2 + r * 1.6, 0, 0.8);
+            if (!pw) continue;
+            decor(pw, 0.42, Math.min(halfTan * 1.5, 5.4), 0.12, 0.5, 0x6b4a2a);       // pew seat
+            decor(pw, 0.85, Math.min(halfTan * 1.5, 5.4), 0.75, 0.10, 0x5a3f26);      // pew back
+            for (const sg of [-1, 1]) seatP({ x: pw.x + tx * sg * 1.3, z: pw.z + tz * sg * 1.3 }, Math.atan2(inx, inz), "chair");
+          }
+        } else if (kind === "postoffice") {
+          // a WALL OF PO BOXES (a real brass grid) + a sorting table
+          for (const sg of [-1, 1]) {
+            const wall = pt(2 * halfIn - 6.0, sg * (halfTan - 0.45), 0.8);
+            if (!wall) continue;
+            decor(wall, 1.15, 3.4, 2.30, 0.35, 0x3a3630);
+            for (let c2 = 0; c2 < 7; c2++) for (let r2 = 0; r2 < 6; r2++) {
+              const lat = -1.5 + c2 * 0.5;
+              b.lbox(wall.x + tx * lat, 0.35 + r2 * 0.36, wall.z + tz * lat,
+                along ? 0.06 : 0.42, 0.30, along ? 0.42 : 0.06, (c2 + r2) % 2 ? 0xc0a057 : 0xa88a44, { cast: false });
+            }
+          }
+          const srt = pt(2 * halfIn - 6.4, 0, 0.9);
+          if (srt) { decor(srt, 0.86, 2.4, 0.10, 1.1, 0x8a7a5e); for (let i = 0; i < 4; i++) decor({ x: srt.x + tx * (-0.9 + i * 0.6), z: srt.z + tz * (-0.9 + i * 0.6) }, 1.02, 0.45, 0.22, 0.45, 0xc47a3a); }
+        } else if (kind === "dmv") {
+          // the QUEUE SNAKE (four rope bays) + a numbered NOW-SERVING board and
+          // a bench row — the universally recognised civil-service waiting hall.
+          for (let i = 0; i < 4; i++) {
+            const p = pt(5.0 + i * 1.5, 0, 0.6);
+            if (!p) continue;
+            for (const sg of [-1, 1]) { const q = { x: p.x + tx * sg * 2.0, z: p.z + tz * sg * 2.0 }; decor(q, 0.5, 0.14, 1.0, 0.14, 0x8a8f97); }
+            decor(p, 0.85, along ? 0.04 : 4.0, 0.05, along ? 4.0 : 0.04, 0x39424c);
+          }
+          const bd2 = pt(2 * halfIn - 3.6, halfTan - 1.2, 0.6);
+          if (bd2) glow(bd2, 2.4, 1.6, 0.7, 0.08, 0x66d9c0, 0.75);
+          for (const sg of [-1, 1]) {
+            const bn = pt(4.2, sg * (halfTan - 1.0), 0.9);
+            if (!bn) continue;
+            decor(bn, 0.44, 2.6, 0.12, 0.5, 0x59606a);
+            seatP(bn, Math.atan2(-tx * sg, -tz * sg), "chair");
+          }
+        } else if (kind === "federal" || kind === "cityannex") {
+          // a SECURITY SCREENING lane just inside the door (metal detector arch
+          // + a bag table) — the thing that says "you are in a government
+          // building" the moment you walk in.
+          const arch = pt(3.8, 0, 0.5);
+          if (arch) {
+            for (const sg of [-1, 1]) { const q = { x: arch.x + tx * sg * 0.95, z: arch.z + tz * sg * 0.95 }; decor(q, 1.05, 0.22, 2.10, 0.32, 0xcfd4da); }
+            decor(arch, 2.18, 2.3, 0.20, 0.32, 0xcfd4da);
+            glow({ x: arch.x, z: arch.z }, 2.05, 0.5, 0.06, 0.06, 0x66d9c0, 0.7);
+          }
+          const tbl = pt(5.4, halfTan - 1.4, 0.8);
+          if (tbl) decor(tbl, 1.6, 0.86, 0.10, 0.7, 0x8f959c);
+          // a directory board of departments on the back wall
+          const dir = pt(2 * halfIn - 1.2, -(halfTan - 1.6), 0.4);
+          if (dir) { decor(dir, 1.9, 2.2, 1.5, 0.08, 0x2a2f37); for (let i = 0; i < 5; i++) glow({ x: dir.x, z: dir.z }, 1.35 + i * 0.26, 1.7, 0.05, 0.04, 0xdfe8ff, 0.4); }
+        }
+        break;
+      }
+      case "library": {
+        // THE STACKS: parallel runs of tall shelving down the room, reading
+        // tables with lamps between them, and a circulation desk at the back.
+        const runs = 3;
+        for (let r = 0; r < runs; r++) for (const sg of [-1, 1]) {
+          const p = pt(5.4 + r * 2.4, sg * (halfTan - 1.5), 0.9);
+          if (!p) continue;
+          decor(p, 1.10, 1.9, 2.20, 0.70, 0x5a4433);                     // shelf carcass
+          for (let s2 = 0; s2 < 5; s2++) {
+            const y = 0.40 + s2 * 0.42;
+            decor({ x: p.x, z: p.z }, y, 1.8, 0.06, 0.62, 0x7a6047);     // shelf boards
+            // a run of book spines per shelf, hashed colours (deterministic)
+            for (let i = 0; i < 6; i++) {
+              const lat = -0.75 + i * 0.3;
+              const hcol = [0x8a3b3b, 0x3b5a8a, 0x3b7a4f, 0xc0a057, 0x6a4a7a][(i + s2 + r) % 5];
+              b.lbox(p.x + tx * lat, y + 0.18, p.z + tz * lat, along ? 0.5 : 0.24, 0.30, along ? 0.24 : 0.5, hcol, { cast: false });
+            }
+          }
+        }
+        for (let i = 0; i < 2; i++) {
+          const tb = pt(6.0 + i * 3.4, 0, 1.0);
+          if (!tb) continue;
+          decor(tb, 0.74, 2.6, 0.10, 1.2, 0x6b4a2a);                     // reading table
+          glow({ x: tb.x, z: tb.z }, 1.05, 0.24, 0.28, 0.24, 0xffe0a0, 0.8);   // green-shade lamp
+          for (const sg of [-1, 1]) {
+            const ch = { x: tb.x + tx * sg * 1.0, z: tb.z + tz * sg * 1.0 };
+            decor(ch, 0.42, 0.5, 0.10, 0.5, 0x4a4033);
+            seatP(ch, Math.atan2(-tx * sg, -tz * sg), "chair");
+          }
+        }
+        const circ = pt(2 * halfIn - 3.2, 0, 0.6);
+        if (circ) { solidBox(circ, 0.55, Math.min(halfTan * 1.2, 4.2), 1.10, 0.8, 0x5a4433); decor(circ, 1.16, Math.min(halfTan * 1.2, 4.2) + 0.2, 0.10, 1.0, 0x7a6047); }
+        break;
+      }
+      case "firestation": {
+        // The APPARATUS BAY: a painted bay floor, a turnout-gear locker row, a
+        // hose rack, and the brass SLIDING POLE dropping from the upper floor —
+        // the four things every fire house in the world actually has.
+        const bay = pt(halfIn * 0.8, 0, 1.6);
+        if (bay) {
+          b.lbox(bay.x, 0.03, bay.z, along ? Math.min(2 * halfIn - 2, 12) : 4.2, 0.05,
+            along ? 4.2 : Math.min(2 * halfIn - 2, 12), 0x39424c, { cast: false });
+          for (let i = -1; i <= 1; i += 2)
+            b.lbox(bay.x + tx * i * 2.1, 0.05, bay.z + tz * i * 2.1,
+              along ? Math.min(2 * halfIn - 2, 12) : 0.16, 0.05, along ? 0.16 : Math.min(2 * halfIn - 2, 12),
+              0xd8c05a, { cast: false });                                  // bay edge stripes
+        }
+        for (const sg of [-1, 1]) {
+          const lk = pt(2 * halfIn - 5.0, sg * (halfTan - 0.6), 0.8);
+          if (!lk) continue;
+          decor(lk, 1.05, 3.2, 2.10, 0.55, 0x3f4650);                      // locker bank
+          for (let i = 0; i < 5; i++) {
+            const lat = -1.3 + i * 0.65;
+            decor({ x: lk.x + tx * lat, z: lk.z + tz * lat }, 1.05, 0.55, 2.0, 0.06, 0x59606a);
+            decor({ x: lk.x + tx * lat, z: lk.z + tz * lat }, 1.45, 0.42, 0.75, 0.22, 0xd8c05a);   // hung turnout coat
+            decor({ x: lk.x + tx * lat, z: lk.z + tz * lat }, 0.16, 0.34, 0.32, 0.34, 0x2a2f37);   // boots
+          }
+        }
+        const pole = pt(2 * halfIn - 2.6, -(halfTan - 1.5), 0.6);
+        if (pole) b.lbox(pole.x, FHl / 2, pole.z, 0.16, FHl, 0.16, 0xc0a057, { cast: false });
+        const hose = pt(2 * halfIn - 2.6, halfTan - 1.2, 0.6);
+        if (hose) { decor(hose, 1.3, 1.8, 2.4, 0.30, 0x4a5058); for (let i = 0; i < 3; i++) decor({ x: hose.x, z: hose.z }, 0.6 + i * 0.7, 1.5, 0.42, 0.42, 0xb8412f); }
         break;
       }
       case "gym": {
@@ -4227,7 +4789,10 @@
       food: 0xff9e6b, gym: 0x66d9c0, clothing: 0xc792ea, drugs: 0x4caf6e, electronics: 0x39d0c0,
       hardware: 0xffd166, hospital: 0xff6b6b, gas: 0xe24b4b, security: 0x49a0c0, casino: 0xc9a227,
       barber: 0x6bb6ff, realtor: 0x4fd0a0, carlot: 0xe88a3c, chop: 0xd0a23c, cityhall: 0xd8dde8 };
-    return A[kind] || 0x9fd8ee;
+    if (A[kind] != null) return A[kind];
+    // the civic trades (courthouse/federal/library/...) carry their own accents
+    if (CBZ.CIVIC_ACCENT && CBZ.CIVIC_ACCENT[kind] != null) return CBZ.CIVIC_ACCENT[kind];
+    return 0x9fd8ee;
   }
 
   // public hook (and back-compat wrapper) — every shop building gets dressed
@@ -5325,6 +5890,10 @@
   // absent and PREFERS lot._company.cash once companies.js routes a real company
   // here, so this is only the pre-company fallback (and the wage/rent float).
   const ACCT_SEED = { bank: 9000, casino: 8000, jewelry: 6500, security: 5000, realtor: 4200, carlot: 4000, chop: 3000, gym: 2200, clothing: 2000, guns: 2400, pawn: 2600, bar: 2800, gas: 1600, drugs: 1800, hospital: 3500, cityhall: 5000, arena: 4000, raceway: 3600, transit: 2000, food: 900 };
+  // the new civic trades bring their own opening float (city/buildings_civic.js
+  // owns the table; merged here so stampOwner needs no special case).
+  if (CBZ.CIVIC_ACCT_SEED) for (const ck in CBZ.CIVIC_ACCT_SEED)
+    if (ACCT_SEED[ck] == null) ACCT_SEED[ck] = CBZ.CIVIC_ACCT_SEED[ck];
   function stampOwner(lot, idx) {
     const b = lot.building; if (!b || b.owner) return;
     const kind = lot.kind;
@@ -5538,6 +6107,49 @@
       if (dd < bestC) { bestC = dd; civicLot = lot; }
     }
 
+    // ---- THE CIVIC QUARTER (BLD_CIVIC_LOTS_V1) ----------------------------
+    // OWNER: "make new building types like gov buildings". City Hall alone is
+    // not a government; a courthouse, a federal building, a library, a post
+    // office, a records office and a fire house are. buildings_civic.js owns
+    // the trade DATA; this owns WHERE they land.
+    //
+    // SELECTION IS PURELY GEOMETRIC — the N lots nearest the city centre, after
+    // the flagship tower and City Hall have claimed theirs. That is deliberate
+    // and it does three things at once:
+    //   • it satisfies "civic clusters downtown, not in the suburbs" by
+    //     construction, more strongly than any affinity weight could;
+    //   • it adds ZERO rng() draws (the same discipline coreBonus/districtStoreys
+    //     already use), so no shared stream is reordered by this feature;
+    //   • it is bounded — ~10% of mainland lots, capped at the number of civic
+    //     trades — so `A.shopLots` grows by a handful, not a flood (the
+    //     math-gate GOLDEN band is 12%; on the stock 6×6 mainland this is 4
+    //     extra shops against a world total of ~178, i.e. +2.2%).
+    // WHICH trade lands on WHICH of those lots is a pure argmax over
+    // CBZ.CIVIC_AFFINITY for the lot's district — again, no rng.
+    const civicAssign = new Map();
+    if (CBZ.CIVIC_SHOPS && CBZ.CIVIC_SHOPS.length && CBZ.CIVIC_AFFINITY
+        && (!CBZ.CONFIG || CBZ.CONFIG.BLD_CIVIC_LOTS_V1 !== false)) {
+      const nCivic = Math.max(1, Math.min(CBZ.CIVIC_SHOPS.length, Math.round(city.lots.length * 0.10)));
+      const ranked = city.lots.filter((l) => l !== lux && l !== civicLot)
+        .map((l, i) => ({ l, i, dd: Math.hypot(l.cx - city.center.x, l.cz - city.center.z) }))
+        // explicit index tiebreak: never rely on Array.sort stability for a
+        // value the deterministic world build depends on.
+        .sort((a, b) => (a.dd - b.dd) || (a.i - b.i));
+      const pool = CBZ.CIVIC_SHOPS.slice();
+      for (let t = 0; t < nCivic && t < ranked.length && pool.length; t++) {
+        const lot = ranked[t].l;
+        const dk = districtKind(lot);
+        const row = CBZ.CIVIC_AFFINITY[dk] || null;
+        let best = 0, bs = -1;
+        for (let q = 0; q < pool.length; q++) {
+          const wq = (row && row[pool[q].kind] != null) ? row[pool[q].kind] : 1;
+          // ties broken by the trade's own rank (courthouse before fire house)
+          if (wq > bs || (wq === bs && pool[q].rank < pool[best].rank)) { bs = wq; best = q; }
+        }
+        civicAssign.set(lot, pool.splice(best, 1)[0]);
+      }
+    }
+
     // The property ladder is SHORT and every rung is a real, visitable building:
     // one lot per LISTED level (studio → aerie), plus the flagship Spire on the
     // lux lot. Every OTHER residence is a generic, occupied apartment (ranked for
@@ -5564,7 +6176,7 @@
     // and is forced to become its assigned listed residence.
     const reserved = new Map();
     {
-      const pool = city.lots.filter((l) => l !== lux && l !== civicLot);
+      const pool = city.lots.filter((l) => l !== lux && l !== civicLot && !civicAssign.has(l));
       const n = LISTED_TIERS.length;
       for (let t = 0; t < n && pool.length; t++) {
         const idx = Math.min(pool.length - 1, Math.floor((t + 0.5) / n * pool.length));
@@ -5580,7 +6192,7 @@
     // businesses do not collapse into one corner. No random draw is added.
     const essentialSlots = new Set();
     {
-      const pool = city.lots.filter((l) => l !== lux && l !== civicLot && !reserved.has(l));
+      const pool = city.lots.filter((l) => l !== lux && l !== civicLot && !reserved.has(l) && !civicAssign.has(l));
       const n = Math.min(nEssential, pool.length);
       for (let t = 0; t < n; t++) {
         const idx = Math.min(pool.length - 1, Math.floor((t + 0.5) / n * pool.length));
@@ -5591,6 +6203,7 @@
     for (const lot of city.lots) {
       const isLux = lot === lux;
       const isCivic = lot === civicLot;              // the reserved City Hall anchor
+      const civicShop = civicAssign.get(lot) || null; // a reserved GOV building anchor
       const forcedTier = reserved.get(lot) || null;   // a reserved listed-level lot
       const essentialSlot = essentialSlots.has(lot);  // cannot be consumed by park/hideout rolls
       const r = rng();
@@ -5604,7 +6217,7 @@
       // "dumb unowned corner": no collider/door requirement. We still give it a
       // benign lot.building stub so the city has NO unowned lots — owned by the
       // city. Downstream that touches lot.building.door already null-guards it.
-      if (!isLux && !isCivic && !forcedTier && !essentialSlot && r < parkP) {
+      if (!isLux && !isCivic && !civicShop && !forcedTier && !essentialSlot && r < parkP) {
         lot.kind = "park"; makePark(root, lot, rng);
         // A park needs NO collider/door. But a few downstream lot.building.door
         // consumers (careers' courier drop, lotDoor) read .door unguarded once a
@@ -5635,7 +6248,7 @@
       // threshold shifts with the lot's geometry.
       const lv = city.landValue ? city.landValue(lot.cx || 0, lot.cz || 0) : 0.5;
       const abandonedMul = Math.max(0.5, Math.min(1.5, 1 + (0.5 - lv) * 0.8));
-      if (!isLux && !isCivic && !forcedTier && !essentialSlot && r < parkP + Math.min(0.6, abandonedP * abandonedMul)) {
+      if (!isLux && !isCivic && !civicShop && !forcedTier && !essentialSlot && r < parkP + Math.min(0.6, abandonedP * abandonedMul)) {
         // Keep the gang turf/stash gameplay, but remove the old boarded derelict
         // visual shell. Those near-windowless boxes were clipping into the read of
         // shops like Cluckin' Diner / The Trap House and made good glass blocks feel
@@ -5644,7 +6257,11 @@
         const storeys = Math.max(1, Math.min(4, districtStoreys(lot)));
         const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];
         rng(); // preserve the old facade-variant draw so later shop placement stays stable
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: "office", district: districtKind(lot) });
+        // A gang hideout reads best as a run-down BRICK walk-up (soot streaks,
+        // a peeling ghost sign, a corbelled cornice missing chunks) rather than
+        // another glass box. Position-hashed, no rng draw; low-rise only.
+        const hideBrick = CBZ.hash01 && storeys <= 4 && CBZ.hash01(lot.cx, lot.cz, 0xb21e) < 0.62;
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: hideBrick ? "brick" : "office", district: districtKind(lot) });
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot, 0x4caf6e);
@@ -5664,6 +6281,12 @@
         // (CITYHALL_SHOP was already spliced out of shopQueue up front so it's
         // never double-placed by the random draw below).
         shop = CITYHALL_SHOP;
+      } else if (civicShop) {
+        // a reserved GOVERNMENT anchor (courthouse / federal / library / post
+        // office / records / fire house). Unconditional and rng-free, exactly
+        // like the City Hall anchor above — these trades never enter shopQueue,
+        // so the shuffle draws the same number of values as it always did.
+        shop = civicShop;
       } else if (!isLux && !isCivic && !forcedTier) {
         if (essentialSlot && shopIdx < nEssential) { shop = dealBestFor(lot, shopIdx, nEssential); shopIdx++; }
         else if (!essentialSlot && shopIdx >= nEssential && shopIdx < shopQueue.length && rng() < 0.4 * extraShopMulFor(lot)) { shop = dealBestFor(lot, shopIdx, shopQueue.length); shopIdx++; }
@@ -5679,12 +6302,30 @@
         const shopStoreys = dk === "core" ? Math.max(shop.storeys, 3 + ((rng() * 3) | 0))
           : dk === "commercial" ? Math.max(shop.storeys, 2 + ((rng() * 2) | 0))
           : shop.storeys;
-        // No deliberately sealed facades in the city pass. Banks/security still
-        // get normal office-style windows so they cannot become the blank blocks
-        // that visually crowd or clip into neighboring shops.
-        const specialFacade = (shop.kind === "bank" || shop.kind === "security") ? "office" : undefined;
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, { showroom: !!(shop.gas || shop.carlot || shop.chop), retail: !!shop.retail, facade: specialFacade, district: dk });
-        signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
+        // FACADE POLICY BY TRADE. Still NO deliberately sealed facades — the
+        // owner's blank-block complaint stands. What changes: the civic trades
+        // (and the bank / security firm, which have always been civic in
+        // everything but their skin) render with the MONUMENTAL ashlar facade —
+        // tall symmetrical bays on a pilaster order — instead of the same glass
+        // curtain wall as a phone shop. The `fortified` archetype stays
+        // unreachable from this pass on purpose: it is the narrow-slot look the
+        // owner cut, and it is reachable only via an explicit opts.facade.
+        const civicSpec = CBZ.civicSpecFor ? CBZ.civicSpecFor(shop.kind) : null;
+        const wantCivic = !!(CBZ.CIVIC_FACADE_KINDS && CBZ.CIVIC_FACADE_KINDS.has(shop.kind));
+        const specialFacade = wantCivic ? "civic"
+          : (shop.kind === "bank" || shop.kind === "security") ? "office" : undefined;
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, {
+          showroom: !!(shop.gas || shop.carlot || shop.chop || shop.showroom),
+          retail: !!shop.retail, facade: specialFacade, district: dk,
+          civic: civicSpec,
+        });
+        // A colonnaded courthouse does not wear a diner awning: when the
+        // monumental portico is live it already carries carved lettering (the
+        // plaque) and the civic seal, so the storefront kit stands down. The
+        // trade name still lives on lot.building.name for HUD/map/interactions.
+        const porticoLive = !!(civicSpec && civicSpec.civic && CBZ.bldCivicOrder
+          && !(CBZ.CONFIG && (CBZ.CONFIG.BLD_CIVIC_PODIUM === false || CBZ.CONFIG.BLD_MASONRY_V1 === false)));
+        if (!porticoLive) signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. On climbable buildings the
         // counter is shifted onto the solid side of the room so it never crosses
         // the dedicated stair strip.
@@ -5956,7 +6597,22 @@
           placed.push(lot);
           continue;
         }
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { district: dk });
+        // ---- BRICK WALK-UPS / TENEMENTS (BLD_MASONRY_V1) ------------------
+        // A residential block is masonry in every real city, not curtain wall.
+        // Which lots go brick is a POSITION HASH (CBZ.hash01) weighted by
+        // district — heavy in residential/projects, rare downtown where the
+        // glass core belongs — so it costs no rng() draw and cannot reorder the
+        // deterministic build. Height-capped: an 8-storey-plus tower stays glass
+        // (load-bearing brick does not go that high, and the skyline read the
+        // owner likes downtown is the glass one).
+        const brickOdds = dk === "residential" ? 0.74 : dk === "projects" ? 0.68
+          : dk === "industrial" ? 0.46 : dk === "commercial" ? 0.26 : 0.08;
+        const wantBrick = storeys <= 7 && CBZ.hash01 && CBZ.hash01(lot.cx, lot.cz, 0xb21d) < brickOdds;
+        // NOTE the explicit "office" on the else branch: leaving it undefined
+        // would fall through to makeBuilding's no-preference masonry share and
+        // silently override this district weighting.
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side,
+          { district: dk, facade: wantBrick ? "brick" : "office" });
         const listed = !!forcedTier;                 // only reserved lots are on the market
         const tierDef = forcedTier || GENERIC;
         // THE HOME lives on the TOP floor — home.floorY below — which is where
@@ -5975,7 +6631,7 @@
           if (k === poolStorey) furnishPoolFloor(b, k * FH);
           else furnishApartmentFloor(b, k * FH, (lot.i | 0) * 5 + (lot.j | 0) * 3 + k);
         }
-        resFacade(b, side, w, d, color, lot);                                   // residential exterior dressing
+        resFacade(b, side, w, d, b.wallColor != null ? b.wallColor : color, lot);   // residential exterior dressing (b.wallColor = the FINAL shell colour: a brick walk-up's stoop must match its brick, not the discarded tower palette entry)
         lot.kind = "tower";
         lot.building = { ...b, name: "Apartments", sign: color, side, door: doorPt };
         if (poolStorey >= 1) lot.building.poolY = poolStorey * FH;   // additive tag (safe)
@@ -6079,6 +6735,13 @@
         if (l.building.storeys < 2) return false;
         return escapeFaceFor(l.building) !== 0;
       });
+      // MASONRY FIRST: a zig-zag iron fire escape belongs on a brick walk-up,
+      // not bolted to a glass curtain wall — that is exactly where every real
+      // one is, and it is the detail that sells a brick block. A stable sort
+      // key (masonry, then original index) keeps this deterministic; no rng.
+      feCand.forEach((l, i) => { l._feIdx = i; });
+      feCand.sort((a, b2) => ((b2.building.masonry ? 1 : 0) - (a.building.masonry ? 1 : 0)) || (a._feIdx - b2._feIdx));
+      feCand.forEach((l) => { delete l._feIdx; });   // transient sort key — never leave it on a lot record
       // spread the picks across the lot list so routes aren't clustered, and let
       // a few more exist now that they read right. Stamp the host face on each.
       city.fireEscapeLots = [];

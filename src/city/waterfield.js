@@ -8,10 +8,17 @@
 
      shoreAt(x,z)       +land / -water signed coast distance
      depthAt(x,z)       gameplay bathymetry derived from that distance
-     surfaceY(x,z,t)    exact CPU copy of world.js's three geometric swells
+     surfaceY(x,z,t)    live surface height — see the note below
+     surfaceSlope(...)  dY/dx, dY/dz of that same surface (buoyancy/pitch)
      currentAt(x,z,t)   slow deterministic ocean current
      moveInWater(...)   shore feelers + inward/tangent steering
      nearestWater(...)  closest-valid-point recovery for spawns/births
+
+   surfaceY() USED TO BE a hand-typed CPU copy of world.js's GLSL swell math,
+   with a comment asking future editors to keep the coefficients "byte-for-byte
+   in sync".  It no longer is: world/water_spec.js owns ONE swell table, GENERATES
+   the GLSL from it, and exposes CBZ.waterWaveHeight() as the CPU evaluation of
+   the very same table.  The render and the query cannot drift apart any more.
 
    `isSurfaceWater` excludes bridge decks (cars/people stand on them).
    `isNavigableWater` deliberately does not, so sea life can pass underneath.
@@ -90,14 +97,41 @@
     return shoreAt(x, z) < -clearance;
   }
 
+  // How far inland a surge pushes the WATERLINE. shoreAt() is a signed
+  // horizontal distance to the coast in metres, so converting a vertical
+  // surge into it needs a shore gradient — INUNDATE_PER_M is that gradient,
+  // and 22:1 is an ordinary run-up ratio for a shallow coast. This is the
+  // gameplay twin of water_spec.js's uShoreCut: one moves the rendered edge,
+  // this moves the edge that swimming, buoyancy, drowning, boats, sharks and
+  // the gore medium all actually ask about. They must move together or the
+  // sea will look like it is over the road while the road is still dry.
+  const INUNDATE_PER_M = 22;
+  function floodReach() {
+    const s = CBZ.waterSurge ? CBZ.waterSurge() : 0;
+    return s > 0 ? s * INUNDATE_PER_M : 0;
+  }
   function isSurfaceWater(x, z, clearance) {
     const A = arena();
     clearance = Math.max(0, +clearance || 0);
     if (overDeck(A, x, z, 0.6)) return false;
     const terrain = A && A.mapTerrain;
-    if (terrain && typeof terrain.shoreAt === "function") return shoreAt(x, z) < -clearance;
+    if (terrain && typeof terrain.shoreAt === "function") return shoreAt(x, z) < -clearance + floodReach();
     return fallbackWater(A, x, z, false);
   }
+  // Metres of standing water at a point that is only wet BECAUSE of a surge —
+  // 0 on ordinary sea, and 0 everywhere when nothing is surging. The one read
+  // for "am I in the flood", as opposed to "am I in the sea".
+  CBZ.cityFloodDepthAt = function (x, z) {
+    const reach = floodReach();
+    if (reach <= 0) return 0;
+    const A = arena();
+    const terrain = A && A.mapTerrain;
+    if (!terrain || typeof terrain.shoreAt !== "function") return 0;
+    const s = shoreAt(x, z);
+    if (s >= reach) return 0;                     // still dry land
+    if (s <= 0) return 0;                         // ordinary sea, not flood
+    return (reach - s) / INUNDATE_PER_M;          // back to metres of depth
+  };
 
   // Semantic depth in metres.  The deep sea does not need a dense rendered
   // seabed, but wildlife and camera effects do need stable depth lanes.
@@ -108,19 +142,57 @@
   }
 
   function clockSeconds() {
+    if (CBZ.waterClock) return CBZ.waterClock();
     return ((typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001) % 3600;
   }
 
-  // Keep byte-for-byte coefficients in sync with world.js's vertex shader.
+  // THE surface height at (x,z).  Delegates to world/water_spec.js so the CPU
+  // answer is literally the same summation the vertex program runs (including
+  // its horizon-distance and inland-lake amplitude scaling — a boat therefore
+  // sits on the crest you can SEE, not on a phantom one).  The inline fallback
+  // below is only reachable if water_spec.js failed to load; it reproduces the
+  // three historical swells so a stripped page still floats swimmers.
   function surfaceY(x, z, t) {
+    if (CBZ.waterWaveHeight) return CBZ.waterWaveHeight(x, z, t);
     if (!Number.isFinite(t)) t = clockSeconds();
     const y0 = CBZ.SEA_Y != null ? CBZ.SEA_Y : MEAN_Y;
     const p1 = x * 0.052 + z * 0.030 + t * 1.1;
     const p2 = x * -0.020 + z * 0.041 + t * 0.7;
     const p3 = (x + z) * 0.011 - t * 0.4;
-    // ~0.36m combined swell: visible at human scale but far below a storm
-    // breaker. Keep coefficients identical to world.js's vertex program.
     return y0 + Math.sin(p1) * 0.145 + Math.sin(p2) * 0.125 + Math.sin(p3) * 0.085;
+  }
+
+  // Surface slope (dY/dx, dY/dz) — the analytic derivative of the same swell
+  // sum, i.e. exactly what the vertex program tilts its normal by.  Boat pitch
+  // and roll ride on this; it is allocation-free with a reused `out`.
+  const _slope = { x: 0, z: 0 };
+  function surfaceSlope(x, z, t, out) {
+    out = out || {};
+    if (CBZ.waterWaveSlope) return CBZ.waterWaveSlope(x, z, t, out);
+    if (!Number.isFinite(t)) t = clockSeconds();
+    const c1 = Math.cos(x * 0.052 + z * 0.030 + t * 1.1) * 0.145;
+    const c2 = Math.cos(x * -0.020 + z * 0.041 + t * 0.7) * 0.125;
+    const c3 = Math.cos((x + z) * 0.011 - t * 0.4) * 0.085;
+    out.x = c1 * 0.052 + c2 * -0.020 + c3 * 0.011;
+    out.z = c1 * 0.030 + c2 * 0.041 + c3 * 0.011;
+    return out;
+  }
+
+  // Upward unit normal of the live surface — handed straight to anything that
+  // wants to sit flat on the water (hulls, floating debris, ripple decals).
+  function surfaceNormal(x, z, t, out) {
+    const s = surfaceSlope(x, z, t, _slope);
+    const inv = 1 / Math.sqrt(s.x * s.x + 1 + s.z * s.z);
+    out = out || {};
+    out.x = -s.x * inv; out.y = inv; out.z = -s.z * inv;
+    return out;
+  }
+
+  // 1 well inside a registered inland water body (a lake), 0 on open sea.
+  // Lets gameplay ask "is this pond water?" with the same answer the shader
+  // uses to paint it green and calm.
+  function inlandFactorAt(x, z) {
+    return CBZ.waterInlandFactorAt ? CBZ.waterInlandFactorAt(x, z) : 0;
   }
 
   function shoreGradient(x, z, step, out) {
@@ -280,6 +352,7 @@
       shore: s,
       depth: s < 0 ? Math.min(62, 1.1 + (-s) * 0.075) : 0,
       surfaceY: surfaceY(x, z, t),
+      inland: inlandFactorAt(x, z),
       currentX: c.x,
       currentZ: c.z,
     };
@@ -291,6 +364,9 @@
     shoreAt: shoreAt,
     depthAt: depthAt,
     surfaceY: surfaceY,
+    surfaceSlope: surfaceSlope,
+    surfaceNormal: surfaceNormal,
+    inlandFactorAt: inlandFactorAt,
     currentAt: currentAt,
     shoreGradient: shoreGradient,
     isNavigableWater: isNavigableWater,
@@ -303,8 +379,17 @@
 
   CBZ.cityWaterAt = function (x, z) { return isSurfaceWater(x, z, 0); };
   CBZ.citySeaHeightAt = surfaceY;
+  CBZ.citySeaSlopeAt = surfaceSlope;
+  CBZ.citySeaNormalAt = surfaceNormal;
   CBZ.cityWaterDepthAt = depthAt;
 
   // Bind the live build descriptor before any biome/wildlife builder runs.
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) { bindArena(city); return null; }, -100);
+  // ...and re-read the registered inland water bodies AFTER every biome has
+  // registered its lakes (order 900 is past every landmass builder), so the
+  // lake look/calm damping in water_spec.js knows where the lakes are.
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
+    if (CBZ.waterSyncInlandBodies) CBZ.waterSyncInlandBodies(city);
+    return null;
+  }, 900);
 })();

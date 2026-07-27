@@ -2022,6 +2022,14 @@
     return Math.hypot(car.pos.x - ox, car.pos.z - oz);
   }
   CBZ.cityCollideVehicle = collideVehicle;
+  // PUBLIC so an ALTERNATIVE vehicle controller (world/water_helm.js takes the
+  // whole frame for a marine hull) can still run the two per-frame duties the
+  // player drive loop below owns and which are NOT specific to road physics:
+  // hitting bodies with the hull, and the smoke -> fire -> explode damage
+  // stager. Without these a boat could neither run down a swimmer nor ever
+  // finish burning. Read-only exports; no behaviour changes here.
+  CBZ.cityVehicleRunOver = runOver;
+  CBZ.cityVehicleTickDamage = tickDamageStage;
 
   // ---- player driving (order 11) ----
   CBZ.onUpdate(11, function (dt) {
@@ -2030,6 +2038,24 @@
     if (!P.driving || !P._vehicle || P.dead) return;
     const car = P._vehicle, k = CBZ.keys;
     const D = carDynamics(car);
+    // ---- THE MARINE HELM SEAM (world/water_helm.js) ------------------------
+    // A hull is not a car. Everything below this line — the tyre grip model,
+    // the friction circle, the fake 5-speed gearbox, the wheelbase bicycle
+    // steer, the weight-transfer dive/squat — describes a thing with four
+    // contact patches on tarmac, and a boat has none of it. The whole marine
+    // model used to be the three multipliers at carDynamics()'s `feel.marine`
+    // branch, which left a boat steering at zero throttle, never planing,
+    // never drifting and pivoting at its own centre of gravity.
+    //
+    // CBZ.marineHelm returns TRUE only when it has fully owned the frame for
+    // this hull (input, Froude-based drag with the wave-making hump, thrust-
+    // vectored or rudder steering, sway damping, aft pivot, wave slamming,
+    // quay collision, player/camera sync and engine audio). It returns FALSE —
+    // having touched nothing — when the hull is beached, airborne off a stunt
+    // ramp, has no registered spec, or the flag is off, and then this loop
+    // runs exactly as it always has. carDynamics()'s marine branch stays put
+    // as that fallback path.
+    if (CBZ.marineHelm && CBZ.CONFIG.WATER_HELM !== false && CBZ.marineHelm(car, dt, D)) return;
     const ACCEL = D.accel, MAXV = D.top, REV = 13, TURN = D.turn;
     // ---- throttle / braking ----
     let throttle = 0;
@@ -2038,6 +2064,14 @@
     // CARS_NO_WATER: a flooded engine takes no throttle (set in the water block
     // below once the grace window passes — during grace you can reverse out).
     if (car._flooded && (!CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false)) throttle = 0;
+    // VEH_FUEL: a dry tank is the same statement as a drowned engine — this
+    // engine makes no torque right now — so it cuts throttle in exactly the
+    // same place and the same way. city/fuel.js owns the tank; feature-detected
+    // and flag-gated, so with fuel.js absent or VEH_FUEL=false this is a no-op.
+    // `_lastThrottle` is read back by the burn tick so fuel is priced against
+    // the throttle actually applied, not the key that was held.
+    car._lastThrottle = throttle;
+    if (CBZ.fuelStarved && CBZ.fuelStarved(car)) throttle = 0;
     const handbrake = !!k[" "];   // SPACE = handbrake → break grip and DRIFT
     if (throttle > 0) {
       if (car.v < 0) car.v += D.brake * dt;           // brake out of reverse first

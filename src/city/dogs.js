@@ -24,6 +24,22 @@
   const g = CBZ.game;
   const mat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
+  // A SHOT STRAY HUNTS YOU ON THE SHARED BRAIN (systems/predator.js), and its
+  // packmates coordinate through CBZ.predatorPack. Flag off — or load without
+  // predator.js at all — and the original relentless beeline + creature_combat
+  // maul runs byte for byte (see the AGGRO branch in tick()). One-line revert.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.DOG_PREDATOR == null) CBZ.CONFIG.DOG_PREDATOR = true;
+  function HUNT_ON() { return CBZ.CONFIG.DOG_PREDATOR !== false && typeof CBZ.predatorHunt === "function"; }
+
+  // THE RATCHET (BLOCK LAW #5). dogs.js loads BEFORE predator.js, so the buffer
+  // branch is the one that actually runs — predator.js drains it at its own load.
+  if (typeof CBZ.predatorAdopt === "function") {
+    try { CBZ.predatorAdopt("dogs:aggro-maul"); } catch (e) {}
+  } else {
+    try { (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push("dogs:aggro-maul"); } catch (e) {}
+  }
+
   function makeRng(seed) {
     let s = seed >>> 0;
     return function () { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -356,6 +372,17 @@
   }
   function dogBite(d, a) {
     const dmg = 10 + (rng() * 6);
+    // THE BODY CARRIES THE BITE. A dog that mauled someone used to leave the
+    // victim visually untouched — all the damage, none of the evidence. The
+    // shared bite wound (systems/wounds.js) stamps the actual tooth row; we
+    // only tell it how big this animal's jaw is. Guarded: no wounds.js, no
+    // change in behaviour. Same call any predator makes, at any scale.
+    if (CBZ.bodyBite && a.char && a.pos) {
+      try {
+        CBZ.bodyBite(a, { x: a.pos.x, y: a.pos.y + 1.0, z: a.pos.z },
+          { jaw: 0.16, sev: 0.55, fromX: d.pos.x, fromZ: d.pos.z });
+      } catch (e) {}
+    }
     if (a.animal) { if (CBZ.cityWildlifeHit) CBZ.cityWildlifeHit(a, { head: false, point: null }, { damage: dmg }); return; }
     if (a.kind === "cop") { if (CBZ.cityHurtCop) CBZ.cityHurtCop(a, dmg, { fromX: d.pos.x, fromZ: d.pos.z }); return; }
     a.hp = (a.hp == null ? (a.maxHp || 100) : a.hp) - dmg;
@@ -400,7 +427,10 @@
     if (!d.tamed) {
       const first = !d.aggro;
       dogAggro(d);
-      // PACK RIPPLE — the whole street pack turns on you together.
+      // PACK RIPPLE — the whole street pack turns on you together. It still
+      // does: the ripple is how the pack LEARNS. What changed is what happens
+      // next — CBZ.predatorPack lets at most one of them commit while the rest
+      // circle for their turn, so this is no longer six dogs in a queue.
       for (let i = 0; i < dogs.length; i++) {
         const o = dogs[i];
         if (o === d || o.dead || o.tamed || o.aggro) continue;
@@ -451,8 +481,100 @@
     if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(d, d.faceH); else grp.rotation.y = -d.faceH;
   }
 
-  // reusable creature_combat target for the aggro maul (never per-frame allocated)
+  // reusable target for the aggro hunt (never per-frame allocated). Its .pos IS
+  // CBZ.player.pos, which is exactly how predator.js's isPlayerActor() and
+  // creature_combat's isPlayerTarget() recognise the player through a decoy —
+  // so damage still lands on cityHurtPlayer and a grab still takes the real body.
   const DTGT = { pos: null, group: { position: null }, dead: false, hp: 1e9 };
+
+  // ============================================================
+  //  THE PACK HUNT — city/dogs.js's half of systems/predator.js.
+  //
+  //  A shot stray used to run two lines of its own AI: point at the player,
+  //  sprint, then hand the last 4.5u to creature_combat. No menace gauge (it
+  //  could camp on your face forever), no fake-outs, no line of sight, no
+  //  coordination (every dog in the ripple charged at once, in a line), and no
+  //  grab — its only path to one was creature_combat's incidental 35% roll.
+  //
+  //  Now it ticks CBZ.predatorHunt and gets all of that, plus the `worry`
+  //  seize predatorKit picks for it — not because anyone typed "dog", but
+  //  because a 0.75-mass quadruped is below the rear-and-slam threshold, so it
+  //  drives BACKWARD and drags you off your feet instead.
+  //
+  //  dogs.js contributes exactly three things, which is the whole point of the
+  //  seam: how a dog moves (the clamped-turn arc), where its damage goes, and
+  //  what it does when it is NOT the one committing.
+  // ============================================================
+
+  // THE LOCOMOTION SEAM. predatorHunt says WHERE; dogMove says HOW — the
+  // bounded turn that keeps a dog arcing instead of pivot-sliding, and the
+  // ground snap. Same call the wander uses, so a hunting dog and an idle dog
+  // are visibly the same animal.
+  function dogHuntMove(d, want, speed, dt) {
+    if (!(dt > 0)) return false;
+    if (want != null) d.heading = want;
+    dogMove(d, Math.max(0, speed || 0), dt, true);
+    return true;
+  }
+
+  // HARRY — what a dog does when predatorPack tells it to flank or hold, and
+  // what the committer does during the driver's mandatory post-rush cooldown.
+  // It holds a bearing slot at ORBIT_R and keeps its shoulder to you: three
+  // dogs doing this SURROUND you, which is the entire pack mechanic. The slot
+  // comes from _hunt.orbitDir (predatorPack spreads it); we only walk it.
+  const ORBIT_R = 7.5;
+  function harry(d, PP, dist, dt) {
+    const h = d._hunt;
+    const dir = (h && h.orbitDir < 0) ? -1 : 1;
+    const to = Math.atan2(PP.z - d.pos.z, PP.x - d.pos.x);
+    const err = Math.max(-1, Math.min(1, (dist - ORBIT_R) / ORBIT_R));
+    d.heading = to + dir * (Math.PI * 0.5) * (1 - err * 0.8);
+    dogMove(d, SPEED * 0.72, dt, true);
+  }
+
+  // the per-dog opts bundle: built ONCE per dog, never per frame.
+  function dogKit(d) {
+    if (d._kit) return d._kit;
+    const sp = DOG_SPECIES;
+    const over = {
+      medium: "air", style: "maul",
+      move: dogHuntMove,
+      // ONE COMMITTER AT A TIME. predatorHunt already honours canReach —
+      // rush -> disengage, circle -> scent — so the pack rule needs no new
+      // plumbing in the FSM at all.
+      canReach: function () { return d._packRole !== "flank" && d._packRole !== "hold"; },
+      // the damage sink is UNCHANGED: still cityHurtPlayer, still that cause
+      // string, still never `.hp -=` on the player.
+      onHit: function (dm) {
+        if (CBZ.cityHurtPlayer) {
+          try { CBZ.cityHurtPlayer(dm, d.pos.x, d.pos.z, "mauled by a dog", false, d, false); } catch (e) {}
+        }
+      },
+      // DOG_SPECIES.spd (6.2) is already a final u/s speed, not a wildlife
+      // species' 1-4 "size of animal" number the archetype multiplies. Left to
+      // derive, a stray would rush at ~23 u/s. These two are the only numbers
+      // in this file that still disagree with the kit, and this is why.
+      cruiseSpeed: SPEED * 0.55,
+      rushSpeed: SPEED,
+    };
+    let k = null;
+    if (CBZ.predatorKit) { try { k = CBZ.predatorKit(d, over); } catch (e) { k = null; } }
+    if (!k) {
+      // DEGRADE (predator.js without predatorKit, or PREDATOR_KIT off): the
+      // seams plus this dog's own authored numbers. Everything unset falls
+      // through to predatorHunt's documented defaults — we do NOT re-invent a
+      // radius table here, since deleting exactly that is the point.
+      k = Object.assign({ reach: 1.7, rate: 0.95, dmg: sp.bite,
+        seize: { dps: 10 + sp.bite * 0.4, thrash: 1, style: "worry" } }, over);
+    }
+    k.seize = k.seize || {};
+    if (!k.seize.jaw && CBZ.creatureJawPoint) {
+      try { k.seize.jaw = CBZ.creatureJawPoint(d); } catch (e) {}
+    }
+    k.seize.cause = "mauled by a dog";
+    d._kit = k;
+    return k;
+  }
 
   // ============================================================
   //  UPDATE — follow / heel / sit / hunt-threats / wag / teleport.
@@ -502,13 +624,31 @@
         }
       }
 
-      // ---- AGGRO (shot stray): relentless Minecraft-wolf attack ----------
+      // ---- AGGRO (shot stray): THE PACK HUNT -----------------------------
       if (d.aggro && !d.tamed) {
         const PP = CBZ.player && CBZ.player.pos;
         if (!PP || (CBZ.player && CBZ.player.dead)) { dogCalm(d); continue; }
         const adx = PP.x - grp.position.x, adz = PP.z - grp.position.z;
         const adp = Math.hypot(adx, adz);
         if (adp > AGGRO_GIVEUP) { dogCalm(d); continue; }        // finally lost you
+        if (HUNT_ON()) {
+          DTGT.pos = PP; DTGT.group.position = PP; DTGT.dead = false; DTGT.hp = 1e9;
+          // ROLES FIRST, then the hunt. predatorPack picks at most one committer
+          // near you and spreads everyone else onto their own bearing slot; the
+          // role is fed to the driver through canReach (see dogKit).
+          d._packRole = CBZ.predatorPack ? (CBZ.predatorPack(d, DTGT, dt) || "commit") : "commit";
+          let st = null;
+          try { st = CBZ.predatorHunt(d, DTGT, dt, dogKit(d)); } catch (e) { st = null; }
+          // "cruise" means the driver is deliberately NOT closing: a flanker
+          // waiting its turn, or a committer inside the anti-camping cooldown
+          // after a rush. It must NOT fall through to the beeline below — that
+          // charge is exactly what the cooldown exists to stop. It harries.
+          if (st === "cruise" || st == null) harry(d, PP, adp, dt);
+          continue;
+        }
+        // ---- DEGRADE: no shared driver (flag off, or predator.js absent).
+        //      The original relentless beeline + creature_combat maul, byte for
+        //      byte, so a dog is never left standing still by a missing file.
         if (adp <= ENGAGE_R && CBZ.creatureFight) {
           // the last stretch + the bite: creature_combat's maul choreography
           // (lunge, shake, recover), damage through onHit → cityHurtPlayer.

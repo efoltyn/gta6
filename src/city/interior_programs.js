@@ -80,6 +80,21 @@
     shelf: 0x8a939c,      // rack shelf lines (shelf-top bucket)
     glow: 0x39516a,       // wall-screen glow (screen bucket)
     planter: 0x2e2620, leaf: 0x3f9a4f,
+    // --- the OCCUPIED-STRUCTURE additions (checkpoint + boss suite). Every
+    // hex below is an EXISTING city bucket (sandbag/crate/rug/upholstery
+    // colours already minted by the street clutter + apartment furnishers),
+    // so no new batch bucket is created by either new program.
+    sack: 0x6b6350,       // sandbag / filled sack (clutter bucket)
+    crate: 0x6d5a3c,      // shipping crate (clutter bucket)
+    steel: 0x39414c,      // locker / rack steel (elevators STEEL bucket)
+    lamp: 0xffd9a0,       // warm domestic lamp (interiorlight warm bucket)
+    flood: 0xffe9b8,      // hard white worklight (streetlamp bucket)
+    rug: 0x6b2f2c,        // deep red rug (apartment bucket)
+    sofa: 0x3d4650,       // upholstery (apartment bucket)
+    wood: 0x4a3524,       // warm wood (DARKWOOD lighter step)
+    marble: 0xd9d5cc,     // pale stone worktop (civic bucket)
+    water: 0x2e6f86,      // aquarium water (waterfield bucket)
+    gold: 0xb99347,       // brass trim / picture frames (trim bucket)
   };
   const PWT = 0.16;       // thin partition thickness (roomKit idiom)
 
@@ -353,8 +368,349 @@
     return { anchors: anchors };
   }
 
+  // ========================================================================
+  //  THE APPROACH FRAME — the ONE orientation helper the door-relative
+  //  programs share (progLobby had it inline; checkpoint/quarters/bosssuite
+  //  all need the identical maths, so it lives here once). Given the room and
+  //  the way you ARRIVE (a doorway, or a stairhead — same record shape), it
+  //  returns a frame in which "inD" is metres INTO the room from the arrival
+  //  and "lat" is metres sideways. Every one of the four rotations a building
+  //  can present collapses to one code path, exactly like progMeeting's
+  //  `alongX` trick, so a program is authored ONCE and reads correctly from
+  //  any door side.
+  // ========================================================================
+  function approach(r, h, opts) {
+    const din = (opts && opts.door && opts.door.nx != null)
+      ? opts.door : { x: cx(r), z: r.z0, nx: 0, nz: 1 };
+    const nx = din.nx, nz = din.nz, tx = -nz, tz = nx;
+    const along = Math.abs(nx) > 0.5;                 // arrival on a ±x wall
+    // opts.inset: metres of the plate the ARRIVAL STRUCTURE itself eats (the
+    // stair core's footprint). Programs must not try to furnish the stairwell
+    // — clearFloorPoint would reject every box and the room would come out
+    // half-dressed — so we shift the whole frame past it instead.
+    const inset = Math.max(0, (opts && opts.inset) || 0);
+    const depth = (along ? (r.x1 - r.x0) : (r.z1 - r.z0)) - inset;
+    const span = along ? (r.z1 - r.z0) : (r.x1 - r.x0);
+    const y = r.y;
+    // ORIGIN: depth 0 is the room edge you arrive through; lateral 0 is the
+    // room's CENTRELINE, not the arrival point. This distinction matters — a
+    // stairhead sits in a corner, so measuring lateral from IT would push
+    // everything at ±span/2 straight through the far wall. The arrival's own
+    // offset from the centreline is published as `gapLat` for the one thing
+    // that genuinely wants it: lining a doorway up with the way you came in.
+    const ctr = { x: cx(r), z: cz(r) };
+    const ax = (along ? (nx > 0 ? r.x0 : r.x1) : ctr.x) + nx * inset;
+    const az = (along ? ctr.z : (nz > 0 ? r.z0 : r.z1)) + nz * inset;
+    const gapLat = (din.x - ctr.x) * tx + (din.z - ctr.z) * tz;
+    function at(inD, lat) { return { x: ax + nx * inD + tx * lat, z: az + nz * inD + tz * lat }; }
+    // an axis-aligned box in the approach frame: `across` is the sideways
+    // extent, `deep` runs along the way you came in.
+    function obox(p, ly, across, hh, deep, c, o) {
+      if (!inRect(r, p.x, p.z, 0.12) || !h.clear(p.x, p.z, o && o.pad != null ? o.pad : 0.5)) return false;
+      h.b.lbox(p.x, y + ly, p.z, along ? deep : across, hh, along ? across : deep, c,
+        (o && o.emissive) ? { emissive: o.emissive, ei: o.ei || 0.45, cast: false } : { cast: false });
+      return true;
+    }
+    // face BACK toward the arrival (a guard watching the way in)
+    const faceIn = Math.atan2(-nx, -nz);
+    // face AWAY from the arrival (someone with their back to the door)
+    const faceOut = Math.atan2(nx, nz);
+    // a full-span partition at depth inD with ONE doorway at lateral `gap`
+    function divider(inD, gap, gapW, wallH) {
+      const p = at(inD, 0), g = at(inD, gap);
+      if (along) wallZ(h, y, p.x, r.z0, r.z1, g.z, gapW || 1.8, wallH);
+      else wallX(h, y, p.z, r.x0, r.x1, g.x, gapW || 1.8, wallH);
+    }
+    // clamp a lateral offset so anything hung off it stays on the plate
+    function lat(v, margin) { const m = span / 2 - (margin == null ? 1.4 : margin); return Math.max(-m, Math.min(m, v)); }
+    return { at, obox, divider, lat, gapLat, depth, span, along, y, faceIn, faceOut, nx, nz, tx, tz, r, h };
+  }
+  // an anchor in the approach frame, tagged with the ROLE the occupier should
+  // cast there. Programs describe the room; occupy.js casts the people.
+  function anchorAt(A, list, inD, lat, face, kind, pose) {
+    const p = A.at(inD, lat);
+    if (!inRect(A.r, p.x, p.z, 0.6) || !A.h.clear(p.x, p.z, 0.5)) return null;
+    const a = { x: A.h.ox + p.x, y: A.y, z: A.h.oz + p.z, face: face, lx: p.x, lz: p.z, kind: kind || "guard" };
+    if (pose) a.pose = pose;
+    list.push(a);
+    return a;
+  }
+
+  // ========================================================================
+  //  (b) CHECKPOINT — a floor held by people who expect trouble from the
+  //  stairs. A sandbag line ACROSS the way in with ONE gap you must funnel
+  //  through (the published chokepoint rule: 3-4 per level, never two covered
+  //  from one post), a weapons locker, a duty table with a radio, a worklight
+  //  aimed back down the approach, crates stacked in the dead corner. This is
+  //  what makes floor 4 read as DEFENDED instead of "the desk floor again".
+  //  Returns guard anchors: two behind the barricade covering the gap, one on
+  //  the locker, one deep in the corner with the long angle.
+  // ========================================================================
+  function progCheckpoint(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const anchors = [];
+    const dep = A.depth, span = A.span;
+    if (dep < 3.6 || span < 3.0) { anchorAt(A, anchors, dep * 0.55, 0, A.faceIn, "guard", "foldarms"); return { anchors: anchors }; }
+    // ---- THE BARRICADE: two courses of sacks with one funnel gap ----------
+    const bd = Math.min(4.6, Math.max(2.4, dep * 0.34));      // stand-off from the way in
+    const half = span / 2 - 0.6;
+    // The funnel is deliberately NOT in line with the stair door: the
+    // published rule is that no single post may cover two chokepoints, so the
+    // gap steps sideways off the way in and you have to cross the room to it.
+    const gap = A.lat(A.gapLat + (span > 6.5 ? 1.9 : 0), 1.3);
+    // MESH BUDGET: a sandbag line spanning a 25m floorplate would be ~50 boxes
+    // AND would read as a wall, not a barricade. Cap the run either side of the
+    // funnel — this is a checkpoint you flank, not a fortification.
+    const barLo = Math.max(-half, gap - 5.0), barHi = Math.min(half, gap + 5.0);
+    for (let lat = barLo; lat <= barHi + 0.01; lat += 1.0) {
+      if (Math.abs(lat - gap) < 0.95) continue;                // the funnel
+      const p = A.at(bd, lat);
+      A.obox(p, 0.18, 0.98, 0.36, 0.6, P.sack, { pad: 0.4 });
+      A.obox({ x: p.x, z: p.z }, 0.53, 0.9, 0.32, 0.55, P.sack, { pad: 0.4 });
+    }
+    // a knocked-over chair and a mug at the gap: someone left in a hurry
+    A.obox(A.at(bd - 0.9, gap + 0.7), 0.12, 0.5, 0.22, 0.5, P.chair, { pad: 0.35 });
+    // ---- WORKLIGHT on a mast, pointed back down the approach --------------
+    { const p = A.at(bd + 1.9, gap);
+      A.obox(p, 1.1, 0.12, 2.2, 0.12, P.steel, { pad: 0.4 });
+      A.obox(p, 2.3, 0.5, 0.26, 0.34, P.flood, { emissive: P.flood, ei: 0.85, pad: 0.4 }); }
+    // ---- WEAPONS LOCKERS against one side wall ----------------------------
+    for (let i = 0; i < 2; i++) {
+      A.obox(A.at(dep * 0.62 + i * 0.95, half - 0.35), 0.95, 0.9, 1.9, 0.55, P.steel, { pad: 0.45 });
+    }
+    // ---- DUTY TABLE + radio + two stools on the opposite side -------------
+    { const p = A.at(dep * 0.68, -half + 0.9);
+      if (A.obox(p, 0.36, 1.5, 0.08, 0.9, P.worktop, { pad: 0.5 })) {
+        A.obox(p, 0.18, 1.4, 0.34, 0.8, P.desk, { pad: 0.5 });
+        A.obox(A.at(dep * 0.68 + 0.35, -half + 0.9), 0.52, 0.34, 0.24, 0.22, P.bezel, { pad: 0.45 });   // the radio set
+        A.obox(A.at(dep * 0.68 + 0.36, -half + 0.9), 0.6, 0.2, 0.06, 0.06, P.glow, { emissive: P.glow, ei: 0.6, pad: 0.45 });
+        A.obox(A.at(dep * 0.68 - 1.0, -half + 0.9), 0.22, 0.4, 0.44, 0.4, P.chair, { pad: 0.4 });
+      } }
+    // ---- CRATES stacked in the dead corner (two down, one on top) ---------
+    A.obox(A.at(dep - 1.2, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 });
+    A.obox(A.at(dep - 2.1, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 });
+    A.obox(A.at(dep - 1.2, -half + 0.7), 1.28, 0.8, 0.78, 0.8, P.crate, { pad: 0.45 });
+    // ---- THE POSTS --------------------------------------------------------
+    // every lateral goes through A.lat() so a wide plate can't push a post
+    // through the far wall and silently lose it to the inRect check
+    anchorAt(A, anchors, bd + 1.0, A.lat(gap - 1.5, 1.0), A.faceIn, "guard", "foldarms");     // covers the funnel
+    anchorAt(A, anchors, bd + 1.0, A.lat(gap + 1.9, 1.0), A.faceIn, "guard", "foldarms");     // second angle on it
+    anchorAt(A, anchors, dep * 0.62, A.lat(half - 1.5, 1.0), A.faceIn, "guard", "foldarms");  // on the lockers
+    anchorAt(A, anchors, dep - 1.4, A.lat(gap * 0.5, 1.0), A.faceIn, "guard", "foldarms");    // the long angle from the back
+    return { anchors: anchors };
+  }
+
+  // ========================================================================
+  //  (c) QUARTERS — a floor people LIVE on while they hold the building.
+  //  Bunk rows against both side walls, footlockers, a mess table down the
+  //  middle, one strip light. Monotony on purpose (archetype (c)) — it is the
+  //  same eight bunks on every crew floor, which is exactly how a barracks
+  //  reads. Doubles as a military-base dormitory with zero changes.
+  // ========================================================================
+  const BUNK_PITCH = 2.2;
+  function progQuarters(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const anchors = [];
+    const dep = A.depth, span = A.span;
+    if (dep < 4.0 || span < 3.4) return { anchors: anchors };
+    const half = span / 2 - 0.55;
+    // MESH BUDGET + read: 4 bunks a wall is a barracks; 12 is a warehouse of
+    // beds and ~90 boxes on one floor. Cap it.
+    const rows = Math.max(1, Math.min(4, Math.floor((dep - 3.0) / BUNK_PITCH)));
+    for (let s = -1; s <= 1; s += 2) {
+      for (let i = 0; i < rows; i++) {
+        const inD = 2.2 + i * BUNK_PITCH;
+        const p = A.at(inD, s * half);
+        // lower bunk, upper bunk, one footlocker at the foot
+        if (!A.obox(p, 0.42, 0.95, 0.16, 1.9, P.sofa, { pad: 0.45 })) continue;
+        A.obox(p, 0.30, 0.9, 0.30, 1.85, P.steel, { pad: 0.45 });      // frame under the mattress
+        A.obox(p, 1.42, 0.95, 0.16, 1.9, P.sofa, { pad: 0.45 });       // upper mattress
+        A.obox(p, 1.30, 0.9, 0.28, 1.85, P.steel, { pad: 0.45 });
+        A.obox(A.at(inD, s * (half - 1.05)), 0.79, 0.1, 1.58, 0.1, P.steel, { pad: 0.4 });  // ladder post (foot on the deck, head at the top bunk)
+        A.obox(A.at(inD + 1.0, s * (half - 0.2)), 0.2, 0.5, 0.4, 0.7, P.crate, { pad: 0.4 });  // footlocker
+      }
+    }
+    // mess table down the centre + benches
+    if (span > 5.2) {
+      const mid = A.at(dep * 0.5, 0);
+      if (A.obox(mid, 0.74, 0.9, 0.08, Math.min(3.2, dep * 0.4), P.worktop, { pad: 0.6 })) {
+        A.obox(mid, 0.36, 0.7, 0.68, Math.min(3.0, dep * 0.38), P.desk, { pad: 0.6 });
+        for (let s = -1; s <= 1; s += 2)
+          A.obox(A.at(dep * 0.5, s * 0.85), 0.38, 0.4, 0.1, Math.min(2.8, dep * 0.36), P.chair, { pad: 0.5 });
+      }
+      anchorAt(A, anchors, dep * 0.5 - 1.6, 0, A.faceIn, "guard", "foldarms");
+    }
+    anchorAt(A, anchors, 1.6, half - 1.2, A.faceIn, "guard", "foldarms");
+    return { anchors: anchors };
+  }
+
+  // ========================================================================
+  //  (b) BOSS SUITE — the top floor, and the ONE room in this kit that is a
+  //  PLACE rather than a program. The owner's ask, literally: "the boss
+  //  sitting in an office in an apt on the top floor... with family."
+  //
+  //  So it is two rooms behind one divider: you come off the stairs into
+  //  somebody's HOME — a dinner half-eaten on the table, a sofa facing a wall
+  //  screen, a rug, a kitchen run, a kid's toy on the floor — and only then,
+  //  through the doorway, the OFFICE: one heavy desk with its back to the
+  //  glass, two chairs waiting in front of it, a drinks cabinet, a floor safe
+  //  and a lit aquarium against the far wall. (Research: the top floor has to
+  //  differ in KIND, not difficulty — domestic staging after ten floors of
+  //  cover geometry is the whole payoff, and one memorable personal prop is
+  //  what people actually remember about a boss room.)
+  //
+  //  Anchors are tagged so the occupier casts the right person in the right
+  //  spot without re-deriving geometry: "boss" behind the desk facing the way
+  //  in, "family" at the dinner table and on the sofa, "guard" flanking the
+  //  desk and standing on the divider doorway.
+  // ========================================================================
+  function progBossSuite(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const anchors = [];
+    const dep = A.depth, span = A.span, y = r.y, wallH = h.fh - 0.1;
+    const half = span / 2 - 0.6;
+    // COMPACT fallback: a plate too small for two rooms still gets a desk, a
+    // sofa and the aquarium — one room, same reading, no divider.
+    const twoRoom = dep >= 9.0 && span >= 5.0;
+    const dv = twoRoom ? dep * 0.5 : 0;
+    // the inner doorway lines up with the way you arrive, so from the stairs
+    // you can see straight through the home into the office
+    const dgap = twoRoom ? A.lat(A.gapLat, 1.4) : 0;
+    if (twoRoom) A.divider(dv, dgap, 1.9, wallH);
+
+    /* ---------------- THE HOME (near half) ------------------------------- */
+    const homeEnd = twoRoom ? dv : dep;
+    if (twoRoom) {
+      // dinner, mid-meal: table, four chairs, four plates, one chair pushed out
+      const tD = Math.min(2.4, (homeEnd - 2.0) * 0.5), td = 2.0;
+      const tp = A.at(td, half - 1.5);
+      if (A.obox(tp, 0.74, 1.15, 0.08, tD, P.wood, { pad: 0.55 })) {
+        A.obox(tp, 0.36, 0.9, 0.68, tD * 0.75, P.wood, { pad: 0.55 });
+        for (let i = -1; i <= 1; i += 2) for (let s = -1; s <= 1; s += 2) {
+          const cp = A.at(td + i * (tD * 0.28), half - 1.5 + s * 0.85);
+          if (!A.obox(cp, 0.42, 0.46, 0.12, 0.46, P.chair, { pad: 0.4 })) continue;
+          A.obox(A.at(td + i * (tD * 0.28), half - 1.5 + s * 1.06), 0.78, 0.46, 0.6, 0.1, P.chair, { pad: 0.4 });
+          seatReg(h, cp.x, y, cp.z, Math.atan2(tp.x - cp.x, tp.z - cp.z), "chair");
+        }
+        for (let i = -1; i <= 1; i += 2) for (let s = -1; s <= 1; s += 2)   // the plates
+          A.obox(A.at(td + i * (tD * 0.2), half - 1.5 + s * 0.5), 0.8, 0.34, 0.03, 0.34, P.marble, { pad: 0.3 });
+        // two of them still at the table, facing across it at each other
+        anchorAt(A, anchors, td - tD * 0.28, half - 2.56, A.faceOut, "family", "stand");
+        anchorAt(A, anchors, td + tD * 0.28, half - 0.44, A.faceIn, "family", "stand");
+      }
+      // the living end: rug, sofa facing the divider, low table, wall screen
+      const sd = Math.max(td + 2.4, homeEnd - 3.2);
+      A.obox(A.at(sd + 0.6, -half + 1.9), 0.02, Math.min(4.0, span * 0.5), 0.03, Math.min(3.2, homeEnd * 0.34), P.rug, { pad: 0.7 });
+      const sp = A.at(sd, -half + 1.9);
+      if (A.obox(sp, 0.36, 2.5, 0.44, 0.9, P.sofa, { pad: 0.6 })) {
+        A.obox(A.at(sd - 0.42, -half + 1.9), 0.72, 2.5, 0.62, 0.16, P.sofa, { pad: 0.6 });   // backrest
+        seatReg(h, sp.x, y, sp.z, A.faceOut, "sofa");
+        anchorAt(A, anchors, sd + 0.05, -half + 2.75, A.faceOut, "family", "stand");
+      }
+      A.obox(A.at(sd + 1.5, -half + 1.9), 0.24, 1.3, 0.1, 0.6, P.wood, { pad: 0.5 });        // low table
+      // the wall screen on the divider, facing the sofa
+      if (twoRoom) {
+        A.obox(A.at(dv - 0.14, -half + 1.9), 1.55, 2.0, 1.05, 0.07, P.bezel, { pad: 0.4 });
+        A.obox(A.at(dv - 0.2, -half + 1.9), 1.55, 1.75, 0.85, 0.03, P.glow, { emissive: P.glow, ei: 0.5, pad: 0.4 });
+      }
+      // the kitchen run down one wall + a warm pendant over the table
+      for (let i = 0; i < 3; i++) {
+        A.obox(A.at(1.4 + i * 1.05, -half + 0.35), 0.46, 1.0, 0.9, 0.62, P.desk, { pad: 0.45 });
+        A.obox(A.at(1.4 + i * 1.05, -half + 0.35), 0.94, 1.02, 0.06, 0.66, P.marble, { pad: 0.45 });
+      }
+      A.obox(A.at(td, half - 1.5), h.fh - 0.75, 0.7, 0.14, 0.7, P.lamp, { emissive: P.lamp, ei: 0.55, pad: 0.5 });
+      // a kid's toy left on the rug — the detail that says people live here
+      A.obox(A.at(sd + 1.9, -half + 3.0), 0.14, 0.3, 0.28, 0.3, 0x3f9a4f, { pad: 0.3 });
+    }
+
+    /* ---------------- THE OFFICE (far half) ------------------------------ */
+    const o0 = twoRoom ? dv + 0.9 : 1.6;
+    const deskD = dep - 2.4;
+    const dp = A.at(deskD, 0);
+    let bossPlaced = false;
+    if (deskD > o0 + 0.4 && A.obox(dp, 0.4, 2.9, 0.78, 1.15, P.wood, { pad: 0.7 })) {
+      A.obox(dp, 0.81, 3.1, 0.08, 1.3, P.marble, { pad: 0.7 });                     // the top
+      A.obox(A.at(deskD - 0.35, 0.9), 0.9, 0.55, 0.1, 0.42, P.bezel, { pad: 0.5 }); // papers
+      A.obox(A.at(deskD - 0.3, -0.95), 1.02, 0.5, 0.34, 0.06, P.bezel, { pad: 0.5 });
+      A.obox(A.at(deskD - 0.32, -0.95), 1.02, 0.42, 0.26, 0.02, P.screen, { pad: 0.5 });
+      // the chair, and the man in it — back to the glass, facing the only way in
+      const bp = A.at(deskD + 1.05, 0);
+      A.obox(bp, 0.44, 0.62, 0.14, 0.62, P.chair, { pad: 0.5 });
+      A.obox(A.at(deskD + 1.32, 0), 0.95, 0.66, 0.9, 0.12, P.chair, { pad: 0.5 });
+      seatReg(h, bp.x, y, bp.z, A.faceIn, "chair");
+      bossPlaced = !!anchorAt(A, anchors, deskD + 1.05, 0, A.faceIn, "boss", "sit");
+      // two chairs waiting on the near side of the desk
+      for (let s = -1; s <= 1; s += 2) {
+        const gp = A.at(deskD - 1.5, s * 0.95);
+        if (!A.obox(gp, 0.42, 0.5, 0.12, 0.5, P.chair, { pad: 0.4 })) continue;
+        A.obox(A.at(deskD - 1.78, s * 0.95), 0.8, 0.5, 0.62, 0.12, P.chair, { pad: 0.4 });
+        seatReg(h, gp.x, y, gp.z, A.faceOut, "chair");
+      }
+    }
+    // THE AQUARIUM — the one prop you remember the room by. Lit water on a
+    // dark plinth against the far wall, glowing across the desk at night.
+    { const ap = A.at(dep - 0.75, half - 1.4);
+      if (A.obox(ap, 0.4, 2.1, 0.8, 0.55, P.wood, { pad: 0.5 })) {
+        A.obox(ap, 1.32, 2.0, 1.0, 0.5, P.water, { emissive: P.water, ei: 0.6, pad: 0.5 });
+        A.obox(ap, 1.86, 2.1, 0.08, 0.55, P.steel, { pad: 0.5 });
+      } }
+    // drinks cabinet + a floor safe + framed pictures on the far wall
+    A.obox(A.at(dep - 0.8, -half + 1.3), 0.5, 1.6, 1.0, 0.5, P.wood, { pad: 0.5 });
+    A.obox(A.at(dep - 0.8, -half + 1.3), 1.08, 1.4, 0.16, 0.4, P.gold, { emissive: P.gold, ei: 0.25, pad: 0.5 });
+    A.obox(A.at(dep - 0.7, -half + 2.7), 0.35, 0.8, 0.7, 0.6, P.steel, { pad: 0.45 });     // the safe
+    for (let i = -1; i <= 1; i++)
+      A.obox(A.at(dep - 0.34, i * 1.5), 2.0, 0.62, 0.46, 0.05, P.gold, { pad: 0.35 });
+    // one warm lamp over the desk, one over the aquarium
+    A.obox(A.at(deskD, 0), h.fh - 0.7, 1.3, 0.1, 0.5, P.lamp, { emissive: P.lamp, ei: 0.5, pad: 0.6 });
+
+    /* ---------------- the two men who never leave the room --------------- */
+    anchorAt(A, anchors, deskD - 0.3, half - 1.9, A.faceIn, "guard", "foldarms");
+    anchorAt(A, anchors, deskD - 0.3, -half + 1.9, A.faceIn, "guard", "foldarms");
+    if (twoRoom) anchorAt(A, anchors, dv + 0.55, dgap, A.faceIn, "guard", "foldarms");   // on the inner doorway
+    if (!bossPlaced) anchorAt(A, anchors, dep * 0.7, 0, A.faceIn, "boss", "stand");      // degenerate plate: still a boss
+    return { anchors: anchors };
+  }
+
+  // ========================================================================
+  //  PER-FLOOR ROOM RECT — the resolver occupy.js and every future per-floor
+  //  caller needs, and the one function this kit was missing. It reproduces
+  //  buildings.js's own roomKit() usable band EXACTLY (facade thickness, the
+  //  0.4m wall standoff, the -x stair strip when a shell has one) and lifts it
+  //  onto floor k via the floorTops contract. One answer to "what is the room
+  //  on floor 3", instead of four files each re-deriving it.
+  //    CBZ.interiorFloorRoom(b, k) -> {x0,x1,z0,z1,y,floor,fh,w,d} | null
+  //  Host-LOCAL rect, ready to hand straight to CBZ.interiorProgram.
+  // ========================================================================
+  CBZ.interiorFloorRoom = function (b, k) {
+    if (!b || b.w == null || b.d == null) return null;
+    const wt = b.wt != null ? b.wt : 0.4;
+    const fh = b.FH != null ? b.FH : 3.2;
+    const tops = Array.isArray(b.floorTops) && b.floorTops.length >= 2 ? b.floorTops : null;
+    const nInterior = tops ? (tops.length - 1) : Math.max(1, b.storeys || 1);
+    k = k | 0;
+    if (k < 0 || k >= nInterior) return null;
+    const x0 = b.hasStairs ? (-b.w / 2 + wt + (b.stairW || 0) + 0.4) : (-b.w / 2 + wt + 0.4);
+    const x1 = b.w / 2 - wt - 0.4;
+    const z0 = -b.d / 2 + wt + 0.4;
+    const z1 = b.d / 2 - wt - 0.4;
+    if (x1 - x0 < 1.4 || z1 - z0 < 1.4) return null;
+    const y = tops ? tops[k] : (k <= 0 ? 0.14 : k * fh);
+    return { x0: x0, x1: x1, z0: z0, z1: z1, y: y, floor: k, fh: fh, w: x1 - x0, d: z1 - z0 };
+  };
+  CBZ.interiorFloorCount = function (b) {
+    if (!b) return 0;
+    const tops = Array.isArray(b.floorTops) && b.floorTops.length >= 2 ? b.floorTops : null;
+    return tops ? (tops.length - 1) : Math.max(0, (b.storeys | 0));
+  };
+
   // ---- dispatch -----------------------------------------------------------
-  const PROGRAMS = { empty: progEmpty, deskfarm: progDeskFarm, meeting: progMeeting, storage: progStorage, lobby: progLobby };
+  const PROGRAMS = {
+    empty: progEmpty, deskfarm: progDeskFarm, meeting: progMeeting, storage: progStorage, lobby: progLobby,
+    checkpoint: progCheckpoint, quarters: progQuarters, bosssuite: progBossSuite,
+  };
   CBZ.interiorProgram = function (name, room, ctx) {
     const h = host(ctx);
     const fn = PROGRAMS[name];
@@ -363,7 +719,7 @@
     const r = { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y || 0 };
     return fn(r, h, (ctx && ctx.opts) || null);
   };
-  CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby"];
+  CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint", "quarters", "bosssuite"];
 
   // ========================================================================
   //  THE WORKERS — real peds seated at the desks, DOING something.

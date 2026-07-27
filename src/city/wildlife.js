@@ -249,7 +249,9 @@
       a.swimDepth = swimDepth;
       a._waterMove = { x: x, z: z, heading: initialHeading, blocked: false, shore: -999 };
     }
-    if (LIVE()) buildGaitRig(a);          // discover legs/head for the gait & graze reads
+    // discover the rig ONCE: legs/head for walkers, tail/jaw for swimmers.
+    // Each builder bails on the other's animals, so this is one line per actor.
+    if (LIVE()) { buildGaitRig(a); buildSwimRig(a); }
     // snakes carry a segment chain the engine undulates (slither) — cache the
     // parts the build() registered on userData so the anim loop is allocation-free.
     if (sp.snake && grp.userData) {
@@ -544,6 +546,173 @@
     }
   }
 
+  // ============================================================
+  //  SWIM RIG — the aquatic half of the SAME discovery system. buildGaitRig
+  //  bailed on sp.aquatic, so every water species in the game (mackerel,
+  //  dolphin, humpback, great white, megalodon) was a rigid mesh SLIDING
+  //  through the sea: five species, zero animation. This is one rig, not a
+  //  shark animator — fixing it here fixes all five and every future one.
+  //
+  //  DISCOVERY (no declarations, same law as the leg columns): the models are
+  //  authored nose-toward +X, so children behind the origin are the tail. The
+  //  ones in the rear half BEHIND the body mass become the tail cluster, with a
+  //  weight t that grows to 1 at the tip; the tip's own proportions decide the
+  //  swim PLANE — a fin taller than it is wide (shark, mackerel) undulates
+  //  LATERALLY, a horizontal fluke (dolphin, humpback) undulates VERTICALLY,
+  //  which is the actual difference between a fish and a cetacean.
+  //
+  //  The travelling-wave-down-the-tail trick is ported from games/ocean.js
+  //  (proven there for years) and applied in place — no reparenting, exactly
+  //  like snakeAnimate's segment chain, so nothing that indexes group.children
+  //  can be surprised.
+  //
+  //  Phase rides DISTANCE ACTUALLY MOVED (gaitAnimate's law), so a wander, a
+  //  tamed follow, a stalk and a shark's rush all animate for free.
+  // ============================================================
+  function tipHorizontal(m) {
+    // horizontal fluke (cetacean) vs vertical caudal fin (fish/shark)
+    const p = m && m.geometry && m.geometry.parameters;
+    if (p && p.depth != null && p.height != null) return p.depth > p.height * 1.25;
+    const d = m ? meshDims(m) : null;
+    return !!(d && d.w > d.h * 1.6);
+  }
+  function buildSwimRig(a) {
+    const sp = a.species, grp = a.group;
+    if (!sp.aquatic || sp.snake) return;
+    const kids = grp.children;
+    let minX = 0, maxX = 0;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i]; if (!m || !m.isMesh) continue;
+      if (m.position.x < minX) minX = m.position.x;
+      if (m.position.x > maxX) maxX = m.position.x;
+    }
+    if (minX > -0.3) return;                       // nothing behind the origin: no tail to swing
+    const cut = minX * 0.5;                        // the rear half behind the body mass
+    const span = minX - cut;
+    const parts = [];
+    let tip = null, tipX = 1e9;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i]; if (!m || !m.isMesh) continue;
+      if (m.position.x > cut) continue;
+      parts.push({
+        m: m, bx: m.position.x, by: m.position.y, bz: m.position.z,
+        ry: m.rotation.y, rz: m.rotation.z,
+        t: Math.max(0, Math.min(1, (m.position.x - cut) / (span || -1))),
+      });
+      if (m.position.x < tipX) { tipX = m.position.x; tip = m; }
+    }
+    if (!parts.length) return;
+    parts.sort(function (p, q) { return p.t - q.t; });   // base -> tip, so the wave travels
+    // JAW: the far-forward children that hang BELOW the mean of the head
+    // cluster — i.e. the lower jaw and its tooth row, never the skull.
+    const jawCut = maxX * 0.6;
+    let sumY = 0, nY = 0;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i]; if (!m || !m.isMesh || m.position.x < jawCut) continue;
+      sumY += m.position.y; nY++;
+    }
+    const jaw = [];
+    if (nY >= 3) {
+      const meanY = sumY / nY;
+      for (let i = 0; i < kids.length && jaw.length < 14; i++) {
+        const m = kids[i]; if (!m || !m.isMesh || m.position.x < jawCut) continue;
+        if (m.position.y < meanY - 0.05) jaw.push({ m: m, bx: m.position.x, by: m.position.y, rz: m.rotation.z });
+      }
+    }
+    const len = Math.max(0.5, maxX - minX);
+    a.swim = {
+      parts: parts, vert: tipHorizontal(tip),
+      amp: len * 0.065,                            // sweep at the tip, in local u
+      yaw: 0.42,                                   // fin angle-of-attack at the tip
+      freq: Math.max(0.8, Math.min(8, 6 / len)),   // radians of beat per unit travelled
+      // DETERMINISM: the seeded rng() is a shared, order-fragile stream — a new
+      // draw here would shift every later spawn and break the byte-identical
+      // world build. Position-hash instead (no stream state at all).
+      ph: (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 71) : 0) * 6.283,
+      k: 0,
+      jaw: jaw.length ? jaw : null, jawX: maxX * 0.62, jawY: 0, jawK: -1,
+      px: null, pz: null, py: null, ph0: a.heading,
+      roll: 0, pitch: 0,
+    };
+    // hinge height for the gape = the mean y of the jaw parts
+    if (jaw.length) {
+      let s = 0;
+      for (let i = 0; i < jaw.length; i++) s += jaw[i].by;
+      a.swim.jawY = s / jaw.length;
+    }
+  }
+
+  // openness 0..1 — the gape. Called by creature_combat's "lunge" strike and by
+  // the seize, so a shark's mouth actually opens on the thing it is biting.
+  function swimJaw(actor, openness) {
+    const rig = actor && actor.swim;
+    if (!rig || !rig.jaw) return;
+    let o = openness > 0 ? (openness > 1 ? 1 : openness) : 0;
+    if (rig.jawK >= 0 && Math.abs(o - rig.jawK) < 0.01) return;   // nothing changed
+    rig.jawK = o;
+    const th = -o * 0.62;                       // drop the lower jaw about the hinge
+    const c = Math.cos(th), s = Math.sin(th);
+    for (let i = 0; i < rig.jaw.length; i++) {
+      const p = rig.jaw[i];
+      const dx = p.bx - rig.jawX, dy = p.by - rig.jawY;
+      p.m.position.x = rig.jawX + dx * c - dy * s;
+      p.m.position.y = rig.jawY + dx * s + dy * c;
+      p.m.rotation.z = p.rz + th;
+    }
+  }
+
+  function animateSwim(a, dt) {
+    const rig = a.swim; if (!rig) return;
+    const grp = a.group;
+    if (grp.visible === false) return;            // out of the LOD radius: no mesh work
+    const mx = grp.position.x, mz = grp.position.z, my = grp.position.y;
+    const mdx = rig.px == null ? 0 : mx - rig.px;
+    const mdz = rig.pz == null ? 0 : mz - rig.pz;
+    const moved = Math.sqrt(mdx * mdx + mdz * mdz);
+    const vy = (rig.py == null || dt <= 0) ? 0 : (my - rig.py) / dt;
+    rig.px = mx; rig.pz = mz; rig.py = my;
+    // beat rides distance moved (same law as the gait) + a small idle flick, so
+    // a hovering fish still lives and a sprinting shark thrashes. Capped so a
+    // teleport/recovery jump can never spin the tail into a blur.
+    rig.ph += Math.min(Math.min(moved, 1.5) * rig.freq, dt * 24) + dt * 0.9;
+    if (rig.ph > 1e6) rig.ph -= 1e6;
+    const swing = moved > 0.002 ? 1 : 0.4;
+    rig.k += (swing - rig.k) * Math.min(1, dt * 4);
+    const amp = rig.amp * rig.k, yaw = rig.yaw * rig.k;
+    const parts = rig.parts;
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const ang = rig.ph - p.t * 1.55;            // lag down the body = a travelling wave
+      const sw = Math.sin(ang) * p.t, lead = Math.cos(ang) * p.t;
+      if (rig.vert) {                             // cetacean: up/down flukes
+        p.m.position.y = p.by + sw * amp;
+        p.m.rotation.z = p.rz + lead * yaw;
+      } else {                                    // fish/shark: side to side
+        p.m.position.z = p.bz + sw * amp;
+        p.m.rotation.y = p.ry + lead * yaw;
+      }
+    }
+    // BODY: bank into the turn (rotation.x rolls a +X-forward body) and pitch
+    // with vertical speed (rotation.z) — a diving shark noses down. Yielded
+    // whenever a flinch or a creature_combat strike owns the transform.
+    if ((a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
+      let dh = a.heading - rig.ph0;
+      while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
+      const turn = dt > 0 ? dh / dt : 0;
+      const wantRoll = Math.max(-0.45, Math.min(0.45, turn * 0.25));
+      const wantPitch = Math.max(-0.5, Math.min(0.5, vy * 0.11));
+      const e = Math.min(1, dt * 3.2);
+      rig.roll += (wantRoll - rig.roll) * e;
+      rig.pitch += (wantPitch - rig.pitch) * e;
+      grp.rotation.x = rig.roll;
+      grp.rotation.z = rig.pitch;
+    }
+    rig.ph0 = a.heading;
+  }
+  CBZ.buildSwimRig = buildSwimRig;
+  CBZ.animateSwim = animateSwim;
+  CBZ.swimJaw = swimJaw;
+
   // ---- matrix LOD: a hidden animal's subtree stops paying r128's per-frame
   //      updateMatrix() tax (the whole point of core/staticfreeze.js — we keep
   //      its saving without its bug by freezing/thawing on visibility flips).
@@ -827,7 +996,21 @@
       // the wound decides: anything with teeth turns on you, prey bolts hard.
       if (!a.snake && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(a); } catch (e) {} }
       const cls = classify(a.species);
-      if (a.species.danger > 0.15 && P) { a.state = "charge"; a._burstT = null; }
+      // A MIGRATED HUNTER IS NOT PROVOKED BY POKING a.state. predatorHunt owns
+      // stalk/charge for it, and a hot state written behind the driver's back
+      // runs the legacy charge FSM while the driver still believes it is
+      // cruising — two brains, one body, and it only shows up as the animal
+      // behaving twice. It is provoked through the grammar instead:
+      // predatorProvoke clears the cooldown, kills the fake-out, resets the
+      // ambush timer and jumps it straight to `scent` with the notice stinger,
+      // while deliberately leaving menace/commits alone (those two ARE the
+      // anti-habituation rule and a rifle must not reset them). Without it a
+      // shot bear could shrug for the 3-7s of a post-commit cooldown, which
+      // reads as broken rather than tense.
+      if (a.species.danger > 0.15 && P) {
+        if (!huntsShared(a)) { a.state = "charge"; a._burstT = null; }
+        else if (CBZ.predatorProvoke && CBZ.player) { try { CBZ.predatorProvoke(a, CBZ.player); } catch (e) {} }
+      }
       else {
         a.state = "flee"; a.stateT = (cls.fleeT || 4) + 2;
         if (P) a.heading = Math.atan2(a.pos.z - P.z, a.pos.x - P.x);
@@ -842,6 +1025,9 @@
     a.dead = true; a.ko = 0; a.state = "dead"; a.hp = 0;
     a.skinnable = true; a.skinT = CARCASS_LINGER;
     if (LIVE()) setAggroEyes(a, 0);          // the light goes out
+    // a dead shark stops being ticked, so its surface proxy must be told to go
+    // down with it — otherwise the fin hangs on the water forever.
+    if (CBZ.sharkFinDrop) { try { CBZ.sharkFinDrop(a); } catch (e) {} }
     // BULLET-DRIVEN CARCASS PHYSICS. The old death pose eased every species to
     // the same feet-up roll around its root, then froze. Carry the killing round
     // into a short rigid-body flight/tumble instead: mass damps big animals,
@@ -968,6 +1154,7 @@
     const gi = animals.indexOf(a); if (gi >= 0) animals.splice(gi, 1);
     const ci = carcasses.indexOf(a); if (ci >= 0) carcasses.splice(ci, 1);
     leaveHerd(a);                                 // drop the stale member ref
+    if (CBZ.sharkFinDrop) { try { CBZ.sharkFinDrop(a); } catch (e) {} }   // idempotent
     if (a.group && a.group.parent) a.group.parent.remove(a.group);
   }
 
@@ -1019,6 +1206,323 @@
   }
 
   // ============================================================
+  //  THE SHARED PREDATOR SEAM (CBZ.CONFIG.WILDLIFE_PREDATOR_HUNT)
+  //
+  //  WHAT THIS REPLACES. This file used to carry a complete second hunting
+  //  brain: a stalk/charge FSM in landLive() with its own approach, its own
+  //  give-up radii and a HUNTER_CAP counter, plus a snakeTick() whose
+  //  "constriction" was a damage tick and a toast describing a hold that did
+  //  not exist. systems/predator.js already owned the ONE shared "something is
+  //  hunting you and it commits" driver — menace gauge, fake-outs, the vanish,
+  //  the dread bus, real grabs — and had proved it on the shark. Two parallel
+  //  predator brains is exactly the disease CLAUDE.md's ratchet indicts ("18-25
+  //  independent AI update loops, only 2 share code"), so the land brain now
+  //  ticks CBZ.predatorHunt and the bespoke one survives only as the revert.
+  //
+  //  WHAT STAYS HERE: LOCOMOTION, and nothing else. predatorHunt decides WHERE
+  //  a hunter wants to be; landWalk()/slither() decide HOW a body of that kind
+  //  gets there — ground height, the biome home-fence, the clamped facing turn
+  //  that makes every direction change an arc, the stalking crouch. That is the
+  //  same seam wildlife_shark.js fills with swim(), and it is the whole reason
+  //  the shared driver can be medium-agnostic.
+  //
+  //  WHAT IS DELIBERATELY NOT HERE: a species table. Every radius, speed, hold
+  //  and seize style arrives from CBZ.predatorKit(a), derived from the species'
+  //  own scale/spd/bite/danger numbers via ONE archetype row. A brown bear, a
+  //  tiger and a gray wolf hunt completely differently because their NUMBERS
+  //  differ — nothing below knows their names, and a species authored tomorrow
+  //  hunts correctly with no edit to this file.
+  //
+  //  REVERT: CBZ.CONFIG.WILDLIFE_PREDATOR_HUNT = false restores the legacy
+  //  stalk/charge FSM verbatim. The same happens automatically when
+  //  systems/predator.js is not loaded at all — without predatorKit there is no
+  //  bundle to pass, so huntsShared() refuses and nothing here ever runs. That
+  //  is the degrade contract: adopting the block must never be able to break
+  //  wildlife for a client that does not have the block.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_PREDATOR_HUNT == null) CBZ.CONFIG.WILDLIFE_PREDATOR_HUNT = true;
+  function HUNT() { return !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_PREDATOR_HUNT === false); }
+
+  // Does the shared grammar own this actor's aggression? Both halves matter.
+  // predatorIs() is the ONE definition of "does this thing hunt you" — we do
+  // NOT re-derive a danger threshold locally, because two files disagreeing
+  // about who is a predator is how the duplication started. predatorKit is
+  // what makes adoption two lines instead of the shark's twenty-five; without
+  // it we would be hand-authoring an opts bundle, i.e. the thing we are here
+  // to delete, so its absence means "stay on the legacy path".
+  //
+  // There is NO local widening here on purpose. This file briefly carried one
+  // (a venom/constriction apparatus is a killing archetype whatever `danger`
+  // the bestiary authored — the rattlesnake sits at 0.4, and without it that
+  // one snake would have been stranded on a parallel bite path). predatorIs
+  // now makes that test itself, ahead of its danger check, so the opinion
+  // lives in exactly one place. The `danger >= 0.5` line below is only the
+  // pre-predator.js fallback, never a second opinion in a loaded game.
+  function huntsShared(a) {
+    if (!HUNT() || !a || a.dead || a.tamed || a.ridden || a.external) return false;
+    if (typeof CBZ.predatorHunt !== "function" || typeof CBZ.predatorKit !== "function") return false;
+    const sp = a.species; if (!sp) return false;
+    if (CBZ.predatorIs) { try { return !!CBZ.predatorIs(a); } catch (e) { return false; } }
+    return (sp.danger || 0) >= 0.5 || !!sp.venom || !!sp.constrictor;
+  }
+
+  // ---- THE LOCOMOTION SEAM (legs) ---------------------------------------
+  // Shared by BOTH drivers: the wander FSM below hands it a.heading + its own
+  // speed, predatorHunt hands it the heading the hunt wants. Keeping one
+  // integrator is what stops a hunting bear from moving by different rules
+  // than a grazing one (the bug that produces pivot-slides and moonwalking
+  // only while charging, which is the hardest kind to notice in review).
+  function landWalk(a, want, speed, dt) {
+    const grp = a.group, sp = a.species || {};
+    if (!grp || !(dt > 0)) return false;
+    if (want != null) a.heading = want;
+    // FACING: a.heading is only the DESIRE. The body turns toward it at a
+    // clamped rate (slower for big animals, faster in a panic) and the animal
+    // MOVES ALONG ITS FACING — so every direction change is an arc, never a
+    // pivot-slide, a moonwalk, or a sideways glide.
+    if (a.faceH == null) a.faceH = a.heading;
+    let fd = a.heading - a.faceH;
+    while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
+    const panicTurn = a.state === "flee" || a.state === "charge";
+    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + (sp.scale || 1) * 0.3)) * dt;
+    if (fd > trMax) fd = trMax; else if (fd < -trMax) fd = -trMax;
+    a.faceH += fd;
+    // integrate ALONG THE FACING + the home fence. A COMMITTED hunter (state
+    // "charge", which predatorHunt sets for bump/rush/seize) ignores the fence
+    // and follows you out of its biome; anything else arcs back inside rather
+    // than emigrating. Unchanged from the pre-migration law on purpose — a
+    // hunt that relaxed the fence in "stalk" too would slowly drain every
+    // biome of its predators over a long session.
+    let moved = false;
+    if (speed > 0) {
+      const nx = grp.position.x + Math.cos(a.faceH) * speed * dt;
+      const nz = grp.position.z + Math.sin(a.faceH) * speed * dt;
+      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
+      const onHome = reg && (reg.biome === sp.biome) && CBZ.cityRegionHit(reg, nx, nz, 6);
+      if (!onHome && a.state !== "charge") {
+        a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
+      } else {
+        grp.position.x = nx; grp.position.z = nz; moved = true;
+      }
+    }
+    grp.position.y = groundY(grp.position.x, grp.position.z);
+    if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
+    faceAnimalHeading(grp, a.faceH);
+    return moved;
+  }
+
+  // ---- THE LOCOMOTION SEAM (no legs) ------------------------------------
+  // A snake has no faceH and no gait: it turns instantly and the segment chain
+  // sells the motion. A REARED snake is holding ground by definition, so it
+  // refuses to translate — which is how the hunt's circle state reads as a
+  // cobra flaring at you rather than orbiting you like a shark.
+  function slither(a, want, speed, dt) {
+    const grp = a.group, sp = a.species || {};
+    if (!grp || !(dt > 0)) return false;
+    if (want != null) a.heading = want;
+    a.moving = false;
+    if (speed > 0 && !a.reared) {
+      const nx = grp.position.x + Math.cos(a.heading) * speed * dt;
+      const nz = grp.position.z + Math.sin(a.heading) * speed * dt;
+      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
+      const onHome = reg && reg.biome === sp.biome && CBZ.cityRegionHit(reg, nx, nz, 4);
+      if (onHome) { grp.position.x = nx; grp.position.z = nz; grp.position.y = groundY(nx, nz); a.moving = true; }
+      else a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
+    }
+    faceAnimalHeading(grp, a.heading);
+    return a.moving;
+  }
+
+  // ---- THE OPTS BUNDLE ---------------------------------------------------
+  // Built ONCE per actor and then frozen, exactly as wildlife_shark.js freezes
+  // its s.opts: predatorHunt is a per-frame hot path and a fresh object here
+  // would allocate once per predator per tick. predatorKit supplies the entire
+  // bundle; the overrides below are the only three things it cannot know —
+  // how a land body moves, where its damage belongs, and whether the pack has
+  // given this animal permission to commit.
+  function huntOpts(a) {
+    if (a._landHunt) return a._landHunt;
+    // The override object is cached SEPARATELY from the kit, because
+    // predatorKit returns null while CBZ.CONFIG.PREDATOR_KIT is off (that is
+    // predator.js's own one-line revert). Caching only the successful result
+    // keeps us live to a runtime flip; caching the closures regardless keeps
+    // the refused path from allocating three functions every single frame.
+    let over = a._landHuntOver;
+    if (!over) {
+      const sp = a.species || {};
+      const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : "bite";
+      const legless = !!a.snake;
+      over = a._landHuntOver = {
+        move: legless
+          ? function (h, wantH, speed, dt) { return slither(h, wantH, speed, dt); }
+          : function (h, wantH, speed, dt) { return landWalk(h, wantH, speed, dt); },
+        // DAMAGE STAYS ON THE WILDLIFE CONTACT BUS. animalStrikePlayer owns the
+        // ram launch through systems/physics, the hitstop, the shake and the
+        // cause string that the kill feed reads; a hunt that wrote player hp
+        // itself would route around cityHurtPlayer and land nowhere the killfeed
+        // can see. This fires only when the driver strikes WITHOUT a seize
+        // (archetypes that do not grab, or a seize the block refused).
+        onHit: function (d) {
+          animalStrikePlayer(a, d, style);
+          // THE VENOM SURVIVES THE MIGRATION. A viper's threat was never the
+          // bite — predatorKit gives it no hold phase at all (one fast strike,
+          // immediate withdrawal), so the DoT this arms is the whole payload.
+          if (sp.venom) applyVenom(sp);
+        },
+        // PACK COORDINATION WITH ZERO NEW PLUMBING: predatorPack says who may
+        // commit, and a hunter that may not simply cannot reach you —
+        // predatorHunt already turns an unreachable target into rush->disengage
+        // and circle->scent, which is precisely "back off and take your slot".
+        canReach: function () { return a._packGate !== false; },
+      };
+    }
+    // NOTE the units contract: predatorKit multiplies sp.spd by an archetype
+    // constant, which is correct for AUTHORED wildlife species (spd 1.2-4.0,
+    // a "how fast is this animal" hint, not a final u/s). Nothing in this file
+    // stores a resolved speed on the species, so no cruiseSpeed/rushSpeed
+    // override is needed — if one ever does, override rather than let the
+    // multiply happen twice.
+    a._landHunt = CBZ.predatorKit(a, over) || null;
+    return a._landHunt;
+  }
+
+  // ---- THE ONE ENTRY POINT ----------------------------------------------
+  // Returns TRUE when the shared hunt owned this actor's transform this frame
+  // (the same contract as CBZ.sharkBrain). "cruise" means it has not noticed
+  // you, so the ordinary wander/graze FSM keeps the body and this costs one
+  // cheap distance test.
+  function huntTick(a, dt, P) {
+    a._gaitEarly = 0;                 // cleared every frame — see the ORDER note below
+    if (!P || !huntsShared(a)) return false;
+    const player = CBZ.player;
+    if (!player || player.dead) return false;
+    const o = huntOpts(a); if (!o) return false;
+    const grp = a.group;
+
+    // THE CAP, DELEGATED. This file used to own HUNTER_CAP = 3 and a `hunters`
+    // counter recounted every tick — a second, independently invented answer
+    // to "how many things may be after you at once", sitting next to a block
+    // that already answers it with a menace gauge. predatorPack answers it
+    // properly: at most one hunter near you may rush or seize, and the rest
+    // are handed their own bearing slot, so a wolf pack SURROUNDS you and
+    // takes turns instead of queueing behind a global integer. The counter is
+    // gone and this is the whole of what replaced it.
+    let gate = "commit";
+    if (CBZ.predatorPack) {
+      try { gate = CBZ.predatorPack(a, player, dt) || "commit"; } catch (e) { gate = "commit"; }
+      a._packGate = (gate === "commit");
+    } else a._packGate = true;
+
+    const prev = a._huntSt;
+    // A REARED snake HOLDS GROUND (slither refuses to translate while it is
+    // up), so the flare must be decided BEFORE the driver moves the body, off
+    // last frame's state. Deciding it afterwards — the obvious way round — is
+    // a no-op: snakeTick clears a.reared at the top of every frame, so the
+    // rear would flicker for one frame and never once stop the snake. a.rear
+    // is a rig fact (how many segments lift), so which snakes can flare comes
+    // from the model, never from a species name.
+    if (a.snake) a.reared = !!a.rear && (prev === "circle" || prev === "bump");
+
+    // ORDER MATTERS, AND ONLY MID-SWING. systems/predator_anim.js composes the
+    // strike pose as an OFFSET on top of the gait's ABSOLUTE leg writes
+    // (`m.position.x = pt.bx + s`), and the strike is driven from INSIDE
+    // predatorHunt (creature_combat's animateAttack). So while a swing is in
+    // flight the gait has to run FIRST or it stomps the pose for as long as
+    // its weight takes to decay (~0.3s) — a bear that attacks the instant it
+    // stops running shows its legs late.
+    //
+    // It is deliberately NOT an unconditional reorder, which is what the
+    // straight swap would have been. Two things are entangled with it: the
+    // gait's VERTICAL flourish (the body bob, and the pack bound) is added to
+    // grp.position.y and landWalk clamps y to the ground on every move, so
+    // gait-always-first silently kills the bound on a charging wolf; and the
+    // hunt can return "cruise", after which landLive runs its own gait — two
+    // gaitAnimate calls in one frame reads a zero position delta and collapses
+    // the stride. Gating on a live swing avoids both: the animal is stationary
+    // mid-strike so there is no flourish to lose, and this path never falls
+    // through to the wander FSM. Cost is one frame of lag on the first strike
+    // frame only.
+    // a._gaitEarly is the receipt: if the driver then hands the actor back
+    // (st === "cruise"), landLive must NOT gait it a second time in the same
+    // frame — the second call reads a zero position delta and collapses the
+    // stride. One gaitAnimate per actor per frame, always.
+    const striking = (a._atkAnim != null && a._atkAnim >= 0);
+    if (striking && !a.snake) { gaitAnimate(a, dt); a._gaitEarly = 1; }
+
+    let st = "cruise";
+    try { st = CBZ.predatorHunt(a, player, dt, o) || "cruise"; } catch (e) { st = "cruise"; }
+    a._huntSt = st;
+    if (st === "cruise") {
+      a.reared = false;
+      // AN AMBUSHER IN COVER IS NOT IDLE. predatorKit turns `ambush` on for the
+      // whole pounce archetype, and an ambusher spends its ENTIRE pre-commit
+      // life in cruise — that IS the design: it holds absolutely still until
+      // you walk inside half its sense radius. Handing it back to the wander
+      // here would stroll a tiger across the clearing in full view, breaking
+      // the one archetype whose whole identity is "you never saw it". So when
+      // the driver says it is deliberately motionless we OWN the actor and
+      // move nothing.
+      let still = false;
+      if (CBZ.predatorStill) { try { still = !!CBZ.predatorStill(a); } catch (e) { still = false; } }
+
+      // A FLANKER IS NOT AN ANIMAL THAT LOST INTEREST. predatorPack gates a
+      // non-committer by making its target unreachable, and predatorHunt does
+      // not merely pause on that — it unwinds circle -> scent -> cruise. So
+      // without this the pack fiction inverted itself: one wolf commits and the
+      // other three WALK AWAY AND GRAZE while it eats you. They must keep
+      // working the ring at their assigned bearing (predatorPack has already
+      // written a.orbitDir toward their slot) until the token frees up.
+      if (!still && gate !== "commit" && !a.snake) {
+        const dxp = P.x - grp.position.x, dzp = P.z - grp.position.z;
+        const dp = Math.hypot(dxp, dzp);
+        const oR = (o.orbitR || 14);
+        if (dp < oR * 3.2) {
+          const dir = (a._hunt && a._hunt.orbitDir) || 1;
+          const err = Math.max(-1, Math.min(1, (dp - oR) / Math.max(1, oR)));
+          const want = Math.atan2(dzp, dxp) + dir * (Math.PI * 0.5) * (1 - err * 0.8);
+          landWalk(a, want, (o.cruiseSpeed || 2) * 1.05, dt);
+          a.state = "stalk";               // markers.js keeps the threat lit
+          gaitAnimate(a, dt);
+          return true;
+        }
+      }
+      if (!still) return false;                  // ordinary un-noticed animal: the caller wanders it
+      // Owning it means everything the wander would have done for a STATIONARY
+      // animal is now ours, or it floats off the terrain / freezes mid-stride.
+      // gaitAnimate's own zero-movement case is exactly the idle pose we want
+      // (it reads distance moved, so with none it eases the legs to rest).
+      if (a.snake) { snakeAnimate(a, dt); return true; }
+      grp.position.y = groundY(grp.position.x, grp.position.z);
+      faceAnimalHeading(grp, a.faceH == null ? a.heading : a.faceH);
+      gaitAnimate(a, dt);
+      return true;
+    }
+
+    // MARKERS FOR FREE, AND THE ONE THING THEY MUST NOT DO: systems/markers.js
+    // lights the HUD/minimap straight off a.state, which predatorHunt sets. It
+    // must not keep the blip lit while the hunter has broken off — losing the
+    // marker IS the scare (wildlife_shark.js does exactly this).
+    if (st === "vanish" || st === "disengage") a.state = "wander";
+
+    if (a.snake) {
+      // The head lunge is the snake's entire tell, and it has to fire on the
+      // frame the hunt COMMITS, not on contact — by contact there is nothing
+      // left to read.
+      if (st === "rush" && prev !== "rush") a.strikeAnim = 1;
+      snakeAnimate(a, dt);
+    } else {
+      // the Minecraft read: hunting eyes glow red. predatorHunt has just
+      // written a.state, so this is the same frame, not one behind.
+      setAggroEyes(a, a.state === "charge" ? 2 : (a.state === "stalk" ? 1 : 0));
+      // settle any leftover strike pitch between swings, or a bear that
+      // swung once keeps its nose in the dirt for the rest of the encounter.
+      if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
+      if (!striking) gaitAnimate(a, dt);      // else it already ran, before the pose
+    }
+    return true;
+  }
+
+  // ============================================================
   //  SNAKES — no legs, so they SLITHER: a travelling sine wave runs down the
   //  body-segment chain each frame. Cobras REAR + flare a hood as a warning,
   //  vipers/mambas STRIKE (a head lunge) to deliver a venom bite, and the
@@ -1050,20 +1554,33 @@
     if (a.strikeT > 0) a.strikeT -= dt;
     if (a.grabT > 0) a.grabT -= dt;
     a.reared = false; a.moving = false;
+    // THE SHARED PREDATOR BRAIN owns every venomous/constricting snake now.
+    // What it buys: the anaconda's coil is a REAL CBZ.predatorSeize with the
+    // "constrict" style (tightening pulses, damage in rising steps, a genuine
+    // escape window) instead of what used to be here — one damage tick, a 0.9s
+    // cooldown, and a toast that told the player to "thrash free" of a hold
+    // the game never actually had. That toast is gone with the fiction it
+    // described. The viper keeps its venom (huntOpts' onHit arms applyVenom)
+    // and gains the approach it never had. See huntTick above.
+    if (huntTick(a, dt, P)) return;
     let spd = 0, nearP = Infinity, towardP = a.heading;
     if (P) { const dx = P.x - grp.position.x, dz = P.z - grp.position.z; nearP = dx * dx + dz * dz; towardP = Math.atan2(dz, dx); }
     const senseR = Math.max(sp.spook || 0, 11);
     const strikeR = sp.constrictor ? 2.5 : 2.9;
+    const shared = huntsShared(a);
 
     if (P && nearP < senseR * senseR) {
-      if (sp.constrictor) {
-        // ANACONDA — ambush hunter: close the gap, then CONSTRICT on contact.
+      if (shared) {
+        // The hunt HAS this snake but is not engaged (it has not sensed you
+        // yet, or it is inside predatorHunt's post-commit cooldown). It must
+        // not run the legacy strike underneath the driver — that would be the
+        // two brains fighting. It watches you instead: alert, coiled, still.
+        a.reared = !!a.rear; a.heading = towardP; a.alarm = Math.max(a.alarm, 2);
+      } else if (sp.constrictor) {
+        // LEGACY (predator.js absent, or WILDLIFE_PREDATOR_HUNT off) — close
+        // the gap, then a bare contact tick on the grabT cooldown.
         if (nearP < strikeR * strikeR) {
-          if (a.grabT <= 0) {
-            animalStrikePlayer(a, sp.bite || 20, "constrict");
-            a.grabT = 0.9;
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + sp.name + " coils around you — thrash free!", 1.6, { urgent: true });
-          }
+          if (a.grabT <= 0) { animalStrikePlayer(a, sp.bite || 20, "constrict"); a.grabT = 0.9; }
         } else { a.heading = towardP; spd = (sp.spd || 1.4) * 1.6; a.moving = true; a.state = "hunt"; }
       } else if (sp.venom || sp.danger >= 0.4) {
         // VIPER / COBRA / MAMBA — warn, then STRIKE (venom on the bite).
@@ -1088,15 +1605,10 @@
       spd = (sp.spd || 1.4) * 0.6; a.moving = true;
     }
 
-    if (spd > 0 && !a.reared) {
-      const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
-      const nz = grp.position.z + Math.sin(a.heading) * spd * dt;
-      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
-      const onHome = reg && reg.biome === sp.biome && CBZ.cityRegionHit(reg, nx, nz, 4);
-      if (onHome) { grp.position.x = nx; grp.position.z = nz; grp.position.y = groundY(nx, nz); }
-      else { a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6; a.moving = false; }
-    }
-    faceAnimalHeading(grp, a.heading);
+    // ONE integrator, shared with the hunt (predatorHunt drives this exact
+    // function through opts.move) — so a slithering snake and a hunting one
+    // obey the same home fence and the same ground clamp.
+    slither(a, a.heading, spd, dt);
     snakeAnimate(a, dt);
   }
 
@@ -1106,8 +1618,11 @@
   //  the dead branch. The legacy block further down is untouched and runs
   //  verbatim when the flag is off.
   // ============================================================
-  const HUNTER_CAP = 3;            // at most this many predators hunt YOU at once
-  let hunters = 0;                 // recounted at the top of every tick
+  // NOTE: there used to be a HUNTER_CAP = 3 and a `hunters` counter here — a
+  // global cap on simultaneous hunters, recounted every tick. It is gone:
+  // CBZ.predatorPack (systems/predator.js) owns that question for every
+  // predator in the game now, and holding a second answer to it in this file
+  // is the exact duplication this migration deletes. See huntTick().
   const SHOT = { win: 0, n: 0 };   // repeated-gunshot tracker (0.9s window)
   // reusable player-as-target for creature_combat (allocation-free hot path;
   // hp is a decoy — damage lands through opts.onHit, never on this object).
@@ -1121,6 +1636,22 @@
     // hit recoil owns the transform while it lasts; the state resumes after.
     if ((a._flinchT || 0) > 0) { if (CBZ.creatureAnimateFlinch) CBZ.creatureAnimateFlinch(a, dt); return; }
     if (a.alarm > 0) a.alarm -= dt;
+    // THE SHARED PREDATOR BRAIN gets first refusal on every hunter. When it is
+    // engaged it owns the transform for the frame (stalk / circle / bump /
+    // vanish / rush / seize / disengage, plus the gait) and the FSM below is
+    // simply not reached; when it returns false the animal has not noticed you
+    // and the ordinary graze/wander life runs exactly as before.
+    if (huntTick(a, dt, P)) return;
+    const shared = huntsShared(a);
+    // SAFETY NET: reaching here with the hunt un-engaged means the driver is
+    // cruising, so nothing may leave a migrated hunter parked in a hot legacy
+    // state. If some other system pokes one in (a wound, a blast, a herd
+    // ripple), drop it back to wander and let the driver decide — the legacy
+    // charge FSM running under a cruising driver is the one failure mode of
+    // this migration that stays invisible until you watch the animal move.
+    if (shared && (a.state === "charge" || a.state === "stalk")) { a.state = "wander"; a.stateT = 0; a._burstT = null; }
+    // (the ambush hold lives in huntTick, which owns the actor outright while
+    //  predatorStill is true — one answer, and it covers snakes too.)
     a.stateT = (a.stateT || 0) - dt;
     a.turnT -= dt;
     const hr = a.herd, danger = sp.danger || 0;
@@ -1131,20 +1662,29 @@
     // HERD PANIC RIPPLE — one spooked member carries the whole herd.
     if (hr && hr.panic > 0.3 && (a.state === "wander" || a.state === "graze" || a.state === "idle") && a.alarm <= 0.1) {
       a.alarm = Math.max(a.alarm, hr.panic * 0.85);
-      if (danger >= 0.5) { a.state = "charge"; }
+      // A migrated hunter never has "charge" written from out here: predatorHunt
+      // owns its stalk/charge markers and a state poked in behind its back
+      // desyncs its FSM (the driver would keep cruising while markers.js lit
+      // the HUD). The panic still reaches it as alarm, and its own sense radius
+      // decides what to do about you. Herd PREY stampedes exactly as before.
+      if (danger >= 0.5) { if (!shared) a.state = "charge"; }
       else { a.state = "flee"; a.stateT = cls.fleeT; a.heading = hr.heading; }   // flee WITH the herd
     }
 
-    // SENSES — calm animals notice you: prey bolts, hunters commit (capped).
+    // SENSES — calm animals notice you: prey bolts. Hunters are NOT here any
+    // more; predatorHunt's own sense/chum radii woke them at the top of this
+    // function, and the "hunters < HUNTER_CAP" throttle that used to gate this
+    // branch is predatorPack's job now. The predator branch below is the
+    // degrade path only (no predator.js, or the flag off).
     if (!playerGone && (a.state === "wander" || a.state === "graze" || a.state === "idle")) {
       const spookR = sp.spook || 26;
       if (danger < 0.5 && nearP < spookR * spookR) {
         a.state = "flee"; a.stateT = cls.fleeT; a.alarm = Math.max(a.alarm, 4);
         a.heading = Math.atan2(dpz, dpx);                       // away from you
-      } else if (danger >= 0.5) {
+      } else if (danger >= 0.5 && !shared) {
         const trig = (sp._stalk && sp._stalk.trig) || cls.stalk;
-        if (nearP < sq(cls.aggro || 16) && hunters < HUNTER_CAP) { a.state = "charge"; a.alarm = 6; hunters++; }
-        else if (trig && nearP < sq(trig) && hunters < HUNTER_CAP && grp.visible !== false) { a.state = "stalk"; hunters++; }
+        if (nearP < sq(cls.aggro || 16)) { a.state = "charge"; a.alarm = 6; }
+        else if (trig && nearP < sq(trig) && grp.visible !== false) { a.state = "stalk"; }
       }
     }
 
@@ -1208,6 +1748,13 @@
               else if (style === "gore" || style === "stomp") o.rate = 1.3;   // heavy hitters swing slower
               if (sp.id === "cheetah") o.rate = 0.9;
             }
+            // SAME ORDERING LAW as the migrated path (see huntTick): the gait
+            // runs BEFORE the strike, because systems/predator_anim.js's pose
+            // composes as an offset on top of the gait's absolute leg writes.
+            // This branch used to return without ticking the gait at all, so
+            // the legs simply froze mid-stride for the whole attack; running
+            // it here settles them AND leaves the pose layer last.
+            gaitAnimate(a, dt);
             CBZ.creatureFight(a, PT, dt, o);
             a.faceH = a.heading;                       // it steers facing itself — stay in sync
             return;                                    // creatureFight owns the transform this frame
@@ -1271,38 +1818,18 @@
       a.heading += dd * Math.min(1, dt * (a.state === "wander" ? 2.2 : 5.0));
     }
 
-    // ---- FACING: a.heading is only the DESIRE. The body turns toward it at
-    //      a clamped rate (slower for big animals, faster in a panic) and the
-    //      animal MOVES ALONG ITS FACING — so every direction change is an
-    //      arc, never a pivot-slide, a moonwalk, or a sideways glide.
-    if (a.faceH == null) a.faceH = a.heading;
-    let fd = a.heading - a.faceH;
-    while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
-    const panicTurn = a.state === "flee" || a.state === "charge";
-    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + (sp.scale || 1) * 0.3)) * dt;
-    if (fd > trMax) fd = trMax; else if (fd < -trMax) fd = -trMax;
-    a.faceH += fd;
-
-    // integrate ALONG THE FACING + home fence + ground + the gait layer
-    if (spd > 0) {
-      const nx = grp.position.x + Math.cos(a.faceH) * spd * dt;
-      const nz = grp.position.z + Math.sin(a.faceH) * spd * dt;
-      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
-      const onHome = reg && (reg.biome === sp.biome) && CBZ.cityRegionHit(reg, nx, nz, 6);
-      if (!onHome && a.state !== "charge") {
-        // steer back toward home anchor instead of leaving the biome (the
-        // clamped facing turns the step into an arc back inside).
-        a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
-      } else {
-        grp.position.x = nx; grp.position.z = nz;
-      }
-    }
-    grp.position.y = groundY(grp.position.x, grp.position.z);
-    if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
-    faceAnimalHeading(grp, a.faceH);
+    // ---- FACING + INTEGRATION + the home fence + ground + the crouch: ONE
+    //      shared integrator (landWalk, above), which predatorHunt also drives
+    //      through opts.move. A grazing bear and a hunting bear must move by
+    //      the same rules, or the pivot-slide bugs come back in exactly the
+    //      state nobody reviews.
+    landWalk(a, a.heading, spd, dt);
     // settle any leftover attack pitch back to rest while roaming
     if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
-    gaitAnimate(a, dt);
+    // ONE gait call per actor per frame: huntTick may already have run it
+    // ahead of the strike pose (see its ORDER note) before handing the actor
+    // back. A second call this frame reads a zero delta and collapses the stride.
+    if (a._gaitEarly) a._gaitEarly = 0; else gaitAnimate(a, dt);
   }
 
   // ============================================================
@@ -1331,9 +1858,20 @@
         continue;
       }
       if (danger >= 0.5) {
+        if (huntsShared(a)) {
+          // A migrated hunter's aggression belongs to predatorHunt — writing
+          // a.state = "charge" from out here would fight its FSM and skip
+          // every beat that makes the encounter (the circle, the fake-out, the
+          // menace gauge). The shot still lands: the alarm keeps it awake past
+          // the LOD freeze and turns it toward the muzzle, its own sense radius
+          // finds you from there, and any blood you spilled pulls it in through
+          // predatorHunt's chum sense for free.
+          a.alarm = Math.max(a.alarm, 5 + extra);
+          a.heading = Math.atan2(z - a.pos.z, x - a.pos.x);
+        }
         // predators: a shot close by provokes; further out they orient/creep.
-        if (d2 < sq((cls.aggro || 16) * 1.4) && hunters < HUNTER_CAP) { a.state = "charge"; a.alarm = 6; hunters++; }
-        else if (cls.stalk && hunters < HUNTER_CAP && a.group.visible !== false) { a.state = "stalk"; hunters++; }
+        else if (d2 < sq((cls.aggro || 16) * 1.4)) { a.state = "charge"; a.alarm = 6; }
+        else if (cls.stalk && a.group.visible !== false) { a.state = "stalk"; }
         else { a.alarm = Math.max(a.alarm, 4); a.heading = Math.atan2(z - a.pos.z, x - a.pos.x); }
       } else {
         a.state = "flee";
@@ -1406,15 +1944,9 @@
     updateHerds(dt);               // live centroid + mean heading + herd alarm
     if (!wrapsOk) installWraps();  // retry until the combat hooks exist (idempotent)
     if (SHOT.win > 0) SHOT.win -= dt;   // repeated-gunshot window cools here
-    // recount the predators currently committed to the player (stalk/charge)
-    // so the HUNTER_CAP can bound both the dogpile and the per-frame cost.
-    hunters = 0;
-    if (LIVE()) {
-      for (let i = 0; i < animals.length; i++) {
-        const st = animals[i].state;
-        if (!animals[i].dead && !animals[i].external && (st === "charge" || st === "stalk")) hunters++;
-      }
-    }
+    // (the whole-list predator recount that used to run here is gone with
+    //  HUNTER_CAP — predatorPack tracks its own hunters, so this is one fewer
+    //  O(animals) sweep per frame as well as one fewer duplicated concept.)
     // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
     // tier): animals beyond the tier's radius don't render or animate their
     // meshes — same pattern as the ped rig LOD. Big species read farther
@@ -1500,7 +2032,7 @@
       // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
       // (their position is set elsewhere; the gait layer keys off distance
       //  actually moved, so their legs animate for free.)
-      if (a.ridden) { if (LIVE()) gaitAnimate(a, dt); continue; }   // glued under the rider
+      if (a.ridden) { if (LIVE()) { if (a.swim) animateSwim(a, dt); else gaitAnimate(a, dt); } continue; }   // glued under the rider
       if (a.tamed && !sp.aquatic) {
         if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt);
         if (a.snake) { a.moving = true; snakeAnimate(a, dt); }
@@ -1511,6 +2043,17 @@
       if (a.snake) { snakeTick(a, dt, P); continue; }
       // ---- aquatic: water-mask navigation + synced wave/depth lanes -------
       if (sp.aquatic) {
+        // APEX PREDATORS think before the LOD gate: a stalking shark hunts from
+        // BEYOND the visible radius (its fin proxy is what you see, not its
+        // body — city/wildlife_shark.js), so it must keep running while hidden.
+        // Everything else in the sea still idles when it is out of sight.
+        if (CBZ.sharkBrain && (sp.danger || 0) >= 0.5 && !a.tamed && !a.dead) {
+          if (CBZ.sharkBrain(a, dt, P)) {
+            faceAnimalHeading(grp, a.heading);
+            if (LIVE()) animateSwim(a, dt);
+            continue;                                 // the hunt owns the transform
+          }
+        }
         if (grp.visible === false) continue;          // far sea life idles (no sim)
         a.bob += dt * (1.2 + a.spd * 0.2);
         a.turnT -= dt;
@@ -1558,6 +2101,7 @@
           grp.position.y = Math.sin(a.bob) * 0.12 * (sp.scale || 1);
         }
         faceAnimalHeading(grp, a.heading);
+        if (LIVE()) animateSwim(a, dt);               // the shared tail/fluke beat
         continue;
       }
       // ---- FAR + CALM land animals FREEZE (no per-frame steering) so a big
@@ -1722,5 +2266,46 @@
       }
     }
     return out;
+  };
+
+  // ============================================================
+  //  THE RATCHET (BLOCK LAW #5) — four independent "a predator lands a hit on
+  //  the player" paths lived in this file. All four now go through
+  //  systems/predator.js's grammar, so all four declare it. Adoption is
+  //  DECLARED, never sniffed: only the migrating file knows it migrated.
+  //
+  //  The `else` branch is the one that actually runs — predator.js loads AFTER
+  //  wildlife.js, so the ids buffer on CBZ._predatorAdopted and predator.js
+  //  drains them at load. Do not "fix" it to a plain call; the buffer is what
+  //  makes the count independent of index.html's script order.
+  //
+  //  What each id means here:
+  //   · predator-charge — landLive's stalk/charge FSM. Bears, big cats and
+  //     wolves now hunt through predatorHunt with a predatorKit bundle.
+  //   · herd-charge     — the dangerous-prey contact charge (bison, rhino,
+  //     boar, elephant). Same driver; their archetype rows simply have no
+  //     seize, so their commit is the impact and then they are past you.
+  //   · snake-constrict — the anaconda's coil is a real predatorSeize now.
+  //   · snake-strike    — the venom strike's approach and commit; the venom
+  //     DoT itself still runs through applyVenom/venomTick, unchanged.
+  //  (Each survives as the flag-off / no-predator.js degrade path only.)
+  // ============================================================
+  (function declareAdoption() {
+    const ids = ["wildlife:predator-charge", "wildlife:herd-charge",
+                 "wildlife:snake-constrict", "wildlife:snake-strike"];
+    for (let i = 0; i < ids.length; i++) {
+      if (typeof CBZ.predatorAdopt === 'function') {
+        try { CBZ.predatorAdopt(ids[i]); } catch (e) {}
+      } else {
+        try { (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push(ids[i]); } catch (e) {}
+      }
+    }
+  })();
+
+  // read-only, for tuning probes: what is this land predator doing, and did
+  // the pack let it commit? (The mirror of CBZ.sharkState.)
+  CBZ.cityWildlifeHuntState = function (a) {
+    if (!a) return null;
+    return { state: a._huntSt || "cruise", commit: a._packGate !== false, kit: !!a._landHunt };
   };
 })();

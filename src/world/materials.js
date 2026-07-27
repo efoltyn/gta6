@@ -22,10 +22,52 @@
    Existing MeshLambertMaterial road tiles (ground.js, world.js, etc.)
    are untouched — Lambert has no roughness/metalness to animate, and
    this file must not change what OTHER files already construct.
+
+   ------------------------------------------------------------------
+   TIERED PBR (2026-07): CBZ.cmat() now has TWO bodies for every cache
+   key — the original MeshLambertMaterial and a MeshStandardMaterial
+   "twin" with sane roughness/metalness and the shared PMREM
+   environment. Which one a call site receives depends on the live
+   quality tier (CBZ.gfxTier.pbr, tiers 3-4 by default). The signature,
+   the cache semantics and the `_shared` contract are IDENTICAL, so all
+   ~250 existing CBZ.cmat() call sites are untouched and unaware.
+
+   WHY TWINS AND NOT A STRAIGHT SWAP — this is the single biggest
+   performance trap in the whole render stack. core/batch.js's
+   mergeableKeyV2() refuses to merge anything that is not
+   MeshLambertMaterial/MeshBasicMaterial ("Standard/Phong keep their
+   look") and refuses anything carrying a `.map`. Handing Standard
+   materials to the world builders would therefore have silently
+   un-merged the entire static city shell and resurrected the ~2200
+   draw calls batching exists to kill. Keeping BOTH bodies alive, each
+   pointing at the other through `_cbzTwin`, lets core/gfx.js swap the
+   whole scene back to Lambert for the duration of the batch pass and
+   restore Standard on the survivors afterwards — so the merge set is
+   byte-for-byte what it always was, and the draw-call count does not
+   move by one. Merged geometry gets its PBR back a different way: gfx
+   promotes the batcher's own output materials, of which there are a
+   handful, at zero draw-call cost.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  CBZ.CONFIG = CBZ.CONFIG || {};
+
+  // GFX_PBR_MATERIALS (owner: "make the world like 100x realer feeling").
+  // On → CBZ.cmat() hands out MeshStandardMaterial twins on quality tiers that
+  // ask for them (CBZ.gfxTier.pbr), so shared surfaces gain roughness,
+  // metalness and environment reflection instead of flat Lambert. Flip false
+  // (or ?cfg_GFX_PBR_MATERIALS=0) and every call site silently returns to the
+  // exact Lambert material it got before — a true one-line revert.
+  if (CBZ.CONFIG.GFX_PBR_MATERIALS == null) CBZ.CONFIG.GFX_PBR_MATERIALS = true;
+  // GFX_ROAD_DETAIL — procedural asphalt normal/roughness maps on CBZ.roadMat.
+  // Roads are the largest continuous surface in the game AND already the only
+  // material with live roughness/metalness (the wet-rain tie-in below), so a
+  // normal map is what finally makes wet highlights scatter instead of mirror.
+  // Draw-call safe: roadMat instances are already textured/Standard and were
+  // therefore ALREADY excluded from every batch pass — adding more maps to
+  // them cannot change the merge set.
+  if (CBZ.CONFIG.GFX_ROAD_DETAIL == null) CBZ.CONFIG.GFX_ROAD_DETAIL = true;
   // Jail geometry belongs to one mode-owned root. Survival's builder reparents
   // the handful of addBox results it creates into its own arena immediately.
   const scene = CBZ.prisonRoot || CBZ.scene;
@@ -48,6 +90,50 @@
   //      be disposed (see entities/survivorbot.js clear). Only use cmat() for
   //      surfaces nothing mutates per-instance — the head stays mat(). ----
   const matCache = new Map();
+  // Every Standard twin ever built, so core/gfx.js can drive the batch-safe
+  // swap protocol and backfill the environment map when carfx builds it late.
+  const pbrTwins = [];
+  CBZ.pbrTwins = pbrTwins;
+
+  // Is the live quality tier asking for PBR shared materials? Read fresh on
+  // every call (never cached) so a tier change takes effect for new geometry
+  // immediately; already-built geometry is re-synced by CBZ.gfxSyncMaterials().
+  function pbrWanted() {
+    if (!CBZ.CONFIG.GFX_PBR_MATERIALS) return false;
+    // Not armed until core/gfx.js has seen the one-shot window-load batch pass
+    // finish. Everything built before that point (the prison, the boot scene)
+    // therefore reaches core/batch.js as Lambert exactly as it always has, and
+    // gets its Standard twin swapped in afterwards.
+    if (!CBZ.gfxPbrArmed) return false;
+    const t = CBZ.gfxTier;
+    return !!(t && t.pbr);
+  }
+  CBZ.pbrMaterialsOn = pbrWanted;
+
+  // Build (once) the MeshStandardMaterial body for a Lambert cache entry.
+  // Roughness is high and metalness ~0 by default: the point is not to make
+  // the city shiny, it is to give it an ENERGY-CONSERVING response plus the
+  // PMREM environment as a cheap indirect-light term. A dark material stays
+  // dark; a light one now picks up sky bounce the way a real one does.
+  function makeTwin(lam, color, em, ei) {
+    const std = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: em,
+      emissiveIntensity: ei,
+      roughness: 0.86,
+      metalness: 0.03,
+      envMap: CBZ.ENV || null,
+      envMapIntensity: 0.55,
+    });
+    std._shared = true;
+    std._cbzPbr = true;
+    std._cbzTwin = lam;
+    lam._cbzTwin = std;
+    lam._cbzPbr = false;
+    pbrTwins.push(std);
+    return std;
+  }
+
   function cmat(color, opts) {
     opts = opts || {};
     const em = opts.emissive || 0, ei = opts.ei != null ? opts.ei : 1;
@@ -58,6 +144,36 @@
       m._shared = true;
       matCache.set(k, m);
     }
+    if (!pbrWanted()) return m;
+    return m._cbzTwin || makeTwin(m, color, em, ei);
+  }
+
+  // CBZ.pbrMat(color, opts) — explicit shared PBR material for callers that
+  // WANT roughness/metalness regardless of tier (glass, chrome, wet stone).
+  // Same cache/`_shared` contract as cmat; opts.roughness/.metalness/.surface
+  // (a world/textures_surface.js name) are all optional.
+  const pbrCache = new Map();
+  function pbrMat(color, opts) {
+    opts = opts || {};
+    const em = opts.emissive || 0, ei = opts.ei != null ? opts.ei : 1;
+    const r = opts.roughness != null ? +opts.roughness : 0.8;
+    const mt = opts.metalness != null ? +opts.metalness : 0.05;
+    const k = color + "|" + em + "|" + ei + "|" + r + "|" + mt + "|" + (opts.surface || "");
+    let m = pbrCache.get(k);
+    if (m) return m;
+    m = new THREE.MeshStandardMaterial({
+      color: color, emissive: em, emissiveIntensity: ei,
+      roughness: r, metalness: mt,
+      envMap: CBZ.ENV || null,
+      envMapIntensity: opts.envMapIntensity != null ? +opts.envMapIntensity : 0.7,
+    });
+    m._shared = true;
+    m._cbzPbr = true;
+    if (opts.surface && CBZ.surfaceApply) {
+      CBZ.surfaceApply(m, opts.surface, { color: opts.surfaceColor !== false, repeat: opts.repeat, roughness: r, metalness: mt });
+    }
+    pbrTwins.push(m);
+    pbrCache.set(k, m);
     return m;
   }
 
@@ -156,7 +272,23 @@
       roughness: DRY_ROUGH,
       metalness: DRY_METAL,
       envMap: CBZ.ENV || null, // carfx.js may not have built this yet; opportunistic only
+      envMapIntensity: 0.9,
     });
+    // SURFACE DETAIL. The asphalt normal map is what turns the wet-road
+    // specular from a mirror sheet into scattered highlights, and the
+    // roughness map is what makes the dry road stop reading as poured rubber.
+    // The caller may already own the albedo (city/world.js hands us its own
+    // checkerTex) — in that case we take normal+roughness only and leave
+    // .map alone. Tier-gated inside surfaceApply: nothing happens on tier 0.
+    if (CBZ.CONFIG.GFX_ROAD_DETAIL && CBZ.surfaceApply) {
+      CBZ.surfaceApply(m, "asphalt", {
+        color: false,                     // never fight the caller's albedo
+        repeat: opts.detailRepeat != null ? opts.detailRepeat : 34,
+        roughness: DRY_ROUGH,
+        metalness: DRY_METAL,
+      });
+      m._roadNormalScale = m.normalScale ? m.normalScale.x : 0;
+    }
     m._roadWet = true;
     m._roadBase = new THREE.Color(opts.color != null ? opts.color : DRY_COL);
     roadMats.push(m);
@@ -187,12 +319,22 @@
       m.color.copy(m._roadBase).multiplyScalar(k);
       m.roughness = rough;
       m.metalness = metal;
+      // Standing water FILLS the aggregate. A wet road is physically smoother
+      // than a dry one, so the same normal map has to flatten as it soaks —
+      // otherwise rain makes the asphalt look like hammered metal.
+      if (m._roadNormalScale && m.normalScale) {
+        const ns = m._roadNormalScale * (1 - wetK * 0.72);
+        m.normalScale.set(ns, ns);
+      }
+      // A wet surface reflects the sky far harder than a dry one.
+      if ("envMapIntensity" in m) m.envMapIntensity = 0.9 + wetK * 1.5;
       if (!m.envMap && CBZ.ENV) { m.envMap = CBZ.ENV; m.needsUpdate = true; } // backfill if carfx's env built later
     }
   });
 
   CBZ.mat = mat;
   CBZ.cmat = cmat;
+  CBZ.pbrMat = pbrMat;
   CBZ.boxGeom = boxGeom;
   CBZ.addBox = addBox;
   CBZ.checkerTex = checkerTex;

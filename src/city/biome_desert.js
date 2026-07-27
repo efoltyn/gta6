@@ -153,24 +153,45 @@
   }
 
   function desertDuneHeightAt(x, z) {
-    // Two wind-aligned wavelengths, domain-warped at field scale.  The second
-    // harmonic makes the windward side broad and the lee side short, avoiding
-    // the old scatter of identical half-spheres.
-    const warp = (terrainNoise(x * 0.0042 + 31, z * 0.0042 - 18) - 0.5) * 86;
-    const u = x * 0.79 + z * 0.61 + warp;
-    const v = -x * 0.61 + z * 0.79;
-    const p = u * (Math.PI * 2 / 66);
-    const q = (u * 0.58 + v * 0.24) * (Math.PI * 2 / 118);
-    let ridge = 0.5 + 0.5 * (Math.sin(p) * 0.72 + Math.sin(p * 2 + 0.85) * 0.21 + Math.sin(q + 1.6) * 0.18);
-    ridge = clamp01(ridge);
-    const macro = 0.55 + terrainNoise(x * 0.008 - 11, z * 0.008 + 7) * 0.75;
-    // These are landforms, not bump-map decoration: crests rise roughly
-    // 19-31m across the open erg. A slightly broader exponent makes the
-    // windward face occupy real driving distance while the harmonic still
-    // drops sharply on the lee side; from ground level this now reads as an
-    // actual dune sea instead of a tan plane carrying scattered props.
-    const transverse = Math.pow(ridge, 1.90) * (12 + 14 * macro);
-    const rippledFloor = terrainNoise(x * 0.021 + 2, z * 0.021 - 5) * 1.65;
+    // Two slowly-changing wind fields replace the old single global sine. A
+    // single direction made the entire 880x940m erg read as corduroy from the
+    // air. These domains cross-fade over hundreds of metres, with independent
+    // warps, so ridges fork, turn and knit into broad dune families without
+    // adding another mesh, material or draw call.
+    const warpA = (terrainNoise(x * 0.0036 + 31, z * 0.0036 - 18) - 0.5) * 94;
+    const warpB = (terrainNoise(x * 0.0029 - 47, z * 0.0029 + 26) - 0.5) * 118;
+    const uA = x * 0.79 + z * 0.61 + warpA;
+    const vA = -x * 0.61 + z * 0.79;
+    const uB = x * 0.94 - z * 0.34 + warpB;
+    const vB = x * 0.34 + z * 0.94;
+    const pA = uA * (Math.PI * 2 / 72);
+    const pB = uB * (Math.PI * 2 / 104);
+    function slipFace(phase, shoulderPhase) {
+      // The second harmonic holds a long windward shoulder and a shorter lee
+      // fall instead of a symmetrical wave hill.
+      return clamp01(0.5 + Math.sin(phase) * 0.42 + Math.sin(phase * 2 + shoulderPhase) * 0.17);
+    }
+    const ridgeA = slipFace(pA, 0.72);
+    const ridgeB = slipFace(pB, 1.18);
+    const turn = smooth01(terrainNoise(x * 0.00165 + 7, z * 0.00165 - 13));
+    // Long cross-wind scallops break infinite ridgelines into crescent/barchan
+    // groups. A low-frequency field leaves calmer interdune basins between
+    // those groups, giving roads and settlements visual breathing room.
+    const scallopA = 0.5 + 0.5 * Math.sin(vA * (Math.PI * 2 / 255) + warpB * 0.018);
+    const scallopB = 0.5 + 0.5 * Math.sin(vB * (Math.PI * 2 / 310) - warpA * 0.014);
+    const duneField = 0.52 + 0.48 * smooth01(terrainNoise(x * 0.00235 - 11, z * 0.00235 + 7));
+    const macro = 0.72 + terrainNoise(x * 0.0061 + 19, z * 0.0061 - 23) * 0.62;
+    // Real landforms, still bounded for driving: roughly 7-30m dune crests,
+    // with the same analytic function shared by rendering and ground physics.
+    // Each wind family tapers independently before the domain cross-fade.
+    // That lets ridges end in horns and basins instead of keeping every stripe
+    // alive across the full allocation rectangle.
+    const groupA = 0.12 + 0.88 * Math.pow(smooth01(scallopA), 1.55);
+    const groupB = 0.12 + 0.88 * Math.pow(smooth01(scallopB), 1.55);
+    const hA = Math.pow(clamp01(ridgeA), 1.72) * groupA;
+    const hB = Math.pow(clamp01(ridgeB), 1.72) * groupB;
+    const transverse = (hA * (1 - turn) + hB * turn) * (10 + 16 * macro) * duneField;
+    const rippledFloor = terrainNoise(x * 0.019 + 2, z * 0.019 - 5) * 1.15;
     return transverse + rippledFloor;
   }
 
@@ -222,26 +243,36 @@
     const ctx = cv.getContext("2d");
     ctx.fillStyle = "#" + base.getHexString();
     ctx.fillRect(0, 0, cv.width, cv.height);
-    // Broad, low-contrast crests deliberately survive mip filtering from a
-    // plane. The old 140-cycle fragment stripes aliased into aerial noise.
-    for (let row = -18; row < 290; row += 18) {
-      ctx.beginPath();
-      for (let x = -20; x <= 276; x += 8) {
-        const y = row + Math.sin((x + row * 0.45) * 0.055) * 2.8 + Math.sin(x * 0.018 + row) * 1.4;
-        if (x < -12) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    // Broken, slowly-turning traces read as wind grain at player height but
+    // do not become a repeated barcode from the map camera. Each trace is
+    // deterministic and finite; the vertex-lit heightfield owns the large
+    // dune silhouette.
+    for (let row = -10, band = 0; row < 274; row += 12, band++) {
+      for (let seg = 0; seg < 4; seg++) {
+        const jitter = Math.sin(band * 7.31 + seg * 11.17);
+        const x0 = seg * 70 - 18 + jitter * 17;
+        const x1 = x0 + 39 + (0.5 + 0.5 * Math.sin(band * 3.71 + seg)) * 30;
+        ctx.beginPath();
+        for (let x = x0; x <= x1; x += 5) {
+          const bend = Math.sin(x * 0.028 + band * 0.83) * 4.5 + Math.sin(x * 0.009 - band * 1.37) * 6;
+          const y = row + bend + (x - 128) * Math.sin(band * 0.47) * 0.035;
+          if (x === x0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = "rgba(112,80,42,0.10)";
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+        ctx.translate(0, 1.8);
+        ctx.strokeStyle = "rgba(255,245,205,0.08)";
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
       }
-      ctx.strokeStyle = "rgba(112,80,42,0.16)";
-      ctx.lineWidth = 2.2;
-      ctx.stroke();
-      ctx.translate(0, 2.3);
-      ctx.strokeStyle = "rgba(255,245,205,0.13)";
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
     const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(6, 6);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    // One unique grain sheet covers the authored basin. Geometry supplies the
+    // detail up close, so tiling this canvas only advertised its repetition.
+    tex.repeat.set(1, 1);
     tex.magFilter = THREE.LinearFilter;
     tex.minFilter = THREE.LinearMipMapLinearFilter;
     tex.generateMipmaps = true;

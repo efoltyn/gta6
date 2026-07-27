@@ -297,3 +297,25 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
   #inventory { transform: translateY(104px); font-size: 11px; max-width: 160px; }
   #keycard { transform: translateY(58px); }
 }
+
+/* ---- THE INSTRUMENT CLUSTER ON TOUCH -------------------------------------
+   city/carcluster.js draws speed + posted limit + fuel in the bottom-right.
+   On touch that corner belongs to systems/touch_vehicle.js's dial and the
+   hold-buttons, so the cluster tags itself .handoff and gives up the speed
+   readout — it keeps only what the dial does NOT show. These rules put what
+   is left somewhere a thumb is never resting and inside the notch cutout. */
+body.touch #cCluster {
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+}
+body.touch #cCluster.handoff {
+  bottom: auto;
+  top: calc(96px + env(safe-area-inset-top, 0px));
+}
+/* a phone has no room for a 46px roundel beside a 108px dial */
+@media (max-width: 520px) {
+  #cCluster #cLimit { width: 38px; height: 38px; border-width: 4px; }
+  #cCluster #cLimitN { font-size: 16px; }
+  #cCluster #cFuel { width: 92px; }
+  #cCluster #cSpeed { font-size: 34px; }
+}

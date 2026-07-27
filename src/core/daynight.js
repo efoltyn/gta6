@@ -14,6 +14,17 @@
    closed in sky.js at order 99, which repaints the dome's horizon
    stop to the FINAL scene.fog.color after every mode override.
 
+   LIGHT WRITES NOW GO THROUGH core/lights.js. This file used to own
+   its own copy of the sun/hemi keyframes (si/hi literals), which
+   city/mode.js and modes/survival.js then each re-derived with THEIR
+   own literals — three writers, three tuning tables, no way to add a
+   fourth term (bounce fill, tone-map gain) without a fourth fight.
+   The keyframes now live once in CBZ.lightRig.keys and this file calls
+   CBZ.lightRig.daylight(dayness, duskness) for the whole rig. Mode
+   overrides that still write the lights by hand are corrected — not
+   fought — by CBZ.lightRig.finalize() at order 94.5 (core/gfx.js),
+   which runs after every one of them.
+
    SHADOW RE-CENTERING (texel-snapped): the fixed ortho shadow frustum
    was parked at the world origin, so at city scale most of its shadow
    texels were spent on empty ground far from wherever the player
@@ -32,6 +43,7 @@
   "use strict";
   const CBZ = window.CBZ;
   const sun = CBZ.sun, hemi = CBZ.hemi, scene = CBZ.scene, dome = CBZ.skyDome;
+  const rig = CBZ.lightRig;
 
   const CYCLE = 150;        // seconds for a full day
                             // NOTE: city/schedule.js DAY_SECS mirrors this
@@ -48,20 +60,25 @@
   CBZ.dayCount = function (v) { if (v != null && isFinite(v)) dayN = Math.max(0, Math.floor(+v)); return dayN; };
   CBZ.dayTime = function () { return dayN + t; };   // continuous days-elapsed clock
 
-  // palette keyframes across the day (0..1): [fog, sunColor, sunInt, hemiInt].
+  // fog keyframes across the day (0..1). The LIGHT keyframes moved to
+  // core/lights.js (CBZ.lightRig.keys) so all three writers share one table;
+  // fog colour is still owned here because sky.js's horizon seam law is keyed
+  // to scene.fog.color and nothing else may write it.
   // dusk fog is a touch deeper than the old 0xff9e6b pastel — the haze near
   // the streets goes warm, while the actual horizon BURN lives in sky.js.
   // Neutral blue-grey aerial perspective. The former saturated baby-blue fog
   // turned every fully fogged dry surface and distant mountain into what looked
   // like a second flat water material from aircraft.
-  const day   = { fog: 0xb6c4c8, sun: 0xfff4e0, si: 1.05, hi: 0.85 };
-  const dusk  = { fog: 0xf09a68, sun: 0xff8a3a, si: 0.7,  hi: 0.6 };
-  const night = { fog: 0x16243f, sun: 0x6f86c0, si: 0.18, hi: 0.4 };
+  const FOG = { day: 0xb6c4c8, dusk: 0xf09a68, night: 0x16243f };
 
   const _a = new THREE.Color(), _b = new THREE.Color();
   function mixHex(h1, h2, k, out) { _a.setHex(h1); _b.setHex(h2); return out.copy(_a).lerp(_b, k); }
   // reused scratch colours — this runs every frame, so don't allocate here
   const sunC = new THREE.Color(), fogC = new THREE.Color();
+
+  // fallback keyframes for the (impossible, but cheap to guard) case where
+  // core/lights.js did not install the rig — keeps this file standalone-safe.
+  const FALLBACK = { si: [0.20, 1.18], hi: [0.34, 0.72], sun: [0x6f86c0, 0xfff4e0], dusk: 0xff8a3a };
 
   // last texel-snapped recenter offset actually applied — compared each frame
   // so we only poke renderer.shadowMap.needsUpdate when the light truly moved
@@ -113,20 +130,34 @@
     const dayness = Math.max(0, up);          // 0 at/under horizon
     const duskness = Math.max(0, 1 - Math.abs(up) * 3); // glow near horizon
 
-    // blend night → day, then push toward dusk near the horizon
-    let A = night, B = day, k = dayness;
-    mixHex(A.sun, B.sun, k, sunC); mixHex(A.fog, B.fog, k, fogC);
-    if (duskness > 0) {
-      _b.setHex(dusk.sun); sunC.lerp(_b, duskness * 0.7);
-      _b.setHex(dusk.fog); fogC.lerp(_b, duskness * 0.6);
+    // ---- the whole light rig in one call (sun colour+intensity, hemisphere
+    //      intensity AND its sky/ground colours, and the ground-bounce fill).
+    //      One shared keyframe table, so a mode override can reproduce the
+    //      exact same look by calling the same function with its own focus.
+    if (rig && rig.daylight) {
+      rig.daylight(dayness, duskness, sunC);
+    } else {
+      mixHex(FALLBACK.sun[0], FALLBACK.sun[1], dayness, sunC);
+      if (duskness > 0) { _b.setHex(FALLBACK.dusk); sunC.lerp(_b, duskness * 0.7); }
+      sun.color.copy(sunC);
+      sun.intensity = FALLBACK.si[0] + (FALLBACK.si[1] - FALLBACK.si[0]) * dayness;
+      hemi.intensity = FALLBACK.hi[0] + (FALLBACK.hi[1] - FALLBACK.hi[0]) * dayness;
     }
 
-    sun.color.copy(sunC);
+    // ---- fog colour (the sky seam's source of truth — see sky.js @99) ----
+    mixHex(FOG.night, FOG.day, dayness, fogC);
+    if (duskness > 0) { _b.setHex(FOG.dusk); fogC.lerp(_b, duskness * 0.6); }
+    // Aerial perspective is BLUER than the light that made it (Rayleigh
+    // scattering is what fog IS). Pushing the daytime haze a few percent
+    // toward the hemisphere's sky colour is what stops distant geometry
+    // reading as "the same grey, just faded".
+    if (hemi && hemi.color && dayness > 0) {
+      fogC.lerp(hemi.color, 0.14 * dayness * (1 - duskness));
+    }
+
     // the sky's sun DISC reads this (CBZ.sun.color gets overwritten by the
     // city's constant-light override at @94, so it can't be the source)
     (CBZ.sunTint || (CBZ.sunTint = new THREE.Color())).copy(sunC);
-    sun.intensity = night.si + (day.si - night.si) * dayness;
-    hemi.intensity = night.hi + (day.hi - night.hi) * dayness;
     if (scene.fog) scene.fog.color.copy(fogC);
     // dome tint stays WHITE here: sky.js paints the real palette (deep-blue
     // zenith over the sunset burn) into the canvas, and a global multiply

@@ -28,6 +28,10 @@
        ctx.npc(spec) -> handle                                   REAL city ped: brain+outfit+gunpoint+cityKillPed. USE THIS.
        ctx.rig(opts) ctx.idle(rig)                               DEPRECATED bare voxel dummy — fallback only (no brain/death)
        ctx.zone({id,label,pos:[x,z],r,onUse,canShow})            interactions (#14 registerZone, slot "e")
+       ctx.mission({title,goal,at:[x,z],reward,onComplete})      TRACKED PAID OBJECTIVE (core/mission.js):
+                                                                 HUD line + map waypoint + world beacon + phone
+                                                                 card + wallet payout, all for one call. Never
+                                                                 null — inert handle if the block is absent.
        ctx.wallet.cash()/spend(n)/give(n)/canAfford(n)           REAL city money (#6b via CBZ.city)
        ctx.hud.feed/toast/panel(html,handlers)/closePanel        player-facing surface
        ctx.rand(a,b,salt) ctx.stream(name)                       DETERMINISM LAW (#12): never Math.random
@@ -199,6 +203,16 @@
   function closePanel() { if (!panelEl) return; panelEl.style.display = "none"; panelEl.innerHTML = ""; panelHandlers = null; }
 
   /* ---------------- ctx factory ------------------------------------------ */
+  // degrade-safe stand-in for ctx.mission() when core/mission.js is not in the
+  // build: same shape, every method a no-op, so a package never branches.
+  const NULL_MISSION = (CBZ.mission && CBZ.mission.NULL) || {
+    id: null, def: {}, data: {}, state: "off", inert: true,
+    stage() { return null; }, stageId() { return null; },
+    advance() { return this; }, retarget() { return this; }, brief() { return this; },
+    progress() { return this; }, note() { return this; }, complete() { return this; },
+    fail() { return this; }, cancel() { return this; }, alive() { return false; },
+    elapsed() { return 0; }, target() { return null; }, distance() { return Infinity; },
+  };
   const animators = [];   // {fn} global across packages; driven from one updater
   let animT = 0;
   function makeCtx(def, venue) {
@@ -347,6 +361,28 @@
             onSelect() { z.onUse(ctx); },
           }],
         });
+      },
+      // ctx.mission(spec) — hand the player a TRACKED, PAID objective.
+      // One call buys the whole loop a package would otherwise hand-roll:
+      // completion detection (reach/kill/steal/deliver/destroy/survive),
+      // the g.cityJob HUD distance line, the map waypoint, the world beacon,
+      // the phone mission card and the wallet payout (core/mission.js).
+      // Coordinates are venue-LOCAL like every other ctx call. The handle is
+      // NEVER null — with the mission block absent it is inert, so package
+      // code never branches: ctx.mission({...}).complete() is always legal.
+      mission(spec) {
+        spec = spec || {};
+        const o = venue.origin;
+        const toWorld = (at) => (Array.isArray(at) ? { x: o.x + (at[0] || 0), z: o.z + (at[1] || 0) } : at);
+        const world = Object.assign({}, spec);
+        world.id = def.id + ":" + (spec.id || "job");
+        world.giver = spec.giver || def.title || def.id;
+        if (spec.at !== undefined) world.at = toWorld(spec.at);
+        if (Array.isArray(spec.stages)) {
+          world.stages = spec.stages.map((s) => (s && Array.isArray(s.at) ? Object.assign({}, s, { at: toWorld(s.at) }) : s));
+        }
+        if (CBZ.mission && CBZ.mission.start) return CBZ.mission.start(world);
+        return NULL_MISSION;
       },
       wallet: {
         cash() { return (CBZ.game && CBZ.game.cash) || 0; },

@@ -12,6 +12,13 @@
    at the end — the quiet show-off spot, and the jump-off-the-end
    dive (swim.js owns the water).
 
+   THE FURNITURE IS REAL. Loungers and deck chairs are CBZ.furnish pieces, so
+   they arrive already registered with city/propuse.js: lying on a lounger runs
+   the same walk → perch on the edge → swing the legs up arc as getting into a
+   bed, and a deck chair runs the office-chair arc. Sunbathers are ordinary
+   peds posted by CBZ.cityPostNpc and handed to propSit/propSleep — this file
+   owns no body, no pose and no brain, only where the furniture goes.
+
    THE MONEY: sunbathers leave their lives on their towels. A few
    coolers and beach bags hold cash you can rifle ([E], a beat,
    gone) — petty theft if anyone's watching (cityCrime "theft"),
@@ -24,6 +31,26 @@
    line is 4m inside the seawall) and a stacked container dockyard
    in the south-east corner (climbable: tops are platforms — a
    free vantage you jump up to).
+
+   THE WATERLINE MOVES. The wet-sand strip and the drowned slope used to be
+   two static meshes in one fixed colour, so the sea's foam edge could run up
+   the beach while the sand under it never changed — the waterline was
+   literally painted on. They are now ONE small vertex-coloured grid (the
+   "swash apron") driven by CBZ.waterSwashAt(x, z, t) from
+   world/water_spec.js: the exact expression the ocean shader's own cbzSwash()
+   evaluates. Sand soaks instantly and dries over ~3s, so you can see where the
+   last big wave reached long after it drained. Gated by CBZ.CONFIG.WATER_SWASH
+   (off → the old static SAND_WET, no per-frame work).
+
+   THE DOCK MOVES. Off the pier head there is now a FLOATING DOCK — a
+   moored raft with a raised sun deck — reached by a hinged GANGWAY. Both
+   are systems/platforms_moving.js rigs: their walk surfaces live in the
+   parent group's LOCAL frame, so they stay correct while the raft heaves,
+   pitches, rolls and swings on its lines (CBZ.waterRideAt — the same swell
+   the ocean shader draws). They are the first things in this game you can
+   stand on WHILE THEY MOVE. Driven at onUpdate(9.4), one step ahead of the
+   rigs (9.5) and two ahead of updatePlayer (10) — a platform that moves
+   after the player has resolved against it is the one-frame sink/pop.
 
    Draw-call discipline: sand/boardwalk/pier planks/rails/stripes
    are MERGED (BufferGeometryUtils, guarded), palms/umbrellas/
@@ -68,7 +95,32 @@
   const BAG_EMPTY  = () => cmat(0x4a3354, { emissive: 0x000000, ei: 0 });
 
   const loot = [];           // { x, z, body, bag, looted, t }
+  // the usable furniture, in build order: { rec, lie } where rec is the
+  // city/propuse.js anchor (a bed rec for a lounger, a seat rec for a deck
+  // chair). Module scope because the sunbathers arrive on a later tick.
+  const chairs = [];
   let built = false;
+
+  // ---- the swash apron (built in section 1, animated at the bottom) --------
+  // Drying sand vs. sand the water is on right now. Kept as THREE.Colors so
+  // the components land in exactly the space a cmat(hex) material would.
+  const SWASH_DRY = new THREE.Color(0xd8c391);   // between SAND and SAND_WET
+  const SWASH_WET = new THREE.Color(0x8c7a50);   // dark, saturated, just-soaked
+  let swash = null;
+  // the floating dock + its gangway (world/systems/platforms_moving.js rigs) —
+  // built in section 5b, driven by the 9.4 tick at the bottom of this file
+  let dock = null;
+  function paintSwash(k, w) {
+    const c = swash.col, q = k * 3;
+    c[q] = SWASH_DRY.r + (SWASH_WET.r - SWASH_DRY.r) * w;
+    c[q + 1] = SWASH_DRY.g + (SWASH_WET.g - SWASH_DRY.g) * w;
+    c[q + 2] = SWASH_DRY.b + (SWASH_WET.b - SWASH_DRY.b) * w;
+  }
+  function ss01(e0, e1, x) {
+    let t = (x - e0) / (e1 - e0);
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    return t * t * (3 - 2 * t);
+  }
 
   CBZ.cityBuildBeach = function (city) {
     if (built || !city || !city.shore) return;
@@ -136,22 +188,111 @@
     }
     mergeAdd(sandGeoms, cmat(SAND));
 
-    // wet-sand strip at the waterline + a slope quad dipping under the sea
-    // surface — the sand visibly RUNS INTO the water (swim.js takes you at
-    // the same line, so the read and the mechanic agree).
-    const wet = new THREE.PlaneGeometry(BW + 4, 7);
-    wet.rotateX(-Math.PI / 2);
-    wet.translate((BX0 + BX1) / 2, 0.048, ES - 3);
-    mergeAdd([wet], cmat(SAND_WET));
-    (function slope() {                                    // two triangles, near edge dry-high, far edge drowned
-      const x0 = BX0 - 2, x1 = BX1 + 2, zN = ES - 5.5, zF = ES - 16, yN = 0.03, yF = -0.8;
-      const pos = new Float32Array([x0, yN, zN, x1, yN, zN, x1, yF, zF, x0, yN, zN, x1, yF, zF, x0, yF, zF]);
-      const nrm = new Float32Array(18); for (let i = 0; i < 6; i++) nrm[i * 3 + 1] = 1;
+    // =====================================================================
+    //  THE SWASH APRON — the wet-sand strip and the drowned slope, replaced
+    //  by ONE small grid whose vertex colours track the water.
+    //
+    //  This was a static PlaneGeometry plus a two-triangle quad in a fixed
+    //  SAND_WET, which meant the "waterline" was painted on: the sea's foam
+    //  edge ran up the beach and the sand under it never changed. Now both
+    //  read the SAME function — CBZ.waterSwashAt(x, z, t) from
+    //  world/water_spec.js, which is literally the expression the sea shader's
+    //  cbzSwash() evaluates — so the dark line and the white line are one
+    //  thing by construction, not by two authors agreeing.
+    //
+    //  Sand wets INSTANTLY and dries SLOWLY (that asymmetry is the whole
+    //  read: you can see where the last big wave reached long after it has
+    //  drained). Cost: 7x13 = 91 vertices, one colour attribute rewrite per
+    //  frame, no geometry rebuild, no new draw call beyond the one this mesh
+    //  already was. Below mean sea level the sand is permanently submerged, so
+    //  the run-up is clamped at 0 there — a drain-back cannot expose seabed.
+    //
+    //  Same footprint and heights as the two meshes it replaces (flat 0.048
+    //  down to ES-5.5, then a straight ramp to -0.80 at ES-16), so nothing
+    //  around it moved. Flagged by CBZ.CONFIG.WATER_SWASH: off → static
+    //  SAND_WET colours and no per-frame work, i.e. the old look exactly.
+    // =====================================================================
+    (function swashApron() {
+      const AX0 = BX0 - 2, AX1 = BX1 + 2;
+      const AZ_LAND = ES + 0.5, AZ_SEA = ES - 16;
+      const RAMP_Z = ES - 5.5, FLAT_Y = 0.048, SEA_FLOOR_Y = -0.80;
+      const NX = 7, NZ = 13;
+      function apronY(z) {
+        if (z >= RAMP_Z) return FLAT_Y;
+        const t = Math.min(1, (RAMP_Z - z) / (RAMP_Z - AZ_SEA));
+        return FLAT_Y + (SEA_FLOOR_Y - FLAT_Y) * t;
+      }
+      // the geometric waterline: where this ramp crosses mean sea level
+      const seaY = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+      const zW = RAMP_Z - (RAMP_Z - AZ_SEA) * (FLAT_Y - seaY) / (FLAT_Y - SEA_FLOOR_Y);
+
+      const n = NX * NZ;
+      const pos = new Float32Array(n * 3);
+      const nrm = new Float32Array(n * 3);
+      const col = new Float32Array(n * 3);
+      const vx = new Float32Array(n);          // world x (the swash phase varies along shore)
+      const dLand = new Float32Array(n);       // metres inland of the mean waterline
+      for (let iz = 0; iz < NZ; iz++) {
+        const z = AZ_LAND + (AZ_SEA - AZ_LAND) * iz / (NZ - 1);
+        for (let ix = 0; ix < NX; ix++) {
+          const x = AX0 + (AX1 - AX0) * ix / (NX - 1);
+          const k = iz * NX + ix;
+          pos[k * 3] = x; pos[k * 3 + 1] = apronY(z); pos[k * 3 + 2] = z;
+          nrm[k * 3 + 1] = 1;                  // flat-lit like the quad it replaces
+          vx[k] = x; dLand[k] = z - zW;
+        }
+      }
+      const idx = new Uint16Array((NX - 1) * (NZ - 1) * 6);
+      let w = 0;
+      // rows run seaward (z DECREASES with iz), so (a,b,c)/(b,d,c) is the
+      // winding whose face normal is +Y — same as the quad this replaces.
+      for (let iz = 0; iz < NZ - 1; iz++) for (let ix = 0; ix < NX - 1; ix++) {
+        const a = iz * NX + ix, b = a + 1, c = a + NX, d = c + 1;
+        idx[w++] = a; idx[w++] = b; idx[w++] = c;
+        idx[w++] = b; idx[w++] = d; idx[w++] = c;
+      }
       const gm = new THREE.BufferGeometry();
       gm.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       gm.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-      const m = new THREE.Mesh(gm, cmat(SAND_WET));
-      m.receiveShadow = true; m.matrixAutoUpdate = false; root.add(m);
+      gm.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      gm.setIndex(new THREE.BufferAttribute(idx, 1));
+      // Its OWN material: the cmat pool is shared and must never be mutated,
+      // and vertexColors has to be on for any of this to show. The name is
+      // deliberately free of "water"/"ocean"/"sea" — tools/test-terrain-water-
+      // browser.mjs asserts exactly ONE water-surface mesh and matches on it.
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      mat.name = "beach-swash-sand";
+      const m = new THREE.Mesh(gm, mat);
+      m.receiveShadow = true; m.castShadow = false; m.matrixAutoUpdate = false;
+      // non-empty userData spares it from core/batch.js's merge (we rewrite its
+      // buffer every frame); `dynamic` additionally keeps core/farcull.js off it.
+      m.userData.beachSwash = true;
+      m.userData.dynamic = true;
+      root.add(m);
+
+      // WATER_V2 is world/water_spec.js's MASTER off-switch and stands its
+      // swash down too, so honour it here or the apron would keep ticking (at
+      // a permanent run-up of 0) instead of falling back to the static sand
+      // this whole block replaced.
+      const CF = CBZ.CONFIG || {};
+      const live = CF.WATER_SWASH !== false && CF.WATER_V2 !== false &&
+        typeof CBZ.waterSwashAt === "function";
+      swash = {
+        mesh: m, attr: gm.getAttribute("color"), col: col,
+        vx: vx, dLand: dLand, n: n, nx: NX, zW: zW,
+        wet: new Float32Array(n), runs: new Float32Array(NX), live: live,
+        cx: (AX0 + AX1) / 2, cz: (AZ_LAND + AZ_SEA) / 2,
+      };
+      if (live) {
+        // Start fully soaked; the first frames dry the upper beach back out.
+        for (let k = 0; k < n; k++) { swash.wet[k] = 1; paintSwash(k, 1); }
+      } else {
+        // Flag off (or water_spec.js absent): the exact flat SAND_WET the two
+        // static meshes used to be, written once, and never ticked again.
+        const s = new THREE.Color(SAND_WET);
+        for (let k = 0; k < n; k++) { col[k * 3] = s.r; col[k * 3 + 1] = s.g; col[k * 3 + 2] = s.b; }
+      }
+      swash.attr.needsUpdate = true;
     })();
 
     // =====================================================================
@@ -274,6 +415,62 @@
     if (towIM.instanceColor) towIM.instanceColor.needsUpdate = true;
     poleIM.castShadow = umbIM.castShadow = towIM.castShadow = false;
     root.add(poleIM); root.add(umbIM); root.add(towIM);
+
+    // =====================================================================
+    //  3b) THE FURNITURE YOU CAN ACTUALLY LIE ON.
+    //
+    //  A towel is a decal. These are city/furniture.js pieces, which means
+    //  they arrive already registered with city/propuse.js — so lying on a
+    //  lounger runs the SAME phased arc as getting into a bed (walk → perch
+    //  on the edge → swing the legs up), and dropping into a deck chair runs
+    //  the same arc as an office chair. Nothing here animates a body: the
+    //  beach only says WHERE the furniture is, and the shared arcs own how
+    //  anyone gets onto it. That is the whole point — a deck chair on a beach
+    //  and a chair behind a desk are the same verb.
+    //
+    //  Drawn through a local `box` so the pieces land in the city root (and
+    //  batch with everything else) instead of CBZ.addBox's bare scene add.
+    //  Degrade-safe: no CBZ.furnish (FURNISH_KIT=false) → no beach furniture
+    //  and no anchors, exactly as before this section existed.
+    // =====================================================================
+    const CANVAS = [0xe24b4b, 0xf2c43d, 0x3c6fd6, 0x4caf6e, 0xe88a3c, 0xe8e8ee];
+    const SEAWARD = Math.PI;        // forward = (sin yaw, cos yaw); the water is at low z
+    function furnBox(bx, by, bz, w, h, d, color, o) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cmat(color));
+      m.position.set(bx, by, bz);
+      m.castShadow = !!(o && o.cast); m.receiveShadow = true;
+      root.add(m);
+      if (o && o.solid) {
+        const c = { minX: bx - w / 2, maxX: bx + w / 2, minZ: bz - d / 2, maxZ: bz + d / 2, ref: m, noCam: true };
+        if (o.y0 != null) c.y0 = o.y0;
+        if (o.y1 != null) c.y1 = o.y1;
+        CBZ.colliders.push(c);
+      }
+      return m;
+    }
+    if (CBZ.furnish) {
+      const SAND_TOP = 0.06;                 // the sand band's own surface height
+      spots.forEach(function (sp) {
+        const n = 1 + (rng() < 0.55 ? 1 : 0);
+        for (let k = 0; k < n; k++) {
+          const fx = sp.x + (k ? 1.7 : -1.7) + (rng() - 0.5) * 0.6;
+          const fz = sp.z - 2.5 - rng() * 1.4;              // seaward of the umbrella
+          const yaw = SEAWARD + (rng() - 0.5) * 0.55;       // nobody lines them up
+          const tone = { cloth: CANVAS[(rng() * CANVAS.length) | 0], frame: 0xd9d2bd };
+          const o = { box: furnBox, solid: true, tone: tone };
+          // Loungers outnumber deck chairs the way they do on a real beach —
+          // and the mix is what makes both arcs visible from one spot.
+          if (rng() < 0.62) {
+            const r = CBZ.furnish.lounger(fx, SAND_TOP, fz, yaw, o);
+            if (r && r.beds && r.beds[0]) chairs.push({ rec: r.beds[0], lie: 1 });
+          } else {
+            const r = CBZ.furnish.deckchair(fx, SAND_TOP, fz, yaw, o);
+            if (r && r.seats && r.seats[0] && r.seats[0].rec) chairs.push({ rec: r.seats[0].rec, lie: 0 });
+          }
+        }
+      });
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
 
     // THE VALUABLES: a cooler or beach bag beside 5 of the clusters. Material
     // swap full↔empty (the roofloot pattern) — a full one glints.
@@ -453,6 +650,112 @@
     })();
 
     // =====================================================================
+    //  5b) THE FLOATING DOCK + ITS GANGWAY — the pier's payoff, and the
+    //  first thing in this game you can stand on WHILE IT MOVES.
+    //
+    //  Both are systems/platforms_moving.js rigs, which is the whole point:
+    //  their walk surfaces live in the parent group's LOCAL frame, so they
+    //  stay correct at any heave/pitch/roll/heading instead of being a
+    //  world-space CBZ.platforms AABB that is a lie the moment the thing
+    //  turns. The dock rides the LIVE swell through CBZ.waterRideAt — the
+    //  same 4-probe hull-attitude query every floating body in this game
+    //  uses — and ranges on its mooring lines the way a real dock does, so
+    //  standing at its seaward corner genuinely lifts and drops you and
+    //  standing off-centre while it swings genuinely carries you through
+    //  the arc.
+    //
+    //  The GANGWAY is the access route and the second rig: hinged on the
+    //  pier head, resting on the dock's inboard edge, its slope recomputed
+    //  every frame from the dock's live deck height. Its deck is longer
+    //  than the nominal gap so the dock's surge can never open a hole to
+    //  fall through — which is what the rollers on a real brow are for.
+    //
+    //  FREEBOARD IS LOAD-BEARING, not styling: city/swim.js takes you into
+    //  the water whenever your feet are within WADE_ABOVE (1.08m) of the
+    //  live surface, so a deck you can stand on out here has to clear it.
+    //  The deck sits 1.50m above the dock's own ride surface, and because
+    //  the whole rig heaves WITH that surface, the clearance is constant by
+    //  construction — a swell can never close it. (The pier next door plays
+    //  the same trick with a static 1.33m.)
+    //
+    //  Degrade-safe: no CBZ.movingPlatform → no dock at all, rather than a
+    //  raft you fall through. Nothing else in the beach changes, and the
+    //  build draws NO rng() (the beach's deterministic stream is untouched).
+    // =====================================================================
+    (function floatingDock() {
+      if (!CBZ.movingPlatform) return;
+      // mirrors the pier block's own constants (that block is an IIFE)
+      const PIER_TOP = 0.85, headW = 9.4, headZ1 = (ES - 36) - 8;
+      const GW_Z = headZ1 + 3.0;                  // out on the pier head, clear of the bench
+      const HINGE_X = pierX + headW / 2 - 0.25;   // gangway's fixed end, on the pier deck
+      const DOCK_X = pierX + headW / 2 + 8.3;     // dock centre, nominal (it ranges ±0.5 on its lines)
+      const DOCK_Z = GW_Z;
+      const DECK_TOP = 1.50;                      // LOCAL deck height above the ride surface
+      const DW = 7.0, DD = 5.0;                   // deck size
+      const LAND_IN = 2.9;                        // how far inboard the gangway lands on the deck
+      const GW_W = 1.7;                           // gangway width
+      const GW_L = (DOCK_X - LAND_IN - HINGE_X) + 1.4;   // + 0.7 of overlap at each end
+
+      // ---- the dock body (all LOCAL to dockGrp; +y is up from the waterline)
+      const dockGrp = new THREE.Group();
+      dockGrp.position.set(DOCK_X, CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48, DOCK_Z);
+      dockGrp.userData.dynamic = true;            // core/batch.js must not merge a moving group away
+      root.add(dockGrp);
+      function part(parent, x, y, z, w, h, d, col, cast) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cmat(col));
+        m.position.set(x, y, z); m.castShadow = !!cast; m.receiveShadow = true;
+        parent.add(m); return m;
+      }
+      part(dockGrp, 0, 0.05, 0, DW + 0.2, 1.30, DD + 0.2, 0x6f6a60);          // pontoon raft, half-drowned
+      part(dockGrp, 0, 0.72, 0, DW + 0.3, 0.10, DD + 0.3, 0x2e3238);          // rub strake
+      for (let ix = -1; ix <= 1; ix += 2) for (let iz = -1; iz <= 1; iz += 2)
+        part(dockGrp, ix * 2.9, 1.05, iz * 2.1, 0.26, 0.72, 0.26, WOOD_DK);   // stub columns
+      part(dockGrp, 0, 1.42, 0, DW, 0.16, DD, WOOD_A, true);                  // the sun deck (top = 1.50)
+      // kick rails along the two long edges — LOCAL walls, so they stay put
+      // relative to the deck at every heading. The inboard (gangway) and
+      // seaward faces are deliberately OPEN: this is a dive stage.
+      for (const sz of [-1, 1]) part(dockGrp, 0, 1.95, sz * 2.56, DW, 0.90, 0.12, 0xd9d2bd);
+
+      // ---- the gangway (LOCAL to gwGrp; its deck top is local y = 0) ----
+      const gwGrp = new THREE.Group();
+      gwGrp.userData.dynamic = true;
+      root.add(gwGrp);
+      part(gwGrp, 0, -0.05, 0, GW_L, 0.10, GW_W, WOOD_B);                     // the brow itself
+      for (const sz of [-1, 1]) {
+        part(gwGrp, 0, 0.52, sz * 0.85, GW_L, 0.08, 0.08, 0xe8ebee);          // handrail
+        for (let i = 0; i < 5; i++)
+          part(gwGrp, -GW_L / 2 + (i + 0.5) * (GW_L / 5), 0.26, sz * 0.85, 0.07, 0.55, 0.07, 0xe8ebee);
+      }
+
+      // ---- ONE LINE EACH: the decks and walls, in the parents' LOCAL frames.
+      // camYaw stays FALSE (the default): the dock's mooring swing must never
+      // grab the player's view. Their BODY turns with it, which is invisible.
+      const dockRig = CBZ.movingPlatform(dockGrp, {
+        id: "beach-floating-dock",
+        decks: [{ x: 0, z: 0, w: DW, d: DD, top: DECK_TOP }],
+        walls: [
+          { x: 0, z: -2.56, w: DW, d: 0.12, y0: DECK_TOP, y1: DECK_TOP + 0.9 },
+          { x: 0, z: 2.56, w: DW, d: 0.12, y0: DECK_TOP, y1: DECK_TOP + 0.9 },
+        ],
+      });
+      const gwRig = CBZ.movingPlatform(gwGrp, {
+        id: "beach-dock-gangway",
+        decks: [{ x: 0, z: 0, w: GW_L, d: GW_W, top: 0 }],
+        walls: [
+          { x: 0, z: -0.9, w: GW_L, d: 0.10, y0: 0, y1: 1.0 },
+          { x: 0, z: 0.9, w: GW_L, d: 0.10, y0: 0, y1: 1.0 },
+        ],
+      });
+
+      dock = {
+        grp: dockGrp, gw: gwGrp, rig: dockRig, gwRig: gwRig,
+        x: DOCK_X, z: DOCK_Z, deckTop: DECK_TOP, len: DW + 0.2, beam: DD + 0.2,
+        hingeX: HINGE_X, hingeY: PIER_TOP, gwZ: GW_Z, landIn: LAND_IN,
+        ride: { y: 0, pitch: 0, roll: 0 },
+      };
+    })();
+
+    // =====================================================================
     //  6) THE REST OF THE APRON — west quay PARKING LOT (paint only: cars
     //  CAN reach it, the drive clamp is 4m inside the seawall) and a SE
     //  CONTAINER DOCKYARD (instanced, solid, tops are climbable platforms).
@@ -546,10 +849,52 @@
     return null;
   }
 
+  // =====================================================================
+  //  THE SUNBATHERS — the beach furniture, in use.
+  //
+  //  Empty loungers read as a shop display. These are ordinary peds, posted
+  //  by city/occupy.js's CBZ.cityPostNpc and then handed to propSleep /
+  //  propSit — no beach-specific body, no beach-specific brain, no beach
+  //  update loop. Whatever those two arcs do for a bedroom, they do here.
+  //
+  //  Committed INSTANT, deliberately: these bodies were never standing up,
+  //  so playing the lie-down arc at them would be a body materialising and
+  //  then climbing onto furniture it is already on.
+  //
+  //  Runs once, on the first tick after the world is up (cityMakePed and the
+  //  ped array are not guaranteed to exist while the beach is being built).
+  //  WHO is sunbathing is a position hash, not a draw on the build stream —
+  //  the beach's rng is long spent by now, and reopening it here would make
+  //  the sand depend on when this file happened to run.
+  // =====================================================================
+  let peopled = false;
+  const SUNBATHERS_MAX = 5;             // leave the rest of the furniture free
+  function populate() {
+    if (peopled) return;
+    if (!chairs.length || !CBZ.cityPostNpc || !CBZ.cityPeds || !CBZ.propSit) return;
+    peopled = true;
+    let n = 0;
+    for (let i = 0; i < chairs.length && n < SUNBATHERS_MAX; i++) {
+      const c = chairs[i], rec = c.rec;
+      if (!rec || rec.occupant) continue;
+      if (CBZ.hash01 && CBZ.hash01(rec.x, rec.z, 0xb3ac) > 0.62) continue;   // some are simply empty
+      const ped = CBZ.cityPostNpc(rec.x, rec.z, {
+        archetype: "tourist", job: "tourist", src: "beach:sunbather",
+      });
+      if (!ped) continue;
+      const took = c.lie
+        ? (CBZ.propSleep && CBZ.propSleep(ped, rec, { instant: true }))
+        : CBZ.propSit(ped, rec, { instant: true });
+      if (!took) { if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(ped); continue; }
+      n++;
+    }
+  }
+
   let rifling = null;          // { L, t }
   let _promptT = 0;
   CBZ.onUpdate(36.9, function (dt) {
     if (g.mode !== "city" || !built) { rifling = null; chipText(null); return; }
+    populate();
     for (const L of loot) {
       if (!L.looted) continue;
       L.t -= dt;
@@ -589,8 +934,115 @@
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
 
+  // =====================================================================
+  //  THE DOCK TICK — priority 9.4.
+  //
+  //  ORDER IS THE FEATURE: 9.4 drives the raft, 9.5 is where
+  //  systems/platforms_moving.js carries its riders, 10 is updatePlayer.
+  //  The platform moves, THEN the rider is carried, THEN physics resolves
+  //  them — all inside one frame. Driving a platform AFTER the player has
+  //  already resolved against it is precisely the one-frame sink/pop that
+  //  made every previous attempt at a moving surface in this engine feel
+  //  broken, and it is why this tick is not down with the other water
+  //  presentation work at 36.9/93.7.
+  //
+  //  Runtime-only motion (CBZ.waterClock + the shared swell), so nothing
+  //  here is on a build path and nothing here draws on the beach's
+  //  deterministic rng stream.
+  // =====================================================================
+  const DOCK_SWAY = 0.085;     // rad — how far it weathervanes inside its lines
+  const DOCK_SURGE = 0.45;     // m — how far it ranges fore/aft on them
+  CBZ.onUpdate(9.4, function () {
+    const D = dock;
+    if (!D || g.mode !== "city") return;
+    const t = CBZ.waterClock ? CBZ.waterClock() : 0;
+    const yaw = Math.sin(t * 0.13) * DOCK_SWAY;
+    const px = D.x + Math.sin(t * 0.09) * DOCK_SURGE;
+    const pz = D.z + Math.cos(t * 0.071) * (DOCK_SURGE * 0.6);
+    let y, pitch = 0, roll = 0;
+    if (CBZ.waterRideAt) {
+      // the shared 4-probe hull-attitude query — the dock heaves and tips on
+      // exactly the swell the ocean shader draws, because it is the same table
+      const r = CBZ.waterRideAt(px, pz, { heading: yaw, len: D.len, beam: D.beam, t: t }, D.ride) || D.ride;
+      y = r.y; pitch = r.pitch || 0; roll = r.roll || 0;
+    } else {
+      y = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(px, pz) : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48);
+    }
+    if (!(y === y)) return;                       // never hand a NaN pose to a rig
+    D.grp.position.set(px, y, pz);
+    D.grp.rotation.set(pitch, yaw, roll);
+
+    // THE GANGWAY: hinged on the pier head, resting on the dock's inboard
+    // edge, its slope recomputed from the dock's LIVE deck height. Its own
+    // deck is 1.4m longer than the nominal gap, so the dock ranging on its
+    // lines can never open a hole to fall through — the job the rollers on a
+    // real brow do. With yaw 0, a Z rotation (roll) is what slopes a deck
+    // running along local +X: worldY = poseY + sin(roll)·lx.
+    const landX = px - D.landIn;
+    const landY = y + D.deckTop;
+    const run = Math.max(0.5, landX - D.hingeX);
+    D.gw.position.set((D.hingeX + landX) / 2, (D.hingeY + landY) / 2, D.gwZ);
+    D.gw.rotation.set(0, 0, Math.atan((landY - D.hingeY) / run));
+  });
+
+  // =====================================================================
+  //  THE SWASH TICK — the sand follows the water.
+  //
+  //  onALWAYS, not onUpdate, and at 93.7: the sea's own clock and uniforms are
+  //  driven on the always chain too (world.js at 93, world/waterfx.js at 93.5)
+  //  precisely so the ocean keeps moving while the game is paused. A beach
+  //  that froze while the surf kept rolling would be worse than one that never
+  //  moved at all, so this rides immediately behind them and reads the same
+  //  CBZ.waterClock().
+  //
+  //  The run-up is sampled ONCE PER COLUMN: cbzSwash's phase drifts along the
+  //  shore (so a coastline never surges in lockstep) but not across it, so a
+  //  per-column sample is exact, not an approximation. 91 vertex colours and
+  //  7 sine triplets per frame, gated on the player being anywhere near.
+  // =====================================================================
+  const SWASH_DRY_RATE = 0.35;      // 1/s — ~3s to dry; wetting is instant
+  const SWASH_RANGE_M = 260;        // beyond this the sand is not on screen
+  CBZ.onAlways(93.7, function (dt) {
+    const S = swash;
+    if (!S || !S.live || g.mode !== "city" || !S.mesh.parent) return;
+    const P = CBZ.player;
+    if (P && Math.hypot(P.pos.x - S.cx, P.pos.z - S.cz) > SWASH_RANGE_M) return;
+    const t = CBZ.waterClock ? CBZ.waterClock() : 0;
+    const NX = S.nx, runs = S.runs;
+    for (let ix = 0; ix < NX; ix++) {
+      // A drain-back cannot expose sand that is BELOW mean sea level, so the
+      // run-up is clamped at the waterline; only the beach above it dries.
+      const r = +CBZ.waterSwashAt(S.vx[ix], S.zW, t);
+      runs[ix] = Number.isFinite(r) && r > 0 ? r : 0;
+    }
+    const dry = Math.min(1, Math.max(0, dt) * SWASH_DRY_RATE);
+    for (let k = 0; k < S.n; k++) {
+      const run = runs[k % NX];
+      // wet everywhere the water currently reaches, with a soft 2m edge
+      const target = 1 - ss01(run - 0.6, run + 1.4, S.dLand[k]);
+      let w = S.wet[k];
+      if (target > w) w = target;               // soaks instantly
+      else w += (target - w) * dry;             // and dries slowly behind it
+      S.wet[k] = w;
+      paintSwash(k, w);
+    }
+    S.attr.needsUpdate = true;
+  });
+
   // ---- PUBLIC --------------------------------------------------------------
   CBZ.cityBeachLoot = function () { return loot; };
+  // usable beach furniture — {loungers, deckchairs, occupied}. A lounger with
+  // no propuse anchor behind it would be a prop pretending to be furniture, so
+  // this counts ANCHORS, never meshes.
+  CBZ.cityBeachSeats = function () {
+    let lie = 0, sit = 0, taken = 0;
+    for (let i = 0; i < chairs.length; i++) {
+      const c = chairs[i];
+      if (c.lie) lie++; else sit++;
+      if (c.rec && c.rec.occupant) taken++;
+    }
+    return { loungers: lie, deckchairs: sit, occupied: taken };
+  };
   CBZ.cityBeachLootReset = function () {
     rifling = null;
     for (const L of loot) { L.looted = false; L.t = 0; setLook(L, true); }

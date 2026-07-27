@@ -253,20 +253,28 @@
       const px = x + Math.cos(ang) * 1.7, pz = z + Math.sin(ang) * 1.7;
       let q = null;
       try {
-        q = CBZ.cityMakePed(px, pz, r, {
+        // THE SHARED POST (city/occupy.js) — same four lines, one call.
+        // Degrade-safe: without occupy.js the inline branch is the prior code.
+        const o = {
+          src: "protection:detail", rng: r, parent: A.root, controlled: true,
           archetype: "security", job: jobFor(detail), wealth: 0.4,
           armed: true, weapon: gear.weapon, aggr: 0.6, hp: gear.hp,
-        });
+        };
+        if (CBZ.cityPostNpc) q = CBZ.cityPostNpc(px, pz, o);
+        else {
+          q = CBZ.cityMakePed(px, pz, r, o);
+          if (q) { A.root.add(q.group); CBZ.cityPeds.push(q); }
+        }
       } catch (e) { q = null; }
       if (!q) break;
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
-      A.root.add(q.group); CBZ.cityPeds.push(q);
       if (CBZ.cityRelShift) CBZ.cityRelShift(q, "recruited", 0.5);   // a fresh hire starts with SOME goodwill, not none
       detail.memberPedRefs.push(q);
     }
   }
   function removePed(p) {
     if (!p) return;
+    if (CBZ.cityUnpostNpc) { CBZ.cityUnpostNpc(p); return; }         // the matching half of the shared post
     try {
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
       if (CBZ.cityPeds) { const i = CBZ.cityPeds.indexOf(p); if (i >= 0) CBZ.cityPeds.splice(i, 1); }

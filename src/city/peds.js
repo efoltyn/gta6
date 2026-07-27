@@ -401,17 +401,68 @@
     // stashed on the ped below (_longHair) so schedule.js's ledger can persist
     // this roll — otherwise a woman who despawns and re-deals comes back bald.
     const longHair = gender === "f" && r() < 0.6;
+    /* AGE — the one field that turns this rig into a child ---------------
+       DETERMINISM: this deliberately takes NO new draw on `r`. CLAUDE.md
+       forbids adding draws to a shared stream (order-fragile: every later
+       appearance roll would shift), so age arrives from the CALLER — the
+       family/birth sim, which is the only thing that should be deciding a
+       person's age anyway. Omit it and you get an adult, exactly as before.
+
+       A child is NOT `scale.setScalar(0.62)` any more. entities/character.js
+       builds a real body from the age: big head on a short torso, legs that
+       are ~37% of a toddler's height against ~48% of an adult's, a pot belly,
+       no neck, a wide-based toddle. See CBZ.childBodyAudit(). */
+    const ageYears = (opts.age != null && isFinite(opts.age)) ? Math.max(0, +opts.age) : null;
+    const childAge = CBZ.charBands ? CBZ.charBands.CHILD_ADULT_AGE : 18;
+    const isChild = ageYears != null && ageYears < childAge;
+    /* Grey (HAIR[3]) and white (HAIR[5]) are a THIRD of the flat HAIR pool, so
+       a uniform pick put a full head of grey on every third twenty-year-old
+       and — now that children exist — on toddlers. Reshaped over the SAME
+       single draw: the four natural tones dominate (globally ~75-80% of heads
+       are black/dark brown), grey/white are adults-only.
+       DRAW ORDER IS UNCHANGED — this is still exactly one r() consumed at the
+       exact position `pick(HAIR, r())` used to sit in the literal below.
+       Shifting it earlier would re-deal every later appearance roll. */
+    const NATURAL_HAIR = [0, 1, 2, 4];      // dark brown, brown, black, auburn
+    const hairFor = (roll) => {
+      if (!isChild && roll >= 0.88) return HAIR[roll < 0.955 ? 3 : 5];   // grey, then white
+      const t = isChild ? roll : roll / 0.88;
+      return HAIR[NATURAL_HAIR[Math.min(3, (t * 4) | 0)]];
+    };
     // SHORT SLEEVE: the two-segment rig has a real forearm mesh now —
     // makeCharacter paints it skin-colored when shortSleeve is set, which
     // reads as a tee ending mid-bicep and bends correctly at the elbow
     // (the old bolt-on forearm box detached the moment the elbow bent).
     const ch = makeCharacter({
-      legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()),
+      legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: hairFor(r()),
       shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, shortSleeve: shortSleeve,
       build: gender === "f" ? "f" : "m", longHair,
+      // ONE FIELD is the whole child adoption. character.js reads it and builds
+      // the body; null/absent = the adult rig, byte-identical to before.
+      age: ageYears,
+      /* HAIR STYLE. At 30m the back-of-head hair MASS is the strongest and
+         cheapest sex cue there is — it reads from front, side AND behind,
+         unlike a hemline. city/outfits.js owns the casting table (it already
+         knows sex, band and job, and ties hair back for cooks, medics and
+         uniformed services); character.js owns the geometry and deliberately
+         holds no RNG. This is the seam between them.
+         It must be decided HERE, before the rig is built: a rig only grows the
+         hair shell at construction, exactly like its cap. The outfit pass
+         further down runs too late to change it.
+         Deterministic (seeded, no draw on `r`) and degrade-safe — no outfits.js
+         and makeCharacter falls back to the legacy longHair boolean. */
+      hairStyle: opts.hairStyle || (CBZ.cityHairStyleFor ? CBZ.cityHairStyleFor({
+        seed: (skin ^ outfit) | 0, sex: gender, band: (ageYears == null ? "adult" : null),
+        age: ageYears, job: opts.job, archetype: opts.archetype, cop: !!opts.cop,
+      }) : null),
     });
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
+    // Leg length relative to the adult rig, floored so a baby that somehow ends
+    // up walking still creeps rather than freezing. Derived from the profile the
+    // rig was actually built from, so it can never drift out of sync with it.
+    const _pf = ch.profile;
+    const legSpeedMul = _pf ? Math.max(0.28, (_pf.legUp + _pf.legLo) / 0.95) : 1;
     const nm = opts.name || (demo && demo.name) || name(r, gender);
     // Identity is read through the aim dossier / interaction UI. Never attach
     // a name, job, bounty or level board to a living person's skeleton.
@@ -466,7 +517,9 @@
     const _plain = !CBZ.CONFIG || CBZ.CONFIG.CITY_PLAIN_CIVVIES == null || !!CBZ.CONFIG.CITY_PLAIN_CIVVIES;
     let _castFit = null;
     if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
-      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0, sex: gender });
+      // age/band ride along so the wardrobe can refuse to put a four-year-old
+      // in a tailored suit or a hi-vis work vest. Absent = adult, as before.
+      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0, sex: gender, age: ageYears, band: ch.band || "adult" });
       if (fit && fit.colors) {
         CBZ.cityRecolorRig(ch, fit.colors, fit);
         _castFit = fit.id;                          // stamped on the ped below (redress revert read)
@@ -546,8 +599,19 @@
         : mr < 0.92 ? "lieutenant" : mr < 0.96 ? "captain" : mr < 0.985 ? "major"
           : mr < 0.997 ? "colonel" : "general";
     }
+    // Any body minted after Play is already live must first exist somewhere
+    // the player cannot see. The normal city LOD will reveal it on a later
+    // frame only after this shared transition gate says the placement is safe.
+    const spawnHidden = !opts.allowVisibleSpawn && g.state === "playing" &&
+      CBZ.CONFIG && CBZ.CONFIG.NPC_SPAWN_HIDE !== false && CBZ.npcTransitionSafe &&
+      !CBZ.npcTransitionSafe(x, z, { minDistance: 18, maxDistance: 150 });
     const ped = {
       char: ch, group: ch.group, pos: ch.group.position, name: nm, gender,
+      // AGE is a first-class field on a person now. `child` is the fast read
+      // every other system wants (systems/childsafe.js seals a child's hp
+      // against all ~32 raw `.hp -=` sites off exactly this). Adults carry
+      // ageYears null and child false — nothing downstream changes for them.
+      ageYears: ageYears, child: isChild, band: ch.band || "adult",
       _longHair: longHair, // W5: persisted by schedule.js's ledger (deal-in restores it)
       tag, outfit, skin, kind: opts.kind || "civilian", milRank,
       aggr, wealth: mWealth, valuables, bounty, bountyTag,
@@ -571,7 +635,14 @@
       // persistent ROUTINE lots (assigned lazily by scheduledGoal; re-validated
       // against the live arena so a stale ref from a recycled body self-heals).
       _home: null, _work: null,
-      baseSpeed: 1.5 + r() * 1.0, speed: 0,
+      // A CHILD MUST NOT WALK AT ADULT SPEED. This is not a nicety: the rig's
+      // cadence is speed ÷ stride, and a child's stride is short (a toddler's is
+      // ~20% of an adult's), so an adult-speed toddler would blur its legs into
+      // a sewing machine. Scaling speed by the body's actual leg length keeps
+      // cadence in the real range (~175 steps/min for a new walker vs ~115
+      // adult) and, incidentally, makes children easy to outwalk and hard to
+      // lose track of. Adults multiply by 1 — unchanged.
+      baseSpeed: (1.5 + r() * 1.0) * legSpeedMul, speed: 0,
       // context-steering hysteresis (Builder B): last frame's chosen unit steer
       // dir, fed back into cityNav.contextSteer so the heading doesn't jitter
       // frame-to-frame (the doc's "global hysteresis" — no per-behaviour state).
@@ -592,7 +663,17 @@
       // business fit), so outfits.js redressPed knows to strip cast paint when
       // the body later reverts to an ordinary civilian. null = plain civilian.
       _castFit: _castFit,
+      _spawnHidden: !!spawnHidden,
     };
+    if (ped._spawnHidden) ped.group.visible = false;
+    // CHILDREN ARE NOT TARGETS. systems/childsafe.js seals a protected record's
+    // `hp` so the ~32 raw `.hp -=` sites scattered through combat, police,
+    // gangs, predators and physics cannot drain it — no per-weapon special
+    // case, no parallel health table. Adults are a no-op; if childsafe never
+    // loaded, this line vanishes. Called here as well as from childsafe's own
+    // cityMakePed wrapper so a ped is protected from the frame it exists,
+    // whatever the script load order turns out to be.
+    if (isChild && CBZ.childSafeSeal) CBZ.childSafeSeal(ped);
     if (ped.vendor) ped.kind = "vendor";
     // FUGITIVE flavor: re-label a wanted ped so the tag reads as a recognizable
     // mark ("☠ WANTED · Marcus V." / "☠ WANTED TERRORIST · …"). Cheap: rebuild the
@@ -1584,7 +1665,7 @@
   // clear here is what keeps a felled worker from carrying a stale sit pose.
   function leaveSit(ped) {
     if (!ped) return;
-    if (ped.char && ped.char.sitting) ped.char.sitting = false;
+    if (ped.char && ped.char.sitting) { ped.char.sitting = false; ped.char.seatRef = null; }
     if (ped.state === "sit") ped.state = "walk";
     if (ped._deskAnchor) { if (CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped); ped._deskAnchor = null; }
   }
@@ -4055,6 +4136,7 @@
     // also let go of the claimed desk so it frees up (optional-chain; officejobs.js).
     if (ped.char && ped.char.sitting && st !== "sit") {
       ped.char.sitting = false;
+      ped.char.seatRef = null;   // release the chair solve with the chair
       ped.char.typing = false;   // stood up → hands off the keys (character.js tap loop)
       if (CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
     }
@@ -4125,14 +4207,25 @@
       const anc = ped.finalGoal.anchor || ped.finalGoal;     // {x,z,face} (C2 anchor / finalGoal carry it)
       const adx = anc.x - ped.pos.x, adz = anc.z - ped.pos.z;
       if (adx * adx + adz * adz <= 1.3 * 1.3) {
-        ped.pos.x = anc.x; ped.pos.z = anc.z; ped.pos.y = 0;          // snap onto the seat
-        ped.group.position.set(anc.x, 0, anc.z);
+        // SEAT FLOOR FIX: the anchor carries its own floor height (a desk on
+        // storey 5 is not at y=0). The old hard-coded 0 sank every upper-floor
+        // worker to street level; anchors that don't declare a y still read 0.
+        const ancY = anc.y || 0;
+        ped.pos.x = anc.x; ped.pos.z = anc.z; ped.pos.y = ancY;        // snap onto the seat
+        ped.group.position.set(anc.x, ancY, anc.z);
         if (anc.face != null) ped.group.rotation.y = anc.face;         // face the desk
-        ped._deskAnchor = { x: anc.x, y: anc.y || 0, z: anc.z, face: anc.face, lot: anc.lot };
+        ped._deskAnchor = { x: anc.x, y: ancY, z: anc.z, face: anc.face, lot: anc.lot, kind: anc.kind || "office" };
         ped.path = null; ped.speed = 0; ped.pause = 0;
         ped.state = "sit";
         if (ped.char) {
           ped.char.sitting = true;
+          // THE REAL CHAIR SOLVE: entities/character.js only runs its
+          // feet-on-the-floor seated pose when the rig is handed the seat's
+          // cushion geometry. Desks whose builder DECLARED that geometry (the
+          // CBZ.furnish kit does, always) now get it; anything undeclared gets
+          // null back and keeps the legacy pose exactly as before. One line,
+          // degrade-safe, and it upgrades itself as builders migrate.
+          if (CBZ.propSeatRef) ped.char.seatRef = CBZ.propSeatRef(ped._deskAnchor);
           // a DESK seat is a WORKING seat: the seated pose runs the typing
           // tap loop (character.js) so an office floor visibly works, not
           // just sits. Flag-gated with the interiors doctrine.
@@ -4148,9 +4241,13 @@
     // the top-of-move clear releases the body back to normal locomotion.
     if (st === "sit") {
       const a = ped._deskAnchor;
-      if (a) { ped.pos.x = a.x; ped.pos.z = a.z; ped.group.position.set(a.x, 0, a.z); if (a.face != null) ped.group.rotation.y = a.face; }
-      ped.pos.y = 0; ped.speed = 0;
-      if (ped.char) ped.char.sitting = true;
+      const ay = (a && a.y) || 0;                                       // SEAT FLOOR FIX (see above)
+      if (a) { ped.pos.x = a.x; ped.pos.z = a.z; ped.group.position.set(a.x, ay, a.z); if (a.face != null) ped.group.rotation.y = a.face; }
+      ped.pos.y = ay; ped.speed = 0;
+      if (ped.char) {
+        ped.char.sitting = true;
+        if (!ped.char.seatRef && CBZ.propSeatRef) ped.char.seatRef = CBZ.propSeatRef(a);
+      }
       if (animate) animChar(ped.char, 0, dt);
       return;
     }
@@ -4189,7 +4286,7 @@
     }
 
     // "entered" a building: hide briefly then re-emerge (cheap life)
-    if (ped.enterT > 0) { ped.enterT -= dt; ped.group.visible = false; ped.speed = 0; if (ped.enterT <= 0) ped.group.visible = true; return; }
+    if (ped.enterT > 0) { ped.enterT -= dt; ped.group.visible = false; ped.speed = 0; if (ped.enterT <= 0) ped.group.visible = !ped._spawnHidden; return; }
 
     // ANTI-TUNNEL DEPENETRATION: CBZ.collide is a SINGLE-PASS circle-vs-box push
     // (shared with the player — do not edit it). One pass at a corner can shove the
@@ -4251,6 +4348,17 @@
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       if (p._parked) continue;     // pooled crowd-promotion ped waiting off-map; not in play
+      // A live-spawned rig stays suppressed until its moving position is safely
+      // outside the padded camera view. It may simulate while hidden, so when
+      // the player later turns around they find a person already living there,
+      // never a frozen body appearing on a frame boundary.
+      if (p._spawnHidden) {
+        if (CBZ.npcTransitionSafe && CBZ.npcTransitionSafe(p.pos.x, p.pos.z, { minDistance: 18, maxDistance: 150 })) {
+          p._spawnHidden = false;
+        } else {
+          p.group.visible = false;
+        }
+      }
       if (p.alarmed > 0) p.alarmed -= dt;
       if (p._rallyT > 0) p._rallyT -= dt;       // turf-rally re-call cooldown
       if (p._refugeT > 0) p._refugeT -= dt;     // flee-toward-refuge recompute gate
@@ -4291,7 +4399,7 @@
         // it before this tick); enterT is deliberately ignored — a seat is
         // not a shop interior.
         const ax = p.pos.x - camx, az = p.pos.z - camz;
-        p.group.visible = ax * ax + az * az < VIS_D2;
+        p.group.visible = !p._spawnHidden && ax * ax + az * az < VIS_D2;
         continue;
       }
       if (p.inCar) continue;     // vehicles.js owns it while it drives
@@ -4318,7 +4426,7 @@
       // brain/movement responsive without forcing its 16-20 mesh rig to draw.
       // Important actors remain visible regardless of distance; enterT owns
       // visibility while inside.
-      const vis = renderImportant || d2 < VIS_D2;
+      const vis = !p._spawnHidden && (renderImportant || d2 < VIS_D2);
       if (p.enterT <= 0) p.group.visible = vis;
       // far rigs stop casting shadows (their shadow is sub-pixel anyway); flip
       // only on a threshold crossing so the per-frame cost is a single compare.
@@ -4349,7 +4457,11 @@
       // trick as the think() stride above). Visible/important peds are
       // untouched — this only trims the invisible mass.
       const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
-      const moveStride = (active || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : 1);
+      // Even Best does not gain visible fidelity from integrating an ordinary
+      // off-screen walker at 60 Hz. Tiered 7.5/12/20/30 Hz remote integration
+      // keeps visible and important actors untouched while cutting the city's
+      // largest recurring CPU loop on every preset.
+      const moveStride = (active || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 5 : q === 2 ? 3 : 2);
       if (moveStride === 1 || (frame + p.slice) % moveStride === 0) {
         move(p, dt * moveStride, visAnim);
       }

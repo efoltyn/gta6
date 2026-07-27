@@ -102,6 +102,14 @@
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
   const MAT_BRUISE = unlit(0x3a2334);  // blunt trauma: purple-dark, no hole
   const MAT_SOAK = unlit(0x310609);    // wet cloth around the hole: near-black
+  // TORN flesh (a bite) is WETTER and brighter than a bullet's cauterised-looking
+  // entry hole — a tooth tears the skin open rather than punching through it.
+  const MAT_TORN = unlit(0x6b0d10);
+
+  // WOUNDS_BITE — the one-line revert for the bite/maul wound type below.
+  // OFF: a bite falls back to the ordinary "shot" wound it used to leave.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.WOUNDS_BITE == null) CBZ.CONFIG.WOUNDS_BITE = true;
 
   const wounds = [];   // FIFO: { m, actor, age, kind, dried, gone, (soak: gx,gy,gt,t) }
   const growing = [];  // soak records still spreading (per-frame, short-lived)
@@ -149,15 +157,24 @@
 
   // ---- seat a decal on a part: part-local point → snapped to the box face --
   // the round came through, slightly proud, spun in its own plane.
-  function seat(m, part, lp, proud) {
+  // which box face did the hit come through? Split out of seat() so the bite
+  // arc below can lay a whole tooth row on the SAME face without re-deriving it
+  // per tooth (and without any risk of two teeth snapping to different faces).
+  function faceAxis(part, lp) {
     const prm = part.geometry.parameters || {};
     const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
     const rx = Math.abs(lp.x) / hx, ry = Math.abs(lp.y) / hy, rz = Math.abs(lp.z) / hz;
-    let ax = "z";                                 // front/back wins ties
-    if (rx > rz + 0.02 && rx > ry) ax = "x";
-    else if (ry > rz + 0.02 && ry > rx) ax = "y";
+    if (rx > rz + 0.02 && rx > ry) return "x";
+    if (ry > rz + 0.02 && ry > rx) return "y";
+    return "z";                                   // front/back wins ties
+  }
+  // spinOverride/axOverride are optional; omitted = the original behaviour.
+  function seat(m, part, lp, proud, spinOverride, axOverride) {
+    const prm = part.geometry.parameters || {};
+    const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
+    const ax = axOverride || faceAxis(part, lp);
     const cl = (v, h) => Math.max(-h * 0.78, Math.min(h * 0.78, v));
-    const spin = Math.random() * 6.28;            // decal spin in its own plane
+    const spin = spinOverride != null ? spinOverride : Math.random() * 6.28;   // decal spin in its own plane
     if (ax === "x") {
       const s = lp.x >= 0 ? 1 : -1;
       m.position.set(s * (hx + proud), cl(lp.y, hy), cl(lp.z, hz));
@@ -220,12 +237,176 @@
     actor._woundN = (actor._woundN || 0) + 1;
   }
 
+  // ============================================================
+  //  BITE / MAUL — the wound a MOUTH leaves.
+  //
+  //  WHY THIS EXISTS: every creature in this game that bites you — dogs, wolves,
+  //  bears, big cats, snakes, and now sharks — used to stamp the same single
+  //  round disc a 9mm leaves. That reads as "you were shot by an invisible
+  //  pistol", not as "something got its teeth into you", and it was the reason
+  //  animal attacks never looked dangerous no matter how much damage they did.
+  //
+  //  A jaw does not punch one hole. It closes, so it leaves TWO OPPOSING
+  //  CRESCENTS of punctures — the upper and lower tooth rows — with torn, wet
+  //  edges between them, and it bleeds far harder and faster than a bullet
+  //  because it tears rather than penetrates. That silhouette is instantly
+  //  legible even at gameplay distance and even on a low-poly rig: the player
+  //  reads "bitten" without being told.
+  //
+  //  Shared on purpose (BLOCK LAW): the caller passes only the JAW SIZE it
+  //  actually has. A terrier's 0.14 and a megalodon's 1.2 run the identical
+  //  code and produce correctly-scaled marks — nothing here is shark-specific.
+  //
+  //    CBZ.bodyBite(actor, worldPoint, opts)
+  //      jaw    jaw RADIUS in metres (dog ~0.16, wolf ~0.22, bear ~0.34,
+  //             great white ~0.55, megalodon ~1.2). Default 0.22.
+  //      teeth  punctures per arc (clamped 3..6, quality-scaled). Default 5.
+  //      double both tooth rows (default true; false = a raking single-row swipe)
+  //      sev    0..1 severity — scales the tear, the soak and the limp. Default 0.7
+  //      sever  true = this bite may take the limb clean off (routes to
+  //             CBZ.goreSever, which owns the stump cap + the restore audit)
+  //      fromX/fromZ, head  — same meaning as bodyWound
+  // ============================================================
+  const _bl = { x: 0, y: 0, z: 0 };     // reused local-point scratch (no allocation)
+  CBZ.bodyBite = function (actor, wp, opts) {
+    opts = opts || {};
+    if (!(CBZ.CONFIG && CBZ.CONFIG.WOUNDS_BITE)) {          // flag off → the old read
+      // _fromBite stops the melee:"bite" router below bouncing straight back here.
+      return CBZ.bodyWound(actor, wp,
+        { head: opts.head, cal: 1.3, fromX: opts.fromX, fromZ: opts.fromZ, _fromBite: true });
+    }
+    if (!actor || !wp || actor.culled || !CBZ.scene) return;
+    const ch = actor.char;
+    if (!ch || !ch.skinSlots || !actor.group || actor.group.visible === false) return;
+    let px = wp.x, py = wp.y, pz = wp.z;
+    if (px == null || py == null || pz == null) return;
+    if (dist2Cam(px, pz) > SPAWN_D2) return;                // only where it can be seen
+
+    // A bite is ONE event that intentionally lays many marks, so it stamps the
+    // burst window rather than being throttled by it (the shotgun-pellet guard
+    // in bodyWound would otherwise eat most of the tooth row). Re-biting the
+    // same body inside the window is still refused.
+    const now = performance.now();
+    if (now - (actor._biteT || -1e9) < 260) return;
+    actor._biteT = now; actor._woundT = now; actor._woundBurst = 99;
+
+    const sev = Math.max(0, Math.min(1, opts.sev != null ? opts.sev : 0.7));
+    const jawR = Math.max(0.08, Math.min(1.4, opts.jaw != null ? opts.jaw : 0.22));
+
+    // bias the mark toward the face the jaw closed on, same trick bodyWound uses
+    if (opts.fromX != null && opts.fromZ != null) {
+      let nx = opts.fromX - px, nz = opts.fromZ - pz;
+      const nl = Math.hypot(nx, nz);
+      if (nl > 0.01) { px += (nx / nl) * 0.4; pz += (nz / nl) * 0.4; }
+    }
+
+    const pick = pickPart(actor, px, py, pz, !!opts.head);
+    const part = pick.mesh;
+    if (!part || !part.geometry) return;
+
+    part.updateWorldMatrix(true, false);
+    const lp = tmpV.set(px, py, pz);
+    part.worldToLocal(lp);
+    const cx = lp.x, cy = lp.y, cz = lp.z;
+    const ax = faceAxis(part, lp);                          // ONE face for the whole jaw
+
+    // Teeth are laid in the face's tangent plane. Which two local components
+    // that is depends on which face we're on — pick them once, up front.
+    //   ax "x" -> tangents (z, y)   ax "y" -> tangents (x, z)   ax "z" -> (x, y)
+    const t1 = ax === "x" ? "z" : "x";
+    const t2 = ax === "y" ? "z" : "y";
+
+    // A LIMB the jaws closed around gets the bite wrapped around it rather than
+    // stamped flat, so shrink the arc to the part it actually has to fit on.
+    const prm = part.geometry.parameters || {};
+    const fit = Math.max(0.12, Math.min(prm.width || 0.5, prm.height || 0.8, prm.depth || 0.4));
+    const R = Math.min(jawR, fit * 0.85);
+
+    const roll = Math.random() * 6.28;                      // the jaw's angle of attack
+    const cosR = Math.cos(roll), sinR = Math.sin(roll);
+    const qn = CBZ.qScale ? CBZ.qScale(3, 6) : 5;
+    let n = Math.max(3, Math.min(6, Math.round(opts.teeth != null ? opts.teeth : qn)));
+    const rows = opts.double === false ? 1 : 2;
+    // FIT THE WHOLE JAW IN ONE BUDGET. meshFor() recycles this body's OLDEST
+    // wound when the per-actor cap is hit — fine for successive bullets, but a
+    // bite is one event laying many marks, so an over-budget arc would eat its
+    // own first teeth while still drawing its last ones and leave a lopsided
+    // half-print. (Bites at 12-14 meshes clear the CITY cap at every tier, but
+    // jail/survival at tiers 0-1 cap at 5/9.) Thin the tooth row instead — a
+    // sparser jaw still reads as a jaw; a half-erased one reads as a bug.
+    const budget = perActor() - 2;                          // reserve the 2 soak stains
+    if (rows * n > budget) n = Math.max(2, Math.floor(budget / rows));
+
+    for (let r = 0; r < rows; r++) {
+      const side = r === 0 ? 1 : -1;                        // upper row / lower row
+      for (let i = 0; i < n; i++) {
+        const t = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;      // -1..1 across the jaw
+        // a crescent, not a line: the row bulges away from the bite centre and
+        // the outermost teeth pull back — the shape a closing mouth actually makes
+        const along = t * R;
+        const out = side * (R * (0.34 + 0.42 * (1 - t * t)));
+        // rotate (out, along) by the jaw roll into the face's tangent plane
+        const o1 = out * cosR - along * sinR;
+        const o2 = out * sinR + along * cosR;
+        const m = meshFor(actor);
+        m.geometry = G_WOUND;
+        m.material = MAT_TORN;
+        _bl.x = cx; _bl.y = cy; _bl.z = cz;
+        _bl[t1] += o1; _bl[t2] += o2;
+        // jitter: teeth are not evenly spaced and a couple always tear wider
+        _bl[t1] += (Math.random() - 0.5) * R * 0.16;
+        _bl[t2] += (Math.random() - 0.5) * R * 0.16;
+        // every puncture rakes the same way (the jaw dragged) — a coherent row
+        // reads as one bite; individually-spun discs read as random buckshot.
+        seat(m, part, _bl, PROUD, roll + (Math.random() - 0.5) * 0.5, ax);
+        const s0 = (0.030 + 0.030 * sev) * (0.75 + Math.random() * 0.7);
+        m.scale.set(s0 * 0.72, s0 * 1.55, 1);               // a tooth tears long, not round
+        part.add(m);
+        wounds.push({ m, actor, age: 0, kind: "bite", dried: false });
+        actor._woundN = (actor._woundN || 0) + 1;
+      }
+    }
+
+    // THE TEAR: a bite bleeds far harder and faster than a bullet — one broad
+    // stain filling the whole jaw print, arriving fast, plus a heavier second
+    // bloom for a deep bite. This is most of what sells it at distance.
+    _bl.x = cx; _bl.y = cy; _bl.z = cz;
+    spawnSoak(actor, part, _bl, R * (1.7 + sev * 1.1), 0.7);
+    if (sev > 0.55) spawnSoak(actor, part, _bl, R * (2.4 + sev * 1.4), 1.9);
+
+    // A MAULED LEG is not a limp, it's a collapse. Reuse character.js's existing
+    // legHurt channel (same field the bullet path writes) — no new state.
+    if ((pick.region === "legL" || pick.region === "legR") && !actor.isPlayer && !ch.legGone) {
+      const s2 = pick.region === "legL" ? -1 : 1;
+      const prev = ch.legHurt;
+      const sevNew = Math.min(1, (prev && prev.side === s2 ? prev.sev : 0) + 0.5 + sev * 0.5);
+      if (!prev || prev.side === s2 || sevNew > prev.sev) ch.legHurt = { side: s2, sev: sevNew, t: 9999 };
+    }
+
+    // THE LIMB COMES OFF — routed to gore.js, which already owns the stump cap,
+    // the flying part and the guaranteed restore-on-rig-reuse audit. We never
+    // hide a limb ourselves; that bookkeeping has exactly one owner.
+    if (opts.sever && CBZ.goreSever && !actor.isPlayer) {
+      const key = pick.region === "legL" ? "ll" : pick.region === "legR" ? "rl"
+        : pick.region === "armL" ? "la" : pick.region === "armR" ? "ra" : null;
+      if (key) { try { CBZ.goreSever(actor, key, { dir: opts.dir || null }); } catch (e) {} }
+    }
+  };
+
   // ---- CBZ.bodyWound(actor, worldPoint, opts) -------------------------------
   CBZ.bodyWound = function (actor, wp, opts) {
     if (!actor || !wp || actor.culled || !CBZ.scene) return;
     const ch = actor.char;
     if (!ch || !ch.skinSlots || !actor.group || actor.group.visible === false) return;
     opts = opts || {};
+    // ONE-LINE ADOPTION for every biting creature already in the game: any caller
+    // that already passes a melee type just says "bite" and gets the tooth-row
+    // wound instead of a bullet hole. No call signature changes anywhere. Routed
+    // before the burst-window guard because a bite is deliberately many marks
+    // from ONE event (bodyBite runs its own distance + re-bite guards).
+    if (opts.melee === "bite" && !opts._fromBite && typeof CBZ.bodyBite === "function") {
+      return CBZ.bodyBite(actor, wp, opts);
+    }
     let px = wp.x, py = wp.y, pz = wp.z;
     if (px == null || py == null || pz == null) return;
     if (dist2Cam(px, pz) > SPAWN_D2) return;   // only where it can be seen
@@ -384,7 +565,8 @@
       // rig left the scene (corpse cull / crowd replacement) → free the record
       if (!a || a.culled || !a.group || !a.group.parent) { dropWound(i); continue; }
       r.age += step;
-      if (r.kind === "shot" && !r.dried && r.age > DRY_T) { r.dried = true; r.m.material = MAT_DRY; }
+      // torn flesh scabs over on the same clock a bullet hole does
+      if ((r.kind === "shot" || r.kind === "bite") && !r.dried && r.age > DRY_T) { r.dried = true; r.m.material = MAT_DRY; }
     }
   });
 })();

@@ -781,12 +781,20 @@
   // empty and these zones never surface.
   I.registerZone({
     id: "zone-seat", kind: "seat", prio: 6, driving: false,
-    find: function (px, pz, ctx) { return CBZ.propNearestSeat ? CBZ.propNearestSeat(px, pz, REACH, ctx.pos.y) : null; },
+    // BODY ARCS: while a sit/stand/lie transition owns the body there is no
+    // verb — you're already committed. (CBZ.propArcActive, degrade-safe.)
+    find: function (px, pz, ctx) {
+      if (CBZ.propArcActive && CBZ.propArcActive(CBZ.player)) return null;
+      return CBZ.propNearestSeat ? CBZ.propNearestSeat(px, pz, REACH, ctx.pos.y) : null;
+    },
     options: [{ id: "seat-sit", slot: "e", label: "Sit down", onSelect: function (seat) { CBZ.propSit(CBZ.player, seat); } }],
   });
   I.registerZone({
     id: "zone-bed", kind: "bed", prio: 6, driving: false,
-    find: function (px, pz, ctx) { return CBZ.propNearestBed ? CBZ.propNearestBed(px, pz, REACH, ctx.pos.y) : null; },
+    find: function (px, pz, ctx) {
+      if (CBZ.propArcActive && CBZ.propArcActive(CBZ.player)) return null;
+      return CBZ.propNearestBed ? CBZ.propNearestBed(px, pz, REACH, ctx.pos.y) : null;
+    },
     options: [{
       id: "bed-sleep", slot: "e",
       label: function (b) { return b.kind === "bedroll" ? "Crash on the bedroll" : "Sleep til morning"; },
@@ -812,18 +820,22 @@
   I.registerSource({
     id: "src-propself", kind: "propself", layers: ["propself"], prio: 40, driving: false,
     find: function (px, pz, ctx, push) {
+      // silent while a sit/stand/lie transition owns the body — offering no
+      // verb is right, but the candidate must not surface at all or the panel
+      // renders a card whose every option is hidden.
+      if (CBZ.propArcActive && CBZ.propArcActive(CBZ.player)) return;
       const s = CBZ.player._propSeat, b = CBZ.player._propBed;
       if (s || b) push(s || b, 0);
     },
   });
   I.register("propself", {
     id: "propself-stand", slot: "e", prio: 100,
-    canShow: function () { return !!CBZ.player._propSeat; },
+    canShow: function () { return !!CBZ.player._propSeat && !(CBZ.propArcActive && CBZ.propArcActive(CBZ.player)); },
     label: "Stand up", onSelect: function () { CBZ.propStand(CBZ.player); },
   });
   I.register("propself", {
     id: "propself-wake", slot: "e", prio: 100,
-    canShow: function () { return !!CBZ.player._propBed; },
+    canShow: function () { return !!CBZ.player._propBed && !(CBZ.propArcActive && CBZ.propArcActive(CBZ.player)); },
     label: "Wake up", onSelect: function () { CBZ.propWake(CBZ.player); },
   });
 
@@ -1049,15 +1061,21 @@
   }
   // the kind of the lot a vendor is keeping (lot carries .kind; degrade safe).
   function vendorKind(v) { return (v && v.vendor && v.vendor.kind) || ""; }
-  CBZ.cityShopVerb = function (kind) { return VERB[kind] || null; };   // shared lookup (HUD / other verbs may want it)
+  // ONE lookup, used by label/sub/HUD alike. The seven CIVIC trades
+  // (courthouse/federal/library/cityannex/postoffice/dmv/firestation) keep
+  // their verb next to their desk in city/civic.js, so a civic counter is
+  // described in exactly one place. Degrade-safe: no civic.js → no row →
+  // the generic "Shop here", exactly as before.
+  function verbFor(kind) { return VERB[kind] || (CBZ.civic && CBZ.civic.verb ? CBZ.civic.verb(kind) : null); }
+  CBZ.cityShopVerb = verbFor;   // shared lookup (HUD / other verbs may want it)
 
   I.register("ped:vendor", {
     id: "vendor-shop", slot: "e",
     // hide ONLY when a rich kind's own in-world module has taken over the
     // walk-up; otherwise this counter is always offered (text-menu fallback).
     canShow: (v) => !!v.vendor && !v.vendor.demolished && !richModuleLive(v.vendor),
-    label: (v) => { const d = VERB[vendorKind(v)]; return d ? d.verb : "Shop here"; },
-    sub:   (v) => { const d = VERB[vendorKind(v)]; return d ? d.sub : ""; },
+    label: (v) => { const d = verbFor(vendorKind(v)); return d ? d.verb : "Shop here"; },
+    sub:   (v) => { const d = verbFor(vendorKind(v)); return d ? d.sub : ""; },
     onSelect: (v) => CBZ.cityOpenShop(v.vendor),
   });
   I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Rob the register", onSelect: (v) => robRegister(v) });

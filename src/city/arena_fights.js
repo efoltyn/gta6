@@ -6,23 +6,34 @@
 // the speedway island works: a landmass you can drive/boat/walk to, with
 // on-map interaction prompts. It has a boxing ring with a LIVE, self-running
 // NPC bout (the showcase for the improved fight poses: kicks, blocks, dodges,
-// staggers, KO crumples), an MMA cage the player can step into, a sunken
-// beast pit that stages creature-vs-creature bouts via CBZ.creatureFight,
-// and a bounded cast of live grandstand spectators watching it all.
+// staggers, KO crumples), an MMA cage the player can step into, a beast pit
+// that stages creature-vs-creature bouts via CBZ.creatureFight, and a bounded
+// cast of live grandstand spectators watching it all.
+//
+// THE BUILDING lives in city/arena_venue.js (raked bowl, concourse, roof,
+// light rig, jumbotron, instanced crowd). THIS file owns the FIGHT SURFACES
+// (ring / cage / pit), the island + causeway they sit on, the fight simulation
+// and the interaction zones.
+//
+// THE ONE RULE THAT USED TO BE BROKEN — GEOMETRY AND BOUNDS ARE NOW ONE THING.
+// Fighters are not constrained by the mesh; they're constrained by clamp
+// functions. Those clamps used to be hand-typed magic numbers (3.2 / 5.2 / 7.4)
+// with no link to the ropes/cage/wall they were meant to sit inside, so any
+// resize silently desynced them. EVERY bound below — combat clamp, spawn
+// radius, interaction-prompt radius, simulation-gating radius — is now DERIVED
+// from the named geometry constants in the GEOMETRY LAW block. Change the ring
+// half-span and everything follows; there is nothing left to hand-sync.
 //
 // PERF NOTES:
-//  - Static venue is draw-call disciplined: grandstand slabs and seats are
-//    InstancedMeshes; spectators are ordinary interactive NPCs in a bounded
-//    set of seats (the rest stay honestly empty, never proxy boxes);
-//    ropes / cage panels / posts / masts / pit wall are batched into a
-//    handful of per-material InstancedMeshes via instBoxes(). Materials come
-//    from the shared CBZ.cmat cache.
-//  - ALL simulation is distance gated: the ring bout only ticks when the
-//    player is within ~90u; the pit bout within ~110u; the player cage bout
-//    only exists while the player started it. When you're across the map the
-//    whole file costs a couple of Math.hypot calls per frame.
-//  - Deterministic placement uses a local LCG so the venue is identical every
-//    load; per-frame liveliness (fight AI) uses Math.random.
+//  - Static geometry is draw-call disciplined: everything is batched into a
+//    handful of per-material InstancedMeshes via instBoxes(); the cage fence is
+//    ONE merged alpha-tested quad batch; the bowl/crowd are arena_venue's.
+//  - ALL simulation is distance gated (see RING_SIM / PIT_SIM, both derived
+//    from the venue footprint so a spectator in the back row never watches a
+//    frozen bout). When you're across the map the whole file costs a couple of
+//    Math.hypot calls per frame.
+//  - Deterministic placement uses CBZ.hash01 / a local LCG so the venue is
+//    identical every load; per-frame liveliness (fight AI) uses Math.random.
 // ============================================================================
 (function(){
 "use strict";
@@ -32,18 +43,60 @@ var g=CBZ.game;
 var mat=CBZ.cmat||CBZ.mat;
 if(!mat||typeof CBZ.addLandmass!=="function"||typeof CBZ.onUpdate!=="function")return;
 
+var CFG=CBZ.CONFIG||(CBZ.CONFIG={});
+// ARENA_FIGHTS — the whole Ironjaw complex (island, causeway, ring, cage, pit,
+// bouts, betting). The file had NO flag at all, which broke the house rule that
+// every risky feature is a one-line revert. ON → the venue exists.
+// Flip false (or ?cfg_ARENA_FIGHTS=0) to remove it from the world entirely.
+if(CFG.ARENA_FIGHTS==null)CFG.ARENA_FIGHTS=true;
+// ARENA_SOLID_PROPS — real colliders/platforms on the ring apron, cage fence,
+// pit wall and steps. The venue used to register ZERO colliders: you walked
+// through the ropes and the cage. OFF → the pre-fix ghost geometry.
+if(CFG.ARENA_SOLID_PROPS==null)CFG.ARENA_SOLID_PROPS=true;
+// (arena_venue.js self-defaults ARENA_VENUE_V2 / ARENA_CROWD_PROXY /
+//  ARENA_LIGHT_RIG / ARENA_JUMBOTRON — the building half of the same feature.)
+
 // ---------------------------------------------------------------- footprint
 // Dedicated island in the open channel between Mercy, Commerce and Coyle.
 // The former (820,-560) footprint was 62% inside Coyle Valley, so two land
 // surfaces and their buildings occupied the same physical space.
 var CX=640, CZ=-950, R=120;
 var CW_X0=482, CW_X1=CX-R+7, CW_CX=(CW_X0+CW_X1)/2;
-var PY=1.1;                      // plaza (octagon deck) top height
+var CW_Y=0.40;                   // causeway deck top (a 0.40 step off the water road)
+var PY=1.1;                      // arena floor / plaza deck top height
 var RX=CX-32, RZ=CZ, RY=PY+0.9;    // boxing ring centre + canvas height
 var CGX=CX+32, CGZ=CZ, CGY=PY+0.5; // MMA cage centre + mat height
-var PX=CX, PZ=CZ+54, PITY=PY-0.5; // beast pit centre + sand height (sunken)
+var PX=CX, PZ=CZ+54, PITY=PY+0.02; // beast pit centre + sand height
 
-var arenaRoot=null;
+// ============================================================ GEOMETRY LAW
+// ONE source of truth per fight surface. Every clamp / spawn / prompt / sim
+// radius below is derived from these — see the header note. Do not re-type a
+// literal anywhere else in this file.
+var RING_HALF   = 4.1;                       // corner-post & rope half-span
+var RING_APRON  = RING_HALF + 0.7;           // 4.8 — canvas + apron half-width
+var RING_INSET  = 0.9;                       // fighters stay this far inside the ropes
+var RING_FIGHT  = RING_HALF - RING_INSET;    // 3.2 — clampRing / startBout radius
+var CAGE_POST_R = 6.3;                       // fence-post ring radius
+var CAGE_MAT_R  = 6.6;                       // mat disc radius
+var CAGE_INSET  = 1.1;                       // fighters stay this far off the fence
+var CAGE_FIGHT  = CAGE_POST_R - CAGE_INSET;  // 5.2 — clampCage / startBout radius
+var PIT_WALL_R  = 9.2;                       // pit wall ring radius
+var PIT_SAND_R  = 8.6;                       // sand floor radius
+var PIT_INSET   = 1.8;                       // beasts stay this far off the wall
+var PIT_FIGHT   = PIT_WALL_R - PIT_INSET;    // 7.4 — clampPitXZ radius
+// Prompt zones: the venue footprint plus a standing-room margin, so the prompt
+// still fires from the walkway around each surface.
+var RING_ZONE   = RING_APRON + 8.2;          // 13
+var CAGE_ZONE   = CAGE_MAT_R + 4.4;          // 11
+var PIT_ZONE    = PIT_WALL_R + 4.8;          // 14
+// Simulation gating: a bout must keep running while ANY spectator seat can see
+// it, so the radius is (offset of the surface from the venue centre) + the
+// furthest walkable point of the bowl. Grow the bowl and these grow with it.
+var VENUE_REACH = 118;
+var RING_SIM    = Math.hypot(RX-CX,RZ-CZ)+VENUE_REACH+8;   // ~158
+var PIT_SIM     = Math.hypot(PX-CX,PZ-CZ)+VENUE_REACH+8;   // ~180
+
+var arenaRoot=null, venue=null;
 var redCh=null, blueCh=null, refCh=null;
 
 function note(msg,secs,opts){ if(CBZ.city&&typeof CBZ.city.note==="function")CBZ.city.note(msg,secs||3,opts); }
@@ -55,17 +108,22 @@ function moveTo(pos,tx,tz,step){
   if(d<0.02)return 0;
   var s=Math.min(step,d); pos.x+=dx/d*s; pos.z+=dz/d*s; return s;
 }
+function board(a,b,c){ if(venue&&venue.board)venue.board(a,b,c); }
 
 // ================================================================ THE VENUE
 CBZ.addLandmass(function(city){
+  if(!CFG.ARENA_FIGHTS)return null;
   var root=city.root; arenaRoot=root;
   var _s=771; function rng(){_s=(_s*1103515245+12345)&0x7fffffff;return _s/0x7fffffff;}
-  var unitBox=(typeof CBZ.boxGeom==="function")?CBZ.boxGeom(1,1,1):new THREE.BoxGeometry(1,1,1);
+  var unitBox=new THREE.BoxGeometry(1,1,1);
+  var SOLID=!!CFG.ARENA_SOLID_PROPS;
 
-  // Batch a list of {x,y,z,sx,sy,sz,ry} boxes into ONE InstancedMesh.
+  // Batch a list of {x,y,z,sx,sy,sz,rx,ry,rz} boxes into ONE InstancedMesh.
   function instBoxes(items,material){
     if(!items.length)return null;
     var m=new THREE.InstancedMesh(unitBox,material,items.length);
+    m.frustumCulled=false;              // r128 InstancedMesh has no real bounds
+    m.castShadow=true; m.receiveShadow=true;
     var M=new THREE.Matrix4(),q=new THREE.Quaternion(),e=new THREE.Euler(),
         p=new THREE.Vector3(),s=new THREE.Vector3();
     for(var i=0;i<items.length;i++){
@@ -77,159 +135,305 @@ CBZ.addLandmass(function(city){
     m.instanceMatrix.needsUpdate=true;
     root.add(m); return m;
   }
+  // --- collision helpers (the venue used to register NOTHING) --------------
+  function solid(minX,minZ,maxX,maxZ,y0,y1){
+    if(!SOLID)return null;
+    var c={minX:Math.min(minX,maxX),maxX:Math.max(minX,maxX),
+           minZ:Math.min(minZ,maxZ),maxZ:Math.max(minZ,maxZ)};
+    if(y0!=null){c.y0=y0;c.y1=y1;}
+    (CBZ.colliders=CBZ.colliders||[]).push(c); return c;
+  }
+  // AABB of an oriented (yaw-rotated) box, for the octagon/circle wall rings
+  function solidYaw(cx2,cz2,w,d,yaw,y0,y1){
+    var c=Math.abs(Math.cos(yaw)),s=Math.abs(Math.sin(yaw));
+    var ax=(w/2)*c+(d/2)*s, az=(w/2)*s+(d/2)*c;
+    return solid(cx2-ax,cz2-az,cx2+ax,cz2+az,y0,y1);
+  }
+  function plat(minX,minZ,maxX,maxZ,top,ramp){
+    if(!SOLID)return null;
+    var p={minX:Math.min(minX,maxX),maxX:Math.max(minX,maxX),
+           minZ:Math.min(minZ,maxZ),maxZ:Math.max(minZ,maxZ),top:top};
+    if(ramp)p.ramp=ramp;
+    (CBZ.platforms=CBZ.platforms||[]).push(p); return p;
+  }
+  var ctex=(CBZ.arenaVenue&&CBZ.arenaVenue.canvasTex)||null;
 
-  // ---- island + causeway apron (reads reachable from the west, x~700)
+  // ---- island + causeway apron (reachable from the west, x~700)
   var island=new THREE.Mesh(new THREE.CylinderGeometry(R,R+7,6,28),mat(0x6a6e64));
-  island.position.set(CX,-2.8,CZ); root.add(island);
+  island.position.set(CX,-2.8,CZ);
+  island.userData.arenaIsland=true;      // non-empty userData -> batch.js spares it
+  root.add(island);
 
-  var concrete=[];
-  concrete.push({x:CW_CX,y:-0.15,z:CZ,sx:CW_X1-CW_X0,sy:1.2,sz:16});          // causeway deck
-  concrete.push({x:CW_CX,y:0.75,z:CZ-7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});      // rails
-  concrete.push({x:CW_CX,y:0.75,z:CZ+7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});
+  var concrete=[],gold=[],white=[],redP=[],blueP=[],dark=[],rail=[],steel=[],sandBits=[];
+  concrete.push({x:CW_CX,y:CW_Y-0.6,z:CZ,sx:CW_X1-CW_X0,sy:1.2,sz:16});             // causeway deck
+  concrete.push({x:CW_CX,y:CW_Y+0.35,z:CZ-7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});       // rails
+  concrete.push({x:CW_CX,y:CW_Y+0.35,z:CZ+7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});
+  plat(CW_X0,CZ-7.4,CW_X1-6,CZ+7.4,CW_Y);                                           // walk the causeway
+  solid(CW_X0,CZ-8.1,CW_X1,CZ-7.1,CW_Y,CW_Y+0.7);
+  solid(CW_X0,CZ+7.1,CW_X1,CZ+8.1,CW_Y,CW_Y+0.7);
+  // approach ramp: causeway deck (CW_Y) up onto the arena apron (PY)
+  concrete.push({x:CW_X1+3,y:(CW_Y+PY)/2-0.5,z:CZ,sx:14,sy:1.1,sz:15,rz:0.05});
+  plat(CW_X1-6,CZ-7.4,CW_X1+8,CZ+7.4,PY,{axis:"x",x0:CW_X1-6,x1:CW_X1+8,y0:CW_Y,y1:PY});
 
-  // ---- raised octagonal plaza (the arena floor)
-  var plaza=new THREE.Mesh(new THREE.CylinderGeometry(70,74,0.9,8),mat(0x84888f));
-  plaza.rotation.y=Math.PI/8; plaza.position.set(CX,PY-0.45,CZ); root.add(plaza);
-  concrete.push({x:CX-R+12,y:PY-0.6,z:CZ,sx:18,sy:0.6,sz:12});         // entry ramp
-
-  // ---- BOXING RING -------------------------------------------------------
-  var plat=new THREE.Mesh(unitBox,mat(0x3a3f4a));
-  plat.scale.set(8.6,0.9,8.6); plat.position.set(RX,RY-0.45,RZ); root.add(plat);
-  var canvasTop=new THREE.Mesh(unitBox,mat(0xd8d4c4));
-  canvasTop.scale.set(8.2,0.08,8.2); canvasTop.position.set(RX,RY+0.02,RZ); root.add(canvasTop);
-
-  var gold=[],white=[],redP=[],blueP=[];
-  var cs=[[-4.1,-4.1],[4.1,-4.1],[4.1,4.1],[-4.1,4.1]];
-  for(var ci=0;ci<4;ci++){
-    gold.push({x:RX+cs[ci][0],y:RY+0.8,z:RZ+cs[ci][1],sx:0.22,sy:1.6,sz:0.22});   // corner posts
-    var pad=(ci<2)?redP:blueP;
-    pad.push({x:RX+cs[ci][0],y:RY+1.0,z:RZ+cs[ci][1],sx:0.4,sy:0.9,sz:0.4});      // corner pads
+  // ---- THE BUILDING (raked bowl, concourse, roof, lights, crowd) ----------
+  if(CBZ.arenaVenue&&typeof CBZ.arenaVenue.build==="function"){
+    venue=CBZ.arenaVenue.build({
+      root:root, cx:CX, cz:CZ, py:PY,
+      focus:{x:CX,z:CZ}, liveSeats:42,
+      spotTargets:[
+        {x:RX,z:RZ,y:RY,angle:0.42,intensity:2.1},
+        {x:CGX,z:CGZ,y:CGY,angle:0.46,intensity:2.0},
+        {x:CX,z:CZ,y:PY,angle:0.62,intensity:1.1},
+        {x:PX,z:PZ,y:PITY,angle:0.5,intensity:1.5}
+      ],
+      floorSeatRings:[            // ringside chairs, clear of the ring stair /
+        {x:RX,z:RZ,r0:8.2,rings:2},      // cage ramp footprints
+        {x:CGX,z:CGZ,r0:10.2,rings:2}
+      ]
+    });
   }
-  for(var rr=0;rr<3;rr++){                                                        // 3 rope rows
-    var ry2=RY+0.55+rr*0.4;
-    white.push({x:RX,y:ry2,z:RZ-4.1,sx:8.4,sy:0.06,sz:0.06});
-    white.push({x:RX,y:ry2,z:RZ+4.1,sx:8.4,sy:0.06,sz:0.06});
-    white.push({x:RX-4.1,y:ry2,z:RZ,sx:0.06,sy:0.06,sz:8.4});
-    white.push({x:RX+4.1,y:ry2,z:RZ,sx:0.06,sy:0.06,sz:8.4});
+  if(!venue){
+    // fallback when the building is flagged off: the original octagon plaza
+    var plaza=new THREE.Mesh(new THREE.CylinderGeometry(70,74,0.9,8),mat(0x84888f));
+    plaza.rotation.y=Math.PI/8; plaza.position.set(CX,PY-0.45,CZ);
+    plaza.userData.arenaPlaza=true; root.add(plaza);
+    plat(CX-70,CZ-70,CX+70,CZ+70,PY);
   }
-  redP.push({x:RX-5.2,y:PY+0.3,z:RZ-5.2,sx:0.7,sy:0.5,sz:0.7});                   // corner stools
-  blueP.push({x:RX+5.2,y:PY+0.3,z:RZ+5.2,sx:0.7,sy:0.5,sz:0.7});
-  concrete.push({x:RX,y:PY+0.25,z:RZ+5.4,sx:2.4,sy:0.5,sz:1.6});                  // ring steps
 
-  // ---- MMA CAGE (octagon) ------------------------------------------------
-  var cageMat=new THREE.Mesh(new THREE.CylinderGeometry(6.6,6.9,0.5,8),mat(0x30343c));
-  cageMat.position.set(CGX,CGY-0.25,CGZ); root.add(cageMat);
-  var dark=[],rail=[];
-  for(var pi=0;pi<8;pi++){
-    var a=pi*Math.PI/4;
-    dark.push({x:CGX+Math.cos(a)*6.3,y:CGY+1.3,z:CGZ+Math.sin(a)*6.3,sx:0.25,sy:2.6,sz:0.25}); // posts
-    var ma=a+Math.PI/8, pr=6.3*Math.cos(Math.PI/8), pw=2*6.3*Math.sin(Math.PI/8);
-    var px2=CGX+Math.cos(ma)*pr, pz2=CGZ+Math.sin(ma)*pr, pry=-ma+Math.PI/2;
-    if(pi===4){ // the gate: swung open toward the plaza
-      dark.push({x:px2-1.2,y:CGY+1.1,z:pz2,sx:pw*0.9,sy:2.1,sz:0.07,ry:pry+0.85});
-    }else{
-      dark.push({x:px2,y:CGY+1.1,z:pz2,sx:pw,sy:2.2,sz:0.07,ry:pry});             // chain panels
-      rail.push({x:px2,y:CGY+2.25,z:pz2,sx:pw,sy:0.16,sz:0.2,ry:pry});            // padded rail
+  // ======================================================== BOXING RING ====
+  // Apron deck + skirt + branded canvas + 4 posts with turnbuckles + 3 sagging
+  // rope rows + corner pads + stools + a walk-up stair that is a REAL ramp.
+  (function(){
+    var deckTop=RY, deckBase=PY;
+    concrete.push({x:RX,y:(deckBase+deckTop)/2,z:RZ,sx:RING_APRON*2,sy:deckTop-deckBase,sz:RING_APRON*2});
+    dark.push({x:RX,y:deckBase+0.28,z:RZ,sx:RING_APRON*2+0.24,sy:0.56,sz:RING_APRON*2+0.24}); // skirt band
+    // canvas: a branded mat, one textured mesh (batch.js skips textured mats)
+    var canvasMat=null;
+    if(ctex){
+      var ct=ctex(512,512,function(c,w,h){
+        c.fillStyle="#d8d4c4"; c.fillRect(0,0,w,h);
+        c.strokeStyle="rgba(20,24,32,.35)"; c.lineWidth=8; c.strokeRect(16,16,w-32,h-32);
+        c.strokeStyle="rgba(160,32,44,.5)"; c.lineWidth=4; c.strokeRect(40,40,w-80,h-80);
+        c.save(); c.translate(w/2,h/2);
+        c.fillStyle="rgba(28,34,48,.55)"; c.font="bold 84px Arial";
+        c.textAlign="center"; c.textBaseline="middle";
+        c.fillText("IRONJAW",0,-24);
+        c.fillStyle="rgba(200,145,42,.6)"; c.font="bold 40px Arial";
+        c.fillText("ARENA",0,44);
+        c.restore();
+      });
+      if(ct)canvasMat=new THREE.MeshLambertMaterial({map:ct});
     }
-  }
+    var canvasTop=new THREE.Mesh(new THREE.BoxGeometry(RING_APRON*2-0.3,0.09,RING_APRON*2-0.3),
+      canvasMat||mat(0xd8d4c4));
+    canvasTop.position.set(RX,RY+0.03,RZ);
+    canvasTop.receiveShadow=true;
+    canvasTop.userData.arenaCanvas=true;
+    root.add(canvasTop);
+    // solid apron (height-gated so you can climb the stair onto it) + deck
+    solid(RX-RING_APRON,RZ-RING_APRON,RX+RING_APRON,RZ+RING_APRON,PY,RY-0.05);
+    plat(RX-RING_APRON,RZ-RING_APRON,RX+RING_APRON,RZ+RING_APRON,RY);
 
-  // ---- BEAST PIT (sunken sand circle the crowd looks down into) ----------
-  var sand=new THREE.Mesh(new THREE.CylinderGeometry(8.6,8.6,0.3,20),mat(0xd8c07a));
-  sand.position.set(PX,PITY-0.15,PZ); root.add(sand);
-  for(var wi=0;wi<18;wi++){
-    var wa=wi*Math.PI*2/18;
-    concrete.push({x:PX+Math.cos(wa)*9.2,y:PY+0.55,z:PZ+Math.sin(wa)*9.2,
-                   sx:3.3,sy:1.3,sz:0.5,ry:-wa+Math.PI/2});                       // pit wall ring
-  }
-
-  // ---- GRANDSTAND: raked seating on 3 sides, fully instanced -------------
-  var sides=[{nx:0,nz:1},{nx:0,nz:-1},{nx:1,nz:0}];
-  var slabItems=[],seatItems=[],specItems=[];
-  for(var si=0;si<sides.length;si++){
-    var nx=sides[si].nx,nz=sides[si].nz, tx=nz,tz=-nx, sry=Math.atan2(nx,nz);
-    for(var row=0;row<10;row++){
-      var dist=80+row*2.3, ry3=PY+0.6+row*0.85;
-      slabItems.push({x:CX+nx*dist,y:ry3-0.45,z:CZ+nz*dist,sx:84,sy:0.9,sz:2.3,ry:sry});
-      for(var sc=0;sc<24;sc++){
-        var off=(sc-11.5)*3.3, sx2=CX+nx*dist+tx*off, sz3=CZ+nz*dist+tz*off;
-        seatItems.push({x:sx2,y:ry3+0.35,z:sz3,sx:0.95,sy:0.7,sz:0.85,ry:sry});
-        if(rng()<0.55)specItems.push({x:sx2,y:ry3+1.08,z:sz3,sx:0.6,sy:1.0,sz:0.5,ry:sry,c:1});
+    var cs=[[-RING_HALF,-RING_HALF],[RING_HALF,-RING_HALF],[RING_HALF,RING_HALF],[-RING_HALF,RING_HALF]];
+    for(var ci=0;ci<4;ci++){
+      var px=RX+cs[ci][0], pz=RZ+cs[ci][1];
+      gold.push({x:px,y:RY+0.85,z:pz,sx:0.24,sy:1.7,sz:0.24});                  // corner post
+      dark.push({x:px,y:RY+1.76,z:pz,sx:0.32,sy:0.12,sz:0.32});                 // post cap
+      var pad=(ci===0)?redP:(ci===2?blueP:white);
+      pad.push({x:px,y:RY+1.02,z:pz,sx:0.44,sy:1.5,sz:0.44});                   // corner pad
+      // turnbuckles at each rope height
+      for(var tb=0;tb<3;tb++)
+        gold.push({x:px,y:RY+0.58+tb*0.42,z:pz,sx:0.3,sy:0.14,sz:0.3});
+    }
+    // ropes: 3 rows x 4 sides, each split into 6 segments with a catenary dip
+    var SEG=6;
+    for(var rr=0;rr<3;rr++){
+      var ry2=RY+0.58+rr*0.42, sag=0.15-rr*0.03;
+      for(var side=0;side<4;side++){
+        for(var q=0;q<SEG;q++){
+          var t0=q/SEG, t1=(q+1)/SEG, tm=(t0+t1)/2;
+          var dip=Math.sin(tm*Math.PI)*sag;
+          var a=-RING_HALF+2*RING_HALF*tm, len=(2*RING_HALF)/SEG+0.02;
+          if(side===0)      white.push({x:RX+a,y:ry2-dip,z:RZ-RING_HALF,sx:len,sy:0.07,sz:0.07});
+          else if(side===1) white.push({x:RX+a,y:ry2-dip,z:RZ+RING_HALF,sx:len,sy:0.07,sz:0.07});
+          else if(side===2) white.push({x:RX-RING_HALF,y:ry2-dip,z:RZ+a,sx:0.07,sy:0.07,sz:len});
+          else              white.push({x:RX+RING_HALF,y:ry2-dip,z:RZ+a,sx:0.07,sy:0.07,sz:len});
+        }
       }
     }
-  }
-  instBoxes(slabItems,mat(0x7a7f88));
-  instBoxes(seatItems,mat(0xb02030));
-  // Spectators are standard city actors fixed to real seat anchors.  The old
-  // coloured boxes looked populated but could not react, take damage or drop
-  // loot. Keep a representative live cast spread across all three stands and
-  // leave every unfilled seat visibly empty.
-  (function(){
-    if(!CBZ.npcLife||!specItems.length)return;
-    var anchors=[],want=Math.min(42,specItems.length),stride=Math.max(1,Math.floor(specItems.length/want));
-    for(var i=0;i<specItems.length&&anchors.length<want;i+=stride){
-      var it=specItems[i];
-      anchors.push({x:it.x,y:it.y-0.38,z:it.z,yaw:(it.ry||0)+Math.PI,pose:"sit",state:"sit"});
-    }
-    var entries=anchors.map(function(a){return {
-      profile:"venueSpectator",placement:{anchor:a,rng:rng},overrides:{job:"fight fan"},
-      configure:function(p){p._venueRole="arena-spectator";}
-    };});
-    if(CBZ.npcLife.definePopulation)CBZ.npcLife.definePopulation("arena-audience",{root:root,entries:entries});
+    // The ropes are SOLID from the canvas up: you cannot stroll out through
+    // them mid-bout. Height-gated at the canvas so nobody outside the apron is
+    // affected, and split on the +z side to leave the walk-in gap at the stair.
+    var ROPE_T=0.3, ROPE_TOP=RY+1.5;
+    solid(RX-RING_HALF-ROPE_T,RZ-RING_HALF-ROPE_T,RX+RING_HALF+ROPE_T,RZ-RING_HALF,RY,ROPE_TOP);
+    solid(RX-RING_HALF-ROPE_T,RZ-RING_HALF,RX-RING_HALF,RZ+RING_HALF,RY,ROPE_TOP);
+    solid(RX+RING_HALF,RZ-RING_HALF,RX+RING_HALF+ROPE_T,RZ+RING_HALF,RY,ROPE_TOP);
+    solid(RX-RING_HALF-ROPE_T,RZ+RING_HALF,RX-1.35,RZ+RING_HALF+ROPE_T,RY,ROPE_TOP);
+    solid(RX+1.35,RZ+RING_HALF,RX+RING_HALF+ROPE_T,RZ+RING_HALF+ROPE_T,RY,ROPE_TOP);
+
+    redP.push({x:RX-RING_HALF-1.1,y:PY+0.3,z:RZ-RING_HALF-1.1,sx:0.7,sy:0.55,sz:0.7});   // corner stools
+    blueP.push({x:RX+RING_HALF+1.1,y:PY+0.3,z:RZ+RING_HALF+1.1,sx:0.7,sy:0.55,sz:0.7});
+    solid(RX-RING_HALF-1.5,RZ-RING_HALF-1.5,RX-RING_HALF-0.7,RZ-RING_HALF-0.7,PY,PY+0.6);
+    solid(RX+RING_HALF+0.7,RZ+RING_HALF+0.7,RX+RING_HALF+1.5,RZ+RING_HALF+1.5,PY,PY+0.6);
+    // ---- the walk-up: two treads + a REAL ramp platform onto the canvas ----
+    steel.push({x:RX,y:PY+0.16,z:RZ+RING_APRON+1.55,sx:2.6,sy:0.32,sz:1.5});
+    steel.push({x:RX,y:PY+0.5,z:RZ+RING_APRON+0.65,sx:2.2,sy:0.36,sz:1.1});
+    steel.push({x:RX-1.25,y:PY+0.75,z:RZ+RING_APRON+1.1,sx:0.09,sy:1.5,sz:0.09});
+    steel.push({x:RX+1.25,y:PY+0.75,z:RZ+RING_APRON+1.1,sx:0.09,sy:1.5,sz:0.09});
+    plat(RX-1.3,RZ+RING_APRON-0.1,RX+1.3,RZ+RING_APRON+2.3,RY,
+         {z0:RZ+RING_APRON+2.3,z1:RZ+RING_APRON-0.1,y0:PY,y1:RY});
   })();
 
-  // ---- floodlight masts + heads (instanced) -------------------------------
-  var heads=[];
-  for(var fi=0;fi<4;fi++){
-    var fa=Math.PI/4+fi*Math.PI/2;
-    var fx=CX+Math.cos(fa)*62, fz=CZ+Math.sin(fa)*62;
-    dark.push({x:fx,y:PY+13,z:fz,sx:0.9,sy:26,sz:0.9});
-    heads.push({x:fx,y:PY+26.4,z:fz,sx:4.6,sy:1.8,sz:1.8,ry:-fa+Math.PI/2});
-  }
-  // sign posts
-  dark.push({x:CX-R+4,y:PY+7,z:CZ-6,sx:0.7,sy:14,sz:0.7});
-  dark.push({x:CX-R+4,y:PY+7,z:CZ+6,sx:0.7,sy:14,sz:0.7});
+  // =========================================================== MMA CAGE ====
+  // Octagon mat + branded floor disc + 8 posts + chain-link fence (ONE merged
+  // alpha-tested quad batch, not solid boxes) + padded top rail + a real gate.
+  (function(){
+    var cageBase=new THREE.Mesh(new THREE.CylinderGeometry(CAGE_MAT_R,CAGE_MAT_R+0.3,CGY-PY,8),mat(0x30343c));
+    cageBase.rotation.y=Math.PI/8;
+    cageBase.position.set(CGX,(PY+CGY)/2,CGZ);
+    cageBase.userData.arenaCageBase=true; root.add(cageBase);
+    if(ctex&&THREE.CircleGeometry){
+      var mt=ctex(512,512,function(c,w,h){
+        c.fillStyle="#2c3038"; c.fillRect(0,0,w,h);
+        c.strokeStyle="rgba(200,145,42,.55)"; c.lineWidth=10;
+        c.beginPath(); c.arc(w/2,h/2,w*0.44,0,6.2832); c.stroke();
+        c.fillStyle="rgba(220,226,236,.30)"; c.font="bold 74px Arial";
+        c.textAlign="center"; c.textBaseline="middle";
+        c.fillText("IRONJAW",w/2,h/2-16);
+        c.fillStyle="rgba(200,145,42,.45)"; c.font="bold 42px Arial";
+        c.fillText("CAGE",w/2,h/2+50);
+      });
+      if(mt){
+        var md=new THREE.Mesh(new THREE.CircleGeometry(CAGE_MAT_R-0.25,32),
+          new THREE.MeshLambertMaterial({map:mt}));
+        md.rotation.x=-Math.PI/2; md.position.set(CGX,CGY+0.02,CGZ);
+        md.receiveShadow=true; md.userData.arenaCageMat=true; root.add(md);
+      }
+    }
+    // Mat edge is solid EXCEPT the doorway strip on the -x side, where the
+    // step-up ramp lands — otherwise the edge collider (y1 just under the mat)
+    // would fence the player out at the exact point the ramp reaches mat level.
+    var DOOR_HW=1.6;
+    solid(CGX-CAGE_MAT_R,CGZ-CAGE_MAT_R,CGX+CAGE_MAT_R,CGZ-DOOR_HW,PY,CGY-0.05);
+    solid(CGX-CAGE_MAT_R,CGZ+DOOR_HW,CGX+CAGE_MAT_R,CGZ+CAGE_MAT_R,PY,CGY-0.05);
+    solid(CGX+0.5,CGZ-DOOR_HW,CGX+CAGE_MAT_R,CGZ+DOOR_HW,PY,CGY-0.05);
+    plat(CGX-CAGE_MAT_R+0.3,CGZ-CAGE_MAT_R+0.3,CGX+CAGE_MAT_R-0.3,CGZ+CAGE_MAT_R-0.3,CGY);
+    // gate-side step-up ramp (the open panel faces -x, toward the ring)
+    steel.push({x:CGX-CAGE_MAT_R-1.1,y:PY+0.16,z:CGZ,sx:2.2,sy:0.32,sz:2.6});
+    plat(CGX-CAGE_MAT_R-2.4,CGZ-DOOR_HW+0.2,CGX-CAGE_MAT_R+0.4,CGZ+DOOR_HW-0.2,CGY,
+         {axis:"x",x0:CGX-CAGE_MAT_R-2.4,x1:CGX-CAGE_MAT_R+0.4,y0:PY,y1:CGY});
 
-  instBoxes(concrete,mat(0x9094a0));
+    // Octagon is rolled half a segment (matching cageBase's PI/8 spin) so a
+    // FACE — not a post — sits on the -x axis: that face is the door, and the
+    // step-up ramp above lands exactly on it.
+    var GATE=3;
+    var FENCE_H=2.35;
+    var chainQ=(CBZ.arenaVenue&&CBZ.arenaVenue.quads)?CBZ.arenaVenue.quads():null;
+    for(var pi=0;pi<8;pi++){
+      var a=Math.PI/8+pi*Math.PI/4;
+      var px=CGX+Math.cos(a)*CAGE_POST_R, pz=CGZ+Math.sin(a)*CAGE_POST_R;
+      steel.push({x:px,y:CGY+FENCE_H/2,z:pz,sx:0.26,sy:FENCE_H,sz:0.26});          // post
+      dark.push({x:px,y:CGY+FENCE_H+0.1,z:pz,sx:0.34,sy:0.2,sz:0.34});             // post cap
+      var ma=a+Math.PI/8;
+      var pr=CAGE_POST_R*Math.cos(Math.PI/8), pw=2*CAGE_POST_R*Math.sin(Math.PI/8);
+      var mx=CGX+Math.cos(ma)*pr, mz=CGZ+Math.sin(ma)*pr;
+      var yaw=Math.atan2(Math.cos(ma),Math.sin(ma));   // local +Z on the outward normal
+      if(pi===GATE){
+        // the door: frame posts + a panel swung open toward the plaza
+        steel.push({x:mx-1.1,y:CGY+FENCE_H/2,z:mz,sx:pw*0.92,sy:0.1,sz:0.1,ry:yaw+0.85});
+        steel.push({x:mx-1.1,y:CGY+FENCE_H,z:mz,sx:pw*0.92,sy:0.12,sz:0.12,ry:yaw+0.85});
+        if(chainQ)chainQ.add(mx-1.1,CGY+FENCE_H/2,mz,pw*0.9,FENCE_H,yaw+0.85,0,0,pw*0.9/0.34,FENCE_H/0.34);
+        rail.push({x:mx-1.1,y:CGY+FENCE_H+0.06,z:mz,sx:pw*0.92,sy:0.16,sz:0.2,ry:yaw+0.85});
+      }else{
+        if(chainQ)chainQ.add(mx,CGY+FENCE_H/2,mz,pw,FENCE_H,yaw,0,0,pw/0.34,FENCE_H/0.34);
+        rail.push({x:mx,y:CGY+FENCE_H+0.06,z:mz,sx:pw,sy:0.18,sz:0.22,ry:yaw});    // padded top rail
+        steel.push({x:mx,y:CGY+0.06,z:mz,sx:pw,sy:0.12,sz:0.14,ry:yaw});           // kick plate
+        solidYaw(mx,mz,pw,0.28,yaw,CGY,CGY+FENCE_H);                               // you cannot walk through it
+      }
+    }
+    if(chainQ&&ctex){
+      var chain=ctex(128,128,function(c,w,h){
+        c.clearRect(0,0,w,h);
+        c.strokeStyle="#b9c0cb"; c.lineWidth=7; c.lineCap="round";
+        var i;
+        for(i=-2;i<=2;i++){ c.beginPath(); c.moveTo(-w+i*w/2,0); c.lineTo(i*w/2,h); c.stroke(); }
+        c.strokeStyle="#8d949f";
+        for(i=-2;i<=2;i++){ c.beginPath(); c.moveTo(i*w/2,0); c.lineTo(i*w/2-w,h); c.stroke(); }
+      });
+      var cg=chainQ.geo();
+      if(chain&&cg){
+        chain.wrapS=chain.wrapT=THREE.RepeatWrapping;
+        var fence=new THREE.Mesh(cg,new THREE.MeshLambertMaterial({
+          map:chain,alphaTest:0.42,side:THREE.DoubleSide}));
+        fence.userData.arenaCageFence=true;
+        root.add(fence);
+      }
+    }
+  })();
+
+  // ============================================================ BEAST PIT ==
+  // A walled sand circle the crowd looks down into over a padded rail.
+  (function(){
+    var sand=new THREE.Mesh(new THREE.CylinderGeometry(PIT_SAND_R,PIT_SAND_R,0.28,24),mat(0xd8c07a));
+    sand.position.set(PX,PITY-0.12,PZ);
+    sand.receiveShadow=true; sand.userData.arenaPitSand=true; root.add(sand);
+    // scattered stones / bones, deterministic
+    for(var si=0;si<26;si++){
+      var sa=si*2.399963, sr=1.4+((si*37)%60)/60*(PIT_SAND_R-2.2);
+      var sxp=PX+Math.cos(sa)*sr, szp=PZ+Math.sin(sa)*sr;
+      var sc=0.18+CBZ.hash01(sxp,szp,0x9b)*0.3;
+      sandBits.push({x:sxp,y:PITY+sc*0.3,z:szp,sx:sc,sy:sc*0.6,sz:sc*1.4,ry:CBZ.hash01(sxp,szp,0x9c)*3.1});
+    }
+    var WALLN=20, WH=1.55;
+    for(var wi=0;wi<WALLN;wi++){
+      var wa=wi*Math.PI*2/WALLN;
+      var wx=PX+Math.cos(wa)*PIT_WALL_R, wz=PZ+Math.sin(wa)*PIT_WALL_R;
+      var wyaw=Math.atan2(Math.cos(wa),Math.sin(wa));
+      var seg=2*PIT_WALL_R*Math.sin(Math.PI/WALLN)+0.12;
+      concrete.push({x:wx,y:PY+WH/2,z:wz,sx:seg,sy:WH,sz:0.55,ry:wyaw});
+      dark.push({x:wx,y:PY+WH+0.09,z:wz,sx:seg,sy:0.18,sz:0.8,ry:wyaw});           // coping
+      rail.push({x:wx,y:PY+WH+0.95,z:wz,sx:seg,sy:0.09,sz:0.09,ry:wyaw});          // spectator rail
+      steel.push({x:wx,y:PY+WH+0.5,z:wz,sx:0.08,sy:0.9,sz:0.08,ry:wyaw});
+      solidYaw(wx,wz,seg,0.6,wyaw,PY,PY+WH+1.05);
+    }
+    // four floodlight-style pylons around the pit so it reads at night
+    for(var pl=0;pl<4;pl++){
+      var pa=Math.PI/4+pl*Math.PI/2;
+      var lx=PX+Math.cos(pa)*(PIT_WALL_R+2.6), lz=PZ+Math.sin(pa)*(PIT_WALL_R+2.6);
+      steel.push({x:lx,y:PY+2.4,z:lz,sx:0.28,sy:4.8,sz:0.28});
+      dark.push({x:lx,y:PY+4.9,z:lz,sx:0.9,sy:0.5,sz:0.9});
+      solid(lx-0.25,lz-0.25,lx+0.25,lz+0.25,PY,PY+4.8);
+    }
+  })();
+
+  // ---- flush the shared instanced pools -----------------------------------
+  instBoxes(concrete,mat(0x9aa0aa));
   instBoxes(gold,mat(0xd8a020));
   instBoxes(white,mat(0xeeeeee));
   instBoxes(redP,mat(0xaa2233));
   instBoxes(blueP,mat(0x2244aa));
   instBoxes(dark,mat(0x22262c));
   instBoxes(rail,mat(0x992222));
-  (function(){ // bright heads: cheap emissive-look basic material
-    var hm=new THREE.MeshBasicMaterial({color:0xfff6cc});
-    var m=new THREE.InstancedMesh(unitBox,hm,heads.length);
-    var M=new THREE.Matrix4(),q=new THREE.Quaternion(),e=new THREE.Euler(),
-        p=new THREE.Vector3(),s=new THREE.Vector3();
-    for(var i=0;i<heads.length;i++){
-      var it=heads[i]; e.set(0,it.ry||0,0); q.setFromEuler(e);
-      p.set(it.x,it.y,it.z); s.set(it.sx,it.sy,it.sz);
-      M.compose(p,q,s); m.setMatrixAt(i,M);
-    }
-    m.instanceMatrix.needsUpdate=true; root.add(m);
-  })();
-  var lamp=new THREE.PointLight(0xffedc0,0.9,320,1);
-  lamp.position.set(CX,PY+32,CZ); root.add(lamp);
+  instBoxes(steel,mat(0x2a2f38));
+  instBoxes(sandBits,mat(0xbba46a));
+  if(typeof CBZ.markCollidersDirty==="function")CBZ.markCollidersDirty();
 
-  // ---- "IRONJAW ARENA" sign (single canvas-textured quad) -----------------
-  if(typeof document!=="undefined"){
-    try{
-      var cv=document.createElement("canvas"); cv.width=1024; cv.height=192;
-      var cx2=cv.getContext("2d");
-      if(cx2){
-        cx2.fillStyle="#0c0f14"; cx2.fillRect(0,0,1024,192);
-        cx2.strokeStyle="#e0a020"; cx2.lineWidth=10; cx2.strokeRect(10,10,1004,172);
-        cx2.fillStyle="#ffd24a"; cx2.font="bold 104px Arial";
-        cx2.textAlign="center"; cx2.textBaseline="middle";
-        cx2.fillText("IRONJAW ARENA",512,100);
-        var tex=new THREE.CanvasTexture(cv);
-        var sign=new THREE.Mesh(new THREE.PlaneGeometry(28,5.3),
-          new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide}));
-        sign.position.set(CX-R+4,PY+15.2,CZ); sign.rotation.y=-Math.PI/2;
-        root.add(sign);
-      }
-    }catch(e){}
-  }
+  // ---- live spectators in REAL seats --------------------------------------
+  // Standard city actors fixed to seat anchors the bowl actually produced, so a
+  // geometry change can never leave a fan sitting in mid air. The instanced
+  // proxy crowd (arena_venue.js) fills every seat these 42 don't.
+  (function(){
+    if(!CBZ.npcLife||!CBZ.npcLife.definePopulation)return;
+    var slots=(venue&&venue.seatSlots)||[];
+    if(!slots.length)return;
+    var entries=slots.map(function(a){return {
+      profile:"venueSpectator",
+      placement:{anchor:{x:a.x,y:a.y,z:a.z,yaw:a.yaw,pose:"sit",state:"sit"},rng:rng},
+      overrides:{job:"fight fan"},
+      configure:function(p){p._venueRole="arena-spectator";}
+    };});
+    CBZ.npcLife.definePopulation("arena-audience",{root:root,entries:entries});
+  })();
 
   // ---- resident fighters + referee ----------------------------------------
   if(typeof CBZ.makeCharacter==="function"){
@@ -243,6 +447,8 @@ CBZ.addLandmass(function(city){
   }
 
   // ---- map regions ---------------------------------------------------------
+  // games/boxing.js anchors SOUTHPAW PALACE by finding /Ironjaw Arena/i in
+  // city.regions — the name is a compatibility contract, do not rename it.
   if(typeof CBZ.registerCityRegion==="function"){
     CBZ.registerCityRegion(city,{name:"Ironjaw Arena",subtitle:"Fight Complex",biome:"arena",
       kind:"circle",cx:CX,cz:CZ,r:R,pad:6});
@@ -413,12 +619,16 @@ function newBout(){
     red:{ch:redCh,hp:100,name:NAMES[i1]},blue:{ch:blueCh,hp:100,name:NAMES[i2]},
     oddsRed:Math.round(94/p)/100,oddsBlue:Math.round(94/(1-p))/100}; // ~6% vig
   resetFighter(redCh,RX-1.8); resetFighter(blueCh,RX+1.8);
+  board("BOUT #"+bout.id,bout.red.name+"  vs  "+bout.blue.name,
+        "RED @"+bout.oddsRed.toFixed(2)+"   ·   BLUE @"+bout.oddsBlue.toFixed(2));
   if(nearRing)note("Next bout — RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
     " vs BLUE "+bout.blue.name+" @"+bout.oddsBlue.toFixed(2)+"  [E] ringside to bet",6);
 }
+// The ring bound: derived from RING_HALF, never hand-typed. Fighters stay
+// RING_INSET inside the ropes so a punch thrown at the rail still lands inside.
 function clampRing(p){
-  p.x=Math.min(RX+3.2,Math.max(RX-3.2,p.x));
-  p.z=Math.min(RZ+3.2,Math.max(RZ-3.2,p.z));
+  p.x=Math.min(RX+RING_FIGHT,Math.max(RX-RING_FIGHT,p.x));
+  p.z=Math.min(RZ+RING_FIGHT,Math.max(RZ-RING_FIGHT,p.z));
   p.y=RY;
 }
 function strike(b,A,D){
@@ -439,10 +649,9 @@ function strike(b,A,D){
     D.hp=0; D.ch.koT=6; D.ch.fightStance=false;
     b.winner=(D===b.red)?"blue":"red";
     b.state="ko"; b.t=3.5;
-    if(nearRing){
-      var w=(b.winner==="red")?b.red:b.blue;
-      note("DOWN! "+w.name+" drops "+D.name+" — the ref is counting...",3,{urgent:true});
-    }
+    var w0=(b.winner==="red")?b.red:b.blue;
+    board("DOWN!",w0.name+" drops "+D.name,"the referee is counting");
+    if(nearRing)note("DOWN! "+w0.name+" drops "+D.name+" — the ref is counting...",3,{urgent:true});
   }
 }
 function settleRingBet(b){
@@ -499,6 +708,7 @@ function tickRing(dt){
     var refMoved=refCh?moveTo(refCh.group.position,L.ch.group.position.x+0.9,L.ch.group.position.z,1.9*dt):0;
     if(refCh){ refCh.group.position.y=RY; face(refCh,L.ch.group.position.x,L.ch.group.position.z); anim(refCh,refMoved>0?1.2:0.15,dt); }
     if(b.t<=0){
+      board("WINNER BY KO",W.name,"IRONJAW ARENA");
       if(nearRing)note((b.winner==="red"?"RED ":"BLUE ")+W.name+" wins by KO!",4,{urgent:true});
       settleRingBet(b);
       b.state="reset"; b.t=4;
@@ -521,7 +731,9 @@ function startBout(box){
   if(!arenaRoot||typeof CBZ.makeCharacter!=="function"){ note("The card is closed tonight.",3); return; }
   if(CBZ.player&&CBZ.player.dead){ return; }
   var c=careerState(), card=bookedOpp(box);
-  var cx=box?RX:CGX, cz=box?RZ:CGZ, cy=box?RY:CGY, rad=box?3.1:5.2;
+  // ONE radius per discipline, straight off the GEOMETRY LAW — the ring used to
+  // spawn at 3.1 while clampRing held 3.2, an invisible 0.1 desync.
+  var cx=box?RX:CGX, cz=box?RZ:CGZ, cy=box?RY:CGY, rad=box?RING_FIGHT:CAGE_FIGHT;
   if(box){
     // the player takes over the RING: refund any live ringside bet, park the
     // house fighters out of sight, resume the card after.
@@ -534,11 +746,16 @@ function startBout(box){
   opp.group.position.set(cx+rad*0.7,cy,cz);
   opp.fightStance=true;
   arenaRoot.add(opp.group);
-  if(CBZ.player&&CBZ.player.pos)CBZ.player.pos.set(cx-rad*0.7,CBZ.player.pos.y,cz);
+  // Put the player ON the deck, not through it: the ring canvas and cage mat
+  // are now real platforms, and physics only adopts a platform within STEP_UP
+  // of the feet it is asked about.
+  if(CBZ.player&&CBZ.player.pos)CBZ.player.pos.set(cx-rad*0.7,cy,cz);
   var purse=purseFor(c,card,box);
   pfight={opp:opp,card:card,box:!!box,purse:purse,cx:cx,cz:cz,cy:cy,rad:rad,t:0,
     oppHp:100*(0.75+card.skill*0.8),oppHpMax:100*(0.75+card.skill*0.8),
     myHp:60,pcd:0.6,ocd:1.4,over:0,won:false,name:card.name};
+  board((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE BOUT":" BOUT"),
+        "YOU  vs  "+card.name,"purse "+money(purse));
   note((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE":"")+" bout vs "+card.name+" ("+card.wins+"-"+card.losses+
     ") — purse "+money(purse)+".",6,{urgent:true});
 }
@@ -552,9 +769,10 @@ function endCageFight(){
     if(redCh)redCh.group.visible=true; if(blueCh)blueCh.group.visible=true; if(refCh)refCh.group.visible=true;
   }
   pfight=null;
+  board("IRONJAW ARENA","FIGHT NIGHT","BOXING / MMA / BEAST PIT");
 }
 function clampCage(p){
-  var f=pfight, cx=f?f.cx:CGX, cz=f?f.cz:CGZ, cy=f?f.cy:CGY, r=f?f.rad:5.2;
+  var f=pfight, cx=f?f.cx:CGX, cz=f?f.cz:CGZ, cy=f?f.cy:CGY, r=f?f.rad:CAGE_FIGHT;
   var dx=p.x-cx,dz=p.z-cz,d=Math.hypot(dx,dz);
   if(d>r){p.x=cx+dx/d*r;p.z=cz+dz/d*r;}
   p.y=cy;
@@ -605,10 +823,12 @@ function tickCage(dt,pp){
   if(f.oppHp<=0){
     opp.koT=5; opp.fightStance=false;
     var war=f.t>30&&f.myHp<=24;                              // a genuine WAR, not a walkover
+    board("WINNER BY KO","YOU","purse "+money(f.purse));
     note("You KO "+f.name+"! Purse +"+money(f.purse)+".",5,{urgent:true});
     recordWin(f.card,f.box,true,war,f.purse);
     f.won=true; f.over=4;
   }else if(f.myHp<=0||(CBZ.player&&CBZ.player.dead)){
+    board("WINNER BY KO",f.name,"no purse tonight");
     note(f.name+" leaves you folded. No purse tonight, and your stock just dropped.",5,{urgent:true});
     recordLoss(f.box);
     f.over=3;
@@ -641,9 +861,11 @@ function findPet(){
   for(var i=0;i<ws.length;i++){var a=ws[i];if(a&&a.tamed&&!a.dead&&a.group)return a;}
   return null;
 }
+// Pit bound: derived from PIT_WALL_R, so a wider pit widens the fight floor.
 function clampPitXZ(p){
   var dx=p.x-PX,dz=p.z-PZ,d=Math.hypot(dx,dz);
-  if(d>7.4){p.x=PX+dx/d*7.4;p.z=PZ+dz/d*7.4;}
+  if(d>PIT_FIGHT){p.x=PX+dx/d*PIT_FIGHT;p.z=PZ+dz/d*PIT_FIGHT;}
+  p.y=PITY;
 }
 function startWildPit(){
   if(pitBout){ note("A pit bout is already running — watch the rail.",3); return; }
@@ -652,10 +874,12 @@ function startWildPit(){
   if(pool.length<2){ note("No beasts in the holding pens tonight.",3); return; }
   var i1=(Math.random()*pool.length)|0, i2=(Math.random()*pool.length)|0;
   if(i2===i1)i2=(i2+1)%pool.length;
-  var A=spawnBeast(pool[i1],PX-4.5,PZ), B=spawnBeast(pool[i2],PX+4.5,PZ);
+  var A=spawnBeast(pool[i1],PX-PIT_FIGHT*0.6,PZ), B=spawnBeast(pool[i2],PX+PIT_FIGHT*0.6,PZ);
   if(!A||!B){ if(A)arenaRoot.remove(A.group); if(B)arenaRoot.remove(B.group);
     note("The beasts refused the pit.",3); return; }
   pitBout={a:A,b:B,kind:"wild",done:false,over:0};
+  board("THE BEAST PIT",prettySpecies(A.species).toUpperCase()+"  vs  "+prettySpecies(B.species).toUpperCase(),
+        "both @1.88");
   note("PIT BOUT: "+prettySpecies(A.species)+" vs "+prettySpecies(B.species)+"!",4,{urgent:true});
   openBetOverlay({
     title:"Beast Pit — place your money",
@@ -674,13 +898,15 @@ function startPetPit(){
   if(!pet){ note("You have no tamed beast following you.",3); return; }
   var pool=speciesPool();
   if(!pool.length){ note("No wild challenger available.",3); return; }
-  var wild=spawnBeast(pool[(Math.random()*pool.length)|0],PX+4.5,PZ);
+  var wild=spawnBeast(pool[(Math.random()*pool.length)|0],PX+PIT_FIGHT*0.6,PZ);
   if(!wild){ note("No wild challenger available.",3); return; }
-  pet.group.position.set(PX-4.5,PITY,PZ);
+  pet.group.position.set(PX-PIT_FIGHT*0.6,PITY,PZ);
   // shadow actor: the bout never permanently harms your pet
   var wrap={group:pet.group,pos:pet.group.position,hp:140,maxHp:140,dead:false,
     species:pet.species||"beast",isPet:true};
   pitBout={a:wrap,b:wild,kind:"pet",done:false,over:0};
+  board("THE BEAST PIT","YOUR "+prettySpecies(wrap.species).toUpperCase()+"  vs  "+prettySpecies(wild.species).toUpperCase(),
+        "purse "+money(600));
   note("Your "+prettySpecies(wrap.species)+" steps into the pit! Purse "+money(600)+".",4,{urgent:true});
 }
 function finishPit(w,l){
@@ -688,6 +914,7 @@ function finishPit(w,l){
   P.done=true; P.over=5;
   l.dead=true; l.hp=0;
   if(!l.isPet&&l.group)l.group.rotation.z=1.35; // spawned loser keels over
+  board("PIT WINNER",(w.isPet?"YOUR ":"")+prettySpecies(w.species).toUpperCase(),"IRONJAW ARENA");
   note((w.isPet?"YOUR ":"")+prettySpecies(w.species).toUpperCase()+" WINS THE PIT!",4,{urgent:true});
   if(P.kind==="pet"){
     if(w.isPet){
@@ -718,6 +945,7 @@ function endPit(){
   }
   if(P.a&&P.a.isPet)P.a.group.rotation.z=0;
   pitBout=null; pitBet=null;
+  if(!bout&&!pfight)board("IRONJAW ARENA","FIGHT NIGHT","BOXING / MMA / BEAST PIT");
 }
 function tickPit(dt){
   var P=pitBout; if(!P)return;
@@ -737,10 +965,12 @@ function tickPit(dt){
 }
 
 // ============================================================ ON-MAP PROMPTS
-if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
+// Every radius here is derived from the GEOMETRY LAW block, so moving or
+// resizing a fight surface moves its prompt with it — automatically.
+if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
   CBZ.interactions.registerZone({
     id:"arena_ring", kind:"arena_ring", prio:4,
-    find:function(px,pz){ return Math.hypot(px-RX,pz-RZ)<13?{x:RX,z:RZ}:null; },
+    find:function(px,pz){ return Math.hypot(px-RX,pz-RZ)<RING_ZONE?{x:RX,z:RZ}:null; },
     options:[{
       id:"arena_ring_bet", slot:"e",
       label:function(){
@@ -777,7 +1007,7 @@ if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
   });
   CBZ.interactions.registerZone({
     id:"arena_cage", kind:"arena_cage", prio:4,
-    find:function(px,pz){ return Math.hypot(px-CGX,pz-CGZ)<11?{x:CGX,z:CGZ}:null; },
+    find:function(px,pz){ return Math.hypot(px-CGX,pz-CGZ)<CAGE_ZONE?{x:CGX,z:CGZ}:null; },
     options:[{
       id:"arena_cage_fight", slot:"i",
       label:function(){
@@ -790,7 +1020,7 @@ if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
   });
   CBZ.interactions.registerZone({
     id:"arena_pit", kind:"arena_pit", prio:4,
-    find:function(px,pz){ return Math.hypot(px-PX,pz-PZ)<14?{x:PX,z:PZ}:null; },
+    find:function(px,pz){ return Math.hypot(px-PX,pz-PZ)<PIT_ZONE?{x:PX,z:PZ}:null; },
     options:[
       {
         id:"arena_pit_wild", slot:"j",
@@ -828,9 +1058,12 @@ CBZ.onUpdate(40,function(dt){
   if(!dt||dt>0.5)dt=0.05;
   if(!arenaRoot||!CBZ.player||!CBZ.player.pos)return;
   var pp=CBZ.player.pos;
-  // ring bout: only simulate while the player can actually see it (~90u) and
-  // the ring isn't handed over to the player's own boxing match.
-  nearRing=Math.hypot(pp.x-RX,pp.z-RZ)<90;
+  // The building's own per-frame work: switch the real light rig + instanced
+  // crowd by distance, and repaint the jumbotron when the card changed.
+  if(venue&&venue.tick)venue.tick(Math.hypot(pp.x-CX,pp.z-CZ),dt);
+  // ring bout: only simulate while a spectator could actually see it, and
+  // while the ring isn't handed over to the player's own boxing match.
+  nearRing=Math.hypot(pp.x-RX,pp.z-RZ)<RING_SIM;
   if(nearRing&&!ringSuspended){
     if(!bout)newBout();
     tickRing(dt);
@@ -838,7 +1071,7 @@ CBZ.onUpdate(40,function(dt){
   // player cage bout: only exists after [I] at the cage
   if(pfight)tickCage(dt,pp);
   // pit bout: only exists after [J]/[I] at the pit; frozen if you wander far
-  if(pitBout&&Math.hypot(pp.x-PX,pp.z-PZ)<110)tickPit(dt);
+  if(pitBout&&Math.hypot(pp.x-PX,pp.z-PZ)<PIT_SIM)tickPit(dt);
 });
 
 })();

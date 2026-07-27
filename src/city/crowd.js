@@ -866,6 +866,33 @@
   // tiny debug accessors (used by the headless harness; cheap, read-only)
   CBZ.cityCrowdCount = function () { return count; };
   CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i], leader: groupLeader[i] }; };
+  /* THE SEAM systems/childsafe.js waits on. The ambient crowd is typed arrays
+     addressed by index — no record, so no age, so childsafe.js had no way to
+     ask whether crowd body `i` is a child and had to count that as an
+     uncoverable hole in CBZ.childSafeAudit().
+
+     The honest answer is now cheap, because the ambient crowd is ADULTS BY
+     CONSTRUCTION: every analytical row is minted as an anonymous adult
+     pedestrian, and the only way one gains a body is promotion to a pooled
+     cityMakePed rig which is likewise never handed an `age`. Children in this
+     game come from the family sim — they live in households, walk with a
+     parent and play in parks — and are full peds from birth, never sidewalk
+     density. So a promoted slot is asked directly (it is a real ped, it may in
+     principle be a child if some future caller promotes one), and an
+     un-promoted row is definitionally an adult.
+
+     If the ambient crowd ever DOES mint children, this function is the one
+     place that has to learn about it — which is the point of having a seam. */
+  CBZ.cityCrowdChild = function (i) {
+    if (!(i >= 0) || i >= count) return false;
+    const s = promotedBy[i];
+    if (s >= 0 && pool[s] && pool[s].ped) {
+      const ped = pool[s].ped;
+      if (ped.child === true) return true;
+      return CBZ.charIsChild ? !!CBZ.charIsChild(ped) : false;
+    }
+    return false;                       // analytical density row: always an adult
+  };
   CBZ.cityCrowdRenderMode = function () {
     let activeReal = 0;
     for (let i = 0; i < pool.length; i++) if (pool[i].idx >= 0 && !pool[i].ped.dead) activeReal++;

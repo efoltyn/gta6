@@ -352,7 +352,13 @@ body.full-map-open #interact{display:none !important;}
   letter-spacing:1.1px; text-transform:uppercase;
 }
 #citySpeech .citySpeechLine{margin-top:3px;color:#f3f6f9;font-size:17px;line-height:1.3;}
-body.full-map-open #citySpeech,body.city-menu-open #citySpeech{opacity:0!important;}
+/* `body.city-menu-open` was a second selector here and could never match:
+   CBZ.cityMenuOpen is a plain JS boolean (playergang.js, realestate.js,
+   zillow.js) that is never mirrored onto document.body.classList, unlike
+   full-map-open which fullmap.js add/removes. Dead clause dropped. To
+   actually hide speech behind city menus, mirror the flag onto the body the
+   way systems/fullmap.js does — then re-add the selector. */
+body.full-map-open #citySpeech{opacity:0!important;}
 
 /* ============================================================
    SURVIVAL (natural-disaster) mode HUD — shown only when the body

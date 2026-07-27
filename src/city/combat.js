@@ -1297,7 +1297,14 @@
       gr.x += gr.vx * dt;
       gr.y += gr.vy * dt;
       gr.z += gr.vz * dt;
-      const floor = (CBZ.floorAt ? CBZ.floorAt(gr.x, gr.z) : 0) || 0;
+      // CBZ.floorAt returns 0 over open sea (it is the LAND height query), so a
+      // grenade thrown into the water used to come to rest 0.6m above the waves
+      // on an invisible shelf. Over water, rest on the live swell instead.
+      let floor = (CBZ.floorAt ? CBZ.floorAt(gr.x, gr.z) : 0) || 0;
+      if (CBZ.citySeaHeightAt && CBZ.cityWaterAt && CBZ.cityWaterAt(gr.x, gr.z)) {
+        const sea = CBZ.citySeaHeightAt(gr.x, gr.z);
+        if (typeof sea === "number" && isFinite(sea) && sea > floor) floor = sea;
+      }
       const rest = floor + 0.12;
       if (gr.y <= rest) {
         gr.y = rest;

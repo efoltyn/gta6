@@ -1,0 +1,355 @@
+/* ============================================================
+   city/bailout.js — STEPPING OUT OF A FLYING AIRCRAFT.
+
+   THE BUG THIS EXISTS TO KILL
+   ---------------------------
+   playeraircraft.js's exitAircraft() was written for a parked machine. It
+   zeroes attitude and velocity, forces `onGround`, drops the gear and stands
+   you on the floor beside the plane. Run that at 500m and the abandoned jet
+   silently teleports flat and lands itself while you appear on the tarmac
+   underneath. The owner's ask — "the plane should actually lose its pilot and
+   fall dramatically unless a pilot takes over" — is really two halves, and
+   this file owns both: the falling body, and the pilotless machine.
+
+   HOW A PILOTLESS AIRCRAFT BEHAVES, AND WHY
+   -----------------------------------------
+   Not a vertical drop. A real departure from controlled flight has a SHAPE,
+   and it comes from the aircraft being out of trim with nobody correcting:
+   any tiny bank grows because the lift vector tilts, which drops the nose,
+   which builds speed, which increases lift on the raised wing — the classic
+   graveyard spiral. So the model here is: seed a small roll from whatever
+   attitude you left it in, let bank feed pitch-down, let pitch-down feed
+   speed, let speed feed bank. It tightens on its own. Nobody scripted the
+   curve; it falls out of the feedback loop, which is why it looks different
+   every time depending on how you left the aeroplane.
+
+   Helicopters get their own answer, because they have one: no collective
+   means no rotor thrust, so they descend fast with a torque-driven yaw spin
+   rather than a spiral.
+
+   "UNLESS A PILOT TAKES OVER"
+   ---------------------------
+   Good world logic, and this repo already flies NPC aircraft (aircraft.js
+   carries a `craft.pilot`). A machine with somebody else aboard — an airliner
+   with a cockpit crew, anything carrying a `pilot`/`copilot` — recovers,
+   levels out and flies on about its business. A single-seat fighter you just
+   stepped out of does not. That distinction is read from the aircraft rather
+   than hand-assigned per airframe.
+
+   THE PARACHUTE
+   -------------
+   Genuinely new — grep confirms this repo has never had one. Freefall until
+   you pull, then a canopy that actually slows and steers you. Pull too late
+   and you meet the ground at freefall speed, where the existing fall-damage
+   ladder in systems/physics.js is waiting; this file adds no second damage
+   path. Every aircraft carries one, per the ask.
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  if (!CBZ) return;
+  const THREE = window.THREE;
+  CBZ.CONFIG = CBZ.CONFIG || {};
+
+  if (CBZ.CONFIG.BAILOUT == null) CBZ.CONFIG.BAILOUT = true;
+  if (CBZ.CONFIG.BAILOUT_CHUTE == null) CBZ.CONFIG.BAILOUT_CHUTE = true;
+  // A machine with someone else aboard recovers instead of falling.
+  if (CBZ.CONFIG.BAILOUT_TAKEOVER == null) CBZ.CONFIG.BAILOUT_TAKEOVER = true;
+  // Height above the surface below which stepping out is an ordinary exit
+  // rather than a bailout — you are landing/taxiing, not abandoning ship.
+  if (CBZ.CONFIG.BAILOUT_MIN_AGL == null) CBZ.CONFIG.BAILOUT_MIN_AGL = 9;
+
+  const on = () => CBZ.CONFIG.BAILOUT !== false;
+  const TERMINAL = -58;        // freefall terminal velocity, m/s
+  const CANOPY_SINK = -5.4;    // under a good canopy
+  const CANOPY_FWD = 9.5;      // canopy forward airspeed
+  const OPEN_SHOCK = 0.55;     // seconds of deceleration when it blooms
+
+  function floorAt(x, z) {
+    if (CBZ.cityCraftFloorY) { try { return CBZ.cityCraftFloorY(x, z); } catch (e) {} }
+    if (CBZ.groundAt) { try { return CBZ.groundAt(x, z); } catch (e) {} }
+    if (CBZ.floorAt) { try { return CBZ.floorAt(x, z); } catch (e) {} }
+    return 0;
+  }
+
+  /* ================= THE FALLING BODY ================= */
+  const F = { active: false, phase: "", t: 0, yaw: 0, canopy: null, shock: 0 };
+
+  function makeCanopy() {
+    if (!THREE) return null;
+    const g = new THREE.Group();
+    // A shallow dome, built from a sphere cut at the equator. Ribs are drawn
+    // as a second, slightly larger wireframe shell rather than real geometry —
+    // at the distance you ever see your own canopy that reads identically and
+    // costs one extra draw instead of thirty.
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(3.1, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      new THREE.MeshLambertMaterial({ color: 0xd8452f, side: THREE.DoubleSide })
+    );
+    dome.scale.set(1, 0.62, 1.35);
+    g.add(dome);
+    const ribs = new THREE.Mesh(
+      new THREE.SphereGeometry(3.16, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      new THREE.MeshBasicMaterial({ color: 0x2b2b2b, wireframe: true, transparent: true, opacity: 0.35 })
+    );
+    ribs.scale.copy(dome.scale);
+    g.add(ribs);
+    // Four lines to the harness.
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xd8d8d8, transparent: true, opacity: 0.75 });
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(Math.cos(a) * 2.6, 0, Math.sin(a) * 3.4),
+        new THREE.Vector3(0, -3.4, 0),
+      ]);
+      g.add(new THREE.Line(geo, lineMat));
+    }
+    g.position.y = 3.6;
+    return g;
+  }
+
+  function beginFall(fromCraft) {
+    const P = CBZ.player; if (!P) return;
+    F.active = true; F.phase = "freefall"; F.t = 0; F.shock = 0;
+    F.yaw = fromCraft ? (fromCraft.heading || 0) : 0;
+    P.grounded = false;
+    // Inherit the aircraft's momentum — you do not stop dead in the air.
+    if (fromCraft) {
+      P.vy = Math.min(0, (fromCraft.vy || 0) * 0.5);
+      F.driftX = (fromCraft.vx || 0) * 0.55;
+      F.driftZ = (fromCraft.vz || 0) * 0.55;
+    } else { P.vy = 0; F.driftX = F.driftZ = 0; }
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
+    if (CBZ.city && CBZ.city.note) {
+      CBZ.city.note("Freefall. Pull to deploy.", 2.6, { from: "Rig", app: "messages" });
+    }
+    if (CBZ.sfx) { try { CBZ.sfx("wind"); } catch (e) {} }
+  }
+
+  function deploy() {
+    if (!F.active || F.phase !== "freefall") return false;
+    if (CBZ.CONFIG.BAILOUT_CHUTE === false) return false;
+    F.phase = "canopy"; F.shock = OPEN_SHOCK;
+    if (!F.canopy && CBZ.scene) { F.canopy = makeCanopy(); if (F.canopy) CBZ.scene.add(F.canopy); }
+    if (F.canopy) F.canopy.visible = true;
+    if (CBZ.sfx) { try { CBZ.sfx("cloth"); } catch (e) {} }
+    return true;
+  }
+  CBZ.cityChuteDeploy = deploy;
+  CBZ.cityChuteState = function () {
+    return F.active ? { phase: F.phase, agl: aglNow() } : null;
+  };
+
+  function aglNow() {
+    const P = CBZ.player; if (!P) return 0;
+    return Math.max(0, P.pos.y - floorAt(P.pos.x, P.pos.z));
+  }
+
+  function endFall(landed) {
+    F.active = false; F.phase = "";
+    if (F.canopy) F.canopy.visible = false;
+    const P = CBZ.player;
+    if (landed && P) { P.grounded = true; P.vy = 0; }
+  }
+
+  /* ================= THE PILOTLESS MACHINE ================= */
+  const ghosts = [];
+
+  function crewAboard(craft) {
+    if (CBZ.CONFIG.BAILOUT_TAKEOVER === false) return false;
+    if (!craft) return false;
+    if (craft.pilot || craft.copilot) return true;
+    const ud = craft.group && craft.group.userData;
+    // An airliner has a modelled cabin and flight deck — somebody is up front.
+    if (ud && (ud.cabin || ud.cockpit)) return true;
+    if (craft.airClass === "airliner") return true;
+    return false;
+  }
+
+  function abandon(craft) {
+    if (!craft) return;
+    const recovered = crewAboard(craft);
+    ghosts.push({
+      craft: craft,
+      recovered: recovered,
+      t: 0,
+      roll: (craft.roll || 0) || 0.05,   // whatever bank you left it in, or a nudge
+      pitch: craft.pitch || 0,
+      spin: 0,
+      heli: craft.kind === "heli" || craft.airClass === "heli",
+    });
+    if (recovered && CBZ.city && CBZ.city.note) {
+      CBZ.city.note("Someone else has the controls.", 3, { from: "Radio", app: "messages" });
+    }
+  }
+
+  function tickGhost(G, dt) {
+    const c = G.craft;
+    if (!c || !c.group) return false;
+    G.t += dt;
+    const gy = floorAt(c.pos.x, c.pos.z);
+
+    if (G.recovered) {
+      // Levels out over a couple of seconds and flies on. It is somebody
+      // else's aeroplane now; the ordinary traffic systems can keep it.
+      G.roll += (0 - G.roll) * Math.min(1, dt * 1.6);
+      G.pitch += (0.04 - G.pitch) * Math.min(1, dt * 1.4);
+      const sp = Math.max(28, c.speed || 40);
+      c.pos.x += Math.sin(c.heading) * sp * dt;
+      c.pos.z += Math.cos(c.heading) * sp * dt;
+      c.pos.y += Math.sin(G.pitch) * sp * dt;
+      applyPose(c, G);
+      return G.t < 40;            // hand it back to the world after a while
+    }
+
+    if (G.heli) {
+      // No collective: it sinks, and engine torque with no tail authority
+      // walks the nose round.
+      G.spin += dt * 1.5;
+      c.heading += G.spin * dt;
+      c.vy = (c.vy || 0) - 9.4 * dt * 0.75;
+      c.pos.y += c.vy * dt;
+      G.roll += (Math.sin(G.t * 2.2) * 0.28 - G.roll) * dt * 2;
+      G.pitch = -0.18;
+    } else {
+      // THE SPIRAL. Bank tilts the lift vector, so the nose drops; the nose
+      // dropping builds speed; speed deepens the bank. Each term feeds the
+      // next, so it tightens by itself rather than on a script.
+      G.roll += Math.sign(G.roll || 1) * dt * (0.34 + Math.abs(G.roll) * 0.55);
+      G.roll = Math.max(-1.5, Math.min(1.5, G.roll));
+      G.pitch -= Math.abs(G.roll) * dt * 0.55;
+      G.pitch = Math.max(-1.15, G.pitch);
+      c.speed = Math.min(140, (c.speed || 40) + (-G.pitch) * 26 * dt);
+      c.heading += G.roll * dt * 0.85;                       // bank turns it
+      const fwd = Math.cos(G.pitch) * c.speed;
+      c.pos.x += Math.sin(c.heading) * fwd * dt;
+      c.pos.z += Math.cos(c.heading) * fwd * dt;
+      c.pos.y += Math.sin(G.pitch) * c.speed * dt;
+    }
+    applyPose(c, G);
+
+    if (c.pos.y - (c.belly || 1.2) <= gy + 0.4) {
+      impact(c, gy);
+      return false;
+    }
+    return G.t < 90;
+  }
+
+  function applyPose(c, G) {
+    c.roll = G.roll; c.pitch = G.pitch;
+    if (CBZ.citySetCraftRotation) {
+      try { CBZ.citySetCraftRotation(c, G.pitch, c.heading, G.roll); } catch (e) {}
+    }
+    if (c.group) c.group.position.set(c.pos.x, c.pos.y, c.pos.z);
+  }
+
+  /* The wreck is priced through the shared ordnance bus so it damages
+     buildings, starts fires and kills exactly like any other impact of that
+     mass and speed. No second blast path — CLAUDE.md forbids hand-rolling
+     one, and the bus already models kinetic energy from mass and speed. */
+  function impact(c, gy) {
+    const speed = Math.max(20, c.speed || 40);
+    const mass = (c.mass || (c.airClass === "airliner" ? 72000 : c.kind === "heli" ? 5200 : 12000));
+    if (CBZ.detonate) {
+      try {
+        CBZ.detonate(c.pos.x, Math.max(gy, c.pos.y), c.pos.z, "aircraft-impact",
+                     { mass: mass, speed: speed, byPlayer: true, frontal: true });
+      } catch (e) {}
+    } else if (CBZ.cityAirstrikeExplosion) {
+      try { CBZ.cityAirstrikeExplosion(c.pos.x, c.pos.z, { power: 3.0, radius: 16, y: c.pos.y, byPlayer: true }); } catch (e) {}
+    }
+    if (c.group && c.group.parent) c.group.parent.remove(c.group);
+    c.dead = true;
+  }
+
+  /* PUBLIC: playeraircraft.js hands the machine over here when you step out of
+     it in flight. Returns true when this file has taken ownership. */
+  CBZ.cityBailOut = function (craft) {
+    if (!on() || !craft || !craft.pos) return false;
+    const gy = floorAt(craft.pos.x, craft.pos.z);
+    const agl = craft.pos.y - gy;
+    if (!(agl > CBZ.CONFIG.BAILOUT_MIN_AGL)) return false;   // parked/landing: normal exit
+    if (craft.onGround) return false;
+    abandon(craft);
+    beginFall(craft);
+    return true;
+  };
+
+  /* ================= TICK ================= */
+  CBZ.onUpdate(CBZ.PRIO && CBZ.PRIO.after ? CBZ.PRIO.after(CBZ.PRIO.VEHICLES, 7) : 17.7, function (dt) {
+    if (!dt) return;
+    for (let i = ghosts.length - 1; i >= 0; i--) {
+      let keep = false;
+      try { keep = tickGhost(ghosts[i], dt); } catch (e) { keep = false; }
+      if (!keep) ghosts.splice(i, 1);
+    }
+    if (!F.active) return;
+
+    const P = CBZ.player;
+    if (!P || P.dead) { endFall(false); return; }
+    F.t += dt;
+    const k = CBZ.keys || {};
+
+    if (F.phase === "freefall") {
+      if (k[" "] || k["f"]) deploy();
+      P.vy = Math.max(TERMINAL, (P.vy || 0) - 9.81 * dt * 1.55);
+      F.driftX *= (1 - dt * 0.55); F.driftZ *= (1 - dt * 0.55);
+    } else if (F.phase === "canopy") {
+      // Bloom: a hard but brief deceleration, then a steady sink.
+      if (F.shock > 0) {
+        F.shock -= dt;
+        P.vy += (CANOPY_SINK - P.vy) * Math.min(1, dt * 9);
+      } else {
+        P.vy += (CANOPY_SINK - P.vy) * Math.min(1, dt * 3.4);
+      }
+      // Steer: turn with A/D, and trade forward speed with W/S the way toggles
+      // do — pulling both hands down flares and slows you.
+      if (k["a"]) F.yaw += dt * 1.25;
+      if (k["d"]) F.yaw -= dt * 1.25;
+      const flare = k["s"] ? 0.25 : (k["w"] ? 1.15 : 1);
+      F.driftX = Math.sin(F.yaw) * CANOPY_FWD * flare;
+      F.driftZ = Math.cos(F.yaw) * CANOPY_FWD * flare;
+      if (k["s"]) P.vy += dt * 1.6;      // flaring also arrests the sink briefly
+    }
+
+    P.pos.x += F.driftX * dt;
+    P.pos.z += F.driftZ * dt;
+    P.grounded = false;
+
+    if (F.canopy) {
+      F.canopy.position.set(P.pos.x, P.pos.y + 3.6, P.pos.z);
+      F.canopy.rotation.y = F.yaw;
+      F.canopy.visible = (F.phase === "canopy");
+    }
+    if (CBZ.playerChar && CBZ.playerChar.group) {
+      CBZ.playerChar.group.position.set(P.pos.x, P.pos.y, P.pos.z);
+      CBZ.playerChar.group.rotation.y = F.yaw;
+    }
+
+    // Landing. Under canopy this is a walk-away; in freefall we simply hand the
+    // body back with its real vertical speed and let the EXISTING fall-damage
+    // ladder in systems/physics.js decide — adding a second damage path here
+    // would be exactly the duplication this codebase is trying to stop.
+    const gy = floorAt(P.pos.x, P.pos.z);
+    if (P.pos.y <= gy + 0.05) {
+      P.pos.y = gy;
+      const hard = (F.phase !== "canopy");
+      endFall(true);
+      if (hard && CBZ.cityHurtPlayer) {
+        try { CBZ.cityHurtPlayer(9999, { cause: "fell", fatal: true }); } catch (e) {}
+      } else if (CBZ.sfx) { try { CBZ.sfx("land"); } catch (e) {} }
+    }
+  });
+
+  /* Touch: the deploy verb belongs to the shared touch layer, never a parallel
+     handler, and never a keyboard glyph (CLAUDE.md). touch.js should call
+     CBZ.cityChuteDeploy() from a pill shown while cityChuteState() is
+     non-null and its phase is "freefall". */
+  CBZ.cityChutePrompt = function () {
+    return (F.active && F.phase === "freefall") ? "Deploy chute" : null;
+  };
+
+  CBZ.bailoutAudit = function () {
+    return { ghosts: ghosts.length, falling: !!F.active, phase: F.phase || null };
+  };
+})();

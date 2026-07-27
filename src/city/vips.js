@@ -809,6 +809,154 @@
     }
   }
 
+  // ============================================================
+  //  THE POLITICAL VIPS — the government layer, delivered to the STREET.
+  //
+  //  Two of the five archetypes have always been political TITLES with no
+  //  politics attached. The Senator and the Judge walk a real lap with a real
+  //  two-officer escort and stop at City Hall — and then do nothing a Magnate
+  //  doesn't. A title with no system behind it is the exact failure the
+  //  research warned about (Saints Row IV made you President and attached
+  //  nothing). These two are now where the political sim touches the pavement:
+  //
+  //    THE JUDGE — approach the bench. A judge holds the bench; a bench can
+  //      lose a charge. Paying is expensive and quiet; leaning on them with a
+  //      gun out is a real crime in front of two real officers. Either road
+  //      buys exactly ONE star (wanted.js's own CBZ.cityReduceWanted), once,
+  //      on a long cooldown, and NEVER for a cop killing — that is a hard
+  //      exclusion, not a price, which is the whole reason the favour means
+  //      anything. A judge you have already leaned on will not see you again.
+  //
+  //    THE SENATOR — an endorsement you have to physically go and get. Only
+  //      while you are actually on the ballot (city/candidacy.js), only if
+  //      your standing carries the ask, and it lands as real momentum in the
+  //      real tally plus a hook on the senator's own identity sid.
+  //
+  //  Tropico's rule, which matches this repo's HUD doctrine exactly: political
+  //  standing is surfaced through OBJECTS IN THE CITY, never a stat screen.
+  //  This is that — with a person instead of a loudspeaker. Both verbs are
+  //  fully feature-detected: with candidacy.js absent the Senator is just a
+  //  Senator again, and the Judge falls back to nothing if wanted.js is gone.
+  // ============================================================
+  const JUDGE_COOL_MS = 420000;      // ~7 real minutes between favours, per judge
+  const JUDGE_BASE_FEE = 2500;       // the quiet road, scaled by what you're erasing
+  const SENATOR_ASK_RESPECT = 60;    // a nobody does not get a senator's name
+
+  function nowMs() { return CBZ.now || 0; }
+  // is this ped a LIVE vip principal, and of which archetype? (slot scan is 4
+  // entries — cheaper than stamping another field on every ped in the city)
+  function vipKindOf(p) {
+    if (!p || p.dead) return "";
+    for (let i = 0; i < S.slots.length; i++) {
+      const sl = S.slots[i];
+      if (sl && sl.state === "live" && sl.principal === p) return (sl.def && sl.def.kind) || "";
+    }
+    return "";
+  }
+  function vipSidOf(p) { return (p && p._identityId) || null; }
+  // a cop killing is not a docket item. This is the exclusion that gives the
+  // favour its weight — mirrors wanted.js's own cop-kill escalation fields.
+  function unpardonable() {
+    return ((g.cityCopKills | 0) > 0) || (g.wanted | 0) >= 5;
+  }
+  function judgeFee() {
+    const stars = Math.max(1, g.wanted | 0);
+    return JUDGE_BASE_FEE * stars;
+  }
+  function benchFavour(p, leaned) {
+    if (!CBZ.cityReduceWanted) return false;
+    p._benchT = nowMs() + JUDGE_COOL_MS;
+    if (leaned) p._benchBurned = true;               // you don't get to do that twice
+    CBZ.cityReduceWanted(1);
+    if (CBZ.cityFeed) {
+      CBZ.cityFeed(leaned
+        ? "A charge quietly vanished off the docket. The judge's hands were shaking."
+        : "A charge was quietly reduced at the bench. Money moves slowly and legally.", "#cfd8ff");
+    }
+    return true;
+  }
+  function askEndorsement(p) {
+    const R = (CBZ.cityRun && CBZ.cityRun.live && CBZ.cityRun.live()) ? CBZ.cityRun : null;
+    if (!R) return false;
+    const sid = vipSidOf(p);
+    p._endorseAsked = true;
+    // the ask is scored off state that already exists: your street standing
+    // and whether the law is currently behind you. No dice.
+    const respect = Math.max(0, (g.respect | 0));
+    if ((g.wanted | 0) > 0) {
+      if (CBZ.citySay) CBZ.citySay(p, "“Not with sirens on you. Are you insane?”", "#cfe6ff", 2.4);
+      p._endorseAsked = false;                       // a refusal for cause can be re-asked later
+      return false;
+    }
+    if (respect < SENATOR_ASK_RESPECT) {
+      if (CBZ.citySay) CBZ.citySay(p, "“I don't know you. Come back when somebody does.”", "#cfe6ff", 2.4);
+      p._endorseAsked = false;
+      return false;
+    }
+    if (sid && R.hook) { try { R.hook(sid, { kind: "endorsement", note: "the senator's public backing" }); } catch (e) {} }
+    if (R.momentumGain) { try { R.momentumGain(4, "a senator's endorsement"); } catch (e) {} }
+    if (CBZ.citySay) CBZ.citySay(p, "“Fine. I'll say your name out loud. Once.”", "#8fe08a", 2.6);
+    if (CBZ.cityFeed) CBZ.cityFeed("A sitting senator put their name behind your campaign.", "#8fe08a");
+    return true;
+  }
+
+  // registration defers one tick — the registry parses after this file.
+  let _vipVerbsDone = false;
+  CBZ.onUpdate(38.7, function () {
+    if (_vipVerbsDone || !CBZ.interactions) return;
+    _vipVerbsDone = true;
+    const I = CBZ.interactions;
+
+    I.register("ped:civ", {
+      id: "vip-bench-pay", slot: "k", prio: 46,
+      canShow: function (p) {
+        return !!CBZ.cityReduceWanted && vipKindOf(p) === "judge" && (g.wanted | 0) >= 1 &&
+          !unpardonable() && !p._benchBurned && nowMs() > (p._benchT || 0);
+      },
+      label: function () { return "Approach the bench — " + "$" + judgeFee().toLocaleString("en-US"); },
+      onSelect: function (p) {
+        if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(judgeFee()))) {
+          if (CBZ.citySay) CBZ.citySay(p, "“That is not a serious offer.”", "#cfe6ff", 2);
+          return;
+        }
+        benchFavour(p, false);
+      },
+    });
+    // the malicious twin — this repo's rule is that there is ALWAYS one. A gun
+    // in a judge's face with two officers on the lap is a real crime in front
+    // of real witnesses; cityCrime carries the heat, and the judge is burned.
+    I.register("ped:civ", {
+      // slot k, not l: interact.js's gunpoint card keeps EXECUTE on l, and slot
+      // exclusivity would silently delete it for this ped. Ransom is the row
+      // worth displacing on a judge. (The pay verb also sits on k, but the two
+      // can never collide — gunpoint mode shows ONLY needsGunDrawn options.)
+      id: "vip-bench-lean", slot: "k", prio: 46, bad: true, needsGunDrawn: true,
+      canShow: function (p) {
+        return !!CBZ.cityReduceWanted && vipKindOf(p) === "judge" && (g.wanted | 0) >= 1 &&
+          !unpardonable() && !p._benchBurned;
+      },
+      label: "Lean on the judge",
+      onSelect: function (p) {
+        benchFavour(p, true);
+        // "extortion" — wanted.js's CRIME table has no "intimidating a judge",
+        // and crimeInfo() returns {stars:0} for an unknown id, so report()
+        // bailed and this charge was a silent no-op. Never invent a type.
+        if (CBZ.cityCrime) CBZ.cityCrime(55, { x: p.pos.x, z: p.pos.z, type: "extortion" });
+        if (CBZ.citySay) CBZ.citySay(p, "“You have no idea what you've just done.”", "#ff9aa2", 2.6);
+      },
+    });
+
+    I.register("ped:civ", {
+      id: "vip-endorse", slot: "k", prio: 46,
+      canShow: function (p) {
+        return !!(CBZ.cityRun && CBZ.cityRun.live && CBZ.cityRun.live()) &&
+          vipKindOf(p) === "senator" && !p._endorseAsked;
+      },
+      label: "Ask for their endorsement",
+      onSelect: function (p) { askEndorsement(p); },
+    });
+  });
+
   // ---------- per-frame ------------------------------------------------------
   // order 35.7: after peds (34) / police (35) / level.js (35.5) so the tag
   // stamp lands the same frame level.js sweeps, and cop fields are read next.

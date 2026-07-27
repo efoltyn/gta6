@@ -123,15 +123,26 @@
     // nearest the resting thumb — so the big primary hold goes first.
     const FIRE_BTN = '<button type="button" id="tvFire" class="tvbtn tv-fire" style="display:none">' + FIRE_SVG + '<span id="tvAmmo" class="tvAmmo"></span></button>';
     const LOOK_BTN = pill("tvLook", "LOOK BACK", "tv-sm");   // camera-agent hook; hidden unless CBZ.camLookBack exists
+    // VIEW swaps the cockpit/chase camera. Feature-detected the same way LOOK
+    // BACK is, so a build without the cockpit files simply never shows it.
+    const VIEW_BTN = pill("tvView", "VIEW", "tv-sm");
     let html = "";
     if (next === "drive") {
       html = pill("tvBrake", "BRAKE", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "heli") {
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
-        FIRE_BTN + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+        FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "wing") {
       html = pill("tvThrUp", "THR +", "tv-big tv-go") + pill("tvThrDn", "THR −", "tv-big") +
-        FIRE_BTN + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+        FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
+    } else if (next === "chute") {
+      // Falling out of an aircraft is a CONTEXT, not a vehicle, but it is the
+      // same problem this layer exists to solve: a keyboard verb the thumb
+      // cannot reach. The stick already steers the canopy (it writes WASD and
+      // the canopy reads A/D to turn, S to flare), so the only thing missing
+      // was the one press that matters. PULL is deliberately the biggest
+      // button on the screen and it is the only one.
+      html = pill("tvChute", "PULL", "tv-big tv-go");
     }
     btnWrap.innerHTML = html;
     const q = (id) => btnWrap.querySelector("#" + id);
@@ -147,9 +158,19 @@
     // LOOK BACK: hold pins the chase cam over the shoulder (camera agent's
     // feature-detected API — the button only shows once that API exists).
     if (q("tvLook")) holdFn(q("tvLook"), (down) => { if (CBZ.camLookBack) CBZ.camLookBack(down); });
+    if (q("tvView")) tapBtn(q("tvView"), () => { if (CBZ.cockpitToggleView) CBZ.cockpitToggleView(); });
+    if (q("tvChute")) tapBtn(q("tvChute"), () => { if (CBZ.cityChuteDeploy) CBZ.cityChuteDeploy(); });
     ammoEl = btnWrap.querySelector("#tvAmmo");
     lastSpeed = -1; lastSub = "";   // force a dial repaint for the new context
   }
+
+  // Is the touch vehicle layer currently OWNING the bottom-right instrument
+  // corner? city/carcluster.js asks, so the desktop cluster can stand down to
+  // a compact strip instead of stacking a second speedometer on top of this
+  // dial. Degrade-safe on both sides: no touch layer → the answer is false and
+  // the cluster draws exactly as it always did.
+  CBZ.touchVehicleActive = function () { return !!(on() && mode); };
+  CBZ.touchVehicleMode = function () { return mode || ""; };
 
   function doExit() {
     const P = CBZ.player; if (!P) return;
@@ -234,7 +255,11 @@
     const P = CBZ.player;
     const active = on() && P && CBZ.game.state === "playing" && !CBZ.cityMenuOpen && !P.dead;
     let next = "";
-    if (active && P._aircraft) next = P._aircraft.kind === "heli" ? "heli" : "wing";
+    // The chute wins over everything: you are not in a vehicle any more, and
+    // any other pill set on screen while you are falling is a lie.
+    const chute = active && CBZ.cityChuteState ? CBZ.cityChuteState() : null;
+    if (chute) next = "chute";
+    else if (active && P._aircraft) next = P._aircraft.kind === "heli" ? "heli" : "wing";
     else if (active && P.driving && P._vehicle) next = "drive";
     if (!root && next) build();
     if (!root) return;
@@ -250,6 +275,23 @@
     if (lb) {
       const want = CBZ.camLookBack ? "" : "none";
       if (lb.style.display !== want) lb.style.display = want;
+    }
+    // VIEW appears only once the cockpit files are present (same merge-order
+    // safety as LOOK BACK — neither button may assume its API exists)
+    const vb = btnWrap.querySelector("#tvView");
+    if (vb) {
+      const want = CBZ.cockpitToggleView ? "" : "none";
+      if (vb.style.display !== want) vb.style.display = want;
+    }
+    // Once the canopy is out there is nothing left to pull, so the button
+    // stops offering it rather than sitting there dead.
+    if (mode === "chute") {
+      const cb = btnWrap.querySelector("#tvChute");
+      const st = CBZ.cityChuteState ? CBZ.cityChuteState() : null;
+      if (cb) {
+        const want = (st && st.phase === "freefall") ? "" : "none";
+        if (cb.style.display !== want) cb.style.display = want;
+      }
     }
     // fire button + ammo badge only on armed craft
     if (mode === "heli" || mode === "wing") {
@@ -268,7 +310,23 @@
     const now = performance.now();
     if (now - lastDraw < 80) return;
     lastDraw = now;
-    if (mode === "drive") {
+    if (mode === "chute") {
+      // Under a canopy the number that matters is how much air is left. The
+      // dial re-scales to 400m so the needle actually SWEEPS on the way down
+      // instead of sitting pinned at the bottom of an aircraft-sized gauge,
+      // and it warns once you are inside the height where pulling still saves
+      // you — the same threshold city/bailout.js uses.
+      const st = CBZ.cityChuteState ? CBZ.cityChuteState() : null;
+      if (!st) return;
+      const agl = Math.max(0, Math.round(st.agl || 0));
+      const open = st.phase !== "freefall";
+      const warn = !open && agl < 120;
+      const sub = open ? "CANOPY" : "PULL";
+      if (agl !== lastSpeed || sub !== lastSub) {
+        lastSpeed = agl; lastSub = sub;
+        drawDial(agl, 400, "AGL m", sub, warn);
+      }
+    } else if (mode === "drive") {
       const car = P._vehicle;
       const kmh = Math.abs((car && car.v) || 0) * 4.8;   // hud.js mph≈v*3 → km/h≈v*4.8
       const key = Math.round(kmh);

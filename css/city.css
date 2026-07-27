@@ -163,7 +163,6 @@ body.mode-city.state-playing #raceLights .go { display: none !important; }
 #cityZillow .zselect { color: #cdd6e2; }
 #cityZillow .zclear { height: 32px; background: #343c46; color: #d6dee9; padding: 0 12px; }
 #cityZillow .zlist { flex: 1; overflow: hidden; padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
-#cityZillow .zhint { font-size: 12px; color: #8a93a3; padding: 2px 2px 4px; }
 #cityZillow .zempty { color: #7f8794; text-align: center; padding: 40px 10px; }
 
 #cityZillow .zcard { display: flex; gap: 10px; align-items: center; min-height: 52px;
@@ -175,14 +174,12 @@ body.mode-city.state-playing #raceLights .go { display: none !important; }
 #cityZillow .ztier { font-size: 10px; font-weight: 800; }
 #cityZillow .zaddr { font-size: 11px; color: #9fb0c6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cityZillow .zsub { font-size: 11px; color: #7f8794; margin-top: 1px; text-transform: capitalize; }
-#cityZillow .zowner { font-size: 11.5px; color: #8a93a3; margin-top: 2px; }
 #cityZillow .zright { display: grid; grid-template-columns: 112px minmax(88px, 120px) minmax(156px, auto); align-items: center; justify-items: end; gap: 8px; min-width: 360px; }
 #cityZillow .zval { font-size: 15px; font-weight: 700; color: var(--money, #7ed957); font-variant-numeric: tabular-nums; }
 #cityZillow .zincome { font-size: 11px; white-space: nowrap; }
 #cityZillow .zincome.up { color: #9be8b4; }
 #cityZillow .zincome.down { color: #ff9e90; }
 #cityZillow .zincome.muted { color: #7f8794; }
-#cityZillow .zrent { font-size: 11px; color: #ffb870; }
 #cityZillow .zacts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 #cityZillow .zacts-inline { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; margin-top: 0; }
 #cityZillow .zbtn { border: none; border-radius: 8px; padding: 5px 9px; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: .12s; white-space: nowrap; }
@@ -203,14 +200,6 @@ body.mode-city.state-playing #raceLights .go { display: none !important; }
 #cityZillow .zb-own { background: rgba(91, 139, 255, .22); color: #8fb6ff; }
 #cityZillow .zb-illegal { background: rgba(226, 87, 75, .2); color: #ff8a7a; }
 
-#cityZillow .zrank { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
-  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 8px; font-size: 14px; }
-#cityZillow .zrank.me { border-color: #4f8bff; background: rgba(47, 111, 237, .14); }
-#cityZillow .zrnum { width: 34px; color: #ffd166; font-weight: 700; }
-#cityZillow .zrname { flex: 1; font-weight: 600; }
-#cityZillow .zrcount { font-size: 12px; color: #8a93a3; }
-#cityZillow .zrval { font-weight: 700; color: var(--money, #7ed957); min-width: 92px; text-align: right; font-variant-numeric: tabular-nums; }
-#cityZillow .zfoot { padding: 8px 16px; border-top: 1px solid #232b34; font-size: 11px; color: #6b7480; text-align: center; }
 #cityZillow .zpager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 4px 0 0; font-size: 12px; color: #9fb0c6; }
 #cityZillow .zpager b { color: #ffd166; }
 

@@ -12,6 +12,20 @@
    low mountain cabin. A winding causeway connects the
    south edge down toward the speedway island.
 
+   REAL GEOLOGY (MOUNT_EROSION_V4, world/mountain_detail.js): both massifs
+   were hand-placed Gaussian lobes soft-maxed together under a light ridged-fbm
+   "crag" multiplier — no drainage, no bedding, no cirques, no talus. They now
+   run the shared erosion stack (domain-warped ridged multifractal crests,
+   derivative-damped fbm, branching V-valleys, cirque headwalls, warped strata
+   benches, talus aprons) over the SAME authored summits, and are shaded from
+   the same bedding field so the colour bands sit on the geometric risers.
+   Snow is a real coverage model (slope + sun aspect + noise), not an altitude
+   contour. Meshes are denser and ADAPTIVE: a CDF over each mountain's own
+   height profile spends the grid lines on summits and cliffs instead of the
+   flat lake/resort valley. Both mountains keep ONE function feeding the mesh
+   AND CBZ.registerCityGroundHeight, via a shared bilinear memo — mesh and
+   collision cannot fork.
+
    DRAW-CALL DISCIPLINE: pines / rocks / drifts / lift-chairs / guardrail
    posts are InstancedMesh (one draw call each); the massif is one mesh.
    Bright point-sprite snowfall is disabled: from aircraft it read as dots
@@ -105,12 +119,61 @@
   }
   function snowRunXAt(z) { return snowRunXAtA(z - DZ) + DX; }
 
-  // AUTHORED-frame field — every constant in the body is stage-1
-  // coordinates; the world-facing snowTerrainHeightAt below maps through
-  // the dial, so the whole massif translates rigidly with the biome.
-  function snowTerrainHeightAtA(x, z) {
-    if (x < A_MINX || x > A_MAXX || z < A_MINZ || z > A_MAXZ) return 0;
+  // =====================================================================
+  //  MOUNT MERCY — from Gaussian blobs to real geology (MOUNT_EROSION_V4).
+  // =====================================================================
+  //  The old field was five hand-placed Gaussian lobes soft-maxed together and
+  //  multiplied by a light ridged-fbm "crag" term. It had no drainage, no
+  //  bedding, no cirques and no talus: geologically arbitrary. The V4 field
+  //  keeps the AUTHORED SILHOUETTE (the same five summits, the same shoulder,
+  //  the same footprint — the ski run, lodge pads and lift all still land where
+  //  they were designed) and replaces the crag multiplier with the real erosion
+  //  stack from world/mountain_detail.js:
+  //     1. domain-warped RIDGED MULTIFRACTAL  → sinuous, connected crest lines
+  //     2. DERIVATIVE-DAMPED fbm ("Quilez")   → detail dies on ground that is
+  //        already steep, so faces weather into planes instead of noise mush
+  //     3. DRAINAGE NETWORK                   → branching V-valleys with a flat
+  //        gravel bed, converging downhill
+  //     4. CIRQUE headwalls on each summit's shaded flank
+  //     5. STRATA TERRACING                   → warped, non-parallel bedding
+  //        benches and risers = actual cliff bands, aligned with the colour
+  //        bands the shading pass paints from the SAME field
+  //     6. TALUS aprons building out from the foot of those cliffs
+  //
+  //  MATH-GATE SAFETY (see mountain_detail.js's LAW 1). EVERY term above is a
+  //  MULTIPLIER, and the multiplier is clamped so it can never exceed 0.95 —
+  //  exactly the value the old `crag` term took wherever highFace→0. There is
+  //  no additive term anywhere in this field (the talus apron is expressed as
+  //  the carve being filled back in, not as material added). So at any sample
+  //  the old field left at or below ~26u — which is where the gate's 25u
+  //  mountain threshold lives — highFace is ~0 and the new factor is <= 0.95
+  //  <= the old one: the new field is never taller there. The set of cells the
+  //  gate counts as "mountain" can only shrink, never grow.
+  const S_RIDGE = 0x4d31, S_ERODE = 0x4d32, S_RIVER = 0x4d33;
+  const S_STRATA = 0x4d34, S_TALUS = 0x4d35, S_FINE = 0x4d36, S_SNOW = 0x4d37;
+  const S_GRIDGE = 0x6e41, S_GERODE = 0x6e42, S_GRIVER = 0x6e43;
+  const S_GSTRATA = 0x6e44, S_GTALUS = 0x6e45, S_GFINE = 0x6e46, S_GSNOW = 0x6e47;
+  const HAS_KIT = !!(CBZ.mtnErode && CBZ.mtnRidgeMF && CBZ.mtnDrainage &&
+                     CBZ.mtnTerrace && CBZ.mtnCirque && CBZ.mtnTalus && CBZ.mtnHiGate);
+  const EROSION_V4 = function () { return HAS_KIT && CFGS.MOUNT_EROSION_V4 !== false; };
+  // the five authored summits, reused for cirque placement and for the
+  // adaptive mesh's density profile (authored frame)
+  const MERCY_PEAKS = [
+    { x: 315, z: -1720, r0: 26, r1: 172, w: 1.00 },
+    { x: 115, z: -1690, r0: 22, r1: 142, w: 0.86 },
+    { x: 545, z: -1705, r0: 26, r1: 162, w: 0.94 },
+    { x: 700, z: -1645, r0: 20, r1: 130, w: 0.78 },
+    { x: 410, z: -1570, r0: 28, r1: 178, w: 0.70 },
+  ];
+  const _erO = { v: 0, slope: 0, gx: 0, gz: 0 };
+  const _drO = { carve: 0, bed: 0, terrace: 0, bank: 0, t: 1 };
+  const _tlO = { smooth: 0, fill: 0 };
 
+  // The EXPENSIVE part: everything that does not depend on build-time state
+  // (no piste, no building pads, no edge feather). Memoised below — the mesh
+  // vertex loop and the registered physics provider both read the memo through
+  // ONE function, so they cannot fork.
+  function mercyMacroA(x, z) {
     // Domain-warped ridged lobes form several summits and real saddles.  A
     // max-composition retains the silhouette of individual peaks; the broad
     // shoulder underneath makes them one geological mass rather than props.
@@ -132,17 +195,130 @@
       Math.pow(p3, 8) + Math.pow(p4, 8), 1 / 8
     );
     const north = smooth01((-z - 1350) / 285);
-    // Broad drainage channels plus finer radial fluting make the Gaussian mass
-    // read as eroded geology.  The multiplier is continuous and bounded, so the
-    // rideable shoulders stay rounded and the piste below can still grade them.
     const mass = shoulder + peaks;
-    const macroRidge = ridgedAt((x + 880) * 0.0062, (z - 420) * 0.0062);
-    const fineRidge = ridgedAt((x - 130) * 0.0175, (z + 760) * 0.0175);
-    const radialPhase = Math.atan2(wz + 1720, wx - 315) * 9 + Math.hypot(wx - 315, wz + 1720) * 0.018;
-    const radial = 0.5 + 0.5 * Math.cos(radialPhase);
     const highFace = smooth01((mass - 20) / 105);
-    const crag = mix(0.95, 0.76 + macroRidge * 0.16 + fineRidge * 0.07 + radial * 0.07, highFace);
-    let h = Math.max(0, mass * crag * north);
+
+    if (!EROSION_V4()) {
+      // ---- LEGACY crag path, byte-identical (one-line revert) ------------
+      const macroRidge = ridgedAt((x + 880) * 0.0062, (z - 420) * 0.0062);
+      const fineRidge = ridgedAt((x - 130) * 0.0175, (z + 760) * 0.0175);
+      const radialPhase = Math.atan2(wz + 1720, wx - 315) * 9 + Math.hypot(wx - 315, wz + 1720) * 0.018;
+      const radial = 0.5 + 0.5 * Math.cos(radialPhase);
+      const crag = mix(0.95, 0.76 + macroRidge * 0.16 + fineRidge * 0.07 + radial * 0.07, highFace);
+      return Math.max(0, mass * crag * north);
+    }
+
+    // 1. sinuous ridgelines — a domain-warped ridged multifractal sharpens the
+    //    crest lines without moving a single authored summit.
+    const ridge = CBZ.mtnRidgeMF(x, z, {
+      oct: 5, cell: 260, lac: 2.07, gain: 0.54, sharp: 1.6,
+      warp: 130, warpCell: 700, salt: S_RIDGE,
+    });
+    // 2. derivative-damped fbm — er.slope is the bedrock steepness signal the
+    //    talus/terrace/strata terms all key off.
+    const er = CBZ.mtnErode(x, z, {
+      oct: 5, cell: 210, lac: 2.03, gain: 0.5, damp: 1.35,
+      warp: 90, warpCell: 620, salt: S_ERODE,
+    }, _erO);
+    // 3. drainage — branching V-valleys, deepest between the crests
+    const dr = CBZ.mtnDrainage(x, z, {
+      oct: 4, cell: 760, width: 0.34, warp: 190, salt: S_RIVER,
+    }, _drO);
+
+    // fine rock-face relief, ~11-27u — the scale the (now 2.2 u/vertex) mesh
+    // resolves and the scale the old field had nothing at. Gated by STEEPNESS:
+    // broken rock on the cliff faces, smooth on the rideable shoulders and the
+    // piste, nothing in the valley. Inside the memo, so it costs nothing extra.
+    const chipA = CBZ.mtnNoise(x, z, 27, S_FINE);
+    const chipB = CBZ.mtnNoise(x, z, 11, S_FINE + 3);
+    const chip = (1 - Math.abs(2 * chipA - 1)) * 0.6 + (1 - Math.abs(2 * chipB - 1)) * 0.4;
+    const faceRough = highFace * smooth01((er.slope - 0.08) / 0.32);
+
+    let f = 0.95
+      - 0.30 * highFace * (1 - Math.pow(ridge, 0.60))                      // flanks fall away from the crest
+      - 0.24 * highFace * dr.carve * (1 - 0.42 * dr.bed)                   // valleys, flat-bottomed
+      - 0.09 * highFace * clamp01(-er.v * 2.2)                             // eroded hollows
+      - 0.15 * faceRough * (1 - chip)                                      // chipped rock faces
+      - 0.06 * highFace * (1 - er.slope) * clamp01(0.55 - er.v)            // damped roughness on gentle ground
+      - 0.05 * (1 - highFace) * dr.carve * dr.carve;                       // the valley floor drains too
+    if (f > 0.95) f = 0.95; else if (f < 0.36) f = 0.36;
+    // SUMMIT GUARD — a real peak is the RESISTANT remnant left standing while
+    // everything around it is stripped away; erosion that eats the summit as
+    // hard as the flanks just makes a lower, rounder hill. Holding the five
+    // authored summits at the baseline while the flanks lose up to 60% is what
+    // turns "eroded" into "dramatic".
+    let guard = 0;
+    for (let gi = 0; gi < MERCY_PEAKS.length; gi++) {
+      const pk = MERCY_PEAKS[gi];
+      const gd = 1 - smooth01((Math.hypot(x - pk.x, z - pk.z) - 16) / 52);
+      if (gd > guard) guard = gd;
+    }
+    if (guard > 0) f = f + (0.95 - f) * guard;
+    // 4. TALUS — rockfall piles into an apron at the foot of every cliff, so
+    //    the apron is LESS eroded than the face above it: a fuller, smoother
+    //    wedge resting near the angle of repose. Expressed as the carve being
+    //    FILLED BACK IN toward the 0.95 baseline rather than as material being
+    //    added, so it needs no height gate at all — LAW 1 holds unconditionally
+    //    (f can never exceed 0.95, the value the old `crag` took on low ground).
+    const tl = CBZ.mtnTalus(x, z, { alt: clamp01(mass / 240), steep: er.slope, cell: 124, salt: S_TALUS }, _tlO);
+    // mtnHiGate(mass) keeps the apron on ground that is already cliff-height:
+    // it is identically 0 below 45u, so filling the carve back in can never
+    // raise a sample in the 20-26u band above what the old `crag` term gave.
+    f = f + (0.95 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * CBZ.mtnHiGate(mass);
+    // 5. cirque headwalls on the shaded (NE) flank of every summit
+    f *= CBZ.mtnCirque(x, z, MERCY_PEAKS, { depth: 0.17, shadeDir: -2.15 });
+
+    let h = Math.max(0, mass * f * north);
+    // 6. STRATA — quantise the steep high faces into warped bedding benches.
+    //    mtnTerrace is <= h by construction, so LAW 1 still holds.
+    h = CBZ.mtnTerrace(h, x, z, {
+      amount: 0.80 * highFace * smooth01((er.slope - 0.05) / 0.28),
+      step: 16, dip: 24, dipCell: 560, dipCell2: 155, salt: S_STRATA,
+    });
+    return h;
+  }
+
+  // Fine rock-face relief, ~9-24u wavelength — the scale a 2.2 u/vertex mesh
+  // can actually resolve and the scale the old field had NOTHING at (its
+  // ridging bottomed out around 60u). Kept OUTSIDE the memo so the cache cell
+  // size can never wash it out; a pure multiplier <= 1 (LAW 1).
+  // Sub-memo-cell grit, ~4-6u: below the mesh's own resolution, so it exists
+  // purely for FOOT-LEVEL feel (the player's collision capsule and the
+  // snowboard read it) and for normals sampled at e=3.0. Kept outside the memo
+  // because a 2.5u grid cannot carry it. Multiplier <= 1 (LAW 1).
+  function mercyFineA(x, z, h) {
+    if (!(h > 8) || !HAS_KIT || !EROSION_V4()) return 1;
+    const alt = smooth01((h - 22) / 95);
+    const a = CBZ.mtnNoise(x, z, 6.5, S_FINE + 7);
+    return 1 - 0.012 * alt * (1 - Math.abs(2 * a - 1));
+  }
+
+  // The memo. Cell 2.5 over the biome rect: the macro field's finest feature
+  // is ~40u, so bilinear interpolation at 2.5u is exact to well under a
+  // centimetre, while cutting the erosion stack's evaluation count by ~4x
+  // across the (much denser) mesh. MESH AND PHYSICS BOTH GO THROUGH HERE.
+  let _mercyMacro = null;
+  function mercyMacro(x, z) {
+    if (!_mercyMacro) {
+      _mercyMacro = (CBZ.mtnGridCache && HAS_KIT)
+        ? CBZ.mtnGridCache({
+            fn: mercyMacroA, cell: 2.5,
+            minX: A_MINX - 8, maxX: A_MAXX + 8, minZ: A_MINZ - 8, maxZ: A_MAXZ + 8,
+          })
+        : mercyMacroA;
+    }
+    return _mercyMacro(x, z);
+  }
+  CBZ.mtnMercyBounds = { minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ };
+
+  // AUTHORED-frame field — every constant in the body is stage-1
+  // coordinates; the world-facing snowTerrainHeightAt below maps through
+  // the dial, so the whole massif translates rigidly with the biome.
+  function snowTerrainHeightAtA(x, z) {
+    if (x < A_MINX || x > A_MAXX || z < A_MINZ || z > A_MAXZ) return 0;
+
+    let h = mercyMacro(x, z);
+    h *= mercyFineA(x, z, h);
 
     // Low polar hummocks keep the valley/ice field from being a mathematically
     // perfect plane, but remain subtle enough for the resort and lake.
@@ -193,7 +369,11 @@
 
   function snowTerrainNormalAt(x, z, out) {
     out = out || new THREE.Vector3();
-    const e = 2.2;
+    // 3.0, not 2.2: the macro field is read through a 2.5u memo grid, and a
+    // central difference narrower than the memo cell would amplify the memo's
+    // bilinear creases into visible faceting. One cell + a margin samples the
+    // real surface slope instead of the interpolant's seams.
+    const e = 3.0;
     const dx = snowTerrainHeightAt(x + e, z) - snowTerrainHeightAt(x - e, z);
     const dz = snowTerrainHeightAt(x, z + e) - snowTerrainHeightAt(x, z - e);
     return out.set(-dx / (2 * e), 1, -dz / (2 * e)).normalize();
@@ -262,8 +442,18 @@
 
   // AUTHORED-frame field (lobes/erosion constants are stage-1 coordinates);
   // the world-facing greaterMercyHeightAt below maps through the dial.
-  function greaterMercyHeightAtA(x, z) {
-    if (x < GREAT_A_MINX || x > GREAT_A_MAXX || z < GREAT_A_MINZ || z > GREAT_A_MAXZ) return 0;
+  //
+  // Same V4 treatment as Mount Mercy, tuned one scale coarser (these summits
+  // are 2-8x larger and are read at kilometre distances, so the erosion works
+  // at ~600u crest wavelength instead of ~260u and the strata beds are 34u
+  // thick instead of 16u). The Gaussian lobe union, the 4σ reject, the family
+  // ribs and the whole footprint are UNCHANGED — this only replaces the two
+  // flat ridged multipliers with the shared erosion stack.
+  const GREAT_MACRO_PEAKS = GREAT_MAJOR.map(function (m) {
+    const s = Math.pow(m.s, 0.62);
+    return { x: m.x, z: m.z, r0: 40 + 30 * s, r1: 150 + 230 * s, w: 0.85 };
+  });
+  function greaterMercyMacroA(x, z) {
     let sum2 = 0;
     for (let i = 0; i < GREAT_LOBES.length; i++) {
       const l = GREAT_LOBES[i];
@@ -290,28 +480,111 @@
     }
     if (sum2 <= 0.0001) return 0;
     let h = Math.sqrt(sum2);
-    // Two continuous ridged fields erode gullies and branching faces into the
-    // silhouette. Their floor stays high enough that no sharp boolean cuts or
-    // disconnected spikes can appear.
-    const macro = ridgedAt(x * 0.0044 + 61, z * 0.0044 - 27);
-    const detail = ridgedAt(x * 0.0105 - 18, z * 0.0105 + 43);
-    const erosion = 0.64 + Math.min(1, macro * 0.68 + detail * 0.32) * 0.36;
     const soft = 0.95 + 0.08 * noiseAt(x * 0.0017 + 61, z * 0.0017 - 27);
     const southJoin = smooth01((GREAT_A_MAXZ - z) / 155);
     const edge = Math.min(x - GREAT_A_MINX, GREAT_A_MAXX - x, z - GREAT_A_MINZ);
-    h *= erosion * soft * southJoin * smooth01(edge / 125);
+    const skirt = soft * southJoin * smooth01(edge / 125);
+
+    if (!EROSION_V4()) {
+      // ---- LEGACY erosion path, byte-identical (one-line revert) ---------
+      const macro = ridgedAt(x * 0.0044 + 61, z * 0.0044 - 27);
+      const detail = ridgedAt(x * 0.0105 - 18, z * 0.0105 + 43);
+      const erosion = 0.64 + Math.min(1, macro * 0.68 + detail * 0.32) * 0.36;
+      return Math.max(0, h * erosion * skirt);
+    }
+
+    const highFace = smooth01((h - 40) / 220);
+    const ridge = CBZ.mtnRidgeMF(x, z, {
+      oct: 5, cell: 600, lac: 2.07, gain: 0.55, sharp: 1.7,
+      warp: 300, warpCell: 1700, salt: S_GRIDGE,
+    });
+    const er = CBZ.mtnErode(x, z, {
+      oct: 5, cell: 470, lac: 2.03, gain: 0.5, damp: 1.25,
+      warp: 210, warpCell: 1400, salt: S_GERODE,
+    }, _erO);
+    const dr = CBZ.mtnDrainage(x, z, {
+      oct: 4, cell: 1750, width: 0.32, warp: 430, salt: S_GRIVER,
+    }, _drO);
+    const gchipA = CBZ.mtnNoise(x, z, 76, S_GFINE);
+    const gchipB = CBZ.mtnNoise(x, z, 30, S_GFINE + 3);
+    const gchip = (1 - Math.abs(2 * gchipA - 1)) * 0.6 + (1 - Math.abs(2 * gchipB - 1)) * 0.4;
+    const gFace = highFace * smooth01((er.slope - 0.08) / 0.32);
+    let f = 0.80                                     // ~ the legacy `erosion` mean
+      - 0.30 * highFace * (1 - Math.pow(ridge, 0.58))
+      - 0.24 * highFace * dr.carve * (1 - 0.40 * dr.bed)
+      - 0.09 * highFace * clamp01(-er.v * 2.2)
+      - 0.18 * gFace * (1 - gchip)
+      - 0.07 * highFace * (1 - er.slope) * clamp01(0.55 - er.v)
+      - 0.06 * (1 - highFace) * dr.carve * dr.carve;
+    if (f > 0.80) f = 0.80; else if (f < 0.32) f = 0.32;
+    let gguard = 0;
+    for (let gi = 0; gi < GREAT_MACRO_PEAKS.length; gi++) {
+      const pk = GREAT_MACRO_PEAKS[gi];
+      const gd = 1 - smooth01((Math.hypot(x - pk.x, z - pk.z) - pk.r0 * 0.6) / (pk.r0 * 2.2));
+      if (gd > gguard) gguard = gd;
+    }
+    if (gguard > 0) f = f + (0.80 - f) * gguard;
+    // talus aprons — same fill-the-carve-back-in formulation as Mount Mercy,
+    // so the factor stays <= 1 and no additive gate is needed
+    const tl = CBZ.mtnTalus(x, z, { alt: clamp01(h / 380), steep: er.slope, cell: 280, salt: S_GTALUS }, _tlO);
+    f = f + (0.80 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * CBZ.mtnHiGate(h);
+    f *= CBZ.mtnCirque(x, z, GREAT_MACRO_PEAKS, { depth: 0.15, shadeDir: -2.15 });
+    h = Math.max(0, h * f * skirt);
+    // strata benches, one scale up from Mount Mercy's
+    h = CBZ.mtnTerrace(h, x, z, {
+      amount: 0.74 * highFace * smooth01((er.slope - 0.05) / 0.28),
+      step: 34, dip: 52, dipCell: 1250, dipCell2: 340, salt: S_GSTRATA,
+    });
+    return h;
+  }
+  // Fine face relief for the range — 26-70u, the scale its ~7u/vertex mesh
+  // resolves. Multiplier <= 1 (LAW 1), kept outside the memo.
+  function greaterFineA(x, z, h) {
+    if (!(h > 14) || !HAS_KIT || !EROSION_V4()) return 1;
+    const alt = smooth01((h - 30) / 220);
+    const a = CBZ.mtnNoise(x, z, 15, S_GFINE + 7);
+    return 1 - 0.014 * alt * (1 - Math.abs(2 * a - 1));
+  }
+  // memo: cell 6 over a 3.2 x 2.3 km envelope (~207k floats). The clearings
+  // list is applied OUTSIDE it, because it is build-time state.
+  let _greatMacro = null;
+  function greatMacro(x, z) {
+    if (!_greatMacro) {
+      _greatMacro = (CBZ.mtnGridCache && HAS_KIT)
+        ? CBZ.mtnGridCache({
+            fn: greaterMercyMacroA, cell: 6,
+            minX: GREAT_A_MINX - 12, maxX: GREAT_A_MAXX + 12,
+            minZ: GREAT_A_MINZ - 12, maxZ: GREAT_A_MAXZ + 12,
+          })
+        : greaterMercyMacroA;
+    }
+    return _greatMacro(x, z);
+  }
+  function greaterMercyHeightAtA(x, z) {
+    if (x < GREAT_A_MINX || x > GREAT_A_MAXX || z < GREAT_A_MINZ || z > GREAT_A_MAXZ) return 0;
+    let h = greatMacro(x, z);
+    if (h <= 0) return 0;
+    h *= greaterFineA(x, z, h);
     for (let i = 0; i < GREAT_BUILDING_CLEARINGS.length; i++) {
       const c = GREAT_BUILDING_CLEARINGS[i];
       h *= flatRectFactor(x, z, c.cx, c.cz, c.hx, c.hz, c.feather);
     }
     return Math.max(0, h);
   }
+  CBZ.mtnGreatBounds = { minX: GREAT_MINX, maxX: GREAT_MAXX, minZ: GREAT_MINZ, maxZ: GREAT_MAXZ };
+  // AUTHORED-frame fields exposed for numeric probes/tooling (the world-facing
+  // dial-mapped oracles are still published by the landmass builder, and they
+  // remain the ONE function that feeds both the mesh and the physics floor —
+  // these are the same closures, not a second implementation).
+  CBZ.mtnMercyFieldA = snowTerrainHeightAtA;
+  CBZ.mtnGreatFieldA = greaterMercyHeightAtA;
   // world-facing oracle — dial-mapped.
   function greaterMercyHeightAt(x, z) { return greaterMercyHeightAtA(x - DX, z - DZ); }
 
   function greaterMercyNormalAt(x, z, out) {
     out = out || new THREE.Vector3();
-    const e = 5.5;
+    // >= the 6u memo cell, for the same reason Mount Mercy's is >= its 2.5u.
+    const e = 7.5;
     const dx = greaterMercyHeightAt(x + e, z) - greaterMercyHeightAt(x - e, z);
     const dz = greaterMercyHeightAt(x, z + e) - greaterMercyHeightAt(x, z - e);
     return out.set(-dx / (2 * e), 1, -dz / (2 * e)).normalize();
@@ -478,9 +751,55 @@
         return;
       }
 
-      const segX = 260, segZ = 200;
-      const geo = new THREE.PlaneGeometry(HX * 2, HZ * 2, segX, segZ);
-      geo.rotateX(-Math.PI / 2);
+      // ---- MESH RESOLUTION -------------------------------------------
+      // 260x200 over 840x660 was ~3.2 u/vertex, which physically cannot
+      // resolve a cliff band, a bedding riser or a talus lobe — the old colour
+      // code painted "cliff"/"scour"/"brokenFace" onto geometry that was
+      // smooth. MOUNT_MESH_DENSITY raises the count (1.45 → ~2.2 u/vertex) and
+      // MOUNT_ADAPTIVE_GRID then REDISTRIBUTES those grid lines: a CDF over the
+      // mountain's own height profile puts them on the summits and cliffs and
+      // takes them off the dead-flat lake/resort valley, so the effective
+      // resolution on the peaks is ~1.5 u/vertex at no extra triangle cost.
+      const DENS = Math.max(0.5, Math.min(2.4, +CFGS.MOUNT_MESH_DENSITY || 1));
+      const segX = Math.round(260 * DENS), segZ = Math.round(200 * DENS);
+      // density profiles: the tallest ground along each axis, plus an explicit
+      // floor under the ski-run corridor so the piste never loses resolution.
+      let xs = null, zs = null;
+      if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry) {
+        const PN = 40;
+        function colMax(fixedX) {
+          let m = 0;
+          for (let k = 0; k <= PN; k++) {
+            const z = A_MINZ + (A_MAXZ - A_MINZ) * (k / PN);
+            const v = mercyMacro(fixedX, z);
+            if (v > m) m = v;
+          }
+          return m;
+        }
+        function rowMax(fixedZ) {
+          let m = 0;
+          for (let k = 0; k <= PN; k++) {
+            const x = A_MINX + (A_MAXX - A_MINX) * (k / PN);
+            const v = mercyMacro(x, fixedZ);
+            if (v > m) m = v;
+          }
+          return m;
+        }
+        const PEAK = 260;
+        xs = CBZ.mtnAdaptiveAxis(segX, A_MINX, A_MAXX, function (x) {
+          const run = (x > 444 && x < 500) ? 0.9 : 0;      // ski-run corridor
+          return Math.max(run, Math.pow(Math.min(1, colMax(x) / PEAK), 0.75));
+        }, { floor: 0.36 });
+        zs = CBZ.mtnAdaptiveAxis(segZ, A_MINZ, A_MAXZ, function (z) {
+          const run = (z > -1715 && z < -1265) ? 0.55 : 0;
+          return Math.max(run, Math.pow(Math.min(1, rowMax(z) / PEAK), 0.75));
+        }, { floor: 0.36 });
+        // authored frame → mesh-local (the mesh sits at CX,CZ)
+        for (let i = 0; i < xs.length; i++) xs[i] = xs[i] + DX - CX;
+        for (let i = 0; i < zs.length; i++) zs[i] = zs[i] + DZ - CZ;
+      }
+      const geo = xs ? CBZ.mtnGridGeometry(xs, zs)
+                     : (function () { const g = new THREE.PlaneGeometry(HX * 2, HZ * 2, segX, segZ); g.rotateX(-Math.PI / 2); return g; })();
       const pa = geo.attributes.position;
       const colors = new Float32Array(pa.count * 3);
       // Natural-colour snow is nearly neutral white; only sky-lit shadow planes
@@ -491,6 +810,13 @@
       const lakeIce = new THREE.Color(COL.ice), lakeIceDeep = new THREE.Color(COL.iceDeep);
       const granite = new THREE.Color(0x5d5952), graniteDark = new THREE.Color(0x262b2e);
       const tundraEdge = new THREE.Color(0x66745d);
+      // Alpine soil/tundra/turf — what shows on SHALLOW ground below the snow.
+      // The old field had no soil at all: every non-snow pixel was granite, so
+      // gentle benches read as bare rock slabs.
+      const alpSoil = new THREE.Color(0x5c6250), alpTurf = new THREE.Color(0x687059);
+      const screeCol = new THREE.Color(0x7a7469);
+      const STRATA = HAS_KIT && CFGS.MOUNT_STRATA_V1 !== false;
+      const _mixOut = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
       for (let i = 0; i < pa.count; i++) {
         const wx = CX + pa.getX(i), wz = CZ + pa.getZ(i);
@@ -500,29 +826,57 @@
         const slope = 1 - n.y;
         const grain = noiseAt(wx * 0.027 + 9, wz * 0.027 - 4);
         const bedrock = noiseAt(wx * 0.0081 - 37, wz * 0.0081 + 22);
-        // Snow loads broad shoulders and gullies. Granite begins only on true
-        // cliff faces, but is stronger there, producing clear rock windows
-        // instead of a weak grey wash over the entire mountain.
-        const cliff = smooth01((slope - 0.04) / 0.16);
-        const brokenFace = smooth01((bedrock - 0.50) / 0.20);
-        const highSnowLoad = smooth01((y - 14) / 86);
-        const scour = cliff * smooth01((grain - 0.64) / 0.25);
-        // Every steep face keeps a narrow granite undertone; the bedrock field
-        // then opens a smaller number of strong, readable rock windows. This
-        // separates exposed geology from blue snow-shadow without reducing the
-        // overwhelmingly white loaded shoulders/crowns.
-        const rockMix = Math.min(0.88,
-          cliff * (0.16 + brokenFace * 0.78) * (1 - highSnowLoad * 0.14) + scour * 0.05);
         const cold = smooth01((3.5 - y) / 3.5) * (0.18 + 0.16 * grain);
         const faceLight = Math.max(0, n.dot(light));
-        c.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
-        c.lerp(iceBlue, cold);
-        if (rockMix > 0) {
-          rc.copy(granite).lerp(graniteDark,
-            smooth01((slope - 0.27) / 0.39) * (0.68 + (1 - faceLight) * 0.32));
-          // Thin altitude bands break the single-grey-clay read on cliffs.
-          rc.multiplyScalar(0.94 + 0.06 * Math.sin(y * 0.19 + grain * 4));
-          c.lerp(rc, rockMix);
+        if (STRATA) {
+          // --- GROUND MATERIAL: soil on shallow ground, banded rock on steep.
+          // mtnStrataTint returns the "how bare is the bedrock here" weight and
+          // writes a WARPED, non-parallel, per-bed-hued rock colour — the same
+          // bedding field mtnTerrace used to cut the actual benches, so the
+          // colour bands land ON the geometric risers instead of floating
+          // across them like the old sin(y*0.19) ripple did.
+          const bare = CBZ.mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
+            rock: granite, rockDark: graniteDark,
+            // bedding params IDENTICAL to the mtnTerrace call in mercyMacroA,
+            // so the colour bands sit exactly on the geometric risers.
+            step: 16, dip: 24, dipCell: 560, dipCell2: 155,
+            slope0: 0.05, slope1: 0.30, salt: S_STRATA, aspect: 1, mixOut: _mixOut,
+          });
+          // soil/turf base, drier and greyer as it climbs toward the treeline
+          c.copy(alpTurf).lerp(alpSoil, smooth01((y - 8) / 70));
+          // scree/talus band: below the cliffs the ground is loose broken rock
+          const scree = smooth01((bedrock - 0.42) / 0.30) * smooth01((slope - 0.07) / 0.13) *
+                        (1 - smooth01((y - 150) / 90));
+          c.lerp(screeCol, scree * 0.55);
+          c.lerp(rc, Math.min(0.94, bare * (0.55 + 0.45 * smooth01((bedrock - 0.34) / 0.34))));
+          // --- SNOW COVERAGE: altitude sets the line, slope sheds it, sun
+          // aspect raises it on lit faces and drops it on shaded ones, two
+          // noise octaves feather the edge. faceLight was already being
+          // computed here and thrown away on brightness alone.
+          const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
+            line: 24, band: 58, aspect: 40, wob: 22, shed0: 0.13, shed1: 0.50, salt: S_SNOW,
+          });
+          rc.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
+          rc.lerp(iceBlue, cold);
+          c.lerp(rc, cover);
+          // wind-scoured crowns keep a hint of blue-white even where rock wins
+          c.lerp(iceBlue, cold * (1 - cover) * 0.5);
+        } else {
+          // ---- LEGACY colour path (MOUNT_STRATA_V1 = false) ----------------
+          const cliff = smooth01((slope - 0.04) / 0.16);
+          const brokenFace = smooth01((bedrock - 0.50) / 0.20);
+          const highSnowLoad = smooth01((y - 14) / 86);
+          const scour = cliff * smooth01((grain - 0.64) / 0.25);
+          const rockMix = Math.min(0.88,
+            cliff * (0.16 + brokenFace * 0.78) * (1 - highSnowLoad * 0.14) + scour * 0.05);
+          c.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
+          c.lerp(iceBlue, cold);
+          if (rockMix > 0) {
+            rc.copy(granite).lerp(graniteDark,
+              smooth01((slope - 0.27) / 0.39) * (0.68 + (1 - faceLight) * 0.32));
+            rc.multiplyScalar(0.94 + 0.06 * Math.sin(y * 0.19 + grain * 4));
+            c.lerp(rc, rockMix);
+          }
         }
         // The frozen lake is the terrain skin itself. The old ice disc and
         // three nearly-coplanar crack rings stacked above this flat basin and
@@ -548,15 +902,18 @@
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
       geo.computeVertexNormals();
       geo.computeBoundingSphere();
-      // Lighting direction is already baked per vertex above. A second Lambert
-      // multiply turned the distant white range slate-blue; Basic here is
-      // intentionally matte (no specular/gloss) and preserves those authored
-      // normal/slope shades at every time of day.
-      const g = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0xffffff, vertexColors: true, flatShading: false, fog: false,
+      // Lighting direction is already baked per vertex above. Basic keeps that
+      // authored snow/rock value without a second Lambert multiply, while the
+      // shared shallow terrain-fog scale gives the massif atmospheric depth at
+      // distance instead of leaving a self-lit white cardboard cutout.
+      const groundMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, vertexColors: true, flatShading: false, fog: true,
         polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
-      }));
+      });
+      if (CBZ.terrainFogScale) CBZ.terrainFogScale(groundMat, 0.12);
+      const g = new THREE.Mesh(geo, groundMat);
       g.position.set(CX, 0, CZ);
+      g.matrixAutoUpdate = false; g.updateMatrix();
       g.receiveShadow = true;
       g.castShadow = true;
       g.userData.terrain = true;
@@ -588,9 +945,37 @@
       const gcx = (GREAT_MINX + GREAT_MAXX) * 0.5;
       const gcz = (GREAT_MINZ + GREAT_MAXZ) * 0.5;
       const gw = GREAT_MAXX - GREAT_MINX, gd = GREAT_MAXZ - GREAT_MINZ;
-      const segX = 300, segZ = 216;
-      const geo = new THREE.PlaneGeometry(gw, gd, segX, segZ);
-      geo.rotateX(-Math.PI / 2);
+      // Same adaptive treatment as Mount Mercy: raise the count, then spend it
+      // on the summits. This range's rectangle is mostly EMPTY (zero-height
+      // cells are index-stripped below), so a uniform grid wasted most of its
+      // vertices on triangles that get thrown away — the CDF puts them on the
+      // ten families instead.
+      const DENSG = Math.max(0.5, Math.min(2.4, +CFGS.MOUNT_MESH_DENSITY || 1)) * 0.9;
+      const segX = Math.round(300 * DENSG), segZ = Math.round(216 * DENSG);
+      let gxs = null, gzs = null;
+      if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry) {
+        const PN = 44, GPEAK = 400;
+        gxs = CBZ.mtnAdaptiveAxis(segX, GREAT_A_MINX, GREAT_A_MAXX, function (x) {
+          let m = 0;
+          for (let k = 0; k <= PN; k++) {
+            const z = GREAT_A_MINZ + (GREAT_A_MAXZ - GREAT_A_MINZ) * (k / PN);
+            const v = greatMacro(x, z); if (v > m) m = v;
+          }
+          return Math.pow(Math.min(1, m / GPEAK), 0.7);
+        }, { floor: 0.30 });
+        gzs = CBZ.mtnAdaptiveAxis(segZ, GREAT_A_MINZ, GREAT_A_MAXZ, function (z) {
+          let m = 0;
+          for (let k = 0; k <= PN; k++) {
+            const x = GREAT_A_MINX + (GREAT_A_MAXX - GREAT_A_MINX) * (k / PN);
+            const v = greatMacro(x, z); if (v > m) m = v;
+          }
+          return Math.pow(Math.min(1, m / GPEAK), 0.7);
+        }, { floor: 0.30 });
+        for (let i = 0; i < gxs.length; i++) gxs[i] = gxs[i] + DX - gcx;
+        for (let i = 0; i < gzs.length; i++) gzs[i] = gzs[i] + DZ - gcz;
+      }
+      const geo = gxs ? CBZ.mtnGridGeometry(gxs, gzs)
+                      : (function () { const g = new THREE.PlaneGeometry(gw, gd, segX, segZ); g.rotateX(-Math.PI / 2); return g; })();
       const pa = geo.attributes.position;
       const colors = new Float32Array(pa.count * 3);
       const c = new THREE.Color(), rc = new THREE.Color();
@@ -601,6 +986,9 @@
       const shadeSnow = new THREE.Color(0xbac9d0);
       const granite = new THREE.Color(0x5f5b54), graniteDark = new THREE.Color(0x293033);
       const alpineFoot = new THREE.Color(0x566452);
+      const screeCol = new THREE.Color(0x746e63);
+      const STRATA_G = HAS_KIT && CFGS.MOUNT_STRATA_V1 !== false;
+      const _mixG = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
       for (let i = 0; i < pa.count; i++) {
         const wx = gcx + pa.getX(i), wz = gcz + pa.getZ(i);
@@ -611,24 +999,45 @@
         const grain = noiseAt(wx * 0.011 + 39, wz * 0.011 - 71);
         const bedrock = noiseAt(wx * 0.0048 - 23, wz * 0.0048 + 54);
         const faceLight = Math.max(0, n.dot(light));
-        c.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
-        const cliff = smooth01((slope - 0.04) / 0.18);
-        c.lerp(shadeSnow, cliff * (1 - faceLight) * 0.16);
-        // Concentrated cliff exposure produces fewer but more legible rock cuts
-        // while the much larger shoulder/crown area stays snow loaded.
-        const highSnowLoad = smooth01((y - 18) / 150);
-        const rockMix = Math.min(0.84,
-          cliff * (0.13 + smooth01((bedrock - 0.50) / 0.20) * 0.79) *
-          (1 - highSnowLoad * 0.12));
-        if (rockMix > 0) {
-          rc.copy(granite).lerp(graniteDark,
-            smooth01((slope - 0.28) / 0.38) * (0.62 + (1 - faceLight) * 0.38));
-          rc.multiplyScalar(0.94 + grain * 0.08);
-          c.lerp(rc, rockMix);
+        if (STRATA_G) {
+          // rock first (banded, warped, aspect-shaded), snow laid over it by a
+          // real coverage model — same grammar as Mount Mercy, one scale up.
+          const bare = CBZ.mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
+            rock: granite, rockDark: graniteDark,
+            // identical bedding params to greaterMercyMacroA's mtnTerrace call
+            step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
+            slope0: 0.05, slope1: 0.32, salt: S_GSTRATA, aspect: 1, mixOut: _mixG,
+          });
+          c.copy(alpineFoot);
+          const scree = smooth01((bedrock - 0.44) / 0.30) * smooth01((slope - 0.07) / 0.14) *
+                        (1 - smooth01((y - 260) / 160));
+          c.lerp(screeCol, scree * 0.5);
+          c.lerp(rc, Math.min(0.92, bare * (0.55 + 0.45 * smooth01((bedrock - 0.36) / 0.34))));
+          const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
+            line: 46, band: 130, aspect: 70, wob: 40, shed0: 0.14, shed1: 0.54, salt: S_GSNOW,
+          });
+          rc.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
+          rc.lerp(shadeSnow, (1 - faceLight) * 0.22);
+          c.lerp(rc, cover);
+          // the geological root at the very feet stays, so no summit floats
+          rc.copy(c); c.copy(alpineFoot).lerp(rc, smooth01((y - 4) / 30));
+        } else {
+          // ---- LEGACY colour path (MOUNT_STRATA_V1 = false) ----------------
+          c.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
+          const cliff = smooth01((slope - 0.04) / 0.18);
+          c.lerp(shadeSnow, cliff * (1 - faceLight) * 0.16);
+          const highSnowLoad = smooth01((y - 18) / 150);
+          const rockMix = Math.min(0.84,
+            cliff * (0.13 + smooth01((bedrock - 0.50) / 0.20) * 0.79) *
+            (1 - highSnowLoad * 0.12));
+          if (rockMix > 0) {
+            rc.copy(granite).lerp(graniteDark,
+              smooth01((slope - 0.28) / 0.38) * (0.62 + (1 - faceLight) * 0.38));
+            rc.multiplyScalar(0.94 + grain * 0.08);
+            c.lerp(rc, rockMix);
+          }
+          rc.copy(c); c.copy(alpineFoot).lerp(rc, smooth01((y - 4) / 30));
         }
-        // Exposed earth/rock at the feet gives every summit a geological root;
-        // the snow load takes over continuously above the lower shoulders.
-        rc.copy(c); c.copy(alpineFoot).lerp(rc, smooth01((y - 4) / 30));
         const shade = 0.80 + faceLight * 0.18;
         colors[i * 3] = c.r * shade;
         colors[i * 3 + 1] = c.g * shade;
@@ -660,6 +1069,7 @@
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(rangeMat, 0.12);
       const mesh = new THREE.Mesh(geo, rangeMat);
       mesh.position.set(gcx, 0, gcz);
+      mesh.matrixAutoUpdate = false; mesh.updateMatrix();
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;

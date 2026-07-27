@@ -26,10 +26,14 @@
    - CBZ.CONFIG.CITY_DEMOLITION gates everything; flip false and blasts
      behave exactly as before this file existed.
 
-   Deliberately NOT destructible: the flagship mega-tower and any
-   building carrying a helipad/hangar (player infrastructure, story
-   anchors). They take facade wounds (fracture holes) like always — they
-   just never pancake.
+   EVERYTHING IS DESTRUCTIBLE, including the flagship mega-tower. Both of
+   the old exemptions have been lifted: the hardcoded 11-storey ceiling
+   (now CBZ.CONFIG.DEMO_MAX_STOREYS, 64) and the helipad/hangar refusal
+   (now CBZ.CONFIG.DEMO_LANDMARKS — the tags are SUSPENDED while the lot
+   is rubble and restored by the rebuild calendar, so losing your hangar
+   is a consequence with an end date rather than a permanent broken
+   state). Only `lot.kind === "park"` is still refused, because there is
+   no building there to fell.
 ============================================================ */
 (function () {
   "use strict";
@@ -49,7 +53,18 @@
   const T_CLEARED = 2.2;    // rubble sits smoking this long
   const T_SCAFFOLD = 4.2;   // then a cleared, barriered lot
   const T_REBUILT = 7.0;    // then scaffolding, then the building returns
-  const MAX_STOREYS = 11;   // taller = landmark = never collapses
+  // Storey ceiling above which a building is immune to collapse. This used to
+  // be a hardcoded 11, which made the city's TALLEST buildings — the ones you
+  // actually want to fly a plane into — the only ones that could never fall.
+  // That was a proxy for "landmark", but landmarks are already identified
+  // explicitly by the helipad/hangar test below, so the proxy only cost us the
+  // spectacle. Default is now effectively "no storey ceiling"; set
+  // ?cfg_DEMO_MAX_STOREYS=11 to restore the old behaviour in one line.
+  // NOTE: this makes tall buildings ELIGIBLE, not easy — hpMax() still scales
+  // with storeys, so a 12-storey block needs ~18 damage (an airliner crash
+  // currently delivers ~3.2). Kinetic impact damage is the other half.
+  if (CBZ.CONFIG.DEMO_MAX_STOREYS == null) CBZ.CONFIG.DEMO_MAX_STOREYS = 64;
+  const MAX_STOREYS = CBZ.CONFIG.DEMO_MAX_STOREYS;
   // ~3 rockets for a small shop, ~5-6 for a fat 4-storey block (RPG power 1.9)
   function hpMax(b) { return 2 + b.storeys * 1.2 + (b.w * b.d) / 300; }
 
@@ -60,13 +75,56 @@
   function keyOf(lot) { return Math.round(lot.cx) + "," + Math.round(lot.cz); }
   function arena() { return CBZ.city && (CBZ.city.arena || CBZ.city); }
 
+  /* DEMO_LANDMARKS — "planes affecting buildings correctly when hitting them".
+     The storey ceiling was raised to 64 so tall buildings could come down, and
+     the very next line still refused anything with a helipad or a hangar. That
+     is not an edge case: `buildings.js` stamps BOTH tags on the 52-storey
+     mega-tower (`makeMegaTower` sets `hangar`, the worldgen post-pass adds
+     `helipad`), so the single most conspicuous building in the game — the one
+     a player flies at precisely because it is the tallest thing on the skyline
+     — was still exempt. The headline read backwards: the low-rises around it
+     would pancake and the tower he aimed at would burn forever.
+
+     WHY THE EXEMPTION EXISTED, and why it is safe to lift: those tags are the
+     player's own aviation infrastructure. `playeraircraft.js` and `phone.js`
+     resolve "where does my jet/helicopter appear" through
+     `CBZ.cityMegaTower()` and read `t.hangar` / `t.helipad`. Deleting the
+     building without touching them would spawn an F-22 in mid-air over a
+     rubble pile. But every one of those readers ALREADY guards on the tag
+     being present (`if (!s || !s.hangar) …`), so the correct move is not to
+     protect the building — it is to SUSPEND the tags while it is rubble and
+     restore them when demolition's own rebuild calendar puts it back. Flying
+     a plane into your own hangar should cost you the hangar, and then, a few
+     in-game days later, give it back. That is a consequence, which is the
+     whole point of the feature.
+
+     Flip false (or `?cfg_DEMO_LANDMARKS=0`) to restore the old exemption. */
+  if (CBZ.CONFIG.DEMO_LANDMARKS == null) CBZ.CONFIG.DEMO_LANDMARKS = true;
+
   function eligible(lot) {
     const b = lot && lot.building;
     if (!b || !b.group || !b.colliders || !b.colliders.length) return false;
     if (b.storeys > MAX_STOREYS) return false;               // landmark tier
-    if (b.helipad || b.hangar || lot.building.helipad || lot.building.hangar) return false;
+    if (!CBZ.CONFIG.DEMO_LANDMARKS && (b.helipad || b.hangar)) return false;
     if (lot.kind === "park") return false;
     return true;
+  }
+
+  /* Suspend / restore the aviation tags across a teardown. Stashed on the
+     building itself so a save/load or a net replay that recreates the ledger
+     rec cannot lose them, and idempotent in both directions so a double
+     destroy or a double rebuild is harmless. */
+  function suspendAir(b) {
+    if (!b || b._demoAir) return;
+    if (!b.helipad && !b.hangar) return;
+    b._demoAir = { helipad: b.helipad || null, hangar: b.hangar || null };
+    b.helipad = null; b.hangar = null;
+  }
+  function restoreAir(b) {
+    if (!b || !b._demoAir) return;
+    if (b._demoAir.helipad) b.helipad = b._demoAir.helipad;
+    if (b._demoAir.hangar) b.hangar = b._demoAir.hangar;
+    b._demoAir = null;
   }
 
   // ---- deterministic rubble / phase prop builders --------------------------
@@ -378,6 +436,7 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // 4) the lot's obligations pause while it's a hole in the ground
     lot.demolished = true;
+    suspendAir(b);              // the pad/hangar go with the building (see DEMO_LANDMARKS)
     if (b.home) { b.home._demoListed = b.home.listed; b.home.listed = false; }
 
     const rec = {
@@ -396,7 +455,9 @@
           CBZ.cityChunk(b.ox - b.w * 0.3, b.h * 0.4, b.oz, { count: 12, force: 7 });
           CBZ.cityChunk(b.ox + b.w * 0.3, b.h * 0.4, b.oz, { count: 12, force: 7 });
         }
-        if (CBZ.sfx) CBZ.sfx("boom");
+        // "boom" is NOT in systems/audio.js's BANK — it silently no-ops with a
+        // console warning. The bank has the exact cue this beat wants.
+        if (CBZ.sfx) CBZ.sfx("collapse");
       } catch (e) {}
     }
     if (typeof D.onEvent === "function" && !opts.silent) try { D.onEvent({ t: "destroy", x: Math.round(lot.cx), z: Math.round(lot.cz), at: rec.at }); } catch (e) {}
@@ -417,6 +478,7 @@
     ledger.delete(rec.k);
     hp.delete(lot);
     lot.demolished = false;
+    restoreAir(b);              // the rebuild calendar gives the pad/hangar back
     if (CBZ.batchShowGroup) CBZ.batchShowGroup(b.group);
     b.group.visible = true;
     for (const gp of b.windows || []) {
@@ -446,6 +508,45 @@
     return el >= T_SCAFFOLD ? 3 : el >= T_CLEARED ? 2 : 1;
   }
 
+  // ========================================================================
+  //  MIGRATED (BLOCK LAW): structural HP now lives in ONE place.
+  //
+  //  This file used to keep its own `hp` Map<lot, number> — one of THREE
+  //  independent "how hurt is this building" accumulators in the codebase
+  //  (the others: fracture.js's per-facade `wounds`, buildings.js's per-wall
+  //  `wallDmg`). They could not see each other, so a tower could be condemned
+  //  on one system's books and pristine on another's, and a plane strike had
+  //  no way to express "this is worse than three rockets" beyond raw power.
+  //
+  //  city/structural.js now owns the ledger, the stage machine (scarred ->
+  //  wounded -> burning -> critical -> collapsing), the per-floor load-path
+  //  check and the collapse choreography. It calls THIS file's destroy() at
+  //  the end of the collapse, because the AFTERMATH — the deterministic
+  //  rubble pile, the in-game-calendar rebuild arc, the save blob, the net
+  //  relay — is machinery this file already owns and does well. Neither side
+  //  duplicates the other.
+  //
+  //  The legacy accumulator below is kept intact as the DEGRADE-SAFE
+  //  fallback: with CBZ.CONFIG.STRUCT_LEDGER off, or structural.js simply not
+  //  loaded, blasts accumulate here exactly as they always did. `_legacyAccum`
+  //  reports live which of the two is in charge, and CBZ.impactAudit() counts
+  //  it as a remaining duplicate whenever it is the legacy one.
+  // ========================================================================
+  function ledgerOn() { return !!(CBZ.CONFIG.STRUCT_LEDGER && CBZ.structure && CBZ.structure.sweep); }
+  try {
+    Object.defineProperty(D, "_legacyAccum", { get: function () { return !ledgerOn(); }, configurable: true });
+  } catch (e) { D._legacyAccum = true; }
+
+  // Damage conversion for a legacy blast entering the shared ledger. The old
+  // curve was `hpMax = 2 + storeys*1.2 + (w*d)/300` against an accumulation of
+  // `power * prox`; the ledger's capacity is `12 + storeys*7 + (w*d)/26`,
+  // ~6x larger, so a legacy blast is scaled 6x to land on the SAME number of
+  // rockets it always took. Checked against both ends of the range:
+  //   1-storey shop  (w*d~100): old 3.5 hp / 1.9-power RPG => 2 hits.
+  //                             new 22.8 cap / 11.4 per hit => 2 hits.
+  //   4-storey block (w*d~400): old 8.1 hp => 5 hits. new 55.4 cap => 4.9.
+  const LEGACY_TO_LEDGER = 6;
+
   // ---- the blast hook: HP accumulation at the single ordnance chokepoint ----
   function onBlast(x, z, opts) {
     if (!CBZ.CONFIG.CITY_DEMOLITION) return;
@@ -462,6 +563,42 @@
     if (!A || !A.lots) return;
     const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6);
     const y = opts && opts.y != null ? opts.y : 1.4;
+
+    // ---- DELEGATION: the shared ledger owns structural HP ------------------
+    if (ledgerOn()) {
+      // A blast that came through CBZ.detonate already fed the ledger with the
+      // ordnance row's own struct/pen/fire — counting it again here would make
+      // every bus-routed warhead twice as strong as its table row says.
+      // TWO guards, because one of them is a convention and the other is not:
+      //   • opts._impact — the tag the bus's own composers set.
+      //   • inBusBlast() — true for the whole duration of ANY composer the bus
+      //     is running, including third-party ones (city/nukefx.js registers
+      //     its own) that cannot be relied on to remember the tag.
+      if (opts && (opts._impact || opts._airImpact)) return;
+      if (CBZ.impact && CBZ.impact.inBusBlast && CBZ.impact.inBusBlast()) return;
+      // `_airImpact` above is city/aircraftimpact.js's claim: it recognised
+      // this blast as an aircraft crash and already priced it through the bus
+      // with the right ordnance row (penetration, fuel fire, ejecta). Its wrap
+      // sits INSIDE ours, so by the time we run it has already decided.
+      // A LEGACY blast (fpsmode's rocket, a grenade, a cooking car, an
+      // airstrike from a file that has not adopted the bus) still has to wound
+      // the city. Same footprint the loop below used — full damage inside,
+      // fading to zero at 0.6R — expressed as one ring sweep.
+      try {
+        CBZ.structure.sweep(x, z, 0, R * 0.6, power * LEGACY_TO_LEDGER, {
+          kind: "explosion", byPlayer: !!(opts && opts.byPlayer), fire: 0,
+          // HEIGHT MATTERS — the legacy loop below carried `if (y > b.h + 4)
+          // continue;` and dropping it on the way to the sweep meant an
+          // airburst 300m up wounded every footprint under its ground
+          // projection. Hand the seat through so the ledger can apply the
+          // same test per building.
+          y: y,
+        });
+      } catch (e) {}
+      return;
+    }
+
+    // ---- LEGACY ACCUMULATOR (flag off / structural.js absent) --------------
     for (const lot of A.lots) {
       const b = lot.building;
       if (!b || lot.demolished || !eligible(lot)) continue;

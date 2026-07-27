@@ -58,12 +58,20 @@
      white paper and dusk read flat). Day ring tints still TRACK the
      live fog (weather darkens them correctly) — but desaturated and
      stepped darker; dusk/night looks are authored here. */
+  // UPPER-ATMOSPHERE BAND (`top`): the dome used to start at the zenith stop
+  // and run straight down, so from an aircraft — where you are looking at a
+  // lot of sky above the zenith line — the whole upper hemisphere was one
+  // flat colour. A fourth, darker/denser stop above the zenith gives the sky
+  // real vertical depth for the cost of one extra gradient stop in a canvas
+  // repaint that is already throttled to <=10Hz.
   const PAL = {
     day: {
+      top: new THREE.Color(0x14418f),   // thin air above the zenith
       zen: new THREE.Color(0x2a64c8),   // zenith blue
       mid: new THREE.Color(0x6fa3e8),   // mid-sky
     },
     dusk: {
+      top: new THREE.Color(0x0e1636),
       zen: new THREE.Color(0x1d2c58),   // zenith STAYS deep blue at sunset
       mid: new THREE.Color(0x8a5f7e),   // mauve mid-band
       ringNear: new THREE.Color(0x2e2840), // dark backlit silhouette
@@ -71,6 +79,7 @@
       win: new THREE.Color(0xffa45e),      // window dots warm up
     },
     night: {
+      top: new THREE.Color(0x02030a),
       zen: new THREE.Color(0x05080f),
       mid: new THREE.Color(0x0c1428),
       ringNear: new THREE.Color(0x0a0e16), // near-black; windows carry it
@@ -148,7 +157,7 @@
 
   // frame state the painter reads (computed each frame, painted throttled)
   const frame = { glowU: 0, glowK: 0, photoK: 1, duskW: 0 };
-  const _zen = new THREE.Color(), _mid = new THREE.Color();
+  const _zen = new THREE.Color(), _mid = new THREE.Color(), _top = new THREE.Color();
   const _hot = new THREE.Color(), _gmid = new THREE.Color();
 
   function paintSky(fog, tint) {
@@ -157,7 +166,8 @@
     //    zenith keeps its own colour while only the low sky approaches the
     //    fog — the one thing a whole-dome tint could never do.
     const grd = skyCtx.createLinearGradient(0, 0, 0, SKY_H);
-    grd.addColorStop(0, css(_zen));
+    grd.addColorStop(0, css(_top));
+    grd.addColorStop(0.15, css(_zen));
     grd.addColorStop(0.28, css(_mid));
     grd.addColorStop(0.47, hz);
     grd.addColorStop(1, hz);
@@ -274,6 +284,26 @@
   const haloSpr = skySprite(discTexture([
     [0, "rgba(255,210,150,0.5)"], [0.4, "rgba(255,165,95,0.26)"], [1, "rgba(255,120,60,0)"],
   ]), 200);
+
+  /* ---------------- 4b. SUN GLARE (the sun-shaft approximation) -------
+     There is no EffectComposer here and there is not going to be one, so
+     "god rays" cannot be a radial-blur post pass. What actually sells the
+     sun in a game like this is not geometric shafts anyway — it is the
+     enormous soft veiling glare that swamps the frame when the sun enters
+     view. That is exactly one very large additive sprite whose opacity is
+     driven by how closely the camera is looking at the sun, and now that
+     core/renderer.js installs a filmic tone map it ROLLS OFF instead of
+     clipping to a flat white disc, which is what makes it read as light
+     rather than as a decal. One draw call, only while the sun is up and
+     roughly in front of you, and the whole thing is a config flag away
+     from never existing. */
+  if (CBZ.CONFIG.GFX_SUN_GLARE == null) CBZ.CONFIG.GFX_SUN_GLARE = true;
+  const glareSpr = skySprite(discTexture([
+    [0, "rgba(255,246,225,0.55)"], [0.18, "rgba(255,228,175,0.30)"],
+    [0.55, "rgba(255,190,130,0.10)"], [1, "rgba(255,160,90,0)"],
+  ]), 600);
+  glareSpr.renderOrder = -3.5;   // in front of the dome, behind the disc
+  const _camFwd = new THREE.Vector3(), _sunDirV = new THREE.Vector3();
 
   /* ---------------- 5. legacy procedural clouds (disabled) ---------
      The daylight photograph already contains the coherent cloud field. The
@@ -476,6 +506,7 @@
     // ---- frame palette: blend the keyframe tables -------------------
     const kDay = clamp01(up * 2.2 + 0.05);   // full daytime sky by mid-morning
     const civil = clamp01(0.45 - up * 3.2);  // 0 = golden hour, 1 = sun dipped
+    _top.copy(PAL.night.top).lerp(PAL.day.top, kDay).lerp(PAL.dusk.top, duskness * 0.6);
     _zen.copy(PAL.night.zen).lerp(PAL.day.zen, kDay).lerp(PAL.dusk.zen, duskness * 0.6);
     _mid.copy(PAL.night.mid).lerp(PAL.day.mid, kDay).lerp(PAL.dusk.mid, duskness * 0.85);
     _hot.copy(PAL.glow.golden).lerp(PAL.glow.civil, civil);
@@ -527,6 +558,27 @@
       haloSpr.material.color.copy(_hot);
       const hs = 170 + 170 * duskness;
       haloSpr.scale.set(hs * 1.35, hs, 1); // wider than tall — it hugs the horizon
+    }
+    // veiling glare — opacity ramps hard with how directly you are looking at
+    // the sun (pow 5 keeps it out of the frame until you actually turn into
+    // it), scaled by how high and how warm the sun is. Tier 0 never gets it.
+    {
+      const tierOK = (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) >= 1;
+      let gop = 0;
+      if (CBZ.CONFIG.GFX_SUN_GLARE && tierOK && sunY > -0.02) {
+        _sunDirV.set(Math.cos(a) * 80, Math.sin(a) * 95, -10).normalize();
+        CBZ.camera.getWorldDirection(_camFwd);
+        const align = clamp01(_camFwd.dot(_sunDirV));
+        gop = Math.pow(align, 5) * clamp01(sunY * 3 + 0.15) * (0.42 + duskness * 0.5);
+      }
+      glareSpr.visible = gop > 0.008;
+      if (glareSpr.visible) {
+        glareSpr.position.copy(sunSpr.position);
+        glareSpr.material.opacity = Math.min(0.95, gop);
+        glareSpr.material.color.copy(CBZ.sunTint || _hot);
+        const gs = 460 + 420 * duskness;
+        glareSpr.scale.set(gs, gs, 1);
+      }
     }
     _p.set(Math.cos(a + Math.PI) * 80, Math.sin(a + Math.PI) * 95, -10).normalize();
     moonSpr.position.copy(_p).multiplyScalar(795);

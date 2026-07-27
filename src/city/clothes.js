@@ -65,6 +65,121 @@
   // ids that are "just a civilian in a shirt" — gated to PLAIN by the switch.
   const CIVVIE_IDS = { basics: 1, civvies: 1, street: 1, hoodie: 1 };
 
+  // ============================================================
+  //  BODY FIT — the painted atlas must land on the body it is DRESSING.
+  //
+  //  entities/character.js builds a real body from a profile now: an adult
+  //  woman (and EVERY child) carries a WAIST BOX under the chest, so
+  //  skinSlots.torso is [chest, waist] instead of [chest]. character.js tags
+  //  the split LIMB segments with clothDims/clothBand, but the torso column
+  //  is untagged — and left alone, dress() would stamp the adult-male
+  //  DIMS.torso box (0.92 x 0.95 x 0.50) onto BOTH boxes:
+  //    • the woman's silhouette snaps back to a man's the instant she gets
+  //      dressed (the waist she was given is overwritten by a man's chest);
+  //    • every horizontal feature in the garment row — hem, belt, waistband,
+  //      reflective stripe — is painted TWICE, once on the chest and once on
+  //      the waist, which is exactly the doubled belt line you would see.
+  //  Fix: tag the torso meshes from the rig's OWN profile, once per rig. The
+  //  chest takes the TOP slice of the garment row, the waist the bottom
+  //  slice, so the two boxes read as ONE continuous garment column — a shirt
+  //  cannot stop at the seam and show skin, because the texture is
+  //  continuous across it.
+  //
+  //  IDENTITY GUARANTEE: ADULT_M's torso/jacket numbers ARE the DIMS literals
+  //  (0.92/0.95/0.50 and 0.98/1.00/0.60) and its waistShare is 0, so an adult
+  //  male — and any legacy rig with no .profile — comes out byte-identical to
+  //  before this change. One-line revert: CBZ.CONFIG.CLOTHES_BODY_FIT=false.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CLOTHES_BODY_FIT == null) CBZ.CONFIG.CLOTHES_BODY_FIT = true;
+  function bodyFit() {
+    const C = CBZ.CONFIG;
+    return !C || C.CLOTHES_BODY_FIT == null || !!C.CLOTHES_BODY_FIT;
+  }
+  // Read from the rig that owns it, so the two files cannot drift apart; the
+  // literal remains only as the fallback for a character.js that predates the
+  // export. (character.js now also TAGS the chest/waist boxes itself, so the
+  // recompute below is a degrade-safe backstop rather than the normal path.)
+  const WAIST_TUCK = (CBZ.CHAR_WAIST_TUCK != null) ? CBZ.CHAR_WAIST_TUCK : 0.06;
+  // the profile's torso column split, in row fractions: {colH, waistH, chestH}
+  function torsoSplit(P) {
+    const colH = (P && P.torsoH > 0) ? P.torsoH : 0.95;
+    const waistH = (P && P.waistShare > 0) ? P.waistShare * colH : 0;
+    return { colH: colH, waistH: waistH, chestH: colH - waistH };
+  }
+  // MEASURE, don't assume (the demolition-check doctrine): a THREE.BoxGeometry
+  // keeps its .parameters, so the boxes the rig was actually built with are
+  // readable — no constant of character.js's has to be copied here and can
+  // therefore never drift out of sync. Profile arithmetic is the fallback for
+  // an exotic/stub rig. Runs ONCE per rig, before the first dress() swaps the
+  // geometry out (and reads the saved flat geometry if it already did).
+  function boxOf(mesh) {
+    if (!mesh || !mesh.position) return null;
+    const g = (mesh.userData && mesh.userData._cbzFlat && mesh.userData._cbzFlat.g) || mesh.geometry;
+    const p = g && g.parameters;
+    if (!p || !(p.height > 0)) return null;
+    return { w: p.width, h: p.height, d: p.depth, y: mesh.position.y || 0 };
+  }
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  function tagCloth(mesh, dims, band) {
+    // never overwrite an existing tag — if character.js starts tagging the
+    // torso itself, its own numbers win and this becomes a no-op.
+    if (!mesh || !mesh.userData || mesh.userData.clothDims) return;
+    mesh.userData.clothDims = dims;
+    mesh.userData.clothBand = [clamp01(band[0]), clamp01(band[1])];
+  }
+  function fitTorso(ch) {
+    if (!ch || ch._clothFitDone) return;
+    ch._clothFitDone = true;
+    if (!bodyFit()) return;
+    const s = ch.skinSlots;
+    if (!s || !s.torso || !s.torso.length) return;
+    const chest = s.torso[0], waist = s.torso[1] || null;
+    const cb = boxOf(chest), wb = waist ? boxOf(waist) : null;
+    if (cb && (!waist || wb)) {
+      // the garment column spans the bottom of the LOWEST box to the top of the
+      // chest; each box takes exactly the slice of the row it occupies, so the
+      // texture runs continuously across the seam (the waist's tuck overlap
+      // lands inside the chest, where nothing can see the doubled band).
+      const top = cb.y + cb.h / 2;
+      const bot = wb ? Math.min(cb.y - cb.h / 2, wb.y - wb.h / 2) : cb.y - cb.h / 2;
+      const H = top - bot;
+      if (!(H > 0)) return;
+      tagCloth(chest, [cb.w, cb.h, cb.d], [(cb.y - cb.h / 2 - bot) / H, (cb.y + cb.h / 2 - bot) / H]);
+      if (wb) tagCloth(waist, [wb.w, wb.h, wb.d], [(wb.y - wb.h / 2 - bot) / H, (wb.y + wb.h / 2 - bot) / H]);
+      return;
+    }
+    const P = ch.profile;
+    if (!P) return;                                  // nothing to go on → legacy behavior
+    const sp = torsoSplit(P);
+    tagCloth(chest, [P.torsoW, sp.chestH, P.torsoD], [sp.waistH / sp.colH, 1]);
+    if (waist && sp.waistH > 0) {
+      const wh = sp.waistH + WAIST_TUCK;             // the waist box tucks UP into the chest
+      tagCloth(waist, [P.waistW, wh, P.waistD], [0, wh / sp.colH]);
+    }
+  }
+  // the jacket SHELL rides skinSlots.torso[0] — which is now only the CHEST,
+  // not the whole column. Size it off the profile and drop it by half the
+  // waist height so it still wraps the whole torso instead of riding up.
+  function jacketFit(ch) {
+    const P = ch && ch.profile;
+    if (!P || !bodyFit()) return null;
+    return { dims: [P.jacketW, P.jacketH, P.jacketD], y: -torsoSplit(P).waistH / 2 };
+  }
+  // COMPOSITE items (collar/tie/bow meshes) are authored in the adult-male
+  // torso frame (a 0.92 x 0.95 x 0.50 box centred on the origin). On a female
+  // or child chest that frame is both smaller AND shifted up, so a tie would
+  // float above the collarbone. One scale+offset node puts the authored
+  // coordinates back on the body. Adult male → 1,1,1 / 0 (identity).
+  function compFrame(ch) {
+    const P = ch && ch.profile;
+    if (!P || !bodyFit()) return null;
+    const sp = torsoSplit(P);
+    return {
+      sx: P.torsoW / 0.92, sy: sp.colH / 0.95, sz: P.torsoD / 0.50,
+      y: -sp.waistH / 2,
+    };
+  }
+
   // ---- color helpers --------------------------------------------------------
   function hx(n) { return "#" + ("00000" + ((n | 0) & 0xffffff).toString(16)).slice(-6); }
   // lighten (amt>0) / darken (amt<0) a hex int, returns css string
@@ -915,7 +1030,11 @@
     const T = P.T, A = P.A, L = P.L, hi = tone(body, 0.14), lo = tone(body, -0.2);
     T.fill(bc);
     T.poly("front", [[0.34, 0], [0.5, 0.18], [0.66, 0]], lo);      // scoop neckline
-    T.rect("front", 0.3, 0.5, 0.4, 0.04, lo);                     // waist seam (bodice meets skirt)
+    // WAIST SEAM at 0.66: the female rig's waist BOX starts at row y ~0.675
+    // (waistShare 0.325), so the bodice/skirt junction now lands on the body's
+    // actual narrowest point instead of floating up the ribcage at 0.5.
+    T.rect("front", 0.3, 0.66, 0.4, 0.04, lo);                    // waist seam (bodice meets skirt)
+    T.rect("side", 0, 0.66, 1, 0.04, lo); T.rect("back", 0, 0.66, 1, 0.04, lo);  // …and all the way round
     T.rect("front", 0, 0.86, 1, 0.14, hi);                        // the skirt begins flaring (lighter sweep)
     T.shade();
     A.fill(bc); A.rect("front", 0, 0.42, 1, 0.05, lo); A.rect("side", 0, 0.42, 1, 0.05, lo); A.shade(); // cap-sleeve cuff
@@ -947,7 +1066,9 @@
     flowers(T, 14);
     T.poly("front", [[0.34, 0], [0.5, 0.16], [0.66, 0]], tone(body, -0.2)); // neckline
     T.rect("front", 0.26, 0, 0.1, 0.16, bc); T.rect("front", 0.64, 0, 0.1, 0.16, bc); // straps gap
-    T.rect("front", 0.3, 0.5, 0.4, 0.03, tone(body, -0.22));      // waist tie
+    // the tie sits on the waist BOX seam (row y ~0.675), not mid-ribcage
+    T.rect("front", 0.3, 0.66, 0.4, 0.035, tone(body, -0.22));    // waist tie
+    T.rect("side", 0, 0.66, 1, 0.035, tone(body, -0.22)); T.rect("back", 0, 0.66, 1, 0.035, tone(body, -0.22));
     T.shade();
     A.fill(bc); A.shade();
     flowers(L, 12);
@@ -967,9 +1088,250 @@
   };
 
   // ============================================================
+  //  WOMENSWEAR — the body carries the read now (real waist box), so the
+  //  garment's job is to REINFORCE the taper, not to fake it with color.
+  // ============================================================
+  // BLOUSE — a fitted everyday top over jeans: soft open collar, front
+  // placket, and DARTS that converge on the natural waist (row y ~0.67 —
+  // exactly where the adult-female waist box starts, waistShare 0.325). The
+  // hem runs to the bottom of the row so the shirt reads as ONE piece tucked
+  // into the trousers: no bare-skin stripe can appear at the chest/waist seam.
+  PAINT.blouse = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0xd8dce4, bc = hx(body);
+    const T = P.T, A = P.A;
+    const lo = tone(body, -0.16), lo2 = tone(body, -0.3), hi = tone(body, 0.16);
+    const WAIST = 0.67;                              // the waist-box seam, in row coords
+    T.fill(bc);
+    T.poly("front", [[0.37, 0], [0.5, 0.17], [0.63, 0]], lo2);       // open neckline
+    T.poly("front", [[0.3, 0], [0.43, 0], [0.47, 0.13]], lo);        // collar leaf L
+    T.poly("front", [[0.7, 0], [0.57, 0], [0.53, 0.13]], lo);        // collar leaf R
+    T.rect("front", 0.49, 0.15, 0.02, 0.66, lo);                     // button placket
+    for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.24 + i * 0.13, 0.012, hi);
+    // princess/waist darts: shallow wedges pinching in toward the waist line
+    T.poly("front", [[0.28, 0.26], [0.33, 0.26], [0.35, WAIST], [0.31, WAIST]], lo);
+    T.poly("front", [[0.72, 0.26], [0.67, 0.26], [0.65, WAIST], [0.69, WAIST]], lo);
+    T.poly("back", [[0.3, 0.28], [0.35, 0.28], [0.36, WAIST], [0.32, WAIST]], lo);
+    T.poly("back", [[0.7, 0.28], [0.65, 0.28], [0.64, WAIST], [0.68, WAIST]], lo);
+    // the garment CONTINUES past the seam and tucks in — a single shadow band
+    // at the very hem, never a second belt line.
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.93, 1, 0.07, lo2);
+    T.shade();
+    A.fill(bc);
+    A.rect("front", 0, 0.52, 1, 0.04, lo); A.rect("side", 0, 0.52, 1, 0.04, lo);   // 3/4 sleeve seam
+    A.rect("front", 0, 0.84, 1, 0.07, lo2); A.rect("side", 0, 0.84, 1, 0.07, lo2); // cuff
+    A.shade();
+    return { torso: 1, arms: 1 };                    // legs keep their flat jean color
+  };
+
+  // ============================================================
+  //  CHILDRENSWEAR — the SAME painted grammar, nothing new invented. A child
+  //  is not a small adult and must never be dressed as one: these are the
+  //  garments the baby / toddler / child / preteen bands actually wear, and
+  //  outfits.js's age gate is what casts them. The rig's own profile-driven
+  //  clothDims/clothBand tags (see BODY FIT) mean a kid's tee lands on a kid's
+  //  torso instead of running off the end of it.
+  // ============================================================
+
+  // ONESIE — a footed babygrow. ONE PIECE: no waist hem anywhere, the fabric
+  // runs torso → legs → painted feet, which is the whole silhouette read.
+  PAINT.onesie = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0xbfd8e8, bc = hx(body);
+    const trim = (c && c.collar != null) ? c.collar : tone2(body, -0.28);
+    const T = P.T, A = P.A, L = P.L, tc = hx(trim), lo = tone(body, -0.16);
+    T.fill(bc);
+    T.rect("front", 0.3, 0, 0.4, 0.07, tc);                          // envelope neck binding
+    T.rect("back", 0.3, 0, 0.4, 0.07, tc);
+    T.rect("front", 0.49, 0.07, 0.02, 0.62, lo);                     // snap placket
+    for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.16 + i * 0.15, 0.014, tc);
+    T.dot("front", 0.32, 0.34, 0.06, tc);                            // a little chest motif
+    T.dot("front", 0.32, 0.34, 0.03, "#fdfaf2");
+    T.rect("front", 0.2, 0.86, 0.6, 0.05, lo);                       // crotch snap row
+    for (const x of [0.3, 0.42, 0.54, 0.66]) T.dot("front", x, 0.885, 0.013, tc);
+    T.shade();                                                        // NOTE: no hem — one piece
+    A.fill(bc); A.rect("front", 0, 0.88, 1, 0.08, tc); A.rect("side", 0, 0.88, 1, 0.08, tc); A.shade();
+    L.fill(bc);
+    L.rect("front", 0, 0.86, 1, 0.14, tc);                           // the sewn-in FOOT
+    L.rect("side", 0, 0.86, 1, 0.14, tc); L.rect("back", 0, 0.86, 1, 0.14, tc);
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // PYJAMAS — horizontal stripes over a pastel ground, button placket, elastic
+  // cuffs. Stripes run all the way round every row, so the two-box torso and
+  // the split limbs read as one continuous striped suit.
+  PAINT.pyjamas = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0xe8e2f0, bc = hx(body);
+    const stripe = (c && c.collar != null) ? c.collar : 0x6a7ac0;
+    const T = P.T, A = P.A, L = P.L, sc = hx(stripe), lo = tone(body, -0.2);
+    // NOTE the loop bound: rowPainter.rect() does not clamp, so a stripe that
+    // ran past y=1 would spill into the NEXT atlas row (a pyjama stripe across
+    // the top of the trousers). Stop a full stripe short of the row edge.
+    function stripes(R, step, off) {
+      const h = step * 0.42;
+      for (const col of ["front", "back", "side"])
+        for (let y = off; y <= 1 - h; y += step) R.rect(col, 0, y, 1, h, sc);
+    }
+    T.fill(bc); stripes(T, 0.14, 0.05);
+    T.rect("front", 0.3, 0, 0.4, 0.06, sc);                          // collar band
+    T.rect("front", 0.49, 0.06, 0.02, 0.86, lo);                     // placket
+    for (let i = 0; i < 5; i++) T.dot("front", 0.5, 0.14 + i * 0.16, 0.012, "#f6f4ee");
+    T.rect("front", 0.14, 0.72, 0.2, 0.14, lo);                      // patch pocket
+    T.shade();
+    A.fill(bc); stripes(A, 0.16, 0.06); A.rect("front", 0, 0.88, 1, 0.08, lo); A.rect("side", 0, 0.88, 1, 0.08, lo); A.shade();
+    L.fill(bc); stripes(L, 0.16, 0.06); L.rect("front", 0, 0.9, 1, 0.08, lo); L.rect("side", 0, 0.9, 1, 0.08, lo); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // ROMPER — a toddler's dungaree romper: a bib-and-straps front in the romper
+  // color over a plain tee, short legs, BARE SHINS (skin rides the cache key —
+  // the wifebeater precedent, see keyOf/SKIN_KEYED).
+  PAINT.romper = function (P, c) {
+    const denim = (c && c.torso != null) ? c.torso : 0x4a6a92, dc = hx(denim);
+    const tee = (c && c.collar != null) ? c.collar : 0xf0e9dc, tc = hx(tee);
+    const skin = (c && c.skin != null) ? c.skin : 0xcf9a72, sk = hx(skin);
+    const T = P.T, A = P.A, L = P.L, dk = tone(denim, -0.24), stitch = "#e2c98a";
+    T.fill(tc);                                                       // the tee underneath
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.12]], tone(tee, -0.22));  // crew neck
+    T.rect("front", 0.2, 0.14, 0.14, 0.86, dc);                      // strap L
+    T.rect("front", 0.66, 0.14, 0.14, 0.86, dc);                     // strap R
+    T.rect("back", 0.2, 0.1, 0.14, 0.9, dc); T.rect("back", 0.66, 0.1, 0.14, 0.9, dc);
+    T.rect("front", 0.24, 0.46, 0.52, 0.54, dc);                     // the BIB
+    T.rect("front", 0.24, 0.46, 0.52, 0.03, stitch);                 // bib top stitch
+    T.rect("front", 0.32, 0.56, 0.36, 0.2, dk);                      // bib pocket
+    T.dot("front", 0.26, 0.44, 0.03, "#d8b04a"); T.dot("front", 0.74, 0.44, 0.03, "#d8b04a"); // strap buttons
+    T.rect("side", 0, 0.5, 1, 0.5, dc); T.rect("back", 0, 0.5, 1, 0.5, dc);   // the romper body wraps round
+    T.shade();
+    A.fill(tc); A.rect("front", 0, 0.4, 1, 0.05, tone(tee, -0.2)); A.rect("side", 0, 0.4, 1, 0.05, tone(tee, -0.2)); // short sleeve seam
+    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.45, 1, 0.55, sk);   // bare forearm
+    A.shade();
+    L.fill(dc);
+    for (const col of ["front", "back", "side"]) {
+      L.rect(col, 0, 0.34, 1, 0.05, stitch);                         // short-leg hem stitch
+      L.rect(col, 0, 0.39, 1, 0.61, sk);                             // BARE SHINS
+    }
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // KIDTEE — the everyday child fit: a bright tee with a chest motif and
+  // shorts, bare arms below the sleeve and bare shins below the hem.
+  PAINT.kidtee = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x4aa8d8, bc = hx(body);
+    // The shorts are DERIVED from the tee, not read from c.legs: only torso and
+    // skin ride this garment's cache key, so a c.legs read would silently give
+    // every kid whichever shorts the first one to build the atlas happened to
+    // have. A deep version of the tee color reads as denim/navy/khaki shorts.
+    const legHex = tone2(body, -0.6), lc = hx(legHex);
+    const skin = (c && c.skin != null) ? c.skin : 0xcf9a72, sk = hx(skin);
+    const motif = (c && c.collar != null) ? c.collar : tone2(body, 0.4);
+    const T = P.T, A = P.A, L = P.L, lo = tone(body, -0.22);
+    T.fill(bc);
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.13]], lo);        // crew neck
+    T.rect("back", 0.34, 0, 0.32, 0.05, lo);
+    T.dot("front", 0.5, 0.42, 0.16, hx(motif));                      // a big simple motif
+    T.dot("front", 0.5, 0.42, 0.08, bc);
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.93, 1, 0.07, lo);   // hem (one line, at the bottom)
+    T.shade();
+    A.fill(bc);
+    A.rect("front", 0, 0.36, 1, 0.04, lo); A.rect("side", 0, 0.36, 1, 0.04, lo);      // sleeve hem
+    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.4, 1, 0.6, sk);     // bare arms
+    A.shade();
+    L.fill(lc);
+    for (const col of ["front", "back", "side"]) {
+      L.rect(col, 0, 0.36, 1, 0.04, tone(legHex, -0.3));             // shorts hem
+      L.rect(col, 0, 0.4, 1, 0.6, sk);                               // bare shins
+    }
+    L.rect("front", 0.44, 0, 0.12, 0.36, tone(legHex, -0.18));       // shorts seam
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // SCHOOL — a pale polo under a V-neck jumper, dark shorts and long socks.
+  // No skin in this one (socks cover the shin), so it needs no skin key.
+  PAINT.school = function (P, c, skirt) {
+    const knit = (c && c.torso != null) ? c.torso : 0x2b3a5a, kc = hx(knit);
+    const shirtHex = (c && c.collar != null) ? c.collar : 0xeceee8, shc = hx(shirtHex);
+    const legHex = (c && c.legs != null) ? c.legs : 0x23283a, lc = hx(legHex);
+    const T = P.T, A = P.A, L = P.L, lo = tone(knit, -0.22), sock = "#e8e9e4";
+    T.fill(kc);
+    T.poly("front", [[0.32, 0], [0.5, 0.3], [0.68, 0]], shc);        // the V of the jumper, shirt below
+    T.poly("front", [[0.36, 0], [0.47, 0.1], [0.44, 0.02]], tone(shirtHex, -0.2)); // shirt collar L
+    T.poly("front", [[0.64, 0], [0.53, 0.1], [0.56, 0.02]], tone(shirtHex, -0.2)); // shirt collar R
+    T.rect("front", 0.47, 0.08, 0.06, 0.2, tone(knit, 0.35));        // a slip of school tie
+    T.poly("front", [[0.32, 0], [0.5, 0.3], [0.68, 0], [0.72, 0], [0.5, 0.36], [0.28, 0]], lo); // V ribbing
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.92, 1, 0.08, lo);  // ribbed jumper hem
+    T.shade();
+    A.fill(kc); A.rect("front", 0, 0.88, 1, 0.08, lo); A.rect("side", 0, 0.88, 1, 0.08, lo); A.shade();
+    L.fill(lc);
+    if (skirt) {                                                      // pleated skirt
+      for (const col of ["front", "back", "side"]) {
+        for (let x = 0.08; x < 1; x += 0.16) L.rect(col, x, 0, 0.02, 0.46, tone(legHex, 0.22));
+        L.rect(col, 0, 0.44, 1, 0.04, tone(legHex, -0.3));
+      }
+    } else {
+      for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.44, 1, 0.04, tone(legHex, -0.3)); // shorts hem
+      L.rect("front", 0.44, 0, 0.12, 0.44, tone(legHex, -0.16));      // shorts seam
+    }
+    for (const col of ["front", "back", "side"]) {
+      L.rect(col, 0, 0.62, 1, 0.38, sock);                            // long socks
+      L.rect(col, 0, 0.62, 1, 0.035, "#c9cbc4");                      // sock welt
+    }
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+  // the girls' variant is the SAME painter with the pleated skirt (the
+  // tracksuit2/3 wrapper grammar — one painter, distinct cache keys).
+  PAINT.schoolgirl = function (P, c) { return PAINT.school(P, c, true); };
+  // kids' hoodie: the adult hoodie painter, cast in a child's colors. Nothing
+  // about a hoodie changes with age — only the palette and the BODY do.
+  PAINT.kidhoodie = function (P, c) { return PAINT.hoodie(P, c); };
+
+  // PINAFORE — a little girl's sundress/pinafore: shoulder straps over a tee,
+  // a gathered waist and a flared skirt to the knee, bare shins below.
+  PAINT.pinafore = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0xe2a2b8, bc = hx(body);
+    const tee = (c && c.collar != null) ? c.collar : 0xf4efe4, tc = hx(tee);
+    const skin = (c && c.skin != null) ? c.skin : 0xcf9a72, sk = hx(skin);
+    const T = P.T, A = P.A, L = P.L, lo = tone(body, -0.22), hi = tone(body, 0.16);
+    T.fill(tc);                                                       // the tee underneath
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.12]], tone(tee, -0.2));
+    T.rect("front", 0.22, 0.1, 0.13, 0.9, bc);                       // strap L
+    T.rect("front", 0.65, 0.1, 0.13, 0.9, bc);                       // strap R
+    T.rect("back", 0.22, 0.08, 0.13, 0.92, bc); T.rect("back", 0.65, 0.08, 0.13, 0.92, bc);
+    T.rect("front", 0.26, 0.4, 0.48, 0.6, bc);                       // the pinafore bib
+    T.rect("front", 0.34, 0.5, 0.32, 0.14, hi);                      // a little pocket
+    T.rect("side", 0, 0.44, 1, 0.56, bc); T.rect("back", 0, 0.44, 1, 0.56, bc);
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.9, 1, 0.05, lo);   // gathered waist tie
+    T.shade();
+    A.fill(tc);
+    A.rect("front", 0, 0.34, 1, 0.04, tone(tee, -0.2)); A.rect("side", 0, 0.34, 1, 0.04, tone(tee, -0.2));
+    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.38, 1, 0.62, sk);  // bare arms
+    A.shade();
+    L.fill(bc);
+    for (const col of ["front", "back", "side"]) {
+      L.poly(col, [[0.28, 0], [0.72, 0], [1, 0.5], [0, 0.5]], hi);    // the skirt flares out
+      L.rect(col, 0, 0.48, 1, 0.05, lo);                              // hem band
+      L.rect(col, 0, 0.53, 1, 0.47, sk);                              // BARE SHINS below the knee
+    }
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // ============================================================
   //  THE CACHE — one set per outfit key, shared by every wearer.
   // ============================================================
   const sets = {};                                  // key → {mat, tex, parts}
+  // ---- CACHE-KEY CLASSES (tables, not branches) ----------------------------
+  // COLOR_KEYED: same painter, one atlas PER COLOR, so the wardrobe can cast a
+  //   dozen dress/hoodie/pyjama colors without collapsing them to one texture.
+  //   (`hoodie` is in here to fix a real collision: the buyable Grey Hoodie and
+  //   Black Hoodie both resolved to the bare key "hoodie" and therefore SHARED
+  //   whichever atlas was built first.)
+  // SKIN_KEYED: garments that show bare skin in the atlas (a tank's arms, a
+  //   child's shins). The shared atlas can't know a wearer's tone unless the
+  //   tone is part of the key — a handful of atlases, never one per rig.
+  const COLOR_KEYED = { dress: 1, sundress: 1, hoodie: 1, blouse: 1, onesie: 1, pyjamas: 1, school: 1, schoolgirl: 1, kidhoodie: 1 };
+  const SKIN_KEYED = { wifebeater: 1, romper: 1, kidtee: 1, pinafore: 1 };
 
   // ============================================================
   //  SUIT_STYLES — the parameterized suit catalog. A suit's cache key is
@@ -1032,7 +1394,7 @@
     }
     // color-keyed garments: same painter, distinct cache per color so the store
     // can sell a dozen dress colors without collapsing them to one texture.
-    if (id === "dress" || id === "sundress") {
+    if (COLOR_KEYED[id]) {
       return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + (c.collar != null ? c.collar | 0 : 0);
     }
     if (id === "suit") {
@@ -1043,12 +1405,13 @@
       return "suit|" + si;
     }
     if (id === "construction") return "hivis|" + (c.torso != null ? c.torso | 0 : 0xffb43a); // same painter, site-orange default
-    // skin-showing garments: the bare shoulders/arms in the atlas must match
-    // the WEARER's actual skin, so the tone joins the cache key (one atlas per
-    // tone actually seen — a handful, not per-rig).
-    if (id === "wifebeater") {
+    // skin-showing garments: the bare shoulders/arms/shins in the atlas must
+    // match the WEARER's actual skin, so the tone joins the cache key (one
+    // atlas per tone actually seen — a handful, not per-rig). Garment color
+    // rides too, so two kids in different tees don't share one texture.
+    if (SKIN_KEYED[id]) {
       const sk = (c.skin != null) ? c.skin | 0 : (ch && ch.skinTone != null ? ch.skinTone | 0 : 0xcf9a72);
-      return "wifebeater|" + sk;
+      return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + sk;
     }
     if (PAINT[id]) return id;
     return null;                                    // leather/tactical/designer… stay flat
@@ -1075,7 +1438,10 @@
     else if (kind === "basics") parts = PAINT.basics(P, { torso: key.split("|")[1] | 0 });
     else if (kind === "hivis") parts = PAINT.hivis(P, { torso: key.split("|")[1] | 0, legs: c.legs, arms: c.arms }); // shared by construction key
     else if (kind === "gang") { const seg = key.split("|"); parts = PAINT.gang(P, { torso: seg[1] | 0, collar: seg[2] | 0, legs: c.legs }); }
-    else if (kind === "wifebeater") parts = PAINT.wifebeater(P, { torso: c.torso, skin: key.split("|")[1] | 0 });   // tone rides the key (see keyOf)
+    // the WEARER's skin tone isn't in rec.colors (it comes off the rig), so it
+    // rides the cache key and is handed back to the painter here. The garment
+    // colors stay exactly where every other painter reads them: rec.colors.
+    else if (SKIN_KEYED[kind]) parts = PAINT[kind](P, Object.assign({}, c, { skin: key.split("|")[2] | 0 }));
     else if (PAINT[kind]) parts = PAINT[kind](P, c);
     if (!parts) return null;
     const tex = new THREE.CanvasTexture(cv);
@@ -1160,6 +1526,7 @@
 
   function applyClothes(ch, rec, opts) {
     if (!ch || !ch.skinSlots) return null;
+    fitTorso(ch);                                    // chest+waist → ONE garment column
     const set = rec ? getSet(rec, ch) : null;
     const key = set ? keyOf(typeof rec === "string" ? { id: rec } : rec, ch) : null;
     if (!set) {                                      // no painted look → strip back to flat
@@ -1183,14 +1550,19 @@
     // ---- the JACKET SHELL (tux/suit/police): silhouette via one inflated
     //      torso shell, structure via the alpha-cut open-jacket paint ----
     if (set.parts.jacket) {
+      const jf = jacketFit(ch);                      // profile-sized shell (see BODY FIT)
       let jm = ch._jacketMesh;
       if (!jm) {
-        jm = new THREE.Mesh(clothGeom("jacket"), m);
+        jm = new THREE.Mesh(clothGeom("jacket", jf && jf.dims), m);
         jm.castShadow = false; jm.receiveShadow = false;
         const t = s.torso && s.torso[0];
-        if (t) t.add(jm);                            // rides the torso — animates for free
+        if (t) t.add(jm);                            // rides the CHEST — animates for free
         ch._jacketMesh = jm;
-      }
+      } else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
+      // torso[0] is only the chest on a body with a waist box, so the shell has
+      // to drop half a waist to keep wrapping the whole column (0 for an adult
+      // male — his chest IS the column).
+      if (jf) jm.position.y = jf.y;
       jm.material = m;
       jm.visible = true;
     } else if (ch._jacketMesh) ch._jacketMesh.visible = false;
@@ -1429,6 +1801,12 @@
   });
   paintedLook("sundress",     "sundress",     "Floral Sundress", 6,  0xf0d9a0, { colors: { torso: 0xf0d9a0, collar: 0xd86a8a } });
   paintedLook("sundress_blue","sundress",     "Blue Sundress",   6,  0xbcd6ea, { colors: { torso: 0xbcd6ea, collar: 0x3a6aa0 } });
+  // BLOUSES — the everyday womenswear the rack was missing entirely (the only
+  // female-read garments on sale were dresses).
+  [["blouse_white", 0xeceef0, "White Blouse"], ["blouse_blush", 0xe8c6cc, "Blush Blouse"],
+   ["blouse_navy", 0x2b3a5a, "Navy Blouse"], ["blouse_olive", 0x6a7050, "Olive Blouse"]].forEach(function (b) {
+    paintedLook(b[0], "blouse", b[2], 4, b[1], { colors: { torso: b[1] } });
+  });
 
   function cityComposableSpec(visualId) { return COMP[visualId] || null; }
   CBZ.cityComposableSpec = cityComposableSpec;
@@ -1480,6 +1858,7 @@
     }
     // layer the small attached meshes (collar/tie/bow) onto the torso
     const host = (ch.skinSlots.torso && ch.skinSlots.torso[0]) || ch.body || ch.group;
+    const cf = compFrame(ch);                        // adult-authored coords → this body
     if (host && host.add) {
       const bin = ch._compMeshes;
       for (let i = 0; i < items.length; i++) {
@@ -1488,6 +1867,10 @@
         const grp = new THREE.Group();
         grp.name = "wearable-" + items[i];
         grp.userData.clothingSlot = sp.slot || "item";
+        // a tie authored for a 0.95-tall male chest would sit ABOVE a woman's
+        // collarbone (her chest box is shorter and higher) — one node fixes
+        // every composable at once instead of re-authoring fourteen of them.
+        if (cf) { grp.scale.set(cf.sx, cf.sy, cf.sz); grp.position.y = cf.y; }
         sp.draw(grp, {});
         grp.children.forEach((m) => bin.push(m));
         host.add(grp);

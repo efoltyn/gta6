@@ -23,23 +23,49 @@
    row (fast, stately, hard-to-flick) — a deliberate reuse instead of
    editing the flight-model file mid-flight-feel-work by another agent.
 
-   ORDNANCE PATHS (hard rule: no parallel blast system): every
-   detonation routes through the WRAPPED CBZ.cityExplosion chain, so
-   demolition HP, facade fracture, armored reactions, crowd panic and
-   heat all fire exactly as they do for the RPG/C4. Each blast gets a
-   FRESH opts object → the chain's per-blast idempotence (_demoSeen)
-   holds by construction.
+   ORDNANCE PATHS — THE BUS (systems/impactbus.js). This file used to
+   hand-roll four separate detonation fan-outs (a bomb's explosion+
+   shatter, the buster's three-way verdict, the nuke's scheduled ring of
+   blasts, the nuke's rolling demolition sweep). They are GONE. Every
+   detonation here is now exactly one call:
 
-   THE NUKE is STAGED (owner: no iPad hitch): detonation enqueues work —
-   an outward-sweeping ring of wrapped blasts, building destruction at a
-   few lots per frame through cityDemolition (batchHide under the hood —
-   merged buffers never disposed), mass deaths through the KILL BUS
-   (cityKillPed/cityCrowdKill with cause "nuclear blast" → the corner
-   feed reads "You killed Dave Smith · NUCLEAR BLAST"), car wrecks, a
-   scorch field and a lingering radiation zone. An INTACT bunker
-   (bunkers.js) shelters anyone inside; a breached one does not. Max
-   wanted via the military-reason star API. NO new HUD — the killfeed
-   carries the story; the flash/cloud are world FX, not UI.
+       CBZ.detonate(x, y, z, "bomb" | "jdam" | "buster" | "nuke", opts)
+
+   The bus owns the fan-out (FX composer, shake/rumble/whiteout, the
+   propagating blast WAVE, and the structural ledger in city/structural.js
+   which is what finally makes buildings genuinely suffer: penetration,
+   fire, load-path failure, a real pancake collapse). What this file still
+   owns is what only it knows: what was dropped, from where, by whom, and
+   the consequences that are not blast (crime/stars, the bunker shelter
+   guarantee, the lingering radiation zone, the one-device-per-world
+   scarcity rule). NEW ORDNANCE IS A TABLE ROW — "buster" is defined via
+   CBZ.impact.define() below, with a high `pen` so it punches through the
+   roof and detonates INSIDE, which is exactly what `pen` models.
+
+   THE B-2 IS A REAL BOMBER: tap [B] to release one, HOLD [B] to walk a
+   CARPET of bombs along the flight path (stagger = release interval x
+   ground speed). The run is a public seam — CBZ.strategicBombRun(opts) /
+   CBZ.strategicBombRunState() / CBZ.strategicOnBombRun — so the mission
+   layer can hang "bomb the city" off it without touching this file. With no
+   B-2 in the air the SAME seam flies a CALLED sortie off-map
+   (CBZ.strategicCallStrike), which is what the bunker's map table tasks.
+   [X] cycles the payload: Mk-84 · JDAM · GBU bunker buster · THE DEVICE.
+
+   BALLISTICS ARE SOLVED, NOT INTEGRATED. y(t) = y0 + vy t - 1/2 g t^2 and the
+   landing time is the positive root of the quadratic, so a round's impact
+   POINT, TIME and SPEED are all known the instant it leaves the bay. That one
+   change is what makes the carpet-walk dust land with the craters, lets an
+   over-cap release snap straight to its end state instead of queueing, and
+   gives the bunker-buster a real impact velocity to be priced by. Rounds are
+   released with the AIRCRAFT'S OWN velocity (craft.vx/vy/vz), which is why
+   they lead the target instead of dropping behind you. The JDAM's target
+   acquisition is still lockon.js's CBZ.lockonMissileSeek — the ONE targeting
+   system — but its flight is a bent parabola re-solved onto the aimpoint a
+   few times a second, because a JDAM steers to a point; it does not chase.
+
+   An INTACT bunker (bunkers.js) still shelters anyone inside a nuke; a
+   breached one does not. Max wanted via the military-reason star API. NO
+   new HUD — the killfeed carries the story; the flash/cloud are world FX.
 
    DETERMINISM: placement/build = hash01 only. Combat-time FX = runtime,
    Math.random allowed (same rule the C4/grenade paths follow). New FX
@@ -59,12 +85,118 @@
   if (CBZ.CONFIG.STRAT_B2 == null) CBZ.CONFIG.STRAT_B2 = true;
   if (CBZ.CONFIG.STRAT_BUNKER_BUSTER == null) CBZ.CONFIG.STRAT_BUNKER_BUSTER = true;
   if (CBZ.CONFIG.STRAT_NUKE == null) CBZ.CONFIG.STRAT_NUKE = true;
+  // HOLD-[B] carpet bombing. false => [B] is a single release exactly as
+  // before (one-line revert of the whole run machinery).
+  if (CBZ.CONFIG.STRAT_BOMB_RUN == null) CBZ.CONFIG.STRAT_BOMB_RUN = true;
+  // The guided bomb payload. false => the payload cycle skips it and the
+  // B-2 carries dumb iron only.
+  if (CBZ.CONFIG.STRAT_JDAM == null) CBZ.CONFIG.STRAT_JDAM = true;
 
   function h01(x, z, s) { return CBZ.hash01 ? CBZ.hash01(x, z, s) : 0.5; }
   function cm(hex, opts) { return CBZ.cmat ? CBZ.cmat(hex, opts) : (CBZ.mat ? CBZ.mat(hex, opts) : new THREE.MeshLambertMaterial({ color: hex })); }
   function bg(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
   function note(m, s) { if (CBZ.city && CBZ.city.note) { try { CBZ.city.note(m, s); } catch (e) {} } }
   function sfx(n, o) { if (CBZ.sfx) { try { CBZ.sfx(n, o); } catch (e) {} } }
+
+  /* ---- THE ORDNANCE BUS ---------------------------------------------------
+     One verb for every detonation in this file. `ensureRows()` registers the
+     ONE warhead the shared table did not already carry (the bunker buster);
+     everything else — bomb, jdam, nuke — is already a row in
+     systems/impactbus.js and needs no code here at all.
+
+     DEGRADE-SAFE (BLOCK LAW rule 2): with no bus loaded, detonate() falls
+     back to the exact inline cityExplosion call this file made before the
+     migration, so a partial load can never leave a bomb silent.            */
+  const LEGACY_BLAST = {                       // the pre-bus numbers, verbatim
+    bomb:   { power: 2.3, radius: 11 },
+    jdam:   { power: 2.6, radius: 12 },
+    buster: { power: 3.0, radius: 13 },
+    nuke:   { power: 3.0, radius: 14 },
+  };
+  /* ---- ORDNANCE MASS + THE KINETIC LAW ------------------------------------
+     Real ordnance, real kilograms. Mk-84 2000 lb = 925 kg carrying ~429 kg of
+     tritonal (~1.8e9 J of CHEMISTRY); a GBU-31 is that same Mk-84 plus a ~45 kg
+     tail kit; a GBU-28-class penetrator is 2130 kg.
+
+     WHERE MOTION MATTERS AND WHERE IT DOES NOT. A general-purpose bomb's
+     damage is its FILLER, not its fall — 1.8e9 J of explosive against maybe
+     2e7 J of impact energy, two orders apart — so the `bomb`/`jdam` rows in
+     systems/impactbus.js correctly declare refE 0 and ignore mass/speed. We
+     still pass {mass, speed} to them: with refE 0 that is INERT today (the
+     multiplier is exactly 1, byte-identical behaviour) and becomes free the
+     day the bus prices them. Handing a neighbour honest data it does not
+     consume yet is the degrade-safe way to do this.
+
+     THE BUNKER BUSTER IS THE EXCEPTION AND IT IS THE WHOLE POINT. A kinetic
+     penetrator's terminal effect genuinely is its motion: its depth into
+     concrete scales with impact VELOCITY (Young's), and E goes as v², so
+     depth goes as sqrt(E). Release it low and slow and it dents the berm;
+     release it fast and high and it opens a command shelter. That is a real
+     skill the player can learn, expressed as one row field and one square
+     root — not a code path.                                                */
+  const MASS = { bomb: 925, jdam: 970, buster: 2130, nuke: 4400 };
+  const BUSTER_REF_E = 3.4e7;      // 2130 kg arriving at ~180 m/s — a NOMINAL release
+  const BUSTER_PEN_CE = 6.0;       // GBU-28's published ~6 m of reinforced concrete, at refE
+
+  let _rowsDone = false;
+  function ensureRows() {
+    if (_rowsDone) return;
+    const I = CBZ.impact;
+    if (!I || !I.define || !I.row) return;      // bus not loaded yet — retry next tick
+    _rowsDone = true;
+    // GBU-57. What makes a bunker buster a bunker buster is not its blast —
+    // it is PENETRATION: it does not stop at the roof or the berm, it carries
+    // its energy to depth and detonates there. `pen` is precisely that model
+    // (exponential energy decay, damage deposited across the floors it passes
+    // through, the leftover blowing out the far side), so the weapon is a ROW,
+    // not a code path. `refE` is the other half: the row's numbers are quoted
+    // AT a nominal release and the bus scales FX by (E/refE)^1/3 and structure
+    // by (E/refE)^2/3 from there. kmax 2.6 keeps a 600 m full-throttle release
+    // meaningful without letting altitude alone turn it into a nuke.
+    if (!I.row("buster")) I.define("buster", {
+      power: 3.4, radius: 14, struct: 13, pen: 40, fire: 0.25,
+      fx: "heavy", quake: 1.8, sfx: "rumble",
+      refE: BUSTER_REF_E, kmin: 0.5, kmax: 2.6,
+    });
+  }
+  ensureRows();
+  // Impact kinetic energy in joules. Asks the BUS (CBZ.impact.kinetic) rather
+  // than re-deriving 1/2mv^2 — one arithmetic, one place — and falls back to
+  // the arithmetic only if the bus is absent.
+  function energyOf(kind, speed) {
+    const m = MASS[kind] || MASS.bomb;
+    if (CBZ.impact && CBZ.impact.kinetic) {
+      try { return CBZ.impact.kinetic(m, speed).E || 0; } catch (e) {}
+    }
+    return (speed > 0 ? 0.5 * m * speed * speed : 0);
+  }
+  // Concrete-equivalent penetration, metres, of a buster arriving at `speed`.
+  // depth ∝ v ⇒ depth ∝ sqrt(E). Clamped so a degenerate speed can never hand
+  // bunkers.js an absurd verdict.
+  function busterPenCE(speed) {
+    const E = energyOf("buster", speed);
+    if (!(E > 0)) return BUSTER_PEN_CE;
+    return BUSTER_PEN_CE * Math.sqrt(Math.max(0.09, Math.min(9, E / BUSTER_REF_E)));
+  }
+  // who gets the blame — the kill bus + city/structural.js's onCollapse seam
+  // both key off this, which is how a mission can ask "did the PLAYER level
+  // that block?" without any extra bookkeeping.
+  function who() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player || null; }
+  function detonate(x, y, z, kind, o) {
+    ensureRows();
+    o = o || {};
+    if (o.by === undefined) o.by = who();
+    if (CBZ.detonate) { try { return CBZ.detonate(x, y, z, kind, o); } catch (e) { return null; } }
+    const L = LEGACY_BLAST[kind] || LEGACY_BLAST.bomb;
+    if (CBZ.cityExplosion) {
+      try {
+        const op = { power: L.power, radius: L.radius, byPlayer: !!o.byPlayer };
+        if (y > 3) op.y = y;
+        CBZ.cityExplosion(x, z, op);
+      } catch (e) {}
+    }
+    return null;
+  }
 
   // ---- payload items live in the one city economy (explosives.js idiom:
   // register here, retry if the economy rebuilds; NOT in any shop stock —
@@ -87,24 +219,8 @@
 
   // sculpt helpers — the r128 position-attribute idiom (same math as
   // island_military's taperBox/wingGeo; local copies, that module is private).
-  function taperBox(w, h, d, opt) {
-    opt = opt || {};
-    const nz = opt.nz != null ? opt.nz : 1, tz = opt.tz != null ? opt.tz : 1;
-    const top = opt.top != null ? opt.top : 1, bot = opt.bot != null ? opt.bot : 1;
-    const geo = new THREE.BoxGeometry(w, h, d, opt.segW || 2, opt.segH || 2, opt.segD || 6);
-    const pos = geo.attributes.position, hd = d / 2, hh = h / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const f = z / hd, zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
-      let sx = zt, sy = zt;
-      const vy = hh > 0 ? y / hh : 0;
-      if (vy > 0) sx *= (1 + (top - 1) * vy);
-      if (vy < 0) sx *= (1 + (bot - 1) * -vy);
-      pos.setX(i, x * sx); pos.setY(i, y * sy);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
+  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
+  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
   function wingGeo(side, span, chord, thick, sweep, taper, thin) {
     const geo = new THREE.BoxGeometry(span, thick, chord, 6, 1, 2);
     const pos = geo.attributes.position;
@@ -281,7 +397,10 @@
   // bomber, not a knife-fighter), a small defensive missile load, and the
   // bomb magazine. Done from OUR file so the flight-model module (another
   // agent's active surface) stays untouched.
-  const B2_BOMBS = 16, B2_MISSILES = 8;
+  // A B-2 carries 80x Mk-82 or 16x 2000 lb-class. We fly the 2000 lb loadout,
+  // so 16 iron + 4 of them swapped for guidance kits.
+  const B2_BOMBS = 16, B2_MISSILES = 8, B2_JDAMS = 4;
+  let _bayT = 0, _bayOpen = 0;
   function flyingB2() {
     const P = CBZ.player;
     const c = P && P._aircraft;
@@ -296,9 +415,11 @@
       c.ammo = Math.min(c.ammo, B2_MISSILES);
       c.maxAmmo = B2_MISSILES;
       c.bombAmmo = B2_BOMBS;
+      c.jdamAmmo = B2_JDAMS;
       c.displayName = "B-2 SPIRIT";
       payload = "bomb";
-      note("B-2 SPIRIT — [B] drop payload · [X] switch payload · LMB defensive missiles", 4.2);
+      // one note, not two — city.note replaces rather than queues
+      note("B-2 SPIRIT — [B] tap: release · HOLD [B]: carpet run · [X] payload · LMB missiles. Penetrators only bite fast and high.", 5.4);
     }
     // bay doors ease open around a drop window, then seal
     if (b2rec && b2rec.group && b2rec.group.userData.bayL) {
@@ -314,18 +435,24 @@
       }
     }
   });
-  let _bayT = 0, _bayOpen = 0;
 
   /* ==========================================================================
      2) THE BOMB BAY — unguided gravity bombs + the two special payloads.
   ========================================================================== */
-  let payload = "bomb";                              // "bomb" | "buster" | "nuke"
-  const PAYLOADS = ["bomb", "buster", "nuke"];
+  let payload = "bomb";                    // "bomb" | "jdam" | "buster" | "nuke"
+  const PAYLOADS = ["bomb", "jdam", "buster", "nuke"];
   function payloadAvailable(k, craft) {
     if (k === "bomb") return craft && (craft.bombAmmo | 0) > 0;
+    if (k === "jdam") return CBZ.CONFIG.STRAT_JDAM !== false && craft && (craft.jdamAmmo | 0) > 0;
     if (k === "buster") return CBZ.CONFIG.STRAT_BUNKER_BUSTER !== false && invCount("Bunker Buster") > 0;
     if (k === "nuke") return CBZ.CONFIG.STRAT_NUKE !== false && invCount("Nuclear Device") > 0;
     return false;
+  }
+  function payloadLabel(k, c) {
+    if (k === "bomb") return "Payload: Mk-84 bombs (" + (c ? (c.bombAmmo | 0) : 0) + ")";
+    if (k === "jdam") return "Payload: GBU-31 JDAM — guided (" + (c ? (c.jdamAmmo | 0) : 0) + ")";
+    if (k === "buster") return "Payload: GBU-57 BUNKER BUSTER (" + invCount("Bunker Buster") + ")";
+    return "Payload: THE DEVICE";
   }
   function cyclePayload() {
     const c = flyingB2();
@@ -335,9 +462,7 @@
       const cand = PAYLOADS[(i + k) % PAYLOADS.length];
       if (payloadAvailable(cand, c)) { payload = cand; break; }
     }
-    note(payload === "bomb" ? "Payload: Mk-84 bombs (" + (c.bombAmmo | 0) + ")"
-      : payload === "buster" ? "Payload: GBU-57 BUNKER BUSTER (" + invCount("Bunker Buster") + ")"
-      : "Payload: THE DEVICE", 1.6);
+    note(payloadLabel(payload, c), 1.6);
     sfx("switch", { pitch: 1.2, volume: 0.3 });
     return payload;
   }
@@ -381,78 +506,443 @@
     gp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
     return gp;
   }
-  const bombs = [];                                  // {mesh,x,y,z,vx,vy,vz,kind,fuse}
+  const bombs = [];                          // {mesh,kind,x0,y0,z0,vx,vy,vz,t,sol,seek}
   const GRAV = 14;                                   // gamey-fast fall — reads right at flight alt
+  const GLIDE_AUTH = 55;                             // JDAM cross-range authority, m/s of correction
+  const REAIM = 0.35;                                // seconds between guided aimpoint re-solves
+  // Live ordnance in the air. Quality-scaled per the brief: a low tier flies
+  // fewer bodies, and over the cap a release SNAPS to its end state (below)
+  // rather than being dropped or queued.
+  function bombCap() { return Math.max(4, Math.round(CBZ.qScale ? CBZ.qScale(6, 14) : 14)); }
 
-  function dropPayload() {
+  /* ---- BALLISTICS, SOLVED — not integrated -------------------------------
+     The old sim stepped `vy -= GRAV*dt` every frame and asked "have I hit the
+     ground yet"; predictWalk() then guessed the SAME fall with a DIFFERENT
+     formula (sqrt(2h/g), which throws away the release vy entirely), so the
+     carpet-walk dust and the actual craters disagreed by metres. Both are gone.
+
+     y(t) = y0 + vy·t − ½g·t², so the landing time is the positive root of
+     ½g·t² − vy·t + (y0 − ys) = 0. Solving it at RELEASE means the impact
+     point, the impact TIME and the impact SPEED are all known the instant the
+     bomb leaves the bay. That is what buys, for free:
+       • the dust walk lining up with the craters (cityBombWalk takes a `delay`)
+       • the over-cap degrade path (snap straight to the end state)
+       • the kinetic law (the buster is priced by the speed it actually arrives at)
+     Per-frame the bomb is then a pure evaluation — no integration, no drift.
+     ---------------------------------------------------------------------- */
+
+  // Highest SOLID surface under (x,z): terrain, a roof/platform, or a bunker
+  // berm. One answer, used by the solver and by the run's predicted walk, so
+  // the two can never disagree again.
+  function surfaceAt(x, z, fromY) {
+    let s = 0;
+    try {
+      s = CBZ.groundAt ? CBZ.groundAt(x, z, fromY == null ? 600 : fromY)
+        : (CBZ.floorAt ? CBZ.floorAt(x, z) : 0);
+    } catch (e) { s = 0; }
+    if (!isFinite(s)) s = 0;
+    if (CBZ.strategicBunkerHit) {
+      const bk = CBZ.strategicBunkerHit(x, z);
+      if (bk && bk.moundTop > s) s = bk.moundTop;      // burst ON the berm, not inside it
+    }
+    return s;
+  }
+
+  // The closed form. `ys` depends on where it lands, so the surface sample is
+  // iterated 3x — it converges on the first pass over flat ground and still
+  // lands honestly on a roof or a berm.
+  function solveFall(x0, y0, z0, vx, vy, vz) {
+    let ys = surfaceAt(x0, z0, y0), t = 0, hx = x0, hz = z0;
+    for (let i = 0; i < 3; i++) {
+      const disc = vy * vy + 2 * GRAV * Math.max(0, y0 - ys);
+      t = disc <= 0 ? 0 : (vy + Math.sqrt(disc)) / GRAV;
+      if (!(t > 0) || !isFinite(t)) t = 0;
+      if (t > 40) t = 40;                              // never leave one in the sky
+      hx = x0 + vx * t; hz = z0 + vz * t;
+      const ns = surfaceAt(hx, hz, y0);
+      if (Math.abs(ns - ys) < 0.05) { ys = ns; break; }
+      ys = ns;
+    }
+    const vyImp = vy - GRAV * t;
+    return { t: t, x: hx, y: ys, z: hz, speed: Math.hypot(vx, vyImp, vz) };
+  }
+
+  // GUIDED SOLVE. A JDAM is an INS/GPS bomb: it steers to an AIMPOINT, it does
+  // not chase like a missile. So the guidance is one BENT PARABOLA, not a
+  // per-frame homing integration — fall to the target's altitude, then set the
+  // horizontal leg so the bomb ARRIVES there, clamped to a real cross-range
+  // authority (a kit can correct a few hundred metres, not fly to the horizon).
+  // Target acquisition is still lockon.js's CBZ.lockonMissileSeek — the ONE
+  // targeting system in the game. Only the flight solver is ours.
+  function solveGuided(x0, y0, z0, vx, vy, vz, tgt) {
+    const disc = vy * vy + 2 * GRAV * Math.max(0, y0 - tgt.y);
+    let t = disc <= 0 ? 0 : (vy + Math.sqrt(disc)) / GRAV;
+    if (!(t > 0.2) || !isFinite(t)) return null;       // no time left to correct
+    let nvx = (tgt.x - x0) / t, nvz = (tgt.z - z0) / t;
+    const dx = nvx - vx, dz = nvz - vz, d = Math.hypot(dx, dz);
+    if (d > GLIDE_AUTH) { nvx = vx + dx / d * GLIDE_AUTH; nvz = vz + dz / d * GLIDE_AUTH; }
+    const vyImp = vy - GRAV * t;
+    return {
+      vx: nvx, vz: nvz,
+      sol: { t: t, x: x0 + nvx * t, y: tgt.y, z: z0 + nvz * t, speed: Math.hypot(nvx, vyImp, nvz) },
+    };
+  }
+
+  // where the round is at local time t on its parabola (pure evaluation)
+  function bombAt(b, t, out) {
+    out.x = b.x0 + b.vx * t;
+    out.y = b.y0 + b.vy * t - 0.5 * GRAV * t * t;
+    out.z = b.z0 + b.vz * t;
+    out.vy = b.vy - GRAV * t;
+    return out;
+  }
+  const _bp = { x: 0, y: 0, z: 0, vy: 0 };
+
+  // THE BAY, in world space. The old release spawned the bomb 1.6 m BELOW the
+  // group origin — which is the WHEELS, so every round appeared a metre and a
+  // half under the landing gear instead of dropping out of the bay doors.
+  // localToWorld off the actual model is exact and banks with the aircraft.
+  const BAY_LOCAL = new THREE.Vector3(0, 0.85, 0.6);   // the belly bay built in makeB2()
+  const _bayWorld = new THREE.Vector3();
+  function bayPoint(c) {
+    const grp = c && c.group;
+    if (grp && grp.localToWorld) {
+      try { return grp.localToWorld(_bayWorld.copy(BAY_LOCAL)); } catch (e) {}
+    }
+    return _bayWorld.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
+  }
+
+  function dropPayload(force) {
     const c = flyingB2();
     if (!c || !g || g.mode !== "city") return false;
-    if (bombs.length >= 12) return false;               // pool cap
     // bomber discipline: a release on the deck detonates under your own tail
     const agl = c.pos.y - (CBZ.floorAt ? CBZ.floorAt(c.pos.x, c.pos.z) : 0);
-    if (agl < 14) { note("Too low — climb before releasing.", 1.4); return false; }
-    if (!payloadAvailable(payload, c)) { cyclePayload(); if (!payloadAvailable(payload, c)) { note("Bay's empty.", 1.2); return false; } }
+    if (agl < 14) { if (!force) note("Too low — climb before releasing.", 1.4); return false; }
+    if (!payloadAvailable(payload, c)) { cyclePayload(); if (!payloadAvailable(payload, c)) { if (!force) note("Bay's empty.", 1.2); return false; } }
     if (c._dropCD > 0) return false;
-    if (payload === "bomb") c.bombAmmo--;
-    else if (payload === "buster") { if (!invTake("Bunker Buster")) return false; }
-    else if (payload === "nuke") { if (!invTake("Nuclear Device")) return false; }
-    c._dropCD = payload === "bomb" ? 0.35 : 1.4;
+    const kind = payload;
+    if (kind === "bomb") c.bombAmmo--;
+    else if (kind === "jdam") c.jdamAmmo--;
+    else if (kind === "buster") { if (!invTake("Bunker Buster")) return false; }
+    else if (kind === "nuke") { if (!invTake("Nuclear Device")) return false; }
+    c._dropCD = kind === "bomb" ? 0.2 : kind === "jdam" ? 0.6 : 1.4;
     _bayT = 1.3;                                     // bay doors swing for the release
-    const sp = c.airspeed != null && c.airspeed > 0 ? c.airspeed : (c.speed || 0);
-    const cp = Math.cos(c.pitch || 0);
+
+    // RELEASED WITH THE AIRCRAFT'S OWN VELOCITY — that is what makes a bomb
+    // LEAD its target instead of falling straight down behind you. craft.vx/
+    // vy/vz is the flight model's real world velocity (playeraircraft.js), so
+    // this is free and always agrees with what the airframe is doing.
+    const p = bayPoint(c);
     const b = {
-      mesh: bombMesh(payload), kind: payload,
-      x: c.pos.x, y: c.pos.y - 1.6, z: c.pos.z,
-      vx: Math.sin(c.heading) * cp * sp, vy: Math.sin(c.pitch || 0) * sp - 2, vz: Math.cos(c.heading) * cp * sp,
+      mesh: null, kind: kind, t: 0, reaim: 0, seek: null,
+      x0: p.x, y0: p.y, z0: p.z,
+      vx: c.vx || 0, vy: (c.vy || 0) - 1.5, vz: c.vz || 0,   // -1.5: ejected, not merely let go
     };
-    b.mesh.position.set(b.x, b.y, b.z);
-    b.mesh.rotation.y = c.heading;
-    if (CBZ.scene) CBZ.scene.add(b.mesh);
-    bombs.push(b);
+    b.sol = solveFall(b.x0, b.y0, b.z0, b.vx, b.vy, b.vz);
+
+    // GUIDED: acquisition is lockon.js's, the solve is ours (see solveGuided).
+    // Undefined (lock-on disabled) or null (no red lock) leaves the bomb dumb,
+    // which is the honest outcome — a JDAM with no aimpoint IS a dumb bomb.
+    if (kind === "jdam" && CBZ.lockonMissileSeek) {
+      try { b.seek = CBZ.lockonMissileSeek() || null; } catch (e) { b.seek = null; }
+      reaimGuided(b);
+    }
+
     sfx("whoosh", { pitch: 0.8, volume: 0.5 });
     // dropping ordnance on the city is a crime the moment it leaves the bay
-    if (CBZ.cityCrime) { try { CBZ.cityCrime(payload === "bomb" ? 120 : 200, { x: c.pos.x, z: c.pos.z, type: "shots-fired" }); } catch (e) {} }
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(kind === "bomb" ? 120 : 200, { x: c.pos.x, z: c.pos.z, type: "shots-fired" }); } catch (e) {} }
+
+    // OVER THE CAP — DEGRADE, never queue. The solver already knows exactly
+    // where and when this round lands, so the only thing a saturated sky loses
+    // is a few seconds of a 0.3 m cylinder falling: the crater, the kills and
+    // the ledger hit are identical. This snap-to-end-state is only possible
+    // BECAUSE the ballistics are closed-form.
+    if (bombs.length >= bombCap()) { resolveImpact(b); return true; }
+
+    b.mesh = bombMesh(kind);
+    b.mesh.rotation.order = "YXZ";                   // yaw then pitch — nose tracks the arc
+    b.mesh.position.set(b.x0, b.y0, b.z0);
+    b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
+    if (CBZ.scene) CBZ.scene.add(b.mesh);
+    bombs.push(b);
     return true;
+  }
+
+  // Re-solve a guided round onto its (possibly moved) aimpoint from wherever
+  // it is right now. Resetting the parabola's ORIGIN each time is what keeps
+  // this closed-form: the bomb is always on exactly one analytic arc.
+  function reaimGuided(b) {
+    if (!b.seek) return;
+    let t = null;
+    try { t = b.seek(); } catch (e) { t = null; }
+    if (!t) { b.seek = null; return; }                 // target died/left: go ballistic
+    bombAt(b, b.t, _bp);
+    const gd = solveGuided(_bp.x, _bp.y, _bp.z, b.vx, _bp.vy, b.vz, t);
+    if (!gd) { b.seek = null; return; }
+    b.x0 = _bp.x; b.y0 = _bp.y; b.z0 = _bp.z;
+    b.vy = _bp.vy; b.vx = gd.vx; b.vz = gd.vz;
+    b.t = 0; b.reaim = REAIM;
+    b.sol = gd.sol;
+  }
+
+  // ONE impact resolution, shared by the flying path and the over-cap snap.
+  // Every branch ends in CBZ.detonate — the bus owns the fan-out, the row owns
+  // the numbers, and {mass, speed} hands it the motion so the kinetic law can
+  // price the hit (inert on rows with refE 0, which is every chemical warhead).
+  function resolveImpact(b) {
+    if (!g || g.mode !== "city") return;
+    const s = b.sol;
+    // a roof hit blooms ON the roof; ground level gets a little standoff
+    const iy = s.y > 2.5 ? s.y : Math.max(0.6, s.y) + 1.0;
+    if (b.kind === "buster") { resolveBuster(s.x, s.z, s.y, b.vx, b.vz, s.speed); return; }
+    if (b.kind === "nuke") { nukeDetonate(s.x, s.z); return; }
+    detonate(s.x, iy, s.z, b.kind, {
+      byPlayer: true, dirx: b.vx, dirz: b.vz,
+      mass: MASS[b.kind] || MASS.bomb, speed: s.speed,
+    });
+  }
+
+  /* ==========================================================================
+     2b) THE CARPET BOMB RUN — the "bomb a city" fantasy.
+     Holding [B] walks a STICK of bombs along the flight path: one release
+     every RUN_INTERVAL seconds, so the ground stagger is release interval x
+     ground speed and falls out of the flight for free (no path authoring).
+     Research: carpet bombing is a SEQUENCE, not a bigger explosion — one
+     pooled prefab fired N times with the dust merging along the line. The
+     merge FX belongs to city/nukefx.js's CBZ.cityBombWalk(points, opts) if
+     that file is loaded; without it the run is still a run.
+
+     MISSION SEAM: CBZ.strategicBombRun(opts) starts one headlessly (opts
+     {count, interval, kind, onDone}); CBZ.strategicBombRunState() reports
+     progress; CBZ.strategicOnBombRun is a global completion hook. The score
+     handed back is the run's own tally — bombs away, buildings condemned —
+     read off city/structural.js rather than counted a second time here.
+  ========================================================================== */
+  const RUN_INTERVAL = 0.28;                 // seconds between releases
+  const RUN_MAX = 24;                        // hard cap on a single stick
+  const run = { active: false, want: 0, sent: 0, acc: 0, t: 0, interval: RUN_INTERVAL, kind: "bomb", onDone: null, x0: 0, z0: 0, _called: null };
+  let _runCollapses = 0, _tapInstalled = false;
+
+  /* Where the stick WILL land, using the SAME closed-form solver the rounds
+     themselves fly. This is the fix for the run's oldest lie: the walk FX used
+     to guess the fall with sqrt(2h/g) — throwing away the release vy and the
+     aircraft's climb/dive entirely — so the dust line and the craters were
+     metres apart and the beat read as two separate events. Now both come from
+     solveFall(), and the walk is handed the fall TIME as its `delay`, so the
+     dust blooms exactly when the first crater does.
+
+     Returns {pts, tf}: the ground track, and the first round's time of flight. */
+  function predictWalk(c, count, interval) {
+    const pts = [];
+    const p = bayPoint(c);
+    const ax = c.vx || 0, ay = c.vy || 0, az = c.vz || 0;   // the AIRCRAFT's travel
+    const vx = ax, vy = ay - 1.5, vz = az;                  // the ROUND's release velocity
+    // the aircraft keeps flying between releases, so round i leaves from
+    // (release point + aircraft velocity x i x interval) — that offset IS the
+    // stagger, and it is why a carpet WALKS instead of stacking.
+    let tf = 0;
+    for (let i = 0; i < count; i++) {
+      const lead = i * interval;
+      const sol = solveFall(p.x + ax * lead, p.y + ay * lead, p.z + az * lead, vx, vy, vz);
+      if (i === 0) tf = sol.t;
+      pts.push({ x: sol.x, y: sol.y, z: sol.z });
+    }
+    return { pts: pts, tf: tf };
+  }
+
+  function startRun(opts) {
+    opts = opts || {};
+    if (CBZ.CONFIG.STRAT_BOMB_RUN === false) return false;
+    if (run.active) return false;
+    const c = flyingB2();
+    // NO B-2 IN THE AIR → this is a CALLED strike, not a flown one (see
+    // calledStrike below). That is what the documented mission seam always
+    // claimed to do and could never actually do: startRun used to bail here.
+    if (!c || !g || g.mode !== "city") return calledStrike(opts);
+    const kind = opts.kind || (payload === "nuke" ? "bomb" : payload);   // never carpet the device
+    if (!payloadAvailable(kind, c)) return false;
+    payload = kind;
+    const stock = kind === "bomb" ? (c.bombAmmo | 0) : kind === "jdam" ? (c.jdamAmmo | 0) : invCount(kind === "buster" ? "Bunker Buster" : "Nuclear Device");
+    run.active = true;
+    run.kind = kind;
+    run.want = Math.max(1, Math.min(RUN_MAX, opts.count || stock));
+    run.interval = Math.max(0.08, opts.interval || RUN_INTERVAL);
+    run.sent = 0; run.acc = run.interval; run.t = 0;
+    run.onDone = typeof opts.onDone === "function" ? opts.onDone : null;
+    run.x0 = c.pos.x; run.z0 = c.pos.z;
+    _runCollapses = 0;
+    // hand the predicted line to the walk composer if one exists. DRAW ONLY
+    // (nukefx.js's default) — we simulate and detonate every round ourselves,
+    // so a detonating walk would bill the whole stick twice.
+    if (CBZ.cityBombWalk) {
+      try {
+        const w = predictWalk(c, run.want, run.interval);
+        CBZ.cityBombWalk(w.pts, { kind: kind, interval: run.interval, delay: w.tf });
+      } catch (e) {}
+    }
+    note("BOMB RUN — " + run.want + " away.", 1.8);
+    return true;
+  }
+
+  /* ---- THE CALLED STRIKE — the same verb, flown off-map -------------------
+     "Bomb that district" with no player in the cockpit. There is deliberately
+     no second bomb sim here: nukefx.js's CBZ.cityBombWalk already owns the
+     staggered prefab walk and, in `detonate:true` mode, fires each impact
+     through CBZ.detonate exactly once — so the structural ledger, the kill bus
+     and the crime system all see it once, capped at 24 points and 2 concurrent
+     walks. All this function contributes is the track and the time-on-target.  */
+  function calledStrike(opts) {
+    if (CBZ.CONFIG.STRAT_BOMB_RUN === false || !CBZ.cityBombWalk) return false;
+    if (!g || g.mode !== "city") return false;
+    if (run.active) return false;
+    const tx = +opts.x, tz = +opts.z;
+    if (!isFinite(tx) || !isFinite(tz)) return false;
+    const kind = opts.kind === "jdam" ? "jdam" : "bomb";   // called sorties fly iron
+    const count = Math.max(1, Math.min(RUN_MAX, opts.count || 12));
+    const interval = Math.max(0.08, opts.interval || RUN_INTERVAL);
+    // a stick walks ALONG a heading through the aimpoint, centred on it, at
+    // the same spacing a real run lays down: interval x a bomber's ground speed.
+    const hd = opts.heading != null ? +opts.heading : 0;
+    const step = interval * (opts.speed || 190);
+    const hx = Math.sin(hd), hz = Math.cos(hd);
+    const pts = [];
+    for (let i = 0; i < count; i++) {
+      const d = (i - (count - 1) / 2) * step;
+      const px = tx + hx * d, pz = tz + hz * d;
+      pts.push({ x: px, y: surfaceAt(px, pz) + 1.0, z: pz });
+    }
+    const tot = Math.max(4, +opts.tot || 7);          // time on target, seconds
+    run.active = true; run.kind = kind; run.want = count; run.sent = count;
+    run.acc = 0; run.t = 0; run.interval = interval;
+    run.x0 = tx; run.z0 = tz;
+    run.onDone = typeof opts.onDone === "function" ? opts.onDone : null;
+    _runCollapses = 0;
+    run._called = tot + count * interval + 1.2;       // when the sortie is over
+    try {
+      CBZ.cityBombWalk(pts, {
+        kind: kind, interval: interval, delay: tot, detonate: true,
+        by: opts.by !== undefined ? opts.by : who(), byPlayer: opts.byPlayer !== false,
+        dirx: hx, dirz: hz,
+      });
+    } catch (e) { run.active = false; return false; }
+    note("STRIKE INBOUND — " + count + " x 2000 lb, " + Math.round(tot) + "s out. Clear the grid.", 3.4);
+    sfx("siren", { volume: 0.35 });
+    return true;
+  }
+  CBZ.strategicCallStrike = calledStrike;
+  function endRun(reason) {
+    if (!run.active) return;
+    run.active = false;
+    run._called = null;
+    let doomed = 0;
+    const S = CBZ.structure;
+    if (S && S.doomed) { try { doomed = (S.doomed() || []).length; } catch (e) { doomed = 0; } }
+    const report = {
+      kind: run.kind, dropped: run.sent, requested: run.want,
+      collapses: _runCollapses,
+      doomed: doomed,                 // condemned and still counting down
+      reason: reason || "done",
+      x: run.x0, z: run.z0,
+    };
+    const cb = run.onDone; run.onDone = null;
+    if (cb) { try { cb(report); } catch (e) {} }
+    if (typeof CBZ.strategicOnBombRun === "function") { try { CBZ.strategicOnBombRun(report); } catch (e) {} }
+  }
+
+  // Count the buildings THIS run felled, by listening to the structural
+  // ledger's existing collapse seam. We CHAIN whatever hook is already there
+  // (the mission layer owns that slot too) instead of clobbering it, and we
+  // only ever read — no second damage ledger is created here.
+  function wireCollapseTap() {
+    if (_tapInstalled) return;
+    const S = CBZ.structure;
+    if (!S) return;                                   // ledger absent: no score, no crash
+    _tapInstalled = true;
+    const prev = typeof S.onCollapse === "function" ? S.onCollapse : null;
+    const tap = function (ev) {
+      if (run.active) _runCollapses++;
+      if (prev) { try { prev(ev); } catch (e) {} }
+    };
+    tap._stratTap = true;
+    S.onCollapse = tap;
   }
 
   // ballistic tick + impact resolution
   CBZ.onUpdate(12.45, function (dt) {
+    ensureRows();
+    wireCollapseTap();
     const c = flyingB2();
     if (c && c._dropCD > 0) c._dropCD -= dt;
+    // ---- [B] hold-to-carpet: past RUN_HOLD the tap becomes a run.
+    // `_bRan` latches the attempt: without it an empty/refused run re-fired
+    // startRun() on EVERY frame the key stayed down.
+    if (_bHeld) {
+      if (!c || g.mode !== "city") { _bHeld = false; _bRan = false; }
+      else {
+        _bT += dt;
+        if (_bT >= RUN_HOLD && !_bRan && !run.active && CBZ.CONFIG.STRAT_BOMB_RUN !== false) {
+          _bRan = true;
+          startRun({});
+        }
+      }
+    }
+    // ---- the carpet run: one release per interval while the trigger is held
+    if (run.active) {
+      run.t += dt;
+      if (run._called != null) {                        // a CALLED sortie flies itself
+        if (run.t >= run._called) { run._called = null; endRun("done"); }
+      } else if (!c || g.mode !== "city") endRun("aborted");
+      else {
+        run.acc += dt;
+        // A stalled cadence (release cooldown longer than the interval) must
+        // not BANK time and then dump the backlog in one frame — cap the debt
+        // at one extra beat so the stick resumes evenly instead of bunching.
+        if (run.acc > run.interval * 2) run.acc = run.interval * 2;
+        while (run.acc >= run.interval && run.sent < run.want) {
+          if (!payloadAvailable(run.kind, c)) { endRun("empty"); break; }
+          payload = run.kind;
+          // too low / on cooldown: HOLD the cadence rather than burning the
+          // beat. (Cap saturation no longer lands here — dropPayload snaps an
+          // over-cap round straight to its impact, so the stagger is intact.)
+          if (!dropPayload(true)) break;
+          run.acc -= run.interval;
+          run.sent++;
+        }
+        if (run.active && run.sent >= run.want) endRun("done");
+      }
+    }
     if (!bombs.length) return;
     if (g.mode !== "city") {                            // mode flip: sweep the sky
-      for (const b of bombs) if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
+      for (const b of bombs) if (b.mesh && b.mesh.parent) b.mesh.parent.remove(b.mesh);
       bombs.length = 0;
       return;
     }
+    // ---- THE FALL. Pure evaluation of each round's analytic arc; the impact
+    // time was solved at release, so "have I landed" is a scalar compare, not
+    // a terrain query per bomb per frame.
     for (let i = bombs.length - 1; i >= 0; i--) {
       const b = bombs[i];
-      b.vy -= GRAV * dt;
-      b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
-      b.mesh.position.set(b.x, b.y, b.z);
-      b.mesh.rotation.x = Math.max(-1.35, b.mesh.rotation.x - dt * 0.9);   // noses over
-      // highest surface under the bomb (terrain OR a roof/platform OR a berm)
-      let surf = 0;
-      try { surf = CBZ.groundAt ? CBZ.groundAt(b.x, b.z, b.y) : (CBZ.floorAt ? CBZ.floorAt(b.x, b.z) : 0); } catch (e) { surf = 0; }
-      if (CBZ.strategicBunkerHit) {
-        const bk = CBZ.strategicBunkerHit(b.x, b.z);
-        if (bk && bk.moundTop > surf) surf = bk.moundTop;   // burst ON the berm, not inside it
+      b.t += dt;
+      // GUIDED: re-solve the aimpoint a few times a second so a moving target
+      // is still hit, then keep flying ONE parabola between solves.
+      if (b.seek) {
+        b.reaim -= dt;
+        if (b.reaim <= 0) reaimGuided(b);
       }
-      if (b.y > surf + 0.5 && b.y > -2) continue;
-      // IMPACT
-      if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
-      bombs.splice(i, 1);
-      if (g.mode !== "city") continue;
-      if (b.kind === "bomb") {
-        const o = { power: 2.3, radius: 11, byPlayer: true };
-        if (surf > 2.5) o.y = surf;                 // roof hits bloom ON the roof
-        if (CBZ.cityExplosion) { try { CBZ.cityExplosion(b.x, b.z, o); } catch (e) {} }
-        if (CBZ.cityShatter) { try { CBZ.cityShatter(b.x, b.z, 13); } catch (e) {} }
-      } else if (b.kind === "buster") {
-        resolveBuster(b.x, b.z, surf);
-      } else if (b.kind === "nuke") {
-        nukeDetonate(b.x, b.z);
+      if (b.t >= b.sol.t) {
+        if (b.mesh && b.mesh.parent) b.mesh.parent.remove(b.mesh);
+        bombs.splice(i, 1);
+        resolveImpact(b);
+        continue;
       }
+      bombAt(b, b.t, _bp);
+      b.mesh.position.set(_bp.x, _bp.y, _bp.z);
+      // nose tracks the arc: yaw down the ground track, pitch down the descent
+      // angle. (The old code pitched the nose UP as it fell — positive X
+      // rotation is what points a +Z nose at the ground.)
+      const hsp = Math.hypot(b.vx, b.vz);
+      b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
+      b.mesh.rotation.x = Math.atan2(-_bp.vy, hsp > 0.001 ? hsp : 0.001);
     }
   });
 
@@ -469,17 +959,31 @@
          ground blast through the wrapped chain for the neighbours.
        • open ground → a deep crater blast, double scorch.
   ========================================================================== */
-  const pendingBusters = [];                          // {x,z,surf,t}
-  function resolveBuster(x, z, surf) {
+  const pendingBusters = [];                          // {x,z,surf,t,dx,dz,speed}
+  function resolveBuster(x, z, surf, vx, vz, speed) {
     if (CBZ.CONFIG.STRAT_BUNKER_BUSTER === false) {
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 2.3, radius: 11, byPlayer: true }); } catch (e) {} }
+      detonate(x, surf > 2.5 ? surf : 1.2, z, "bomb", { byPlayer: true, mass: MASS.bomb, speed: speed });
       return;
     }
-    // the entry spike: a thin cosmetic pop AT the surface (fresh opts; noDamage
-    // keeps demolition/fracture from double-counting the real blast below)
-    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 0.8, radius: 3, noDamage: true, y: surf > 2.5 ? surf : undefined }); } catch (e) {} }
+    // THE ENTRY SPIKE is DRAW ONLY — a penetrator going in is a spike of dust
+    // and spall, not a fireball. It used to be a raw cityExplosion with
+    // noDamage, which is a damage API being called for a cosmetic; the pooled
+    // dust/chunk primitives are the honest tools, they are already capped, and
+    // they add no pool. The REAL detonation happens below, underground.
+    const sy = surf > 2.5 ? surf : Math.max(0, surf);
+    if (CBZ.cityDustKick) { try { CBZ.cityDustKick(x, sy + 0.4, z, 1.5); } catch (e) {} }
+    if (CBZ.cityChunk) {
+      try {
+        CBZ.cityChunk(x, sy + 0.5, z, {
+          count: Math.max(2, Math.round(CBZ.qScale ? CBZ.qScale(2, 6) : 5)),
+          force: 5, color: 0x6f7275,
+        });
+      } catch (e) {}
+    }
     sfx("clank", { pitch: 0.6, volume: 0.8 });
-    pendingBusters.push({ x, z, surf, t: 0.4 });      // the burrow beat
+    // the burrow beat — a GBU does not go off at the surface, and the pause is
+    // what sells that it is still travelling
+    pendingBusters.push({ x: x, z: z, surf: surf, t: 0.4, dx: vx || 0, dz: vz || 0, speed: speed || 0 });
   }
   CBZ.onUpdate(12.5, function (dt) {
     if (!pendingBusters.length) return;
@@ -488,41 +992,105 @@
       p.t -= dt;
       if (p.t > 0) continue;
       pendingBusters.splice(i, 1);
-      busterDetonate(p.x, p.z, p.surf);
+      busterDetonate(p.x, p.z, p.surf, p.dx, p.dz, p.speed);
     }
   });
-  function busterDetonate(x, z, surf) {
-    // 1) a bunker berm under the impact → BREACH
+  // THE THREE-WAY VERDICT, unchanged in shape — but each branch is now ONE
+  // detonate() with the "buster" row (pen 40) instead of a hand-rolled blast,
+  // and the BUILDING branch asks city/structural.js for the outcome instead of
+  // yanking the lot straight to rubble. That is the difference between a
+  // building vanishing and a building COMING DOWN.
+  function busterDetonate(x, z, surf, dx, dz, speed) {
+    // How deep this round actually got, in metres of concrete-equivalent. This
+    // is the number the whole weapon hangs on, and it is REAL: it comes from
+    // the impact speed the ballistic solver handed back, which comes from the
+    // altitude and airspeed the player chose. Fast and high opens a command
+    // shelter; low and slow dents the berm.
+    const penCE = busterPenCE(speed);
+    const kin = { mass: MASS.buster, speed: speed || 0 };
+
+    // 1) a bunker berm under the impact → does it get THROUGH the roof?
+    //    bunkers.js owns how thick its own roofs are and returns the verdict;
+    //    we own what a verdict MEANS. This is the one weapon that ends a bunker.
     const bunker = CBZ.strategicBunkerHit && CBZ.strategicBunkerHit(x, z);
     if (bunker && !bunker.breached) {
-      CBZ.strategicBunkerBreach(bunker);
+      let v = null;
+      try {
+        v = CBZ.strategicBunkerBreach(bunker, { penCE: penCE, by: who() });
+      } catch (e) { v = null; }
+      // pre-penetration bunkers.js (or none): treat any hit as a breach, so a
+      // partial load can never make the weapon a dud (BLOCK LAW rule 2).
+      const verdict = v && v.verdict ? v.verdict : (v ? "breach" : "breach");
       const I = bunker.interior;
-      // the blast lives INSIDE: wrapped-chain explosion seated at the room
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(I.cx, I.cz, { power: 2.6, radius: 10, byPlayer: true }); } catch (e) {} }
-      // guarantee the interior kill through the BUS with an honest cause
-      sweepKill(I.minX - 1, I.maxX + 1, I.minZ - 1, I.maxZ + 1, "airstrike");
-      note("Direct hit — " + (bunker.name || "the bunker") + " is breached.", 2.6);
-      if (CBZ.shake) { try { CBZ.shake(1.4); } catch (e) {} }
+      const iy = (I.floorY != null ? I.floorY : 0) + 1.4;
+      if (verdict === "breach") {
+        // the blast lives INSIDE the room. struct is irrelevant down here (a
+        // bunker is not a lot), so this is the bus doing FX + people + rumble.
+        detonate(I.cx, iy, I.cz, "buster", { byPlayer: true, mass: kin.mass, speed: kin.speed });
+        // guarantee the interior kill through the KILL BUS with an honest cause
+        sweepKill(I.minX - 1, I.maxX + 1, I.minZ - 1, I.maxZ + 1, "airstrike");
+        note("Direct hit — " + (bunker.name || "the bunker") + " is breached.", 2.6);
+      } else if (verdict === "crack") {
+        // through most of the roof, not all of it: the room is survivable
+        // hell, the shelter guarantee HOLDS, and the player is told why.
+        detonate(I.cx, iy, I.cz, "buster", {
+          byPlayer: true, noDamage: false, scale: 0.45, mass: kin.mass, speed: kin.speed,
+        });
+        sweepKill(x - 4, x + 4, I.minZ - 1, I.maxZ + 1, "airstrike");
+        note("The roof cracked but held — come in faster and higher.", 3.2);
+      } else {
+        // spent on the berm. Still a 2-tonne warhead going off on a hillside.
+        detonate(x, Math.max(1.2, surf) + 0.8, z, "buster", {
+          byPlayer: true, dirx: dx, dirz: dz, scale: 0.6, mass: kin.mass, speed: kin.speed,
+        });
+        note("Spent on the berm — that roof needs a faster, higher release.", 3.2);
+      }
       return;
     }
-    // 2) a building under the impact (came down on its roof) → THROUGH-ROOF KILL
-    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
-    if (surf > 3 && A && A.lots && CBZ.cityDemolition && CBZ.cityDemolition.destroy) {
-      let hit = null;
-      for (const lot of A.lots) {
-        const b = lot.building;
-        if (!b || lot.demolished) continue;
-        if (Math.abs(x - b.ox) <= b.w / 2 && Math.abs(z - b.oz) <= b.d / 2 && surf >= b.h * 0.5) { hit = lot; break; }
-      }
-      if (hit) {
-        CBZ.cityDemolition.destroy(hit);            // batched teardown, colliders, rubble
-        if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 2.4, radius: 10, byPlayer: true }); } catch (e) {} }
-        if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, 14); } catch (e) {} }
-        return;
+
+    // 2) a building under the impact (came down on its roof) → THROUGH-ROOF.
+    //    `pen` already carries the warhead to depth and guts the floorplates;
+    //    forceCollapse is the guarantee that a GBU through a roof is fatal —
+    //    but only when the round GOT there. A shallow release is now a heavy
+    //    hit the ledger has to adjudicate, not a free demolition.
+    //    Lot lookup delegates to the ledger's own CBZ.structure.lotAt (the
+    //    hand-rolled scan this used to carry was a third copy of it).
+    let hit = null;
+    if (surf > 3) {
+      if (CBZ.structure && CBZ.structure.lotAt) {
+        try { hit = CBZ.structure.lotAt(x, z, 1.5); } catch (e) { hit = null; }
+      } else {
+        const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+        if (A && A.lots) {
+          for (const lot of A.lots) {
+            const b = lot.building;
+            if (!b || lot.demolished) continue;
+            if (Math.abs(x - b.ox) <= b.w / 2 && Math.abs(z - b.oz) <= b.d / 2) { hit = lot; break; }
+          }
+        }
       }
     }
+    if (hit) {
+      detonate(x, Math.max(1.2, surf - 3), z, "buster", {
+        byPlayer: true, dirx: dx, dirz: dz, lot: hit, mass: kin.mass, speed: kin.speed,
+      });
+      if (penCE >= BUSTER_PEN_CE * 0.6) {              // it genuinely reached the load path
+        let fell = false;
+        if (CBZ.structure && CBZ.structure.forceCollapse) {
+          try { fell = !!CBZ.structure.forceCollapse(hit, { by: who() }); } catch (e) { fell = false; }
+        }
+        // landmark tier / no ledger loaded: the pre-migration teardown still
+        // applies, so a well-flown buster is never a dud (BLOCK LAW rule 2).
+        if (!fell && CBZ.cityDemolition && CBZ.cityDemolition.destroy) {
+          try { CBZ.cityDemolition.destroy(hit); } catch (e) {}
+        }
+      }
+      return;
+    }
     // 3) open ground → the deep crater
-    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 3.0, radius: 13, byPlayer: true }); } catch (e) {} }
+    detonate(x, 1.2, z, "buster", {
+      byPlayer: true, dirx: dx, dirz: dz, mass: kin.mass, speed: kin.speed,
+    });
     if (CBZ.cityScorch) { try { CBZ.cityScorch(x, z, 11); } catch (e) {} }
   }
   // kill-bus sweep of a rect (the buster's interior guarantee): named peds +
@@ -549,11 +1117,17 @@
   /* ==========================================================================
      4) THE NUKE — multi-stage, staged-over-frames, kill-bus honest.
   ========================================================================== */
+  // The blast radii that used to live here (R_DESTROY, the crowd pulses) are
+  // now the "nuke" ROW in systems/impactbus.js — power 9, radius 120,
+  // wave {speed:190, maxR:620}. Only the numbers the bus does not own survive.
+  // VEHICLES ARE NOT HERE ANY MORE. `R_CAR: 130` plus a 3-wrecks-per-frame
+  // queue used to live in this block; systems/impactbus.js's sweepRing now
+  // damages cars inside the propagating ring for EVERY wave-carrying warhead
+  // (nuke, MOAB, an airliner into a tower), capped per tick. Keeping ours
+  // would have billed the nuke's cars twice. Deleted, not disabled.
   const NK = {
-    R_DESTROY: 150,      // buildings inside this come down (rolling, 2/frame)
-    R_KILL: 175,         // actors inside this die (24/frame, bunkers exempt)
-    R_CAR: 130,          // vehicles wrecked
-    R_PLAYER: 160,       // unsheltered player death radius
+    R_KILL: 175,         // cop roster sweep (the bus does not walk cops)
+    R_PLAYER: 160,       // instant unsheltered player death radius
     RAD_R: 70,           // lingering radiation zone radius
     RAD_DAYS: 1.2,       // in-game days the zone stays hot
     TIMER: 45,           // planted-device countdown (seconds, real)
@@ -561,64 +1135,18 @@
   let nk = null;                                     // the one live resolution
   const radZones = [];                               // {x,z,r,until}
 
-  // ---- mushroom cloud + flash FX (runtime-only; materials module-shared and
-  // PARKED in the scene at load for fxwarm's renderer.compile prewarm) ----
-  let CLOUD = null;
-  function cloudMats() {
-    if (CLOUD) return CLOUD;
-    CLOUD = {
-      fire: new THREE.MeshBasicMaterial({ color: 0xffb054, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }),
-      smoke: new THREE.MeshLambertMaterial({ color: 0x4a4038, transparent: true, opacity: 0.92 }),
-      ash: new THREE.MeshLambertMaterial({ color: 0x33302c, transparent: true, opacity: 0.85 }),
-    };
-    for (const k in CLOUD) CLOUD[k]._shared = true;
-    return CLOUD;
-  }
-  function buildCloud(x, z) {
-    const M = cloudMats();
-    // fresh start on the shared materials (an interrupted previous cloud —
-    // mode flip / fresh run — may have left them mid-fade)
-    M.fire.opacity = 0.95; M.smoke.opacity = 0.92; M.ash.opacity = 0.85;
-    const gp = new THREE.Group();
-    gp.position.set(x, 0, z);
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(6, 10, 1, 12, 1, true), M.smoke);
-    stem.position.y = 0.5; gp.add(stem);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(16, 14, 10), M.smoke);
-    cap.position.y = 4; gp.add(cap);
-    const core = new THREE.Mesh(new THREE.SphereGeometry(12, 12, 8), M.fire);
-    core.position.y = 4; gp.add(core);
-    const skirt = new THREE.Mesh(new THREE.TorusGeometry(14, 4.5, 8, 18), M.ash);
-    skirt.rotation.x = Math.PI / 2; skirt.position.y = 3; gp.add(skirt);
-    gp.traverse(function (o) { o.castShadow = false; o.receiveShadow = false; });
-    if (CBZ.scene) CBZ.scene.add(gp);
-    return { gp, stem, cap, core, skirt, t: 0 };
-  }
-  function tickCloud(c, dt) {
-    c.t += dt;
-    const t = c.t, rise = Math.min(1, t / 14);         // column climbs ~14s
-    const e = rise * rise * (3 - 2 * rise);
-    const H = 20 + e * 95;                             // cap altitude
-    c.cap.position.y = H; c.core.position.y = H;
-    const swell = 1 + e * 2.1 + Math.min(0.5, t * 0.01);
-    c.cap.scale.setScalar(swell);
-    c.core.scale.setScalar(Math.max(0.001, swell * (1 - Math.min(1, t / 9))));  // fire cools out
-    CLOUD.fire.opacity = Math.max(0, 0.95 * (1 - t / 9));
-    c.stem.scale.set(1 + e * 0.8, H, 1 + e * 0.8);
-    c.stem.position.y = H / 2;
-    c.skirt.position.y = 2 + e * 6;
-    c.skirt.scale.setScalar(1 + e * 2.6 + t * 0.02);
-    const fade = t > 34 ? Math.max(0, 1 - (t - 34) / 16) : 1;
-    CLOUD.smoke.opacity = 0.92 * fade;
-    CLOUD.ash.opacity = 0.85 * fade;
-    c.gp.rotation.y += dt * 0.03;                      // a slow roil
-    if (t > 50) {
-      if (c.gp.parent) c.gp.parent.remove(c.gp);
-      c.gp.traverse(function (o) { if (o.isMesh && o.geometry && !o.geometry._shared) o.geometry.dispose(); });
-      CLOUD.smoke.opacity = 0.92; CLOUD.ash.opacity = 0.85; CLOUD.fire.opacity = 0.95;  // restore for the next one
-      return false;
-    }
-    return true;
-  }
+  /* ---- THE MUSHROOM CLOUD IS NOT HERE ANY MORE.
+     It was ~70 lines of bespoke geometry, three module-shared materials and a
+     per-frame animator that only the nuke could ever use. The spectacle now
+     belongs to the ordnance bus's "nuke" FX composer (city/nukefx.js registers
+     it with CBZ.impact.fx("nuke", fn)) — one registration, zero edits here,
+     and any future warhead can name the same composer.
+
+     The white flash below survives as the DEGRADE PATH only: if nukefx.js is
+     not loaded the bus falls back to the generic heavy composer, and a nuke
+     with no whiteout would read as a large car fire. It is deliberately NOT
+     registered as a composer, so it can never clobber the real one whichever
+     file loads first.                                                       */
   function whiteout() {
     if (typeof document === "undefined" || !document.body) return;
     let el = document.getElementById("nukeFlash");
@@ -635,86 +1163,80 @@
     }); });
   }
 
-  function nukeDetonate(x, z) {
+  /* ---- BUNKER SHELTER GUARD ------------------------------------------------
+     The nuke's people-damage is the BUS's job now (its propagating wave owns
+     the crowd/ped/player sweep, with the lethal-core rule the owner tuned).
+     The bus knows nothing about bunkers, and "an intact berm holds" is THIS
+     file's rule — so we assert it the way this repo asserts every other
+     cross-module rule: a lazy, marker-copying wrapper on the kill bus. It is
+     one boolean test (`nk` null) whenever a nuke is not resolving, and it is
+     scoped to the resolution window, so it cannot change ordinary combat.  */
+  let _guardWrapped = false;
+  function wireShelterGuard() {
+    if (_guardWrapped) return;
+    const orig = CBZ.cityKillPed;
+    if (typeof orig !== "function") return;
+    if (orig._stratShelterWrapped) { _guardWrapped = true; return; }
+    const wrapped = function (p) {
+      if (nk && p && p.pos && CBZ.strategicBunkerShelterAt) {
+        try { if (CBZ.strategicBunkerShelterAt(p.pos.x, p.pos.y, p.pos.z)) return undefined; } catch (e) {}
+      }
+      return orig.apply(this, arguments);
+    };
+    for (const k in orig) if (k.endsWith("Wrapped")) wrapped[k] = orig[k];
+    wrapped._stratShelterWrapped = true;
+    CBZ.cityKillPed = wrapped;
+    _guardWrapped = true;
+  }
+
+  /* ---- THE DETONATION.
+     Everything that used to live here as bespoke machinery — the scheduled
+     ring of explosions, the rolling per-frame demolition of every lot inside
+     150 m, the three expanding crowd-kill pulses, the 24-actors-per-frame
+     sweep, the mushroom cloud and its point light — is GONE. All of it is one
+     row + one call now: the bus's `wave: {speed:190, maxR:620}` rolls the
+     damage outward over ~3.3 s (which is what the staged ring was faking),
+     and city/structural.js's sweep() decides each building's fate through the
+     real ledger, so towers CATCH FIRE, SAG and PANCAKE instead of blinking
+     into rubble.
+
+     What stays is what only this file knows: the bunker shelter guarantee,
+     the wanted/panic consequence, the scorched ground, the lingering
+     radiation zone, the wrecked cars, and one-apocalypse-at-a-time.        */
+  function nukeDetonate(x, z, opts) {
     if (CBZ.CONFIG.STRAT_NUKE === false) {
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 3, radius: 14, byPlayer: true }); } catch (e) {} }
+      detonate(x, 1.2, z, "bomb", { byPlayer: true });
       return;
     }
     if (nk) return;                                   // one apocalypse at a time
     if (!g || g.mode !== "city") return;
+    opts = opts || {};
+    wireShelterGuard();
+    const y = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.2;
 
-    // ---- t=0: the FLASH + the first light of a new sun
-    whiteout();
-    sfx("explosion"); sfx("boom");
-    if (CBZ.shake) { try { CBZ.shake(6); } catch (e) {} }
-    if (CBZ.doHitstop) { try { CBZ.doHitstop(0.22); } catch (e) {} }
-    let light = null;
-    try {
-      light = new THREE.PointLight(0xfff2d0, 7, 480, 2);
-      light.position.set(x, 40, z);
-      if (CBZ.scene) CBZ.scene.add(light);
-    } catch (e) { light = null; }
-
-    // ---- the blast-wave schedule: an outward-sweeping ring of WRAPPED
-    // cityExplosion calls (fresh opts each → chain idempotence holds). Ring
-    // points that would sit on an intact bunker are skipped — the berm holds,
-    // and the bunker's fate belongs to the buster, not splash.
-    const blasts = [{ t: 0.05, x, z, power: 3.0, radius: 20 }];
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      blasts.push({ t: 0.55 + i * 0.08, x: x + Math.cos(a) * 55, z: z + Math.sin(a) * 55, power: 2.4, radius: 13 });
-    }
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2 + 0.39;
-      blasts.push({ t: 1.5 + i * 0.09, x: x + Math.cos(a) * 105, z: z + Math.sin(a) * 105, power: 1.9, radius: 11 });
-    }
-
-    // ---- building queue: every lot inside R_DESTROY, sorted by distance so
-    // the collapse VISIBLY rolls outward from ground zero, 2 per frame.
-    const lots = [];
-    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
-    if (A && A.lots && CBZ.cityDemolition) {
-      for (const lot of A.lots) {
-        const b = lot.building;
-        if (!b || lot.demolished) continue;
-        const d = Math.hypot(b.ox - x, b.oz - z);
-        if (d <= NK.R_DESTROY) lots.push({ lot, d });
-      }
-      lots.sort(function (a, b) { return a.d - b.d; });
-    }
-
-    // ---- car queue
-    const cars = [];
-    for (const cv of (CBZ.cityCars || [])) {
-      if (!cv || cv.dead || !cv.pos) continue;
-      if (Math.hypot(cv.pos.x - x, cv.pos.z - z) <= NK.R_CAR) cars.push(cv);
-    }
-
-    // ---- the player's verdict, decided NOW (the wavefront is instant at
-    // these scales): an INTACT bunker is the one shelter. Everything the
-    // staged queues do afterwards respects that same rule.
+    // ---- the player's verdict, decided NOW and BEFORE the bus runs, so the
+    // shelter window is already open when the wave sweeps over the berm.
     const P = CBZ.player;
-    let sheltered = false;
     if (P && !P.dead) {
-      sheltered = !!(CBZ.strategicBunkerShelterAt && CBZ.strategicBunkerShelterAt(P.pos.x, P.pos.y, P.pos.z));
+      const sheltered = !!(CBZ.strategicBunkerShelterAt && CBZ.strategicBunkerShelterAt(P.pos.x, P.pos.y, P.pos.z));
       const pd = Math.hypot(P.pos.x - x, P.pos.z - z);
       if (sheltered) {
-        g.invuln = Math.max(g.invuln || 0, 8);        // the blast wave passes OVER
+        g.invuln = Math.max(g.invuln || 0, 12);       // the blast wave passes OVER
         if (pd < NK.R_KILL) note("The bunker holds. Outside, there is nothing left.", 4);
       } else if (pd <= NK.R_PLAYER) {
         try { CBZ.cityHurtPlayer(9999, x, z, "caught in a nuclear blast", false, null, false); } catch (e) {}
-      } else if (pd <= NK.R_PLAYER + 70) {
-        try { CBZ.cityHurtPlayer(Math.round(60 * (1 - (pd - NK.R_PLAYER) / 70)), x, z, "caught in a nuclear blast", false, null, false); } catch (e) {}
       }
+      // beyond R_PLAYER the bus's wave hurts him as it arrives — on a timer,
+      // which is the whole point of a propagating front.
     }
 
     // ---- consequence: the whole state turns on you. The star API grants the
     // owner-reserved 5th star only for a military-scale reason — this is one.
-    if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x, z, type: "terrorism", instant: true }); } catch (e) {} }
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: x, z: z, type: "terrorism", instant: true }); } catch (e) {} }
     if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear detonation — military response"); } catch (e) {} }
     // panic buses (the loudest possible scare, C4's exact pattern)
-    if (CBZ.cityPostEvent) { try { CBZ.cityPostEvent({ type: "explosion", pos: { x, y: 1, z }, radius: 400, intensity: 4 }); } catch (e) {} }
-    if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x, z, panic: 40, damage: 30 }, { silent: true, noWanted: true }); } catch (e) {} }
+    if (CBZ.cityPostEvent) { try { CBZ.cityPostEvent({ type: "explosion", pos: { x: x, y: 1, z: z }, radius: 400, intensity: 4 }); } catch (e) {} }
+    if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x: x, z: z, panic: 40, damage: 30 }, { silent: true, noWanted: true }); } catch (e) {} }
 
     // ---- ground zero stays WRONG for days: scorch rings now, a radiation
     // zone that ticks damage until it decays (in-game clock).
@@ -727,20 +1249,35 @@
         }
       } catch (e) {}
     }
-    radZones.push({ x, z, r: NK.RAD_R, until: (CBZ.dayTime ? CBZ.dayTime() : 0) + NK.RAD_DAYS });
+    radZones.push({ x: x, z: z, r: NK.RAD_R, until: (CBZ.dayTime ? CBZ.dayTime() : 0) + NK.RAD_DAYS });
 
-    nk = {
-      t: 0, x, z, blasts, lots, cars, carI: 0,
-      crowdStep: 0, actorDone: false, light,
-      cloud: buildCloud(x, z), acc: 0,
-    };
+    // nk is live BEFORE the bus fires so the shelter guard covers the very
+    // first frame of the wave.
+    nk = { t: 0, x: x, z: z, hold: 16 };
+
+    // degrade path only — see whiteout()'s note. With nukefx.js loaded the
+    // composer owns the flash, the fireball, the stem and the cap.
+    if (!(CBZ.impact && CBZ.impact.hasFx && CBZ.impact.hasFx("nuke"))) {
+      whiteout();
+      if (CBZ.shake) { try { CBZ.shake(6); } catch (e) {} }
+      if (CBZ.doHitstop) { try { CBZ.doHitstop(0.22); } catch (e) {} }
+    }
+    // "boom" is NOT in systems/audio.js's bank — it silently no-opped here for
+    // this file's whole life. The bank's two honest cues are these.
+    sfx("rumble", { delay: 1.1 });
+    sfx("collapse", { delay: 2.6 });
+
+    // ONE CALL. The row does the rest.
+    detonate(x, y, z, "nuke", { byPlayer: opts.byPlayer !== false, by: opts.by });
   }
   CBZ.strategicNukeDetonate = nukeDetonate;           // probe/tooling handle
 
-  // ---- the staged resolver (order 34.7 — right after demolition's own
-  // ticker, so a lot we destroy this frame settles in the same pass).
+  // ---- the aftermath resolver (order 34.7 — after systems/impactbus.js's
+  // wave (34.4), city/structural.js's ledger (34.45) and demolition's ticker
+  // (34.5), so anything condemned this frame has already been handed on).
   let _lastEl = 0;
   CBZ.onUpdate(34.7, function (dt) {
+    wireShelterGuard();
     // fresh-run detection (the C4 g.elapsed-rewind trick): a new run must not
     // inherit radiation zones, armed devices, falling bombs or a half-resolved
     // apocalypse from the previous life of the city.
@@ -752,11 +1289,9 @@
       bombs.length = 0;
       for (const a of armed) if (a.mesh && a.mesh.parent) a.mesh.parent.remove(a.mesh);
       armed.length = 0;
-      if (nk) {
-        if (nk.cloud && nk.cloud.gp.parent) nk.cloud.gp.parent.remove(nk.cloud.gp);
-        if (nk.light && nk.light.parent) nk.light.parent.remove(nk.light);
-        nk = null;
-      }
+      run.active = false; run.onDone = null; run.sent = 0;
+      nk = null;
+      if (CBZ.impact && CBZ.impact.clearWaves) { try { CBZ.impact.clearWaves(); } catch (e) {} }
     }
     _lastEl = el;
     // radiation zones tick even after the resolution finishes
@@ -778,69 +1313,17 @@
       }
     }
     if (!nk) return;
-    if (g.mode !== "city") {                           // mode flip mid-apocalypse: wind down clean
-      if (nk.cloud && nk.cloud.gp.parent) nk.cloud.gp.parent.remove(nk.cloud.gp);
-      if (nk.light && nk.light.parent) nk.light.parent.remove(nk.light);
-      nk = null;
-      return;
-    }
+    if (g.mode !== "city") { nk = null; return; }      // mode flip mid-apocalypse
     nk.t += dt;
 
-    // the dying sun
-    if (nk.light) {
-      nk.light.intensity = Math.max(0, 7 * (1 - nk.t / 3.2));
-      if (nk.light.intensity <= 0.01) { if (nk.light.parent) nk.light.parent.remove(nk.light); nk.light = null; }
-    }
-    // the cloud
-    if (nk.cloud && !tickCloud(nk.cloud, dt)) nk.cloud = null;
-
-    // scheduled ring blasts (skip points an intact berm is holding under)
-    for (let i = 0; i < nk.blasts.length; i++) {
-      const b = nk.blasts[i];
-      if (b.done || b.t > nk.t) continue;
-      b.done = true;
-      if (CBZ.strategicBunkerHit) {
-        const shel = CBZ.strategicBunkerHit(b.x, b.z);
-        if (shel && !shel.breached) continue;
-      }
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(b.x, b.z, { power: b.power, radius: b.radius, byPlayer: true }); } catch (e) {} }
-    }
-
-    // rolling building destruction — 2 lots/frame, nearest first
-    let budget = 2;
-    while (budget > 0 && nk.lots.length) {
-      const rec = nk.lots.shift();
-      budget--;
-      try { CBZ.cityDemolition.destroy(rec.lot); } catch (e) {}
-    }
-
-    // the crowd dies in three expanding pulses through the BUS (the wrap logs
-    // "You killed <name> · NUCLEAR BLAST"; the feed caps itself at 4 lines)
-    const pulses = [[0.2, 70], [0.9, 125], [1.8, NK.R_KILL]];
-    while (nk.crowdStep < pulses.length && nk.t >= pulses[nk.crowdStep][0]) {
-      const r = pulses[nk.crowdStep][1];
-      nk.crowdStep++;
-      if (CBZ.cityCrowdCircleKill) {
-        try { CBZ.cityCrowdCircleKill(nk.x, nk.z, r, { cause: "nuclear blast", fromX: nk.x, fromZ: nk.z, quiet: true }); } catch (e) {}
-      }
-    }
-
-    // named peds + cops — 24 kills/frame max, bunker-sheltered spared
-    if (!nk.actorDone) {
-      let killed = 0, checked = 0;
+    // COPS: the wave's ped/crowd/player sweep is the bus's; cops are a
+    // separate roster it does not walk, so they stay here — bunker-sheltered
+    // spared, 12/frame, once.
+    if (!nk.copsDone) {
+      let killed = 0;
       const R2 = NK.R_KILL * NK.R_KILL;
-      for (const p of (CBZ.cityPeds || [])) {
-        if (killed >= 24) break;
-        checked++;
-        if (!p || p.dead || !p.pos) continue;
-        const dx = p.pos.x - nk.x, dz = p.pos.z - nk.z;
-        if (dx * dx + dz * dz > R2) continue;
-        if (CBZ.strategicBunkerShelterAt && CBZ.strategicBunkerShelterAt(p.pos.x, p.pos.y, p.pos.z)) continue;
-        if (CBZ.cityKillPed) { try { CBZ.cityKillPed(p, { byPlayer: true, fromX: nk.x, fromZ: nk.z, force: 12, fling: 9 }, "nuclear blast"); } catch (e) {} }
-        killed++;
-      }
       for (const cp of (CBZ.cityCops || [])) {
-        if (killed >= 24) break;
+        if (killed >= 12) break;
         if (!cp || cp.dead || !cp.pos) continue;
         const dx = cp.pos.x - nk.x, dz = cp.pos.z - nk.z;
         if (dx * dx + dz * dz > R2) continue;
@@ -848,22 +1331,14 @@
         if (CBZ.cityHurtCop) { try { CBZ.cityHurtCop(cp, 9999, { byPlayer: true, fromX: nk.x, fromZ: nk.z }); } catch (e) {} }
         killed++;
       }
-      if (killed === 0 && nk.t > 3) nk.actorDone = true;
+      if (killed === 0 && nk.t > 3) nk.copsDone = true;
     }
 
-    // vehicles — 3 wrecks/frame
-    let cb = 3;
-    while (cb > 0 && nk.carI < nk.cars.length) {
-      const cv = nk.cars[nk.carI++];
-      cb--;
-      if (cv && !cv.dead && CBZ.cityDamageCar) { try { CBZ.cityDamageCar(cv, 9999, { byPlayer: true }); } catch (e) {} }
-    }
+    // (vehicles: see the note on NK — the bus's blast ring owns them now)
 
-    // done when every queue has drained and the cloud has dissolved
-    if (nk.t > 6 && !nk.lots.length && nk.carI >= nk.cars.length &&
-        nk.actorDone && nk.crowdStep >= pulses.length && !nk.cloud) {
-      nk = null;
-    }
+    // the shelter guard and `nukeActive` stay live until the wave has run out
+    // (nuke row: 620 m at 190 m/s ≈ 3.3 s) and the fires it lit have settled.
+    if (nk.t > nk.hold) nk = null;
   });
 
   /* ==========================================================================
@@ -977,36 +1452,134 @@
   /* ==========================================================================
      6) INPUT + TOUCH SEAM + PREWARM
   ========================================================================== */
+  // [B] — TAP releases one, HOLD walks a carpet. Same key family as the C4
+  // charge on foot (explosives.js releases the key while you are flying), same
+  // tap/hold grammar, so there is one bomb verb in the game and not two.
+  const RUN_HOLD = 0.4;                              // seconds before a hold becomes a run
+  let _bHeld = false, _bT = 0, _bRan = false;
   addEventListener("keydown", function (e) {
-    if (e.repeat || e.defaultPrevented) return;       // C4's capture handler may own B
+    if (e.defaultPrevented) return;                   // C4's capture handler may own B
     const k = (e.key || "").toLowerCase();
     if (k !== "b" && k !== "x") return;
     if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
     if (!g || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
     if (!flyingB2()) return;                          // only the B-2 owns these keys
     e.preventDefault();
-    if (k === "b") dropPayload();
-    else cyclePayload();
+    if (k === "x") { if (!e.repeat) cyclePayload(); return; }
+    if (e.repeat || _bHeld) return;
+    _bHeld = true; _bT = 0; _bRan = false;
   });
+  addEventListener("keyup", function (e) {
+    if ((e.key || "").toLowerCase() !== "b" || !_bHeld) return;
+    _bHeld = false; _bRan = false;
+    if (run.active) { endRun("released"); return; }
+    if (_bT < RUN_HOLD) dropPayload();                // a tap is one bomb
+  });
+  // a lost keyup (alt-tab mid-run) must not leave the trigger stuck down
+  addEventListener("blur", function () { _bHeld = false; _bRan = false; if (run.active) endRun("released"); });
+  // (the hold timer itself is ticked inside the existing 12.45 updater — no
+  // new updater order is claimed for a two-line state machine)
+
   // the touch layer (touch_vehicle.js agent) wires these to pills/buttons
   CBZ.strategicBombDrop = dropPayload;
   CBZ.strategicPayloadCycle = cyclePayload;
+  // slide-hold seam for systems/touch_vehicle.js: press-and-hold the bomb pill
+  // and you get the carpet run, exactly like holding [B] on a keyboard.
+  CBZ.strategicBombHold = function (down) {
+    if (down) { if (!_bHeld) { _bHeld = true; _bT = 0; _bRan = false; } return true; }
+    if (!_bHeld) return false;
+    _bHeld = false; _bRan = false;
+    if (run.active) { endRun("released"); return true; }
+    return dropPayload();
+  };
+
+  /* ---- MISSION SEAMS -------------------------------------------------------
+     The roles/missions layer needs three questions answered and none of them
+     should cost it a new bookkeeping system:
+       "is a bomb run in progress"  -> strategicBombRunState()
+       "start / stop one for me"    -> strategicBombRun(opts) / ...Abort()
+       "how much have I levelled"   -> strategicDevastation()
+     The devastation report is computed ON DEMAND from city/structural.js's
+     ledger — this file keeps NO second tally of who wrecked what. `by` is set
+     on every detonate() above, which is what makes the per-building
+     attribution ("was this the player?") free.                              */
+  CBZ.strategicBombRun = function (opts) { return startRun(opts || {}); };
+  CBZ.strategicBombRunAbort = function () { endRun("aborted"); };
+  CBZ.strategicBombRunState = function () {
+    return {
+      active: run.active, kind: run.kind,
+      called: run._called != null,          // flown off-map vs. from the cockpit
+      dropped: run.sent, requested: run.want,
+      interval: run.interval, elapsed: +run.t.toFixed(2),
+      inAir: bombs.length, cap: bombCap(), collapses: _runCollapses,
+    };
+  };
+  /* NUMERIC PROBE (CLAUDE.md's closed loop is math over live state, never
+     frames). Answers, without dropping anything: where would a release from
+     (x,y,z) at (vx,vy,vz) land, when, how fast, and how deep would a buster
+     get. This is what a CDP probe asserts a bomb run against.               */
+  CBZ.strategicBallistics = function (x, y, z, vx, vy, vz) {
+    const s = solveFall(+x || 0, +y || 0, +z || 0, +vx || 0, +vy || 0, +vz || 0);
+    return {
+      t: +s.t.toFixed(3), x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2),
+      speed: +s.speed.toFixed(2),
+      lead: +Math.hypot(s.x - (+x || 0), s.z - (+z || 0)).toFixed(2),
+      busterE: Math.round(energyOf("buster", s.speed)),
+      busterPenCE: +busterPenCE(s.speed).toFixed(2),
+      grav: GRAV,
+    };
+  };
+  CBZ.strategicOnBombRun = CBZ.strategicOnBombRun || null;   // fn(report) — mission hook
+  CBZ.strategicDevastation = function () {
+    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+    const out = { lots: 0, damaged: 0, burning: 0, collapsed: 0, doomed: 0, byPlayer: 0, frac: 0 };
+    if (!A || !A.lots) return out;
+    const S = CBZ.structure;
+    // CONDEMNED-BUT-STILL-STANDING is the most interesting number a bomb run
+    // produces — a district counting down. structural.js publishes it; we read
+    // it, we do not keep a second tally (degrade-safe: absent ⇒ 0).
+    if (S && S.doomed) { try { out.doomed = (S.doomed() || []).length; } catch (e) { out.doomed = 0; } }
+    const PL = who();
+    for (let i = 0; i < A.lots.length; i++) {
+      const lot = A.lots[i];
+      if (!lot.building) continue;
+      out.lots++;
+      if (lot.demolished) out.collapsed++;
+      if (!S || !S.state) continue;
+      let st = null;
+      try { st = S.state(lot); } catch (e) { st = null; }
+      if (!st || !st.stage) continue;
+      out.damaged++;
+      if (st.fires) out.burning++;
+      if (st.stage >= 5 && !lot.demolished) out.collapsed++;
+      if (st.by && (st.by === PL || st.by === CBZ.player)) out.byPlayer++;
+    }
+    out.frac = out.lots ? +(out.collapsed / out.lots).toFixed(4) : 0;
+    return out;
+  };
   CBZ.strategicState = function () {
     const c = flyingB2();
     return {
-      b2: !!c, payload,
+      b2: !!c, payload: payload,
       bombs: c ? (c.bombAmmo | 0) : 0,
+      jdams: c ? (c.jdamAmmo | 0) : 0,
       busters: invCount("Bunker Buster"),
       nukes: invCount("Nuclear Device"),
       armed: armed.length,
+      inAir: bombs.length, cap: bombCap(),
+      run: run.active ? { kind: run.kind, sent: run.sent, want: run.want, called: run._called != null } : null,
       nukeActive: !!nk,
+      rad: radZones.length,
+      bus: !!CBZ.detonate, ledger: !!CBZ.structure,
     };
   };
 
-  // ---- PREWARM PARK: every lazy material this file spawns mid-fight (cloud,
-  // bombs, device) sits invisible in the scene from load, so core/fxwarm's
+  // ---- PREWARM PARK: the lazy materials this file spawns mid-fight (bombs,
+  // the device) sit invisible in the scene from load, so core/fxwarm's
   // renderer.compile(scene, camera) builds their programs on the play-start
-  // beat instead of a mid-apocalypse freeze (the fxwarm doctrine).
+  // beat instead of a mid-fight freeze (the fxwarm doctrine). The cloud
+  // materials that used to be parked here left with the cloud — city/nukefx.js
+  // owns that spectacle and its own prewarm now.
   let _warmed = false;
   CBZ.onAlways(1.1, function () {
     if (_warmed || !CBZ.scene) return;
@@ -1015,11 +1588,6 @@
       const park = new THREE.Group();
       park.name = "strategic-fx-prewarm";
       park.visible = false;
-      const M = cloudMats();
-      const a = new THREE.Mesh(bg(0.1, 0.1, 0.1), M.fire);
-      const b = new THREE.Mesh(bg(0.1, 0.1, 0.1), M.smoke);
-      const c = new THREE.Mesh(bg(0.1, 0.1, 0.1), M.ash);
-      park.add(a); park.add(b); park.add(c);
       park.add(bombMesh("bomb")); park.add(bombMesh("buster")); park.add(deviceMesh());
       park.position.set(0, -400, 0);
       CBZ.scene.add(park);

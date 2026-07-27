@@ -351,16 +351,20 @@
     // The Spire's living space is the LOFT — the top interior floor — so the
     // elevator lands you ON that floor, centred in the open plan. Older homes
     // (penthouse roof) keep going one flight up onto the open roof terrace.
-    if (home.loftY != null) {
-      P.pos.set(lot.cx, home.loftY + 0.1, lot.cz);
-    } else {
-      const roofY = (home.floorY || 0) + (lot.building.FH || 4);
-      P.pos.set(lot.cx + 1.4, roofY + 0.2, lot.cz);
+    let tx, ty, tz;
+    if (home.loftY != null) { tx = lot.cx; ty = home.loftY + 0.1; tz = lot.cz; }
+    else { tx = lot.cx + 1.4; ty = (home.floorY || 0) + (lot.building.FH || 4) + 0.2; tz = lot.cz; }
+    const note = home.loftY != null ? "The Spire loft — top of the world." : "Penthouse — top of the world.";
+    // THE SHARED LIFT RIDE (city/occupy.js) — the census found this exact
+    // reposition+sfx+note hand-rolled three times. One copy now; the inline
+    // branch below is the degrade-safe fallback.
+    if (!(CBZ.cityLiftRide && CBZ.cityLiftRide(tx, ty, tz, { note: note, noteSecs: 2, force: true }))) {
+      P.pos.set(tx, ty, tz);
+      P.vy = 0; P.grounded = true;
+      CBZ.playerChar.group.position.copy(P.pos);
+      if (CBZ.sfx) CBZ.sfx("door");
+      CBZ.city.note(note, 2);
     }
-    P.vy = 0; P.grounded = true;
-    CBZ.playerChar.group.position.copy(P.pos);
-    if (CBZ.sfx) CBZ.sfx("door");
-    CBZ.city.note(home.loftY != null ? "The Spire loft — top of the world." : "Penthouse — top of the world.", 2);
     close();
   }
 

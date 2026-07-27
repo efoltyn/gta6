@@ -836,6 +836,55 @@
   // the player never watches a body materialize. Off → old placement.
   if (CBZ.CONFIG.NPC_SPAWN_HIDE == null) CBZ.CONFIG.NPC_SPAWN_HIDE = true;
 
+  // One spawn/despawn visibility contract for every population system. Older
+  // callers each carried a slightly different forward-cone check, which left
+  // gaps in the main city slice, regional streaming and jail rig promotion.
+  // This test is deliberately conservative: it rejects a padded screen area
+  // (not just the exact frustum) and every very-close transition, even behind
+  // the player. Farther than maxDistance the actor is outside the full-rig LOD
+  // contract, so it is safe to stage without spending a projection.
+  const _npcTransitionProbe = window.THREE ? new window.THREE.Vector3() : null;
+  CBZ.npcSpawnGuardStats = CBZ.npcSpawnGuardStats || { checked: 0, blocked: 0, allowed: 0 };
+  CBZ.npcTransitionSafe = function (x, z, opts) {
+    opts = opts || {};
+    if (!CBZ.CONFIG || CBZ.CONFIG.NPC_SPAWN_HIDE === false) return true;
+    const P = CBZ.player;
+    if (!P || !P.pos) return true;
+    const dx = x - P.pos.x, dz = z - P.pos.z, d2 = dx * dx + dz * dz;
+    const minDistance = opts.minDistance == null ? 16 : Math.max(0, +opts.minDistance || 0);
+    const maxDistance = opts.maxDistance == null ? 150 : Math.max(minDistance, +opts.maxDistance || 0);
+    const stats = CBZ.npcSpawnGuardStats;
+    stats.checked++;
+    if (d2 < minDistance * minDistance) { stats.blocked++; return false; }
+    if (d2 > maxDistance * maxDistance) { stats.allowed++; return true; }
+
+    const camera = CBZ.camera;
+    if (camera && _npcTransitionProbe && camera.projectionMatrix && camera.matrixWorldInverse) {
+      // One metre above the actor root is a better body-centre probe than the
+      // floor point, especially for the prison's pitched third-person camera.
+      let y = opts.y == null ? null : +opts.y;
+      if (y == null || !Number.isFinite(y)) {
+        const floor = CBZ.floorAt ? +CBZ.floorAt(x, z)
+          : (CBZ.cityGroundHeightAt ? +CBZ.cityGroundHeightAt(x, z) : NaN);
+        y = (Number.isFinite(floor) ? floor : (Number.isFinite(P.pos.y) ? P.pos.y : 0)) + 1.05;
+      }
+      _npcTransitionProbe.set(x, y, z).project(camera);
+      const onPaddedScreen = _npcTransitionProbe.z >= -1.05 && _npcTransitionProbe.z <= 1.05 &&
+        Math.abs(_npcTransitionProbe.x) <= 1.28 && Math.abs(_npcTransitionProbe.y) <= 1.38;
+      if (onPaddedScreen) { stats.blocked++; return false; }
+      stats.allowed++;
+      return true;
+    }
+
+    // Camera matrices are not guaranteed during the earliest boot frames.
+    // Fall back to a deliberately wider-than-FOV forward test until they are.
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, d = Math.sqrt(d2) || 1;
+    const forwardDot = (dx / d) * -Math.sin(yaw) + (dz / d) * -Math.cos(yaw);
+    const safe = forwardDot < -0.12;
+    if (safe) stats.allowed++; else stats.blocked++;
+    return safe;
+  };
+
   // INTERIORS INTENTIONALITY (owner: "it should be empty, or designed, or a
   // dystopian feeling — intentionally monotonous. Not designed because it has
   // to be."). Every generated office interior is ONE thing, per building,
@@ -1097,4 +1146,35 @@
     const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
     return lo + (hi - lo) * (Math.max(0, Math.min(4, q)) / 4);
   };
+
+  // ---- FLAG INDEX for the REALISM PASS ----------------------------------
+  // These families are self-defaulted at the top of their OWN module with the
+  // usual `if (CBZ.CONFIG.X == null) CBZ.CONFIG.X = <default>;` idiom, so they
+  // are all `?cfg_X=0`-overridable. Listed here for discoverability only —
+  // setting one here still wins, because the modules only fill in null.
+  //
+  //   WATER_*    src/world/water_spec.js — WATER_V2 (master), _RADIAL_MESH,
+  //              _SHORE_FX, _LAKE_TINT, _UNDERWATER, _BUOYANCY, _WAKE_FX
+  //   MOUNT_*    src/world/mountain_detail.js — _EROSION_V4, _STRATA_V1,
+  //              _SNOW_ASPECT_V1, _ROCKS_V1, _MESH_DENSITY, _ADAPTIVE_GRID,
+  //              _HEIGHT_CACHE
+  //   TERRAIN_*  src/world/terrain_overhaul.js — _RIVER_BANKS, _STRATA,
+  //              _SMOOTH_SHADE, _TILE_SEG, _RING_AMP
+  //   SPEEDWAY_* src/city/island_speedway.js — _BANK, _BANK_WALKABLE,
+  //              _CAR_CONFORM, _CATCH_FENCE, _STRUCTURES
+  //   ARENA_*    src/city/arena_fights.js + arena_venue.js — ARENA_FIGHTS,
+  //              _SOLID_PROPS, _VENUE_V2, _CROWD_PROXY, _LIGHT_RIG, _JUMBOTRON
+  //   BLD_*      src/city/buildings_civic.js — _MASONRY_V1, _MASONRY_TEXTURE,
+  //              _CIVIC_LOTS_V1, _CIVIC_PODIUM, _ROOF_CLUTTER_V1, _WEATHERING_V1
+  //   RENDER_*   src/core/renderer.js — _TONEMAP_V1, _GRADE_V1, _HEIGHT_FOG_V1,
+  //              _FOG_GRADE_V1, _EXPOSURE, _FOG_HEIGHT, _FOG_FLOOR
+  //   GFX_*      src/core/gfx.js, lights.js, materials.js, textures_surface.js,
+  //              sky.js — _BOUNCE_LIGHT, _SKY_AMBIENT, _SURFACE_TEX(_RES/_ANISO),
+  //              _PBR_MATERIALS, _ROAD_DETAIL, _WORLD_PBR, _WORLD_DETAIL,
+  //              _CONTACT_AO, _ENV_WORLD, _AUTO_EXPOSURE, _TIGHT_SHADOWS,
+  //              _DETAIL_SCALE, _DETAIL_STRENGTH, _SUN_GLARE
+  //   DETAIL_*   src/world/detail_kit.js — _WORLD_V1 (master), _DENSITY (the
+  //              single knob if the dressing pass ever feels heavy),
+  //              _UTILITY_LINES, _STREET_FURNITURE, _GROUND_GRIME,
+  //              _BUILDING_DRESS
 })();

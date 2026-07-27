@@ -119,7 +119,36 @@
   // cx,cz = a world point on/near the wall (handed straight to
   // CBZ.cityAirstrikeCollapse, which resolves the building's tallest wall from
   // the live colliders itself — we don't need to track height/footprint here).
-  function woundFacade(b, face, amount, cx, cz) {
+  // ========================================================================
+  //  MIGRATED (BLOCK LAW): facade wound escalation now defers to the shared
+  //  structural ledger (city/structural.js).
+  //
+  //  The `wounds` Map below was the SECOND of three independent building-damage
+  //  accumulators (demolition.js's per-lot `hp` was the first, buildings.js's
+  //  per-wall `wallDmg` the third). Its job — "enough repeated hits on one wing
+  //  and the wing comes down" — is now a special case of the ledger's stage
+  //  machine, which additionally knows about floors, fire and a real load path.
+  //
+  //  IMPORTANT, AND THE WHOLE REASON THIS IS A `fromBlast` FLAG RATHER THAN A
+  //  BLANKET DELEGATION: a carve is USUALLY the downstream consequence of a
+  //  blast that has ALREADY been counted (cityExplosion -> structuralBlast ->
+  //  blastAt -> carveNow). Feeding the ledger again from here would double-count
+  //  every rocket. So blast-driven carves add NOTHING — the blast already paid.
+  //  Only chewWall (sustained rifle fire grinding a murder hole, which has no
+  //  blast behind it at all) contributes, because otherwise that damage would
+  //  vanish from the books entirely.
+  //
+  //  The legacy path is kept verbatim as the degrade-safe fallback.
+  // ========================================================================
+  function ledgerOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.STRUCT_LEDGER && CBZ.structure && CBZ.structure.hit); }
+  const CHEW_TO_LEDGER = 4.5;   // a ground-out murder hole is real structural loss, just slow
+
+  function woundFacade(b, face, amount, cx, cz, fromBlast) {
+    if (ledgerOn()) {
+      if (fromBlast) return;                  // the blast that caused this carve already fed the ledger
+      try { CBZ.structure.hit(cx, 1.6, cz, amount * CHEW_TO_LEDGER, { kind: "chew" }); } catch (e) {}
+      return;
+    }
     const t = nowS();
     const k = woundKey(b, face);
     let w = wounds.get(k);
@@ -241,7 +270,7 @@
     // STRUCTURAL ESCALATION: every real (non-quiet/non-replay) carve feeds the
     // facade's cumulative wound score — repeated rockets into the same wing of
     // a building, not just one huge hit, can now bring it down for real.
-    if (!quiet) woundFacade(h.b, h.face, power, x, z);
+    if (!quiet) woundFacade(h.b, h.face, power, x, z, true);   // fromBlast: the blast already paid the ledger
     return h;
   }
 
@@ -323,7 +352,7 @@
     // sustained gunfire still feeds the same facade wound score, just at a
     // much lighter weight than ordnance — many murder holes ground into one
     // wing CAN bring it down, it just takes a lot more of them than a rocket.
-    woundFacade(h.b, h.face, 0.35, x, z);
+    woundFacade(h.b, h.face, 0.35, x, z, false);   // no blast behind a chewed hole — this is the one path that pays
     return h;
   }
 
@@ -500,5 +529,11 @@
   // debug/QA accessor for the per-facade cumulative wound score (b+face key —
   // see woundFacade above); not used by any gameplay path, additive only.
   api._woundScore = function (b, face) { const w = wounds.get(woundKey(b, face)); return w ? w.score : 0; };
+  // RATCHET INPUT (CBZ.impactAudit, systems/impactbus.js): true while THIS file
+  // is still keeping its own independent structural books. Goes false the
+  // moment the shared ledger is in charge — the counter may only go down.
+  try {
+    Object.defineProperty(api, "_legacyAccum", { get: function () { return !ledgerOn(); }, configurable: true });
+  } catch (e) { api._legacyAccum = true; }
   CBZ.cityFracture = api;
 })();

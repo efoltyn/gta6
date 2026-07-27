@@ -624,7 +624,6 @@
 
     PORT.rend.setSize(px, px, false);
     if (canvas.width !== px || canvas.height !== px) { canvas.width = px; canvas.height = px; }
-    PORT.rend.setSize(px, px, false);
     PORT.rend.render(PORT.scene, PORT.cam);
     // blit the offscreen render onto the visible 2D canvas
     const ctx = canvas.getContext("2d");

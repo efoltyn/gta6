@@ -34,6 +34,23 @@
      the EXISTING Campaign Event activity (already wired to
      w.politics.support since P3), which now actually moves a live election
      instead of a smoothed-away approval nudge.
+
+   GOV WAVE — THE SOCKET IS PLUGGED (the bullet above is now historical).
+   Everything this file wrote for a player candidate — the {player:true}
+   record, the respect-read charisma, the race.pledged branch in
+   callElection(), the "YOU ARE ON THE BALLOT" headline — was finished code
+   with NO PRODUCER: nothing in the repo ever set race.pledged, and
+   playerCandidateRecord() read `g.cityCampaign`, which is the STORY campaign
+   (city/campaign.js), not a political run. city/candidacy.js is the producer
+   and owns `g.cityRun`. This file gained exactly four public functions
+   (playerCandidacy / playerRace / openRaces / pledge), one snapshot refresh
+   (refreshPlayerCandidate — a candidate record is frozen at callElection, so
+   without it every rally, endorsement and bribe earned DURING the campaign
+   window was worth nothing), and one BUG FIX: w.politics.support was handed
+   unconditionally to the incumbent, so a player challenger's own paid
+   Campaign Events bought momentum for their opponent. It follows the
+   player's record now whenever the player is in the field.
+
    - Governor (14d)/president (28d) races run through the EXACT SAME
      tickOffice/tally/resolve machinery as the mayor — MASTER-PLAN's own
      "the queries ARE the simulation's smart parts" spirit: one generic
@@ -262,10 +279,29 @@
     if (CBZ.cityMintName) return CBZ.cityMintName(rng, gender);
     return gender === "f" ? "Adelaide Winthrop" : "Foster Winthrop"; // no-name fallback, should never hit
   }
+  // ============================================================
+  //  THE PLAYER SENTINEL — office.holder / candidate.sid may be the STRING
+  //  "player" instead of a ledger sid. That is the whole of the seam
+  //  city/factions.js's §OFFICE names: "a candidate record flagged
+  //  {player:true} with no sid" + "nameOf()/scoreCandidate()/tally()
+  //  branches that read CBZ.player instead of the ledger" + "officials.js
+  //  accepting a player holder". officials.js owns the constant (it loads
+  //  first and stamps CBZ.officials.PLAYER_SID); the literal fallback keeps
+  //  this file correct if that file is ever absent.
+  // ============================================================
+  const PLAYER = (CBZ.officials && CBZ.officials.PLAYER_SID) || "player";
+  function isPlayerSid(sid) { return sid === PLAYER; }
+  function playerName() {
+    if (CBZ.cityPlayerName) { try { const n = CBZ.cityPlayerName(); if (n) return n; } catch (e) {} }
+    const P = CBZ.player;
+    return (P && P.name) || (g && g.playerName) || "You";
+  }
+
   // name lookup — officials.js already exposes the exact right accessor
   // (reads the live body first, falls back to the ledger page); no second
   // copy of that logic belongs here.
   function nameOf(sid) {
+    if (isPlayerSid(sid)) return playerName();
     if (CBZ.officials && CBZ.officials.identityOf) {
       const idn = CBZ.officials.identityOf(sid);
       if (idn && idn.name) return idn.name;
@@ -313,6 +349,16 @@
       if (n > bestN) { bestN = n; bestId = gid; }
     }
     return bestN >= 2 ? bestId : null;
+  }
+  // THE PLAYER-RUN MACHINE (V.2's own deferred endgame lever, now live): if
+  // the player is ON the ballot and the player's OWN crew holds >= 2 turf.js
+  // zones, the player IS the machine candidate — their blocs get the same
+  // turnout x0.6 / +20%-of-the-vote treatment any gang-backed candidate gets.
+  // Same threshold, same tally() code path, no second formula.
+  function playerZoneCount() {
+    if (!CBZ.cityZoneControl) return 0;
+    const ctrl = CBZ.cityZoneControl();
+    return ((ctrl && ctrl.byGang && ctrl.byGang.player) | 0);
   }
 
   // ============================================================
@@ -382,11 +428,25 @@
   // ============================================================
   //  SCORING + TALLY (see header for the verbatim formula walk-through)
   // ============================================================
+  // CHARISMA, for the player, is not a frozen roll — it is the street cred
+  // they actually carry the day the vote is tallied (g.respect, the repo's
+  // one global player-standing currency, read through the same 0..1 band an
+  // NPC's rolled charisma occupies). A nobody polls like a nobody.
+  const PLAYER_CHARISMA_RESPECT = 400;
+  function charismaOf(cand) {
+    if (!cand.player) return cand.charisma;
+    const r = Math.max(0, (g && g.respect) || 0);
+    return clampNum(0, 1, 0.12 + 0.88 * (r / PLAYER_CHARISMA_RESPECT));
+  }
   function scoreCandidate(cand, bloc, rec) {
     const approvalTerm = cand.type === "incumbent" ? 0.5 * (rec.approval || 0) : 0;
     const platformDot = (-cand.platform.tax * bloc.taxPref) + (cand.platform.police * bloc.policePref);
-    const fraud = 0; // wired, zero this wave — regimes.js/P6 (fascism +25) and ballot heists (+10) land later
-    return 40 + approvalTerm + 12 * cand.charisma + platformDot * 15 + cand.momentum + fraud;
+    // FRAUD — the slot P4 wired and left at zero. It is no longer always zero:
+    // a candidate record may carry a `fraud` term written by a REAL rigging
+    // act (city/candidacy.js's records-office bribe; regimes.js may add its
+    // own under fascism later). Nothing here invents one.
+    const fraud = +cand.fraud || 0;
+    return 40 + approvalTerm + 12 * charismaOf(cand) + platformDot * 15 + cand.momentum + fraud;
   }
   // tally(rec, candidates) -> {votes:[per-candidate summed weighted votes],
   // totalVotes, blocs} — the shared machinery poll + result both call, so a
@@ -434,7 +494,66 @@
     return { sid: obj._sid, type: type, platform: { tax: rng() * 2 - 1, police: rng() * 2 - 1 }, charisma: rng(), momentum: 0 };
   }
   function incumbentCandidate(rec) {
-    return { sid: rec.office.holder, type: "incumbent", platform: { tax: rng() * 2 - 1, police: rng() * 2 - 1 }, charisma: rng(), momentum: 0 };
+    const holder = rec.office.holder;
+    if (isPlayerSid(holder)) {
+      // the player defending a seat they hold — same record shape, the
+      // `player` flag is what makes nameOf/charismaOf/resolve() read
+      // CBZ.player instead of the ledger.
+      return Object.assign(playerCandidateRecord(), { type: "incumbent" });
+    }
+    return { sid: holder, type: "incumbent", platform: { tax: rng() * 2 - 1, police: rng() * 2 - 1 }, charisma: rng(), momentum: 0 };
+  }
+  // THE PLAYER'S CANDIDATE RECORD. No sid is minted — the player is not a
+  // ledger identity and pretending otherwise would put a second, fake "you"
+  // in the world's population. Platform/momentum/fraud come from what the
+  // player actually ran: city/candidacy.js's `g.cityRun`.
+  //
+  // NAME-COLLISION FIX (the whole reason this file's player socket had never
+  // fired): this used to read `g.cityCampaign`, which is the STORY campaign
+  // (city/campaign.js's authored hitman spine) — a completely different
+  // object that has never carried a platform, a momentum or a fraud term and
+  // never will. Every player run therefore polled from three permanent
+  // zeroes. The political run has its OWN key, `g.cityRun`, owned by
+  // city/candidacy.js. The read stays degrade-safe: with that module absent
+  // the platform is dead centre and momentum/fraud are zero, which polls
+  // exactly as badly as it should.
+  function runState() { return (g && g.cityRun) || null; }
+  function playerCandidateRecord() {
+    const C = runState();
+    const pf = (C && C.platform) || null;
+    return {
+      sid: PLAYER, player: true, type: "challenger",
+      platform: { tax: pf ? clampNum(-1, 1, +pf.tax || 0) : 0, police: pf ? clampNum(-1, 1, +pf.police || 0) : 0 },
+      charisma: 0.5,                       // ignored — charismaOf() reads g.respect live
+      // clamped on READ as well as on write: a blob saved before the cap
+      // existed (or written by a module that reached g.cityRun directly) must
+      // not be able to hand the tally an unbounded term.
+      momentum: clampNum(-PLAYER_MOMENTUM_CAP, PLAYER_MOMENTUM_CAP, (C && +C.momentum) || 0),
+      fraud: (C && +C.fraud) || 0,
+    };
+  }
+  // A CANDIDATE RECORD IS A SNAPSHOT — but the player's campaign keeps
+  // running for the whole CAMPAIGN_DAYS window after callElection() froze it.
+  // Without this, every rally, endorsement and bribe the player earned during
+  // the campaign was worth exactly nothing (the tally read the record minted
+  // two days earlier). NPC candidates keep accruing momentum on their own
+  // record in campaignDay(); this is the player's equivalent, read straight
+  // off the live run. Platform is re-read too — a pledge changed mid-campaign
+  // is a real, and realistically punishing, thing to do.
+  function refreshPlayerCandidate(race) {
+    const pi = playerIndex(race);
+    if (pi < 0) return;
+    const C = runState(); if (!C) return;
+    const cand = race.candidates[pi];
+    const fresh = playerCandidateRecord();
+    cand.platform = fresh.platform;
+    cand.momentum = fresh.momentum;
+    cand.fraud = fresh.fraud;
+  }
+  function playerIndex(race) {
+    if (!race || !race.candidates) return -1;
+    for (let i = 0; i < race.candidates.length; i++) if (race.candidates[i].player) return i;
+    return -1;
   }
 
   // ============================================================
@@ -456,20 +575,39 @@
   function callElection(id, rec, race, day, isSnap) {
     const title = titleFor(rec);
     const candidates = [];
+    // is the player STANDING in this race? Either they already hold the seat
+    // (incumbent, handled below) or they filed papers for it (race.pledged,
+    // stamped by playerCandidacy() before the race was ever called).
+    const playerHolds = isPlayerSid(rec.office.holder);
+    const playerFiled = race.pledged === true && !playerHolds;
     if (!isSnap && rec.office.holder) candidates.push(incumbentCandidate(rec));
+    if (playerFiled) candidates.push(playerCandidateRecord());
     const gid = machineGangId();
+    // the player's own crew backs them if it holds the ground — the machine
+    // slot is taken by the player, so no NPC machine candidate is minted.
+    const playerIsMachine = (playerFiled || playerHolds) && playerZoneCount() >= 2;
+    if (playerIsMachine) {
+      const pi = playerIndex({ candidates: candidates });
+      if (pi >= 0) candidates[pi].type = "machine";
+    }
+    const wantMachine = !!gid && !playerIsMachine;
     if (isSnap) {
-      // no sitting officeholder to run against — two open challengers, one
-      // machine-typed only if a qualifying gang actually exists this cycle.
-      const c1 = mintCandidate(gid ? "machine" : "reformer");
-      const c2 = mintCandidate("reformer");
+      // no sitting officeholder to run against — challengers fill the field;
+      // exactly one is machine-typed if a qualifying gang actually exists.
+      const c1 = mintCandidate(wantMachine ? "machine" : "reformer");
       if (c1) candidates.push(c1);
-      if (c2) candidates.push(c2);
+      // a snap race normally mints TWO open challengers; with the player on
+      // the ballot they ARE the second name, so only one NPC is needed.
+      if (!playerFiled) { const c2 = mintCandidate("reformer"); if (c2) candidates.push(c2); }
     } else {
-      const c1 = mintCandidate(gid ? "machine" : "reformer");
+      const c1 = mintCandidate(wantMachine ? "machine" : "reformer");
       if (c1) candidates.push(c1);
     }
     race.candidates = candidates;
+    race.pledged = false;                  // the pledge has been cashed into a real candidacy
+    if (playerFiled || playerHolds) {
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("YOU ARE ON THE BALLOT — " + title.toUpperCase() + " OF " + String(rec.name).toUpperCase());
+    }
     race.phase = "campaign";
     race.calledDay = day;
     race.electionDay = isSnap ? day + CAMPAIGN_DAYS : (rec.office.termDay != null ? rec.office.termDay : day + CAMPAIGN_DAYS);
@@ -480,6 +618,31 @@
     if (CBZ.cityFeed) CBZ.cityFeed("Election called for " + title + " of " + rec.name + ": " + names, "#8fc1ff");
   }
 
+  // momentum accrues on the CANDIDATE RECORD for an NPC, but the player's
+  // record is a projection of the live run (see refreshPlayerCandidate) — so
+  // anything credited to the player's record would be overwritten seconds
+  // later. Route it to the run instead; that is the only copy that survives.
+  // PLAYER_MOMENTUM_CAP mirrors city/candidacy.js's own MOMENTUM_CAP. momentum
+  // is a RAW ADDITIVE TERM in scoreCandidate(), in the same units as the 40
+  // base, the ~25 incumbency approval term and the ±15 platform swing — so an
+  // uncapped one makes every other term noise. candidacy.js caps its own public
+  // writer (momentumGain); this is the OTHER door into the same number (the
+  // rally roll and the w.politics.support credit, both of which land here), and
+  // it has to agree or the cap leaks.
+  const PLAYER_MOMENTUM_CAP = 40;
+  function addMomentum(cand, n) {
+    if (!cand || !isFinite(n) || !n) return;
+    if (cand.player) {
+      const C = runState();
+      if (C) {
+        C.momentum = clampNum(-PLAYER_MOMENTUM_CAP, PLAYER_MOMENTUM_CAP, (+C.momentum || 0) + n);
+        cand.momentum = C.momentum;
+        return;
+      }
+    }
+    cand.momentum += n;
+  }
+
   function campaignDay(id, rec, race, day) {
     if (!race.candidates.length) return;
     // a random small rally — flavored with a real bloc name so campaign
@@ -487,18 +650,30 @@
     const cand = race.candidates[(rng() * race.candidates.length) | 0];
     const blocs = buildBlocs(rec);
     const place = blocs.length ? blocs[(rng() * blocs.length) | 0].name : rec.name;
-    cand.momentum += 0.3 + rng() * 0.9;
+    addMomentum(cand, 0.3 + rng() * 0.9);
     if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(cand.sid) + " rallies supporters in " + place + ".", "#e8c84a");
 
-    // the player's OWN Campaign Event activity credits the INCUMBENT (a
-    // snap election has none — player-as-candidate is V.2's own future
-    // endgame lever, see header).
-    const incumbent = race.candidates.find(function (c) { return c.type === "incumbent"; });
-    if (incumbent) {
-      const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
-      const support = (w && w.politics && w.politics.support) || 0;
-      incumbent.momentum += support * 0.2;
+    // THE CAMPAIGN-EVENT CREDIT. w.politics.support is moved by the player's
+    // own "Campaign Event" activity (activities.js:194) — real money, a real
+    // world-state number. It used to be handed unconditionally to the
+    // INCUMBENT, which was correct only while the player could not stand for
+    // anything: the moment candidacy.js put the player on the ballot as a
+    // CHALLENGER, every $100 campaign event they paid for was momentum for
+    // the person they were running against. The support goes to the player's
+    // own record whenever the player is in the field (incumbent or
+    // challenger — playerIndex finds both); an NPC-only race is unchanged.
+    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
+    const support = (w && w.politics && w.politics.support) || 0;
+    if (support) {
+      const pi = playerIndex(race);
+      const target = pi >= 0 ? race.candidates[pi]
+        : race.candidates.find(function (c) { return c.type === "incumbent"; });
+      if (target) addMomentum(target, support * 0.2);
     }
+
+    // the player's live campaign (city/candidacy.js) keeps moving all through
+    // the window — pull it onto the frozen record before anyone tallies it.
+    refreshPlayerCandidate(race);
 
     // POLL — the same tally() the real result uses, snapshotted today.
     if (race.candidates.length >= 2) {
@@ -511,6 +686,11 @@
 
   function resolve(id, rec, race, day) {
     const title = titleFor(rec);
+    // election day does NOT run campaignDay() (tickOffice returns straight
+    // here), so this is the last chance to read the player's live run before
+    // the votes are counted — the momentum they earned on the final day has
+    // to be in the record the tally sees.
+    refreshPlayerCandidate(race);
     const t = tally(rec, race.candidates);
     let bestI = 0;
     for (let i = 1; i < t.votes.length; i++) if (t.votes[i] > t.votes[bestI]) bestI = i;
@@ -619,11 +799,23 @@
     const R = g.elections.races;
     for (const id in R) {
       const r = R[id];
-      if (r.phase !== "campaign") continue; // idle races carry nothing worth a save slot
+      // idle races carry nothing worth a save slot — EXCEPT a filed pledge. A
+      // player who paid a filing fee on day 3 for a race called on day 5 had
+      // that pledge silently dropped by every save in between, so the papers
+      // were pulled and the ballot never showed the name.
+      if (r.phase !== "campaign" && r.pledged !== true) continue;
       out[id] = {
         phase: r.phase, calledDay: r.calledDay, electionDay: r.electionDay,
+        pledged: r.pledged === true,
         candidates: r.candidates.map(function (c) {
-          return { sid: c.sid, type: c.type, platform: { tax: c.platform.tax, police: c.platform.police }, charisma: c.charisma, momentum: c.momentum };
+          // `player` and `fraud` are load-bearing: without the flag a restored
+          // player candidate reads as a sid-less NPC (nameOf/charismaOf both
+          // branch on it) and the rigging term silently zeroes on reload.
+          return {
+            sid: c.sid, type: c.type, player: !!c.player,
+            platform: { tax: c.platform.tax, police: c.platform.police },
+            charisma: c.charisma, momentum: c.momentum, fraud: +c.fraud || 0,
+          };
         }),
         lastPoll: r.lastPoll ? { aPct: r.lastPoll.aPct, bPct: r.lastPoll.bPct } : null,
       };
@@ -641,15 +833,20 @@
         phase: src.phase === "campaign" ? "campaign" : null,
         calledDay: src.calledDay != null ? src.calledDay : null,
         electionDay: src.electionDay != null ? src.electionDay : null,
+        pledged: src.pledged === true,
         candidates: Array.isArray(src.candidates) ? src.candidates.map(function (c) {
           return {
             sid: c.sid, type: c.type,
+            // a candidate whose sid is the player sentinel IS the player, even
+            // if an older blob predates the flag — belt and braces.
+            player: !!c.player || c.sid === PLAYER,
             platform: {
               tax: isFinite(c.platform && c.platform.tax) ? +c.platform.tax : 0,
               police: isFinite(c.platform && c.platform.police) ? +c.platform.police : 0,
             },
             charisma: isFinite(c.charisma) ? +c.charisma : 0.5,
             momentum: isFinite(c.momentum) ? +c.momentum : 0,
+            fraud: isFinite(c.fraud) ? +c.fraud : 0,
           };
         }) : [],
         lastPoll: (src.lastPoll && isFinite(src.lastPoll.aPct)) ? { aPct: src.lastPoll.aPct, bPct: src.lastPoll.bPct } : null,
@@ -657,8 +854,107 @@
     }
   }
 
+  // ============================================================
+  //  THE PLAYER SOCKET — the three reads and the one write that turn the
+  //  finished-but-unreachable player path above into a reachable one.
+  //  city/candidacy.js is the PRODUCER (it owns g.cityRun, the filing fee,
+  //  the petition and the campaign jobs); this file stays the RETURNING
+  //  OFFICER and owns nothing about how a run is earned.
+  // ============================================================
+
+  // pledge(officeId, on) — the ONE write. `race.pledged === true` is what
+  // callElection() reads to put the player on the ballot; before this
+  // function existed nothing in the repo could set it, which is why the
+  // player-filed branch had never once executed. Refuses a monarchy (the
+  // crown is not a ballot) and refuses once the field has already been set —
+  // you cannot file for a race whose candidates are already printed.
+  function pledge(officeId, on) {
+    if (!officeId) return false;
+    const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(officeId) : null;
+    if (!rec || !rec.office) return false;
+    if (rec.govType === "monarchy") return false;
+    const race = ensureRace(officeId);
+    if (race.phase === "campaign") return false;
+    race.pledged = (on !== false);
+    return true;
+  }
+
+  // playerRace() -> the live race the player is standing in, or null.
+  function playerRace() {
+    ensureInit();
+    const R = g.elections.races;
+    const day = CBZ.worldDay ? CBZ.worldDay() : 0;
+    for (const id in R) {
+      const race = R[id];
+      if (!race || race.phase !== "campaign") continue;
+      const pi = playerIndex(race);
+      if (pi < 0) continue;
+      const rec = (CBZ.polity && CBZ.polity.get) ? CBZ.polity.get(id) : null;
+      const poll = race.lastPoll ? Object.assign({}, race.lastPoll) : null;
+      return {
+        id: id, rec: rec, race: race, poll: poll,
+        title: titleFor(rec), i: pi,
+        daysLeft: Math.max(0, (race.electionDay || 0) - day),
+        me: poll ? (pi === 0 ? poll.aPct : poll.bPct) : null,
+      };
+    }
+    return null;
+  }
+
+  // openRaces() -> every seat a run could be aimed at, with the ONE number
+  // that decides whether papers can still be filed (daysLeft). Monarchies are
+  // omitted because tickOffice() never calls an election for one.
+  function openRaces() {
+    ensureInit();
+    const day = CBZ.worldDay ? CBZ.worldDay() : 0;
+    const ids = allOfficeIds();
+    const out = [];
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const rec = CBZ.polity.get(id);
+      if (!rec || !rec.office || rec.govType === "monarchy") continue;
+      const race = g.elections.races[id] || null;
+      const inCampaign = !!(race && race.phase === "campaign");
+      const phase = inCampaign ? "campaign" : (rec.vacuum != null ? "snap" : "idle");
+      const endDay = inCampaign ? race.electionDay : (rec.office.termDay != null ? rec.office.termDay : null);
+      out.push({
+        id: id, rec: rec, title: titleFor(rec), termDay: rec.office.termDay,
+        daysLeft: endDay != null ? Math.max(0, endDay - day) : null,
+        phase: phase, pledged: !!(race && race.pledged === true),
+        callDay: rec.office.termDay != null ? rec.office.termDay - CAMPAIGN_DAYS : null,
+        campaignDays: CAMPAIGN_DAYS,
+      });
+    }
+    return out;
+  }
+
+  // playerCandidacy(opts) — THE NAME factions.js:828-842 already calls
+  // ("CBZ.factions.office.stand() will use CBZ.elections.playerCandidacy()
+  // the moment it exists"). It does not own filing: it delegates to the
+  // producer, and refuses in one plain sentence when the producer is absent.
+  function playerCandidacy(opts) {
+    opts = opts || {};
+    const R = CBZ.cityRun;
+    if (!R || typeof R.file !== "function") {
+      return { ok: false, why: "There is no campaign office open — city/candidacy.js is not loaded." };
+    }
+    if (opts.officeId) return R.file(opts.officeId);
+    const list = (typeof R.offices === "function") ? R.offices() : [];
+    let pick = null;
+    for (let i = 0; i < list.length; i++) if (list[i].canFile) { pick = list[i]; break; }
+    if (!pick) {
+      return { ok: false, why: (list[0] && list[0].why) || "No seat you could contest is up for election here." };
+    }
+    return R.file(pick.id);
+  }
+
   CBZ.elections = {
     status: status,
+    // --- the player socket (see above) ---
+    playerCandidacy: playerCandidacy,
+    playerRace: playerRace,
+    openRaces: openRaces,
+    pledge: pledge,
     serialize: serialize,
     apply: apply,
     reset: reset,

@@ -1,36 +1,56 @@
 /* ============================================================
-   city/island_speedway.js — THE SPEEDWAY ISLAND.
+   city/island_speedway.js — DIAMOND SPEEDWAY, THE CIRCUIT.
 
    WHY: a city this size has nowhere to open a car up. The drag of
    stop-lights and traffic is the whole point of the streets, but a
    gearhead needs a place where speed is the ONLY rule. So the
-   northern bay gets a real banked superspeedway — a 2.5-mile-style
-   tri-oval (Daytona/Talladega proportions, scaled to ~300m of
-   footprint), reachable by its own causeway bridge off the commerce
-   annex. You drive across the water, roll onto the apron, and at the
-   start/finish stripe a flag-stand offers the only thing the streets
-   can't: JOIN THE RACE. Five hand-picked muscle/super cars line up,
-   you run the laps, the crowd in the grandstand is there to be raced
-   IN FRONT OF, and the purse pays by finishing position.
+   northern bay gets a real superspeedway, reachable by its own
+   causeway bridge off the commerce annex. You drive across the water,
+   through the marshal gate on the back straight, and at the start/
+   finish line under the gantry a flag stand offers the only thing the
+   streets can't: JOIN THE RACE.
 
-   The motorsports park around the oval exists for the same reason a
+   WHAT THIS FILE IS: the LAND. One parametric racing line (defined
+   ONCE — see the long note above trackFrame), and a real 3-D circuit
+   swept along it:
+     • a BANKED, CROWNED asphalt ribbon. The shape is authored as a
+       CURVATURE DIAGRAM the way circuits actually are: zero down the
+       back straight, gentle through the tri-oval front stretch, hard
+       through the turns, joined by C2 transition spirals. Bank angle
+       is derived FROM curvature, so it is steep in the turns and
+       shallow on the straights and can never be discontinuous.
+     • a flat inside apron at the foot of the banking, red/white kerbs
+       through the turns, a graded outer embankment down to grade.
+     • SAFER barrier walls with sponsor panels, catch fencing on posts
+       and cable runs above them, retaining walls through the turns,
+       and ONE marshal service gate on the back straight (the way on
+       and off the circuit).
+     • a trussed START/FINISH GANTRY over the racing surface with a
+       five-column light rig driven live by the race countdown.
+     • paint that belongs to a circuit: track limits, the rubbered-in
+       groove and marbles baked into the asphalt, the starting grid,
+       pit-in/pit-out blend lines.
+
+   The ARCHITECTURE — grandstands, the pit lane and garages, the
+   scoring pylon, the jumbotron, floodlight masts, hoardings, marshal
+   posts, tyre walls, gravel run-off, the paddock — lives next door in
+   city/speedway_structures.js and is authored against the same frame.
+
+   The motorsports park around the circuit exists for the same reason a
    real speedway has a midway: the AUTO SHOWROOM is the cathedral —
-   every car the city sells, on lit pads, floor after floor, so the
-   track is also where you go to covet the next ride. A team garage,
-   a trophy hall (why you race) and a trackside sports bar (where the
-   crowd that can't get a seat watches) round it out.
+   every car the city sells, on lit pads, so the track is also where you
+   go to covet the next ride. A team garage, a trophy hall and the
+   paddock round it out.
 
-   PERF: grandstand seat rows remain one InstancedMesh; a bounded sample
-   of seats holds real city actors and every other seat is honestly empty. The
-   SAFER barrier, lane lines, catch-fence posts and floodlight masts
-   are merged / instanced. One shared Lambert per colour (CBZ.mat
-   pool). The race AI cars are animated procedurally around the oval
-   centreline (not injected into the traffic graph), so they read as
-   a live field without fighting the street AI. Deterministic LCG so
+   PERF: every surface (asphalt, apron, embankment, walls, fences,
+   hoardings, roofs) is ONE swept BufferGeometry; every repeated element
+   (kerbs, fence posts, grid paint, seats, truss members, tyres, lamps)
+   is an InstancedMesh. The race AI cars use the real driving brain
+   (racedrivers.js) around the same line. Deterministic seed stream, so
    the park is identical every run.
 
-   Publishes nothing global except the landmass builder + the zone
-   interaction; everything else is self-contained in this IIFE.
+   Publishes: CBZ.speedwayFrame / speedwaySurfaceY / speedwayTrackLen,
+   the landmass builder, the zone interactions, and the race flow.
 ============================================================ */
 (function () {
   "use strict";
@@ -42,17 +62,46 @@
     return new THREE.MeshLambertMaterial(Object.assign({ color: c }, o && o.emissive ? { emissive: o.emissive, emissiveIntensity: o.ei || 0.5 } : {}));
   };
 
+  // ====================================================================== //
+  //  CONFIG FLAGS — every risky part of the rebuild is a one-line revert.    //
+  //  (Self-defaulted here rather than in config.js because this file owns    //
+  //   all of them; the `== null` guard means ?cfg_X=0 always wins.)          //
+  // ====================================================================== //
+  // SPEEDWAY_BANK — the circuit is REAL banked geometry: progressive bank
+  // (steep through the turns, shallow on the back straight), spiral
+  // transitions, crowned asphalt, a flat inside apron and a graded outer
+  // embankment. Flip false (or ?cfg_SPEEDWAY_BANK=0) and the identical
+  // ribbon builds dead flat — same layout, zero elevation.
+  if (CBZ.CONFIG.SPEEDWAY_BANK == null) CBZ.CONFIG.SPEEDWAY_BANK = true;
+  // SPEEDWAY_BANK_WALKABLE — publish the banked surface as a city ground
+  // height (CBZ.registerCityGroundHeight) so the player and peds walk UP the
+  // banking instead of through it. Off → the banking is scenery you clip.
+  if (CBZ.CONFIG.SPEEDWAY_BANK_WALKABLE == null) CBZ.CONFIG.SPEEDWAY_BANK_WALKABLE = true;
+  // SPEEDWAY_CAR_CONFORM — cars in this engine are 2D (they always drive at
+  // y=0, see vehicles.js). This PRESENTATIONAL pass lifts/rolls/pitches any
+  // car standing on the speedway onto the banked surface. Off → cars drive
+  // through the banking at y=0.
+  if (CBZ.CONFIG.SPEEDWAY_CAR_CONFORM == null) CBZ.CONFIG.SPEEDWAY_CAR_CONFORM = true;
+  // SPEEDWAY_CATCH_FENCE — debris fencing (posts + cable runs + mesh) above
+  // the SAFER wall. Off → bare wall, one less transparent surface.
+  if (CBZ.CONFIG.SPEEDWAY_CATCH_FENCE == null) CBZ.CONFIG.SPEEDWAY_CATCH_FENCE = true;
+  // SPEEDWAY_STRUCTURES — the rebuilt architecture (grandstands, pit lane +
+  // garages, scoring pylon, jumbotron, floodlights, hoardings, marshal posts,
+  // tyre walls, paddock) from city/speedway_structures.js. Off → track only.
+  if (CBZ.CONFIG.SPEEDWAY_STRUCTURES == null) CBZ.CONFIG.SPEEDWAY_STRUCTURES = true;
+
   // ---- footprint -----------------------------------------------------------
-  // Keep the entire motorsports footprint clear of Halloran Field to the
-  // west and the Saltlands to the east.  The old bounds touched both peers;
-  // worse, the visual grass was accidentally left at world origin while the
-  // track/region used these coordinates, laying a 400m green disc across the
-  // airport.  One authoritative transform owns every speedway surface now.
+  // One authoritative transform owns every speedway surface. The campus is
+  // kept clear of Halloran Field (west) and the Saltlands (east); R is what
+  // the city region registers as speedway ownership.
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };   // world-layout dial (zero today)
   const CX = 490 + _WOFF.dx, CZ = -350 + _WOFF.dz, R = 210;   // speedway/campus ownership radius
   // The visible venue is deliberately not a circular island.  Its irregular,
-  // elongated boundary follows the oval and grows a southern paddock shoulder,
-  // so from an aircraft it reads as a motorsports campus cut into the country.
+  // elongated boundary follows the circuit and grows a southern paddock
+  // shoulder, so from the air it reads as a motorsports campus cut into the
+  // country.  NOTE: this superellipse does NOT auto-follow the racing line —
+  // if you resize the track (TRACK_HX / TRACK_DZ below) check it still
+  // contains the outer embankment plus the grandstands.
   const SITE_HX = 205, SITE_HZ = 182, SITE_DZ = -23;
   const ACCESS_X = CX - 98, ACCESS_Z = CZ - 190;
   const ANNEX = { cx: 348.5, cz: -700, r: 120 }; // existing commerce island (DO NOT TOUCH)
@@ -65,38 +114,427 @@
   function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('speedway') : (function () { let s = 990217; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
   armRng();
 
-  // ---- track geometry (a tri-oval centreline) ------------------------------
-  // A superspeedway is an elongated oval; the tri-oval is the start/finish
-  // straight bulged out into a shallow fifth "turn" so the grandstand gets an
-  // angled view. We lay the centreline on a parametric ellipse and push the
-  // front straight (z on the +CZ / pit side) outward with a gentle bulge.
-  const OVAL_RX = 150;          // half-width of the oval (X)
-  const OVAL_RZ = 103;          // half-length (Z)
-  const TRACK_W = 22;           // full superspeedway racing surface width
-  const TRIBULGE = 12;          // tri-oval front-straight bulge (m)
-  const SF_T = 0.0;             // start/finish line parameter (t=0 = front straight centre)
+  // ======================================================================= //
+  //  THE RACING LINE — ONE DEFINITION. NOTHING ELSE.                        //
+  //                                                                          //
+  //  This file used to carry TWO parametric frames ("kept identical", by     //
+  //  comment only): the builder's `ovalFrame` and the race engine's          //
+  //  `CBZ_FRAME`. They had drifted — CBZ_FRAME's normal pointed INWARD while //
+  //  ovalFrame's pointed outward — and because both were plain function      //
+  //  declarations in the SAME IIFE scope, hoisting silently made the second  //
+  //  one win everywhere. The whole park was therefore authored against an    //
+  //  inward normal (grandstands in the infield, the SAFER wall on the wrong  //
+  //  side of the track). There is now exactly one function, `trackFrame`,    //
+  //  and both old names are gone.                                            //
+  //                                                                          //
+  //  HOW THE SHAPE IS DEFINED: not as an ellipse but as a CURVATURE          //
+  //  DIAGRAM, the way circuits are actually designed. κ(s) is 0 down the     //
+  //  back straight, a small constant through the tri-oval front stretch, a   //
+  //  larger constant through each turn, and joined by smootherstep TRANSITION//
+  //  SPIRALS so curvature is C² everywhere. Integrating κ gives heading;     //
+  //  integrating heading gives the centreline. κ ≥ 0 everywhere ⇒ the curve  //
+  //  is convex, which is what makes the nearest-point search below (and      //
+  //  racedrivers.js's) single-valued. A closed curve needs exactly           //
+  //  ∮κ ds = 2π and κ even about s=0 — both are enforced below, so the line  //
+  //  closes to floating-point dust.                                          //
+  //                                                                          //
+  //  FRAME CONTRACT (additive-only; racedrivers.js reads the first seven):   //
+  //    x, z         centreline point                                         //
+  //    tx, tz       unit tangent (direction of travel)                       //
+  //    nx, nz       unit OUTWARD normal (right of travel; the wall side)     //
+  //    heading      atan2(tx, tz) — the car yaw that drives this point       //
+  //    -- new, additive --                                                   //
+  //    t            the parameter itself                                     //
+  //    s            arc length from the start/finish line (m)                //
+  //    y            surface height ON the centreline (m)                     //
+  //    bank         bank angle (rad, + = outside edge higher)                //
+  //    curv         curvature (1/m)                                          //
+  //    halfW        half racing-surface width (m)                            //
+  //    upx,upy,upz  unit surface normal of the banked plane                  //
+  //  Surface height anywhere across the track: heightAtTU(t, u) — u is       //
+  //  metres from the centreline along +n (outward).                          //
+  // ======================================================================= //
 
-  // centreline point + outward normal + heading at param t∈[0,1)
-  function ovalPoint(t) {
-    const a = t * Math.PI * 2;
-    let x = CX + Math.cos(a) * OVAL_RX;
-    let z = CZ + Math.sin(a) * OVAL_RZ;
-    // tri-oval bulge: the front straight is the +Z (sin>0) arc near a≈PI/2.
-    // bulge peaks at the start/finish, fades over the straight.
-    const front = Math.max(0, Math.sin(a));     // 0..1, peaks on front straight
-    z += front * front * TRIBULGE;
-    return { x, z };
+  // ---- cross-section (metres) ----
+  const TRACK_W = 22;                 // FROZEN: race code passes TRACK_W/2 as trackHalf
+  const HALFW = TRACK_W / 2;
+  const APRON_W = 9;                  // flat inside apron at the foot of the banking
+  const APRON_BLEND = 3.5;            // apron → infield grade
+  const SHOULDER_W = 1.6;             // outside verge between asphalt and wall
+  const SKIRT_W = 15;                 // graded embankment from the wall down to grade
+  const TRACK_Y0 = 0.12;              // INSIDE edge of the racing surface (the pivot)
+  const APRON_Y = 0.10;
+  const CROWN = 0.09;                 // crest of the crowned road surface
+  const BANK_TURN = 14 * Math.PI / 180;
+  const BANK_MIN = 3.5 * Math.PI / 180;
+  const WALL_H = 1.05;                // SAFER barrier height above the surface
+  const FENCE_H = 5.8;                // catch fence above the wall
+
+  // ---- footprint targets (the site superellipse must contain these) ----
+  const TRACK_HX = 156;               // centreline half-extent in X
+  const TRACK_DZ = 12;                // centreline bbox centre, offset in Z from CZ
+  const SF_T = 0.0;                   // start/finish = the tri-oval front-stretch apex
+
+  // ---- the curvature diagram (lap fractions, measured from the S/F line) ----
+  const CV_A1 = 0.105;                // end of the constant tri-oval bulge
+  const CV_SP = 0.043;                // TRANSITION SPIRAL length at each turn end
+  const CV_A2 = CV_A1 + CV_SP;        // start of the constant-radius turn
+  const CV_FRONT = 0.18;              // front-stretch curvature, relative to a turn
+  let CV_A3 = 0.38;                   // end of the turn — SOLVED, never guessed (below)
+  function smoother(e0, e1, x) {
+    let u = (x - e0) / (e1 - e0);
+    u = u < 0 ? 0 : (u > 1 ? 1 : u);
+    return u * u * u * (u * (u * 6 - 15) + 10);   // C² smootherstep = the spiral
   }
-  function ovalFrame(t) {
-    const p = ovalPoint(t);
-    const p2 = ovalPoint(t + 0.0015);
-    const dx = p2.x - p.x, dz = p2.z - p.z;
-    const len = Math.hypot(dx, dz) || 1;
-    const tx = dx / len, tz = dz / len;        // tangent (heading dir)
-    // For this counter-clockwise parameterisation the RIGHT-hand normal points
-    // out of the oval. The old left-hand normal pointed inward, so grandstands,
-    // barriers and the pit complex were literally authored across the track.
-    return { x: p.x, z: p.z, tx, tz, nx: tz, nz: -tx, heading: Math.atan2(tx, tz) };
+  // κ(t)/κmax, even about t=0 (so the two turns mirror and the venue has one
+  // axis of symmetry — a tri-oval, not an ellipse).
+  function kShape(t) {
+    let u = t - Math.floor(t);
+    if (u > 0.5) u = 1 - u;
+    const a4 = CV_A3 + CV_SP;
+    if (u <= CV_A1) return CV_FRONT;
+    if (u < CV_A2) return CV_FRONT + (1 - CV_FRONT) * smoother(CV_A1, CV_A2, u);
+    if (u <= CV_A3) return 1;
+    if (u < a4) return 1 - smoother(CV_A3, a4, u);
+    return 0;
+  }
+  // THE CLOSURE CONDITION, and why the turn length is solved rather than typed.
+  // ∮κ ds = 2π only guarantees the HEADING wraps once. For the loop to meet
+  // itself, the X displacement over half a lap must also vanish — physically,
+  // the front stretch and the back straight have to cancel. Guessing the turn
+  // length left an ~80 m gap, and "fixing" that with a drift correction would
+  // have sheared the whole track so the stored heading no longer matched the
+  // real tangent (which is exactly what the AI's curvature braking reads).
+  // So: bisect the turn length until half-lap ΔX is zero. Closes to ~1e-14.
+  function shapeHalfDx(n) {
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += kShape((i + 0.5) / n);
+    mean /= n;
+    const ks = (Math.PI * 2) / mean, du = 1 / n;
+    let phi = Math.PI, X = 0;
+    const half = n >> 1;
+    for (let i = 0; i < half; i++) {
+      const km = ks * kShape((i + 0.5) / n);
+      X += Math.cos(phi - km * du * 0.5) * du;
+      phi -= km * du;
+    }
+    return X;
+  }
+  function solveShape() {
+    let lo = CV_A2 + 0.02, hi = 0.5 - CV_SP - 0.001;
+    for (let i = 0; i < 58; i++) {
+      CV_A3 = (lo + hi) / 2;
+      if (shapeHalfDx(2048) > 0) lo = CV_A3; else hi = CV_A3;
+    }
+    CV_A3 = (lo + hi) / 2;
+  }
+
+  const NS = 1024;                    // centreline samples (~0.73 m apart)
+  const NA = 1024;                    // polar-angle → parameter lookup resolution
+  let TBL = null;
+  function ensureTable() {
+    if (TBL) return TBL;
+    solveShape();                                  // closes the loop exactly
+    const ux = new Float64Array(NS + 1), uz = new Float64Array(NS + 1),
+      up = new Float64Array(NS + 1), uk = new Float64Array(NS + 1);
+    // 1. normalise the shape so the heading sweeps exactly 2π over one lap
+    let mean = 0;
+    for (let i = 0; i < NS; i++) mean += kShape((i + 0.5) / NS);
+    mean /= NS;
+    const kScale = (Math.PI * 2) / mean;          // dφ/du on a unit-perimeter lap
+    // 2. integrate (midpoint). φ is the tangent angle in the XZ plane; it
+    //    DECREASES because a positive curvature here turns left (real ovals
+    //    turn left), which also fixes the outward normal as (-tz, tx).
+    let phi = Math.PI, X = 0, Z = 0;               // t=0 heads -X at the front apex
+    const du = 1 / NS;
+    ux[0] = 0; uz[0] = 0; up[0] = phi; uk[0] = kScale * kShape(0);
+    for (let i = 0; i < NS; i++) {
+      const km = kScale * kShape((i + 0.5) / NS);
+      const pm = phi - km * du * 0.5;
+      X += Math.cos(pm) * du; Z += Math.sin(pm) * du;
+      phi -= km * du;
+      ux[i + 1] = X; uz[i + 1] = Z; up[i + 1] = phi; uk[i + 1] = kScale * kShape((i + 1) / NS);
+    }
+    // 3. remove the (sub-micron) integration drift so the loop closes exactly
+    const dxE = ux[NS], dzE = uz[NS];
+    for (let i = 0; i <= NS; i++) { const w = i / NS; ux[i] -= dxE * w; uz[i] -= dzE * w; }
+    // 4. uniform scale to the target footprint + centre it on the venue
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (let i = 0; i <= NS; i++) {
+      if (ux[i] < x0) x0 = ux[i]; if (ux[i] > x1) x1 = ux[i];
+      if (uz[i] < z0) z0 = uz[i]; if (uz[i] > z1) z1 = uz[i];
+    }
+    const L = (TRACK_HX * 2) / (x1 - x0);          // lap length in metres
+    const ox = -(x0 + x1) / 2, oz = -(z0 + z1) / 2;
+    const xc = CX, zc = CZ + TRACK_DZ;
+    const PX = new Float64Array(NS + 1), PZ = new Float64Array(NS + 1),
+      PP = new Float64Array(NS + 1), PK = new Float64Array(NS + 1);
+    let kMax = 0;
+    for (let i = 0; i <= NS; i++) {
+      PX[i] = xc + (ux[i] + ox) * L;
+      PZ[i] = zc + (uz[i] + oz) * L;
+      PP[i] = up[i];
+      PK[i] = uk[i] / L;
+      if (PK[i] > kMax) kMax = PK[i];
+    }
+    PX[NS] = PX[0]; PZ[NS] = PZ[0];                // exact seam
+    // 5. polar-angle → t table. The curve is convex (κ ≥ 0) so the angle about
+    //    the centre is strictly monotonic in t: one pass builds an O(1) index.
+    const A2T = new Float32Array(NA + 1);
+    const ang0 = Math.atan2(PZ[0] - zc, PX[0] - xc);
+    const AG = new Float64Array(NS + 1);           // "angle swept since t=0", 0..2π
+    let prev = 0;
+    for (let i = 0; i <= NS; i++) {
+      let d = ang0 - Math.atan2(PZ[i] - zc, PX[i] - xc);
+      d = ((d % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      if (i === 0) d = 0;
+      if (i === NS) d = Math.PI * 2;
+      while (d < prev) d += Math.PI * 2;           // keep it monotonic across the seam
+      AG[i] = d; prev = d;
+    }
+    let cur = 0;
+    for (let j = 0; j <= NA; j++) {
+      const target = (Math.PI * 2) * j / NA;
+      while (cur < NS && AG[cur + 1] < target) cur++;
+      const a = AG[cur], b = AG[Math.min(NS, cur + 1)];
+      const f = b > a ? (target - a) / (b - a) : 0;
+      A2T[j] = (cur + Math.max(0, Math.min(1, f))) / NS;
+    }
+    TBL = { X: PX, Z: PZ, P: PP, K: PK, A2T: A2T, ang0: ang0, L: L, kMax: kMax || 1, xc: xc, zc: zc,
+      hx: (x1 - x0) / 2 * L, hz: (z1 - z0) / 2 * L };
+    return TBL;
+  }
+
+  function bankAtT(t) {
+    if (CBZ.CONFIG.SPEEDWAY_BANK === false) return 0;
+    const T = ensureTable();
+    let u = t - Math.floor(t);
+    const fi = u * NS, i = fi | 0, fr = fi - i;
+    const k = T.K[i] + (T.K[i + 1] - T.K[i]) * fr;
+    return BANK_MIN + (BANK_TURN - BANK_MIN) * (k / T.kMax);
+  }
+
+  // Surface height at parameter t, u metres outboard of the centreline.
+  // THE single source of truth for the ribbon mesh, the walls, the ground
+  // provider and the car conformer — they cannot disagree.
+  function heightAtTU(t, u) {
+    const b = bankAtT(t), tb = Math.tan(b);
+    if (u >= -HALFW) {
+      if (u <= HALFW) {
+        const r = u / HALFW;
+        return TRACK_Y0 + (u + HALFW) * tb + CROWN * (1 - r * r);
+      }
+      const yEdge = TRACK_Y0 + TRACK_W * tb;
+      if (u <= HALFW + SHOULDER_W) return yEdge + (u - HALFW) * tb;
+      const yS = yEdge + SHOULDER_W * tb;
+      const w = (u - HALFW - SHOULDER_W) / SKIRT_W;
+      if (w >= 1) return 0;
+      return yS * (1 - (w * w * (3 - 2 * w)));     // graded embankment down to grade
+    }
+    if (u >= -(HALFW + APRON_W)) {
+      const w = (u + HALFW + APRON_W) / APRON_W;
+      return APRON_Y + (TRACK_Y0 - APRON_Y) * w;   // flat apron at the foot of the bank
+    }
+    const w2 = (-u - HALFW - APRON_W) / APRON_BLEND;
+    if (w2 >= 1) return 0;
+    return APRON_Y * (1 - w2);
+  }
+
+  // THE frame. Returns a fresh object (existing consumers keep references to
+  // frames, so this must NOT be pooled).
+  function trackFrame(t) {
+    const T = ensureTable();
+    let u = t - Math.floor(t);
+    const fi = u * NS, i = fi | 0, fr = fi - i, i2 = i + 1;
+    const x = T.X[i] + (T.X[i2] - T.X[i]) * fr;
+    const z = T.Z[i] + (T.Z[i2] - T.Z[i]) * fr;
+    const ps = T.P[i] + (T.P[i2] - T.P[i]) * fr;   // monotonic: no wrap artefacts
+    const k = T.K[i] + (T.K[i2] - T.K[i]) * fr;
+    const tx = Math.cos(ps), tz = Math.sin(ps);
+    const nx = -tz, nz = tx;                        // OUTWARD (right of travel)
+    const bank = CBZ.CONFIG.SPEEDWAY_BANK === false ? 0
+      : BANK_MIN + (BANK_TURN - BANK_MIN) * (k / T.kMax);
+    const sb = Math.sin(bank), cb = Math.cos(bank);
+    return {
+      x: x, z: z, tx: tx, tz: tz, nx: nx, nz: nz, heading: Math.atan2(tx, tz),
+      t: u, s: u * T.L, curv: k, bank: bank, halfW: HALFW,
+      y: TRACK_Y0 + HALFW * Math.tan(bank) + CROWN,
+      upx: -nx * sb, upy: cb, upz: -nz * sb,
+    };
+  }
+  CBZ.speedwayFrame = trackFrame;
+
+  // ---- fast nearest-point parameter (O(1) angle index + Newton projection) --
+  const _sc = { x: 0, z: 0, tx: 0, tz: 0, nx: 0, nz: 0 };
+  function frameLite(t) {
+    const T = ensureTable();
+    let u = t - Math.floor(t);
+    const fi = u * NS, i = fi | 0, fr = fi - i, i2 = i + 1;
+    _sc.x = T.X[i] + (T.X[i2] - T.X[i]) * fr;
+    _sc.z = T.Z[i] + (T.Z[i2] - T.Z[i]) * fr;
+    const ps = T.P[i] + (T.P[i2] - T.P[i]) * fr;
+    _sc.tx = Math.cos(ps); _sc.tz = Math.sin(ps);
+    _sc.nx = -_sc.tz; _sc.nz = _sc.tx;
+    return _sc;
+  }
+  function paramAtFast(x, z) {
+    const T = ensureTable();
+    let d = T.ang0 - Math.atan2(z - T.zc, x - T.xc);
+    d = ((d % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const fj = d / (Math.PI * 2) * NA, j = fj | 0, fr = fj - j;
+    let t = T.A2T[j] + (T.A2T[Math.min(NA, j + 1)] - T.A2T[j]) * fr;
+    // project onto the curve: slide along the tangent until the offset is normal
+    for (let it = 0; it < 4; it++) {
+      const f = frameLite(t);
+      const along = (x - f.x) * f.tx + (z - f.z) * f.tz;
+      t += along / T.L;
+      t -= Math.floor(t);
+      if (Math.abs(along) < 0.02) break;
+    }
+    return t - Math.floor(t);
+  }
+
+  // Across-track offset of a world point (+ = outboard). Cheap: one param solve.
+  function offsetAt(x, z, t) {
+    const f = frameLite(t == null ? paramAtFast(x, z) : t);
+    return (x - f.x) * f.nx + (z - f.z) * f.nz;
+  }
+
+  // The published ground oracle for the banked surface. Registered with
+  // CBZ.registerCityGroundHeight at build time so floorAt() walks the banking.
+  const SURF_R2 = (TRACK_HX + HALFW + SHOULDER_W + SKIRT_W + 8);
+  function speedwaySurfaceY(x, z) {
+    if (!TBL) return 0;
+    const dx = x - TBL.xc, dz = z - TBL.zc;
+    if (dx * dx + dz * dz > SURF_R2 * SURF_R2) return 0;
+    const t = paramAtFast(x, z);
+    const u = offsetAt(x, z, t);
+    if (u < -(HALFW + APRON_W + APRON_BLEND) || u > HALFW + SHOULDER_W + SKIRT_W) return 0;
+    return heightAtTU(t, u);
+  }
+  CBZ.speedwaySurfaceY = speedwaySurfaceY;
+  CBZ.speedwayTrackLen = function () { return ensureTable().L; };
+
+  // ---- an orientation basis that SITS ON the banked surface ----------------
+  // Local axes: +Z along the tangent (the car/prop forward convention), +Y the
+  // surface normal, +X = Y×Z. Everything placed on the track (kerb blocks,
+  // paint ticks, wall segments) uses this so nothing floats or intersects.
+  const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(),
+    _bs = new THREE.Vector3(), _bm = new THREE.Matrix4();
+  function surfMatrix(t, u, dy, sx, sy, sz, out) {
+    const f = trackFrame(t);
+    const sb = Math.sin(f.bank), cb = Math.cos(f.bank);
+    _bz.set(f.tx, 0, f.tz);
+    _by.set(-f.nx * sb, cb, -f.nz * sb);
+    _bx.crossVectors(_by, _bz);
+    const y = heightAtTU(t, u) + (dy || 0);
+    const m = out || _bm;
+    m.makeBasis(_bx, _by, _bz);
+    m.scale(_bs.set(sx, sy, sz));
+    m.setPosition(f.x + f.nx * u, y, f.z + f.nz * u);
+    return m;
+  }
+
+  // ---- strip(): sweep a ribbon along the racing line ----------------------
+  // The workhorse behind every surface in the park — the asphalt, the apron,
+  // the embankment, the walls, the pit road, the grandstand rakes, the roofs,
+  // the hoardings. ONE BufferGeometry, one draw call, always following the
+  // curve. `prof` is an ordered list of cross-section rows:
+  //     { u, dy, abs, uv }   u may be a number OR fn(w) for a tapering run
+  //   u   across-track offset (m, + = outboard)
+  //   dy  height offset above the track surface at that u, or (abs:true) the
+  //       ABSOLUTE world height
+  //   uv  texture U for this row (defaults to the row index fraction)
+  // Row order matters: inner→outer (or bottom→top) produces outward/upward
+  // facing triangles.
+  // o.swapUV: put the ALONG-track coordinate on the texture's U axis instead
+  // of V. Ground surfaces want across=U (lane paint runs along the track);
+  // vertical bands — the SAFER wall, the pit wall, hoardings, roof fascias —
+  // want along=U, because a sponsor board reads horizontally. Without this a
+  // sponsor band renders rotated 90 degrees and tiles down the wall's height.
+  let _root = null;
+  function strip(prof, o) {
+    o = o || {};
+    const T = ensureTable();
+    const t0 = o.t0 == null ? 0 : o.t0, t1 = o.t1 == null ? 1 : o.t1;
+    const closed = !!o.closed;
+    const arc = Math.abs(t1 - t0) * T.L;
+    const seg = Math.max(4, o.seg || Math.round(arc / (o.step || 2.5)));
+    const rows = closed ? seg : seg + 1;
+    const n = prof.length;
+    const pos = new Float32Array(rows * n * 3);
+    const uvs = new Float32Array(rows * n * 2);
+    const vTiles = o.vLen ? Math.max(1, Math.round(arc / o.vLen)) : 1;
+    for (let i = 0; i < rows; i++) {
+      const w = i / seg;
+      const t = t0 + (t1 - t0) * w;
+      const f = trackFrame(t);
+      for (let j = 0; j < n; j++) {
+        const e = prof[j];
+        const u = typeof e.u === "function" ? e.u(w) : e.u;
+        const y = e.abs ? (e.dy || 0) : heightAtTU(t, u) + (e.dy || 0);
+        const p = (i * n + j) * 3;
+        pos[p] = f.x + f.nx * u; pos[p + 1] = y; pos[p + 2] = f.z + f.nz * u;
+        const q = (i * n + j) * 2;
+        const uvRow = e.uv == null ? (n > 1 ? j / (n - 1) : 0) : e.uv;
+        if (o.swapUV) { uvs[q] = w * vTiles; uvs[q + 1] = uvRow; }
+        else { uvs[q] = uvRow; uvs[q + 1] = w * vTiles; }
+      }
+    }
+    const idx = [];
+    for (let i = 0; i < seg; i++) {
+      const i2 = closed ? ((i + 1) % rows) : (i + 1);
+      for (let j = 0; j < n - 1; j++) {
+        const a = i * n + j, b = a + 1, c = i2 * n + j, d = c + 1;
+        idx.push(a, b, c, b, d, c);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    let m = o.mat;
+    if (o.doubleSide && m && m.side !== THREE.DoubleSide) {
+      m = m._shared ? m.clone() : m;
+      m.side = THREE.DoubleSide;
+    }
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.receiveShadow = o.receive !== false;
+    mesh.castShadow = !!o.cast;
+    mesh.name = o.name || "speedway-strip";
+    mesh.userData.speedway = true;          // keep it out of the inert merge pass
+    (o.parent || _root).add(mesh);
+    return mesh;
+  }
+
+  // ---- collider helpers ---------------------------------------------------
+  // AABBs cannot represent banking, so a banked wall is approximated by a
+  // stepped chain of short boxes along it, each spanning the full height from
+  // grade (y0=0) to the wall top: the earth under the banking is solid, and
+  // vehicles.js calls CBZ.collide() WITHOUT a height gate anyway.
+  function solidBox(minX, maxX, minZ, maxZ, y0, y1) {
+    CBZ.colliders.push({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, y0: y0 || 0, y1: y1 });
+  }
+  function solidAt(cx, cz, w, d, h) {
+    solidBox(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, 0, h);
+  }
+  // chain of AABBs following the racing line at across-track offset u
+  function solidChain(t0, t1, u, thick, y0, yTop, step, skip) {
+    const T = ensureTable();
+    const arc = Math.abs(t1 - t0) * T.L;
+    const n = Math.max(2, Math.round(arc / (step || 3.0)));
+    const half = arc / n * 0.62;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + (t1 - t0) * (i + 0.5) / n;
+      if (skip && skip(t)) continue;
+      const f = trackFrame(t);
+      const x = f.x + f.nx * u, z = f.z + f.nz * u;
+      const ex = Math.abs(f.tx) * half + Math.abs(f.nx) * thick / 2;
+      const ez = Math.abs(f.tz) * half + Math.abs(f.nz) * thick / 2;
+      const top = yTop == null ? (heightAtTU(t, u) + WALL_H) : (typeof yTop === "function" ? yTop(t) : yTop);
+      solidBox(x - ex, x + ex, z - ez, z + ez, y0 || 0, top);
+    }
   }
 
   // ====================================================================== //
@@ -106,13 +544,30 @@
     const root = city.root;
     if (!root) return;
     armRng();
+    _root = root;
+    const T = ensureTable();
+    const L = T.L;
+    const SU = CBZ.CONFIG.SPEEDWAY_STRUCTURES !== false ? CBZ.speedwayStructures : null;
 
     // ---- shared palette ----
-    const C_GRASS = 0x668852, C_INFIELD = 0x5f814b, C_ASPHALT = 0x2b2d31,
-      C_APRON = 0x3a3d42, C_CONCRETE = 0xb7bcc2, C_LINE = 0xeef2f6,
-      C_PIT = 0x35383d, C_SAFER = 0xdadfe4, C_STEEL = 0x8a9099,
-      C_STAND = 0x6c7480, C_SEAT = 0x37506e, C_RED = 0xc23a36,
-      C_GREEN = 0x3ba24a, C_DECK = 0x6a6d72, C_CURB = 0xcfd3d8;
+    const C = {
+      GRASS: 0x668852, INFIELD: 0x5f814b, ASPHALT: 0x2b2d31, APRON: 0x3a3d42,
+      CONCRETE: 0xb7bcc2, LINE: 0xeef2f6, PIT: 0x35383d, SAFER: 0xdadfe4,
+      STEEL: 0x8a9099, STAND: 0x6c7480, SEAT: 0x37506e, RED: 0xc23a36,
+      GREEN: 0x3ba24a, DECK: 0x6a6d72, CURB: 0xcfd3d8,
+    };
+    const C_DECK = C.DECK, C_CURB = C.CURB, C_STEEL = C.STEEL;
+
+    // ---- layout, in (t, u) — everything below derives from the ONE frame --
+    const WALL_U = HALFW + SHOULDER_W;               // SAFER barrier centreline
+    const SKIRT_END = HALFW + SHOULDER_W + SKIRT_W;  // toe of the embankment
+    const APRON_EDGE = -(HALFW + APRON_W);           // inside edge of the apron
+    const PIT_T = 78 / L;                            // pit lane half-length (laps)
+    const PIT_WALL_U = -26.0;
+    const PIT_LANE_OUT = -26.7, PIT_LANE_IN = -36.5;
+    const GARAGE_FRONT = -38.5, GARAGE_DEPTH = 15;
+    const GATE_T = 0.5, GATE_HALF = 6.5 / L;         // service gate in the outer wall
+    const TURN1 = [0.12, 0.42], TURN2 = [0.58, 0.88];
 
     function flat(geo, m, y, opts) {
       opts = opts || {};
@@ -140,8 +595,8 @@
         if (i === 0) shape.moveTo(lx, -lz); else shape.lineTo(lx, -lz);
       }
       const geo = new THREE.ShapeGeometry(shape, 12);
-      // Match CircleGeometry's UV convention so the existing world-coordinate
-      // canvas bake remains exact after replacing the circular mesh.
+      // Match CircleGeometry's UV convention so the world-coordinate canvas
+      // bake below stays exact.
       const p = geo.attributes.position, uv = new Float32Array(p.count * 2);
       for (let i = 0; i < p.count; i++) {
         uv[i * 2] = (p.getX(i) + R) / (R * 2);
@@ -151,75 +606,79 @@
       return geo;
     }
 
-    // ---- 1. ONE ground skin: grass + infield + asphalt --------------------
-    // The old version rendered three near-coplanar meshes (island grass,
-    // asphalt ring and infield). From a plane their depth values collapsed and
-    // swapped ownership. Bake those zones into one texture on one circle; the
-    // raised barriers, paint, pit road and buildings remain real geometry.
+    // ====================================================================
+    //  1. THE GROUND SKIN — grass, infield, courts, car parks.
+    //  The DRIVABLE track is no longer painted here: it is real, raised,
+    //  banked geometry (step 2). This skin only carries the ground the
+    //  circuit sits IN, so nothing is coplanar and nothing can flicker.
+    // ====================================================================
     const surfaceCanvas = document.createElement("canvas");
     surfaceCanvas.width = surfaceCanvas.height = 1024;
     const sx = surfaceCanvas.getContext("2d");
     function css(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); }
     function cvx(x) { return (x - (CX - R)) / (R * 2) * surfaceCanvas.width; }
     function cvz(z) { return (z - (CZ - R)) / (R * 2) * surfaceCanvas.height; }
-    function pathEdge(offset) {
+    // trace a closed canvas path parallel to the racing line at offset u —
+    // sampled from the SAME frame the geometry uses, so paint and mesh agree.
+    function pathU(u) {
       sx.beginPath();
-      for (let i = 0; i <= 192; i++) {
-        const a = i / 192 * Math.PI * 2;
-        const front = Math.max(0, Math.sin(a));
-        // Canvas-space concentric ovals are more robust than offsetting the
-        // sampled world tangent: concave tri-oval samples could reverse the
-        // winding and let the infield paint over the whole track.
-        const x = cvx(CX + Math.cos(a) * (OVAL_RX + offset));
-        const z = cvz(CZ + Math.sin(a) * (OVAL_RZ + offset) + front * front * TRIBULGE);
-        if (i === 0) sx.moveTo(x, z); else sx.lineTo(x, z);
+      for (let i = 0; i <= 240; i++) {
+        const f = trackFrame(i / 240);
+        const px = cvx(f.x + f.nx * u), pz = cvz(f.z + f.nz * u);
+        if (i === 0) sx.moveTo(px, pz); else sx.lineTo(px, pz);
       }
       sx.closePath();
     }
-    // Fade the outer turf toward the surrounding backcountry instead of
-    // presenting a single dark-green poker chip from the air.
     const turf = sx.createRadialGradient(512, 512, 80, 512, 512, 724);
-    turf.addColorStop(0, css(C_GRASS)); turf.addColorStop(0.78, css(C_GRASS));
+    turf.addColorStop(0, css(C.GRASS)); turf.addColorStop(0.78, css(C.GRASS));
     turf.addColorStop(1, css(0x738260));
     sx.fillStyle = turf; sx.fillRect(0, 0, surfaceCanvas.width, surfaceCanvas.height);
-    // subtle mowing bands keep the huge infield from reading as a flat swatch
-    sx.globalAlpha = 0.10; sx.fillStyle = css(C_INFIELD);
+    sx.globalAlpha = 0.10; sx.fillStyle = css(C.INFIELD);
     for (let y = 0; y < surfaceCanvas.height; y += 42) sx.fillRect(0, y, surfaceCanvas.width, 20);
     sx.globalAlpha = 1;
-    // Real superspeedways have a broad paved safety/service apron outside the
-    // racing groove.  The former razor-thin charcoal line inside a featureless
-    // green disc disappeared at aircraft height and made the venue read as an
-    // empty field.  Paint the hierarchy outside-in on this ONE texture so it
-    // stays flicker-free: service apron -> racing surface -> grass infield.
-    pathEdge(TRACK_W / 2 + 13); sx.fillStyle = css(C_APRON); sx.fill();
-    pathEdge(TRACK_W / 2); sx.fillStyle = css(C_ASPHALT); sx.fill();
-    pathEdge(-(TRACK_W / 2 + 1)); sx.fillStyle = css(C_INFIELD); sx.fill();
-    // The infield is an operating paddock, not 45,000 square metres of empty
-    // green.  Bake its garage court, ambulance lane and marked work bays into
-    // the same texture so none of these broad horizontal surfaces can flicker.
-    const innerX0 = cvx(CX - 66), innerX1 = cvx(CX + 62);
-    const innerZ0 = cvz(CZ - 43), innerZ1 = cvz(CZ + 38);
+    // the graded earth footprint the embankment is cut into (mostly hidden by
+    // the skirt mesh; it stops a bright green fringe from peeking through)
+    pathU(SKIRT_END + 2.5); sx.fillStyle = css(0x6f6c58); sx.fill();
+    // the infield, mown short and darker than the surrounding country
+    pathU(APRON_EDGE - APRON_BLEND - 1.5); sx.fillStyle = css(C.INFIELD); sx.fill();
+    // infield service ring — the road the recovery trucks and marshals use
+    sx.strokeStyle = css(0x4a4e53); sx.lineWidth = 9;
+    pathU(-58); sx.stroke();
+    sx.strokeStyle = "rgba(238,242,246,.45)"; sx.lineWidth = 1.5;
+    pathU(-58); sx.stroke();
+    // the infield paddock court behind the garages (support paddock, scrutineer
+    // bay, recovery compound) — texture-baked so no coplanar slab can fight it
+    {
+      const x0 = cvx(CX - 74), x1 = cvx(CX + 74), z0 = cvz(CZ - 8), z1 = cvz(CZ + 58);
+      sx.fillStyle = css(0x4a4e53); sx.fillRect(x0, z0, x1 - x0, z1 - z0);
+      sx.fillStyle = css(0x747a80);
+      sx.fillRect(cvx(CX - 6), z0, cvx(CX + 6) - cvx(CX - 6), z1 - z0);
+      sx.strokeStyle = css(C.LINE); sx.globalAlpha = 0.6; sx.lineWidth = 2;
+      for (let x = CX - 66; x <= CX + 66; x += 12) {
+        if (Math.abs(x - CX) < 10) continue;
+        sx.beginPath(); sx.moveTo(cvx(x), z0 + 6); sx.lineTo(cvx(x), z1 - 6); sx.stroke();
+      }
+      sx.globalAlpha = 1;
+    }
+    // south side: spectator concourse, paddock apron and the public car park
+    function court(mx0, mz0, mx1, mz1, col, bays) {
+      const a = cvx(mx0), b = cvz(mz0), c2 = cvx(mx1), d = cvz(mz1);
+      sx.fillStyle = css(col); sx.fillRect(a, b, c2 - a, d - b);
+      if (!bays) return;
+      sx.strokeStyle = css(C.LINE); sx.globalAlpha = 0.55; sx.lineWidth = 2;
+      for (let x = mx0 + 7; x <= mx1 - 7; x += 14) {
+        sx.beginPath(); sx.moveTo(cvx(x), b + 5); sx.lineTo(cvx(x), d - 5); sx.stroke();
+      }
+      sx.globalAlpha = 1;
+    }
+    court(CX - 122, CZ - 126, CX + 122, CZ - 97, 0x8b8f94, false);   // stand concourse
+    court(CX - 124, CZ - 158, CX + 124, CZ - 126, C.APRON, false);   // paddock apron
+    court(CX - 132, CZ - 204, CX + 132, CZ - 182, C.APRON, true);    // public car park
+    // access lane from the causeway into the car park
     sx.fillStyle = css(0x4a4e53);
-    sx.fillRect(innerX0, innerZ0, innerX1 - innerX0, innerZ1 - innerZ0);
-    sx.fillStyle = css(0x747a80);
-    sx.fillRect(cvx(CX - 7), innerZ0, cvx(CX + 7) - cvx(CX - 7), innerZ1 - innerZ0);
-    sx.strokeStyle = css(C_LINE); sx.globalAlpha = 0.62; sx.lineWidth = 2;
-    for (let x = CX - 59; x <= CX + 55; x += 19) {
-      if (Math.abs(x - CX) < 10) continue;
-      sx.beginPath(); sx.moveTo(cvx(x), innerZ0 + 5); sx.lineTo(cvx(x), innerZ1 - 5); sx.stroke();
-    }
-    sx.globalAlpha = 1;
-    // South paddock/parking court behind the team garages. It is texture-baked
-    // rather than another coplanar slab, and therefore remains solid from the
-    // exact top-down view that exposed the previous ground fighting.
-    const parkX0 = cvx(CX - 118), parkX1 = cvx(CX + 118);
-    const parkZ0 = cvz(CZ - 188), parkZ1 = cvz(CZ - 132);
-    sx.fillStyle = css(C_APRON); sx.fillRect(parkX0, parkZ0, parkX1 - parkX0, parkZ1 - parkZ0);
-    sx.strokeStyle = css(C_LINE); sx.globalAlpha = 0.58; sx.lineWidth = 2;
-    for (let x = CX - 105; x <= CX + 105; x += 14) {
-      sx.beginPath(); sx.moveTo(cvx(x), parkZ0 + 5); sx.lineTo(cvx(x), parkZ1 - 5); sx.stroke();
-    }
-    sx.globalAlpha = 1;
+    sx.fillRect(cvx(ACCESS_X - 7), cvz(CZ - 204), cvx(ACCESS_X + 7) - cvx(ACCESS_X - 7),
+      cvz(CZ - 124) - cvz(CZ - 204));
+
     const surfaceTex = new THREE.CanvasTexture(surfaceCanvas);
     if (THREE.sRGBEncoding != null) surfaceTex.encoding = THREE.sRGBEncoding;
     surfaceTex.magFilter = THREE.LinearFilter;
@@ -234,306 +693,595 @@
     speedwaySurface.userData.nonRectSurface = true;
     speedwaySurface.name = "speedway-island-surface";
 
-    // ---- 2. lane lines + start/finish + pit road -------------------------
-    // dashed white lane line down the racing groove (instanced dashes)
-    {
-      const N = 120;
-      const dash = new THREE.BoxGeometry(0.35, 0.02, 2.2);
-      const im = new THREE.InstancedMesh(dash, mat(C_LINE), N);
-      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
-      let k = 0;
-      for (let i = 0; i < N; i++) {
-        const f = ovalFrame(i / N);
-        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.heading);
-        M.compose(new THREE.Vector3(f.x, 0.07, f.z), q, s);
-        im.setMatrixAt(k++, M);
+    // ====================================================================
+    //  2. THE RACING SURFACE — a swept, banked, crowned asphalt ribbon.
+    //  Cross-section, inside → outside: infield grade, apron blend, flat
+    //  apron, RACING SURFACE (banked + crowned), outside shoulder, SAFER
+    //  wall, graded embankment down to grade.
+    // ====================================================================
+    // --- asphalt texture: rubbered-in groove, marbles off-line, paving
+    //     seams, painted track limits and a few braking skids. U runs across
+    //     the track (0 = inside white line), V repeats every ~26 m.
+    const asphalt = (function () {
+      const N = 512, cv = document.createElement("canvas");
+      cv.width = cv.height = N;
+      const g = cv.getContext("2d");
+      g.fillStyle = "#2b2d31"; g.fillRect(0, 0, N, N);
+      // aggregate speckle (deterministic arithmetic sequence — never random)
+      for (let i = 0; i < 26000; i++) {
+        const x = (i * 53) % N, y = (i * 97) % N;
+        const v = 38 + ((i * 31) % 26);
+        g.fillStyle = "rgba(" + v + "," + (v + 1) + "," + (v + 5) + ",0.55)";
+        g.fillRect(x, y, 1, 1);
       }
-      im.count = k; im.instanceMatrix.needsUpdate = true;
-      root.add(im);
-    }
-    // start/finish: a bold red stripe across the front straight
-    {
-      const f = ovalFrame(SF_T);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(TRACK_W, 0.03, 1.6), mat(C_RED, { emissive: 0xc23a36, ei: 0.25 }));
-      stripe.position.set(f.x, 0.08, f.z);
-      stripe.rotation.y = f.heading;
-      root.add(stripe);
-      // checker accent bars flanking it
-      for (const off of [-1.4, 1.4]) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(TRACK_W, 0.03, 0.5), mat(C_LINE));
-        b.position.set(f.x + f.tx * off, 0.085, f.z + f.tz * off);
-        b.rotation.y = f.heading; root.add(b);
+      // rubbered-in racing groove: the line the field actually uses, dark and
+      // polished, feathered at both edges
+      const groove = g.createLinearGradient(0, 0, N, 0);
+      groove.addColorStop(0.00, "rgba(0,0,0,0)");
+      groove.addColorStop(0.19, "rgba(0,0,0,0)");
+      groove.addColorStop(0.30, "rgba(10,10,12,0.55)");
+      groove.addColorStop(0.42, "rgba(10,10,12,0.55)");
+      groove.addColorStop(0.55, "rgba(0,0,0,0)");
+      groove.addColorStop(1.00, "rgba(0,0,0,0)");
+      g.fillStyle = groove; g.fillRect(0, 0, N, N);
+      // marbles: shed rubber and dust piled off the racing line, up by the wall
+      const marb = g.createLinearGradient(0, 0, N, 0);
+      marb.addColorStop(0.00, "rgba(0,0,0,0)");
+      marb.addColorStop(0.62, "rgba(0,0,0,0)");
+      marb.addColorStop(0.78, "rgba(120,108,92,0.20)");
+      marb.addColorStop(0.97, "rgba(132,118,98,0.30)");
+      marb.addColorStop(1.00, "rgba(0,0,0,0)");
+      g.fillStyle = marb; g.fillRect(0, 0, N, N);
+      for (let i = 0; i < 5200; i++) {
+        const x = 0.62 * N + ((i * 71) % Math.round(0.35 * N));
+        const y = (i * 149) % N;
+        const v = 120 + ((i * 23) % 40);
+        g.fillStyle = "rgba(" + v + "," + (v - 12) + "," + (v - 30) + ",0.35)";
+        g.fillRect(x, y, 2, 1);
       }
-      city._sfLine = f;
+      // paving seams every quarter tile (~6.5 m of real track)
+      g.strokeStyle = "rgba(18,19,22,0.55)"; g.lineWidth = 2;
+      for (let y = 0; y < N; y += N / 4) { g.beginPath(); g.moveTo(0, y); g.lineTo(N, y); g.stroke(); }
+      // braking / traction skids in the groove
+      g.strokeStyle = "rgba(12,12,14,0.5)"; g.lineWidth = 5;
+      for (let i = 0; i < 9; i++) {
+        const x = 0.22 * N + ((i * 37) % Math.round(0.34 * N));
+        const y = (i * 113) % N;
+        g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 9, y + 34, x + 3, y + 74); g.stroke();
+      }
+      // painted track limits
+      g.fillStyle = "#e9eef4";
+      g.fillRect(0, 0, 11, N); g.fillRect(N - 11, 0, 11, N);
+      const t = new THREE.CanvasTexture(cv);
+      if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
+      t.wrapS = THREE.ClampToEdgeWrapping; t.wrapT = THREE.RepeatWrapping;
+      t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+      return t;
+    })();
 
-      // PAINTED STARTING GRID — the staggered slots the field lines up in behind
-      // the line (two columns, offset down-track like a real rolling-start grid).
-      // One shared white box geo + one shared material → these all merge into the
-      // C_LINE bucket; cheap painted markings, no per-slot draw cost.
-      {
-        const slotGeo = new THREE.BoxGeometry(0.18, 0.02, 2.0);   // a slot outline tick
-        const slotMat = mat(C_LINE);
-        const ROWS = 4, COLW = 2.6, ROWGAP = 6.0;
-        for (let row = 0; row < ROWS; row++) {
-          for (const lane of [-1, 1]) {
-            // each successive grid box steps back down-track (behind the line) and
-            // the right column is staggered half a row forward (the GP stagger).
-            const back = -(row * ROWGAP + (lane > 0 ? 0 : ROWGAP * 0.5) + 3.0);
-            const sx = f.x + f.tx * back + f.nx * (lane * COLW);
-            const sz = f.z + f.tz * back + f.nz * (lane * COLW);
-            // two side ticks bracket the painted box the car sits in (left + right
-            // of the slot centre, along the across-track normal).
-            for (const e of [-1.4, 1.4]) {
-              const tk = new THREE.Mesh(slotGeo, slotMat);
-              tk.position.set(sx + f.nx * e, 0.072, sz + f.nz * e);
-              tk.rotation.y = f.heading;
-              root.add(tk);
+    // --- the ribbon itself (9 rows across so the crown and bank read) ---
+    {
+      const prof = [];
+      const NU = 9;
+      for (let j = 0; j < NU; j++) {
+        const u = -HALFW + TRACK_W * j / (NU - 1);
+        prof.push({ u: u, dy: 0, uv: (u + HALFW) / TRACK_W });
+      }
+      strip(prof, {
+        closed: true, step: 2.2, vLen: 26, name: "speedway-racing-surface",
+        mat: new THREE.MeshLambertMaterial({ color: 0xffffff, map: asphalt }),
+      });
+    }
+    // --- apron (flat, at the foot of the banking) ---
+    strip([
+      { u: APRON_EDGE, dy: 0, uv: 0 },
+      { u: APRON_EDGE + APRON_W * 0.5, dy: 0, uv: 0.5 },
+      { u: -HALFW, dy: 0, uv: 1 },
+    ], { closed: true, step: 3.0, vLen: 20, name: "speedway-apron", mat: mat(C.APRON) });
+    // --- apron → infield grade, and the outside embankment ---
+    strip([
+      { u: APRON_EDGE - APRON_BLEND, dy: 0 }, { u: APRON_EDGE, dy: 0 },
+    ], { closed: true, step: 4.0, name: "speedway-infield-verge", mat: mat(0x62804d) });
+    strip([
+      { u: HALFW, dy: 0, uv: 0 }, { u: WALL_U, dy: 0, uv: 1 },
+    ], { closed: true, step: 2.6, name: "speedway-shoulder", mat: mat(0x9aa1a8) });
+    strip([
+      { u: WALL_U, dy: 0 },
+      { u: WALL_U + SKIRT_W * 0.4, dy: 0 },
+      { u: WALL_U + SKIRT_W * 0.75, dy: 0 },
+      { u: SKIRT_END, dy: 0 },
+    ], { closed: true, step: 4.0, name: "speedway-embankment", mat: mat(0x5f7349) });
+
+    // --- KERBS: real red/white rumble blocks at the inside edge, through the
+    //     turns only (where cars actually use them), fading out on the
+    //     straights exactly like a real circuit. Two instanced draws. ---
+    {
+      const step = 2.1, n = Math.round(L / step);
+      const kg = new THREE.BoxGeometry(1, 1, 1); kg._shared = true;
+      const red = new THREE.InstancedMesh(kg, mat(C.RED), n);
+      const wht = new THREE.InstancedMesh(kg, mat(0xe9eef4), n);
+      red.count = 0; wht.count = 0;
+      red.castShadow = wht.castShadow = false;
+      red.receiveShadow = wht.receiveShadow = true;
+      const M = new THREE.Matrix4();
+      for (let i = 0; i < n; i++) {
+        const t = i / n;
+        const kr = trackFrame(t).curv / T.kMax;
+        if (kr < 0.55) continue;
+        // taper the kerb height in and out so it never appears as a step
+        const hgt = 0.16 * Math.min(1, (kr - 0.55) / 0.25);
+        surfMatrix(t, -HALFW - 0.52, hgt / 2 - 0.02, 0.95, hgt, step * 0.92, M);
+        const im = (i & 1) ? red : wht;
+        if (im.count < n) im.setMatrixAt(im.count++, M);
+      }
+      for (const im of [red, wht]) {
+        if (!im.count) continue;
+        im.instanceMatrix.needsUpdate = true;
+        im.userData.speedway = true;
+        root.add(im);
+      }
+    }
+
+    // ====================================================================
+    //  3. PAINT — start/finish, the starting grid, pit blend lines.
+    //  Every marking is swept or basis-oriented onto the BANKED surface,
+    //  so nothing floats over the camber.
+    // ====================================================================
+    const sf = trackFrame(SF_T);
+    city._sfLine = sf;
+    {
+      // start/finish stripe (swept, so it follows the crown across 22 m)
+      const w = 1.7 / L;
+      strip([{ u: -HALFW, dy: 0.02, uv: 0 }, { u: HALFW, dy: 0.02, uv: 1 }], {
+        t0: SF_T - w, t1: SF_T + w, closed: false, seg: 3, name: "speedway-sf-line",
+        mat: mat(C.LINE),
+      });
+      // the checkered timing-beam bars either side of it
+      for (const off of [-2.6, 2.6]) {
+        const t = SF_T + off / L, w2 = 0.5 / L;
+        strip([{ u: -HALFW, dy: 0.02 }, { u: HALFW, dy: 0.02 }], {
+          t0: t - w2, t1: t + w2, closed: false, seg: 2, name: "speedway-sf-bar",
+          mat: mat(0x14181d),
+        });
+      }
+      // PAINTED STARTING GRID — the staggered slots the field lines up in.
+      // gridSlot() below returns the SAME geometry, so a car on the grid sits
+      // exactly inside its painted box.
+      const slotGeo = new THREE.BoxGeometry(1, 1, 1); slotGeo._shared = true;
+      const slotIM = new THREE.InstancedMesh(slotGeo, mat(C.LINE), 64);
+      slotIM.count = 0; slotIM.castShadow = false;
+      const M = new THREE.Matrix4();
+      const ROWS = 5, COLW = 2.6, ROWGAP = 6.0;
+      for (let row = 0; row < ROWS; row++) {
+        for (const lane of [-1, 1]) {
+          const back = -(row * ROWGAP + (lane > 0 ? 0 : ROWGAP * 0.5) + 3.0);
+          const t = SF_T + back / L;
+          const u0 = lane * COLW;
+          for (const e of [-1.4, 1.4]) {          // the two side ticks
+            surfMatrix(t, u0 + e, 0.025, 0.18, 0.03, 2.0, M);
+            if (slotIM.count < 64) slotIM.setMatrixAt(slotIM.count++, M);
+          }
+          surfMatrix(t - 1.05 / L, u0, 0.025, 2.9, 0.03, 0.18, M);   // the front line
+          if (slotIM.count < 64) slotIM.setMatrixAt(slotIM.count++, M);
+        }
+      }
+      slotIM.instanceMatrix.needsUpdate = true;
+      slotIM.userData.speedway = true;
+      root.add(slotIM);
+    }
+    // pit-in / pit-out blend lines: solid paint tapering off the racing surface
+    // down to the pit wall, exactly the way a real pit entry is marked.
+    {
+      const blend = 46 / L;
+      function lerpU(a, b) { return function (w) { return a + (b - a) * w; }; }
+      // pit ENTRY (approaching the line, on the lap before): track → pit lane
+      strip([
+        { u: lerpU(-HALFW, PIT_LANE_OUT - 1.0), dy: 0.02 },
+        { u: lerpU(-HALFW + 0.35, PIT_LANE_OUT - 0.65), dy: 0.02 },
+      ], { t0: -PIT_T - blend, t1: -PIT_T, closed: false, step: 3.0, mat: mat(0xf0c419), name: "pit-in-blend" });
+      // pit EXIT: pit lane → track
+      strip([
+        { u: lerpU(PIT_LANE_OUT - 1.0, -HALFW), dy: 0.02 },
+        { u: lerpU(PIT_LANE_OUT - 0.65, -HALFW + 0.35), dy: 0.02 },
+      ], { t0: PIT_T, t1: PIT_T + blend, closed: false, step: 3.0, mat: mat(0xf0c419), name: "pit-out-blend" });
+      // the apron aprons themselves (paved run-off between apron and pit lane)
+      strip([
+        { u: PIT_LANE_OUT, dy: 0.09, abs: true }, { u: APRON_EDGE - APRON_BLEND, dy: 0.02, abs: true },
+      ], { t0: -PIT_T - blend, t1: PIT_T + blend, closed: false, step: 4.0, mat: mat(0x54585e), name: "pit-verge" });
+    }
+
+    // ====================================================================
+    //  4. BARRIERS — SAFER wall + catch fencing outside, retaining walls
+    //  through the turns inside, and the pit wall along the front stretch.
+    //
+    //  ACCESS: the wall is a CONTINUOUS collider (the old one wasn't — its
+    //  80 colliders were 1.2 m boxes 11.8 m apart, so cars drove straight
+    //  through a wall that looked solid). A closed ring would make the
+    //  circuit unreachable and the race unjoinable, so it has exactly two
+    //  real openings, in the two places a real venue puts them:
+    //    • the PADDOCK CROSSOVER just past the main grandstand, where the
+    //      bank is shallowest and the embankment is a driveable ramp —
+    //      the concourse plaza leads straight to it and it lands you on
+    //      the apron by the pit exit;
+    //    • the MARSHAL / RECOVERY GATE at the centre of the back straight.
+    // ====================================================================
+    const sponsorTex = SU && SU.tex ? SU.tex.sponsorBand(0, 96) : null;
+    const GATES = [
+      { t: 0.112, half: 7.5 / L },     // paddock crossover (front stretch, 5.4° bank)
+      { t: GATE_T, half: GATE_HALF },  // marshal gate (back straight, 3.5° bank)
+    ];
+    // the wall arcs BETWEEN the gates — everything outboard sweeps these
+    const ARCS = [];
+    for (let i = 0; i < GATES.length; i++) {
+      const a = GATES[i], b = GATES[(i + 1) % GATES.length];
+      let t0 = a.t + a.half, t1 = b.t - b.half;
+      while (t1 <= t0) t1 += 1;
+      ARCS.push([t0, t1]);
+    }
+    function inGate(t) {
+      for (const gt of GATES) {
+        const d = Math.abs(((t - gt.t) % 1 + 1.5) % 1 - 0.5);
+        if (d < gt.half) return true;
+      }
+      return false;
+    }
+    {
+      // Outer SAFER barrier: a swept box section (track face → top cap → back
+      // face) carrying a sponsor band, in ONE draw call, plus a stepped chain
+      // of AABB colliders (an AABB cannot be banked, so the wall is
+      // approximated by short boxes rising from grade to the wall top).
+      const wallProf = [
+        { u: WALL_U - 0.45, dy: 0, uv: 0 },
+        { u: WALL_U - 0.45, dy: WALL_H, uv: 1 },
+        { u: WALL_U + 0.45, dy: WALL_H, uv: 1 },
+        { u: WALL_U + 0.45, dy: 0, uv: 0 },
+      ];
+      const wallMat = sponsorTex
+        ? new THREE.MeshLambertMaterial({ color: 0xffffff, map: sponsorTex })
+        : mat(C.SAFER);
+      // one swept run per arc, so each gate is a REAL hole in the wall
+      for (const arc of ARCS) {
+        strip(wallProf, { t0: arc[0], t1: arc[1], closed: false, step: 2.4, vLen: 12, swapUV: true, mat: wallMat, name: "speedway-safer-wall" });
+        solidChain(arc[0], arc[1], WALL_U, 1.1, 0, null, 3.0);
+      }
+      // hinged gate leaves parked open against the posts, both sides of each gap
+      for (const gt of GATES) {
+        for (const s of [-1, 1]) {
+          const t = gt.t + s * gt.half;
+          const f = trackFrame(t);
+          const px = f.x + f.nx * WALL_U, pz = f.z + f.nz * WALL_U;
+          const py = heightAtTU(t, WALL_U);
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.6, 0.8), mat(0xf0c419));
+          post.position.set(px, py + 1.3, pz); post.rotation.y = f.heading;
+          post.userData.speedway = true;
+          root.add(post);
+          const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.5, 4.2), mat(0xd8dde3));
+          leaf.position.set(px + f.nx * 2.2 - f.tx * s * 1.8, py + 0.9, pz + f.nz * 2.2 - f.tz * s * 1.8);
+          leaf.rotation.y = f.heading + Math.PI / 2.6;
+          leaf.userData.speedway = true;
+          root.add(leaf);
+          solidAt(px, pz, 1.1, 1.1, py + 2.6);
+        }
+      }
+
+      // CATCH FENCING — posts, three cable runs and debris mesh above the
+      // wall. Alpha-tested (not blended), so there is no sorting cost.
+      if (CBZ.CONFIG.SPEEDWAY_CATCH_FENCE !== false) {
+        const chain = SU && SU.tex ? SU.tex.chainLink() : null;
+        if (chain) {
+          const m = new THREE.MeshLambertMaterial({
+            color: 0xb6bec6, map: chain, transparent: false, alphaTest: 0.42,
+            side: THREE.DoubleSide,
+          });
+          for (const arc of ARCS) {
+            const fence = strip([
+              { u: WALL_U, dy: WALL_H - 0.1, uv: 0 },
+              { u: WALL_U - 0.55, dy: WALL_H + FENCE_H, uv: 1 },
+            ], {
+              t0: arc[0], t1: arc[1], closed: false,
+              step: 2.4, mat: m, name: "speedway-catch-fence", receive: false,
+            });
+            // tile the mesh: ~2.4 m per cell up the fence, ~2.6 m along it
+            const uv = fence.geometry.attributes.uv;
+            const tiles = Math.max(1, Math.round((arc[1] - arc[0]) * L / 2.6));
+            for (let i = 0; i < uv.count; i++) {
+              uv.setXY(i, uv.getX(i) * (FENCE_H / 2.4), uv.getY(i) * tiles);
             }
+            uv.needsUpdate = true;
           }
         }
-      }
-      // FLAGMAN STAND — a small post + a checkered-flag plate at the line, the
-      // figure who waves the green/checker. Pure flavor anchoring WHY a START line.
-      {
-        const fx = f.x + f.nx * (TRACK_W / 2 + 2.2), fz = f.z + f.nz * (TRACK_W / 2 + 2.2);
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.0, 0.18), mat(C_STEEL));
-        post.position.set(fx, 1.5, fz); root.add(post);
-        const flag = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.04), mat(C_LINE, { emissive: 0x202020, ei: 0.2 }));
-        flag.position.set(fx, 2.7, fz + 0.5); flag.rotation.y = f.heading; root.add(flag);
-        const knob = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), mat(C_RED, { emissive: 0xc23a36, ei: 0.3 }));
-        knob.position.set(fx, 3.05, fz); root.add(knob);
-      }
-    }
-
-    // ---- 5. pit road along the front straight with numbered stalls -------
-    {
-      const f0 = ovalFrame(0.04), f1 = ovalFrame(-0.04 + 1); // ends of front straight-ish band
-      // a simple straight pit lane just inside the front straight
-      const fc = ovalFrame(SF_T);
-      const pitLen = 70, pitW = 8;
-      const pitHeading = Math.atan2(-fc.tz, fc.tx); // Box long axis (local X) follows tangent
-      const pit = new THREE.Mesh(new THREE.BoxGeometry(pitLen, 0.04, pitW), mat(C_PIT));
-      // place inboard of the front straight
-      const px = fc.x - fc.nx * (TRACK_W / 2 + pitW / 2 + 1);
-      const pz = fc.z - fc.nz * (TRACK_W / 2 + pitW / 2 + 1);
-      pit.position.set(px, 0.06, pz);
-      pit.rotation.y = pitHeading;
-      root.add(pit);
-      // numbered pit stalls (label sprites) + a low pit wall
-      const stalls = 8;
-      for (let i = 0; i < stalls; i++) {
-        const t = (i - (stalls - 1) / 2) * (pitLen / stalls);
-        const sx = px + fc.tx * t, sz = pz + fc.tz * t;
-        // stall divider line
-        const ln = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, pitW), mat(C_LINE));
-        ln.position.set(sx, 0.075, sz); ln.rotation.y = pitHeading; root.add(ln);
-        if (CBZ.makeLabelSprite) {
-          const lab = CBZ.makeLabelSprite(String(i + 1), { color: "#ffd451" });
-          lab.scale.set(2, 0.5, 1);
-          lab.position.set(sx, 1.3, sz);
-          root.add(lab);
+        // posts + cable runs (one instanced draw each)
+        const nP = Math.round(L / 5.0);
+        const pg = new THREE.BoxGeometry(1, 1, 1); pg._shared = true;
+        const postIM = new THREE.InstancedMesh(pg, mat(0x767d85), nP + 4);
+        postIM.count = 0; postIM.receiveShadow = false;
+        const M = new THREE.Matrix4();
+        for (let i = 0; i < nP; i++) {
+          const t = i / nP;
+          if (inGate(t)) continue;
+          surfMatrix(t, WALL_U - 0.28, WALL_H + FENCE_H / 2, 0.22, FENCE_H, 0.22, M);
+          if (postIM.count < nP + 4) postIM.setMatrixAt(postIM.count++, M);
+        }
+        if (postIM.count) { postIM.instanceMatrix.needsUpdate = true; postIM.userData.speedway = true; root.add(postIM); }
+        for (const arc of ARCS) {
+          for (const h of [1.9, 3.6, 5.4]) {
+            strip([
+              { u: WALL_U - 0.16 - h * 0.09, dy: WALL_H + h - 0.05 },
+              { u: WALL_U - 0.16 - h * 0.09, dy: WALL_H + h + 0.05 },
+            ], {
+              t0: arc[0], t1: arc[1], closed: false,
+              step: 3.2, mat: mat(0x9aa2aa), name: "speedway-fence-cable", receive: false,
+            });
+          }
+          // the top rail the mesh hangs from, canted back over the track
+          strip([
+            { u: WALL_U - 0.72, dy: WALL_H + FENCE_H - 0.06 },
+            { u: WALL_U - 0.38, dy: WALL_H + FENCE_H + 0.16 },
+          ], {
+            t0: arc[0], t1: arc[1], closed: false,
+            step: 3.2, mat: mat(0x767d85), name: "speedway-fence-rail", receive: false,
+          });
         }
       }
-      // pit wall (concrete) between pit lane and track
-      const wallX = fc.x - fc.nx * (TRACK_W / 2 + 1), wallZ = fc.z - fc.nz * (TRACK_W / 2 + 1);
-      const pw = new THREE.Mesh(new THREE.BoxGeometry(pitLen, 0.9, 0.4), mat(C_CONCRETE));
-      pw.position.set(wallX, 0.45, wallZ); pw.rotation.y = pitHeading; root.add(pw);
+
+      // INNER retaining walls — turns only. The straights stay open to the
+      // apron (that is how an oval works, and it is how you get to the infield).
+      const innerProf = [
+        { u: APRON_EDGE + 0.35, dy: 0, uv: 0 },
+        { u: APRON_EDGE + 0.35, dy: 0.95, uv: 1 },
+        { u: APRON_EDGE - 0.35, dy: 0.95, uv: 1 },
+        { u: APRON_EDGE - 0.35, dy: 0, uv: 0 },
+      ];
+      const innerMat = SU && SU.tex
+        ? new THREE.MeshLambertMaterial({ color: 0xffffff, map: SU.tex.sponsorBand(6, 96) })
+        : mat(C.CONCRETE);
+      for (const seg of [TURN1, TURN2]) {
+        strip(innerProf, { t0: seg[0], t1: seg[1], closed: false, step: 2.6, vLen: 12, swapUV: true, mat: innerMat, name: "speedway-inner-wall" });
+        solidChain(seg[0], seg[1], APRON_EDGE, 0.9, 0, function (t) { return heightAtTU(t, APRON_EDGE) + 0.95; }, 3.0);
+      }
     }
 
-    // ---- 6. SAFER barrier (outer wall) — colliders keep cars on track ----
-    {
-      const N = 80;
-      const seg = new THREE.BoxGeometry(1.0, 1.0, (Math.PI * 2 * OVAL_RX) / N + 2.4);
-      const im = new THREE.InstancedMesh(seg, mat(C_SAFER), N);
-      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
-      for (let i = 0; i < N; i++) {
-        const f = ovalFrame(i / N);
-        const wx = f.x + f.nx * (TRACK_W / 2 + 1.2);
-        const wz = f.z + f.nz * (TRACK_W / 2 + 1.2);
-        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.heading);
-        M.compose(new THREE.Vector3(wx, 0.5, wz), q, s);
-        im.setMatrixAt(i, M);
-        // collider per segment so vehicles bounce off the wall
-        const hw = 0.6;
-        CBZ.colliders.push({ minX: wx - hw, maxX: wx + hw, minZ: wz - hw, maxZ: wz + hw, y0: 0, y1: 1.0 });
+    // ====================================================================
+    //  5. THE START/FINISH GANTRY — the single most iconic thing a circuit
+    //  has, and the one this venue never had. A real trussed bridge over
+    //  the racing surface with a five-column light rig (driven live by the
+    //  race countdown, see the updater at the bottom of this file), a
+    //  timing beam, and signage on both faces.
+    // ====================================================================
+    if (SU) {
+      const U = SU.util;
+      const grp = new THREE.Group(); grp.name = "speedway-sf-gantry"; root.add(grp);
+      const steel = mat(0x39424c), acc = mat(0xc23a36);
+      const uIn = APRON_EDGE - 4.5, uOut = WALL_U + 9.0;
+      const fG = trackFrame(SF_T);
+      function pt(u, y) {
+        return [fG.x + fG.nx * u, y, fG.z + fG.nz * u];
       }
-      im.instanceMatrix.needsUpdate = true;
-      root.add(im);
-      // inner retaining wall (lower) so the infield edge reads
-      const im2 = new THREE.InstancedMesh(new THREE.BoxGeometry(0.4, 0.5, (Math.PI * 2 * OVAL_RX) / N + 1.6), mat(C_CONCRETE), N);
-      for (let i = 0; i < N; i++) {
-        const f = ovalFrame(i / N);
-        const wx = f.x - f.nx * (TRACK_W / 2 + 0.6);
-        const wz = f.z - f.nz * (TRACK_W / 2 + 0.6);
-        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.heading);
-        M.compose(new THREE.Vector3(wx, 0.25, wz), q, s);
-        im2.setMatrixAt(i, M);
-        const hw = 0.3;
-        CBZ.colliders.push({ minX: wx - hw, maxX: wx + hw, minZ: wz - hw, maxZ: wz + hw, y0: 0, y1: 0.5 });
+      const yIn = heightAtTU(SF_T, uIn), yOut = heightAtTU(SF_T, uOut);
+      const BEAM = Math.max(yIn, yOut) + 10.5;
+      const towerIM = U.makeIM(steel, 120);
+      // two lattice towers
+      for (const spec of [{ u: uIn, y: yIn }, { u: uOut, y: yOut }]) {
+        const legs = [[-1.5, -1.5], [1.5, -1.5], [1.5, 1.5], [-1.5, 1.5]];
+        for (let i = 0; i < 4; i++) {
+          const ax = fG.x + fG.nx * (spec.u + legs[i][0]) + fG.tx * legs[i][1];
+          const az = fG.z + fG.nz * (spec.u + legs[i][0]) + fG.tz * legs[i][1];
+          U.pushStrut(towerIM, ax, spec.y, az, ax, BEAM + 1.4, az, 0.34);
+          const j = (i + 1) % 4;
+          const bx = fG.x + fG.nx * (spec.u + legs[j][0]) + fG.tx * legs[j][1];
+          const bz = fG.z + fG.nz * (spec.u + legs[j][0]) + fG.tz * legs[j][1];
+          for (let r = 0; r < 6; r++) {
+            const h0 = spec.y + (BEAM + 1.4 - spec.y) * r / 6;
+            const h1 = spec.y + (BEAM + 1.4 - spec.y) * (r + 1) / 6;
+            U.pushStrut(towerIM, ax, h0, az, bx, h1, bz, 0.15);
+            U.pushStrut(towerIM, ax, h1, az, bx, h1, bz, 0.15);
+          }
+        }
+        solidAt(fG.x + fG.nx * spec.u, fG.z + fG.nz * spec.u, 4.4, 4.4, BEAM);
       }
-      im2.instanceMatrix.needsUpdate = true;
-      root.add(im2);
+      // the beam: top + bottom chords each side, plus a Warren web
+      const a0 = pt(uIn, BEAM), b0 = pt(uOut, BEAM);
+      for (const dz of [-1.5, 1.5]) {
+        const ax = a0[0] + fG.tx * dz, az = a0[2] + fG.tz * dz;
+        const bx = b0[0] + fG.tx * dz, bz = b0[2] + fG.tz * dz;
+        U.pushStrut(towerIM, ax, BEAM, az, bx, BEAM, bz, 0.3);
+        U.pushStrut(towerIM, ax, BEAM + 2.1, az, bx, BEAM + 2.1, bz, 0.3);
+        const NW = 10;
+        for (let w = 0; w < NW; w++) {
+          const f0 = w / NW, f1 = (w + 1) / NW;
+          U.pushStrut(towerIM,
+            ax + (bx - ax) * f0, BEAM + (w % 2 ? 2.1 : 0), az + (bz - az) * f0,
+            ax + (bx - ax) * f1, BEAM + (w % 2 ? 0 : 2.1), az + (bz - az) * f1, 0.14);
+        }
+      }
+      U.finishIM(grp, towerIM);
+      // signage panels on both faces of the beam
+      const signTex = SU.tex.screen([
+        { text: "DIAMOND SPEEDWAY", color: "#ffd451" },
+      ], 1024, 128);
+      const signMat = new THREE.MeshLambertMaterial({ map: signTex, emissive: 0xffffff, emissiveIntensity: 0.28, emissiveMap: signTex, side: THREE.DoubleSide });
+      const span = Math.abs(uOut - uIn);
+      const midU = (uIn + uOut) / 2;
+      U.box(grp, signMat, fG.x + fG.nx * midU, BEAM + 3.4, fG.z + fG.nz * midU,
+        span * 0.86, 2.4, 0.2, fG.heading + Math.PI / 2);
+      U.box(grp, mat(0x22282f), fG.x + fG.nx * midU, BEAM + 3.4, fG.z + fG.nz * midU,
+        span * 0.9, 2.9, 0.34, fG.heading + Math.PI / 2);
+      // THE LIGHT RIG: five columns, two lamps each, hung under the beam over
+      // the racing surface. Kept addressable so the countdown can drive them.
+      GANTRY.lamps.length = 0;
+      const housing = mat(0x14181d);
+      for (let c = 0; c < 5; c++) {
+        const u = (c - 2) * 4.2;
+        U.box(grp, housing, fG.x + fG.nx * u, BEAM - 1.0, fG.z + fG.nz * u, 2.0, 2.2, 0.7, fG.heading);
+        const col = [];
+        for (let r = 0; r < 2; r++) {
+          const lm = (CBZ.mat || mat)(0x2a1214, { emissive: 0x2a1214, ei: 0.15 });
+          const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 8), lm);
+          lamp.position.set(fG.x + fG.nx * u + fG.tx * 0.4, BEAM - 0.5 - r * 0.85,
+            fG.z + fG.nz * u + fG.tz * 0.4);
+          lamp.userData.speedway = true;
+          grp.add(lamp);
+          col.push(lm);
+        }
+        GANTRY.lamps.push(col);
+      }
+      setGantryLights(-1);
+      // FLAG STAND on the pit wall at the line — the starter's platform
+      {
+        const fu = PIT_WALL_U + 1.3;
+        const fx = fG.x + fG.nx * fu, fz = fG.z + fG.nz * fu;
+        U.box(grp, mat(0x6f757d), fx, 1.1, fz, 3.4, 2.2, 2.6, fG.heading);
+        U.box(grp, mat(0xc8ced5), fx, 2.3, fz, 3.6, 0.16, 2.8, fG.heading);
+        for (const s of [-1, 1]) {
+          U.box(grp, steel, fx + fG.tx * s * 1.5, 2.9, fz + fG.tz * s * 1.5, 0.12, 1.2, 0.12, fG.heading);
+        }
+        U.box(grp, acc, fx, 3.6, fz, 3.8, 0.16, 3.0, fG.heading);
+        // the flags themselves on a rack
+        const fl = [0x101317, 0xf0c419, 0x2ba24a, 0xc23a36];
+        for (let i = 0; i < fl.length; i++) {
+          U.box(grp, mat(fl[i]), fx + fG.tx * (i - 1.5) * 0.6, 2.95, fz + fG.tz * (i - 1.5) * 0.6,
+            0.5, 0.4, 0.05, fG.heading);
+        }
+        solidAt(fx, fz, 3.8, 3.2, 2.4);
+      }
     }
 
-    // ---- 7. GRANDSTANDS + live crowd along the front straight ------------
-    const grandstandAudience = buildGrandstand(root, mat, ovalFrame, {
-      CX, CZ, TRACK_W, C_STAND, C_SEAT, C_STEEL, t: 0, rows: 18, seats: 140, audienceCap: 48,
-    });
-    // A lower backstretch stand closes the stadium bowl without cloning four
-    // giant corner buildings.  It remains a single instanced seat draw.
-    buildGrandstand(root, mat, ovalFrame, {
-      CX, CZ, TRACK_W, C_STAND, C_SEAT, C_STEEL, t: 0.5, rows: 10, seats: 104, audienceCap: 0,
-    });
+    // ====================================================================
+    //  6. ARCHITECTURE — grandstands, the pit complex, the scoring pylon,
+    //  the jumbotron, floodlight masts, hoardings, marshal posts, tyre
+    //  walls, gravel run-off and the paddock (speedway_structures.js).
+    // ====================================================================
+    let grandstandAudience = [];
+    if (SU) {
+      const S = {
+        root: root, frame: trackFrame, heightAt: heightAtTU, bankAt: bankAtT,
+        strip: strip, solid: solidAt, solidBox: solidBox, solidChain: solidChain,
+        L: L, CX: CX, CZ: CZ, HALFW: HALFW, APRON_W: APRON_W, TRACK_W: TRACK_W,
+        SHOULDER_W: SHOULDER_W, SKIRT_W: SKIRT_W, WALL_H: WALL_H, C: C,
+        rng: rng, label: CBZ.makeLabelSprite ? function (s, o) { return CBZ.makeLabelSprite(s, o); } : null,
+      };
 
-    // ---- 8. scoring pylon + floodlight masts -----------------------------
-    buildPylonAndLights(root, mat, ovalFrame, rng);
+      // --- MAIN GRANDSTAND: curved, raked, roofed, facing the pits ---
+      grandstandAudience = SU.grandstand(S, {
+        t0: -0.085, t1: 0.085, rows: 22, uBase: 30, plinth: 1.7,
+        name: "speedway-main-grandstand", word: "DIAMOND", audienceCap: 44,
+        seatA: 0x2f4b70, seatB: 0x3d6491, wordColor: 0xe4e9ef,
+        fasciaSalt: 1, sign: "DIAMOND SPEEDWAY",
+      });
+      // --- BACKSTRETCH STAND (past the service gate) ---
+      SU.grandstand(S, {
+        t0: 0.545, t1: 0.655, rows: 13, uBase: 30, plinth: 1.4,
+        name: "speedway-backstretch-stand", word: "SPEEDWAY", audienceCap: 0,
+        seatA: 0x3a5c40, seatB: 0x47704d, wordColor: 0xe4e9ef, fasciaSalt: 3, voms: false,
+      });
+      // --- TURN 1 STAND ---
+      SU.grandstand(S, {
+        t0: 0.185, t1: 0.275, rows: 11, uBase: 29, plinth: 1.2,
+        name: "speedway-turn1-stand", audienceCap: 0,
+        seatA: 0x6b4a2c, seatB: 0x7d5934, fasciaSalt: 5, voms: false,
+      });
 
-    // ---- 9. CAUSEWAY bridge to the commerce annex ------------------------
+      // --- PIT LANE + GARAGES on the inside of the front stretch ---
+      SU.pitComplex(S, {
+        t0: -PIT_T, t1: PIT_T, wallU: PIT_WALL_U,
+        laneIn: PIT_LANE_IN, laneOut: PIT_LANE_OUT,
+        garageFront: GARAGE_FRONT, garageDepth: GARAGE_DEPTH, boxes: 12,
+      });
+
+      // --- SCORING PYLON + JUMBOTRON in the infield, facing the main stand ---
+      {
+        const fp = trackFrame(0.055);
+        PYLON = SU.pylon(S, fp.x + fp.nx * -62, fp.z + fp.nz * -62, fp.heading);
+        const fj = trackFrame(-0.05);
+        JUMBO = SU.jumbotron(S, fj.x + fj.nx * -60, fj.z + fj.nz * -60,
+          Math.atan2(fj.nx, fj.nz), 22, 12);
+      }
+
+      // --- FLOODLIGHT MASTS (clear of the stands) ---
+      {
+        const spots = [];
+        for (const t of [0.135, 0.235, 0.32, 0.40, 0.46, 0.68, 0.79, 0.89]) {
+          const f = trackFrame(t);
+          spots.push({
+            x: f.x + f.nx * (SKIRT_END + 7), z: f.z + f.nz * (SKIRT_END + 7),
+            ax: T.xc, az: T.zc,
+          });
+        }
+        SU.floodlights(S, spots);
+      }
+
+      // --- TRACKSIDE HOARDINGS ---
+      SU.hoardings(S, [
+        { t0: TURN1[0], t1: TURN1[1], u: APRON_EDGE - 2.6, h: 1.2, salt: 2 },
+        { t0: TURN2[0], t1: TURN2[1], u: APRON_EDGE - 2.6, h: 1.2, salt: 7 },
+        { t0: -0.10, t1: 0.10, u: GARAGE_FRONT - GARAGE_DEPTH - 6, h: 2.4, salt: 9, y0: 0.05 },
+        { t0: 0.42, t1: 0.58, u: APRON_EDGE - 3.0, h: 1.3, salt: 11 },
+      ]);
+
+      // --- MARSHAL POSTS around the outside ---
+      {
+        const posts = [];
+        for (const t of [0.115, 0.16, 0.31, 0.38, 0.46, 0.5, 0.68, 0.76, 0.84, 0.90]) {
+          const u = (t === 0.5) ? SKIRT_END + 9 : SKIRT_END + 3.2;
+          const f = trackFrame(t);
+          posts.push({ x: f.x + f.nx * u, z: f.z + f.nz * u, heading: f.heading });
+        }
+        SU.marshalPosts(S, posts);
+      }
+
+      // --- GRAVEL RUN-OFF at both turn exits, backed by a tyre wall ---
+      SU.gravelTraps(S, [
+        { t0: 0.20, t1: 0.32, u0: -33, u1: -22.5 },
+        { t0: 0.70, t1: 0.82, u0: -33, u1: -22.5 },
+      ]);
+      {
+        const stacks = [];
+        function tyreRun(t0, t1, u, n) {
+          const fa = trackFrame(t0), fb = trackFrame(t1);
+          const ax = fa.x + fa.nx * u, az = fa.z + fa.nz * u;
+          const bx = fb.x + fb.nx * u, bz = fb.z + fb.nz * u;
+          stacks.push({ x: (ax + bx) / 2, z: (az + bz) / 2, dx: (bx - ax) / n, dz: (bz - az) / n, n: n, h: 3 });
+        }
+        tyreRun(0.20, 0.32, -34.0, 22);
+        tyreRun(0.70, 0.82, -34.0, 22);
+        tyreRun(-PIT_T - 0.012, -PIT_T + 0.004, PIT_LANE_OUT + 0.9, 6);   // pit entry
+        tyreRun(PIT_T - 0.004, PIT_T + 0.012, PIT_LANE_OUT + 0.9, 6);     // pit exit
+        SU.tyreStacks(S, stacks);
+      }
+
+      // --- THE PADDOCK, behind the main grandstand ---
+      SU.paddock(S, {
+        x0: CX - 120, x1: CX + 120, z0: CZ - 156, z1: CZ - 127,
+        trucks: 11, units: 5,
+      });
+    }
+
+    // ====================================================================
+    //  7. CAUSEWAY, MOTORSPORTS COMPLEX, POPULATION
+    // ====================================================================
     buildCauseway(root, mat, { C_DECK, C_CURB, C_STEEL }, rng);
-
-    // ---- 10. motorsports complex buildings -------------------------------
     buildComplex(root, rng);
-
-    // ---- 11. populate: spectators, pit crew, parked cars -----------------
     populate(root, rng, city, grandstandAudience);
 
+    // ---- the banked surface becomes real walkable ground -----------------
+    if (CBZ.CONFIG.SPEEDWAY_BANK_WALKABLE !== false && CBZ.registerCityGroundHeight) {
+      CBZ.registerCityGroundHeight(speedwaySurfaceY, {
+        owner: "speedway", kind: "circle", cx: T.xc, cz: T.zc, r: SURF_R2,
+        note: "banked racing surface + apron + embankment",
+      });
+    }
+
     // ---- regions: register the island + causeway -------------------------
-    // This is a grounded campus over the shared continent, not an isolated
-    // island slab. Keeping the country underlay beneath its non-rectangular
-    // perimeter prevents clear-colour AABB holes around the rounded footprint.
     CBZ.registerCityRegion(city, { name: "Diamond Speedway", subtitle: "Motorsports Park", biome: "speedway", kind: "circle", cx: CX, cz: CZ, r: R, pad: 6, underlay: true, terrainGrade: true });
-    // L-shaped causeway widened to the 24m highway deck: vertical leg up from
-    // the annex, horizontal leg over to the island.
     const causewayZ = ACCESS_Z;
     CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: 360, minZ: -585, maxZ: causewayZ + 12, pad: 1 });
     CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: ACCESS_X + 12, minZ: causewayZ - 12, maxZ: causewayZ + 12, pad: 1 });
-    // give traffic a road down each leg so cars actually drive the causeway
     if (city.roads) {
       city.roads.push({ x: 348, z: (-585 + causewayZ) / 2, vertical: true, len: causewayZ - (-585), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
       city.roads.push({ x: (348 + ACCESS_X) / 2, z: causewayZ, vertical: false, len: ACCESS_X - 348, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
   }, 20);
-
-  // ====================================================================== //
-  //  GRANDSTANDS                                                            //
-  // ====================================================================== //
-  function buildGrandstand(root, mat, frame, P) {
-    // Tiered stand running along the front straight, set back behind the wall.
-    const fc = frame(P.t == null ? 0 : P.t);
-    // A 57m stand beside a 300m oval looked like a temporary bleacher.  This
-    // 133m / 18-row front-straight grandstand gives the circuit a believable
-    // stadium scale while remaining one instanced seat draw and 48 live fans.
-    const ROWS = P.rows || 18, SEATS = P.seats || 140;
-    const AUDIENCE_CAP = P.audienceCap == null ? 48 : P.audienceCap;
-    const TIER_RISE = 0.55, TIER_DEPTH = 0.95, SEAT_W = 0.95;
-    const standLen = SEATS * SEAT_W;
-    // anchor: outboard of the front straight, centred on S/F
-    const baseX = fc.x + fc.nx * (P.TRACK_W / 2 + 7);
-    const baseZ = fc.z + fc.nz * (P.TRACK_W / 2 + 7);
-    const tx = fc.tx, tz = fc.tz;          // along the stand
-    const nx = fc.nx, nz = fc.nz;          // back/up direction
-
-    // tier decks (one box per row, merged-ish via shared geom) + seat instances
-    const deckGeo = new THREE.BoxGeometry(standLen + 2, 0.25, TIER_DEPTH);
-    const deckMat = mat(P.C_STAND);
-    const seatGeo = new THREE.BoxGeometry(SEAT_W * 0.8, 0.4, 0.5);
-    const seatMat = mat(P.C_SEAT);
-    const totalSeats = ROWS * SEATS;
-    const seatIM = new THREE.InstancedMesh(seatGeo, seatMat, totalSeats);
-    // A venue may have hundreds of seats without inventing hundreds of fake
-    // cylinder-people. Keep most seats visibly empty and publish a bounded,
-    // well-distributed set of anchors for ordinary live actors below.
-    const audience = [];
-
-    const M = new THREE.Matrix4(), q = new THREE.Quaternion(),
-      one = new THREE.Vector3(1, 1, 1);
-    // Deck/canopy geometry is long on local X (unlike cars, whose forward is
-    // local Z).  Align that X axis to the oval tangent; the old vehicle-yaw
-    // formula laid each 135m roof straight across the racing surface.
-    const standHeading = Math.atan2(-tz, tx);
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), standHeading);
-
-    let si = 0;
-    for (let r = 0; r < ROWS; r++) {
-      const up = 1.2 + r * TIER_RISE;
-      const back = 2 + r * TIER_DEPTH;
-      const dx = baseX + nx * back, dz = baseZ + nz * back;
-      // deck
-      const deck = new THREE.Mesh(deckGeo, deckMat);
-      deck.position.set(dx, up, dz);
-      deck.rotation.y = standHeading;
-      deck.receiveShadow = true;
-      root.add(deck);
-      for (let c = 0; c < SEATS; c++) {
-        const t = (c - (SEATS - 1) / 2) * SEAT_W;
-        const sx = dx + tx * t, sz = dz + tz * t;
-        // seat
-        M.compose(new THREE.Vector3(sx, up + 0.32, sz), q, one);
-        seatIM.setMatrixAt(si, M);
-        // Roughly three live people per row, staggered across the stand. They
-        // use standard character rigs and remain hittable/lootable; every
-        // other physical seat is honestly empty.
-        if (((c + r * 7) % 19) === 2 && audience.length < AUDIENCE_CAP) {
-          audience.push({
-            x: sx, y: up + 0.52, z: sz,
-            yaw: Math.atan2(-nx, -nz), pose: "sit", state: "sit",
-          });
-        }
-        si++;
-      }
-    }
-    seatIM.instanceMatrix.needsUpdate = true;
-    root.add(seatIM);
-
-    // back wall / grandstand structure with support columns + a roof canopy
-    const topUp = 1.2 + ROWS * TIER_RISE;
-    const topBack = 2 + ROWS * TIER_DEPTH;
-    const bwx = baseX + nx * (topBack + 0.5), bwz = baseZ + nz * (topBack + 0.5);
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(standLen + 4, topUp + 1, 0.6), mat(P.C_STEEL));
-    backWall.position.set(bwx, (topUp + 1) / 2, bwz); backWall.rotation.y = standHeading;
-    root.add(backWall);
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(standLen + 4, 0.3, topBack + 3), mat(0x3c4047));
-    canopy.position.set((baseX + bwx) / 2, topUp + 2.5, (baseZ + bwz) / 2);
-    canopy.rotation.y = standHeading;
-    root.add(canopy);
-    return audience;
-  }
-
-  // ====================================================================== //
-  //  PYLON + FLOODLIGHTS                                                    //
-  // ====================================================================== //
-  function buildPylonAndLights(root, mat, frame, rng) {
-    // scoring pylon in the infield near the front straight
-    const fc = frame(0);
-    const px = fc.x - fc.nx * 40, pz = fc.z - fc.nz * 40;
-    const tower = new THREE.Mesh(new THREE.BoxGeometry(3, 26, 3), mat(0x23262b));
-    tower.position.set(px, 13, pz); root.add(tower);
-    // leaderboard faces (emissive panels) up the pylon
-    for (let i = 0; i < 6; i++) {
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2.4, 0.2), mat(0x101418, { emissive: 0x2e5a8a, ei: 0.6 }));
-      panel.position.set(px, 4 + i * 3.4, pz + 1.6); root.add(panel);
-    }
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(4.5, 2, 4.5), mat(0xc23a36, { emissive: 0xc23a36, ei: 0.4 }));
-    cap.position.set(px, 27, pz); root.add(cap);
-    if (CBZ.makeLabelSprite) {
-      const lab = CBZ.makeLabelSprite("SPEEDWAY", { color: "#ffd451" });
-      lab.scale.set(8, 2, 1); lab.position.set(px, 30, pz); root.add(lab);
-    }
-
-    // floodlight masts ringing the oval
-    const mastGeo = new THREE.CylinderGeometry(0.5, 0.7, 30, 6);
-    const headGeo = new THREE.BoxGeometry(6, 2, 1.2);
-    const mastMat = mat(0x6a6d72), lampMat = mat(0xeef2f6, { emissive: 0xfff4d0, ei: 0.7 });
-    for (let i = 0; i < 8; i++) {
-      const f = frame(i / 8);
-      const mx = f.x + f.nx * 26, mz = f.z + f.nz * 26;
-      const mast = new THREE.Mesh(mastGeo, mastMat); mast.position.set(mx, 15, mz); root.add(mast);
-      const head = new THREE.Mesh(headGeo, lampMat);
-      head.position.set(mx, 30, mz);
-      head.lookAt(f.x, 30, f.z);
-      root.add(head);
-    }
-  }
 
   // ====================================================================== //
   //  CAUSEWAY                                                               //
@@ -781,31 +1529,44 @@
     for (let i = 0; audience && i < audience.length; i++) {
       liveActor("venueSpectator", 0, 0, { job: "race fan" }, audience[i], "speedway-spectator");
     }
-    // a handful of LIVE interactive peds on the concourse (perf: keep it small)
     if (makePed) {
-      // concourse fans on the OUTER ring only (radius 165..192) — clear of the
-      // oval racing surface (which spans ~150m in X from centre).
-      for (let i = 0; i < 14; i++) {
-        const a = rng() * Math.PI * 2, rr = 165 + rng() * 27;
-        const px = CX + Math.cos(a) * rr, pz = CZ + Math.sin(a) * rr;
+      // CONCOURSE: the plaza behind the main grandstand and the paddock apron.
+      // Deliberately clear of the racing surface and the embankment — the old
+      // ring at radius 165..192 now lands ON the widened circuit.
+      for (let i = 0; i < 16; i++) {
+        const px = CX - 108 + (rng() * 216);
+        const pz = CZ - 152 + rng() * 52;
         try { liveActor("venueSpectator", px, pz, { kind: "civilian", job: "race fan" }, null, "speedway-concourse"); } catch (e) { /* headless */ }
       }
-      // pit crew near pit road
-      const fc = ovalFrame(0);
-      const px = fc.x - fc.nx * (TRACK_W / 2 + 5), pz = fc.z - fc.nz * (TRACK_W / 2 + 5);
-      for (let i = 0; i < 5; i++) {
-        try { liveActor("venueWorker", px + (i - 2) * 6 * fc.tx, pz + (i - 2) * 6 * fc.tz, { kind: "worker", job: "pit crew" }, null, "speedway-worker"); } catch (e) { /* */ }
+      // PIT CREW along the working lane, in front of their garage bays.
+      for (let i = 0; i < 8; i++) {
+        const t = (-0.09 + i * 0.026);
+        const f = trackFrame(t);
+        const u = -31.5 - (i % 2) * 2.2;
+        try {
+          liveActor("venueWorker", f.x + f.nx * u, f.z + f.nz * u,
+            { kind: "worker", job: "pit crew" }, null, "speedway-worker");
+        } catch (e) { /* */ }
+      }
+      // MARSHALS at the two turn-exit posts.
+      for (const t of [0.25, 0.75]) {
+        const f = trackFrame(t);
+        const u = HALFW + SHOULDER_W + SKIRT_W + 3.2;
+        try {
+          liveActor("venueWorker", f.x + f.nx * u + 2, f.z + f.nz * u + 2,
+            { kind: "worker", job: "track marshal" }, null, "speedway-worker");
+        } catch (e) { /* */ }
       }
     }
     if (modular) CBZ.npcLife.definePopulation("speedway-authored", { root: root, entries: populationEntries });
-    // a few parked cars in a lot near the showroom (south-ish exterior)
+    // The public car park south of the campus actually holds cars.
     if (CBZ.cityMakeCar && CBZ.cityEcon && CBZ.cityEcon.CARS) {
       const CARS = CBZ.cityEcon.CARS;
-      for (let i = 0; i < 6; i++) {
-        const a = (-90 + (i - 2.5) * 7) * Math.PI / 180;
-        const x = CX + Math.cos(a) * 160, z = CZ + Math.sin(a) * 160;
+      for (let i = 0; i < 10; i++) {
+        const x = CX - 100 + (i % 5) * 44 + (rng() - 0.5) * 4;
+        const z = CZ - 199 + Math.floor(i / 5) * 13;
         const model = CARS[(rng() * CARS.length) | 0];
-        try { CBZ.cityMakeCar(x, z, a + Math.PI, false, model, 0.1); } catch (e) { /* */ }
+        try { CBZ.cityMakeCar(x, z, Math.PI / 2, false, model, 0.1); } catch (e) { /* */ }
       }
     }
   }
@@ -836,38 +1597,20 @@
   const LAP_PURSE = 7500;       // per finishing-position-scaled payout base
   const FIELD_N = 5;            // legacy AI opponents on the grid
   const FIELD_RD = 6;           // real driving opponents on the grid
-  let LINE_LEN = 0;             // oval centreline length (m), computed lazily
-  function lineLen() {
-    if (LINE_LEN) return LINE_LEN;
-    let L = 0, p = CBZ_FRAME(0);
-    for (let i = 1; i <= 96; i++) {
-      const f = CBZ_FRAME(i / 96);
-      L += Math.hypot(f.x - p.x, f.z - p.z); p = f;
-    }
-    return (LINE_LEN = L);
-  }
+  // Centreline length. NOT re-derived by chord sampling any more (that
+  // under-measured a curved line by ~0.4%): the frame table is built by
+  // arc-length integration, so T.L IS the exact lap distance and the race
+  // kit's gap/lap-time maths gets the same number the geometry used.
+  function lineLen() { return ensureTable().L; }
   function useRD() {
     if (RACE._rdBroken) return false;   // spawn failed once (headless rig) → legacy for good
     return !!(CBZ.raceDrivers && CBZ.raceDrivers.enabled() && CBZ.raceKit && CBZ.cityMakeCar);
   }
 
-  function ovalFrame(t) { // local alias usable by zone/tick (defined again for closure scope)
-    return CBZ_FRAME(t);
-  }
-  // bind the same parametric frame used by the builder (kept identical)
-  function CBZ_FRAME(t) {
-    const a = t * Math.PI * 2;
-    let x = CX + Math.cos(a) * OVAL_RX;
-    let z = CZ + Math.sin(a) * OVAL_RZ;
-    const front = Math.max(0, Math.sin(a));
-    z += front * front * TRIBULGE;
-    const a2 = (t + 0.0015) * Math.PI * 2;
-    let x2 = CX + Math.cos(a2) * OVAL_RX, z2 = CZ + Math.sin(a2) * OVAL_RZ;
-    z2 += Math.max(0, Math.sin(a2)) * Math.max(0, Math.sin(a2)) * TRIBULGE;
-    const dx = x2 - x, dz = z2 - z, len = Math.hypot(dx, dz) || 1;
-    const tx = dx / len, tz = dz / len;
-    return { x, z, tx, tz, nx: -tz, nz: tx, heading: Math.atan2(tx, tz) };
-  }
+  // (The two duplicated frame functions that used to live here — ovalFrame
+  //  and CBZ_FRAME, "kept identical" by comment only — are gone. There is
+  //  exactly one: trackFrame, at the top of this file. See the long note
+  //  there for what they had drifted into.)
 
   function note(m, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, s || 2.2); }
 
@@ -923,10 +1666,11 @@
       if (!vis) { vis = new THREE.Group(); }
       // stagger the grid behind the S/F line
       const startT = (1 - (i + 1) * 0.012 + 1) % 1;
-      const f = CBZ_FRAME(startT);
+      const f = trackFrame(startT);
       const lane = (i % 2 === 0 ? 1 : -1) * 2.2;
-      vis.position.set(f.x + f.nx * lane, 0.0, f.z + f.nz * lane);
+      vis.position.set(f.x + f.nx * lane, heightAtTU(startT, lane), f.z + f.nz * lane);
       vis.rotation.y = f.heading;
+      vis.rotation.z = -trackFrame(startT).bank;
       if (root) root.add(vis); else if (CBZ.city && CBZ.city.root) CBZ.city.root.add(vis);
       RACE.racers.push({
         group: vis, t: startT, lane,
@@ -948,15 +1692,13 @@
   // export the join flow so racing.js's "challenge to a race" can drop the flag.
   CBZ.cityStartSpeedwayRace = startRace;
 
-  // approximate centreline parameter nearest to a world point (coarse search)
+  // Nearest centreline parameter to a world point. O(1): a polar-angle
+  // index into the precomputed table (legal because the curve is convex)
+  // plus four Newton projections along the tangent. The old 64-sample
+  // linear scan is gone — this is both faster and metre-accurate, which
+  // matters because the lap counter watches t wrap through the S/F line.
   function paramAt(x, z) {
-    let best = 0, bd = 1e9;
-    for (let i = 0; i < 64; i++) {
-      const t = i / 64, f = CBZ_FRAME(t);
-      const d = (x - f.x) * (x - f.x) + (z - f.z) * (z - f.z);
-      if (d < bd) { bd = d; best = t; }
-    }
-    return best;
+    return paramAtFast(x, z);
   }
 
   // ====================================================================== //
@@ -965,7 +1707,7 @@
   // the painted grid slot i (0 = pole): two staggered columns behind the S/F
   // line — the SAME geometry the painted grid boxes use (builder step 4).
   function gridSlot(i) {
-    const f = CBZ_FRAME(SF_T);
+    const f = trackFrame(SF_T);
     const row = i >> 1, lane = (i % 2 === 0) ? 1 : -1;
     const COLW = 2.6, ROWGAP = 6.0;
     const back = -(row * ROWGAP + (lane > 0 ? 0 : ROWGAP * 0.5) + 3.0);
@@ -973,7 +1715,7 @@
     const z = f.z + f.tz * back + f.nz * (lane * COLW);
     // heading follows the track tangent at the slot's own param
     const t = ((back / lineLen()) % 1 + 1) % 1;
-    return { x, z, heading: CBZ_FRAME(t).heading };
+    return { x, z, heading: trackFrame(t).heading };
   }
 
   function startRaceRD() {
@@ -1004,7 +1746,7 @@
         consistency: 0.55 + (racer.skill || 0.8) * 0.4,
         lane0: (i % 2 === 0 ? 1 : -1) * 2.6,     // hold your grid column off the launch
         tag: "speedway", mode: "line",
-        line: CBZ_FRAME, lineLen: lineLen(), trackHalf: TRACK_W / 2,
+        line: trackFrame, lineLen: lineLen(), trackHalf: TRACK_W / 2,
         playerProgress: function () { return RACE.playerTotal; },
       });
       if (!m) continue;
@@ -1274,7 +2016,7 @@
     if (!P || !P.driving) { endRace(6); return; }   // bailed out of the car
 
     const total = RACE.laps;
-    const circ = Math.PI * (OVAL_RX + OVAL_RZ); // ~perimeter estimate
+    const circ = lineLen();                     // exact lap distance (m)
 
     // player progress FIRST (one paramAt/frame) — lap counting at the S/F crossing
     // AND the rubber-band reference for the AI field below.
@@ -1302,10 +2044,11 @@
       const prevT = r.t;
       r.t = (r.t + dtp) % 1;
       if (prevT > 0.85 && r.t < 0.15) r.laps++;     // crossed S/F
-      const f = CBZ_FRAME(r.t);
+      const f = trackFrame(r.t);
       if (r.group) {
-        r.group.position.set(f.x + f.nx * r.lane, 0.0, f.z + f.nz * r.lane);
+        r.group.position.set(f.x + f.nx * r.lane, heightAtTU(r.t, r.lane), f.z + f.nz * r.lane);
         r.group.rotation.y = f.heading;
+        r.group.rotation.z = -f.bank;    // sit ON the banking (outside wheel up)
       }
     }
 
@@ -1499,7 +2242,7 @@
     I.registerZone({
       id: "zone-speedway-race", kind: "speedway", prio: 9, driving: true,
       find: function (px, pz) {
-        const f = CBZ_FRAME(0);
+        const f = trackFrame(0);
         if (Math.hypot(px - f.x, pz - f.z) > ZREACH) return null;
         if (!RACE._zt) RACE._zt = { x: f.x, z: f.z };
         return RACE._zt;
@@ -1519,7 +2262,7 @@
     I.registerZone({
       id: "zone-speedway-board", kind: "speedway-board", prio: 6,
       find: function (px, pz) {
-        const f = CBZ_FRAME(0);
+        const f = trackFrame(0);
         if (Math.hypot(px - f.x, pz - f.z) > ZREACH + 4) return null;
         if (!RACE._zb) RACE._zb = { x: f.x, z: f.z };
         return RACE._zb;
@@ -1569,4 +2312,140 @@
       });
     }
   }
+
+  // ====================================================================== //
+  //  LIVE TRACK SURFACE + THE LIGHT GANTRY                                  //
+  //                                                                          //
+  //  Cars in this engine are two-dimensional: vehicles.js integrates x/z     //
+  //  and pins every hull to y=0 (racedrivers.js does the same for the AI     //
+  //  field). A banked circuit therefore needs a PRESENTATIONAL conformer —   //
+  //  a pass that runs after every vehicle updater and lifts / rolls /        //
+  //  pitches any car standing on the speedway onto the banked surface. It    //
+  //  reads the SAME heightAtTU() the mesh was built from, so a car is never  //
+  //  a millimetre off its own asphalt. Physics is untouched (collision is    //
+  //  XZ-only and the walls are full-height AABBs from grade up).             //
+  // ====================================================================== //
+  const GANTRY = { lamps: [], stage: -2 };
+  let PYLON = null, JUMBO = null;
+
+  function setGantryLights(stage) {
+    GANTRY.stage = stage;
+    for (let c = 0; c < GANTRY.lamps.length; c++) {
+      const col = GANTRY.lamps[c];
+      const green = stage === 0;
+      const lit = stage > 0 && c < stage;
+      for (let i = 0; i < col.length; i++) {
+        const m = col[i];
+        if (!m || !m.emissive) continue;
+        if (green) { m.color.setHex(0x3af06a); m.emissive.setHex(0x2ef05a); m.emissiveIntensity = 1.0; }
+        else if (lit) { m.color.setHex(0xff3a30); m.emissive.setHex(0xff2b24); m.emissiveIntensity = 1.0; }
+        else { m.color.setHex(0x2a1214); m.emissive.setHex(0x2a1214); m.emissiveIntensity = 0.12; }
+      }
+    }
+  }
+
+  function clearConform(c) {
+    if (c._swRoll) { c.group.rotation.z -= c._swRoll; c._swRoll = 0; }
+    if (c._swPitch) { c.group.rotation.x -= c._swPitch; c._swPitch = 0; }
+  }
+
+  // Order: just after the VEHICLES band. Every car mover (player 11, traffic
+  // 37, race drivers 37.3, the car-car crash pass 37.6, misc 38) has already
+  // written this frame's transform; the camera/presentation band has not read
+  // it yet. See core/prio.js.
+  CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.after(CBZ.PRIO.VEHICLES, 5) : 42.05, function () {
+    if (g.mode !== "city") return;
+    if (CBZ.CONFIG.SPEEDWAY_CAR_CONFORM === false || CBZ.CONFIG.SPEEDWAY_BANK === false) return;
+    if (!TBL) return;
+    const cars = CBZ.cityCars;
+    if (!cars || !cars.length) return;
+    const T = TBL, lim = SURF_R2;
+    const IN_EDGE = -(HALFW + APRON_W) - 1.5, OUT_EDGE = HALFW + SHOULDER_W + 0.4;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !c.group || !c.pos) continue;
+      const dx = c.pos.x - T.xc, dz = c.pos.z - T.zc;
+      if (dx * dx + dz * dz > lim * lim) { if (c._swRoll || c._swPitch) clearConform(c); continue; }
+      const t = paramAtFast(c.pos.x, c.pos.z);
+      const f = trackFrame(t);
+      const u = (c.pos.x - f.x) * f.nx + (c.pos.z - f.z) * f.nz;
+      if (u < IN_EDGE || u > OUT_EDGE) { if (c._swRoll || c._swPitch) clearConform(c); continue; }
+      const y = heightAtTU(t, u);
+      const tb = Math.tan(f.bank);
+      const h = c.heading || 0;
+      // car local +X is its LEFT flank; +Z is forward (vehicles.js convention)
+      const lx = Math.cos(h), lz = -Math.sin(h);
+      const fwx = Math.sin(h), fwz = Math.cos(h);
+      const roll = Math.atan(tb * (f.nx * lx + f.nz * lz));
+      const pitch = -Math.atan(tb * (f.nx * fwx + f.nz * fwz));
+      c.group.position.y = y + (c._airY || 0);
+      if (CBZ.player && CBZ.player._vehicle === c) {
+        // the player's hull re-sets its full rotation every frame (order 11)
+        c.group.rotation.z = (c._roll || 0) + (c._airRoll || 0) + roll;
+        c.group.rotation.x = (c._pitch || 0) + (c._airPitch || 0) + pitch;
+      } else {
+        c.group.rotation.z += roll - (c._swRoll || 0);
+        c.group.rotation.x += pitch - (c._swPitch || 0);
+      }
+      c._swRoll = roll; c._swPitch = pitch;
+    }
+  });
+
+  // ---- the gantry light rig follows the real countdown -------------------
+  CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.after(CBZ.PRIO.VEHICLES, 6) : 42.06, function () {
+    if (!GANTRY.lamps.length) return;
+    let stage = -1;
+    if (RACE.active && RACE.rd) {
+      if (RACE.phase === "grid") {
+        const c = RACE.countT;
+        stage = c > 3.1 ? 1 : c > 2.3 ? 2 : c > 1.5 ? 3 : c > 0.7 ? 4 : c > 0 ? 5 : 0;
+      } else if (RACE.lightsOffT > 0) stage = 0;
+    } else if (RACE.active) stage = 0;
+    if (stage !== GANTRY.stage) setGantryLights(stage);
+  });
+
+  // ---- the jumbotron + scoring pylon actually show the race --------------
+  // Low-rate (1.5 s) and keyed, so the canvas is only re-uploaded when the
+  // content genuinely changed — never once per frame.
+  let _boardT = 0, _boardKey = "";
+  CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.after(CBZ.PRIO.PRESENTATION, 2) : 60.02, function (dt) {
+    if (g.mode !== "city") return;
+    if (!JUMBO && !PYLON) return;
+    _boardT -= dt || 0;
+    if (_boardT > 0) return;
+    _boardT = 1.5;
+    let key, big, small;
+    const rows = [];
+    if (RACE.active && RACE.kit && RACE.kit.order) {
+      const ord = RACE.kit.order;
+      key = "R" + RACE.playerLaps + "|" + ord.map(function (e) { return e.number == null ? "Y" : e.number; }).join(",");
+      big = "LAP " + Math.max(1, Math.min(RACE.laps, RACE.playerLaps + 1)) + " / " + RACE.laps;
+      small = ord.length ? ("P1  " + ord[0].name) : "GREEN FLAG";
+      for (let i = 0; i < Math.min(6, ord.length); i++) {
+        rows.push({ text: String(i + 1), right: ord[i].number == null ? "YOU" : ("#" + ord[i].number) });
+      }
+    } else if (RACE.active) {
+      key = "L" + RACE.playerLaps;
+      big = "LAP " + Math.max(1, RACE.playerLaps + 1) + " / " + RACE.laps;
+      small = "DIAMOND SPEEDWAY";
+    } else {
+      const RC = CBZ.cityRacing;
+      key = RC ? ("S" + RC.season + "R" + RC.round) : "idle";
+      big = "DIAMOND SPEEDWAY";
+      small = RC ? ("SEASON " + RC.season + " · ROUND " + (RC.round + 1) + "/" + RC.ROUNDS) : "GRAND CIRCUIT";
+      const st = RC && RC.standings ? RC.standings() : [];
+      for (let i = 0; i < Math.min(6, st.length); i++) {
+        rows.push({ text: String(i + 1), right: "#" + st[i].number });
+      }
+    }
+    if (key === _boardKey) return;
+    _boardKey = key;
+    if (JUMBO && JUMBO.tex && JUMBO.tex.redraw) {
+      JUMBO.tex.redraw([
+        { text: big, color: "#ffd451" },
+        { text: small, color: "#9fe6c8", right: RACE.active ? "LIVE" : "", rightColor: "#ff5a5a" },
+      ]);
+    }
+    if (PYLON && PYLON.tex && PYLON.tex.redraw && rows.length) PYLON.tex.redraw(rows);
+  });
 })();

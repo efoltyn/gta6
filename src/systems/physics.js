@@ -148,6 +148,11 @@
         }
       }
     }
+    // MOVING WALLS (systems/platforms_moving.js): same shortest-exit resolver,
+    // run in a moving parent's LOCAL frame (a boat's gunwales, a gangway's
+    // handrails). Feature-detected + flagged; the signature and the math above
+    // are untouched, exactly as this function's contract requires.
+    if (CBZ.mpCollide) CBZ.mpCollide(pos, radius, feetY, headY);
   }
   CBZ.collide = collide;
 
@@ -261,6 +266,12 @@
         if (top <= reach && top > best) best = top;
       }
     }
+    // MOVING DECKS (systems/platforms_moving.js): a walk surface on a parent
+    // that moves cannot live in the world-space CBZ.platforms array — its AABB
+    // would be stale the moment the parent turns. The rig keeps its decks in the
+    // parent's LOCAL frame and transforms the query point in. Feature-detected +
+    // flagged: absent or off, this is byte-identical to before.
+    if (CBZ.mpGroundAt) { const t = CBZ.mpGroundAt(x, z, fromY, best); if (t > best) best = t; }
     return best;
   }
   CBZ.groundAt = groundAt;

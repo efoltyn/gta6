@@ -8,13 +8,18 @@
         LAUNDER dirty street cash clean (GTA nightclub / arcade / car-wash
         money-front model). Each has tiers/upgrades so income SCALES, and a
         "supply" pool that fills passively and you periodically COLLECT.
-     2) LUXURY / STATUS — mansions, yachts, supercars, jewellery, bottle
-        service: elastic money-sinks that buy RESPECT, NOTORIETY and a flashy
-        lifestyle. The richer you are, the more they cost (so a whale keeps
-        bleeding) and the more flex they grant.
+     2) BOTTLE SERVICE — the one vanity sink left here: an elastic cash drain
+        (economy.js SINKS.bottleService) that buys RESPECT + notoriety.
+        NO-FICTION NOTE: a catalog of buyable "luxury assets" (watch / chain /
+        supercar / VIP card / mansion / yacht / jet) used to live here. Every
+        one was a boolean with no hull — and four of them SHADOWED systems that
+        really exist and really render: jewellery (city/jewelry.js + bling.js),
+        owned cars (shops.js buyCar → citySpawnOwnedCar), property (zillow.js /
+        realestate.js) and owned aircraft/hangars (realestate.js + playerair.js).
+        Buy those THERE, where the object actually appears in the world.
      3) WEALTH TIERS & PERKS — your NET WORTH (computed in economy.js) places
-        you in a tier; each tier unlocks real perks: VIP venue access, fatter
-        passive multipliers, cheaper bribes/laundering, a discount on luxury.
+        you in a tier; each tier unlocks real perks: fatter passive multipliers,
+        a bigger turf cut, cheaper bribes, cheaper crew.
      4) HIGH-STAKES OPPORTUNITIES — heists / investments only the rich can
         front the capital for, with big risk and bigger reward.
 
@@ -68,13 +73,14 @@
   //  PERSISTENT STATE  (lazy-init on g.*, mirrored to cityWorld)
   // ============================================================
   // g.cityEmpireBiz : { [id]: { tier, supply, lastTick } }  owned businesses
-  // g.cityLuxury    : { [id]: count|true }                  owned luxury assets
   // g.cityWealthLog : { laundered, passiveEarned, flexSpent, opsDone }
   function state() {
     if (!g.cityEmpireBiz) g.cityEmpireBiz = {};
-    if (!g.cityLuxury) g.cityLuxury = {};
     if (!g.cityWealthLog) g.cityWealthLog = { laundered: 0, passiveEarned: 0, flexSpent: 0, opsDone: 0 };
-    if (g.cityFlexBonus == null) g.cityFlexBonus = 0;   // cached respect-flavour from owned luxury
+    // standing/"flex" points. We only DECLARE it here; the earners write it
+    // (millionaires.js's charity gala) and millionaires.js reads it back
+    // through CBZ.cityFlexLevel to drive real tycoon-NPC reactions.
+    if (g.cityFlexBonus == null) g.cityFlexBonus = 0;
     return g;
   }
   function persist() {
@@ -89,9 +95,12 @@
       out.push(o);
     }
     w.assets.businesses = out;
-    // luxury lives in our own ledger field so it survives runs too
-    w.luxury = JSON.parse(JSON.stringify(g.cityLuxury || {}));
     if (w.economy) w.economy.laundering = (g.cityWealthLog && g.cityWealthLog.laundered) || 0;
+    // FLEX: philanthropy flex (millionaires.js's charity gala, +2 a sponsorship)
+    // is now the only source, and CBZ.cityFlexLevel drives real tycoon-NPC
+    // reactions. The deleted luxury catalog used to rebuild this on hydrate, so
+    // persist it explicitly or a reload would silently wipe every gala earned.
+    w.assets.flex = g.cityFlexBonus | 0;
   }
   // restore from the durable ledger on first ensure of a run
   function hydrate() {
@@ -100,6 +109,9 @@
     g._wealthHydrated = true;
     if (!CBZ.cityWorldEnsure) return;
     const w = CBZ.cityWorldEnsure(); if (!w) return;
+    // restore philanthropy flex (see persist()); absent on pre-existing saves,
+    // in which case the `| 0` leaves it at the fresh-game 0.
+    if (w.assets && w.assets.flex != null) g.cityFlexBonus = w.assets.flex | 0;
     if (w.assets && w.assets.businesses) {
       for (const rec of w.assets.businesses) {
         // legacy alias: the old "taxi" front is now the "rideshare" gig company.
@@ -115,8 +127,6 @@
         }
       }
     }
-    if (w.luxury) { for (const k in w.luxury) g.cityLuxury[k] = w.luxury[k]; }
-    recomputeFlex();
   }
 
   // ============================================================
@@ -274,7 +284,7 @@
     sfx("coin");
     // spin up the fleet glue for a fresh gig company (no-op if absent).
     if (b.gig && CBZ.cityGigFleet && CBZ.cityGigFleet.sync) try { CBZ.cityGigFleet.sync(id); } catch (e) {}
-    persist(); recomputeFlex(); if (open_) render();
+    persist(); if (open_) render();
   }
   function upgradeBiz(id) {
     const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return;
@@ -333,55 +343,21 @@
   }
 
   // ============================================================
-  //  2) LUXURY / STATUS — elastic vanity sinks → respect + flex
+  //  2) BOTTLE SERVICE — the elastic vanity sink → respect + notoriety
   // ------------------------------------------------------------
-  //  Prices SCALE with your net worth (the elastic-sink trick: a whale pays
-  //  more to flex, so money never becomes worthless). Owning luxury raises a
-  //  cached "flex" level → bonus respect, notoriety, and a per-tier discount
-  //  on future luxury (status compounds). Some are one-of (mansion), some you
-  //  can stack (jewellery, supercars in the collection).
+  //  NO-FICTION NOTE (deleted 2026-07): a LUXURY[] catalog of 7 "assets"
+  //  (watch/chain/supercar/VIP card/mansion/yacht/jet) used to sit here.
+  //  Buying one wrote a boolean into g.cityLuxury and NOTHING ELSE — no mesh,
+  //  no spawn, no gate, no net-worth contribution (economy.js holdingsWorth()
+  //  never counted it). Four of the seven also shadowed systems that are REAL:
+  //    watch / chain  -> city/jewelry.js buys a real econ item that bling.js
+  //                      seats on the body and that counts toward club DRIP.
+  //    supercar       -> shops.js buyCar() -> citySpawnOwnedCar() (a vehicle).
+  //    mansion        -> city/zillow.js + city/realestate.js (a real deed/home).
+  //    jet            -> city/realestate.js buyHangar() + city/playerair.js.
+  //  Only the *spend* below survives, because it is a pure cash->respect sink
+  //  and never claimed an object existed.
   // ============================================================
-  const LUXURY = [
-    { id: "watch",   name: "Diamond-Iced Watch",  emoji: "", base: 35000,   flex: 6,   stack: true,  blurb: "Iced out. People notice." },
-    { id: "chain",   name: "Solid-Gold Chains",   emoji: "", base: 60000,   flex: 9,   stack: true,  blurb: "Drip that screams new money." },
-    { id: "super",   name: "Supercar (collection)",emoji: "", base: 180000, flex: 14,  stack: true,  blurb: "Add a hypercar to the collection. Pure status." },
-    { id: "vip",     name: "Lifetime VIP Membership",emoji: "", base: 250000,flex: 18,  stack: false, blurb: "Velvet rope opens everywhere. The city knows your name." },
-    { id: "mansion", name: "Vinewood Hills Mansion",emoji: "", base: 1500000,flex: 40,  stack: false, minTier: 4, blurb: "20-car garage, infinity pool, helipad. The ultimate flex address." },
-    { id: "yacht",   name: "Superyacht 'Leviathan'",emoji: "", base: 4000000,flex: 70,  stack: false, minTier: 5, blurb: "Floating palace. Throw the party the whole city talks about." },
-    { id: "jet",     name: "Private Jet",          emoji: "", base: 7500000, flex: 110, stack: false, minTier: 5, blurb: "Skip the traffic, skip the cops, skip the line. Kingpin air travel." },
-  ];
-  const LUX_BY_ID = {}; for (const l of LUXURY) LUX_BY_ID[l.id] = l;
-
-  function luxCount(id) { const v = state().cityLuxury[id]; return v === true ? 1 : (v | 0); }
-  function ownsLux(id) { return luxCount(id) > 0; }
-  // elastic price: base × (1 + netWorth pressure) × stack escalation, minus
-  // your status discount. Flexing gets pricier as you stack & as you get rich.
-  function luxPrice(id) {
-    const l = LUX_BY_ID[id]; if (!l) return 0;
-    const nw = netWorth();
-    const pressure = 1 + clamp(nw / 6000000, 0, 2.2);          // up to ~3.2× for a mega-whale
-    const stackMul = l.stack ? Math.pow(1.6, luxCount(id)) : 1; // each extra costs more
-    const disc = 1 - tierPerk("luxDiscount");                  // tier perk shaves a bit
-    return Math.max(1000, Math.round(l.base * pressure * stackMul * disc));
-  }
-  function buyLux(id) {
-    const l = LUX_BY_ID[id]; if (!l) return;
-    if (!l.stack && ownsLux(id)) { note("You already own the " + l.name + ".", 1.6); return; }
-    if (l.minTier != null && tierIndex() < l.minTier) { note("" + l.name + " is " + tierName(l.minTier) + "-only.", 2.4); sfx("hit"); return; }
-    const price = luxPrice(id);
-    if (!canAfford(price)) { note("Need " + money(price) + " to buy " + l.name + ".", 2.4); sfx("hit"); return; }
-    charge(price);
-    state().cityLuxury[id] = l.stack ? luxCount(id) + 1 : true;
-    state().cityWealthLog.flexSpent += price;
-    // flexing buys real status: respect + a notoriety bump (the city talks)
-    const rep = Math.round(l.flex * (1 + 0.5 * (l.stack ? luxCount(id) : 1)));
-    if (CBZ.city) CBZ.city.addRespect(rep);
-    bumpNotoriety(Math.round(l.flex * 0.4));
-    big(l.emoji + " " + (l.stack ? "Added to your collection: " : "Bought ") + l.name + "  (+" + rep + " respect)");
-    note("Flex level up. The whole city sees the lifestyle now.", 2.6);
-    sfx("coin"); if (CBZ.shake) CBZ.shake(0.15);
-    recomputeFlex(); persist(); if (open_) render();
-  }
   // throw a party / bottle service — a pure vanity drain that spikes respect &
   // draws a crowd vibe (elastic via SINKS.bottleService in economy.js).
   function partySpend() {
@@ -398,16 +374,16 @@
     if (open_) render();
   }
 
-  // cached "flex level": total flex points from owned luxury → small passive
-  // respect/notoriety presence + drives the luxDiscount-ish vibe. Recomputed on
-  // any luxury change (cheap; not per-frame).
-  function recomputeFlex() {
-    let f = 0;
-    for (const id in state().cityLuxury) { const l = LUX_BY_ID[id]; if (l) f += l.flex * luxCount(id); }
-    g.cityFlexBonus = f;
-    return f;
-  }
-  function flexLevel() { return g.cityFlexBonus || recomputeFlex(); }
+  // "flex level" = your standing with the city's rich. REAL CONSUMER:
+  // city/millionaires.js reads this through CBZ.cityFlexLevel every ~2.4s and
+  // changes tycoon-NPC behaviour with it (loaded -> a respectful nod, broke ->
+  // they step wide). It is now a pure ACCUMULATOR: millionaires.js's charity
+  // gala is the earner (g.cityFlexBonus += 2 per sponsorship).
+  // BUGFIX RIDER: this used to be recomputed from the (fictional) luxury
+  // catalog with a plain ASSIGNMENT, which silently wiped every gala point the
+  // player had earned on the next business purchase or ledger hydrate. Reading
+  // the accumulator directly makes the philanthropy flex actually stick.
+  function flexLevel() { return g.cityFlexBonus || 0; }
   function bumpNotoriety(n) {
     // route through whatever notoriety field the game uses; fall back to respect
     if (g.cityCarBiz && typeof g.cityCarBiz.notoriety === "number") g.cityCarBiz.notoriety += n;
@@ -420,24 +396,24 @@
   //  As your tier (from economy.js TIERS, by net worth) rises you unlock real,
   //  queryable perks. Other modules can ask CBZ.cityWealth.perk(name).
   //   passiveMul  — multiplies all business output (rich get richer)
-  //   luxDiscount — fraction off luxury prices (status compounds)
   //   bribeDisc   — fraction off cop bribes (money talks)
-  //   vip         — boolean: VIP access (casino high-roller, club back room)
+  //   vip         — boolean: the money half of VIP venue access
   //   bodyguardDisc — cheaper crew/bodyguards
+  //  (a `luxDiscount` perk lived here; its only consumer was the deleted
+  //   luxury catalog's price formula, so it was a discount on nothing.)
   // ============================================================
-  //               broke  hustler comfort  rich   baller  kingpin
+  //               broke  hustler comfort  M'aire rich    kingpin+
   const PERKS = {
     passiveMul:   [1.00,  1.05,   1.12,    1.22,  1.38,   1.60],
     // turfMul: how much harder your tax collectors squeeze the blocks you hold
     // (economy.js turfIncome reads this) — a feared kingpin skims more.
     turfMul:      [1.00,  1.08,   1.18,    1.32,  1.55,   1.85],
-    luxDiscount:  [0.00,  0.00,   0.04,    0.08,  0.14,   0.22],
     bribeDisc:    [0.00,  0.05,   0.10,    0.18,  0.28,   0.40],
     bodyguardDisc:[0.00,  0.05,   0.10,    0.18,  0.28,   0.40],
     vip:          [false, false,  false,   true,  true,   true],
   };
   const PERK_LABELS = {
-    passiveMul: "Business income", turfMul: "Turf tax take", luxDiscount: "Luxury discount", bribeDisc: "Cheaper bribes",
+    passiveMul: "Business income", turfMul: "Turf tax take", bribeDisc: "Cheaper bribes",
     bodyguardDisc: "Cheaper crew", vip: "VIP access",
   };
   function tierPerk(name) {
@@ -446,7 +422,12 @@
     return arr[i];
   }
   function tierName(i) { const e = E(); if (e.TIERS && e.TIERS[i]) return e.TIERS[i].name; return ["Broke", "Hustler", "Comfortable", "Rich", "Baller", "Kingpin"][i] || "?"; }
-  function hasVIP() { return !!tierPerk("vip") || ownsLux("vip"); }
+  // The WEALTH half of VIP standing. This is a status READOUT, not the gate:
+  // the live gates are city/activities.js highRoller() (wealth tier OR max
+  // DRIP) and city/club.js's velvet rope (CBZ.CITY.VIP_DRIP, an outfit score).
+  // Nothing outside this file reads hasVIP; the perk row it renders is
+  // labelled accordingly so it can't promise access it doesn't grant.
+  function hasVIP() { return !!tierPerk("vip"); }
 
   // ============================================================
   //  4) HIGH-STAKES OPPORTUNITIES — front capital, big risk/reward
@@ -622,6 +603,12 @@
   CBZ.onUpdate(41, function (dt) {
     if (g.mode !== "city") return;
     hydrate();
+    // BOAT RUNNING COSTS ride THIS tick — city/boatyard.js owns the rule
+    // (research: ~10% of purchase price per year, berth fees per foot of LOA;
+    // buying is the entry fee, HOLDING is the sink). It bills once per in-game
+    // day, so it is a no-op on almost every frame. Deliberately NOT a second
+    // timer: the empire faucet and the marine drain share one clock.
+    if (CBZ.cityBoatUpkeepTick) { try { CBZ.cityBoatUpkeepTick(dt); } catch (e) {} }
     const biz = state().cityEmpireBiz;
     let anyFull = false, autoTotal = 0;
     for (const id in biz) {
@@ -761,25 +748,6 @@
     }
     return h;
   }
-  function renderLux() {
-    let h = "<div style='font-size:12px;color:#c9b98a;margin-bottom:8px'>Flex level <b style='color:#ffd166'>" + Math.round(flexLevel()) +
-      "</b> — luxury buys respect & notoriety. Prices scale with your net worth.</div>";
-    let i = 1;
-    for (const l of LUXURY) {
-      const cnt = luxCount(l.id), locked = l.minTier != null && tierIndex() < l.minTier;
-      const price = luxPrice(l.id);
-      let right;
-      if (!l.stack && cnt > 0) right = "<div style='color:#7ed957'>OWNED ✓</div><div style='font-size:11px;color:#a99b78'>+" + l.flex + " flex</div>";
-      else {
-        right = "<div style='color:" + (locked ? "#a06b6b" : "#ffd166") + "'>" + money(price) + "</div>" +
-          "<div style='font-size:11px;color:#a99b78'>" + (locked ? "" + tierName(l.minTier) : "+" + l.flex + " flex" + (cnt ? " · own " + cnt : "")) + "</div>";
-        if (!locked) right += "<div style='margin-top:3px'>" + btn(keyLabel(i), "buy", "#4a3a1a") + "</div>";
-      }
-      h += row(l.emoji + " <b>" + l.name + "</b>", right, l.blurb, cnt ? "#ffd166" : "#5a4a2a");
-      i++;
-    }
-    return h;
-  }
   function renderPerks() {
     const e = E();
     const t = wealthTier(), idx = tierIndex();
@@ -792,10 +760,9 @@
     h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:6px'>YOUR PERKS AT THIS TIER</div>";
     h += row("" + PERK_LABELS.passiveMul, "<b style='color:#7ed957'>×" + tierPerk("passiveMul").toFixed(2) + "</b>", "Multiplies all business output", "#7ed957");
     h += row("" + PERK_LABELS.turfMul, "<b style='color:#7ed957'>×" + tierPerk("turfMul").toFixed(2) + "</b>", "Bigger cut of the turf you hold", "#ff9e6b");
-    h += row("" + PERK_LABELS.luxDiscount, "<b style='color:#7ed957'>−" + Math.round(tierPerk("luxDiscount") * 100) + "%</b>", "Off every luxury purchase", "#ffd166");
     h += row("" + PERK_LABELS.bribeDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bribeDisc") * 100) + "%</b>", "Cheaper to pay off the cops", "#7fd0ff");
     h += row("" + PERK_LABELS.bodyguardDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bodyguardDisc") * 100) + "%</b>", "Cheaper crew & bodyguards", "#9fd07e");
-    h += row("" + PERK_LABELS.vip, hasVIP() ? "<b style='color:#7ed957'>UNLOCKED ✓</b>" : "<b style='color:#a06b6b'>locked</b>", "Casino high-roller & club back rooms", hasVIP() ? "#7ed957" : "#5a4a2a");
+    h += row("" + PERK_LABELS.vip, hasVIP() ? "<b style='color:#7ed957'>UNLOCKED ✓</b>" : "<b style='color:#a06b6b'>locked</b>", "Money side of the door — the club's rope also reads your DRIP", hasVIP() ? "#7ed957" : "#5a4a2a");
     // P5: a tiny UI seam onto city/protection.js's ProtectionDetail — the SAME
     // hire() the bodyguardDisc perk above already discounts. One row, one
     // hotkey (G — unused elsewhere in this menu); it always hires the next
@@ -833,7 +800,7 @@
 
   function render() {
     state();
-    const tabs = [["biz", "Empire"], ["lux", "Luxury"], ["ops", "High Stakes"], ["perks", "Status"]];
+    const tabs = [["biz", "Empire"], ["ops", "High Stakes"], ["perks", "Status"]];
     let head = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
       "<div style='font-size:22px;font-weight:700;letter-spacing:.5px'>EMPIRE</div>" +
       "<div style='font-size:12px;color:#c9b98a'>Cash " + money(g.cash || 0) + " · Bank " + money(g.cityBank || 0) + " · " + wealthTier().name + "</div></div>";
@@ -846,7 +813,7 @@
         t[1] + "</div>";
     });
     bar += "</div>";
-    let body = tab === "biz" ? renderBiz() : tab === "lux" ? renderLux() : tab === "ops" ? renderOps() : renderPerks();
+    let body = tab === "biz" ? renderBiz() : tab === "ops" ? renderOps() : renderPerks();
     let foot = "<div style='font-size:11px;color:#8a7d5a;margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
       "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>I</b> IPO · <b>G</b> hire bodyguard (Status tab) · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
     el().innerHTML = head + bar + body + foot;
@@ -867,7 +834,7 @@
   }
   CBZ.cityOpenWealth = open;
 
-  const TAB_ORDER = ["biz", "lux", "ops", "perks"];
+  const TAB_ORDER = ["biz", "ops", "perks"];
   function switchTab(dir) {
     let i = TAB_ORDER.indexOf(tab); i = (i + dir + TAB_ORDER.length) % TAB_ORDER.length;
     tab = TAB_ORDER[i]; render();
@@ -879,8 +846,6 @@
       const b = BUSINESSES[n - 1]; if (!b) return;
       if (owns(b.id)) { if (Math.floor(rec(b.id).supply) >= 1) collectBiz(b.id); else note(b.name + " has nothing to collect yet.", 1.4); }
       else buyBiz(b.id);
-    } else if (tab === "lux") {
-      const l = LUXURY[n - 1]; if (l) buyLux(l.id);
     } else if (tab === "ops") {
       const o = OPS[n - 1]; if (o) runOp(o.id);
     }
@@ -923,7 +888,7 @@
 
   // ---- reset (new game / mode switch) --------------------------------------
   CBZ.cityWealthReset = function () {
-    g.cityEmpireBiz = {}; g.cityLuxury = {}; g.cityWealthLog = { laundered: 0, passiveEarned: 0, flexSpent: 0, opsDone: 0 };
+    g.cityEmpireBiz = {}; g.cityWealthLog = { laundered: 0, passiveEarned: 0, flexSpent: 0, opsDone: 0 };
     g.cityFlexBonus = 0; g.cityOpCD = {}; g._wealthHydrated = false; g._wealthAutoAcc = 0;
     if (panel) panel.style.display = "none"; open_ = false;
   };
@@ -932,21 +897,31 @@
   //  PUBLIC SURFACE  (other modules + headless harness)
   // ============================================================
   CBZ.cityBizIncome = incomePerSec;          // $/sec faucet
-  CBZ.cityFlexLevel = flexLevel;             // flex points from luxury
+  CBZ.cityFlexLevel = flexLevel;             // standing with the city's rich (millionaires.js reads this)
+  // The ONE way to earn flex now. Bumps and persists in a single call, so a
+  // caller can't earn flex that a reload then silently eats (the deleted luxury
+  // catalog used to rebuild flex on hydrate; nothing does now). Replaces the
+  // raw `g.cityFlexBonus = (g.cityFlexBonus||0) + n` line callers wrote anyway.
+  CBZ.cityAddFlex = function (n) {
+    state();
+    g.cityFlexBonus = (g.cityFlexBonus || 0) + (n | 0);
+    persist();
+    return g.cityFlexBonus;
+  };
   CBZ.cityWealth = {
     open, close, isOpen: () => open_,
-    BUSINESSES, LUXURY, OPS, PERKS,
+    BUSINESSES, OPS, PERKS,
     buyBiz, upgradeBiz, collectBiz, collectAll, bizRate, bizCap, bizValue,
     // gig two-stream surface (gigfleet.js drives these):
     isGig, hireWorker, workerCount, workerCost, WORKER_MAX, bizRep, repMul, bumpRep,
     upgradeSecurity, secLevel, secCost, raidChance, resolveRaid, defenseStrength, liveCrew, SEC_MAX,
-    buyLux, luxPrice, ownsLux, partySpend, launderAll,
+    partySpend, launderAll,
     ipoEligible, ipoBiz,   // E7
     runOp, opCooldown,
     tierPerk, hasVIP, flexLevel, incomePerSec,
     // economy.js holdingsWorth() & SINKS.launderCut() read these via CBZ.cityEmpire:
     bizValueTotal, laundromats,
-    owns, ownsBiz: owns, state: () => ({ biz: g.cityEmpireBiz, luxury: g.cityLuxury, log: g.cityWealthLog }),
+    owns, ownsBiz: owns, state: () => ({ biz: g.cityEmpireBiz, log: g.cityWealthLog }),
   };
 
   // ---- wire our totals into economy.js WITHOUT touching empire.js -----------

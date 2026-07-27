@@ -67,6 +67,20 @@
     boat:       { class: "boat",   accel: 1.0, top: 1.1, turn: 1.0, grip: 1.0, brake: 0.7, drift: 1.4, roll: 0.6, marine: true },
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
+  // (d) THE ONE FEEL LOOKUP. FEEL above covers the road silhouettes; a
+  // REGISTERED MARINE HULL (world/water_hulls.js) carries its own feel record
+  // — always with marine:true, which is what every downstream branch reads.
+  // Degrade-safe: no registry, or an unknown key, and this is byte-identical
+  // to the `FEEL[style] || DEFAULT_FEEL` it replaces.
+  function feelFor(style) {
+    const f = FEEL[style];
+    if (f) return f;
+    if (CBZ.marineHulls) {
+      const mf = CBZ.marineHulls.feel(style);
+      if (mf) return mf;
+    }
+    return DEFAULT_FEEL;
+  }
 
   // ---- SHINY MATERIAL API ---------------------------------------------------
   // world/carfx.js (loads BEFORE this file) publishes CBZ.vehicleMat(role,color,
@@ -1536,6 +1550,12 @@
       else if (style === "van") template = makeVan();
       else if (style === "motorcycle") template = makeMotorcycle();
       else if (style === "helicopter") template = makeHelicopter();
+      // (c) REGISTERED MARINE HULLS build themselves (world/water_hulls.js).
+      // `buildable` is deliberately not `get`: the registry also carries a
+      // record for "boat" — the physics spec + price for the runabout below —
+      // and that record has NO build(), so the existing makeBoat() art stays
+      // the one and only authority on the runabout's geometry.
+      else if (CBZ.marineHulls && CBZ.marineHulls.buildable(style)) template = CBZ.marineHulls.build(style);
       else if (style === "boat") template = makeBoat();
       else template = makeRoadCar(style);
       procTemplates.set(style, template);
@@ -1674,7 +1694,7 @@
     car._playerCarActualStyle = style;
     car._visualDims = visual.userData.vehicleDims || car.dims || null;
     // publish the handling-feel hook so the driving sim can read it per style.
-    car._playerCarFeel = FEEL[style] || DEFAULT_FEEL;
+    car._playerCarFeel = feelFor(style);
     active = car;
     placeholder(car, true);
     return true;
@@ -1686,8 +1706,21 @@
   // car AND every ambient car now (city/vehicles.js builds the same visual).
   function inferStyle(car) {
     const model = car && (car.model || car);   // accept a car OR a model directly
-    if (model && model.detailStyle && STYLE_LABEL[model.detailStyle]) return model.detailStyle;
+    // (b) a REGISTERED MARINE KEY is as valid a detailStyle as a STYLE_LABEL one.
+    if (model && model.detailStyle
+        && (STYLE_LABEL[model.detailStyle]
+            || (CBZ.marineHulls && CBZ.marineHulls.get(model.detailStyle)))) return model.detailStyle;
     const name = model ? (model.name || "") : "";
+    // (a) THE HULL REGISTRY OWNS BOATS (world/water_hulls.js). It resolves a
+    // real class — RIB, runabout, sport cruiser, motor yacht — where the
+    // regex below could only ever alias every marine name onto the ONE
+    // 6.2m runabout mesh. Returns null for anything it doesn't recognise, so
+    // the legacy regex stays as the fallback (and as the ratchet:
+    // CBZ.marineHullAudit() counts it until it can be deleted).
+    if (CBZ.marineHulls) {
+      const mk = CBZ.marineHulls.styleFor(name, model);
+      if (mk) return mk;
+    }
     if (/ferrari/i.test(name)) return "ferrari";
     if (/charger|mustang|camaro|challenger/i.test(name)) return "muscle";
     if (/impala|cadillac|low\s*rider/i.test(name)) return "lowrider";
@@ -1726,7 +1759,7 @@
       collectWheels(visual);
       car._playerCarVisual = visual;
       car.detailStyle = ud.carStyle || inferStyle(car);
-      car._playerCarFeel = FEEL[car.detailStyle] || DEFAULT_FEEL;
+      car._playerCarFeel = feelFor(car.detailStyle);
       car._visualDims = visual.userData.vehicleDims || car.dims || null;
       active = car;
       return;
@@ -1766,7 +1799,7 @@
     collectWheels(visual);
     car.detailStyle = style;
     car._playerCarVisual = visual;
-    car._playerCarFeel = FEEL[style] || DEFAULT_FEEL;
+    car._playerCarFeel = feelFor(style);
     car._visualDims = visual.userData.vehicleDims || car._visualDims || car.dims || null;
     return true;
   }
@@ -1823,10 +1856,22 @@
     }
     return v;
   };
+  // THE VEHICLE ART KIT. These cached builders — one chrome, one glass, one
+  // geometry per size, all routed through carfx's vehicleMat — are what make
+  // the whole fleet read as one material family instead of a pile of
+  // one-offs. world/water_hulls.js's marine fleet draws from EXACTLY these, so
+  // a change to the shine or the glass tint uplifts boats and cars together.
+  // Any future vehicle builder that lives outside this file uses this and
+  // never invents a parallel material path.
+  CBZ.cityCarKit = {
+    sharedMat, roleMat, paintMat, vmat,
+    glassMat, chromeMat, lightFrontMat, lightTailMat,
+    boxGeo, prismGeo, addBox, addPrism, addSphere, slopeBox,
+  };
   // public handling-feel lookup so the driving sim / other systems can branch on
   // vehicle class (e.g. air/marine/twoWheel flags) and apply the multipliers.
   CBZ.cityPlayerCarFeel = function (style) {
-    return FEEL[style] || (active && active._playerCarFeel) || DEFAULT_FEEL;
+    return FEEL[style] || (CBZ.marineHulls && CBZ.marineHulls.feel(style)) || (active && active._playerCarFeel) || DEFAULT_FEEL;
   };
   preloadFerrari();
 

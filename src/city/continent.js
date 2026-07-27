@@ -430,6 +430,11 @@
     const SUBMERGED_Y = SEA_Y - 0.44;
     // cache the shore field per vertex — the foam pass re-reads it below
     const sGrid = COAST ? new Float32Array(pos.count) : null;
+    // cache the relief per vertex too: the strata/aspect pass below derives its
+    // slope from the NEIGHBOURING grid samples instead of re-evaluating
+    // countryHeightAt four more times per vertex (that would have quintupled
+    // this 103k-vertex loop's cost for a shading term).
+    const rGrid = new Float32Array(pos.count);
     for (let i = 0; i < pos.count; i++) {
       const wx = pos.getX(i) + cx0, wz = pos.getZ(i) + cz0;
       // two octaves of position-hash "noise" pick the patch tone —
@@ -445,6 +450,7 @@
       c.lerp(cLush, Math.max(0, -drift) * 0.4);
       applyBiomeLandCover(c, wx, wz);
       const reliefY = countryHeightAt(wx, wz);
+      rGrid[i] = reliefY;
       let y = GROUND_Y + reliefY;
       if (COAST) {
         const s = shoreField(wx, wz);
@@ -472,6 +478,50 @@
       const shade = 0.92 + h2 * 0.1;                       // subtle facet variation
       pos.setY(i, y);
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
+    }
+    // ---- STRATA + ASPECT on the backcountry relief -----------------------
+    // The plate painted its land cover from a position hash alone: two
+    // kilometres of hill country and a flat field got the same treatment, so
+    // even the eroded ridgelines read as a green tablecloth. This second pass
+    // opens ROCK on steep ground (banded by the same warped bedding field the
+    // mountains use, so an outcrop in the backcountry is visibly the same
+    // geology as Mount Mercy) and shades every face by its sun aspect.
+    // Colour only — no vertex is moved, so countryHeightAt, floorAt, the carve
+    // pass and every audit are untouched.
+    if (CFG.CONTINENT_RELIEF_V1 !== false && CBZ.mtnStrataTint) {
+      const stride = SEG + 1;
+      const dxw = W / SEG, dzw = D / SEG;
+      const rockC = new THREE.Color(), baseC = new THREE.Color();
+      const outcrop = new THREE.Color(0x6d6659), outcropD = new THREE.Color(0x3b3f3d);
+      const lightV = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
+      const nv = new THREE.Vector3();
+      for (let j = 0; j <= SEG; j++) {
+        for (let k = 0; k <= SEG; k++) {
+          const i = j * stride + k;
+          const ry = rGrid[i];
+          const w = smooth01((ry - 1.5) / 4.5);
+          if (w <= 0.001) continue;                     // flat country keeps its land cover
+          const hx0 = rGrid[j * stride + (k > 0 ? k - 1 : k)];
+          const hx1 = rGrid[j * stride + (k < SEG ? k + 1 : k)];
+          const hz0 = rGrid[(j > 0 ? j - 1 : j) * stride + k];
+          const hz1 = rGrid[(j < SEG ? j + 1 : j) * stride + k];
+          const gx = (hx1 - hx0) / (2 * dxw), gz = (hz1 - hz0) / (2 * dzw);
+          nv.set(-gx, 1, -gz).normalize();
+          const slope = 1 - nv.y;
+          const faceLight = Math.max(0, nv.dot(lightV));
+          const wx = pos.getX(i) + cx0, wz = pos.getZ(i) + cz0;
+          const bare = CBZ.mtnStrataTint(rockC, wx, wz, ry, slope, faceLight, {
+            rock: outcrop, rockDark: outcropD,
+            step: 6, dip: 9, slope0: 0.10, slope1: 0.32, salt: 0x22a7, aspect: 1,
+          });
+          baseC.setRGB(colors[i * 3], colors[i * 3 + 1], colors[i * 3 + 2]);
+          baseC.lerp(rockC, Math.min(0.78, bare) * w);
+          const shade = 1 + (faceLight - 0.55) * 0.22 * w;
+          colors[i * 3] = baseC.r * shade;
+          colors[i * 3 + 1] = baseC.g * shade;
+          colors[i * 3 + 2] = baseC.b * shade;
+        }
+      }
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 

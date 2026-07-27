@@ -58,7 +58,11 @@
     g.cityNotoriety = notoriety() + Math.max(0, amt | 0);
     const after = rankIdx();
     if (after > before && CBZ.city) {
-      CBZ.city.note("Word's getting around — heavier jobs hit the board now.", 2.2);
+      // opts.from is not decoration: mode.js's phoneWorthy() (mode.js:101-115)
+      // DELETES any note that neither matches its keyword list nor names a
+      // sender, and this line matched nothing — the one moment the game tells
+      // you your record just opened heavier work never reached the player.
+      CBZ.city.note("Word's getting around — heavier jobs hit the board now.", 2.2, { from: "Dispatch", app: "missions" });
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -75,19 +79,88 @@
   //  implements for the NPC office floors (CBZ.cityPromoteOfficeManager /
   //  CBZ.citySucceedOfficeManager) — same shape, different roster of one.
   // ============================================================
+  //  MIGRATED to city/factions.js (2026-07-26). This was ladder #4 of 6 — its
+  //  own header above admits it is "a small mirror of gangs.js's Prospect→Boss
+  //  pyramid… same shape, different roster of one." It is now DECLARED, not
+  //  re-implemented: factions.js owns the tier order, the thresholds, the
+  //  promotion check and the announcement. The array below is the literal
+  //  rank DATA (three names and two numbers — the only genuinely new thing);
+  //  every function that used to walk it now asks factions.js.
+  //
+  //  `bind` is what keeps this a migration instead of a second bookkeeping
+  //  system: the shift counter stays exactly where it was, g.citySecurityShifts,
+  //  owned by this file. factions.js reads and writes THAT number as the
+  //  "served" credit. Nothing is mirrored, so nothing can desync.
   const SECURITY_RANKS = [
     { key: "guard",   pip: "Guard",         shifts: 0,  wageMul: 1.0 },
     { key: "senior",  pip: "Senior Guard",  shifts: 6,  wageMul: 1.4 },
     { key: "shiftmgr",pip: "Shift Manager", shifts: 16, wageMul: 1.9 },
   ];
-  CBZ.citySecurityRankLadder = function () { return SECURITY_RANKS.map((r) => ({ key: r.key, pip: r.pip, shifts: r.shifts })); };
-  CBZ.citySecurityRankName = function (key) { const r = SECURITY_RANKS.find((x) => x.key === key); return r ? r.pip : "Guard"; };
+  if (CBZ.factions && CBZ.factions.declare) {
+    CBZ.factions.declare({
+      id: "secco",
+      name: "Bayfront Security",
+      short: "Bayfront",
+      kind: "job",
+      color: 0x5a7fb0,
+      ranks: SECURITY_RANKS.map((r) => ({ key: r.key, pip: r.pip, needServed: r.shifts, cut: r.wageMul })),
+      needScale: { served: 0, orders: 0, bodies: 0, contrib: 0 },
+      heat: 0.85,                    // a guard's uniform is a quiet one
+      lore: "Straight work. Clean shifts bank toward the next tier's wage.",
+      bind: {
+        // ONE store: this file's own g.citySecurityShifts, as "served".
+        get: function () {
+          // membership IS the job: this file sets g.career="security" when hired
+          // (:626) and nulls it when the badge is pulled (:1077). One field.
+          if (g.career !== "security") return null;
+          return {
+            org: "secco", rank: SECURITY_RANKS[securityRankIdx()].key,
+            standing: 0.5, served: g.citySecurityShifts || 0, orders: 0, bodies: 0, contrib: 0,
+            how: "hired",
+          };
+        },
+        // rank is DERIVED from the shift count — there is nothing to set.
+        setRank: function () {},
+        // DELIBERATELY INERT. factions.js's upkeep tick credits "served" in
+        // SECONDS once a second; this counter is in SHIFTS. Letting that
+        // through made Shift Manager arrive after 16 seconds of standing
+        // still. The shift counter has exactly one writer — securityClockShift()
+        // below, on a completed clean shift — and rank is DERIVED from it, so
+        // there is nothing for the role layer to add here. factions.js reads
+        // the number; it does not get to move it.
+        addCredit: function () {},
+        addStanding: function () {},
+      },
+    });
+    if (CBZ.factionMigrated) CBZ.factionMigrated("ladder:careers-security");
+  }
+  CBZ.citySecurityRankLadder = function () {
+    if (CBZ.factions && CBZ.factions.ladder) {
+      const L = CBZ.factions.ladder("secco");
+      if (L && L.length) return L.map((r) => ({ key: r.key, pip: r.pip, shifts: r.need.served }));
+    }
+    return SECURITY_RANKS.map((r) => ({ key: r.key, pip: r.pip, shifts: r.shifts }));
+  };
+  CBZ.citySecurityRankName = function (key) {
+    if (CBZ.factions && CBZ.factions.rankName && CBZ.factions.exists("secco")) return CBZ.factions.rankName("secco", key);
+    const r = SECURITY_RANKS.find((x) => x.key === key); return r ? r.pip : "Guard";
+  };
+  // ONE tier table. The walk below reads whichever ladder is authoritative —
+  // factions.js's when it is loaded, the literal above when it is not — so the
+  // thresholds can never disagree between this file and the role layer.
+  function rungs() {
+    if (CBZ.factions && CBZ.factions.ladder && CBZ.factions.exists("secco")) {
+      const L = CBZ.factions.ladder("secco");
+      if (L && L.length) return L.map((r) => ({ key: r.key, pip: r.pip, shifts: r.need.served, wageMul: r.cut }));
+    }
+    return SECURITY_RANKS;
+  }
   function securityRankIdx() {
-    const shifts = g.citySecurityShifts || 0;
-    let i = 0; for (let k = 0; k < SECURITY_RANKS.length; k++) if (shifts >= SECURITY_RANKS[k].shifts) i = k;
+    const shifts = g.citySecurityShifts || 0, R = rungs();
+    let i = 0; for (let k = 0; k < R.length; k++) if (shifts >= R[k].shifts) i = k;
     return i;
   }
-  function securityRankInfo() { return SECURITY_RANKS[securityRankIdx()]; }
+  function securityRankInfo() { return rungs()[securityRankIdx()]; }
   CBZ.citySecurityRank = function () { const r = securityRankInfo(); return { key: r.key, pip: r.pip, shifts: g.citySecurityShifts || 0, wageMul: r.wageMul }; };
   // a clean paid shift banks toward the next rank; firing (going wanted) resets
   // the streak — a real consequence for blowing a clean-record job, same spirit
@@ -97,16 +170,156 @@
     g.citySecurityShifts = (g.citySecurityShifts || 0) + 1;
     const after = securityRankIdx();
     if (after > before) {
-      const r = SECURITY_RANKS[after];
+      const r = rungs()[after];
       CBZ.city.note("Promoted to " + r.pip + " — the new wage starts today.", 2.4, { from: "Payroll", app: "bank" });
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
 
+  /* ============================================================
+     THE OBJECTIVE MARK — MIGRATED to core/mission.js (2026-07-26).
+
+     The light column below was one of FIVE independent objective UIs in the
+     repo (gigs.js's twin is the one mission.js's beacon was lifted from, and
+     it kept its copy too until today). A job accepted here now takes ONE
+     mission handle: the column, the map waypoint and the rich phone card all
+     come from that single call, and a MOVING mark — the ped you were sent to
+     clip — is handed over LIVE so mission.js drags it itself instead of this
+     file nudging a mesh from two different per-frame loops.
+
+     WHAT DELIBERATELY DOES NOT MOVE: g.cityJob. This file still writes, reads
+     and PAYS its own job object — finishJob() reads j.reward, the big tick at
+     the bottom switches on j.type — and city/hud.js still draws the objective
+     line from it. mission.js's paintSurface yields to a foreign (non-_mission)
+     g.cityJob for exactly this reason, so the two coexist cleanly: careers.js
+     owns the JOB, the mission block supplies the SURFACE. pay:false — every
+     dollar still moves through finishJob()/finishGangContract() below.
+
+     makeBeacon()/clearBeacon() keep their names and signatures so the ~20 call
+     sites did not have to change; the raw-THREE pair is the degrade-safe path
+     for a build without the block (or with CBZ.CONFIG.MISSION_BLOCK = false).
+  ============================================================ */
+  let jobMission = null;                 // the live mission handle, or null
+  let markedActor = null;                // the live actor the mark is pinned to
+  function missionBlock() { return (CBZ.mission && CBZ.CONFIG.MISSION_BLOCK !== false) ? CBZ.mission : null; }
+  // what the phone card calls each contract (the desc is the briefing line).
+  const JOB_TITLE = {
+    hit: "Contract Hit", delivery: "Courier Run", heist: "Store Job",
+    smuggle: "Smuggling Run", getaway: "Getaway Driver", protection: "Protection Round",
+    deaddrop: "Dead Drop", gcHit: "Crew Hit", gcCollect: "Collection",
+    gcRun: "Product Run", gcTake: "Take the Block", gcDefend: "Hold the Block",
+  };
+  // A CREW contract is faction work — factions.js credits an order on the gang
+  // ladder when it completes. Feature-detected in BOTH directions: with no
+  // factions module the tag is inert, but with one loaded we must NOT tag a job
+  // the player is not a member for, because mission.start() gates member-only
+  // defs and would hand back an inert handle (no mark, no card) — myCrew() can
+  // still be true through its own legacy fallback when factions says otherwise.
+  function jobFaction(j) {
+    if (!j || !isGangJob(j.type)) return null;      // freelance work answers to nobody
+    const F = CBZ.factions;
+    if (F && typeof F.isMember === "function") { try { return F.isMember("gang") ? "gang" : null; } catch (e) { return null; } }
+    return "gang";
+  }
+  // start (or re-aim) the ONE handle that surfaces whatever is on g.cityJob.
+  // `where` is anything mission.js resolves: [x,z], a ped, a lot. Returns false
+  // when there is no block to use, which is the caller's cue to draw its own.
+  function markJob(where, color, label) {
+    const MB = missionBlock(); if (!MB) return false;
+    const j = g.cityJob; if (!j) return false;
+    const id = "careers:" + (j.type || "job");
+    const live = (where && where.pos) ? where : null;      // a mark that walks
+    // same job, new leg → just re-aim. A DIFFERENT job (nothing stops the board
+    // handing you a second one over the top of the first) retires the old handle
+    // instead of inheriting it — otherwise the card would keep the dead job's
+    // title, pay and faction while tracking the new one's mark.
+    if (jobMission && jobMission.alive() && jobMission.id === id) { markedActor = live; jobMission.retarget(where, label, color); return true; }
+    if (jobMission) { try { (jobMission.retire || jobMission.cancel).call(jobMission, "replaced"); } catch (e) {} jobMission = null; }
+    const crew = isGangJob(j.type) ? myCrew() : null;
+    const m = MB.start({
+      id: id,
+      title: JOB_TITLE[j.type] || "Contract",
+      giver: crew ? crew.name : "Dispatch",
+      brief: j.desc || "",
+      reward: j.reward || 0,
+      pay: false,                        // finishJob()/finishGangContract() own the wallet
+      announce: false,                   // the board's own note()/big() lines carry it
+      goal: "manual",                    // the tick below is the phase machine
+      at: where, label: label, color: color,
+      faction: jobFaction(j),
+      // this file decides what a blown job is (failJob/failGangContract) and
+      // cityCareersReset() sweeps a new life — the shared sweeper must not race
+      // either one into a fail card for a job that was merely reset.
+      failOnDeath: false, failOnBust: false, failOnModeExit: false,
+    });
+    if (!m || m.inert) return false;     // flag off / faction gate refused → draw our own
+    jobMission = m; markedActor = live;
+    return true;
+  }
   // topY (optional): stretch the column to reach a ROOF objective — a dead-drop
-  // point 40m up still needs a beam you can see from the street.
+  // point 40m up still needs a beam you can see from the street. (The shared
+  // mark is a fixed-height column, so a roof leg loses that stretch; the ring
+  // and the waypoint still land under the drop.)
   function makeBeacon(x, z, color, topY) {
-    clearBeacon();
+    if (markJob([x, z], color)) { clearBeaconRaw(); return; }   // never both
+    makeBeaconRaw(x, z, color, topY);
+  }
+  // a LIVE mark: hand the actor itself to the block so the column, the waypoint
+  // and the HUD distance follow it every frame with no work from us.
+  function markLive(actor, color) {
+    if (!actor || !actor.pos) return;
+    if (markJob(actor, color)) { clearBeaconRaw(); return; }
+    makeBeaconRaw(actor.pos.x, actor.pos.z, color);
+  }
+  // re-aim at a moving actor. With the block on we only touch the handle when
+  // the MARK ITSELF changes (a multi-target sweep dropping to the next name) —
+  // retarget() re-renders the phone card, and doing that 60×/s would be a
+  // per-frame DOM rebuild for a mark mission.js is already tracking live.
+  function moveMark(a) {
+    if (!a || !a.pos) return;
+    if (jobMission) {
+      if (markedActor !== a) { markedActor = a; jobMission.retarget(a); }
+      return;
+    }
+    if (beacon) beacon.position.set(a.pos.x, 15, a.pos.z);
+  }
+  // THE JOB LOSES ITS LOCATION, NOT ITS JOB (the getaway's escape leg: "lose the
+  // cops" is a state, not a place). mission.js only repaints the shared mark for
+  // a leg that HAS a target and only clears it when a mission ENDS — so retire
+  // the handle, which clears the column and the waypoint silently, paying
+  // nothing and reporting nothing, and immediately take a fresh location-less
+  // one so the phone card and the faction credit survive the leg change.
+  function markGone() {
+    if (!jobMission) { clearBeaconRaw(); return; }
+    try { (jobMission.retire || jobMission.cancel).call(jobMission, "leg done"); } catch (e) {}
+    jobMission = null; markedActor = null;
+    markJob(null, 0x7de7ff);
+  }
+  // RETIRE, not cancel: clearBeacon() runs on the way out of EVERY job, the
+  // finished ones included. finishJob()/failJob()/finishGangContract()/
+  // failGangContract() state the real verdict FIRST (see endJobMission), so by
+  // the time we get here the handle is closed or genuinely has no verdict —
+  // cancelling would archive a "FAILED" card for a job just completed and tell
+  // factions.js the player botched it. cityCareersReset() lands here too.
+  function clearBeacon() {
+    if (jobMission) { try { (jobMission.retire || jobMission.cancel).call(jobMission, "wrapped"); } catch (e) {} jobMission = null; }
+    markedActor = null;
+    clearBeaconRaw();
+  }
+  // close the handle with a real verdict. pay:false, so `cash` is reported, not
+  // paid — it must be the figure this file ACTUALLY moved.
+  function endJobMission(how, arg) {
+    if (!jobMission) return;
+    const m = jobMission; jobMission = null; markedActor = null;
+    try {
+      if (how === "done") m.complete({ cash: arg || 0 });
+      else m.fail(arg || "you lost it");
+    } catch (e) {}
+  }
+  if (CBZ.mission && CBZ.mission.adopt) CBZ.mission.adopt("city/careers.js");
+
+  function makeBeaconRaw(x, z, color, topY) {
+    clearBeaconRaw();
     const hgt = Math.max(30, (topY || 0) + 8);
     const m = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, hgt, 12, 1, true),
       new THREE.MeshBasicMaterial({ color: color || 0xffd166, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false }));
@@ -114,7 +327,7 @@
     CBZ.city.arena.root.add(m);
     beacon = m;
   }
-  function clearBeacon() { if (beacon) { if (beacon.parent) beacon.parent.remove(beacon); if (beacon.geometry) beacon.geometry.dispose(); if (beacon.material) beacon.material.dispose(); beacon = null; } }
+  function clearBeaconRaw() { if (beacon) { if (beacon.parent) beacon.parent.remove(beacon); if (beacon.geometry) beacon.geometry.dispose(); if (beacon.material) beacon.material.dispose(); beacon = null; } }
 
   function aliveCivilians() { return (CBZ.cityPeds || []).filter((p) => !p.dead && !p.vendor); }
   function lotDoor(l) { return { x: l.building.door.x, z: l.building.door.z }; }
@@ -159,6 +372,23 @@
   // who do you ride with? returns { kind:"member"|"boss", gangId, rank, name }
   // — works whether you JOINED an NPC crew or FOUNDED your own.
   function myCrew() {
+    // MIGRATED to the ONE membership query (city/factions.js). The census
+    // found 16 hand-rolled `g.playerGang` reads across 15 files and at least
+    // four independently reimplemented myGangId() helpers; this was one of
+    // them. The old three-field re-derivation stays underneath as the
+    // degrade-safe fallback per the BLOCK LAW.
+    const F = CBZ.factions;
+    if (F && F.membership) {
+      const fm = F.membership("gang");
+      if (fm) {
+        const rec = (CBZ.cityGangs || []).find((x) => x.id === fm.org) || (fm.owner ? g.playerGang : null) || null;
+        return {
+          kind: fm.owner ? "boss" : "member", gangId: fm.owner ? "player" : fm.org, rank: fm.rank,
+          rec: rec, memb: fm.owner ? null : g.cityMembership,
+          name: (rec && rec.name) || (g.playerGang && g.playerGang.name) || "the crew",
+        };
+      }
+    }
     const pg = g.playerGang;
     if (pg && pg.founded) return { kind: "boss", gangId: "player", rank: "boss", rec: pg, name: pg.name || "your gang" };
     const m = (CBZ.cityMembership && CBZ.cityMembership()) || null;
@@ -172,8 +402,22 @@
 
   // crew rank tier 0..6 (gates which contracts the set trusts you with) —
   // a boss of his own set is treated as top-tier.
+  // The FOURTH hand-typed copy of the gang tier order lived here (the census
+  // named it explicitly). It now reads gangs.js's RANKS through factions.js —
+  // one table, one order. The literal survives ONLY as the degrade-safe
+  // fallback and for the aliases gangs.js does not define (lieutenant/capo/
+  // underboss are careers.js's own synonyms, not rungs).
   const GC_RANK_TIER = { prospect: 0, lookout: 1, runner: 2, soldier: 3, enforcer: 4, lt: 5, lieutenant: 5, capo: 5, underboss: 6, boss: 6 };
-  function crewTier(c) { return c ? (GC_RANK_TIER[c.rank] != null ? GC_RANK_TIER[c.rank] : 0) : 0; }
+  function crewTier(c) {
+    if (!c) return 0;
+    const F = CBZ.factions;
+    if (F && F.rankTier && F.exists("gang")) {
+      const t = F.rankTier("gang", c.rank);
+      if (t != null && (c.rank === "prospect" || t > 0)) return t;
+    }
+    return GC_RANK_TIER[c.rank] != null ? GC_RANK_TIER[c.rank] : 0;
+  }
+  if (CBZ.factionMigrated) CBZ.factionMigrated("memb:careers");
 
   // a rival member of a DIFFERENT, non-allied crew (optionally a lieutenant).
   function findRivalMember(myGangId, wantLt) {
@@ -303,8 +547,9 @@
     g.cityJob = j;
     const c = myCrew();
     j.gangId = c ? c.gangId : null;
-    if (j.type === "gcHit" && j.target) makeBeacon(j.target.pos.x, j.target.pos.z, 0xff5b5b);
-    else if (j.type === "gcCollect" && j.target) makeBeacon(j.target.pos.x, j.target.pos.z, 0xffd166);
+    // the two marks that WALK go over as live actors (see markLive)
+    if (j.type === "gcHit" && j.target) markLive(j.target, 0xff5b5b);
+    else if (j.type === "gcCollect" && j.target) markLive(j.target, 0xffd166);
     else if (j.type === "gcRun") makeBeacon(j.pickup.x, j.pickup.z, 0xffd166);
     else if (j.type === "gcTake") makeBeacon(j.x, j.z, 0x7de7ff);
     else if (j.type === "gcDefend") {
@@ -353,14 +598,19 @@
     }
     g.cityGangJobsDone = (g.cityGangJobsDone || 0) + 1;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    // DONE before clearBeacon() below retires it — a retired handle pays
+    // nothing and posts nothing, so the player would finish a contract and see
+    // no completion card. `total` is the cash addCash() already moved.
+    endJobMission("done", total);
     g.cityJob = null; clearBeacon();
   }
   function failGangContract(j, why) {
     if (!j) return;
-    CBZ.city.note("Crew job blown — " + (why || "you lost it") + ". The set won't be happy.", 2.6);
+    CBZ.city.note("Crew job blown — " + (why || "you lost it") + ". The set won't be happy.", 2.6, { from: "The Set", app: "missions" });
     // a botched job sours the crew a touch (they trust you less)
     const c = myCrew();
     if (c && c.kind === "member" && c.memb) c.memb.loyalty = Math.max(0, (c.memb.loyalty || 0.6) - 0.06);
+    endJobMission("fail", why);          // a REAL blown job: the set hears about it
     g.cityJob = null; clearBeacon();
   }
   CBZ.cityGangContractFail = failGangContract;
@@ -519,7 +769,7 @@
     else if (j.type === "getaway") makeBeacon(j.rdv.x, j.rdv.z, 0x7de7ff);
     else if (j.type === "protection" && j.lot) makeBeacon(j.lot.building.door.x, j.lot.building.door.z, 0xffd166);
     else if (j.dest) makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
-    else if (j.type === "hit" && j.target) makeBeacon(j.target.pos.x, j.target.pos.z, 0xff5b5b);
+    else if (j.type === "hit" && j.target) markLive(j.target, 0xff5b5b);   // a mark that walks
     else if (j.type === "heist" && j.lot) makeBeacon(j.lot.building.door.x, j.lot.building.door.z, 0xff9e6b);
     CBZ.city.note("You're on: " + j.desc, 2.4, { from: "Dispatch" });
     closeBoard();
@@ -559,11 +809,15 @@
     // every finished contract grows your criminal CV (≈ a fraction of the pay)
     gainNotoriety(Math.round(j.reward * 0.5) + 40);
     g.cityJobsDone = (g.cityJobsDone || 0) + 1;
+    // DONE before clearBeacon() retires the handle (see endJobMission): `total`
+    // is what addCash() moved a few lines up, never a quote.
+    endJobMission("done", total);
     g.cityJob = null; clearBeacon();
   }
   function failJob(why) {
     const j = g.cityJob; if (!j) return;
-    CBZ.city.note("Job blown — " + (why || "you lost it") + ".", 2.4);
+    CBZ.city.note("Job blown — " + (why || "you lost it") + ".", 2.4, { from: "Dispatch", app: "missions" });
+    endJobMission("fail", why);
     g.cityJob = null; clearBeacon();
   }
   CBZ.cityJobComplete = finishJob;
@@ -816,10 +1070,10 @@
       if (j.t <= 0 && j.type !== "gcDefend") { failGangContract(j, "you ran out of time"); return; }
     }
     if (j.type === "gcHit") {
-      if (beacon && j.target && !j.target.dead) beacon.position.set(j.target.pos.x, 15, j.target.pos.z);
+      if (j.target && !j.target.dead) moveMark(j.target);
       if (j.target && j.target.dead) { CBZ.city.note("Mark's down. The set noticed.", 1.8); finishGangContract(j, 0); }
     } else if (j.type === "gcCollect") {
-      if (beacon && j.target && !j.target.dead) beacon.position.set(j.target.pos.x, 15, j.target.pos.z);
+      if (j.target && !j.target.dead) moveMark(j.target);
       // collected = you robbed them (took the debt) OR put them in the ground
       if (j.target && (j.target.robbed || j.target.dead)) {
         const clean = j.target.robbed && !j.target.dead;
@@ -948,9 +1202,9 @@
           // multi-target sweep: retarget the beacon to the next live mark
           j.targets = j.targets.filter((t) => t && !t.dead);
           if (!j.targets.length) { CBZ.city.note("Sweep complete.", 1.6); finishJob(); }
-          else { const t = j.targets[0]; if (beacon) beacon.position.set(t.pos.x, 15, t.pos.z); }
+          else moveMark(j.targets[0]);
         } else if (j.target) {
-          if (beacon && !j.target.dead) beacon.position.set(j.target.pos.x, 15, j.target.pos.z);
+          if (!j.target.dead) moveMark(j.target);
           if (j.target.dead) { CBZ.city.note("Contract complete.", 1.6); finishJob(); }
         }
       } else if (j.type === "delivery" && j.dest) {
@@ -975,7 +1229,9 @@
           j.t -= dt;
           if (j.t <= 0) { failJob("you missed the pickup window"); }
           else if (CBZ.player.driving && Math.hypot(P.x - j.rdv.x, P.z - j.rdv.z) < 6) {
-            j.phase = "escape"; clearBeacon();
+            // the rendezvous is behind you and the next leg has no location —
+            // drop the mark WITHOUT dropping the job (see markGone).
+            j.phase = "escape"; markGone();
             // pulling the job draws heat — now SHAKE it to get paid
             if (CBZ.cityCrime) CBZ.cityCrime(120, { x: P.x, z: P.z, type: "robbery" });
             CBZ.city.note("Crew's in! Lose the cops to get paid.", 2.6);

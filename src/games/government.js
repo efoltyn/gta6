@@ -41,6 +41,36 @@
                        call line by line, FOR > AGAINST = WIN (payout +
                        territory), tie/fewer = LOSE gracefully.
 
+   THE POLITICAL LAYER (2026-07 wave) — three seams, every one guarded, so
+   this package still plays alone exactly as it did before:
+     THE CLERK'S WINDOW  — a barred counter in the lobby. The single most
+                       important verb added to this room: it FILES THE PAPERS
+                       (city/candidacy.js). It is the one prop here that
+                       matters when no session is running, which is most of
+                       the time. It owns no rules — the office list, the fee,
+                       the signature bar and the refusal reason all come from
+                       candidacy.js, because a second copy of those rules is
+                       how a feature rots.
+     THE CHAIR'S GAVEL — if `rec.office.holder` on THIS jurisdiction is the
+                       player sentinel, you are not lobbying the room, you
+                       are chairing it, and the interesting move stops being
+                       "flip seven people" and becomes "do I OVERRIDE them".
+                       Ramming a bill past a council that voted it down is
+                       legal, instant, pays exactly the same $60k — and burns
+                       real approval (CBZ.approvalShock, approval.js's live
+                       number) plus tyranny (city/statecraft.js), which is
+                       the number the garrison reads before deciding whether
+                       your next order is worth obeying. The override is
+                       offered ONLY when the room is genuinely against you;
+                       when they already agree it is just the vote.
+     THE ARCHIVES      — a hook the campaign banked against a councillor's
+                       real sid (an afternoon in the public library's records
+                       room) is a file already in your hand when the session
+                       opens. No dirt is invented: the line shown is the line
+                       the research wrote.
+   And a bill carried while you are ON THE BALLOT is real momentum in the
+   real tally — elections.js's scoreCandidate() reads `momentum` directly.
+
    Determinism: BUILD paths + the seeded puzzle (stances, wants, fears,
    shelf dirt) use ctx.rand/ctx.stream only (multiplayer law). Shredder
    jam is runtime FX (Math.random, allowed). Nothing persists across
@@ -113,6 +143,52 @@
   function clampNum(lo, hi, v) { return Math.max(lo, Math.min(hi, v)); }
   function clockStr() { const s = Math.max(0, Math.round(G.clockLeft)); return (s / 60 | 0) + ":" + ("0" + (s % 60)).slice(-2) + " to the gavel"; }
 
+  /* ---------------- the POLITICAL LAYER bridge (all feature-detected) ------
+     This package used to be a closed evening: you flipped a room, you got
+     paid, nothing outside the chamber ever knew. Three real systems now meet
+     in here, and every one of them is read through a guard so the chamber
+     still works alone:
+       city/statecraft.js (CBZ.gov)    — if YOU hold this jurisdiction's seat,
+                                         you are the chair, not a lobbyist.
+       city/candidacy.js (CBZ.cityRun) — the clerk's window in the lobby is
+                                         where a run for office is filed, and
+                                         a bill passed mid-campaign is real
+                                         momentum in the real tally.
+       city/library research           — dirt dug in the archives arrives here
+                                         as a file you already hold, because a
+                                         hook on a sid is a hook on the person
+                                         sitting at that bench.
+     ------------------------------------------------------------------ */
+  const PLAYER_SID = (CBZ.officials && CBZ.officials.PLAYER_SID) || "player";
+  // the seat the PLAYER holds, if any — null when statecraft isn't loaded.
+  function playerSeat() {
+    try { return (CBZ.gov && CBZ.gov.holds) ? CBZ.gov.holds() : null; } catch (e) { return null; }
+  }
+  // Does the player chair THIS chamber? Their seat must be the jurisdiction
+  // the city hall actually STANDS IN. This is a point lookup on purpose:
+  // CBZ.polity.of(x,z) resolves only `city` and `federal` records (states and
+  // countries are hierarchy nodes, never point targets), so a governor or a
+  // president standing in a municipal chamber correctly fails this test. A
+  // president does not gavel a city council — the narrow compare IS the rule.
+  function playerChairsHere() {
+    const seat = playerSeat(); if (!seat || !seat.id) return false;
+    const o = (V && V._venue && V._venue.origin) || null;
+    if (!o || !CBZ.polity || !CBZ.polity.of) return false;
+    let here = null;
+    try { here = CBZ.polity.of(o.x, o.z); } catch (e) { here = null; }
+    return !!(here && here.id === seat.id);
+  }
+  function runState() {
+    try { return (CBZ.cityRun && CBZ.cityRun.state) ? CBZ.cityRun.state() : null; } catch (e) { return null; }
+  }
+  // a hook the campaign banked on this sid IS dirt in this room. Read both
+  // key shapes (bare sid, and the "sid:"-prefixed roster key) so whichever
+  // convention candidacy.js settled on, the archive research pays off here.
+  function bankedHook(sid) {
+    const R = runState(); const H = R && R.hooks; if (!H || !sid) return null;
+    return H[sid] || H["sid:" + sid] || null;
+  }
+
   /* ---------------- pure rules (probe-testable via api) ------------------- */
   // The whip count. A councillor votes AYE (for) / NAY (against) / ABSTAIN
   // (undecided). The rezoning carries iff FOR strictly beats AGAINST — a tie
@@ -135,7 +211,14 @@
   }
 
   /* ---------------- casting FROM the real officials sim ------------------- */
+  // officials.js OWNS this derivation and now exports it — call the owner
+  // rather than keeping a third private copy of the same five branches. The
+  // local fallback stays only so this package still casts a council if it is
+  // ever mounted without officials.js underneath it.
   function officeTitle(rec) {
+    if (CBZ.officials && CBZ.officials.titleFor) {
+      try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {}
+    }
     if (!rec) return "Councilmember";
     if (rec.kind === "country") return rec.govType === "monarchy" ? "Monarch" : "President";
     if (rec.kind === "state" || rec.kind === "federal") return "Governor";
@@ -151,6 +234,11 @@
       CBZ.polity.list("federal"), CBZ.polity.list("city"));
     function push(sid, title) {
       if (!sid || seen[sid]) return;
+      // NEVER cast the player as a councillor. Once city/candidacy.js can put
+      // you in an office, office.holder may literally be the player sentinel —
+      // and seating a second "you" at the bench while you're standing in the
+      // room is the exact fake-identity trap officials.js refuses to fall into.
+      if (sid === PLAYER_SID) { seen[sid] = 1; return; }
       const idn = CBZ.officials.identityOf(sid);
       if (!idn || !idn.name || idn.name === "Someone") return;
       seen[sid] = 1; out.push({ sid: sid, name: idn.name, title: title });
@@ -178,10 +266,11 @@
     for (let i = 0; i < COUNCIL_N; i++) {
       const seat = V.seats[i], meta = V.seatMeta[i];
       let name, title, real = false, key;
-      if (i < offs.length) { name = offs[i].name; title = offs[i].title; real = true; key = "sid:" + offs[i].sid; V.realCount++; }
+      let sid = null;
+      if (i < offs.length) { sid = offs[i].sid; name = offs[i].name; title = offs[i].title; real = true; key = "sid:" + sid; V.realCount++; }
       else { name = fillName(i); title = "Councilmember"; key = "fill:" + i; }
       const handle = ctx.npc ? ctx.npc({ role: "councillor", name: name, outfit: { archetype: "exec" }, at: [seat.x, seat.z], face: 0, post: "pinned", pose: "sit" }) : null;
-      COUNCIL.push({ i: i, key: key, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null });
+      COUNCIL.push({ i: i, key: key, sid: sid, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null });
     }
     // the auditor — a controlled ped we drive along posted waypoints.
     V.auditor = ctx.npc ? ctx.npc({ role: "auditor", name: auditorName(), outfit: { archetype: "exec" }, at: [0, V.hz * 0.2], face: Math.PI, post: "pinned", pose: "stand" }) : null;
@@ -240,11 +329,64 @@
     }
   }
 
-  /* ================= THE CHAIR / SESSION HUB ============================== */
+  /* ================= THE CHAIR / SESSION HUB ==============================
+     TWO GAMES SHARE THIS ROOM, and which one you're playing is decided by a
+     single real fact: does `rec.office.holder` on THIS jurisdiction equal the
+     player sentinel?
+       NO  — you are a lobbyist working a room after dark. Flip it or lose it.
+       YES — you ARE the chair. The gavel is yours, and the interesting move
+             is no longer flipping seven people, it is deciding whether to
+             OVERRIDE them. Ramming a bill through a council that voted it
+             down is legal and it is the fastest way to lose the room: the
+             cost is paid in the jurisdiction's REAL approval number and in
+             statecraft's tyranny, which is what the garrison reads before it
+             decides whether your next order is worth obeying.
+     The override is deliberately NOT free money. It is the same $60k the
+     honest majority pays — the difference is entirely what it costs you.
+     ------------------------------------------------------------------ */
+  const CHAIR_OVERRIDE_APPROVAL = 9;   // approval points burned ramming a bill through
+  const CHAIR_OVERRIDE_TYRANNY  = 12;  // tyranny added — statecraft decays it slowly
+
+  // the chair's override: legal, instant, and expensive in the only currency
+  // an officeholder actually has. Returns false when the room already agrees
+  // (then it isn't an override, it's just the vote).
+  function chairOverride() {
+    if (!G.active || G.result) return false;
+    if (!playerChairsHere()) return false;
+    const t = tallyOf(COUNCIL);
+    if (t.pass) { C.hud.feed("The room's already with you — just call the vote."); return false; }
+    const seat = playerSeat();
+    // the whole cost, paid to the REAL simulation, before anything is gained.
+    if (seat && seat.id && CBZ.approvalShock) {
+      try { CBZ.approvalShock(seat.id, -CHAIR_OVERRIDE_APPROVAL); } catch (e) {}
+    }
+    if (CBZ.gov && CBZ.gov.forceUsed) { try { CBZ.gov.forceUsed(CHAIR_OVERRIDE_TYRANNY, "gavelled a bill past the council"); } catch (e) {} }
+    G.voted = true; G.active = false;
+    G.result = "win";
+    C.wallet.give(WIN_PAYOUT, "Docklands rezoning — chair's prerogative");
+    setCooldown(); redrawBoard();
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING GAVELLED THROUGH " + t.for + "–" + t.against + " AGAINST");
+    if (CBZ.cityFeed) CBZ.cityFeed("The chair overrode the council on the Docklands rezoning. Two members walked out.", "#ff9a6a");
+    creditCampaign("gavelled the Docklands rezoning through");
+    C.hud.feed("You gavel it through over the council's objection. It is legal. Nobody in this room will forget it.", "#e8c84a");
+    return true;
+  }
+
+  // a bill you carried while you are ON THE BALLOT is real momentum in the
+  // real tally — elections.js's scoreCandidate() reads `momentum` directly.
+  function creditCampaign(why) {
+    try {
+      if (CBZ.cityRun && CBZ.cityRun.live && CBZ.cityRun.live() && CBZ.cityRun.momentumGain) {
+        CBZ.cityRun.momentumGain(3, why);
+      }
+    } catch (e) {}
+  }
+
   function openSession() {
     if (!C) return;
     const t = tallyOf(COUNCIL);
-    let body = head("CITY HALL — DOCKLANDS REZONING", G.active ? clockStr() : "after dark");
+    const chair = playerChairsHere();
+    let body = head("CITY HALL — DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
     body += "<div style='margin:2px 0 8px;line-height:1.55'>";
     body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b> · <b style='color:#ff6a5e'>AGAINST " + t.against + "</b> · <b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b> — need FOR &gt; AGAINST.<br>";
     body += "Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b>/" + SCANDAL_CAP + " · Ledger <b>" + G.ledger.length + "</b> page(s) · Cash <b>" + fmt(C.wallet.cash()) + "</b>";
@@ -258,13 +400,85 @@
       body += " " + btn("close", "Leave", "#26343c");
     } else {
       body += "<div style='opacity:.8;font-size:12px;margin-bottom:6px'>Flip " + Math.max(0, shortfall()) + " more to carry it. Lobby councillors at their seats; the records room, the cabinets, the press and the shredder are down the halls.</div>";
-      body += btn("callvote", "CALL THE VOTE NOW", "#c98f22") + btn("close", "Keep working", "#26343c");
+      body += btn("callvote", "CALL THE VOTE NOW", "#c98f22");
+      // THE CHAIR'S PREROGATIVE — only when the player genuinely holds this
+      // jurisdiction's seat, and only when the room is actually against them
+      // (otherwise it is not an override, it is just the vote).
+      if (chair && !t.pass) {
+        body += btn("override", "GAVEL IT THROUGH ANYWAY", "#7c1626");
+        body += "<div style='opacity:.75;font-size:12px;margin:4px 0'>The chair can carry a bill the council rejected. It costs " +
+          CHAIR_OVERRIDE_APPROVAL + " points of your approval and it is remembered — the garrison reads that number before it obeys you.</div>";
+      }
+      body += btn("close", "Keep working", "#26343c");
     }
     C.hud.panel(body, {
       start: function () { startNight(); openSession(); },
       callvote: function () { C.hud.closePanel(); gavel("early"); },
+      override: function () { C.hud.closePanel(); chairOverride(); },
       close: function () { C.hud.closePanel(); },
     });
+  }
+
+  /* ================= THE CLERK'S WINDOW — the door INTO politics ===========
+     The lobby of the flagship City Hall is where a first-time player will
+     stand before they have ever heard of the annex. The window does exactly
+     one thing and it is the most important verb in the wave: it files the
+     papers. Everything about which office, what it costs and why you can't
+     yet belongs to city/candidacy.js — this is a door, not a second copy of
+     the rules. With that module absent the window is honest about being shut.
+     ------------------------------------------------------------------ */
+  function openClerkWindow() {
+    if (!C) return;
+    const R = (CBZ.cityRun && CBZ.cityRun.offices) ? CBZ.cityRun : null;
+    let body = head("THE CLERK'S WINDOW", "filings · candidacies · the ballot");
+    if (!R) {
+      body += "<div style='opacity:.75;line-height:1.5'>The filing window is shuttered. A typed card behind the glass gives an office number and no hours.</div>";
+      C.hud.panel(body + btn("close", "Leave", "#26343c"), { close: function () { C.hud.closePanel(); } });
+      return;
+    }
+    let list = [];
+    try { list = R.offices() || []; } catch (e) { list = []; }
+    const st = runState();
+    if (st && st.filed) {
+      const held = playerSeat();
+      body += "<div style='margin:2px 0 8px;line-height:1.55'>You are <b style='color:#8fe08a'>on the ballot</b>" +
+        (st.officeId ? " for <b>" + String(st.officeId) + "</b>" : "") + ".<br>" +
+        "Signatures <b>" + (st.sigCount | 0) + "</b> · war chest <b>" + fmt(st.warChest || 0) + "</b> · momentum <b>" + Math.round(st.momentum || 0) + "</b>" +
+        (st.scandal ? " · scandal <b style='color:#ff6a5e'>" + Math.round(st.scandal) + "</b>" : "") + "</div>";
+      if (held) body += "<div style='opacity:.8;margin-bottom:6px'>You already hold a seat. Defending it is the same ballot.</div>";
+      body += btn("withdraw", "Withdraw the papers", "#7c1626") + btn("close", "Leave", "#26343c");
+      C.hud.panel(body, {
+        withdraw: function () { try { R.withdraw(); } catch (e) {} C.hud.closePanel(); },
+        close: function () { C.hud.closePanel(); },
+      });
+      return;
+    }
+    if (!list.length) {
+      body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course — come back when a seat's up, or when one comes up the hard way.”</div>";
+      C.hud.panel(body + btn("close", "Leave", "#26343c"), { close: function () { C.hud.closePanel(); } });
+      return;
+    }
+    body += "<div style='opacity:.85;margin-bottom:6px'>“Fee's the fee. Signatures are yours to get. Ballot closes when it closes.”</div>";
+    const h = { close: function () { C.hud.closePanel(); } };
+    for (let i = 0; i < list.length && i < 6; i++) {
+      (function (o, i) {
+        const ok = o.canFile !== false;
+        body += "<div style='margin:6px 0;padding-top:5px;border-top:1px solid #2c3140'>" +
+          "<b>" + (o.title || "Office") + " of " + (o.name || o.id) + "</b>" +
+          "<span style='opacity:.7;font-size:12px'> · fee " + fmt(o.fee || 0) +
+          " · " + (o.sigsNeeded | 0) + " signatures" +
+          (o.daysLeft != null ? " · " + o.daysLeft + "d to the ballot" : "") + "</span><br>" +
+          btn("file" + i, ok ? "FILE THE PAPERS" : "Can't file", ok ? "#1c6b40" : "#3a3f46", !ok) +
+          (!ok && o.why ? "<span style='opacity:.7;font-size:12px'> " + o.why + "</span>" : "") +
+          "</div>";
+        h["file" + i] = function () {
+          let r = null; try { r = R.file(o.id); } catch (e) { r = null; }
+          if (r && r.ok === false && r.why) C.hud.feed(r.why, "#ff9aa2");
+          C.hud.closePanel();
+        };
+      })(list[i], i);
+    }
+    C.hud.panel(body + "<br>" + btn("close", "Leave", "#26343c"), h);
   }
 
   /* ================= A COUNCILLOR ======================================== */
@@ -422,6 +636,12 @@
     C.wallet.give(WIN_PAYOUT, "Docklands rezoning — developer kickback");
     if (CBZ.city && CBZ.city.big) CBZ.city.big("DOCKLANDS REZONING PASSES " + t.for + "–" + t.against);
     C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " — the Docklands waterfront is your crew's turf now.", "#8fe08a");
+    // A bill you carried on a clean majority while you hold the seat is the
+    // one thing in this room that BUYS approval instead of spending it — and
+    // only when the room genuinely voted for it. Real number, real system.
+    const seat = playerChairsHere() ? playerSeat() : null;
+    if (seat && seat.id && CBZ.approvalShock) { try { CBZ.approvalShock(seat.id, 4); } catch (e) {} }
+    creditCampaign("carried the Docklands rezoning");
   }
   function lose(t) {
     G.result = t.for === t.against ? "lose:tie" : "lose:vote";
@@ -473,8 +693,19 @@
     for (let i = 0; i < COUNCIL.length; i++) { const m = COUNCIL[i]; m.stance = m.baseStance; m.flippedBy = null; m.dirtLine = null; }
     if (V.shelves) for (let i = 0; i < V.shelves.length; i++) V.shelves[i].searched = false;
     G = idleGame(); G.active = true; G.clockLeft = NIGHT_SECONDS;
+    // THE ARCHIVES PAY OFF HERE. A hook the campaign banked against a real
+    // sid — the afternoon you spent in the public library's records room —
+    // is a file already in your hand when the session opens. We invent no
+    // dirt: the line shown is the line the research actually wrote.
+    let banked = 0;
+    for (let i = 0; i < COUNCIL.length; i++) {
+      const m = COUNCIL[i]; if (!m.sid) continue;
+      const h = bankedHook(m.sid); if (!h) continue;
+      G.dirt[m.key] = true; m.dirtLine = h.note || h.line || "a file you pulled from the archives"; banked++;
+    }
     V.wpIdx = 0; V.guardAlertT = 0;
     redrawBoard();
+    if (banked) C.hud.feed("You came in with " + banked + " file(s) out of the archives. Someone at that bench knows it.", "#ffd166");
     if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK — PASS THE DOCKLANDS REZONING BY THE GAVEL");
     C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls — flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
     return true;
@@ -617,6 +848,29 @@
       })(SUPPLY[i]);
     }
 
+    // ---- THE CLERK'S WINDOW: a barred counter in the lobby, opposite the
+    //      press table. This is the door into elected politics — the one prop
+    //      in the room that matters when there is NO session running, which
+    //      is most of the time. Sited on the -x lobby wall so it reads on the
+    //      way in, not tucked behind the bench. ----
+    V.clerkPos = { x: -hx * 0.34, z: hz * 0.62 };
+    ctx.box(g, V.clerkPos.x, 0.55, V.clerkPos.z, 1.9, 1.1, 0.6, ctx.mat(COL.wood));          // counter
+    ctx.box(g, V.clerkPos.x, 1.16, V.clerkPos.z, 2.0, 0.1, 0.7, ctx.mat(COL.stone));         // stone sill
+    ctx.box(g, V.clerkPos.x, 1.95, V.clerkPos.z, 1.9, 1.5, 0.08, ctx.mat(0x22282f));         // glass screen
+    for (let bi = 0; bi < 5; bi++) {                                                          // the bars
+      ctx.box(g, V.clerkPos.x - 0.7 + bi * 0.35, 1.95, V.clerkPos.z - 0.05, 0.05, 1.5, 0.05, ctx.mat(COL.brass));
+    }
+    ctx.solid(V.clerkPos.x - 1.0, V.clerkPos.z - 0.35, V.clerkPos.x + 1.0, V.clerkPos.z + 0.35);
+    ctx.zone({ id: "clerkwindow", pos: [V.clerkPos.x, V.clerkPos.z - 0.95], r: 1.5,
+      onUse: openClerkWindow,
+      label: function () {
+        const st = runState();
+        if (st && st.filed) return "[E] The clerk's window — your filing";
+        const seat = playerSeat();
+        if (seat) return "[E] The clerk's window — the ballot";
+        return "[E] The clerk's window — file for office";
+      } });
+
     // ---- the lobby press (leak fears) ----
     V.reporterPost = { x: hx * 0.35, z: hz * 0.62, face: Math.PI };
     ctx.box(g, hx * 0.35, 0.5, hz * 0.72, 1.6, 1.0, 0.5, ctx.mat(COL.woodD));   // press table
@@ -698,6 +952,10 @@
       auditorCheck: function () { return auditorCheck(); },
       callVote: function () { gavel("early"); return !!(G && G.result); },
       expireClock: function () { if (G) { G.clockLeft = 0; tickClock(0); } return !!(G && G.result); },
+      // the political layer (all no-ops when statecraft/candidacy aren't loaded)
+      chairs: function () { return playerChairsHere(); },
+      override: function () { return chairOverride(); },
+      clerkWindow: function () { openClerkWindow(); },
       // harness-only hooks — not part of the player-facing surface.
       _setStance: function (i, s) { if (COUNCIL[i]) { COUNCIL[i].stance = s; redrawBoard(); } },
       _drain: function () { return ensureCouncil(); },

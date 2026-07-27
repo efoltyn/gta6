@@ -143,21 +143,31 @@
     owner._identityId = rec.id;
   }
 
+  // THE SHARED POST (city/occupy.js) — the four lines this file used to write
+  // by hand. Degrade-safe: without occupy.js the fallback is the prior code.
+  function post(x, z, o) {
+    if (CBZ.cityPostNpc) return CBZ.cityPostNpc(x, z, o);
+    if (!CBZ.cityMakePed || !CBZ.cityPeds || !o.parent) return null;
+    const p = CBZ.cityMakePed(x, z, o.rng, o);
+    if (!p) return null;
+    o.parent.add(p.group); CBZ.cityPeds.push(p);
+    if (o.homeGuard) p.homeGuard = o.homeGuard;
+    return p;
+  }
+
   function spawnOwner(co, A) {
     if (!CBZ.cityMakePed || !CBZ.cityPeds || !A || !A.root) return null;
     const sp = ownerSpawnPoint(co.hq);
     const title = OWNER_TITLE[co.sector] || "executive";
-    const owner = CBZ.cityMakePed(sp.x, sp.z, rng, {
+    const owner = post(sp.x, sp.z, {
+      src: "companies:owner", rng: rng, parent: A.root,
       kind: "civilian", archetype: "socialite", job: title,
       wealth: Math.min(0.97, 0.55 + rint(40) / 100), aggr: 0.16,    // money doesn't brawl
-      guard: { x: sp.x, z: sp.z },
+      guard: { x: sp.x, z: sp.z }, homeGuard: { x: sp.x, z: sp.z },
     });
     if (!owner) return null;
     owner.isCompanyOwner = true;
     owner.company = co.id;
-    owner.homeGuard = { x: sp.x, z: sp.z };
-    A.root.add(owner.group);
-    CBZ.cityPeds.push(owner);
     registerOwnerIdentity(co, owner);
     return owner;
   }
@@ -168,6 +178,7 @@
   function despawnOwner(co) {
     const owner = co && co.owner; if (!owner) return;
     co.owner = null;
+    if (CBZ.cityUnpostNpc) { CBZ.cityUnpostNpc(owner); return; }   // the matching half of post()
     const i = CBZ.cityPeds ? CBZ.cityPeds.indexOf(owner) : -1;
     if (i >= 0) CBZ.cityPeds.splice(i, 1);
     if (owner.group && owner.group.parent) owner.group.parent.remove(owner.group);

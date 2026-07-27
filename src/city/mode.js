@@ -48,8 +48,23 @@
   // "police"/"cops", which NOTE_URGENT would otherwise promote to a centre flash.
   const NOTE_FOURTH_WALL = new RegExp([
     // --- witnesses / snitching (peds.js, jewelry.js) ---
-    "saw that", "reported you", "pointed you out", "Reported:", "",
-    ".*(saw|spun around|made)", "is a narc", "rival-affiliated",
+    // TWO ENTRIES HERE WERE EMOJI, AND REMOVING THE EMOJI BROKE THE REGEX.
+    // Commit ea61ace ("Remove every emoji from the game") rewrote
+    //     "🗣️",  "👀.*(saw|spun around|made)"
+    // as
+    //     "",    ".*(saw|spun around|made)"
+    // The first left an EMPTY ALTERNATIVE in the joined pattern
+    // (`...|Reported:||.*(saw...`), and an empty alternative matches the empty
+    // string at position 0 of EVERY input — so NOTE_FOURTH_WALL.test(anything)
+    // was `true`, phoneWorthy() returned false on line 103 for every message in
+    // the game, and city.note / city.big / phoneNotify / cityFeed all silently
+    // deleted 100% of their traffic. The whole game was mute.
+    // The second lost its 👀 anchor and became a bare wildcard: ".*made" ate
+    // "you're MADE!", "homemade", any sentence containing "saw". Both are
+    // restored to what they were guarding — the witness-narration phrasing —
+    // with word boundaries instead of an emoji.
+    "saw that", "reported you", "pointed you out", "Reported:",
+    "\\bspun around\\b", "\\b(?:saw|made) you\\b", "is a narc", "rival-affiliated",
     // --- traffic flavor (vehicles.js) ---
     "Traffic stop", "ticketed", "fleeing the police", "running from (the )?police",
     // --- gang movement / ambient gang life (turf.js, gangs.js) ---

@@ -240,8 +240,22 @@
     const p = chargeWorldPos(ch, _v);
     removeCharge(ch);
     if (g.mode !== "city") return;
-    // SAME blast chain as the RPG/grenade — byPlayer routes kills + heat to you
-    if (CBZ.cityExplosion) {
+    // THE ORDNANCE BUS (systems/impactbus.js): one verb replaces the blast
+    // fan-out this function used to spell out. The "c4" row carries the same
+    // power/radius C4 always had (1.4 / 6) plus the two things the inline call
+    // could not express — a structural multiplier into city/structural.js's
+    // ledger and a small ignition — so a wall charge now genuinely WOUNDS the
+    // building instead of scorching it. A charge up a wall still blooms THERE
+    // (y), and a wall charge drives its damage INTO the facade (-normal), which
+    // is what makes a breaching charge read like one.
+    // DEGRADE-SAFE: no bus loaded => the exact pre-bus call, unchanged.
+    const by = (CBZ.city && CBZ.city.playerActor) || CBZ.player || null;
+    if (CBZ.detonate) {
+      CBZ.detonate(p.x, p.y, p.z, "c4", {
+        by: by, byPlayer: true,
+        dirx: ch.wall ? -ch.wall.x : 0, dirz: ch.wall ? -ch.wall.z : 0,
+      });
+    } else if (CBZ.cityExplosion) {
       const o = { power: C4.power, radius: C4.radius, byPlayer: true };
       if (p.y > 3) o.y = p.y;                 // a charge up a wall blooms THERE
       CBZ.cityExplosion(p.x, p.z, o);
@@ -265,6 +279,11 @@
     if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;   // Shift+B belongs to wealth.js
     if (g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || !CBZ.player || CBZ.player.dead) return;
+    // FLYING THE BOMBER OWNS [B]. city/strategic.js's B-2 uses tap=release /
+    // hold=carpet run on this same key; a charge in your pocket must not eat
+    // the bomb-bay key while you are 200 m up (this capture handler would
+    // stopImmediatePropagation it and the drop would silently never happen).
+    if (CBZ.player._aircraft) return;
     // only claim the key when it can DO something: plant (on foot, carrying)
     // or detonate (charges out — allowed from the driver's seat: the getaway boom)
     const canPlant = !CBZ.player.driving && count() > 0;

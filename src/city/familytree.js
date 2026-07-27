@@ -33,12 +33,42 @@
    (markDeath is the only writer). If a later wave adds a real alive
    query to the ledger, heirOf/isLiving below is the one place to widen.
 
-   TIME: no world-day counter exists yet (polity.js, later, will add one
-   — grep found only CBZ.dayPhase, which is a 0..1 fraction of the CURRENT
-   day, not a monotonic counter). Stamps use CBZ.game.elapsed (seconds
-   since the current run started) as a placeholder ordering key — good
-   enough for "since"/"end" ordering within a run; P1 should upgrade these
-   stamps to a real worldDay once one exists.
+   TIME: EDGE stamps (since/end) still use CBZ.game.elapsed — seconds since
+   the run started — as an ordering key. That header line used to say "no
+   world-day counter exists yet"; that is now STALE (see below), but the edge
+   stamps deliberately stay on elapsed: a save written before this change
+   carries `since` in SECONDS, and silently re-basing the same field to DAYS
+   would scramble kidsOf()'s oldest-first sort across a load (and would move
+   births.js's per-edge `e.lb` cooldown from 300s to 300 days). The unit
+   mismatch is invisible because nothing compares a stamp to a wall clock —
+   only to another stamp from the same run. Leave it.
+
+   BIRTHDAYS ARE A DIFFERENT AXIS, and they DO ride a real calendar (W13).
+   The world-day counter the old note said was missing exists in two places:
+     · core/daynight.js — `CBZ.dayCount()` (integer calendar day, bumped on
+       the midnight wrap) and `CBZ.dayTime()` = dayCount + dayPhase, a
+       CONTINUOUS monotonic days-elapsed clock. BOTH halves ride the world
+       save (net/netpersist.js:140-141 writes blob.day/blob.dayN, :267-268
+       restores them), so it survives a reload and an MP adopt.
+     · city/polity.js — `CBZ.worldDay()`, a second monotonic counter derived
+       off the SAME dayPhase wrap. It is deliberately NOT used here: its own
+       header says "worldDay does NOT survive reset(): a fresh run is day 0,
+       always", and it only exists once polity.js has loaded.
+   So the birth ledger below stamps CBZ.dayTime() — the one clock that is
+   (a) continuous (a fraction of a day is a real fraction of a life at this
+   scale), (b) monotonic, and (c) already persisted by the existing save.
+
+   WHY THE BIRTHDAY LIVES HERE and not on the ped: a ped BODY is transient —
+   crowd.js parks it, schedule.js stashes the identity to a ledger page whose
+   fields are a fixed whitelist (cityPedStash, schedule.js:255-300 — we can't
+   add one), and cityPedDeal later re-attaches that identity to a DIFFERENT
+   body. The sid is the only thing that survives all of that, and this module
+   is already the sid-keyed, save-persisted book of who-is-whose. A birthday
+   is the same kind of fact as a parentage edge: permanent, per-identity, and
+   meaningless to re-derive. Storing it here means an offline NPC ages for
+   free — nothing ticks, because age is DERIVED (today − bornDay), exactly
+   the trick crown.js already uses for royals (`born` + worldDay(), no aging
+   pass anywhere). city/childhood.js owns the rate and the bodies.
 
    PERSISTENCE (two paths, both guarded/defensive, matching the fracture.js
    / cityNpcLedger precedent):
@@ -63,12 +93,33 @@
   // ---- STATE -------------------------------------------------------------
   let edges = [];              // { k, a, b, since, end, why }
   let dead = Object.create(null); // sid -> true (the sole liveness authority — see header)
+  let born = Object.create(null); // sid -> bornDay (CBZ.dayTime() units — W13, see header)
   let idx = null;               // sid -> edge[] (lazy, rebuilt on dirty)
   let idxDirty = true;
 
   function now() {
-    // P1 will upgrade this to a real worldDay once polity.js lands one.
+    // EDGE ordering key only — stays on elapsed SECONDS on purpose (header).
     return (g && g.elapsed) | 0;
+  }
+
+  // ---- W13: the CALENDAR read. Continuous days-elapsed, guarded three deep
+  // so a load-order change (or a harness with no daynight.js) can only ever
+  // make every birthday "day 0" — never throw. ----
+  function dayNow() {
+    if (typeof CBZ.dayTime === "function") return CBZ.dayTime();
+    if (typeof CBZ.dayCount === "function") {
+      return CBZ.dayCount() + (typeof CBZ.dayPhase === "function" ? CBZ.dayPhase() : 0);
+    }
+    return 0;
+  }
+  // How many YEARS of a life one world-day buys. city/childhood.js owns this
+  // flag's real home and its documentation; read defensively here so a
+  // back-dated cast birthday (bearChild below) lands on the same scale even
+  // if childhood.js never loaded. crown.js already set this precedent for
+  // royals: "a ped starts at 0 and ages exactly one unit per worldDay".
+  function yearsPerDay() {
+    const v = CBZ.CONFIG && CBZ.CONFIG.CHILD_YEARS_PER_DAY;
+    return (v != null && isFinite(v) && v > 0) ? +v : 1;
   }
 
   function markDirty() { idxDirty = true; }
@@ -131,11 +182,71 @@
     const c = sidOf(childPed);
     const out = [];
     if (!c) return out;
+    // W13 — BIRTHDAY FOR FREE. Every existing bearChild() caller (births.js's
+    // birth clock, family.js's cast mansion kids, social.js's rare boss kid)
+    // gets a persisted birthday from the call it ALREADY makes: no new API to
+    // learn, no schema, no second bookkeeping table. That is the whole point —
+    // a block that costs an extra call at every site does not get adopted.
+    //   The stamp is BACK-DATED by the child's own ageYears when the caller
+    // minted a body that is already N years old (cast-time kids: peds.js's
+    // opts.age stamps ped.ageYears). A newborn has ageYears 0/absent and lands
+    // on today. Idempotent: a second bearChild for the same child never moves
+    // an existing birthday (re-marrying a widow re-runs these paths).
+    if (childPed && typeof childPed === "object" && born[c] == null) {
+      const yrs = (childPed.ageYears != null && isFinite(childPed.ageYears)) ? +childPed.ageYears : 0;
+      born[c] = dayNow() - Math.max(0, yrs) / yearsPerDay();
+    }
     const pa = parentA != null ? sidOf(parentA) : null;
     const pb = parentB != null ? sidOf(parentB) : null;
     if (pa) out.push(addPc(pa, c));
     if (pb && pb !== pa) out.push(addPc(pb, c));
     return out;
+  }
+
+  // ============================================================
+  //  W13 BIRTHDAYS — the time axis this ledger was missing.
+  //  Three tiny calls; NOTHING here ticks. Age is derived on read
+  //  (today − bornDay), so an identity that is parked, stashed to an
+  //  offline ledger page, or sitting in a save file ages at exactly the
+  //  same rate as the one standing in front of you — for free.
+  // ============================================================
+
+  // setBorn(pedOrSid, day, force) — record a birthday. `day` omitted = today.
+  // Non-destructive by default (first stamp wins) so a re-entrant caster can't
+  // reset somebody's age; pass force to deliberately re-base one (a cast kid
+  // whose plausible age is decided after the body exists).
+  function setBorn(x, day, force) {
+    const sid = sidOf(x);
+    if (!sid) return null;
+    if (born[sid] != null && !force) return born[sid];
+    const d = (day != null && isFinite(day)) ? +day : dayNow();
+    born[sid] = d;
+    return d;
+  }
+  // setAge(pedOrSid, years, force) — the same thing said the way callers think
+  // ("this person is 7"), converted through the one rate.
+  function setAge(x, years, force) {
+    const y = (years != null && isFinite(years)) ? Math.max(0, +years) : 0;
+    return setBorn(x, dayNow() - y / yearsPerDay(), force);
+  }
+  function bornOf(sid) {
+    const s = sidOf(sid);
+    return (s != null && born[s] != null) ? born[s] : null;
+  }
+  // ageDaysOf(sid) — world-days lived. null when this identity has no recorded
+  // birthday at all (every adult minted before W13, i.e. almost everyone):
+  // "unknown age" is NOT "age zero", and a caller must read the null as adult.
+  function ageDaysOf(sid, atDay) {
+    const b = bornOf(sid);
+    if (b == null) return null;
+    const t = (atDay != null && isFinite(atDay)) ? +atDay : dayNow();
+    const d = t - b;
+    return d > 0 ? d : 0;
+  }
+  // ageOf(sid) — years, through the shared rate. The read every consumer wants.
+  function ageOf(sid, atDay) {
+    const d = ageDaysOf(sid, atDay);
+    return d == null ? null : d * yearsPerDay();
   }
   function addPc(parentSid, childSid) {
     const list = ensureIdx().get(parentSid) || [];
@@ -237,7 +348,13 @@
   //  single-player wrap below)
   // ============================================================
   function serialize() {
-    return { v: 1, edges: edges.slice(), dead: Object.keys(dead) };
+    // `born` rides as a plain sid->number map. Version stays 1 on purpose:
+    // the field is purely ADDITIVE, an older reader ignores it and an older
+    // SAVE simply has no birthdays (apply() below treats that as "everyone is
+    // an adult", which is exactly what the world was before W13). Bumping v
+    // would make every existing save fail apply()'s `obj.v !== 1` guard and
+    // silently drop the whole family tree — a far worse trade.
+    return { v: 1, edges: edges.slice(), dead: Object.keys(dead), born: Object.assign({}, born) };
   }
   function apply(obj) {
     if (!obj || obj.v !== 1) return;
@@ -252,16 +369,27 @@
     edges = clean;
     dead = Object.create(null);
     if (Array.isArray(obj.dead)) for (let i = 0; i < obj.dead.length; i++) dead[obj.dead[i]] = true;
+    born = Object.create(null);
+    if (obj.born && typeof obj.born === "object") {
+      for (const sid in obj.born) {
+        const d = obj.born[sid];
+        if (isFinite(d)) born[sid] = +d;      // hostile/garbage values simply don't land
+      }
+    }
     markDirty();
   }
   function reset() {
-    edges = []; dead = Object.create(null); markDirty();
+    edges = []; dead = Object.create(null); born = Object.create(null); markDirty();
   }
 
   CBZ.cityFamilyTree = {
     marry: marry, bearChild: bearChild, endMarriage: endMarriage, markDeath: markDeath,
     spouseOf: spouseOf, exSpousesOf: exSpousesOf, kidsOf: kidsOf, parentsOf: parentsOf,
     heirOf: heirOf, edgesOf: edgesOf, count: count,
+    // W13 birthdays (city/childhood.js is the main consumer; see header)
+    setBorn: setBorn, setAge: setAge, bornOf: bornOf, ageDaysOf: ageDaysOf, ageOf: ageOf,
+    dayNow: dayNow,
+    bornCount: function () { return Object.keys(born).length; },
     serialize: serialize, apply: apply, reset: reset,
   };
   // top-level guard-call convention (cityGangsReset/citySocialReset/

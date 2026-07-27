@@ -9,7 +9,8 @@
    manual tier: sampleFPS() below no-ops while it's true, and
    CBZ.setQualityLevel(n) is the one call the settings panel needs to set
    qLevel + applyQuality() together (capped at the live host-aware
-   CBZ.qualityTopTier()). Untouched (panel never opened) → byte-identical.
+   CBZ.qualityTopTier()). The title screen starts with an explicit, persistent
+   Medium preset; Settings can still opt back into adaptive quality.
 ============================================================ */
 (function () {
   "use strict";
@@ -31,13 +32,38 @@
   // cull = FULL-DETAIL radius for static city groups (core/farcull.js); beyond
   //        it real buildings continue as one measured instanced skyline draw,
   //        while invisible rooms/windows stop consuming thousands of calls.
+  // gfx = the RENDER-REALISM budget (core/gfx.js, core/lights.js,
+  //       world/materials.js, world/textures_surface.js all read it via
+  //       CBZ.gfxTier). Every field degrades to "exactly what shipped before"
+  //       at tier 0, which must stay at least as cheap as it always was:
+  //   lightGain  scales the LOGICAL light intensities for the installed tone
+  //              map (1.0 = no tone map / no compensation).
+  //   exposure   multiplies renderer.toneMappingExposure.
+  //   bounce     0..1 scale on the ground-bounce fill (0 = light held at zero).
+  //   shadowHalf ortho shadow-frustum HALF-size in world units for city play.
+  //              Smaller = far more shadow texels per metre. The old hard-coded
+  //              190 gave 0.186 u/texel at 2048; 110 gives 0.107 — 1.7x sharper
+  //              contact shadows for free (the map size never changes).
+  //   env        attach the PMREM environment to Standard materials.
+  //   normals    procedural normal/roughness maps (world/textures_surface.js).
+  //   pbr        promote merged Lambert world geometry to Standard + env + the
+  //              in-material ground-AO/detail-normal grade (core/gfx.js).
+  //   aniso      anisotropic filtering cap for the surface library.
+  const GFX = [
+    { lightGain: 1.00, exposure: 1.00, bounce: 0.00, shadowHalf: 190, env: false, normals: false, pbr: false, aniso: 1 }, // 0 — no shadow pass at all
+    { lightGain: 1.00, exposure: 0.98, bounce: 0.55, shadowHalf: 170, env: false, normals: true,  pbr: false, aniso: 2 }, // 1
+    { lightGain: 1.00, exposure: 1.00, bounce: 0.85, shadowHalf: 150, env: true,  normals: true,  pbr: false, aniso: 4 }, // 2
+    { lightGain: 1.00, exposure: 1.02, bounce: 1.00, shadowHalf: 125, env: true,  normals: true,  pbr: true,  aniso: 8 }, // 3
+    { lightGain: 1.00, exposure: 1.04, bounce: 1.00, shadowHalf: 110, env: true,  normals: true,  pbr: true,  aniso: 8 }, // 4
+  ];
+
   const QUALITY = [
     // Even emergency mode remains legible. The city is dominated by draw
     // submission/shadow work, so crushing DPR to 0.28 blurred the image without
     // reliably moving the bottleneck. Emergency instead disables the sun pass
     // and trims render distance/actors while keeping a sane resolution floor.
-    { pr: 0.72, shadow: 512, crowd: 180,  ped: { vis: 45,  shadow: 0  }, sunShadow: false, fog: 420,  cull: 230 },  // 0 — emergency
-    { pr: 0.85, shadow: 1024, crowd: 360, ped: { vis: 70,  shadow: 28 }, fog: 580,  cull: 300 },  // 1
+    { pr: 0.90, shadow: 512, crowd: 180,  ped: { vis: 45,  shadow: 0  }, sunShadow: false, fog: 380,  cull: 230 },  // 0 — Fast preset: crisp, short horizon
+    { pr: 0.95, shadow: 1024, crowd: 360, ped: { vis: 70,  shadow: 28 }, fog: 560,  cull: 300 },  // 1
     { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 }, fog: 760,  cull: 390 },  // 2
     // The actor visibility leak used to spend ~2.3k calls before the scenery
     // was considered. With that fixed, High/Best can show the real skyline and
@@ -46,13 +72,15 @@
     { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 1000, cull: 500 },  // 3
     { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 1400, cull: 700 },  // 4 — full world
   ];
+  // Published live so any renderer-side system can read the current budget
+  // without importing the table. Set before the first applyQuality() below.
+  CBZ.gfxTier = GFX[2];
+  CBZ.gfxTiers = GFX;
   const QUALITY_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
-  // A fresh session is a first impression, not a benchmark screen. Starting at
-  // the emergency tier hid most of the archipelago behind a 170m fog wall and
-  // made the aerial world look unfinished until the tuner slowly climbed up.
-  // Start from the coherent High presentation; the adaptive sampler still
-  // steps down immediately when a device genuinely needs it.
-  let qLevel = 3;
+  const TITLE_PRESETS = { fast: 0, medium: 2, best: 4 };
+  // The title makes the tradeoff explicit. Medium is a stable first-run choice;
+  // Settings still offers the five fine-grained tiers and an Auto opt-in.
+  let qLevel = 2, titlePreset = "medium", applyingTitlePreset = false;
   // Changing DPR/shadow storage can itself hitch. Do not feed that transition
   // back into the sampler and trigger a downgrade cascade.
   let qualitySettlingUntil = 0;
@@ -62,14 +90,32 @@
   // pins qLevel to the chosen tier and disables auto-adjust entirely — a
   // manual choice should stick, not get silently overridden. Persisted so it
   // survives a reload.
-  CBZ.qualityAuto = true;
+  CBZ.qualityAuto = false;
+  CBZ.qualityLocked = true;
   try {
+    const savedPreset = localStorage.getItem("cbz_qualityPreset");
     const saved = localStorage.getItem("cbz_qualityLevel");
-    if (saved !== null) {
+    if (savedPreset && TITLE_PRESETS[savedPreset] != null) {
+      titlePreset = savedPreset;
+      qLevel = TITLE_PRESETS[savedPreset];
+    } else if (saved !== null) {
       const n = parseInt(saved, 10);
-      if (n >= 0 && n < QUALITY.length) { qLevel = n; CBZ.qualityAuto = false; }
+      if (n >= 0 && n < QUALITY.length) {
+        qLevel = n;
+        titlePreset = n <= 1 ? "fast" : (n >= 4 ? "best" : "medium");
+      }
     }
   } catch (e) {}
+
+  function syncTitlePresetUI() {
+    const nearest = qLevel <= 1 ? "fast" : (qLevel >= 4 ? "best" : "medium");
+    const buttons = document.querySelectorAll("[data-quality-preset]");
+    for (let i = 0; i < buttons.length; i++) {
+      const active = CBZ.qualityLocked !== false && buttons[i].getAttribute("data-quality-preset") === nearest;
+      buttons[i].classList.toggle("active", active);
+      buttons[i].setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
 
   // ONE setQualityLevel for both manual surfaces (pause slider + settings
   // panel): pins the tier, disables auto (qualityAuto=false is what the
@@ -78,13 +124,34 @@
     n = Math.max(0, Math.min(QUALITY.length - 1, n | 0));
     n = Math.min(n, topTier());
     qLevel = n;
+    titlePreset = n <= 1 ? "fast" : (n >= 4 ? "best" : "medium");
     CBZ.qualityAuto = false;
-    try { localStorage.setItem("cbz_qualityLevel", String(n)); } catch (e) {}
+    try {
+      localStorage.setItem("cbz_qualityLevel", String(n));
+      // A fine-grained Settings choice (tiers 1 or 3 included) must not be
+      // overwritten by an older three-button preset on the next reload.
+      if (!applyingTitlePreset) localStorage.removeItem("cbz_qualityPreset");
+    } catch (e) {}
     applyQuality();
     return qLevel;
   }
   CBZ.setQualityLevel = setQualityLevel;
   CBZ.qualityLabels = QUALITY_LABELS;
+  CBZ.syncQualityPresetUI = syncTitlePresetUI;
+  CBZ.setQualityPreset = function (id) {
+    if (TITLE_PRESETS[id] == null) id = "medium";
+    titlePreset = id;
+    CBZ.qualityLocked = true;
+    let level;
+    applyingTitlePreset = true;
+    try { level = setQualityLevel(TITLE_PRESETS[id]); }
+    finally { applyingTitlePreset = false; }
+    try { localStorage.setItem("cbz_qualityPreset", id); } catch (e) {}
+    try {
+      window.dispatchEvent(new CustomEvent("cbzqualitypreset", { detail: { id: id, level: level } }));
+    } catch (e) {}
+    return level;
+  };
 
   // ---- QUALITY-V2 (smarter FEEL-aware tier control) -----------------------
   // Gated behind CBZ.qualityV2 (default ON). When OFF we retain the legacy
@@ -125,8 +192,7 @@
   // V2/legacy sampler drive it. CBZ.qualityLocked is the ONLY new piece of
   // state needed for that: when true, sampleFPS() below returns immediately
   // before touching qLevel, so a manual pick sticks until the player flips
-  // back to Auto. Default false (=Auto) → untouched byte-identical sampler
-  // behaviour for anyone who never opens the panel. CBZ.setQualityLevel is the
+  // back to Auto. CBZ.setQualityLevel is the
   // single entry point settings.js calls — it owns the qLevel write + the
   // applyQuality() call so the panel never has to poke qLevel directly.
   if (CBZ.qualityLocked === undefined) CBZ.qualityLocked = false;
@@ -165,6 +231,7 @@
     const label = document.getElementById("qualityCurrentLabel");
     if (slider) slider.value = qLevel;
     if (label) label.textContent = QUALITY_LABELS[qLevel];
+    syncTitlePresetUI();
   }
 
   // ---- quality-change listener bus ----------------------------------------
@@ -179,6 +246,10 @@
   function applyQuality() {
     const q = QUALITY[qLevel];
     CBZ.qualityLevel = qLevel;
+    // Publish the render-realism budget BEFORE the listener fan-out below, so
+    // every gfx listener (core/gfx.js, world/materials.js) reads this tier's
+    // row rather than the previous one on the frame the tier changes.
+    CBZ.gfxTier = GFX[qLevel] || GFX[2];
     syncSliderUI();
     CBZ.crowdRenderBudget = q.crowd;
     if (CBZ.refreshCrowdBudget) CBZ.refreshCrowdBudget();
@@ -212,6 +283,14 @@
     qualitySettlingUntil = stamp + 800;
   }
   applyQuality();
+
+  const titleButtons = document.querySelectorAll("[data-quality-preset]");
+  for (let i = 0; i < titleButtons.length; i++) {
+    titleButtons[i].addEventListener("click", function () {
+      CBZ.setQualityPreset(this.getAttribute("data-quality-preset"));
+    });
+  }
+  syncTitlePresetUI();
 
   // rolling FPS sampler with hysteresis (no quality ping-pong)
   let _accum = 0, _frames = 0, _window = 0, _good = 0, _warmup = 1.5;

@@ -68,8 +68,34 @@
    (which, with config.js's PROC_TERRAIN=false default, means "no backdrop
    at all" — today's shipped world, one-line revert).
 
-   Perf: 4×4 tiles at 76 segs ≈ 185k tris / 16 draws + one 90-boulder talus
-   scatter (≤3 InstancedMesh draws). Oracle is analytic + allocation-free.
+   REALNESS PASS (world/mountain_detail.js — the shared geology kit):
+     • RIVERS V2 — the old carve was a near-inert scalar (its mapLinear window
+       sat outside pingpong's own range, so it never exceeded ~6% of its
+       nominal depth: "rivers" were a smooth dip). Now a real cross-section —
+       flat gravel bed, V walls, floodplain terrace shelf, cut-bank crest —
+       with gravel/wetted-channel colours to match.
+     • STRATA — warped, non-parallel bedding cut as geometry (mtnTerrace) and
+       painted from the SAME field (mtnStrataTint), so the colour bands land on
+       the geometric risers. Rock↔soil now blends by SLOPE, not altitude alone.
+     • SNOW — coverage, not a contour: slope sheds it, sun ASPECT raises the
+       line on lit faces and drops it on shaded ones, noise feathers the edge.
+       (faceLight was already computed and thrown away on brightness alone.)
+     • SHADING SEAM — the tiles were flat-shaded while the walkable Mount
+       Mercy / Greater Mercy meshes right in front of them are smooth-shaded,
+       so the two ranges met at a hard faceted-vs-smooth line. Both smooth now.
+     • RESOLUTION — one adaptive CDF axis computed across the whole 4×4 span
+       and SLICED per tile (shared boundary samples ⇒ no T-junction cracks),
+       so grid lines concentrate on the relief sector and thin over open sea.
+     • SCALE — TERRAIN_RING_AMP compensates the foreshortening of a range that
+       stands 150-2050u further out than the walkable one.
+   All of it obeys the kit's two safety laws, so the math gate's
+   city-on-mountain / mountains-outside-snow cell sets can only shrink.
+
+   Perf: 4×4 tiles at TERRAIN_TILE_SEG (88) ≈ 248k tris / 16 draws + one
+   90-boulder talus scatter (≤3 InstancedMesh draws). Smooth shading means the
+   colour loop runs per VERTEX rather than per de-indexed triangle corner, so
+   it is ~4x cheaper than the old flat-shaded build despite the higher segment
+   count. Oracle is analytic + allocation-free.
 ============================================================ */
 (function () {
   "use strict";
@@ -88,6 +114,35 @@
   // half=420), so relief rises ONLY behind the white country and the rest of the
   // horizon reads as open sea. Flip false to restore the map-wide range.
   if (CFG.TERRAIN_SNOW_ONLY_RANGES == null) CFG.TERRAIN_SNOW_ONLY_RANGES = true;
+  // ---- REALNESS PASS (world/mountain_detail.js kit) ---------------------
+  // TERRAIN_RIVER_BANKS — the V3 river term used to be a near-inert smooth dip
+  // (its mapLinear window sat outside pingpong's own range, so the carve never
+  // exceeded ~6% of its nominal depth). Replaced by a real valley cross-section:
+  // a flat gravel bed, V walls, a floodplain terrace shelf and a cut-bank crest,
+  // with matching bed/wet-band colours. Off → the old scalar dip.
+  if (CFG.TERRAIN_RIVER_BANKS == null) CFG.TERRAIN_RIVER_BANKS = true;
+  // TERRAIN_STRATA — warped, non-parallel altitude bedding: geometry (benches
+  // and risers via mtnTerrace) plus the matching banded rock colour, shared
+  // with the snow biome so both ranges are the same rock. Off → the old
+  // single-ramp granite lerp on a smooth surface.
+  if (CFG.TERRAIN_STRATA == null) CFG.TERRAIN_STRATA = true;
+  // TERRAIN_SMOOTH_SHADE — the backdrop tiles were de-indexed + flatShading
+  // while Mount Mercy / Greater Mercy right in front of them are smooth-shaded,
+  // so the exact place the two ranges meet showed a faceted-vs-smooth style
+  // seam. Both are smooth now. Off → the old flat facets.
+  if (CFG.TERRAIN_SMOOTH_SHADE == null) CFG.TERRAIN_SMOOTH_SHADE = true;
+  // TERRAIN_TILE_SEG — segments per backdrop tile (was a hard 76). The axes are
+  // computed ONCE across the whole 4x4 span and then sliced per tile, so tile
+  // edges share identical vertices (no T-junction cracks) while the adaptive
+  // CDF concentrates lines on the relief sector and thins them over open sea.
+  if (CFG.TERRAIN_TILE_SEG == null) CFG.TERRAIN_TILE_SEG = 88;
+  // TERRAIN_RING_AMP — scale foreshortening dial. The offshore ranges are the
+  // same world-unit height as the walkable ones but sit 150-2050u further out,
+  // so they read SMALLER. This multiplies their upper two-thirds only, through
+  // CBZ.mtnHiGate: a sample at or below 45u is untouched and a sample already
+  // above the math gate's 25u threshold stays above it, so the gate's
+  // mountains-outside-snow / city-on-mountain counts are provably unchanged.
+  if (CFG.TERRAIN_RING_AMP == null) CFG.TERRAIN_RING_AMP = 1.18;
 
   // originals (terrain.js loaded just before this file)
   const orig = {
@@ -398,10 +453,16 @@
   // ---- THE FIELD — the reference pipeline, one evaluation ----------------
   // Returns world height h (signed: <0 = under the sea shelf) plus the
   // intermediate fields the color ramp / vegetation ecology reuse.
-  const _fld = { h: 0, carve: 0, altN: 0, moist: 0, snowY: 260 };
+  const _fld = { h: 0, carve: 0, altN: 0, moist: 0, snowY: 260, rivT: 1, rivBed: 0, rivWet: 0 };
+  const KIT = function () {
+    return !!(CBZ.mtnTerrace && CBZ.mtnHiGate && CBZ.mtnStrataTint && CBZ.mtnSnowCover);
+  };
   function v3Field(x, z, out) {
     out = out || _fld;
-    if (!initSeeds()) { out.h = 0; out.carve = 0; out.altN = 0; out.moist = 0; out.snowY = 260; return out; }
+    if (!initSeeds()) {
+      out.h = 0; out.carve = 0; out.altN = 0; out.moist = 0; out.snowY = 260;
+      out.rivT = 1; out.rivBed = 0; out.rivWet = 0; return out;
+    }
 
     // base mountain mass
     let t = fbmN(x, z, SB, V3P.OCT, V3P.LAC, V3P.GAIN, V3P.FREQ, V3P.OFFSET);
@@ -423,6 +484,18 @@
     r = pingpong(r, 0.5);
     r = clamp01((r - V3P.RIVER_W) / V3P.RIVER_F * (0 - 1) + 1);   // mapLinear(r, W, W+F, 1, 0)
     r = (1 - smooth01(r)) * 0.5;
+    // ---- RIVERS V2: the channel-distance profile a real valley has ------
+    // `rivT` is 0 on the thalweg and 1 at the valley rim. Zero crossings of a
+    // continuous field are continuous CURVES, so these channels branch and
+    // merge into a drainage network instead of scattering as dents.
+    let rivT = 1, rivBed = 0, rivTer = 0, rivBank = 0;
+    if (CFG.TERRAIN_RIVER_BANKS !== false) {
+      const raw = Math.abs(fbmN(x, z, SR, V3P.R_OCT, 2, V3P.R_GAIN, V3P.R_FREQ, 0));
+      rivT = clamp01(pingpong(raw, 0.26) / 0.26);
+      rivBed = clamp01(1 - rivT / 0.18);                  // flat gravel bed / bars
+      rivTer = clamp01(1 - Math.abs(rivT - 0.55) / 0.20); // floodplain terrace shelf
+      rivBank = clamp01(1 - Math.abs(rivT - 0.90) / 0.11);// cut-bank crest
+    }
 
     // regional altitude: biome noise + the offshore ring, CONFINED to the
     // sector behind the snow country. snowSector gates BOTH the ring lift
@@ -447,10 +520,54 @@
     // relief exists ONLY behind the snow country — on every other bearing
     // the field may carve the sea deeper but never raise land, so no stray
     // fbm island can surface off the city/nation coasts.
-    const carve = r;                       // 0..0.5 (0.5 = full channel)
+    const carve = (CFG.TERRAIN_RIVER_BANKS !== false)
+      ? 0.5 * (1 - rivT)                   // 0..0.5, honest channel-ness
+      : r;                                 // 0..0.5 (0.5 = full channel)
     t = t - carve * V3P.RIVERS;
     let h = t * V3P.AMP;
+
+    // ---- CUT BANKS, GRAVEL BARS, FLOODPLAIN TERRACES --------------------
+    // Everything here except the cut-bank crest SUBTRACTS, so it can only move
+    // samples DOWN through the math gate's 25u mountain threshold. The crest is
+    // the one additive term and rides CBZ.mtnHiGate (identically 0 below 45u),
+    // so it can never lift a sub-threshold sample over the line. Both counts
+    // the gate tracks are therefore subsets of what they were.
+    // The gate sees the FINAL height, which is this h times the sector mask
+    // AND the flat-contract ramp `fo` that v3Height/v3Visual apply afterwards.
+    // Both additive terms below must therefore be gated on h * sec * fo, not on
+    // the raw h — gating on the raw value would let a 0.25 sector/ramp weight
+    // scale a "safely high" sample back down across the 25u line.
+    const foGate = (d <= MARGIN) ? 0 : smooth(MARGIN, MARGIN + RAMP, d);
+    const finalScale = sec * foGate;
+    if (h > 0 && CFG.TERRAIN_RIVER_BANKS !== false && KIT()) {
+      const land = smooth01(h / 34);                     // no shredding at the shore
+      const depth = 26 * land;
+      // flat-bottomed V + a shelf cut one step above the bed
+      h -= depth * ((1 - rivT) * (1 - 0.55 * rivBed) + rivTer * 0.26);
+      if (h < 0) h = 0;
+      h += 5.0 * rivBank * land * CBZ.mtnHiGate(h * finalScale);
+    }
+
+    // ---- STRATA GEOMETRY: warped bedding benches and risers -------------
+    // mtnTerrace is <= h by construction (its in-bed profile is pow(frac, k>1)),
+    // so this is a pure LAW 1 multiplier-class term.
+    if (h > 0 && CFG.TERRAIN_STRATA !== false && KIT()) {
+      h = CBZ.mtnTerrace(h, x, z, {
+        amount: 0.42 * smooth01((h - 55) / 120),
+        step: 26, dip: 44, dipCell: 900, dipCell2: 250, salt: 0x7e11,
+      });
+    }
+
+    // ---- SCALE FORESHORTENING (TERRAIN_RING_AMP) ------------------------
+    // Gated by mtnHiGate: a sample at or under 45u is untouched, and a sample
+    // already over 25u stays over it — the gate's cell counts are unchanged.
+    const ampX = +CFG.TERRAIN_RING_AMP;
+    if (h > 0 && Number.isFinite(ampX) && ampX !== 1 && KIT()) {
+      h *= 1 + (ampX - 1) * CBZ.mtnHiGate(h * finalScale);
+    }
+
     if (h > 0) h *= sec;
+    out.rivT = rivT; out.rivBed = rivBed; out.rivWet = clamp01(rivBed * 1.2);
 
     // snowline: wobbled band, dropping toward the cold north — the high
     // crests cap deep white (harmonizing with the snow country)
@@ -513,7 +630,15 @@
     snow: new THREE.Color(0xf8fafb), snowSh: new THREE.Color(0xd4dfe2),
   };
   const _veg = new THREE.Color();
-  function bandColor3(y, slope, wob, fld, out) {
+  const _rk = new THREE.Color();
+  const C3_GRAVEL = new THREE.Color(0x8a8579);   // river bed / point bars
+  const C3_WET = new THREE.Color(0x4b5a5c);      // wetted channel
+  const C3_TALUS = new THREE.Color(0x777064);    // scree apron below the cliffs
+  // x,z are needed now: the strata bands are warped by a world-space field
+  // (the SAME one mtnTerrace cut the benches with), so colour lands ON the
+  // risers instead of running across them. faceLight drives both aspect
+  // shading and — crucially — the snow LINE, not just its brightness.
+  function bandColor3(x, z, y, slope, faceLight, wob, fld, out) {
     const snowY = fld.snowY;
     if (y < -0.6) {                                     // the sea shelf
       out.copy(C3.deep).lerp(C3.shallow, smooth(-20, -0.6, y));
@@ -527,11 +652,39 @@
     _veg.copy(C3.dry).lerp(C3.moistV, fld.moist);
     _veg.lerp(C3.forest, smooth(24, 170, y) * (0.35 + fld.moist * 0.5));
     out.copy(C3.sand).lerp(_veg, smooth(2.6, 12, y));
-    // slope exposes granite (stronger with steepness, full on cliffs)
-    if (slope > 0.34) out.lerp(C3.granite, smooth(0.34, 0.62, slope));
-    if (slope > 0.55) out.lerp(C3.graniteD, smooth(0.55, 0.9, slope) * 0.8);
-    // ragged snowline band (wobble breaks the contour), then snow country
-    const sn = smooth(snowY - 70, snowY, y + (wob - 0.5) * 44);
+    // ---- RIVER BED: gravel bars in the channel, a wetted line at the thalweg
+    if (CFG.TERRAIN_RIVER_BANKS !== false && fld.rivBed > 0.01 && y < snowY - 30) {
+      out.lerp(C3_GRAVEL, Math.min(0.85, fld.rivBed * 0.9));
+      out.lerp(C3_WET, Math.min(0.7, fld.rivWet * fld.rivWet * 0.75));
+    }
+    if (CFG.TERRAIN_STRATA !== false && CBZ.mtnStrataTint) {
+      // ---- BANDED ROCK: per-bed hue + a shadowed bedding contact, blended in
+      // by SLOPE (steep = bare rock, shallow = soil), not by altitude alone.
+      const bare = CBZ.mtnStrataTint(_rk, x, z, y, slope, faceLight, {
+        rock: C3.granite, rockDark: C3.graniteD,
+        // identical bedding params to the mtnTerrace call in v3Field
+        step: 26, dip: 44, dipCell: 900, dipCell2: 250,
+        slope0: 0.22, slope1: 0.58, salt: 0x7e11, aspect: 1,
+      });
+      out.lerp(_rk, Math.min(0.94, bare));
+      // talus apron: just below the steep bands the ground is loose scree
+      const apron = smooth(0.10, 0.26, slope) * (1 - smooth(0.30, 0.48, slope)) * smooth(30, 90, y);
+      out.lerp(C3_TALUS, apron * 0.42);
+    } else {
+      if (slope > 0.34) out.lerp(C3.granite, smooth(0.34, 0.62, slope));
+      if (slope > 0.55) out.lerp(C3.graniteD, smooth(0.55, 0.9, slope) * 0.8);
+    }
+    // ---- SNOW: coverage, not a contour. Shallow slopes and shaded faces hold
+    // it far lower than steep sunlit ones, and the edge is noise-feathered.
+    let sn;
+    if (CBZ.mtnSnowCover && CFG.MOUNT_SNOW_ASPECT_V1 !== false) {
+      sn = CBZ.mtnSnowCover(x, z, y, slope, faceLight, {
+        line: snowY - 40, band: 74, aspect: 62, wob: 40,
+        shed0: 0.20, shed1: 0.66, salt: 0x7e22,
+      });
+    } else {
+      sn = smooth(snowY - 70, snowY, y + (wob - 0.5) * 44);
+    }
     if (sn > 0) {
       _veg.copy(C3.snow).lerp(C3.snowSh, smooth(0.1, 0.5, slope));
       if (slope > 0.55) _veg.lerp(C3.graniteD, smooth(0.55, 0.88, slope));  // rock windows
@@ -606,43 +759,101 @@
     // world.js's 16 km SEA_OVERHAUL ocean underlies the whole span).
     const liveSpan = Math.max(FLAT.maxX - FLAT.minX, FLAT.maxZ - FLAT.minZ);
     const SPAN = Math.ceil((liveSpan + 4400 + 2 * plateClear()) / 500) * 500;   // ring receded by the plate clearance must still fit inside the tile field
-    const TILES = 4, TSPAN = SPAN / TILES, TSEG = 76;
+    const TILES = 4, TSPAN = SPAN / TILES;
+    const TSEG = Math.max(24, Math.min(192, +CFG.TERRAIN_TILE_SEG || 76));
+    const SMOOTH_SHADE = CFG.TERRAIN_SMOOTH_SHADE !== false;
     const terrMat = CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
-      color: 0xffffff, vertexColors: true, flatShading: true, fog: true,
+      // SMOOTH now: the walkable Mount Mercy / Greater Mercy meshes sitting
+      // directly in front of this backdrop are smooth-shaded, so flat facets
+      // here drew a hard style seam exactly where the two ranges meet. The
+      // crispness the facets were buying is bought back by TERRAIN_TILE_SEG +
+      // the adaptive axes below, which put real geometry where the facets
+      // were only implying it.
+      color: 0xffffff, vertexColors: true, flatShading: !SMOOTH_SHADE, fog: true,
       transparent: false, opacity: 1, depthTest: true, depthWrite: true,
     }));
     const _c = new THREE.Color();
+    const _nrm = new THREE.Vector3();
+    const _lightDir = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
     const terrainTiles = [];
+    // ---- ONE global adaptive axis, then sliced per tile -----------------
+    // Adapting each tile INDEPENDENTLY would give neighbours different vertex
+    // counts along their shared edge → T-junction cracks. Computing the axis
+    // once over the whole span and slicing it means every tile boundary is a
+    // shared sample, so the field is watertight while the CDF still puts the
+    // grid lines on the relief sector and takes them off the open sea.
+    const N = TILES * TSEG;
+    const X0 = CX - SPAN / 2, X1 = CX + SPAN / 2;
+    const Z0 = CZ - SPAN / 2, Z1 = CZ + SPAN / 2;
+    let AX = null, AZ = null;
+    if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry) {
+      const PN = 36;
+      AX = CBZ.mtnAdaptiveAxis(N, X0, X1, function (x) {
+        let m = 0;
+        for (let k = 0; k <= PN; k++) {
+          const zz = Z0 + (Z1 - Z0) * (k / PN);
+          const h = v3Height(x, zz); if (h > m) m = h;
+        }
+        return Math.pow(Math.min(1, m / 340), 0.65);
+      }, { floor: 0.26 });
+      AZ = CBZ.mtnAdaptiveAxis(N, Z0, Z1, function (z) {
+        let m = 0;
+        for (let k = 0; k <= PN; k++) {
+          const xx = X0 + (X1 - X0) * (k / PN);
+          const h = v3Height(xx, z); if (h > m) m = h;
+        }
+        return Math.pow(Math.min(1, m / 340), 0.65);
+      }, { floor: 0.26 });
+    }
+    function axisSlice(A, t) {
+      const out = new Float64Array(TSEG + 1);
+      for (let k = 0; k <= TSEG; k++) out[k] = A[t * TSEG + k];
+      return out;
+    }
     for (let tj = 0; tj < TILES; tj++) for (let ti = 0; ti < TILES; ti++) {
-      const tcx = CX - SPAN / 2 + (ti + 0.5) * TSPAN;
-      const tcz = CZ - SPAN / 2 + (tj + 0.5) * TSPAN;
-      const geo = new THREE.PlaneGeometry(TSPAN, TSPAN, TSEG, TSEG);
-      geo.rotateX(-Math.PI / 2);
-      geo.translate(tcx, 0, tcz);
+      const tcx = X0 + (ti + 0.5) * TSPAN;
+      const tcz = Z0 + (tj + 0.5) * TSPAN;
+      let geo;
+      if (AX) {
+        geo = CBZ.mtnGridGeometry(axisSlice(AX, ti), axisSlice(AZ, tj));   // world-space verts
+      } else {
+        geo = new THREE.PlaneGeometry(TSPAN, TSPAN, TSEG, TSEG);
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(tcx, 0, tcz);
+      }
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++) {
         pos.setY(i, v3Visual(pos.getX(i), pos.getZ(i)));
       }
       pos.needsUpdate = true;
-      // flat-shaded crisp facets: de-index, per-face normals
-      const flatGeo = geo.toNonIndexed();
-      flatGeo.computeVertexNormals();
-      const fp = flatGeo.attributes.position;
-      const fn = flatGeo.attributes.normal;
+      // Indexed + smooth normals (SMOOTH_SHADE) or de-indexed per-face facets.
+      const outGeo = SMOOTH_SHADE ? geo : geo.toNonIndexed();
+      outGeo.computeVertexNormals();
+      const fp = outGeo.attributes.position;
+      const fn = outGeo.attributes.normal;
       const fcolors = new Float32Array(fp.count * 3);
       for (let i = 0; i < fp.count; i++) {
         const vx = fp.getX(i), vz = fp.getZ(i);
         const y = fp.getY(i);
-        const slope = 1 - Math.min(1, Math.max(0, fn.getY(i)));
+        const ny = Math.min(1, Math.max(0, fn.getY(i)));
+        const slope = 1 - ny;
+        // aspect: which way the face turns relative to the sun. This is what
+        // moves the snowline and warms/cools the rock — the old ramp computed
+        // nothing of the sort and read every face identically.
+        _nrm.set(fn.getX(i), fn.getY(i), fn.getZ(i));
+        const faceLight = Math.max(0, _nrm.dot(_lightDir));
         const fld = v3Field(vx, vz, _fld);
         const wob = vn(vx * 0.012 + SW, vz * 0.012 - SW);
-        bandColor3(y, slope, wob, fld, _c);
-        fcolors[i * 3] = _c.r; fcolors[i * 3 + 1] = _c.g; fcolors[i * 3 + 2] = _c.b;
+        bandColor3(vx, vz, y, slope, faceLight, wob, fld, _c);
+        // bake the aspect into the vertex value too, so a smooth-shaded face
+        // still reads its own light direction under the flat backdrop lighting
+        const shade = 0.86 + faceLight * 0.20;
+        fcolors[i * 3] = _c.r * shade; fcolors[i * 3 + 1] = _c.g * shade; fcolors[i * 3 + 2] = _c.b * shade;
       }
-      flatGeo.setAttribute("color", new THREE.BufferAttribute(fcolors, 3));
-      geo.dispose();
-      flatGeo.computeBoundingSphere();
-      const tile = new THREE.Mesh(flatGeo, terrMat);
+      outGeo.setAttribute("color", new THREE.BufferAttribute(fcolors, 3));
+      if (outGeo !== geo) geo.dispose();
+      outGeo.computeBoundingSphere();
+      const tile = new THREE.Mesh(outGeo, terrMat);
       tile.position.y = -0.06;             // city ground always wins the flat depth fight
       tile.receiveShadow = true;
       tile.castShadow = false;
@@ -685,6 +896,14 @@
         variants: 3,
         colorHex: 0x5f5b54,                // the shared granite hue
         seed: 4242,
+        // Placement is UNCHANGED (same pick, same seed, same rng draw order —
+        // these options consume no rng). They only change how each instance
+        // SITS: wedged into the apron slope instead of standing world-up, with
+        // plate-ish proportions and position-hashed size variation. Zero extra
+        // draw calls.
+        alignToSlope: 0.7, flatten: 0.28, bury: 0.30, hashVary: true,
+        rockTune: { scrapes: 11, depthMin: 0.06, depthMax: 0.38, squashY: 0.82 },
+        tag: "backdrop-talus",
       });
       if (scat && scat.meshes) for (const m of scat.meshes) heroMeshes.push(m);
     }

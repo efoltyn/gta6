@@ -701,8 +701,14 @@
   function bindResetChain() {
     if (CBZ.cityVehiclesReset && !CBZ.cityVehiclesReset._milVehWrapped) {
       const orig = CBZ.cityVehiclesReset;
-      CBZ.cityVehiclesReset = function () { try { teardown(); } catch (e) {} return orig.apply(this, arguments); };
-      CBZ.cityVehiclesReset._milVehWrapped = true;
+      const wrapped = function () { try { teardown(); } catch (e) {} return orig.apply(this, arguments); };
+      // WRAPPER DISCIPLINE (CLAUDE.md): carry EVERY `*Wrapped` marker forward.
+      // Without this, whichever sibling wrapped cityVehiclesReset before us
+      // lost its own idempotence guard and re-wrapped on the next retry tick,
+      // stacking a fresh layer of the same reset every few frames.
+      for (const k in orig) if (k.endsWith("Wrapped")) wrapped[k] = orig[k];
+      wrapped._milVehWrapped = true;
+      CBZ.cityVehiclesReset = wrapped;
       return true;
     }
     return false;

@@ -48,6 +48,32 @@
        no new geometry), and a non-uniform chassis-bend skew applied to the
        car's own visual root at very high cumulative damage (total>=3.2) so a
        totalled wreck reads as a bent hulk, not just a dented one.
+
+   ============================================================
+   AIRCRAFT (CBZ.cityAircraftImpactDeform) — the SAME system, not a second one.
+
+   OWNER BRIEF: a plane hitting a tower must read as a catastrophe. Half of
+   that is what happens to the BUILDING (city/aircraftimpact.js + the ordnance
+   bus + city/structural.js); the other half is what happens to the AIRFRAME,
+   and this file already owns "a vehicle that hit something looks like it hit
+   something". So the airframe path REUSES every primitive above rather than
+   authoring a parallel one:
+
+     • the same LRU registry / rest snapshot / shared-geometry clone-and-swap
+       contract / eviction fade,
+     • the same clamped radial vertex displacement (carveMeshes, extracted
+       verbatim out of the car path so both callers run identical maths) —
+       just with an airframe-scale budget, because 0.34u of crumple on a 38 m
+       fuselage is invisible,
+     • the same absolute-set transform skew as bendChassis, extended with a
+       Z-axis pinch so a nose crumple SHORTENS the airframe,
+     • the same debris hand-off (crashfx's pool via cityDebrisAdopt) for small
+       pieces, and city/aircraftimpact.js's wreck field for whole sheared
+       sections that the pool refuses (its 3 m donation limit).
+
+   Airframe-only consequences: a wing or tail SHEARING OFF and flying away
+   under its residual velocity, and a wound that trails fuel smoke for a few
+   seconds. Both ride existing systems. Behind CBZ.CONFIG.AIR_IMPACT_DEFORM.
 ============================================================ */
 (function () {
   "use strict";
@@ -69,6 +95,23 @@
   const FADE_T = 0.5;           // eviction fade-to-pristine window, seconds
   const damaged = [];          // LRU registry, oldest first; entries move to the tail when re-hit
   let dead = false;            // stub renderer / missing API → permanent no-op
+
+  // AIRCRAFT entries share the registry but are addressed through their own
+  // group (a craft record carries .group, an airtraffic record carries .grp,
+  // and neither is shaped like a car record). One accessor pair keeps every
+  // existing LRU/eviction/fade path working for both without branching.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.AIR_IMPACT_DEFORM == null) CBZ.CONFIG.AIR_IMPACT_DEFORM = true;
+  function entGroup(e) { return e.air ? e.airGroup : (e.car && e.car.group); }
+  function entPos(e) {
+    if (e.air) return e.airGroup && e.airGroup.position;
+    return e.car && e.car.pos;
+  }
+  function entGone(e) {
+    const grp = entGroup(e);
+    if (e.air) return !grp || !grp.parent;
+    return e.car.dead || !grp || !grp.parent;
+  }
 
   // scratch (no per-impact allocation beyond the one-time rest snapshots)
   let _inv = null, _pt = null, _dir = null, _gInv = null, _gp = null, _wp = null, _wq = null;
@@ -93,7 +136,7 @@
   // treated as "farthest", same as off-screen, so it's evicted first).
   function camDist2(e) {
     const cam = CBZ.camera && CBZ.camera.position;
-    const p = e.car && e.car.pos;
+    const p = entPos(e);
     if (!cam || !p) return Infinity;
     const dx = p.x - cam.x, dz = p.z - cam.z;
     return dx * dx + dz * dz;
@@ -103,8 +146,9 @@
   // we only need "definitely off-screen" to prefer it for eviction).
   function offScreen(e) {
     const cam = CBZ.camera;
-    if (!cam || !cam.position || !e.car || !e.car.pos || !_fwd) return false;
-    const dx = e.car.pos.x - cam.position.x, dz = e.car.pos.z - cam.position.z;
+    const ep = entPos(e);
+    if (!cam || !cam.position || !ep || !_fwd) return false;
+    const dx = ep.x - cam.position.x, dz = ep.z - cam.position.z;
     const d = Math.hypot(dx, dz);
     if (d < 1e-3) return false;
     // camera forward in the XZ plane (three.js looks down -Z by default)
@@ -124,8 +168,11 @@
       const off = offScreen(e);
       const d2 = camDist2(e);
       // off-screen entries always outrank on-screen ones for eviction;
-      // among equals, farther wins.
-      const score = (off ? 1e12 : 0) + d2;
+      // among equals, farther wins. A deformed AIRFRAME outranks nothing — a
+      // crashed plane is a permanent landmark of what the player did, so cars
+      // are always evicted first and an air entry only goes when it is the
+      // only thing left to give.
+      const score = (e.air ? 0 : 1e18) + (off ? 1e12 : 0) + d2;
       if (score > bestD2) { bestD2 = score; bestIdx = i; }
     }
     if (bestIdx < 0) bestIdx = 0;       // everything mid-fade or no camera — oldest
@@ -143,10 +190,10 @@
       }
     }
     if (!create) return null;
-    // sweep entries whose car already left the world (exploded / cleared)
+    // sweep entries whose car/airframe already left the world (exploded / cleared)
     for (let i = damaged.length - 1; i >= 0; i--) {
       const e = damaged[i];
-      if (e.car.dead || !e.car.group || !e.car.group.parent) release(e, true);
+      if (entGone(e)) release(e, true);
     }
     // settle any fades that finished while we weren't ticking (e.g. several
     // impacts land in the same frame) before counting toward the cap
@@ -159,6 +206,8 @@
       lightsOut: false, frosted: false, hoodGone: false, nudged: false,
       wheelPop: null, bendApplied: false, bendRotZ: 0, bendRotX: 0, bendScale: null,
       fading: false, fadeT: 0,
+      // ---- aircraft-only state (unset for cars; costs one hidden-class slot) ----
+      air: false, airGroup: null, airDims: null, airShear: 0, airWound: null, airBurn: 0,
     };
     damaged.push(e);
     return e;
@@ -225,7 +274,8 @@
     const ch = o.children;
     for (let i = 0; i < ch.length; i++) collect(ch[i], list);
   }
-  function snapshot(e, root) {
+  function snapshot(e, root, budget) {
+    if (budget == null) budget = OUTER_BUDGET;
     const list = [];
     collect(root, list);
     e.meshes = [];
@@ -241,7 +291,7 @@
       // craters move verts up to the outer budget past the rest hull — widen the
       // cull sphere once so a deformed fender can't flicker out at screen edge
       let bsr = null;
-      if (geo.boundingSphere && geo.boundingSphere.radius != null) { bsr = geo.boundingSphere.radius; geo.boundingSphere.radius += OUTER_BUDGET; }
+      if (geo.boundingSphere && geo.boundingSphere.radius != null) { bsr = geo.boundingSphere.radius; geo.boundingSphere.radius += budget; }
       e.meshes.push({ mesh, orig, bsr, base: new Float32Array(geo.attributes.position.array) });
     }
   }
@@ -461,9 +511,18 @@
     e.bendApplied = true; e.bendRotZ = rotZ; e.bendRotX = rotX; e.bendScale = { x: scX, y: scY };
   }
   function unbendChassis(e) {
-    if (!e.bendApplied || !e.car || !e.car.group) { e.bendApplied = false; return; }
-    const grp = e.car.group;
+    const grp = entGroup(e);
+    if (!e.bendApplied || !grp) { e.bendApplied = false; return; }
     const root = (grp.userData && grp.userData.carVisual) || grp;
+    if (e.air) {
+      // an AIRFRAME's rotation IS its flight attitude and belongs to the craft
+      // controller (playeraircraft's setCraftRotation / the fall handlers) — we
+      // only ever wrote its SCALE. Put the authored scale back, touch nothing else.
+      const b = e.airBaseScale;
+      if (b) root.scale.set(b.x, b.y, b.z);
+      e.bendApplied = false;
+      return;
+    }
     root.rotation.z = 0; root.rotation.x = 0;
     root.scale.set(1, 1, 1);
     e.bendApplied = false;
@@ -505,45 +564,16 @@
     out.set(0, 0, 0); return out;
   }
 
-  function impact(car, grp, point, dir, energy, opts) {
-    _dir.set(dir.x || 0, dir.y || 0, dir.z || 0);
-    if (_dir.lengthSq() < 1e-6) return;
-    _dir.normalize();
-    const e = entryFor(car, true);
-    const root = (grp.userData && grp.userData.carVisual) || grp;
-    if (!e.meshes) { snapshot(e, root); findMats(e, root); }
-    const d = dimsOf(grp);
-    const R = opts && opts.r ? opts.r : Math.min(2.4, 0.9 + energy * 0.05);
-    const amp = Math.min(0.42, energy * 0.019);
-    const cabinZ = d.length * 0.21, cabinY = d.height * 0.42;
-
-    grp.updateWorldMatrix(true, true);          // impacts are rare; per-frame cost stays zero
-    const wdx = _dir.x, wdy = _dir.y, wdz = _dir.z;
-
-    // ---- DIRECTIONAL CRUMPLE SETUP (world space) ----------------------------
-    // Tangent = the closing-velocity component perpendicular to the impact
-    // normal (dir) — this is the "drag" axis a sideswipe rakes the crater
-    // along. glance ∈ [0,1]: how much of the velocity is tangential vs into
-    // the panel (0 = pure head-on, 1 = pure sideswipe). We stretch the
-    // crater's reach along the tangent by up to ~2.2x at glance=1 and squash
-    // the perpendicular (bite-depth) axis slightly so total displaced volume
-    // stays budget-sane — a rake is LONG and SHALLOW, not a bigger crater.
-    closingVel(car, opts, _vel);
-    let tanX = 0, tanY = 0, tanZ = 0, glance = 0, stretch = 1, squash = 1;
-    const vSpeed = _vel.length();
-    if (vSpeed > 0.6) {
-      _vel.normalize();
-      const into = _vel.x * wdx + _vel.y * wdy + _vel.z * wdz;   // velocity component along the normal
-      tanX = _vel.x - wdx * into; tanY = _vel.y - wdy * into; tanZ = _vel.z - wdz * into;
-      const tanLen = Math.sqrt(tanX * tanX + tanY * tanY + tanZ * tanZ);
-      if (tanLen > 1e-4) {
-        tanX /= tanLen; tanY /= tanLen; tanZ /= tanLen;
-        glance = Math.min(1, tanLen);              // |tangent| of a unit vector = sin(angle off normal)
-        stretch = 1 + glance * 1.2;                 // up to 2.2x reach along the drag axis
-        squash = 1 - glance * 0.35;                 // shallower bite as it gets more glancing
-      }
-    }
-
+  // ---- THE CRATER (extracted verbatim from impact(), unchanged maths) -------
+  // Clamped radial vertex displacement in each panel's own local space, with
+  // the anisotropic (stretch/squash) footprint. Extracted so the CAR path and
+  // the AIRCRAFT path below run the IDENTICAL loop instead of a second copy
+  // that drifts — the whole point of extending this file rather than writing
+  // a parallel one. The only things the two callers differ on are the crater
+  // radius/amplitude and the per-vertex displacement BUDGETS (0.34u of crumple
+  // is a caved fender on a car and invisible on a 38 m fuselage).
+  function carveMeshes(e, point, wdx, wdy, wdz, tanX, tanY, tanZ, stretch, squash,
+                       R, amp, cabinZ, cabinY, outerBudget, cabinBudget) {
     for (let m = 0; m < e.meshes.length; m++) {
       const rec = e.meshes[m], mesh = rec.mesh, geo = mesh.geometry;
       if (!geo || !geo.attributes || !geo.attributes.position) continue;
@@ -587,7 +617,7 @@
         let oz = pos[o + 2] + lz * push - base[o + 2];
         // budget clamp: cabin band (mid-body, up high) crumples far less than
         // fenders — that's what keeps the roofline a car instead of a sock
-        const lim = (Math.abs(base[o + 2]) < cabinZ && base[o + 1] > cabinY) ? CABIN_BUDGET : OUTER_BUDGET;
+        const lim = (Math.abs(base[o + 2]) < cabinZ && base[o + 1] > cabinY) ? cabinBudget : outerBudget;
         const ol = Math.sqrt(ox * ox + oy * oy + oz * oz);
         if (ol > lim) { const s = lim / ol; ox *= s; oy *= s; oz *= s; }
         pos[o] = base[o] + ox; pos[o + 1] = base[o + 1] + oy; pos[o + 2] = base[o + 2] + oz;
@@ -598,6 +628,49 @@
         if (geo.computeVertexNormals) geo.computeVertexNormals();
       }
     }
+  }
+
+  function impact(car, grp, point, dir, energy, opts) {
+    _dir.set(dir.x || 0, dir.y || 0, dir.z || 0);
+    if (_dir.lengthSq() < 1e-6) return;
+    _dir.normalize();
+    const e = entryFor(car, true);
+    const root = (grp.userData && grp.userData.carVisual) || grp;
+    if (!e.meshes) { snapshot(e, root); findMats(e, root); }
+    const d = dimsOf(grp);
+    const R = opts && opts.r ? opts.r : Math.min(2.4, 0.9 + energy * 0.05);
+    const amp = Math.min(0.42, energy * 0.019);
+    const cabinZ = d.length * 0.21, cabinY = d.height * 0.42;
+
+    grp.updateWorldMatrix(true, true);          // impacts are rare; per-frame cost stays zero
+    const wdx = _dir.x, wdy = _dir.y, wdz = _dir.z;
+
+    // ---- DIRECTIONAL CRUMPLE SETUP (world space) ----------------------------
+    // Tangent = the closing-velocity component perpendicular to the impact
+    // normal (dir) — this is the "drag" axis a sideswipe rakes the crater
+    // along. glance ∈ [0,1]: how much of the velocity is tangential vs into
+    // the panel (0 = pure head-on, 1 = pure sideswipe). We stretch the
+    // crater's reach along the tangent by up to ~2.2x at glance=1 and squash
+    // the perpendicular (bite-depth) axis slightly so total displaced volume
+    // stays budget-sane — a rake is LONG and SHALLOW, not a bigger crater.
+    closingVel(car, opts, _vel);
+    let tanX = 0, tanY = 0, tanZ = 0, glance = 0, stretch = 1, squash = 1;
+    const vSpeed = _vel.length();
+    if (vSpeed > 0.6) {
+      _vel.normalize();
+      const into = _vel.x * wdx + _vel.y * wdy + _vel.z * wdz;   // velocity component along the normal
+      tanX = _vel.x - wdx * into; tanY = _vel.y - wdy * into; tanZ = _vel.z - wdz * into;
+      const tanLen = Math.sqrt(tanX * tanX + tanY * tanY + tanZ * tanZ);
+      if (tanLen > 1e-4) {
+        tanX /= tanLen; tanY /= tanLen; tanZ /= tanLen;
+        glance = Math.min(1, tanLen);              // |tangent| of a unit vector = sin(angle off normal)
+        stretch = 1 + glance * 1.2;                 // up to 2.2x reach along the drag axis
+        squash = 1 - glance * 0.35;                 // shallower bite as it gets more glancing
+      }
+    }
+
+    carveMeshes(e, point, wdx, wdy, wdz, tanX, tanY, tanZ, stretch, squash,
+      R, amp, cabinZ, cabinY, OUTER_BUDGET, CABIN_BUDGET);
 
     // ---- classify the hit in GROUP space + run the consequence ladder ----
     _gInv.copy(grp.matrixWorld).invert();
@@ -634,6 +707,274 @@
       if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, 8, {});
     }
   }
+
+  /* ============================================================
+     AIRCRAFT IMPACT — the airframe half of the plane-into-tower catastrophe.
+
+     city/aircraftimpact.js owns what happens to the WORLD (penetration into
+     the structural ledger, ejecta, fire, collapse, falling debris). This owns
+     what happens to the AIRCRAFT, and it does it with the primitives already
+     above rather than a second deformation system:
+
+       1. NOSE CRUMPLE      carveMeshes() — the identical clamped radial
+                            displacement the car path runs, with an
+                            airframe-scale budget derived from the fuselage.
+       2. AIRFRAME SHORTEN  a non-uniform scale pinch on the root (the same
+                            absolute-set discipline as bendChassis, extended
+                            with Z so the hull reads SHORTER, and restricted
+                            to scale because a craft's ROTATION is its flight
+                            attitude and belongs to its controller).
+       3. WING / TAIL SHEAR the struck-side wing (and, on a heavy strike, the
+                            tail) detaches at its world pose and flies away on
+                            its residual velocity via city/aircraftimpact.js's
+                            wreck field — crashfx's debris pool refuses
+                            donations over 3 m, which is every wing in the game.
+       4. WRECK FIELD       5..15 fragments: the big recognisable ones on the
+                            wreck field's closed-form arcs, the rest into
+                            CBZ.cityChunk's existing pooled debris.
+       5. FUEL / FIRE TRAIL the wound keeps smoking from its LOCAL point on the
+                            hull, so the trail follows the wreck as it tumbles.
+
+     Behind CBZ.CONFIG.AIR_IMPACT_DEFORM (one-line revert).
+     ============================================================ */
+  function airDims(grp, given) {
+    const d = given || (grp.userData && grp.userData.aircraftDims);
+    if (d) return {
+      length: Math.max(4, d.length || 8), span: Math.max(3, d.span || 7),
+      height: Math.max(2, d.height || 3),
+      fuselage: Math.max(1.1, d.fuselage || Math.min(4.2, (d.span || 8) * 0.16)),
+    };
+    return { length: 10, span: 9, height: 3, fuselage: 1.6 };
+  }
+
+  // ONE shared box + ONE shared material for every airframe fragment in the
+  // city (mesh.scale sizes them), so a wreck field costs one geometry total.
+  let airDebrisGeo = null, airDebrisMat = null;
+  function ensureAirDebris() {
+    if (airDebrisGeo) return true;
+    try {
+      airDebrisGeo = new THREE.BoxGeometry(1, 1, 1); airDebrisGeo._shared = true;
+      airDebrisMat = new THREE.MeshLambertMaterial({ color: 0x9aa1a8 }); airDebrisMat._shared = true;
+    } catch (err) { return false; }
+    return true;
+  }
+  function arenaRoot() {
+    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+    return (A && A.root) || CBZ.scene || null;
+  }
+
+  // Furthest-out mesh on the struck wing side / furthest-aft mesh, measured in
+  // the ROOT's local space so nested builders (island_airport, militaryvehicles
+  // and our own buildJet all nest differently) are handled the same way.
+  function findSection(root, d, kind, side) {
+    let best = null, bestScore = -1;
+    root.updateWorldMatrix(true, true);
+    _gInv.copy(root.matrixWorld).invert();
+    root.traverse(function (o) {
+      if (o === root || !o.isMesh || !o.geometry) return;
+      // rotors/props spin on their own transform every frame — shearing one off
+      // reads as a bug, not as damage. Leave them to the craft controller.
+      if (o.userData && (o.userData.rotor || o.userData.tailRotor || o.userData.playerWheel)) return;
+      o.getWorldPosition(_gp); _gp.applyMatrix4(_gInv);
+      const score = kind === "wing" ? side * _gp.x : -_gp.z;
+      if (score > bestScore) { bestScore = score; best = o; }
+    });
+    if (kind === "wing" && bestScore < d.span * 0.16) return null;
+    if (kind !== "wing" && bestScore < d.length * 0.22) return null;
+    return best;
+  }
+
+  function shearOff(root, mesh, baseScale, vx, vy, vz, burning) {
+    if (!mesh) return false;
+    try {
+      mesh.updateWorldMatrix(true, true);
+      mesh.getWorldPosition(_wp);
+      mesh.getWorldQuaternion(_wq);
+      if (mesh.parent) mesh.parent.remove(mesh);
+      mesh.position.copy(_wp);
+      mesh.quaternion.copy(_wq);
+      // the root may carry a non-unit authored scale; the detached piece has to
+      // keep the size it had while it was still bolted on
+      mesh.scale.set(mesh.scale.x * baseScale.x, mesh.scale.y * baseScale.y, mesh.scale.z * baseScale.z);
+      const dest = arenaRoot();
+      if (!dest) return false;
+      dest.add(mesh);
+      // Whole SECTIONS go to the wreck field (closed-form arcs, no size limit);
+      // if that module is absent we fall back to crashfx's debris pool exactly
+      // as this file already does for a torn-off hood.
+      if (CBZ.cityWreckDebris) {
+        CBZ.cityWreckDebris(mesh, vx, vy, vz, { burning: burning, spin: (rng() - 0.5) * 6 });
+      } else if (CBZ.cityDebrisAdopt) {
+        CBZ.cityDebrisAdopt(mesh, vx, vy, vz);
+      }
+      if (CBZ.sfx) CBZ.sfx("clank");
+      return true;
+    } catch (err) { return false; }
+  }
+
+  // Absolute-set (never incremental) non-uniform pinch: the hull reads SHORTER
+  // and narrower the harder it hit. Rotation is deliberately untouched.
+  function bendAirframe(e, root, k) {
+    const bs = e.airBaseScale || { x: 1, y: 1, z: 1 };
+    const t = Math.max(0, Math.min(1, k));
+    if (t <= 0.02) return;
+    const sx = bs.x * (1 - 0.05 * t);
+    const sy = bs.y * (1 - 0.07 * t);
+    const sz = bs.z * (1 - 0.16 * t);            // the nose crumple, as a length loss
+    root.scale.set(sx, sy, sz);
+    e.bendApplied = true; e.bendRotZ = 0; e.bendRotX = 0;
+    e.bendScale = { x: sx, y: sy, z: sz };
+  }
+
+  // the wound trails fuel smoke from its LOCAL seat on the hull, so the plume
+  // follows the wreck while it tumbles instead of hanging in mid-air
+  function stepAirBurn(e, dt, cam) {
+    if (!e.airWound || !(e.airBurn > 0) || !e.airGroup) return;
+    e.airBurn -= dt;
+    e.airBurnT = (e.airBurnT || 0) - dt;
+    if (e.airBurnT > 0 || !CBZ.cityCrashSmoke) return;
+    e.airBurnT = 0.22;
+    try {
+      _wp.set(e.airWound.x, e.airWound.y, e.airWound.z);
+      e.airGroup.localToWorld(_wp);
+      if (cam) {
+        const dx = _wp.x - cam.x, dz = _wp.z - cam.z;
+        const cull = CBZ.cityCullRadius || 320;
+        if (dx * dx + dz * dz > cull * cull) return;
+      }
+      CBZ.cityCrashSmoke(_wp.x, _wp.y, _wp.z);
+    } catch (err) {}
+  }
+
+  function airImpact(craft, grp, point, dir, energy, opts) {
+    _dir.set(dir.x || 0, dir.y || 0, dir.z || 0);
+    if (_dir.lengthSq() < 1e-6) _dir.set(0, 0, 1);
+    _dir.normalize();
+    const wdx = _dir.x, wdy = _dir.y, wdz = _dir.z;
+
+    const e = entryFor(craft, true);
+    const d = airDims(grp, opts.dims);
+    const scale = Math.max(0.4, Math.min(2.6, opts.scale || 1));
+    // an airframe's crumple budget is a fraction of its fuselage diameter, not
+    // a car's fixed 0.34u — that constant is invisible on an A320 and would
+    // turn a Cessna inside out.
+    const budget = Math.max(0.25, Math.min(1.8, d.fuselage * 0.55));
+    const cabinBudget = budget * 0.35;
+
+    if (!e.air) {
+      e.air = true; e.airGroup = grp; e.airDims = d;
+      e.airBaseScale = { x: grp.scale.x, y: grp.scale.y, z: grp.scale.z };
+    }
+    // NOTE: no findMats() — the headlight/glasshouse consequence ladder is a
+    // CAR ladder. An airframe's ladder is shear + shorten + burn.
+    if (!e.meshes) snapshot(e, grp, budget);
+
+    grp.updateWorldMatrix(true, true);
+
+    // 1) THE CRATER — identical maths to the car path (carveMeshes), airframe
+    //    radius/budget. Symmetric (no glance skew): a plane arrives nose-first
+    //    at its own velocity, so there is no tangential drag axis to rake along.
+    const R = Math.max(2.5, Math.min(9, d.length * 0.30));
+    const amp = Math.min(budget, 0.12 + energy * 0.016);
+    carveMeshes(e, point, wdx, wdy, wdz, 0, 0, 0, 1, 1,
+      R, amp, d.length * 0.18, d.height * 0.55, budget, cabinBudget);
+    e.total += amp / budget;
+    e.front = Math.min(3, e.front + amp / budget);
+
+    // 2) SHEAR — before the pinch, so the detached piece keeps its true size.
+    //    Which WING went is decided in the hull's OWN local frame (a world-X
+    //    test would pick the wrong side for any heading but north).
+    _gp.set(point.x, point.y, point.z);
+    grp.worldToLocal(_gp);
+    const struckSide = _gp.x >= 0 ? 1 : -1;
+    const shearVX = wdx * (5 + energy * 0.22), shearVZ = wdz * (5 + energy * 0.22);
+    if (energy >= 22 && e.airShear < 1) {
+      e.airShear = 1;
+      shearOff(grp, findSection(grp, d, "wing", struckSide), e.airBaseScale,
+        shearVX + struckSide * (4 + rng() * 7), 3 + rng() * 6, shearVZ + (rng() - 0.5) * 8, true);
+    }
+    if (energy >= 34 && scale >= 1 && e.airShear < 2) {
+      e.airShear = 2;
+      shearOff(grp, findSection(grp, d, "tail", 0), e.airBaseScale,
+        -wdx * (3 + rng() * 6), 2 + rng() * 5, -wdz * (3 + rng() * 6), false);
+    }
+
+    // 3) THE PINCH.
+    bendAirframe(e, grp, Math.min(1, energy / 45) * Math.min(1.4, scale));
+
+    // 4) THE WRECK FIELD — 5..15 fragments. The few big recognisable ones ride
+    //    the closed-form arcs of city/aircraftimpact.js's wreck field; the rest
+    //    go into CBZ.cityChunk's existing pooled debris (cap 60), so the count
+    //    reads big without either pool being flooded.
+    const total = Math.max(5, Math.min(15, Math.round((CBZ.qScale ? CBZ.qScale(5, 15) : 9) * Math.min(1.4, scale))));
+    const big = Math.min(total, Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(1, 5) : 3)));
+    if (CBZ.cityWreckDebris && ensureAirDebris()) {
+      const dest = arenaRoot();
+      for (let i = 0; dest && i < big; i++) {
+        let m;
+        try { m = new THREE.Mesh(airDebrisGeo, airDebrisMat); } catch (err) { break; }
+        const s = d.fuselage * (0.25 + rng() * 0.5);
+        m.scale.set(s, s * (0.35 + rng() * 0.5), s * (0.8 + rng()));
+        m.position.set(point.x + (rng() - 0.5) * 3, point.y + rng() * 2.5, point.z + (rng() - 0.5) * 3);
+        m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+        dest.add(m);
+        const a = rng() * 6.2832, sp = 3 + rng() * 9;
+        CBZ.cityWreckDebris(m,
+          wdx * (3 + energy * 0.12) + Math.cos(a) * sp,
+          2.5 + rng() * 6,
+          wdz * (3 + energy * 0.12) + Math.sin(a) * sp,
+          { burning: i === 0, own: true, hazard: point.y > 14, dmg: 45,
+            byPlayer: !!opts.byPlayer, by: opts.byPlayer ? CBZ.player : null });
+      }
+    }
+    if (CBZ.cityChunk) {
+      try {
+        CBZ.cityChunk(point.x, point.y, point.z, {
+          count: Math.max(1, total - big), force: Math.min(15, 6 + energy * 0.12),
+          dirx: wdx, dirz: wdz, color: 0x9aa1a8,
+        });
+      } catch (err) {}
+    }
+
+    // 5) THE WOUND KEEPS BURNING — stored in HULL-LOCAL space so the plume
+    //    follows the wreck as it tumbles/settles.
+    try {
+      _wp.set(point.x, point.y, point.z);
+      grp.worldToLocal(_wp);
+      e.airWound = { x: _wp.x, y: _wp.y, z: _wp.z };
+      e.airBurn = 5 + scale * 5;
+      e.airBurnT = 0;
+    } catch (err) {}
+  }
+
+  /* PUBLIC: deform an AIRFRAME at an impact.
+       craft   any record with a group (playeraircraft craft / aircraft.js heli
+               or jet / airtraffic record) — used only as the registry key
+       point   world impact point
+       dir     unit-ish travel direction (the way the metal is moving)
+       energy  impact speed, m/s-ish
+       opts    { dims, cls, scale, building, byPlayer, group }
+     Degrade-safe: returns false and touches nothing if the flag is off, the
+     group is gone, or the renderer is a headless stub. */
+  CBZ.cityAircraftImpactDeform = function (craft, point, dir, energy, opts) {
+    if (dead || !craft || !point || !dir) return false;
+    if (!CBZ.CONFIG.AIR_IMPACT_DEFORM) return false;
+    opts = opts || {};
+    const grp = opts.group || craft.group || craft.grp;
+    if (!grp || !grp.parent) return false;
+    if (!ensureScratch()) return false;
+    energy = Math.max(0, Math.min(120, energy || 0));
+    if (energy < 4) return false;                    // a taxi nudge deforms nothing
+    try { airImpact(craft, grp, point, dir, energy, opts); }
+    catch (err) { dead = true; return false; }       // stub renderer — the whole module no-ops
+    return true;
+  };
+  // restore ONE airframe to pristine (same contract as cityCarImpactReset)
+  CBZ.cityAircraftImpactReset = function (craft) {
+    if (!craft) return;
+    const e = entryFor(craft, false);
+    if (e) release(e, false);
+  };
 
   // restore ONE car to pristine (police cruiser pool reuse, [C] body swap)
   CBZ.cityCarImpactReset = function (car) {
@@ -674,11 +1015,19 @@
       w.rotation.z = wp.baseRotZ + (wp.lean) * keep;
       w.position.y = wp.baseY - wp.drop * keep;
     }
-    if (e.bendApplied && e.bendScale && e.car && e.car.group) {
-      const grp = e.car.group, root = (grp.userData && grp.userData.carVisual) || grp;
-      root.rotation.z = e.bendRotZ * keep; root.rotation.x = e.bendRotX * keep;
-      root.scale.x = 1 - (1 - e.bendScale.x) * keep;
-      root.scale.y = 1 - (1 - e.bendScale.y) * keep;
+    if (e.bendApplied && e.bendScale && entGroup(e)) {
+      const grp = entGroup(e), root = (grp.userData && grp.userData.carVisual) || grp;
+      if (e.air) {
+        // AIRFRAME: scale only — its rotation is the craft controller's.
+        const b = e.airBaseScale || { x: 1, y: 1, z: 1 };
+        root.scale.x = b.x - (b.x - e.bendScale.x) * keep;
+        root.scale.y = b.y - (b.y - e.bendScale.y) * keep;
+        if (e.bendScale.z != null) root.scale.z = b.z - (b.z - e.bendScale.z) * keep;
+      } else {
+        root.rotation.z = e.bendRotZ * keep; root.rotation.x = e.bendRotX * keep;
+        root.scale.x = 1 - (1 - e.bendScale.x) * keep;
+        root.scale.y = 1 - (1 - e.bendScale.y) * keep;
+      }
     }
     if (e.fadeT >= FADE_T) { release(e, false); return true; }
     return false;
@@ -702,7 +1051,8 @@
     for (let i = damaged.length - 1; i >= 0; i--) {
       const e = damaged[i], car = e.car;
       if (e.fading) continue;            // mid-fade entries are driven by stepFade above only
-      if (car.dead || !car.group || !car.group.parent) { release(e, true); continue; }
+      if (entGone(e)) { release(e, true); continue; }
+      if (e.air) { stepAirBurn(e, dt, cam); continue; }   // airframes have no flaps/bumper
       if (!e.hood && !e.door && !e.bump) continue;
       const sp = Math.abs(car.v || 0);
       if (e.hood) e.hood.pivot.rotation.x = e.hood.base + Math.sin(wob * 21 + e.hood.ph) * Math.min(0.13, sp * 0.012);

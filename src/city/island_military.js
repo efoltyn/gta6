@@ -194,24 +194,8 @@
   // per inputs → deterministic worlds.
   // taperBox: scales each vertex's X/Y by a factor of its Z (nose=+Z → nz,
   // tail=-Z → tz) with optional roofline (top) / keel (bot) narrowing.
-  function taperBox(w, h, d, opt) {
-    opt = opt || {};
-    const nz = opt.nz != null ? opt.nz : 1, tz = opt.tz != null ? opt.tz : 1;
-    const top = opt.top != null ? opt.top : 1, bot = opt.bot != null ? opt.bot : 1;
-    const geo = new THREE.BoxGeometry(w, h, d, opt.segW || 2, opt.segH || 2, opt.segD || 6);
-    const pos = geo.attributes.position, hd = d / 2, hh = h / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const f = z / hd, zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
-      let sx = zt, sy = zt;
-      const vy = hh > 0 ? y / hh : 0;
-      if (vy > 0) sx *= (1 + (top - 1) * vy);
-      if (vy < 0) sx *= (1 + (bot - 1) * -vy);
-      pos.setX(i, x * sx); pos.setY(i, y * sy);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
+  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
+  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
   // sculpted taperBox mesh (fuselage fairings, canopies, hulls)
   function tbox(parent, x, y, z, w, h, d, opt, material) {
     const m = new THREE.Mesh(taperBox(w, h, d, opt), material);

@@ -17,10 +17,13 @@
 
    Only the benches are BIG solid cover (hide behind / get stopped by
    them); the small clutter above is collidable but easy to shoulder past.
+   The benches are also the yard's only SITTABLE prop now — they route
+   through CBZ.furnish.bench (the one shared furniture kit) and register
+   propuse sit anchors, so "bench" stopped being a shape and became a seat.
    Everything is placed once at startup — no per-frame work — so it stays
-   cheap on phones. Placement uses Math.random() with rejection sampling
-   to avoid the central walkway, the spawn/cell area, and the three
-   indoor room footprints.
+   cheap on phones. Placement uses the seeded "yard-clutter" stream with
+   rejection sampling to avoid the central walkway, the spawn/cell area,
+   and the three indoor room footprints.
 ============================================================ */
 (function () {
   "use strict";
@@ -28,6 +31,16 @@
   if (!CBZ || !CBZ.addBox || !CBZ.scene) return;
   const { addBox, mat } = CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
+
+  // DETERMINISM: every draw below runs at LOAD TIME to place world geometry,
+  // so it must be byte-identical per seed across multiplayer clients. This
+  // file used raw Math.random() at 23 sites, which made the yard reshuffle on
+  // every reload and differ between players. One named stream fixes all of
+  // them: seedStream("yard-clutter") is isolated (mulberry32 keyed by
+  // WORLD_SEED + name), so adding or removing a draw HERE can never shift any
+  // other file's layout — the whole point of the named-stream API. Degrade-safe
+  // fallback keeps the file working if seed.js somehow loaded late.
+  const rnd = CBZ.seedStream ? CBZ.seedStream("yard-clutter") : Math.random;
 
   // --- keep-out zones (axis-aligned rects in x/z) -------------------
   // We reject any candidate prop centre that lands inside these, plus a
@@ -92,8 +105,8 @@
   function pickSpot(selfR, minGap) {
     minGap = minGap == null ? 1.2 : minGap;
     for (let tries = 0; tries < 30; tries++) {
-      const x = -27 + Math.random() * 54;   // [-27,27]
-      const z = -4 + Math.random() * 53;     // [-4,49]
+      const x = -27 + rnd() * 54;   // [-27,27]
+      const z = -4 + rnd() * 53;     // [-4,49]
       if (inZones(x, z, 0.6)) continue;
       if (nearObstacle(x, z, selfR)) continue;
       if (nearPlaced(x, z, minGap + selfR)) continue;
@@ -124,14 +137,14 @@
   const bagGeo = new THREE.SphereGeometry(0.45, 7, 6);
   const knotGeo = new THREE.ConeGeometry(0.16, 0.28, 6);
   function trashBag(x, z) {
-    const m = Math.random() < 0.55 ? M.bag : M.bag2;
-    const sx = 0.9 + Math.random() * 0.5;
-    const sz = 0.9 + Math.random() * 0.5;
-    const sy = 0.7 + Math.random() * 0.35;
+    const m = rnd() < 0.55 ? M.bag : M.bag2;
+    const sx = 0.9 + rnd() * 0.5;
+    const sz = 0.9 + rnd() * 0.5;
+    const sy = 0.7 + rnd() * 0.35;
     const body = new THREE.Mesh(bagGeo, m);
     body.position.set(x, 0.45 * sy, z);
     body.scale.set(sx, sy, sz);
-    body.rotation.y = Math.random() * Math.PI;
+    body.rotation.y = rnd() * Math.PI;
     body.castShadow = true; body.receiveShadow = true;
     scene.add(body);
     const knot = new THREE.Mesh(knotGeo, M.tie);
@@ -142,7 +155,7 @@
     // small, so a foot or bumper barely notices it, but it's no longer a ghost.
     smallCollider(x, z, 0.45 * Math.max(sx, sz), body);
     // a single escaped wrapper next to ~half of them
-    if (Math.random() < 0.5) scrap(x + (Math.random() - 0.5) * 1.4, z + (Math.random() - 0.5) * 1.4);
+    if (rnd() < 0.5) scrap(x + (rnd() - 0.5) * 1.4, z + (rnd() - 0.5) * 1.4);
   }
 
   // ---------------- scattered papers / scraps ----------------
@@ -150,13 +163,13 @@
   // + tiny y so it reads as a decal and never z-fights the floor.
   const scrapGeo = new THREE.PlaneGeometry(1, 1);
   function scrap(x, z) {
-    const w = 0.35 + Math.random() * 0.45;
-    const h = 0.3 + Math.random() * 0.4;
-    const p = new THREE.Mesh(scrapGeo, Math.random() < 0.6 ? M.paper : M.paper2);
-    p.position.set(x, 0.03 + Math.random() * 0.02, z);
+    const w = 0.35 + rnd() * 0.45;
+    const h = 0.3 + rnd() * 0.4;
+    const p = new THREE.Mesh(scrapGeo, rnd() < 0.6 ? M.paper : M.paper2);
+    p.position.set(x, 0.03 + rnd() * 0.02, z);
     p.scale.set(w, h, 1);
     p.rotation.x = -Math.PI / 2;
-    p.rotation.z = Math.random() * Math.PI;     // (becomes spin around up after the x-tilt)
+    p.rotation.z = rnd() * Math.PI;     // (becomes spin around up after the x-tilt)
     p.castShadow = false; p.receiveShadow = true;
     scene.add(p);
     // trivial collider — a scrap is paper-thin, but per the same convention
@@ -167,13 +180,13 @@
 
   // ---------------- puddles ----------------
   function puddle(x, z) {
-    const w = 1.4 + Math.random() * 1.8;
-    const d = 1.0 + Math.random() * 1.6;
+    const w = 1.4 + rnd() * 1.8;
+    const d = 1.0 + rnd() * 1.6;
     const p = new THREE.Mesh(scrapGeo, puddleMat);
     p.position.set(x, 0.02, z);
     p.scale.set(w, d, 1);
     p.rotation.x = -Math.PI / 2;
-    p.rotation.z = Math.random() * Math.PI;
+    p.rotation.z = rnd() * Math.PI;
     p.castShadow = false; p.receiveShadow = false;
     scene.add(p);
   }
@@ -193,20 +206,69 @@
     addBox(x, 0.04, z, 0.62, 0.08, 0.62, 0xe25c12, { cast: false, solid: true });
   }
 
-  // ---------------- wooden benches (solid) ----------------
+  // ---------------- wooden benches (solid + SITTABLE) ----------------
   // A low slatted bench placed flush to the west (x<0) or east (x>0) wall.
   // The walls run along z, so the bench's long axis is along z too and its
   // backrest sits toward the wall (backSign = +1 pushes the rest toward +x).
   // The seat box is the solid collider, so the bench is real cover.
+  //
+  // PROPS WITH PURPOSE: the seating now routes through CBZ.furnish.bench
+  // (city/furniture.js — the ONE shared furniture kit), which owns the
+  // geometry AND registers the propuse sit anchors. Feature-detected: with
+  // the kit absent the authored boxes below run exactly as before, and we
+  // register the sit anchors ourselves so the bench is sittable either way.
+  //
+  // LOAD ORDER: this file parses at index.html:357 — before world/roombuild.js
+  // (:404) defines the CBZ.roomSeatAnchor pipe and long before city/propuse.js
+  // (:629) defines the registry itself. seatAnchor() below therefore defers to
+  // `load` when neither exists yet; because THIS listener is registered before
+  // roombuild's flush listener, the queued anchor still lands ahead of
+  // core/batch.js's merge pass.
+  // `cushion` = cushion top above the floor — propuse's 7th `geom` argument.
+  // Without it the seat is undeclared, keeps the legacy squat pose and counts
+  // in CBZ.propUseAudit().noGeom, so we always declare our own known geometry.
+  function seatAnchor(x, z, face, cushion) {
+    const reg = function () {
+      const f = CBZ.roomSeatAnchor || CBZ.propRegisterSeat;
+      if (f) f(x, 0, z, face, "bench", null, cushion != null ? { cushion: cushion, floorBelow: 0 } : null);
+    };
+    if (CBZ.roomSeatAnchor || CBZ.propRegisterSeat) reg();
+    else if (window.addEventListener) window.addEventListener("load", reg, { once: true });
+  }
   function bench(x, z, backSign) {
     const len = 2.6;       // length along z
     const seatH = 0.5;
     const bs = backSign || -1;
-    addBox(x, seatH, z, 0.6, 0.16, len, 0xa9742f, { solid: true });                       // seat
-    addBox(x + 0.24 * bs, seatH + 0.45, z, 0.1, 0.5, len, 0x8a5e2b, { cast: false });     // backrest (toward wall)
-    addBox(x, seatH / 2, z - len / 2 + 0.2, 0.5, seatH, 0.16, 0x6e4a22, { cast: false }); // legs
-    addBox(x, seatH / 2, z + len / 2 - 0.2, 0.5, seatH, 0.16, 0x6e4a22, { cast: false });
-    addBox(x, seatH + 0.085, z, 0.18, 0.04, len + 0.04, 0x7a531f, { cast: false });       // plank groove
+    // front faces AWAY from the wall the backrest leans on: bs = -1 (west
+    // wall, rest toward -x) looks +x; bs = +1 (east wall) looks -x.
+    const face = bs < 0 ? Math.PI / 2 : -Math.PI / 2;
+    // invoked THROUGH the namespace (never a detached reference) so a kit
+    // implemented with `this` still works; a throw degrades to the boxes below.
+    const F = CBZ.furnish;
+    const hasKit = !!(F && typeof F.bench === "function");
+    let sat = false, r = null, drew = false;
+    if (hasKit) {
+      try { r = F.bench(x, 0, z, face, { len: len, solid: true, tone: 0xa9742f }); drew = true; }
+      catch (e) { drew = false; }
+    }
+    if (drew) {
+      if (r && r.seats && r.seats.length) {
+        for (let i = 0; i < r.seats.length; i++) {
+          const s = r.seats[i];
+          if (s) seatAnchor(s.x, s.z, s.face != null ? s.face : (s.yaw != null ? s.yaw : face), s.cushion);
+        }
+        sat = true;
+      }
+    } else {
+      addBox(x, seatH, z, 0.6, 0.16, len, 0xa9742f, { solid: true });                       // seat
+      addBox(x + 0.24 * bs, seatH + 0.45, z, 0.1, 0.5, len, 0x8a5e2b, { cast: false });     // backrest (toward wall)
+      addBox(x, seatH / 2, z - len / 2 + 0.2, 0.5, seatH, 0.16, 0x6e4a22, { cast: false }); // legs
+      addBox(x, seatH / 2, z + len / 2 - 0.2, 0.5, seatH, 0.16, 0x6e4a22, { cast: false });
+      addBox(x, seatH + 0.085, z, 0.18, 0.04, len + 0.04, 0x7a531f, { cast: false });       // plank groove
+    }
+    // two sit spots down the bench — only if the kit reported none.
+    // cushion 0.58 = the authored plank's real top (seatH 0.50 + half of 0.16).
+    if (!sat) for (const dz of [-0.7, 0.7]) seatAnchor(x, z + dz, face, 0.58);
   }
 
   // ---------------- laundry line along the east wall ----------------
@@ -228,10 +290,10 @@
     addBox(wallX, top - 0.12, (z0 + z1) / 2, 0.05, 0.05, lineLen, 0x2c2c2c, { cast: false });
     // hanging cloth — alternating sizes/colours, gentle vertical jitter
     const clothCols = [0xd94f5c, 0x4f8fd9, 0xe8d44f, 0xe2e2e2, 0x6cc06a, 0xc06ca8];
-    for (let z = z0 + 1.2, i = 0; z < z1 - 0.4; z += 1.5 + Math.random() * 0.5, i++) {
-      const w = 0.8 + Math.random() * 0.5;
-      const h = 1.0 + Math.random() * 0.8;
-      const col = clothCols[(i * 2 + (Math.random() * 6 | 0)) % clothCols.length];
+    for (let z = z0 + 1.2, i = 0; z < z1 - 0.4; z += 1.5 + rnd() * 0.5, i++) {
+      const w = 0.8 + rnd() * 0.5;
+      const h = 1.0 + rnd() * 0.8;
+      const col = clothCols[(i * 2 + (rnd() * 6 | 0)) % clothCols.length];
       // cloth hangs from the line downward
       addBox(wallX, top - 0.12 - h / 2, z, 0.06, h, w, col, { cast: false });
       // a darker fold line down the middle for a bit of depth
@@ -250,9 +312,9 @@
     if (!s) continue;
     trashBag(s.x, s.z);
     // ~40% chance of a buddy bag right beside it for a "pile" feel
-    if (Math.random() < 0.45) {
-      const ax = s.x + (Math.random() - 0.5) * 1.4;
-      const az = s.z + (Math.random() - 0.5) * 1.4;
+    if (rnd() < 0.45) {
+      const ax = s.x + (rnd() - 0.5) * 1.4;
+      const az = s.z + (rnd() - 0.5) * 1.4;
       if (!inZones(ax, az, 0.5) && !nearObstacle(ax, az, 0.6)) {
         trashBag(ax, az);
         placed.push({ x: ax, z: az, r: 0.6 });

@@ -66,33 +66,8 @@
   // factor `tz`), optionally squashing the underside (`belly`<1 narrows the
   // bottom, rounding the keel). One geometry, one draw call. NOT cached/shared —
   // each sculpted body is unique, so the disposer (which skips _shared) frees it.
-  function taperBox(w, h, d, opt) {
-    opt = opt || {};
-    const nz = opt.nz != null ? opt.nz : 1;   // X/Y scale at the nose (+Z)
-    const tz = opt.tz != null ? opt.tz : 1;   // X/Y scale at the tail (-Z)
-    const topNarrow = opt.top != null ? opt.top : 1;   // <1 → narrower roofline (rounded canopy/spine)
-    const botNarrow = opt.bot != null ? opt.bot : 1;   // <1 → narrower keel (rounded belly)
-    const segW = opt.segW || 2, segH = opt.segH || 2, segD = opt.segD || 6;
-    const g = new THREE.BoxGeometry(w, h, d, segW, segH, segD);
-    const pos = g.attributes.position;
-    const hd = d / 2, hh = h / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      // longitudinal taper: lerp nose↔tail factor by normalized z (-1..1)
-      const f = z / hd;                                   // -1 (tail) .. +1 (nose)
-      const zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
-      let sx = zt, sy = zt;
-      // vertical profile narrowing toward the top / bottom
-      const vy = hh > 0 ? y / hh : 0;                     // -1 (bottom) .. +1 (top)
-      if (vy > 0) sx *= (1 + (topNarrow - 1) * vy);
-      if (vy < 0) sx *= (1 + (botNarrow - 1) * -vy);
-      pos.setX(i, x * sx);
-      pos.setY(i, y * sy);
-    }
-    pos.needsUpdate = true;
-    g.computeVertexNormals();
-    return g;
-  }
+  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
+  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
 
   // a single thin tapered rotor blade with a slight droop, rooted at the hub
   // (origin) and reaching out +X. Reused by both player rotors. Returns a Mesh.
@@ -1117,6 +1092,15 @@
   function exitAircraft() {
     const P = CBZ.player; if (!P) return;
     const craft = P._aircraft;
+    // BAILOUT SEAM (city/bailout.js). Everything below this line assumes you
+    // are stepping out of a PARKED aircraft: it zeroes the craft's attitude and
+    // velocity, forces onGround, drops the gear and sets you on the floor
+    // beside it. Run at 500m that is a magic trick — the abandoned plane
+    // silently teleports flat and lands itself. When you leave an aircraft that
+    // is actually flying, bailout.js takes ownership of BOTH halves instead:
+    // the falling body and the pilotless machine. It returns true when it has
+    // done so, and this function must then do nothing at all.
+    if (craft && CBZ.cityBailOut && CBZ.cityBailOut(craft)) { P.driving = false; P._aircraft = null; return; }
     P.driving = false; P._aircraft = null;
     if (craft && craft.group && craft.group.userData && craft.group.userData.pilot) craft.group.userData.pilot.visible = false;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
@@ -1169,6 +1153,12 @@
     CBZ.aircraftDoorArc.exitCraft(craft, exitAircraft);
   }
   CBZ.cityPlayerAircraftExit = exitAircraftWithDoors;
+  // Published for city/bailout.js, which flies the abandoned airframe after you
+  // step out of it. Attitude MUST go through here — it is the one place that
+  // undoes each model's yaw offset, and a pilotless plane written directly to
+  // group.rotation would spiral sideways relative to its own nose.
+  CBZ.citySetCraftRotation = setCraftRotation;
+  CBZ.cityCraftFloorY = floorY;
   // TOUCH hooks (touch.js verb pills + touch_vehicle.js buttons): the [F] and
   // left-click handlers below are pointer-lock-gated, which a tablet never
   // satisfies — these call the same private functions those handlers end in.

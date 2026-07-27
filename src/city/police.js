@@ -2399,6 +2399,19 @@
   // the minimap/full map can flag the closed street ahead (a 🚧 with a bearing)
   CBZ.cityRoadblockPos = function () { return RB.state === 1 ? { x: RB.x, z: RB.z } : null; };
 
+  // PAINT A CAR AS A CRUISER. This was rbDecorate, private, and the ONLY place
+  // in the game that knew what a marked police unit looks like — light bar,
+  // white door panels, matte hood and trunk. Anything else that wanted a
+  // cruiser (a checkpoint, a station forecourt, a motorcade) had exactly two
+  // options: import a second copy of these twenty lines, or park an unmarked
+  // black sedan and call it police. Exporting it is what stops the second
+  // copy from being written. Idempotent (it no-ops on an already-marked car),
+  // so it is safe to call on a unit that came out of the roadblock pool.
+  CBZ.cityMarkCruiser = function (car) { if (car && car.group) rbDecorate(car); return car; };
+  // and the model those units are built from, so a caller does not have to
+  // retype the literal to get the same vehicle.
+  CBZ.cityCruiserModel = function () { return CRUISER_MODEL; };
+
   // pick the best target for a cop: the player (if wanted) or an NPC offender
   function chooseTarget(cop) {
     let best = null, bestScore = -1, bestPed = null;
@@ -2485,7 +2498,15 @@
       if (c._post) {
         const post = c._post;
         const nearB = (c.pos.x - camx) * (c.pos.x - camx) + (c.pos.z - camz) * (c.pos.z - camz) < ANIM_D2;
-        if (!c.armed) drawGun(c);
+        // A ROADBLOCK is staged against a live pursuit, so its officers are
+        // always gunned up. A STANDING post (a highway checkpoint) is not: an
+        // officer waving traffic through with a rifle out reads as martial
+        // law, and it also destroys the moment a checkpoint DOES draw down.
+        // post.relaxed opts a post into "holstered while nothing is wrong";
+        // the instant you have stars or he can see you, the same code below
+        // arms him. Absent the flag every existing post is byte-identical.
+        if (post.relaxed && (stars | 0) === 0 && !c.sees) { if (c.armed) holsterGun(c); }
+        else if (!c.armed) drawGun(c);
         if (c.shootCD > 0) c.shootCD -= dt;
         if (RB.state === 2) {                                  // mounting up — the wall is leaving
           post.mountT += dt;

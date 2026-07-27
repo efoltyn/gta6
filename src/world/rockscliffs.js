@@ -145,7 +145,13 @@
   //  ONE-TIME CPU COST — call this at world-build time, cache the result,
   //  never call it per-frame.
   // ----------------------------------------------------------------------
-  function makeRock(radius, seed, detail) {
+  //  `tune` (OPTIONAL, added for the real-mountain deployment — omitted by
+  //  every legacy caller, so their geometry is byte-identical): {scrapes,
+  //  hops, depthMin, depthMax, squashY} lets a caller ask for a FLATTER, more
+  //  heavily-spalled slab (cliff-band rubble / talus plates) instead of the
+  //  default rounded-ish boulder. Real talus is plate-shaped because it splits
+  //  along bedding, so a uniform boulder scatter reads wrong at a cliff foot.
+  function makeRock(radius, seed, detail, tune) {
     radius = radius || 1;
     detail = detail == null ? 1 : detail;
     const rng = makeRng(seed == null ? 1 : seed);
@@ -175,10 +181,23 @@
     const adj = buildAdjacency(indexArr, vcount);
 
     // ---- run the scrape N times at random points/strengths -------------
-    const SCRAPES = 8 + ((rng() * 6) | 0);          // 8-13 chips per rock
-    const HOPS = 1 + ((rng() * 2) | 0);             // 1-2 edge-hops per chip (keeps facets small)
+    // NOTE the draw ORDER is preserved exactly when `tune` is absent: the two
+    // rng() draws below happen either way, so a legacy caller's rock is
+    // byte-identical whether or not this branch exists.
+    const rS = (rng() * 6) | 0, rH = (rng() * 2) | 0;
+    const SCRAPES = (tune && tune.scrapes) ? tune.scrapes + rS : 8 + rS;   // 8-13 chips per rock
+    const HOPS = (tune && tune.hops) ? tune.hops + rH : 1 + rH;            // 1-2 edge-hops per chip (keeps facets small)
+    const dMin = radius * ((tune && tune.depthMin != null) ? tune.depthMin : 0.05);
+    const dMax = radius * ((tune && tune.depthMax != null) ? tune.depthMax : 0.32);
     for (let s = 0; s < SCRAPES; s++) {
-      scrapeOnce(positions, adj, rng, HOPS, radius * 0.05, radius * 0.32);
+      scrapeOnce(positions, adj, rng, HOPS, dMin, dMax);
+    }
+    // Plate/slab shaping: a uniform vertical squash AFTER the scrapes keeps
+    // every chipped facet (they just become shallower), which is exactly how a
+    // split slab looks — angular in plan, thin in section.
+    if (tune && tune.squashY != null && tune.squashY !== 1) {
+      const sq = tune.squashY;
+      for (let i = 0; i < vcount; i++) positions[i].y *= sq;
     }
 
     // ---- write back into a fresh non-indexed BufferGeometry so each
@@ -231,8 +250,30 @@
   //    seed              — RNG seed (deterministic placement)
   //    rng               — supply an existing seeded rng instead of `seed`
   //    maxAttempts        — over-sample factor guard (default count*4)
+  //
+  //  REAL-MOUNTAIN EXTENSIONS (all default-OFF, so every legacy caller —
+  //  terrain.js / terrain_overhaul.js's backdrop talus, biome_desert — keeps
+  //  byte-identical placement AND an identical rng draw sequence):
+  //    alignToSlope      — 0..1, tilt each rock's up-axis toward the GROUND
+  //                        NORMAL by this fraction. A boulder wedged on a 35°
+  //                        face sits IN the face; a world-up boulder reads as
+  //                        a sticker. Required for cliff-band rubble.
+  //    flatten           — 0..1, squash Y / spread XZ per instance: talus
+  //                        plates and scree flakes instead of potatoes.
+  //    bury              — fraction of the instance's size sunk below the
+  //                        surface (default 0.18, i.e. today's behaviour).
+  //    hashVary          — use CBZ.hash01(x,z,…) for per-instance size/roll
+  //                        variation instead of the legacy `i % 3` cycle.
+  //                        Position-hashed, so it adds ZERO rng draws.
+  //    rockTune          — passed straight to makeRock (scrapes/hops/squashY).
+  //    tag               — stamped into userData.rockPopulation for debugging.
   // ----------------------------------------------------------------------
   const _EPS = 1.5;
+  // module-scope scratch for the slope-alignment path (allocation-free)
+  const _UP = new THREE.Vector3(0, 1, 0);
+  const _alignN = new THREE.Vector3();
+  const _alignQ = new THREE.Quaternion();
+  const _spinQ = new THREE.Quaternion();
   function centralNormal(heightAt, x, z, out) {
     const hL = heightAt(x - _EPS, z), hR = heightAt(x + _EPS, z);
     const hD = heightAt(x, z - _EPS), hU = heightAt(x, z + _EPS);
@@ -261,7 +302,7 @@
     const baseR = opts.baseRadius == null ? 1 : opts.baseRadius;
     const geomVariants = [];
     for (let v = 0; v < variantN; v++) {
-      geomVariants.push(makeRock(baseR, (opts.seed == null ? 777 : opts.seed) * 31 + v * 97 + 1, opts.detail == null ? 1 : opts.detail));
+      geomVariants.push(makeRock(baseR, (opts.seed == null ? 777 : opts.seed) * 31 + v * 97 + 1, opts.detail == null ? 1 : opts.detail, opts.rockTune));
     }
 
     // ---- gather placements first (slope-tested), THEN size the instanced
@@ -284,6 +325,7 @@
         rotY: rng() * Math.PI * 2,
         rotTilt: (rng() - 0.5) * 0.35,
         variant: (rng() * variantN) | 0,
+        nx: n.x, ny: n.y, nz: n.z,                     // ground normal at the spot
       });
     }
     if (!placed.length) return { count: 0, meshes: [] };
@@ -297,6 +339,11 @@
 
     const dummy = new THREE.Object3D();
     const meshes = [];
+    const align = opts.alignToSlope == null ? 0 : Math.max(0, Math.min(1, opts.alignToSlope));
+    const flatten = opts.flatten == null ? 0 : Math.max(0, Math.min(1, opts.flatten));
+    const bury = opts.bury == null ? 0.18 : opts.bury;
+    const hashVary = !!opts.hashVary;
+    const hash01 = CBZ.hash01;
     for (let v = 0; v < variantN; v++) {
       const list = buckets[v];
       if (!list.length) { if (geomVariants[v].dispose) geomVariants[v].dispose(); continue; }   // unused variant this call — free it
@@ -308,14 +355,37 @@
         // partially bury the rock so it reads as sitting IN the ground, not
         // floating on top of it (a plain sphere-ish shape looks glued-on
         // otherwise).
-        dummy.position.set(p.x, p.y - p.s * 0.18, p.z);
-        dummy.rotation.set(p.rotTilt, p.rotY, p.rotTilt * 0.6);
-        dummy.scale.set(p.s, p.s * (0.85 + (i % 3) * 0.08), p.s);
+        dummy.position.set(p.x, p.y - p.s * bury, p.z);
+        if (align > 0 && p.ny != null) {
+          // Wedge the rock INTO the slope: rotate world-up onto (a fraction of)
+          // the ground normal, then spin it about that new up. On a 35° cliff
+          // face this is the whole difference between "wedged block" and
+          // "sticker".
+          _alignN.set(p.nx, p.ny, p.nz);
+          if (_alignN.lengthSq() < 1e-9) _alignN.set(0, 1, 0);
+          _alignN.normalize().lerp(_UP, 1 - align).normalize();
+          _alignQ.setFromUnitVectors(_UP, _alignN);
+          _spinQ.setFromAxisAngle(_UP, p.rotY);
+          dummy.quaternion.copy(_alignQ).multiply(_spinQ);
+        } else {
+          dummy.rotation.set(p.rotTilt, p.rotY, p.rotTilt * 0.6);
+        }
+        // per-instance size variation. hashVary derives it from POSITION (no
+        // extra rng draws → the shared stream stays order-stable); the legacy
+        // `i % 3` cycle is preserved verbatim when it is off.
+        const vary = hashVary
+          ? (hash01 ? hash01(p.x, p.z, 0x0c1a) : 0.5)
+          : ((i % 3) / 3);
+        const yS = p.s * (0.85 + vary * 0.24) * (1 - flatten * 0.62);
+        const xzS = p.s * (1 + flatten * 0.40);
+        dummy.scale.set(xzS, yS, xzS * (hashVary ? 0.84 + vary * 0.32 : 1));
         dummy.updateMatrix();
         im.setMatrixAt(i, dummy.matrix);
       }
       im.instanceMatrix.needsUpdate = true;
       im.matrixAutoUpdate = false;
+      if (opts.tag) im.userData.rockPopulation = opts.tag;   // non-empty userData also spares it from the batcher
+      im.name = "rock-scatter" + (opts.tag ? ":" + opts.tag : "");
       root.add(im);
       meshes.push(im);
     }
