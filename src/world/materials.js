@@ -370,10 +370,19 @@
   const GLASS_TINT = 0xbfe9f7;     // buildings.js's exact cool blue
   const GLASS_LIFT = 0x3f8aa6;     // and its exact emissive underlight
   const glassCache = new Map();
+  let glassCalls = 0;              // adoption counter — see CBZ.glassPool()
   function glass(opts) {
     opts = opts || {};
+    glassCalls++;
     const tint = opts.tint != null ? (opts.tint | 0) : GLASS_TINT;
-    const lift = opts.lift != null ? (opts.lift | 0) : GLASS_LIFT;
+    // `lift` is this factory's word for the underlight; `emissive` is the word
+    // every OTHER factory here uses (mat/cmat/pbrMat all take opts.emissive),
+    // and it is what ~15 vehicle call sites already type. Accepting it as an
+    // alias is what let world/carfx.js hand a caller's own tuning straight
+    // through instead of dropping it on the floor. `lift` still wins if both
+    // are given, so no existing call site changes behaviour.
+    const lift = opts.lift != null ? (opts.lift | 0)
+      : (opts.emissive != null ? (opts.emissive | 0) : GLASS_LIFT);
     const ei = opts.ei != null ? +opts.ei : 0.5;
     const op = opts.opacity != null ? +opts.opacity : 0.6;
     // FrontSide(0) by default; pass side: THREE.DoubleSide for a pane you can
@@ -403,6 +412,18 @@
   }
   CBZ.glass = glass;
   CBZ.GLASS_TINT = GLASS_TINT;
+  CBZ.GLASS_LIFT = GLASS_LIFT;
+  // Live census of THE ONE GLASS, for CBZ.glassAudit() (world/carfx.js).
+  // `variants` is how many DISTINCT panes the pool holds (a curtain wall, a
+  // cockpit pane, a terminal window and a canopy are four different asks off
+  // one recipe); `calls` is how often anything in the game asked for glass at
+  // all. Both are the adoption signal: a variant count of 1 means only
+  // buildings.js ever found this, which is where it started.
+  CBZ.glassPool = function () {
+    const mats = [];
+    glassCache.forEach(function (m) { mats.push(m); });
+    return { mats: mats, variants: mats.length, calls: glassCalls };
+  };
 
   CBZ.mat = mat;
   CBZ.cmat = cmat;

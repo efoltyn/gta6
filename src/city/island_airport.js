@@ -1700,7 +1700,7 @@
     const FLEET = {
       white:  vmat("paint", 0xf2f4f6, { roughness: 0.5, metalness: 0.3 }),
       navy:   vmat("paint", 0x1b2438, { roughness: 0.55 }),
-      glass:  vmat("glass", 0x10161c),
+      glass:  vmat("glass", 0x101a24), // was 0x10161c — that cleared crashdeform's frost window (b-r>0.045) by 0.002, half an 8-bit step; this clears by 0.033 with the same near-black read
       metal:  vmat("metal", 0xc8ccd2),
       dark:   vmat("plastic", 0x14181d),
       tire:   vmat("tire", 0x1a1d21),

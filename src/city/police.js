@@ -1084,7 +1084,7 @@
     const matWhite = chopMat('paint', 0xe9edf2);
     const matNavy  = chopMat('paint', 0x161a24);
     const matTrim  = chopMat('metal', 0x2a2e36);
-    const matGlass = chopMat('glass', 0x10161c);
+    const matGlass = chopMat('glass', 0x101a24); // was 0x10161c — cleared crashdeform's frost window by half an 8-bit step; same near-black read, real margin
     const matBlade = chopMat('metal', 0x1c2229);
     // sculpted white cab over a navy belly band — cruiser doors in the sky
     const body = new THREE.Mesh(chopTaperBox(1.9, 1.25, 4.2, { nz: 0.5, tz: 0.45, top: 0.7, bot: 0.62, segD: 8 }), matWhite);

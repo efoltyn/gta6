@@ -665,7 +665,7 @@
       m._shared = true;
       return m;
     }
-    EMS = { glass: sh("glass", 0x10161c), steel: sh("metal", 0x9aa3ab) };
+    EMS = { glass: sh("glass", 0x101a24), steel: sh("metal", 0x9aa3ab) }; // glass was 0x10161c — frost-window margin
     return EMS;
   }
   // scaled-unit-box brick: the whole emergency build is this call over and over

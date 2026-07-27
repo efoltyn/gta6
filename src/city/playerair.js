@@ -126,7 +126,7 @@
       matGlow: M(0xffd98a, { emissive: 0xffd98a, ei: 0.7 }),   // warm landing-light bar
       matJet:  shared(vmat('paint', 0x39424f)),           // strike jet slate
       matJetMetal: shared(vmat('metal', 0x565e68)),       // burner cans / rails
-      matGlass:shared(vmat('glass', 0x10161c)),           // jet canopy (reflective)
+      matGlass:shared(vmat('glass', 0x101a24)),           // jet canopy (was 0x10161c — frost-window margin, same near-black read)
       // ONE-OFF transparent bubble glass: the shared carfx 'glass' is opaque on
       // purpose (sort cost at 100s of cars), but a single summoned chopper can
       // afford true see-through panes — you SEE the seats you're about to take.
