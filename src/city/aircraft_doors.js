@@ -37,6 +37,10 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   if (CBZ.CONFIG && CBZ.CONFIG.AIRCRAFT_DOOR_ARC == null) CBZ.CONFIG.AIRCRAFT_DOOR_ARC = true;
+  // A hijack fired from INSIDE the aircraft runs a short flight-deck beat
+  // instead of replaying the whole walk-up (see alreadyAboard below). false =
+  // the old unconditional arc, which marched the player back out of the plane.
+  if (CBZ.CONFIG && CBZ.CONFIG.AIRCRAFT_DOOR_SKIP_WHEN_ABOARD == null) CBZ.CONFIG.AIRCRAFT_DOOR_SKIP_WHEN_ABOARD = true;
 
   function enabled() { return !CBZ.CONFIG || CBZ.CONFIG.AIRCRAFT_DOOR_ARC !== false; }
   function inCity() { return CBZ.game && CBZ.game.mode === "city"; }
@@ -226,6 +230,33 @@
   // committed — same success semantics as the old instant call). handover()
   // runs at the step's end and must return truthy; a falsy handover triggers
   // onFail() so the caller's theft state can revert.
+  /* ---- ALREADY PAST THIS DOOR ------------------------------------------
+     OWNER BUG (2026-07-27, verbatim): "when i go to steal an airplane i board
+     the plane and then the cockpit door opens, and when i press E again to
+     hijack it, instead of throwing the pilot out and sitting in the seat, the
+     door and steps open as if I'm hijacking from outside the plane — but i
+     already boarded and opened the cockpit door."
+
+     Exactly right, and the cause is that this arc was UNCONDITIONAL. begin()
+     always started at phase "walk", whose first act is to guide the player to
+     `outLocal` — a point 1.6 hull-scales OUTSIDE the fuselage door — while the
+     airstairs deploy and the fuselage panel slides. Fired from the flight deck
+     that means the player is marched back out through the aeroplane he is
+     standing in and the whole boarding beat is replayed.
+
+     The fix is an ENTRY into this grammar, not a bypass of it (elevators.js's
+     rule: the door beats are the door beats). A player who is already inside
+     starts at a "deck" phase: no stairs, no fuselage panel, no door flag — the
+     flight-deck door he already opened is the only door in play, so the beat is
+     the short one the owner described — walk to the seats, pilots out, take
+     the controls. Everything else about the arc (cancel-on-death, theft revert
+     via onFail, the one-arc-at-a-time rule) is unchanged and shared. */
+  function alreadyAboard(rec) {
+    if (!rec) return false;
+    if (CBZ.CONFIG && CBZ.CONFIG.AIRCRAFT_DOOR_SKIP_WHEN_ABOARD === false) return false;
+    return !!(CBZ.cityCabinAboard && CBZ.cityCabinAboard(rec));
+  }
+
   function begin(opts) {
     if (!enabled() || arc || !inCity()) return false;
     const P = CBZ.player;
@@ -233,12 +264,22 @@
     const grp = opts.group;
     if (!grp || !grp.parent) return false;
     const spec = doorSpec(opts.rec, grp);
+    const aboard = alreadyAboard(opts.rec);
     arc = {
       P, rec: opts.rec || null, group: grp, spec,
       handover: opts.handover, onFail: opts.onFail || null,
-      phase: "walk", t: 0, walkT: 0, exit: false,
-      stair: null,
+      phase: aboard ? "deck" : "walk", t: 0, walkT: 0, exit: false,
+      stair: null, aboard: aboard,
+      deck: aboard && CBZ.cityCabinFlightDeck ? CBZ.cityCabinFlightDeck(opts.rec) : null,
     };
+    if (aboard) {
+      // The fuselage door and the stairs stay OUT of this: the player never
+      // passes through them. _doorArcOpen is deliberately not set, which is
+      // what stops island_airport.js force-opening the panel and the airstair.
+      P._doorArc = true;
+      if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+      return true;
+    }
     // a walk-in door gets a real flight of stairs; a fighter canopy and a
     // bare hatch do not (nothing to climb to — spec.inY is null).
     if (arc && arc.spec && arc.spec.inY != null) {
@@ -280,6 +321,27 @@
     const a = arc, P = a.P, spec = a.spec;
     a.t += dt;
 
+    // ---- ALREADY ABOARD: the short flight-deck beat ------------------------
+    // No stairs, no fuselage panel, no walk-up. Step up to the chairs, put the
+    // crew out of them, take the controls. Bounded by the same 2.2 s the walk
+    // beat uses so a blocked path can never wedge the arc.
+    if (a.phase === "deck") {
+      a.walkT += dt;
+      let there = true;
+      if (a.deck) there = guide(P, a.deck.x, a.deck.z, dt, 3.2);
+      if (there || a.walkT > 2.2) {
+        a.phase = "close"; a.t = 0;
+        // The crew coming OUT of the seats is not staged here: it belongs to
+        // the handover itself (playeraircraft.js citySpawnFlyableFromProp calls
+        // CBZ.cityVacateFlightDeck), so every route to the controls ejects them
+        // — this arc, the flag-off instant path, and cityAirborneStart alike —
+        // instead of only the one that happens to run a door beat.
+        let ok = false;
+        try { ok = !!(a.handover && a.handover()); } catch (e) { ok = false; }
+        if (!ok) { endArc(true); return; }
+      }
+      return;
+    }
     if (a.phase === "walk") {
       // guided approach to the door point while the door eases open
       a.walkT += dt;

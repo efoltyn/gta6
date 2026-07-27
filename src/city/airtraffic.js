@@ -59,7 +59,13 @@
 
   // ---- tunables -------------------------------------------------------------
   const N_TRAFFIC   = 4;                       // a handful — atmosphere, not an airshow
-  const ALT_BANDS   = [72, 96, 122, 148];      // stacked, all above the police air (44/52)
+  // Stacked VFR bands. (The old comment here claimed these sat "all above the
+  // police air (44/52)"; that stopped being true when Air-1 moved onto
+  // CBZ.heliSpec's 150 m search / 85 m engaged postures. These bands are
+  // deliberately UNCHANGED — this fleet is TRANSITING traffic, not air support
+  // orbiting a point, so a low-level GA circuit crossing under and over a
+  // police orbit is correct and is also what keeps these craft shootable.)
+  const ALT_BANDS   = [72, 96, 122, 148];
   const VIS_RING    = 520;                     // cull update+draw beyond this from the player
   // GA accent stripes / heli bold bodies — classic civilian schemes
   const GA_ACCENTS  = [0x2d5fb0, 0xc0392b, 0xd8821f, 0x1f7a4d];
@@ -287,6 +293,28 @@
   }
   CBZ.cityClearAirTraffic = teardown;
   CBZ.cityAirTrafficList = function () { return fleet ? fleet.slice() : []; };
+  // CBZ.heliAudit() census provider (aircraft.js owns the audit; each fleet
+  // pushes ONE of these). Ambient civil helis are deliberately reported as
+  // crewed:1 — a light single flown by its owner IS a crewed aircraft, and
+  // counting it as `uncrewed` would poison the number that must trend to 0.
+  // Fixed-wing traffic is not a rotorcraft and is not reported here.
+  CBZ.heliFleet = CBZ.heliFleet || [];
+  CBZ.heliFleet.push(function () {
+    if (!fleet) return null;
+    const out = [];
+    for (let i = 0; i < fleet.length; i++) {
+      const t = fleet[i];
+      if (!t || t.kind !== "heli" || !t.grp || !t.grp.parent) continue;
+      const p = t.grp.position;
+      const gy = CBZ.floorAt ? (+CBZ.floorAt(p.x, p.z) || 0) : 0;
+      out.push({
+        role: "traffic", x: p.x, y: p.y, z: p.z, agl: p.y - gy,
+        speed: t.speed, orbitR: t.radius, crew: 1,
+        roofTop: trafficRoofTop(p.x, p.z), downed: !!t.downed,
+      });
+    }
+    return out;
+  });
 
   // systems/lockon.js UNIVERSAL-acquisition seam (owner: "homing doesn't work
   // for small planes"): every ambient GA plane / light heli is a lockable
@@ -345,7 +373,14 @@
       // hit wrecks the airframe, a near miss WOUNDS it into tier smoke.
       const hullD = Math.max(0, Math.hypot(p.x - x, p.y - y, p.z - z) - (t.kind === "heli" ? 2.6 : 3.2));
       if (hullD > radius) continue;
-      damageTraffic(t, dmg * Math.max(0.3, 1 - hullD / radius));
+      let d = dmg * Math.max(0.3, 1 - hullD / radius);
+      // NO SINGLE BLAST DOWNS A HELICOPTER (owner: "helicopters need two rpg
+      // hits to come down"): rotorcraft cap any ONE explosive splash at 62%
+      // of max hp — the first rocket wounds the bird into tier smoke (50hp
+      // vs the 140 splash used to vaporise it), the second kills. Planes are
+      // unchanged, and bullets (damageTraffic via the ray path) untouched.
+      if (t.kind === "heli" && (!CBZ.CONFIG || CBZ.CONFIG.AIR_HELI_TWO_BLAST !== false)) d = Math.min(d, trafficHP(t) * 0.62);
+      damageTraffic(t, d);
       hit++;
     }
     return hit;
@@ -535,10 +570,15 @@
       t.grp.position.set(x, t.alt, z);
       // heading = the orbit tangent; bank = the constant-radius turn angle
       // (tan(bank) = v^2 / (R*g)), signed to lean INTO the turn (matches the
-      // player model's roll→turn sign convention).
+      // player model's roll→turn sign convention). THIS FILE'S OWN FORMULA is
+      // now the shared one — CBZ.heliOrbitBank (city/aircraft.js) is exactly
+      // this expression, and the police chopper and the military gunship fly
+      // their orbits on it too instead of a decorative sin() wobble. Local
+      // fallback kept so this module never depends on load order.
       const vx = -Math.sin(ang) * t.dir, vz = Math.cos(ang) * t.dir;
       const heading = Math.atan2(vx, vz);
-      const bank = -t.dir * Math.atan((t.speed * t.speed) / (t.radius * 9.8)) * 0.85;
+      const bank = -t.dir * (CBZ.heliOrbitBank ? CBZ.heliOrbitBank(t.speed, t.radius)
+                                               : Math.atan((t.speed * t.speed) / (t.radius * 9.8))) * 0.85;
       t.grp.rotation.set(0, heading, Math.max(-0.5, Math.min(0.5, bank)));
       const ud = t.grp.userData;
       if (ud.prop) ud.prop.rotation.z += dt * 42;

@@ -388,7 +388,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=riglock6"></script>
+  <script src="src/entities/character.js?v=riglock6w11"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=scale1"></script>
 <script src="src/entities/coins.js"></script>
@@ -619,8 +619,8 @@
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
 <script src="src/city/island_speedway.js?v=circuit1"></script>
-<script src="src/city/island_airport.js?v=airfieldpaint4w9"></script>
-<script src="src/city/island_military.js?v=livebase5"></script>
+<script src="src/city/island_airport.js?v=airfieldpaint4w9w11"></script>
+<script src="src/city/island_military.js?v=livebase5w11"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=organicforest5"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
@@ -702,9 +702,9 @@
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=fortress1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=localheli2w9"></script>
+<script src="src/city/police.js?v=localheli2w9w11"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
-<script src="src/city/aircraft.js?v=localheli2"></script>
+<script src="src/city/aircraft.js?v=localheli2w11"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
 <script src="src/city/carparts.js?v=brands1"></script>
 <script src="src/city/playercars.js?v=brands1"></script>
@@ -714,7 +714,7 @@
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/vehicles.js?v=boostjump2w9"></script>
 <script src="src/city/playerair.js?v=air3"></script>
-<script src="src/city/playeraircraft.js?v=swepthull3w9"></script>
+<script src="src/city/playeraircraft.js?v=swepthull3w9w11"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -746,11 +746,11 @@
      control hands over (and the reverse on exit). Wired behind the existing
      board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
      island_airport.js panel/airstair easing honours its open flag. -->
-<script src="src/city/aircraft_doors.js?v=doorarc1"></script>
+<script src="src/city/aircraft_doors.js?v=doorarc1w11"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=air2"></script>
+<script src="src/city/airtraffic.js?v=air2w11"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→

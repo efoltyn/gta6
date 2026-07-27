@@ -55,17 +55,152 @@
     return geo;
   }
 
+  // ============================================================
+  //  WHAT A HELICOPTER IS — the ONE flight envelope every rotorcraft AI in
+  //  this game reads (CBZ.heliSpec). OWNER: "they should move around at
+  //  correct speed and height."
+  //
+  //  MEASURED BEFORE (three unrelated models, none of them a helicopter):
+  //    • this file's gunship  — 26 m absolute / 24 m AGL, orbit radius 22 m,
+  //      14 m/s. 26 m is 85 ft: that is a camera drone hovering over the
+  //      street, and a 22 m orbit is not an orbit, it is a hover directly
+  //      over your head.
+  //    • police.js Air-1      — 38 m AGL, orbit radius 18 - 1.5*stars, i.e.
+  //      13.5 m at 3 stars and 10.5 m at 5. Tangential speed ~9 m/s.
+  //    • airtraffic.js fleet  — 72-148 m, 70-140 m radius, 18-26 m/s. The one
+  //      set of numbers that was already honest.
+  //
+  //  REAL: US law-enforcement air support patrols 500-1000 ft AGL (150-300 m)
+  //  — above the rooftops, above small-arms range, and audible long before it
+  //  is legible. Light-single cruise (Bell 206/407, MD 500 class) is 100-135 kt
+  //  = 52-70 m/s; an ORBIT is flown far slower, 40-90 km/h = 11-25 m/s, banked
+  //  into the turn. A police orbit is one lap in roughly 30-60 s.
+  //
+  //  THE ORBIT RADIUS IS NOT A CONSTANT. It falls out of the speed and the
+  //  bank angle: a coordinated turn holds tan(bank) = v^2 / (g*R). Authoring a
+  //  radius AND a speed AND a bank separately is what let all three sites
+  //  drift into geometry no aircraft could fly. heliOrbitRadius() is that one
+  //  equation, and airtraffic.js had already typed its inverse for its own
+  //  bank — so this is the shared form of a formula the repo already trusted.
+  //
+  //  WHERE REALISM IS TRADED FOR PLAYABILITY, EXPLICITLY: the longest-ranged
+  //  weapon in this game is the sniper at 240 m and the RPG — the sanctioned
+  //  anti-air answer, and the weapon the two-blast rotorcraft rule is written
+  //  for — reaches 200 m. A textbook 1000 ft / 400 m orbit puts the slant
+  //  range past 430 m: unshootable by every gun in the game, which fails the
+  //  owner's "must still be able to SEE and SHOOT it". So air support has TWO
+  //  postures, which is also what a real ship does:
+  //    SEARCH  (no eyes on you)  — 150 m AGL, 190 m orbit, 26 m/s. Slant from
+  //            the orbit centre 242 m: realistically out of reach. You hear it
+  //            and watch it circle.
+  //    ENGAGED (painted / the gunner is working) — it comes DOWN and TIGHTENS
+  //            to put the observer's optics and the gun's arc on you: 85 m AGL
+  //            (279 ft), 112 m orbit, 20 m/s. Slant 141 m — sniper and RPG
+  //            reach comfortably, a rifle (118 m) only when you close. That
+  //            descent is the shootable window, and the helicopter EARNS it by
+  //            committing. The gunship sits one step higher and faster.
+  //  Every orbit here is flown at a 20 deg bank, which is what makes the three
+  //  numbers in each row mutually consistent instead of three opinions.
+  // ============================================================
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.AIR_HELI_REALISM == null) CBZ.CONFIG.AIR_HELI_REALISM = true;
+  function heliRealism() { return CBZ.CONFIG.AIR_HELI_REALISM !== false; }
+  const HELI_BANK_DEG = 20;                  // the coordinated-turn bank every orbit below is flown at
+  function heliOrbitRadius(v, bankDeg) {
+    const b = (bankDeg == null ? HELI_BANK_DEG : bankDeg) * Math.PI / 180;
+    return (v * v) / (9.81 * Math.max(0.02, Math.tan(b)));
+  }
+  function heliOrbitBank(v, R) { return Math.atan((v * v) / (Math.max(1, R) * 9.81)); }
+  // A searchlight is a CONE, so its footprint is a function of height — not a
+  // constant disc (owner: "a searchlight from 500 ft casts a cone tens of
+  // metres wide, not a spotlight the width of a car"). 4 deg half-angle is a
+  // Nightsun-class spot: ~12 m across from the engaged orbit at 85 m, ~21 m
+  // from the 150 m search orbit.
+  //
+  // THIS NUMBER IS ALSO THE PAINT RADIUS (cityChopperPaints reads spotR), and
+  // that is deliberate — one number, no parallel bookkeeping. 4 deg is chosen
+  // so the ENGAGED posture lands on 5.9 m + the star bonus ≈ the 7.5 m the
+  // player already knew: at the height where the ship actually hunts you the
+  // difficulty is unchanged, and only the high search orbit throws the wider
+  // (correct) pool, where being lit matters less anyway.
+  const BEAM_HALF = 4.0 * Math.PI / 180;
+  function heliBeamRadius(agl) {
+    return Math.max(5, Math.min(18, Math.max(0, agl) * Math.tan(BEAM_HALF)));
+  }
+  // role → envelope. LEGACY is what each site used to hard-code, so
+  // AIR_HELI_REALISM=false is a true one-line revert for all three.
+  const HELI_SPECS = {
+    // police Air-1 — a light single (Bell 206/407 class)
+    police:  { aglSearch: 150, agl: 85,  vSearch: 26, v: 20, cruise: 60, climb: 8,  roofClear: 15, gunRange: 170, hp: 85 },
+    // the 5-star military gunship — heavier, higher, faster, still killable
+    // gunRange 220 is a FAIRNESS INVARIANT, not a gun stat: the engaged slant
+    // range is 187 m, so the gunship can only shoot from a posture the player's
+    // RPG (200 m) and sniper (240 m) can shoot back from. It must descend out
+    // of the 301 m search orbit to fire, and once it has, it is reachable.
+    gunship: { aglSearch: 165, agl: 95,  vSearch: 30, v: 24, cruise: 68, climb: 9,  roofClear: 14, gunRange: 220, hp: 140 },
+    // ambient civil traffic is NOT air support: it transits, it does not orbit
+    // a point, so it keeps its own stacked VFR bands and only shares the bank
+    // equation and the audit.
+    traffic: { aglSearch: 122, agl: 122, vSearch: 22, v: 22, cruise: 22, climb: 6,  roofClear: 10, gunRange: 0,   hp: 50 },
+  };
+  // The revert must be FAITHFUL, so the legacy rows pin their old radii
+  // explicitly instead of letting heliOrbitRadius re-derive them — those orbits
+  // were not flyable geometry and would not come back out of the equation.
+  const HELI_LEGACY = {
+    police:  { aglSearch: 38,  agl: 38,  vSearch: 9,  v: 9,  cruise: 36, climb: 12, roofClear: 9,  gunRange: 60,  hp: 85,  R: 13.5, RS: 13.5 },
+    gunship: { aglSearch: 26,  agl: 24,  vSearch: 11, v: 11, cruise: 24, climb: 9,  roofClear: 4,  gunRange: 35,  hp: 140, R: 22,   RS: 22 },
+    traffic: { aglSearch: 122, agl: 122, vSearch: 22, v: 22, cruise: 22, climb: 6,  roofClear: 10, gunRange: 0,   hp: 50,  R: 105,  RS: 105 },
+  };
+  const specCache = Object.create(null);
+  function heliSpec(role) {
+    const on = heliRealism();
+    const key = (HELI_SPECS[role] ? role : "police") + (on ? "|r" : "|l");
+    if (specCache[key]) return specCache[key];
+    const base = (on ? HELI_SPECS : HELI_LEGACY)[HELI_SPECS[role] ? role : "police"];
+    const out = Object.assign({}, base);
+    out.role = role;
+    out.orbitR = out.R > 0 ? out.R : heliOrbitRadius(out.v);              // engaged orbit — derived, never authored
+    out.orbitRSearch = out.RS > 0 ? out.RS : heliOrbitRadius(out.vSearch); // search orbit — same equation
+    out.bank = HELI_BANK_DEG * Math.PI / 180;
+    Object.freeze(out);
+    specCache[key] = out;
+    return out;
+  }
+  CBZ.heliSpec = heliSpec;
+  CBZ.heliOrbitRadius = heliOrbitRadius;
+  CBZ.heliOrbitBank = heliOrbitBank;
+  CBZ.heliBeamRadius = heliBeamRadius;
+  // Every rotorcraft owner pushes ONE census function here; heliAudit walks
+  // them. Declared with `||` so load order between police.js (parses first),
+  // this file and airtraffic.js cannot matter.
+  CBZ.heliFleet = CBZ.heliFleet || [];
+
   // ---- tunables (kept conservative so phones survive a 5-star firefight) ----
   const HELI_STAR   = 5;      // military owns only the rare top wanted tier
   const JET_STAR    = 5;      // jets + missiles at 5 stars
-  // Street-search baseline. Local terrain/roof clearance below raises the
-  // gunship only where needed, instead of making every pass unshootably high.
-  const HELI_Y      = 26;
-  const HELI_AGL    = 24;
-  const HELI_CLEAR  = 4;      // min air gap kept over any rooftop the gunship passes over (no fly-through)
-  const HELI_R      = 22;     // orbit radius around last-known
-  const HELI_SPEED  = 14;     // m/s lateral chase toward orbit point
-  const MISSILE_SPD = 46;     // m/s missile travel
+  // Derived from the spec above — HELI_Y / HELI_AGL / HELI_R / HELI_SPEED /
+  // HELI_CLEAR are gone. What remains is a hard floor for an inbound leg over
+  // water or bare terrain, where there is no roof to clear and no ground AGL
+  // reference worth trusting.
+  function GS() { return heliSpec("gunship"); }
+  const HELI_Y_FLOOR = 40;    // absolute floor while transiting (never skim the sea)
+  const MISSILE_SPD = 46;     // m/s missile travel (legacy — see missileSpd())
+  // MISSILE PACE V2 (owner: "really figure out on all guns but especially
+  // missiles what the slowing factor is when player fires... and fix it").
+  // The slowing factor HERE was this hard 46 m/s — slower than the F-22 that
+  // fires it (JET_MAX 120: a player at cruise flew through his own ordnance)
+  // and ~30x slower than the tank shell that ALSO rides this pool. 46 was
+  // defended only by the point-test collision below (a faster tip stepped
+  // clean through thin walls between frames); updateMissiles now sweeps the
+  // step at ≤0.8m samples (ground + blockers + prox fuse all along the
+  // segment, not just at the endpoint), so the speed is free to be honest:
+  // 150 m/s — 30m in 0.2s, still readable in flight, still far under a real
+  // AGM's 425. Homing turn authority scales ×1.8 with it so turn RADIUS
+  // stays close to the old geometry (a maneuvering player can still shake
+  // one). Flip false → 46 m/s point-test behaviour, byte-identical.
+  if (CBZ.CONFIG && CBZ.CONFIG.AIR_MISSILE_PACE_V2 == null) CBZ.CONFIG.AIR_MISSILE_PACE_V2 = true;
+  function missilePaceOn() { return !CBZ.CONFIG || CBZ.CONFIG.AIR_MISSILE_PACE_V2 !== false; }
+  function missileSpd() { return missilePaceOn() ? 150 : MISSILE_SPD; }
   const MAX_MISSILES = 6;     // hard cap on live projectiles (pool size)
   const JET_Y       = 52;     // jet pass altitude (highest — screams overhead)
   // a target this much below the aircraft's nose is a plausible down/level shot;
@@ -213,27 +348,123 @@
     }
     return best;
   }
+  // ============================================================
+  //  CREW — a gunship is flown by PEOPLE, and the people are real game NPCs.
+  //  Before this, the airframe carried exactly ONE occupant: a claimed roster
+  //  soldier whose rig was set group.visible=false and parked at the origin,
+  //  plus two decorative torso/head boxes in buildGunshipGroup() that only the
+  //  studio photographer ever sees (makeHeli flies the island model, not that
+  //  one). So the crew you could shoot was nobody, and the crew you could see
+  //  was a prop.
+  //
+  //  No new occupant system is invented here. Seats are npclife ANCHORS and
+  //  the bodies go in through CBZ.npcLife.attach, which is the same call the
+  //  airliner cabin uses — so syncAttached() holds each body in its seat every
+  //  frame (the documented "detaching is the only way a body leaves a seat"
+  //  rule), the V2 chair pose solves feet-on-the-deck off the declared cushion,
+  //  fpsmode's CHAR_SEATED_HITTABLE path makes them shootable through the
+  //  glass, and aim_dossier's Lv.N pill reads the truthful `job` string.
+  //  ROLES: Pilot / Weapons Systems Officer / Door Gunner — and each one has a
+  //  CONSEQUENCE below (kill the pilot and the aircraft falls).
+  // ============================================================
+  if (CBZ.CONFIG.AIR_HELI_CREW == null) CBZ.CONFIG.AIR_HELI_CREW = true;
+  function crewOn() { return CBZ.CONFIG.AIR_HELI_CREW !== false; }
+  // Seat anchors in REAL WORLD METRES relative to the aircraft origin, +Z nose.
+  // The island gunship model is authored at group.scale 1.45, so a rig parented
+  // straight into it would render 45% oversize; crewNode() interposes ONE node
+  // scaled 1/1.45 which cancels it exactly, leaving these numbers in metres.
+  // Cabin floor sits 1.10 m above the origin, cushion 0.42 above that.
+  const GUNSHIP_SEATS = [
+    { job: "Pilot",                     x: -0.55, y: 1.52, z: 3.70, yaw: 0,             cushionH: 0.42, floorBelow: 0.42 },
+    { job: "Weapons Systems Officer",   x:  0.55, y: 1.52, z: 3.70, yaw: 0,             cushionH: 0.42, floorBelow: 0.42 },
+    { job: "Door Gunner",               x:  0.75, y: 1.52, z: 0.60, yaw: Math.PI / 2,   cushionH: 0.42, floorBelow: 0.42 },
+  ];
+  function crewNode(grp) {
+    if (!grp) return null;
+    if (grp.userData._crewNode && grp.userData._crewNode.parent === grp) return grp.userData._crewNode;
+    const n = new THREE.Group();
+    const s = (grp.scale && grp.scale.x) || 1;
+    n.scale.setScalar(s > 0.001 ? 1 / s : 1);       // author seats in metres, whatever the model scale
+    n.name = "crew";
+    n.userData.dynamic = true;                      // never batch/freeze a node that carries live rigs
+    grp.add(n);
+    grp.userData._crewNode = n;
+    return n;
+  }
+  // Take a body OUT of a seat without killing it. island_airport.js owns the
+  // shared form (CBZ.cityUnseat, the un-killed half of citySpillCabin); this is
+  // the degrade-safe fallback for a build where that file did not load.
+  function unseat(a, opts) {
+    if (!a) return false;
+    if (CBZ.cityUnseat) { try { return CBZ.cityUnseat(a, opts); } catch (e) {} }
+    a._seatHold = false;
+    if (CBZ.npcLife && CBZ.npcLife.detach) { try { return CBZ.npcLife.detach(a, { state: a.dead ? "dead" : "walk" }); } catch (e) {} }
+    return false;
+  }
+  function seatCrew(craft) {
+    if (!crewOn() || !craft || !craft.group || !CBZ.npcLife || !CBZ.npcLife.attach) return;
+    const node = crewNode(craft.group); if (!node) return;
+    for (let i = 0; i < craft.crew.length; i++) {
+      const c = craft.crew[i], s = GUNSHIP_SEATS[i] || GUNSHIP_SEATS[0];
+      if (!c || !c.actor || c.actor.dead || c.seated) continue;
+      c.actor.group.visible = true;
+      // RE-ARM THE HOLD — cityUnseat drops `_seatHold` to get a body out of a
+      // chair, and a body seated again later needs it back or syncAttached
+      // stops defending its facing (the "passengers sit sideways" bug).
+      c.actor._seatHold = true;
+      const ok = CBZ.npcLife.attach(c.actor, node, {
+        x: s.x, y: s.y, z: s.z, yaw: s.yaw, pose: "sit", state: "sit",
+        cushionH: s.cushionH, floorBelow: s.floorBelow,
+      });
+      if (ok) { c.seated = true; c.actor.inCar = false; }
+    }
+  }
   function claimMilitary(kind) {
     const rec = parkedMilitary(kind); if (!rec) return null;
     const pilot = militaryPilot(rec); if (!pilot) return null;
     if (!CBZ.cityClaimMilitaryVehicle || !CBZ.cityClaimMilitaryVehicle(rec, pilot)) return null;
-    pilot._milPilot = rec; pilot._milPilotPrev = { state: pilot.state, pause: pilot.pause };
-    pilot.rage = null; pilot.targetActor = null; pilot.speed = 0;
-    pilot.state = "pilot"; pilot.inCar = true; pilot.group.visible = false;
-    return { rec, pilot, home: Object.assign({}, rec._aiHome) };
+    const crew = [];
+    const enlist = function (p, job) {
+      if (!p) return;
+      p._milPilot = rec; p._milPilotPrev = { state: p.state, pause: p.pause };
+      p.rage = null; p.targetActor = null; p.speed = 0;
+      p.state = "pilot"; p.inCar = true; p.group.visible = false;
+      // TRUTHFUL JOB: cityTitle() reads a.job, so the overhead pill and the
+      // dossier say what this person actually does. Nothing is hardcoded near
+      // the HUD and level.js needs no edit for these to flow through.
+      p._airCrewPrevJob = p.job;
+      p.job = job;
+      crew.push({ actor: p, job: job, seated: false });
+    };
+    enlist(pilot, "Pilot");
+    // a gunship is crewed, not solo — WSO + door gunner, if the base has bodies
+    if (crewOn() && kind === "heli") {
+      for (let n = 1; n < GUNSHIP_SEATS.length; n++) {
+        const extra = militaryPilot(rec);         // skips anyone already _milPilot
+        if (!extra) break;
+        enlist(extra, GUNSHIP_SEATS[n].job);
+      }
+    }
+    return { rec, pilot, crew, home: Object.assign({}, rec._aiHome) };
   }
   function releaseMilitary(craft, crashed) {
     if (!craft) return;
-    const rec = craft.sourceRec, p = craft.pilot;
-    if (p) {
+    const rec = craft.sourceRec;
+    const list = craft.crew && craft.crew.length ? craft.crew.map(function (c) { return c.actor; })
+                                                : (craft.pilot ? [craft.pilot] : []);
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p) continue;
+      unseat(p, { state: p.dead ? "dead" : "walk" });
       p._milPilot = null; p.inCar = false;
-      p.pos.set(crashed ? craft.pos.x : craft.home.x + 3,
+      if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
+      p.pos.set(crashed ? craft.pos.x + (i - 1) * 1.4 : craft.home.x + 3 + i * 1.6,
         0,
-        crashed ? craft.pos.z : craft.home.z + 2);
-      p.group.visible = true;
+        crashed ? craft.pos.z + (i - 1) * 1.1 : craft.home.z + 2);
+      if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
       if (crashed) {
-        // The pilot is a real roster person, so losing the aircraft also loses
-        // its crew instead of quietly returning an invisible NPC to the base.
+        // Every seat is a real roster person, so losing the aircraft loses its
+        // whole crew instead of quietly returning invisible NPCs to the base.
         if (!p.dead && CBZ.cityKillPed) CBZ.cityKillPed(p, {
           fromX: craft.pos.x - 1, fromZ: craft.pos.z - 1,
           force: 12, fling: 6, byPlayer: false,
@@ -245,6 +476,32 @@
     }
     if (rec && CBZ.cityReleaseMilitaryVehicle) CBZ.cityReleaseMilitaryVehicle(rec, !!crashed);
     craft.pilot = null;
+    if (craft.crew) craft.crew.length = 0;
+  }
+  // Who is alive in which seat. The consequence of a dead crewman is per ROLE:
+  // no pilot = nobody is flying it, no WSO = the optics/searchlight go slack,
+  // no door gunner = the chin gun stops. That is what makes shooting the man
+  // in the left seat different from shooting the man in the right.
+  //
+  // TWO predicates on purpose, because one cannot be degrade-safe in both
+  // directions. `crewLost` answers "this seat was MANNED and that person is now
+  // dead" — the only thing that may ever take a capability away, so a build
+  // with AIR_HELI_CREW off (or a base with no spare soldiers) can never
+  // accidentally disarm the aircraft. `crewHasAlive` answers the opposite
+  // question for a capability that should require a live body.
+  function crewSeat(craft, job) {
+    const list = craft && craft.crew;
+    if (!list) return null;
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].job === job) return list[i];
+    return null;
+  }
+  function crewLost(craft, job) {
+    const c = crewSeat(craft, job);
+    return !!(c && (!c.actor || c.actor.dead));
+  }
+  function crewHasAlive(craft, job) {
+    const c = crewSeat(craft, job);
+    return !!(c && c.actor && !c.actor.dead);
   }
 
   // ---------------------------------------------------------------- helpers --
@@ -289,7 +546,7 @@
     const cz = arena && arena.center ? arena.center.z : 0;
     let span = 120;
     if (arena && arena.minX != null) span = Math.max(arena.maxX - arena.minX, arena.maxZ - arena.minZ) * 0.6 + 30;
-    return { x: cx + Math.cos(angle) * span, y: y || HELI_Y, z: cz + Math.sin(angle) * span };
+    return { x: cx + Math.cos(angle) * span, y: y || (HELI_Y_FLOOR + GS().aglSearch * 0.5), z: cz + Math.sin(angle) * span };
   }
 
   // ---------------------------------------------------- MISSILE projectiles --
@@ -447,8 +704,10 @@
     let len = Math.sqrt(nx * nx + ny * ny + nz * nz);
     if (len < 1e-5) return false;              // no direction → nothing to fire
     nx /= len; ny /= len; nz /= len;
-    // a target FAR along the dir — the missile self-destructs at life 3.2s
-    // (≈150m at MISSILE_SPD) anyway, so 400m guarantees it's never "reached".
+    // a target FAR along the dir — launchMissile reads this point ONCE to set
+    // the initial direction (nothing ever "arrives" at it); the round is ended
+    // by geometry, the prox fuse, or the 3.2s self-destruct (≈480m at the
+    // PACE V2 150 m/s, ≈150m legacy).
     const FAR = 400;
     const target = { x: x + nx * FAR, y: y + ny * FAR, z: z + nz * FAR };
     const byPlayer = opts.byPlayer !== false;  // default TRUE for the player entry
@@ -469,7 +728,7 @@
   // are the shared pool's tunables; the blast power/radius mirror detonate()'s
   // airstrike call so the FLIGHT agent can size its own UI/recoil to the hit.
   CBZ.cityMissileTuning = {
-    speed: MISSILE_SPD,
+    get speed() { return missileSpd(); },   // live: honours AIR_MISSILE_PACE_V2
     maxLive: MAX_MISSILES,
     blastPower: 3.0,
     blastRadius: 16,
@@ -499,13 +758,17 @@
       if (m.seek && m.life > HOMING_ARM_T && CBZ.aeroPhysics) {
         const tp = m.seek();
         if (tp) {
-          // a lockon.js seek carries its own per-weapon turn-rate cap (air-to-air snappier)
-          const nd = CBZ.aeroPhysics.homingSteer(m.dir, tp.x - p.x, (tp.y != null ? tp.y : p.y) - p.y, tp.z - p.z, m.seek.turnRate || HOMING_TURN_RATE, dt);
+          // a lockon.js seek carries its own per-weapon turn-rate cap (air-to-air
+          // snappier). PACE V2 scales turn authority with the hotter speed so the
+          // turn RADIUS (v/w) stays near the authored geometry.
+          const turnMul = missilePaceOn() ? 1.8 : 1;
+          const nd = CBZ.aeroPhysics.homingSteer(m.dir, tp.x - p.x, (tp.y != null ? tp.y : p.y) - p.y, tp.z - p.z, (m.seek.turnRate || HOMING_TURN_RATE) * turnMul, dt);
           m.dir.set(nd.x, nd.y, nd.z);
           m.group.lookAt(p.x + nd.x, p.y + nd.y, p.z + nd.z);
         }
       }
-      const step = MISSILE_SPD * dt;
+      const prevX = p.x, prevY = p.y, prevZ = p.z;
+      const step = missileSpd() * dt;
       p.x += m.dir.x * step; p.y += m.dir.y * step; p.z += m.dir.z * step;
       m.life += dt;
       // smoke trail — recycle puffs, cap count so it never grows unbounded
@@ -520,19 +783,38 @@
         if (k <= 0) { if (s.parent) s.parent.remove(s); m.trail.splice(j, 1); continue; }
         s.scale.setScalar(0.4 + (1 - k) * 1.6);
       }
-      // detonate on ground, on a building (losBlockers), or after a max life
+      // detonate on ground, on a building (losBlockers), or after a max life.
+      // PACE V2: the step is swept at <=0.8m samples from the previous tip to
+      // the new one — ground plane, blocker AABBs and the proximity fuse are
+      // all tested ALONG the segment, so the hotter 150 m/s (2.5m/frame at
+      // 60fps, up to 15m at the dt clamp) cannot tunnel through a thin wall
+      // or skip past its locked target between frames. Legacy path (flag
+      // off) keeps the original endpoint-only tests byte-identical.
       let hit = false, hx = p.x, hy = p.y, hz = p.z;
-      if (p.y <= 0.6) { hit = true; hy = 0.4; }
+      if (missilePaceOn() && step > 0.9) {
+        const nSamp = Math.min(24, Math.ceil(step / 0.8));
+        for (let s = 1; s <= nSamp && !hit; s++) {
+          const k = s / nSamp;
+          const sx = prevX + (p.x - prevX) * k, sy = prevY + (p.y - prevY) * k, sz = prevZ + (p.z - prevZ) * k;
+          _sweepP.x = sx; _sweepP.y = sy; _sweepP.z = sz;
+          if (sy <= 0.6) { hit = true; hx = sx; hy = 0.4; hz = sz; }
+          else if (hitsBlocker(_sweepP)) { hit = true; hx = sx; hy = sy; hz = sz; }
+          else if (m.seek && m.seek.prox && m.seek.prox(sx, sy, sz)) { hit = true; hx = sx; hy = sy; hz = sz; }
+        }
+      } else {
+        if (p.y <= 0.6) { hit = true; hy = 0.4; }
+        if (!hit && hitsBlocker(p)) hit = true;
+        // proximity fuse (lockon.js seeks only): a near-miss on the locked
+        // vehicle still detonates instead of sailing past
+        if (!hit && m.seek && m.seek.prox && m.seek.prox(p.x, p.y, p.z)) hit = true;
+      }
       if (!hit && m.life > 3.2) hit = true;        // safety self-destruct
-      if (!hit && hitsBlocker(p)) hit = true;
-      // proximity fuse (lockon.js seeks only): a near-miss on the locked
-      // vehicle still detonates instead of sailing past
-      if (!hit && m.seek && m.seek.prox && m.seek.prox(p.x, p.y, p.z)) hit = true;
       if (hit) { detonate(hx, hy, hz, m.byPlayer); freeMissile(m); missiles.splice(i, 1); }
     }
   }
 
   // cheap building check: is the missile tip inside any LOS blocker's AABB?
+  const _sweepP = { x: 0, y: 0, z: 0 };   // reusable sample point for the swept test
   const _tmpBox = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   function hitsBlocker(p) {
     const cols = CBZ.colliders;
@@ -562,6 +844,23 @@
     // cinematic structural damage on a building hit (buildings agent provides it)
     if (y > 1.5 && CBZ.cityDamageBuilding) {
       try { CBZ.cityDamageBuilding(x, y, z, 2.4); } catch (e) {}
+    }
+    // A MISSILE'S BLAST NOW REACHES AIRCRAFT (owner: fire and SEE the
+    // result): this detonate used to call only the ground/building couplers,
+    // so an air-to-air missile that proximity-fused ON its locked target did
+    // literally nothing to it. Same four seams the RPG detonation fan-out
+    // uses (fpsmode.js), same damage grammar and the same +4 hull allowance
+    // on the radius; the rotorcraft two-blast cap in police/airtraffic keeps
+    // helis a two-hit kill from missiles too. Guarded per-seam and
+    // idempotent per craft (every seam gates on its own `downed`). Flip
+    // AIR_MISSILE_SPLASH false → the old couple-to-nothing behaviour.
+    if (CBZ.CONFIG.AIR_MISSILE_SPLASH == null) CBZ.CONFIG.AIR_MISSILE_SPLASH = true;
+    if (CBZ.CONFIG.AIR_MISSILE_SPLASH !== false) {
+      const AR = 20;   // blastRadius 16 + 4 (the RPG fan-out's hull allowance)
+      if (CBZ.cityAircraftSplash) { try { CBZ.cityAircraftSplash(x, y, z, AR, 90); } catch (e) {} }
+      if (CBZ.cityCivilAircraftSplash) { try { CBZ.cityCivilAircraftSplash(x, y, z, AR, 520, { byPlayer: byPlayer }); } catch (e) {} }
+      if (CBZ.cityPoliceAirSplash) { try { CBZ.cityPoliceAirSplash(x, y, z, AR, 90); } catch (e) {} }
+      if (CBZ.cityAirTrafficSplash) { try { CBZ.cityAirTrafficSplash(x, y, z, AR, 140); } catch (e) {} }
     }
     if (CBZ.shake) CBZ.shake(1.2);
     // the explosion handles blast damage to player/crowd/cops; nothing else here.
@@ -667,7 +966,7 @@
     const rotor = grp.userData && grp.userData.rotor;
     const trotor = grp.userData && grp.userData.tailRotor;
     if (!rotor || !trotor) {
-      releaseMilitary({ sourceRec: claim.rec, pilot: claim.pilot, home: claim.home, pos: grp.position }, false);
+      releaseMilitary({ sourceRec: claim.rec, pilot: claim.pilot, crew: claim.crew, home: claim.home, pos: grp.position }, false);
       return null;
     }
     // World-space beam geometry avoids inheriting the authored model's 1.45x
@@ -679,15 +978,17 @@
     grp.visible = true;
     grp.position.set(claim.home.x, claim.home.y, claim.home.z);
     grp.rotation.set(0, claim.home.heading, 0);
-    return {
+    const craft = {
       group: grp, rotor, trotor, cone, pool,
       pos: grp.position, orbit: rng() * 6.28,
       missileCD: 3.5, gunCD: 1.0, leaveT: 0, spotR: 6, climb: 0,
       hp: 140, maxHp: 140, downed: false,           // armoured — ~2 rockets / a sustained burst
       spin: 0, vy: 0, yawRate: 0, smokeCD: 0,
-      sourceRec: claim.rec, pilot: claim.pilot, home: claim.home,
+      sourceRec: claim.rec, pilot: claim.pilot, crew: claim.crew || [], home: claim.home,
       phase: "spool", launchT: 4.5, _worldCone: true,
     };
+    seatCrew(craft);
+    return craft;
   }
 
   function despawnHeli(crashed) {
@@ -938,6 +1239,16 @@
 
   function updateHeli(dt, r) {
     if (heli && heli.downed) { fallHeli(dt); return; }     // a dying heli ignores all AI
+    // NOBODY IS FLYING IT. Shooting the man in the left seat is not a cosmetic
+    // kill: the aircraft goes into the same ballistic fall arc a dead engine
+    // does. This is the whole reason the crew is real bodies in real seats
+    // rather than mesh silhouettes.
+    if (heli && !heli.downed && heli.phase !== "spool" && crewLost(heli, "Pilot")) {
+      if (CBZ.cityFlavor) CBZ.cityFlavor("The gunship's pilot is down — it's going in!", "#ff8b6b");
+      downHeli();
+      fallHeli(dt);
+      return;
+    }
     const stars = g.wanted | 0;
     if (!heli) {
       if (stars < HELI_STAR || g.state !== "playing") return;
@@ -961,8 +1272,11 @@
       if (stars < HELI_STAR || g.state !== "playing") { heli.phase = "return"; }
       else {
         heli.rotor.rotation.y += dt * 42; heli.trotor.rotation.x += dt * 60;
-        const launchY = Math.max(22, heli.home.y + 22);
-        heli.pos.y += Math.min(9 * dt, launchY - heli.pos.y);
+        // A real rotorcraft leaves the pad at ~1200-1800 fpm, not 9 m/s. It
+        // climbs to a departure height here and keeps climbing on the inbound
+        // leg, so the pad beat stays short without teleporting it to altitude.
+        const launchY = Math.max(HELI_Y_FLOOR, heli.home.y + 45);
+        heli.pos.y += Math.min(GS().climb * dt, launchY - heli.pos.y);
         if (heli.pos.y >= launchY - 0.35) heli.phase = "inbound";
         return;
       }
@@ -970,9 +1284,9 @@
     if (heli.phase === "return") {
       const dx = heli.home.x - heli.pos.x, dz = heli.home.z - heli.pos.z;
       const d = Math.hypot(dx, dz) || 1;
-      const safeY = Math.max(heli.home.y + 20, roofTopAt(heli.pos.x, heli.pos.z) + HELI_CLEAR + 2);
+      const safeY = Math.max(heli.home.y + 20, roofTopAt(heli.pos.x, heli.pos.z) + GS().roofClear + 2);
       if (d > 4) {
-        const step = Math.min(d, HELI_SPEED * 1.8 * dt);
+        const step = Math.min(d, GS().cruise * dt);
         heli.pos.x += dx / d * step; heli.pos.z += dz / d * step;
         heli.pos.y += (Math.max(safeY, heli.pos.y) - heli.pos.y) * Math.min(1, dt * 1.2);
       } else {
@@ -988,24 +1302,52 @@
     heli.leaveT = 0;
     const aim = aimPoint();
     const cx = aim ? aim.x : heli.pos.x, cz = aim ? aim.z : heli.pos.z;
-    // orbit the target — tighter/faster at higher heat
-    heli.orbit += dt * (0.5 + (stars - HELI_STAR) * 0.12);
-    const R = HELI_R - (stars - HELI_STAR) * 3;
-    const tx = cx + Math.cos(heli.orbit) * R, tz = cz + Math.sin(heli.orbit) * R;
-    // Local AGL cruise: climb for the roof under this orbit point, or for a
-    // player who has genuinely climbed above the gunship.
+    // ---- POSTURE: search vs engaged (see the heliSpec header) --------------
+    // Engaged = it has a real shot on you. That is the SAME question canEngage
+    // already answers for the guns, so the descent is not a second threat model
+    // bolted on: the ship comes down exactly when it could shoot, and climbs
+    // back to its search orbit the moment you break the geometry.
+    const SPEC = GS();
     const P0 = player();
+    const painted0 = CBZ.cityChopperPaints ? CBZ.cityChopperPaints() : false;
+    // ...and it must actually be over the right piece of city. Clear line of
+    // sight from 165 m is nearly always true, so LOS alone would collapse the
+    // search posture into the engaged one the moment the ship arrived. The
+    // second half is "the target is inside the ring I would descend onto".
+    const nearOrbit = !!(P0 && Math.hypot(P0.pos.x - cx, P0.pos.z - cz) < SPEC.orbitR * 1.25);
+    const engaged = !!(P0 && nearOrbit && (painted0 || canEngage(heli.pos.x, heli.pos.y - 0.6, heli.pos.z, P0)));
+    // ease the posture so it descends/climbs like an aircraft, not a lift
+    heli._eng = (heli._eng || 0) + ((engaged ? 1 : 0) - (heli._eng || 0)) * Math.min(1, dt * 0.35);
+    const post = heli._eng;
+    const R = SPEC.orbitRSearch + (SPEC.orbitR - SPEC.orbitRSearch) * post;
+    const vOrb = SPEC.vSearch + (SPEC.v - SPEC.vSearch) * post;
+    const aglNow = SPEC.aglSearch + (SPEC.agl - SPEC.aglSearch) * post;
+    // ORBIT RATE IS THE SPEED, not a hand-picked rad/s: omega = v / R, so the
+    // ship always flies its own airspeed around its own radius (the pair that
+    // heliOrbitRadius already made physically consistent at a 20 deg bank).
+    heli.orbit += dt * (vOrb / Math.max(8, R));
+    const tx = cx + Math.cos(heli.orbit) * R, tz = cz + Math.sin(heli.orbit) * R;
+    // Local AGL: climb for the roof under this orbit point, or for a player who
+    // has genuinely climbed above the gunship.
     const needY = P0 ? (P0.pos.y || 0) + 1.4 + FIRE_MARGIN + 6 : 0;   // stay this far over the player
     const localGround = CBZ.floorAt ? (+CBZ.floorAt(tx, tz) || 0) : 0;
     const localRoof = roofTopAt(tx, tz);
-    const ty = Math.max(HELI_Y, localGround + HELI_AGL, localRoof + HELI_CLEAR, needY);
+    const ty = Math.max(HELI_Y_FLOOR, localGround + aglNow, localRoof + SPEC.roofClear, needY);
     const inbound = heli.phase === "inbound";
-    const lat = inbound ? Math.min(1, dt * (HELI_SPEED * 1.7 / Math.max(Math.hypot(tx - heli.pos.x, tz - heli.pos.z), 1)))
-                        : Math.min(1, dt * (HELI_SPEED / Math.max(R, 6)));
+    // TRANSIT at cruise speed toward the orbit point; ORBIT by walking the
+    // orbit point itself (the lerp only has to keep up with it, so lateral
+    // pace is the orbit's own tangential speed rather than a magic constant).
+    const lat = inbound ? Math.min(1, dt * (SPEC.cruise / Math.max(Math.hypot(tx - heli.pos.x, tz - heli.pos.z), 1)))
+                        : Math.min(1, dt * (vOrb / Math.max(R, 6)) * 1.6);
     const prevX = heli.pos.x, prevY = heli.pos.y, prevZ = heli.pos.z;
     heli.pos.x += (tx - heli.pos.x) * lat;
     heli.pos.z += (tz - heli.pos.z) * lat;
-    heli.pos.y += (ty - heli.pos.y) * Math.min(1, dt * 1.2);
+    // vertical rate is a REAL climb/descent rate now, not a proportional snap:
+    // an aircraft cannot change 65 m of altitude in a heartbeat.
+    {
+      const dy = ty - heli.pos.y;
+      heli.pos.y += Math.max(-SPEC.climb * dt, Math.min(SPEC.climb * dt, dy));
+    }
     // bank into the turn + face flight direction
     const head = Math.atan2(tx - heli.pos.x + 0.0001, tz - heli.pos.z + 0.0001);
     heli.group.rotation.y += (head - heli.group.rotation.y) * Math.min(1, dt * 2.5) * 0.4;
@@ -1040,8 +1382,13 @@
     // (checked AFTER the aero sag so the small cushion/sag correction can never
     // itself cause a roof clip — this clamp always has the final say)
     const bodyTop = roofTopAt(heli.pos.x, heli.pos.z);
-    if (bodyTop > 0 && heli.pos.y < bodyTop + HELI_CLEAR) heli.pos.y = bodyTop + HELI_CLEAR;
-    heli.group.rotation.z = Math.sin(heli.orbit) * 0.14;
+    if (bodyTop > 0 && heli.pos.y < bodyTop + SPEC.roofClear) heli.pos.y = bodyTop + SPEC.roofClear;
+    // BANK IS THE TURN, not a decorative wobble: the old sin(orbit)*0.14 was a
+    // fixed 8 deg roll that had nothing to do with the circle being flown.
+    // heliOrbitBank is the coordinated-turn angle for THIS speed and radius —
+    // the same equation airtraffic.js already flew its fleet on.
+    const bankT = inbound ? 0 : -heliOrbitBank(vOrb, R);
+    heli.group.rotation.z += (bankT - heli.group.rotation.z) * Math.min(1, dt * 2.2);
     heli.rotor.rotation.y += dt * 42;
     heli.trotor.rotation.x += dt * 60;
     if (inbound) {
@@ -1051,13 +1398,19 @@
         heli.pool.visible = true; heli.cone.visible = true;
       } else return;
     }
-    // spotlight chases the player but lags (so you can break the beam)
+    // spotlight chases the player but lags (so you can break the beam). The
+    // WSO is the one on the optics — kill him and the beam stops tracking.
     const P = player();
     const beam = heli.pool.position;
-    const tgtx = P ? P.pos.x : cx, tgtz = P ? P.pos.z : cz;
+    const optics = !crewLost(heli, "Weapons Systems Officer");
+    const tgtx = optics ? (P ? P.pos.x : cx) : beam.x, tgtz = optics ? (P ? P.pos.z : cz) : beam.z;
     beam.x += (tgtx - beam.x) * Math.min(1, dt * 0.9);
     beam.z += (tgtz - beam.z) * Math.min(1, dt * 0.9);
-    heli.spotR = 6 + stars * 0.5;
+    // BEAM WIDTH IS A CONE, NOT A CONSTANT: the footprint follows the height
+    // it is cast from (heliBeamRadius). A gunship at 95 m throws a ~17 m pool;
+    // the old 6-8.5 m disc was the same size whether it hung at 26 m or 150.
+    const beamGround = heli._beamY || 0;
+    heli.spotR = heliBeamRadius(heli.pos.y - beamGround) + stars * 0.4;
     heli.pool.scale.setScalar(heli.spotR / 5);
     // the beam lands on what's under it — over a building the pool climbs to
     // the roof and the cone stops there (same fix as the police searchlight:
@@ -1077,12 +1430,16 @@
     }
     beam.y = (heli._beamY || 0) + 0.08;
     const len = Math.max(2, heli.pos.y - beam.y);
+    // the cone's FOOT must match the pool it lands in — the authored bottom
+    // radius is 5.5, so scale x/z by spotR/5.5. Before this the cone was a
+    // fixed 11 m across at any altitude while the pool moved underneath it.
+    const coneW = heli.spotR / 5.5;
     if (heli._worldCone) {
       heli.cone.position.set(heli.pos.x, beam.y + len * 0.5, heli.pos.z);
-      heli.cone.scale.set(1, len, 1);
+      heli.cone.scale.set(coneW, len, coneW);
     } else {
       heli.cone.position.set(0, -len / 2 - 0.4, 0);
-      heli.cone.scale.set(1, len, 1);
+      heli.cone.scale.set(coneW, len, coneW);
     }
 
     // ---- WEAPONS ---------------------------------------------------------
@@ -1118,7 +1475,26 @@
     // preserves rooftop/behind-cover safety. Fire comes in BURSTS: a few rapid
     // tracers, then a breath — readable, survivable, and it LEADS your motion.
     const rdx = heli.pos.x - P.pos.x, rdz = heli.pos.z - P.pos.z;   // true slant range to the player
-    const inGunRange = (rdx * rdx + rdz * rdz) < (HELI_R * 1.6) * (HELI_R * 1.6);
+    // GUN RANGE IS THE GUN'S, not the orbit's. It used to be (orbit radius x
+    // 1.6) = 35 m, which was only ever "the ship is nearly on top of you" — and
+    // moving the orbit out to a real 112-161 m would have silently disabled the
+    // chin gun entirely. A 20 mm chin turret reaches far past that; the spec's
+    // gunRange is what gates it now, and it is REQUIRED by the altitude change,
+    // not an unrelated buff (the hit roll below falls off with range to pay for
+    // it, so the threat at 30 m is the one the player already knew).
+    const gunR = SPEC.gunRange;
+    // A DEAD GUNNER DOES NOT SHOOT. Same rule for the WSO and the missiles.
+    // THE DOOR GUNNER IS NOT A DECORATION. He is one of two people who can keep
+    // the gun firing: guns go quiet only when EVERY manned weapons seat is
+    // dead, so killing him costs the aircraft its redundancy and killing them
+    // both silences it. Missiles are the WSO's alone (he owns the optics), so
+    // the two roles do genuinely different things — a rank/role that unlocks
+    // nothing is the stat fiction this repo bans by name.
+    const anyWeaponSeat = !!(crewSeat(heli, "Door Gunner") || crewSeat(heli, "Weapons Systems Officer"));
+    const gunnerUp = !anyWeaponSeat ||
+      crewHasAlive(heli, "Door Gunner") || crewHasAlive(heli, "Weapons Systems Officer");
+    const wsoUp = !crewLost(heli, "Weapons Systems Officer");
+    const inGunRange = gunnerUp && (rdx * rdx + rdz * rdz) < gunR * gunR;
     heli.gunCD -= dt;
     if (canHit && inGunRange) {
       if (heli.burst == null || heli.burst <= 0) {
@@ -1135,7 +1511,7 @@
       heli.burst = 0;   // lost the shot mid-burst → reset (don't dump rounds on reacquire)
     }
     // missiles: only at 5 stars, on a long cooldown, with eyes on you
-    if (stars >= JET_STAR) {
+    if (stars >= JET_STAR && wsoUp) {
       heli.missileCD -= dt;
       if (heli.missileCD <= 0 && (painted || onTarget) && canHit) {
         heli.missileCD = 4.5 + rng() * 2.5;
@@ -1171,12 +1547,20 @@
     // (which spikes/reverses the smoothed velocity) still throws the gun off — so
     // strafing remains the counter-play, exactly as it should be.
     const rng3 = Math.hypot(heli.pos.x - P.pos.x, heli.pos.y - py, heli.pos.z - P.pos.z);
-    const tof = Math.min(0.5, rng3 / 220);            // 220 m/s notional round
+    // Time of flight and lead both scale with the REAL slant range now that the
+    // ship engages from 100-190 m instead of 30. 380 m/s is the notional round
+    // (a chin gun's, still far under a real 20 mm's 1030) and the cap rises
+    // with it, so a sprinter at 190 m is genuinely led instead of clipped to a
+    // 4.5 m offset that meant "aim where he was".
+    const tof = Math.min(1.4, rng3 / 380);
     let lx = (heli.pvx || 0) * tof, lz = (heli.pvz || 0) * tof;
-    const ll = Math.hypot(lx, lz), LMAX = 4.5;        // cap the lead distance
+    const ll = Math.hypot(lx, lz), LMAX = 9;          // cap the lead distance
     if (ll > LMAX) { lx = lx / ll * LMAX; lz = lz / ll * LMAX; }
     const aimx = P.pos.x + lx, aimz = P.pos.z + lz;
-    const to = { x: aimx + (rng() - 0.5) * 1.4, y: py, z: aimz + (rng() - 0.5) * 1.4 };
+    // DISPERSION GROWS WITH RANGE (~12 mrad). A flat +/-0.7 m cone was fair at
+    // 30 m and superhuman at 190 — a helicopter gunner is not a laser.
+    const spread = Math.max(1.4, rng3 * 0.012);
+    const to = { x: aimx + (rng() - 0.5) * spread, y: py, z: aimz + (rng() - 0.5) * spread };
     // don't shoot through walls — test the line to the player's true elevation, not
     // a hardcoded ground height (so it neither hits a rooftop target through the roof
     // nor phantom-misses one it can plainly see from above). LOS is to the player's
@@ -1187,7 +1571,11 @@
     // a led shot connects more often — but keep per-round damage LOW (it's a fast
     // burst), so a 5-star air rake stays survivable (the hitstop/missile caps are
     // unchanged). Hit chance rises when our lead actually tracked your motion.
-    if (rng() < 0.55 && CBZ.cityHurtPlayer) {
+    // ...and the hit ROLL falls off with range for the same reason. 0.55 stays
+    // the point-blank figure (nothing the player already knew got harder); by
+    // 190 m it is ~0.17, which is what buys the longer engagement range above.
+    const hitP = Math.max(0.10, Math.min(0.55, 0.55 * (60 / Math.max(60, rng3))));
+    if (rng() < hitP && CBZ.cityHurtPlayer) {
       CBZ.cityHurtPlayer(6 + rng() * 6, heli.pos.x, heli.pos.z, "raked by a gunship", rng() < 0.02, "a military gunship");
     }
   }
@@ -1501,6 +1889,56 @@
     }
     updateJets(dt, r);
     updateMissiles(dt, r);
+  });
+
+  // ---- THE RATCHET --------------------------------------------------------
+  // CBZ.heliAudit() — every rotorcraft the sim is flying right now, measured,
+  // not asserted. `uncrewed` (an airborne helicopter with nobody in it) and
+  // `belowRoofline` (a helicopter inside the building it is passing over) are
+  // the two that must trend to ZERO and may only ever go DOWN. The others are
+  // census: meanAGL / meanSpeed / orbitR are what the owner asked to be
+  // "correct", so they are reported as numbers you can read rather than as a
+  // claim in a comment. Every fleet owner pushes ONE provider into
+  // CBZ.heliFleet, so a new rotorcraft appears here with no edit to this
+  // function — and a fleet whose module did not load simply is not counted.
+  CBZ.heliAudit = function () {
+    const out = { helis: 0, crewed: 0, uncrewed: 0, meanAGL: 0, meanSpeed: 0, orbitR: 0, belowRoofline: 0, byRole: {} };
+    let aglSum = 0, spdSum = 0, rSum = 0, rN = 0;
+    const list = CBZ.heliFleet || [];
+    for (let i = 0; i < list.length; i++) {
+      let rows = null;
+      try { rows = list[i](); } catch (e) { rows = null; }
+      if (!rows || !rows.length) continue;
+      for (let k = 0; k < rows.length; k++) {
+        const h = rows[k];
+        if (!h) continue;
+        out.helis++;
+        out.byRole[h.role] = (out.byRole[h.role] || 0) + 1;
+        if (h.crew > 0) out.crewed++; else out.uncrewed++;
+        aglSum += h.agl || 0; spdSum += h.speed || 0;
+        if (h.orbitR > 0) { rSum += h.orbitR; rN++; }
+        if (h.roofTop > 0 && h.y < h.roofTop) out.belowRoofline++;
+      }
+    }
+    if (out.helis) { out.meanAGL = +(aglSum / out.helis).toFixed(1); out.meanSpeed = +(spdSum / out.helis).toFixed(1); }
+    if (rN) out.orbitR = +(rSum / rN).toFixed(1);
+    return out;
+  };
+  CBZ.heliFleet.push(function () {
+    if (!heli || !heli.pos || !heli.group || !heli.group.parent) return null;
+    const gy = Math.max(CBZ.floorAt ? (+CBZ.floorAt(heli.pos.x, heli.pos.z) || 0) : 0, 0);
+    const SPEC = GS();
+    let crew = 0;
+    for (let i = 0; i < (heli.crew || []).length; i++) if (heli.crew[i].actor && !heli.crew[i].actor.dead) crew++;
+    if (!crew && heli.pilot && !heli.pilot.dead) crew = 1;
+    const post = heli._eng || 0;
+    return [{
+      role: "gunship", x: heli.pos.x, y: heli.pos.y, z: heli.pos.z,
+      agl: heli.pos.y - gy,
+      speed: heli.phase === "orbit" ? (SPEC.vSearch + (SPEC.v - SPEC.vSearch) * post) : SPEC.cruise,
+      orbitR: heli.phase === "orbit" ? (SPEC.orbitRSearch + (SPEC.orbitR - SPEC.orbitRSearch) * post) : 0,
+      crew: crew, roofTop: roofTopAt(heli.pos.x, heli.pos.z), downed: !!heli.downed,
+    }];
   });
 
   // Read-only runtime evidence for the gameplay QA harness and minimap/debug

@@ -1353,7 +1353,32 @@
         for (let i = 0; i < troops.length; i++) {
           const t = troops[i];
           if (!t || t.dead) continue;
-          if (t._milPilot) { t.speed = 0; t.group.visible = false; continue; }
+          // AIRCREW: a soldier flying one of this base's aircraft is off the
+          // parade tick. He used to be force-HIDDEN every frame, which was
+          // correct while the "crew" was an invisible bookkeeping entry — but
+          // aircraft.js now SEATS these bodies in the airframe (npclife anchor,
+          // visible through the canopy, shootable). An attached rig owns its own
+          // visibility (attach() shows it, peds.js re-applies distance LOD), so
+          // hiding it here would erase the crew the owner asked for. Only an
+          // UNSEATED aircrew — the legacy bookkeeping case — still hides.
+          if (t._milPilot) {
+            t.speed = 0;
+            if (!t._npcAttached) t.group.visible = false;
+            else {
+              // SEATED AIRCREW carry their own render LOD here, because the
+              // `continue` below skips every other visibility pass they would
+              // normally get — without it three character rigs draw from any
+              // distance forever. 120 m is past peds.js's 95 m street cutoff on
+              // purpose: these bodies are ~95 m UP, and the slant range to a
+              // gunship overhead is most of that budget.
+              const PL = CBZ.player;
+              t.group.visible = !PL || !PL.pos ? true
+                : ((t.pos.x - PL.pos.x) * (t.pos.x - PL.pos.x) +
+                   (t.pos.y - (PL.pos.y || 0)) * (t.pos.y - (PL.pos.y || 0)) +
+                   (t.pos.z - PL.pos.z) * (t.pos.z - PL.pos.z)) < 120 * 120;
+            }
+            continue;
+          }
           const combat = !!(t.rage || t.npcWanted || t.state === "fight" || t.state === "flee" || t.state === "shoot");
           if (combat) { t.pause = 0; t.activityState = t.state; continue; }
           if (t._stationed) {

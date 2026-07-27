@@ -418,9 +418,43 @@
   };
   const hairGeoCache = Object.create(null);
 
+  /* TEMPLE TAPER (owner: "everyone has too much hair on left and right side of
+     their head"). MEASURED CAUSE, not a guess: the side pieces were authored as
+     OUTBOARD SLABS rather than as a layer lying on the skull. Their inner face
+     sat at S/2 - 0.02k — i.e. ON the skull surface — so the whole declared
+     `sideW` hung OUTSIDE the head. On the adult male (S=0.60, k=1, HUMAN_SCALE
+     0.70) that put the hair 0.070 rig units proud of the skull per side for
+     `short` and 0.095 for `long` — 4.9 cm and 6.7 cm of REAL hair standing off
+     each ear — while the crown directly above it was only (S+0.04)/2, i.e.
+     0.020 proud (1.4 cm). The silhouette therefore flared to 3.5-5.5x the
+     crown's thickness at exactly ear height, which is the "too much hair on the
+     sides" read. Two lesser faults compounded it: the slab was a CONSTANT-width
+     box from temple to jaw (no taper in toward the ears) and its front face
+     reached z=+0.18, only 0.12 behind the face plane, so it covered the temples
+     instead of sitting above and behind them.
+
+     The fix keeps every style's identity (crown / back / occipital / tail / bun
+     are untouched, so the table above still drives the read) and changes only
+     how the SIDE is built:
+       1. it is a skull-hugging layer — inner face BURIED at S/2 - 0.062k, so no
+          skin gap can open at any angle, outer face only `sideT` proud;
+       2. `sideT` is capped into the same family as the crown: buzz 0.017k,
+          short 0.031k, bob 0.035k, long 0.036k, pigtail 0.038k (1.2 - 2.7 cm
+          real) instead of a flat 0.05-0.13k;
+       3. the outboard offset TAPERS to 0.58 at the panel's bottom, so the hair
+          narrows in toward the ear instead of running straight down;
+       4. the panel is pulled BACK (depth 0.72 -> 0.64 of hd, centre -0.05 ->
+          -0.085k) so the hairline starts behind the temple.
+     Head+hair width falls 10.6% (short) / 15% (long) / 17% (pigtail).
+     CHAR_HAIR_TEMPLE=false restores the old slabs byte-for-byte. */
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CHAR_HAIR_TEMPLE == null) CBZ.CONFIG.CHAR_HAIR_TEMPLE = true;
+  function templeTaper() { return CBZ.CONFIG.CHAR_HAIR_TEMPLE !== false; }
+
   function hairGeometry(styleId, S) {
     const st = HAIR_STYLES[styleId] || HAIR_STYLES.short;
-    const key = styleId + "|" + S.toFixed(3);
+    const taper = templeTaper();
+    const key = styleId + "|" + S.toFixed(3) + (taper ? "|t" : "");
     const hit = hairGeoCache[key];
     if (hit) return hit;
     const k = S / 0.60;                       // every offset scales with the head
@@ -434,6 +468,29 @@
     const put = (w, h, d, x, y, z) => {
       const g = new THREE.BoxGeometry(w, h, d);
       g.translate(x, y, z);
+      parts.push(g);
+    };
+    /* One side panel, sculpted (r128: write geometry.attributes.position, then
+       computeVertexNormals — there is no .vertices[] on a BufferGeometry).
+       `sign` is +1 starboard / -1 port. The box spans from a face BURIED inside
+       the skull out to `outer`, and every vertex's OUTBOARD component is scaled
+       by a factor that falls with height — that is the taper toward the ear.
+       The outboard direction is measured WITH the sign rather than building one
+       panel and mirroring it: a negative scale would reverse the triangle
+       winding and render the port side inside-out under FrontSide culling. */
+    const sidePanel = (sign, inner, outer, yTop, yBot, zc, dz, botMul) => {
+      const w = outer - inner, h = yTop - yBot;
+      const g = new THREE.BoxGeometry(w, h, dz, 1, 3, 1);
+      const pos = g.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const t = (pos.getY(i) + h / 2) / h;               // 0 at the bottom, 1 at the top
+        const f = botMul + (1 - botMul) * t;
+        const out = sign > 0 ? pos.getX(i) + w / 2 : w / 2 - pos.getX(i);
+        pos.setX(i, sign > 0 ? out * f - w / 2 : w / 2 - out * f);
+      }
+      pos.needsUpdate = true;
+      g.computeVertexNormals();
+      g.translate(sign * (inner + w / 2), (yTop + yBot) / 2, zc);
       parts.push(g);
     };
     // crown: pulled back off the brow so a hairline reads instead of a helmet
@@ -450,19 +507,33 @@
     // panel's parallel face, while its front stays buried inside the panel so
     // no seam can open between them.
     put(hw * 0.80, crownH * 0.85, 0.11 * k, 0, crownBot + 0.01 * k, -(S / 2 + 0.085 * k));
-    // sides: temple -> ear -> jaw. THIS is what closes the old skin gap.
-    const sx = S / 2 + sideW / 2 - 0.02 * k;
-    put(sideW, sideH, hd * 0.72, -sx, shellTop - sideH / 2, -0.05 * k);
-    put(sideW, sideH, hd * 0.72, sx, shellTop - sideH / 2, -0.05 * k);
+    // sides: temple -> ear -> jaw. THIS is what closes the old skin gap — and
+    // it closes it from INSIDE the skull now, not by hanging a slab off it.
+    if (taper) {
+      // proud of the skull: same family as the crown's 0.020k, ordered by style
+      const sideT = Math.min(st.sideW * 0.34, 0.020 + st.sideW * 0.14) * k;
+      const inner = S / 2 - 0.062 * k;        // buried well inside — no skin can show through
+      const outer = S / 2 + sideT;
+      for (const sgn of [-1, 1]) {
+        sidePanel(sgn, inner, outer, shellTop, shellTop - sideH, -0.085 * k, hd * 0.64, 0.58);
+      }
+    } else {
+      const sx = S / 2 + sideW / 2 - 0.02 * k;
+      put(sideW, sideH, hd * 0.72, -sx, shellTop - sideH / 2, -0.05 * k);
+      put(sideW, sideH, hd * 0.72, sx, shellTop - sideH / 2, -0.05 * k);
+    }
     if (st.tail) {
       const tH = st.tail * k;
       put(0.17 * k, tH, 0.17 * k, 0, shellTop - 0.05 * k - tH / 2, -(S / 2 + 0.15 * k));
     }
     if (st.bun) put(0.26 * k, 0.24 * k, 0.26 * k, 0, crownTop - 0.02 * k, -(S / 2 + 0.02 * k));
     if (styleId === "pigtail") {
-      const tH = 0.34 * k;
-      put(0.14 * k, tH, 0.14 * k, -(S / 2 + 0.08 * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
-      put(0.14 * k, tH, 0.14 * k, (S / 2 + 0.08 * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
+      // Pigtails legitimately stand off the head — that is what a pigtail IS —
+      // but they were compounding a slab that was already too wide. Pulled in
+      // with the sides so the pair reads as bunched hair, not as ear muffs.
+      const tH = 0.34 * k, pw = taper ? 0.115 : 0.14, px = taper ? 0.052 : 0.08;
+      put(pw * k, tH, pw * k, -(S / 2 + px * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
+      put(pw * k, tH, pw * k, (S / 2 + px * k), shellTop - 0.24 * k - tH / 2, -0.06 * k);
     }
     let geo;
     const U = THREE.BufferGeometryUtils;

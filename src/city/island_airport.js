@@ -416,6 +416,69 @@
     });
   }
 
+  // PASSENGER SPILL (shared): detach every seated occupant of a cabin hook AT
+  // WORLD POSE and route them through the normal ped kill path, so a downed
+  // hull sheds tumbling, killfeed-logged bodies instead of freezing, deleting
+  // or tarmac-teleporting them. TWO consumers: the shot-down branch below and
+  // playeraircraft.js's crash transition — author no third copy. Living
+  // occupants go through cityKillPed (bus-wrapped: explosion-magnitude
+  // ragdoll + gore + killfeed line for free); already-dead seat slumpers get
+  // the same tumble via cityRagdoll directly (cityKillPed no-ops on the
+  // dead). MUST run BEFORE the wreck blast: a blast that kills a still-
+  // attached body trips peds.js's seatedCorpse gate and the corpse freezes
+  // mid-air. Flag AIR_CABIN_SPILL reverts to the old vanish/freeze behaviour.
+  if (CBZ.CONFIG.AIR_CABIN_SPILL == null) CBZ.CONFIG.AIR_CABIN_SPILL = true;
+  // ---- TAKE A BODY OUT OF A SEAT (CBZ.cityUnseat) ---------------------------
+  // syncAttached() now RE-ASSERTS an attached body's seat transform every
+  // frame, so a seated body cannot be nudged, shoved or teleported out of a
+  // chair — DETACHING is the only way one leaves a seat, and `_seatHold=false`
+  // is the documented escape hatch for the frame in which that happens. That
+  // three-step dance (drop the hold, detach at world pose, clear the seat's
+  // back-pointer) was written inline in citySpillCabin and is exactly what a
+  // HIJACK needs too: an ejected pilot wants the detach half WITHOUT the kill.
+  // So it lives here once and every caller gets it. Callers that want the body
+  // somewhere specific pass x/z (+ ground:true to drop it onto the terrain).
+  // Returns true if the actor actually left a seat.
+  function cityUnseat(a, opts) {
+    if (!a || !a.group) return false;
+    opts = opts || {};
+    a._seatHold = false;
+    if (opts.seat && opts.seat.occupant === a) opts.seat.occupant = null;
+    let left = false;
+    const NL = CBZ.npcLife;
+    try { if (NL && NL.detach) left = !!NL.detach(a, { state: opts.state || (a.dead ? "dead" : "walk") }); } catch (e) {}
+    if (opts.x != null && opts.z != null && a.pos && a.pos.set) {
+      const gy = opts.y != null ? opts.y
+        : (opts.ground !== false && CBZ.floorAt ? (+CBZ.floorAt(opts.x, opts.z) || 0) : (a.pos.y || 0));
+      a.pos.set(opts.x, gy, opts.z);
+      if (a.group.position && a.group.position.copy) a.group.position.copy(a.pos);
+      if (a.target && a.target.set) a.target.set(opts.x, 0, opts.z);
+    }
+    if (!a.dead) { a.speed = 0; a.pause = Math.max(a.pause || 0, 0.3); }
+    return left;
+  }
+  CBZ.cityUnseat = cityUnseat;
+
+  function citySpillCabin(hook, x, z, byPlayer) {
+    if (!hook || !hook.seats || CBZ.CONFIG.AIR_CABIN_SPILL === false) return 0;
+    let spilled = 0;
+    for (let si = 0; si < hook.seats.length; si++) {
+      const a = hook.seats[si] && hook.seats[si].occupant;
+      if (!a || a === CBZ.player || !a.group) continue;
+      const wasDead = !!a.dead;
+      cityUnseat(a, { state: wasDead ? "dead" : "walk" });
+      if (!wasDead) {
+        if (CBZ.cityKillPed) { try { CBZ.cityKillPed(a, { fromX: x, fromZ: z, force: 14, byPlayer: !!byPlayer }, "explosion"); } catch (e) {} }
+      } else if (CBZ.cityRagdoll && a.pos) {
+        const ddx = a.pos.x - x, ddz = a.pos.z - z, dl = Math.hypot(ddx, ddz) || 1;
+        try { CBZ.cityRagdoll(a, a.pos, { x: ddx / dl, y: 0.55, z: ddz / dl }, 12); } catch (e) {}
+      }
+      spilled++;
+    }
+    return spilled;
+  }
+  CBZ.citySpillCabin = citySpillCabin;
+
   CBZ.cityDamageCivilAircraft = function (rec, amount, point, opts) {
     opts = opts || {};
     if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || !(amount > 0)) return false;
@@ -445,6 +508,15 @@
     if (cabinState.rec === rec) cabinForceClear(false);
     const hook = grp.userData.cabin && grp.userData.cabin.passengerCabin;
     if (hook) { hook.state = "destroyed"; hook.active = false; emitPassengerCabin("destroyed", hook, rec); }
+
+    // PASSENGERS SPILL, NOT VANISH — see citySpillCabin below. Order matters
+    // and used to be wrong: the wreck blast killed occupants while still
+    // ATTACHED (peds.js's seatedCorpse gate skips ragdoll for attached
+    // bodies → corpses froze mid-air), then npclife's pruneCabins deleted the
+    // spawned ones and tarmac-teleported the claimed ones (peds.js pos.y=0) —
+    // bodies popping out of the bottom of a flying hull. Spill FIRST, blast
+    // after, so the bodies get the real tumble.
+    if (hook) citySpillCabin(hook, x, z, !!opts.byPlayer);
 
     const heavy = rec.flightKind === "airliner";
     if (CBZ.cityAirstrikeExplosion) {
@@ -491,8 +563,17 @@
       if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent) continue;
       const b = civilBodyBounds(rec); if (!b) continue;
       const cy = rec.group.position.y + (b.minY + b.maxY) * 0.5;
-      const d = Math.hypot(rec.group.position.x - x, cy - y, rec.group.position.z - z);
-      // The blast reaches the hull surface, not only the aircraft origin.
+      // CAPSULE, NOT ORIGIN-SPHERE (measured): the old test took the distance
+      // from the aircraft ORIGIN with a ~3.5m hull allowance, so on a 54m
+      // airliner a rocket into the TAIL read as a 20m+ miss and did literally
+      // nothing. Project the blast onto the fuselage AXIS (plane-local x,
+      // clamped to the half-length), measure to THAT point — every station
+      // along the hull is now equally hittable; the radial allowance is the
+      // fuselage half-width exactly as before.
+      const loc = cabinLocal(rec, x, z);
+      const ax = Math.max(-b.hx, Math.min(b.hx, loc.x));
+      const axW = cabinWorld(rec, ax, 0);
+      const d = Math.hypot(axW.x - x, cy - y, axW.z - z);
       const hullD = Math.max(0, d - Math.max(b.hz, rec.flightKind === "airliner" ? 3.5 : 2.2));
       if (hullD > radius) continue;
       const damage = maxDamage * Math.max(0.18, 1 - hullD / radius);
@@ -560,6 +641,78 @@
     cabinState.inside = false; cabinState.rec = null; cabinState.pending = null;
   }
   function cabinReset() { cabinForceClear(false); }
+
+  // ============================================================
+  //  ALREADY ABOARD (owner bug, 2026-07-27, verbatim): "when i go to steal an
+  //  airplane i board the plane and then the cockpit door opens, and when i
+  //  press E again to hijack it, instead of throwing the pilot out and sitting
+  //  in the seat, the door and steps open as if I'm hijacking from outside the
+  //  plane — but i already boarded and opened the cockpit door."
+  //
+  //  Two separate defects, both real:
+  //   (1) the boarding arc was UNCONDITIONAL. aircraft_doors.js's begin() had
+  //       no notion of "the player is already past this door", so a hijack
+  //       fired from the flight deck marched him back OUT through the fuselage,
+  //       redeployed the airstairs and replayed the walk-up. The state "I am
+  //       aboard" existed (cabinState.inside) and nothing ever asked it. These
+  //       two exports are that question, and aircraft_doors.js answers the arc
+  //       with a short flight-deck beat instead of the full walk-in.
+  //   (2) THE PILOT WAS NEVER EJECTED. citySpawnFlyableFromProp simply handed
+  //       the player the controls; the captain stayed sitting in his chair for
+  //       the whole flight. cityVacateFlightDeck is the missing half, and it is
+  //       the un-killed twin of citySpillCabin — the crew are thrown out ALIVE
+  //       and panicked, because being hijacked is not a death.
+  // ============================================================
+  // "Is the player standing inside this aircraft right now?" (any aircraft if
+  // rec is omitted). The ONE query — never re-derive it from a position test.
+  CBZ.cityCabinAboard = function (rec) {
+    if (!cabinState.inside || cabinState.pending) return false;
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving || P._aircraft) return false;
+    if (rec && cabinState.rec !== rec) return false;
+    return true;
+  };
+  // Where the flight deck is, in world space, for a caller that needs to walk
+  // the player to it. Null when this airframe has no reachable flight deck.
+  CBZ.cityCabinFlightDeck = function (rec) {
+    const cab = rec && rec.group && rec.group.userData && rec.group.userData.cabin;
+    if (!cab || !cab.cockpitLeaf || cab.deckX == null) return null;
+    const w = cabinWorld(rec, cab.deckX, cab.deckZ || 0);
+    return { x: w.x, z: w.z, y: (rec.group.position.y || 0) + cab.floorTop, open: cab.cockpitT > 0.5 };
+  };
+  // Throw the flight crew out of their seats — ALIVE. Not a death: the
+  // killfeed is for deaths, and a hijacked pilot who runs for the terminal is
+  // not one. The bodies leave through cityUnseat (the only sanctioned way out
+  // of a seat now that syncAttached re-asserts the transform every frame), land
+  // on the apron clear of the forward door, and panic like any civilian who
+  // just watched an aircraft get stolen. Returns how many were put off.
+  CBZ.cityVacateFlightDeck = function (rec, opts) {
+    opts = opts || {};
+    const cab = rec && rec.group && rec.group.userData && rec.group.userData.cabin;
+    if (!cab || !cab.seats) return 0;
+    let n = 0;
+    for (let i = 0; i < cab.seats.length; i++) {
+      const s = cab.seats[i];
+      if (!s || !s.cockpit) continue;
+      const a = s.occupant;
+      if (a === CBZ.player) { s.occupant = null; continue; }
+      if (!a || !a.group) continue;
+      // put them down on the apron beside the forward door, spaced apart
+      const out = cabinWorld(rec, cab.doorX, -(4.6 + n * 1.4) * (cab.scale || 1));
+      cityUnseat(a, { seat: s, state: "walk", x: out.x, z: out.z, ground: true });
+      if (a.dead) { n++; continue; }
+      a.job = a.job || "pilot";
+      a.rage = null; a.targetActor = null;
+      // a real witness: they run, and they report it (the theft's own
+      // cityCrime call already owns the heat — this is the human reaction)
+      if (CBZ.cityPanic) { try { CBZ.cityPanic(out.x, out.z, 2.0, opts.byPlayer ? CBZ.player : null); } catch (e) {} }
+      n++;
+    }
+    if (n && CBZ.cityFlavor && opts.byPlayer !== false) {
+      CBZ.cityFlavor(n > 1 ? "You throw the flight crew out of the cockpit." : "You throw the pilot out of his seat.", "#ffd27a");
+    }
+    return n;
+  };
 
   function cabinCompleteBoard(rec) {
     const P = CBZ.player;
@@ -1807,10 +1960,16 @@
           reservedForNpc: true, occupant: null,
           cushionH: Rm(0.45), floorBelow: Rm(0.45),   // world metres above the deck (see Rm)
         });
+        // TWO PILOTS PER AIRCRAFT (owner, 2026-07-27). This chair used to carry
+        // `reservedForNpc: false` with a note that it stayed free for the
+        // player — but an airliner with one pilot aboard is wrong, and the
+        // player takes a seat by DISPLACING its occupant now
+        // (CBZ.cityVacateFlightDeck), exactly as he does the captain's. So the
+        // first officer is crewed like every other flight deck.
         seats.push({
           id: "seat-firstofficer", x: 13.13 * AL_SC, y: (CABIN_FLOOR + R(0.45)) * AL_SC, z: PIL_Z * AL_SC,
           heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", job: "co-pilot", cockpit: true,
-          reservedForNpc: false, occupant: null,
+          reservedForNpc: true, occupant: null,
           cushionH: Rm(0.45), floorBelow: Rm(0.45),
         });
       }
@@ -1962,6 +2121,11 @@
         seats, panel, doorT: 0,
         rows: rowsX.length, abreast: SEAT.abreast,     // read by cabinAudit
         cockpitLeaf, cockpitT: 0,
+        // WHERE THE FLIGHT DECK IS — the standing point between the two pilot
+        // chairs, plane-local. aircraft_doors.js walks the player here for the
+        // short "already aboard" hijack beat instead of marching him back out
+        // of the fuselage and replaying the airstairs (CBZ.cityCabinFlightDeck).
+        deckX: 12.7 * AL_SC, deckZ: 0,
       };
     }
 
@@ -2573,10 +2737,19 @@
           wealth: 0.4 + rng() * 0.4, aggr: 0.06 + rng() * 0.08,
         }, "traveller", "traveller");
       }
-      // ground crew in hi-vis on the apron near the jets
+      // ground crew in hi-vis on the apron near the jets. The spawn band used
+      // to straddle the parked airliners' own lanes (measured: 6 of 7 bodies
+      // standing inside a fuselage footprint — the owner's "people under
+      // planes"), so each roll is now pushed OUT of the two airliner gate
+      // lanes: a ramp agent works beside the hull, never inside it.
+      const GATE_LANES = [-120 + ADX, -10 + ADX];
       for (let i = 0; i < 6; i++) {
-        const sx = -120 + ADX + rng() * 220;
+        let sx = -120 + ADX + rng() * 220;
         const sz = APRON_Z - 18 + (rng() - 0.5) * 18;
+        for (let gl = 0; gl < GATE_LANES.length; gl++) {
+          const d = sx - GATE_LANES[gl];
+          if (Math.abs(d) < 6) sx = GATE_LANES[gl] + (d >= 0 ? 6.5 : -6.5);
+        }
         airportActor("groundCrew", sx, sz, {
           kind: "worker", archetype: "laborer", job: "ground crew",
           outfit: 0xffc81f, wealth: 0.25, aggr: 0.12 + rng() * 0.06,
@@ -2633,8 +2806,13 @@
         x: APRON_X, z: APRON_Z - 16, cap: 6,
         home: { x: APRON_X, z: 24 + ADZ },                  // the terminal concourse
         spots: [
-          { x: -120 + ADX, z: APRON_Z - 14 - 11 * (AL_SC - 1) },  // gate 1 airliner (dialed + tracks the up-scaled gate line)
-          { x: -10 + ADX, z: APRON_Z - 14 - 11 * (AL_SC - 1) },   // mid-apron gate
+          // The two gate spots used to be the AIRCRAFT ORIGIN coordinates, so
+          // aigoals routed crew to stand at the fuselage centre on schedule —
+          // the other half of the owner's "people under planes". +7 in x puts
+          // the task point BESIDE the hull (a ramp agent's position), still on
+          // the same gate line.
+          { x: -113 + ADX, z: APRON_Z - 14 - 11 * (AL_SC - 1) },  // beside gate 1 airliner (tracks the up-scaled gate line)
+          { x: -3 + ADX, z: APRON_Z - 14 - 11 * (AL_SC - 1) },    // beside the mid-apron gate
           { x: 95 + ADX, z: APRON_Z - 6 },                        // the private-jet apron
           { x: APRON_X, z: APRON_Z + 18 },                        // the baggage / GSE line
         ],

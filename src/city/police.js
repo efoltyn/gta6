@@ -76,14 +76,20 @@
   if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE == null) CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE = true;
   // POLICE HELI ALTITUDE (owner: "helicopters fly too low now — first they were
   // too high, I asked to lower them, now they're too low"). Air-1's orbit height
-  // swung from an absolute y≈49 cruise (the old too-high) to 26 metres above
-  // ground (too low — it skims mid-rise rooftops). This is the MIDDLE GROUND, in
-  // metres ABOVE LOCAL GROUND: 38 reads clearly airborne (well over a 9-storey
-  // walk-up roof, ≈ y36 at FH 3.2) yet stays below the old cruise, so it holds a
-  // real down-angle without buzzing the blocks. Numeric config = a one-line tune
-  // (26 = old low, 49 = old high). CHOP_AGL below reads this; the roof-clear and
-  // player-height floors still lift it locally over a genuinely tall tower.
-  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_ALTITUDE == null) CBZ.CONFIG.POLICE_HELI_ALTITUDE = 38;
+  // swung from an absolute y≈49 cruise (too high) to 26 m AGL (too low), and the
+  // "middle ground" this line used to pin was 38 m AGL = 125 ft.
+  //
+  // SUPERSEDED 2026-07-27 (owner: "correct speed and height"). 125 ft is still
+  // not a police helicopter — real air support patrols 500-1000 ft. The height
+  // is no longer a lone number here; it comes from CBZ.heliSpec("police") in
+  // city/aircraft.js, which declares a SEARCH posture and an ENGAGED posture
+  // and derives the orbit radius from the airspeed at a coordinated bank, so
+  // altitude/speed/radius can no longer drift apart. DEFAULT 0 = "use the
+  // spec". Setting it to any positive number still PINS the AGL exactly as
+  // before (?cfg_POLICE_HELI_ALTITUDE=38 restores the old height), so the
+  // owner's existing dial is intact; ?cfg_AIR_HELI_REALISM=0 reverts every
+  // rotorcraft in the game in one line.
+  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_ALTITUDE == null) CBZ.CONFIG.POLICE_HELI_ALTITUDE = 0;
   function arrestFirst() { return !!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST); }
   function swatRedesign() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
   function heliSlowResponse() { return !!(CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE); }
@@ -959,34 +965,142 @@
       // leave it wounded (streaming the damage-tier smoke). `downed` flips the
       // record into the ballistic fall arc and out of every dispatch phase.
       hp: 85, maxHp: 85, downed: false, vy: 0, yawRate: 0, spinT: 0, smokeCD: 0, hurtSmokeCD: 0,
+      crew: [],   // [{actor, job, seated}] — pilot / TFO / (4★) door gunner
     };
   }
 
-  function assignChopperPilot() {
-    if (!chopper || chopper.pilot) return;
-    let pilot = null, bd = Infinity;
+  // ============================================================
+  //  AIR-1 IS A CREW, NOT A DRIVER (owner: "helicopters should have more than
+  //  one officer in them"). A US police helicopter is flown by a PILOT and a
+  //  TACTICAL FLIGHT OFFICER — the TFO runs the searchlight and the optics and
+  //  is the one who actually spots you; a gunned-up ship adds a door gunner.
+  //  Before this, Air-1 carried exactly one officer whose rig was hidden
+  //  (group.visible=false) and parked at the home pad, so the aircraft you
+  //  looked at was empty.
+  //
+  //  No bespoke occupant system: the seats are npclife ANCHORS and the bodies
+  //  go in via CBZ.npcLife.attach — the same call the airliner cabin uses — so
+  //  syncAttached() holds each body in its seat every frame, the V2 chair pose
+  //  solves feet-on-the-deck from the declared cushion, fpsmode's
+  //  CHAR_SEATED_HITTABLE path makes them shootable through the canopy, and
+  //  aim_dossier's Lv.N pill reads the truthful `job` string with no HUD edit.
+  //  Each seat has a CONSEQUENCE: no pilot and the ship falls; no TFO and the
+  //  searchlight stops tracking; no gunner and the potshots stop.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_CREW == null) CBZ.CONFIG.POLICE_HELI_CREW = true;
+  function heliCrewOn() { return !CBZ.CONFIG || CBZ.CONFIG.POLICE_HELI_CREW !== false; }
+  // Seat anchors in metres, aircraft-local, +Z is the nose. makeChopper's hull
+  // is authored at scale 1 so these are already world metres: cabin floor sits
+  // 0.66 below the origin, cushion 0.36 above the floor, which puts a 1.82 m
+  // officer's head at y≈+0.69 — inside the glass canopy (top +0.845), which is
+  // the whole point: you can see them through the windscreen.
+  const CHOP_SEATS = [
+    { job: "Pilot",                    x: -0.42, y: -0.30, z: 1.30, yaw: 0,           cushionH: 0.36, floorBelow: 0.36 },
+    { job: "Tactical Flight Officer",  x:  0.42, y: -0.30, z: 1.30, yaw: 0,           cushionH: 0.36, floorBelow: 0.36 },
+    { job: "Door Gunner",              x:  0.55, y: -0.30, z: -0.35, yaw: Math.PI / 2, cushionH: 0.36, floorBelow: 0.36 },
+  ];
+  function chopCrewNode() {
+    if (!chopper || !chopper.group) return null;
+    const grp = chopper.group;
+    if (grp.userData._crewNode && grp.userData._crewNode.parent === grp) return grp.userData._crewNode;
+    const n = new THREE.Group();
+    const s = (grp.scale && grp.scale.x) || 1;
+    n.scale.setScalar(s > 0.001 ? 1 / s : 1);     // author in metres whatever the hull scale
+    n.name = "crew";
+    n.userData.dynamic = true;                    // live rigs live here — never batch/freeze it
+    grp.add(n);
+    grp.userData._crewNode = n;
+    return n;
+  }
+  function pickBeatOfficer() {
+    let pick = null, bd = Infinity;
     for (const c of CBZ.cityCops) {
       if (!c || c.dead || c.swat || c._post || c._airPilot || c.gunstop || (CBZ.body && CBZ.body.busy && CBZ.body.busy(c))) continue;
       const d = Math.hypot(c.pos.x - chopper.homeX, c.pos.z - chopper.homeZ);
-      if (d < bd) { bd = d; pilot = c; }
+      if (d < bd) { bd = d; pick = c; }
     }
     // If every beat officer is occupied, dispatch one real roster officer from
     // the same precinct and seat that person — still no anonymous vehicle AI.
-    if (!pilot && forcePool > 0) pilot = spawnCop(false, false);
-    if (!pilot) return;
-    pilot._airPilot = true; pilot._airPilotPrev = { ambient: !!pilot.ambient, state: pilot.state };
-    pilot.curTarget = null; pilot.npcTarget = null; pilot.sees = false; pilot.speed = 0;
-    pilot.pos.set(chopper.homeX, 0, chopper.homeZ);
-    pilot.group.visible = false;
-    chopper.pilot = pilot;
+    if (!pick && forcePool > 0) pick = spawnCop(false, false);
+    return pick;
+  }
+  function seatChopCrew() {
+    if (!chopper || !heliCrewOn() || !CBZ.npcLife || !CBZ.npcLife.attach) return;
+    const node = chopCrewNode(); if (!node) return;
+    for (let i = 0; i < chopper.crew.length; i++) {
+      const c = chopper.crew[i], s = CHOP_SEATS[i] || CHOP_SEATS[0];
+      if (!c || !c.actor || c.actor.dead || c.seated) continue;
+      c.actor.group.visible = true;
+      // RE-ARM THE HOLD. cityUnseat drops `_seatHold` to false to get a body
+      // OUT of a chair (syncAttached re-asserts the transform otherwise, so
+      // that is the only way out); a body seated again later must have it back
+      // or nothing defends its facing — the exact bug the seat hold exists for.
+      c.actor._seatHold = true;
+      const ok = CBZ.npcLife.attach(c.actor, node, {
+        x: s.x, y: s.y, z: s.z, yaw: s.yaw, pose: "sit", state: "sit",
+        cushionH: s.cushionH, floorBelow: s.floorBelow,
+      });
+      if (ok) c.seated = true;
+    }
+  }
+  function assignChopperPilot() {
+    if (!chopper) return;
+    chopper.crew = chopper.crew || [];
+    // A door gunner only rides when the force has actually gunned up (4 stars);
+    // the pilot + TFO pair is the standing crew of every police helicopter.
+    const want = heliCrewOn() ? ((g.wanted | 0) >= 4 ? 3 : 2) : 1;
+    for (let i = chopper.crew.length; i < want; i++) {
+      const p = pickBeatOfficer();
+      if (!p) break;
+      p._airPilot = true; p._airPilotPrev = { ambient: !!p.ambient, state: p.state };
+      p.curTarget = null; p.npcTarget = null; p.sees = false; p.speed = 0;
+      p.pos.set(chopper.homeX, 0, chopper.homeZ);
+      p.group.visible = false;
+      // TRUTHFUL JOB — cityTitle() reads a.job, so the overhead pill and the
+      // dossier say what this officer actually does aboard the aircraft.
+      p._airCrewPrevJob = p.job;
+      p.job = (CHOP_SEATS[i] || CHOP_SEATS[0]).job;
+      chopper.crew.push({ actor: p, job: p.job, seated: false });
+    }
+    chopper.pilot = chopper.crew.length ? chopper.crew[0].actor : null;
+    seatChopCrew();
+  }
+  // TWO predicates on purpose, because one cannot be degrade-safe in both
+  // directions. `crewLost` answers "this seat was MANNED and that officer is
+  // now dead" — the only thing that may ever take a capability away, so a build
+  // with POLICE_HELI_CREW off, or a precinct with nobody spare, can never
+  // accidentally ground or disarm Air-1. `crewHasAlive` answers the opposite
+  // question for a capability that must have a live body behind it.
+  function crewSeat(job) {
+    const list = chopper && chopper.crew;
+    if (!list) return null;
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].job === job) return list[i];
+    return null;
+  }
+  function crewLost(job) { const c = crewSeat(job); return !!(c && (c.dead || !c.actor || c.actor.dead)); }
+  function crewHasAlive(job) { const c = crewSeat(job); return !!(c && !c.dead && c.actor && !c.actor.dead); }
+  // Take a body out of a seat without killing it — island_airport.js owns the
+  // shared form (CBZ.cityUnseat); this is the degrade-safe fallback.
+  function unseatCop(a) {
+    if (!a) return;
+    if (CBZ.cityUnseat) { try { CBZ.cityUnseat(a, { state: a.dead ? "dead" : "walk" }); return; } catch (e) {} }
+    a._seatHold = false;
+    if (CBZ.npcLife && CBZ.npcLife.detach) { try { CBZ.npcLife.detach(a, { state: a.dead ? "dead" : "walk" }); } catch (e) {} }
   }
   function releaseChopperPilot() {
-    if (!chopper || !chopper.pilot) return;
-    const p = chopper.pilot; chopper.pilot = null;
-    p._airPilot = false; p.state = "patrol"; p.curTarget = null; p.npcTarget = null; p.sees = false;
-    p.pos.set(chopper.homeX + 3.2, 0, chopper.homeZ + 1.5);
-    p.group.visible = true;
-    if ((g.wanted | 0) === 0 && !p.swat) holsterGun(p);
+    if (!chopper) return;
+    const list = chopper.crew || (chopper.pilot ? [{ actor: chopper.pilot }] : []);
+    chopper.crew = []; chopper.pilot = null;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i] && list[i].actor;
+      if (!p) continue;
+      unseatCop(p);
+      p._airPilot = false; p.state = "patrol"; p.curTarget = null; p.npcTarget = null; p.sees = false;
+      if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
+      p.pos.set(chopper.homeX + 3.2 + i * 1.5, 0, chopper.homeZ + 1.5);
+      if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
+      if ((g.wanted | 0) === 0 && !p.swat) holsterGun(p);
+    }
   }
   // Orbit/search altitude ABOVE LOCAL GROUND (not above the tallest object
   // anywhere — the old global skyline scan made Air-1 effectively unshootable
@@ -994,8 +1108,29 @@
   // CBZ.CONFIG.POLICE_HELI_ALTITUDE (defaulted to 38 up top — the middle ground
   // between the old y≈49 cruise "too high" and 26 AGL "too low"); the fallback
   // stays 38 if config is stripped.
-  const CHOP_AGL = (CBZ.CONFIG && +CBZ.CONFIG.POLICE_HELI_ALTITUDE > 0) ? +CBZ.CONFIG.POLICE_HELI_ALTITUDE : 38;
-  const CHOP_ROOF_CLEAR = 9;   // (raised 7→9) a touch more standoff over a roof it hunts across, matching the higher cruise
+  //
+  // SUPERSEDED (2026-07-27, owner: "they should move around at correct speed
+  // and height"): 38 m AGL is 125 ft and the orbit radius under it was
+  // 18 - 1.5*stars — 13.5 m at 3 stars, 10.5 m at 5. That is not an orbit, it
+  // is a hover directly over the suspect's head at rooftop height. Air-1 now
+  // reads its envelope from CBZ.heliSpec("police") (city/aircraft.js), the ONE
+  // place a rotorcraft's altitude / orbit / cruise / bank is declared, shared
+  // with the military gunship and the ambient fleet. POLICE_HELI_ALTITUDE is
+  // still honoured as an explicit override so the owner's existing dial keeps
+  // working; leave it unset and the spec's 150 m search / 85 m engaged
+  // postures apply. AIR_HELI_REALISM=false takes every rotorcraft in the game
+  // back to its old numbers in one line.
+  function chopSpec() {
+    return CBZ.heliSpec ? CBZ.heliSpec("police")
+      : { aglSearch: 38, agl: 38, vSearch: 9, v: 9, cruise: 36, climb: 12, roofClear: 9, gunRange: 60, orbitR: 13.5, orbitRSearch: 13.5 };
+  }
+  const CHOP_AGL_OVERRIDE = (CBZ.CONFIG && +CBZ.CONFIG.POLICE_HELI_ALTITUDE > 0) ? +CBZ.CONFIG.POLICE_HELI_ALTITUDE : 0;
+  function chopAgl(engagedMix) {
+    if (CHOP_AGL_OVERRIDE) return CHOP_AGL_OVERRIDE;
+    const s = chopSpec();
+    return s.aglSearch + (s.agl - s.aglSearch) * (engagedMix || 0);
+  }
+  function chopRoofClear() { return chopSpec().roofClear; }
   // PER-BULLET hull damage = w.damage × this (owner: "they also can't be shot").
   // Air-1 hp is 85, so a rifle (~34 dmg) needs a sustained burst (~10 rounds) and
   // a sniper (130) a few shots — never a one-tap. Missile splash stays the fast
@@ -1019,7 +1154,7 @@
   }
   function chopperCruiseY(x, z, homeY) {
     const ground = groundYForChopper(x, z);
-    return Math.max(ground + CHOP_AGL, (homeY || ground) + 8);
+    return Math.max(ground + chopAgl(0), (homeY || ground) + 8);
   }
   // POLICE_HELI_SLOW_RESPONSE (b): push the dispatch OFF the actual precinct
   // distance and out toward the map edge, so the inbound leg is a real, visible
@@ -1082,6 +1217,29 @@
     if (!chopper || !chopper.pos) return null;
     return { x: chopper.pos.x, z: chopper.pos.z, y: chopper.pos.y };
   };
+  // CBZ.heliAudit() census provider (aircraft.js owns the audit; every
+  // rotorcraft owner pushes ONE of these, so a new fleet costs no edit there).
+  // Declared with || because this file parses BEFORE aircraft.js.
+  CBZ.heliFleet = CBZ.heliFleet || [];
+  CBZ.heliFleet.push(function () {
+    if (!chopper || !chopper.pos || !chopper.group || !chopper.group.parent) return null;
+    if (chopper.phase === "idle" || chopper.phase === "dispatch") return null;   // still on the pad
+    const S = chopSpec(), post = chopper._eng || 0;
+    let crew = 0;
+    for (let i = 0; i < (chopper.crew || []).length; i++) {
+      if (chopper.crew[i].actor && !chopper.crew[i].actor.dead) crew++;
+    }
+    const orbiting = chopper.phase === "orbit";
+    const gnd = groundYForChopper(chopper.pos.x, chopper.pos.z);
+    const roof = roofYForChopper(chopper.pos.x, chopper.pos.z, 1);
+    return [{
+      role: "police", x: chopper.pos.x, y: chopper.pos.y, z: chopper.pos.z,
+      agl: chopper.pos.y - gnd,
+      speed: orbiting ? (S.vSearch + (S.v - S.vSearch) * post) : S.cruise,
+      orbitR: orbiting ? (S.orbitRSearch + (S.orbitR - S.orbitRSearch) * post) : 0,
+      crew: crew, roofTop: roof > gnd + 0.5 ? roof : 0, downed: !!chopper.downed,
+    }];
+  });
   // systems/lockon.js UNIVERSAL-acquisition seam (owner: "homing doesn't work
   // for police helicopters"): expose Air-1 as a lockable craft — parked on its
   // precinct pad or flying. LIST/ACQUIRE SEAM ONLY: damage and flight behavior
@@ -1121,7 +1279,16 @@
     const d = Math.hypot(c.pos.x - x, c.pos.y - y, c.pos.z - z);
     const hullD = Math.max(0, d - 3.4);
     if (hullD > radius) return false;
-    damageChopper(dmg * Math.max(0.3, 1 - hullD / radius));
+    let hit = dmg * Math.max(0.3, 1 - hullD / radius);
+    // NO SINGLE BLAST DOWNS A HELICOPTER (owner: "helicopters need two rpg
+    // hits to come down"): rotorcraft cap any ONE explosive splash at 62% of
+    // max hp — the first direct rocket wounds Air-1 into its tier-smoke state
+    // (85hp vs the RPG's 90 used to one-shot it), the second kills. This
+    // entry IS the blast seam, so bullets (damageChopper via the ray path)
+    // are untouched. The military gunship needs no cap — its 140hp already
+    // rides two 90s — so the behaviour is uniform across every rotorcraft.
+    if (!CBZ.CONFIG || CBZ.CONFIG.AIR_HELI_TWO_BLAST !== false) hit = Math.min(hit, (c.maxHp || 85) * 0.62);
+    damageChopper(hit);
     return true;
   };
   function damageChopper(dmg, quiet) {
@@ -1181,16 +1348,35 @@
   // arrest-posture flip, kill/respect/bounty ledgers, weapon + armor drops,
   // gore/ragdoll — no parallel scoring path. The feed line is ours to log:
   // cityHurtCop predates the kill bus and never logs deaths itself.
+  // ...and so does the WHOLE crew, not just the man at the controls (this
+  // used to reach exactly one officer because Air-1 only ever had one).
   function crashKillPilot(ix, surfY, iz) {
-    const p = chopper && chopper.pilot;
-    if (chopper) chopper.pilot = null;   // detach FIRST — despawn's releaseChopperPilot must never resurrect him
-    if (!p || p.dead) return;
-    p._airPilot = false;                 // corpse takes the normal dead-cop path (deadT tick + cull)
-    p.pos.set(ix + 1.6, surfY, iz + 1.1);          // thrown clear of the fireball
-    p.group.visible = true;
-    if (CBZ.cityHurtCop) CBZ.cityHurtCop(p, 99999, { byPlayer: true, fromX: ix, fromZ: iz, force: 13 });
-    else { p.dead = true; p.deadT = 0; }
-    if (CBZ.cityKillFeed) CBZ.cityKillFeed("You", p.name || "Officer", "helicopter crash");   // normalises to the feed's "plane crash" line
+    const list = (chopper && chopper.crew && chopper.crew.length)
+      ? chopper.crew.slice()
+      : (chopper && chopper.pilot ? [{ actor: chopper.pilot }] : []);
+    // detach FIRST — despawn's releaseChopperPilot must never resurrect them
+    if (chopper) { chopper.pilot = null; chopper.crew = []; }
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i] && list[i].actor;
+      if (!p) continue;
+      // EVERY body comes out of the airframe, including one already dead in his
+      // seat: the wreck's group is about to be removed and its geometry
+      // disposed, and a rig still parented under it would be walked by that
+      // disposer. Detaching first is not tidiness, it is the difference between
+      // a corpse on the ground and a destroyed character rig.
+      unseatCop(p);                      // a body only ever leaves a seat by detaching
+      if (p.dead) continue;
+      p._airPilot = false;               // corpse takes the normal dead-cop path (deadT tick + cull)
+      if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
+      p.pos.set(ix + 1.6 + i * 1.3, surfY, iz + 1.1 - i * 0.9);   // thrown clear of the fireball
+      if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
+      if (CBZ.cityHurtCop) CBZ.cityHurtCop(p, 99999, { byPlayer: true, fromX: ix, fromZ: iz, force: 13 });
+      else { p.dead = true; p.deadT = 0; }
+      // the ONE sanctioned death popup is the killfeed — cityHurtCop predates
+      // the kill bus and never logs deaths itself, so the line is ours to file.
+      if (CBZ.cityLogDeath) CBZ.cityLogDeath(p.name || "Officer", "helicopter crash", { by: "You" });
+      else if (CBZ.cityKillFeed) CBZ.cityKillFeed("You", p.name || "Officer", "helicopter crash");
+    }
   }
   // ballistic wreck ride-down (aircraft.js fallHeli shape): gravity + flat
   // spin + smoke trail, then a CONTAINED crash fireball ON whatever it lands
@@ -1226,6 +1412,20 @@
   function despawnChopper() {
     if (!chopper) return;
     releaseChopperPilot();
+    // BELT AND BRACES: the disposer below traverses the whole airframe, and the
+    // crew node carries LIVE character rigs. releaseChopperPilot has already
+    // detached every body it knows about; strip the node itself so no rig a
+    // future caller parented here can ever be reached by dispose().
+    const cn = chopper.group && chopper.group.userData && chopper.group.userData._crewNode;
+    if (cn) {
+      for (let i = cn.children.length - 1; i >= 0; i--) {
+        const kid = cn.children[i];
+        cn.remove(kid);
+        if (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) CBZ.city.arena.root.add(kid);
+      }
+      if (cn.parent) cn.parent.remove(cn);
+      chopper.group.userData._crewNode = null;
+    }
     if (chopper.group && chopper.group.parent) chopper.group.parent.remove(chopper.group);
     if (chopper.pool && chopper.pool.parent) chopper.pool.parent.remove(chopper.pool);
     if (chopper.pad && chopper.pad.parent) chopper.pad.parent.remove(chopper.pad);
@@ -1251,6 +1451,56 @@
     // a dying bird ignores ALL dispatch/orbit AI — it's a ballistic wreck now
     // (this also runs playerless, so the fall always finishes).
     if (chopper.downed) { fallChopper(dt); return; }
+    // NOBODY IS FLYING IT. Killing the officer in the right-hand seat is not a
+    // cosmetic kill: Air-1 enters the same ballistic fall arc a dead engine
+    // does. This is the reason the crew are real bodies in real seats instead
+    // of a hidden bookkeeping entry, and it is the counter-play the owner asked
+    // for ("if you shoot the pilot the helicopter should be in trouble").
+    if (crewLost("Pilot") &&
+        chopper.phase !== "idle" && chopper.phase !== "dispatch" && chopper.phase !== "spool") {
+      if (CBZ.cityFlavor) CBZ.cityFlavor("Air-1's pilot is hit — she's going down!", "#ff8b6b");
+      downChopper();
+      fallChopper(dt);
+      return;
+    }
+    // A DEAD CREWMAN IS NOT REPLACED IN FLIGHT. His entry stays in the manifest
+    // — the corpse is slumped in its seat (CHAR_SEATED_HITTABLE keeps an
+    // attached body there rather than detaching it into the sky) — so the seat
+    // reads as FILLED and nobody is teleported aboard a flying helicopter to
+    // take it. crewLost() answers off `dead`, not off the roster length, which
+    // is what makes the consequence stick. Only a body the world genuinely
+    // deleted (corpse cull) leaves the list.
+    // The top-up therefore only ever fills a seat that was NEVER manned — which
+    // is exactly the door gunner joining when the heat reaches 4 stars, and
+    // only while the aircraft is still on its pad.
+    // The entry is never spliced out: a corpse that the 75 s cull eventually
+    // removes from CBZ.cityCops must not quietly restore the capability it took
+    // with it, so the LOSS is latched on the manifest rather than inferred from
+    // whether the body still exists.
+    if (chopper.crew && chopper.crew.length) {
+      // ...and the same pass carries the crew's render LOD. The cop tick skips
+      // `_airPilot` officers before its own visibility recompute, so without
+      // this three character rigs would draw at any distance forever. 120 m is
+      // a touch past peds.js's 95 m street cutoff because these bodies are 85 m
+      // UP — the slant range to a ship overhead is most of that budget.
+      // (read CBZ.player directly — the function's own `const P` is declared
+      // BELOW this point and would be in its temporal dead zone here)
+      const PL = CBZ.player;
+      const near = !PL || !PL.pos ? true
+        : ((chopper.pos.x - PL.pos.x) * (chopper.pos.x - PL.pos.x) +
+           (chopper.pos.y - (PL.pos.y || 0)) * (chopper.pos.y - (PL.pos.y || 0)) +
+           (chopper.pos.z - PL.pos.z) * (chopper.pos.z - PL.pos.z)) < 120 * 120;
+      for (let i = 0; i < chopper.crew.length; i++) {
+        const c = chopper.crew[i];
+        if (!c.actor || c.actor.dead || c.actor.culled || c.actor._npcLifeDestroyed ||
+            (CBZ.cityCops && CBZ.cityCops.indexOf(c.actor) < 0)) c.dead = true;
+        if (c.actor && c.seated && c.actor.group) c.actor.group.visible = near;
+      }
+    }
+    if (chopper.phase === "idle" || chopper.phase === "dispatch" || chopper.phase === "spool") {
+      chopper._crewT = (chopper._crewT || 0) - dt;
+      if (chopper._crewT <= 0) { chopper._crewT = 2.5; if (chopper.crew && chopper.crew.length) assignChopperPilot(); }
+    }
     // damage-tier smoke: a wounded airframe streams engine smoke long before
     // it dies, so a glancing blast visibly COUNTS (the parked-plane burn read).
     if (chopper.hp < chopper.maxHp * 0.45 && chopper.phase !== "idle" && chopper.phase !== "dispatch") {
@@ -1318,8 +1568,14 @@
       // out) climbs relative to THAT point's own local terrain; the plain
       // home-relative cap is the original formula, unchanged for the flag-off
       // instant-response path where pos.x/z never moved off the home pad.
-      const liftY = chopper.launchCeilY != null ? chopper.launchCeilY : Math.min(chopper.cruiseY, chopper.homeY + 30);
-      chopper.pos.y += Math.min(12 * dt, liftY - chopper.pos.y);
+      // DEPARTURE HEIGHT, NOT CRUISE HEIGHT. The orbit ceiling is now 150 m, and
+      // riding a lift straight up to it on the spot is neither a departure nor
+      // watchable — a real ship gets airborne and climbs EN ROUTE. So the pad
+      // beat ends at ~45 m above home and the inbound leg (which already climbs
+      // at the spec's rate toward its own ty) does the rest.
+      const ceil = chopper.launchCeilY != null ? chopper.launchCeilY : Math.min(chopper.cruiseY, chopper.homeY + 30);
+      const liftY = Math.min(ceil, chopper.homeY + 45);
+      chopper.pos.y += Math.min(chopSpec().climb * dt, liftY - chopper.pos.y);
       if (chopper.pos.y >= liftY - 0.5) chopper.phase = "inbound";
       return;
     }
@@ -1335,7 +1591,7 @@
         const rd = Math.hypot(rx, rz) || 1;
         const safeY = chopper.homeY + 18;
         if (rd > 3.5) {
-          const step = Math.min(rd, 34 * dt); chopper.pos.x += rx / rd * step; chopper.pos.z += rz / rd * step;
+          const step = Math.min(rd, chopSpec().cruise * dt); chopper.pos.x += rx / rd * step; chopper.pos.z += rz / rd * step;
           chopper.pos.y += (Math.max(safeY, chopper.pos.y) - chopper.pos.y) * Math.min(1, dt * 1.2);
         } else {
           chopper.pos.x += rx * Math.min(1, dt * 2); chopper.pos.z += rz * Math.min(1, dt * 2);
@@ -1351,47 +1607,92 @@
     }
     chopper.leaveT = 0;
     const lk = g.cityLastKnown;
-    // orbit the suspect's last-known position; tighter + faster the more stars
-    const cx = lk ? lk.x : P.pos.x, cz = lk ? lk.z : P.pos.z;
-    chopper.orbit += dt * (0.45 + stars * 0.07);
-    const R = 18 - stars * 1.5;
+    const SPEC = chopSpec();
+    // ---- POSTURE: search vs engaged -------------------------------------
+    // A police ship patrols HIGH and WIDE and only comes down to work a
+    // pursuit. `chopperEngage` is the question the guns and the paint test
+    // already ask (are you below me with a clear line), so the descent needs no
+    // second threat model — it is the same answer, used for altitude. The mix
+    // eases over ~3 s so the ship descends like an aircraft, not a lift.
+    const cx = lk ? lk.x : P.pos.x, cz = lk ? lk.z : P.pos.z;   // the orbit centre = last-known
+    // ...and it only comes DOWN when the suspect is actually under the ring it
+    // would descend onto. A clear line of sight from 150 m is nearly always
+    // true, so LOS alone would collapse the search posture the moment Air-1
+    // arrived; if you have run clear of your last-known position it stays high
+    // and keeps searching, which is the whole point of the high orbit.
+    const nearOrbit = Math.hypot(P.pos.x - cx, P.pos.z - cz) < SPEC.orbitR * 1.25;
+    const engaged = nearOrbit && (chopperEngage(P) || (stars >= 4 && CBZ.cityChopperPaints && CBZ.cityChopperPaints()));
+    chopper._eng = (chopper._eng || 0) + ((engaged ? 1 : 0) - (chopper._eng || 0)) * Math.min(1, dt * 0.35);
+    const post = chopper._eng;
+    // RADIUS AND RATE BOTH COME FROM THE AIRSPEED. heliSpec derives the radius
+    // from the speed at a 20 deg coordinated bank, and omega = v/R closes it —
+    // so Air-1 flies a circle an actual helicopter could fly instead of three
+    // independently-guessed numbers. Heat tightens it by a few percent rather
+    // than collapsing it to a 10 m hover.
+    const heat = Math.max(0, Math.min(1, (stars - 3) / 2));
+    const R = (SPEC.orbitRSearch + (SPEC.orbitR - SPEC.orbitRSearch) * post) * (1 - 0.12 * heat);
+    const vOrb = SPEC.vSearch + (SPEC.v - SPEC.vSearch) * post;
+    chopper.orbit += dt * (vOrb / Math.max(8, R));
     const tx = cx + Math.cos(chopper.orbit) * R, tz = cz + Math.sin(chopper.orbit) * R;
-    // Hold a shootable street-search height and climb only for the roof directly
-    // under the next orbit point (or a player who genuinely got above us).
+    // Hold the posture's height and climb only for the roof directly under the
+    // next orbit point (or a player who genuinely got above us).
     const needY = (P.pos.y || 0) + 1.4 + CHOP_FIRE_MARGIN + 6;
     const localGround = groundYForChopper(tx, tz);
     const localRoof = roofYForChopper(tx, tz, 5);
-    const ty = Math.max(localGround + CHOP_AGL - Math.min(3, stars - 3), localRoof + CHOP_ROOF_CLEAR, needY);
+    const ty = Math.max(localGround + chopAgl(post), localRoof + chopRoofClear(), needY);
     const mdx = tx - chopper.pos.x, mdz = tz - chopper.pos.z;
     const md = Math.hypot(mdx, mdz);
     if (chopper.phase === "inbound") {
-      const step = Math.min(md, 36 * dt);
+      const step = Math.min(md, SPEC.cruise * dt);
       if (md > 0.01) { chopper.pos.x += mdx / md * step; chopper.pos.z += mdz / md * step; }
-      const vy = Math.max(-18 * dt, Math.min(18 * dt, ty - chopper.pos.y));
+      // climb at a real rate on the way in (~1600 fpm), not 18 m/s
+      const vy = Math.max(-SPEC.climb * dt, Math.min(SPEC.climb * dt, ty - chopper.pos.y));
       chopper.pos.y += vy;
-      if (md < 34 && Math.abs(chopper.pos.y - ty) < 14) {
+      if (md < 44 && Math.abs(chopper.pos.y - ty) < 22) {
         chopper.phase = "orbit";
         chopper.pool.position.set(P.pos.x, groundYForChopper(P.pos.x, P.pos.z) + 0.07, P.pos.z);
         chopper.pool.visible = true; chopper.cone.visible = true;
       }
     } else {
-      chopper.pos.x += mdx * Math.min(1, dt * 1.4);
-      chopper.pos.z += mdz * Math.min(1, dt * 1.4);
-      chopper.pos.y += (ty - chopper.pos.y) * Math.min(1, dt * 1.2);
+      // chase the orbit point at the orbit's own tangential speed
+      const lat = Math.min(1, dt * (vOrb / Math.max(R, 8)) * 1.6);
+      chopper.pos.x += mdx * lat;
+      chopper.pos.z += mdz * lat;
+      const dy = ty - chopper.pos.y;
+      chopper.pos.y += Math.max(-SPEC.climb * dt, Math.min(SPEC.climb * dt, dy));
     }
     chopper.heading = Math.atan2(mdx, mdz);
     let yd = chopper.heading - chopper.group.rotation.y;
     while (yd > Math.PI) yd -= Math.PI * 2; while (yd < -Math.PI) yd += Math.PI * 2;
     chopper.group.rotation.y += yd * Math.min(1, dt * 2.8);
-    const bank = chopper.phase === "orbit" ? Math.sin(chopper.orbit) * 0.12 : Math.max(-0.16, Math.min(0.16, yd * 0.16));
+    // BANK IS THE TURN. The old sin(orbit)*0.12 was a fixed ~7 deg wobble
+    // unrelated to the circle being flown; heliOrbitBank is the coordinated
+    // angle for THIS speed and radius (the equation airtraffic.js already used).
+    const bank = chopper.phase === "orbit"
+      ? -(CBZ.heliOrbitBank ? CBZ.heliOrbitBank(vOrb, R) : Math.atan((vOrb * vOrb) / (Math.max(1, R) * 9.81)))
+      : Math.max(-0.16, Math.min(0.16, yd * 0.16));
     chopper.group.rotation.z += (bank - chopper.group.rotation.z) * Math.min(1, dt * 3);
     chopper.rotor.rotation.y += dt * 40;
+    // NO FLY-THROUGH, kept explicit: the roof clamp above is a target, this is
+    // the guarantee. A ship that has been shoved (aero, a lurch) still rides
+    // over the building it is above rather than through it.
+    {
+      const bodyTop = roofYForChopper(chopper.pos.x, chopper.pos.z, 1);
+      const gnd = groundYForChopper(chopper.pos.x, chopper.pos.z);
+      if (bodyTop > gnd + 0.5 && chopper.pos.y < bodyTop + chopRoofClear()) chopper.pos.y = bodyTop + chopRoofClear();
+    }
     if (chopper.phase !== "orbit") return;
-    // spotlight tracks toward the player but lags (so you can outrun the beam)
+    // spotlight tracks toward the player but lags (so you can outrun the beam).
+    // THE TFO IS THE ONE ON THE LIGHT — shoot him and the beam stops tracking.
     const beam = chopper.pool.position;
-    beam.x += (P.pos.x - beam.x) * Math.min(1, dt * (0.7 + stars * 0.18));
-    beam.z += (P.pos.z - beam.z) * Math.min(1, dt * (0.7 + stars * 0.18));
-    chopper.spotR = 6 + stars * 0.5;
+    const optics = !crewLost("Tactical Flight Officer");
+    const btx = optics ? P.pos.x : beam.x, btz = optics ? P.pos.z : beam.z;
+    beam.x += (btx - beam.x) * Math.min(1, dt * (0.7 + stars * 0.18));
+    beam.z += (btz - beam.z) * Math.min(1, dt * (0.7 + stars * 0.18));
+    // BEAM WIDTH FOLLOWS HEIGHT — a searchlight is a cone (heliBeamRadius,
+    // 5.5 deg half-angle: ~16 m across at 85 m, ~29 m at 150 m). The old flat
+    // 6-8.5 m disc was the same size from 26 m as from 150.
+    chopper.spotR = (CBZ.heliBeamRadius ? CBZ.heliBeamRadius(chopper.pos.y - (chopper._beamY || 0)) : 6) + stars * 0.4;
     chopper.pool.scale.setScalar(chopper.spotR / 5);
     // the beam lands on whatever is actually UNDER it: when the spot drifts
     // over a building, the pool climbs to that ROOF and the cone stops there —
@@ -1414,14 +1715,20 @@
     // visible light cone hangs from the belly down to the lit surface (cheap: a
     // local downward cylinder; the wide bottom radius reads as a spreading beam).
     const len = Math.max(2, chopper.pos.y - beam.y);
+    // the cone's FOOT must land in the pool it lights: the authored bottom
+    // radius is 5.5, so x/z scale by spotR/5.5 and the beam widens with height.
+    const coneW = chopper.spotR / 5.5;
     chopper.cone.position.set(0, -len / 2 - 0.4, 0);
     chopper.cone.rotation.set(0, 0, 0);
-    chopper.cone.scale.set(1, len, 1);
+    chopper.cone.scale.set(coneW, len, coneW);
     // PAINTED: the chopper relays your position → feeds last-known + lets cops see
     if (CBZ.cityChopperPaints && CBZ.cityChopperPaints() && !P.dead) {
       g.cityLastKnown = { x: P.pos.x, z: P.pos.z, t: CBZ.now };
-      // at 4+ stars the door gunner takes potshots from above
-      if (stars >= 4) { chopper.shootCD -= dt; if (chopper.shootCD <= 0) { chopper.shootCD = 0.9 + rng() * 0.6; chopperFire(); } }
+      // at 4+ stars the door gunner takes potshots from above — and only while
+      // there IS a door gunner aboard (the 4-star third seat, below).
+      if (stars >= 4 && (!heliCrewOn() || crewHasAlive("Door Gunner"))) {
+        chopper.shootCD -= dt; if (chopper.shootCD <= 0) { chopper.shootCD = 0.9 + rng() * 0.6; chopperFire(); }
+      }
     } else if (chopper.shootCD > 0) chopper.shootCD -= dt;
   }
   function chopperFire() {
@@ -1430,10 +1737,17 @@
     // line of fire (the paint gate already checks this, but guard it here too).
     if (!chopperEngage(P)) return;
     const from = { x: chopper.pos.x, y: chopper.pos.y - 0.5, z: chopper.pos.z };
-    if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * 2, y: 1.5, z: P.pos.z + (rng() - 0.5) * 2 }, { muzzleScale: 1.2 });
+    // Air-1 now works from 85-150 m instead of 38, so both the visible spread
+    // and the hit roll scale with the REAL slant range. 0.45 stays the
+    // point-blank figure — nothing the player already knew got harder — and by
+    // 140 m it is ~0.19, which is what a carbine off a moving skid is worth.
+    const rng3 = Math.hypot(chopper.pos.x - P.pos.x, chopper.pos.y - 1.5, chopper.pos.z - P.pos.z);
+    const spread = Math.max(2, rng3 * 0.014);
+    if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * spread, y: 1.5, z: P.pos.z + (rng() - 0.5) * spread }, { muzzleScale: 1.2 });
     if (CBZ.gunVoice) CBZ.gunVoice("carbine", Math.hypot(chopper.pos.x - P.pos.x, chopper.pos.z - P.pos.z));
     else if (CBZ.sfx) CBZ.sfx("report");
-    if (rng() < 0.45 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
+    const hitP = Math.max(0.08, Math.min(0.45, 0.45 * (60 / Math.max(60, rng3))));
+    if (rng() < hitP && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
   }
   CBZ.cityClearChopper = despawnChopper;
 

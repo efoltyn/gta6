@@ -193,7 +193,9 @@
 
   // weapons
   const FIRE_CD     = 0.6;         // seconds between missiles
-  const MISSILE_SPD = 60;          // muzzle ejection speed for the dir hint
+  // NO-FICTION NOTE: a `MISSILE_SPD = 60` used to sit here claiming to be the
+  // "muzzle ejection speed for the dir hint" — it was referenced by NOTHING in
+  // the repo (the real speed lives in city/aircraft.js's missileSpd()).
   const HELI_AMMO   = 38;          // missiles before resupply
   const JET_AMMO    = 24;
   const RESUPPLY_AT_BASE = true;   // landing on the pad/hangar tops you back up
@@ -1029,6 +1031,17 @@
     craft.group.position.copy(craft.pos);
     setCraftRotation(craft, 0, craft.heading, 0);
     if (craft.externalGroup) detachPropCollider(rec);   // the hull you fly can't stay solid on the apron
+    // ---- THE SEAT YOU ARE TAKING HAS SOMEBODY IN IT -----------------------
+    // OWNER BUG (2026-07-27): "instead of throwing the pilot out and sitting in
+    // the seat..." — the crew were never displaced at all. The player was handed
+    // the controls while the captain sat in his chair for the whole flight.
+    // This is the ONE call site on purpose: every route to the controls passes
+    // through here (the door arc's handover, the flag-off instant path, and
+    // cityAirborneStart), so no future path can quietly skip it. The crew leave
+    // ALIVE and panicked — cityVacateFlightDeck is the un-killed twin of
+    // citySpillCabin, and a hijacking is not a death, so nothing is logged to
+    // the killfeed. Idempotent: a second call finds the seats already empty.
+    if (CBZ.cityVacateFlightDeck) { try { CBZ.cityVacateFlightDeck(rec, { byPlayer: true }); } catch (e) {} }
     craft.hot = true;                                          // never keepable: a base bird, not yours
     craft.fromProp = true;                                    // so the keep-gate ignores it (only the Raptor launders)
     enterAircraft(craft);
@@ -1095,6 +1108,24 @@
     return P && P._aircraft ? P._aircraft : null;
   }
   function craftLabel(c) { return (c && c.displayName) || (c && c.kind === "jet" ? "F-22" : "Heli"); }
+
+  // CBZ.heliAudit() census provider (city/aircraft.js owns the audit; every
+  // rotorcraft owner pushes ONE of these). The player's own bird counts as
+  // CREWED — the player IS the crew — so the audit's `uncrewed` figure stays a
+  // count of helicopters flying themselves rather than being poisoned by the
+  // one rotorcraft that is definitionally occupied. The player's envelope is
+  // deliberately NOT taken from heliSpec: that table describes AI air support,
+  // and HELI_TOP/CEILING here are the owner's own hand-tuned feel.
+  CBZ.heliFleet = CBZ.heliFleet || [];
+  CBZ.heliFleet.push(function () {
+    const c = _aircraftFlying();
+    if (!c || c.kind !== "heli" || !c.pos || !c.group || !c.group.parent) return null;
+    const gy = CBZ.floorAt ? (+CBZ.floorAt(c.pos.x, c.pos.z) || 0) : 0;
+    return [{
+      role: "player", x: c.pos.x, y: c.pos.y, z: c.pos.z, agl: c.pos.y - gy,
+      speed: Math.abs(c.speed || 0), orbitR: 0, crew: 1, roofTop: 0, downed: !!c.dead,
+    }];
+  });
 
   function enterAircraft(craft) {
     if (!craft || !craft.group) return false;
@@ -2062,7 +2093,17 @@
         rec.group.userData.hijackable = false;
         rec.group.userData.milKind = null;
         const cabin = rec.group.userData.cabin && rec.group.userData.cabin.passengerCabin;
-        if (cabin) { cabin.state = "destroyed"; cabin.active = false; }
+        if (cabin) {
+          cabin.state = "destroyed"; cabin.active = false;
+          // PASSENGERS SPILL, NOT VANISH: same shared arc as a shot-down
+          // airliner (island_airport.js citySpillCabin — detach at world
+          // pose, then the normal kill path → tumbling killfeed-logged
+          // bodies). byPlayer: the player crashed the plane they were flying.
+          if (CBZ.citySpillCabin) {
+            const gp = (rec.group && rec.group.position) || craft.pos || { x: 0, z: 0 };
+            try { CBZ.citySpillCabin(cabin, gp.x, gp.z, true); } catch (e) {}
+          }
+        }
       }
       charAircraftWreck(rec.group || craft.group);
       // A little final list/roll keeps a dead hull from reading as a pristine
