@@ -106,6 +106,79 @@
   // only ever LOWER h, so the mountains-outside-snow / city-on-mountain
   // doctrines get MORE true. OFF → the old 8 m boolean.
   if (CFG.TERRAIN_FLATTEN_UNDER_BUILT == null) CFG.TERRAIN_FLATTEN_UNDER_BUILT = true;
+  // ---- TERRAIN_BUILT_FROM_LOTS -------------------------------------------
+  // OWNER: "there is this green ground that is different heights in different
+  // places and overlaps with things like the stadium. When I drive on it, or
+  // when a building is on it, they overlap instead of things going on top of
+  // the ground like real physics."
+  //
+  // The gate above was already correct ARITHMETIC and still let that happen,
+  // because being gated was an OPT-IN: a surface only counted if it tagged a
+  // mesh `userData.worldSurface` or set `terrainGrade` on its region record.
+  // The Ironjaw Arena does neither (its bowl stands on a bare CylinderGeometry
+  // island and its region carries no terrainGrade), so `builtGate` returned 1
+  // under a 20-tier stadium and the country climbed straight through the bowl.
+  // `groundMatchAudit().ungated` read 0 the whole time BECAUSE IT ONLY SAMPLES
+  // WHAT DECLARED — the classic audit-measures-its-own-declaration trap.
+  //
+  // ON → the gate ALSO derives its built ground from `city.lots`, the registry
+  // every building generator in this game already writes to (world.js's
+  // mainland grid, towngen.js's towns via `A.lots`), plus CBZ.terrainFlattenUnder
+  // below. Nobody declares anything; a building anywhere flattens the ground it
+  // stands on. Lots whose ground is ALREADY flat are dropped at build time, so
+  // in the shipped world this adds a handful of records, not thousands.
+  // OFF → declaration-only, exactly as before.
+  if (CFG.TERRAIN_BUILT_FROM_LOTS == null) CFG.TERRAIN_BUILT_FROM_LOTS = true;
+
+  /* ==================================================================
+     CBZ.terrainFlattenUnder(rec) — "I AM BUILT GROUND."
+
+     THE LAW (owner): built things sit ON the ground, never inside it —
+     so the ground is flattened under anything built on it, and it is the
+     TERRAIN that gives way, never the slab that gets raised.
+
+     One line, no schema, no registration order to respect, degrade-safe
+     (`CBZ.terrainFlattenUnder && CBZ.terrainFlattenUnder(...)`), and it
+     REPLACES nothing the caller writes — which is exactly why the two
+     older paths (a `worldSurface` mesh tag, a `terrainGrade` region) are
+     kept working untouched. Use it when your footprint is NOT a
+     rectangle-shaped rendered floor: a round apron, a bowl, a pad drawn
+     as a Cylinder/Circle (continent.js deliberately refuses those as
+     carve rects — an AABB around a disc carves four square corners).
+
+       CBZ.terrainFlattenUnder({ cx, cz, r, name })        // circle
+       CBZ.terrainFlattenUnder({ minX, maxX, minZ, maxZ }) // rect
+
+     Push any time BEFORE the continent builds (landmass order 97); this
+     list is created at parse time so load order cannot lose a record. A
+     record pushed later is kept and reported by groundMatchAudit() as
+     `lateDeclarations` — it cannot move a plate that already exists, and
+     silently doing nothing is how the last one of these rotted.
+  ================================================================== */
+  const FLATTEN_DECLS = (CBZ._terrainFlattenDecls = CBZ._terrainFlattenDecls || []);
+  let flattenSealedAt = -1;                      // set to FLATTEN_DECLS.length at build
+  CBZ.terrainFlattenUnder = function (rec) {
+    if (!rec) return null;
+    const out = { name: rec.name || "(built)", pad: +rec.pad || 0 };
+    if (Number.isFinite(rec.r) && Number.isFinite(rec.cx) && Number.isFinite(rec.cz)) {
+      out.circle = true; out.cx = +rec.cx; out.cz = +rec.cz; out.rad = +rec.r + out.pad;
+      if (!(out.rad > 0)) return null;
+    } else if ([rec.minX, rec.maxX, rec.minZ, rec.maxZ].every(Number.isFinite)) {
+      out.circle = false;
+      out.minX = Math.min(+rec.minX, +rec.maxX) - out.pad;
+      out.maxX = Math.max(+rec.minX, +rec.maxX) + out.pad;
+      out.minZ = Math.min(+rec.minZ, +rec.maxZ) - out.pad;
+      out.maxZ = Math.max(+rec.minZ, +rec.maxZ) + out.pad;
+    } else return null;                          // malformed: never poison the gate with NaN
+    // Idempotent: this list lives on CBZ and a world rebuild re-runs every
+    // builder, so an identical footprint must not stack up.
+    const key = out.name + "|" + (out.circle ? out.cx + "," + out.cz + "," + out.rad
+      : out.minX + "," + out.maxX + "," + out.minZ + "," + out.maxZ);
+    for (let i = 0; i < FLATTEN_DECLS.length; i++) if (FLATTEN_DECLS[i]._key === key) return FLATTEN_DECLS[i];
+    out._key = key;
+    FLATTEN_DECLS.push(out);
+    return out;
+  };
   // WORLD_LAYOUT_V2 (declared in world/layout.js, which parses first) — the
   // stage-3 world re-lay. This file is one of its four consumers; the guard
   // below only mirrors the default for a build without layout.js.
@@ -189,7 +262,12 @@
         area: (A.maxX - A.minX) * (A.maxZ - A.minZ) });
     }
     const AN = A && A.annex;
-    if (AN && Number.isFinite(AN.cx) && Number.isFinite(AN.radius)) {
+    // …unless it now registers itself. city/expansion.js finally puts the
+    // Commerce Annex in city.regions (it never had been, which is why this
+    // synthetic push exists at all); pushing it twice would put a zero-gap
+    // pair in the table and pin minPairDistance at 0 forever.
+    const annexIsRegion = raw.some(function (r) { return r && r.biome === "annex"; });
+    if (!annexIsRegion && AN && Number.isFinite(AN.cx) && Number.isFinite(AN.radius)) {
       raw.push({ name: "Commerce Annex", biome: "annex",
         cx: AN.cx, cz: AN.cz, hx: AN.radius, hz: AN.radius,
         minX: AN.cx - AN.radius, maxX: AN.cx + AN.radius,
@@ -656,6 +734,19 @@
         gradedRegs.push({ circle: false, minX: r.minX - p, maxX: r.maxX + p, minZ: r.minZ - p, maxZ: r.maxZ + p });
       }
     }
+    // …and every footprint that declared itself through CBZ.terrainFlattenUnder
+    // (round aprons, bowls, anything whose floor is not a rectangular mesh).
+    // Snapshot ONCE: the plate is baked below, so a record arriving after this
+    // point cannot move it and is reported instead of silently ignored.
+    const declaredFlatten = FLATTEN_DECLS.length;
+    for (let i = 0; i < declaredFlatten; i++) gradedRegs.push(FLATTEN_DECLS[i]);
+    flattenSealedAt = declaredFlatten;
+    // `gradedN` is the live scan length. It stays at the DECLARED count while
+    // the lot-derived pass below asks "is this lot's ground already flat?", so
+    // that answer can never be contaminated by a lot this same pass just added
+    // (which would make the result depend on lot iteration order).
+    let gradedN = gradedRegs.length;
+    let lotsGated = 0, lotsSeen = 0;
     // 1 = untouched country, 0 = graded flat under (and one cell around) a
     // built surface. Allocation-free; the loops are the same ones the old
     // boolean form already walked, now with a Chebyshev pre-reject in front.
@@ -681,7 +772,7 @@
         if (t <= 0) return 0;
         if (t < g) g = t;
       }
-      for (let i = 0; i < gradedRegs.length; i++) {
+      for (let i = 0; i < gradedN; i++) {
         const r = gradedRegs[i];
         let t;
         if (r.circle) {
@@ -696,8 +787,169 @@
         if (t <= 0) return 0;
         if (t < g) g = t;
       }
+      if (dgLive) {
+        const t = derivedGate(x, z);
+        if (t <= 0) return 0;
+        if (t < g) g = t;
+      }
       return g;
     }
+
+    /* ---- BUILT GROUND, DERIVED (TERRAIN_BUILT_FROM_LOTS) ------------------
+       OWNER, after the first pass shipped: "there's STILL green ground
+       overlapping the stadium and many roadways."
+
+       He was right, and the reason is the same one that made `ungated` read 0
+       while a stadium stood in a hill: the gate was fed ONLY by things that
+       opted in. Three registries the whole game already writes to had never
+       been asked where the built world is —
+
+         • city.lots      every building (world.js's mainland grid, and
+                          towngen.js's towns, which push into the arena's
+                          `A.lots`).
+         • city.roads     ~198 axis-aligned segments, each carrying
+                          {x, z, vertical, len, w}: a ready-made rect apiece.
+                          A ROAD IS THE MOST BUILT SURFACE THERE IS.
+         • CBZ.platforms  every authored walkable DECK, with its real top
+                          height. This is what covers the stadium without
+                          hard-coding a stadium: arena_venue.js pushes one
+                          record per deck row, so the bowl publishes its own
+                          extent (as do the causeway decks, bunkers, marina).
+                          Trees and scatter never push platforms, which is
+                          exactly why this is the right registry and
+                          CBZ.colliders is not.
+
+       COST CONTROL, because this is inside a 103k-vertex loop. Everything
+       derived goes into ONE fixed 128 m grid, and a rect is CLIPPED into every
+       cell it spans (never stamped whole into the cell of its centre), so a
+       cell's union can never leave that cell. A query therefore only has to
+       look at the cells within BUILT_REACH — a (2*DG_RAD+1)^2 = 5x5 = 25-entry
+       Uint8 scan, most of it empty, INDEPENDENT of how many roads or platforms
+       exist. That is a bounded ~25 byte-reads per vertex on top of the ~20
+       rect tests already there; it does not scale with the world.
+
+       Every source is pre-filtered by `alreadyFlat`, so a lot on a town pad, a
+       street on the mainland slab and a highway the road-network gate already
+       flattens contribute NOTHING. What survives is precisely the built things
+       standing on raw country — which is the bug.
+    ---------------------------------------------------------------------- */
+    const DG_CELL = 128;
+    const DG_RAD = Math.max(1, Math.ceil(BUILT_REACH / DG_CELL));
+    const dgNX = Math.max(1, Math.ceil(W / DG_CELL) + 1), dgNZ = Math.max(1, Math.ceil(D / DG_CELL) + 1);
+    const dgHas = new Uint8Array(dgNX * dgNZ);
+    const dgBox = new Float32Array(dgNX * dgNZ * 4);
+    let dgLive = false, dgCells = 0;
+    let builtFromLots = 0, builtFromRoads = 0, builtFromVenues = 0;
+    function dgStamp(x0, x1, z0, z1) {
+      if (!(x1 > x0)) { const m = (x0 + x1) * 0.5; x0 = m - 0.5; x1 = m + 0.5; }
+      if (!(z1 > z0)) { const m = (z0 + z1) * 0.5; z0 = m - 0.5; z1 = m + 0.5; }
+      let i0 = Math.floor((x0 - minX) / DG_CELL), i1 = Math.floor((x1 - minX) / DG_CELL);
+      let j0 = Math.floor((z0 - minZ) / DG_CELL), j1 = Math.floor((z1 - minZ) / DG_CELL);
+      if (i1 < 0 || j1 < 0 || i0 >= dgNX || j0 >= dgNZ) return;
+      if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0;
+      if (i1 >= dgNX) i1 = dgNX - 1; if (j1 >= dgNZ) j1 = dgNZ - 1;
+      for (let j = j0; j <= j1; j++) {
+        const cz0 = minZ + j * DG_CELL, cz1 = cz0 + DG_CELL;
+        const a0 = z0 > cz0 ? z0 : cz0, a1 = z1 < cz1 ? z1 : cz1;
+        for (let i = i0; i <= i1; i++) {
+          const cx0 = minX + i * DG_CELL, cx1 = cx0 + DG_CELL;
+          const b0 = x0 > cx0 ? x0 : cx0, b1 = x1 < cx1 ? x1 : cx1;
+          const k = j * dgNX + i, o = k * 4;
+          if (!dgHas[k]) { dgHas[k] = 1; dgCells++; dgBox[o] = b0; dgBox[o + 1] = b1; dgBox[o + 2] = a0; dgBox[o + 3] = a1; }
+          else {
+            if (b0 < dgBox[o]) dgBox[o] = b0;
+            if (b1 > dgBox[o + 1]) dgBox[o + 1] = b1;
+            if (a0 < dgBox[o + 2]) dgBox[o + 2] = a0;
+            if (a1 > dgBox[o + 3]) dgBox[o + 3] = a1;
+          }
+        }
+      }
+    }
+    function derivedGate(x, z) {
+      let ix = Math.floor((x - minX) / DG_CELL), iz = Math.floor((z - minZ) / DG_CELL);
+      let i0 = ix - DG_RAD, i1 = ix + DG_RAD, j0 = iz - DG_RAD, j1 = iz + DG_RAD;
+      if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0;
+      if (i1 >= dgNX) i1 = dgNX - 1; if (j1 >= dgNZ) j1 = dgNZ - 1;
+      let g = 1;
+      for (let j = j0; j <= j1; j++) {
+        const row = j * dgNX;
+        for (let i = i0; i <= i1; i++) {
+          const k = row + i;
+          if (!dgHas[k]) continue;
+          const o = k * 4;
+          const t = builtBandGate(outsideRectDist(x, z, dgBox[o], dgBox[o + 1], dgBox[o + 2], dgBox[o + 3]));
+          if (t <= 0) return 0;
+          if (t < g) g = t;
+        }
+      }
+      return g;
+    }
+    // "Is this point's ground ALREADY flat?" — the declared gate, plus the two
+    // other corridor gates countryHeightAt multiplies in below. Composing them
+    // here is what stops the highway network (kilometres of segments that
+    // highwayNetReliefGate already zeroes) from filling the grid for nothing.
+    function alreadyFlat(x, z) {
+      if (builtGate(x, z) <= 0) return true;                       // dgLive is false here
+      if (frontierDistance(x, z) <= 10) return true;
+      if (CBZ.highwayNetReliefGate && CBZ.highwayNetReliefGate(x, z) <= 0) return true;
+      return false;
+    }
+    if (CFG.TERRAIN_BUILT_FROM_LOTS !== false && CFG.TERRAIN_FLATTEN_UNDER_BUILT !== false) {
+      // --- buildings -----------------------------------------------------
+      const lots = Array.isArray(city.lots) ? city.lots : [];
+      for (let i = 0; i < lots.length; i++) {
+        const L = lots[i];
+        if (!L || !Number.isFinite(L.cx) || !Number.isFinite(L.cz)) continue;
+        lotsSeen++;
+        if (alreadyFlat(L.cx, L.cz)) continue;
+        const hw = Math.max(1, (Number.isFinite(L.w) ? L.w : 0) * 0.5);
+        const hd = Math.max(1, (Number.isFinite(L.d) ? L.d : 0) * 0.5);
+        dgStamp(L.cx - hw, L.cx + hw, L.cz - hd, L.cz + hd);
+        builtFromLots++;
+      }
+      // --- roads ---------------------------------------------------------
+      // Walked in ~64 m steps rather than stamped whole: a 900 m rural link is
+      // usually flat where it crosses a town pad and NOT flat in between, and
+      // stepping is what lets the grid hold only the parts that are actually
+      // owed. `w` is the full deck width; +2.5 m of shoulder each side keeps the
+      // straddling plate triangle at the kerb reading zero, which is the entire
+      // point of the distance gate.
+      const roads = Array.isArray(city.roads) ? city.roads : [];
+      for (let i = 0; i < roads.length; i++) {
+        const r = roads[i];
+        if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.z)) continue;
+        const len = Math.max(0, +r.len || 0);
+        const half = (Math.max(4, +r.w || 8) * 0.5) + 2.5;
+        const steps = Math.max(1, Math.ceil(len / 64));
+        const seg = len / steps;
+        for (let s = 0; s < steps; s++) {
+          const off = -len / 2 + (s + 0.5) * seg;
+          const px = r.vertical ? r.x : r.x + off;
+          const pz = r.vertical ? r.z + off : r.z;
+          if (alreadyFlat(px, pz)) continue;
+          if (r.vertical) dgStamp(px - half, px + half, pz - seg / 2, pz + seg / 2);
+          else dgStamp(px - seg / 2, px + seg / 2, pz - half, pz + half);
+          builtFromRoads++;
+        }
+      }
+      // --- venues / decks ------------------------------------------------
+      // The stadium is not a lot and never will be. It is ~160 platform records
+      // (one per deck row per side) published by arena_venue.js's own build, so
+      // its footprint comes from the venue itself and no coordinate is repeated
+      // here. Same for causeway decks, bunker roofs and the marina.
+      const plats = Array.isArray(CBZ.platforms) ? CBZ.platforms : [];
+      for (let i = 0; i < plats.length; i++) {
+        const p = plats[i];
+        if (!p || ![p.minX, p.maxX, p.minZ, p.maxZ].every(Number.isFinite)) continue;
+        const px = (p.minX + p.maxX) * 0.5, pz = (p.minZ + p.maxZ) * 0.5;
+        if (alreadyFlat(px, pz)) continue;
+        dgStamp(p.minX - 2, p.maxX + 2, p.minZ - 2, p.maxZ + 2);
+        builtFromVenues++;
+      }
+    }
+    lotsGated = builtFromLots;
+    gradedN = gradedRegs.length;
+    dgLive = dgCells > 0;      // the gate now sees the derived grid too
 
     function countryHeightAt(x, z) {
       if (CFG.CONTINENT_RELIEF_V1 === false) return 0;
@@ -1096,6 +1348,20 @@
            i.e. green poking through asphalt. Sampled across each footprint
            AND around its kerb ring, because the kerb is exactly where the
            straddling triangle used to climb through.
+         • sunkStructures — THE ONE THAT CANNOT BE GAMED. `ungated` only
+           ever measured surfaces that DECLARED themselves to the gate, so
+           it read 0 for months while a 20-tier stadium stood in a hill:
+           the arena had never declared, so it was never sampled. This
+           number is sourced from registries NOBODY OPTS INTO — every lot
+           the world built (`city.lots`), every walkable platform record
+           (`CBZ.platforms`) and the annex disc — and counts the ones whose
+           own top surface sits BELOW the country relief drawn under them.
+           A missing declaration therefore SHOWS UP HERE. Structures whose
+           ground is owned by another registered landmass oracle (a lodge on
+           Mount Mercy, a garage on the speedway banking) are excluded by
+           test, not by name: `cityGroundHeightAt` returning MORE than the
+           country field means some other surface, not this plate, is what
+           they stand on.
 
        Pure read; mutates nothing. Pass {step} to change the sweep.
     ================================================================== */
@@ -1159,6 +1425,77 @@
         if (worst > 0.25) { ungated++; offenders.push({ name: b.name, relief: +worst.toFixed(2), at: at }); }
       }
       offenders.sort(function (a, b2) { return b2.relief - a.relief; });
+
+      // --- sunk structures (declaration-free) -----------------------------
+      const TOL = 0.25;
+      let sunk = 0, structs = 0; const sunkList = [];
+      // A point is only "sunk" if the COUNTRY plate is the top surface there.
+      // cityGroundHeightAt is the MAX over every registered landmass oracle,
+      // so `total > country` means the structure stands on somebody else's
+      // ground (snow massif, speedway banking, desert mesa) and this plate is
+      // correctly underneath it.
+      function countryOnTop(x, z) {
+        const country = reliefAt(x, z);
+        if (!(country > 0)) return 0;
+        const total = CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : country;
+        return total > country + 0.05 ? 0 : country;
+      }
+      function checkStruct(name, x, z, top) {
+        if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+        structs++;
+        const h = countryOnTop(x, z);
+        if (h > (top || 0) + TOL) {
+          sunk++;
+          if (sunkList.length < 40) sunkList.push({ name: name, at: { x: Math.round(x), z: Math.round(z) }, ground: +h.toFixed(2), base: +(top || 0).toFixed(2) });
+        }
+      }
+      const lotList = Array.isArray(city.lots) ? city.lots : [];
+      for (let i = 0; i < lotList.length; i++) {
+        const L = lotList[i];
+        if (!L) continue;
+        checkStruct((L.district || "lot") + ":building", L.cx, L.cz, 0);
+      }
+      const AN = city.annex;
+      if (AN && Number.isFinite(AN.cx) && Number.isFinite(AN.radius)) {
+        // the disc's centre and its four cardinal quarter points
+        checkStruct("annex", AN.cx, AN.cz, 0);
+        const q = AN.radius * 0.66;
+        checkStruct("annex", AN.cx + q, AN.cz, 0); checkStruct("annex", AN.cx - q, AN.cz, 0);
+        checkStruct("annex", AN.cx, AN.cz + q, 0); checkStruct("annex", AN.cx, AN.cz - q, 0);
+      }
+      const plats = Array.isArray(CBZ.platforms) ? CBZ.platforms : [];
+      for (let i = 0; i < plats.length; i++) {
+        const p = plats[i];
+        if (!p || !Number.isFinite(p.top)) continue;
+        if (![p.minX, p.maxX, p.minZ, p.maxZ].every(Number.isFinite)) continue;
+        checkStruct("platform", (p.minX + p.maxX) / 2, (p.minZ + p.maxZ) / 2, p.top);
+      }
+      for (let i = 0; i < FLATTEN_DECLS.length; i++) {
+        const r = FLATTEN_DECLS[i];
+        checkStruct("declared:" + r.name, r.circle ? r.cx : (r.minX + r.maxX) / 2,
+          r.circle ? r.cz : (r.minZ + r.maxZ) / 2, 0);
+      }
+      sunkList.sort(function (a, b2) { return (b2.ground - b2.base) - (a.ground - a.base); });
+
+      // --- PLACES the gate still does not cover ----------------------------
+      // Reported, never inferred. A venue that is a REGION rather than a lot
+      // (the arena is the standing example) is only covered because it publishes
+      // platforms; if some future venue publishes neither lots nor decks it
+      // shows up HERE instead of quietly standing in a hill. Links and the
+      // `wilds` underlay are excluded — a causeway crosses country on purpose
+      // and the backcountry IS the country.
+      let ungatedRegions = 0; const regionOffenders = [];
+      for (let i = 0; i < regs.length; i++) {
+        const r = regs[i];
+        if (!r || r.underlay || !r.biome || r.biome === "wilds") continue;
+        if (/causeway|bridge|link/i.test(r.name || "")) continue;
+        const rx = r.kind === "circle" ? r.cx : (r.minX + r.maxX) / 2;
+        const rz = r.kind === "circle" ? r.cz : (r.minZ + r.maxZ) / 2;
+        const h = countryOnTop(rx, rz);
+        if (h > TOL) { ungatedRegions++; regionOffenders.push({ name: r.name || r.biome, relief: +h.toFixed(2) }); }
+      }
+      regionOffenders.sort(function (a, b2) { return b2.relief - a.relief; });
+
       return {
         samples: samples,
         meanErr: +(sum / Math.max(1, samples)).toFixed(4),
@@ -1167,8 +1504,28 @@
         builtSurfaces: built.length,
         ungated: ungated,
         offenders: offenders.slice(0, 8),
+        // the declaration-free ratchet (see the header): may only go DOWN
+        structures: structs,
+        sunkStructures: sunk,
+        sunkWorst: sunkList.slice(0, 8),
+        // HOW THE GATE WAS ACTUALLY FED, broken out by CLASS. `ungated: 0` once
+        // read as "everything is fine" while buildings, roads and the stadium
+        // were simply never in the list — a number lying. These make the
+        // coverage of each class visible instead of inferable.
+        flattenDeclared: flattenSealedAt < 0 ? 0 : flattenSealedAt,
+        lateDeclarations: Math.max(0, FLATTEN_DECLS.length - Math.max(0, flattenSealedAt)),
+        lotsSeen: lotsSeen,
+        builtFromLots: builtFromLots,      // ungated BUILDINGS picked up (city.lots)
+        builtFromRoads: builtFromRoads,    // ungated ROAD sub-spans picked up (city.roads)
+        builtFromVenues: builtFromVenues,  // ungated DECKS picked up (CBZ.platforms)
+        builtCells: dgCells,               // occupied 128 m grid cells — the per-vertex cost driver
+        builtProbePerVertex: (2 * DG_RAD + 1) * (2 * DG_RAD + 1),
+        ungatedRegions: ungatedRegions,    // PLACES with country relief still on top
+        regionOffenders: regionOffenders.slice(0, 8),
+        lotFootprints: lotsGated,
         matched: CFG.TERRAIN_PHYSICS_MATCH !== false,
         flattened: CFG.TERRAIN_FLATTEN_UNDER_BUILT !== false,
+        fromLots: CFG.TERRAIN_BUILT_FROM_LOTS !== false,
         registered: !!reliefRec,
       };
     };

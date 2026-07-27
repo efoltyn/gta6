@@ -63,7 +63,16 @@
     if (proxyArena === A && proxyMesh) return;
     disposeProxy();
     if (!A || !A.root || !THREE.InstancedMesh) return;
-    const seen = new Set(), lots = A.lots || [];
+    // THE COMMERCE ANNEX HAD NO DISTANCE SKYLINE. `A.lots` is the mainland +
+    // every town (towngen pushes into it), but city/expansion.js keeps the
+    // island's ~20 buildings — including the 38- and 32-storey twin towers —
+    // on its OWN `annex.lots` and never merged them in. So past the cull
+    // radius the annex's whole skyline popped out and the island read as a
+    // bare green disc beside downtown while every other settlement in the
+    // world kept its proxy. Same records, same shape, one concat.
+    const seen = new Set();
+    let lots = A.lots || [];
+    if (A.annex && Array.isArray(A.annex.lots) && A.annex.lots.length) lots = lots.concat(A.annex.lots);
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i], b = lot && lot.building;
       if (!b || b.park || !b.group || seen.has(b.group)) continue;

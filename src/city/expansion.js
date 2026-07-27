@@ -23,6 +23,91 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const mat = CBZ.mat;
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+
+  // ---- ANNEX_GROUND_V2 — THE ISLAND WAS A CHECKERBOARD --------------------
+  // OWNER: "on the island the green checkered ground is retardedly fake."
+  // MEASURED CAUSE, not a guess: the floor was
+  //     CBZ.checkerTex(COL.GRASS_A, COL.GRASS_B, 2), repeat.set(28, 28)
+  // and checkerTex (world/materials.js) bakes a 256 px canvas holding a LITERAL
+  // 2x2 CHESSBOARD of two flat greens (#57b257 / #4aa14a) with
+  // `magFilter = NearestFilter` — hard edges by construction, no filtering.
+  // Tiled 28x across a 240 m disc that is one tile every 8.6 m and one
+  // razor-edged green square every 4.3 m: a 56x56 chessboard you can count
+  // from the air. No amount of repeat tuning fixes a texture that IS a chequer.
+  //
+  // ON → the disc becomes a real vertex-coloured land-cover surface, using the
+  // METHOD city/continent.js already proved in CONTINENT_LANDCOVER_V2 (whose
+  // own note says the hashed 22/90 u colour CELLS "dissolved into orange/green
+  // confetti from any altitude"): three SMOOTH multi-scale fields sampled in
+  // WORLD space, interpolated between cells instead of snapped, lerped through
+  // a turf palette, plus a low-contrast seamless grain map for near detail and
+  // a sand blend into the beach ring so the island edge stops being a hard
+  // colour join. Still ONE draw call; the geometry cost is a 129x27 ring grid.
+  // OFF → the exact old chequer.
+  if (CFG.ANNEX_GROUND_V2 == null) CFG.ANNEX_GROUND_V2 = true;
+  // ---- ANNEX_STREETS_V2 — "and road looks awful" --------------------------
+  // MEASURED CAUSE: the island streets were ~40 separate untextured Lambert
+  // planes (flat #33363d, no map at all) plus 25 SEPARATE junction squares in a
+  // DIFFERENT tone (0x2e3138) sitting 1 cm proud of them — and those squares
+  // existed only to paper over the fact that every crossing laid two COPLANAR
+  // road planes at exactly y=0.05, which z-fights. The bridge deck in this same
+  // file already got a baked tarmac grain (bakeTarmac) and the island streets
+  // never did, so the island read as painted cardboard beside its own bridge.
+  // ON → one merged, world-UV'd, tarmac-textured surface for the whole island
+  // street network + one merged concrete shoulder + one merged dash mesh (3
+  // draws, was ~105), the two axes separated by 2 mm so nothing is coplanar and
+  // the mismatched junction patches are gone. OFF → the old planes.
+  if (CFG.ANNEX_STREETS_V2 == null) CFG.ANNEX_STREETS_V2 = true;
+
+  // Deterministic smooth value noise (city/continent.js's noise2, verbatim in
+  // shape): hash01 corners, smoothstep interpolation. NEVER Math.random and
+  // never the shared rng() stream — this is a build/generation path.
+  function sm01(t) { t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
+  function gnoise(x, z, cell, salt) {
+    if (!CBZ.hash01) return 0.5;
+    const gx = x / cell, gz = z / cell;
+    const x0 = Math.floor(gx), z0 = Math.floor(gz);
+    const fx = sm01(gx - x0), fz = sm01(gz - z0);
+    const h00 = CBZ.hash01(x0 * cell, z0 * cell, salt);
+    const h10 = CBZ.hash01((x0 + 1) * cell, z0 * cell, salt);
+    const h01 = CBZ.hash01(x0 * cell, (z0 + 1) * cell, salt);
+    const h11 = CBZ.hash01((x0 + 1) * cell, (z0 + 1) * cell, salt);
+    const a = h00 + (h10 - h00) * fx, b = h01 + (h11 - h01) * fx;
+    return a + (b - a) * fz;
+  }
+
+  // Seamless low-contrast surface grain, multiplied over the vertex colours so
+  // the turf keeps detail underfoot without a visible tile (every blob is drawn
+  // nine times, wrapped, so the 256 px tile edge matches itself). Build-time
+  // canvas with a fixed-literal LCG — deterministic, no world position, no
+  // Math.random (same idiom as bakeTarmac below).
+  function bakeGrain(seed, blobs, specks, darkA, liteA) {
+    let cv = null;
+    try { cv = document.createElement("canvas"); } catch (e) { return null; }
+    if (!cv || !cv.getContext) return null;
+    const S = 256; cv.width = S; cv.height = S;
+    const g = cv.getContext("2d"); if (!g) return null;
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, S, S);
+    let s = (seed | 0) & 0x7fffffff || 0x2f6e2b1;
+    const rnd = function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    for (let i = 0; i < blobs; i++) {
+      const bx = rnd() * S, by = rnd() * S, r = 2.5 + rnd() * 11;
+      g.fillStyle = rnd() < 0.55 ? "rgba(24,30,18," + darkA + ")" : "rgba(255,255,246," + liteA + ")";
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+        g.beginPath(); g.arc(bx + ox * S, by + oy * S, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+    for (let i = 0; i < specks; i++) {                       // blade-scale detail
+      const px = (rnd() * S) | 0, py = (rnd() * S) | 0;
+      g.fillStyle = rnd() < 0.5 ? "rgba(20,26,16,0.075)" : "rgba(255,255,240,0.06)";
+      g.fillRect(px, py, 1, 1 + ((rnd() * 2) | 0));
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    return t;
+  }
 
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
   // — one world-seed knob instead of a per-file magic literal. rng() is
@@ -125,13 +210,93 @@
     // water, so no local ocean geometry is created here.
     // Sand is an annulus, not a larger full disc hidden under the grass. The
     // old pair overlapped across the whole island and depth-flickered from air.
-    const beach = new THREE.Mesh(new THREE.RingGeometry(R, R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
-    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, 0, cz); beach.receiveShadow = true;
+    // ---- THE ISLAND SURFACE (ANNEX_GROUND_V2) ---------------------------
+    // Both discs are RingGeometry with REAL radial subdivision, because a
+    // CircleGeometry is a triangle FAN: 1 centre vertex + a rim, i.e. nowhere
+    // to put land cover. The ring grid (129 x 27 on the turf) gives ~4.5 m
+    // radial / ~5.9 m circumferential vertex spacing, which is finer than any
+    // feature in the fields below, so the colour reads as continuous ground
+    // rather than as cells. Still one draw call each.
+    const V2G = CFG.ANNEX_GROUND_V2 !== false;
+    // turf palette — the continent's own family (city/continent.js cGrass /
+    // cScrub / cDry / cDirt), so the island stops reading as a different
+    // planet's grass from the country across the water.
+    const C_LUSH = new THREE.Color(0x4c7842), C_TURF = new THREE.Color(0x5b8a48);
+    const C_DRY = new THREE.Color(0x86904f), C_SCRUB = new THREE.Color(0x456a3f);
+    const C_DIRT = new THREE.Color(0x6f6244), C_SAND = new THREE.Color(0xdcc794);
+    const C_WETSAND = new THREE.Color(0xb49f74);
+
+    let beach;
+    if (V2G) {
+      const bgeo = new THREE.RingGeometry(R, R + 14, 128, 4);
+      bgeo.rotateX(-Math.PI / 2);
+      const bpos = bgeo.attributes.position, bcol = new Float32Array(bpos.count * 3);
+      const bc = new THREE.Color();
+      for (let i = 0; i < bpos.count; i++) {
+        const lx = bpos.getX(i), lz = bpos.getZ(i);
+        const wx = lx + cx, wz = lz + cz;
+        // 0 at the grass edge, 1 at the water — sand darkens as it wets
+        const t = Math.min(1, Math.max(0, (Math.hypot(lx, lz) - R) / 14));
+        bc.copy(C_SAND).lerp(C_WETSAND, sm01(t * 1.18));
+        // drift + wrack line so the annulus is not one flat swatch
+        const dr = gnoise(wx, wz, 34, 0x51a1) - 0.5;
+        bc.offsetHSL(0, 0, dr * 0.055);
+        bc.lerp(C_DIRT, Math.max(0, gnoise(wx, wz, 11, 0x51a2) - 0.72) * 0.5);
+        bcol[i * 3] = bc.r; bcol[i * 3 + 1] = bc.g; bcol[i * 3 + 2] = bc.b;
+      }
+      bgeo.setAttribute("color", new THREE.BufferAttribute(bcol, 3));
+      const sandGrain = bakeGrain(0x7ab31d, 520, 1500, "0.05", "0.045");
+      if (sandGrain) sandGrain.repeat.set(30, 30);
+      beach = new THREE.Mesh(bgeo, new THREE.MeshLambertMaterial({ vertexColors: true, map: sandGrain || null }));
+      beach.position.set(cx, 0, cz);
+    } else {
+      beach = new THREE.Mesh(new THREE.RingGeometry(R, R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
+      beach.rotation.x = -Math.PI / 2; beach.position.set(cx, 0, cz);
+    }
+    beach.receiveShadow = true;
     beach.userData.terrain = true; beach.userData.worldSurface = true; beach.name = "annex-beach-surface";
     root.add(beach);
-    const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
-    const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64), new THREE.MeshLambertMaterial({ map: grassTex }));
-    island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz); island.receiveShadow = true;
+
+    let island;
+    if (V2G) {
+      const igeo = new THREE.RingGeometry(0.02, R, 128, 26);
+      igeo.rotateX(-Math.PI / 2);
+      const ipos = igeo.attributes.position, icol = new Float32Array(ipos.count * 3);
+      const ic = new THREE.Color();
+      for (let i = 0; i < ipos.count; i++) {
+        const lx = ipos.getX(i), lz = ipos.getZ(i);
+        const wx = lx + cx, wz = lz + cz;
+        // THREE SMOOTH FIELDS, no cell hash: a 74 m land-use mosaic (mown park
+        // vs rougher scrub), a 26 m dryness variation and a low-contrast 9 m
+        // break. Every one is interpolated between its lattice corners, which
+        // is the whole difference between land cover and a chequer.
+        const use = gnoise(wx + 310, wz - 140, 74, 0x51b0);
+        const veg = gnoise(wx - 90, wz + 260, 26, 0x51b1);
+        const fine = gnoise(wx + 40, wz + 40, 9, 0x51b2);
+        ic.copy(C_TURF).lerp(C_SCRUB, sm01((use - 0.36) / 0.34));
+        ic.lerp(C_LUSH, sm01((0.44 - use) / 0.30) * 0.75);
+        ic.lerp(C_DRY, sm01((veg - 0.62) / 0.30) * 0.72);
+        ic.lerp(C_DIRT, sm01((fine - 0.78) / 0.16) * 0.30);   // worn patches
+        // island-wide hue drift so 240 m of turf is not one repeated swatch
+        const drift = gnoise(wx, wz, 155, 0x51b3) - 0.5;
+        ic.offsetHSL(0, drift * 0.05, drift * 0.045);
+        // …and the last few metres blend into the beach, so the grass/sand join
+        // is a shoreline instead of a hard circle.
+        const rim = Math.min(1, Math.max(0, (Math.hypot(lx, lz) - (R - 9)) / 9));
+        if (rim > 0) ic.lerp(C_SAND, sm01(rim) * 0.9);
+        icol[i * 3] = ic.r; icol[i * 3 + 1] = ic.g; icol[i * 3 + 2] = ic.b;
+      }
+      igeo.setAttribute("color", new THREE.BufferAttribute(icol, 3));
+      const turfGrain = bakeGrain(0x51ee2d, 900, 2600, "0.06", "0.045");
+      if (turfGrain) turfGrain.repeat.set(46, 46);   // ~5 m per tile, invisible at this contrast
+      island = new THREE.Mesh(igeo, new THREE.MeshLambertMaterial({ vertexColors: true, map: turfGrain || null }));
+      island.position.set(cx, 0, cz);
+    } else {
+      const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
+      island = new THREE.Mesh(new THREE.CircleGeometry(R, 64), new THREE.MeshLambertMaterial({ map: grassTex }));
+      island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz);
+    }
+    island.receiveShadow = true;
     island.userData.terrain = true; island.userData.worldSurface = true; island.name = "annex-island-surface";
     root.add(island);
 
@@ -426,9 +591,50 @@
     // sharing pattern as the flat Lambert it replaces), kept damp-looking by
     // materials.js as CBZ.weather.intensity rises. Falls back to the plain
     // Lambert if materials.js hasn't loaded yet.
+    // ANNEX_STREETS_V2: the island streets get the SAME baked tarmac grain the
+    // bridge deck in this very file already had (bakeTarmac), on world-scaled
+    // UVs so one shared material tiles at a constant metres-per-repeat across
+    // segments of every length — the discipline city/world.js's quadField uses
+    // downtown. The old path handed roadMat NO map at all, which is why the
+    // island read as flat painted cardboard next to its own textured bridge.
+    const V2S = CFG.ANNEX_STREETS_V2 !== false;
+    const streetTex = V2S ? bakeTarmac("#33363d") : null;
+    const kerbTex = V2S ? bakeTarmac("#8d939c") : null;
+    if (streetTex) streetTex.repeat.set(1, 1);       // UVs already carry the world scale
+    if (kerbTex) kerbTex.repeat.set(1, 1);
     const roadMat = CBZ.roadMat
-      ? CBZ.roadMat({ color: 0x33363d })
-      : new THREE.MeshLambertMaterial({ color: 0x33363d });
+      ? CBZ.roadMat(streetTex ? { color: 0xffffff, map: streetTex, detailRepeat: 1 } : { color: 0x33363d })
+      : new THREE.MeshLambertMaterial(streetTex ? { map: streetTex } : { color: 0x33363d });
+    const kerbMat = CBZ.roadMat
+      ? CBZ.roadMat(kerbTex ? { color: 0xffffff, map: kerbTex, detailRepeat: 1 } : { color: 0x8d939c })
+      : new THREE.MeshLambertMaterial(kerbTex ? { map: kerbTex } : { color: 0x8d939c });
+    // ONE merged surface for the whole island network (was ~40 planes + 25
+    // junction squares). Quads are pushed here and built into three meshes
+    // after the grid is laid — see the note at the build site.
+    const SURF_UV = 6;                       // metres per texture repeat
+    const rdP = [], rdN = [], rdU = [];      // asphalt
+    const kbP = [], kbN = [], kbU = [];      // concrete shoulder
+    const dashAll = [];                      // every centre dash, one mesh
+    function surfQuad(P, N, U, x0, x1, z0, z1, y) {
+      const uw = (x1 - x0) / SURF_UV, uh = (z1 - z0) / SURF_UV;
+      P.push(x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0);
+      for (let i = 0; i < 6; i++) N.push(0, 1, 0);
+      U.push(0, uh, 0, 0, uw, 0, 0, uh, uw, 0, uw, uh);
+    }
+    function surfMesh(P, N, U, material, name) {
+      if (!P.length) return null;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(N), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(U), 2));
+      g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, material);
+      m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+      m.name = name;
+      m.userData.islandSurface = true;   // non-empty userData: batch.js spares it
+      root.add(m);
+      return m;
+    }
     // road-paint decal material: polygonOffset (not y-lift) does the depth
     // separation, so the dashes read as paint on the asphalt (shared by every
     // merged per-segment dash mesh below).
@@ -469,15 +675,35 @@
       for (const [a, b] of segs) {
         const mid = (a + b) / 2, len = b - a;
         const x = vertical ? fixed : cx + mid, z = vertical ? cz + mid : fixed;
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
-        m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.receiveShadow = true; root.add(m);
-        // centre dashes: ONE merged mesh per road segment (was one plane per
-        // dash — the batch pass scattered those into per-tile buckets that
-        // farcull hid out of sync with this live road plane, the same floating-
-        // line bug the bridge had). Merged per SEGMENT, the dash mesh's cull
-        // sphere matches its own road plane's, so they always hide together.
+        if (V2S) {
+          // THE TWO AXES SIT 2 mm APART. Every crossing used to lay two road
+          // planes at exactly y=0.05 — coplanar, so they z-fight — and the
+          // 25 junction squares existed only to hide that, in a DIFFERENT tone
+          // (0x2e3138 vs 0x33363d) one centimetre proud. Both problems die
+          // here: separate the axes and the junction needs no patch at all.
+          const rY = vertical ? 0.050 : 0.052, kY = vertical ? 0.042 : 0.044;
+          const hw = ROADW / 2, KERB = 1.2;      // shoulder clears the closest possible building by 0.2 m
+          if (vertical) {
+            surfQuad(kbP, kbN, kbU, x - hw - KERB, x - hw, z - len / 2, z + len / 2, kY);
+            surfQuad(kbP, kbN, kbU, x + hw, x + hw + KERB, z - len / 2, z + len / 2, kY);
+            surfQuad(rdP, rdN, rdU, x - hw, x + hw, z - len / 2, z + len / 2, rY);
+          } else {
+            surfQuad(kbP, kbN, kbU, x - len / 2, x + len / 2, z - hw - KERB, z - hw, kY);
+            surfQuad(kbP, kbN, kbU, x - len / 2, x + len / 2, z + hw, z + hw + KERB, kY);
+            surfQuad(rdP, rdN, rdU, x - len / 2, x + len / 2, z - hw, z + hw, rY);
+          }
+        } else {
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
+          m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.receiveShadow = true; root.add(m);
+        }
+        // Centre dashes accumulate into ONE island-wide mesh. They used to be
+        // merged per SEGMENT so each dash mesh's cull sphere matched its own
+        // road plane's (out-of-sync culling is what made the bridge's yellow
+        // line float over open water). The road is now ONE mesh, so the paint
+        // has to be one mesh too — same rule, followed to its conclusion.
         const dashes = Math.max(1, Math.floor(len / 6));
-        const dashPos = [], dashY = 0.065;   // paint-thin over the 0.05 road; polygonOffset does the rest
+        const dashPos = V2S ? dashAll : [];
+        const dashY = 0.065;   // paint-thin over the 0.05 road; polygonOffset does the rest
         for (let i = 0; i < dashes; i++) {
           const tt = a + (i + 0.5) * (len / dashes);
           const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
@@ -486,12 +712,12 @@
             lx - hx, dashY, lz - hz, lx - hx, dashY, lz + hz, lx + hx, dashY, lz + hz,
             lx - hx, dashY, lz - hz, lx + hx, dashY, lz + hz, lx + hx, dashY, lz - hz);
         }
-        if (dashPos.length) {
+        if (!V2S && dashPos.length) {
           const dg = new THREE.BufferGeometry();
           dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashPos), 3));
           const dmesh = new THREE.Mesh(dg, lineMat);
           dmesh.matrixAutoUpdate = false; dmesh.renderOrder = 1;
-          dmesh.userData.roadPaint = true;   // batch-exempt: keeps the decal material, culls with its segment
+          dmesh.userData.roadPaint = true;
           root.add(dmesh);
         }
         const seg = { x, z, len, vertical, district: "island", w: ROADW, lanesPerDir: 1, laneW: 3.0 };
@@ -505,10 +731,32 @@
       layRoadLine(cz + k * GRID, false);
     }
 
+    // THE THREE ISLAND SURFACE MESHES. Asphalt + concrete shoulder + paint, for
+    // the whole network. Built here (after every line is laid) rather than per
+    // segment, which is what collapses ~105 draw calls into 3.
+    if (V2S) {
+      surfMesh(kbP, kbN, kbU, kerbMat, "annex-street-shoulder");
+      surfMesh(rdP, rdN, rdU, roadMat, "annex-street-surface");
+      if (dashAll.length) {
+        const dg = new THREE.BufferGeometry();
+        dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashAll), 3));
+        dg.computeBoundingSphere();
+        const dmesh = new THREE.Mesh(dg, lineMat);
+        dmesh.matrixAutoUpdate = false; dmesh.updateMatrix(); dmesh.renderOrder = 1;
+        dmesh.userData.roadPaint = true;   // batch-exempt: keeps the decal material
+        root.add(dmesh);
+      }
+    }
+
     // Traffic lights and the radar use the same intersection records as downtown.
+    // DELETED with ANNEX_STREETS_V2: the per-junction `plane(...0x2e3138, 0.06)`
+    // patch. It was a different asphalt tone from the road it sat on, one
+    // centimetre proud of it, and it only existed to cover the coplanar z-fight
+    // that the 2 mm axis separation above now makes impossible. The RECORD stays
+    // — that is what traffic lights and the radar read.
     for (const x of islandXLines) for (const z of islandZLines) {
       if (Math.hypot(x - cx, z - cz) >= R - 8 || blocked(x, z)) continue;
-      plane(x, z, ROADW, ROADW, 0x2e3138, 0.06);
+      if (!V2S) plane(x, z, ROADW, ROADW, 0x2e3138, 0.06);
       city.intersections.push({ x, z, i: -1, j: -1, phase: 0, t: rng() * 6, ns: true, light: null, district: "island" });
     }
     city.allXLines = city.xLines.concat(islandXLines);
@@ -635,6 +883,32 @@
       center: { x: cx, z: cz },
     };
     city.annex = annex;
+
+    // ---- THE ANNEX IS A PLACE, AND NOTHING IN THE WORLD KNEW IT -----------
+    // The commerce island has existed since the game had two landmasses and it
+    // has NEVER been in `city.regions`. Everything that asks "what places are
+    // there" reads that list: roadrules.js's clearance law ("roads connect
+    // places, they do not overlap them"), continent.js's inSolidRegion (a POI
+    // is never carved into water) and its dressing skip, the full map's
+    // labels, and worldLayoutAudit — which had to SYNTHESISE the annex by hand
+    // precisely because it is missing. So a 240 m city island was invisible to
+    // every no-build and clearance rule in the game, and anything routed past
+    // it was routed straight THROUGH it. One registration ends that; the disc
+    // is its real footprint, and the sand ring is the pad.
+    if (CBZ.registerCityRegion && !(city.regions || []).some(function (r) { return r && r.biome === "annex"; })) {
+      CBZ.registerCityRegion(city, {
+        name: "Commerce Annex", subtitle: "East Island District", biome: "annex",
+        kind: "circle", cx: cx, cz: cz, r: R, pad: 14,
+      });
+    }
+    // BUILT GROUND IS FLAT (city/continent.js). continent.js carries a
+    // hard-coded `city.annex` special case for exactly this, but it stops at
+    // radius + 2 and so leaves the outer sand ring ungated. Declaring the real
+    // extent through the shared registry covers the beach too, and it is the
+    // path any future island should use instead of another special case.
+    if (CBZ.terrainFlattenUnder) {
+      CBZ.terrainFlattenUnder({ name: "Commerce Annex", cx: cx, cz: cz, r: R + 14, pad: 2 });
+    }
     return annex;
   };
 })();

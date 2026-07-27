@@ -33,6 +33,16 @@
     } else {
       x = road.x + along; z = road.z + lane; fx = sign; fz = 0; heading = sign > 0 ? Math.PI / 2 : -Math.PI / 2;
     }
+    // NOT ON GROUND SOMEBODY HAS CLOSED. The owner found a stunt ramp sitting
+    // on the airport apron beside a parked airliner. The guard above only ever
+    // tested `district === "airport"` — a STRING — and city/airside.js publishes
+    // the apron service lanes as `district: "industrial"`, so they sailed
+    // straight through it. Matching on a district name was always going to
+    // break the first time somebody added a road; the keep-out list is the
+    // actual answer and roadrules.js now exposes it. Tested at the ramp's REAL
+    // position, not the road's centre, because a long road can start outside a
+    // zone and end well inside it.
+    if (CBZ.roadPointOpen && !CBZ.roadPointOpen(x, z)) { refused++; return null; }
     const angle = THREE.MathUtils.degToRad(11.5 + ((h >>> 22) % 4));
     const mat = new THREE.MeshLambertMaterial({ color: (h & 2) ? 0x72523a : 0x626a70, roughness: 0.95 });
     const deck = new THREE.Mesh(new THREE.BoxGeometry(width, 0.32, len), mat);
@@ -50,9 +60,12 @@
       const backZ = z + fz * len * 0.38 + (!road.vertical ? side * width * 0.38 : 0);
       post.position.set(backX, Math.max(0.25, rise * 0.31), backZ); root.add(post);
     }
-    ramps.push({ x, z, fx, fz, width, len, rise, id: index, deck });
+    const rec = { x, z, fx, fz, width, len, rise, id: index, deck };
+    ramps.push(rec);
+    return rec;                 // build() counts only ramps that were actually placed
   }
 
+  let refused = 0;   // ramps rejected for landing on closed ground (audit)
   function build() {
     const city = CBZ.city, arena = city && city.arena;
     const root = arena && arena.root;
@@ -63,9 +76,14 @@
     for (let i = 0; i < roads.length && made < 18; i++) {
       const r = roads[i];
       if (!r || r.len < 72 || r.district === "bridge" || r.district === "airport") continue;
+      // ...and never on a segment the traffic-access law has CLOSED (the
+      // airfield, the military perimeter, a bunker shell, or a lane a builder
+      // reserved for its own service vehicles). A ramp you cannot legally
+      // drive to is scenery at best and, on a live apron, nonsense.
+      if (CBZ.roadOpen && !CBZ.roadOpen(r)) continue;
       const h = hash(i + 73);
       if ((h % 5) !== 0 && made < 8) continue;
-      makeRamp(root, r, i + 1); made++;
+      if (makeRamp(root, r, i + 1)) made++;
     }
   }
 
@@ -95,4 +113,11 @@
     const car = CBZ.player && CBZ.player._vehicle;
     if (car && car._lastStuntRampT > 0) car._lastStuntRampT = Math.max(0, car._lastStuntRampT - dt);
   });
+  // Ratchet: `refusedAirside` is the count of ramps that tried to land on
+  // ground somebody had closed. It is evidence, not a failure — a nonzero
+  // number means the guard is doing its job. `ramps` going to zero would mean
+  // the guard is too aggressive and every jump in the game vanished.
+  CBZ.cityStuntAudit = function () {
+    return { ramps: ramps.length, refusedAirside: refused };
+  };
 })();

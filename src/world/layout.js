@@ -148,6 +148,28 @@
     //     dz -1500 parks Mount Mercy ~2.06 km of open country north of the
     //     speedway (was 1.36 km) and drags the whole Greater Mercy range,
     //     its backdrop ranges and the terrain FLAT north with it.
+    //     MEASURED AND NOT FIXED (2026-07-27) — the Mercy Causeway lane
+    //     RUNS THROUGH THE COMMERCE ANNEX. biome_snow.js authors the deck at
+    //     x 463..477 (snow berms out to 455.7..490.3) from the snow shore
+    //     (z = -2620) south to CAUSEWAY_MAXZ = -552, the speedway hand-off.
+    //     The annex is a 120 m disc at (city.maxX + 215, city.center.z) =
+    //     (380, -700) with a 14 m sand ring, i.e. x 246..514, z -834..-566.
+    //     The lane is therefore inside the island's x-span and its z-span
+    //     covers the island whole: ~158 m of 24 m concrete deck + white berms
+    //     crosses the island's east side, over its street grid, at y 0..0.6
+    //     against island ground at y 0 and island asphalt at y 0.05.
+    //     It is NOT a stage-3 regression — it has been true since the lane
+    //     was first derived from the speedway — and the annex cannot dodge it:
+    //     west of the lane it lands on the mainland's harbour bay ring
+    //     (x 193..260) and east of it on the Ironjaw Arena (x 520..760).
+    //     The CORRIDOR has to move or terminate, not the island. It also
+    //     escapes roadrules.js's clearance law twice over: the deck is
+    //     GEOMETRY (only `city.roads` records are clamped) and the name
+    //     "Mercy Causeway" matches the CONNECTOR exemption.
+    //     city/expansion.js now registers the annex in `city.regions` (it
+    //     never had been — which is why every clearance and spacing rule in
+    //     the game was blind to a 240 m city island), so the audit can at
+    //     last SEE the clash.
     snow:     { dx: 0,     dz: -1500 },
     // --- RING 2 NW. forest<->military strait 120u -> 330u; the Redhollow
     //     causeway (forest MAXZ -> military MINZ) stretches to match.

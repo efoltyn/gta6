@@ -506,6 +506,18 @@ CBZ.arenaVenue = {
     disc.receiveShadow = true;
     disc.userData.arenaDeck = true;      // non-empty userData: core/batch.js spares it
     V.add(disc);
+    // BUILT GROUND IS FLAT (city/continent.js). This apron is the venue's own
+    // floor and it is a DISC — which is precisely why the arena had never been
+    // gated: continent.js collects rectangular `worldSurface` meshes (an AABB
+    // around a round pad would carve four square corners out of the country) and
+    // the Ironjaw region record carries no `terrainGrade`. So the backcountry
+    // kept full relief under a 20-tier bowl authored at PY=1.1 and climbed
+    // straight through the stands — the owner's "green ground … overlaps with
+    // things like the stadium". One line, degrade-safe, and the flat band is
+    // widened one plate cell by the gate itself.
+    if (CBZ.terrainFlattenUnder) {
+      CBZ.terrainFlattenUnder({ name: "Ironjaw Arena deck", cx: CX, cz: CZ, r: DECK_R + 3, pad: 4 });
+    }
     (function () {
       var bands = [[30, 107], [60, 94], [82, 75], [98, 53], [107, 30]];
       var prev = 0;
