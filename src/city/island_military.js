@@ -241,60 +241,189 @@
     const g = new THREE.Group();
     const cy = 1.15;                                        // body centreline (on gear)
     const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    // fuselage tube + faceted forebody + afterbody. A radar radome resolves to
-    // a continuous point, not the old long cylinder with a blunt round cap.
-    cyl(g, 0, cy, 0.2, 0.5, 0.5, 8.6, M.jetGrey, 14).rotation.x = Math.PI / 2;
-    tbox(g, 0, cy, 4.35, 0.92, 0.78, 2.7, { nz: 0.18, tz: 0.98, top: 0.72, bot: 0.66, segD: 6 }, cm(M.jetGrey));
-    const radome = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.95, 10), cm(M.jetGreyD));
-    radome.rotation.x = -Math.PI / 2; radome.position.set(0, cy - 0.01, 6.15); radome.castShadow = true; g.add(radome);
-    cyl(g, 0, cy, -4.6, 0.42, 0.5, 2.0, M.jetGreyD, 14).rotation.x = Math.PI / 2;  // afterbody
-    mcyl(g, 0, cy, -5.85, 0.3, 0.38, 0.6, GUN, 12).rotation.x = Math.PI / 2;       // nozzle
-    const plume = CBZ.createRocketPlume({ name: "fighter-afterburner", lightRange: 13 });
-    plume.position.set(0, cy, -6.12); g.add(plume); CBZ.setRocketPlume(plume, 0, 0);
-    g.userData.plume = [plume]; g.userData.plumeMat = plume.userData.outerMaterial;
-    // glass canopy (tapers to the windscreen) + spine fairing flowing aft
-    tbox(g, 0, cy + 0.5, 1.7, 0.72, 0.5, 2.2, { nz: 0.45, tz: 0.85, top: 0.55 }, GLASS);
-    tbox(g, 0, cy + 0.38, -1.9, 0.55, 0.45, 4.6, { tz: 0.6 }, cm(M.jetGreyD));
-    // intake trunks flanking the fuselage, dark mouths up front
+    const RIM = vmat("rim", 0xb9bdc4), TRIM = vmat("interior", 0x0d0e10);
+    const SKIN = cm(M.jetGrey), SKIND = cm(M.jetGreyD), STORE = cm(0xd4d9df);
+
+    // ---- LOFT ---------------------------------------------------------------
+    // Skin a chain of cross-sections (each a ring of [x,y] in its own section
+    // plane) laid out along Z, NOSE FIRST. Rings wind CCW seen from +Z so every
+    // quad faces outward, and the result is de-indexed before computing normals
+    // so each facet shades FLAT. That flat shading is the whole point: it is what
+    // makes a CHINE read as a knife edge instead of a soft bulge, and it is why
+    // this jet no longer needs a cone stuck on the front. Pure function of its
+    // arguments (no rng, no external state) → determinism-safe.
+    function loft(rings, mat) {
+      const n = rings[0].p.length, m = rings.length, pos = [], idx = [];
+      for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) pos.push(rings[i].p[j][0], rings[i].p[j][1], rings[i].z);
+      for (let i = 0; i < m - 1; i++) for (let j = 0; j < n; j++) {
+        const a = i * n + j, b = i * n + (j + 1) % n;
+        idx.push(a, a + n, b, b, a + n, b + n);
+      }
+      for (let e = 0; e < 2; e++) {                          // end caps: fan about the ring centroid
+        const r = rings[e ? m - 1 : 0], base = e ? (m - 1) * n : 0;
+        let sx = 0, sy = 0;
+        for (let j = 0; j < n; j++) { sx += r.p[j][0]; sy += r.p[j][1]; }
+        const c = pos.length / 3;
+        pos.push(sx / n, sy / n, r.z);
+        for (let j = 0; j < n; j++) {
+          const u = base + j, v = base + (j + 1) % n;
+          if (e) idx.push(c, v, u); else idx.push(c, u, v);  // tail cap faces -Z
+        }
+      }
+      const src = new THREE.BufferGeometry();
+      src.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      src.setIndex(idx);
+      const geo = src.toNonIndexed();
+      geo.computeVertexNormals();
+      // core/batch.js concatenates position/normal/uv when it merges a bucket —
+      // hand it a real (zeroed) uv so this geometry is attribute-compatible.
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
+      return mesh;
+    }
+
+    // ---- FUSELAGE — CHINED, BLENDED FOREBODY --------------------------------
+    // ONE lofted skin from radome to boat-tail. Every station is a HEXAGON: a
+    // flat upper deck (tw), a flat keel (bw) and a sharp lateral CHINE (hw)
+    // where the two meet. Forward, hw is ~2.4x the deck half-width, so the
+    // forebody is a knife-edged wedge — an F-22 forebody, not a cone — and the
+    // chine sits BELOW the centreline (chy<0) exactly where a real one does.
+    // Aft, hw/tw converge so the chine dissolves and the body squares up into
+    // the nozzle pack. dy droops the whole radome, so the nose rakes down.
+    //             z      hw     top    bot    tw     bw     chy     dy
+    const FUS = [
+      [  6.30, 0.035, 0.040, 0.040, 0.018, 0.018,  0.000, -0.085],
+      [  5.72, 0.190, 0.145, 0.135, 0.075, 0.090, -0.010, -0.062],
+      [  5.02, 0.380, 0.255, 0.230, 0.155, 0.200, -0.030, -0.040],
+      [  4.18, 0.600, 0.345, 0.300, 0.245, 0.315, -0.055, -0.022],
+      [  3.22, 0.790, 0.415, 0.360, 0.330, 0.425, -0.065, -0.008],
+      [  2.15, 0.920, 0.460, 0.415, 0.400, 0.520, -0.055,  0.000],
+      [  0.95, 1.000, 0.490, 0.460, 0.450, 0.600, -0.030,  0.000],
+      [ -0.45, 1.020, 0.500, 0.500, 0.480, 0.640,  0.000,  0.000],
+      [ -2.05, 0.980, 0.490, 0.520, 0.480, 0.640,  0.030,  0.000],
+      [ -3.60, 0.885, 0.450, 0.490, 0.460, 0.580,  0.050,  0.000],
+      [ -4.90, 0.760, 0.380, 0.420, 0.420, 0.480,  0.060,  0.000],
+      [ -5.80, 0.660, 0.310, 0.330, 0.380, 0.400,  0.060,  0.000],
+    ];
+    loft(FUS.map(function (st) {
+      const c = st[6] + st[7], t = st[2] + st[7], b = -st[3] + st[7];
+      return { z: st[0], p: [[st[1], c], [st[4], t], [-st[4], t], [-st[1], c], [-st[5], b], [st[5], b]] };
+    }), SKIN).position.y = cy;
+    // chin sensor turret — a faceted gem under the forebody chine (the thing a
+    // player standing at the nose actually looks at).
+    const eots = new THREE.Mesh(new THREE.OctahedronGeometry(0.27, 0), GUN);
+    eots.position.set(0, cy - 0.40, 3.55); eots.scale.set(1.0, 0.60, 1.45);
+    eots.rotation.y = Math.PI / 4; eots.castShadow = true; eots.receiveShadow = true; g.add(eots);
+    // belly weapons-bay doors — twin recessed panels with a centreline seam
+    // (y/height chosen so the panel top stays ABOVE the keel line across the
+    // whole z-span — the keel rises from -0.508 aft to -0.428 forward — so the
+    // doors are proud of the belly everywhere and float nowhere.)
+    [-1, 1].forEach(function (s) { box(g, s * 0.31, cy - 0.46, 0.35, 0.52, 0.12, 2.9, M.jetGreyD); });
+
+    // ---- CHEEK INTAKES ------------------------------------------------------
+    // Trunks hung low and outboard, each with its OWN chine (top:0.62 narrows
+    // the upper face so the widest line is at mid height), a raked CARET mouth
+    // (yawed + pitched dark plate recessed behind the lip) and a boundary-layer
+    // diverter plate bridging trunk-to-flank so no daylight shows through.
     [-1, 1].forEach(function (s) {
-      box(g, s * 0.75, cy - 0.05, 0.9, 0.6, 0.72, 2.8, M.jetGreyD);
-      mbox(g, s * 0.75, cy - 0.05, 2.35, 0.5, 0.6, 0.16, GUN);
+      tbox(g, s * 1.28, cy - 0.34, 1.05, 0.68, 0.72, 4.30, { nz: 0.90, tz: 0.66, top: 0.62, bot: 0.82, segD: 6 }, SKIN);
+      const mo = mbox(g, s * 1.28, cy - 0.34, 3.04, 0.50, 0.60, 0.12, GUN);
+      mo.rotation.y = s * 0.34; mo.rotation.x = -0.20;
+      box(g, s * 0.96, cy - 0.28, 1.55, 0.09, 0.56, 3.10, M.jetGreyD);
     });
-    // WINGS — sculpted slabs: swept leading edge, tapering chord, thinning tip.
-    // Root edge buried in the round flank → no gap, no rotation seam.
+
+    // ---- WINGS / TAILS ------------------------------------------------------
+    // Trapezoidal planform: 43° swept leading edge, 0.32 tip/root taper, a
+    // separate FLAPERON slab hung off the trailing edge (a real control-surface
+    // step, not a painted seam), all-moving stabilators aft, and underwing
+    // pylons carrying finned stores. Roots sit at x=±0.80 — deep inside the
+    // flank — and emerge THROUGH the intake fairing, so there is no seam.
     [-1, 1].forEach(function (s) {
-      wing(g, s * 0.5, cy + 0.05, -0.4, s, 3.9, 3.6, 0.22, 2.2, 0.62, 0.35, M.jetGreyD);
-      wing(g, s * 0.45, cy + 0.1, -4.7, s, 1.8, 1.6, 0.16, 1.0, 0.5, 0.3, M.jetGreyD); // tailplane
-      box(g, s * 2.25, cy - 0.25, 0.1, 0.12, 0.18, 1.25, M.jetGreyD); // launch rail
-      const mb = cyl(g, s * 2.25, cy - 0.47, 0.15, 0.10, 0.10, 1.65, 0xd4d9df, 8);
-      mb.rotation.x = Math.PI / 2;
-      const mc = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.38, 8), cm(0xd4d9df));
-      mc.rotation.x = -Math.PI / 2; mc.position.set(s * 2.25, cy - 0.47, 1.16); g.add(mc);
-      box(g, s * 2.25, cy - 0.47, -0.58, 0.54, 0.035, 0.26, M.dark);
-      box(g, s * 2.25, cy - 0.47, -0.58, 0.035, 0.54, 0.26, M.dark);
+      wing(g, s * 0.80, cy + 0.04, -0.35, s, 3.70, 4.00, 0.30, 2.10, 0.68, 0.55, SKIND);
+      wing(g, s * 1.10, cy + 0.05, -2.66, s, 3.00, 0.62, 0.16, 0.51, 0.28, 0.45, SKIN);   // flaperon
+      wing(g, s * 0.66, cy + 0.06, -4.05, s, 1.90, 1.95, 0.20, 1.05, 0.58, 0.50, SKIND);  // stabilator
+      box(g, s * 2.70, cy - 0.22, -1.20, 0.13, 0.36, 1.35, M.jetGreyD);                   // pylon
+      mcyl(g, s * 2.70, cy - 0.44, -1.00, 0.105, 0.105, 1.90, STORE, 10).rotation.x = Math.PI / 2;
+      const og = new THREE.Mesh(new THREE.ConeGeometry(0.105, 0.46, 10), STORE);
+      og.rotation.x = -Math.PI / 2; og.position.set(s * 2.70, cy - 0.44, 0.18);
+      og.castShadow = true; og.receiveShadow = true; g.add(og);
+      box(g, s * 2.70, cy - 0.44, -1.72, 0.60, 0.035, 0.30, M.dark);
+      box(g, s * 2.70, cy - 0.44, -1.72, 0.035, 0.60, 0.30, M.dark);
     });
-    // TWIN FINS — a sculpted "wing" stood upright (rotation.z), raked by its
-    // sweep, canted outboard; root wedge buried in the afterbody so no float.
+    // TWIN CANTED FINS — sculpted slabs stood on end (rotation.z) and raked out
+    // 23° from vertical, each rising out of a THICKER fairing on the same cant
+    // so the root is swallowed instead of stabbed into the spine.
     [-1, 1].forEach(function (s) {
-      const fin = wing(g, s * 0.28, cy + 0.3, -4.3, s, 1.9, 2.0, 0.16, 1.1, 0.55, 0.3, M.jetGrey);
-      fin.rotation.z = s * 1.25;                            // ~72°: up + canted out
-      box(g, s * 0.28, cy + 0.25, -4.3, 0.2, 0.4, 1.6, M.jetGrey); // root wedge
+      wing(g, s * 0.24, cy + 0.06, -3.45, s, 1.05, 3.00, 0.38, 0.85, 0.55, 0.55, SKIN).rotation.z = s * 1.16;
+      wing(g, s * 0.30, cy + 0.34, -3.55, s, 2.05, 2.50, 0.20, 1.45, 0.60, 0.50, SKIN).rotation.z = s * 1.16;
     });
-    // LANDING GEAR — chunky voxel legs, wheels touch y=0 (nose + two mains)
-    box(g, 0, 0.5, 3.2, 0.3, 0.55, 0.3, M.steelD);          // nose strut
-    mcyl(g, 0, 0.3, 3.2, 0.3, 0.3, 0.26, RUBBER, 10).rotation.z = Math.PI / 2;
+
+    // ---- COCKPIT ------------------------------------------------------------
+    // A lofted one-piece bubble (5-point arc sections) whose sill sinks under
+    // the upper deck at every station, a torus canopy bow at the windscreen
+    // join, and a real interior — coaming, raked seat, headrest — because the
+    // shared vehicle glass is genuinely transparent and an empty tub shows.
+    //             z      w     base    h
+    const CAN = [
+      [  2.72, 0.120, 0.415, 0.115],
+      [  2.28, 0.280, 0.425, 0.290],
+      [  1.55, 0.405, 0.440, 0.455],
+      [  0.60, 0.435, 0.455, 0.480],
+      [ -0.40, 0.400, 0.460, 0.425],
+      [ -1.15, 0.295, 0.450, 0.235],
+    ];
+    mbox(g, 0, cy + 0.52, 2.02, 0.42, 0.16, 0.42, TRIM);                       // instrument coaming
+    tbox(g, 0, cy + 0.56, 0.88, 0.40, 0.58, 0.24, { top: 0.78, segD: 2 }, TRIM).rotation.x = -0.22;
+    mbox(g, 0, cy + 0.80, 0.70, 0.24, 0.15, 0.16, TRIM);                       // headrest
+    const canopy = loft(CAN.map(function (st) {
+      const w = st[1], b = st[2], t = st[2] + st[3];
+      return { z: st[0], p: [[w, b], [w * 0.86, b + st[3] * 0.62], [0, t], [-w * 0.86, b + st[3] * 0.62], [-w, b]] };
+    }), GLASS);
+    canopy.position.y = cy;
+    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.038, 6, 14, Math.PI), SKIND);
+    bow.position.set(0, cy + 0.425, 2.28); bow.scale.y = 0.95;
+    bow.castShadow = true; bow.receiveShadow = true; g.add(bow);
+    // dorsal spine fairing — carries the canopy line aft into the fin roots
+    tbox(g, 0, cy + 0.44, -1.60, 0.62, 0.42, 4.40, { nz: 0.75, tz: 0.45, top: 0.55, segD: 5 }, SKIND);
+
+    // ---- NOZZLES — twin 2D THRUST-VECTORING PACK ----------------------------
+    // Not round cones: rectangular convergent housings with a dark throat and
+    // upper/lower vectoring paddles that pinch shut going aft. Two plumes, one
+    // per engine (the userData.plume contract is an array).
+    const plumes = [];
     [-1, 1].forEach(function (s) {
-      box(g, s * 0.85, 0.62, 0.2, 0.3, 0.6, 0.3, M.steelD); // main strut (under trunk)
-      mcyl(g, s * 0.85, 0.36, 0.2, 0.36, 0.36, 0.3, RUBBER, 10).rotation.z = Math.PI / 2;
+      tbox(g, s * 0.40, cy + 0.02, -5.55, 0.66, 0.66, 1.10, { tz: 0.68, top: 0.88, bot: 0.88, segD: 3 }, SKIND);
+      mbox(g, s * 0.40, cy + 0.02, -6.02, 0.42, 0.42, 0.14, GUN);
+      box(g, s * 0.40, cy + 0.28, -5.95, 0.58, 0.08, 0.62, M.steelD).rotation.x = 0.22;
+      box(g, s * 0.40, cy - 0.24, -5.95, 0.58, 0.08, 0.62, M.steelD).rotation.x = -0.22;
+      const p = CBZ.createRocketPlume({ name: "fighter-afterburner", lightRange: 13 });
+      p.position.set(s * 0.40, cy + 0.02, -6.18); g.add(p); CBZ.setRocketPlume(p, 0, 0);
+      plumes.push(p);
     });
+    g.userData.plume = plumes; g.userData.plumeMat = plumes[0].userData.outerMaterial;
+
+    // ---- LANDING GEAR — oleo struts, hubbed wheels, hanging doors -----------
+    mcyl(g, 0, 0.56, 3.40, 0.065, 0.075, 0.62, GUN, 8);                        // nose oleo
+    mcyl(g, 0, 0.26, 3.40, 0.26, 0.26, 0.22, RUBBER, 12).rotation.z = Math.PI / 2;
+    mcyl(g, 0, 0.26, 3.40, 0.13, 0.13, 0.24, RIM, 10).rotation.z = Math.PI / 2;
+    box(g, 0.22, 0.68, 3.40, 0.05, 0.50, 1.15, M.jetGreyD);                    // nose bay door
+    [-1, 1].forEach(function (s) {
+      mcyl(g, s * 1.05, 0.60, -0.25, 0.075, 0.088, 0.58, GUN, 8);              // main oleo
+      mcyl(g, s * 1.05, 0.34, -0.25, 0.34, 0.34, 0.26, RUBBER, 12).rotation.z = Math.PI / 2;
+      mcyl(g, s * 1.05, 0.34, -0.25, 0.17, 0.17, 0.28, RIM, 10).rotation.z = Math.PI / 2;
+      box(g, s * 0.86, 0.72, -0.25, 0.06, 0.62, 1.50, M.jetGreyD);             // main bay door
+    });
+
     // nav lights: red port wingtip, green starboard, white tail
-    navBox(g, -4.3, cy + 0.05, -2.55, 0.16, 0xff4a3d);
-    navBox(g, 4.3, cy + 0.05, -2.55, 0.16, 0x37d67a);
-    navBox(g, 0, cy + 0.45, -5.35, 0.14, 0xf2f4ff);
+    navBox(g, -4.42, cy + 0.04, -2.20, 0.15, 0xff4a3d);
+    navBox(g, 4.42, cy + 0.04, -2.20, 0.15, 0x37d67a);
+    navBox(g, 0, cy + 0.40, -5.05, 0.13, 0xf2f4ff);
     // Exact visible launch socket. The generic fallback multiplied the already
     // world-sized footprint by this group's 1.5 scale and spawned missiles far
     // in front of the jet, which looked like no rocket left the aircraft.
-    const muzzle = new THREE.Object3D(); muzzle.position.set(0, cy, 6.48); g.add(muzzle);
+    // Sits on the drooped radome boresight, just clear of the loft's tip.
+    const muzzle = new THREE.Object3D(); muzzle.position.set(0, cy - 0.06, 6.42); g.add(muzzle);
     g.userData.muzzle = muzzle; g.userData.muzzleLocal = muzzle.position.clone();
     const scale = 1.5;
     const dims = { family: "F-22-class", length: 18.6, span: 13.5, height: 5.25 };
