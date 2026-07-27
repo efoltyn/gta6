@@ -341,12 +341,68 @@
   //      4200) ~12% (crisp panorama).
   const FOG_SCALE = 0.12;
   CBZ.terrainFogScale = function (mat, scale) {
+    // tagged so the worldSurface fog sweep (worldmap.js) never double-wraps a
+    // material a builder already dialled by hand
+    mat.userData = mat.userData || {};
+    mat.userData._cbzFogScaled = true;
     mat.onBeforeCompile = function (sh) {
       sh.uniforms.uFogScale = { value: scale == null ? FOG_SCALE : scale };
       sh.vertexShader = "uniform float uFogScale;\n" + sh.vertexShader
         .replace("#include <fog_vertex>",
           "#include <fog_vertex>\n#ifdef USE_FOG\n\tfogDepth *= uFogScale;\n#endif");
     };
+    return mat;
+  };
+
+  // ---- day-tracking brightness for UNLIT terrain/world materials ---------
+  // A MeshBasicMaterial renders its authored colours at full brightness
+  // through dawn, dusk and midnight — which is why the snow massifs (both
+  // Basic with baked shading) read as self-lit white cardboard standing on a
+  // correctly darkened Lambert plate whenever the sun is low. Owner, from
+  // the air: "mountains look brighter than the ground that they sit on — it
+  // makes the ground look gray and it makes it look computer generated and
+  // dumb." The luminance SEAM is the ugliness: lit and unlit surfaces must
+  // move together. This multiplies the fragment by ONE shared day factor
+  // (tracking the same dayness the Lambert ground effectively renders with),
+  // injected just before tone mapping so it dims in linear light exactly
+  // like a real light change. Chain-safe: composes with any onBeforeCompile
+  // the material already carries (terrainFogScale), every adopter shares one
+  // uniform object, and one lazy per-frame hook drives them all.
+  // Flag TERRAIN_DAY_TINT — false pins the factor at 1 (the old always-noon
+  // look) without touching any adopter.
+  if (CFG.TERRAIN_DAY_TINT == null) CFG.TERRAIN_DAY_TINT = true;
+  const _dayU = { value: 1 };
+  let _dayHooked = false;
+  function dayTintTick() {
+    // Lambert ground swings roughly 1.0 (noon sun+hemi) -> ~0.4 (night
+    // 0.16 sun + 0.38 hemi). 0.40 + 0.60·dayness tracks that swing without
+    // crushing the snow's high albedo; dusk lands in between exactly as the
+    // lit ground does. Flag off -> 1 (byte-identical old brightness).
+    const day = CBZ.dayness != null ? +CBZ.dayness : 1;
+    _dayU.value = CFG.TERRAIN_DAY_TINT === false
+      ? 1 : (0.40 + 0.60 * Math.max(0, Math.min(1, day)));
+  }
+  CBZ.terrainDayTint = function (mat) {
+    if (!mat) return mat;
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (sh) {
+      if (prev) prev.call(this, sh);
+      sh.uniforms.uCbzDay = _dayU;                 // SHARED object — one write drives all
+      let fs = sh.fragmentShader;
+      // pre-tonemap when possible (dims in linear light, like a real lamp);
+      // pre-fog as the fallback so the fogged colour still converges on the
+      // live fog tint either way.
+      if (fs.indexOf("#include <tonemapping_fragment>") >= 0) {
+        fs = fs.replace("#include <tonemapping_fragment>",
+          "gl_FragColor.rgb *= uCbzDay;\n#include <tonemapping_fragment>");
+      } else {
+        fs = fs.replace("#include <fog_fragment>",
+          "gl_FragColor.rgb *= uCbzDay;\n#include <fog_fragment>");
+      }
+      sh.fragmentShader = "uniform float uCbzDay;\n" + fs;
+    };
+    mat.needsUpdate = true;
+    if (!_dayHooked && CBZ.onAlways) { _dayHooked = true; CBZ.onAlways(91.5, dayTintTick); }
     return mat;
   };
 

@@ -93,8 +93,16 @@
     });
     // ground stops just past the seawall line (bounds+26): the city meets the
     // WATER, not an endless gray apron — the +29 edge tucks under the rip-rap
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 58, spanZ + 58),
-      baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45));
+    const groundMat = baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45);
+    // FOG-RATE HARMONY (owner, from the air: "city areas look bright and
+    // rendered while the ground around them is grayer"): the continent plate
+    // fogs at 0.08x and the mountain landmarks at 0.12x, but this city slab
+    // fogged at the FULL 1.0x rate — from altitude it washed toward the fog
+    // colour ~10x faster than the country touching it, so every authored pad
+    // read as a differently-lit sticker on the landscape. Same shared helper,
+    // same family of rates; the height fog still clears the air up high.
+    if (CBZ.terrainFogScale) CBZ.terrainFogScale(groundMat, 0.10);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 58, spanZ + 58), groundMat);
     ground.rotation.x = -Math.PI / 2; ground.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     ground.receiveShadow = true;
     // A land floor is not disposable scenery.  Far-distance culling can keep

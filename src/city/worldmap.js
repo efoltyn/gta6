@@ -637,6 +637,37 @@
     const list = CBZ._landmassBuilders.slice().sort((a, b) => a.order - b.order);
     for (const b of list) { try { b.fn(city); } catch (e) { console.error("[landmass]", e); } }
     if (CBZ.buildArchipelagoDressing) CBZ.buildArchipelagoDressing(city);
+    // ---- FOG-RATE HARMONY SWEEP (owner, from the air: "city areas look
+    // bright and rendered while the ground around them is grayer… the same
+    // with mountains — computer generated and dumb") ------------------------
+    // The continent plate fogs at 0.08x and the mountain landmarks at 0.12x,
+    // but every OTHER authored ground slab — settlement pads, mini-city pads,
+    // island aprons, biome floors — fogged at the full 1.0x rate, so from any
+    // altitude each one washed toward the fog colour ~10x faster than the
+    // country it sits in and read as a differently-lit sticker. Every slab
+    // already self-identifies (userData.worldSurface), so ONE sweep gives the
+    // whole map a single atmospheric family instead of editing a dozen
+    // builders: big worldSurface meshes adopt the shared terrainFogScale.
+    // Hand-dialled materials are tagged and skipped; ShaderMaterials (the
+    // sea) own their fog; small meshes (< 60m radius) are props, not ground.
+    if (CBZ.CONFIG && CBZ.CONFIG.WORLD_SURFACE_FOG == null) CBZ.CONFIG.WORLD_SURFACE_FOG = true;
+    if ((!CBZ.CONFIG || CBZ.CONFIG.WORLD_SURFACE_FOG !== false) && CBZ.terrainFogScale && city.root) {
+      city.root.traverse(function (o) {
+        if (!o.isMesh || !o.userData || !o.userData.worldSurface) return;
+        const m = o.material;
+        if (!m || m.isShaderMaterial) return;
+        // the tag doubles as the dedupe: terrainFogScale sets it, so a shared
+        // material is wrapped exactly once (and a small mesh that fails the
+        // size gate below never blocks a big sibling from adopting later)
+        if (m.userData && m.userData._cbzFogScaled) return;
+        const g = o.geometry;
+        if (!g) return;
+        if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch (e) { return; } }
+        if (!g.boundingSphere || !(g.boundingSphere.radius * Math.max(o.scale.x, o.scale.z) >= 60)) return;
+        CBZ.terrainFogScale(m, 0.10);
+        m.needsUpdate = true;
+      });
+    }
     // MAP_RESERVE_V1: regression alarm. After every landmass is placed, report
     // any two PEER landmasses (biome floors, skirts, massifs, island POIs) that
     // interpenetrate — the owner's "terrain overlaps terrain" complaint. This

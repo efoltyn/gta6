@@ -929,6 +929,9 @@
         polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
       });
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(groundMat, 0.12);
+      // unlit material — must darken with the day like the Lambert plate it
+      // stands on, or it glows as a self-lit white massif at dawn/night
+      if (CBZ.terrainDayTint) CBZ.terrainDayTint(groundMat);
       const g = new THREE.Mesh(geo, groundMat);
       g.position.set(CX, 0, CZ);
       g.matrixAutoUpdate = false; g.updateMatrix();
@@ -1085,6 +1088,9 @@
       // Retain the distant landmark through normal city fog, but let it gain
       // atmospheric depth instead of remaining a full-white cardboard cutout.
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(rangeMat, 0.12);
+      // unlit — darken with the day in step with the lit ground (see
+      // terrainDayTint: the luminance seam at the massif's foot was the tell)
+      if (CBZ.terrainDayTint) CBZ.terrainDayTint(rangeMat);
       const mesh = new THREE.Mesh(geo, rangeMat);
       mesh.position.set(gcx, 0, gcz);
       mesh.matrixAutoUpdate = false; mesh.updateMatrix();

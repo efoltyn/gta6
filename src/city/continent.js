@@ -658,6 +658,9 @@
       group.userData.terrain = true; // one world-spanning route; never disappear as one far-cull blob
       const roadMat = new THREE.MeshLambertMaterial({ color: 0x30343a });
       const paintMat = new THREE.MeshBasicMaterial({ color: 0xe6c45a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      // unlit paint on a lit road: without the day tint the dashes glow like
+      // LEDs all night while the asphalt under them goes dark
+      if (CBZ.terrainDayTint) CBZ.terrainDayTint(paintMat);
       const roadDefs = [
         { x: (x0 + x1) / 2, z: z0, len: x1 - x0, vertical: false },
         { x: x1, z: (z0 + z1) / 2, len: z1 - z0, vertical: true },
