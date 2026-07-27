@@ -172,8 +172,24 @@
     };
     const watch = function (band, faceM) {
       return [
-        { kind: "cuff", mat: band, x: 0, y: -0.60, z: 0 },     // WRIST — was -0.20, up under the sleeve at the elbow
-        { kind: "face", mat: faceM, x: 0, y: -0.60, z: 0.175 },   // the dial rides ON the band
+      // THE WRIST, MEASURED — not guessed. bling.js mounts to anchorsOf()'s
+      // `laLow` / `raLow`, which is character.js's `low` group: the ELBOW pivot,
+      // not the limb root. So y here is distance BELOW THE ELBOW. In that frame
+      // character.js puts the hand at `-P.armLo - 0.01` (armLo ~0.45), i.e.
+      // y = -0.46, and the forearm runs 0 -> -0.45.
+      //
+      // My previous pass moved these to -0.60 on the strength of a stale
+      // comment claiming "hand top is y -0.72" — a number from a DIFFERENT
+      // frame. -0.60 is 0.14 BELOW the hand, so the watch hung in mid-air past
+      // the fingertips, which is exactly what the owner saw. -0.36 is the
+      // wrist: just above the hand, on the last third of the forearm.
+      //
+      // The original -0.20 was not the real bug either; it was mid-forearm and
+      // survivable. The bug was the 0.32 BOX around a 0.30 arm — 1cm of
+      // clearance per side, which any sleeve swallowed. That is what the torus
+      // below fixes, and it is why the band can now sit properly on the wrist.
+        { kind: "cuff", mat: band, x: 0, y: -0.36, z: 0 },
+        { kind: "face", mat: faceM, x: 0, y: -0.36, z: 0.175 },   // the dial rides ON the band
       ];
     };
     _looks = {
@@ -186,11 +202,11 @@
       watchSilver: watch(M.silver, M.silver),
       watchIced: watch(M.ice, M.glint),
       watchSteel: watch(M.silver, M.silver),                                   // clean steel dress watch
-      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.60, z: 0 },      // steel band, on the wrist
-        { kind: "face", mat: M.blueDial, x: 0, y: -0.60, z: 0.175 },           // signature blue dial
-        { kind: "ring", mat: M.glint, x: 0, y: -0.54, z: 0.19 }],              // lume pip
+      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.36, z: 0 },      // steel band, on the wrist
+        { kind: "face", mat: M.blueDial, x: 0, y: -0.36, z: 0.175 },           // signature blue dial
+        { kind: "ring", mat: M.glint, x: 0, y: -0.30, z: 0.19 }],              // lume pip
       // tennis bracelet — band only
-      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.56, z: 0 }],   // sits just above the watch, on skin
+      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.30, z: 0 }],   // sits just above the watch, on skin
       // ring — a glint dot on the hand's front edge
       ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.34, z: 0.17 }],
       // grill — a small iced bar across the lower face (the mouth)

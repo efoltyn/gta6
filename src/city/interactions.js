@@ -488,10 +488,31 @@
     // the pill IS the control, so it stays. Only the single-verb case goes
     // silent (_pass holds exactly one option); a second seat verb brings the
     // card back. Standing up rides a separate 'propself' kind and is untouched.
+    // ...AND ON TOUCH TOO, now that a seat IS tappable. The `!CBZ.touchMode`
+    // that used to be on this line was load-bearing for a real reason — the
+    // comment above it said "a seat has no tappable mesh", so on touch the pill
+    // was the ONLY way to sit and had to stay. systems/touch.js's tapWorld now
+    // resolves a tap to the seat anchor under your finger (and any tap to
+    // stand), which is the vehicle grammar and Minecraft's: the object is the
+    // button, and nothing narrates the possibility to you first. With the
+    // control living in the world, the card is pure noise on both inputs.
     if (pick.kind === "seat" && rows._pass && rows._pass.length === 1 &&
-        CBZ.CONFIG.CITY_SEAT_SILENT !== false && !CBZ.touchMode) {
+        CBZ.CONFIG.CITY_SEAT_SILENT !== false) {
       current = pick; currentRows = rows; currentScore = pick.score;
       fingerprint = "seat-silent:" + (pick.t && pick.t.x) + "," + (pick.t && pick.t.z);
+      dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); }
+      return;
+    }
+
+    // STANDING UP is the same story. Once you are seated the ONLY thing you
+    // want is out, so a card offering you that single verb is telling you
+    // something you already know. Desktop presses E; touch taps anywhere (the
+    // tapWorld stand path). Suppressed on exactly the same terms as sitting:
+    // single-verb only, so if a seat ever gains a second verb the card returns.
+    if (pick.kind === "propself" && rows._pass && rows._pass.length === 1 &&
+        CBZ.CONFIG.CITY_SEAT_SILENT !== false) {
+      current = pick; currentRows = rows; currentScore = pick.score;
+      fingerprint = "propself-silent";
       dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); }
       return;
     }

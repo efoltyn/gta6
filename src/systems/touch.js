@@ -589,6 +589,8 @@
     if (kind === "car") return !!(CBZ.cityEnterVehicle && CBZ.cityEnterVehicle(rec) !== false);
     if (kind === "machine") return !!(CBZ.cityBoardMilitaryVehicle && CBZ.cityBoardMilitaryVehicle(rec));
     if (kind === "animal") return !!(CBZ.cityMountAnimal && CBZ.cityMountAnimal(rec));
+    // a seat reached by walking finishes the same verb the direct tap fires
+    if (kind === "seat") return !!(CBZ.propSit && CBZ.propSit(CBZ.player, rec));
     if (kind === "ped") {
       const p = rec.pos || (rec.group && rec.group.position);
       if (p) faceToward(p.x, p.z);
@@ -638,10 +640,53 @@
         const c = cops[i]; if (c && !c.dead && c.group) add(c.group, "ped", c);
       }
     }
-    if (!objects.length) return false;
-    const hits = tapRay.intersectObjects(objects, true);
-    if (!hits.length) return false;
-    const target = rootFor(hits[0].object, roots);
+    const hits = objects.length ? tapRay.intersectObjects(objects, true) : [];
+    const target = hits.length ? rootFor(hits[0].object, roots) : null;
+
+    // ---- TAP THE CHAIR TO SIT ON IT ------------------------------------
+    // OWNER: "on iPad it pops up and says sit down / stand up. Good that the
+    // capability is there, bad that there's a popup in the middle of the
+    // screen. Maybe they should just press the chair to sit down — how does
+    // Minecraft do it?"
+    //
+    // Minecraft's answer, and every good touch game's answer, is that THE
+    // WORLD OBJECT IS THE BUTTON. You tap the thing; no prompt narrates the
+    // possibility to you first. This codebase already made exactly that call
+    // for vehicles — city/interactions.js's SILENT_RIDE ("no card, you just
+    // press E / tap to take it. Keeps the HUD from announcing 'you may now
+    // board' like a tutorial"). Seats were the one thing excluded, and the
+    // comment there says why in as many words: "a seat has no tappable mesh".
+    //
+    // It does now. Seats are propuse ANCHORS rather than groups, so instead of
+    // adding them to the raycast list we intersect the tap ray with the ground
+    // plane the seat stands on and ask propNearestSeat what is under the
+    // finger. Same result, no per-seat mesh bookkeeping, and it works for every
+    // seat in the game — desk chairs, benches, deck chairs, cabin seats —
+    // because they all register through the one anchor system.
+    if (!target && CBZ.propNearestSeat && !CBZ.player.dead) {
+      const P = CBZ.player;
+      // where the ray crosses the player's own floor level
+      const dirY = tapRay.ray.direction.y;
+      if (dirY < -0.001) {
+        const t = (P.pos.y - tapRay.ray.origin.y) / dirY;
+        if (t > 0 && t < 40) {
+          const gx = tapRay.ray.origin.x + tapRay.ray.direction.x * t;
+          const gz = tapRay.ray.origin.z + tapRay.ray.direction.z * t;
+          const seat = CBZ.propNearestSeat(gx, gz, 1.5, P.pos.y);
+          if (seat) {
+            const d = Math.hypot(seat.x - P.pos.x, seat.z - P.pos.z);
+            if (d <= 3.6) { if (CBZ.propSit) CBZ.propSit(P, seat); return true; }
+            if (d <= WALK_MAX) { startWalk("seat", seat); return true; }
+            note("Get closer to sit down."); return true;
+          }
+        }
+      }
+    }
+    // ---- TAP ANYWHERE TO GET UP ----------------------------------------
+    // The mirror of the above, and the reason the "stand up" card can go too:
+    // once you are seated the only verb you want is OUT, so any tap is it.
+    if (!target && CBZ.player._propSeat && CBZ.propStand) { CBZ.propStand(CBZ.player); return true; }
+
     if (!target) return false;
 
     // In reach → fire immediately (same path as the keyboard).
