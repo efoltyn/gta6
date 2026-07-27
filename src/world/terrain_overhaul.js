@@ -142,7 +142,15 @@
   // CBZ.mtnHiGate: a sample at or below 45u is untouched and a sample already
   // above the math gate's 25u threshold stays above it, so the gate's
   // mountains-outside-snow / city-on-mountain counts are provably unchanged.
-  if (CFG.TERRAIN_RING_AMP == null) CFG.TERRAIN_RING_AMP = 1.18;
+  // 1.18 → 4.5 (owner: "the terrain should be absolutely massive"): at 1.18
+  // the offshore skyline crested ~140u — SHORTER than the walkable Greater
+  // Mercy in front of it, so the backdrop read as foothills and the horizon
+  // as a pancake from any altitude. 4.5 lifts the drawn crests to ~450-550u
+  // (genre norm is peak ≈ extent/10; this world spans ~11km), which finally
+  // puts summits above a 300-400m canopy/aircraft eye line so they can notch
+  // the horizon. Same provably-gate-safe construction as before — only the
+  // number moved. `?cfg_TERRAIN_RING_AMP=1.18` is the exact old skyline.
+  if (CFG.TERRAIN_RING_AMP == null) CFG.TERRAIN_RING_AMP = 4.5;
 
   // originals (terrain.js loaded just before this file)
   const orig = {

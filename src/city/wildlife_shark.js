@@ -45,6 +45,17 @@
 
   if (CBZ.CONFIG && CBZ.CONFIG.SHARK_HORROR == null) CBZ.CONFIG.SHARK_HORROR = true;
   function ON() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_HORROR === false); }
+  // SHARK_SHADOW — the dark body-mass gliding under the surface, drawn as a
+  // soft ellipse riding the waterline. The sea is OPAQUE (depth-writing, no
+  // transparency budget on a 16km disc), so from above the water the body is
+  // never actually visible — the fin was the only tell. This is the owner's
+  // "you can see a tiny bit of what's inside the water": the classic stylized
+  // shadow every top-down water game uses, faded out by real depth so a deep
+  // cruiser vanishes and a shallow stalker reads as a looming shape.
+  if (CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW == null) CBZ.CONFIG.SHARK_SHADOW = true;
+  function shadowOn() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW === false); }
+  const SHADOW_DEPTH = 9;       // m of water that fully swallows the shadow
+  const SHADOW_ALPHA = 0.34;    // its darkest (near-surface) opacity
 
   // ---- tuning (one screen; every constant the encounter has) -------------
   const SENSE_R = 110;          // u — it notices a swimmer this far out
@@ -111,23 +122,27 @@
   //  cutting the surface. Geometry and materials are module-wide singletons;
   //  each shark owns three tiny objects and nothing is allocated per frame.
   // ============================================================
-  let finGeo = null, wakeGeo = null, finMat = null, wakeMat = null;
+  let finGeo = null, wakeGeo = null, finMat = null, wakeMat = null, shadowGeo = null;
   function assets() {
     if (finGeo) return;
     finGeo = new THREE.ConeGeometry(0.5, 1.2, 4);          // r128: (radius, height, radialSegments)
     wakeGeo = new THREE.PlaneGeometry(1, 1);
+    // unit disc, stretched per shark into the body-plan ellipse
+    shadowGeo = new THREE.CircleGeometry(0.5, 18);
     finMat = new THREE.MeshLambertMaterial({ color: 0x59636b });
     wakeMat = new THREE.MeshBasicMaterial({
       color: 0xe2edf2, transparent: true, opacity: 0.28,
       depthWrite: false, side: THREE.DoubleSide,
     });
-    // EVERY SHARK IN THE WORLD SHARES THESE FOUR OBJECTS, so the repo's
+    // EVERY SHARK IN THE WORLD SHARES THESE OBJECTS, so the repo's
     // disposal sweeps must be told to keep their hands off: gore.js's rm(),
     // the rig teardowns and the per-group cleaners all skip anything tagged
     // _shared and dispose everything else. Today the proxy survives only
     // because of how it happens to be parented; the first sweep that reaches
     // it would otherwise dispose one shark's fin and blank every other one.
-    finGeo._shared = wakeGeo._shared = true;
+    // (The shadow's MATERIAL is deliberately per-shark — its opacity animates
+    // with that one shark's depth — so only its geometry joins this pool.)
+    finGeo._shared = wakeGeo._shared = shadowGeo._shared = true;
     finMat._shared = wakeMat._shared = true;
   }
   function makeProxy(a, s) {
@@ -154,6 +169,23 @@
       root.add(arm);
       arms.push(q);
     }
+    // the submerged body-mass, as seen through the surface: a soft dark
+    // ellipse in the shark's body plan, lying flat just over the waterline
+    // (the sea depth-writes, so anything meant to read as "under it" must in
+    // fact be drawn just above it — same trick the wake quads already use).
+    if (shadowOn()) {
+      s.shadowMat = new THREE.MeshBasicMaterial({
+        color: 0x06131c, transparent: true, opacity: SHADOW_ALPHA,
+        depthWrite: false,
+      });
+      const sh = new THREE.Mesh(shadowGeo, s.shadowMat);
+      sh.rotation.x = -Math.PI / 2;
+      sh.position.y = 0.015;                              // under the fin, over the sea
+      sh.renderOrder = 2;                                 // wake (3) draws over it
+      sh.castShadow = false;
+      root.add(sh);
+      s.shadow = sh;
+    }
     parent.add(root);
     s.root = root; s.fin = fin; s.arms = arms; s.sz = sz;
     s.finH = 1.2 * sz * 1.15;
@@ -179,20 +211,39 @@
     const hidden = s.state === "vanish" || s.state === "disengage";
     const finR = ((s.opts && s.opts.senseR) || SENSE_R) * FIN_F;
     const want = (!a.dead && ON() && shallow && !hidden && dist < finR) ? 1 : 0;
-    if (!want && (s.finK <= 0.02)) {                        // fully down: nothing to draw
+    // The SHADOW has a wider envelope than the fin: any body within
+    // SHADOW_DEPTH of the surface casts one, fin up or not — but it honours
+    // `hidden` exactly like the fin, because predator.js's vanish beat only
+    // works if the thing genuinely disappears. Depth is the fade axis.
+    const shWant = (shadowOn() && !a.dead && ON() && !hidden && dist < finR * 1.15 && dep > 0.3)
+      ? Math.max(0, Math.min(1, 1 - dep / (SHADOW_DEPTH * Math.max(1, s.sz * 0.8)))) : 0;
+    if (!want && s.finK <= 0.02 && !shWant && (s.shK || 0) <= 0.02) {   // fully down: nothing to draw
       if (s.root && s.root.visible) s.root.visible = false;
-      s.finK = 0;
+      s.finK = 0; s.shK = 0;
       return;
     }
     if (!s.root && !makeProxy(a, s)) return;
     s.finK += (want - s.finK) * Math.min(1, dt * (want ? 1.8 : 3.2));
+    s.shK = (s.shK || 0) + (shWant - (s.shK || 0)) * Math.min(1, dt * 3);
     const k = s.finK;
-    s.root.visible = k > 0.02;
+    s.root.visible = k > 0.02 || s.shK > 0.02;
     if (!s.root.visible) return;
     s.root.position.set(grp.position.x, surf + 0.04, grp.position.z);
     s.root.rotation.y = -a.heading;                         // same yaw law as every animal
+    if (s.shadow) {
+      const sk = s.shK;
+      s.shadow.visible = sk > 0.02;
+      if (s.shadow.visible) {
+        // a deeper body reads as a bigger, softer, fainter smudge — the same
+        // blur law a real shadow through water obeys.
+        const spread = 1 + dep * 0.10;
+        s.shadow.scale.set(4.6 * s.sz * spread, 1.5 * s.sz * spread, 1);
+        s.shadowMat.opacity = SHADOW_ALPHA * sk;
+      }
+    }
     // the fin RISES out of the water instead of popping into existence
     s.fin.position.y = s.finH * 0.5 - s.finH * (1 - k);
+    s.fin.visible = k > 0.02;
     // the wake grows with speed and fades with it; it is the only thing telling
     // the player how fast the thing they cannot see is moving.
     const len = (2.2 + Math.min(9, s.spd * 0.85)) * s.sz;
@@ -208,7 +259,11 @@
   function dropProxy(a) {
     const s = a && a._shark; if (!s || !s.root) return;
     if (s.root.parent) s.root.parent.remove(s.root);
+    // the shadow material is per-shark (its opacity animates), so it is ours
+    // to dispose — everything else in the proxy is a _shared singleton.
+    if (s.shadowMat && s.shadowMat.dispose) { try { s.shadowMat.dispose(); } catch (e) {} }
     s.root = null; s.fin = null; s.arms = null; s.finK = 0;
+    s.shadow = null; s.shadowMat = null; s.shK = 0;
   }
 
   // ============================================================
@@ -224,8 +279,8 @@
       baseClear: a.waterClearance || 12,
       dive: a.swimDepth || 2.5, diveWant: (a.swimDepth || 2.5) * DIVE.cruise,
       state: "cruise", owned: false, stuck: 0, bail: 0,
-      finK: 0, spd: 0, px: null, pz: null, wedged: 0,
-      root: null, fin: null, arms: null, sz: 1, finH: 1,
+      finK: 0, shK: 0, spd: 0, px: null, pz: null, wedged: 0,
+      root: null, fin: null, arms: null, shadow: null, shadowMat: null, sz: 1, finH: 1,
     };
     // moveInWater writes into a caller-owned scratch object; without one it
     // allocates a fresh result EVERY frame. wildlife.js gives aquatic actors

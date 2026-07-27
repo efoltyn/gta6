@@ -560,6 +560,22 @@
     }
     return _greatMacro(x, z);
   }
+  // ---- SNOW_MASSIF_AMP: the "absolutely massive" dial (owner order) -------
+  // Scales ONLY the Greater Mercy massif — never Mount Mercy, whose field
+  // carries the authored ski piste/jump knuckles/lift line, gameplay that a
+  // blanket multiplier would silently re-grade. Applied through mtnHiGate
+  // (identically 0 below 45u, 1 above 70u), the same provably-gate-safe
+  // construction TERRAIN_RING_AMP uses: a sample under 45u is untouched, a
+  // sample over the math gate's 25u mountain threshold stays over it, so the
+  // gate's city-on-mountain / mountains-outside-snow cell sets are unchanged
+  // by construction. Feet, pads, clearings, the causeway skirt — all live in
+  // the untouched sub-45u band. `?cfg_SNOW_MASSIF_AMP=1` is the revert.
+  function massifAmp() {
+    const C = CBZ.CONFIG || {};
+    if (C.SNOW_MASSIF_AMP == null) C.SNOW_MASSIF_AMP = 1.9;
+    const v = +C.SNOW_MASSIF_AMP;
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  }
   function greaterMercyHeightAtA(x, z) {
     if (x < GREAT_A_MINX || x > GREAT_A_MAXX || z < GREAT_A_MINZ || z > GREAT_A_MAXZ) return 0;
     let h = greatMacro(x, z);
@@ -569,6 +585,8 @@
       const c = GREAT_BUILDING_CLEARINGS[i];
       h *= flatRectFactor(x, z, c.cx, c.cz, c.hx, c.hz, c.feather);
     }
+    const K = massifAmp();
+    if (K !== 1 && h > 0 && CBZ.mtnHiGate) h *= 1 + (K - 1) * CBZ.mtnHiGate(h);
     return Math.max(0, h);
   }
   CBZ.mtnGreatBounds = { minX: GREAT_MINX, maxX: GREAT_MAXX, minZ: GREAT_MINZ, maxZ: GREAT_MAXZ };

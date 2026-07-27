@@ -141,8 +141,17 @@
       // cannot reach. The stick already steers the canopy (it writes WASD and
       // the canopy reads A/D to turn, S to flare), so the only thing missing
       // was the one press that matters. PULL is deliberately the biggest
-      // button on the screen and it is the only one.
+      // button on the screen and it is the only one — and once the canopy is
+      // out the same button becomes CUT AWAY (bailout.js's cut-away verb), so
+      // a touch player is never trapped under a chute they cannot close.
       html = pill("tvChute", "PULL", "tv-big tv-go");
+    } else if (next === "swim") {
+      // The swimmer's vertical axis (swim.js reads Space=rise / Ctrl=dive off
+      // CBZ.keys). CBZ.citySwimVertical existed for touch and had ZERO callers
+      // — on a phone or iPad you literally could not go under the water. Two
+      // hold buttons on the existing key grammar close that: no new API, the
+      // same keys the desktop uses, swept by the layer's own stale-hold guard.
+      html = pill("tvDive", "DIVE", "tv-big") + pill("tvRise", "RISE", "tv-big tv-go");
     }
     btnWrap.innerHTML = html;
     const q = (id) => btnWrap.querySelector("#" + id);
@@ -159,7 +168,13 @@
     // feature-detected API — the button only shows once that API exists).
     if (q("tvLook")) holdFn(q("tvLook"), (down) => { if (CBZ.camLookBack) CBZ.camLookBack(down); });
     if (q("tvView")) tapBtn(q("tvView"), () => { if (CBZ.cockpitToggleView) CBZ.cockpitToggleView(); });
-    if (q("tvChute")) tapBtn(q("tvChute"), () => { if (CBZ.cityChuteDeploy) CBZ.cityChuteDeploy(); });
+    if (q("tvChute")) tapBtn(q("tvChute"), () => {
+      const st = CBZ.cityChuteState ? CBZ.cityChuteState() : null;
+      if (st && st.phase === "canopy") { if (CBZ.cityChuteCut) CBZ.cityChuteCut(); }
+      else if (CBZ.cityChuteDeploy) CBZ.cityChuteDeploy();
+    });
+    if (q("tvRise")) holdBtn(q("tvRise"), " ");
+    if (q("tvDive")) holdBtn(q("tvDive"), "control");
     ammoEl = btnWrap.querySelector("#tvAmmo");
     lastSpeed = -1; lastSub = "";   // force a dial repaint for the new context
   }
@@ -261,6 +276,9 @@
     if (chute) next = "chute";
     else if (active && P._aircraft) next = P._aircraft.kind === "heli" ? "heli" : "wing";
     else if (active && P.driving && P._vehicle) next = "drive";
+    // In the water the thumb needs the vertical axis (dive/rise). Same
+    // precedence slot as a vehicle: the swim owns the body right now.
+    else if (active && CBZ.citySwimming && CBZ.citySwimming()) next = "swim";
     if (!root && next) build();
     if (!root) return;
     if (next !== mode) {
@@ -283,13 +301,17 @@
       const want = CBZ.cockpitToggleView ? "" : "none";
       if (vb.style.display !== want) vb.style.display = want;
     }
-    // Once the canopy is out there is nothing left to pull, so the button
-    // stops offering it rather than sitting there dead.
+    // Once the canopy is out the pull becomes the cut-away — same button, the
+    // verb the phase actually offers. (It used to just hide, which on touch
+    // left no way at all to close an open parachute.)
     if (mode === "chute") {
       const cb = btnWrap.querySelector("#tvChute");
       const st = CBZ.cityChuteState ? CBZ.cityChuteState() : null;
       if (cb) {
-        const want = (st && st.phase === "freefall") ? "" : "none";
+        const canCut = !!(st && st.phase === "canopy") && CBZ.CONFIG.BAILOUT_CUTAWAY !== false && !!CBZ.cityChuteCut;
+        const label = canCut ? "CUT AWAY" : "PULL";
+        if (cb.textContent !== label) cb.textContent = label;
+        const want = (st && st.phase === "freefall") || canCut ? "" : "none";
         if (cb.style.display !== want) cb.style.display = want;
       }
     }
@@ -331,6 +353,20 @@
       const kmh = Math.abs((car && car.v) || 0) * 4.8;   // hud.js mph≈v*3 → km/h≈v*4.8
       const key = Math.round(kmh);
       if (key !== lastSpeed) { lastSpeed = key; drawDial(kmh, 240, "km/h", "", false); }
+    } else if (mode === "swim") {
+      // Underwater the number that matters is air. Seconds left on the dial,
+      // warning at the same 30% swim.js's own HUD threshold uses; the sub-line
+      // says DIVING while the head is actually under so the gauge explains
+      // itself the first time it drains.
+      const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
+      const airMax = (P.breathMax != null && P.breathMax > 0) ? P.breathMax : 28;
+      const air = P.breath != null ? Math.max(0, P.breath) : airMax;
+      const key2 = Math.round(air * 2);
+      const sub2 = sw && sw.headUnder ? "DIVING" : "AIR";
+      if (key2 !== lastSpeed || sub2 !== lastSub) {
+        lastSpeed = key2; lastSub = sub2;
+        drawDial(air, airMax, "air s", sub2, air < airMax * 0.3);
+      }
     } else {
       const craft = P._aircraft; if (!craft) return;
       const derived = !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_GAUGES_DERIVED !== false;

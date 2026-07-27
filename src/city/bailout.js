@@ -58,6 +58,21 @@
   // Height above the surface below which stepping out is an ordinary exit
   // rather than a bailout — you are landing/taxiing, not abandoning ship.
   if (CBZ.CONFIG.BAILOUT_MIN_AGL == null) CBZ.CONFIG.BAILOUT_MIN_AGL = 9;
+  // BAILOUT_WATER_LANDING — splashing down ends the jump and hands the body to
+  // the swimmer. WHY THIS HAS TO EXIST: this file never integrates P.pos.y
+  // (systems/physics.js does), and over open water physics lands the body on
+  // the phantom flat y=0 floor — while the landing test below asks
+  // cityCraftFloorY, which over water correctly answers SEA_Y (-0.48). So the
+  // condition `y <= floor + 0.05` could never come true at sea: the canopy
+  // stayed open forever over a player standing on invisible water, and the
+  // swimmer's own fall-catcher (swim.js order 9.9) never fired because physics
+  // kept re-grounding the body. Flip false for the old (stuck) behaviour.
+  if (CBZ.CONFIG.BAILOUT_WATER_LANDING == null) CBZ.CONFIG.BAILOUT_WATER_LANDING = true;
+  // BAILOUT_CUTAWAY — pressing the deploy key again under canopy cuts it away
+  // (back to freefall; you can pull again). The owner's literal ask — "I can't
+  // close the parachute" — there was no way to end a canopy ride except
+  // touching down. Flip false to remove the verb.
+  if (CBZ.CONFIG.BAILOUT_CUTAWAY == null) CBZ.CONFIG.BAILOUT_CUTAWAY = true;
 
   const on = () => CBZ.CONFIG.BAILOUT !== false;
   const TERMINAL = -58;        // freefall terminal velocity, m/s
@@ -150,7 +165,7 @@
 
   function beginFall(fromCraft) {
     const P = CBZ.player; if (!P) return;
-    F.active = true; F.phase = "freefall"; F.t = 0; F.shock = 0;
+    F.active = true; F.phase = "freefall"; F.t = 0; F.shock = 0; F.rearm = false;
     F.yaw = fromCraft ? (fromCraft.heading || 0) : 0;
     P.grounded = false;
     // Inherit the aircraft's momentum — you do not stop dead in the air.
@@ -176,6 +191,29 @@
     return true;
   }
   CBZ.cityChuteDeploy = deploy;
+
+  // CUT AWAY — the canopy releases and you are back in freefall (pull again if
+  // you like; the rearm latch below stops one held key from cut-then-redeploying
+  // in consecutive frames). The keyboard edge lives on a real keydown, exactly
+  // like swim.js's climb press, because the deploy poll below reads LEVELS and
+  // a level cannot distinguish "still holding the pull" from "pressed again".
+  function cutAway() {
+    if (!F.active || F.phase !== "canopy") return false;
+    if (CBZ.CONFIG.BAILOUT_CUTAWAY === false) return false;
+    F.phase = "freefall"; F.shock = 0;
+    F.rearm = true;                     // deploy key must be RELEASED before it pulls again
+    if (F.canopy) F.canopy.visible = false;
+    if (CBZ.sfx) { try { CBZ.sfx("cloth"); } catch (e) {} }
+    return true;
+  }
+  CBZ.cityChuteCut = cutAway;
+  if (typeof addEventListener === "function") {
+    addEventListener("keydown", function (e) {
+      if (!e || (e.key !== " " && e.key !== "f" && e.key !== "F")) return;
+      if (F.active && F.phase === "canopy") cutAway();
+    });
+  }
+
   CBZ.cityChuteState = function () {
     return F.active ? { phase: F.phase, agl: aglNow() } : null;
   };
@@ -331,7 +369,9 @@
     const k = CBZ.keys || {};
 
     if (F.phase === "freefall") {
-      if (k[" "] || k["f"]) deploy();
+      // after a cut-away the pull key must come UP once before it pulls again
+      if (F.rearm) { if (!k[" "] && !k["f"]) F.rearm = false; }
+      else if (k[" "] || k["f"]) deploy();
       P.vy = Math.max(TERMINAL, (P.vy || 0) - 9.81 * dt * 1.55);
       F.driftX *= (1 - dt * 0.55); F.driftZ *= (1 - dt * 0.55);
     } else if (F.phase === "canopy") {
@@ -380,6 +420,30 @@
     if (CBZ.playerChar && CBZ.playerChar.group) {
       CBZ.playerChar.group.position.set(P.pos.x, P.pos.y, P.pos.z);
       CBZ.playerChar.group.rotation.y = F.yaw;
+    }
+
+    // SPLASHDOWN. Over open water the ground test below is unreachable by
+    // construction: physics holds the body on the phantom y=0 floor while
+    // cityCraftFloorY says the ground is the sea surface at -0.48 — so before
+    // this branch existed the canopy simply never came off at sea. End the
+    // jump at the live wave surface, keep the body FALLING and UN-grounded,
+    // and get out of the way: swim.js's pre-physics fall-catcher (order 9.9,
+    // the same path that owns a bridge dive) then claims the entry next tick —
+    // splash, plunge momentum, breath, the lot. No second water-entry path.
+    // The 0.12 floor on the threshold matters: in a calm trough the surface
+    // sits below the phantom floor, so a body riding y=0 must still count as
+    // "at the water" or it hovers there forever, which was the whole bug.
+    if (CBZ.CONFIG.BAILOUT_WATER_LANDING !== false &&
+        CBZ.cityWaterAt && CBZ.cityWaterAt(P.pos.x, P.pos.z)) {
+      const surf = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(P.pos.x, P.pos.z)
+        : (CBZ.waterSeaY ? CBZ.waterSeaY() : -0.48);
+      if (P.pos.y <= Math.max(surf + 0.45, 0.12)) {
+        const sink = Math.min(P.vy || 0, -2.5);   // never arrive rising: the
+        endFall(false);                           // catcher requires vy < 0
+        P.grounded = false;
+        P.vy = sink;
+        return;
+      }
     }
 
     // Landing. Under canopy this is a walk-away; in freefall we simply hand the

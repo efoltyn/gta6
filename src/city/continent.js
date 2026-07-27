@@ -71,6 +71,17 @@
   //   colour, and slope/treeline/clearing rejection sampling.
   if (CFG.CONTINENT_RELIEF_EROSION == null) CFG.CONTINENT_RELIEF_EROSION = true;
   if (CFG.CONTINENT_FOREST_V2 == null) CFG.CONTINENT_FOREST_V2 = true;
+  //  RELIEF_MACRO — one continent-wavelength (2.9km) uplift field organising
+  //   the backcountry hills into broad uplands/plains, tanh-saturated under
+  //   24u so it can never cross the math gate's 25u mountain threshold.
+  //   The measured backcountry mean was 8.7m on an ~11km plate — relief three
+  //   orders of magnitude under the horizontal scale reads as dead flat from
+  //   any altitude. `?cfg_CONTINENT_RELIEF_MACRO=0` reverts to that.
+  if (CFG.CONTINENT_RELIEF_MACRO == null) CFG.CONTINENT_RELIEF_MACRO = true;
+  //  LANDCOVER_V2 — smooth multi-scale land-use fields replace the hashed
+  //   22/90u colour cells whose hard edges dissolved into orange/green
+  //   confetti from any altitude. `?cfg_CONTINENT_LANDCOVER_V2=0` reverts.
+  if (CFG.CONTINENT_LANDCOVER_V2 == null) CFG.CONTINENT_LANDCOVER_V2 = true;
 
   CBZ.addLandmass(function (city) {
     if (CFG.CITY_CONTINENT === false) return;
@@ -344,6 +355,22 @@
       const broad = noise2(x, z, 540, 8896);
       const ridge = 1 - Math.abs(2 * noise2(x + 700, z - 300, 250, 8897) - 1);
       let h = (2.0 + Math.max(0, n + 0.18) * 17 + Math.pow(ridge, 2.4) * broad * 8) * coastFade;
+      // ---- CONTINENT_RELIEF_MACRO: the missing octave -----------------------
+      // Nothing above had a wavelength over 540m on a ~11km plate, so from any
+      // altitude the backcountry read as a corduroy of same-sized 8m bumps —
+      // texture, not geography (a terrain with no octave near the map's own
+      // scale cannot have macro structure, by construction). One continent-
+      // wavelength uplift field now organises the same hills into broad
+      // uplands and plains. The tanh SOFT-SATURATES the result under 24u, so
+      // backcountry relief can approach but NEVER cross the math gate's 25u
+      // mountain threshold — "mountains outside snow" stays impossible here
+      // no matter what the uplift multiplies to. Deterministic (hash01 salt
+      // 8905), per-point, and zero wherever h is already 0, so every existing
+      // flat gate (coasts, pads, highways below) is untouched.
+      if (CFG.CONTINENT_RELIEF_MACRO !== false && h > 0) {
+        const upl = noise2(x + 940, z - 2600, 2900, 8905);
+        h = 24 * Math.tanh((h * (1.25 + 2.15 * upl * upl)) / 24);
+      }
       // Frontier highways are cut into the landscape with broad shoulders;
       // their visible planes never hover over a noisy heightfield.
       const fd = frontierDistance(x, z);
@@ -439,10 +466,36 @@
       const wx = pos.getX(i) + cx0, wz = pos.getZ(i) + cz0;
       // two octaves of position-hash "noise" pick the patch tone —
       // deterministic per seed, no shared rng stream touched.
-      const h1 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 90), Math.floor(wz / 90), 8801) : 0.5;
-      const h2 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 22), Math.floor(wz / 22), 8802) : 0.5;
-      c.copy(h1 < 0.55 ? cGrass : (h1 < 0.8 ? cScrub : cDry));
-      if (h2 > 0.86) c.copy(cDirt);                        // dirt breaks
+      let shade;
+      if (CFG.CONTINENT_LANDCOVER_V2 !== false) {
+        // ---- LANDCOVER V2 (the far-view discoloration fix) ----------------
+        // The old pick hashed 90u / 22u CELLS (Math.floor — hard edges, no
+        // interpolation) straight into a high-contrast palette, plus a ±5%
+        // per-cell brightness jitter. Close up that reads as pleasant patchy
+        // ground; from a rooftop or a canopy the cells are at the vertex
+        // grid's Nyquist limit and the whole country dissolves into the
+        // orange/green confetti the owner screenshotted ("looks good close
+        // up, far away it looks weird"). Real land cover is the opposite:
+        // broad coherent regions with soft ecotones, fine detail only near.
+        // Three SMOOTH fields replace the cell hash — a 760u land-use mosaic
+        // (meadow vs scrub), a 170u dryness variation, and a low-contrast
+        // 46u dirt break — so distance integrates to calm coherent regions
+        // instead of noise. Deterministic (noise2 → hash01, fresh salts).
+        // `?cfg_CONTINENT_LANDCOVER_V2=0` restores the exact old confetti.
+        const use = noise2(wx + 310, wz - 140, 760, 8830);
+        const veg = noise2(wx - 90, wz + 260, 170, 8831);
+        const fine = noise2(wx + 40, wz + 40, 46, 8832);
+        c.copy(cGrass).lerp(cScrub, smooth01((use - 0.34) / 0.34));
+        c.lerp(cDry, smooth01((veg - 0.60) / 0.32) * 0.85);
+        c.lerp(cDirt, smooth01((fine - 0.76) / 0.18) * 0.38);
+        shade = 0.958 + veg * 0.06;                        // gentle, smooth facet variation
+      } else {
+        const h1 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 90), Math.floor(wz / 90), 8801) : 0.5;
+        const h2 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 22), Math.floor(wz / 22), 8802) : 0.5;
+        c.copy(h1 < 0.55 ? cGrass : (h1 < 0.8 ? cScrub : cDry));
+        if (h2 > 0.86) c.copy(cDirt);                      // dirt breaks
+        shade = 0.92 + h2 * 0.1;
+      }
       // large-scale hue drift (300u) so kilometres of country stop reading
       // as one repeated swatch — dryer here, greener there.
       const drift = noise2(wx, wz, 300, 8812) - 0.5;
@@ -475,7 +528,6 @@
           c.lerp(cLush, (1 - (s - 26) / 26) * 0.35);
         }
       }
-      const shade = 0.92 + h2 * 0.1;                       // subtle facet variation
       pos.setY(i, y);
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
     }
