@@ -19,6 +19,13 @@
        (slots dominate the floor, a table pit, a cage, a perimeter bar).
      • INTERACTION: walking up to any table surfaces "[E] Sit at the table",
        which opens the live casino floor (blackjack/roulette/slots).
+     • STAFF (2026-07-27): every casino except the one flagship lot was felt
+       tables and an EMPTY CASHIER CAGE. Each floor now declares a croupier
+       per felt, a cage cashier, a bartender and a pit boss through
+       city/citystaff.js — posts (pure data) until you are within 170 m, which
+       is the only way one real rig per table is affordable across a world full
+       of casinos. They are ordinary peds: killable through the feed, aimable,
+       and every ped verb already registered works on them.
 
    HOW IT RUNS
    An order-90 landmass pass (after every town/biome/mainland building
@@ -47,6 +54,9 @@
   // live table registry (world positions) — the single interaction zone reads
   // this; reset at the top of every dress pass so rebuilds never stack.
   CBZ._casinoTables = CBZ._casinoTables || [];
+  // running total of declared casino jobs across every lot in the world, so
+  // venueStaffAudit can compare it against the posts actually declared.
+  let _casinoStations = 0;
 
   function litMat(color, ei) {
     return new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: ei == null ? 0.8 : ei });
@@ -108,6 +118,11 @@
 
     // TABLES — a small pit toward the interior, clear of the door lane.
     const tables = [];
+    // WHO WORKS THIS FLOOR, collected as the furniture that implies each job
+    // is drawn. Owner: "every place should have the people who work there" —
+    // and a casino with felt tables, a slot bank, a bar and a cashier cage and
+    // NOT ONE EMPLOYEE was the loudest empty room in the game.
+    const staff = [];
     const spanT = hz * 0.9;
     for (let i = 0; i < N; i++) {
       const t = N > 1 ? (i / (N - 1) - 0.5) : 0;
@@ -121,13 +136,26 @@
       const wx = ox + lx, wz = oz + lz;
       tables.push({ x: wx, y: floorY, z: wz, lot: lot });
       CBZ._casinoTables.push({ x: wx, y: floorY, z: wz, lot: lot });
-      // 4 sittable "table" seats around the felt (satisfies the pit-ambiance +
-      // gives the sit pose; the casino-table zone opens the actual game).
+      // 4 sittable seats around the felt. They used to be ANCHORS WITH NOTHING
+      // UNDER THEM and no declared cushion — so a body took the legacy squat
+      // pose while floating over bare carpet. Each now has a real stool drawn
+      // at 0.68 (propuse.js's SEAT_H for a stool against a ~1.0 counter, which
+      // is exactly what the felt top at floorY+1.01 is) and DECLARES it, so
+      // character.js's feet-on-the-floor chair solve applies.
       if (CBZ.propRegisterSeat) {
-        const off = 1.4;
+        const off = 1.4, STOOL = 0.68;
         const spots = [[off, 0, -Math.PI / 2], [-off, 0, Math.PI / 2], [0, off, Math.PI], [0, -off, 0]];
-        for (const s of spots) CBZ.propRegisterSeat(wx + s[0], floorY, wz + s[1], s[2], "table", lot);
+        for (const s of spots) {
+          b.lbox(lx + s[0], floorY + STOOL / 2, lz + s[1], 0.40, STOOL, 0.40, 0x3a2a1c, { cast: false });
+          CBZ.propRegisterSeat(wx + s[0], floorY, wz + s[1], s[2], "stool", lot, { cushion: STOOL, floorBelow: 0 });
+        }
       }
+      // WHO DEALS. One croupier per felt, standing at the dealer's side of the
+      // table facing it — the side a real pit leaves open. `pose:"deal"` is
+      // entities/poses.js's existing croupier pose (hands forward over the
+      // felt); it was written for exactly this and had no consumer.
+      staff.push({ x: wx, z: wz - 2.05, face: 0, job: "croupier", pose: "deal",
+                   id: "deal:" + i, wealth: 0.42, outfit: 0x2a2620 });
     }
 
     // SLOT BANK — a back-to-back row of lit cabinets along a side wall (the
@@ -146,6 +174,37 @@
     b.lbox(-hx * 0.8, floorY + 0.6, -hz * 0.8, Math.min(3.2, hx), 1.1, 0.7, 0x3a2a1c, { solid: true });
     b.lbox(hx * 0.8, floorY + 0.7, -hz * 0.8, Math.min(2.6, hx), 1.4, 0.7, 0x2a2620, { solid: true });
     b.lbox(hx * 0.8, floorY + 1.5, -hz * 0.8, Math.min(2.6, hx), 0.1, 0.7, GOLD, { emissive: GOLD, ei: 0.5, cast: false });
+    // ...and the two people those two counters are FOR. Both stand behind
+    // their own counter (between it and the wall) facing the floor, which is
+    // the only side of a cage or a bar anybody ever works from.
+    staff.push({ x: ox + hx * 0.8, z: oz - hz * 0.8 - 0.72, face: 0, job: "cage cashier",
+                 pose: "table", id: "cage", wealth: 0.4, outfit: 0x2a2620 });
+    staff.push({ x: ox - hx * 0.8, z: oz - hz * 0.8 - 0.72, face: 0, job: "bartender",
+                 pose: "table", id: "bar", wealth: 0.36, outfit: 0x5a3a22 });
+    // THE PIT BOSS watches the felt from behind the dealers. He is the reason
+    // the room has consequences, and "pit boss" is a `class: "law"` trade.
+    if (tables.length) {
+      staff.push({ x: tables[0].x + 2.6, z: tables[0].z - 2.6, face: Math.PI * 0.75, job: "pit boss",
+                   pose: "foldarms", id: "pit", wealth: 0.55, outfit: 0x1c1e24 });
+    }
+
+    // Declare them. A world can hold a lot of casinos and only one of them is
+    // ever near you, so these are POSTS (data) until you are within 170 m —
+    // which is what makes a real croupier per felt affordable at all.
+    if (CBZ.cityStaffPost) {
+      const key = Math.round(lot.cx) + "_" + Math.round(lot.cz);
+      for (let s = 0; s < staff.length; s++) {
+        const p = staff[s];
+        CBZ.cityStaffPost({
+          venue: "casino", id: "casino:" + key + ":" + p.id, job: p.job,
+          archetype: p.job === "pit boss" ? "professional" : "merchant",
+          x: p.x, z: p.z, face: p.face, pose: p.pose,
+          opts: { wealth: p.wealth, outfit: p.outfit, aggr: p.job === "pit boss" ? 0.3 : 0.1 },
+        });
+      }
+      _casinoStations += staff.length;
+      if (CBZ.cityStaffStations) CBZ.cityStaffStations("casino", _casinoStations);
+    }
 
     lot._casinoTables = tables;
     return tables.length;
@@ -195,6 +254,11 @@
     const root = (city && city.root) || (A && A.root) || null;
     if (!A || !root) return;
     CBZ._casinoTables.length = 0;                 // fresh per world build
+    // ...and the people, for the same reason: cityStaffVenue CLEARS this
+    // venue's posts, so a rebuild can never inherit croupiers standing in a
+    // demolished arena.
+    _casinoStations = 0;
+    if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("casino", { stations: 0, note: "one croupier per felt, cage, bar, pit" });
     const seen = new Set();
     const scan = function (arr) {
       if (!arr) return;

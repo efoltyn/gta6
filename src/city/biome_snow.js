@@ -77,7 +77,82 @@
   // -530, byte-identical.
   const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
   const _SP_ACCESS_X = (490 + _SPOFF.dx) - 98, _SP_ACCESS_Z = (-350 + _SPOFF.dz) - 190;
-  const CAUSEWAY_MAXZ = (_SP_ACCESS_X + 12 > 458 + _WOFF.dx) ? (_SP_ACCESS_Z - 12) : -530;
+  const CAUSEWAY_HANDOFF_Z = (_SP_ACCESS_X + 12 > 458 + _WOFF.dx) ? (_SP_ACCESS_Z - 12) : -530;
+
+  // THE LANE, IN ONE PLACE. The deck, the berms, the reserve rect, the region
+  // record, the road record and the island-clearance test below all need the
+  // same x-span, and four of them used to retype it. `HW` is the DECK half
+  // width (buildHighway width 24); `OUTER_HW` includes the snow berms, whose
+  // outer faces sit at ±13.2 ± 1.1 — that is the widest thing the corridor
+  // actually puts on the ground and therefore the thing that has to clear.
+  const CW_CX = 470 + DX, CW_HW = 12, CW_OUTER_HW = 14.3;
+
+  /* ==========================================================================
+     THE CAUSEWAY DRIVES THROUGH A CITY, AND IT ALWAYS HAS.
+
+     MEASURED, not assumed. With the shipped dials (snow dx 0, speedway dx 400)
+     the hand-off above resolves to z = -552, so the deck runs from the snow
+     shore (MAXZ = -2620) south to -552 at x 458..482, berms 455.7..484.3.
+
+     The Commerce Annex — city/expansion.js — is a 120 m disc at
+     (city.maxX + 215, city.center.z) = (380, -700) with a 14 m sand ring, so
+     it occupies x 246..514, z -834..-566. At the deck's WEST edge (455.7) the
+     island's half-chord in z is sqrt(134^2 - 75.7^2) = 110.4, i.e. the island
+     spans z -810.4..-589.6 right where the lane is. The lane's z-span covers
+     that whole interval, so ~200 m of 24 m concrete deck and white snow berms
+     at y 0..0.6 lie across the island's east side, over its street grid, with
+     island ground at y 0 and island asphalt at y 0.05. That z-fight is the
+     owner's "ghost city next to the real city".
+
+     It is NOT a regression from the world re-lay — it has been true since this
+     lane was first derived from the speedway — and it escaped every clearance
+     rule in the game twice over: the deck is raw GEOMETRY (roadrules.js only
+     clamps `city.roads` records) and the name "Mercy Causeway" matches its
+     CONNECTOR exemption. The annex was also missing from `city.regions`
+     entirely until expansion.js registered it, so nothing could even SEE it.
+
+     THE ISLAND CANNOT DODGE. West of the lane is the mainland's harbour bay
+     ring; east is the Ironjaw Arena, whose region is a 120 m disc at
+     (640, -950) with pad 6 — its west edge is x 514 and the annex's sand ring
+     ends at x 514. There is literally a zero-metre gap. So the CORRIDOR moves,
+     and the only move available is to stop short.
+
+     WHAT THIS DOES. The deck now TERMINATES at the island's north shore, which
+     is roadrules.js's own DESTINATION RULE: a road is allowed to reach where it
+     is going. The alpine causeway lands ON the Commerce Annex instead of
+     driving over it, and the Ironjaw Arena's approach causeway (x 482..527 at
+     z -950) is 130 m NORTH of the new terminus, so the arena keeps its link to
+     the mountain. WHAT IS LOST, stated plainly: the butt-joint onto the
+     speedway's annex leg at z -540. That leg runs east-west 26 m off the
+     island's south beach across its whole width, so the through-route is the
+     annex's own street grid — and building that link belongs in expansion.js,
+     not here.
+
+     DERIVED, NEVER TYPED. The cut is computed from `city.annex`'s published
+     cx/cz/radius at BUILD time (expansion.js runs inside buildCity, before
+     cityWorldGeo runs any landmass builder, so the record exists). A
+     hard-coded z is exactly what produced this bug. No rng, no Math.random,
+     idempotent — a rebuild recomputes the same number.
+     ========================================================================== */
+  const ANNEX_SAND = 14;      // expansion.js's beach ring (terrainFlattenUnder R+14)
+  const ANNEX_MARGIN = 8;     // shoulder between the deck's end and the sand
+  function causewayCut(city) {
+    const A = city && city.annex;
+    if (!A || A.radius == null || A.cx == null || A.cz == null) return CAUSEWAY_HANDOFF_Z;
+    // The first part of the corridor that would touch the island is whichever
+    // berm edge is nearest its centre — not the centreline.
+    const x0 = CW_CX - CW_OUTER_HW, x1 = CW_CX + CW_OUTER_HW;
+    const dx = A.cx < x0 ? (x0 - A.cx) : (A.cx > x1 ? (A.cx - x1) : 0);
+    const RR = A.radius + ANNEX_SAND + ANNEX_MARGIN;
+    if (dx >= RR) return CAUSEWAY_HANDOFF_Z;          // the lane misses it entirely
+    const dz = Math.sqrt(RR * RR - dx * dx);
+    // south is +z here (the snow shore is the most negative), so "stop north
+    // of the island" is the SMALLER z of the two.
+    return Math.min(CAUSEWAY_HANDOFF_Z, A.cz - dz);
+  }
+  // Re-derived at the top of the landmass builder; the parse-time value is the
+  // degrade-safe fallback for a build with no annex at all.
+  let CAUSEWAY_MAXZ = CAUSEWAY_HANDOFF_Z;
   // Buildings are laid out before landmass builders run.  Keep a per-build
   // list of their occupied footprints so the terrain oracle can grade a real
   // shelf beneath them instead of letting a later mountain grow through a
@@ -783,6 +858,10 @@
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
+    // WHERE THE CAUSEWAY STOPS, decided against the world that actually exists
+    // (see causewayCut's block comment). Must run before the layout reserve,
+    // the deck, the region record and the road record — all four read it.
+    CAUSEWAY_MAXZ = causewayCut(city);
     const mat = CBZ.mat, cmat = CBZ.cmat || CBZ.mat;
     // AUTHORED-FRAME SEEDING (WORLD_LAYOUT_V2). Everything in this file is
     // already authored in the stage-1 frame and mapped world<->authored at the
@@ -896,7 +975,7 @@
       layout.reserve("snow:lift", { minX: 226 + DX, maxX: 484 + DX, minZ: -1734 + DZ, maxZ: -1166 + DZ }, { pad: 5 });
       // north end = the snow shore (rides the dial); south end stays butted
       // on the speedway leg — the deck STRETCHES as the island moves away.
-      layout.reserve("snow:causeway", { minX: 458 + DX, maxX: 482 + DX, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ }, { pad: 3 });
+      layout.reserve("snow:causeway", { minX: CW_CX - CW_HW, maxX: CW_CX + CW_HW, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ }, { pad: 3 });
       for (let i = 0; i < GREAT_MAJOR.length; i++) {
         const m = GREAT_MAJOR[i], scaled = Math.pow(m.s, 0.62);
         layout.reserveCircle("snow:massif-family:" + i, m.x + DX, m.z + DZ,
@@ -1974,12 +2053,17 @@
     // ============================================================
     //  CAUSEWAY: winding snowy road deck south toward the speedway,
     //  with instanced guardrail posts. North end = the snow shore (MAXZ,
-    //  rides the dial); south end = the speedway-derived CAUSEWAY_MAXZ —
-    //  the deck stretches to cover however far the island moves.
+    //  rides the dial); south end = CAUSEWAY_MAXZ, which is the speedway
+    //  hand-off OR the Commerce Annex's north shore, whichever comes first —
+    //  see causewayCut at the top of this file. The deck stretches to cover
+    //  however far the island moves and stops where a city begins.
     // ============================================================
     (function causeway() {
+      // CW_CX / CW_OUTER_HW are module constants precisely so the clearance
+      // test above and the geometry here can never disagree about where this
+      // road is. The 463..477 rect is the FALLBACK deck's own narrower body.
       const rMinX = 463 + DX, rMaxX = 477 + DX, rMinZ = MAXZ, rMaxZ = CAUSEWAY_MAXZ;
-      const cxMid = (rMinX + rMaxX) / 2;
+      const cxMid = CW_CX;
       if (CBZ.buildHighway) {
         // REAL wide plowed concrete highway over the water toward the speedway.
         // heightAt: grade-follow world/terrain.js relief (it's exactly 0 over
@@ -2030,20 +2114,39 @@
       root.add(postIM);
     })();
 
-    // ---- LIFE: a few skiers / hikers (low live count per spec) -----------
+    // ---- LIFE: the resort's own people (low live count per spec) ---------
+    //
+    //  THE MOUNTAIN REGISTERED A "ski instructor" WORK ANCHOR AND THEN CAST
+    //  ALL FIVE OF ITS BODIES AS "hiker". A slope with a chairlift, a groomed
+    //  run and a lodge, worked by nobody — the anchor below has been advertising
+    //  a job since the day it shipped and no body in this world has ever held
+    //  it. The spot list is unchanged and so is its ORDER; only the `job` each
+    //  spot deals has changed, so no draw on `lr` moves and the snow biome is
+    //  byte-identical for a given seed.
+    //
+    //  Each of these is a real trade in aigoals.js's CITY_JOBS: "ski instructor"
+    //  and "skier" were already there (anchor "slope"), and "ski patrol" and
+    //  "lift operator" are registered against the same anchor by
+    //  city/citystaff.js. So they commute, work a shift and get paid — they are
+    //  not four new labels.
     (function life() {
       if (!CBZ.cityMakePed || !CBZ.cityPeds) return;
       const spots = [
-        { x: 360 + DX, z: -1232 + DZ }, { x: 250 + DX, z: -1190 + DZ },      // near the lodge / lift base
-        { x: 470 + DX, z: -1320 + DZ }, { x: 590 + DX, z: -1585 + DZ },      // ski run / cabin
-        { x: 190 + DX, z: -1430 + DZ },                                      // by the lake
+        // lift base: the operator who actually runs the chairlift, and the
+        // instructor whose class meets at the bottom of it.
+        { x: 360 + DX, z: -1232 + DZ, job: "ski instructor" },               // outside the lodge
+        { x: 250 + DX, z: -1190 + DZ, job: "lift operator" },                // the chairlift base
+        { x: 470 + DX, z: -1320 + DZ, job: "ski patrol" },                   // bottom of the run
+        { x: 590 + DX, z: -1585 + DZ, job: "skier" },                        // up by the cabin
+        { x: 190 + DX, z: -1430 + DZ, job: "hiker" },                        // by the lake — the one
+                                                                             // genuinely off-piste body
       ];
       const lr = mulberry(0xA17 ^ (CX | 0));
       const populationEntries = [];
       for (const sp of spots) {
         try {
           const opts = {
-            job: "hiker", archetype: "resident", behavior: "wander",
+            job: sp.job, archetype: "resident", behavior: "wander",
             wealth: 0.4 + lr() * 0.3, armed: false,
           };
           if (CBZ.npcLife && CBZ.npcLife.definePopulation) {
@@ -2062,6 +2165,28 @@
       if (populationEntries.length && CBZ.npcLife && CBZ.npcLife.definePopulation) {
         CBZ.npcLife.definePopulation("snow-authored", { root: root, entries: populationEntries });
       }
+      // Census only: these five man themselves through npcLife.definePopulation,
+      // so citystaff.js must not be told the slope is five people short of
+      // itself. Nothing here posts a body.
+      if (CBZ.cityStaffVenue) {
+        const JOBS = { "ski instructor": 1, "lift operator": 1, "ski patrol": 1, skier: 1, hiker: 1 };
+        CBZ.cityStaffVenue("snow", {
+          stations: spots.length, note: "lodge, lift base, ski run",
+          census: function () {
+            const peds = CBZ.cityPeds || [];
+            let n = 0;
+            for (let i = 0; i < peds.length; i++) { const p = peds[i]; if (p && !p.dead && JOBS[p.job]) n++; }
+            return Math.min(spots.length, n);
+          },
+        });
+      }
+      // NO FISHING STATION HERE, deliberately. The obvious place for one is the
+      // lake at (180, -1380) — but it is a FROZEN lake, drawn as the terrain
+      // skin itself (see the flatCircleFactor above and the ice colour bands),
+      // not as water. Registering a spot on it would put an angler on solid ice
+      // pulling live mackerel out of ground, which is the class of lie this
+      // wave exists to remove. Ice fishing needs a hole in the ice; when
+      // somebody draws one, this is where the station goes.
     })();
 
     // ============================================================
@@ -2166,15 +2291,18 @@
       // Let the continent render between its sparse connected summits.
       underlay: true,
     });
-    // causeway widened to the 24m highway deck (authored x∈[458,482], centre
-    // x=470; lane + span ride the snow dial — north end is the live shore)
+    // The 24 m highway deck, off the ONE lane definition (CW_CX/CW_HW) rather
+    // than a fourth copy of "458..482, centre 470". North end is the live snow
+    // shore; south end is causewayCut's answer, so this record can never claim
+    // ground the deck no longer covers — which is what let the old span sit on
+    // top of the Commerce Annex with the region registry none the wiser.
     CBZ.registerCityRegion(city, {
       name: "Mercy Causeway", subtitle: "Alpine Range", kind: "rect",
-      minX: 458 + DX, maxX: 482 + DX, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ, pad: 1,
+      minX: CW_CX - CW_HW, maxX: CW_CX + CW_HW, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ, pad: 1,
     });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: 470 + DX, z: (MAXZ + CAUSEWAY_MAXZ) / 2, vertical: true, len: CAUSEWAY_MAXZ - MAXZ, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      city.roads.push({ x: CW_CX, z: (MAXZ + CAUSEWAY_MAXZ) / 2, vertical: true, len: CAUSEWAY_MAXZ - MAXZ, district: "highway", w: CW_HW * 2, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
   }, 30);
 })();

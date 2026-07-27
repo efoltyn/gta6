@@ -424,6 +424,43 @@ const PASS = `(() => {
     if (CBZ.mapAudit) { const mp = CBZ.mapAudit({ draw: true }); out.map = mp.icons + "ico " + mp.labels + "lbl overlap=" + mp.overlaps + " hover=" + mp.hoverable;
       if (mp.overlaps > 2) out.fails.push("MAP LABEL CLUTTER returned: " + mp.overlaps + " overlaps (ratchet 2)"); }
     if (CBZ.platforms) { out.platforms = CBZ.platforms.length; }
+    // VENUE STAFF — the owner's "roles can be greatly expanded": a venue with
+    // buildings and no people is a stage set. unstaffed is the ratchet.
+    if (CBZ.venueStaffAudit) {
+      const vs = CBZ.venueStaffAudit();
+      out.venues = vs.venues + "v " + vs.staffed + "/" + vs.stations + " staffed unstaffed=" + vs.unstaffed + " live=" + (vs.live || 0);
+      if (vs.unstaffed > 0) out.fails.push("VENUE STATIONS WITH NOBODY WORKING THEM: " + vs.unstaffed);
+    }
+    // FISHING — a spot that lies about standing on water refuses itself and is
+    // counted. refused must be 0; a nonzero number is a station on dry land.
+    if (CBZ.fishAudit) {
+      const fa = CBZ.fishAudit();
+      out.fishing = fa.spots + " spots refused=" + fa.refused + " anglers=" + (fa.anglers || 0);
+      if (fa.refused > 0) out.fails.push("FISHING SPOTS NOT ON WATER: " + fa.refused);
+    }
+    // AIRSIDE — every tug and baggage train had nobody in it.
+    if (CBZ.airsideAudit) {
+      const av = CBZ.airsideAudit();
+      if (av.driverless != null && av.driverless > 0) out.fails.push("DRIVERLESS AIRPORT VEHICLES: " + av.driverless);
+    }
+    // RANK LADDERS — a rung nobody holds, or one that unlocks no verb, is the
+    // vanity XP bar CLAUDE.md bans. Both must fall, never rise.
+    if (CBZ.rankAudit) {
+      const rk = CBZ.rankAudit();
+      out.ranks = (rk.orgs || 0) + "orgs rungs=" + (rk.rungs || 0) + " empty=" + (rk.emptyRanks || 0) + " verbless=" + (rk.verblessRungs || 0);
+    }
+    // STREET — wires that land on nothing, poles you walk through, lane paint
+    // running through a junction.
+    if (CBZ.streetAudit) {
+      const st = CBZ.streetAudit();
+      out.street = st.poles + "poles disc=" + st.wiresDisconnected + " thru=" + (st.wiresThroughGeometry || 0) +
+        " noCol=" + (st.polesNoCollider || 0) + " junc=" + st.junctionsDetailed + "/" + st.junctions + " paintThru=" + st.paintThroughJunction;
+      if (st.wiresDisconnected > 0) out.fails.push("POWER LINES ANCHORED TO NOTHING: " + st.wiresDisconnected);
+      if (st.paintThroughJunction > 0) out.fails.push("LANE PAINT RUNS THROUGH A JUNCTION: " + st.paintThroughJunction);
+    }
+    // Stunt ramps must never land on ground somebody closed (the apron).
+    if (CBZ.cityStuntAudit) { const sj = CBZ.cityStuntAudit(); out.stunts = sj.ramps + " ramps refusedAirside=" + sj.refusedAirside;
+      if (!sj.ramps) out.fails.push("EVERY STUNT RAMP VANISHED — the keep-out guard is too aggressive"); }
     if (CBZ.powerAudit) {
       const pw = CBZ.powerAudit();
       out.power = pw.principals + "p/" + pw.guarded + "g legacy=" + pw.legacyGuardSites;
@@ -522,6 +559,8 @@ async function runSeed(seed, label) {
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
+  tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
+  tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
   tmark(`${label}: arena ${r.arena || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);

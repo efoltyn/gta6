@@ -148,28 +148,35 @@
     //     dz -1500 parks Mount Mercy ~2.06 km of open country north of the
     //     speedway (was 1.36 km) and drags the whole Greater Mercy range,
     //     its backdrop ranges and the terrain FLAT north with it.
-    //     MEASURED AND NOT FIXED (2026-07-27) — the Mercy Causeway lane
-    //     RUNS THROUGH THE COMMERCE ANNEX. biome_snow.js authors the deck at
-    //     x 463..477 (snow berms out to 455.7..490.3) from the snow shore
-    //     (z = -2620) south to CAUSEWAY_MAXZ = -552, the speedway hand-off.
-    //     The annex is a 120 m disc at (city.maxX + 215, city.center.z) =
-    //     (380, -700) with a 14 m sand ring, i.e. x 246..514, z -834..-566.
-    //     The lane is therefore inside the island's x-span and its z-span
-    //     covers the island whole: ~158 m of 24 m concrete deck + white berms
-    //     crosses the island's east side, over its street grid, at y 0..0.6
-    //     against island ground at y 0 and island asphalt at y 0.05.
-    //     It is NOT a stage-3 regression — it has been true since the lane
-    //     was first derived from the speedway — and the annex cannot dodge it:
-    //     west of the lane it lands on the mainland's harbour bay ring
-    //     (x 193..260) and east of it on the Ironjaw Arena (x 520..760).
-    //     The CORRIDOR has to move or terminate, not the island. It also
-    //     escapes roadrules.js's clearance law twice over: the deck is
+    //     THE MERCY CAUSEWAY / COMMERCE ANNEX CLASH — MEASURED, THEN FIXED
+    //     (2026-07-27). biome_snow.js authored the deck at x 458..482 (berms
+    //     455.7..484.3) running from the snow shore (z -2620) south to the
+    //     speedway hand-off at z -552. The annex is a 120 m disc at
+    //     (city.maxX + 215, city.center.z) = (380, -700) plus a 14 m sand
+    //     ring; at the deck's west edge the island spans z -810.6..-589.4 —
+    //     so the deck crossed ALL of it: ~220 m of 24 m concrete + white berm
+    //     over the island's street grid, deck at y 0..0.6 against island
+    //     ground at y 0 and island asphalt at y 0.05. That z-fight is what
+    //     read to the owner as a translucent "ghost city" beside the real one.
+    //     It was NOT a stage-3 regression — true since the lane was first
+    //     derived from the speedway. The annex could not dodge it: west is the
+    //     mainland harbour bay ring (x 193..260) and the east gap to the
+    //     Ironjaw Arena region (west edge x 514) is ZERO. So the CORRIDOR
+    //     terminates instead: biome_snow's causewayCut() derives the cut from
+    //     `city.annex`'s own published cx/cz/radius at build time (expansion
+    //     runs before cityWorldGeo), ending the deck at z -820.1 — 9.5 m clear
+    //     of the sand. The Ironjaw approach junction at z -950 is 130 m north
+    //     of the new end, so the arena keeps its mountain link.
+    //     LOST, AND STATED PLAINLY: the butt-joint onto the speedway leg at
+    //     z -540. That link belongs to expansion.js, which still owes the
+    //     annex a road to the speedway leg 26 m off its south beach.
+    //     Note it escaped roadrules.js's clearance law TWICE — the deck is
     //     GEOMETRY (only `city.roads` records are clamped) and the name
-    //     "Mercy Causeway" matches the CONNECTOR exemption.
-    //     city/expansion.js now registers the annex in `city.regions` (it
-    //     never had been — which is why every clearance and spacing rule in
-    //     the game was blind to a 240 m city island), so the audit can at
-    //     last SEE the clash.
+    //     "Mercy Causeway" matches the CONNECTOR exemption — which is why a
+    //     240 m city island could be crossed by a highway for months.
+    //     city/expansion.js now also registers the annex in `city.regions`; it
+    //     never had been, which is why every clearance and spacing rule in the
+    //     game was blind to it.
     snow:     { dx: 0,     dz: -1500 },
     // --- RING 2 NW. forest<->military strait 120u -> 330u; the Redhollow
     //     causeway (forest MAXZ -> military MINZ) stretches to match.

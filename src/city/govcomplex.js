@@ -54,6 +54,14 @@
        the cliff house's is private contractors — and the difference between
        them is the `org` string and nothing else. Guard-called throughout, so
        a build without power.js still places every complex.
+     · THE HOUSEHOLD. Five of the nine sites are RESIDENCES and every one of
+       them contained exactly one person plus his gunmen — no cook, no driver,
+       no housekeeper, no gardener, no nanny, on grounds with hedge parterres,
+       two pools and a helipad. §5b fixes that with a five-word `household` row
+       per site and NO coordinates: the stations are derived from the rect, the
+       gate and the threshold this file already publishes, and
+       city/citystaff.js owns when a body exists (inside 170 m — nineteen staff
+       across nine estates therefore cost nothing while you are elsewhere).
      · THE PEOPLE AT THE TOP. city/officials.js and city/polity.js already
        run a president, governors, mayors and their deputies as real ledger
        identities with real terms, real approval and real succession. This
@@ -731,6 +739,16 @@
       id: "execmansion", name: "The Executive Mansion", subtitle: "Residence of the Head of State",
       hx: 124, hz: 122, bearing: 334, keepOut: "civ", gateSide: 1,
       principal: { key: "president", tier: 5, org: "state", lawful: true, role: "Head of State", job: "official", wealth: 0.95, family: true },
+      // THE RESIDENCE HALF OF "residence AND workplace". Five words per job,
+      // no coordinates — §5b derives every station from the rect, the gate
+      // and the threshold this builder already published.
+      household: [
+        { job: "butler", at: "door", pose: "foldarms", outfit: 0x23262c },
+        { job: "estate cook", at: "yard", outfit: 0xe8eaec },
+        { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
+        { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
+        { job: "nanny", at: "yard", outfit: 0xc8d4e0 },
+      ],
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.lawn, "execmansion");
@@ -777,6 +795,12 @@
       id: "governor", name: "The Governor's Residence", subtitle: "State Executive Residence",
       hx: 94, hz: 88, bearing: 308, keepOut: "civ", gateSide: 1,
       principal: { key: "governor", tier: 4, org: "state", lawful: true, role: "Governor", job: "official", wealth: 0.9, family: true },
+      household: [
+        { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
+        { job: "estate cook", at: "yard", outfit: 0xe8eaec },
+        { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
+        { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
+      ],
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.lawn, "governor");
@@ -940,6 +964,13 @@
       id: "compound", name: "The Compound", subtitle: "Private Estate",
       hx: 78, hz: 74, bearing: 138, keepOut: "civ", gateSide: 2,
       principal: { key: null, tier: 4, org: "gang", lawful: false, role: "The Boss", job: "criminal", wealth: 0.85, family: true },
+      // A crew boss keeps a household too, and it is the same three jobs —
+      // which is the point of a shared vocabulary: no "mob" trade exists.
+      household: [
+        { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
+        { job: "estate cook", at: "yard", outfit: 0xe8eaec },
+        { job: "nanny", at: "garden", outfit: 0xc8d4e0 },
+      ],
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.gravel, "compound");
@@ -972,6 +1003,12 @@
       id: "finca", name: "La Finca", subtitle: "Private Estate",
       hx: 114, hz: 98, bearing: 98, keepOut: "civ", gateSide: 2,
       principal: { key: null, tier: 5, org: "cartel", lawful: false, role: "El Patron", job: "criminal", wealth: 0.95, family: true },
+      household: [
+        { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
+        { job: "estate cook", at: "yard", outfit: 0xe8eaec },
+        { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
+        { job: "nanny", at: "court", outfit: 0xc8d4e0 },
+      ],
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.dirt, "finca");
@@ -1015,6 +1052,11 @@
       id: "cliffhouse", name: "The Cliff House", subtitle: "Private Estate",
       hx: 84, hz: 78, bearing: 58, keepOut: "civ", gateSide: 1,
       principal: { key: null, tier: 4, org: "secco", lawful: false, role: "Founder", job: "executive", wealth: 1.0, family: true },
+      household: [
+        { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
+        { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
+        { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
+      ],
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.stoneD, "cliffhouse");
@@ -1056,7 +1098,7 @@
   const RINGS = 16, STEP = 48, FAN = 6, FAN_STEP = 8 * Math.PI / 180;
 
   const SITES = [];        // live placement records, one per COMPLEXES entry
-  const AUDIT = { complexes: 0, placed: 0, rejected: 0, overlaps: 0, urbanAdjacent: 0, staffed: 0, roadless: 0 };
+  const AUDIT = { complexes: 0, placed: 0, rejected: 0, overlaps: 0, urbanAdjacent: 0, staffed: 0, roadless: 0, household: 0, householdWanted: 0, householdStations: 0 };
 
   function rectOf(cx, cz, hx, hz) { return { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz }; }
   function hit(a, b, m) {
@@ -1510,6 +1552,89 @@
     if (withSeat) site.seated = true;
   }
 
+  /* ====================================================================
+     §5b  THE HOUSEHOLD — a residence is a WORKPLACE.
+
+     OWNER (2026-07-27): "every place should have the people who work there."
+
+     Before this, a complex contained exactly ONE person: the officeholder, plus
+     whatever detail power.js hangs off his tier. That is defensible for the
+     Capitol and the Defence HQ, which are offices — and indefensible for the
+     five RESIDENCES. The Executive Mansion, the Governor's Residence, the mob
+     compound, the cartel finca and the tech cliff house are all declared
+     `family: true`, all have walled grounds, hedge parterres, motor courts,
+     pools and helipads, and NOBODY cleaned, cooked, drove or gardened in any of
+     them. A mansion with nothing in it but guards is a stage set.
+
+     WHAT THIS FILE STILL DOES NOT AUTHOR: no bodies, no brains, no schedule.
+     A row says WHO works there and WHERE the job is in the abstract; the
+     coordinates are derived from what the builder already published (the
+     threshold it stood the principal on, the gate it pushed a road to, its own
+     rectangle), so a new complex declares five words and no numbers.
+     city/citystaff.js decides when a body exists — inside 170 m and no closer,
+     which is why nineteen household staff across nine estates cost nothing
+     while you are anywhere else in the world.
+     ==================================================================== */
+  // Each resolver returns a station in world space. Every one is SIGN-SAFE
+  // against the door normal (lateral offsets, midpoints and rect corners
+  // only), because `seatPoint.face` is the builder's convention and this file
+  // should not be the second place that has to agree with it.
+  const HOUSE_AT = {
+    // either side of the principal's own threshold — the butler/housekeeper
+    // post, and the one you meet first.
+    door: function (s, i) {
+      const f = s.seatPoint.face, side = (i % 2) ? 1 : -1, r = 3.4 + ((i / 2) | 0) * 1.8;
+      return { x: s.seatPoint.x + Math.cos(f) * r * side, z: s.seatPoint.z - Math.sin(f) * r * side, face: f };
+    },
+    // the motor court: on the line the car takes from the gate to the door.
+    court: function (s) {
+      const t = 0.34;
+      const x = s.seatPoint.x + (s.gate.x - s.seatPoint.x) * t;
+      const z = s.seatPoint.z + (s.gate.z - s.seatPoint.z) * t;
+      return { x: x, z: z, face: Math.atan2(s.gate.x - x, s.gate.z - z) };
+    },
+    // service side of the house — where a kitchen door and the bins are.
+    yard: function (s, i) {
+      const c = corner(s, 2 + i), t = 0.34;
+      return { x: s.cx + (c.x - s.cx) * t, z: s.cz + (c.z - s.cz) * t, face: Math.atan2(s.cx - c.x, s.cz - c.z) };
+    },
+    // out in the grounds, where the hedges and the lawn actually are.
+    garden: function (s, i) {
+      const c = corner(s, i), t = 0.62;
+      return { x: s.cx + (c.x - s.cx) * t, z: s.cz + (c.z - s.cz) * t, face: Math.atan2(c.x - s.cx, c.z - s.cz) };
+    },
+  };
+  function corner(s, i) {
+    const R = s.rect;
+    const xs = [R.minX + 14, R.maxX - 14], zs = [R.minZ + 14, R.maxZ - 14];
+    return { x: xs[(i | 0) % 2], z: zs[(((i | 0) >> 1) % 2)] };
+  }
+
+  function staffHousehold(city, site) {
+    if (CFG.GOV_COMPLEX_STAFF === false) return 0;
+    const list = site.def.household;
+    if (!list || !list.length || !site.rect || !site.seatPoint || !CBZ.cityStaffPost) return 0;
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const h = list[i];
+      const res = HOUSE_AT[h.at] || HOUSE_AT.yard;
+      let p = null;
+      try { p = res(site, i); } catch (e) { p = null; }
+      if (!p) continue;
+      CBZ.cityStaffPost({
+        venue: "govcomplex", id: "gov:" + site.id + ":" + h.job.replace(/\s+/g, "-") + ":" + i,
+        job: h.job, archetype: "worker", pose: h.pose || null,
+        x: p.x, z: p.z, face: p.face,
+        // They belong to the household, not to the org — a cook is not a
+        // guard and must never read as one. Unarmed, low aggression, and
+        // powerReactionTo is untouched because we declare no principal here.
+        opts: { wealth: 0.3, aggr: 0.08, armed: false, outfit: h.outfit || 0xd8dce0 },
+      });
+      n++;
+    }
+    return n;
+  }
+
   function staffSite(city, site) {
     if (CFG.GOV_COMPLEX_STAFF === false) return;
     if (!CBZ.cityPostNpc && !CBZ.cityMakePed) return;
@@ -1586,6 +1711,17 @@
     AUDIT.complexes = COMPLEXES.length;
     AUDIT.placed = 0; AUDIT.rejected = 0;
     AUDIT.overlaps = 0; AUDIT.urbanAdjacent = 0; AUDIT.staffed = 0; AUDIT.roadless = 0;
+    // how many household jobs the registry DECLARES, against how many were
+    // actually posted. A residence whose staff silently failed to declare is
+    // the empty-mansion bug coming back, and this is where it shows.
+    AUDIT.household = 0; AUDIT.householdWanted = 0; AUDIT.householdStations = 0;
+    // cityStaffVenue CLEARS this venue's posts — the same "no ghosts from the
+    // last arena" contract the SITES ledger above starts from.
+    if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("govcomplex", { stations: 0, note: "household staff at the five residences" });
+    for (let i = 0; i < COMPLEXES.length; i++) {
+      const hh = COMPLEXES[i].household;
+      if (hh) AUDIT.householdWanted += hh.length;
+    }
 
     const U = settledUnion(city);
     const LB = lotBounds(city);
@@ -1654,9 +1790,12 @@
         });
       }
 
-      // ---- the road, then the person -------------------------------------
+      // ---- the road, then the people -------------------------------------
       site.roads = linkRoad(city, site, streamFor(def.id + ":road"));
       staffSite(city, site);
+      if (def.household) AUDIT.householdStations += def.household.length;
+      AUDIT.household += staffHousehold(city, site);
+      if (CBZ.cityStaffStations) CBZ.cityStaffStations("govcomplex", AUDIT.householdStations);
 
       // ---- the job people do here ---------------------------------------
       // Anchors are pure data on the schedule/goal brain aigoals.js already
@@ -1674,6 +1813,23 @@
             { x: site.cx, z: site.cz },
           ],
         });
+        // ...and a SECOND anchor for the household, because a cook and a
+        // groundskeeper do not commute to a gatehouse. `kind: "estate"` is what
+        // citystaff.js's TRADES registers every household trade against, so
+        // these six jobs route through aigoals.js's existing schedule/goal
+        // brain exactly like a farmer routes to a field.
+        if (def.household && def.household.length) {
+          CBZ.registerWorkAnchor({
+            biome: "city", kind: "estate", role: "housekeeper",
+            x: site.cx, z: site.cz, cap: def.household.length,
+            home: { x: site.cx, z: site.cz },
+            spots: [
+              { x: site.seatPoint.x, z: site.seatPoint.z },
+              { x: site.cx, z: site.cz },
+              { x: (site.cx + site.gate.x) / 2, z: (site.cz + site.gate.z) / 2 },
+            ],
+          });
+        }
       }
 
       AUDIT.placed++;
@@ -1836,6 +1992,11 @@
       urbanAdjacent: AUDIT.urbanAdjacent,   // the DECLARED exception (City Hall)
       staffed: AUDIT.staffed,
       roadless: AUDIT.roadless,
+      // §5b — the residences' cooks/drivers/gardeners. `household` must equal
+      // `householdWanted` on a world where every complex found ground.
+      household: AUDIT.household,
+      householdWanted: AUDIT.householdWanted,
+      householdPlaced: AUDIT.householdStations,   // rows belonging to complexes that found ground
       // the per-site working, so a probe can say WHICH one moved and why
       sites: SITES.map(function (s) {
         return {

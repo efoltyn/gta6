@@ -296,7 +296,7 @@
 <script src="src/vendor/noise.js"></script>
 <!-- world layout dial: per-biome anchor offsets (map-enlargement stage 1;
      all-zero today). Must load before terrain + every biome/island file. -->
-<script src="src/world/layout.js?v=stage2w9z"></script>
+<script src="src/world/layout.js?v=stage2w9zs"></script>
 <script src="src/world/rockscliffs.js?v=rock2"></script>
 <script src="src/world/terrain.js?v=rings1"></script>
 <!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
@@ -543,7 +543,7 @@
 <script src="src/city/exec_office.js?v=fortress1"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
-<script src="src/city/beach.js?v=beach1"></script>
+<script src="src/city/beach.js?v=beach1s"></script>
 <script src="src/city/expansion.js?v=waterunify4z"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
@@ -624,7 +624,7 @@
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=organicforest5"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
-<script src="src/city/biome_snow.js?v=organicmountain18w9y"></script>
+<script src="src/city/biome_snow.js?v=organicmountain18w9ys"></script>
 <script src="src/city/snowboard.js?v=terrain2"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -819,7 +819,7 @@
      enterable, drivable and damageable like anything else — never scenery.
      After roadrules.js (the access law) and island_airport.js (the apron
      geometry it works). Revert with ?cfg_AIRSIDE_TRAFFIC=0. -->
-<script src="src/city/airside.js?v=air1"></script>
+<script src="src/city/airside.js?v=air1s"></script>
 <!-- HIGHWAY CHECKPOINTS. Permanent policed shoulders, as opposed to the
      dynamic roadblock police.js already stages across your lane at 3 stars.
      The officers run police.js's OWN posted-officer brain (c._post) and the
@@ -873,7 +873,7 @@
 <script src="src/city/empire.js?v=empire1"></script>
 <script src="src/city/construction.js?v=build1"></script>
 <script src="src/city/companies.js?v=fortress1"></script>
-<script src="src/city/citystaff.js?v=staff1"></script>
+<script src="src/city/citystaff.js?v=staff1s"></script>
 <script src="src/city/playergang.js?v=fortress1"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=sched1"></script>
@@ -923,8 +923,20 @@
      persistence and net worth work with zero new save code. After storage.js
      — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
      became water-aware without a caller changing. -->
-<script src="src/city/marina.js?v=marina1"></script>
-<script src="src/city/boatyard.js?v=marina1"></script>
+<script src="src/city/marina.js?v=marina1s"></script>
+<script src="src/city/boatyard.js?v=marina1s"></script>
+<!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
+     a mackerel was harvested by SHOOTING it through the hunting pipeline).
+     Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
+     station that lies about standing on water is refused and counted — gives
+     NPC anglers a real cast/settle/haul loop, and puts the player on the same
+     one through a single interaction option. It owns NO fish table: catches
+     are drawn from CBZ.WILDLIFE_SPECIES and paid in the SAME "Fresh Fish" /
+     "Fish Fillet" items wildlife.js's skin() already grants, so adding a
+     species to aquatic.js makes it catchable with no edit here. After
+     marina/boatyard (it registers spots on their quays) and after wildlife.
+     Revert with ?cfg_FISHING=0. -->
+<script src="src/city/fishing.js?v=fish1"></script>
 <script src="src/city/armor.js?v=armor1"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
 <script src="src/city/gigs.js?v=gig5"></script>
@@ -1095,7 +1107,7 @@
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
      countries.js and its deps (interactions.js, activities.js, worldmap). -->
-<script src="src/city/casino.js?v=casino1"></script>
+<script src="src/city/casino.js?v=casino1s"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
 <script src="src/city/continent.js?v=ecotones17w9yz"></script>
@@ -1216,7 +1228,7 @@
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=gov2x"></script>
+<script src="src/city/govcomplex.js?v=gov2xs"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker

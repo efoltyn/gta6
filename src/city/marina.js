@@ -46,6 +46,16 @@
         · cleats every 4m, piles, fenders, mooring lines
         · life: dockhands and liveaboards via CBZ.npcLife.definePopulation —
           the EXISTING shared spawner. No new NPC loop is created here.
+        · THE TRADES THAT WERE MISSING (2026-07-27): nine authored bodies stood
+          on this quay and not one of them was a captain, a deckhand, a
+          mechanic, a fuel attendant or a fisherman — a travel-lift gantry, a
+          hardstand yard, a Med-moor superyacht quay and a fuel dock with
+          nobody working any of them. Five more jobs are declared against the
+          geometry that implies each one and manned by city/citystaff.js only
+          inside 170 m. The work anchor was also DEAD (`kind: "work"` matched no
+          job in aigoals.js's CITY_JOBS, so the dockhands it exists for could
+          never route to it); it is now `kind: "marina"`, which citystaff.js's
+          TRADES table registers every waterfront trade against.
 
    DETERMINISM: this is a world-BUILD path. Every random draw goes through
    CBZ.seedStream("marina") / CBZ.hash01. No Math.random anywhere in build.
@@ -352,6 +362,9 @@
     if (!found) return null;
 
     const rng = marinaRng();
+    // WHO WORKS THIS MARINA, collected as the geometry that implies each job is
+    // drawn. Data only — city/citystaff.js mints the bodies when you are near.
+    const crewSpots = [];
     const mats = new Map();
     function m(c) { let v = mats.get(c); if (!v) { v = cmat(c); mats.set(c, v); } return v; }
     const BGU = THREE.BufferGeometryUtils;
@@ -615,6 +628,16 @@
       const boll = [], lines = [];
       for (let i = 0; i < 3; i++) {
         const bx = QX + 10 + i * step;
+        // A 34 m hull stern-to a quay is not left unattended. The first berth
+        // gets its CAPTAIN and its DECKHAND on the quay beside the passerelle;
+        // the rest of the row is quiet, which is also how a real superyacht
+        // basin looks (one boat working, the others shut up).
+        if (i === 0) {
+          crewSpots.push({ x: bx - bigH.beam / 2 - 1.6, z: MEDZ + 2.0, face: Math.PI, job: "yacht captain",
+            id: "captain", wealth: 0.9, outfit: 0x1d2a44, pose: "foldarms" });
+          crewSpots.push({ x: bx + bigH.beam / 2 + 1.4, z: MEDZ + 2.6, face: Math.PI * 0.86, job: "deckhand",
+            id: "deckhand", wealth: 0.3, outfit: 0xe8eaec, pose: "table" });
+        }
         registerBerth({
           id: "marina-med" + i, x: bx, z: MEDZ - bigH.loa * 0.5 - 1.2,
           heading: Math.PI,                     // bow -z, stern to the quay
@@ -703,6 +726,10 @@
       const slings = [];
       for (const sz of [WELL_Z - 2.0, WELL_Z + 2.0]) slings.push(boxGeoAt((wx0 + wx1) / 2, QUAY_TOP + 6.6, sz, 0.14, 4.6, 0.14));
       mergeAdd(slings, m(0x3a3f44));
+      // A GANTRY DOES NOT LIFT A BOAT BY ITSELF. The lift operator stands at
+      // the head of the well where the controls are, watching the slings.
+      crewSpots.push({ x: (wx0 + wx1) / 2 - 2.0, z: WELL_Z - 5.6, face: 0, job: "boat mechanic",
+        id: "lift", wealth: 0.32, outfit: 0x3a78c9, pose: "foldarms" });
     }
     // -- hardstand yard: hulls out of the water, chocked on steel cradles --
     {
@@ -928,13 +955,89 @@
 
     // A work anchor so the city's existing job brain routes dockhands here —
     // reuse, not a new schedule system.
+    //
+    // IT WAS DEAD. `kind: "work"` matched NO job in aigoals.js's CITY_JOBS, and
+    // an anchor kind nothing routes to is a stat fiction with coordinates: the
+    // marina's own dockhands, yard hands and harbourmaster had a label and
+    // nowhere to go. The kind is now "marina", which is what citystaff.js's
+    // TRADES table registers every waterfront trade against, and `role` names
+    // the trade the way every other biome anchor in the game does.
     if (CBZ.registerWorkAnchor) {
       try {
         CBZ.registerWorkAnchor({
-          kind: "work", name: "Marina", x: QX - 4, z: BZ, cap: 4,
+          biome: "coast", kind: "marina", role: "dockhand",
+          name: "Marina", x: QX - 4, z: BZ, cap: 5,
+          home: { x: QX - 10, z: BZ + 8 },                 // the harbourmaster's office
           spots: [{ x: QX - 4, z: BZ + 4 }, { x: QX - 3, z: BZ - 14 }, { x: QX - 13, z: WELL_Z + 2 }, { x: QX + 10, z: BZ }],
         });
       } catch (e) {}
+    }
+
+    /* =====================================================================
+       9) THE REST OF THE PEOPLE WHO WORK HERE.
+
+       OWNER: "every place should have the people who work there." This marina
+       drew a travel-lift gantry, a hardstand yard, a Med-moor superyacht quay
+       and a fuel dock and staffed NONE of them — the authored population above
+       is nine bodies standing on the quay, and not one of them is a captain, a
+       deckhand or a mechanic. These four are the missing trades, declared
+       against the geometry that implies them and manned by city/citystaff.js
+       only when you are inside 170 m (a full rig is ~16 draw calls, and this
+       basin is 200 m of waterfront you can only stand on one part of).
+
+       They are ordinary peds — killable through the feed, aimable, and every
+       ped verb interactions.js already registers works on them.
+       ===================================================================== */
+    crewSpots.push({ x: QX + FUEL_X - 3.6, z: BZ + FUEL_Z + 0.9, face: -Math.PI / 2, job: "fuel attendant",
+      id: "fuel", wealth: 0.26, outfit: 0xe0a93b, pose: "table" });
+    if (CBZ.cityStaffVenue && CBZ.cityStaffPost) {
+      // 9 authored bodies + 4 crew + the quay fisherman = the whole staff.
+      CBZ.cityStaffVenue("marina", {
+        stations: 14, note: "quay, yard, lift well, fuel dock, superyacht quay",
+        // the authored population (dockhands, harbourmaster, liveaboards,
+        // broker) mans itself through npcLife.definePopulation — count it here
+        // so the audit is not told the marina is 9 people short of itself.
+        census: function () {
+          const peds = CBZ.cityPeds || [];
+          let n = 0;
+          for (let i = 0; i < peds.length; i++) if (peds[i] && peds[i]._marinaRole && !peds[i].dead) n++;
+          return n;
+        },
+      });
+      for (let i = 0; i < crewSpots.length; i++) {
+        const s = crewSpots[i];
+        CBZ.cityStaffPost({
+          venue: "marina", id: "marina:" + s.id, job: s.job,
+          archetype: s.job === "yacht captain" ? "professional" : "laborer",
+          x: s.x, z: s.z, face: s.face, pose: s.pose,
+          opts: { wealth: s.wealth, outfit: s.outfit, aggr: 0.1 },
+        });
+      }
+    }
+
+    // THE WATER IS FISHED. Two stations on geometry that already exists: the
+    // quay edge beside the harbourmaster's office and the end of the fuel
+    // pontoon. Each validates its own water (city/fishing.js refuses a station
+    // whose water point is not water), so if a future coastline moves out from
+    // under this marina the stations disappear instead of lying.
+    if (CBZ.fishSpotRegister) {
+      const quaySpot = CBZ.fishSpotRegister(QX - 2.5, BZ + 20, {
+        name: "Marina Quay", face: Math.PI / 2, y: QUAY_TOP, water: { x: QX + 16, z: BZ + 20 },
+      });
+      CBZ.fishSpotRegister(QX + FUEL_X + 5.0, BZ + FUEL_Z, {
+        name: "Fuel Dock", face: Math.PI / 2, water: { x: QX + FUEL_X + 16, z: BZ + FUEL_Z },
+      });
+      // ...and the man who works one of them. level.js has carried a
+      // "Fisherman" title for its whole life with nobody wearing it; this is
+      // one of the two bodies that finally do.
+      if (quaySpot && CBZ.cityStaffPost) {
+        CBZ.cityStaffPost({
+          venue: "marina", id: "marina:angler", job: "fisherman", archetype: "laborer",
+          x: quaySpot.x - 1.1, z: quaySpot.z, face: quaySpot.face, pose: "table",
+          opts: { wealth: 0.22, outfit: 0x4a5232, aggr: 0.08 },
+          after: function (ped) { if (CBZ.fishWorkRod) CBZ.fishWorkRod(ped, quaySpot); },
+        });
+      }
     }
 
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();

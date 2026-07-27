@@ -212,7 +212,59 @@ Before building anything adjacent, wire into the existing system:
   — never re-derive `g.playerGang` again (16 files did; that is the ratchet).
   **Every rung must unlock a VERB, not just a bigger number** — a rank that
   only raises a payout is a vanity XP bar (see `contracts.js` UNLOCKS).
-  Ratchet: `CBZ.factionAudit()`, baseline 27, currently **19**.
+  Ratchet: `CBZ.factionAudit()`, baseline 27, currently **17**.
+- **A RANK IS A VERB, OR IT IS NOTHING** — `CBZ.rankCan(actor, org, verb)` /
+  `CBZ.rankHolder(org, verb)` / `CBZ.rankKnows(org, verb)` in `city/factions.js`.
+  OWNER (2026-07-27): "different levels in orgs etc etc — roles can be greatly
+  expanded." The law above ("every rung must unlock a VERB") shipped with **no
+  answer function**: `contracts.js` enforced it for the PLAYER via `minRank`, and
+  nothing could answer it for an NPC — which is why `police.js` ran a whole force
+  off ONE boolean (`swat`) in 3300 lines and `level.js`'s eight military rungs
+  were, in its own census's words, "pure display". Two questions are now
+  askable, and the second is the one that gives an org a SHAPE: **a roadblock is
+  an ORDER, and an order needs somebody alive to give it.** Adoption is
+  `grants:["roadblock"]` on the rung that opens it plus `rankField:"copRank"`
+  once for the org — **`rankField` is what keeps this a migration and not
+  parallel bookkeeping: an NPC's rank stays in the field the world was already
+  writing** (`copRank` · `milRank` · `rank`), and factions.js never stores one.
+  **The degrade-safe guard is `rankKnows`, never a bare null check on
+  `rankCan`** — rankCan answers FALSE for an undeclared org, so `if
+  (!rankCan(…)) return` would SLAM every gate shut the moment `FACTION_V1` was
+  flipped off. What each rung actually opens, all enforced, none aspirational:
+  police — Corporal `moveon`/`partner` (the move-along and the two-officer beat)
+  · Sergeant `roadblock` · Lieutenant `swat` · Captain `air` (Air-1) · Chief
+  `standdown`; army — Sergeant `enlist` (a private cannot swear you in) ·
+  General `crackdown`; gang — Enforcer `vouch`/`succeed`; secco — Senior Guard
+  `carry` (a REAL issued sidearm), Shift Manager `cover` (one star no longer
+  costs the job). **`vouch` is cross-org and lives in ONE place**: level.js's
+  cover reveal used to read "any cop sees through any police cover", making a
+  rookie as dangerous to a stolen uniform as the watch commander.
+  **THE BRASS ARE PEOPLE YOU CAN FIND, AND THAT IS THE WHOLE MECHANIC.** A rank
+  drawn as a 3% roll on a street body is a stat fiction — you could play for
+  hours with nobody who could authorise SWAT. So `police.js` posts a COMMAND
+  WATCH (Lieutenant · Captain · Chief) at the precinct on its own `_post`
+  standing-officer brain (`relaxed:true`), and a killed commander leaves the
+  chair EMPTY for 60-150 s. Kill the Chief and the department's arrest-first
+  posture **lapses** — it was a config flag with no author; it is a standing
+  order somebody holds. Same law on the army side: peds.js assigns military rank
+  by **ROSTER SLOT** (a unit is a pyramid, and a pyramid is a roster) instead of
+  the old 0.3%-per-body roll that left most seeds with no General at all, and
+  level.js derives the Defence HQ officeholder's rung from the power tier
+  govcomplex.js already declared him at — so the Chief of the General Staff IS
+  the General. **Three ladders were deleted, not added**: level.js's `MIL_NAME`/
+  `MIL_LVL` (8 rungs that existed nowhere else) and its private
+  `{police, army}` audit tables now DERIVE from the declared ladder, and
+  `hud.js`'s `MEMB_LADDER`/`MEMB_NEED` — the fourth copy of the gang order,
+  which **disagreed with gangs.js** (Runner cost 2 bodies/$220 on the bar and
+  1/$180 in the promotion that actually fires, so the sliver lied about its own
+  condition). **Captain, Major and Colonel were CUT from the army ladder**: no
+  verb in this game separates them, and every candidate lived in a file that
+  wave did not own. Cut a rung rather than ship a number. Flags `POLICE_RANKS` ·
+  `POLICE_COMMAND`. Ratchet: **`CBZ.rankAudit()`** → `{orgs, rungs, held,
+  verbed, emptyRanks, verblessRungs}`; **`emptyRanks` and `verblessRungs` may
+  only ever go DOWN**, with `held`/`verbed` printed beside them so an org that
+  "fixes" the count by declaring fewer rungs cannot pass. NOT YET PINNED —
+  measure and write the number in (do not repeat the `propUseAudit` mistake).
 - **Missions / objectives / contracts** — `src/core/mission.js` (`CBZ.mission`).
   ONE tracked, paid objective primitive: `CBZ.mission.start({id, title, goal,
   at|actor|vehicle|object, reward, onComplete})` where `goal` is
@@ -245,9 +297,13 @@ Before building anything adjacent, wire into the existing system:
   dossier's "Known for" row, never over a head. Ratchet: `CBZ.roleAudit()` →
   `{peds, roled, roleless, shrugs, kinds, titles, orgs, emptyRanks}`. **`roleless`
   and `shrugs` may only go DOWN; `emptyRanks` names declared rungs with no holder,
-  which is the stat-fiction ban applied to ladders.** THE BASELINE IS NOT YET
-  MEASURED — the gate reports it and does not fail; whoever runs it first writes
-  the number in (do not repeat the `propUseAudit` mistake of pinning a guess).
+  which is the stat-fiction ban applied to ladders.** It no longer carries any
+  rank table of its own — the `{police: COP_NAME, army: MIL_NAME}` loop that used
+  to live in it is DELETED, and the declared ladders cover both, so this and
+  `CBZ.rankAudit()` can never disagree about what a rung is. THE BASELINE IS NOT
+  YET MEASURED — the gate reports it and does not fail; whoever runs it first
+  writes the number in (do not repeat the `propUseAudit` mistake of pinning a
+  guess).
 - **A DISPLAYED ROLE IS A CLAIM, NOT A FACT** — `CBZ.cityTrueRole(a)` /
   `CBZ.cityTitle(a, viewer)` / `CBZ.citySeesThrough(a, viewer)` /
   `CBZ.citySetCover(a, {role, lvl, org, seeTier})` / `CBZ.cityBurnCover(a, secs)`,
@@ -753,6 +809,56 @@ Before building anything adjacent, wire into the existing system:
   and it was never about planes. The re-assert lives in the SHARED file, so cars,
   taxis and every future moving seat are fixed by the same three writes. Skipped
   during a live propuse arc; `actor._seatHold = false` opts out.
+- **A venue declares its JOBS, not its bodies** — `CBZ.cityStaffVenue(id,
+  {stations, census})` / `CBZ.cityStaffPost(spec)` in `city/citystaff.js`.
+  OWNER: "roles can be greatly expanded" — and the census that followed found
+  the buildings without the people: `airside.js` was 1,471 lines of pushback
+  tugs, baggage trains and fuel bowsers with **every one driverless**, the
+  marina had no captain and its work anchor matched no job in `CITY_JOBS`, the
+  boatyard's "Talk to the broker" pointed at nobody, the beach had a lifeguard
+  chair you can stand on with nobody in it, and every casino but the flagship
+  was felt tables and an empty cashier cage. A venue with buildings and no
+  people is a stage set.
+  The block is DATA AT BUILD TIME, BODY ON DEMAND: a station is declared once,
+  and a rig is minted only inside `near` (170 m) and given back past `far`
+  (320 m). **That 170 is arithmetic, not taste** — peds.js hides rigs past 95 m
+  and `npcTransitionSafe` auto-allows past 150 m, so a body minted at 170 m is
+  invisible AND unwatchable by construction: nobody ever sees a worker appear.
+  Seams: `adopt` (bind to a body the world already runs — the boatyard casts
+  nobody, it adopts the marina's broker), `attach` (caller does its own
+  `npcLife.attach`), `at` (a station that MOVES — an airside tug), `release`.
+  Killed staff are not replaced; swept staff are. Cap 40, flag `VENUE_STAFF`.
+  It also registers 27 venue trades into `CBZ.cityJobs` on the first tick, so a
+  deckhand or croupier has a shift, a wage and a workplace instead of being
+  label #121 the job table never heard of. Ratchet: `CBZ.venueStaffAudit()`,
+  `unstaffed` pinned at **0**.
+- **Fishing** — `city/fishing.js`. `CBZ.fishSpotRegister` SELF-VALIDATES against
+  `CBZ.cityWaterAt`: a spot that lies about standing on water is refused and
+  counted (`fishAudit().refused`, pinned at 0). It owns **no fish table** —
+  catches come from `CBZ.WILDLIFE_SPECIES` and pay in the same "Fresh Fish" /
+  "Fish Fillet" items `wildlife.js`'s `skin()` already grants, so a species
+  added to `aquatic.js` is catchable with no edit here. Before this, the world
+  had a "Fisherman" title nobody wore and a mackerel was harvested by SHOOTING
+  it through the hunting pipeline.
+- **Rank unlocks a VERB** — `CBZ.rankCan(actor, org, verb)` / `rankHolder` /
+  `rankKnows` / `rankAudit` in `city/factions.js`. CLAUDE.md's law was already
+  "every rung must unlock a verb, not just a bigger number"; police wrote ZERO
+  ranks while `level.js` held the names, and the military ladder was 8 rungs of
+  pure display whose top rung was **statistically unreachable** (rolled 0.3%
+  PER BODY, so a seed could simply never contain a General — rank is a ROSTER
+  SLOT now). Adoption is `grants:["roadblock"]` on a rung plus `rankField:
+  "copRank"` once per org, and **`rankField` is what keeps it a migration**: the
+  rank stays in the field the world already writes and factions.js stores
+  nothing. THE TRAP TO KNOW: `rankCan` returns FALSE for an undeclared org, so a
+  naive `if (!rankCan(...)) return` slams every gate shut when the flag is off —
+  that is why `rankKnows` exists and why every gate uses it. The headline verb
+  is the Chief's `standdown`: arrest-first was a config flag with no author, and
+  is now a standing order somebody HOLDS — kill the Chief and the department
+  stops trying to take you in for 60-150 s. Deletions matter more than additions
+  here: `MIL_NAME`, `roleAudit`'s duplicate table and `hud.js`'s `MEMB_LADDER`
+  are gone — that last one was the FOURTH copy of the gang order and it
+  DISAGREED with `gangs.js`, so the progress bar filled at a different rate than
+  the promotion that actually fired. Ratchet: `factionAudit` 19 -> **17**.
 - **Power / protection** — `src/city/power.js`. ONE declaration,
   `CBZ.powerPrincipal(actor, {tier, org, role, seat, family})`, turns any actor
   the world already runs into a PRINCIPAL: a ring of guards, the `Lv.N Role`
@@ -1025,23 +1131,33 @@ showing the work:
 | furniture anchors NOTHING can walk to (`propUseAudit().blocked`) | 0 (claimed) | **487** of ~6000 |
 | seat anchors with no declared cushion (`.noGeom`) | — | **4955** of 5993 |
 | venue seats whose anchor declared no cushion (the arena bowl) | — | **0** (was every one) |
-| rank/tier ladders (RE-COUNTED 2026-07-27, file-by-file) | 20 | **~28** |
-| ↳ copies of the GANG rank order alone | 8 | **8** (playergang · careers · hud · leaderboard · level ×2 · gangs ×2 · economy) |
+| rank/tier ladders (RE-COUNTED 2026-07-27, file-by-file) | 20 → ~28 | **~24** |
+| ↳ copies of the GANG rank order alone | 8 | **7** (playergang · careers · leaderboard · level ×2 · gangs ×2 — `hud.js`'s copy is DELETED) |
 | ↳ copies of the POLITICAL title ladder | — | **8 files** (officials · officialdom · contracts · civic · statecraft · candidacy · elections · games/government) |
 | jobs the world casts that `aigoals.js` `CITY_JOBS` has never heard of | — | **~120** (no workplace, no shift, no wage) |
 
-The rank-ladder row is worse than the old 20, not better, and the two sub-rows
-are why: the political title ladder ("President"/"Governor"/"Mayor"/"Chief") is
+The rank-ladder row still dwarfs the old 20, and the political sub-row is why:
+the political title ladder ("President"/"Governor"/"Mayor"/"Chief") is
 hand-copied across EIGHT files, and `officialdom.js`'s own comment admits the
-duplication while predicting it "is not going to be four" — it is eight. Two
-ladders fail the verb law outright and are named here so they cannot hide:
-`careers.js`'s `secco` (Guard → Senior Guard → Shift Manager) is three rungs of
-`wageMul` and nothing else, and `level.js`'s `MIL_NAME` is **8 rungs that unlock
-nothing at all** — the largest ladder in the repo is pure display, and its top
-rung is unreachable in practice (0.3% of military-jobped bodies, drawn off the
-SEEDED stream, so a seed with no `r() > 0.997` in its garrison will never produce
-a General no matter how long you play). There is **no police rank ladder at all**:
-`police.js` has one boolean, `swat`.
+duplication while predicting it "is not going to be four" — it is eight. **That
+one is the next migration owed.**
+
+CORRECTED 2026-07-27 (this paragraph used to name three live faults; all three
+are now fixed, and leaving the old text would be exactly the stale-claim
+problem this file keeps catching itself in):
+- `careers.js`'s `secco` was "three rungs of `wageMul` and nothing else". Senior
+  Guard now issues a REAL sidearm through `CBZ.cityGiveWeapon`; Shift Manager
+  survives one star instead of being fired on the spot. The multipliers stay —
+  being the *only* difference was the fault, not existing.
+- `level.js`'s `MIL_NAME` was "8 rungs that unlock nothing at all", with a top
+  rung unreachable in practice (0.3% per body off the SEEDED stream). It is no
+  longer a ladder at all: `militia.js` declares the ONE army ladder, three of
+  those eight rungs (Captain · Major · Colonel) are DELETED for having no verb,
+  and rank is assigned by roster slot so a General exists the moment a garrison
+  does.
+- "There is **no police rank ladder at all**: `police.js` has one boolean,
+  `swat`." There is one now, it has six rungs, and five of them gate an order
+  the force already knew how to give. See "A RANK IS A VERB, OR IT IS NOTHING".
 
 The last two are the newest entry and the sharpest lesson in this table: both
 numbers come from an audit that had existed for weeks with a header confidently

@@ -54,6 +54,18 @@
    aircraft's own published dims rather than from its bounding rectangle. No
    aircraft is named anywhere in this file.
 
+   SOMEBODY IS DRIVING (2026-07-27). This file shipped five machines with
+   NOBODY IN ANY OF THEM. Every service vehicle now carries a real, killable
+   ped in a declared npclife seat (section 8b — the police/gunship helicopter
+   crew grammar verbatim) and three more work the ramp itself. Shoot a driver
+   and his machine coasts to a stop; steal one and he is thrown out ALIVE.
+   The bodies exist only inside 170 m (city/citystaff.js's CBZ.cityStaffPost),
+   which is why eight ~16-draw-call rigs cost nothing when you are not there.
+   Two cab shells had to GROW to make this honest: the catering and bowser cabs
+   were 1.02 m and 1.10 m floor-to-roof — boxes no human could sit in — and the
+   follow-me's saloon greenhouse was 0.56 m. All three now clear a seated head
+   and all three stay under the 2.3 m jet-bridge underside.
+
    NOBODY DRIVES ON THE RUNWAY. Every authored waypoint sits on the apron, the
    taxiway or the service road; the audit below counts violations and it must
    read zero. The ONE exception is a rare runway-inspection run by the
@@ -223,7 +235,12 @@
     geoMesh(g, taperBox(1.80, 0.34, 1.50, { nz: 0.72, top: 0.9 }), paint, 0, 0.62, 1.30);  // sloped snout
     bx(g, 1.42, 0.64, 1.05, 0, 1.10, -0.62, paint);                   // rear-set cab tub
     bx(g, 1.30, 0.46, 0.92, 0, 1.42, -0.62, vmat("glass", 0x1d3a4a), { noCast: true });
-    bx(g, 0.52, 0.50, 0.46, 0, 1.02, -0.30, dark);                    // seat
+    // A SEAT A HUMAN FITS IN. The cushion top is 1.11 and the hoop canopy's
+    // underside is 1.98, which leaves 0.87 of head room — a seated rig needs
+    // ~0.82 above the cushion, so the driver's head sits just under the canvas
+    // exactly the way a real tug driver's does. (Was 1.02 / top 1.27, which put
+    // his head THROUGH the canopy. See SEATS below for the anchor.)
+    bx(g, 0.52, 0.50, 0.46, 0, 0.86, -0.30, dark);                    // seat
     bx(g, 0.86, 0.06, 0.10, 0, 1.16, -0.06, dark);                    // wheel/tiller
     for (const s of [-1, 1]) bx(g, 0.08, 0.62, 0.08, s * 0.62, 1.72, -0.62, chrome);   // roll hoop
     bx(g, 1.34, 0.08, 0.42, 0, 2.02, -0.62, paint);                   // hoop canopy
@@ -242,15 +259,19 @@
     const dark = cmat(0x24272b);
     bx(g, 1.42, 0.34, 2.50, 0, 0.54, 0, paint);                       // chassis deck
     geoMesh(g, taperBox(1.26, 0.48, 1.10, { nz: 0.76 }), paint, 0, 0.86, 0.86);        // bonnet
-    bx(g, 0.54, 0.52, 0.48, 0, 0.98, -0.30, dark);                    // seat pan
-    bx(g, 0.54, 0.46, 0.10, 0, 1.24, -0.54, dark);                    // seat back
-    for (const s of [-1, 1]) for (const z of [0.30, -0.86]) bx(g, 0.07, 0.86, 0.07, s * 0.62, 1.32, z, cmat(0x9aa0a6));
-    bx(g, 1.44, 0.07, 1.36, 0, 1.78, -0.28, cmat(0xe6e9ec));          // canopy roof
+    // Seat pan top 1.18, canopy underside 2.025 — 0.845 of head room for a rig
+    // that needs ~0.82. The canopy posts grew 0.30 to make that true, which is
+    // also the honest height for a baggage tractor a person actually drives
+    // (the old 1.745 canopy would have been a decapitation).
+    bx(g, 0.54, 0.52, 0.48, 0, 0.92, -0.30, dark);                    // seat pan
+    bx(g, 0.54, 0.46, 0.10, 0, 1.18, -0.54, dark);                    // seat back
+    for (const s of [-1, 1]) for (const z of [0.30, -0.86]) bx(g, 0.07, 1.16, 0.07, s * 0.62, 1.47, z, cmat(0x9aa0a6));
+    bx(g, 1.44, 0.07, 1.36, 0, 2.06, -0.28, cmat(0xe6e9ec));          // canopy roof
     bx(g, 0.30, 0.16, 0.60, 0, 0.60, -1.44, vmat("chrome", 0xc8ccd2));// drawbar
     bx(g, 0.26, 0.10, 0.10, 0, 1.02, 1.34, mat(0xfff2cc, { emissive: 0xffe9b8, ei: 0.7 }), { noCast: true });
-    const bm = beaconLamp(g, 0, 1.88, -0.28, 0xffb648, 0.26, 0.13);
+    const bm = beaconLamp(g, 0, 2.16, -0.28, 0xffb648, 0.26, 0.13);
     for (const s of [-1, 1]) for (const z of [0.86, -0.94]) wheel(g, s * 0.66, z, 0.32, 0.28, wheels);
-    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 1.7, length: 2.9, height: 1.85, wheelbase: 1.8 } };
+    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 1.7, length: 2.9, height: 2.15, wheelbase: 1.8 } };
   }
 
   function buildCart(seedX, seedZ, idx) {
@@ -290,9 +311,15 @@
     const steel = cmat(0x9aa0a6);
     const dark = cmat(0x24272b);
     bx(g, 2.06, 0.42, 5.10, 0, 0.46, 0, cmat(0x40454b));              // chassis rails
-    bx(g, 1.94, 1.02, 1.66, 0, 1.20, 1.62, paint);                    // cab
-    bx(g, 1.80, 0.60, 0.10, 0, 1.42, 2.42, vmat("glass", 0x1d3a4a), { noCast: true });
-    for (const s of [-1, 1]) bx(g, 0.10, 0.54, 1.30, s * 0.94, 1.34, 1.58, vmat("glass", 0x1d3a4a), { noCast: true });
+    // CAB HEIGHT IS A HUMAN MEASUREMENT. The old shell was 1.02 m floor-to-roof
+    // — a box nobody could sit in — so the roof is now 2.05, matching the lift
+    // box's own 2.06 cap and staying inside this file's ≤2.1 m moving-height
+    // discipline (jet-bridge underside 2.3). Floor 0.69, cushion 1.14, head
+    // ~1.96: the driver is visible through his own glass.
+    bx(g, 1.94, 1.36, 1.66, 0, 1.37, 1.62, paint);                    // cab
+    bx(g, 1.80, 0.60, 0.10, 0, 1.62, 2.42, vmat("glass", 0x1d3a4a), { noCast: true });
+    for (const s of [-1, 1]) bx(g, 0.10, 0.54, 1.30, s * 0.94, 1.58, 1.58, vmat("glass", 0x1d3a4a), { noCast: true });
+    bx(g, 0.52, 0.46, 0.48, -0.42, 0.91, 1.62, dark);                 // driver's seat
     bx(g, 1.90, 0.20, 0.16, 0, 0.70, 2.52, dark);                     // bumper
 
     // Scissor: two crossed arms a side, pivoting on the chassis behind the cab.
@@ -332,9 +359,12 @@
     const steel = vmat("chrome", 0xc8ccd2);
     const dark = cmat(0x24272b);
     bx(g, 2.14, 0.40, 5.90, 0, 0.46, 0, cmat(0x3a3e44));              // chassis
-    bx(g, 2.00, 1.10, 1.80, 0, 1.24, 1.90, paint);                    // cab
-    bx(g, 1.86, 0.62, 0.10, 0, 1.46, 2.76, vmat("glass", 0x1d3a4a), { noCast: true });
-    for (const s of [-1, 1]) bx(g, 0.10, 0.56, 1.40, s * 0.97, 1.38, 1.86, vmat("glass", 0x1d3a4a), { noCast: true });
+    // Same fix as the catering cab: floor 0.69, roof 2.10 (the fill hatch is
+    // already at 2.11, so the silhouette does not grow), cushion 1.14.
+    bx(g, 2.00, 1.42, 1.80, 0, 1.40, 1.90, paint);                    // cab
+    bx(g, 1.86, 0.62, 0.10, 0, 1.66, 2.76, vmat("glass", 0x1d3a4a), { noCast: true });
+    for (const s of [-1, 1]) bx(g, 0.10, 0.56, 1.40, s * 0.97, 1.62, 1.86, vmat("glass", 0x1d3a4a), { noCast: true });
+    bx(g, 0.52, 0.46, 0.48, -0.44, 0.91, 1.90, dark);                 // driver's seat
     // the tank: one squat cylinder lying along the body (top at 2.04 — it has
     // to clear the jet-bridge underside on the head-of-stand road)
     geoMesh(g, cylGeom(0.72, 3.40, 14), paint, 0, 1.32, -0.80, { rx: Math.PI / 2 });
@@ -368,18 +398,23 @@
       } catch (e) { check = cmat(0xf2c010); }
     }
     geoMesh(g, taperBox(1.82, 0.62, 4.10, { nz: 0.88, tz: 0.92, top: 0.86 }), body, 0, 0.74, 0);
-    bx(g, 1.54, 0.56, 1.74, 0, 1.28, -0.18, body);                    // greenhouse
-    bx(g, 1.42, 0.42, 0.08, 0, 1.30, 0.70, vmat("glass", 0x1d3a4a), { noCast: true });
-    bx(g, 1.42, 0.42, 0.08, 0, 1.30, -1.06, vmat("glass", 0x1d3a4a), { noCast: true });
-    for (const s of [-1, 1]) bx(g, 0.08, 0.40, 1.50, s * 0.78, 1.30, -0.18, vmat("glass", 0x1d3a4a), { noCast: true });
+    // A REAL FOLLOW-ME IS A HIGH-ROOF OPS VAN, not a saloon — and it has to be,
+    // because a 0.56 m greenhouse cannot hold a driver. Roof 1.92 over a cabin
+    // floor of 0.62 gives 1.30 of head room; the board and beacon ride up with
+    // it, which is exactly where a rooftop FOLLOW ME board belongs.
+    bx(g, 1.54, 0.92, 1.74, 0, 1.46, -0.18, body);                    // greenhouse
+    bx(g, 1.42, 0.42, 0.08, 0, 1.44, 0.70, vmat("glass", 0x1d3a4a), { noCast: true });
+    bx(g, 1.42, 0.42, 0.08, 0, 1.44, -1.06, vmat("glass", 0x1d3a4a), { noCast: true });
+    for (const s of [-1, 1]) bx(g, 0.08, 0.40, 1.50, s * 0.78, 1.44, -0.18, vmat("glass", 0x1d3a4a), { noCast: true });
+    bx(g, 0.50, 0.44, 0.46, -0.34, 0.83, -0.05, dark);                 // driver's seat
     for (const s of [-1, 1]) bx(g, 0.04, 0.30, 3.10, s * 0.93, 0.72, -0.10, check, { noCast: true });   // checker flanks
-    bx(g, 1.10, 0.34, 0.08, 0, 1.78, -0.18, check, { noCast: true });  // roof board
-    bx(g, 1.18, 0.10, 0.34, 0, 1.60, -0.18, dark, { noCast: true });   // board mount / light bar base
-    bx(g, 0.44, 0.16, 0.20, -0.34, 1.62, -0.18, mat(0xffb648, { emissive: 0xffb648, ei: 0.9 }), { noCast: true });
-    const bm = beaconLamp(g, 0.34, 1.62, -0.18, 0xffb648, 0.30, 0.16);
+    bx(g, 1.10, 0.34, 0.08, 0, 2.14, -0.18, check, { noCast: true });  // roof board
+    bx(g, 1.18, 0.10, 0.34, 0, 1.96, -0.18, dark, { noCast: true });   // board mount / light bar base
+    bx(g, 0.44, 0.16, 0.20, -0.34, 1.98, -0.18, mat(0xffb648, { emissive: 0xffb648, ei: 0.9 }), { noCast: true });
+    const bm = beaconLamp(g, 0.34, 1.98, -0.18, 0xffb648, 0.30, 0.16);
     bx(g, 1.60, 0.16, 0.10, 0, 0.62, 2.06, dark, { noCast: true });    // bumper
     for (const s of [-1, 1]) for (const z of [1.28, -1.30]) wheel(g, s * 0.80, z, 0.33, 0.26, wheels);
-    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 1.9, length: 4.2, height: 1.9, wheelbase: 2.6 } };
+    return { grp: g, wheels: wheels, beacon: bm, dims: { width: 1.9, length: 4.2, height: 2.2, wheelbase: 2.6 } };
   }
 
   // ============================================================
@@ -860,6 +895,100 @@
   }
 
   // ============================================================
+  //  8b. THE CREW — SOMEBODY IS DRIVING.
+  //
+  //  OWNER (2026-07-27): "every place should have the people who work there."
+  //  This file built 1,471 lines of pushback tugs, baggage trains, catering
+  //  lifts, bowsers and a follow-me car and put NOBODY IN ANY OF THEM — five
+  //  driverless machines crawling around an international airport, which is a
+  //  stranger sight than the empty apron it replaced.
+  //
+  //  NO BESPOKE OCCUPANT SYSTEM. This is the police/gunship helicopter grammar
+  //  verbatim (police.js CHOP_SEATS): a `crew` node on the vehicle group, an
+  //  npclife ANCHOR per seat, the body in through CBZ.npcLife.attach — so
+  //  syncAttached holds it against the vehicle's own motion every frame, the V2
+  //  chair pose solves feet-on-the-deck from the DECLARED cushion, the rig is
+  //  shootable through its own glass and aim_dossier's Lv.N pill reads the
+  //  truthful `job` with no HUD edit. They are ordinary CBZ.cityPeds: they die
+  //  through killfeed.js's bus and surrender at gunpoint like anyone else.
+  //
+  //  WHEN THE BODY EXISTS AT ALL is citystaff.js's CBZ.cityStaffPost — the
+  //  post is data until you are within 170 m of it. That is the draw-call
+  //  answer (a rig is ~16 calls; five of them idling on an apron nobody is
+  //  standing on is pure waste) and it costs this file one call per vehicle.
+  //
+  //  EVERY SEAT HAS A CONSEQUENCE, the same law the helicopter crews follow:
+  //  shoot the driver and the machine rolls to a stop where it is — which is
+  //  also what turns a hijack into a real event on a live apron.
+  //
+  //  The anchors below are the FLOOR the boots rest on; `cushionH` is the seat
+  //  cushion's height above that floor (propuse.js's SEAT_H convention). Every
+  //  one was solved against this file's own geometry so the head clears the
+  //  canopy/roofline — see the seat and cab edits in section 3.
+  // ============================================================
+  const SEATS = {
+    tug:      { job: "pushback driver", x:  0.00, y: 0.80, z: -0.30, cushionH: 0.31 },
+    baggage:  { job: "baggage handler", x:  0.00, y: 0.71, z: -0.30, cushionH: 0.47 },
+    catering: { job: "catering driver", x: -0.42, y: 0.69, z:  1.62, cushionH: 0.45 },
+    fuel:     { job: "refueller",       x: -0.44, y: 0.69, z:  1.90, cushionH: 0.45 },
+    followme: { job: "airfield driver", x: -0.34, y: 0.62, z: -0.05, cushionH: 0.43 },
+  };
+
+  function crewNode(u) {
+    const grp = u.grp;
+    if (!grp) return null;
+    if (grp.userData._crewNode && grp.userData._crewNode.parent === grp) return grp.userData._crewNode;
+    const n = new THREE.Group();
+    const s = (grp.scale && grp.scale.x) || 1;
+    n.scale.setScalar(s > 0.001 ? 1 / s : 1);   // author in metres whatever the hull scale
+    n.name = "crew";
+    n.userData.dynamic = true;                  // a live rig lives here — never batch it
+    grp.add(n);
+    grp.userData._crewNode = n;
+    return n;
+  }
+
+  function crewUp(u) {
+    if (!u) return;
+    const s = SEATS[u.kind];
+    if (!s || !CBZ.cityStaffPost) return;
+    u.post = CBZ.cityStaffPost({
+      venue: "airside", id: "airside:" + u.kind + ":" + V.length,
+      job: s.job, archetype: "laborer",
+      x: u.pos.x, z: u.pos.z, face: u.rec ? u.rec.heading : 0,
+      // the station MOVES: hand the post the live hull position each tick.
+      at: function () { return u.pos; },
+      alive: function () { return !!(u.grp && u.grp.parent) && !u.released; },
+      attach: function (ped) {
+        if (!CBZ.npcLife || !CBZ.npcLife.attach) return false;
+        const node = crewNode(u);
+        if (!node) return false;
+        ped._seatHold = true;                   // syncAttached defends the facing
+        return !!CBZ.npcLife.attach(ped, node, {
+          x: s.x, y: s.y, z: s.z, yaw: 0, pose: "sit", state: "sit",
+          cushionH: s.cushionH, floorBelow: 0,
+        });
+      },
+      release: function (ped, why) {
+        u.driver = null;
+        // Only a HIJACK ("gone") or a KILL ("dead") leaves a body behind. Every
+        // other reason — out of range, a world rebuild, the whole system
+        // resetting — means nobody can see this machine, and the body goes back
+        // to the pool rather than leaking into the next arena.
+        if (why !== "gone" && why !== "dead") return false;
+        // A HIJACKED DRIVER IS THROWN OUT ALIVE, and a shot one leaves a body.
+        // cityUnseat is the ONE sanctioned way out of a seat (syncAttached
+        // re-asserts the transform otherwise, so a corpse would ride along).
+        // Being thrown out is NOT a death and must never reach the killfeed.
+        if (CBZ.cityUnseat) { try { CBZ.cityUnseat(ped, { state: ped.dead ? "dead" : "walk" }); } catch (e) {} }
+        if (!ped.dead) { ped.staffPost = null; ped.state = "walk"; ped.pause = 0.6; }
+        return true;                            // the world keeps him
+      },
+      after: function (ped) { u.driver = ped; },
+    });
+  }
+
+  // ============================================================
   //  9. THE BUILD — one landmass builder, ordered AFTER the airport (21) so
   //     the audit record and the parked fleet already exist.
   // ============================================================
@@ -876,6 +1005,11 @@
         }
       }
     }
+    // and reap the people. cityStaffVenue CLEARS this venue's posts, which is
+    // the same "no ghosts from the last arena" problem as the persist:true
+    // vehicle records above and has the same one-line answer.
+    if (CBZ.cityStaffVenue) { try { CBZ.cityStaffVenue("airside", { stations: 0 }); } catch (e) {} }
+    for (let i = 0; i < V.length; i++) V[i].driver = null;
     V.length = 0;
     craft = [];
     nearPeds = [];
@@ -985,6 +1119,15 @@
       });
     }
 
+    // ---- who works here -------------------------------------------------
+    // FIVE drivers (one per machine, declared by crewUp inside spawn) and
+    // THREE bodies on the ramp itself. That is the whole airside headcount and
+    // it is a deliberate ceiling: a rig is ~16 draw calls, they only exist
+    // inside 170 m, and eight is what you can see across an apron at once.
+    if (CBZ.cityStaffVenue) {
+      CBZ.cityStaffVenue("airside", { stations: 8, note: "5 service vehicles + the ramp" });
+    }
+
     // ---- the fleet ------------------------------------------------------
     // Placement is staggered around each route by arclength so the five
     // machines are spread across the field on the first frame instead of
@@ -1002,7 +1145,9 @@
       rig.grp.position.set(opts.x, 0, opts.z);
       rig.grp.rotation.y = opts.heading;
       root.add(rig.grp);
-      return register(rig, opts);
+      const u = register(rig, opts);
+      crewUp(u);                    // and somebody is driving it
+      return u;
     }
     // TUG
     let p = place("tug", 0.15);
@@ -1062,6 +1207,33 @@
       route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z,
       maxV: 11.0, acc: 4.5, brake: 8.0, turnK: 0.0016,
     });
+
+    // ---- THE RAMP CREW — the three bodies the machines drive around.
+    //
+    //  Not scenery and not a new brain: cityPostNpc's `pin` gives peds.js's
+    //  own posted-staff brain (rooted, no wander, no crowd recast, still
+    //  gunpoint-aware, still dies through the kill bus), and citystaff.js
+    //  decides WHEN the body exists. The marshaller stands off the wingtip of
+    //  the first stand facing the aircraft — which is where the machines are
+    //  already holding short for each other, so the ramp finally reads as a
+    //  worked one. The two handlers work the GSE line the baggage train serves.
+    //
+    //  laneBrake() already brakes every vehicle in this file for any ped in
+    //  its lane, so these three are a real constraint on the traffic and not a
+    //  decoration standing in it.
+    if (CBZ.cityStaffPost) {
+      const st = stands[0] || { x: f.apronX, z: f.apronZ - 19 };
+      const post = function (id, x, z, face, job) {
+        CBZ.cityStaffPost({
+          venue: "airside", id: "airside:ramp:" + id, job: job, archetype: "laborer",
+          x: x, z: z, face: face, pose: "foldarms",
+          opts: { outfit: 0xf0a020, wealth: 0.3 },      // hi-vis: the one thing a ramp worker IS
+        });
+      };
+      post("marshal", st.x + 15, st.z + 7, Math.atan2(-15, -7), "aircraft marshaller");
+      post("load-a", f.apronX - 7, f.hsBackZ + 3.2, Math.PI, "baggage handler");
+      post("load-b", f.apronX + 5, f.hsBackZ + 3.2, Math.PI * 0.85, "ramp agent");
+    }
 
     // first inspection is minutes away, deterministically — the audit's
     // onRunway ratchet reads 0 on a freshly built world and stays there.
@@ -1250,6 +1422,20 @@
 
   function stepVehicle(u, dt) {
     if (releaseCheck(u)) return;
+    // EVERY SEAT HAS A CONSEQUENCE (the helicopter-crew law). Shoot the driver
+    // and the machine coasts to a stop where it is and stays there. `lost` is
+    // set only by a DEATH — a post that is merely dormant (nobody within
+    // 170 m, so nobody can see the cab is empty) never sets it, which is why
+    // this cannot quietly freeze the whole fleet when you walk away.
+    if (u.post && u.post.lost) {
+      u.v += Math.max(-u.brake * dt, -u.v);
+      if (u.v < 0.02) u.v = 0;
+      u.rec.v = u.v;
+      mastStep(u, dt, false);
+      trailStep(u, dt);
+      pushPlayerOut(u);
+      return;
+    }
     const r = u.route, pts = r && r.pts;
     if (!pts || !pts.length) return;
     const wp = pts[u.i % pts.length];
@@ -1428,10 +1614,23 @@
   // ============================================================
   CBZ.airsideAudit = function () {
     let vehicles = 0, onRunway = 0, raw = 0, holding = 0, released = 0, kerb = 0, dwelling = 0;
+    // CREW CENSUS. `seats` counts machines that DECLARE a driver's seat;
+    // `driverless` counts one whose post was never declared at all — the
+    // original bug (five machines, zero people), and it must read 0.
+    // `crewed`/`dormant` are evidence: a dormant post is correct at range and
+    // would be the whole story if the ratchet were "a body exists right now".
+    let seats = 0, driverless = 0, crewed = 0, dormant = 0, driverDown = 0;
     for (let i = 0; i < V.length; i++) {
       const u = V[i];
       if (u.released || !u.grp || !u.grp.parent) { released++; continue; }
       vehicles++;
+      if (SEATS[u.kind]) {
+        seats++;
+        if (!u.post) driverless++;
+        else if (u.post.lost) driverDown++;
+        else if (u.driver && !u.driver.dead) crewed++;
+        else dormant++;
+      }
       if (u.kind === "kerb") kerb++;
       if (u.held) holding++;
       if (u.dwellT > 0) dwelling++;
@@ -1447,6 +1646,9 @@
       onRunway: onRunway,
       holdingShort: holding,
       routes: routes,
+      // crew (see the census above) — `driverless` is a second ratchet and is 0
+      seats: seats, driverless: driverless, crewed: crewed,
+      crewDormant: dormant, driverDown: driverDown,
       // evidence, not pins
       onRunwayRaw: raw,
       inspecting: inspecting,

@@ -643,9 +643,58 @@
      interact.js:1119 already owns it).
      ============================================================ */
   let _zoneWired = false;
+
+  /* THE BROKER IS A PERSON. -----------------------------------------------
+     "Talk to the broker" has, for this file's whole life, pointed at a desk
+     with NOBODY BEHIND IT — a verb naming a man who does not exist, which is
+     the same class of lie as a work anchor no job routes to.
+
+     He is not invented here. marina.js's authored population ALREADY stands a
+     `yacht broker` two metres from this desk (city/marina.js's populate():
+     QX-6.5, BZ+DEAL_Z+6); this file simply never knew. So the post ADOPTS that
+     body — contracts.js's binding law, "the generator picks the verb, the
+     WORLD supplies the specifics" — and only mints one if the marina is absent
+     or its broker is gone. Either way there is exactly one broker.
+
+     And if you shoot him, the desk is SHUT. That is not a punishment bolted
+     on; it is what "talk to the broker" has to mean once the broker is real.
+     ---------------------------------------------------------------------- */
+  let brokerPost = null;
+  function deskPoint() { return (CBZ.cityMarina && CBZ.cityMarina.desk) ? CBZ.cityMarina.desk() : null; }
+  function brokerBody() {
+    const p = brokerPost;
+    const b = p && p.ped;
+    return (b && !b.dead) ? b : null;
+  }
+  function findMarinaBroker() {
+    const d = deskPoint();
+    const peds = CBZ.cityPeds;
+    if (!d || !peds) return null;
+    for (let i = 0; i < peds.length; i++) {
+      const a = peds[i];
+      if (!a || a.dead) continue;
+      if (a._marinaRole !== "broker" && a.job !== "yacht broker") continue;
+      const dx = a.pos.x - d.x, dz = a.pos.z - d.z;
+      if (dx * dx + dz * dz < 12 * 12) return a;
+    }
+    return null;
+  }
+  function wireBroker() {
+    if (brokerPost || !CBZ.cityStaffPost || !CBZ.cityStaffVenue) return;
+    const d = deskPoint();
+    if (!d) return;                       // no marina in this world: no brokerage
+    CBZ.cityStaffVenue("boatyard", { stations: 1, note: "the sales desk" });
+    brokerPost = CBZ.cityStaffPost({
+      venue: "boatyard", id: "boatyard:broker", job: "yacht broker", archetype: "professional",
+      x: d.x, z: d.z - 1.4, face: 0, pose: "table",
+      adopt: findMarinaBroker,
+      opts: { wealth: 0.95, aggr: 0.04 },
+    });
+  }
+
   function deskTarget(px, pz) {
     if (C.BOAT_DEALER === false) return null;
-    const d = CBZ.cityMarina && CBZ.cityMarina.desk ? CBZ.cityMarina.desk() : null;
+    const d = deskPoint();
     if (!d) return null;
     const dx = d.x - px, dz = d.z - pz;
     if (dx * dx + dz * dz > 5.0 * 5.0) return null;
@@ -661,6 +710,10 @@
       options: [
         {
           id: "boatyard-browse", slot: "e",
+          // The verb only exists while the man does. `brokerPost` null means
+          // citystaff.js is not loaded at all, in which case the desk keeps its
+          // old, person-free behaviour rather than becoming unusable.
+          canShow: function () { return !brokerPost || !!brokerBody(); },
           label: function () { return "Talk to the broker"; },
           onSelect: function () { open("buy"); },
         },
@@ -673,7 +726,12 @@
       ],
     });
     if (I.describe) I.describe("boatbroker", function () {
-      return { label: "Cassaline Marine", note: "Brokerage & yard — hulls in the water, sea trials on request" };
+      const manned = !brokerPost || !!brokerBody();
+      return {
+        label: "Cassaline Marine",
+        note: manned ? "Brokerage & yard — hulls in the water, sea trials on request"
+                     : "Desk unmanned — nobody left to sell you a boat",
+      };
     });
     // ANCHOR: the verb belongs to whoever is at the helm, jacked hull or not.
     I.register("vehicle:inside", {
@@ -686,7 +744,13 @@
       onSelect: function (car) { anchorToggle(car); },
     });
   }
-  if (CBZ.onUpdate) CBZ.onUpdate(14.7, function () { if (!_zoneWired) wireZone(); });
+  // 14.7 also re-tries the broker: marina.js builds at landmass order 66, so
+  // its desk does not exist while this file is parsing, and a world rebuild
+  // moves it. Both are one cheap null check per frame until they land.
+  if (CBZ.onUpdate) CBZ.onUpdate(14.7, function () {
+    if (!_zoneWired) wireZone();
+    if (!brokerPost) wireBroker();
+  });
   wireZone();
 
   /* ============================================================

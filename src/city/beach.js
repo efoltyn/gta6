@@ -12,6 +12,16 @@
    at the end — the quiet show-off spot, and the jump-off-the-end
    dive (swim.js owns the water).
 
+   THE PEOPLE WHO WORK IT ARE REAL TOO (2026-07-27). This beach built a
+   lifeguard chair nobody sat in, two market stalls with no vendor and two
+   fishing rods with no angler — three pieces of geometry whose whole meaning
+   is the person missing from them. There is now a Lifeguard in the chair (a
+   propuse seat with a DECLARED cushion, so he sits properly rather than
+   squatting), a vendor behind each stall counter and an angler at each rod,
+   all declared through city/citystaff.js and manned only inside 170 m. The
+   chair's collider is also height-capped at its deck now, which is what makes
+   the platform record beside it — a promise since the day it shipped — true.
+
    THE FURNITURE IS REAL. Loungers and deck chairs are CBZ.furnish pieces, so
    they arrive already registered with city/propuse.js: lying on a lounger runs
    the same walk → perch on the edge → swing the legs up arc as getting into a
@@ -99,6 +109,12 @@
   // city/propuse.js anchor (a bed rec for a lounger, a seat rec for a deck
   // chair). Module scope because the sunbathers arrive on a later tick.
   const chairs = [];
+  // THE PEOPLE WHO WORK THIS BEACH. Declared during the build, manned by
+  // city/citystaff.js when you are within 170 m of them (a full rig is ~16
+  // draw calls; five of them standing on an empty beach is pure waste).
+  let lifeguardSeat = null, lifeguardPost = null;
+  const stallSpots = [];     // { x, z, face } behind each vendor stall counter
+  const anglerSpots = [];    // { x, z, face } at each rod on the pier head
   let built = false;
 
   // ---- the swash apron (built in section 1, animated at the bottom) --------
@@ -492,7 +508,13 @@
       loot.push({ x: lx, z: lz, body, bag, looted: false, t: 0 });
     });
 
-    // lifeguard chair — the beach's landmark; tall white frame + red roof
+    // lifeguard chair — the beach's landmark; tall white frame + red roof.
+    // AND SOMEBODY SITS IN IT. A lifeguard tower with nobody watching the water
+    // is the clearest "stage set" tell on this whole beach, so the seat deck
+    // now carries a real propuse anchor with a DECLARED cushion (0.34 above the
+    // deck, the height of the pad drawn below) and city/citystaff.js puts a
+    // Lifeguard on it. Declared, so the rig gets character.js's real
+    // feet-on-the-deck chair solve instead of the legacy squat.
     (function lifeguard() {
       const lgx = BX1 - 10, lgz = ES + 6;
       const white = [];
@@ -509,8 +531,23 @@
       roof.position.set(lgx, 3.8, lgz); roof.castShadow = false; root.add(roof);
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.3, 0.1), cmat(0xe8ebee));
       post.position.set(lgx, 3.15, lgz - 0.6); root.add(post);
-      solid(lgx, lgz, 1.8, 1.6, roof, null);
+      // Height-capped at the deck (was full-height): the platform record right
+      // below has always PROMISED you can stand up there, and an uncapped
+      // collider is what stopped you. It is also what lets the seat anchor
+      // below resolve a clear entry — propuse's clearAt skips any collider
+      // whose y1 is under the anchor, so this keeps propUseAudit().blocked
+      // exactly where it was instead of adding one more unreachable seat.
+      solid(lgx, lgz, 1.8, 1.6, roof, 2.4);
       CBZ.platforms.push({ minX: lgx - 0.85, maxX: lgx + 0.85, minZ: lgz - 0.75, maxZ: lgz + 0.75, top: 2.4 });
+      // the seat pad itself (there was none — the "seat deck" was a bare
+      // plank), then the anchor that makes it usable furniture.
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.28, 1.1), cmat(0xc23434));
+      pad.position.set(lgx, 2.55, lgz + 0.05); pad.castShadow = false; root.add(pad);
+      // faces the WATER (-z): a lifeguard who watches the car park is a joke.
+      lifeguardSeat = CBZ.propRegisterSeat
+        ? CBZ.propRegisterSeat(lgx, 2.41, lgz + 0.05, Math.PI, "chair", null, { cushion: 0.28, floorBelow: 0 })
+        : null;
+      lifeguardPost = { x: lgx, z: lgz - 1.6, face: Math.PI };
     })();
 
     // beached rowboats — hulls hauled up past the wet line, tipped on a chine
@@ -571,6 +608,12 @@
       const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.1, 2.3), cmat(canopyC));
       canopy.position.set(sx, bwTop + 2.18, sz); canopy.rotation.z = 0.06; canopy.castShadow = false; root.add(canopy);
       solid(sx, sz, 2.4, 1.8, canopy, 1.4);
+      // AND SOMEBODY TO SELL YOU SOMETHING. A stall with no vendor is a table.
+      // He stands on the landward side of his own goods table, facing the sand
+      // (the side the customers walk past on) — the same read props.js's shop
+      // stalls have. "street vendor" is already a real trade in aigoals.js's
+      // CITY_JOBS, so he arrives with a shift and a wage, not just a label.
+      stallSpots.push({ x: sx, z: sz + 1.5, face: Math.PI });
     }
     stall(BX0 + 34, 0xf2c43d);
     stall(BX0 + 46, 0x3c6fd6);
@@ -640,10 +683,24 @@
       const tHead = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.7), cmat(0xc23434));
       tHead.position.set(pierX + 2.4, top + 1.3, headZ1 + 1.2); tHead.rotation.x = 0.18; root.add(tHead);
       solid(pierX + 2.4, headZ1 + 1.4, 0.6, 0.6, tPole, top + 1.5);
-      // a couple of rods leaning on the head rail — the fishing-scene read
+      // a couple of rods leaning on the head rail — the fishing-scene read.
+      // THEY ARE NO LONGER PROPS OF AN ABSENT PERSON: each rod gets an angler
+      // standing behind it (city/citystaff.js) and registers a FISHING STATION
+      // (city/fishing.js) so the same spot the NPC works is the spot the player
+      // can work. The rod mesh stays exactly where it was — the fisherman's own
+      // rod is his, drawn by fishing.js, and these are the spares on the rail.
       for (const rx of [pierX - headW / 2 + 1.2, pierX + headW / 2 - 2.0]) {
         const rod = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.6, 0.05), cmat(WOOD_DK));
         rod.position.set(rx, top + 1.2, headZ1 + 0.7); rod.rotation.x = -0.5; rod.castShadow = false; root.add(rod);
+        anglerSpots.push({ x: rx, z: headZ1 + 1.5, face: Math.PI, y: top });
+        if (CBZ.fishSpotRegister) {
+          // rod:false — the rod on the rail above IS this station's rod; letting
+          // fishing.js draw a second one would be two rods for one line.
+          CBZ.fishSpotRegister(rx, headZ1 + 1.5, {
+            name: "Pier Head", face: Math.PI, y: top, rod: false,
+            water: { x: rx, z: headZ1 - 6 },
+          });
+        }
       }
       const tackle = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.4), cmat(0x4a5232));
       tackle.position.set(pierX + headW / 2 - 2.0, top + 0.2, headZ1 + 1.6); root.add(tackle);
@@ -796,6 +853,50 @@
       contIM.castShadow = true; contIM.receiveShadow = true;
       root.add(contIM);
     })();
+
+    // =====================================================================
+    //  7) THE PEOPLE WHO WORK THE BEACH.
+    //
+    //  OWNER: "every place should have the people who work there." This beach
+    //  built a lifeguard chair nobody sat in, two market stalls with no vendor
+    //  and two fishing rods with no angler — three pieces of geometry whose
+    //  entire meaning is the person who is missing from them.
+    //
+    //  No beach body, no beach brain and no beach update loop, exactly like
+    //  the sunbathers below: CBZ.cityStaffPost declares the job, occupy.js's
+    //  cityPostNpc mints an ORDINARY ped when you are near enough to see it,
+    //  propuse.js seats the lifeguard, and peds.js's own posted-staff brain
+    //  holds each of them at their station. They are killable through the feed,
+    //  aimable, and interactions.js offers the normal ped verbs on them.
+    // =====================================================================
+    if (CBZ.cityStaffPost && CBZ.cityStaffVenue) {
+      CBZ.cityStaffVenue("beach", { stations: 5, note: "lifeguard chair, 2 stalls, 2 rods" });
+      if (lifeguardPost) {
+        CBZ.cityStaffPost({
+          venue: "beach", id: "beach:lifeguard", job: "lifeguard", archetype: "worker",
+          x: lifeguardPost.x, z: lifeguardPost.z, face: lifeguardPost.face,
+          seat: function () { return lifeguardSeat; },
+          // red trunks + a whistle is the whole uniform; the tan is the wealth
+          // read, and he is the one person on this beach who is on duty.
+          opts: { outfit: 0xc23434, wealth: 0.35, aggr: 0.1 },
+        });
+      }
+      stallSpots.forEach(function (s, i) {
+        CBZ.cityStaffPost({
+          venue: "beach", id: "beach:vendor:" + i, job: "street vendor", archetype: "merchant",
+          x: s.x, z: s.z, face: s.face, pose: "table",
+          opts: { wealth: 0.4, floorY: bwTop },      // he stands ON the boardwalk deck
+        });
+      });
+      anglerSpots.forEach(function (s, i) {
+        CBZ.cityStaffPost({
+          venue: "beach", id: "beach:angler:" + i, job: "fisherman", archetype: "laborer",
+          x: s.x, z: s.z, face: s.face, pose: "table",
+          opts: { wealth: 0.28, floorY: s.y },
+          after: function (ped) { if (CBZ.fishWorkRod) CBZ.fishWorkRod(ped, s); },
+        });
+      });
+    }
 
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
