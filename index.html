@@ -11,7 +11,7 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=diegetictext1">
+<link rel="stylesheet" href="css/hud.css?v=diegetictext1y">
 <link rel="stylesheet" href="css/screens.css?v=intro2">
 <link rel="stylesheet" href="css/mobile.css?v=ipad4">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
@@ -303,7 +303,7 @@
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=4"></script>
+<script src="src/world/terrain_overhaul.js?v=4y"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -390,7 +390,7 @@
 <!-- 3. entities -->
   <script src="src/entities/character.js?v=riglock6w11"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
-<script src="src/entities/player.js?v=scale1"></script>
+<script src="src/entities/player.js?v=scale1y"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -443,7 +443,7 @@
 <script src="src/entities/keycard.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
-<script src="src/entities/npclife.js?v=life3w9"></script>
+<script src="src/entities/npclife.js?v=life3w9y"></script>
 <script src="src/entities/npc.js?v=notags1"></script>
 <script src="src/entities/ai.js?v=gore1"></script>
 
@@ -618,13 +618,13 @@
      frame island_speedway.js publishes; both run at world-build time so either
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=circuit1"></script>
+<script src="src/city/island_speedway.js?v=circuit1y"></script>
 <script src="src/city/island_airport.js?v=airfieldpaint4w9w11x"></script>
 <script src="src/city/island_military.js?v=livebase5w11"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=organicforest5"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
-<script src="src/city/biome_snow.js?v=organicmountain18w9"></script>
+<script src="src/city/biome_snow.js?v=organicmountain18w9y"></script>
 <script src="src/city/snowboard.js?v=terrain2"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -659,8 +659,8 @@
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
-<script src="src/city/arena_venue.js?v=ironjaw1"></script>
-<script src="src/city/arena_fights.js?v=ironjaw1"></script>
+<script src="src/city/arena_venue.js?v=ironjaw1y"></script>
+<script src="src/city/arena_fights.js?v=ironjaw1y"></script>
 <script src="src/city/props.js?v=diegetictext1x"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
@@ -669,7 +669,7 @@
 <script src="src/city/mode.js?v=unmute1"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
 <script src="src/city/clothes.js?v=fit5"></script>
-<script src="src/city/outfits.js?v=fits2"></script>
+<script src="src/city/outfits.js?v=fits2y"></script>
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=arrest4"></script>
 <script src="src/city/identity.js?v=perm1"></script>
@@ -684,7 +684,7 @@
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=notags2"></script>
+<script src="src/city/peds.js?v=notags2y"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -693,11 +693,11 @@
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
 <script src="src/city/childhood.js?v=child1"></script>
-<script src="src/city/level.js?v=lvl2w9"></script>
-<script src="src/city/sizeup.js?v=lvl1"></script>
+<script src="src/city/level.js?v=lvl2w9y"></script>
+<script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=fortress1"></script>
-<script src="src/city/crowd.js?v=real1"></script>
+<script src="src/city/crowd.js?v=real1y"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=fortress1"></script>
@@ -712,7 +712,7 @@
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=boostjump2w9"></script>
+<script src="src/city/vehicles.js?v=boostjump2w9y"></script>
 <script src="src/city/playerair.js?v=air3"></script>
 <script src="src/city/playeraircraft.js?v=swepthull3w9w11"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -861,7 +861,7 @@
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
 <script src="src/city/family.js?v=fam2"></script>
-<script src="src/city/swim.js?v=waterv2"></script>
+<script src="src/city/swim.js?v=waterv2y"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -930,7 +930,7 @@
 <script src="src/city/gigs.js?v=gig5"></script>
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=gunthumb3"></script>
+<script src="src/city/hud.js?v=gunthumb3y"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
@@ -955,7 +955,7 @@
 <script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
-<script src="src/systems/fullmap.js?v=organicmap4"></script>
+<script src="src/systems/fullmap.js?v=organicmap4y"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -1098,7 +1098,7 @@
 <script src="src/city/casino.js?v=casino1"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=ecotones17w9"></script>
+<script src="src/city/continent.js?v=ecotones17w9y"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -1239,7 +1239,7 @@
 <script src="src/games/casino.js?v=pkg1"></script>
 <script src="src/games/ocean.js?v=pkg1"></script>
 <script src="src/games/racing.js?v=pkg2"></script>
-<script src="src/games/boxing.js?v=pkg1"></script>
+<script src="src/games/boxing.js?v=pkg1y"></script>
 <script src="src/games/airport.js?v=pkg2"></script>
 <script src="src/games/military.js?v=pkg2"></script>
 <script src="src/games/government.js?v=pkg1"></script>

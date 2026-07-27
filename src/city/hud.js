@@ -813,12 +813,17 @@
 
     // ---- NOTABLE POIs near you (MAP_V2): mirrors the full map's icon language
     //      so the radar answers "what's around me" — casinos/banks/hospital/
-    //      guns/gas/civic/venues as small trade-coloured diamonds (the same
-    //      CBZ.fullMap.poi palette). Ordinary shops stay OFF the radar (they're
-    //      the [M] map's job) so the instrument doesn't turn to measles. ----
+    //      guns/gas/civic/venues. Ordinary shops stay OFF the radar (they're
+    //      the [M] map's job) so the instrument doesn't turn to measles.
+    //      A MINIMAP IS ICONS ONLY, NEVER TEXT — this one already was, and it
+    //      now draws the SHARED pictograms (CBZ.mapIcon, systems/fullmap.js)
+    //      instead of one undifferentiated diamond per trade, so a hospital and
+    //      a pawn shop stop being "two diamonds of slightly different colour".
+    //      Degrade-safe: no mapIcon block ⇒ byte-identical old diamond. ----
     const MAPV2 = !CBZ.CONFIG || CBZ.CONFIG.MAP_V2 !== false;
     const NOTABLE = { casino: 1, bank: 1, hospital: 1, guns: 1, gas: 1, cityhall: 1, transit: 1, arena: 1, raceway: 1, racepark: 1, airfield: 1 };
     const poiFn = CBZ.fullMap && CBZ.fullMap.poi;
+    const MI = CBZ.mapIcon;
     if (MAPV2 && poiFn) {
       const shopLots = (A.shopLots && A.shopLots.length) ? A.shopLots : A.lots;
       for (const lot of shopLots || []) {
@@ -829,8 +834,11 @@
         const dx = lot.cx - px, dz = lot.cz - pz; if (dx * dx + dz * dz > R2) continue;
         S(lot.cx, lot.cz);
         const big = info.key || k === "casino";
-        diamond(_p[0], _p[1], info.color, big ? 3.6 : 2.6);
-        if (k === "casino") { ctx.strokeStyle = "rgba(201,162,39,.9)"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(_p[0], _p[1], 5.2, 0, 6.28); ctx.stroke(); }
+        if (MI) MI.draw(ctx, _p[0], _p[1], info.key ? "home" : k, { size: big ? 6 : 5, tier: big });
+        else {
+          diamond(_p[0], _p[1], info.color, big ? 3.6 : 2.6);
+          if (k === "casino") { ctx.strokeStyle = "rgba(201,162,39,.9)"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(_p[0], _p[1], 5.2, 0, 6.28); ctx.stroke(); }
+        }
       }
     }
 
@@ -838,7 +846,14 @@
     if (CBZ.cityGangs) for (const gang of CBZ.cityGangs) {
       if (!gang || gang.isPlayer || gang.absorbed) continue;
       const hq = CBZ.cityGangHQ ? CBZ.cityGangHQ(gang.id) : (gang.center && (gang.center.x || gang.center.z) ? gang.center : null);
-      if (hq && (hq.x || hq.z)) { const dx = hq.x - px, dz = hq.z - pz; if (dx * dx + dz * dz <= R * R) { S(hq.x, hq.z); diamond(_p[0], _p[1], hex6n(gang.color), 3.4); } }
+      if (hq && (hq.x || hq.z)) {
+        const dx = hq.x - px, dz = hq.z - pz;
+        if (dx * dx + dz * dz <= R * R) {
+          S(hq.x, hq.z);
+          if (MI) MI.draw(ctx, _p[0], _p[1], "hq", { size: 5, color: hex6n(gang.color) });
+          else diamond(_p[0], _p[1], hex6n(gang.color), 3.4);
+        }
+      }
     }
 
     // ---- cars: your ride is a bright green chevron (always findable); traffic faint ----
@@ -882,7 +897,12 @@
     // waypoint reads as the loudest mark on the map: pulsing accent ring + dot
     if (wp) { blip(wp.x, wp.z, (x, y) => { ctx.strokeStyle = "#7de7ff"; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(x, y, 4.5 + pulse * 2, 0, 6.28); ctx.stroke(); ctx.fillStyle = "#7de7ff"; ctx.beginPath(); ctx.arc(x, y, 1.8, 0, 6.28); ctx.fill(); }, true); }
     const j = g && g.cityJob;
-    if (j && j.dest) blip(j.dest.x, j.dest.z, (x, y) => diamond(x, y, "#7ed957", 4 + pulse * 2), true);
+    // the objective blip is the SAME mission pictogram the [M] map draws, so
+    // "the thing on my radar" and "the thing on my map" are one symbol
+    if (j && j.dest) blip(j.dest.x, j.dest.z, (x, y) => {
+      if (MI) MI.draw(ctx, x, y, "mission", { size: 6 + pulse });
+      else diamond(x, y, "#7ed957", 4 + pulse * 2);
+    }, true);
     if (g && g.cityPartner && g.cityPartner.kidnapped && g.cityPartner.pos) blip(g.cityPartner.pos.x, g.cityPartner.pos.z, (x, y) => diamond(x, y, "#ff6bd0", 4 + pulse * 2), true);
 
     // ---- POLICE CHOPPER: at 3★+ it hunts you. Always rim-clamped with a bearing

@@ -930,7 +930,16 @@
         if (!A || !A.root || !A.regions) return null;           // wait until the world can answer
         let cx = 640, cz = -950;                                  // arena_fights constants (fallback)
         for (const r of A.regions) { if (r && /Ironjaw Arena/i.test(r.name || "")) { cx = r.cx; cz = r.cz; break; } }
-        return { x: cx, z: cz - 52 };                             // north plaza (clear of ring 608,-950 / cage / pit)
+        // DERIVED FROM THE LIVE FLOOR, not a frozen 52. The arena floor shrank
+        // from 102 x 130 to 52 x 70 when the bowl went to 20 tiers, and a fixed
+        // offset would have planted Southpaw Palace half way up the new stands.
+        // Sit it on the open north half of whatever floor the venue reports.
+        let dz = 22;
+        try {
+          const M = CBZ.arenaAudit ? CBZ.arenaAudit() : null;
+          if (M && M.floor && M.floor[1] > 0) dz = Math.max(14, M.floor[1] / 2 - 13);
+        } catch (e) { /* venue not built yet — the 22 fallback is on the floor */ }
+        return { x: cx, z: cz - dz };                             // north plaza (clear of ring / cage / pit)
       },
     },
     build(ctx, venue) { build(ctx, venue); },

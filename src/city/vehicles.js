@@ -111,6 +111,112 @@
   // player's own swim state); reuse it here instead of re-deriving shorelines.
   function overWater(x, z) { return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)); }
 
+  // ==========================================================================
+  //  VEHICLES STAND ON THE GROUND  (CBZ.CONFIG.VEHICLE_TERRAIN, default ON)
+  // ==========================================================================
+  // OWNER, verbatim: "IT'S NOT LIKE DRIVING ON HILLS, IT'S LIKE DRIVING ON
+  // WATER." He was describing arithmetic, not a feeling: EVERY car in this file
+  // wrote `group.position.set(pos.x, 0, pos.z)` — a literal zero — at seven
+  // separate sites, and the file's own comment admitted it ("this engine has no
+  // terrain-following suspension — every car sits at y=0"). Measured against
+  // the rendered country plate that is a mean 11.0 m and a max 22.9 m of green
+  // ground passing through the bodywork.
+  //
+  // `seatCar` REPLACES those seven `position.set(x, 0, z)` calls — it is not a
+  // parallel bookkeeping layer, it is the line the caller already wrote. One
+  // call now buys ride height, terrain pitch and terrain roll.
+  //
+  // PROBE COUNT IS THE WHOLE PERFORMANCE STORY. CBZ.floorAt costs ~0.35 µs once
+  // continent.js's TERRAIN_PHYSICS_MATCH grid is live (it was 6.03 µs against
+  // the analytic field — 17x worse, and at that price this feature could not
+  // ship). A NEAR car takes 4 probes (a wheel at each corner: height is their
+  // mean, pitch and roll fall out of the differences); a FAR car takes 1 and
+  // keeps its attitude flat, because nobody can see the attitude of a car they
+  // cannot see. ~150 cars, mostly far: ≈ 300 probes/frame ≈ 0.1 ms/s.
+  if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_TERRAIN == null) CBZ.CONFIG.VEHICLE_TERRAIN = true;
+  const TERRAIN_ON = function () {
+    return (!CBZ.CONFIG || CBZ.CONFIG.VEHICLE_TERRAIN !== false) && !!CBZ.floorAt;
+  };
+  // How hard the body is allowed to follow the ground. A real suspension is a
+  // low-pass filter, not a rigid follower: without this a 40 m plate triangle
+  // edge reads as a step, and cars twitch on it.
+  const TERRAIN_EASE = 9;          // 1/s exponential approach on ride height
+  const TERRAIN_ATT_EASE = 6;      // 1/s on pitch/roll
+  const TERRAIN_MAX_TILT = 0.55;   // rad — a car never stands on its nose
+  function groundY(x, z) {
+    if (!TERRAIN_ON()) return 0;
+    const y = +CBZ.floorAt(x, z);
+    return Number.isFinite(y) ? y : 0;
+  }
+  CBZ.cityCarGroundY = groundY;
+  // Sample the four corners and fold them into ride height + terrain attitude.
+  // `near` false = one probe, flat attitude (the far-car budget).
+  function terrainSeat(car, near, dt) {
+    if (!TERRAIN_ON()) { car._terrY = 0; car._terrPitch = 0; car._terrRoll = 0; return 0; }
+    const h = +car.heading || 0;
+    const fx = Math.sin(h), fz = Math.cos(h);
+    const d = vehicleDims(car);
+    const half = Math.max(1, (d && d.length ? d.length : 4.2) * 0.45);
+    const halfW = Math.max(0.6, (d && d.width ? d.width : 1.9) * 0.45);
+    let gy, pitch = 0, roll = 0;
+    if (near) {
+      // right vector = (fz, -fx) with this file's (sin,cos) forward convention
+      const rx = fz, rz = -fx;
+      const fL = groundY(car.pos.x + fx * half + rx * halfW, car.pos.z + fz * half + rz * halfW);
+      const fR = groundY(car.pos.x + fx * half - rx * halfW, car.pos.z + fz * half - rz * halfW);
+      const bL = groundY(car.pos.x - fx * half + rx * halfW, car.pos.z - fz * half + rz * halfW);
+      const bR = groundY(car.pos.x - fx * half - rx * halfW, car.pos.z - fz * half - rz * halfW);
+      gy = (fL + fR + bL + bR) * 0.25;
+      // nose-up is NEGATIVE rotation.x with this rig (see the airborne pitch,
+      // which uses -vy), so climbing (front higher than back) pitches negative.
+      pitch = -Math.atan2(((fL + fR) - (bL + bR)) * 0.5, half * 2);
+      roll = Math.atan2(((fL + bL) - (fR + bR)) * 0.5, halfW * 2);
+      if (pitch > TERRAIN_MAX_TILT) pitch = TERRAIN_MAX_TILT; else if (pitch < -TERRAIN_MAX_TILT) pitch = -TERRAIN_MAX_TILT;
+      if (roll > TERRAIN_MAX_TILT) roll = TERRAIN_MAX_TILT; else if (roll < -TERRAIN_MAX_TILT) roll = -TERRAIN_MAX_TILT;
+    } else {
+      gy = groundY(car.pos.x, car.pos.z);
+    }
+    // suspension damping. A car that has never been seated snaps to the ground
+    // on its first frame (no drop-in from y=0 when it spawns on a hill).
+    const k = dt > 0 ? 1 - Math.exp(-TERRAIN_EASE * dt) : 1;
+    const ka = dt > 0 ? 1 - Math.exp(-TERRAIN_ATT_EASE * dt) : 1;
+    car._terrY = car._terrY == null ? gy : car._terrY + (gy - car._terrY) * k;
+    car._terrPitch = car._terrPitch == null ? pitch : car._terrPitch + (pitch - car._terrPitch) * ka;
+    car._terrRoll = car._terrRoll == null ? roll : car._terrRoll + (roll - car._terrRoll) * ka;
+    return car._terrY;
+  }
+  // THE call every ambient/AI/wreck site makes instead of writing a literal 0.
+  //   seatCar(car, dt, extraY, near) — extraY is the site's own offset (a
+  //   drowned wreck's -1.1, a boat's WATER_Y); `near` defaults to the car's own
+  //   visibility, which every one of those sites already computed.
+  // PARKED / ABANDONED hulls never enter the drive loop, so they kept the
+  // literal y=0 they were spawned at — and a parked car sitting in the green at
+  // the edge of a lot is EXACTLY the screenshot the owner sent. Seat them once,
+  // and again only when something has moved them: a still car costs three float
+  // compares a frame and no ground probe at all.
+  function parkSeat(c) {
+    if (!TERRAIN_ON() || !c || !c.group || !c.pos) return;
+    if (c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading) return;
+    c._parkX = c.pos.x; c._parkZ = c.pos.z; c._parkH = c.heading;
+    c._terrY = c._terrPitch = c._terrRoll = null;     // snap onto the hill, no drop-in
+    seatCar(c, 0, 0, true);
+  }
+  function seatCar(c, dt, extraY, near) {
+    const base = terrainSeat(c, near == null ? !!c.group.visible : !!near, dt || 0);
+    const y = base + (extraY || 0);
+    c.group.position.set(c.pos.x, y, c.pos.z);
+    let px = c._terrPitch || 0, rz = c._terrRoll || 0;
+    // A BLOWN TIRE'S SAG. cityCarTireHit wrote rotation.x/z ONCE on an AI car
+    // with the comment "the AI loop only writes rotation.y" — which stopped
+    // being true the moment this function started writing a terrain attitude,
+    // and the sag would have been erased on the very next frame. It composes
+    // now, exactly the way the player car composes _pitch/_roll on top.
+    if (c._flats) { const L = flatLean(c); if (L) { px += L.pitch; rz += L.roll; } }
+    c.group.rotation.set(px, c.heading, rz);
+    if (c.npcDriver && c.npcDriver.pos) c.npcDriver.pos.set(c.pos.x, y, c.pos.z);
+    return base;
+  }
+
   // ---- RUN-OVER JUICE ------------------------------------------------------
   // A lethal run-over currently fires shake + a speed-bleed but — unlike a melee
   // land() (combat.js) — NO hit-stop and NO bass impact, so a kill at speed reads
@@ -2578,9 +2684,23 @@
     // can never stand on oracle-water). Once over water, the water mechanic
     // owns the position: sink where you swamped, don't teleport to the quay.
     if (!marine && !(noWater && onWater) && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
-    const rideY = (marine ? WATER_Y : sinkY) + (car._airY || 0);
+    // VEHICLE_TERRAIN: the driven car stands on the ground under it — the same
+    // CBZ.floorAt the player's own feet use — and PITCHES AND ROLLS over the
+    // hills. Marine hulls still ride WATER_Y, a swamped hull still sinks and an
+    // airborne car still keeps its ballistic _airY, because all three are
+    // OFFSETS FROM THE GROUND, not replacements for it. Weight-transfer
+    // pitch/roll (_pitch/_roll) composes on top of the terrain's attitude, and
+    // the terrain's is dropped entirely while airborne — a jumping car's
+    // attitude belongs to the jump.
+    let terrY = 0;
+    if (!marine && !(noWater && onWater)) terrY = terrainSeat(car, true, dt);
+    else { car._terrY = 0; car._terrPitch = 0; car._terrRoll = 0; }
+    const rideY = (marine ? WATER_Y : sinkY + terrY) + (car._airY || 0);
     car.group.position.set(car.pos.x, rideY, car.pos.z);
-    car.group.rotation.set((car._pitch || 0) + (car._airPitch || 0), car.heading, (car._roll || 0) + (car._airRoll || 0));
+    car.group.rotation.set(
+      (car._pitch || 0) + (car._airPitch || 0) + (car._airborne ? 0 : (car._terrPitch || 0)),
+      car.heading,
+      (car._roll || 0) + (car._airRoll || 0) + (car._airborne ? 0 : (car._terrRoll || 0)));
     if (!car._airborne) {
       car._airPitch = (car._airPitch || 0) * Math.max(0, 1 - dt * 7);
       car._airRoll = (car._airRoll || 0) * Math.max(0, 1 - dt * 7);
@@ -2787,9 +2907,14 @@
             if (imp.deltaA < 0.01 && imp.deltaB < 0.01) { a.v *= 0.98; b.v *= 0.98; }
           }
         // keep visuals (and the player's position/camera) in sync this frame
-          a.group.position.set(a.pos.x, 0, a.pos.z); b.group.position.set(b.pos.x, 0, b.pos.z);
-          if (a.player) { CBZ.player.pos.set(a.pos.x, 0, a.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
-          if (b.player) { CBZ.player.pos.set(b.pos.x, 0, b.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
+          // The DRIVEN car's altitude and attitude belong to the drive step
+          // (it composes _airY, sinkY, WATER_Y and the weight transfer); this
+          // depenetration pass only owns XZ, so it must not re-seat it or a
+          // shove mid-jump would snap the car to the ground for a frame.
+          const ay = a.player ? a.group.position.y : seatCar(a, dt);
+          const by = b.player ? b.group.position.y : seatCar(b, dt);
+          if (a.player) { a.group.position.set(a.pos.x, ay, a.pos.z); CBZ.player.pos.set(a.pos.x, ay, a.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
+          if (b.player) { b.group.position.set(b.pos.x, by, b.pos.z); CBZ.player.pos.set(b.pos.x, by, b.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
         }
       }
     }
@@ -2945,9 +3070,7 @@
     }
     aiSlipStep(car, dt, 6);   // decays any slide; keeps car.v/vx/vz consistent (no-op when undisturbed)
     if (arena) arena.clampToCity(car.pos, wallRadius(car));
-    car.group.position.set(car.pos.x, 0, car.pos.z);
-    car.group.rotation.y = car.heading;
-    if (car.npcDriver && car.npcDriver.pos) car.npcDriver.pos.set(car.pos.x, 0, car.pos.z);
+    seatCar(car, dt);
     if (car.v > 6) runOver(car, car.v);
     setBrake(car, false);                 // a rammer is flat on the throttle
     const cdx = car.pos.x - CBZ.camera.position.x, cdz = car.pos.z - CBZ.camera.position.z;
@@ -3037,7 +3160,7 @@
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
     for (const c of CBZ.cityCars) {
       dt = baseDt;     // reset each car (a strided far car overrides this below)
-      if (c.player || c.dead || !c.ai || !c.road) continue;
+      if (c.player || c.dead || !c.ai || !c.road) { if (!c.player && !c.dead) parkSeat(c); continue; }
       // off-screen, non-critical cars: skip 2 of every 3 frames, banking dt so
       // they still cover the same ground when they do tick.
       const _cdx = c.pos.x - camx, _cdz = c.pos.z - camz;
@@ -3088,7 +3211,7 @@
         if ((!CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false) && overWater(c.pos.x, c.pos.z)) {
           c.dead = true; c.abandoned = true; c.ai = false;
           if (c.npcDriver) ejectNpcDriver(c);
-          c.group.position.set(c.pos.x, -1.1, c.pos.z);
+          seatCar(c, dt, -1.1, false);
           continue;
         }
         // slammed a building / lamppost mid-spin: crumple the car (the structure
@@ -3116,9 +3239,7 @@
           if (catastrophic && c.npcDriver && !c.abandoned) killNpcDriverInCar(c);
           c.v *= catastrophic ? 0.08 : (hard ? 0.18 : 0.45);
         }
-        c.group.position.set(c.pos.x, 0, c.pos.z);
-        c.group.rotation.y = c.heading;
-        if (c.npcDriver && c.npcDriver.pos) c.npcDriver.pos.set(c.pos.x, 0, c.pos.z);
+        seatCar(c, dt);
         const wdx = c.pos.x - CBZ.camera.position.x, wdz = c.pos.z - CBZ.camera.position.z;
         c.group.visible = (wdx * wdx + wdz * wdz) < 150 * 150;
         if (c.wreckT <= 0 && c.abandoned) c.ai = false;   // settle as an abandoned wreck
@@ -3138,9 +3259,7 @@
         c.v += Math.max(-20 * dt, Math.min(12 * dt, tv - c.v));
         c.v = Math.max(0.8, c.v);
         advanceTurn(c, dt);
-        c.group.position.set(c.pos.x, 0, c.pos.z);
-        c.group.rotation.y = c.heading;
-        if (c.npcDriver && c.npcDriver.pos) c.npcDriver.pos.set(c.pos.x, 0, c.pos.z);
+        seatCar(c, dt);
         if (c.v > 9 && (c.reckless || c.pullover === 4)) runOver(c, c.v);
         const tdx = c.pos.x - CBZ.camera.position.x, tdz = c.pos.z - CBZ.camera.position.z;
         c.group.visible = (tdx * tdx + tdz * tdz) < 150 * 150;
@@ -3409,10 +3528,8 @@
         if (pushedAI > 0.04) c.v *= Math.max(0.25, 1 - pushedAI * 2);
       }
 
-      c.group.position.set(c.pos.x, 0, c.pos.z);
-      c.group.rotation.y = c.heading;
       // keep a carjacker's body riding with the car so cops chase the right spot
-      if (c.npcDriver && c.npcDriver.pos) c.npcDriver.pos.set(c.pos.x, 0, c.pos.z);
+      seatCar(c, dt);
       // any moving car hits whoever's in front of it — calm drivers braked
       // above so they rarely connect; reckless ones plow straight through.
       if (c.v > 5) runOver(c, c.v);

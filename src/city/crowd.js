@@ -1365,8 +1365,51 @@
     // liveTorsoHex/civShirtFor and every downstream read agree with what was seen.
     ped.outfit = shirtHex;
   }
+  // ============================================================
+  //  NEVER LET THE PLAYER SEE A SPAWN.
+  //
+  //  OWNER (2026-07-27): "NPCs spawn right in front of the player. It's like —
+  //  I should never see a spawn, that breaks the fourth wall. It should be like
+  //  buildings." The world is ALREADY THERE and you merely arrive at it.
+  //
+  //  Every TELEPORT path in this file was already guarded (placeSafe on the
+  //  un-suppress and turnover draws, a forward-cone floor on drain and sparse
+  //  fill). PROMOTION was not — and in the shipping STANDARD_ACTORS_ONLY mode
+  //  promotion is the moment a body becomes VISIBLE AT ALL, because there is no
+  //  instanced stand-in underneath it. So the "fill every free slot in one
+  //  cheap pass" loop could hand a rig to a row three metres in front of the
+  //  camera and flip it visible on a frame boundary. That IS the spawn the
+  //  owner is seeing.
+  //
+  //  Guarded with the SHARED contract every other population system already
+  //  uses (CBZ.npcTransitionSafe — a padded-screen projection, strictly
+  //  stronger than a yaw cone), never a private cone of our own. A refused row
+  //  is simply not promoted this tick and is retried on the next one: an empty
+  //  patch of pavement for a fraction of a second is the correct trade, and it
+  //  is what "it should be like buildings" means.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CROWD_PROMOTE_HIDE == null) CBZ.CONFIG.CROWD_PROMOTE_HIDE = true;
+  let promoBlocked = 0, promoAllowed = 0, promoInView = 0;
+  function promoteSafe(i) {
+    if (!CBZ.CONFIG || CBZ.CONFIG.CROWD_PROMOTE_HIDE === false) return true;
+    if (!CBZ.npcTransitionSafe) return true;
+    return CBZ.npcTransitionSafe(px[i], pz[i], { minDistance: 14, maxDistance: 140 });
+  }
+  function promoteOk(i) {
+    const ok = promoteSafe(i);
+    if (ok) promoAllowed++; else promoBlocked++;
+    return ok;
+  }
+  // RATCHET: `spawnsInView` is the count of rigs that actually became visible
+  // inside the padded screen area. PIN AT 0 — it can only be nonzero if the
+  // guard is switched off or absent.
+  CBZ.cityCrowdSpawnAudit = function () {
+    return { promoted: promoAllowed, deferred: promoBlocked, spawnsInView: promoInView };
+  };
+
   function assign(e, s, i) {
     const ped = e.ped;
+    if (!promoteSafe(i)) promoInView++;   // only reachable with the guard off
     ungroup(i);          // promoted to a real rig → any walking-group link releases (followers go solo)
     e.idx = i; promotedBy[i] = s;
     ped._parked = false; ped.dead = false; ped.deadT = 0; ped.ko = 0; ped.culled = false; ped.collected = false; ped.needsPickup = false;
@@ -1445,8 +1488,11 @@
 
       // Every on-street analytical row gets one ordinary registered character.
       // Fill the bounded pool in one cheap pass (no distance sort, no proxy LOD).
+      // A row the player can SEE right now is skipped and retried next tick —
+      // see the NEVER LET THE PLAYER SEE A SPAWN note above.
       for (let i = 0; i < count; i++) {
         if (promotedBy[i] >= 0 || deadAgent[i] || suppressed[i]) continue;
+        if (!promoteOk(i)) continue;
         const slotIdx = pickFreeSlot(!!fem[i]);
         if (slotIdx < 0) break;
         assign(pool[slotIdx], slotIdx, i);
@@ -1491,7 +1537,12 @@
         const dn = Math.sqrt(d2) || 1;
         const ahead = (dx / dn) * fx + (dz / dn) * fz >= AHEAD_DOT;
         const range = ahead ? PROMO_AHEAD2 : PROMO_IN2;
-        if (d2 < range && d2 < bd) { bd = d2; best = i; }
+        if (d2 < range && d2 < bd) {
+          // the instanced stand-in is already on screen here, so this is a LOD
+          // swap rather than a spawn — but a swap you can catch is still a pop.
+          if (!promoteOk(i)) continue;
+          bd = d2; best = i;
+        }
       }
       if (best < 0) break;
       // gender-matched slot pick (W3): e/s is only a guaranteed-free anchor —

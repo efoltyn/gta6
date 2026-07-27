@@ -516,6 +516,14 @@
       return true;
     }
     const pp = CBZ.cityApplyClothes ? CBZ.cityApplyClothes(ch, rec || null, opts) : null;
+    // The PELVIS goes with the legs — it is the top of the trousers, not a
+    // separate garment. character.js gives it its own recolor slot and nothing
+    // in the game had ever painted it, so it kept whatever colour the rig was
+    // BUILT with: the prison orange on the player, the cast colour on an NPC.
+    // That is the coloured band people were seeing between shirt and trousers.
+    // Painted unconditionally (outside the `pp.legs` guard) because even a
+    // painted-texture trouser has a solid pelvis block under it.
+    paint(s.pelvis, c.legs);
     if (!pp || !pp.legs) { paint(s.legs, c.legs); paint(s.legsLower, c.legs); }
     if (!pp || !pp.torso) paint(s.torso, c.torso);
     if (!pp || !pp.arms) { const ah = c.arms != null ? c.arms : c.torso; paint(s.arms, ah); paint(s.armsLower, ah); }

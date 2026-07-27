@@ -63,6 +63,52 @@ path; run it once before a big deploy or when render-path code changed,
 otherwise skip). `tools/terrain-map-audit.mjs` is the deep-dive superset of
 the math gate's terrain sweep for terrain-focused work.
 
+## WHO VERIFIES — builders build, the orchestrator gates
+
+OWNER DOCTRINE (2026-07-27): "their job is to build and have great physics and
+realisticness, but not to test. Testing is done by me, the orchestrator, quickly
+before merging to main. They just need to focus on research if needed, and
+building. **They are artists not scientists.** It will make them not only more
+efficient but also make them write more new artistic and meaningful code and
+make the world look better — and worry less about testing and more about READING
+CURRENT CODE and writing better or new code."
+
+So the loop above is not everyone's job. It splits:
+
+**A BUILDER (subagent) does:** research, read the surrounding code until it
+understands the seam it is touching, and build. `node --check` on every file —
+that is not a test, it costs nothing, and a syntax error blocks the whole wave.
+Then report PRECISELY what it would have verified: the audit calls, the expected
+values, and every invariant it thinks its change could plausibly break. It must
+still EXPORT its audits so somebody else can call them.
+
+**A BUILDER DOES NOT:** boot a browser. No math gate, no CDP probe, no
+screenshot tool. Each of those costs 15-90 s of setup to answer a 3 ms question,
+and a parallel wave of them once left 93 orphaned Chrome profiles, 6.6 GB of
+disk and ten live headless instances that stopped the owner's real browser from
+opening. `tools/probe.mjs --serve` exists so ONE live world answers many
+queries; even that is the orchestrator's tool.
+
+**THE ORCHESTRATOR does:** one gate run on the MERGED state, immediately before
+push. Not per-agent, not per-file — once, on what actually ships.
+
+WHY THIS IS NOT A LOWERING OF STANDARDS. The number of gate runs is not the
+quality signal; what the gate CATCHES is, and it catches the same things whether
+it ran once or twenty times. What twenty runs cost is the thing that actually
+produces quality here — time spent reading the file you are about to change.
+Every genuinely good fix in this repo came from reading, not from running: the
+airliner console sitting 0.09 m ABOVE the pilot's eye, the blood soak comparing
+a RADIUS against a part's WIDTH, `findRoad` matching a junction to a road it was
+never on, the pelvis wearing prison orange because no code path had ever painted
+that slot. None of those were found by a test. They were found by reading, and
+then a number was written to PIN them.
+
+THE ONE CONDITION that makes this safe, and it is on the orchestrator: the gate
+must actually run before merge. Freed from testing, a builder can produce
+confident code that does not execute — this repo has already seen a wave leave
+`world.js` throwing mid-edit. Builders trade verification for reading time; the
+orchestrator owes them the verification back.
+
 Escalate depth with risk: a color tweak needs (1); logic needs (1)+(2);
 behavior/systems work needs all three. Never commit on (1) alone.
 
@@ -389,6 +435,97 @@ Before building anything adjacent, wire into the existing system:
   in the survival arena for its whole life: a separate mesh has to be taught to
   every water consumer individually. `city/tsunami.js` is the whole main-world
   event and it authors no water, no flood damage model and no panic AI.
+- **THE GROUND YOU SEE IS THE GROUND YOU DRIVE ON** — `CBZ.countryReliefAt(x,z)`
+  (`city/continent.js`) + `CBZ.cityCarGroundY` / the private `seatCar` in
+  `city/vehicles.js`. OWNER, verbatim: "THE GREEN TERRAIN WAS MADE TO NOT BE FLAT
+  BUT THERE'S NO PHYSICS, SO IT'S LIKE GREEN WATER — DRIVING IN IT… IT'S LIKE
+  DRIVING ON WATER." Two separate faults, both arithmetic:
+  (a) **the oracle was not the mesh.** `countryHeightAt` is an ANALYTIC field
+  whose finest octave is ~17 m; the plate that RENDERS it is a ~40 m triangle
+  grid, so they are two different surfaces — measured **0.41 m mean / 9.77 m max**
+  apart. The registered provider now samples the plate's OWN vertices across the
+  plate's OWN triangles (r128 `PlaneGeometry` emits `(a,b,d)` then `(b,c,d)`, so
+  the split is `tx+tz<=1` — get that wrong and you are matching a bilinear
+  approximation, ~1 m off on a ridge). Measured after: **0.0002 m mean / 0.29 m
+  max**. It is also 45x CHEAPER (the whole `CBZ.floorAt` stack went **6.03 µs →
+  0.14 µs**), which is the only reason (b) is affordable at all.
+  (b) **every car sat at a literal `y = 0`** — seven `position.set(x, 0, z)` sites
+  plus parked cars, which never enter the drive loop at all and are the car in
+  the owner's screenshot. `seatCar(car, dt, extraY, near)` REPLACES the line each
+  site already wrote and buys ride height + terrain pitch + terrain roll. Probe
+  budget is the whole perf story: a NEAR car takes 4 (one per wheel), a FAR car 1,
+  a PARKED car 0 after its first tick. `_airY`, `sinkY` and `WATER_Y` are OFFSETS
+  FROM the ground, never replacements for it. Flags `TERRAIN_PHYSICS_MATCH` ·
+  `VEHICLE_TERRAIN`. Ratchet: **`CBZ.groundMatchAudit()` → `maxErr`** (metres of
+  disagreement between the drawn plate and the physics floor) — pin it once run.
+- **BUILT GROUND IS FLAT, AND THE TERRAIN IS WHAT GIVES WAY** —
+  `TERRAIN_FLATTEN_UNDER_BUILT` in `city/continent.js`. OWNER: "IT OVERLAPS
+  PARKING LOTS." The relief gate under an authored floor was a BOOLEAN with an
+  **8 m** margin while the plate cell is **40 m**, so the triangle STRADDLING the
+  kerb kept full relief at its outer vertex and its inner half climbed straight
+  through the asphalt — that is the green banding, and raising the lot cannot
+  cure it. The gate is now a DISTANCE (0 inside and for one whole grid cell
+  beyond — so BOTH vertices of every straddling triangle read zero — then
+  smoothly back over 110 m), which is the grammar `CBZ.highwayNetReliefGate`
+  already used under a road corridor. **Never raise a built surface to clear the
+  terrain; flatten the terrain under it.** The gate can only ever LOWER h, so
+  `mountainCellsOutsideSnow` / `cityOnMountain` get MORE true, never less.
+  Ratchet: **`CBZ.groundMatchAudit()` → `ungated`** (built surfaces with country
+  relief still standing above their own slab).
+- **YOU SINK UNLESS YOU SWIM** — `SWIM_SINK` in `city/swim.js`. OWNER: "WHEN IN
+  WATER, YOU SHOULD SINK UNLESS PRESSING SPACE TO GO TO SURFACE, LIKE HOW GTA
+  WORKS." Everything needed was already in the file and is reused untouched — the
+  damped vertical oscillator, the bathymetry floor, the 28 s breath meter, the
+  drown routed through `cityHurtPlayer(.., "drowned", ..)` which `killfeed.js`'s
+  `cityKillPlayer` wrap turns into the corner feed. **The flag changes exactly one
+  thing: the sign of the resting buoyancy.** The number is DERIVED, not picked —
+  terminal sink is `G_WATER*(1-buoy)/VDRAG`, so a target of 0.85 m/s (between a
+  passive body's few tenths and a freediver's ~1.2 in free fall) solves to
+  `SINK_BUOY = 0.7544`; the 0.38 s solve time constant means the head does not go
+  under for ~0.85 s, so sinking is a state you can answer. Holding Space restores
+  POSITIVE buoyancy rather than merely accelerating you up, so you HOLD at the
+  surface instead of porpoising. Ratchet/exports: **`CBZ.swimAudit()` →
+  `{sinkRate, ascendRate, breathSec, drowned}`**; `drowned` counts real deaths
+  through the ONE pipeline and is what proves the drown is not a stat fiction.
+- **SCENERY MUST BE OUT OF REACH** — `TERRAIN_BACKDROP_CLEAR` /
+  `CBZ.backdropAudit()` in `world/terrain_overhaul.js`, fed by
+  `CBZ.CONTINENT_PLATE` (published by `continent.js`). OWNER: "there's also a very
+  tall darker mountain than the rest of the mountains and it can be flown straight
+  through." It is this file's offshore skyline range — DARKER because it is the
+  only range drawn with a lit `MeshLambertMaterial` (Mount Mercy and the Greater
+  Mercy Range are unlit `MeshBasicMaterial`), and collision-free ON PURPOSE
+  ("decorative mountains are not geography"). **That contract is only honest while
+  you cannot reach it**, and the world re-lay broke it: the clearance was
+  ASSUMED (`PAD + 120 = 2320`) while the walkable plate actually reaches **4410 m**
+  past `TERRAIN_FLAT` on its north side, because the plate pads around the REGION
+  union and the Greater Mercy Range region reaches further out than FLAT does. A
+  **1441 m** range therefore stood on 2.1 km of driveable backcountry with
+  `CBZ.floorAt` reading 0 under it. The fix measures instead of assuming — and
+  every downstream number (the relief ring band, the side weights, the tile SPAN)
+  already rode that one value, so nothing else had to be told. **Do not answer a
+  reachable backdrop by making it collidable** — that puts a heavy analytic field
+  inside `CBZ.floorAt`, which is now called per car per frame. Ratchet:
+  `backdropAudit().onPlate`, pinned at **0**.
+- **A MOUNTAIN HAS A HIERARCHY** — `TERRAIN_PEAKS_V2` / `CBZ.peakShapeAudit()` in
+  `city/biome_snow.js`. OWNER: "all the mountains have these curved yet sharp
+  multi-peaks that don't look like realistic mountain shape." All three words were
+  separate arithmetic faults in the Greater Mercy field, and the lesson generalises
+  to any lobe-sum range: **(1)** a radial rib term `cos(angle*k + radius*7.0)`
+  evaluated out to 4 sigma completes ~4.5 CYCLES between summit and base, so every
+  ridgeline oscillated on its way down — a real ridge DESCENDS MONOTONICALLY, so
+  the rib is now purely azimuthal with its depth decaying outward; **(2)** the
+  summit ladder was compressed (`pow(s,0.62)`) while shoulders were allowed
+  0.555x their parent, so the biggest summit's shoulders (213) out-topped SIX OF
+  THE TEN SUMMITS — the share is now capped at 0.168, which is strictly under
+  `1/5.754`, the exact point at which the tallest shoulder equals the shortest
+  summit (hierarchy as an INEQUALITY, not as taste); **(3)** no apron — one
+  `base*(1-base)` term is zero at the crest and zero in the far field and peaks
+  at mid-slope, so a massif gets the long shallow foot a real one has **without
+  one centimetre added to any summit** (which is what keeps the 25 u mountain
+  threshold where it was). The amplitude is renormalised (92 → 67) so the steeper
+  ladder does not also GROW the range: a shape change that raises the massif is a
+  different change and would move the gate's mountain-cell sets. No octave and no
+  noise call was added — the field costs exactly what it did.
 - **Beach/outdoor furniture** — `CBZ.furnish.lounger` / `.deckchair`
   (`city/furniture.js`). A lounger registers a propuse BED, so lying on one runs
   the same walk→perch→swing arc as getting into a bed; a deck chair registers a
@@ -663,6 +800,116 @@ Before building anything adjacent, wire into the existing system:
   applies the origin. Ratchet: `CBZ.cityOriginAudit()`, `bespoke` pinned at
   **3** and may only go DOWN — the seventh story must not add a fourth.
 
+- **A VENUE IS A BUILDING WITH ONE NUMBER** — `CBZ.CONFIG.ARENA_TIERS` +
+  `CBZ.arenaAudit()` in `city/arena_venue.js` / `city/arena_fights.js`. OWNER
+  (2026-07-27): "STADIUM HAS TWO LEVELS OF ROWS SO IT FEELS SUPER SUPER SHORT —
+  IT SHOULD HAVE 20 OF THE CURRENT LEVELS IT HAS 2 OF, AND BE MUCH TALLER." The
+  bowl's row count, rake, tread, cross-aisle spacing, vomitory height, rail
+  placement, roof/gantry height and seat-colour banding ALL derive from
+  `ARENA_TIERS` — set it to 2 and the old silhouette comes back. **The rake is
+  not tuned, it is solved**: stadium design's C-VALUE sightline equation
+  `C = D(R+N)/(D+T) − R` gives the tread as a CEILING (`T_max = D(N−C)/(R+C)`),
+  and the bowl runs an ergonomic tread ramp capped by it, so no row can ever be
+  built that cannot see the floor (`arenaAudit().minCValue`, code floor 0.06,
+  target 0.12). The riser is pinned at 0.42 **because physics.js's `STEP_UP` is
+  0.45** — a real bowl steepens by growing the riser and this one cannot, so the
+  tread carries the steepening instead. That constraint is also why **seats are
+  not colliders**: a solid seat bank each side of a 0.86 m tread leaves a 0.26 m
+  strip against a 0.55-radius player capsule, so the rows stay climbable and what
+  gets colliders is the STRUCTURE (bowl front, every cross-aisle rail, top rail,
+  back wall — all of which were `put()` decoration with no `solid()` at all).
+  Ratchets: `misposed` and `shrugRoles` pinned at **0**.
+- **A CROWD IS A DIAL, NOT A CONSTANT** — `venue.crowdFill(f, snap)`. OWNER: "IT
+  SHOULD BE FULL WHEN ACTIVE AND NEARLY EMPTY WHEN NOT... IT'S LIKE 10 PERCENT
+  FULL." Occupancy used to be decided ONCE at world build by a position hash, so
+  the bowl was frozen at one fill forever — never a crowd, never abandoned. The
+  instanced proxy is now built for EVERY seat, ORDERED by a deterministic
+  KEENNESS rank (best seats first, how a real house fills), and occupancy is
+  `mesh.count = fill × total` — an integer write, no matrices rebuilt, **three
+  draw calls at any fill**. The split IS the performance answer: distant
+  spectators are instanced and near ones are ~28 real rigs (a full rig is ~16
+  draw calls and is the only thing that actually costs GPU here).
+- **AN ACTIVITY IS NOT AN IDENTITY** — `CBZ.citySetAttending(a, what, venue)` /
+  `cityAttending` / `cityAttendingLine` in `city/level.js`. OWNER: "'FIGHT FAN'
+  AS ROLE OF NPCS — THAT'S NOT AN NPC ROLE." Same bug class as npclife's
+  "passenger": the person in that seat is a cashier who came to a fight tonight.
+  `job` is the field that renders the pill, so the activity word comes OFF it —
+  "fight fan"/"race fan"/"spectator"/"fan" are now `NO_ROLE`, and `ARCH_TITLE`'s
+  `fan` row is deleted — the caster deals a real trade, and what they are DOING
+  goes on the separate attending field. Adoption is one call that REPLACES the
+  `overrides:{job:"fight fan"}` the venue was writing anyway. Consumers:
+  arena spectators, arena staff, speedway spectators/concourse. Ratchet:
+  `roleAudit().activityTitles`, pinned at **0**.
+- **FREEZE OR BOLT IS ONE DECISION** — `CBZ.cityScare(actor, threat, opts)` →
+  `"bolt"|"freeze"|"hold"` in `city/peds.js`. OWNER: "right now NPCs can't stand
+  up and run away. Yes, with a gun pointed some should [put] hands up, but some
+  should stand up and run away." Not a coin flip: `sizeup.js`'s `citySizeUp`
+  already answers "does this person dare", DISTANCE decides freeze-vs-run
+  (nobody outruns a gun at four metres), and **panic is contagious** —
+  `CBZ.cityPanicRaise`/`cityPanicAt` is a decaying spatial field that every bolt
+  feeds and every next decision reads, which is what makes a stand empty as a
+  WAVE instead of as N independent dice. The choice is drawn from the person's
+  own stable `roleHash`, so the same person is always the one who runs; a runner
+  is a character trait, not a die re-rolled every three seconds. **It is also
+  the one place a body gets OUT of a seat** — `syncAttached` re-asserts an
+  attached body's transform every frame, so detaching via `CBZ.cityUnseat` is
+  the only exit and nothing here re-implements it. Consumers migrated in the
+  same change: `sizeup.js`'s `citySizeUpFold` (which WAS this branch, copied),
+  `peds.js`'s `gunpointSweep` (every held body anywhere — cars, cabins, gate
+  lounges, desks), and the arena crowd.
+- **NEVER LET THE PLAYER SEE A SPAWN** — `CBZ.npcTransitionSafe` (config.js) is
+  the shared contract and it is a padded-screen PROJECTION, strictly stronger
+  than a yaw cone. OWNER: "NPCs spawn right in front of the player... It should
+  be like buildings" — the world is already there and you merely arrive at it.
+  Every TELEPORT path in `city/crowd.js` was already guarded; **PROMOTION was
+  not**, and in the shipping `STANDARD_ACTORS_ONLY` mode promotion is the moment
+  a body becomes visible at all, so the "fill every free slot in one cheap pass"
+  loop could hand a rig to a row three metres in front of the camera. Refused
+  rows retry next tick — an empty patch of pavement for a fraction of a second
+  is the correct trade. `npclife`'s `attach()` deliberately forces an anchored
+  rig VISIBLE (right for a plane, wrong for a seat six metres away), so venues
+  re-arm peds.js's own `_spawnHidden` latch in their `configure`. Ratchets:
+  `CBZ.cityCrowdSpawnAudit().spawnsInView` and `arenaAudit().spawnsInView`, both
+  pinned at **0**. Flag `CROWD_PROMOTE_HIDE`.
+
+- **THE MAP SPEAKS IN ICONS** — `CBZ.mapIcon` in `src/systems/fullmap.js`.
+  OWNER (2026-07-27, verbatim): "AND THE MAP SHOWS WAY WAY TOO MUCH TEXT. IT
+  SHOULD SHOW ICONS, AND TEXT WHEN AN ICON IS HOVERED OVER." The map printed a
+  NAME over every point of interest at the zoom `M` drops you at, so the
+  geography drowned under shop names. **A place's KIND is now a pictogram and
+  its NAME is one hover (or one tap) away.** `CBZ.mapIcon` is the ONE
+  kind→symbol table: `{c colour, r RANK, n human name, g glyph}`, and RANK does
+  three jobs so no second table is ever needed — it is the zoom tier
+  (`>= mapIcon.LANDMARK` draws at every city zoom, below it only zoomed in), the
+  declutter arbitration (in a collision the higher rank survives) and the label
+  priority. `POI_KINDS` is now DERIVED from it, so a colour can never disagree
+  with its icon. **Adding a trade is a ROW.** Adoption is one line and
+  degrade-safe (`CBZ.mapIcon ? MI.draw(...) : <old diamond>`, which is exactly
+  what `city/hud.js`'s radar does). Consumers migrated in the same change: the
+  full-map POI layer, settlements, gang HQs + district crests, climb marks,
+  leased ad boards, the mission marker, the prison map's hatches/gate, the
+  LEGEND (it renders the real pictogram via `mapIcon.dataURL`, cached) and the
+  corner radar. Glyph craft rules are in a comment above the table and are
+  binding: silhouette over detail, one idea per glyph, **never colour alone**
+  (that rule is why `town` is a multi-roof cluster and not the house `home`
+  already owns), consistent optical weight, optically centred on a 20×20 box.
+  **Every permanent word on the chart goes through ONE function, `mapLabel`** —
+  it measures, boxes, collision-tests and COUNTS. A label that skips it is
+  invisible to the ratchet, which is the whole reason there is only one.
+  What deliberately KEEPS permanent text, and why: region/settlement/city names
+  (geography — a place name you must hover to discover is a quiz, not a map),
+  your own waypoint and the active objective (you already chose them), and
+  `SEALED` on the bridge (a live obstruction, not a place). Everything else —
+  every shop, crew turf tag, `LAST SEEN`, `HATCH` — went silent.
+  Ratchet: **`CBZ.mapAudit()`** → `{icons, labels, overlaps, hoverable, merged,
+  skipped, furniture, plateLabels, kinds, mode, zoom}`. **`labels` and
+  `overlaps` may only ever go DOWN**; `icons`/`hoverable` are printed beside
+  them so a "fix" that just draws nothing cannot pass. Flag `MAP_ICONS_V2`
+  (default true) is a one-line revert to the all-text map, and the legacy path
+  is kept routed through `mapLabel` so the before-state stays measurable.
+  NOT YET PINNED — measure and write the number in (do not repeat the
+  `propUseAudit` mistake of pinning a guess).
+
   HONEST STATUS (2026-07-26, after the predators wave): `bodyBite` and the gore
   medium have real adoption (3 consumers / every existing gore caller).
   `predatorHunt`/`predatorSeize` went from ONE consumer to **eight** — every
@@ -777,6 +1024,7 @@ showing the work:
 | phone UIs | — | **2** (`phone.js` 984 + `campaign_ui.js` 1138) |
 | furniture anchors NOTHING can walk to (`propUseAudit().blocked`) | 0 (claimed) | **487** of ~6000 |
 | seat anchors with no declared cushion (`.noGeom`) | — | **4955** of 5993 |
+| venue seats whose anchor declared no cushion (the arena bowl) | — | **0** (was every one) |
 | rank/tier ladders (RE-COUNTED 2026-07-27, file-by-file) | 20 | **~28** |
 | ↳ copies of the GANG rank order alone | 8 | **8** (playergang · careers · hud · leaderboard · level ×2 · gangs ×2 · economy) |
 | ↳ copies of the POLITICAL title ladder | — | **8 files** (officials · officialdom · contracts · civic · statecraft · candidacy · elections · games/government) |

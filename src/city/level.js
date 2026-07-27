@@ -199,6 +199,20 @@
     "crew": 1,                   // playergang.js — the gang rank is the real read
     "passenger": 1,              // npclife.js — where they are, not who they are
     "civilian": 1, "resident": 1, "villager": 1, "none": 1,
+    // ---- AN ACTIVITY IS NOT AN IDENTITY (owner, 2026-07-27, verbatim):
+    // "'FIGHT FAN' AS ROLE OF NPCS — THAT'S NOT AN NPC ROLE."  He is right and
+    // it is the same law as "passenger": the person in that seat is a cashier,
+    // a mechanic, a dock worker WHO CAME TO A FIGHT TONIGHT. Where they are and
+    // what they are watching belongs on CBZ.cityAttending (below) — a separate
+    // field that the dossier may print and the pill never sees. Every one of
+    // these was a live JOB_TITLE row until this change; deleting the row is not
+    // enough, because `jobTitle` title-cases anything short it does not know,
+    // so "fight fan" would come straight back as "Fight Fan".
+    "fight fan": 1,              // arena_fights.js — an evening, not a trade
+    "race fan": 1,               // island_speedway.js — likewise
+    "spectator": 1, "fan": 1, "audience": 1, "attendee": 1,
+    "crowd": 1, "punter": 1, "supporter": 1, "ticket holder": 1,
+    "concert goer": 1, "moviegoer": 1, "gig goer": 1, "watching": 1,
   };
 
   // (2) THE JOB -> STREET TITLE MAP. Left column is every job string this
@@ -261,8 +275,10 @@
     "student": "Student", "immigrant": "Immigrant", "former cop": "Ex-Cop",
     "club member": "Club Member", "liveaboard": "Liveaboard",
     "venue worker": "Venue Worker", "traveller": "Tourist", "traveler": "Tourist",
-    "tourist": "Tourist", "race fan": "Race Fan", "fight fan": "Fight Fan",
-    "spectator": "Spectator", "enforcer": "Enforcer", "lieutenant": "Lieutenant",
+    // NOTE: "race fan" / "fight fan" / "spectator" USED to be mapped here. They
+    // are now NO_ROLE (see the block above) — an activity is not an identity.
+    "tourist": "Tourist", "usher": "Usher", "ticket seller": "Ticket Seller",
+    "enforcer": "Enforcer", "lieutenant": "Lieutenant",
     "criminal": "Crook", "gang boss": "Boss", "foreign noble": "Noble",
   };
 
@@ -279,7 +295,10 @@
     tweaker: "Addict", thug: "Thug", gangster: "Gangster", hitman: "Hitman",
     official: "Official", exec: "Executive", merchant: "Vendor",
     security: "Security Guard", military: "Soldier", soldier: "Soldier",
-    racer: "Racer", fan: "Spectator", nightlife: "Partygoer",
+    // `fan` is DELIBERATELY ABSENT (it used to map to "Spectator"). Being in the
+    // stands is an activity, so a "fan" archetype resolves to NOTHING and routes
+    // to the casting repair, exactly like "resident"/"civilian" above.
+    racer: "Racer", nightlife: "Partygoer",
     royal: "Royal", noble: "Noble", laborer: "Laborer", professional: "Professional",
     worker: "Worker", tourist: "Tourist", terrorist: "Terrorist",
   };
@@ -395,6 +414,43 @@
   }
   // public, non-aliasing copy (roleOf reuses one object per frame by design)
   CBZ.cityRole = function (a) { const r = roleOf(a); return { title: r.title, kind: r.kind }; };
+
+  // ============================================================
+  //  §ATTENDING. WHAT SOMEBODY IS DOING IS NOT WHO THEY ARE.
+  //
+  //  OWNER (2026-07-27): "'FIGHT FAN' AS ROLE OF NPCS — THAT'S NOT AN NPC ROLE."
+  //
+  //  Venues kept solving this the same wrong way: arena_fights.js stamped
+  //  job = "fight fan", island_speedway.js stamped job = "race fan", and both
+  //  went straight over the head as a pill, because `job` IS the role field.
+  //  The information itself is real and worth keeping — a venue genuinely wants
+  //  to know who is in its seats — it simply does not belong on the thing that
+  //  renders the pill. So it gets its OWN field, and the rule is one line:
+  //
+  //      CBZ.citySetAttending(ped, "the fights", "Ironjaw Arena");
+  //
+  //  and the person KEEPS whatever trade the caster dealt them. Adoption is one
+  //  call that REPLACES the `overrides:{job:"fight fan"}` the caller was writing
+  //  anyway (BLOCK LAW #1), it is degrade-safe (a venue that never calls it is
+  //  byte-identical), and it is measured — roleAudit().attending.
+  //
+  //  It is deliberately NOT a role: nothing in roleOf() reads it, so a spectator
+  //  aiming-pill says "Lv.4 Mechanic" and the DOSSIER can say "at the fights".
+  // ============================================================
+  CBZ.citySetAttending = function (a, what, venue) {
+    if (!a) return null;
+    if (!what) { a._attending = null; return null; }
+    a._attending = { what: String(what), venue: venue ? String(venue) : null,
+                     since: (CBZ.now != null ? CBZ.now : 0) };
+    return a._attending;
+  };
+  CBZ.cityAttending = function (a) { return (a && a._attending) || null; };
+  // one prose line for a dossier row — never a title, never a pill.
+  CBZ.cityAttendingLine = function (a) {
+    const at = a && a._attending;
+    if (!at) return "";
+    return at.venue ? (at.what + " · " + at.venue) : at.what;
+  };
 
   // ============================================================
   //  §COVER. A DISPLAYED ROLE IS A CLAIM, NOT A FACT.
@@ -674,8 +730,13 @@
     const all = everyone();
     const titles = Object.create(null), kinds = { org: 0, job: 0, condition: 0, status: 0 };
     const orgs = Object.create(null);
-    let roled = 0, roleless = 0, shrugs = 0;
+    let roled = 0, roleless = 0, shrugs = 0, attending = 0, activityTitles = 0;
     const SHRUG = { Psycho: 1, Crook: 1, "Old Money": 1, Drifter: 1, Civilian: 1 };
+    // §ATTENDING's ratchet. A title that names an ACTIVITY is the same bug class
+    // as a shrug: it is what somebody is doing, not who they are. PIN AT 0 — if
+    // this is nonzero a venue is still stamping its activity onto `job`.
+    const ACTIVITY = { "Fight Fan": 1, "Race Fan": 1, Spectator: 1, Fan: 1,
+                       Audience: 1, Attendee: 1, Crowd: 1, Punter: 1, Passenger: 1 };
     function org(id, rank) {
       const o = orgs[id] || (orgs[id] = { members: 0, byRank: Object.create(null) });
       o.members++;
@@ -698,11 +759,13 @@
         coverOrgs[cv.org || "(burn-only)"] = (coverOrgs[cv.org || "(burn-only)"] | 0) + 1;
         if (!cv.org && !a._burnable && !a._killer) unseeable++;
       }
+      if (a._attending) attending++;
       const r = roleOf(a);
       if (r.title) {
         roled++; kinds[r.kind] = (kinds[r.kind] | 0) + 1;
         titles[r.title] = (titles[r.title] | 0) + 1;
         if (SHRUG[r.title]) shrugs++;
+        if (ACTIVITY[r.title]) activityTitles++;
       } else roleless++;
       // org membership, read off the fields the world already keeps
       if (a.kind === "cop") org("police", a.swat ? "swat" : (a.copRank || "patrol"));
@@ -750,6 +813,7 @@
       } catch (e) {}
     }
     return { peds: all.length, roled: roled, roleless: roleless, shrugs: shrugs,
+             attending: attending, activityTitles: activityTitles,
              kinds: kinds, titles: titles, orgs: orgs, emptyRanks: empty,
              covered: covered, coverOrgs: coverOrgs, unseeable: unseeable,
              disguise: disguise };

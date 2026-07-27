@@ -215,7 +215,14 @@
     // ignore visible=false). An anchor is an authored, meant-to-be-seen
     // placement: force the rig visible. peds.js re-applies distance LOD
     // to attached rigs every frame after this.
-    group.visible = true;
+    // ...but NOT when the caller deliberately staged this body hidden. The
+    // unconditional force is right for a cabin draft (it claims FAR bodies the
+    // street LOD had already hidden, and an authored seat is meant to be seen)
+    // and wrong for a stadium spectator six metres from the camera, where the
+    // pop-in is the thing the owner asked us to remove. `_spawnHidden` is
+    // peds.js's own "do not reveal yet" latch; honouring it here means a venue
+    // no longer has to re-arm it after every attach.
+    group.visible = !actor._spawnHidden;
     if (actor.char) {
       actor.char.sitting = anchor.pose !== "stand";
       actor.char.handsUp = false;
@@ -629,7 +636,12 @@
   // consistent identity, equipment and baseline temperament.
   define("cityResident", { actor: { kind: "civilian", archetype: "resident" }, life: { initialState: "walk" } });
   define("terminalTraveller", { actor: { kind: "civilian", archetype: "tourist", job: "traveller", aggr: 0.08, armed: false, weapon: null }, life: { initialState: "walk", venue: "airport" } });
-  define("venueSpectator", { actor: { kind: "civilian", archetype: "fan", job: "spectator", aggr: 0.12, armed: false, weapon: null }, life: { initialState: "sit", stationary: true, venue: true } });
+  // archetype/job NULL, deliberately. "fan" and "spectator" are ACTIVITIES,
+  // not roles — level.js now classes both as NO_ROLE, and the person in that
+  // seat is a cashier or a mechanic who came to a fight tonight. Leaving
+  // these null hands them to cityDealRole so they arrive with a real trade
+  // instead of being repaired afterwards by the retag sweep.
+  define("venueSpectator", { actor: { kind: "civilian", archetype: null, job: null, aggr: 0.12, armed: false, weapon: null }, life: { initialState: "sit", stationary: true, venue: true } });
   define("venueWorker", { actor: { kind: "worker", archetype: "laborer", job: "venue worker", aggr: 0.16, armed: false, weapon: null }, life: { initialState: "walk", workPost: true, venue: true } });
   define("cabPassenger", { actor: { kind: "civilian", archetype: "resident", job: "passenger", aggr: 0.08, armed: false, weapon: null }, life: { initialState: "sit", stationary: true, ride: "cab" } });
   define("aircraftPassenger", { actor: { kind: "civilian", archetype: "tourist", job: "traveller", aggr: 0.08, armed: false, weapon: null }, life: { initialState: "sit", stationary: true } });

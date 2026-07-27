@@ -64,6 +64,32 @@ if (CFG.ARENA_CROWD_PROXY == null) CFG.ARENA_CROWD_PROXY = true;
 if (CFG.ARENA_LIGHT_RIG == null) CFG.ARENA_LIGHT_RIG = true;
 // ARENA_JUMBOTRON — the centre-hung screen and its live-card redraw.
 if (CFG.ARENA_JUMBOTRON == null) CFG.ARENA_JUMBOTRON = true;
+// ---------------------------------------------------------------------------
+// ARENA_TIERS — HOW MANY SEATING TIERS THE BOWL STACKS. OWNER, verbatim:
+// "STADIUM HAS TWO LEVELS OF ROWS SO IT FEELS SUPER SUPER SHORT — IT SHOULD
+// HAVE 20 OF THE CURRENT LEVELS IT HAS 2 OF, AND BE MUCH TALLER."
+// He was counting BANDS: the old bowl had exactly one cross-aisle, so it read
+// as two blocks of seating. This is now ONE NUMBER and everything follows from
+// it — row count, rake, tread, cross-aisle spacing, vomitory height, aisle
+// ramps, rail placement, roof and gantry height, and the seat-colour banding
+// that makes the tiers COUNTABLE from inside. Set it to 2 and you get the old
+// silhouette back; set it to 30 and the building grows correctly.
+if (CFG.ARENA_TIERS == null) CFG.ARENA_TIERS = 20;
+// rows inside one tier. TIERS × ROWS_PER_TIER = the bowl's total row count.
+if (CFG.ARENA_ROWS_PER_TIER == null) CFG.ARENA_ROWS_PER_TIER = 2;
+// ARENA_SEAT_POSE — declare each seat's REAL cushion/floor geometry so
+// entities/character.js runs its V2 feet-on-the-floor chair solve instead of
+// the legacy squat (owner: spectators "SIT WEIRD WITH LEGS AGAINST CHEST LIKE
+// THEY ARE BALLED UP"). OFF → the old undeclared anchor and the legacy pose.
+if (CFG.ARENA_SEAT_POSE == null) CFG.ARENA_SEAT_POSE = true;
+// ARENA_STAND_SOLID — the seat banks and handrails are REAL colliders, so you
+// cannot run through the stands; the radial aisles carry ramp platforms and
+// become the only way up (which is how a real bowl works). OFF → the old
+// ghost seating where every row was walk-through and climbable.
+if (CFG.ARENA_STAND_SOLID == null) CFG.ARENA_STAND_SOLID = true;
+// ARENA_CROWD_EVENT — occupancy follows whether an event is actually running.
+// OFF → the crowd sits at a fixed fill exactly like before.
+if (CFG.ARENA_CROWD_EVENT == null) CFG.ARENA_CROWD_EVENT = true;
 
 var mat = CBZ.cmat || CBZ.mat;
 if (!mat) return;
@@ -151,45 +177,131 @@ CBZ.arenaVenue = {
     // platform, and vomitory ramps can use the frozen x/z ramp record shapes)
     // and whose corners are concentric arcs (so rows never leave a wedge-shaped
     // hole the way four separate straight stands would).
-    var A = 38, B = 52;             // rectangle core half-extents (x, z)
-    var D0 = 13;                    // offset of row 0's front edge -> floor 51 x 65
-    var ROWS = 16, RISE = 0.42, TREAD = 1.30;
-    var FRONT_H = 3.0;              // ringside barrier: row 0's deck sits this high
-    var XROW = 6, XW = 2.0;         // cross-aisle folded into row 6's tread
+    // THE FLOOR SHRANK AND THE BOWL GREW. The old plan wrapped a 102 x 130 m
+    // FLOOR — a football pitch — in a 16-row, 6.3 m stand, which is exactly why
+    // the owner read it as "super super short": the height/width proportion was
+    // 0.09. A fight venue's floor is small and its bowl is tall and steep. This
+    // plan is 52 x 70 on the floor with a 20-tier bowl, proportion 0.40.
+    var A = 15, B = 24;             // rectangle core half-extents (x, z)
+    var D0 = 11;                    // offset of row 0's front edge -> floor 52 x 70
+    // ---- THE ONE PARAMETER -------------------------------------------------
+    var TIERS = Math.max(1, CFG.ARENA_TIERS | 0);
+    var RPT = Math.max(1, CFG.ARENA_ROWS_PER_TIER | 0);
+    var ROWS = TIERS * RPT;
+    // RISE IS CAPPED BY THE ENGINE, NOT BY TASTE: systems/physics.js's STEP_UP
+    // is 0.45, and the bowl's own contract is that a row is climbable without a
+    // ramp record. So the rake is steepened by NARROWING THE TREAD, never by
+    // raising the riser — 0.42 / 0.95 = 23.9 deg at the floor ramping to
+    // 0.42 / 0.78 = 28.3 deg in the gods, which is the real 25-30 deg band with
+    // the upper tiers correctly steeper.
+    var RISE = 0.42;
+    var TREAD_LO = 0.95, TREAD_HI = 0.78;
+    var FRONT_H = 4.2;              // ringside podium: row 0's deck sits this high
+    var XW = 1.9;                   // extra tread where a cross-aisle is folded in
+    // a real walkable cross-aisle every CROSS_EVERY tiers (lower / club / upper
+    // concourse). Derived, so 4 tiers gives one and 40 gives seven.
+    var CROSS_EVERY = Math.max(2, Math.round(TIERS / 4));
     var CONC = 7.0;                 // rear concourse width
-    var PITCH = 1.40;               // seat pitch along a row
+    var PITCH = 0.60;               // seat pitch along a row (real seat width)
     var AISLE_H = 0.95;             // half-width of a radial aisle
     var DECK_R = 112;               // concrete apron disc radius (island R is 120)
 
-    function rowD(i) { return D0 + i * TREAD + (i >= XROW ? XW : 0); }
-    function deckFront(i) { return rowD(i) - (i === XROW ? XW : 0); }
-    function deckDepth(i) { return TREAD + (i === XROW ? XW : 0); }
-    function rowY(i) { return PY + FRONT_H + i * RISE; }
+    function tierOf(r) { return Math.min(TIERS - 1, (r / RPT) | 0); }
+    function tierFirst(r) { return (r % RPT) === 0; }                 // first row of a tier
+    function crossRow(r) { return r > 0 && (r % (RPT * CROSS_EVERY)) === 0; }
 
-    var D_TOP = rowD(ROWS - 1) + TREAD;   // rear edge of the last row  (35.8)
-    var D_BACK = D_TOP + 1.4;             // rear skirt wall            (37.2)
-    var D_OUT = D_BACK + CONC;            // inner face of the facade   (44.2)
-    var D_FACE = D_OUT + 2.0;             // outer face of the facade   (46.2)
+    // ---- THE RAKE COMES FROM THE SIGHTLINE FORMULA, NOT FROM TASTE ---------
+    // Stadium design solves a rake with the C-VALUE: the vertical distance by
+    // which a spectator's eye clears the head of the person one row in front,
+    // measured to a FOCAL POINT on the playing surface.
+    //
+    //     C = D·(R + N)/(D + T) − R
+    //
+    // D = horizontal eye-to-focus, R = eye height above the focus, N = riser,
+    // T = tread. 60 mm is the usual code floor, 90 mm is decent, 120 mm is a
+    // good arena. Solved for the tread it becomes a CEILING:
+    //
+    //     T_max = D·(N − C)/(R + C)
+    //
+    // The reason real upper tiers rake steeper is that N grows with height —
+    // and WE CANNOT GROW N, because physics.js's STEP_UP is 0.45 and this
+    // bowl's contract is that every row is climbable with no ramp record. So
+    // the riser stays at 0.42 and the TREAD carries the steepening instead:
+    // an ergonomic ramp (wide legroom at the front, tight in the gods) capped
+    // by T_max, so the geometry can never drift into a row that cannot see.
+    // The worst C in the bowl is reported as arenaAudit().minCValue.
+    var C_VALUE = 0.12;      // target clearance, above the 0.06 code floor
+    var EYE = 1.15;          // seated eye height above the deck
+    var TREAD_MIN = 0.76;    // knees and feet — no arena treads tighter
+    var FOCUS_Y = PY;        // focal point: the arena floor at the bowl centre
+
+    // Precomputed plan: DECK_F[r] = front edge of row r's walkable deck,
+    // DECK_D[r] = its depth (tread, plus the cross-aisle where one is folded in).
+    var DECK_F = [], DECK_D = [], ROW_Y = [], TREAD = [], CVAL = [];
+    (function () {
+      var d = D0;
+      for (var r = 0; r < ROWS; r++) {
+        // comfort ramp: generous at the front, tight at the top
+        var T = TREAD_LO + (TREAD_HI - TREAD_LO) * (ROWS < 2 ? 0 : r / (ROWS - 1));
+        if (r > 0) {
+          // …capped by what the row BELOW can see over. D is measured on the
+          // ±x straights, the shortest run in the plan and therefore the
+          // tightest sightline in the bowl — solve for the worst case and the
+          // rest of the ring is better by construction.
+          var Dh = A + DECK_F[r - 1] + TREAD[r - 1] * 0.5;
+          var Rv = (ROW_Y[r - 1] + EYE) - FOCUS_Y;
+          var Tmax = Dh * (RISE - C_VALUE) / (Rv + C_VALUE);
+          if (Tmax > 0 && Tmax < T) T = Tmax;
+          T = Math.max(TREAD_MIN, T);
+          // the C this row actually achieves, for the audit
+          CVAL[r] = Dh * (Rv + RISE) / (Dh + T) - Rv;
+        } else CVAL[r] = 99;
+        TREAD[r] = T;
+        DECK_F[r] = d;
+        DECK_D[r] = T + (crossRow(r) ? XW : 0);
+        ROW_Y[r] = PY + FRONT_H + r * RISE;
+        d += DECK_D[r];
+      }
+    })();
+    function treadOf(r) { return TREAD[r]; }
+    var MIN_C = 99;
+    for (var cvi = 1; cvi < ROWS; cvi++) if (CVAL[cvi] < MIN_C) MIN_C = CVAL[cvi];
+    function rowD(i) { return DECK_F[i] + (crossRow(i) ? XW : 0); }   // front of the SEATS
+    function deckFront(i) { return DECK_F[i]; }
+    function deckDepth(i) { return DECK_D[i]; }
+    function rowY(i) { return ROW_Y[i]; }
+
+    var D_TOP = DECK_F[ROWS - 1] + DECK_D[ROWS - 1];   // rear edge of the last row
+    var D_BACK = D_TOP + 1.4;             // rear skirt wall
+    var D_OUT = D_BACK + CONC;            // inner face of the facade
+    var D_FACE = D_OUT + 2.0;             // outer face of the facade
     var TOP_Y = rowY(ROWS - 1);
+    // The VOMITORY level: the lowest real cross-aisle. Everything the old code
+    // keyed off the single hard-coded XROW=6 now keys off this.
+    var XROW = Math.min(ROWS - 1, RPT * CROSS_EVERY);
     var CROSS_Y = rowY(XROW);
-    var ROOF_Y = PY + 15.5;
-    var GANTRY_Y = PY + 19.5;
+    // Roof/gantry ride ON the bowl instead of at a frozen 15.5/19.5, so the
+    // canopy still covers the stands when TIERS changes.
+    var ROOF_Y = TOP_Y + 4.4;
+    var GANTRY_Y = ROOF_Y + 3.5;
     var CONC_CEIL = PY + 5.2;
     var CANOPY_IN = D0 - 4, CANOPY_OUT = D_FACE + 0.4;
 
     // radial aisle anchors: coordinate along each straight, mid-angle on corners
-    var AIS_X = [-39, -13, 13, 39];       // z offsets, used by the ±x stands
-    var AIS_Z = [-19, 19];                // x offsets, used by the ±z stands
+    var AIS_X = [-18, -6, 6, 18];         // z offsets, used by the ±x stands
+    var AIS_Z = [-9, 9];                  // x offsets, used by the ±z stands
     // Vomitories (ramped tunnels under the stand) — every one aligned with an
     // aisle so the walk-up continues straight into the rows.
+    // DERIVED from the aisle anchors, never re-typed: a vomitory that does not
+    // surface INTO an aisle dumps you into the back of a seat bank.
     var VOMS = [
-      { side: "xp", k: -13 }, { side: "xp", k: 13 },
-      { side: "xn", k: -39 }, { side: "xn", k: 39 },
-      { side: "zp", k: -19 }, { side: "zp", k: 19 },
-      { side: "zn", k: -19 }, { side: "zn", k: 19 }
+      { side: "xp", k: AIS_X[1] }, { side: "xp", k: AIS_X[2] },
+      { side: "xn", k: AIS_X[0] }, { side: "xn", k: AIS_X[3] },
+      { side: "zp", k: AIS_Z[0] }, { side: "zp", k: AIS_Z[1] },
+      { side: "zn", k: AIS_Z[0] }, { side: "zn", k: AIS_Z[1] }
     ];
     var VOM_HW = 2.2;                      // vomitory half-width
-    var GATE_HW = 5.0;                     // west entrance tunnel half-width
+    var GATE_HW = 4.2;                     // west entrance tunnel half-width
     // The ramp surfaces through a NOTCH cut in rows XROW..XROW+2. It has to:
     // a stand only 6.3 units tall cannot hide a 5.5-unit climb AND keep 2.4 of
     // headroom under the decks — the notch is what makes a real vomitory work.
@@ -256,7 +368,12 @@ CBZ.arenaVenue = {
             v = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
         for (var i = 0; i < items.length; i++) {
           var it = items[i];
-          e.set(it.rx || 0, it.ry || 0, it.rz || 0); q.setFromEuler(e);
+          // r128's default Euler order is XYZ, i.e. R = RX·RY·RZ — so an `rx`
+          // alongside a yaw is a rotation about the WORLD x axis and a body
+          // facing +x would ROLL instead of tipping forward. `eo:"YXZ"` gives
+          // R = RY·RX·RZ, which is yaw first and then pitch about the body's
+          // OWN side-to-side axis. Same scoped swap the death roll needs.
+          e.set(it.rx || 0, it.ry || 0, it.rz || 0, it.eo || "XYZ"); q.setFromEuler(e);
           v.set(it.x, it.y, it.z); s.set(it.sx, it.sy, it.sz);
           M.compose(v, q, s); im.setMatrixAt(i, M);
           if (tinted) { col.setHex(it.c == null ? 0xffffff : it.c); im.setColorAt(i, col); }
@@ -447,18 +564,47 @@ CBZ.arenaVenue = {
     }
 
     // ============================================================ SEATING BOWL
-    var seatRecords = [];       // {x,y,z,yaw,row}
-    var SEAT_W = 0.98, SEAT_D = 0.86, SEAT_H = 0.74;
-    // Seat-colour banding: lower tier ember/gold, upper tier deep maroon, two
-    // contrast rows reading as a painted stripe all the way round the bowl.
+    var seatRecords = [];       // {x,y,z,yaw,row,tier}
+    // ---- SEAT GEOMETRY IS DECLARED, NOT GUESSED -----------------------------
+    // The old seat was ONE 0.74-tall box whose TOP FACE was the seating surface,
+    // and the spectator anchor sat on that top face with NOTHING declared — the
+    // exact antipattern city/propuse.js names in propSeatRef ("a single tall
+    // block whose top face IS the seating surface"). entities/character.js's V2
+    // chair solve therefore never ran, the legacy squat pose did, and the body
+    // folded on top of the block with its knees at its chest. That is the
+    // owner's screenshot, and the cure is to draw a REAL seat and say so.
+    //
+    // READ the kit's number, never retype it (propuse.js's own doctrine): one
+    // edit to SEAT_H there moves the mesh and the pose together.
+    var SEAT_CUSH = (typeof CBZ.propSeatHeight === "function")
+      ? +CBZ.propSeatHeight("seat") : 0.45;           // cushion top above the deck
+    var SEAT_W = 0.50, SEAT_D = 0.46;                 // a real tip-up seat
+    var SEAT_BACK_H = 0.44;                           // backrest above the cushion
+    var SEAT_H = SEAT_CUSH;                           // legacy alias: anchor height
+    // Seat-colour banding by TIER, so the owner can COUNT the tiers from inside
+    // — that is the whole point of the ask. Families walk ember -> stripe ->
+    // maroon as you climb, and every tier is one step along the family.
     var LOWER = [0xc8912a, 0xb9821f, 0xd39b33];
     var UPPER = [0x8c1f2c, 0x7a1a26, 0x9a2634];
     var STRIPE = [0x1d3f6e, 0x24508a];
     function seatColour(row, x, z) {
-      if (row === 9 || row === 10) return hpick(STRIPE, x, z, 0x51);
-      return hpick(row < XROW ? LOWER : UPPER, x, z, 0x52);
+      var t = tierOf(row);
+      // every CROSS_EVERY-th tier is the contrast band that marks a concourse
+      if (CROSS_EVERY > 1 && (t % CROSS_EVERY) === 0 && t > 0) return hpick(STRIPE, x, z, 0x51);
+      return hpick(t * 2 < TIERS ? LOWER : UPPER, x, z, 0x52);
     }
     function notchRow(r) { return r >= NOTCH_LO && r <= NOTCH_HI; }
+    // How many AABB wedges a corner arc needs at radial depth d so the wedge's
+    // bulge never reaches into the next row. DERIVED from the tread, not tuned:
+    // the sagitta of a chord subtending 2t at radius d is d(1-cos t), and we
+    // allow at most 45% of a tread. Coarse near the floor, fine in the gods —
+    // the old fixed W=6 was correct at d<=36 and wrong for a 20-tier bowl.
+    function cornerSegs(d, tread) {
+      var tol = tread * 0.45;
+      var half = Math.acos(Math.max(-1, Math.min(1, 1 - Math.min(0.9, tol / Math.max(1, d)))));
+      if (!(half > 1e-4)) return 12;
+      return Math.max(3, Math.min(12, Math.ceil((Math.PI / 2) / (2 * half))));
+    }
 
     // straight-side platform for one row, split around the vomitory notches
     function rowStraightPlats(side, dIn, dOut, top, cut) {
@@ -488,18 +634,20 @@ CBZ.arenaVenue = {
       }
     }
 
+    var SOLID_STAND = CFG.ARENA_STAND_SOLID !== false;
+    var standColliders = 0;
     for (var r = 0; r < ROWS; r++) {
       (function (r) {
         var df = deckFront(r), dd = deckDepth(r), dy = rowY(r), cut = notchRow(r);
         var vp = cut ? 1.8 : 7.0;      // fine sampling only where we must cut
+        var tI = tierOf(r), first = tierFirst(r);
 
         // --- deck slab (visual)
         walkRing(df + dd / 2, vp, function (s) {
           if (cut && isStraight(s.side) && vomGap(s)) return;
           put("deck", { x: s.x, y: dy - 0.09, z: s.z, sx: s.len + 0.06, sy: 0.18, sz: dd, ry: s.yaw });
         });
-        // --- deck platforms: straights exact, corners as 6 wedge AABBs each
-        var i;
+        // --- deck platforms: straights exact, corners as wedge AABBs
         rowStraightPlats("xp", df, df + dd, dy, cut);
         rowStraightPlats("xn", df, df + dd, dy, cut);
         rowStraightPlats("zp", df, df + dd, dy, cut);
@@ -507,7 +655,7 @@ CBZ.arenaVenue = {
         for (var ci = 0; ci < 4; ci++) {
           var ox = (ci === 0 || ci === 3) ? CX + A : CX - A;
           var oz = (ci === 0 || ci === 1) ? CZ + B : CZ - B;
-          var a0 = ci * Math.PI / 2, W = 6, st = (Math.PI / 2) / W;
+          var a0 = ci * Math.PI / 2, W = cornerSegs(df + dd, treadOf(r)), st = (Math.PI / 2) / W;
           for (var w = 0; w < W; w++) {
             var mnx = 1e9, mxx = -1e9, mnz = 1e9, mxz = -1e9;
             for (var t = 0; t <= 3; t++) {
@@ -522,46 +670,98 @@ CBZ.arenaVenue = {
             plat(mnx, mnz, mxx, mxz, dy);
           }
         }
-        // --- riser face (row 0's riser IS the bowl-front wall, built above)
+        // --- riser face (row 0's riser IS the bowl-front wall, built above),
+        //     plus a bright NOSING on the first row of every tier: that stripe
+        //     is what makes 20 tiers countable from across the bowl.
         if (r > 0) {
           walkRing(df + 0.07, cut ? 1.8 : 6.0, function (s) {
             if (cut && isStraight(s.side) && vomGap(s)) return;
             put("riser", { x: s.x, y: dy - RISE / 2, z: s.z, sx: s.len + 0.05, sy: RISE, sz: 0.14, ry: s.yaw });
+            if (first) put("rail", { x: s.x, y: dy - 0.03, z: s.z, sx: s.len + 0.05, sy: 0.06, sz: 0.19, ry: s.yaw });
           });
         }
-        // --- seats
+        // --- seats: a real PAN at the declared cushion height plus a BACK.
+        //     The pan is drawn only on the tiers you can walk up to and look at
+        //     (a deliberate LOD — from tier 3 up all you ever see is seat backs,
+        //     and every occupied seat is hidden by the body on it anyway).
         var ds = df + dd - SEAT_D / 2 - 0.12;
+        var panTier = tI < 3;
         walkRing(ds, PITCH, function (s) {
           if (aisleGap(s)) return;
           if (cut && isStraight(s.side) && vomGap(s, VOM_HW + 0.4)) return;
+          var col = seatColour(r, s.x, s.z);
+          // backrest — the seat's silhouette, rear of the pan, leaning back a touch
           put("seat", {
-            x: s.x, y: dy + SEAT_H / 2, z: s.z,
-            sx: SEAT_W, sy: SEAT_H, sz: SEAT_D, ry: s.yaw,
-            c: seatColour(r, s.x, s.z)
+            x: s.x + s.nx * 0.19, y: dy + SEAT_CUSH + SEAT_BACK_H * 0.5, z: s.z + s.nz * 0.19,
+            sx: SEAT_W, sy: SEAT_BACK_H, sz: 0.08, ry: s.yaw, c: col
           });
-          seatRecords.push({ x: s.x, y: dy, z: s.z, yaw: s.yaw + Math.PI, row: r });
+          if (panTier) {
+            put("seat", {
+              x: s.x, y: dy + SEAT_CUSH - 0.045, z: s.z,
+              sx: SEAT_W, sy: 0.09, sz: SEAT_D, ry: s.yaw, c: col
+            });
+          }
+          seatRecords.push({ x: s.x, y: dy, z: s.z, yaw: s.yaw + Math.PI, row: r, tier: tI });
         });
-        void i;
+        // WHY THE SEATS THEMSELVES ARE NOT COLLIDERS — this was tried and the
+        // MATH REFUSED IT, which is worth recording so nobody tries again.
+        // Making each row's seat bank solid (so you cannot cross the rows, as
+        // in a real bowl) needs a walkable strip left over on the tread. The
+        // tread is 0.78-0.95 m and a bank has to be ~0.6 m thick to stop a
+        // body; with a bank at the back of row r AND the back of row r-1 the
+        // clear strip is ~0.26 m against a player capsule of RADIUS 0.55. The
+        // player would be permanently wedged. A tread wide enough for solid
+        // banks (>=1.7 m) is not a stadium rake. So the rows stay climbable
+        // (0.42 riser, under physics.js's 0.45 STEP_UP — the bowl's original
+        // contract, kept) and what gets colliders is the STRUCTURE you could
+        // otherwise run through: the bowl front, every cross-aisle rail, the
+        // top rail and the back wall — see the handrail block below, where all
+        // three used to be put() decoration with no solid() at all.
       })(r);
     }
 
-    // ---------------- handrails: cross-aisle front edge + back of the bowl ---
+    // ---------------- handrails: every cross-aisle + the front and the back ---
+    // ALL THREE ARE REAL COLLIDERS. They used to be pure decoration — put()
+    // only, no solid() — so you walked straight through the barrier at the top
+    // of a 22 m bowl and off the front of the podium. The rail bar sits high
+    // enough to vault nothing and is height-gated so it never affects anybody
+    // on the deck below it.
     (function () {
-      walkRing(deckFront(XROW) - 0.12, 2.6, function (s) {
-        if (aisleGap(s)) return;
-        if (isStraight(s.side) && vomGap(s, VOM_HW + 0.4)) return;
-        put("rail", { x: s.x, y: CROSS_Y + 0.58, z: s.z, sx: s.len + 0.05, sy: 0.09, sz: 0.09, ry: s.yaw });
-        put("steel", { x: s.x, y: CROSS_Y + 0.29, z: s.z, sx: 0.08, sy: 0.58, sz: 0.08, ry: s.yaw });
-      });
-      walkRing(D_TOP + 0.25, 2.6, function (s) {
-        put("rail", { x: s.x, y: TOP_Y + 1.02, z: s.z, sx: s.len + 0.05, sy: 0.09, sz: 0.09, ry: s.yaw });
-        put("steel", { x: s.x, y: TOP_Y + 0.52, z: s.z, sx: 0.08, sy: 1.04, sz: 0.08, ry: s.yaw });
-      });
+      function railRing(d, baseY, h, guard) {
+        walkRing(d, 2.6, function (s) {
+          if (aisleGap(s)) return;
+          if (isStraight(s.side) && (vomGap(s, VOM_HW + 0.4) || gateGap(s, GATE_HW + 0.6))) return;
+          put("rail", { x: s.x, y: baseY + h, z: s.z, sx: s.len + 0.05, sy: 0.09, sz: 0.09, ry: s.yaw });
+          put("steel", { x: s.x, y: baseY + h / 2, z: s.z, sx: 0.08, sy: h, sz: 0.08, ry: s.yaw });
+        });
+        if (!guard || !SOLID_STAND) return;
+        // one coarse solid ring behind the visual bar (pitch 5, not 2.6): the
+        // barrier only has to stop a body, not trace the balusters. Height
+        // gated to the rail band, so a body on the deck BELOW it is untouched.
+        var before = colliders.length;
+        ringSolid(d, 0.24, baseY, baseY + h + 0.5, {
+          pitch: 5.0, mesh: false,
+          skip: function (s) {
+            return aisleGap(s) || (isStraight(s.side) && (vomGap(s, VOM_HW + 0.4) || gateGap(s, GATE_HW + 0.6)));
+          }
+        });
+        standColliders += colliders.length - before;
+      }
+      // the front of row 0 — a 4.2 m drop onto the arena floor without it
+      railRing(deckFront(0) - 0.14, rowY(0), 1.06, true);
+      // one at EVERY cross-aisle, not just the single old XROW
+      for (var r2 = 1; r2 < ROWS; r2++) {
+        if (crossRow(r2)) railRing(deckFront(r2) - 0.12, rowY(r2), 0.98, true);
+      }
+      railRing(D_TOP + 0.25, TOP_Y, 1.04, false);
       // solid back wall behind the top row — you cannot step off the bowl
-      ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.2, { pitch: 5.0, mesh: false });
+      ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.4, { pitch: 5.0, mesh: false });
     })();
 
     // ---------------- aisle step treads (two half-risers per row) ------------
+    // Visual only: the walk surface is the row deck platform, which every row
+    // registers. Tread depth comes from treadOf(r), so the steps stay glued to
+    // a variable rake instead of a frozen 1.30.
     (function () {
       function aisleSteps(side, key) {
         for (var r2 = 1; r2 < ROWS; r2++) {
@@ -574,14 +774,15 @@ CBZ.arenaVenue = {
             }
             if (skip) continue;
           }
-          var df = deckFront(r2), yb = rowY(r2), mid = df - TREAD / 2;
+          var TR = treadOf(r2);
+          var df = deckFront(r2), yb = rowY(r2), mid = df - TR / 2;
           for (var h = 0; h < 2; h++) {
-            var dstep = mid + (h ? TREAD * 0.25 : -TREAD * 0.25);
+            var dstep = mid + (h ? TR * 0.25 : -TR * 0.25);
             var yy = yb - RISE + RISE * (h ? 0.75 : 0.25);
             var p = straightPoint(side, dstep, key);
             put("concrete", {
               x: p.x, y: yy - 0.1, z: p.z, sx: AISLE_H * 2 - 0.1, sy: 0.2,
-              sz: TREAD * 0.5, ry: yawOf(p.nx, p.nz)
+              sz: TR * 0.5, ry: yawOf(p.nx, p.nz)
             });
           }
         }
@@ -614,6 +815,16 @@ CBZ.arenaVenue = {
         // 2.9 so nobody walking the intact rows ABOVE the tunnel is blocked by
         // an invisible slab.
         var yNotch = CROSS_Y + 1.2;
+        // LANDING: the cross-aisle deck is CUT at the vomitory (that cut is what
+        // lets the tunnel surface), so the ramp used to end on a seam with a
+        // hole the width of the tunnel beside it. One flat platform over the
+        // cut, at the cross-aisle's own height, closes it.
+        var pLand = straightPoint(side, deckFront(XROW) + deckDepth(XROW), k);
+        if (side === "xp" || side === "xn") {
+          plat(Math.min(pIn.x, pLand.x), k - VOM_HW, Math.max(pIn.x, pLand.x), k + VOM_HW, CROSS_Y);
+        } else {
+          plat(k - VOM_HW, Math.min(pIn.z, pLand.z), k + VOM_HW, Math.max(pIn.z, pLand.z), CROSS_Y);
+        }
         if (side === "xp" || side === "xn") {
           plat(pOut.x, k - VOM_HW, pIn.x, k + VOM_HW, CROSS_Y,
                { axis: "x", x0: pOut.x, x1: pIn.x, y0: PY, y1: CROSS_Y });
@@ -989,8 +1200,13 @@ CBZ.arenaVenue = {
             var a = k * Math.PI * 2 / n;
             var px = g0.x + Math.cos(a) * rad, pz = g0.z + Math.sin(a) * rad;
             var yaw = Math.atan2(g0.x - px, g0.z - pz);
-            put("chair", { x: px, y: PY + 0.42, z: pz, sx: 0.6, sy: 0.84, sz: 0.6, ry: yaw });
-            floorSlots.push({ x: px, y: PY, z: pz, yaw: yaw, row: -1 });
+            // a REAL folding chair — pan at the declared cushion height, back
+            // behind it — not the single 0.84 block that used to make a body
+            // squat on top of its own furniture.
+            put("chair", { x: px, y: PY + SEAT_CUSH - 0.04, z: pz, sx: 0.52, sy: 0.08, sz: 0.50, ry: yaw });
+            put("chair", { x: px - Math.sin(yaw) * 0.22, y: PY + SEAT_CUSH + 0.22, z: pz - Math.cos(yaw) * 0.22,
+                           sx: 0.52, sy: 0.44, sz: 0.07, ry: yaw });
+            floorSlots.push({ x: px, y: PY, z: pz, yaw: yaw, row: -1, tier: 0 });
           }
         }
       }
@@ -1001,11 +1217,23 @@ CBZ.arenaVenue = {
     // seat is a candidate for the instanced proxy crowd — one static seated
     // body, three instanced draws total, deterministic colour and occupancy.
     var seatSlots = [];
+    // THE SEAT DECLARES ITS GEOMETRY. `y` stays the CUSHION TOP (npclife's
+    // attach() writes the anchor straight onto the rig group), and the two new
+    // fields are what attach() forwards into ch.seatRef — cushion height above
+    // the deck, and how far the deck is BELOW the anchor. Identical convention
+    // to island_airport.js's airliner rows, which is the worked example.
+    function seatAnchor(rec) {
+      var a = { x: rec.x, y: rec.y + SEAT_CUSH, z: rec.z, yaw: rec.yaw };
+      if (CFG.ARENA_SEAT_POSE !== false) { a.cushionH = SEAT_CUSH; a.floorBelow = SEAT_CUSH; }
+      return a;
+    }
     (function () {
       if (!seatRecords.length) return;
       var want = Math.min(spec.liveSeats == null ? 42 : spec.liveSeats, seatRecords.length);
       var cand = [], i;
-      for (i = 0; i < seatRecords.length; i++) if (seatRecords[i].row <= 3) cand.push(seatRecords[i]);
+      // the tiers a player can actually WALK to and talk to (tier 0-1), not a
+      // frozen row index — a 20-tier bowl and a 2-tier bowl both work.
+      for (i = 0; i < seatRecords.length; i++) if (seatRecords[i].tier <= 1) cand.push(seatRecords[i]);
       if (!cand.length) cand = seatRecords.slice(0);
       var focus = spec.focus || { x: CX, z: CZ };
       cand.sort(function (a, b) {
@@ -1017,44 +1245,81 @@ CBZ.arenaVenue = {
       var stride = Math.max(1, Math.floor(pick / want));
       for (var j = 0; j < pick && seatSlots.length < want; j += stride) {
         cand[j]._live = true;
-        // npclife's attach() writes the anchor straight onto the rig's group
-        // position, and the old grandstand anchored fans at the SEAT CUSHION
-        // TOP — keep that convention so the seated pose reads identically.
-        seatSlots.push({ x: cand[j].x, y: cand[j].y + SEAT_H, z: cand[j].z, yaw: cand[j].yaw });
+        seatSlots.push(seatAnchor(cand[j]));
       }
     })();
 
+    // ---- THE INSTANCED CROWD IS A DIAL, NOT A CONSTANT ----------------------
+    // OWNER: "THE STADIUM IS BARELY FILLED AND NOTHING IS EVER ACTUALLY
+    // HAPPENING — IT SHOULD BE FULL WHEN ACTIVE AND NEARLY EMPTY WHEN NOT."
+    //
+    // The old proxy decided occupancy ONCE at world build from a position hash,
+    // so the bowl was frozen at one fill forever — never a crowd, never
+    // abandoned. It is now built ONCE for EVERY seat and ORDERED by a
+    // deterministic KEENNESS rank (best seats first, exactly how a real venue
+    // fills), so occupancy is `mesh.count = fill * total`. That is an integer
+    // write per frame: no matrices are rebuilt, no geometry is created or
+    // destroyed, and an empty bowl costs the renderer three draw calls of zero
+    // instances. Draw-call budget for the WHOLE crowd: 3, at any fill.
+    var crowdTotal = 0, crowdCap = 0;
     (function () {
       if (!CFG.ARENA_CROWD_PROXY) return;
+      // instance budget by quality tier — the ONE knob a weak device turns. The
+      // subset is the keenest N, so a low tier is a sparser crowd, never a
+      // crowd with a hole in it.
       var q = (CBZ.qualityLevel == null ? 3 : CBZ.qualityLevel);
-      var base = [0.0, 0.30, 0.46, 0.58, 0.66][Math.max(0, Math.min(4, q))];
-      if (base <= 0) return;
+      crowdCap = [0, 4000, 8000, 14000, 22000][Math.max(0, Math.min(4, q))];
+      if (crowdCap <= 0) return;
       var SHIRTS = [0xb23a3a, 0x2f4f8a, 0x2f7a4f, 0xc9a227, 0x8a4fa0, 0xd8d3c8, 0x333a45, 0xa5562a];
       var SKINS = [0xe8c39a, 0xd9a97c, 0xb5794c, 0x8a5a34, 0x5f3a20, 0xf0d4b4];
-      var i, s;
+      var order = [], i, s;
       for (i = 0; i < seatRecords.length; i++) {
         s = seatRecords[i];
         if (s._live) continue;
-        var rowFactor = 1.18 - s.row * 0.028;      // a fight crowd packs the floor end
-        if (h01(s.x, s.z, 0x5c) > base * rowFactor) continue;
-        var lean = (h01(s.x, s.z, 0x5f) - 0.5) * 0.25;
-        put("body", { x: s.x, y: s.y + 0.98, z: s.z, sx: 0.52, sy: 0.66, sz: 0.34,
-                      ry: s.yaw + lean, c: hpick(SHIRTS, s.x, s.z, 0x5d) });
-        put("head", { x: s.x, y: s.y + 1.45, z: s.z, sx: 0.25, sy: 0.28, sz: 0.25,
-                      ry: s.yaw + lean, c: hpick(SKINS, s.x, s.z, 0x5e) });
-        put("lap", { x: s.x + Math.sin(s.yaw) * 0.34, y: s.y + 0.62, z: s.z + Math.cos(s.yaw) * 0.34,
-                     sx: 0.5, sy: 0.22, sz: 0.5, ry: s.yaw });
+        // KEENNESS: low tiers and seats near the fight surfaces fill first, with
+        // a hash jitter so the boundary is a scatter, not a clean waterline.
+        var dx = s.x - CX, dz = s.z - CZ;
+        var k = s.tier / Math.max(1, TIERS) * 0.62
+              + Math.min(1, Math.hypot(dx, dz) / (D_TOP + A + B)) * 0.20
+              + h01(s.x, s.z, 0x5c) * 0.40;
+        order.push({ s: s, k: k, y: s.y + SEAT_CUSH,
+                     lean: (h01(s.x, s.z, 0x5f) - 0.5) * 0.25,
+                     // A WATCHING BODY SITS FORWARD. A bored one sits back.
+                     // Elbows-on-knees is what a fight crowd looks like, and a
+                     // bowl of bodies all at the same upright angle is the
+                     // single clearest "these are boxes" tell. Deterministic
+                     // per seat, and biased forward for the good seats — the
+                     // people who paid to be close are the ones leaning in.
+                     pitch: (h01(s.x, s.z, 0x63) * 0.34 - 0.09) * (1 - s.tier / (TIERS * 1.6)) });
       }
       for (i = 0; i < floorSlots.length; i++) {
         s = floorSlots[i];
-        if (h01(s.x, s.z, 0x60) > base * 0.9) continue;
-        put("body", { x: s.x, y: s.y + 1.04, z: s.z, sx: 0.52, sy: 0.66, sz: 0.34,
-                      ry: s.yaw, c: hpick(SHIRTS, s.x, s.z, 0x61) });
-        put("head", { x: s.x, y: s.y + 1.51, z: s.z, sx: 0.25, sy: 0.28, sz: 0.25,
-                      ry: s.yaw, c: hpick(SKINS, s.x, s.z, 0x62) });
-        put("lap", { x: s.x + Math.sin(s.yaw) * 0.34, y: s.y + 0.68, z: s.z + Math.cos(s.yaw) * 0.34,
-                     sx: 0.5, sy: 0.22, sz: 0.5, ry: s.yaw });
+        // ringside floor seats are the most-wanted in the house
+        order.push({ s: s, k: h01(s.x, s.z, 0x60) * 0.22, y: s.y + SEAT_CUSH, lean: 0,
+                     pitch: h01(s.x, s.z, 0x64) * 0.30 - 0.04 });
       }
+      order.sort(function (a, b) { return a.k - b.k || a.s.x - b.s.x || a.s.z - b.s.z; });
+      if (order.length > crowdCap) order.length = crowdCap;
+      for (i = 0; i < order.length; i++) {
+        var o = order[i]; s = o.s;
+        // a seated body: torso, head, thighs. Solved against the SAME declared
+        // cushion the live rigs are posed against, so a proxy and a promoted
+        // rig sit at the same height in the same chair.
+        // the lean pivots about the HIPS, so the torso tips and the head
+        // travels forward with it instead of the box just rotating in place.
+        var pt = o.pitch || 0, sp = Math.sin(pt);
+        put("body", { x: s.x + Math.sin(s.yaw) * sp * 0.30, y: o.y + 0.40 - (1 - Math.cos(pt)) * 0.24,
+                      z: s.z + Math.cos(s.yaw) * sp * 0.30,
+                      sx: 0.44, sy: 0.60, sz: 0.30,
+                      ry: s.yaw + o.lean, rx: pt, eo: "YXZ", c: hpick(SHIRTS, s.x, s.z, 0x5d) });
+        put("head", { x: s.x + Math.sin(s.yaw) * sp * 0.66, y: o.y + 0.84 - (1 - Math.cos(pt)) * 0.62,
+                      z: s.z + Math.cos(s.yaw) * sp * 0.66,
+                      sx: 0.22, sy: 0.25, sz: 0.22,
+                      ry: s.yaw + o.lean, c: hpick(SKINS, s.x, s.z, 0x5e) });
+        put("lap", { x: s.x + Math.sin(s.yaw) * 0.24, y: o.y + 0.05, z: s.z + Math.cos(s.yaw) * 0.24,
+                     sx: 0.42, sy: 0.18, sz: 0.42, ry: s.yaw });
+      }
+      crowdTotal = order.length;
     })();
 
     // ------------------------------------------------------------- finalise
@@ -1070,16 +1335,58 @@ CBZ.arenaVenue = {
 
     // ================================================================ HANDLE
     var lightsOn = false, proxyOn = true, boardDirty = false, boardCd = 0;
+    // occupancy state: `fill` is where the bowl IS, `fillWant` where it is
+    // GOING. The ramp is what makes an event read as people ARRIVING rather
+    // than a crowd blinking into the seats.
+    var fill = 0, fillWant = 0, fillRate = 1 / 45;
+    var shownCount = -1;
+    function applyFill() {
+      var n = Math.round(fill * crowdTotal);
+      if (n === shownCount) return;
+      shownCount = n;
+      for (var i = 0; i < proxies.length; i++) proxies[i].count = n;
+    }
+    applyFill();                     // an unattended bowl starts EMPTY, not full
+    var meshCount = 0;
+    for (var mk in pools) if (pools[mk] && pools[mk].mesh) meshCount++;
     return {
       root: V,
       seatSlots: seatSlots,
       floorSlots: floorSlots,
+      seatRecords: seatRecords,
+      seatAnchor: seatAnchor,
       colliders: colliders,
       platforms: platforms,
       lights: lights,
       metrics: {
-        seats: seatRecords.length, colliders: colliders.length,
-        platforms: platforms.length, losBlockers: losMeshes.length
+        tiers: TIERS, rowsPerTier: RPT, rows: ROWS,
+        seats: seatRecords.length + floorSlots.length,
+        bowlHeight: +(TOP_Y - PY).toFixed(2),
+        rakeDeg: +(Math.atan(RISE / TREAD[0]) * 180 / Math.PI).toFixed(1),
+        rakeTopDeg: +(Math.atan(RISE / TREAD[ROWS - 1]) * 180 / Math.PI).toFixed(1),
+        // the worst sightline clearance anywhere in the bowl (metres). The
+        // code floor is 0.06 and this design targets 0.12 — if it ever reads
+        // below 0.06 a row has been built that cannot see the floor.
+        minCValue: +MIN_C.toFixed(3), targetC: C_VALUE,
+        floorX: +((A + D0) * 2).toFixed(1), floorZ: +((B + D0) * 2).toFixed(1),
+        crowdTotal: crowdTotal, crowdCap: crowdCap,
+        colliders: colliders.length, standColliders: standColliders,
+        platforms: platforms.length,
+        losBlockers: losMeshes.length,
+        seatCushion: SEAT_CUSH,
+        // every InstancedMesh + the five merged canvas batches + the three
+        // per-object meshes. The crowd is 3 of these AT ANY FILL.
+        drawCallEst: meshCount + 8
+      },
+      // ---- OCCUPANCY -------------------------------------------------------
+      // `f` 0..1. `snap` skips the arrival ramp (world build / teleport in).
+      crowdFill: function (f, snap) {
+        fillWant = Math.max(0, Math.min(1, +f || 0));
+        if (snap) { fill = fillWant; applyFill(); }
+        return fillWant;
+      },
+      crowdState: function () {
+        return { fill: fill, want: fillWant, shown: Math.max(0, shownCount), total: crowdTotal };
       },
       // the live card on the centre-hung screen
       board: function (a, b, c) {
@@ -1097,10 +1404,18 @@ CBZ.arenaVenue = {
           lightsOn = wantLights;
           for (var i = 0; i < lights.length; i++) lights[i].visible = wantLights;
         }
-        var wantProxy = dist < 340;
+        var wantProxy = dist < 420;
         if (wantProxy !== proxyOn) {
           proxyOn = wantProxy;
           for (var j = 0; j < proxies.length; j++) proxies[j].visible = wantProxy;
+        }
+        // walk the occupancy toward its target. A bowl fills/empties over ~45 s
+        // of game time, so you SEE the house come in before the first bell.
+        if (fill !== fillWant) {
+          var step = (dt || 0.016) * fillRate;
+          if (Math.abs(fillWant - fill) <= step) fill = fillWant;
+          else fill += (fillWant > fill ? step : -step);
+          applyFill();
         }
         if (boardDirty && boardTex && dist < 220) {
           boardCd -= (dt || 0.016);

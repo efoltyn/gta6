@@ -65,6 +65,15 @@
     const s = playerChar.skinSlots;
     paint(s.legs, cop ? 0x202a44 : 0xff7a1a);
     paint(s.legsLower, cop ? 0x202a44 : 0xff7a1a);
+    // THE PELVIS IS A LEG. character.js registers it as its OWN recolor slot
+    // (`pelvis: [pelvis]`) and builds it from `c.legs` — and until now NOTHING
+    // IN THE GAME EVER PAINTED THAT SLOT. Not this function, not outfits.js,
+    // not clothes.js. So it kept its build colour for the life of the rig: for
+    // the player that is 0xff7a1a, the PRISON JUMPSUIT ORANGE, which is why a
+    // gold-orange band sat between the shirt hem and the jeans no matter what
+    // you were wearing. It reads as a belt, which is what made it hard to find
+    // — it survived the belts being deleted because it was never a belt.
+    paint(s.pelvis, cop ? 0x202a44 : 0xff7a1a);
     paint(s.torso, cop ? 0x263a67 : 0xff7a1a);
     paint(s.collar, cop ? 0x1b2848 : 0xff9747);
     paint(s.arms, cop ? 0x263a67 : 0xff7a1a);

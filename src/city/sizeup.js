@@ -82,14 +82,26 @@
     if (!tgt || tgt.dead || tgt.surrender || tgt.kind === "cop" || tgt.kind === "security") return;
     if ((tgt._foldUntil || 0) > nowMs()) return;        // already made their choice
     tgt._foldUntil = nowMs() + 4000;
-    const attArmed = att && (att.isPlayer ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!att.armed);
-    // markGunpoint can REFUSE (vendors, KO'd, the bold) — then they run instead
-    if (attArmed && !tgt.armed && CBZ.cityMarkGunpoint && CBZ.cityMarkGunpoint(tgt, 2.2)) {
-      // hands shot up — they know the read
+    // THE FOLD IS ONE DECISION AND IT LIVES IN ONE PLACE (peds.js's
+    // CBZ.cityScare). What was written here was exactly that branch —
+    // hands-up-or-run — but it could only ever freeze or flee a body that was
+    // already standing: a person in a seat is HELD by npclife's syncAttached
+    // and nothing here could get them out of it. cityScare owns the read
+    // (distance, panic contagion, the person's own nerve) AND owns the seat
+    // exit (CBZ.cityUnseat), so this is now a call, not a copy.
+    if (CBZ.cityScare) {
+      CBZ.cityScare(tgt, att, { bias: 0.05 });
     } else {
-      tgt.rage = null; tgt.state = "flee";
-      tgt.fear = 10; tgt.alarmed = Math.max(tgt.alarmed || 0, 6);
-      if (CBZ.cityFleeFrom && att && att.pos) CBZ.cityFleeFrom(tgt, att.pos.x, att.pos.z);
+      // degrade-safe: peds.js absent → the original inline branch, unchanged.
+      const attArmed = att && (att.isPlayer ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!att.armed);
+      // markGunpoint can REFUSE (vendors, KO'd, the bold) — then they run instead
+      if (attArmed && !tgt.armed && CBZ.cityMarkGunpoint && CBZ.cityMarkGunpoint(tgt, 2.2)) {
+        // hands shot up — they know the read
+      } else {
+        tgt.rage = null; tgt.state = "flee";
+        tgt.fear = 10; tgt.alarmed = Math.max(tgt.alarmed || 0, 6);
+        if (CBZ.cityFleeFrom && att && att.pos) CBZ.cityFleeFrom(tgt, att.pos.x, att.pos.z);
+      }
     }
     // being made to fold is remembered: fear up, grudge simmers (social.js)
     if (att && att.isPlayer && CBZ.cityRelShift) CBZ.cityRelShift(tgt, "intimidated", 1);

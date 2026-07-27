@@ -385,6 +385,45 @@ const PASS = `(() => {
     // power: legacyGuardSites is the classic adoption ratchet — hand-rolled
     // guard/escort AI still living outside the protection layer. Counted
     // file-by-file, baseline 9, may only ever go DOWN.
+    // ---- THIS WAVE'S RATCHETS (stadium / map / terrain / swim) ----------
+    if (CBZ.groundMatchAudit) {
+      const gm = CBZ.groundMatchAudit();
+      out.ground = "err " + (gm.meanErr||0).toFixed(3) + "/" + (gm.maxErr||0).toFixed(2) + "m ungated=" + gm.ungated + " built=" + gm.builtSurfaces;
+      if (gm.maxErr > 0.30) out.fails.push("GROUND ORACLE DISAGREES WITH THE MESH: maxErr " + gm.maxErr.toFixed(2) + "m (limit 0.30)");
+      if (gm.ungated > 1) out.fails.push("BUILT SURFACES WITH NO RELIEF GATE: " + gm.ungated);
+    }
+    if (CBZ.backdropAudit) {
+      const bd = CBZ.backdropAudit({ step: 400 });
+      out.backdrop = "onPlate=" + bd.onPlate + " clear=" + Math.round(bd.minClearance||0) + "m";
+      if (bd.onPlate > 0) out.fails.push("DECORATIVE BACKDROP IS STANDING ON WALKABLE GROUND: " + bd.onPlate);
+    }
+    if (CBZ.swimAudit) { const sw = CBZ.swimAudit(); out.swim = "sink " + sw.sinkRate + " up " + sw.ascendRate + " breath " + sw.breathSec + "s"; }
+    if (CBZ.peakShapeAudit) {
+      const pk = CBZ.peakShapeAudit();
+      out.peaks = "maxH " + Math.round(pk.maxH||0) + " shoulderTop " + Math.round(pk.shoulderTop||0) + " smallest " + Math.round(pk.smallestSummit||0);
+      if (pk.shoulderTop != null && pk.smallestSummit != null && pk.shoulderTop >= pk.smallestSummit) out.fails.push("PEAK HIERARCHY INVERTED: a shoulder out-tops the smallest summit");
+    }
+    if (CBZ.arenaAudit) {
+      const ar = CBZ.arenaAudit();
+      out.arena = ar.tiers + "t " + ar.seats + "seats fill=" + (ar.occupancyPct||0) + "% rigs=" + ar.rigs + " misposed=" + ar.misposed + " shrug=" + ar.shrugRoles + " inView=" + ar.spawnsInView;
+      if (ar.misposed > 0) out.fails.push("SEATED BODIES MISPOSED: " + ar.misposed);
+      if (ar.shrugRoles > 0) out.fails.push("SPECTATORS WITH AN ACTIVITY AS THEIR ROLE: " + ar.shrugRoles);
+      if (ar.spawnsInView > 0) out.fails.push("SPAWNS INSIDE THE VIEW CONE: " + ar.spawnsInView);
+      if (ar.minCValue != null && ar.minCValue < 0.06) out.fails.push("STADIUM SIGHTLINE FAILS: minCValue " + ar.minCValue);
+    }
+    if (CBZ.cityCrowdSpawnAudit) { const cs = CBZ.cityCrowdSpawnAudit(); out.crowdSpawn = "inView=" + cs.spawnsInView + " deferred=" + cs.deferred;
+      if (cs.spawnsInView > 0) out.fails.push("CROWD PROMOTED A RIG IN VIEW: " + cs.spawnsInView); }
+    // MAP CLUTTER. fullmap.js only COUNTS an overlap for a label drawn with
+    // the force option — i.e. one the map insists on showing even though it collided:
+    // your waypoint, the active objective, SEALED on a live obstruction, the
+    // city title. Those are meant to win. So zero is the wrong pin, and I had
+    // it at zero from the builder's report rather than from a measurement,
+    // which is this repo's own oldest mistake. The clutter this ratchet exists
+    // to catch is the 25-overlap district read (164 shop names competing);
+    // pinned at the measured 2 so a return to that fails loudly.
+    if (CBZ.mapAudit) { const mp = CBZ.mapAudit({ draw: true }); out.map = mp.icons + "ico " + mp.labels + "lbl overlap=" + mp.overlaps + " hover=" + mp.hoverable;
+      if (mp.overlaps > 2) out.fails.push("MAP LABEL CLUTTER returned: " + mp.overlaps + " overlaps (ratchet 2)"); }
+    if (CBZ.platforms) { out.platforms = CBZ.platforms.length; }
     if (CBZ.powerAudit) {
       const pw = CBZ.powerAudit();
       out.power = pw.principals + "p/" + pw.guarded + "g legacy=" + pw.legacyGuardSites;
@@ -483,6 +522,9 @@ async function runSeed(seed, label) {
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
+  tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
+  tmark(`${label}: arena ${r.arena || "-"}`);
+  tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   return r;
 }

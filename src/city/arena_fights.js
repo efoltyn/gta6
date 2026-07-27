@@ -53,6 +53,13 @@ if(CFG.ARENA_FIGHTS==null)CFG.ARENA_FIGHTS=true;
 // pit wall and steps. The venue used to register ZERO colliders: you walked
 // through the ropes and the cage. OFF → the pre-fix ghost geometry.
 if(CFG.ARENA_SOLID_PROPS==null)CFG.ARENA_SOLID_PROPS=true;
+// ARENA_CROWD_EVENT — occupancy follows whether an event is actually running:
+// FULL and loud on a live card, a handful of staff and stragglers otherwise.
+// (arena_venue.js self-defaults the same flag; this is the driving half.)
+if(CFG.ARENA_CROWD_EVENT==null)CFG.ARENA_CROWD_EVENT=true;
+// ARENA_CROWD_PANIC — a seated spectator can get OUT of the seat and run.
+// OFF → the old behaviour where a body in a chair is stuck in it forever.
+if(CFG.ARENA_CROWD_PANIC==null)CFG.ARENA_CROWD_PANIC=true;
 // (arena_venue.js self-defaults ARENA_VENUE_V2 / ARENA_CROWD_PROXY /
 //  ARENA_LIGHT_RIG / ARENA_JUMBOTRON — the building half of the same feature.)
 
@@ -64,9 +71,15 @@ var CX=640, CZ=-950, R=120;
 var CW_X0=482, CW_X1=CX-R+7, CW_CX=(CW_X0+CW_X1)/2;
 var CW_Y=0.40;                   // causeway deck top (a 0.40 step off the water road)
 var PY=1.1;                      // arena floor / plaza deck top height
-var RX=CX-32, RZ=CZ, RY=PY+0.9;    // boxing ring centre + canvas height
-var CGX=CX+32, CGZ=CZ, CGY=PY+0.5; // MMA cage centre + mat height
-var PX=CX, PZ=CZ+54, PITY=PY+0.02; // beast pit centre + sand height
+// THE FLOOR IS AN ARENA FLOOR, NOT A PITCH. These three used to sit 32/32/54
+// from centre, which forced arena_venue.js's bowl to wrap a 102 x 130 m floor —
+// and a bowl that far from the action is exactly why the owner read the stands
+// as "super super short" no matter how many rows they had. The venue floor is
+// now 52 x 70 and the surfaces are pulled in to match it. Every clamp, prompt
+// and sim radius below is derived, so nothing else had to move.
+var RX=CX-13, RZ=CZ, RY=PY+0.9;    // boxing ring centre + canvas height
+var CGX=CX+13, CGZ=CZ, CGY=PY+0.5; // MMA cage centre + mat height
+var PX=CX, PZ=CZ+21, PITY=PY+0.02; // beast pit centre + sand height
 
 // ============================================================ GEOMETRY LAW
 // ONE source of truth per fight surface. Every clamp / spawn / prompt / sim
@@ -109,6 +122,105 @@ function moveTo(pos,tx,tz,step){
   var s=Math.min(step,d); pos.x+=dx/d*s; pos.z+=dz/d*s; return s;
 }
 function board(a,b,c){ if(venue&&venue.board)venue.board(a,b,c); }
+
+// ======================================================= THE HOUSE (OCCUPANCY)
+// OWNER: "THE STADIUM IS BARELY FILLED AND NOTHING IS EVER ACTUALLY HAPPENING —
+// IT SHOULD BE FULL WHEN ACTIVE AND NEARLY EMPTY WHEN NOT. IT'S LIKE 10 PERCENT
+// FULL." He is describing a bowl whose occupancy was decided ONCE at world
+// build and never moved, which reads broken in both directions: it was never a
+// crowd and it was never abandoned.
+//
+// Occupancy now has exactly one input, EVENT.active, and two outputs:
+//   • the INSTANCED crowd (arena_venue.crowdFill) — thousands of bodies for
+//     THREE draw calls at any fill, so "full" is free;
+//   • the LIVE RIG count — the only number that actually costs GPU (a full rig
+//     is ~16 draw calls), so it stays small and sits in the seats you can walk
+//     up to. That split IS the performance answer: distant spectators are
+//     instanced, near ones are real, and nothing in between exists.
+var arenaRootRef=null, seatSlotsRef=[], audienceN=-1;
+var EVENT={active:false, kind:"dark", name:"", t:0, init:false};
+var LIVE_ON=28, LIVE_OFF=4;
+var FILL_ON=0.94, FILL_OFF=0.035;      // a packed house vs. staff and stragglers
+// a private stream: the audience is re-cast at RUNTIME (people arrive and go
+// home), so it must never touch a shared build-time rng.
+var _as=0x5EA7; function arng(){_as=(_as*1103515245+12345)&0x7fffffff;return _as/0x7fffffff;}
+
+function attendingLine(){
+  return EVENT.kind==="box"?"the boxing":EVENT.kind==="mma"?"the cage":
+         EVENT.kind==="pit"?"the beast pit":"the fights";
+}
+
+// WHO IS IN THAT SEAT. OWNER: "'FIGHT FAN' AS ROLE OF NPCS — THAT'S NOT AN NPC
+// ROLE." Right, and it is the same bug as npclife's "passenger": the person is
+// a cashier, a mechanic, a dock worker WHO CAME TO A FIGHT TONIGHT. So the
+// activity word is stripped off `job` (the field that renders the pill), the
+// CASTER deals them a trade that already has a workplace, a shift and a wage in
+// aigoals.js, and what they are doing here goes on CBZ.citySetAttending — a
+// separate field the dossier may print and the overhead pill never sees.
+var staffCut=0;
+var STAFF_JOBS=["usher","ticket seller","venue worker","security guard","bartender"];
+function configureSpectator(p,i){
+  if(!p)return;
+  p._venueRole="arena-spectator";
+  p.job=null; p.archetype="resident"; p._role=null; p._work=null; p._castFit=null;
+  if(i<staffCut){
+    // THE PEOPLE WHO ARE HERE WHEN NOBODY ELSE IS. A dark arena is not empty —
+    // it has staff, and "usher"/"venue worker" are real trades in level.js's
+    // vocabulary, so their pill reads a job and not an activity.
+    p.job=STAFF_JOBS[i%STAFF_JOBS.length]; p.archetype="worker";
+    if(CBZ.citySetAttending)CBZ.citySetAttending(p,"working the house","Ironjaw Arena");
+  }else{
+    if(CBZ.cityDealRole){ try{ CBZ.cityDealRole(p); }catch(e){} }
+    if(CBZ.citySetAttending)CBZ.citySetAttending(p,attendingLine(),"Ironjaw Arena");
+  }
+  // NEVER LET THE PLAYER SEE A SPAWN. npclife's attach() deliberately forces an
+  // anchored rig visible (a cabin draft claims far bodies), which is right for
+  // a plane and wrong for a seat six metres from your face. Re-arm peds.js's
+  // OWN spawn-hide latch: the body simulates, and the ordinary LOD pass reveals
+  // it on a later frame once the shared transition gate says it is unseen.
+  if(CBZ.npcTransitionSafe&&p.pos&&
+     !CBZ.npcTransitionSafe(p.pos.x,p.pos.z,{minDistance:14,maxDistance:150})){
+    if(p.group){ p._spawnHidden=true; p.group.visible=false; arenaSpawnBlocked++; }
+    else arenaSpawnSeen++;              // could not hide it — a real violation
+  }
+}
+var arenaSpawnBlocked=0, arenaSpawnSeen=0;
+
+function setAudience(n,force){
+  if(!arenaRootRef||!CBZ.npcLife||!CBZ.npcLife.definePopulation)return;
+  n=Math.max(0,Math.min(seatSlotsRef.length,n|0));
+  if(n===audienceN&&!force)return;
+  audienceN=n;
+  staffCut=Math.min(n,EVENT.active?3:n);   // dark house = all staff
+  var entries=[];
+  for(var i=0;i<n;i++){
+    var a=seatSlotsRef[i];
+    entries.push({
+      profile:"venueSpectator",
+      // cushionH/floorBelow are what npclife's attach() forwards into
+      // ch.seatRef, which is what makes entities/character.js run its V2
+      // feet-on-the-floor chair solve instead of the balled-up legacy squat.
+      placement:{anchor:{x:a.x,y:a.y,z:a.z,yaw:a.yaw,pose:"sit",state:"sit",
+                         cushionH:a.cushionH,floorBelow:a.floorBelow},rng:arng},
+      overrides:{job:null,archetype:"resident"},
+      configure:configureSpectator
+    });
+  }
+  CBZ.npcLife.definePopulation("arena-audience",{root:arenaRootRef,entries:entries});
+}
+
+// IS THERE A CARD ON TONIGHT? Deterministic per in-game day (so a seed's
+// calendar is the same for every client), plus anything the PLAYER started.
+function cardTonight(){
+  var day=(typeof CBZ.dayCount==="function")?(CBZ.dayCount()|0):0;
+  return CBZ.hash01?(CBZ.hash01(day*37.1,day*11.7,0xF1)<0.58):true;
+}
+function eventNow(){
+  if(pfight)return pfight.box?"box":"mma";
+  if(pitBout)return "pit";
+  var night=(CBZ.nightAmount==null?0:CBZ.nightAmount);
+  return (night>0.34&&cardTonight())?"card":null;
+}
 
 // ================================================================ THE VENUE
 CBZ.addLandmass(function(city){
@@ -187,8 +299,8 @@ CBZ.addLandmass(function(city){
         {x:PX,z:PZ,y:PITY,angle:0.5,intensity:1.5}
       ],
       floorSeatRings:[            // ringside chairs, clear of the ring stair /
-        {x:RX,z:RZ,r0:8.2,rings:2},      // cage ramp footprints
-        {x:CGX,z:CGZ,r0:10.2,rings:2}
+        {x:RX,z:RZ,r0:7.0,rings:2},      // cage ramp footprints
+        {x:CGX,z:CGZ,r0:8.6,rings:2}
       ]
     });
   }
@@ -421,19 +533,29 @@ CBZ.addLandmass(function(city){
   // ---- live spectators in REAL seats --------------------------------------
   // Standard city actors fixed to seat anchors the bowl actually produced, so a
   // geometry change can never leave a fan sitting in mid air. The instanced
-  // proxy crowd (arena_venue.js) fills every seat these 42 don't.
-  (function(){
-    if(!CBZ.npcLife||!CBZ.npcLife.definePopulation)return;
-    var slots=(venue&&venue.seatSlots)||[];
-    if(!slots.length)return;
-    var entries=slots.map(function(a){return {
-      profile:"venueSpectator",
-      placement:{anchor:{x:a.x,y:a.y,z:a.z,yaw:a.yaw,pose:"sit",state:"sit"},rng:rng},
-      overrides:{job:"fight fan"},
-      configure:function(p){p._venueRole="arena-spectator";}
-    };});
-    CBZ.npcLife.definePopulation("arena-audience",{root:root,entries:entries});
-  })();
+  // proxy crowd (arena_venue.js) fills every seat these don't. The population
+  // is now RE-DEFINED whenever the house flips between "card on" and "dark" —
+  // see setAudience() below — so an empty arena really is empty.
+  arenaRootRef=root;
+  seatSlotsRef=(venue&&venue.seatSlots)||[];
+  setAudience(0, true);
+
+  // ---- the live seats join the SHARED seat kit -----------------------------
+  // Only the live slots (tens, not the twenty thousand): CBZ.propSeats is a
+  // linear registry and stuffing a whole bowl into it would tax every
+  // propSeatNpc/propSeatsIn query in the game for no gain. These few DECLARE
+  // their geometry, so they can only push propUseAudit().noGeom's ratio down,
+  // and `requireEntry` means an anchor nothing can walk to is refused outright
+  // rather than added to propUseAudit().blocked.
+  if(CBZ.propRegisterSeat){
+    for(var qi=0;qi<seatSlotsRef.length;qi++){
+      var qa=seatSlotsRef[qi];
+      try{
+        CBZ.propRegisterSeat(qa.x,qa.y-(qa.floorBelow||0),qa.z,qa.yaw,"seat",null,
+          {cushion:qa.cushionH!=null?qa.cushionH:0.45,floorBelow:0,requireEntry:true});
+      }catch(e){}
+    }
+  }
 
   // ---- resident fighters + referee ----------------------------------------
   if(typeof CBZ.makeCharacter==="function"){
@@ -1053,14 +1175,134 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
   }
 }
 
+// ============================================ A SEATED BODY CAN GET UP AND RUN
+// OWNER: "right now NPCs can't stand up and run away. Yes, with a gun pointed
+// some should [put] hands up, but some should stand up and run away."
+//
+// A seated body is HELD by npclife's syncAttached, which re-asserts the seat
+// transform every frame — so nothing can nudge, shove or scare one out of a
+// chair. Detaching is the only exit, and CBZ.cityUnseat is the shared call that
+// does it. The BRANCH (freeze vs. bolt) is not a coin flip and is not decided
+// here: peds.js's CBZ.cityScare owns it, reading sizeup.js's fight-or-fold
+// maths, whether the person is armed, how close the threat is and how many
+// people have ALREADY run — panic is contagious, which is what makes a bowl
+// read as a crowd instead of N independent dice.
+//
+// Costs nothing when nothing is happening: one gate on the shared threat flag.
+var panicT=0;
+function tickPanic(dt,pp){
+  if(!CFG.ARENA_CROWD_PANIC||!CBZ.cityScare)return;
+  panicT-=dt; if(panicT>0)return;
+  panicT=0.22;
+  var P=CBZ.player;
+  if(!P||P.dead)return;
+  var armed=!!(CBZ.cityHasGun&&CBZ.cityHasGun());
+  var threat=armed||(CBZ.game&&(CBZ.game.wanted|0)>=2);
+  if(!threat)return;
+  var peds=CBZ.cityPeds; if(!peds)return;
+  var act=CBZ.city&&CBZ.city.playerActor;
+  for(var i=0;i<peds.length;i++){
+    var p=peds[i];
+    if(!p||p.dead||p._venueRole!=="arena-spectator")continue;
+    var dx=p.pos.x-pp.x, dz=p.pos.z-pp.z;
+    if(dx*dx+dz*dz>34*34)continue;               // the ripple has a radius
+    CBZ.cityScare(p,act||P,{seat:true});
+  }
+}
+
+// ============================================================ CBZ.arenaAudit()
+// THE RATCHET (BLOCK LAW #5). `misposed` and `shrugRoles` are pinned at 0 and
+// may only ever stay there:
+//   misposed   — a seated spectator whose body disagrees with the cushion its
+//                seat DECLARED. Measured two ways, because one alone lies: the
+//                seat must carry a seatRef at all (an undeclared anchor is the
+//                legacy squat by definition), AND the rig's hip must sit within
+//                a tolerance of where character.js's own closed form puts it.
+//                That is what "knees at the chest" reads as, numerically.
+//   shrugRoles — a spectator whose DISPLAYED title is an activity ("Fight Fan",
+//                "Spectator") or a shrug, rather than a trade / org / condition.
+//   spawnsInView — a spectator rig that became visible inside the camera's
+//                padded screen area. Never let the player watch a body appear.
+CBZ.arenaAudit=function(){
+  var M=(venue&&venue.metrics)||{};
+  var cs=(venue&&venue.crowdState)?venue.crowdState():{fill:0,shown:0,total:0};
+  var peds=CBZ.cityPeds||[];
+  var rigs=0,seated=0,misposed=0,shrugs=0,inView=0,attending=0;
+  var ACT={"Fight Fan":1,"Race Fan":1,"Spectator":1,"Fan":1,"Audience":1,
+           "Attendee":1,"Crowd":1,"Punter":1,"Passenger":1,
+           "Psycho":1,"Crook":1,"Old Money":1,"Drifter":1,"Civilian":1};
+  for(var i=0;i<peds.length;i++){
+    var p=peds[i];
+    if(!p||p._venueRole!=="arena-spectator")continue;
+    rigs++;
+    if(p._attending)attending++;
+    var t=CBZ.cityTitle?CBZ.cityTitle(p):"";
+    if(!t||ACT[t])shrugs++;
+    var ch=p.char;
+    if(!ch||!ch.sitting)continue;
+    seated++;
+    var ref=ch.seatRef;
+    // TWO independent reads, because either alone lies. (a) the seat must
+    // DECLARE a cushion at all — an undeclared anchor IS the legacy squat, by
+    // definition, and that is what put the knees at the chest. (b) the V2 solve
+    // must actually be RUNNING: character.js sets ch._seatSunk = 1 on every
+    // frame it sinks the model onto the cushion, and clears it when the body
+    // stands, so a body posed by the legacy branch can never show it.
+    if(!ref||ref.cushion==null||!ch._seatSunk)misposed++;
+  }
+  inView+=arenaSpawnSeen;
+  var live=rigs*16;                       // ~16 draw calls per full rig
+  return {
+    tiers:M.tiers|0, rowsPerTier:M.rowsPerTier|0, rows:M.rows|0,
+    bowlHeight:M.bowlHeight||0, rakeDeg:M.rakeDeg||0, rakeTopDeg:M.rakeTopDeg||0,
+    minCValue:M.minCValue||0, targetC:M.targetC||0,
+    floor:[M.floorX||0,M.floorZ||0],
+    seats:M.seats|0,
+    occupied:(cs.shown|0)+rigs,
+    occupancyPct:M.seats?+(((cs.shown+rigs)/M.seats)*100).toFixed(1):0,
+    eventActive:!!EVENT.active, event:EVENT.kind,
+    instanced:cs.shown|0, instancedCap:M.crowdCap|0, rigs:rigs, seated:seated,
+    misposed:misposed, shrugRoles:shrugs, attending:attending,
+    spawnsInView:inView, spawnsDeferred:arenaSpawnBlocked,
+    colliders:M.colliders|0, standColliders:M.standColliders|0,
+    platforms:M.platforms|0, aisleRamps:M.aisleRamps|0,
+    seatCushion:M.seatCushion||0,
+    drawCallEst:(M.drawCallEst|0)+live
+  };
+};
+
 // ================================================================ MAIN TICK
 CBZ.onUpdate(40,function(dt){
   if(!dt||dt>0.5)dt=0.05;
   if(!arenaRoot||!CBZ.player||!CBZ.player.pos)return;
   var pp=CBZ.player.pos;
+  // ---- THE HOUSE: full when a card is on, near-empty when it is dark -------
+  if(CFG.ARENA_CROWD_EVENT!==false&&venue&&venue.crowdFill){
+    var kind=eventNow();
+    var on=!!kind;
+    EVENT.kind=kind||"dark";
+    // Re-cast ONLY on the dark<->live edge. Stepping into the cage during a
+    // live card is not a reason to destroy and rebuild 28 bodies — the kind
+    // changes, the house does not.
+    if(!EVENT.init||on!==EVENT.active){
+      // SNAP the very first time (you may have loaded in mid-card and a bowl
+      // visibly filling from zero on arrival is its own fourth-wall break);
+      // every later change RAMPS, so you watch the house come in.
+      var snap=!EVENT.init;
+      EVENT.init=true;
+      EVENT.active=on; EVENT.kind=kind||"dark"; EVENT.t=0;
+      venue.crowdFill(on?FILL_ON:FILL_OFF,snap);
+      setAudience(on?LIVE_ON:LIVE_OFF,true);
+      board(on?"TONIGHT — FIGHT NIGHT":"IRONJAW ARENA",
+            on?"THE HOUSE IS IN":"DARK TONIGHT",
+            on?"BOXING / MMA / BEAST PIT":"next card at dusk");
+    }
+    EVENT.t+=dt;
+  }
   // The building's own per-frame work: switch the real light rig + instanced
   // crowd by distance, and repaint the jumbotron when the card changed.
   if(venue&&venue.tick)venue.tick(Math.hypot(pp.x-CX,pp.z-CZ),dt);
+  tickPanic(dt,pp);
   // ring bout: only simulate while a spectator could actually see it, and
   // while the ring isn't handed over to the player's own boxing match.
   nearRing=Math.hypot(pp.x-RX,pp.z-RZ)<RING_SIM;

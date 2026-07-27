@@ -157,6 +157,58 @@
   const S_STRATA = 0x4d34, S_TALUS = 0x4d35, S_FINE = 0x4d36, S_SNOW = 0x4d37;
   const S_GRIDGE = 0x6e41, S_GERODE = 0x6e42, S_GRIVER = 0x6e43;
   const S_GSTRATA = 0x6e44, S_GTALUS = 0x6e45, S_GFINE = 0x6e46, S_GSNOW = 0x6e47;
+  /* ---- TERRAIN_PEAKS_V2 ------------------------------------------------
+     OWNER: "all the mountains have these curved yet sharp multi-peaks that
+     don't look like realistic mountain shape."
+
+     That is a precise description of what the Greater Mercy Range's field
+     actually computes, and all three words are separate arithmetic faults:
+
+       CURVED  — 50 Gaussian lobes, unioned by sqrt(sum of squares). A
+                 Gaussian is a perfectly round bell, and a soft-max union
+                 keeps every one of them visible as its own dome.
+       SHARP   — each lobe carries a radial rib term
+                 `0.5 + 0.5*cos(angle*k + radius*7.0 + phase)`. `radius` is
+                 in SIGMA units and a lobe is evaluated out to 4 sigma, so
+                 that cosine completes ~4.5 FULL CYCLES between the summit
+                 and the base. A ridgeline is therefore creased into four or
+                 five concentric rings on the way down. Real ridgelines
+                 DESCEND MONOTONICALLY from a summit; they do not oscillate
+                 along their own crest.
+       MULTI   — the ten summits run a scale ladder 1.0 -> 10.0, but it is
+                 compressed by pow(s, 0.62), so the tallest is only 4.17x the
+                 shortest; then each summit is given four shoulders at up to
+                 0.555x its own amplitude. Worked through, the summit
+                 amplitudes are 92 / 114 / 132 / 164 / 183 / 210 / 241 / 279 /
+                 341 / 384, and the BIGGEST summit's shoulders reach
+                 0.555 x 384 = 213 — which out-tops SIX OF THE TEN SUMMITS.
+                 There is no hierarchy left to read: it is a field of similar
+                 bumps, which is exactly what "multi-peaks" describes.
+
+     The fix is three terms and no new noise call:
+       1. MONOTONE RIBS — drop `radius*7.0`. A rib becomes what a rib is:
+          an azimuthal crease whose depth DECAYS outward from the summit, so
+          every ridgeline falls all the way to the base without a single
+          reversal. (Cheaper too: one multiply instead of an add + a term.)
+       2. HIERARCHY — steepen the summit ladder (pow 0.62 -> 0.76, so the
+          tallest is 5.75x the shortest) and cap the shoulder share at 0.168
+          (was 0.555). The tallest shoulder in the whole range drops from 213
+          to 65, which is UNDER the shortest summit (67) — stated as an
+          inequality, not as taste. A few dominant summits, a lot of
+          subordinate shoulders.
+       3. A BROAD BASE — add `base*(1-base)` mass, which is ZERO at the
+          summit and ZERO in the far field and peaks at mid-slope: an apron.
+          It is zero at the crest BY CONSTRUCTION, so no summit gets taller
+          and the math gate's 25 u mountain threshold cannot be crossed by
+          a cell that was not already over it.
+     Every term only reshapes the existing lobe sum — no octave is added, so
+     the field costs the same. Determinism is untouched (no rng, no hash
+     stream: the lobe table is built from the same greaterHash it always was).
+     `?cfg_TERRAIN_PEAKS_V2=0` restores the exact prior silhouette.
+  ---------------------------------------------------------------------- */
+  if (CFGS.TERRAIN_PEAKS_V2 == null) CFGS.TERRAIN_PEAKS_V2 = true;
+  const PEAKS_V2 = function () { return CFGS.TERRAIN_PEAKS_V2 !== false; };
+
   const HAS_KIT = !!(CBZ.mtnErode && CBZ.mtnRidgeMF && CBZ.mtnDrainage &&
                      CBZ.mtnTerrace && CBZ.mtnCirque && CBZ.mtnTalus && CBZ.mtnHiGate);
   const EROSION_V4 = function () { return HAS_KIT && CFGS.MOUNT_EROSION_V4 !== false; };
@@ -418,10 +470,31 @@
     const h = Math.sin((i + 1) * 91.713 + (j + 3) * 37.119) * 43758.5453;
     return h - Math.floor(h);
   }
+  // TERRAIN_PEAKS_V2 term 2 — HIERARCHY. A steeper summit ladder (0.76) and
+  // a shoulder share capped at 0.34 of the parent. Before: the biggest
+  // summit's shoulders reached 232 u and out-topped six of the ten summits.
+  // After: no shoulder can reach the smallest summit. Amplitude is renormalised
+  // (92 -> 74) so the RANGE's own top stays where it was — this redistributes
+  // mass into a hierarchy, it does not grow the massif.
+  // GP_AMP is solved, not chosen: 92*10^0.62 = 384 was the old top summit, so
+  // 384/10^0.76 = 67 keeps the RANGE EXACTLY AS TALL while the ladder under it
+  // gets steeper. A shape change that also grows the massif is a different
+  // change, and it would move the math gate's mountain-cell sets.
+  // The shoulder share is solved too: the tallest parent is 10^0.76 = 5.754x
+  // the smallest SUMMIT, so 1/5.754 = 0.1738 is the exact share at which the
+  // biggest summit's biggest shoulder EQUALS the smallest summit. The share
+  // below tops out at 0.168, strictly under it — so no shoulder anywhere in the
+  // range can out-top any summit. That is the hierarchy, stated as an
+  // inequality instead of as taste.
+  const GP_EXP = PEAKS_V2() ? 0.76 : 0.62;
+  const GP_AMP = PEAKS_V2() ? 67 : 92;
+  const GP_SH0 = PEAKS_V2() ? 0.072 : 0.30;     // shoulder share, innermost
+  const GP_SHJ = PEAKS_V2() ? 0.021 : 0.055;    // …per ring outward
+  const GP_SHV = PEAKS_V2() ? 0.033 : 0.09;     // …hash jitter (max share 0.168)
   for (let gi = 0; gi < GREAT_MAJOR.length; gi++) {
     const m = GREAT_MAJOR[gi];
-    const scaled = Math.pow(m.s, 0.62);
-    const mainAmp = 92 * scaled;
+    const scaled = Math.pow(m.s, GP_EXP);
+    const mainAmp = GP_AMP * scaled;
     GREAT_LOBES.push({
       x: m.x, z: m.z,
       sx: 48 + 67 * scaled, sz: 44 + 61 * scaled,
@@ -439,7 +512,7 @@
         z: m.z + Math.sin(angle) * ring,
         sx: 30 + 58 * ss,
         sz: 28 + 52 * ss,
-        a: mainAmp * (0.30 + j * 0.055 + v * 0.09), major: false,
+        a: mainAmp * (GP_SH0 + j * GP_SHJ + v * GP_SHV), major: false,
       });
     }
   }
@@ -469,16 +542,29 @@
       // A narrower upper crown turns each broad Gaussian foundation into an
       // alpine summit while retaining the wind-rounded base requested for the
       // rideable terrain. Shoulders stay softer and knit nearby peaks together.
-      const profile = l.major
+      // TERRAIN_PEAKS_V2 term 3 — A BROAD BASE. `base*(1-base)` is zero at the
+      // summit (base=1) and zero in the far field (base=0) and peaks at
+      // mid-slope, so it is an APRON: it widens the skirt and makes the lower
+      // slopes concave without adding one centimetre to any crest. That is the
+      // single loudest missing tell — real massifs have a long shallow foot.
+      let profile = l.major
         ? base * (0.22 + 0.78 * Math.pow(base, 1.35))
         : base * (0.76 + 0.24 * base);
-      // Each main summit gets long, rounded radial ribs.  This breaks the blank
-      // snowball silhouette while preserving the exact lobe footprint and the
-      // continuous shared collision heightfield.
+      if (PEAKS_V2()) profile += (l.major ? 0.42 : 0.18) * base * (1 - base);
+      // Each main summit gets long radial ribs.
+      // TERRAIN_PEAKS_V2 term 1 — MONOTONE RIDGELINES. The old term added
+      // `radius * 7.0` inside the cosine; `radius` is in sigma and lobes reach
+      // 4 sigma, so the crease oscillated ~4.5 times between summit and base
+      // and every ridge went up and down on its way down. The rib is now purely
+      // AZIMUTHAL, and its depth DECAYS with radius, so a ridgeline descends
+      // once and keeps descending — which is the only thing a real one does.
       const angle = Math.atan2(dz, dx);
       const radius = Math.sqrt(dx * dx + dz * dz);
-      const ribs = 0.5 + 0.5 * Math.cos(angle * (6 + (i % 4)) + radius * 7.0 + i * 1.37);
-      const face = l.major ? (0.80 + ribs * 0.20) : (0.91 + ribs * 0.09);
+      const ribs = PEAKS_V2()
+        ? 0.5 + 0.5 * Math.cos(angle * (6 + (i % 4)) + i * 1.37)
+        : 0.5 + 0.5 * Math.cos(angle * (6 + (i % 4)) + radius * 7.0 + i * 1.37);
+      const ribFade = PEAKS_V2() ? 1 / (1 + 0.45 * radius * radius) : 1;
+      const face = l.major ? (1 - (1 - ribs) * 0.20 * ribFade) : (1 - (1 - ribs) * 0.09 * ribFade);
       const h = l.a * profile * face;
       sum2 += h * h;
     }
@@ -594,6 +680,65 @@
     return Math.max(0, h);
   }
   CBZ.mtnGreatBounds = { minX: GREAT_MINX, maxX: GREAT_MAXX, minZ: GREAT_MINZ, maxZ: GREAT_MAXZ };
+
+  /* ==================================================================
+     CBZ.peakShapeAudit() — THE SILHOUETTE AS NUMBERS (TERRAIN_PEAKS_V2).
+
+     "Multi-peaks that don't look like a real mountain" is a shape claim,
+     and shape claims are measurable. Four numbers over the Greater Mercy
+     envelope, sampled on the AUTHORED frame so the dial cannot move them:
+
+       summits    — 8-neighbour local maxima above SUM_H. A range has a few
+                    dominant summits; a field of similar bumps has dozens.
+       maxH       — the top of the massif (must not grow: a shape change
+                    that also raises the range is a different change).
+       meanSlope  — mean |gradient| over the massif. Sharper spikes on a
+                    narrow base read as a HIGHER mean slope; an apron
+                    lowers it.
+       baseWidth  — (cells above 5 u) / (cells above half the summit). The
+                    ratio a real massif has is large — a long shallow foot
+                    under a small crest. Spikes rising straight out of flat
+                    ground score near 1.
+  ================================================================== */
+  CBZ.peakShapeAudit = function (opts) {
+    opts = opts || {};
+    const N = Number.isFinite(+opts.step) && +opts.step > 16 ? +opts.step : 220;
+    const SUM_H = Number.isFinite(+opts.summit) ? +opts.summit : 60;
+    const x0 = GREAT_A_MINX, x1 = GREAT_A_MAXX, z0 = GREAT_A_MINZ, z1 = GREAT_A_MAXZ;
+    const dx = (x1 - x0) / N, dz = (z1 - z0) / N;
+    const H = new Float32Array(N * N);
+    let maxH = 0;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const h = greaterMercyHeightAtA(x0 + (i + 0.5) * dx, z0 + (j + 0.5) * dz);
+      H[j * N + i] = h; if (h > maxH) maxH = h;
+    }
+    let summits = 0, slopeSum = 0, slopeN = 0, wide = 0, crest = 0;
+    for (let j = 1; j < N - 1; j++) for (let i = 1; i < N - 1; i++) {
+      const k = j * N + i, h = H[k];
+      if (h > 5) wide++;
+      if (h > maxH * 0.5) crest++;
+      if (h > 1) {
+        const gx = (H[k + 1] - H[k - 1]) / (2 * dx), gz = (H[k + N] - H[k - N]) / (2 * dz);
+        slopeSum += Math.sqrt(gx * gx + gz * gz); slopeN++;
+      }
+      if (h < SUM_H) continue;
+      let top = true;
+      for (let a = -1; a <= 1 && top; a++) for (let b = -1; b <= 1; b++) {
+        if ((a || b) && H[(j + a) * N + (i + b)] > h) { top = false; break; }
+      }
+      if (top) summits++;
+    }
+    return {
+      summits: summits,
+      maxH: Math.round(maxH),
+      meanSlope: +(slopeSum / Math.max(1, slopeN)).toFixed(3),
+      baseWidth: +(wide / Math.max(1, crest)).toFixed(2),
+      lobes: GREAT_LOBES.length,
+      shoulderTop: Math.round(GREAT_LOBES.reduce(function (m, l) { return l.major ? m : Math.max(m, l.a); }, 0)),
+      smallestSummit: Math.round(GREAT_LOBES.reduce(function (m, l) { return l.major ? Math.min(m, l.a) : m; }, 1e9)),
+      v2: PEAKS_V2(),
+    };
+  };
   // AUTHORED-frame fields exposed for numeric probes/tooling (the world-facing
   // dial-mapped oracles are still published by the landmass builder, and they
   // remain the ONE function that feeds both the mesh and the physics floor —

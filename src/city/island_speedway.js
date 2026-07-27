@@ -1495,6 +1495,19 @@
   // ====================================================================== //
   //  POPULATE                                                              //
   // ====================================================================== //
+  // WHO IS IN THAT SEAT. OWNER (2026-07-27): "'FIGHT FAN' AS ROLE OF NPCS —
+  // THAT'S NOT AN NPC ROLE." "race fan" is the same bug: it is an evening, not
+  // a trade, and `job` is the field that renders the overhead pill. Strip the
+  // activity word, let the caster deal a real trade (city/peds.js cityDealRole),
+  // and put what they are DOING here on the separate attending field
+  // (city/level.js). One call, degrade-safe, no other line changes.
+  function venueCast(p, role) {
+    if (!p || !/spectator|concourse/.test(role || "")) return;
+    p.job = null; p.archetype = "resident"; p._role = null; p._work = null;
+    if (CBZ.cityDealRole) { try { CBZ.cityDealRole(p); } catch (e) {} }
+    if (CBZ.citySetAttending) CBZ.citySetAttending(p, "the racing", "Redline Speedway");
+  }
+
   function populate(root, rng, city, audience) {
     const makePed = CBZ.cityMakePed;
     const populationEntries = [];
@@ -1505,7 +1518,7 @@
           profile: profile,
           placement: anchor ? { anchor: anchor, rng: rng } : { x: x, z: z, rng: rng },
           overrides: opts || {},
-          configure: role ? function (p) { p._venueRole = role; } : null,
+          configure: role ? function (p) { p._venueRole = role; venueCast(p, role); } : null,
         });
         return null;
       }
@@ -1513,7 +1526,7 @@
         const p = CBZ.npcLife.spawnCity(profile, anchor
           ? { parent: root, anchor: anchor, rng: rng }
           : { x: x, z: z, parent: root, rng: rng }, opts || {});
-        if (p && role) p._venueRole = role;
+        if (p && role) { p._venueRole = role; venueCast(p, role); }
         return p;
       }
       if (!makePed || anchor) return null; // empty seat beats a decorative proxy

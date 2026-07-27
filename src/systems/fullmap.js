@@ -56,6 +56,19 @@
     return (CBZ.game && CBZ.game.wanted) | 0;
   }
 
+  // ---- MAP_ICONS_V2 ---------------------------------------------------------
+  // OWNER, verbatim: "AND THE MAP SHOWS WAY WAY TOO MUCH TEXT. IT SHOULD SHOW
+  // ICONS, AND TEXT WHEN AN ICON IS HOVERED OVER."
+  //
+  // Before this flag the map printed a NAME over every point of interest at the
+  // zoom M drops you at, so ~90 shop names stacked on top of the geography and
+  // the chart was unreadable. With MAP_ICONS_V2 on, a POI draws a PICTOGRAM that
+  // says its trade at a glance and its name appears only for the icon under the
+  // cursor (desktop) or the icon you tapped (touch). One-line revert to the
+  // all-text map: CBZ.CONFIG.MAP_ICONS_V2 = false.
+  if (CBZ.CONFIG && CBZ.CONFIG.MAP_ICONS_V2 == null) CBZ.CONFIG.MAP_ICONS_V2 = true;
+  function ICONS_V2() { return !CBZ.CONFIG || CBZ.CONFIG.MAP_ICONS_V2 !== false; }
+
   function boundsFor(which) {
     if (which === "survival") {
       const A = CBZ.surv && CBZ.surv.arena;
@@ -319,7 +332,7 @@
     clearMoveKeys();
     plates.a = null;   // re-render the static city plates fresh each open (ownership/renovations may have moved)
     if (mode() === "city") setCityView(false);   // drop the view on the player, zoomed-in
-    map._cursor = null;
+    map._cursor = null; map._sel = null; map._hoverKey = "";
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("full-map-open");
     // touch: no M key exists — the close chip drops the key hint
@@ -337,7 +350,7 @@
   function close(relock) {
     if (!map.active) return;
     map.active = false;
-    map._cursor = null;
+    map._cursor = null; map._sel = null; map._hoverKey = "";
     zoomRepeatStop();   // a held zoom chip must never keep repeating past the map
     root.setAttribute("aria-hidden", "true");
     document.body.classList.remove("full-map-open");
@@ -364,10 +377,10 @@
     ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p.x(x), p.z(z), r || 2.5, 0, Math.PI * 2); ctx.fill();
   }
 
+  // world-anchored place text. Routed through mapLabel so EVERY permanent word
+  // on the chart is measured by the same funnel the audit reads (see mapLabel).
   function text(s, x, z, p, color, size) {
-    ctx.fillStyle = color || "rgba(235,245,255,.62)";
-    ctx.font = "700 " + (size || 12) + "px Fredoka, sans-serif";
-    ctx.textAlign = "center"; ctx.fillText(s, p.x(x), p.z(z));
+    mapLabel(s, p.x(x), p.z(z), { size: size || 12, fill: color || "rgba(235,245,255,.62)", halo: false, force: true });
   }
 
   function traceRoute(g, toX, toZ, route) {
@@ -408,6 +421,12 @@
     const x = p.x(wp.x), z = p.z(wp.z), pulse = 7 + Math.sin(performance.now() * 0.008) * 2;
     ctx.strokeStyle = "#7de7ff"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, z, pulse, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x - 12, z); ctx.lineTo(x + 12, z); ctx.moveTo(x, z - 12); ctx.lineTo(x, z + 12); ctx.stroke();
+    // YOUR OWN DESTINATION KEEPS ITS NAME. It is the one thing on this chart
+    // you already chose, so making you hover to re-read it would be a downgrade.
+    if (ICONS_V2() && wp.label) {
+      mapLabel(wp.label, x, z - 17, { size: 11, fill: "#bff2ff", haloC: "rgba(0,0,0,.8)", force: true });
+      pickAdd(x, z, 13, "waypoint", wp.label, waypointDistance(wp) + " m away", wp.x, wp.z);
+    }
   }
 
   function drawEscape(p) {
@@ -432,8 +451,19 @@
     }
     for (const g of CBZ.guards || []) if (!g.dead) dot(g.group.position.x, g.group.position.z, p, g.hunt > 0 ? "#ff3146" : "#ffd451", 3);
     if (CBZ.keycard && !CBZ.keycard.collected) dot(CBZ.keycard.group.position.x, CBZ.keycard.group.position.z, p, "#39ff88", 4);
-    for (const vent of CBZ.vents || []) drawPoi(vent.x, vent.z, p, "#c792ea", vent.route ? "HATCH" : "", false);
-    if (CBZ.EXIT) { dot(CBZ.EXIT.x, CBZ.EXIT.z, p, "#39ff88", 5); text("EXIT", CBZ.EXIT.x, CBZ.EXIT.z - 3, p, "#8dffb8", 11); }
+    // Vents/hatches are ICONS with the name on hover — the prison map used to
+    // stamp "HATCH" over every routed vent, which is the same clutter the world
+    // map had, one floor down.
+    for (const vent of CBZ.vents || []) {
+      drawPoi(vent.x, vent.z, p, "#c792ea", ICONS_V2() ? "" : (vent.route ? "HATCH" : ""), false, "hatchpt");
+      if (ICONS_V2()) pickAdd(p.x(vent.x), p.z(vent.z), 8, "hatchpt", vent.name || "Maintenance hatch", vent.route ? "Escape route" : "", vent.x, vent.z);
+    }
+    if (CBZ.EXIT) {
+      if (ICONS_V2()) {
+        drawIcon(ctx, p.x(CBZ.EXIT.x), p.z(CBZ.EXIT.z), "exitpt", { size: 9, tier: true }); stats.icons++;
+        pickAdd(p.x(CBZ.EXIT.x), p.z(CBZ.EXIT.z), 10, "exitpt", "Freedom Gate", "", CBZ.EXIT.x, CBZ.EXIT.z);
+      } else { dot(CBZ.EXIT.x, CBZ.EXIT.z, p, "#39ff88", 5); text("EXIT", CBZ.EXIT.x, CBZ.EXIT.z - 3, p, "#8dffb8", 11); }
+    }
   }
 
   function drawSurvival(p) {
@@ -519,25 +549,22 @@
     });
     if (!list.length) return;
     const A = CBZ.city && CBZ.city.arena;
-    const settlementNames = new Set(list.map(function (s) {
-      return String((s && s.name) || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-    }));
-    const boxes = [];   // placed label AABBs (greedy declutter, like the POI labels)
-    const hit = (x0, y0, x1, y1) => { for (let i = 0; i < boxes.length; i++) { const b = boxes[i]; if (x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0) return true; } return false; };
-    // SEED with the baked region/biome name boxes so towns never overwrite the
-    // geography labels ("Redhollow Woods", "The Sands"…) — those win the space.
-    if (A) for (const rg of A.regions || []) {
-      if (isLink(rg) || rg.underlay) continue;
-      const name = rg.name || rg.biome || ""; if (!name) continue;
-      // A mini-city registers both a terrain footprint and a settlement.  Its
-      // terrain record is intentionally not lettered on the baked plate, so it
-      // must not reserve an invisible label box here either.
-      if (settlementNames.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
-      const c = regionCentroid(rg);
-      const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
-      const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
-      const half = name.length * size * 0.28, nx = p.x(c.x), ny = p.z(c.z);
-      boxes.push({ x0: nx - half, y0: ny - size, x1: nx + half, y1: ny + size * (rg.subtitle ? 2 : 1) });
+    // LEGACY ONLY: with MAP_ICONS_V2 off the region names are baked onto the
+    // zoom-scaled plate, so their live footprint has to be re-derived here or a
+    // town name lands on "Redhollow Woods". With the flag on, region names are
+    // live and share the one box list, which is what makes this unnecessary.
+    if (!ICONS_V2() && A) {
+      const known = settlementNameSet();
+      for (const rg of A.regions || []) {
+        if (isLink(rg) || rg.underlay) continue;
+        const name = rg.name || rg.biome || ""; if (!name) continue;
+        if (known.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
+        const c = regionCentroid(rg);
+        const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
+        const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
+        const half = name.length * size * 0.28, nx = p.x(c.x), ny = p.z(c.z);
+        labelBoxes.push({ x0: nx - half, y0: ny - size, x1: nx + half, y1: ny + size * (rg.subtitle ? 2 : 1) });
+      }
     }
     for (const s of list) {
       if (!s || !Number.isFinite(s.cx)) continue;
@@ -546,21 +573,30 @@
       if (A && s.cx > A.minX && s.cx < A.maxX && s.cz > A.minZ && s.cz < A.maxZ) continue;
       const mx = p.x(s.cx), mz = p.z(s.cz);
       if (mx < -40 || mx > W + 40 || mz < -40 || mz > H + 40) continue;
-      // house-shaped marker (always drawn — it's the town's anchor)
-      ctx.fillStyle = "#e6c069"; ctx.strokeStyle = "rgba(0,0,0,.72)"; ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(mx, mz - 6.5); ctx.lineTo(mx + 5.5, mz - 1.5); ctx.lineTo(mx + 5.5, mz + 5);
-      ctx.lineTo(mx - 5.5, mz + 5); ctx.lineTo(mx - 5.5, mz - 1.5); ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      if (s.casino) { ctx.fillStyle = "#fff2c0"; ctx.beginPath(); ctx.arc(mx, mz + 1.5, 1.6, 0, Math.PI * 2); ctx.fill(); }
       const name = s.name || "Town";
-      ctx.font = "700 11px Fredoka, sans-serif"; ctx.textAlign = "center";
-      const tw = ctx.measureText(name).width, ty = mz - 9;
-      const x0 = mx - tw / 2 - 1, x1 = mx + tw / 2 + 1, y0 = ty - 11, y1 = ty + 2;
-      if (hit(x0, y0, x1, y1)) continue;   // a nearer town already owns this label space
-      boxes.push({ x0, y0, x1, y1 });
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.78)"; ctx.strokeText(name, mx, ty);
-      ctx.fillStyle = "#ffe9b0"; ctx.fillText(name, mx, ty);
+      const cnt = s.counts || {};
+      if (ICONS_V2()) {
+        // the town marker joins the ONE icon vocabulary (it used to hand-roll a
+        // house path + a gold pip that meant "casino" to nobody)
+        drawIcon(ctx, mx, mz, "town", { size: 8, tier: !!s.casino }); stats.icons++;
+        const bits = [];
+        if (cnt.shops) bits.push(cnt.shops + " shops");
+        if (cnt.homes) bits.push(cnt.homes + " homes");
+        if (s.casino) bits.push("casino");
+        pickAdd(mx, mz, 9, "town", name, bits.join(" · "), s.cx, s.cz);
+      } else {
+        ctx.fillStyle = "#e6c069"; ctx.strokeStyle = "rgba(0,0,0,.72)"; ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(mx, mz - 6.5); ctx.lineTo(mx + 5.5, mz - 1.5); ctx.lineTo(mx + 5.5, mz + 5);
+        ctx.lineTo(mx - 5.5, mz + 5); ctx.lineTo(mx - 5.5, mz - 1.5); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        if (s.casino) { ctx.fillStyle = "#fff2c0"; ctx.beginPath(); ctx.arc(mx, mz + 1.5, 1.6, 0, Math.PI * 2); ctx.fill(); }
+        stats.icons++;
+      }
+      // A TOWN NAME IS GEOGRAPHY, NOT CLUTTER — it stays permanent (you cannot
+      // hover what you have not found yet). It still goes through the shared
+      // funnel, so it declutters against the region names and is counted.
+      mapLabel(name, mx, mz - (ICONS_V2() ? 12 : 9), { size: 11, fill: "#ffe9b0", haloC: "rgba(0,0,0,.78)" });
     }
   }
 
@@ -576,7 +612,7 @@
     if (wanted >= 4) {   // molten label at high heat
       ctx.font = "800 11px Fredoka, sans-serif"; ctx.textAlign = "center";
       ctx.fillStyle = "rgba(255,120,90," + pulse.toFixed(2) + ")";
-      ctx.fillText("WANTED", W / 2, y + 15);
+      ctx.fillText("WANTED", W / 2, y + 15); stats.furniture++;
     }
   }
   function starGlyph(cx, cy, r, color, glow) {
@@ -601,15 +637,442 @@
     }
   }
 
-  // a labelled point of interest you can navigate to. Colour is icon-like per
-  // trade so the map reads at a glance (bank=blue, hospital=red, guns=green…).
-  const POI_KINDS = {
-    guns: "#8ed24a", jewelry: "#f2c43d", pawn: "#c08a3c", gas: "#ff6b6b", clothing: "#c792ea",
-    drugs: "#4caf6e", food: "#ff9e6b", bar: "#e85d8a", bank: "#5b8bff", hardware: "#ffd166",
-    gym: "#66d9c0", security: "#9aa6c2", hospital: "#ff5b6b", barber: "#6bb6ff", electronics: "#39d0c0",
-    carlot: "#e88a3c", realtor: "#4fd0a0", chop: "#d0a23c", casino: "#c9a227", raceway: "#2f6fed",
-    arena: "#d94f45", paintball: "#7ed957", transit: "#39c0d0", cityhall: "#d8dde8", airfield: "#8a93a3",
-    racepark: "#b98a5a",
+  // ============================================================
+  //  THE MAP ICON VOCABULARY — `CBZ.mapIcon`
+  //
+  //  ONE table for "what does this place look like on a chart". It used to be
+  //  POI_KINDS: a kind→colour map and nothing else, so every marker on both the
+  //  full map and the corner radar was the SAME diamond and colour was the only
+  //  thing telling a bank from a hospital — which is exactly why the old map had
+  //  to print a name on every one of them.
+  //
+  //  Each row is {c: badge colour, r: RANK, n: human name, g: glyph, poi: it is
+  //  a shop kind}. RANK does three jobs at once and is the reason no second
+  //  table is needed: it is the zoom tier (>= LANDMARK is drawn at every city
+  //  zoom, below it only once you zoom in), it is the declutter arbitration
+  //  (when two icons collide the higher rank survives), and it is the label
+  //  priority. Adding a trade is a ROW — never a second placer, never a second
+  //  palette, and never a special case in a consumer.
+  //
+  //  Glyphs are authored on a 20×20 box centred on the origin and drawn in one
+  //  ink colour over the badge, so they stay legible down to ~10 px (the radar)
+  //  and up to ~22 px (a landmark on the full map). No image assets, no fonts —
+  //  these are canvas primitives, which is what this map already draws with.
+  // ============================================================
+  const ICON_INK = "#0d1319";
+  function rrect(g, x, y, w, h, r) {          // rounded rect with an arcTo fallback
+    r = Math.max(0, Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2));
+    if (g.roundRect) { g.beginPath(); g.roundRect(x, y, w, h, r); return; }
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+  function poly(g, pts, fill) {            // pts = [x0,y0,x1,y1,…]
+    g.beginPath(); g.moveTo(pts[0], pts[1]);
+    for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
+    g.closePath(); if (fill !== false) g.fill(); else g.stroke();
+  }
+  function bars(g, list) {                 // list = [[x,y,w,h],…] filled rects
+    for (let i = 0; i < list.length; i++) g.fillRect(list[i][0], list[i][1], list[i][2], list[i][3]);
+  }
+  function strokes(g, segs) {              // segs = [[x0,y0,x1,y1],…]
+    g.beginPath();
+    for (let i = 0; i < segs.length; i++) { g.moveTo(segs[i][0], segs[i][1]); g.lineTo(segs[i][2], segs[i][3]); }
+    g.stroke();
+  }
+  function disc(g, x, y, r, fill) { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); if (fill === false) g.stroke(); else g.fill(); }
+
+  // GLYPH CRAFT RULES this set is authored to (they are why it reads at 16px):
+  //  • SILHOUETTE OVER DETAIL — every glyph must survive being filled solid;
+  //    interior detail under ~2 authoring units is sub-pixel on the radar and
+  //    is not drawn at all.
+  //  • ONE IDEA PER GLYPH — a single referent, no compound scenes.
+  //  • NEVER COLOUR ALONE — no two kinds share a silhouette. That rule is what
+  //    forced `town` off the plain house (home has it), `crest` off the diamond
+  //    (jewelry has it) and `racepark` off the chequered flag (raceway has it).
+  //  • CONSISTENT OPTICAL WEIGHT — a glyph is roughly 35-55% ink, so no icon
+  //    reads as louder than its neighbour purely by mass.
+  //  • OPTICALLY CENTRED on the 20×20 box, not mathematically centred.
+  const GLYPH = {
+    house: function (g) { poly(g, [-7.5, -0.5, 0, -7.5, 7.5, -0.5]); bars(g, [[-5.2, -0.5, 10.4, 7.6]]); },
+    houseOpen: function (g) { poly(g, [-7.5, -0.5, 0, -7.5, 7.5, -0.5], false); g.strokeRect(-5.2, -0.5, 10.4, 7.6); },
+    // a SETTLEMENT is more than one roof — that is the whole difference from
+    // "home", and it survives at 10px where a colour swap does not
+    town: function (g) { poly(g, [-9, 1.4, -4.4, -3.6, 0.2, 1.4]); bars(g, [[-7.6, 1.4, 6.4, 6.6]]); poly(g, [0.6, 0.4, 4.8, -5.4, 9, 0.4]); bars(g, [[2, 0.4, 5.6, 7.6]]); },
+    // a PENNANT: territory claimed. Distinct from the chequered flag (a race)
+    // and from the diamond (a gem).
+    pennant: function (g) { strokes(g, [[-5.6, -8.4, -5.6, 8.4]]); poly(g, [-5.6, -8, 7.6, -3.6, -5.6, 0.8]); },
+    wheel: function (g) { g.lineWidth = 2.9; disc(g, 0, 0, 7.2, false); strokes(g, [[-7.2, 0, 7.2, 0], [0, 0, 0, 7.2]]); disc(g, 0, 0, 2.1); },
+    gun: function (g) { poly(g, [-8, -4.2, 6.4, -4.2, 6.4, -0.6, 1.2, -0.6, -0.8, 6.4, -4.8, 6.4, -3.6, -0.6, -8, -0.6]); },
+    gem: function (g) { poly(g, [0, -6.6, 7.4, -1.4, 0, 7.4, -7.4, -1.4]); g.strokeStyle = "rgba(255,255,255,.5)"; strokes(g, [[-7.4, -1.4, 7.4, -1.4], [-3.5, -1.4, 0, -6.6], [3.5, -1.4, 0, -6.6]]); },
+    balls: function (g) { disc(g, 0, -4.4, 2.9); disc(g, -5, 2.6, 2.9); disc(g, 5, 2.6, 2.9); },
+    pump: function (g) { bars(g, [[-7.4, -7, 8.6, 14]]); g.fillStyle = "rgba(255,255,255,.62)"; bars(g, [[-5.4, -5, 4.6, 4]]); g.fillStyle = ICON_INK; strokes(g, [[1.6, -2.6, 6.4, -2.6], [6.4, -2.6, 6.4, 3.4]]); },
+    shirt: function (g) { poly(g, [-7.4, -4.4, -3, -7, 3, -7, 7.4, -4.4, 5, -0.6, 3.8, -1.6, 3.8, 7, -3.8, 7, -3.8, -1.6, -5, -0.6]); },
+    pill: function (g) { g.save(); g.rotate(-0.72); rrect(g, -8, -4, 16, 8, 4); g.fill(); g.strokeStyle = "rgba(255,255,255,.6)"; strokes(g, [[0, -4, 0, 4]]); g.restore(); },
+    cutlery: function (g) { g.lineWidth = 2.6; strokes(g, [[-6.8, -7.4, -6.8, -3], [-2.8, -7.4, -2.8, -3], [-4.8, -3, -4.8, 7.4]]); bars(g, [[-7.4, -3.8, 5.2, 2.2]]); poly(g, [6.4, -7.4, 6.4, 7.4, 3.4, 7.4, 3.4, -3.6]); },
+    glass: function (g) { poly(g, [-7, -6.4, 7, -6.4, 0, 1.2]); strokes(g, [[0, 1.2, 0, 6], [-4.2, 6.4, 4.2, 6.4]]); },
+    bank: function (g) { poly(g, [-8, -2.2, 0, -7.4, 8, -2.2]); bars(g, [[-5.4, -0.6, 2.1, 5.4], [-1.05, -0.6, 2.1, 5.4], [3.3, -0.6, 2.1, 5.4], [-8, 5.6, 16, 2.4]]); },
+    hammer: function (g) { g.save(); g.lineWidth = 2.9; strokes(g, [[-6, 7, 1.4, -0.4]]); g.restore(); poly(g, [-1.2, -2.2, 2.8, -6.4, 7.2, -2.2, 3.2, 2]); },
+    dumbbell: function (g) { bars(g, [[-8.2, -4.4, 3, 8.8], [5.2, -4.4, 3, 8.8], [-5.6, -1.6, 11.2, 3.2]]); },
+    shield: function (g) { poly(g, [0, -7.4, 7, -4.4, 7, 0.6, 3.6, 5.4, 0, 7.6, -3.6, 5.4, -7, 0.6, -7, -4.4]); },
+    cross: function (g) { bars(g, [[-2.6, -7.4, 5.2, 14.8], [-7.4, -2.6, 14.8, 5.2]]); },
+    pole: function (g) { rrect(g, -3.6, -8, 7.2, 16, 2.6); g.fill(); g.save(); g.clip(); g.strokeStyle = "rgba(255,255,255,.72)"; g.lineWidth = 2.4; strokes(g, [[-8, 2, 8, -6], [-8, 7, 8, -1], [-8, 12, 8, 4]]); g.restore(); },
+    bolt: function (g) { poly(g, [1.6, -8, -5.4, 1.2, -0.6, 1.2, -1.6, 8, 5.4, -1.6, 0.6, -1.6]); },
+    car: function (g) { poly(g, [-8, 2, -5.6, -1.4, -2.6, -4.4, 2.6, -4.4, 5.6, -1.4, 8, 2, 8, 4, -8, 4]); disc(g, -4.4, 4.6, 2); disc(g, 4.4, 4.6, 2); },
+    wrench: function (g) { g.save(); g.rotate(-0.62); g.lineWidth = 3.2; g.beginPath(); g.arc(0, -4.6, 4.2, Math.PI * 0.62, Math.PI * 2.38); g.stroke(); g.restore(); g.save(); g.rotate(-0.62); bars(g, [[-1.7, -3.4, 3.4, 11]]); g.restore(); },
+    chip: function (g) { disc(g, 0, 0, 7.4); g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = 2.6; strokes(g, [[0, -7.4, 0, -4.6], [0, 4.6, 0, 7.4], [-7.4, 0, -4.6, 0], [4.6, 0, 7.4, 0]]); g.strokeStyle = ICON_INK; disc(g, 0, 0, 3.2, false); },
+    flag: function (g) { strokes(g, [[-5.4, -8.4, -5.4, 8.4]]); bars(g, [[-5.4, -8.4, 4, 3.4], [-1.4, -5, 4, 3.4], [-1.4, -8.4, 4, 3.4]]); g.fillStyle = "rgba(255,255,255,.85)"; bars(g, [[-1.4, -8.4, 4, 3.4], [-5.4, -5, 4, 3.4]]); },
+    stadium: function (g) { g.save(); g.scale(1, 0.62); g.lineWidth = 4.4; disc(g, 0, 0, 7.6, false); g.restore(); bars(g, [[-1.2, -2, 2.4, 4]]); },
+    splat: function (g) { disc(g, 0, 0, 4.6); disc(g, 5.6, -4, 1.9); disc(g, -5.2, 3.4, 1.7); disc(g, 4.2, 5, 1.5); disc(g, -4.6, -4.6, 1.4); },
+    bus: function (g) { rrect(g, -7.4, -7, 14.8, 11.6, 2.4); g.fill(); g.fillStyle = "rgba(255,255,255,.72)"; bars(g, [[-5.2, -4.8, 10.4, 4.6]]); g.fillStyle = ICON_INK; disc(g, -4.2, 5.4, 2.1); disc(g, 4.2, 5.4, 2.1); },
+    civic: function (g) { g.beginPath(); g.arc(0, -1.4, 4.4, Math.PI, 0); g.closePath(); g.fill(); strokes(g, [[0, -5.8, 0, -9.4]]); poly(g, [0, -9.4, 4.6, -7.8, 0, -6.2]); bars(g, [[-8, 5.4, 16, 2.6], [-6.4, -1.4, 2, 6.4], [-1, -1.4, 2, 6.4], [4.4, -1.4, 2, 6.4]]); },
+    plane: function (g) { poly(g, [0, -9, 1.7, -2.8, 8.4, 1.4, 8.4, 3.4, 1.7, 1.8, 1.7, 5.4, 4.2, 7.6, 4.2, 8.6, 0, 7.4, -4.2, 8.6, -4.2, 7.6, -1.7, 5.4, -1.7, 1.8, -8.4, 3.4, -8.4, 1.4, -1.7, -2.8]); },
+    lift: function (g) { poly(g, [0, -6.4, 6, 1.4, -6, 1.4]); bars(g, [[-6, 3.6, 12, 2.6]]); },
+    ladder: function (g) { g.lineWidth = 2.8; strokes(g, [[-5, -8, -5, 8], [5, -8, 5, 8], [-5, -4, 5, -4], [-5, 1, 5, 1], [-5, 6, 5, 6]]); },
+    coin: function (g) { disc(g, 0, 0, 7); g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = 2; g.beginPath(); g.moveTo(3.2, -3.4); g.arc(0, -2.2, 3.2, -0.35, Math.PI * 1.05); g.arc(0, 2.2, 3.2, Math.PI * 1.9, Math.PI * 0.68, true); g.stroke(); strokes(g, [[0, -6.4, 0, 6.4]]); },
+    eye: function (g) { g.beginPath(); g.moveTo(-8, 0); g.quadraticCurveTo(0, -7.4, 8, 0); g.quadraticCurveTo(0, 7.4, -8, 0); g.closePath(); g.fill(); g.fillStyle = "rgba(255,255,255,.9)"; disc(g, 0, 0, 3); g.fillStyle = ICON_INK; disc(g, 0, 0, 1.4); },
+    barrier: function (g) { bars(g, [[-8.4, -3.2, 16.8, 6.4]]); g.save(); rrect(g, -8.4, -3.2, 16.8, 6.4, 0.6); g.clip(); g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = 2.6; strokes(g, [[-10, 4, -3, -4], [-4, 4, 3, -4], [2, 4, 9, -4], [8, 4, 15, -4]]); g.restore(); },
+    rotor: function (g) { g.lineWidth = 2.4; strokes(g, [[-8.4, -3, 8.4, 3], [-8.4, 3, 8.4, -3]]); disc(g, 0, 0, 2.6); },
+    hatch: function (g) { g.strokeRect(-6.4, -6.4, 12.8, 12.8); strokes(g, [[-6.4, -2.2, 6.4, -2.2], [-6.4, 2.2, 6.4, 2.2]]); },
+    exit: function (g) { strokes(g, [[-7.4, -6.6, -7.4, 6.6], [-7.4, -6.6, 0, -6.6], [-7.4, 6.6, 0, 6.6]]); g.lineWidth = 2.6; strokes(g, [[-1.4, 0, 6.6, 0]]); poly(g, [8.4, 0, 3.6, -3.6, 3.6, 3.6]); },
+    pin: function (g) { disc(g, 0, -1.4, 4.4, false); strokes(g, [[0, 3, 0, 8]]); },
+  };
+
+  // kind → {c colour, r rank, n name, g glyph, poi: is a shop trade}
+  const LANDMARK = 60;   // rank at or above this is drawn at every city zoom
+  const MAP_ICONS = {
+    // --- your own things (never decluttered away) ---
+    home:      { c: "#39ff88", r: 100, n: "Home",              g: GLYPH.house },
+    waypoint:  { c: "#7de7ff", r: 99,  n: "Waypoint",          g: GLYPH.pin },
+    mission:   { c: "#7ed957", r: 97,  n: "Job",               g: GLYPH.flag },
+    // --- live world state ---
+    chopper:   { c: "#ff5040", r: 95,  n: "Police helicopter", g: GLYPH.rotor },
+    sealed:    { c: "#ff5a4c", r: 93,  n: "Bridge",            g: GLYPH.barrier },
+    seen:      { c: "#ff6a5a", r: 91,  n: "Last known position", g: GLYPH.eye },
+    town:      { c: "#e6c069", r: 88,  n: "Settlement",        g: GLYPH.town },
+    hq:        { c: "#d0d6e2", r: 80,  n: "Crew HQ",           g: GLYPH.pennant },
+    // --- landmarks (rank >= LANDMARK): the fit-zoom tier ---
+    hospital:  { c: "#ff5b6b", r: 82, n: "Hospital",           g: GLYPH.cross,    poi: 1 },
+    casino:    { c: "#c9a227", r: 78, n: "Casino",             g: GLYPH.chip,     poi: 1 },
+    bank:      { c: "#5b8bff", r: 76, n: "Bank",               g: GLYPH.bank,     poi: 1 },
+    guns:      { c: "#8ed24a", r: 74, n: "Gun Store",          g: GLYPH.gun,      poi: 1 },
+    cityhall:  { c: "#d8dde8", r: 72, n: "City Hall",          g: GLYPH.civic,    poi: 1 },
+    transit:   { c: "#39c0d0", r: 70, n: "Transit",            g: GLYPH.bus,      poi: 1 },
+    airfield:  { c: "#8a93a3", r: 68, n: "Airfield",           g: GLYPH.plane,    poi: 1 },
+    arena:     { c: "#d94f45", r: 66, n: "Arena",              g: GLYPH.stadium,  poi: 1 },
+    raceway:   { c: "#2f6fed", r: 66, n: "Raceway",            g: GLYPH.flag,     poi: 1 },
+    racepark:  { c: "#b98a5a", r: 64, n: "Race Park",          g: GLYPH.wheel,    poi: 1 },
+    carlot:    { c: "#e88a3c", r: 62, n: "Car Dealer",         g: GLYPH.car,      poi: 1 },
+    chop:      { c: "#d0a23c", r: 61, n: "Chop Shop",          g: GLYPH.wrench,   poi: 1 },
+    realtor:   { c: "#4fd0a0", r: 60, n: "Realtor",            g: GLYPH.houseOpen, poi: 1 },
+    security:  { c: "#9aa6c2", r: 60, n: "Security",           g: GLYPH.shield,   poi: 1 },
+    // --- ordinary trades (below LANDMARK): revealed once you zoom in ---
+    gas:       { c: "#ff6b6b", r: 50, n: "Gas Station",        g: GLYPH.pump,     poi: 1 },
+    food:      { c: "#ff9e6b", r: 48, n: "Food",               g: GLYPH.cutlery,  poi: 1 },
+    bar:       { c: "#e85d8a", r: 46, n: "Bar",                g: GLYPH.glass,    poi: 1 },
+    drugs:     { c: "#4caf6e", r: 44, n: "Pharmacy",           g: GLYPH.pill,     poi: 1 },
+    jewelry:   { c: "#f2c43d", r: 42, n: "Jeweller",           g: GLYPH.gem,      poi: 1 },
+    pawn:      { c: "#c08a3c", r: 40, n: "Pawn Shop",          g: GLYPH.balls,    poi: 1 },
+    clothing:  { c: "#c792ea", r: 38, n: "Clothing",           g: GLYPH.shirt,    poi: 1 },
+    electronics: { c: "#39d0c0", r: 37, n: "Electronics",      g: GLYPH.bolt,     poi: 1 },
+    hardware:  { c: "#ffd166", r: 36, n: "Hardware",           g: GLYPH.hammer,   poi: 1 },
+    gym:       { c: "#66d9c0", r: 34, n: "Gym",                g: GLYPH.dumbbell, poi: 1 },
+    barber:    { c: "#6bb6ff", r: 32, n: "Barber",             g: GLYPH.pole,     poi: 1 },
+    paintball: { c: "#7ed957", r: 30, n: "Paintball",          g: GLYPH.splat,    poi: 1 },
+    // --- planning marks (zoomed-in detail) ---
+    board:     { c: "#ffd451", r: 22, n: "Ad board (leased)",  g: GLYPH.coin },
+    lift:      { c: "#9fd8ff", r: 18, n: "Roof lift",          g: GLYPH.lift },
+    stairs:    { c: "#ffc46b", r: 16, n: "Fire stairs",        g: GLYPH.ladder },
+    // --- prison map ---
+    hatchpt:   { c: "#c792ea", r: 55, n: "Maintenance hatch",  g: GLYPH.hatch },
+    exitpt:    { c: "#39ff88", r: 96, n: "Freedom Gate",       g: GLYPH.exit },
+    _default:  { c: "#b9c4d4", r: 25, n: "Place",              g: GLYPH.pin },
+  };
+  function iconSpec(kind) { return MAP_ICONS[kind] || MAP_ICONS._default; }
+
+  // Draw one icon at SCREEN pixels (x,y). `size` is the badge half-width, so a
+  // 8 gives a 16px chip (the design target) and 5 gives the radar's 10px blip.
+  // `tier` true = landmark ring; `count` > 1 stamps the merge badge.
+  function drawIcon(g, x, y, kind, opts) {
+    opts = opts || {};
+    const sp = iconSpec(kind), s = opts.size || 8;
+    g.save();
+    g.translate(x, y);
+    if (opts.shadow !== false) { g.shadowColor = "rgba(0,0,0,.55)"; g.shadowBlur = 3; g.shadowOffsetY = 1; }
+    g.fillStyle = opts.color || sp.c;
+    g.strokeStyle = "rgba(0,0,0,.78)";
+    g.lineWidth = Math.max(1, s * 0.2);
+    rrect(g, -s, -s, s * 2, s * 2, s * 0.42);
+    g.fill();
+    g.shadowColor = "transparent"; g.shadowBlur = 0; g.shadowOffsetY = 0;
+    g.stroke();
+    if (opts.tier) {   // landmark: a hairline light rim so the tier reads instantly
+      g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = Math.max(0.8, s * 0.11);
+      rrect(g, -s * 0.82, -s * 0.82, s * 1.64, s * 1.64, s * 0.3); g.stroke();
+    }
+    g.beginPath();   // glyph, drawn in ink on a 20×20 authoring box
+    g.fillStyle = ICON_INK; g.strokeStyle = ICON_INK;
+    g.lineJoin = "round"; g.lineCap = "round";
+    g.scale(s / 11.4, s / 11.4);
+    g.lineWidth = 2.1;
+    try { sp.g(g); } catch (e) {}
+    g.restore();
+    if (opts.count > 1) {   // MERGE BADGE: "and N more of the same trade here"
+      const bs = Math.max(5, s * 0.72);
+      g.save();
+      g.fillStyle = "rgba(10,14,20,.92)"; g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 1;
+      disc(g, x + s * 0.86, y - s * 0.86, bs, true); g.stroke();
+      g.fillStyle = "#e8eef6"; g.font = "700 " + Math.round(bs * 1.35) + "px Fredoka, sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(opts.count > 9 ? "9+" : String(opts.count), x + s * 0.86, y - s * 0.86 + 0.5);
+      g.restore();
+    }
+  }
+
+  // The block's public face. Degrade-safe by construction: every accessor
+  // answers for an unknown kind, so a consumer can adopt in ONE line and can
+  // never be broken by a kind this table has not heard of.
+  // An icon rendered once to a data URI, so the LEGEND can be the same
+  // vocabulary the chart uses instead of a second colour-swatch language.
+  const iconUrlCache = {};
+  function iconDataURL(kind) {
+    if (iconUrlCache[kind]) return iconUrlCache[kind];
+    const c = document.createElement("canvas");
+    c.width = c.height = 30;
+    const g = c.getContext("2d");
+    drawIcon(g, 15, 15, kind, { size: 12, shadow: false });
+    let u = "";
+    try { u = c.toDataURL("image/png"); } catch (e) {}
+    iconUrlCache[kind] = u;
+    return u;
+  }
+
+  CBZ.mapIcon = {
+    kinds: MAP_ICONS,
+    LANDMARK: LANDMARK,
+    draw: drawIcon,
+    dataURL: iconDataURL,
+    color: function (k) { return iconSpec(k).c; },
+    rank: function (k) { return iconSpec(k).r; },
+    name: function (k) { return iconSpec(k).n; },
+    notable: function (k) { return iconSpec(k).r >= LANDMARK; },
+    has: function (k) { return !!MAP_ICONS[k]; },
+  };
+
+  // The legacy kind→colour map every older call site reads. DERIVED from the
+  // one table above (shop trades only) so a colour can never disagree with its
+  // icon and there is no second palette to keep in sync.
+  const POI_KINDS = (function () {
+    const o = {};
+    for (const k in MAP_ICONS) if (MAP_ICONS[k].poi) o[k] = MAP_ICONS[k].c;
+    return o;
+  })();
+
+  // ============================================================
+  //  MEASURED INK + HOVER PICKING
+  //
+  //  "Way too much text" only stops being an opinion when it is a NUMBER, so
+  //  every permanent label on the map surface goes through ONE function
+  //  (mapLabel) which measures it, records its box, tests it against every box
+  //  already placed and counts it. `CBZ.mapAudit()` reports what that funnel
+  //  saw on the last draw. A label that does not go through mapLabel is
+  //  invisible to the ratchet — which is the whole reason there is exactly one.
+  //
+  //  Picking is the other half: an icon that draws also REGISTERS itself, so
+  //  hover/tap resolution is a distance test over the same list the frame just
+  //  drew and can never point at something that is not on screen.
+  // ============================================================
+  const stats = { icons: 0, labels: 0, overlaps: 0, hoverable: 0, merged: 0, skipped: 0, furniture: 0, plate: 0, zoom: 1, mode: "" };
+  let labelBoxes = [];    // permanent-label AABBs placed this frame (screen px)
+  let plateLabels = [];   // AABBs baked onto the static plates (base-projection px)
+  let plateOverlapN = 0;  // baked labels that landed on another baked label
+  let bakeMode = false;   // true while a plate is being baked
+  map._picks = [];        // {x,y,r,kind,label,sub,wx,wz} for hover/tap
+  map._sel = null;        // touch: the selected pick (world-anchored, survives pan/zoom)
+
+  function boxHit(boxes, x0, y0, x1, y1) {
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0) return true;
+    }
+    return false;
+  }
+  // Fold the boxes baked onto the static plates into this frame's census,
+  // transformed through the SAME scale/offset compositePlate uses. Only labels
+  // whose transformed box actually touches the canvas count — a name baked on a
+  // landmass 4 km off the left edge is not text the player is drowning in.
+  // The boxes are only PUSHED (i.e. allowed to suppress live text) under
+  // MAP_ICONS_V2; the legacy map never collision-tested live text against baked
+  // text and must keep measuring as the thing it really is.
+  function seedPlateBoxes(p) {
+    const p0 = plates.p0;
+    if (!p0 || !plateLabels.length) return;
+    const k = p.sc / p0.sc, dx = p.left - k * p0.left, dy = p.top - k * p0.top;
+    const push = ICONS_V2();
+    let n = 0;
+    for (let i = 0; i < plateLabels.length; i++) {
+      const b = plateLabels[i];
+      const q = { x0: b.x0 * k + dx, y0: b.y0 * k + dy, x1: b.x1 * k + dx, y1: b.y1 * k + dy };
+      if (q.x1 < 0 || q.x0 > W || q.y1 < 0 || q.y0 > H) continue;
+      n++;
+      if (push) labelBoxes.push(q);
+    }
+    stats.labels += n;
+    stats.plate = n;
+    if (n) stats.overlaps += plateOverlapN;
+  }
+  // THE ONE PERMANENT-LABEL DRAW. Returns true if the text was actually drawn.
+  //   o.size / o.weight / o.fill / o.halo — appearance
+  //   o.force  — draw even if it collides (counts an overlap instead of skipping)
+  //   o.sub    — a dimmer second line under it (counts as part of the same label)
+  function mapLabel(str, x, y, o) {
+    str = String(str == null ? "" : str);
+    if (!str) return false;
+    o = o || {};
+    const size = o.size || 12, weight = o.weight || 700;
+    ctx.font = weight + " " + size.toFixed(1) + "px Fredoka, sans-serif";
+    ctx.textAlign = o.align || "center";
+    ctx.textBaseline = "alphabetic";
+    const w = ctx.measureText(str).width;
+    const half = ctx.textAlign === "center" ? w / 2 : 0;
+    const x0 = x - half - 2, x1 = x - half + w + 2;
+    const y0 = y - size, y1 = y + size * (o.sub ? 1.2 : 0.28);
+    const boxes = o.boxes || (bakeMode ? plateLabels : labelBoxes);
+    const hit = boxHit(boxes, x0, y0, x1, y1);
+    if (hit && !o.force) { stats.skipped++; return false; }
+    if (hit) { if (bakeMode) plateOverlapN++; else stats.overlaps++; }
+    if (o.halo !== false) {
+      ctx.lineWidth = o.haloW || 3; ctx.strokeStyle = o.haloC || "rgba(0,0,0,.72)";
+      ctx.strokeText(str, x, y);
+    }
+    ctx.fillStyle = o.fill || "rgba(232,242,255,.92)";
+    ctx.fillText(str, x, y);
+    if (o.sub) {
+      const ss = Math.max(8, size * 0.78);
+      ctx.font = "600 " + ss.toFixed(1) + "px Fredoka, sans-serif";
+      if (o.halo !== false) { ctx.lineWidth = 2.4; ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.strokeText(o.sub, x, y + size * 0.95); }
+      ctx.fillStyle = o.subFill || "rgba(198,212,228,.62)";
+      ctx.fillText(o.sub, x, y + size * 0.95);
+    }
+    boxes.push({ x0: x0, y0: y0, x1: x1, y1: y1 });
+    if (!bakeMode) stats.labels++;
+    return true;
+  }
+  // Chart furniture (compass rose N, scale bar, WANTED banner) is NOT a place
+  // label. Those four sites bump stats.furniture at the point they draw, so
+  // they are counted APART and can never quietly absorb a place name.
+
+  // ---- pick registry: an icon that draws also becomes hoverable -------------
+  function pickAdd(x, y, r, kind, label, sub, wx, wz) {
+    if (!label || bakeMode) return;   // a baked plate is not screen space — never pickable
+    map._picks.push({ x: x, y: y, r: r || 9, kind: kind, label: label, sub: sub || "", wx: wx, wz: wz });
+    stats.hoverable++;
+  }
+  // Reserve the space every icon drawn so far occupies, so the place-name pass
+  // that runs after it cannot letter over a symbol. The pick list already
+  // carries an on-screen box for every icon in the frame, so this costs no
+  // extra bookkeeping — it is the same list hover resolution uses.
+  function reserveIconBoxes() {
+    const list = map._picks;
+    for (let i = 0; i < list.length; i++) {
+      const q = list[i];
+      labelBoxes.push({ x0: q.x - q.r, y0: q.y - q.r, x1: q.x + q.r, y1: q.y + q.r });
+    }
+  }
+  function pickAt(cx, cy) {
+    const list = map._picks;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const q = list[i];
+      const d = Math.hypot(q.x - cx, q.y - cy), reach = q.r + 5;
+      if (d > reach) continue;
+      // a tie inside two reaches goes to the higher-ranked kind, so a bank never
+      // loses its own tooltip to the pawn shop two doors down
+      const score = d - iconSpec(q.kind).r * 0.06;
+      if (score < bd) { bd = score; best = q; }
+    }
+    return best;
+  }
+  map.pickAt = pickAt;
+
+  // ---- THE TOOLTIP: the name, and only for the ONE thing you are pointing at.
+  // Deliberately drawn on the MAP SURFACE, not as a HUD card — the killfeed is
+  // this game's only sanctioned popup and a floating panel would be a second one.
+  function drawMapTip(pk, ax, ay, anchored) {
+    const name = pk.label, sub = pk.sub;
+    ctx.save();
+    ctx.font = "700 13px Fredoka, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const nw = ctx.measureText(name).width;
+    ctx.font = "600 11px Fredoka, sans-serif";
+    const sw = sub ? ctx.measureText(sub).width : 0;
+    const padX = 9, ic = 9;
+    const bw = Math.max(nw, sw) + padX * 2 + ic * 2 + 6;
+    const bh = sub ? 36 : 24;
+    // Both anchors are the ICON, never the cursor — a card that chases the
+    // mouse jitters and can end up covering the very thing it names. Desktop
+    // sets it beside the icon; touch centres it above, so a thumb never covers
+    // what it just asked about. Both flip when they would leave the canvas.
+    let bx = anchored ? ax - bw / 2 : ax + 14;
+    let by = anchored ? ay - bh - 16 : ay - bh - 12;
+    if (bx + bw > W - 6) bx = anchored ? W - bw - 6 : ax - bw - 14;
+    if (bx < 6) bx = 6;
+    if (by < 6) by = ay + 18;
+    ctx.fillStyle = "rgba(8,14,21,.92)";
+    ctx.strokeStyle = "rgba(125,231,255,.5)"; ctx.lineWidth = 1;
+    rrect(ctx, bx, by, bw, bh, 7); ctx.fill(); ctx.stroke();
+    drawIcon(ctx, bx + padX + ic, by + bh / 2, pk.kind, { size: ic, shadow: false });
+    ctx.fillStyle = "#eaf3ff"; ctx.font = "700 13px Fredoka, sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(name, bx + padX + ic * 2 + 6, by + (sub ? 16 : 16.5));
+    if (sub) {
+      ctx.fillStyle = "rgba(178,196,216,.85)"; ctx.font = "600 11px Fredoka, sans-serif";
+      ctx.fillText(sub, bx + padX + ic * 2 + 6, by + 29);
+    }
+    // a hairline leader back to the icon so there is never any doubt what it names
+    ctx.strokeStyle = "rgba(125,231,255,.4)";
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx + bw / 2, by + (by > ay ? 0 : bh)); ctx.stroke();
+    ctx.restore();
+  }
+  // Resolve + draw the single label the player asked for. Desktop = hover;
+  // touch has no hover, so it is the icon the last tap SELECTED (world-anchored,
+  // so it stays glued to its icon while you pan and zoom).
+  function drawHoverTip(p) {
+    if (!ICONS_V2()) return;
+    if (CBZ.touchMode) {
+      const s = map._sel; if (!s) return;
+      const x = p.x(s.wx), y = p.z(s.wz);
+      if (x < -40 || x > W + 40 || y < -40 || y > H + 40) return;
+      drawMapTip(s, x, y - (s.r || 9), true);
+      return;
+    }
+    const cur = map._cursor; if (!cur) return;
+    const pk = pickAt(cur.x, cur.y); if (!pk) return;
+    // ring the icon being named so the pairing is unambiguous
+    ctx.save();
+    ctx.strokeStyle = "rgba(125,231,255,.85)"; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r + 3, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    drawMapTip(pk, pk.x, pk.y, false);
+  }
+
+  // ---- THE RATCHET -----------------------------------------------------------
+  // `labels` = permanent text runs on the map surface (place names, region
+  // names, owner tags). `overlaps` = how many of those were drawn on top of
+  // another one. Both may only ever go DOWN. `icons`/`hoverable` are the
+  // replacement capability and are reported beside them so a "fix" that simply
+  // draws nothing at all cannot pass.
+  CBZ.mapAudit = function (opts) {
+    if ((!opts || opts.draw !== false) && !map.active) { try { draw(); } catch (e) {} }
+    const kinds = {};
+    for (let i = 0; i < map._picks.length; i++) kinds[map._picks[i].kind] = (kinds[map._picks[i].kind] || 0) + 1;
+    return {
+      icons: stats.icons, labels: stats.labels, overlaps: stats.overlaps,
+      hoverable: stats.hoverable, merged: stats.merged, skipped: stats.skipped,
+      furniture: stats.furniture, plateLabels: stats.plate,
+      kinds: Object.keys(kinds).length, mode: stats.mode, zoom: +stats.zoom.toFixed(2),
+      iconsV2: ICONS_V2(),
+    };
   };
   // ---- BIOME PALETTE: every island/biome region paints with a land fill + a
   // coastline edge so the archipelago reads as REAL ground floating on a sea,
@@ -1044,7 +1507,7 @@
       ctx.closePath(); ctx.fill();
     }
     ctx.fillStyle = "#ffd451"; ctx.font = "800 12px Fredoka, sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("N", cx, cy - r - 5);
+    ctx.fillText("N", cx, cy - r - 5); stats.furniture++;
     ctx.restore();
   }
   function drawScaleBar(p) {
@@ -1061,7 +1524,7 @@
     ctx.strokeStyle = "rgba(230,240,250,.7)"; ctx.lineWidth = 1;
     ctx.strokeRect(x0, y0 - 3, px, 5);
     ctx.fillStyle = "rgba(230,240,250,.85)"; ctx.font = "700 10px Fredoka, sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(m + " m", x0 + px + 7, y0 + 2);
+    ctx.fillText(m + " m", x0 + px + 7, y0 + 2); stats.furniture++;
     ctx.restore();
   }
   // Only explicitly named links are links. `pad<=1` used to misclassify the
@@ -1176,15 +1639,23 @@
     if (POI_KINDS[k]) return { color: POI_KINDS[k], label: b.name || k };
     return null;
   }
-  function drawPoi(x, z, p, color, label, key) {
+  // A point of interest. With MAP_ICONS_V2 it is a PICTOGRAM badge (kind at a
+  // glance); with the flag off it falls back to the old colour-only diamond, so
+  // the revert really is one line.
+  function drawPoi(x, z, p, color, label, key, kind) {
     const mx = p.x(x), mz = p.z(z), s = key ? 7 : 5;
+    if (ICONS_V2() && !bakeMode) {   // never bake a fixed-size glyph onto a zoom-scaled plate
+      drawIcon(ctx, mx, mz, kind || (key ? "home" : "_default"), { size: key ? 8.5 : 7, tier: !!key, color: kind ? null : color });
+      stats.icons++;
+      if (label) mapLabel(label, mx, mz - (key ? 12 : 10), { size: key ? 12 : 10, fill: key ? "#bfffd9" : "rgba(244,250,255,.96)", force: true });
+      return;
+    }
     ctx.fillStyle = color; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(mx, mz - s); ctx.lineTo(mx + s, mz); ctx.lineTo(mx, mz + s); ctx.lineTo(mx - s, mz); ctx.closePath();
     ctx.fill(); ctx.stroke();
+    stats.icons++;
     if (label) {
-      ctx.font = "700 " + (key ? 12 : 10) + "px Fredoka, sans-serif"; ctx.textAlign = "center";
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.strokeText(label, mx, mz - s - 3);
-      ctx.fillStyle = key ? "#bfffd9" : "rgba(244,250,255,.96)"; ctx.fillText(label, mx, mz - s - 3);
+      mapLabel(label, mx, mz - s - 3, { size: key ? 12 : 10, fill: key ? "#bfffd9" : "rgba(244,250,255,.96)", force: true });
     }
   }
   function drawPois(lots, p) {
@@ -1200,30 +1671,77 @@
   // (casinos/banks/hospital/civic/venues + your HOME); zoomed IN ⇒ every shop.
   // Then a cheap min-distance dedup drops glyphs that would stack into mush.
   // Landmarks and HOME/casinos never dedup away. Drawn live at fixed size.
-  const NOTABLE_POI = { casino: 1, bank: 1, hospital: 1, guns: 1, cityhall: 1, transit: 1, arena: 1, raceway: 1, racepark: 1, airfield: 1, carlot: 1, chop: 1, realtor: 1, security: 1 };
   function poiKindOf(lot) {
     const b = lot.building;
     return (b && b.shop && b.shop.kind) || lot.kind || null;
   }
+  // Screen-space declutter distances. SAME-KIND icons inside MERGE_PX collapse
+  // into ONE with a count badge (three pawn shops on a block are one "pawn"
+  // pin that says 3, which is more honest than three identical pins). Icons of
+  // DIFFERENT kinds inside DROP_PX cannot merge — a bank fused with a hospital
+  // would be a lie — so the lower RANK yields instead. Landmarks and your own
+  // places never yield.
+  const MERGE_PX = 20, DROP_PX = 15;
   function drawCityPoisLive(p, A) {
     const zoomAll = map.view.z >= 1.8;   // zoomed in ⇒ reveal ordinary shops too
-    const placed = [];
-    const near = (x, y, d) => { for (let i = 0; i < placed.length; i++) { const q = placed[i]; if (Math.abs(q.x - x) < d && Math.abs(q.y - y) < d) return true; } return false; };
+    const cands = [];
     const collect = (lots) => {
       for (const lot of lots || []) {
         const info = poiInfo(lot); if (!info) continue;
-        const k = poiKindOf(lot);
-        const anchor = info.key || k === "casino" || NOTABLE_POI[k];   // never hidden/deduped
+        const raw = poiKindOf(lot);
+        const k = info.key ? "home" : raw;
+        const rank = iconSpec(k).r;
+        const anchor = info.key || raw === "casino" || rank >= LANDMARK;   // never hidden/deduped
         if (!zoomAll && !anchor) continue;
         const mx = p.x(lot.cx), my = p.z(lot.cz);
         if (mx < -20 || mx > W + 20 || my < -20 || my > H + 20) continue;
-        if (!anchor && near(mx, my, 9)) continue;
-        placed.push({ x: mx, y: my });
-        drawPoi(lot.cx, lot.cz, p, info.color, "", info.key || k === "casino");
-        if (k === "casino") { ctx.strokeStyle = "rgba(201,162,39,.92)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, my, 8.5, 0, Math.PI * 2); ctx.stroke(); }
+        cands.push({ lot: lot, info: info, k: k, raw: raw, rank: rank, anchor: anchor, mx: mx, my: my, count: 1 });
       }
     };
     collect(A.lots); if (A.annex) collect(A.annex.lots);
+    if (!ICONS_V2()) {   // legacy: colour-only diamonds, first-come dedup
+      const placed = [];
+      const near = (x, y, d) => { for (let i = 0; i < placed.length; i++) { const q = placed[i]; if (Math.abs(q.x - x) < d && Math.abs(q.y - y) < d) return true; } return false; };
+      for (const c of cands) {
+        if (!c.anchor && near(c.mx, c.my, 9)) continue;
+        placed.push({ x: c.mx, y: c.my });
+        drawPoi(c.lot.cx, c.lot.cz, p, c.info.color, "", c.info.key || c.raw === "casino");
+        if (c.raw === "casino") { ctx.strokeStyle = "rgba(201,162,39,.92)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.mx, c.my, 8.5, 0, Math.PI * 2); ctx.stroke(); }
+      }
+      return;
+    }
+    // Important first: rank decides who survives a collision, and within a rank
+    // the icon nearest the middle of what you are looking at wins.
+    const ccx = W / 2, ccy = H / 2;
+    cands.sort(function (a, b) {
+      if (b.rank !== a.rank) return b.rank - a.rank;
+      return (Math.hypot(a.mx - ccx, a.my - ccy) - Math.hypot(b.mx - ccx, b.my - ccy));
+    });
+    const placed = [];
+    for (const c of cands) {
+      let merge = null, blocked = false;
+      for (let i = 0; i < placed.length; i++) {
+        const q = placed[i];
+        const d = Math.max(Math.abs(q.mx - c.mx), Math.abs(q.my - c.my));
+        if (q.k === c.k) { if (d < MERGE_PX) { merge = q; break; } continue; }
+        if (!c.anchor && d < DROP_PX) blocked = true;
+      }
+      if (merge) { merge.count++; stats.merged++; continue; }
+      if (blocked) { stats.merged++; continue; }
+      placed.push(c);
+    }
+    const owns = CBZ.cityOwnsLot;
+    for (const c of placed) {
+      const tier = c.anchor;
+      const s = tier ? 8.5 : 7;
+      drawIcon(ctx, c.mx, c.my, c.k, { size: s, tier: tier, count: c.count });
+      stats.icons++;
+      // the NAME lives here now — registered, not printed
+      const bits = [iconSpec(c.k).n];
+      if (c.count > 1) bits.push("+" + (c.count - 1) + " more nearby");
+      if (owns) { try { if (owns(c.lot)) bits.push("yours"); } catch (e) {} }
+      pickAdd(c.mx, c.my, s + 2, c.k, c.info.key ? "Home" : (c.info.label || iconSpec(c.k).n), bits.join(" · "), c.lot.cx, c.lot.cz);
+    }
   }
   // shared so the corner minimap (city/hud.js) colours shops by the SAME trade
   // palette as the full map — bank=blue, guns=green, hospital=red, HOME=lime…
@@ -1257,9 +1775,23 @@
         ctx.globalAlpha = z.owner ? 0.72 : 0.22; ctx.strokeStyle = hx; ctx.lineWidth = isPlayer ? 2.6 : 1.6;
         ctx.setLineDash(z.owner && (z.strength || 1) < 0.5 ? [6, 5] : []);
         ctx.strokeRect(mx - w / 2, mz - d / 2, w, d); ctx.setLineDash([]); ctx.globalAlpha = 1;
-        // the district NAME lives on the static lettered layer now — here only
-        // WHO holds it, pinned to the zone's top edge like a flag on the line
-        if (z.owner) { ctx.textAlign = "center"; ctx.fillStyle = hx; ctx.font = "700 9px Fredoka, sans-serif"; ctx.fillText(isPlayer ? "★ YOURS" : (g ? (g.name || "").toUpperCase() : "CONTESTED"), mx, mz - d / 2 + 13); }
+        // WHO holds it, pinned to the zone's top edge like a flag on the line.
+        // Under MAP_ICONS_V2 that is a CREST in the crew's colour (the fill and
+        // border already carry the colour; the name is one hover away) — nine
+        // district names shouting over the geography was nine labels too many.
+        if (z.owner) {
+          const who = isPlayer ? "Your turf" : (g ? (g.name || "Crew") : "Contested");
+          if (ICONS_V2()) {
+            const ty = mz - d / 2 + 11;
+            drawIcon(ctx, mx, ty, "hq", { size: 6, color: hx, tier: isPlayer }); stats.icons++;
+            pickAdd(mx, ty, 7, "hq", who, (z.name ? z.name + " · " : "") + Math.round((z.strength || 0) * 100) + "% hold",
+              p.wx(mx), p.wz(ty));
+          } else {
+            ctx.textAlign = "center"; ctx.fillStyle = hx; ctx.font = "700 9px Fredoka, sans-serif";
+            ctx.fillText(isPlayer ? "★ YOURS" : (g ? (g.name || "").toUpperCase() : "CONTESTED"), mx, mz - d / 2 + 13);
+            stats.labels++;
+          }
+        }
       }
     }
     if (!CBZ.cityGangs) return;
@@ -1270,12 +1802,20 @@
       const hq = (CBZ.cityGangHQ && CBZ.cityGangHQ(gang.id)) || (c && (c.x || c.z) ? { x: c.x, z: c.z } : null);
       if (hq && (hq.x || hq.z)) {
         const mx = p.x(hq.x), mz = p.z(hq.z), s = 8;
-        ctx.fillStyle = col; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(mx, mz - s); ctx.lineTo(mx + s, mz); ctx.lineTo(mx, mz + s); ctx.lineTo(mx - s, mz); ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(mx, mz, 2, 0, Math.PI * 2); ctx.fill();
-        // crown the gang that holds the most districts (the one to beat)
-        if (leader && leader.id === gang.id) { ctx.fillStyle = "#ffd451"; ctx.font = "700 12px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("♛", mx, mz - s - 6); }
+        const top = leader && leader.id === gang.id;
+        if (ICONS_V2()) {
+          drawIcon(ctx, mx, mz, "hq", { size: s, color: col, tier: true }); stats.icons++;
+          // the crew holding the most districts (the one to beat) gets the star
+          if (top) starGlyph(mx, mz - s - 6, 5.4, "#ffd451", true);
+          pickAdd(mx, mz, s + 2, "hq", (gang.name || "Crew") + " HQ",
+            (gang.isPlayer ? "Your crew" : "Rival crew") + (top ? " · leading the takeover" : ""), hq.x, hq.z);
+        } else {
+          ctx.fillStyle = col; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(mx, mz - s); ctx.lineTo(mx + s, mz); ctx.lineTo(mx, mz + s); ctx.lineTo(mx - s, mz); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(mx, mz, 2, 0, Math.PI * 2); ctx.fill();
+          if (top) { ctx.fillStyle = "#ffd451"; ctx.font = "700 12px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("♛", mx, mz - s - 6); }
+        }
       }
     }
   }
@@ -1306,12 +1846,22 @@
   // to a gold $ — your money visible on the planning map like on the skyline.
   function drawLiftMark(x, z, p) {
     const mx = p.x(x), mz = p.z(z);
+    if (ICONS_V2()) {
+      drawIcon(ctx, mx, mz, "lift", { size: 6 }); stats.icons++;
+      pickAdd(mx, mz, 7, "lift", "Roof lift", "Quiet ride to the roof", x, z);
+      return;
+    }
     ctx.fillStyle = "#9fd8ff"; ctx.strokeStyle = "rgba(0,0,0,.65)"; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(mx, mz - 5.5); ctx.lineTo(mx + 4.6, mz + 3.4); ctx.lineTo(mx - 4.6, mz + 3.4); ctx.closePath();
     ctx.fill(); ctx.stroke();
   }
   function drawEscapeMark(x, z, p) {
     const mx = p.x(x), mz = p.z(z);
+    if (ICONS_V2()) {
+      drawIcon(ctx, mx, mz, "stairs", { size: 6 }); stats.icons++;
+      pickAdd(mx, mz, 7, "stairs", "Fire stairs", "The loud way up", x, z);
+      return;
+    }
     for (const pass of [["rgba(0,0,0,.6)", 3.2], ["#ffc46b", 1.4]]) {   // dark underlay → amber ladder
       ctx.strokeStyle = pass[0]; ctx.lineWidth = pass[1]; ctx.beginPath();
       ctx.moveTo(mx - 2.2, mz - 5); ctx.lineTo(mx - 2.2, mz + 5);
@@ -1321,9 +1871,19 @@
     }
   }
   function drawClimbMarks(p, A) {
-    for (const el of (CBZ.cityElevators && CBZ.cityElevators()) || []) { if (el.groundPad) drawLiftMark(el.groundPad.x, el.groundPad.z, p); }
+    for (const el of (CBZ.cityElevators && CBZ.cityElevators()) || []) {
+      if (!el.groundPad) continue;
+      const mx = p.x(el.groundPad.x); if (mx < -20 || mx > W + 20) continue;
+      const my = p.z(el.groundPad.z); if (my < -20 || my > H + 20) continue;
+      drawLiftMark(el.groundPad.x, el.groundPad.z, p);
+    }
     const lots = (A.lots || []).concat(A.annex ? A.annex.lots || [] : []);
-    for (const lot of lots) { const fe = lot.building && lot.building.fireEscape; if (fe) drawEscapeMark(fe.x, fe.z, p); }
+    for (const lot of lots) {
+      const fe = lot.building && lot.building.fireEscape; if (!fe) continue;
+      const mx = p.x(fe.x); if (mx < -20 || mx > W + 20) continue;
+      const my = p.z(fe.z); if (my < -20 || my > H + 20) continue;
+      drawEscapeMark(fe.x, fe.z, p);
+    }
   }
   function drawBoardTicks(p) {
     ctx.fillStyle = "rgba(216,206,176,.5)";
@@ -1333,6 +1893,12 @@
     for (const b of CBZ.cityAdBoards || []) {
       if (!b.lease) continue;
       const mx = p.x(b.x), mz = p.z(b.z);
+      if (mx < -20 || mx > W + 20 || mz < -20 || mz > H + 20) continue;
+      if (ICONS_V2()) {
+        drawIcon(ctx, mx, mz, "board", { size: 6.5 }); stats.icons++;
+        pickAdd(mx, mz, 7.5, "board", (b.name || "Ad board"), "Leased by you", b.x, b.z);
+        continue;
+      }
       ctx.fillStyle = "#ffd451"; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(mx, mz, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = "#231a05"; ctx.font = "700 8px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("$", mx, mz + 2.8);
@@ -1353,11 +1919,13 @@
   function onPlate(c, fn) {
     const main = ctx; ctx = c.getContext("2d");
     ctx.clearRect(0, 0, W, H);
-    try { fn(); } finally { ctx = main; }
+    bakeMode = true;
+    try { fn(); } finally { ctx = main; bakeMode = false; }
   }
   function buildCityPlates(p, A) {
     plates.a = A;
     plates.p0 = p;   // remember the base projection the plates were baked at
+    plateLabels = []; plateOverlapN = 0;   // the bake owns its own label boxes (base-projection px)
     coastCache = new Map();   // fresh organic coastlines for this bake
     // the mainland + commerce annex join the same land pipeline as the islands,
     // so every landmass shares one visual language (shadow/beach/texture/surf).
@@ -1381,26 +1949,14 @@
       // for this terrain map; block-level identity remains in the live world.
       // ---- METROPOLIS TITLE: the mainland city is a named place too, equal to
       //      the islands. A large faint banner sits just above the district grid.
-      {
-        const title = "PORT VANCE";
-        const mw = (A.maxX - A.minX) * p.sc;
-        const tsize = Math.max(16, Math.min(34, mw / Math.max(8, title.length * 0.6)));
-        ctx.font = "800 " + tsize.toFixed(1) + "px Fredoka, sans-serif"; ctx.textAlign = "center";
-        if ("letterSpacing" in ctx) ctx.letterSpacing = "6px";   // cartographic tracking (no-op on old canvas)
-        const tx = p.x((A.minX + A.maxX) / 2), ty = p.z(A.minZ) - tsize * 0.5;
-        ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.strokeText(title, tx, ty);
-        ctx.fillStyle = "rgba(232,242,255,.4)"; ctx.fillText(title, tx, ty);
-        if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
-      }
+      if (!ICONS_V2()) drawCityTitle(p, A);
     });
     onPlate(plates.lots, function () {
       drawLots(A.lots, p);
       if (A.annex) drawLots(A.annex.lots, p);
     });
     onPlate(plates.marks, function () {
-      const settlementNames = new Set((CBZ.settlements || []).map(function (s) {
-        return String((s && s.name) || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-      }));
+      const settlementNames = settlementNameSet();
       // POI DIAMONDS only (no text) — labels are a dynamic, decluttered pass in
       // drawCity so they don't pile into unreadable mush at the fit zoom.
       // MAP_V2: fixed-size glyphs (POI icons, climb marks, board ticks) are NOT
@@ -1411,44 +1967,83 @@
         drawPoiGlyphs(A.lots, p);
         if (A.annex) drawPoiGlyphs(A.annex.lots, p);
       }
-      // REGION / BIOME NAMES at each island's centroid (the map's geography
-      // legend — "where is the desert / the snow / the speedway"). Sized to the
-      // region's on-screen width so a small island gets a small name.
-      // REGION names: the real place name (no letter-spacing smear so multi-word
-      // names like "Redhollow Woods" stay readable), with a smaller, fainter
-      // subtitle below (e.g. "International Airport"). Sized to the region width.
-      const labelledRegions = new Set();
-      for (const rg of A.regions || []) {
-        if (isLink(rg) || rg.underlay || rg.mapLabel === false) continue;
-        const c = regionCentroid(rg);
-        const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
-        const name = rg.name || rg.biome || "";
-        if (!name) continue;
-        const labelKey = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
-        if (labelledRegions.has(labelKey)) continue;
-        labelledRegions.add(labelKey);
-        // Mini-city builders register both a terrain region and a settlement.
-        // Let the collision-aware settlement layer draw that city once.
-        if (settlementNames.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
-        const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
-        const nx = p.x(c.x), ny = p.z(c.z);
-        ctx.textAlign = "center";
-        ctx.font = "700 " + size.toFixed(1) + "px Fredoka, sans-serif";
-        if ("letterSpacing" in ctx) ctx.letterSpacing = "1.5px";   // map-label tracking (no-op on old canvas)
-        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.strokeText(name, nx, ny);
-        ctx.fillStyle = "rgba(228,238,250,.92)"; ctx.fillText(name, nx, ny);
-        // Subtitles are useful only after zooming into the city. At the world
-        // fit they duplicated the legend and turned geography into paragraphs.
-        if (rg.subtitle && map.view.z >= 1.65) {
-          const ssize = Math.max(8, size * 0.8);
-          ctx.font = "600 " + ssize.toFixed(1) + "px Fredoka, sans-serif";
-          ctx.lineWidth = 2.4; ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.strokeText(rg.subtitle, nx, ny + size * 0.95);
-          ctx.fillStyle = "rgba(205,218,232,.5)"; ctx.fillText(rg.subtitle, nx, ny + size * 0.95);
-        }
-        if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
-      }
+      if (!ICONS_V2()) drawRegionNames(p, A, settlementNames);
       if (!MAP_V2()) { drawClimbMarks(p, A); drawBoardTicks(p); }
     });
+  }
+
+  // A mini-city registers BOTH a terrain region and a settlement; this is the
+  // one set that stops it being lettered twice.
+  function settlementNameSet() {
+    return new Set((CBZ.settlements || []).map(function (s) {
+      return String((s && s.name) || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    }));
+  }
+
+  // ---- METROPOLIS TITLE: the mainland city is a named place too, equal to the
+  //      islands. Live (not baked) under MAP_ICONS_V2 for the same reason the
+  //      region names are: baked on the plate it multiplied by the zoom.
+  function drawCityTitle(p, A) {
+    const title = "PORT VANCE";
+    const mw = (A.maxX - A.minX) * p.sc;
+    const tsize = Math.max(16, Math.min(34, mw / Math.max(8, title.length * 0.6)));
+    const tx = p.x((A.minX + A.maxX) / 2), ty = p.z(A.minZ) - tsize * 0.5;
+    if (ICONS_V2()) {
+      // hidden once the city fills the view — at that zoom the district and
+      // shop layer is what you are reading, not the city's own name. No LOWER
+      // bound: at the world fit this is the capital's name and must be there.
+      if (mw > W * 2.6) return;
+      if (tx < -80 || tx > W + 80 || ty < -20 || ty > H + 40) return;
+    }
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "6px";   // cartographic tracking (no-op on old canvas)
+    mapLabel(title, tx, ty, { size: tsize, weight: 800, fill: "rgba(232,242,255,.4)", haloC: "rgba(0,0,0,.45)", haloW: 4, force: true });
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  }
+
+  // ---- REGION / BIOME NAMES: the map's geography legend ("where is the desert
+  //      / the snow / the speedway"). THESE STAY PERMANENT — a place name you
+  //      have to hover to discover is not a map, it is a quiz. What changed is
+  //      WHERE they are drawn: baked onto the zoom-magnified plate they scaled
+  //      with the zoom (a 14px name became 168px at 12x), so with MAP_ICONS_V2
+  //      they draw LIVE at a fixed pixel size and tier by zoom — a region too
+  //      small on screen to carry its name does not get one. ---------------
+  function drawRegionNames(p, A, settlementNames) {
+    const cand = [];
+    const seen = new Set();
+    for (const rg of A.regions || []) {
+      if (isLink(rg) || rg.underlay || rg.mapLabel === false) continue;
+      const name = rg.name || rg.biome || ""; if (!name) continue;
+      const key = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Mini-city builders register both a terrain region and a settlement.
+      // Let the collision-aware settlement layer draw that city once.
+      if (settlementNames && settlementNames.has(key)) continue;
+      const c = regionCentroid(rg);
+      const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
+      const hpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxZ - rg.minZ)) * p.sc;
+      cand.push({ rg: rg, name: name, nx: p.x(c.x), ny: p.z(c.z), wpx: wpx, area: wpx * hpx });
+    }
+    // biggest landmass claims its name first — registry order is build order,
+    // not cartographic importance, so a hamlet used to hide a continent
+    cand.sort(function (a, b) { return b.area - a.area; });
+    for (const q of cand) {
+      const size = Math.max(11, Math.min(20, q.wpx / Math.max(6, q.name.length * 0.55)));
+      if (ICONS_V2()) {
+        if (q.wpx < 46) continue;                                        // too small on screen to carry a name
+        if (q.nx < -70 || q.nx > W + 70 || q.ny < -40 || q.ny > H + 40) continue;
+      }
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "1.5px";   // cartographic tracking (no-op on old canvas)
+      mapLabel(q.name, q.nx, q.ny, {
+        size: size, fill: "rgba(228,238,250,.92)", haloC: "rgba(0,0,0,.55)",
+        force: !ICONS_V2(),   // legacy behaviour: baked names never collision-tested
+        // Subtitles are useful only after zooming in. At the world fit they
+        // duplicated the legend and turned geography into paragraphs.
+        sub: (q.rg.subtitle && map.view.z >= 1.65) ? q.rg.subtitle : null,
+        subFill: "rgba(205,218,232,.5)",
+      });
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    }
   }
 
   // ---- DECLUTTERED POI LABELS (the fix for "label mush") --------------------
@@ -1457,13 +2052,11 @@
   // you've zoomed IN (view.z>=1.8) or are hovering near them (~70px of the
   // cursor). Then a greedy collision pass measures each candidate and skips any
   // that would overlap one already placed — so what shows always reads clean.
-  function labelHit(boxes, x0, y0, x1, y1) {
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      if (x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0) return true;
-    }
-    return false;
-  }
+  // LEGACY ONLY (MAP_ICONS_V2 = false). This is the "way way too much text"
+  // pass: at the zoom M drops you at, `zoomShow` is true, so EVERY shop on
+  // screen printed its name. Kept intact behind the flag as the one-line
+  // revert, and routed through mapLabel so `CBZ.mapAudit()` can measure the
+  // before-state honestly instead of the fix being marked by its own homework.
   function drawCityLabels(p, A) {
     const cur = map._cursor;   // {x,y} canvas px, or null
     const zoomShow = map.view.z >= 1.8;
@@ -1488,17 +2081,15 @@
       if (!!b.info.key !== !!a.info.key) return b.info.key ? 1 : -1;
       return a.cd - b.cd;
     });
-    const boxes = [];
+    const priv = [];   // this pass owned a FRESH box list — keep the revert faithful
     for (let i = 0; i < cands.length; i++) {
-      const c = cands[i], s = c.info.key ? 7 : 5, lbl = c.info.label;
+      const c = cands[i], s = c.info.key ? 7 : 5;
       const fs = c.info.key ? 12 : 10;
-      ctx.font = "700 " + fs + "px Fredoka, sans-serif"; ctx.textAlign = "center";
-      const w = ctx.measureText(lbl).width, ty = c.sy - s - 3;
-      const x0 = c.sx - w / 2 - 1, x1 = c.sx + w / 2 + 1, y0 = ty - fs, y1 = ty + 2;
-      if (!c.info.key && labelHit(boxes, x0, y0, x1, y1)) continue;   // greedy skip overlaps
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.strokeText(lbl, c.sx, ty);
-      ctx.fillStyle = c.info.key ? "#bfffd9" : "rgba(244,250,255,.96)"; ctx.fillText(lbl, c.sx, ty);
-      boxes.push({ x0: x0, y0: y0, x1: x1, y1: y1 });
+      mapLabel(c.info.label, c.sx, c.sy - s - 3, {
+        size: fs, fill: c.info.key ? "#bfffd9" : "rgba(244,250,255,.96)",
+        haloC: "rgba(0,0,0,.75)", boxes: priv,
+        force: !!c.info.key,   // key POIs always drew, shops skipped on overlap
+      });
     }
   }
 
@@ -1530,9 +2121,19 @@
       // drawing another giant road ribbon across the terrain.
       if (sealed || detail) {
         const bx = (b.minX + b.maxX) / 2, by = mz;
-        dot(bx, by, p, sealed ? "#ff5a4c" : "rgba(220,232,240,.72)", sealed ? 5 : 3);
-        text(sealed ? "BRIDGE — SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
-          sealed ? "#ff8b7a" : "rgba(225,240,255,.58)", 10);
+        if (ICONS_V2()) {
+          const sx = p.x(bx), sy = p.z(by);
+          drawIcon(ctx, sx, sy, "sealed", { size: sealed ? 8 : 6, tier: sealed, color: sealed ? null : "rgba(220,232,240,.9)" });
+          stats.icons++;
+          pickAdd(sx, sy, 9, "sealed", "Bridge", sealed ? "SEALED — roadblocks up" : "Mainland ↔ island crossing", bx, by);
+          // SEALED is the one bridge word that survives: it is a live obstruction
+          // between you and your escape, not a place name you can go and read.
+          if (sealed) mapLabel("SEALED", sx, sy - 14, { size: 10, fill: "#ff8b7a", force: true });
+        } else {
+          dot(bx, by, p, sealed ? "#ff5a4c" : "rgba(220,232,240,.72)", sealed ? 5 : 3);
+          text(sealed ? "BRIDGE — SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
+            sealed ? "#ff8b7a" : "rgba(225,240,255,.58)", 10);
+        }
       }
     }
     // Tactical block/actor ink is useful only when zoomed into a city. At the
@@ -1552,16 +2153,26 @@
       }
       for (const a of CBZ.cityWildlife || []) if (a && !a.dead && CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(a)) dot(a.pos.x, a.pos.z, p, "#ff3b35", 3.0);
     }
-    compositePlate(plates.marks, p);  // region/biome names (glyphs draw live below)
+    compositePlate(plates.marks, p);  // baked ink (region names only when MAP_ICONS_V2 is off)
+    seedPlateBoxes(p);                // …and its label boxes, so live text avoids them
     // ---- MAP_V2 LIVE GLYPH LAYER: fixed-size at the current zoom so nothing
     //      balloons. POI icons + settlements always; climb marks + board ticks
     //      only once you've zoomed IN (planning detail, not fit-view clutter). ----
+    // LABEL PRIORITY, in the cartographic order: the metropolis banner, then
+    // TOWNS (point features — a place you navigate to, with a short name that
+    // cannot be moved), then REGIONS by size (area features, whose name is the
+    // first thing a real chart drops when space runs out). One shared box list,
+    // so nothing can ever be drawn on top of anything else.
+    // Outside the MAP_V2 gate because these names are BAKED when MAP_ICONS_V2
+    // is off — exactly one of the two paths must run, whatever the other says.
+    if (ICONS_V2()) drawCityTitle(p, A);
     if (MAP_V2()) {
       if (detail) drawCityPoisLive(p, A); // city services only at city scale
       drawSettlementsLive(p);        // named towns (labels collision-avoided)
-      if (map.view.z >= 2.6 || map._cursor) { drawClimbMarks(p, A); drawBoardTicks(p); }
     }
-    if (detail) drawCityLabels(p, A);
+    if (ICONS_V2()) { reserveIconBoxes(); drawRegionNames(p, A, settlementNameSet()); }
+    if (MAP_V2() && (map.view.z >= 2.6 || (map._cursor && !ICONS_V2()))) { drawClimbMarks(p, A); drawBoardTicks(p); }
+    if (detail && !ICONS_V2()) drawCityLabels(p, A);
     if (detail) drawRentedBoards(p);
     // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
     if (detail && CBZ.cityOwnsLot) {
@@ -1581,10 +2192,18 @@
     pulseKind("hospital", (CBZ.player && CBZ.player.hp != null && CBZ.player.hp < (CBZ.player.maxHp || 200) * 0.4), "#ff5b6b");
     // ---- HEAT LAYER: where the police think you are + the air threat ----
     if (wanted >= 1 && G.cityLastKnown) {
-      const lk = G.cityLastKnown, rr = (12 + wanted * 10) * p.sc;
+      const lk = G.cityLastKnown, rr2 = (12 + wanted * 10) * p.sc;
       ctx.strokeStyle = "rgba(255,70,55," + (0.35 + 0.25 * npulse).toFixed(2) + ")"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(p.x(lk.x), p.z(lk.z), rr * (0.7 + 0.3 * npulse), 0, Math.PI * 2); ctx.stroke();
-      text("LAST SEEN", lk.x, lk.z - (14 + wanted * 10), p, "rgba(255,140,120,.7)", 10);
+      ctx.beginPath(); ctx.arc(p.x(lk.x), p.z(lk.z), rr2 * (0.7 + 0.3 * npulse), 0, Math.PI * 2); ctx.stroke();
+      if (ICONS_V2()) {
+        // The pulsing red ring already says "they think you are here"; the eye
+        // names it on hover instead of stamping LAST SEEN over the streets.
+        const ex = p.x(lk.x), ey = p.z(lk.z) - Math.min(60, rr2 * 0.7) - 10;
+        drawIcon(ctx, ex, ey, "seen", { size: 7 }); stats.icons++;
+        pickAdd(ex, ey, 8, "seen", "Last known position", wanted + "★ search area", lk.x, lk.z);
+      } else {
+        text("LAST SEEN", lk.x, lk.z - (14 + wanted * 10), p, "rgba(255,140,120,.7)", 10);
+      }
     }
     if (wanted >= 3 && CBZ.cityChopperPos) {
       const hp = CBZ.cityChopperPos();
@@ -1593,10 +2212,21 @@
         ctx.save(); ctx.translate(mx, mz); ctx.rotate(performance.now() * 0.009);
         ctx.strokeStyle = "#ff5040"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10, 0); ctx.moveTo(0, -10); ctx.lineTo(0, 10); ctx.stroke(); ctx.restore();
         ctx.fillStyle = "#ff5040"; ctx.beginPath(); ctx.arc(mx, mz, 3, 0, Math.PI * 2); ctx.fill();
+        if (ICONS_V2()) pickAdd(mx, mz, 10, "chopper", "Police helicopter", "Hunting you", hp.x, hp.z);
       }
     }
     const job = CBZ.game.cityJob;
-    if (job && job.dest) drawPoi(job.dest.x, job.dest.z, p, "#7ed957", "JOB", true);
+    if (job && job.dest) {
+      // THE OBJECTIVE KEEPS ITS WORD. Everything else on this map went silent;
+      // the thing you are being paid to reach did not.
+      const jx = p.x(job.dest.x), jy = p.z(job.dest.z);
+      const jn = String(job.desc || "Job").slice(0, 34);
+      if (ICONS_V2()) {
+        drawIcon(ctx, jx, jy, "mission", { size: 9, tier: true }); stats.icons++;
+        mapLabel(jn, jx, jy - 14, { size: 11, fill: "#bfffd9", force: true });
+        pickAdd(jx, jy, 11, "mission", jn, job.reward ? "Pays $" + Math.round(job.reward).toLocaleString() : "Active objective", job.dest.x, job.dest.z);
+      } else drawPoi(job.dest.x, job.dest.z, p, "#7ed957", "JOB", true, "mission");
+    }
   }
 
   function drawGrid(p) {
@@ -1611,6 +2241,13 @@
     if (!ctx) return;
     const which = mode(), p = map.projection = makeProjection(boundsFor(which));
     if (titleEl) titleEl.textContent = MODE_TITLE[which] || "AREA MAP";
+    // one frame, one census: every icon, label, overlap and pick below is
+    // counted from scratch, which is what makes CBZ.mapAudit() a measurement
+    // rather than an opinion.
+    stats.icons = stats.labels = stats.overlaps = stats.hoverable = 0;
+    stats.merged = stats.skipped = stats.furniture = stats.plate = 0;
+    stats.zoom = which === "city" ? map.view.z : 1; stats.mode = which;
+    labelBoxes = []; map._picks = [];
     ctx.clearRect(0, 0, W, H);
     if (which === "city" || which === "survival") {
       // OCEAN: the archipelago floats on water, not a black void — depth
@@ -1627,41 +2264,69 @@
     else drawEscape(p);
     drawWaypoint(p); drawPlayer(p);
     drawVignette();   // soft dark edges pull the eye to the chart, not the frame
+    // THE ONE LABEL YOU ASKED FOR, last so nothing can paint over it.
+    drawHoverTip(p);
     if (which === "city") {
       drawCompassRose();
       drawScaleBar(p);
       if (MAP_V2()) drawWantedStars(starCount());   // only rendered when > 0
     } else {
-      ctx.fillStyle = "rgba(223,250,255,.82)"; ctx.font = "700 14px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("N", W / 2, 18);
+      ctx.fillStyle = "rgba(223,250,255,.82)"; ctx.font = "700 14px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("N", W / 2, 18); stats.furniture++;
     }
     const wp = activeWaypoint();
     const route = activeRoute();
     if (readout) readout.textContent = wp ? "Route: " + waypointDistance(wp) + "m - " + wp.label + (route && route.kind === "fallback" ? " (direct)" : "") : "No waypoint set";
     if (legend) {
+      // The legend is rebuilt from scratch on every redraw, which was harmless
+      // when it was six colour swatches and is NOT once it carries a dozen
+      // data-URI pictograms: writing that innerHTML 12×/s would re-decode every
+      // image. setLegend only touches the DOM when the markup actually changed.
+      const setLegend = function (html) {
+        if (html === map._legendHTML) return;
+        map._legendHTML = html;
+        legend.innerHTML = html;
+      };
       const common = "<span><i style='background:#ff9b3d'></i>You</span><span><i style='background:#7de7ff'></i>Route</span>";
       if (which === "escape") {
-        legend.innerHTML = common + "<span><i style='background:#c792ea'></i>Hatch</span><span><i style='background:#ffd451'></i>Guard</span><span><i style='background:#39ff88'></i>Exit</span>";
+        setLegend(common + "<span><i style='background:#c792ea'></i>Hatch</span><span><i style='background:#ffd451'></i>Guard</span><span><i style='background:#39ff88'></i>Exit</span>");
       } else if (which === "survival") {
-        legend.innerHTML = common + "<span><i style='background:#ffe38a'></i>High ground</span><span><i style='background:#e8eef5'></i>Survivor</span>";
+        setLegend(common + "<span><i style='background:#ffe38a'></i>High ground</span><span><i style='background:#e8eef5'></i>Survivor</span>");
       } else {
         if (map.view.z < 2.4) {
-          legend.innerHTML = common +
+          // at the geographic fit the key is TERRAIN (colour washes), not trades
+          setLegend(common +
             "<span><i style='background:#e6c069'></i>City</span>" +
             "<span><i style='background:#6f9a48'></i>Farm</span>" +
             "<span><i style='background:#d4a04c'></i>Desert</span>" +
             "<span><i style='background:#3f7043'></i>Forest</span>" +
             "<span><i style='background:#e7f2fb'></i>Snow</span>" +
-            "<span><i style='background:#277e8f'></i>Water</span>";
+            "<span><i style='background:#277e8f'></i>Water</span>" +
+            (ICONS_V2() ? "<span style='opacity:.6;font-style:italic;margin-left:6px'>" +
+              (CBZ.touchMode ? "tap an icon for its name" : "hover an icon for its name") + "</span>" : ""));
           return;
         }
         // grouped by WHY: Navigation, Threats, Your empire, then the clickable
         // Territory swatches (each routes to that crew's HQ).
         const grp = (t) => "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>" + t + "</span>";
-        let html = grp("GO") + common + "<span><i style='background:#39ff88'></i>Home</span><span><i style='background:#7ed957'></i>Job</span>";
-        html += grp("HEAT") + "<span><i style='background:#ff6a5a'></i>Police</span><span><i style='background:#ff5040'></i>Chopper 3★+</span><span><i style='background:#ff463a'></i>Last seen</span>";
-        html += grp("EMPIRE") + "<span><i style='background:#ffd451;border-radius:50%'></i>Your turf / owned</span><span><i style='background:#ffd451'></i>Boards you rent</span>";
+        // THE KEY IS THE VOCABULARY. Under MAP_ICONS_V2 the legend shows the
+        // ACTUAL pictogram (rendered once per kind, cached), so the chart and
+        // its key are one language instead of two.
+        const key = function (kind, label, fallbackColor) {
+          if (ICONS_V2()) {
+            const u = iconDataURL(kind);
+            if (u) return "<span><i style=\"width:14px;height:14px;border-radius:3px;box-shadow:none;background:url(" + u + ") center/contain no-repeat\"></i>" + esc(label) + "</span>";
+          }
+          return "<span><i style='background:" + (fallbackColor || iconSpec(kind).c) + "'></i>" + esc(label) + "</span>";
+        };
+        let html = grp("GO") + common + key("home", "Home") + key("mission", "Job");
+        html += grp("HEAT") + "<span><i style='background:#ff6a5a'></i>Police</span>" + key("chopper", "Chopper 3★+") + key("seen", "Last seen");
+        html += grp("EMPIRE") + "<span><i style='background:#ffd451;border-radius:50%'></i>Your turf / owned</span>" + key("board", "Boards you rent");
         // ways onto a roof — plan the climb before the chase starts
-        html += grp("CLIMB") + "<span><i style='background:#9fd8ff'></i>Lifts</span><span><i style='background:#ffc46b'></i>Fire stairs</span>";
+        html += grp("CLIMB") + key("lift", "Lifts") + key("stairs", "Fire stairs");
+        if (ICONS_V2()) {
+          html += grp("SERVICES") + key("hospital", "Hospital") + key("bank", "Bank") + key("guns", "Guns") +
+            key("gas", "Fuel") + key("casino", "Casino") + key("carlot", "Cars") + key("food", "Food");
+        }
         // one clickable swatch per rival crew → route to their HQ.
         let hasGang = false; let terr = "";
         for (const gang of CBZ.cityGangs || []) {
@@ -1670,8 +2335,13 @@
           terr += "<span class='fmGangChip' data-gang='" + esc(String(gang.id)) + "' style='cursor:pointer'>" +
             "<i style='background:" + hex6(gang.color) + "'></i>" + esc(gang.name || "Gang") + "</span>";
         }
-        if (hasGang) html += grp("TERRITORY") + terr + "<span style='opacity:.7;font-style:italic'>[click a crew] route to HQ</span>";
-        legend.innerHTML = html;
+        if (hasGang) html += grp("TERRITORY") + terr + "<span style='opacity:.7;font-style:italic'>" +
+          (CBZ.touchMode ? "tap a crew to route to their HQ" : "[click a crew] route to HQ") + "</span>";
+        // The discoverability line for the whole change — WORDS on touch, never
+        // a key glyph (touch doctrine), and it names the gesture that exists.
+        if (ICONS_V2()) html += "<span style='opacity:.6;font-style:italic;margin-left:6px'>" +
+          (CBZ.touchMode ? "tap an icon for its name" : "hover an icon for its name") + "</span>";
+        setLegend(html);
       }
     }
   }
@@ -1717,10 +2387,32 @@
     const r = cv.getBoundingClientRect();
     return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
   }
+  // ---- TAP-TO-IDENTIFY (touch) ---------------------------------------------
+  // Hover does not exist on a touch screen, so the label has to be asked for.
+  // First tap on an icon SELECTS it and shows its name; tapping the SAME icon
+  // again commits it as your waypoint (so identifying a place and routing to it
+  // is one gesture repeated, not two different ones); tapping empty map
+  // dismisses the label and drops a waypoint exactly as it always did.
+  // Returns true when the tap was consumed by the icon layer.
+  function touchTap(c) {
+    if (!CBZ.touchMode || !ICONS_V2()) return false;
+    const hit = pickAt(c.x, c.y);
+    if (!hit) { if (map._sel) { map._sel = null; draw(); } return false; }
+    const same = map._sel && Math.abs(map._sel.wx - hit.wx) < 0.01 && Math.abs(map._sel.wz - hit.wz) < 0.01;
+    if (same) {
+      map._sel = null;
+      if (hit.wx != null) setWaypoint(hit.wx, hit.wz, hit.label);
+      return true;
+    }
+    map._sel = { wx: hit.wx, wz: hit.wz, kind: hit.kind, label: hit.label, sub: hit.sub, r: hit.r };
+    draw();
+    return true;
+  }
   function placeFromEvent(e) {
     if (e.button !== 0 && e.button !== 2) return;
     e.preventDefault();
     const c = evCanvas(e);
+    if (touchTap(c)) return;
     const p = map.projection || makeProjection(boundsFor(mode()));
     setWaypoint(p.wx(c.x), p.wz(c.y));
   }
@@ -1738,7 +2430,20 @@
   });
   cv.addEventListener("mousemove", function (e) {
     const c = evCanvas(e);
-    if (mode() === "city") map._cursor = { x: c.x, y: c.y };
+    // HOVER IS THE LABEL. Tracked in every mode now (the prison map has icons
+    // too), but NEVER on touch: a synthesized mousemove at the tap point would
+    // otherwise render a hover affordance on a device that cannot hover.
+    if (!CBZ.touchMode) {
+      const had = map._cursor;
+      map._cursor = { x: c.x, y: c.y };
+      if (map.active && !drag && ICONS_V2()) {
+        const now = pickAt(c.x, c.y), was = map._hoverKey || "";
+        const key = now ? now.label + "@" + now.x.toFixed(0) + "," + now.y.toFixed(0) : "";
+        // redraw only when the NAMED thing changes, not on every mouse pixel
+        if (key !== was) { map._hoverKey = key; draw(); }
+        else if (!had) draw();
+      }
+    } else if (mode() === "city") map._cursor = { x: c.x, y: c.y };
     if (!drag) return;
     const dx = c.x - drag.startX, dy = c.y - drag.startY;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;   // still a potential click
@@ -1755,14 +2460,19 @@
     const d = drag; drag = null;
     if (mode() !== "city") return;
     if (!d.moved && (e.button === 0 || e.button === 2)) {
+      const c = evCanvas(e);
+      if (touchTap(c)) return;   // touch: this tap was asking WHAT that icon is
       // a clean click → place the waypoint (left OR right, as before)
       const p = map.projection || makeProjection(boundsFor("city"));
-      const c = evCanvas(e);
       setWaypoint(p.wx(c.x), p.wz(c.y));
     }
   }
   cv.addEventListener("mouseup", endDrag);
-  cv.addEventListener("mouseleave", function () { drag = null; });
+  cv.addEventListener("mouseleave", function () {
+    drag = null;
+    // the cursor left the chart, so the one hover label goes with it
+    if (map._cursor) { map._cursor = null; map._hoverKey = ""; if (map.active) draw(); }
+  });
   cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
   // ZOOM-TO-CURSOR wheel: keep the world point under the cursor fixed while the
   // zoom changes (the standard map-zoom feel), then re-clamp the pan.

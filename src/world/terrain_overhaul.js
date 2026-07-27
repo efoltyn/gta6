@@ -186,7 +186,97 @@
   // recedes the whole offshore composition past the plate edge — ranges can
   // never stand on walkable wilds. Read lazily (this file loads before the
   // value exists; it is set inside buildTerrain, before any field sample).
-  function plateClear() { return CBZ.TERRAIN_PLATE_CLEAR || 0; }
+  // ---- TERRAIN_BACKDROP_CLEAR --------------------------------------------
+  // OWNER: "there's also a very tall darker mountain than the rest of the
+  // mountains and it can be flown straight through."
+  //
+  // That mountain is THIS FILE'S offshore skyline range, and it is DARKER
+  // because it is the only range in the world drawn with a lit
+  // MeshLambertMaterial — Mount Mercy and the Greater Mercy Range are unlit
+  // MeshBasicMaterial with baked shading. It is collision-free ON PURPOSE
+  // ("decorative mountains are not geography"), and that contract is only
+  // honest while you cannot reach it.
+  //
+  // You could. `CBZ.TERRAIN_PLATE_CLEAR` is computed in terrain.js as the
+  // CONTINENT MARGIN (PAD + 120 = 2320) on the assumption that the walkable
+  // plate is FLAT plus that margin. It is not: the plate is padded around the
+  // REGION UNION, and the Greater Mercy Range region reaches 2.2 km further
+  // north than FLAT does — so the plate's north edge sits 4410 m past
+  // FLAT.minZ while the backdrop believed 2320. The range therefore stood on
+  // 2.1 km of real, driveable backcountry: measured tops of 1441 m and 1270 m
+  // with CBZ.floorAt reading 0 underneath them.
+  //
+  // The fix is to stop assuming the number and MEASURE it, against the rect
+  // continent.js publishes for the plate it actually built. Everything
+  // downstream already rides this one value — the relief ring band, the side
+  // weights, and the tile SPAN (which is literally `liveSpan + 4400 +
+  // 2*plateClear()`), so the tiles grow to keep covering the receded range and
+  // no second constant needs to learn about this.
+  //
+  // COST: nothing per query. The value cannot change after the plate is built,
+  // so it is solved once and cached. No collision is added anywhere and
+  // CBZ.floorAt is untouched — the physics floor still never reads this field.
+  if (CFG.TERRAIN_BACKDROP_CLEAR == null) CFG.TERRAIN_BACKDROP_CLEAR = true;
+  const BACKDROP_KEEPOUT = 260;   // clear water between the last land and the first relief
+  let _pcVal = 0, _pcFor = null;
+  function plateClear() {
+    const base = CBZ.TERRAIN_PLATE_CLEAR || 0;
+    if (CFG.TERRAIN_BACKDROP_CLEAR === false) return base;
+    const P = CBZ.CONTINENT_PLATE;
+    if (!P || !Number.isFinite(P.minX)) return base;
+    if (_pcFor === P) return _pcVal;
+    const F = CBZ.TERRAIN_FLAT || FLAT;
+    const need = Math.max(F.minX - P.minX, P.maxX - F.maxX,
+                          F.minZ - P.minZ, P.maxZ - F.maxZ) + BACKDROP_KEEPOUT;
+    _pcFor = P; _pcVal = need > base ? need : base;
+    return _pcVal;
+  }
+  /* ==================================================================
+     CBZ.backdropAudit() — CAN YOU TOUCH THE SCENERY?
+
+     The decorative range is allowed to have no collision ONLY while it is
+     unreachable. So the invariant is a DISTANCE, measured by sampling the
+     real field rather than by trusting the gates: for every grid point that
+     carries relief, how far OUTSIDE the walkable continent plate does it
+     sit? `onPlate` is the ratchet — a relief sample standing on driveable
+     ground is the fly-through mountain, and it must be 0.
+  ================================================================== */
+  CBZ.backdropAudit = function (opts) {
+    opts = opts || {};
+    const P = CBZ.CONTINENT_PLATE, F = CBZ.TERRAIN_FLAT || FLAT;
+    const g = plateClear();
+    if (!P || !Number.isFinite(P.minX)) {
+      return { plate: null, plateClear: +g.toFixed(0), note: "continent plate not published" };
+    }
+    const MIN_H = Number.isFinite(+opts.h) ? +opts.h : 8;    // "relief", not a ripple
+    const N = Number.isFinite(+opts.step) && +opts.step > 8 ? +opts.step : 150;
+    const span = Math.max(F.maxX - F.minX, F.maxZ - F.minZ) + 2 * g + 5200;
+    const cx = (F.minX + F.maxX) / 2, cz = (F.minZ + F.maxZ) / 2;
+    let onPlate = 0, minClear = Infinity, maxH = 0, worst = null, cells = 0;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const x = cx - span / 2 + (i + 0.5) * span / N;
+      const z = cz - span / 2 + (j + 0.5) * span / N;
+      const h = CBZ.terrainHeight(x, z);
+      if (!(h > MIN_H)) continue;
+      cells++;
+      if (h > maxH) maxH = h;
+      // signed distance outside the plate rect: negative = ON the plate
+      const dx = Math.max(P.minX - x, 0, x - P.maxX), dz = Math.max(P.minZ - z, 0, z - P.maxZ);
+      const outside = (dx > 0 || dz > 0) ? Math.hypot(dx, dz)
+        : -Math.min(x - P.minX, P.maxX - x, z - P.minZ, P.maxZ - z);
+      if (outside <= 0) onPlate++;
+      if (outside < minClear) { minClear = outside; worst = { x: Math.round(x), z: Math.round(z), h: Math.round(h) }; }
+    }
+    return {
+      plateClear: +g.toFixed(0),
+      reliefCells: cells,
+      maxHeight: Math.round(maxH),
+      onPlate: onPlate,                     // RATCHET: must be 0
+      minClearance: Number.isFinite(minClear) ? Math.round(minClear) : null,
+      worstAt: worst,
+      enabled: CFG.TERRAIN_BACKDROP_CLEAR !== false,
+    };
+  };
   function distOutsideFlat(x, z) {
     const g = plateClear();
     const dx = Math.max((FLAT.minX - g) - x, 0, x - (FLAT.maxX + g));

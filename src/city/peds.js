@@ -4566,6 +4566,107 @@
   CBZ.cityRallyGang = rallyGang;   // sizeup.js: hitting one ganger rallies the set
 
   // ============================================================
+  //  CBZ.cityScare(actor, threat, opts) -> "bolt" | "freeze" | "hold"
+  //
+  //  OWNER (2026-07-27): "right now NPCs can't stand up and run away. Yes,
+  //  with a gun pointed some should [put] hands up, but some should stand up
+  //  and run away."
+  //
+  //  ONE answer to "somebody dangerous is right there — what does this person
+  //  do", and the whole point is that it is NOT a coin flip. Every input is
+  //  something the game already knows:
+  //    • sizeup.js's citySizeUp already answers "does this person dare fight";
+  //      anybody who dares, and can, is left to the brain they already have.
+  //    • DISTANCE decides freeze vs. run. Nobody outruns a gun at four metres
+  //      and everybody knows it, so a muzzle in your face FREEZES you and the
+  //      same muzzle across the room makes you bolt.
+  //    • PANIC IS CONTAGIOUS. Every bolt raises a decaying local panic field
+  //      and the field feeds back into the next person's odds — which is what
+  //      makes a stand empty as a WAVE instead of as N independent dice. Point
+  //      a gun at a full bowl and the ripple outward IS the spectacle.
+  //    • The choice is drawn from the person's OWN stable hash, not a die: the
+  //      same person is always the one who runs. "A runner" is a character
+  //      trait; re-rolling it every 3 seconds is what makes crowds read fake.
+  //
+  //  AND IT IS THE ONE PLACE A BODY GETS OUT OF A SEAT. npclife's syncAttached
+  //  re-asserts an attached body's seat transform every frame, so a seated body
+  //  cannot be nudged, shoved or scared out of a chair — DETACHING is the only
+  //  exit and CBZ.cityUnseat (island_airport.js) is the shared call that does
+  //  it. A propuse-seated body leaves through CBZ.propStand. Neither is
+  //  re-implemented here.
+  //
+  //  Adoption is one line and it REPLACES the hands-up-or-run branch the caller
+  //  was writing anyway (sizeup.js's citySizeUpFold is exactly that branch, and
+  //  is now this). Degrade-safe: with peds.js absent every caller keeps its own
+  //  inline fallback.
+  // ============================================================
+  const PANIC = [];
+  const PANIC_R = 26, PANIC_LIFE = 7;
+  CBZ.cityPanicRaise = function (x, z, amt) {
+    PANIC.push({ x: x, z: z, a: amt || 1, t: 0 });
+    if (PANIC.length > 32) PANIC.shift();
+  };
+  CBZ.cityPanicAt = function (x, z) {
+    let s = 0;
+    for (let i = 0; i < PANIC.length; i++) {
+      const p = PANIC[i];
+      const dx = p.x - x, dz = p.z - z, d2 = dx * dx + dz * dz;
+      if (d2 > PANIC_R * PANIC_R) continue;
+      s += p.a * (1 - Math.sqrt(d2) / PANIC_R) * Math.max(0, 1 - p.t / PANIC_LIFE);
+    }
+    return Math.min(2.5, s);
+  };
+  function panicDecay(dt) {
+    for (let i = PANIC.length - 1; i >= 0; i--) {
+      PANIC[i].t += dt;
+      if (PANIC[i].t > PANIC_LIFE) PANIC.splice(i, 1);
+    }
+  }
+
+  CBZ.cityScare = function (a, threat, opts) {
+    if (!a || a.dead || a.ko > 0 || a.isPlayer || a.controlled || a.vendor) return "hold";
+    opts = opts || {};
+    const now = (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0));
+    if ((a._scareUntil || 0) > now) return a._scareChoice || "hold";
+    const tp = threat && threat.pos;
+    const dist = tp ? Math.hypot(a.pos.x - tp.x, a.pos.z - tp.z) : 99;
+    // trained bodies and anyone who dares hold their ground keep the brain they
+    // already have — this function never overrides a fight.
+    if (a.kind === "cop" || a.kind === "security" || a.rampage) return "hold";
+    if (a.armed && (!CBZ.citySizeUp || CBZ.citySizeUp(a, threat))) return "hold";
+    a._scareUntil = now + 3400;
+    const attArmed = threat && (threat.isPlayer
+      ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!threat.armed);
+    const panic = CBZ.cityPanicAt(a.pos.x, a.pos.z);
+    // Odds of BOLTING rather than freezing. Distance and the panic around you
+    // push up; a gun at point-blank pushes hard down; the meek run sooner.
+    let bolt = 0.16 + panic * 0.34 + Math.min(0.44, dist * 0.028);
+    if ((a.aggr || 0.4) < 0.35) bolt += 0.14;
+    if (a.child) bolt += 0.26;
+    if (attArmed && dist < 5.5) bolt -= 0.38;
+    if (opts.seat) bolt += 0.10;              // a seat is a trap and they know it
+    if (opts.bias) bolt += opts.bias;
+    const runs = roleHash(a, 0x5CA7) < bolt;
+    if (!runs && attArmed && markGunpoint(a, 2.4)) {
+      a._scareChoice = "freeze";
+      return "freeze";
+    }
+    // BOLT. Out of the seat FIRST — a held body cannot flee, and the hold is
+    // re-asserted every frame, so anything short of a detach is a body running
+    // on the spot in its chair.
+    if (a._npcAttached && CBZ.cityUnseat) { try { CBZ.cityUnseat(a, { state: "flee" }); } catch (e) {} }
+    else if ((a._propSeat || a._deskAnchor) && CBZ.propStand) { try { CBZ.propStand(a); } catch (e) {} }
+    a.surrender = false; a.surrenderT = 0; a.poseHandsUp = false; a.poseAimBack = false;
+    a.rage = null; a.pause = 0;
+    a.fear = Math.max(a.fear || 0, 10);
+    a.alarmed = Math.max(a.alarmed || 0, 6);
+    if (tp) fleeFrom(a, tp.x, tp.z); else a.state = "flee";
+    CBZ.cityPanicRaise(a.pos.x, a.pos.z, 1);
+    a._scareChoice = "bolt";
+    return "bolt";
+  };
+
+  // ============================================================
   //  GUNPOINT SWEEP (every frame, cheap) — give the WHOLE near crowd the jail's
   //  expressive HANDS-UP the instant the player points a gun at them, instead of
   //  waiting for the time-sliced think() to come around (which lagged + only
@@ -4606,6 +4707,14 @@
         const drawsBack = ped.armed || ped.aggr >= (B.violent || 0.88);
         if (drawsBack) {
           if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
+        } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit") {
+          // A HELD BODY GETS THE BRANCH, NOT THE FREEZE. Everyone in a seat used
+          // to land on markGunpoint alone, which is why a stadium, a gate lounge
+          // and an office floor all reacted to a levelled gun by sitting
+          // perfectly still: the freeze was the ONLY option a seated body had.
+          // cityScare decides freeze-vs-bolt from the read and, when it is bolt,
+          // is the one thing that can actually get them out of the chair.
+          CBZ.cityScare(ped, CBZ.city && CBZ.city.playerActor ? CBZ.city.playerActor : P, { seat: true });
         } else {
           // meek/scared: throw hands up + freeze. markGunpoint owns the full state.
           markGunpoint(ped, 0.4);
@@ -4903,6 +5012,7 @@
     // GUNPOINT: raise hands across the near crowd the moment you aim a gun at them
     // (every frame, so it's instant + covers everyone, not just one per think pass).
     gunpointSweep(dt);
+    panicDecay(dt);            // the contagion field forgets (cityScare)
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
     rebuildPedGrid();

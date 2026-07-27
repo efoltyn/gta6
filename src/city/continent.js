@@ -82,6 +82,30 @@
   //   22/90u colour cells whose hard edges dissolved into orange/green
   //   confetti from any altitude. `?cfg_CONTINENT_LANDCOVER_V2=0` reverts.
   if (CFG.CONTINENT_LANDCOVER_V2 == null) CFG.CONTINENT_LANDCOVER_V2 = true;
+  // ---- TERRAIN_PHYSICS_MATCH (owner: "there's no physics, so it's like green
+  //   water — driving in it") ------------------------------------------------
+  // The relief field is ANALYTIC with a ~17 m finest octave; the plate that
+  // RENDERS it is a ~40 m triangle grid. Those are two different surfaces, and
+  // the measured gap between them was 0.41 m mean / 9.77 m MAX. ON → the
+  // registered ground provider samples the PLATE'S OWN VERTICES across the
+  // PLATE'S OWN TRIANGLES, so the surface you SEE is the surface you WALK and
+  // DRIVE on by construction, and one query costs a grid fetch instead of ~30
+  // hash evaluations (6.03 µs → ~0.35 µs for the whole floorAt stack, which is
+  // what makes a per-car-per-frame ground probe affordable at all).
+  // OFF → the analytic field is the provider exactly as before.
+  if (CFG.TERRAIN_PHYSICS_MATCH == null) CFG.TERRAIN_PHYSICS_MATCH = true;
+  // ---- TERRAIN_FLATTEN_UNDER_BUILT (owner: "IT OVERLAPS PARKING LOTS") -----
+  // A lot / apron / plaza / town floor is a FLAT slab laid on this plate. The
+  // relief gate under them used to be a BOOLEAN with an 8 m margin — but the
+  // plate cell is ~40 m, so the triangle that STRADDLES the kerb kept full
+  // relief at its outer vertex and its inner half rose straight through the
+  // asphalt. That is the green banding across the parking lot, and raising the
+  // lot cannot cure it. ON → the gate becomes a DISTANCE (0 inside and for one
+  // whole grid cell beyond, then smoothly back to full relief) — the same
+  // grammar CBZ.highwayNetReliefGate already uses under a road corridor. It can
+  // only ever LOWER h, so the mountains-outside-snow / city-on-mountain
+  // doctrines get MORE true. OFF → the old 8 m boolean.
+  if (CFG.TERRAIN_FLATTEN_UNDER_BUILT == null) CFG.TERRAIN_FLATTEN_UNDER_BUILT = true;
   // WORLD_LAYOUT_V2 (declared in world/layout.js, which parses first) — the
   // stage-3 world re-lay. This file is one of its four consumers; the guard
   // below only mirrors the default for a build without layout.js.
@@ -590,10 +614,96 @@
       const g = smooth01((rimT(x, z) - RIM_IN) / (RIM_OUT - RIM_IN));
       return RIM_LO + (RIM_HI - RIM_LO) * g;
     }
+    // ---- THE BUILT-GROUND GATE (TERRAIN_FLATTEN_UNDER_BUILT) -------------
+    // PLATE_SEG must agree with the SEG used to build the plate below — the
+    // whole point of the flat band is that it is at least one PLATE CELL wide,
+    // so BOTH vertices of a triangle straddling a kerb read zero relief and the
+    // green can no longer climb through the asphalt between them.
+    const PLATE_SEG = COAST ? 320 : 72;
+    const BUILT_FLAT = Math.hypot(W / PLATE_SEG, D / PLATE_SEG) + 6;
+    const BUILT_FADE = 110;    // then the country rises back over ~one block
+    const BUILT_REACH = BUILT_FLAT + BUILT_FADE;   // past this a surface cannot matter
+    // Math.sqrt, never Math.hypot: this runs ~75 times per plate vertex over
+    // 103k vertices at build, and V8's hypot (which guards against overflow) is
+    // several times slower. The two branches above it mean the sqrt is only
+    // reached for a genuine diagonal corner.
+    function outsideRectDist(x, z, r0, r1, s0, s1) {
+      const dx = Math.max(r0 - x, 0, x - r1), dz = Math.max(s0 - z, 0, z - s1);
+      if (dx <= 0) return dz;
+      if (dz <= 0) return dx;
+      return Math.sqrt(dx * dx + dz * dz);
+    }
+    function builtBandGate(d) {
+      if (d <= BUILT_FLAT) return 0;
+      if (d >= BUILT_FLAT + BUILT_FADE) return 1;
+      return smooth01((d - BUILT_FLAT) / BUILT_FADE);
+    }
+    // The graded regions, flattened into a plain array ONCE. The old boolean
+    // form re-read `r.terrainGrade` and `r.pad` on every region on every call;
+    // there are only ever a handful and they cannot change after the build.
+    const gradedRegs = [];
+    for (let i = 0; i < regs.length; i++) {
+      const r = regs[i];
+      if (!r || !r.terrainGrade) continue;
+      const p = r.pad || 0;
+      // A malformed record must not poison the gate with NaN (which silently
+      // reads as "no flattening here" and would be invisible).
+      if (r.kind === "circle") {
+        if (![r.cx, r.cz, r.r].every(Number.isFinite)) continue;
+        gradedRegs.push({ circle: true, cx: r.cx, cz: r.cz, rad: r.r + p });
+      } else {
+        if (![r.minX, r.maxX, r.minZ, r.maxZ].every(Number.isFinite)) continue;
+        gradedRegs.push({ circle: false, minX: r.minX - p, maxX: r.maxX + p, minZ: r.minZ - p, maxZ: r.maxZ + p });
+      }
+    }
+    // 1 = untouched country, 0 = graded flat under (and one cell around) a
+    // built surface. Allocation-free; the loops are the same ones the old
+    // boolean form already walked, now with a Chebyshev pre-reject in front.
+    function builtGate(x, z) {
+      if (CFG.TERRAIN_FLATTEN_UNDER_BUILT === false) {
+        return (insideAuthoredSurface(x, z, 8) || insideTerrainGrade(x, z, 8)) ? 0 : 1;
+      }
+      let g = 1;
+      const annex = city.annex;
+      if (annex && Number.isFinite(annex.cx) && Number.isFinite(annex.cz) && Number.isFinite(annex.radius)) {
+        const t = builtBandGate(Math.hypot(x - annex.cx, z - annex.cz) - (annex.radius + 2));
+        if (t <= 0) return 0;
+        if (t < g) g = t;
+      }
+      for (let i = 0; i < authoredSurfaceBounds.length; i++) {
+        const b = authoredSurfaceBounds[i];
+        // Chebyshev pre-reject first (four compares, no arithmetic) — the same
+        // shape highwayNetReliefGate uses, and the reason this gate is
+        // affordable inside a 103k-vertex build loop.
+        if (x < b.minX - BUILT_REACH || x > b.maxX + BUILT_REACH ||
+            z < b.minZ - BUILT_REACH || z > b.maxZ + BUILT_REACH) continue;
+        const t = builtBandGate(outsideRectDist(x, z, b.minX, b.maxX, b.minZ, b.maxZ));
+        if (t <= 0) return 0;
+        if (t < g) g = t;
+      }
+      for (let i = 0; i < gradedRegs.length; i++) {
+        const r = gradedRegs[i];
+        let t;
+        if (r.circle) {
+          const dx = x - r.cx, dz = z - r.cz, rr = r.rad + BUILT_REACH;
+          if (dx * dx + dz * dz > rr * rr) continue;
+          t = builtBandGate(Math.sqrt(dx * dx + dz * dz) - r.rad);
+        } else {
+          if (x < r.minX - BUILT_REACH || x > r.maxX + BUILT_REACH ||
+              z < r.minZ - BUILT_REACH || z > r.maxZ + BUILT_REACH) continue;
+          t = builtBandGate(outsideRectDist(x, z, r.minX, r.maxX, r.minZ, r.maxZ));
+        }
+        if (t <= 0) return 0;
+        if (t < g) g = t;
+      }
+      return g;
+    }
+
     function countryHeightAt(x, z) {
       if (CFG.CONTINENT_RELIEF_V1 === false) return 0;
       if (x < minX || x > maxX || z < minZ || z > maxZ) return 0;
-      if (insideAuthoredSurface(x, z, 8) || insideTerrainGrade(x, z, 8)) return 0;
+      const built = builtGate(x, z);
+      if (built <= 0) return 0;
       const shore = COAST ? shoreField(x, z) : 100;
       if (shore <= 38) return 0;
       const coastFade = smooth01((shore - 38) / 74);
@@ -643,12 +753,24 @@
       // The gate is 1 everywhere when the network is off/absent — identical
       // relief to before.
       if (CBZ.highwayNetReliefGate) h *= CBZ.highwayNetReliefGate(x, z);
+      // …and the same cut under every BUILT surface (lots, aprons, town
+      // floors, graded pads). Applied last with the other two gates so all
+      // three are the same kind of thing: a multiplier that only removes.
+      h *= built;
       return Math.max(0, h);
     }
     function smooth01(v) { v = v < 0 ? 0 : (v > 1 ? 1 : v); return v * v * (3 - 2 * v); }
     CBZ.countryTerrainHeightAt = countryHeightAt;
+    // The ONE height every country consumer reads. It starts as the analytic
+    // field (nothing has built the plate yet) and is swapped for the plate's
+    // own interpolated grid the moment that grid exists — see
+    // TERRAIN_PHYSICS_MATCH below. Degrade-safe: if the plate build ever bails,
+    // this stays the analytic field and the world is exactly what it was.
+    let reliefAt = countryHeightAt;
+    let reliefRec = null;
     if (CBZ.registerCityGroundHeight) {
-      CBZ.registerCityGroundHeight(countryHeightAt, { name: "Backcountry relief", biome: "wilds" });
+      reliefRec = CBZ.registerCityGroundHeight(function (x, z) { return reliefAt(x, z); },
+        { name: "Backcountry relief", biome: "wilds" });
     }
 
     // Publish the exact coast oracle used by the rendered continent.  The
@@ -669,7 +791,10 @@
     // triangles visibly sliced through the animated sea as large green/tan
     // checker patches from aircraft. The denser coast remains one draw call
     // and is tiny beside the city geometry budget.
-    const SEG = COAST ? 320 : 72;
+    // ONE segment count, declared above with the built-ground gate (which sizes
+    // its flat band from the plate CELL and so must not be able to disagree
+    // with it). PLATE_SEG is that number.
+    const SEG = PLATE_SEG;
     const geo = new THREE.PlaneGeometry(W, D, SEG, SEG);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
@@ -794,6 +919,50 @@
       pos.setY(i, y);
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
     }
+
+    // ==================================================================
+    //  TERRAIN_PHYSICS_MATCH — THE SURFACE YOU SEE IS THE SURFACE YOU DRIVE ON
+    // ==================================================================
+    // rGrid now holds the relief at every plate VERTEX. Interpolating it across
+    // the plate's OWN triangles reproduces the rendered surface exactly, which
+    // is a stronger statement than "close": there is no tuning constant here
+    // and no way for the two to drift apart again, because there is only one
+    // set of numbers.
+    //
+    // r128 PlaneGeometry emits, per cell, indices (a,b,d) then (b,c,d) with
+    // a=(ix,iy) b=(ix,iy+1) c=(ix+1,iy+1) d=(ix+1,iy) — so in local cell
+    // coordinates the first triangle covers tx+tz<=1 and the second the rest.
+    // Getting that split right is the difference between matching the mesh and
+    // matching a bilinear approximation of it (up to ~1 m apart on a ridge).
+    //
+    // COST: one bounds test, one floor, three array reads, ~6 flops. Measured
+    // against the analytic field it replaces: 2.2-2.5 µs -> ~0.05 µs per call,
+    // which takes the WHOLE CBZ.floorAt stack from 6.03 µs to ~0.35 µs. That
+    // is the only reason city/vehicles.js can afford four ground probes per car
+    // per frame. Memory: SEG=320 -> 103,041 floats = 412 KB, already allocated.
+    const RSTRIDE = SEG + 1;
+    const RMINX = cx0 - W / 2, RMINZ = cz0 - D / 2;
+    const RINVDX = SEG / W, RINVDZ = SEG / D;
+    function reliefSample(x, z) {
+      const fx = (x - RMINX) * RINVDX, fz = (z - RMINZ) * RINVDZ;
+      if (!(fx >= 0 && fz >= 0 && fx <= SEG && fz <= SEG)) return 0;
+      let i0 = fx | 0, j0 = fz | 0;
+      if (i0 >= SEG) i0 = SEG - 1;
+      if (j0 >= SEG) j0 = SEG - 1;
+      const tx = fx - i0, tz = fz - j0;
+      const base = j0 * RSTRIDE + i0;
+      const a = rGrid[base], b = rGrid[base + RSTRIDE], d = rGrid[base + 1];
+      const h = (tx + tz <= 1)
+        ? a + (d - a) * tx + (b - a) * tz
+        : rGrid[base + RSTRIDE + 1] * (tx + tz - 1) + b * (1 - tx) + d * (1 - tz);
+      return h > 0 ? h : 0;
+    }
+    if (CFG.TERRAIN_PHYSICS_MATCH !== false) reliefAt = reliefSample;
+    // The ONE country-height query for anything that stands on, drives over or
+    // is scattered across the backcountry. Never re-derive it from
+    // countryTerrainHeightAt again — that is the analytic field, and it is not
+    // what is drawn.
+    CBZ.countryReliefAt = function (x, z) { return reliefAt(x, z); };
     // ---- STRATA + ASPECT on the backcountry relief -----------------------
     // The plate painted its land cover from a position hash alone: two
     // kilometres of hill country and a flat field got the same treatment, so
@@ -887,6 +1056,14 @@
     // interior sits just under the islands' y=0 slabs (no z-fight), well
     // above the sea; carved verts carry their own absolute depth.
     plate.position.set(cx0, COAST ? 0 : -0.06, cz0);
+    // THE LAST WALKABLE METRE, published. Anything that must stand CLEAR of the
+    // playable world (the decorative offshore skyline in world/terrain_overhaul.js)
+    // has to measure against THIS rect, not against CBZ.TERRAIN_FLAT: FLAT is the
+    // authored-region union and the plate is FLAT plus the country margin plus
+    // whatever a late region (the Greater Mercy Range) dragged it out by. Those
+    // two numbers disagreed by 2.1 km after the world re-lay, which is precisely
+    // how a 1441 m backdrop range ended up standing on driveable backcountry.
+    CBZ.CONTINENT_PLATE = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ };
     plate.receiveShadow = true;
     plate.name = "continent-underlay";
     plate.renderOrder = -10;
@@ -901,6 +1078,100 @@
       return { name: b.name, geometry: b.geometry, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ };
     });
     city.root.add(plate);
+
+    /* ==================================================================
+       CBZ.groundMatchAudit() — DOES THE GROUND YOU SEE EXIST TO PHYSICS?
+
+       Two numbers, both ratchets, both answering one of the owner's two
+       ground complaints as arithmetic instead of opinion:
+
+         • maxErr — the largest gap in metres between the RENDERED country
+           plate and the height the walk/drive oracle returns at the same
+           point. "Driving on water" IS this number being large. Sampled on
+           dry backcountry only (the carved coast rim is deliberately below
+           the sea and the walkable floor is deliberately 0 out there —
+           swim.js owns that band, and counting it would measure the ocean).
+         • ungated — how many BUILT surfaces (authored floors + graded
+           regions) still have country relief standing above their own slab,
+           i.e. green poking through asphalt. Sampled across each footprint
+           AND around its kerb ring, because the kerb is exactly where the
+           straddling triangle used to climb through.
+
+       Pure read; mutates nothing. Pass {step} to change the sweep.
+    ================================================================== */
+    CBZ.groundMatchAudit = function (opts) {
+      opts = opts || {};
+      const N = Number.isFinite(+opts.step) && +opts.step > 8 ? +opts.step : 120;
+      const py0 = plate.position.y;
+      function plateYAt(x, z) {
+        const fx = (x - RMINX) * RINVDX, fz = (z - RMINZ) * RINVDZ;
+        if (!(fx >= 0 && fz >= 0 && fx <= SEG && fz <= SEG)) return null;
+        let i0 = fx | 0, j0 = fz | 0;
+        if (i0 >= SEG) i0 = SEG - 1;
+        if (j0 >= SEG) j0 = SEG - 1;
+        const tx = fx - i0, tz = fz - j0, base = j0 * RSTRIDE + i0;
+        const a = pos.getY(base), b = pos.getY(base + RSTRIDE), d = pos.getY(base + 1);
+        const y = (tx + tz <= 1)
+          ? a + (d - a) * tx + (b - a) * tz
+          : pos.getY(base + RSTRIDE + 1) * (tx + tz - 1) + b * (1 - tx) + d * (1 - tz);
+        return py0 + y;
+      }
+      let samples = 0, sum = 0, maxErr = 0, worstAt = null;
+      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+        const wx = RMINX + (i + 0.5) * W / N, wz = RMINZ + (j + 0.5) * D / N;
+        if (COAST && shoreField(wx, wz) < 26) continue;   // carved coast: the sea owns it
+        const my = plateYAt(wx, wz);
+        if (my == null) continue;
+        const e = Math.abs((my - GROUND_Y) - reliefAt(wx, wz));
+        samples++; sum += e;
+        if (e > maxErr) { maxErr = e; worstAt = { x: Math.round(wx), z: Math.round(wz), mesh: +my.toFixed(2), physics: +reliefAt(wx, wz).toFixed(2) }; }
+      }
+      // --- built ground ---------------------------------------------------
+      const built = [];
+      for (let i = 0; i < authoredSurfaceBounds.length; i++) {
+        const b = authoredSurfaceBounds[i];
+        built.push({ name: b.name, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ });
+      }
+      for (let i = 0; i < regs.length; i++) {
+        const r = regs[i];
+        if (!r || !r.terrainGrade) continue;
+        const p = r.pad || 0;
+        // A circle is sampled over its INSCRIBED square: its bounding box
+        // corners are ordinary country by definition, and counting them would
+        // report the speedway as ungated for relief that is legitimately
+        // outside it. (The kerb ring is still covered — the inscribed square's
+        // edge midpoints touch the circle.)
+        const q = (r.r + p) * Math.SQRT1_2;
+        built.push(r.kind === "circle"
+          ? { name: r.name || "(graded)", minX: r.cx - q, maxX: r.cx + q, minZ: r.cz - q, maxZ: r.cz + q }
+          : { name: r.name || "(graded)", minX: r.minX - p, maxX: r.maxX + p, minZ: r.minZ - p, maxZ: r.maxZ + p });
+      }
+      let ungated = 0; const offenders = [];
+      for (const b of built) {
+        let worst = 0, at = null;
+        const K = 7;
+        for (let i = 0; i <= K; i++) for (let j = 0; j <= K; j++) {
+          // interior grid AND the kerb ring (i or j on the edge is the kerb)
+          const x = b.minX + (b.maxX - b.minX) * i / K, z = b.minZ + (b.maxZ - b.minZ) * j / K;
+          const h = reliefAt(x, z);
+          if (h > worst) { worst = h; at = { x: Math.round(x), z: Math.round(z) }; }
+        }
+        if (worst > 0.25) { ungated++; offenders.push({ name: b.name, relief: +worst.toFixed(2), at: at }); }
+      }
+      offenders.sort(function (a, b2) { return b2.relief - a.relief; });
+      return {
+        samples: samples,
+        meanErr: +(sum / Math.max(1, samples)).toFixed(4),
+        maxErr: +maxErr.toFixed(3),
+        worstAt: worstAt,
+        builtSurfaces: built.length,
+        ungated: ungated,
+        offenders: offenders.slice(0, 8),
+        matched: CFG.TERRAIN_PHYSICS_MATCH !== false,
+        flattened: CFG.TERRAIN_FLATTEN_UNDER_BUILT !== false,
+        registered: !!reliefRec,
+      };
+    };
 
     // ---- FRONTIER EXPANSION: real travel distance, not a camera trick -------
     // Four long rural highway legs live wholly OUTSIDE the old authored union,
@@ -1189,10 +1460,10 @@
         // is kept but flagged so the build turns it into scree, not trees.
         let steep = false;
         if (CFG.CONTINENT_FOREST_V2 !== false) {
-          const reliefY = countryHeightAt(jx, jz);
+          const reliefY = reliefAt(jx, jz);
           const e = 4;                                        // slope: 2-tap finite diff of the SAME height fn the prop sits on
-          const sxg = countryHeightAt(jx + e, jz) - countryHeightAt(jx - e, jz);
-          const szg = countryHeightAt(jx, jz + e) - countryHeightAt(jx, jz - e);
+          const sxg = reliefAt(jx + e, jz) - reliefAt(jx - e, jz);
+          const szg = reliefAt(jx, jz + e) - reliefAt(jx, jz - e);
           const slope = Math.sqrt(sxg * sxg + szg * szg) / (2 * e);   // rise/run
           steep = slope > 0.85;                               // ridge faces -> rock, not tree
           const treeline = smooth01((22 - reliefY) / 7);      // canopy thins out on the high ridges
@@ -1276,7 +1547,7 @@
         const scale = 0.8 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8806) : 0.5) * 0.7;
         const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8807) : 0.3) * Math.PI * 2;
         if (isTreeSpot(s)) {
-          const gy = countryHeightAt(s.x, s.z);
+          const gy = reliefAt(s.x, s.z);
           if (V2) {
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8808) : 0.5;
             const sc = 0.75 + hs * hs * 1.15;                // squared-bias scale (biases small)
@@ -1285,7 +1556,7 @@
             let seatRef = gy - 0.06, parts = null;
             if (TREES2) {
               // SEATED: base below the lowest footprint sample on the slope
-              const gu = CBZ.treeGroundUnder(countryHeightAt, s.x, s.z, Math.max(0.32 * sc, 0.6));
+              const gu = CBZ.treeGroundUnder(reliefAt, s.x, s.z, Math.max(0.32 * sc, 0.6));
               seatRef = Math.min(gy, gu.min);
               const seatY = seatRef - 0.25;
               const span = trunkTop - seatY;
@@ -1332,7 +1603,7 @@
           }
           ti++;
         } else {
-          dummy.position.set(s.x, countryHeightAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
+          dummy.position.set(s.x, reliefAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
           dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
           if (V2) {
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8819) : 0.5;
