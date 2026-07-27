@@ -1085,8 +1085,9 @@ Before building anything adjacent, wire into the existing system:
   herd charge, and both snake paths, plus `wildlife_shark.js` finally declaring
   the adoption it always had. `CBZ.predatorAudit()` reads `{legacy: 0, adopted: 8}`
   and **may only ever go DOWN** — if you add a site id you migrate it in the same
-  change. `ragdollPin` still has ONE consumer (the seize) and remains at-risk;
-  that is the next migration owed, not a solved problem.
+  change. `ragdollPin` went from one consumer to TWO (the seize fling, and a
+  held animal corpse now rides the quad solver's pin instead of a rigid
+  position write) — still thin, no longer alone.
 
   HONEST STATUS ON THE WATER/ROADS WAVE (2026-07-26): `waterSurge` has real
   adoption — 8 files migrated off raw `CBZ.SEA_Y` onto `CBZ.waterSeaY()` in the
@@ -1107,6 +1108,163 @@ Before building anything adjacent, wire into the existing system:
   caller's numbers for it and adoption costs two lines. **If your shared block
   needs a config bundle, ship the thing that WRITES the bundle, or the block will
   sit at one consumer forever.**
+
+## THE 2026-07-27 EVENING WAVE — seven territories, one merge
+
+Seven opus builders in parallel, disjoint file territories, orchestrator merged
+and patched the seams. Every ratchet below says NOT YET PINNED because the wave
+shipped without a gate run (owner's call: "no testing just building") — whoever
+runs each audit first writes the number in; do not pin a guess.
+
+- **THE WORLD IS V4-SCALE AND BIOME EDGES ARE REAL CURVES** — `SPREAD_V4` in
+  `world/layout.js` (×1.60 of V3 with seven axes PINNED, each pin justified
+  inline: `snow.dx` protects the Mercy lane, `speedway.dx` moves the desert east
+  instead of the live build zone) + **`CBZ.worldFoot(id)` / `worldFootScale(id)`,
+  the footprint registry that killed the copy-rect disease** — terrain_overhaul's
+  `snowSector` and biome_farmland's `DESERT_MINZ` now ASK the owning biome
+  instead of re-typing its rect (old literal kept as degrade fallback; flag-off
+  is byte-identical, verified per biome). FLAT 7820×4810 → **9570×6109**; `W_ROOF`
+  13500 → 15500 (union 13896 — the roof still catches runaways); `PLATE_SEG` now
+  DERIVES from a 38 m cell target (320 on a V3 world byte-identical, 368 on V4 —
+  cells got FINER, not coarser); sea span derives from FLAT (`CBZ.WORLD_SEA_SPAN`
+  25000). **Organic edges** (`BIOME_ORGANIC_EDGES`, worldmap.js): OUTSIDE a rect
+  the already-existing blend warp claims land to its own reach — that is where
+  the de-squaring lives; INSIDE a rect an edge may hand a point to a neighbouring
+  biome that genuinely dominates but NEVER to nothing — a hole in an authored
+  painted floor is the one path to a false `mtnOutSnow`. fullmap's `coastPath`
+  bisects the real 0.42 contour now instead of drawing a cosmetic wobble. Desert:
+  the little gray rocks are GONE (`DESERT_ROCK_SCATTER` default false — the dead
+  loop still draws its rng so no other scatter re-deals) and dunes run an
+  ENVELOPE (`DESERT_DUNES_V3`): 4-16u across most of the erg, 2-3 isolated
+  45-55u draa per basin on 850-1410 m fields with 10° drivable flanks, corridor
+  gates keep towns and the highway flat. TWO STALE-LITERAL BUGS found by
+  measuring: the Saltlands causeway had dangled 280u short of its own biome
+  since stage 3, and the Coyle causeway stopped 112u short of the desert highway
+  — both ends now DERIVE (`CBZ.DESERT_HWY_Z`). The highwaynet eight were
+  re-derived for V4 (before→after arithmetic in highwaynet.js). Ratchet:
+  `CBZ.worldScaleAudit()`.
+- **A VENUE HAS A SITE, AND THE SITE IS A KIT** — `CBZ.venueSite`
+  (speedway_structures.js): fence · gatehouse · monument · lampRow · bays ·
+  census; a whole fence of any length is 2 draw calls. Three consumers including
+  a real migration (the paddock's private fenceRun is DELETED). Ironjaw: the
+  "island" was never an island — the coastline is 222u away — and the Mercy
+  Causeway's east kerb ends at exactly `CW_X0`; the two decks had been
+  butt-jointed with no road record for the venue's whole life. It now has a real
+  road + T-junction (kerb returns, stop bars and wires arrive free via the
+  roadrules/utility passes), gatehouse + arch, 828 m perimeter, 16-bay car park,
+  kiosks, service yard, its first-ever keep-outs, and 6 staffed posts through
+  `cityStaffVenue` (ticket sellers finally stand AT the booths that always
+  existed). Speedway: **the public car park had been empty its whole life** —
+  `cityMakeCar` ran inside the landmass builder before `city.arena` existed and
+  every call threw into a swallowing catch; the fill is deferred now, and
+  `venueSite.bays` feeds BOTH the paint and the cars so they can never disagree
+  again. Flags `ARENA_SITE` / `SPEEDWAY_SITE`. Ratchet: `CBZ.venueSiteAudit()`.
+- **EVERY JOB ANSWERS TO A VERB** — `city/roleverbs.js`: `ROLE_VERBS` +
+  `OBJECT_VERBS`, two data tables consumed by TWO registrations total — a new
+  trade or prop is a ROW (the interact.js `VERB`-table shape, deliberately).
+  `CBZ.cityPedJob/cityPedJobClass` (level.js) is the promoted job accessor;
+  shops.js consumes it with its private pair as fallback. Every effect runs a
+  sanctioned primitive (spend/addCash/hp/hunger/econ/engineHp/respect/mission)
+  — **a verb that writes a field nothing reads is a stat fiction and BANNED.**
+  The game finally has a street heal (medics; paramedics discount emergencies
+  under 35 hp), day labor on 17 worker trades (once per worker per day, off the
+  trade's own declared shift), produce/catch purchases that register real items
+  the way wildlife pelts do, courier delivery missions bound to lots the city
+  built (the world supplies the destination or there is no offer), and a dealer
+  you can Score from — priced ×1.15 street so flipping LOSES by construction.
+  Class floors make `withoutVerb` STRUCTURALLY 0 across all ~60 jobs. Objects:
+  hydrant crack (fires the existing geyser), meter jimmy (the same position
+  hash as ramming, so the two payouts agree), bus-stop routes (names real
+  regions), cart rummage (the existing bounded search + it is theft and files
+  as such). `objectVerbAudit`'s remainder is REPORTED, deliberately not pinned
+  0 — lamp/tree/planter/sign have no honest verb and a fake one is worse.
+  Flags `ROLE_VERBS` / `OBJECT_VERBS`. Ratchets: `CBZ.roleVerbAudit()` /
+  `CBZ.objectVerbAudit()`.
+- **AN ANIMAL DIES LIKE A BODY, NOT A POSE** — `systems/quadruped_ragdoll.js`
+  + **`CBZ.wildlifeDeathPhysics` (wildlife.js), the ONE death entry**: verlet
+  quadruped ragdoll when the solver takes the body, the shared rigid tumble
+  (`CBZ.wildlifeDeathTumble`) when it won't, NEVER a pose snap — "head pointed
+  at the sky" was `rotation.z` (the model-local PITCH axis) snapped to ~1.3 rad
+  in dogs.js and the beast pit; both are dead, with the snap kept only as the
+  flag-off degrade. Rig discovery is GEOMETRIC (legs = taller-than-wide
+  ground-touchers, head = far-forward-and-up, spine rides what is left) — NO
+  SPECIES TABLE; the named refusals (swim/segs/aquatic/snake) are rig facts.
+  Four bugs only math found (pure-node harness against the vendored r128):
+  a planar 4-point torso can never rest on edge; the roll couple was about the
+  BULLET's axis so flank shots somersaulted deer back onto their feet; the
+  menace gauge starved NPC hunts (correct for the player, now player-scoped —
+  existing callers byte-identical); an alarm re-raised twice a second pinned
+  herds in permanent flight. Food chain (`WILDLIFE_FOODCHAIN`): prey is
+  ARITHMETIC — medium match, mass ≤1.35×, danger below the hunter's, which is
+  why a wolf takes an elk and never a grizzly with no name typed; kill → feed
+  20-40 s → satiation 3-5 min; man-eaters need scale ≥0.85, danger ≥0.6, night
+  weighting, a lone victim, global cap 2; killfeed is proximity-gated at 70u so
+  a distant wolf-vs-deer never spams the corner. Cars hit animals
+  (`WILDLIFE_CAR_IMPACT`): one loop in `runOver`, lethal = `pedLethal·√mass`,
+  damage ∝ v², camera-gated to 240u. predator.js's `killVictim` animal branch
+  now routes the REAL wildlife death — the frozen-corpse bug (undefined `skinT`
+  → NaN countdown → immortal corpse) is fixed. Ratchet:
+  `CBZ.wildlifeDeathAudit()` — `legacyPoseDeaths` and `frozenCorpses` are
+  structurally 0.
+- **VEHICLES WEAR THE ONE GLASS** — carfx.js's `glass` role delegates to
+  `CBZ.glass()` (`VEHICLE_GLASS_V2`). Every canopy and windscreen in the game —
+  airliner, fighters, bombers, helicopters, GA, cars, boats — was ONE shared
+  MeshStandard+envMap material (near-black under a Lambert world, the exact
+  failure buildings.js documents in its own reflectMats comment) cached under
+  the bare string "glass", so per-aircraft tints NEVER reached a pane
+  (island_military's vmat didn't even forward its color arg — fixed). Now:
+  Lambert + lift, DoubleSide (a camera sits BEHIND a canopy), pool keyed per
+  tint, and the callers' long-dead `{emissive, ei}` args live as a per-channel
+  FLOOR so night cockpits are neither voids nor lamps. **THE FROST WINDOW IS
+  LAW**: crashdeform finds glass by color arithmetic (`b−r>0.045, b<0.4,
+  r<0.25`) — a tint outside the window is refused and swapped, and the worst
+  live margin is a measured number (`glassAudit().frostMargin`); the airliner's
+  old tint cleared by half an 8-bit step and was nudged along with its three
+  siblings. Interiors already existed behind almost every pane (pilots, crew,
+  car drivers, a yacht saloon) — the material was the only thing defeating
+  them; the one true hollow shell (utility heli) got furniture fitted by corner
+  arithmetic against the canopy taper. Ratchet: `CBZ.glassAudit()`.
+- **SEATS OF POWER HAVE ROOMS BEHIND THE DOOR** — govcomplex §5c
+  (`GOV_INTERIORS`): all nine complexes get designed floors that ADOPT
+  occupy.js's own ledger (`_occupyProgrammed`/`_occupyAnchors`) so power.js's
+  existing cast lands in these rooms — no second cast path, no peds authored
+  here. **`world/roombuild.js` is AWAKE**: zero callers → three (furnishHome,
+  furnishApartmentFloor, gov `room:*` floors), and waking it took SIX latent
+  fixes — the headline: `roomFurnish` never forwarded the host origin, so every
+  propuse anchor from a non-origin building would have been filed AT THE WORLD
+  ORIGIN. Also: beds headboard-into-the-room, a lounge that produced nothing
+  when the door was centred, a world-vs-host keepout compare, uncapped
+  deskfarm/storage grids (the Agency's slab asked for ~5,000 boxes on one
+  floor), and furniture.js's `propPurposeReset` wrap that never armed — the
+  furnishAudit ledger had NEVER reset between builds. Empty floors keep their
+  ratio but get five deterministic reads (`INTERIOR_EMPTY_VARIETY` — bare,
+  renovation, move-out, after-hours, dark storey); interior strips ramp with
+  `nightAmount` through one shared driver, zero new draw calls
+  (`INTERIOR_LIGHT_DAY`). Ratchets: `CBZ.interiorAudit()` (`govBare`
+  structurally 0) / `CBZ.roomPlanAudit()`.
+- **ORDNANCE OBEYS ONE LAW** — `CBZ.ordnanceDropVel` / `CBZ.ordnanceSeek`
+  (aircraft.js). OWNER: "bombs should drop straight down and missiles should
+  have the same homing as the rpg." A free-fall store keeps 8% of horizontal —
+  a DIVE is inherited whole (it points the store down) while a climb is scaled,
+  so a zoom release can't toss a bomb upward; guided kits keep 22% because
+  `solveGuided` budgets its whole cross-range FROM release velocity. Measured:
+  300 m AGL at 105 m/s, downrange 676 m → 54 m, impact 48.9° → 5.2° off
+  vertical; carpet stagger untouched (it comes from the aircraft's travel, not
+  the bomb's). Missiles: every military launcher (jet, heli, tank main gun,
+  JDAM, the modshop channel) acquires via lockon.js's ONE path, read LIVE per
+  call so childsafe's wraps hold; playeraircraft's `fired` flag now honors the
+  launcher's return (a saturated pool used to eat the shot silently).
+  `strategic.js`'s makeB2 is a real lofted flying wing (span:length 2.10 →
+  2.495 against the owner's b2code.html reference — planform, sweep and
+  thickness laws lifted, 3 draw calls) with a two-seat deck whose windscreen is
+  the removed hull piece RE-EMITTED IN GLASS — an aperture that cannot gap; the
+  island heavy bomber (a B-52-class airframe, deliberately NOT reshaped into a
+  second flying wing) got the deck treatment too (`MIL_BOMBER_DECK`). Three
+  latent bugs fixed by reading: bay doors opened UP into the wing, the crew
+  hatch swung opposite its own comment, and door geometry called `.translate()`
+  on boxGeom's CACHED SHARED geometry — corrupting every other consumer of that
+  box size. Flags `BOMBS_DROP_STRAIGHT` / `MIL_MISSILE_HOMING`. Ratchet:
+  `CBZ.ordnanceAudit()`.
 
 ## Hard rules that keep the game correct
 

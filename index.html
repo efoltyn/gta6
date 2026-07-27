@@ -838,6 +838,15 @@
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=cluster1"></script>
 <script src="src/city/interact.js?v=registry1"></script>
+<!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
+     up, cook feeds you, dock hand puts you on the clock, courier hands you a
+     run) plus one of streetProp-type -> verb (hydrant, meter, route board,
+     cart). Registers into interact.js's registry, so it must load AFTER it;
+     reads CBZ.cityPedJob (level.js), the cab fare (shops.js) and the bounded
+     prop rummage (interact.js), all of which are already loaded here.
+     CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
+     Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
+<script src="src/city/roleverbs.js?v=roles1"></script>
 <script src="src/city/restrain.js?v=collar2"></script>
 <script src="src/city/combat.js?v=punch2"></script>
 <!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
@@ -983,6 +992,14 @@
      geometric (no species table), so all 45 species animate from one change.
      MUST follow predator.js; without this tag the whole animation lane is dead. -->
 <script src="src/systems/predator_anim.js?v=predanim1"></script>
+<!-- VERLET CORPSE PHYSICS FOR ANIMALS — the sibling of city/ragdoll.js, which
+     is hard-wired to the humanoid skeleton, so every one of the 45 species used
+     to die by easing group.rotation.z to a constant ("head pointed to sky").
+     The point graph is DISCOVERED geometrically (legs/head/tail off the same
+     evidence buildGaitRig reads), so there is no species table and the 46th
+     animal ragdolls for free. Declines cleanly (snakes, fish, far kills, budget
+     full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
+<script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
 <script src="src/city/wildlife_shark.js?v=shark1"></script>

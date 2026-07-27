@@ -968,6 +968,39 @@
   // total across all interiors).
   if (CBZ.CONFIG.INTERIOR_STAFF_MAX == null) CBZ.CONFIG.INTERIOR_STAFF_MAX = 48;
 
+  // ---- INTERIORS, SECOND PASS (owner: "interiors of buildings feel very
+  // unintentional") -----------------------------------------------------------
+  // INTERIOR_ROOMPLAN — wake world/roombuild.js. CBZ.roomPlan/roomFurnish is a
+  // complete, constraint-checked interior LAYOUT planner (real circulation
+  // widths, chair pull-out, sofa-to-screen distance, a flood-filled reach test
+  // that DROPS any piece you could not walk to) that draws exclusively through
+  // CBZ.furnish — and it had ZERO callers in the whole repo. On → the home,
+  // apartment and government-residence dressers route their bedrooms, lounges
+  // and offices through it instead of hand-placing boxes. Off → every caller's
+  // `CBZ.roomFurnish ? … : <the old boxes>` guard falls back verbatim.
+  if (CBZ.CONFIG.INTERIOR_ROOMPLAN == null) CBZ.CONFIG.INTERIOR_ROOMPLAN = true;
+  // INTERIOR_EMPTY_VARIETY — the "empty" archetype is owner-endorsed doctrine
+  // ("it should be empty, OR it should be designed"), but every empty floor in
+  // the world was the IDENTICAL shell: one slab, one ceiling strip, the same hex,
+  // fifty times over — which reads as nobody made this rather than as a choice.
+  // On → empty picks one of five deterministic reads per building (bare · under
+  // renovation · moved out · after-hours skeleton) plus the occasional DARK
+  // storey, all from existing colour buckets. The empty RATIO is untouched.
+  if (CBZ.CONFIG.INTERIOR_EMPTY_VARIETY == null) CBZ.CONFIG.INTERIOR_EMPTY_VARIETY = true;
+  // INTERIOR_LIGHT_DAY — one shared ceiling-strip material per interior palette,
+  // ramped warmer/brighter as night falls (the interiorlight.js window-glow
+  // shape, applied to the strips you see from INSIDE). One material write per
+  // frame, zero new draw calls, no new material buckets.
+  if (CBZ.CONFIG.INTERIOR_LIGHT_DAY == null) CBZ.CONFIG.INTERIOR_LIGHT_DAY = true;
+  // GOV_INTERIORS — city/govcomplex.js builds nine seats of power as SHELLS: the
+  // Capitol's two chambers, the Executive Mansion's West Wing, the Agency's
+  // annex, the finca's wings and the compound's shed had no interior at all, and
+  // the main halls were only dressed when city/power.js seated their principal
+  // (inside 260 m). On → every gov building is dressed AT WORLD BUILD from the
+  // shared kit, and the ledger occupy.js already keeps means the people cast by
+  // power.js land in THESE rooms rather than re-dressing the floor.
+  if (CBZ.CONFIG.GOV_INTERIORS == null) CBZ.CONFIG.GOV_INTERIORS = true;
+
   // ---- DRIVING WAVE (city/vehicles.js + police.js + props.js) --------------
   // DRIVE_FEEL_V2: recovers the "out of control" handling — raises the lateral
   // grip floor (0.42 → 1.6) so a broken-loose slide recovers in a beat instead
@@ -1227,9 +1260,12 @@
   //   TERRAIN_*  src/world/terrain_overhaul.js — _RIVER_BANKS, _STRATA,
   //              _SMOOTH_SHADE, _TILE_SEG, _RING_AMP
   //   SPEEDWAY_* src/city/island_speedway.js — _BANK, _BANK_WALKABLE,
-  //              _CAR_CONFORM, _CATCH_FENCE, _STRUCTURES
+  //              _CAR_CONFORM, _CATCH_FENCE, _STRUCTURES, _SITE (the arrival:
+  //              gate, perimeter, monument, car park, staff, track keep-out)
   //   ARENA_*    src/city/arena_fights.js + arena_venue.js — ARENA_FIGHTS,
-  //              _SOLID_PROPS, _VENUE_V2, _CROWD_PROXY, _LIGHT_RIG, _JUMBOTRON
+  //              _SOLID_PROPS, _VENUE_V2, _CROWD_PROXY, _LIGHT_RIG, _JUMBOTRON,
+  //              _SITE (the arrival: drivable causeway + its road record,
+  //              perimeter, gate, monument, car park, service yard, staff)
   //   BLD_*      src/city/buildings_civic.js — _MASONRY_V1, _MASONRY_TEXTURE,
   //              _CIVIC_LOTS_V1, _CIVIC_PODIUM, _ROOF_CLUTTER_V1, _WEATHERING_V1
   //   RENDER_*   src/core/renderer.js — _TONEMAP_V1, _GRADE_V1, _HEIGHT_FOG_V1,
