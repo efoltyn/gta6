@@ -136,6 +136,14 @@
   // edges share identical vertices (no T-junction cracks) while the adaptive
   // CDF concentrates lines on the relief sector and thins them over open sea.
   if (CFG.TERRAIN_TILE_SEG == null) CFG.TERRAIN_TILE_SEG = 88;
+  // TERRAIN_SHELF_LAND_CUTOUT — the visual field keeps a teal seabed at -1.8
+  // below the playable world. That belongs under real water, but it used to
+  // remain opaque below dry land too. From an aircraft the depth buffer can no
+  // longer resolve its ~1.8 m separation from the country plate; the later
+  // teal draw then replaces green ground around biome/stadium/highway slabs.
+  // Use the ocean's published shoreline texture as the ONE pixel-ownership
+  // mask. Off restores the old overlapping shelf as a one-line revert.
+  if (CFG.TERRAIN_SHELF_LAND_CUTOUT == null) CFG.TERRAIN_SHELF_LAND_CUTOUT = true;
   // TERRAIN_RING_AMP — scale foreshortening dial. The offshore ranges are the
   // same world-unit height as the walkable ones but sit 150-2050u further out,
   // so they read SMALLER. This multiplies their upper two-thirds only, through
@@ -443,6 +451,53 @@
     };
     return mat;
   };
+
+  // ---- dry-land ownership for the visual seabed ------------------------
+  // city/world.js publishes the same 640² shoreline field the ocean samples:
+  // red > 0.5 means dry land and the water fragment discards itself. The
+  // decorative shelf must make that identical decision. Draw order, a larger
+  // vertical gap, or another polygon offset only moves the camera distance at
+  // which two opaque owners collapse onto one depth value.
+  const _shelfLandMaskU = { value: null };
+  const _shelfLandBoundsU = { value: new THREE.Vector4(0, 0, 1, 1) };
+  const _shelfHasLandMaskU = { value: 0 };
+  function syncShelfLandMask() {
+    const tex = CBZ.citySeaFieldTexture || null;
+    _shelfLandMaskU.value = tex;
+    _shelfHasLandMaskU.value = tex ? 1 : 0;
+    if (CBZ.citySeaFieldBounds) _shelfLandBoundsU.value.copy(CBZ.citySeaFieldBounds);
+  }
+  function terrainShelfLandCutout(mat) {
+    if (!mat || CFG.TERRAIN_SHELF_LAND_CUTOUT === false) return mat;
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (sh) {
+      if (prev) prev.call(this, sh);
+      syncShelfLandMask();
+      sh.uniforms.uCbzShelfLandMask = _shelfLandMaskU;
+      sh.uniforms.uCbzShelfLandBounds = _shelfLandBoundsU;
+      sh.uniforms.uCbzShelfHasLandMask = _shelfHasLandMaskU;
+      sh.vertexShader = "varying vec2 vCbzShelfWorldXZ;\n" + sh.vertexShader
+        .replace("#include <worldpos_vertex>",
+          "#include <worldpos_vertex>\n" +
+          "vCbzShelfWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;");
+      sh.fragmentShader =
+        "uniform sampler2D uCbzShelfLandMask;\n" +
+        "uniform vec4 uCbzShelfLandBounds;\n" +
+        "uniform float uCbzShelfHasLandMask;\n" +
+        "varying vec2 vCbzShelfWorldXZ;\n" +
+        sh.fragmentShader.replace("#include <clipping_planes_fragment>",
+          "#include <clipping_planes_fragment>\n" +
+          "if (uCbzShelfHasLandMask > 0.5) {\n" +
+          "  vec2 cbzSpan = max(uCbzShelfLandBounds.zw - uCbzShelfLandBounds.xy, vec2(1.0));\n" +
+          "  vec2 cbzUv = (vCbzShelfWorldXZ - uCbzShelfLandBounds.xy) / cbzSpan;\n" +
+          "  if (all(greaterThanEqual(cbzUv, vec2(0.0))) && all(lessThanEqual(cbzUv, vec2(1.0))) &&\n" +
+          "      texture2D(uCbzShelfLandMask, cbzUv).r > 0.5) discard;\n" +
+          "}");
+    };
+    mat.userData = mat.userData || {};
+    mat.userData._cbzShelfLandCutout = true;
+    return mat;
+  }
 
   // ---- day-tracking brightness for UNLIT terrain/world materials ---------
   // A MeshBasicMaterial renders its authored colours at full brightness
@@ -916,7 +971,7 @@
     const TILES = 4, TSPAN = SPAN / TILES;
     const TSEG = Math.max(24, Math.min(192, +CFG.TERRAIN_TILE_SEG || 76));
     const SMOOTH_SHADE = CFG.TERRAIN_SMOOTH_SHADE !== false;
-    const terrMat = CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
+    const terrMat = terrainShelfLandCutout(CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
       // SMOOTH now: the walkable Mount Mercy / Greater Mercy meshes sitting
       // directly in front of this backdrop are smooth-shaded, so flat facets
       // here drew a hard style seam exactly where the two ranges meet. The
@@ -925,7 +980,7 @@
       // were only implying it.
       color: 0xffffff, vertexColors: true, flatShading: !SMOOTH_SHADE, fog: true,
       transparent: false, opacity: 1, depthTest: true, depthWrite: true,
-    }));
+    })));
     const _c = new THREE.Color();
     const _nrm = new THREE.Vector3();
     const _lightDir = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
@@ -1013,6 +1068,7 @@
       tile.castShadow = false;
       tile.matrixAutoUpdate = false; tile.updateMatrix();
       tile.userData.terrain = true;        // batch + farcull exempt
+      tile.userData.terrainBackdropTile = true;
       root.add(tile);
       terrainTiles.push(tile);
     }
@@ -1087,10 +1143,10 @@
     const liveSpan = Math.max(FLAT.maxX - FLAT.minX, FLAT.maxZ - FLAT.minZ) + 1500;
     const SPAN = Math.max(6000, Math.ceil(liveSpan / 500) * 500);
     const TILES = 4, TSPAN = SPAN / TILES, TSEG = 76;
-    const terrMat = CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
+    const terrMat = terrainShelfLandCutout(CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
       color: 0xffffff, vertexColors: true, flatShading: true, fog: true,
       transparent: false, opacity: 1, depthTest: true, depthWrite: true,
-    }), 0.16);
+    }), 0.16));
     const _c = new THREE.Color();
     const terrainTiles = [];
     for (let tj = 0; tj < TILES; tj++) for (let ti = 0; ti < TILES; ti++) {
@@ -1125,6 +1181,7 @@
       tile.castShadow = false;
       tile.matrixAutoUpdate = false; tile.updateMatrix();
       tile.userData.terrain = true;
+      tile.userData.terrainBackdropTile = true;
       root.add(tile);
       terrainTiles.push(tile);
     }
@@ -1179,6 +1236,27 @@
     if (!root) return null;
     _built = CFG.TERRAIN_EROSION_V3 !== false ? buildV3(root) : buildV2(root);
     return _built;
+  };
+
+  // Render-ownership probe for the orchestrator. The physics-facing height
+  // oracle is intentionally flat over this visual shelf, so backdropAudit()
+  // cannot detect whether its material still owns dry-land pixels.
+  CBZ.terrainShelfAudit = function () {
+    syncShelfLandMask();
+    let tiles = 0, protectedTiles = 0;
+    const root = CBZ.city && CBZ.city.root;
+    if (root && root.traverse) root.traverse(function (o) {
+      if (!o.isMesh || !o.userData || !o.userData.terrainBackdropTile) return;
+      tiles++;
+      const m = o.material;
+      if (m && m.userData && m.userData._cbzShelfLandCutout) protectedTiles++;
+    });
+    return {
+      tiles: tiles,
+      protectedTiles: protectedTiles,
+      maskReady: !!_shelfLandMaskU.value,
+      unprotected: CFG.TERRAIN_SHELF_LAND_CUTOUT === false ? 0 : (tiles - protectedTiles),
+    };
   };
 
   // ---- CALL SITE — nothing ever invoked buildTerrain (the index.html
