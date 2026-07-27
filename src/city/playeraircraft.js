@@ -48,6 +48,8 @@
   // craft stay byte-for-byte on their old booms). false restores the old fixed
   // constants.
   if (CBZ.CONFIG && CBZ.CONFIG.CAM_AIRCRAFT_FIT == null) CBZ.CONFIG.CAM_AIRCRAFT_FIT = true;
+  // Keep aircraft out of the collision-free backdrop range. One-line revert.
+  if (CBZ.CONFIG && CBZ.CONFIG.AIR_RING_BOUND == null) CBZ.CONFIG.AIR_RING_BOUND = true;
 
   // ---- NEW MATERIAL API (carfx.js) — fake-reflection env-mapped vehicle mats
   // for instant shine. Falls back to the flat cached cmat() if carfx hasn't
@@ -1422,7 +1424,72 @@
     else if (pos.x > maxX) { pos.x = maxX; if (craft && craft.vx > 0) craft.vx = 0; }
     if (pos.z < minZ) { pos.z = minZ; if (craft && craft.vz < 0) craft.vz = 0; }
     else if (pos.z > maxZ) { pos.z = maxZ; if (craft && craft.vz > 0) craft.vz = 0; }
+
+    /* ---- AND OUT OF THE DECORATIVE MOUNTAINS -------------------------------
+       The box above protects the WORLD EDGE. Nothing protected the BACKDROP
+       RING, and the two are not the same circle: the sea box reaches ~3500-4000
+       from centre while world/terrain.js's ring starts at `near` (~1900), so
+       there was a 1600-2000 unit deep band where an aircraft was inside the
+       legal box and already flying THROUGH a 1441 m mountain range. On foot
+       you cannot reach it; in the air you fly through it.
+
+       That range is collision-free ON PURPOSE — CBZ.floorAt deliberately
+       excludes it, and floorAt is now called per car per frame, so making the
+       backdrop solid there would tax every ground query in the game to fix a
+       problem only aircraft have. So the check lives HERE, in the one update
+       that aircraft run, and nowhere else. That is the general shape for
+       "solid to one class of entity only": keep it local to that entity, and
+       resolve it against a number the terrain system already publishes.
+
+       The radius is NOT hard-coded: CBZ.terrainRingRadii() is the same
+       function terrain.js uses to place the ring, so if WORLD_ENLARGE_FLAT
+       ever grows the world again the boundary grows with it — which is the
+       failure this whole session kept hitting (a constant measured once
+       against a world that later moved).
+
+       TELEGRAPHED, NOT SILENT. A wall you hit with no warning reads as
+       arbitrary; the same wall with a beat of warning reads as a boundary.
+       Inside the warn band the craft gets a `_airspaceWarn` stamp the HUD can
+       surface; only past the hard line is position clamped and the OUTWARD
+       velocity component killed. */
+    if (CBZ.CONFIG && CBZ.CONFIG.AIR_RING_BOUND === false) return;
+    const RING = CBZ.terrainRingRadii ? CBZ.terrainRingRadii() : null;
+    if (!RING || !RING.near) return;
+    // centre on the same box the clamp above derives, so the two agree
+    const ccx = (b.min.x + b.max.x) / 2, ccz = (b.min.z + b.max.z) / 2;
+    const dx = pos.x - ccx, dz = pos.z - ccz;
+    const d2 = dx * dx + dz * dz;
+    const hard = RING.near - 90;          // stop short of the nearest rock face
+    const warn = hard - 260;              // ~4-6 s of warning at cruise
+    if (d2 <= warn * warn) { if (craft) craft._airspaceWarn = 0; return; }
+    const d = Math.sqrt(d2) || 1;
+    if (craft) craft._airspaceWarn = Math.min(1, (d - warn) / Math.max(1, hard - warn));
+    if (d <= hard) return;
+    const nx = dx / d, nz = dz / d;       // outward unit
+    pos.x = ccx + nx * hard; pos.z = ccz + nz * hard;
+    if (craft) {
+      const out = craft.vx * nx + craft.vz * nz;   // outward component only
+      if (out > 0) { craft.vx -= out * nx; craft.vz -= out * nz; }
+      craft._airspaceWarn = 1;
+    }
   }
+
+  /* Evidence for the gate: how much clear air actually separates the flyable
+     box from the decorative range. `slackToRing` going NEGATIVE means an
+     aircraft can reach the rock again — which is exactly what happened when
+     the world grew and the boundary did not. */
+  CBZ.airspaceAudit = function () {
+    const RING = CBZ.terrainRingRadii ? CBZ.terrainRingRadii() : null;
+    const b = airspaceBounds || { min: { x: -3190, z: -4250 }, max: { x: 3810, z: 2750 } };
+    const half = Math.max((b.max.x - b.min.x) / 2, (b.max.z - b.min.z) / 2);
+    const hard = RING ? RING.near - 90 : 0;
+    return {
+      ringNear: RING ? RING.near : 0, ringFar: RING ? RING.far : 0,
+      boxHalfExtent: Math.round(half), hardRadius: Math.round(hard),
+      slackToRing: RING ? Math.round(RING.near - hard) : 0,
+      bounded: !!(RING && RING.near) && !(CBZ.CONFIG && CBZ.CONFIG.AIR_RING_BOUND === false),
+    };
+  };
 
   // ---- spin every rotor a craft owns: the builder bars on OUR heli (group
   // userData.rotor/rotor2/trotor/trotor2 — 90° phase keeps the crossed bars a

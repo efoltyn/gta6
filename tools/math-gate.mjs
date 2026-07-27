@@ -461,6 +461,36 @@ const PASS = `(() => {
     // Stunt ramps must never land on ground somebody closed (the apron).
     if (CBZ.cityStuntAudit) { const sj = CBZ.cityStuntAudit(); out.stunts = sj.ramps + " ramps refusedAirside=" + sj.refusedAirside;
       if (!sj.ramps) out.fails.push("EVERY STUNT RAMP VANISHED — the keep-out guard is too aggressive"); }
+    // SHADER PREWARM. renderer.compile walks with scene.traverse, and a throw
+    // inside that callback unwinds the WHOLE walk — so one mesh carrying a raw
+    // colour instead of a Material silently killed prewarming for everything
+    // after it in traversal order, behind a catch that printed nothing.
+    // unwarmed and badMaterials both belong at 0. programs is EVIDENCE: it
+    // counts unique shader permutations, which are keyed on a tuple that
+    // includes exact light COUNTS — so a rising number here is where to look
+    // if a first-encounter stutter survives.
+    if (CBZ.fxWarmAudit) {
+      const fw = CBZ.fxWarmAudit();
+      out.fxwarm = fw.materials + "mat unwarmed=" + fw.unwarmed + " bad=" + fw.badMaterials + " programs=" + fw.programs;
+      if (fw.badMaterials > 0) out.fails.push("OBJECTS WITH A NON-MATERIAL .material: " + fw.badMaterials);
+    }
+    // groundAt is called per vehicle per frame; it linear-scanned every
+    // platform until the 20-tier stadium took the world to ~3000 records.
+    if (CBZ.platformGridAudit) {
+      const pg = CBZ.platformGridAudit();
+      out.platGrid = pg.platforms + "plat " + pg.cells + "cells mean=" + pg.meanBucket + " max=" + pg.maxBucket + " giants=" + pg.giants;
+      if (pg.platforms > 200 && pg.cells === 0) out.fails.push("PLATFORM GRID NOT BUILT — groundAt is still linear-scanning " + pg.platforms);
+    }
+    // The flyable box protects the world edge; the decorative mountain ring is
+    // a different circle. slackToRing going negative means aircraft can reach
+    // the rock again — which is what happened when the world grew and this
+    // boundary did not.
+    if (CBZ.airspaceAudit) {
+      const as = CBZ.airspaceAudit();
+      out.airspace = "ring " + as.ringNear + " hard " + as.hardRadius + " slack " + as.slackToRing + (as.bounded ? "" : " UNBOUNDED");
+      if (!as.bounded) out.fails.push("AIRCRAFT CAN FLY INTO THE DECORATIVE BACKDROP — no radial bound");
+      if (as.slackToRing < 0) out.fails.push("AIRSPACE HARD RADIUS IS OUTSIDE THE MOUNTAIN RING: slack " + as.slackToRing);
+    }
     if (CBZ.powerAudit) {
       const pw = CBZ.powerAudit();
       out.power = pw.principals + "p/" + pw.guarded + "g legacy=" + pw.legacyGuardSites;
@@ -559,6 +589,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
+  tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);

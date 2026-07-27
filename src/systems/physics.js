@@ -241,13 +241,86 @@
   // is the feet height we're testing from — a platform only counts as support
   // if it's no more than STEP_UP above us (so you can't walk up a sheer wall,
   // only stairs). In the prison there are no platforms, so this is just terrain.
+  /* ---- THE PLATFORM GRID -------------------------------------------------
+     groundAt LINEARLY SCANNED every platform record — and it is called per
+     vehicle per frame, plus by the player, plus by every ground query in the
+     game. That was tolerable at a few hundred records; the 20-tier stadium
+     pushes one platform PER DECK ROW and took the world to ~3,000.
+
+     This is deliberately NOT a new data structure. Twenty lines up this same
+     file already solves the identical problem for ~5,000 colliders with a
+     SPARSE uniform bucket grid, and that pattern is the right one here: at a
+     few thousand axis-aligned rects queried BY POINT, a grid is O(1) with a
+     tiny constant, while an R-tree's O(log n) only starts winning somewhere
+     above ~10k or under real density skew. A third-party index would also owe
+     this repo's determinism law an audit of its bulk-load order, for nothing.
+     So: same shape, same key scheme, own cell size.
+
+     TWO THINGS THE COLLIDER GRID ALREADY GETS RIGHT AND WE INHERIT:
+     • MULTI-CELL INSERTION into a SPARSE Map. A doorstep touches one cell, a
+       stadium deck touches many, and memory grows only with OCCUPIED cells —
+       a dense array at this cell size over a ~7000-unit world would be ~750k
+       cells that are mostly nothing.
+     • Rebuild keyed on array length, so a world rebuild re-buckets and nothing
+       else has to remember to.
+     PLUS ONE THIS PROBLEM NEEDS AND THAT ONE DOES NOT: a genuinely enormous
+     platform would smear across hundreds of cells and bloat every bucket near
+     it, so anything wider than GIANT goes in a short unconditional list
+     instead. There are very few, and it keeps the common bucket short. */
+  const PLAT_CELL = 24;         // platforms skew far bigger than wall colliders
+  const PLAT_GIANT = 240;       // wider than this and it goes in the small list
+  const platBuckets = new Map();
+  const platGiant = [];
+  const EMPTY_PLATS = [];
+  let platCount = -1;
+
+  function rebuildPlatformGrid() {
+    platBuckets.clear(); platGiant.length = 0;
+    const plats = CBZ.platforms;
+    for (let i = 0; i < plats.length; i++) {
+      const p = plats[i];
+      if (!p) continue;
+      if ((p.maxX - p.minX) > PLAT_GIANT || (p.maxZ - p.minZ) > PLAT_GIANT) { platGiant.push(p); continue; }
+      const x0 = Math.floor(p.minX / PLAT_CELL), x1 = Math.floor(p.maxX / PLAT_CELL);
+      const z0 = Math.floor(p.minZ / PLAT_CELL), z1 = Math.floor(p.maxZ / PLAT_CELL);
+      for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) {
+        const k = colKey(gx, gz);
+        let b = platBuckets.get(k);
+        if (!b) { b = []; platBuckets.set(k, b); }
+        b.push(p);
+      }
+    }
+    platCount = plats.length;
+  }
+  // The candidate list under a point: one Map lookup plus the giants.
+  function platsAt(x, z) {
+    const plats = CBZ.platforms;
+    if (platCount !== plats.length) rebuildPlatformGrid();
+    const b = platBuckets.get(colKey(Math.floor(x / PLAT_CELL), Math.floor(z / PLAT_CELL)));
+    if (!b) return platGiant.length ? platGiant : EMPTY_PLATS;
+    if (!platGiant.length) return b;
+    return b.concat(platGiant);
+  }
+  CBZ.platformGridAudit = function () {
+    const plats = CBZ.platforms || [];
+    if (platCount !== plats.length) rebuildPlatformGrid();
+    let maxBucket = 0, total = 0;
+    platBuckets.forEach(function (b) { total += b.length; if (b.length > maxBucket) maxBucket = b.length; });
+    return {
+      platforms: plats.length, cells: platBuckets.size, giants: platGiant.length,
+      meanBucket: platBuckets.size ? +(total / platBuckets.size).toFixed(1) : 0,
+      maxBucket: maxBucket, cell: PLAT_CELL,
+    };
+  };
+
   function groundAt(x, z, fromY) {
     let best = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
     const plats = CBZ.platforms;
     if (plats.length && CBZ.game.mode !== "escape") {
       const reach = (fromY != null ? fromY : best) + STEP_UP;
-      for (let i = 0; i < plats.length; i++) {
-        const p = plats[i];
+      const cand = platsAt(x, z);
+      for (let i = 0; i < cand.length; i++) {
+        const p = cand[i];
         if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
         // stairs are stored as a sloped ramp so you glide up smoothly instead
         // of hopping tread to tread; flat floors/roofs just use their top.

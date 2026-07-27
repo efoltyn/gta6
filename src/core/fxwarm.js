@@ -37,6 +37,109 @@
     warmed = key;                  // one attempt per mode entry, success or not
     const r = CBZ.renderer, sc = CBZ.scene, cam = CBZ.camera;
     if (!r || typeof r.compile !== "function" || !sc || !cam) return;
-    try { r.compile(sc, cam); } catch (e) {}
+    warm(r, sc, cam);
   });
+
+  /* ==================================================================
+     WHY THIS IS NOT JUST `r.compile(sc, cam)` IN A TRY/CATCH ANY MORE.
+
+     `renderer.compile` walks the scene with `scene.traverse` and, for every
+     object, calls `properties.get(material)` — and `WebGLProperties` is a raw
+     `WeakMap`. A WeakMap key MUST be an object, so the instant it reaches a
+     mesh whose `.material` is a raw colour INTEGER instead of a Material, it
+     throws `TypeError: Invalid value used as weak map key`.
+
+     THE BLAST RADIUS IS THE PART THAT WAS MISSED. `traverse` is depth-first
+     and the throw unwinds the WHOLE walk — so the first bad material does not
+     merely fail to warm itself, it ABORTS PREWARMING FOR EVERY OBJECT AFTER IT
+     IN TRAVERSAL ORDER. The old body was `try { r.compile(sc, cam); } catch
+     (e) {}`: completely silent. So the loss was never even 29% of the scene
+     with certainty — it was "everything after the first offender", and nobody
+     could tell, because the catch printed nothing for however long it was live.
+
+     THE FIX IS TO MAKE THE WALK ANTIFRAGILE, not to chase the current
+     offenders. Before compiling we swap a shared dummy Material over anything
+     whose `.material` is not a Material, compile, then restore. `compile()`
+     never renders a frame, so the swap is invisible by construction. A future
+     bad material costs one warning line instead of the rest of the scene.
+
+     r128 NOTE, checked against the vendored source: `compileAsync` and
+     `KHR_parallel_shader_compile` do not exist here — they landed in r158, 30
+     revisions later — so this is synchronous by necessity, not by choice.
+     `renderer.info.programs` and `renderer.properties` ARE public in r128,
+     which is what makes the audit below possible without patching three.js.
+     ================================================================== */
+  let DUMMY = null;
+  let lastReport = null;
+
+  function warm(r, sc, cam) {
+    const THREE = window.THREE;
+    if (!DUMMY && THREE) { DUMMY = new THREE.MeshBasicMaterial({ color: 0x808080 }); DUMMY._fxwarmDummy = true; }
+    const swapped = [];
+    let bad = 0;
+    try {
+      sc.traverse(function (o) {
+        if (!o || !("material" in o) || !o.material) return;
+        const m = o.material;
+        if (Array.isArray(m)) {
+          let dirty = false;
+          for (let i = 0; i < m.length; i++) if (!m[i] || !m[i].isMaterial) dirty = true;
+          if (dirty) { bad++; swapped.push([o, m]); o.material = DUMMY; }
+          return;
+        }
+        if (!m.isMaterial) { bad++; swapped.push([o, m]); o.material = DUMMY; }
+      });
+    } catch (e) {
+      try { console.warn("[fxwarm] material scan failed:", e && e.message); } catch (e2) {}
+    }
+    let err = null;
+    try { r.compile(sc, cam); } catch (e) { err = e; }
+    for (let i = 0; i < swapped.length; i++) swapped[i][0].material = swapped[i][1];
+    // LOUD, ONCE. The whole reason this bug survived is that its predecessor
+    // said nothing at all.
+    if (bad || err) {
+      try {
+        console.warn("[fxwarm] " + bad + " object(s) carry a non-Material `.material` (a raw colour?) — " +
+          "they were swapped for a dummy so the prewarm walk could finish" +
+          (err ? "; compile still threw: " + (err && err.message) : ""));
+      } catch (e2) {}
+    }
+    lastReport = { badMaterials: bad, threw: !!err, programs: (r.info && r.info.programs && r.info.programs.length) || 0 };
+  }
+
+  /* THE RATCHET. `renderer.properties` is public in r128, and a material that
+     was actually compiled has a non-empty `programs` set on its property
+     record — so "how much of the scene never got warmed" stops being a guess.
+     `unwarmed` and `badMaterials` both belong at 0. `programs` is evidence:
+     it is the count of unique SHADER PERMUTATIONS, and permutations are keyed
+     on a ~50-field tuple that includes the exact COUNTS of each light type —
+     so a world with dynamic lighting can still compile fresh programs after
+     boot, and a rising number here is the thing to look at if a stutter
+     survives this fix. */
+  CBZ.fxWarmAudit = function () {
+    const r = CBZ.renderer, sc = CBZ.scene;
+    const out = { materials: 0, unwarmed: 0, badMaterials: 0, programs: 0, warmedMode: warmed };
+    if (!r || !sc) return out;
+    out.programs = (r.info && r.info.programs && r.info.programs.length) || 0;
+    if (lastReport) out.badMaterials = lastReport.badMaterials;
+    const seen = new Set();
+    try {
+      sc.traverse(function (o) {
+        if (!o || !("material" in o) || !o.material) return;
+        const list = Array.isArray(o.material) ? o.material : [o.material];
+        for (let i = 0; i < list.length; i++) {
+          const m = list[i];
+          if (!m) continue;
+          if (!m.isMaterial) { out.badMaterials++; continue; }
+          if (seen.has(m)) continue;
+          seen.add(m);
+          out.materials++;
+          let p = null;
+          try { p = r.properties && r.properties.get(m); } catch (e) { p = null; }
+          if (!p || !p.programs || !p.programs.size) out.unwarmed++;
+        }
+      });
+    } catch (e) {}
+    return out;
+  };
 })();
