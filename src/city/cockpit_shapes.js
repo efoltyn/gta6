@@ -436,7 +436,7 @@
 
       // WINDSCREEN — one pane raked on the same axis as the centre post, so
       // it lands flush inside the forward bow rather than floating in it.
-      const wsH = Math.max(0.24, (railY + railHW * 0.42) - (topY + gRise));
+      var wsH = Math.max(0.24, (railY + railHW * 0.42) - (topY + gRise));
       const ws = put(new THREE.PlaneGeometry(gw, wsH), gMat);
       ws.position.set(ex,
         topY + gRise + (wsH / 2) * Math.cos(wsTilt),
@@ -445,6 +445,36 @@
       ws.name = "cockpit-windscreen";
       ws.renderOrder = 6;               // after the opaque interior, always
       ws.userData.glass = true;
+
+      // THE NOSE, FROM THE INSIDE (owner: "the front of planes looks good from
+      // outside, not from inside" / "the front of planes needs some redoing").
+      // From the seat, the forward structure was a hood and then NOTHING — the
+      // windscreen ended and the world began, with no coaming, no nose deck and
+      // no wiper. So the aircraft appeared to have no front at all: you looked
+      // straight off the edge of the glareshield into open sky, which is why the
+      // outside read fine and the inside did not. These are the three parts you
+      // genuinely see over the panel of a real aeroplane.
+      const noseW = gW * 0.94;
+      // the coaming rail capping the top of the windscreen — closes the frame
+      const coam = put(taper(noseW, 0.05, 0.10, { top: 0.7, bot: 0.9 }), mFrame);
+      coam.position.set(ex,
+        topY + gRise + wsH * Math.cos(wsTilt) + 0.02,
+        topZ + 0.055 - wsH * Math.sin(wsTilt));
+      coam.rotation.x = -wsTilt;
+      coam.name = "cockpit-coaming";
+      // the NOSE DECK visible beyond the glass — the sloping skin ahead of the
+      // windscreen that tells you where the aircraft ENDS
+      const deck = put(taper(noseW * 0.86, 0.05, D.noseLen != null ? D.noseLen : 0.62,
+        { nz: 0.55, tz: 0.34, top: 0.8, bot: 0.8, segD: 3 }), mHood);   // the hull skin ahead of the screen wears the hood tone
+      deck.position.set(ex, topY + gRise - 0.10, topZ + (D.noseLen != null ? D.noseLen : 0.62) * 0.5 + 0.10);
+      deck.rotation.x = 0.09;                    // falls away toward the nose
+      deck.name = "cockpit-nosedeck";
+      // one wiper parked at the base of the screen — tiny, and it is the detail
+      // that says "this glass is real and someone maintains it"
+      const wip = put(taper(0.02, 0.02, 0.30, { top: 0.7, bot: 0.7 }), mFrame);
+      wip.position.set(ex - noseW * 0.22, topY + gRise + 0.03, topZ + 0.08);
+      wip.rotation.x = -wsTilt + 0.12;
+      wip.name = "cockpit-wiper";
 
       // SIDE LIGHTS — the panes your peripheral vision actually reads while
       // you bank. Hung on the rails, canted in slightly at the top the way a

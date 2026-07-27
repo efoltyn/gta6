@@ -550,7 +550,12 @@
     // below suspension/vehicle tolerances, but gives the depth buffer one
     // unambiguous winner at junctions.
     const deckLayer = elevated ? 0 : ((_highways.length % 8) * 0.0008);
-    const deckY = (elevated ? 2.5 : 0.05) + deckLayer;
+    // Lifted 0.05 -> 0.085 for the same reason city/world.js widened its own
+    // road ladder: a highway deck laid across the city grid was sitting 5mm
+    // above the cross-street quads (0.045), which is inside depth precision at
+    // altitude and flickers. 85mm clears the whole city ladder and is still
+    // flush kerb height.
+    const deckY = (elevated ? 2.5 : 0.085) + deckLayer;
 
     // ---- TERRAIN-FOLLOWING GRADE (optional): long causeways cross genuinely
     //      non-flat world/terrain.js relief near the map rim. opts.heightAt

@@ -97,7 +97,15 @@
     clank: fx([O + "sfx100v2_metal_hit_01.m4a", K + "impactMetal_heavy_000.m4a", K + "impactMetal_heavy_001.m4a"], 0.54, 0.14),
     glass: fx([O + "sfx100v2_glass_03.m4a", O + "sfx100v2_glass_05.m4a", K + "impactGlass_heavy_000.m4a", K + "impactGlass_heavy_001.m4a"], 0.66, 0.08),
     alarm: fx([R + "alarm1.mp3", R + "alarm4.mp3"], 0.58, 0.48),
-    siren: fx([W + "disaster_siren.m4a"], 0.62, 1.8),
+    // POLICE SIREN, not an air-raid alarm (owner: "I hate the wanted sound —
+    // there is no sound for being wanted in real life, only the siren of a real
+    // cop"). "siren" is fired by seven call sites that all mean A POLICE UNIT IS
+    // NEARBY, and every one of them was playing disaster_siren.m4a — a
+    // civil-defence wail. That is why being wanted felt like an air raid rather
+    // than like being chased: the sound was announcing a STATE, not a vehicle.
+    // Pitched up and shortened so it reads as a car passing rather than a town
+    // being evacuated, and quieter so the real cue is the cop you can see.
+    siren: layers([part([W + "disaster_siren.m4a"], 0.34, 1.42, 1.62)], 1.9),
     lockdown: fx([W + "lockdown_brief.m4a"], 0.6, 1.0),   // BRIEF jail-lockdown siren (one-shot, not a loop)
 
     step: fx([

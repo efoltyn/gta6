@@ -333,8 +333,21 @@
       else paintStreet((minX + maxX) / 2, z, false, spanX, false);
       roads.push({ x: (minX + maxX) / 2, z, vertical: false, len: spanX, w: ROAD });
     });
-    quadField(aveRects, roadMat, 0.04);
-    quadField(crossRects, roadMat, 0.045);
+    // ROAD FLICKER (owner, from an aerial screenshot: "the roads flicker").
+    // Avenues sat at 0.040 and cross-streets at 0.045 — a FIVE MILLIMETRE gap
+    // between two big coplanar quads that overlap at every single intersection.
+    // Up close the depth buffer resolves that fine; from altitude, where the
+    // near/far range is enormous and precision collapses, 5mm is inside the
+    // noise and the two surfaces trade places per frame. That is the flicker,
+    // and it appears exactly on the grid crossings because that is the only
+    // place the two layers overlap.
+    //
+    // polygonOffset cannot fix this one: both fields share the SAME roadMat
+    // instance, so any offset would move them together. Widening the ladder to
+    // 25mm is the honest fix — still visually flat asphalt, four times the
+    // depth separation.
+    quadField(aveRects, roadMat, 0.040);
+    quadField(crossRects, roadMat, 0.065);
     // bake ALL lane paint into two merged flat meshes (white + yellow).
     // PAINTED, NOT GEOMETRY: every marking material is a polygonOffset decal —
     // the depth offset (factor/units -2) does the separation from the asphalt,

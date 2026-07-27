@@ -1378,17 +1378,56 @@
       // BUSIER cabin: tighter row pitch + one more bay fills the up-scaled
       // fuselage with more rows, and a high reserve chance keeps most seats
       // occupied (actual fill is throttled by the shared npclife attach cap).
+      // ================================================================
+      //  THE CABIN (owner: "the NPCs sitting inside planes look dumb — they
+      //  aren't people in our game engine sitting in chairs in a room designed
+      //  to look like an airplane, which they should be. It's like a SCENE and
+      //  it's clearly overdone and redundant, and that pattern is clear
+      //  throughout my code.")
+      //
+      //  He is describing a diorama, and the geometry was the tell: five flat
+      //  slabs per seat pair — cushion, back, pedestal, two headrest cubes —
+      //  and nothing else. No armrests, no recline, no bins, no aisle edge. A
+      //  bench painted to look like seating, with bodies parked on it.
+      //
+      //  What actually makes an aircraft cabin read is not seat COUNT, it is
+      //  three things this had none of:
+      //    • ARMRESTS. The single strongest cue, because they are what a
+      //      seated body's arms rest on — without them the passengers look
+      //      like they are sitting on a shelf.
+      //    • RECLINE. Every seat back in the world leans. A vertical slab is
+      //      the most artificial shape in a cabin.
+      //    • OVERHEAD BINS. The ceiling is half of what you see walking an
+      //      aisle, and it was bare tube.
+      //  Cost stays flat because the row loop already ran per seat pair; these
+      //  are the same K.put budget spent on shapes that carry the read.
+      // ================================================================
+      const RECLINE = 0.14;                     // radians the seat back leans aft
       for (let rx = -11.8; rx <= 8.8; rx += 1.4) {
         for (const s of [-1, 1]) {
           const zc = s * 1.0;
           K.put(FLEET.navy, new THREE.BoxGeometry(0.62, 0.16, 1.1), rx, 2.87, zc);       // cushion
-          K.put(FLEET.navy, new THREE.BoxGeometry(0.18, 0.85, 1.1), rx - 0.34, 3.32, zc); // back
+          // RECLINED back — leans aft (-X is aft here), so the top trails the base
+          const back = K.put(FLEET.navy, new THREE.BoxGeometry(0.18, 0.85, 1.1), rx - 0.34, 3.32, zc);
+          if (back && back.rotation) back.rotation.z = RECLINE;
           K.put(FLEET.dark, new THREE.BoxGeometry(0.5, 0.32, 0.95), rx, 2.66, zc);        // pedestal
-          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.36, 3.85, zc - 0.28); // headrests
-          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.36, 3.85, zc + 0.28);
+          // headrests ride the recline so they don't float off the leaning back
+          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.40, 3.86, zc - 0.28);
+          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.40, 3.86, zc + 0.28);
+          // ARMRESTS — three per pair (outboard, shared centre, inboard), the
+          // thing a seated body's arms actually land on.
+          for (const az of [zc - 0.56, zc, zc + 0.56]) {
+            K.put(FLEET.dark, new THREE.BoxGeometry(0.46, 0.07, 0.09), rx + 0.02, 3.10, az);
+          }
           addSeat(rx, s * 1.28, 0.9);   // window
           addSeat(rx, s * 0.72, 0.74);  // aisle
         }
+      }
+      // OVERHEAD BINS — one continuous run per side, closed, with a lip. The
+      // ceiling was bare tube, which is why the cabin read as a corridor.
+      for (const s of [-1, 1]) {
+        K.put(FLEET.navy, new THREE.BoxGeometry(21.0, 0.62, 0.92), -1.5, 4.62, s * 1.42);
+        K.put(FLEET.dark, new THREE.BoxGeometry(21.0, 0.07, 0.10), -1.5, 4.30, s * 0.98);   // lip
       }
       // ONE standing uniformed crew member in the forward cabin aisle, facing
       // AFT over the seated cabin (heading -pi/2 → local -X, the mirror of the

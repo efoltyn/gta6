@@ -6267,7 +6267,9 @@
         // A gang hideout reads best as a run-down BRICK walk-up (soot streaks,
         // a peeling ghost sign, a corbelled cornice missing chunks) rather than
         // another glass box. Position-hashed, no rng draw; low-rise only.
-        const hideBrick = CBZ.hash01 && storeys <= 4 && CBZ.hash01(lot.cx, lot.cz, 0xb21e) < 0.62;
+        // same leak as the residential brick below — honour the purge flag
+        const hideBrick = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false)
+          && CBZ.hash01 && storeys <= 4 && CBZ.hash01(lot.cx, lot.cz, 0xb21e) < 0.62;
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: hideBrick ? "brick" : "office", district: districtKind(lot) });
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
@@ -6614,7 +6616,16 @@
         // owner likes downtown is the glass one).
         const brickOdds = dk === "residential" ? 0.74 : dk === "projects" ? 0.68
           : dk === "industrial" ? 0.46 : dk === "commercial" ? 0.26 : 0.08;
-        const wantBrick = storeys <= 7 && CBZ.hash01 && CBZ.hash01(lot.cx, lot.cz, 0xb21d) < brickOdds;
+        // THE PURGE HAS TO BITE HERE (owner, with a screenshot: "do you see how
+        // there are weird building types overlapping with our beautiful glass
+        // building towns that we designed"). This line was the leak: it decided
+        // brick from a position hash ALONE and never consulted BLD_MASONRY_V1,
+        // so turning the masonry flag off still left every residential lot
+        // ASKING for a brick facade and relying on a downstream collapse that
+        // did not reach the shell. The flag is now read at the source, which is
+        // the only place that can actually stop a brick building existing.
+        const brickAllowed = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false);
+        const wantBrick = brickAllowed && storeys <= 7 && CBZ.hash01 && CBZ.hash01(lot.cx, lot.cz, 0xb21d) < brickOdds;
         // NOTE the explicit "office" on the else branch: leaving it undefined
         // would fall through to makeBuilding's no-preference masonry share and
         // silently override this district weighting.

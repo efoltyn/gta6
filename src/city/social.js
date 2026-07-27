@@ -331,6 +331,19 @@
         : speechEngaged(ped) ? SPEECH_D_ENGAGED : SPEECH_D_AMBIENT;
       if (d > lim) return;
     }
+    // DIALOGUE IS A FACE-TO-FACE THING (owner: "I shouldn't see passenger
+    // dialogue popups when I'm flying a plane — dialogue is when a character is
+    // standing right in front of you"). The distance gate above is not enough
+    // on its own: seated cabin passengers are metres from you and technically
+    // "close", so their barks fired the whole time you were flying. You are not
+    // in a conversation with anyone while you are flying an aeroplane, driving,
+    // falling under a canopy, or dead.
+    if (P && ped !== P) {
+      if (P._aircraft || P.dead) return;
+      if (CBZ.cityChuteState && CBZ.cityChuteState()) return;
+      // In a vehicle, only the person you are sharing it with gets to talk.
+      if (P.driving && ped._vehicle !== P._vehicle) return;
+    }
     ensureSpeech();
     speechPed = ped;
     speechT = secs || 2.4;
