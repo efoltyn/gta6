@@ -6817,13 +6817,11 @@
   }
 
   // a real STOREFRONT: a BIG illuminated sign board carrying the shop NAME baked
-  // right onto the facade (no freestanding sidewalk sign), a canopy awning, a
-  // perpendicular BLADE sign readable down the street, and display windows.
+  // right onto the facade (no freestanding sidewalk sign), plus a canopy awning.
   // `along` = the facade runs perpendicular to the door normal.
   function signAwning(b, side, w, d, color, name, kind) {
     const di = doorInfo(0, 0, w, d, side);
     const along = Math.abs(di.nx) > 0.5;          // door faces ±X → storefront spans Z
-    const tx = along ? 0 : 1, tz = along ? 1 : 0; // facade tangent
     const facade = along ? d : w;                  // width available across the storefront
     const sw = Math.min(facade - 0.6, DOORW + 4.2); // sign board spans most of the facade
     const fx = (lw, h, ld) => (along ? [ld, h, lw] : [lw, h, ld]);   // size helper (swap by facing)
@@ -6864,21 +6862,14 @@
     if (along) plate.rotation.y = di.nx > 0 ? -Math.PI / 2 : Math.PI / 2;
     else if (di.nz > 0) plate.rotation.y = Math.PI;
     plate.renderOrder = 2; b.group.add(plate);
-    // PERPENDICULAR BLADE SIGN — a small projecting sign so the store is readable
-    // looking down the sidewalk (classic GTA storefront). Bracket + lit panel.
-    // The blade glows the kind accent so trades read apart down the street.
-    const bladeOut = 0.9;
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.12, 0.9, 0.9)), mat(accent, { emissive: accent, ei: 0.85 }));
-    blade.position.set(di.x + tx * (sw / 2 - 0.4) + onx * bladeOut, FH - 0.2, di.z + tz * (sw / 2 - 0.4) + onz * bladeOut);
-    b.group.add(blade);
     // (DISPLAY WINDOWS REMOVED: two raw glass boxes used to sit flush in the
     // wall here, their street faces EXACTLY coplanar with the facade — the
     // z-fighting panels the player filmed. makeBuilding already glazes the
     // door flanks with pooled, shatterable storefront panes; these were
     // redundant, un-shatterable, and 4 extra meshes per shop.)
     // (CH1 — FLOATING NAME SPRITE REMOVED: the store name is already painted on
-    // the lit board PLATE above the door AND on the perpendicular BLADE sign, so
-    // a third hovering camera-facing label was redundant text floating off the
+    // the lit board PLATE above the door, so a second hovering camera-facing
+    // label was redundant text floating off the
     // facade. Cutting it saves 1 Sprite + 1 SpriteMaterial cache entry per shop
     // and respects "no dumb floating UI". Interactions read lot.building.shop.name,
     // never this sprite, so nothing gameplay-side depends on it.)
