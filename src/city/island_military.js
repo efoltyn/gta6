@@ -431,63 +431,164 @@
     return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
   }
 
-  // HEAVY BOMBER — round body, sculpted swept wings, 4 DIFFERENTIATED engine
-  // nacelles (dark intake lip + tapered exhaust, not four identical drums),
-  // cockpit glass band, aft tail-gunner blister with twin guns, bomb-bay door
-  // seams on the belly, full landing gear (nose + twin main bogies — the old
-  // bomber levitated 1m off the tarmac with nothing under it) and nav lights.
+  // HEAVY BOMBER — a SCULPTED airframe, not a tube with cones on both ends
+  // (which is exactly what it used to be). Four hexagonal-section fuselage
+  // stations with a waist and a keel; a blunt drooped forebody with chines, a
+  // raised flight deck and an overhanging graphite brow; a beaver-tail aft
+  // body that sweeps UP onto an armoured bulkhead carrying a remote tail
+  // barbette; shoulder wings with hard sweep and real anhedral; four podded
+  // turbofans with rolled intake lips, recessed fan faces and spinners; a
+  // bulged bomb bay; and long-legged gear on two four-wheel bogies.
+  // ~82 meshes. Nose +Z, tyres on y=0.
   function makeBomber() {
     const g = new THREE.Group();
-    const cy = 2.2;                                         // body centreline y
+    const cy = 2.7;                                         // body centreline y — it stands TALL on its legs
     const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    // round fuselage tube + tapered nose + tail cone
-    cyl(g, 0, cy, 0, 1.2, 1.2, 20.8, M.jetGrey, 16).rotation.x = Math.PI / 2;
-    cyl(g, 0, cy, 11.5, 0.14, 1.2, 4.0, M.jetGrey, 16).rotation.x = Math.PI / 2;
-    cyl(g, 0, cy, -11.5, 0.5, 1.2, 4.0, M.jetGrey, 16).rotation.x = Math.PI / 2;
-    // cockpit glass band on the nose slope + graphite brow frame
-    mbox(g, 0, cy + 0.62, 10.4, 1.4, 0.55, 1.6, GLASS);
-    box(g, 0, cy + 0.95, 10.4, 1.46, 0.14, 1.7, M.jetGreyD);
-    // TAIL GUNNER BLISTER — glass pod facing aft, twin gun tubes poking out
-    tbox(g, 0, cy, -13.55, 0.95, 0.8, 1.4, { tz: 0.45 }, GLASS);
+    // Deliberately DARKER than the fighter: low-vis strategic-bomber grey.
+    // Three cached tones only — hull / shadowed fairings / lighter surfaces.
+    const HULL = cm(M.jetGreyD), SHADE = cm(0x464d56), PANEL = cm(M.jetGrey);
+
+    // ===================== FUSELAGE =====================
+    // FOUR sculpted stations, each a hexagonal-section taperBox (top/bot
+    // narrowing fakes a round-shouldered hull in low-poly). There is no tube
+    // and no cone anywhere on this airframe: the body has a real waist, real
+    // shoulders and a keel line that sweeps UP into the tail.
+    tbox(g, 0, cy, -0.10, 3.00, 3.20, 9.20, { nz: 0.99, tz: 0.86, top: 0.56, bot: 0.64, segD: 6 }, HULL);       // centre / wing box
+    tbox(g, 0, cy + 0.06, 7.45, 2.97, 3.17, 6.10, { nz: 0.66, tz: 0.99, top: 0.54, bot: 0.62, segD: 8 }, HULL); // forebody
+
+    // NOSE — the cone is GONE. The forebody keeps real width and real depth
+    // all the way forward, DROOPS a couple of degrees so it looks down at you,
+    // and finishes on a blunt oval radome instead of resolving to a point.
+    const noseCap = tbox(g, 0, cy - 0.06, 11.85, 1.96, 2.09, 3.00, { nz: 0.34, tz: 1.0, top: 0.50, bot: 0.60, segD: 8 }, HULL);
+    noseCap.rotation.x = 0.04;
+    const radome = new THREE.Mesh(new THREE.SphereGeometry(0.52, 10, 6), SHADE);
+    radome.scale.set(0.95, 1.0, 1.35); radome.position.set(0, cy - 0.10, 12.90);
+    radome.castShadow = true; radome.receiveShadow = true; g.add(radome);
+    // forebody CHINES — half-buried strakes carrying the flank line forward,
+    // sweeping inboard as they go. This is what stops the front reading as a
+    // separate shape stuck on the end of a pipe.
     [-1, 1].forEach(function (s) {
-      mcyl(g, s * 0.2, cy, -14.4, 0.06, 0.06, 1.0, GUN, 8).rotation.x = Math.PI / 2;
+      const chine = tbox(g, s * 0.88, cy - 0.25, 10.25, 0.50, 0.34, 3.50, { nz: 0.42, tz: 0.85, top: 0.4, bot: 0.4, segD: 6 }, HULL);
+      chine.rotation.y = -s * 0.13;
     });
-    // WINGS — sculpted: swept, tapered, thinning; roots buried in the flank
+    // CHIN — a bomb-aiming/sensor blister under the forebody ending in a
+    // manned BARBETTE. Walk under the nose on the apron and two cannon are
+    // pointed at you; that is why the front of this thing reads as hostile.
+    tbox(g, 0, cy - 1.05, 10.10, 1.85, 0.95, 4.00, { nz: 0.42, tz: 0.80, bot: 0.50, segD: 6 }, SHADE);
+    tbox(g, 0, cy - 1.42, 11.30, 1.10, 0.80, 1.20, { nz: 0.72, top: 0.78, bot: 0.62, segD: 4 }, cm(M.steelD));
     [-1, 1].forEach(function (s) {
-      wing(g, s * 1.0, cy + 0.15, 1.2, s, 12.5, 5.6, 0.5, 3.4, 0.6, 0.4, M.jetGreyD);
-      // 2 nacelles per wing, slung under it, noses proud of the leading edge
-      [[4.2, 1.5], [8.2, 0.2]].forEach(function (p) {
-        const off = p[0], pz = p[1];
-        cyl(g, s * off, 1.55, pz, 0.62, 0.62, 3.0, M.steel, 12).rotation.x = Math.PI / 2;
-        mcyl(g, s * off, 1.55, pz + 1.42, 0.66, 0.62, 0.35, GUN, 12).rotation.x = Math.PI / 2;   // intake lip
-        mcyl(g, s * off, 1.55, pz - 1.6, 0.34, 0.48, 0.5, GUN, 12).rotation.x = Math.PI / 2;     // exhaust
-        box(g, s * off, 1.95, pz - 0.4, 0.34, 0.8, 1.4, M.jetGreyD);                             // pylon
+      mcyl(g, s * 0.26, cy - 1.50, 12.35, 0.075, 0.085, 1.70, GUN, 8).rotation.x = Math.PI / 2;
+    });
+
+    // ===================== FLIGHT DECK =====================
+    // A raised deck shell standing proud of the roofline, a raked wrap-around
+    // windscreen, quarter lights down the flanks — and a heavy graphite BROW
+    // overhanging the glass. That overhang is the scowl: seen from the tarmac
+    // the aeroplane is frowning at you.
+    tbox(g, 0, cy + 1.28, 8.85, 2.05, 1.00, 3.90, { nz: 0.60, tz: 0.90, top: 0.62, segD: 6 }, HULL);
+    tbox(g, 0, cy + 1.30, 10.40, 1.40, 0.72, 1.00, { nz: 0.72, tz: 1.0, top: 0.66, bot: 0.92, segD: 4 }, GLASS);
+    const brow = tbox(g, 0, cy + 1.62, 10.35, 1.42, 0.26, 1.50, { nz: 0.72, tz: 1.0, top: 0.60, segD: 4 }, SHADE);
+    brow.rotation.x = 0.10;                                 // the lip tips DOWN over the glass
+    [-1, 1].forEach(function (s) { mbox(g, s * 0.80, cy + 1.35, 9.40, 0.14, 0.44, 1.70, GLASS); });
+
+    // ===================== SPINE & DORSAL FILLET =====================
+    // A raised spine running back from the deck, then a fillet that RISES aft
+    // into the fin root. From above the aircraft has a backbone, not a pipe.
+    tbox(g, 0, cy + 1.42, 2.20, 1.55, 0.90, 9.60, { nz: 0.55, tz: 0.90, top: 0.55, segD: 8 }, HULL);
+    tbox(g, 0, cy + 1.28, -4.00, 1.25, 1.30, 6.40, { nz: 0.35, tz: 0.98, top: 0.35, segD: 8 }, HULL);
+
+    // ===================== AFT BODY & TAIL BARBETTE =====================
+    // The classic bomber "beaver tail": instead of pinching into a cone the
+    // hull sweeps UP and boat-tails onto a flat armoured bulkhead carrying a
+    // remote turret. The rear three-quarter view gets a real shoulder line.
+    const aft = tbox(g, 0, cy + 0.28, -7.60, 2.55, 2.80, 6.20, { nz: 0.98, tz: 0.66, top: 0.55, bot: 0.60, segD: 8 }, HULL);
+    aft.rotation.x = 0.09;
+    const boat = tbox(g, 0, cy + 0.68, -12.00, 1.72, 1.89, 2.80, { nz: 0.98, tz: 0.60, top: 0.60, bot: 0.55, segD: 6 }, HULL);
+    boat.rotation.x = 0.09;
+    tbox(g, 0, cy + 0.83, -13.75, 1.03, 1.13, 1.00, { tz: 0.78, top: 0.72, bot: 0.72, segD: 4 }, cm(M.steelD));
+    mbox(g, 0, cy + 0.93, -14.28, 0.58, 0.30, 0.10, GLASS);       // gunner's vision slit
+    [-1, 1].forEach(function (s) {
+      mcyl(g, s * 0.26, cy + 0.70, -14.10, 0.085, 0.095, 1.40, GUN, 8).rotation.x = Math.PI / 2;
+    });
+    // ===================== TAIL GROUP =====================
+    // Tall raked fin growing OUT of the dorsal fillet (not planted on a tube),
+    // capped by an ECM fairing; hard-swept stabilizers with anhedral echoing
+    // the wings so the whole tail reads as one family of shapes.
+    wing(g, 0, cy + 0.50, -9.00, 1, 3.70, 4.40, 0.46, 2.60, 0.55, 0.40, PANEL).rotation.z = Math.PI / 2;
+    tbox(g, 0, 6.68, -11.55, 0.44, 0.42, 2.20, { nz: 0.50, tz: 0.45, top: 0.7, bot: 0.7, segD: 4 }, SHADE);
+    [-1, 1].forEach(function (s) {
+      wing(g, s * 0.55, cy + 0.62, -10.20, s, 4.30, 3.40, 0.34, 2.30, 0.55, 0.40, PANEL, 0.30);
+    });
+
+    // ===================== WINGS =====================
+    // 27m of shoulder-mounted wing (40.5m at world scale): hard sweep, strong
+    // taper, thinning tips and real ANHEDRAL — the tips HANG, the way a laden
+    // heavy's wings do. Roots buried inside the wing-body fairings so the slab
+    // grows out of a blister instead of being stuck on a flank.
+    [-1, 1].forEach(function (s) {
+      tbox(g, s * 1.40, cy + 0.10, 0.70, 1.90, 2.00, 10.40, { nz: 0.34, tz: 0.50, top: 0.55, bot: 0.60, segD: 8 }, SHADE);
+      wing(g, s * 0.95, cy + 0.92, 0.90, s, 12.55, 6.40, 0.66, 4.40, 0.62, 0.50, HULL, 0.62);
+      // flap-track fairings under the trailing edge — the detail you actually
+      // see when you are standing underneath it on the apron
+      tbox(g, s * 5.90, 3.24, -2.75, 0.50, 0.48, 3.20, { nz: 0.80, tz: 0.20, top: 0.7, bot: 0.7, segD: 4 }, SHADE);
+      // wingtip ECM/fuel pod straddling the tip chord
+      tbox(g, s * 13.15, cy + 0.30, -3.50, 0.62, 0.55, 3.60, { nz: 0.45, tz: 0.40, top: 0.7, bot: 0.7, segD: 6 }, SHADE);
+    });
+
+    // ===================== ENGINES =====================
+    // Four big turbofans podded FORWARD of and UNDER the wing on swept pylons.
+    // Every one is a real engine — a rolled intake lip (a torus, not a washer),
+    // a dark recessed fan face with a spinner, a boat-tailed cowl and a
+    // converging nozzle. No drums with cones glued on the back.
+    const ENG = [
+      // x, y, z, length, radius, pylonY, pylonZ, pylonHeight
+      [4.30, 2.16, 3.30, 3.70, 0.70, 2.92, 2.35, 1.55],
+      [7.95, 2.02, 1.45, 3.35, 0.64, 2.76, 0.60, 1.45],
+    ];
+    [-1, 1].forEach(function (s) {
+      ENG.forEach(function (e) {
+        const ex = s * e[0], ey = e[1], ez = e[2], eL = e[3], er = e[4];
+        const fz = ez + eL / 2, az = ez - eL / 2;           // cowl front / aft faces
+        tbox(g, ex, e[5], e[6], 0.42, e[7], 2.50, { nz: 0.55, tz: 0.70, top: 0.80, bot: 0.85, segD: 4 }, SHADE);
+        cyl(g, ex, ey, ez, er, er * 0.84, eL, M.jetGrey, 14).rotation.x = Math.PI / 2;
+        const lip = new THREE.Mesh(new THREE.TorusGeometry(er * 0.90, er * 0.16, 6, 16), cm(M.steelD));
+        lip.position.set(ex, ey, fz - er * 0.10); lip.castShadow = true; lip.receiveShadow = true; g.add(lip);
+        mcyl(g, ex, ey, fz - er * 0.55, er * 0.85, er * 0.85, 0.12, GUN, 14).rotation.x = Math.PI / 2;
+        const hub = new THREE.Mesh(new THREE.ConeGeometry(er * 0.22, er * 0.80, 8), cm(M.steelD));
+        hub.rotation.x = Math.PI / 2; hub.position.set(ex, ey, fz - er * 0.55);
+        hub.castShadow = true; hub.receiveShadow = true; g.add(hub);
+        mcyl(g, ex, ey, az + 0.10, er * 0.80, er * 0.62, 0.72, GUN, 12).rotation.x = Math.PI / 2;
       });
     });
-    // tall swept fin (sculpted wing stood upright) + swept stabilizers
-    wing(g, 0, cy + 0.8, -10.4, 1, 3.8, 3.2, 0.34, 2.0, 0.5, 0.3, M.jetGrey).rotation.z = Math.PI / 2;
+
+    // ===================== BOMB BAY =====================
+    // A long bulged bay with twin door leaves — the reason the aeroplane
+    // exists, and the first thing you see looking up from underneath.
+    box(g, 0, cy - 1.62, 1.40, 1.85, 0.50, 9.00, M.dark);
+    [-1, 1].forEach(function (s) { box(g, s * 0.62, cy - 1.72, 1.40, 0.62, 0.16, 8.80, M.jetGreyD); });
+
+    // ===================== LANDING GEAR =====================
+    // Long-legged: a twin-wheel nose leg braced up into the chin bay, and TWO
+    // FOUR-WHEEL BOGIES tucked into the wing-body fairings. Tyres on y=0.
+    box(g, 0, 1.20, 9.00, 0.40, 2.05, 0.36, M.steelD);                          // nose oleo
+    box(g, 0, 1.45, 8.72, 0.22, 1.40, 0.22, M.steel).rotation.x = -0.45;        // drag brace
     [-1, 1].forEach(function (s) {
-      wing(g, s * 0.5, cy + 0.55, -11.6, s, 4.4, 2.4, 0.28, 1.5, 0.5, 0.3, M.jetGreyD);
+      mcyl(g, s * 0.30, 0.58, 9.00, 0.58, 0.58, 0.30, RUBBER, 12).rotation.z = Math.PI / 2;
     });
-    // BOMB BAY — recessed belly panel + twin door seam strips
-    box(g, 0, cy - 1.16, 2.0, 1.4, 0.14, 7.5, M.jetGreyD);
-    [-1, 1].forEach(function (s) { box(g, s * 0.36, cy - 1.21, 2.0, 0.1, 0.06, 7.3, M.dark); });
-    // LANDING GEAR — nose leg with twin wheels + two main bogies under the wings
-    box(g, 0, 0.6, 9.0, 0.3, 1.0, 0.3, M.steelD);
     [-1, 1].forEach(function (s) {
-      mcyl(g, s * 0.24, 0.42, 9.0, 0.42, 0.42, 0.24, RUBBER, 10).rotation.z = Math.PI / 2;
-    });
-    [-1, 1].forEach(function (s) {
-      box(g, s * 2.6, 1.3, 0.2, 0.34, 1.8, 0.34, M.steelD);   // main strut (into wing)
-      box(g, s * 2.6, 0.5, 0.2, 0.4, 0.28, 2.3, M.steelD);    // bogie beam
-      [-0.85, 0.85].forEach(function (wz) {
-        mcyl(g, s * 2.6, 0.5, 0.2 + wz, 0.5, 0.5, 0.44, RUBBER, 10).rotation.z = Math.PI / 2;
+      box(g, s * 1.72, 1.55, 0.40, 0.46, 2.60, 0.48, M.steelD);                 // main oleo
+      box(g, s * 1.72, 2.00, 0.95, 0.26, 1.70, 0.26, M.steel).rotation.x = 0.42; // drag stay
+      box(g, s * 1.72, 0.68, 0.40, 0.54, 0.30, 3.00, M.steelD);                 // bogie beam
+      [-1.05, 1.05].forEach(function (wz) {
+        [-1, 1].forEach(function (ws) {
+          mcyl(g, s * 1.72 + ws * 0.40, 0.68, 0.40 + wz, 0.68, 0.68, 0.34, RUBBER, 12).rotation.z = Math.PI / 2;
+        });
       });
     });
     // nav lights: red port wingtip, green starboard, white on the fin tip
-    navBox(g, -13.4, cy + 0.15, -2.15, 0.2, 0xff4a3d);
-    navBox(g, 13.4, cy + 0.15, -2.15, 0.2, 0x37d67a);
-    navBox(g, 0, 6.6, -12.3, 0.18, 0xf2f4ff);
+    navBox(g, -13.35, cy + 0.30, -3.50, 0.22, 0xff4a3d);
+    navBox(g, 13.35, cy + 0.30, -3.50, 0.22, 0x37d67a);
+    navBox(g, 0, 6.72, -12.75, 0.20, 0xf2f4ff);
     const scale = 1.5;
     const dims = { family: "heavy-bomber", length: 42, span: 40.5, height: 10.35 };
     g.scale.setScalar(scale); g.userData.aircraftDims = dims;
