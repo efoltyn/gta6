@@ -342,7 +342,22 @@
     // districts disappear outside a small bubble — the "Truman Show" effect
     // in the flight screenshot. Expand only while an aircraft owns the player;
     // ground play keeps the normal quality-tier budget.
-    const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
+    // AIRBORNE IS AN ALTITUDE, NOT A VEHICLE (owner, from a canopy at 185m:
+    // "the horizon, certain things like cities look blue and kinda dumb").
+    //
+    // This test used to require P._aircraft — but the moment you BAIL OUT you
+    // no longer have one, so a player under a parachute (or in freefall) got
+    // the 1000m GROUND fog while hanging a couple of hundred metres up looking
+    // at the whole map. The comment right below has always said what that does:
+    // a short fog wall "painted dry land into a uniform cyan sheet". That sheet
+    // is precisely what he screenshotted, and it was never a fog-colour problem
+    // — it was the wrong fog distance for where he actually was.
+    //
+    // What matters is height above ground, whatever is or is not carrying you.
+    const P_ = CBZ.player;
+    const chuting = !!(CBZ.cityChuteState && CBZ.cityChuteState());
+    const highUp = !!(P_ && P_.pos && P_.pos.y > 24 && !P_.grounded);
+    const airborne = !!(P_ && P_.pos && P_.pos.y > 24 && (P_._aircraft || chuting || highUp));
     if (CBZ.scene.fog) {
       // A 1.8km fog wall is inside the authored Mercy range and painted dry
       // land into a uniform cyan sheet. Aircraft need continental visibility;

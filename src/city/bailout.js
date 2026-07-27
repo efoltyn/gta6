@@ -78,35 +78,75 @@
   function makeCanopy() {
     if (!THREE) return null;
     const g = new THREE.Group();
-    // A shallow dome, built from a sphere cut at the equator. Ribs are drawn
-    // as a second, slightly larger wireframe shell rather than real geometry —
-    // at the distance you ever see your own canopy that reads identically and
-    // costs one extra draw instead of thirty.
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(3.1, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
-      new THREE.MeshLambertMaterial({ color: 0xd8452f, side: THREE.DoubleSide })
-    );
-    dome.scale.set(1, 0.62, 1.35);
+    // ==================================================================
+    //  A PARACHUTE, NOT A CEILING (owner: "the canopy doesn't look like a
+    //  parachute at all, it's stupid").
+    //
+    //  The old one WAS a dome — but 3.1m across hanging 3.6m over your head,
+    //  which from underneath is not a canopy, it is a low roof: it fills the
+    //  whole sky, you never see its edge, and with no edge there is no
+    //  silhouette and no parachute. It was also MeshLambert, so its underside
+    //  — the only side you ever see — sat in its own shadow as a dark slab.
+    //  That is the flat maroon rectangle in the screenshot.
+    //
+    //  Three things make a canopy read from directly below, and it had none:
+    //    1. DISTANCE AND EDGE. A real canopy is ~7m across on ~5m of line. You
+    //       must be able to see past it to sky, or it is a roof.
+    //    2. BACKLIT FABRIC. Ripstop nylon is thin — daylight comes THROUGH it
+    //       and it glows, brightest at the crown. Unlit + slight transparency
+    //       is the honest model and it is also the cheapest.
+    //    3. GORES. The radial panel seams are THE recognisable parachute
+    //       pattern. Alternating gore colour is baked into vertex colour on the
+    //       one shared sphere, so it costs nothing.
+    //  Plus lines: many, long, converging. Four stubs read as nothing.
+    // ==================================================================
+    const R = 4.6, GORES = 12;
+    const domeGeo = new THREE.SphereGeometry(R, GORES * 2, 9, 0, Math.PI * 2, 0, Math.PI * 0.54);
+    // stripe alternating gores by azimuth, straight into vertex colour
+    const pos = domeGeo.attributes.position;
+    const col = new Float32Array(pos.count * 3);
+    const A = new THREE.Color(0xe8563a), B = new THREE.Color(0xf2f2ee);
+    for (let i = 0; i < pos.count; i++) {
+      const ang = Math.atan2(pos.getZ(i), pos.getX(i));
+      const gore = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * GORES);
+      const c = (gore & 1) ? B : A;
+      // the crown is brightest — that is where the sun comes through
+      const lift = 0.78 + 0.30 * (pos.getY(i) / R);
+      col[i * 3] = Math.min(1, c.r * lift);
+      col[i * 3 + 1] = Math.min(1, c.g * lift);
+      col[i * 3 + 2] = Math.min(1, c.b * lift);
+    }
+    domeGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const dome = new THREE.Mesh(domeGeo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide,
+      transparent: true, opacity: 0.94, depthWrite: true,
+    }));
+    dome.scale.set(1, 0.78, 1.12);        // deeper than before: curvature reads from below
     g.add(dome);
+    // the seam lines themselves, dark against the lit fabric
     const ribs = new THREE.Mesh(
-      new THREE.SphereGeometry(3.16, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.5),
-      new THREE.MeshBasicMaterial({ color: 0x2b2b2b, wireframe: true, transparent: true, opacity: 0.35 })
+      new THREE.SphereGeometry(R * 1.004, GORES, 5, 0, Math.PI * 2, 0, Math.PI * 0.54),
+      new THREE.MeshBasicMaterial({ color: 0x1c1c1c, wireframe: true, transparent: true, opacity: 0.30 })
     );
     ribs.scale.copy(dome.scale);
     g.add(ribs);
-    // Four lines to the harness.
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xd8d8d8, transparent: true, opacity: 0.75 });
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + 0.4;
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(Math.cos(a) * 2.6, 0, Math.sin(a) * 3.4),
-        new THREE.Vector3(0, -3.4, 0),
-      ]);
-      g.add(new THREE.Line(geo, lineMat));
+    // SUSPENSION LINES — twelve, running the full drop to the harness. These
+    // are most of what says "parachute" when the canopy is above your view.
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xdfe4ea, transparent: true, opacity: 0.55 });
+    const skirtY = R * 0.78 * Math.cos(Math.PI * 0.54);
+    const pts = [];
+    for (let i = 0; i < GORES; i++) {
+      const a = (i / GORES) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * R * 0.97, skirtY, Math.sin(a) * R * 1.09 * 0.97));
+      pts.push(new THREE.Vector3(0, -6.0, 0));
     }
-    g.position.y = 3.6;
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+    // hung HIGHER, so you can see past its edge to sky — the thing that turns
+    // a roof back into a canopy.
+    g.position.y = 6.4;
     return g;
   }
+
 
   function beginFall(fromCraft) {
     const P = CBZ.player; if (!P) return;
@@ -333,7 +373,7 @@
     P.grounded = false;
 
     if (F.canopy) {
-      F.canopy.position.set(P.pos.x, P.pos.y + 3.6, P.pos.z);
+      F.canopy.position.set(P.pos.x, P.pos.y + 6.4, P.pos.z);   // matches makeCanopy's hang height
       F.canopy.rotation.y = F.yaw;
       F.canopy.visible = (F.phase === "canopy");
     }

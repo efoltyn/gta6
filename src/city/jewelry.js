@@ -664,7 +664,10 @@
     // the alarm screams in bursts until it times out (cops come via wanted flow)
     if (S.alarmT > 0) {
       S.alarmT -= dt; S.beepT -= dt;
-      if (S.beepT <= 0) { if (CBZ.sfx) CBZ.sfx("alarm"); S.beepT = 1.6; }
+      // a shop alarm every 1.6s at full volume is the "really annoying bell"
+      // the owner called out. Slower, quieter, lower — a nuisance in the
+      // street rather than a klaxon in your head.
+      if (S.beepT <= 0) { if (CBZ.sfx) CBZ.sfx("alarm", { volume: 0.22, pitch: 0.78 }); S.beepT = 2.6; }
     }
 
     // distance VIS-GATE: the showroom draws only when you're near the shop

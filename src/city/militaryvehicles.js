@@ -395,7 +395,15 @@
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
     if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" ? 3 : 4); } catch (e) {} }
     big(rec.civilian ? "Tower reports a " + name + " departing with no clearance — owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
-    sfx("alarm");
+    // NO BELL FOR A STATE (owner: "there's this really annoying sound whenever
+    // the player does something bad — like a bell alarm sound. It's a really
+    // annoying sound"). Same defect as the wanted siren: an abstract alarm
+    // fired AT you the instant a flag flips, at full volume, from nowhere in
+    // particular. A base alarm is a real object on a real airfield — it should
+    // sound like it is coming from the base you are stealing from, behind you,
+    // not like a UI notification. Halved and pitched down into a horn rather
+    // than a bell; the line of narration above already carries the message.
+    sfx("alarm", { volume: 0.26, pitch: 0.72 });
     return true;
   }
   CBZ.cityBoardMilitaryVehicle = boardVehicle;
