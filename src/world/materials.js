@@ -332,6 +332,78 @@
     }
   });
 
+  // ============================================================
+  //  CBZ.glass(opts) — THE ONE GLASS.
+  //
+  //  OWNER, on seeing the game: "our OG glass buildings that populate the
+  //  whole map are amazing and the glass is perfectly see-thru and behaves
+  //  like glass — the cockpit has some glass but it's not good at all."
+  //
+  //  He is right, and the reason is not that cockpit glass was tuned badly.
+  //  It is that there was no such thing as "the game's glass". There was a
+  //  private `glassMat()` closure inside city/buildings.js that nobody else
+  //  could reach, and then every other surface that needed to be see-through
+  //  guessed its own recipe from scratch:
+  //     buildings.js  0xbfe9f7 + emissive 0x3f8aa6 @0.5, opacity 0.60  <- the good one
+  //     island_airport  flat grey 0x66717d, no emissive, opacity 0.52  <- murky
+  //     cockpit_shapes  glassMats: []  — literally "no glass here by design"
+  //  Three surfaces that are all glass, three unrelated answers, and only the
+  //  one nobody could import looked right.
+  //
+  //  THE CHARACTER, and why it works: a cool blue-white tint with an EMISSIVE
+  //  LIFT under it. The emissive is what makes it read as glass rather than as
+  //  a translucent plastic sheet — real glass never goes fully dark, because
+  //  it is always bouncing some sky back at you. Opacity 0.6 is see-through
+  //  enough to read the world behind it while still catching a highlight.
+  //  That is the whole trick, and it is now available to anything with a
+  //  window in it.
+  //
+  //  Pooled per (tint, opacity, side, lift) so a thousand windows across the
+  //  map stay ONE material and ONE draw-call bucket — the same discipline
+  //  cmat() enforces. Callers must never mutate the returned material; ask for
+  //  a different variant instead.
+  //
+  //    CBZ.glass()                                 the building curtain wall
+  //    CBZ.glass({ opacity: 0.34 })                a windscreen you fly through
+  //    CBZ.glass({ tint: 0x9fdcf2, side: 2 })      cabin windows, seen both ways
+  // ============================================================
+  const GLASS_TINT = 0xbfe9f7;     // buildings.js's exact cool blue
+  const GLASS_LIFT = 0x3f8aa6;     // and its exact emissive underlight
+  const glassCache = new Map();
+  function glass(opts) {
+    opts = opts || {};
+    const tint = opts.tint != null ? (opts.tint | 0) : GLASS_TINT;
+    const lift = opts.lift != null ? (opts.lift | 0) : GLASS_LIFT;
+    const ei = opts.ei != null ? +opts.ei : 0.5;
+    const op = opts.opacity != null ? +opts.opacity : 0.6;
+    // FrontSide(0) by default; pass side: THREE.DoubleSide for a pane you can
+    // be on either side of (a cabin window, a canopy you sit inside).
+    const side = opts.side != null ? (opts.side | 0) : THREE.FrontSide;
+    // depthWrite defaults FALSE for double-sided panes: a canopy that writes
+    // depth sorts against the instrument panel behind it and punches a hole in
+    // its own cockpit. Single-sided building glass keeps writing, as it always
+    // has, so the city is byte-identical.
+    const dw = opts.depthWrite != null ? !!opts.depthWrite : (side === THREE.FrontSide);
+    // fog:false for panes rendered in a separate fog-free pass (the cockpit
+    // interior scene). A fogged windscreen inside a fog-free cockpit turns
+    // milky at range and reads as frosted glass.
+    const fog = opts.fog !== false;
+    const k = tint + "|" + lift + "|" + ei + "|" + op + "|" + side + "|" + (dw ? 1 : 0) + "|" + (fog ? 1 : 0);
+    let m = glassCache.get(k);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({
+        color: tint, emissive: lift, emissiveIntensity: ei,
+        transparent: true, opacity: op, side: side, depthWrite: dw, fog: fog,
+      });
+      m._shared = true;
+      m._cbzGlass = true;      // colliders/LOS already test material.transparent
+      glassCache.set(k, m);
+    }
+    return m;
+  }
+  CBZ.glass = glass;
+  CBZ.GLASS_TINT = GLASS_TINT;
+
   CBZ.mat = mat;
   CBZ.cmat = cmat;
   CBZ.pbrMat = pbrMat;

@@ -459,6 +459,35 @@
   }
   CBZ.cityRecolorRig = recolorRig;
 
+  // ============================================================
+  //  CBZ.cityPaintSlot(meshes, color, visible) — THE ONLY SAFE WAY TO TINT
+  //  A BODY.
+  //
+  //  WHY THIS IS EXPORTED, and why it is not optional:
+  //  CBZ.cmat() is a GLOBAL material cache keyed on colour, and every material
+  //  it hands out is flagged _shared — one object reused by every mesh in the
+  //  world that asked for that colour. character.js builds a rig's HANDS (and
+  //  shoes, and forearm caps) through cmat, but builds the HEAD through mat(),
+  //  which allocates a private material.
+  //
+  //  So a painter that calls `m.material.color.setHex(h)` with no clone-on-
+  //  write does not recolour one actor. It reaches into the shared pool and
+  //  repaints that colour EVERYWHERE — on strangers across the map, on the
+  //  hands of people who have nothing to do with the fit being applied. Their
+  //  heads keep their own private material and do not follow.
+  //
+  //  That is the bug the owner reported as "HANDS AND FACES ARE DIFFERENT
+  //  COLORS AND RACES". It is not a casting bug and there is nothing wrong
+  //  with the skin-tone tables: it is one missing clone, copied into four
+  //  files. This is that one line, given a name so the fifth copy is never
+  //  written.
+  //
+  //  Adoption is a straight swap for the local `paint` closure every dresser
+  //  had already written, and it is degrade-safe:
+  //      const paint = CBZ.cityPaintSlot || function (a, h) { ...old... };
+  // ============================================================
+  CBZ.cityPaintSlot = paint;
+
   // ---- VISUAL TRUTH: sample what a body is ACTUALLY rendering -------------
   // Peds are painted at spawn from district wardrobes / tourist brights /
   // vagrant rags, and repainted by crowd promotion + vips drafting — so a

@@ -229,7 +229,9 @@ const PASS = `(() => {
       // anchors out of ~6000, so zero was an aspiration nobody had checked.
       // Pinned at the measured baseline instead — it may only ever go DOWN,
       // and a change that walls in more furniture fails the gate.
-      if (pa.blocked > 487) out.fails.push("UNREACHABLE FURNITURE ANCHORS rose to " + pa.blocked + " (ratchet 487)");
+      // 487 -> 6 when the masonry/civic building type was purged: those podium
+      // interiors were most of the furniture nobody could walk to. Ratchet down.
+      if (pa.blocked > 6) out.fails.push("UNREACHABLE FURNITURE ANCHORS rose to " + pa.blocked + " (ratchet 6)");
     }
     // road rules: carcluster.js's district-of-the-nearest-lot stopgap must be
     // dead. True here means roadrules.js failed to load or loaded too late.

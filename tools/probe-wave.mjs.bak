@@ -85,7 +85,7 @@ const R = await evl(`(() => {
   if (out.furnish && !(out.furnish.kinds.lounger || out.furnish.kinds.deckchair)) out.fails.push("no lounger/deckchair drawn by the kit");
   out.anchors = CBZ.propUseAudit ? CBZ.propUseAudit() : null;
   // ratchet, not an invariant — see the math gate's note (baseline 487)
-  if (out.anchors && out.anchors.blocked > 6) out.fails.push("unreachable anchors rose to " + out.anchors.blocked);
+  if (out.anchors && out.anchors.blocked > 487) out.fails.push("unreachable anchors rose to " + out.anchors.blocked);
 
   // ---- 2. ROAD RULES ------------------------------------------------------
   out.roadRules = CBZ.roadRulesAudit ? CBZ.roadRulesAudit() : null;

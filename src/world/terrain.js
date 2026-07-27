@@ -275,27 +275,104 @@
   const COL_GRASS = new THREE.Color(0x4f7d3f);
   const COL_GRASS2= new THREE.Color(0x3c6a33);
   const COL_ROCK  = new THREE.Color(0x6f6a63);
-  const COL_ROCKH = new THREE.Color(0x8a8378);
+  const COL_ROCKH = new THREE.Color(0x4d4b48);   // HIGH alpine rock: dark, cold, wet — was 0x8a8378, a light warm tan that read as sand
   const COL_SNOW  = new THREE.Color(0xeef3f8);
+  const COL_SNOW_SHADE = new THREE.Color(0xc3d2e4);   // snow on a shaded face is blue, not white
+  const _snowMix = new THREE.Color();
   const _c = new THREE.Color();
-  function bandColor(y, slope, out) {
+  /* ======================================================================
+     SNOW IS NOT AN ELEVATION. IT IS AN ACCUMULATION.
+
+     The old model painted a HEIGHT BAND: everything above y=52 became
+     near-white, snow crept in from y=34, and only the very steepest faces
+     recovered any rock. That is why every hill in the world looked bleached —
+     and no threshold tweak could have fixed it, because the band itself was
+     the bug. A contour line is not what snow does.
+
+     What snow actually does, and what this now models:
+
+     1. TEMPERATURE — a soft freezing gradient, not a step. Nothing in nature
+        has a hard edge at one altitude.
+
+     2. SLOPE SHEDDING — the big one. Snow has an angle of repose around
+        50-55 degrees; past that it sloughs off and the face stays BARE ROCK.
+        This is precisely why a real peak is white on its shoulders and black
+        down its cliffs and gullies, and it is the single detail that makes a
+        mountain read as rock-with-snow-on-it instead of a scoop of ice cream.
+        The old code had a weak version of this bolted on after the fact
+        (slope > 0.7); here it is a first-class multiplier, so it applies at
+        EVERY altitude rather than only on the summit band.
+
+     3. ASPECT / INSOLATION — sun-facing faces melt out, shaded faces hold.
+        Baked against a fixed prevailing sun azimuth rather than the live sun,
+        which is not a shortcut: real aspect patterns record accumulated
+        SEASONAL insolation, not this afternoon's light. This is what gives a
+        range its asymmetry — one flank white, the other bare — and it is the
+        "physics lighting" half of the problem.
+
+     4. PATCHINESS — a real snowline is ragged, torn up by wind scour and
+        drift. A deterministic position hash breaks the contour so the
+        transition is a mottled edge instead of a drawn line.
+
+     The rock underneath was also wrong. The old ramp went from COL_ROCK to
+     the LIGHTER COL_ROCKH with altitude — brightening as it rose, which is
+     backwards and is what made bare peaks read as sand dunes. High alpine
+     rock is DARKER and colder-toned than valley stone: wet, shadowed,
+     lichen-stained. The ramp now runs that way.
+     ====================================================================== */
+  // Prevailing sun azimuth used for the aspect bake (unit, world XZ). Faces
+  // pointing along this melt out; faces pointing away hold their snow.
+  const SUN_AZ_X = -0.38, SUN_AZ_Z = 0.92;
+  // SCALED WITH THE RANGE. These were 46/96, tuned when the rings peaked at
+  // 360. With the near ring at 900 and the far at 1250, leaving them there
+  // would have put the snowline at 8% of the mountain and re-created the exact
+  // bleaching this model was written to kill — every peak white again, just
+  // bigger. A snowline sits well UP a real mountain: roughly a third to a half
+  // of the way, with a long ragged transition. 380 -> 720 is that band.
+  const SNOW_WARM = 380;    // below this, no lasting snow at any angle
+  const SNOW_COLD = 720;    // by this height it is cold enough everywhere
+  const SHED_LO = 0.42;     // slope where snow starts sliding (~25 deg)
+  const SHED_HI = 0.74;     // slope where nothing can stay (~45 deg+)
+
+  function snowCover(y, slope, nx, nz, x, z) {
+    const cold = smooth(SNOW_WARM, SNOW_COLD, y);
+    if (cold <= 0.001) return 0;
+    // it cannot lie on a cliff, at any altitude
+    const shed = 1 - smooth(SHED_LO, SHED_HI, slope);
+    if (shed <= 0.001) return 0;
+    // sun-facing melts; the horizontal component of the face normal is aspect
+    const face = nx * SUN_AZ_X + nz * SUN_AZ_Z;
+    const melt = 1 - 0.5 * (face > 0 ? face : 0);
+    // ragged edge — deterministic, never Math.random (this is a build path)
+    const h = CBZ.hash01 ? CBZ.hash01(x, z, 0x5107) : 0.5;
+    const patch = 0.72 + 0.56 * h;
+    const c = cold * shed * melt * patch;
+    return c < 0 ? 0 : (c > 1 ? 1 : c);
+  }
+
+  function bandColor(y, slope, out, nx, nz, x, z) {
     // slope (0 flat .. 1 vertical-ish) darkens grass toward rock on steeps.
     if (y < 0.5) { out.copy(COL_WATER); return; }
     if (y < 6)   { out.copy(COL_SAND).lerp(COL_GRASS, smooth(2, 6, y)); return; }
-    if (y < 30)  {
-      out.copy(COL_GRASS).lerp(COL_GRASS2, smooth(8, 28, y));
+    if (y < 150)  {
+      // vegetation runs a long way up a 900-unit peak — a treeline at 30 on a
+      // mountain this tall is a green skirt on a bare cone.
+      out.copy(COL_GRASS).lerp(COL_GRASS2, smooth(8, 120, y));
       if (slope > 0.45) out.lerp(COL_ROCK, smooth(0.45, 0.8, slope));
       return;
     }
-    if (y < 52)  {
-      out.copy(COL_ROCK).lerp(COL_ROCKH, smooth(30, 50, y));
-      // snow starts creeping onto flatter high ground (snowline lowered)
-      if (slope < 0.6) out.lerp(COL_SNOW, smooth(34, 54, y) * (1 - slope));
-      return;
+    // ---- ROCK, and then whatever snow can hold onto it --------------------
+    // grass gives way to stone, and stone DARKENS as it climbs
+    out.copy(COL_ROCK).lerp(COL_ROCKH, smooth(60, 520, y));   // scaled with the range (was 30->74)
+    const s = snowCover(y, slope, nx || 0, nz || 0, x || 0, z || 0);
+    if (s > 0.002) {
+      // snow lying on a shaded face is blue, not white — the shade tone is
+      // already in the palette and was only ever used by the snow biome.
+      _snowMix.copy(COL_SNOW);
+      const face = (nx || 0) * SUN_AZ_X + (nz || 0) * SUN_AZ_Z;
+      if (face < 0) _snowMix.lerp(COL_SNOW_SHADE, Math.min(1, -face) * 0.55);
+      out.lerp(_snowMix, s);
     }
-    // high peaks: snow, except the steepest faces stay bare rock.
-    out.copy(COL_SNOW);
-    if (slope > 0.7) out.lerp(COL_ROCKH, smooth(0.7, 1.0, slope));
   }
 
   // ----------------------------------------------------------------------
@@ -370,7 +447,7 @@
         // slope from the face normal (1 = flat-up, 0 = vertical) → invert.
         const ny = fn.getY(i);
         const slope = 1 - Math.min(1, Math.max(0, ny));
-        bandColor(y, slope, _c);
+        bandColor(y, slope, _c, fn.getX(i), fn.getZ(i), fp.getX(i), fp.getZ(i));
         fcolors[i * 3] = _c.r; fcolors[i * 3 + 1] = _c.g; fcolors[i * 3 + 2] = _c.b;
       }
       flatGeo.setAttribute("color", new THREE.BufferAttribute(fcolors, 3));
@@ -444,13 +521,36 @@
         if (built) { heroGeoms.push(built.geo); if (built.spine) heroSpines.push(built.spine); }
       }
     }
+    // ================================================================
+    //  SCALE (owner: "make the scale of everything much much more massive
+    //  versus human — really consider that for mountains").
+    //
+    //  He is right and the numbers say so. A person in this game stands about
+    //  1.8 units. The near ring topped out at 360 — call it 200 people stacked
+    //  up, which sounds like a lot and reads as a big hill, because what your
+    //  eye actually judges is the peak against the horizon and against how far
+    //  away it is. A real coastal range is 2000-4000 m against a 1.8 m human:
+    //  a thousand to two thousand times your height.
+    //
+    //  Pushing the rings to 900 / 1250 puts the near ring at ~500x human and
+    //  the far ring at ~700x — still conservative against reality, but it is
+    //  the difference between a hill you look ACROSS at and a wall of rock you
+    //  have to look UP at. It also finally gives the snow model something to
+    //  work with: the accumulation field needs real altitude and real steep
+    //  faces before shedding and aspect have anything to bite on, so the
+    //  snowline and the bare cliffs only become legible at this size.
+    //
+    //  Free of gameplay risk: this is the BACKDROP RING, outside
+    //  CBZ.TERRAIN_FLAT, where terrainHeight is exactly 0 by contract. Nothing
+    //  walkable moves by a millimetre.
+    // ================================================================
     // near ring — the dominant craggy peaks
     ringSpines(RING.near, 1.04, {
-      cols: 40, rows: 7, depthLen: 280, peakAmp: 360, noiseScale: 0.0055, seedBase: 1000,
+      cols: 40, rows: 7, depthLen: 280, peakAmp: 900, noiseScale: 0.0055, seedBase: 1000,
     }, 0.04, 0.10);
     // far ring — taller, pushed out, hazier (recedes into the sky)
     ringSpines(RING.far, 1.04, {
-      cols: 38, rows: 5, depthLen: 360, peakAmp: 470, noiseScale: 0.0045, seedBase: 5000,
+      cols: 38, rows: 5, depthLen: 360, peakAmp: 1250, noiseScale: 0.0045, seedBase: 5000,
     }, 0.22, 0.22);
 
     // ====================================================================

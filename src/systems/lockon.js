@@ -779,27 +779,55 @@
     scopeEl.id = "realScope";
     scopeEl.style.cssText = "position:fixed;inset:0;z-index:45;display:none;pointer-events:none;overflow:hidden";
     scopeEl.innerHTML =
-      // glass + hard blackout ring (everything else recedes underneath)
+      // ---- THE IMAGE TUBE -------------------------------------------------
+      // A real optic is not a black mask with a hole in it. Three things sell
+      // it and none of them were here: the EXIT PUPIL (a bright rim where the
+      // image ends), EYE RELIEF (the dark crescent that swims in from the edge
+      // when your eye is off-axis — driven below by the same sway that already
+      // moves the aim), and GLASS that actually tints. The glass tint is the
+      // game's own curtain-wall blue, because that is the glass that reads
+      // right everywhere else.
+      "<div id='scGlass' style='position:absolute;inset:0;background:radial-gradient(circle at 50% 50%," +
+        "rgba(191,233,247,.07) 0,rgba(120,170,200,.035) 18vmin,rgba(20,30,40,.02) 28vmin," +
+        "rgba(0,0,0,0) 32.6vmin,rgba(2,2,3,.995) 33.4vmin)'></div>" +
+      // exit-pupil rim: the thin bright ring the eyepiece throws at the edge
+      "<div style='position:absolute;left:50%;top:50%;width:65.6vmin;height:65.6vmin;transform:translate(-50%,-50%);" +
+        "border-radius:50%;box-shadow:0 0 0 1px rgba(150,190,220,.30) inset,0 0 14px 2px rgba(120,165,200,.10) inset'></div>" +
+      // in-glass vignette so the image sits DOWN a tube rather than on a sticker
       "<div style='position:absolute;inset:0;background:radial-gradient(circle at 50% 50%," +
-        "rgba(140,175,205,.05) 0,rgba(20,30,40,.02) 20vmin,rgba(0,0,0,0) 32.6vmin,rgba(2,2,3,.995) 33.4vmin)'></div>" +
-      // subtle in-glass vignette so the image sits IN a tube
-      "<div style='position:absolute;inset:0;background:radial-gradient(circle at 50% 50%," +
-        "rgba(0,0,0,0) 0,rgba(0,0,0,0) 24vmin,rgba(0,0,0,.28) 32vmin,rgba(0,0,0,0) 33vmin)'></div>" +
+        "rgba(0,0,0,0) 0,rgba(0,0,0,0) 22vmin,rgba(0,0,0,.34) 31vmin,rgba(0,0,0,0) 33vmin)'></div>" +
+      // EYE RELIEF SHADOW — offset per frame from the live sway. This is the
+      // single strongest "I am behind an optic" cue there is.
+      "<div id='scShadow' style='position:absolute;left:50%;top:50%;width:67vmin;height:67vmin;" +
+        "transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;" +
+        "background:radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 56%,rgba(0,0,0,.55) 78%,rgba(0,0,0,.92) 100%);" +
+        "opacity:.55;will-change:transform'></div>" +
       // bezel
       "<div style='position:absolute;left:50%;top:50%;width:66.4vmin;height:66.4vmin;transform:translate(-50%,-50%);" +
         "border-radius:50%;border:3px solid rgba(8,9,11,.95);box-shadow:0 0 0 1.5px rgba(70,80,92,.45) inset,0 0 46px rgba(0,0,0,.7) inset'></div>" +
-      // fine crosshair
-      "<div style='position:absolute;left:50%;top:calc(50% - 33vmin);width:1px;height:66vmin;background:rgba(8,12,14,.92);transform:translateX(-.5px)'></div>" +
-      "<div style='position:absolute;top:50%;left:calc(50% - 33vmin);height:1px;width:66vmin;background:rgba(8,12,14,.92);transform:translateY(-.5px)'></div>" +
-      // mil ticks down each axis
-      [8, 16, 24].map(function (d) {
-        return "<div style='position:absolute;left:50%;top:calc(50% + " + d + "vmin);width:9px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
-          "<div style='position:absolute;left:50%;top:calc(50% - " + d + "vmin);width:9px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
-          "<div style='position:absolute;top:50%;left:calc(50% + " + d + "vmin);height:9px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
-          "<div style='position:absolute;top:50%;left:calc(50% - " + d + "vmin);height:9px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>";
+      // ---- DUPLEX RETICLE -------------------------------------------------
+      // Real hunting/marksman optics are DUPLEX: heavy posts from the edge that
+      // taper to a fine centre. Your eye is dragged to the middle by the step,
+      // and the thin part never covers the target. The old single 1px cross was
+      // uniform, which is both harder to find and thicker than it needs to be
+      // where it matters. Posts stop short of centre; the fine cross bridges.
+      [["left:50%;top:calc(50% - 33vmin);width:2.4px;height:19vmin;transform:translateX(-50%)"],
+       ["left:50%;top:calc(50% + 14vmin);width:2.4px;height:19vmin;transform:translateX(-50%)"],
+       ["top:50%;left:calc(50% - 33vmin);height:2.4px;width:19vmin;transform:translateY(-50%)"],
+       ["top:50%;left:calc(50% + 14vmin);height:2.4px;width:19vmin;transform:translateY(-50%)"]]
+        .map(function (p) { return "<div style='position:absolute;" + p[0] + ";background:rgba(6,9,11,.95)'></div>"; }).join("") +
+      // the fine centre cross
+      "<div style='position:absolute;left:50%;top:calc(50% - 14vmin);width:1px;height:28vmin;background:rgba(8,12,14,.86);transform:translateX(-.5px)'></div>" +
+      "<div style='position:absolute;top:50%;left:calc(50% - 14vmin);height:1px;width:28vmin;background:rgba(8,12,14,.86);transform:translateY(-.5px)'></div>" +
+      // mil ticks down each axis (holdover marks)
+      [4, 8, 12].map(function (d) {
+        return "<div style='position:absolute;left:50%;top:calc(50% + " + d + "vmin);width:7px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
+          "<div style='position:absolute;left:50%;top:calc(50% - " + d + "vmin);width:7px;height:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
+          "<div style='position:absolute;top:50%;left:calc(50% + " + d + "vmin);height:7px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>" +
+          "<div style='position:absolute;top:50%;left:calc(50% - " + d + "vmin);height:7px;width:1.5px;background:rgba(8,12,14,.9);transform:translate(-50%,-50%)'></div>";
       }).join("") +
       // centre dot
-      "<div style='position:absolute;left:50%;top:50%;width:3px;height:3px;border-radius:50%;background:rgba(200,30,24,.9);transform:translate(-50%,-50%)'></div>";
+      "<div style='position:absolute;left:50%;top:50%;width:2.5px;height:2.5px;border-radius:50%;background:rgba(200,30,24,.92);transform:translate(-50%,-50%)'></div>";
     document.body.appendChild(scopeEl);
   }
 
@@ -865,6 +893,19 @@
     if (CBZ.fps && CBZ.fps.active) {
       CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + (wantPitch - swayPitchApplied)));
       swayPitchApplied = wantPitch;
+    }
+    // EYE RELIEF — swim the scope shadow against the sway. Your head is not
+    // welded to the eyepiece: as the rifle breathes, your eye drifts off the
+    // exit pupil and the dark crescent creeps in from whichever side you have
+    // moved away from. Magnified ~90x off the raw sway radians because the
+    // shadow is the AMPLIFIED read of a tiny head movement — that ratio is
+    // what makes a 0.0015-radian breath visible as an optical effect at all.
+    if (scopeEl) {
+      const sh = scopeEl.querySelector("#scShadow");
+      if (sh) {
+        const ox = -wantYaw * 90, oy = wantPitch * 90;
+        sh.style.transform = "translate(calc(-50% + " + ox.toFixed(2) + "vmin), calc(-50% + " + oy.toFixed(2) + "vmin))";
+      }
     }
     // the optic's own reticle replaces the HUD crosshair while scoped
     const cx = crossEl();

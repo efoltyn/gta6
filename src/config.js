@@ -774,6 +774,51 @@
   // civilian aircraft (GA prop planes + a light heli) orbiting the city on
   // stacked altitude bands, banking into their turns. Pure atmosphere — no
   // colliders, no weapons, no wanted interaction. Flip false to clear the sky.
+  // ======================================================================
+  //  BLD_EXTRAS — THE ONE SWITCH FOR EVERY NON-GLASS BUILDING LAYER.
+  //
+  //  OWNER, twice, and the second time with feeling: "you added a second
+  //  building type beyond our normal glass building — purge that second
+  //  building type, our glass is perfect and it's THE GAME, why mix it up",
+  //  then "the building purge of all the non-glass buildings you added, all
+  //  the fucking overlapping things — it's ONE flag."
+  //
+  //  He is right on both counts. A wave of "make the world realer" work piled
+  //  four separate dressing passes onto a building silhouette that was already
+  //  finished: masonry/civic facades, brick veneer bands, monumental podiums,
+  //  and vertical clutter glued onto the finished lots. Each was individually
+  //  defensible and collectively they buried the one thing that gives this
+  //  city its identity — a skyline of clean glass. They also overlapped each
+  //  other, which is why it read as noise rather than as detail.
+  //
+  //  So this is the single revert, and it is OFF. Everything downstream reads
+  //  it and stands down. Set ?cfg_BLD_EXTRAS=1 to bring the whole lot back at
+  //  once if it is ever wanted again — nothing was deleted, it is all one
+  //  boolean away.
+  // ======================================================================
+  //  CORRECTION after a second look in play: "keep government building — it
+  //  was the RESIDENTIAL, an old type of building that overlaps over buildings
+  //  and got re-added." So this is no longer a blanket purge. The courthouse,
+  //  federal building, library, post office and city hall annex STAY: they are
+  //  landmarks with function behind them, and they were never the complaint.
+  //  What goes is the MASONRY/BRICK residential facade — the old archetype
+  //  that came back in on the "realer world" wave — and the vertical clutter
+  //  pass, which is the thing that literally geometrically overlaps the
+  //  finished building shells.
+  if (CBZ.CONFIG.BLD_EXTRAS == null) CBZ.CONFIG.BLD_EXTRAS = false;
+  if (!CBZ.CONFIG.BLD_EXTRAS) {
+    // GONE: the brick/masonry residential facade archetype + its veneer bands
+    CBZ.CONFIG.BLD_MASONRY_V1 = false;
+    CBZ.CONFIG.BLD_MASONRY_TEXTURE = false;
+    // GONE: the passes that glue geometry ONTO finished buildings (the overlap)
+    CBZ.CONFIG.DETAIL_BUILDING_DRESS = false;
+    CBZ.CONFIG.BLD_ROOF_CLUTTER_V1 = false;
+    CBZ.CONFIG.BLD_WEATHERING_V1 = false;
+    CBZ.CONFIG.DETAIL_GROUND_GRIME = false;
+    // KEPT: the government/civic buildings and their monumental entries.
+    // Explicitly left alone so a future blanket edit cannot quietly take them.
+  }
+
   if (CBZ.CONFIG.AIR_TRAFFIC_AMBIENT == null) CBZ.CONFIG.AIR_TRAFFIC_AMBIENT = true;
   // HEAVY-WEAPON AIR DAMAGE (city/police.js + city/airtraffic.js): the lock-on
   // work made Air-1 and the ambient GA fleet ACQUIRABLE, so a homing missile

@@ -212,13 +212,23 @@
       iso(ss.torso); iso(ss.collar); iso(ss.legs); iso(ss.legsLower);
       p._vipFitIso = true;
     }
-    const paint = (arr, h) => { if (h == null) return; (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(h); }); };
+    const paint = (arr, h) => { if (h == null) return;
+      // CBZ.cityPaintSlot clones a _shared pooled material before tinting.
+      // The old inline version did not, so dressing ONE actor repainted that
+      // colour across the whole world (hands vs faces diverging).
+      if (CBZ.cityPaintSlot) return CBZ.cityPaintSlot(arr, h);
+      (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(h); } }); };
     paint(ss.torso, hex); paint(ss.collar, hex); paint(ss.legs, hex); paint(ss.legsLower, hex);
   }
   function restoreFit(p) {
     const f = p._vipFit0; if (!f) return;
     const ss = p.char && p.char.skinSlots; if (!ss) return;
-    const paint = (arr, h) => { if (h == null) return; (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(h); }); };
+    const paint = (arr, h) => { if (h == null) return;
+      // CBZ.cityPaintSlot clones a _shared pooled material before tinting.
+      // The old inline version did not, so dressing ONE actor repainted that
+      // colour across the whole world (hands vs faces diverging).
+      if (CBZ.cityPaintSlot) return CBZ.cityPaintSlot(arr, h);
+      (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(h); } }); };
     paint(ss.torso, f.torso); paint(ss.collar, f.collar); paint(ss.legs, f.legs); paint(ss.legsLower, f.legs);
     p._vipFit0 = null;
   }

@@ -45,6 +45,13 @@
   // ============================================================
   if (CBZ.CONFIG) {
     // BLD_MASONRY_V1 — revive the punched-masonry facade grammar that has been
+  // ======================================================================
+  //  PURGED — but the switch is NOT here. src/config.js's BLD_EXTRAS is the
+  //  ONE flag (owner: "it's one fucking flag"), and it force-sets every flag
+  //  below to false before this file parses. These defaults therefore stay
+  //  TRUE on purpose: they are what ?cfg_BLD_EXTRAS=1 restores. Setting them
+  //  false here as well would make the master switch a one-way door.
+  // ======================================================================
     // dead code since `const punched = false` landed (buildings.js), and add
     // the new "brick" / "civic" facade archetypes on top of it. ON → brick and
     // government buildings render as real masonry (piers, sills, lintels,

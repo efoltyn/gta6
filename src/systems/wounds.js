@@ -71,30 +71,104 @@
   const PROUD_SOAK = 0.008; // the stain sits UNDER its wound disc
 
   // ---- shared geometry + materials ------------------------------------------
-  const G_WOUND = new THREE.CircleGeometry(1, 8);
-  G_WOUND._shared = true;
+  //
+  //  WHY THE OLD HOLE LOOKED FAKE (owner: "the bullet hole and blood shit looks
+  //  dumb"). It was a CircleGeometry(1, 8) — a flat, single-colour OCTAGON. Three
+  //  separate tells, and all three were free to fix:
+  //    1. EIGHT SEGMENTS. Close up that is a visible stop sign, not a hole.
+  //    2. ONE FLAT COLOUR. A real entry wound is a dark pit ringed by raw,
+  //       abraded skin. A single flat fill cannot be a pit — it is a sticker.
+  //    3. A PERFECT CIRCLE. Nothing about torn tissue is perfectly round.
+  //
+  //  The fix costs ZERO extra draw calls and zero extra geometry, because the
+  //  geometry is SHARED: every wound in the game reads this one object, so
+  //  improving it once improves every hit ever taken, forever.
+  //
+  //  THE TRICK IS VERTEX COLOUR. MeshBasicMaterial multiplies its own colour by
+  //  the per-vertex colour, so baking a radial ramp into the geometry gives the
+  //  disc DEPTH while leaving every existing material colour — and therefore
+  //  every wound TYPE (fresh / dry / bruise / torn) — exactly as authored. The
+  //  ramp only ever DARKENS toward the centre and reaches 1.0 at the rim, so
+  //  the outer edge is still today's exact colour and nothing can wash out.
+  //  A bullet hole, a bite and a bruise all become pits from one change, and
+  //  none of them needed a new material, a texture, or a second mesh.
+  function rampGeo(seg, jitter, floor) {
+    const g = new THREE.CircleGeometry(1, seg);
+    g._shared = true;
+    const pos = g.attributes.position;
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    const col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i), y = pos.getY(i);
+      const r0 = Math.sqrt(x * x + y * y);
+      if (jitter && r0 > 0.25) {
+        // the same randomly-phased-sine rim wobble the soak blobs already use,
+        // just tighter — a punched hole is irregular, not lumpy
+        const a = Math.atan2(y, x);
+        const k = 1 + jitter * (Math.sin(a * 3 + p1) * 0.5 + Math.sin(a * 5 + p2) * 0.33 + Math.sin(a * 7 + p3) * 0.2);
+        x *= k; y *= k;
+        pos.setXY(i, x, y);
+      }
+      const r = Math.min(1, Math.sqrt(x * x + y * y));
+      // r^2 keeps the dark core tight and small instead of a soft grey wash —
+      // the pit should be a PIT, with the falloff crowded against the rim.
+      let v = floor + (1 - floor) * (r * r);
+      col[i * 3] = v;
+      // green/blue lag red slightly through the mid-band, so the ring just
+      // inside the rim goes raw and red rather than merely lighter.
+      const raw = 1 - 0.22 * Math.max(0, 1 - Math.abs(r - 0.72) * 4);
+      col[i * 3 + 1] = v * raw;
+      col[i * 3 + 2] = v * raw;
+    }
+    pos.needsUpdate = true;
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    return g;
+  }
+  // 14 segments reads as round at contact range; the 0.30 floor is the pit.
+  const G_WOUND = rampGeo(14, 0.10, 0.30);
   // soak stains: IRREGULAR blob outlines — a circle with per-vertex radial
   // jitter (sum of randomly-phased sines) baked ONCE at startup. 3 shared
   // geometries, randomly picked + spun + stretched per stain.
+  //
+  //  The stains had the SAME defect as the hole and it read even worse, because
+  //  a stain is bigger: an irregular outline was already here, but the fill was
+  //  flat, so a soak ended in a HARD EDGE — a solid sticker of blood with a
+  //  crisp border. Blood wicking through cloth is dark where it pooled and
+  //  fades out where it spread. Same free fix: a radial ramp in vertex colour,
+  //  darkest at the centre, falling to nearly nothing at the rim so the stain
+  //  DISSOLVES into the garment instead of being cut out of it.
   function blobGeo() {
     const g = new THREE.CircleGeometry(1, 14);
     g._shared = true;
     const pos = g.attributes.position;
     const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    const col = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i);
-      if (x * x + y * y < 0.25) continue;            // centre vertex stays put
-      const a = Math.atan2(y, x);
-      const k = 1 + 0.18 * Math.sin(a * 3 + p1) + 0.14 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
-      pos.setXY(i, x * k, y * k);
+      let x = pos.getX(i), y = pos.getY(i);
+      if (x * x + y * y >= 0.25) {                   // centre vertex stays put
+        const a = Math.atan2(y, x);
+        const k = 1 + 0.18 * Math.sin(a * 3 + p1) + 0.14 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
+        x *= k; y *= k;
+        pos.setXY(i, x, y);
+      }
+      // 1 at the pooled centre → 0.18 at the feathered rim. Multiplied against
+      // MAT_SOAK, the edge all but vanishes into the cloth.
+      const r = Math.min(1, Math.sqrt(x * x + y * y));
+      const v = 1 - 0.82 * (r * r);
+      col[i * 3] = v; col[i * 3 + 1] = v * 0.94; col[i * 3 + 2] = v * 0.94;
     }
+    pos.needsUpdate = true;
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     return g;
   }
   const G_SOAK = [blobGeo(), blobGeo(), blobGeo()];
   function unlit(color) {
     // unlit = the wound reads as a HOLE (no light catch), and it's the
     // cheapest material in the renderer. _shared → rig-disposal sweeps skip it.
-    const m = new THREE.MeshBasicMaterial({ color });
+    // vertexColors MULTIPLIES this colour by the geometry's baked radial ramp,
+    // which is what turns a flat fill into a pit. Every material here keeps its
+    // authored hex — the ramp only shades within it. (r128 takes a boolean.)
+    const m = new THREE.MeshBasicMaterial({ color, vertexColors: true });
     m._shared = true;
     return m;
   }

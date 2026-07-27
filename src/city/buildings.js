@@ -112,7 +112,14 @@
   const cityGlass = [], cityShards = [];
   let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
-  function glassMat() { return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 })); }
+  // THE reference glass — now sourced from CBZ.glass() so the cockpit, the
+  // cabin windows and anything else with a pane get THIS material, not a
+  // guess at it. Degrade-safe: no CBZ.glass (materials.js stripped) and the
+  // exact original inline recipe still runs, so the city cannot regress.
+  function glassMat() {
+    if (CBZ.glass) return CBZ.glass();
+    return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
+  }
   function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.18, 0.25, 0.035)); }
   function shardGeoBig() { return _shardGeoBig || (_shardGeoBig = new THREE.BoxGeometry(0.30, 0.40, 0.04)); }
 

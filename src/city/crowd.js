@@ -1246,8 +1246,12 @@
     if (plain && ch._clothesKey != null && CBZ.cityApplyClothes) CBZ.cityApplyClothes(ch, null);
     // a stale bandana from a prior gang occupant must go too (clothes.js mesh)
     if (plain && ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
-    const paint = (arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(hex); });
-    if (ch.head && ch.head.material && ch.head.material.color) ch.head.material.color.setHex(skinHex);
+    // cityPaintSlot clones a _shared pooled material before tinting. cloneLook()
+    // isolates a POOLED rig up front, but this ran on any rig handed to it, and
+    // an un-isolated one leaked its tint into the global cmat cache — which is
+    // what made strangers' hands change skin tone while their faces did not.
+    const paint = CBZ.cityPaintSlot || ((arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } }));
+    if (ch.head) paint([ch.head], skinHex);
     const ss = ch.skinSlots || {};
     paint(ss.hands, skinHex); paint(ss.arms, skinHex); paint(ss.armsLower, skinHex); paint(ss.hair, hairHex);
     paint(ss.torso, shirtHex); paint(ss.collar, shirtHex);

@@ -784,6 +784,14 @@
      own limit query only if nobody else has, so loading first is the entire
      handover. Revert with ?cfg_ROAD_RULES=0 (?cfg_ROAD_SPEED_ENFORCE=0 keeps
      the roundel and drops only the ticket). -->
+<!-- THE CONTROLS CARD. The owner reported "planes are not moving", then
+     corrected it: "planes do move, they just changed the control and I did not
+     know the control." FLIGHT_CONTROLS_V2 moved throttle from W/S to Space/Ctrl
+     and this game has never had a controls screen anywhere, so a better scheme
+     read as a broken aircraft. One registry, declared next to the key tests that
+     consume them; pops once per context and stays until dismissed; [?] reopens.
+     Revert with ?cfg_CONTROLS_CARD=0. -->
+<script src="src/systems/controls.js?v=ctrl1"></script>
 <script src="src/city/roadrules.js?v=rules1"></script>
 <!-- HIGHWAY CHECKPOINTS. Permanent policed shoulders, as opposed to the
      dynamic roadblock police.js already stages across your lane at 3 stars.

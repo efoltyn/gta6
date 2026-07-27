@@ -310,6 +310,22 @@
       F.driftX = Math.sin(F.yaw) * CANOPY_FWD * flare;
       F.driftZ = Math.cos(F.yaw) * CANOPY_FWD * flare;
       if (k["s"]) P.vy += dt * 1.6;      // flaring also arrests the sink briefly
+
+      // THE CANOPY DISCARDS THE FALL. systems/physics.js scores a landing on
+      // player._fallPeak — the fastest you fell at ANY point — not on the speed
+      // you actually touch down at. Freefall pins that at terminal (58 m/s), so
+      // before this line a parachute could not save you: you decelerated to a
+      // 5.4 m/s sink and the game still judged the landing at 58 and killed you
+      // every single time, however well you flew it.
+      //
+      // Clamping the peak to the CURRENT sink rate is not a special case, it is
+      // the physics: a canopy's entire job is to shed the energy you built up,
+      // and once it is open and flying, how fast you were falling a moment ago
+      // is no longer stored anywhere in your body. A late pull still hurts —
+      // you are still fast when the ground arrives, so the peak is still high.
+      // No second damage path; the existing ladder just gets an honest number.
+      const sink = -(P.vy || 0);
+      if (P._fallPeak == null || P._fallPeak > sink) P._fallPeak = Math.max(0, sink);
     }
 
     P.pos.x += F.driftX * dt;

@@ -100,6 +100,77 @@
   }
 
   // canopy pose: t 0 closed → 1 open (lift + slide aft, reads as a popped hood)
+  // ======================================================================
+  //  THE AIRSTAIR (owner: "a whole animation for entering a plane, like for
+  //  private planes the stairs coming down — we already have some animation
+  //  for entering a plane but it looks glitchy").
+  //
+  //  BOTH halves of that are the same defect. The "step" beat eased the
+  //  player's Y toward the cabin floor with an exponential, so you rose into
+  //  the fuselage THROUGH THIN AIR — no stair, no ladder, nothing under your
+  //  feet, and an ease that never quite arrives. It looked glitchy because it
+  //  WAS: a body levitating up the side of an aeroplane.
+  //
+  //  A stair fixes the look and the bug in one move. Once there is a real ramp
+  //  the climb stops being an ease toward a height and becomes a walk ALONG a
+  //  surface — Y is a function of how far up the ramp you are, which lands
+  //  exactly on the deck by construction and cannot float.
+  //
+  //  Built lazily, once per aircraft, parented to the door group so it rides
+  //  every heading and taxi movement for free. Deploys by rotating about its
+  //  top hinge, exactly the way a real integrated airstair unfolds.
+  // ======================================================================
+  const STAIR_STEPS = 7;
+  function buildStair(grp, spec) {
+    if (!window.THREE || !grp) return null;
+    const THREE = window.THREE;
+    const cmat = CBZ.cmat || CBZ.mat;
+    const drop = Math.max(0.9, (spec.inY != null ? spec.inY - (grp.position.y || 0) : 1.6));
+    const run = drop * 1.25;                       // ~38 degrees, a real airstair rake
+    const W = 0.92;
+    const g = new THREE.Group();
+    // hinge at the door sill so the whole flight swings down from the doorway
+    g.position.set(spec.doorLocal.x, drop, spec.doorLocal.z);
+    const rail = cmat(0x9aa3ad), tread = cmat(0xb6bec7);
+    for (let i = 0; i < STAIR_STEPS; i++) {
+      const t = (i + 0.5) / STAIR_STEPS;
+      const st = new THREE.Mesh(new THREE.BoxGeometry(W, 0.05, run / STAIR_STEPS * 0.92), tread);
+      st.position.set(0, -drop * t, -run * t);
+      st.castShadow = false; st.receiveShadow = true;
+      g.add(st);
+    }
+    // two stringers so it reads as a flight of stairs rather than floating slats
+    for (let sdir = -1; sdir <= 1; sdir += 2) {
+      const len = Math.hypot(drop, run);
+      const sr = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, len), rail);
+      sr.position.set(sdir * (W / 2 + 0.03), -drop / 2, -run / 2);
+      sr.rotation.x = -Math.atan2(drop, run);
+      g.add(sr);
+      // handrail above it, the detail that makes an airstair an AIRSTAIR
+      const hr = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, len), rail);
+      hr.position.set(sdir * (W / 2 + 0.03), -drop / 2 + 0.86, -run / 2);
+      hr.rotation.x = -Math.atan2(drop, run);
+      g.add(hr);
+      for (let k = 0; k < 3; k++) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.86, 0.04), rail);
+        const tt = 0.18 + k * 0.34;
+        post.position.set(sdir * (W / 2 + 0.03), -drop * tt + 0.43, -run * tt);
+        g.add(post);
+      }
+    }
+    g.userData.stair = { drop: drop, run: run };
+    g.visible = false;
+    grp.add(g);
+    return g;
+  }
+  // t 0 = stowed flush against the hull, 1 = fully deployed on the apron
+  function poseStair(g, t) {
+    if (!g) return;
+    g.visible = t > 0.001;
+    // swings down about the sill hinge; stowed it lies flat up the fuselage
+    g.rotation.x = (1 - t) * 1.32;
+  }
+
   function poseCanopy(grp, t) {
     const c = grp.userData.canopy;
     if (!c) return;
@@ -166,7 +237,14 @@
       P, rec: opts.rec || null, group: grp, spec,
       handover: opts.handover, onFail: opts.onFail || null,
       phase: "walk", t: 0, walkT: 0, exit: false,
+      stair: null,
     };
+    // a walk-in door gets a real flight of stairs; a fighter canopy and a
+    // bare hatch do not (nothing to climb to — spec.inY is null).
+    if (arc && arc.spec && arc.spec.inY != null) {
+      try { arc.stair = grp.userData._cbzStair || (grp.userData._cbzStair = buildStair(grp, arc.spec)); } catch (e) { arc.stair = null; }
+      poseStair(arc.stair, 0);
+    }
     P._doorArc = true;
     setDoorFlag(arc.rec, true);                    // island_airport eases panel/stair open
     if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
@@ -208,6 +286,10 @@
       const out = toWorld(a.group, spec.outLocal.x, spec.outLocal.z);
       const arrived = guide(P, out.x, out.z, dt, 4.4);
       if (spec.kind === "canopy") poseCanopy(a.group, Math.min(1, a.walkT / 0.55));
+      // THE STAIRS COME DOWN while you walk up to the aircraft — the beat the
+      // owner asked for, and it is timed to be finished before you arrive so
+      // you never wait on it.
+      if (a.stair) poseStair(a.stair, Math.min(1, a.walkT / 0.9));
       if (arrived || a.walkT > 2.2) { a.phase = "open"; a.t = 0; }
       return;
     }
@@ -221,9 +303,18 @@
       // the player visibly steps IN through the opening (rising to the deck
       // when the door has one — reads as climbing aboard)
       const inn = toWorld(a.group, spec.inLocal.x, spec.inLocal.z);
+      const out = toWorld(a.group, spec.outLocal.x, spec.outLocal.z);
       const done = guide(P, inn.x, inn.z, dt, 3.6);
       if (spec.inY != null) {
-        P.pos.y += (spec.inY - P.pos.y) * Math.min(1, dt * 6);
+        // WALK UP THE RAMP, do not levitate. Height is now a function of how
+        // far along the door-ward leg you are, so the body arrives exactly on
+        // the deck instead of chasing it with an ease that never lands. That
+        // ease is what made the old boarding look glitchy.
+        const total = Math.hypot(inn.x - out.x, inn.z - out.z) || 1;
+        const left = Math.hypot(inn.x - P.pos.x, inn.z - P.pos.z);
+        const up = Math.max(0, Math.min(1, 1 - left / total));
+        const baseY = a.baseY != null ? a.baseY : 0;
+        P.pos.y = baseY + (spec.inY - baseY) * (up * up * (3 - 2 * up));
         if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.y = P.pos.y;
       }
       if (done || a.t > 1.2) {
@@ -238,6 +329,7 @@
     }
     if (a.phase === "close") {
       if (spec.kind === "canopy" && a.group.parent) poseCanopy(a.group, Math.max(0, 1 - a.t / 0.45));
+      if (a.stair) poseStair(a.stair, Math.max(0, 1 - a.t / 0.5));   // folds up behind you
       if (a.t >= 0.5) endArc(false);
       return;
     }

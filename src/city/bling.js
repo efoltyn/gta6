@@ -90,7 +90,18 @@
     else if (kind === "linkThin") gm = CBZ.boxGeom(0.30, 0.026, 0.024); // diamond necklace's finer strand
     else if (kind === "linkThick") gm = CBZ.boxGeom(0.30, 0.055, 0.035); // iced chain's fat links
     else if (kind === "pendant") gm = CBZ.boxGeom(0.07, 0.07, 0.03);  // small flat pendant block
-    else if (kind === "cuff") gm = CBZ.boxGeom(0.32, 0.05, 0.32);     // thin band wrapping the 0.3 forearm
+    else if (kind === "cuff") {
+      // A BAND, NOT A BLOCK (owner: "bracelets overlap clothes and look dumb").
+      // The old cuff was a 0.32 box around a 0.30 forearm — one centimetre of
+      // clearance per side, which any sleeve thickness at all swallows, so the
+      // watch sank INTO the shirt and z-fought its own arm. It was also square,
+      // so its corners poked through a round-ish limb at every angle.
+      // A torus wraps the limb properly and 0.185 of radius clears the sleeve
+      // with room to spare; 8 radial segments keeps it in the low-poly language
+      // of everything else on the body.
+      gm = new THREE.TorusGeometry(0.185, 0.028, 4, 8);
+      gm.rotateX(Math.PI / 2);          // torus lies in XY by default; lay it flat around the arm
+    }
     else if (kind === "face") gm = CBZ.boxGeom(0.10, 0.07, 0.03);     // watch face plate on the band
     else if (kind === "ring") gm = CBZ.boxGeom(0.05, 0.04, 0.05);     // a glint dot, not a knuckle-duster
     else if (kind === "grill") gm = CBZ.boxGeom(0.16, 0.05, 0.04);    // an iced bar across the mouth (a grill)
@@ -161,8 +172,8 @@
     };
     const watch = function (band, faceM) {
       return [
-        { kind: "cuff", mat: band, x: 0, y: -0.20, z: 0 },
-        { kind: "face", mat: faceM, x: 0, y: -0.20, z: 0.165 },
+        { kind: "cuff", mat: band, x: 0, y: -0.60, z: 0 },     // WRIST — was -0.20, up under the sleeve at the elbow
+        { kind: "face", mat: faceM, x: 0, y: -0.60, z: 0.175 },   // the dial rides ON the band
       ];
     };
     _looks = {
@@ -175,11 +186,11 @@
       watchSilver: watch(M.silver, M.silver),
       watchIced: watch(M.ice, M.glint),
       watchSteel: watch(M.silver, M.silver),                                   // clean steel dress watch
-      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.20, z: 0 },      // steel band
-        { kind: "face", mat: M.blueDial, x: 0, y: -0.20, z: 0.165 },           // signature blue dial
-        { kind: "ring", mat: M.glint, x: 0, y: -0.14, z: 0.18 }],              // lume pip
+      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.60, z: 0 },      // steel band, on the wrist
+        { kind: "face", mat: M.blueDial, x: 0, y: -0.60, z: 0.175 },           // signature blue dial
+        { kind: "ring", mat: M.glint, x: 0, y: -0.54, z: 0.19 }],              // lume pip
       // tennis bracelet — band only
-      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.20, z: 0 }],
+      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.56, z: 0 }],   // sits just above the watch, on skin
       // ring — a glint dot on the hand's front edge
       ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.34, z: 0.17 }],
       // grill — a small iced bar across the lower face (the mouth)

@@ -1937,7 +1937,12 @@
         // an invisible wall anywhere between the widely spaced posts.  A darker,
         // depth-writing mesh keeps the chain-link feel while making every solid
         // span agree with what the player can actually see.
-        const fm = new THREE.MeshLambertMaterial({ color: 0x66717d, transparent: true, opacity: 0.52, depthWrite: true, side: THREE.DoubleSide });
+        const fm = CBZ.glass
+          // the SAME glass as the towers, seen from both sides. The old flat
+          // grey 0x66717d had no emissive lift, which is exactly why an
+          // airliner window read as a dead grey slot instead of a pane.
+          ? CBZ.glass({ opacity: 0.5, side: THREE.DoubleSide })
+          : new THREE.MeshLambertMaterial({ color: 0x66717d, transparent: true, opacity: 0.52, depthWrite: true, side: THREE.DoubleSide });
         const fmesh = new THREE.Mesh(BGU.mergeBufferGeometries(panels), fm);
         fmesh.matrixAutoUpdate = false; root.add(fmesh);
       }

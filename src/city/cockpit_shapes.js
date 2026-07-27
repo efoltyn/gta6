@@ -398,6 +398,71 @@
     }
 
     // -----------------------------------------------------------------
+    // 4b. THE GLAZING — actual glass in the actual frame.
+    //
+    // OWNER: "the cockpit has some glass but it's not good at all." It had
+    // NONE. The header above said so outright — "structure only, never glass"
+    // — on the theory that the exterior aircraft model owns the canopy. From
+    // the pilot's seat that theory fails: you sit inside a bare hoop-and-rail
+    // cage and look straight out through nothing. There is no pane between you
+    // and the sky, so nothing ever catches the light, and the one surface that
+    // should say "you are sealed inside a machine at altitude" is absent.
+    //
+    // These panes are CBZ.glass — the same material as the curtain wall on
+    // every tower in the city, which is the glass the owner says is perfect.
+    // Not a lookalike: the same object out of the same pool. Two deliberate
+    // deviations from the building preset, both forced by sitting INSIDE it:
+    //   • far lower opacity — a 0.6 pane is a windscreen you cannot fly
+    //     through. Aircraft glass is nearly clear; it is the TINT and the
+    //     emissive lift that sell it, not the density.
+    //   • DoubleSide + no depth write — you are on the inside of this pane,
+    //     and a canopy that writes depth sorts in front of its own instrument
+    //     panel and punches a hole through the cockpit.
+    //
+    // Frameless airframes (spec.minimal, which model their own windscreen)
+    // are skipped for exactly the reason their frame is: doubling a mullion
+    // is bad, and doubling a windscreen is worse.
+    // -----------------------------------------------------------------
+    const glassMats = [];
+    if (S.frame && CBZ.glass && D.glaze !== false) {
+      const gMat = CBZ.glass({
+        opacity: num(D.glazeOpacity, 0.17),
+        side: THREE.DoubleSide,
+        ei: 0.34,                       // a touch under the building lift
+        fog: false,                     // this interior renders in a fog-free pass
+      });
+      glassMats.push(gMat);
+      const gw = railHW * 2 * 0.98;
+
+      // WINDSCREEN — one pane raked on the same axis as the centre post, so
+      // it lands flush inside the forward bow rather than floating in it.
+      const wsH = Math.max(0.24, (railY + railHW * 0.42) - (topY + gRise));
+      const ws = put(new THREE.PlaneGeometry(gw, wsH), gMat);
+      ws.position.set(ex,
+        topY + gRise + (wsH / 2) * Math.cos(wsTilt),
+        topZ + 0.055 - (wsH / 2) * Math.sin(wsTilt));
+      ws.rotation.x = -wsTilt;
+      ws.name = "cockpit-windscreen";
+      ws.renderOrder = 6;               // after the opaque interior, always
+      ws.userData.glass = true;
+
+      // SIDE LIGHTS — the panes your peripheral vision actually reads while
+      // you bank. Hung on the rails, canted in slightly at the top the way a
+      // real greenhouse tapers toward the spine.
+      const sideL = Math.max(0.3, tD * 0.62);
+      const sideH = Math.max(0.2, railHW * 0.72);
+      for (let s = -1; s <= 1; s += 2) {
+        const pane = put(new THREE.PlaneGeometry(sideL, sideH), gMat);
+        pane.position.set(ex + s * railHW * 0.99, railY - sideH * 0.34, tubZ + 0.02);
+        pane.rotation.y = s * Math.PI / 2;
+        pane.rotation.z = s * 0.12;
+        pane.name = "cockpit-sidelight";
+        pane.renderOrder = 6;
+        pane.userData.glass = true;
+      }
+    }
+
+    // -----------------------------------------------------------------
     // 5. CONSOLES — one sculpted box each. Switch rows are NOT modelled
     //    (five draws for detail you never look straight at); the lamp
     //    strip below is what makes them read at a glance.
@@ -626,7 +691,7 @@
         pedalR: pedalR,
         yoke: yoke,
         lampMats: lampMats,
-        glassMats: [],                    // no glass here by design (see header)
+        glassMats: glassMats,             // REAL panes now — see section 4b
       },
     };
   }
