@@ -521,7 +521,23 @@
     // byte-identical on the per-segment path below.
     const smooth = !!opts.smooth;
     if (smooth && path.length > 2) path = CBZ.highwaySmoothPath(path, opts.filletRadius || 60, opts.filletStep || 9);
-    const width = opts.width != null ? opts.width : 24;
+    // SCALE (owner: "make the scale of everything much much more massive versus
+    // human — really consider that for mountains and ROADS").
+    //
+    // The honest read on why a highway felt small: 24m of deck with 3.6m lanes
+    // is CORRECT — those are real motorway numbers — but correct is not the
+    // same as massive, and a person is 1.8m tall, so a 3.6m lane is only two
+    // body-lengths across. Standing on the shoulder of a real six-lane
+    // motorway, the thing that hits you is that the road is WIDER THAN THE
+    // BUILDINGS ARE TALL. This deck was narrower than a four-storey walk-up.
+    //
+    // 34m of deck on 4.6m lanes is a deliberate over-scale: it is not what a
+    // highway measures, it is what a highway FEELS like from the hard shoulder.
+    // Safe to change here because a highway is placed as its own ribbon and
+    // never participates in the city grid's lot math — widening it cannot move
+    // a building. Callers that pass an explicit width (causeways sized to their
+    // gap) are untouched.
+    const width = opts.width != null ? opts.width : 34;
     // ROADS_V2 (owner: "never many lanes or wide highways"): a paved highway
     // defaults to a REAL 3+3 cross-section with a hard median — 6×3.6m lanes +
     // 1.2m median + 0.4m edge margins = 23.2m, inside the 24m deck with a 0.4m
@@ -530,7 +546,7 @@
     const isDirt = opts.theme === "dirt";
     const lanesPerDir = Math.max(1, (opts.lanesPerDir != null ? opts.lanesPerDir
       : (V2 && !isDirt && width >= 23) ? 3 : 2) | 0);
-    const laneW = opts.laneW != null ? opts.laneW : 3.6;
+    const laneW = opts.laneW != null ? opts.laneW : 4.6;   // over-scaled with the deck (see above)
     const elevated = !!opts.elevated;
     const theme = THEME[opts.theme] || THEME.asphalt;
     const median = opts.median != null ? !!opts.median : (V2 && !isDirt && lanesPerDir >= 3);
