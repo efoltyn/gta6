@@ -414,6 +414,39 @@
   }
   CBZ.cityJobTitle = jobTitle;      // peds.js / dossier read the same normaliser
 
+  // ---- WHAT TRADE IS THIS PERSON WORKING? ---------------------------------
+  // jobTitle() above answers "what do I PRINT over their head". These two
+  // answer "what does the WORLD know them to do" — the key into aigoals.js's
+  // CITY_JOBS (the one table that owns a workplace, a shift and a wage) and
+  // that record's trade family. They are the same two lines shops.js kept
+  // private as `_jobOf`/`_jclass` to gate its mechanic / cab / cart / grease
+  // verbs; role identity lives HERE, so the accessor does too, and shops.js
+  // now consumes it (its private pair survives only as a degrade fallback).
+  //
+  // `job` is FREE-FORM PROSE in this codebase (see the long note on
+  // cityTitle): a caster may deal "Cab Driver" where the table keys "cab
+  // driver". The exact key wins, then the lowercased one; anything the table
+  // has never heard of comes back VERBATIM, so a regex probe
+  // (/mechanic/i.test) reads exactly what it always read. That makes this a
+  // strict superset of the private pair — it can only ever match MORE.
+  function pedJob(a) {
+    const raw = a && a.job;
+    if (!raw) return "";
+    const s = String(raw).trim();
+    if (!s) return "";
+    const J = CBZ.cityJobs;
+    if (J && J[s]) return s;
+    const lc = s.toLowerCase();
+    if (J && J[lc]) return lc;
+    return s;
+  }
+  function pedJobClass(a) {
+    const J = CBZ.cityJobs && CBZ.cityJobs[pedJob(a)];
+    return (J && J.class) || "";
+  }
+  CBZ.cityPedJob = pedJob;          // the CITY_JOBS key this actor works ("" = none)
+  CBZ.cityPedJobClass = pedJobClass;// "service" | "trade" | "law" | "medic" | ""
+
   // ---- CONDITIONS: not a job, not an org, but a real thing to be. ----------
   // Ordered most-specific first. Each one is acted on by a live system, which
   // is what separates a condition from a shrug: vagrant -> the night hunt

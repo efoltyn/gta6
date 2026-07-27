@@ -762,7 +762,7 @@
     CBZ.city.note("Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
     if (CBZ.sfx) CBZ.sfx("coin"); render();
   }
-  function train() { if (CBZ.city.spend(100)) { CBZ.player.maxHp = (CBZ.player.maxHp || 100) + 10; CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained — max HP " + CBZ.player.maxHp, 1.8); render(); } }
+  function train() { if ((CBZ.player.maxHp || 100) >= 240) { CBZ.city.note("You're maxed out — the gym can't take you further.", 1.8); return; } if (CBZ.city.spend(100)) { CBZ.player.maxHp = Math.min(240, (CBZ.player.maxHp || 100) + 10); CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained — max HP " + CBZ.player.maxHp, 1.8); render(); } }
   // BAR — buy a round. The bar's verb promises "drinks" but it has no stock and
   // the food heal path is kind-gated; this is the drink. Loosens you up: tops a
   // little hunger, a short stamina boost, and a small patch-up (mirrors the
@@ -906,8 +906,16 @@
   // ============================================================
   const _sNow = () => CBZ.now || 0;
   const _first = (n) => (n || "them").split(" ")[0];
-  const _jobOf = (p) => (p && p.job) || "";
-  const _jclass = (p) => { const J = CBZ.cityJobs && CBZ.cityJobs[_jobOf(p)]; return J ? J.class : ""; };
+  // WHO IS WORKING: promoted to city/level.js (CBZ.cityPedJob / cityPedJobClass)
+  // — role identity is that file's business, and city/roleverbs.js needs the
+  // same read to hang a verb on a trade. The old private pair stays underneath
+  // as the degrade path, byte-identical to what it always was.
+  const _jobOf = (p) => (CBZ.cityPedJob ? CBZ.cityPedJob(p) : ((p && p.job) || ""));
+  const _jclass = (p) => {
+    if (CBZ.cityPedJobClass) return CBZ.cityPedJobClass(p);
+    const J = CBZ.cityJobs && CBZ.cityJobs[_jobOf(p)];
+    return J ? J.class : "";
+  };
 
   // is this storefront LOCKED UP for the night? Only the banker's-hours kinds
   // shut (the diner, the gas pump, the bar and the trap never close); hours
@@ -988,6 +996,13 @@
     if (CBZ.sfx) CBZ.sfx("door");
     CBZ.city.note("Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
   }
+  // A CAB IS A FARE, AND A FARE IS NOT A CAB DRIVER. The crosstown drop above
+  // is the only "somebody drives you" effect in the game; a chauffeur standing
+  // at an estate gate wants exactly it and should never re-author the meter.
+  // Exported (not restructured) so city/roleverbs.js can hang a second trade
+  // on the same fare instead of typing a third teleport-and-charge.
+  CBZ.cityCabFare = cabFare;
+  CBZ.cityCabRide = cabRide;
 
   const TOOLBAG = ["Crowbar", "Lockpick", "Medkit"];   // the hardware counter's working bundle
   function toolbagPrice() {

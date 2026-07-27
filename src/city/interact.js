@@ -370,14 +370,15 @@
     sp._searchT = now + SEARCH_COOLDOWN_MS;
     const r = propRng();
     if (r < 0.55) {
-      CBZ.city.note("Nothing but trash.", 1.4);
+      // a caller that isn't a trash can names its own empty (citySearchStreetProp)
+      CBZ.city.note(sp._searchEmpty || "Nothing but trash.", 1.4);
       return;
     }
     if (r < 0.9) {
       const cash = 3 + ((propRng() * 12) | 0);
       CBZ.city.addCash(cash);
       if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("Found $" + cash + " someone tossed.", 1.8);
+      CBZ.city.note((sp._searchHit || "Found $") + cash + (sp._searchHit ? "." : " someone tossed."), 1.8);
       return;
     }
     // rare: a usable scrap item, if the econ catalog is loaded
@@ -392,6 +393,22 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.city.note("Jackpot — someone dumped $" + cash + " in there.", 2);
   }
+  // PUBLIC: rummage ANY street-prop record on the bin/newsbox terms — the same
+  // bounded roll, the same 90 s per-prop cooldown, the same city RNG. A second
+  // rummagable prop (a bum's loaded shopping cart, city/roleverbs.js) must
+  // reuse THIS, not re-roll its own faucet with its own cooldown clock.
+  // `opts.empty` / `opts.hit` re-word the two flavour lines for the caller's
+  // object; the payouts and the bound are not negotiable. Returns TRUE only
+  // when the prop was actually READY — a caller that files heat for the act
+  // must not file it again for bouncing off the cooldown.
+  CBZ.citySearchStreetProp = function (sp, opts) {
+    if (!sp) return false;
+    const t = (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0);
+    const ready = (sp._searchT || 0) <= t;
+    if (opts) { sp._searchEmpty = opts.empty || null; sp._searchHit = opts.hit || null; }
+    searchStreetProp(sp);
+    return ready;
+  };
   // ---- CHECK THE MAIL (mailbox street prop) — searchStreetProp's cousin, but
   // keyed to a LETTERBOX: mostly junk flavor, sometimes a cash envelope ($5–40),
   // and rarely a scrap of street intel naming a nearby shop/crew (flavor only —
