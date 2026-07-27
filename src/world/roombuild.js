@@ -252,10 +252,18 @@
   // ============================================================
   //  CBZ.roomPlan
   // ============================================================
-  // rect    { x0, x1, z0, z1, y }        world rect + floor height
+  // rect    { x0, x1, z0, z1, y }        HOST rect + floor height (world coords
+  //                                      by default; building-LOCAL when the
+  //                                      caller passes a buildings.js lbox as
+  //                                      opts.box — then opts.ox/oz bridge to
+  //                                      world for the propuse anchors)
   // program "bedroom" | "office" | "breakroom" | "lounge" | "mess"
   //         | "bossoffice" | "empty"
-  // opts    { seed, door:{x,z,side}, box, lot, tone, inset }
+  // opts    { seed, door:{x,z,side}, clear(x,z,pad), box, ox, oz, oy, lot,
+  //           tone, inset }
+  //         `clear` is buildings.js's clearFloorPoint contract: false where the
+  //         host owns the floor (stair strip, door aisle, lift chase). Sampled
+  //         once into the circulation grid; a piece straddling it is refused.
   // ->      { pieces:[{fn,x,z,yaw,opts,...}], ok, blocked, coverage, program }
   CBZ.roomPlan = function (rect, program, opts) {
     opts = opts || {};
@@ -308,6 +316,47 @@
       minX: DX - DOOR_CLEAR, maxX: DX + DOOR_CLEAR,
       minZ: DZ - DOOR_CLEAR, maxZ: DZ + DOOR_CLEAR,
     }];
+
+    // ---- HOST KEEP-OUTS ------------------------------------------------
+    // `opts.clear(x, z, pad) -> bool`, in the RECT's OWN coordinate space —
+    // buildings.js's `clearFloorPoint` contract verbatim, which is also the
+    // predicate interior_programs.js takes as `h.clear`. Without it a planner
+    // furnishes straight into the stair strip, the door aisle and the lift
+    // chase, because none of those is a wall and none of them is a piece.
+    //
+    // IT GATES PLACEMENT ONLY, NEVER THE FLOOD FILL, and the distinction is the
+    // whole point of the predicate: it means "do not put furniture here", not
+    // "a body cannot stand here". Marking the door aisle as a circulation
+    // obstacle would cut the room in half and drop every piece on the far side
+    // as unreachable — the aisle is the most walkable strip on the plate.
+    const hostClear = (typeof opts.clear === "function") ? opts.clear : null;
+    // Nine samples over the footprint (corners, edge midpoints, centre) resolve
+    // the aisle and stair BANDS this predicate actually describes, at nine calls
+    // per candidate piece rather than one per grid cell.
+    function hostOk(f) {
+      if (!hostClear) return true;
+      const xs = [f.minX + 0.12, (f.minX + f.maxX) / 2, f.maxX - 0.12];
+      const zs = [f.minZ + 0.12, (f.minZ + f.maxZ) / 2, f.maxZ - 0.12];
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
+        try { if (!hostClear(xs[a], zs[b], 0.15)) return false; } catch (e) { return true; }
+      }
+      return true;
+    }
+
+    // ---- THE CIRCULATION GRID, allocated up front and its constant layer (the
+    // room's own wall band, a body radius deep on every side) written ONCE
+    // instead of being re-swept on every validation pass.
+    const cols = Math.max(1, Math.ceil(W / GRID)), rows = Math.max(1, Math.ceil(D / GRID));
+    const base = new Uint8Array(cols * rows);     // the walls (constant)
+    const cell = new Uint8Array(cols * rows);     // base + the pieces of one pass
+    const seen = new Uint8Array(cols * rows);
+    const queue = new Int32Array(cols * rows);
+    function cellX(i) { return R.x0 + (i + 0.5) * GRID; }
+    function cellZ(j) { return R.z0 + (j + 0.5) * GRID; }
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+      const x = cellX(i), z = cellZ(j);
+      if (x < R.x0 + BODY_R || x > R.x1 - BODY_R || z < R.z0 + BODY_R || z > R.z1 - BODY_R) base[j * cols + i] = 1;
+    }
 
     // ---- placement helpers -------------------------------------------
     // Wall-slot: back to the wall, front facing into the room. `along` is the
@@ -388,6 +437,7 @@
       const f = foot(p);
       if (f.minX < R.x0 - 0.02 || f.maxX > R.x1 + 0.02 || f.minZ < R.z0 - 0.02 || f.maxZ > R.z1 + 0.02) return false;
       for (let i = 0; i < KEEPOUT.length; i++) if (overlap(f, KEEPOUT[i])) return false;
+      if (!hostOk(f)) return false;
       for (let i = 0; i < pieces.length; i++) if (overlap(f, foot(pieces[i]), 0.06)) return false;
       return true;
     }
@@ -443,7 +493,17 @@
       const awayFromDoor = (bw === "N" || bw === "S")
         ? (DX < CX ? 1 : -1) : (DZ < CZ ? 1 : -1);
       const bedAlong = mid + shove * awayFromDoor;
-      put("bed", wallPos("bed", null, bw, bedAlong, 0), { tone: opts.tone }, 9, "bed");
+      // HEADBOARD TO THE WALL. CBZ.furnish.bed's yaw points from the mattress
+      // centre toward the PILLOW (furniture.js:372), and the headboard is drawn
+      // at +L/2 — the FORWARD end. Every other wall-slot faces its piece INTO
+      // the room, which for a bed puts the headboard in mid-floor and drives the
+      // foot through the plaster. Flipping the slot yaw is the whole fix, and
+      // because a bed's footprint is symmetric the wall gap does not move. It
+      // also makes entry()'s third candidate ("the foot") land in the room
+      // instead of inside the wall, which is what its own comment claimed.
+      const bedPos = wallPos("bed", null, bw, bedAlong, 0);
+      bedPos.yaw += Math.PI;
+      put("bed", bedPos, { tone: opts.tone }, 9, "bed");
       // wardrobe/locker + shelf on the remaining walls, desk under a wall.
       // NO separate chair: CBZ.furnish.desk draws AND registers its own, and
       // its returned depth already reserves the space behind it.
@@ -488,18 +548,39 @@
       if (rest[0]) put("shelf", wallPos("shelf", null, rest[0], wallMid(rest[0]) + 0.8, 0), {}, 4, "shelf");
 
     } else if (program === "lounge") {
-      // Sofa faces the media wall at 2.5-3.5 m. Pick the media wall as the one
-      // opposite the sofa wall; float the sofa off its wall when the room is
-      // deeper than TV_MAX so the viewing distance lands in the band.
+      // Sofa faces the media wall at 2.5-3.5 m; the media wall is always the one
+      // the sofa's back is NOT against, so the pair keeps its viewing geometry
+      // whichever wall the sofa ends up on.
+      //
+      // THE BUG THIS CANDIDATE WALK REPLACES: the sofa was pinned to the middle
+      // of the DOOR's wall, and the door keep-clear is a 1.8 m box centred on
+      // the doorway — so for the overwhelmingly common case of a door centred on
+      // its wall, `fits()` refused the sofa, and with it the coffee table, the
+      // armchair and the lamp, which all hang off the sofa. The room came out
+      // EMPTY and reported ok. Now the sofa steps ALONG its wall until the swing
+      // arc is clear, and only if that wall is too short to hold both does it
+      // fall through to a side wall.
       const sf = dimsOf("sofa");
-      const media = far;                                   // you see the screen on entry
-      const sofaWall = dside;                              // ...from behind the sofa
-      const depth = (media === "N" || media === "S") ? D : W;
-      let off = 0;
-      if (depth - sf.d > TV_MAX) off = depth - sf.d - TV_MAX;          // pull it forward
-      if (depth - sf.d - off < TV_MIN) off = Math.max(0, depth - sf.d - TV_MIN);
-      const sl = Math.max(1.4, Math.min(wallSpan(sofaWall) - 1.0, 2.6)), so = { len: sl };
-      const sofa = put("sofa", wallPos("sofa", so, sofaWall, wallMid(sofaWall), off), so, 9, "sofa");
+      let sofa = null, sofaWall = dside, media = far, sofaLen = 2.4;
+      const cands = [dside, sideA(dside), sideB(dside)];
+      for (let ci = 0; ci < cands.length && !sofa; ci++) {
+        const sw = cands[ci], mw = OPP[sw] || far;
+        const depth = (mw === "N" || mw === "S") ? D : W;
+        let off = 0;
+        if (depth - sf.d > TV_MAX) off = depth - sf.d - TV_MAX;        // pull it forward
+        if (depth - sf.d - off < TV_MIN) off = Math.max(0, depth - sf.d - TV_MIN);
+        const sl = Math.max(1.4, Math.min(wallSpan(sw) - 1.0, 2.6)), so = { len: sl };
+        const dAlong = (sw === "N" || sw === "S") ? DX : DZ;
+        const mid = wallMid(sw), lim = Math.max(0, wallSpan(sw) / 2 - sl / 2 - 0.15);
+        const need = DOOR_CLEAR + sl / 2 + 0.05;
+        const tries = (Math.abs(mid - dAlong) >= need) ? [mid] : [
+          Math.max(mid - lim, Math.min(mid + lim, dAlong + need)),
+          Math.max(mid - lim, Math.min(mid + lim, dAlong - need)),
+        ];
+        for (let t = 0; t < tries.length && !sofa; t++)
+          sofa = put("sofa", wallPos("sofa", so, sw, tries[t], off), so, 9, "sofa");
+        if (sofa) { sofaWall = sw; media = mw; sofaLen = sl; }
+      }
       if (sofa) {
         // coffee table on the focal axis, one shin-gap in front of the sofa.
         // seats:0 → the kit rings NO chairs around it (furniture.js F.table).
@@ -508,8 +589,8 @@
         put("table", { x: sofa.x + s * gap, z: sofa.z + c * gap, yaw: sofa.yaw }, { seats: 0, len: 1.1 }, 6, "coffee");
         // an armchair at 90 degrees to the sofa (the conversational L)
         const rx = c, rz = -s, side = H(0x4) < 0.5 ? 1 : -1;
-        const ax = sofa.x + rx * side * (sl / 2 + 0.75) + s * 0.9;
-        const az = sofa.z + rz * side * (sl / 2 + 0.75) + c * 0.9;
+        const ax = sofa.x + rx * side * (sofaLen / 2 + 0.75) + s * 0.9;
+        const az = sofa.z + rz * side * (sofaLen / 2 + 0.75) + c * 0.9;
         put("chair", { x: ax, z: az, yaw: sofa.yaw - side * HALF }, {}, 4, "armchair");
       }
       const rest = ["N", "S", "W", "E"].filter(function (s) { return s !== dside && s !== media && s !== sofaWall; });
@@ -617,20 +698,10 @@
     let guard = 24;
     while (pieces.length && coverage(pieces) > DENS_MAX && guard-- > 0) dropLowest(pieces, "density");
 
-    // 2. CIRCULATION — coarse flood fill from the doorway.
-    const cols = Math.max(1, Math.ceil(W / GRID)), rows = Math.max(1, Math.ceil(D / GRID));
-    const cell = new Uint8Array(cols * rows);
-    const seen = new Uint8Array(cols * rows);
-    const queue = new Int32Array(cols * rows);
-    function cellX(i) { return R.x0 + (i + 0.5) * GRID; }
-    function cellZ(j) { return R.z0 + (j + 0.5) * GRID; }
+    // 2. CIRCULATION — coarse flood fill from the doorway. The grid, the room's
+    //    own wall band and the host's obstacles were sampled once, up top.
     function mark(list) {
-      cell.fill(0);
-      // the room's own walls eat a body radius on every side
-      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
-        const x = cellX(i), z = cellZ(j);
-        if (x < R.x0 + BODY_R || x > R.x1 - BODY_R || z < R.z0 + BODY_R || z > R.z1 - BODY_R) cell[j * cols + i] = 1;
-      }
+      cell.set(base);
       for (let k = 0; k < list.length; k++) {
         const f = foot(list[k]);
         const i0 = Math.max(0, Math.floor((f.minX - BODY_R - R.x0) / GRID));
@@ -728,11 +799,41 @@
   // Degrade-safe by design: with the shared kit absent nothing is drawn and
   // the caller keeps whatever it drew before (plan.executed === 0). This file
   // never draws furniture itself — CBZ.furnish is the ONE vocabulary.
+  // ---- the ratchet ledger. A shared block with no consumers is prose
+  // (CLAUDE.md BLOCK LAW #3/#5), and this is the number that says whether the
+  // planner is running at all. Read by CBZ.interiorAudit() (city/occupy.js).
+  const LED = { calls: 0, planned: 0, executed: 0, pieces: 0, blocked: 0, dropped: 0, seatsInKeepout: 0, empty: 0, programs: {} };
+  CBZ.roomPlanAudit = function () {
+    const pr = {};
+    for (const k in LED.programs) pr[k] = LED.programs[k];
+    return {
+      calls: LED.calls,                 // roomFurnish invocations
+      planned: LED.planned,             // ...that produced at least one piece
+      empty: LED.empty,                 // ...that planned nothing at all
+      executed: LED.executed,           // CBZ.furnish calls actually made
+      pieces: LED.pieces,               // pieces surviving both validation passes
+      blocked: LED.blocked,             // pieces DROPPED as unreachable (the roomPlan analogue of propUseAudit().blocked)
+      dropped: LED.dropped,             // pieces dropped for any reason (density + reach)
+      seatsInKeepout: LED.seatsInKeepout,
+      programs: pr,
+    };
+  };
+  CBZ.roomPlanAuditReset = function () {
+    LED.calls = LED.planned = LED.executed = LED.pieces = LED.blocked = LED.dropped = LED.seatsInKeepout = LED.empty = 0;
+    LED.programs = {};
+  };
+
   CBZ.roomFurnish = function (rect, program, opts) {
     opts = opts || {};
     const plan = CBZ.roomPlan(rect, program, opts);
     plan.executed = 0;
     plan.seatsInKeepout = 0;
+    LED.calls++;
+    LED.programs[plan.program] = (LED.programs[plan.program] | 0) + 1;
+    LED.blocked += plan.blocked | 0;
+    LED.dropped += (plan.dropped && plan.dropped.length) | 0;
+    LED.pieces += plan.pieces.length;
+    if (plan.pieces.length) LED.planned++; else LED.empty++;
     const F = CBZ.furnish;
     if (!F || !plan.pieces.length) return plan;
     const y = (rect && rect.y) || 0;
@@ -743,6 +844,15 @@
       const o = {};
       for (const k in p.opts) if (Object.prototype.hasOwnProperty.call(p.opts, k)) o[k] = p.opts[k];
       if (opts.box != null && o.box == null) o.box = opts.box;
+      // THE HOST ORIGIN. CBZ.furnish draws at (x, z) in the HOST's space but
+      // registers every propuse anchor in WORLD space, and it reads ox/oz/oy to
+      // bridge the two (furniture.js:48-50). Dropping them here — which this
+      // function did for its whole un-called life — draws the room in the right
+      // place and files every seat, bed and cushion at BUILDING-LOCAL
+      // coordinates, i.e. in a heap around the world origin. Forward them.
+      if (opts.ox != null && o.ox == null) o.ox = opts.ox;
+      if (opts.oz != null && o.oz == null) o.oz = opts.oz;
+      if (opts.oy != null && o.oy == null) o.oy = opts.oy;
       if (opts.lot != null && o.lot == null) o.lot = opts.lot;
       if (opts.solid != null && o.solid == null) o.solid = opts.solid;
       if (opts.tone != null && o.tone == null) o.tone = opts.tone;
@@ -775,13 +885,19 @@
             face, st.kind || p.fn, o.lot || null, geom);
           // the boss office's approach corridor must stay EMPTY: report any
           // seat the kit landed inside a keepout instead of silently allowing it.
+          // The anchor is WORLD, the keepout is the RECT's own space — subtract
+          // the host origin or this test silently reads true for every seat in
+          // any building that is not sitting on the world origin.
+          const kx = st.x - (opts.ox || 0), kz = st.z - (opts.oz || 0);
           for (let k = 0; k < plan.keepout.length; k++) {
             const K = plan.keepout[k];
-            if (st.x > K.minX && st.x < K.maxX && st.z > K.minZ && st.z < K.maxZ) { plan.seatsInKeepout++; break; }
+            if (kx > K.minX && kx < K.maxX && kz > K.minZ && kz < K.maxZ) { plan.seatsInKeepout++; break; }
           }
         }
       }
     }
+    LED.executed += plan.executed;
+    LED.seatsInKeepout += plan.seatsInKeepout;
     return plan;
   };
 })();

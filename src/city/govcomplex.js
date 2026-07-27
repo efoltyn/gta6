@@ -600,6 +600,10 @@
      the lot record every downstream system (occupy.js's floor ladder,
      power.js's seat, officialdom's door lookup) already knows how to read.
      -------------------------------------------------------------------- */
+  // Every enterable shell a complex raises, in build order, so §5c can dress
+  // the INSIDE of it. Filed exactly like parkingSea's `_bays`: the builder
+  // functions declare nothing, the collector is the one that knows the site.
+  const _shells = [];
   function civic(root, x, z, w, d, storeys, hex, side, spec, name) {
     let b = null;
     try {
@@ -607,6 +611,7 @@
         spec ? { facade: "civic", civic: spec, district: "core" } : { facade: "office", district: "core" });
     } catch (e) { b = null; }
     if (!b) return null;
+    if (_curSite) _shells.push({ site: _curSite, b: b, name: name || null });
     // doorInfo's normal points INWARD; doorPt is the standing spot just
     // inside the threshold — the exact record shape buildings.js stamps.
     const n = side === 0 ? { x: 0, z: 1 } : side === 1 ? { x: 0, z: -1 } : side === 2 ? { x: 1, z: 0 } : { x: -1, z: 0 };
@@ -621,8 +626,11 @@
   }
   // a plain block (barracks, annex, warehouse, garage) with no civic dressing
   function block(root, x, z, w, d, storeys, hex, side, opts) {
-    try { return CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side, opts || { facade: "office" }); }
-    catch (e) { return null; }
+    let b = null;
+    try { b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side, opts || { facade: "office" }); }
+    catch (e) { b = null; }
+    if (b && _curSite) _shells.push({ site: _curSite, b: b, name: null });
+    return b;
   }
 
   /* ====================================================================
@@ -689,6 +697,9 @@
       id: "capitol", name: "The Capitol", subtitle: "Legislative Assembly",
       hx: 132, hz: 112, bearing: 0, keepOut: null, gateSide: 1,
       principal: { key: "speaker", tier: 4, org: "state", lawful: true, role: "President of the Senate", job: "official", wealth: 0.85 },
+      // arrival hall · committee floor · the chamber officer's suite; the two
+      // wings are committee rooms over a clerks' floor.
+      interiors: { main: ["lobby", "meeting", "bosssuite"], aux: ["meeting", "deskfarm"] },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.paving, "capitol");
@@ -739,6 +750,10 @@
       id: "execmansion", name: "The Executive Mansion", subtitle: "Residence of the Head of State",
       hx: 124, hz: 122, bearing: 334, keepOut: "civ", gateSide: 1,
       principal: { key: "president", tier: 5, org: "state", lawful: true, role: "Head of State", job: "official", wealth: 0.95, family: true },
+      // "residence AND workplace", made literal: the house is a state entrance
+      // hall under the family's floor, and the WEST WING is the work — a real
+      // office over the ground floor's staff room, both laid out by roomPlan.
+      interiors: { main: ["lobby", "bosssuite"], aux: ["deskfarm", "room:bossoffice"] },
       // THE RESIDENCE HALF OF "residence AND workplace". Five words per job,
       // no coordinates — §5b derives every station from the rect, the gate
       // and the threshold this builder already published.
@@ -795,6 +810,7 @@
       id: "governor", name: "The Governor's Residence", subtitle: "State Executive Residence",
       hx: 94, hz: 88, bearing: 308, keepOut: "civ", gateSide: 1,
       principal: { key: "governor", tier: 4, org: "state", lawful: true, role: "Governor", job: "official", wealth: 0.9, family: true },
+      interiors: { main: ["lobby", "bosssuite"], aux: ["storage"] },
       household: [
         { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
         { job: "estate cook", at: "yard", outfit: 0xe8eaec },
@@ -829,6 +845,11 @@
       id: "agency", name: "Bureau Headquarters", subtitle: "Restricted Federal Facility",
       hx: 154, hz: 132, bearing: 248, keepOut: "hard", gateSide: 3,
       principal: { key: null, tier: 4, org: "agency", lawful: true, role: "Director of the Bureau", job: "official", wealth: 0.8 },
+      // INTENTIONALLY MONOTONOUS (archetype (c)): the annex and the wing are
+      // the SAME desk floor, over and over, all the way up. That is the read a
+      // building with no signage and no windows you can see into is going for,
+      // and repeating one program is how the kit expresses it.
+      interiors: { main: ["lobby", "deskfarm", "deskfarm", "storage", "bosssuite"], aux: ["deskfarm", "storage"] },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.concrete, "agency");
@@ -881,6 +902,8 @@
       id: "defence", name: "Defence Headquarters", subtitle: "Joint Command",
       hx: 196, hz: 194, bearing: 204, keepOut: "hard", gateSide: 0,
       principal: { key: null, tier: 5, org: "army", lawful: true, role: "Chief of the General Staff", job: "official", wealth: 0.75 },
+      // you clear a manned entrance before you reach the briefing floor.
+      interiors: { main: ["checkpoint", "meeting", "bosssuite"], aux: ["quarters"] },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.concrete, "defence");
@@ -928,6 +951,7 @@
       // beside a city is not a direction this file may assume.
       fan: 22, fanStep: 16 * Math.PI / 180,
       principal: { key: "mayor", tier: 3, org: "state", lawful: true, role: "Mayor", job: "official", wealth: 0.7 },
+      interiors: { main: ["lobby", "deskfarm", "bosssuite"], aux: ["deskfarm"] },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.paving, "cityhall");
@@ -964,6 +988,9 @@
       id: "compound", name: "The Compound", subtitle: "Private Estate",
       hx: 78, hz: 74, bearing: 138, keepOut: "civ", gateSide: 2,
       principal: { key: null, tier: 4, org: "gang", lawful: false, role: "The Boss", job: "criminal", wealth: 0.85, family: true },
+      // a crew house has no lobby. You walk into somebody's front room, and the
+      // shed out the back is where the stock is.
+      interiors: { main: ["room:lounge", "bosssuite"], aux: ["storage"] },
       // A crew boss keeps a household too, and it is the same three jobs —
       // which is the point of a shared vocabulary: no "mob" trade exists.
       household: [
@@ -1003,6 +1030,8 @@
       id: "finca", name: "La Finca", subtitle: "Private Estate",
       hx: 114, hz: 98, bearing: 98, keepOut: "civ", gateSide: 2,
       principal: { key: null, tier: 5, org: "cartel", lawful: false, role: "El Patron", job: "criminal", wealth: 0.95, family: true },
+      // the two courtyard wings are where the men who work the strip sleep.
+      interiors: { main: ["room:lounge", "bosssuite"], aux: ["quarters"] },
       household: [
         { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
         { job: "estate cook", at: "yard", outfit: 0xe8eaec },
@@ -1052,6 +1081,7 @@
       id: "cliffhouse", name: "The Cliff House", subtitle: "Private Estate",
       hx: 84, hz: 78, bearing: 58, keepOut: "civ", gateSide: 1,
       principal: { key: null, tier: 4, org: "secco", lawful: false, role: "Founder", job: "executive", wealth: 1.0, family: true },
+      interiors: { main: ["room:lounge", "bosssuite"], aux: ["storage"] },
       household: [
         { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
         { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
@@ -1098,7 +1128,7 @@
   const RINGS = 16, STEP = 48, FAN = 6, FAN_STEP = 8 * Math.PI / 180;
 
   const SITES = [];        // live placement records, one per COMPLEXES entry
-  const AUDIT = { complexes: 0, placed: 0, rejected: 0, overlaps: 0, urbanAdjacent: 0, staffed: 0, roadless: 0, household: 0, householdWanted: 0, householdStations: 0 };
+  const AUDIT = { complexes: 0, placed: 0, rejected: 0, overlaps: 0, urbanAdjacent: 0, staffed: 0, roadless: 0, household: 0, householdWanted: 0, householdStations: 0, govBuildings: 0, govFloors: 0, govBare: 0 };
 
   function rectOf(cx, cz, hx, hz) { return { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz }; }
   function hit(a, b, m) {
@@ -1635,6 +1665,228 @@
     return n;
   }
 
+  /* ====================================================================
+     §5c  THE INSIDE — GOV_INTERIORS.
+
+     OWNER (2026-07-27): "interiors of buildings feel very unintentional."
+
+     Nine seats of power, and twenty-three enterable shells between them, of
+     which exactly ZERO had an interior authored here. What dressing did exist
+     arrived by accident and late: city/power.js seats a principal when you come
+     within GOV_COMPLEX_SEAT_NEAR of him, that seat runs occupy.js's floor
+     ladder, and the ladder happens to run a program on two or three of the main
+     hall's storeys. Everything else — the Capitol's Senate and Assembly wings,
+     the Executive Mansion's West Wing, the Bureau's annex and wing, the finca's
+     two courtyard wings, the compound's shed, both garages — was a lit box you
+     could walk into and find nothing in, forever.
+
+     THIS AUTHORS NO FURNITURE. Every room comes from CBZ.interiorProgram (the
+     archetype kit) or CBZ.roomFurnish (the layout planner, which itself draws
+     only through CBZ.furnish). What is new here is the one thing this file is
+     for: a REGISTRY LINE saying which room goes on which floor of which
+     building — `interiors: { main: [...], aux: [...] }`, last entry repeating
+     upward, so a tenth complex declares a list and no geometry.
+
+     AND IT HANDS THE ROOMS TO THE PEOPLE RATHER THAN RACING THEM. occupy.js
+     already keeps a per-building ledger of which floors have been dressed
+     (`b._occupyProgrammed` / `b._occupyAnchors`) precisely so a second
+     occupation cannot stack a second set of sandbags on the first. Stamping OUR
+     floors into that ledger means power.js's later cast READS these rooms —
+     the guard posts, the clerks' desks and the boss's own chair are the ones
+     authored here — instead of re-dressing the storey. One ledger, one room.
+
+     WHY AT BUILD TIME. The dressing is static geometry with no userData and no
+     colliders, so running it inside the landmass pass puts it AHEAD of mode.js's
+     one-shot batch, which swallows the whole lot for free — the merge occupy.js
+     explicitly cannot use when it dresses a floor at runtime (see its
+     RE-FREEZE note). It also means the Mansion is furnished whether or not
+     anybody has walked within 260 m of the President.
+
+     THE STAIRS COME FIRST, and that ordering is load-bearing: CBZ.cityStairCore
+     registers the core's footprint through buildings.js's own shaft carve, and
+     `clearFloorPoint` reads that list — so furnishing after it is what keeps a
+     desk out of the stairwell. It is idempotent per building, so occupy.js's
+     own later call returns this same core and every program still orients off
+     the same stairhead.
+     ==================================================================== */
+  function interiorsOn() { return CFG.GOV_INTERIORS !== false && !!CBZ.interiorFloorRoom; }
+
+  // the room on floor k of a shell, plus the way you ARRIVE on it: the front
+  // door downstairs, the stairhead everywhere above — occupy.js's own rule.
+  function arriveOn(bld, k) {
+    if (k <= 0) return bld.localDoor || null;
+    const core = bld._stairCore;
+    return (core && core.head) || bld.localDoor || null;
+  }
+  // metres of the plate the stair core itself eats, so a program dresses the
+  // ROOM and not the stairwell. Occupy.js's insetFor, to the number.
+  function insetOn(bld, room) {
+    const core = bld._stairCore;
+    if (!core || !core.head || !room) return 0;
+    const d = core.depth + 0.6;
+    const along = Math.abs(core.head.nx) > 0.5;
+    const depth = along ? (room.x1 - room.x0) : (room.z1 - room.z0);
+    return (depth - d >= 9.0) ? d : 0;
+  }
+
+  /* A SEAT OF POWER HAS NO ROOM-SIZED FLOORPLATES, and that is the one thing
+     that stops world/roombuild.js from being usable here as-is. roomPlan is a
+     ROOM planner: its wall slots, its 0.90 m circulation band and its 25-40 %
+     coverage law all assume a rect you can see across. Hand it the hacienda's
+     44x26 hall and it puts four pieces in eleven hundred square metres, reports
+     `sparse`, and it is right and useless.
+
+     So on an oversized plate we BUILD THE ROOM instead of pretending the hall
+     is one: a partitioned corner whose other two walls are the building's own,
+     with ONE doorway, sited at the far end from the way you arrive so you cross
+     the hall to reach it. The hall itself stays open, which is what the inside
+     of a big house actually is. The wall comes from the shared kit
+     (CBZ.interiorPartition) — this file draws no architecture of its own. */
+  const ROOM_W = 8.5, ROOM_D = 7.5;      // a generous private room, not a hall
+  function carveRoom(bld, k, room, ctx) {
+    const dn = arriveOn(bld, k) || { x: 0, z: room.z0, nx: 0, nz: 1 };
+    const W = room.x1 - room.x0, D = room.z1 - room.z0;
+    // already room-sized: furnish the whole plate and draw nothing.
+    if (W <= ROOM_W + 2.2 && D <= ROOM_D + 2.2)
+      return { rect: { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y }, door: { x: dn.x, z: dn.z } };
+    const RW = Math.min(ROOM_W, W - 1.6), RD = Math.min(ROOM_D, D - 1.6);
+    const alongX = Math.abs(dn.nx) > 0.5;
+    const flip = h01(bld.ox + k * 3.7, bld.oz, 0x0C11) < 0.5 ? -1 : 1;
+    let x0, x1, z0, z1;
+    // the running axis of arrival puts the room at the FAR end; the other axis
+    // is a deterministic coin, so two floors of one building are not identical
+    // and two buildings are not either.
+    const farX = alongX ? (dn.nx > 0) : (flip > 0);
+    const farZ = alongX ? (flip > 0) : (dn.nz > 0);
+    if (farX) { x1 = room.x1; x0 = x1 - RW; } else { x0 = room.x0; x1 = x0 + RW; }
+    if (farZ) { z1 = room.z1; z0 = z1 - RD; } else { z0 = room.z0; z1 = z0 + RD; }
+    // the two INNER walls are the ones not lying on a real facade; the doorway
+    // goes on the one that faces the way you came in.
+    const xi = farX ? x0 : x1, zi = farZ ? z0 : z1;
+    const doorOnX = alongX;
+    const gX = (x0 + x1) / 2, gZ = (z0 + z1) / 2;
+    if (CBZ.interiorPartition) {
+      // running along z at fixed x = xi
+      CBZ.interiorPartition(room, ctx, { axis: "z", at: xi, from: z0, to: z1, gap: doorOnX ? gZ : null, gapW: 1.8 });
+      // running along x at fixed z = zi
+      CBZ.interiorPartition(room, ctx, { axis: "x", at: zi, from: x0, to: x1, gap: doorOnX ? null : gX, gapW: 1.8 });
+    }
+    return {
+      rect: { x0: x0, x1: x1, z0: z0, z1: z1, y: room.y },
+      door: doorOnX ? { x: xi, z: gZ } : { x: gX, z: zi },
+    };
+  }
+
+  // ONE floor. `name` is either an archetype from CBZ.interiorProgramNames or
+  // "room:<program>", which routes to world/roombuild.js's layout planner.
+  // Returns the role-tagged anchors (empty for a planner room, which is honest:
+  // a bedroom has no guard post in it).
+  function dressFloor(bld, k, name) {
+    const room = CBZ.interiorFloorRoom(bld, k);
+    if (!room) return null;
+    const rect = { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y };
+    const ctx = { b: bld, opts: { door: arriveOn(bld, k), inset: insetOn(bld, room) } };
+    if (name.slice(0, 5) === "room:") {
+      const prog = name.slice(5);
+      if (CFG.INTERIOR_ROOMPLAN === false || !CBZ.roomFurnish) {
+        // degrade-safe: the planner is off or absent, so this floor takes the
+        // nearest archetype the kit ships rather than coming out bare.
+        const alt = prog === "bedroom" ? "quarters" : prog === "bossoffice" ? "bosssuite" : "lobby";
+        const out = CBZ.interiorProgram(alt, rect, ctx);
+        return (out && out.anchors) ? out.anchors : [];
+      }
+      // the floor covering + the ceiling strip are the SHELL, not the layout —
+      // roomFurnish places furniture and deliberately draws no room.
+      if (CBZ.interiorShell) CBZ.interiorShell(rect, ctx);
+      const sub = carveRoom(bld, k, room, ctx);
+      CBZ.roomFurnish(sub.rect, prog, {
+        box: bld.lbox, ox: bld.ox, oz: bld.oz,
+        // buildings.js's own aisle/stair/lift-chase predicate, in the same
+        // building-local space as the rect. Without it the planner furnishes
+        // the stairwell and the doorway.
+        clear: bld.clearFloorPoint || null,
+        door: sub.door,
+        // determinism: the layout is a pure function of (rect, seed), and the
+        // seed is the building's own origin — never Math.random, never a draw
+        // on a shared stream.
+        seed: (Math.round(bld.ox) * 401) ^ (Math.round(bld.oz) * 733) ^ (k * 97),
+        tone: "exec",
+      });
+      return [];
+    }
+    const out = CBZ.interiorProgram(name, rect, ctx);
+    return (out && out.anchors) ? out.anchors : [];
+  }
+
+  // one shell, floor by floor. `list` is the registry row; its LAST entry
+  // repeats for every storey above it, which is how a five-storey annex and a
+  // one-storey garage share one declaration.
+  function dressShell(bld, list, ledgerHost) {
+    if (!bld || !list || !list.length || typeof bld.lbox !== "function") return 0;
+    const n = CBZ.interiorFloorCount ? CBZ.interiorFloorCount(bld) : 0;
+    if (n < 1) return 0;
+    let done = 0;
+    for (let k = 0; k < n; k++) {
+      const name = list[Math.min(k, list.length - 1)];
+      if (!name || name === "none") continue;
+      // NEVER dress a floor somebody else already dressed. The ledger is
+      // occupy.js's, and re-running its own idempotency rule here is what stops
+      // a re-occupied building from getting two floor coverings.
+      if (ledgerHost && ledgerHost._occupyProgrammed && ledgerHost._occupyProgrammed[k]) continue;
+      let anchors = null;
+      try { anchors = dressFloor(bld, k, name); } catch (e) { anchors = null; }
+      if (!anchors) continue;
+      done++;
+      AUDIT.govFloors++;
+      if (!ledgerHost) continue;
+      ledgerHost._occupyProgrammed = ledgerHost._occupyProgrammed || Object.create(null);
+      ledgerHost._occupyAnchors = ledgerHost._occupyAnchors || Object.create(null);
+      ledgerHost._occupyProgrammed[k] = name;
+      ledgerHost._occupyAnchors[k] = anchors.map(function (a) {
+        return { x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz, kind: a.kind, pose: a.pose };
+      });
+    }
+    return done;
+  }
+
+  function dressComplex(site) {
+    if (!interiorsOn()) return 0;
+    const plan = site.def.interiors;
+    if (!plan) return 0;
+    const mainB = site.lot && site.lot.building;
+    // civic() hands the lot a SHALLOW COPY of the building record, and that copy
+    // is what occupy.js's bldOf(lot) returns — so the ledger has to be stamped
+    // on THAT object or the two files will not agree about which floors are
+    // dressed. Both share every closure (lbox, clearFloorPoint) and the
+    // shaftRects array by reference, so drawing through either is identical.
+    let n = 0;
+    if (mainB && plan.main) {
+      if (CFG.OCCUPY_STAIRS !== false && CBZ.cityStairCore) {
+        try { CBZ.cityStairCore(site.lot); } catch (e) {}
+      }
+      const got = dressShell(mainB, plan.main, mainB);
+      n += got;
+      if (got) AUDIT.govBuildings++; else AUDIT.govBare++;
+      mainB._govDressed = got;
+    }
+    for (let i = 0; i < _shells.length; i++) {
+      const s = _shells[i];
+      if (s.site !== site.id) continue;
+      if (site.lot && s.b === site.lot._rawMain) continue;   // the main hall, already done
+      if (!plan.aux) { AUDIT.govBare++; continue; }
+      if (CFG.OCCUPY_STAIRS !== false && CBZ.cityStairCore) {
+        try { CBZ.cityStairCore({ building: s.b }); } catch (e) {}
+      }
+      // an annex has no lot and nothing will ever occupy it, so it carries no
+      // ledger — it is dressed once and that is the whole of its life.
+      const got = dressShell(s.b, plan.aux, null);
+      n += got;
+      if (got) AUDIT.govBuildings++; else AUDIT.govBare++;
+      s.b._govDressed = got;
+    }
+    return n;
+  }
+
   function staffSite(city, site) {
     if (CFG.GOV_COMPLEX_STAFF === false) return;
     if (!CBZ.cityPostNpc && !CBZ.cityMakePed) return;
@@ -1707,10 +1959,11 @@
 
     // a rebuild re-runs this builder; start from an empty ledger so stale
     // records can never be counted by the audit or re-staffed by the tick.
-    SITES.length = 0; _bays.length = 0;
+    SITES.length = 0; _bays.length = 0; _shells.length = 0;
     AUDIT.complexes = COMPLEXES.length;
     AUDIT.placed = 0; AUDIT.rejected = 0;
     AUDIT.overlaps = 0; AUDIT.urbanAdjacent = 0; AUDIT.staffed = 0; AUDIT.roadless = 0;
+    AUDIT.govBuildings = 0; AUDIT.govFloors = 0; AUDIT.govBare = 0;
     // how many household jobs the registry DECLARES, against how many were
     // actually posted. A residence whose staff silently failed to declare is
     // the empty-mansion bug coming back, and this is where it shows.
@@ -1770,6 +2023,10 @@
       const main = (out && out.seat) || null;
       if (main) {
         site.lot = main.lot;
+        // which of the shells this complex raised IS the main hall, so §5c can
+        // tell it apart from the wings (the lot carries a shallow COPY of the
+        // record, so an identity test needs the original).
+        site.lot._rawMain = main.b;
         // the principal stands on his own threshold, facing out: visible,
         // guarded, and — the owner's word — assassinable.
         const d = main.door, n = main.n;
@@ -1777,6 +2034,13 @@
       } else {
         site.seatPoint = { x: site.cx, z: site.cz + 6, face: 0 };
       }
+
+      // ---- THE INSIDE (§5c) ----------------------------------------------
+      // Before the road and before the people: the rooms are static geometry
+      // and belong to the same build pass the shells did, so mode.js's one-shot
+      // batch swallows them. The bodies arrive later, through power.js, and
+      // land in these rooms because of the ledger dressComplex stamps.
+      try { dressComplex(site); } catch (e) { console.error("[govcomplex] interiors " + def.id, e); }
 
       // ---- keep-out ------------------------------------------------------
       // hard  → nobody at all (the Agency, the Defence HQ)
@@ -1982,6 +2246,13 @@
     AUDIT.placed = placed;
   }
 
+  // the §5c counters on their own, WITHOUT recount()'s full region/lot sweep —
+  // city/interior_programs.js's CBZ.interiorAudit() reads these, and an audit
+  // that costs a world scan is an audit nobody calls twice.
+  CBZ.govInteriorCounts = function () {
+    return { buildings: AUDIT.govBuildings, floors: AUDIT.govFloors, bare: AUDIT.govBare };
+  };
+
   CBZ.govComplexAudit = function () {
     recount();
     return {
@@ -1997,6 +2268,13 @@
       household: AUDIT.household,
       householdWanted: AUDIT.householdWanted,
       householdPlaced: AUDIT.householdStations,   // rows belonging to complexes that found ground
+      // §5c — the INSIDE. `govBare` is the ratchet: an enterable shell on a
+      // seat of power with no room in it. It may only ever go DOWN, and
+      // `govBuildings`/`govFloors` are printed beside it so a "fix" that stops
+      // raising the wings cannot pass.
+      govBuildings: AUDIT.govBuildings,
+      govFloors: AUDIT.govFloors,
+      govBare: AUDIT.govBare,
       // the per-site working, so a probe can say WHICH one moved and why
       sites: SITES.map(function (s) {
         return {

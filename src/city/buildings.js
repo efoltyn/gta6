@@ -3973,6 +3973,72 @@
     }
   }
 
+  // ---- INTERIOR_ROOMPLAN — THE LAYOUT PLANNER AS A FURNITURE SET -----------
+  // world/roombuild.js (CBZ.roomPlan / CBZ.roomFurnish) is a complete,
+  // constraint-checked interior planner — real circulation widths, chair
+  // pull-out, sofa-to-screen distance, and a flood fill from the doorway that
+  // DROPS any piece whose propuse entry point it cannot reach — and it had ZERO
+  // callers anywhere in the repo. It is a drop-in peer of the sets above: same
+  // building-local rect, same `b`, same Y. Two things it buys that a set cannot:
+  // the pieces come from CBZ.furnish, so every seat is filed with REAL cushion
+  // geometry (the sets' own k.seatAt files none, which is what puts them in
+  // propUseAudit().noGeom and gives the legacy squat pose), and a bed's
+  // headboard is placed against a wall by construction rather than by the
+  // author remembering.
+  //
+  // EVERY CALL SITE KEEPS ITS SHIPPED SET behind the null return, so flag-off
+  // (or a build without roombuild.js) is byte-identical to today.
+  function planSet(b, Y, rect, prog, door, tone) {
+    if (CBZ.CONFIG.INTERIOR_ROOMPLAN === false || !CBZ.roomFurnish) return null;
+    if (!(rect.x1 - rect.x0 > 2.2) || !(rect.z1 - rect.z0 > 2.2)) return null;
+    let p = null;
+    try {
+      p = CBZ.roomFurnish({ x0: rect.x0, x1: rect.x1, z0: rect.z0, z1: rect.z1, y: Y }, prog, {
+        box: b.lbox, ox: b.ox != null ? b.ox : 0, oz: b.oz != null ? b.oz : 0,
+        // the building's own aisle / stair-strip / lift-chase predicate. Without
+        // it the planner furnishes the doorway it is supposed to keep clear.
+        clear: b.clearFloorPoint || null,
+        door: door || null,
+        // DETERMINISM, and it carries the monotony doctrine: the seed is the
+        // BUILDING's origin and nothing else, so every storey of one tower plans
+        // the identical flat (which is the point) and two towers do not.
+        seed: (Math.round(b.ox || 0) * 401) ^ (Math.round(b.oz || 0) * 733),
+        tone: tone || "warm",
+      });
+    } catch (e) { p = null; }
+    return (p && p.pieces && p.pieces.length) ? p : null;
+  }
+  // The planner places FURNITURE; a screen on a wall is architecture, and its
+  // `lounge` program deliberately draws none. Put one back on the wall the sofa
+  // it just placed is actually looking at — the same three boxes setLiving uses,
+  // in the same buckets — so a planned living room is never poorer than the set.
+  function planMediaWall(b, Y, rect, plan) {
+    let s = null;
+    for (let i = 0; i < plan.pieces.length; i++) if (plan.pieces[i].tag === "sofa") { s = plan.pieces[i]; break; }
+    if (!s) return;
+    const fx = Math.round(Math.sin(s.yaw)), fz = Math.round(Math.cos(s.yaw));
+    if (!fx && !fz) return;
+    const across = Math.min(fx ? (rect.z1 - rect.z0) : (rect.x1 - rect.x0), 3.2) - 0.6;
+    if (across < 1.4) return;
+    const wx = fx > 0 ? rect.x1 : fx < 0 ? rect.x0 : s.x;
+    const wz = fz > 0 ? rect.z1 : fz < 0 ? rect.z0 : s.z;
+    const ccx = wx - fx * 0.34, ccz = wz - fz * 0.34;
+    if (b.clearFloorPoint && !b.clearFloorPoint(ccx, ccz, 0.5)) return;
+    b.lbox(ccx, Y + 0.4, ccz, fx ? 0.5 : across, 0.8, fx ? across : 0.5, 0x2a2f37, { cast: false });
+    // A SCREEN NEEDS A WALL. When the sofa is looking at the CURTAIN WALL — the
+    // premium layout, and the one this plate produces most often — hanging a
+    // panel there would put a television in the window, which is the exact class
+    // of "nobody chose this" the whole pass is against. The console stays (a low
+    // sideboard under the glass is what is actually there); the screen does not.
+    const wt = b.wt != null ? b.wt : 0.4;
+    const onFacade = fx ? (Math.abs(wx) > b.w / 2 - wt - 0.9) : (Math.abs(wz) > b.d / 2 - wt - 0.9);
+    if (onFacade) return;
+    b.lbox(wx - fx * 0.2, Y + 1.4, wz - fz * 0.2, fx ? 0.1 : across - 0.6, 1.1, fx ? across - 0.6 : 0.1,
+      0x14171c, { cast: false });
+    b.lbox(wx - fx * 0.16, Y + 1.4, wz - fz * 0.16, fx ? 0.05 : across - 0.9, 0.85, fx ? across - 0.9 : 0.05,
+      0x39516a, { emissive: 0x39516a, ei: 0.4, cast: false });
+  }
+
   // ---- interior furnishing ------------------------------------------------
   // A real, kind-specific room: a back COUNTER (placed by the caller) gets a
   // register; wall SHELVES/cases are stocked with kind-appropriate props; a
@@ -4876,19 +4942,28 @@
       // VERTICAL partition splitting the private bedroom wing from the great-room
       const wingDoorZ = kh.zLo + (kh.zHi - kh.zLo) * 0.5;
       kh.wallZ(midX, kh.zLo, kh.zHi, wingDoorZ, 1.7);
+      // INTERIOR_ROOMPLAN: the enclosed rooms are handed to the layout planner,
+      // which knows where a bed goes (headboard on a wall, bedside clearance on
+      // the side you approach from) and drops anything it cannot walk to. The
+      // `|| set…` fallback is the whole degrade path.
+      const tone = t >= 4 ? "exec" : t >= 3 ? "cool" : "warm";
+      const wingDoor = { x: (kh.xLo + midX) / 2 };
       if (wantBeds >= 2) {
         // split the wing into two bedrooms + a shared bath strip
         const splitZ = kh.zLo + (kh.zHi - kh.zLo) * 0.5;
         kh.wallX(splitZ, kh.xLo, midX, (kh.xLo + midX) / 2, 1.6);
-        setBedroom(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: kh.zLo + 0.3, z1: splitZ - 0.3 }, linenH);
+        const bedA = { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: kh.zLo + 0.3, z1: splitZ - 0.3 };
+        if (!planSet(b, Y, bedA, "bedroom", { x: wingDoor.x, z: splitZ }, tone)) setBedroom(kh, bedA, linenH);
         // second bedroom OR an ensuite bath for the lower half
-        if (t >= 4) setBath(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 });
-        else setBedroom(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 }, 0x7a6f8c);
+        const lowR = { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 };
+        if (t >= 4) setBath(kh, lowR);
+        else if (!planSet(b, Y, lowR, "bedroom", { x: wingDoor.x, z: splitZ }, tone)) setBedroom(kh, lowR, 0x7a6f8c);
       } else {
         // t2: one enclosed bedroom in the top of the wing + a bath nook below it
         const splitZ = kh.zLo + (kh.zHi - kh.zLo) * 0.58;
         kh.wallX(splitZ, kh.xLo, midX, (kh.xLo + midX) / 2, 1.6);
-        setBedroom(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: kh.zLo + 0.3, z1: splitZ - 0.3 }, linenH);
+        const bedA = { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: kh.zLo + 0.3, z1: splitZ - 0.3 };
+        if (!planSet(b, Y, bedA, "bedroom", { x: wingDoor.x, z: splitZ }, tone)) setBedroom(kh, bedA, linenH);
         if (kh.zHi - splitZ >= 2.2) setBath(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 });
       }
       // t4: a WALK-IN closet carved off the bedroom suite (a slim run along -x wall)
@@ -4898,7 +4973,10 @@
       }
       // the GREAT-ROOM (+x side): living + kitchen + (t3+) a dining set
       const greatX0 = midX + 0.3;
-      setLiving(kh, { x0: greatX0, x1: kh.xHi, z0: kh.zLo + 0.3, z1: kh.zLo + (kh.zHi - kh.zLo) * 0.5 - 0.3 }, sofaH);
+      const livG = { x0: greatX0, x1: kh.xHi, z0: kh.zLo + 0.3, z1: kh.zLo + (kh.zHi - kh.zLo) * 0.5 - 0.3 };
+      const livPlan = planSet(b, Y, livG, "lounge", { x: greatX0, z: wingDoorZ }, tone);
+      if (livPlan) planMediaWall(b, Y, livG, livPlan);
+      else setLiving(kh, livG, sofaH);
       setKitchen(kh, { x0: greatX0, x1: kh.xHi, z0: kh.zHi - (kh.zHi - kh.zLo) * 0.36, z1: kh.zHi });
       if (t >= 3) setDining(kh, { x0: greatX0, x1: kh.xHi, z0: kh.zLo + (kh.zHi - kh.zLo) * 0.5, z1: kh.zHi - (kh.zHi - kh.zLo) * 0.36 - 0.4 });
       return;
@@ -5059,9 +5137,20 @@
       const dinR = { x0: k.xLo, x1: midX - 0.3, z0: midZ + 0.3, z1: k.zHi };
       const bedR = { x0: midX + 0.3, x1: k.xHi, z0: bedZ0 + 0.3, z1: bedZ1 - 0.3 };
       const bathR = { x0: midX + 0.3, x1: k.xHi, z0: bathZ0 + 0.3, z1: bathZ1 - 0.3 };
-      setLiving(k, livR, sofa);
+      // INTERIOR_ROOMPLAN: the two rooms that are ROOMS (as opposed to a
+      // counter run and a tiled nook) go through the layout planner, which is
+      // also what finally gives a flat's sofa and bed real propuse cushions.
+      // Seeded off the building only, so every storey of one tower plans the
+      // identical flat — the monotony this function already enforces.
+      // `idx` is already the per-BUILDING palette key under the intentionality
+      // doctrine, so it picks the plan's tone too: one coherent palette per
+      // tower, four towers apart, and not one new colour bucket.
+      const ftone = ["warm", "cool", "exec", "clinic"][idx & 3];
+      const livPlan = planSet(b, Y, livR, "lounge", { x: midX, z: (livR.z0 + livR.z1) / 2 }, ftone);
+      if (livPlan) planMediaWall(b, Y, livR, livPlan);
+      else setLiving(k, livR, sofa);
       setKitchen(k, dinR);
-      setBedroom(k, bedR, linen);
+      if (!planSet(b, Y, bedR, "bedroom", { x: midX, z: (bedR.z0 + bedR.z1) / 2 }, ftone)) setBedroom(k, bedR, linen);
       if (bathR.z1 - bathR.z0 >= 2.2) setBath(k, bathR);
       return;
     }

@@ -120,12 +120,16 @@
   // the "empty" archetype — a clean, finished, lit room with nothing in it.
   // Ground floors (y≈0) lift the covering to clear the 0.14-top foundation
   // slab the building shells pour; upper floors use the standard 0.02 lift.
-  function shell(h, r) {
+  // `dark` drops the ceiling strip: an UNLIT storey in a lit tower, which is a
+  // deliberate read from the street and the one variant that must be per-FLOOR.
+  function shell(h, r, dark) {
     const w = Math.max(1, r.x1 - r.x0), d = Math.max(1, r.z1 - r.z0);
     const fy = r.y < 0.1 ? r.y + 0.13 : r.y + 0.02;
     h.b.lbox(cx(r), fy, cz(r), w, 0.04, d, P.floor, { cast: false });
-    h.b.lbox(cx(r), r.y + h.fh - 0.24, cz(r), Math.min(w * 0.6, 8.0), 0.08, 0.5, P.light,
+    if (dark) return;
+    const m = h.b.lbox(cx(r), r.y + h.fh - 0.24, cz(r), Math.min(w * 0.6, 8.0), 0.08, 0.5, P.light,
       { emissive: P.light, ei: 0.32, cast: false });
+    ceilingStrip(m);
   }
   // rect containment — programs that place relative to a DOOR (lobby) can
   // aim outside a small plate; hosts without clearFloorPoint get no bounds
@@ -166,9 +170,192 @@
   }
 
   // ========================================================================
-  //  (a) EMPTY — floor, walls, windows, light. Nothing else.
+  //  THE INTERIOR LIGHT RAMP — INTERIOR_LIGHT_DAY.
+  //
+  //  Every ceiling strip in this kit is an emissive mesh, and core/batch.js
+  //  refuses emissives, so each one is already its own draw call and its own
+  //  material (buildings.js's `lbox` mints a fresh `CBZ.mat`, not a cached
+  //  `cmat`). That makes them the one interior surface we can drive per-frame
+  //  for FREE: the ramp writes `emissiveIntensity` on materials that already
+  //  exist and adds no mesh, no material bucket and no draw call.
+  //
+  //  Shape copied from city/interiorlight.js's window glow (which does the same
+  //  job for the OUTSIDE of the same glass), including its quantisation: the
+  //  value is rounded to 1/40 so the sweep is a no-op on the overwhelming
+  //  majority of frames and only actually writes across dusk and dawn.
   // ========================================================================
-  function progEmpty(r, h) { shell(h, r); return { anchors: [] }; }
+  const STRIPS = [];                    // {m: mesh, ei: authored day intensity}
+  const STRIP_CAP = 4000;
+  let nightApplied = -1;
+  function ceilingStrip(m) {
+    if (!m || !m.material || CBZ.CONFIG.INTERIOR_LIGHT_DAY === false) return m;
+    if (STRIPS.length >= STRIP_CAP) return m;
+    const ei = m.material.emissiveIntensity != null ? m.material.emissiveIntensity : 1;
+    STRIPS.push({ m: m, ei: ei });
+    return m;
+  }
+  // a strip only counts while it is still CONNECTED to the live scene — a torn
+  // down city keeps its local parent chain, so a bare .parent check would hold
+  // every dead tower's lights in the registry forever (interiorStaff's own
+  // rootLive lesson, same fix).
+  function stripLive(o) {
+    let hops = 0;
+    while (o && hops++ < 64) { if (o === CBZ.scene) return true; o = o.parent; }
+    return false;
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(0.345, function () {
+    if (CBZ.CONFIG.INTERIOR_LIGHT_DAY === false || !STRIPS.length) return;
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
+    const q = Math.round(n * 40) / 40;
+    if (q === nightApplied) return;
+    nightApplied = q;
+    // 0.72x at noon (daylight through the glass swamps a ceiling strip and a
+    // full-strength one reads as a light box) up to 1.28x at midnight.
+    const k = 0.72 + 0.56 * q;
+    for (let i = STRIPS.length - 1; i >= 0; i--) {
+      const s = STRIPS[i];
+      if (!s.m || !s.m.material || !stripLive(s.m)) { STRIPS.splice(i, 1); continue; }
+      s.m.material.emissiveIntensity = s.ei * k;
+    }
+  });
+
+  // ========================================================================
+  //  (a) EMPTY — INTENTIONALLY empty, and that is owner doctrine ("it should
+  //  be empty, OR it should be designed"). What was NOT doctrine was that
+  //  every empty floor in the world was the IDENTICAL shell — one slab, one
+  //  strip, the same hex, fifty times over — which does not read as a choice,
+  //  it reads as nobody having made one.
+  //
+  //  So `empty` keeps its RATIO (buildings.js still rolls 46% of office towers
+  //  into it; nothing here changes that) and gains a VOCABULARY: four dressed
+  //  reads picked per BUILDING — so a tower is still ONE thing all the way up,
+  //  which is the monotony doctrine — plus a DARK storey, which is the one
+  //  variant that must vary per floor because its whole read is an unlit floor
+  //  in a lit tower seen from the street.
+  //
+  //    bare        the clean shell (what every empty used to be)
+  //    renovation  tarps, a ladder, paint tins, one wall half-repainted
+  //    moveout     stacked cartons and one chair somebody left behind
+  //    afterhours  two desks, a tipped chair, one monitor still on
+  //
+  //  BUDGET: every variant is opaque cast:false boxes from the palette above
+  //  (no new hex, no new bucket, no collider, no userData → core/batch.js folds
+  //  them), ≤16 boxes, and AT MOST ONE extra emissive accent. The abandoned
+  //  chair is a REAL CBZ.furnish.chair so it is sittable — an empty room with a
+  //  decoy chair in it would be a worse lie than an empty room.
+  // ========================================================================
+  // bare stays the plurality: most empty is still just empty. The cumulative
+  // band is the table so the ratio is readable in one line and cannot drift
+  // from the names beside it.
+  const EMPTY_KINDS = ["bare", "renovation", "moveout", "afterhours"];
+  const EMPTY_CUM = [0.42, 0.66, 0.85, 1.01];
+  function emptyVariant(h) {
+    if (CBZ.CONFIG.INTERIOR_EMPTY_VARIETY === false || !CBZ.hash01) return EMPTY_KINDS[0];
+    const v = CBZ.hash01(h.ox, h.oz, 0x0E11);
+    for (let i = 0; i < EMPTY_CUM.length; i++) if (v < EMPTY_CUM[i]) return EMPTY_KINDS[i];
+    return EMPTY_KINDS[0];
+  }
+  function floorIndexOf(r, h) { return Math.max(0, Math.round((r.y - 0.14) / Math.max(0.5, h.fh))); }
+
+  // the live tally of which empty read each floor actually got — the evidence
+  // for CBZ.interiorAudit().emptyVariants. A vocabulary nobody can COUNT is
+  // indistinguishable from the one shell repeated (CLAUDE.md: an audit nobody
+  // has executed is not a measurement).
+  const EMPTY_TALLY = { bare: 0, renovation: 0, moveout: 0, afterhours: 0, dark: 0 };
+
+  function progEmpty(r, h) {
+    const kind = emptyVariant(h);
+    const k = floorIndexOf(r, h);
+    // the DARK storey. Never the ground floor (an unlit lobby reads as broken,
+    // not as intentional) and never on a bare building, whose whole read is the
+    // clean lit shell repeated.
+    const dark = kind !== "bare" && k > 0 && CBZ.hash01
+      && CBZ.hash01(h.ox + k * 13.7, h.oz - k * 7.1, 0x0E12) < 0.18;
+    shell(h, r, dark);
+    EMPTY_TALLY[kind] = (EMPTY_TALLY[kind] | 0) + 1;
+    if (dark) EMPTY_TALLY.dark++;
+    if (kind === "bare" || CBZ.CONFIG.INTERIOR_EMPTY_VARIETY === false) return { anchors: [] };
+
+    const y = r.y, w = r.x1 - r.x0, d = r.z1 - r.z0;
+    if (w < 3.0 || d < 3.0) return { anchors: [] };
+    const mx = cx(r), mz = cz(r);
+    // one gated box, exactly the roomKit idiom: refused on the door aisle, the
+    // stair strip and the lift chase rather than drawn through them.
+    function eb(x, z, ly, bw, bh, bd, col, o) {
+      if (!inRect(r, x, z, 0.35) || !h.clear(x, z, (o && o.pad) || 0.5)) return false;
+      h.b.lbox(x, y + ly + bh / 2, z, bw, bh, bd, col,
+        (o && o.emissive) ? { emissive: o.emissive, ei: o.ei || 0.5, cast: false } : { cast: false });
+      return true;
+    }
+    // a real, sittable chair from the ONE furniture vocabulary. Thinned to
+    // about a third of the floors so a twelve-storey shell does not file twelve
+    // propuse anchors nobody will ever sit in.
+    function realChair(x, z, yaw) {
+      if (!CBZ.furnish || !CBZ.furnish.chair) return false;
+      if (!inRect(r, x, z, 0.6) || !h.clear(x, z, 0.6)) return false;
+      if (CBZ.hash01 && CBZ.hash01(h.ox + k, h.oz, 0x0E13) >= 0.34) return false;
+      try { CBZ.furnish.chair(x, y, z, yaw, { box: h.b.lbox, ox: h.ox, oz: h.oz }); } catch (e) { return false; }
+      return true;
+    }
+    // a deterministic offset inside the room, so two floors of the same shell
+    // are identical (the monotony) while two BUILDINGS are not.
+    const j = CBZ.hash01 ? CBZ.hash01(h.ox, h.oz, 0x0E14) : 0.5;
+    const sx = mx + (j - 0.5) * Math.min(3.0, w * 0.25);
+
+    if (kind === "renovation") {
+      // dust sheets down the middle of the floor, laid in two runs
+      for (let i = -1; i <= 1; i += 2)
+        eb(sx + i * 1.3, mz, 0.05, 1.15, 0.02, Math.min(d - 1.6, 5.0), P.marble, { pad: 0.4 });
+      // the ladder, leaning nowhere — two rails and four rungs
+      const lx = sx - 2.2;
+      for (let i = -1; i <= 1; i += 2) eb(lx + i * 0.24, mz + 1.1, 0, 0.06, 2.4, 0.06, P.steel, { pad: 0.4 });
+      for (let i = 0; i < 4; i++) eb(lx, mz + 1.1, 0.45 + i * 0.55, 0.54, 0.05, 0.05, P.steel, { pad: 0.4 });
+      // paint tins and a tray, clustered where somebody was working
+      for (let i = 0; i < 3; i++)
+        eb(sx + 0.6 + i * 0.42, mz - 1.4, 0, 0.3, 0.34, 0.3, i === 1 ? P.worktop : P.sack, { pad: 0.35 });
+      eb(sx + 1.1, mz - 2.0, 0.01, 0.9, 0.05, 0.5, P.sack, { pad: 0.35 });
+      // ONE wall half-repainted — the tell that says the job is unfinished
+      eb(mx, r.z1 - 0.22, 0, Math.min(w - 1.2, 6.0), 1.55, 0.06, P.marble, { pad: 0.3 });
+      // the single emissive accent: a worklight on a short mast
+      eb(sx - 2.6, mz - 1.6, 0, 0.1, 1.5, 0.1, P.steel, { pad: 0.4 });
+      eb(sx - 2.6, mz - 1.6, 1.5, 0.42, 0.22, 0.3, P.flood, { emissive: P.flood, ei: 0.75, pad: 0.4 });
+
+    } else if (kind === "moveout") {
+      // two stacks of cartons and a single third, left where the truck stopped
+      const bx = sx + 1.0, bz = mz + Math.min(1.6, d * 0.16);
+      eb(bx, bz, 0, 0.72, 0.62, 0.72, P.crate, { pad: 0.45 });
+      eb(bx, bz, 0.62, 0.66, 0.54, 0.66, P.crate, { pad: 0.45 });
+      eb(bx + 0.86, bz - 0.2, 0, 0.7, 0.6, 0.7, P.crate, { pad: 0.45 });
+      eb(bx + 0.86, bz - 0.2, 0.6, 0.6, 0.5, 0.6, P.crate, { pad: 0.45 });
+      eb(bx - 1.5, bz + 0.9, 0, 0.68, 0.58, 0.68, P.crate, { pad: 0.45 });
+      // the tape gun and a flattened carton on the floor
+      eb(bx - 0.3, bz - 1.5, 0.01, 0.9, 0.03, 0.7, P.crate, { pad: 0.35 });
+      // one chair nobody came back for, facing the empty room
+      realChair(sx - 1.9, mz - 1.2, Math.PI * 0.25);
+
+    } else if (kind === "afterhours") {
+      // two desks left standing out of a floor that used to be full of them —
+      // the SAME 1.5x0.85 station the desk farm draws, minus its worker.
+      for (let i = 0; i < 2; i++) {
+        const dx = sx - 1.6 + i * 3.0, dz = mz - 0.4;
+        if (!eb(dx, dz, 0.03, 1.5, 0.66, 0.85, P.desk, { pad: 0.6 })) continue;
+        eb(dx, dz, 0.69, 1.62, 0.08, 0.95, P.worktop, { pad: 0.6 });
+        if (i === 0) {           // ONE monitor still on — the whole read
+          eb(dx, dz - 0.42, 0.79, 0.7, 0.46, 0.06, P.bezel, { pad: 0.55 });
+          eb(dx, dz - 0.38, 0.81, 0.58, 0.36, 0.02, P.screen, { emissive: P.screen, ei: 0.55, pad: 0.55 });
+        }
+      }
+      // a chair on its side, drawn as what a tipped chair actually is: the pad
+      // flat on the deck with the back lying off one edge of it.
+      eb(sx + 0.4, mz + 1.5, 0.02, 0.6, 0.1, 0.6, P.chair, { pad: 0.4 });
+      eb(sx + 0.4, mz + 2.02, 0.02, 0.6, 0.1, 0.5, P.chair, { pad: 0.4 });
+      eb(sx + 0.4, mz + 1.5, 0.12, 0.12, 0.1, 0.5, P.bezel, { pad: 0.4 });
+      // ...and one still upright, and real
+      realChair(sx + 1.4, mz - 1.5, 0);
+    }
+    return { anchors: [] };
+  }
 
   // ========================================================================
   //  (b/c) DESK-FARM — the flagship. Ordered rows of IDENTICAL desks +
@@ -179,6 +366,20 @@
   //  Returns one seat anchor per landed desk (world coords, face=π).
   // ========================================================================
   const PITCH_X = 3.0, PITCH_Z = 2.6;
+  // MESH BUDGET, and it is the one cap this kit was missing. A station is 8
+  // boxes, so the grid cost is 8·cols·rows and BOTH factors grow with the
+  // plate: on a city tower's ~24 m plate that is ~500 boxes and nobody noticed,
+  // but a government slab is 118 m across and the same code asks for 624 desks
+  // — 5,000 boxes on ONE floor, three floors of it. The pitch and the centring
+  // are untouched (the rows still read as rows); only the EXTENT is bounded, so
+  // a big floor gets a dense core of desks with open circulation around it,
+  // which is what a big floor actually looks like.
+  const DESK_CAP = 96, RACK_CAP = 80;
+  function gridCap(cols, rows, cap) {
+    if (cols * rows <= cap) return [cols, rows];
+    const s = Math.sqrt(cap / (cols * rows));
+    return [Math.max(1, Math.floor(cols * s)), Math.max(1, Math.floor(rows * s))];
+  }
   function progDeskFarm(r, h) {
     shell(h, r);
     const anchors = [];
@@ -186,8 +387,9 @@
     const y = r.y;
     const spanX = (r.x1 - r.x0) - 2.0, spanZ = (r.z1 - r.z0) - 2.8;
     if (spanX < 0.5 || spanZ < 0.5) return { anchors: anchors };
-    const cols = Math.max(1, 1 + Math.floor(spanX / PITCH_X));
-    const rows = Math.max(1, 1 + Math.floor(spanZ / PITCH_Z));
+    const cap = gridCap(Math.max(1, 1 + Math.floor(spanX / PITCH_X)),
+                        Math.max(1, 1 + Math.floor(spanZ / PITCH_Z)), DESK_CAP);
+    const cols = cap[0], rows = cap[1];
     const gx0 = cx(r) - ((cols - 1) * PITCH_X) / 2;
     const gz0 = cz(r) - ((rows - 1) * PITCH_Z) / 2 - 0.3;   // station reaches +1.15 (chair side)
     for (let c = 0; c < cols; c++) for (let w = 0; w < rows; w++) {
@@ -281,8 +483,8 @@
     h.b.lbox(fx, y + 1.62, fz, alongX ? 0.08 : 2.3, 1.15, alongX ? 2.3 : 0.08, P.bezel, { cast: false });
     h.b.lbox(alongX ? fx - Math.sign(din.nx) * 0.04 : fx, y + 1.62, alongX ? fz : fz - Math.sign(din.nz) * 0.04,
       alongX ? 0.04 : 2.0, 0.9, alongX ? 2.0 : 0.04, P.glow, { emissive: P.glow, ei: 0.4, cast: false });
-    h.b.lbox(mx2, y + h.fh - 0.28, mz2, alongX ? 0.34 : TL * 0.8, 0.06, alongX ? TL * 0.8 : 0.34, P.light,
-      { emissive: P.light, ei: 0.3, cast: false });
+    ceilingStrip(h.b.lbox(mx2, y + h.fh - 0.28, mz2, alongX ? 0.34 : TL * 0.8, 0.06, alongX ? TL * 0.8 : 0.34, P.light,
+      { emissive: P.light, ei: 0.3, cast: false }));
     return { anchors: anchors };
   }
 
@@ -296,11 +498,15 @@
     const y = r.y;
     const spanX = (r.x1 - r.x0) - 2.0;
     if (spanX < 0.5) return { anchors: [] };
-    const runs = Math.max(1, 1 + Math.floor(spanX / RACK_PITCH));
+    // same budget law as the desk farm above: 4 boxes a bay, and BOTH the run
+    // count and the bays-per-run grow with the plate.
+    const segs = Math.max(1, Math.floor(((r.z1 - 1.0) - (r.z0 + 1.2)) / (RACK_SEG + RACK_GAP)) + 1);
+    const runs = gridCap(Math.max(1, 1 + Math.floor(spanX / RACK_PITCH)), segs, RACK_CAP)[0];
+    const zEnd = r.z0 + 1.2 + Math.min(segs, Math.ceil(RACK_CAP / runs)) * (RACK_SEG + RACK_GAP);
     const rx0 = cx(r) - ((runs - 1) * RACK_PITCH) / 2;
     for (let i = 0; i < runs; i++) {
       const x = rx0 + i * RACK_PITCH;
-      for (let z = r.z0 + 1.2; z + RACK_SEG <= r.z1 - 1.0; z += RACK_SEG + RACK_GAP) {
+      for (let z = r.z0 + 1.2; z + RACK_SEG <= Math.min(r.z1 - 1.0, zEnd); z += RACK_SEG + RACK_GAP) {
         const zc2 = z + RACK_SEG / 2;
         if (!h.clear(x, zc2, 0.8)) continue;                       // aisles/stairs punch clean gaps
         h.b.lbox(x, y + RACK_H / 2, zc2, 0.6, RACK_H, RACK_SEG, P.desk, { cast: false });   // rack body
@@ -712,6 +918,7 @@
     checkpoint: progCheckpoint, quarters: progQuarters, bosssuite: progBossSuite,
   };
   CBZ.interiorProgram = function (name, room, ctx) {
+    armReset();                        // see armReset: propuse.js parses AFTER this file
     const h = host(ctx);
     const fn = PROGRAMS[name];
     if (!h || !fn || !room) return null;
@@ -720,6 +927,36 @@
     return fn(r, h, (ctx && ctx.opts) || null);
   };
   CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint", "quarters", "bosssuite"];
+  // THE PARTITION ALONE — one thin full-run wall with ONE doorway and a lintel
+  // over it, in the host's local frame. It is the only wall this kit draws and
+  // it was private to `meeting` and `bosssuite`; a caller that wants to make a
+  // ROOM out of part of a big floorplate needs exactly this and nothing else, so
+  // it is the difference between one export and a fifth partition drawer.
+  //   spec: { axis:"x"|"z", at, from, to, gap, gapW, h }
+  //     axis "x" → the wall RUNS along x at a fixed z (`at`), from..to in x.
+  //     axis "z" → the wall RUNS along z at a fixed x (`at`), from..to in z.
+  //     `gap` is the doorway's coordinate on the running axis (omit for solid).
+  CBZ.interiorPartition = function (room, ctx, spec) {
+    const h = host(ctx);
+    if (!h || !spec) return false;
+    const y = (room && room.y) || 0;
+    const wallH = spec.h != null ? spec.h : h.fh - 0.1;
+    const gap = spec.gap != null ? spec.gap : (spec.to + 1e6);   // off-run → solid
+    if (String(spec.axis) === "x") wallX(h, y, spec.at, spec.from, spec.to, gap, spec.gapW || 1.8, wallH);
+    else wallZ(h, y, spec.at, spec.from, spec.to, gap, spec.gapW || 1.8, wallH);
+    return true;
+  };
+  // THE SHELL ALONE — floor covering + ceiling strip, no program. A caller that
+  // dresses a floor with world/roombuild.js's LAYOUT planner still needs the
+  // finished floor and the light under it, and `interiorProgram("empty", …)` is
+  // no longer that (it has a vocabulary of its own now). One export instead of a
+  // fourth copy of two lbox calls; the ramp registration comes with it.
+  CBZ.interiorShell = function (room, ctx, dark) {
+    const h = host(ctx);
+    if (!h || !room) return false;
+    shell(h, { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y || 0 }, !!dark);
+    return true;
+  };
 
   // ========================================================================
   //  THE WORKERS — real peds seated at the desks, DOING something.
@@ -784,4 +1021,69 @@
     ledger.push({ id: id, root: root, n: take });
     return take;
   };
+
+  /* ========================================================================
+     THE RATCHET — CBZ.interiorAudit(). OWNER: "interiors of buildings feel very
+     unintentional." Every number below is RECOMPUTED from live state on each
+     call, never a stored guess, and each answers one half of that sentence:
+
+       govFurnished / govBare  the seats of power. `govBare` is an ENTERABLE
+                               shell on a government complex with no room in it
+                               at all — the Capitol's two chambers, the Mansion's
+                               West Wing, the Bureau's annex. It may only ever go
+                               DOWN, and govFurnished/govFloors sit beside it so a
+                               "fix" that stops raising the wings cannot pass.
+       roomplanCalls           world/roombuild.js invocations. It was ZERO for the
+                               planner's entire life — a validated layout engine
+                               nobody called. It may only ever go UP.
+       emptyVariants           the empty vocabulary, by read. `bare` alone means
+                               the variety flag is off or the hash collapsed.
+       anchorsRegistered       seats + beds filed by the ONE furniture kit, with
+                               `mismatched` beside them (furnitureAudit's own
+                               pin, which must stay 0) — the proof that a
+                               furnished room is SITTABLE and not scenery.
+     ======================================================================== */
+  CBZ.interiorAudit = function () {
+    const gov = (typeof CBZ.govInteriorCounts === "function") ? CBZ.govInteriorCounts() : null;
+    const rp = (typeof CBZ.roomPlanAudit === "function") ? CBZ.roomPlanAudit() : null;
+    const fa = (typeof CBZ.furnishAudit === "function") ? CBZ.furnishAudit() : null;
+    const ev = {};
+    for (const k in EMPTY_TALLY) ev[k] = EMPTY_TALLY[k];
+    return {
+      govFurnished: gov ? gov.buildings : 0,     // gov shells with at least one designed floor
+      govBare: gov ? gov.bare : 0,               // <- PIN. Only ever down.
+      govFloors: gov ? gov.floors : 0,
+      roomplanCalls: rp ? rp.calls : 0,          // <- only ever UP (was 0 forever)
+      roomplanPlaced: rp ? rp.planned : 0,       // ...that produced at least one piece
+      roomplanEmpty: rp ? rp.empty : 0,          // ...that planned nothing (a refused rect)
+      roomplanBlocked: rp ? rp.blocked : 0,      // pieces dropped as unreachable
+      roomplanPrograms: rp ? rp.programs : {},
+      emptyVariants: ev,
+      lightStrips: STRIPS.length,                // ceiling strips on the day/night ramp
+      anchorsRegistered: fa ? (fa.seats + fa.beds) : 0,
+      anchorsMismatched: fa ? fa.mismatched : 0, // furnitureAudit's own pin: 0
+    };
+  };
+  // a world rebuild re-runs every furnisher, so the tallies restart in lockstep
+  // with the anchor registry they describe — the same wrap furniture.js uses on
+  // the same reset, marker-guarded like the explosion wrappers.
+  CBZ.interiorAuditReset = function () {
+    for (const k in EMPTY_TALLY) EMPTY_TALLY[k] = 0;
+    if (CBZ.roomPlanAuditReset) CBZ.roomPlanAuditReset();
+  };
+  // LAZY RETRY — this file is index.html:530 and city/propuse.js is :667, so
+  // CBZ.propPurposeReset does not exist yet at parse time and a wrap written
+  // here would be dead on arrival (which is exactly what happened to the
+  // identical wrap in city/furniture.js). Re-armed from interiorProgram, which
+  // cannot run until the whole script block has parsed.
+  function armReset() {
+    if (typeof CBZ.propPurposeReset !== "function" || CBZ.propPurposeReset._interiorWrapped) return;
+    const prev = CBZ.propPurposeReset;
+    const wrapped = function () { CBZ.interiorAuditReset(); return prev.apply(this, arguments); };
+    // carry every marker forward — city/furniture.js wraps the same function.
+    for (const kk in prev) { try { wrapped[kk] = prev[kk]; } catch (e) {} }
+    wrapped._interiorWrapped = true;
+    CBZ.propPurposeReset = wrapped;
+  }
+  armReset();
 })();

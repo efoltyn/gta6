@@ -156,12 +156,27 @@
   // piggybacking city/propuse.js's own reset (idempotent, feature-detected,
   // marker-guarded like the explosion wrappers).
   CBZ.furnishReset = resetLedger;
-  if (typeof CBZ.propPurposeReset === "function" && !CBZ.propPurposeReset._furnishWrapped) {
+  // LAZY RETRY, and it is not belt-and-braces — it is the whole wrap. This file
+  // is index.html:366 and city/propuse.js is :667, so CBZ.propPurposeReset does
+  // not EXIST when this line first runs: the wrap has been dead since it
+  // shipped, and the ledger this file's pinned `mismatched` ratchet is computed
+  // from has therefore never reset between world builds (a determinism re-run,
+  // which rebuilds the same seed twice, double-counts every piece). Retried from
+  // the one place guaranteed to run after every script has parsed — a furnish
+  // call — the same lazy-hook pattern city/killfeed.js uses for the same reason.
+  function armReset() {
+    if (typeof CBZ.propPurposeReset !== "function" || CBZ.propPurposeReset._furnishWrapped) return;
     const prev = CBZ.propPurposeReset;
     const wrapped = function () { resetLedger(); return prev.apply(this, arguments); };
+    // CARRY EVERY MARKER FORWARD (CLAUDE.md's explosion-wrapper law). Two files
+    // now wrap this one function; if each only stamped its OWN flag, the second
+    // wrapper would hide the first's and every retry would add another layer.
+    for (const kk in prev) { try { wrapped[kk] = prev[kk]; } catch (e) {} }
     wrapped._furnishWrapped = true;
     CBZ.propPurposeReset = wrapped;
   }
+  CBZ.furnishArmReset = armReset;
+  armReset();
 
   // CBZ.furnishAudit() — {pieces, seats, beds, mismatched}. `mismatched` counts
   // seat/bed anchors whose REGISTERED cushion/mattress height disagrees with
@@ -190,6 +205,7 @@
   // the box silhouettes.
   function pen(name, x, y, z, yaw, opts) {
     opts = opts || {};
+    armReset();                        // see armReset: propuse.js parses AFTER this file
     yaw = +yaw || 0;
     const s = Math.sin(yaw), c = Math.cos(yaw);
     const swap = (Math.round(yaw / HALF_PI) & 1) === 1;
