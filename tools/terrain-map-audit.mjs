@@ -50,7 +50,14 @@ await rm(`/tmp/cbz-tmap-${dbg}`, { recursive: true, force: true });
   if (!up) { console.error("FAIL: devserver never came up on :" + port); server.kill("SIGTERM"); process.exit(1); } }
 // small viewport: the audit is PURE NUMBERS (no screenshot) and SwiftShader
 // frame cost scales with pixels — menu boot + the settle frames run ~3x faster.
-const chrome = spawn("/opt/pw-browsers/chromium", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", "--window-size=640,400", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-tmap-${dbg}`, base], { stdio: "ignore" });
+// Chromium path: honour CBZ_CHROME, fall back to the system Chrome on macOS.
+// (Same resolution math-gate.mjs uses — commit dc9329c fixed it there and the
+// sibling tools were never updated, so they hard-failed on a Mac.)
+const CHROME_BIN = process.env.CBZ_CHROME ||
+  (process.platform === "darwin"
+    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    : "/opt/pw-browsers/chromium");
+const chrome = spawn(CHROME_BIN, ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", "--window-size=640,400", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-tmap-${dbg}`, base], { stdio: "ignore" });
 let pg = null;
 // match the page by THIS run's exact origin, never a loose substring — a
 // colliding debug port must read as "no page", not someone else's world.

@@ -50,6 +50,14 @@ async function evaluate(expression) {
   if (out && out.exceptionDetails) throw new Error(out.exceptionDetails.exception?.description || out.exceptionDetails.text || "browser evaluation failed");
   return out && out.result && out.result.value;
 }
+async function stepWorld(seconds, dt = 1 / 30) {
+  const steps = Math.ceil(seconds / dt);
+  const batch = 60;
+  for (let i = 0; i < steps; i += batch) {
+    const count = Math.min(batch, steps - i);
+    await evaluate(`(function () { for (let i = 0; i < ${count}; i++) CBZ.stepSim(${dt}); return true; })()`);
+  }
+}
 
 try {
   let page = null;
@@ -149,31 +157,6 @@ try {
       if (!aircraft.lock) failures.push("homing acquisition could not lock a real civilian aircraft record");
     }
 
-    let boarding = null;
-    if (rec && CBZ.cityTryNearestRide && CBZ.cityAimedMilitaryVehicle) {
-      const oldPlayer = CBZ.player.pos.clone(), oldDriving = !!CBZ.player.driving;
-      const oldCamPos = CBZ.camera.position.clone(), oldCamQ = CBZ.camera.quaternion.clone();
-      const g = rec.group;
-      g.updateMatrixWorld(true);
-      const stand = new THREE.Vector3(7.8, 0.9, -5.0).applyMatrix4(g.matrixWorld);
-      const look = new THREE.Vector3(7.8, 3.2, 0).applyMatrix4(g.matrixWorld);
-      CBZ.player.dead = false; CBZ.player.driving = false; CBZ.player._aircraft = null; CBZ.player._vehicle = null;
-      CBZ.player.pos.copy(stand);
-      CBZ.camera.position.set(stand.x, stand.y + 1.05, stand.z);
-      CBZ.camera.lookAt(look); CBZ.camera.updateMatrixWorld(true);
-      const surface = CBZ.cityVehicleSurfaceDistance ? CBZ.cityVehicleSurfaceDistance(rec, stand.x, stand.z, stand.y) : null;
-      const aimed = CBZ.cityAimedMilitaryVehicle();
-      const used = CBZ.cityTryNearestRide();
-      const boarded = !!(CBZ.player._aircraft && CBZ.player._aircraft.sourceRec === rec);
-      if (boarded && CBZ.cityPlayerAircraftExit) CBZ.cityPlayerAircraftExit();
-      CBZ.player.driving = oldDriving; CBZ.player.pos.copy(oldPlayer);
-      CBZ.camera.position.copy(oldCamPos); CBZ.camera.quaternion.copy(oldCamQ); CBZ.camera.updateMatrixWorld(true);
-      boarding = { surface: surface, aimed: aimed === rec, used: !!used, boarded: boarded };
-      if (!(surface != null && surface <= 10.5) || !boarding.aimed || !boarding.used || !boarding.boarded) {
-        failures.push("E/Y could not board the rendered aircraft aimed at from beside its fuselage");
-      }
-    }
-
     let collision = null;
     if (rec && CBZ.cityAircraftSweepProbe) {
       const fake = { kind: "jet", airClass: "jet", heading: 0, pitch: 0, roll: 0,
@@ -210,6 +193,34 @@ try {
       if (!collision.building) failures.push("fast aircraft sweep tunneled through a building collider");
       if (!collision.aircraft) failures.push("relative aircraft sweep tunneled through another plane");
       if (collision.gateClear.some(function (x) { return !x.clear; })) failures.push("a parked gate plane began inside the new swept collision hull");
+    }
+
+    // Run boarding after the collision fixture: starting the real door arc
+    // marks this record taken immediately, so probing relative aircraft
+    // collision after it would deliberately exclude the target. The arc itself
+    // finishes asynchronously below, outside this synchronous CDP evaluation.
+    let boarding = null;
+    if (rec && CBZ.cityTryNearestRide && CBZ.cityAimedMilitaryVehicle) {
+      const oldPlayer = CBZ.player.pos.clone(), oldDriving = !!CBZ.player.driving;
+      const oldCamPos = CBZ.camera.position.clone(), oldCamQ = CBZ.camera.quaternion.clone();
+      const g = rec.group;
+      g.updateMatrixWorld(true);
+      const stand = new THREE.Vector3(7.8, 0.9, -5.0).applyMatrix4(g.matrixWorld);
+      const look = new THREE.Vector3(7.8, 3.2, 0).applyMatrix4(g.matrixWorld);
+      CBZ.player.dead = false; CBZ.player.driving = false; CBZ.player._aircraft = null; CBZ.player._vehicle = null;
+      CBZ.player.pos.copy(stand);
+      CBZ.camera.position.set(stand.x, stand.y + 1.05, stand.z);
+      CBZ.camera.lookAt(look); CBZ.camera.updateMatrixWorld(true);
+      const surface = CBZ.cityVehicleSurfaceDistance ? CBZ.cityVehicleSurfaceDistance(rec, stand.x, stand.z, stand.y) : null;
+      const aimed = CBZ.cityAimedMilitaryVehicle();
+      const used = CBZ.cityTryNearestRide();
+      const pending = !!(CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active);
+      const boarded = !!(CBZ.player._aircraft && CBZ.player._aircraft.sourceRec === rec);
+      window.__aircraftQaBoarding = { rec: rec, oldPlayer: oldPlayer, oldDriving: oldDriving, oldCamPos: oldCamPos, oldCamQ: oldCamQ };
+      boarding = { surface: surface, aimed: aimed === rec, used: !!used, boarded: boarded, pending: pending };
+      if (!(surface != null && surface <= 10.5) || !boarding.aimed || !boarding.used) {
+        failures.push("E/Y could not start boarding the rendered aircraft aimed at from beside its fuselage");
+      }
     }
 
     const victim = planes[planes.length - 1];
@@ -258,6 +269,33 @@ try {
       emergencyApi: typeof CBZ.cityReportMajorIncident === "function", failures };
   })())`));
 
+  // Elevator-grammar boarding is intentionally not an instant teleport. Let
+  // the real door-open/walk-in/close sequence finish, verify ownership, then
+  // exit instantly for fixture cleanup so it cannot steer the later homing aim.
+  // SwiftShader can render fewer than one frames/second on this world; advance
+  // the repo's real updater/always chains without rendering so this verifies
+  // simulation time rather than accidentally measuring the GPU fallback.
+  if (result.boarding && result.boarding.pending) {
+    await stepWorld(6);
+    const finishedBoarding = JSON.parse(await evaluate(`JSON.stringify((function () {
+      const q=window.__aircraftQaBoarding,rec=q&&q.rec,P=CBZ.player;
+      const boarded=!!(q&&P&&P._aircraft&&P._aircraft.sourceRec===rec);
+      const stillActive=!!(CBZ.aircraftDoorArc&&CBZ.aircraftDoorArc.active);
+      if(CBZ.aircraftDoorArc&&stillActive)CBZ.aircraftDoorArc.cancel();
+      const doorCfg=CBZ.CONFIG&&CBZ.CONFIG.AIRCRAFT_DOOR_ARC;
+      if(CBZ.CONFIG)CBZ.CONFIG.AIRCRAFT_DOOR_ARC=false;
+      if(boarded&&CBZ.cityPlayerAircraftExit)CBZ.cityPlayerAircraftExit();
+      if(CBZ.CONFIG)CBZ.CONFIG.AIRCRAFT_DOOR_ARC=doorCfg;
+      if(q&&P){P.driving=q.oldDriving;P.pos.copy(q.oldPlayer);CBZ.camera.position.copy(q.oldCamPos);CBZ.camera.quaternion.copy(q.oldCamQ);CBZ.camera.updateMatrixWorld(true);}
+      return {boarded:boarded,stillActive:stillActive};
+    })())`));
+    result.boarding.boarded = finishedBoarding.boarded;
+    result.boarding.pending = finishedBoarding.stillActive;
+    if (!result.boarding.boarded || result.boarding.pending) result.failures.push("aircraft door arc did not complete boarding cleanly");
+  } else if (result.boarding && !result.boarding.boarded) {
+    result.failures.push("E/Y did not board the rendered aircraft");
+  }
+
   // End-to-end seeker proof: place the real player near a remaining gate plane,
   // aim the real FPS channel, fire one selected homing round, then let normal
   // onAlways projectile updates steer/impact it. This catches self-cover lock
@@ -283,7 +321,7 @@ try {
     return { ok: true, id: rec.flightKind, hp: rec.hp, at: [rec.group.position.x, rec.group.position.y, rec.group.position.z] };
   })())`));
   if (homingSetup.ok) {
-    await sleep(450);
+    await stepWorld(0.5);
     await evaluate(`(function () {
       const q = window.__homingAircraftProbe, rec = q && q.rec;
       if (!rec || rec.destroyed) return false;
@@ -292,10 +330,19 @@ try {
       const d = new THREE.Vector3(rec.group.position.x - c.x, targetY - c.y, rec.group.position.z - c.z).normalize();
       CBZ.cam.yaw = Math.atan2(-d.x, -d.z);
       CBZ.fps.fp = Math.asin(Math.max(-1, Math.min(1, d.y)));
-      CBZ.fpsFire(true); CBZ.fpsFire(false);
       return true;
     })()`);
-    await sleep(2200);
+    // The universal lock-on contract requires a visible yellow-to-red dwell;
+    // firing on the aim-setting tick correctly produces a dumb round. Hold the
+    // real camera ray through that acquisition, then launch from the red lock.
+    await stepWorld(1.1);
+    result.homingLock = JSON.parse(await evaluate("JSON.stringify(CBZ.lockonState ? CBZ.lockonState() : null)"));
+    result.homingLaunch = JSON.parse(await evaluate(`JSON.stringify((function () {
+      const i=CBZ.fps.weapon,before=CBZ.fps.rounds[i];
+      CBZ.fpsFire(true);CBZ.fpsFire(false);
+      return {before:before,after:CBZ.fps.rounds[i],lock:CBZ.lockonLastLaunch&&CBZ.lockonLastLaunch()};
+    })())`));
+    await stepWorld(6);
     result.homingFlight = JSON.parse(await evaluate(`JSON.stringify((function () {
       const q = window.__homingAircraftProbe, rec = q && q.rec;
       return rec ? { destroyed: !!rec.destroyed, hpBefore: q.hp, hpAfter: rec.hp, persistent: !!(rec.group && rec.group.parent), charred: !!(rec.group && rec.group.userData.charred) } : null;

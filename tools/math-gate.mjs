@@ -206,6 +206,49 @@ const PASS = `(() => {
     if (ta.unseatedTrunks) out.fails.push("UNSEATED TRUNKS: " + ta.unseatedTrunks);
     if (ta.floatingCanopies) out.fails.push("FLOATING TREE PARTS: " + ta.floatingCanopies + " across " + ta.brokenChains + " trees");
   } catch (e) { out.fails.push("treeAudit threw: " + (e && e.message)); } }
+
+  // ---- BLOCK-LAW RATCHETS (CLAUDE.md #5). Each of these is a HARD invariant
+  // — a physical-plausibility or handover fact that must hold in every build,
+  // not an adoption counter that is allowed to be nonzero today. Adoption
+  // counters are reported as EVIDENCE below and never fail the gate, because a
+  // number pinned at a guess is worse than no pin at all.
+  try {
+    // furniture kit: a registered cushion/mattress height that disagrees with
+    // the box actually drawn under it means a body sits inside its own chair.
+    if (CBZ.furnishAudit) {
+      const fa = CBZ.furnishAudit();
+      out.furnish = fa.pieces + "p/" + fa.seats + "s/" + fa.beds + "b";
+      if (fa.mismatched) out.fails.push("FURNISH CUSHION MISMATCH: " + fa.mismatched);
+    }
+    // propuse: an anchor with no walkable standing spot is furniture that lies.
+    if (CBZ.propUseAudit) {
+      const pa = CBZ.propUseAudit();
+      out.anchors = pa.seats + "s/" + pa.beds + "b noGeom=" + pa.noGeom + " blocked=" + pa.blocked;
+      // RATCHET, not an invariant. propuse.js's own header says to pin this at
+      // zero; the first build that actually MEASURED it read 487 unreachable
+      // anchors out of ~6000, so zero was an aspiration nobody had checked.
+      // Pinned at the measured baseline instead — it may only ever go DOWN,
+      // and a change that walls in more furniture fails the gate.
+      if (pa.blocked > 487) out.fails.push("UNREACHABLE FURNITURE ANCHORS rose to " + pa.blocked + " (ratchet 487)");
+    }
+    // road rules: carcluster.js's district-of-the-nearest-lot stopgap must be
+    // dead. True here means roadrules.js failed to load or loaded too late.
+    if (CBZ.roadRulesAudit) {
+      const ra = CBZ.roadRulesAudit();
+      out.roadSegs = ra.segments;   // NOT out.roads — that is the golden road-COUNT
+      if (ra.fallback) out.fails.push("SPEED LIMIT STILL ON THE CARCLUSTER FALLBACK");
+    }
+    if (CBZ.clusterAudit && CBZ.clusterAudit().limitIsFallback) out.fails.push("clusterAudit: limit is still the fallback");
+    // sea level: nothing may leave a surge standing at world build.
+    if (CBZ.waterSurge && Math.abs(CBZ.waterSurge()) > 1e-6) out.fails.push("SEA SURGE NONZERO AT BUILD: " + CBZ.waterSurge());
+    // ---- evidence only (adoption counters / world census) ------------------
+    if (CBZ.predatorAudit) { const p = CBZ.predatorAudit(); out.predator = p.legacy + "/" + p.adopted; }
+    if (CBZ.checkpointAudit) { const c = CBZ.checkpointAudit(); out.checkpoints = c.count + "/" + c.manned; }
+    if (CBZ.cityBeachSeats) { const b = CBZ.cityBeachSeats(); out.beachSeats = b.loungers + "L/" + b.deckchairs + "D/" + b.occupied + "used"; }
+    if (CBZ.factionAudit) out.factions = CBZ.factionAudit();
+    if (CBZ.missionAudit) { const m = CBZ.missionAudit(); out.missions = (m && m.legacy != null) ? m.legacy : m; }
+  } catch (e) { out.fails.push("ratchet block threw: " + (e && e.message)); }
+
   out.peds = (CBZ.cityPeds || []).length;
   return out;
 })()`;
@@ -236,6 +279,8 @@ async function runSeed(seed, label) {
   r.newErrors = errors.slice(errBefore).filter((e) => !/ProgressEvent/.test(e));
   if (r.newErrors.length) r.fails.push(r.newErrors.length + " console errors");
   tmark(`${label}: ${r.lots}/${r.shops}/${r.roads} lots/shops/roads | sim ${TICKS} ticks in ${r.simMs}ms | mtnOutSnow ${r.mtnOutSnow} cityOnMtn ${r.cityOnMtn} overlaps ${r.overlaps} | trees ${r.trees == null ? "-" : r.trees} | peds ${r.peds}`);
+  // adoption/census evidence — printed, never asserted (see the PASS block)
+  tmark(`${label}: furnish ${r.furnish || "-"} | anchors ${r.anchors || "-"} | roads ${r.roadSegs == null ? "-" : r.roadSegs} | predator ${r.predator || "-"} | checkpoints ${r.checkpoints || "-"} | beach ${r.beachSeats || "-"}`);
   return r;
 }
 

@@ -24,7 +24,14 @@ const dbg = 9850 + Math.floor(Math.random() * 30);
 const profile = `/tmp/cbz-rway-${dbg}`;
 await rm(profile, { recursive: true, force: true });
 await sleep(700);
-const chrome = spawn("/opt/pw-browsers/chromium", [
+// Chromium path: honour CBZ_CHROME, fall back to the system Chrome on macOS.
+// (Same resolution math-gate.mjs uses — commit dc9329c fixed it there and the
+// sibling tools were never updated, so they hard-failed on a Mac.)
+const CHROME_BIN = process.env.CBZ_CHROME ||
+  (process.platform === "darwin"
+    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    : "/opt/pw-browsers/chromium");
+const chrome = spawn(CHROME_BIN, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=1440,900",

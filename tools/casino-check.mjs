@@ -23,9 +23,9 @@ const base = `http://127.0.0.1:${port}/games/casino.html?boot=1&nolock=1`;
 const profile = `/tmp/cbz-casino-${dbg}`;
 await rm(profile, { recursive: true, force: true });
 await sleep(700);
-const chromePath = process.platform === "darwin"
+const chromePath = process.env.CBZ_CHROME || (process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : "/opt/pw-browsers/chromium";
+  : "/opt/pw-browsers/chromium");
 const chrome = spawn(chromePath, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",

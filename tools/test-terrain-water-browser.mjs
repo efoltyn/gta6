@@ -86,13 +86,15 @@ try {
 
   const initial = JSON.parse(await evaluate(`JSON.stringify((function(){
     const wf=CBZ.waterField,A=CBZ.city&&CBZ.city.arena,animals=CBZ.cityWildlife||[];
+    const offsets={};['snow','forest','desert','farmland','speedway','military','airport'].forEach(function(id){const o=CBZ.worldOff?CBZ.worldOff(id):null;offsets[id]={dx:o&&o.dx||0,dz:o&&o.dz||0};});
     const aquatic=animals.filter(function(a){return a&&!a.dead&&a.species&&a.species.aquatic&&a.group;});
     const bad=aquatic.filter(function(a){return !wf.isNavigableWater(a.pos.x,a.pos.z,(a.waterClearance||12)*0.4);});
     let worst=Infinity,minDepth=Infinity,maxDepth=0;
     aquatic.forEach(function(a){const s=wf.shoreAt(a.pos.x,a.pos.z);worst=Math.min(worst,s);const d=wf.depthAt(a.pos.x,a.pos.z);minDepth=Math.min(minDepth,d);maxDepth=Math.max(maxDepth,d);});
     function stats(fn,x0,x1,z0,z1,n){let min=Infinity,max=-Infinity,sum=0,sum2=0,c=0;for(let iz=0;iz<=n;iz++)for(let ix=0;ix<=n;ix++){const x=x0+(x1-x0)*ix/n,z=z0+(z1-z0)*iz/n,h=fn(x,z);min=Math.min(min,h);max=Math.max(max,h);sum+=h;sum2+=h*h;c++;}const mean=sum/c;return {min:min,max:max,mean:mean,std:Math.sqrt(Math.max(0,sum2/c-mean*mean))};}
-    const snow=stats(CBZ.snowTerrainHeightAt,-60,760,-1770,-1130,34);
-    const desert=stats(CBZ.desertTerrainHeightAt,690,1550,-310,610,34);
+    const so=offsets.snow,de=offsets.desert;
+    const snow=stats(CBZ.snowTerrainHeightAt,-60+so.dx,760+so.dx,-1770+so.dz,-1130+so.dz,34);
+    const desert=stats(CBZ.desertTerrainHeightAt,690+de.dx,1550+de.dx,-310+de.dz,610+de.dz,34);
     // Integrate copies of real actors through thousands of mask-constrained
     // moves. Any dry result is a shoreline tunnelling regression.
     let routeFailures=0,routeSteps=0;
@@ -147,9 +149,9 @@ try {
       const ia=iw*id,small=Math.min(a.w*a.d,b.w*b.d),dy=Math.max(0,Math.max(a.y0,b.y0)-Math.min(a.y1,b.y1));
       if(ia>1200&&ia/Math.max(1,small)>0.08&&dy<0.18)overlaps.push({a:a.name,b:b.name,area:Math.round(ia),coverage:+(ia/Math.max(1,small)).toFixed(3),gap:+dy.toFixed(4)});
     }
-    const lakeX=-710,lakeZ=-1260;
+    const lakeX=-710+offsets.forest.dx,lakeZ=-1260+offsets.forest.dz;
     const localLakeSlabs=surfaceMeshes.filter(function(s){return s.name!=='world-sea'&&Math.hypot((s.x0+s.x1)/2-lakeX,(s.z0+s.z1)/2-lakeZ)<8&&s.w>150&&s.d>150&&s.h<0.5;});
-    const snowIceSlabs=surfaceMeshes.filter(function(s){return s.name!=='mount-mercy-earth-terrain'&&Math.hypot((s.x0+s.x1)/2-180,(s.z0+s.z1)/2+1380)<8&&s.w>50&&s.d>50&&s.h<0.5;});
+    const snowIceSlabs=surfaceMeshes.filter(function(s){return s.name!=='mount-mercy-earth-terrain'&&Math.hypot((s.x0+s.x1)/2-(180+offsets.snow.dx),(s.z0+s.z1)/2-(-1380+offsets.snow.dz))<8&&s.w>50&&s.d>50&&s.h<0.5;});
     const ownerSurfaces=surfaceMeshes.filter(function(s){return s.owner;}).map(function(s){return {name:s.name,owner:s.owner,unified:s.unified,geometry:s.geometry,x:+((s.x0+s.x1)/2).toFixed(1),z:+((s.z0+s.z1)/2).toFixed(1),w:s.w,d:s.d};});
     // Sample the real triangles from above instead of trusting bounding boxes.
     // Two distinct broad surfaces less than 12mm apart at the same map point
@@ -165,6 +167,7 @@ try {
       {n:'snow',x0:-40,x1:740,z0:-1750,z1:-1160,nx:9,nz:8},
       {n:'desert',x0:710,x1:1530,z0:-290,z1:590,nx:9,nz:9},
     ];
+    zones.forEach(function(q){const o=offsets[q.n]||{dx:0,dz:0};q.x0+=o.dx;q.x1+=o.dx;q.z0+=o.dz;q.z1+=o.dz;if(q.cx!=null)q.cx+=o.dx;if(q.cz!=null)q.cz+=o.dz;});
     outer:for(let zi=0;zi<zones.length;zi++){
       const q=zones[zi];
       for(let iz=0;iz<q.nz;iz++)for(let ix=0;ix<q.nx;ix++){
@@ -191,7 +194,7 @@ try {
     if(airportReg&&speedwayReg){const qx=Math.max(airportReg.minX,Math.min(speedwayReg.cx,airportReg.maxX)),qz=Math.max(airportReg.minZ,Math.min(speedwayReg.cz,airportReg.maxZ));airportSpeedwayClear=Math.hypot(speedwayReg.cx-qx,speedwayReg.cz-qz)-speedwayReg.r;}
     const surfaceAudit={waterMeshes:waterMeshes,ownerSurfaces:ownerSurfaces,localLakeSlabs:localLakeSlabs.map(function(s){return s.name;}),snowIceSlabs:snowIceSlabs.map(function(s){return s.name;}),airportSpeedwayClear:airportSpeedwayClear,nearCoplanar:nearCoplanar,surfaces:surfaceMeshes.map(function(s){return {name:s.name,geometry:s.geometry,x:+((s.x0+s.x1)/2).toFixed(1),z:+((s.z0+s.z1)/2).toFixed(1),w:s.w,d:s.d,h:s.h,y:[+s.y0.toFixed(3),+s.y1.toFixed(3)],worldSurface:s.worldSurface,owner:s.owner,unified:s.unified,material:s.material};}),overlaps:overlaps};
     const inlandLake={centerWater:wf.isSurfaceWater(lakeX,lakeZ,0),bankLand:!wf.isSurfaceWater(lakeX+112,lakeZ,0),registered:!!(A.mapTerrain&&A.mapTerrain.inlandWaterAt&&A.mapTerrain.inlandWaterAt(lakeX,lakeZ)),shore:wf.shoreAt(lakeX,lakeZ)};
-    return {api:!!wf,map:!!(A&&A.mapTerrain),seaMesh:!!CBZ.citySea,seaFieldProbe:seaFieldProbe,surfaceAudit:surfaceAudit,aquatic:aquatic.length,badInitial:bad.length,
+    return {api:!!wf,map:!!(A&&A.mapTerrain),seaMesh:!!CBZ.citySea,offsets:offsets,seaFieldProbe:seaFieldProbe,surfaceAudit:surfaceAudit,aquatic:aquatic.length,badInitial:bad.length,
       badActors:bad.slice(0,6).map(function(a){return {species:a.species.id,x:a.pos.x,z:a.pos.z,shore:wf.shoreAt(a.pos.x,a.pos.z),clearance:a.waterClearance};}),
       worstShore:worst,minDepth:minDepth,maxDepth:maxDepth,routeSteps:routeSteps,routeFailures:routeFailures,snow:snow,desert:desert,inlandLake:inlandLake,probe:!!probe};
   })())`));
@@ -226,11 +229,13 @@ try {
     // includes a deliberately extended south paddock (SITE_DZ=-23). Validate
     // that authored surface's real AABB centre/coverage instead of requiring
     // the obsolete circular-island centroid.
+    const o=initial.offsets||{};
+    const moved=function(id,x,z){const d=o[id]||{dx:0,dz:0};return [x+(d.dx||0),z+(d.dz||0)];};
     const expected={
-      airport:{at:[-305,-120],tol:2},
-      speedway:{at:[490,-373],tol:5,minW:400,minD:350},
-      military:{at:[-620,-700],tol:2},
-      farmland:{at:[1180,-880],tol:2}
+      airport:{at:moved('airport',-305,-120),tol:2},
+      speedway:{at:moved('speedway',490,-373),tol:5,minW:400,minD:350},
+      military:{at:moved('military',-620,-700),tol:2},
+      farmland:{at:moved('farmland',1180,-880),tol:2}
     };
     for (const owner of Object.keys(expected)) {
       const ss=initial.surfaceAudit.ownerSurfaces.filter(function(s){return s.owner===owner;});
@@ -248,7 +253,10 @@ try {
   if (!aquaticMotion || !aquaticMotion.valid || aquaticMotion.distance < 0.2 || aquaticMotion.surfaceError > 0.2) failures.push("live aquatic actor did not move in valid wave-synced water");
   if (!snowboardStart.ok || !snowboardStart.mounted || snowboardEnd.distance < 8 || snowboardEnd.downhill < 5) failures.push("snowboard did not physically descend the mountain");
   if (browserErrors.length) failures.push(`browser runtime exceptions: ${browserErrors.slice(0,3).join(" | ")}`);
-  console.log(JSON.stringify({ initial, aquaticMotion, snowboardStart, snowboardEnd, browserErrors, failures }, null, 2));
+  const compactInitial = { ...initial, surfaceAudit: { ...initial.surfaceAudit } };
+  compactInitial.surfaceAudit.surfaceCount = compactInitial.surfaceAudit.surfaces.length;
+  delete compactInitial.surfaceAudit.surfaces;
+  console.log(JSON.stringify({ initial: compactInitial, aquaticMotion, snowboardStart, snowboardEnd, browserErrors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } finally {
   try { if (ws && ws.readyState === WebSocket.OPEN) await send("Browser.close"); } catch (_) {}

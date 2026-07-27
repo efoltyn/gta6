@@ -120,7 +120,9 @@ try {
     const water=typeof shore!=="function"?[]:peds.filter(function(p){
       if(!p||!p.pos||p.dead||p._parked||p._npcAttached||(p.pos.y||0)>1.5)return false;
       try{return +shore(p.pos.x,p.pos.z)<-0.25;}catch(e){return false;}
-    }).map(function(p){return p.name||p.job||"ped";});
+    }).map(function(p){return {name:p.name||p.job||"ped",x:+p.pos.x.toFixed(2),z:+p.pos.z.toFixed(2),
+      shore:+shore(p.pos.x,p.pos.z).toFixed(2),profile:p._npcProfile||null,population:p._npcPopulation||null,
+      region:p.region&&p.region.name||p.region||null,spawnHidden:!!p._spawnHidden};});
     const roleCount=function(role){return peds.filter(function(p){return p&&p._venueRole===role;}).length;};
     const findPlaced=function(name){const p=peds.find(function(x){return x&&x.name===name;});return !!(p&&p.group&&p.group.parent);};
     const dryFailures=[];
@@ -145,6 +147,7 @@ try {
       facingError:Math.abs(wa.group.rotation.y+wa.faceH),visible:wa.group.visible!==false};
     return {
       roster:peds.length,npcLife:CBZ.npcLife.stats(),cabins:cabins.length,seats:seats,occupied:occupied,badOccupants:badOccupants,
+      policeOrigin:CBZ.games&&CBZ.games.api&&CBZ.games.api.police&&CBZ.games.api.police.origin?CBZ.games.api.police.origin():null,
       airportTravellers:peds.filter(function(p){return p&&p._airportRole==="traveller"&&p.group&&p.group.parent;}).length,
       groundCrew:peds.filter(function(p){return p&&p._airportRole==="ground-crew"&&p.group&&p.group.parent;}).length,
       soldiers:peds.filter(function(p){return p&&p._npcProfile&&/^military/.test(p._npcProfile)&&p.group&&p.group.parent;}).length,

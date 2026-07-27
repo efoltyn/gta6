@@ -19,6 +19,7 @@ const chromeBin = process.env.CBZ_CHROME || (process.platform === "darwin"
   : "/opt/pw-browsers/chromium");
 const base = `http://127.0.0.1:${webPort}/?seed=90210`;
 const only = new Set(String(process.env.CBZ_VISUAL_ONLY || "").split(",").map((s) => s.trim()).filter(Boolean));
+const focusedViewport = only.size ? { width: 1200, height: 750 } : { width: 1600, height: 1000 };
 
 await mkdir(OUT, { recursive: true });
 await rm(profile, { recursive: true, force: true });
@@ -29,7 +30,7 @@ const chrome = spawn(chromeBin, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--disable-background-timer-throttling",
-  "--disable-renderer-backgrounding", "--mute-audio", "--window-size=1600,1000",
+  "--disable-renderer-backgrounding", "--mute-audio", `--window-size=${focusedViewport.width},${focusedViewport.height}`,
   `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, base,
 ], { cwd: ROOT, stdio: "ignore" });
 
@@ -91,7 +92,7 @@ try {
   });
   await send("Runtime.enable");
   await send("Page.enable");
-  await send("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await send("Emulation.setDeviceMetricsOverride", { width: focusedViewport.width, height: focusedViewport.height, deviceScaleFactor: 1, mobile: false });
 
   for (let i = 0; i < 160; i++) {
     if (await evaluate("document.readyState==='complete' && !!(window.CBZ && CBZ.resetGame && CBZ.setMode && CBZ.renderer && CBZ._landmassBuilders && CBZ._landmassBuilders.length>15)")) break;
@@ -99,12 +100,13 @@ try {
   }
   await evaluate(`(function(){
     if(CBZ.CONFIG){CBZ.CONFIG.CITY_HITMAN_CAMPAIGN=false;CBZ.CONFIG.CITY_SCENE_DIRECTOR=false;}
+    if(${only.size ? "true" : "false"}&&CBZ.setQualityPreset)CBZ.setQualityPreset("fast");
     CBZ.setMode("city");CBZ.resetGame();CBZ.setState("playing");
     if(CBZ.disarmFPSAfterIntro)CBZ.disarmFPSAfterIntro();
     if(CBZ.setFPS)CBZ.setFPS(false);
   })()`);
   for (let i = 0; i < 180; i++) {
-    const ready = await evaluate("!!(CBZ.city && CBZ.city.arena && CBZ.city.arena.regions && CBZ.city.arena.regions.length >= 45 && !CBZ.citySpawnDraining)");
+    const ready = await evaluate(`!!(CBZ.city && CBZ.city.arena && CBZ.city.arena.regions && CBZ.city.arena.regions.length >= 45${only.size ? "" : " && !CBZ.citySpawnDraining"})`);
     if (ready) break;
     await sleep(500);
   }
@@ -116,6 +118,10 @@ try {
     await sleep(500);
   }
 
+  // A focused CBZ_VISUAL_ONLY pass should photograph its requested terrain,
+  // not first spend minutes traversing ~160k objects for unrelated global
+  // metadata. The exhaustive audit still runs on the normal full suite.
+  if (!only.size) {
   const runtime = JSON.parse(await evaluate(`JSON.stringify((function(){
     const A=CBZ.city.arena,regs=A.regions||[],lots=A.lots||[],machines=CBZ.cityMilitaryVehicles||[];
     const towers=lots.filter(l=>l&&l.building&&(l.building.storeys||0)>=7);
@@ -149,11 +155,13 @@ try {
   })())`));
   await writeFile(path.join(OUT, "runtime.json"), JSON.stringify({ runtime, browserErrors }, null, 2));
   console.log(JSON.stringify(runtime, null, 2));
+  }
 
   // Geometry ownership probe for the exact failure that looked like a second
   // blue water material. A downward ray around the speedway rim must always
   // find authored track or country earth; the ocean shader may exist below it
   // but no coordinate classified as land may be an empty clear-colour hole.
+  if (!only.size || only.has("speedway") || only.has("speedway-top")) {
   const terrainAudit = JSON.parse(await evaluate(`JSON.stringify((function(){
     const A=CBZ.city.arena,wf=CBZ.waterField,ray=new THREE.Raycaster();
     function shown(o){for(let p=o;p;p=p.parent)if(p.visible===false)return false;return true;}
@@ -203,6 +211,7 @@ try {
   })())`));
   await writeFile(path.join(OUT, "terrain-audit.json"), JSON.stringify(terrainAudit, null, 2));
   console.log(`terrain-audit: ${JSON.stringify(terrainAudit)}`);
+  }
   if (!only.size || only.has("speedway") || only.has("speedway-top")) {
     const surfaceData = await evaluate(`(function(){
       const m=CBZ.city.arena.root.getObjectByName("speedway-island-surface");
@@ -309,7 +318,7 @@ try {
     return {region:r.name,bounds:[r.minX,r.maxX,r.minZ,r.maxZ]};`);
 
   await pose("forest-lake", `
-    const x=-710,z=-1260,wf=CBZ.waterField;
+    const o=CBZ.worldOff&&CBZ.worldOff("forest")||{dx:0,dz:0},x=-710+(o.dx||0),z=-1260+(o.dz||0),wf=CBZ.waterField;
     window.__visualQaPose=[x+128,42,z+145,x,-.45,z];CBZ.player.pos.set(x+104,CBZ.floorAt(x+104,z)||0,z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
     return {sharedWater:!!(wf&&wf.isSurfaceWater(x,z,0)),bankLand:!!(wf&&!wf.isSurfaceWater(x+112,z,0)),shore:wf&&wf.shoreAt(x,z),localSlab:CBZ.scene.children.some(o=>o&&o.name==="redhollow-lake-water")};`);
 
@@ -380,14 +389,18 @@ try {
     return {loaded:!!(o&&o.children.length>1),center:c.toArray(),size:s.toArray()};`);
 
   await pose("desert-ground", `
-    let best={x:1040,z:420,h:0,relief:-1};
-    if(CBZ.desertTerrainHeightAt)for(let z=-240;z<=560;z+=32)for(let x=720;x<=1520;x+=32){
-      if(CBZ.desertMesaHeightAt&&CBZ.desertMesaHeightAt(x,z)>0.8)continue;
+    const r=CBZ.city.arena.regions.find(x=>x.name==="The Saltlands");
+    let best={x:(r.minX+r.maxX)/2,z:(r.minZ+r.maxZ)/2,h:0,relief:-1};
+    if(CBZ.desertTerrainHeightAt)for(let z=r.minZ+30;z<=r.maxZ-110;z+=32)for(let x=r.minX+30;x<=r.maxX-110;x+=32){
+      const camX=x+74,camZ=z+68;
+      const mesaSamples=CBZ.desertMesaHeightAt?[CBZ.desertMesaHeightAt(x,z),CBZ.desertMesaHeightAt(x+24,z),CBZ.desertMesaHeightAt(x-24,z),CBZ.desertMesaHeightAt(x,z+24),CBZ.desertMesaHeightAt(x,z-24),CBZ.desertMesaHeightAt(camX,camZ)]:[0];
+      if(Math.max.apply(Math,mesaSamples)>0.15)continue;
       const hs=[CBZ.desertTerrainHeightAt(x,z),CBZ.desertTerrainHeightAt(x+18,z),CBZ.desertTerrainHeightAt(x-18,z),CBZ.desertTerrainHeightAt(x,z+18),CBZ.desertTerrainHeightAt(x,z-18)];
       const mx=Math.max.apply(Math,hs),mn=Math.min.apply(Math,hs),relief=mx-mn;
-      if(mx<38&&hs[0]>5&&relief>best.relief)best={x:x,z:z,h:hs[0],relief:relief};
+      const camH=CBZ.desertTerrainHeightAt(camX,camZ);
+      if(mx<38&&camH<34&&hs[0]>5&&relief>best.relief)best={x:x,z:z,h:hs[0],camH:camH,relief:relief};
     }
-    window.__visualQaPose=[best.x+74,best.h+11,best.z+68,best.x,best.h+3,best.z];CBZ.player.pos.set(best.x,best.h,best.z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
+    window.__visualQaPose=[best.x+74,Math.max(best.h+11,(best.camH||0)+9),best.z+68,best.x,best.h+3,best.z];CBZ.player.pos.set(best.x,best.h,best.z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
     return {sample:best,dune:CBZ.desertDuneHeightAt&&CBZ.desertDuneHeightAt(best.x,best.z),mesa:CBZ.desertMesaHeightAt&&CBZ.desertMesaHeightAt(best.x,best.z),mesh:!!CBZ.scene.getObjectByName("saltlands-desert-surface")};`);
 
   await pose("desert-top", `
@@ -396,8 +409,9 @@ try {
     return {region:r.name,bounds:[r.minX,r.maxX,r.minZ,r.maxZ]};`);
 
   await pose("mountain", `
-    window.__visualQaFogFar=2600;window.__visualQaPose=[350,55,-1050,350,72,-1590,55];CBZ.player.pos.set(470,CBZ.floorAt(470,-1300)||0,-1300);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
-    return {summit:CBZ.snowTerrainHeightAt&&CBZ.snowTerrainHeightAt(470,-1585),ranges:(CBZ.city.arena.regions||[]).filter(r=>r.biome==="snow").map(r=>r.name)};`);
+    const r=CBZ.city.arena.regions.find(x=>x.name==="Mount Mercy"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
+    window.__visualQaFogFar=2600;window.__visualQaPose=[cx+70,68,r.maxZ+390,cx,82,cz-80,55];CBZ.player.pos.set(cx,CBZ.floorAt(cx,r.maxZ-90)||0,r.maxZ-90);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
+    return {summit:CBZ.snowTerrainHeightAt&&CBZ.snowTerrainHeightAt(470+(CBZ.worldOff("snow").dx||0),-1585+(CBZ.worldOff("snow").dz||0)),ranges:(CBZ.city.arena.regions||[]).filter(r=>r.biome==="snow").map(r=>r.name)};`);
 
   await pose("mountain-top", `
     const r=CBZ.city.arena.regions.find(x=>x.name==="Mount Mercy"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
@@ -405,11 +419,13 @@ try {
     return {region:r.name,bounds:[r.minX,r.maxX,r.minZ,r.maxZ]};`);
 
   await pose("mountain-east", `
-    window.__visualQaFogFar=3400;window.__visualQaPose=[1120,330,-1250,280,105,-2050,52];CBZ.player.pos.set(470,CBZ.floorAt(470,-1300)||0,-1300);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
+    const r=CBZ.city.arena.regions.find(x=>x.name==="Greater Mercy Range"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
+    window.__visualQaFogFar=3400;window.__visualQaPose=[r.maxX+420,380,r.maxZ+290,cx,115,cz,52];CBZ.player.pos.set(cx,CBZ.floorAt(cx,r.maxZ-80)||0,r.maxZ-80);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
     return {families:CBZ.greaterSnowMountainCount,lobes:CBZ.greaterSnowLobeCount};`);
 
   await pose("mountain-west", `
-    window.__visualQaFogFar=3400;window.__visualQaPose=[-500,310,-1260,360,105,-2070,52];CBZ.player.pos.set(470,CBZ.floorAt(470,-1300)||0,-1300);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
+    const r=CBZ.city.arena.regions.find(x=>x.name==="Greater Mercy Range"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
+    window.__visualQaFogFar=3400;window.__visualQaPose=[r.minX-420,360,r.maxZ+260,cx,105,cz,52];CBZ.player.pos.set(cx,CBZ.floorAt(cx,r.maxZ-80)||0,r.maxZ-80);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
     return {families:CBZ.greaterSnowMountainCount,lobes:CBZ.greaterSnowLobeCount};`);
 
   // Survey renders intentionally extend fog without changing production. They
