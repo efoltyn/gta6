@@ -39,6 +39,9 @@
     // → fpsmode explosive shoot()), surfaced under the name players asked for so it
     // shows up & buys/equips/fires/explodes through the exact same RPG chain.
     "Rocket Launcher": { value: 9500, tag: "weapon", gun: "bazooka", dmg: 1, rof: 1.4, ammo: 1 },
+    // 40mm drum launcher: the RPG's exact explosion (same engine blast data),
+    // six lobbed rounds per reload instead of one — see weapons/weapon-data.js.
+    "Grenade Launcher": { value: 8500, tag: "weapon", gun: "glauncher", dmg: 1, rof: 0.72, ammo: 6 },
     Bat:           { value: 80,   tag: "weapon", melee: true, dmg: 26 },
     Knife:         { value: 120,  tag: "weapon", melee: true, dmg: 40 },
     // --- throwables (lobbed, arcing — see city/combat.js grenade system) ---
@@ -281,7 +284,7 @@
   jewel("grill_diamond", "glasses", 12, 4000, "Diamond Grill (Composable)", "ring");
 
   const SHOP_STOCK = {
-    guns:        ["Pistol", "Revolver", "Desert Eagle", "SMG", "Uzi", "Shotgun", "Rifle", "AK-47", "LMG", "Sniper", "Bazooka", "Rocket Launcher", "Grenade", "Ammo Box", "Body Armor", "Knife", "Bat"],
+    guns:        ["Pistol", "Revolver", "Desert Eagle", "SMG", "Uzi", "Shotgun", "Rifle", "AK-47", "LMG", "Sniper", "Bazooka", "Rocket Launcher", "Grenade Launcher", "Grenade", "Ammo Box", "Body Armor", "Knife", "Bat"],
     jewelry:     ["Gold Chain", "Diamond Ring", "Rolex", "Diamond Grill", "Earrings", "Iced Chain", "Iced Watch", "Diamond Pinky"],
     pawn:        ["Lockpick", "Crowbar", "Burner Phone", "Knife"],
     // the boutique: streetwear → designer → luxury, every wearable slot covered.

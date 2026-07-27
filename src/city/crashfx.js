@@ -467,10 +467,59 @@
     const L = RAMP[RAMP.length - 1]; return out.setRGB(L[1], L[2], L[3]);
   }
   function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  // FX_BLAST_FIRSTFRAME (owner: "the explosion takes too long after i
+  // shoot"). Two MEASURED impact-side thieves, both fixed under this flag:
+  //   (1) a puff's opacity is written only by updatePuffs — onAlways(9.5),
+  //       which runs BEFORE the rocket updater (onAlways 52) whose detonate
+  //       spawns the blast — so the flash rendered its birth frame at
+  //       opacity 0: one structurally guaranteed DEAD FRAME between "the
+  //       game decided the explosion happened" and anything visible.
+  //       spawnPuff now seeds the exact envelope updatePuffs would produce
+  //       one full-speed tick in (same ramp, same colour), so the
+  //       detonation frame already shows the flash at ~93%.
+  //   (2) the blast fired doHitstop(0.18)+doSlowmo(0.34) in the SAME call
+  //       stack that spawned the fireball, so its own time dilation
+  //       stretched its own first instants ~3x (30% fireball growth at
+  //       ~610ms real instead of ~215ms). blastPunch defers the freeze two
+  //       frames: the flash and first fireball step land at full speed,
+  //       THEN the stop punctuates them. Same total juice.
+  // Flip false → opacity-0 birth frame + same-frame stop, byte-identical.
+  if (CBZ.CONFIG.FX_BLAST_FIRSTFRAME == null) CBZ.CONFIG.FX_BLAST_FIRSTFRAME = true;
+  function firstFrameOn() { return CBZ.CONFIG.FX_BLAST_FIRSTFRAME !== false; }
+  const punchQ = [];
+  function blastPunch(hs, sm) {
+    if (!firstFrameOn()) {
+      if (CBZ.doSlowmo && sm) CBZ.doSlowmo(sm);
+      if (CBZ.doHitstop && hs) CBZ.doHitstop(hs);
+      return;
+    }
+    punchQ.push({ t: 2 / 60, hs: hs, sm: sm });
+  }
+  function pumpPunch(dt) {
+    for (let i = punchQ.length - 1; i >= 0; i--) {
+      const q = punchQ[i]; q.t -= dt;
+      if (q.t > 0) continue;
+      if (CBZ.doSlowmo && q.sm) CBZ.doSlowmo(q.sm);
+      if (CBZ.doHitstop && q.hs) CBZ.doHitstop(q.hs);
+      punchQ.splice(i, 1);
+    }
+  }
   function spawnPuff(x, y, z, o) {
     const p = getPuff(o.additive !== false, o.smoke);
     p.position.set(x, y, z); p.material.rotation = rng() * 6.2832;
     p.scale.set(o.base, o.base, 1); p.material.opacity = 0; p.visible = (o.delay || 0) <= 0;
+    // FIRST-FRAME TRUTH — see the flag block above. Delayed puffs (the
+    // deliberate smoke staging) keep their opacity-0 birth.
+    if (firstFrameOn() && (o.delay || 0) <= 0 && o.life > 0) {
+      const t0 = Math.min(0.999, (1 / 60) / o.life);
+      const mo = o.maxOp == null ? 1 : o.maxOp;
+      if (o.smoke) {
+        p.material.opacity = Math.max(0, (t0 < 0.25 ? t0 / 0.25 : 1) * mo);
+      } else {
+        p.material.opacity = Math.max(0, (t0 < 0.1 ? t0 / 0.1 : 1 - (t0 - 0.1) / 0.9) * mo);
+        rampColor(p.material.color, t0);
+      }
+    }
     puffs.push({
       s: p, age: -(o.delay || 0), life: o.life, base: o.base, pop: o.pop,
       x: x, y: y, z: z, vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0,
@@ -743,8 +792,9 @@
       att = Math.max(0.25, Math.min(1, 1.25 - cd / 130));
     }
     if (CBZ.shake) CBZ.shake(3.2 * Math.min(2, power) * att);
-    if (CBZ.doSlowmo && att > 0.5) CBZ.doSlowmo(0.34);
-    if (CBZ.doHitstop && att > 0.5) CBZ.doHitstop(0.18);
+    // punch is DEFERRED two frames (blastPunch) so the flash renders before
+    // time stops — see the FX_BLAST_FIRSTFRAME block.
+    if (att > 0.5) blastPunch(0.18, 0.34);
     try { const fl = CBZ.el && CBZ.el.flash; if (fl && att > 0.4) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
     // blast damage in radius — crowd, peds, cops, and the player (shared path).
     // An elevated blast only reaches the street where its SPHERE does: the
@@ -943,8 +993,8 @@
     // ---- IMPACT FEEDBACK: bigger boom, harder shake, more slow-mo, screen flash --
     if (CBZ.sfx) CBZ.sfx("explosion");
     if (CBZ.shake) CBZ.shake(5.5 * Math.min(2.4, power));
-    if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
-    if (CBZ.doHitstop) CBZ.doHitstop(0.26);
+    // deferred like cityExplosion's — the fireball exists before time stops
+    blastPunch(0.26, 0.5);
     try { const fl = CBZ.el && CBZ.el.flash; if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
 
     // blast damage — SAME shared path as cityExplosion, just flings bodies harder
@@ -1524,6 +1574,7 @@
   };
 
   CBZ.onAlways(9.5, function (dt) {
+    if (punchQ.length) pumpPunch(dt);
     if (puffs.length) updatePuffs(dt);
     // wall-blast scars: snap in, hold ~80–120s, fade out
     for (let i = scars.length - 1; i >= 0; i--) {
@@ -1711,6 +1762,24 @@
     scene.add(p);
     puffPool.push(p);
   }
+  // Park one invisible mesh per BLAST-MINTED material family, so their
+  // programs compile inside core/fxwarm's play-start renderer.compile()
+  // (r128 compiles on first RENDER; compile() walks traverse(), so
+  // visible:false still counts) instead of inside the first rocket's frame —
+  // the pooled sprites above were warm, but every chunk/rubble/rebar mesh
+  // and the scorch decal linked their programs mid-fight on blast #1
+  // (measured: the first blast of a session linked ~dozens of programs; the
+  // second linked zero).
+  (function parkBlastMats() {
+    const pg = new THREE.BoxGeometry(0.01, 0.01, 0.01); pg._shared = true;
+    const fam = [chunkMat, chunkMatHot, rubbleMat, rubbleMat2, rebarMat];
+    for (let i = 0; i < fam.length; i++) {
+      const m = new THREE.Mesh(pg, fam[i]); m.visible = false; scene.add(m);
+    }
+    const sm = new THREE.Mesh(new THREE.PlaneGeometry(0.01, 0.01),
+      new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, depthWrite: false, opacity: 0 }));
+    sm.visible = false; scene.add(sm);
+  })();
 
   // ============================================================
   // CBZ.cityEjectaCone(x, y, z, nx, nz, power, opts) — PENETRATION EXIT.

@@ -587,14 +587,22 @@
   const rocketGeo = new THREE.CylinderGeometry(0.065, 0.075, 0.46, 10);
   const rocketMat = new THREE.MeshLambertMaterial({ color: 0x2a2e22 });
   const rockets = [];
-  for (let i = 0; i < 3; i++) {
+  // Pool of 6: the old pool of 3 round-robined onto ACTIVE slots — fire 4
+  // rockets at long range (5 carried; a 450u shot flies ~4s) and the first
+  // one's detonate closure was silently overwritten, so it never exploded.
+  // 6 covers the grenade launcher's full drum in the air at once, and
+  // launchRocket below now FLUSHES a still-active slot (detonating it where
+  // it is) instead of eating it.
+  for (let i = 0; i < 6; i++) {
     const body = new THREE.Mesh(rocketGeo, rocketMat);
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.16, 10), new THREE.MeshLambertMaterial({ color: 0x485042 }));
     nose.position.y = 0.31; body.add(nose);
     const finMat = new THREE.MeshLambertMaterial({ color: 0x20251f });
+    const fins = [];
     for (let f = 0; f < 4; f++) {
       const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.15, 0.14), finMat);
       fin.position.y = -0.16; fin.rotation.y = f * Math.PI * 0.5; body.add(fin);
+      fins.push(fin);
     }
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending, opacity: 0.85,
@@ -611,6 +619,7 @@
     CBZ.scene.add(body);
     rockets.push({
       mesh: body, active: false, t: 0, dur: 0.3,
+      flame: [glow, core], fins: fins,             // dressing a plain (launched-shell) flight hides
       ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0,   // origin + impact point (straight-line endpoints)
       sagY: 0,                                     // peak mid-flight gravity sag (world units, visual only)
       detonate: null,                               // bound closure: () => runs the exact old detonation block
@@ -711,8 +720,18 @@
 
   function launchRocket(from, to, dur, sag, onArrive, opts) {
     opts = opts || {};
-    const r = rockets[rocketIdx];
-    rocketIdx = (rocketIdx + 1) % rockets.length;
+    // prefer a FREE slot; only steal an active one when all six are flying
+    let r = null;
+    for (let i = 0; i < rockets.length; i++) {
+      const c = rockets[(rocketIdx + i) % rockets.length];
+      if (!c.active) { r = c; rocketIdx = (rocketIdx + i + 1) % rockets.length; break; }
+    }
+    if (!r) {
+      r = rockets[rocketIdx];
+      rocketIdx = (rocketIdx + 1) % rockets.length;
+      // never silently drop a live round's detonate — blow it where it is
+      if (r.active) finishRocket(r, r.mesh.position, null);
+    }
     r.active = true; r.t = 0; r.dur = Math.max(0.02, dur);
     r.ox = from.x; r.oy = from.y; r.oz = from.z;
     r.dx = to.x; r.dy = to.y; r.dz = to.z;
@@ -723,11 +742,17 @@
     r.speed = opts.speed || 0;
     r.turnRate = opts.turnRate || 2.4;
     r.life = 0;
+    r._owe = 0;                     // sustainer deficit ledger (softAuthority)
     r.smokeT = 0;
     r.maxLife = opts.maxLife || Math.max(3.2, r.dur + 2.0);
     r.targetRadius = opts.targetRadius || 2;
     r.impactPoint = opts.impactPoint || null;
     r.onImpact = typeof opts.onImpact === "function" ? opts.onImpact : null;
+    // plain flight (grenade launcher): a launched shell, not a burning rocket —
+    // hide the exhaust flame sprites + fins for this flight; restore on reuse.
+    const plain = !!opts.plain;
+    if (r.flame) for (let i = 0; i < r.flame.length; i++) r.flame[i].visible = !plain;
+    if (r.fins) for (let i = 0; i < r.fins.length; i++) r.fins[i].visible = !plain;
     r.velocity.set(to.x - from.x, to.y - from.y, to.z - from.z);
     if (r.velocity.lengthSq() < 1e-6) r.velocity.set(0, 0, -1);
     r.velocity.normalize().multiplyScalar(r.speed || (from.distanceTo(to) / r.dur));
@@ -750,19 +775,64 @@
   }
   // SOFT LAUNCH (owner: "start kind of slow just at the very start, just so
   // you can see the rocket — beautiful and very satisfying"): the round
-  // leaves the tube at 35% authority, holds ~0.3s, then eases to full by
-  // 0.7s. Homing rockets scale their position advance AND turn authority
-  // together (a slow rocket must not out-turn its own speed and orbit);
-  // ballistic rockets remap their arc progress with a power curve — same
-  // arrival time, slow ignition, fast cruise. Theater, not a nerf.
+  // leaves the tube slow and eases to full authority. Homing rockets scale
+  // their position advance AND turn authority together (a slow rocket must
+  // not out-turn its own speed and orbit); ballistic rockets remap their arc
+  // progress with a power curve — same arrival time, slow ignition, fast
+  // cruise. Theater, not a nerf.
   if (CBZ.CONFIG.WEAPON_ROCKET_SOFTLAUNCH == null) CBZ.CONFIG.WEAPON_ROCKET_SOFTLAUNCH = true;
-  const SOFT_T0 = 0.3, SOFT_T1 = 0.7, SOFT_K0 = 0.35;
+  // ROCKET PACE V2 (owner report, 2026-07-27: "i shoot the rpg and the
+  // explosion looks amazing but it takes too long from after i shoot... i
+  // wouldn't mind if it took realistically long but it's just too long").
+  // MEASURED cause, not vibes: the original soft launch (35% authority for
+  // 0.3s, full only by 0.7s) preserved arrival time on the BALLISTIC path
+  // (progress remap, pow(k,1.55)) but on the HOMING path it scaled the real
+  // position advance with NO repayment — every guided shot (both RPG ammo
+  // types are homing:true, so the plane shot the owner filmed is always this
+  // path) arrived ~326ms LATE over 30m: 642ms measured vs the 316ms the
+  // speed constant promises. V2 keeps the owner's visible-launch beat but
+  // makes it stop costing time, the way a real RPG-7 does (booster ejects at
+  // ~115 m/s, sustainer accelerates to ~295 m/s — slow leave, HOT cruise):
+  //   (a) the slow beat shrinks to the first ~0.22s (50% authority, still a
+  //       clearly visible leave with the dense smoke trail),
+  //   (b) the homing path REPAYS the ramp deficit with a sustainer burst (up
+  //       to +100% cruise until the owed seconds are burned) — arrival now
+  //       matches dist/speed to within one frame (30m: 279ms vs 263 ideal;
+  //       60m: 529 vs 526; 100m: 879 vs 877 — integrated, not guessed),
+  //   (c) all rocket speeds run ×1.2 (95→114 u/s standard — still well under
+  //       a real RPG's sustained ~295 m/s, so the flight stays readable).
+  // Flip false → the shipped 0.3/0.7/0.35 no-repay 95 u/s behaviour,
+  // byte-identical. WEAPON_ROCKET_SOFTLAUNCH=false still kills the theater
+  // entirely (both paths fly flat-out from the muzzle).
+  if (CBZ.CONFIG.WEAPON_ROCKET_PACE_V2 == null) CBZ.CONFIG.WEAPON_ROCKET_PACE_V2 = true;
   function softOn() { return CBZ.CONFIG.WEAPON_ROCKET_SOFTLAUNCH !== false; }
+  function paceOn() { return CBZ.CONFIG.WEAPON_ROCKET_PACE_V2 !== false; }
+  function softT0() { return paceOn() ? 0.08 : 0.3; }
+  function softT1() { return paceOn() ? 0.22 : 0.7; }
+  function softK0() { return paceOn() ? 0.5 : 0.35; }
+  const PACE_SPEED_MUL = 1.2;   // (c) above — applied once, in shoot()
+  const SOFT_BOOST = 1.0;       // (b) max extra sustainer authority while repaying
   function softRamp(t) {
-    if (t <= SOFT_T0) return SOFT_K0;
-    if (t >= SOFT_T1) return 1;
-    const u = (t - SOFT_T0) / (SOFT_T1 - SOFT_T0);
-    return SOFT_K0 + (1 - SOFT_K0) * u * u * (3 - 2 * u);
+    const T0 = softT0(), T1 = softT1(), K0 = softK0();
+    if (t <= T0) return K0;
+    if (t >= T1) return 1;
+    const u = (t - T0) / (T1 - T0);
+    return K0 + (1 - K0) * u * u * (3 - 2 * u);
+  }
+  // Homing-path authority for this frame: the ramp while igniting, then >1
+  // while the owed deficit is repaid (r._owe accumulates the seconds of
+  // full-speed travel the ramp withheld). The ballistic path never calls
+  // this — its power remap is arrival-preserving by construction.
+  function softAuthority(r, dt) {
+    if (!softOn()) return 1;
+    const k = softRamp(r.life);
+    if (k < 1) { r._owe = (r._owe || 0) + (1 - k) * dt; return k; }
+    if (paceOn() && r._owe > 0 && dt > 0) {
+      const b = Math.min(SOFT_BOOST, r._owe / dt);
+      r._owe -= b * dt;
+      return 1 + b;
+    }
+    return 1;
   }
   function updateRockets(dt) {
     for (let i = 0; i < rockets.length; i++) {
@@ -771,9 +841,14 @@
       _rocketPrev.copy(r.mesh.position);
       r.smokeT += dt;
       // denser trail during the slow phase — the visible-launch beauty beat
-      if (r.smokeT >= ((softOn() && r.t < SOFT_T1) ? 0.018 : 0.035)) { r.smokeT = 0; emitRocketSmoke(_rocketPrev); }
+      if (r.smokeT >= ((softOn() && r.t < softT1()) ? 0.018 : 0.035)) { r.smokeT = 0; emitRocketSmoke(_rocketPrev); }
       if (r.homing) {
         r.t += dt; r.life += dt;
+        // ONE authority sample per frame (it owns the deficit bookkeeping) —
+        // position advance and turn authority must share it so a slow rocket
+        // cannot out-turn its own speed, and a sustainer-hot one keeps its
+        // turn radius.
+        const auth = softAuthority(r, dt);
         const target = r.seek ? r.seek() : null;
         if (target) {
           _rocketDir.copy(r.velocity).normalize();
@@ -781,13 +856,13 @@
           if (_rocketWant.lengthSq() > 1e-6) {
             _rocketWant.normalize();
             const dot = Math.max(-1, Math.min(1, _rocketDir.dot(_rocketWant)));
-            const angle = Math.acos(dot), maxTurn = r.turnRate * dt * (softOn() ? softRamp(r.life) : 1);
+            const angle = Math.acos(dot), maxTurn = r.turnRate * dt * auth;
             if (angle <= maxTurn || angle < 1e-4) _rocketDir.copy(_rocketWant);
             else _rocketDir.lerp(_rocketWant, maxTurn / angle).normalize();
             r.velocity.copy(_rocketDir).multiplyScalar(r.speed);
           }
         }
-        r.mesh.position.addScaledVector(r.velocity, dt * (softOn() ? softRamp(r.life) : 1));
+        r.mesh.position.addScaledVector(r.velocity, dt * auth);
         _rocketPos.copy(r.mesh.position);
         _rocketDir.copy(_rocketPos).sub(_rocketPrev);
         const stepLen = _rocketDir.length();
@@ -830,6 +905,88 @@
       }
     }
   }
+
+  // ---- LATENCY LEDGER (ratchet) ---------------------------------------------
+  // The owner's "the explosion takes too long after i shoot" as a NUMBER
+  // instead of a feeling. Per weapon, in ms, for a shot at `dist` (default
+  // 30m ≈ the 100ft plane shot he filmed):
+  //   pressToSpawnMs   — physical press → projectile/ray exists. Fire is
+  //                      event-driven (mousedown → shoot() same JS turn, no
+  //                      first-shot gate), so this is only the half-frame
+  //                      mean wait for the same-frame render.
+  //   spawnToImpactMs  — flight time, integrated with the LIVE softRamp/
+  //                      softAuthority/pace math (not a copy), so any drift
+  //                      in the constants moves this number. Homing-capable
+  //                      weapons report the GUIDED path (the felt case — a
+  //                      locked plane shot); hitscan reports 0; the sniper
+  //                      reports its deliberate travel-feel defer.
+  //   impactToVisibleMs— detonate/hit → first visible frame. cityExplosion
+  //                      runs synchronously inside the arrival frame, and
+  //                      with crashfx's FX_BLAST_FIRSTFRAME fix its flash is
+  //                      ~93% bright on that same frame (half-frame render
+  //                      alignment). Flag off restores the measured legacy
+  //                      defect — the flash spawned at opacity 0 and
+  //                      updatePuffs (onAlways 9.5) had already run before
+  //                      the rocket updater (52), so the birth frame drew
+  //                      NOTHING: one extra full frame, reported honestly.
+  //   physicsMs        — dist/speed, the part that is real ballistics (KEEP).
+  //   overheadMs       — spawnToImpactMs − physicsMs, the artificial part
+  //                      (DELETE). THE RATCHET: with PACE_V2 on, the RPG's
+  //                      guided overhead at 30m is ~16ms (one frame; was
+  //                      ~326ms) and ~0 from 60m out. It may only ever go
+  //                      DOWN.
+  CBZ.weaponLatencyAudit = function (dist) {
+    dist = dist || 30;
+    const F = 1000 / 60, out = {};
+    for (let i = 0; i < WEAPONS.length; i++) {
+      const w = WEAPONS[i];
+      let flight = 0, physics = 0;
+      if (w.explosive) {
+        const spec = (w.ammoTypes && w.ammoTypes[0]) || rocketAmmoSpec(w) || {};
+        const mul = paceOn() ? PACE_SPEED_MUL : 1;
+        const v = ((spec.homing && spec.speed) || w.projSpeed || 0) * mul;
+        physics = v > 0 ? (dist / v) * 1000 : 0;
+        if (spec.homing && v > 0) {
+          // integrate the real homing authority curve (ramp + sustainer)
+          const sim = { life: 0, _owe: 0 };
+          let t = 0, d = 0; const step = 1 / 240;
+          while (d < dist && t < 12) { sim.life += step; d += v * softAuthority(sim, step) * step; t += step; }
+          flight = t * 1000;
+        } else {
+          flight = physics;   // ballistic: arrival is dist/speed by construction
+        }
+      } else if (w.sniperDrop && dist > w.sniperDrop.start) {
+        flight = physics = (dist - w.sniperDrop.start) * (w.sniperDrop.flightPerM || 0) * 1000;
+      }
+      const visMs = F / 2 + (CBZ.CONFIG.FX_BLAST_FIRSTFRAME === false && w.explosive ? F : 0);
+      out[w.id] = {
+        pressToSpawnMs: Math.round(F / 2),
+        spawnToImpactMs: Math.round(flight),
+        impactToVisibleMs: Math.round(visMs),
+        physicsMs: Math.round(physics),
+        overheadMs: Math.round(Math.max(0, flight - physics)),
+        totalMs: Math.round(F / 2 + flight + visMs),
+      };
+    }
+    // vehicle ordnance (F-22 / gunship / tank / car pods — city/aircraft.js's
+    // one shared pool): constant-velocity flight, speed read LIVE off
+    // cityMissileTuning so AIR_MISSILE_PACE_V2 moves this row. The 0.35s
+    // seeker-arm delay is steering-only (the round is already flying) and
+    // therefore adds no flight time.
+    const mt = CBZ.cityMissileTuning;
+    if (mt && mt.speed > 0) {
+      const vm = (dist / mt.speed) * 1000;
+      out["vehicle-missile"] = {
+        pressToSpawnMs: Math.round(F / 2),
+        spawnToImpactMs: Math.round(vm),
+        impactToVisibleMs: Math.round(F / 2),
+        physicsMs: Math.round(vm),
+        overheadMs: 0,
+        totalMs: Math.round(F + vm),
+      };
+    }
+    return out;
+  };
 
   // ---- tiny deferred-call queue (sniper travel-time feedback) ---------------
   // GENERIC, NOT just for the sniper: a short list of {t, fn} pairs ticked
@@ -2200,8 +2357,9 @@
       // a real travel delay instead of detonating the instant the trigger is
       // pulled. Weapons without projSpeed (defensive default) keep the OLD
       // instant-detonate behaviour so this never silently breaks a future
-      // explosive that doesn't carry the new fields.
-      const projSpeed = (guidedTarget && ammoSpec.speed) || w.projSpeed || 0;
+      // explosive that doesn't carry the new fields. PACE V2 (c): rockets
+      // cruise 20% hotter — see the WEAPON_ROCKET_PACE_V2 block above.
+      const projSpeed = ((guidedTarget && ammoSpec.speed) || w.projSpeed || 0) * (paceOn() ? PACE_SPEED_MUL : 1);
       if (projSpeed > 0) {
         const lockPoint = guidedTarget && guidedTarget.seek ? guidedTarget.seek() : null;
         const flightDist = lockPoint
@@ -2228,7 +2386,9 @@
             wallPoint = actualWall && actualWall.point ? actualWall.point.clone() : null;
           },
         } : null;
-        launchRocket(origin, pt, flightDur, sag, detonate, guideOpts);
+        const flightOpts = guideOpts || {};
+        if (w.projPlain) flightOpts.plain = true;   // launched shell, no exhaust dressing
+        launchRocket(origin, pt, flightDur, sag, detonate, flightOpts);
         // a brief launch flare only (the flying mesh IS the tracer now) — no
         // fireTracer() instant line all the way to `pt`, which would visibly
         // spoil the flight by drawing the whole path before the rocket arrives.

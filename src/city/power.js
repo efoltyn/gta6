@@ -745,7 +745,21 @@
 
     // 1. ONE OF OURS. factions.js's tier() is your rank inside his outfit —
     //    -1 when you are not in it at all. A made man walks straight in.
-    const myTier = (CBZ.factions && CBZ.factions.tier && rec.org) ? CBZ.factions.tier(rec.org) : -1;
+    let myTier = (CBZ.factions && CBZ.factions.tier && rec.org) ? CBZ.factions.tier(rec.org) : -1;
+    // A STOLEN UNIFORM IS A CLAIM OF MEMBERSHIP. city/outfits.js's disguise
+    // layer answers "does the world currently read me as one of THIS outfit"
+    // — a cartel soldier's colours at the finca gate, a police shirt at a
+    // roadblock. It enters the gap computation as the LOWEST rung of
+    // membership, deliberately, so everything below still applies: the level
+    // gap, being armed, being wanted, and every one of the disguise's own
+    // breakers (seen taking it, the wrong weapon for the role, somebody
+    // senior standing too close) all still fire. Feeding it in HERE rather
+    // than short-circuiting above is what keeps a costume from being a
+    // skeleton key — it gets you the benefit of the doubt at the door, not
+    // past the man himself.
+    if (myTier < 0 && rec.org && CBZ.cityDisguiseTrust) {
+      try { if (CBZ.cityDisguiseTrust(rec.org)) myTier = 0; } catch (e) {}
+    }
     const inOrg = myTier >= 0;
     if (inOrg) {
       score += 2 + Math.min(3, myTier);

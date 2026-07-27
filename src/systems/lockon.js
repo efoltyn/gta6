@@ -250,10 +250,13 @@
       return "car";
     }
     // ON FOOT with the RPG (FPS or the shoulder cam) — the camera ray is the
-    // same intent ray shoot() samples (aimForward/preKickAim).
+    // same intent ray shoot() samples (aimForward/preKickAim). `dumbfire`
+    // (weapon-data) opts an explosive launcher OUT of the missile platform —
+    // the grenade launcher lobs unguided shells and must never draw lock
+    // squares or hand shoot() a guided target.
     if (P.driving) return "";
     const w = CBZ.currentGun && CBZ.currentGun();
-    if (w && w.explosive && (CBZ.fpsActive && CBZ.fpsActive() || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()))) {
+    if (w && w.explosive && !w.dumbfire && (CBZ.fpsActive && CBZ.fpsActive() || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()))) {
       CBZ.camera.getWorldDirection(_aimD).normalize();
       _aimO.copy(CBZ.camera.position);
       return "rpg";

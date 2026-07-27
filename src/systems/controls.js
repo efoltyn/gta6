@@ -111,10 +111,14 @@
       "border-bottom-width:2px;font:600 12px ui-monospace,Menlo,monospace;color:#cfe0f5}",
       "#cCtrl td.d{color:#b9c6d6}",
       "#cCtrl .note{margin-top:10px;color:#8fa3b8;font-size:12px;line-height:1.4}",
-      "#cCtrl .close{margin-top:13px;width:100%;padding:9px;border-radius:9px;cursor:pointer;",
+      "#cCtrl .close{margin-top:13px;width:100%;padding:11px;border-radius:999px;cursor:pointer;",
       "background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.18);",
-      "color:#e8edf5;font:600 13px 'Fredoka',system-ui,sans-serif}",
+      "color:#e8edf5;font:600 14px 'Fredoka',system-ui,sans-serif}",
       "#cCtrl .close:hover{background:rgba(255,255,255,.18)}",
+      // the DESKTOP dismiss: a key, not a button. Same kbd chrome as the rows
+      // above, so it reads as one more binding rather than as UI furniture.
+      "#cCtrl .dismiss{margin-top:13px;padding-top:11px;text-align:center;color:#8fa3b8;",
+      "font-size:12.5px;border-top:1px solid rgba(255,255,255,.10)}",
       "body.touch #cCtrl{font-size:15px}",
     ].join("");
     document.head.appendChild(css);
@@ -129,6 +133,33 @@
     return esc(s).split(/\s*\/\s*/).map((k) => "<kbd>" + k + "</kbd>").join(" / ");
   }
 
+  /* ---- HOW YOU CLOSE IT ---------------------------------------------------
+     OWNER (verbatim): "right now it's a 'Got it' button to close, it should be
+     a key to close, because 'Got it' isn't a pressable button unless on iPad."
+
+     He is right and he is also only half the problem: on an iPad the button IS
+     the only way to close it, so replacing it with a key would break touch
+     exactly as badly as the key's absence broke desktop. The answer is the one
+     CLAUDE.md's touch doctrine already prescribes — words-and-pills for touch,
+     key glyphs for keyboard, and NEVER a keyboard glyph rendered on a touch
+     device (`CBZ.touchActionPrompt` re-skins prompts for precisely this
+     reason). So the dismiss is whichever the player actually has:
+
+       touch   → the pill stays, and it is a real tap target (touchend, not
+                 just click, because a click on iOS lags 300 ms behind).
+       desktop → NO button at all. Space / Enter / Esc close it, and the card
+                 says so in the same <kbd> chrome as every binding above it —
+                 which makes the dismiss one more thing this card TEACHES.
+
+     Detection is `CBZ.touchMode`, the single flag systems/touch.js raises in
+     enable() alongside `body.touch` (touch.js:152-153). Read live at render
+     time, so a card opened before the first touch and a card opened after it
+     are each correct. */
+  function isTouch() {
+    if (CBZ.touchMode) return true;
+    try { return !!(document.body && document.body.classList.contains("touch")); } catch (e) { return false; }
+  }
+
   function render() {
     if (!on()) { if (el) el.style.display = "none"; return; }
     build();
@@ -139,10 +170,14 @@
       const r = d.rows[i];
       rows += '<tr><td class="k">' + keys(r[0]) + '</td><td class="d">' + esc(r[1]) + "</td></tr>";
     }
+    const touch = isTouch();
+    const dismiss = touch
+      ? '<button type="button" class="close">Got it</button>'
+      : '<div class="dismiss">' + keys("Space") + " / " + keys("Esc") + " to close</div>";
     el.innerHTML =
       "<h3>" + esc(d.title) + "</h3><table>" + rows + "</table>" +
       (d.note ? '<div class="note">' + esc(d.note) + "</div>" : "") +
-      '<button type="button" class="close">Got it</button>';
+      dismiss;
     el.style.display = "block";
     const b = el.querySelector(".close");
     if (b) {
@@ -172,7 +207,15 @@
     document.addEventListener("keydown", function (e) {
       if (!on() || e.repeat) return;
       const k = (e.key || "");
-      if (openId && (k === "Escape" || k === "?" || k === "/")) { e.preventDefault(); C.hide(); return; }
+      // A KEY CLOSES IT. Space is the primary because it is the one key every
+      // player already has a thumb on and because it is the throttle/collective
+      // on the two cards that actually pop — so the same press that dismisses
+      // the aeroplane card is the press that starts the takeoff roll. Enter and
+      // Esc are the conventional pair; ? and / toggle as before. preventDefault
+      // stops that dismissing press from ALSO jumping.
+      if (openId && (k === "Escape" || k === " " || k === "Spacebar" || k === "Enter" || k === "?" || k === "/")) {
+        e.preventDefault(); C.hide(); return;
+      }
       if (k === "?" || (k === "/" && e.shiftKey)) {
         if (CBZ.cityMenuOpen) return;
         e.preventDefault();
@@ -193,6 +236,7 @@
       ["Space", "Jump"],
       ["E", "Interact — doors, seats, vehicles, loot"],
       ["?", "Show the controls for whatever you are doing"],
+      ["Space / Esc", "Close this card"],
     ],
   });
 

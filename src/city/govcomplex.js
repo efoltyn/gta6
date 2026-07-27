@@ -1471,7 +1471,19 @@
     site.power = CBZ.powerPrincipal(p, {
       id: "gov:" + site.id,
       tier: spec.tier, org: spec.org, role: spec.role, lawful: spec.lawful,
-      family: spec.family === true ? true : null,
+      // `spec.family` is an ARRAY OF LIVE BODIES (power.js:387 does
+      // `Array.isArray(spec.family) ? …slice() : []`), for a caller that
+      // already has the people. We do not — so `true` here has never done
+      // anything, and passing a COUNT would not either.
+      //
+      // That is not the bug it looks like: power.js fills the array itself.
+      // `kit.family` is a tier-derived count (:299, clamp(tier-2, 0, 3)) that
+      // the floor ladder uses to populate the top-floor suite, and :436 pushes
+      // any ped that comes back flagged `isFamily` into rec.family. So the
+      // dependants arrive with the occupancy, not from here. Passing null is
+      // the honest expression of "we have no bodies to hand over"; leaving
+      // `true` in place implied a contract that does not exist.
+      family: Array.isArray(spec.family) ? spec.family : null,
       seat: (withSeat && site.lot) ? { lot: site.lot } : null,
     });
     if (withSeat) site.seated = true;

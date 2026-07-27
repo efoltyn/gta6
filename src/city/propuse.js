@@ -236,6 +236,23 @@
     for (let i = arcs.length - 1; i >= 0; i--) endArc(arcs[i]);
     arcs.length = 0;
     claimed.length = 0;
+    // ACTOR-SIDE RESIDUE (the owner's "people laying down under planes"):
+    // the registries above die with the old world, but the CLAIM lived on
+    // the actor — `_propLie`/`_propBed`/`_propSeat` plus the `_deskAnchor`
+    // THIS file wrote — and peds.js's sit branch re-pins from `_deskAnchor`
+    // every frame. After a rebuild that held bodies at a mattress lieY
+    // (~0.7) whose bed no longer exists, at coordinates the NEW world may
+    // have parked an airliner over (measured: 3 stale-pinned sleepers inside
+    // gate-airliner footprints, none within 40m of any live bed). Clear OUR
+    // residue and hand the body back to locomotion; a desk anchor another
+    // system owns (no propuse claim on the actor) is never touched.
+    const residuePeds = CBZ.cityPeds;
+    if (residuePeds) for (let i = 0; i < residuePeds.length; i++) {
+      const p = residuePeds[i];
+      if (!p || (!p._propLie && !p._propBed && !p._propSeat)) continue;
+      p._propLie = false; p._propBed = null; p._propSeat = null; p._deskAnchor = null;
+      if (!p.dead && !p._npcAttached && p.state === "sit") p.state = "walk";
+    }
     // the furniture kit's own ledger rebuilds in lockstep. A direct feature-
     // detected CALL, not a wrapper: it works no matter which of the two files
     // parses first, so city/furniture.js is free to load early enough for the
@@ -1149,8 +1166,11 @@
       if (rec.lieY != null) {
         // peds' own sit branch pins x/z + yaw but forces char.sitting=true and
         // y=0 every frame — re-pin the height onto the mattress and apply the
-        // roll AFTER peds ran (this updater is later in the order).
-        if (o._propLie && o.group) {
+        // roll AFTER peds ran (this updater is later in the order). Never
+        // touch an ATTACHED body: npclife's seat re-assert owns that
+        // transform, and a lie-pin fighting it is exactly the class of
+        // unguarded world-space write syncAttached exists to defend against.
+        if (o._propLie && o.group && !o._npcAttached) {
           if (o.pos) o.pos.y = rec.lieY;
           o.group.position.y = rec.lieY;
           o.group.rotation.z = Math.PI / 2;

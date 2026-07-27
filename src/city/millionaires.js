@@ -436,7 +436,10 @@
     if (q && !q.dead) {
       q._milliGuard = false; q.controlled = false; q.rage = null;
       q.kind = "civilian"; q.archetype = "resident";
-      q.job = "between jobs"; q.armed = false; q.weapon = null; q.aggr = 0.22;
+      // null, not "between jobs" — the owner named this exact string as the thing
+      // that is wrong with the cast. A released escort goes back to the role
+      // caster and gets an occupation.
+      q.job = null; q.armed = false; q.weapon = null; q.aggr = 0.22;
       q.state = "walk"; q.path = null; restoreFit(q);
       if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(q);
     }

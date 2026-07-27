@@ -78,6 +78,7 @@
     { id: "carbine", label: "5.56 crate",   qty: 150, cost: 1400 },
     { id: "smg",     label: "SMG crate",    qty: 180, cost: 1300 },
     { id: "bazooka", label: "Rocket crate", qty: 6,   cost: 5200 },
+    { id: "glauncher", label: "40mm crate", qty: 12,  cost: 2600 },
   ];
 
   const RETRIEVE_CD = 120000;   // ms (~2 min) cooldown between vehicle retrievals

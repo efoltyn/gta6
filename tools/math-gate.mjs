@@ -206,6 +206,21 @@ const PASS = `(() => {
     if (ta.unseatedTrunks) out.fails.push("UNSEATED TRUNKS: " + ta.unseatedTrunks);
     if (ta.floatingCanopies) out.fails.push("FLOATING TREE PARTS: " + ta.floatingCanopies + " across " + ta.brokenChains + " trees");
   } catch (e) { out.fails.push("treeAudit threw: " + (e && e.message)); } }
+  // ---- weapon latency ledger (fpsmode.js): press→boom as a NUMBER. Derived
+  // from tuning constants (no world state, seed-independent), so it is safe
+  // to pin hard. overheadMs is flight time ABOVE dist/speed — the artificial
+  // part of the felt lag. The 2026-07-27 pace fix cut the guided RPG's 30m
+  // overhead from ~326ms to 16ms (one frame, the soft-launch beat the owner
+  // asked to keep); ≤20 allows one integrator step of drift and nothing
+  // more. The grenade launcher flies the arrival-preserving ballistic remap,
+  // so its overhead is zero BY CONSTRUCTION — any nonzero value means the
+  // remap regressed.
+  if (CBZ.weaponLatencyAudit) { try { const wl = CBZ.weaponLatencyAudit(30);
+    const rpg = wl.bazooka, gl = wl.glauncher;
+    out.weaponLat = (rpg ? rpg.totalMs + "ms rpg" : "no-rpg") + (gl ? " / " + gl.totalMs + "ms gl" : "");
+    if (rpg && rpg.overheadMs > 20) out.fails.push("RPG 30m FLIGHT OVERHEAD rose to " + rpg.overheadMs + "ms (ratchet 20)");
+    if (gl && gl.overheadMs > 0) out.fails.push("GRENADE-LAUNCHER OVERHEAD nonzero: " + gl.overheadMs + "ms");
+  } catch (e) { out.fails.push("weaponLatencyAudit threw: " + (e && e.message)); } }
 
   // ---- BLOCK-LAW RATCHETS (CLAUDE.md #5). Each of these is a HARD invariant
   // — a physical-plausibility or handover fact that must hold in every build,
@@ -318,6 +333,33 @@ const PASS = `(() => {
       if (gc.roadless > 0) out.fails.push("GOV COMPLEXES WITH NO ACCESS ROAD: " + gc.roadless);
       if (gc.placed < gc.complexes) out.fails.push("GOV COMPLEXES UNPLACED: " + (gc.complexes - gc.placed));
     }
+    // road clearance: OWNER — "roads should connect places but never overlap
+    // with them." A road may DOCK at a registered place's edge and may END
+    // inside the one it is going to; it may never CROSS one it is merely
+    // passing, and neither may its streetlights. 'violations' is pinned at 0
+    // (a hard invariant by construction — city/roadrules.js's order-98 pass
+    // clamps any record that would break it, so a non-zero reading means the
+    // law itself regressed). 'propsInside' is the number the owner actually
+    // reported: kerb furniture standing in a place its road only passes, or
+    // in ANY declared keep-out. Baseline 15, measured — it was 120-130 before
+    // the law, and the 15 that remain are the airport terminal's own barrier
+    // hardware plus the gov gate bollards, which the "small collider at a
+    // kerb" heuristic cannot tell apart from road scatter.
+    // 'dockedInside' and 'zoneCrossings' are printed BESIDE them on purpose:
+    // the first is roads that legally terminate inside a place, the second is
+    // roads that cross a restricted facility end to end (today: exactly one,
+    // island_airport.js's landside perimeter road inside the airside rect,
+    // which is a bug in that FOOTPRINT and is deliberately not clamped). If
+    // either grows while 'violations' stays 0, somebody widened a definition.
+    if (CBZ.roadClearanceAudit) {
+      const rc = CBZ.roadClearanceAudit();
+      out.clearance = rc.segments + "seg viol=" + rc.violations + " deepest=" + rc.deepestIntrusion +
+        " props=" + rc.propsInside + " docked=" + rc.dockedInside + "(" + rc.deepestDocked + "m)" +
+        " zoneCross=" + rc.zoneCrossings + " clamped=" + rc.clampedSegs;
+      if (rc.violations > 0) out.fails.push("ROADS CROSSING PLACES: " + rc.violations + " " + JSON.stringify(rc.where));
+      if (rc.propsInside > 15) out.fails.push("ROAD PROPS INSIDE A PLACE/KEEP-OUT: " + rc.propsInside + " (ratchet 15)");
+      if (rc.zoneCrossings > 1) out.fails.push("ROADS CROSSING A RESTRICTED FACILITY END TO END: " + rc.zoneCrossings + " " + JSON.stringify(rc.zoneWhere));
+    }
     // cockpit: the forward sightline is a NUMBER, not a screenshot. A pilot
     // must be able to see at least 15 degrees below the horizon over the
     // glareshield (the certification floor) or the cockpit is the broken one
@@ -350,6 +392,51 @@ const PASS = `(() => {
     }
     // sea level: nothing may leave a surge standing at world build.
     if (CBZ.waterSurge && Math.abs(CBZ.waterSurge()) > 1e-6) out.fails.push("SEA SURGE NONZERO AT BUILD: " + CBZ.waterSurge());
+    // roles: "civilian isn't a role" (owner, 2026-07-27) as a NUMBER.
+    //   roleless — people who resolve to no job, no org and no condition
+    //   shrugs   — people who land on the aggr/wealth last resort
+    // BASELINE IS UNMEASURED. This audit has never been executed against a
+    // built world; CLAUDE.md's own lesson is that an audit nobody has run is
+    // not a measurement (propUseAudit was confidently pinned at 0 and read
+    // 487 the first time it ran). So the FIRST run of this gate must print
+    // these two numbers and the pin below must be edited to whatever it says,
+    // downward-only from there. Until then it reports and does not fail.
+    if (CBZ.roleAudit) {
+      const ra = CBZ.roleAudit();
+      out.roles = ra.peds + "p roled=" + ra.roled + " roleless=" + ra.roleless + " shrugs=" + ra.shrugs +
+                  " emptyRanks=" + (ra.emptyRanks || []).length;
+      out.roleTitles = ra.titles;
+      out.roleOrgs = ra.orgs;
+      out.roleEmptyRanks = ra.emptyRanks;
+      // COVER: a displayed role is a CLAIM. covered = actors presenting a
+      // role that is not their true one; unseeable is the stat-fiction test
+      // applied to secrecy — a cover no observer could EVER see through is a
+      // secret that cannot be discovered, which this repo bans by name.
+      // PINNED AT 0 and it is a hard invariant, not a ratchet.
+      out.covers = ra.covered + " covered unseeable=" + ra.unseeable +
+                   " orgs=" + JSON.stringify(ra.coverOrgs || {});
+      if (ra.unseeable > 0) out.fails.push("UNSEEABLE COVERS (secrets nobody can ever uncover): " + ra.unseeable);
+      if (ra.disguise) out.disguise = ra.disguise.readsAs + "/" + ra.disguise.org + " holding=" + ra.disguise.holding;
+    }
+    // ROTORCRAFT (CBZ.heliAudit, city/aircraft.js). 'uncrewed' — an airborne
+    // helicopter with nobody in it — and 'belowRoofline' — one inside the
+    // building it is passing over — are the two that must trend to ZERO and may
+    // only ever go DOWN. meanAGL/meanSpeed/orbitR are the owner's "correct
+    // speed and height" as measurable numbers, printed not asserted.
+    //
+    // NOT YET PINNED, deliberately: this gate has never run since the audit was
+    // written, and CLAUDE.md's own rule is that an audit nobody has executed is
+    // not a measurement (propUseAudit was confidently pinned at 0 and read 487
+    // the first time it ran). Whoever runs this first writes the pin. Note the
+    // sim must have a wanted level for any police/military rotorcraft to be
+    // airborne at all — a 0-star census will legitimately read zero helis.
+    if (CBZ.heliAudit) {
+      const ha = CBZ.heliAudit();
+      out.helis = ha.helis + " crewed=" + ha.crewed + " uncrewed=" + ha.uncrewed +
+                  " meanAGL=" + ha.meanAGL + " meanSpeed=" + ha.meanSpeed +
+                  " orbitR=" + ha.orbitR + " belowRoofline=" + ha.belowRoofline +
+                  " " + JSON.stringify(ha.byRole);
+    }
     // ---- evidence only (adoption counters / world census) ------------------
     if (CBZ.predatorAudit) { const p = CBZ.predatorAudit(); out.predator = p.legacy + "/" + p.adopted; }
     if (CBZ.checkpointAudit) { const c = CBZ.checkpointAudit(); out.checkpoints = c.count + "/" + c.manned; }
@@ -395,6 +482,7 @@ async function runSeed(seed, label) {
   // an audit whose output nobody can see is one nobody will notice regressing.
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
+  tmark(`${label}: clearance ${r.clearance || "-"}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   return r;
 }

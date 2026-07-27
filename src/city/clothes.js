@@ -310,10 +310,7 @@
     } else if (opts.tie && opts.vest) {                            // a glimpse of tie at the vest V
       T.rect("front", 0.47, 0.04, 0.06, 0.22, hx(opts.tie));
     }
-    if (opts.belt && !opts.vest) {                                 // suit belt line at the waist
-      T.rect("front", 0.3, 0.84, 0.4, 0.08, "#17181d");
-      T.rect("front", 0.475, 0.85, 0.05, 0.06, "#b9a05a");        // buckle
-    } else if (!opts.vest) T.rect("front", 0.3, 0.78, 0.4, 0.1, "#0d0e12"); // tux cummerbund break
+    if (!opts.belt && !opts.vest) T.rect("front", 0.3, 0.78, 0.4, 0.1, "#0d0e12"); // tux cummerbund break
     if (ctx) patternRow(T, ctx, jacketHex, opts.pattern);
     T.shade();
     // ---- the OPEN JACKET shell: alpha-cut V gap + satin lapel wedges ----
@@ -393,7 +390,6 @@
     T.fill(uc);
     T.rect("front", 0.3, 0, 0.4, 0.86, shirt);
     T.rect("front", 0.47, 0.02, 0.06, 0.6, hx(0x16264a));          // dark tie
-    T.rect("front", 0.3, 0.86, 0.4, 0.14, "#101218");              // belt under the hem
     T.shade();
     // duty jacket: badge, breast pockets w/ flap lines, belt + holster block
     J.fill(uc);
@@ -406,12 +402,7 @@
     J.poly("front", [[0.21, 0.1], [0.29, 0.1], [0.29, 0.17], [0.25, 0.21], [0.21, 0.17]], "#e8c454"); // badge shield
     J.dot("front", 0.25, 0.135, 0.028, "#fadf8e");                 // badge dot
     J.rect("front", 0.66, 0.13, 0.16, 0.04, "#cfd6e2");            // name tape
-    const beltY = 0.84;                                            // duty belt rides the jacket hem
-    J.rect("front", 0, beltY, 1, 0.16, "#0d1016");
-    J.rect("back", 0, beltY, 1, 0.16, "#0d1016");
-    J.rect("side", 0, beltY, 1, 0.16, "#0d1016");
     J.rect("side", 0.15, 0.78, 0.7, 0.2, "#15181f");               // holster block at the hip
-    J.rect("front", 0.46, 0.86, 0.08, 0.1, "#c9a23f");             // buckle
     J.shade();
     A.fill(uc);
     A.rect("front", 0.2, 0.05, 0.6, 0.2, tone(uni, -0.3));         // shoulder patch
@@ -441,13 +432,11 @@
     // ---- torso = the uniform SHIRT + duty belt under the carrier ----
     T.fill(fc);
     T.rect("front", 0.46, 0, 0.08, 0.3, tone(fat, -0.35));          // zip placket
-    T.rect("front", 0, 0.84, 1, 0.16, "#101218");                   // duty belt
     T.rect("back", 0, 0.84, 1, 0.16, "#101218");
     T.rect("side", 0, 0.84, 1, 0.16, "#101218");
     T.rect("side", 0.15, 0.76, 0.7, 0.22, "#15181f");               // holster block at the hip
     T.rect("front", 0.08, 0.86, 0.14, 0.11, "#1a1d24");             // cuff case
     T.rect("front", 0.74, 0.86, 0.15, 0.11, "#1a1d24");             // spare-mag case
-    T.rect("front", 0.465, 0.86, 0.07, 0.1, "#8d949e");             // silver buckle
     T.shade();
     // ---- the PLATE CARRIER rides the jacket shell (real bulk) ----
     J.fill(cc);
@@ -638,7 +627,6 @@
     T.rect("front", 0.12, 0.16, 0.16, 0.04, "#c6d0dc");                        // EMS name tape
     T.poly("front", [[0.7, 0.12], [0.78, 0.16], [0.74, 0.24], [0.66, 0.24], [0.62, 0.16]], refl); // shoulder patch
     T.dot("front", 0.7, 0.18, 0.02, "#2f6bb0");                                // Star-of-Life dot
-    T.rect("front", 0, 0.88, 1, 0.12, "#101218");                             // belt at the hem
     T.shade();
     A.fill(nc);
     A.rect("front", 0, 0.34, 1, 0.07, refl); A.rect("side", 0, 0.34, 1, 0.07, refl);   // sleeve reflective band
@@ -715,7 +703,6 @@
     T.rect("front", 0.49, 0, 0.02, 1, tone(body, 0.18));                       // placket
     T.rect("front", 0.06, 0, 0.18, 0.12, tone(body, 0.22)); T.rect("front", 0.76, 0, 0.18, 0.12, tone(body, 0.22)); // epaulettes
     T.rect("front", 0.28, 0.2, 0.44, 0.06, "#d8b73a");                        // gold SECURITY tape
-    T.rect("front", 0, 0.9, 1, 0.1, "#0d0f14");                              // belt
     T.shade();
     A.fill(bc); A.rect("front", 0, 0.88, 1, 0.06, tone(body, 0.15)); A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x1c1f26)); L.shade();
@@ -749,7 +736,6 @@
     T.rect("front", 0.06, 0, 0.16, 0.12, tone(khaki, -0.12)); T.rect("front", 0.78, 0, 0.16, 0.12, tone(khaki, -0.12)); // epaulettes
     // five-point star badge (a small ring of dots reads as a star at distance)
     T.dot("front", 0.26, 0.16, 0.03, "#e8c454");
-    T.rect("front", 0, 0.88, 1, 0.12, "#1a140c");                            // brown duty belt
     T.shade();
     A.fill(kc); A.rect("front", 0, 0.86, 1, 0.06, tone(khaki, -0.2)); A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x5a4632));

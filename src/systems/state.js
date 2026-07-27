@@ -344,8 +344,18 @@
     if (CBZ.setCityOriginPlane && !(CBZ.cityOriginPlane && CBZ.cityOriginPlane())) CBZ.setCityOriginPlane(chosen);
   }
 
-  function setOrigin(id) {
+  // `picked` = the player physically clicked a story card. origins.js has
+  // always distinguished a real pick from a picker SYNC (its peekLedger sets
+  // the active card from the save and its own comment says "picker sync only —
+  // no 'picked' intent") — but the intent flag it describes was never actually
+  // built, so origins.js could not tell "the player chose the Pilot" from "the
+  // picker is showing the Pilot because that is who is on record". That is the
+  // whole bug: choosing a story silently adopted your existing life instead of
+  // starting one. CBZ.setCityOrigin (the sync path) passes nothing; only the
+  // click handler below passes true.
+  function setOrigin(id, picked) {
     g.cityOrigin = normalize(id);
+    if (picked) g.cityOriginPicked = true;
     originButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.origin === g.cityOrigin));
     if (planeWrap) {
       const wantPlane = g.cityOrigin === "pilot";
@@ -368,9 +378,10 @@
         const comp = CBZ.cityOriginRoll();
         if (w) w.originRoll = comp;
         if (rollLine && CBZ.cityOriginDescribe) rollLine.textContent = CBZ.cityOriginDescribe(comp);
+        g.cityOriginPicked = true;
         return;
       }
-      setOrigin(btn.dataset.origin);
+      setOrigin(btn.dataset.origin, true);   // true = a REAL pick, not a sync
     });
   });
   setOrigin(g.cityOrigin || "exec");

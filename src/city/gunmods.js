@@ -39,7 +39,7 @@
   const MG = { lmg: 1 };
   const SNIPERS = { sniper: 1 };
   const SHOTGUNS = { shotgun: 1 };
-  const NOMOD = { bazooka: 1, taser: 1, grenade: 1 };   // launcher / stun / thrown take nothing
+  const NOMOD = { bazooka: 1, glauncher: 1, taser: 1, grenade: 1 };   // launchers / stun / thrown take nothing
 
   function isFirearm(id) { return !!id && !NOMOD[id]; }
 

@@ -258,7 +258,11 @@
     let kid = null;
     try {
       kid = CBZ.cityMakePed(x, z, rng, {
-        gender, archetype: "resident", job: "the kid", aggr: 0, armed: false,
+        // "the kid" is an AGE, not a job — and `job` is the pill. A child is a real
+        // CONDITION the sim already acts on (childsafe.js seals their HP,
+        // childhood.js runs their school), so level.js's condition layer titles
+        // them off `age`. Leaving job null lets it.
+        gender, archetype: "resident", job: null, aggr: 0, armed: false,
         name: kidName || undefined,
         // W13 GROWING UP: `age` is the whole migration. It replaces the
         // `char.group.scale.setScalar(0.62)` fake this file used to apply

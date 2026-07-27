@@ -592,7 +592,14 @@
            // pattern + name: two pinstripe/checked suits can share every hashed
            // color — without these the portrait kept a stale flat-suit render
            // while the body wore the patterned one (owner bug).
-           "/" + (w.pattern || "") + "/" + (w.name || "");
+           "/" + (w.pattern || "") + "/" + (w.name || "") +
+           // PAINTED-SUIT STYLE INDEX. clothes.js resolves "suit" to one of 22
+           // SUIT_STYLES; outfits.js now pins the chosen index onto the worn
+           // record (see its pinSuitStyle note — that pin is the actual fix for
+           // "the portrait's suit is a different colour than the character").
+           // Hashing it here means changing suits inside the same catalog id
+           // still forces a portrait redraw.
+           "/" + (w.style != null ? w.style : "-");
     }
     // outfit revision (outfits.js applyPlayer bumps it on EVERY application) —
     // catches swiped fits / same-record re-dresses the field hash can't see.

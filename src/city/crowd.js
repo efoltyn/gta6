@@ -1343,7 +1343,17 @@
   // (cityPedDeal) can still re-seat a specific remembered person and re-dress them.
   function resetToPlain(ped, shirtHex) {
     // identity → ordinary resident (clear any stale role the pooled rig wore last)
-    ped.archetype = "resident"; ped.job = "between jobs";
+    //
+    // `job` is NULLED, not set to "between jobs". OWNER (2026-07-27): "there's
+    // roles 'the kid' 'in between jobs' … civilian isn't a role." This line was
+    // the single biggest producer of that shrug in the game — every ambient
+    // body promoted to a real rig walked up wearing the words "Between Jobs"
+    // over its head. A null here is not a regression: level.js's retag sweep
+    // sees a roleless person, calls CBZ.cityDealRole(), and the promotion is
+    // cast into a real trade with a real workplace within a third of a second —
+    // which is what the owner actually wanted, and it is also strictly cheaper
+    // than what this line used to do, because a null needs no wardrobe revert.
+    ped.archetype = "resident"; ped.job = null;
     ped.gang = null; ped.vendor = null; ped.vagrant = false;
     ped.bounty = 0; ped.bountyTag = null;
     // wardrobe-revert reads in outfits.js: no cast fit, no worn record, no stashed

@@ -171,7 +171,12 @@
       recoil: 0.9, maxRecoil: 1.0, climb: 0.08, sideKick: 0.02,
       recenter: 0.4, rampMax: 1.0, yawWeave: 0, noRecoil: true,
       shake: 1.1, heat: 70, knock: 3.0, flash: 0.9,
-      sfx: "explosion", tracer: 0.03, auto: false,
+      // LAUNCH sound is a deep tube THUMP, not the boom: the fire sfx used to
+      // be the same "explosion" sample crashfx plays at impact, so the ear got
+      // the boom at t=0 and the eye got it ~0.3s later — that gap read as lag
+      // (owner: "takes too long from after i shoot"). The boom now happens
+      // exactly once, where the rocket lands (crashfx owns it).
+      sfx: "shoot_shotgun", sfxPitch: 0.62, sfxVol: 1.25, tracer: 0.03, auto: false,
       explosive: true, blastPower: 1.9, blastRadius: 13,
       // X cycles the loaded guidance package while this weapon is shouldered.
       // Both consume the same physical rocket inventory; only the seeker and
@@ -183,10 +188,14 @@
       // REAL PROJECTILE FLIGHT (b): muzzle velocity (m/s) and gravity (m/s^2)
       // for the visible travel arc fpsmode.js now flies the rocket along
       // instead of resolving impact the instant the trigger is pulled.
-      // projSpeed tuned so a typical 30-60u shot has a perceptible (~0.3-0.6s)
-      // flight time without feeling sluggish; projGravity is a mild arc (real
-      // RPGs are near-flat over city engagement ranges, but zero gravity read
-      // as "still hitscan" in testing, so a light drop sells the flight).
+      // OWNER RE-TUNE (2026-07-27, "takes too long from after i shoot"):
+      // fpsmode's WEAPON_ROCKET_PACE_V2 multiplies every rocket speed here by
+      // 1.2 (95 → 114 u/s effective, still far under a real RPG-7's ~295 m/s
+      // sustained) and repays the soft-launch ramp with a sustainer burst, so
+      // a 30u shot lands in ~0.28s guided / ~0.26s ballistic instead of the
+      // old ~0.64s guided. CBZ.weaponLatencyAudit() prints the live budget.
+      // projGravity stays a mild arc (real RPGs are near-flat over city
+      // ranges, but zero gravity read as "still hitscan" in testing).
       projSpeed: 95, projGravity: 6,
     },
     {
@@ -199,6 +208,37 @@
       recenter: 0.12, rampMax: 1.0, yawWeave: 0.2,
       shake: 0.12, heat: 14, knock: 0.40, flash: 0.22,
       sfx: "shoot_taser", tracer: 0.006, auto: false, nonlethal: true,
+    },
+    {
+      // GRENADE LAUNCHER (owner ask): the RPG's beautiful explosion, less
+      // reloading. It is a pure REUSE weapon: `explosive: true` routes it
+      // through fpsmode's existing rocket branch — SAME blastPower/blastRadius
+      // as the bazooka, so cityExplosion runs the byte-identical FX chain (no
+      // new composer, no new FX). What is authored here is only the launcher's
+      // own character: a 6-round drum (reload a fifth as often as the RPG's
+      // single tube), a slower lofted round (projSpeed 50 / heavy projGravity
+      // arc — a lobbed 40mm, not a flat rocket), and NO guidance: dumbfire
+      // gates it out of lockon.js's missile platform, homing:false keeps
+      // pull-time acquisition off, and the explicit ammoTypes row stops
+      // rocketAmmoSpec's DEFAULT_ROCKET_SPEC (homing:true) from adopting it.
+      // projPlain strips the shared projectile mesh's exhaust flame + fins for
+      // this weapon's flights — a launched shell, not a burning rocket.
+      id: "glauncher", key: "glauncher", label: "GRENADE LAUNCHER", short: "40MM", slot: "long",
+      appearanceFactory: "glauncher",
+      mag: 6, reserve: 18, reload: 2.3, interval: 0.72, range: 200,
+      damage: 1, headMult: 1.0, dropStart: 200, minDamage: 1.0, falloff: "flat",
+      spread: 0.006, bodyRadius: 0.62, headRadius: 0.33,
+      recoil: 0.5, maxRecoil: 0.9, climb: 0.045, sideKick: 0.02,
+      recenter: 0.2, rampMax: 1.0, yawWeave: 0.2,
+      shake: 0.6, heat: 70, knock: 2.2, flash: 0.5,
+      sfx: "shoot_shotgun", sfxPitch: 0.72, sfxVol: 1.1, tracer: 0.02, auto: false,
+      explosive: true, blastPower: 1.9, blastRadius: 13,
+      // authored 42 → ~50 u/s effective under fpsmode's PACE_SPEED_MUL (1.2):
+      // 30m in ~0.6s with a real visible loft — the hang IS this weapon's
+      // identity next to the flat fast rocket.
+      dumbfire: true, projPlain: true,
+      ammoTypes: [{ id: "standard", label: "40MM HE", homing: false, speed: 42 }],
+      projSpeed: 42, projGravity: 24,
     },
   ];
 

@@ -76,10 +76,25 @@
     const rel = a.relPlayer || null;
     const ident = a._identityId && CBZ.cityIdentities && CBZ.cityIdentities.get ? CBZ.cityIdentities.get(a._identityId) : null;
     const maxHp = a.maxHp || (a.kind === "cop" ? (a.swat ? 120 : 90) : null);
-    const role = a.job || a.vipTitle || a.archetype || (a.vendor && a.vendor.kind) || title;
-    const gang = a.gang && (a.gang.name || a.gang.id || a.gang);
-    const affiliation = a.kind === "cop" ? (a.swat ? "Police · SWAT" : "Police") :
-      (/soldier|military|marine/i.test(a.job || "") ? "Military" : (gang ? String(gang) + (a.rank ? " · " + a.rank : "") : "Independent"));
+    // ROLE AND TITLE MUST NOT DISAGREE. This line used to print the raw `a.job`
+    // string, which is free-form prose in this codebase — so the dossier said
+    // "Role: panhandling" while the pill over the same head said "Bum", and
+    // "Role: owns half the skyline" against "Magnate". cityTitle() is now the
+    // ONE normaliser (level.js), so both readouts come from the same vocabulary
+    // and the raw prose survives only where it is genuinely extra colour.
+    const role = title;
+    // A DOSSIER MUST NOT LEAK WHAT THE PILL IS HIDING. `title` already respects
+    // the cover (level.js §COVER), but these two lines read `a.job`/`a.gang`
+    // RAW — so a plant whose pill said "Accountant" would have his true
+    // allegiance printed two rows below it. If you cannot see through the
+    // cover, the dossier reports the cover's story and nothing else; that is
+    // what a dossier compiled from the outside would actually contain.
+    const seen = !CBZ.citySeesThrough || CBZ.citySeesThrough(a);
+    const note = (seen && a.job && CBZ.cityJobTitle && !CBZ.cityJobTitle(a.job)) ? String(a.job) : null;
+    const gang = seen && a.gang && (a.gang.name || a.gang.id || a.gang);
+    const affiliation = !seen ? "Independent"
+      : a.kind === "cop" ? (a.swat ? "Police · SWAT" : "Police")
+      : (/soldier|military|marine/i.test(a.job || "") ? "Military" : (gang ? String(gang) + (a.rank ? " · " + a.rank : "") : "Independent"));
     let social = "";
     if (rel) social += row("Respect", Math.round(rel.respect || 0) + "/100") + row("Fear", Math.round(rel.fear || 0) + "/100") +
       row("Loyalty", Math.round(rel.loyalty || 0) + "/100") + row("Affection", Math.round(rel.affection || 0) + "/100") + row("Grudge", Math.round(rel.grudge || 0) + "/100", (rel.grudge || 0) > 50 ? "hot" : "");
@@ -98,7 +113,10 @@
       '<div class="aimDBody">' +
       section("Street read", row("Standing", "Lv." + level + " " + title) + (standing ? row("How they see you", standing.tier, standing.canInfluence ? "good" : "hot") + row("Your name carries", standing.playerLevel >= standing.targetLevel ? "enough weight" : "less weight here") : "")) +
       section("Condition", row("Health", Math.max(0, Math.round(a.hp == null ? 0 : a.hp)) + (maxHp ? "/" + maxHp : "")) + row("Status", stateOf(a), /hostile|dead/.test(stateOf(a)) ? "hot" : "") + row("Armor", armor != null ? Math.round(armor) : "")) +
-      section("Who they are", row("Role", role) + row("Affiliation", affiliation) + row("Weapon", a.armed ? (a.weapon || "armed") : "unarmed") + identity) +
+      // "Known for" is where the flavour prose the pill rejects belongs — a
+      // character note ("owns half the skyline") is a fine thing to READ in a
+      // dossier and a terrible thing to float over somebody's head.
+      section("Who they are", row("Role", role) + row("Known for", note) + row("Affiliation", affiliation) + row("Weapon", a.armed ? (a.weapon || "armed") : "unarmed") + identity) +
       section("Known means", row("Cash", a.cash != null ? money(a.cash) : "") + row("Lifestyle", a.wealth != null ? (a.wealth >= 0.9 ? "elite" : a.wealth >= 0.65 ? "wealthy" : a.wealth >= 0.35 ? "comfortable" : "modest") : "") + row("Bounty", a.bounty ? money(a.bounty) : "")) +
       section("Disposition", social) + "</div>";
   }
@@ -154,7 +172,9 @@
       return (a.legendary ? "★ " : "") + (sp.name || sp.id || "Animal");
     }
     const lv = CBZ.cityLevel ? CBZ.cityLevel(a) : 1;
-    const title = CBZ.cityTitle ? CBZ.cityTitle(a) : (a.swat ? "SWAT" : a.kind === "cop" ? "Police" : "Civilian");
+    // "Civilian" is not a role (owner, 2026-07-27) and it is not a degrade
+    // string either — without level.js loaded we still say what we can see.
+    const title = CBZ.cityTitle ? CBZ.cityTitle(a) : (a.swat ? "SWAT" : a.kind === "cop" ? "Police" : "Person");
     return '<span class="lv">Lv.' + lv + '</span>' + esc(title);
   }
   function tagTone(a) {

@@ -92,12 +92,30 @@
     });
   }
 
+  // The lobby probe. Two things were wrong with it and both were visible in
+  // the console on the live site:
+  //
+  // 1. THE PATH WAS ROOT-ABSOLUTE. "/api/info" resolves against the ORIGIN, so
+  //    on GitHub Pages — where the game is served from /gta6/ — it asked
+  //    https://efoltyn.github.io/api/info and got a 404 from the domain root.
+  //    Relative to the page, it is a sibling of index.html.
+  // 2. IT NEVER GAVE UP. A 404 is not a transient hiccup, it means there is no
+  //    multiplayer server behind this build at all — but the 4 s interval kept
+  //    asking forever, so a static deploy printed a fresh 404 every four
+  //    seconds for as long as the title screen was open. That is the console
+  //    spam. One failure now stops the poll; nothing else about multiplayer
+  //    changes, because a build with no server has no lobby to show either way.
+  let probeDead = false;
   function poll() {
-    fetch("/api/info").then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    if (probeDead) return;
+    fetch("api/info").then(function (r) {
+      if (!r.ok) { probeDead = true; return null; }
+      return r.json();
+    }).then(function (j) {
       if (!j || j.game !== "cell-block-z") return;
       info = j;
       if (g.state === "title" && !net.active) { renderPanel(); panel.style.display = "block"; }
-    }).catch(function () {});
+    }).catch(function () { probeDead = true; });
   }
   poll();
   setInterval(function () {

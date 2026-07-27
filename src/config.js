@@ -840,6 +840,15 @@
   // occupant deaths). Flip false to restore the invulnerable set-dressing birds.
   if (CBZ.CONFIG.POLICE_AIR_DAMAGE == null) CBZ.CONFIG.POLICE_AIR_DAMAGE = true;
   if (CBZ.CONFIG.AIRTRAFFIC_DAMAGE == null) CBZ.CONFIG.AIRTRAFFIC_DAMAGE = true;
+  // NO SINGLE BLAST DOWNS A HELICOPTER (owner: "helicopters need two rpg hits
+  // to come down"). Rotorcraft (records that already carry kind:"heli" — Air-1
+  // in city/police.js, the ambient fleet in city/airtraffic.js) cap any ONE
+  // explosive splash at 62% of max hp, so a direct rocket wounds them into
+  // their existing tier-smoke state and the SECOND kills. Applied only at the
+  // blast seams (cityPoliceAirSplash / cityAirTrafficSplash); bullets and
+  // planes are byte-identical. The military gunship (140hp vs 90/rocket) was
+  // already a two-hit bird and is untouched. Flip false → one-shot helis.
+  if (CBZ.CONFIG.AIR_HELI_TWO_BLAST == null) CBZ.CONFIG.AIR_HELI_TWO_BLAST = true;
   // REAL COCKPIT DOOR (city/island_airport.js): the airliner cockpit becomes
   // a room you physically enter — the bulkhead gets a genuine doorway with a
   // sliding pocket-door leaf that eases open as you approach (elevator

@@ -181,6 +181,73 @@ Before building anything adjacent, wire into the existing system:
   the specifics.** Never spawn a target for a contract; bind to the ped, lot,
   vehicle or officeholder the simulation was already running, and do not offer
   the contract at all if the world cannot supply one.
+- **WHO A PERSON IS** — `CBZ.cityRole(a)` / `CBZ.cityTitle(a)` / `CBZ.cityJobTitle(job)`
+  in `src/city/level.js`. OWNER DOCTRINE (2026-07-27, verbatim): "civilian isn't a
+  role but tourist can be… homeless person should just be title bum. hustler is a
+  title." A ROLE is something a person **does** (a job), **belongs to** (an org +
+  a rank), or **is** in a way the sim acts on (bum · tourist · kid · addict).
+  "Civilian", "in between jobs", "the kid" and "looking for work" are the ABSENCE
+  of one. The rule that follows is the whole point: **a person with no role is a
+  CASTING BUG, not a person to apologise for with a filler string** — so
+  `cityTitle` calls `CBZ.cityDealRole(ped)` (peds.js) and the caster deals them a
+  trade that already has a workplace, a shift and a wage in `aigoals.js`'s
+  `CITY_JOBS`. level.js's 0.33 s retag sweep IS the repair pass, so the count
+  self-heals during play. `job` is FREE-FORM PROSE in this codebase — always
+  normalise through `CBZ.cityJobTitle`, never `titleCase(a.job)`; that is what
+  stopped the pill reading "Lv.2 Panhandling", "Lv.3 Between Jobs", "Lv.4
+  Cinematic" and "Lv.61 Owns Half The Skyline". Flavour prose belongs in the
+  dossier's "Known for" row, never over a head. Ratchet: `CBZ.roleAudit()` →
+  `{peds, roled, roleless, shrugs, kinds, titles, orgs, emptyRanks}`. **`roleless`
+  and `shrugs` may only go DOWN; `emptyRanks` names declared rungs with no holder,
+  which is the stat-fiction ban applied to ladders.** THE BASELINE IS NOT YET
+  MEASURED — the gate reports it and does not fail; whoever runs it first writes
+  the number in (do not repeat the `propUseAudit` mistake of pinning a guess).
+- **A DISPLAYED ROLE IS A CLAIM, NOT A FACT** — `CBZ.cityTrueRole(a)` /
+  `CBZ.cityTitle(a, viewer)` / `CBZ.citySeesThrough(a, viewer)` /
+  `CBZ.citySetCover(a, {role, lvl, org, seeTier})` / `CBZ.cityBurnCover(a, secs)`,
+  all in `level.js`. OWNER (2026-07-27): "nobody would have role agent, they would
+  have whatever role the agent puts... they would have role agent if you joined
+  their agency! … there can be fake level and role but actually agents." An
+  intelligence officer whose pill reads *Agent* is not an intelligence officer.
+  So every actor has a TRUE role (what the **simulation** acts on — never lies)
+  and a PRESENTED role (what an observer is **entitled** to see). **Anything
+  making a DECISION reads `cityTrueRole`/`cityTrueLevel`; anything DISPLAYING one
+  reads `cityTitle`/`cityLevel`.** `viewer` defaults to the player, so all ~40
+  one-argument call sites are unchanged, and an actor with no cover costs one null
+  check. **THE LEVEL LIES WITH THE TITLE** — a Lv.72 operative presenting as a
+  Lv.9 clerk must READ 9 or the number gives away what the title hid. The reveal
+  rule lives in exactly ONE function and is a rank test through `factions.tier` —
+  never re-derive membership. Graded: `citySeeLevel()` returns 2 (full truth) /
+  1 ("one of ours", brass-only detail withheld) / 0 (you see the claim). **Every
+  leak is a bug of the same class**: the tag COLOUR and the dossier's Affiliation
+  row both had to be gated too, because an allegiance colour is an allegiance
+  readout. Ratchet: `roleAudit().unseeable` is **pinned at 0** — a cover with no
+  org to see through it *and* no way to burn it is a secret that can never be
+  discovered, i.e. a stat fiction. Flag `CITY_COVER_ROLES`.
+- **THE UNIFORM IS A CLAIM ABOUT YOU** — `CBZ.cityDisguise()` /
+  `CBZ.cityDisguiseTrust(org)` / `CBZ.cityDisguiseBlow(by, why)` in `outfits.js`.
+  OWNER: "we already have logic for stealing others clothes, that's a huge thing
+  now once there are roles that are actually being done." It IS a migration, not a
+  new system: `outfits.js` already had a complete disguise mechanic (trust, a 60 s
+  blown-cover timer, a heat multiplier) **hard-wired to exactly two roles** — cop
+  and gang — because those were the only two roles the game had. `copTrust`/
+  `blowCover` are DELETED and their exports point at the org-agnostic pair, so
+  there is one trust rule and one burn timer. What makes a uniform mean anything
+  is one stamp in `finishSwap`: **the corpse swap now carries the dead person's
+  TRUE role** (`_claimRole`/`_claimOrg`/`_claimArms`), so you take *the flight
+  attendant's uniform*, not a blue shirt. **`cityDisguiseTrust(org)` IS THE
+  ONE-LINE ADOPTION** — police.js passes `"police"`, power.js passes the
+  principal's org, a gate passes its own. **A disguise that always works is a
+  cheat code**, so there are four breakers and each is a decision, not a dice
+  roll: (a) *seen taking it* — any living witness within 22 m of the 2.4 s strip
+  burns it on arrival, which is what makes WHERE you kill somebody matter;
+  (b) wanted ≥ 2★ — a manhunt outranks a costume; (c) **the wrong weapon** —
+  a flight attendant with an AK is not a flight attendant (roles whose claim
+  is armed are exempt); (d) somebody senior in the org you are impersonating,
+  within 12 m, knows they do not know you. AUTHORITY covers (police/army) buy
+  the benefit of the doubt on minor crime; **ACCESS covers buy you THROUGH doors,
+  never ABOVE the law** — they are a partial mask (×0.55 heat, `wanted.js`),
+  deliberately weaker than `g.cityMasked`. Flag `CITY_DISGUISE`.
 - **Camera polish flags** — `CAM_*` in `src/systems/camera.js` (occlusion
   follow, FP↔TP blend, vehicle free-look/look-back via
   `camFreeLook`/`camLookBack`/`camRecenterSuspended`, air bank, shoulder
@@ -203,7 +270,30 @@ Before building anything adjacent, wire into the existing system:
   the near-silence before a strike. Set `hunter.state = "stalk"/"charge"` and
   `markers.js`'s existing `cityTargetsPlayer()` lights every threat surface free;
   never add a parallel threat marker. Ratchet: `CBZ.predatorAudit()`, baseline 5
-  legacy / 1 adopted, currently **0 / 8**.
+  legacy / 1 adopted, currently **0 / 10**.
+
+  **HUMANS HUNT TOO** (2026-07-27). OWNER: "homeless people (they attack you at
+  night like jump scares, like how sharks can gruesomely attack the player — not
+  all but some of the homeless)." `peds.js` was running a LEGACY predator path —
+  a distance band, a bark, `p.rage = player` — whose fatal flaw was that the bark
+  RELIABLY PREDICTED the lunge. Both human hunters now tick the shared FSM
+  (`peds:hobo-jumpscare`): about **one vagrant in six** (the volatile band ∩ a
+  deterministic 0.55 hash — 2-3 people in a whole city, chosen against the menace
+  gauge, because a predator you meet three times a block is a tax), and **exactly
+  one SERIAL KILLER per city**, who is PROMOTED out of the ordinary cast by
+  position hash and keeps the job he already had, so his pill reads "Accountant"
+  until he commits. The five-in-six harmless bums keep the startle bark — that is
+  what keeps the dangerous ones camouflaged. **The seize style is the identity**:
+  `predatorKit` picks `worry` from a human's mass and both override it — the bum
+  to `drag` (hauled off the street) and the killer to `pin` (the stillness is the
+  scare) — so each is identifiable by FEEL in the dark. The counterplay is a VERB,
+  not a stat: a **drawn gun refuses the commit** (`canReach` false — he still
+  stalks, he cannot take you) and your own `cityLevel` shrinks his senses, so
+  walking home broke and unarmed at 3 a.m. is a different city than walking home
+  as a shot-caller. The killer additionally needs you ALONE (no cops in 45 u, ≤1
+  witness in 28 u). Provocation is watched off the hunter's own `hp` rather than
+  adding a 33rd damage contract. Flags: `CITY_HOBO_SCARE` (all of it) ·
+  `CITY_BUM_PREDATOR` (just the hunt).
 
   **`CBZ.predatorKit(actor, overrides)` IS HOW YOU ADOPT IT.** Never hand-write an
   opts bundle again. It derives the WHOLE thing — radii, speeds, circle time,
@@ -351,6 +441,48 @@ Before building anything adjacent, wire into the existing system:
   `CBZ.roadTrafficAudit()` — `trespassing` and `onWater` are pinned at **0**
   (hard invariants, measured after the sim burst so a car that DRIVES in fails
   too), `adopted` may only go UP from **4**.
+- **ROADS CONNECT PLACES, THEY DO NOT OVERLAP THEM** — `CBZ.roadClearance(x0,z0,
+  x1,z1,opts)` / `CBZ.roadClamp(seg, opts)` / `CBZ.roadPropClear(x,z,road)` /
+  `CBZ.roadPropRoadOk(r)` in `city/roadrules.js`. OWNER: "roads rn and all the
+  props that surround roads overlap with places like the airport. roads should
+  connect places but never overlap with them. that's so simple." `city.regions`
+  has been the registry of PLACES since worldmap.js shipped and ~20 files push to
+  `city.roads`; **not one had ever tested its segment against that registry.** The
+  nearest thing was `highwaynet.js`'s `clearanceSweep`, which detected real
+  crossings and only `console.warn`ed — CLAUDE.md's own failure mode, and it had
+  been true and ignored for months. It now ENFORCES through the shared law.
+  The law has four exemptions and **every one is derived from data the world
+  already carries, so adoption is one line and no builder declares anything**:
+  an UNDERLAY region (continent.js's wilds bands), a CONNECTOR by name
+  (causeway/bridge/link/ramp/approach/spur/corridor — those ARE roads), **THE
+  DESTINATION RULE** (the segment's far endpoint is inside it: a road is allowed
+  to reach where it is going, which is the whole difference between the airport
+  causeway and a highway cutting a town's corner), and ownership
+  (`owner`/`_govOwner`/`district` vs the region's `owner`/`_govOwner`/`biome` —
+  govcomplex and towngen already stamp both sides). Anything else may enter only
+  the **24 m DOCK BAND**, which is derived, not tasted: one full deck width of
+  the widest road here, the deepest a road can sit inside a place and still make
+  a continuous T-junction with a perimeter road. Measured over the shipped world
+  NO segment lands between 24 m and 48 m — the distribution is bimodal.
+  An order-98 pass clamps any record that still violates it, so **the law does
+  not depend on a builder cooperating**; the record is what traffic, `roadPick`,
+  `roadSegmentAt`, `roadCross`, the map and every prop walker read.
+  **Keep-outs (`arena.noSpawn`) are audited and warned, never clamped** — a prop
+  refused costs nothing, but clamping a road out of a keep-out can strand the
+  facility it serves, and that is a bug in the FACILITY'S OWN FOOTPRINT.
+  Props: `props.js`'s lamp walk, `detail_kit.js`'s `streetRoads`/`eachKerb`/`free`
+  (which buys `utility_lines`, `street_furniture` and `world_grime` for free).
+  Ratchet: `CBZ.roadClearanceAudit()` — `violations` pinned at **0**,
+  `propsInside` at **15** (it was 120-130; the residue is the airport terminal's
+  own barrier hardware and the gov gate bollards, which a "small collider at a
+  kerb" heuristic cannot tell from road scatter). `dockedInside` and
+  `zoneCrossings` are printed BESIDE them so neither can quietly absorb a real
+  violation. Flags `ROAD_CLEARANCE` / `_ENFORCE` / `_PROPS` / `_DOCK`.
+  **KNOWN AND NOT FIXED** (`island_airport.js`, outside that wave's territory):
+  the airside keep-out is `{minX:A_MINX, maxX:A_MAXX, …}` while the landside
+  perimeter road runs at `A_MAXX - 22`, i.e. 22 m INSIDE it for its whole length
+  — the file's own comment claims the opposite. `zoneCrossings` is pinned at
+  **1** for exactly that road and drops to 0 the day the rect stops at the kerb.
 - **Traffic follows one equation, not a stack of thresholds** —
   `CBZ.cityTrafficIDM(v, v0, s, dv, car)` in `city/vehicles.js`, the
   Intelligent Driver Model (Treiber/Hennecke/Helbing). Ambient speed used to be
@@ -384,6 +516,76 @@ Before building anything adjacent, wire into the existing system:
   GROUND VEHICLES: a service vehicle holds short if anything is moving on its
   next waypoint, and that one behaviour is most of what makes an airport read as
   an airport. Ratchet: `CBZ.airsideAudit().onRunway`, pinned at **0**.
+- **WHAT A HELICOPTER IS** — `CBZ.heliSpec(role)` / `heliOrbitRadius(v,bank)` /
+  `heliOrbitBank(v,R)` / `heliBeamRadius(agl)` in `src/city/aircraft.js`. OWNER:
+  "helicopters should have more than one officer in them and they should move
+  around at correct speed and height." There were THREE unrelated flight models
+  and none of them was a helicopter: the gunship at **26 m / 85 ft** on a **22 m
+  orbit**, Air-1 at 38 m AGL on an orbit radius of `18 − 1.5·stars` (13.5 m at
+  3★ — a **9-second lap**, i.e. a hover over your head), and airtraffic.js's
+  fleet, which was the only honest set. **THE ORBIT RADIUS IS NOT A CONSTANT**:
+  a coordinated turn holds `tan(bank) = v²/(gR)`, so authoring a radius AND a
+  speed AND a bank separately is exactly how all three drifted into geometry no
+  aircraft could fly. `heliOrbitBank` is airtraffic.js's own formula promoted to
+  the shared one, and every orbit is now flown at a 20° bank. Air support has
+  TWO postures, which is also what a real ship does: **SEARCH** (150 m AGL,
+  190 m orbit, 26 m/s) and **ENGAGED** (85 m, 112 m, 20 m/s) — it descends when
+  `canEngage`/`chopperEngage` says it has a shot, which is the gate the guns
+  already used, so the descent is not a second threat model. **Where realism is
+  traded for playability, it is traded HERE and named**: the game's longest gun
+  is the sniper at 240 m and the RPG (the sanctioned anti-air answer, and what
+  the two-blast rotorcraft rule is written for) reaches 200 m, so a textbook
+  1000 ft orbit would be unshootable. `gunRange` is therefore a **fairness
+  invariant, not a gun stat** — the gunship's 220 m keeps its engaged slant
+  (187 m) inside the player's RPG. Flags: `AIR_HELI_REALISM` (all of it, one
+  line back to the old numbers) · `POLICE_HELI_ALTITUDE` still PINS Air-1's AGL
+  if set. Ratchet: **`CBZ.heliAudit()`** → `{helis, crewed, uncrewed, meanAGL,
+  meanSpeed, orbitR, belowRoofline}`; **`uncrewed` and `belowRoofline` may only
+  go DOWN**. NOT YET PINNED — the gate reports it and does not fail; whoever
+  runs it first writes the number (do not repeat the `propUseAudit` mistake).
+  Every fleet owner pushes ONE census function into `CBZ.heliFleet`, so a new
+  rotorcraft costs no edit to the audit.
+- **AN AIRCRAFT IS CREWED BY PEOPLE** — `police.js` `CHOP_SEATS` /
+  `aircraft.js` `GUNSHIP_SEATS`. Air-1 carried ONE officer whose rig was
+  `visible=false` at the home pad; the gunship carried one soldier plus two
+  decorative torso boxes only the studio photographer ever saw. Both now carry a
+  real crew — **Pilot · Tactical Flight Officer · Door Gunner** (police, the
+  gunner only at 4★) and **Pilot · Weapons Systems Officer · Door Gunner**
+  (military) — and **no bespoke occupant system was written**: the seats are
+  npclife ANCHORS and the bodies go in through `CBZ.npcLife.attach`, the same
+  call the airliner cabin uses, so `syncAttached` holds them, the V2 chair pose
+  solves feet-on-the-deck from the declared cushion, `CHAR_SEATED_HITTABLE`
+  makes them shootable through the glass, and `aim_dossier`'s `Lv.N` pill reads
+  the truthful `job` string with no HUD edit. **Every seat has a CONSEQUENCE**:
+  kill the pilot and the airframe enters the fall arc, kill the TFO/WSO and the
+  searchlight stops tracking, kill the gunner and the gun stops — that is the
+  whole reason they are bodies and not silhouettes. A model authored at a scale
+  (the island gunship is 1.45) gets ONE inverse-scaled `crew` node so anchors
+  stay in real metres. **A dead crewman is never replaced in flight** and the
+  teardown detaches every body before the airframe's disposer runs — a rig still
+  parented to a wreck would have its geometry freed. Flags: `AIR_HELI_CREW` ·
+  `POLICE_HELI_CREW`.
+- **A BODY LEAVES A SEAT ONLY BY DETACHING** — `CBZ.cityUnseat(actor, opts)` in
+  `city/island_airport.js`. `syncAttached` re-asserts an attached body's seat
+  transform every frame, so a seated body cannot be nudged, shoved or teleported
+  out of a chair; the three-step dance (drop `_seatHold`, detach at world pose,
+  clear the seat's back-pointer) was written inline inside `citySpillCabin` and
+  is exactly what a HIJACK needs — minus the kill. Consumers: `citySpillCabin`,
+  `cityVacateFlightDeck`, and the two helicopter crew teardowns.
+  **`CBZ.cityVacateFlightDeck(rec)` is the un-killed twin of `citySpillCabin`**
+  and it fixes a defect that was live for the airliner's whole life: taking the
+  controls never displaced the crew, so the captain sat in his chair for the
+  entire stolen flight. It is called from ONE place, `spawnFlyableFromProp` —
+  every route to the controls passes through there (door arc, flag-off instant
+  path, `cityAirborneStart`), so no future path can quietly skip it. A hijacked
+  pilot is thrown out ALIVE and panicked: **that is not a death and must never
+  reach the killfeed.** Companion: `CBZ.cityCabinAboard(rec)` /
+  `cityCabinFlightDeck(rec)` — the ONE answer to "is the player already inside
+  this aircraft", which `aircraft_doors.js` consults so a hijack fired from the
+  flight deck runs a short deck beat instead of marching the player back OUT
+  through the fuselage and replaying the airstairs (owner's bug, verbatim: "the
+  door and steps open as if I'm hijacking from outside the plane — but i already
+  boarded"). Flag: `AIRCRAFT_DOOR_SKIP_WHEN_ABOARD`.
 - **Seats of power stand on their own land** — `src/city/govcomplex.js`. OWNER:
   "add gov buildings but NOT inside cities, because when you do that it overlaps
   — like the pentagon and white house... those type of massive buildings that
@@ -575,6 +777,23 @@ showing the work:
 | phone UIs | — | **2** (`phone.js` 984 + `campaign_ui.js` 1138) |
 | furniture anchors NOTHING can walk to (`propUseAudit().blocked`) | 0 (claimed) | **487** of ~6000 |
 | seat anchors with no declared cushion (`.noGeom`) | — | **4955** of 5993 |
+| rank/tier ladders (RE-COUNTED 2026-07-27, file-by-file) | 20 | **~28** |
+| ↳ copies of the GANG rank order alone | 8 | **8** (playergang · careers · hud · leaderboard · level ×2 · gangs ×2 · economy) |
+| ↳ copies of the POLITICAL title ladder | — | **8 files** (officials · officialdom · contracts · civic · statecraft · candidacy · elections · games/government) |
+| jobs the world casts that `aigoals.js` `CITY_JOBS` has never heard of | — | **~120** (no workplace, no shift, no wage) |
+
+The rank-ladder row is worse than the old 20, not better, and the two sub-rows
+are why: the political title ladder ("President"/"Governor"/"Mayor"/"Chief") is
+hand-copied across EIGHT files, and `officialdom.js`'s own comment admits the
+duplication while predicting it "is not going to be four" — it is eight. Two
+ladders fail the verb law outright and are named here so they cannot hide:
+`careers.js`'s `secco` (Guard → Senior Guard → Shift Manager) is three rungs of
+`wageMul` and nothing else, and `level.js`'s `MIL_NAME` is **8 rungs that unlock
+nothing at all** — the largest ladder in the repo is pure display, and its top
+rung is unreachable in practice (0.3% of military-jobped bodies, drawn off the
+SEEDED stream, so a seed with no `r() > 0.997` in its garrison will never produce
+a General no matter how long you play). There is **no police rank ladder at all**:
+`police.js` has one boolean, `swat`.
 
 The last two are the newest entry and the sharpest lesson in this table: both
 numbers come from an audit that had existed for weeks with a header confidently

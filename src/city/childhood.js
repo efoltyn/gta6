@@ -770,7 +770,11 @@
           // "the kid", family.js "your wife"), so retitle rather than null it —
           // schedule.js/outfits.js/the dossier all read `job` and a null there
           // is a needless new case for a purely cosmetic label.
-          if (ped.job === "the kid") ped.job = "looking for work";
+          // Was "the kid" -> "looking for work": one shrug replaced by another, and
+          // the second is worse (it is unemployment, printed as an occupation).
+          // Clearing it hands the grown kid to the role caster, which gives them
+          // a real job instead of a label for not having one.
+          if (ped.job === "the kid" || ped.job === "looking for work") ped.job = null;
           if (CBZ.cityFeed && ped.name && ped._sid) {
             CBZ.cityFeed("" + ped.name + " isn't a kid anymore.", "#cfe6ff");
           }

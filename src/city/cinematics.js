@@ -180,7 +180,11 @@
     try {
       ped = CBZ.cityMakePed(x, z, rng, {
         name, armed: !!opts.armed, weapon: opts.weapon || (opts.armed ? "Pistol" : null),
-        aggr: 0.1, archetype: opts.archetype || "professional", job: "cinematic", wealth: 0.8,
+        // job: null, NOT "cinematic" — that is a STAGE DIRECTION, and `job` is what
+        // level.js's cityTitle() renders on the overhead pill, so a bystander in a
+        // cutscene was floating the words "Lv.4 Cinematic" over his own head.
+        // A null here lets the role layer cast him as an actual person.
+        aggr: 0.1, archetype: opts.archetype || "professional", job: null, wealth: 0.8,
       });
     } catch (e) { ped = null; }
     if (!ped) return null;

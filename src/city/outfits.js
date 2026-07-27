@@ -318,25 +318,95 @@
   //    pinstripe (mob), tux/3-piece (old money), colored/DB (socialite),
   //    charcoal/navy notch (generic exec).
   // ============================================================
-  // a guess at how many styles clothes.js ships (read it if exposed, else a
-  // safe default that the modulo keeps in-range for any real table size).
+  // How many styles clothes.js ships. It EXPORTS the table (CBZ.citySuitStyles,
+  // clothes.js:1375) — the old guess of 20 was written before that export
+  // existed and is 2 short of the real 22, which quietly made the last two
+  // tuxedos unreachable from every archetype family below.
   function suitStyleCount() {
+    const t = CBZ.citySuitStyles;
+    if (t && t.length) return t.length;
     const n = CBZ.citySuitStyleCount && (CBZ.citySuitStyleCount() | 0);
     return n > 0 ? n : 20;
+  }
+
+  // ============================================================
+  //  THE PORTRAIT WEARS THE SUIT YOU ARE WEARING. (bug: "my character showing
+  //  in top left of screen has a suit that is a different color than the
+  //  actual character")
+  //
+  //  ROOT CAUSE, measured — not guessed. clothes.js:1400-1406 picks the
+  //  painted-suit style like this:
+  //
+  //      let si = (rec.style != null) ? (rec.style | 0)
+  //             : (ch && ch.group && ch.group.id != null
+  //                  ? (ch.group.id % SUIT_STYLES.length) : 0);
+  //
+  //  The fallback branch is seeded off THE RIG'S THREE.Object3D.id — a global
+  //  monotonic counter. The HUD portrait (charpanel.js:554) builds a SECOND
+  //  makeCharacter ~2.5 s after boot, so it holds a different Object3D.id than
+  //  CBZ.playerChar (entities/player.js:28). Two rigs, two ids, two style
+  //  indices, two different suits off a 22-entry table that spans Charcoal,
+  //  Tan, Powder-Blue and All-White. They agree only when the ids happen to be
+  //  congruent mod 22 — a 1-in-22 coincidence, which is exactly why the
+  //  mismatch is PERMANENT rather than flickering: both rigs are internally
+  //  stable forever and no redraw can ever reconcile them.
+  //
+  //  It was never a caching bug, never a stale value, and never two different
+  //  fields: both sides read the SAME record through the SAME recolorRig call
+  //  (outfits.js:587 for the body, charpanel.js:487 for the portrait). The
+  //  painter injected rig identity into a colour decision.
+  //
+  //  THE FIX: the style belongs to the GARMENT, not to the body wearing it.
+  //  Pin it onto the worn RECORD, and clothes.js's first branch — which is
+  //  already there and already correct — takes over for every rig alike.
+  //
+  //  Two live bugs fell out of the same investigation and are fixed with it:
+  //   (a) suitRecord() below CHOSE an archetype-appropriate style and wrote it
+  //       to `suitStyle`, a field NOTHING has ever read (clothes.js reads
+  //       `style`). Every deliberately-cast NPC suit fell through to the rig-id
+  //       branch, so a mob captain's pinstripe was a coin flip.
+  //   (b) clothes.js ships one buyable look per style ("suit_11" = the Tan
+  //       Suit, paintRec {style:11}) but cityWear() dropped paintRec on the
+  //       way to wearRecord(CAT.suit) — so buying the Tan Suit put you in a
+  //       random one. styleFrom() below carries it through.
+  // ============================================================
+  function pinSuitStyle(rec, style) {
+    if (!rec) return rec;
+    if (rec.style != null && style == null) return rec;          // already pinned
+    // honour, in order: an explicit request, the legacy misspelled field, the
+    // shop's default. NEVER mutate a CAT entry — it is shared with every other
+    // wearer in the world — so clone.
+    let s = (style != null) ? style : (rec.suitStyle != null ? rec.suitStyle : 0);
+    const n = suitStyleCount();
+    s = ((s | 0) % n + n) % n;
+    const out = {};
+    for (const k in rec) out[k] = rec[k];
+    out.style = s;
+    return out;
+  }
+  // the style a composable's paintRec asked for ({style:N} from clothes.js's
+  // paintedLook loop), or null.
+  function styleFrom(sp) {
+    return (sp && sp.paintRec && sp.paintRec.style != null) ? (sp.paintRec.style | 0) : null;
   }
   // archetype → a small set of preferred style indices (deterministic pick
   // within the set via the seed). Conservative, table-agnostic mapping: the
   // sibling wave's SUIT_STYLES is ordered notch→pinstripe→DB→3-piece→color→tux,
   // so these ranges aim at the right families and degrade to a modulo if the
   // real table is shorter.
+  // RE-AIMED against the REAL table now that clothes.js exports it
+  // (CBZ.citySuitStyles, 22 entries): 0-3 notch business · 4-5 pinstripe ·
+  // 6-7 double-breasted peak · 8-10 three-piece · 11-15 colour/seasonal ·
+  // 15-16 patterned · 17-20 tuxedo. The old numbers were written blind and
+  // aimed old money at 12 = OLIVE SUIT and 13 = BURGUNDY DINNER JACKET.
   const SUIT_FAMILIES = {
-    mobster:   [4, 5, 6, 7],        // pinstripe band
-    made:      [4, 5, 6, 7],        // pinstripe band
-    tycoon:    [12, 13, 18, 19],    // 3-piece / tux band
-    billionaire:[12, 13, 18, 19],
-    oldmoney:  [12, 13, 18, 19],
-    socialite: [8, 9, 10, 11, 14],  // double-breasted / colored band
-    boss:      [0, 1, 2, 3],        // charcoal/navy notch
+    mobster:   [4, 5, 6, 7],           // pinstripe + double-breasted peak
+    made:      [4, 5, 6, 7],
+    tycoon:    [8, 9, 17, 18],         // three-piece + black/midnight tuxedo
+    billionaire:[8, 9, 17, 20],
+    oldmoney:  [8, 9, 17, 18],
+    socialite: [10, 11, 13, 14],       // burgundy 3-piece, tan, dinner, powder blue
+    boss:      [0, 1, 2, 3],           // charcoal/navy notch
     exec:      [0, 1, 2, 3],
   };
   function suitStyleFor(spec) {
@@ -370,7 +440,12 @@
     return {
       id: "suit", name: "Tailored Suit", tier: "money", who: "professionals",
       price: 0, drip: tux ? CAT.tuxedo.drip : CAT.suit.drip,
-      formal: tux ? "tux" : "suit", suitStyle: style,
+      // `style` is the field clothes.js's keyOf() actually reads (clothes.js:
+      // 1402). This used to say `suitStyle`, which NOTHING has ever read — so
+      // the archetype family picked just above was discarded and every NPC suit
+      // fell back to the rig-id branch. One word; it is the difference between
+      // "mob captains wear pinstripe" and "mob captains wear a coin flip".
+      formal: tux ? "tux" : "suit", style: style,
       colors: { legs: body, torso: body, collar: tone(body, 0.12), arms: body, shoes: 0x0c0d10, gloss: tux },
     };
   }
@@ -621,7 +696,10 @@
     if (!id) return false;
     if (!cityOwnsItem(id)) { CBZ.city && CBZ.city.note("You don't own that yet.", 1.4); return false; }
     const sp = CBZ.cityComposableSpec && CBZ.cityComposableSpec(id);
-    if (sp && sp.painted && CAT[sp.painted]) return wearRecord(CAT[sp.painted]);  // tuxedo
+    // tuxedo + the 22 buyable painted SUITS. clothes.js mints one composable
+    // per SUIT_STYLES index carrying paintRec {style:N} — carry it through, or
+    // buying the Tan Suit puts you in whichever suit the rig id lands on.
+    if (sp && sp.painted && CAT[sp.painted]) return wearRecord(pinSuitStyle(CAT[sp.painted], styleFrom(sp)));
     const f = fit();
     const slot = compSlot(id);
     // slot-replace: drop any existing item in the same slot, then add this one
@@ -662,6 +740,11 @@
   function wearRecord(rec, opts) {
     if (!rec || !rec.colors) return false;
     opts = opts || {};
+    // PIN THE SUIT STYLE ONTO THE RECORD (see pinSuitStyle's note). This is the
+    // whole fix for "the portrait's suit is a different colour": once the worn
+    // record names its own style, clothes.js never consults a rig id again, and
+    // the HUD portrait rig and the player rig paint the identical garment.
+    if (rec.id === "suit" && rec.style == null) rec = pinSuitStyle(rec, null);
     const before = CBZ.cityPlayerDrip ? (CBZ.cityPlayerDrip() | 0) : 0;
     g.cityWornOutfit = rec;
     g.cityOutfitId = rec.id;
@@ -710,31 +793,164 @@
   //  (police.js / gangs.js / wanted.js call these as tiny guarded reads.)
   // ============================================================
   function isCopFit() { const w = g.cityWornOutfit; return !!(w && w.cop); }
-  // does the uniform currently BUY trust? Only at minor heat (0-1★ — a manhunt
-  // outranks a costume) and only until an officer has clocked your face.
-  function copTrust() {
-    if (!isCopFit()) return false;
-    if ((g.wanted | 0) >= 2) return false;
-    if (g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT) return false;
-    return true;
-  }
-  // an officer got close enough to see the face under the cap — the uniform
-  // stops working for a while (they radio the description around).
-  function blowCover(byCop) {
-    if (!isCopFit()) return;
-    const fresh = !(g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT);
-    g.cityOutfitBlownT = CBZ.now + 60000;
-    if (fresh && CBZ.city) CBZ.city.note("“Wait — you're no cop!” " + ((byCop && byCop.name) || "An officer") + " clocks your face.", 2.6);
-  }
+  // NOTE: `copTrust()` and `blowCover()` used to live here — the cop-only trust
+  // rule and the cop-only 60 s burn. They are GONE, not wrapped: the §DISGUISE
+  // block below is the same two rules with the word "cop" removed, and the old
+  // exports point at it. Leaving the originals in place would have been a
+  // second trust rule waiting to drift from the first.
   // the crew whose colors you're flying (gang id), or null
   function gangFit() { const w = g.cityWornOutfit; return (w && w.gang) || null; }
   // crimes committed IN UNIFORM burn hotter (impersonating an officer makes
   // every charge worse) — wanted.js multiplies its heat charge by this.
   function heatMult() { return isCopFit() ? 1.5 : 1; }
 
+  // ============================================================
+  //  §DISGUISE — THE UNIFORM IS A CLAIM ABOUT WHO YOU ARE.
+  //
+  //  OWNER (2026-07-27): "we already have logic for stealing others clothes,
+  //  that's a huge thing now once there are roles that are actually being done
+  //  — there can be fake level and role but actually agents."
+  //
+  //  He is right that the plumbing exists, and it is worth being precise about
+  //  what already existed, because this is a MIGRATION and not a new system:
+  //  the four functions directly above are a complete disguise mechanic —
+  //  trust, a blown-cover timer, a heat multiplier, a "whose colours am I
+  //  flying" read — that was hard-wired to EXACTLY TWO roles, cop and gang,
+  //  because those were the only two roles the game had. Now that every person
+  //  has one, the same mechanic has to stop naming its roles.
+  //
+  //  So `copTrust`/`blowCover` become the org-agnostic pair below and keep
+  //  their old exports pointing at the new ones. Nothing that called them
+  //  changes; police.js, gangs.js and wanted.js keep working unmodified.
+  //
+  //  WHAT MAKES THE UNIFORM MEAN SOMETHING: the corpse swap now carries the
+  //  DEAD PERSON'S TRUE ROLE along with their cloth (see finishSwap). That is
+  //  the whole feature and it is one stamp — you are not "wearing a blue
+  //  shirt", you are wearing THE FLIGHT ATTENDANT'S UNIFORM, and level.js's
+  //  vocabulary already knows what a flight attendant is.
+  //
+  //  A DISGUISE THAT ALWAYS WORKS IS A CHEAT CODE. Four breakers, and each one
+  //  is a decision the player can actually make rather than a dice roll:
+  //
+  //   (a) SEEN TAKING IT. Stripping a body is already a 2.4 s beat where you
+  //       cannot shoot. Do it in front of a witness and the disguise starts
+  //       burned. This is what makes WHERE you kill somebody matter.
+  //   (b) A MANHUNT OUTRANKS A COSTUME (wanted >= 2). Kept verbatim from the
+  //       cop version — it was already the right rule.
+  //   (c) THE WRONG WEAPON. A flight attendant with an AK is not a flight
+  //       attendant. This is the best tension in the system because it forces
+  //       the same choice the bum predator forces: the disguise or the gun.
+  //   (d) SOMEONE SENIOR RECOGNISES THEY DO NOT KNOW YOU. A member of the org
+  //       you are impersonating, at rank, close and in the open, burns it —
+  //       because the people most fooled by a uniform are the ones outside it.
+  //
+  //  Flag: CITY_DISGUISE (one-line revert to the old cop-only behaviour).
+  // ============================================================
+  if (CBZ.CONFIG.CITY_DISGUISE == null) CBZ.CONFIG.CITY_DISGUISE = true;
+  function disguiseOn() { return CBZ.CONFIG.CITY_DISGUISE !== false; }
+
+  // WHAT DOES THIS GARMENT CLAIM? Reads only the record — no rig, no globals —
+  // so it answers for a corpse's fit as readily as for the player's.
+  function claimOf(rec) {
+    if (!rec) return null;
+    if (rec.cop) return { org: "police", role: rec.swat ? "SWAT" : "Officer", arms: "gun" };
+    if (rec.gang) return { org: "gang:" + rec.gang, role: "Soldier", arms: "gun" };
+    // stamped by the corpse swap: the TRUE role of the body you took it off.
+    if (rec._claimRole) return { org: rec._claimOrg || null, role: rec._claimRole, arms: rec._claimArms || "none" };
+    return null;
+  }
+  // what the PLAYER currently presents as — or null for "just a person".
+  function disguise() {
+    if (!disguiseOn()) { return isCopFit() ? { org: "police", role: "Officer", arms: "gun" } : null; }
+    return claimOf(g.cityWornOutfit);
+  }
+  CBZ.cityDisguise = function () {
+    const c = disguise(); if (!c) return null;
+    return { org: c.org, role: c.role, trusted: disguiseTrust(c.org) };
+  };
+
+  // THE ONE-LINE QUERY every consumer adopts: "does the world currently read
+  // the player as one of YOURS?" police.js passes "police"; power.js passes the
+  // principal's org; a gate passes its own. Org-agnostic by construction.
+  function disguiseTrust(org) {
+    const c = disguise();
+    if (!c) return false;
+    if (org && c.org !== org) return false;              // wrong uniform entirely
+    if ((g.wanted | 0) >= 2) return false;               // (b) a manhunt outranks a costume
+    if (g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT) return false;
+    return true;
+  }
+  CBZ.cityDisguiseTrust = disguiseTrust;
+  // is the player pretending at all, and as what — for the audit and the HUD.
+  CBZ.cityDisguiseOrg = function () { const c = disguise(); return c ? c.org : null; };
+
+  // BURN IT. Generalised blowCover: any observer, any org, one message.
+  function disguiseBlow(by, why) {
+    const c = disguise(); if (!c) return false;
+    const fresh = !(g.cityOutfitBlownT && CBZ.now < g.cityOutfitBlownT);
+    g.cityOutfitBlownT = CBZ.now + 60000;
+    if (fresh && CBZ.city) {
+      const who = (by && by.name) || "Someone";
+      CBZ.city.note("“" + (why || ("Wait — you're no " + String(c.role).toLowerCase() + "!")) + "” " + who + " clocks you.", 2.6);
+    }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  CBZ.cityDisguiseBlow = disguiseBlow;
+
+  // (c) THE WRONG WEAPON. Only roles whose claim is "unarmed" are broken by a
+  // drawn gun — a cop's uniform and a gang's colours come WITH one, which is
+  // why they were never subject to this and still are not.
+  function weaponBetraysCover() {
+    const c = disguise();
+    if (!c || c.arms === "gun") return false;
+    try { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); } catch (e) { return false; }
+  }
+  // (d) SOMEONE SENIOR. Cheap: one throttled scan, nearest-first, LOS-free
+  // (they are 12 m away in the open — if you can see them they can see you).
+  let _senT = 0;
+  function seniorSees(dt) {
+    _senT -= dt; if (_senT > 0) return null;
+    _senT = 0.7;
+    const c = disguise(); if (!c || !c.org) return null;
+    const P = CBZ.player; if (!P || P.dead) return null;
+    const px = P.pos.x, pz = P.pos.z;
+    const pools = [CBZ.cityCops, CBZ.cityPeds];
+    for (let q = 0; q < pools.length; q++) {
+      const arr = pools[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i];
+        if (!a || a.dead || a.isPlayer || a._parked) continue;
+        const dx = a.pos.x - px, dz = a.pos.z - pz;
+        if (dx * dx + dz * dz > 12 * 12) continue;
+        // is THIS person genuinely one of the org you are impersonating, and
+        // senior enough to know the roster? Read off the fields the world keeps.
+        if (c.org === "police") { if (a.kind === "cop" && (a.swat || a.copRank)) return a; continue; }
+        if (c.org.indexOf("gang:") === 0) {
+          if (("gang:" + a.gang) === c.org && (a.rank === "lt" || a.rank === "boss" || a.rank === "enforcer")) return a;
+          continue;
+        }
+        // a job cover: somebody doing the SAME job, at this range, knows their
+        // own colleagues. That is the whole reason a uniform fools outsiders.
+        if (a.job && c.role && CBZ.cityJobTitle && CBZ.cityJobTitle(a.job) === c.role) return a;
+      }
+    }
+    return null;
+  }
+  // ticked from the per-frame updater below.
+  function disguiseTick(dt) {
+    if (!disguiseOn() || !disguise()) return;
+    if (weaponBetraysCover()) { disguiseBlow(null, "That's not staff — he's armed!"); return; }
+    const sen = seniorSees(dt);
+    if (sen) disguiseBlow(sen, "I don't know you.");
+  }
+
   CBZ.cityOutfitIsCop = isCopFit;
-  CBZ.cityOutfitCopTrust = copTrust;
-  CBZ.cityOutfitBlow = blowCover;
+  // MIGRATED: the cop-only pair now routes through the org-agnostic one, so
+  // there is a single trust rule and a single burn timer in the game. Existing
+  // callers (police.js, gangs.js, wanted.js) are untouched by design.
+  CBZ.cityOutfitCopTrust = function () { return disguiseTrust("police"); };
+  CBZ.cityOutfitBlow = function (byCop) { return disguiseBlow(byCop, null); };
   CBZ.cityOutfitGangId = gangFit;
   CBZ.cityOutfitHeatMult = heatMult;
   CBZ.cityOutfitDrip = wornDrip;
@@ -1369,7 +1585,11 @@
     const theirs = CBZ.cityOutfitOf(body);
     if (!theirs) return false;
     body._clothesTaken = true;
-    _pendingSwap = { body, theirs, mine: worn() };
+    // §DISGUISE (a) — SEEN TAKING IT. The 2.4 s strip is already a beat of
+    // vulnerability; now it is a beat of EXPOSURE too. Anyone alive and near
+    // enough to watch means the uniform is burned before you have it on, which
+    // is what makes the choice of where you drop somebody matter.
+    _pendingSwap = { body, theirs, mine: worn(), witness: strippingWitness(body) };
     g.cityOutfitChanging = 2.4;
     if (!CBZ.cityMenuOpen) { CBZ.cityMenuOpen = true; _heldMenu = true; }   // hands full — can't shoot
     if (CBZ.sfx) CBZ.sfx("door");
@@ -1394,7 +1614,46 @@
       // loses the shirt-front/bow on the spot (or gains yours, if you had one).
       if (CBZ.cityBlingResyncPed) CBZ.cityBlingResyncPed(sw.body);
     }
+    // ---- THE ROLE RIDES WITH THE CLOTH -------------------------------------
+    // THIS is the line that turns a cosmetic swap into a disguise. Until now
+    // you took a blue shirt; now you take THE FLIGHT ATTENDANT'S UNIFORM, and
+    // level.js's vocabulary already knows what that is. The claim is stamped
+    // from the dead person's TRUE role (cityTrueRole — never the covered one,
+    // or stripping a plant would hand you his cover instead of his job), plus
+    // the org that can see through it and whether the role comes with a gun.
+    if (CBZ.cityTrueRole && sw.body) {
+      const tr = CBZ.cityTrueRole(sw.body);
+      if (tr && tr.title) {
+        sw.theirs._claimRole = tr.title;
+        sw.theirs._claimOrg = sw.body.gang ? ("gang:" + sw.body.gang)
+          : (sw.body.kind === "cop" ? "police" : (sw.body.milRank ? "army" : null));
+        sw.theirs._claimArms = (sw.body.kind === "cop" || sw.body.gang || sw.body.milRank ||
+          sw.body.kind === "security") ? "gun" : "none";
+      }
+    }
     wearRecord(sw.theirs);
+    // (a) burned on arrival if somebody watched you take it.
+    if (sw.witness) disguiseBlow(sw.witness, "I saw what you did to him.");
+  }
+  // anyone ALIVE, awake and close enough to have seen the strip. Cops count
+  // double-strength (they are the ones who radio it), but any living witness
+  // is enough — a uniform whose provenance was observed is not a disguise.
+  function strippingWitness(body) {
+    const P = CBZ.player; if (!P || !body) return null;
+    const px = P.pos.x, pz = P.pos.z;
+    const pools = [CBZ.cityCops, CBZ.cityPeds];
+    for (let q = 0; q < pools.length; q++) {
+      const arr = pools[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i];
+        if (!a || a.dead || a === body || a.isPlayer || a._parked || (a.ko || 0) > 0) continue;
+        if (a.companion || a.recruited || a.controlled) continue;   // your own people don't tell
+        if (a.enterT > 0 || (a.group && !a.group.visible)) continue; // indoors / not rendered
+        const dx = a.pos.x - px, dz = a.pos.z - pz;
+        if (dx * dx + dz * dz <= 22 * 22) return a;
+      }
+    }
+    return null;
   }
   function cancelSwap() {
     _pendingSwap = null;
@@ -1546,6 +1805,10 @@
     buildGangOutfits();
     const w = worn();
     if (_appliedId !== w.id) applyPlayer();
+    // §DISGUISE breakers (c) wrong weapon and (d) somebody senior recognises
+    // that they do not know you. Both are no-ops the instant you are not
+    // pretending to be anybody, which is the overwhelmingly common case.
+    disguiseTick(dt);
     // COPS wear the painted uniform too (badge/belt/patches) — makeCop lives
     // in police.js, which we don't edit: a cheap throttled sweep dresses any
     // not-yet-painted cop rig through the same API. One pass per cop, ever

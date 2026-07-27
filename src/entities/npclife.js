@@ -417,9 +417,14 @@
        update that was already happening.
 
        A live prop arc (propuse's walk→perch→swing) owns the transform while it
-       runs, so it is skipped; `_seatHold === false` lets a caller opt out. */
+       runs, so it is skipped; `_seatHold === false` lets a caller opt out.
+       The arc test is CBZ.propArcActive — the `_propArc` field this line
+       originally checked is set by NOTHING in the repo (propuse tracks
+       `_propArcT` timestamps), so the documented escape hatch never opened;
+       feature-detected, with the old field kept as the fallback. */
     const a = rec.anchor;
-    if (a && actor._seatHold !== false && !actor._propArc) {
+    if (a && actor._seatHold !== false &&
+        !(CBZ.propArcActive ? CBZ.propArcActive(actor) : actor._propArc)) {
       actor.group.position.set(a.x || 0, a.y || 0, a.z || 0);
       if (actor.group.rotation && actor.group.rotation.set) {
         actor.group.rotation.set(a.pitch || 0, a.yaw || 0, a.roll || 0);
@@ -551,7 +556,12 @@
           for (let k = 0; k < seats.length; k++) if (seats[k] && seats[k].occupant === a) seats[k].occupant = null;
           const spawned = !!a._aircraftCabinSpawned;
           a._aircraftCabin = null; a._aircraftSeat = -1; a._aircraftCabinSpawned = false;
-          if (spawned) destroyCity(a);
+          // A DEAD body is never destroyed here: the shoot-down spill
+          // (island_airport.js cityDamageCivilAircraft) just detached and
+          // killed these occupants so they ragdoll out of the hull — deleting
+          // them the same tick would undo the owner-visible bodies. The
+          // ordinary corpse sweep (peds.js deadT) reaps them later.
+          if (spawned && !a.dead) destroyCity(a);
           else release(a);
         }
       }

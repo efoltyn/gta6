@@ -303,6 +303,14 @@
     if (ped.name) return ped.name;
     if (ped.swat) return "SWAT Officer";
     if (ped.kind === "cop") return "Police Officer";
+    // ONE VOCABULARY, AND IT IS THE COVERED ONE. Title-casing the raw `job`
+    // string put "Panhandling" and "Chasing A Fix" in the speaker slot of a
+    // subtitle — `job` is free-form prose here. Worse, it is the TRUE role:
+    // routing through it would have captioned a covered operative's small talk
+    // with "Agent:", which is the exact leak level.js's §COVER split exists to
+    // close. cityTitle is the presented role, viewer-defaulted to the player,
+    // so the caption says what you are entitled to know and nothing more.
+    if (CBZ.cityTitle) { const st = CBZ.cityTitle(ped); if (st) return st; }
     if (ped.job) return String(ped.job).replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     return "Stranger";
   }

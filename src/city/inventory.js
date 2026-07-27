@@ -99,7 +99,7 @@
     // weapons / tools
     Pistol: "", Revolver: "", "Desert Eagle": "", SMG: "", Uzi: "",
     Shotgun: "", Rifle: "", "AK-47": "", LMG: "", Sniper: "",
-    Bazooka: "", "Rocket Launcher": "", Taser: "", Bat: "", Knife: "",
+    Bazooka: "", "Rocket Launcher": "", "Grenade Launcher": "", Taser: "", Bat: "", Knife: "",
     Grenade: "", "Ammo Box": "", Medkit: "", "Body Armor": "",
     Lockpick: "", Crowbar: "", "Burner Phone": "", Chest: "",
     Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",

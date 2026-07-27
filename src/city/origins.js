@@ -293,6 +293,34 @@
   }
   CBZ.citySwitchLedger = switchLedgerTo;    // exposed for the [U] wheel below + harness pokes
 
+  /* Park a PRE-ORIGIN life — a save that predates the story system, so it has
+     no character id of its own — into the vault under the reserved id
+     `previous`, and hand the main key back empty so the next
+     cityWorldEnsure() mints a clean ledger for the story the player chose.
+
+     This is the "nothing is destroyed" half of honouring a real pick. The old
+     life keeps its cash, bank, weapons, record and assets intact and is
+     reachable again from the [U] wheel, which lists it as Your Previous Life.
+     The shared world (economy / politics / clock) is carried forward, exactly
+     as an ordinary character switch does — the city does not restart because
+     you did. */
+  const PREV_ID = "previous";
+  function parkPreviousLife(w) {
+    if (!w) return false;
+    try {
+      if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();   // freeze cash/pos as they stand
+      const v = loadVault();
+      w.origin = PREV_ID; w.originPlayed = true;
+      v.chars[PREV_ID] = w;
+      saveVault(v);
+      pendingShared = {};
+      carryShared(w, pendingShared);                    // the city rides across
+      g.cityWorld = null;
+      try { localStorage.removeItem(MAIN_KEY); } catch (e) {}
+      return true;
+    } catch (e) { return false; }
+  }
+
   // Returning character: put them back where they were. Within one browser
   // session the exact position (incl. interior floor height) is trusted; a
   // position saved by an EARLIER session keeps its x/z but re-derives a safe
@@ -1536,6 +1564,23 @@
       },
     };
     IDS.random = 1;
+
+    // YOUR PREVIOUS LIFE — the pre-origin save parked by parkPreviousLife().
+    // A real, switchable character with a full ledger; it simply has no
+    // opening scene, because it predates the idea of one. Registering it here
+    // is what puts it in the [U] wheel (which walks these keys) so the life is
+    // recoverable. It gets NO title-screen button — those are authored in
+    // index.html — so it can only ever be reached deliberately, and its
+    // grants/scene are never reached at all: its ledger carries
+    // originPlayed:true, so cityOriginApply returns at the resume branch.
+    ORIGINS[PREV_ID] = {
+      meta: { icon: "", name: "Your Previous Life", blurb: "the character you were playing before the stories" },
+      get tuning() { return { missedLotFeed: "" }; },
+      findSpawn: function () { return null; },
+      grants: function () {},
+      scene: function () { genericSafeSpawn(); return { compact: false }; },
+    };
+    IDS[PREV_ID] = 1;
   })();
 
   // ---------------------------------------------------------------
@@ -1568,15 +1613,47 @@
       if (!CBZ.cityWorldEnsure) return { introActive: false };
       let w = CBZ.cityWorldEnsure();
       const selected = normOrigin(game.cityOrigin);
+      // Did the player physically click a story card this session? One-shot:
+      // read it and clear it, so it can never leak into a later reset.
+      const picked = !!game.cityOriginPicked;
+      game.cityOriginPicked = false;
 
-      // PRE-ORIGIN character (see peekLedger): a real save from before this
-      // feature. Adopt whatever's selected as their origin-on-record — play
-      // nothing, wipe nothing, override nothing.
+      /* ---- DEFECT 1: THE UNADDRESSABLE LEDGER ---------------------------
+         A save stamped `originPlayed:true` whose `origin` is not one of the
+         registered ids (an id from an older build, or never written at all)
+         is PERMANENTLY LOCKED. Trace it: peekLedger's `IDS[p.origin]` test
+         fails, so it falls through; the switch below needs a truthy
+         `w.origin` to compare, so it never fires; and the resume branch
+         after it returns `{introActive:false}` unconditionally. Every pick
+         lands in resume, forever, whatever you click. That is exactly the
+         owner's "I always have the same one life regardless of story."
+         Claiming it for the default character makes it addressable again, so
+         the ordinary switch below can move off it. */
+      if (w.originPlayed && !IDS[w.origin]) w.origin = "exec";
+
+      /* ---- DEFECT 2: THE ADOPTION THAT ATE YOUR CHOICE ------------------
+         A pre-origin save (progress, but no originPlayed stamp) used to be
+         adopted AS whatever was selected, stamped played, and returned with
+         no scene. So the first time you chose the Pilot, your existing
+         character was silently re-labelled "The Pilot" and marked as having
+         already played — and from then on picking the Pilot resumed that
+         same life. You could never reach the story, and nothing said so.
+
+         That silent adoption is still right when the player did NOT choose:
+         somebody who just presses Play must not have their save wiped. But a
+         REAL CLICK is a request to start that story, and it is now honoured —
+         the old life is parked in the vault under `previous` (recoverable
+         from the [U] wheel; nothing is destroyed) and the chosen character is
+         minted fresh so their opening actually runs. */
       if (legacyLedger && !w.originPlayed) {
         legacyLedger = false;
-        w.origin = selected; w.originPlayed = true;
-        if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-        return { introActive: false };
+        if (!picked) {
+          w.origin = selected; w.originPlayed = true;
+          if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+          return { introActive: false };
+        }
+        parkPreviousLife(w);
+        w = CBZ.cityWorldEnsure();          // a freshly minted, unplayed ledger
       }
       legacyLedger = false;
 
@@ -1687,6 +1764,10 @@
     const act = activeCharId();
     let rows = "";
     for (const id of Object.keys(ORIGINS)) {
+      // The parked pre-origin life is only a character if one was ever parked.
+      // Offering "Your Previous Life — NEW, their story begins" to somebody who
+      // has no previous life would be a row that lies.
+      if (id === PREV_ID && !v.chars[id] && act !== id) continue;
       const m = ORIGINS[id].meta;
       let status, dim = "";
       if (id === act) { status = "<span style='color:#7ed957'>YOU · " + moneyFmt(g.cash) + "</span>"; dim = "opacity:.55;pointer-events:none;"; }

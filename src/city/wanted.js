@@ -380,15 +380,36 @@
         _theftCoolT[opts.type] = CBZ.now;
       }
     }
-    // THE UNIFORM READS (outfits.js): police colors buy trust on the street —
-    // civilians don't call the law on "an officer" doing minor work. VIOLENCE
-    // in uniform blows the costume, and impersonation makes the charge burn
-    // hotter. (A manhunt at 2★+ outranks any costume — copTrust handles that.)
-    if (CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust()) {
+    // THE UNIFORM READS (outfits.js §DISGUISE). Two KINDS of uniform, and the
+    // difference matters — it is the whole reason this is not one rule:
+    //
+    //  AUTHORITY (police, army): the badge buys the benefit of the doubt.
+    //    Civilians don't call the law on "an officer" doing minor work. This
+    //    is the original cop rule, unchanged in behaviour and now asked
+    //    org-agnostically, so a stolen army uniform finally works too.
+    //
+    //  ACCESS (a flight attendant's, a dockhand's, a guard's): buys you
+    //    THROUGH doors, never ABOVE the law. A cashier's tunic does not make
+    //    mugging somebody look like work. What it does buy is ANONYMITY —
+    //    a witness describes the uniform, not the face — so it is a partial
+    //    mask, in the same spirit as g.cityMasked but honest about being
+    //    weaker than one. Getting the strong version here would have been the
+    //    "disguise that always works" the design explicitly refuses.
+    //
+    // Either way VIOLENCE blows the costume, and a manhunt at 2★+ outranks any
+    // of it (cityDisguiseTrust owns that rule for every org at once).
+    const _dTrust = CBZ.cityDisguiseTrust;
+    const _authority = _dTrust ? (_dTrust("police") || _dTrust("army")) : (CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust());
+    if (_authority) {
       if (amount >= 60) {
-        if (CBZ.cityOutfitBlow) CBZ.cityOutfitBlow();
+        if (CBZ.cityDisguiseBlow) CBZ.cityDisguiseBlow(null, "That's no officer!");
+        else if (CBZ.cityOutfitBlow) CBZ.cityOutfitBlow();
         amount = Math.round(amount * (CBZ.cityOutfitHeatMult ? CBZ.cityOutfitHeatMult() : 1.5));
       } else return;   // minor crime in uniform: witnesses saw "police work"
+    } else if (_dTrust && _dTrust(null)) {
+      // an ACCESS disguise: they saw a uniform do it, not you.
+      if (amount >= 60 && CBZ.cityDisguiseBlow) CBZ.cityDisguiseBlow(null, "It was one of the staff!");
+      amount = Math.round(amount * 0.55);
     }
     const x = opts.x != null ? opts.x : CBZ.player.pos.x;
     const z = opts.z != null ? opts.z : CBZ.player.pos.z;

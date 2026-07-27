@@ -34,7 +34,7 @@
   const P = CBZ.player;
 
   // city weapon name → engine (fpsmode) weapon id
-  const GUN_MAP = { Pistol: "sidearm", SMG: "smg", Shotgun: "shotgun", Carbine: "carbine", Rifle: "carbine", Revolver: "revolver", "Desert Eagle": "deagle", "AK-47": "ak47", Uzi: "uzi", Sniper: "sniper", LMG: "lmg", Bazooka: "bazooka", "Rocket Launcher": "bazooka" };
+  const GUN_MAP = { Pistol: "sidearm", SMG: "smg", Shotgun: "shotgun", Carbine: "carbine", Rifle: "carbine", Revolver: "revolver", "Desert Eagle": "deagle", "AK-47": "ak47", Uzi: "uzi", Sniper: "sniper", LMG: "lmg", Bazooka: "bazooka", "Rocket Launcher": "bazooka", "Grenade Launcher": "glauncher" };
   const CITY_NAME = {};
   Object.keys(GUN_MAP).forEach((name) => { CITY_NAME[GUN_MAP[name]] = name; });
   CITY_NAME.carbine = "Rifle";
