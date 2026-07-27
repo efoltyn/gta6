@@ -3025,6 +3025,53 @@
         if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009));
       }
     }
+    // ---- WILDLIFE. OWNER: "they ... don't get hit by cars." They could not:
+    // every loop in this function walks CBZ.cityPeds / the ambient crowd /
+    // CBZ.cityCops, and animals live in a fourth list (CBZ.cityWildlife) that
+    // nothing here had ever heard of — so a truck through a herd of elk was a
+    // no-event for both parties. This is that loop, and it is deliberately the
+    // ONLY thing this wave adds to this file: the damage MODEL (mass-scaled
+    // lethal speed, energy going as v², the launch direction, the herd panic)
+    // lives in wildlife.js where the species is, exactly as the ped kill lives
+    // in cityKillPed. Same cheap squared-distance reject and the same
+    // per-victim cooldown latch as the peds loop above, so the cost of a car
+    // that hits nothing is one distance test per nearby animal.
+    // AND IT IS BOUNDED. CBZ.cityWildlife is ~850 long — an order of magnitude
+    // more than anything else this function walks — and runOver already runs
+    // for every moving car in the world. A third full-length sweep per car per
+    // frame is exactly how a surgical loop becomes a frame-rate bug, so only
+    // cars near the camera sweep it. Nothing is lost: an animal struck by a car
+    // nobody is within 240u of is a tree falling in a forest, and wildlife.js
+    // has LOD-frozen it out of the simulation at that range anyway.
+    const _wcam = CBZ.camera && CBZ.camera.position;
+    const _wdx = _wcam ? car.pos.x - _wcam.x : 0, _wdz = _wcam ? car.pos.z - _wcam.z : 0;
+    if (CBZ.cityWildlife && CBZ.cityWildlifeCarHit &&
+        (!_wcam || _wdx * _wdx + _wdz * _wdz < 240 * 240)) {
+      const wl = CBZ.cityWildlife;
+      for (let wi = 0; wi < wl.length; wi++) {
+        const an = wl[wi];
+        if (!an || an.dead || an.ridden || !an.pos) continue;
+        const adx = an.pos.x - car.pos.x, adz = an.pos.z - car.pos.z;
+        // a bull moose is a wider target than a rabbit — the reach scales with
+        // the animal, which is the only species-aware number in this loop and
+        // it comes off the species' own `scale`.
+        const rr = 1.55 + ((an.species && an.species.scale) || 1) * 0.75;
+        if (adx * adx + adz * adz > rr * rr) continue;
+        if ((an._carHitUntil || 0) > (CBZ.now || 0)) continue;
+        an._carHitUntil = (CBZ.now || 0) + 850;
+        const hitDmg = CBZ.cityWildlifeCarHit(an, {
+          v: vmag, vx: car.vx, vz: car.vz, lethal: CRASH.pedLethal,
+          fromX: car.pos.x, fromZ: car.pos.z,
+          by: car.player ? null : (car.npcDriver || null),
+        });
+        if (hitDmg > 0) {
+          if (CBZ.shake) CBZ.shake((car.player ? 0.18 : 0.1) + Math.min(0.6, vmag * 0.02));
+          // the car HOOKS on the body, scaled by what it hit — clipping a hare
+          // must not stop a truck, and a bison must not feel like a traffic cone.
+          car.v *= Math.max(0.7, 1 - Math.min(0.3, ((an.species && an.species.scale) || 1) * 0.12));
+        }
+      }
+    }
     for (const c of CBZ.cityCops) {
       if (c.dead) continue;
       const dx = c.pos.x - car.pos.x, dz = c.pos.z - car.pos.z;

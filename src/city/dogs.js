@@ -423,7 +423,10 @@
     const dmg = Math.max(1, Math.round((w && w.damage || 20) * (hit && hit.head ? (w && w.headMult || 2) : 1) * fall));
     d.hp -= dmg;
     if (hit && hit.point && CBZ.gore && CBZ.gore.spray) { try { CBZ.gore.spray(hit.point, 1); } catch (e) {} }
-    if (d.hp <= 0) { dogDie(d); return { head: !!(hit && hit.head), down: true, dmg: dmg }; }
+    // the killing round is CARRIED into the death now (see dogDie) — a dog shot
+    // from the kerb has to land off the kerb, and it cannot do that if the only
+    // thing the death is told is that it happened.
+    if (d.hp <= 0) { dogDie(d, hit, w); return { head: !!(hit && hit.head), down: true, dmg: dmg }; }
     if (!d.tamed) {
       const first = !d.aggro;
       dogAggro(d);
@@ -443,12 +446,43 @@
     }
     return { head: !!(hit && hit.head), down: false, dmg: dmg };
   }
-  function dogDie(d) {
+  // ============================================================
+  //  DEATH — OWNER: "when they are killed they don't have death ragdoll like
+  //  humans they just sit head pointed to sky dumb death animation."
+  //
+  //  He was describing THIS FUNCTION, literally. `_toppleTo = ±1.25` eased
+  //  group.rotation.z to a constant, and on these rigs rotation.z is the
+  //  MODEL-LOCAL PITCH (nose +X, Euler 'XYZ' — see the r128 note at the top of
+  //  systems/predator_anim.js), so half of every dog death in the game pointed
+  //  the animal's nose at the sky and froze it there.
+  //
+  //  Nothing bespoke replaces it. Dogs ride the CBZ.cityWildlife registry for
+  //  the guns already; they now ride wildlife.js's death physics too —
+  //  CBZ.wildlifeDeathPhysics gives the body to the quadruped verlet solver
+  //  when it will take it (legs splay, head lolls, the corpse settles on real
+  //  terrain slope) and falls back to the shared rigid tumble when it will not.
+  //  The ONE thing dogs.js still owns is that wildlife's tick skips `external`
+  //  actors, so the integrator has to be stepped from OUR tick (see below).
+  // ============================================================
+  function dogDie(d, hit, w) {
     d.dead = true; d.hp = 0; d.state = "dead"; d.aggro = false;
     setDogEyes(d, false);
-    d._dieT = 0.5;
-    d._toppleTo = (Math.random() < 0.5 ? 1 : -1) * 1.25;
-    d._dieZ0 = d.group.rotation.z;
+    d._dieT = null; d._toppleTo = null;
+    let mode = "none";
+    if (CBZ.wildlifeDeathPhysics) {
+      const shotK = Math.max(0.55, (w && w.knock) || 1) * (w && w.pellets ? 1.22 : 1);
+      try {
+        mode = CBZ.wildlifeDeathPhysics(d, (hit && hit.dir) || null, 3.2 + shotK * 2.7, (hit && hit.point) || null) || "none";
+      } catch (e) { mode = "none"; }
+    }
+    if (mode === "none") {
+      // DEGRADE: wildlife.js absent entirely (unit-loaded dogs). Keep the old
+      // topple rather than freeze the body bolt upright — but on the roll axis
+      // it should always have used, not the pitch axis.
+      d._dieT = 0.5;
+      d._toppleTo = (Math.random() < 0.5 ? 1 : -1) * 1.25;
+      d._dieZ0 = d.group.rotation.z;
+    }
     d.fadeT = 26;
     if (CBZ.city && CBZ.city.note) {
       CBZ.city.note(d.tamed ? ("" + d.name + " is gone.") : (d.name + " goes down."), d.tamed ? 3.4 : 2, d.tamed ? { urgent: true } : undefined);
@@ -585,8 +619,15 @@
     for (let i = 0; i < dogs.length; i++) {
       const d = dogs[i], grp = d.group;
       if (d.dead) {
-        // animated topple, then the body fades out of the world.
-        if (d._dieT != null) {
+        // THE CORPSE IS SOMEBODY ELSE'S SIMULATION NOW. wildlife.js's tick
+        // skips `external` actors outright (that is what makes dogs.js the
+        // driver), so the shared tumble integrator has to be stepped from here
+        // — without this a dog handed the tumble would hang in the air with a
+        // velocity nothing ever applied. When the quadruped ragdoll took the
+        // body instead there is no _deathPhys and its own updater owns it, so
+        // this is a no-op and we must not touch the transform at all.
+        if (d._deathPhys && CBZ.wildlifeDeathStep) CBZ.wildlifeDeathStep(d, dt);
+        else if (d._dieT != null) {                    // the degrade topple only
           d._dieT -= dt;
           const k = Math.max(0, Math.min(1, 1 - d._dieT / 0.5));
           const e = 1 - (1 - k) * (1 - k);

@@ -1056,8 +1056,39 @@
       }
     } else {
       const v = h.victim;
+      // AN ANIMAL'S HEALTH IS NOT OURS TO WRITE EITHER. The player has had a
+      // sanctioned sink here since day one; wildlife got a raw `.hp -=` because
+      // for this file's whole life the only thing it ever held was the player.
+      // CBZ.cityWildlifeHit is that species' cityHurtPlayer — it owns the
+      // flinch, the blood, the pelt quality and (the part that matters) the
+      // corpse timeline, so draining hp behind its back produced exactly the
+      // frozen-carcass class of bug killVictim's comment describes.
+      if (v && v.animal && CBZ.cityWildlifeHit && !v.dead) {
+        _killHit.point = h.jaw;
+        _killHit.dir.x = 0; _killHit.dir.z = 0;
+        _killHit.from.x = ap ? ap.x : 0; _killHit.from.z = ap ? ap.z : 0;
+        _killW.damage = dmg; _killW.by = h.attacker; _killW.cause = h.cause;
+        try { CBZ.cityWildlifeHit(v, _killHit, _killW); } catch (e) {}
+        _killW.by = null;
+        return;
+      }
       if (v && v.hp != null) v.hp -= dmg;
     }
+  }
+
+  // reusable hit/weapon records for the wildlife bus (killVictim runs inside a
+  // hot resolve; a fresh object per kill would allocate in the worst place).
+  const _killHit = { head: false, point: null, dir: { x: 0, y: 0.35, z: 0 }, from: { x: 0, z: 0 } };
+  const _killW = { damage: 0, knock: 1.5, by: null, cause: "" };
+  function vDirX(from, v) {
+    const p = actorPos(v); if (!p) return 0;
+    const dx = p.x - from.x, dz = p.z - from.z, l = Math.hypot(dx, dz) || 1;
+    return dx / l;
+  }
+  function vDirZ(from, v) {
+    const p = actorPos(v); if (!p) return 0;
+    const dx = p.x - from.x, dz = p.z - from.z, l = Math.hypot(dx, dz) || 1;
+    return dz / l;
   }
 
   // EVERY death in this file goes through the kill bus. We never toast one —
@@ -1077,11 +1108,32 @@
       return;
     }
     if (v && v.animal) {
-      // wildlife has no cityKillPed contract — down it and log the death.
+      // AN ANIMAL HAS A KILL CONTRACT TOO, AND THIS BRANCH USED TO SKIP IT.
+      // The comment this replaces said "wildlife has no cityKillPed contract",
+      // which was simply wrong: CBZ.cityWildlifeHit is the ONE damage/death bus
+      // for wildlife and it owns the entire corpse timeline. Setting `dead` from
+      // out here bypassed all of it — the body got no death physics, never
+      // entered wildlife's `carcasses` list, was left with an UNDEFINED skinT
+      // (a NaN countdown that can never reach zero) and therefore stood frozen
+      // mid-pose in the world forever, unskinnable and undespawnable. Every
+      // predator kill in the game produced one. Route the death properly and it
+      // ragdolls, bleeds, becomes skinnable and eventually fades, for free.
       if (!v.dead) {
-        v.dead = true; if (v.hp != null) v.hp = 0;
-        if (CBZ.cityLogDeath) {
-          try { CBZ.cityLogDeath(actorName(v), h.cause, { by: actorName(h.attacker) }); } catch (e) {}
+        const ap2 = actorPos(h.attacker);
+        if (CBZ.cityWildlifeHit) {
+          _killHit.point = h.jaw;
+          _killHit.dir.x = ap2 ? (vDirX(ap2, v)) : 0;
+          _killHit.dir.z = ap2 ? (vDirZ(ap2, v)) : 0;
+          _killHit.from.x = ap2 ? ap2.x : 0; _killHit.from.z = ap2 ? ap2.z : 0;
+          _killW.damage = 1e9; _killW.by = h.attacker; _killW.cause = h.cause;
+          try { CBZ.cityWildlifeHit(v, _killHit, _killW); } catch (e) {}
+          _killW.by = null;
+        }
+        if (!v.dead) {                       // no wildlife bus at all: the old path
+          v.dead = true; if (v.hp != null) v.hp = 0;
+          if (CBZ.cityLogDeath) {
+            try { CBZ.cityLogDeath(actorName(v), h.cause, { by: actorName(h.attacker) }); } catch (e) {}
+          }
         }
       }
       return;
@@ -1301,9 +1353,16 @@
     // NO stinger here — the "commit" cluster already fired when the hunter
     // entered `rush`; stacking one on top of the drop-out would fill in the
     // silence the drop-out exists to create.
-    predatorDrop(S_WIND);
-    predatorTrauma(0.30);
-    predatorDread(attacker, 1, dreadOptsFor(attacker, 0, h.medium === "water"));
+    // ...but only when the player is IN it or NEAR it. A grab is the loudest
+    // thing this file does — a drop-out in the mix, a trauma shake, a full dread
+    // report — and with a food chain running across the map it now happens to
+    // animals you will never see. Same law as the FSM's cue gate above, off the
+    // same radius; a seize on YOU short-circuits before any distance is taken.
+    if (isP || scoring(attacker, false)) {
+      predatorDrop(S_WIND);
+      predatorTrauma(0.30);
+      predatorDread(attacker, 1, dreadOptsFor(attacker, 0, h.medium === "water"));
+    }
     if (h.cam && isP) possessCamera(h);
     startDolly(h.jaw.x, h.jaw.y + 0.8, h.jaw.z, h.id);
     return h;
@@ -1346,9 +1405,7 @@
     // (gaitAnimate's body sway, wildlife's pitch decay, the gait-ordering gate)
     // silently stayed switched off on any animal that had ever grabbed anyone.
     if (a && a._atkAnim != null && a._atkAnim >= 0) { a._atkAnim = -1; a._atkStyle = null; }
-    if (h.pinned && CBZ.ragdollUnpin) {
-      try { CBZ.ragdollUnpin(h.isPlayer ? playerRagdollTarget() : v); } catch (e) {}
-    }
+    if (h.pinned) unpinCorpse(h.isPlayer ? playerRagdollTarget() : v);
     h.pinned = false;
     const i = SEIZES.indexOf(h);
     if (i >= 0) SEIZES.splice(i, 1);
@@ -1574,6 +1631,29 @@
   }
 
   // ---- slave the victim to the jaw ---------------------------------------
+  // A HELD BODY HAS A SOLVER, AND WHICH ONE DEPENDS ON WHAT IT IS.
+  // city/ragdoll.js is the HUMANOID one and refuses anything without a `char`,
+  // so before today every animal a predator killed and kept was carried by a
+  // raw position write — the corpse slid through the air perfectly rigid, in
+  // the one shot the camera is guaranteed to be looking at. Ask the human
+  // solver first (identical behaviour for every existing caller), and only then
+  // systems/quadruped_ragdoll.js, which is the animal sibling.
+  function pinCorpse(v, atFn, until) {
+    if (!v) return false;
+    if (CBZ.ragdollPin) {
+      try { if (CBZ.ragdollPin(v, { point: "torso", at: atFn, until: until, stiff: 1 })) return true; } catch (e) {}
+    }
+    if (v.animal && CBZ.quadRagdollPin) {
+      try { if (CBZ.quadRagdollPin(v, { point: "torso", at: atFn, until: until, stiff: 1 })) return true; } catch (e) {}
+    }
+    return false;
+  }
+  function unpinCorpse(v) {
+    if (!v) return;
+    if (CBZ.ragdollUnpin) { try { CBZ.ragdollUnpin(v); } catch (e) {} }
+    if (v.animal && CBZ.quadRagdollUnpin) { try { CBZ.quadRagdollUnpin(v); } catch (e) {} }
+  }
+
   function anchorVictim(h) {
     const _jaw = h.jaw;
     if (h.isPlayer) {
@@ -1590,12 +1670,10 @@
     }
     const v = h.victim;
     if (!v) return;
-    if (v.dead && CBZ.ragdollPin) {
+    if (v.dead) {
       // A CORPSE IS NOT FURNITURE. Pin the torso to the jaw and let the verlet
       // body whip off it — this is the whole reason ragdollPin exists.
-      if (!h.pinned) {
-        try { h.pinned = !!CBZ.ragdollPin(v, { point: "torso", at: h.atFn, until: 2.2, stiff: 1 }); } catch (e) { h.pinned = false; }
-      }
+      if (!h.pinned) h.pinned = pinCorpse(v, h.atFn, 2.2);
       if (h.pinned) return;   // the ragdoll owns the transform now
     }
     const p = actorPos(v);
@@ -1732,7 +1810,12 @@
           h.pulseT = 0.45;   // don't double up with the ambient wet beat below
         } else if (h.dmgT <= 0) { h.dmgT = 0.28; hurtVictim(h, h.dmgAcc); h.dmgAcc = 0; }
         if (h.isPlayer && CBZ.player && CBZ.player.dead) { resolveSeize(h, "killed", true); continue; }
-        if (!h.isPlayer && v.hp != null && v.hp <= 0 && !v.dead) { resolveSeize(h, "killed", false); continue; }
+        // `v.dead` is now a real outcome mid-hold: hurtVictim routes an animal's
+        // damage through its own bus, and that bus can kill it. Resolving on
+        // `hp <= 0 && !dead` alone would MISS that and grind on to the hold
+        // timeout with a corpse in its mouth. Pass alreadyDead so killVictim is
+        // not asked to kill it a second time.
+        if (!h.isPlayer && (v.dead || (v.hp != null && v.hp <= 0))) { resolveSeize(h, "killed", !!v.dead); continue; }
 
         // a wet beat every ~0.45s: sound, a blood pulse, a fresh wound. The
         // hold has to keep COSTING something or it reads as a cutscene.
@@ -1883,11 +1966,7 @@
     // implementation was never exercised: the pin was created and destroyed in
     // the same call and lived exactly zero frames.
     const target = h.victim;
-    if (target && CBZ.ragdollPin) {
-      try {
-        h.pinned = !!CBZ.ragdollPin(target, { point: "torso", at: h.atFn, until: CARRY_T + 0.3, stiff: 1 });
-      } catch (e) {}
-    }
+    if (target) h.pinned = pinCorpse(target, h.atFn, CARRY_T + 0.3);
     h.phase = "carry"; h.t = 0;
   }
 
@@ -2060,6 +2139,28 @@
     return h.chumHit;
   }
 
+  // A HUNT THAT IS NOT ABOUT YOU ONLY SCORES ITSELF WHEN YOU ARE THERE TO SEE
+  // IT. The dread bus, the stingers, the drop-out and the trauma shake are the
+  // PLAYER's tension mix — the Jaws law, where the approach motif's tempo IS the
+  // distance readout. That was safe while every one of this file's four callers
+  // handed it the player. It stops being safe the moment a food chain runs
+  // across the whole map: a wolf working a deer three fields away would have the
+  // motif screaming at a threat the player cannot see, and the anti-habituation
+  // rule would be spent on encounters he never had. Player-targeted hunts are
+  // NEVER gated — `isP` short-circuits before any distance is computed.
+  const SCORE_R = 55;
+  // the silent twins. Swapping the FUNCTION rather than branching at each of the
+  // fourteen cue sites keeps the hot path one indirection and, more importantly,
+  // means a cue added to the FSM later cannot forget to ask.
+  function noDread() {} function noStinger() {} function noTrauma() {} function noDrop() {}
+  function scoring(hunter, isP) {
+    if (isP) return true;
+    const P = CBZ.player && CBZ.player.pos, hp2 = actorPos(hunter);
+    if (!P || !hp2) return false;
+    const dx = hp2.x - P.x, dz = hp2.z - P.z;
+    return dx * dx + dz * dz < SCORE_R * SCORE_R;
+  }
+
   function predatorHunt(hunter, target, dt, opts) {
     if (!on()) return "cruise";
     if (!hunter || !hunter.group || !target || !(dt > 0)) return "cruise";
@@ -2088,6 +2189,12 @@
     const dist = Math.hypot(dx, dz);
     const toT = Math.atan2(dz, dx);
     const isP = isPlayerActor(target);
+    // one distance test per frame; every player-facing cue below reads it.
+    const score = scoring(hunter, isP);
+    const dreadFor = score ? predatorDread : noDread;
+    const stinger = score ? predatorStinger : noStinger;
+    const trauma = score ? predatorTrauma : noTrauma;
+    const drop = score ? predatorDrop : noDrop;
 
     let reachable = true;
     if (typeof opts.canReach === "function") {
@@ -2119,9 +2226,22 @@
     } else {
       h.menace = clamp(h.menace - MEN_BLEED * dt, 0, 1);
     }
-    // THE ANTI-CAMPING LAW. Nothing may sit on you forever; the withdrawal is
+    // THE ANTI-CAMPING LAW. Nothing may sit on YOU forever; the withdrawal is
     // what recharges the next approach.
-    if (engaged && h.st !== "seize" && h.menace >= MEN_PEAK) {
+    //
+    // AND IT IS SCOPED TO THE PLAYER ON PURPOSE. §B is a FAIRNESS rule — it
+    // exists so an encounter stays frightening on the tenth meeting instead of
+    // becoming a tax. Applied to a hunt on another animal the same arithmetic
+    // is not fairness, it is starvation: prey flees in a straight line at a
+    // speed close to its hunter's, so a commit needs whole seconds to close,
+    // while the gauge peaks in about a third of one. Measured, with a wolf and
+    // a deer herd in a meadow and no player within 600u: EVERY rush was vetoed
+    // at ~0.35s, closest approach 5.1u against a 2.9u reach, and zero kills in
+    // 20,000 frames — the food chain could not exist. The gauge still rises and
+    // still bleeds for a non-player hunt (predatorMenace stays truthful); it
+    // simply does not get to veto the commit. `isP` short-circuits first, so
+    // every player-facing behaviour is byte-identical.
+    if (engaged && isP && h.st !== "seize" && h.menace >= MEN_PEAK) {
       setState(hunter, h, "disengage", opts);
       h.cool = MEN_COOL_MIN + Math.random() * MEN_COOL_RAND;
     }
@@ -2145,14 +2265,14 @@
           h.scentFake = Math.random() < P_SCENT_FAKE;
           h.passes = 0;
           setState(hunter, h, "scent", opts);
-          predatorStinger("notice");
+          stinger("notice");
         }
         break;
       }
 
       case "scent": {
         // it knows. It turns and closes, and the motif starts.
-        predatorDread(hunter, 0.25, dreadOptsFor(hunter, dist, sub));
+        dreadFor(hunter, 0.25, dreadOptsFor(hunter, dist, sub));
         // keep tasting the water: a bleeding target that is still WAY outside
         // sense range must not bounce this state back to cruise on frame two —
         // blood is exactly the thing that pulls a predator in from far away.
@@ -2176,7 +2296,7 @@
         // THE TEASE. Inside circleR it does NOT attack. This is the single most
         // important state in the file and shortening it is the one change that
         // would flatten the whole system.
-        predatorDread(hunter, 0.55, dreadOptsFor(hunter, dist, sub));
+        dreadFor(hunter, 0.55, dreadOptsFor(hunter, dist, sub));
         if (!reachable || dist > circleR * 2.4) { setState(hunter, h, "scent", opts); break; }
         // §J. THE PASS SHRINKS. Every circle that ends in nothing comes back
         // tighter than the last, so a long stalk has a shape — it is closing in
@@ -2214,7 +2334,7 @@
             // swing) is owner-tuned and deliberately untouched.
             hunter._atkT = 0;
             setState(hunter, h, "rush", opts);
-            predatorStinger("commit");   // the brass cluster IS the commitment
+            stinger("commit");   // the brass cluster IS the commitment
           }
         }
         break;
@@ -2223,7 +2343,7 @@
       case "bump": {
         // ONE investigatory shoulder-nudge, then it VEERS OFF. A fake-out that
         // is also real animal behaviour, and it teaches the tell for free.
-        predatorDread(hunter, 0.7, dreadOptsFor(hunter, dist, sub));
+        dreadFor(hunter, 0.7, dreadOptsFor(hunter, dist, sub));
         move(hunter, toT, rushSpd * 0.72, dt);
         if (dist <= reach * 1.15) {
           const dmg = opts.bumpDmg != null ? opts.bumpDmg : D_BUMP_DMG;
@@ -2239,12 +2359,19 @@
               // ballistic path — that one integrates against the SEABED.
               knockPlayer(sx, sz, 8.2, 4.2, null);
             }
-          } else if (!isP && target.hp != null) {
-            target.hp -= dmg;
+          } else if (!isP) {
+            // A NON-PLAYER VICTIM'S DAMAGE BELONGS TO THE CALLER'S SINK. The
+            // raw `target.hp -= dmg` this replaces bypassed whatever bus the
+            // victim's own file runs — for wildlife that is cityWildlifeHit,
+            // the ONE thing that turns lethal damage into a real carcass — so a
+            // shoulder-bump could kill a deer into a frozen, unskinnable prop.
+            // Invisible while the only victim this file ever had was the player.
+            if (typeof opts.onHit === "function") { try { opts.onHit(dmg); } catch (e) {} }
+            else if (target.hp != null) target.hp -= dmg;
           }
-          predatorStinger("impact");
-          predatorTrauma(0.6);
-          if (CBZ.sfx) { try { CBZ.sfx("punch", _sfxOpts); } catch (e) {} }
+          stinger("impact");
+          trauma(0.6);
+          if (CBZ.sfx) { try { score && CBZ.sfx("punch", _sfxOpts); } catch (e) {} }
           h.menace = clamp(h.menace + MEN_HIT, 0, 1);
           h.orbitDir = -h.orbitDir;
           h.circleDur = circleTime(opts);
@@ -2259,7 +2386,7 @@
       case "vanish": {
         // MAXIMUM DREAD THROUGH ABSENCE. It leaves, the mix goes almost silent,
         // the fin drops. What you cannot see is worse than what you can.
-        predatorDread(hunter, 0.06, dreadOptsFor(hunter, dist, sub));
+        dreadFor(hunter, 0.06, dreadOptsFor(hunter, dist, sub));
         h.dive = 1;   // a hint the caller's move() may read (dive / break LOS)
         // A SWIMMER VANISHES BY LEAVING; AN AMBUSHER VANISHES BY STOPPING.
         // Same state, same dread, opposite locomotion — a cougar that swam
@@ -2288,14 +2415,14 @@
         // COMMITTED. Straight, fast, from below/behind where the caller's move
         // lets it. This is the only state that is allowed to actually hurt you
         // badly, and it is the rarest outcome of circling.
-        predatorDread(hunter, 0.9 + clamp(1 - dist / Math.max(1, circleR), 0, 1) * 0.1,
+        dreadFor(hunter, 0.9 + clamp(1 - dist / Math.max(1, circleR), 0, 1) * 0.1,
           dreadOptsFor(hunter, dist, sub));
         if (!reachable) { setState(hunter, h, "disengage", opts); break; }
         move(hunter, toT, rushSpd, dt);
         // THE DROP-OUT, timed off closing speed rather than a fixed radius.
         if (!h.dropped && dist <= rushSpd * DROP_LEAD + reach) {
           h.dropped = true;
-          predatorDrop(0.30);
+          drop(0.30);
         }
         // CONTACT AT `reach`, NOT `reach * 1.25`. The wider band overlapped
         // creature_combat's own approach branch (which moves the body whenever
@@ -2335,7 +2462,7 @@
             else if (isP && CBZ.cityHurtPlayer && !(CBZ.player && CBZ.player.dead)) {
               try { CBZ.cityHurtPlayer(bd * 2, hp.x, hp.z, "struck by a " + actorName(hunter), false, hunter, true); } catch (e) {}
             } else if (!isP && target.hp != null) target.hp -= bd * 2;
-            predatorStinger("impact"); predatorTrauma(0.7);
+            stinger("impact"); trauma(0.7);
             setState(hunter, h, "disengage", opts);
           }
         } else if (h.t > RUSH_TIMEOUT) {
@@ -2345,7 +2472,7 @@
       }
 
       case "seize": {
-        predatorDread(hunter, 1, dreadOptsFor(hunter, 0, sub));
+        dreadFor(hunter, 1, dreadOptsFor(hunter, 0, sub));
         if (!hunter._seizing) {
           // whatever the outcome, the commit is spent. §B is absolute.
           setState(hunter, h, "disengage", opts);
@@ -2357,7 +2484,7 @@
 
       case "disengage": {
         // MANDATORY after every commit, hit or miss.
-        predatorDread(hunter, clamp(0.25 - h.t * 0.12, 0, 0.25), dreadOptsFor(hunter, dist, sub));
+        dreadFor(hunter, clamp(0.25 - h.t * 0.12, 0, 0.25), dreadOptsFor(hunter, dist, sub));
         h.dive = 0.6;
         move(hunter, toT + Math.PI, cruiseSpd * 1.15, dt);
         if (dist > orbitR * 2.5 || h.t > 8) {

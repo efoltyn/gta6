@@ -990,7 +990,14 @@
     // its owner: it just takes the hit — shooting your own pet is on you.)
     if (a.tamed) return { head: !!(hit && hit.head), down: false, dmg: dmg };
     a.alarm = 8;
-    const P = CBZ.player && CBZ.player.pos;
+    // WHO HURT IT decides which way it runs. Before the food chain the only
+    // possible answer was "the player", so the flee heading was hard-coded away
+    // from CBZ.player — which made a deer bitten by a wolf sprint TOWARD the
+    // wolf whenever the player happened to be on the far side. `w.by` (a hunter,
+    // a car) names the real source; absent still means you.
+    const by = (w && w.by) || null;
+    const byPos = (by && by.pos) || (hit && hit.from) || null;
+    const P = byPos || (CBZ.player && CBZ.player.pos);
     if (LIVE()) {
       // a visible recoil so every hit READS (creature_combat's shudder), then
       // the wound decides: anything with teeth turns on you, prey bolts hard.
@@ -1009,7 +1016,17 @@
       // reads as broken rather than tense.
       if (a.species.danger > 0.15 && P) {
         if (!huntsShared(a)) { a.state = "charge"; a._burstT = null; }
-        else if (CBZ.predatorProvoke && CBZ.player) { try { CBZ.predatorProvoke(a, CBZ.player); } catch (e) {} }
+        else if (CBZ.predatorProvoke) {
+          // IT FIGHTS BACK AT WHAT ACTUALLY BIT IT. `by` is null for a player
+          // shot, which is the old behaviour byte for byte; when another ANIMAL
+          // drew the blood, the wound re-targets the hunt onto it instead of
+          // onto whoever happens to be standing across the meadow. Satiation and
+          // any half-finished meal are cleared: being eaten outranks being full.
+          const foe = (by && by.animal && by.pos && !by.dead) ? by : (CBZ.player || null);
+          a._feedT = 0; a._feedOn = null; a._satT = 0;
+          a._prey = (foe && foe.animal) ? foe : null;
+          try { CBZ.predatorProvoke(a, foe); } catch (e) {}
+        }
       }
       else {
         a.state = "flee"; a.stateT = (cls.fleeT || 4) + 2;
@@ -1021,6 +1038,184 @@
     return { head: !!(hit && hit.head), down: false, dmg: dmg };
   };
 
+  // ============================================================
+  //  THE DEATH TUMBLE — the shared single-rigid-body fall, LIFTED OUT of
+  //  killAnimal so it can actually be CALLED.
+  //
+  //  OWNER: "when they are killed they don't have death ragdoll like humans
+  //  they just sit head pointed to sky dumb death animation." Two different
+  //  files were literally doing that — dogs.js eased `rotation.z` to ±1.25 and
+  //  arena_fights.js's pit loser snapped it to 1.35 — while THIS physics, which
+  //  is a real (if rigid) fall, sat locked inside a function neither of them
+  //  could reach. Nothing here is new: it is the same impulse, spin, bounce and
+  //  side-biased rest wildlife has run on a shot deer for months.
+  //
+  //  It is deliberately the SECOND-best death. systems/quadruped_ragdoll.js
+  //  takes the body whenever it can (near the camera, legs discoverable, solver
+  //  budget free) and then the limbs really do flail; this is what a far kill,
+  //  a snake, a fish or a full pool gets. Either way the killing round's
+  //  DIRECTION is carried, so a deer shot from the road lands off the road.
+  //
+  //  `impulse` is the RAW impulse before mass damping (pass ~3-9); mass is
+  //  derived here from the species' own scale so no caller has to know it.
+  // ============================================================
+  const _kdir = { x: 0, y: 0, z: 0 };
+  function killDir(a, hit) {
+    let dx = hit && hit.dir ? (+hit.dir.x || 0) : 0;
+    let dy = hit && hit.dir ? (+hit.dir.y || 0) : 0;
+    let dz = hit && hit.dir ? (+hit.dir.z || 0) : 0;
+    let dl = Math.hypot(dx, dz);
+    if (dl < 0.01) {
+      // no travel direction (a blast, a bite, a car with no vector): fall away
+      // from whatever killed it, else from the player, else anywhere.
+      const src = (hit && hit.from) || null;
+      const P = src || (CBZ.player && CBZ.player.pos);
+      if (P) { dx = a.group.position.x - P.x; dz = a.group.position.z - P.z; dl = Math.hypot(dx, dz); }
+    }
+    if (dl < 0.01) { const ah = Math.random() * Math.PI * 2; dx = Math.cos(ah); dz = Math.sin(ah); dl = 1; }
+    _kdir.x = dx / dl; _kdir.y = dy; _kdir.z = dz / dl;
+    return _kdir;
+  }
+
+  function wildlifeDeathTumble(a, dir, impulse, point) {
+    if (!a || !a.group) return null;
+    const grp = a.group, sp = a.species || {};
+    let dx = dir ? (+dir.x || 0) : 0;
+    const dy = dir ? (+dir.y || 0) : 0;
+    let dz = dir ? (+dir.z || 0) : 0;
+    let dl = Math.hypot(dx, dz);
+    if (dl < 0.01) { const ah = Math.random() * Math.PI * 2; dx = Math.cos(ah); dz = Math.sin(ah); dl = 1; }
+    dx /= dl; dz /= dl;
+    const scale = Math.max(0.35, sp.scale || 1);
+    const mass = Math.max(0.75, scale * scale * 1.7);
+    const raw = (impulse != null && isFinite(impulse) && impulse > 0) ? impulse : 5.9;
+    const imp = Math.min(8.5, raw / Math.sqrt(mass));
+    const side = point
+      ? (Math.sign((point.x - grp.position.x) * -dz + (point.z - grp.position.z) * dx) || (Math.random() < 0.5 ? -1 : 1))
+      : (Math.random() < 0.5 ? -1 : 1);
+    a._deathPhys = {
+      vx: dx * imp, vy: Math.max(1.2, 1.6 + Math.max(-0.2, dy) * imp * 0.7), vz: dz * imp,
+      wx: (Math.random() - 0.5) * 2.1 + dy * 0.8,
+      wy: (Math.random() - 0.5) * 1.8,
+      wz: side * (2.7 + Math.random() * 1.9) + dx * 0.5,
+      restRoll: side * (1.38 + Math.random() * 0.14),
+      restPitch: (Math.random() - 0.5) * 0.32,
+      restYaw: grp.rotation.y + (Math.random() - 0.5) * 0.25,
+      t: 0, groundT: 0, bounces: 0,
+    };
+    a._dieT = null;
+    DEATHS.tumbles++;
+    grp.position.y = Math.max(groundY(grp.position.x, grp.position.z) + 0.08 * scale, grp.position.y);
+    return a._deathPhys;
+  }
+  CBZ.wildlifeDeathTumble = wildlifeDeathTumble;
+
+  // The tumble's INTEGRATOR, also lifted out of the tick's dead branch for the
+  // same reason: dogs.js's actors are `external`, so wildlife's tick skips them
+  // entirely (see the `a.external` continue) and a dog handed the shared tumble
+  // would have had nothing stepping it. Returns true while the body is still
+  // moving. Verbatim physics — do not retune it here and there.
+  function wildlifeDeathStep(a, dt) {
+    const ph = a && a._deathPhys;
+    if (!ph) return false;
+    const grp = a.group;
+    if (!grp) { a._deathPhys = null; return false; }
+    const step = Math.min(0.04, dt);
+    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    ph.t += step;
+    ph.vy -= 20.5 * step;
+    grp.position.x += ph.vx * step;
+    grp.position.y += ph.vy * step;
+    grp.position.z += ph.vz * step;
+    grp.rotation.x += ph.wx * step;
+    grp.rotation.y += ph.wy * step;
+    grp.rotation.z += ph.wz * step;
+    const restY = groundY(grp.position.x, grp.position.z) + 0.08 * scale;
+    if (grp.position.y <= restY && ph.vy < 0) {
+      grp.position.y = restY;
+      ph.bounces++;
+      if (ph.bounces <= 1 && Math.abs(ph.vy) > 2.2) ph.vy = -ph.vy * 0.18;
+      else ph.vy = 0;
+      ph.vx *= 0.48; ph.vz *= 0.48;
+      ph.wx *= 0.28; ph.wy *= 0.38; ph.wz *= 0.3;
+      ph.groundT += step;
+    } else ph.groundT = 0;
+    const drag = Math.pow(0.3, step);
+    ph.vx *= drag; ph.vz *= drag;
+    ph.wx *= Math.pow(0.24, step); ph.wy *= Math.pow(0.2, step); ph.wz *= Math.pow(0.24, step);
+    if (ph.vy === 0 || ph.t > 1.55) {
+      const settle = Math.min(1, step * (ph.t > 2.2 ? 10 : 4.2));
+      grp.rotation.x += (ph.restPitch - grp.rotation.x) * settle;
+      grp.rotation.y += (ph.restYaw - grp.rotation.y) * settle;
+      grp.rotation.z += (ph.restRoll - grp.rotation.z) * settle;
+    }
+    if ((ph.t > 2.7) || (ph.t > 1.45 && ph.vy === 0 && Math.hypot(ph.vx, ph.vz, ph.wx, ph.wy, ph.wz) < 0.45)) {
+      grp.position.y = restY;
+      grp.rotation.x = ph.restPitch;
+      grp.rotation.y = ph.restYaw;
+      grp.rotation.z = ph.restRoll;
+      a._deathPhys = null;
+      return false;
+    }
+    return true;
+  }
+  CBZ.wildlifeDeathStep = wildlifeDeathStep;
+
+  // THE ONE ENTRY EVERY DEATH USES. Ragdoll if the solver will take it (real
+  // limbs), tumble if it will not. Exported because dogs.js and the arena pit
+  // need exactly this decision and must never re-implement it — re-implementing
+  // it is what produced two independent `rotation.z = ±1.3` snaps.
+  function wildlifeDeathPhysics(a, dir, impulse, point) {
+    if (!a || !a.group) return "none";
+    let rag = false;
+    if (CBZ.quadRagdoll) {
+      try {
+        rag = !!CBZ.quadRagdoll(a, {
+          point: point || null, dir: dir || null,
+          // the solver's impulse band is the human ragdoll's (1..34 — ~6 pistol,
+          // ~14 shotgun, 20+ blast); ours is the tumble's raw 3-9, so scale it
+          // once, here, rather than let two callers guess at the conversion.
+          imp: Math.max(2, Math.min(30, (impulse || 5.9) * 2.2)),
+        });
+      } catch (e) { rag = false; }
+    }
+    if (rag) {
+      a._deathPhys = null; a._dieT = null; a._toppleTo = null;
+      DEATHS.ragdolls++;
+      return "ragdoll";
+    }
+    wildlifeDeathTumble(a, dir, impulse, point);
+    return "tumble";
+  }
+  CBZ.wildlifeDeathPhysics = wildlifeDeathPhysics;
+
+  // how the world's deaths actually resolved — the ratchet's raw material.
+  const DEATHS = { ragdolls: 0, tumbles: 0, legacyPose: 0 };
+
+  // WHO KILLED IT. Every wildlife death used to be reported as YOURS, which was
+  // fine while the player was the only killer in the game and is a lie the
+  // moment a wolf takes a deer or a car clips an elk. `w.by` names the actor;
+  // absent means the player, so every existing caller is byte-identical.
+  const FEED_R = 70;                    // u — a kill you had no part in is only
+                                        // worth a feed line if you could see it
+  function killerIsPlayer(by) {
+    if (!by) return true;
+    if (by === CBZ.player || by.isPlayer) return true;
+    return !!(CBZ.city && CBZ.city.playerActor && by === CBZ.city.playerActor);
+  }
+  function killerName(by) {
+    if (!by) return "You";
+    if (by.name) return by.name;
+    if (by.species) return by.species.name || by.species.id || "an animal";
+    return by.kind || "something";
+  }
+  function playerNear(a, r) {
+    const P = CBZ.player && CBZ.player.pos;
+    if (!P || !a.pos) return false;
+    const dx = a.pos.x - P.x, dz = a.pos.z - P.z;
+    return dx * dx + dz * dz < r * r;
+  }
+
   function killAnimal(a, hit, w) {
     a.dead = true; a.ko = 0; a.state = "dead"; a.hp = 0;
     a.skinnable = true; a.skinT = CARCASS_LINGER;
@@ -1028,45 +1223,15 @@
     // a dead shark stops being ticked, so its surface proxy must be told to go
     // down with it — otherwise the fin hangs on the water forever.
     if (CBZ.sharkFinDrop) { try { CBZ.sharkFinDrop(a); } catch (e) {} }
-    // BULLET-DRIVEN CARCASS PHYSICS. The old death pose eased every species to
-    // the same feet-up roll around its root, then froze. Carry the killing round
-    // into a short rigid-body flight/tumble instead: mass damps big animals,
-    // gravity/bounces move the root, and the final rest is side-biased with a
-    // little pitch/yaw variance so a herd never becomes a row of identical toys.
     const grp = a.group;
     if (LIVE()) {
-      let dx = hit && hit.dir ? (+hit.dir.x || 0) : 0;
-      let dy = hit && hit.dir ? (+hit.dir.y || 0) : 0;
-      let dz = hit && hit.dir ? (+hit.dir.z || 0) : 0;
-      let dl = Math.hypot(dx, dz);
-      if (dl < 0.01) {
-        const P = CBZ.player && CBZ.player.pos;
-        if (P) { dx = grp.position.x - P.x; dz = grp.position.z - P.z; dl = Math.hypot(dx, dz); }
-      }
-      if (dl < 0.01) { const ah = Math.random() * Math.PI * 2; dx = Math.cos(ah); dz = Math.sin(ah); dl = 1; }
-      dx /= dl; dz /= dl;
-      const scale = Math.max(0.35, a.species.scale || 1);
-      const mass = Math.max(0.75, scale * scale * 1.7);
       const shotK = Math.max(0.55, (w && w.knock) || 1) * (w && w.pellets ? 1.22 : 1);
-      const impulse = Math.min(8.5, (3.2 + shotK * 2.7) / Math.sqrt(mass));
-      const side = (hit && hit.point)
-        ? Math.sign((hit.point.x - grp.position.x) * -dz + (hit.point.z - grp.position.z) * dx) || (Math.random() < 0.5 ? -1 : 1)
-        : (Math.random() < 0.5 ? -1 : 1);
-      a._deathPhys = {
-        vx: dx * impulse, vy: Math.max(1.2, 1.6 + Math.max(-0.2, dy) * impulse * 0.7), vz: dz * impulse,
-        wx: (Math.random() - 0.5) * 2.1 + dy * 0.8,
-        wy: (Math.random() - 0.5) * 1.8,
-        wz: side * (2.7 + Math.random() * 1.9) + dx * 0.5,
-        restRoll: side * (1.38 + Math.random() * 0.14),
-        restPitch: (Math.random() - 0.5) * 0.32,
-        restYaw: grp.rotation.y + (Math.random() - 0.5) * 0.25,
-        t: 0, groundT: 0, bounces: 0,
-      };
-      a._dieT = null;
-      grp.position.y = Math.max(groundY(grp.position.x, grp.position.z) + 0.08 * scale, grp.position.y);
+      wildlifeDeathPhysics(a, killDir(a, hit), 3.2 + shotK * 2.7, (hit && hit.point) || null);
     } else {
+      // the flag-off build, untouched: one canned topple and freeze.
       grp.rotation.z = (Math.random() < 0.5 ? 1 : -1) * (1.15 + Math.random() * 0.25);
       grp.position.y = Math.max(0, grp.position.y) + 0.05;
+      DEATHS.legacyPose++;
     }
     // A kill gets one full, direction-aware bleed event (pool + mist, no human
     // body-part logic); the connecting bullet already emitted its small entry
@@ -1075,12 +1240,20 @@
       try { CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: hit.dir || null, amount: hit.head ? 1.05 : 0.72, player: false }); } catch (e) {}
     }
     carcasses.push(a);
-    // score/notify — a kill is a kill.
-    if (CBZ.city) {
-      if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN — skin it before it's gone!", 4, { urgent: true }); }
-      else if (CBZ.city.note) CBZ.city.note(a.species.name + " down · walk up & hold to skin", 2.4);
+    // score/notify — a kill is a kill, but only YOUR kill is news.
+    const by = (w && w.by) || null;
+    if (killerIsPlayer(by)) {
+      if (CBZ.city) {
+        if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN — skin it before it's gone!", 4, { urgent: true }); }
+        else if (CBZ.city.note) CBZ.city.note(a.species.name + " down · walk up & hold to skin", 2.4);
+      }
+      if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", a.species.name, "hunted"); } catch (e) {} }
+    } else if (playerNear(a, FEED_R) && CBZ.cityKillFeed) {
+      // KILLFEED HYGIENE. The food chain runs across the whole map; a wolf
+      // taking a deer two kilometres away is simulation, not news, and toasting
+      // every one of them would turn the ONE sanctioned popup into spam.
+      try { CBZ.cityKillFeed(killerName(by), a.species.name, (w && w.cause) || "killed"); } catch (e) {}
     }
-    if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", a.species.name, "hunted"); } catch (e) {} }
     // let a following dog notice the kill too (dogs.js reads this list).
   }
 
@@ -1386,6 +1559,318 @@
     return a._landHunt;
   }
 
+  // ============================================================
+  //  THE FOOD CHAIN (CBZ.CONFIG.WILDLIFE_FOODCHAIN)
+  //
+  //  OWNER: "they don't eat each other or attack the human." The engine already
+  //  had every piece of this and none of them were wired together: a CARNIVORE
+  //  set that existed only to cap spawn budgets, a stalking FSM that reads its
+  //  target STRUCTURALLY (predatorHunt asks a target for .pos and nothing else,
+  //  so it never cared that the four live call sites all handed it the player),
+  //  a pack coordinator, a herd panic ripple that only gunfire could trigger,
+  //  and peds.js's cityScare, which takes any threat with a position. So the
+  //  whole food chain is a TARGET CHOICE plus a damage sink — no second brain.
+  //
+  //  WHAT A PREDATOR WILL TAKE IS ARITHMETIC, NOT A TABLE. Three continuous
+  //  facts already on every species decide it:
+  //    * MEDIUM must match — a wolf cannot take a shark, a shark cannot take a
+  //      deer, and neither needs to be told which it is.
+  //    * MASS — prey up to ~1.35x the hunter's own scale. A gray wolf (0.95)
+  //      reaches a whitetail and an elk and stops short of a brown bear (1.35),
+  //      and nobody typed "bear" to make that true.
+  //    * TROPHIC — anything at least as DANGEROUS as you is not lunch. One line,
+  //      and predators stop hunting each other without a hostility matrix.
+  //  Add the 46th species tomorrow and it slots into the pyramid untouched.
+  //
+  //  AND IT DOES NOT BECOME A SLAUGHTERHOUSE. predatorHunt's menace gauge
+  //  already forces a withdrawal after every commit; on top of that a kill is
+  //  followed by 20-40s of FEEDING at the carcass and then 3-5 minutes of
+  //  satiation. A fed wolf is scenery, which is the point.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_FOODCHAIN == null) CBZ.CONFIG.WILDLIFE_FOODCHAIN = true;
+  function CHAIN() { return !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_FOODCHAIN === false); }
+
+  const PREY_RESCAN = 1.15;      // s between prey searches per hunter (they are O(n))
+  const FEED_MIN = 20, FEED_RAND = 20;      // s spent at a fresh carcass
+  const SAT_MIN = 180, SAT_RAND = 120;      // s of satiation after a meal
+  const PREY_MASS_MAX = 1.35;    // prey may outweigh its hunter by this much
+  const ALARM_EVERY = 0.6;       // s between herd-alarm sweeps from one hunter
+  const NPC_HUNT_CAP = 2;        // concurrent predator-vs-person hunts, globally
+  const NPC_HUNT_R = 46;         // u — how far a predator will look for a person
+  // How far from the player the food chain is SIMULATED at all. Generous (it is
+  // ~2.5x the widest LOD radius, so hunts are well under way before you can see
+  // them and you never watch one begin), and hard, so a 10 km map cannot put a
+  // hundred and seventy predators in the frame budget for a fight nobody will
+  // ever witness. Beyond it the world is still a world; it is just not ticking.
+  const HUNT_SIM_R2 = 900 * 900;
+  let npcHunts = 0;              // recounted every tick from the live list
+
+  // "COULD THIS SPECIES EVER HUNT?" — cached on the SPECIES the same way
+  // classify() caches sp._bclass, because the LOD freeze in tick() asks it about
+  // every animal in the world every frame and predatorIs() re-derives a style
+  // string on each call. Species objects are world-lifetime, so this is computed
+  // once per species per session, not once per animal.
+  function predSpecies(sp) {
+    if (sp._isPred == null) {
+      sp._isPred = CBZ.predatorIs
+        ? !!CBZ.predatorIs({ species: sp })
+        : ((sp.danger || 0) >= 0.5 || !!sp.venom || !!sp.constrictor);
+    }
+    return sp._isPred;
+  }
+
+  function preyOk(hunter, hsp, a) {
+    if (!a || a === hunter || a.dead || a.tamed || a.ridden || a.external || a.bird) return false;
+    const sp = a.species;
+    if (!sp || sp === hsp) return false;                    // never its own kind
+    if (!!sp.aquatic !== !!hsp.aquatic) return false;       // medium must match
+    if (sp.rarity === "legendary") return false;            // unique animals are not lunch
+    if ((sp.scale || 1) > (hsp.scale || 1) * PREY_MASS_MAX) return false;
+    if ((sp.danger || 0) >= (hsp.danger || 0)) return false;
+    return true;
+  }
+
+  // ---- CAN THIS ONE TAKE A PERSON? Rare, and gated on FACTS the species
+  //      already carries plus the state of the world around the victim. A
+  //      snake, a fox or a coyote never qualifies; a wolf, a big cat or a bear
+  //      does, at night, when you are on your own.
+  function manEater(a, hsp) {
+    if ((hsp.scale || 1) < 0.85 || (hsp.danger || 0) < 0.6) return false;
+    const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(hsp) : "bite";
+    if (style !== "maul" && style !== "pounce") return false;   // teeth and mass, not venom
+    const night = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
+    // night-weighted rather than night-only: a daylight attack is possible and
+    // rare, which is what makes the night ones land.
+    return Math.random() < 0.16 + night * 0.5;
+  }
+  function loneEnough(p) {
+    if (!p || p.dead || p.inCar || p.ko > 0 || p.isPlayer) return false;
+    if (p.kind === "cop" || p.kind === "security" || p.armed) return false;
+    let near = 0;
+    const list = CBZ.cityPeds;
+    if (list) {
+      for (let i = 0; i < list.length; i++) {
+        const o = list[i];
+        if (o === p || !o.pos || o.dead) continue;
+        const dx = o.pos.x - p.pos.x, dz = o.pos.z - p.pos.z;
+        if (dx * dx + dz * dz < 28 * 28 && ++near > 1) return false;   // a crowd is safety
+      }
+    }
+    const cops = CBZ.cityCops;
+    if (cops) {
+      for (let i = 0; i < cops.length; i++) {
+        const c = cops[i];
+        if (!c || c.dead || !c.pos) continue;
+        const dx = c.pos.x - p.pos.x, dz = c.pos.z - p.pos.z;
+        if (dx * dx + dz * dz < 45 * 45) return false;
+      }
+    }
+    return true;
+  }
+
+  // Runtime AI, so Math.random is sanctioned here (the determinism law binds
+  // BUILD paths). Throttled per hunter: the sweep is O(animals) and there is no
+  // reason a predator re-decides what it is stalking sixty times a second.
+  function pickPrey(a, senseR, dt) {
+    a._preyT = (a._preyT || 0) - dt;
+    if (a._prey && !a._prey.dead) return a._prey;
+    if (a._preyT > 0) return null;
+    a._preyT = PREY_RESCAN * (0.7 + Math.random() * 0.6);
+    if ((a._satT || 0) > 0) return null;
+    const hsp = a.species, hx = a.pos.x, hz = a.pos.z;
+    const R = Math.max(18, senseR);
+    let best = null, bd = R * R;
+    for (let i = 0; i < animals.length; i++) {
+      const o = animals[i];
+      if (!preyOk(a, hsp, o)) continue;
+      const dx = o.pos.x - hx, dz = o.pos.z - hz, d2 = dx * dx + dz * dz;
+      // never two hunters on one animal — that is what predatorPack is for when
+      // they are a pack, and a free-for-all when they are not.
+      if (d2 < bd && !(o._huntedBy && o._huntedBy !== a && !o._huntedBy.dead)) { bd = d2; best = o; }
+    }
+    // A PERSON IS THE RARE ONE. Only looked for when no animal prey was found
+    // (a wolf with a deer in front of it does not walk past it to reach a
+    // pedestrian), and only under the whole gate above.
+    if (!best && !hsp.aquatic && npcHunts < NPC_HUNT_CAP && manEater(a, hsp)) {
+      const list = CBZ.cityPeds;
+      let bp = null, bpd = NPC_HUNT_R * NPC_HUNT_R;
+      if (list) {
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          if (!p || !p.pos || p._huntedBy) continue;
+          const dx = p.pos.x - hx, dz = p.pos.z - hz, d2 = dx * dx + dz * dz;
+          if (d2 < bpd && loneEnough(p)) { bpd = d2; bp = p; }
+        }
+      }
+      best = bp;
+    }
+    if (best) { best._huntedBy = a; a._prey = best; }
+    return best;
+  }
+
+  // ---- the PREY bundle. Same locomotion seam, different damage sink: this is
+  //      the only real difference between hunting you and hunting a deer, and
+  //      it is why the FSM needed no changes at all.
+  function preyOpts(a) {
+    if (a._preyHunt) return a._preyHunt;
+    let over = a._preyHuntOver;
+    if (!over) {
+      const legless = !!a.snake;
+      over = a._preyHuntOver = {
+        move: legless
+          ? function (h, wantH, speed, dt) { return slither(h, wantH, speed, dt); }
+          : function (h, wantH, speed, dt) { return landWalk(h, wantH, speed, dt); },
+        onHit: function (d) {
+          const v = a._prey;
+          if (!v || v.dead) return;
+          if (v.animal) {
+            // EVERY animal wound goes through the ONE bus, so a predator's bite
+            // gets the flinch, the gore, the carcass and the pelt for free — and
+            // so a lethal one produces a REAL corpse instead of a frozen prop.
+            if (CBZ.cityWildlifeHit) {
+              try { CBZ.cityWildlifeHit(v, { head: false, point: null, from: a.pos }, { damage: d, by: a, cause: preyCause(a) }); } catch (e) {}
+            }
+            return;
+          }
+          // A PERSON. There is no shared ped damage bus in this codebase (the
+          // census counts 52 raw `.hp -=` sites and this makes 53); dogs.js's
+          // dogBite is the established shape for an animal hurting somebody, so
+          // this is that shape, in ONE place, with the KILL handed to
+          // cityKillPed — which is what buys the human ragdoll and the killfeed.
+          v.hp = (v.hp == null ? (v.maxHp || 100) : v.hp) - d;
+          if (CBZ.body && CBZ.body.hit) { try { CBZ.body.hit(v, { fromX: a.pos.x, fromZ: a.pos.z, force: 6, knockdown: true }); } catch (e) {} }
+          if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(v.pos.x, v.pos.z, 1.4); } catch (e) {} }
+          if (v.hp <= 0 && CBZ.cityKillPed && !v.dead) {
+            try { CBZ.cityKillPed(v, { fromX: a.pos.x, fromZ: a.pos.z, force: 7, attacker: a, byPlayer: false }, preyCause(a)); } catch (e) {}
+          }
+        },
+        canReach: function (t) { return a._packGate !== false && !!t && !t.dead; },
+      };
+    }
+    // WE MERGE THIS ONE OURSELVES, AND THE REASON IS A TRAP WORTH KNOWING:
+    // predatorKit caches exactly ONE merged-overrides object per actor
+    // (`actor._predOpts`) and returns that same object to every caller. Two
+    // bundles on one animal — hunting YOU and hunting a deer — would therefore
+    // be the SAME object, and whichever was built last would silently take over
+    // the other's damage sink. That is a bear whose bite on an elk lands on the
+    // player's health bar. So the kit is asked for its BASE (stable, cached,
+    // never merged) and the three overrides go on top of a bundle we own.
+    const base = CBZ.predatorKit ? CBZ.predatorKit(a) : null;
+    if (!base) { a._preyHunt = null; return null; }
+    const out = {};
+    for (const k in base) out[k] = base[k];
+    for (const k in over) out[k] = over[k];
+    a._preyHunt = out;
+    return out;
+  }
+  function preyCause(a) {
+    const n = (a.species && (a.species.name || a.species.id)) || "animal";
+    return "mauled by a " + String(n).toLowerCase();
+  }
+
+  // ---- HERDS ALARM OFF PREDATORS, not just off gunfire. spookFromShot already
+  //      owns "something frightening happened here" for this file; a stalking or
+  //      charging hunter IS that, so prey gets the identical ripple (a.alarm is
+  //      what updateHerds carries into hr.panic, and the whole herd bolts as one
+  //      wall) with no second panic system anywhere.
+  function alarmFromPredator(h, amt) {
+    const hsp = h.species, hx = h.pos.x, hz = h.pos.z;
+    const R = 34 + (hsp.scale || 1) * 12;
+    const R2 = R * R;
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i], sp = a.species;
+      if (a === h || a.dead || a.tamed || a.ridden || a.external || !sp) continue;
+      if (!!sp.aquatic !== !!hsp.aquatic) continue;                  // a fish does not fear a wolf
+      if ((sp.danger || 0) >= (hsp.danger || 0)) continue;          // peers do not flinch
+      const dx = a.pos.x - hx, dz = a.pos.z - hz;
+      if (dx * dx + dz * dz > R2) continue;
+      a.alarm = Math.max(a.alarm || 0, amt);
+      if (a.state === "wander" || a.state === "graze" || a.state === "idle") {
+        a.state = "flee";
+        // the QUARRY gets a shorter burst than the bystanders. It is the one
+        // animal that must remain catchable, and the herd around it is the one
+        // that should read as a wall going the other way.
+        a.stateT = (a === h._prey ? 1.6 : ((classify(sp).fleeT || 4) + 1.5));
+        a.heading = Math.atan2(dz, dx);                             // straight away from it
+        a.spd = (sp.spd || 1.4) * 2.0;
+      }
+    }
+    // People scatter too, and they do it through peds.js's OWN decision —
+    // cityScare already weighs distance, nerve and the contagious panic field
+    // and answers bolt/freeze/hold. We never write a ped's state ourselves.
+    if (CBZ.cityScare && CBZ.cityPeds) {
+      const P = CBZ.cityPeds;
+      for (let i = 0; i < P.length; i++) {
+        const p = P[i];
+        if (!p || p.dead || p.inCar || !p.pos) continue;
+        const dx = p.pos.x - hx, dz = p.pos.z - hz;
+        if (dx * dx + dz * dz > 20 * 20) continue;
+        try { CBZ.cityScare(p, h); } catch (e) {}
+      }
+    }
+  }
+
+  // ---- FEEDING. The other half of the anti-slaughterhouse rule, and the beat
+  //      that makes a kill READ as a kill: the hunter stops, works at the
+  //      carcass with the maul/worry body layer predator_anim already owns (no
+  //      new animation anywhere), and then it is simply not hungry for minutes.
+  // hand a target back: nothing may hold a claim on prey it is not working, or
+  // one abandoned stalk locks that deer out of the food chain for the session.
+  function releasePrey(a) {
+    const v = a._prey;
+    if (v && v._huntedBy === a) v._huntedBy = null;
+    a._prey = null;
+  }
+
+  function startFeed(a, kill) {
+    a._feedOn = kill;
+    a._feedT = FEED_MIN + Math.random() * FEED_RAND;
+    a._feedPh = 0; a._feedGore = 0.4;
+    a._prey = null;
+    if (kill && kill._huntedBy === a) kill._huntedBy = null;
+  }
+  function endFeed(a) {
+    a._feedT = 0; a._feedOn = null;
+    a._satT = SAT_MIN + Math.random() * SAT_RAND;
+    if (CBZ.predatorPose) { try { CBZ.predatorPose(a, "maul", 0, 0, 0); } catch (e) {} }
+  }
+  function feedTick(a, dt) {
+    const kill = a._feedOn;
+    const grp = a.group;
+    if (!kill || !kill.group || !kill.group.parent) { endFeed(a); return false; }
+    a._feedT -= dt;
+    if (a._feedT <= 0) { endFeed(a); return false; }
+    const dx = kill.pos.x - grp.position.x, dz = kill.pos.z - grp.position.z;
+    const d = Math.hypot(dx, dz);
+    const reach = 1.1 + (a.species.scale || 1) * 0.9;
+    a.state = "graze";                 // markers.js reads a.state: a feeding animal is not a threat
+    // the SAME locomotion seam the hunt uses — a constrictor feeds too, and it
+    // has no legs to walk there on.
+    const walk = a.snake ? slither : landWalk;
+    if (d > reach) {
+      walk(a, Math.atan2(dz, dx), (a.species.spd || 1.4) * 0.85, dt);
+      if (a.snake) snakeAnimate(a, dt); else gaitAnimate(a, dt);
+      return true;
+    }
+    walk(a, Math.atan2(dz, dx), 0, dt);
+    a._feedPh += dt * 0.55;
+    if (CBZ.predatorPose) {
+      // mass picks the beat exactly the way predatorKit picks a seize style —
+      // the heavy ones tear with the whole body, the light ones worry at it.
+      const style = ((a.species.scale || 1) >= 1.15) ? "maul" : "worry";
+      try { CBZ.predatorPose(a, style, a._feedPh, 0.5, dt); } catch (e) {}
+    }
+    if (a.snake) snakeAnimate(a, dt); else gaitAnimate(a, dt);
+    a._feedGore -= dt;
+    if (a._feedGore <= 0) {
+      a._feedGore = 1.8 + Math.random() * 2.4;
+      if (CBZ.gore) {
+        try { CBZ.gore(kill.pos.x, kill.pos.y + 0.2 * (kill.species.scale || 1), kill.pos.z, { amount: 0.26, player: false }); } catch (e) {}
+      }
+    }
+    return true;
+  }
+
   // ---- THE ONE ENTRY POINT ----------------------------------------------
   // Returns TRUE when the shared hunt owned this actor's transform this frame
   // (the same contract as CBZ.sharkBrain). "cruise" means it has not noticed
@@ -1393,11 +1878,64 @@
   // cheap distance test.
   function huntTick(a, dt, P) {
     a._gaitEarly = 0;                 // cleared every frame — see the ORDER note below
-    if (!P || !huntsShared(a)) return false;
+    if (!huntsShared(a)) return false;
     const player = CBZ.player;
-    if (!player || player.dead) return false;
-    const o = huntOpts(a); if (!o) return false;
     const grp = a.group;
+
+    // FEEDING OWNS THE BODY OUTRIGHT — it is not a hunt state, it is what
+    // happens after one, and running the driver underneath it would have the
+    // hunter walk away from the meal it just killed.
+    if ((a._feedT || 0) > 0) { if (feedTick(a, dt)) return true; }
+
+    // THE MEAL, AND IT IS DETECTED HERE FOR A REASON. The seize resolves through
+    // predator.js's killVictim, which routes back through cityWildlifeHit, so by
+    // the frame we see `dead` there is a real carcass on the ground. That has to
+    // be noticed BEFORE anything below can drop the claim — the target-validity
+    // check further down releases dead prey, and with the hand-off written after
+    // it the hunter walked away from every animal it had just killed (measured:
+    // 213 frames of seize, one dead deer, zero frames of feeding).
+    if (a._prey && a._prey.dead) {
+      if (CHAIN() && a._prey.animal && (a._satT || 0) <= 0) {
+        startFeed(a, a._prey);
+        if (feedTick(a, dt)) return true;
+      } else releasePrey(a);                       // a person is not carrion
+    }
+
+    // ---- WHOM IS THIS HUNT FOR? -------------------------------------------
+    // ONE predatorHunt call per hunter per frame, ALWAYS. The FSM keeps a single
+    // scratch per hunter (menace, commits, the circle clock), so calling it
+    // twice in a frame with two targets would advance that clock twice and let
+    // two states fight over one body. The target is therefore decided HERE, and
+    // only ever while the machine is idle — once it has committed to something
+    // it keeps it until the states unwind on their own.
+    //   * The PLAYER always outranks lunch when he is inside sense range: this
+    //     file's whole existing behaviour is the branch below, unchanged.
+    //   * Otherwise a hungry predator looks for an animal it can take, and very
+    //     rarely for a person on their own.
+    const o0 = huntOpts(a);
+    let o = o0, target = player, preyMode = false;
+    const senseR = (o0 && o0.senseR) || 40;
+    let dpl = Infinity;
+    if (P && player && !player.dead) dpl = Math.hypot(grp.position.x - P.x, grp.position.z - P.z);
+    if (!(dpl < senseR * 1.6)) {
+      // a claim on prey is not forever. Drop it the moment the quarry is gone,
+      // protected, or simply too far to be worth walking to — otherwise the
+      // FIRST animal a predator ever noticed becomes the only one it will ever
+      // hunt, and a wolf ignores the deer beside it to stare across the valley.
+      const pv = a._prey;
+      if (pv) {
+        const pdx = pv.pos ? pv.pos.x - grp.position.x : 1e9;
+        const pdz = pv.pos ? pv.pos.z - grp.position.z : 1e9;
+        if (pv.dead || pv.inCar || pv.tamed || pv.ridden ||
+            (pdx * pdx + pdz * pdz) > (senseR * 2.2) * (senseR * 2.2)) releasePrey(a);
+      }
+      const st0 = a._huntSt;
+      // never re-pick mid-grab: the seize already owns this animal's mouth.
+      if (CHAIN() && !a._seizing && (!st0 || st0 === "cruise" || st0 === "disengage")) pickPrey(a, senseR, dt);
+      if (a._prey && !a._prey.dead) { target = a._prey; preyMode = true; o = preyOpts(a); }
+      else if (dpl === Infinity) { releasePrey(a); a._huntSt = "cruise"; return false; }
+    } else if (a._prey && !a._seizing) releasePrey(a);   // you walked in: the deer can wait
+    if (!o || !target || (target === player && (!player || player.dead))) { a._huntSt = "cruise"; return false; }
 
     // THE CAP, DELEGATED. This file used to own HUNTER_CAP = 3 and a `hunters`
     // counter recounted every tick — a second, independently invented answer
@@ -1409,7 +1947,7 @@
     // gone and this is the whole of what replaced it.
     let gate = "commit";
     if (CBZ.predatorPack) {
-      try { gate = CBZ.predatorPack(a, player, dt) || "commit"; } catch (e) { gate = "commit"; }
+      try { gate = CBZ.predatorPack(a, target, dt) || "commit"; } catch (e) { gate = "commit"; }
       a._packGate = (gate === "commit");
     } else a._packGate = true;
 
@@ -1450,8 +1988,26 @@
     if (striking && !a.snake) { gaitAnimate(a, dt); a._gaitEarly = 1; }
 
     let st = "cruise";
-    try { st = CBZ.predatorHunt(a, player, dt, o) || "cruise"; } catch (e) { st = "cruise"; }
+    try { st = CBZ.predatorHunt(a, target, dt, o) || "cruise"; } catch (e) { st = "cruise"; }
     a._huntSt = st;
+    if (preyMode) {
+      // THE HERD SEES IT COMING. Only while the hunter is actually working the
+      // target — a cruising wolf is part of the scenery and must not stampede
+      // the meadow it lives in. Throttled, because the sweep is O(animals).
+      // ON THE TELL, NOT ON A TIMER. A repeating sweep looks obviously right and
+      // is the one thing that makes the food chain impossible: `a.alarm` decays
+      // at 1/s, so re-raising it to 4.5 twice a second PINS every deer in the
+      // meadow into permanent flight — and prey in permanent flight at
+      // spd x fleeM is faster than a hunter's cruise, so the stalk can never
+      // close and nothing is ever caught (measured: 20,000 frames, zero kills).
+      // Firing on the STATE CHANGE instead gives a pulse per beat of the hunt,
+      // with the alarm decaying between them: the herd bolts, settles, watches,
+      // and bolts again — which is both what real prey does and what leaves the
+      // hunter a window to actually take one.
+      if (st !== prev && (st === "circle" || st === "bump" || st === "rush" || st === "seize")) {
+        alarmFromPredator(a, st === "rush" || st === "seize" ? 4.5 : 2.4);
+      }
+    }
     if (st === "cruise") {
       a.reared = false;
       // AN AMBUSHER IN COVER IS NOT IDLE. predatorKit turns `ambush` on for the
@@ -1472,8 +2028,12 @@
       // other three WALK AWAY AND GRAZE while it eats you. They must keep
       // working the ring at their assigned bearing (predatorPack has already
       // written a.orbitDir toward their slot) until the token frees up.
-      if (!still && gate !== "commit" && !a.snake) {
-        const dxp = P.x - grp.position.x, dzp = P.z - grp.position.z;
+      // (the ring is walked around whatever this hunt is ABOUT, which since the
+      //  food chain is not always the player — a flanking wolf must circle the
+      //  elk, not the man watching from the ridge.)
+      const tp = preyMode ? target.pos : P;
+      if (!still && gate !== "commit" && !a.snake && tp) {
+        const dxp = tp.x - grp.position.x, dzp = tp.z - grp.position.z;
         const dp = Math.hypot(dxp, dzp);
         const oR = (o.orbitR || 14);
         if (dp < oR * 3.2) {
@@ -1953,13 +2513,22 @@
     // (you SHOULD spot an elephant across the savanna before a rabbit).
     const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : ANIMAL_VIS.length - 1;
     const visR = ANIMAL_VIS[Math.max(0, Math.min(ANIMAL_VIS.length - 1, q))];
+    npcHunts = 0;
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species, grp = a.group;
       if (a.external) continue;      // dogs: in the registry for the GUNS, driven by dogs.js
+      // THE SATIATION CLOCK runs out here, not inside the hunt: a fed predator
+      // is deliberately a calm animal, and a calm animal LOD-freezes below —
+      // ticking its cooldown in the hunt would mean the world's only way to get
+      // hungry again was for you to stand next to it.
+      if (a._satT > 0) a._satT -= dt;
+      if (a._prey && !a._prey.animal) npcHunts++;   // the global predator-vs-person cap
+      let pd2 = 0;
       if (P) {
         const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
+        pd2 = vdx * vdx + vdz * vdz;
         const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);
-        grp.visible = a.ridden || a.tamed || (vdx * vdx + vdz * vdz) < vr * vr;
+        grp.visible = a.ridden || a.tamed || pd2 < vr * vr;
       }
       // matrix LOD: hidden animals stop paying r128's per-frame matrix math
       // (the saving staticfreeze.js was after) and thaw the moment they show.
@@ -1969,44 +2538,11 @@
         // bounce once and rotate on every axis before friction settles it onto a
         // side. This deliberately runs even when the mesh is LOD-hidden so the
         // carcass is in the right place/pose when the player approaches again.
+        // (When systems/quadruped_ragdoll.js took the body there is no
+        //  _deathPhys at all and IT owns the transform — one simulation per
+        //  corpse, never two.)
         if (a._deathPhys) {
-          const ph = a._deathPhys;
-          const step = Math.min(0.04, dt);
-          const scale = Math.max(0.35, sp.scale || 1);
-          ph.t += step;
-          ph.vy -= 20.5 * step;
-          grp.position.x += ph.vx * step;
-          grp.position.y += ph.vy * step;
-          grp.position.z += ph.vz * step;
-          grp.rotation.x += ph.wx * step;
-          grp.rotation.y += ph.wy * step;
-          grp.rotation.z += ph.wz * step;
-          const restY = groundY(grp.position.x, grp.position.z) + 0.08 * scale;
-          if (grp.position.y <= restY && ph.vy < 0) {
-            grp.position.y = restY;
-            ph.bounces++;
-            if (ph.bounces <= 1 && Math.abs(ph.vy) > 2.2) ph.vy = -ph.vy * 0.18;
-            else ph.vy = 0;
-            ph.vx *= 0.48; ph.vz *= 0.48;
-            ph.wx *= 0.28; ph.wy *= 0.38; ph.wz *= 0.3;
-            ph.groundT += step;
-          } else ph.groundT = 0;
-          const drag = Math.pow(0.3, step);
-          ph.vx *= drag; ph.vz *= drag;
-          ph.wx *= Math.pow(0.24, step); ph.wy *= Math.pow(0.2, step); ph.wz *= Math.pow(0.24, step);
-          if (ph.vy === 0 || ph.t > 1.55) {
-            const settle = Math.min(1, step * (ph.t > 2.2 ? 10 : 4.2));
-            grp.rotation.x += (ph.restPitch - grp.rotation.x) * settle;
-            grp.rotation.y += (ph.restYaw - grp.rotation.y) * settle;
-            grp.rotation.z += (ph.restRoll - grp.rotation.z) * settle;
-          }
-          if ((ph.t > 2.7) || (ph.t > 1.45 && ph.vy === 0 && Math.hypot(ph.vx, ph.vz, ph.wx, ph.wy, ph.wz) < 0.45)) {
-            grp.position.y = restY;
-            grp.rotation.x = ph.restPitch;
-            grp.rotation.y = ph.restYaw;
-            grp.rotation.z = ph.restRoll;
-            a._deathPhys = null;
-          }
+          wildlifeDeathStep(a, dt);
         } else if (a._dieT != null) {
           // legacy fallback for a carcass created before the new state existed.
           a._dieT -= dt;
@@ -2037,6 +2573,16 @@
         if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt);
         if (a.snake) { a.moving = true; snakeAnimate(a, dt); }
         else if (LIVE()) gaitAnimate(a, dt);
+        continue;
+      }
+      // ---- HELD IN SOMETHING'S JAWS ---------------------------------------
+      // predator.js's seize re-anchors its victim's transform to the attacker's
+      // mouth EVERY frame (anchorVictim). Steering the same body from here as
+      // well is two writers on one transform, and the visible result is an
+      // animal that calmly walks out of the jaws holding it. The body layer
+      // still runs, so the prey keeps kicking while it is being shaken.
+      if (a._seizedBy) {
+        if (LIVE()) { if (a.swim) animateSwim(a, dt); else if (!a.snake) gaitAnimate(a, dt); }
         continue;
       }
       // ---- SNAKES slither (own locomotion + strike/rear/constrict logic) --
@@ -2130,8 +2676,23 @@
       //      They resume instantly when you approach, or if their herd panics.
       //      Hot states (flee/charge/stalk) keep running off-screen so a shot
       //      herd genuinely LEAVES instead of pausing at the horizon.
+      //      TWO EXEMPTIONS, and both are the food chain's:
+      //      (a) A FEEDING animal — its meal clock only runs inside feedTick, so
+      //          freezing it would leave a wolf standing over a carcass forever
+      //          the moment you walked away.
+      //      (b) A HUNGRY PREDATOR — this is the one that decides whether the
+      //          food chain exists at all. Hot states (flee/charge/stalk) have
+      //          always kept running off-screen, but ACQUISITION happened in the
+      //          wander state, which freezes; so with the gate as it stood a wolf
+      //          could only ever notice a deer inside the LOD radius, i.e. the
+      //          world only ate itself where you were standing. A SATIATED
+      //          predator still freezes (it is scenery for the next few minutes),
+      //          and everything past HUNT_SIM_R freezes regardless, so the extra
+      //          load is bounded by the predator ceiling, halved again by the
+      //          far-distance AI throttle below.
+      const hungryHunter = CHAIN() && (a._satT || 0) <= 0 && predSpecies(sp) && pd2 < HUNT_SIM_R2;
       if (grp.visible === false && (a.state === "wander" || a.state === "graze" || a.state === "idle") &&
-          (a.alarm || 0) <= 0 &&
+          (a.alarm || 0) <= 0 && (a._feedT || 0) <= 0 && !hungryHunter &&
           (!a.herd || a.herd.panic <= 0.3)) { a.turnT -= dt; continue; }
       // ---- WILDLIFE_LIVE: the living state machine ------------------------
       if (LIVE()) {
@@ -2266,6 +2827,112 @@
     });
     return null;
   }, 98);
+
+  // ============================================================
+  //  CARS HIT ANIMALS (CBZ.CONFIG.WILDLIFE_CAR_IMPACT)
+  //
+  //  OWNER: "they don't ... get hit by cars." They could not. vehicles.js's
+  //  runOver() tests the player, CBZ.cityPeds, the instanced crowd and
+  //  CBZ.cityCops; animals live in CBZ.cityWildlife, and the two lists were
+  //  mutually invisible — you could drive a truck through a herd of elk and
+  //  nothing happened to anybody. The LOOP belongs to vehicles.js (it owns the
+  //  geometry and the per-frame budget); the damage MODEL belongs here, where
+  //  the species is.
+  //
+  //  IT IS NOT ONE THRESHOLD FOR EVERY ANIMAL, which is the whole reason this
+  //  is not four lines in runOver. CRASH.pedLethal is the speed that kills a
+  //  PERSON, and a person is scale 1 — so the lethal speed for anything else
+  //  scales with the square root of its own mass (a rabbit dies at a crawl, a
+  //  bull moose walks away from a parking-lot clip) and the damage goes as the
+  //  SQUARE of the closing speed, which is what kinetic energy actually does.
+  //  Nothing here knows a species name; every number is scale and hp.
+  //
+  //  The body then flies with the CAR's direction of travel, because that is
+  //  what the shared death physics was always reading — a struck deer launches
+  //  down the road using code that already existed.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_CAR_IMPACT == null) CBZ.CONFIG.WILDLIFE_CAR_IMPACT = true;
+  const _carHit = { head: false, point: null, dir: { x: 0, y: 0.3, z: 0 }, from: { x: 0, z: 0 } };
+  const _carW = { damage: 0, knock: 1.9, by: null, cause: "hit by a car" };
+  CBZ.cityWildlifeCarHit = function (a, opts) {
+    if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_CAR_IMPACT === false) return 0;
+    if (!a || a.dead || a.ridden || !a.pos || !opts) return 0;
+    const sp = a.species || {};
+    const v = Math.max(0, +opts.v || 0);
+    if (v <= 0.5) return 0;
+    const mass = Math.max(0.12, (sp.scale || 1) * (sp.scale || 1));
+    const lethalV = Math.max(2.5, (opts.lethal || 14) * Math.sqrt(mass));
+    const maxHp = a.maxHp || sp.hp || 40;
+    const k = v / lethalV;
+    const dmg = Math.max(1, Math.round(maxHp * k * k * 1.15));
+    // direction of travel + a little lift; killDir/wildlifeDeathTumble read it
+    let dx = +opts.vx || 0, dz = +opts.vz || 0;
+    const dl = Math.hypot(dx, dz);
+    if (dl > 0.01) { dx /= dl; dz /= dl; } else { dx = 0; dz = 0; }
+    _carHit.dir.x = dx; _carHit.dir.y = 0.3; _carHit.dir.z = dz;
+    _carHit.from.x = opts.fromX != null ? opts.fromX : a.pos.x - dx;
+    _carHit.from.z = opts.fromZ != null ? opts.fromZ : a.pos.z - dz;
+    _carHit.point = a.pos;                 // the strike is at the body, not at a bone
+    _carW.damage = dmg;
+    _carW.knock = 1.4 + Math.min(2.6, v * 0.1);   // a faster car throws it further
+    _carW.by = opts.by || null;
+    const wasDead = a.dead;
+    CBZ.cityWildlifeHit(a, _carHit, _carW);
+    _carW.by = null;                       // never hold a reference between calls
+    if (!wasDead && !a.dead) {
+      // SURVIVED IT. cityWildlifeHit has already bolted it or provoked it (a
+      // clipped bear turns on you — that is the shared grammar's job, not
+      // ours); all we add is the BANG, which the herd hears exactly the way it
+      // hears a gunshot. One panic system, not two.
+      a.alarm = Math.max(a.alarm || 0, 6);
+      spookFromShot(_carHit.from.x, _carHit.from.z);
+    }
+    return dmg;
+  };
+
+  // ============================================================
+  //  THE RATCHET (BLOCK LAW #5) — HOW ANIMALS ACTUALLY DIED.
+  //
+  //  `legacyPoseDeaths` counts deaths that ended in the canned rotation snap
+  //  (the owner's "head pointed to sky"). It is STRUCTURALLY zero while
+  //  WILDLIFE_LIVE is on, which is the shipping default — it can only rise if
+  //  somebody re-introduces a hand-written topple.
+  //
+  //  `frozenCorpses` counts dead bodies with no corpse timeline at all: no
+  //  skin/fade countdown and not on the carcass list. That was a REAL live bug
+  //  — predator.js's killVictim set `dead = true` on an animal directly, so a
+  //  predator-killed deer got no death physics, never entered `carcasses`, had
+  //  an undefined skinT (a NaN countdown that can never reach zero) and stood
+  //  frozen mid-pose in the world FOREVER. It is pinned at 0.
+  //
+  //  ragdolls/tumbles are printed beside them so a "fix" that simply stops
+  //  killing anything cannot pass.
+  // ============================================================
+  CBZ.wildlifeDeathAudit = function () {
+    let frozen = 0, live = 0, dead = 0, hunting = 0, feeding = 0, satiated = 0, preyHunts = 0, npcTargets = 0;
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (!a.dead) {
+        live++;
+        if (a._huntSt && a._huntSt !== "cruise") hunting++;
+        if ((a._feedT || 0) > 0) feeding++;
+        if ((a._satT || 0) > 0) satiated++;
+        if (a._prey) { preyHunts++; if (!a._prey.animal) npcTargets++; }
+        continue;
+      }
+      dead++;
+      const timed = isFinite(a.skinT) || isFinite(a.fadeT);
+      if (!timed || (!a.external && carcasses.indexOf(a) < 0)) frozen++;
+    }
+    return {
+      ragdolls: DEATHS.ragdolls, tumbles: DEATHS.tumbles,
+      legacyPoseDeaths: DEATHS.legacyPose, frozenCorpses: frozen,
+      live: live, corpses: dead, carcasses: carcasses.length,
+      hunting: hunting, preyHunts: preyHunts, npcTargets: npcTargets,
+      feeding: feeding, satiated: satiated,
+      solver: CBZ.quadRagdollAudit ? CBZ.quadRagdollAudit() : null,
+    };
+  };
 
   // public: let other systems (dogs.js) read/kill wildlife.
   CBZ.cityWildlifeList = function () { return animals; };
