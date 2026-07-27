@@ -230,7 +230,19 @@
     // Player start/return location. The airport builder publishes the exact
     // safe apron anchor; city/mode.js resolves this symbolic choice after the
     // whole archipelago exists, so these coordinates never drift apart.
-    playerSpawn: "airport",
+    //
+    // "story" (default) — the chosen ORIGIN owns the opening. city/origins.js
+    //   places you: the exec on his floor, the pilot already airborne, the
+    //   debtor outside the motel. This is the front door of the game and it
+    //   should be what a new player meets.
+    // "airport" — OVERRIDE. Ignores the origin's placement entirely and puts
+    //   every character on the Halloran Field apron instead. It was useful for
+    //   working on the airfield, and it is exactly what was hiding the nine
+    //   stories: mode.js gates on `playerSpawn !== "airport"`, so any other
+    //   value turns the override off and the origin runs.
+    // The switch is kept, not deleted — flip this back to "airport" whenever
+    // the airport itself needs iterating on.
+    playerSpawn: "story",
     blocks: 6,             // 6×6 grid of city blocks (room for shops + homes + turf)
     block: 34,             // block size (building lot)
     road: 18,              // four 3.6m lanes + 1.8m curb/clear zone per side
