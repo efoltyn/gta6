@@ -391,7 +391,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=riglock6w11"></script>
+  <script src="src/entities/character.js?v=riglock6w12"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=scale1y"></script>
 <script src="src/entities/coins.js"></script>
@@ -530,13 +530,13 @@
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
 <script src="src/world/water_spec.js?v=waterv2"></script>
 <script src="src/city/world.js?v=waterv2t"></script>
-<script src="src/city/interior_programs.js?v=fortress1"></script>
+<script src="src/city/interior_programs.js?v=fortress2"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=civic1"></script>
-<script src="src/city/buildings.js?v=masonry1"></script>
+<script src="src/city/buildings.js?v=masonry2"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
@@ -691,7 +691,7 @@
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
-<script src="src/city/occupy.js?v=fortress1w9"></script>
+<script src="src/city/occupy.js?v=fortress1w10"></script>
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
@@ -1248,7 +1248,7 @@
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=gov2xs"></script>
+<script src="src/city/govcomplex.js?v=gov2xt"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -1267,14 +1267,14 @@
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=pkg5"></script>
+<script src="src/core/packages.js?v=pkg6"></script>
 <script src="src/games/casino.js?v=pkg1"></script>
 <script src="src/games/ocean.js?v=pkg1"></script>
 <script src="src/games/racing.js?v=pkg2"></script>
 <script src="src/games/boxing.js?v=pkg1y"></script>
 <script src="src/games/airport.js?v=pkg2"></script>
 <script src="src/games/military.js?v=pkg2"></script>
-<script src="src/games/government.js?v=pkg1"></script>
+<script src="src/games/government.js?v=pkg2"></script>
 <script src="src/games/police.js?v=pkg2"></script>
 <script src="src/games/jail.js?v=pkg1"></script>
 <script src="src/systems/newlife.js?v=newlife1"></script>

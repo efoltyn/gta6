@@ -1011,12 +1011,24 @@
         ch.model.position.y = damp(ch.model.position.y, sink, sr, dt);
         ch._seatSunk = 1;
         const drop = Math.max(0.05, hipF - 0.03 * hs);   // hip → sole, soles a hair above the floor
-        let th = 0.95;                                    // thigh forward of vertical (relaxed slope)
-        let fold;                                         // knee flexion (rotation.x ≥ 0 folds back)
-        const c2 = Math.min(1, (drop - THIGH * Math.cos(th)) / SHIN);
-        const tuck = th + Math.acos(Math.max(-1, c2));    // shin drops near-vertical, foot under the knee
-        if (tuck <= 1.75) fold = tuck;
-        else {
+        let th, fold, shinScale = 1;
+        // A chair is read by its THIGH line. The old V2 solve began at 0.95 rad
+        // (54° from vertical) solely to make the short voxel shin touch the
+        // floor. That drove the knee DOWN through the cushion: the body was at
+        // the right height, but the legs visibly pierced the seat. Put a normal
+        // chair thigh almost level first, then lengthen only the lower-leg
+        // chain enough to meet the floor. This is also the honest correction
+        // for this stylised rig: its authored shin is only ~0.35 m in world
+        // scale, while a real 0.45-0.50 m chair needs a longer seated drop.
+        const chairTh = 1.38;                            // 79° from vertical
+        const chairShin = (drop - THIGH * Math.cos(chairTh)) / SHIN;
+        if (chairShin >= 0.82) {
+          th = chairTh;
+          fold = th;                                     // lower leg hangs vertically
+          // Standard chairs reach the floor; tall benches/stools dangle rather
+          // than destroying the seat-clear thigh line to chase it.
+          shinScale = Math.max(0.88, Math.min(1.38, chairShin));
+        } else {
           // low lounger: knees ride above the hips, feet planted forward
           const a2 = 0.55;                                // shin leans forward of vertical
           th = Math.acos(Math.max(-0.45, Math.min(1, (drop - SHIN * Math.cos(a2)) / THIGH)));
@@ -1029,6 +1041,10 @@
         if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -th, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
         if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -th, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
         setKnee(J.ll, fold + 0.03, sr); setKnee(J.rl, fold, sr);       // hair of asymmetry so rows don't read cloned
+        if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, shinScale, sr, dt);
+        if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, shinScale, sr, dt);
+        ch._seatShinScaled = !!((J.ll && Math.abs(J.ll.scale.y - 1) > 0.001) ||
+          (J.rl && Math.abs(J.rl.scale.y - 1) > 0.001));
         // forearms rest on the thighs/armrests (same relaxed carry as legacy)
         if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
         if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
@@ -1045,6 +1061,10 @@
       if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -1.3, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
       if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -1.3, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
       setKnee(J.ll, 1.42, sr); setKnee(J.rl, 1.38, sr);
+      if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, 1, sr, dt);
+      if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, 1, sr, dt);
+      ch._seatShinScaled = !!((J.ll && Math.abs(J.ll.scale.y - 1) > 0.001) ||
+        (J.rl && Math.abs(J.rl.scale.y - 1) > 0.001));
       // forearms rest toward the desktop — and a WORKING seat (ch.typing, set
       // only by the desk-sit paths) actually TYPES: a small alternating
       // forearm tap + a touch more head-down focus. Pure target modulation:
@@ -1066,6 +1086,17 @@
     if (ch._seatSunk) {
       if (ch.model) ch.model.position.y = damp(ch.model.position.y, 0, 10, dt);
       if (!ch.model || Math.abs(ch.model.position.y) < 0.005) { if (ch.model) ch.model.position.y = 0; ch._seatSunk = 0; }
+    }
+    if (ch._seatShinScaled) {
+      if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, 1, 12, dt);
+      if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, 1, 12, dt);
+      const lRest = !J.ll || Math.abs(J.ll.scale.y - 1) < 0.005;
+      const rRest = !J.rl || Math.abs(J.rl.scale.y - 1) < 0.005;
+      if (lRest && rRest) {
+        if (J.ll) J.ll.scale.y = 1;
+        if (J.rl) J.rl.scale.y = 1;
+        ch._seatShinScaled = 0;
+      }
     }
     if (ch.typing) ch.typing = false;   // typing exists only while seated (stale-flag guard)
 
