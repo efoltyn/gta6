@@ -91,6 +91,9 @@
   // The guided bomb payload. false => the payload cycle skips it and the
   // B-2 carries dumb iron only.
   if (CBZ.CONFIG.STRAT_JDAM == null) CBZ.CONFIG.STRAT_JDAM = true;
+  // Engine fire when the player is at the throttle (owner: "no fire comes out
+  // the back"). false => cold trenches exactly as before.
+  if (CBZ.CONFIG.STRAT_B2_PLUME == null) CBZ.CONFIG.STRAT_B2_PLUME = true;
 
   function h01(x, z, s) { return CBZ.hash01 ? CBZ.hash01(x, z, s) : 0.5; }
   function cm(hex, opts) { return CBZ.cmat ? CBZ.cmat(hex, opts) : (CBZ.mat ? CBZ.mat(hex, opts) : new THREE.MeshLambertMaterial({ color: hex })); }
@@ -229,8 +232,13 @@
     return cm(hex != null ? hex : 0x2b2f35, opts);
   }
 
+  // Palette matched to the owner's two reference photos (2026-07-27): from
+  // three-quarter the real ship is a LIGHT blue-grey with the intake fairings
+  // in the SAME family as the skin (they read as swells, not fittings); from
+  // below it is one near-black arrowhead. So: top up, belly down, panel only
+  // one step above skin.
   const B2C = {
-    skin: 0x2b2f35, skinD: 0x1b1e23, belly: 0x1f2227, panel: 0x373d45,
+    skin: 0x3a434d, skinD: 0x22262c, belly: 0x17191d, panel: 0x434c57,
     glass: 0x2a3b4d, gear: 0x3a3f46, tire: 0x14161a,
     deck: 0x0e1216, instr: 0x0c1a1c,
   };
@@ -571,6 +579,37 @@
       b2Seat(gp, cm(0x101215), ix, -5.90, -4.90, 1.66, 0.24, 0.05);
     }
 
+    // ---- ENGINE FIRE (owner: "when active it should have rocket in back —
+    // rn no fire comes out the back"). The real ship hides its heat on
+    // purpose; a game engine that is ON needs to LOOK on. Two additive
+    // sprites per trench, parked invisible at build (fxwarm's prewarm law),
+    // lit by the 12.35 updater only while flyingB2() is truthy — parked and
+    // NPC airframes stay cold, which keeps the stealth read when it is not
+    // yours. Positions derive from the trench's own station (b2TopY), never
+    // a typed height.
+    if (CBZ.CONFIG.STRAT_B2_PLUME !== false) {
+      const cv = document.createElement("canvas"); cv.width = cv.height = 32;
+      const c2 = cv.getContext("2d");
+      const grd = c2.createRadialGradient(16, 16, 1, 16, 16, 15);
+      grd.addColorStop(0, "rgba(255,244,214,1)");
+      grd.addColorStop(0.35, "rgba(255,170,64,0.85)");
+      grd.addColorStop(1, "rgba(255,90,20,0)");
+      c2.fillStyle = grd; c2.fillRect(0, 0, 32, 32);
+      const ptex = new THREE.Texture(cv); ptex.needsUpdate = true;
+      gp.userData.plumes = [];
+      for (let i = 0; i < 2; i++) {
+        const s = i ? 1 : -1, px = s * 5.0, py = b2TopY(5.0, -5.4) + 0.12;
+        for (let k = 0; k < 2; k++) {
+          const pm = new THREE.SpriteMaterial({ map: ptex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 });
+          const sp = new THREE.Sprite(pm);
+          sp.position.set(px, py, -6.5 - k * 1.05);
+          sp.visible = false;
+          gp.add(sp);
+          gp.userData.plumes.push({ s: sp, core: k === 0, bx: 1.5 - k * 0.3, by: 0.9 + k * 0.9 });
+        }
+      }
+    }
+
     // ---- BOMB BAY: a recessed cavity + TWO working doors -------------------
     // The doors are tagged (bayL / bayR) — the release arc in section 2 eases
     // them and CBZ.cockpitClassOf reads bombBay to pick the bomber costume.
@@ -796,6 +835,21 @@
         ud.bayR.rotation.z = -e * 1.15;
       }
     }
+    // engine fire — lit only under a player at the throttle; flicker is
+    // runtime FX so Math.random is sanctioned here
+    const pud = b2rec && b2rec.group && b2rec.group.userData;
+    if (pud && pud.plumes) {
+      const spd = c ? Math.hypot(c.vx || 0, c.vz || 0) : 0;
+      const thr = c ? Math.min(1, 0.4 + spd / 46) : 0;
+      for (let i = 0; i < pud.plumes.length; i++) {
+        const p = pud.plumes[i];
+        p.s.visible = thr > 0;
+        if (thr <= 0) continue;
+        const f = 0.72 + Math.random() * 0.56;
+        p.s.material.opacity = (p.core ? 0.9 : 0.5) * thr * f;
+        p.s.scale.set(p.bx * (0.85 + 0.3 * f), p.by * (0.8 + 0.5 * f) * (0.6 + 0.4 * thr), 1);
+      }
+    }
   });
 
   /* ==========================================================================
@@ -819,10 +873,18 @@
   function cyclePayload() {
     const c = flyingB2();
     if (!c) return payload;
+    const before = payload;
     const i = PAYLOADS.indexOf(payload);
     for (let k = 1; k <= PAYLOADS.length; k++) {
       const cand = PAYLOADS[(i + k) % PAYLOADS.length];
       if (payloadAvailable(cand, c)) { payload = cand; break; }
+    }
+    if (payload === before) {
+      // [X] with nothing to switch TO must say WHY, or it reads as a dead key
+      // (owner: "theres no way to change payload"). Name where the other
+      // stores come from instead of silently re-picking the same rack.
+      note("No other stores aboard — JDAM rack " + (CBZ.CONFIG.STRAT_JDAM === false ? "is disabled" : "spent") + "; Bunker Buster & THE DEVICE are bought at the bunker vault.", 3.2);
+      return payload;
     }
     note(payloadLabel(payload, c), 1.6);
     sfx("switch", { pitch: 1.2, volume: 0.3 });
