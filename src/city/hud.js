@@ -1119,10 +1119,15 @@
     const w = meta && meta.w;
     // Unified hotbar entries already carry the canonical engine id. Prefer it
     // over a label round-trip so every gun gets the exact same procedural
-    // thumbnail used by the full I inventory.
+    // thumbnail used by the full I inventory. That "exact same" is now literal:
+    // city/itemicons.js photographs guns through the ONE offscreen camera every
+    // other item in the bar goes through, so the pistol chip and the medkit chip
+    // beside it are lit and framed identically instead of coming from two
+    // renderers with two frames. weaponThumbnail stays as the degrade.
     const id = directId || (w && (w.id || w.key));
     let src = "";
-    try { if (id && CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id); } catch (e) {}
+    try { if (id && CBZ.itemIconGun) src = CBZ.itemIconGun(id); } catch (e) {}
+    if (!src) { try { if (id && CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id); } catch (e) {} }
     return src ? "<img class='gunModel' src='" + src + "' alt=''>"
       : "<span class='ic gun'>" + hotbarGunGlyph(meta) + "</span>";
   }

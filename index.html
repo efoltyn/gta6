@@ -500,6 +500,12 @@
 <script src="src/systems/killstreaks.js"></script>
 <script src="src/systems/interact.js?v=lines3"></script>
 <script src="src/systems/interactions.js?v=mapflow2"></script>
+<!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
+     which city/itemicons.js photographs for the slot and city/inventory.js
+     drops on the pavement. Needs THREE + actorweapons + materials, all
+     above; resolves itemicons' seams lazily so order between the two does
+     not matter. -->
+<script src="src/city/itemassets.js?v=itemasset1"></script>
 <!-- WHAT A THING IN YOUR BAG IS: one drawn pictogram per item KIND (so
      runtime registrations — species pelts/meat, the fishing catch, produce,
      C4 — are covered structurally), plus its verb and its worth. Loads

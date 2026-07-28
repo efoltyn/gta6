@@ -23,17 +23,61 @@
 
      CBZ.itemIcon(name, row)            -> a data: URI (cached forever)
      CBZ.itemIconHtml(name, row, cls)   -> "<img class='itemIcn ...'>"
+     CBZ.itemIconGun(engineId)          -> the same face for a weapon-slot chip
      CBZ.itemKind(name, row)            -> the pictogram kind string
+     CBZ.itemRow(name, row)             -> the catalog row (the one lookup)
+     CBZ.itemTone(name, row)            -> [base, accent, deep] — the one tint
      CBZ.itemVerb(name, row)            -> { id, label, hint } — what you DO
      CBZ.itemTip(name, row, count)      -> the slot tooltip (worth + verb)
      CBZ.cityUseItem(name)              -> run that verb (existing primitives)
      CBZ.itemIconAudit() / itemVerbAudit()
 
-   THE ART. 12x12 pixel sprites baked into SVG data-URIs at first ask — the
-   EXACT technique city/hud.js already uses for its hearts/shanks/armour
-   plates, so an item in a slot reads as family with the vitals above it.
-   No fetches, no canvas, no atlas; a sprite costs one string and is cached
-   per (kind x palette), so 40 species share ~36 drawings.
+   ============================================================
+   THE ART — SECOND PASS (2026-07-28). OWNER, seeing the first one live:
+   "Look how guns are a tiny actual gun in the icon but all other things in the
+   icon are retarded. Fix the others — make them the exact same thing. We have
+   so many assets built that can be shrunk for an icon, and if it isn't an asset
+   that can be shrunk, why is it a thing that can be an icon? Make the asset
+   then."
+
+   He is right and the diagnosis is exact. A gun icon was never a drawing: the
+   `row.gun` branch below has always handed off to `weapon_thumbnails.js`, which
+   photographs `CBZ.buildActorWeapon(id)` — the SAME model an NPC holds — with
+   one offscreen renderer and caches the PNG. Every other item got a 12x12
+   hand-drawn sprite. Two art forms in one grid, and the doodle loses on sight.
+
+   SO THE ICONS *ARE* THE ASSETS NOW. `city/itemassets.js` is the registry
+   ("what does this item look like"); this file is the CAMERA. One lazily-made
+   offscreen WebGL context, one orthographic camera at a fixed 3/4 hero angle,
+   one light rig — and the light rig is *literally weapon_thumbnails.js's*,
+   copied value for value, because that is the rig the owner has already
+   approved. Every item in the bag is now photographed under the lamps that
+   made the gun read.
+
+   THE FRAMING IS ARITHMETIC, NOT TASTE, and that is what makes the bag read as
+   ONE system rather than fifty stickers: the asset's 8 bounding-box corners are
+   projected onto the camera's own right/up axes, and the ortho half-extent is
+   `max(|x|, |y|) * 1.10` on BOTH axes. Same angle, same lamps, same 10% of air
+   around the widest dimension, for a pistol and for a boar hide. A long object
+   is not a special case either — under this camera a Z-aligned model lays
+   itself across the frame's DIAGONAL, which is 1.41x the room a horizontal one
+   would get, so a rifle survives a 30 px cell. (That is why itemassets.js's
+   authoring convention is "long axis along Z"; buildActorWeapon was obeying it
+   before it was written down.)
+
+   Two details that are bugs if you get them wrong. (a) A material may be a
+   MeshStandardMaterial PBR twin whose envMap is the LIVE SKY — an icon baked
+   at midnight would then be cached darker than the same icon baked at noon, so
+   the bake swaps to the Lambert twin for the shot and swaps back. (b) The
+   context is created ONCE and reused forever; browsers cap WebGL contexts and
+   a renderer per slot is how you lose the game's own canvas.
+
+   THE SPRITES STAY, AS THE DEGRADE. If context creation fails (a headless gate,
+   a browser out of contexts, a blacklisted GPU) every icon falls back to the
+   12x12 pixel sprite below — the EXACT technique city/hud.js uses for its
+   hearts/shanks/armour plates. No fetches, no atlas; a sprite costs one string
+   and is cached per (kind x palette), so 40 species share ~36 drawings.
+   `CBZ.CONFIG.ITEM_ICONS_RENDERED = false` is the one-line revert to it.
 
    WHY KIND AND NOT NAME. Half the catalog is registered at RUNTIME — every
    pelt and every meat in wildlife.js, the fishing catch, roleverbs' produce,
@@ -60,7 +104,11 @@
   if (!CBZ) return;
   const C = CBZ.CONFIG || (CBZ.CONFIG = {});
   if (C.ITEM_ICONS_V2 == null) C.ITEM_ICONS_V2 = true;
+  // ITEM_ICONS_RENDERED — icons are photographs of the real 3D asset. False is
+  // a one-line revert to the 12x12 sprite sheet below, byte-identically.
+  if (C.ITEM_ICONS_RENDERED == null) C.ITEM_ICONS_RENDERED = true;
   function on() { return C.ITEM_ICONS_V2 !== false; }
+  function rendersOn() { return C.ITEM_ICONS_RENDERED !== false && !!CBZ.itemAsset; }
 
   // ============================================================
   //  1. THE SPRITE SHEET — 12x12, one string per row.
@@ -950,6 +998,144 @@
   }
 
   // ============================================================
+  //  3b. THE PHOTOGRAPH — one context, one camera, one light rig, forever.
+  //
+  //  Everything below exists so that a pistol and a boar hide are shot under
+  //  identical conditions. Nothing here knows what an item IS; it is handed an
+  //  Object3D by city/itemassets.js and it takes a picture of it.
+  // ============================================================
+  const ICON_PX = 96;            // 3x the 30px slot: sharp on retina, ~4 KB/PNG
+  const HERO_YAW = 0.62;         // rad, ~35.5 deg — the product-shot three-quarter
+  const HERO_PITCH = 0.40;       // rad, ~22.9 deg above the horizon
+  const FRAME = 1.10;            // 10% air on the widest dimension. THE margin.
+  let R3 = null, RSCENE = null, RCAM = null, RHOLD = null, glDead = false;
+  const rcache = Object.create(null);   // renderKey -> data:image/png (or "")
+
+  function boot3() {
+    if (R3) return true;
+    if (glDead) return false;
+    // no THREE / no document at the moment an icon is first ASKED FOR is
+    // permanent, not transient — boot3 runs long after DOM ready.
+    if (!window.THREE || typeof document === "undefined") { glDead = true; return false; }
+    const T = window.THREE;
+    try {
+      R3 = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: "low-power" });
+      R3.setPixelRatio(1);
+      R3.setSize(ICON_PX, ICON_PX, false);
+      R3.setClearColor(0x000000, 0);
+      if (T.sRGBEncoding != null) R3.outputEncoding = T.sRGBEncoding;   // r128 spelling
+      RSCENE = new T.Scene();
+      RHOLD = new T.Group();
+      RSCENE.add(RHOLD);
+      // THE APPROVED RIG, copied value for value out of weapon_thumbnails.js.
+      // It is hot on purpose: a near-black gun has to lift off a near-black
+      // inventory cell, and blown highlights on the top faces are what give a
+      // 30 px silhouette its edge. Do not "correct" these numbers — they are
+      // the reason the owner said guns read right.
+      RSCENE.add(new T.HemisphereLight(0xeaf5ff, 0x1a2027, 2.0));
+      const key = new T.DirectionalLight(0xffffff, 2.6); key.position.set(4, 6, 3); RSCENE.add(key);
+      const rim = new T.DirectionalLight(0x82c8ff, 1.2); rim.position.set(-4, 2, -5); RSCENE.add(rim);
+      RCAM = new T.OrthographicCamera(-1, 1, 1, -1, 0.01, 400);
+      return true;
+    } catch (e) { R3 = null; glDead = true; return false; }
+  }
+
+  // free only what this asset OWNS — every geometry and material in the
+  // registry is `_shared` and outlives any one photograph.
+  function dropAsset(obj) {
+    if (!obj) return;
+    if (obj.parent) obj.parent.remove(obj);
+    obj.traverse(function (o) {
+      if (o.geometry && o.geometry.dispose && !o.geometry._shared) o.geometry.dispose();
+      const m = o.material;
+      if (m && !Array.isArray(m) && !m._shared && m.dispose) m.dispose();
+    });
+  }
+
+  function shoot(obj) {
+    const T = window.THREE;
+    if (!boot3()) return "";
+    let swapped = null;
+    try {
+      while (RHOLD.children.length) RHOLD.remove(RHOLD.children[0]);
+      RHOLD.position.set(0, 0, 0);
+      RHOLD.add(obj);
+      RHOLD.updateMatrixWorld(true);
+
+      // (a) THE PBR TWIN. CBZ.cmat hands back a MeshStandardMaterial on high
+      // graphics tiers, and its envMap is the LIVE sky — so the same item baked
+      // at midnight would cache darker than at noon. An icon must not depend on
+      // the hour. Shoot the Lambert twin, restore afterwards.
+      obj.traverse(function (o) {
+        const m = o.material;
+        if (m && !Array.isArray(m) && m._cbzPbr && m._cbzTwin) {
+          (swapped || (swapped = [])).push([o, m]);
+          o.material = m._cbzTwin;
+        }
+      });
+
+      let box = new T.Box3().setFromObject(RHOLD);
+      if (!isFinite(box.min.x) || box.min.x > box.max.x) return "";
+      const cx = (box.min.x + box.max.x) * 0.5, cyy = (box.min.y + box.max.y) * 0.5, cz = (box.min.z + box.max.z) * 0.5;
+      RHOLD.position.set(-cx, -cyy, -cz);
+      RHOLD.updateMatrixWorld(true);
+
+      // (b) THE FRAME. Project the 8 recentred corners onto the camera's own
+      // right/up axes and take the larger half-extent for BOTH — one margin,
+      // no stretch, identical for every item in the game.
+      const hx = (box.max.x - box.min.x) * 0.5, hy = (box.max.y - box.min.y) * 0.5, hz = (box.max.z - box.min.z) * 0.5;
+      const sy = Math.sin(HERO_YAW), cyw = Math.cos(HERO_YAW);
+      const sp = Math.sin(HERO_PITCH), cp = Math.cos(HERO_PITCH);
+      // camera basis: z = (sy*cp, sp, cyw*cp); right = (cyw, 0, -sy); up = z x right
+      const rX = cyw, rZ = -sy;
+      const uX = -sp * sy, uY = cp, uZ = -sp * cyw;
+      // a box's extent along an axis is the sum of |half * axis| per component
+      const ex = Math.abs(hx * rX) + Math.abs(hz * rZ);
+      const ey = Math.abs(hx * uX) + Math.abs(hy * uY) + Math.abs(hz * uZ);
+      const rad = Math.sqrt(hx * hx + hy * hy + hz * hz) || 0.2;
+      const half = Math.max(ex, ey, 1e-3) * FRAME;
+      const d = rad * 3 + 1;
+      RCAM.position.set(sy * cp * d, sp * d, cyw * cp * d);
+      RCAM.up.set(0, 1, 0);
+      RCAM.lookAt(0, 0, 0);
+      RCAM.left = -half; RCAM.right = half; RCAM.top = half; RCAM.bottom = -half;
+      RCAM.near = Math.max(0.01, d - rad * 1.8);
+      RCAM.far = d + rad * 2.6;
+      RCAM.updateProjectionMatrix();
+      RCAM.updateMatrixWorld(true);
+
+      R3.render(RSCENE, RCAM);
+      return R3.domElement.toDataURL("image/png");
+    } catch (e) {
+      return "";
+    } finally {
+      if (swapped) for (let i = 0; i < swapped.length; i++) swapped[i][0].material = swapped[i][1];
+      dropAsset(obj);
+      if (RHOLD) { while (RHOLD.children.length) RHOLD.remove(RHOLD.children[0]); RHOLD.position.set(0, 0, 0); }
+    }
+  }
+
+  // WHAT COUNTS AS THE SAME PICTURE. Tone-only for the kinds whose model is one
+  // model in many colours (that is the same policy the sprite sheet has always
+  // had — 40 species, ~36 drawings); NAME for the kinds where the name really
+  // does pick a different object out of the registry.
+  const BY_NAME = { gun: 1, melee: 1, tool: 1, pick: 1, crowbar: 1 };
+  function renderKey(kind, name, row) {
+    if (kind === "gun") return "gun|" + String((row && row.gun) || name || "").toLowerCase();
+    if (BY_NAME[kind]) return kind + "|" + String(name || "").toLowerCase();
+    return toneKey(kind, name, row).k;
+  }
+  function photo(kind, name, row, forceKind) {
+    const k = renderKey(kind, name, row);
+    let uri = rcache[k];
+    if (uri !== undefined) return uri;
+    let obj = null;
+    try { obj = CBZ.itemAsset(name, row, forceKind ? { kind: forceKind } : null); } catch (e) { obj = null; }
+    uri = rcache[k] = obj ? shoot(obj) : "";
+    return uri;
+  }
+
+  // ============================================================
   //  4. THE CLASSIFIER — row facts, then the name, then the tag. Every tag
   //  resolves, which is what makes itemIconAudit().generic structurally 0.
   // ============================================================
@@ -1049,10 +1235,33 @@
     return (IT && IT[name]) || null;
   }
   CBZ.itemKind = function (name, row) { return kindOf(name, rowFor(name, row)); };
+  // The two seams city/itemassets.js reads. It must never carry a second
+  // catalog lookup and never a second tint table — two tables that disagree
+  // about what a boar is would put a brown hide in the bag and a grey one on
+  // the pavement.
+  CBZ.itemRow = rowFor;
+  CBZ.itemTone = function (name, row) {
+    row = rowFor(name, row);
+    return toneFor(kindOf(name, row), name, row);
+  };
+
   CBZ.itemIcon = function (name, row) {
     if (!on()) return "";
     row = rowFor(name, row);
-    return sprite(kindOf(name, row), name, row);
+    const kind = kindOf(name, row);
+    if (rendersOn()) {
+      const src = photo(kind, name, row);
+      if (src) return src;
+    }
+    return sprite(kind, name, row);
+  };
+  // The SAME face for a weapon-slot chip, which is addressed by the ENGINE id
+  // (city/inventory.js's grid and city/hud.js's hotbar both hold weapon entries,
+  // not catalog rows). This is what stops a gun in the weapon slot and a gun in
+  // the item slot being two different photographs of the same object.
+  CBZ.itemIconGun = function (id) {
+    if (!on() || !rendersOn() || !id) return "";
+    return photo("gun", id, { gun: id }, "gun");
   };
   // Legendary/pristine wear a ring of light — a rank you can see in the bag.
   function rarityClass(row) {
@@ -1066,25 +1275,30 @@
 
   // The one call a renderer makes. Returns "" when the flag is off so every
   // consumer keeps its own old expression (degrade-safe by construction).
+  // GUNS NO LONGER TAKE A SIDE DOOR: they used to short-circuit to
+  // weapon_thumbnails.js's own renderer and its own 180x100 wide frame, which
+  // is exactly the inconsistency the owner saw — a photograph beside a doodle,
+  // in a differently-shaped chip. Now every kind, gun included, goes through
+  // photo() and comes back square, at the same angle, under the same lamps.
   CBZ.itemIconHtml = function (name, row, cls) {
     if (!on()) return "";
     row = rowFor(name, row);
-    // a GUN has a real rendered model already (weapon_thumbnails.js, cached) —
-    // prefer the actual weapon over a pictogram of one.
-    if (row && row.gun && CBZ.weaponThumbnail) {
-      let src = "";
-      try { src = CBZ.weaponThumbnail(row.gun); } catch (e) {}
-      if (src) return "<img class='itemIcn gunFace " + (cls || "") + "' src='" + src + "' alt='' draggable='false'>";
-    }
-    // the whole <img> string is cached, not just the URI: the grid rebuilds 27
-    // cells of innerHTML on every click and the fallback bar at 5 Hz.
     const kind = kindOf(name, row);
     const rc = rarityClass(row);
-    const hk = toneKey(kind, name, row).k + "|" + (cls || "") + rc;
+    // the whole <img> string is cached, not just the URI, and the cache is
+    // consulted FIRST: the grid rebuilds 27 cells of innerHTML on every click
+    // and the fallback bar at 5 Hz, so a hit must cost one property read.
+    const hk = renderKey(kind, name, row) + "|" + (cls || "") + rc;
     let html = htmlCache[hk];
-    if (!html) {
-      html = htmlCache[hk] = "<img class='itemIcn " + (cls || "") + rc + "' src='" +
-        sprite(kind, name, row) + "' alt='' draggable='false'>";
+    if (html === undefined) {
+      const src = CBZ.itemIcon(name, row);
+      // `px` re-arms nearest-neighbour scaling ONLY for the sprite degrade — a
+      // photographed icon smoothed is right, a 12x12 sprite smoothed is mush.
+      const px = src && src.lastIndexOf("data:image/svg", 0) === 0 ? " px" : "";
+      const gf = kind === "gun" ? " gunFace" : "";
+      html = htmlCache[hk] = src
+        ? "<img class='itemIcn" + gf + px + " " + (cls || "") + rc + "' src='" + src + "' alt='' draggable='false'>"
+        : "";
     }
     return html;
   };
@@ -1227,14 +1441,18 @@
     const st = document.createElement("style");
     st.id = "itemIcnCss";
     st.textContent =
-      ".itemIcn{display:block;image-rendering:pixelated;image-rendering:crisp-edges;pointer-events:none;" +
+      // Every icon is a SQUARE photograph now, so the sizes below are the only
+      // sizes: the gun's old 42x28 letterbox is gone, which is half of what the
+      // owner was seeing (a wide chip beside square ones reads as two systems
+      // even when both are good). `.px` re-arms nearest-neighbour ONLY for the
+      // 12x12 sprite degrade — a photograph must be smoothed.
+      ".itemIcn{display:block;image-rendering:auto;pointer-events:none;object-fit:contain;" +
       "width:30px;height:30px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.7))}" +
+      ".itemIcn.px{image-rendering:pixelated;image-rendering:crisp-edges}" +
       ".itemIcn.lg{width:34px;height:34px}" +
       ".itemIcn.md{width:28px;height:28px}" +
       ".itemIcn.sm{width:22px;height:22px}" +
       ".itemIcn.xs{width:18px;height:18px}" +
-      ".itemIcn.gunFace{image-rendering:auto;width:42px;height:28px;object-fit:contain}" +
-      ".itemIcn.gunFace.sm{width:34px;height:22px}" +
       ".itemIcn.rar-pristine{filter:drop-shadow(0 0 3px rgba(180,226,255,.85)) drop-shadow(0 1px 1px rgba(0,0,0,.6))}" +
       ".itemIcn.rar-legend{filter:drop-shadow(0 0 4px rgba(255,196,74,.95)) drop-shadow(0 1px 1px rgba(0,0,0,.6))}" +
       // the two drag-cursor ghosts are fixed-size boxes that used to hold an
@@ -1251,6 +1469,16 @@
   //  count (an item you own that answers to no verb at all). Both may only
   //  ever go DOWN. `items`/`iconed`/`verbed` print beside them so a "fix"
   //  that just registers fewer items cannot pass.
+  //
+  //  The rendered pass adds three. `assetless` — catalog rows city/itemassets.js
+  //  cannot build a real object for — is the owner's law made countable ("if it
+  //  isn't an asset that can be shrunk, why is it a thing that can be an icon")
+  //  and is STRUCTURALLY 0, because the registry covers every kind the
+  //  classifier can return. `rendered` counts photographs actually taken this
+  //  session and `spriteFallback` counts the ones GL refused — that second one
+  //  is REPORTED, never pinned: it is nonzero only on a machine with no working
+  //  WebGL, where falling back to sprites is the correct outcome, not a
+  //  regression. It reads 0 on any machine that can run the game at all.
   // ============================================================
   CBZ.itemIconAudit = function () {
     const IT = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
@@ -1263,7 +1491,23 @@
       if (k === GENERIC) { generic++; if (genericNames.length < 20) genericNames.push(n); }
       else iconed++;
     }
-    return { items, iconed, generic, genericNames, kinds, sprites: Object.keys(ART).length, baked: Object.keys(cache).length };
+    // rendered / failed are read off the photo cache, NOT forced — an audit
+    // that bakes 130 PNGs to count them would be the measurement changing the
+    // thing measured (and would stall whoever ran it).
+    let rendered = 0, failed = 0;
+    for (const k in rcache) { if (rcache[k]) rendered++; else failed++; }
+    const A = CBZ.itemAssetAudit ? CBZ.itemAssetAudit() : null;
+    return {
+      items, iconed, generic, genericNames, kinds,
+      sprites: Object.keys(ART).length, baked: Object.keys(cache).length,
+      rendered: rendered,
+      spriteFallback: failed + (rendersOn() ? 0 : items),
+      assetless: A ? A.assetless : items,
+      assetlessNames: A ? A.assetlessNames : null,
+      assets: A ? A.builders : 0,
+      gl: !rendersOn() ? "off" : glDead ? "failed" : R3 ? "on" : "idle",
+      mode: rendersOn() ? "rendered" : "sprite",
+    };
   };
   CBZ.itemVerbAudit = function () {
     const IT = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};

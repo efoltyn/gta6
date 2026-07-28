@@ -115,9 +115,15 @@
     if (CBZ.itemTip) { try { return CBZ.itemTip(name, items()[name], count); } catch (e) {} }
     return String(name);
   }
+  // A GUN IN A WEAPON SLOT AND A GUN IN AN ITEM SLOT MUST BE THE SAME PICTURE.
+  // This used to call weapon_thumbnails.js directly — a second offscreen
+  // renderer with its own 180x100 frame — so the grid could show the same
+  // pistol two ways depending on which store held it. itemicons.js photographs
+  // everything now, guns included; weaponThumbnail stays as the degrade.
   function weaponFace(id, name, className) {
     let src = "";
-    try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {}
+    try { if (CBZ.itemIconGun) src = CBZ.itemIconGun(id || name); } catch (e) {}
+    if (!src) { try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {} }
     return src ? "<img class='" + (className || "gunThumb") + "' src='" + src + "' alt=''>"
       : itemFace(name, "");
   }
@@ -297,62 +303,69 @@
     if (!geo) { geo = new THREE.BoxGeometry(sx, sy, sz); geo._shared = true; DROP_GEO.set(key, geo); }
     return geo;
   }
-  function cylGeo(r, len) {
-    const key = "c|" + r + "|" + len;
-    let geo = DROP_GEO.get(key);
-    if (!geo) { geo = new THREE.CylinderGeometry(r, r, len, 10); geo._shared = true; DROP_GEO.set(key, geo); }
-    return geo;
-  }
+  // (the cylinder helper this block used to carry went with the four models it
+  // served — city/itemassets.js has its own, and it caches more shapes than a
+  // drop path ever needed.)
   function propBox(parent, sx, sy, sz, mat, x, y, z, rx, ry, rz) {
     const m = new THREE.Mesh(boxGeo(sx, sy, sz), mat);
     m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
     m.castShadow = true; parent.add(m); return m;
   }
-  function propCyl(parent, r, len, mat, x, y, z, rx, ry, rz) {
-    const m = new THREE.Mesh(cylGeo(r, len), mat);
-    m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
-    m.castShadow = true; parent.add(m); return m;
-  }
+  // what the degrade crate is painted with. The rest of this palette went to
+  // city/itemassets.js with the models that used it.
   const PM = {
     case: sharedMat("case", 0x3a2719), trim: sharedMat("trim", 0x17191d),
-    metal: sharedMat("metal", 0xb5a56a), cloth: sharedMat("cloth", 0x354553),
-    cloth2: sharedMat("cloth2", 0x1f2b35), leather: sharedMat("leather", 0x241a14),
-    steel: sharedMat("steel", 0x929ba5), wood: sharedMat("wood", 0x7a4d2a),
-    paper: sharedMat("paper", 0xd8d0ad),
+    cloth: sharedMat("cloth", 0x354553), steel: sharedMat("steel", 0x929ba5),
   };
 
-  function makeBriefcase(small) {
-    const g0 = new THREE.Group(), k = small ? 0.72 : 1;
-    propBox(g0, 0.82 * k, 0.38 * k, 0.22 * k, PM.case, 0, 0.22 * k, 0);
-    propBox(g0, 0.84 * k, 0.045 * k, 0.24 * k, PM.trim, 0, 0.22 * k, 0);
-    propBox(g0, 0.24 * k, 0.05 * k, 0.07 * k, PM.trim, 0, 0.46 * k, 0);
-    propBox(g0, 0.05 * k, 0.16 * k, 0.06 * k, PM.trim, -0.12 * k, 0.42 * k, 0);
-    propBox(g0, 0.05 * k, 0.16 * k, 0.06 * k, PM.trim, 0.12 * k, 0.42 * k, 0);
-    propBox(g0, 0.07 * k, 0.08 * k, 0.025 * k, PM.metal, -0.18 * k, 0.23 * k, -0.125 * k);
-    propBox(g0, 0.07 * k, 0.08 * k, 0.025 * k, PM.metal, 0.18 * k, 0.23 * k, -0.125 * k);
+  // ---- THE THING ON THE PAVEMENT IS THE THING ------------------------------
+  // OWNER (2026-07-28): "if it isn't an asset that can be shrunk, why is it a
+  // thing that can be an icon? Make the asset then." Those assets live in
+  // city/itemassets.js now, and it is the SAME registry city/itemicons.js
+  // photographs for the slot — so a Boar Hide in your bag and a Boar Hide you
+  // just threw on the ground are one model instead of two guesses.
+  //
+  // What that fixed here: every non-gun, non-cash drop in this game was a
+  // BACKPACK. You dropped a hide, a fillet, a gold bar, a bottle of pills, and
+  // a rucksack appeared on the kerb. The four models below MOVED into the
+  // registry (byte-identical dimensions and palettes, so a saved chest is the
+  // chest it always was); what is left here is the degrade, and it is
+  // deliberately a plain crate — a fallback that looks like a real asset is how
+  // you stop noticing the registry never loaded.
+  function assetProp(name, row, kind, opts) {
+    if (!CBZ.itemAssetPickup) return null;
+    let o = null;
+    if (kind || opts) { o = opts ? Object.assign({}, opts) : {}; if (kind) o.kind = kind; }
+    let m = null;
+    try { m = CBZ.itemAssetPickup(name || null, row || null, o); } catch (e) { m = null; }
+    // itemAssetPickup seats its asset ON y=0, so the drop sites below must not
+    // ALSO apply their old "lift a gun 18 cm off the deck" fudge — that fudge
+    // existed because buildActorWeapon's origin is a hand, not a floor.
+    if (m) m.userData._assetSeated = true;
+    return m;
+  }
+  function crateDegrade(w, h, d, mat) {
+    const g0 = new THREE.Group();
+    propBox(g0, w, h, d, mat || PM.case, 0, h * 0.5, 0);
+    propBox(g0, w * 1.02, h * 0.12, d * 1.02, PM.trim, 0, h * 0.5, 0);
     return g0;
+  }
+  function makeBriefcase(small) {
+    return assetProp("Briefcase of Cash", null, "briefcase", { small: !!small }) ||
+      crateDegrade(small ? 0.59 : 0.82, small ? 0.27 : 0.38, small ? 0.16 : 0.22, PM.case);
   }
   function makeBackpack() {
-    const g0 = new THREE.Group();
-    propBox(g0, 0.56, 0.66, 0.28, PM.cloth, 0, 0.36, 0);
-    propBox(g0, 0.50, 0.23, 0.06, PM.cloth2, 0, 0.58, -0.17, -0.18, 0, 0);
-    propBox(g0, 0.38, 0.22, 0.09, PM.cloth2, 0, 0.22, -0.19);
-    propBox(g0, 0.07, 0.54, 0.05, PM.leather, -0.20, 0.37, 0.17, 0, 0, -0.10);
-    propBox(g0, 0.07, 0.54, 0.05, PM.leather, 0.20, 0.37, 0.17, 0, 0, 0.10);
-    return g0;
+    return assetProp(null, null, "backpack", null) || crateDegrade(0.56, 0.66, 0.28, PM.cloth);
   }
   function makeMelee(name) {
-    const g0 = new THREE.Group(), n = String(name || "").toLowerCase();
-    if (/knife|blade/.test(n)) {
-      propBox(g0, 0.14, 0.06, 0.58, PM.steel, 0, 0.08, -0.20, 0, 0, 0.04);
-      propBox(g0, 0.18, 0.10, 0.34, PM.leather, 0, 0.08, 0.25);
-    } else {
-      propCyl(g0, 0.07, 1.15, /bat/.test(n) ? PM.wood : PM.steel, 0, 0.10, 0, 0, 0, Math.PI / 2);
-      propCyl(g0, 0.095, 0.34, PM.leather, -0.42, 0.10, 0, 0, 0, Math.PI / 2);
-    }
-    return g0;
+    return assetProp(name, null, "melee", null) || crateDegrade(0.16, 0.10, 0.90, PM.steel);
   }
   function makeWeapon(nameOrId) {
+    // The registry's `gun` builder IS this function's old body — buildActorWeapon
+    // unmounted from the hand and given the pistol's ground-visibility nudge —
+    // so the drop and the icon photograph the same object by construction.
+    const a = assetProp(nameOrId, { gun: nameOrId }, "gun", null);
+    if (a) return a;
     let model = null;
     try { if (CBZ.buildActorWeapon) model = CBZ.buildActorWeapon(nameOrId); } catch (e) {}
     if (!model) {
@@ -370,13 +383,21 @@
     return model;
   }
   function makePhysicalDrop(payload) {
-    let prop;
+    let prop = null;
     if (payload.weaponId) prop = makeWeapon(payload.weaponId);
     else if (payload.melee) prop = makeMelee(payload.melee);
     else if (payload.cash != null) prop = makeBriefcase((payload.cash | 0) < 250);
-    else if (/^(?:briefcase of cash|cash stack)$/i.test(payload.name || "")) prop = makeBriefcase(false);
-    else if (/^wallet$/i.test(payload.name || "")) prop = makeBriefcase(true);
-    else prop = makeBackpack();
+    else if (payload.name) {
+      // the item ITSELF, from the registry — the line that ends the backpacks.
+      prop = assetProp(payload.name, items()[payload.name] || null, null, null);
+    }
+    if (!prop) {
+      // the two names that always had a hand-picked container keep it, and a
+      // catalog row the registry somehow could not build still gets a bag.
+      if (/^(?:briefcase of cash|cash stack)$/i.test(payload.name || "")) prop = makeBriefcase(false);
+      else if (/^wallet$/i.test(payload.name || "")) prop = makeBriefcase(true);
+      else prop = makeBackpack();
+    }
     prop.userData.transient = true;
     prop.userData._invPhysicalDrop = true;
     return prop;
@@ -389,7 +410,8 @@
     const y0 = payload.y != null ? payload.y : floorY(x, z);
     if (root) {
       mesh = makePhysicalDrop(payload);
-      mesh.position.set(x, y0 + (payload.weaponId || payload.melee ? 0.18 : 0.03), z);
+      const lift = mesh.userData._assetSeated ? 0.02 : (payload.weaponId || payload.melee ? 0.18 : 0.03);
+      mesh.position.set(x, y0 + lift, z);
       mesh.rotation.y = (x * 7 + z * 13) % 6.28;
       root.add(mesh);
     }
@@ -411,7 +433,7 @@
     if (old.material && old.material.dispose && !old.material._shared) old.material.dispose();
     const prop = makeWeapon((CBZ.weaponIdFromName && CBZ.weaponIdFromName(d.weapon)) || d.weapon || "Pistol");
     prop.userData.transient = true; prop.userData._invPhysicalDrop = true;
-    prop.position.set(d.x, y + 0.18, d.z);
+    prop.position.set(d.x, y + (prop.userData._assetSeated ? 0.02 : 0.18), d.z);
     prop.rotation.y = (d.x * 7 + d.z * 13) % 6.28;
     parent.add(prop);
     d.mesh = prop; d._inv2Physical = true;
@@ -662,17 +684,27 @@
   let _chestRoot = null;
   let openChestRef = null;
 
+  // THE CHEST IN YOUR BAG IS THE CHEST ON THE GROUND. Its three boxes moved to
+  // city/itemassets.js's `chest` builder — same dimensions, same palette, same
+  // emissive lift — so the item icon is a photograph of the object you are
+  // about to place, not a drawing of one. `itemAsset` (not `itemAssetPickup`)
+  // because a chest is world-sized already and must not be normalised.
   function buildChestMesh(x, z) {
     const root = arenaRoot(); if (!root) return null;
     const grp = new THREE.Group();
     const y = floorY(x, z);
     grp.position.set(x, y, z);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.8), cmat(0x6b4a2a, { emissive: 0x241505, ei: 0.15 }));
-    body.position.y = 0.3; grp.add(body);
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.2, 0.84), cmat(0x4a3320, { emissive: 0x1a0f04, ei: 0.15 }));
-    lid.position.y = 0.7; grp.add(lid);
-    const latch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.06), cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }));
-    latch.position.set(0, 0.58, 0.44); grp.add(latch);
+    let body = null;
+    if (CBZ.itemAsset) { try { body = CBZ.itemAsset("Chest", null, { kind: "chest" }); } catch (e) { body = null; } }
+    if (body) grp.add(body);
+    else {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.8), cmat(0x6b4a2a, { emissive: 0x241505, ei: 0.15 }));
+      b.position.y = 0.3; grp.add(b);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.2, 0.84), cmat(0x4a3320, { emissive: 0x1a0f04, ei: 0.15 }));
+      lid.position.y = 0.7; grp.add(lid);
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.06), cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }));
+      latch.position.set(0, 0.58, 0.44); grp.add(latch);
+    }
     grp.userData.transient = true;
     root.add(grp);
     return grp;
