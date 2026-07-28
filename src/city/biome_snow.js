@@ -2122,18 +2122,33 @@
           guardrail: false, elevated: false, rng: rng,
           heightAt: CBZ.terrainHeight,
         });
-        // snow berms flanking the wider deck (visual edge + read). The EAST
-        // berm is split around z=-950: the Ironjaw causeway (arena_fights.js)
-        // T-junctions into this deck there, and an unbroken berm would stand
-        // 0.2 m proud across the junction mouth.
+        // Snow berms flanking the wider deck (visual edge + read).
+        //
+        // THIS SPLIT USED TO BE TWO TYPED NUMBERS. The east berm was cut at
+        // [-966, -934] because arena_fights.js T-junctions the Ironjaw causeway
+        // into this deck at z = -950 — i.e. a road position owned by ANOTHER
+        // FILE, copied into this one, with arena_fights' own header carrying a
+        // KNOWN-NOT-FIXED note asking for it. Move that junction and the berm
+        // stands 0.2 m proud across the mouth again with nothing to catch it.
+        // A gap in a berm is not a thing to author: it is what you get where a
+        // road crosses, and `city.roads` has always known where the roads are.
+        // DEFERRED, because this biome builds at order 30 and the Ironjaw
+        // approach is not pushed until 40.
         for (const ex of [cxMid - 13.2, cxMid + 13.2]) {
-          const runs = (ex > cxMid) ? [[rMinZ, -966], [-934, rMaxZ]] : [[rMinZ, rMaxZ]];
-          for (const seg of runs) {
-            const z0 = seg[0], z1 = seg[1];
-            if (z1 - z0 <= 0) continue;
+          const drawBerm = function (s) {
+            const z0 = Math.min(s.z0, s.z1), z1 = Math.max(s.z0, s.z1);
+            if (z1 - z0 <= 0.5) return;
             const berm = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, z1 - z0), mSnowShade);
             berm.position.set(ex, 0.3, (z0 + z1) / 2);
             berm.receiveShadow = true; root.add(berm);
+          };
+          if (CBZ.roadGapDefer) {
+            CBZ.roadGapDefer(ex, rMinZ, ex, rMaxZ,
+              { id: "snow:mercy-berm", thick: 2.2 }, drawBerm);
+          } else {
+            // degrade path: the authored split this replaces, byte for byte
+            const runs = (ex > cxMid) ? [[rMinZ, -966], [-934, rMaxZ]] : [[rMinZ, rMaxZ]];
+            for (const seg of runs) drawBerm({ z0: seg[0], z1: seg[1] });
           }
         }
         return;

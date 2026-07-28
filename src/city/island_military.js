@@ -877,6 +877,22 @@
     // gap centres along each seaward edge (mid-edge)
     const gapCN = CEN_X;                       // north/south gap at x = base centre
     const gapCW = CEN_Z;                       // west gap at z = base centre
+    /* ONE WALL RUN, MINUS WHATEVER CARRIAGEWAYS CROSS IT. The authored gate
+       above is kept as the degrade path; this is what makes the perimeter
+       correct for every OTHER road that reaches the reservation, without this
+       file holding a second copy of any road's position. Called from a
+       roadGapAfterRoads step (see the builder), so the road list is complete. */
+    function wallCol(x0, z0, x1, z1) {
+      const pieces = CBZ.roadGapRun
+        ? CBZ.roadGapRun(x0, z0, x1, z1, { id: "military:perimeter", thick: 0.4 })
+        : [{ x0: x0, z0: z0, x1: x1, z1: z1 }];
+      for (let i = 0; i < pieces.length; i++) {
+        const s = pieces[i];
+        const w = Math.abs(s.x1 - s.x0), d = Math.abs(s.z1 - s.z0);
+        if (Math.max(w, d) < 0.5) continue;
+        col((s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2, w < 0.4 ? 0.4 : w, d < 0.4 ? 0.4 : d, 0, 2.4);
+      }
+    }
     // collect post positions + build collider wall segments
     const posts = [];
     edges.forEach(function (e, ei) {
@@ -892,23 +908,26 @@
         // seaward edges: skip posts inside the pedestrian water-access gap
         if (ei !== 1 && horiz && px > gapCN - PG && px < gapCN + PG) continue;   // N/S (along X)
         if (ei !== 1 && !horiz && pz > gapCW - PG && pz < gapCW + PG) continue;  // W (along Z)
+        // …and inside any CARRIAGEWAY. A post you drive through is the same bug
+        // as a collider you cannot: both are the fence not knowing the road.
+        if (CBZ.roadGapAt && CBZ.roadGapAt(px, pz, 0)) continue;
         posts.push({ x: px, z: pz });
       }
-      // collider wall: each edge splits around its gap
+      // collider wall: each edge splits around its gap AND around every road
       if (ei === 1) {
         // east: wall from north corner down to gate, and gate to south corner
-        col(MAXX, (MINZ + gateMin) / 2, 0.4, gateMin - MINZ, 0, 2.4);
-        col(MAXX, (gateMax + MAXZ) / 2, 0.4, MAXZ - gateMax, 0, 2.4);
+        wallCol(MAXX, MINZ, MAXX, gateMin);
+        wallCol(MAXX, gateMax, MAXX, MAXZ);
       } else if (horiz) {
         // N/S: split around the centre water-access gap (along X)
         const z = a.z;
-        col((MINX + (gapCN - PG)) / 2, z, (gapCN - PG) - MINX, 0.4, 0, 2.4);
-        col(((gapCN + PG) + MAXX) / 2, z, MAXX - (gapCN + PG), 0.4, 0, 2.4);
+        wallCol(MINX, z, gapCN - PG, z);
+        wallCol(gapCN + PG, z, MAXX, z);
       } else {
         // W: split around the centre water-access gap (along Z)
         const x = a.x;
-        col(x, (MINZ + (gapCW - PG)) / 2, 0.4, (gapCW - PG) - MINZ, 0, 2.4);
-        col(x, ((gapCW + PG) + MAXZ) / 2, 0.4, MAXZ - (gapCW + PG), 0, 2.4);
+        wallCol(x, MINZ, x, gapCW - PG);
+        wallCol(x, gapCW + PG, x, MAXZ);
       }
     });
     // decorative sand/ramp APRONS (no collider) at each seaward gap → slipway.
@@ -934,21 +953,35 @@
     root.add(im);
     // a thin translucent "mesh" band between posts so it reads as chain-link,
     // not floating poles: one merged thin box per edge (cheap, 3 meshes).
+    // the fabric follows the SAME split as the posts and the colliders — three
+    // descriptions of one object, so they go through one law (the lampMast /
+    // ATTACH rule: two constants describing one thing must never be typed apart)
+    function linkRun(x0, z0, x1, z1) {
+      const pieces = CBZ.roadGapRun
+        ? CBZ.roadGapRun(x0, z0, x1, z1, { id: "military:perimeter", thick: 0.4 })
+        : [{ x0: x0, z0: z0, x1: x1, z1: z1 }];
+      for (let i = 0; i < pieces.length; i++) {
+        const s = pieces[i];
+        const w = Math.abs(s.x1 - s.x0), d = Math.abs(s.z1 - s.z0);
+        if (Math.max(w, d) < 0.5) continue;
+        mkLink(root, (s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2, w < 0.06 ? 0.06 : w, d < 0.06 ? 0.06 : d);
+      }
+    }
     edges.forEach(function (e, ei) {
       const a = e[0], b = e[1];
       const dx = b.x - a.x, dz = b.z - a.z;
       const horiz = Math.abs(dx) > Math.abs(dz);
       if (ei === 1) {                                     // east split for the gate
-        mkLink(root, MAXX, (MINZ + gateMin) / 2, 0.06, gateMin - MINZ);
-        mkLink(root, MAXX, (gateMax + MAXZ) / 2, 0.06, MAXZ - gateMax);
+        linkRun(MAXX, MINZ, MAXX, gateMin);
+        linkRun(MAXX, gateMax, MAXX, MAXZ);
       } else if (horiz) {                                 // N/S split for the water gap
         const z = a.z;
-        mkLink(root, (MINX + (gapCN - PG)) / 2, z, (gapCN - PG) - MINX, 0.06);
-        mkLink(root, ((gapCN + PG) + MAXX) / 2, z, MAXX - (gapCN + PG), 0.06);
+        linkRun(MINX, z, gapCN - PG, z);
+        linkRun(gapCN + PG, z, MAXX, z);
       } else {                                            // W split for the water gap
         const x = a.x;
-        mkLink(root, x, (MINZ + (gapCW - PG)) / 2, 0.06, (gapCW - PG) - MINZ);
-        mkLink(root, x, ((gapCW + PG) + MAXZ) / 2, 0.06, MAXZ - (gapCW + PG));
+        linkRun(x, MINZ, x, gapCW - PG);
+        linkRun(x, gapCW + PG, x, MAXZ);
       }
     });
   }
@@ -1206,7 +1239,17 @@
     placed.length = 0; _reg = false;
 
     buildGround(root);
-    buildFence(root);
+    /* THE PERIMETER IS SOLVED AGAINST THE ROAD NETWORK, SO IT WAITS FOR IT.
+       buildFence's gate used to be a pair of typed numbers (CW_CZ ± 13, "widened
+       to the 24 m highway deck so the road actually passes through") — a hole
+       hand-measured in this file against a road record this file does not push
+       until 350 lines later, and it is the ONLY hole. Any other road that ever
+       reaches this reservation meets 2.4 m of sealed collider wall. The shared
+       law in city/roadrules.js already knows where every carriageway in the
+       world is; it just cannot know it at order 22, which is why this whole
+       build step is handed to roadGapAfterRoads and runs at 98.6 instead. The
+       authored gate stays as the degrade path. */
+    if (!(CBZ.roadGapAfterRoads && CBZ.roadGapAfterRoads(function () { buildFence(root); }))) buildFence(root);
     const cw = buildCauseway(root);
 
     // ---- AIRSTRIP: parked fighter jets in a row + a heavy bomber ----

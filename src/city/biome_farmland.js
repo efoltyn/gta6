@@ -403,8 +403,26 @@
       });
       fenceCols++;
     }
+    /* A FIELD BOUNDARY STOPS AT THE ROAD. Each side of a parcel is ~170 m of
+       continuous rail and continuous collider, and this file has never asked
+       whether anything drives across one — it survives today only because the
+       inter-parcel dirt lanes happen to sit outside each parcel's own footprint
+       and the county road is south of the farm. That is luck, not a rule, and
+       the moment a route is laid through the grid it is 170 m of invisible
+       fence across it. city/roadrules.js's shared law splits the run for us
+       (mesh AND collider from the same pieces, so the rails can never disagree
+       with what blocks). Synchronous: this biome builds at order 33, and any
+       road it would need to open for either exists by then or is caught by the
+       98.6 collider sweep. */
     function fenceLine(x0, z0, x1, z1) {
+      const pieces = CBZ.roadGapRun
+        ? CBZ.roadGapRun(x0, z0, x1, z1, { id: "farm:fence", thick: 0.36, min: 1.2 })
+        : [{ x0: x0, z0: z0, x1: x1, z1: z1 }];
+      for (let k = 0; k < pieces.length; k++) fenceRun(pieces[k].x0, pieces[k].z0, pieces[k].x1, pieces[k].z1);
+    }
+    function fenceRun(x0, z0, x1, z1) {
       const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz);
+      if (!(len > 0.5)) return;
       const segs = Math.max(1, Math.round(len / 4));
       const ang = Math.atan2(dx, dz);
       fenceSolid(x0, z0, x1, z1);

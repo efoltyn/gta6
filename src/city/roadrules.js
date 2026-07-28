@@ -1094,6 +1094,550 @@
     return !r.access && !r.noTraffic;
   };
 
+  /* ======================================================================
+     A WALL MAY NOT STAND IN A CARRIAGEWAY — CBZ.roadGapRun / roadGapDefer
+     ======================================================================
+     OWNER, with a screenshot of a car nose-first into a knee-high slab lying
+     clean across both lanes: "there are places like this where roads are
+     blocked — remove all geometry bullshit in the roads like this."
+
+     THE CLASS, not the instance. Everything in this game that fences, kerbs,
+     berms, rails or walls a SITE draws the same shape: a long straight run
+     between two world points, one box and one collider. Every one of them is
+     authored against its OWN site's numbers and none of them has ever asked
+     whether a ROAD passes underneath. Where somebody noticed, the answer was
+     hand-typed and became a second constant to keep in sync:
+
+       · city/world.js's seawall opens at three literal gates — a beach span,
+         `NGATE`/`WGATE`/`GATE` — one per causeway that happened to exist when
+         somebody hit the invisible knee-wall. A fourth causeway gets nothing.
+       · city/biome_snow.js splits its east Mercy berm at the literal z range
+         [-966, -934] because arena_fights.js T-junctions in at -950. That
+         number is a copy of a road position in another file, and arena_fights'
+         own header had to carry a KNOWN-NOT-FIXED note asking for it.
+       · speedway_structures.js's shared fence takes an explicit `gaps` list,
+         so BOTH venues have to remember to declare the hole their own approach
+         road needs.
+
+     A gap in a wall is not a thing to author. It is what you get when a run
+     crosses a road, and both facts are already in the world: the run's two
+     endpoints, and `city.roads` — the registry every road builder in this game
+     already pushes to. So this derives it.
+
+       CBZ.roadGapRun(x0,z0,x1,z1,opts)          -> [{x0,z0,x1,z1,len,cx,cz}]
+       CBZ.roadGapDefer(x0,z0,x1,z1,opts,draw)   same, but AFTER every road exists
+       CBZ.roadGapAt(x,z,pad)                    the carriageway under a point
+       CBZ.roadBlockAudit()                      the ratchet
+
+     ADOPTION IS THE LINE THE CALLER ALREADY WROTE. It hands back the run split
+     into the pieces that do NOT lie in a carriageway; the caller loops them and
+     draws exactly what it was going to draw, mesh and collider together:
+
+         CBZ.roadGapRun(x0, z0, x1, z1).forEach(function (s) {
+           wallPiece(s.x0, s.z0, s.x1, s.z1);       // the line it had anyway
+         });
+
+     WHY THERE IS A DEFERRED FORM, and it is not a convenience. Wall runs are
+     built by landmass builders at orders 20-42; highwaynet pushes its decks at
+     91 and continent.js its frontier loop at 97, and city/world.js's seawall is
+     laid before cityWorldGeo() has run at all. A run that asked the road list
+     at its own build time would be asking an EMPTY list — which is exactly the
+     failure mode roadClearance's `worldRef` documents one section up. So a
+     builder that runs before its crossing roads exist hands over its draw
+     closure instead and the run is split at order 98.6 — after roadrules' own
+     clamp (98), before detail_kit's dressing (99). Same one line, correct
+     answer, no builder has to know what order it runs at.
+
+     THE GAP WIDTH IS SOLVED, NOT TASTED. It is the widest of
+       (a) the TRAVELLED WAY — `CBZ.roadLanes`'s medianHalf + lanes*laneW, the
+           tarmac cars actually use, and
+       (b) the DECK — the road's own declared `w`/2, because a car straddling a
+           kerb is still on the road,
+     plus one shoulder (1.5 m) so you are not scraping the cut ends. Run that
+     against this repo's own hand-authored gates and it reproduces them:
+       mainland street  w 18, 2x3.6         -> max(7.2, 9.0) + 1.5 = 10.5  (21 m
+                                               hole; world.js's east GATE: 22)
+       highway causeway w 24, 3x3.6 + 1.2m  -> max(11.4, 12) + 1.5 = 13.5  (27 m
+                                               hole; world.js's NGATE/WGATE: 26)
+     Those two literals were measured by hand years apart, in a different file
+     from the roads they open for, and the derivation lands on both. That is the
+     evidence the number is the road's and not a taste knob.
+
+     WHAT IS DELIBERATELY NOT GAPPED. A barrier whose whole job is to stand in
+     the road — city/checkpoints.js's board, a military gate arm, a demolition
+     hoarding — sets `roadBarrier` on its collider (or `opts.exempt` on its run)
+     and is skipped and COUNTED. Nothing else is special-cased: a bollard on a
+     pavement is outside the carriageway by construction and needs no rule.
+
+     Flags: ROAD_GAP_RUNS (the whole law; off => every caller draws its single
+     unbroken run exactly as before) · ROAD_GAP_ENFORCE (the late collider
+     sweep only, so the audit can keep measuring with the net switched off) ·
+     ROAD_GAP_SHOULDER (the clearance either side of the deck).
+     ====================================================================== */
+
+  if (CBZ.CONFIG.ROAD_GAP_RUNS == null) CBZ.CONFIG.ROAD_GAP_RUNS = true;
+  if (CBZ.CONFIG.ROAD_GAP_ENFORCE == null) CBZ.CONFIG.ROAD_GAP_ENFORCE = true;
+  if (CBZ.CONFIG.ROAD_GAP_SHOULDER == null) CBZ.CONFIG.ROAD_GAP_SHOULDER = 1.5;
+
+  function gapOn() { return on() && CBZ.CONFIG.ROAD_GAP_RUNS !== false; }
+
+  // Half-width of the hole one road punches through a run. See the header for
+  // why this is max(travelled way, deck) + shoulder and not a chosen number.
+  function lanesOf(r) {
+    return CBZ.roadLanes
+      ? CBZ.roadLanes(r)
+      : { lanesPerDir: Math.max(1, (r.lanesPerDir || 2) | 0), laneW: r.laneW || 3.6, medianHalf: 0, width: r.w || 18 };
+  }
+  function carriageHalf(r, extra) {
+    if (!r) return 0;
+    const L = lanesOf(r);
+    const travelled = L.medianHalf + Math.max(1, L.lanesPerDir | 0) * L.laneW;
+    const deck = (r.w != null ? r.w : (r.width != null ? r.width : (L.width || 18))) / 2;
+    const sh = CBZ.CONFIG.ROAD_GAP_SHOULDER;
+    return Math.max(travelled, deck) + (sh == null ? 1.5 : sh) + (extra || 0);
+  }
+  /* THE TARMAC ITSELF — the travelled way, with no deck rounding and no
+     shoulder. This is the band a run PARALLEL to the road is judged against:
+     alongside a road is where a berm, a kerb, a guardrail and a seawall belong,
+     but ON it is a blockage whichever way it points. Two different questions,
+     so two different widths, and the difference is exactly the verge. */
+  function travelledHalf(r, extra) {
+    if (!r) return 0;
+    const L = lanesOf(r);
+    return L.medianHalf + Math.max(1, L.lanesPerDir | 0) * L.laneW + (extra || 0);
+  }
+  // The median of a DIVIDED road is a legal place to stand a barrier; an
+  // undivided one has no such place, so it returns a band nothing is inside.
+  function medianBand(r) { return r && r.median ? lanesOf(r).medianHalf + 0.4 : -1; }
+  CBZ.roadCarriageHalf = carriageHalf;
+  CBZ.roadTravelledHalf = travelledHalf;
+  // Runs within this much of parallel are judged against the tarmac, not the
+  // carriageway. ~15 degrees: shallower than that and a "crossing" would be a
+  // 100 m cut through a wall that is really running alongside.
+  const PARALLEL_DOT = 0.25;
+
+  // The road whose CARRIAGEWAY (not merely whose record) covers this point.
+  // A fence-post / lamp / bollard loop uses this to skip one station instead of
+  // splitting a run — the same law asked point-wise.
+  // NOTE the road list is taken through worldRef, NOT roadsList: during a build
+  // `CBZ.city.arena` still points at the PREVIOUS world, so a builder asking
+  // roadsList() would be gapped against roads that no longer exist. Same trap
+  // roadClearance documents one section up, same door out of it.
+  function gapRoads(opts) {
+    if (opts && opts.city && opts.city.roads) return opts.city.roads;
+    const A = worldRef(opts);
+    return (A && A.roads) || roadsList();
+  }
+
+  CBZ.roadGapAt = function (x, z, pad) {
+    if (!gapOn()) return null;
+    const R = gapRoads();
+    if (!R || !R.length) return null;
+    const p = pad || 0;
+    for (let i = 0; i < R.length; i++) {
+      const r = R[i];
+      if (!r || !(r.len > 0) || r.noGap) continue;
+      const gh = carriageHalf(r, p);
+      const along = r.vertical ? z - r.z : x - r.x;
+      if (Math.abs(along) > r.len / 2 + p) continue;
+      const across = r.vertical ? x - r.x : z - r.z;
+      if (Math.abs(across) <= gh) return r;
+    }
+    return null;
+  };
+
+  /* Clip a segment against an axis-aligned box; returns the [t0,t1] parameter
+     interval that lies INSIDE it, or null. The ordinary slab method — written
+     out rather than pulled from THREE because this runs at build time in a
+     path that must not allocate a Vector3 per road per run. */
+  function clipT(x0, z0, dx, dz, bx0, bz0, bx1, bz1) {
+    let t0 = 0, t1 = 1;
+    if (Math.abs(dx) < 1e-9) { if (x0 < bx0 || x0 > bx1) return null; }
+    else {
+      let a = (bx0 - x0) / dx, b = (bx1 - x0) / dx;
+      if (a > b) { const t = a; a = b; b = t; }
+      if (a > t0) t0 = a;
+      if (b < t1) t1 = b;
+      if (t0 >= t1) return null;
+    }
+    if (Math.abs(dz) < 1e-9) { if (z0 < bz0 || z0 > bz1) return null; }
+    else {
+      let a = (bz0 - z0) / dz, b = (bz1 - z0) / dz;
+      if (a > b) { const t = a; a = b; b = t; }
+      if (a > t0) t0 = a;
+      if (b < t1) t1 = b;
+      if (t0 >= t1) return null;
+    }
+    return [t0, t1];
+  }
+
+  // ---- the ledger. What every run through the block ACTUALLY LEFT DRAWN —
+  //      the surviving pieces, never the original span — so roadBlockAudit()
+  //      can re-ask the FINAL world whether anything this block passed still
+  //      lies in a carriageway. Recording the ORIGINAL run would make
+  //      `crossingsRemaining` equal `runsSplit` by construction: a ratchet that
+  //      counts the bug it just fixed is the quiet redefinition CLAUDE.md warns
+  //      about, and it is worth one sentence to say so.
+  const gapLedger = [];
+  const LEDGER_CAP = 6000;
+  function ledgerPush(id, segs) {
+    if (gapLedger.length >= LEDGER_CAP) return;
+    for (let i = 0; i < segs.length && gapLedger.length < LEDGER_CAP; i++) {
+      const s = segs[i];
+      gapLedger.push({ x0: s.x0, z0: s.z0, x1: s.x1, z1: s.z1, id: id });
+    }
+  }
+  let gapRuns = 0, gapSplitRuns = 0, gapCuts = 0, gapSwallowed = 0,
+    gapDeferred = 0, gapExempt = 0, trimmedColliders = 0;
+
+  function splitRun(x0, z0, x1, z1, opts) {
+    opts = opts || {};
+    const one = [{ x0: x0, z0: z0, x1: x1, z1: z1, len: Math.hypot(x1 - x0, z1 - z0), cx: (x0 + x1) / 2, cz: (z0 + z1) / 2 }];
+    if (!gapOn() || opts.exempt) { if (opts.exempt) gapExempt++; return one; }
+    if (!isFinite(x0) || !isFinite(z0) || !isFinite(x1) || !isFinite(z1)) return one;
+    const dx = x1 - x0, dz = z1 - z0;
+    const runLen = Math.hypot(dx, dz);
+    if (!(runLen > 0.01)) return one;
+    const R = gapRoads(opts);
+    gapRuns++;
+    const id = opts.id || "?";
+    if (!R || !R.length) { ledgerPush(id, one); return one; }
+    // half the run's own body, so a THICK wall clears the tarmac too
+    const half = (opts.thick != null ? opts.thick : 0.6) / 2;
+    const ux = dx / runLen, uz = dz / runLen;
+    const cuts = [];
+    for (let i = 0; i < R.length; i++) {
+      const r = R[i];
+      if (!r || !(r.len > 0) || r.noGap) continue;
+      if (opts.skip && opts.skip(r)) continue;
+      /* A RUN PARALLEL TO A ROAD IS A VERGE, NOT A BLOCKAGE — and the verge is
+         exactly where a berm, a kerb, a guardrail and a seawall BELONG. Without
+         this, biome_snow.js's Mercy berm (13.2 m off a deck whose derived
+         carriageway reaches 13.5) would be swallowed whole by the very road it
+         edges. But "alongside" is a matter of OFFSET, not of bearing: a wall
+         lying down the middle of a lane is a blockage however it points. So a
+         near-parallel run is judged against the TARMAC and a crossing one
+         against the whole carriageway — the difference between the two IS the
+         verge, which is the thing being protected. */
+      const across = r.vertical ? Math.abs(ux) : Math.abs(uz);
+      const par = across < PARALLEL_DOT;
+      if (par) {
+        // …and the MEDIAN of a divided road is a legal place to stand one.
+        const lat = Math.abs((r.vertical ? (x0 + x1) / 2 - r.x : (z0 + z1) / 2 - r.z));
+        if (lat <= medianBand(r)) continue;
+      }
+      const gh = par ? travelledHalf(r, half) : carriageHalf(r, half);
+      const al = r.len / 2 + half;
+      const bx0 = r.vertical ? r.x - gh : r.x - al;
+      const bx1 = r.vertical ? r.x + gh : r.x + al;
+      const bz0 = r.vertical ? r.z - al : r.z - gh;
+      const bz1 = r.vertical ? r.z + al : r.z + gh;
+      const iv = clipT(x0, z0, dx, dz, bx0, bz0, bx1, bz1);
+      if (iv) cuts.push(iv);
+    }
+    if (!cuts.length) { ledgerPush(id, one); return one; }
+    // merge the cut intervals, then keep what is left of [0,1]
+    cuts.sort(function (a, b) { return a[0] - b[0]; });
+    const merged = [];
+    for (let i = 0; i < cuts.length; i++) {
+      const c = cuts[i], last = merged[merged.length - 1];
+      if (last && c[0] <= last[1] + 1e-6) { if (c[1] > last[1]) last[1] = c[1]; }
+      else merged.push([c[0], c[1]]);
+    }
+    const minLen = opts.min != null ? opts.min : 0.5;
+    const out = [];
+    let t = 0;
+    for (let i = 0; i <= merged.length; i++) {
+      const nt = i < merged.length ? merged[i][0] : 1;
+      if (nt - t > 0) {
+        const px0 = x0 + dx * t, pz0 = z0 + dz * t;
+        const px1 = x0 + dx * nt, pz1 = z0 + dz * nt;
+        const len = Math.hypot(px1 - px0, pz1 - pz0);
+        if (len >= minLen) out.push({ x0: px0, z0: pz0, x1: px1, z1: pz1, len: len, cx: (px0 + px1) / 2, cz: (pz0 + pz1) / 2 });
+      }
+      if (i < merged.length) t = Math.max(t, merged[i][1]);
+    }
+    gapSplitRuns++;
+    gapCuts += merged.length;
+    ledgerPush(id, out);
+    if (!out.length) gapSwallowed++;
+    return out;
+  }
+
+  /* THE BLOCK. Synchronous form: for a builder whose crossing roads already
+     exist (anything running after the road it must not block). */
+  CBZ.roadGapRun = function (x0, z0, x1, z1, opts) { return splitRun(x0, z0, x1, z1, opts); };
+
+  /* THE DEFERRED FORM. For a run built BEFORE the roads that cross it — which
+     is most of them (see the header). `draw` is called once per surviving
+     piece at order 98.6, with the piece and its index. Flag off => drawn
+     immediately, unsplit, exactly as the caller used to. */
+  const pendingRuns = [];
+  CBZ.roadGapDefer = function (x0, z0, x1, z1, opts, draw) {
+    if (typeof draw !== "function") return null;
+    if (!gapOn()) {
+      draw({ x0: x0, z0: z0, x1: x1, z1: z1, len: Math.hypot(x1 - x0, z1 - z0), cx: (x0 + x1) / 2, cz: (z0 + z1) / 2 }, 0);
+      return null;
+    }
+    gapDeferred++;
+    const job = { x0: x0, z0: z0, x1: x1, z1: z1, opts: opts || {}, draw: draw };
+    pendingRuns.push(job);
+    return job;
+  };
+
+  /* THE SAME DEFERRAL, FOR A WHOLE BUILD STEP. Some perimeters are not one run
+     but a solve — a post InstancedMesh sized off the path, a merged panel
+     geometry and a collider ledger, all of which have to agree about where the
+     holes are. Splitting only the colliders would leave posts standing in the
+     carriageway you can now drive through, which is a different bug wearing the
+     same shape. `fn(city)` runs at order 98.6, once every road in the world
+     exists, so a builder registered at order 20-42 can solve against roads that
+     are pushed at 91 and 97 without knowing any of those numbers.
+     Flag off / roadrules absent => the caller runs it inline, as it always did. */
+  const pendingSteps = [];
+  // Returns TRUE when it has TAKEN the job — deferred it, or (flag off) run it
+  // inline — and false only when it cannot. A caller's guard is
+  // `if (!(CBZ.roadGapAfterRoads && CBZ.roadGapAfterRoads(fn))) fn();`, so
+  // returning false after already running it would build the step TWICE.
+  CBZ.roadGapAfterRoads = function (fn) {
+    if (typeof fn !== "function") return false;
+    if (!gapOn()) { fn(CBZ.city && CBZ.city.arena ? CBZ.city.arena : CBZ.city); return true; }
+    pendingSteps.push(fn);
+    return true;
+  };
+
+  /* ---- THE LATE PASS -----------------------------------------------------
+     Order 98.6: after every landmass builder (≤42), highwaynet (91), the
+     continent plate (97) and roadrules' own clearance clamp (98) — so a run is
+     split against the roads that SHIPPED, including the ones a clamp shortened
+     — and before detail_kit's dressing passes (99).
+
+     It does two things. The first is the deferred draws above. The second is
+     the SAFETY NET, and it exists for the same reason the clearance clamp does:
+     the law must not depend on a builder cooperating. It walks the world's own
+     collider list for LOW LONG RUNS lying across a carriageway and trims them
+     out of it — never deleting what is outside the road, never touching
+     anything that did not declare a height band (a collider with no y1 is a
+     BUILDING, and a building standing in a road is a footprint bug, not a wall
+     to cut), never touching a declared `roadBarrier`. The visible mesh of an
+     unmigrated run stays drawn; that is scenery, and the audit names it. */
+  const RUN_MIN_LEN = 8;        // shorter than this is furniture, not a run
+  // 4.5, not 3.5: city/world.js's seawall collider is T = 4 m thick and would
+  // otherwise fall outside its own law — the net would have been blind to the
+  // single longest wall in the game. At 4.5 m the aspect gate (>= 3:1) still
+  // means nothing under 13.5 m long can qualify, so no slab or plinth does.
+  const RUN_MAX_THICK = 4.5;
+  /* TALLER THAN THIS IS NOT TRIMMED, AND THAT IS A DECISION, NOT AN OVERSIGHT.
+     The owner's report is knee-to-chest geometry lying in a carriageway, and
+     that is what this cuts. A 3-5 m masonry perimeter (city/govcomplex.js's
+     nine compounds, the county jail yard at 4.6) is a different object: its
+     opening is a GATE somebody authored, its mesh is opaque, and silently
+     punching a 21 m collider-shaped hole through a prison wall while the wall
+     is still DRAWN would trade a blocked road for a wall you can drive through
+     — the same class of bug wearing better clothes. Those are MEASURED instead
+     (`tallCrossings` in the audit) so the file that owns them can adopt
+     roadGapRun and cut the MESH too, which is the only honest fix at that
+     height. */
+  const RUN_MAX_TOP = 2.6;
+  const TALL_MAX_TOP = 6.0;     // above this it is a building, not a wall at all
+  const RUN_MAX_BASE = 0.8;     // a run starting above knee height is a deck, not a kerb
+  const RUN_SPAN_FRAC = 0.6;    // it must genuinely cross, not merely touch
+
+  function colliderExempt(c) {
+    if (c.roadBarrier || c.gate || c.noGap || c.road) return true;
+    const u = c.ref && c.ref.userData;
+    return !!(u && (u.roadBarrier || u.noGap));
+  }
+
+  // Is this collider a low, long, thin RUN — the shape a wall/kerb/berm/rail
+  // makes — as opposed to a building, a plinth or a piece of furniture?
+  // A collider with NO declared y1 is full-height, i.e. a BUILDING: a building
+  // standing in a road is a footprint bug in the builder that placed it, not a
+  // wall to cut, so it is never touched here.
+  function isRun(c, top) {
+    if (!c || !isFinite(c.minX) || !isFinite(c.minZ)) return false;
+    if (c.y1 == null || !isFinite(c.y1)) return false;
+    if (c.y1 > (top || RUN_MAX_TOP) || (c.y0 || 0) > RUN_MAX_BASE) return false;
+    const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+    const lo = Math.min(w, d), hi = Math.max(w, d);
+    return hi >= RUN_MIN_LEN && lo <= RUN_MAX_THICK && hi >= lo * 3;
+  }
+  // The box one road punches through a run. `par` picks the TARMAC band for a
+  // run lying alongside and the whole carriageway for one crossing — the same
+  // verge distinction splitRun makes, applied to an AABB.
+  function roadBox(r, par, out) {
+    const gh = par ? travelledHalf(r, 0) : carriageHalf(r, 0), al = r.len / 2;
+    out[0] = r.vertical ? r.x - gh : r.x - al;
+    out[1] = r.vertical ? r.x + gh : r.x + al;
+    out[2] = r.vertical ? r.z - al : r.z - gh;
+    out[3] = r.vertical ? r.z + al : r.z + gh;
+    out[4] = gh;
+    return out;
+  }
+  const _rb = [0, 0, 0, 0, 0];
+  /* Which road (if any) this run BLOCKS. Two shapes count and nothing else:
+       · it CROSSES — perpendicular, and it covers at least 60% of the
+         carriageway. Touching a carriageway's edge is a kerb doing its job.
+       · it LIES ON THE TARMAC — parallel, standing inside the travelled way
+         and long enough to matter. A run parallel to a road on the VERGE is
+         the correct place for it and is never touched, and the median of a
+         divided road is a legal place to stand a barrier. */
+  function crossedBy(c, R) {
+    const vertRun = (c.maxZ - c.minZ) > (c.maxX - c.minX);
+    for (let j = 0; j < R.length; j++) {
+      const r = R[j];
+      if (!r || !(r.len > 0) || r.noGap) continue;
+      const par = !!r.vertical === vertRun;
+      const b = roadBox(r, par, _rb);
+      if (c.maxX <= b[0] || c.minX >= b[1] || c.maxZ <= b[2] || c.minZ >= b[3]) continue;
+      if (par) {
+        const lat = Math.abs(r.vertical ? (c.minX + c.maxX) / 2 - r.x : (c.minZ + c.maxZ) / 2 - r.z);
+        if (lat <= medianBand(r)) continue;                    // a median barrier
+        const along = vertRun ? Math.min(c.maxZ, b[3]) - Math.max(c.minZ, b[2])
+                              : Math.min(c.maxX, b[1]) - Math.max(c.minX, b[0]);
+        if (along < RUN_MIN_LEN) continue;
+        return r;
+      }
+      const ovl = vertRun ? Math.min(c.maxZ, b[3]) - Math.max(c.minZ, b[2])
+                          : Math.min(c.maxX, b[1]) - Math.max(c.minX, b[0]);
+      if (ovl < (b[4] * 2) * RUN_SPAN_FRAC) continue;
+      return r;
+    }
+    return null;
+  }
+
+  function sweepColliders(city) {
+    const cols = CBZ.colliders;
+    const R = (city && city.roads) || gapRoads();
+    if (!cols || !cols.length || !R || !R.length) return;
+    // A WORK QUEUE, not one pass: cutting a run in two can leave a tail that
+    // crosses a SECOND road, and a safety net that only ever cuts once is a net
+    // with a hole in it. Every piece produced is re-tested.
+    const queue = [];
+    for (let i = 0; i < cols.length; i++) if (isRun(cols[i])) queue.push(cols[i]);
+    const dead = [];
+    let guard = 0;
+    while (queue.length && guard++ < 20000) {
+      const c = queue.pop();
+      if (c._roadGapDead) continue;
+      if (colliderExempt(c)) { gapExempt++; continue; }
+      const r = crossedBy(c, R);
+      if (!r) continue;
+      const vertRun = (c.maxZ - c.minZ) > (c.maxX - c.minX);
+      const b = roadBox(r, !!r.vertical === vertRun, _rb);
+      const lo0 = vertRun ? c.minZ : c.minX, hi0 = vertRun ? c.maxZ : c.maxX;
+      const cut0 = vertRun ? b[2] : b[0], cut1 = vertRun ? b[3] : b[1];
+      const keepLo = cut0 - lo0, keepHi = hi0 - cut1;
+      trimmedColliders++;
+      if (keepLo > 0.5 && keepHi > 0.5) {
+        const tail = { minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ, y0: c.y0, y1: c.y1, ref: c.ref, noCam: c.noCam, _roadGapped: true };
+        if (vertRun) { tail.minZ = cut1; c.maxZ = cut0; } else { tail.minX = cut1; c.maxX = cut0; }
+        cols.push(tail); queue.push(tail); queue.push(c);
+      } else if (keepLo > 0.5) {
+        if (vertRun) c.maxZ = cut0; else c.maxX = cut0;
+        queue.push(c);
+      } else if (keepHi > 0.5) {
+        if (vertRun) c.minZ = cut1; else c.minX = cut1;
+        queue.push(c);
+      } else {
+        // the whole run lies in the carriageway — nothing of it should exist
+        c._roadGapDead = true; dead.push(c);
+      }
+      c._roadGapped = true;
+    }
+    if (dead.length) {
+      // compact in place: CBZ.colliders is held by reference all over the game
+      // (physics.js's broadphase, LOS, demolition), so it is never reassigned.
+      let w = 0;
+      for (let i = 0; i < cols.length; i++) { const c = cols[i]; if (!c || !c._roadGapDead) cols[w++] = c; }
+      cols.length = w;
+    }
+  }
+
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
+    if (!gapOn()) { pendingRuns.length = 0; pendingSteps.length = 0; return; }
+    // whole build steps first: they may themselves register runs
+    let drew = pendingSteps.length;
+    for (let i = 0; i < pendingSteps.length; i++) {
+      try { pendingSteps[i](city); } catch (e) { console.error("[roadrules gap step]", e); }
+    }
+    pendingSteps.length = 0;
+    for (let i = 0; i < pendingRuns.length; i++) {
+      const j = pendingRuns[i];
+      const o = j.opts || {};
+      if (o.city == null) o.city = city;
+      const pieces = splitRun(j.x0, j.z0, j.x1, j.z1, o);
+      for (let k = 0; k < pieces.length; k++) { try { j.draw(pieces[k], k); drew++; } catch (e) { console.error("[roadrules gap]", e); } }
+    }
+    pendingRuns.length = 0;
+    if (CBZ.CONFIG.ROAD_GAP_ENFORCE !== false) { try { sweepColliders(city); } catch (e) { console.error("[roadrules gap sweep]", e); } }
+    if (drew || trimmedColliders) { if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+  }, 98.6);
+
+  /* ---- THE BLOCKED-ROAD RATCHET (CLAUDE.md BLOCK LAW #5) -----------------
+     `crossingsRemaining` is a LIVE re-ask of the FINAL world: every run this
+     block ever saw, re-tested against the roads that shipped. It is the
+     structural number and its target is 0 — a run in the ledger that still
+     crosses a carriageway means the split ran too early or was refused.
+
+     `worldBlockers` is the honest one, and it is deliberately NOT computed
+     from the ledger: it walks CBZ.colliders for a low long run lying across a
+     carriageway whether or not anybody adopted anything, so a producer that
+     never called this block cannot hide behind a clean ledger. `where` names
+     each one. `trimmed` says how many the safety net had to cut, which is the
+     number that should fall as producers migrate. */
+  CBZ.roadBlockAudit = function () {
+    const R = gapRoads() || [];
+    let remaining = 0;
+    const where = {};
+    for (let i = 0; i < gapLedger.length; i++) {
+      const g = gapLedger[i];
+      const dx = g.x1 - g.x0, dz = g.z1 - g.z0;
+      const rl = Math.hypot(dx, dz) || 1;
+      const ux = dx / rl, uz = dz / rl;
+      for (let j = 0; j < R.length; j++) {
+        const r = R[j];
+        if (!r || !(r.len > 0) || r.noGap) continue;
+        if ((r.vertical ? Math.abs(ux) : Math.abs(uz)) < 0.25) continue;   // a verge, not a crossing
+        const gh = carriageHalf(r, 0), al = r.len / 2;
+        const bx0 = r.vertical ? r.x - gh : r.x - al, bx1 = r.vertical ? r.x + gh : r.x + al;
+        const bz0 = r.vertical ? r.z - al : r.z - gh, bz1 = r.vertical ? r.z + al : r.z + gh;
+        if (clipT(g.x0, g.z0, dx, dz, bx0, bz0, bx1, bz1)) {
+          remaining++; where[g.id] = (where[g.id] || 0) + 1; break;
+        }
+      }
+    }
+    let blockers = 0, exemptNow = 0, runs = 0, tall = 0;
+    const cols = CBZ.colliders || [];
+    const blockWhere = {}, tallWhere = {};
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      const short = isRun(c);
+      if (!short && !isRun(c, TALL_MAX_TOP)) continue;
+      if (colliderExempt(c)) { exemptNow++; continue; }
+      const r = crossedBy(c, R);
+      const k = r ? ((r.route || r.district || "road") + "@" + Math.round(r.x) + "," + Math.round(r.z)) : null;
+      if (short) {
+        runs++;
+        if (!r) continue;
+        blockers++; blockWhere[k] = (blockWhere[k] || 0) + 1;
+      } else {
+        // above the trim ceiling: measured, never cut. See RUN_MAX_TOP.
+        if (!r) continue;
+        tall++; tallWhere[k + " (h" + Math.round(c.y1) + ")"] = (tallWhere[k + " (h" + Math.round(c.y1) + ")"] || 0) + 1;
+      }
+    }
+    return {
+      runsChecked: gapRuns, runsSplit: gapSplitRuns, gaps: gapCuts,
+      swallowed: gapSwallowed, deferred: gapDeferred, pending: pendingRuns.length,
+      crossingsRemaining: remaining, worldBlockers: blockers,
+      tallCrossings: tall, exempt: exemptNow, exemptSeen: gapExempt,
+      trimmed: trimmedColliders, colliderRuns: runs,
+      ledger: gapLedger.length, segments: R.length,
+      where: where, blockWhere: blockWhere, tallWhere: tallWhere,
+    };
+  };
+
   /* ---- THE POST-BUILD ENFORCEMENT PASS -----------------------------------
      Order 98: after every landmass/biome/island/mini-city/gov builder (≤42),
      after highwaynet (91) and the continent plate (97), before detail_kit's

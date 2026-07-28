@@ -524,12 +524,44 @@
       CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m, y0: 0, y1: 0.8 });
       return pad;
     }
+    /* EVERY SEAWALL RUN GOES THROUGH THE SHARED ROAD-GAP LAW.
+       (city/roadrules.js, CBZ.roadGapDefer.) The three authored gates below are
+       KEPT — they are the degrade path, and they are what this file draws with
+       no roadrules.js at all or with ROAD_GAP_RUNS off — but they are no longer
+       the only way a road gets through this wall. Each of them exists because
+       somebody drove into an invisible knee-wall at ONE causeway mouth and
+       typed the hole in by hand, in this file, against a constant owned by a
+       different one; a fourth approach reaching this coast used to get nothing.
+       Now the law that already knows where every road is opens its own hole.
+
+       DEFERRED, and that is the whole reason roadGapDefer exists: this runs
+       inside buildCity's main body, hundreds of lines BEFORE cityWorldGeo()
+       hands `city` to the landmass builders that push the causeway records. A
+       run split here and now would be split against an empty road list. The
+       closure is called back at order 98.6, once every road in the world
+       exists, and draws exactly the pieces this file would have drawn. */
     const EW = minX - 26, EE = maxX + 26, ES = minZ - 26, EN = maxZ + 26, T = 4;
+    function gapWall(x, z, w, d) {
+      if (!CBZ.roadGapDefer) return wall(x, z, w, d);
+      const horiz = w >= d;
+      const x0 = horiz ? x - w / 2 : x, x1 = horiz ? x + w / 2 : x;
+      const z0 = horiz ? z : z - d / 2, z1 = horiz ? z : z + d / 2;
+      // `min`: a piece shorter than the wall is THICK is not a wall, it is a
+      // stub — and wall() picks its own long axis from w >= d, so a 2 m stub of
+      // a 4 m-thick seawall would be drawn rotated. Drop it instead.
+      return CBZ.roadGapDefer(x0, z0, x1, z1,
+        { id: "world:seawall", thick: horiz ? d : w, min: (horiz ? d : w) + 0.5 },
+        function (s) {
+          wall((s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2,
+            horiz ? Math.abs(s.x1 - s.x0) : w,
+            horiz ? d : Math.abs(s.z1 - s.z0));
+        });
+    }
     // THE BEACH GAP: the south seawall opens over one stretch — city/beach.js
     // lays sand there and the shore must run straight into the water (no
     // knee-wall, no cap). The wall resumes either side of the span.
     const BX0 = cx - 110, BX1 = cx - 10;
-    wall((EW + BX0) / 2, ES, BX0 - EW, T); wall((BX1 + EE) / 2, ES, EE - BX1, T);
+    gapWall((EW + BX0) / 2, ES, BX0 - EW, T); gapWall((BX1 + EE) / 2, ES, EE - BX1, T);
     // THE NORTH CAUSEWAY GATE: city/island_airport.js runs a 24m-wide highway
     // causeway straight across the harbor from the mainland's NORTH edge (centred
     // on cx) up to the airport island. The north seawall MUST open for it, or the
@@ -538,8 +570,8 @@
     // gap matches the deck width; the causeway's own side curbs carry the
     // fall-guard line across the opening, so no car can slip off into the sea.
     const NGATE = 26;                                   // ≥ 24m deck width
-    wall((EW + (cx - NGATE / 2)) / 2, EN, (cx - NGATE / 2) - EW, T);
-    wall(((cx + NGATE / 2) + EE) / 2, EN, EE - (cx + NGATE / 2), T);
+    gapWall((EW + (cx - NGATE / 2)) / 2, EN, (cx - NGATE / 2) - EW, T);
+    gapWall(((cx + NGATE / 2) + EE) / 2, EN, EE - (cx + NGATE / 2), T);
     // THE WEST CAUSEWAY GATE: city/island_military.js runs the 24m-wide highway
     // causeway from the mainland's WEST edge (authored centred on cz, z=-700)
     // out to the military base. Same fix as the north gate — open the seawall
@@ -552,13 +584,13 @@
     const WGATE = 26;                                   // ≥ 24m deck width
     const _MILW = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
     const wgz = cz + _MILW.dz;                          // deck centreline == CEN_Z
-    wall(EW, (ES + (wgz - WGATE / 2)) / 2, T, (wgz - WGATE / 2) - ES);
-    wall(EW, ((wgz + WGATE / 2) + EN) / 2, T, EN - (wgz + WGATE / 2));
+    gapWall(EW, (ES + (wgz - WGATE / 2)) / 2, T, (wgz - WGATE / 2) - ES);
+    gapWall(EW, ((wgz + WGATE / 2) + EN) / 2, T, EN - (wgz + WGATE / 2));
     // The east wall has a real road gate. city/expansion.js continues this
     // centre cross-street across a bridge into the island district.
     const GATE = 22;
-    wall(EE, (ES + (cz - GATE / 2)) / 2, T, cz - GATE / 2 - ES);
-    wall(EE, ((cz + GATE / 2) + EN) / 2, T, EN - (cz + GATE / 2));
+    gapWall(EE, (ES + (cz - GATE / 2)) / 2, T, cz - GATE / 2 - ES);
+    gapWall(EE, ((cz + GATE / 2) + EN) / 2, T, EN - (cz + GATE / 2));
 
     // ---- waypoint helpers ----
     function lotAt(i, j) { return lots.find((l) => l.i === i && l.j === j); }

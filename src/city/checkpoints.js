@@ -165,6 +165,13 @@
       minX: bx - (site.vertical ? 0.4 : barW / 2), maxX: bx + (site.vertical ? 0.4 : barW / 2),
       minZ: bz - (site.vertical ? barW / 2 : 0.4), maxZ: bz + (site.vertical ? barW / 2 : 0.4),
       ref: plank, y0: 0, y1: 1.05, noCam: true,
+      // THE ONE DECLARED EXEMPTION from roadrules.js's road-gap law: standing in
+      // the road IS this object's job, so the pass that cuts walls out of
+      // carriageways must skip it and COUNT it (roadBlockAudit().exempt) rather
+      // than special-case a file name. It is 3 m on a shoulder today and would
+      // not qualify as a "run" anyway — the flag is here so that stays true if
+      // the board is ever widened across a lane.
+      roadBarrier: true,
     });
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
 
