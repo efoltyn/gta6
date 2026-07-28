@@ -798,6 +798,13 @@
     const fn = opts.hand === "rocket" ? CBZ.lockonFireTarget : CBZ.lockonMissileSeek;
     let seek;
     if (typeof fn === "function") { try { seek = fn(); } catch (e) { seek = undefined; } }
+    // RPG PARITY (owner: "missiles just like how homing rpg is"): a maintained
+    // red lock is the best answer, but with NONE held (seek === null) the tube
+    // grabs whatever the RPG would grab at trigger time — lockonFireTarget's
+    // best-under-the-crosshair. Live-read so childsafe's wraps keep working.
+    if (seek === null && opts.hand !== "rocket" && typeof CBZ.lockonFireTarget === "function") {
+      try { const ft = CBZ.lockonFireTarget(); if (ft) seek = ft; } catch (e) {}
+    }
     if (seek === undefined) return typeof opts.legacy === "function" ? opts.legacy() : null;
     if (seek) s.homed++;
     return seek || null;
@@ -992,9 +999,19 @@
   // pass nothing → false (police fire, no crime on you).
   function detonate(x, y, z, byPlayer) {
     byPlayer = !!byPlayer;
-    // prefer the dedicated airstrike blast (crashfx agent provides it — bigger,
-    // longer, with shockwave); fall back to a beefed-up car explosion.
-    if (CBZ.cityAirstrikeExplosion) {
+    // THE MISSILE NAMES ITS ORDNANCE (systems/impactbus.js). This one function
+    // is BOTH the shared missile pool (jet rails, gunship, tank main gun, the
+    // modshop channel) and the 5-star called-in airstrike — they have always
+    // been the same detonation, which is why the bus's "missile" and
+    // "airstrike" rows were re-aligned to the SAME 3.0 / 16 rather than one of
+    // them being invented. The row was corrected UP (it read 2.6 / 11, a blast
+    // 40% smaller than what has actually been firing here) and now carries the
+    // penetration, the fuel fire and the ordnance identity a bare
+    // cityAirstrikeExplosion could not. Degrade: flag off => the exact old
+    // pair, fallback included.
+    if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
+      CBZ.detonate(x, y, z, "missile", { byPlayer: byPlayer });
+    } else if (CBZ.cityAirstrikeExplosion) {
       CBZ.cityAirstrikeExplosion(x, z, { power: 3.0, radius: 16, byPlayer: byPlayer, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
     } else if (CBZ.cityExplosion) {
       CBZ.cityExplosion(x, z, { power: 2.2, radius: 11, byPlayer: byPlayer });
@@ -2119,4 +2136,8 @@
   function vehLabel(rec) {
     return rec && rec.model && rec.model.name || rec && rec.kind || "aircraft";
   }
+
+  // ordnance-bus adoption, declared at LOAD (CBZ.blastAudit()). An ARRAY
+  // because this file loads before systems/impactbus.js does.
+  (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("air:missile-pool");
 })();

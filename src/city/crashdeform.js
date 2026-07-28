@@ -110,6 +110,12 @@
   function entGone(e) {
     const grp = entGroup(e);
     if (e.air) return !grp || !grp.parent;
+    // `_husk` — a BURNT-OUT HULK (city/vehicles.js) is `dead` but has not left
+    // the world, and the whole point of it is the damage on it. Without this
+    // clause the very next entryFor() sweep would release the entry, and
+    // release() strips the flaps, un-pops the wheel and UN-BENDS the chassis
+    // before its dropOnly early-out — so the wreck would straighten up.
+    if (e.car._husk) return !grp || !grp.parent;
     return e.car.dead || !grp || !grp.parent;
   }
 
@@ -171,8 +177,12 @@
       // among equals, farther wins. A deformed AIRFRAME outranks nothing — a
       // crashed plane is a permanent landmark of what the player did, so cars
       // are always evicted first and an air entry only goes when it is the
-      // only thing left to give.
-      const score = (e.air ? 0 : 1e18) + (off ? 1e12 : 0) + d2;
+      // only thing left to give. A BURNT-OUT CAR HULK is the same kind of
+      // landmark and is protected the same way: a wreck that quietly
+      // straightens itself out because a fender-bender happened elsewhere is
+      // the world forgetting what you did to it.
+      const permanent = e.air || (e.car && e.car._husk);
+      const score = (permanent ? 0 : 1e18) + (off ? 1e12 : 0) + d2;
       if (score > bestD2) { bestD2 = score; bestIdx = i; }
     }
     if (bestIdx < 0) bestIdx = 0;       // everything mid-fade or no camera — oldest
@@ -352,6 +362,101 @@
     }
     if (CBZ.sfx) CBZ.sfx("glass");
   }
+
+  /* ============================================================
+     THE BURNT-OUT LOOK — two public verbs, both composed entirely from what
+     this file already does. Nothing new is drawn.
+
+     WHY THEY LIVE HERE: `city/vehicles.js` needed a wreck to STAY in the world
+     after a cook-off (a car used to delete itself one frame after exploding,
+     while aircraft leave hulks), and everything that makes a hulk read as a
+     hulk was already written in this file and simply never reachable from
+     outside it — the crazed glass, the dead lamps, the sprung hood, the
+     splayed wheel, the buckled chassis. Exporting them is a migration, not a
+     feature: `cityCarBurnOut` is ~15 lines of orchestration over five existing
+     private functions plus one material cache, and the alternative was
+     vehicles.js re-authoring all of it against geometry it does not own.
+
+     `CBZ.cityCarFrost(car)` — just the glass. An overpressure takes the
+     windows out long before it caves a panel, and the crater ladder only
+     crazes glass once a panel is DEEPLY caved (right for a kerb scrape, wrong
+     for a blast), so systems/impactbus.js's vehicle coupling calls this
+     directly.
+     ============================================================ */
+  const charMats = new Map();       // source material -> its scorched counterpart
+  // A char is a MULTIPLY, never a fixed tint: a red taxi and a white van must
+  // burn to different blacks or the whole street ends up the same charcoal
+  // prop. Matches city/playeraircraft.js's charAircraftWreck, which already
+  // does exactly this to a downed airframe (0.22 colour / 0.08 emissive).
+  function charMat(src) {
+    let out = charMats.get(src);
+    if (out) return out;
+    out = src && src.clone ? src.clone() : src;
+    if (out && out !== src) {
+      if (out.color && out.color.multiplyScalar) out.color.multiplyScalar(0.2);
+      if (out.emissive && out.emissive.multiplyScalar) out.emissive.multiplyScalar(0.06);
+      if (out.map) out.map = null;             // soot covers the livery
+      out.transparent = false; out.opacity = 1;
+      out.needsUpdate = true;
+      // one per SOURCE material for the whole city, and never disposed — the
+      // `_shared` flag is also what stops vehicles.js's teardown traverse from
+      // freeing a material another wreck is still wearing.
+      out._shared = true;
+    }
+    charMats.set(src, out);
+    return out;
+  }
+
+  CBZ.cityCarFrost = function (car) {
+    if (dead || !car || !car.group) return;
+    const e = entryFor(car, true);
+    if (!e) return;
+    const root = (car.group.userData && car.group.userData.carVisual) || car.group;
+    if (!e.meshes) { if (!ensureScratch()) return; snapshot(e, root); findMats(e, root); }
+    frostGlass(e);
+  };
+
+  CBZ.cityCarBurnOut = function (car, opts) {
+    if (dead || !car || !car.group) return false;
+    if (!ensureScratch()) return false;
+    opts = opts || {};
+    const grp = car.group;
+    const root = (grp.userData && grp.userData.carVisual) || grp;
+    const e = entryFor(car, true);
+    if (!e) return false;
+    if (!e.meshes) { snapshot(e, root); findMats(e, root); }
+    const d = dimsOf(grp);
+    // (1) the paint is gone
+    root.traverse(function (o) {
+      const m = o.material;
+      if (!m || Array.isArray(m) || m._carCharred) return;
+      const cm = charMat(m);
+      if (cm && cm !== m) { cm._carCharred = true; o.material = cm; }
+    });
+    // (2) crazed glass + dead lamps (their swaps run BEFORE the char above
+    //     would have caught them; both caches are keyed on the source mat, so
+    //     a car that had already frosted keeps its frost rather than going
+    //     black-glass — which is the honest read: soot on cracked safety glass)
+    frostGlass(e);
+    killHeadlights(e);
+    // (3) the hood is somewhere else now. spawnHood is idempotent per entry
+    //     and detachHood hands it to crashfx's debris pool, so it tumbles off
+    //     the way any other piece of wreckage does.
+    if (!e.hoodGone) {
+      spawnHood(e, root, d);
+      const a = (car.heading || 0);
+      detachHood(e, car, Math.sin(a) * 0.6, Math.cos(a) * 0.6, 22);
+    }
+    // (4) one corner is on the ground, and the frame is no longer straight.
+    //     The tallies are forced past the file's own BEND_THRESHOLD rather
+    //     than a new number being invented for wrecks.
+    if (!e.wheelPop) popWheel(e, root, opts.rearWheel ? false : true);
+    e.front = Math.max(e.front, 1.1); e.rear = Math.max(e.rear, 0.9);
+    e.sideL = Math.max(e.sideL, 0.7); e.sideR = Math.max(e.sideR, 0.8);
+    e.total = Math.max(e.total, BEND_THRESHOLD + 1.4);
+    bendChassis(e, root, d);
+    return true;
+  };
 
   // ---- hung panels: hood / door / bumper ---------------------------------
   // ONE shared unit box (hinge at z=0, panel spanning +z); mesh.scale sizes it

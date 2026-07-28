@@ -587,7 +587,18 @@
     if (!fired) {
       const reach = 30;
       const tx = wp.x + dx * reach, tz = wp.z + dz * reach;
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(tx, tz, { power: 2.2, radius: 10, byPlayer: true, y: 0 }); } catch (e) {} }
+      // THE MAIN GUN NAMES ITS ORDNANCE (systems/impactbus.js). The "tank" row
+      // IS this fallback's numbers — 2.2 power / 10 radius, corrected UP from
+      // the row's stale 9 to match what actually fires here — and adds the
+      // penetration a sabot round has and a bare cityExplosion never could.
+      // `dirx/dirz` is the shell's travel, which the ledger turns into the
+      // ejecta axis. Degrade: flag off => the exact old line.
+      if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
+        try {
+          CBZ.detonate(tx, CBZ.blastSeatY ? CBZ.blastSeatY(tx, tz) : 1.0, tz, "tank",
+            { byPlayer: true, dirx: dx, dirz: dz });
+        } catch (e) {}
+      } else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(tx, tz, { power: 2.2, radius: 10, byPlayer: true, y: 0 }); } catch (e) {} }
     }
     rec.fireCD = 0.85;
     if (CBZ.shake) { try { CBZ.shake(0.6); } catch (e) {} }
@@ -739,4 +750,7 @@
       if (!wireInteraction._done) wireInteraction();
     });
   }
+
+  // ordnance-bus adoption, declared at LOAD (CBZ.blastAudit()).
+  (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("armor:tank-fallback");
 })();

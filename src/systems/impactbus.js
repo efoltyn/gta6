@@ -95,6 +95,19 @@
   // Let ordnance rows escalate structural damage through city/structural.js.
   // Off => blasts still do FX + people damage, buildings behave as before.
   if (CBZ.CONFIG.IMPACT_STRUCTURAL == null) CBZ.CONFIG.IMPACT_STRUCTURAL = true;
+  // EVERY PAYLOAD SPEAKS THE BUS. The consumer-side switch that the migrated
+  // hand-rolled detonations (fpsmode's rocket, combat's grenade, the tank
+  // fallback, the aircraft missile pool, playeraircraft's fallback, the car
+  // cook-off) read before choosing `CBZ.detonate(...)` over their own inline
+  // cityExplosion call. Off => every one of them runs its ORIGINAL line,
+  // byte-for-byte. It lives HERE rather than in config.js because this file is
+  // what the callers already feature-detect (`CBZ.detonate ? … : …`), so one
+  // null-check answers both questions.
+  if (CBZ.CONFIG.ORDNANCE_BUS_ALL == null) CBZ.CONFIG.ORDNANCE_BUS_ALL = true;
+  // A blast reaching the PARKED CARS around it (the 8th cityExplosion wrapper,
+  // near the bottom of this file). Off => only the wave-carrying rows touch
+  // vehicles, exactly as before.
+  if (CBZ.CONFIG.IMPACT_CAR_BLAST == null) CBZ.CONFIG.IMPACT_CAR_BLAST = true;
 
   const I = (CBZ.impact = {});
 
@@ -197,14 +210,79 @@
   I.row = function (id) { return TABLE[id] || null; };
   I.list = function () { return Object.keys(TABLE); };
 
-  // ---- conventional ordnance (migrated from existing call sites) ----------
-  I.define("grenade",   { power: 1.0, radius: 6,  struct: 0.8, fire: 0.05 });
+  /* ---- conventional ordnance (migrated from existing call sites) ----------
+
+     THESE SIX ROWS WERE DEFINED AND NEVER CALLED. They sat here for the whole
+     life of this file while fpsmode's rocket, combat's grenade, the tank
+     fallback, the aircraft missile pool, playeraircraft's fallback and
+     vehicles.js's cook-off each hand-rolled power/radius straight into
+     cityExplosion. Wiring the callers up (see the ORDNANCE_BUS_ALL flag)
+     exposed that the rows had DRIFTED from the live numbers, every one of them
+     downward — adopting them as written would have SHRUNK six explosions:
+
+       row  →  live caller                            was      now
+       rpg      fpsmode/weapon-data 1.9 x r13         8        13
+       tank     militaryvehicles fallback 2.2 x r10   9        10
+       missile  aircraft.js detonate() 3.0 x r16      2.6/11   3.0/16
+       airstrike same call (5-star strike IS the      3.0/12   3.0/16
+                 missile pool's detonate)
+       carcook  vehicles.js explodeCar 1.15 x r6.5    0.9/5    1.15/6.5
+       grenade  combat.js GREN 1.0 x r5.5             6        6 (kept — the
+                 row was already the larger of the two)
+
+     THE RULE THAT SETTLED EACH ONE: where the row and the live caller
+     disagreed, THE LIVE CALLER WON. A migration that quietly makes the RPG's
+     fireball 15 m instead of 25 m is not a migration, it is a nerf wearing a
+     refactor's coat.
+
+     `struct: 6` ON ALL SIX IS ARITHMETIC, NOT TASTE. Until now these blasts
+     reached buildings through city/demolition.js's onBlast hook, which
+     delegates `power * LEGACY_TO_LEDGER` (=6) per building into the structural
+     ledger. The moment a caller routes through CBZ.detonate, demolition.js
+     stands down (it checks `opts._impact` / `inBusBlast()`) and the ROW is the
+     only thing feeding the ledger. So a row carrying anything less than 6
+     would have silently made every migrated warhead weaker against the city
+     than the un-migrated version of itself. 6 is the number that makes the
+     per-building deposit identical — which is exactly what "migrate, don't
+     retune" is supposed to mean. What the bus ADDS on top is the part the
+     legacy path never had: penetration, fuel fire, the ejecta direction, and a
+     seat height that is not a guess.
+     ------------------------------------------------------------------------ */
+  I.define("grenade",   { power: 1.0, radius: 6,  struct: 6,   fire: 0.05 });
   I.define("c4",        { power: 1.4, radius: 7,  struct: 1.6, fire: 0.10 });
-  I.define("rpg",       { power: 1.9, radius: 8,  struct: 2.0, fire: 0.12 });
-  I.define("tank",      { power: 2.2, radius: 9,  struct: 2.4, pen: 3,  fire: 0.05 });
-  I.define("missile",   { power: 2.6, radius: 11, struct: 3.0, pen: 5,  fire: 0.15, fx: "heavy" });
-  I.define("airstrike", { power: 3.0, radius: 12, struct: 3.6, fire: 0.20, fx: "heavy" });
-  I.define("carcook",   { power: 0.9, radius: 5,  struct: 0.5, fire: 0.25 });
+  I.define("rpg",       { power: 1.9, radius: 13, struct: 6,   fire: 0.12 });
+  I.define("tank",      { power: 2.2, radius: 10, struct: 6,   pen: 3,  fire: 0.05 });
+  I.define("missile",   { power: 3.0, radius: 16, struct: 6,   pen: 5,  fire: 0.15, fx: "heavy" });
+  I.define("airstrike", { power: 3.0, radius: 16, struct: 6,   fire: 0.20, fx: "heavy" });
+  /* THE CAR COOK-OFF IS THE ONE CHEMICAL ROW THAT KNOWS ITS OWN SIZE.
+     Every car in the game detonated with the identical 1.15 / 6.5 — a hatchback
+     and a box van made the same fireball, which is the single loudest tell that
+     the "explosion" was a constant and not an event. A cook-off is a FUEL
+     event, and fuel load scales with the vehicle, so this row declares a
+     reference energy and city/vehicles.js hands it the burning car's own mass
+     factor. THE KINETIC LAW then does the rest for free and in the right
+     proportions: the fireball rides the cube root (a 1.43x van is a 1.13x
+     fireball, not a 1.43x one) and the damage the 2/3 power (1.27x). Nothing
+     else in the file had to be told, and a hatchback still prices at exactly
+     the numbers explodeCar always used.
+     refE 8.4e6 J = 2 kg TNT-equivalent, the customary figure for a passenger
+     car's tank deflagration — an order below the tank's chemical content
+     because most of a car fire BURNS rather than detonating, which is also why
+     this row's `fire` is its biggest field. kmin/kmax are deliberately tight:
+     the whole spread from a coupe to an armoured van is under 2x, and a bad
+     mass field must never be able to turn a saloon into a MOAB. */
+  /* `fire: 0.24` IS ONE HUNDREDTH UNDER city/structural.js's FIRE_IGNITE_MIN
+     (0.25), AND THAT IS DELIBERATE. `fire` does two jobs: it is the chance a
+     blast lights a NEIGHBOURING CAR (systems/impactbus's vehicle coupling —
+     the highest of any conventional row here, because a cook-off is the fuel
+     event), and it is the term that lights a BUILDING FLOOR. The legacy path
+     this row replaces passed `fire: 0`, so buildings have never caught from a
+     car, and cars now cook off in CHAINS — one flipped character would have
+     shipped "a parking-lot cascade can burn a block down" as a side effect of
+     a migration. Raise it to 0.25 to turn that on deliberately, with the
+     structural-fire arc in front of you. */
+  I.define("carcook",   { power: 1.15, radius: 6.5, struct: 6, fire: 0.24,
+                          refE: 8.4e6, kmin: 0.6, kmax: 1.9 });
   // cosmetic only — the helicopter ember. struct 0 so it can never wound a
   // facade (this is the `noDamage` case the legacy code special-cased inline).
   I.define("ember",     { power: 0.2, radius: 1.5, struct: 0, fire: 0 });
@@ -576,9 +654,16 @@
     // this, any custom composer that calls cityExplosion would have its
     // structural damage counted twice — once by the row, once by the wrap.
     const composer = COMPOSERS[row.fx] || COMPOSERS.heavy || COMPOSERS.blast;
+    // ONE IDENTITY FOR THIS DETONATION, minted before anything draws. The
+    // near-field vehicle pass runs inside the composer (it is a wrapper on the
+    // blast primitives) and the wave runs seconds later off `opts`, so both
+    // need the same number to agree they are the same event. `pendingCarId` is
+    // the hand-off and is only ever read synchronously inside the composer —
+    // the same discipline `busDepth` right below it relies on.
+    opts._carBlastId = pendingCarId = ++carBlastSeq;
     busDepth++;
     try { composer(x, y, z, row, fxOpts); } catch (e) {}
-    finally { busDepth--; if (busDepth < 0) busDepth = 0; }
+    finally { busDepth--; if (busDepth < 0) busDepth = 0; pendingCarId = 0; }
 
     // ---- 2) FEEL. Shake / rumble / flash, scaled by camera distance so a
     //        strike across the map rumbles instead of slapping the lens. The
@@ -607,7 +692,8 @@
       if (row.sfx && CBZ.sfx) {
         try {
           const d = camDist(x, y, z);
-          CBZ.sfx(row.sfx, d > 40 ? { delay: Math.min(9, d / 343), dist: d } : { dist: d });
+          const vol = blastVolume(row.power * fxScale);
+          CBZ.sfx(row.sfx, d > 40 ? { delay: Math.min(9, d / 343), dist: d, volume: vol } : { dist: d, volume: vol });
         } catch (e) {}
       }
     }
@@ -619,7 +705,19 @@
     //         re-hand-rolled at each ordnance site — which is exactly the
     //         duplication the migrated callers just deleted. cityShatter skips
     //         panes that are already shattered, so overlapping calls are free.
-    if (!opts.noDamage && row.struct >= 4 && CBZ.cityShatter) {
+    //         THE GATE MOVED OFF `struct` (2026-07-27). It used to read
+    //         `struct >= 4`, which was a fine proxy while `struct` was a
+    //         per-row character number — but the six migrated conventional
+    //         rows now all carry 6 (see the block above the table: it is
+    //         demolition.js's LEGACY_TO_LEDGER, not a character), so `struct`
+    //         had stopped saying anything about how HEAVY the round was and a
+    //         hand grenade would have started blowing out a block of glass.
+    //         POWER is the honest axis, with a struct escape hatch for the
+    //         genuine building-killers whose power is modest (an airliner into
+    //         a facade is 2.6). Every row that shattered before still does;
+    //         "missile" and "airstrike" — the two 3.0-power rows — are new.
+    const heavy = row.power >= 2.4 || row.struct >= 8;
+    if (!opts.noDamage && heavy && CBZ.cityShatter) {
       try { CBZ.cityShatter(x, z, row.radius * row.power * fxScale * 0.8); } catch (e) {}
     }
 
@@ -652,6 +750,32 @@
           by: opts.by, byPlayer: opts.byPlayer, lot: opts.lot,
         });
       } catch (e) {}
+    }
+
+    // ---- 3b) THE FACADE REACTS. The RPG has had `CBZ.cityBlastWall` since the
+    //          owner filmed a rocket hit a tower and "a few windows popped" —
+    //          a debris avalanche pouring down the face, a wound that smokes
+    //          for a minute, a parapet block knocked loose near the roofline.
+    //          NOTHING BIGGER THAN A ROCKET HAD IT. A JDAM into the same tower
+    //          drew a fireball and left the wall serene, because that call
+    //          lived at ONE call site (fpsmode's rocket branch) instead of on
+    //          the shared verb, and every heavier warhead was authored in a
+    //          file that had never read fpsmode.
+    //
+    //          THE SURFACE INFO IS CHEAP AND ALREADY HERE — no raycast is
+    //          invented. `facadeAt` below is the SAME collider-AABB scan
+    //          cityBlastWall itself runs to find the roofline, and the same one
+    //          cityBreach/cityScorch use; it answers "did this detonation land
+    //          on a wall, and which way does that wall face" by snapping to the
+    //          nearest face of the box it is inside/beside. If the answer is
+    //          "open air", we skip — a scar hanging four metres off a building
+    //          is exactly the floating-decal failure this repo keeps catching.
+    //          HEAVY ONLY, so a grenade never pays for the scan.
+    if (!opts.noDamage && heavy && CBZ.cityBlastWall && CBZ.CONFIG.IMPACT_STRUCTURAL) {
+      const face = facadeAt(x, y, z, 1.6);
+      if (face) {
+        try { CBZ.cityBlastWall(face, face.n, { power: row.power * fxScale }); } catch (e) {}
+      }
     }
 
     // ---- 4) WAVE. Big ordnance arrives over TIME. The ring below applies
@@ -698,6 +822,107 @@
     return Math.max(0.08, Math.min(1, 1.25 - d / 420));   // gentler than the blast's /130: a nuke is felt a LONG way out
   }
 
+  /* ------------------------------------------------------------------
+     HOW LOUD IS A GIVEN PAYLOAD — the one curve, shared.
+
+     A grenade and a JDAM made the IDENTICAL boom, because every explosion in
+     the game called `CBZ.sfx("explosion")` with no options at all while
+     systems/audio.js had supported `{dist, volume}` the whole time (and
+     city/nukefx.js was the sole caller that had ever noticed). Scale is the
+     cheapest thing an explosion can tell you and we were throwing it away.
+
+     Sound pressure at a fixed range goes as roughly the cube root of yield —
+     but `power` in this game is ALREADY a radius-like (cube-root) quantity
+     (see THE KINETIC LAW), so pressure is close to linear in `power` and
+     LOUDNESS, which is logarithmic in pressure, lands near its square root.
+     Hence sqrt. Floored at 1 so nothing on the bus can ever get QUIETER than
+     it is today — the distance term in audio.js is what makes far blasts
+     recede, and that is a fade, not a nerf. Capped at 2.4 so a nuke saturates
+     rather than clipping the bus.
+     Exported because crashfx.js's two blast primitives feed the same curve —
+     one answer, one place, and a legacy caller that never learned the bus
+     still gets the right volume for its own `power`.
+     ------------------------------------------------------------------ */
+  function blastVolume(power) {
+    const p = +power;
+    if (!(p > 1) || !isFinite(p)) return 1;
+    return Math.min(2.4, Math.sqrt(p));
+  }
+  I.volumeFor = blastVolume;
+  CBZ.blastVolume = blastVolume;
+
+  /* ------------------------------------------------------------------
+     WHERE A GROUND-LEVEL DETONATION SITS — and the trap it exists to avoid.
+
+     crashfx.js's cityExplosion reads `elevated = y > 3` and, above that,
+     cancels its ground rings, its scorch, its road wash AND shrinks its damage
+     footprint to `sqrt(R^2 - (y-1.2)^2)` — which goes IMAGINARY, i.e. NaN,
+     i.e. no damage at all, once the seat is more than R above a standing
+     chest. That test is an ABSOLUTE world height, and it has been correct for
+     the whole life of the game only because every ground-level caller passed
+     NO y and silently got 1.0.
+
+     Now that cars sit on real terrain and towns stand on hills, a migrated
+     caller that helpfully hands over `floorAt(x,z) + 1.2` would turn a grenade
+     thrown on a 10 m rise into a silent dud. So a ground-level caller asks for
+     its seat HERE: the real floor, so the fireball is on the hill rather than
+     buried in it, hard-clamped strictly under the airburst line so it can
+     never trip that branch. On flat ground it returns exactly the 1.0 every
+     one of these call sites has always used.
+
+     (The right long-term fix is for `elevated` to mean "above the LOCAL
+     ground", not "above y=3" — but that is crashfx's contract and every
+     airburst in the game is tuned against it, so it is not this wave's to
+     move. Named here so the next person can find it.)
+     ------------------------------------------------------------------ */
+  I.groundSeat = CBZ.blastSeatY = function (x, z) {
+    const f = CBZ.floorAt ? +CBZ.floorAt(x, z) : 0;
+    return Math.min(2.9, (isFinite(f) && f > 0 ? f : 0) + 1.0);
+  };
+
+  /* ------------------------------------------------------------------
+     DID THIS LAND ON A WALL, AND WHICH WAY DOES THAT WALL FACE?
+
+     Not a raycast: a scan of the collider AABBs, which is the identical test
+     `cityBlastWall` runs for its own parapet read and `cityBreach`/`cityScorch`
+     use to find a facade. A detonation inside (or within `pad` of) a tall box
+     is on that box's skin; the nearest of its four vertical faces is the one
+     it hit, and that face's outward normal is the direction the debris should
+     avalanche. Returns a point ON the face (so the wound is not stamped
+     floating in the street) plus `n`, or null for open air.
+
+     Cheap enough to run per heavy blast — one linear pass, no allocation
+     beyond the two hoisted scratch objects, and gated so grenades never call
+     it. Boxes shorter than a storey are furniture, not facades.
+     ------------------------------------------------------------------ */
+  const _facePt = { x: 0, y: 0, z: 0, n: { x: 0, y: 0, z: 0 } };
+  function facadeAt(x, y, z, pad) {
+    const cols = CBZ.colliders;
+    if (!cols || !cols.length) return null;
+    let best = null, bestPen = Infinity;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.minX == null) continue;
+      const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
+      if (y1 - y0 < 3) continue;                       // a kerb/planter is not a facade
+      if (y < y0 - pad || y > y1 + pad) continue;
+      if (x < c.minX - pad || x > c.maxX + pad || z < c.minZ - pad || z > c.maxZ + pad) continue;
+      // distance to each vertical face; the smallest is the skin we are on
+      const dxn = Math.abs(x - c.minX), dxp = Math.abs(c.maxX - x);
+      const dzn = Math.abs(z - c.minZ), dzp = Math.abs(c.maxZ - z);
+      const m = Math.min(dxn, dxp, dzn, dzp);
+      if (m >= bestPen) continue;
+      bestPen = m;
+      best = c;
+      _facePt.y = Math.max(0.8, Math.min(y1 - 0.4, y));
+      if (m === dxn)      { _facePt.x = c.minX; _facePt.z = z; _facePt.n.x = -1; _facePt.n.y = 0; _facePt.n.z = 0; }
+      else if (m === dxp) { _facePt.x = c.maxX; _facePt.z = z; _facePt.n.x = 1;  _facePt.n.y = 0; _facePt.n.z = 0; }
+      else if (m === dzn) { _facePt.x = x; _facePt.z = c.minZ; _facePt.n.x = 0;  _facePt.n.y = 0; _facePt.n.z = -1; }
+      else                { _facePt.x = x; _facePt.z = c.maxZ; _facePt.n.x = 0;  _facePt.n.y = 0; _facePt.n.z = 1; }
+    }
+    return best ? _facePt : null;
+  }
+
   // A rumble is a decaying low shake driven for `dur` seconds. One live rumble
   // at a time (the loudest wins) — stacking them just saturates the camera and
   // costs frames. This is the "ongoing aftershock" beat that separates a bomb
@@ -739,6 +964,12 @@
      a district degrades to fewer, coarser rings rather than a frame cliff.
      ============================================================ */
   const waves = [];
+  // hoisted billCar bag for the ring's vehicle pass — a wave ticks 20 Hz for
+  // seconds, so this is the one place a per-car literal would actually add up.
+  // `ignite: 0` is deliberate and permanent: the RING does not light cars, the
+  // near-field pass does. A nuke's front rolling over a district must not be
+  // able to seed a fire every 50 ms all the way out to 620 m.
+  const _ringBill = { x: 0, y: 0, z: 0, byPlayer: false, sev: 1, ignite: 0, cause: "explosion" };
   let waveSeq = 0;
   const WAVE_MAX = 2;
   const WAVE_TICK = 0.05;               // seconds between ring evaluations
@@ -773,6 +1004,11 @@
       // slow-moving front crawls across a wide footprint. See the ONE HIT PER
       // BUILDING PER WAVE block there for what that bug actually cost.
       id: ++waveSeq,
+      // WHICH DETONATION THIS WAVE BELONGS TO. The near-field car pass (the
+      // 8th wrapper) already billed the vehicles inside the fireball at t=0;
+      // this ring starts at row.radius and the two bands overlap, so without a
+      // shared identity a nuke would hit the same car twice on its way out.
+      carBlastId: opts._carBlastId || 0,
       acc: 0, done: false,
     });
   }
@@ -886,6 +1122,14 @@
     //      be exactly the second implementation this file exists to prevent.
     //      Bounded: the ring band is thin, and the pass is capped per tick so
     //      a nuke over a car park cannot spike a frame.
+    //      SHARED BILLING (2026-07-27): the per-car work moved into `billCar`
+    //      below so this ring pass and the near-field wrapper cannot disagree
+    //      about what a blast does to a vehicle — and, more importantly, so a
+    //      wave-carrying warhead cannot bill the same car TWICE (once at t=0
+    //      through the fireball, again as its own ring rolls over the same
+    //      metres). `w.carBlastId` is the detonation's identity; billCar
+    //      refuses a second bite from it. Nothing about the ring band, the CAP
+    //      or the 240*frac amount moved.
     if (CBZ.cityDamageCar && CBZ.cityCars && frac > 0.15) {
       const cars = CBZ.cityCars;
       let hurt = 0;
@@ -896,13 +1140,10 @@
         const d = Math.hypot(cv.pos.x - w.x, cv.pos.z - w.z);
         if (d < r0 || d >= r1) continue;
         hurt++;
-        try {
-          CBZ.cityDamageCar(cv, 240 * frac, {
-            byPlayer: w.byPlayer, blast: true,
-            fromX: w.x, fromZ: w.z,
-            cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
-          });
-        } catch (e) {}
+        _ringBill.x = w.x; _ringBill.y = w.y; _ringBill.z = w.z;
+        _ringBill.byPlayer = w.byPlayer; _ringBill.sev = frac;
+        _ringBill.cause = w.kind === "nuke" ? "nuclear blast" : "explosion";
+        billCar(cv, w.carBlastId, 240 * frac, _ringBill);
       }
     }
 
@@ -1019,6 +1260,193 @@
   }
 
   /* ============================================================
+     THE 8TH WRAPPER — EVERY BLAST REACHES THE CARS.
+
+     OWNER: "make cars blow up realistically."
+
+     The census that preceded this found that `applyBlastDamage` (crashfx.js) —
+     the shared path EVERY explosion in the game funnels its people-damage
+     through — iterates crowd, peds, cops, the player and player-built pieces,
+     and then stops. It has never touched `CBZ.cityCars`. So an RPG could land
+     between two parked cars, kill everyone on the pavement, carve the wall
+     behind them, and leave both cars showroom-fresh; the only warheads that
+     ever hurt a vehicle were the three rows carrying a `wave` (nuke, MOAB, a
+     falling airliner), through the ring pass in sweepRing above.
+
+     THIS IS A WRAPPER AND NOT A CALL IN `detonate` ON PURPOSE. Half the
+     explosions in this game do not come through the bus and never will —
+     police C4, a scripted set-piece, a mod, anything a future file writes
+     against `cityExplosion` because that is the primitive it found first.
+     Wrapping the two primitives is what makes the coupling TOTAL without
+     editing a file this domain does not own — the same reasoning
+     `wrapDamageBuilding` above is built on, and the same reasoning
+     aircraftimpact.js's wrapBoom uses.
+
+     THE EXPLOSION-WRAPPER LAW (CLAUDE.md), all three clauses honoured below:
+       * a FRESH marker (`_carBlastWrapped`) so no sibling's guard is aliased;
+       * EVERY `*Wrapped` marker copied forward, so a sibling that installs
+         after us (armored.js at 54.3) still fails its own idempotence test;
+       * a per-event idempotency tag (`opts._carSeen`, demolition.js's
+         `_demoSeen` idiom verbatim) plus the per-car `_carBlastId` stamp, so a
+         chain that has been layered twice bills a car exactly once.
+     ============================================================ */
+  let carBlastSeq = 0;      // identity of the detonation currently being drawn
+  let pendingCarId = 0;     // handed from detonate() to the composer, synchronously
+  const CAR_CAP = 24;       // vehicles billed per blast (sweepRing's own number)
+  const CAR_FUSE_CAP = 14;  // cars allowed to be cooking off at the same time
+
+  // How many vehicles are already on fire. This is the hard stop on a chain
+  // reaction: past it a blast still WRECKS the cars it reaches, it just stops
+  // lighting new ones, so a nuke over a multi-storey car park cannot turn into
+  // an unbounded cascade of detonations queued against each other.
+  function carsCooking() {
+    const cars = CBZ.cityCars;
+    if (!cars) return 0;
+    let n = 0;
+    for (let i = 0; i < cars.length; i++) { const c = cars[i]; if (c && c._onFire && !c._exploded) n++; }
+    return n;
+  }
+
+  /* ONE CAR, ONE BLAST. Shared by the near-field wrapper and sweepRing's ring
+     pass so the two can never drift, and so a wave-carrying warhead cannot
+     bill the same vehicle in both.
+       amount  engine-HP points, already distance-scaled by the caller
+       o.sev   0..1 severity, drives the crater and the ignition roll
+       o.ignite 0..1 chance this blast lights the car outright (the row's `fire`)
+     Everything goes through CBZ.cityDamageCar / cityCarIgnite — never a raw
+     `.hp -=` — so armour (armored.js), mods (modshop.js), the smoke/fire/cook
+     ladder and the kill bus for whoever is inside all still apply. */
+  let carSweepDepth = 0;
+  function billCar(cv, blastId, amount, o) {
+    if (!cv || cv.dead || cv._exploded || cv._husk || !cv.pos) return false;
+    if (!CBZ.cityDamageCar) return false;
+    if (blastId && cv._carBlastId === blastId) return false;     // already billed by this detonation
+    if (blastId) cv._carBlastId = blastId;
+    carSweepDepth++;
+    try { billCarInner(cv, amount, o); }
+    finally { carSweepDepth--; if (carSweepDepth < 0) carSweepDepth = 0; }
+    return true;
+  }
+  // THE DEPTH LIVES ON billCar, not on the sweep, so BOTH entries are covered:
+  // the near-field wrapper and the wave's ring pass. Damaging a car can cook it
+  // off, a cook-off is a detonation, and a detonation re-enters the wrapper —
+  // so without this a chain could recurse on the STACK instead of travelling
+  // through each car's fuse. (It matters most on the CAR_COOKOFF_V2-off
+  // degrade path, where a drained car still pops in the same frame.)
+  function billCarInner(cv, amount, o) {
+    const sev = Math.max(0, Math.min(1, o.sev == null ? 1 : o.sev));
+    // (1) THE DENT. A car that "took blast damage" and is still geometrically
+    //     pristine is a number, not an event — so the same vertex crater the
+    //     crash path stamps goes on, driven from the blast bearing, and with
+    //     it the whole consequence ladder crashdeform already owns (hood
+    //     sprung, door hanging, glass crazed, wheel splayed, chassis bent).
+    if (CBZ.cityCarImpact && sev > 0.08) {
+      let ux = cv.pos.x - o.x, uz = cv.pos.z - o.z;
+      const ul = Math.hypot(ux, uz);
+      if (ul > 1e-3) { ux /= ul; uz /= ul; } else { ux = 0; uz = 1; }
+      const half = ((cv.dims && cv.dims.width) || 2) * 0.5;
+      try {
+        CBZ.cityCarImpact(cv,
+          { x: cv.pos.x - ux * half, y: 0.95, z: cv.pos.z - uz * half },
+          { x: ux, y: -0.15, z: uz },                    // the metal moves AWAY from the blast
+          Math.min(34, 4 + sev * 30),
+          { vel: { x: -ux * 6 * sev, z: -uz * 6 * sev } });
+      } catch (e) {}
+    }
+    // (2) THE GLASS. A pressure wave takes the windows before it takes the
+    //     panels; the crater ladder only crazes glass once a panel is deeply
+    //     caved, which is right for a kerb scrape and wrong for an overpressure.
+    if (sev > 0.3 && CBZ.cityCarFrost) { try { CBZ.cityCarFrost(cv); } catch (e) {} }
+    // (3) THE DAMAGE. `blast: true` is what tells vehicles.js this is
+    //     overpressure and not a rifle round — a drained engine then cooks off
+    //     on a short jittered fuse instead of popping in the same frame, which
+    //     is the whole difference between one explosion and a rolling cascade.
+    try {
+      CBZ.cityDamageCar(cv, amount, {
+        byPlayer: !!o.byPlayer, blast: true,
+        fromX: o.x, fromZ: o.z,
+        cause: o.cause || "explosion",
+      });
+    } catch (e) {}
+    // (4) THE FIRE. Fuel-carrying ordnance lights what it does not kill. Rolled
+    //     against the row's own `fire`, scaled by severity, and refused once
+    //     the concurrent-cook budget is spent — `o.budget` is a live counter
+    //     the caller seeds from carsCooking() once, so the cap holds ACROSS a
+    //     whole sweep and not just per car.
+    if (o.ignite > 0 && !cv._onFire && !cv.dead && CBZ.cityCarIgnite &&
+        (!o.budget || o.budget.n > 0) && Math.random() < o.ignite * sev) {
+      if (o.budget) o.budget.n--;
+      try { CBZ.cityCarIgnite(cv, !!o.byPlayer); } catch (e) {}
+    }
+  }
+  I.billCar = billCar;                 // probes read this; nothing else calls it
+
+  // The near-field pass: every car inside the blast's own effective radius.
+  // SQUARED falloff, deliberately — linear would flatten every car out to the
+  // rim and leave no readable shape. An RPG (power 1.9, radius 13 => R 24.7 m)
+  // therefore cooks off what is within ~10 m, heavily wounds to ~15 m, and
+  // dents to ~20 m, which is the gradient a real blast leaves in a car park.
+  const _fuseBudget = { n: 0 };            // hoisted: no per-blast allocation
+  function carSweep(x, y, z, opts, defRadius, blastId) {
+    const cars = CBZ.cityCars;
+    if (!cars || !cars.length) return 0;
+    // NO NESTED SWEEPS — see the depth block on billCar above. A 24-wide
+    // fan-out that can re-enter itself is a frame-killer and, on the
+    // CAR_COOKOFF_V2-off path, an unbounded one.
+    if (carSweepDepth > 0) return 0;
+    const power = (opts && opts.power) || 1;
+    const R = ((opts && opts.radius) || defRadius) * power;
+    if (!(R > 0.5)) return 0;
+    const row = opts && opts.ordnance ? TABLE[opts.ordnance] : null;
+    // A legacy blast declares no ordnance row; 0.10 is between the shaped
+    // charge (0.05) and the fuel-carrying rows, i.e. the honest average of the
+    // things that reach this path without a name.
+    const fire = row ? row.fire : 0.10;
+    const byPlayer = !!(opts && opts.byPlayer);
+    _fuseBudget.n = Math.max(0, CAR_FUSE_CAP - carsCooking());
+    const bill = {
+      x: x, y: y, z: z, byPlayer: byPlayer, sev: 1, ignite: fire,
+      budget: _fuseBudget,
+      cause: row && row.id === "carcook" ? "burned in the car" : "explosion",
+    };
+    let hurt = 0;
+    for (let i = 0; i < cars.length && hurt < CAR_CAP; i++) {
+      const cv = cars[i];
+      if (!cv || cv.dead || cv._exploded || !cv.pos) continue;
+      const dx = cv.pos.x - x, dz = cv.pos.z - z;
+      const d = Math.hypot(dx, dz);
+      if (d >= R) continue;
+      bill.sev = 1 - d / R;
+      if (billCar(cv, blastId, 150 * power * bill.sev * bill.sev, bill)) hurt++;
+    }
+    return hurt;
+  }
+
+  function wrapCarBlast(name, defRadius) {
+    const orig = CBZ[name];
+    if (typeof orig !== "function" || orig._carBlastWrapped) return;
+    const wrapped = function (x, z, opts) {
+      const r = orig.apply(this, arguments);
+      try {
+        if (CBZ.CONFIG.IMPACT_CAR_BLAST && CBZ.cityCars &&
+            (!CBZ.game || CBZ.game.mode === "city") &&
+            !(opts && (opts.noDamage || opts._carSeen))) {
+          if (opts) opts._carSeen = true;          // one blast, one bill (demolition's idiom)
+          // A blast with no `ordnance` tag never came through CBZ.detonate.
+          // Counted, not refused — see CBZ.blastAudit().unrowed.
+          if (!(opts && opts.ordnance) && unrowedBlasts < 1e9) unrowedBlasts++;
+          const y = opts && opts.y != null ? opts.y : 1.0;
+          carSweep(x, y, z, opts || {}, defRadius, pendingCarId || (++carBlastSeq));
+        }
+      } catch (e) { /* a coupling failure must never break the shared blast chain */ }
+      return r;
+    };
+    for (const k in orig) if (/Wrapped$/.test(k)) wrapped[k] = orig[k];
+    wrapped._carBlastWrapped = true;
+    CBZ[name] = wrapped;
+  }
+
+  /* ============================================================
      TICK. Order 34.4 — immediately BEFORE city/demolition.js's 34.5, so a
      wave that condemns a lot this frame is acted on by the demolition phase
      ticker in the SAME frame rather than one frame late. Early-outs to a
@@ -1034,6 +1462,15 @@
     wrapDamageBuilding();
     wrapBlastScope("cityExplosion");
     wrapBlastScope("cityAirstrikeExplosion");
+    // The vehicle coupling installs AFTER the scope wraps and is therefore
+    // OUTSIDE them, which is what we want: it runs once the whole legacy chain
+    // (buildings' structuralBlast, demolition's onBlast, the armour coupling)
+    // has finished, so a car it cooks off cannot re-enter a half-finished
+    // blast. The defaults mirror each primitive's own `opts.radius ||` value
+    // in crashfx.js, so a caller that omits a radius gets the same R the
+    // fireball itself used.
+    wrapCarBlast("cityExplosion", 6);
+    wrapCarBlast("cityAirstrikeExplosion", 12);
     if (!waves.length && !rumble) return;
     const d = dt > 0.25 ? 0.25 : dt;      // spike-cap: a stalled frame must not teleport the front
     stepWaves(d);
@@ -1064,6 +1501,86 @@
     if (CBZ.cityFracture && CBZ.cityFracture._legacyAccum) n++;
     if (CBZ._cityWoundWallRec) n++;      // buildings.js per-wall wound map (not this domain's to move yet)
     return n;
+  };
+
+  /* ============================================================
+     CBZ.blastAudit() — THE RATCHET FOR "EVERY PAYLOAD SPEAKS THE BUS".
+
+     `impactAudit` counts duplicated structural LEDGERS. This counts duplicated
+     ORDNANCE: the call sites that still hand-roll a power/radius pair straight
+     into cityExplosion instead of naming a table row.
+
+     ADOPTION IS DECLARED AT LOAD, NOT ON THE FIRST TRIGGER PULL — the same
+     discipline city/playeraircraft.js's `CBZ.ordnanceSite` uses, and for the
+     same reason: the audit must report what the world is WIRED with, not what
+     has happened to be fired since boot. A migrated file's whole cost is one
+     line next to its detonation:
+
+         (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("fps:rocket");
+
+     AN ARRAY AND NOT A FUNCTION, deliberately: index.html loads this file at
+     754 and FOUR of the six migrated callers (fpsmode, aircraft,
+     vehicles, playeraircraft) load BEFORE it. A `CBZ.ordnanceBusSite(...)`
+     call at their load time would have found `undefined` and silently
+     declared nothing, and the audit would have read a confident, wrong zero —
+     which is precisely the "an audit nobody has executed is not a
+     measurement" failure CLAUDE.md keeps catching. A plain array a caller
+     creates-or-appends is order-free by construction.
+
+     FIELDS
+       busKinds       rows in the ordnance table
+       busAdopted     declared sites, of KNOWN_SITES
+       handRolled     KNOWN_SITES that have NOT declared. **MAY ONLY GO DOWN.**
+       unrowed        blasts seen by the vehicle wrapper carrying no `ordnance`
+                      tag since boot — the LIVE version of the same question,
+                      and the one that catches a site nobody remembered to add
+                      to KNOWN_SITES. Non-zero is not automatically a failure
+                      (police C4, scripted set-pieces and mods legitimately
+                      reach the primitives directly) but it is the number to
+                      look at when asking "what is still not on the bus".
+       carsCoupled    both blast primitives carry the vehicle wrapper
+       husks          burnt-out car wrecks currently standing in the world
+       chainDepthCap  how deep a cook-off cascade may nest ON THE STACK (1 —
+                      chains travel through fuses, i.e. through TIME)
+       wrappers       how many modules are layered on cityExplosion right now
+     ============================================================ */
+  const BUS_SITES = Object.create(null);
+  let unrowedBlasts = 0;
+  // The six hand-rolled detonations this domain owns. fpsmode's 40 mm grenade
+  // launcher is deliberately NOT a seventh: it is byte-identical to the rocket
+  // (weapon-data gives both 1.9/13) and shares the exact same `w.explosive`
+  // branch, so one declaration covers both weapons and inventing a second id
+  // would flatter the count.
+  const KNOWN_SITES = ["fps:rocket", "combat:grenade", "armor:tank-fallback",
+                       "air:missile-pool", "air:player-missile-fallback", "vehicles:carcook"];
+  I.site = CBZ.ordnanceBusSite = function (id, kind) {
+    if (id) BUS_SITES[id] = kind || true;
+  };
+  function drainSites() {
+    const q = CBZ.ordnanceBusSites;
+    if (!q || !q.length) return;
+    for (let i = 0; i < q.length; i++) if (q[i]) BUS_SITES[q[i]] = true;
+  }
+  drainSites();                       // the four callers that load before us
+  CBZ.blastAudit = function () {
+    drainSites();                     // ...and anything declared since (idempotent)
+    let adopted = 0;
+    for (let i = 0; i < KNOWN_SITES.length; i++) if (BUS_SITES[KNOWN_SITES[i]]) adopted++;
+    let wrappers = 0;
+    const be = CBZ.cityExplosion;
+    if (be) for (const k in be) if (/Wrapped$/.test(k)) wrappers++;
+    return {
+      busKinds: Object.keys(TABLE).length,
+      busAdopted: adopted,
+      handRolled: KNOWN_SITES.length - adopted,
+      unrowed: unrowedBlasts,
+      carsCoupled: !!(CBZ.cityExplosion && CBZ.cityExplosion._carBlastWrapped &&
+                      CBZ.cityAirstrikeExplosion && CBZ.cityAirstrikeExplosion._carBlastWrapped),
+      husks: CBZ.cityCarHusks ? CBZ.cityCarHusks() : 0,
+      chainDepthCap: 1,
+      wrappers: wrappers,
+      sites: Object.keys(BUS_SITES),
+    };
   };
 
   /* ============================================================

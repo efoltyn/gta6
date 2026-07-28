@@ -2285,7 +2285,31 @@
           // the hull sphere (airTarget false) yet still detonates up at aircraft
           // altitude — clearly above street/low-ledge combat, below every craft.
           const airburst = !groundHit && !wallStruck && (airTarget || pt.y > 12);
-          if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
+          // THE ROCKET NAMES ITS ORDNANCE (systems/impactbus.js). One verb
+          // replaces the hand-rolled power/radius pair and buys what the
+          // inline call could never have: the structural ledger at the real
+          // impact height, a fuel-fire term, the ejecta direction, and the
+          // ordnance identity every downstream wrapper reads (which is what
+          // lets a car under the blast tell an RPG from a car fire). The
+          // "rpg" row IS these numbers — 1.9 power / 13 radius, straight off
+          // weapon-data.js — so nothing about the fireball moves; the row was
+          // corrected UP to match the weapon, not the other way round.
+          // The 40 mm launcher shares this branch and is deliberately
+          // byte-identical to the rocket (weapon-data gives both 1.9/13), so
+          // it rides the same row rather than inventing a duplicate.
+          // THE NUMBER GUARD is not paranoia: `w.blastPower/blastRadius` are
+          // WEAPON DATA, and a future explosive authored with different ones
+          // must not be quietly re-priced as an RPG. It takes the row only
+          // when the row IS its numbers, and otherwise fires the exact line
+          // the rocket has always fired. Same for flag-off / bus-absent.
+          const useBus = CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false &&
+                         (w.blastPower || 1.4) === 1.9 && (w.blastRadius || 7) === 13;
+          if (useBus) {
+            CBZ.detonate(pt.x, pt.y, pt.z, "rpg", {
+              byPlayer: true, airburst: airburst,
+              dirx: launchDir.x, dirz: launchDir.z,
+            });
+          } else if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
           // a guest's blast never reaches the host's sim otherwise — the host
           // can't count structural HP for a detonation it never saw (mirrors
           // localGunHit's "hit" forwarding in net.js). FX stays local (above);
@@ -2345,6 +2369,39 @@
           // distance so a near miss wounds into tier smoke instead.
           if (CBZ.cityPoliceAirSplash) CBZ.cityPoliceAirSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
           if (CBZ.cityAirTrafficSplash) CBZ.cityAirTrafficSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 140);
+          // ---- A ROCKET INTO A CAR DID NOTHING TO THE CAR. --------------
+          // `hit.car` was resolved at fire time and used for ONE thing: to
+          // decide where the rocket stops (detT, above). The explosive branch
+          // deliberately skips the per-pellet damage loop because "the BLAST
+          // is the kill" — but nothing in the blast chain had ever touched
+          // CBZ.cityCars, so the vehicle you aimed at absorbed the shot and
+          // drove on. The general fix is the vehicle coupling on the blast
+          // primitives themselves (systems/impactbus.js); THIS is the other
+          // half of it — a DIRECT hit is not a near miss, and it should not
+          // be priced by distance falloff like one.
+          //   `direct: true` is what buys the 0.2-0.4 s fuel-flash beat in
+          //   vehicles.js instead of the blast's 0.4-1.6 s fuse: you shot the
+          //   car, so it goes now — but never in the same frame, because the
+          //   flash before the fireball is the whole read.
+          //   The crater comes through cityCarImpact along the rocket's own
+          //   flight vector, so the hole is where the round went in.
+          if (hit && hit.car && !hit.car.dead && hit.car.pos && CBZ.cityDamageCar &&
+              Math.hypot(hit.car.pos.x - pt.x, hit.car.pos.z - pt.z) < 6) {
+            const tgt = hit.car;
+            if (CBZ.cityCarImpact) {
+              try {
+                CBZ.cityCarImpact(tgt, hit.point || pt,
+                  { x: launchDir.x, y: Math.min(-0.1, launchDir.y), z: launchDir.z },
+                  32, { r: 1.5 });
+              } catch (e) {}
+            }
+            try {
+              CBZ.cityDamageCar(tgt, 260, {
+                byPlayer: true, blast: true, direct: true,
+                fromX: pt.x, fromZ: pt.z, cause: "explosion",
+              });
+            } catch (e) {}
+          }
         }
         // kick scales with how close the blast is to the lens — a rocket at your
         // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
@@ -3575,4 +3632,11 @@
 
   // keep ammo HUD honest if you pick up the gun mid-FPS
   CBZ.onUpdate(53, setAmmoHud);
+
+  // Declared at LOAD, not on the first trigger pull, so CBZ.blastAudit()
+  // reports what the world is WIRED with rather than what has been shot. The
+  // rocket and the 40 mm share this one site: weapon-data gives both the same
+  // 1.9/13, and both leave through the same `w.explosive` branch. An ARRAY
+  // because this file loads well before systems/impactbus.js does.
+  (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("fps:rocket");
 })();

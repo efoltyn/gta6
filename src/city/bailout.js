@@ -330,8 +330,13 @@
     const mass = (c.mass || (c.airClass === "airliner" ? 72000 : c.kind === "heli" ? 5200 : 12000));
     if (CBZ.detonate) {
       try {
-        CBZ.detonate(c.pos.x, Math.max(gy, c.pos.y), c.pos.z, "aircraft-impact",
-                     { mass: mass, speed: speed, byPlayer: true, frontal: true });
+        // "aircraft-impact" was never a bus row — it degraded to the unknown-kind
+        // firecracker (power 1, radius 6) for this path's whole life; and
+        // `frontal` is METRES of sever, so `true` coerced to a 1 m nick. Route
+        // by the craft's real class and let the kinetic law price mass×speed².
+        CBZ.detonate(c.pos.x, Math.max(gy, c.pos.y), c.pos.z,
+                     c.airClass === "airliner" ? "crashAirliner" : c.kind === "heli" ? "crashSmall" : "crashJet",
+                     { mass: mass, speed: speed, byPlayer: true, frontal: 3 });
       } catch (e) {}
     } else if (CBZ.cityAirstrikeExplosion) {
       try { CBZ.cityAirstrikeExplosion(c.pos.x, c.pos.z, { power: 3.0, radius: 16, y: c.pos.y, byPlayer: true }); } catch (e) {}

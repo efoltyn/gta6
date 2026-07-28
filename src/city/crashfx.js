@@ -784,13 +784,23 @@
     // ---- IMPACT FEEDBACK: sound, shake, slow-mo, screen flash. Shake/stop
     // scale with how close the blast is to the LENS — a rocket at your feet
     // rattles the camera, one landing 120u up a tower only rumbles. ----
-    if (CBZ.sfx) CBZ.sfx("explosion");
-    let att = 1;
+    // A GRENADE AND A JDAM MADE THE IDENTICAL BOOM. This line was
+    // `CBZ.sfx("explosion")` with no options at all — while systems/audio.js
+    // has supported `{dist, volume}` the whole time (dist drives its own
+    // attenuation AND swaps to the far-field muffle bus past 60 u), and the
+    // distance was being computed two lines below for the camera shake and
+    // then thrown away. Scale is the cheapest thing an explosion can tell you.
+    // CBZ.blastVolume is the shared curve (systems/impactbus.js) so this and
+    // the bus's own sound cue can never disagree; it is floored at 1, so
+    // nothing gets quieter than it was — only bigger things get louder and
+    // distant ones recede.
+    let att = 1, cd = 0;
     const cam = CBZ.camera;
     if (cam && cam.position) {
-      const cd = Math.hypot(x - cam.position.x, cy - cam.position.y, z - cam.position.z);
+      cd = Math.hypot(x - cam.position.x, cy - cam.position.y, z - cam.position.z);
       att = Math.max(0.25, Math.min(1, 1.25 - cd / 130));
     }
+    if (CBZ.sfx) CBZ.sfx("explosion", { dist: cd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 });
     if (CBZ.shake) CBZ.shake(3.2 * Math.min(2, power) * att);
     // punch is DEFERRED two frames (blastPunch) so the flash renders before
     // time stops — see the FX_BLAST_FIRSTFRAME block.
@@ -991,7 +1001,18 @@
     addScorch(x, z, R * 0.55, 16);                              // big, long-lasting crater scorch
 
     // ---- IMPACT FEEDBACK: bigger boom, harder shake, more slow-mo, screen flash --
-    if (CBZ.sfx) CBZ.sfx("explosion");
+    // Same treatment as cityExplosion above: distance in, power-scaled volume
+    // out, through the shared CBZ.blastVolume curve. Heavy ordnance is a
+    // BIGGER `power` than a car blast by construction, so this is where "a
+    // JDAM is louder than a grenade" actually becomes audible. The SHAKE is
+    // deliberately left alone — every airstrike in the game is tuned against
+    // its unattenuated value, and quieting it is a different change.
+    if (CBZ.sfx) {
+      let sd = 0;
+      const scam = CBZ.camera;
+      if (scam && scam.position) sd = Math.hypot(x - scam.position.x, cy - scam.position.y, z - scam.position.z);
+      CBZ.sfx("explosion", { dist: sd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 });
+    }
     if (CBZ.shake) CBZ.shake(5.5 * Math.min(2.4, power));
     // deferred like cityExplosion's — the fireball exists before time stops
     blastPunch(0.26, 0.5);

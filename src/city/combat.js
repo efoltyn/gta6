@@ -1207,7 +1207,17 @@
   // it kills, shatters glass, and is a witnessed crime. CITY-ONLY.
   function detonate(x, z) {
     if (g.mode !== "city") return;
-    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true });
+    // THE FRAG NAMES ITS ORDNANCE (systems/impactbus.js). The "grenade" row is
+    // 1.0 power / 6 radius against GREN's 1.0 / 5.5, so the fireball grows
+    // very slightly and never shrinks — and the row brings the structural
+    // ledger, a fire term and the ordnance identity the vehicle coupling reads
+    // to tell a frag from a car fire. Degrade: flag off => the exact old line.
+    // CBZ.blastSeatY: the ground seat, clamped strictly under crashfx's
+    // airburst line — see the block above it for why a frag on a hill would
+    // otherwise be a silent dud.
+    if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
+      CBZ.detonate(x, CBZ.blastSeatY ? CBZ.blastSeatY(x, z) : 1.0, z, "grenade", { byPlayer: true });
+    } else if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true });
     if (CBZ.cityShatter) CBZ.cityShatter(x, z, GREN.radius + 2);
     if (CBZ.shake) CBZ.shake(1.2);
     if (CBZ.doHitstop) CBZ.doHitstop(0.05);
@@ -1326,4 +1336,7 @@
       }
     }
   });
+
+  // ordnance-bus adoption, declared at LOAD (CBZ.blastAudit()).
+  (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("combat:grenade");
 })();

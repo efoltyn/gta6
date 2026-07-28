@@ -1388,7 +1388,22 @@
       // "works" if the missile hook isn't wired. Lands ahead along the aim.
       const reach = 26;
       const tx = mx + dx * reach, tz = mz + dz * reach;
-      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(tx, tz, { power: 1.4, radius: 8, byPlayer: true }); } catch (e) {} }
+      // THE FALLBACK NAMES ITS ORDNANCE (systems/impactbus.js). It is a
+      // MISSILE that never left the rail, so it takes the "missile" row —
+      // scaled by 1.4/3.0 = 0.467, which reproduces this call's authored POWER
+      // exactly (3.0 x 0.467 = 1.4) while inheriting the row's 16 m radius
+      // instead of the 8 typed here. Net: same fireball intensity, reach
+      // 11.2 m -> 22.4 m. That is a growth and it is the intended direction —
+      // a saturated pool used to silently EAT the shot entirely (fixed in the
+      // ordnance wave), and the consolation prize for a shot that did fire
+      // should read like the weapon it stands in for, not like a firecracker.
+      // Degrade: flag off => the exact old line.
+      if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
+        try {
+          CBZ.detonate(tx, CBZ.blastSeatY ? CBZ.blastSeatY(tx, tz) : 1.0, tz, "missile",
+            { byPlayer: true, scale: 0.467, dirx: dx, dirz: dz });
+        } catch (e) {}
+      } else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(tx, tz, { power: 1.4, radius: 8, byPlayer: true }); } catch (e) {} }
     }
     craft.ammo--;
     craft.fireCD = FIRE_CD;
@@ -2819,4 +2834,8 @@
       if (bindHurtWrap()) _hurtBound = true;
     });
   }
+
+  // ordnance-bus adoption, declared at LOAD (CBZ.blastAudit()). An ARRAY
+  // because this file loads before systems/impactbus.js does.
+  (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("air:player-missile-fallback");
 })();

@@ -1161,6 +1161,10 @@
     }
     CBZ.cityCars.length = 0;
     for (const c of keep) CBZ.cityCars.push(c);
+    // burnt-out hulks go with the fleet — the array is a ledger of records
+    // this pass has just torn down, and a stale entry would let the eviction
+    // in makeHusk re-dispose a group whose geometry is already freed.
+    husks.length = 0;
   }
   CBZ.clearCityCars = clearCars;
 
@@ -1354,6 +1358,59 @@
   //  capped, distance-culled, and reusing one shared radial texture.
   // ============================================================
   const SMOKE_AT = 45, FIRE_AT = 15;
+
+  /* ============================================================
+     CARS BLOW UP REALISTICALLY  (CBZ.CONFIG.CAR_COOKOFF_V2, default ON)
+
+     OWNER: "make cars blow up realistically."
+
+     What was wrong was not the fireball, it was the SEQUENCE, and it was four
+     separate faults that all pulled the same way — toward "a car is a health
+     bar that deletes itself":
+
+       (1) `damageEngine(car, amount, fromGun)` took a BOOLEAN, and
+           CBZ.cityDamageCar hardcoded `true` into it. So every source that was
+           not a crash — a rifle round, an RPG, a nuke's shock front, a molotov
+           — arrived as "gunfire", and gunfire's rule was `engineHp <= 0 =>
+           explodeCar(car)` IN THE SAME FRAME. The crash path, meanwhile, ran a
+           genuinely good arc (dented -> smoking -> a rolled chance of fire -> a
+           long fuse -> half of them merely burn out). One of the two paths was
+           realistic and the other was a switch, and the realistic one was
+           unreachable from anything that shoots.
+       (2) Because the pop was same-frame, a blast could never CASCADE: the
+           first car to reach 0 HP deleted itself instantly, and its own
+           detonation therefore happened inside the frame that killed it. A
+           parking lot could not roll.
+       (3) explodeCar disposed the mesh on the spot. Aircraft leave hulks; cars
+           left nothing — the most destructive thing you can do to a street
+           erased its own evidence.
+       (4) Nobody ever got out. bailout.js is aircraft-only, and a burning car
+           held its driver until it detonated with them in it.
+
+     The flag changes the SOURCE OF TRUTH, not the numbers: `damageEngine`'s
+     third argument becomes a MODE, and cityDamageCar passes the truth it was
+     already being handed in `opts`. Each mode gets the arc its physics
+     deserves, and every one of them ends in a FUSE — a readable beat between
+     the hit and the fireball — because that beat is the whole difference
+     between an explosion and a deletion:
+
+       "gun"     a round finds the fuel line: instant FIRE, 2-5 s cook-off
+                 (igniteCar's own weapon-fire fuse, untouched)
+       "blast"   overpressure: ignition + a 0.4-1.6 s PER-CAR JITTERED fuse.
+                 The jitter is the point — identical fuses would make a car
+                 park detonate as one chord instead of a roll.
+       "direct"  a heavy warhead's impact point ON the hull: a 0.2-0.4 s
+                 fuel-flash. Effectively instant, but never same-frame, so the
+                 eye always gets the flash before the fireball.
+       "fire"    an already-burning car finishing itself.
+       false     a CRASH. Byte-identical to before; this path was already right.
+
+     Flag OFF => `damageEngine(car, amount, true)` exactly as before, no husk,
+     no bail-out. One line back.
+     ============================================================ */
+  if (CBZ.CONFIG && CBZ.CONFIG.CAR_COOKOFF_V2 == null) CBZ.CONFIG.CAR_COOKOFF_V2 = true;
+  function COOKOFF() { return !CBZ.CONFIG || CBZ.CONFIG.CAR_COOKOFF_V2 !== false; }
+
   // shared soft radial texture for all car smoke/flame sprites
   let _vfxTex = null;
   function vfxTex() {
@@ -1496,14 +1553,30 @@
   // over minutes rather than detonating on contact (a fuel-tank fireball is a
   // Hollywood myth). Gunfire/explosive damage keeps the old instant-pop so those
   // weapons still cook a car off as before.
-  function damageEngine(car, amount, fromGun) {
+  // `mode`: false = a CRASH (unchanged, and the one path that was always
+  // right); true = the legacy "gunfire" boolean; or one of the CAR_COOKOFF_V2
+  // strings "gun" / "blast" / "direct" / "fire" (see the block above SMOKE_AT).
+  function damageEngine(car, amount, mode) {
     if (!car || car.dead) return;
     if (car.engineHp == null) car.engineHp = 100;
+    const fromGun = !!mode;                       // anything that is not a crash
     const armor = Math.max(0, Math.min(0.35, car.armor || 0));
     amount *= Math.max(0.55, 1 - armor * (fromGun ? 1.25 : 0.85));
     car.engineHp = Math.max(-50, car.engineHp - amount);
     if (car.engineHp <= 0 && !car._exploded) {
-      if (fromGun) { explodeCar(car); return; }            // weapon hits still pop instantly
+      if (fromGun) {
+        // THE ENGINE IS GONE. What happens next is the mode's business, and it
+        // is never the same frame unless the flag is off.
+        //   `fuseOnly` matters: the cook-off gate in tickDamageStage explodes a
+        //   weapon fire the moment `engineHp <= 0` OR the fuse runs out, and
+        //   engineHp is ALREADY <= 0 here — so without it the "fuse" would
+        //   expire on the very next tick and we would be back to the pop.
+        if (!COOKOFF()) { explodeCar(car); return; }        // legacy: weapon hits pop instantly
+        if (mode === "direct") igniteCar(car, false, { fuse: 0.2 + Math.random() * 0.2, fuseOnly: true, burnsOut: false, quiet: true });
+        else if (mode === "blast") igniteCar(car, false, { fuse: 0.4 + Math.random() * 1.2, fuseOnly: true, burnsOut: false, quiet: true });
+        else igniteCar(car, false, { fuseOnly: true });     // "gun"/"fire": the existing 2.4-4.6 s cook-off
+        return;
+      }
       // a crash that guts the motor DISABLES it (smoking wreck). A fire only
       // sometimes develops — post-crash fires are rare (~0.2% of crashes) — and
       // when it does it cooks off slowly, never an instant bump-to-fireball.
@@ -1511,8 +1584,13 @@
       maybeCrashFire(car, true);
       return;
     }
-    if (fromGun) { if (car.engineHp <= FIRE_AT && !car._onFire) igniteCar(car, false); }
-    else if (car.engineHp <= FIRE_AT) maybeCrashFire(car, false);   // badly-crashed: a CHANCE to ignite
+    if (fromGun) {
+      // Survived, but hurt past the fire line. A DIRECT heavy hit or a blast
+      // that leaves the motor running still lights it (the fuel line is the
+      // fuel line); the fuse is the ordinary weapon-fire one, so there is time
+      // to run or to shoot it again.
+      if (car.engineHp <= FIRE_AT && !car._onFire) igniteCar(car, false);
+    } else if (car.engineHp <= FIRE_AT) maybeCrashFire(car, false);   // badly-crashed: a CHANCE to ignite
     if (car.engineHp <= SMOKE_AT) car._smoking = true;
   }
   // CRASH-INDUCED FIRE — rare and slow, per real-world data (vehicle fires occur
@@ -1529,30 +1607,117 @@
   }
   // crashFire = a slow post-crash burn (long cook-off); otherwise a weapon/molotov
   // fire that cooks off in a few seconds as before.
-  function igniteCar(car, crashFire) {
-    if (car._onFire || car.dead || car._exploded) return;
+  // opts (all optional, all CAR_COOKOFF_V2 era — a 2-argument call is
+  // byte-identical to before):
+  //   fuse      explicit seconds to cook-off (a blast's 0.4-1.6, a direct
+  //             heavy hit's 0.2-0.4) instead of the class default
+  //   fuseOnly  the engine is ALREADY gone; only the fuse may fire it. Without
+  //             this the `engineHp <= 0` half of the cook-off gate detonates on
+  //             the next tick and the fuse is decorative.
+  //   burnsOut  force / forbid the burn-out-instead-of-detonate outcome
+  //   quiet     skip the bail-out prompt (a 0.3 s fuel flash is not advice)
+  function igniteCar(car, crashFire, opts) {
+    if (car.dead || car._exploded) return;
+    opts = opts || {};
+    // ALREADY BURNING. A second, HARDER hit on a car that is already alight
+    // must be able to shorten its fuse — otherwise the blast that lights a car
+    // at 1.4 s makes the direct rocket that follows meaningless, and "I shot
+    // it again and nothing happened" is exactly the readability failure this
+    // whole arc exists to fix. Only ever shortens; never relights, never
+    // extends, never re-runs the bail-out.
+    if (car._onFire) {
+      if (opts.fuse != null && opts.fuse < car._fuse) {
+        car._fuse = opts.fuse;
+        if (opts.fuseOnly) car._fuseOnly = true;
+        if (opts.burnsOut === false) car._burnsOut = false;
+      }
+      return;
+    }
     car._onFire = true; car._smoking = true;
     car._crashFire = !!crashFire;
     // a FUSE: a weapon fire cooks off in a few seconds; a CRASH fire builds slowly
     // (real post-crash fires take minutes), giving plenty of time to bail. About
     // half of crash fires simply BURN OUT into a charred wreck instead of ever
     // exploding (a fuel-tank fireball is the exception, not the rule).
-    car._fuse = crashFire ? (14 + Math.random() * 12) : (2.4 + Math.random() * 2.2);
-    car._burnsOut = crashFire && Math.random() < 0.5;   // crash fire that never detonates
-    if (CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire — bail out!", 1.1);
+    car._fuse = opts.fuse != null ? opts.fuse : (crashFire ? (14 + Math.random() * 12) : (2.4 + Math.random() * 2.2));
+    car._fuseOnly = !!opts.fuseOnly;
+    car._burnsOut = opts.burnsOut != null ? !!opts.burnsOut
+      : (crashFire && Math.random() < 0.5);            // crash fire that never detonates
+    // NOBODY EVER GOT OUT. A burning car held its NPC driver until it
+    // detonated with them inside — the one place in this game where a person
+    // sat still for a fire. They bail through the existing eject and then run
+    // through the ONE panic decision (peds.js's cityScare), so the flight is
+    // the same contagious wave a gun in the street produces, not a bespoke
+    // "run from car" brain. Only for a fuse long enough to actually beat: a
+    // 0.3 s fuel flash kills whoever is in the seat, which is correct.
+    if (COOKOFF() && car.npcDriver && !car.npcDriver.dead && car._fuse > 1.2) {
+      const ped = car.npcDriver;
+      ejectNpcDriver(car);
+      car.abandoned = true; car.npcWanted = 0; car.stolen = false;
+      car.roadRageTarget = null; car.roadRageT = 0; car.pullover = 0;
+      car.wreckT = Math.max(car.wreckT || 0, 0.8);
+      if (CBZ.cityScare) { try { CBZ.cityScare(ped, { pos: car.pos }, { bias: 0.9, seat: true }); } catch (e) {} }
+    }
+    // A BURNING CAR IS A THING PEOPLE BACK AWAY FROM. peds.js's decaying
+    // spatial panic field is what every cityScare decision already reads, so
+    // one call makes the whole pavement nervous and the next person to be
+    // scared here bolts sooner — the same contagion a gunshot produces. No
+    // second "run from fire" brain, and no cost when nobody is nearby.
+    if (COOKOFF() && CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(car.pos.x, car.pos.z, 0.8); } catch (e) {} }
+    if (!opts.quiet && CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire — bail out!", 1.1);
   }
+  /* THE FUEL LOAD IS THE PAYLOAD. A cook-off is a chemical event whose size is
+     set by how much fuel the vehicle carries, and fuel capacity tracks vehicle
+     size — which `car.mass` (vehicleProfile's body factor, 0.9 coupe .. 1.5
+     van, sedan 1.05) already is. Feeding that to the "carcook" row's declared
+     refE lets THE KINETIC LAW do the proportioning: cube root for the
+     fireball, 2/3 power for the damage. A saloon prices at exactly 1.0, i.e.
+     the numbers explodeCar has always used; a box van makes a 13% wider
+     fireball and hits 27% harder. Nothing here picks a number per body type. */
+  const CARCOOK_REF_E = 8.4e6;          // = the "carcook" row's refE; a saloon's tank
+  function cookEnergy(car) {
+    const m = car && car.mass > 0 ? car.mass : 1.05;
+    return CARCOOK_REF_E * (m / 1.05);
+  }
+
   function explodeCar(car) {
     if (car._exploded) return;
     car._exploded = true; car.dead = true; car._onFire = false; car._smoking = false;
     const x = car.pos.x, z = car.pos.z;
     if (car.npcDriver) killNpcDriverInCar(car);
     const byPlayer = !!(car._burnByPlayer || car.player);
-    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: byPlayer });
+    // ONE ORDNANCE VERB. The row carries what the inline call never could: a
+    // structural coupling, a real fire term, the ordnance identity every
+    // downstream wrapper reads — and, through `energy`, the vehicle's own size.
+    //   `y`: cityExplosion treats a seat above 3 m as an AIRBURST and cancels
+    //   its ground rings AND most of its damage footprint. A car parked on a
+    //   hill is not an airburst. The old call passed no y at all (so the
+    //   fireball always bloomed at y=1 regardless of terrain); we seat it on
+    //   the car but CLAMP strictly under that threshold, which is honest on
+    //   the flat, better on a slope, and cannot trip the airburst branch.
+    const gy = car.group ? car.group.position.y : 0;
+    const seatY = CBZ.blastSeatY ? Math.max(CBZ.blastSeatY(x, z), Math.min(2.9, (gy > 0 ? gy : 0) + 1.0))
+                                 : Math.min(2.9, (gy > 0 ? gy : 0) + 1.0);
+    if (CBZ.detonate && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
+      CBZ.detonate(x, seatY, z, "carcook", { byPlayer: byPlayer, energy: cookEnergy(car) });
+    } else if (CBZ.cityExplosion) {
+      CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: byPlayer });
+    }
     // B7: a wreck the PLAYER caused leaves scrap behind (systems/resources.js's
     // Scrap item) — a real reason to blow cars up beyond the spectacle.
     if (byPlayer && CBZ.cityEcon && CBZ.cityEcon.add) CBZ.cityEcon.add("Scrap", 2 + ((Math.random() * 5) | 0));
     // if the PLAYER was still inside, the blast handles their damage; eject them
     if (car.player && CBZ.player.driving) { CBZ.cityExitVehicle(); }
+    // THE HUSK. Aircraft leave hulks and cars left NOTHING — the most
+    // destructive thing you can do to a street erased its own evidence one
+    // frame later. makeHusk keeps the wreck standing (charred, crazed,
+    // buckled, hood gone, collider intact) and hands it to the SAME `_reap`
+    // flag the reaper below has always consumed, just minutes later and only
+    // once nobody is looking. Flag off / husk refused => the original teardown,
+    // unchanged.
+    if (!(COOKOFF() && makeHusk(car))) disposeCar(car);
+  }
+  function disposeCar(car) {
     // remove the wreck mesh now; DEFER the array splice to the reaper so we never
     // mutate cityCars mid-iteration (explodeCar fires from inside the AI loop).
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
@@ -1562,6 +1727,108 @@
     });
     car._reap = true;
   }
+
+  /* ============================================================
+     THE BURNT-OUT HULK.
+
+     Everything a wreck should look like was ALREADY written, in
+     city/crashdeform.js, and explodeCar threw the car away before any of it
+     could be read: the vertex craters, the sprung hood, the hanging door, the
+     splayed wheel, the crazed glass, the bent chassis. `cityCarBurnOut` (this
+     wave's one addition to that file) fires the lot from a single call and
+     chars the paint on top. This function authors NO geometry and NO material
+     of its own — it seats the wreck on the ground, asks crashdeform for the
+     look, and turns the record into scenery.
+
+     BUDGET: hard cap on live husks (oldest goes first, and it goes by the
+     ordinary disposal path), plus a lifetime, plus a "not while you are
+     watching" gate on the despawn. The cap is also what protects the ambient
+     TRAFFIC POOL — traffic.js recycles far cars to keep the streets busy, and
+     a husk is a car it can never recycle, so an uncapped graveyard would
+     quietly empty the city.
+     ============================================================ */
+  const HUSK_MAX = 10;                       // live burnt-out wrecks
+  const HUSK_LIFE = 165;                     // seconds before it is allowed to go
+  const HUSK_HARD = 420;                     // ...and the age at which it goes regardless
+  const husks = [];
+  function makeHusk(car) {
+    if (!car || !car.group || !car.group.parent) return false;
+    if (car._husk) return true;
+    // oldest first — reuses the ordinary teardown, so a retired husk is
+    // disposed exactly the way an exploded car always was
+    while (husks.length >= HUSK_MAX) {
+      const old = husks.shift();
+      if (old && !old._reap) disposeCar(old);
+    }
+    car._husk = true;
+    car._huskT = 0;
+    car.ai = false; car.abandoned = true; car.stolen = false; car.owned = false;
+    car.v = 0; car.vx = 0; car.vz = 0; car.baseV = 0; car.spin = 0; car.wreckT = 0;
+    car.npcWanted = 0; car.roadRageTarget = null; car.roadRageT = 0; car.pullover = 0;
+    car._smoking = true;                     // a fresh hulk keeps seeping for a while
+    car._flats = 15;                         // all four tyres are gone (bitmask: FL|FR|RL|RR)
+    // A DEAD WEIGHT. resolveCars splits depenetration by mass, so a burnt
+    // shell with 12x its own mass is shunted a few centimetres by a car that
+    // rams it instead of skating down the street — no special case needed in
+    // the contact solver, which is the whole reason this is one field and not
+    // a branch. Nothing else reads mass on a car that never drives again.
+    car.mass = Math.max(0.6, car.mass || 1.05) * 12;
+    try { applyFlatVisual(car); } catch (e) {}     // rims on the road, no rubber left
+    // Seat it on the real ground FIRST: seatCar writes group.rotation
+    // wholesale, and on a rig whose carVisual IS the group
+    // (cityRegisterVehicle's shape) doing it afterwards would erase the buckle.
+    car._parkX = car._parkZ = car._parkH = null;
+    // The traffic loop's distance cull only ever writes `visible` for a LIVE
+    // ai/road car, so a wreck made from a far-off car would inherit
+    // `visible=false` and be an invisible obstacle forever. A husk draws like
+    // a parked car does — always.
+    if (car.group) car.group.visible = true;
+    try { seatCar(car, 0, 0, true); } catch (e) {}
+    // crashdeform.js owns every part of the LOOK and already knew how to draw
+    // all of it — craters, crazed glass, dead lamps, the hood gone, a splayed
+    // corner, the buckled frame. This authors none of it.
+    if (CBZ.cityCarBurnOut) { try { CBZ.cityCarBurnOut(car); } catch (e) {} }
+    husks.push(car);
+    return true;
+  }
+  // Ticked from the SAME order-38 pass that already owns the reaper, so this
+  // adds no updater. A husk only leaves when it is old, out of sight and far
+  // enough away that its disappearance cannot be witnessed — with a hard
+  // ceiling so a wreck parked in the player's driveway still eventually goes.
+  const HUSK_SMOULDER = 34;                  // seconds a fresh hulk keeps seeping
+  function stepHusk(car, dt) {
+    car._huskT = (car._huskT || 0) + dt;
+    // A fresh wreck SMOULDERS. Same pooled sprite emitter tickDamageStage
+    // uses for a hurt engine, just slower and off the roofline rather than the
+    // bonnet — the bonnet is somewhere else now.
+    if (car._huskT < HUSK_SMOULDER && (car.group && car.group.visible) && nearCam(car, 95)) {
+      car._smkT = (car._smkT || 0) + dt;
+      if (car._smkT > 0.34) {
+        car._smkT = 0;
+        spawnVPart(car.pos.x + (Math.random() - 0.5) * 1.6, 1.5,
+                   car.pos.z + (Math.random() - 0.5) * 1.6, "smoke");
+      }
+    }
+    if (car._huskT < HUSK_LIFE) return;
+    // 160 u is deliberately PAST the 150 u group-visibility cull the traffic
+    // loop applies, so a husk that retires here was provably not being drawn.
+    // Cheaper and quieter than CBZ.npcTransitionSafe, which would also pump
+    // the shared crowd-spawn guard counters that another audit is pinned on.
+    if (car._huskT < HUSK_HARD && nearCam(car, 160)) return;
+    const i = husks.indexOf(car);
+    if (i >= 0) husks.splice(i, 1);
+    disposeCar(car);
+  }
+  // CBZ.blastAudit() reads this — a husk count of zero after a car has been
+  // blown up is the fastest proof the wreck is being deleted again.
+  CBZ.cityCarHusks = function () {
+    let n = 0;
+    for (let i = 0; i < husks.length; i++) if (husks[i] && !husks[i]._reap) n++;
+    return n;
+  };
+  // ordnance-bus adoption, declared at LOAD (CBZ.blastAudit()). An ARRAY
+  // because this file loads before systems/impactbus.js does.
+  (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("vehicles:carcook");
   // damage-stage tick for EVERY non-player car (smoke/fire/explode progresses
   // for ambient + abandoned wrecks too, independent of the AI lane logic), then
   // reap exploded wrecks — AFTER every per-car pass has finished this frame so we
@@ -1572,6 +1839,9 @@
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
       syncOccupants(c);                      // driver body appears/vanishes with control state
+      // A BURNT-OUT HULK still ages, on the reaper's own loop — no second
+      // timer system. It is `dead`, so it falls out of every line below.
+      if (c._husk) { if (!c._reap) stepHusk(c, dt); continue; }
       if (c.player || c.dead || c.engineHp == null) continue;
       tickDamageStage(c, dt);
     }
@@ -1630,7 +1900,12 @@
           if (car._burnsOut) { car._onFire = false; car._smoking = true; car._fuse = 0; return; }
           explodeCar(car); return;
         }
-      } else if (car._fuse <= 0 || car.engineHp <= 0) { explodeCar(car); return; }
+      // `_fuseOnly` (CAR_COOKOFF_V2): the motor is already at or below zero
+      // because that is WHY this fire started, so the engineHp half of the
+      // test would fire on the very next tick and there would be no fuse at
+      // all. This is the line that turns "the car pops" into "the car catches,
+      // and then the car goes".
+      } else if (car._fuse <= 0 || (car.engineHp <= 0 && !car._fuseOnly)) { explodeCar(car); return; }
     }
   }
 
@@ -1750,12 +2025,20 @@
     // exact-point dent: a small crater under the bullet-hole decal. The shot
     // resolver threads opts.point (world Vector3-ish), opts.normal (entry
     // face, toward the shooter) and opts.cal — caliber sets the dimple.
-    if (!tire && opts.point && CBZ.cityCarImpact) {
+    if (!tire && opts.point && !opts.blast && CBZ.cityCarImpact) {
       const n = opts.normal || { x: 0, y: 0, z: 0 };
       CBZ.cityCarImpact(car, opts.point, { x: -(n.x || 0), y: -(n.y || 0), z: -(n.z || 0) },
         1.6 + (opts.cal || 1) * 1.5, { r: 0.22 + (opts.cal || 1) * 0.08 });
     }
-    damageEngine(car, amount, true);
+    // TELL damageEngine THE TRUTH. This line used to read `damageEngine(car,
+    // amount, true)` — one hardcoded boolean that flattened a rifle round, a
+    // molotov, an RPG and a nuclear shock front into "gunfire", and gunfire's
+    // rule was to POP the car the same frame its engine hit zero. Every caller
+    // already declared what it was in `opts`; nothing was ever reading it.
+    // Flag off => the literal `true`, byte-identical.
+    damageEngine(car, amount, COOKOFF()
+      ? (opts.direct ? "direct" : opts.blast ? "blast" : opts.fire ? "fire" : "gun")
+      : true);
     // a driver taking fire doesn't keep cruising the speed limit — they FLOOR it
     // (unless the round just took a tire: you can't floor it on a flat)
     if (!tire && opts.byPlayer && car.ai && !car.dead && !car.npcDriver) {
@@ -1763,12 +2046,15 @@
       car.baseV = Math.max(car.baseV || 0, ((CBZ.CITY.traf && CBZ.CITY.traf.cruise) || [7, 12])[1] * 1.5);
     }
   };
-  // PUBLIC: force a car to catch fire now (e.g. molotov, fuel-line shot)
-  CBZ.cityCarIgnite = function (car, byPlayer) {
+  // PUBLIC: force a car to catch fire now (e.g. molotov, fuel-line shot, a
+  // blast that wounded but did not gut it). `opts` is igniteCar's bag —
+  // {fuse, fuseOnly, burnsOut, quiet} — so a caller with a reason to pick the
+  // beat can, and the 2-argument call every existing site makes is unchanged.
+  CBZ.cityCarIgnite = function (car, byPlayer, opts) {
     if (!car || car.dead) return;
     if (car.engineHp == null || car.engineHp > FIRE_AT) car.engineHp = FIRE_AT;
     if (byPlayer) car._burnByPlayer = true;
-    igniteCar(car);
+    igniteCar(car, false, opts);
   };
   // PUBLIC: read damage stage for HUD/minimap. 0 intact,1 dented,2 smoke,3 fire
   CBZ.cityCarStage = function (car) {
@@ -2865,11 +3151,18 @@
   }
   const CAR_GRID_CELL = 9;
   const carGrid = new Map();
+  // A BURNT-OUT HULK IS STILL IN THE ROAD. `dead` used to mean "gone next
+  // frame", so every collision path in this file skips it — correct then,
+  // wrong now that a cook-off leaves a wreck standing for minutes. A husk is
+  // solid (you shunt it, you cannot drive through it) but it is NOT a crash
+  // partner: there is nothing left of it to wreck, and running carCrash on a
+  // dead record would re-enter the damage ladder it has already finished.
+  function solidCar(c) { return c && (!c.dead || c._husk); }
   function resolveCars(dt) {
     const cars = CBZ.cityCars, n = cars.length;
     carGrid.clear();
     for (let i = 0; i < n; i++) {
-      const a = cars[i]; if (a.dead) continue;
+      const a = cars[i]; if (!solidCar(a)) continue;
       if (a._crashCD > 0) a._crashCD -= dt;
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
       // numeric key (no per-frame string alloc; gx/gz are small at CELL=9) — packs
@@ -2878,13 +3171,14 @@
       if (bucket) bucket.push(i); else carGrid.set(key, [i]);
     }
     for (let i = 0; i < n; i++) {
-      const a = cars[i]; if (a.dead) continue;
+      const a = cars[i]; if (!solidCar(a)) continue;
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
       for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
         const bucket = carGrid.get(((gx + ox) + 1024) * 4096 + ((gz + oz) + 1024)); if (!bucket) continue;
         for (let bi = 0; bi < bucket.length; bi++) {
           const j = bucket[bi]; if (j <= i) continue;
-          const b = cars[j]; if (b.dead) continue;
+          const b = cars[j]; if (!solidCar(b)) continue;
+          if (a._husk && b._husk) continue;            // two wrecks already at rest
           const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
           const broadHit = collisionBound(a) + collisionBound(b);
           if (d2 > broadHit * broadHit) continue;
@@ -2901,7 +3195,7 @@
         // closing speed along the contact normal
           const va = carVel(a), vb = carVel(b);
           const closing = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
-          if (closing > 2 && (a._crashCD || 0) <= 0 && (b._crashCD || 0) <= 0) carCrash(a, b, closing, nx, nz);
+          if (closing > 2 && !a._husk && !b._husk && (a._crashCD || 0) <= 0 && (b._crashCD || 0) <= 0) carCrash(a, b, closing, nx, nz);
           else if (closing > 0.25) {
             const imp = collisionImpulse(a, b, va, vb, nx, nz, closing, false, false);
             if (imp.deltaA < 0.01 && imp.deltaB < 0.01) { a.v *= 0.98; b.v *= 0.98; }
@@ -3620,7 +3914,12 @@
   // one candidate `o` into the best-so-far and returns the new bumper gap.
   let _caBest = null, _caBg = 1e9, _caAlong = 0;
   function _caConsider(c, o, fx, fz, myHalf, look) {
-    if (o === c || o.dead) return;
+    // `_husk` — a burnt-out wreck standing in the lane IS the car ahead. It is
+    // `dead`, but traffic.js already knows what to do with a stationary
+    // obstacle (its blockedT / `deadAhead` pull-around names exactly this
+    // case), so letting the IDM see it is the whole fix — a queue forms, then
+    // the queue goes round.
+    if (o === c || (o.dead && !o._husk)) return;
     const dx = o.pos.x - c.pos.x, dz = o.pos.z - c.pos.z;   // LIVE pos (same as old full scan)
     const along = dx * fx + dz * fz;
     if (along <= 0 || along > look) return;
