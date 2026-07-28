@@ -1843,7 +1843,10 @@
       ledgerHost._occupyAnchors = ledgerHost._occupyAnchors || Object.create(null);
       ledgerHost._occupyProgrammed[k] = name;
       ledgerHost._occupyAnchors[k] = anchors.map(function (a) {
-        return { x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz, kind: a.kind, pose: a.pose };
+        return {
+          x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz,
+          kind: a.kind, pose: a.pose, cushionH: a.cushionH, floorBelow: a.floorBelow,
+        };
       });
     }
     return done;

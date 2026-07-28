@@ -165,8 +165,9 @@
       h.b.lbox(x, y + wallH - 0.18, gapZ, PWT, 0.36, gapW, P.wall, { cast: false });
   }
 
-  function seatReg(h, x, y, z, face, kind) {
-    if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(h.ox + x, y, h.oz + z, face, kind, null);
+  function seatReg(h, x, y, z, face, kind, cushionH) {
+    if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(h.ox + x, y, h.oz + z, face, kind, null,
+      cushionH == null ? null : { cushion: cushionH, floorBelow: 0 });
   }
 
   // ========================================================================
@@ -406,7 +407,10 @@
       h.b.lbox(dx, y + 0.42, seatZ, 0.6, 0.12, 0.6, P.chair, { cast: false });     // seat pad
       h.b.lbox(dx, y + 0.78, seatZ + 0.26, 0.6, 0.7, 0.12, P.chair, { cast: false }); // backrest
       h.b.lbox(dx, y + 0.2, seatZ, 0.1, 0.4, 0.1, P.bezel, { cast: false });       // post
-      anchors.push({ x: h.ox + dx, y: y, z: h.oz + seatZ, face: Math.PI, lx: dx, lz: seatZ });
+      anchors.push({
+        x: h.ox + dx, y: y, z: h.oz + seatZ, face: Math.PI, lx: dx, lz: seatZ,
+        cushionH: 0.48, floorBelow: 0,
+      });
       // CCTV: a bounded few of these terminals show a live camera feed. The lit
       // face sits at world (h.ox+dx, y+1.04, h.oz+monZ+0.04) looking +z at the
       // seat, so the outward screen normal is (0,1). Runtime-visual only.
@@ -464,7 +468,7 @@
       h.b.lbox(qx, y + 0.42, qz, 0.5, 0.14, 0.5, P.chair, { cast: false });
       h.b.lbox(qx + (alongX ? s * 0.24 : 0), y + 0.8, qz + (alongX ? 0 : s * 0.24),
         alongX ? 0.12 : 0.5, 0.6, alongX ? 0.5 : 0.12, P.chair, { cast: false });
-      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair");
+      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.49);
     }
     for (let e = -1; e <= 1; e += 2) {
       const lat = e * (TL / 2 + 0.75);
@@ -474,7 +478,7 @@
       h.b.lbox(qx, y + 0.42, qz, 0.5, 0.14, 0.5, P.chair, { cast: false });
       h.b.lbox(qx + (alongX ? 0 : e * 0.24), y + 0.8, qz + (alongX ? e * 0.24 : 0),
         alongX ? 0.5 : 0.12, 0.6, alongX ? 0.12 : 0.5, P.chair, { cast: false });
-      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair");
+      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.49);
     }
     // one wall screen on the FAR wall (glow proud of the bezel, toward the
     // room) + one light line over the table
@@ -547,7 +551,10 @@
       obox(pc, 0.42, 0.56, 0.14, 0.56, P.chair);
       obox(at(dIn + 1.2, 0), 0.78, 0.56, 0.62, 0.12, P.chair);
       const yaw = Math.atan2(-nx, -nz);               // look back out the door
-      anchors.push({ x: h.ox + pc.x, y: y, z: h.oz + pc.z, face: yaw, lx: pc.x, lz: pc.z });
+      anchors.push({
+        x: h.ox + pc.x, y: y, z: h.oz + pc.z, face: yaw, lx: pc.x, lz: pc.z,
+        cushionH: 0.49, floorBelow: 0,
+      });
       // the lit name band floating behind the desk
       const pb = at(dIn + 1.7, 0);
       h.b.lbox(pb.x, y + 2.35, pb.z, along ? 0.07 : 2.8, 0.5, along ? 2.8 : 0.07, P.light,
@@ -561,7 +568,7 @@
       const fy = Math.atan2(tx, tz);                  // face across the walk (+tangent)
       for (let s = -1; s <= 1; s++) {
         const ps = at(Math.min(dIn - 0.6, 4.6) + s * 0.8, -3.1);
-        seatReg(h, ps.x, y, ps.z, fy, "waiting");
+        seatReg(h, ps.x, y, ps.z, fy, "waiting", 0.44);
       }
     }
     // two planters flanking the walk, just inside the door
@@ -633,11 +640,12 @@
   }
   // an anchor in the approach frame, tagged with the ROLE the occupier should
   // cast there. Programs describe the room; occupy.js casts the people.
-  function anchorAt(A, list, inD, lat, face, kind, pose) {
+  function anchorAt(A, list, inD, lat, face, kind, pose, cushionH) {
     const p = A.at(inD, lat);
     if (!inRect(A.r, p.x, p.z, 0.6) || !A.h.clear(p.x, p.z, 0.5)) return null;
     const a = { x: A.h.ox + p.x, y: A.y, z: A.h.oz + p.z, face: face, lx: p.x, lz: p.z, kind: kind || "guard" };
     if (pose) a.pose = pose;
+    if (cushionH != null) { a.cushionH = cushionH; a.floorBelow = 0; }
     list.push(a);
     return a;
   }
@@ -799,7 +807,7 @@
           const cp = A.at(td + i * (tD * 0.28), half - 1.5 + s * 0.85);
           if (!A.obox(cp, 0.42, 0.46, 0.12, 0.46, P.chair, { pad: 0.4 })) continue;
           A.obox(A.at(td + i * (tD * 0.28), half - 1.5 + s * 1.06), 0.78, 0.46, 0.6, 0.1, P.chair, { pad: 0.4 });
-          seatReg(h, cp.x, y, cp.z, Math.atan2(tp.x - cp.x, tp.z - cp.z), "chair");
+          seatReg(h, cp.x, y, cp.z, Math.atan2(tp.x - cp.x, tp.z - cp.z), "chair", 0.48);
         }
         for (let i = -1; i <= 1; i += 2) for (let s = -1; s <= 1; s += 2)   // the plates
           A.obox(A.at(td + i * (tD * 0.2), half - 1.5 + s * 0.5), 0.8, 0.34, 0.03, 0.34, P.marble, { pad: 0.3 });
@@ -813,7 +821,7 @@
       const sp = A.at(sd, -half + 1.9);
       if (A.obox(sp, 0.36, 2.5, 0.44, 0.9, P.sofa, { pad: 0.6 })) {
         A.obox(A.at(sd - 0.42, -half + 1.9), 0.72, 2.5, 0.62, 0.16, P.sofa, { pad: 0.6 });   // backrest
-        seatReg(h, sp.x, y, sp.z, A.faceOut, "sofa");
+        seatReg(h, sp.x, y, sp.z, A.faceOut, "sofa", 0.58);
         anchorAt(A, anchors, sd + 0.05, -half + 2.75, A.faceOut, "family", "stand");
       }
       A.obox(A.at(sd + 1.5, -half + 1.9), 0.24, 1.3, 0.1, 0.6, P.wood, { pad: 0.5 });        // low table
@@ -846,14 +854,14 @@
       const bp = A.at(deskD + 1.05, 0);
       A.obox(bp, 0.44, 0.62, 0.14, 0.62, P.chair, { pad: 0.5 });
       A.obox(A.at(deskD + 1.32, 0), 0.95, 0.66, 0.9, 0.12, P.chair, { pad: 0.5 });
-      seatReg(h, bp.x, y, bp.z, A.faceIn, "chair");
-      bossPlaced = !!anchorAt(A, anchors, deskD + 1.05, 0, A.faceIn, "boss", "sit");
+      seatReg(h, bp.x, y, bp.z, A.faceIn, "boss", 0.51);
+      bossPlaced = !!anchorAt(A, anchors, deskD + 1.05, 0, A.faceIn, "boss", "sit", 0.51);
       // two chairs waiting on the near side of the desk
       for (let s = -1; s <= 1; s += 2) {
         const gp = A.at(deskD - 1.5, s * 0.95);
         if (!A.obox(gp, 0.42, 0.5, 0.12, 0.5, P.chair, { pad: 0.4 })) continue;
         A.obox(A.at(deskD - 1.78, s * 0.95), 0.8, 0.5, 0.62, 0.12, P.chair, { pad: 0.4 });
-        seatReg(h, gp.x, y, gp.z, A.faceOut, "chair");
+        seatReg(h, gp.x, y, gp.z, A.faceOut, "chair", 0.48);
       }
     }
     // THE AQUARIUM — the one prop you remember the room by. Lit water on a
@@ -1012,7 +1020,10 @@
       const s = seats[i];
       entries.push({
         profile: "interiorClerk",
-        placement: { anchor: { x: s.x, y: s.y || 0, z: s.z, yaw: s.yaw || 0, pose: "sit", state: "sit" } },
+        placement: { anchor: {
+          x: s.x, y: s.y || 0, z: s.z, yaw: s.yaw || 0, pose: "sit", state: "sit",
+          cushionH: s.cushionH, floorBelow: s.floorBelow,
+        } },
         overrides: (opts && opts.overrides) || null,
         configure: clerkConfigure,
       });

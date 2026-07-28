@@ -88,6 +88,7 @@
 
   /* ---------------- tunables ---------------------------------------------- */
   const COUNCIL_N = 7;
+  const COUNCIL_SEAT_H = 0.48; // cushion top above the chamber floor
   const NIGHT_SECONDS = 240;      // the evening, in gameplay seconds, to the gavel
   const BRIBE_COST = 5000;        // real city cash per envelope
   const WIN_PAYOUT = 60000;       // developer kickback on a passed rezoning
@@ -269,7 +270,11 @@
       let sid = null;
       if (i < offs.length) { sid = offs[i].sid; name = offs[i].name; title = offs[i].title; real = true; key = "sid:" + sid; V.realCount++; }
       else { name = fillName(i); title = "Councilmember"; key = "fill:" + i; }
-      const handle = ctx.npc ? ctx.npc({ role: "councillor", name: name, outfit: { archetype: "exec" }, at: [seat.x, seat.z], face: 0, post: "pinned", pose: "sit" }) : null;
+      const handle = ctx.npc ? ctx.npc({
+        role: "councillor", name: name, outfit: { archetype: "exec" },
+        at: [seat.x, seat.z], face: 0, post: "pinned", pose: "sit",
+        seatRef: { cushion: COUNCIL_SEAT_H, floorBelow: 0 },
+      }) : null;
       COUNCIL.push({ i: i, key: key, sid: sid, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null });
     }
     // the auditor — a controlled ped we drive along posted waypoints.
@@ -785,7 +790,23 @@
     ctx.box(g, 0, 0.5, -hz * 0.52, hx * 1.7, 0.9, 0.7, ctx.mat(COL.wood));
     ctx.box(g, 0, 0.98, -hz * 0.52 - 0.34, hx * 1.7, 0.16, 0.08, ctx.mat(COL.brass));
     ctx.solid(-hx * 0.85, -hz * 0.52 - 0.42, hx * 0.85, -hz * 0.52 + 0.42);
-    for (let i = 0; i < COUNCIL_N; i++) { const s = V.seats[i]; ctx.box(g, s.x, 0.46, s.z - 0.16, 0.5, 0.92, 0.5, ctx.mat(COL.woodD)); }
+    // Proper high-backed council chairs. The old chair was one 0.5 × 0.92 ×
+    // 0.5 upright block, so it had neither a visible seat nor a truthful seat
+    // height and forced every councillor into character.js's compressed legacy
+    // squat. These dimensions and COUNCIL_SEAT_H above are the same contract:
+    // the rig's pelvis lands on the burgundy cushion and its feet reach floor.
+    for (let i = 0; i < COUNCIL_N; i++) {
+      const s = V.seats[i];
+      const legH = COUNCIL_SEAT_H - 0.12;
+      for (let dx = -1; dx <= 1; dx += 2) for (let dz = -1; dz <= 1; dz += 2)
+        ctx.box(g, s.x + dx * 0.27, legH / 2, s.z + dz * 0.25, 0.08, legH, 0.08, ctx.mat(COL.woodD));
+      ctx.box(g, s.x, COUNCIL_SEAT_H - 0.06, s.z, 0.70, 0.12, 0.68, ctx.mat(COL.red));
+      ctx.box(g, s.x, COUNCIL_SEAT_H + 0.39, s.z - 0.29, 0.72, 0.78, 0.12, ctx.mat(COL.red));
+      for (let dx = -1; dx <= 1; dx += 2) {
+        ctx.box(g, s.x + dx * 0.38, 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
+        ctx.box(g, s.x + dx * 0.38, 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
+      }
+    }
 
     // ---- the tally board (canvas texture) on the wall behind the bench ----
     V.board = makeBoard();

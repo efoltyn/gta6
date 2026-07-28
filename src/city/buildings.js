@@ -5270,6 +5270,7 @@
       anchors.push({
         x: b.ox + cx, y: Y, z: b.oz + seatZ,
         face: Math.atan2(0, monZ - seatZ),
+        cushionH: 0.48, floorBelow: 0,
       });
     }
 
@@ -6678,8 +6679,10 @@
                 const sy = s.y || 0;
                 // ground seats ride the 0.14-top foundation slab; upper floors
                 // ride their own 0.04-top floor covering.
-                return { x: s.lx != null ? s.lx : s.x - b.ox, y: sy + (sy < 0.1 ? 0.15 : 0.05),
-                         z: s.lz != null ? s.lz : s.z - b.oz, yaw: s.face || 0 };
+                const floorLift = sy < 0.1 ? 0.15 : 0.05;
+                return { x: s.lx != null ? s.lx : s.x - b.ox, y: sy + floorLift,
+                         z: s.lz != null ? s.lz : s.z - b.oz, yaw: s.face || 0,
+                         cushionH: s.cushionH, floorBelow: (s.floorBelow || 0) + floorLift };
               }));
           }
           // C2: officejobs.js DEFINES CBZ.cityRegisterOfficeDesks and stores the

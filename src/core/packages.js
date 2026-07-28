@@ -162,10 +162,27 @@
     else if (of && typeof of === "object") { for (const k in of) opts[k] = of[k]; }
     return opts;
   }
-  function npcSetPose(ped, verb) {
+  // Package furniture is authored here in exact metres, so a seated cast member
+  // can hand character.js the height of the cushion it is visibly sitting on.
+  // Never infer it: a lot of legacy "chairs" are single tall blocks, and using
+  // the generic 0.45 m chair number for those would bury the rig in the mesh.
+  function npcSeatRef(src) {
+    if (!src || (CBZ.CONFIG && CBZ.CONFIG.PROPS_SEAT_GEOM === false)) return null;
+    if (typeof src === "string") {
+      if (CBZ.propSeatRef) return CBZ.propSeatRef(src);
+      return { cushion: CBZ.propSeatHeight ? CBZ.propSeatHeight(src) : 0.45, floorBelow: 0 };
+    }
+    const cushion = src.cushion != null ? Number(src.cushion) :
+      (src.cushionH != null ? Number(src.cushionH) : NaN);
+    if (!Number.isFinite(cushion)) return null;
+    const below = src.floorBelow != null ? Number(src.floorBelow) : 0;
+    return { cushion: cushion, floorBelow: Number.isFinite(below) ? below : 0 };
+  }
+  function npcSetPose(ped, verb, seatRef) {
     if (!ped || !ped.char) return;
     if (CBZ.setCharPose) CBZ.setCharPose(ped.char, verb);
     else { ped.char.sitting = (verb === "sit"); ped.char.pose = (verb && verb !== "sit" && verb !== "stand") ? verb : null; }
+    ped.char.seatRef = verb === "sit" ? npcSeatRef(seatRef) : null;
   }
   function npcDispose(ped) {
     if (!ped) return;
@@ -244,7 +261,9 @@
       },
       // requisition a REAL city ped (brain + outfit + gunpoint + death funnel).
       // spec: { role, outfit, at:[x,z](venue-LOCAL), face, post:"pinned"|"ambient",
-      //         pose, dialogue:[...], name }. Returns a handle:
+      //         pose, seatRef:{cushion,floorBelow}, dialogue:[...], name }.
+      // seatRef is required for the anatomical seated solve: it must describe
+      // the furniture actually drawn by the package. Returns a handle:
       //   { ped, pose(verb), say(line[,secs]), at(x,z[,face]), remove() }
       npc(spec) {
         spec = spec || {};
@@ -288,7 +307,7 @@
           // Ambient NPCs keep the normal ped brain (they wander like a resident).
           if (pinned) { ped.staffPost = { x: wx, z: wz, face: face }; ped.state = "idle"; ped.speed = 0; }
           // initial pose through the ENGINE pose layer (character.js + poses.js)
-          npcSetPose(ped, spec.pose || (pinned ? "stand" : null));
+          npcSetPose(ped, spec.pose || (pinned ? "stand" : null), spec.seatRef);
           // [E] Talk — cycle the dialogue via the interaction registry (#14). It
           // rides the ped's own _iopts, so it dies with the ped, zero per-frame cost.
           // GRAMMAR LAW (owner): the label is a bare verb — the ped's NAME is
@@ -308,7 +327,7 @@
           }
           return {
             ped: ped,
-            pose(verb) { npcSetPose(ped, verb); return this; },
+            pose(verb) { npcSetPose(ped, verb, spec.seatRef); return this; },
             say(line, secs) { if (ped && !ped.dead && CBZ.citySay && line) CBZ.citySay(ped, "“" + line + "”", spec.sayColor || "#dfe7ff", secs || 2.6); return this; },
             at(x, z, f) {
               if (ped && ped.group) {

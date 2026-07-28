@@ -238,6 +238,7 @@
         CBZ.npcLife.attach(ped, ap, {
           x: a.x || 0, y: a.y || 0, z: a.z || 0, yaw: a.yaw || 0,
           pose: a.pose || "stand", state: a.state || "idle",
+          cushionH: a.cushionH, floorBelow: a.floorBelow,
         });
       } catch (e) {}
     }
@@ -776,7 +777,10 @@
             // the authored spots instead of falling back to a perimeter walk.
             fr.program = b._occupyProgrammed[k];
             fr.anchors = (b._occupyAnchors[k] || []).map(function (a) {
-              return { x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz, kind: a.kind, pose: a.pose };
+              return {
+                x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz,
+                kind: a.kind, pose: a.pose, cushionH: a.cushionH, floorBelow: a.floorBelow,
+              };
             });
           }
           if (room && fs.program && CFG.OCCUPY_PROGRAMS && CBZ.interiorProgram
@@ -797,7 +801,10 @@
               fr.program = fs.program;
               fr.anchors = (out && out.anchors) ? out.anchors.slice() : [];
               b._occupyAnchors[k] = fr.anchors.map(function (a) {
-                return { x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz, kind: a.kind, pose: a.pose };
+                return {
+                  x: a.x, y: a.y, z: a.z, face: a.face, lx: a.lx, lz: a.lz,
+                  kind: a.kind, pose: a.pose, cushionH: a.cushionH, floorBelow: a.floorBelow,
+                };
               });
             } catch (e) { fr.program = fs.program; fr.anchors = []; }
           }
@@ -819,7 +826,10 @@
             // guard never ends up standing in a clerk's chair.
             if (!a || a._used || (a.kind || "seat") !== kind) continue;
             a._used = true;
-            out.push({ lx: a.lx, lz: a.lz, face: a.face, kind: kind, pose: a.pose });
+            out.push({
+              lx: a.lx, lz: a.lz, face: a.face, kind: kind, pose: a.pose,
+              cushionH: a.cushionH, floorBelow: a.floorBelow,
+            });
           }
           return out;
         };
@@ -970,7 +980,11 @@
         // a genuinely seated worker is better off attached: no brain needed,
         // and the seated rig rides the building group exactly like a cabin seat.
         opts.parent = b.group;
-        opts.attach = { parent: b.group, x: pt.lx, y: floorY + 0.05, z: pt.lz, yaw: pt.face, pose: "sit", state: "sit" };
+        opts.attach = {
+          parent: b.group, x: pt.lx, y: floorY + 0.05, z: pt.lz, yaw: pt.face,
+          pose: "sit", state: "sit", cushionH: pt.cushionH,
+          floorBelow: pt.cushionH != null ? (pt.floorBelow || 0) + 0.05 : pt.floorBelow,
+        };
       }
     }
 
