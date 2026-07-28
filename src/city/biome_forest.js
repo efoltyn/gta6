@@ -327,9 +327,22 @@
     // registers with world/treeaudit.js. Off = the old single cone.
     const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
     if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("forest");
-    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.42, 1, 5); // unit height; scaled per-instance
+    // ONE TREE GRAMMAR (world/treeaudit.js §2). This file AUTHORED the shape
+    // the owner named as the good one — "the type of tree that has two cones"
+    // — so the migration here is mostly a promotion: the hand-rolled 2-cone
+    // stack below is exactly what treeCrownGeo({tiers:2}) solves back to, and
+    // it now comes from the shared factory so every other biome inherits it.
+    // What is genuinely NEW here is the ROOTS: the owner's complaint about
+    // this specific tree was "each tree needs to have more roots, it needs to
+    // be more connected to the ground". They are baked into the trunk geo, so
+    // the whole forest is still two InstancedMeshes.
+    const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
+    const trunkGeo = (CBZ.treeTrunkGeo
+      ? CBZ.treeTrunkGeo({ rTop: 0.22, rBase: 0.42, h: 1, seg: 5, site: "forest", spread: 2.25, flare: 1.45 })
+      : (function () { const g = new THREE.CylinderGeometry(0.22, 0.42, 1, 5); g.translate(0, 0.5, 0); return g; })());
     const conGeo = (function () {
       if (!TREES2) return new THREE.ConeGeometry(1, 1, 6);         // unit cone; scaled per-instance
+      if (GRAM) return CBZ.treeCrownGeo({ tiers: 2, r: 1, h: 1, seg: 6, site: "forest" });
       const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
       if (merge) {
         // two stacked cones in unit space (total height 1, base at y=0);
@@ -341,10 +354,25 @@
       }
       return new THREE.ConeGeometry(1, 1, 6);
     })();
-    const roundGeo = new THREE.IcosahedronGeometry(1, 0);          // unit round canopy; scaled per-instance
-    trunkGeo.translate(0, 0.5, 0);  // base at y=0 so scaling grows upward
+    // THE ROUND CANOPY IS DEAD. It was a unit IcosahedronGeometry — 20 flat
+    // facets that read as a faceted ball, not foliage, at every distance —
+    // and it was the single biggest source of "weird geometric" trees inside
+    // a biome that otherwise draws the good one. Replaced by a NARROWER,
+    // taller 2-tier stack (taper 0.64 against the conifer's 0.70), which is a
+    // genuinely different silhouette from the conifer without leaving the
+    // family. The unit ENVELOPE changes (a blob spans y[-0.5,1.5] at radius
+    // 1; a stack spans y[0,1] at radius 1), so the round-canopy placement
+    // loop below rescales to land the crown in exactly the same volume —
+    // search ROUND_STACK there. Getting that compensation wrong is how a
+    // shape change silently lifts every canopy off its trunk and trips
+    // CBZ.treeAudit()'s chain, so it is done once, explicitly, next to the
+    // matrix write rather than folded into these numbers.
+    const ROUND_STACK = GRAM;
+    const roundGeo = ROUND_STACK
+      ? CBZ.treeCrownGeo({ tiers: 2, r: 1, h: 1, seg: 6, taper: 0.64, site: "forest" })
+      : new THREE.IcosahedronGeometry(1, 0);                       // unit round canopy; scaled per-instance
+    if (!ROUND_STACK) { roundGeo.translate(0, 0.5, 0); if (CBZ.treeGrammarLegacy) CBZ.treeGrammarLegacy("forest"); }
     if (!TREES2) conGeo.translate(0, 0.5, 0);                      // V2 geo is already base-at-0
-    roundGeo.translate(0, 0.5, 0);
     const V2SINK = 0.2;             // trunk base below the floor plane (seated, not flush)
 
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // tinted via instanceColor
@@ -474,8 +502,15 @@
     // "thousands of trees, ~6 draw calls" budget). Distinct silhouette from
     // both the narrow conifer cone and the squat broadleaf cone.
     const RN = roundTrees.length;
-    const roundTrunkGeo = new THREE.CylinderGeometry(0.13, 0.2, 1, 5);
-    roundTrunkGeo.translate(0, 0.5, 0);
+    // TRUNK RADIUS WAS THE OTHER HALF OF THE COMPLAINT. 0.13/0.20 under a
+    // per-instance tr of 0.32-0.54 is a 12-22 cm bole holding up a 12 m tree —
+    // spaghetti, and it is what made the round-canopy species read as a
+    // lollipop. 0.20/0.30 puts it at 19-32 cm: still the slender species next
+    // to the conifer's 0.42, no longer a wire. (The collider below reads the
+    // same 0.30, so timber and physics can never disagree.)
+    const roundTrunkGeo = (CBZ.treeTrunkGeo
+      ? CBZ.treeTrunkGeo({ rTop: 0.20, rBase: 0.30, h: 1, seg: 5, roots: 3, spread: 2.4, flare: 1.4, site: "forest" })
+      : (function () { const g = new THREE.CylinderGeometry(0.20, 0.30, 1, 5); g.translate(0, 0.5, 0); return g; })());
     const roundTrunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     roundTrunkMat._shared = true;
     const roundTrunkInst = new THREE.InstancedMesh(roundTrunkGeo, roundTrunkMat, RN);
@@ -498,9 +533,16 @@
         parts = [];
         CBZ.treeAabbPush(parts, dummy.matrix, rtbb.min.x, rtbb.min.y, rtbb.min.z, rtbb.max.x, rtbb.max.y, rtbb.max.z);
       }
-      dummy.position.set(t.x, t.folY, t.z);
+      // CROWN VOLUME PRESERVED ACROSS THE SHAPE CHANGE. The blob was a unit
+      // sphere-ish geo (y[-0.5..1.5], radius 1) placed at folY and scaled
+      // uniformly by folR, so it filled y[folY-0.5folR, folY+1.5folR]. The
+      // stack is base-at-0/height-1, so it lands in the same volume from
+      // (folY - 0.5folR) with a Y-scale of 2folR — which is what keeps the
+      // trunk-top overlap (and therefore CBZ.treeAudit()'s chain) exactly
+      // where it was, instead of quietly lifting the canopy off the tree.
+      dummy.position.set(t.x, ROUND_STACK ? t.folY - 0.5 * t.folR : t.folY, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-      dummy.scale.set(t.folR, t.folR, t.folR);
+      dummy.scale.set(t.folR, ROUND_STACK ? t.folR * 2 : t.folR, t.folR);
       dummy.updateMatrix();
       roundCrownInst.setMatrixAt(i, dummy.matrix);
       if (parts && rcbb) {
@@ -540,7 +582,7 @@
       }
       for (let i = 0; i < RN; i++) {
         const t = roundTrees[i];
-        const r = t.tr * 0.20 + 0.05;          // roundTrunkGeo base radius 0.20
+        const r = t.tr * 0.30 + 0.05;          // roundTrunkGeo base radius 0.30 (the root flare stays free)
         CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
         placed++;
       }
@@ -564,14 +606,38 @@
 
     // ================================================================
     //  GROUND DETAIL — ferns / bushes / rocks / fallen logs, INSTANCED.
-    //  Two instanced meshes: a green bush blob (icosahedron) and a grey
-    //  rock (low-poly dodeca). Logs are a SMALL count so plain meshes ok.
+    //  Two instanced meshes: a leafy shrub clump and a small fractured
+    //  stone. Logs are a SMALL count so plain meshes ok.
+    //
+    //  OWNER: "there are little green and little gray rocks — these little
+    //  geometric things. Get rid of those... You can have small rocks, but
+    //  not these, like, boulders." Both of these WERE those things: the bush
+    //  was a unit IcosahedronGeometry (a green faceted ball) and the rock a
+    //  unit DodecahedronGeometry scaled to 0.5-1.5 m — a grey geometric solid
+    //  the size of a suitcase, sitting on the forest floor 260 times.
+    //    • the SHRUB joins the one tree grammar: a squat two-whorl cone
+    //      clump, authored in the blob's exact unit envelope (y[-0.85,0.85],
+    //      radius 0.85) so not one line of the placement loop moves.
+    //    • the STONE goes through world/rockscliffs.js — the ONE rock factory
+    //      in this game, whose scrape algorithm produces real planar fracture
+    //      facets instead of a smooth solid — and SHRINKS to boot-sized
+    //      (SMALL_ROCK below). Small rocks are allowed; boulders made of six
+    //      pentagons are not.
     // ================================================================
     // bushes / ferns
-    const bushGeo = new THREE.IcosahedronGeometry(1, 0);
+    const bushGeo = (GRAM && CBZ.treeCrownGeo)
+      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.85, h: 1.7, y0: -0.85, seg: 5, taper: 0.68, site: "forest-shrub" })
+      : new THREE.IcosahedronGeometry(1, 0);
     const bushMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); bushMat._shared = true;
-    const rockGeo = new THREE.DodecahedronGeometry(1, 0);
-    const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); rockMat._shared = true;
+    // 0.28 turns the old 0.5-1.5 m geometric solid into a 0.28-0.84 m field
+    // stone standing at most ~0.5 m proud — around physics.js's 0.45 STEP_UP,
+    // i.e. scenery you walk over. These have never carried colliders and
+    // still do not.
+    const SMALL_ROCK = (CBZ.CONFIG && CBZ.CONFIG.WILD_SMALL_ROCKS !== false && CBZ.makeRock) ? 0.28 : 1;
+    const rockGeo = SMALL_ROCK !== 1
+      ? CBZ.makeRock(1, 0x5F0235, 1, { scrapes: 9, depthMin: 0.06, depthMax: 0.34 })
+      : new THREE.DodecahedronGeometry(1, 0);
+    const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }); rockMat._shared = true;
 
     const bushes = [], rocks = [];
     const NB = 900, NR = 260;
@@ -611,9 +677,14 @@
     }
     for (let i = 0; i < rocks.length; i++) {
       const r = rocks[i];
-      dummy.position.set(r.x, r.s * 0.4, r.z);
+      // SMALL_ROCK shrinks the drawn stone WITHOUT touching the scatter: r.s
+      // still comes off the same single rng() draw it always did (the claim
+      // radius here was a fixed 0.9 and never rode r.s), so the stream — and
+      // therefore every bush, log and tree dealt after it — is untouched.
+      const rs = r.s * SMALL_ROCK;
+      dummy.position.set(r.x, rs * 0.4, r.z);
       dummy.rotation.set(rng() * 0.6, r.rot, rng() * 0.6);
-      dummy.scale.set(r.s, r.s * 0.8, r.s);
+      dummy.scale.set(rs, rs * 0.8, rs);
       dummy.updateMatrix(); rockInst.setMatrixAt(i, dummy.matrix);
       const g = 0.42 + rng() * 0.16; rc.setRGB(g, g, g * 1.02);
       rockCol.push(rc.r, rc.g, rc.b);

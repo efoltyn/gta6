@@ -2375,24 +2375,57 @@
       box.position.y = 0.21; box.castShadow = true; g.add(box);
       const soil = new THREE.Mesh(geo("planterSoil", () => new THREE.BoxGeometry(0.86, 0.06, 0.86)), soilM);
       soil.position.y = 0.42; g.add(soil);
+      // ONE TREE GRAMMAR (world/treeaudit.js §2). The street tree was two
+      // stacked IcosahedronGeometry blobs on a 0.1 m stick — the same "weird
+      // geometric" tree the wilderness was full of, standing on every
+      // pavement in the city. It becomes ONE cone-stack crown (two meshes to
+      // one, a small object-count win) over a bole with a real root flare
+      // spreading into the planter soil, which is the one place in the game a
+      // player is close enough to READ a root. Every number below keeps the
+      // old silhouette's envelope: crown y[1.30,3.10] at radius 0.82, trunk
+      // top at 1.90.
+      const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
       if (withTree) {
-        const trunk = new THREE.Mesh(geo("treeTrunk", () => new THREE.CylinderGeometry(0.1, 0.14, 1.5, 6)), trunkM);
-        trunk.position.y = 1.15; trunk.castShadow = true; g.add(trunk);
+        // A planter tree is drawn at scale 1, so the flare is authored in
+        // METRES here rather than as a fraction of the geo height (see the
+        // non-uniform-scale note in treeaudit.js §2).
+        const trunk = new THREE.Mesh(GRAM && CBZ.treeTrunkGeo
+          ? geo("treeTrunkRoot", () => CBZ.treeTrunkGeo({ rTop: 0.10, rBase: 0.16, h: 1.5, seg: 6,
+              roots: 4, rise: 0.20, dip: 0.05, spread: 2.0, flare: 1.45, site: "street" }))
+          : geo("treeTrunk", () => new THREE.CylinderGeometry(0.1, 0.14, 1.5, 6)), trunkM);
+        trunk.position.y = GRAM ? 0.40 : 1.15;      // base-at-0 geo sits ON the soil; legacy geo is centred
+        trunk.castShadow = true; g.add(trunk);
         const fm = FOLIAGE[(rng() * FOLIAGE.length) | 0];
-        // two stacked low-poly blobs for a stylised canopy
-        const c1 = new THREE.Mesh(geo("treeCanopy1", () => new THREE.IcosahedronGeometry(0.82, 0)), fm);
-        c1.position.y = 2.0; c1.castShadow = true; c1.scale.set(1, 0.85, 1); g.add(c1);
-        const c2 = new THREE.Mesh(geo("treeCanopy2", () => new THREE.IcosahedronGeometry(0.55, 0)), fm);
-        c2.position.set(0.25, 2.55, 0.1); g.add(c2);
+        if (GRAM) {
+          const c = new THREE.Mesh(geo("treeCrownStack",
+            () => CBZ.treeCrownGeo({ tiers: 2, r: 0.82, h: 1.8, seg: 7, taper: 0.66, site: "street" })), fm);
+          c.position.y = 1.30; c.castShadow = true; g.add(c);
+        } else {
+          // two stacked low-poly blobs for a stylised canopy
+          const c1 = new THREE.Mesh(geo("treeCanopy1", () => new THREE.IcosahedronGeometry(0.82, 0)), fm);
+          c1.position.y = 2.0; c1.castShadow = true; c1.scale.set(1, 0.85, 1); g.add(c1);
+          const c2 = new THREE.Mesh(geo("treeCanopy2", () => new THREE.IcosahedronGeometry(0.55, 0)), fm);
+          c2.position.set(0.25, 2.55, 0.1); g.add(c2);
+          if (CBZ.treeGrammarLegacy) CBZ.treeGrammarLegacy("street");
+        }
         solidCollider(x, z, 0.5, trunk);
         city.streetProps.push({ x, z, type: "tree" });
       } else {
-        // shrub planter: a couple of small bushes
+        // shrub planter: a couple of small bushes (leafy clumps in the same
+        // grammar — a shrub is just a very squat crown)
         const sm = FOLIAGE[(rng() * FOLIAGE.length) | 0];
-        const b1 = new THREE.Mesh(geo("shrub1", () => new THREE.IcosahedronGeometry(0.34, 0)), sm);
-        b1.position.set(-0.18, 0.62, 0.1); b1.scale.y = 0.8; g.add(b1);
-        const b2 = new THREE.Mesh(geo("shrub2", () => new THREE.IcosahedronGeometry(0.3, 0)), sm);
-        b2.position.set(0.2, 0.6, -0.12); g.add(b2);
+        if (GRAM) {
+          const sg = geo("shrubStack", () => CBZ.treeCrownGeo({ tiers: 2, r: 0.34, h: 0.44, seg: 5, taper: 0.70, site: "street" }));
+          const b1 = new THREE.Mesh(sg, sm);
+          b1.position.set(-0.18, 0.45, 0.1); b1.scale.set(1, 1.05, 1); g.add(b1);
+          const b2 = new THREE.Mesh(sg, sm);
+          b2.position.set(0.2, 0.45, -0.12); b2.scale.set(0.88, 0.9, 0.88); b2.rotation.y = 0.9; g.add(b2);
+        } else {
+          const b1 = new THREE.Mesh(geo("shrub1", () => new THREE.IcosahedronGeometry(0.34, 0)), sm);
+          b1.position.set(-0.18, 0.62, 0.1); b1.scale.y = 0.8; g.add(b1);
+          const b2 = new THREE.Mesh(geo("shrub2", () => new THREE.IcosahedronGeometry(0.3, 0)), sm);
+          b2.position.set(0.2, 0.6, -0.12); g.add(b2);
+        }
         solidCollider(x, z, 0.55, box);
         city.streetProps.push({ x, z, type: "planter" });
       }
