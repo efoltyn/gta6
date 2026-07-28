@@ -347,10 +347,16 @@ const PASS = `(() => {
     // kerb" heuristic cannot tell apart from road scatter.
     // 'dockedInside' and 'zoneCrossings' are printed BESIDE them on purpose:
     // the first is roads that legally terminate inside a place, the second is
-    // roads that cross a restricted facility end to end (today: exactly one,
-    // island_airport.js's landside perimeter road inside the airside rect,
-    // which is a bug in that FOOTPRINT and is deliberately not clamped). If
-    // either grows while 'violations' stays 0, somebody widened a definition.
+    // roads that cross a restricted facility end to end. If either grows while
+    // 'violations' stays 0, somebody widened a definition.
+    //
+    // zoneCrossings WAS pinned at 1 for island_airport.js's landside perimeter
+    // road, which ran 22 m inside an airside keep-out declared out to A_MAXX,
+    // with the note "drops to 0 the day the rect stops at the kerb". The rect
+    // stops at the kerb: the keep-out is A_MAXX - 32 and the road's west kerb
+    // is A_MAXX - 29, so scan() grazes and the segment is skipped. Pinned at 0.
+    // If this fails, read zoneWhere — it NAMES the facility, and a new name
+    // there is a bug in that facility's own footprint, not in the road.
     if (CBZ.roadClearanceAudit) {
       const rc = CBZ.roadClearanceAudit();
       out.clearance = rc.segments + "seg viol=" + rc.violations + " deepest=" + rc.deepestIntrusion +
@@ -358,7 +364,7 @@ const PASS = `(() => {
         " zoneCross=" + rc.zoneCrossings + " clamped=" + rc.clampedSegs;
       if (rc.violations > 0) out.fails.push("ROADS CROSSING PLACES: " + rc.violations + " " + JSON.stringify(rc.where));
       if (rc.propsInside > 15) out.fails.push("ROAD PROPS INSIDE A PLACE/KEEP-OUT: " + rc.propsInside + " (ratchet 15)");
-      if (rc.zoneCrossings > 1) out.fails.push("ROADS CROSSING A RESTRICTED FACILITY END TO END: " + rc.zoneCrossings + " " + JSON.stringify(rc.zoneWhere));
+      if (rc.zoneCrossings > 0) out.fails.push("ROADS CROSSING A RESTRICTED FACILITY END TO END: " + rc.zoneCrossings + " " + JSON.stringify(rc.zoneWhere));
     }
     // cockpit: the forward sightline is a NUMBER, not a screenshot. A pilot
     // must be able to see at least 15 degrees below the horizon over the
@@ -379,8 +385,14 @@ const PASS = `(() => {
     // cabin: a seated passenger facing across the aisle instead of forward.
     if (CBZ.cabinAudit) {
       const cb = CBZ.cabinAudit();
-      out.cabin = cb.occupied + "/" + cb.seats + " seated misaligned=" + cb.misaligned + " roleless=" + cb.roleless;
+      out.cabin = cb.occupied + "/" + cb.seats + " seated misaligned=" + cb.misaligned + " roleless=" + cb.roleless +
+        " deplane=" + (cb.deplaneArcs || 0) + "arc/" + (cb.walking || 0) + "walk/" + (cb.queued || 0) + "q out=" + (cb.outside || 0);
       if (cb.misaligned > 0) out.fails.push("PASSENGERS SEATED SIDEWAYS: " + cb.misaligned);
+      // OWNER: passengers "get up and automatically are out of the plane".
+      // A body mid-deplane standing outside the cabin/airstair envelope has
+      // left through the WALL. Hard invariant, pinned at 0; walking/queued
+      // print beside it so never deplaning anybody cannot satisfy it.
+      if (cb.outside > 0) out.fails.push("PASSENGERS LEAVING THROUGH THE FUSELAGE: " + cb.outside);
     }
     // power: legacyGuardSites is the classic adoption ratchet — hand-rolled
     // guard/escort AI still living outside the protection layer. Counted
@@ -396,6 +408,19 @@ const PASS = `(() => {
       const bd = CBZ.backdropAudit({ step: 400 });
       out.backdrop = "onPlate=" + bd.onPlate + " clear=" + Math.round(bd.minClearance||0) + "m";
       if (bd.onPlate > 0) out.fails.push("DECORATIVE BACKDROP IS STANDING ON WALKABLE GROUND: " + bd.onPlate);
+    }
+    // POOL PARENTING — a shared InstancedMesh whose records are WORLD
+    // coordinates must hang at identity. Parent one to a TRANSLATED building
+    // group and every instance in the city moves by that building's origin,
+    // silently, with the Y offset zero — which is exactly the ghost-city
+    // lattice the owner photographed twice. atTranslatedParent is a hard
+    // invariant, not a measured baseline: 0 is the law. pools/atRoot/localSpace
+    // print beside it so a "fix" that merely stops drawing cannot pass.
+    if (CBZ.poolParentAudit) {
+      const pp = CBZ.poolParentAudit();
+      out.pools = pp.pools + " inst world=" + pp.worldPools + " atRoot=" + pp.atRoot +
+        " displaced=" + pp.atTranslatedParent + " local=" + pp.localSpace;
+      if (pp.atTranslatedParent > 0) out.fails.push("WORLD-COORD POOL ON A TRANSLATED PARENT: " + pp.atTranslatedParent + " " + JSON.stringify(pp.offenders));
     }
     if (CBZ.swimAudit) { const sw = CBZ.swimAudit(); out.swim = "sink " + sw.sinkRate + " up " + sw.ascendRate + " breath " + sw.breathSec + "s"; }
     if (CBZ.peakShapeAudit) {
@@ -593,6 +618,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
+  tmark(`${label}: pools ${r.pools || "-"}`);
   tmark(`${label}: arena ${r.arena || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);

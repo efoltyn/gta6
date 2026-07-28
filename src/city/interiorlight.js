@@ -183,6 +183,12 @@
       im.frustumCulled = true;            // big bounding sphere; still cheap
       im.renderOrder = -1;                // draw before glass panes
       im.name = "cityInteriorGlow_" + k;
+      // DECLARE THE COORDINATE SPACE. Every matrix written below is composed
+      // from WORLD coordinates, so this pool is only correct while its whole
+      // ancestor chain is at identity. That is not a comment any more — it is
+      // the fact CBZ.poolParentAudit() (city/buildings.js) reads, and the
+      // stamp is what makes this pool visible to it at all.
+      im.userData.worldSpacePool = "cityInteriorGlow";
       layers[k] = im;
       counts[k] = 0;
     });
@@ -193,6 +199,17 @@
     _up = new THREE.Vector3(0, 1, 0);
     built = true;
     return true;
+  }
+
+  // THE ONE ANSWER to "where does a world-coordinate pool hang?" lives in
+  // city/buildings.js (CBZ.poolIdentityHost) — it owns the three oldest pools
+  // and the doctrine. index.html loads buildings.js (line ~539) before this
+  // file (~541) so it is always there in the real game; the fallback is the
+  // old one-hop, which is correct for the shipped nesting and keeps a stripped
+  // load order from losing its panels entirely.
+  function identityHost(node) {
+    if (CBZ.poolIdentityHost) return CBZ.poolIdentityHost(node);
+    return (node && node.parent && node.parent.add) ? node.parent : node;
   }
 
   // pick the layer key for a window
@@ -262,11 +279,24 @@
     // the reason (buildings.js:226-232): "parent the pools to the city root
     // (the building groups' parent) so they inherit the mode-visibility toggle.
     // Records hold WORLD coords and the root is at identity ... so no
-    // re-basing." Same records, same requirement, same answer — one hop up.
-    // Fall back to `parent` if the group is not in the scene yet, so a caller
-    // that hands us an unattached group still gets its panels.
+    // re-basing." Same records, same requirement, same answer.
+    //
+    // THE ANCHOR IS ABSOLUTE, NOT A HOP. The first cure for this was
+    // `parent.parent` — one level up from the building group. That is RIGHT
+    // TODAY only because every one of the ~12 cityMakeBuilding callers happens
+    // to hand `city.root` in as its root, so a building group is always
+    // exactly one level under identity. It is a relative fix to an absolute
+    // requirement: nest a building group one level deeper (a district group, a
+    // town group, a demolition holder) and the hop silently lands on a
+    // TRANSLATED node and the whole disease comes back, in the same silent way,
+    // with no error anywhere. So we do not count levels — we look for the
+    // property the records actually need: identityHost walks the real ancestor
+    // chain and returns the DEEPEST node whose accumulated transform is still
+    // identity. For today's world that IS city.root (so the mode-visibility
+    // toggle still owns these panels and nothing changes), and for any future
+    // nesting it is still the correct node by construction.
     if (!im.parent && parent && parent.add) {
-      var host = (parent.parent && parent.parent.add) ? parent.parent : parent;
+      var host = identityHost(parent) || parent;
       host.add(im);
     }
 

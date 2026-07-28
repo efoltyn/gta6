@@ -438,6 +438,111 @@
     CBZ.onQualityChange(function (lvl) { masonryTier(lvl); });
   }
 
+  /* ==================================================================
+     A POOL IN WORLD COORDINATES MUST HANG AT IDENTITY
+     ------------------------------------------------------------------
+     Three pools in this file (panes / room dressing / masonry veneer)
+     and one in city/interiorlight.js all compose their instance
+     matrices from WORLD coordinates — `addCityGlass`, `addRoomDeco` and
+     `addMasonryTile` every one of them store `ox + lx`. A building
+     GROUP, by contrast, is TRANSLATED (`bgroup.position.set(ox,0,oz)`,
+     ~line 2279) and everything drawn into it is LOCAL. Mixing the two
+     is a silent, total displacement: parent a world-coordinate pool to
+     a building group and EVERY instance in the city moves by that one
+     building's origin — no error, no warning, and (because the Y offset
+     is 0) the panels keep plausible heights, so the result reads as a
+     second, ghost city standing on open ground a few hundred metres
+     away. That shipped, twice, and the owner found it both times.
+
+     The old cure was RELATIVE — "one hop up from the building group".
+     It is right only while every builder nests a building group exactly
+     one level under identity, which is true today (all ~12
+     cityMakeBuilding callers pass `city.root`) and is not a law anybody
+     wrote down. So the anchor is now ABSOLUTE and DERIVED:
+     poolIdentityHost walks the ancestor chain from the TOP and returns
+     the DEEPEST node whose accumulated transform is still identity —
+     `city.root` for the shipped world (so the mode-visibility toggle
+     still owns these pools and nothing changes), and still the correct
+     node under any future nesting.
+     ================================================================== */
+  function nodeMoved(n) {
+    const p = n.position, r = n.rotation, s = n.scale;
+    if (p && (p.x || p.y || p.z)) return true;
+    if (r && (r.x || r.y || r.z)) return true;
+    if (s && (s.x !== 1 || s.y !== 1 || s.z !== 1)) return true;
+    return false;
+  }
+  // The search deliberately starts ABOVE the caller's own group. A shared pool
+  // must outlive any one building: if a building happened to sit at ox=oz=0 its
+  // group would BE an identity node, and hanging the whole city's panels off it
+  // would be coordinate-correct and lifecycle-fatal — demolishing that one
+  // building would take every window in the city with it. So the caller's group
+  // is never a candidate, only its ancestors.
+  CBZ.poolIdentityHost = function (node) {
+    if (!node) return null;
+    const chain = [];
+    for (let n = node.parent; n; n = n.parent) chain.push(n);
+    let host = null;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (nodeMoved(chain[i])) break;      // this node and all below it are displaced
+      host = chain[i];
+    }
+    return host;                            // null → caller keeps its own fallback
+  };
+
+  /* RATCHET — CBZ.poolParentAudit().
+     Measures the law above over the LIVE scene graph, so it can never
+     disagree with what actually renders. It reads the stamps the pools
+     ALREADY carry (`glassPool`, `masonryPool`, `worldDetail`) plus the
+     generic `worldSpacePool` a new pool declares in one line, so nobody
+     registers anything and there is no parallel bookkeeping to rot.
+       pools               — every InstancedMesh in the scene
+       worldPools          — every mesh DECLARING world-space records,
+                             instanced or merged. world/detail_kit.js's Sheet
+                             is a plain merged Mesh carrying `worldDetail` and
+                             is exactly as displaceable as an InstancedMesh, so
+                             the test is the CLAIM, never the class.
+       atRoot              — world-space pools whose whole ancestor chain
+                             (including the mesh itself) is identity: CORRECT
+       atTranslatedParent  — world-space pools hanging under a moved node.
+                             THE BUG. PIN AT 0.
+       localSpace          — instanced meshes with no world-space claim that
+                             sit under a moved node (a gatehouse's own
+                             fittings, an aircraft's cabin rows). By design;
+                             reported so `atTranslatedParent` cannot be
+                             "fixed" by quietly reclassifying an offender.
+       offenders           — {name, dx, dy, dz} for every atTranslatedParent,
+                             so a failure names the file instead of a count. */
+  CBZ.poolParentAudit = function () {
+    const out = { pools: 0, worldPools: 0, atRoot: 0, atTranslatedParent: 0,
+                  localSpace: 0, offenders: [] };
+    const scene = CBZ.scene;
+    if (!scene || !scene.traverse) return out;
+    scene.traverse(function (o) {
+      if (!o.isMesh) return;
+      const u = o.userData || {};
+      const world = !!(u.glassPool || u.masonryPool || u.worldDetail || u.worldSpacePool);
+      if (!o.isInstancedMesh && !world) return;      // an ordinary local mesh is not this law's business
+      if (o.isInstancedMesh) out.pools++;
+      // accumulate the chain INCLUDING the mesh itself — a pool nudged by its
+      // own position displaces its instances exactly as a moved parent does.
+      let dx = 0, dy = 0, dz = 0, moved = false;
+      for (let n = o; n; n = n.parent) {
+        if (nodeMoved(n)) {
+          moved = true;
+          if (n.position) { dx += n.position.x; dy += n.position.y; dz += n.position.z; }
+        }
+      }
+      if (!world) { if (moved) out.localSpace++; return; }
+      out.worldPools++;
+      if (!moved) { out.atRoot++; return; }
+      out.atTranslatedParent++;
+      out.offenders.push({ name: o.name || u.worldDetail || u.worldSpacePool || "(unnamed)",
+                           dx: +dx.toFixed(3), dy: +dy.toFixed(3), dz: +dz.toFixed(3) });
+    });
+    return out;
+  };
+
   // PUBLIC: swap the ~15% "someone's home" panes between their day tint and
   // the warm lit pool. Idempotent; self-driven below on view.js's hysteresis
   // thresholds, but exposed so the dusk pass can call it directly too.
