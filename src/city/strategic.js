@@ -66,7 +66,7 @@
 
    An INTACT bunker (bunkers.js) still shelters anyone inside a nuke; a
    breached one does not. Max wanted via the military-reason star API. NO
-   new HUD element — the flight strip carries the held-B tally, the killfeed
+   new HUD element — the flight strip carries the bomb-camera tally, the killfeed
    carries individual deaths, and the flash/cloud are world FX.
 
    DETERMINISM: placement/build = hash01 only. Combat-time FX = runtime,
@@ -100,7 +100,7 @@
   // the payload state is invisible again, exactly as it shipped. See the long
   // note above drawPayloadHud() for WHY a toast could never have worked.
   if (CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK == null) CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK = true;
-  // HOLD-[B] B-2 bomb camera. The shared camera remains the sole transform
+  // HOLD-[C] B-2 bomb camera. The shared camera remains the sole transform
   // writer; this module only publishes the moving shot target.
   if (CBZ.CONFIG.STRAT_BOMB_CINEMATIC == null) CBZ.CONFIG.STRAT_BOMB_CINEMATIC = true;
 
@@ -976,7 +976,7 @@
   let _payFlash = 0, _payTag = "", _b2Legend = 0;
   const bombCine = {
     active: false, snap: false, kills0: 0, kills: 0,
-    released: 0, impacts: 0, linger: 0,
+    released: 0, impacts: 0,
     hasImpact: false, lastX: 0, lastY: 0, lastZ: 0,
   };
   function bombCineDeaths() {
@@ -996,7 +996,7 @@
       // because the note that used to teach it is deleted upstream. Never on
       // touch — CLAUDE.md forbids key glyphs there, and the touch layer's own
       // pills (CBZ.strategicPayloadCycle / strategicBombHold) say the words.
-      (_b2Legend > 0 && !CBZ.touchMode ? "   X:payload  B:drop (hold: carpet)" : "");
+      (_b2Legend > 0 && !CBZ.touchMode ? "   X:payload  B:drop (hold: carpet)  C:bomb cam (hold)" : "");
   }
   // Append our group to the flight strip. Returns nothing; safe on every path.
   function drawPayloadHud(c, dt) {
@@ -1162,12 +1162,12 @@
     return _bayWorld.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
   }
 
-  /* ---- THE HELD-B SHOT ----------------------------------------------------
+  /* ---- THE HELD-C SHOT ----------------------------------------------------
      Strategic weapons publish a shot; systems/camera.js remains the only code
      that writes the camera transform. The lens sits ahead and off one wing,
      looking BACK through the B-2 toward the falling stick and then the latest
-     impact. It stays up until every released round lands, then holds the last
-     blast long enough to read the confirmed death tally.
+     impact. Its lifetime is literal input state: hold C and the shot exists;
+     release C and the normal chase camera resumes on the next camera tick.
 
      Deaths are the canonical game.kills delta. We do not estimate victims from
      the blast radius and we do not wrap a kill function: if the shared death
@@ -1186,7 +1186,6 @@
     bombCine.kills = 0;
     bombCine.released = 0;
     bombCine.impacts = 0;
-    bombCine.linger = 0;
     bombCine.hasImpact = false;
     bombCine.lastX = c.pos.x;
     bombCine.lastY = c.pos.y;
@@ -1209,20 +1208,14 @@
     bombCine.lastX = b.sol.x;
     bombCine.lastY = b.sol.y;
     bombCine.lastZ = b.sol.z;
-    bombCine.linger = 4.0;
   }
-  function tickBombCine(dt, c) {
+  function tickBombCine(c) {
     if (!bombCine.active) return;
     bombCineDeaths();
     if (CBZ.CONFIG.STRAT_BOMB_CINEMATIC === false || !c || !g ||
-        g.mode !== "city" || (CBZ.player && CBZ.player.dead)) {
+        g.mode !== "city" || (CBZ.player && CBZ.player.dead) || !_bombCamHeld) {
       stopBombCine();
-      return;
     }
-    if (_bHeld || run.active || bombs.length) return;
-    if (!bombCine.hasImpact) { stopBombCine(); return; }
-    bombCine.linger -= dt;
-    if (bombCine.linger <= 0) stopBombCine();
   }
   CBZ.aircraftCinematicView = function () {
     const c = flyingB2();
@@ -1624,7 +1617,7 @@
         _bT += dt;
         if (_bT >= RUN_HOLD && !_bRan && !run.active && CBZ.CONFIG.STRAT_BOMB_RUN !== false) {
           _bRan = true;
-          if (startRun({})) startBombCine(c);
+          startRun({});
         }
       }
     }
@@ -1686,7 +1679,7 @@
       b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
       b.mesh.rotation.x = Math.atan2(-_bp.vy, hsp > 0.001 ? hsp : 0.001);
     }
-    tickBombCine(dt, c);
+    tickBombCine(c);
   });
 
   /* ==========================================================================
@@ -2200,36 +2193,56 @@
   // tap/hold grammar, so there is one bomb verb in the game and not two.
   const RUN_HOLD = 0.4;                              // seconds before a hold becomes a run
   let _bHeld = false, _bT = 0, _bRan = false;
+  let _bombCamHeld = false;
   addEventListener("keydown", function (e) {
     if (e.defaultPrevented) return;                   // C4's capture handler may own B
     const k = (e.key || "").toLowerCase();
-    if (k !== "b" && k !== "x") return;
+    if (k !== "b" && k !== "x" && k !== "c") return;
     if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
     if (!g || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
-    if (!flyingB2()) {
+    const craft = flyingB2();
+    if (!craft) {
       // A DEAD KEY MUST SAY SO. Fort Brandt parks a "Heavy Bomber"
       // (island_military.js:1218) that looks exactly like the aircraft these
       // keys belong to and has no bay at all — same for the gunship, the
       // airliner and the Raptor. Pressing [B] in one of them was silent, which
       // reads as a broken control rather than the wrong airframe. We do NOT
       // preventDefault here: the key still belongs to whoever else wants it.
-      if (!e.repeat && CBZ.player && CBZ.player._aircraft) payloadFlash("NO BOMB BAY — TAKE THE B-2", 2.6);
+      if (k !== "c" && !e.repeat && CBZ.player && CBZ.player._aircraft) payloadFlash("NO BOMB BAY — TAKE THE B-2", 2.6);
       return;                                         // only the B-2 owns these keys
     }
     e.preventDefault();
+    if (k === "c") {
+      if (!e.repeat && !_bombCamHeld) {
+        _bombCamHeld = true;
+        startBombCine(craft);
+        _b2Legend = 0;
+      }
+      return;
+    }
     if (k === "x") { if (!e.repeat) cyclePayload(); return; }
     if (e.repeat || _bHeld) return;
     _bHeld = true; _bT = 0; _bRan = false;
     _b2Legend = 0;                                    // you found the key
   });
   addEventListener("keyup", function (e) {
-    if ((e.key || "").toLowerCase() !== "b" || !_bHeld) return;
+    const k = (e.key || "").toLowerCase();
+    if (k === "c" && _bombCamHeld) {
+      _bombCamHeld = false;
+      stopBombCine();
+      return;
+    }
+    if (k !== "b" || !_bHeld) return;
     _bHeld = false; _bRan = false;
     if (run.active) { endRun("released"); return; }
     if (_bT < RUN_HOLD) dropPayload();                // a tap is one bomb
   });
   // a lost keyup (alt-tab mid-run) must not leave the trigger stuck down
-  addEventListener("blur", function () { _bHeld = false; _bRan = false; if (run.active) endRun("released"); });
+  addEventListener("blur", function () {
+    _bHeld = false; _bRan = false; _bombCamHeld = false;
+    stopBombCine();
+    if (run.active) endRun("released");
+  });
   // (the hold timer itself is ticked inside the existing 12.45 updater — no
   // new updater order is claimed for a two-line state machine)
 
@@ -2244,6 +2257,17 @@
     _bHeld = false; _bRan = false;
     if (run.active) { endRun("released"); return true; }
     return dropPayload();
+  };
+  CBZ.strategicBombCameraHold = function (down) {
+    const c = flyingB2();
+    if (down) {
+      if (!c) return false;
+      _bombCamHeld = true;
+      return startBombCine(c);
+    }
+    _bombCamHeld = false;
+    stopBombCine();
+    return true;
   };
 
   /* ---- MISSION SEAMS -------------------------------------------------------
@@ -2273,7 +2297,7 @@
       released: bombCine.released,
       impacts: bombCine.impacts,
       deaths: bombCineDeaths(),
-      linger: +Math.max(0, bombCine.linger).toFixed(2),
+      held: _bombCamHeld,
       hasImpact: bombCine.hasImpact,
       enabled: CBZ.CONFIG.STRAT_BOMB_CINEMATIC !== false,
     };

@@ -1877,7 +1877,11 @@
 
   addEventListener("keydown", function (e) {
     const g = CBZ.game;
-    if (!g || g.mode !== "city" || g.state !== "playing" || !CBZ.player.driving || e.repeat) return;
+    // Aircraft also set player.driving, but C belongs to their held cinematic
+    // camera. A flying B-2 must never cycle a road-car body before strategic.js
+    // sees the same keydown.
+    if (!g || g.mode !== "city" || g.state !== "playing" || !CBZ.player.driving ||
+        CBZ.player._aircraft || e.repeat) return;
     if (e.key.toLowerCase() === "c") {
       e.preventDefault();
       CBZ.cityCyclePlayerCarStyle();
