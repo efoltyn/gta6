@@ -86,6 +86,8 @@
   if (CFG.DETAIL_STREET_FURNITURE == null) CFG.DETAIL_STREET_FURNITURE = true;
   if (CFG.DETAIL_GROUND_GRIME == null) CFG.DETAIL_GROUND_GRIME = true;
   if (CFG.DETAIL_BUILDING_DRESS == null) CFG.DETAIL_BUILDING_DRESS = true;
+  // DETAIL_AIR_LOD — see AERIAL LOD below. One-line revert to always-drawn.
+  if (CFG.DETAIL_AIR_LOD == null) CFG.DETAIL_AIR_LOD = true;
 
   const DK = CBZ.detailKit = CBZ.detailKit || {};
 
@@ -131,10 +133,48 @@
   const scalables = [];            // {apply(density)} — batches + sheets
   let tierApplied = -1;
 
+  /* ------------------------------------------------------------------
+     AERIAL LOD — THE FITTINGS MUST NOT OUTLIVE THE WALLS THEY ARE BOLTED TO.
+
+     Every batch and sheet in this file is ONE InstancedMesh (or one merged
+     soup) per prop type FOR THE WHOLE WORLD, `frustumCulled = false`,
+     `userData.dynamic = true` — deliberately, because a world-spanning pool
+     cannot be dropped wholesale and one always-submitted draw is the right
+     trade. The consequence nobody had priced: core/farcull.js culls a distant
+     building's SHELL (its group, and core/batch.js's merged walls) and
+     replaces it with a solid box proxy, but it cannot cull one building's
+     share of a world pool. So past the cull radius the walls go and the
+     FITTINGS STAY — fire escapes, downpipes, roof plant, aerials, window AC
+     units, wall grime — standing proud of a box that is 4% narrower than the
+     facade they were bolted to. That is the owner's ghost: "the EXACT metal
+     frames from those TWO CITIES TOGETHER". It reads as both cities at once
+     because these pools span both cities (and everything else) BY DESIGN —
+     one mesh, one draw, the whole world in it.
+
+     THE GATE IS ALTITUDE, and the two numbers are derived, not tasted:
+       • it must sit ABOVE every rotorcraft posture, because this file's own
+         header promises roof plant "from every window and every helicopter"
+         and city/aircraft.js flies SEARCH at 150 m AGL / ENGAGED at 85 m.
+       • it must sit BELOW aeroplane cruise, which is where the ghost is seen.
+       • and by then the fittings are speckle anyway: a 2 m fire escape at
+         320 m subtends 2/320 rad, about 6 px on a 1080-line 60° view, and
+         4 px at the 563 m the owner was flying. Speckle with no wall behind
+         it is a ghost; speckle with a wall behind it was never worth a draw.
+     80 m of hysteresis (engage 320, release 240) so a climb or a descent
+     cannot flap the layer — the flicker half of the same bug.
+
+     ONLY `decor` and `fine` are gated. `solid` carries this file's colliders
+     and is full count on every tier by contract: two clients on different
+     GPUs — or one client at two altitudes — must collide with the same world.
+  ------------------------------------------------------------------ */
+  const AIR_ON = 320, AIR_OFF = 240;
+  let aloft = false;
+  function airFactor() { return (CFG.DETAIL_AIR_LOD === false || !aloft) ? 1 : 0; }
+
   function densityFor(cls, q) {
     if (cls === "solid") return 1;
     const row = TIER_DENSITY[Math.max(0, Math.min(TIER_DENSITY.length - 1, q | 0))];
-    return cls === "fine" ? row.fine : row.decor;
+    return (cls === "fine" ? row.fine : row.decor) * airFactor();
   }
   function applyTier(q) {
     tierApplied = q | 0;
@@ -144,6 +184,31 @@
   }
   if (CBZ.onQualityChange) CBZ.onQualityChange(function (q) { applyTier(q); });
   else tierApplied = 4;
+
+  // 4 Hz on the WALL clock (core/farcull.js's reasoning: game dt is clamped,
+  // so a dt-accumulated poll degrades on exactly the machines that need it).
+  // Costs one height query per quarter-second and re-writes instance COUNTS
+  // only on a state change — never per frame.
+  let _airAt = 0;
+  if (CBZ.onAlways) CBZ.onAlways(3.7, function () {
+    if (CFG.DETAIL_AIR_LOD === false) { if (aloft) { aloft = false; applyTier(DK.currentTier()); } return; }
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    if (now - _airAt < 250) return;
+    _airAt = now;
+    const P = CBZ.player && CBZ.player.pos;
+    if (!P || !Number.isFinite(P.y)) return;
+    let gy = 0;
+    try { gy = DK.groundY(P.x, P.z) || 0; } catch (e) { gy = 0; }
+    const agl = P.y - gy;
+    const next = aloft ? (agl > AIR_OFF) : (agl > AIR_ON);
+    if (next === aloft) return;
+    aloft = next;
+    applyTier(DK.currentTier());
+  });
+
+  // Pure read for the gate: is the decorative layer currently suppressed, and
+  // at what height did it decide that.
+  DK.airLOD = function () { return { aloft: aloft, on: AIR_ON, off: AIR_OFF, enabled: CFG.DETAIL_AIR_LOD !== false }; };
   DK.currentTier = function () { return tierApplied < 0 ? (CBZ.qualityLevel != null ? CBZ.qualityLevel : 2) : tierApplied; };
 
   // The AUTHORED count multiplier. Note this is NOT the tier scale — it is a

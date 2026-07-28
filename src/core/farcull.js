@@ -40,6 +40,41 @@
   const _box = new THREE.Box3();
   const _v = new THREE.Vector3();
 
+  /* ---- HYSTERESIS THAT OUTRUNS THE VIEWER --------------------------------
+     The show/hide band was a flat literal 20 u, and the sweep's own comment
+     names the assumption it was sized against: "4Hz is plenty for walking/
+     driving speeds". Two facts make that false in an aircraft, and the
+     aircraft is what is new:
+       • the sweep is AMORTIZED — at most a quarter of the root's children are
+         tested per 250 ms tick, so any ONE object is re-tested about once a
+         SECOND, not four times;
+       • a plane covers 90-200 m in that second — 4.5 to 10 times the entire
+         20 u band.
+     So an object can cross the whole band between two consecutive tests of
+     itself and toggle on every test: hide, show, hide. That is the flicker,
+     it only appears at flight speed, and no amount of tuning a CONSTANT fixes
+     it — the band has to be DERIVED from how far the viewer travels between
+     two looks at the same object. 1.5x that distance, floored at the original
+     20 u so a standing player behaves exactly as before. Widening the band
+     only ever keeps things visible LONGER, which is the safe direction.
+  ------------------------------------------------------------------------ */
+  let _spd = 0, _lastPX = null, _lastPZ = 0, _lastSpdT = 0, _retest = 1;
+  function hysBand() { return Math.max(20, _spd * _retest * 1.5); }
+  function trackViewer(P, now, kids, slice) {
+    // objects per sweep vs. objects total = how many 250 ms ticks until this
+    // one comes round again. Measured from the live sweep, never assumed.
+    _retest = (slice > 0 && kids > 0) ? Math.max(0.25, (kids / slice) * 0.25) : 1;
+    if (!P) { _spd = 0; _lastPX = null; return; }
+    if (_lastPX == null) { _lastPX = P.x; _lastPZ = P.z; _lastSpdT = now; return; }
+    const dt = (now - _lastSpdT) / 1000;
+    if (dt <= 0) return;
+    const v = Math.hypot(P.x - _lastPX, P.z - _lastPZ) / dt;
+    // rise fast (a launch must widen the band immediately), fall slow (landing
+    // must not snap the band shut while things are still mid-band).
+    _spd = v > _spd ? v : _spd + (v - _spd) * 0.25;
+    _lastPX = P.x; _lastPZ = P.z; _lastSpdT = now;
+  }
+
   // ---- REAL DISTANT-BUILDING LOD ----------------------------------------
   // The old 430m fog wall hid every distant building. Merely lifting it made
   // the renderer submit every pane, room and prop from a kilometre away
@@ -134,7 +169,10 @@
     ensureProxy(A);
     if (!proxyMesh || !P) return;
     let dirty = false, visible = 0;
-    const enter = Math.max(0, R - 20); // overlap while inset: proxy is hidden inside the full shell
+    // The proxy must ALWAYS be up before its shell goes down, so it reads the
+    // same derived band the shell sweep uses — never its own literal. A second
+    // 20 here is how the two drift apart the day one of them is retuned.
+    const enter = Math.max(0, R - hysBand()); // overlap while inset: proxy is hidden inside the full shell
     for (let i = 0; i < proxyRecords.length; i++) {
       const r = proxyRecords[i];
       const d = Math.hypot(r.x - P.x, r.z - P.z) - r.r;
@@ -291,17 +329,20 @@
       ? (CBZ.cityCullRadius || 0) : 0;
     const R = airborne && baseR ? Math.max(700, baseR + 180) : baseR;
     if (!root) return;
+    const kids = root.children;
+    // amortize: at most ~1/4 of the children measured/tested per sweep → the
+    // whole city re-evaluates every ~1s, still far faster than you can drive
+    // through a fog wall. Hysteresis (show at R - hysBand()) stops boundary
+    // flicker — and the band is DERIVED from this very slice, see hysBand().
+    const slice = Math.max(64, Math.ceil(kids.length / 4));
+    // measure the viewer BEFORE anything reads hysBand() this tick
+    trackViewer(P, now, kids.length, slice);
     updateProxy(CBZ.city && CBZ.city.arena, P, R);
     if (!R) {                       // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
       return;
     }
     if (!P) return;
-    const kids = root.children;
-    // amortize: at most ~1/4 of the children measured/tested per sweep → the
-    // whole city re-evaluates every ~1s, still far faster than you can drive
-    // through a fog wall. Hysteresis (show at R-20) stops boundary flicker.
-    const slice = Math.max(64, Math.ceil(kids.length / 4));
     // First-time measurements are the expensive part (a group pays a Box3
     // subtree walk) — measured 30-50ms hitch-stacks right after a tier drop
     // when ~1000 unmeasured children landed in one sweep. Cap fresh measures
@@ -341,7 +382,7 @@
         // to re-take it, or the object stays drawn forever while the set still
         // claims we own it. Re-adding to a Set is free.
         if (o.visible) { o.visible = false; hidByUs.add(o); }
-      } else if (d < R - 20) {
+      } else if (d < R - hysBand()) {
         // userData.cullLocked = "another system wants this hidden at this
         // quality tier" (city/buildings.js's masonry veneer is dropped whole at
         // tier 0). Re-showing on approach would override that owner. Culling it
@@ -376,8 +417,15 @@
   CBZ.farcullAudit = function () {
     const A = CBZ.city && CBZ.city.arena;
     const root = A && A.root;
+    const air = (CBZ.detailKit && CBZ.detailKit.airLOD) ? CBZ.detailKit.airLOD() : null;
     const out = {
       radius: CBZ.cityCullRadius || 0, hidden: hidByUs.size,
+      // the derived show/hide band and the viewer speed it came from — a band
+      // stuck at 20 while `viewerSpd` is 150 is the flicker, visible as a number
+      hysBand: Math.round(hysBand()), viewerSpd: Math.round(_spd), retestSec: Math.round(_retest * 100) / 100,
+      // world-pool dressing suppressed at altitude (the fittings-without-walls
+      // ghost); null when world/detail_kit.js is absent
+      dressingAloft: air ? !!air.aloft : null,
       shells: 0, lots: 0, proxied: proxyRecords.length, unproxied: 0,
       pools: 0, poolsExempt: 0, poolsIdle: 0, worldPools: 0,
     };
