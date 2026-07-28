@@ -58,6 +58,42 @@
   const SHADOW_ALPHA = 0.34;    // its darkest (near-surface) opacity
 
   // ---- tuning (one screen; every constant the encounter has) -------------
+  //
+  // THE NUMBERS BELOW ARE NOW THE DEGRADE PATH, NOT THE SOURCE (2026-07-28).
+  // CLAUDE.md named this file by name: "wildlife_shark.js is the one consumer
+  // that has NOT adopted [predatorKit] and still hand-writes its bundle, which
+  // is why ARCH.lunge and the shark can drift — migrating it is the next debt
+  // owed." That debt is paid here. predatorKit's `lunge` row was SOLVED against
+  // these very constants months ago, so the migration is not a retune — it is
+  // the file finally reading its own numbers back out of the shared table:
+  //
+  //   field         hand-written (great white)   predatorKit @ scale 1.2
+  //   senseR        110                          109.5
+  //   chumR         220                          220.2
+  //   circleR       26                           25.96
+  //   orbitR        18                           17.96
+  //   circleT       6.5                          6.51
+  //   cruiseSpeed   spd*2.4 = 6.24               6.24   (exact)
+  //   rushSpeed     spd*8.5 = 22.10              22.09
+  //   reach         2.2 + sc*1.6 = 4.12          4.12   (exact)
+  //   rate          1.5                          1.501
+  //   seize.dps     22                           22     (exact: 10 + bite*0.4)
+  //   seize.hold    2.6                          2.63
+  //   seize.escape  0.35                         0.348
+  //   bumpDmg       6                            6      (exact: bite*0.2)
+  // ..and the megalodon, tuned by hand months apart from the great white,
+  // reproduces to the same tolerance from scale 2.6 alone. There is therefore
+  // no `meg` branch left in the opts: "circles roughly twice as long, holds
+  // twice as long, half as escapable" IS scale^0.7 / scale^0.9 / scale^-0.9,
+  // and a third shark authored tomorrow gets all of it for free.
+  //
+  // SHARK_KIT = false puts the hand-written bundle back, byte for byte, which
+  // is what these constants are kept for. Do not delete them: they are the
+  // measurement the ARCH row is checked against.
+  if (CBZ.CONFIG && CBZ.CONFIG.SHARK_KIT == null) CBZ.CONFIG.SHARK_KIT = true;
+  function KIT() {
+    return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_KIT === false) && typeof CBZ.predatorKit === "function";
+  }
   const SENSE_R = 110;          // u — it notices a swimmer this far out
   const CHUM_R = 220;           // u — blood in the water pulls it from much further
   const CIRCLE_R = 26;          // u — inside this it stops closing and starts orbiting
@@ -294,9 +330,60 @@
     // theirs at spawn — this is the belt-and-braces for anything hand-made.
     if (!a._waterMove) a._waterMove = { x: 0, z: 0, heading: 0, blocked: false, shore: -999 };
     const label = String(sp.name || sp.id || "shark").toLowerCase();
-    // MEGALODON tunes the same knobs harder: it finds you further out, circles
-    // roughly twice as long, sounds far deeper, holds twice as long and is half
-    // as escapable. No second code path, just bigger numbers.
+
+    // ---- THE SEAM, and ONLY the seam. These are the four things predatorKit
+    //      genuinely cannot know: how a body of this kind moves through water,
+    //      what a depth beat looks like, where the damage belongs, and the fact
+    //      that a swimmer counts as reachable while a man on a pier does not
+    //      (the kit's generic aquatic canReach cannot see citySwimming).
+    //      `cause` is kept because actorName() would spell it "Great White
+    //      Shark" and the killfeed line has always been lower case.
+    const over = {
+      canReach: function (t) { return inWater(t); },
+      // THE ONE MOVER. predatorHunt drives it directly, and predator.js also
+      // forwards it to creature_combat's approach branch (as its opts.move) so
+      // the last few metres of a rush go through waterField + the CLEAR table
+      // and depth() too — instead of a second, land-shaped mover writing raw
+      // x/z/y and walking the shark onto the beach mid-strike.
+      move: function (hunter, want, speed, dt) { return swim(hunter, want, speed, dt); },
+      onState: function (ns, os) { onState(a, ns, os); },
+      // if the driver strikes without a seize (refused, flag off), damage must
+      // still go through the wildlife contact bus, never straight onto .hp
+      onHit: function (d) {
+        if (CBZ.cityAnimalStrikePlayer) { try { CBZ.cityAnimalStrikePlayer(a, d, "lunge"); } catch (e) {} }
+      },
+      name: sp.name || "shark",
+      seize: { cause: "mauled by a " + label },
+    };
+
+    if (KIT()) {
+      // MERGED HERE, NOT THROUGH predatorKit(a, over). The kit caches exactly
+      // ONE merged-overrides object per actor (`actor._predOpts`) and hands the
+      // same object to every caller — so a shark that later ends up with a
+      // second bundle would silently share this one. wildlife.js's preyOpts
+      // learned that the hard way and documents it; we take the stable BASE and
+      // own the merge, which is also what lets s.opts stay frozen for the
+      // lifetime of the animal (predatorHunt is a per-frame hot path).
+      const base = CBZ.predatorKit(a) || null;
+      if (base) {
+        const outK = {};
+        for (const k in base) outK[k] = base[k];
+        if (base.seize) {
+          const sz = {};
+          for (const j in base.seize) sz[j] = base.seize[j];
+          sz.cause = over.seize.cause;
+          outK.seize = sz;
+        }
+        for (const k in over) if (k !== "seize") outK[k] = over[k];
+        s.opts = outK;
+        return s;
+      }
+    }
+
+    // ---- DEGRADE: SHARK_KIT off, or no predator.js at all. The hand-written
+    //      bundle, byte for byte as it shipped. MEGALODON tunes the same knobs
+    //      harder: it finds you further out, circles roughly twice as long,
+    //      sounds far deeper, holds twice as long and is half as escapable.
     s.opts = {
       senseR: meg ? SENSE_R * 1.45 : SENSE_R,
       chumR: meg ? CHUM_R * 1.5 : CHUM_R,
@@ -311,27 +398,19 @@
       reach: 2.2 + (sp.scale || 1) * 1.6,
       rate: meg ? 2.2 : 1.5,
       dmg: sp.bite || 30,
-      name: sp.name || "shark",
-      canReach: function (t) { return inWater(t); },
-      // THE ONE MOVER. predatorHunt drives it directly, and predator.js also
-      // forwards it to creature_combat's approach branch (as its opts.move) so
-      // the last few metres of a rush go through waterField + the CLEAR table
-      // and depth() too — instead of a second, land-shaped mover writing raw
-      // x/z/y and walking the shark onto the beach mid-strike.
-      move: function (hunter, want, speed, dt) { return swim(hunter, want, speed, dt); },
-      onState: function (ns, os) { onState(a, ns, os); },
-      // if the driver strikes without a seize (refused, flag off), damage must
-      // still go through the wildlife contact bus, never straight onto .hp
-      onHit: function (d) {
-        if (CBZ.cityAnimalStrikePlayer) { try { CBZ.cityAnimalStrikePlayer(a, d, "lunge"); } catch (e) {} }
-      },
+      passes: 1,
+      name: over.name,
+      canReach: over.canReach,
+      move: over.move,
+      onState: over.onState,
+      onHit: over.onHit,
       seize: {
         jaw: CBZ.creatureJawPoint ? CBZ.creatureJawPoint(a) : { x: 2, y: 0.7, z: 0 },
         dps: meg ? 34 : 22,
         hold: meg ? HOLD_S * 2 : HOLD_S,
         escape: meg ? ESCAPE_P * 0.5 : ESCAPE_P,
         thrash: 1, medium: "water", style: "shake",
-        cause: "mauled by a " + label,
+        cause: over.seize.cause,
       },
     };
     return s;
@@ -513,6 +592,15 @@
   } else {
     try { (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push('wildlife_shark:hunt'); } catch (e) {}
   }
+  // ..and the OTHER half of the debt, which the id above never covered: this
+  // file ticked the shared FSM while still hand-writing the opts bundle the
+  // shared table was solved from. `sharkKitAdopted` is what
+  // CBZ.wildlifeDefenseAudit reads; it is a live answer rather than a constant
+  // so flipping SHARK_KIT off reports the truth instead of a claim.
+  Object.defineProperty(CBZ, "sharkKitAdopted", {
+    configurable: true,
+    get: function () { return KIT(); },
+  });
 
   CBZ.sharkBrain = sharkBrain;
   CBZ.sharkFinDrop = dropProxy;

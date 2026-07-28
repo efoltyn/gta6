@@ -177,7 +177,16 @@
     // charge gets a longer, unmistakable RAM silhouette.
     if (/rhino|bison|bull|buffalo/.test(id)) return 'ram';
     if (/boar|moose|elephant/.test(id)) return 'gore';
-    if (/horse|deer|goat|elk|donkey|mule|ram/.test(id)) return 'stomp';
+    // THE HOOFED FALL-THROUGH. A whole shelf of this bestiary was landing on
+    // the generic 'bite' — animals whose only weapon is a hoof or a horn,
+    // animated as a mouth: bighorn sheep, caribou, zebra, giraffe, the white
+    // stag. `ram` was already in this alternation but only ever matched a
+    // species literally CALLED "ram" ("bighorn_sheep" contains no token here at
+    // all). It matters now in two places it never used to: the cornered
+    // defence picks its pose from this string, and predatorKit reads the
+    // archetype row off it. Domestic cattle and the barnyard ewe deliberately
+    // stay where they are — `cow` and `sheep` do NOT appear.
+    if (/horse|deer|goat|elk|donkey|mule|ram|bighorn|ibex|argali|mouflon|caribou|reindeer|stag|zebra|giraffe|antelope|gazelle/.test(id)) return 'stomp';
     if (/bird|hawk|eagle|crow|raven|gull|owl|vulture|chicken|rooster|ostrich/.test(id) || species.bird) return 'peck';
     if (/snake|viper|cobra|python|rattler/.test(id)) return 'strike';
     return 'bite';
@@ -505,13 +514,23 @@
   // every present and future biter is correct for free — never special-cased.
   // Humanoid rigs only (bodyBite needs .char.skinSlots); the player has no
   // .char and gets damage + gore + the seize camera instead of a decal.
+  // A TUSK IS A MOUTH TOO. bodyBite draws two opposing crescents of torn
+  // punctures — which is exactly what a pair of tusks, a pair of horns or a
+  // pair of antler tines leaves, and exactly what a boar goring a pedestrian
+  // should show. The only thing that changes is the SPAN: a jaw is as wide as
+  // the head, and a tusk pair is a fraction of it, so `gore` and `ram` pass a
+  // narrowed radius through the same call rather than getting a second wound
+  // system. (`stomp` is a hoof, not a paired point — it stays out.)
+  var GORE_SPAN = 0.55;
   function biteWound(attacker, target, style) {
     if (typeof CBZ.bodyBite !== 'function') return;
     if (!target || !target.char || !target.pos) return;
     var g = attacker.group; if (!g) return;
     var sc = actorScale(attacker);
     var jaw = Math.max(0.12, Math.min(1.2, 0.10 + sc * 0.16));
-    var sev = (style === 'lunge') ? 0.95 : (style === 'maul') ? 0.8 : (style === 'strike') ? 0.45 : 0.6;
+    if (style === 'gore' || style === 'ram') jaw = Math.max(0.10, jaw * GORE_SPAN);
+    var sev = (style === 'lunge') ? 0.95 : (style === 'maul') ? 0.8 : (style === 'strike') ? 0.45
+      : (style === 'gore' || style === 'ram') ? 0.75 : 0.6;
     try {
       _bp.x = target.pos.x; _bp.y = target.pos.y + 1.0; _bp.z = target.pos.z;
       _bo.jaw = jaw; _bo.sev = sev; _bo.sever = (style === 'lunge' && sc >= 1.6);
@@ -612,7 +631,8 @@
           // — flag off, no block loaded, refused (already holding someone) —
           // falls through to the ordinary strike exactly as before.
           if (!trySeize(attacker, target, opts, style)) {
-            if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge') {
+            if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge' ||
+                style === 'gore' || style === 'ram') {
               biteWound(attacker, target, style);
             }
             if (typeof opts.onHit === 'function') {
@@ -716,6 +736,18 @@
   CBZ.creatureSeizeStyleFor = creatureSeizeStyleFor;
   CBZ.creatureJawPoint = jawPoint;      // group-LOCAL hold point, cached per actor
   CBZ.creatureRestY = restY;            // medium-aware rest height (land or water)
+  // CANCEL A SWING IN FLIGHT, cleanly. Exported because this file is the only
+  // one that can: it owns `_lungeAmt` (the un-applied forward offset), `_atkAnim`
+  // and the predatorPose hand-back, and a caller that abandons an attacker
+  // mid-animation without them leaves the body permanently pitched, the pose
+  // latched and the next swing's first frame yanking backwards by a stale
+  // offset. predator.js's break-off is the first consumer; anything that yanks
+  // an attacker out of a fight (a tame, a teleport, a mode change) is the next.
+  CBZ.creatureEndAttack = function (actor) {
+    if (!actor || !(actor._atkAnim >= 0)) return false;
+    endAttack(actor);
+    return true;
+  };
 
   // ---- the predator block's ratchet ---------------------------------------
   // We DID migrate: trySeize() gives every style the opts.seize seam and opts
