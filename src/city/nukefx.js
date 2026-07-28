@@ -9,7 +9,8 @@
        CBZ.impact.fx("nuke", composer)      // src/systems/impactbus.js
        CBZ.detonate(x, y, z, "nuke")        // ...and the row starts working
 
-   ZERO edits to the bus, zero edits to crashfx's blast composers.
+   The bus owns all scale/damage numbers; this file consumes them and leaves
+   crashfx's proven near-field composer intact.
 
    ------------------------------------------------------------------
    WHAT THE SEQUENCE IS (Glasstone/Dolan beat table, compressed for pacing —
@@ -49,32 +50,23 @@
                               transient near-white SHELL (never a ball — that is
                               what uCore 0.06 + uRimPow 2.6 buys) thrown by the
                               rarefaction behind the front, then evaporating.
-     0.10-3.90  IGNITION      the fireball: ONE low-poly icosphere with a
-                              fresnel-rim ShaderMaterial, additive. 63 m of
-                              radius for the stock nuke row, cooling blue-white
+     0.10-3.90  IGNITION      a 126 m low-poly luminous core wrapped in
+                              instanced hot billows. The radius is the published
+                              50*W^(1/3) maximum-fireball relation at the game's
+                              roughly 15 kt scale, cooling blue-white
                               -> white -> yellow -> orange -> deep red along the
                               shared RAMP as it rises and mixes.
-     0.50-4.90  GROUND SHOCK  a flat RingGeometry annulus whose radius is read
-                              straight off CBZ.impact.waveState() — the ring
-                              you SEE and the ring that KILLS are the same
-                              number, by construction. It retires WITH the
-                              front, not on a clock of its own.
-     0.90-2.20  IGNITION RING fires OUTSIDE the flattened zone, plus a second
-                              standing ANNULUS (same RingGeometry, scaled to the
-                              burn radius: 0.8/1.0 authored inner/outer IS the
-                              1/1.25 blast:thermal ratio, so the burn band's
-                              inner edge sits exactly on the blast ring's rim
-                              for zero new geometry). Thermal exposure goes as
-                              Y^0.41 and blast radius as Y^0.33, so their ratio
-                              goes as Y^0.08 and at this yield the ignition ring
-                              lands ~25% OUTSIDE the flattened zone. Fires
-                              burning past the edge of the wreckage is a thing
-                              only a nuclear weapon does.
+     0.50-6.30  PRESSURE      NO drawn ring. The invisible gameplay wave still
+                              rolls outward, while an irregular filled dust
+                              surge, scattered world fires and a brief 3D
+                              condensation shell reveal its passage. A pressure
+                              front is compressed air, not neon painted on the
+                              terrain.
      1.37-6.85  GLASS LADDER  four cityShatter passes at 0.42 / 0.85 / 1.35 /
                               2.10 x the blast reach (260 / 527 / 837 / 1302 m),
                               each timed to r/speed so the panes go out AS THE
                               FRONT PASSES rather than on a clock of their own.
-                              Glass is the ~1 psi ring: the widest of the three
+                              Glass is the ~1 psi zone: the widest of the three
                               and the biggest single injury source a city
                               detonation produces, so it must outrange both the
                               flattening and the burning. It used to outrange
@@ -89,13 +81,11 @@
                               read by the fireball, the cap, the stem and the
                               roll, so they cannot disagree about how high the
                               cloud is.
-     3.90-24.0  CAP + ROLL    camera-facing cap billboards + a squashed torus
-                              with tube-scrolling noise UVs (the toroidal roll
-                              that makes a mushroom read as a mushroom). The
-                              roll rate DECAYS: a vortex ring overturns hardest
-                              the moment it forms.
-     2.00-8.00  BASE SURGE    a low wide billboard rolling outward + pooled
-                              dust kicks walking along the shock front.
+     0.70-25.0  MUSHROOM      four pooled InstancedMeshes form a genuinely 3D
+                              hot core, thin rising stem, broad lobed cap and
+                              filled ground cloud. Procedural billboards add
+                              roiling surface detail but no longer have to carry
+                              the silhouette alone.
      8.00+      ASH FALL      CBZ.fx.particleCloud in fall mode around the
                               lens. Reused, not rebuilt.
      THROUGHOUT ATMOSPHERE    scene.fog.color is lerped white -> orange -> ash
@@ -109,27 +99,22 @@
                               restore and an abort mid-arc is clean.
 
    PROPORTIONS — the thing films get wrong and the thing this file got wrong.
-   The stock nuke row draws a 63 m fireball, a stabilisation altitude of ~454 m
-   over the burst, a cap that blooms to ~244 m across and a stem ~18 m across
-   (~30 m by full rise). That is a cloud TOP:CAP WIDTH of 2.19:1 and a CAP:STEM
+   The stock nuke row draws a 126 m maximum-radius fireball, a compressed game
+   stabilisation altitude of ~907 m over the burst, a cap that blooms to ~488 m
+   across and a stem ~35 m across (~60 m by full rise). That is a cloud
+   TOP:CAP WIDTH of 2.19:1 and a CAP:STEM
    of 9.8:1. Both were wrong before — 1.75:1 and 6.5:1, a squat cloud on a fat
    stalk, which is exactly the silhouette films draw and real film does not.
    Both are reported by CBZ.nukeFxAudit().proportions so they cannot drift back
    without somebody having to change a number they can see.
 
-   WHAT THIS FILE STILL DOES NOT OWN, honestly: the three DAMAGE rings are the
-   bus's and the ledger's. systems/impactbus.js's wave stops at wave.maxR and
-   carries `fire` only that far, so the LEDGER's burn zone is the blast zone —
-   the ignition ring drawn out at 1.25x maxR is FX, and the buildings under it
-   are not lit. Closing that is a one-field change in impactbus.js (a thermal
-   reach past maxR that ignites without wounding), not a change here, and it is
-   written down rather than faked.
+   WHAT THIS FILE DOES NOT OWN: gameplay blast, thermal and glass zones remain
+   the bus's and ledger's. This file renders consequences—cloud, dust, world
+   fires and broken windows—without outlining any zone on the ground.
 
-   MUSHROOM CLOUDS, CHEAPLY (Fallout 4's actual technique): 3-5 CAMERA-FACING
-   BILLBOARDS = a grayscale lumpy mask x an independently-scrolling noise x a
-   1D lifetime gradient LUT for colour. NOT hundreds of particles. Every
-   texture is generated procedurally with a CanvasTexture at load — nothing is
-   fetched, ever (CDN is blocked and must stay that way).
+   MUSHROOM CLOUDS, CHEAPLY: four InstancedMeshes form the 3D silhouette and
+   3-5 procedural billboards add noisy surface detail. Every texture is baked
+   at load; nothing is fetched (CDN is blocked and must stay that way).
 
    ------------------------------------------------------------------
    COST DISCIPLINE (fill rate is the enemy — a full-screen additive layer is
@@ -143,8 +128,8 @@
        eight seconds after the bang.
      • Big layers are SEQUENCED, not stacked: the whiteout has faded before
        the cap blooms; the fireball shell is retired before the cloud is big.
-     • Everything rides CBZ.qScale. At tier 0 the sequence degrades to
-       whiteout + ground ring + ONE cloud billboard and still reads.
+     • Everything rides CBZ.qScale. At tier 0 the sequence keeps whiteout plus
+       a reduced instanced mushroom; it never degrades into a ground ring.
      • Not one new particle pool. Dust/debris/smoke all route into crashfx's
        already-capped cityDustKick / cityExplosion / cityChunk.
 
@@ -166,7 +151,7 @@
   // still works. One line.
   if (CBZ.CONFIG.NUKE_FX_V1 == null) CBZ.CONFIG.NUKE_FX_V1 = true;
   // The fresnel shock/condensation shells — the two biggest fill-rate items in
-  // the sequence. false => the cloud, ring and whiteout still run.
+  // the sequence. false => the volumetric cloud and whiteout still run.
   if (CBZ.CONFIG.NUKE_FX_SHELL == null) CBZ.CONFIG.NUKE_FX_SHELL = true;
   // The late ash-fall particle cloud (borrowed from systems/fx.js).
   if (CBZ.CONFIG.NUKE_FX_ASH == null) CBZ.CONFIG.NUKE_FX_ASH = true;
@@ -198,12 +183,9 @@
   // THE RISE CURVE — fast, then decelerating, then stable. false => the old
   // smoothstep (slow-start, constant-ish middle), which is what films draw.
   if (CBZ.CONFIG.NUKE_FX_RISE == null) CBZ.CONFIG.NUKE_FX_RISE = true;
-  // THE TOROIDAL ROLL, earlier and decaying. false => the old fixed 0.16 uv/s
-  // scroll starting at 4.4s.
+  // THE CLOUD ROLL, earlier and decaying. It drives the billboard shear and
+  // the 3D cap-lobe circulation; there is deliberately no visible torus mesh.
   if (CBZ.CONFIG.NUKE_FX_ROLL == null) CBZ.CONFIG.NUKE_FX_ROLL = true;
-  // THE IGNITION ANNULUS — the standing burn ring outside the blast ring.
-  // false => the scattered thermal pops only (what the file had before).
-  if (CBZ.CONFIG.NUKE_FX_BURN == null) CBZ.CONFIG.NUKE_FX_BURN = true;
   // THE GLASS LADDER — cityShatter passes walking outward WITH the front, out
   // past the blast reach. false => the old three fixed-clock passes that all
   // landed INSIDE the flattened zone.
@@ -451,53 +433,6 @@
     return m;
   }
 
-  // ---- ground shock annulus ------------------------------------------------
-  // r128 RingGeometry(inner, outer, thetaSegments, phiSegments, thetaStart,
-  // thetaLength) lays its vertices in the XY plane, so position.xy IS the
-  // radius vector and the mesh is rotated -90deg about X to lie on the deck.
-  const RING_VS = [
-    "#include <fog_pars_vertex>",
-    "varying vec2 vP;",
-    "void main() {",
-    "  vP = position.xy;",
-    "  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);",
-    "  gl_Position = projectionMatrix * mvPosition;",
-    "  #include <fog_vertex>",
-    "}",
-  ].join("\n");
-  /* ONE ring shader, TWO rings.
-
-     `uRagged` is the whole difference between the SHOCK FRONT (a clean travelling
-     annulus, uRagged 0 — byte-identical to what this shader has always drawn)
-     and the IGNITION ANNULUS (uRagged 1: the same band, chewed into a broken
-     ring of fires by two noise lookups keyed on the polar angle). A burning ring
-     that is a perfect circle reads as a debug gizmo; a burning ring with holes
-     in it reads as a city. Deriving the angle from vP costs an atan and buys the
-     second ring for zero extra geometry, zero extra material class and zero
-     extra shader program past this branch. */
-  const RING_FS = [
-    "#include <fog_pars_fragment>",
-    "uniform vec3 uHot; uniform vec3 uDust; uniform float uOpacity; uniform float uCool;",
-    "uniform sampler2D uNoise; uniform float uRagged; uniform float uChurn;",
-    "varying vec2 vP;",
-    "void main() {",
-    // the annulus is authored inner 0.8 / outer 1.0, so k walks the band 0..1
-    "  float k = clamp((length(vP) - 0.8) / 0.2, 0.0, 1.0);",
-    "  float a = smoothstep(0.0, 0.32, k) * (1.0 - smoothstep(0.62, 1.0, k));",
-    "  if (uRagged > 0.001) {",
-    "    float ang = atan(vP.y, vP.x) * 0.15915494;",           // -0.5..0.5 turns
-    "    float n1 = texture2D(uNoise, vec2(ang * 5.0, k * 0.5 + uChurn)).r;",
-    "    float n2 = texture2D(uNoise, vec2(ang * 13.0 + uChurn * 0.4, k * 0.25)).r;",
-    "    float burn = smoothstep(0.30, 0.78, n1 * 0.66 + n2 * 0.52);",
-    "    a *= mix(1.0, burn, uRagged);",
-    "  }",
-    "  a *= uOpacity;",
-    "  if (a <= 0.003) discard;",
-    "  gl_FragColor = vec4(mix(uHot, uDust, uCool), a);",
-    TAIL_FOG_ADD,
-    "}",
-  ].join("\n");
-
   // ---- camera-facing cloud billboard --------------------------------------
   const BILL_VS = [
     "#include <fog_pars_vertex>",
@@ -529,26 +464,6 @@
     "}",
   ].join("\n");
 
-  // ---- toroidal cap roll ---------------------------------------------------
-  const TORUS_FS = [
-    "#include <fog_pars_fragment>",
-    "uniform sampler2D uNoise; uniform sampler2D uLut;",
-    "uniform float uRoll; uniform float uLife; uniform float uOpacity;",
-    "varying vec2 vUv;",
-    "void main() {",
-    // r128 TorusGeometry writes uv.x along the TUBULAR direction (around the
-    // major circle) and uv.y around the TUBE, so scrolling uv.y is literally
-    // the toroidal roll. Verified against the vendored build, not remembered.
-    "  float n1 = texture2D(uNoise, vec2(vUv.x * 3.0, vUv.y + uRoll)).r;",
-    "  float n2 = texture2D(uNoise, vec2(vUv.x * 1.6 - uRoll * 0.35, vUv.y * 0.7)).r;",
-    "  float a = smoothstep(0.34, 0.86, n1 * 0.62 + n2 * 0.62) * uOpacity;",
-    "  if (a <= 0.004) discard;",
-    "  vec3 c = texture2D(uLut, vec2(clamp(uLife, 0.02, 0.98), 0.5)).rgb * (0.7 + 0.55 * n1);",
-    "  gl_FragColor = vec4(c, a);",
-    TAIL_FOG,
-    "}",
-  ].join("\n");
-
   /* ============================================================
      THE MESH POOL — built ONCE at load, parked invisible, reused by every
      detonation for the life of the session. Nothing here is ever disposed
@@ -556,8 +471,52 @@
      chunkGeo/chunkMat), and every object carries userData so core/batch.js
      can never swallow it into a merged buffer.
      ============================================================ */
-  const POOL = { shell: null, dome: null, ring: null, burn: null, torus: null, bills: [] };
+  const POOL = {
+    shell: null, dome: null, bills: [],
+    capVol: null, stemVol: null, surgeVol: null, hotVol: null,
+  };
   const MAX_BILLS = 5;
+  const VOL_MAX = { cap: 28, stem: 16, surge: 24, hot: 16 };
+  const VOL_SEED = { cap: [], stem: [], surge: [], hot: [] };
+
+  // One deterministic layout, reused by every detonation. The instances move
+  // and swell, but never allocate. A 3D lobe cloud remains a mushroom from the
+  // B-2's steep camera angle; a camera-facing cap quad becomes a flat disc.
+  function seedVolumes() {
+    if (VOL_SEED.cap.length) return;
+    for (let i = 0; i < VOL_MAX.cap; i++) {
+      const a = i ? (i * 2.399963 + rng() * 0.24) : 0; // golden-angle, no spokes
+      VOL_SEED.cap.push({
+        a: a, r: i ? Math.sqrt(rng()) * 0.86 : 0,
+        y: i ? (rng() - 0.42) * 0.48 : 0.08,
+        s: i ? 0.16 + rng() * 0.12 : 0.34,
+        spin: (rng() - 0.5) * 0.28,
+      });
+    }
+    for (let i = 0; i < VOL_MAX.stem; i++) {
+      VOL_SEED.stem.push({
+        f: (i + 0.45) / VOL_MAX.stem,
+        a: i * 2.399963 + rng() * 0.35,
+        r: 0.08 + rng() * 0.28,
+        s: 0.78 + rng() * 0.42,
+      });
+    }
+    for (let i = 0; i < VOL_MAX.surge; i++) {
+      VOL_SEED.surge.push({
+        a: i * 2.399963 + rng() * 0.42,
+        r: Math.sqrt((i + 0.6) / VOL_MAX.surge) * (0.82 + rng() * 0.18),
+        s: 0.70 + rng() * 0.55,
+      });
+    }
+    for (let i = 0; i < VOL_MAX.hot; i++) {
+      const a = i * 2.399963 + rng() * 0.3;
+      VOL_SEED.hot.push({
+        a: a, r: 0.18 + Math.sqrt(rng()) * 0.72,
+        y: (rng() - 0.35) * 0.9,
+        s: 0.14 + rng() * 0.12,
+      });
+    }
+  }
 
   function park(mesh, order) {
     mesh.visible = false;
@@ -576,24 +535,14 @@
 
     const sphereGeo = new THREE.IcosahedronGeometry(1, 2);   // 320 tris — a rim needs no more
     sphereGeo._shared = true;
-    // r128 signature, verified against the vendored build:
-    //   RingGeometry(innerRadius, outerRadius, thetaSegments, phiSegments, ...)
-    //   TorusGeometry(radius, tube, radialSegments, tubularSegments, arc)
-    const ringGeo = new THREE.RingGeometry(0.8, 1.0, 72, 1);
-    ringGeo._shared = true;
-    const torusGeo = new THREE.TorusGeometry(1, 0.34, 8, 36);
-    torusGeo._shared = true;
+    const billowGeo = new THREE.IcosahedronGeometry(1, 1);   // 80 tris x instances
+    billowGeo._shared = true;
     const quadGeo = new THREE.PlaneGeometry(1, 1);
     quadGeo._shared = true;
 
-    /* RENDER ORDER. All of these are transparent + depthWrite:false, so three
-       sorts them by renderOrder first and only then back-to-front. The order
-       below is the painting order of the real event:
-         3 ignition annulus (deck, outermost) -> 4 ground shock ring (deck)
-         -> 5 cloud billboards -> 6 toroidal roll -> 8 fireball shell
-         (additive) -> 9 shock veil / condensation shell.
-       The ring used to sit ABOVE the billboards, which drew a 600 m annulus
-       over the base surge that is supposed to be rolling across it.
+    /* RENDER ORDER. The filled ground cloud is first, then the opaque-ish
+       volumetric stem/cap, then surface-detail billboards, then the hot volume
+       and fireball core, and finally the condensation shell.
 
        THE VEIL IS ABOVE THE FIREBALL ON PURPOSE (9 vs 8), and that one number
        is what makes the double flash real in the WORLD rather than only on the
@@ -613,56 +562,36 @@
     domeMat.uniforms.uCore.value = 0.06;
     POOL.dome = park(new THREE.Mesh(sphereGeo, domeMat), 9);
 
-    function makeRingMat(hot, dust, ragged) {
-      const m = new THREE.ShaderMaterial({
-        uniforms: FOG_U({
-          uHot: { value: new THREE.Color(hot) },
-          uDust: { value: new THREE.Color(dust) },
-          uOpacity: { value: 0 }, uCool: { value: 0 },
-          uNoise: { value: TEX.noise }, uRagged: { value: ragged }, uChurn: { value: 0 },
-        }),
-        vertexShader: RING_VS, fragmentShader: RING_FS,
-        transparent: true, depthWrite: false, depthTest: true,
-        fog: true,
-        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    seedVolumes();
+    function volumeMat(color, emissive, opacity) {
+      const m = new THREE.MeshLambertMaterial({
+        color: color, emissive: emissive, emissiveIntensity: 1,
+        transparent: true, opacity: opacity, depthWrite: true,
+        fog: true, flatShading: true,
       });
       m._shared = true;
       return m;
     }
-
-    const ring = new THREE.Mesh(ringGeo, makeRingMat(0xffe0a0, 0xb0a595, 0));
-    ring.rotation.x = -Math.PI / 2;
-    POOL.ring = park(ring, 4);
-
-    /* THE IGNITION ANNULUS — the second ring, and the cheapest honest way to
-       draw "the burn zone is wider than the flattened zone".
-
-       It reuses the SAME RingGeometry, and that is not a coincidence: the
-       geometry is authored inner 0.8 / outer 1.0, i.e. a ratio of exactly 1.25,
-       which is the blast:thermal radius ratio this yield works out to (see
-       STYLE.nuke.thermK). Scaling this one mesh to the burn radius therefore
-       puts its INNER edge precisely on the blast ring's rim and its outer edge
-       at the ignition radius, with no new geometry, no second annulus authored
-       by hand, and no chance of the two drifting apart. One draw call for the
-       whole aftermath read. */
-    const burn = new THREE.Mesh(ringGeo, makeRingMat(0xff7a24, 0x6d5a4a, 1));
-    burn.rotation.x = -Math.PI / 2;
-    POOL.burn = park(burn, 3);
-
-    const torusMat = new THREE.ShaderMaterial({
-      uniforms: FOG_U({
-        uNoise: { value: TEX.noise }, uLut: { value: TEX.lut },
-        uRoll: { value: 0 }, uLife: { value: 0.5 }, uOpacity: { value: 0 },
-      }),
-      vertexShader: BILL_VS, fragmentShader: TORUS_FS,
-      transparent: true, depthWrite: false, depthTest: true,
-      fog: true,
-      side: THREE.DoubleSide, blending: THREE.NormalBlending,
+    function volumeMesh(name, count, material, order) {
+      const mesh = new THREE.InstancedMesh(billowGeo, material, count);
+      mesh.name = "nuke-" + name;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.count = 0;
+      return park(mesh, order);
+    }
+    POOL.surgeVol = volumeMesh("ground-cloud", VOL_MAX.surge,
+      volumeMat(0x746154, 0x1b0d07, 0.88), 4);
+    POOL.stemVol = volumeMesh("stem", VOL_MAX.stem,
+      volumeMat(0x4b3a31, 0x24110a, 0.94), 5.1);
+    POOL.capVol = volumeMesh("cap", VOL_MAX.cap,
+      volumeMat(0x5b4030, 0x301208, 0.96), 5.2);
+    const hotMat = new THREE.MeshBasicMaterial({
+      color: 0xff8a20, transparent: true, opacity: 0,
+      depthWrite: false, depthTest: true, fog: true,
+      blending: THREE.AdditiveBlending,
     });
-    torusMat._shared = true;
-    const torus = new THREE.Mesh(torusGeo, torusMat);
-    torus.rotation.x = Math.PI / 2;
-    POOL.torus = park(torus, 6);
+    hotMat._shared = true;
+    POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat, 7);
 
     for (let i = 0; i < MAX_BILLS; i++) {
       const mat = new THREE.ShaderMaterial({
@@ -828,7 +757,7 @@
 
      Every dimension below used to be derived from `row.radius` alone — 14 for
      the nuke — which produced a 7 m fireball under a mushroom cloud 20 m tall
-     and 18 m wide, while the ring that actually kills rolled out to 620 m.
+     and 18 m wide, while the actual damage zone rolled hundreds of metres out.
      fireR() is the honest number, and it is the ONLY place the conversion
      lives so it cannot drift again. `opts.scale` is already the bus's
      kinetic FX multiplier (cube-root of energy), so multiplying it in here is
@@ -860,17 +789,20 @@
      scales as Y^0.41 and a given overpressure radius as Y^0.33, so the ratio of
      the two goes as Y^0.08, which at the yield the bus's nuke row is priced for
      lands at ~1.25. A chemical bomb's thermal pulse does not outrange its own
-     blast at all, so the MOAB's is 0 and it never draws a burn ring. */
+     blast at all, so the MOAB's is 0 and it has no outer thermal zone. */
   const STYLE = {
     nuke: {
-      rFrac: 0.50,     // fireball radius as a fraction of the EFFECTIVE radius
-      riseK: 7.20,     // stabilisation altitude, in fireball radii (63m ball -> ~454m)
+      // OSTI/LLNL's peak visual-fireball estimate is Rmax = 50*W^(1/3) m.
+      // The row's 126 m effective radius is already the right answer for the
+      // game's ~15 kt event; halving it here was the tiny-fireball bug.
+      rFrac: 1.00,
+      riseK: 7.20,     // compressed stabilisation altitude (126m ball -> ~907m)
       capK: 2.75, stemK: 0.28, surgeK: 3.4,
       thermK: 1.25,    // ignition radius / blast radius (Y^0.08 — see above)
       riseT: 13, dur: 34, white: 2.9, whitePeak: 1, dbl: true,
-      bills: 5, dome: true, torus: true, ash: true,
+      bills: 5, dome: true, volume: true, ash: true,
       secondary: 6, shatter: 4, thermal: 9,
-      shake: 9, ringLife: 7.5, glow: 0.85,
+      shake: 9, frontLife: 7.5, glow: 0.85,
     },
     moab: {
       // A MOAB throws a tall, dirty smoke column — genuinely taller relative to
@@ -878,12 +810,14 @@
       // NOT a mushroom, and it is deliberately left squatter and stubbier than
       // the nuke. The audit knows that and asserts it against chemical
       // thresholds rather than nuclear ones.
-      rFrac: 0.55, riseK: 4.00, capK: 1.85, stemK: 0.30, surgeK: 2.6,
+      // Its row radius is the pressure/damage near field, not a literal ball of
+      // flame. Keep the visible chemical fireball to ~42 m at the 120 m row.
+      rFrac: 0.35, riseK: 4.00, capK: 1.85, stemK: 0.30, surgeK: 2.6,
       thermK: 0,
       riseT: 5.6, dur: 13, white: 0.8, whitePeak: 0.82, dbl: false,
-      bills: 3, dome: false, torus: false, ash: false,
+      bills: 3, dome: false, volume: true, ash: false,
       secondary: 3, shatter: 1, thermal: 0,
-      shake: 4.5, ringLife: 3.4, glow: 0.7,
+      shake: 4.5, frontLife: 3.4, glow: 0.7,
     },
   };
 
@@ -905,7 +839,7 @@
      THE RISE — ONE curve, four readers.
 
      This used to be `ease((t - 0.9) / riseT)` copy-pasted into the fireball,
-     the billboards and the torus: three places that all had to agree about how
+     billboards and cap roll: three places that all had to agree about how
      high the cloud was and had no structural reason to. It is now one function,
      and fixing the SHAPE was a one-line change instead of three.
 
@@ -956,17 +890,17 @@
   let live = null;
 
   function beginSequence(x, y, z, styleName, row, opts) {
-    if (!POOL.ring) return null;                    // pool never built (no THREE/scene)
+    if (!POOL.shell || !POOL.capVol) return null;   // pool never built (no THREE/scene)
     const P = STYLE[styleName] || STYLE.nuke;
     const q = q01();
     const gy = floorAt(x, z);
     // EFFECTIVE near-field radius (see fireR above): 126 m for the nuke row,
-    // 41 m for the MOAB — NOT the row's bare `radius` field.
+    // ~120 m for the MOAB pressure footprint — NOT the row's bare field.
     const radius = fireR(row, opts);
     const R = Math.max(5, radius * P.rFrac);
     const wave = row.wave || null;
     // Match systems/impactbus.js's queueWave EXACTLY — same quality clamp AND
-    // the same fxScale — or the ring you see stops being the ring that kills.
+    // the same fxScale so rendered consequences reach the gameplay footprint.
     const sc = (opts.scale > 0 ? +opts.scale : 1);
     const maxR = (wave && wave.maxR ? wave.maxR : radius * 4) *
                  (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1) * sc;
@@ -975,7 +909,7 @@
        B-2 releasing over a district is the whole reason this file exists — an
        airburst is not a ground burst with the same picture. So the FIREBALL,
        the condensation dome and the cap seat at the burst height while the
-       shock ring, the base surge and the walking dust stay on the DECK, which
+       base surge and the walking dust stay on the DECK, which
        is exactly the geometry: the stem is the dust column being drawn UP off
        the ground into a fireball that was never touching it.
        Clamped to 3 fireball radii so a stray y (a bomb still in the bomb bay,
@@ -1002,14 +936,13 @@
       x: x, y: gy, by: burstY, z: z, R: R, maxR: maxR, spd: spd, eff: radius,
       // THE IGNITION RADIUS. Y^0.41 vs Y^0.33 (see STYLE.thermK) — the burn zone
       // is genuinely wider than the flattened zone, and this is the number that
-      // says so. Zero for anything chemical, which is why the MOAB never draws
-      // a burn ring and the branch below costs it nothing.
+      // says so. Zero for anything chemical. It is never drawn as an outline.
       burnR: P.thermK > 0 ? maxR * P.thermK : 0,
       riseH: R * P.riseK, capW: R * P.capK, stemW: R * P.stemK, surgeW: R * P.surgeK,
       t: 0, r: Math.max(1, row.radius || radius * 0.1), dur: P.dur, q: q,
-      // the front stops at maxR; the ring must retire WITH it, not on a fixed
-      // clock that leaves a 620 m annulus parked in the street for 4 seconds.
-      ringLife: Math.min(P.ringLife, maxR / Math.max(1, spd) + 1.6),
+      // The front still drives damage, dust and condensation, but it is never
+      // painted as geometry on the terrain.
+      frontLife: Math.min(P.frontLife, maxR / Math.max(1, spd) + 1.6),
       bills: bills, dustAcc: 0, pending: [], ash: null, ashT: 0,
       boomAt: dist > 60 ? Math.min(9, dist / 343) : -1,
       frontAt: dist > 45 && dist < maxR ? dist / Math.max(1, spd) : -1,
@@ -1019,11 +952,9 @@
     };
 
     // ---- shells -----------------------------------------------------------
-    // tier 2+ gets the fireball shell, the shock veil / condensation shell and
-    // the toroidal roll. Tier 0/1 keep whiteout + rings + cloud and read fine.
-    // The veil and the roll used to be gated at q>0.6 / q>0.7 (tier 3+); both
-    // are SIGNATURE beats — the double flash and the vortex overturn — so they
-    // now come in a tier earlier, where the fireball shell already lives.
+    // Tier 2+ gets the smooth luminous core and condensation veil. Every tier
+    // gets a reduced 3D lobe cloud, so the fallback remains a mushroom instead
+    // of becoming the old flat ring.
     const wantShell = CBZ.CONFIG.NUKE_FX_SHELL && q > 0.28;
     live.shell = wantShell ? POOL.shell : null;
     live.dome = wantShell && P.dome && q > 0.45 ? POOL.dome : null;
@@ -1039,109 +970,98 @@
       live.dome.material.uniforms.uOpacity.value = 0;
       live.dome.visible = false;
     }
-    // ---- the ground ring is the ONE layer that survives every tier ---------
-    live.ring = POOL.ring;
-    live.ring.position.set(x, gy + 0.14, z);
-    live.ring.scale.set(0.01, 0.01, 1);
-    live.ring.material.uniforms.uOpacity.value = 0;
-    live.ring.material.uniforms.uCool.value = 0;
-    live.ring.visible = true;
-    /* ---- the IGNITION ANNULUS. One draw call, parked on the deck 0.2 m under
-       the shock ring so the two never z-fight, and scaled ONCE here because it
-       does not travel — the burn zone is where it is from the moment the
-       thermal pulse lands. It outlives the shock ring by design: the front is
-       gone in three seconds, the fires are the thing that is still there when
-       you fly back over. */
-    live.burn = (CBZ.CONFIG.NUKE_FX_BURN && live.burnR > 0 && POOL.burn) ? POOL.burn : null;
-    if (live.burn) {
-      live.burn.position.set(x, gy + 0.10, z);
-      live.burn.scale.set(live.burnR, live.burnR, 1);
-      live.burn.material.uniforms.uOpacity.value = 0;
-      live.burn.material.uniforms.uCool.value = 0;
-      live.burn.material.uniforms.uChurn.value = 0;
-      live.burn.visible = true;
-    }
-    // ---- the toroidal cap roll --------------------------------------------
-    live.torus = P.torus && q > 0.45 ? POOL.torus : null;
-    if (live.torus) {
-      live.torus.material.uniforms.uOpacity.value = 0;
-      live.torus.material.uniforms.uRoll.value = 0;
-      live.torus.visible = false;
+    // ---- VOLUMETRIC FIREBALL + MUSHROOM ------------------------------------
+    // Four InstancedMeshes, four draw calls at every quality. Counts fall with
+    // quality, not physical size; the silhouette never shrinks into a toy.
+    live.volume = !!P.volume;
+    if (live.volume) {
+      const nuke = styleName === "nuke";
+      const count = function (lo, hi) {
+        return Math.max(lo, Math.min(hi, Math.round(CBZ.qScale ? CBZ.qScale(lo, hi) : hi)));
+      };
+      live.volN = {
+        cap: count(nuke ? 12 : 8, nuke ? VOL_MAX.cap : 18),
+        stem: count(nuke ? 8 : 5, nuke ? VOL_MAX.stem : 10),
+        surge: count(nuke ? 10 : 7, nuke ? VOL_MAX.surge : 15),
+        hot: count(nuke ? 8 : 6, nuke ? VOL_MAX.hot : 11),
+      };
+      POOL.capVol.count = live.volN.cap;
+      POOL.stemVol.count = live.volN.stem;
+      POOL.surgeVol.count = live.volN.surge;
+      POOL.hotVol.count = live.volN.hot;
+      const vv = [POOL.surgeVol, POOL.stemVol, POOL.capVol, POOL.hotVol];
+      for (let i = 0; i < vv.length; i++) {
+        vv[i].position.set(x, gy, z);
+        vv[i].visible = true;
+      }
+      POOL.capVol.material.opacity = 0;
+      POOL.stemVol.material.opacity = 0;
+      POOL.surgeVol.material.opacity = 0;
+      POOL.hotVol.material.opacity = 0;
     }
 
     /* ---- SCHEDULED BEATS. All of them route into systems that are already
        pooled and capped: crashfx's cityExplosion (FX-only satellites — the
-       bus's wave owns the damage out there), buildings.js's cityShatter and
-       cityScorch. Counts ride the quality tier; at tier 0 the lists are
-       simply empty. -------------------------------------------------------- */
+       bus's wave owns the damage out there) and buildings.js's cityShatter.
+       Counts ride the quality tier; at tier 0 the lists are simply empty. --- */
     const nSat = Math.round((CBZ.qScale ? CBZ.qScale(0, P.secondary) : P.secondary));
     for (let i = 0; i < nSat; i++) {
-      const a = (i / nSat) * 6.2832 + rng() * 0.4;
-      const rr = radius * (0.85 + rng() * 0.5);
+      // Reuse the RPG's excellent puff explosion INSIDE the nuclear fireball.
+      // The former even-radius placement drew a necklace of little blasts.
+      const a = i * 2.399963 + rng() * 0.55;
+      const rr = R * (0.16 + Math.sqrt((i + 0.35) / Math.max(1, nSat)) * 0.68);
       live.pending.push({
-        t: 0.45 + i * 0.11,
+        t: 0.22 + i * 0.09,
         x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr,
         power: 2.4, radius: 13, sat: true,
       });
     }
     const nSat2 = Math.round(nSat * 0.7);
     for (let i = 0; i < nSat2; i++) {
-      const a = (i / Math.max(1, nSat2)) * 6.2832 + 0.7;
-      const rr = radius * (1.7 + rng() * 0.6);
+      const a = i * 2.399963 + 0.7 + rng() * 0.45;
+      const rr = R * (0.55 + Math.sqrt(rng()) * 0.85);
       live.pending.push({
-        t: 1.35 + i * 0.13,
+        t: 0.95 + i * 0.12,
         x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr,
         power: 1.9, radius: 11, sat: true,
       });
     }
-    /* THE IGNITION RING — free divergence, and the most distinctive read a big
-       warhead has. Thermal radiant exposure scales as Y^0.41 while blast radius
-       scales as Y^(1/3) = Y^0.333, so the exponents SEPARATE with yield: at nuke
-       scale the ignition ring lands well OUTSIDE the flattened zone. Fires
-       burning past the edge of the wreckage is a thing only a nuclear weapon
-       does. The MOAB's `thermal` is 0, so it never draws one — a chemical bomb's
-       thermal pulse does not outrange its own blast.
-
-       THE RADIUS IS NOW THE ANNULUS'S RADIUS, not a second guess at it. These
-       pops used to sit at `maxR * (1.02 + rand*0.26)`, which is a 250 m-wide
-       scatter that happens to average about right; they now land ON live.burnR
-       with a ±6% jitter, so the pops, the standing burn annulus and the number
-       CBZ.nukeFxAudit() reports are all the same radius. A pop at a radius the
-       ring is not drawn at is just a fireball in a field.
-
-       Each one also lays a SMOKE COLUMN (crashfx's pooled cityCrashSmoke, capped
-       at six puffs a call) — a fireball that pops and vanishes reads as ordnance
-       landing out there; a fireball that leaves something standing and smoking
-       reads as the city catching fire, which is what actually happened. */
+    /* THERMAL IGNITION IS AN AREA, NOT A CIRCLE. The actual thermal sweep in
+       impactbus lights eligible structures between the pressure reach and the
+       wider thermal reach. These few pooled flame/smoke receipts are scattered
+       by AREA through that footprint, never at one radius. The world therefore
+       shows irregular fires wherever combustible things exist rather than a
+       mathematically perfect orange ring painted on empty terrain. */
     const nTherm = Math.round(CBZ.qScale ? CBZ.qScale(0, P.thermal) : P.thermal);
     for (let i = 0; i < nTherm; i++) {
-      const a = (i / Math.max(1, nTherm)) * 6.2832 + 1.9;
-      const rr = (live.burnR > 0 ? live.burnR : maxR * 1.15) * (0.94 + rng() * 0.12);
+      const a = i * 2.399963 + 1.9 + rng() * 0.7;
+      const inner = Math.min(maxR * 0.70, Math.max(R * 1.25, 1));
+      const outer = Math.max(inner, live.burnR > 0 ? live.burnR : maxR);
+      const rr = Math.sqrt(inner * inner + rng() * (outer * outer - inner * inner));
       live.pending.push({
         t: 0.9 + i * 0.14,
         x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr,
         power: 1.1, radius: 16, sat: true, smoke: true,
       });
     }
-    /* GLASS IS THE WIDEST OF THE THREE RINGS, and it was the narrowest.
+    /* GLASS IS THE WIDEST OF THE THREE EFFECT ZONES.
 
        By overpressure: ~5 psi collapses most buildings (the classic destruction
        radius, and what `maxR` is), ~2 psi takes roofs and walls, and ~1 psi
        shatters windows across an area several times larger than any of it —
        flying glass is the single biggest injury source a city detonation
        produces. This ladder used to run 0.9 / 1.65 / 2.4 x the FIREBALL radius,
-       i.e. 113 / 208 / 302 m against a 620 m blast reach: every pane it broke
+       i.e. 113 / 208 / 302 m against the old blast reach: every pane it broke
        was inside a zone where the buildings were already coming down. It now
-       runs GLASS_K = 0.42 / 0.85 / 1.35 / 2.10 x the BLAST reach — 260 / 527 /
-       837 / 1302 m — so the last two passes land well beyond the rim, where the
-       glass ring actually belongs.
+       runs GLASS_K = 0.42 / 0.85 / 1.35 / 2.10 x the BLAST reach, so the last
+       two passes land well beyond the demolition footprint.
 
        And each pass is timed to r/speed — the radius divided by the front's own
        speed — so the panes go out AS THE FRONT REACHES THEM rather than on a
        clock of their own. The outermost pass is past `maxR`, which the damage
        wave never reaches: that is not a mistake, it is the honest picture. The
-       wave stops at 620 m because that is a gameplay budget; a 1 psi front does
-       not stop there, it just stops knocking buildings down.
+       wave stops at its gameplay reach; a 1 psi front does not stop there, it
+       just stops knocking buildings down.
 
        The tier walk DECIMATES the ladder evenly rather than truncating it, the
        same rule cityBombWalk uses on a bomb stick and for the same reason: a
@@ -1165,9 +1085,6 @@
         live.pending.push({ t: 0.3 + i * 0.55, shatter: radius * (0.9 + i * 0.75) });
       }
     }
-    // ground zero stays black
-    live.pending.push({ t: 0.2, scorch: Math.min(70, radius * 0.42) });
-
     /* ---- t=0 FEEL -----------------------------------------------------------
        DELIBERATELY THIN. nearField() has already run by the time we get here,
        and crashfx's cityAirstrikeExplosion fires sfx("explosion"),
@@ -1219,9 +1136,8 @@
       } catch (e) {}
       /* IGNITION leaves something behind. crashfx's cityCrashSmoke is the
          pooled plume every wreck in the game already uses (six puffs a call,
-         off the shared puff pool, self-recycling) — so "the ignition ring is
-         still burning a minute later" costs us a function call and no pool of
-         our own. Only the thermal pops carry `smoke`; the near-in satellites
+         off the shared puff pool, self-recycling). Only the irregular thermal
+         receipts carry `smoke`; the near-in satellites
          are inside the flattened zone, where the structural ledger's own fires
          are already the thing that is burning. */
       if (p.smoke && CBZ.cityCrashSmoke) {
@@ -1232,12 +1148,6 @@
     if (p.shatter != null && CBZ.cityShatter && live) {
       try { CBZ.cityShatter(live.x, live.z, p.shatter); } catch (e) {}
       return;
-    }
-    if (p.scorch != null && CBZ.cityScorch && live) {
-      // ONE stain. The near-field blast already laid its own crater scorch and
-      // city/strategic.js lays a ring of its own for a nuke — a third fan of
-      // decals here would just churn buildings.js's capped pool for nothing.
-      try { CBZ.cityScorch(live.x, live.z, p.scorch); } catch (e) {}
     }
   }
 
@@ -1259,23 +1169,9 @@
   }
 
   /* ---- billboard placement -------------------------------------------------
-     TWO billboard modes, and using the wrong one is the classic mushroom-cloud
-     tell. A SPHERICAL billboard (copy the camera's whole quaternion) is right
-     for the cap: it is a blob, it has no up. It is WRONG for the stem and the
-     base surge, because their whole job is to be vertical/horizontal in the
-     WORLD — and a mushroom cloud is the one thing in a game the player is
-     guaranteed to crane their neck at. The moment the camera pitches up, a
-     spherical stem tips over with it and the column visibly detaches from the
-     cap it is supposed to be holding up.
-
-     So those two get a CYLINDRICAL billboard: yaw toward the camera about the
-     world Y axis only, keeping local +Y pinned to world up. Same cost. */
-  function faceCameraSpherical(mesh, roll) {
-    const cam = CBZ.camera;
-    if (!cam) return;
-    mesh.quaternion.copy(cam.quaternion);
-    if (roll) mesh.rotateZ(roll);
-  }
+     Every detail plane stays vertical in world space and yaws only. Copying the
+     camera's pitch was the aircraft-view bug: from above, the cap tipped flat
+     and exposed itself as a disc precisely when the mushroom mattered most. */
   function faceCameraYaw(mesh) {
     const cam = CBZ.camera;
     if (!cam || !cam.position) return;
@@ -1283,11 +1179,151 @@
                                     cam.position.z - mesh.position.z), 0);
   }
 
+  /* ---- TRUE 3D MUSHROOM VOLUME -------------------------------------------
+     The old silhouette depended on one cap quad and a horizontal torus. From
+     the B-2's steep view those become a disc and a ring. These four instanced
+     lobe fields have real depth from every camera angle while remaining four
+     draw calls total. The cap's instances circulate slowly around the stem;
+     no geometry is a ring and no fragment is painted on the terrain. */
+  const _volDummy = new THREE.Object3D();
+  const VOL_HOT = new THREE.Color(0xff7a18);
+  const VOL_ASH = new THREE.Color(0x332f2c);
+  const VOL_STEM_HOT = new THREE.Color(0x5e3b2b);
+  const VOL_STEM_ASH = new THREE.Color(0x292725);
+  const VOL_DUST_HOT = new THREE.Color(0x806456);
+  const VOL_DUST_ASH = new THREE.Color(0x5a5651);
+  const VOL_EMBER = new THREE.Color(0x7a2a0b);
+  const VOL_EMBER_OFF = new THREE.Color(0x080604);
+
+  function putVolume(mesh, i, x, y, z, sx, sy, sz, ry) {
+    _volDummy.position.set(x, y, z);
+    _volDummy.rotation.set(0, ry || 0, 0);
+    _volDummy.scale.set(Math.max(0.01, sx), Math.max(0.01, sy), Math.max(0.01, sz));
+    _volDummy.updateMatrix();
+    mesh.setMatrixAt(i, _volDummy.matrix);
+  }
+
+  function cloudColor(mat, hot, ash, u, ember) {
+    mat.color.copy(hot).lerp(ash, clamp(u, 0, 1));
+    if (mat.emissive) {
+      mat.emissive.copy(ember || VOL_EMBER).lerp(VOL_EMBER_OFF, clamp(u * 1.25, 0, 1));
+    }
+  }
+
+  function stepVolumes(t, L) {
+    if (!L.volume || !L.volN) return;
+    const rise = riseAt(t, L);
+    const capY = capYAt(rise, L) - L.y;
+    const bloom = bloomAt(t, L);
+    const cloudCool = clamp((t - 0.7) / 11, 0, 1);
+    const endFade = Math.max(0, 1 - ease((t - (L.dur - 8)) / 8));
+    const roll = CBZ.CONFIG.NUKE_FX_ROLL
+      ? t * (0.11 + 0.22 * Math.exp(-Math.max(0, t - 1) / 8))
+      : t * 0.08;
+
+    // CAP — a broad, deep mass of overlapping lobes. The slight vertical
+    // circulation is the mushroom's overturn, without exposing a donut mesh.
+    const cap = POOL.capVol;
+    const capIn = ease((t - 0.55) / 1.15);
+    const capRadius = L.capW * bloom * 0.5;
+    for (let i = 0; i < L.volN.cap; i++) {
+      const s = VOL_SEED.cap[i];
+      const a = s.a + roll * (0.35 + s.r * 0.45) + s.spin * t;
+      const rr = capRadius * s.r;
+      const lobe = capRadius * s.s * (0.45 + 0.55 * capIn);
+      const overturn = Math.sin(a * 1.7 + t * 0.55) * capRadius * 0.035;
+      putVolume(cap, i,
+        Math.cos(a) * rr,
+        capY + capRadius * s.y + overturn,
+        Math.sin(a) * rr,
+        lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18), lobe,
+        a * 0.35);
+    }
+    cap.material.opacity = 0.96 * capIn * endFade;
+    cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
+    cap.visible = cap.material.opacity > 0.004;
+    cap.instanceMatrix.needsUpdate = true;
+
+    // STEM — overlapping vertical billows leave no chair-leg-thin cylinder and
+    // no gap under the cap. A mild spiral makes sucked-up debris visibly rise.
+    const stem = POOL.stemVol;
+    const stemIn = ease((t - 0.65) / 1.3);
+    const h = Math.max(L.R * 0.55, capY);
+    const stemR = L.stemW * (0.72 + rise * 0.88);
+    const stemY = Math.max(L.R * 0.10, h / Math.max(5, L.volN.stem * 0.72));
+    for (let i = 0; i < L.volN.stem; i++) {
+      const s = VOL_SEED.stem[i];
+      const a = s.a + roll * (0.28 + s.f * 0.35);
+      const neck = 0.72 + Math.abs(s.f - 0.55) * 0.55;
+      putVolume(stem, i,
+        Math.cos(a) * stemR * s.r,
+        Math.max(stemY * 0.45, h * s.f),
+        Math.sin(a) * stemR * s.r,
+        stemR * s.s * neck, stemY * s.s, stemR * s.s * neck,
+        a);
+    }
+    stem.material.opacity = 0.91 * stemIn * endFade;
+    cloudColor(stem.material, VOL_STEM_HOT, VOL_STEM_ASH, cloudCool);
+    stem.visible = stem.material.opacity > 0.004;
+    stem.instanceMatrix.needsUpdate = true;
+
+    // BASE SURGE — a FILLED, irregular dust cloud. It occupies area; it never
+    // traces the pressure radius as a line.
+    const surge = POOL.surgeVol;
+    const surgeIn = ease((t - 0.75) / 2.0);
+    const surgeFade = Math.max(0, 1 - ease((t - Math.min(15, L.dur - 5)) / 7));
+    const surgeMax = Math.min(L.maxR * 0.72, L.R * 3.6);
+    const surgeR = surgeMax * (0.12 + 0.88 * ease((t - 0.55) / 6.2));
+    for (let i = 0; i < L.volN.surge; i++) {
+      const s = VOL_SEED.surge[i];
+      const a = s.a + Math.sin(t * 0.16 + i) * 0.08;
+      const rr = surgeR * s.r;
+      const lobe = Math.max(L.R * 0.075, surgeMax * (0.055 + s.s * 0.028));
+      putVolume(surge, i,
+        Math.cos(a) * rr,
+        lobe * (0.24 + 0.10 * Math.sin(i * 1.7)),
+        Math.sin(a) * rr,
+        lobe * 1.25, lobe * 0.38, lobe,
+        a);
+    }
+    surge.material.opacity = 0.82 * surgeIn * surgeFade;
+    cloudColor(surge.material, VOL_DUST_HOT, VOL_DUST_ASH, cloudCool * 0.85);
+    surge.visible = surge.material.opacity > 0.004;
+    surge.instanceMatrix.needsUpdate = true;
+
+    // HOT BILLOWS — the RPG puff language the owner likes, enlarged around the
+    // smooth core so the nuclear fireball roils instead of reading as one orb.
+    const hot = POOL.hotVol;
+    const hotIn = ease(t / 0.16);
+    const hotFade = Math.max(0, 1 - ease((t - 2.8) / 3.2));
+    const grow = 1 - Math.exp(-t * 5.5);
+    const fireR0 = L.R * grow * (1 + rise * 0.30);
+    const fireY = (L.by - L.y) + L.R * 0.55 +
+      (L.riseH * 0.92 - L.R * 0.55) * rise;
+    for (let i = 0; i < L.volN.hot; i++) {
+      const s = VOL_SEED.hot[i];
+      const a = s.a + t * 0.18;
+      const rr = fireR0 * s.r * 0.68;
+      const lobe = Math.max(0.01, fireR0 * s.s);
+      putVolume(hot, i,
+        Math.cos(a) * rr,
+        fireY + s.y * fireR0 * 0.42,
+        Math.sin(a) * rr,
+        lobe * 1.08, lobe * 0.88, lobe,
+        a);
+    }
+    const pulse = flashRadiance(t, L.style);
+    hot.material.color.setHex(t < 0.45 ? 0xfff4cf : t < 1.8 ? 0xffa02e : 0xd94312);
+    hot.material.opacity = 0.82 * hotIn * hotFade * (0.18 + 0.82 * pulse);
+    hot.visible = hot.material.opacity > 0.004;
+    hot.instanceMatrix.needsUpdate = true;
+  }
+
   function stepBill(b, t, L) {
     const m = b.mesh, u = m.material.uniforms;
     // riseAt/capYAt/bloomAt — the SHARED curves. These three numbers used to be
     // recomputed with a copy-pasted smoothstep in three separate places (here,
-    // the fireball and the torus), so "how high is the cloud" had three
+    // the fireball and cap roll), so "how high is the cloud" had three
     // answers that only happened to agree.
     const rise = riseAt(t, L);
     const capY = capYAt(rise, L);
@@ -1301,9 +1337,9 @@
     // off sequence time, not per-frame increments, so the roil runs at the
     // same speed whatever the framerate is.
     // THE CAP'S SCROLL IS NOT RANDOM. Its two lookups shear vertically in
-    // OPPOSITE directions, which on a camera-facing quad reads as material
+    // OPPOSITE directions, which on a vertical detail quad reads as material
     // climbing the middle and falling down the edges — the same overturn the
-    // torus below draws in 3D. The two layers agreeing is what stops the cap
+    // instanced lobes draw in 3D. The two layers agreeing stops the cap
     // looking like a still image with noise crawling on it; every other role
     // keeps its per-detonation random drift.
     const shear = (CBZ.CONFIG.NUKE_FX_ROLL && b.role === "cap") ? 0.055 : 0;
@@ -1366,12 +1402,13 @@
         u.uOpacity.value = 0;
         return;
     }
+    // Once a 3D volume owns the silhouette, these planes are surface texture,
+    // not the cloud itself. Keeping them subordinate prevents a steep aircraft
+    // camera from revealing one enormous paper oval.
+    if (L.volume) op *= 0.46;
     u.uOpacity.value = Math.max(0, op);
     m.visible = u.uOpacity.value > 0.004;
-    if (m.visible) {
-      if (b.role === "stem" || b.role === "surge") faceCameraYaw(m);
-      else faceCameraSpherical(m, b.roll);
-    }
+    if (m.visible) faceCameraYaw(m);
   }
 
   /* ---- the whole timeline, one function --------------------------------- */
@@ -1417,21 +1454,10 @@
       scene.fog.color.lerp(_fogTint, clamp(k, 0, 0.95));
     }
 
-    // ---- the shock front (drives the ring, the dome and the dust) --------
+    // ---- the invisible shock front (drives condensation + irregular dust) --
     const r = frontRadius(dt);
-    if (L.ring) {
-      const k = clamp(r / L.maxR, 0, 1);
-      const life = clamp(t / L.ringLife, 0, 1);
-      L.ring.scale.set(r, r, 1);
-      L.ring.material.uniforms.uCool.value = k;
-      // Fade hard as the front stalls at maxR: a stationary 600 m annulus is a
-      // debug gizmo, not a shockwave. `k*k*k` only bites in the last stretch.
-      L.ring.material.uniforms.uOpacity.value =
-        Math.max(0, (1 - life) * (0.9 - 0.45 * k) * (1 - k * k * k * 0.75));
-      if (life >= 1) { L.ring.visible = false; L.ring = null; }
-    }
     // dust walking the front — pooled crashfx puffs, never a pool of ours
-    if (t < L.ringLife && r < L.maxR) {
+    if (t < L.frontLife && r < L.maxR) {
       L.dustAcc += dt;
       const nd = Math.round(CBZ.qScale ? CBZ.qScale(0, 3) : 3);
       if (L.dustAcc > 0.3 && nd > 0 && CBZ.cityDustKick) {
@@ -1446,7 +1472,6 @@
 
     // ---- FIREBALL: ignite, stall, rise, cool -----------------------------
     const rise = riseAt(t, L);                              // ONE curve, four readers
-    const capY = capYAt(rise, L);
     if (L.shell) {
       const grow = 1 - Math.exp(-t * 5.5);                 // fast punch, then stall
       const rad = L.R * (grow * (1 + rise * 0.35));
@@ -1541,35 +1566,13 @@
       }
     }
 
-    /* ---- THE IGNITION ANNULUS — the aftermath ring, and the one layer that is
-       still there when the light show is over.
+    // The 3D volumes carry the actual mushroom silhouette from every angle.
+    stepVolumes(t, L);
 
-       It blooms in as the thermal pulse lands (the pops scheduled at 0.9s are
-       the same beat), holds through the middle of the sequence and cools from
-       flame-orange toward ash as it goes. `uChurn` scrolls the noise that chews
-       the band into a broken ring of fires rather than a circle. It deliberately
-       OUTLIVES the shock ring: the front is gone in three seconds, the fires are
-       not, and the last thing a player should still be able to see is a ring of
-       burning city wider than the flattened part inside it. */
-    if (L.burn) {
-      const u = L.burn.material.uniforms;
-      const light = ease((t - 0.85) / 1.4);
-      const cool = clamp((t - 2.5) / (L.dur - 2.5), 0, 1);
-      u.uChurn.value += dt * 0.05;
-      u.uCool.value = cool * 0.85;
-      u.uOpacity.value = Math.max(0, light * (0.62 - 0.30 * cool) * (1 - ease((t - (L.dur - 7)) / 7)));
-      if (u.uOpacity.value <= 0.004 && t > L.dur - 1) { L.burn.visible = false; L.burn = null; }
-    }
-
-    // ---- CAP + STEM + SURGE billboards -----------------------------------
+    // ---- procedural surface detail over the 3D cap/stem/surge -------------
     for (let i = 0; i < L.bills.length; i++) {
       const b = L.bills[i];
-      // STAGGERED ENTRY, and the two secondary lobes deliberately wait until
-      // AFTER the condensation dome retires at 1.7s. That is both the right
-      // read (the cap's secondary lobes bloom off the main one, they do not
-      // appear with it) and what holds the peak concurrent transparent layer
-      // count at 7 — cap2 and collar arriving at 0.9 with everything else put
-      // the whole sequence's maximum in the 1.4-1.7s window for no gain.
+      // Stagger secondary texture lobes until the condensation veil has thinned.
       if (b.t0 == null) {
         b.t0 = b.role === "stem" ? 0.8
              : b.role === "cap" ? 0.9
@@ -1578,40 +1581,6 @@
              : 2.2;                          // collar
       }
       stepBill(b, t, L);
-    }
-
-    /* ---- the TOROIDAL ROLL under the cap.
-
-       The vortex ring is what makes a mushroom read as a mushroom: the cap is
-       not a blob sitting on a stalk, it is a torus of air turning itself inside
-       out, rolling up over the top and back down under the edge. Without it the
-       silhouette is a tree.
-
-       ROLL_0 is the rate the moment the ring forms and it DECAYS with a 7 s time
-       constant to ROLL_1 — an overturn is fastest when the ring is newest and
-       tightest, and a fixed rate (the old flat 0.16 uv/s, slow enough to read as
-       a texture drifting rather than as air turning over) is the tell that this
-       is a scrolling quad. Scrolling uv.y IS the roll: r128 TorusGeometry writes
-       uv.y around the TUBE, verified against the vendored build.
-
-       Starts at 3.9s, which is the exact frame the fireball shell above retires:
-       the two most expensive layers hand over instead of ever coexisting, and
-       that is what holds the peak concurrent transparent layer count at 7. */
-    if (L.torus) {
-      const ROLL_T0 = 3.9;
-      if (t >= ROLL_T0) {
-        const bloom = bloomAt(t, L) * 0.95;
-        const u = L.torus.material.uniforms;
-        L.torus.visible = true;
-        L.torus.position.set(L.x, capY - L.capW * 0.06, L.z);
-        L.torus.scale.set(L.capW * 0.44 * bloom, L.capW * 0.44 * bloom, L.capW * 0.20 * bloom);
-        u.uRoll.value += dt * (CBZ.CONFIG.NUKE_FX_ROLL
-          ? 0.14 + 0.62 * Math.exp(-(t - ROLL_T0) / 7)      // fastest when newest
-          : 0.16);
-        u.uLife.value = clamp(t / 11, 0, 1);
-        u.uOpacity.value = Math.max(0, 0.7 * ease((t - ROLL_T0) / 1.6) * (1 - ease((t - (L.dur - 10)) / 10)));
-        if (u.uOpacity.value <= 0.004 && t > 7) { L.torus.visible = false; L.torus = null; }
-      }
     }
 
     // ---- the front reaching the LENS: the second slap ---------------------
@@ -1658,12 +1627,17 @@
     // Meshes are session-lifetime pool members: park them, never dispose.
     // Runs even from a half-built sequence (a throw in beginSequence), which
     // is the only way geometry could ever be stranded visible in the world.
-    const mm = [POOL.shell, POOL.dome, POOL.ring, POOL.burn, POOL.torus];
+    const mm = [
+      POOL.shell, POOL.dome,
+      POOL.capVol, POOL.stemVol, POOL.surgeVol, POOL.hotVol,
+    ];
     for (let i = 0; i < mm.length; i++) {
       const m = mm[i];
       if (!m) continue;
       m.visible = false;
+      if (m.isInstancedMesh) m.count = 0;
       if (m.material && m.material.uniforms && m.material.uniforms.uOpacity) m.material.uniforms.uOpacity.value = 0;
+      if (m.material && m.material.opacity != null) m.material.opacity = 0;
     }
     for (let i = 0; i < POOL.bills.length; i++) {
       POOL.bills[i].visible = false;
@@ -1693,7 +1667,7 @@
 
      We now pass exactly what fxHeavy passes. R = 126 m, lethal core 0.55R =
      69 m, and systems/impactbus.js's wave takes over from row.radius outward
-     to 620 m — there is no gap between them, which is why the second
+     to 900 m — there is no gap between them, which is why the second
      "gap-closer" blast that used to be here (an undamped 254 m instant-kill
      sphere at t=0) is gone. It was closing a hole that only existed because of
      the radius bug, and it was quietly defeating the entire point of the
@@ -1749,12 +1723,12 @@
     let row = null;
     if (CBZ.impact && CBZ.impact.row) { try { row = CBZ.impact.row(kind); } catch (e) {} }
     // Defaults MIRROR systems/impactbus.js's rows verbatim (power 9 / radius 14
-    // for the nuke, 4.6 / 9 for the MOAB) so a probe that fires this with no bus
+    // for the nuke, 4.6 / 26 for the MOAB) so a probe that fires this with no bus
     // loaded gets the same 126 m fireball the real row produces. `radius` here
     // is the row field, NOT the effective reach — fireR() does that multiply.
     row = Object.assign(
-      { id: kind, power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 9 : 14,
-        wave: kind === "moab" ? { speed: 140, maxR: 150 } : { speed: 190, maxR: 620 } },
+      { id: kind, power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 26 : 14,
+        wave: kind === "moab" ? { speed: 140, maxR: 320 } : { speed: 190, maxR: 900 } },
       row || {},
       opts.row || {}
     );
@@ -1978,15 +1952,16 @@
         maxR: +live.maxR.toFixed(1), eff: +live.eff.toFixed(1),
         gy: +live.y.toFixed(1), burstY: +live.by.toFixed(1),
         R: +live.R.toFixed(1), capW: +live.capW.toFixed(1), riseH: +live.riseH.toFixed(1),
-        ringLife: +live.ringLife.toFixed(2), fogK: +live.fogK.toFixed(3),
+        frontLife: +live.frontLife.toFixed(2), fogK: +live.fogK.toFixed(3),
         burnR: +(live.burnR || 0).toFixed(1),
         rise: +riseAt(live.t, live).toFixed(3),
         capY: +capYAt(riseAt(live.t, live), live).toFixed(1),
         radiance: +flashRadiance(live.t, live.style).toFixed(3),
         bills: live.bills.length,
         pending: live.pending.length, ash: !!live.ash,
-        shell: !!live.shell, dome: !!live.dome, ring: !!live.ring,
-        burn: !!live.burn, torus: !!live.torus,
+        shell: !!live.shell, dome: !!live.dome,
+        volume: !!live.volume, volumeCounts: live.volN || null,
+        groundRings: 0,
       } : null,
       flash: flash ? { t: +flash.t.toFixed(2), dur: flash.dur, peak: flash.peak, keys: flash.keys.length } : null,
       walks: walks.map(function (w) { return { kind: w.kind, i: w.i, n: w.pts.length }; }),
@@ -1998,37 +1973,39 @@
         sky: !!CBZ.CONFIG.NUKE_FX_SKY, walk: !!CBZ.CONFIG.BOMB_WALK_V1,
         pulse: !!CBZ.CONFIG.NUKE_FX_PULSE, veil: !!CBZ.CONFIG.NUKE_FX_VEIL,
         rise: !!CBZ.CONFIG.NUKE_FX_RISE, roll: !!CBZ.CONFIG.NUKE_FX_ROLL,
-        burn: !!CBZ.CONFIG.NUKE_FX_BURN, glass: !!CBZ.CONFIG.NUKE_FX_GLASS,
+        glass: !!CBZ.CONFIG.NUKE_FX_GLASS,
       },
     };
   };
 
   /* CBZ.nukeFxSize(kind, opts) — what the spectacle WOULD be, without firing it.
      The numeric twin of CBZ.impact.priceOf(), and the assertion surface for the
-     bug this file shipped with: `fireball` MUST equal the row's radius*power
-     (126 m for the nuke, 41 m for the MOAB), and `reach` MUST equal the bus's
-     own wave maxR after the same quality clamp. If those two ever disagree with
-     CBZ.impact.priceOf(), the picture and the damage have drifted apart. */
+     bug this file shipped with. `nearField` is the row's radius*power (126 m
+     nuke, 119.6 m MOAB pressure footprint); `fireball` is the actually drawn
+     luminous radius (the same 126 m for the nuke, ~42 m for the chemical
+     MOAB). `reach` is the bus's wave maxR after the same quality clamp. */
   CBZ.nukeFxSize = function (kind, opts) {
     opts = opts || {};
     kind = kind === "moab" ? "moab" : "nuke";
     const P = STYLE[kind];
     let row = null;
     if (CBZ.impact && CBZ.impact.row) { try { row = CBZ.impact.row(kind); } catch (e) {} }
-    row = row || { power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 9 : 14,
-                   wave: kind === "moab" ? { speed: 140, maxR: 150 } : { speed: 190, maxR: 620 } };
+    row = row || { power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 26 : 14,
+                   wave: kind === "moab" ? { speed: 140, maxR: 320 } : { speed: 190, maxR: 900 } };
     const eff = fireR(row, opts);
     const R = Math.max(5, eff * P.rFrac);
     const sc = (opts.scale > 0 ? +opts.scale : 1);
     const reach = (row.wave ? row.wave.maxR : eff * 4) * (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1) * sc;
     return {
-      kind: kind, fireball: +eff.toFixed(1), R: +R.toFixed(1),
+      kind: kind, nearField: +eff.toFixed(1), fireball: +R.toFixed(1), R: +R.toFixed(1),
       capW: +(R * P.capK).toFixed(1), capY: +(R * P.riseK).toFixed(1),
       reach: +reach.toFixed(1),
       burnR: +(P.thermK > 0 ? reach * P.thermK : 0).toFixed(1),
       bills: Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
       shell: !!(CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28),
-      addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + 1,   // shell + ring
+      volumeDraws: P.volume ? 4 : 0,
+      groundRings: 0,
+      addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + (P.volume ? 4 : 0),
     };
   };
 
@@ -2039,17 +2016,18 @@
      frame, and "does the nuke look right" is exactly the kind of question that
      rots into a screenshot argument. So every claim this file's header makes is
      published here as a number a probe can assert on, WITHOUT firing anything:
-     the beat timings, the three ring radii and their required ordering, and the
-     two proportion ratios that were wrong.
+     beat timings, three gameplay-zone radii, zero drawn ground rings, the real
+     fireball radius and the two mushroom proportions that were wrong.
 
      THE ASSERTIONS THAT MATTER (all of them are booleans in `ok`, so a probe is
      one `Object.values(...).every(Boolean)`):
 
-       ringsOrdered   flatten < burn < glass. The three overpressure rings a
-                      city detonation leaves must come out in that order and
+       zonesOrdered   flatten < burn < glass. The three effect zones a
+                      city detonation creates must come out in that order and
                       never collapse together. This is the one that caught the
                       old glass ladder, which ran ENTIRELY inside the flattened
-                      zone (302 m of glass against a 620 m blast).
+                      zone.
+       noGroundRings  no RingGeometry or other outlined terrain layer survives.
        thermalOutranges  burn > flatten strictly. Y^0.41 vs Y^0.33 — if this
                       ever reads false the divergence has been tuned away and
                       the event has stopped being nuclear.
@@ -2089,9 +2067,9 @@
     const stemWide = S.R * P.stemK * 1.7;              // widened by the rise term
 
     const glassK = GLASS_K;
-    const rings = {
+    const zones = {
       // ~5 psi: the classic destruction radius. The bus's wave maxR IS this
-      // number — the ring you see and the ring that kills are the same one.
+      // number; it is intentionally not drawn as a circle.
       flatten: S.reach,
       // ~thermal ignition. Strictly outside `flatten` or the event is not nuclear.
       burn: S.burnR,
@@ -2110,9 +2088,10 @@
       secondMax: P.dbl ? +(pk2T * P.white).toFixed(3) : -1,
       veilIn: P.dbl && CBZ.CONFIG.NUKE_FX_VEIL ? 0.06 : 0.28,
       veilOut: 1.9,
-      stemIn: 0.8, capIn: 0.9, surgeIn: 1.4, cap2In: 1.9, collarIn: 2.2,
-      burnRingIn: 0.85,
-      shellOut: 3.9, rollIn: 3.9,
+      volumeIn: 0.55,
+      stemIn: 0.65, capIn: 0.55, surgeIn: 0.75, cap2In: 1.9, collarIn: 2.2,
+      thermalIgnitionIn: 0.9,
+      shellOut: 3.9,
       riseStart: 0.9, riseEnd: +(0.9 + P.riseT).toFixed(2),
       glassAt: glassK.map(function (k) { return +Math.max(0.3, S.reach * k / spd).toFixed(2); }),
       ashIn: P.ash ? 8 : -1,
@@ -2125,29 +2104,33 @@
       stemWidth: +stemWide.toFixed(1),
       topOverCap: +(cloudTop / capWide).toFixed(2),
       capOverStem: +(capWide / stemWide).toFixed(2),
-      burnOverFlatten: +(rings.burn / Math.max(1, rings.flatten)).toFixed(3),
+      burnOverFlatten: +(zones.burn / Math.max(1, zones.flatten)).toFixed(3),
     };
 
     return {
-      kind: kind, rings: rings, beats: beats, proportions: proportions,
+      // `rings` aliases numeric zones for older probes; it never means drawn
+      // geometry. `layers.groundRings` is the visual contract.
+      kind: kind, zones: zones, rings: zones, beats: beats, proportions: proportions,
       pulse: { min: dipV, secondMax: pk2V, keys: FLASH_DOUBLE.length },
       layers: {
-        // peak CONCURRENT transparent layers, which is the cost ceiling this
-        // file is actually budgeted against. Shell and roll hand over at 3.9s
-        // and never coexist, which is why the number is 7 and not 8.
         bills: S.bills, shell: S.shell,
         dome: !!(S.shell && P.dome && q01() > 0.45),
-        torus: !!(P.torus && q01() > 0.45),
-        burn: !!(CBZ.CONFIG.NUKE_FX_BURN && P.thermK > 0),
+        volumeDraws: S.volumeDraws,
+        groundRings: 0,
       },
       ok: {
-        // A chemical warhead has no ignition ring at all (thermK 0), so it is
-        // asserted on the two rings it does have rather than being failed for
-        // not being nuclear.
+        zonesOrdered: P.thermK === 0
+          ? zones.flatten < zones.glass
+          : (zones.flatten < zones.burn && zones.burn < zones.glass),
+        // Old key retained for probe compatibility; it asserts zones.
         ringsOrdered: P.thermK === 0
-          ? rings.flatten < rings.glass
-          : (rings.flatten < rings.burn && rings.burn < rings.glass),
-        thermalOutranges: P.thermK === 0 || rings.burn > rings.flatten,
+          ? zones.flatten < zones.glass
+          : (zones.flatten < zones.burn && zones.burn < zones.glass),
+        noGroundRings: S.groundRings === 0,
+        fullNuclearFireball: kind !== "nuke" ||
+          (S.fireball === S.nearField && S.R === S.fireball),
+        volumetricCloud: !P.volume || S.volumeDraws === 4,
+        thermalOutranges: P.thermK === 0 || zones.burn > zones.flatten,
         dipPresent: !P.dbl || dipV < 0.2,
         secondBrighter: !P.dbl || pk2V >= FLASH_DOUBLE[0][1],
         /* THE TWO PROPORTION GATES, on style-appropriate thresholds. A chemical
@@ -2169,7 +2152,7 @@
   };
 
   // ---- BUILD AT LOAD (the crashfx prewarm doctrine) ------------------------
-  // Four canvas bakes, four shader programs and nine meshes, all minted here
+  // Three canvas bakes, four shader programs and nine meshes, all minted here
   // rather than in the frame a warhead lands — core/fxwarm.js then compiles
   // the programs during the play-start transition, so the first nuke of a
   // session hits fully warm caches. The eager rng() draws happen in a FIXED

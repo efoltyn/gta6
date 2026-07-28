@@ -111,7 +111,9 @@
 
   // wall-mounted TV glowing blue (2.6 m up — over a body's head, stays open)
   addBox(21.0, 2.6, 33, 0.2, 1.4, 2.4, 0x0a0d18, {});
-  addBox(21.15, 2.6, 33, 0.06, 1.2, 2.1, 0x6fb7ff, { emissive: 0x2a6ea5, ei: 0.8, cast: false });
+  // Bezel's room-facing surface is x=21.10; keep real air behind the glass.
+  addBox(21.17, 2.6, 33, 0.06, 1.2, 2.1, 0x6fb7ff,
+    { emissive: 0x2a6ea5, ei: 0.8, cast: false });
 
   // coffee machine in the corner — floor-standing, so SOLID like the rest.
   addBox(28.2, 1.0, 31.5, 0.9, 1.2, 0.9, 0x222831, { solid: true });

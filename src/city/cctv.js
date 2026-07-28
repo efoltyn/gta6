@@ -64,6 +64,7 @@
   const POLE_PITCH = -0.52;           // pole cams look further down
   const FEED_FOV = 64;                // cctv lens field of view
   const FEED_TINT = 0xbcc8d4;         // cool, slightly desaturated monitor multiply (no shader)
+  const SCREEN_GAP = 0.025;           // live feed floats over the physical glass
   const STREET_POLE_MAX = 8;          // cap on hashed street-pole cameras
   const STREET_POLE_THRESH = 0.14;    // hash01 gate for a lot to earn a street pole
 
@@ -162,7 +163,13 @@
     feedCam = new THREE.PerspectiveCamera(FEED_FOV, RT_W / RT_H, 0.3, 520);
     // unlit screen: the RT texture reads as self-lit; the colour multiply gives
     // the desaturated, cool CCTV cast with no custom shader.
-    feedMat = new THREE.MeshBasicMaterial({ map: rt.texture, color: FEED_TINT });
+    feedMat = new THREE.MeshBasicMaterial({
+      map: rt.texture, color: FEED_TINT,
+      // Secondary protection for steep viewing angles. The physical gap below
+      // is the primary fix; polygon offset keeps the dynamic quad stable on
+      // drivers with coarse depth precision without changing static batching.
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
     if ("toneMapped" in feedMat) feedMat.toneMapped = false;
     feedRoot = new THREE.Group();
     feedRoot.name = "cctv-feeds";
@@ -406,7 +413,7 @@
       const o = overlays[i];
       if (i >= n) { o.visible = false; continue; }
       const s = _near[i].s;
-      o.position.set(s.x + s.nx * 0.02, s.y, s.z + s.nz * 0.02);
+      o.position.set(s.x + s.nx * SCREEN_GAP, s.y, s.z + s.nz * SCREEN_GAP);
       o.rotation.set(0, Math.atan2(s.nx, s.nz), 0);          // visible +z face points along the outward normal
       o.visible = true;
     }

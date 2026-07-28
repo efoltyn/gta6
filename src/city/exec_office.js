@@ -72,6 +72,7 @@
   const BEZEL = 0x14181e;            // office monitor bezel bucket
   const PALE = 0xc9ccd2;             // office worktop bucket
   const SCREEN = 0x39516a;           // screen-glow bucket
+  const SCREEN_GAP = 0.025;          // real air between glass and bezel
   const WARM = 0xffe6c0;             // warm cove-light bucket
   const STEEL = 0x8a93a0;            // elevator leaf bucket
   const PLANTER = 0x2e2620, LEAF = 0x3f7a4a;
@@ -210,12 +211,15 @@
     // desk's -x working edge facing the chair, a keyboard slab, a desk lamp.
     for (const mz of [-0.66, 0, 0.66]) {
       lb(dsk.x - 0.42, 1.03, dsk.z + mz, 0.06, 0.42, 0.6, BEZEL);     // bezel
-      glow(dsk.x - 0.39, 1.03, dsk.z + mz, 0.02, 0.34, 0.5, SCREEN, 0.4); // lit pane
+      glow(dsk.x - 0.39 + SCREEN_GAP + 0.01, 1.03, dsk.z + mz,
+        0.02, 0.34, 0.5, SCREEN, 0.4);                              // lit pane, proud of bezel
       lb(dsk.x - 0.42, 0.8, dsk.z + mz, 0.1, 0.1, 0.12, BEZEL);       // stand
     }
     // CCTV: the terminal cluster carries a live camera feed (the lit panes face
     // +x toward the chair). World coords + outward normal (1,0). Runtime-visual.
-    if (CBZ.cctvAddScreen) for (const mz of [-0.66, 0, 0.66]) CBZ.cctvAddScreen(ox + dsk.x - 0.39, Y + 1.03, oz + dsk.z + mz, 1, 0);
+    if (CBZ.cctvAddScreen) for (const mz of [-0.66, 0, 0.66])
+      CBZ.cctvAddScreen(ox + dsk.x - 0.39 + SCREEN_GAP + 0.02,
+        Y + 1.03, oz + dsk.z + mz, 1, 0);
     lb(dsk.x - 0.02, 0.81, dsk.z, 0.34, 0.03, 0.9, PALE);             // keyboard slab
     lb(dsk.x + 0.34, 0.86, dsk.z - 1.2, 0.16, 0.22, 0.16, BEZEL);     // phone dock
     glow(dsk.x + 0.3, 1.06, dsk.z + 1.22, 0.2, 0.34, 0.2, WARM, 0.45);// desk lamp
@@ -274,7 +278,8 @@
       }
       // one wall screen on the back partition + one light line over the table
       lb(mcx, 1.62, mr.z1 - 0.16, 2.3, 1.15, 0.08, BEZEL);
-      glow(mcx, 1.62, mr.z1 - 0.2, 2.0, 0.9, 0.04, SCREEN, 0.4);
+      glow(mcx, 1.62, mr.z1 - 0.2 - SCREEN_GAP - 0.02,
+        2.0, 0.9, 0.04, SCREEN, 0.4);
       glow(mcx, ceilY, mcz, TL * 0.8, 0.06, 0.34, 0xf2ead8, 0.3);
     }
 

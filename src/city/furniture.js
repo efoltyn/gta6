@@ -114,6 +114,10 @@
 
   const HALF_PI = Math.PI / 2;
   const EPS_CUSHION = 0.02;          // 2cm — the audit's mismatch tolerance
+  // Minimum AIR between a display's rear face and its bezel. The old screen
+  // boxes touched or intersected the bezel by 0-10mm, which depth-fought after
+  // batching. Physical separation survives every material/batch path.
+  const SCREEN_GAP = 0.025;
 
   // ---- THE PALETTE — existing colour buckets ONLY (interior_programs.js's P
   // and buildings.js's roomKit furniture sets). Minting a new hex here would
@@ -465,7 +469,8 @@
     const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop);                  // worktop → 0.74
     p.put(0, 0.74, D / 2 - 0.22, 0.12, 0.06, 0.14, P.bezel);               // monitor stand
     p.put(0, 0.78, D / 2 - 0.22, 0.62, 0.42, 0.05, P.bezel);               // monitor
-    p.put(0, 0.80, D / 2 - 0.245, 0.52, 0.32, 0.02, P.screen, { emissive: P.screen, ei: 0.35 });
+    p.put(0, 0.80, D / 2 - (0.245 + SCREEN_GAP + 0.01), 0.52, 0.32, 0.02, P.screen,
+      { emissive: P.screen, ei: 0.35 });                                  // glass proud of bezel
     // the chair behind the desk, facing it (= facing along yaw, over the top)
     const so = sub(opts);
     const cr = F.chair(p.wx(0, -(D / 2 + 0.42)), y, p.wz(0, -(D / 2 + 0.42)), yaw, so);
@@ -517,7 +522,8 @@
     const top = p.put(0, 0.86, 0, L + 0.08, 0.06, D + 0.10, P.worktop);      // worktop → 0.92
     p.put(0, 0.60, D / 2 + 0.06, L, 0.06, 0.04, P.worktop);                  // customer-side rail
     p.put(L / 2 - 0.42, 0.92, -0.05, 0.34, 0.22, 0.28, P.bezel);             // till
-    p.put(L / 2 - 0.42, 0.96, -0.20, 0.26, 0.14, 0.02, P.screen, { emissive: P.screen, ei: 0.35 });
+    p.put(L / 2 - 0.42, 0.96, -0.19 - SCREEN_GAP - 0.01, 0.26, 0.14, 0.02, P.screen,
+      { emissive: P.screen, ei: 0.35 });                                  // staff-facing glass
     if (opts.stools) {
       const n = Math.max(1, Math.floor(L / 0.9));
       const so = sub(opts);
@@ -603,7 +609,8 @@
     p.put(0, 0.74, D / 2 - 0.10, 0.46, 0.05, 0.08, P.worktop);               // nameplate
     p.put(0.55, 0.74, D / 2 - 0.34, 0.12, 0.06, 0.14, P.bezel);              // monitor stand
     p.put(0.55, 0.78, D / 2 - 0.34, 0.66, 0.44, 0.05, P.bezel);              // monitor
-    p.put(0.55, 0.80, D / 2 - 0.365, 0.56, 0.34, 0.02, P.screen, { emissive: P.screen, ei: 0.35 });
+    p.put(0.55, 0.80, D / 2 - (0.365 + SCREEN_GAP + 0.01), 0.56, 0.34, 0.02, P.screen,
+      { emissive: P.screen, ei: 0.35 });                                  // glass proud of bezel
 
     // THE THRONE — high-back, on a pedestal column, behind the desk.
     const tf = -(D / 2 + 0.52);

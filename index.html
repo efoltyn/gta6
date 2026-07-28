@@ -366,7 +366,7 @@
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=furnish1"></script>
+<script src="src/city/furniture.js?v=furnish2"></script>
 <script src="src/world/carfx.js?v=carfx1"></script>
 <script src="src/world/ground.js"></script>
 <script src="src/world/cellblock.js"></script>
@@ -432,7 +432,7 @@
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js"></script>
-<script src="src/world/lounge.js"></script>
+<script src="src/world/lounge.js?v=screen1"></script>
 <script src="src/world/gunroom.js?v=scale2"></script>
 <script src="src/world/ventilation.js"></script>
 <script src="src/world/escape_routes.js?v=mapflow2"></script>
@@ -530,20 +530,20 @@
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
 <script src="src/world/water_spec.js?v=waterv2"></script>
 <script src="src/city/world.js?v=waterv2t"></script>
-<script src="src/city/interior_programs.js?v=fortress2"></script>
+<script src="src/city/interior_programs.js?v=fortress3"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=civic1"></script>
-<script src="src/city/buildings.js?v=masonry2"></script>
+<script src="src/city/buildings.js?v=masonry3"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
 <script src="src/city/demolition.js?v=fall1"></script>
 <script src="src/city/elevators.js?v=fortress1"></script>
-<script src="src/city/exec_office.js?v=fortress1"></script>
+<script src="src/city/exec_office.js?v=fortress2"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
 <script src="src/city/beach.js?v=beach1s"></script>
@@ -729,7 +729,7 @@
      cockpit_shapes (geometry — needs CBZ.taperBox from world/carfx.js:353)
      must precede cockpit.js; cockpit_view.js must be last of the four. -->
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
-<script src="src/city/cockpit_shapes.js?v=cockpit1w9"></script>
+<script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
 <script src="src/city/cockpit.js?v=cockpit1w9"></script>
 <script src="src/city/cockpit_view.js?v=cockpit1"></script>
 <!-- BAILOUT: stepping out of a FLYING aircraft. exitAircraft() was written for
@@ -759,9 +759,9 @@
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=bus1w9"></script>
+<script src="src/systems/impactbus.js?v=bus1x0"></script>
 <script src="src/city/structural.js?v=struct1"></script>
-<script src="src/city/nukefx.js?v=nuke2w9"></script>
+<script src="src/city/nukefx.js?v=nuke3"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -868,8 +868,8 @@
 <script src="src/city/leaderboard.js?v=city3"></script>
 <script src="src/city/zillow.js?v=zillow1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=bank2"></script>
-<script src="src/city/pawnshop.js?v=pawn1"></script>
+<script src="src/city/bank.js?v=bank3"></script>
+<script src="src/city/pawnshop.js?v=pawn2"></script>
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
 <script src="src/city/family.js?v=fam2"></script>
@@ -901,7 +901,7 @@
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Every blast routes through
      the WRAPPED cityExplosion chain; deaths route through the kill bus. -->
-<script src="src/city/strategic.js?v=b2bombcam2"></script>
+<script src="src/city/strategic.js?v=b2bombcam3"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=sim1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -1337,7 +1337,7 @@
 <script src="src/core/gfx.js?v=gfx1"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=warm1u"></script>
-<script src="src/city/cctv.js?v=cctv1"></script>
+<script src="src/city/cctv.js?v=cctv2"></script>
 <script src="src/core/loop.js?v=scale1"></script>
 <script src="src/main.js"></script>
 </body>

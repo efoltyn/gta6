@@ -1854,8 +1854,8 @@
      4) THE NUKE — multi-stage, staged-over-frames, kill-bus honest.
   ========================================================================== */
   // The blast radii that used to live here (R_DESTROY, the crowd pulses) are
-  // now the "nuke" ROW in systems/impactbus.js — power 9, radius 120,
-  // wave {speed:190, maxR:620}. Only the numbers the bus does not own survive.
+  // now the "nuke" ROW in systems/impactbus.js — power 9, 126 m fireball,
+  // wave {speed:190, maxR:900}. Only the numbers the bus does not own survive.
   // VEHICLES ARE NOT HERE ANY MORE. `R_CAR: 130` plus a 3-wrecks-per-frame
   // queue used to live in this block; systems/impactbus.js's sweepRing now
   // damages cars inside the propagating ring for EVERY wave-carrying warhead
@@ -1930,15 +1930,15 @@
      ring of explosions, the rolling per-frame demolition of every lot inside
      150 m, the three expanding crowd-kill pulses, the 24-actors-per-frame
      sweep, the mushroom cloud and its point light — is GONE. All of it is one
-     row + one call now: the bus's `wave: {speed:190, maxR:620}` rolls the
-     damage outward over ~3.3 s (which is what the staged ring was faking),
+     row + one call now: the bus's `wave: {speed:190, maxR:900}` rolls the
+     damage outward over ~4.7 s (which is what the staged ring was faking),
      and city/structural.js's sweep() decides each building's fate through the
      real ledger, so towers CATCH FIRE, SAG and PANCAKE instead of blinking
      into rubble.
 
      What stays is what only this file knows: the bunker shelter guarantee,
-     the wanted/panic consequence, the scorched ground, the lingering
-     radiation zone, the wrecked cars, and one-apocalypse-at-a-time.        */
+     the wanted/panic consequence, the lingering radiation zone, the wrecked
+     cars, and one-apocalypse-at-a-time.                                    */
   function nukeDetonate(x, z, opts) {
     if (CBZ.CONFIG.STRAT_NUKE === false) {
       detonate(x, 1.2, z, "bomb", { byPlayer: true });
@@ -1974,17 +1974,9 @@
     if (CBZ.cityPostEvent) { try { CBZ.cityPostEvent({ type: "explosion", pos: { x: x, y: 1, z: z }, radius: 400, intensity: 4 }); } catch (e) {} }
     if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x: x, z: z, panic: 40, damage: 30 }, { silent: true, noWanted: true }); } catch (e) {} }
 
-    // ---- ground zero stays WRONG for days: scorch rings now, a radiation
-    // zone that ticks damage until it decays (in-game clock).
-    if (CBZ.cityScorch) {
-      try {
-        CBZ.cityScorch(x, z, 45);
-        for (let i = 0; i < 4; i++) {
-          const a = i * 1.57 + 0.6;
-          CBZ.cityScorch(x + Math.cos(a) * 34, z + Math.sin(a) * 34, 18);
-        }
-      } catch (e) {}
-    }
+    // The shared airstrike/RPG near-field already lays one central blast stain.
+    // Do not add evenly spaced scorch decals here: from altitude they merge
+    // into the exact fake ground ring a real pressure front does not leave.
     radZones.push({ x: x, z: z, r: NK.RAD_R, until: (CBZ.dayTime ? CBZ.dayTime() : 0) + NK.RAD_DAYS });
 
     // nk is live BEFORE the bus fires so the shelter guard covers the very
@@ -2073,7 +2065,7 @@
     // (vehicles: see the note on NK — the bus's blast ring owns them now)
 
     // the shelter guard and `nukeActive` stay live until the wave has run out
-    // (nuke row: 620 m at 190 m/s ≈ 3.3 s) and the fires it lit have settled.
+    // (nuke row: 900 m at 190 m/s ≈ 4.7 s) and the fires it lit have settled.
     if (nk.t > nk.hold) nk = null;
   });
 

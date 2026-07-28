@@ -146,8 +146,8 @@
                  radius BY power internally** (crashfx.js: `R = radius*power`),
                  and we pass both straight through so migrated callers keep
                  their exact old numbers. So the effective near-field radius of
-                 a row is `radius * power`, NOT `radius` — "rpg" is 8*1.9 = 15m,
-                 which is what fpsmode's rocket always was.
+                 a row is `radius * power`, NOT `radius` — "rpg" is now
+                 13*1.9 = 24.7m, matching the shared rocket path.
                  For anything carrying a `wave`, keep `radius` SMALL: it is only
                  the fireball, and it is also where the wave starts. The reach
                  of a nuke is `wave.maxR`, not this. Setting a nuke's radius to
@@ -363,18 +363,26 @@
                              refE: 3.277e8, kmax: 7 });
 
   // ---- NEW: real bombs ---------------------------------------------------
-  // A stick of these is what a B2 drops. Individually modest; the spectacle
-  // is the WALK across a district, which is city/ordnance.js's job to stagger.
-  I.define("bomb",   { power: 2.4, radius: 13, struct: 4.0, pen: 6,  fire: 0.30, fx: "heavy" });
+  // The RPG is the visual/gameplay baseline: 1.9*13 = 24.7 m. The B-2's
+  // unguided weapon is explicitly a 2,000 lb Mk-84, while a JDAM is a guidance
+  // kit around that same Mk-84/BLU-117 class warhead. Guidance changes where
+  // the energy lands, not how much explosive exists, so their open-air blast
+  // footprints now agree: 48 m and 51.2 m, roughly twice the RPG radius
+  // (four times its area). The JDAM keeps its much greater penetration and
+  // structural deposit; that is what accuracy/delay fuzing buys it.
+  I.define("bomb",   { power: 2.4, radius: 20, struct: 4.0, pen: 6,  fire: 0.30, fx: "heavy" });
   I.define("jdam",   { power: 3.2, radius: 16, struct: 7.0, pen: 18, fire: 0.35, fx: "heavy",
                        quake: 1.2 });
-  // radius*power = 41m fireball; the other 110m of reach is the wave.
+  // The 18,700 lb H6 MOAB carries about twenty Mk-84 explosive fills. Cube-root
+  // blast scaling makes its comparable-pressure radius about 2.7x larger, not
+  // the old 1.25x. Its 120 m near field and 320 m pressure reach preserve that
+  // relationship without pretending a conventional weapon is nuclear.
   // fx "moab" is city/nukefx.js's composer. Naming it here rather than leaving
   // "heavy" for that file to re-point is the preferred end state: the table is
   // the single declaration, and if nukefx never loads the lookup simply falls
   // through to COMPOSERS.heavy — which is the degrade path by construction.
-  I.define("moab",   { power: 4.6, radius: 9, struct: 16,  pen: 10, fire: 0.60, fx: "moab",
-                       quake: 4, wave: { speed: 140, maxR: 150 }, flashbang: true });
+  I.define("moab",   { power: 4.6, radius: 26, struct: 16,  pen: 10, fire: 0.60, fx: "moab",
+                       quake: 4, wave: { speed: 140, maxR: 320 }, flashbang: true });
 
   // ---- NEW: the nuke -----------------------------------------------------
   // The biggest spectacle in the game. Its FX composer is city/nukefx.js,
@@ -390,20 +398,20 @@
   // a scorched-but-standing outer edge — instead of one uniform "everything
   // dies" radius. A struct in the hundreds would flatten the entire map out to
   // maxR and leave nothing to look at.
-  // radius*power = 126m of instantly-vaporised fireball, then the wave rolls
-  // from there out to 620m over ~3.2s at 190 m/s. If city/nukefx.js is absent
+  // radius*power = 126m maximum visible fireball radius, matching the published
+  // 50*W^(1/3) m relation at roughly a 15 kt event. The pressure front rolls
+  // from there out to 900m over ~4.7s at 190 m/s. If city/nukefx.js is absent
   // this degrades to the "heavy" composer at that same 126m — a very large
   // airstrike plus a white flash, which is the right shape of wrong.
   I.define("nuke", {
     power: 9, radius: 14, struct: 55, pen: 0, fire: 1, fx: "nuke",
     quake: 14, flashbang: true, sfx: "explosion",
-    // thermal 1.25: the ignition ring outranges the destruction ring, because
+    // thermal 1.25: the ignition zone outranges the destruction zone, because
     // thermal radius goes as Y^0.41 and blast radius as Y^0.33. This is the
     // ONE row that declares it — a chemical warhead's fireball and its blast
-    // are the same event and do not diverge. It is also the number
-    // city/nukefx.js draws its burn annulus at, so the ring you SEE burning
-    // and the ring that actually lights buildings are the same radius.
-    wave: { speed: 190, maxR: 620, thermal: 1.25 },
+    // are the same event and do not diverge. This is gameplay only: nukefx
+    // deliberately draws no geometric ring or annulus on the terrain.
+    wave: { speed: 190, maxR: 900, thermal: 1.25 },
   });
 
   // ---- environmental (city/disasters wiring) ------------------------------
@@ -968,7 +976,7 @@
   // seconds, so this is the one place a per-car literal would actually add up.
   // `ignite: 0` is deliberate and permanent: the RING does not light cars, the
   // near-field pass does. A nuke's front rolling over a district must not be
-  // able to seed a fire every 50 ms all the way out to 620 m.
+  // able to seed a fire every 50 ms across the whole nuclear pressure zone.
   const _ringBill = { x: 0, y: 0, z: 0, byPlayer: false, sev: 1, ignite: 0, cause: "explosion" };
   let waveSeq = 0;
   const WAVE_MAX = 2;
@@ -1027,18 +1035,18 @@
       // ---- THE THERMAL FRONT OUTRUNS THE BLAST FRONT --------------------
       // Blast radius scales as Y^0.33 and thermal as Y^0.41 (Glasstone &
       // Dolan), so at nuclear yield the two genuinely diverge and the IGNITION
-      // ring is meaningfully WIDER than the destruction ring — at very high
+      // zone is meaningfully WIDER than the destruction zone — at very high
       // yield a burn victim is out where the blast can do little more than
-      // break windows. city/nukefx.js already draws that outer ring; until
-      // now it was light with no consequence, because the wave carries `fire`
+      // break windows. This is intentionally NOT painted as an outer ring;
+      // world fires are the visual receipt. The wave carries `fire`
       // only as far as maxR, so the game's burn zone WAS its blast zone and
-      // the two rings could never disagree.
+      // the two zones could never disagree.
       //
       // A row that declares `thermal` gets one extra sweep past its own reach:
       // amount ~0 (nothing out there is knocked down — that is the whole
       // point) with the fire term intact. It IGNITES without wounding, which
-      // is what a thermal pulse does, and it is what leaves a burning outer
-      // band around a flattened core instead of a clean edge.
+      // is what a thermal pulse does, and it leaves irregular world fires
+      // outside the flattened core instead of a fake circular decal.
       if (w.thermal > w.maxR && !w.burned && r1 >= w.maxR) {
         w.burned = true;
         if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {

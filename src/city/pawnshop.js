@@ -191,7 +191,12 @@
     // an old flatscreen TV leaned on the upper shelf
     place(shelfW * 0.16, 1.7, (px, pz, y) => {
       group.add(box(m.black, Math.abs(tx) * 0.7 + Math.abs(inx) * 0.06, 0.42, Math.abs(tz) * 0.7 + Math.abs(inz) * 0.06, px, y, pz));
-      group.add(box(m.screen, Math.abs(tx) * 0.6 + Math.abs(inx) * 0.04, 0.32, Math.abs(tz) * 0.6 + Math.abs(inz) * 0.04, px + inx * 0.04, y, pz + inz * 0.04));
+      // The customer stands on the -IN side. The old +IN offset buried this
+      // pane inside the black set and made the two front faces depth-fight.
+      const sg = box(m.screen, Math.abs(tx) * 0.6 + Math.abs(inx) * 0.04,
+        0.32, Math.abs(tz) * 0.6 + Math.abs(inz) * 0.04,
+        px - inx * 0.075, y, pz - inz * 0.075);
+      group.add(sg);
     });
     // a tray of pawned WATCHES on the lower shelf
     place(shelfW * 0.34, 0.96, (px, pz, y) => {

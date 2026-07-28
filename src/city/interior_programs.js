@@ -97,6 +97,10 @@
     gold: 0xb99347,       // brass trim / picture frames (trim bucket)
   };
   const PWT = 0.16;       // thin partition thickness (roomKit idiom)
+  // Screen glass is a surface, not paint. Keep a real 2.5cm air gap between
+  // it and the bezel so merged static boxes and live CCTV quads never compete
+  // for the same depth sample.
+  const SCREEN_GAP = 0.025;
 
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   // INTERIOR_COHERENCE_V1 — an interior is an ANSWER to "what is this building
@@ -447,7 +451,9 @@
         eb(dx, dz, 0.69, 1.62, 0.08, 0.95, P.worktop, { pad: 0.6 });
         if (i === 0) {           // ONE monitor still on — the whole read
           eb(dx, dz - 0.42, 0.79, 0.7, 0.46, 0.06, P.bezel, { pad: 0.55 });
-          eb(dx, dz - 0.38, 0.81, 0.58, 0.36, 0.02, P.screen, { emissive: P.screen, ei: 0.55, pad: 0.55 });
+          eb(dx, dz - 0.42 + 0.03 + SCREEN_GAP + 0.01,
+            0.81, 0.58, 0.36, 0.02, P.screen,
+            { emissive: P.screen, ei: 0.55, pad: 0.55 }); // 2.5cm clear of bezel
         }
       }
       // a chair on its side, drawn as what a tipped chair actually is: the pad
@@ -505,7 +511,8 @@
       h.b.lbox(dx, y + 0.36, dz, 1.5, 0.66, 0.85, P.desk, { cast: false });        // desk pedestal
       h.b.lbox(dx, y + 0.72, dz, 1.62, 0.08, 0.95, P.worktop, { cast: false });    // worktop
       h.b.lbox(dx, y + 1.02, monZ, 0.7, 0.46, 0.06, P.bezel, { cast: false });     // monitor
-      h.b.lbox(dx, y + 1.04, monZ + 0.04, 0.58, 0.36, 0.02, P.screen, { cast: false }); // lit face
+      const screenZ = monZ + 0.03 + SCREEN_GAP + 0.01;
+      h.b.lbox(dx, y + 1.04, screenZ, 0.58, 0.36, 0.02, P.screen, { cast: false }); // lit face
       h.b.lbox(dx, y + 0.74, monZ, 0.12, 0.12, 0.12, P.bezel, { cast: false });    // stand
       h.b.lbox(dx, y + 0.42, seatZ, 0.6, 0.12, 0.6, P.chair, { cast: false });     // seat pad
       h.b.lbox(dx, y + 0.78, seatZ + 0.26, 0.6, 0.7, 0.12, P.chair, { cast: false }); // backrest
@@ -515,9 +522,12 @@
         cushionH: 0.48, floorBelow: 0,
       });
       // CCTV: a bounded few of these terminals show a live camera feed. The lit
-      // face sits at world (h.ox+dx, y+1.04, h.oz+monZ+0.04) looking +z at the
-      // seat, so the outward screen normal is (0,1). Runtime-visual only.
-      if (feedReg < 3 && CBZ.cctvAddScreen) { CBZ.cctvAddScreen(h.ox + dx, y + 1.04, h.oz + monZ + 0.04, 0, 1); feedReg++; }
+      // visible face sits at screenZ+0.01 looking +z at the seat. Register the
+      // actual outer glass, not the box centre, for the live overlay.
+      if (feedReg < 3 && CBZ.cctvAddScreen) {
+        CBZ.cctvAddScreen(h.ox + dx, y + 1.04, h.oz + screenZ + 0.01, 0, 1);
+        feedReg++;
+      }
     }
     return { anchors: anchors };
   }
@@ -588,7 +598,9 @@
     const fx = alongX ? (din.nx > 0 ? room.x1 - 0.3 : room.x0 + 0.3) : mx2;
     const fz = alongX ? mz2 : (din.nz > 0 ? room.z1 - 0.3 : room.z0 + 0.3);
     h.b.lbox(fx, y + 1.62, fz, alongX ? 0.08 : 2.3, 1.15, alongX ? 2.3 : 0.08, P.bezel, { cast: false });
-    h.b.lbox(alongX ? fx - Math.sign(din.nx) * 0.04 : fx, y + 1.62, alongX ? fz : fz - Math.sign(din.nz) * 0.04,
+    const screenOff = 0.04 + SCREEN_GAP + 0.02;
+    h.b.lbox(alongX ? fx - Math.sign(din.nx) * screenOff : fx, y + 1.62,
+      alongX ? fz : fz - Math.sign(din.nz) * screenOff,
       alongX ? 0.04 : 2.0, 0.9, alongX ? 2.0 : 0.04, P.glow, { emissive: P.glow, ei: 0.4, cast: false });
     ceilingStrip(h.b.lbox(mx2, y + h.fh - 0.28, mz2, alongX ? 0.34 : TL * 0.8, 0.06, alongX ? TL * 0.8 : 0.34, P.light,
       { emissive: P.light, ei: 0.3, cast: false }));
@@ -931,7 +943,8 @@
       // the wall screen on the divider, facing the sofa
       if (twoRoom) {
         A.obox(A.at(dv - 0.14, -half + 1.9), 1.55, 2.0, 1.05, 0.07, P.bezel, { pad: 0.4 });
-        A.obox(A.at(dv - 0.2, -half + 1.9), 1.55, 1.75, 0.85, 0.03, P.glow, { emissive: P.glow, ei: 0.5, pad: 0.4 });
+        A.obox(A.at(dv - 0.175 - SCREEN_GAP - 0.015, -half + 1.9),
+          1.55, 1.75, 0.85, 0.03, P.glow, { emissive: P.glow, ei: 0.5, pad: 0.4 });
       }
       // the kitchen run down one wall + a warm pendant over the table
       for (let i = 0; i < 3; i++) {
@@ -952,7 +965,10 @@
       A.obox(dp, 0.81, 3.1, 0.08, 1.3, P.marble, { pad: 0.7 });                     // the top
       A.obox(A.at(deskD - 0.35, 0.9), 0.9, 0.55, 0.1, 0.42, P.bezel, { pad: 0.5 }); // papers
       A.obox(A.at(deskD - 0.3, -0.95), 1.02, 0.5, 0.34, 0.06, P.bezel, { pad: 0.5 });
-      A.obox(A.at(deskD - 0.32, -0.95), 1.02, 0.42, 0.26, 0.02, P.screen, { pad: 0.5 });
+      // The chair is on the +depth side: put the display on that face. The old
+      // -0.32 coordinate put it through the back of the monitor.
+      A.obox(A.at(deskD - 0.27 + SCREEN_GAP + 0.01, -0.95),
+        1.02, 0.42, 0.26, 0.02, P.screen, { pad: 0.5 });
       // the chair, and the man in it — back to the glass, facing the only way in
       const bp = A.at(deskD + 1.05, 0);
       A.obox(bp, 0.44, 0.62, 0.14, 0.62, P.chair, { pad: 0.5 });
@@ -1217,9 +1233,12 @@
     }
     // a vending machine in the corner: the detail that says "this is the floor
     // people come to", one lit face, two boxes.
-    const v = A.at(A.depth - 0.9, A.lat(A.span / 2 - 1.2, 1.0));
+    const vendingD = A.depth - 0.9;
+    const vendingLat = A.lat(A.span / 2 - 1.2, 1.0);
+    const v = A.at(vendingD, vendingLat);
     if (A.obox(v, 0.9, 0.9, 1.8, 0.7, P.steel, { pad: 0.5 }))
-      A.obox(v, 1.15, 0.62, 1.0, 0.06, P.glow, { emissive: P.glow, ei: 0.4, pad: 0.5 });
+      A.obox(A.at(vendingD - 0.35 - SCREEN_GAP - 0.03, vendingLat),
+        1.15, 0.62, 1.0, 0.06, P.glow, { emissive: P.glow, ei: 0.4, pad: 0.5 });
     return { anchors: [] };
   }
 

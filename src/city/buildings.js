@@ -103,6 +103,10 @@
   const SW = 4.2;      // two generous stair lanes for a 0.76m-wide actor
   const DOORW = 1.6;   // generous double-clear pedestrian door; garages use GW
   const GLASS = 0x9fd8ee;
+  // Physical air behind display glass. Screen faces used to touch/intersect
+  // their dark housings; at oblique angles the depth buffer alternated which
+  // surface won. This distance survives the static batcher.
+  const SCREEN_GAP = 0.025;
 
   // ---- SHATTERABLE GLASS (city-wide) ------------------------------------
   // Every window pane registers here so a crash / blast / gunshot can burst
@@ -4044,7 +4048,8 @@
     k.put(cx, 0.34, cz, 1.4, 0.34, 0.8, 0x6b4a2a, 0.9);              // coffee table
     k.put(cx, 0.4, r.z0 + 0.3, Math.min(r.x1 - r.x0 - 0.8, 3.2), 0.8, 0.4, 0x2a2f37, 0.9);  // media wall console
     k.put(cx, 1.4, r.z0 + 0.22, Math.min(r.x1 - r.x0 - 1.4, 2.6), 1.2, 0.1, 0x14171c, 0.9);  // TV on the media wall
-    k.glow(cx, 1.4, r.z0 + 0.16, Math.min(r.x1 - r.x0 - 1.8, 2.2), 0.9, 0.05, 0x39516a, 0.4, 0.9);  // screen glow
+    k.glow(cx, 1.4, r.z0 + 0.22 + 0.05 + SCREEN_GAP + 0.025,
+      Math.min(r.x1 - r.x0 - 1.8, 2.2), 0.9, 0.05, 0x39516a, 0.4, 0.9);  // glass faces the sofa
   }
   function setKitchen(k, r) {
     const cz = rcz(r);
@@ -4091,7 +4096,8 @@
     for (const s of [-1, 1]) for (let i = -1; i <= 1; i++) if (k.put(cx + i * 0.9, 0.45, cz + s * 0.95, 0.42, 0.9, 0.42, 0x2a2f37, 0.9))  // chairs
       k.seatAt(cx + i * 0.9, cz + s * 0.95, Math.atan2(-i * 0.9, -s * 0.95), "chair");   // face the table
     k.put(cx, 1.5, r.z0 + 0.2, Math.min(r.x1 - r.x0 - 1.4, 2.2), 1.1, 0.1, 0x14171c, 0.9);  // wall screen
-    k.glow(cx, 1.5, r.z0 + 0.15, Math.min(r.x1 - r.x0 - 1.8, 1.8), 0.8, 0.05, 0x39516a, 0.4, 0.9);
+    k.glow(cx, 1.5, r.z0 + 0.2 + 0.05 + SCREEN_GAP + 0.025,
+      Math.min(r.x1 - r.x0 - 1.8, 1.8), 0.8, 0.05, 0x39516a, 0.4, 0.9);
   }
   function setBreak(k, r) {
     const cx = rcx(r), cz = rcz(r);
@@ -4185,7 +4191,11 @@
     if (onFacade) return;
     b.lbox(wx - fx * 0.2, Y + 1.4, wz - fz * 0.2, fx ? 0.1 : across - 0.6, 1.1, fx ? across - 0.6 : 0.1,
       0x14171c, { cast: false });
-    b.lbox(wx - fx * 0.16, Y + 1.4, wz - fz * 0.16, fx ? 0.05 : across - 0.9, 0.85, fx ? across - 0.9 : 0.05,
+    // The sofa is opposite the wall direction, so move glass farther INTO the
+    // room (-facing), beyond the backing's visible face.
+    const screenOff = 0.2 + 0.05 + SCREEN_GAP + 0.025;
+    b.lbox(wx - fx * screenOff, Y + 1.4, wz - fz * screenOff,
+      fx ? 0.05 : across - 0.9, 0.85, fx ? across - 0.9 : 0.05,
       0x39516a, { emissive: 0x39516a, ei: 0.4, cast: false });
   }
 
@@ -4744,7 +4754,13 @@
         }
         // a big BIG-SCREEN TV demo wall + a glass gadget island in the middle
         const bs = pt(2 * halfIn - 1.8, 0, 0.6);
-        if (bs) { decor(bs, 1.6, along ? 0.08 : 3.0, 1.8, along ? 3.0 : 0.08, 0x14171c); glow(bs, 1.6, along ? 0.05 : 2.7, 1.5, along ? 2.7 : 0.05, 0x39d0c0, 0.7); }
+        if (bs) {
+          decor(bs, 1.6, along ? 0.08 : 3.0, 1.8, along ? 3.0 : 0.08, 0x14171c);
+          // Back wall is in the +IN direction; glass faces the shop aisle.
+          const sg = { x: bs.x - inx * (0.04 + SCREEN_GAP + 0.025),
+            z: bs.z - inz * (0.04 + SCREEN_GAP + 0.025) };
+          glow(sg, 1.6, along ? 0.05 : 2.7, 1.5, along ? 2.7 : 0.05, 0x39d0c0, 0.7);
+        }
         const gi = pt(halfIn, 0, 1.0);
         if (gi) { decor(gi, 0.5, along ? 1.0 : 2.0, 1.0, along ? 2.0 : 1.0, 0x2a2f37); decor(gi, 1.04, along ? 0.95 : 1.9, 0.06, along ? 1.9 : 0.95, GLASS); }
         break;
@@ -5205,7 +5221,8 @@
     decor(W / 2 - 1.6, 0.35, 0, 1.8, 0.5, 0.5, 0x2a2f37, 1.0);                       // stand
     const tvW = t >= 4 ? 2.2 : 1.4;
     decor(W / 2 - 1.6, 1.1, 0, tvW, 1.0, 0.08, 0x14171c, 1.0);                       // screen
-    glowAt(W / 2 - 1.6, 1.1, 0, tvW - 0.3, 0.7, 0.05, 0x39516a, 0.4, 1.0);           // screen glow
+    glowAt(W / 2 - 1.6, 1.1, -0.04 - SCREEN_GAP - 0.025,
+      tvW - 0.3, 0.7, 0.05, 0x39516a, 0.4, 1.0);                         // glass faces couch
 
     // a BOOKSHELF against a wall (body + a couple of coloured book bands)
     if (decor(-W / 2 + 1.4, 0.9, 0.5, 0.6, 1.8, 1.6, 0x6b4a2a, 0.9)) {
@@ -5523,7 +5540,8 @@
       // monitor: a thin dark slab + a pale opaque "screen" face (no emissive →
       // stays in the batch; reads as a lit display at office scale)
       b.lbox(cx, Y + 1.02, monZ, 0.7, 0.46, 0.06, 0x14181e, { cast: false });
-      b.lbox(cx, Y + 1.04, monZ + dir * 0.04, 0.58, 0.36, 0.02, panel, { cast: false });
+      b.lbox(cx, Y + 1.04, monZ + dir * (0.03 + SCREEN_GAP + 0.01),
+        0.58, 0.36, 0.02, panel, { cast: false });
       b.lbox(cx, Y + 0.74, monZ, 0.12, 0.12, 0.12, 0x14181e, { cast: false });   // stand
       // chair: a swivel seat + a back, behind the desk on the seat side
       b.lbox(cx, Y + 0.42, seatZ, 0.6, 0.12, 0.6, chair, { cast: false });        // seat pad
@@ -5652,7 +5670,8 @@
     for (const s of [-1, 1]) { lb(s * 3.4, 0.5, D / 2 - 4.6, 1.2, 0.65, 3.0, 0x6b2230); seatPH(s * 3.4, D / 2 - 4.6, -s * Math.PI / 2, "sofa"); }  // sectional returns face centre
     lb(0, 0.42, D / 2 - 5.6, 2.6, 0.42, 1.1, GOLD);                                 // gold coffee table
     lb(0, 1.5, D / 2 - 0.3, 5.0, 2.2, 0.12, 0x101319);                             // wall-spanning TV
-    glow(0, 1.5, D / 2 - 0.38, 4.6, 1.8, 0.05, 0x39516a, 0.45);                    // screen glow
+    glow(0, 1.5, D / 2 - 0.36 - SCREEN_GAP - 0.025,
+      4.6, 1.8, 0.05, 0x39516a, 0.45);                                  // glass faces lounge
     // ---- MARBLE KITCHEN: island w/ waterfall counter + stools + back run ----
     lb(W / 2 - 3.4, 0.55, 0.4, 2.2, 1.0, 4.6, STONE);                              // island body
     lb(W / 2 - 3.4, 1.08, 0.4, 2.4, 0.1, 4.9, MARBLE);                             // waterfall worktop

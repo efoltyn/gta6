@@ -663,7 +663,9 @@
     face.rotation.y = atm.rotation.y;
     group.add(face);
     const atmScreen = box(0.34, 0.26, 0.04, m.screen);
-    atmScreen.position.set(atmPos.x + inx * 0.25, 1.2, atmPos.z + inz * 0.25);
+    // ATM fascia front is +IN 0.26m. Keep 2.5cm of real air before the 4cm
+    // screen slab so it cannot flicker with the fascia at any viewing angle.
+    atmScreen.position.set(atmPos.x + inx * 0.305, 1.2, atmPos.z + inz * 0.305);
     atmScreen.rotation.y = atm.rotation.y;
     group.add(atmScreen);
     if (CBZ.colliders) CBZ.colliders.push({ minX: atmPos.x - 0.45, maxX: atmPos.x + 0.45, minZ: atmPos.z - 0.45, maxZ: atmPos.z + 0.45, y0: 0, y1: 1.6 });

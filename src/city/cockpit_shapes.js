@@ -60,6 +60,12 @@
   // exactly that once already, in clearanceSweep). 40 is the measured heaviest
   // costume plus small headroom; a NEW costume that trips it is still a bug.
   const MAX_MESHES = 40;
+  // A display cannot share the bezel's depth plane. The old panel sat exactly
+  // on the bezel's rear face, so the depth buffer alternated between canvas
+  // and frame pixels (the crawling black/white pattern visible in first
+  // person). Twelve millimetres is visually still an inset instrument face,
+  // but is a real geometric gap even in the bomber overlay camera.
+  const SCREEN_GAP = 0.012;
 
   // ---- small numeric helpers ----------------------------------------------
   function num(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
@@ -526,7 +532,9 @@
     // AFTER the flip, about the world lateral axis — a clean recline.
     const panelMat = new THREE.MeshBasicMaterial({ map: null, fog: false, toneMapped: false });
     const panelMesh = put(new THREE.PlaneGeometry(pW, pH), panelMat);
-    panelMesh.position.set(ex, pCy, pCz);
+    // Pull the glass AFT, toward the pilot, along the panel normal. It used to
+    // be exactly coplanar with the bezel's aft face at (pCy,pCz).
+    panelMesh.position.set(ex, pCy + SCREEN_GAP * upZ, pCz - SCREEN_GAP * upY);
     panelMesh.rotation.set(pTilt, Math.PI, 0);
     panelMesh.name = "cockpit-panel";
 
