@@ -183,6 +183,10 @@
     w.cityPawnTickets = copy(g.cityPawnTickets || []);
     w.cityOutfit = copy(g.cityOutfit || {});
     w.cityFenceRep = g.cityFenceRep || 0;
+    // dialogue.js CONTACTS — people you met in person who may text/call later.
+    // Records are plain JSON-safe data by that file's contract (live ped refs
+    // stay in its module map, never in g.cityContacts).
+    w.cityContacts = copy(g.cityContacts || []);
     // ---- property ladder (LEDGER GAP fix — see fresh()'s comment). cityHome
     // holds a LIVE lot reference (buildings/meshes) that must never be
     // JSON.stringify'd directly — realestate.js's cityHomeSerialize() gives us
@@ -241,6 +245,7 @@
     g.cityPawnTickets = copy(w.cityPawnTickets || []);
     g.cityOutfit = copy(w.cityOutfit || {});
     g.cityFenceRep = w.cityFenceRep || 0;
+    g.cityContacts = copy(w.cityContacts || []);
     g.cityMeleeWeapon = w.meleeWeapon || null;
     // ---- property ladder + gang identity (LEDGER GAP fix). Restoring these
     // here covers the MP-adopt path and any future caller of applyToGame()

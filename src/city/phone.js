@@ -738,6 +738,50 @@
     return card("GIG WORK", inner);
   }
 
+  // ---- CONTACTS: people you MET (city/dialogue.js). Strangers never appear
+  //      here — a contact exists only because you walked up and talked, took
+  //      their work, or became their friend (owner law: "you don't get a
+  //      mission from a character you never met"). When one of them texts or
+  //      calls with a follow-up, the offer lands here as TWO buttons — accept
+  //      or pass — because everything in this game is two choices. Pure
+  //      render + click-forward: dialogue.js owns every outcome; this card is
+  //      feature-detected and vanishes whole when that module is absent.
+  function contactBtn(id, yes, label) {
+    const green = yes ? "rgba(126,217,87,.14)" : "rgba(255,255,255,.05)";
+    const bd = yes ? "#4a8a3a" : "#3a4152";
+    const col = yes ? "#dff5d0" : "#c9d2df";
+    return "<div data-dlgcontact='" + esc(id) + "' data-dlgyes='" + (yes ? 1 : 0) + "' " +
+      "style='background:" + green + ";border:1px solid " + bd + ";border-radius:8px;padding:6px 10px;" +
+      "font-size:12px;font-weight:700;color:" + col + ";cursor:pointer;display:inline-block;margin:2px 6px 2px 0'>" + esc(label) + "</div>";
+  }
+  function contactsApp() {
+    const D = CBZ.cityDialogue;
+    if (!D || typeof D.contacts !== "function") return "";
+    let list = [];
+    try { list = D.contacts() || []; } catch (e) { list = []; }
+    if (!list.length) return "";
+    let inner = "";
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const tag = c.friend ? "friend" : (c.org ? String(c.org) : (c.why || "met"));
+      inner += "<div style='padding:6px 0;border-top:" + (i ? "1px solid rgba(255,255,255,.06)" : "0") + "'>" +
+        "<div style='display:flex;justify-content:space-between;gap:10px;font-size:13px'>" +
+        "<b style='color:#e8eef7'>" + esc(c.name) + "</b>" +
+        "<span style='color:" + DIM + ";font-size:11px'>" + esc(tag) + "</span></div>";
+      if (c.pending) {
+        const p = c.pending;
+        const line = p.kind === "job"
+          ? esc(p.title) + " · " + money(p.pay)
+          : "Meet at " + esc(p.place || "the spot");
+        inner += "<div style='font-size:12px;color:" + GOLD + ";margin:3px 0'>" + line + "</div>" +
+          "<div>" + contactBtn(c.id, true, p.kind === "job" ? "I'M IN" : "I'LL BE THERE") +
+          contactBtn(c.id, false, p.kind === "job" ? "NOT MY THING" : "CAN'T MAKE IT") + "</div>";
+      }
+      inner += "</div>";
+    }
+    return card("CONTACTS", inner);
+  }
+
   function vitalsApp() {
     const p = CBZ.player || {};
     const hp = num(p.hp, 0), maxHp = num(p.maxHp, 100);
@@ -762,6 +806,7 @@
     let html = noticesApp();
     let marketRows = [];
     let fxRows = [];
+    try { html += contactsApp(); } catch (e) {}
     try { html += servicesApp(); } catch (e) {}
     try { html += wantedApp(); } catch (e) {}
     try { html += territoryApp(); } catch (e) {}
@@ -841,6 +886,21 @@
           render();
         }
         else render();
+        return;
+      }
+      // ---- CONTACTS clicks — the two-choice answer to a follow-up offer.
+      // dialogue.js owns the outcome (mission.take / the meet mission / the
+      // remembered decline); this forwards the tap and re-renders.
+      const ct = e.target && e.target.closest ? e.target.closest("[data-dlgcontact]") : null;
+      if (ct) {
+        const D = CBZ.cityDialogue;
+        if (D && typeof D.phoneAnswer === "function") {
+          const yes = ct.getAttribute("data-dlgyes") === "1";
+          let took = false;
+          try { took = D.phoneAnswer(ct.getAttribute("data-dlgcontact"), yes); } catch (err) {}
+          if (yes && took) { close(); return; }   // job's on — go work it (gig idiom)
+        }
+        render();
         return;
       }
       // ---- GIG WORK clicks ----
