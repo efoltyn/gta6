@@ -771,52 +771,609 @@
       cop._arrestingPlayer = true; cop.curTarget = null; cop.npcTarget = null;
       cop.sees = true; cop.speed = 0; cop.state = "arrest";
     }
-    arrestScene = { t: 0, dur: opts.peaceful ? 2.2 : 3.0, opts: opts, cop: cop, finished: false };
+    // A SCRIPTED ARREST KEEPS THE SCRIPT. The campaign's rooftop collar and
+    // city/origins.js's exec-fraud opening are authored beats that supply their
+    // own big-text/sub-line and expect the short pose + straight transfer; the
+    // arc is for arrests the WORLD produced. `opts.arc === false` is the
+    // explicit opt-out for anything written later.
+    const scripted = opts.arc === false || !!opts.bigLabel || !!opts.note
+      || !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    arrestScene = { t: 0, dur: opts.peaceful ? 2.2 : 3.0, opts: opts, cop: cop, finished: false,
+      phase: (arcOn() && !scripted) ? "hands" : "legacy", total: 0, car: null, ourCar: false,
+      cine: false, legB: false, gate: null, lost: 0, charged: false, seat: null };
+    if (arrestScene.phase === "hands") TALLY.arcs++;   // tackles are counted where they happen (police.js)
   }
+
+  // ============================================================
+  //  THE ARREST IS A SCENE, NOT A CALL   (CBZ.CONFIG.ARREST_ARC)
+  //
+  //  OWNER: "when you get arrested in game, you dont actually get handcuffed
+  //  by the cop or tackled or anything real, you just spawn into this
+  //  completely fake jail."
+  //
+  //  Every beat below rides a seam that already existed and had never been
+  //  pointed at the player:
+  //    hands  — entities/character.js's handsUp layer (was already used)
+  //    cuff   — city/restrain.js's REAL zip-tie meshes + the two-bone
+  //             wrists-behind-the-back IK. NPC-only for its whole life;
+  //             `cuffPlayer` is the entire adoption.
+  //    walk   — restrain.js's ESCORT grammar (marched one pace ahead), the
+  //             perp walk that was built and never used ON the player.
+  //    ride   — a REAL marked cruiser (CBZ.cityMarkCruiser) driven to the
+  //             jail, camera on city/cinematics.js's director. The mode/place
+  //             handoff happens INSIDE the sealed car — the elevator law —
+  //             never as a visible teleport.
+  //    book   — games/jail.js's compound, which stops being the destination
+  //             and becomes the BOOKING stop (CBZ.cityBookIn).
+  //
+  //  Flag OFF (or no cruiser / no jail venue / a scripted arrest that asks for
+  //  it) = the legacy 2.2-3.0 s pose + cityBustOverlay + straight to the
+  //  prison, byte for byte. Every phase can fall through to that.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.ARREST_ARC == null) CBZ.CONFIG.ARREST_ARC = true;
+  function arcOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.ARREST_ARC); }
+
+  // ratchet counters (CBZ.arrestAudit) — every one is a REAL event, never a flag
+  const TALLY = { arcs: 0, tackles: 0, bookings: 0, sentences: 0, releases: 0, escapes: 0, legacyTeleports: 0 };
+  CBZ.arrestCount = function (k, n) { if (k in TALLY) TALLY[k] += (n == null ? 1 : n) | 0; };
+
+  const HANDS_T = 0.9, CUFF_T = 0.8, DOOR_T = 1.15, LEG_T = 3.6, ARRIVE_T = 1.3;
+  const WALK_SPD = 1.45, MARCH_MAX = 11, RIDE_SPD = 11.5, ARC_MAX = 60;
+  // car-local rear-bench + driver offsets. The ONE copy lives in
+  // city/cinematics.js (its RIDE scene's seatLocal); we ask for it and only
+  // fall back to a literal if that file is absent.
+  function seatOf(which) {
+    const S = CBZ.cineSeats && CBZ.cineSeats();
+    if (S && S[which]) return S[which];
+    return which === "driver" ? { x: 0.42, z: 0.42 } : { x: -0.42, z: -0.78 };
+  }
+  function seatAt(car, seat) {
+    const h = car.heading, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
+    return { x: car.pos.x + rx * seat.x + fx * seat.z, z: car.pos.z + rz * seat.x + fz * seat.z };
+  }
+  // a body pinned into a seat: sunk, facing the way the car is going.
+  function sitRig(ped, car, seat) {
+    if (!ped || !ped.group) return;
+    const w = seatAt(car, seat);
+    ped.pos.set(w.x, -0.62, w.z);
+    ped.group.position.set(w.x, -0.62, w.z);
+    ped.group.rotation.y = car.heading;
+    ped.speed = 0; ped.state = "walk"; ped.pause = Math.max(ped.pause || 0, 0.5);
+    if (ped.target) ped.target.set(w.x, 0, w.z);
+    if (CBZ.animChar && ped.char) CBZ.animChar(ped.char, 0, 0.016);
+  }
+  // where the jail takes you in. The gate is games/jail.js's compound door;
+  // with no jail package mounted the precinct desk stands in.
+  function jailGate() {
+    const j = CBZ.cityJailGate && CBZ.cityJailGate();
+    if (j) return j;
+    const st = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
+    if (!st) return null;
+    const d = st.lot && st.lot.building && st.lot.building.door;
+    const nx = d && d.nx != null ? d.nx : 0, nz = d && d.nz != null ? d.nz : 1;
+    const nl = Math.hypot(nx, nz) || 1;
+    return { x: st.x, z: st.z, nx: nx / nl, nz: nz / nl, desk: { x: st.x, z: st.z } };
+  }
+
+  // THE RIDE NEEDS A CAR. Prefer the arresting officer's own cruiser (parked
+  // ten metres away, which is where a beat cop's unit actually is); otherwise
+  // put one at the kerb through the sanctioned road placement, marked with
+  // CBZ.cityMarkCruiser so nobody ever writes a second light bar.
+  function findCruiser(P, cop) {
+    const cars = CBZ.cityCars || [];
+    let best = null, bd = 34 * 34;
+    for (const c of cars) {
+      if (!c || c.dead || c.player || !c.group) continue;
+      if (!c._rbBar && !c._patrolCar && !c._cruiser) continue;   // marked units only
+      const dd = (c.pos.x - P.pos.x) * (c.pos.x - P.pos.x) + (c.pos.z - P.pos.z) * (c.pos.z - P.pos.z);
+      if (dd < bd) { bd = dd; best = c; }
+    }
+    if (best) return { car: best, ours: false };
+    if (!CBZ.cityMakeCar) return null;
+    // NOBODY WATCHES A CRUISER APPEAR. roadPick is the only sanctioned way to
+    // put a vehicle on a road here, and `unseen` is its view-cone test — a unit
+    // rolls up from off-screen, it does not materialise at your elbow.
+    const spot = CBZ.roadPick ? CBZ.roadPick({
+      near: { x: P.pos.x, z: P.pos.z }, minDist: 14, maxDist: 46,
+      cls: "emergency", unseen: true, tries: 20,
+    }) : null;
+    if (!spot) return null;
+    const x = spot.x, z = spot.z, heading = spot.heading, vertical = !!spot.vertical;
+    let car = null;
+    try { car = CBZ.cityMakeCar(x, z, heading, vertical, CBZ.cityCruiserModel ? CBZ.cityCruiserModel() : null, 0); } catch (e) { car = null; }
+    if (!car) return null;
+    if (CBZ.cityMarkCruiser) { try { CBZ.cityMarkCruiser(car); } catch (e) {} }
+    car._cruiser = true;
+    return { car, ours: true };
+  }
+
+  // hand the whole scene back: cuffs off, officer released, input returned.
+  function clearArc(sc) {
+    if (sc && sc.cop) sc.cop._arrestingPlayer = false;
+    if (sc && sc.car) { sc.car._arrestRide = false; sc.car.ai = !!sc.car.road; }
+    if (sc && sc.cine && CBZ.cineBusy && CBZ.cineBusy() && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
+    if (sc) sc.cine = false;
+    if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
+    if (CBZ.player) CBZ.player._cityArrested = false;
+    if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; }
+  }
+  // the arc dies mid-beat (you were shot, the world changed under it): give
+  // everything back. It NEVER re-arms itself — an abort that re-installed the
+  // scene would spin forever against the very condition (mode left city) that
+  // aborted it.
+  function abortArc(reason) {
+    const sc = arrestScene;
+    if (!sc) return;
+    clearArc(sc);
+    arrestScene = null; busting = false;
+    if (reason === "dead") return;                   // death.js owns the slate
+  }
+  CBZ.cityArrestAbort = function () { abortArc("cancel"); };
+  // core/mission.js's sweeper is THE one place modal state is torn down — the
+  // arc holds the body, the camera and the input, so it registers here rather
+  // than growing a second death/mode watcher of its own.
+  if (CBZ.mission && CBZ.mission.onInterrupt) {
+    CBZ.mission.onInterrupt(function (reason) {
+      if (reason === "death") abortArc("dead");
+      else if (reason === "mode" && g.mode !== "city") abortArc("mode");
+    });
+  }
+  CBZ.cityArrestActive = function () { return !!(arrestScene && !arrestScene.finished && arrestScene.phase !== "legacy"); };
+
+  // THE FORFEIT — cooperating (hands up) costs you a quarter, being dragged in
+  // costs you half. Charged EXACTLY ONCE per arrest, at the booking desk, by
+  // whichever path gets there.
+  function forfeit(sc) {
+    if (!sc || sc.charged) return sc ? sc.lost : 0;
+    sc.charged = true;
+    const opts = sc.opts || {};
+    const frac = opts.peaceful ? 0.25 : 0.5;
+    const lost = Math.round((g.cash || 0) * frac);
+    if (lost > 0) g.cash -= lost;
+    if (CBZ.cityEvent) CBZ.cityEvent("arrest", { lost, peaceful: !!opts.peaceful, debt: opts.peaceful ? 0 : 25 }, { noWanted: true });
+    sc.lost = lost;
+    return lost;
+  }
+
+  // ============================================================
+  //  THE EVIDENCE LOCKER — your guns go IN a bag, not into thin air.
+  //  Same snapshot shape police.js's gun-stop already uses (g._copStow), a
+  //  different key, and one rule: nothing else may open it. Escaping does not
+  //  return it (your piece is still in the property room); serving your time
+  //  or making bail does.
+  // ============================================================
+  function evidenceSeize() {
+    // fold a live police-stop stow back in first, or the bag records an empty
+    // inventory and the real loadout is lost with the snapshot.
+    if (CBZ.cityRedrawWeapon && (g._copStow || g.cityStowedWeapon)) { try { CBZ.cityRedrawWeapon(); } catch (e) {} }
+    // A SECOND ARREST DOES NOT EMPTY THE FIRST BAG. Escape with your guns still
+    // in the property room, arm yourself again, get taken again — the new
+    // hardware is ADDED to what is already in there. An early-out on "a bag
+    // exists" would have quietly let the second loadout survive the arrest.
+    const prev = g.cityEvidence;
+    const bagged = {
+      inv: (prev ? prev.inv.slice() : []),
+      cur: (prev && prev.cur) || CBZ.currentWeaponId || null,
+      melee: (prev && prev.melee) || g.cityMeleeWeapon || null,
+    };
+    for (const id of (CBZ.weaponInventory || [])) if (bagged.inv.indexOf(id) < 0) bagged.inv.push(id);
+    if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
+    CBZ.currentWeaponId = null;
+    g.cityMeleeWeapon = null;
+    g.cityHolstered = false;
+    if (CBZ.fpsResetWeapons) { try { CBZ.fpsResetWeapons(); } catch (e) {} }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    g.cityEvidence = bagged;
+    return bagged;
+  }
+  function evidenceReturn() {
+    const bagged = g.cityEvidence;
+    if (!bagged) return 0;
+    g.cityEvidence = null;
+    if (CBZ.weaponInventory) { CBZ.weaponInventory.length = 0; for (const id of bagged.inv || []) CBZ.weaponInventory.push(id); }
+    CBZ.currentWeaponId = bagged.cur || CBZ.currentWeaponId;
+    g.cityMeleeWeapon = bagged.melee || null;
+    if (CBZ.onWeaponInventoryChanged && CBZ.currentWeaponId) { try { CBZ.onWeaponInventoryChanged(CBZ.currentWeaponId, false); } catch (e) {} }
+    if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }   // the ledger must agree
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return (bagged.inv || []).length + (bagged.melee ? 1 : 0);
+  }
+  CBZ.cityEvidenceSeize = evidenceSeize;
+  CBZ.cityEvidenceReturn = evidenceReturn;
+  CBZ.cityEvidenceHeld = function () {
+    const b = g.cityEvidence;
+    return b ? { guns: (b.inv || []).length, melee: b.melee || null } : null;
+  };
+
+  // the charge sheet — the world already knows what you did; never invent one.
+  CBZ.cityArrestCharges = function (stars, label) {
+    const w = Math.max(1, Math.min(5, stars | 0));
+    const out = [];
+    if (label) out.push(String(label));
+    if ((g.cityCopKills | 0) > 0) out.push("Killing a police officer");
+    if ((g.cityMurders | 0) > 0 && out.indexOf("Murder") < 0) out.push("Murder");
+    if (w >= 4 && !out.length) out.push("Armed rampage");
+    if (!out.length) out.push(w >= 2 ? "Aggravated assault" : "Disorderly conduct");
+    if (g.escapedConvict) out.unshift("Escape from custody");
+    return out;
+  };
+
   function finishBustScene(sc) {
     if (!sc || sc.finished) return;
     sc.finished = true;
     const opts = sc.opts || {};
     CBZ.city && CBZ.city.big(opts.bigLabel || (opts.peaceful ? "SURRENDERED" : "BUSTED"));
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-    // cooperating (hands up) costs you less than getting dragged in violently
-    const frac = opts.peaceful ? 0.25 : 0.5;
-    const lost = Math.round((g.cash || 0) * frac);
-    if (lost > 0) g.cash -= lost;
-    if (CBZ.cityEvent) CBZ.cityEvent("arrest", { lost, peaceful: !!opts.peaceful, debt: opts.peaceful ? 0 : 25 }, { noWanted: true });
+    const lost = forfeit(sc);
     if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: opts.note });
     else toJail();
   }
-  CBZ.onUpdate(32.8, function (dt) {
-    const sc = arrestScene;
-    if (!sc || sc.finished || g.mode !== "city") return;
-    sc.t += dt;
-    const P = CBZ.player, ch = CBZ.playerChar, c = sc.cop;
-    if (P) { P._cityArrested = true; P.speed = 0; }
-    if (ch) {
-      ch.handsUp = sc.t < 0.75;
-      ch.cuffed = sc.t >= 0.62;
-      if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+
+  // BOOKING: the compound at the end of the ride takes custody. If it cannot
+  // (no package, flag off, venue never mounted) the legacy overlay + straight
+  // transfer still concludes the arrest — an arrest may never evaporate.
+  function bookIn(sc) {
+    if (!sc || sc.finished) return;
+    const lost = forfeit(sc);
+    let took = false;
+    if (CBZ.cityBookIn) {
+      try {
+        // `atDesk` is a FACT, not an assumption: true only if the perp walk
+        // actually reached the booking desk. False routes games/jail.js down
+        // its counted degrade (CBZ.arrestAudit().legacyTeleports), which is the
+        // only thing stopping "just move his coordinates" becoming normal again.
+        took = !!CBZ.cityBookIn(Object.assign({}, sc.opts || {}, {
+          lost, stars: sc.stars0 || (g.wanted | 0), cop: sc.cop, atDesk: !!sc.atDesk,
+        }));
+      } catch (e) { console.error("[arrest] booking", e); took = false; }
     }
-    // The arresting officer remains a physical participant: close the last
-    // metre, face the player and hold position while the cuffs go on.
-    if (c && !c.dead && P) {
-      c._arrestingPlayer = true; c.curTarget = null; c.npcTarget = null; c.speed = 0;
-      const dx = P.pos.x - c.pos.x, dz = P.pos.z - c.pos.z;
-      if (c.group) c.group.rotation.y = Math.atan2(dx, dz);
+    sc.finished = true;
+    if (took) {
+      TALLY.bookings++;
+      // custody is the jail's now: the officer stands down, the input lock and
+      // the ties are released by games/jail.js when it finishes processing.
+      if (sc.cop) sc.cop._arrestingPlayer = false;
+      if (sc.car) { sc.car._arrestRide = false; sc.car.ai = !!sc.car.road; }
+      if (sc.cine && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
+      sc.cine = false;
+      arrestScene = null;
+      return;
     }
-    if (sc.t >= sc.dur) finishBustScene(sc);
-  });
-  function toJail() {
-    if (arrestScene && arrestScene.cop) arrestScene.cop._arrestingPlayer = false;
-    arrestScene = null;
+    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: (sc.opts || {}).note });
+    else toJail();
+  }
+  // games/jail.js calls this when processing is done and you can move again.
+  CBZ.cityArrestUncuff = function () {
+    if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
     if (CBZ.player) CBZ.player._cityArrested = false;
     if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; }
     busting = false;
+  };
+
+  CBZ.onUpdate(32.8, function (dt) {
+    const sc = arrestScene;
+    if (!sc || sc.finished) return;
+    if (g.mode !== "city") { abortArc("mode"); return; }
+    if (!(dt > 0) || dt > 0.4) dt = 0.05;
+    const P = CBZ.player, ch = CBZ.playerChar, c = sc.cop;
+    if (P && P.dead) { abortArc("dead"); return; }
+    sc.t += dt; sc.total += dt;
+    if (P) { P._cityArrested = true; P.speed = 0; }
+    if (sc.stars0 == null) sc.stars0 = Math.max(1, g.wanted | 0);
+
+    // ---- LEGACY (flag off, or an arc that gave up): the original pose. ----
+    if (sc.phase === "legacy") {
+      if (ch) {
+        ch.handsUp = sc.t < 0.75;
+        ch.cuffed = sc.t >= 0.62;
+        if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      }
+      if (c && !c.dead && P) {
+        c._arrestingPlayer = true; c.curTarget = null; c.npcTarget = null; c.speed = 0;
+        if (c.group) c.group.rotation.y = Math.atan2(P.pos.x - c.pos.x, P.pos.z - c.pos.z);
+      }
+      if (sc.t >= sc.dur) finishBustScene(sc);
+      return;
+    }
+
+    // a scene that has run away with itself still concludes the arrest
+    if (sc.total > ARC_MAX) { bookIn(sc); return; }
+    // the arresting officer can be shot out from under the arc — the nearest
+    // other unit takes over rather than the scene stalling on a corpse.
+    if (!c || c.dead) {
+      let alt = null, bd = 26;
+      for (const o of CBZ.cityCops || []) {
+        if (!o || o.dead || !P) continue;
+        const d = Math.hypot(o.pos.x - P.pos.x, o.pos.z - P.pos.z);
+        if (d < bd) { bd = d; alt = o; }
+      }
+      if (alt) sc.cop = alt;
+      else if (sc.phase !== "ride") { bookIn(sc); return; }
+    }
+    const cop = sc.cop;
+    if (cop && !cop.dead) { cop._arrestingPlayer = true; cop.curTarget = null; cop.npcTarget = null; cop.rage = null; }
+
+    // ---------- 1. HANDS UP: the last metre, and a squared-up officer ----------
+    if (sc.phase === "hands") {
+      g.cityHolstered = true;
+      if (ch) { ch.handsUp = true; ch.cuffed = false; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
+      if (cop && !cop.dead && P) {
+        const dx = P.pos.x - cop.pos.x, dz = P.pos.z - cop.pos.z, d = Math.hypot(dx, dz) || 1;
+        if (d > 1.5) {
+          const step = Math.min(d - 1.4, 2.4 * dt);
+          cop.pos.x += dx / d * step; cop.pos.z += dz / d * step;
+          if (cop.group) cop.group.position.set(cop.pos.x, cop.pos.y || 0, cop.pos.z);
+          if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, step / dt, dt);
+        } else if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
+        cop.speed = 0;
+        if (cop.group) cop.group.rotation.y = Math.atan2(dx, dz);
+      }
+      if (sc.t >= HANDS_T) { sc.phase = "cuff"; sc.t = 0; }
+      return;
+    }
+
+    // ---------- 2. THE CUFFS GO ON: real ties, real wrists ----------
+    if (sc.phase === "cuff") {
+      if (ch) {
+        ch.handsUp = sc.t < 0.18;
+        ch.cuffed = sc.t >= 0.16;
+        if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      }
+      if (!sc._tied && sc.t >= 0.16) {
+        sc._tied = true;
+        if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(true); } catch (e) {} }
+        if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }       // the ratchet click
+        if (CBZ.city && CBZ.city.big) CBZ.city.big((sc.opts || {}).bigLabel || ((sc.opts || {}).peaceful ? "SURRENDERED" : "CUFFED"));
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("“You're under arrest. Watch your head.”", 2.2);
+      }
+      if (cop && !cop.dead && P) {
+        cop.speed = 0;
+        if (cop.group) cop.group.rotation.y = Math.atan2(P.pos.x - cop.pos.x, P.pos.z - cop.pos.z);
+        if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
+      }
+      if (sc.t >= CUFF_T) {
+        const found = P ? findCruiser(P, cop) : null;
+        if (!found) { sc.phase = "walkin"; sc.t = 0; sc.gate = jailGate(); if (!sc.gate) { bookIn(sc); return; } }
+        else { sc.car = found.car; sc.ourCar = found.ours; sc.car.ai = false; sc.car._arrestRide = true; sc.car.v = 0; sc.phase = "walk"; sc.t = 0; }
+      }
+      return;
+    }
+
+    // ---------- 3. THE PERP WALK: marched to the car, one pace ahead ----------
+    if (sc.phase === "walk") {
+      const car = sc.car;
+      if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = jailGate(); if (!sc.gate) bookIn(sc); return; }
+      // the kerb-side rear door, in the car's own frame
+      const door = seatAt(car, { x: seatOf("rear").x - 1.35, z: seatOf("rear").z });
+      const moved = marchTo(P, ch, cop, door.x, door.z, dt);
+      if (moved <= 0.0001 || sc.t >= MARCH_MAX) { sc.phase = "door"; sc.t = 0; }
+      return;
+    }
+
+    // ---------- 4. THE DOOR: it opens, you go in, it shuts ----------
+    if (sc.phase === "door") {
+      if (!sc._doorSfx) { sc._doorSfx = true; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } }
+      if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
+      const car = sc.car;
+      if (car && !car.dead && sc.t >= DOOR_T * 0.5 && P) {
+        const w = seatAt(car, seatOf("rear"));
+        P.pos.x = w.x; P.pos.z = w.z; P.vy = 0;
+        if (ch && ch.group) { ch.group.position.set(w.x, -0.62, w.z); ch.group.rotation.y = car.heading; }
+      }
+      if (cop && !cop.dead && car) sitRig(cop, car, seatOf("driver"));
+      if (sc.t >= DOOR_T) {
+        if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }        // it shuts behind you
+        sc.phase = "ride"; sc.t = 0; sc.legB = false;
+        sc.gate = jailGate();
+        startRideCamera(sc);
+      }
+      return;
+    }
+
+    // ---------- 5. THE RIDE ----------
+    if (sc.phase === "ride") { ride(sc, P, ch, cop, dt); return; }
+
+    // ---------- 6. ARRIVAL: out of the car at the jail gate ----------
+    if (sc.phase === "arrive") {
+      const car = sc.car;
+      if (!sc._outSfx) { sc._outSfx = true; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } }
+      if (sc.t >= ARRIVE_T * 0.45 && car && P && !sc._out) {
+        sc._out = true;
+        const w = seatAt(car, { x: seatOf("rear").x - 1.5, z: seatOf("rear").z });
+        P.pos.x = w.x; P.pos.z = w.z; P.vy = 0; P.grounded = true;
+        if (ch && ch.group) ch.group.position.set(w.x, 0, w.z);
+        if (cop && !cop.dead && cop.group) {
+          const cw = seatAt(car, { x: seatOf("driver").x + 1.5, z: seatOf("driver").z });
+          cop.pos.set(cw.x, 0, cw.z); cop.group.position.set(cw.x, 0, cw.z);
+        }
+      }
+      if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
+      if (sc.t >= ARRIVE_T) {
+        if (sc.cine && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
+        sc.cine = false;
+        // the unit stays PARKED at the jail (ai stays off) rather than rejoining
+        // traffic from a place it was never routed to.
+        if (sc.car) { sc.car._arrestRide = false; sc.car.ai = false; sc.car.v = 0; }
+        sc.phase = "walkin"; sc.t = 0;
+      }
+      return;
+    }
+
+    // ---------- 7. THROUGH THE GATE TO THE DESK ----------
+    if (sc.phase === "walkin") {
+      const gate = sc.gate || (sc.gate = jailGate());
+      if (!gate) { bookIn(sc); return; }
+      const target = (!sc._atGate && gate.gate) ? gate.gate : (gate.desk || gate);
+      const moved = marchTo(P, ch, cop, target.x, target.z, dt);
+      if (moved <= 0.0001) {
+        if (!sc._atGate && gate.gate) { sc._atGate = true; sc.t = 0; return; }
+        sc.atDesk = true;                 // you WALKED in — no teleport happened
+        bookIn(sc); return;
+      }
+      if (sc.t >= MARCH_MAX) { bookIn(sc); return; }
+      return;
+    }
+
+    bookIn(sc);
+  });
+
+  // ONE march step, shared by both perp walks: the player is walked to (tx,tz)
+  // and the officer holds ESCORT_D behind, which is city/restrain.js's own
+  // escort offset rather than a second opinion about how far back that is.
+  // Returns the distance still to run (0 = arrived).
+  function marchTo(P, ch, cop, tx, tz, dt) {
+    if (!P) return 0;
+    const dx = tx - P.pos.x, dz = tz - P.pos.z, d = Math.hypot(dx, dz);
+    if (d <= 0.55) {
+      if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      if (cop && !cop.dead && CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
+      return 0;
+    }
+    const step = Math.min(d - 0.4, WALK_SPD * dt);
+    const ux = dx / d, uz = dz / d;
+    P.pos.x += ux * step; P.pos.z += uz * step; P.vy = 0; P.grounded = true;
+    if (CBZ.collide) { try { CBZ.collide(P.pos, 0.5, 0, 1.7); } catch (e) {} }
+    if (ch && ch.group) {
+      ch.group.position.set(P.pos.x, 0, P.pos.z);
+      ch.group.rotation.y = Math.atan2(ux, uz);
+      if (CBZ.animChar) CBZ.animChar(ch, step / Math.max(dt, 1e-4), dt);
+    }
+    // ease the lens toward where you are being taken — slowly enough that the
+    // player can still look around while marched (never a locked camera).
+    if (CBZ.cam) {
+      const want = Math.atan2(ux, uz) + Math.PI;
+      CBZ.cam.yaw = CBZ.lerpAngle ? CBZ.lerpAngle(CBZ.cam.yaw, want, 1 - Math.pow(0.55, dt)) : want;
+    }
+    if (cop && !cop.dead) {
+      const back = (CBZ.cityRestrain && CBZ.cityRestrain.ESCORT_D) || 0.9;
+      const bx = P.pos.x - ux * (back + 0.55), bz = P.pos.z - uz * (back + 0.55);
+      const cd = Math.hypot(bx - cop.pos.x, bz - cop.pos.z);
+      const cstep = Math.min(cd, Math.max(WALK_SPD, 2.6) * dt);
+      if (cd > 0.02) { cop.pos.x += (bx - cop.pos.x) / cd * cstep; cop.pos.z += (bz - cop.pos.z) / cd * cstep; }
+      cop.pos.y = 0; cop.speed = 0;
+      if (cop.group) { cop.group.position.set(cop.pos.x, 0, cop.pos.z); cop.group.rotation.y = Math.atan2(ux, uz); }
+      if (cop.target) cop.target.set(cop.pos.x, 0, cop.pos.z);
+      if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, cstep / Math.max(dt, 1e-4), dt);
+    }
+    return d;
+  }
+
+  // THE RIDE'S CAMERA — three shots on city/cinematics.js's director. It also
+  // buys the input lock and the holster for free; we keep ownership of the car
+  // and both bodies so nothing lags a frame behind the bonnet.
+  function startRideCamera(sc) {
+    if (!CBZ.cinePlay || (CBZ.cineBusy && CBZ.cineBusy())) return;
+    const carOf = () => sc.car;
+    const shot = (ox, oy, oz, lx, ly, lz) => function () {
+      const car = carOf(); if (!car) return null;
+      const h = car.heading, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
+      return {
+        pos: { x: car.pos.x + rx * ox + fx * oz, y: (car.pos.y || 0) + oy, z: car.pos.z + rz * ox + fz * oz },
+        look: { x: car.pos.x + rx * lx + fx * lz, y: (car.pos.y || 0) + ly, z: car.pos.z + rz * lx + fz * lz },
+      };
+    };
+    const steps = [
+      // pulling away — held from the kerb, the street watching you go
+      { dur: LEG_T * 0.55, track: true, cam: shot(4.6, 2.4, -7.0, 0, 1.0, 0) },
+      // CUT to the back bench: the ride is a sealed interior, and the whole
+      // world handoff happens behind this shot (the elevator law).
+      { dur: LEG_T * 1.1, cut: true, track: true, hideRig: false, cam: shot(-0.42, 1.15, -0.9, 0.1, 0.9, 6.0) },
+      // the gate coming up through the windscreen. Deliberately longer than the
+      // drive needs: the arc aborts the scene the moment you are out of the
+      // car, so the lens can never expire mid-ride and snap back inside a boot.
+      { dur: LEG_T * 3.0, track: true, cam: shot(-1.9, 1.5, -3.2, 0, 1.0, 5.0) },
+    ];
+    sc.cine = CBZ.cinePlay(steps, { ride: sc }, function () { sc.cine = false; }, { noHolster: false });
+  }
+
+  function ride(sc, P, ch, cop, dt) {
+    const car = sc.car;
+    if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = sc.gate || jailGate(); if (!sc.gate) bookIn(sc); return; }
+    car._arrestRide = true; car.ai = false;
+
+    // ---- LEG A: pull away down the road you were arrested on, easing onto the
+    //      bearing of the jail so the unit at least leaves in the right
+    //      direction rather than reversing into the kerb it was parked at. ----
+    if (!sc.legB) {
+      const gate0 = sc.gate;
+      if (gate0) {
+        const want0 = Math.atan2(gate0.x - car.pos.x, gate0.z - car.pos.z);
+        car.heading = CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, want0, 1 - Math.pow(0.35, dt)) : want0;
+      }
+      const spd = Math.min(RIDE_SPD, sc.t * 7.0);
+      drive(car, car.heading, spd, dt);
+      if (sc.t >= LEG_T) {
+        // ---- THE SEALED CUT. You are inside a closed car with the camera on
+        // the bench: the vehicle (and everyone in it) is relocated onto the
+        // jail's approach in ONE frame. Nothing visible teleports — this is
+        // exactly how city/elevators.js hides a floor change.
+        const gate = sc.gate || (sc.gate = jailGate());
+        if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
+        const ax = gate.x + (gate.nx || 0) * 34, az = gate.z + (gate.nz || 1) * 34;
+        car.pos.x = ax; car.pos.z = az;
+        car.heading = Math.atan2(gate.x - ax, gate.z - az);
+        if (car.group) { car.group.position.set(ax, car.group.position.y || 0, az); car.group.rotation.y = car.heading; }
+        car._parkX = car._parkZ = car._parkH = null;      // vehicles.js re-seats it on the new ground
+        sc.legB = true; sc.t = 0;
+      }
+    } else {
+      // ---- LEG B: roll up to the gate and stop. ----
+      const gate = sc.gate || (sc.gate = jailGate());
+      if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
+      const dx = gate.x - car.pos.x, dz = gate.z - car.pos.z, d = Math.hypot(dx, dz);
+      const want = Math.atan2(dx, dz);
+      car.heading = CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, want, 1 - Math.pow(0.02, dt)) : want;
+      const spd = Math.max(0, Math.min(RIDE_SPD, (d - 6) * 1.4));
+      drive(car, car.heading, spd, dt);
+      if (d < 7.5 || sc.t >= LEG_T * 1.6) { sc.phase = "arrive"; sc.t = 0; return; }
+    }
+    // both bodies ride WITH the car, written after it moves so neither trails it
+    if (P) {
+      const w = seatAt(car, seatOf("rear"));
+      P.pos.x = w.x; P.pos.z = w.z; P.vy = 0; P.grounded = true; P.speed = 0;
+      if (ch) {
+        ch.cuffed = true;
+        if (ch.group) { ch.group.position.set(w.x, -0.62, w.z); ch.group.rotation.y = car.heading; }
+        if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      }
+    }
+    if (cop && !cop.dead) sitRig(cop, car, seatOf("driver"));
+  }
+
+  function drive(car, heading, spd, dt) {
+    car.group.rotation.y = heading;
+    car.v = spd;
+    car.pos.x += Math.sin(heading) * spd * dt;
+    car.pos.z += Math.cos(heading) * spd * dt;
+    // vehicles.js's parkSeat() re-seats any non-AI car onto the terrain each
+    // frame (ride height + pitch + roll) at order 37, i.e. AFTER us, so the
+    // ride obeys the same ground the player drives on — we never write
+    // group.position.y ourselves, only x/z (which it then re-writes anyway).
+    if (car.group) car.group.position.set(car.pos.x, car.group.position.y || 0, car.pos.z);
+  }
+
+  function toJail() {
+    if (arrestScene) clearArc(arrestScene);
+    arrestScene = null;
+    busting = false;
+    TALLY.sentences++;
     if (CBZ.setMode) CBZ.setMode("escape");
     if (CBZ.setRole) CBZ.setRole("inmate");
     if (CBZ.startRun) CBZ.startRun();
   }
+  CBZ.cityArrestToPrison = toJail;
+
+  // ---- THE RATCHET (CLAUDE.md block law, step 5) --------------------------
+  // Every number here is an EVENT COUNT, never a flag: `legacyTeleports` is the
+  // one that must stay 0 — it counts arrests that reached a cell by moving the
+  // player's coordinates instead of by walking, riding and being booked in.
+  CBZ.arrestAudit = function () {
+    return { arcs: TALLY.arcs, tackles: TALLY.tackles, bookings: TALLY.bookings,
+      sentences: TALLY.sentences, releases: TALLY.releases, escapes: TALLY.escapes,
+      legacyTeleports: TALLY.legacyTeleports,
+      arcOn: arcOn(), evidence: CBZ.cityEvidenceHeld(),
+      phase: arrestScene ? arrestScene.phase : null };
+  };
 
   // ---- per-frame: decay heat when you lose the cops ----
   CBZ.onUpdate(33, function (dt) {
@@ -854,7 +1411,7 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene && arrestScene.cop) arrestScene.cop._arrestingPlayer = false; arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene) clearArc(arrestScene); arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
 
   // ---- DEATH RESET (PROG owns): on player death, drop the player's STREET INFAMY
   // back toward Lv.1 so the level/title visibly falls and the player re-climbs.

@@ -1150,6 +1150,12 @@
 
   function goreAtJaw(h, amount) {
     if (!CBZ.gore) return;
+    // A NON-LETHAL HOLD DRAWS NO BLOOD. `nonLethal` means the grab is a
+    // TAKEDOWN, not a mauling — a cop tackling you does not open a wound, so
+    // the gore/bite-wound layer is skipped wholesale here rather than being
+    // gated at each of the four call sites. (Trauma, hit-stop and shake are
+    // deliberately KEPT: a tackle is still a physical event.)
+    if (h.nonLethal) return;
     const _jaw = h.jaw;
     const ap = actorPos(h.attacker);
     let dx = 0, dz = 0;
@@ -1242,6 +1248,11 @@
       // allocation-free while concurrent seizes stop stealing each other's mouth.
       jaw: { x: 0, y: 0, z: 0 },
       dps: S_DPS, hold: S_HOLD, escape: S_ESCAPE, thrash: 1,
+      // NON-LETHAL HOLDS (opts.nonLethal). A hold whose worst outcome is being
+      // TAKEN, never killed: resolveSeize maps its "killed" branch to "taken",
+      // goreAtJaw draws nothing, and killVictim is never reached. Defaults
+      // FALSE, so every existing caller is byte-identical.
+      nonLethal: false,
       medium: "air", cam: true, cause: "", style: "shake",
       onEnd: null, mode0: "", result: "",
       camOwned: false, camYield: false, camPh: 0,
@@ -1299,6 +1310,7 @@
     h.medium = opts.medium || predatorMedium(ap.x, ap.y != null ? ap.y : 0, ap.z);
     h.cam = opts.cam != null ? !!opts.cam : isP;
     h.cause = opts.cause || ("mauled by a " + actorName(attacker));
+    h.nonLethal = !!opts.nonLethal;
     h.style = opts.style || "shake";
     h.onEnd = typeof opts.onEnd === "function" ? opts.onEnd : null;
     h.mode0 = (CBZ.game && CBZ.game.mode) || "";
@@ -1924,6 +1936,21 @@
       // non-player victims (and a player whose windows never ran) fall back to
       // the probability roll — runtime FX/behaviour may use Math.random.
       result = (Math.random() < h.escape) ? "escaped" : "killed";
+    }
+    // A NON-LETHAL HOLD CANNOT KILL, BY CONSTRUCTION — not by the caller
+    // remembering to check. Every road into the lethal branch (the hold timing
+    // out, the probability roll, a missed final window) lands here first, so
+    // "killed" is rewritten to "taken" BEFORE killVictim is anywhere in reach.
+    // "taken" is a real third outcome, reported to onEnd, and it is what an
+    // arrest tackle waits for. The one path that still says "killed" on a
+    // nonLethal hold is `alreadyDead` — the victim died of something else
+    // mid-hold, and lying about that would hide a real death from the bus.
+    if (h.nonLethal && result === "killed" && !alreadyDead) {
+      h.phase = "resolve";
+      forceDisengage(h.attacker, 0.6);
+      if (dread > 0.4) dread = 0.4;
+      endSeize(h, "taken");
+      return;
     }
     h.phase = "resolve";
     if (result === "escaped") {
@@ -3003,6 +3030,12 @@
     // creature_combat.js: the opts.seize seam + the maul opt-in. MIGRATED — it
     // adopts from its own file, which is the only place that can say so honestly.
     "creature_combat:seize-seam",
+    // police.js: THE ARREST TACKLE. A human grappler, and the first NON-LETHAL
+    // consumer of the seize — running from an officer inside reach gets you put
+    // on the pavement through the same wind->strike->hold->resolve FSM every
+    // animal uses, with `nonLethal` so its worst outcome is "taken". MIGRATED in
+    // the change that added the id; nothing here was ever hand-rolled.
+    "police:arrest-tackle",
   ];
 
   CBZ.predatorAudit = function () {

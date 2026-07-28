@@ -283,6 +283,14 @@
       z: car.pos.z + rz * seat.x + fz * seat.z,
     };
   }
+  // THE SEAT OFFSETS ARE ONE TABLE, NOT A LITERAL EACH CALLER RETYPES.
+  // city/wanted.js's arrest ride puts a cuffed player on the rear bench and the
+  // arresting officer behind the wheel; it asks HERE rather than typing its own
+  // opinion about where a back seat is. Names are the caller-facing shape
+  // ("rear"/"driver"/"front") so this table can move without moving them.
+  CBZ.cineSeats = function () { return { rear: seatLocal.rearP, front: seatLocal.frontP, driver: seatLocal.driver }; };
+  CBZ.cineSeatWorld = function (car, seat, y) { return seatWorld(car, seat, y); };
+
   function seatRig(ped, car, seat) {                  // "sit" a rig: sink + face forward
     const w = seatWorld(car, seat);
     ped.pos.set(w.x, -0.62, w.z);

@@ -102,6 +102,16 @@
     // a capture closes the manhunt that led to it — the strike IS the payback
     g.witnessReportT = 0; g.lastKnown = null;
 
+    // ---- AND IT COSTS YOU TIME. A strike used to be worth nothing at all
+    // until the third one; now every capture lengthens the thing you are
+    // actually in here spending. It is the same clock the release runs on, so
+    // there is no second penalty ledger.
+    if (pipeOn() && (+g.jailSentence || 0) > 0) {
+      g.jailSentence = (+g.jailSentence || 0) + STRIKE_TIME;
+      sentShown = -1;
+      if (CBZ.flashHint) CBZ.flashHint("+" + STRIKE_TIME + "s on your sentence.", 2.2);
+    }
+
     // shakedown: the screws pocket half your cigs on every strike
     const taken = Math.floor((g.cigs || 0) / 2);
     if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
@@ -231,13 +241,97 @@
     else if (sprayEl.style.opacity !== "0") sprayEl.style.opacity = "0";
   });
 
+  // ============================================================
+  //  THE SENTENCE (CBZ.CONFIG.PRISON_PIPE) — you are HERE FOR A REASON.
+  //
+  //  OWNER: "we have a whole jail minigame built that is for where you go when
+  //  you are arrested… that minigame needs a lot of improving and pairing with
+  //  the main game." The pen used to be a room with one exit: escape or be
+  //  transferred. Nothing in it knew you had been sentenced, so serving time
+  //  was not a thing you could do, and the only way back to the city was over
+  //  the wall as a 3★ convict.
+  //
+  //  This is the whole pairing, and it is a CLOCK, not a system: an arrest
+  //  stamps g.jailSentence (games/jail.js's ONE formula, handed over by
+  //  systems/state.js's reset), it runs down while you are inside, and at zero
+  //  a guard opens the gate — CBZ.cityJailRelease puts you back on the
+  //  precinct step with your property, clean. A run that did NOT start with an
+  //  arrest carries no sentence and is the pure escape game it always was.
+  //
+  //  It gives the three-strikes law teeth BEFORE strike three, too: every
+  //  capture ADDS to the sentence, so getting caught costs you the thing you
+  //  are actually spending in here — time.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_PIPE == null) CBZ.CONFIG.PRISON_PIPE = true;
+  function pipeOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_PIPE); }
+  const STRIKE_TIME = 45;          // seconds added to the stretch per capture
+  let sentShown = -1, sentCallT = 0, sentCall = "";
+  // THE DAY BEAT. No new rooms and no new geometry: the block simply CALLS the
+  // rooms the prison already has, on a rotation, so being inside has a rhythm
+  // and the yard/chow hall are somewhere you are meant to be rather than
+  // scenery you happen to walk through.
+  const DAY_BEAT = [
+    { t: 55, s: "YARD CALL — the block empties into the yard." },
+    { t: 40, s: "CHOW — the line's forming in the cafeteria." },
+    { t: 35, s: "REC — the lounge is open." },
+    { t: 30, s: "LOCKDOWN — back to your cell, count time." },
+  ];
+  let beatI = 0, beatT = 0;
+  function sentenceTick(dt) {
+    if (!pipeOn() || g.role === "cop") return;
+    const left = +g.jailSentence || 0;
+    if (left <= 0) return;
+    if (player.dead) return;
+    g.jailSentence = Math.max(0, left - dt);
+    g.jailServed = (g.jailServed || 0) + dt;
+    const s = Math.ceil(g.jailSentence);
+    if (s !== sentShown) {
+      sentShown = s;
+      if (s === 60 || s === 30 || s === 10) CBZ.flashHint && CBZ.flashHint("Sentence: " + s + "s left.", 2.0);
+    }
+    // the mode's OWN readout — state.js already writes this line on reset, so
+    // the sentence rides the surface the prison run already has.
+    sentCallT -= dt;
+    if (sentCallT <= 0) {
+      sentCallT = 1;
+      if (CBZ.setObjective) {
+        CBZ.setObjective("Serving " + s + "s" + (sentCall ? " · " + sentCall : "") +
+          " — or find a keycard, a vent or a tunnel and don't wait.");
+      }
+    }
+    // the day beat rotates the block
+    beatT -= dt;
+    if (beatT <= 0) {
+      const b = DAY_BEAT[beatI % DAY_BEAT.length];
+      beatI++;
+      beatT = b.t;
+      sentCall = b.s.split(" —")[0];
+      if (CBZ.flashHint) CBZ.flashHint(b.s, 2.4);
+      // LOCKDOWN puts the screws on your block — the cell-watch sweep the
+      // strike-2 rule already drives, reused rather than re-authored.
+      g.cellWatch = /LOCKDOWN/.test(b.s) ? true : !!(g.caughtCount >= 2);
+    }
+    if (g.jailSentence <= 0) {
+      g.jailSentence = 0;
+      if (CBZ.flashToast) CBZ.flashToast("TIME SERVED — GATE'S OPEN");
+      if (CBZ.cityJailRelease) { try { CBZ.cityJailRelease("served"); return; } catch (e) {} }
+      if (CBZ.winGame) { try { CBZ.winGame("route"); } catch (e) {} }
+    }
+  }
+  CBZ.jailSentenceLeft = function () { return Math.max(0, Math.ceil(+g.jailSentence || 0)); };
+
   // per-frame bookkeeping
   CBZ.onUpdate(31, function (dt) {
     if (CBZ.game.mode !== "escape") return;   // prison capture/arrest only in escape (survival + city own theirs)
     if (fireCD > 0) fireCD -= dt;
+    // A served sentence RELEASES you mid-tick (mode -> city, world rebuilt).
+    // Everything below this line is escape-mode plumbing and must not run
+    // against a city that has just been built underneath it.
+    sentenceTick(dt);
+    if (CBZ.game.mode !== "escape") return;
 
     // new run? clear strike-beat leftovers before anything else ticks
-    if (pollStrikeRun && pollStrikeRun()) { confineT = 0; confineShown = -1; cellWatchCD = 0; }
+    if (pollStrikeRun && pollStrikeRun()) { confineT = 0; confineShown = -1; cellWatchCD = 0; sentShown = -1; beatI = 0; beatT = 0; sentCall = ""; }
 
     // ---- strike confinement: held in your cell for a beat after a capture ----
     if (confineT > 0 && !player.dead) {

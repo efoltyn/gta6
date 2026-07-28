@@ -765,9 +765,13 @@
   // ---- BUSTED fade (called by city/wanted.js before the jail handoff) ----
   // opts.note (city/origins.js EXEC fraud arrest): an optional custom sub-line
   // replacing the generic "Cuffed and processed..." text; omitted -> unchanged.
+  // opts.title (games/jail.js, the prison transport): the arrest is no longer a
+  // single moment — being CUFFED and being SHIPPED TO THE PEN are two different
+  // beats and the card must not say "BUSTED" for both. Defaults to the original
+  // word, so every existing caller is unchanged.
   CBZ.cityBustOverlay = function (lost, done, opts) {
     opts = opts || {};
-    showOverlay("BUSTED", opts.note || ("Cuffed and processed" + (lost > 0 ? "  ·  lost $" + lost : "") + "  ·  off to the cells…"), "#5b8bff");
+    showOverlay(opts.title || "BUSTED", opts.note || ("Cuffed and processed" + (lost > 0 ? "  ·  lost $" + lost : "") + "  ·  off to the cells…"), "#5b8bff");
     let t = 0;
     const tick = function () {
       t += 0.05;

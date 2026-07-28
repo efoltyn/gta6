@@ -272,6 +272,82 @@
     return !!watchAlive("chief");
   }
 
+  // ============================================================
+  //  THE TACKLE (CBZ.CONFIG.ARREST_TACKLE) — predator grammar, adopter #9.
+  //
+  //  OWNER: "when you get arrested in game, you dont actually get handcuffed by
+  //  the cop or tackled or anything real." Running from a challenging officer
+  //  who is already inside arm's reach now gets you put on the pavement, and it
+  //  authors NO combat code: systems/predator.js's seize is the one answer this
+  //  game has to "a thing grabs you and takes you", and it grew exactly one new
+  //  option to serve this — `nonLethal`, which rewrites its lethal resolve to
+  //  "taken" BEFORE killVictim is in reach. A police tackle that could kill you
+  //  would be a bug the day somebody tuned a number; this one cannot, by
+  //  construction rather than by tuning.
+  //
+  //  The counterplay is a VERB, not a stat: ONE telegraphed window (qteMax 1,
+  //  escape 0 — the probability roll is switched OFF so nothing but your own
+  //  press can save you). Beat it and predator.js's own escaped branch flings
+  //  you clear and forces the officer to disengage; you are loose, and charged
+  //  with resisting. Miss it and you are booked the hard way.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE == null) CBZ.CONFIG.ARREST_TACKLE = true;
+  function tackleOn() {
+    return !!(CBZ.CONFIG && CBZ.CONFIG.ARREST_TACKLE) && typeof CBZ.predatorSeize === "function";
+  }
+  const TACKLE_R = 2.6;       // arm's reach — nobody tackles you from across the street
+  let tackleCD = 0;           // one attempt at a time, force-wide (never a squad pile-on)
+  // this file adopts the shared seize; police.js loads BEFORE predator.js, so
+  // use the documented pre-load buffer rather than the (absent) direct call.
+  if (CBZ.predatorAdopt) CBZ.predatorAdopt("police:arrest-tackle");
+  else (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push("police:arrest-tackle");
+
+  function startTackle(c) {
+    if (!c || c.dead || !c.group) return false;
+    const victim = (CBZ.city && CBZ.city.playerActor) || CBZ.player;
+    if (!victim) return false;
+    const h = CBZ.predatorSeize(c, victim, {
+      // "pin" is the big-cat style: the body goes STILL, which is what a
+      // takedown looks like — never the shake/worry rhythms of a mauling.
+      style: "pin",
+      nonLethal: true,
+      dps: 0,                       // a tackle bruises; it does not open you
+      hold: 2.4,
+      escape: 0,                    // only the timed press decides this
+      qteMax: 1,
+      thrash: 0.35,
+      cause: "taken down",
+      // human rigs in this repo face +Z (police.js aims them with
+      // atan2(dx, dz)); the wildlife default anchor is nose-toward-+X, so the
+      // jaw MUST be given explicitly or the officer would grab sideways.
+      // y ≈ 0.95 puts the held body at ground level (anchorVictim sits the
+      // player at jaw.y − 0.85).
+      jaw: { x: 0, y: 0.95, z: 0.62 },
+      onEnd: function (result) {
+        c._seizing = null;
+        if (result === "taken") {
+          // he has you: the arrest arc takes it from here, and a violent
+          // collar is the expensive one (city/wanted.js's 50% forfeit).
+          if (CBZ.cityBust) { try { CBZ.cityBust({ cop: c, peaceful: false, _tackled: true }); } catch (e) {} }
+          return;
+        }
+        if (result === "escaped") {
+          // you broke his grip. That IS a crime, and the report is the one the
+          // world already has for it — never a bespoke penalty.
+          if (CBZ.city && CBZ.city.note) CBZ.city.note("You tear loose. “SUSPECT IS RESISTING!”", 2.0);
+          if (CBZ.cityCrime) { try { CBZ.cityCrime(60, { instant: true, x: c.pos.x, z: c.pos.z, type: "resisting" }); } catch (e) {} }
+          c._challenged = false; c._patience = 0; c.arrestT = 0;
+          c.curTarget = (CBZ.city && CBZ.city.playerActor) || null; c.sees = true; c.retarget = 0.6;
+        }
+      },
+    });
+    if (!h) return false;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("“STOP RIGHT THERE!”", 1.4);
+    if (CBZ.arrestCount) CBZ.arrestCount("tackles");
+    c.arrestT = 0; c.speed = 0; c.curTarget = null; c.npcTarget = null;
+    return true;
+  }
+
   const carSuspects = [];     // fleeing cars the police are after
   const pursuers = [];        // traffic cars drafted into PIT pursuit of the player car
 
@@ -3060,6 +3136,10 @@
       // Same contract for the SWAT van: these are real, named roster actors,
       // but the van owns their transform until its rear doors open.
       if (c._swatPassenger) { c.sees = false; c.curTarget = null; c.npcTarget = null; c.speed = 0; continue; }
+      // ---- TAKING SOMEBODY DOWN: systems/predator.js owns this officer's body
+      // for the length of the hold (it drives the pose and anchors the victim to
+      // him). Patrol logic must not walk him out from under his own tackle.
+      if (c._seizing) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) { c.sees = false; continue; }
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.
@@ -3234,6 +3314,13 @@
           wantShoot = lethal;
           wantArrest = !lethal;
         }
+        // ---- A COLLAR IN PROGRESS IS NOT A FIREFIGHT. The arrest arc
+        // (city/wanted.js) now marches, drives and books you over ~25 s instead
+        // of the old 3 s pose, and for that whole time the player is cuffed,
+        // input-locked and defenceless. Every OTHER unit stands down: nobody
+        // executes a man already in handcuffs, and without this the arc is a
+        // firing squad. `_arrestingPlayer` (the arc's own officer) keeps working.
+        if (isPlayer && g.busted) { wantShoot = false; wantArrest = false; c.arrestT = 0; }
         // PROCEDURE: the gun leaves the belt only when the stop calls for it —
         // an armed suspect (or gunfire-grade heat nearby) gets drawn on; a plain
         // 0★ collar of an unarmed brawler stays hands-on, holster snapped. A
@@ -3261,6 +3348,18 @@
             if (c._challenged) {
               if (!c.sees || P.speed > 3 || P.driving) c._patience = (c._patience || 0) - dt;   // ignoring the order
               if (!c.sees && (c.lostT || 0) > 8) c._challenged = false;   // long blind spell → fresh challenge on re-contact
+              // ---- THE TACKLE. You were told to hold still and you RAN, and he
+              // is close enough to put a hand on you. This is not a new combat
+              // path: it is systems/predator.js's seize — the same
+              // wind→strike→hold→resolve FSM a big cat runs — with the
+              // `nonLethal` flag, so its worst outcome is TAKEN, never killed.
+              // ONE fair telegraphed window decides it, and both answers cost
+              // something: beat it and you are loose but charged with resisting;
+              // miss it and you go in the hard way (the violent 50% forfeit).
+              if (tackleOn() && c.sees && !P.driving && !P.dead && P.speed > 3
+                  && dist < TACKLE_R && !g.busted && tackleCD <= 0 && !c._seizing) {
+                if (startTackle(c)) { tackleCD = 6; continue; }
+              }
             }
             if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
               if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("\"Easy now — hold still.\"", 1.2); }
@@ -3518,6 +3617,7 @@
     copClock += dt;
     if (barkCD > 0) barkCD -= dt;
     if (challengeNoteCD > 0) challengeNoteCD -= dt;
+    if (tackleCD > 0) tackleCD -= dt;
     scanDuty(dt);
   });
 

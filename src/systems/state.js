@@ -68,6 +68,16 @@
     const role = g.role === "cop" ? "cop" : "inmate";
     g.cigs = 0; g.caughtCount = 0; g.trades = 0; g.hasKey = false;
     g.strikeHeatFloor = 0; g.cellWatch = false;   // three-strikes arc (systems/capture.js)
+    // ---- THE SENTENCE (games/jail.js -> systems/capture.js) ----
+    // A prison run that STARTED with an arrest carries a stretch to serve; a
+    // plain "escape again" carries none and is the pure escape game it always
+    // was. The handoff is a consumed pair, never a second sentence formula:
+    // games/jail.js's transport stamps _jailSentenceIn/_jailBailIn, this reset
+    // takes them exactly once, and capture.js runs the clock down.
+    g.jailSentence = (g._jailSentenceIn | 0) || 0;
+    g.jailBail = (g._jailBailIn | 0) || 0;
+    g._jailSentenceIn = 0; g._jailBailIn = 0;
+    g.jailServed = 0;
     g.complaints = 0; g.role = role;
     g.gangStanding = [0, 0];
     g.gangDebt = [0, 0];
@@ -267,6 +277,11 @@
       again.parentNode.insertBefore(streetsBtn, again.nextSibling);
       bindButton("backToStreetsBtn", function () {
         g.escapedConvict = true;
+        // YOU BROKE OUT — you did not walk out. The sentence dies with the wall
+        // you went over, and your property stays in the precinct evidence
+        // locker (city/wanted.js): only serving it or making bail opens that.
+        g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
+        if (CBZ.arrestCount) CBZ.arrestCount("escapes");
         if (CBZ.setMode) CBZ.setMode("city");
         if (CBZ.startRun) CBZ.startRun();
       });

@@ -89,6 +89,29 @@
     const w = Math.max(1, Math.min(5, wanted | 0));
     return BRIBE_BASE + BRIBE_PER_STAR * w;
   }
+
+  // ============================================================
+  //  ONE SENTENCE FORMULA FOR THE WHOLE GAME (CBZ.cityJailSentence).
+  //  This file's `sentenceFor` was the only sentence anywhere and it only ever
+  //  described a beat in a holding cell. The stretch you actually SERVE is
+  //  served in the PRISON (mode "escape"), so the same number now answers for
+  //  both — the pen simply runs it at real-time scale instead of the holding
+  //  cell's 3.2x. Nothing anywhere else may invent a second one; ask here.
+  //    jail   — holding-cell seconds (the legacy/degrade number, unchanged)
+  //    prison — real seconds to serve in the pen
+  //    bail   — CITY CASH, the price set at booking (was the corrupt guard's
+  //             bribe; same curve, honest name)
+  //    hold   — real seconds in the holding cell before the transport rolls,
+  //             i.e. how long your last chance to walk out of BOOKING lasts.
+  // ============================================================
+  const PRISON_SCALE = 3.0, HOLD_BASE = 34, HOLD_PER_STAR = 3;
+  function jailSentence(wanted) {
+    const w = Math.max(1, Math.min(5, wanted | 0));
+    const jail = sentenceFor(w);
+    return { stars: w, jail, prison: Math.round(jail * PRISON_SCALE),
+      bail: bribeCost(w), hold: HOLD_BASE + HOLD_PER_STAR * w };
+  }
+  CBZ.cityJailSentence = jailSentence;
   // the pry: seconds of UNOBSERVED work on the cell door's loose plate before
   // it gives. No sweet spots, no attempts — the only clock is the patrol.
   const PRY_TIME = 24;
@@ -97,7 +120,6 @@
   const WAGES = { catch: 400 };
 
   // runtime feel constants
-  const SERVE_SPEED = 3.2;          // jail-seconds served per real second
   const SERVE_DAY_RATE = 0.010;     // dayPhase advanced per real second while serving
   const RECAP_PENALTY = 14;         // sentence added when they drag you back / catch you prying
   const GUARD_SEE_R = 7.0;          // a guard clocks you inside this radius…
@@ -206,7 +228,7 @@
     box(0, 0.6, 6.6, 3.0, 1.2, 0.9, MAT.desk);
     box(0, 1.25, 6.6, 3.1, 0.14, 1.0, MAT.deskD);
     ctx.solid(-1.5, 6.1, 1.5, 7.1, 0.0, 1.25);
-    signBoard(ctx, gp, 0, 2.5, 8.05, "CITY  JAIL");
+    signBoard(ctx, gp, 0, 2.5, 8.05, "BOOKING");
 
     // ---- the PATROL RING: 4 posts, 3 guards — one post always stands EMPTY,
     //      and the empty slot rotates as the guards walk on. The gap-corner
@@ -250,20 +272,25 @@
     //      The card title comes from the venue (packages.js describe). ----
     ctx.zone({ id: "gate", pos: [0, 7.6], r: 2.6,
       label: () => {
-        if (INM) return "Return";
+        if (INM) return "Booking";
         if (JOB && JOB.active) return "Clock off";
         return "Sign on";
       },
       onUse: () => {
-        if (INM) { openInmate(); return; }
+        if (INM) { openBooking(); return; }
         if (JOB && JOB.active) { endShift("clocked off"); return; }
         startShift();
       } });
     // the CELL: re-open the sentence options if you wandered the panel closed.
     ctx.zone({ id: "cell", pos: [V.cells[1].lx, V.cells[1].lz], r: 2.2,
-      canShow: () => !!INM && INM.phase !== "breakout" && INM.phase !== "prying",
-      label: () => "Weigh options",
-      onUse: () => { if (INM) openInmate(); } });
+      canShow: () => !!INM && INM.phase === "booking",
+      label: () => "Read sheet",
+      onUse: () => { if (INM) openBooking(); } });
+    // the DESK is where a booking is answered — same point the sarge stands at.
+    ctx.zone({ id: "desk", pos: [0, 5.4], r: 2.8,
+      canShow: () => !!INM && INM.phase === "booking",
+      label: () => "Booking",
+      onUse: () => { if (INM) openBooking(); } });
     // the DOOR PLATE: the physical escape. Pry = work it over time, unobserved.
     ctx.zone({ id: "pry", pos: [V.cells[1].doorX + 0.6, V.cells[1].lz], r: 1.9,
       canShow: () => !!INM && (INM.phase === "held" || INM.phase === "prying"),
@@ -351,27 +378,117 @@
   /* ==========================================================
      4. INMATE ARC — the arrest lands you in a cell; three ways out.
      ========================================================== */
-  function beginInmate(opts) {
+  // ============================================================
+  //  BOOKING — this compound stopped being the DESTINATION.
+  //
+  //  OWNER: "we have a whole jail minigame built that is for where you go when
+  //  you are arrested… that minigame needs a lot of improving and pairing with
+  //  the main game." So the three-cell yard is now the PRECINCT BOOKING STOP at
+  //  the end of city/wanted.js's arrest ride, and the real prison (mode
+  //  "escape" — cellblock, cafeteria, yard, towers, the three-strikes law) is
+  //  where a sentence is actually served.
+  //
+  //  What a booking is, in order, all of it physical:
+  //    · the charge sheet, read off what the WORLD says you did
+  //      (CBZ.cityArrestCharges) — never a made-up list;
+  //    · the forfeit, already applied by the arc, shown here;
+  //    · your guns into the EVIDENCE LOCKER (CBZ.cityEvidenceSeize);
+  //    · BAIL in city cash, or SERVE;
+  //    · SERVE walks you into the holding cell and starts the TRANSPORT clock.
+  //      The pry/keys escape survives as exactly what it should be — your last
+  //      chance to be somewhere else when the van arrives.
+  // ============================================================
+  function beginBooking(opts) {
     if (!V || !V.ready || INM) return false;
     opts = opts || {};
-    const w = Math.max(1, stars());
+    const w = Math.max(1, opts.stars ? (opts.stars | 0) : stars());
+    const S0 = jailSentence(w);
+    const charges = (CBZ.cityArrestCharges ? CBZ.cityArrestCharges(w, g.cityCrimeLabel) : ["Disorderly conduct"]);
     // the collar concludes the manhunt (you're in custody) — INCLUDING the
-    // escaped-convict floor: without cityClearConvict a served/bribed release
+    // escaped-convict floor: without cityClearConvict a served/bailed release
     // walked you out into a re-asserted 3★ you'd already paid for.
     if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
     if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
-    INM = { phase: "held", sentence: sentenceFor(w), served: 0, wanted0: w,
-      bribe: bribeCost(w), pry: 0, _pryMark: 0, peaceful: !!opts.peaceful };
-    // teleport into the middle cell and lock it behind you
-    const cell = V.cells[1];
-    const wc = W(cell.lx, cell.lz);
-    teleportPlayer(wc.x, wc.z);
-    setDoor(cell, true);
+    // …but the CUFFS stay on and the body stays held: cityWantedReset hands the
+    // player back, and you are standing at a booking desk, not free.
+    holdPlayer(true);
+    // the property room takes the guns. Escaping does NOT give them back.
+    const bagged = CBZ.cityEvidenceSeize ? CBZ.cityEvidenceSeize() : null;
+    INM = { phase: "booking", sentence: S0.jail, prison: S0.prison, served: 0, wanted0: w,
+      bribe: S0.bail, hold: S0.hold, transportT: S0.hold, pry: 0, _pryMark: 0,
+      peaceful: !!opts.peaceful, lost: opts.lost | 0, charges,
+      guns: bagged ? (bagged.inv || []).length + (bagged.melee ? 1 : 0) : 0,
+      atDesk: !!opts.atDesk };
+    if (!opts.atDesk) {
+      // DEGRADE ONLY (flag off / no arc / no officer): the old instant landing.
+      // Counted, because CBZ.arrestAudit().legacyTeleports existing at all is
+      // what stops this quietly becoming the normal path again.
+      const cell = V.cells[1], wc = W(cell.lx, cell.lz);
+      teleportPlayer(wc.x, wc.z);
+      if (CBZ.arrestCount) CBZ.arrestCount("legacyTeleports");
+    }
     const s = bag(); s.stints++; save();
-    big("BUSTED — CITY JAIL");
-    feed("Booked. " + w + "★ jacket → " + INM.sentence + "s.", "#ffd166");
-    openInmate();
+    big("BOOKING");
+    openBooking();
     return true;
+  }
+  // legacy name kept for the probe surface / any older caller
+  function beginInmate(opts) { return beginBooking(opts); }
+
+  // hold/free the player's body at the desk. The cuffs and the input lock are
+  // city/wanted.js's (restrain.js's real zip-ties + physics.js's _cityArrested
+  // gate) — this file owns neither and re-implements neither.
+  function holdPlayer(on) {
+    const P = CBZ.player;
+    if (on) {
+      if (P) { P._cityArrested = true; P.speed = 0; }
+      if (CBZ.playerChar) { CBZ.playerChar.cuffed = true; CBZ.playerChar.handsUp = false; }
+      if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(true); } catch (e) {} }
+    } else if (CBZ.cityArrestUncuff) { try { CBZ.cityArrestUncuff(); } catch (e) {} }
+    else {
+      if (P) P._cityArrested = false;
+      if (CBZ.playerChar) { CBZ.playerChar.cuffed = false; CBZ.playerChar.handsUp = false; }
+      if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
+    }
+  }
+
+  // SERVE: into the holding cell, ties cut, door locked, transport ordered.
+  function doServe() {
+    if (!INM) return;
+    INM.phase = "held";
+    holdPlayer(false);
+    const cell = V.cells[1], wc = W(cell.lx, cell.lz);
+    teleportPlayer(wc.x, wc.z);          // one pace through a door you are standing at
+    setDoor(cell, true);
+    panelMode = null; menuLock(false); if (C) C.hud.closePanel();
+    feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s — " +
+      INM.prison + "s to serve inside.", "#ffd166");
+    feed("That plate's still loose. Last chance.", "#cfd6e6");
+  }
+
+  // THE TRANSPORT — the sealed handoff into the real prison. The van's door
+  // closing IS the transition (city/elevators.js's law: a mode change hides
+  // inside a sealed interior, never behind a visible teleport), and the fade
+  // is city/death.js's EXISTING bust overlay, not a new HUD element.
+  function toPrison() {
+    if (!INM) return;
+    const sec = INM.prison, bail = INM.bribe;
+    const s = bag(); s.served++; save();
+    setDoor(V.cells[1], true);
+    holdPlayer(true);
+    INM = null; panelMode = null; menuLock(false); if (C) C.hud.closePanel();
+    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    // the pen reads these on its own reset (systems/state.js) — a handoff pair,
+    // never a second sentence formula.
+    g._jailSentenceIn = sec;
+    g._jailBailIn = bail;
+    const go = function () {
+      holdPlayer(false);
+      if (CBZ.cityArrestToPrison) CBZ.cityArrestToPrison();
+      else { if (CBZ.setMode) CBZ.setMode("escape"); if (CBZ.setRole) CBZ.setRole("inmate"); if (CBZ.startRun) CBZ.startRun(); }
+    };
+    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(0, go, { title: "TRANSFERRED", note: "Prison transport · " + sec + "s to serve" });
+    else go();
   }
 
   function teleportPlayer(x, z) {
@@ -385,9 +502,17 @@
     if (!INM) return;
     const s = bag();
     setDoor(V.cells[1], false);                          // door swings open
+    holdPlayer(false);
     if (reason === "served") { s.served++; respect(2); big("TIME SERVED"); feed("You did your time. Back to the streets.", "#cfe8b0"); }
-    else if (reason === "bribed") { s.bribed++; big("RELEASED"); feed("The Sarge pockets it. You never happened.", "#ffd166"); }
-    else if (reason === "escaped") {
+    else if (reason === "bailed" || reason === "bribed") {
+      s.bribed++; big("RELEASED ON BAIL");
+      // BAIL BUYS YOUR PROPERTY BACK TOO. Escaping does not — the locker keeps it.
+      const back = CBZ.cityEvidenceReturn ? CBZ.cityEvidenceReturn() : 0;
+      feed("Bond posted. You walk." + (back ? " Property returned (" + back + ")." : ""), "#ffd166");
+      if (CBZ.arrestCount) CBZ.arrestCount("releases");
+      // out the front, not out of thin air
+      const wg = W(0, 10.5); teleportPlayer(wg.x, wg.z);
+    } else if (reason === "escaped") {
       s.escapes++;
       // OUT the wall gap — and HOT. Reuse the real wanted API + convict floor.
       const wg = W(V.gap.x + 1.5, V.gap.z - 2.0);
@@ -396,23 +521,74 @@
       if (CBZ.cityAddStars) { try { CBZ.cityAddStars(4, "Jailbreak"); } catch (e) {} }
       else if (CBZ.cityForceStars) { try { CBZ.cityForceStars(4); } catch (e) {} }
       big("OVER THE WALL — MANHUNT");
-      feed("You're out — and every cop in the city knows it. RUN.", "#ff9a9a");
+      // YOUR GUNS ARE STILL IN THE PROPERTY ROOM. Breaking out does not open
+      // the locker; you are loose, broke of hardware, and hunted.
+      const held = CBZ.cityEvidenceHeld ? CBZ.cityEvidenceHeld() : null;
+      feed("You're out — and every cop in the city knows it. RUN." +
+        (held && held.guns ? " (Your hardware's still in evidence.)" : ""), "#ff9a9a");
+      if (CBZ.arrestCount) CBZ.arrestCount("escapes");
     }
     save();
     INM = null; panelMode = null; menuLock(false); if (C) C.hud.closePanel();
   }
 
+  // ============================================================
+  //  RELEASE FROM THE PEN — the other end of the pipe. Called by
+  //  systems/capture.js when the sentence runs out, and by anything that
+  //  legitimately opens the gate. Weapons come back out of evidence, the slate
+  //  is clean, and you land at the law's own door rather than at a random
+  //  spawn (the same point city/mode.js already uses for a jailbreak entry).
+  // ============================================================
+  function jailRelease(reason) {
+    if (g.mode !== "escape") return false;
+    g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
+    g.escapedConvict = false; g.escapedFromJail = false;
+    if (!g.cityWorld) {                       // no city run behind this prison
+      if (CBZ.winGame) { try { CBZ.winGame("route"); } catch (e) {} }
+      return true;
+    }
+    if (CBZ.setMode) CBZ.setMode("city");
+    if (CBZ.setRole) CBZ.setRole("inmate");
+    if (CBZ.startRun) CBZ.startRun();
+    // AFTER the city reset (which restores the character ledger, and whose
+    // ledger records an EMPTY loadout because the guns were in evidence when it
+    // was committed): hand the property back and put you on the precinct step.
+    const back = CBZ.cityEvidenceReturn ? CBZ.cityEvidenceReturn() : 0;
+    const st = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
+    const P = CBZ.player;
+    if (st && P && P.pos) {
+      const d = st.lot && st.lot.building && st.lot.building.door;
+      const nx = d && d.nx != null ? d.nx : 0, nz = d && d.nz != null ? d.nz : 1;
+      const nl = Math.hypot(nx, nz) || 1;
+      P.pos.set(st.x + (nx / nl) * 3.0, 0, st.z + (nz / nl) * 3.0);
+      P.vy = 0; P.grounded = true;
+      if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
+    }
+    if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
+    if (CBZ.cityClearConvict) { try { CBZ.cityClearConvict(); } catch (e) {} }
+    if (CBZ.city && CBZ.city.big) CBZ.city.big(reason === "bailed" ? "RELEASED ON BAIL" : "TIME SERVED");
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(back ? "Property returned at the desk." : "Nothing to collect at the desk.", 2.6);
+    if (CBZ.arrestCount) CBZ.arrestCount("releases");
+    return true;
+  }
+  CBZ.cityJailRelease = jailRelease;
+
   // recapture (spotted in the yard mid-breakout, or busted again outside
   // before you're clear): back in the cell, the stretch gets longer.
+  // caught trying it on before the van comes: back in the cell, a longer
+  // stretch waiting for you inside, and they MOVE THE TRANSPORT UP — the
+  // punishment for a failed break is losing the time you needed for the next one.
   function recapture(byName) {
     if (!INM) return;
     const cell = V.cells[1]; const wc = W(cell.lx, cell.lz);
     teleportPlayer(wc.x, wc.z); setDoor(cell, true);
-    INM.phase = "held"; INM.sentence += RECAP_PENALTY;
+    INM.phase = "held";
+    INM.prison += RECAP_PENALTY * PRISON_SCALE;
+    INM.transportT = Math.min(INM.transportT, 16);
     INM.pry = 0; INM._pryMark = 0;      // they bolt a fresh plate on the door
     big("CAUGHT");
-    feed((byName ? byName + " drags you back. " : "Dragged back. ") + "+" + RECAP_PENALTY + "s on the sentence.", "#ff9a9a");
-    openInmate();
+    feed((byName ? byName + " drags you back. " : "Dragged back. ") + "+" +
+      Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside, and the van's early.", "#ff9a9a");
   }
 
   /* ---- the PRY: physical escape, gated by real guard sightlines ---------- */
@@ -431,9 +607,10 @@
   // hammered half back and the sentence grows. The spotting guard sells it.
   function caughtPrying(spot) {
     if (!INM) return;
-    INM.phase = "held"; INM.sentence += RECAP_PENALTY; INM.pry *= 0.5; INM._pryMark = 0;
+    INM.phase = "held"; INM.prison += RECAP_PENALTY * PRISON_SCALE; INM.pry *= 0.5; INM._pryMark = 0;
     if (spot && spot.ped && CBZ.citySay) { try { CBZ.citySay(spot.ped, "“Step AWAY from the door!”", "#ffd27b", 2.2); } catch (e) {} }
-    feed((spot ? spot.name : "A guard") + " catches you at the door — the plate's hammered back. +" + RECAP_PENALTY + "s.", "#ff9a9a");
+    feed((spot ? spot.name : "A guard") + " catches you at the door — the plate's hammered back. +" +
+      Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside.", "#ff9a9a");
   }
   function popDoor(how) {
     if (!INM) return;
@@ -588,12 +765,28 @@
     // ---- INMATE loop ----
     if (INM) {
       if (P && P.dead) { abortAll(); return; }
-      if (INM.phase === "serving") {
-        INM.served += dt * SERVE_SPEED;
+      if (INM.phase === "booking") {
+        // Cuffed for the whole booking, but PINNED only while the sheet is
+        // actually up. Holding the body with the panel closed would be a
+        // soft-lock: physics.js zeroes movement off _cityArrested, and you
+        // could not walk back to the desk zone that re-opens it.
+        if (CBZ.playerChar) CBZ.playerChar.cuffed = true;
+        if (P) { P._cityArrested = panelMode === "booking"; if (panelMode === "booking") P.speed = 0; }
+        if (CBZ.animChar && CBZ.playerChar) { try { CBZ.animChar(CBZ.playerChar, 0, dt); } catch (e) {} }
+      } else if (INM.phase === "held" || INM.phase === "prying" || INM.phase === "breakout") {
+        // THE TRANSPORT CLOCK. It runs through every holding-cell phase, so the
+        // pry and the run for the gap are a race against a real van, not a
+        // decoration. The day rolls while you wait (dayPhase-aware, as before).
+        INM.transportT -= dt;
         if (CBZ.dayPhase) { try { CBZ.dayPhase(CBZ.dayPhase() + dt * SERVE_DAY_RATE); } catch (e) {} }
-        if (panelMode === "serving") refreshServe();
-        if (INM.served >= INM.sentence) releaseInmate("served");
-      } else if (INM.phase === "prying") {
+        const mark = Math.ceil(INM.transportT);
+        if (INM._tMark !== mark && (mark === 20 || mark === 10 || mark === 5)) {
+          INM._tMark = mark;
+          feed("Transport in " + mark + "s.", mark <= 5 ? "#ff9a9a" : "#ffd27b");
+        }
+        if (INM.transportT <= 0) { toPrison(); return; }
+      }
+      if (INM && INM.phase === "prying") {
         // progress ONLY at the door and ONLY unobserved — the patrol is the clock
         const cell = V.cells[1];
         if (!playerNear(cell.doorX + 0.3, cell.lz, 2.8)) { stopPry(true); return; }
@@ -671,8 +864,17 @@
   // clean teardown if the world/mode drops out from under an active loop.
   function abortAll() {
     if (V && V.cells && V.cells[1]) setDoor(V.cells[1], false);
+    if (INM) holdPlayer(false);            // never leave a body cuffed and input-locked
     INM = null; JOB = null; PENDING = null; panelMode = null; menuLock(false);
     if (C) C.hud.closePanel();
+  }
+  // core/mission.js's ONE sweeper. A booking desk is a modal that holds the
+  // player's body; it must not be able to survive a death or a mode exit.
+  // Idempotent — abortAll on nothing is a no-op.
+  if (CBZ.mission && CBZ.mission.onInterrupt) {
+    CBZ.mission.onInterrupt(function (reason) {
+      if (reason === "death" || (reason === "mode" && g.mode !== "city")) abortAll();
+    });
   }
 
   /* ==========================================================
@@ -684,44 +886,44 @@
   function btn(act, label, bg, dis) { return "<span data-act='" + act + "' style='" + BTN + "background:" + (bg || "#1c6b40") + ";" + (dis ? "opacity:.35;pointer-events:none;" : "") + "'>" + label + "</span>"; }
   function head(title, sub) { return "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><b style='letter-spacing:2px;color:#e8b64c'>" + title + "</b><span style='opacity:.7;font-size:12px'>" + (sub || "") + " · Esc closes</span></div>"; }
 
-  function openInmate() {
+  // THE BOOKING SCREEN. It is a bounded package panel (ctx.hud.panel), which is
+  // the one sanctioned modal here — no floating card, no second HUD layer, and
+  // every button is still a bare VERB.
+  function openBooking() {
     if (!INM) return;
-    if (INM.phase === "serving") { panelMode = "serving"; menuLock(true); openServe(); return; }
-    if (INM.phase === "breakout" || INM.phase === "prying") { panelMode = null; menuLock(false); if (C) C.hud.closePanel(); return; }
-    panelMode = "inmate"; menuLock(true);
-    const canBribe = C.wallet.cash() >= INM.bribe;
-    const left = Math.max(0, Math.ceil(INM.sentence - INM.served));
+    if (INM.phase !== "booking") { panelMode = null; menuLock(false); if (C) C.hud.closePanel(); return; }
+    panelMode = "booking"; menuLock(true);
+    // the sheet is CLICKED — hand the mouse back (same beat the legacy bust
+    // overlay ran; a locked pointer swallows every button on this card).
+    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
+    const canBail = C.wallet.cash() >= INM.bribe;
+    const row = (k, v) => "<div style='display:flex;justify-content:space-between;font-size:12px;margin:2px 0'><span style='opacity:.7'>" + k + "</span><b>" + v + "</b></div>";
+    const charges = INM.charges.map((c) =>
+      "<div style='font-size:12px;margin:1px 0 1px 6px;opacity:.9'>· " + c + "</div>").join("");
     C.hud.panel(
-      head("CITY JAIL", INM.wanted0 + "★ jacket") +
-      "<div style='font-size:12px;opacity:.85;margin:2px 0 8px'>Sentence <b>" + left + "s</b> · cash <b>" + fmt(C.wallet.cash()) + "</b></div>" +
+      head("BOOKING", INM.wanted0 + "★ jacket") +
+      "<div style='font-size:11px;letter-spacing:1px;opacity:.6;margin-top:4px'>CHARGES</div>" + charges +
+      "<div style='height:6px'></div>" +
+      row("Property seized", INM.guns ? INM.guns + " item" + (INM.guns === 1 ? "" : "s") + " → evidence" : "nothing") +
+      row("Forfeited", INM.lost > 0 ? fmt(INM.lost) : "—") +
+      row("Sentence", INM.prison + "s in state prison") +
+      row("Bail set at", fmt(INM.bribe)) +
+      row("On you", fmt(C.wallet.cash())) +
+      "<div style='height:8px'></div>" +
       btn("serve", "SERVE", "#2a6b40") +
-      btn("bribe", "BRIBE " + fmt(INM.bribe), canBribe ? "#8a6a1f" : "#4a4433", !canBribe),
-      { serve: () => { INM.phase = "serving"; openServe(); },
-        bribe: () => doBribe(),
-        close: () => { menuLock(false); C.hud.closePanel(); } });
+      btn("bail", "BAIL " + fmt(INM.bribe), canBail ? "#8a6a1f" : "#4a4433", !canBail),
+      { serve: () => doServe(),
+        bail: () => doBail(),
+        // Esc does NOT walk you out of a booking desk — it just puts the sheet
+        // down. The cell zone re-opens it.
+        close: () => { menuLock(false); C.hud.closePanel(); panelMode = null; } });
   }
-  function openServe() {
-    panelMode = "serving";
-    C.hud.panel(
-      head("DOING TIME", "the clock rolls") +
-      "<div id='jl_serve' style='font-size:14px;margin:6px 0'></div>" +
-      barHTML("jl_servebar", "linear-gradient(90deg,#6ab04c,#2a6b40)", 0) +
-      "<div style='margin-top:8px'>" + btn("bribe", "BRIBE " + fmt(INM.bribe), "#8a6a1f") + btn("stop", "STOP", "#26343c") + "</div>",
-      { bribe: () => doBribe(), stop: () => { INM.phase = "held"; openInmate(); }, close: () => { menuLock(false); C.hud.closePanel(); } });
-    refreshServe();
-  }
-  function refreshServe() {
+  function doBail() {
     if (!INM) return;
-    const pct = Math.max(0, Math.min(100, INM.served / INM.sentence * 100));
-    const e = document.getElementById("jl_serve"); if (e) e.textContent = "Time left: " + Math.max(0, Math.ceil(INM.sentence - INM.served)) + "s";
-    const b = document.getElementById("jl_servebar"); if (b) b.style.width = pct + "%";
+    if (!C.wallet.spend(INM.bribe, "Posted bail")) { feed("Not enough cash to post bond."); return; }
+    releaseInmate("bailed");
   }
-  function doBribe() {
-    if (!INM) return;
-    if (!C.wallet.spend(INM.bribe, "Bribed the guard")) { feed("Not enough cash for the Sarge."); return; }
-    releaseInmate("bribed");
-  }
-  function barHTML(id, col, pct) { return "<div style='height:12px;border-radius:6px;background:rgba(0,0,0,.5);overflow:hidden;border:1px solid rgba(255,255,255,.18);margin:3px 0'><div id='" + id + "' style='height:100%;width:" + pct + "%;background:" + col + "'></div></div>"; }
+  function doBribe() { doBail(); }
 
   /* ==========================================================
      8. THE CAPTURE-FUNNEL SEAM — wrap CBZ.cityBust (the _jailWrapped idiom).
@@ -741,6 +943,11 @@
   function jailEngages() {
     return jailOn() && CBZ.CONFIG.GAME_PACKAGES !== false && g.mode === "city"
       && !(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+  }
+  // is city/wanted.js's physical arrest arc the live path? If so it owns the
+  // scene end-to-end and delivers here through CBZ.cityBookIn.
+  function arcLive() {
+    return CBZ.CONFIG.ARREST_ARC !== false && typeof CBZ.cityArrestCharges === "function";
   }
   function deliverPending(viaOrig) {
     if (!PENDING) return;
@@ -763,11 +970,22 @@
       if (jailEngages()) {
         try {
           if (INM) {
-            // mid-breakout collar = recapture; held/serving = already in custody.
+            // mid-breakout collar = recapture; booking/held = already in custody.
             if (INM.phase === "breakout") recapture(opts && opts.cop && ((opts.cop.data && opts.cop.data.name) || opts.cop.name));
             return;
           }
           if (JOB && JOB.active) endShift("arrested");           // badge off, then in
+          // ---- ONE PIPELINE, NOT TWO. ----
+          // For this file's whole life this wrap SWALLOWED the arrest and
+          // teleported the player into a cell — which meant city/wanted.js's
+          // choreographed bust (hands up, cuffs, the officer closing, the cash
+          // forfeit, g.busted, mission.onInterrupt("bust")) was dead code on
+          // every real arrest, and the owner never saw a cuff.
+          // With the arc live we do the opposite: fall THROUGH to wanted.js,
+          // which runs the whole scene and hands custody back to us at the
+          // booking desk via CBZ.cityBookIn. The intercept below survives only
+          // as the degrade for ARREST_ARC = false.
+          if (arcLive()) return orig.apply(this, arguments);
           if (V && V.ready) { if (beginInmate(opts || {})) return; }
           else {
             PENDING = { opts: opts || {}, t: 0 };
@@ -790,6 +1008,37 @@
     return true;
   }
   if (!wrapBust()) { const iv = setInterval(function () { if (wrapBust()) clearInterval(iv); }, 0); }
+
+  /* ==========================================================
+     8b. THE PIPE INTO THE MAIN GAME — two exports, and they are the whole
+         seam city/wanted.js's arrest arc rides.
+
+         cityJailGate()  — WHERE the cruiser is driving to, where it stops,
+                           where the perp walk ends. The compound group is
+                           never rotated (see §3), so local +Z is world +Z and
+                           the outward normal is a constant, not a solve.
+         cityBookIn()    — TAKE CUSTODY. Returns false if this venue cannot
+                           (not mounted, flag off, already holding somebody),
+                           and the arc then falls back to the legacy overlay +
+                           straight transfer. An arrest may never evaporate.
+     ========================================================== */
+  CBZ.cityJailGate = function () {
+    if (!V || !V.ready || !V.origin) return null;
+    const stop = W(0, 14.0);        // the cruiser's kerb — outside the wire
+    return { x: stop.x, z: stop.z, nx: 0, nz: 1,
+      gate: W(0, 9.6),              // just outside the gate opening
+      desk: W(0, 5.4) };            // the booking desk itself
+  };
+  CBZ.cityBookIn = function (opts) {
+    if (!jailOn() || !V || !V.ready || INM || g.mode !== "city") return false;
+    if (CBZ.CONFIG.GAME_PACKAGES === false) return false;
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return false;
+    if (JOB && JOB.active) endShift("arrested");
+    try { return !!beginBooking(opts || {}); }
+    catch (e) { console.error("[gamepkg:jail] bookIn", e); return false; }
+  };
+  // the pen asks how long it is holding you for (systems/capture.js).
+  CBZ.cityJailHeldSentence = function () { return (g.jailSentence | 0) || 0; };
 
   /* ==========================================================
      9. REGISTER — a SITE venue (no jail lot kind): resolve to the city's law
@@ -822,10 +1071,12 @@
 
     /* probe surface — the gate asserts THROUGH this (numeric verify) */
     api: {
-      rules: { sentenceFor, bribeCost, PRY_TIME, RECAP_PENALTY, WAGES },
+      rules: { sentenceFor, bribeCost, jailSentence, PRISON_SCALE, PRY_TIME, RECAP_PENALTY, WAGES },
       mounted: () => !!(V && V.ready),
       near: () => near,
-      arc: () => (INM ? { phase: INM.phase, sentence: INM.sentence, served: +INM.served.toFixed(2), wanted0: INM.wanted0, bribe: INM.bribe, pry: +INM.pry.toFixed(2) } : null),
+      arc: () => (INM ? { phase: INM.phase, sentence: INM.sentence, prison: INM.prison,
+        transportT: +INM.transportT.toFixed(2), wanted0: INM.wanted0, bribe: INM.bribe,
+        guns: INM.guns, lost: INM.lost, charges: INM.charges.slice(), pry: +INM.pry.toFixed(2) } : null),
       shift: () => (JOB ? { active: JOB.active, caught: JOB.caught, wage: JOB.wage, escape: !!JOB.escape } : null),
       state: () => (S ? JSON.parse(JSON.stringify(S)) : null),
       cast: () => (V ? { guards: V.guards.length, inmates: V.inmates.length, sarge: !!V.sarge, cells: V.cells.length, posts: V.posts.length } : null),
@@ -840,9 +1091,14 @@
       // fire the REAL seam (respects the flag/guards) or force the arc directly.
       bust: (opts) => (CBZ.cityBust ? (CBZ.cityBust(opts || {}), true) : false),
       beginInmate: (opts) => beginInmate(opts || {}),
-      serve: () => { if (INM) { INM.phase = "serving"; return true; } return false; },
-      _serveComplete: () => { if (INM && INM.phase === "serving") { INM.served = INM.sentence; releaseInmate("served"); return true; } return false; },
-      bribe: () => { if (INM) { doBribe(); return !INM; } return false; },
+      bookIn: (opts) => !!(CBZ.cityBookIn && CBZ.cityBookIn(opts || { atDesk: true })),
+      gate: () => (CBZ.cityJailGate ? CBZ.cityJailGate() : null),
+      serve: () => { if (INM && INM.phase === "booking") { doServe(); return INM.phase === "held"; } return false; },
+      // force the transport (the sealed handoff into the real prison)
+      _transport: () => { if (INM && INM.phase !== "booking") { toPrison(); return true; } return false; },
+      setTransport: (x) => { if (INM) { INM.transportT = +x || 0; return true; } return false; },
+      bail: () => { if (INM) { doBail(); return !INM; } return false; },
+      bribe: () => { if (INM) { doBail(); return !INM; } return false; },
       pry: () => { if (INM) { startPry(); return INM.phase === "prying"; } return false; },
       stopPry: () => { if (INM) { stopPry(false); return INM.phase === "held"; } return false; },
       setPry: (x) => { if (INM) { INM.pry = +x || 0; return true; } return false; },

@@ -148,6 +148,34 @@
     pinArm(ra, -1);
   }
 
+  // ---- THE PLAYER WEARS THE SAME TIES -------------------------------------
+  // addCuffs/removeCuffs/cuffPose only ever read `ped.char` and `ped._cuffMeshes`,
+  // so the real zip-tie meshes and the two-bone wrists-behind-the-back IK are
+  // already rig-agnostic — they were simply never handed the player's rig,
+  // because nothing in the game had ever cuffed the player. city/wanted.js's
+  // arrest arc does. This is the WHOLE adoption: one proxy object standing in
+  // for the "ped" record the player does not have.
+  //
+  // entities/character.js's `ch.cuffed` branch (a crude two-axis damp on the
+  // upper arms) stays exactly as it was and is the DEGRADE: with this off, or
+  // on a rig with no elbow joints, the player still reads as cuffed — just
+  // without the ties or the solved wrists.
+  let PCUFF = null;
+  function cuffPlayer(on) {
+    const ch = CBZ.playerChar;
+    if (!on) { if (PCUFF) { removeCuffs(PCUFF); PCUFF = null; } return true; }
+    if (!ch || !ch.parts) return false;
+    if (PCUFF && PCUFF.char !== ch) { removeCuffs(PCUFF); PCUFF = null; }
+    if (!PCUFF) PCUFF = { char: ch, _cuffMeshes: null };
+    addCuffs(PCUFF);
+    return true;
+  }
+  function playerCuffed() { return !!PCUFF; }
+  // Runs AFTER whatever animated the player this frame (the arrest arc calls
+  // animChar at order 32.8; this updater is 38.5), so gait can never pull the
+  // solved hands back apart — the same ordering law the NPC pose relies on.
+  function posePlayerCuffs() { if (PCUFF && PCUFF.char) cuffPose(PCUFF); }
+
   // ---- who's actually GOT a charge coming (the desk only pays for real
   //      collars): a rolled bounty, NPC heat the city itself polices, colors,
   //      a rampage, or bodies that follow them around -------------------------
@@ -384,7 +412,8 @@
     "“Where are you taking me?!”",
   ];
   CBZ.onUpdate(38.5, function (dt) {
-    if (g.mode !== "city") { if (restrained.length) releaseAll(); return; }
+    if (g.mode !== "city") { if (restrained.length) releaseAll(); if (PCUFF) cuffPlayer(false); return; }
+    posePlayerCuffs();
     if (!restrained.length) return;
     const P = CBZ.player;
     pleadCD -= dt; copSuspectCD -= dt;
@@ -635,5 +664,9 @@
     stateOf: st, isWanted, bountyFor,
     cuff, grapple, escort, stand, release, seat, unseat, turnIn, slam, shove,
     releaseAll,
+    // the player side of the same verbs (city/wanted.js's arrest arc)
+    cuffPlayer, playerCuffed, posePlayerCuffs,
+    // the march-one-pace-ahead offset, so the perp walk does not re-type it
+    ESCORT_D,
   };
 })();
