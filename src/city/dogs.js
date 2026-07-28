@@ -32,6 +32,30 @@
   if (CBZ.CONFIG.DOG_PREDATOR == null) CBZ.CONFIG.DOG_PREDATOR = true;
   function HUNT_ON() { return CBZ.CONFIG.DOG_PREDATOR !== false && typeof CBZ.predatorHunt === "function"; }
 
+  // ONE FOLLOWER GRAMMAR (owner: "it's already, I think, kinda built for dogs").
+  // It was — and so was a second copy of it in wildlife_tame.js, with a
+  // different arrival radius and a "Sit & stay" that never sat. The heel, the
+  // go-to and the sit-in-front ritual are CBZ.petFollow now; dogs.js keeps the
+  // two things that are genuinely a dog's — how it MOVES (dogMove's clamped
+  // arc, handed over as the locomotion seam) and how it FIGHTS. Flag off, or
+  // wildlife_tame.js absent, and the original heel below runs byte for byte.
+  function PETS_ON() { return CBZ.CONFIG.PET_AFFECTION !== false && typeof CBZ.petFollow === "function"; }
+  let DOG_PET = null;
+  function dogPetOpts() {
+    return DOG_PET || (DOG_PET = {
+      id: "dogs:heel",
+      stayKey: "sit",              // the field dogs.js was already writing
+      topSpeed: SPEED,             // 6.2 is a final u/s, not a species size number
+      heelR: HEEL_R,
+      move: function (d, heading, spd, dt, panic) { d.heading = heading; dogMove(d, spd, dt, panic); },
+      note: function (msg, sec) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec); },
+    });
+  }
+
+  // ..declared at LOAD (wildlife_tame.js loads first), so CBZ.companionAudit()
+  // reads adopted:2 on a cold boot instead of only after somebody tames a dog.
+  if (typeof CBZ.petAdopt === "function" && PETS_ON()) CBZ.petAdopt("dogs:heel");
+
   // THE RATCHET (BLOCK LAW #5). dogs.js loads BEFORE predator.js, so the buffer
   // branch is the one that actually runs — predator.js drains it at its own load.
   if (typeof CBZ.predatorAdopt === "function") {
@@ -265,7 +289,13 @@
     d.hp = Math.min(d.maxHp, d.hp + 18);
     if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " wolfs it down (+health).", 1.8);
   }
-  function pet(d) { if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " wags happily.", 1.4); d.wagBoost = 2.2; }
+  // PETTING IS ANSWERED. _petCheckIn is the affection layer's own flag (see
+  // wildlife_tame.js's beat scheduler) — it nuzzles back instead of the note
+  // being the entire event.
+  function pet(d) {
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " wags happily.", 1.4);
+    d.wagBoost = 2.2; d._petCheckIn = 1; d._beatT = 0;
+  }
   function toggleSit(d) { d.sit = !d.sit; if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + (d.sit ? " sits and stays." : " is at your heel."), 1.6); }
 
   // register a Bone + Dog Treat into the economy so they're real, buyable items.
@@ -466,6 +496,9 @@
   // ============================================================
   function dogDie(d, hit, w) {
     d.dead = true; d.hp = 0; d.state = "dead"; d.aggro = false;
+    // hand every bone back BEFORE the solver reads the body — a corpse must
+    // ragdoll from the dog's own rest pose, not from a held sit.
+    if (CBZ.petRelease) { try { CBZ.petRelease(d); } catch (e) {} }
     setDogEyes(d, false);
     d._dieT = null; d._toppleTo = null;
     let mode = "none";
@@ -732,6 +765,46 @@
       const toPx = P.x - grp.position.x, toPz = P.z - grp.position.z;
       const distP = Math.hypot(toPx, toPz);
 
+      // NO TELEPORTING. However far you get, the dog just runs flat-out toward
+      // you at full dog speed and closes the gap on foot — the chase IS the
+      // point. (When you're far, threat-hunting is suppressed below so it makes
+      // a beeline for you instead of stopping to fight.)
+      const FAR = distP > TELEPORT_R;
+
+      // THREAT RESPONSE STAYS HERE and still overrides everything — dogs.js
+      // owns dog defense (the real bite wound, the kill bus, the pack). It only
+      // has to SAY so: companionBusy is the shared yield flag every companion
+      // system already honours, so while it is set the follower brain does not
+      // steer and the affection pose stands the dog back up.
+      let threat = (d.sit || d.goTo || FAR) ? null : findThreat(d);
+      if (threat) {
+        d.companionBusy = true; d._fightT = (d._fightT || 0) + dt;
+        const tx = threat.pos ? threat.pos.x : threat.group.position.x;
+        const tz = threat.pos ? threat.pos.z : threat.group.position.z;
+        const tdx = tx - grp.position.x, tdz = tz - grp.position.z, td = Math.hypot(tdx, tdz);
+        if (td <= BITE_R) {
+          d.heading = Math.atan2(tdz, tdx); dogMove(d, 0, dt, true);   // square up
+          if (d.biteT <= 0) { dogBite(d, threat); d.biteT = 0.8; }
+        } else {
+          d.heading = Math.atan2(tdz, tdx);
+          dogMove(d, SPEED, dt, true);
+        }
+        continue;
+      }
+      // fight's over: it comes back and checks in (only after a REAL scrap —
+      // a threat that blinked for one frame is not a story worth telling).
+      if (d.companionBusy) {
+        d.companionBusy = false;
+        if ((d._fightT || 0) > 0.8) { d._petCheckIn = 1; d._beatT = 0; }
+        d._fightT = 0;
+      }
+
+      // ---- THE SHARED FOLLOWER BRAIN (heel slots · pace matching · go-to ·
+      //      the sit-in-front ritual · the never-seen catch-up) --------------
+      if (PETS_ON() && CBZ.petFollow(d, dt, dogPetOpts())) continue;
+      if (CBZ.petLegacy) CBZ.petLegacy("dogs:heel");
+
+      // ---- LEGACY (flag off, or wildlife_tame.js absent) ------------------
       // GO-TO (ANIMALS_ALL_CONTROLLABLE): sent to a spot — sprint there on
       // real legs, then sit and hold it until called back to heel.
       if (d.goTo) {
@@ -745,30 +818,6 @@
           dogMove(d, SPEED, dt, true);
           continue;
         }
-      }
-
-      // NO TELEPORTING. However far you get, the dog just runs flat-out toward
-      // you at full dog speed and closes the gap on foot — the chase IS the
-      // point. (When you're far, threat-hunting is suppressed below so it makes
-      // a beeline for you instead of stopping to fight.)
-      const FAR = distP > TELEPORT_R;
-
-      // threat response overrides sit/heel — defend the owner (but only when the
-      // dog is actually near you; if you've bolted across the map it prioritises
-      // catching up over picking fights).
-      let threat = (d.sit || FAR) ? null : findThreat(d);
-      if (threat) {
-        const tx = threat.pos ? threat.pos.x : threat.group.position.x;
-        const tz = threat.pos ? threat.pos.z : threat.group.position.z;
-        const tdx = tx - grp.position.x, tdz = tz - grp.position.z, td = Math.hypot(tdx, tdz);
-        if (td <= BITE_R) {
-          d.heading = Math.atan2(tdz, tdx); dogMove(d, 0, dt, true);   // square up
-          if (d.biteT <= 0) { dogBite(d, threat); d.biteT = 0.8; }
-        } else {
-          d.heading = Math.atan2(tdz, tdx);
-          dogMove(d, SPEED, dt, true);
-        }
-        continue;
       }
 
       if (d.sit) { d.heading = Math.atan2(toPz, toPx); dogMove(d, 0, dt, false); continue; }  // stays put, turns to face you

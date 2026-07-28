@@ -50,7 +50,13 @@
   function disposition(a) {
     var s = a && a.species;
     if (!s) return "skittish";
-    if (s.id === "dog") return "guardian"; // dogs are always guardians
+    // DOGS ARE ALWAYS GUARDIANS — and this row had never once matched. The
+    // species dogs.js registers into the wildlife registry is `stray_dog`, not
+    // `dog`, so every tamed dog fell through to the tail of this function and
+    // came out SKITTISH (danger 0.6, bite 8, scale 0.75) — i.e. companions.js
+    // was driving your dog AWAY from a fight in the same frame dogs.js was
+    // driving it INTO one. Two writers, one transform, opposite directions.
+    if (s.id === "dog" || s.id === "stray_dog" || a.kind === "dog") return "guardian";
     var danger = +s.danger || 0, bite = +s.bite || 0, scale = +s.scale || 1;
     if (danger >= GUARDIAN_DANGER && bite >= GUARDIAN_BITE && scale >= GUARDIAN_MIN_SCALE)
       return "guardian"; // bears, big cats, wolves...
@@ -324,6 +330,14 @@
 
   /* ------------------------------- main loop ------------------------------- */
   function release(a) {
+    // IT CAME BACK TO YOU — say so. _petCheckIn is the affection layer's flag
+    // (wildlife_tame.js's beat scheduler): a companion that just finished
+    // fighting for you tucks in and nuzzles instead of silently resuming heel.
+    // Only after REAL engagement — "guard" is a posture, not a scrap.
+    var st = a.companionState;
+    if (st === "fight" || st === "interpose" || st === "retreat" || st === "fallback" || st === "flee") {
+      a._petCheckIn = 1; a._beatT = 0;
+    }
     if (a.companionBusy) a.companionBusy = false;
     a.companionState = "idle";
     a.companionTarget = null;
@@ -347,6 +361,12 @@
     for (var i = 0; i < list.length; i++) {
       var a = list[i];
       if (!a || !a.tamed || !a.species || !a.group || !a.pos) continue;
+      // ONE DRIVER PER BODY. `external` actors ride CBZ.cityWildlife for the
+      // GUNS only — dogs.js owns their movement, their threat scan and their
+      // bite (with the real tooth wound and the kill bus), exactly the way
+      // wildlife.js's own tick skips them. Steering them from here too was the
+      // second half of the tamed-dog bug above.
+      if (a.external) continue;
       if (a.dead || a.hp <= 0) { if (a.companionBusy) a.companionBusy = false; continue; }
       if (a.stay || a.ridden || a.mounted || a.beingRidden) { if (a.companionBusy) release(a); continue; }
       var sp = a.species;

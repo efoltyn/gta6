@@ -1223,6 +1223,10 @@
   // it is what produced two independent `rotation.z = ±1.3` snaps.
   function wildlifeDeathPhysics(a, dir, impulse, point) {
     if (!a || !a.group) return "none";
+    // A TAMED ANIMAL MAY BE HOLDING A POSE. wildlife_tame.js's affection layer
+    // owns leg/head/group offsets on a seated companion; hand every bone back
+    // BEFORE the solver reads the body, or the corpse ragdolls out of a sit.
+    if (a.tamed && CBZ.petRelease) { try { CBZ.petRelease(a); } catch (e) {} }
     let rag = false;
     if (CBZ.quadRagdoll) {
       try {
