@@ -9,12 +9,16 @@
    main rotor disc BIGGER than the whole airframe, small vertical tail
    rotor, wide skids) — orbiting the city on stacked altitude bands,
    banking into their turns at the physically-correct constant-radius bank
-   angle (tan(bank) = v^2 / (R*g)), and — since AIR_TRAFFIC_CLEARANCE — flying
-   ABOVE the tallest roof their own circuit crosses instead of through it.
+   angle (tan(bank) = v^2 / (R*g)). Since AIR_TRAFFIC_COLLIDE those bands are
+   REAL: a craft whose hull reaches a building's collider does not pass through
+   it, it dies there — the same explosion and the same tumbling wreck a craft
+   shot out of the sky gets.
 
-   Pure atmosphere: no colliders, no weapons, no wanted interaction, no
-   boarding — though a heavy-weapon blast CAN down one (the shoot-down arc
-   at the bottom of the file; gated by CBZ.CONFIG.AIRTRAFFIC_DAMAGE).
+   They register no colliders of their own, carry no weapons, take no part in
+   the wanted system and cannot be boarded — but they are no longer only
+   scenery: a heavy-weapon blast can down one (the shoot-down arc at the
+   bottom of the file; CBZ.CONFIG.AIRTRAFFIC_DAMAGE), and so can a tower
+   (AIR_TRAFFIC_COLLIDE, which routes into that same arc).
    Everything about WHERE they fly and WHAT they look like is
    position-hash deterministic (CBZ.hash01 — never Math.random), so every
    client sees the same fleet in the same sky. The only per-frame state is
@@ -31,9 +35,22 @@
   const THREE = window.THREE;
   const g = CBZ.game;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
-  // OWNER: "LITTLE PROPELLOR PLANES FLY THRU BUILDINGS." One-line revert to
-  // the old four-authored-numbers sky. See ROOF CLEARANCE below.
-  if (CFG.AIR_TRAFFIC_CLEARANCE == null) CFG.AIR_TRAFFIC_CLEARANCE = true;
+  // OWNER, the fault: "LITTLE PROPELLOR PLANES FLY THRU BUILDINGS."
+  // OWNER, the fix he actually wanted: "WHAT I MEANT FOR LITTLE PLANES WAS NOT
+  // FLY HIGHER BUT IF THEY FLY AT CURRENT HEIGHT AND GO THRU BUILDING BLOW UP
+  // LIKE OTHER PLANE."
+  //
+  // There are two honest answers to one fault and he picked the second, so the
+  // file carries both and ships his. AIR_TRAFFIC_CLEARANCE (raise the track
+  // above the roofline — ROOF CLEARANCE, below) is complete, tested by
+  // construction and one line from being live again; it is OFF because a sky in
+  // which nothing can go wrong is not the sky he asked for. AIR_TRAFFIC_COLLIDE
+  // is the shipped behaviour: the bands do not move one metre, and a craft that
+  // flies into a building dies the way a craft the player shot down dies.
+  // They compose — both on means "climb over what you can, die on what you
+  // cannot" — but the shipped world is COLLIDE alone.
+  if (CFG.AIR_TRAFFIC_CLEARANCE == null) CFG.AIR_TRAFFIC_CLEARANCE = false;
+  if (CFG.AIR_TRAFFIC_COLLIDE == null) CFG.AIR_TRAFFIC_COLLIDE = true;
 
   const cmat = CBZ.cmat || CBZ.mat || function (c, o) { return new THREE.MeshLambertMaterial({ color: c }); };
   function vmat(role, color, opts) {
@@ -70,10 +87,13 @@
   // deliberately UNCHANGED — this fleet is TRANSITING traffic, not air support
   // orbiting a point, so a low-level GA circuit crossing under and over a
   // police orbit is correct and is also what keeps these craft shootable.)
-  // THEY ARE NOW A FLOOR, NOT AN ANSWER: a band is what a craft flies when its
-  // own track is CLEAR, and the ROOF CLEARANCE block below raises the ones
-  // whose circuit crosses something tall. See there for why that is the whole
-  // fix and why the bands themselves did not move.
+  // THEY ARE STILL THE TRACK, AND NOW THEY HAVE CONSEQUENCES. Under the
+  // shipped AIR_TRAFFIC_COLLIDE these four numbers are exactly what they
+  // always were — nothing raises them — but the city underneath is no longer
+  // notional: buildings.js's 52-storey mega tower stands at 52 * FH(3.2) =
+  // 166.4 m, above ALL FOUR of them, and a craft that meets it dies on it.
+  // (Under the alternate AIR_TRAFFIC_CLEARANCE they become a FLOOR instead;
+  // see ROOF CLEARANCE below.)
   const ALT_BANDS   = [72, 96, 122, 148];
   const VIS_RING    = 520;                     // cull update+draw beyond this from the player
   // GA accent stripes / heli bold bodies — classic civilian schemes
@@ -247,47 +267,76 @@
   let fleet = null;        // [{ grp, kind, cx, cz, radius, alt, dir, speed, phase }]
   let fleetRoot = null;    // the arena root the fleet was built into
   let clock = 0;
+  let crashes = 0;         // cumulative building strikes since this fleet was built
 
   /* ============================================================
-     ROOF CLEARANCE  (CBZ.CONFIG.AIR_TRAFFIC_CLEARANCE)
+     THE BANDS ARE REAL  (CBZ.CONFIG.AIR_TRAFFIC_COLLIDE — shipped)
+     ROOF CLEARANCE      (CBZ.CONFIG.AIR_TRAFFIC_CLEARANCE — alternate)
 
-     OWNER: "LITTLE PROPELLOR PLANES FLY THRU BUILDINGS."
+     OWNER: "LITTLE PROPELLOR PLANES FLY THRU BUILDINGS." Then, deciding which
+     way that should be cured: "WHAT I MEANT FOR LITTLE PLANES WAS NOT FLY
+     HIGHER BUT IF THEY FLY AT CURRENT HEIGHT AND GO THRU BUILDING BLOW UP LIKE
+     OTHER PLANE."
 
-     The fleet's altitude was FOUR AUTHORED NUMBERS and the city was never
-     consulted. ALT_BANDS tops out at 148 while buildings.js's makeMegaTower
-     puts a 52-storey flagship at 52 * FH(3.2) = 166.4 m — so EVERY band flew
-     through the tallest thing in the world, and the lowest (72) flew through
-     anything over 22 storeys. Nothing here was wrong about the circuit; the
-     circuit simply had no idea what was underneath it.
+     THE FAULT, either way: the fleet's altitude was FOUR AUTHORED NUMBERS and
+     the city was never consulted. ALT_BANDS tops out at 148 while buildings.js's
+     makeMegaTower puts a 52-storey flagship at 52 * FH(3.2) = 166.4 m — so
+     EVERY band flew through the tallest thing in the world, and the lowest (72)
+     flew through anything over 22 storeys. Nothing here was wrong about the
+     circuit; the circuit simply had no idea what was underneath it. The
+     shipped answer is not to move the circuit — it is to make the building
+     count.
 
-     city/aircraft.js has answered this correctly for its whole life — the
-     gunship holds `roofTopAt(x,z) + roofClear + 2` and the strike jet
-     `roofTopAt + 10` — and this file's own `trafficRoofTop` already scans
-     exactly the same collider tops so a WRECK lands on the roof it hit.
-     Ambient traffic just never asked the question while it was still flying.
+     ONE PIECE OF MATH SERVES BOTH MODES, WHICH IS THE WHOLE REASON THE SECOND
+     ONE IS CHEAP. These craft fly a FIXED CIRCLE, so "what does my track
+     touch" has a stable answer that only has to be recomputed when the city
+     changes. `scanRing` walks CBZ.colliders ONCE per craft on a slow
+     round-robin and returns two things from the same pass: the tallest roof on
+     the ring (which is all AIR_TRAFFIC_CLEARANCE ever needed) and a SHORTLIST
+     of the colliders on that ring standing tall enough to be flown into. The
+     annulus test is exact and allocation-free: the set of distances from the
+     orbit centre to the points of an AABB is precisely the interval
+     [near, far], so a padded circle of radius R touches the box iff
+     near <= R+pad AND far >= R-pad — squared throughout, no sqrt, no trig.
 
-     IT ASKS ONCE PER CIRCUIT, NOT PER FRAME. These craft fly a FIXED CIRCLE,
-     so "what is the tallest thing under my track" has ONE answer per craft,
-     and a pilot picks one cruise altitude for a circuit rather than
-     porpoising block by block. One pass over CBZ.colliders per craft
-     (allocation-free AABB-vs-annulus, no trig, no sqrt) yields the ring's
-     tallest roof; cruise = max(authored band, roof + clearance). A ring that
-     crosses nothing tall KEEPS its authored band — which is exactly what
-     preserves the low, shootable traffic the ALT_BANDS note above is
-     protecting. Altitude is the whole fix: no route is planned, no waypoint
-     is invented, no craft is moved.
+     COLLIDE then costs almost nothing per frame. The shortlist is filtered to
+     the handful of colliders whose vertical span actually brackets the level
+     this craft flies at (`t.hits`, usually EMPTY — a ring that crosses nothing
+     tall arms nothing at all), and the per-frame work is an exact hull-vs-AABB
+     test against that tiny list at the craft's live position. There is no
+     tunnelling to worry about: a candidate is a WHOLE TOWER, so the test is
+     "am I inside this box", not "did I cross this plane", and at 26-43 m/s a
+     craft spends many frames inside a 15-20 m footprint. Detection is
+     therefore every frame for an armed craft and NEVER for an unarmed one,
+     which is tighter than the coordinator's floor and cheaper than the slow
+     cadence it replaces.
 
-     Degrade-safe by construction: no colliders, no CBZ.colliders, or the flag
-     off ⇒ ringRoof 0 ⇒ cruise === the old band, byte-identical.
+     THE CRASH IS NOT A NEW DEATH PATH. It calls `downTraffic`, the exact
+     function a rocket or a rifle burst already calls — the lurch, the frozen
+     crash heading, the death roll / flat spin, the smoke trail, `fallTraffic`'s
+     ride-down and its terminal fireball, the kill-bus line for the occupants.
+     A building strike only differs in the two ways it must: an impact blast at
+     the WALL FACE it struck (byPlayer false — a plane the player never touched
+     puts no heat on him and no attribution in the feed), and a shorter carried
+     speed, because you leave a wall, you do not fly on through it.
+
+     Degrade-safe: no colliders, or both flags off ⇒ no shortlist, no hits,
+     cruise === the authored band ⇒ byte-identical to the sky that shipped.
   ============================================================ */
-  const CLEARANCE = () => CFG.AIR_TRAFFIC_CLEARANCE !== false;
-  // HULL DROP — how far the airframe's lowest point hangs below its own
-  // origin, worst case, WHILE BANKED (the orbit is flown at a bank clamped to
-  // 0.5 rad in the update loop):
-  //   plane — mains at y=-1.30 with a 0.28 wheel radius = -1.58; the outboard
-  //           tip of the 10.6 span dips 5.3*sin(0.5) = 2.54 → 2.54 dominates.
-  //   heli  — skids at -1.05 (0.18 box ⇒ -1.14); rotor tip 4.6*sin(0.5) = 2.20.
-  const HULL_DROP = 2.6;
+  const CLEARANCE = () => CFG.AIR_TRAFFIC_CLEARANCE === true;
+  const COLLIDE   = () => CFG.AIR_TRAFFIC_COLLIDE !== false;
+  // HULL_V — the airframe's vertical half-extent about its own origin, worst
+  // case, WHILE BANKED (the orbit is flown at a bank clamped to 0.5 rad in the
+  // update loop). It is SYMMETRIC for the honest reason that a banked wing
+  // dips on one side by exactly what it rises on the other:
+  //   plane — outboard tip of the 10.6 span moves 5.3*sin(0.5) = 2.54;
+  //           gear at -1.58 and fin crown at +1.75 are both inside that.
+  //   heli  — rotor tip 4.6*sin(0.5) = 2.20; skids -1.14, rotor hub +1.34.
+  const HULL_V = 2.6;
+  // HULL_SPAN — half the widest horizontal dimension, i.e. how far out the
+  // thing that hits the wall is. A wing striking a tower IS a crash, so this
+  // is the pad on the footprint test, not the fuselage radius.
+  function hullSpan(t) { return t.kind === "heli" ? 4.6 : 5.3; }
   // ROOFTOP HARDWARE THE COLLIDER SET DOES NOT CARRY. Roof gear is drawn as
   // decoration far more often than it is registered solid: expansion.js hangs
   // a beacon 1.0 above b.h with no collider, buildings.js's helipad mast is
@@ -297,7 +346,7 @@
   // READ GAP — the daylight that makes it read as flying OVER rather than
   // skimming: ~5 storeys at buildings.js's FH of 3.2.
   const READ_GAP = 16;
-  const ROOF_CLEAR = HULL_DROP + ROOF_GEAR + READ_GAP;      // 25.6
+  const ROOF_CLEAR = HULL_V + ROOF_GEAR + READ_GAP;         // 25.6
   // FAIRNESS CEILING. aircraft.js states the law this obeys: a range is a
   // FAIRNESS invariant, not a gun stat. This fleet is shootable
   // (AIRTRAFFIC_DAMAGE, above), the sanctioned anti-air answer is the RPG at
@@ -328,33 +377,92 @@
     return ROOF_CLEAR;
   }
 
-  // Tallest collider top anywhere under this craft's orbit RING. The set of
-  // distances from the orbit centre to the points of an AABB is exactly the
-  // interval [near, far], so the padded circle touches the box iff
-  // near <= R+pad AND far >= R-pad. Squared throughout — no sqrt, no trig,
-  // one early-out on `y1 <= top` that rejects almost every collider after the
-  // first tall one is found.
-  function ringRoof(t) {
+  // THE ONE O(colliders) WALK. Returns the tallest collider top under this
+  // craft's orbit RING and fills `t._tall` with every collider on that ring
+  // standing high enough to be flown into. Exact annulus test (see the block
+  // header), squared throughout, with a `y1 <= top && !tallEnough` early-out
+  // that rejects essentially every short collider in the world after the first
+  // tall one is found.
+  const TALL_CAP = 256;      // shortlist ceiling — a ring crossing more is a forest of towers
+  function scanRing(t) {
+    const tall = t._tall || (t._tall = []);
+    tall.length = 0;
+    t.tallOverflow = false;
     const cols = CBZ.colliders;
-    if (!cols || !cols.length || !CLEARANCE()) return 0;
+    if (!cols || !cols.length) return 0;
     const cx = t.cx, cz = t.cz, R = t.radius;
-    // half-span plus a wingtip of slop, so a tower the wing would clip counts
-    const pad = (t.kind === "heli" ? 4.6 : 5.3) + 3;
+    // half-span plus a wingtip of slop: candidates are deliberately OVER-
+    // selected (the safe direction) because the hit test below is exact.
+    const pad = hullSpan(t) + 3;
     const rp = R + pad, rm = R - pad;
     const rp2 = rp * rp, rm2 = rm > 0 ? rm * rm : 0;
+    // Nothing whose top is below the craft's LOWEST possible level can ever be
+    // struck: `alt` is never under the authored band in either mode.
+    const reach = t.band - HULL_V;
     let top = 0;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
-      if (!c || c.y1 == null || c.y1 <= top || c.y1 > ROOF_CAP) continue;
+      if (!c || c.y1 == null || c.y1 > ROOF_CAP) continue;
+      const tallEnough = c.y1 >= reach;
+      if (c.y1 <= top && !tallEnough) continue;            // can't raise `top`, can't be hit
       const dx = Math.max(c.minX - cx, 0, cx - c.maxX);
       const dz = Math.max(c.minZ - cz, 0, cz - c.maxZ);
       if (dx * dx + dz * dz > rp2) continue;               // whole box outside the ring
       const fx = Math.max(Math.abs(c.minX - cx), Math.abs(c.maxX - cx));
       const fz = Math.max(Math.abs(c.minZ - cz), Math.abs(c.maxZ - cz));
       if (fx * fx + fz * fz < rm2) continue;               // whole box inside the ring
-      top = c.y1;
+      if (c.y1 > top) top = c.y1;
+      if (tallEnough) { if (tall.length < TALL_CAP) tall.push(c); else t.tallOverflow = true; }
     }
     return top;
+  }
+
+  // Of the tall things on the ring, the ones whose vertical span actually
+  // brackets the level this craft flies at. Usually EMPTY, which is what makes
+  // the per-frame test free for most of the fleet.
+  function armHits(t) {
+    const hits = t.hits || (t.hits = []);
+    hits.length = 0;
+    if (!COLLIDE() || !t._tall) return;
+    const lo = t.alt - HULL_V, hi = t.alt + HULL_V;
+    for (let i = 0; i < t._tall.length; i++) {
+      const c = t._tall[i];
+      if ((c.y0 == null ? 0 : c.y0) <= hi && c.y1 >= lo) hits.push(c);
+    }
+  }
+
+  // EXACT hull-vs-collider test at a live position, over the tiny armed list.
+  // A candidate is a whole tower, not a plane to be crossed, so there is
+  // nothing to tunnel through: at 26-43 m/s a craft is inside a 15-20 m
+  // footprint for many consecutive frames.
+  function hullStrike(t, x, z) {
+    const hits = t.hits;
+    if (!hits || !hits.length) return null;
+    const s = hullSpan(t), lo = t.alt - HULL_V, hi = t.alt + HULL_V;
+    for (let i = 0; i < hits.length; i++) {
+      const c = hits[i];
+      if (x < c.minX - s || x > c.maxX + s || z < c.minZ - s || z > c.maxZ + s) continue;
+      if (c.y1 < lo || (c.y0 == null ? 0 : c.y0) > hi) continue;
+      return c;
+    }
+    return null;
+  }
+
+  // An armed candidate is a REFERENCE captured up to one full round-robin ago,
+  // so a demolished tower could still be sitting in the list. The SAME
+  // predicate is re-run against the LIVE collider array before an aircraft is
+  // killed — O(colliders), but only ever on the single frame a craft actually
+  // strikes something, and it also catches anything built since the last scan.
+  function strikeConfirm(x, z, s, lo, hi) {
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.y1 == null || c.y1 > ROOF_CAP) continue;
+      if (c.y1 < lo || (c.y0 == null ? 0 : c.y0) > hi) continue;
+      if (x < c.minX - s || x > c.maxX + s || z < c.minZ - s || z > c.maxZ + s) continue;
+      return c;
+    }
+    return null;
   }
 
   // Re-measure one craft's circuit and publish its cruise altitude.
@@ -364,53 +472,91 @@
   // That asymmetry is what lets airTrafficAudit().clipping pin at 0.
   function refreshClear(t, snap) {
     if (!t || t.downed) return;
-    t.ringRoof = CLEARANCE() ? ringRoof(t) : 0;
-    const want = t.ringRoof > 0 ? t.ringRoof + roofClearFor(t) : 0;
-    // THE CEILING IS A PREFERENCE, NOT A LICENCE TO CLIP. Staying inside the
-    // RPG's reach is polish; not being inside a building is the fix, and the
-    // fix outranks the polish. `noClip` is the lowest altitude at which no
-    // part of the airframe is inside the roof — if the ceiling would sit
-    // under it, the roof wins and `overCeil` records the trade instead of the
-    // craft quietly going back through the tower.
-    const noClip = t.ringRoof > 0 ? t.ringRoof + HULL_DROP + 1 : 0;
-    t.overCeil = want > CRUISE_CEIL;
-    t.cruise = Math.max(t.band, noClip, Math.min(CRUISE_CEIL, want));
+    const need = CLEARANCE() || COLLIDE();
+    t.ringRoof = need ? scanRing(t) : 0;
+    if (!need && t._tall) t._tall.length = 0;
+    if (CLEARANCE()) {
+      const want = t.ringRoof > 0 ? t.ringRoof + roofClearFor(t) : 0;
+      // THE CEILING IS A PREFERENCE, NOT A LICENCE TO CLIP. Staying inside the
+      // RPG's reach is polish; not being inside a building is the fix, and the
+      // fix outranks the polish. `noClip` is the lowest altitude at which no
+      // part of the airframe is inside the roof — if the ceiling would sit
+      // under it, the roof wins and `overCeil` records the trade instead of the
+      // craft quietly going back through the tower.
+      const noClip = t.ringRoof > 0 ? t.ringRoof + HULL_V + 1 : 0;
+      t.overCeil = want > CRUISE_CEIL;
+      t.cruise = Math.max(t.band, noClip, Math.min(CRUISE_CEIL, want));
+    } else {
+      t.overCeil = false;
+      t.cruise = t.band;                 // the authored track, exactly as it shipped
+    }
     if (snap || t.alt == null || t.cruise > t.alt) t.alt = t.cruise;
+    armHits(t);                          // altitude is settled — arm what it can hit
   }
   const CLIMB_DOWN = 4.5;           // m/s — a light single's honest rate of descent
   function easeClear(t, dt) {
     if (t.alt > t.cruise) t.alt = Math.max(t.cruise, t.alt - CLIMB_DOWN * dt);
   }
 
-  /* CBZ.airTrafficAudit() — DOES THE AMBIENT FLEET FLY THROUGH THE CITY?
-     `clipping` is the ratchet and must be 0: a craft whose lowest point
-     (alt - HULL_DROP) sits below the tallest roof on its own circuit is, at
-     some point in every lap, INSIDE a building. `overCeil` names any craft the
-     fairness ceiling had to hold down, and `minGap` is the thinnest daylight
-     any craft has over its own track — printed beside `clipping` so a "fix"
-     that just raised everything into the stratosphere cannot pass unnoticed. */
+  /* CBZ.airTrafficAudit() — WHAT IS THE AMBIENT FLEET DOING TO THE CITY?
+
+     Read the two headline numbers TOGETHER; each alone can be gamed.
+
+       crashed  — cumulative building strikes since this fleet was built. In
+                  the shipped COLLIDE world this is the FEATURE WORKING and it
+                  is expected to climb off 0 as soon as a track that crosses a
+                  tower is flown in view. It is not a ratchet in either
+                  direction; it is proof the sky has consequences.
+       clipping — RATCHET, must be 0. A craft that is being SIMULATED (inside
+                  the ring cull, i.e. actually drawn) while its hull is inside
+                  a building and it is still flying. Zero by construction: the
+                  update loop kills such a craft on the same frame it draws it.
+                  Culled craft are excluded on purpose — they are frozen, and
+                  they die on the frame they resume.
+
+     `armed`/`candidates` say how much of the fleet the detector is even
+     watching, so a "fix" that silently stopped arming anything cannot hide
+     behind clipping:0. `raised` is 0 whenever AIR_TRAFFIC_CLEARANCE is off,
+     which is the one-line proof that the alternate mode is not secretly on. */
   CBZ.airTrafficAudit = function () {
     const out = {
-      craft: 0, planes: 0, helis: 0, clipping: 0, overCeil: 0, raised: 0,
-      minGap: null, maxAlt: 0, bands: ALT_BANDS.slice(),
-      roofClear: ROOF_CLEAR, ceiling: CRUISE_CEIL,
-      enabled: CLEARANCE(), colliders: (CBZ.colliders || []).length, list: [],
+      mode: COLLIDE() ? (CLEARANCE() ? "collide+clearance" : "collide")
+                      : (CLEARANCE() ? "clearance" : "off"),
+      clearance: CLEARANCE(), collide: COLLIDE(),
+      craft: 0, planes: 0, helis: 0,
+      crashed: crashes,          // cumulative strikes — the feature working
+      clipping: 0,               // RATCHET: must be 0
+      armed: 0, candidates: 0, overflow: false,
+      raised: 0, overCeil: 0, minGap: null, maxAlt: 0,
+      bands: ALT_BANDS.slice(), roofClear: ROOF_CLEAR, ceiling: CRUISE_CEIL,
+      colliders: (CBZ.colliders || []).length, list: [],
     };
     if (!fleet) return out;
+    const P = CBZ.player;
     for (let i = 0; i < fleet.length; i++) {
       const t = fleet[i];
       if (!t || t.downed) continue;
       out.craft++;
       if (t.kind === "heli") out.helis++; else out.planes++;
+      const nHits = (t.hits && t.hits.length) || 0;
+      if (nHits) out.armed++;
+      out.candidates += nHits;
+      if (t.tallOverflow) out.overflow = true;
+      // the craft's TRUE orbit position (the mesh transform is stale while a
+      // craft is ring-culled, and reading it would report a ghost)
+      const ang = t.phase + t.dir * (t.speed / t.radius) * clock;
+      const x = t.cx + Math.cos(ang) * t.radius, z = t.cz + Math.sin(ang) * t.radius;
+      const simmed = !P || ((x - P.pos.x) * (x - P.pos.x) + (z - P.pos.z) * (z - P.pos.z)) <= VIS_RING * VIS_RING;
+      if (simmed && COLLIDE() && hullStrike(t, x, z)) out.clipping++;
       const roof = t.ringRoof || 0;
-      const gap = (t.alt || 0) - HULL_DROP - roof;
-      if (roof > 0 && gap < 0) out.clipping++;
+      const gap = (t.alt || 0) - HULL_V - roof;
       if (t.overCeil) out.overCeil++;
       if ((t.alt || 0) > t.band + 0.01) out.raised++;
       if (out.minGap == null || gap < out.minGap) out.minGap = +gap.toFixed(2);
       if ((t.alt || 0) > out.maxAlt) out.maxAlt = Math.round(t.alt || 0);
       out.list.push({ kind: t.kind, band: t.band, alt: Math.round(t.alt || 0),
-                      roof: Math.round(roof), gap: +gap.toFixed(1), r: Math.round(t.radius) });
+                      roof: Math.round(roof), gap: +gap.toFixed(1),
+                      r: Math.round(t.radius), armed: nHits });
     }
     return out;
   };
@@ -453,10 +599,11 @@
         speed: (isHeli ? 18 : 27) + h01(i, 74) * (isHeli ? 8 : 16),
         phase: h01(i, 75) * Math.PI * 2,
       };
-      // measure the circuit before the craft is ever drawn — a plane must not
-      // appear inside a tower for one frame and then climb out of it. Reads
-      // only CBZ.colliders (a pure function of the seeded world build) and
-      // draws no rng, so the fleet stays byte-identical per seed.
+      // measure the circuit before the craft is ever drawn, so it is ARMED
+      // (and, under the alternate clearance mode, already at its level) from
+      // its very first frame. Reads only CBZ.colliders — a pure function of
+      // the seeded world build — and draws no rng, so the fleet stays
+      // byte-identical per seed.
       refreshClear(t, true);
       root.add(grp);
       list.push(t);
@@ -618,9 +765,16 @@
     damageTraffic(rec, Math.max(1.5, (dmg || 0) * TRAFFIC_BULLET_MULT), true);
   }
 
-  function downTraffic(t) {
+  // opts.cause === "building" is the AIR_TRAFFIC_COLLIDE strike; everything
+  // else (the default) is the gun/rocket path and is byte-identical to what it
+  // always did. ONE die function, because "blow up like other plane" is a
+  // statement about reuse, not about a new effect.
+  function downTraffic(t, opts) {
     if (!t || t.downed) return;                // idempotent — one death per airframe
+    opts = opts || {};
+    const struck = opts.cause === "building";
     t.downed = true;
+    t.hitWall = struck;
     // freeze the orbit tangent as the crash heading: the wreck flies ON where
     // it was pointed, it doesn't keep steering the circuit.
     const ang = t.phase + t.dir * (t.speed / t.radius) * clock;
@@ -633,17 +787,42 @@
     t.rollRate = t.kind === "plane" ? (Math.random() < 0.5 ? -1 : 1) * (2.0 + Math.random() * 2) : 0;   // wing-loss death roll
     t.yawRate = t.kind === "heli" ? (Math.random() < 0.5 ? -1 : 1) * (3.5 + Math.random() * 3) : 0;     // tail-rotor-loss flat spin
     t.spinT = 0; t.smokeCD = 0;
+    if (struck) {
+      // BLOW UP WHERE IT HIT. The impact grammar is the one fallTraffic
+      // already uses when a wreck lands on a roof, fired at the WALL FACE
+      // instead of at the ground under it — and byPlayer FALSE throughout,
+      // because a plane the player never touched must put no heat on him.
+      const q = opts.impact || t.grp.position;
+      if (CBZ.cityExplosion) { try { CBZ.cityExplosion(q.x, q.z, { power: 1.6, radius: 8, byPlayer: false, y: q.y }); } catch (e) {} }
+      if (CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(q.x, q.y, q.z, 1.8); } catch (e) {} }
+      if (CBZ.cityShatter) { try { CBZ.cityShatter(q.x, q.z, 10); } catch (e) {} }
+      if (CBZ.cityScorch) { try { CBZ.cityScorch(q.x, q.z, 3); } catch (e) {} }
+      if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(q.x, q.y, q.z); } catch (e) {} }
+      // you leave a wall, you do not fly on through it: the wreck drops down
+      // the face instead of carrying its cruise speed into the building.
+      t.crashSpd = t.kind === "plane" ? 8 : 4;
+      t.vy = -1.0;
+    }
     if (CBZ.sfx) CBZ.sfx("explosion");
-    if (CBZ.shake) CBZ.shake(0.3);
-    if (CBZ.cityFlavor) CBZ.cityFlavor(t.kind === "heli" ? "You shot down a civilian helicopter!" : "You shot down a civilian plane!", "#ff8b6b");
+    if (CBZ.shake) CBZ.shake(struck ? 0.35 : 0.3);
+    if (CBZ.cityFlavor) CBZ.cityFlavor(
+      struck
+        ? (t.kind === "heli" ? "A civilian helicopter has flown into a building!"
+                             : "A civilian plane has flown into a building!")
+        : (t.kind === "heli" ? "You shot down a civilian helicopter!"
+                             : "You shot down a civilian plane!"),
+      "#ff8b6b");
     // occupants die with the airframe — route through the KILL BUS so the
     // corner feed attributes it ("You killed <citizen> · plane crash"; the
     // bus generates the citizen name for a null victim). GA planes sometimes
     // carry a passenger, so a second line can follow the pilot's.
+    // A BUILDING STRIKE HAS NO KILLER: `by` is null, so killfeed.js logs the
+    // (still generated) victim name with no attribution — nobody did this, and
+    // the player must not be credited with a death he had no part in.
     if (CBZ.cityKillFeed) {
       const n = t.kind === "plane" && Math.random() < 0.4 ? 2 : 1;
       for (let i = 0; i < n; i++) {
-        try { CBZ.cityKillFeed("You", null, t.kind === "heli" ? "helicopter crash" : "plane crash"); } catch (e) {}
+        try { CBZ.cityKillFeed(struck ? null : "You", null, t.kind === "heli" ? "helicopter crash" : "plane crash"); } catch (e) {}
       }
     }
   }
@@ -695,7 +874,16 @@
     }
     const groundRaw = CBZ.floorAt ? +CBZ.floorAt(p.x, p.z) : 0;
     const ground = isFinite(groundRaw) ? groundRaw : 0;
-    const surf = Math.max(ground, trafficRoofTop(p.x, p.z));
+    // YOU CANNOT LAND ON A ROOF YOU ARE ALREADY BELOW. trafficRoofTop answers
+    // "tallest collider top here" with no reference to the wreck's own height,
+    // so a craft falling PAST a tower — or one that just flew into its 40th
+    // storey — used to "impact" on that tower's ROOF, detonating dozens of
+    // metres above itself. Discarding a roof the wreck is under can only ever
+    // let it fall FURTHER; it can never carry one through a surface it was
+    // above, because in that case p.y is greater and the clamp does nothing.
+    let roof = trafficRoofTop(p.x, p.z);
+    if (roof > p.y) roof = 0;
+    const surf = Math.max(ground, roof);
     if (p.y > surf + 1.2) return false;
     // CONTAINED crash fireball (aircraft.js wreckImpact grammar at light-
     // airframe scale) + a scorch where it couples to true ground — never the
@@ -733,13 +921,15 @@
     const root = arenaRoot();
     if (!root) { if (fleet) teardown(); return; }
     if (fleet && fleetRoot !== root) teardown();     // city rebuilt → fresh fleet
-    if (!fleet) { fleet = buildFleet(root); fleetRoot = root; clearNext = 0; clearWho = 0; }
+    if (!fleet) { fleet = buildFleet(root); fleetRoot = root; clearNext = 0; clearWho = 0; crashes = 0; }
     clock += Math.min(dt, 0.05);
     // ROUND-ROBIN CIRCUIT RE-MEASURE: one craft every CLEAR_REFRESH seconds, so
     // a tower demolished (demolition.js) or raised (construction.js) under an
-    // existing track is picked up within one fleet-length of refreshes for the
-    // cost of a single collider walk. The whole fleet is never scanned in one
-    // frame after the build.
+    // existing track re-arms (or disarms) that craft within one fleet-length of
+    // refreshes, for the cost of a single collider walk. The whole fleet is
+    // never scanned in one frame after the build. This is the SLOW half of the
+    // detector — the fast half is the per-frame armed-list test in the loop
+    // below, which is exactly why this can afford to be slow.
     if (fleet.length && clock >= clearNext) {
       clearNext = clock + CLEAR_REFRESH;
       refreshClear(fleet[clearWho % fleet.length], false);
@@ -770,6 +960,30 @@
       }
       t.grp.visible = true;
       t.grp.position.set(x, t.alt, z);
+      // ---- THE BUILDING IS REAL (AIR_TRAFFIC_COLLIDE) ---------------------
+      // Tested AFTER the ring cull on purpose: a craft that is frozen and
+      // undrawn should not detonate on the far side of the map, spend its FX
+      // budget and empty the sky before the player has ever seen the fleet. It
+      // resumes, and it dies on the frame it is drawn inside the tower — which
+      // is also what makes this something you WATCH happen.
+      if (COLLIDE() && t.hits && t.hits.length) {
+        const s = hullSpan(t), lo = t.alt - HULL_V, hi = t.alt + HULL_V;
+        // tiny armed-list test first; the O(colliders) live confirm runs only
+        // on the one frame it says yes.
+        if (hullStrike(t, x, z)) {
+          const c = strikeConfirm(x, z, s, lo, hi);
+          if (c) {
+            // closest point of the box to the craft IS the wall face it struck
+            const qx = Math.max(c.minX, Math.min(c.maxX, x));
+            const qz = Math.max(c.minZ, Math.min(c.maxZ, z));
+            const qy = Math.max(c.y0 == null ? 0 : c.y0, Math.min(c.y1, t.alt));
+            crashes++;
+            downTraffic(t, { cause: "building", impact: { x: qx, y: qy, z: qz } });
+            continue;                    // the wreck arc owns it from here
+          }
+          t.hits.length = 0;             // stale candidate (demolished) — disarm until the next scan
+        }
+      }
       // heading = the orbit tangent; bank = the constant-radius turn angle
       // (tan(bank) = v^2 / (R*g)), signed to lean INTO the turn (matches the
       // player model's roll→turn sign convention). THIS FILE'S OWN FORMULA is
