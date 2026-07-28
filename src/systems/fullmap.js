@@ -2599,8 +2599,40 @@
   });
 
   addEventListener("keydown", function (e) {
+    // (e.key is read before the repeat bail now — a synthetic tapKey() event
+    // from the gamepad carries no code and, in principle, no key either.)
+    const k = (e.key || "").toLowerCase();
+    /* SPACE CLEARS THE WAYPOINT (CBZ.CONFIG.MAP_SPACE_CLEARS).
+       OWNER: "space bar doesnt work to clear waypoint on map." It never has —
+       this handler only ever bound Backspace/Delete (kept below as silent
+       aliases) and the footer in index.html advertised [Backspace]. Both now
+       say Space, which is the key the hand is already on.
+
+       The un-latch is the load-bearing half. systems/input.js keeps CBZ.keys
+       from a listener that knows nothing about overlays — it writes
+       keys[" "] = true for every press, map open or not — and the frame loop
+       keeps running while the map is up, so vehicles.js's handbrake (k[" "]),
+       playeraircraft's throttle/collective and swim.js's ascend all read that
+       latch underneath the map. open() already scrubs it via clearMoveKeys();
+       a press made WHILE the map is up needs the same scrub, which is why this
+       sits above the `e.repeat` bail and clears on repeats too (a held Space
+       re-latches on every auto-repeat, but only the first one is a real press,
+       so only the first one clears the waypoint). */
+    if (map.active && (e.code === "Space" || k === " " || k === "spacebar") &&
+        (!CBZ.CONFIG || CBZ.CONFIG.MAP_SPACE_CLEARS !== false)) {
+      e.preventDefault();
+      if (CBZ.keys) CBZ.keys[" "] = false;   // the map owns the key while it is up
+      // ...except that a controls card ("Space / Esc to close", controls.js) is
+      // the one overlay that can legitimately stand over the map — open a car,
+      // its Driving card pops, press M. That card's Space DISMISSES the card,
+      // and one press must not also throw the waypoint away. The un-latch above
+      // still runs, because the card only preventDefaults; input.js latched the
+      // key before it either way.
+      const cardUp = !!(CBZ.controls && CBZ.controls.open && CBZ.controls.open());
+      if (!e.repeat && !cardUp) clearWaypoint();
+      return;
+    }
     if (e.repeat) return;
-    const k = e.key.toLowerCase();
     // M ALWAYS toggles the full map (owner's order: the binding is M, layout-safe
     // via e.code; e.key kept for the gamepad's synthetic tapKey("m") which carries
     // no code). The old campaign branch that hijacked M to open the phone's

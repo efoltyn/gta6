@@ -110,6 +110,37 @@
   // exact pre-card behaviour).
   if (CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD == null) CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD = true;
 
+  /* ---- THE PILOT OWNS THE KEYBOARD (CBZ.CONFIG.FLIGHT_KEYS_OWNED) ---------
+     OWNER, verbatim: "e doesnt work to turn planes because it jumps out."
+
+     He is describing a collision this file caused. FLIGHT_CONTROLS_V2 put the
+     RUDDER on Q/E (playeraircraft.js flyWingV2 — `if (k["e"]) rudder -= 1`) and
+     the heli's lateral cyclic on the same pair (flyHeliV2), and
+     systems/controls.js's "Aeroplane" card prints exactly that: `Q / E —
+     Rudder`, `F — Get out`. But the keydown below routes EVERY e through
+     CBZ.cityTryNearestRide(), and that router's very first branch
+     (militaryvehicles.js) is `if (P._aircraft) { cityPlayerAircraftExit() }`.
+     So the pilot's right-rudder input was read as "leave the aeroplane", every
+     time, at any altitude.
+
+     The fix is not a special case on one key — it is a statement about who owns
+     input in this mode. At the controls of an aircraft the interact fabric
+     stands DOWN ENTIRELY: no E router, no detection pass, no card, no touch
+     verb pills. Nothing can shadow a flight control and nothing ADVERTISES a
+     key the pilot must not press. [F] remains the one exit (playeraircraft.js
+     owns it; bailout.js owns it in the air), which is what the controls card
+     has always said, and the gamepad's Y already called cityPlayerAircraftExit
+     directly rather than synthesising an e — so every route out is unchanged.
+
+     GROUND VEHICLES ARE UNTOUCHED. `ctx.driving` is true for both a car and an
+     aircraft, so the gate is the aircraft handle itself — a car keeps its E
+     step-out (interact.js "car-out") exactly as before. */
+  function pilotingAircraft() {
+    if (CBZ.CONFIG.FLIGHT_KEYS_OWNED === false) return false;
+    const P = CBZ.player;
+    return !!(P && P._aircraft);
+  }
+
   // ---- storage -------------------------------------------------------------
   const layers = Object.create(null);   // layer name -> [option, ...]
   const sources = [];                    // candidate finders (peds, cars, zones…)
@@ -468,6 +499,12 @@
   CBZ.onUpdate(39, function (dt) {
     if (g.mode !== "city") { if (current || (panel && panel.style.display)) releasePanel(); return; }
     if (g.state !== "playing" || CBZ.cityMenuOpen || CBZ.player.dead) { if (current) hidePanel(); holdKey = ""; return; }
+    // FLIGHT: nothing on the ground is in reach of a cockpit, so the card is
+    // both useless and dangerous up here — every row it draws is a key the
+    // pilot is flying with. Hiding it is what stops the HUD advertising an [E]
+    // the rudder owns, and it takes the touch verb pills (which are these same
+    // rows) down with it. See pilotingAircraft() above.
+    if (pilotingAircraft()) { if (current) hidePanel(); holdKey = ""; return; }
     if (dismissT > 0) { dismissT -= dt; if (dismissT <= 0) dismissedTarget = null; }
     pumpHold(dt);
     detAcc += dt; if (detAcc < 1 / 12) return; detAcc = 0;   // ~12 Hz is plenty for a prompt
@@ -643,6 +680,12 @@
   addEventListener("keydown", function (e) {
     if (g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || CBZ.player.dead) return;
+    // FLIGHT STAND-DOWN — the pilot owns the keyboard. Q/E are the rudder, F is
+    // the exit. This must sit ABOVE the ride router below: that router's first
+    // branch exits the aircraft, which is precisely the bug. Returning here
+    // also drops the slot dispatch, so a zone card that resolved on the frame
+    // before takeoff cannot fire from a stale row either.
+    if (pilotingAircraft()) { holdKey = ""; holdT = 0; holdFired = false; return; }
     const k = e.key.toLowerCase();
     // E/Y is the physical "use this ride" button. Do this before consulting
     // the prompt candidate: a pedestrian standing beside an aircraft used to
@@ -671,7 +714,9 @@
     if (k !== holdKey) return;
     const wasFired = holdFired;
     holdKey = ""; holdT = 0; holdFired = false;
-    if (wasFired || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
+    // ...and never on the release of a key that was armed on the ground and let
+    // go in the air (hold E on a car, [F] into the aircraft beside it, release).
+    if (wasFired || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || pilotingAircraft()) return;
     const { tap } = rowsFor(k);
     if (tap) fire(tap);   // released before the threshold → the tap verb
   });

@@ -74,6 +74,11 @@
     toggle: function (id) { if (openId) C.hide(); else C.show(id || context()); },
     // "has the player already been shown and dismissed this one"
     dismissed: function (id) { return !!seen[id]; },
+    // Which card is up right now ("" for none). The card's own keydown claims
+    // Space/Enter/Esc to dismiss itself, so any OTHER overlay that wants Space
+    // has to be able to see that this press is already spoken for — that is
+    // what systems/fullmap.js's Space-clears-waypoint asks before it acts.
+    open: function () { return openId || ""; },
   };
 
   /* ---- WHAT AM I DOING RIGHT NOW ----------------------------------------
