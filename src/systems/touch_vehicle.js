@@ -31,39 +31,121 @@
               FIRE / EXIT as heli. (QE rudder is a desktop fine-tune; touch turns
               by banking, the natural mobile-flight feel — no extra pills.)
 
+     ARMOR    the tank / armoured truck (city/militaryvehicles.js). It sets
+              P.driving but NOT P._vehicle — it keeps a module-local record —
+              so this layer's context watcher never matched it and an iPad
+              player could BOARD A TANK AND NEVER GET OUT: no EXIT, no FIRE,
+              no dial, and the on-foot cluster is hidden by body.tveh-on the
+              whole time. Now a real context.
+              FIRE  = tap → CBZ.cityArmorFire() (tank only; the truck has no
+                      gun, and a dead button is worse than no button)
+              EXIT  = tap → CBZ.cityExitArmor()
+     AUX RAIL (#tvAux) — a SECOND column standing directly above the dial, in
+              the dial's own footprint, so weapon/ordnance controls never grow
+              the primary thumb column past a thumb's reach. It carries the
+              controls that are about the PAYLOAD rather than the airframe:
+
+     B-2 ORDNANCE (city/strategic.js). The bomber shipped with four seams
+              published FOR THIS FILE — strategicBombDrop, strategicPayloadCycle,
+              strategicBombHold, strategicBombCameraHold — and not one of them
+              had a caller anywhere in the repo, so on an iPad the B-2 was a
+              plane with a bay you could not open:
+              BOMB    = hold → CBZ.strategicBombHold(down). Tap releases one,
+                        hold walks a carpet: the SAME tap/hold arc [B] runs,
+                        because it IS that state machine, not a copy of it.
+              PAYLOAD = tap  → CBZ.strategicPayloadCycle(), and the pill is
+                        also the READOUT ("MK-84 ×16"). That second job is not
+                        decoration: mobile.css hides #cityFlightHud under
+                        body.tveh-on, so the strip that teaches the payload on
+                        desktop is invisible on touch — the switch had no label
+                        AND no state.
+              BOMB CAM= hold → CBZ.strategicBombCameraHold(down)
+     HOMING   = tap → CBZ.lockonHomingSet(). The on-foot cluster has had this
+              pill for a while and body.tveh-on hides that cluster, so the one
+              place homing matters most — an armed aircraft with missiles on
+              the rail — was the one place a thumb could not reach it.
+     TRIM     = hold pair on the "q"/"e" keys the flight model already reads:
+              a helicopter's LATERAL CYCLIC (a real translation axis — it is
+              how you slide onto a pad) and a fixed wing's RUDDER.
+     RECENTER = tap → CBZ.camRecenter(): levels the view and hands the yaw back
+              to the vehicle's own auto-recenter (which has always honoured
+              camRecenterSuspended, so this adds no second yaw writer).
+
    Held buttons RE-ASSERT their key every frame from onUpdate(10) —
    just before vehicles (11) and aircraft (12) consume them — so a
    stick release (which clears WASD wholesale in touch.js) can never
    swallow a button the thumb is still pressing.
 
-   One-line revert: CBZ.CONFIG.TOUCH_VEHICLE = false.
+   One-line reverts: CBZ.CONFIG.TOUCH_VEHICLE = false (the whole layer),
+   TOUCH_AIRCRAFT_V2 = false (the aux rail + armor context — the layer
+   falls back byte-for-byte to the drive/heli/wing/chute/swim set).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_VEHICLE == null) CBZ.CONFIG.TOUCH_VEHICLE = true;
+  // TOUCH_AIRCRAFT_V2 — the ordnance/armor pass (owner 2026-07-28: "the B-2
+  // bomber and many other things that have new controls need new iPad
+  // controls"). Master flag for the aux rail, the armor context and the trim
+  // pair; off = this file behaves exactly as it did before the pass.
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIRCRAFT_V2 == null) CBZ.CONFIG.TOUCH_AIRCRAFT_V2 = true;
+  // TOUCH_TRIM_PAIR — the SLIDE/RUDDER hold pair. Separately revertible because
+  // it is the one addition that is a taste call rather than a missing verb:
+  // you CAN fly without it (bank and yaw cover the ground), you just cannot
+  // slide sideways onto a rooftop, which is what a helicopter is for.
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_TRIM_PAIR == null) CBZ.CONFIG.TOUCH_TRIM_PAIR = true;
   const on = () => !!(CBZ.touchMode) && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VEHICLE !== false);
+  const airV2 = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIRCRAFT_V2 !== false;
+  const trimOn = () => airV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_TRIM_PAIR !== false);
 
-  let root = null, dial = null, dialCtx = null, btnWrap = null, ammoEl = null;
-  let mode = "";               // "" | "drive" | "heli" | "wing"
+  let root = null, dial = null, dialCtx = null, btnWrap = null, auxWrap = null, ammoEl = null;
+  let mode = "";               // "" | "drive" | "armor" | "heli" | "wing" | "chute" | "swim"
   const held = Object.create(null);   // key -> true while a hold-button is down
-  let lastDraw = 0, lastSpeed = -1, lastSub = "";
+  // Every holdFn control's release callback, so the blur/pagehide sweeper can
+  // let go of a CALLBACK hold the same way it lets go of a KEY hold. LOOK BACK
+  // has been a holdFn since it shipped and was never in that sweep: a swallowed
+  // touchend (system edge swipe, notification shade) left the chase camera
+  // pinned backwards with no button down to explain it.
+  const heldFns = [];
+  let lastDraw = 0, lastSpeed = -1, lastSub = "", lastPay = "", lastAuxT = 0;
 
   // ---- DOM -------------------------------------------------------------------
   function pill(id, label, cls) {
     return '<button type="button" id="' + id + '" class="tvbtn ' + (cls || "") + '">' + label + "</button>";
   }
+  // The aux rail's LOOK is entirely the existing .tvbtn / .tv-sm / .tv-big /
+  // .tv-go / .tv-warn vocabulary — nothing new is styled. Only its POSITION is
+  // new, and it is one rule: a second column standing in the dial's own
+  // footprint (the dial is 128 px tall at bottom:4, so bottom:142 clears it)
+  // growing upward, so the primary thumb column never gets a seventh button.
+  function auxCss() {
+    if (document.getElementById("tvAuxCss")) return;
+    const s = document.createElement("style");
+    s.id = "tvAuxCss";
+    s.textContent =
+      "#tveh #tvAux{position:absolute;right:140px;bottom:142px;display:flex;" +
+      "flex-direction:column-reverse;align-items:flex-end;gap:8px;}" +
+      "#tveh #tvAux .tvrow{display:flex;flex-direction:row;gap:8px;}" +
+      "#tveh #tvAux .tvbtn{min-width:96px;}" +
+      "#tveh #tvAux .tvrow .tvbtn{min-width:60px;padding:8px 10px;}" +
+      "@media (max-width:820px){#tveh #tvAux{right:118px;bottom:120px;}" +
+      "#tveh #tvAux .tvbtn{min-width:86px;min-height:42px;font-size:13px;}}";
+    document.head.appendChild(s);
+  }
   function build() {
     if (root) return;
+    auxCss();
     root = document.createElement("div");
     root.id = "tveh";
     root.innerHTML =
       '<canvas id="tvDial" width="256" height="256"></canvas>' +
+      '<div id="tvAux"></div>' +
       '<div id="tvBtns"></div>';
     document.body.appendChild(root);
     dial = root.querySelector("#tvDial");
     dialCtx = dial.getContext("2d");
     btnWrap = root.querySelector("#tvBtns");
+    auxWrap = root.querySelector("#tvAux");
   }
 
   // press-and-hold: the key goes down with the finger and is re-asserted per
@@ -83,18 +165,28 @@
     el.addEventListener("touchcancel", () => el.classList.remove("on"), { passive: false });
     el.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
   }
-  // press-and-hold that drives a callback instead of a key (camera hooks)
+  // press-and-hold that drives a callback instead of a key (camera hooks, the
+  // bomb release, the bomb camera). Its release is REGISTERED so the layer's
+  // stale-hold sweeper can drop it on blur — a callback hold is exactly as
+  // capable of surviving a swallowed touchend as a key hold, and a latched
+  // BOMB would keep walking a carpet run across the city after you alt-tabbed.
   function holdFn(el, fn) {
-    const dn = (e) => { e.preventDefault(); el.classList.add("on"); fn(true); };
-    const up = (e) => { e.preventDefault(); el.classList.remove("on"); fn(false); };
+    let down = false;
+    const dn = (e) => { e.preventDefault(); if (down) return; down = true; el.classList.add("on"); fn(true); };
+    const up = (e) => { if (e && e.preventDefault) e.preventDefault(); if (!down) return; down = false; el.classList.remove("on"); fn(false); };
     el.addEventListener("touchstart", dn, { passive: false });
     el.addEventListener("touchend", up, { passive: false });
     el.addEventListener("touchcancel", up, { passive: false });
     el.addEventListener("mousedown", dn); el.addEventListener("mouseup", up);
     el.addEventListener("mouseleave", up);
+    heldFns.push(function () { up(null); });
   }
   function clearHeld() {
     for (const k in held) { if (held[k]) { held[k] = false; if (CBZ.keys) CBZ.keys[k] = false; } }
+    // Release, but do NOT forget: after a blur the buttons still exist and must
+    // stay sweepable. Only layout() — which replaces the DOM outright — drops
+    // the list, and it does that itself.
+    for (let i = 0; i < heldFns.length; i++) { try { heldFns[i](); } catch (e) {} }
   }
   // Losing the page mid-hold (app switch, phone lock, edge swipe) can swallow
   // a touchend — BRAKE/UP/THR would stay latched through the refocus. Drop
@@ -117,7 +209,9 @@
   function layout(next) {
     mode = next;
     clearHeld();
+    heldFns.length = 0;          // the DOM these released is about to be replaced
     if (!btnWrap) return;
+    if (auxWrap) { auxWrap.innerHTML = ""; lastPay = ""; lastAuxT = 0; }
     if (!next) { btnWrap.innerHTML = ""; ammoEl = null; return; }
     // #tvBtns is column-REVERSE: the FIRST button here sits at the BOTTOM,
     // nearest the resting thumb — so the big primary hold goes first.
@@ -129,6 +223,13 @@
     let html = "";
     if (next === "drive") {
       html = pill("tvBrake", "BRAKE", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+    } else if (next === "armor") {
+      // A TANK IS A GUN ON TRACKS AND A TRUCK IS NOT. The FIRE button is built
+      // only for the turreted hull — militaryvehicles.js's own fire path refuses
+      // anything else, and a lit button that refuses is worse than no button.
+      // The turret needs no control of its own: it already tracks cam.yaw, which
+      // on touch is the look drag, so aiming the gun is aiming the camera.
+      html = (isTank() ? FIRE_BTN : "") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "heli") {
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
         FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
@@ -176,7 +277,73 @@
     if (q("tvRise")) holdBtn(q("tvRise"), " ");
     if (q("tvDive")) holdBtn(q("tvDive"), "control");
     ammoEl = btnWrap.querySelector("#tvAmmo");
+    layoutAux(next);
+    // The dial paints per CONTEXT and a mount publishes no speed, so rather than
+    // leave the previous context's needle frozen on screen (a gauge that lies is
+    // worse than no gauge) the instrument stands down for the saddle.
+    if (dial) dial.style.display = (next === "mount") ? "none" : "";
     lastSpeed = -1; lastSub = "";   // force a dial repaint for the new context
+  }
+
+  // ---- the AUX RAIL: payload / weapons / camera, above the dial -------------
+  // Everything here is built for the CONTEXT and then shown or hidden per frame
+  // by the watcher below — the same merge-order-safe pattern LOOK BACK and VIEW
+  // already use, which is what lets a B-2 that finishes initialising a beat
+  // after boarding still get its bay controls without a second layout pass.
+  function layoutAux(next) {
+    if (!auxWrap || !airV2()) return;
+    const air = next === "heli" || next === "wing";
+    const drv = next === "drive" || next === "armor";
+    if (!air && !drv && next !== "mount") return;
+    let h = "";
+    // A MOUNT IS NOT A VEHICLE and must not be dressed as one — see the mount
+    // branch in the watcher. It gets ONE pill, in the aux rail, well clear of
+    // the on-foot cluster, because everything else about riding (move, look,
+    // jump, aim, FIRE) is still the on-foot layer's job and stays on screen.
+    if (next === "mount") h += pill("tvDismount", "DISMOUNT", "tv-sm");
+    if (air) {
+      // Bottom-up (column-reverse): the release sits nearest the thumb, its own
+      // readout directly above it, and the occasional taps PAIR OFF into rows.
+      // The rows are a height budget, not a style choice — stacking all six
+      // singly runs the column past 500 px up a 768 px landscape iPad and into
+      // the top-right money/wanted stack. Rows keep the whole rail under ~290.
+      h += pill("tvBomb", "BOMB", "tv-big tv-warn");
+      h += pill("tvPay", "PAYLOAD", "tv-sm");
+      h += '<div class="tvrow" id="tvWepRow">' + pill("tvBombCam", "BOMB CAM", "tv-sm") +
+        pill("tvHoming", "HOMING", "tv-sm") + "</div>";
+      if (trimOn()) {
+        // A PAIR READS AS A PAIR: left and right side by side in one row, never
+        // stacked — a stacked left/right is the classic touch-layout lie.
+        const tw = next === "heli" ? "SLIDE" : "RUD";
+        h += '<div class="tvrow" id="tvTrimRow">' +
+          pill("tvTrimL", "◀ " + tw, "tv-sm") +
+          pill("tvTrimR", tw + " ▶", "tv-sm") + "</div>";
+      }
+    }
+    h += pill("tvRecen", "RECENTER", "tv-sm");
+    auxWrap.innerHTML = h;
+    const q = (id) => auxWrap.querySelector("#" + id);
+    // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
+    // releases one, past 0.4 s it becomes a carpet run), so the thumb inherits
+    // the whole arc instead of re-implementing half of it.
+    if (q("tvBomb")) holdFn(q("tvBomb"), (down) => { if (CBZ.strategicBombHold) CBZ.strategicBombHold(down); });
+    if (q("tvBombCam")) holdFn(q("tvBombCam"), (down) => { if (CBZ.strategicBombCameraHold) CBZ.strategicBombCameraHold(down); });
+    if (q("tvPay")) tapBtn(q("tvPay"), () => {
+      if (CBZ.strategicPayloadCycle) CBZ.strategicPayloadCycle();
+      lastPay = "";                      // repaint the label on the next tick
+    });
+    if (q("tvHoming")) tapBtn(q("tvHoming"), () => {
+      if (!CBZ.lockonHomingSet) return;
+      CBZ.lockonHomingSet(!CBZ.lockonHomingOn());
+      if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn() ? 1.25 : 0.8 });
+    });
+    // The trim pair writes the SAME q/e the flight model already reads (heli
+    // lateral cyclic, wing rudder) — no new API, no new axis, and the layer's
+    // own key pump + stale-hold sweeper cover it for free.
+    if (q("tvTrimL")) holdBtn(q("tvTrimL"), "q");
+    if (q("tvTrimR")) holdBtn(q("tvTrimR"), "e");
+    if (q("tvDismount")) tapBtn(q("tvDismount"), () => { if (CBZ.cityDismount) CBZ.cityDismount(); });
+    if (q("tvRecen")) tapBtn(q("tvRecen"), () => { if (CBZ.camRecenter) CBZ.camRecenter(); });
   }
 
   // Is the touch vehicle layer currently OWNING the bottom-right instrument
@@ -187,12 +354,24 @@
   CBZ.touchVehicleActive = function () { return !!(on() && mode); };
   CBZ.touchVehicleMode = function () { return mode || ""; };
 
+  // ARMOR reads (city/militaryvehicles.js). Feature-detected on BOTH sides: a
+  // build without the seam simply never offers the fire button and never grows
+  // an armor context, and the pre-seam behaviour returns exactly.
+  const armorOn = () => !!(airV2() && CBZ.cityArmorActive && CBZ.cityArmorActive());
+  function armorRec() { return CBZ.cityArmorRec ? CBZ.cityArmorRec() : null; }
+  function isTank() { const r = armorRec(); return !!(r && r.kind === "tank" && CBZ.cityArmorFire); }
+
   function doExit() {
     const P = CBZ.player; if (!P) return;
     if (P._aircraft && CBZ.cityPlayerAircraftExit) CBZ.cityPlayerAircraftExit();
+    // ARMOR BEFORE THE CAR CHECK: the tank sim sets P.driving with no
+    // P._vehicle, so cityExitVehicle has nothing to step out of — it was the
+    // one seat in the game a thumb could enter and not leave.
+    else if (armorOn() && CBZ.cityExitArmor) CBZ.cityExitArmor();
     else if (P.driving && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
   }
   function doFire() {
+    if (mode === "armor") { if (CBZ.cityArmorFire) CBZ.cityArmorFire(); return; }
     if (CBZ.cityAircraftFireMissile) CBZ.cityAircraftFireMissile();
   }
 
@@ -257,6 +436,80 @@
     if (sub) { c.font = "600 19px Fredoka, system-ui, sans-serif"; c.fillText(sub, cx, cy - 44); }
   }
 
+  // ---- aux rail refresh -----------------------------------------------------
+  // Show/hide by what the world can actually DO right now, and let each label
+  // carry its own state. Nothing here is a second source of truth: the payload
+  // name and count come from strategic.js's own readout (the exact function its
+  // desktop strip reads), homing from lockon.js's own getter.
+  function show(el, want) {
+    if (!el) return;
+    const v = want ? "" : "none";
+    if (el.style.display !== v) el.style.display = v;
+  }
+  function refreshAux() {
+    if (!auxWrap || !airV2()) return;
+    // ~11 Hz, the dial's own budget. strategicPayloadReadout builds a small
+    // object and a string per call; at 60 Hz that is 60 throwaway objects a
+    // second to answer a question whose answer changes on a button press.
+    const nowA = performance.now();
+    if (nowA - lastAuxT < 90) return;
+    lastAuxT = nowA;
+    const air = mode === "heli" || mode === "wing";
+    // THE BOMBER IS THE CONTEXT, not the aircraft. Every other airframe in the
+    // game — the gunship, the airliner, the Raptor, Fort Brandt's heavy bomber
+    // — has no bay at all (strategic.js says so in as many words when [B] is
+    // pressed in one), so these three controls exist only while the B-2 is the
+    // thing you are flying.
+    const pay = (air && CBZ.strategicPayloadReadout) ? CBZ.strategicPayloadReadout() : null;
+    const b2 = !!(pay && pay.b2);
+    show(auxWrap.querySelector("#tvBomb"), b2 && !!CBZ.strategicBombHold);
+    show(auxWrap.querySelector("#tvPay"), b2 && !!CBZ.strategicPayloadCycle);
+    show(auxWrap.querySelector("#tvBombCam"), b2 && !!CBZ.strategicBombCameraHold &&
+      CBZ.CONFIG.STRAT_BOMB_CINEMATIC !== false);
+    const pb = auxWrap.querySelector("#tvPay");
+    if (pb && b2) {
+      // The pill IS the payload strip on touch: mobile.css hides
+      // #cityFlightHud under body.tveh-on, so without this label the switch
+      // would have neither a name nor a count — the exact "there's no way to
+      // change payload" complaint, one layer down.
+      //
+      // AND IT IS THE REFUSAL CHANNEL. strategic.js answers a refused release
+      // with payloadFlash("TOO LOW — CLIMB" / "BAY EMPTY") because its own
+      // comment says the matching note() is deleted upstream by mode.js — so
+      // on touch, where the strip that carries the flash is display:none, a
+      // refused BOMB was completely silent. It reads as a broken button, which
+      // is the exact failure that comment was written to prevent. The flash
+      // takes the pill for its duration; `count` carries the rest.
+      const flash = (pay.flash > 0 && pay.tag) ? String(pay.tag) : "";
+      const lab = flash || ((pay.short || "PAYLOAD") + " ×" + (pay.count | 0));
+      if (lab !== lastPay) { lastPay = lab; pb.textContent = lab; }
+      pb.classList.toggle("tv-warn", !!flash || (pay.count | 0) <= 0);
+    }
+    // HOMING: the on-foot cluster owns this pill, and body.tveh-on hides that
+    // cluster — so on an armed aircraft, where a red lock matters most, a thumb
+    // had no way to reach it at all. Lit = homing, dim = dumb-fire; same read,
+    // same setter, no second state.
+    const hm = auxWrap.querySelector("#tvHoming");
+    let homLive = false;
+    if (hm) {
+      homLive = !!(air && CBZ.lockonState && CBZ.lockonState().active && CBZ.lockonHomingSet);
+      show(hm, homLive);
+      if (homLive) hm.style.opacity = CBZ.lockonHomingOn && CBZ.lockonHomingOn() ? "" : "0.42";
+    }
+    // A row whose every child is hidden is still a flex item and still eats its
+    // share of the column gap, so the row itself stands down with its contents.
+    const wr = auxWrap.querySelector("#tvWepRow");
+    if (wr) show(wr, homLive || (b2 && !!CBZ.strategicBombCameraHold &&
+      CBZ.CONFIG.STRAT_BOMB_CINEMATIC !== false));
+    // TRIM pair — only where the axis exists: FLIGHT_CONTROLS_V2 is what maps
+    // q/e to lateral cyclic / rudder, so with it off the buttons would write
+    // keys nothing reads, which is a stat fiction in button form.
+    const tr = auxWrap.querySelector("#tvTrimRow");
+    if (tr) show(tr, air && (!CBZ.CONFIG || CBZ.CONFIG.FLIGHT_CONTROLS_V2 !== false));
+    const rc = auxWrap.querySelector("#tvRecen");
+    if (rc) show(rc, !!CBZ.camRecenter && (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false));
+  }
+
   // ---- key pump: held buttons win over a released stick ---------------------
   // Runs at 10, just before player driving (11) / flight (12) read CBZ.keys.
   CBZ.onUpdate(10, function () {
@@ -276,15 +529,33 @@
     if (chute) next = "chute";
     else if (active && P._aircraft) next = P._aircraft.kind === "heli" ? "heli" : "wing";
     else if (active && P.driving && P._vehicle) next = "drive";
+    // ARMOR: militaryvehicles.js sets P.driving and keeps its hull in a
+    // module-local record, so it matches NEITHER of the two branches above —
+    // which is precisely why this layer never appeared in a tank. It is tested
+    // after them because a car and a hull can never both be true, and its own
+    // sim bails the moment P._vehicle / P._aircraft appears.
+    else if (active && armorOn()) next = "armor";
     // In the water the thumb needs the vertical axis (dive/rise). Same
     // precedence slot as a vehicle: the swim owns the body right now.
     else if (active && CBZ.citySwimming && CBZ.citySwimming()) next = "swim";
+    // MOUNTED (city/wildlife_tame.js). Tapping the animal mounts it — touch.js
+    // has always routed that through cityMountAnimal — but the way OFF was the
+    // literal string "E to dismount" in a note, so a thumb was stuck on the
+    // horse. The detection is gamepad.js's own idiom verbatim (_rideScale > 1 +
+    // the public cityDismount), not a new field and not a new export.
+    else if (active && airV2() && P._rideScale > 1 && CBZ.cityDismount) next = "mount";
     if (!root && next) build();
     if (!root) return;
     if (next !== mode) {
       layout(next);
       root.style.display = next ? "block" : "none";
-      document.body.classList.toggle("tveh-on", !!next);
+      // "tveh-on" HIDES THE ON-FOOT CLUSTER, and that is right for everything
+      // you climb into and wrong for a saddle: you can still shoot, jump, aim
+      // and swap weapons from horseback (fpsmode's shoulder owner only bails on
+      // p.driving, which riding never sets), so claiming the corner would DELETE
+      // combat from a mounted player. The mount context therefore lives entirely
+      // in the aux rail and leaves #tbtns exactly where it is.
+      document.body.classList.toggle("tveh-on", !!next && next !== "mount");
     }
     if (!next) return;
 
@@ -294,6 +565,7 @@
       const want = CBZ.camLookBack ? "" : "none";
       if (lb.style.display !== want) lb.style.display = want;
     }
+    refreshAux();
     // VIEW appears only once the cockpit files are present (same merge-order
     // safety as LOOK BACK — neither button may assume its API exists)
     const vb = btnWrap.querySelector("#tvView");
@@ -326,6 +598,13 @@
           if (a !== ammoEl.textContent) ammoEl.textContent = a;
         }
       }
+    } else if (mode === "armor") {
+      // The main gun carries no magazine (militaryvehicles.js gates it on a
+      // 0.85 s fireCD, not on rounds), so the ammo badge is HIDDEN rather than
+      // shown empty — a blank counter is a claim that you have none.
+      const fb = btnWrap.querySelector("#tvFire");
+      if (fb) show(fb, isTank());
+      if (ammoEl) ammoEl.style.display = "none";
     }
 
     // dial repaint, throttled (~12 Hz — SwiftShader/phone friendly)
@@ -353,6 +632,16 @@
       const kmh = Math.abs((car && car.v) || 0) * 4.8;   // hud.js mph≈v*3 → km/h≈v*4.8
       const key = Math.round(kmh);
       if (key !== lastSpeed) { lastSpeed = key; drawDial(kmh, 240, "km/h", "", false); }
+    } else if (mode === "armor") {
+      // Same instrument, honest SCALE: armorTuning tops a tank at 14 m/s and a
+      // truck at 20 (≈67 / 96 km/h), so the car dial's 240 cap would pin the
+      // needle in the first eighth and read as a broken gauge. 120 lets a tank
+      // actually sweep. The sub-line names the hull, which is also how you can
+      // tell at a glance why there is (or is not) a FIRE button.
+      const rec = armorRec();
+      const kmh = Math.abs((rec && rec.v) || 0) * 4.8;
+      const key = Math.round(kmh), sub = isTank() ? "TANK" : "ARMOR";
+      if (key !== lastSpeed || sub !== lastSub) { lastSpeed = key; lastSub = sub; drawDial(kmh, 120, "km/h", sub, false); }
     } else if (mode === "swim") {
       // Underwater the number that matters is air. Seconds left on the dial,
       // warning at the same 30% swim.js's own HUD threshold uses; the sub-line
@@ -392,4 +681,42 @@
       }
     }
   });
+
+  /* ---- THE VERB LEDGER (systems/touch.js owns CBZ.touchAudit) ---------------
+     Declared and stamped at LOAD, so the audit reports what this layer is
+     WIRED with rather than what a session happened to render. A row whose
+     `hook` is absent counts as noHook, never as covered — which is what makes
+     the degrade-safe feature-detects above readable as numbers instead of
+     hopes. The B-2 rows are the whole reason this ledger exists: those four
+     seams sat published and uncalled for the bomber's entire life.          */
+  if (CBZ.touchVerb) {
+    const V = CBZ.touchVerb, W = CBZ.touchVerbWired;
+    V("drive-brake", { ctx: "drive", key: "Space", hook: null }); W("drive-brake", "#tvBrake");
+    V("vehicle-exit", { ctx: "drive/air", key: "F/E", hook: null }); W("vehicle-exit", "#tvExit");
+    V("look-back", { ctx: "drive/air", key: "MMB", hook: "camLookBack" }); W("look-back", "#tvLook");
+    V("cockpit-view", { ctx: "air", key: "V", hook: "cockpitToggleView" }); W("cockpit-view", "#tvView");
+    V("heli-collective", { ctx: "heli", key: "Space/Ctrl", hook: null }); W("heli-collective", "#tvUp/#tvDown");
+    V("wing-throttle", { ctx: "wing", key: "Space/Ctrl", hook: null }); W("wing-throttle", "#tvThrUp/#tvThrDn");
+    V("air-missile", { ctx: "air", key: "LMB", hook: "cityAircraftFireMissile" }); W("air-missile", "#tvFire");
+    V("chute-pull", { ctx: "chute", key: "Space/F", hook: "cityChuteDeploy" }); W("chute-pull", "#tvChute");
+    V("chute-cut", { ctx: "chute", key: "Space/F", hook: "cityChuteCut" }); W("chute-cut", "#tvChute");
+    V("swim-vertical", { ctx: "swim", key: "Space/Ctrl", hook: null }); W("swim-vertical", "#tvRise/#tvDive");
+    V("bomb-release", { ctx: "b2", key: "B tap", hook: "strategicBombHold" }); W("bomb-release", "#tvBomb");
+    V("bomb-carpet", { ctx: "b2", key: "B hold", hook: "strategicBombHold" }); W("bomb-carpet", "#tvBomb");
+    V("payload-cycle", { ctx: "b2", key: "X", hook: "strategicPayloadCycle" }); W("payload-cycle", "#tvPay");
+    V("payload-readout", { ctx: "b2", key: "#cityFlightHud", hook: "strategicPayloadReadout" }); W("payload-readout", "#tvPay label");
+    V("bomb-camera", { ctx: "b2", key: "C hold", hook: "strategicBombCameraHold" }); W("bomb-camera", "#tvBombCam");
+    V("air-homing", { ctx: "air", key: "H", hook: "lockonHomingSet" }); W("air-homing", "#tvHoming");
+    V("heli-lateral", { ctx: "heli", key: "Q/E", hook: null }); W("heli-lateral", "#tvTrimL/#tvTrimR");
+    V("wing-rudder", { ctx: "wing", key: "Q/E", hook: null }); W("wing-rudder", "#tvTrimL/#tvTrimR");
+    V("armor-exit", { ctx: "armor", key: "E", hook: "cityExitArmor" }); W("armor-exit", "#tvExit");
+    V("armor-fire", { ctx: "armor", key: "LMB", hook: "cityArmorFire" }); W("armor-fire", "#tvFire");
+    V("mount", { ctx: "foot", key: "I / panel", hook: "cityMountAnimal" }); W("mount", "world tap");
+    V("dismount", { ctx: "mount", key: "E", hook: "cityDismount" }); W("dismount", "#tvDismount");
+    V("vehicle-recenter", { ctx: "drive/air/armor/mount", key: "—", hook: "camRecenter" }); W("vehicle-recenter", "#tvRecen");
+    // Declared and deliberately NOT drawn — the reason travels with the row so
+    // the skipped list can never quietly absorb a real gap:
+    V("hangar-buy", { ctx: "foot", key: "B", skip: "playeraircraft's [B] at a hangar only ever prints the steal-it notice; the F-22 is not buyable and a pill for a refusal is a lie" });
+    V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag — aiming the gun is aiming the camera, so a control would be a duplicate axis" });
+  }
 })();

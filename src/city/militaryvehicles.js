@@ -509,6 +509,21 @@
   // Read-only seat ownership probe for controllers/touch. Armor intentionally
   // does not use P._vehicle, so callers cannot infer it from the car system.
   CBZ.cityArmorActive = function () { return !!armor; };
+  // TOUCH SEAM (systems/touch_vehicle.js). Armor published ONE boolean, so the
+  // touch layer could not tell a tank from a truck, could not read the hull's
+  // speed for its dial, and had no fire verb to call — which is why a tank on
+  // an iPad was a machine you could board and never leave (the on-foot cluster
+  // is hidden by body.tveh-on the whole time you are in one). Two read-only
+  // accessors and one call-through; no state moves out of this file.
+  // core/mission.js also has to IDENTIFY this hull today by comparing the
+  // player's position against every record (its own `armorIs` comment says so);
+  // cityArmorRec is the honest answer whenever that file is next opened.
+  CBZ.cityArmorRec = function () { return armor; };
+  CBZ.cityArmorFire = function () {
+    if (!armor || armor.kind !== "tank") return false;   // the truck has no gun
+    fireTank(armor);
+    return true;
+  };
 
   // One input route for every stealable machine. Pressing E/Y exits the
   // current seat or attempts the nearest parked ride; there is no artificial
@@ -678,11 +693,18 @@
       const maxStep = 1.4 * dt;                            // ~1.4 rad/s slew
       if (d > maxStep) d = maxStep; else if (d < -maxStep) d = -maxStep;
       ud.turret.rotation.y = cur + d;
-    } else if (rec.kind !== "tank" && CBZ.cam && CBZ.lerpAngle && Math.abs(rec.v) > 0.3) {
+    } else if (rec.kind !== "tank" && CBZ.cam && CBZ.lerpAngle && Math.abs(rec.v) > 0.3 &&
+               !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
       // NON-TURRET ground (the armored truck): no independent gun, so frame it
       // like a car — gently ease the chase cam back BEHIND the hull as it rolls,
       // so you read the road ahead. Only while moving, and lazily, so the mouse
       // can still glance around when stopped.
+      // CLAUDE.md law: "vehicle-recenter writers must respect
+      // camRecenterSuspended()". This was the LAST holdout — cars, aircraft,
+      // boats and the cockpit head all honour it and this line did not, so a
+      // deliberate glance (a mouse look, or a touch look-drag, which is the
+      // only way to look around at all on an iPad) was fought back every frame
+      // while the truck was rolling.
       CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, rec.heading + Math.PI, 1 - Math.pow(0.2, dt));
     }
 
