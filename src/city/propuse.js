@@ -86,6 +86,14 @@
      CBZ.propSeatsIn(x0,x1,z0,z1,y) — every seat in a rect on one floor.
      CBZ.propSit / propStand    — seat/release now (arc; claim is instant)
      CBZ.propSleep / propWake   — the bed pair
+     CBZ.propLiePlace(actor,bed) — {x,y,z} for the rig's ORIGIN (its FEET) when
+                                  this actor lies on this bed. THE ONE placement
+                                  solve: both commits, both arc beats, the NPC
+                                  hold and the player pin call it, so a sleeper
+                                  is never in two places. Never place a lying
+                                  body off `bed.x/z/lieY` again — that put the
+                                  feet at the mattress CENTRE and threw the head
+                                  a body-length past the headboard.
      CBZ.propSeatRef(rec|kind)  — {cushion, floorBelow} → ch.seatRef, the one
                                   seam between "what seat is this" and the
                                   rig's chair solve. null for an undeclared
@@ -216,8 +224,11 @@
   // ---- registries -----------------------------------------------------------
   // Seat rec: { x,y,z, face, kind, lot, occupant, cushionH, floorBelow }
   //   (y = FLOOR level the sitter's FEET rest on; cushionH = cushion top above it)
-  // Bed rec:  { x,y,z, face, hx,hz, len, lieY, kind, lot, occupant }
-  //   (lieY = pinned body height when lying = mattressTop + 0.3, the KO-lie offset)
+  // Bed rec:  { x,y,z, face, hx,hz, len, top, lieY, kind, lot, occupant }
+  //   (top = the mattress TOP surface, world y — the one number a lying body is
+  //    placed off. lieY is the legacy `top + 0.3` KO-lie height and is now only
+  //    the "this record is a BED" discriminator: WHERE A BODY ACTUALLY LIES IS
+  //    CBZ.propLiePlace, which solves it from the sleeper's own rig.)
   // Poster rec: { mesh, x,y,z, entry }  (entry = props.js's dynAds record; its
   //   lastKey tells whether the board is CURRENTLY showing a wanted ad)
   const seats = CBZ.propSeats = CBZ.propSeats || [];
@@ -624,6 +635,69 @@
     if (grp) { grp.position.set(x, y, z); if (yaw != null) grp.rotation.y = yaw; }
   }
 
+  // ---- WHERE A BODY LIES ------------------------------------------------------
+  // THE ONE answer to "where does THIS actor's rig go when it lies on THIS bed".
+  // Every lie path routes through it — both instant commits, both arc beats
+  // (swing/unroll), the NPC hold and the player pin — so the player and an NPC
+  // can never again lie in two different places on the same mattress.
+  //
+  // THE BUG IT DELETES (owner: "laying in bed looks f-ing dumb, player is far too
+  // high up on the bed, head is over it"): all six sites placed the rig's ORIGIN
+  // on the mattress CENTRE. entities/character.js stacks the entire body UP from
+  // the origin — THE ORIGIN IS THE FEET, not the middle — and the lie is that
+  // standing rig rolled 90° about Z (physics.js's KO look). So putting the feet
+  // at the centre threw a whole body length (~1.8 m) toward the pillow: on a
+  // 2.0 m bed the crown finished ~0.85 m PAST the head end, hanging in the air
+  // over the headboard, with the foot half of the mattress empty.
+  //
+  // Two numbers fall out of the RIG, and neither may be a constant again:
+  //   ALONG the bed — the anchor is where the FEET go, offset from the centre by
+  //     the sleeper's own stature, so a child and an adult both lie in the same
+  //     bed correctly and no caller has to know the rig's height.
+  //   VERTICALLY — under that roll the axis that becomes UP is the body's
+  //     LATERAL one, so the mattress clearance is half a SHOULDER, not the
+  //     standing capsule and not the KO-on-the-floor 0.3 this inherited from
+  //     `lieY` (that constant is measured against a FLOOR, where sinking is
+  //     invisible; a mattress top is a surface you can see the body miss).
+  // Degrade-safe: a rig with no published metric/profile gets the old numbers.
+  const LIE_HEAD_PAD = 0.06;   // gap the crown keeps off the head end of the mattress
+  const LIE_SINK = 0.04;       // a real mattress takes this much of the shoulder
+  const lieTmp = { x: 0, y: 0, z: 0 };
+  const lieM = { len: 1.80, rise: 0.30 };     // scratch: this runs in the per-frame pin
+  function lieMetrics(actor) {
+    const ch = charOf(actor);
+    const m = ch && ch.metric;
+    const pf = ch && ch.profile;
+    const hs = (ch && ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
+    // feet -> crown, in metres (character.js publishes the metric per rig)
+    lieM.len = (m && m.height > 0.6) ? m.height : 1.80;
+    lieM.rise = (pf && pf.torsoW > 0) ? Math.max(0.14, pf.torsoW * 0.5 * hs - LIE_SINK) : 0.30;
+    return lieM;
+  }
+  // Returns {x,y,z} for the rig's ORIGIN (its feet) — pass `out` to avoid the
+  // shared scratch when you need to hold the result across another call.
+  CBZ.propLiePlace = function (actor, bed, out) {
+    out = out || lieTmp;
+    if (!bed) {                      // no record: the honest answer is "don't move"
+      const g0 = actor && groupOf(actor);
+      out.x = g0 ? g0.position.x : 0; out.y = g0 ? g0.position.y : 0; out.z = g0 ? g0.position.z : 0;
+      return out;
+    }
+    const M = lieMetrics(actor);
+    const half = (bed.len || 2.0) * 0.5;
+    // Feet offset from the mattress centre along the head axis (hx,hz): crown one
+    // pad short of the head end, and NEVER past the foot end — a body longer than
+    // its bed is CENTRED instead, so the overhang is shared at both ends rather
+    // than dumped on the pillow. |s| can therefore never exceed half a body
+    // length, which is what keeps the dismount arc inside DISMOUNT_MAX.
+    const s = Math.max(half - LIE_HEAD_PAD - M.len, -M.len * 0.5);
+    out.x = bed.x + bed.hx * s;
+    out.z = bed.z + bed.hz * s;
+    out.y = (bed.top != null ? bed.top
+      : (bed.lieY != null ? bed.lieY - 0.3 : (bed.y || 0))) + M.rise;
+    return out;
+  };
+
   function beginArc(actor, kind, rec) {
     if (!arcOn()) return false;
     // Arcs are for REGISTERED WORLD anchors only. Ad-hoc seat literals (the
@@ -847,7 +921,11 @@
         const e = eInOut(u);
         if (ch.sitting && u > 0.16) { ch.sitting = false; ch.seatRef = null; }   // hold the perch a beat into the swing
         ch.crouch = false;
-        place(actor, px + (rec.x - px) * e, rec.y + (rec.lieY - rec.y) * e, pz + (rec.z - pz) * e,
+        // The target is the SHARED lie spot, never the anchor itself: the rig's
+        // origin is its FEET, so the legs slide down toward the foot end as the
+        // roll carries the head onto the pillow (see CBZ.propLiePlace).
+        const L = CBZ.propLiePlace(actor, rec);
+        place(actor, px + (L.x - px) * e, rec.y + (L.y - rec.y) * e, pz + (L.z - pz) * e,
           lerpA(A.syaw, rec.face, e));
         grp.rotation.z = HALF * e;
         break;
@@ -861,7 +939,8 @@
         const outFace = Math.atan2(sx * side, sz * side);
         const e = eInOut(u);
         ch.sitting = false; ch.crouch = false;
-        place(actor, rec.x + (px - rec.x) * e, rec.lieY + (rec.y - rec.lieY) * e, rec.z + (pz - rec.z) * e,
+        const L = CBZ.propLiePlace(actor, rec);          // where the body actually IS
+        place(actor, L.x + (px - L.x) * e, L.y + (rec.y - L.y) * e, L.z + (pz - L.z) * e,
           lerpA(rec.face, outFace, e));
         grp.rotation.z = HALF * (1 - e);
         break;
@@ -987,24 +1066,28 @@
     if (actor === CBZ.player) {
       const P = CBZ.player, ch = CBZ.playerChar;
       if (!(opts && opts.instant) && beginArc(actor, "lie", bed)) { arcOf(actor).onDone = bedDown; return true; }
-      P.pos.set(bed.x, bed.lieY, bed.z);
+      const L = CBZ.propLiePlace(P, bed, {});   // own object: outlives the shared scratch
+      P.pos.set(L.x, L.y, L.z);
       P.vy = 0; P.grounded = true;
-      if (ch) { ch.sitting = false; ch.group.rotation.y = bed.face; }
+      if (ch) { ch.sitting = false; ch.group.position.set(L.x, L.y, L.z); ch.group.rotation.y = bed.face; }
       // No heal, no heat change — the owned-safehouse sleepHeal stays the
       // special full reset.
       bedDown(actor, bed);
       return true;
     }
-    // NPC lie-down: sit-state pin at mattress height + the roll flag; the
-    // per-frame roll is applied by the hold below (peds' sit branch owns x/z).
-    actor._deskAnchor = { x: bed.x, y: bed.lieY, z: bed.z, face: bed.face, lot: bed.lot };
+    // NPC lie-down: sit-state pin at the SHARED lie spot + the roll flag; the
+    // per-frame roll is applied by the hold below (peds' sit branch owns x/z,
+    // and it re-pins from this anchor every frame — so the anchor must be where
+    // the body lies, not the mattress centre it used to be).
+    const LN = CBZ.propLiePlace(actor, bed, {});   // own object: outlives the shared scratch
+    actor._deskAnchor = { x: LN.x, y: LN.y, z: LN.z, face: bed.face, lot: bed.lot };
     actor.state = "sit";
     actor.speed = 0; actor.path = null;
     actor._propLie = true;
     if (actor.char) actor.char.sitting = false;
     if (!(opts && opts.instant) && beginArc(actor, "lie", bed)) return true;
-    if (actor.pos && actor.pos.set) actor.pos.set(bed.x, bed.lieY, bed.z);
-    if (actor.group) { actor.group.position.set(bed.x, bed.lieY, bed.z); actor.group.rotation.y = bed.face; }
+    if (actor.pos && actor.pos.set) actor.pos.set(LN.x, LN.y, LN.z);
+    if (actor.group) { actor.group.position.set(LN.x, LN.y, LN.z); actor.group.rotation.y = bed.face; }
     return true;
   };
   CBZ.propWake = function (actor, opts) {
@@ -1165,14 +1248,18 @@
       if (o === P || arcOf(o)) continue;
       if (rec.lieY != null) {
         // peds' own sit branch pins x/z + yaw but forces char.sitting=true and
-        // y=0 every frame — re-pin the height onto the mattress and apply the
+        // y=0 every frame — re-pin the body onto the mattress and apply the
         // roll AFTER peds ran (this updater is later in the order). Never
         // touch an ATTACHED body: npclife's seat re-assert owns that
         // transform, and a lie-pin fighting it is exactly the class of
         // unguarded world-space write syncAttached exists to defend against.
         if (o._propLie && o.group && !o._npcAttached) {
-          if (o.pos) o.pos.y = rec.lieY;
-          o.group.position.y = rec.lieY;
+          // The WHOLE transform, off the same solve the player pin uses — an NPC
+          // whose _deskAnchor was cleared by another system would otherwise be
+          // left lying at whatever x/z it last held.
+          const L = CBZ.propLiePlace(o, rec);
+          if (o.pos && o.pos.set) o.pos.set(L.x, L.y, L.z);
+          o.group.position.set(L.x, L.y, L.z);
           o.group.rotation.z = Math.PI / 2;
           if (o.char) o.char.sitting = false;
         }
@@ -1200,10 +1287,14 @@
       if (seat) CBZ.propStand(P, { instant: true }); else CBZ.propWake(P, { instant: true });
       return;
     }
-    const y = seat ? a.y : a.lieY;
-    P.pos.set(a.x, y, a.z);
+    // A seat is pinned AT its anchor; a bed is not — the lying rig's origin is
+    // its feet, so the one solve in CBZ.propLiePlace owns the spot (identical
+    // call to the NPC hold above: the two bodies cannot diverge again).
+    let lx = a.x, ly = a.y, lz = a.z;
+    if (!seat) { const L = CBZ.propLiePlace(P, a); lx = L.x; ly = L.y; lz = L.z; }
+    P.pos.set(lx, ly, lz);
     P.vy = 0; P.grounded = true;
-    ch.group.position.set(a.x, y, a.z);
+    ch.group.position.set(lx, ly, lz);
     ch.group.rotation.y = a.face;
     if (seat) {
       ch.sitting = true;
