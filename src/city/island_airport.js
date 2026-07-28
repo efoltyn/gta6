@@ -192,6 +192,46 @@
   // propNearestSeat scan over every chair in the city.
   const gateSeats = [];
   let gateSeated = false;
+  /* AIRPORT_ENTRY_V2 — the landside overhaul: the frontage fence opening +
+     sea wall, the forecourt (gate, canopy, footway, lamps), the taxi rank and
+     the tower's door/stairs/controller. One flag, one revert: off restores the
+     unbroken perimeter run, the sealed tower collider and an empty kerb. */
+  if (CBZ.CONFIG.AIRPORT_ENTRY_V2 == null) CBZ.CONFIG.AIRPORT_ENTRY_V2 = true;
+  // the terminal taxi rank + the tower cab (AIRPORT_ENTRY_V2)
+  const taxiRank = [];
+  let rankDone = false;
+  let towerDone = false;
+  /* The tower's stair treads and cab floor are CBZ.platforms records. That
+     array is created once in config.js and is never bulk-cleared on a world
+     rebuild (govcomplex and arena_venue push to it too), so a builder that
+     re-runs must reap its OWN — otherwise every rebuild leaves a ghost
+     staircase standing in mid-air where the last one was. */
+  const towerPlats = [];
+  function towerPlatsClear() {
+    const P = CBZ.platforms;
+    if (P) for (let i = 0; i < towerPlats.length; i++) {
+      const k = P.indexOf(towerPlats[i]);
+      if (k >= 0) P.splice(k, 1);
+    }
+    towerPlats.length = 0;
+  }
+  /* A DRIVER'S SEAT INSIDE A PARKED CAR. The same crew-node trick airside.js
+     uses on its service vehicles: one inverse-scaled child of the car group so
+     the anchor is authored in real metres whatever the hull scale, marked
+     dynamic so the static batcher never swallows a live rig. */
+  function taxiSeatNode(car) {
+    const grp = car && car.group;
+    if (!grp) return null;
+    if (grp.userData._rankSeat && grp.userData._rankSeat.parent === grp) return grp.userData._rankSeat;
+    const n = new THREE.Group();
+    const s = (grp.scale && grp.scale.x) || 1;
+    n.scale.setScalar(s > 0.001 ? 1 / s : 1);
+    n.name = "cabbie";
+    n.userData.dynamic = true;
+    grp.add(n);
+    grp.userData._rankSeat = n;
+    return n;
+  }
   const GATE_SITTERS = 12;      // the rest of the lounge stays genuinely free
   function boardablePlane(grp, x, z, heading, footW, footL, name) {
     if (!grp) return grp;
@@ -1779,6 +1819,15 @@
     // the gate-lounge anchors die with the propuse reset cityBuildings already
     // ran (it runs BEFORE the landmass hooks), so only our index needs clearing
     gateSeats.length = 0; gateSeated = false;
+    // the taxi rank re-arms with the world; its cars are ordinary parked
+    // records (cleared by clearCars) and its drivers are citystaff posts
+    // (cleared with the venue), so only our own index needs resetting.
+    taxiRank.length = 0; rankDone = false;
+    towerDone = false; towerPlatsClear();
+    if (CBZ.cityStaffVenue) {
+      try { CBZ.cityStaffVenue("airport-rank", { stations: 0 }); } catch (e) {}
+      try { CBZ.cityStaffVenue("airport-tower", { stations: 0 }); } catch (e) {}
+    }
 
     const BGU = THREE.BufferGeometryUtils;
 
@@ -1843,6 +1892,20 @@
     const APRON_Z = 0 + ADZ;      // ramp/apron centre (south, by terminal)
     const APRON_X = -40 + ADX;    // apron/terminal centreline (x)
     const CONN_XS = [-160 + ADX, 80 + ADX];   // runway->apron connector taxiways
+    /* THE TERMINAL FOOTPRINT, PUBLISHED ONCE (AIRPORT_ENTRY_V2). It used to be
+       four literals inside buildTerminal(), which is why the fence, the kerb
+       and the forecourt could each hold a different idea of where the building
+       stops — and a fence that disagrees with the frontage by a metre is a
+       fence standing in the drop-off. Everything landside now derives from
+       these four numbers. */
+    const TERM_W = 150, TERM_D = 26;
+    const TERM_Z = 24 + ADZ;                       // terminal centre (z)
+    const TERM_X0 = APRON_X - TERM_W / 2;          // -115 + ADX
+    const TERM_X1 = APRON_X + TERM_W / 2;          //   35 + ADX
+    const TERM_FRONT = TERM_Z + TERM_D / 2;        //   37 + ADZ — the DOORS face +z
+    const FRONT_Z = A_MAXZ;                        //   40 + ADZ — the island's north edge
+    const KERB_Z = 38.5 + ADZ;                     // the drop-off lane (the road record's own z)
+    const PERIM_X = A_MAXX - 22;                   //  268 + ADX — the east perimeter spur
 
     // =====================================================================
     //  1) ONE AIRFIELD SURFACE — grass, runway, taxiway and apron are baked
@@ -1982,7 +2045,7 @@
     // =====================================================================
     let terminal = null;
     (function buildTerminal() {
-      const tx = APRON_X, tz = 24 + ADZ, tw = 150, td = 26;
+      const tx = APRON_X, tz = TERM_Z, tw = TERM_W, td = TERM_D;
       // doorSide 1 = +z (faces causeway/landside). retail glass = clear.
       terminal = CBZ.cityMakeBuilding(root, tx, tz, tw, td, 1, 0x6f8ba0, 1,
         { retail: true, glassKind: "clear", stairs: false });
@@ -2072,11 +2135,49 @@
     //  6) CONTROL TOWER — a tall shaft with a glass cab on top, set beside
     //     the apron with a clear sightline down the runway. Solid collider.
     // =====================================================================
+    /* THE TOWER IS A WORKPLACE, NOT A SILHOUETTE (AIRPORT_ENTRY_V2).
+       OWNER (2026-07-28, verbatim): "theres the tall glass building that looks
+       like a cool radio tower but its a dumb empty prop."
+
+       It was: a shaft, a glass box and a collider that sealed the whole thing
+       from y=0 to y=40. Nothing to open, nothing to climb, nobody inside.
+       What it gets is the three things that make any building in this game
+       real, and each is an EXISTING block rather than a tower system:
+         • a DOORWAY — the shaft collider splits either side of a real opening,
+           which is the elevator/door grammar reduced to its honest minimum for
+           a structure cityMakeBuilding never built;
+         • a CLIMB — a switchback stair core of platform records, so the cab is
+           reachable on foot the same way every occupied floor in the game is;
+         • a WORKER — CBZ.cityStaffPost, job "air traffic controller", seated at
+           a console in the cab and visible through the glass.
+       The beacon it already had stays; the cab gets a floodlight bar so it
+       reads as lit from the apron at night. */
     (function controlTower() {
       const cxp = -180 + ADX, czp = 30 + ADZ, base = 4.5, H = 34;
+      const V2 = CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false;
       // shaft
       box(cxp, H / 2, czp, base, H, base, 0xb6bdc4, { cast: true });
-      solid(cxp, czp, base, base, 0, H + 6);
+      if (!V2) {
+        solid(cxp, czp, base, base, 0, H + 6);
+      } else {
+        /* THE DOORWAY. One collider became three: the shaft is solid above the
+           head height of the opening, and the ground band is split into the two
+           jambs either side of it. The door faces +z (the apron/terminal side,
+           which is where anybody walking here comes from). */
+        const DW = 1.6, DH = 2.5;                       // clear opening
+        const jamb = (base - DW) / 2;
+        solid(cxp, czp, base, base, DH, H + 6);         // everything above the head
+        solid(cxp - (DW + jamb) / 2, czp, jamb, base, 0, DH);   // west jamb
+        solid(cxp + (DW + jamb) / 2, czp, jamb, base, 0, DH);   // east jamb
+        solid(cxp, czp - base / 2 + 0.15, DW, 0.3, 0, DH);      // …and the back wall behind it
+        // the door leaf itself, standing open against the jamb — an opening you
+        // can SEE is what stops this reading as a hole in a wall.
+        const leaf = box(cxp + DW / 2 + 0.12, DH / 2, czp + base / 2 + 0.22, 0.09, DH, DW * 0.92,
+          0x3e4a56, { cast: true });
+        leaf.rotation.y = 0.5;
+        box(cxp, DH + 0.35, czp + base / 2 + 0.06, DW + 0.7, 0.5, 0.35, 0x2f3a46,
+          { cast: true, emissive: 0x1d3550, ei: 0.3 });   // door head / sign band
+      }
       // cab (wider glass box) + roof + dish — OWNER RULE (bda61ab): no gray
       // panes; the cab is the same clear tinted glass as every city facade.
       // mat() is fresh-per-call so mutating is safe; transparent keeps it out
@@ -2088,6 +2189,110 @@
       if (CBZ.makeLabelSprite) {
         const s = CBZ.makeLabelSprite("TWR", { color: "#cfe3ff" });
         if (s) { s.position.set(cxp, H + 1.6, czp + base + 2.2); s.scale.set(5, 2.6, 1); root.add(s); }
+      }
+      if (!V2) return;
+
+      /* THE CLIMB. A switchback stair core of PLATFORM records — the same
+         CBZ.platforms the airliner cabin deck stands on, so the player's own
+         physics carries them up with nothing new to write. Twelve flights of
+         four treads wrapping the shaft's inner face; each landing is a
+         platform you can stand on and each tread is a step under physics.js's
+         0.45 STEP_UP, which is what makes it climbable rather than decorative. */
+      /* THE RISER IS PINNED AT 0.42 BECAUSE physics.js's STEP_UP IS 0.45 — the
+         same constraint arena_venue.js's bowl is built to. And the flight
+         wraps OUTSIDE the shaft, not inside it: the shaft is a solid collider
+         from the door head to the cab, so a tread within base/2 of the axis
+         would put a climber inside it and the resolver would shove them off.
+         WR is therefore derived from the shaft, not chosen — half the shaft
+         plus a body's shoulder — and the treads (1.4 m wide) clear the
+         collider face by 0.15 m while still landing under the cab's own
+         overhang (half of base+4 = 4.25) so the top step is on the floor. */
+      const RISE = 0.42;
+      const WR = base / 2 + 0.85;                       // 3.10 — outside the shaft
+      const PER_LEG = 8;
+      const steps = Math.ceil(H / RISE);
+      const stairs = [];
+      for (let s = 0; s < steps; s++) {
+        const y = (s + 1) * RISE;
+        if (y > H + 1.2) break;
+        // four legs round the shaft, turning the corner at each landing
+        const leg = (s / PER_LEG | 0) % 4;
+        const off = ((s % PER_LEG) / PER_LEG - 0.5) * 2 * WR;
+        let sx = cxp, sz = czp;
+        if (leg === 0) { sx = cxp + off; sz = czp - WR; }
+        else if (leg === 1) { sx = cxp + WR; sz = czp + off; }
+        else if (leg === 2) { sx = cxp - off; sz = czp + WR; }
+        else { sx = cxp - WR; sz = czp - off; }
+        stairs.push([sx, y, sz]);
+        if (CBZ.platforms) {
+          const pr = { minX: sx - 0.7, maxX: sx + 0.7, minZ: sz - 0.7, maxZ: sz + 0.7, top: y };
+          CBZ.platforms.push(pr); towerPlats.push(pr);
+        }
+      }
+      if (stairs.length && BGU && BGU.mergeBufferGeometries) {
+        const gs = [];
+        for (let i = 0; i < stairs.length; i++) {
+          const g = new THREE.BoxGeometry(1.4, 0.10, 1.4);
+          g.translate(stairs[i][0], stairs[i][1] - 0.05, stairs[i][2]);
+          gs.push(g);
+        }
+        const sm = new THREE.Mesh(BGU.mergeBufferGeometries(gs), mat(0x767d85));
+        sm.castShadow = false; sm.receiveShadow = true;
+        sm.matrixAutoUpdate = false; root.add(sm);
+      }
+      // the cab FLOOR — the top landing, and the deck the controller's chair
+      // and console stand on.
+      const CAB_Y = H + 0.05;
+      if (CBZ.platforms) {
+        const cf = {
+          minX: cxp - (base + 4) / 2, maxX: cxp + (base + 4) / 2,
+          minZ: czp - (base + 4) / 2, maxZ: czp + (base + 4) / 2, top: CAB_Y,
+        };
+        CBZ.platforms.push(cf); towerPlats.push(cf);
+      }
+      box(cxp, CAB_Y - 0.06, czp, base + 4, 0.12, base + 4, 0x4a5158, { cast: false });
+
+      // ---- THE CONSOLE. A desk arc facing the runway (-z, down the field),
+      //      with a lit screen bank — what an air traffic controller sits at.
+      const DESK_Z = czp - 1.9;
+      box(cxp, CAB_Y + 0.42, DESK_Z, 4.6, 0.10, 0.9, 0x2b3138, { cast: false });   // worktop
+      box(cxp, CAB_Y + 0.20, DESK_Z, 4.4, 0.44, 0.7, 0x3c444c, { cast: false });   // pedestal
+      box(cxp, CAB_Y + 0.86, DESK_Z - 0.28, 3.6, 0.78, 0.08,
+        0x1d5f74, { emissive: 0x3fc6e6, ei: 0.75, cast: false });                  // screen bank
+      // cab floodlight bar — one emissive strip under the roof, no light object.
+      box(cxp, H + 3.15, czp, base + 3.4, 0.10, 0.22,
+        0xfff0cf, { emissive: 0xffe6b0, ei: 0.8, cast: false });
+
+      /* ---- THE CONTROLLER. cityStaffPost, so the body exists only when
+         somebody could see the cab and is reaped when they leave. The trade
+         itself is NOT declared here: "air traffic controller" is a row in
+         citystaff.js's TRADES table, which is the additive merge that already
+         gives 27 venue jobs a workplace, a shift and a wage — so this job has
+         all three instead of being label #121 aigoals never heard of. */
+      if (CBZ.onUpdate && CBZ.cityStaffPost) {
+        CBZ.onUpdate(55.37, function () {
+          if (towerDone) return;
+          if (!CBZ.game || CBZ.game.mode !== "city") return;
+          if (!CBZ.city || !CBZ.city.arena) return;
+          towerDone = true;
+          if (CBZ.cityStaffVenue) {
+            try { CBZ.cityStaffVenue("airport-tower", { stations: 1, note: "the cab" }); } catch (e) {}
+          }
+          CBZ.cityStaffPost({
+            venue: "airport-tower", id: "airport:twr:1",
+            job: "air traffic controller", archetype: "office",
+            // he STANDS at the console rather than riding a chair anchor: the
+            // cab floor is a platform record, and a posted body pinned on it
+            // holds whatever height we spawn it at (peds.js's staffPost branch
+            // returns from move() before the y-clamp) — which is exactly why
+            // this one is posted UNSEATED and needs no seat at all.
+            x: cxp, z: DESK_Z + 1.0, face: Math.PI,
+            opts: { floorY: CAB_Y },
+            pose: "foldarms",
+            near: 260, far: 420,        // he is 34 m up: you see him from further out
+            after: function (ped) { ped.job = "air traffic controller"; ped._airportPlaced = true; },
+          });
+        });
       }
     })();
 
@@ -3033,6 +3238,53 @@
       // causeway side (south) keeps its full fence + checkpoint gate.
       const PG = 3;                                  // pedestrian gap half-span ≈1.5m
       const midX = (A_MINX + A_MAXX) / 2, midZ = (A_MINZ + A_MAXZ) / 2;
+      /* ---- THE FRONTAGE OPENING (AIRPORT_ENTRY_V2) ---------------------
+         OWNER (2026-07-28, verbatim): "ingress egress of the airport is
+         awful… the road should lead up to the entrance for drop off — rn
+         theres a FENCE literally right in front of the dropoff."
+
+         He is describing this run, and it was not a near miss. The terminal's
+         doors face +z at TERM_FRONT (37); the drop-off lane is at KERB_Z
+         (38.5); this fence stood at A_MAXZ (40). A metre and a half of glass
+         between the kerb and the sea, unbroken for 1190 m, with the nearest
+         opening 190 m west at the water slipway — so the frontage read as a
+         cage and the only way in was a 300 m detour round the east perimeter.
+
+         THE OPENING IS DERIVED, NOT PICKED, and the derivation is the one the
+         coordinator asked for: `city.roads` already carries a landside kerb
+         record along this edge (pushed at the bottom of this file, centreline
+         KERB_Z, deck 14 m) running from the terminal centreline east to
+         PERIM_X. A 14 m deck centred at 38.5 spans z 31.5..45.5 — it CROSSES
+         this fence line for its entire length. The fence was standing inside a
+         road. So the run opens exactly where the road crosses it, extended one
+         terminal half-bay west so the whole frontage is clear rather than
+         ending in a stub beside the doors.
+
+         What replaces it is what the fence was actually FOR out here. Its job
+         on this edge was never security — airside is 30 m south behind its own
+         keep-out — it was "you cannot drive into the sea". That is a KERB, so
+         the opened span gets a 0.55 m balustrade with a real collider at the
+         water's edge: it stops a car, you can see over it, and it cannot read
+         as a wall in front of a doorway.
+
+         MIGRATION OWED, and it is worth stating precisely because a shared
+         block landed for this while this change was being written:
+         roadrules.js now has CBZ.roadGapRun / roadGapAfterRoads — "a wall meets
+         a road and yields" — which SPLITS a barrier run wherever a road crosses
+         it, from the road's own derived carriage width. That is the general law
+         this opening is a hand-derived instance of, and the whole perimeter
+         (all four runs, the posts and the causeway gate) should move onto it.
+         It is not a one-liner: this fence is built at order 21 and the roads it
+         must yield to are pushed at the BOTTOM of this same builder, so it
+         needs roadGapAfterRoads' order-98.6 deferral, which means the post
+         InstancedMesh and the merged panel geometry have to be solved in that
+         callback rather than here. Deliberately left as the next change rather
+         than rushed; the colliders this section leaves are already stamped with
+         the block's own exemption words (`roadBarrier`, `gate`) so
+         roadBlockAudit reads them correctly in the meantime. */
+      const OPEN_X0 = TERM_X0 - 10;                  // one half-bay west of the doors
+      const OPEN_X1 = A_MAXX;                        // …east to the corner the perimeter road turns at
+      const frontOpen = (x) => (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false && x > OPEN_X0 && x < OPEN_X1);
       // The perimeter stays visually fenced but has no world-sized collision
       // slabs. Those slabs were the repeated "invisible wall outside the
       // airport" report; gameplay boundaries must come from visible geometry,
@@ -3056,7 +3308,7 @@
       const inGapZ = (z) => (z > midZ - PG && z < midZ + PG);
       const inGapX = (x) => (x > midX - PG && x < midX + PG);
       for (let x = A_MINX; x <= A_MAXX; x += stepP) {
-        if (!inGapX(x)) pts.push([x, A_MAXZ]);       // north (skip centre gap)
+        if (!inGapX(x) && !frontOpen(x)) pts.push([x, A_MAXZ]);  // north (skip centre gap + the frontage)
         if (x < gapX0 || x > gapX1) pts.push([x, A_MINZ]); // south (skip causeway gate)
       }
       for (let z = A_MINZ; z <= A_MAXZ; z += stepP) {
@@ -3077,9 +3329,10 @@
           g.translate((x0 + x1) / 2, H * 0.5, (z0 + z1) / 2);
           panels.push(g);
         }
-        // north split around centre gap
+        // north split around the centre gap AND the frontage opening
         panelRun(A_MINX, A_MAXZ, midX - PG, A_MAXZ);
-        panelRun(midX + PG, A_MAXZ, A_MAXX, A_MAXZ);
+        if (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false) panelRun(midX + PG, A_MAXZ, OPEN_X0, A_MAXZ);
+        else panelRun(midX + PG, A_MAXZ, A_MAXX, A_MAXZ);
         // west split around centre gap
         panelRun(A_MINX, A_MINZ, A_MINX, midZ - PG);
         panelRun(A_MINX, midZ + PG, A_MINX, A_MAXZ);
@@ -3102,6 +3355,219 @@
           : new THREE.MeshLambertMaterial({ color: 0x66717d, transparent: true, opacity: 0.52, depthWrite: true, side: THREE.DoubleSide });
         const fmesh = new THREE.Mesh(BGU.mergeBufferGeometries(panels), fm);
         fmesh.matrixAutoUpdate = false; root.add(fmesh);
+      }
+      // …and the SEA WALL that takes over the opened span's real job. One
+      // merged run, y-gated 0..0.55 so it stops a car and a walking body
+      // without ever reading as a barrier in front of a door.
+      if (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false) {
+        const BH = 0.55, seg = 30;
+        for (let x = OPEN_X0; x < OPEN_X1; x += seg) {
+          const w = Math.min(seg, OPEN_X1 - x);
+          box(x + w / 2, BH / 2, A_MAXZ, w, BH, 0.30, C_CONC, { cast: false });
+          // `roadBarrier` is roadrules.js's own word (colliderExempt) and it is
+          // the literally correct one: this run lies ALONGSIDE the kerb lane at
+          // the water's edge, which is what a barrier is for. Without the stamp
+          // roadBlockAudit would read a 415 m parapet as a wall in a
+          // carriageway and the gap law would try to cut the one thing out here
+          // that must never be cut.
+          solid(x + w / 2, A_MAXZ, w, 0.30, 0, BH).roadBarrier = true;
+        }
+      }
+    })();
+
+    // =====================================================================
+    //  10b) THE FORECOURT (AIRPORT_ENTRY_V2) — "the road should lead up to
+    //       the entrance for drop off". Opening the fence is half of it; the
+    //       other half is that an entrance has to READ as one. Nothing here
+    //       invents a system: it is paint, four box primitives and one call
+    //       each to the shared lamp solve and the parked-car builder.
+    //
+    //       WHERE THE VOLUME IS. The frontage strip at the doors is genuinely
+    //       only 3 m deep (TERM_FRONT 37 → FRONT_Z 40), which is a kerb lane
+    //       and nothing else — no room for a column, a rank or a footpath. But
+    //       EAST of the terminal the landside is wide open: from TERM_X1 (35)
+    //       to PERIM_X (268) with 26 m of depth. That is where an airport
+    //       forecourt belongs and where all the volume goes; the frontage
+    //       itself gets a CANTILEVERED canopy that costs no floor at all.
+    // =====================================================================
+    (function forecourt() {
+      if (CBZ.CONFIG.AIRPORT_ENTRY_V2 === false) return;
+      const PLZ_X0 = TERM_X1 + 6, PLZ_X1 = TERM_X1 + 96;   // 41 → 131 + ADX
+      const PLZ_Z0 = 14 + ADZ, PLZ_Z1 = FRONT_Z;           // 26 m of real depth
+      // ---- the plaza deck, painted so the ground says where to drive.
+      mergePaint([quadGeo((PLZ_X0 + PLZ_X1) / 2, (PLZ_Z0 + PLZ_Z1) / 2,
+        PLZ_X1 - PLZ_X0, PLZ_Z1 - PLZ_Z0, 0.05)], 0x53585e, 0.05);
+
+      /* ---- THE ENTRY GATE at the plaza's east mouth. You drive under it and
+         you have arrived — which is the whole difference between an entrance
+         and a hole in a fence.
+
+         IT IS A SINGLE PYLON, not a pair, and that is measured rather than
+         stylistic: the lane centre is KERB_Z (38.5) and the island's edge is
+         FRONT_Z (40), so a car's own half-width already reaches 39.5 and there
+         is no room on the north side for a post that a car would not clip. The
+         north side of the gate is therefore the SEA WALL the fence opening left
+         behind — 0.55 m of parapet that is already there — and the gantry
+         cantilevers to it. Clear width 5.85 m against a 2 m car.
+         Colliders on the pylon only; the gantry is 6.6 m up. */
+      const GATE_Z = KERB_Z - 5.5;                     // pylon centre, south side
+      box(PLZ_X1, 3.4, GATE_Z, 1.1, 6.8, 1.1, C_CONC, { cast: true });
+      // `gate` — roadrules.js's colliderExempt word for hardware that stands
+      // beside a carriageway ON PURPOSE. A gatepost is the one collider at a
+      // road's edge that is not an accident.
+      solid(PLZ_X1, GATE_Z, 1.1, 1.1, 0, 6.8).gate = true;
+      box(PLZ_X1, 6.6, (GATE_Z + FRONT_Z) / 2, 1.2, 0.9, FRONT_Z - GATE_Z,
+        0x2f3a46, { cast: true, emissive: 0x1d3550, ei: 0.35 });
+      if (CBZ.makeLabelSprite) {
+        const s = CBZ.makeLabelSprite("→ DEPARTURES · ARRIVALS", { color: "#ffd451" });
+        if (s) { s.position.set(PLZ_X1, 6.6, (GATE_Z + FRONT_Z) / 2 + 0.7); s.scale.set(13, 1.7, 1); root.add(s); }
+      }
+      // the PEDESTRIAN gate — its own opening well south of the carriageway,
+      // two posts with 2.4 m between them, and the footway threads it.
+      const PED_Z = GATE_Z - 4.5;                      // 28.5 — clear of the lane
+      [PED_Z - 1.2, PED_Z + 1.2].forEach(function (pz) {
+        box(PLZ_X1, 1.6, pz, 0.5, 3.2, 0.5, C_CONC, { cast: true });
+        solid(PLZ_X1, pz, 0.5, 0.5, 0, 3.2).gate = true;
+      });
+
+      /* FOOTWAY — the pedestrian leg of the arrival, walked end to end:
+         through the pedestrian gate, west across the plaza, north to the
+         frontage, then along the terminal wall to the doors. Three straight
+         runs, all south of the carriageway, so a walker never shares ground
+         with the drop-off lane. Paint only — nothing here has a collider. */
+      const foot = [];
+      const TURN_X = TERM_X1 - 4;
+      foot.push(quadGeo((TURN_X + PLZ_X1 + 6) / 2, PED_Z,
+        (PLZ_X1 + 6) - TURN_X, 1.4, 0.07));            // gate → the turn
+      foot.push(quadGeo(TURN_X, (PED_Z + TERM_FRONT + 0.42) / 2,
+        1.4, (TERM_FRONT + 0.42) - PED_Z, 0.07));      // north to the frontage
+      // …and the frontage leg narrows to 0.8 m, because that is all the strip
+      // has: wall at TERM_FRONT (37), lane edge at 37.8. A wider path here
+      // would only be paint drawn under the cars.
+      foot.push(quadGeo((TERM_X0 + TURN_X) / 2, TERM_FRONT + 0.42,
+        TURN_X - TERM_X0, 0.8, 0.07));                 // along the wall to the doors
+      foot.push(quadGeo(APRON_X, KERB_Z, 9, 0.5, 0.07));  // and a crossing at the doors
+      mergePaint(foot, 0xd8dde3, 0.07);
+
+      // ---- THE CANOPY over the doors. CANTILEVERED off the terminal's north
+      //      wall on angled struts — a columned porte-cochère cannot fit in a
+      //      3 m strip without standing in the lane, and a canopy you have to
+      //      swerve round is a worse entrance than none.
+      const CAN_W = 62, CAN_OUT = 2.6, CAN_Y = 5.4;
+      box(APRON_X, CAN_Y, TERM_FRONT + CAN_OUT / 2, CAN_W, 0.35, CAN_OUT,
+        0x8d97a1, { cast: true });
+      for (let k = -2; k <= 2; k++) {
+        const sx = APRON_X + k * (CAN_W / 5);
+        const st = box(sx, CAN_Y - 0.95, TERM_FRONT + 0.75, 0.22, 2.3, 0.22, 0x6b737b, { cast: false });
+        st.rotation.x = -0.62;                    // leans back to the wall
+      }
+      // …and it is LIT, because an entrance canopy that goes dark at dusk is
+      // where the whole read falls over. One emissive strip, no light object.
+      box(APRON_X, CAN_Y - 0.24, TERM_FRONT + CAN_OUT - 0.25, CAN_W - 3, 0.12, 0.30,
+        0xfff0cf, { emissive: 0xffe6b0, ei: 0.85, cast: false });
+
+      // ---- LAMPS along the arrival, through the SHARED solve (CLAUDE.md:
+      //      "A LUMINAIRE IS A POLE, AN ARM AND A HEAD ON THE ARM'S TIP").
+      //      Degrade-safe: no lampMast, no lamps — never a hand-rolled mast.
+      const LM = CBZ.lampMast ? CBZ.lampMast({ poleH: 6.2, reach: 1.7, rise: 0.32, poleR: 0.12 }) : null;
+      if (LM) {
+        for (let x = PLZ_X0 + 10; x <= PLZ_X1 - 6; x += 26) {
+          const g = new THREE.Group();
+          g.position.set(x, 0, PLZ_Z0 + 1.6);
+          g.rotation.y = 0;                        // local +Z faces the lane (north)
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(LM.poleR, LM.poleR * 1.3, LM.poleH, 6), mat(0x6f767d));
+          pole.position.y = LM.poleCY; g.add(pole);
+          const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, LM.armLen, 5), mat(0x6f767d));
+          arm.rotation.x = LM.armRotX; arm.position.set(0, LM.armCY, LM.armCZ); g.add(arm);
+          const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.62), mat(0x4c535a));
+          head.position.set(0, LM.headY, LM.headZ); g.add(head);
+          const bulb = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.5),
+            mat(0xfff2d0, { emissive: 0xffe9b8, ei: 0.9 }));
+          bulb.position.set(0, LM.bulbY, LM.bulbZ); g.add(bulb);
+          root.add(g);
+          solid(x, PLZ_Z0 + 1.6, 0.4, 0.4, 0, LM.poleH);
+        }
+      }
+
+      /* ---- THE TAXI RANK ------------------------------------------------
+         OWNER (verbatim): "in front there can be a line of taxis waiting to
+         pick people up — they dont have to move — full of taxi drivers."
+
+         And it costs no new verb. `cab driver` is already a CITY_JOBS trade
+         (aigoals.js) and shops.js already registers `ped-cab-ride` — "Flag a
+         cab" — on the ped:civ layer, gated only on the job string, the player
+         not driving and wanted < 2. It does NOT filter a seated body, and
+         interact.js's `src-ped` source finds any live ped by world position —
+         which npclife syncs every frame for an attached actor. So a driver
+         sitting in a parked cab is a fully interactive cab driver the moment
+         he has the job string. Nothing here registers a verb.
+
+         THE RANK IS ITS OWN LANE, per real airport grammar and per the owner's
+         constraint: it sits at RANK_Z, 15 m south of the drop-off lane, so a
+         stationary queue can never block the kerb it serves. Placement is a
+         position hash, never Math.random. */
+      const RANK_Z = KERB_Z - 15, RANK_N = 6, RANK_GAP = 6.4;
+      const rankPaint = [];
+      rankPaint.push(quadGeo(PLZ_X0 + 8 + (RANK_N - 1) * RANK_GAP / 2, RANK_Z,
+        RANK_N * RANK_GAP + 2, 3.2, 0.08));
+      mergePaint(rankPaint, 0xd8b53a, 0.08);
+      if (CBZ.makeLabelSprite) {
+        const s = CBZ.makeLabelSprite("TAXI", { color: "#ffd451" });
+        if (s) { s.position.set(PLZ_X0 + 4, 2.6, RANK_Z); s.scale.set(4.6, 2.0, 1); root.add(s); }
+      }
+      // deferred: cityAddParkedCar needs a live arena, and cityStaffPost needs
+      // the ped roster — neither exists while a landmass builder is running.
+      // Same one-shot trick the parked fleet and the kerb traffic already use.
+      if (CBZ.onUpdate) {
+        CBZ.onUpdate(55.36, function () {
+          if (rankDone) return;
+          if (!CBZ.game || CBZ.game.mode !== "city") return;
+          if (!CBZ.city || !CBZ.city.arena || !CBZ.cityAddParkedCar) return;
+          rankDone = true;
+          // DECLARE THE VENUE FIRST — cityStaffVenue CLEARS the venue's posts,
+          // so calling it after the loop would reap every driver we just hired.
+          if (CBZ.cityStaffVenue) {
+            try { CBZ.cityStaffVenue("airport-rank", { stations: RANK_N, note: "terminal taxi rank" }); } catch (e) {}
+          }
+          for (let i = 0; i < RANK_N; i++) {
+            const tx2 = PLZ_X0 + 8 + i * RANK_GAP;
+            let rec = null;
+            try { rec = CBZ.cityAddParkedCar(tx2, RANK_Z, Math.PI / 2, { modelName: "Taxi" }); } catch (e) { rec = null; }
+            if (!rec || !rec.group) continue;
+            rec.group.userData.airportTaxi = true;
+            taxiRank.push(rec);
+            // A DRIVER, not a decal. citystaff mints the body only inside 170 m
+            // (invisible AND unwatchable by construction) and reaps it past 320;
+            // the seat is npclife's anchor grammar, exactly as airside.js's
+            // service-vehicle crew works, so syncAttached holds the pose and
+            // peds.js leaves the body alone.
+            if (!CBZ.cityStaffPost) continue;
+            (function (car, idx) {
+              CBZ.cityStaffPost({
+                venue: "airport-rank", id: "airport:taxi:" + idx,
+                job: "cab driver", archetype: "merchant",
+                x: car.pos.x, z: car.pos.z, face: Math.PI / 2,
+                alive: function () { return !!(car.group && car.group.parent) && !car.player && !car.stolen; },
+                attach: function (ped) {
+                  if (!CBZ.npcLife || !CBZ.npcLife.attach) return false;
+                  const node = taxiSeatNode(car);
+                  if (!node) return false;
+                  ped._seatHold = true;
+                  return !!CBZ.npcLife.attach(ped, node, {
+                    x: 0.34, y: 0.62, z: 0.10, yaw: 0, pose: "sit", state: "sit",
+                    cushionH: 0.43, floorBelow: 0,
+                  });
+                },
+                release: function (ped, why) {
+                  if (why !== "gone" && why !== "dead") return false;
+                  if (CBZ.cityUnseat) { try { CBZ.cityUnseat(ped, { state: ped.dead ? "dead" : "walk", keepPose: true }); } catch (e) {} }
+                  return true;
+                },
+                after: function (ped) { ped.job = "cab driver"; },
+              });
+            })(rec, i);
+          }
+        });
       }
     })();
 
@@ -3227,7 +3693,7 @@
       // always staffed. Desk geometry (dx, tz + td/2 - 3) is read from the same
       // constants the desks were drawn with — no second copy of the layout.
       {
-        const tx = APRON_X, tz = 24 + ADZ, tw = 150, td = 26;
+        const tx = APRON_X, tz = TERM_Z, tw = TERM_W, td = TERM_D;
         for (let k = 0; k < 4; k++) {
           const dx = tx - tw / 2 + 20 + k * 30;
           airportActor("venueWorker", dx, tz + td / 2 - 1.4, {
@@ -3312,22 +3778,50 @@
     //     x[-115,35] z[11,37]) so nobody materializes inside the concourse.
     // Hand-placed staff (populate()'s ground crew/passengers) don't route
     // through the scatter paths, so the authored airport life is untouched.
+    /* THE KEEP-OUT IS THE MOVEMENT AREA, NOT THE ISLAND (AIRPORT_ENTRY_V2).
+       Walking the arrival end to end in code is what found this: the causeway
+       lands at (0, A_MINZ) and the east perimeter road starts at (PERIM_X,
+       A_MINZ) — 268 m apart, with NO road record between them and nothing but
+       airside in between. The route the previous wave intended (causeway →
+       east along the south edge → north up the perimeter → west to the kerb)
+       had its first leg missing, so the only way off the causeway really was
+       across the field.
+
+       The link cannot be `access:"service"` — it is the airport's main
+       entrance — so the keep-out has to be the right SHAPE instead. It was the
+       whole southern island; it is now the movement area, with a 26 m landside
+       access corridor along the south edge. That corridor is 149 m south of
+       the runway's own strip edge (RWY_Z -90, half-width 15 → -105, against a
+       corridor ending at -254), so nothing about the runway, the taxiway or
+       the apron changes: `airsideAudit().onRunway` reads a different rect
+       entirely, and the keep-out still bars every ambient path from all of it.
+       ONE declaration, consumed twice — the audit mirror used to be a hand
+       copy, which is how a keep-out and its own census start disagreeing. */
+    const LANDSIDE_S = CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false ? 26 : 0;
+    const NO_SPAWN = [
+      { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ + LANDSIDE_S, maxZ: 9 + ADZ, label: "airport-airside" },
+      { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" },
+    ];
     if (CBZ.registerNoSpawnZone) {
-      CBZ.registerNoSpawnZone(city, { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" });
-      CBZ.registerNoSpawnZone(city, { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" });
+      for (let i = 0; i < NO_SPAWN.length; i++) CBZ.registerNoSpawnZone(city, NO_SPAWN[i]);
     }
     city.airportAudit = {
       bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
       runway: { minX: RWY_X0, maxX: RWY_X1, minZ: RWY_Z - RWY_W / 2, maxZ: RWY_Z + RWY_W / 2 },
-      noSpawn: [
-        { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ, maxZ: 9 + ADZ, label: "airport-airside" },
-        { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" },
-      ],
+      noSpawn: NO_SPAWN,
       aircraft: AIRCRAFT_DIMS,
     };
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      /* THE CAUSEWAY RUNS ONTO THE ISLAND, not up to its edge. It used to stop
+         dead at CW_MAXZ (=== A_MINZ), which is the shoreline — so it shared no
+         ground with anything and CBZ.roadJunctions, which derives a junction
+         from two records OVERLAPPING, could never find one here. It now reaches
+         the approach link below, and the two cross at (CW_X, LINK_Z): one real,
+         derived T-junction where the bridge meets the airport. */
+      const LINK_Z = A_MINZ + 13, CW_X = (CW_MINX + CW_MAXX) / 2;
+      const cwEnd = CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false ? LINK_Z : CW_MAXZ;
+      city.roads.push({ x: CW_X, z: (CW_MINZ + cwEnd) / 2, vertical: true, len: cwEnd - CW_MINZ, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
 
       /* ---- THE PERIMETER ACCESS ROAD --------------------------------------
          Until now the airport had NO landside road. The causeway arrives at
@@ -3376,9 +3870,7 @@
          fixed where it lived, in airside.js, and the two service records that
          file publishes carry access:"service" so roadOpen/roadPick refuse an
          ambient car on them regardless of what any keep-out says. */
-      const PERIM_X = A_MAXX - 22;              // east perimeter, clear of RWY_X1
       const TERM_X = -40 + ADX;                 // terminal centreline (APRON_X, which is scoped to the paint pass)
-      const KERB_Z = 38.5 + ADZ;                // the departures kerb strip
       city.roads.push({
         x: PERIM_X, z: (A_MINZ + KERB_Z) / 2, vertical: true, len: KERB_Z - A_MINZ,
         district: "airport", w: 14, lanesPerDir: 1, laneW: 3.4,
@@ -3388,6 +3880,24 @@
         len: Math.abs(PERIM_X - TERM_X), district: "airport",
         w: 14, lanesPerDir: 1, laneW: 3.4,
       });
+      /* THE APPROACH LINK — the leg that was missing. Without it the causeway
+         and the perimeter spur are two roads that never touch, and the whole
+         "drive to the terminal" story dead-ends the moment you come off the
+         bridge. It runs the landside access corridor the keep-out now leaves
+         along the south edge (see NO_SPAWN's LANDSIDE_S), from the causeway's
+         own centreline east to the foot of the perimeter, so the four records
+         finally form ONE route: causeway → link → perimeter → kerb. */
+      if (CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false) {
+        // it starts WEST of the causeway centreline so the crossing is a real
+        // overlap (a junction is derived, never authored) and ends ON the
+        // perimeter's south end, so all four records form one continuous route.
+        const LX0 = CW_X - 22, LX1 = PERIM_X + 10;
+        city.roads.push({
+          x: (LX0 + LX1) / 2, z: LINK_Z, vertical: false,
+          len: LX1 - LX0, district: "airport",
+          w: 14, lanesPerDir: 1, laneW: 3.4,
+        });
+      }
     }
 
     // ---- MAKE THE PARKED FLEET STEALABLE (deferred — militaryvehicles.js loads

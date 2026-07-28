@@ -523,6 +523,9 @@
     "refueller":           { class: "trade",   anchor: "terminal", hours: [5, 23], pay: 15 },
     "catering driver":     { class: "trade",   anchor: "terminal", hours: [5, 23], pay: 13 },
     "pushback driver":     { class: "trade",   anchor: "terminal", hours: [5, 23], pay: 16 },
+    // the tower cab is manned round the clock — an airfield without a
+    // controller is the "dumb empty prop" the owner reported.
+    "air traffic controller": { class: "service", anchor: "terminal", hours: [0, 24], pay: 31 },
     "airfield driver":     { class: "trade",   anchor: "terminal", hours: [5, 23], pay: 15 },
     // --- the casino floor (a real storefront exists: lot.kind "casino")
     "croupier":            { class: "service", lots: ["casino"], hours: [16, 4], pay: 17 },
