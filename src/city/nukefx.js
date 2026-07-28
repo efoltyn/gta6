@@ -63,6 +63,19 @@
                               rendered ABOVE the fireball (renderOrder 9 vs 8)
                               so it genuinely hides it, then thinning as the
                               second pulse burns through.
+     0.90+      FAR TIER      (NUKE_REAL_SCALE) the cloud is 5,106 m across
+                              and 10,000 m tall — TEN TIMES the camera's own
+                              far plane — so past the point where the 3D cap
+                              can no longer fit inside the frustum it is
+                              drawn as ONE sky-locked impostor quad at true
+                              ANGULAR size. Not an extra layer: it fades the
+                              3D cap/crown/glow out as it fades in, on a
+                              geometric handoff (impostorMix), so the peak
+                              draw count is unchanged and nothing is ever
+                              clipped mid-swap. The near stem and the base
+                              surge stay 3D under it — they are the only
+                              parts genuinely inside the frustum, and they
+                              are the reference photograph's foreground.
      0.62-1.90  CONDENSATION  the same shell, continued: the Wilson cloud, the
                               transient near-white SHELL (never a ball — that is
                               what uCore 0.06 + uRimPow 2.6 buys) thrown by the
@@ -166,28 +179,63 @@
                               every frame anyway, so there is nothing to
                               restore and an abort mid-arc is clean.
 
-   PROPORTIONS — the thing films get wrong and the thing this file got wrong.
-   The stock nuke row draws a 126 m maximum-radius fireball, a compressed game
-   stabilisation altitude of ~907 m over the burst, a cap that blooms to ~489 m
-   across and a stem ~35 m across (~60 m by full rise). That is a cloud
-   TOP:CAP WIDTH of 2.06:1 and a CAP:STEM of 8.15:1. Both were wrong before —
-   1.75:1 and 6.5:1, a squat cloud on a fat stalk, which is exactly the
-   silhouette films draw and real film does not.
+   SIZE AND PROPORTION (rewritten 2026-07-28 — NUKE_REAL_SCALE).
+   OWNER: "make them REAL TO SIZE, and also make the mushroom cloud LOOK LIKE
+   AN ACTUAL MUSHROOM CLOUD."
 
-   (TOP:CAP reads 2.06 rather than the 2.19 this block used to claim because
-   the head now FLATTENS to 0.62 of its vertical extent as it stabilises —
-   see capFlatAt. The cloud did not get shorter; its top stopped being a
-   dome. The audit computes the reported number through the same CAP_FLAT the
-   renderer uses, so the two can never diverge.)
+   Nothing here is chosen for framing any more. The YIELD is INVERTED out of
+   the bus row (W = (radius*power/50)^3 = 16.0 kt, Hiroshima-class) and every
+   dimension is solved from it — see the physical-model block for the
+   arithmetic. What the stock nuke row now draws:
 
-   THE THIRD PROPORTION, and the one the reference photograph is actually
-   about: OVERHANG. The collar hangs at 0.98 of the cap radius and the stem
-   is 60 m across, so the skirt is 7.98x the stem's width and the cap
-   visibly sits OUT PAST its own column. A cap that does not overhang is a
-   disc balanced on a pole, which is what this file drew before.
+       fireball radius         126 m      50*W^(1/3)
+       cap DIAMETER          5,106 m      Glasstone 20 kt cap, W^(1/3)-scaled
+       cap THICKNESS         3,992 m
+       cap centre altitude   8,004 m      top minus half the cap
+       cloud TOP            10,000 m      tropopause-limited, not W^(1/3)
+       stem diameter         1,702 m      cap/3 — the reference photograph
+       dust base radius      2,016 m      the 2 psi contour
 
-   All three are reported by CBZ.nukeFxAudit().proportions so they cannot
-   drift back without somebody having to change a number they can see.
+   THE FOUR RATIOS THE PHOTOGRAPH IS ABOUT, before -> after:
+
+       cap WIDER THAN TALL       (never asserted) -> 1.28 : 1
+       cap : stem                8.15 : 1         -> 3.00 : 1
+       overhang (skirt : stem)   7.98 : 1         -> 2.94 : 1
+       cloud top : cap width     2.06 : 1         -> 1.96 : 1
+
+   The cap:stem number is the headline. At 8.15:1 this file was drawing a
+   CHIMNEY under a hat — and the gate that was supposed to protect the
+   silhouette (`capOverStem >= 6`) was ONE-SIDED, so it could only ever catch
+   a stem that was too fat and it passed the chimney every single time. It is
+   a two-sided window now (2.5..4.5), which is the only shape of gate that
+   can catch both failure modes.
+
+   THE CAP'S LUMPS OBEY A SIZE LAW, and that is what actually makes a
+   silhouette read as cauliflower — not a shader. Lobe RADIUS falls with
+   distance from the axis (0.34 -> 0.178) while lobe COUNT rises with it
+   (the radial seed is area-uniform), so the crown carries a handful of very
+   big lumps and the rim a dense fringe of small ones. The vertical station
+   rides the cap's own lens profile sqrt(1-r^2), so the head is deep through
+   the middle and tapers to the rim — the shape a vortex ring takes.
+
+   THE STEM IS A TWISTED COLUMN, NOT A CYLINDER: the azimuth advances 0.85
+   turns over the column height and stemProfile() flares it 1.9x at the foot
+   into the dust base and 1.25x at the shoulder into the cap. Every lobe used
+   to sit inside 0.36 of the declared radius — a thin core inside a wide
+   claim, smooth from every angle.
+
+   AND A 10 KM CLOUD DOES NOT FIT IN A 1 KM FRUSTUM. core/scene.js's camera
+   is PerspectiveCamera(62, aspect, 0.1, 1000). Rather than shrink the
+   physics to fit the renderer, the far tier is a single sky-locked IMPOSTOR
+   quad drawn at TRUE ANGULAR SIZE (size' = size * D/d, D = 0.86*far) — see
+   makeMushroomTexture. The two tiers cross-fade on a GEOMETRIC FACT (how
+   close the 3D cap's far edge is to the far plane), so the swap always
+   completes before anything can be clipped, and the impostor REPLACES the
+   3D cap rather than stacking on it: peak draw count does not move.
+
+   All of it is reported by CBZ.nukeFxAudit() — .yieldKt, .dims, .zones,
+   .casualty, .proportions, .impostor — so nothing here can drift back
+   without somebody having to change a number they can see.
 
    WHAT THIS FILE DOES NOT OWN: gameplay blast, thermal and glass zones remain
    the bus's and ledger's. This file renders consequences—cloud, dust, world
@@ -303,6 +351,18 @@
   if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
   function v2() { return CBZ.CONFIG.NUKE_FX_V2 !== false; }
 
+  /* NUKE_REAL_SCALE (2026-07-28) — DIMENSIONAL HONESTY.
+     OWNER: "make them REAL TO SIZE."
+     The cloud stops being sized for framing and takes the dimensions the
+     modelled yield actually produces (nukeDims): a 5,106 m cap 3,992 m thick
+     centred at 8,004 m, on a 1,702 m stem, over a 2,016 m dust base, topping
+     out at 10 km. Since that is ten times the camera's own far plane, the
+     flag also switches on the far-tier impostor that draws it at true
+     ANGULAR size. false => the old framing-scale cloud (a 489 m cap at
+     907 m), which is what every ratio in this file used to be tuned for. */
+  if (CBZ.CONFIG.NUKE_REAL_SCALE == null) CBZ.CONFIG.NUKE_REAL_SCALE = true;
+  function real() { return v2() && CBZ.CONFIG.NUKE_REAL_SCALE !== false; }
+
   // ---- deterministic seeded LCG (NEVER Math.random — replay/MP sync) --------
   let _rs = 0x51ed77;
   function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
@@ -310,6 +370,16 @@
   function q01() { return CBZ.qScale ? Math.max(0, Math.min(1, CBZ.qScale(0, 1))) : 1; }
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
   function camPos() { return CBZ.camera && CBZ.camera.position ? CBZ.camera.position : null; }
+  // core/scene.js ships PerspectiveCamera(62, aspect, 0.1, 1000). Read it
+  // live rather than typing 1000: a quality tier or a mode is allowed to
+  // move it, and every impostor number below is a fraction of it.
+  function camFar() {
+    const c = CBZ.camera;
+    return (c && c.far > 1) ? c.far : 1000;
+  }
+  // bloomAt()'s ceiling: 0.35 + 0.9 + 0.16. Named once so the cap's true
+  // width can be divided by it instead of by a literal nobody can trace.
+  const BLOOM_MAX = 0.35 + 0.9 + 0.16;
   function camDist(x, y, z) {
     const c = camPos();
     return c ? Math.hypot(x - c.x, y - c.y, z - c.z) : 0;
@@ -389,6 +459,180 @@
     return t;
   }
 
+  /* ============================================================
+     THE MUSHROOM IMPOSTOR TEXTURE — the far tier, baked once at load.
+
+     WHY THIS EXISTS. The honest cloud for this device is 5,106 m across and
+     10,000 m tall (see nukeDims). core/scene.js's camera is
+     `PerspectiveCamera(62, aspect, 0.1, 1000)` — a ONE KILOMETRE far plane —
+     and scene.fog is `Fog(0xb6c4c8, 95, 360)`. So the true cloud is TEN
+     TIMES the entire view frustum and twenty-eight times the fog's reach:
+     there is no camera setting and no lobe count that renders it as 3D
+     geometry. Raising the far plane is not the answer either — 0.1 to 20000
+     is a depth-precision disaster across the whole city for one 34-second
+     event.
+
+     The owner's instruction was explicit: do not shrink the physics to fit
+     the renderer. So the cloud stays 10 km tall in every number this file
+     publishes, and the FAR TIER is drawn as a sky-locked impostor at TRUE
+     ANGULAR SIZE — the same trick core/sky.js's dome and
+     world/terrain_overhaul.js's unlit backdrop range already use, which is
+     this repo's own precedent for "further away than the frustum goes".
+
+     THE SIMILAR-TRIANGLES SOLVE (stepImpostor does it every frame):
+         d      = |cloudCentre - camera|          the TRUE distance
+         D      = 0.86 * camera.far = 860 m       where we actually put it
+         size'  = size * D / d
+     A quad of size' at D subtends exactly the angle `size` does at d, so a
+     player 2 km from ground zero sees a cloud of the correct angular size,
+     and one standing AT ground zero looks up at a cap that correctly fills
+     the sky. Depth-tested at 860 m, so everything in the world occludes it
+     (correct: it is really kilometres further away), and un-fogged, because
+     it is behind the fog, not in it.
+
+     WHAT IS IN THE THREE CHANNELS:
+        A  the silhouette — knobbly cap, twisted stem, broad dust base
+        R  incandescence  — 1 in the cap core and up the stem's spine
+        G  coolness       — 1 at the boiled-over crown and the dust base
+     R and G are read by BILL_FS (see uCool). The LOBE STATISTICS are the
+     whole craft here and they are the owner's note: a real cap's lumps are
+     BIG AND FEW near the crown and SMALL AND DENSE at the rim, so lobe
+     radius falls with distance from the axis while lobe COUNT rises with it.
+     ============================================================ */
+  const IMP_W = 256, IMP_H = 512;
+  function makeMushroomTexture() {
+    const c = document.createElement("canvas");
+    c.width = IMP_W; c.height = IMP_H;
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, IMP_W, IMP_H);
+    ctx.globalCompositeOperation = "lighter";
+
+    // The canvas is laid out in the cloud's OWN metres so every station below
+    // is the researched number, not a fraction somebody guessed. The quad is
+    // later scaled to (capW, top), so these two mappings are exact.
+    const D = nukeDims(126);
+    const SX = IMP_W / D.capW, SY = IMP_H / D.top;
+    function px(wx) { return IMP_W * 0.5 + wx * SX; }
+    function py(wy) { return IMP_H - wy * SY; }        // canvas y grows downward
+
+    // one cauliflower lobe. hot/cold are 0..1 and land in R and G.
+    function lobe(wx, wy, wr, hot, cold, alpha) {
+      const x = px(wx), y = py(wy), r = Math.max(1.5, wr * SX);
+      const R8 = Math.round(clamp(hot, 0, 1) * 255);
+      const G8 = Math.round(clamp(cold, 0, 1) * 255);
+      const g = ctx.createRadialGradient(x, y, r * 0.12, x, y, r);
+      g.addColorStop(0.0, "rgba(" + R8 + "," + G8 + ",0," + alpha.toFixed(3) + ")");
+      g.addColorStop(0.62, "rgba(" + R8 + "," + G8 + ",0," + (alpha * 0.72).toFixed(3) + ")");
+      g.addColorStop(1.0, "rgba(" + R8 + "," + G8 + ",0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+    }
+
+    const capRx = D.capW * 0.5, capRy = D.capH * 0.5;
+    const capY = D.capY, capBase = capY - capRy;
+    const stemRx = D.stemW * 0.5;
+    const baseR = D.base, baseH = D.top * 0.055;
+
+    /* ---- THE DUST BASE. Broad, low, DARK, and wider than the stem — it is
+       the ground-shock skirt and it is what gives the photograph its scale.
+       Drawn first so everything else sits in front of it. */
+    for (let i = 0; i < 40; i++) {
+      const u = (rng() * 2 - 1);
+      const wx = u * baseR * (0.35 + 0.65 * Math.sqrt(rng()));
+      const wy = baseH * (0.10 + rng() * 0.95) * (1 - Math.abs(wx) / (baseR * 1.15));
+      const wr = baseH * (0.52 + rng() * 0.55);
+      lobe(wx, Math.max(baseH * 0.06, wy), wr, 0.04 + rng() * 0.06, 0.86 + rng() * 0.14, 0.55);
+    }
+
+    /* ---- THE STEM. A TWISTED convective column, not a cylinder: the
+       azimuth advances STEM_TURNS over the column height, and the radius
+       flares at both ends (see stemProfile). Lit from inside along its
+       spine — that is the orange-brown roil in the reference plate — and
+       cooling toward its own edges. */
+    const STEM_TURNS = 0.85;
+    for (let i = 0; i < 46; i++) {
+      const f = (i + 0.5) / 46;                       // 0 at the deck, 1 at the cap
+      const wy = baseH * 0.35 + (capBase - baseH * 0.35) * f;
+      const prof = stemProfile(f);
+      const th = f * STEM_TURNS * 6.2832 + rng() * 0.9;
+      // project the helix: the silhouette only sees its x component
+      const off = Math.cos(th) * stemRx * prof * 0.42;
+      const side = (rng() * 2 - 1) * stemRx * prof * 0.72;
+      const wx = off + side;
+      const wr = stemRx * prof * (0.30 + rng() * 0.20);
+      // the spine is incandescent; the flanks are cooler; the foot is dust
+      const axial = 1 - Math.min(1, Math.abs(wx) / (stemRx * prof));
+      const hot = clamp((0.30 + 0.62 * axial) * (0.35 + 0.75 * f), 0, 1);
+      lobe(wx, wy, wr, hot, clamp(0.72 - 0.55 * axial + 0.30 * (1 - f), 0, 1), 0.62);
+    }
+
+    /* ---- THE SKIRT / OVERHANG. A band of lobes hanging under the cap's rim
+       and reaching slightly WIDER than the cap body (1.04x). This is the
+       single feature that makes the head read as a mushroom instead of a
+       ball on a stick, and it is why the cap:stem ratio alone is not enough:
+       the cap has to visibly HANG OUT past its own column. */
+    for (let i = 0; i < 26; i++) {
+      const s = (i + 0.5) / 26, side = s < 0.5 ? -1 : 1;
+      const u = 0.52 + 0.52 * ((s * 2) % 1);
+      const wx = side * capRx * u * 1.04;
+      const wy = capBase + capRy * (0.02 + rng() * 0.30) - capRy * 0.16;
+      const wr = capRy * (0.13 + rng() * 0.09);
+      lobe(wx, wy, wr, 0.24 + rng() * 0.22, 0.44 + rng() * 0.22, 0.60);
+    }
+
+    /* ---- THE CAP. THE SIZE LAW IS THE OWNER'S NOTE, IMPLEMENTED:
+         lobe radius  falls  as (0.30 - 0.19*|u|^1.4) of the cap half-height
+         lobe count   rises  with |u|, because u is drawn area-uniform
+       so the crown carries a handful of very big lumps and the rim carries
+       a dense fringe of small ones. That distribution, not any shader, is
+       what makes a silhouette read as cauliflower.
+       The vertical extent follows the cap's own LENS profile sqrt(1-u^2), so
+       the head is thick through the middle and tapers to the rim, which is
+       the shape a vortex ring actually takes. */
+    for (let i = 0; i < 92; i++) {
+      const u = (rng() < 0.5 ? -1 : 1) * Math.sqrt(rng()) * 0.97;
+      const lens = Math.sqrt(Math.max(0.02, 1 - u * u));
+      const wx = u * capRx;
+      const wy = capY + capRy * lens * (rng() * 1.72 - 0.86);
+      const wr = capRy * (0.30 - 0.19 * Math.pow(Math.abs(u), 1.4)) * (0.80 + rng() * 0.44);
+      // the CROWN (top third) has boiled over and gone dark; the CORE is
+      // still white-hot; the flanks are the orange cauliflower between them.
+      const up = (wy - capY) / (capRy * Math.max(0.1, lens));   // -1 bottom .. +1 top
+      const core = (1 - Math.abs(u) / 0.62) * (1 - Math.abs(up) * 0.55);
+      const hot = clamp(0.26 + 0.86 * core, 0, 1);
+      const cold = clamp(0.10 + 0.62 * Math.max(0, up) + 0.34 * Math.abs(u), 0, 1);
+      lobe(wx, wy, wr, hot, cold, 0.66);
+    }
+
+    /* ---- THE CORE, painted last and painted BRIGHT. In the reference plate
+       the white-yellow heart burns THROUGH the orange lobes; with `lighter`
+       compositing this pass adds straight onto them, which is exactly that
+       reading and costs no second layer. */
+    for (let i = 0; i < 16; i++) {
+      const u = (rng() * 2 - 1) * 0.40;
+      const wy = capY + capRy * (rng() * 0.9 - 0.55);
+      lobe(u * capRx, wy, capRy * (0.16 + rng() * 0.14), 1, 0, 0.50);
+    }
+
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.generateMipmaps = false;
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.needsUpdate = true;
+    return t;
+  }
+
+  /* A CONVECTIVE COLUMN IS NOT A CYLINDER. It flares at BOTH ends — hard at
+     the foot, where it is being drawn up out of the ground-shock skirt, and
+     gently at the shoulder, where it feeds the vortex ring. Measured off the
+     owner's reference plate: about 1.9x at the deck, 1.25x at the shoulder,
+     and 1.0 through the middle third. f = 0 at the ground, 1 at the cap. */
+  function stemProfile(f) {
+    f = clamp(f, 0, 1);
+    return (1 + 0.90 * Math.pow(1 - f, 2.4)) * (1 + 0.25 * Math.pow(f, 3.0));
+  }
+
   // The 1D LIFETIME LUT: white-hot -> yellow -> orange -> ember -> soot -> ash.
   // Sampled by u = normalized age, which is how a single billboard shader
   // covers "fireball" and "old cloud" without a second material.
@@ -435,7 +679,7 @@
     return out.copy(RAMP_C[RAMP_C.length - 1]);
   }
 
-  const TEX = { cloud: null, noise: null, lut: null };
+  const TEX = { cloud: null, noise: null, lut: null, mush: null };
 
   /* ============================================================
      SHADERS — r128 GLSL ES 1.0, ShaderMaterial (NOT RawShaderMaterial, so
@@ -556,11 +800,30 @@
     "  #include <fog_vertex>",
     "}",
   ].join("\n");
+  /* uCool — THE ONE ADDITION, AND IT DEFAULTS TO A NO-OP.
+
+     The mask's RED channel has always been "how bright is this part"
+     (it multiplies the LUT colour, which is what draws the hot core). The
+     mask's GREEN channel was unused. It now carries "how COLD is this part",
+     and it walks the LUT sample FORWARD along its own white->yellow->orange
+     ->ember->soot->ash ramp.
+
+     That one lookup shift is what lets a SINGLE quad carry the whole
+     reference photograph: an incandescent white-yellow core (green 0, red 1),
+     orange cauliflower lobes around it (green ~0.15, red ~0.5), a dark
+     boiled-over crown (green ~0.5, red ~0.1) and a near-black dust base
+     (green ~0.9, red ~0.05) — one draw call, one material, no second
+     sampler and no second shader.
+
+     uCool = 0 makes lifeShift exactly 0, so the five existing cloud
+     billboards compile and render byte-identically. Only the impostor sets
+     it. */
   const BILL_FS = [
     "#include <fog_pars_fragment>",
     "uniform sampler2D uMask; uniform sampler2D uNoise; uniform sampler2D uLut;",
     "uniform vec2 uScroll; uniform vec2 uScroll2;",
     "uniform float uLife; uniform float uOpacity; uniform float uErode; uniform float uGlow;",
+    "uniform float uCool;",
     "varying vec2 vUv;",
     "void main() {",
     "  vec4 m = texture2D(uMask, vUv);",
@@ -569,7 +832,8 @@
     "  float d = m.a * (0.42 + 0.78 * n1) * (0.55 + 0.7 * n2);",
     "  float a = smoothstep(uErode, uErode + 0.30, d) * uOpacity;",
     "  if (a <= 0.004) discard;",
-    "  vec3 c = texture2D(uLut, vec2(clamp(uLife, 0.02, 0.98), 0.5)).rgb;",
+    "  float life = clamp(uLife + uCool * m.g * 0.55, 0.02, 0.98);",
+    "  vec3 c = texture2D(uLut, vec2(life, 0.5)).rgb;",
     "  c *= 0.72 + uGlow * m.r * (0.6 + 0.7 * n1);",
     "  gl_FragColor = vec4(c, a);",
     TAIL_FOG,
@@ -584,7 +848,7 @@
      can never swallow it into a merged buffer.
      ============================================================ */
   const POOL = {
-    shell: null, dome: null, bills: [], wdome: null,
+    shell: null, dome: null, bills: [], wdome: null, imp: null,
     capVol: null, stemVol: null, surgeVol: null, hotVol: null,
     crownVol: null, glowVol: null,
   };
@@ -604,21 +868,49 @@
   // B-2's steep camera angle; a camera-facing cap quad becomes a flat disc.
   function seedVolumes() {
     if (VOL_SEED.cap.length) return;
+    /* CAP. `r` is drawn AREA-UNIFORM (sqrt of a uniform), which already puts
+       more lobes per unit radius out at the rim than at the crown. What was
+       missing is the other half of the owner's note — "a real cap's lumps
+       are BIG AND FEW near the crown, SMALL AND DENSE at the rim" — so `s2`
+       makes lobe RADIUS fall with distance from the axis:
+
+           s2 = (0.34 - 0.20*r^1.4) * jitter
+
+       0.34 at the crown down to 0.178 at r = 0.86: the crown's lumps are
+       about twice the rim's, on top of the rim already carrying more of
+       them. That distribution, not any shader, is what makes a silhouette
+       read as cauliflower rather than as a fuzzy disc.
+       `y2` is the vertical station in units of the cap's own half-THICKNESS,
+       and it is multiplied at draw time by the LENS profile sqrt(1-r^2), so
+       the head is deep through the middle and tapers to the rim — the shape
+       a vortex ring actually takes. `s`/`y` are kept verbatim for the
+       flag-off path. */
     for (let i = 0; i < VOL_MAX.cap; i++) {
       const a = i ? (i * 2.399963 + rng() * 0.24) : 0; // golden-angle, no spokes
+      const rr = i ? Math.sqrt(rng()) * 0.86 : 0;
       VOL_SEED.cap.push({
-        a: a, r: i ? Math.sqrt(rng()) * 0.86 : 0,
+        a: a, r: rr,
         y: i ? (rng() - 0.42) * 0.48 : 0.08,
         s: i ? 0.16 + rng() * 0.12 : 0.34,
         spin: (rng() - 0.5) * 0.28,
+        s2: (0.34 - 0.20 * Math.pow(rr, 1.4)) * (0.82 + rng() * 0.36),
+        y2: i ? (rng() * 1.7 - 0.85) : 0.10,
       });
     }
+    /* STEM. The old seeds put every lobe within 0.36 of the column radius —
+       a thin core inside a wide declared stem, which is why it read as a
+       smooth chimney. `r2` fills the column out to its edge and `s2` makes
+       the lumps big enough to overlap, and `tw` is the per-lobe twist jitter
+       on top of the shared helix (see STEM_TURNS in the stem block). */
     for (let i = 0; i < VOL_MAX.stem; i++) {
       VOL_SEED.stem.push({
         f: (i + 0.45) / VOL_MAX.stem,
         a: i * 2.399963 + rng() * 0.35,
         r: 0.08 + rng() * 0.28,
         s: 0.78 + rng() * 0.42,
+        r2: 0.22 + Math.sqrt(rng()) * 0.72,
+        s2: 0.34 + rng() * 0.26,
+        tw: (rng() - 0.5) * 0.8,
       });
     }
     for (let i = 0; i < VOL_MAX.surge; i++) {
@@ -689,6 +981,7 @@
     TEX.cloud = makeCloudTexture();
     TEX.noise = makeNoiseTexture();
     TEX.lut = makeLutTexture();
+    TEX.mush = makeMushroomTexture();
 
     const sphereGeo = new THREE.IcosahedronGeometry(1, 2);   // 320 tris — a rim needs no more
     sphereGeo._shared = true;
@@ -815,6 +1108,7 @@
           uScroll: { value: new THREE.Vector2(0, 0) },
           uScroll2: { value: new THREE.Vector2(0, 0) },
           uLife: { value: 0.3 }, uOpacity: { value: 0 }, uErode: { value: 0.18 }, uGlow: { value: 0.5 },
+          uCool: { value: 0 },              // 0 => byte-identical to before
         }),
         vertexShader: BILL_VS, fragmentShader: BILL_FS,
         transparent: true, depthWrite: false, depthTest: true,
@@ -824,6 +1118,36 @@
       mat._shared = true;
       POOL.bills.push(park(new THREE.Mesh(quadGeo, mat), 5));
     }
+
+    /* ---- THE FAR-TIER IMPOSTOR. One quad, one baked mushroom, one draw
+       call for a ten-kilometre cloud. It is NOT an extra layer on top of the
+       3D cloud — it REPLACES it (they cross-fade on whether the 3D cap still
+       fits inside the frustum, see impostorMix), so the peak draw count does
+       not move.
+         fog:false  it is behind the fog, not in it. This also gives it its
+                    own shader permutation, which is exactly why it is minted
+                    here at load and parked for core/fxwarm.
+         renderOrder 4.5 — UNDER every 3D cloud layer, so during the
+                    cross-fade the near geometry always paints over it, and
+                    the depth test at 860 m lets real world geometry occlude
+                    it while the 3D stem in front of it wins on depth. The
+                    depth buffer composites the two tiers for free. */
+    const impMat = new THREE.ShaderMaterial({
+      uniforms: FOG_U({
+        uMask: { value: TEX.mush }, uNoise: { value: TEX.noise }, uLut: { value: TEX.lut },
+        uScroll: { value: new THREE.Vector2(0, 0) },
+        uScroll2: { value: new THREE.Vector2(0, 0) },
+        uLife: { value: 0.12 }, uOpacity: { value: 0 }, uErode: { value: 0.10 },
+        uGlow: { value: 1.55 },             // the core must overdrive into white
+        uCool: { value: 1 },                // ...and the crown/dust must not
+      }),
+      vertexShader: BILL_VS, fragmentShader: BILL_FS,
+      transparent: true, depthWrite: false, depthTest: true,
+      fog: false,
+      side: THREE.DoubleSide, blending: THREE.NormalBlending,
+    });
+    impMat._shared = true;
+    POOL.imp = park(new THREE.Mesh(quadGeo, impMat), 4.5);
   }
 
   /* ============================================================
@@ -984,6 +1308,183 @@
     return Math.max(8, rr * pw * sc);
   }
 
+  /* ============================================================
+     THE PHYSICAL MODEL — ONE yield, and every dimension solved from it.
+
+     OWNER: "make them REAL TO SIZE ... the amount of DEATH in the radius
+     should also be REAL based on the research — the percentage — and the
+     BUILDING DAMAGE."
+
+     THE YIELD IS NOT TYPED, IT IS INVERTED OUT OF THE BUS ROW. The published
+     maximum-fireball relation for an air burst is
+
+         R_fireball = 50 * W^(1/3)  metres,  W in kilotons
+
+     and systems/impactbus.js's nuke row already fixes R at radius*power =
+     14*9 = 126 m (its own comment says so, and cites the same relation). So
+
+         W = (R / 50)^3 = (126 / 50)^3 = 2.52^3 = 16.0 kt
+
+     — a HIROSHIMA-CLASS device (Little Boy is best-estimated at 15 kt), and
+     that is a gift, because Hiroshima is the most thoroughly measured
+     nuclear casualty dataset that exists. Every ring below is therefore
+     sourced rather than invented, and (16/15)^(1/3) = 1.022 means the
+     Hiroshima distances transfer to this device essentially one-to-one.
+
+     BECAUSE IT IS INVERTED, THE SPECTACLE AND THE DAMAGE CAN NEVER DRIFT.
+     Change the row's power or radius and the yield, the cloud, the rings and
+     the casualty fractions all move together. Nothing here is a constant
+     that has to be remembered.
+     ============================================================ */
+  // W = (R/50)^3, the inverse of the maximum-fireball relation.
+  function yieldKt(R) { return Math.pow(Math.max(1, R) / 50, 3); }
+  // cube-root scaling factor against the 1 kt references below
+  function cubeRt(W) { return Math.pow(Math.max(0.001, W), 1 / 3); }
+
+  /* ---- THE CLOUD, AT TRUE SIZE ------------------------------------------
+     Glasstone & Dolan's stabilised-cloud figures for a 20 kt surface burst
+     (their cloud-height/yield curves, Fig. 2.16 and the accompanying table):
+        cloud TOP        ~10.7 km      cloud BOTTOM (cap base)  ~6.4 km
+        cap thickness    ~4.3 km       cap DIAMETER             ~5.5 km
+     At 16 kt those come down by (16/20)^(1/3) = 0.928 on the width terms;
+     cloud HEIGHT scales far more weakly than W^(1/3) because the tropopause
+     (~11 km at mid latitudes) is a hard ceiling — everything going up goes
+     sideways instead — so the top is held at 10 km rather than scaled.
+
+     THE STEM IS THE OWNER'S RATIO AND IT IS RIGHT FOR THIS PHASE. He is
+     looking at the classic tower shot — the cloud at tens of seconds, not
+     the ten-minute stabilised cloud — and at that age the convective column
+     is FAT: "roughly as wide as ~1/3 the cap". A stabilised cloud's stem is
+     thinner (1/5 to 1/6), and drawing that would be a different photograph.
+     This whole sequence is 34 s long, so the tower shot is the correct
+     reference and the stem is capDiameter/3.
+
+     THE DUST BASE is the ground-shock skirt: Crossroads Baker's base surge
+     (23 kt) reached ~1 km radius by a minute, and a land surface burst's
+     skirt tracks the 2 psi contour early on, which for this yield is
+     2,016 m (see RINGS). That is what the reference photograph's broad dark
+     spreading foot is, and it is wider than the stem by design.           */
+  const CLOUD_TOP_M = 10000;     // m — tropopause-limited, not W^(1/3)-scaled
+  const CAP_DIA_20KT = 5500;     // m — Glasstone's 20 kt stabilised cap
+  const CAP_THICK_20KT = 4300;   // m
+  const STEM_OF_CAP = 1 / 3;     // owner's reference photograph
+  function nukeDims(R) {
+    const W = yieldKt(R);
+    const k = Math.pow(W / 20, 1 / 3);          // width terms scale as W^(1/3)
+    const capW = CAP_DIA_20KT * k;              // 16 kt -> 5,104 m
+    const capH = CAP_THICK_20KT * k;            // 16 kt -> 3,990 m
+    const top = CLOUD_TOP_M;                    // tropopause ceiling
+    return {
+      W: W,
+      fireball: R,                              // 126 m
+      capW: capW,
+      capH: capH,
+      // the cap's CENTRE sits half its own thickness below the cloud top
+      capY: top - capH * 0.5,                   // 16 kt -> 8,005 m
+      top: top,
+      stemW: capW * STEM_OF_CAP,                // 16 kt -> 1,701 m
+      base: RING_1KT.p2 * cubeRt(W),            // dust base radius = the 2 psi contour
+    };
+  }
+
+  /* ---- THE RINGS ---------------------------------------------------------
+     TWO LADDERS, because they are two different physics and they must not be
+     collapsed into one "blast radius":
+
+     (1) OVERPRESSURE -> BUILDINGS. Glasstone & Dolan's 1 kt surface-burst
+         reference radii, scaled by W^(1/3) = 2.520 at 16 kt:
+
+           psi   1 kt      x2.520     what it does to a building
+           20    200 m     504 m      total destruction; even reinforced
+                                      concrete is gutted to its frame
+           10    300 m     756 m      heavy structural failure
+            5    440 m   1,109 m      MOST ORDINARY BUILDINGS COLLAPSE
+                                      (the classic "destruction radius")
+            2    800 m   2,016 m      roofs and walls out, wood frames down,
+                                      what is left is burning
+            1  1,300 m   3,276 m      windows across the whole district;
+                                      the largest injury source there is
+
+     (2) FATALITY -> PEOPLE. The USSBS survey of Hiroshima (15 kt, burst
+         580 m) measured killed/injured/safe by distance from the hypocentre.
+         Scaled to 16 kt by (16/15)^(1/3) = 1.0217:
+
+           Hiroshima band   here          killed
+           0.0-0.5 km       0-511 m       86.0%
+           0.5-1.0 km       511-1,022 m   83.0%
+           1.0-1.5 km       1,022-1,533   51.0%
+           1.5-2.0 km       1,533-2,043   21.6%
+           2.0-2.5 km       2,043-2,554    4.9%
+           2.5-3.0 km       2,554-3,065    2.4%
+           3.0-4.0 km       3,065-4,087    0.3%
+
+     TWO CAVEATS, stated because leaving them out would be the stale-claim
+     problem this file keeps catching itself in:
+       * those fractions are for a population largely INDOORS in light
+         wood-frame construction with no warning. In the open you fare worse
+         close in (thermal) and better further out.
+       * Hiroshima was an AIRBURST, which spreads blast further than the
+         surface burst both of this game's delivery routes produce. The two
+         ladders are therefore kept SEPARATE rather than fused: buildings ride
+         the surface-burst overpressure radii, people ride the measured
+         fatality curve. Fusing them would have meant inventing a number.
+
+     INSIDE THE FIREBALL IT IS 100%, and that is not a survey figure — it is
+     that there is nothing left to survey.                                  */
+  const RING_1KT = { p20: 200, p10: 300, p5: 440, p2: 800, p1: 1300 };
+  const USSBS = [                                 // [outer km at 15 kt, killed]
+    [0.5, 0.860], [1.0, 0.830], [1.5, 0.510], [2.0, 0.216],
+    [2.5, 0.049], [3.0, 0.024], [4.0, 0.003], [5.0, 0.000],
+  ];
+  const HIROSHIMA_KT = 15;
+  /* CBZ.nukeRings(R) — the whole event as a table. R is the fireball radius
+     (fireR of the bus row); everything else is solved. Exported because
+     systems/impactbus.js applies the fatality curve and city/strategic.js
+     sizes its cop sweep and radiation zone from the same numbers — one
+     source, three consumers, no second table anywhere. */
+  function nukeRings(R) {
+    const W = yieldKt(R);
+    const k = cubeRt(W);
+    const hk = Math.pow(W / HIROSHIMA_KT, 1 / 3);   // 16 kt -> 1.0217
+    return {
+      W: +W.toFixed(2),
+      fireball: R,
+      psi20: RING_1KT.p20 * k, psi10: RING_1KT.p10 * k,
+      psi5: RING_1KT.p5 * k, psi2: RING_1KT.p2 * k, psi1: RING_1KT.p1 * k,
+      // the measured fatality curve, in metres for THIS yield
+      fatal: USSBS.map(function (b) { return [b[0] * 1000 * hk, b[1]]; }),
+      // 500 rem prompt-radiation radius. Prompt gamma+neutron attenuates
+      // exponentially in air, so it does NOT scale as W^(1/3): the standard
+      // figure for a 20 kt burst is ~1.1 km to 500 rem (a ~50% lethal dose
+      // without treatment), and it grows only slowly with yield. Held at
+      // 1.1 km * (W/20)^0.2 rather than cube-rooted, which would have made
+      // it a blast radius wearing a radiation label.
+      rad500: 1100 * Math.pow(W / 20, 0.2),
+    };
+  }
+  /* CBZ.nukeLethalAt(r, R) — the researched probability that an unsheltered
+     person at range r is KILLED. Linear between the measured bands, 1.0
+     inside the fireball, 0 past the last band. This is the ONE function the
+     bus's ring sweep asks; it never re-derives a curve of its own. */
+  function nukeLethalAt(r, R) {
+    const T = nukeRings(R);
+    if (r <= T.fireball) return 1;                 // nothing to survey
+    const f = T.fatal;
+    let prev = T.fireball, prevV = 1;
+    for (let i = 0; i < f.length; i++) {
+      if (r <= f[i][0]) {
+        const u = (r - prev) / Math.max(1, f[i][0] - prev);
+        return Math.max(0, prevV + (f[i][1] - prevV) * u);
+      }
+      prev = f[i][0]; prevV = f[i][1];
+    }
+    return 0;
+  }
+  CBZ.nukeYield = function (R) { return yieldKt(R == null ? 126 : R); };
+  CBZ.nukeRings = function (R) { return nukeRings(R == null ? 126 : R); };
+  CBZ.nukeLethalAt = function (r, R) { return nukeLethalAt(r, R == null ? 126 : R); };
+  CBZ.nukeDims = function (R) { return nukeDims(R == null ? 126 : R); };
+
   /* PROPORTIONS ARE THE TELL. Everything below is a ratio against the fireball
      radius R, so the whole cloud stays in proportion at any yield, and the
      ratios are the ones test film actually shows rather than the ones films
@@ -1048,7 +1549,31 @@
      BOUNDED one, because buildings.js's cityShatter caps itself at 50 panes per
      call whatever radius you hand it. A bigger radius costs nothing extra; it
      just stops the breakage being concentrated on the block you were standing on. */
+  /* RE-DERIVED 2026-07-28 AGAINST THE RESEARCHED CONTOURS. maxR used to be
+     900 m — the COLLAPSE radius wearing the name "reach" — so the ladder ran
+     out to 2.10x it to get past the flattening. maxR is now the 1 psi
+     contour itself (3,276 m), so the same four passes become fractions of
+     it and every rung is a named contour instead of a multiple:
+
+         5 psi  1,109 / 3,276 = 0.339   panes go inside the collapse zone
+         2 psi  2,016 / 3,276 = 0.615   the gutted band
+         1 psi  3,276 / 3,276 = 1.000   THE glass contour, the biggest single
+                                        injury source a city detonation makes
+         0.5 psi                 1.250   light breakage beyond it
+
+     The old 2.10 against the new maxR would have been 6,880 m — further than
+     a 16 kt burst breaks anything, and the sort of stale multiplier this
+     file keeps catching. Under NUKE_REAL_SCALE the ladder is these; with the
+     flag off it is the old one, because the old one is right for the old
+     maxR and wrong for this one. */
   const GLASS_K = [0.42, 0.85, 1.35, 2.10];
+  const GLASS_K_REAL = [0.339, 0.615, 1.000, 1.250];
+  /* KEYED ON KIND, NOT JUST ON THE FLAG. The real ladder's rungs are NUCLEAR
+     overpressure contours; handing them to the MOAB would have quietly
+     narrowed its glass reach from 2.10x to 1.25x its own maxR on the
+     strength of research about a completely different weapon. A chemical
+     bomb keeps its own ladder. */
+  function glassLadder(kind) { return (kind === "nuke" && real()) ? GLASS_K_REAL : GLASS_K; }
 
   /* ============================================================
      THE RISE — ONE curve, four readers.
@@ -1210,8 +1735,15 @@
       // THE IGNITION RADIUS. Y^0.41 vs Y^0.33 (see STYLE.thermK) — the burn zone
       // is genuinely wider than the flattened zone, and this is the number that
       // says so. Zero for anything chemical. It is never drawn as an outline.
-      burnR: P.thermK > 0 ? maxR * P.thermK : 0,
+      // THE IGNITION RADIUS. Under NUKE_REAL_SCALE it is the researched
+      // firestorm boundary (2,016 m for this yield — Hiroshima's 11.4 km^2
+      // burnt area is a 1.9 km radius, and spontaneous ignition of light
+      // fuels reaches ~2.0 km at 15 kt). Otherwise it is the old multiple of
+      // the reach. It is never drawn as an outline either way.
+      burnR: (styleName === "nuke" && real()) ? nukeRings(radius).psi2
+           : (P.thermK > 0 ? maxR * P.thermK : 0),
       riseH: R * P.riseK, capW: R * P.capK, stemW: R * P.stemK, surgeW: R * P.surgeK,
+      capH: R * P.capK * 0.66, capThick: 0, dims: null, impW: 0, impH: 0, surgeDraw: 0,
       t: 0, r: Math.max(1, row.radius || radius * 0.1), dur: P.dur, q: q,
       // The front still drives damage, dust and condensation, but it is never
       // painted as geometry on the terrain.
@@ -1219,10 +1751,46 @@
       bills: bills, dustAcc: 0, pending: [], ash: null, ashT: 0,
       boomAt: dist > 60 ? Math.min(9, dist / 343) : -1,
       frontAt: dist > 45 && dist < maxR ? dist / Math.max(1, spd) : -1,
-      frontHit: false, fogK: 0,
+      frontHit: false, fogK: 0, mix: 0,
       mode: (CBZ.game && CBZ.game.mode) || null,
       quiet: !!opts.quiet, noDamage: !!opts.noDamage, byPlayer: !!opts.byPlayer,
     };
+
+    /* ---- REAL TO SIZE. Every drawn dimension is now the researched one,
+       divided by whatever multiplier the downstream animator applies to it,
+       so the value that finally reaches the screen IS the number nukeDims
+       published. Getting that division wrong is the whole risk here, so each
+       one names its divisor:
+         cap   stepVolumes/stepBill multiply L.capW by bloomAt(), whose
+               ceiling is 0.35 + 0.9 + 0.16 = 1.41
+         rise  capYAt() drives L.riseH to exactly L.by + riseH at full rise,
+               so no divisor — riseH IS the cap-centre altitude
+         stem  the stem block uses L.stemW as the column's true RADIUS at
+               full rise and applies stemProfile() per lobe, so no divisor
+         surge see the clamp below — the drawn skirt is deliberately NOT the
+               true one, and that is the one honest exception
+       The MOAB and the flag-off path keep the framing-scale ks untouched. */
+    if (styleName === "nuke" && real()) {
+      const D = nukeDims(R);
+      live.dims = D;
+      live.capW = D.capW / BLOOM_MAX;         // -> D.capW at full bloom
+      live.capH = D.capH;
+      live.capThick = D.capH / D.capW;        // 0.782 — a RATIO, so it rides bloom
+      live.riseH = D.capY;                    // cap CENTRE altitude, 8,004 m
+      live.stemW = D.stemW * 0.5;             // the block below wants a RADIUS
+      live.surgeW = D.base;
+      /* THE ONE PLACE THE DRAWN SIZE IS NOT THE TRUE SIZE, and it is named.
+         The dust base is 2,016 m across the deck. scene.fog ends at 360 m
+         and the far plane at 1,000 m, so every metre of it past ~600 m is
+         either fully hazed or clipped — drawing 34 instanced lobes out there
+         buys nothing and costs fill. The 3D skirt is therefore clamped to
+         what the atmosphere can actually show, and the IMPOSTOR's baked dust
+         base carries the true 2,016 m at true angular size. The published
+         number stays 2,016 either way; only the near geometry is clamped. */
+      live.surgeDraw = Math.min(D.base, camFar() * 0.62);
+      live.impW = D.capW;
+      live.impH = D.top;
+    }
 
     // ---- shells -----------------------------------------------------------
     // Tier 2+ gets the smooth luminous core and condensation veil. Every tier
@@ -1355,7 +1923,15 @@
     for (let i = 0; i < nTherm; i++) {
       const a = i * 2.399963 + 1.9 + rng() * 0.7;
       const inner = Math.min(maxR * 0.70, Math.max(R * 1.25, 1));
-      const outer = Math.max(inner, live.burnR > 0 ? live.burnR : maxR);
+      /* THE RECEIPTS ARE CLAMPED TO WHAT CAN BE SEEN, and the ZONE is not.
+         The ignition footprint is genuinely 2 km wide, but scene.fog ends at
+         360 m and the frustum at 1,000 m, so a pooled flame lit at 1,900 m
+         is a draw call nobody will ever receive a photon from. The real
+         thermal sweep out there is impactbus's (wave.thermal), which is
+         gameplay and is unaffected; these are only the visible receipts. */
+      const outer = Math.min(
+        Math.max(inner, live.burnR > 0 ? live.burnR : maxR),
+        real() ? camFar() : Infinity);
       const rr = Math.sqrt(inner * inner + rng() * (outer * outer - inner * inner));
       live.pending.push({
         t: 0.9 + i * 0.14,
@@ -1393,9 +1969,10 @@
        it must never floor to zero. */
     const nShatter = Math.max(1, Math.round((CBZ.qScale ? CBZ.qScale(1, P.shatter) : P.shatter)));
     if (CBZ.CONFIG.NUKE_FX_GLASS) {
-      const step = GLASS_K.length / nShatter;
+      const GK = glassLadder(styleName);
+      const step = GK.length / nShatter;
       for (let i = 0; i < nShatter; i++) {
-        const k = GLASS_K[Math.min(GLASS_K.length - 1, Math.max(0, Math.round((i + 0.5) * step - 0.5)))];
+        const k = GK[Math.min(GK.length - 1, Math.max(0, Math.round((i + 0.5) * step - 0.5)))];
         const rr = maxR * k;
         live.pending.push({ t: Math.max(0.3, rr / Math.max(1, spd)), shatter: rr });
       }
@@ -1487,6 +2064,104 @@
     return live.r;
   }
 
+  /* ============================================================
+     THE FAR TIER — one quad, true angular size, and a handoff that is a
+     GEOMETRIC FACT rather than a distance somebody picked.
+
+     impostorMix(L) returns 0 (all 3D) .. 1 (all impostor). The rule is:
+     fade as the 3D cap's FURTHEST POINT approaches the far plane, i.e.
+
+         dFar = |capCentre - camera| + capRadius
+
+     — the far EDGE, not the centre. Using the centre would let the cap's
+     back half get clipped by the frustum mid-fade, which is precisely the
+     artefact this is here to prevent: the 3D cap is fully retired before any
+     part of it can cross the far plane. The band is 0.55..0.95 of far, so
+     the swap always finishes with 5% of the frustum still to spare.
+
+     Early in the sequence the cloud is small and low and this is 0 — you get
+     real 3D lobes overhead. Within a few seconds it has climbed past a
+     kilometre and this is 1, which is correct: at that point the cloud is
+     genuinely a sky object and no amount of geometry would render it.
+     ============================================================ */
+  function impostorMix(L) {
+    if (!L.dims || !POOL.imp) return 0;
+    const c = camPos();
+    if (!c) return 1;
+    const cy = capYAt(riseAt(L.t, L), L);
+    const capR = L.capW * bloomAt(L.t, L) * 0.5;
+    const dFar = Math.hypot(L.x - c.x, cy - c.y, L.z - c.z) + capR;
+    const f = camFar();
+    return clamp((dFar - f * 0.55) / (f * 0.40), 0, 1);
+  }
+  const _impDir = new THREE.Vector3();
+  function stepImpostor(t, L, mix) {
+    const imp = POOL.imp;
+    if (!imp) return;
+    if (mix <= 0.004 || !L.dims) { imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return; }
+    const c = camPos();
+    if (!c) { imp.visible = false; return; }
+    /* SIMILAR TRIANGLES. The cloud's bounding box is impW x impH centred at
+       (x, impH/2, z). We cannot draw it there — it is 10 km tall against a
+       1 km frustum — so we draw a SMALLER quad NEARER, chosen so it subtends
+       the identical angle:
+            size' = size * D / d
+       with D = 0.86 * far (inside the frustum, outside almost everything in
+       the world, so the depth test still lets buildings occlude it). */
+    const rise = riseAt(t, L);
+    // the cloud grows into its full size across the rise; the impostor is
+    // scaled by the SAME curve, so the handoff cannot show a size jump.
+    const grow = 0.30 + 0.70 * rise;
+    const w = L.impW * grow, h = L.impH * grow;
+    const cx = L.x, cz = L.z, cyc = L.y + h * 0.5;
+    const d = Math.max(1, Math.hypot(cx - c.x, cyc - c.y, cz - c.z));
+    const D = camFar() * 0.86;
+    const k = D / d;
+    _impDir.set(cx - c.x, cyc - c.y, cz - c.z).multiplyScalar(1 / d);
+    imp.position.set(c.x + _impDir.x * D, c.y + _impDir.y * D, c.z + _impDir.z * D);
+    imp.scale.set(w * k, h * k, 1);
+    /* THE FAR TIER IS THE ONE BILLBOARD IN THIS FILE THAT IS *NOT* YAW-ONLY,
+       and the reason is arithmetic, not taste.
+
+       Every other quad here is cylindrically billboarded because copying the
+       camera's PITCH is the documented aircraft-view bug — a near cloud quad
+       tips flat under a bomber and exposes itself as a sheet of paper. But
+       this quad stands in for an object eight kilometres up, and yaw-only
+       has a DEGENERACY exactly where this event puts the player: near ground
+       zero the cloud centre is almost straight overhead, so the horizontal
+       vector faceCameraYaw takes its atan2 of collapses to noise (the quad
+       spins) and the quad goes edge-on (the cloud vanishes) at the one
+       moment it should fill the sky.
+
+       Object3D.lookAt with the default up of (0,1,0) is the correct
+       primitive: it faces the camera fully while keeping the quad's local up
+       as close to world-vertical as the geometry allows, so it degrades
+       gracefully straight overhead instead of degenerating. THE HONEST
+       LIMITATION, named: standing directly under a real cloud you would see
+       the UNDERSIDE of the cap, not its silhouette, and one quad cannot draw
+       that. Laying the silhouette over toward you is the better of the two
+       available wrongs. */
+    imp.lookAt(c.x, c.y, c.z);
+    const u = imp.material.uniforms;
+    // the whole cloud cools along the shared LUT; uCool then spreads the
+    // crown and the dust base further along it than the core (see BILL_FS).
+    u.uLife.value = clamp(0.06 + t / 26, 0, 0.55);
+    u.uScroll.value.set(0.013 * t, -0.021 * t);
+    u.uScroll2.value.set(-0.008 * t, 0.011 * t);
+    /* THE FADE-IN IS capIn'S OWN CURVE, DELIBERATELY AND EXACTLY.
+       stepVolumes draws the 3D cap at `capIn * near` and this draws the far
+       tier at `capIn * mix`, and near + mix = 1 by construction — so the two
+       tiers always sum to capIn no matter where the handoff sits. Any other
+       curve here leaves a HOLE: with an independent 0.9 s start the impostor
+       was still at zero through the window where mix had already retired the
+       3D cap, and the head simply vanished for a third of a second. Two
+       layers cross-fading have to share one envelope or they cannot. */
+    const fadeIn = ease((t - 0.55) / 1.15);        // === capIn in stepVolumes
+    const fadeOut = 1 - ease((t - (L.dur - 9)) / 9);
+    u.uOpacity.value = Math.max(0, mix * fadeIn * Math.max(0, fadeOut));
+    imp.visible = u.uOpacity.value > 0.004;
+  }
+
   /* ---- billboard placement -------------------------------------------------
      Every detail plane stays vertical in world space and yaws only. Copying the
      camera's pitch was the aircraft-view bug: from above, the cap tipped flat
@@ -1548,8 +2223,11 @@
     }
   }
 
-  function stepVolumes(t, L) {
+  function stepVolumes(t, L, mix) {
     if (!L.volume || !L.volN) return;
+    // 1 while the 3D cloud owns the picture, 0 once the impostor has it.
+    const mixC = clamp(mix || 0, 0, 1);
+    const near = 1 - mixC;
     const rise = riseAt(t, L);
     const capY = capYAt(rise, L) - L.y;
     const bloom = bloomAt(t, L);
@@ -1568,20 +2246,38 @@
     const capIn = ease((t - 0.55) / 1.15);
     const capRadius = L.capW * bloom * 0.5;
     const flat = capFlatAt(t, L);
+    /* THE CAP IS A LENS, AND ITS LUMPS OBEY A SIZE LAW.
+       `photo` switches the two together, because they are one shape:
+         • the vertical station is the seed's y2 scaled by the cap's own
+           HALF-THICKNESS (a researched 1,996 m, i.e. 0.78 of the cap radius)
+           and by the lens profile sqrt(1-r^2) — deep in the middle, thin at
+           the rim, which is what a vortex ring is;
+         • the lobe radius is s2, which FALLS with distance from the axis.
+       Together those give the reference plate's read: a handful of very big
+       lumps boiling over the crown and a dense fringe of small ones round
+       the rim. The legacy branch is the old flat disc of same-size blobs. */
+    const photo = real();
+    // half-THICKNESS as a ratio of the cap RADIUS, so it rides bloom for
+    // free: (capH/2)/(capW/2) = capH/capW = 3,992/5,106 = 0.782 at 16 kt.
+    const halfH = capRadius * (L.capThick || 0.782);
     for (let i = 0; i < L.volN.cap; i++) {
       const s = VOL_SEED.cap[i];
       const a = s.a + roll * (0.35 + s.r * 0.45) + s.spin * t;
       const rr = capRadius * s.r;
-      const lobe = capRadius * s.s * (0.45 + 0.55 * capIn);
+      const lens = Math.sqrt(Math.max(0.04, 1 - s.r * s.r));
+      const lobe = capRadius * (photo ? s.s2 : s.s) * (0.45 + 0.55 * capIn);
       const overturn = Math.sin(a * 1.7 + t * 0.55) * capRadius * 0.035;
+      const yOff = photo
+        ? (halfH * s.y2 * lens + overturn) * flat
+        : (capRadius * s.y + overturn) * flat;
       putVolume(cap, i,
         Math.cos(a) * rr,
-        capY + (capRadius * s.y + overturn) * flat,
+        capY + yOff,
         Math.sin(a) * rr,
         lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
         a * 0.35);
     }
-    cap.material.opacity = 0.96 * capIn * endFade;
+    cap.material.opacity = 0.96 * capIn * endFade * near;
     cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
     cap.visible = cap.material.opacity > 0.004;
     cap.instanceMatrix.needsUpdate = true;
@@ -1619,7 +2315,7 @@
       // white-hot -> yellow -> deep orange, the same walk the fireball took
       // but slower: a cap is a much bigger mass and cools far more slowly.
       glow.material.color.setHex(t < 1.6 ? 0xfff2c8 : t < 4.5 ? 0xffc45a : 0xd96a1e);
-      glow.material.opacity = 0.62 * glowIn * glowOut * endFade;
+      glow.material.opacity = 0.62 * glowIn * glowOut * endFade * near;
       glow.visible = glow.material.opacity > 0.004;
       glow.instanceMatrix.needsUpdate = true;
     }
@@ -1667,7 +2363,7 @@
           lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
           lobe * (isCrown ? 1.05 : 1.42), a * 0.5);
       }
-      crown.material.opacity = 0.95 * Math.max(collarIn, crownIn) * endFade;
+      crown.material.opacity = 0.95 * Math.max(collarIn, crownIn) * endFade * near;
       cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH, cloudCool, VOL_CROWN_EMBER);
       crown.visible = crown.material.opacity > 0.004;
       crown.instanceMatrix.needsUpdate = true;
@@ -1675,23 +2371,64 @@
 
     // STEM — overlapping vertical billows leave no chair-leg-thin cylinder and
     // no gap under the cap. A mild spiral makes sucked-up debris visibly rise.
+    /* THE STEM IS A TWISTED CONVECTIVE COLUMN, NOT A CYLINDER.
+       OWNER: "a THICK ROILING ORANGE-BROWN STEM roughly as wide as ~1/3 the
+       cap ... visibly a twisted convective column of lumps ... flaring out
+       at the bottom into a broad dark dust base."
+       Three separate things were wrong and all three are geometry:
+         (1) WIDTH. stemK 0.28 against capK 2.75 made the cap 9.8x the stem.
+             The reference is 3x, so the stem is now capW/3 = 1,702 m (see
+             STEM_OF_CAP) and it is a real column you could fly through.
+         (2) LUMPS. Every lobe sat inside 0.36 of the declared radius, so the
+             column was a thin core in a wide claim — smooth from any angle.
+             `r2` fills it to the edge and `s2` makes the lumps overlap.
+         (3) TWIST + FLARE. The azimuth now advances STEM_TURNS over the
+             column height (a helix — that is what "twisted" means and it is
+             what a buoyant plume in shear actually does), and stemProfile()
+             flares it 1.9x at the foot into the dust base and 1.25x at the
+             shoulder into the cap.
+       THE FRUSTUM CLAMP. At true scale the column runs to the cap base at
+       6,008 m, ten times past the far plane, so the drawn 3D column is
+       clamped to 0.82 of far and its topmost lobes are TAPERED AWAY rather
+       than cut — the impostor carries everything above, and the depth test
+       composites the two because the near lobes are genuinely nearer. */
     const stem = POOL.stemVol;
     const stemIn = ease((t - 0.65) / 1.3);
-    const h = Math.max(L.R * 0.55, capY);
-    const stemR = L.stemW * (0.72 + rise * 0.88);
+    const STEM_TURNS = 0.85;
+    const capBase = capY - (photo ? capRadius * (L.capThick || 0.782) : capRadius * 0.4);
+    const hTrue = Math.max(L.R * 0.55, capBase);
+    const h = photo ? Math.min(hTrue, camFar() * 0.82) : Math.max(L.R * 0.55, capY);
+    const stemR = photo ? L.stemW * (0.55 + rise * 0.45) : L.stemW * (0.72 + rise * 0.88);
     const stemY = Math.max(L.R * 0.10, h / Math.max(5, L.volN.stem * 0.72));
     for (let i = 0; i < L.volN.stem; i++) {
       const s = VOL_SEED.stem[i];
-      const a = s.a + roll * (0.28 + s.f * 0.35);
-      const neck = 0.72 + Math.abs(s.f - 0.55) * 0.55;
+      if (!photo) {
+        const a0 = s.a + roll * (0.28 + s.f * 0.35);
+        const neck = 0.72 + Math.abs(s.f - 0.55) * 0.55;
+        putVolume(stem, i,
+          Math.cos(a0) * stemR * s.r, Math.max(stemY * 0.45, h * s.f), Math.sin(a0) * stemR * s.r,
+          stemR * s.s * neck, stemY * s.s, stemR * s.s * neck, a0);
+        continue;
+      }
+      // f is the station on the TRUE column, so the flare profile is honest
+      // even though only the bottom 0.82*far of it is drawn.
+      const fTrue = s.f * (h / Math.max(1, hTrue));
+      const prof = stemProfile(fTrue);
+      const a = s.a + s.tw + roll * (0.28 + s.f * 0.35) + fTrue * STEM_TURNS * 6.2832;
+      const rr = stemR * prof * s.r2;
+      // taper the last 18% of the drawn column to nothing so the frustum
+      // clamp is a fade, not a guillotine.
+      const taper = 1 - ease((s.f - 0.82) / 0.18);
+      const lobe = stemR * prof * s.s2 * Math.max(0.02, taper);
       putVolume(stem, i,
-        Math.cos(a) * stemR * s.r,
-        Math.max(stemY * 0.45, h * s.f),
-        Math.sin(a) * stemR * s.r,
-        stemR * s.s * neck, stemY * s.s, stemR * s.s * neck,
-        a);
+        Math.cos(a) * rr, Math.max(stemY * 0.35, h * s.f), Math.sin(a) * rr,
+        lobe * 1.06, lobe * 0.92, lobe * 1.06, a);
     }
-    stem.material.opacity = 0.91 * stemIn * endFade;
+    // The near column is deliberately kept ALIVE under the impostor (it only
+    // loses 55% of its opacity, not all of it): the reference plate's whole
+    // foreground is that thick roiling column, and it is the one part of the
+    // cloud that genuinely is inside the frustum.
+    stem.material.opacity = 0.91 * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
     cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH, cloudCool);
     stem.visible = stem.material.opacity > 0.004;
     stem.instanceMatrix.needsUpdate = true;
@@ -1717,7 +2454,13 @@
     const surge = POOL.surgeVol;
     const surgeIn = ease((t - 0.75) / 2.0);
     const surgeFade = Math.max(0, 1 - ease((t - Math.min(15, L.dur - 5)) / 7));
-    const surgeMax = Math.min(L.maxR * 0.72, L.R * 3.6);
+    /* THE DRAWN SKIRT IS THE CLAMPED ONE (L.surgeDraw — see beginSequence).
+       The researched dust base is 2,016 m across the deck; the fog ends at
+       360 m and the frustum at 1,000 m, so the 3D lobes are clamped to what
+       the atmosphere can actually show and the impostor's baked dust base
+       carries the true reach at true angular size. `surgeW` keeps the honest
+       number for the audit — only the geometry is clamped, never the claim. */
+    const surgeMax = photo ? L.surgeDraw : Math.min(L.maxR * 0.72, L.R * 3.6);
     const surgeR = surgeMax * (0.12 + 0.88 * ease((t - 0.55) / 6.2));
     const deep = v2();
     for (let i = 0; i < L.volN.surge; i++) {
@@ -1867,6 +2610,15 @@
     // not the cloud itself. Keeping them subordinate prevents a steep aircraft
     // camera from revealing one enormous paper oval.
     if (L.volume) op *= 0.46;
+    /* ...and once the IMPOSTOR owns it, they are nothing at all: the far
+       tier already carries its own baked surface detail, so leaving these
+       up would paint a second, differently-scaled cloud over it. The stem
+       and surge roles keep a share for the same reason the 3D stem does —
+       they are the near foreground. */
+    if (L.mix > 0) {
+      const keep = (b.role === "stem" || b.role === "surge") ? 0.55 : 1;
+      op *= Math.max(0, 1 - L.mix * keep);
+    }
     u.uOpacity.value = Math.max(0, op);
     m.visible = u.uOpacity.value > 0.004;
     if (m.visible) faceCameraYaw(m);
@@ -2064,8 +2816,15 @@
       }
     }
 
+    /* THE TWO TIERS. impostorMix is a geometric fact — how close the 3D
+       cap's far edge is to the far plane — so the handoff happens exactly
+       when the near geometry stops being renderable and never on a clock.
+       Both are stepped every frame; each fades the other out. */
+    const mix = real() ? impostorMix(L) : 0;
+    L.mix = mix;
+    stepImpostor(t, L, mix);
     // The 3D volumes carry the actual mushroom silhouette from every angle.
-    stepVolumes(t, L);
+    stepVolumes(t, L, mix);
 
     // ---- procedural surface detail over the 3D cap/stem/surge -------------
     for (let i = 0; i < L.bills.length; i++) {
@@ -2126,7 +2885,7 @@
     // Runs even from a half-built sequence (a throw in beginSequence), which
     // is the only way geometry could ever be stranded visible in the world.
     const mm = [
-      POOL.shell, POOL.dome, POOL.wdome,
+      POOL.shell, POOL.dome, POOL.wdome, POOL.imp,
       POOL.capVol, POOL.stemVol, POOL.surgeVol, POOL.hotVol,
       POOL.crownVol, POOL.glowVol,
     ];
@@ -2569,6 +3328,15 @@
         lum: +fireLum(live.t, live).toFixed(3),
         lumAtLens: +(fireLum(live.t, live) * lightAtten(live)).toFixed(3),
         crownN: live.crownN || 0,
+        // NUKE_REAL_SCALE live state: which tier is drawing, and at what size
+        mix: +(live.mix || 0).toFixed(3),
+        impostor: !!(POOL.imp && POOL.imp.visible),
+        realScale: !!live.dims,
+        yieldKt: live.dims ? +live.dims.W.toFixed(2) : null,
+        capWNow: +(live.capW * bloomAt(live.t, live)).toFixed(0),
+        capYNow: +capYAt(riseAt(live.t, live), live).toFixed(0),
+        stemWNow: +(live.stemW * 2).toFixed(0),
+        surgeDraw: +(live.surgeDraw || 0).toFixed(0),
       } : null,
       flash: flash ? { t: +flash.t.toFixed(2), dur: flash.dur, peak: flash.peak, keys: flash.keys.length } : null,
       walks: walks.map(function (w) { return { kind: w.kind, i: w.i, n: w.pts.length }; }),
@@ -2613,9 +3381,23 @@
        it would be a fiction rather than a saving. */
     const v2n = kind === "nuke" && v2();
     const volumeDraws = P.volume ? (v2n ? 6 : 4) : 0;
+    /* THE CLOUD'S OWN DIMENSIONS. Under NUKE_REAL_SCALE these are the
+       researched ones (nukeDims), NOT the framing-scale k-multiples — the
+       whole point of the flag is that the published size is the physical
+       one. capY is the cap CENTRE altitude in both paths. */
+    const RD = (kind === "nuke" && real()) ? nukeDims(R) : null;
     return {
       kind: kind, nearField: +eff.toFixed(1), fireball: +R.toFixed(1), R: +R.toFixed(1),
-      capW: +(R * P.capK).toFixed(1), capY: +(R * P.riseK).toFixed(1),
+      capW: +(RD ? RD.capW : R * P.capK).toFixed(1),
+      capY: +(RD ? RD.capY : R * P.riseK).toFixed(1),
+      capH: +(RD ? RD.capH : R * P.capK * 0.66).toFixed(1),
+      stemW: +(RD ? RD.stemW : R * P.stemK).toFixed(1),
+      cloudTop: +(RD ? RD.top : R * P.riseK * 1.16).toFixed(1),
+      yieldKt: RD ? +RD.W.toFixed(2) : null,
+      realScale: !!RD,
+      // the far tier is ONE quad and it REPLACES the 3D cap/crown/glow it
+      // cross-fades with, so the peak draw count does not move.
+      impostorDraws: RD ? 1 : 0,
       reach: +reach.toFixed(1),
       burnR: +(P.thermK > 0 ? reach * P.thermK : 0).toFixed(1),
       bills: Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
@@ -2683,11 +3465,14 @@
     // V2 the head has also FLATTENED to CAP_FLAT of its vertical extent by
     // then, and the reported cloud top has to say so or the audit is
     // describing a silhouette the file stopped drawing.
-    const bloomMax = 0.35 + 0.9 + 0.16;
-    const capWide = S.capW * bloomMax;
+    const bloomMax = BLOOM_MAX;
+    const RD = (kind === "nuke" && real()) ? nukeDims(S.fireball) : null;
+    const capWide = RD ? RD.capW : S.capW * bloomMax;
     const flatK = (kind === "nuke" && v2()) ? CAP_FLAT : 1;
-    const cloudTop = S.capY + capWide * 0.66 * 0.5 * flatK;
-    const stemWide = S.R * P.stemK * 1.7;              // widened by the rise term
+    const capTall = RD ? RD.capH : capWide * 0.66 * flatK;
+    const cloudTop = RD ? RD.top : S.capY + capWide * 0.66 * 0.5 * flatK;
+    const capMidY = RD ? RD.capY : S.capY;
+    const stemWide = RD ? RD.stemW : S.R * P.stemK * 1.7;   // widened by the rise term
     // THE OVERHANG. The collar seeds sit at 0.70..0.98 of the cap radius and
     // the cap radius is capWide/2, so the skirt's outer edge is this — and
     // it must be comfortably wider than the stem or the cap is not
@@ -2695,8 +3480,24 @@
     // about the silhouette in the reference plate.
     const collarWide = capWide * 0.98;
 
-    const glassK = GLASS_K;
-    const zones = {
+    const glassK = glassLadder(kind);
+    /* THE ZONES ARE NAMED CONTOURS NOW, NOT MULTIPLES OF A FRAMING NUMBER.
+       `flatten` used to be S.reach because maxR used to BE the collapse
+       radius. maxR is now the 1 psi contour, so reading `flatten = S.reach`
+       would have quietly claimed that ordinary buildings collapse out to
+       3.3 km — a 3x overstatement that would still have passed every gate,
+       because every gate compared it against numbers derived from itself.
+       Under NUKE_REAL_SCALE each zone is read off CBZ.nukeRings instead. */
+    const T = (kind === "nuke" && real()) ? nukeRings(S.fireball) : null;
+    const zones = T ? {
+      fireball: S.fireball,                       //   126 m  vaporised
+      severe: +T.psi20.toFixed(1),                //   504 m  20 psi, total destruction
+      flatten: +T.psi5.toFixed(1),                // 1,109 m   5 psi, buildings collapse
+      burn: +T.psi2.toFixed(1),                   // 2,016 m  thermal ignition / firestorm
+      glass: +T.psi1.toFixed(1),                  // 3,276 m   1 psi, windows district-wide
+      rad500: +T.rad500.toFixed(1),               // 1,052 m  500 rem prompt dose
+      reach: S.reach,
+    } : {
       // ~5 psi: the classic destruction radius. The bus's wave maxR IS this
       // number; it is intentionally not drawn as a circle.
       flatten: S.reach,
@@ -2736,12 +3537,22 @@
       end: P.dur,
     };
 
+    /* THE FOUR RATIOS THE REFERENCE PHOTOGRAPH IS ABOUT, all published so a
+       probe can hold them and nobody can drift them back by taste:
+         capWideOverTall   the head must be WIDER THAN TALL          > 1
+         capOverStem       the owner's ~3:1                    2.5 .. 4.5
+         overhang          the skirt must hang out past the column   > 2.5
+         topOverCap        overall slenderness of the whole cloud    ~1.8-2.2 */
     const proportions = {
       cloudTop: +cloudTop.toFixed(1),
       capWidth: +capWide.toFixed(1),
+      capHeight: +capTall.toFixed(1),
+      capAltitude: +capMidY.toFixed(1),
       stemWidth: +stemWide.toFixed(1),
       collarWidth: +collarWide.toFixed(1),
+      capWideOverTall: +(capWide / Math.max(1, capTall)).toFixed(2),
       topOverCap: +(cloudTop / capWide).toFixed(2),
+      altOverCap: +(capMidY / capWide).toFixed(2),
       capOverStem: +(capWide / stemWide).toFixed(2),
       overhang: +(collarWide / stemWide).toFixed(2),
       capFlatten: flatK,
@@ -2765,6 +3576,22 @@
       // geometry. `layers.groundRings` is the visual contract.
       kind: kind, zones: zones, rings: zones, beats: beats, proportions: proportions,
       pulse: { min: dipV, secondMax: pk2V, keys: FLASH_DOUBLE.length },
+      /* THE WHOLE EVENT AS PHYSICS, so a probe never has to trust a comment.
+         `yield` is INVERTED out of the bus row (see the physical-model
+         block), `dims` is the cloud at true size, and `casualty` samples the
+         measured USSBS curve at the same stations the ring table quotes. */
+      yieldKt: T ? T.W : null,
+      dims: RD,
+      casualty: T ? [126, 504, 756, 1109, 1533, 2016, 2554, 3276].map(function (r) {
+        return { r: r, killed: +nukeLethalAt(r, S.fireball).toFixed(3) };
+      }) : null,
+      impostor: (kind === "nuke" && real()) ? {
+        // true angular size is reproduced by size' = size * D / d
+        at: +(camFar() * 0.86).toFixed(1), far: camFar(),
+        band: [+(camFar() * 0.55).toFixed(0), +(camFar() * 0.95).toFixed(0)],
+        w: RD ? +RD.capW.toFixed(0) : 0, h: RD ? +RD.top.toFixed(0) : 0,
+        draws: 1,
+      } : null,
       dome: S.whiteDome
         ? { r: +S.fireball.toFixed(1), t: WDOME_T, out: WDOME_OUT, p: WDOME_P, curve: domeCurve }
         : null,
@@ -2803,9 +3630,9 @@
                                       domeCurve[3] === 1),
         // ...and it reaches the real fireball radius, not some fraction of it
         domeReachesFireball: !S.whiteDome || S.fireball === S.R,
-        // THE CAP OVERHANGS ITS STEM. This is the silhouette, and it is the
-        // one thing the collar exists to buy.
-        capOverhangs: !S.whiteDome || proportions.overhang > 6,
+        // (retained key; the real assertion is capOverhangsStem above, which
+        // is stated in the reference plate's own units)
+        capOverhangs: !S.whiteDome || proportions.overhang > 2.5,
         // the head genuinely CHANGES SHAPE as it stabilises (anvil, not ball)
         capFlattens: !S.whiteDome || (flatK < 0.85 && flatK > 0.3),
         // the crown arrives AFTER the collar, which arrives after the cap:
@@ -2822,14 +3649,34 @@
         secondBrighter: !P.dbl || pk2V >= FLASH_DOUBLE[0][1],
         /* THE TWO PROPORTION GATES, on style-appropriate thresholds. A chemical
            bomb's column is legitimately squatter and stubbier than a mushroom —
-           holding the MOAB to the nuke's 2.19:1 and 9.8:1 would be asserting a
-           fiction, and quietly exempting it would be worse. So the nuclear
-           style is gated at 1.8 / 6.0 (it reads 2.06 / 8.15) and the chemical
-           style at 1.5 / 4.5 (it reads 1.86 / 5.12). Neither has slack enough
-           to absorb a careless riseK/capK/stemK edit unnoticed, which is the
-           entire job of a gate. */
+           holding the MOAB to the nuke's ratios would be asserting a fiction,
+           and quietly exempting it would be worse. So the chemical style is
+           gated at 1.5 / 4.5 (it reads 1.86 / 5.12) against its own
+           framing-scale geometry, while the nuclear style under
+           NUKE_REAL_SCALE is gated on the RESEARCHED ratios: top:cap >= 1.8
+           (it reads 1.96) and a two-sided cap:stem window 2.5..4.5 (it reads
+           3.00). Neither has slack enough to absorb a careless capK/stemK or
+           STEM_OF_CAP edit unnoticed, which is the entire job of a gate. */
         tallEnough: proportions.topOverCap >= (P.thermK > 0 ? 1.8 : 1.5),
-        thinStem: proportions.capOverStem >= (P.thermK > 0 ? 6 : 4.5),
+        /* THE STEM GATE IS TWO-SIDED NOW, AND THAT IS A STRICTLY BETTER GATE.
+           It used to be `capOverStem >= 6` — one-sided, so it could only ever
+           catch a stem that was too FAT, and it happily passed the 9.8:1
+           chimney this file was actually drawing. The owner's reference plate
+           is explicit ("a THICK ROILING ORANGE-BROWN STEM roughly as wide as
+           ~1/3 the cap"), and both failure modes are real: past ~4.5:1 the
+           column reads as a chimney under a hat, under ~2.5:1 it reads as a
+           pillar with a lid. Under NUKE_REAL_SCALE the window is 2.5..4.5
+           and the file reads 3.00; the legacy path keeps its old one-sided
+           test, because 9.8:1 is what the legacy geometry draws. */
+        thinStem: (kind === "nuke" && real())
+          ? (proportions.capOverStem >= 2.5 && proportions.capOverStem <= 4.5)
+          : proportions.capOverStem >= (P.thermK > 0 ? 6 : 4.5),
+        // THE HEAD MUST BE WIDER THAN IT IS TALL. This is the first thing the
+        // eye reads in the photograph and nothing was asserting it.
+        capWiderThanTall: !(kind === "nuke" && real()) || proportions.capWideOverTall > 1.15,
+        // ...and it must HANG OUT past its own column, or it is a ball on a
+        // stick. The collar exists to buy exactly this.
+        capOverhangsStem: !(kind === "nuke" && real()) || proportions.overhang > 2.5,
         // the rise must DECELERATE: half the height inside the first quarter of
         // the window is the shape, and a smoothstep cannot produce it.
         riseDecelerates: !CBZ.CONFIG.NUKE_FX_RISE ||

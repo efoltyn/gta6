@@ -406,12 +406,54 @@
   I.define("nuke", {
     power: 9, radius: 14, struct: 55, pen: 0, fire: 1, fx: "nuke",
     quake: 14, flashbang: true, sfx: "explosion",
-    // thermal 1.25: the ignition zone outranges the destruction zone, because
-    // thermal radius goes as Y^0.41 and blast radius as Y^0.33. This is the
-    // ONE row that declares it — a chemical warhead's fireball and its blast
-    // are the same event and do not diverge. This is gameplay only: nukefx
-    // deliberately draws no geometric ring or annulus on the terrain.
-    wave: { speed: 190, maxR: 900, thermal: 1.25 },
+    /* THERMAL, RE-DERIVED AGAINST THE NEW maxR. The 1.25 this used to carry
+       was a multiple of the OLD 900 m reach, and 900 m was the collapse
+       radius wearing the name "reach" — so the multiplier read "ignition
+       outranges destruction", which is true. maxR now means the 1 psi
+       contour, so the same physical statement needs a different number:
+
+         thermal ignition (light fuels catching, the firestorm boundary)
+           Hiroshima's firestorm covered 11.4 km^2 => radius 1.9 km, and the
+           spontaneous-ignition range for a 15 kt burst is ~2.0 km. Ours is
+           2,016 m — the 2 psi contour, which is a coincidence of this yield
+           and not a law.
+         5 psi collapse contour                        1,109 m
+         1 psi glass contour (= maxR)                  3,276 m
+
+       => thermal = 2016 / 3276 = 0.615.
+       The ordering the audit actually cares about is unchanged and is now
+       stated in the right units: collapse 1,109 < ignition 2,016 < glass
+       3,276. Ignition still outranges destruction by 1.82x; it just no
+       longer outranges the whole wave, because the wave is bigger than the
+       destruction now. This is gameplay only: nukefx deliberately draws no
+       geometric ring or annulus on the terrain. */
+    /* maxR IS NOW THE RESEARCHED 1 psi CONTOUR, not a framing number.
+       city/nukefx.js inverts this row's own fireball radius back into a
+       yield — W = (radius*power / 50)^3 = (126/50)^3 = 16.0 kt, a
+       Hiroshima-class device — and Glasstone & Dolan's 1 kt surface-burst
+       reference radii scaled by W^(1/3) = 2.520 give
+
+           20 psi   200 m ->   504 m    total destruction
+           10 psi   300 m ->   756 m    heavy structural failure
+            5 psi   440 m -> 1,109 m    most ordinary buildings COLLAPSE
+            2 psi   800 m -> 2,016 m    roofs and walls out, what is left burns
+            1 psi 1,300 m -> 3,276 m    windows across the whole district
+
+       900 m stopped inside the 2 psi ring — it was not even the collapse
+       radius, let alone the reach. 3,276 m is where a 16 kt burst genuinely
+       stops breaking things.
+
+       THE SPEED IS UNCHANGED AND THAT IS DELIBERATE. A real front is much
+       faster (roughly 500 m/s over the first kilometre, decaying toward
+       sonic); 190 m/s is the same named readability compression the double
+       flash takes, and it is what makes the front something you WATCH
+       arrive. 3,276 / 190 = 17.2 s, comfortably inside nukefx's 34 s arc.
+
+       THE PER-TICK COST DOES NOT GROW WITH maxR. sweepRing is a full scan of
+       the ped roster with a distance test whatever the radius is, and the
+       car pass is capped per tick — a wider wave costs more TICKS, not more
+       work per tick, and WAVE_TICK already bounds those. */
+    wave: { speed: 190, maxR: 3276, thermal: 0.615, lethal: "nuclear" },
   });
 
   // ---- environmental (city/disasters wiring) ------------------------------
@@ -1001,6 +1043,17 @@
       // byte-for-byte unchanged.
       thermal: row.wave.thermal ? row.wave.maxR * q * fxScale * row.wave.thermal : 0,
       speed: row.wave.speed,
+      /* THE LETHALITY MODEL AND THE YIELD KEY IT NEEDS. `lethal` names which
+         casualty curve this wave runs (only the nuke row declares one, so
+         every other wave keeps the legacy boolean). `fireR` is the row's
+         EFFECTIVE fireball radius — radius*power, the same product this
+         file's own nuke comment cites — and it is what city/nukefx.js
+         inverts the yield back out of. Passing it means the casualty
+         fractions follow the row: retune power or radius and the rings, the
+         cloud and the death toll all move together, because there is exactly
+         one number underneath all three. */
+      lethal: row.wave.lethal || null,
+      fireR: Math.max(1, (row.radius || 14) * (row.power || 1)) * fxScale,
       power: row.power * fxScale,
       struct: row.struct * (strScale / fxScale),       // the ledger's 2/3 power, net of the power term below
 
@@ -1042,11 +1095,20 @@
       // only as far as maxR, so the game's burn zone WAS its blast zone and
       // the two zones could never disagree.
       //
-      // A row that declares `thermal` gets one extra sweep past its own reach:
-      // amount ~0 (nothing out there is knocked down — that is the whole
-      // point) with the fire term intact. It IGNITES without wounding, which
-      // is what a thermal pulse does, and it leaves irregular world fires
-      // outside the flattened core instead of a fake circular decal.
+      // A row whose ignition zone reaches PAST its own blast reach gets one
+      // extra sweep out there: amount ~0 (nothing that far out is knocked
+      // down — that is the whole point) with the fire term intact. It IGNITES
+      // without wounding, which is what a thermal pulse does, and it leaves
+      // irregular world fires outside the flattened core instead of a fake
+      // circular decal.
+      // AS OF 2026-07-28 NO SHIPPING ROW TAKES THIS BRANCH: the nuke's
+      // ignition radius (2,016 m) is now INSIDE its 1 psi reach (3,276 m),
+      // so its thermal boundary acts as the ceiling in sweepRing instead.
+      // The branch is kept because it is the correct handling of the other
+      // case and a future high-yield row will take it — Y^0.41 vs Y^0.33
+      // means ignition really does overtake blast as yield climbs. It is NOT
+      // dead code pretending to be a feature: `thermal` is read on every
+      // sweep either way, which is what stops it being a stat fiction.
       if (w.thermal > w.maxR && !w.burned && r1 >= w.maxR) {
         w.burned = true;
         if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
@@ -1065,6 +1127,26 @@
   // Everything whose distance from ground zero falls in [r0, r1) is caught by
   // the front THIS tick. Linear falloff on the OUTER radius, so the edge of a
   // nuke's reach knocks you down and the middle of it does not.
+  /* ---- the two helpers the graded sweep below asks -----------------------
+     hash01: this repo's determinism primitive. A death must be identical on
+     every client, so the casualty roll is a POSITION HASH and never
+     Math.random. Degrades to Math.random only if seed.js is absent, which is
+     single-player-only territory anyway.
+     lethalFor: the ONE lethality answer. A row that declares
+     `wave.lethal:"nuclear"` gets city/nukefx.js's researched USSBS curve;
+     everything else gets the pre-2026-07-28 boolean, byte for byte, so this
+     change cannot reach any warhead but the nuke. */
+  function hash01(x, z, salt) {
+    if (CBZ.hash01) { try { return CBZ.hash01(x, z, salt); } catch (e) {} }
+    return Math.random();
+  }
+  function lethalFor(w, r) {
+    if (w.lethal === "nuclear" && CBZ.nukeLethalAt) {
+      try { return CBZ.nukeLethalAt(r, w.fireR || 126); } catch (e) {}
+    }
+    // legacy: the flat cliff at 0.75 * maxR
+    return (1 - r / (w.maxR + 0.01)) > 0.25 ? 1 : 0;
+  }
   function sweepRing(w, r0, r1) {
     const frac = 1 - r1 / (w.maxR + 0.01);            // 1 at ground zero -> 0 at the rim
     const bite = w.power * frac;
@@ -1084,13 +1166,58 @@
     // of the crowd system to find the handful of agents in the new band. It is
     // correct either way (the dead stay dead) — it is purely wasted work — so
     // gate it on the front having actually advanced a useful distance.
+    /* ---- HOW MANY OF THEM DIE, AND IT IS A MEASURED NUMBER ----------------
+       OWNER: "the amount of DEATH in the radius should also be REAL based on
+       the research — the percentage."
+
+       `frac > 0.25` was a CLIFF: everyone inside 0.75*maxR died and nobody
+       outside it did. That is the "flat blast" the owner objects to, and it
+       is not what a nuclear weapon does to a city — Hiroshima killed 86% of
+       the people in the first 500 m, 51% at 1.0-1.5 km and 2.4% at 2.5-3 km,
+       and the gradient between those is the whole shape of the event.
+
+       lethalFor(w, r) is the ONE answer. For the nuke row it is
+       city/nukefx.js's CBZ.nukeLethalAt — the USSBS Hiroshima survey's
+       measured killed-by-distance curve, cube-root scaled to this row's own
+       inverted yield. For every other row it returns the old boolean
+       verbatim, so nothing but the nuke changes by one frame.
+
+       THE ROLL IS A POSITION HASH, NEVER Math.random. A death is gameplay,
+       not FX: two clients in a multiplayer city must agree about who is
+       standing up afterwards, and CBZ.hash01(x, z, salt) is this repo's
+       determinism primitive. Same person, same wave, same verdict, every
+       machine. */
     if (CBZ.cityCrowdCircleKill && frac > 0.35 && r1 - (w.crowdR || 0) > 18) {
       w.crowdR = r1;
-      try {
-        CBZ.cityCrowdCircleKill(w.x, w.z, r1, {
-          byCar: true, quiet: true, fromX: w.x, fromZ: w.z, noCrime: !w.byPlayer,
-        });
-      } catch (e) {}
+      const pk = lethalFor(w, r1);
+      /* The instanced crowd has no individual identity to roll against, so
+         it is killed as a DISC while the fatality is above half and then
+         thinned in PATCHES: n discs of radius rp sprinkled through the
+         annulus, sized so the covered area is p x the annulus area. Real
+         casualty maps are patchy for exactly this reason (shielding), so
+         this is closer to the truth than a uniform cull would be — and it
+         needs no edit to city/crowd.js, which owns that array. */
+      if (pk >= 0.5) {
+        try {
+          CBZ.cityCrowdCircleKill(w.x, w.z, r1, {
+            byCar: true, quiet: true, fromX: w.x, fromZ: w.z, noCrime: !w.byPlayer,
+          });
+        } catch (e) {}
+      } else if (pk > 0.004 && r1 > r0) {
+        const band = Math.PI * (r1 * r1 - r0 * r0);
+        const N = 6;                                     // hard cap: 6 scans
+        const rp = Math.sqrt(Math.max(1, pk * band / (Math.PI * N)));
+        for (let k = 0; k < N; k++) {
+          const hs = hash01(w.x + k * 37.1, w.z + r1, (w.id | 0) + k);
+          const a = hs * 6.2832;
+          const rr = r0 + (r1 - r0) * hash01(w.z + k * 11.7, w.x + r1, (w.id | 0) + k + 91);
+          try {
+            CBZ.cityCrowdCircleKill(w.x + Math.cos(a) * rr, w.z + Math.sin(a) * rr, rp, {
+              byCar: true, quiet: true, fromX: w.x, fromZ: w.z, noCrime: !w.byPlayer,
+            });
+          } catch (e) {}
+        }
+      }
     }
     if (CBZ.cityPeds && CBZ.cityKillPed) {
       const peds = CBZ.cityPeds;
@@ -1099,17 +1226,24 @@
         if (!p || p.dead || !p.pos) continue;
         const d = Math.hypot(p.pos.x - w.x, p.pos.z - w.z);
         if (d < r0 || d >= r1) continue;
-        if (frac > 0.25) {
+        const pk = lethalFor(w, d);
+        if (pk > 0 && hash01(p.pos.x, p.pos.z, (w.id | 0) + 7) < pk) {
           try { CBZ.cityKillPed(p, { fromX: w.x, fromZ: w.z, force: 14 * frac, fling: 10 * frac, byPlayer: w.byPlayer }, w.kind === "nuke" ? "the blast wave" : "explosion"); } catch (e) {}
         }
       }
     }
-    // the player is knocked about but the falloff means the far rim only stings
+    /* THE PLAYER IS NOT ROLLED FOR. A dice roll that silently ends a run is
+       the worst thing this could do, so the researched fraction becomes a
+       DAMAGE CURVE instead: 100% fatality means damage that will certainly
+       kill an unarmoured player, 22% means a mauling you can survive with
+       health, and the far rim stings. Same curve, honest gradient, and the
+       player's own health/armour/shelter still decide the outcome. */
     const PL = CBZ.player;
     if (PL && !PL.dead && PL.pos && CBZ.cityHurtPlayer) {
       const d = Math.hypot(PL.pos.x - w.x, PL.pos.z - w.z);
       if (d >= r0 && d < r1) {
-        const dmg = Math.round(120 * frac);
+        const pk = lethalFor(w, d);
+        const dmg = w.lethal ? Math.round(30 + 190 * pk) : Math.round(120 * frac);
         if (dmg > 0) { try { CBZ.cityHurtPlayer(dmg, w.x, w.z, w.kind === "nuke" ? "caught in the blast wave" : "caught in an explosion", false, null, false); } catch (e) {} }
       }
     }
@@ -1169,8 +1303,23 @@
     //     them down rather than sparing them outright.
     if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
       try {
+        /* THE IGNITION BOUNDARY IS A CEILING NOW, NOT ONLY A FLOOR — and
+           this is a real fault the maxR retune exposed rather than caused.
+           `thermal` was only ever read as "ignite BEYOND the reach", because
+           for its whole life it was a multiple GREATER than 1 of a maxR that
+           was really the collapse radius. maxR is now the 1 psi contour and
+           the researched ignition radius (2,016 m) sits INSIDE it, so the
+           branch below can no longer fire and the fire term would instead
+           have carried ignition out to ~2,457 m — where the fire coefficient
+           finally falls under structural.js's FIRE_IGNITE_MIN — a full
+           kilometre past where a 16 kt burst can actually light anything.
+           One expression fixes both readings: a row's `thermal` is now the
+           edge of its ignition zone in EITHER direction. Rows that declare
+           no thermal, or declare one outside their reach, are untouched. */
         CBZ.structure.sweep(w.x, w.z, r0, r1, w.struct * bite * frac, {
-          kind: w.kind, fire: w.fire * frac, by: w.by, byPlayer: w.byPlayer,
+          kind: w.kind,
+          fire: (w.thermal > 0 && w.thermal < w.maxR && r1 > w.thermal) ? 0 : w.fire * frac,
+          by: w.by, byPlayer: w.byPlayer,
           sudden: true,                     // a shock front is THE sudden load
           waveId: w.id,                     // one bite per building per wave
           // Seat the ring at the DETONATION HEIGHT. structural.js restored a

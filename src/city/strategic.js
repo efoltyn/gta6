@@ -2393,10 +2393,31 @@
   // damages cars inside the propagating ring for EVERY wave-carrying warhead
   // (nuke, MOAB, an airliner into a tower), capped per tick. Keeping ours
   // would have billed the nuke's cars twice. Deleted, not disabled.
+  /* ---- THE CONSEQUENCE RADII, TAKEN FROM THE RESEARCHED RINGS -----------
+     OWNER: "the amount of DEATH in the radius should also be REAL."
+     These three were framing numbers — 175 m of cops, a 160 m instant-death
+     bubble and a 70 m hot zone — for an event whose 5 psi collapse contour
+     is 1,109 m and whose 1 psi contour is 3,276 m. city/nukefx.js publishes
+     CBZ.nukeRings() (the yield inverted out of the bus row, then Glasstone's
+     1 kt reference radii cube-root scaled) and CBZ.nukeLethalAt() (the USSBS
+     Hiroshima killed-by-distance survey). Both are read LIVE here, so this
+     file carries no second copy of either and cannot drift from the bus.
+     Degrade-safe: with nukefx.js absent every one falls back to the exact
+     number it had before.                                               */
+  function rings() {
+    if (CBZ.nukeRings) { try { return CBZ.nukeRings(126); } catch (e) {} }
+    return null;
+  }
+  function lethalAt(r) {
+    if (CBZ.nukeLethalAt) { try { return CBZ.nukeLethalAt(r, 126); } catch (e) {} }
+    return r < NK.R_KILL ? 1 : 0;                 // legacy: the flat cliff
+  }
   const NK = {
-    R_KILL: 175,         // cop roster sweep (the bus does not walk cops)
-    R_PLAYER: 160,       // instant unsheltered player death radius
-    RAD_R: 70,           // lingering radiation zone radius
+    // cop roster sweep. The bus does not walk cops, so this file does — out
+    // to the 2 psi contour, past which the measured fatality is under 5%.
+    R_KILL: 175,         // fallback only; nkKillR() below is the live answer
+    R_PLAYER: 160,       // fallback only; nkPlayerR() below is the live answer
+    RAD_R: 70,           // fallback only; nkRadR() below is the live answer
     RAD_DAYS: 1.2,       // in-game days the zone stays hot
     /* ---- THE PLANTED-DEVICE CLOCK, and why it is not 45 any more ---------
        RESEARCH. The real article is the SADM (Special Atomic Demolition
@@ -2436,6 +2457,23 @@
   // Flag-off returns the pre-2026-07-28 arc verbatim: 45 s, no arming beat.
   function nkTimer() { return CBZ.CONFIG.NUKE_GROUND_COUNTDOWN === false ? 45 : NK.TIMER; }
   function nkArm() { return CBZ.CONFIG.NUKE_GROUND_COUNTDOWN === false ? 0 : NK.ARM; }
+  /* The cop sweep runs to the 2 psi contour (2,016 m) — beyond it the
+     measured fatality is under 5% and the roster walk stops being worth a
+     frame. Cops inside it are killed on the SAME researched probability
+     every ped gets, so a precinct 1.8 km out loses most of its shift and not
+     all of it. */
+  function nkKillR() { const T = rings(); return T ? T.psi2 : NK.R_KILL; }
+  /* INSTANT, UNCONDITIONAL DEATH IS THE FIREBALL AND NOTHING ELSE (126 m).
+     Everything outside it is the bus's graded wave, which now hurts the
+     player on the researched curve instead of a 160 m on/off bubble — so
+     you can be badly mauled at 400 m and limp away, which is both truer and
+     a better game than a hard kill line inside the collapse radius. */
+  function nkPlayerR() { const T = rings(); return T ? T.fireball : NK.R_PLAYER; }
+  /* The 500 rem prompt-dose contour — about a 50% lethal dose untreated.
+     Prompt gamma and neutrons attenuate exponentially in air, so this does
+     NOT ride the cube root (see nukeRings): ~1,052 m for this yield. That is
+     15x the 70 m this file used to claim. */
+  function nkRadR() { const T = rings(); return T ? T.rad500 : NK.RAD_R; }
   let nk = null;                                     // the one live resolution
   const radZones = [];                               // {x,z,r,until}
 
@@ -2526,8 +2564,8 @@
       const pd = Math.hypot(P.pos.x - x, P.pos.z - z);
       if (sheltered) {
         g.invuln = Math.max(g.invuln || 0, 12);       // the blast wave passes OVER
-        if (pd < NK.R_KILL) note("The bunker holds. Outside, there is nothing left.", 4);
-      } else if (pd <= NK.R_PLAYER) {
+        if (pd < nkKillR()) note("The bunker holds. Outside, there is nothing left.", 4);
+      } else if (pd <= nkPlayerR()) {
         try { CBZ.cityHurtPlayer(9999, x, z, "caught in a nuclear blast", false, null, false); } catch (e) {}
       }
       // beyond R_PLAYER the bus's wave hurts him as it arrives — on a timer,
@@ -2545,11 +2583,18 @@
     // The shared airstrike/RPG near-field already lays one central blast stain.
     // Do not add evenly spaced scorch decals here: from altitude they merge
     // into the exact fake ground ring a real pressure front does not leave.
-    radZones.push({ x: x, z: z, r: NK.RAD_R, until: (CBZ.dayTime ? CBZ.dayTime() : 0) + NK.RAD_DAYS });
+    radZones.push({ x: x, z: z, r: nkRadR(), until: (CBZ.dayTime ? CBZ.dayTime() : 0) + NK.RAD_DAYS });
 
     // nk is live BEFORE the bus fires so the shelter guard covers the very
     // first frame of the wave.
-    nk = { t: 0, x: x, z: z, hold: 16 };
+    /* THE HOLD MUST OUTLAST THE WAVE. The shelter guard and `nukeActive`
+       stay live until the front has run its whole course, and the front now
+       reaches the researched 1 psi contour: 3,276 m at 190 m/s = 17.2 s. A
+       16 s hold would have dropped the bunker guarantee with 1.2 s of wave
+       still rolling — i.e. the last ring would have killed the people the
+       berm was supposed to be protecting. 24 s covers it with margin for the
+       fires the wave lit to settle. */
+    nk = { t: 0, x: x, z: z, hold: 24 };
 
     // degrade path only — see whiteout()'s note. With nukefx.js loaded the
     // composer owns the flash, the fireball, the stem and the cap.
@@ -2612,28 +2657,43 @@
     if (g.mode !== "city") { nk = null; return; }      // mode flip mid-apocalypse
     nk.t += dt;
 
-    // COPS: the wave's ped/crowd/player sweep is the bus's; cops are a
-    // separate roster it does not walk, so they stay here — bunker-sheltered
-    // spared, 12/frame, once.
+    /* COPS: the wave's ped/crowd/player sweep is the bus's; cops are a
+       separate roster it does not walk, so they stay here — bunker-sheltered
+       spared, 12/frame, once.
+       THEY DIE ON THE SAME MEASURED CURVE EVERYBODY ELSE DOES. This used to
+       be a hard 175 m disc where every officer inside was killed outright
+       and every officer at 176 m was untouched. It now runs to the 2 psi
+       contour and rolls each one against CBZ.nukeLethalAt — so a precinct at
+       1.5 km loses about half its shift (USSBS: 51% at 1.0-1.5 km) instead
+       of losing nobody. The roll is a POSITION HASH, not Math.random: a
+       death has to be identical on every client in a multiplayer city. */
     if (!nk.copsDone) {
-      let killed = 0;
-      const R2 = NK.R_KILL * NK.R_KILL;
+      let killed = 0, seen = 0;
+      const RK = nkKillR(), R2 = RK * RK;
       for (const cp of (CBZ.cityCops || [])) {
         if (killed >= 12) break;
         if (!cp || cp.dead || !cp.pos) continue;
         const dx = cp.pos.x - nk.x, dz = cp.pos.z - nk.z;
-        if (dx * dx + dz * dz > R2) continue;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > R2) continue;
+        seen++;
         if (CBZ.strategicBunkerShelterAt && CBZ.strategicBunkerShelterAt(cp.pos.x, cp.pos.y, cp.pos.z)) continue;
+        const pk = lethalAt(Math.sqrt(d2));
+        const roll = CBZ.hash01 ? CBZ.hash01(cp.pos.x, cp.pos.z, 0x4e0c) : Math.random();
+        if (roll >= pk) continue;                  // survived, on the measured fraction
         if (CBZ.cityHurtCop) { try { CBZ.cityHurtCop(cp, 9999, { byPlayer: true, fromX: nk.x, fromZ: nk.z }); } catch (e) {} }
         killed++;
       }
-      if (killed === 0 && nk.t > 3) nk.copsDone = true;
+      // `seen` and not `killed`: with a graded curve a pass can legitimately
+      // kill nobody and still have work left, so the old `killed === 0` exit
+      // would have retired the sweep on its first tick out at the rim.
+      if (seen === 0 && nk.t > 3) nk.copsDone = true;
     }
 
     // (vehicles: see the note on NK — the bus's blast ring owns them now)
 
     // the shelter guard and `nukeActive` stay live until the wave has run out
-    // (nuke row: 900 m at 190 m/s ≈ 4.7 s) and the fires it lit have settled.
+    // (nuke row: 3,276 m at 190 m/s = 17.2 s) and the fires it lit settle.
     if (nk.t > nk.hold) nk = null;
   });
 
@@ -3069,6 +3129,29 @@
         reach: 900, onFoot: +(900 / 11.9).toFixed(1), byCar: +(900 / 22).toFixed(1),
         bomberClear: +(900 / 105).toFixed(2), targetFall: RET.T_ESCAPE,
       },
+      /* THE CONSEQUENCE MODEL, AS NUMBERS. Every one is read LIVE off
+         city/nukefx.js's published rings, so this object proves that this
+         file holds no second copy of the yield, the radii or the fatality
+         curve — if the bus row moves, all of these move with it. */
+      nuke: (function () {
+        const T = rings();
+        return {
+          yieldKt: T ? T.W : null,
+          fireball: T ? +T.fireball.toFixed(0) : null,
+          psi20: T ? +T.psi20.toFixed(0) : null,
+          psi5: T ? +T.psi5.toFixed(0) : null,
+          psi2: T ? +T.psi2.toFixed(0) : null,
+          psi1: T ? +T.psi1.toFixed(0) : null,
+          copSweep: +nkKillR().toFixed(0),
+          instantDeath: +nkPlayerR().toFixed(0),
+          radZone: +nkRadR().toFixed(0),
+          hold: 24,
+          // the measured curve, sampled where this file actually uses it
+          killed: [126, 504, 1109, 1533, 2016, 2554].map(function (r) {
+            return { r: r, p: +lethalAt(r).toFixed(3) };
+          }),
+        };
+      })(),
       /* THE DELIVERY PROFILE AT EVERY BAND, AS A TABLE. Deliberately an
          ARRAY OF PLAIN OBJECTS and not a function(agl): a CDP probe reads
          this through Runtime.evaluate with returnByValue, and JSON drops a

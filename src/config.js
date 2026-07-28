@@ -1137,6 +1137,19 @@
   //   that the escape IS the mission (see NK.TIMER's derivation), escalating
   //   audible/visual cues, and the same abort the arc always had.
   //   false → the flat 45 s timer with no arming beat.
+  // NUKE_REAL_SCALE (city/nukefx.js + systems/impactbus.js) — DIMENSIONAL
+  //   AND CASUALTY HONESTY. The yield is INVERTED out of the bus's nuke row
+  //   (W = (radius*power/50)^3 = 16 kt, Hiroshima-class), and then nothing
+  //   is typed: the cloud takes the dimensions Glasstone's stabilised-cloud
+  //   figures give (5,106 m cap, 3,992 m thick, 8,004 m up, on a 1,702 m
+  //   stem over a 2,016 m dust base, topping out at 10 km), the blast rings
+  //   take the 1 kt reference overpressure radii cube-root scaled
+  //   (504/756/1,109/2,016/3,276 m for 20/10/5/2/1 psi), and the death toll
+  //   takes the USSBS Hiroshima killed-by-distance survey. Because a 10 km
+  //   cloud is ten times the camera's own 1 km far plane, the flag also
+  //   switches on the far-tier impostor that draws it at true ANGULAR size.
+  //   false → the pre-2026-07-28 framing-scale cloud and the flat blast.
+  if (CBZ.CONFIG.NUKE_REAL_SCALE == null) CBZ.CONFIG.NUKE_REAL_SCALE = true;
   if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
   if (CBZ.CONFIG.NUKE_STASH_TRIPLE == null) CBZ.CONFIG.NUKE_STASH_TRIPLE = true;
   if (CBZ.CONFIG.NUKE_GROUND_COUNTDOWN == null) CBZ.CONFIG.NUKE_GROUND_COUNTDOWN = true;
