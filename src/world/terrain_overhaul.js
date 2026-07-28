@@ -31,6 +31,15 @@
           for the square term so negative altitudes stay below sea level —
           the reference app had no ocean; this world does.)
 
+   THE OFFSHORE RANGE THIS FILE DRAWS IS REMOVED (TERRAIN_DARK_RANGE, default
+   false — owner order, see the flag's block below for the material and scale
+   evidence that made it "the black mountain"). Everything the pipeline does
+   BELOW the waterline is untouched and still shipping: the tiles are the sea
+   floor, the shelf-land cutout still owns its pixels, and terrainFogScale /
+   terrainDayTint / terrainShelfLandCutout still serve their consumers in
+   world.js, worldmap.js, biome_snow.js and continent.js. Read the paragraph
+   below as the description of the field the flag switches back on.
+
      WHERE THE RELIEF LIVES: the live playable world (city + islands +
      biomes + countries + the continent's driveable Backcountry) is a ~7 km
      plate whose union AABB is synced into FLAT at build time. The oracle is
@@ -240,6 +249,66 @@
     return _pcVal;
   }
   /* ==================================================================
+     TERRAIN_DARK_RANGE — THE BLACK HORIZON MOUNTAIN IS GONE.
+
+     OWNER, twice. First: "there's also a very tall darker mountain than the
+     rest of the mountains and it can be flown straight through." That was
+     answered above by making it UNREACHABLE (TERRAIN_BACKDROP_CLEAR) rather
+     than by removing it. Then, having looked at it again: "THERES A NORMAL
+     MOUNTAIN RANGE AND THEN ONE BIGGER BLACK MOUNTAIN ON THE EDGE, REMOVE
+     THAT BLACK MOUNTAIN."
+
+     The object is THIS FILE'S OFFSHORE SKYLINE RANGE — the eroded relief the
+     V3 field raises in the sector due north of the snow country. Two
+     independent reasons it reads as a black mountain instead of as a
+     mountain, and both are structural rather than a matter of taste:
+
+       • MATERIAL. The backdrop tiles are the ONLY range in this world drawn
+         with a LIT MeshLambertMaterial (buildV3's terrMat / buildV2's,
+         below). The two ranges the owner is comparing it against —
+         biome_snow.js's Mount Mercy and the Greater Mercy Range — are unlit
+         MeshBasicMaterial with their shading baked into vertex colour, so
+         they hold their authored albedo while this one takes the scene's
+         real light and goes near-black under every low sun. terrainDayTint
+         (below) exists because that luminance seam was visible from the
+         other side, and it cannot help here: a Lambert surface is ALREADY
+         dark; the tint only pulls the unlit ranges DOWN to meet it.
+       • SCALE. TERRAIN_RING_AMP (4.5) multiplies the upper two thirds of
+         this field and nothing else, so the decorative range out-tops the
+         walkable one standing in front of it. "One BIGGER black mountain on
+         the edge" is that dial, precisely.
+
+     REMOVING IT IS ONE GATE, NOT A DEMOLITION. snowSector() is the single
+     function that says where positive relief is permitted to exist, and the
+     hard sector law (`if (h > 0) h *= sec`) already routes every raised
+     sample through it. Returning 0 severs the whole composition BY
+     CONSTRUCTION: no ring lift, no positive biome excursion, CBZ.terrainHeight
+     identically 0 everywhere (so the math gate's mountain-cell sets can only
+     shrink and backdropAudit's onPlate invariant holds with nothing left to
+     violate it), terrainTreeInfo density 0 (wildnature plants nothing
+     offshore), the talus scatter finds no apron to sit in. The northern
+     horizon becomes exactly what every OTHER bearing has always been: open
+     sea over the same visual shelf, drawn by the same tiles.
+
+     WHAT SURVIVES, DELIBERATELY:
+       • the 4x4 tiles themselves. They are not the mountain — they are the
+         SEA FLOOR (v3Visual eases from -1.8 under the playable world out to
+         the SHELF_MIN clamp at -26), and they are the ground the 16 km ocean
+         is drawn over. Deleting the mesh to delete the mountain would take
+         the seabed with it.
+       • every UNLIT range. Mount Mercy and the Greater Mercy Range are
+         biome_snow.js's, walkable, and untouched by this file.
+       • terrainFogScale / terrainDayTint / terrainShelfLandCutout, which are
+         shared helpers with consumers in world.js, worldmap.js,
+         biome_snow.js and continent.js. None of them knows this range
+         existed and none of them is told.
+
+     true restores the range exactly as it shipped — a one-line revert.
+  ================================================================== */
+  if (CFG.TERRAIN_DARK_RANGE == null) CFG.TERRAIN_DARK_RANGE = false;
+  const RANGE_ON = () => CFG.TERRAIN_DARK_RANGE === true;
+
+  /* ==================================================================
      CBZ.backdropAudit() — CAN YOU TOUCH THE SCENERY?
 
      The decorative range is allowed to have no collision ONLY while it is
@@ -248,13 +317,25 @@
      carries relief, how far OUTSIDE the walkable continent plate does it
      sit? `onPlate` is the ratchet — a relief sample standing on driveable
      ground is the fly-through mountain, and it must be 0.
+
+     SINCE TERRAIN_DARK_RANGE, the honest answer to that sweep is that there
+     is nothing to measure: the field carries no positive relief anywhere, so
+     `reliefCells` reads 0 and `onPlate` is 0 with nothing left that could
+     make it otherwise. The sweep is deliberately still RUN rather than
+     short-circuited — reliefCells === 0 measured over the real oracle is the
+     PROOF that the range is gone, and it is the same proof the day somebody
+     flips the flag back on. `rangeRemoved` says which world you are looking
+     at so a reader never mistakes "audit reports nothing" for "audit did not
+     run"; `minClearance` / `worstAt` are null when there is no relief,
+     because a clearance to an object that does not exist is not a number.
   ================================================================== */
   CBZ.backdropAudit = function (opts) {
     opts = opts || {};
     const P = CBZ.CONTINENT_PLATE, F = CBZ.TERRAIN_FLAT || FLAT;
     const g = plateClear();
     if (!P || !Number.isFinite(P.minX)) {
-      return { plate: null, plateClear: +g.toFixed(0), note: "continent plate not published" };
+      return { plate: null, plateClear: +g.toFixed(0), rangeRemoved: !RANGE_ON(),
+               note: "continent plate not published" };
     }
     const MIN_H = Number.isFinite(+opts.h) ? +opts.h : 8;    // "relief", not a ripple
     const N = Number.isFinite(+opts.step) && +opts.step > 8 ? +opts.step : 150;
@@ -277,11 +358,12 @@
     }
     return {
       plateClear: +g.toFixed(0),
-      reliefCells: cells,
+      reliefCells: cells,                   // 0 once the range is removed
       maxHeight: Math.round(maxH),
       onPlate: onPlate,                     // RATCHET: must be 0
       minClearance: Number.isFinite(minClear) ? Math.round(minClear) : null,
       worstAt: worst,
+      rangeRemoved: !RANGE_ON(),            // TERRAIN_DARK_RANGE — why cells is 0
       enabled: CFG.TERRAIN_BACKDROP_CLEAR !== false,
     };
   };
@@ -363,6 +445,11 @@
   // Everything else on the horizon stays open sea (owner: mountains only on
   // the snow island's side, far from every city, from any angle).
   function snowSector(x, z) {
+    // TERRAIN_DARK_RANGE (above): the offshore skyline range is REMOVED. This
+    // is the one gate the whole V3 composition hangs off — zero here and no
+    // positive relief can be raised on any bearing, so the horizon is open
+    // sea and the shelf tiles draw the seabed alone.
+    if (!RANGE_ON()) return 0;
     if (!SNOW_ONLY()) return 1;
     return snowWindowX(x) * smooth(60 + SNOW_WARP, 420 + SNOW_WARP, SNOW_NZ - z);
   }
@@ -391,6 +478,11 @@
     return Math.exp(-0.5 * q * q);
   }
   function rangeMask2(x, z) {
+    // TERRAIN_DARK_RANGE: the V2 fallback draws the SAME object with the SAME
+    // lit Lambert material (buildV2's terrMat), so it is removed here too —
+    // otherwise flipping TERRAIN_EROSION_V3 off would quietly bring the black
+    // mountain back.
+    if (!RANGE_ON()) return 0;
     const north = FLAT.minZ - z;
     if (north <= MARGIN + 20) return 0;
     const depth = smooth(MARGIN + 20, MARGIN + RAMP * 0.9, north) *
@@ -1022,7 +1114,13 @@
     const X0 = CX - SPAN / 2, X1 = CX + SPAN / 2;
     const Z0 = CZ - SPAN / 2, Z1 = CZ + SPAN / 2;
     let AX = null, AZ = null;
-    if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry) {
+    // TERRAIN_DARK_RANGE: with no relief there is nothing for the CDF to
+    // concentrate on — every weight is the floor, so the adaptive axis
+    // degenerates to the uniform one the fallback below already builds, and
+    // solving it would cost ~26k field evaluations to learn that. Tiles still
+    // share their edge samples exactly (same TSEG both sides), so the seabed
+    // stays watertight.
+    if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry && RANGE_ON()) {
       const PN = 36;
       AX = CBZ.mtnAdaptiveAxis(N, X0, X1, function (x) {
         let m = 0;
@@ -1106,7 +1204,10 @@
     //      the height window keeps them in the apron/gully zone where real
     //      rockfall collects). Sits exactly on the mesh (visual samplers).
     const heroMeshes = [];
-    if (CBZ.scatterRocks) {
+    // TERRAIN_DARK_RANGE: talus is what collects at the FOOT of a cliff. With
+    // the range removed `pick` could only ever fail its own h >= 14 window and
+    // return null 90 times over; not asking is the same world for less work.
+    if (CBZ.scatterRocks && RANGE_ON()) {
       const band0 = MARGIN + 220, band1 = MARGIN + 1500;
       const scat = CBZ.scatterRocks(root, {
         count: 90,
@@ -1215,7 +1316,7 @@
     const terrain = terrainTiles[0];
 
     const heroMeshes = [];
-    if (CBZ.scatterRocks) {
+    if (CBZ.scatterRocks && RANGE_ON()) {          // TERRAIN_DARK_RANGE — no range, no talus
       const scat = CBZ.scatterRocks(root, {
         count: 90,
         pick: function (rng) {
