@@ -1266,6 +1266,58 @@ runs each audit first writes the number in; do not pin a guess.
   box size. Flags `BOMBS_DROP_STRAIGHT` / `MIL_MISSILE_HOMING`. Ratchet:
   `CBZ.ordnanceAudit()`.
 
+## THE 2026-07-27 NIGHT WAVE — arrest, explosions, the B-2's face
+
+- **AN ARREST IS A SCENE, AND THE PRISON IS THE JAIL** — `ARREST_ARC` (wanted.js)
+  + `PRISON_PIPE` (capture.js). The live arrest path was a same-frame teleport
+  into games/jail.js's 3-cell compound that never set `g.busted` (mission
+  interrupts had NEVER fired on a real arrest — fixed structurally). Now: hands
+  up → REAL zip-tie cuffs + wrists-behind-back IK on the PLAYER (restrain.js's
+  rig-agnostic pose, one proxy object = the whole adoption) → perp-walk to a
+  marked cruiser (roadPick unseen) → driven ride with a sealed interior cut
+  (cinePlay; the cab-ride fade is the named anti-pattern) → booking desk where
+  the forfeit is charged ONCE and weapons go to an EVIDENCE LOCKER → the full
+  prison mode serves the ONE sentence formula (`CBZ.cityJailSentence`); release
+  returns property at the precinct door, escape forfeits the locker and keeps
+  the manhunt. RUN from the challenge and the cop TACKLES via predatorSeize's
+  new `nonLethal` resolve ("killed"→"taken" before killVictim is in reach; all
+  eight existing callers byte-identical) — predatorAudit 0 legacy / **9**
+  adopted. The compound is precinct HOLDING now (pry-out is a race against a
+  37-49s transport clock). Every recapture inside adds +45s; a 4-beat day
+  cycle (yard→chow→rec→lockdown) reuses the rooms. Ratchet: `CBZ.arrestAudit()`
+  — **legacyTeleports pinned 0** (an arrest that reaches a cell by moving
+  coordinates instead of walking there counts against it).
+- **EVERY WARHEAD SPEAKS THE BUS, AND CARS ARE IN THE BLAST** —
+  `ORDNANCE_BUS_ALL` (impactbus.js) + `CAR_COOKOFF_V2` (vehicles.js). Six
+  hand-rolled detonations (RPG+40mm, grenade, tank, missile pool=airstrike,
+  player fallback, explodeCar) migrated onto `CBZ.detonate` rows — the dead
+  rows had drifted DOWNWARD, so the live caller won every disagreement, and
+  `struct:6` is arithmetic (demolition's LEGACY_TO_LEDGER), not taste. Sound
+  finally scales (`CBZ.blastVolume` = √power floored at 1) and heavy rows fire
+  cityBlastWall/shatter off the same collider scan the breach already ran.
+  CARS: an RPG into a car now connects (fpsmode direct-hit + deform); the 8TH
+  WRAPPER (`_carBlastWrapped`/`opts._carSeen`, all markers copied) bills every
+  blast's cars once (`_carBlastId` dedupes vs the wave pass); gunfire kills
+  burn 2.4-4.6s before the boom, blast kills fuse at 0.4-1.6s JITTERED (that
+  jitter is what makes a car park roll instead of chord), direct heavy hits
+  flash 0.2-0.4s; `explodeCar` leaves a SOLID charred husk (crashdeform's
+  `cityCarBurnOut` — bent, crazed, hood gone, smoulders, shunts traffic, reaped
+  by the existing loop); drivers bail + cityScare when the fuse allows.
+  Termination is proven: one bill per car per blast, burnt cars leave the
+  ignitable set, CAR_CAP 24 / FUSE_CAP 14 / HUSK_MAX 10. **`carcook.fire=0.24`
+  sits ONE HUNDREDTH under structural.js's FIRE_IGNITE_MIN — cars never ignite
+  buildings; that is a one-character dial the owner flips, not a default.**
+  Ratchet: `CBZ.blastAudit()` — **handRolled pinned 0**. Known: bailout.js's
+  crash row was "aircraft-impact" (never existed → firecracker) with
+  `frontal:true` coerced to 1m — fixed to real class rows.
+- **B-2 POLISH (owner's photos)** — palette matched (light blue-grey top,
+  near-black belly, fairings one step above skin), engine FIRE under player
+  throttle only (`STRAT_B2_PLUME`, sprites parked for fxwarm), and [X] with
+  empty racks now SAYS why (JDAM rack spent · buster/DEVICE from the vault)
+  instead of silently re-picking Mk-84. Missiles get RPG PARITY: with no held
+  lock, `ordnanceSeek` grabs `lockonFireTarget()` at trigger time. Bombs stay
+  ballistic (buster/nuke never home; JDAM steers to a point, doesn't chase).
+
 ## Hard rules that keep the game correct
 
 - **Determinism**: world builds must be byte-identical per seed across
