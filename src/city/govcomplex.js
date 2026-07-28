@@ -41,8 +41,15 @@
    AUTHORS: a footprint search, a silhouette kit (perimeter walls, chain
    fence, gatehouse, monumental steps, parking seas, and the one genuinely
    new shape in the repo — a five-sided CONCENTRIC RING block, which is the
-   whole readable identity of a defence headquarters), and a registry of nine
+   whole readable identity of a defence headquarters), and a registry of TEN
    sites that say where each silhouette goes and who sits at the top.
+
+   THE TENTH IS THE COUNTY JAIL, and it is the proof the registry is a
+   registry: the owner reported the jail as "an OPEN-TOP BUILDING IN THE
+   MIDDLE OF TOWN with 0 effort", and the whole of the placement fix is one
+   ROW — no second placer, no second land contract, no second shell factory.
+   games/jail.js keeps every mechanic it had and builds INTO the plot this
+   file claims for it (`site.jail`). See row 10.
 
    DOES NOT AUTHOR — every one of these is somebody else's shipped system:
      · GUARDS. Not one. `CBZ.powerPrincipal(actor, {tier, org, role, seat})`
@@ -54,7 +61,7 @@
        the cliff house's is private contractors — and the difference between
        them is the `org` string and nothing else. Guard-called throughout, so
        a build without power.js still places every complex.
-     · THE HOUSEHOLD. Five of the nine sites are RESIDENCES and every one of
+     · THE HOUSEHOLD. Five of the ten sites are RESIDENCES and every one of
        them contained exactly one person plus his gunmen — no cook, no driver,
        no housekeeper, no gardener, no nanny, on grounds with hedge parterres,
        two pools and a helipad. §5b fixes that with a five-word `household` row
@@ -152,10 +159,16 @@
    can never quietly absorb a real overlap: an `edgeOfCity` site (City Hall)
    is MEANT to sit against the urban grid.
 
-   MEASURED on the stock world (seed 90210, the shipped region set):
+   MEASURED on the stock world (seed 90210) WHEN THE REGISTRY HELD NINE ROWS:
      9 complexes, 9 placed, 25 candidate rectangles rejected, 0 overlaps,
      0 roadless, 9 staffed; every footprint 44 m+ clear of every foreign
      region; two runs of one seed byte-identical.
+   THE TENTH ROW (County Jail) HAS NOT BEEN RE-MEASURED — `complexes` and
+   `placed` should now read 10 and `rejected` will move, but this file does
+   not get to claim a number nobody has run. `overlaps` and `roadless` are
+   the ratchets and remain pinned at 0; whoever runs the gate next writes the
+   new census in. (CLAUDE.md's own lesson: an audit nobody has executed is
+   not a measurement.)
 
    Revert: CBZ.CONFIG.GOV_COMPLEX = false (or ?cfg_GOV_COMPLEX=0).
 ============================================================ */
@@ -291,7 +304,7 @@
   /* ====================================================================
      §1  THE SILHOUETTE KIT — the vocabulary every complex is drawn from.
 
-     Nine complexes share these eight primitives. That is the point: the
+     Ten complexes share these nine primitives. That is the point: the
      difference between a cartel finca and an intelligence campus should be
      which pieces you pick and what colour they are, not eight hundred more
      lines of one-off geometry.
@@ -551,6 +564,17 @@
     repeat(root, geo, M.steelD, pts, function () { return h / 2; });
     for (let i = 0; i < pts.length; i++) col(pts[i].x, pts[i].z, r * 2, r * 2, 0, h);
     return pts.length;
+  }
+
+  // FLOODLIGHT MAST — a mast, a head and a real collider. The compound row
+  // wrote this inline; a walled yard needs the same object and a second
+  // hand-typed copy of a mast height is exactly how two constants describing
+  // one thing drift apart (the lamp-arm bug). One author, two consumers.
+  function floodMast(root, x, z, h) {
+    h = h == null ? 9.0 : h;
+    cyl(root, x, h / 2, z, 0.16, 0.22, h, M.steelD, 8);
+    box(root, x, h + 0.2, z, 1.2, 0.5, 0.6, M.lampHead, { cast: false, matOpts: { emissive: M.lampHead, ei: 0.85 } });
+    col(x, z, 0.7, 0.7, 0, h);
   }
 
   // HELIPAD — the disc, the ring and a painted H, on the shared paint colour.
@@ -1036,9 +1060,7 @@
         repeat(root, bg(12.0, 2.8, 2.6), M.red, cont, function () { return 1.4; });
         for (let i = 0; i < 4; i++) col(cx + 44, cz - 6 + i * 7.0, 12.0, 2.6, 0, 2.8);
         for (const p of [[R.minX + 14, R.minZ + 14], [R.maxX - 14, R.minZ + 14], [R.minX + 14, R.maxZ - 14], [R.maxX - 14, R.maxZ - 14]]) {
-          cyl(root, p[0], 4.5, p[1], 0.16, 0.22, 9.0, M.steelD, 8);
-          box(root, p[0], 9.2, p[1], 1.2, 0.5, 0.6, M.lampHead, { cast: false, matOpts: { emissive: M.lampHead, ei: 0.85 } });
-          col(p[0], p[1], 0.7, 0.7, 0, 9.0);
+          floodMast(root, p[0], p[1], 9.0);
         }
         return { gate: { x: R.minX, z: cz }, seat: main };
       },
@@ -1136,6 +1158,175 @@
         const lamps = [];
         for (let i = 0; i < 4; i++) { lamps.push({ x: cx - 14, z: cz + 30 + i * 10 }); lamps.push({ x: cx + 14, z: cz + 30 + i * 10 }); }
         lampRow(root, lamps);
+        return { gate: { x: cx, z: R.maxZ }, seat: main };
+      },
+    },
+    /* ================================================================
+       10. THE COUNTY JAIL — the one complex the player is brought TO.
+
+       OWNER (2026-07-27, verbatim): "the county jail is placed stupidly on
+       the map and it's still where character goes when arrested — not the
+       jail game — which is FAIR, it goes to jail not prison. But why an
+       OPEN-TOP BUILDING IN THE MIDDLE OF TOWN with 0 effort." And, on the
+       shape of the fix: "the issue with the jail is its not in a building,
+       we have buildings — the jail tries to be its own building."
+
+       Both halves of that are the same bug and this row is the answer to
+       both. games/jail.js sited its compound 24 m off `cityPoliceStation()`'s
+       door — and that function is a FALLBACK CHAIN onto the City Hall shop
+       lot, so "the police station" is a downtown lot and the jail landed in
+       the middle of the grid. It then hand-raised three cells and an open
+       yard: no roof, no shell, no region, no road, nothing the rest of the
+       world knew about. A county jail is a BUILDING ON ITS OWN LAND at the
+       edge of town, and both of those are things this file already does for
+       nine other addresses. So the jail becomes the tenth ROW — no second
+       placer, no second land contract, no second shell factory.
+
+       WHAT THIS ROW AUTHORS: the plot, the walled court, the sally port and
+       the ONE weak point in the wall. THE BUILDING IS `civic()` — the same
+       `CBZ.cityMakeBuilding` shell the Capitol and City Hall are, so the
+       roof, the walls, the glass, the colliders, the stair core, the floor
+       plates and the batch merge all arrive for free and the cellblock is
+       INSIDE architecture rather than pretending to be some.
+
+       WHAT IT DOES NOT AUTHOR: the cells, the booking desk, the guards, the
+       inmates, the pry, the transport clock. Those are games/jail.js's and
+       they stay there — this row publishes `site.jail`, the coordinates it
+       reserved, and jail.js dresses the ground floor and the court it finds.
+       One author per object: the shell and the walls are here, the furniture
+       and the bars are there, and neither re-types the other's numbers.
+
+       PLACEMENT: `edgeOfCity` (a county jail is a county-seat building, not a
+       federal campus in the wilderness) with a `bearingFrom` hint at the
+       law's own door, so the search STARTS on the civic side of town and
+       fans the full circle if that side is built up. Modest: 132 x 116 m, the
+       smallest footprint in the registry.
+       ================================================================ */
+    {
+      id: "countyjail", name: "County Jail", subtitle: "County Sheriff's Detention Facility",
+      hx: 66, hz: 58, bearing: null, edgeOfCity: true, keepOut: "civ", gateSide: 1,
+      // the full sweep, City Hall's own numbers: which side of a city has
+      // clear ground is not something this file may assume.
+      fan: 22, fanStep: 16 * Math.PI / 180,
+      // START the search on the law's side of town. `cityPoliceStation()` is
+      // police.js's own answer and is asked FIRST; it needs `CBZ.city.arena`,
+      // which mode.js publishes only after buildCity returns, so on the first
+      // build we ask the same question of the arena we are being handed.
+      bearingFrom: function (city) {
+        if (CBZ.cityPoliceStation) {
+          try { const st = CBZ.cityPoliceStation(); if (st) return { x: st.x, z: st.z }; } catch (e) {}
+        }
+        const L = (city && city.shopLots) || null;
+        if (!L || !L.length) return null;
+        const lot = L.find(function (l) { return l && l.kind === "cityhall"; })
+          || L.find(function (l) { return l && l.kind === "bank"; })
+          || L.find(function (l) { return l && l.building && l.building.door; });
+        if (!lot) return null;
+        const d = lot.building && lot.building.door;
+        return d ? { x: d.x, z: d.z } : { x: lot.cx, z: lot.cz };
+      },
+      // A SHERIFF, NOT A WARDEN — the pen is systems/capture.js's and has its
+      // own staff. tier 3 is City Hall's tier: a real detail of deputies (org
+      // "police" → power.js's `presetFor` government preset → spawnCopGuard),
+      // not a head-of-state ring.
+      principal: { key: null, tier: 3, org: "police", lawful: true, role: "County Sheriff", job: "official", wealth: 0.55 },
+      // the people who commute HERE do a job, and it is not clerking
+      work: { kind: "security", role: "security guard", patrol: true },
+      // FLOOR 0 IS DELIBERATELY "none": it is the cellblock and the booking
+      // hall, and games/jail.js dresses it. dressShell skips a floor named
+      // "none", so the two files cannot both furnish one plate. Floor 1 is the
+      // sheriff's own office, and that IS this file's job.
+      interiors: { main: ["none", "bosssuite"], aux: ["storage"] },
+      build: function (c) {
+        const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
+        // ---- the numbers, declared ONCE and published to jail.js below ----
+        const WALL_H = 4.6, WALL_T = 0.7;      // a real yard wall, not a garden wall
+        const BW = 54, BD = 28, BCZ = cz - 32; // the jail building
+        const BFZ = BCZ + BD / 2;              // its front face = the court's back wall
+        const YX = 34, YFZ = cz + 26;          // the walled court
+        const GATE_W = 12;                     // the sally port
+        const WEAK_Z = cz + 6, WEAK_W = 2.6;   // THE ONE WEAK POINT, east wall
+        pad(root, R, M.concrete, "countyjail");
+        // the court floor and the public forecourt in front of the wall
+        slab(root, cx, (BFZ + YFZ) / 2, YX * 2, YFZ - BFZ, M.concreteD, YG);
+        slab(root, cx, (YFZ + R.maxZ) / 2, 52, R.maxZ - YFZ, M.paving, YS);
+
+        // ---- THE BUILDING. One call to the shell factory every tower and
+        // civic building in this game is made of: real walls, a real roof,
+        // real colliders, a stair core, floor plates and the batch merge.
+        const main = civic(root, cx, BCZ, BW, BD, 2, M.concrete, 1,
+          { kind: "federal", crown: "flat", order: "pilaster", motto: "COUNTY JAIL", stone: true }, "County Jail");
+        c.main = main;
+
+        // ---- THE COURT. Four runs of wall closed on its fourth side by the
+        // building's own front facade, so the yard is ATTACHED to the jail
+        // rather than floating beside it.
+        wallRun(root, cx - YX, YFZ, cx + YX, YFZ, WALL_H, WALL_T, M.concrete, cx, GATE_W);       // front + sally port
+        wallRun(root, cx - YX, BFZ, cx - YX, YFZ, WALL_H, WALL_T, M.concrete, 0, 0);             // west
+        wallRun(root, cx + YX, BFZ, cx + YX, YFZ, WALL_H, WALL_T, M.concrete, WEAK_Z, WEAK_W);   // east + THE WEAK POINT
+        wallRun(root, cx - YX, BFZ, cx - BW / 2, BFZ, WALL_H, WALL_T, M.concrete, 0, 0);         // return to the west corner
+        wallRun(root, cx + BW / 2, BFZ, cx + YX, BFZ, WALL_H, WALL_T, M.concrete, 0, 0);         // return to the east corner
+        // razor wire along every coping, one InstancedMesh for the lot. `r` is
+        // the yaw repeat() reads per point: a coil lies ALONG the wall it sits
+        // on, so the side runs are turned a quarter — the geometry is 1.9 m long
+        // on its own X and a wall running in Z would otherwise wear it crossways.
+        const wire = [];
+        for (let x = cx - YX + 1.1; x <= cx + YX - 1.0; x += 2.2) wire.push({ x: x, z: YFZ, r: 0 });
+        for (let z = BFZ + 1.1; z <= YFZ - 1.0; z += 2.2) {
+          wire.push({ x: cx - YX, z: z, r: Math.PI / 2 });
+          wire.push({ x: cx + YX, z: z, r: Math.PI / 2 });
+        }
+        repeat(root, bg(1.9, 0.26, 0.26), M.fenceP, wire, function () { return WALL_H + 0.34; });
+
+        // ---- THE ONE HONEST WEAK POINT. A service gate whose leaf hangs off
+        // one pin and has not latched in years: the hinge posts and the leaf
+        // are drawn, the leaf swung back against the wall, and the 2.6 m
+        // opening carries NO COLLIDER. That opening is the whole escape, and
+        // it is one hole in one wall — everything else here is solid.
+        cyl(root, cx + YX, WALL_H / 2, WEAK_Z - WEAK_W / 2, 0.1, 0.12, WALL_H, M.steelD, 8);
+        cyl(root, cx + YX, WALL_H / 2, WEAK_Z + WEAK_W / 2, 0.1, 0.12, WALL_H, M.steelD, 8);
+        box(root, cx + YX + 0.16, 1.6, WEAK_Z + WEAK_W / 2 + 1.15, 0.1, 3.2, 2.2, M.steelD);
+        // the bin line somebody stacked against the wall beside it
+        box(root, cx + YX - 2.2, 0.78, WEAK_Z + 4.4, 2.4, 1.56, 1.4, M.steelD);
+        col(cx + YX - 2.2, WEAK_Z + 4.4, 2.4, 1.4, 0, 1.56);
+
+        // ---- the sally port is MANNED, and the yard is LIT ----------------
+        gatehouse(root, cx, YFZ - 6, true, M.concreteD);
+        floodMast(root, cx - YX + 3, BFZ + 4, 11.0);
+        floodMast(root, cx + YX - 3, BFZ + 4, 11.0);
+        floodMast(root, cx - YX + 3, YFZ - 4, 11.0);
+        floodMast(root, cx + YX - 3, YFZ - 4, 11.0);
+        // exercise-yard markings + a bench line against the west wall
+        slab(root, cx - 14, (BFZ + YFZ) / 2 + 2, 22, 15, M.paint, YM);
+        for (let i = 0; i < 3; i++) {
+          box(root, cx - YX + 2.6, 0.45, BFZ + 12 + i * 7, 0.7, 0.28, 4.2, M.stoneDk, { cast: false });
+          col(cx - YX + 2.6, BFZ + 12 + i * 7, 0.7, 4.2, 0, 0.45);
+        }
+
+        // ---- staff parking, the impound strip and the civic approach ------
+        parkingSea(root, cx - 51, cz - 4, 24, 44);        // staff, west of the court
+        parkingSea(root, cx + 50, cz - 4, 24, 44);        // impound, east — the way out runs through it
+        flagpole(root, cx - 13, YFZ + 12, 12);
+        flagpole(root, cx + 13, YFZ + 12, 12);
+        const lamps = [];
+        for (let i = 0; i < 3; i++) { lamps.push({ x: cx - 20, z: YFZ + 10 + i * 10 }); lamps.push({ x: cx + 20, z: YFZ + 10 + i * 10 }); }
+        lampRow(root, lamps);
+
+        // ---- WHAT games/jail.js IS HANDED. Every one of these is a number
+        // this builder already committed to; jail.js re-derives none of them,
+        // which is what keeps the bars in the doorway and the escape at the
+        // gate that is actually open.
+        c.site.jail = {
+          origin: { x: cx, z: cz },
+          building: main ? main.b : null,
+          lot: main ? main.lot : null,
+          door: main ? main.door : null,
+          court: { minX: cx - YX, maxX: cx + YX, minZ: BFZ, maxZ: YFZ },
+          wallH: WALL_H,
+          sally: { x: cx, z: YFZ, w: GATE_W },
+          stop: { x: cx, z: YFZ + 14 },              // the cruiser's kerb, outside the wire
+          weak: { x: cx + YX, z: WEAK_Z, ox: 1, oz: 0, w: WEAK_W },
+        };
         return { gate: { x: cx, z: R.maxZ }, seat: main };
       },
     },
@@ -1310,6 +1501,19 @@
     if (def.edgeOfCity && isFinite(city.minX)) {
       ox = (city.minX + city.maxX) / 2; oz = (city.minZ + city.maxZ) / 2;
       base = Math.PI;                                     // south of downtown
+      // A ROW MAY NAME THE SIDE OF TOWN IT BELONGS ON, and it names it with a
+      // PLACE rather than a compass number: a county jail belongs on the law's
+      // side of town, and where the law's door is depends on the seed. The hint
+      // only moves the SEARCH START — every candidate still runs the full
+      // clearance test, and the fan still sweeps the whole circle if that side
+      // of town has no clear ground, so a hint can never place anything.
+      if (def.bearingFrom) {
+        let p = null;
+        try { p = def.bearingFrom(city); } catch (e) { p = null; }
+        if (p && isFinite(p.x) && isFinite(p.z) && (p.x !== ox || p.z !== oz)) {
+          base = Math.atan2(p.x - ox, -(p.z - oz));       // 0 rad = due north (-Z)
+        }
+      }
     } else {
       ox = (U.minX + U.maxX) / 2; oz = (U.minZ + U.maxZ) / 2;
       base = ((def.bearing || 0) % 360) * Math.PI / 180;
@@ -2091,10 +2295,16 @@
       // runs; the gate and the forecourt are real posts, so staff commute to
       // a real place instead of standing in an empty field.
       if (CBZ.registerWorkAnchor) {
+        // keepOut is a good proxy for "what kind of job is this" and it covers
+        // nine of the ten rows — but not all: a county jail is a `civ` keep-out
+        // (its posted staff belong there) and is emphatically not staffed by
+        // office workers. A row may therefore name its own trade.
+        const wk = def.work || null;
         CBZ.registerWorkAnchor({
-          biome: "city", kind: def.keepOut === "hard" ? "security" : "cityhall",
-          role: def.keepOut === "hard" ? "security guard" : "office worker",
-          x: site.gate.x, z: site.gate.z, cap: 4, patrol: def.keepOut === "hard",
+          biome: "city", kind: wk ? wk.kind : (def.keepOut === "hard" ? "security" : "cityhall"),
+          role: wk ? wk.role : (def.keepOut === "hard" ? "security guard" : "office worker"),
+          x: site.gate.x, z: site.gate.z, cap: 4,
+          patrol: wk ? !!wk.patrol : def.keepOut === "hard",
           home: { x: site.cx, z: site.cz },
           spots: [
             { x: site.gate.x, z: site.gate.z },
@@ -2227,6 +2437,7 @@
   function recount() {
     const A = CBZ.city && (CBZ.city.arena || CBZ.city);
     let overlaps = 0, urbanAdjacent = 0, roadless = 0, staffed = 0, placed = 0;
+    const urbanIds = [];
     const regs = (A && A.regions) || [];
     const lots = [(A && A.lots) || null, (A && A.shopLots) || null];
     for (let i = 0; i < SITES.length; i++) {
@@ -2259,13 +2470,18 @@
       // whoever came next to ignore the number. Excluded here and reported
       // separately as `urbanAdjacent`, so the exception is VISIBLE and cannot
       // quietly grow to cover a complex that overlapped by accident.
-      if (bad) { if (s.def && s.def.edgeOfCity) urbanAdjacent++; else overlaps++; }
+      // …and it is now TWO rows that carry the exception (City Hall and the
+      // County Jail), so the count alone is no longer enough to keep it
+      // visible: the ids come out with it. An `edgeOfCity` row that shows up
+      // here is a row to LOOK at, not a row to forgive by category.
+      if (bad) { if (s.def && s.def.edgeOfCity) { urbanAdjacent++; urbanIds.push(s.id); } else overlaps++; }
       if (!s.roads || !s.roads.length) roadless++;
       if (s.power && s.power.live) staffed++;
       else if (s.actor && !s.actor.dead) staffed++;   // declared, power.js absent
     }
     AUDIT.overlaps = overlaps;
     AUDIT.urbanAdjacent = urbanAdjacent;
+    AUDIT.urbanAdjacentIds = urbanIds;
     AUDIT.roadless = roadless;
     AUDIT.staffed = staffed;
     AUDIT.placed = placed;
@@ -2285,7 +2501,8 @@
       placed: AUDIT.placed,
       rejected: AUDIT.rejected,
       overlaps: AUDIT.overlaps,
-      urbanAdjacent: AUDIT.urbanAdjacent,   // the DECLARED exception (City Hall)
+      urbanAdjacent: AUDIT.urbanAdjacent,   // the DECLARED exception (City Hall · County Jail)
+      urbanAdjacentIds: (AUDIT.urbanAdjacentIds || []).slice(),
       staffed: AUDIT.staffed,
       roadless: AUDIT.roadless,
       // §5b — the residences' cooks/drivers/gardeners. `household` must equal

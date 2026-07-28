@@ -1,5 +1,37 @@
 /* ============================================================
-   games/jail.js — LOCKUP, as a GAME PACKAGE.
+   games/jail.js — THE COUNTY JAIL, as a GAME PACKAGE.
+
+   WHERE IT IS AND WHAT IT IS (2026-07-27). OWNER: "the county jail is placed
+   stupidly on the map and it's still where character goes when arrested — not
+   the jail game — which is FAIR, it goes to jail not prison. But why an
+   OPEN-TOP BUILDING IN THE MIDDLE OF TOWN with 0 effort." And: "the issue with
+   the jail is its not in a building, we have buildings — the jail tries to be
+   its own building."
+
+   Both complaints were the same two lines of this file. The venue resolved to
+   `cityPoliceStation()` + 24 m — and that function is a fallback chain onto the
+   downtown City Hall shop lot, so the jail landed in the middle of the grid.
+   Then it hand-raised three cells and an open yard: no roof, no shell, no
+   region, no keep-out, no access road, nothing the rest of the world had ever
+   heard of.
+
+   Neither is fixed here, because neither is this file's job:
+     · THE LAND is city/govcomplex.js's — the ONE sanctioned standalone-plot
+       placer — as its tenth COMPLEXES row ("countyjail"). One row buys the
+       clear-ground search, the region, the terrain grade, the keep-out, the
+       access road, the map presence and a County Sheriff with a real detail.
+     · THE BUILDING is CBZ.cityMakeBuilding's, raised by that row through the
+       same `civic()` call the Capitol and City Hall are made of. Roof, walls,
+       glass, colliders, stair core, floor plates and the batch merge, free.
+   What THIS file authors is what it always should have: the cellblock inside
+   that shell, the people, and the game. See §3.
+
+   EVERY MECHANIC BELOW IS UNCHANGED. The pry clock, the guards' gaze cones,
+   the rotating empty post, the keys off a restrained guard, the recapture, the
+   transport race and the whole CBZ.cityBust seam read ANCHORS out of `V` now
+   instead of literals — and that is the entire diff. Flag COUNTY_JAIL_V2 off
+   (or no plot on this seed) falls back to the legacy yard at the legacy
+   siting, byte for byte, so an arrest can never depend on any of this.
 
    ONE prison sim standing in the CITY, two roles on it — and ONE law
    (owner doctrine): the jail is ABOUT ESCAPING, and the guards exist to
@@ -19,9 +51,12 @@
                     yard); get caught working it and the plate is hammered
                     back + time added. OR lift the KEYS off a guard you've
                     dealt with — dead, or zip-tied through the bars (the
-                    real cityRestrain collar). Door open → slip the
-                    rotating patrols to the wall gap → over the wall HOT:
-                    CBZ.cityAddStars + the escaped-convict floor, and the
+                    real cityRestrain collar). Door open → down the corridor,
+                    across the booking hall (one post on the ring stands
+                    INSIDE, so the way out of the building is watched on the
+                    same rotation the yard is), out into the walled court and
+                    through the ONE gate in it that has never latched → out
+                    HOT: CBZ.cityAddStars + the escaped-convict floor, and the
                     manhunt follows you into the street.
      role JAILOR — the gate desk signs you on for a guard shift. No beat
        timers, no disgrace meter: seeded inmates periodically BREAK for
@@ -69,7 +104,29 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.PKG_JAIL == null) CBZ.CONFIG.PKG_JAIL = true;
+  // COUNTY_JAIL_V2 — the jail as a BUILDING ON ITS OWN LAND (city/govcomplex.js
+  // row "countyjail") instead of three cells and an open yard dropped 24 m off
+  // a downtown lot. Off (or no plot: govcomplex absent, GOV_COMPLEX false, or
+  // the placement search found no clear ground) → the legacy yard, byte for
+  // byte, at the legacy siting. An arrest can never depend on this flag.
+  if (CBZ.CONFIG.COUNTY_JAIL_V2 == null) CBZ.CONFIG.COUNTY_JAIL_V2 = true;
   function jailOn() { return CBZ.CONFIG.PKG_JAIL !== false; }
+
+  // THE PLOT. govcomplex.js's tenth row claims the land, registers the region,
+  // the keep-out and the access road, raises the SHELL (a real
+  // CBZ.cityMakeBuilding, with its roof, its colliders, its stair core and its
+  // floor plates) and walls the court behind the sally port. Everything it
+  // committed to is published on `site.jail`; we re-derive none of it.
+  function plotFor() {
+    if (CBZ.CONFIG.COUNTY_JAIL_V2 === false) return null;
+    const S = CBZ.govComplexes;
+    if (!S || !S.length) return null;
+    for (let i = 0; i < S.length; i++) {
+      const s = S[i];
+      if (s && s.id === "countyjail" && s.rect && s.jail && s.jail.building) return s.jail;
+    }
+    return null;
+  }
 
   /* ==========================================================
      1. PURE RULES — plain functions, unit-testable via api.
@@ -162,15 +219,32 @@
   function menuLock(on) { try { CBZ.cityMenuOpen = !!on; } catch (e) {} }
 
   /* ==========================================================
-     3. BUILD — the jail compound. Deterministic, chunky, every prop a job.
-        Local axis-aligned coords (the group is never rotated so ctx.solid's
-        world AABBs stay in sync with the meshes).
+     3. BUILD — TWO SITINGS, ONE SET OF MECHANICS.
 
-        Footprint (local): yard interior X∈[-10,10], Z∈[-8,8].
-          · GATE + desk on the +Z (front) wall — the entrance / sign-on.
-          · 3 CELLS along the -X (west) wall, doors facing +X into the yard.
-          · GUARD POSTS around the yard — the PATROL RING guards walk.
-          · WALL GAP at the -Z/+X back corner — the escape target (no collider).
+     OWNER (2026-07-27): "why an OPEN-TOP BUILDING IN THE MIDDLE OF TOWN with
+     0 effort", and "the issue with the jail is its not in a building, we have
+     buildings — the jail tries to be its own building."
+
+     Both are answered by moving ANCHORS, never mechanics. The pry, the patrol
+     gaze cones, the transport clock, the keys, the recapture, the jailor shift
+     and the whole capture-funnel seam are untouched below this section: every
+     one of them now reads a point out of `V` instead of a literal, and the two
+     sitings differ in those points and in nothing else.
+
+       PLOT (COUNTY_JAIL_V2, the shipping path) — city/govcomplex.js's tenth
+         row claims a civic plot at the edge of town and raises a REAL
+         CBZ.cityMakeBuilding shell on it. We dress its ground floor: a booking
+         hall inside the front doors, a secure line across the plate, a row of
+         real cells with real barred doors down the west wall, and a corridor.
+         The court behind the sally port is the row's, walls and all, including
+         the one gate in it that does not latch.
+       YARD (the degrade) — the legacy three cells and open yard, at the legacy
+         siting, unchanged. This is what runs with the flag off, with
+         govcomplex absent, or on a seed where the placement search found no
+         clear ground. An arrest may never depend on a flag.
+
+     Local axis-aligned coords throughout (the venue group is never rotated, so
+     ctx.solid's world AABBs stay in sync with the meshes).
      ========================================================== */
   const MAT = { wall: 0x6b7079, wallD: 0x4d525a, bar: 0x2b2f36, floor: 0x3c4046, desk: 0x4a2e1c,
     deskD: 0x33200f, bunk: 0x555a63, gold: 0xe8b64c, orange: 0xcf6a2a, rubble: 0x5a5148, sign: 0x11151b, wire: 0xb9bec6 };
@@ -178,10 +252,56 @@
   function build(ctx, venue) {
     C = ctx;
     const gp = venue.group;
-    V = { origin: venue.origin, ready: false, _venue: venue, group: gp,
-      cells: [], guards: [], inmates: [], posts: [], pending: [],
-      gate: { x: 0, z: 7.2 }, gap: { x: 7.5, z: -8 } };
+    V = legacyV(venue, gp);
 
+    const plot = plotFor();
+    let built = false;
+    if (plot) {
+      try { built = buildInside(ctx, venue, plot); }
+      catch (e) { console.error("[gamepkg:jail] plot build", e); built = false; }
+    }
+    // a plot build that refused (or threw part-way) must not leave half a
+    // cellblock in the records the yard is about to fill: start it clean.
+    if (!built) { V = legacyV(venue, gp); buildYard(ctx, venue); }
+    V.onPlot = built;
+    zones(ctx);
+    V.ready = true;
+  }
+
+  // THE LEGACY ANCHOR BAG. Eight venue-LOCAL points, the legacy yard's own
+  // literals, and nothing below this function may type one of them again.
+  function legacyV(venue, gp) {
+    return { origin: venue.origin, ready: false, _venue: venue, group: gp,
+      cells: [], guards: [], inmates: [], posts: [], pending: [], onPlot: false,
+      nearR: 60, runVia: null,
+      // A GAZE IS A RADIUS AND A CONE, and the rule does not change between
+      // sitings — only the scale does. The legacy yard's interior is 20x16 m
+      // and 7 m of vision covers a real share of it; the county jail's court is
+      // 68x44, where the same 7 m would make walking out unopposed and kill the
+      // one mechanic this whole venue is about. The number is a property of the
+      // SPACE, so it lives beside the space's other anchors.
+      seeR: GUARD_SEE_R,
+      gate: { x: 0, z: 7.2 },          // the gate itself (sign-on / the way in)
+      gateZone: { x: 0, z: 7.6 },      // where the gate card shows
+      gateIn: { x: 0, z: 9.6 },        // the perp walk's pause, just outside it
+      stop: { x: 0, z: 14.0 },         // the cruiser's kerb
+      desk: { x: 0, z: 5.4 },          // the booking desk you are marched to
+      out: { x: 0, z: 10.5 },          // where a released body is put down
+      gap: { x: 7.5, z: -8 },          // THE weak point — reach it and you are out
+      gapOut: { x: 0.6, z: -0.8 },     // its outward normal (which way "out" is)
+      gapApp: { x: 7.5, z: -6.8 } };   // the inside approach to it (runners aim here)
+  }
+
+  /* ----------------------------------------------------------
+     3a. THE LEGACY YARD — the degrade path, unchanged.
+        Footprint (local): yard interior X∈[-10,10], Z∈[-8,8].
+          · GATE + desk on the +Z (front) wall — the entrance / sign-on.
+          · 3 CELLS along the -X (west) wall, doors facing +X into the yard.
+          · GUARD POSTS around the yard — the PATROL RING guards walk.
+          · WALL GAP at the -Z/+X back corner — the escape target (no collider).
+     ---------------------------------------------------------- */
+  function buildYard(ctx, venue) {
+    const gp = venue.group;
     const box = (x, y, z, w, h, d, m, ry) => ctx.box(gp, x, y, z, w, h, d, ctx.mat(m), ry);
     const WALL_H = 3.2, WALL_T = 0.6;
 
@@ -266,11 +386,221 @@
         at: [-8.6, cz], face: Math.PI / 2, post: "pinned", pose: "stand",
         dialogue: ["I been in here longer than the walls.", "That door plate's been loose since the riot. Work it when their backs are turned.", "The Sarge takes cash. Everybody knows."] }, "inmate:" + ci);
     }
+  }
 
-    // ---- ZONES (stable interactions). GRAMMAR LAW (owner): a zone label is a
-    //      BUTTON — one or two words, no key glyphs, no names, no sentences.
-    //      The card title comes from the venue (packages.js describe). ----
-    ctx.zone({ id: "gate", pos: [0, 7.6], r: 2.6,
+  /* ----------------------------------------------------------
+     3b. THE COUNTY JAIL — dressing the INSIDE of a real building.
+
+     The shell is `CBZ.cityMakeBuilding`'s, raised by govcomplex.js's row: we
+     get the roof, the four walls, the facade colliders, the stair core, the
+     floor plates and the batch merge without drawing one of them. What is
+     genuinely new — and it is the only thing this function authors — is a
+     CELLBLOCK: a secure line across the plate, a row of cells with real barred
+     doors on the same y0/y1 collider contract `setDoor` has always toggled, a
+     patrol corridor, a day room and a booking counter inside the front doors.
+
+     The floor covering and the ceiling light come from the shared interior kit
+     (`CBZ.interiorShell`), which is the sanctioned "shell alone" export for
+     exactly this case — a caller that lays out its own room and still wants
+     the finished, lit floor. govcomplex declares floor 0 as "none" so the two
+     files can never both dress this plate.
+
+     EVERY LENGTH IS DERIVED from the shell's own floor rect. Hand this a
+     bigger building and it lays more cells; hand it one too small and it
+     refuses (returns false) and the legacy yard is built instead.
+     ---------------------------------------------------------- */
+  function buildInside(ctx, venue, P) {
+    const b = P.building;
+    if (!b || typeof b.lbox !== "function" || !CBZ.interiorFloorRoom) return false;
+    const room = CBZ.interiorFloorRoom(b, 0);
+    if (!room) return false;
+    const gp = venue.group, O = venue.origin;
+    const box = (x, y, z, w, h, d, m, ry) => ctx.box(gp, x, y, z, w, h, d, ctx.mat(m), ry);
+    // building-local -> venue-local, and world -> venue-local. Neither frame is
+    // ever rotated, so both are a translation and ctx.solid's AABBs stay true.
+    const BX = b.ox - O.x, BZ = b.oz - O.z;
+    const bl = (x, z) => ({ x: BX + x, z: BZ + z });
+    const wl = (x, z) => ({ x: x - O.x, z: z - O.z });
+
+    const x0 = room.x0, x1 = room.x1, z0 = room.z0, z1 = room.z1;
+    const FY = room.y;                                          // the ground slab top
+    // FLOOR TO CEILING. A cell whose walls stop short of the slab is the
+    // owner's original complaint wearing a roof, so the block runs the full
+    // storey height the shell declares rather than a comfortable 3 m.
+    const CH = Math.max(2.4, (room.fh || 3.2) - 0.16);
+    const SEC_Z = z1 - 9.0;                                     // the secure line
+    const CELL_D = 3.8, CORR_W = 3.4;
+    const doorX = x0 + CELL_D;                                  // the barred faces
+    // too small a shell is not a jail. Refuse rather than cram.
+    if (SEC_Z - z0 < 9.0 || (x1 - x0) < CELL_D + CORR_W + 5.0) return false;
+
+    // ---- THE ANCHORS, all taken from what the row already committed to -----
+    const sal = wl(P.sally.x, P.sally.z), wk = wl(P.weak.x, P.weak.z), st = wl(P.stop.x, P.stop.z);
+    const dsk = bl(0, z1 - 4.6);
+    V.gate = { x: sal.x, z: sal.z - 3.4 };
+    V.gateZone = { x: sal.x, z: sal.z - 2.6 };
+    V.gateIn = { x: sal.x, z: sal.z - 5.0 };
+    V.stop = st;
+    V.out = { x: st.x, z: st.z + 3.0 };
+    V.desk = dsk;
+    V.gap = wk;
+    V.gapOut = { x: P.weak.ox, z: P.weak.oz };
+    V.gapApp = { x: wk.x - P.weak.ox * 2.0, z: wk.z - P.weak.oz * 2.0 };
+    V.nearR = 130;
+    V.seeR = 11.0;      // see the note on V.seeR: a 68x44 court, not a 20x16 yard
+    // and the way OUT of the building, for anyone the sim walks rather than
+    // teleports: the secure gate, then the front doorway, then the court.
+    V.runVia = [{ x: BX, z: BZ + SEC_Z }, { x: BX, z: (P.court.minZ - O.z) + 2.4 }];
+
+    // the finished, lit floor — the shared kit, not a fourth copy of two boxes
+    if (CBZ.interiorShell) { try { CBZ.interiorShell(room, { b: b }); } catch (e) {} }
+
+    // TELL THE LEDGER THIS PLATE IS TAKEN. occupy.js keeps `_occupyProgrammed`
+    // per building precisely so two occupations cannot stack two sets of
+    // furniture on one floor, and power.js seats the County Sheriff here on
+    // approach — whose floor ladder would otherwise dress the ground storey
+    // straight over the cells. govcomplex's own note applies: civic() hands the
+    // lot a SHALLOW COPY of the record and occupy.js reads the ledger off THAT,
+    // so both objects are stamped. They share every closure by reference, so
+    // this is one claim written twice, never two claims.
+    for (const host of [b, P.lot && P.lot.building]) {
+      if (!host) continue;
+      host._occupyProgrammed = host._occupyProgrammed || Object.create(null);
+      host._occupyAnchors = host._occupyAnchors || Object.create(null);
+      host._occupyProgrammed[0] = "cellblock";
+      host._occupyAnchors[0] = [];
+    }
+
+    // an interior wall in building-local coords, with a REAL collider. Interior
+    // partitions in this game are conventionally non-solid; a jail's are not.
+    const iwall = (bcx, bcz, w, d, h) => {
+      h = h == null ? CH : h;
+      const p = bl(bcx, bcz);
+      box(p.x, FY + h / 2, p.z, w, h, d, MAT.wall);
+      ctx.solid(p.x - w / 2, p.z - d / 2, p.x + w / 2, p.z + d / 2, FY, FY + h);
+    };
+
+    // ---- THE CELLS. Down the west wall, doors facing +X onto the corridor —
+    //      the same arrangement (and the same records) the legacy yard used, so
+    //      every mechanic below reads them without knowing which siting it is.
+    const span = SEC_Z - z0 - 1.0;
+    const N = Math.max(3, Math.min(6, Math.floor(span / 3.4)));
+    const pitch = span / N, zBase = z0 + 0.5;
+    for (let i = 0; i <= N; i++) iwall(x0 + CELL_D / 2, zBase + pitch * i, CELL_D, 0.24);
+    for (let i = 0; i < N; i++) {
+      const c = bl(x0 + CELL_D / 2, zBase + pitch * (i + 0.5)), half = pitch / 2 - 0.16;
+      const dx = BX + doorX;
+      box(BX + x0 + 1.15, FY + 0.55, c.z, 1.9, 0.34, 0.92, MAT.bunk);          // the bunk
+      box(BX + x0 + 0.62, FY + 0.28, c.z + half - 0.62, 0.5, 0.56, 0.5, MAT.wire);   // the pan
+      box(BX + x0 + 0.62, FY + 0.72, c.z - half + 0.55, 0.42, 0.06, 0.42, MAT.wallD); // the shelf
+      // the barred DOOR: the y0/y1 gate collider setDoor pushes and pops, plus
+      // the bars we hide when it swings open.
+      const dc = ctx.solid(dx - 0.18, c.z - half, dx + 0.18, c.z + half, FY, FY + CH);
+      const bars = new THREE.Group(); gp.add(bars);
+      barGate(ctx, bars, dx, c.z, half, CH, FY);
+      V.cells.push({ i, lz: c.z, lx: c.x, doorX: dx, half: half, doorCol: dc, bars, locked: true });
+    }
+    setDoor(V.cells[1], false);       // cell 1 is the player's — open until an arrest
+
+    // ---- THE SECURE LINE. Two solid runs and a barred gate standing OPEN
+    //      between them: what holds you is the cell door, and a locked inner
+    //      gate would make the pry unwinnable instead of tense.
+    const GW = 1.15;
+    iwall((x0 - GW) / 2, SEC_Z, Math.max(0.5, -GW - x0), 0.24);
+    iwall((GW + x1) / 2, SEC_Z, Math.max(0.5, x1 - GW), 0.24);
+    const leaf = new THREE.Group();
+    const sg = bl(-GW, SEC_Z);
+    leaf.position.set(sg.x, FY, sg.z); leaf.rotation.y = 1.22; gp.add(leaf);
+    barGate(ctx, leaf, GW, 0, GW, CH, 0, true);
+    signBoard(ctx, gp, bl(-6.2, SEC_Z + 0.14).x, FY + 2.35, bl(-6.2, SEC_Z + 0.14).z, "BOOKING");
+
+    // ---- THE DAY ROOM, east of the corridor: tables somebody sits at ------
+    const dayX = doorX + CORR_W;
+    if (x1 - dayX > 6.5) {
+      const cxd = (dayX + x1) / 2;
+      for (let i = 0; i < 2; i++) {
+        const tz = z0 + 3.0 + i * Math.max(4.0, (SEC_Z - z0 - 6.0));
+        const t = bl(cxd, tz);
+        box(t.x, FY + 0.72, t.z, 2.4, 0.1, 1.1, MAT.deskD);
+        for (const s of [-1, 1]) {
+          box(t.x, FY + 0.35, t.z + s * 0.95, 2.4, 0.1, 0.4, MAT.wallD);
+          box(t.x, FY + 0.18, t.z + s * 0.95, 2.2, 0.36, 0.12, MAT.wallD);
+        }
+        for (const s of [-1, 1]) box(t.x + s * 1.0, FY + 0.36, t.z, 0.12, 0.72, 0.12, MAT.bar);
+      }
+    }
+
+    // ---- THE BOOKING HALL, inside the front doors. The counter is the point
+    //      city/wanted.js's perp walk ends at, so it stands square to the door.
+    box(dsk.x, FY + 0.55, bl(0, z1 - 6.4).z, 7.2, 1.1, 0.92, MAT.desk);
+    box(dsk.x, FY + 1.16, bl(0, z1 - 6.4).z, 7.4, 0.12, 1.02, MAT.deskD);
+    ctx.solid(dsk.x - 3.6, bl(0, z1 - 6.4).z - 0.46, dsk.x + 3.6, bl(0, z1 - 6.4).z + 0.46, FY, FY + 1.16);
+    // the property lockers behind the counter — where your guns actually go
+    for (let i = 0; i < 4; i++) {
+      const L = bl(4.6 + i * 1.05, SEC_Z + 0.75);
+      box(L.x, FY + 1.0, L.z, 0.95, 2.0, 0.55, MAT.wallD);
+    }
+    ctx.solid(bl(4.1, SEC_Z + 0.75).x, bl(0, SEC_Z + 0.5).z, bl(8.3, SEC_Z + 0.75).x, bl(0, SEC_Z + 1.0).z, FY, FY + 2.0);
+    // the bench you wait on
+    for (let i = 0; i < 2; i++) {
+      const B = bl(x0 + 2.2, z1 - 3.0 - i * 2.4);
+      box(B.x, FY + 0.44, B.z, 1.0, 0.12, 1.8, MAT.wallD);
+      box(B.x - 0.42, FY + 0.22, B.z, 0.14, 0.44, 1.7, MAT.wallD);
+    }
+
+    // ---- THE PATROL RING. Four posts, three guards, one slot always empty and
+    //      the empty slot rotates — physics instead of a timer, unchanged. What
+    //      IS new is that one post is INSIDE, behind the counter, so the way out
+    //      of the building is watched on the same rotation the yard is. Post 0
+    //      declares a `via` on the door's own axis (see marchGuards).
+    const cq = { x: (P.court.minX + P.court.maxX) / 2 - O.x, z0: P.court.minZ - O.z, z1: P.court.maxZ - O.z,
+      x0: P.court.minX - O.x, x1: P.court.maxX - O.x };
+    const insideP = bl(0, z1 - 7.8);
+    V.posts = [
+      { lx: insideP.x, lz: insideP.z, face: 0, via: { lx: insideP.x, lz: cq.z0 + 7 } },
+      { lx: insideP.x, lz: cq.z0 + (cq.z1 - cq.z0) * 0.55, face: 0 },
+      // THE GAP CORNER, and it is in the ring on purpose: standing here the
+      // service gate is inside a deputy's cone, so the way out is open only
+      // while this is the empty slot. That is the legacy design, re-measured
+      // against the real distance rather than re-typed.
+      { lx: cq.x1 - 5.5, lz: V.gap.z + 1.6, face: Math.PI / 2 },
+      { lx: cq.x0 + 9, lz: cq.z0 + (cq.z1 - cq.z0) * 0.34, face: -Math.PI / 2 },
+    ];
+
+    // ---- the LOOK (≤8 lights per venue; four here) -------------------------
+    ctx.light(dsk.x, FY + 2.7, bl(0, z1 - 5.0).z, 0xfff1d8, 0.8, 18);            // booking hall
+    ctx.light(bl(doorX + 1.6, (z0 + SEC_Z) / 2).x, FY + 2.7, bl(0, (z0 + SEC_Z) / 2).z, 0xbfe0ff, 0.6, 22);  // the block
+    ctx.light(cq.x, 7.0, (cq.z0 + cq.z1) / 2, 0xfff1d8, 0.55, 40);               // the court
+    ctx.light(V.gap.x - 5, 5.0, V.gap.z, 0xffcaa0, 0.6, 16);                     // the gate that does not latch
+
+    // ---- CAST. Same roles, same dialogue, new posts. --------------------
+    for (let i = 0; i < 3; i++) {
+      const p = V.posts[i];
+      queue({ role: "guard", name: "Deputy " + guardName(ctx, i), outfit: "security",
+        at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
+        dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out in that yard after lights-out.", "Wall's forty feet of nothing. Don't be stupid."] }, "guard");
+    }
+    const sr = bl(3.9, z1 - 7.8);
+    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "security",
+      at: [sr.x, sr.z], face: 0, post: "pinned", pose: "stand",
+      dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
+    // an inmate in every cell but yours. Their mouths carry the escape hint.
+    for (let i = 0, k = 0; i < V.cells.length; i++) {
+      if (i === 1) continue;
+      const cell = V.cells[i];
+      queue({ role: "inmate", name: inmateName(ctx, k++), outfit: MAT.orange,
+        at: [cell.lx, cell.lz], face: Math.PI / 2, post: "pinned", pose: "stand",
+        dialogue: ["I been in here longer than the walls.", "That door plate's been loose since the riot. Work it when their backs are turned.", "Service gate on the east wall hasn't latched in years. Mind their eyes."] }, "inmate:" + i);
+    }
+    return true;
+  }
+
+  /* ---- ZONES (stable interactions), shared by both sitings. GRAMMAR LAW
+     (owner): a zone label is a BUTTON — one or two words, no key glyphs, no
+     names, no sentences. The card title comes from the venue (packages.js
+     describe). Every position is an anchor out of V, never a literal. ---- */
+  function zones(ctx) {
+    ctx.zone({ id: "gate", pos: [V.gateZone.x, V.gateZone.z], r: V.onPlot ? 3.2 : 2.6,
       label: () => {
         if (INM) return "Booking";
         if (JOB && JOB.active) return "Clock off";
@@ -287,7 +617,7 @@
       label: () => "Read sheet",
       onUse: () => { if (INM) openBooking(); } });
     // the DESK is where a booking is answered — same point the sarge stands at.
-    ctx.zone({ id: "desk", pos: [0, 5.4], r: 2.8,
+    ctx.zone({ id: "desk", pos: [V.desk.x, V.desk.z], r: 2.8,
       canShow: () => !!INM && INM.phase === "booking",
       label: () => "Booking",
       onUse: () => { if (INM) openBooking(); } });
@@ -296,8 +626,6 @@
       canShow: () => !!INM && (INM.phase === "held" || INM.phase === "prying"),
       label: () => (INM && INM.phase === "prying" ? "Stop" : "Pry"),
       onUse: () => { if (!INM) return; if (INM.phase === "prying") stopPry(false); else startPry(); } });
-
-    V.ready = true;
   }
 
   // ---- small deterministic name pickers (build path → ctx.rand) -----------
@@ -316,12 +644,17 @@
 
   // barred cell-door bars between chunky top/bottom rails (visual; the collider
   // is the real barrier). Toggled off when the door swings open.
-  function barGate(ctx, parent, x, z, half, h) {
+  //   y0     — the floor it stands on (a shell's ground slab is at ~0.14, the
+  //            legacy yard's is 0; defaulting to 0 keeps every old call exact).
+  //   alongX — the run lies along X instead of Z (the secure line's gate).
+  function barGate(ctx, parent, x, z, half, h, y0, alongX) {
+    y0 = y0 || 0;
     const bx = (lx, ly, lz, w, hh, d, m) => ctx.box(parent, lx, ly, lz, w, hh, d, ctx.mat(m));
-    bx(x, 0.2, z, 0.22, 0.3, half * 2 + 0.2, MAT.wallD);       // bottom rail (chunky)
-    bx(x, h - 0.15, z, 0.22, 0.3, half * 2 + 0.2, MAT.wallD);  // top rail
-    for (let bz = -half + 0.2; bz <= half - 0.2 + 1e-6; bz += 0.42)
-      ctx.cyl(parent, x, h / 2, z + bz, 0.05, 0.05, h - 0.4, ctx.mat(MAT.bar), 6);   // vertical bar
+    const rw = alongX ? half * 2 + 0.2 : 0.22, rd = alongX ? 0.22 : half * 2 + 0.2;
+    bx(x, y0 + 0.2, z, rw, 0.3, rd, MAT.wallD);                // bottom rail (chunky)
+    bx(x, y0 + h - 0.15, z, rw, 0.3, rd, MAT.wallD);           // top rail
+    for (let t = -half + 0.2; t <= half - 0.2 + 1e-6; t += 0.42)
+      ctx.cyl(parent, alongX ? x + t : x, y0 + h / 2, alongX ? z : z + t, 0.05, 0.05, h - 0.4, ctx.mat(MAT.bar), 6);
   }
   function wallStub(box, ctx, cx, cz, len, t, h) { box(cx, h / 2, cz, len, h, t, MAT.wallD); }
   function rubblePile(box, ctx, cx, cz) {
@@ -414,8 +747,9 @@
     holdPlayer(true);
     // the property room takes the guns. Escaping does NOT give them back.
     const bagged = CBZ.cityEvidenceSeize ? CBZ.cityEvidenceSeize() : null;
+    const hold = S0.hold + runAllowance();
     INM = { phase: "booking", sentence: S0.jail, prison: S0.prison, served: 0, wanted0: w,
-      bribe: S0.bail, hold: S0.hold, transportT: S0.hold, pry: 0, _pryMark: 0,
+      bribe: S0.bail, hold: hold, transportT: hold, pry: 0, _pryMark: 0,
       peaceful: !!opts.peaceful, lost: opts.lost | 0, charges,
       guns: bagged ? (bagged.inv || []).length + (bagged.melee ? 1 : 0) : 0,
       atDesk: !!opts.atDesk };
@@ -432,6 +766,24 @@
     openBooking();
     return true;
   }
+  // THE CLOCK IS A RACE AGAINST A DISTANCE, so it has to know the distance.
+  // The legacy yard puts 18 m between the player's cell and the hole in the
+  // wall; the county jail puts ~73 m and three doorways between them. Leaving
+  // HOLD_BASE fixed across both would not be "the same mechanic at a new
+  // address" — it would be a silent ten-second nerf to the one escape this
+  // venue exists for. So the van's ETA carries the RUN, at a sprint, and
+  // nothing else moves: the pry is still 24 s of unobserved work and the patrol
+  // rotation is still the only thing watching. Measured off the live anchors,
+  // which is why the legacy siting gets exactly zero (17.7 m < 18) and the
+  // sentence formula every other caller reads is untouched.
+  const RUN_FREE = 18, RUN_SPD = 5.2;
+  function runAllowance() {
+    if (!V || !V.cells || !V.cells[1]) return 0;
+    const c = V.cells[1];
+    const d = Math.hypot(V.gap.x - c.lx, V.gap.z - c.lz);
+    return Math.max(0, (d - RUN_FREE) / RUN_SPD);
+  }
+
   // legacy name kept for the probe surface / any older caller
   function beginInmate(opts) { return beginBooking(opts); }
 
@@ -511,11 +863,13 @@
       feed("Bond posted. You walk." + (back ? " Property returned (" + back + ")." : ""), "#ffd166");
       if (CBZ.arrestCount) CBZ.arrestCount("releases");
       // out the front, not out of thin air
-      const wg = W(0, 10.5); teleportPlayer(wg.x, wg.z);
+      const wg = W(V.out.x, V.out.z); teleportPlayer(wg.x, wg.z);
     } else if (reason === "escaped") {
       s.escapes++;
-      // OUT the wall gap — and HOT. Reuse the real wanted API + convict floor.
-      const wg = W(V.gap.x + 1.5, V.gap.z - 2.0);
+      // OUT through the weak point — and HOT. Which way "out" is belongs to the
+      // gap, not to this line: the legacy yard's hole faces -Z and the county
+      // jail's service gate faces +X, and neither is typed here.
+      const wg = W(V.gap.x + V.gapOut.x * 2.8, V.gap.z + V.gapOut.z * 2.8);
       teleportPlayer(wg.x, wg.z);
       g.escapedConvict = true;
       if (CBZ.cityAddStars) { try { CBZ.cityAddStars(4, "Jailbreak"); } catch (e) {} }
@@ -691,8 +1045,14 @@
     const e = JOB.escape, h = e.h, ped = h && h.ped;
     if (!ped || ped.dead) { JOB.escape = null; return; }
     e.t += dt;
-    // march toward the wall gap (derived motion, like restrain.js escorts)
-    const goal = W(V.gap.x, V.gap.z + 1.2);
+    // MARCH FOR THE WEAK POINT (derived motion, like restrain.js escorts) — but
+    // through the doors, not through the walls. `V.runVia` is the same one-field
+    // answer the patrol ring uses: a short list of waypoints on the doorways'
+    // own axis, walked in order, then the gap. The legacy yard declares none and
+    // this is a straight line, exactly as before.
+    if (!e.route) e.route = (V.runVia || []).concat([{ x: V.gapApp.x, z: V.gapApp.z }]);
+    const leg = e.route[0];
+    const goal = W(leg.x, leg.z);
     const dx = goal.x - ped.pos.x, dz = goal.z - ped.pos.z, d = Math.hypot(dx, dz) || 1;
     const step = Math.min(d, 3.2 * dt);
     ped.pos.x += dx / d * step; ped.pos.z += dz / d * step; ped.pos.y = 0;
@@ -701,7 +1061,8 @@
     // caught?
     const P = CBZ.player;
     if (P && Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z) <= CATCH_R) { catchRunner(); return; }
-    // over the wall = gone
+    // waypoint reached → next leg; the LAST leg is the gap, and reaching it is gone
+    if (e.route.length > 1) { if (d <= 1.4) e.route.shift(); return; }
     if (d <= RUNNER_REACH) { missRunner(); return; }
   }
   // return a runner to its cell: re-home, re-pin, re-lock. The cell block never
@@ -712,7 +1073,7 @@
     if (CBZ.cityRestrain && CBZ.cityRestrain.release) { try { CBZ.cityRestrain.release(ped, { silent: true }); } catch (e) {} }
     ped.npcWanted = 0; ped._parked = false; if (ped.group) ped.group.visible = true;
     const cell = V.cells[h._cellIdx];
-    if (cell) { const hw = W(-8.6, cell.lz); ped.pos.set(hw.x, 0, hw.z); if (ped.group) ped.group.position.set(hw.x, 0, hw.z); ped.staffPost = { x: hw.x, z: hw.z, face: Math.PI / 2 }; setDoor(cell, true); }
+    if (cell) { const hw = W(cell.lx, cell.lz); ped.pos.set(hw.x, 0, hw.z); if (ped.group) ped.group.position.set(hw.x, 0, hw.z); ped.staffPost = { x: hw.x, z: hw.z, face: Math.PI / 2 }; setDoor(cell, true); }
   }
   function catchRunner() {
     if (!JOB || !JOB.escape) return;
@@ -756,7 +1117,7 @@
     if (PENDING) deliverPending(false);
 
     const P = CBZ.player;
-    near = !!(P && P.pos && Math.hypot(P.pos.x - V.origin.x, P.pos.z - V.origin.z) < 60);
+    near = !!(P && P.pos && Math.hypot(P.pos.x - V.origin.x, P.pos.z - V.origin.z) < (V.nearR || 60));
 
     // the patrol ring walks whenever anyone's watching — the guards' gaze
     // cones ARE the detection model, so the ring is the whole game.
@@ -827,7 +1188,15 @@
       if (!ped || ped.dead || ped.surrender || ped._covered) continue;
       if (h._ring == null) { h._ring = i % n; h._holdT = POST_HOLD * (0.55 + 0.3 * i); h._scan = i * 1.7; }
       const post = V.posts[h._ring % n];
-      const goal = W(post.lx, post.lz);
+      // A POST MAY DECLARE A WAY IN. The county jail's ring runs through the
+      // building's own front doorway, and a guard marched on a straight line
+      // from a yard post to the post behind the booking counter would walk
+      // through the facade. `via` is ONE waypoint on the doorway's axis,
+      // cleared before the post itself — the whole of the pathing this ring
+      // needs, which is why it is a field and not a navmesh.
+      if (h._ringAt !== h._ring) { h._ringAt = h._ring; h._via = post.via || null; }
+      const tgt = h._via || post;
+      const goal = W(tgt.lx, tgt.lz);
       const dx = goal.x - ped.pos.x, dz = goal.z - ped.pos.z, d = Math.hypot(dx, dz);
       if (d > 0.35) {
         const step = Math.min(d, GUARD_WALK * dt);
@@ -835,6 +1204,8 @@
         if (ped.group) { ped.group.position.set(ped.pos.x, 0, ped.pos.z); ped.group.rotation.y = Math.atan2(dx, dz); }
         if (CBZ.animChar && ped.char) CBZ.animChar(ped.char, step / Math.max(dt, 1e-3), dt);
         if (ped.staffPost) { ped.staffPost.x = ped.pos.x; ped.staffPost.z = ped.pos.z; }
+      } else if (h._via) {
+        h._via = null;                       // waypoint reached — on to the post itself
       } else {
         h._scan = (h._scan || 0) + dt * 0.8;
         const face = (post.face || 0) + Math.sin(h._scan) * 0.9;
@@ -852,7 +1223,7 @@
     for (let i = 0; i < V.guards.length; i++) {
       const h = V.guards[i], ped = h && h.ped; if (!ped || ped.dead) continue;
       const dx = P.pos.x - ped.pos.x, dz = P.pos.z - ped.pos.z, d = Math.hypot(dx, dz);
-      if (d > GUARD_SEE_R || d < 0.01) continue;
+      if (d > ((V && V.seeR) || GUARD_SEE_R) || d < 0.01) continue;
       const facing = ped.group ? ped.group.rotation.y : 0;
       let da = Math.atan2(dx, dz) - facing;
       while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
@@ -1024,10 +1395,62 @@
      ========================================================== */
   CBZ.cityJailGate = function () {
     if (!V || !V.ready || !V.origin) return null;
-    const stop = W(0, 14.0);        // the cruiser's kerb — outside the wire
+    const stop = W(V.stop.x, V.stop.z);        // the cruiser's kerb — outside the wire
     return { x: stop.x, z: stop.z, nx: 0, nz: 1,
-      gate: W(0, 9.6),              // just outside the gate opening
-      desk: W(0, 5.4) };            // the booking desk itself
+      gate: W(V.gateIn.x, V.gateIn.z),         // the sally port, on the way in
+      desk: W(V.desk.x, V.desk.z) };           // the booking counter itself
+  };
+  // EVERY POINT THIS JAIL HAS, IN WORLD COORDS, from one place. `cityJailGate`
+  // is the arrest arc's contract and stays exactly what it was; this is for
+  // anything else that needs to know where the cells or the yard are (probes,
+  // contracts, a future bail bondsman) so nothing ever re-derives them from a
+  // literal again. `onPlot` is the honest answer to "is this the real jail or
+  // the degrade yard".
+  CBZ.cityJailAnchors = function () {
+    if (!V || !V.ready || !V.origin) return null;
+    return {
+      onPlot: !!V.onPlot,
+      origin: { x: V.origin.x, z: V.origin.z },
+      stop: W(V.stop.x, V.stop.z),
+      gate: W(V.gate.x, V.gate.z),
+      desk: W(V.desk.x, V.desk.z),
+      release: W(V.out.x, V.out.z),
+      weak: W(V.gap.x, V.gap.z),
+      weakOut: { x: V.gapOut.x, z: V.gapOut.z },
+      cells: V.cells.map(function (c) { const w = W(c.lx, c.lz); return { i: c.i, x: w.x, z: w.z, locked: !!c.locked }; }),
+      posts: V.posts.map(function (p) { const w = W(p.lx, p.lz); return { x: w.x, z: w.z, face: p.face, inside: !!p.via }; }),
+    };
+  };
+  // THE REBUILD, AS A NUMBER. `roofed` and `walled` are what the owner actually
+  // complained about ("an OPEN-TOP BUILDING IN THE MIDDLE OF TOWN") and they
+  // are read off the LIVE world, not asserted: roofed means the cells stand
+  // inside a real cityMakeBuilding shell, walled means the yard's wall came
+  // from the complex row. `onOwnLand` means the plot is a registered region
+  // with its own access road. All three may only ever go from false to true.
+  CBZ.jailSiteAudit = function () {
+    const S = CBZ.govComplexes || [];
+    let site = null;
+    for (let i = 0; i < S.length; i++) if (S[i] && S[i].id === "countyjail") site = S[i];
+    const P = site && site.jail;
+    const b = P && P.building;
+    return {
+      mounted: !!(V && V.ready),
+      onOwnLand: !!(site && site.rect),
+      roofed: !!(V && V.onPlot && b && b.storeys > 0),
+      walled: !!(V && V.onPlot && P && P.wallH >= 4.0),
+      roadedTo: site ? ((site.roads || []).length | 0) : 0,
+      cells: V ? V.cells.length : 0,
+      posts: V ? V.posts.length : 0,
+      insidePosts: V ? V.posts.filter(function (p) { return !!p.via; }).length : 0,
+      wallH: P ? P.wallH : 0,
+      storeys: b ? (b.storeys | 0) : 0,
+      weakPoints: 1,                       // by construction: ONE gate that does not latch
+      // the escape, as a distance and the seconds the clock hands you for it
+      runDist: (V && V.cells && V.cells[1]) ? +Math.hypot(V.gap.x - V.cells[1].lx, V.gap.z - V.cells[1].lz).toFixed(1) : 0,
+      runAllowance: +runAllowance().toFixed(2),
+      seeR: V ? V.seeR : 0,
+      anchors: CBZ.cityJailAnchors ? CBZ.cityJailAnchors() : null,
+    };
   };
   CBZ.cityBookIn = function (opts) {
     if (!jailOn() || !V || !V.ready || INM || g.mode !== "city") return false;
@@ -1041,16 +1464,25 @@
   CBZ.cityJailHeldSentence = function () { return (g.jailSentence | 0) || 0; };
 
   /* ==========================================================
-     9. REGISTER — a SITE venue (no jail lot kind): resolve to the city's law
-        intake (the precinct / City Hall desk) and build the compound out
-        front, with a constants-ish fallback near arena centre.
+     9. REGISTER — a SITE venue.
+
+     THE PLOT FIRST. city/govcomplex.js's "countyjail" row has already claimed
+     a civic plot at the edge of town, registered its region, its keep-out and
+     a real access road, and raised the building; mounting on its centre is the
+     whole of the siting fix. Only when there is no plot (flag off, govcomplex
+     absent, or no clear ground on this seed) do we fall back to the old
+     answer — the city's law intake (the precinct / City Hall desk, which is
+     WHY the jail used to stand in the middle of town) with a constants-ish
+     fallback near arena centre.
      ========================================================== */
   CBZ.games.register({
     id: "jail",
-    title: "CITY JAIL",
+    title: "COUNTY JAIL",
     venue: {
       site: "cityjail",
       resolve(CBZ) {
+        const plot = plotFor();
+        if (plot && plot.origin) return { x: plot.origin.x, z: plot.origin.z };
         const st = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
         if (st) {
           const lot = st.lot || {};
@@ -1081,6 +1513,10 @@
       state: () => (S ? JSON.parse(JSON.stringify(S)) : null),
       cast: () => (V ? { guards: V.guards.length, inmates: V.inmates.length, sarge: !!V.sarge, cells: V.cells.length, posts: V.posts.length } : null),
       anchor: () => (V ? { x: V.origin.x, z: V.origin.z } : null),
+      // the rebuild, as numbers a probe can assert on
+      site: () => (CBZ.jailSiteAudit ? CBZ.jailSiteAudit() : null),
+      anchors: () => (CBZ.cityJailAnchors ? CBZ.cityJailAnchors() : null),
+      onPlot: () => !!(V && V.onPlot),
       cellLocked: (i) => (V && V.cells[i] ? !!V.cells[i].locked : null),
       engages: () => jailEngages(),
       pending: () => !!PENDING,
@@ -1111,7 +1547,7 @@
       startShift: () => (startShift(), !!(JOB && JOB.active)),
       endShift: (why) => { endShift(why || "clocked off"); return !JOB; },
       rigEscape: () => { const r = rigEscape(); return !!r; },
-      catch: () => { if (JOB && JOB.escape) { const ped = JOB.escape.h && JOB.escape.h.ped; if (ped) { const w = W(V.gap.x, V.gap.z + 3); teleportPlayer(w.x, w.z); ped.pos.set(w.x, 0, w.z); } catchRunner(); return true; } return false; },
+      catch: () => { if (JOB && JOB.escape) { const ped = JOB.escape.h && JOB.escape.h.ped; if (ped) { const w = W(V.gapApp.x - V.gapOut.x * 1.4, V.gapApp.z - V.gapOut.z * 1.4); teleportPlayer(w.x, w.z); ped.pos.set(w.x, 0, w.z); } catchRunner(); return true; } return false; },
       missEscape: () => { if (JOB && JOB.escape) { missRunner(); return true; } return false; },
     },
   });
