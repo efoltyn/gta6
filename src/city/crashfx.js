@@ -1047,13 +1047,10 @@
   // RPG ON A BUILDING — the facade REACTS at the impact point (owner filmed a
   // rocket hit a tower and "a few windows popped"). CBZ.cityBlastWall(pt, n, o)
   // composes, at pt on a wall face with outward normal n:
-  //   1) a big blackened BLAST SCAR decal (pooled, 2–4u, the scorch gradient)
-  //      stamped on the face — the building remembers the rocket like walls
-  //      remember 7.62 (gunfx bullet pocks),
+  //   1) [PURGED — see FX_WALL_WOUNDS] a painted BLAST SCAR decal on the face,
   //   2) a debris AVALANCHE: concrete chunks + a sheet of pale dust cascading
   //      DOWN the facade from the wound (shared chunk pool, downward bias),
-  //   3) a LINGERING smoke column seeping from the wound for 60–90s (pooled
-  //      sprite emitter ~2/s — the show-off plume reads across the district),
+  //   3) [PURGED — see FX_WALL_WOUNDS] a 60–90s smoke column off the wound,
   //   4) near the roofline: ONE parapet block knocked loose, tumbling the whole
   //      way down (collider tops locate the roof).
   // Ground-floor hits still breach (buildings.js cityBreach) — this layers on.
@@ -1062,7 +1059,43 @@
   const SCAR_CAP = 8;
   const _scarZ = new THREE.Vector3(0, 0, 1);
   const _scarN = new THREE.Vector3();
+
+  // ---- FX_WALL_WOUNDS — THE PERSISTENT MARK ON A FACADE IS PURGED ------------
+  // OWNER (2026-07-27, filming a jeweller's shopfront after a blast): "this type
+  // of mark left on buildings and windows is so dumb and defies physics — purge
+  // it." TWO producers were painting that mark and both are this one class:
+  //
+  //  (a) addWallScar — a flat scorch-gradient quad stamped 8 cm PROUD of the wall
+  //      plane and held at 0.95 opacity for 80–120 s. On a glass curtain wall
+  //      there is nothing for soot to adhere TO, so it read as a dark smudge
+  //      hovering on the pane. This is the SAME floating-decal failure that
+  //      cityBlastWall's own note (1) already diagnosed and deleted from its
+  //      path — woundScorch quietly reintroduced it one function over.
+  //  (b) addBlastWound — the 60–90 s wall smoke emitter. Every puff it spawns is
+  //      the LUMPY smoke sprite (makeSmokeTexture draws SEVEN overlapping soft
+  //      blobs), seated 0.6 m off the face at shade 0.12–0.16 (near-black), at
+  //      ~2/s with a 3.6–5.2 s life — so roughly EIGHT dark blurry blobs hang
+  //      against the glass continuously for a minute and a half, replenished as
+  //      fast as they die. Sprites are camera-facing, so the cluster reads as
+  //      painted ON the pane instead of as smoke leaving a hole. That arc of
+  //      ~8 blobs in the owner's screenshot is exactly this emitter.
+  //
+  // WHAT DELIBERATELY SURVIVES: every DETONATION-TIME layer (flash, fireball,
+  // concrete dust burst, the cascading dust sheet, the facade avalanche, the
+  // rubble heap, the dangling rebar, the parapet chunk, the ejecta cone) — the
+  // explosion still looks like an explosion — and every GROUND mark (addScorch's
+  // flat pavement stain and its addSmolder column), which sit on a HORIZONTAL
+  // surface where settled soot is exactly what physics leaves behind.
+  //
+  // Gating the two PRODUCERS (rather than their four call sites) is what keeps
+  // this a one-line revert: flip true and cityWallRuin, cityHeavyWallRuin,
+  // cityBlastWall and cityEjectaCone all get the old behaviour back, unchanged.
+  // Their update loops and cityBlastFxReset already handle empty pools.
+  if (CBZ.CONFIG.FX_WALL_WOUNDS == null) CBZ.CONFIG.FX_WALL_WOUNDS = false;
+  function wallWoundsOn() { return CBZ.CONFIG.FX_WALL_WOUNDS === true; }
+
   function addWallScar(x, y, z, nx, ny, nz, size) {
+    if (!wallWoundsOn()) return;   // purged: no painted mark on a vertical face
     if (!scorchTex) scorchTex = makeScorchTexture();
     while (scars.length >= SCAR_CAP) { const o = scars.shift(); scene.remove(o.mesh); o.mat.dispose(); }
     const mat = new THREE.MeshBasicMaterial({
@@ -1209,11 +1242,13 @@
   }
 
   // ---- SOOT RING decal hugging the wall around the wound ----
-  // The owner called the OLD floating brown decal fake — but that was a scar
-  // sitting in EMPTY AIR with no hole behind it. Now there is a real carved hole,
-  // so a blackened soot ring rimming the wound reads exactly right (research:
-  // radial-gradient blackening that fades at the edges, smudges radiating from
-  // the epicentre). Reuses the wall-scar pool/updater already in this file.
+  // NO-OP by default. The argument that brought this back was "the old floating
+  // brown decal was fake because it hung in EMPTY AIR; now there is a real carved
+  // hole behind it, so a soot ring reads right." That reasoning holds only where
+  // a hole was actually carved — and the same decal is stamped on glass curtain
+  // walls and shopfronts, which never carve, so it went back to hanging in front
+  // of an intact pane. The owner filmed exactly that. Gated at addWallScar (see
+  // FX_WALL_WOUNDS); the carved hole itself is still the mark.
   function woundScorch(x, y, z, nx, ny, nz, size) {
     addWallScar(x, y, z, nx, ny, nz, size);
   }
@@ -1224,10 +1259,9 @@
   //   1) debris AVALANCHE pouring down the facade (the existing cascade),
   //   2) a DENSE PERSISTENT RUBBLE HEAP mounded at the wall base on the street,
   //   3) DANGLING REBAR off the broken header edge,
-  //   4) a blackened SOOT RING rimming the hole on the wall face,
+  //   4) [PURGED by FX_WALL_WOUNDS] a painted soot ring on the wall face,
   //   5) a fat concrete DUST CLOUD bursting out of the wound,
-  //   6) a LINGERING smoke wound (60-90s column) so the ruin reads across the
-  //      district — wired through addBlastWound.
+  //   6) [PURGED by FX_WALL_WOUNDS] a 60-90s smoke column off the wound.
   // x,y,z = the wound centre on the outer wall plane; nx,nz = outward normal.
   // o = { power, width (hole width), top, bottom } from the carved gap.
   // ============================================================
@@ -1256,7 +1290,8 @@
     const nBar = top > 2.2 ? Math.round(3 + width * 0.8) : 2;
     dangleRebar(x, top - 0.1, z, nx, nz, width, Math.min(8, nBar));
 
-    // (4) blackened SOOT RING rimming the hole on the wall face
+    // (4) soot ring on the face — PURGED by default (FX_WALL_WOUNDS); the call
+    //     stays so flipping the flag restores the old read exactly.
     woundScorch(x, y, z, nx, 0, nz, width * 1.5 + 1.0);
 
     // (5) a fat CONCRETE DUST CLOUD punching out of the wound + a low billow that
@@ -1285,8 +1320,8 @@
       });
     }
 
-    // (6) the wound keeps smoking for a minute-plus — the show-off plume that
-    //     tells the whole block a rocket hit here.
+    // (6) lingering wall plume — PURGED by default (FX_WALL_WOUNDS). The dust
+    //     cloud and cascade above are what the detonation leaves behind now.
     addBlastWound(x, y, z, nx, 0, nz, 60 + rng() * 30);
   };
 
@@ -1513,7 +1548,8 @@
         delay: f * 0.6,
       });
     }
-    // (5) the collapse keeps smoking for a minute-plus + a ground scorch ring
+    // (5) the wall plume is PURGED (FX_WALL_WOUNDS); the GROUND scorch ring at
+    //     the foot of the collapse stays — soot settling on pavement is real.
     addBlastWound(faceX, woundY, faceZ, fnx, 0, fnz, 60 + rng() * 30);
     addScorch(faceX + fnx * 1.2, faceZ + fnz * 1.2, width * 0.5 + 2, 18);
     // (6) feedback — a heavy structural rumble (sound is owned by the caller's
@@ -1523,7 +1559,12 @@
     if (CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(faceX, woundY, faceZ, Math.min(3, power)); } catch (e) {} }
   };
 
+  // The lingering wall plume. PURGED by default — see the FX_WALL_WOUNDS block
+  // above; the ground smolder (addSmolder) is a different, horizontal thing and
+  // is untouched. Gated here so all four callers stop together and no emitter is
+  // ever left anchored to a mark that no longer exists.
   function addBlastWound(x, y, z, nx, ny, nz, dur) {
+    if (!wallWoundsOn()) return;
     while (wounds.length >= 3) wounds.shift();   // 3 live wounds max — the oldest stops smoking
     wounds.push({ x, y, z, nx, ny, nz, t: 0, dur, acc: 0.2 });
   }
@@ -1563,7 +1604,11 @@
     else facadeAvalanche(x, y, z, nx, nz, power);
     // a breath of concrete dust out of the wound itself
     pointBurst(x, z, Math.round(16 + 10 * power), 0x9a9082, 0.42, 3.5 + power, 1.0, true, y);
-    // (3) the wound smokes for a minute-plus — visible across the district
+    // (3) the wound used to smoke for a minute-plus — PURGED by default
+    //     (FX_WALL_WOUNDS). This is the call the owner's shopfront screenshot
+    //     came from: fpsmode's rocket branch hits a jeweller's glass front, and
+    //     a facade with no hole in it stood there wearing a cloud of black
+    //     sprites for 90 s. The dust breath above is the detonation read.
     addBlastWound(x, y, z, nx, ny, nz, 60 + rng() * 30);
     // (4) a hit near the roofline knocks a parapet block loose. Collider tops
     // under the impact point locate the roof (the same wall AABBs cityScorch /
@@ -1583,6 +1628,21 @@
     }
   };
 
+  // ---- CBZ.wallMarkAudit() — the ratchet on the purged facade-mark class ----
+  // wallScars + wallWounds are the two PERSISTENT vertical-surface marks and are
+  // pinned at 0: detonate anything against a facade, burst the sim, and both must
+  // still read 0. groundScorches / groundSmolders are printed BESIDE them so a
+  // "fix" that quietly kills the legitimate pavement stain (or the smoking
+  // crater) cannot pass as a win — they must stay NON-ZERO after a ground blast.
+  CBZ.wallMarkAudit = function () {
+    return {
+      wallScars: scars.length, wallWounds: wounds.length,
+      groundScorches: scorches.length, groundSmolders: smolders.length,
+      livePuffs: puffs.length,
+      flag: CBZ.CONFIG.FX_WALL_WOUNDS === true,
+    };
+  };
+
   // fresh run → cold facades (fpsmode's reset path calls this with the pocks)
   CBZ.cityBlastFxReset = function () {
     wounds.length = 0;
@@ -1597,7 +1657,9 @@
   CBZ.onAlways(9.5, function (dt) {
     if (punchQ.length) pumpPunch(dt);
     if (puffs.length) updatePuffs(dt);
-    // wall-blast scars: snap in, hold ~80–120s, fade out
+    // wall-blast scars: snap in, hold ~80–120s, fade out. Empty unless
+    // FX_WALL_WOUNDS is flipped back on — the pool and this loop are kept so the
+    // revert is one line and behaves exactly as it used to.
     for (let i = scars.length - 1; i >= 0; i--) {
       const s = scars[i]; s.t += dt;
       if (s.t < 0.2) s.mat.opacity = (s.t / 0.2) * 0.95;
@@ -1614,7 +1676,10 @@
       if (rb.t >= rb.hold) { scene.remove(rb.group); rebar.splice(i, 1); }
     }
     // wounded facades keep smoking: ~2 puffs/s drifting up + out of the hole,
-    // thinning as the wound cools; the first beats still cook with flame licks
+    // thinning as the wound cools; the first beats still cook with flame licks.
+    // THIS IS THE BLOB CLUSTER THE OWNER PURGED — wounds[] is empty unless
+    // FX_WALL_WOUNDS is flipped on, so this loop idles. Note the GROUND smolder
+    // loop directly below is a different thing and still runs.
     for (let i = wounds.length - 1; i >= 0; i--) {
       const w = wounds[i]; w.t += dt;
       if (w.t >= w.dur) { wounds.splice(i, 1); continue; }
@@ -1893,8 +1958,8 @@
         delay: rng() * 0.22,
       });
     }
-    // (4) the exit mouth keeps smoking like any other wound (pooled emitter,
-    // hard cap 3) — the far face has to remember it too.
+    // (4) the exit mouth used to keep smoking like any other wound — PURGED by
+    // default (FX_WALL_WOUNDS); the jet, spall and slab dust above are the read.
     if (P >= 1) addBlastWound(x, y0, z, ax, 0, az, 30 + rng() * 25);
   };
 })();
