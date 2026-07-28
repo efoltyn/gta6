@@ -70,18 +70,36 @@
     // radius the annex's whole skyline popped out and the island read as a
     // bare green disc beside downtown while every other settlement in the
     // world kept its proxy. Same records, same shape, one concat.
+    //
+    // AND THE CONCAT WAS THE TELL. A LOT is an ECONOMY record (Zillow, shops,
+    // jobs, map POIs), not a census of what stands in the world — so keying the
+    // distance skyline on it makes every builder that raises a shell without
+    // selling one invisible past the radius. FOUR do, and they are exactly the
+    // ones standing on empty ground where a missing skyline shows most:
+    // govcomplex.js's nine complexes, island_military.js, island_airport.js's
+    // terminal and biome_forest.js's cabins. `root.userData.shells` is
+    // city/buildings.js's own registry — every cityMakeBuilding return, pushed
+    // by the one function that mints a shell, so nobody opts in and a fifth
+    // builder cannot re-open this. LOTS GO IN FIRST so a lot-backed record wins
+    // the dedupe and keeps its `demolished` flag (demolition only ever walks
+    // city.lots); shells merely fill the gaps. Degrade-safe: no registry, no
+    // change.
     const seen = new Set();
     let lots = A.lots || [];
     if (A.annex && Array.isArray(A.annex.lots) && A.annex.lots.length) lots = lots.concat(A.annex.lots);
-    for (let i = 0; i < lots.length; i++) {
-      const lot = lots[i], b = lot && lot.building;
+    const src = [];
+    for (let i = 0; i < lots.length; i++) src.push({ lot: lots[i], b: lots[i] && lots[i].building });
+    const shells = (A.root.userData && A.root.userData.shells) || null;
+    if (shells) for (let i = 0; i < shells.length; i++) src.push({ lot: null, b: shells[i] });
+    for (let i = 0; i < src.length; i++) {
+      const lot = src[i].lot, b = src[i].b;
       if (!b || b.park || !b.group || seen.has(b.group)) continue;
       const w = +b.w, d = +b.d, h = +b.h;
       if (!(w > 1 && d > 1 && h > 1)) continue;
       seen.add(b.group);
-      const x = Number.isFinite(b.ox) ? b.ox : (+lot.cx || 0);
-      const z = Number.isFinite(b.oz) ? b.oz : (+lot.cz || 0);
-      proxyRecords.push({ lot, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false });
+      const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
+      const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
+      proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false });
     }
     if (!proxyRecords.length) { proxyArena = A; return; }
 
@@ -120,7 +138,10 @@
     for (let i = 0; i < proxyRecords.length; i++) {
       const r = proxyRecords[i];
       const d = Math.hypot(r.x - P.x, r.z - P.z) - r.r;
-      const show = !!R && !r.lot.demolished && d > enter;
+      // r.lot is null for a shell that never registered a lot (govcomplex, the
+      // military island, the airport terminal, forest cabins) — and those are
+      // precisely the ones demolition never touches, since it walks city.lots.
+      const show = !!R && !(r.lot && r.lot.demolished) && d > enter;
       if (show) visible++;
       if (show === r.shown) continue;
       r.shown = show; dirty = true;
@@ -143,11 +164,25 @@
 
   function boundsFor(o) {
     let b = bounds.get(o);
-    if (b) return b;
+    // A pool's bounds are its INSTANCES, so the "it MOVED → don't trust the
+    // cache" rule the sweep applies to o.position has to apply to them too:
+    // an InstancedMesh never moves its object transform, it rewrites matrices.
+    // BufferAttribute bumps `version` on every needsUpdate, so that is the
+    // cheap tell. Re-measure rather than blacklist — the pane pools legitimately
+    // rewrite matrices on every shatter and every dusk flip, and a pool that
+    // gets blacklisted for doing its job is the exemption bug all over again.
+    if (b && b.dynamic) return b;
+    if (b && !(o.isInstancedMesh && o.instanceMatrix && b.iv !== o.instanceMatrix.version)) return b;
     // one-time measure. Meshes with a bounding sphere are cheap; groups pay
     // one Box3 walk. Anything unmeasurable or world-spanning is marked
     // dynamic=true (== never cull).
     b = { x: 0, z: 0, r: 1e9, px: o.position.x, pz: o.position.z, dynamic: false };
+    // A verdict taken from a TRANSIENT state must not be cached. The warm
+    // night-pane pools sit at count 0 all day (city/buildings.js zeroes them so
+    // ~60k degenerate instances stop entering the vertex shader); measuring one
+    // at noon and caching "dynamic" would exempt it from culling for the whole
+    // session, and it is exactly the pool that lights up after dusk.
+    let cacheable = true;
     try {
       if (o.userData && (o.userData.dynamic || o.userData.terrain)) { b.dynamic = true; }
       else if (o.name === "city-crowd") { b.dynamic = true; }
@@ -157,22 +192,55 @@
         // whenever the player left the origin, or never culled them at all.
         // Aggregate the true spread from the instance matrices once (positions
         // live at elements 12/14 of each 16-float block).
+        //
+        // THE GHOST CITY WAS THIS LINE. The per-instance slack used to be
+        // `geometry.boundingSphere.radius * 3` — which assumes that sphere
+        // describes ONE instance. city/buildings.js's pooledIM() deliberately
+        // HAND-SETS an AGGREGATE sphere spanning its whole 320 u sector, so
+        // r128 can frustum-cull the sector (its own comment: "core/farcull.js
+        // can drop far cells wholesale"). Two files describing one object
+        // independently: a populated downtown sector reads radius ~230, x3 =
+        // ~690 of "slack", and b.r lands ~920 — straight past the 400 u
+        // never-cull guard below. EVERY glass-pane, interior-mullion and
+        // masonry-veneer pool in the world was therefore permanently exempt
+        // from the culling it exists to enable, while the SHELLS those panes
+        // belong to (building groups + core/batch.js's per-building merged
+        // walls) culled normally. Past the radius the walls went and the
+        // windows stayed: a see-through city of frames on empty ground.
+        // The slack is now measured off the instances themselves — the
+        // prototype's own extent (boundingBox, which never touches the
+        // hand-set boundingSphere) times the largest instance scale — so it
+        // is correct for a hand-set sphere and a real prototype alike.
         const a = o.instanceMatrix && o.instanceMatrix.array;
         const n = o.count | 0;
-        if (!a || !n) { b.dynamic = true; }
+        if (!a || !n) { b.dynamic = true; cacheable = false; }
         else {
-          let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+          let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9, maxS = 0;
           for (let i = 0; i < n; i++) {
-            const x = a[i * 16 + 12], z = a[i * 16 + 14];
+            const o16 = i * 16;
+            const x = a[o16 + 12], z = a[o16 + 14];
             if (x < minX) minX = x; if (x > maxX) maxX = x;
             if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            // columns 0..2 of the instance matrix are the SCALED basis vectors:
+            // their lengths are the instance's scale on each axis.
+            const sx = Math.hypot(a[o16], a[o16 + 1], a[o16 + 2]);
+            const sy = Math.hypot(a[o16 + 4], a[o16 + 5], a[o16 + 6]);
+            const sz = Math.hypot(a[o16 + 8], a[o16 + 9], a[o16 + 10]);
+            if (sx > maxS) maxS = sx; if (sy > maxS) maxS = sy; if (sz > maxS) maxS = sz;
           }
-          if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
-          const proto = (o.geometry.boundingSphere ? o.geometry.boundingSphere.radius : 2) * 3; // generous per-instance slack (instances scale)
+          // computeBoundingBox does NOT write boundingSphere, so a pool that
+          // published its own sector sphere keeps it (and keeps frustum-culling).
+          if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+          const bb = o.geometry.boundingBox;
+          const protoR = bb
+            ? Math.hypot(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * 0.5
+            : 2;
+          const proto = Math.max(0.5, protoR * (maxS > 0 ? maxS : 1));
           // instance positions are pool-local; nearly every pool sits at the
           // identity, but honour a translated pool object anyway.
           b.x = (minX + maxX) / 2 + o.position.x; b.z = (minZ + maxZ) / 2 + o.position.z;
           b.r = Math.hypot(maxX - minX, maxZ - minZ) / 2 + proto;
+          b.iv = o.instanceMatrix.version;     // the measurement's own receipt
         }
       }
       else if (o.isMesh && o.geometry) {
@@ -189,9 +257,12 @@
       }
       // a footprint wider than a few blocks (terrain tiles, the sea, road
       // webs) never culls anyway — skip it forever instead of re-testing.
+      // (world/detail_kit.js's dressing pools are ONE InstancedMesh per prop
+      // type for the WHOLE world by design, so they land here and stay drawn;
+      // that is correct — a world-spanning pool cannot be dropped wholesale.)
       if (b.r > 400) b.dynamic = true;
     } catch (e) { b.dynamic = true; }
-    bounds.set(o, b);
+    if (cacheable) bounds.set(o, b);
     return b;
   }
 
@@ -265,12 +336,88 @@
       const dx = b.x - P.x, dz = b.z - P.z;
       const d = Math.sqrt(dx * dx + dz * dz) - b.r;   // nearest possible point
       if (d > R) {
-        if (o.visible && !hidByUs.has(o)) { o.visible = false; hidByUs.add(o); }
+        // no `!hidByUs.has(o)` guard: if another system handed visibility back
+        // (a quality tier restoring the masonry veneer), the sweep must be able
+        // to re-take it, or the object stays drawn forever while the set still
+        // claims we own it. Re-adding to a Set is free.
+        if (o.visible) { o.visible = false; hidByUs.add(o); }
       } else if (d < R - 20) {
-        if (hidByUs.has(o)) { o.visible = true; hidByUs.delete(o); }
+        // userData.cullLocked = "another system wants this hidden at this
+        // quality tier" (city/buildings.js's masonry veneer is dropped whole at
+        // tier 0). Re-showing on approach would override that owner. Culling it
+        // is still fine — hidden is hidden.
+        if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); }
       }
     }
   });
+
+  /* ==================================================================
+     CBZ.farcullAudit() — WHAT IS EXEMPT FROM DISTANCE CULLING, AND WHY.
+
+     The ghost city was not a coordinate bug: it was a shell that culled
+     and a window that did not. Two numbers therefore have to be visible
+     together, or a "fix" that simply stops drawing something passes.
+
+       poolsExempt — pooled facade geometry (glass panes, interior sky/
+                     mullion strips, masonry veneer) that boundsFor marks
+                     dynamic, i.e. can never be dropped with the wall it
+                     is stuck to. MUST BE 0.
+       unproxied   — buildings with no distance-LOD box, so past the cull
+                     radius they leave nothing but their fittings. MUST
+                     BE 0.
+       shells/lots/proxied/pools are printed BESIDE them so neither can
+       be zeroed by building or drawing less.
+
+     Pure read: it measures through the same boundsFor the sweep uses, so
+     it cannot disagree with the live behaviour. NOT YET PINNED — whoever
+     runs it first writes the numbers into CLAUDE.md (do not repeat the
+     propUseAudit mistake of pinning a guess).
+  ================================================================== */
+  CBZ.farcullAudit = function () {
+    const A = CBZ.city && CBZ.city.arena;
+    const root = A && A.root;
+    const out = {
+      radius: CBZ.cityCullRadius || 0, hidden: hidByUs.size,
+      shells: 0, lots: 0, proxied: proxyRecords.length, unproxied: 0,
+      pools: 0, poolsExempt: 0, poolsIdle: 0, worldPools: 0,
+    };
+    if (!root) return out;
+    const shells = (root.userData && root.userData.shells) || [];
+    out.shells = shells.length;
+    let lots = (A.lots || []);
+    if (A.annex && Array.isArray(A.annex.lots)) lots = lots.concat(A.annex.lots);
+    out.lots = lots.length;
+    // A building is "proxied" when the live proxy carries its group — an
+    // identity test, not a coordinate one, so two towers on one spot can never
+    // cover for each other.
+    const have = new Set();
+    for (let i = 0; i < proxyRecords.length; i++) have.add(proxyRecords[i].grp);
+    const all = [];
+    for (let i = 0; i < lots.length; i++) if (lots[i] && lots[i].building) all.push(lots[i].building);
+    for (let i = 0; i < shells.length; i++) all.push(shells[i]);
+    const seenB = new Set();
+    for (let i = 0; i < all.length; i++) {
+      const b = all[i];
+      if (!b || b.park || !b.group || seenB.has(b.group)) continue;
+      if (!(+b.w > 1 && +b.d > 1 && +b.h > 1)) continue;
+      seenB.add(b.group);
+      if (!have.has(b.group)) out.unproxied++;
+    }
+    // pooled facade geometry: buildings.js tags every one of its pools.
+    // A pool at count 0 submits nothing (the warm night panes by day), so it
+    // cannot ghost anything and is reported apart rather than failing the gate.
+    const kids = root.children;
+    for (let i = 0; i < kids.length; i++) {
+      const o = kids[i];
+      if (!o || !o.isInstancedMesh) continue;
+      const ud = o.userData || {};
+      if (!(ud.glassPool || ud.masonryPool)) { if (!ud.dynamic) out.worldPools++; continue; }
+      if (!(o.count | 0)) { out.poolsIdle++; continue; }
+      out.pools++;
+      if (boundsFor(o).dynamic) out.poolsExempt++;
+    }
+    return out;
+  };
 
   // tier changed → new radius applies next sweep; if it WIDENED, groups past
   // the old radius but inside the new one re-show within a second via the

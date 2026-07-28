@@ -409,8 +409,20 @@
       root.add(im); masonryPools.push(im);
     });
     hookMasonryQuality();
-    if (CBZ.getQualityLevel && CBZ.getQualityLevel() <= 0)
-      for (let i = 0; i < masonryPools.length; i++) masonryPools[i].visible = false;
+    if (CBZ.getQualityLevel && CBZ.getQualityLevel() <= 0) masonryTier(0);
+  }
+  // ONE writer for the veneer's tier visibility. `cullLocked` tells
+  // core/farcull.js that somebody else owns this object's hidden state, so its
+  // re-show-on-approach pass leaves it alone — without it, walking up to a
+  // sector farcull had culled would resurrect the brickwork at tier 0.
+  function masonryTier(lvl) {
+    const off = lvl <= 0;
+    for (let i = 0; i < masonryPools.length; i++) {
+      const p = masonryPools[i];
+      p.userData.cullLocked = off;
+      if (off) p.visible = false;
+      else if (!p.visible) p.visible = true;
+    }
   }
   // Tier gate: at the lowest quality tier the veneer is pure decoration on top
   // of an already-correct flat wall, so drop it wholesale rather than paying
@@ -423,9 +435,7 @@
   function hookMasonryQuality() {
     if (_masonryQHooked || !CBZ.onQualityChange) return;
     _masonryQHooked = true;
-    CBZ.onQualityChange(function (lvl) {
-      for (let i = 0; i < masonryPools.length; i++) masonryPools[i].visible = lvl > 0;
-    });
+    CBZ.onQualityChange(function (lvl) { masonryTier(lvl); });
   }
 
   // PUBLIC: swap the ~15% "someone's home" panes between their day tint and
@@ -3707,7 +3717,7 @@
     const floorTops = [0.14];
     for (let L = 1; L <= storeys; L++) floorTops.push(L * FH);
 
-    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE,
+    const built = { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE,
       wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
       boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
@@ -3716,6 +3726,24 @@
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
+    // ---- THE SHELL REGISTRY (read by core/farcull.js's distance skyline) ----
+    // WHAT BUILDINGS EXIST had only ever been answerable through `arena.lots`,
+    // and a lot is an ECONOMY record — Zillow, shops, jobs, map POIs. Four
+    // builders raise real shells and sell nothing, so they wrote no lot:
+    // govcomplex.js's nine complexes, island_military.js, island_airport.js's
+    // terminal and biome_forest.js's cabins. They therefore had NO distance
+    // LOD box at all, and past the cull radius their walls were culled while
+    // their pooled panes, interior mullion strips and brick veneer — which
+    // live in sector pools on the CITY ROOT, not inside the shell — kept
+    // drawing: the see-through frame city on empty ground.
+    // Every shell in the game is minted by this one function, so this is the
+    // only place that can answer the question without anybody opting in.
+    // It hangs off the ROOT ON PURPOSE: a rebuilt world gets a new root and
+    // therefore a fresh list by construction, where a module-level array would
+    // hand the next world the previous one's coordinates — which is the actual
+    // ghost city this registry exists to prevent.
+    if (root && root.userData) (root.userData.shells || (root.userData.shells = [])).push(built);
+    return built;
   }
   // The connected island district reuses the exact same enterable shell and
   // stair rig, so every added tower behaves like the original city buildings.
