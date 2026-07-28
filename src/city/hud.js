@@ -42,6 +42,12 @@
   let membEl, membFillEl;   // gang-membership badge + its promotion sliver
   let relEl;                // single-ped relationship chip (aim/near target)
   let postWrap, postYouEl, postFoeEl, postFoeNameEl;  // melee posture bars
+  // Is THIS file's fallback speedometer the one currently on screen? Only ever
+  // true when city/carcluster.js is absent or switched off — see the render
+  // block below. Published so a probe can assert the owner's invariant
+  // (exactly one speed readout while driving) without reading the DOM.
+  let _speedShown = false;
+  CBZ.hudSpeedShown = function () { return _speedShown; };
   let dirty = true;
   // ---- MINECRAFT-STYLE HUD (owner ask: "inventory on screen and health and
   //      hunger just like Minecraft"). Hearts / drumsticks / armor-plate icon
@@ -1569,15 +1575,34 @@
     // it only touches the DOM when the held weapon's mag/reserve actually changed).
     refreshAmmoLive();
     pruneFeed(1 / 60);
-    // speedometer when driving (the engine ammo readout sits elsewhere)
+    // Speedometer when driving — THE FALLBACK ONE. (OWNER: "DRIVING A CAR
+    // THERES 2 SPEEDS SHOWN IN BOTTOM RIGHT FOR THE PLAYER.") city/carcluster.js
+    // draws a real instrument cluster in this exact corner (bottom:92px against
+    // this element's bottom:74px) with the posted limit, the gear and the fuel
+    // gauge — and on the sim unit vehicles.js:68 actually documents, 2.4 mph per
+    // unit, where the line below guesses 3. So when the cluster is up, this
+    // readout stands down and there is exactly ONE number on screen.
+    // It is a stand-down, not a deletion, on purpose: flip CAR_CLUSTER off (or
+    // load without carcluster.js at all) and this comes straight back, because
+    // carClusterSpeedOwned() is feature-detected and answers false. The touch
+    // racing dial (systems/touch_vehicle.js) counts as owned too — the cluster
+    // reports true through its handoff — and css/mobile.css's
+    // `body.tveh-on #cSpeed` remains as a second belt on that path.
     if (speedEl) {
       const car = P.driving && P._vehicle;
-      if (car && car.pos) {
+      // Two owners can outrank this readout, and BOTH are checked here rather
+      // than leaned on from CSS: the cluster, and — for the CAR_CLUSTER=false
+      // case, where the cluster answers false but the dial is still drawing —
+      // the touch racing dial itself.
+      const owned = !!((CBZ.carClusterSpeedOwned && CBZ.carClusterSpeedOwned()) ||
+                       (CBZ.touchVehicleActive && CBZ.touchVehicleActive()));
+      if (car && car.pos && !owned) {
         const mph = Math.round(Math.abs(car.v || 0) * 3);   // world units/s → rough mph (top coupe ~50u/s ≈ 150)
         speedEl.style.display = "block";
+        _speedShown = true;
         const sn = speedEl.querySelector("#cSpeedN");
         if (sn) { sn.textContent = mph; sn.style.color = mph > 100 ? "#ff9e6b" : "#e8ecf2"; }
-      } else speedEl.style.display = "none";
+      } else { speedEl.style.display = "none"; _speedShown = false; }
     }
     // population headcount + kill feed (throttled — they change steadily, not
     // every frame; ~4Hz keeps phones smooth)

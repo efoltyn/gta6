@@ -221,9 +221,40 @@
     }
   });
 
+  /* ---- ONE SPEED ON SCREEN --------------------------------------------------
+     OWNER: "DRIVING A CAR THERES 2 SPEEDS SHOWN IN BOTTOM RIGHT FOR THE PLAYER."
+
+     He is right, and it is worse than a duplicate: hud.js has carried its own
+     `↠ NN` speed readout since long before this file existed, anchored at
+     right / bottom:74px — eighteen pixels under this cluster's bottom:92px, in
+     the same corner, drawing at the same time. They also DISAGREED about the
+     unit (hud.js multiplies the sim unit by 3, this file by the 2.4 that
+     vehicles.js:68 documents), so the two numbers were never even the same
+     number. And because both elements are literally id="cSpeed", this file's
+     `#cSpeed{font-size:44px}` rule was styling hud.js's span too.
+
+     This is the ONE answer to "is a speed already on screen", so hud.js's
+     readout can STAND DOWN rather than be deleted — which keeps the revert
+     honest: turn CAR_CLUSTER off, or drop this file, and hud.js's speedometer
+     comes back by itself with nothing else told. It reports true for the touch
+     handoff as well: when systems/touch_vehicle.js's racing dial is live this
+     cluster hides its own digits, but the speed IS on screen, and hud.js must
+     stay down. Degrade-safe on the caller's side by feature detection. */
+  CBZ.carClusterSpeedOwned = function () {
+    if (!on()) return false;
+    const g = CBZ.game;
+    if (!g || g.mode !== "city") return false;
+    return !!clusterCar();
+  };
+
   /* Whether the limit query is still this file's stopgap or the roads domain
      has taken it over. Should read false once roads land. */
   CBZ.clusterAudit = function () {
-    return { limitIsFallback: !!(CBZ.roadSpeedLimit && CBZ.roadSpeedLimit._fallback) };
+    return {
+      limitIsFallback: !!(CBZ.roadSpeedLimit && CBZ.roadSpeedLimit._fallback),
+      // how many speed readouts claim the driving corner right now. The whole
+      // point of this wave: it may be 1 or 0, never 2.
+      speedReadouts: (CBZ.carClusterSpeedOwned() ? 1 : 0) + (CBZ.hudSpeedShown && CBZ.hudSpeedShown() ? 1 : 0),
+    };
   };
 })();

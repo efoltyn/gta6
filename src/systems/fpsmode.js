@@ -1554,17 +1554,67 @@
   // aim_dossier's person filter skips it instead of pinning UI to a proxy.
   const occPilot = { kind: "pilot", occupant: true, name: "Pilot", pos: new THREE.Vector3() };
 
+  // ---- AIM ASSIST IS FOR TARGETS, AND A CHILD IS NOT ONE -------------------
+  // systems/childsafe.js already refuses every DAMAGE path to a child (its
+  // wraps plus the hp seal). Its own OPEN census names the one surface it
+  // structurally could not reach from outside this file, verbatim:
+  //   "src/systems/fpsmode.js findActorHit — module-private (not on CBZ), so it
+  //    cannot be wrapped. A child stays an acquirable bullet target and still
+  //    receives head/body aim-assist radii; the DAMAGE is refused (the seal)
+  //    but the crosshair still snaps."
+  //
+  // That combination is the worst possible state and it is exactly what the
+  // owner is seeing: the gun PULLS onto a kid, the reticle goes hot, and then
+  // nothing happens. Three separate surfaces do the pulling; all three close
+  // on this one predicate:
+  //   • the ASSIST SPHERES below — the inflated head/body radii that turn a
+  //     near-miss into a hit. A protected actor is tested against the weapon's
+  //     RAW silhouette instead, so nothing is magnetic about them.
+  //   • the SOFT AIM-LOCK (lockValid, further down) — the one that physically
+  //     writes cam.yaw / cam.pitch. A child is never a candidate, and a lock
+  //     already held releases the moment its record reads protected.
+  //   • the HOT reticle — a crosshair that goes red over somebody no weapon in
+  //     the game can hurt is the HUD telling a lie.
+  //
+  // WHAT IS DELIBERATELY *NOT* CHANGED — and this is why the census's suggested
+  // `continue` was not the fix: the bullet stays PHYSICAL. The actor is still
+  // scanned, so a round still stops on a real body, the impact still lands, and
+  // childsafe's veto still flinches and flees them — which is that file's own
+  // stated design ("The shot still cracks, the impact FX still land"). Skipping
+  // the actor outright would make every child a ghost you fire through, and
+  // would be a change to damage/occlusion, which this is not.
+  //
+  // Never cached: crowd pooling recycles ped records, so the predicate is
+  // re-asked every test (childsafe.js's obligation 2). Feature-detected, so
+  // this file is unchanged when childsafe.js is absent.
+  // One-line revert: CBZ.CONFIG.AIM_CHILD_NO_ASSIST = false.
+  if (CBZ.CONFIG.AIM_CHILD_NO_ASSIST == null) CBZ.CONFIG.AIM_CHILD_NO_ASSIST = true;
+  let aimChildSkips = 0;                       // telemetry: assists denied (childSafeStats' sibling)
+  function childUnaided(a) {
+    if (CBZ.CONFIG.AIM_CHILD_NO_ASSIST === false) return false;
+    return !!(CBZ.isProtectedActor && CBZ.isProtectedActor(a));
+  }
+  CBZ.aimAssistAudit = function () {
+    return { on: CBZ.CONFIG.AIM_CHILD_NO_ASSIST !== false, childSafe: !!CBZ.isProtectedActor, denied: aimChildSkips };
+  };
+
   function findActorHit(origin, dir, maxT, w) {
     // generous-but-fair aim assist (bigger from the third-person shoulder cam)
     const headAssist = shoulderActive() ? 0.22 : (fps.active ? 0.13 : 0);
     const bodyAssist = shoulderActive() ? 0.40 : (fps.active ? 0.16 : 0);
-    const hr = (w.headRadius || 0.33) + headAssist;
-    const br = (w.bodyRadius || BODY_R) + bodyAssist;
+    const hrRaw = (w.headRadius || 0.33), brRaw = (w.bodyRadius || BODY_R);
+    const hrA = hrRaw + headAssist;            // the ASSISTED radii — everyone but a child
+    const brA = brRaw + bodyAssist;
     let bestActor = null, bestDist = maxT, bestHead = false, bestOcc = false;
     const scan = function (list) {
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
         if (!a || a.dead || a.ko > 0 || a.escaped || !a.group) continue;
+        // per-actor radii: a protected actor gets the bare silhouette, so only
+        // a literal ray through the real body registers. (See the block above.)
+        const bare = childUnaided(a);
+        if (bare) aimChildSkips++;
+        const hr = bare ? hrRaw : hrA, br = bare ? brRaw : brA;
         if (a.group.visible === false) {
           // SEATED OCCUPANT (hidden body, live vehicle): only LIVE riders whose
           // record links the actual car object. (AIM_VEHICLE_OCCUPANTS)
@@ -1625,7 +1675,12 @@
     // not just the few promoted peds). It competes on distance → real occlusion.
     let crowdIdx = -1;
     if (CBZ.game.mode === "city" && CBZ.cityCrowdRayHit) {
-      const ch = CBZ.cityCrowdRayHit(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist, hr, br);
+      // The instanced crowd is index-addressed and this call takes ONE pair of
+      // radii for the whole sweep, so per-agent radii are not expressible from
+      // here — the assisted pair stands. childsafe.js's OPEN census already
+      // carries `crowd.js cityCrowdRayHit` as its own separate item, whose
+      // stated close is a `cityCrowdChild(i)` seam inside crowd.js.
+      const ch = CBZ.cityCrowdRayHit(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist, hrA, brA);
       if (ch) { bestActor = null; crowdIdx = ch.i; bestDist = ch.dist; bestHead = ch.head; bestOcc = false; }
     }
     if (!bestActor && crowdIdx < 0) return null;
@@ -3086,7 +3141,14 @@
   let lockTarget = null, lockScanT = 0;
   const _lockEye = new THREE.Vector3(), _lockDir = new THREE.Vector3(), _lockRay = new THREE.Vector3();
   const _lockCands = [];
-  function lockValid(a) { return a && !a.dead && (a.ko || 0) <= 0 && !a.escaped && a.group && a.group.visible !== false; }
+  // A CHILD IS NEVER A LOCK CANDIDATE (AIM_CHILD_NO_ASSIST). This is the
+  // surface that literally moves the camera onto a target, so it is the one the
+  // owner means by "the crosshair snaps to them". Putting the test in
+  // lockValid — not in pickLockActor — closes BOTH ends at once: the acquire
+  // never picks a child, AND applyAimLock re-runs lockValid on the held target
+  // every frame, so a lock releases instantly if a record becomes protected
+  // (crowd pooling recycles ped records; nothing here may be cached).
+  function lockValid(a) { return a && !a.dead && (a.ko || 0) <= 0 && !a.escaped && a.group && a.group.visible !== false && !childUnaided(a); }
   function pickLockActor(eye, fwd, range, coneCos) {
     _lockCands.length = 0;
     const consider = function (list) {
@@ -3623,7 +3685,13 @@
       }
       reticleState.blocked = muzzleBlocked;
       reticleState.target = reticleHitKind(muzzleHit || cameraHit);
-      cross.classList.toggle("hot", !muzzleBlocked && (!!aim || reticleDamageable(muzzleHit)));
+      // A HOT reticle over somebody no weapon in this game can hurt is the HUD
+      // promising a shot that childsafe.js will refuse (AIM_CHILD_NO_ASSIST).
+      // Tested on BOTH the acquire and the real muzzle hit, because either can
+      // be the protected actor; childUnaided(null) is false, so nothing else
+      // changes and the "blocked"/"dry"/"locked" states are untouched.
+      const aimProtected = childUnaided(aim && aim.actor) || childUnaided(muzzleHit && muzzleHit.actor);
+      cross.classList.toggle("hot", !muzzleBlocked && !aimProtected && (!!aim || reticleDamageable(muzzleHit)));
       cross.classList.toggle("blocked", muzzleBlocked);
       cross.classList.toggle("dry", armed() && fps.ammo <= 0);
       cross.classList.toggle("locked", !!lockTarget);   // soft aim-lock is tracking someone

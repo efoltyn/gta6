@@ -189,6 +189,12 @@
     else { r *= 1 + amt; g *= 1 + amt; b *= 1 + amt; }
     return "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
   }
+  // a TRANSLUCENT wash of a hex — what a woven pattern needs, because the
+  // colour a weave shows is the thread OVER the ground, and two washes that
+  // cross must darken each other on their own rather than by a third literal.
+  function rgba(n, a) {
+    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+  }
 
   // ---- per-row painter: draws in 0-1 coords of a column region --------------
   function rowPainter(ctx, rowName) {
@@ -251,7 +257,18 @@
   // the jacket gap/cap. line color is a quiet tone of the body.
   // a generic source-atop pattern stamper that works through a rowPainter's
   // rect() (so it respects the row/column atlas regions automatically).
-  function patternRow(R, ctx, bodyHex, kind) {
+  // THE PATTERN CLASSES OF THIS WARDROBE, AND THE ONE THAT IS BANNED.
+  // Everything here is built from RECT — a stripe, a grid, a check. That is not
+  // an accident of taste, it is the rule (owner, verbatim: "GET THIS OUTFIT WITH
+  // DUMB DOTS ON IT LITTLE CIRCLES GET THIS SHIT OUT OF THE GAME"). A SCATTERED
+  // MOTIF FIELD — a loop that stamps many small discs at pseudo-random positions
+  // — is banned from this file. It read as speckle, not fabric, at every
+  // distance the game actually shows a person at. `PAINT.sundress`'s old
+  // `flowers()` was the only one that ever existed and it is deleted; the
+  // remaining ~40 `dot()` calls in this file are each ONE hand-placed button,
+  // stud, badge or motif on a known coordinate, which is a different thing.
+  // If you want a new print, add a kind HERE and draw it with rect().
+  function patternRow(R, ctx, bodyHex, kind, accentHex) {
     if (kind === "solid" || !kind) return;
     ctx.save(); ctx.globalCompositeOperation = "source-atop";
     const light = tone(bodyHex, 0.22), dark = tone(bodyHex, -0.18);
@@ -269,6 +286,20 @@
           for (let x = 0; x < 1; x += 0.1)
             R.rect(col, x, y, 0.05, 0.05, ((x * 10 + y * 10) & 1) ? dark : light);
         for (let x = 0.06; x < 1; x += 0.18) R.rect(col, x, 0, 0.01, 1, dark);  // faint windowpane over-check
+      }
+    } else if (kind === "gingham") {
+      // GINGHAM — the summer-dress check, and the replacement for the deleted
+      // dot field. A real gingham is ONE dyed thread run in both directions
+      // over a white ground, so it has exactly three tones and you never pick
+      // the third: the warp wash, the weft wash, and the squares where they
+      // CROSS, which darken by themselves because the alpha composites twice.
+      // Half-cell bands so cloth and check are equal width, which is what makes
+      // the check read as a check rather than as a grid drawn on cloth.
+      const cell = 0.125, half = cell / 2;                 // ~8px of a 64px column ≈ 11 cm of real dress
+      const wash = rgba(accentHex != null ? accentHex : bodyHex, 0.42);
+      for (const col of ["front", "back", "side"]) {
+        for (let x = 0; x < 0.999; x += cell) R.rect(col, x, 0, half, 1, wash);  // warp
+        for (let y = 0; y < 0.999; y += cell) R.rect(col, 0, y, 1, half, wash);  // weft
       }
     }
     ctx.restore();
@@ -1035,29 +1066,49 @@
     return { torso: 1, arms: 1, legs: 1 };
   };
 
-  // SUNDRESS — light dress + a FLORAL dot pattern (deterministic blot field).
+  // SUNDRESS — a light summer dress in a woven GINGHAM check.
+  //
+  // WHAT USED TO BE HERE, AND WHY IT IS GONE. OWNER, verbatim: "GET THIS OUTFIT
+  // WITH DUMB DOTS ON IT LITTLE CIRCLES GET THIS SHIT OUT OF THE GAME." This
+  // painter ran a private `flowers()` blot field: an LCG scattering 14 discs
+  // across each torso column and 12 across each skirt column, every disc a
+  // coloured ring with a cream centre. That is 78 arcs on one dress, and the
+  // ring-plus-centre construction is exactly the "dark rings + pink dots on
+  // torso and legs" in the screenshot — the accent hue came straight off
+  // `c.collar`, which `outfits.js`'s SUNDRESS_HUES fills with a rose, so the
+  // whitish-pink variant was the loudest of the seven.
+  //
+  // It was the ONLY randomised motif field in the entire wardrobe. It is
+  // DELETED, not flagged: a flag would keep a live code path that can put a
+  // scattered circle on a person, and the owner asked for the class to leave
+  // the game. `PAINT.soldier`'s camo scatters RECTS (that is camouflage and it
+  // stays); every other `dot()` in this file is one hand-placed button, stud,
+  // badge or chest motif at a known coordinate.
+  //
+  // The replacement is the shared `patternRow` stamper's `gingham` kind, so the
+  // print belongs to the wardrobe rather than to this one garment and the next
+  // checked shirt costs one argument. Rect-only by construction, and cheaper:
+  // 24 fillRects a row against 78 arcs, on a canvas that is built once and
+  // cached per colour key.
   PAINT.sundress = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0xf0d9a0, bc = hx(body);
-    const flo1 = (c && c.collar != null) ? c.collar : 0xd86a8a, flo2 = tone(body, -0.3);
-    const T = P.T, A = P.A, L = P.L;
-    let seed = (body & 0xffff) ^ 0x5a5a;
-    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-    function flowers(R, n) {
-      R.fill(bc);
-      for (const col of ["front", "back", "side"]) for (let i = 0; i < n; i++) {
-        const x = rnd(), y = rnd(), r = 0.025 + rnd() * 0.02, fc = rnd() < 0.5 ? hx(flo1) : hx(flo2);
-        R.dot(col, x, y, r, fc); R.dot(col, x, y, r * 0.4, "#fff7e2");
-      }
-    }
-    flowers(T, 14);
+    // the SECOND hue of the dress. It was the flower colour; it is now the
+    // thread the check is woven from, so the seven SUNDRESS_HUES pairs still
+    // produce seven visibly different dresses off exactly the same records.
+    const accent = (c && c.collar != null) ? c.collar : 0xd86a8a;
+    const T = P.T, A = P.A, L = P.L, ctx = P.ctx;
+    const trim = tone(body, -0.22);
+    T.fill(bc);
+    if (ctx) patternRow(T, ctx, body, "gingham", accent);
     T.poly("front", [[0.34, 0], [0.5, 0.16], [0.66, 0]], tone(body, -0.2)); // neckline
     T.rect("front", 0.26, 0, 0.1, 0.16, bc); T.rect("front", 0.64, 0, 0.1, 0.16, bc); // straps gap
     // the tie sits on the waist BOX seam (row y ~0.675), not mid-ribcage
-    T.rect("front", 0.3, 0.66, 0.4, 0.035, tone(body, -0.22));    // waist tie
-    T.rect("side", 0, 0.66, 1, 0.035, tone(body, -0.22)); T.rect("back", 0, 0.66, 1, 0.035, tone(body, -0.22));
+    T.rect("front", 0.3, 0.66, 0.4, 0.035, trim);                 // waist tie
+    T.rect("side", 0, 0.66, 1, 0.035, trim); T.rect("back", 0, 0.66, 1, 0.035, trim);
     T.shade();
-    A.fill(bc); A.shade();
-    flowers(L, 12);
+    A.fill(bc); A.shade();                                        // plain shoulder/strap column, as before
+    L.fill(bc);
+    if (ctx) patternRow(L, ctx, body, "gingham", accent);         // the skirt carries the same check
     for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.92, 1, 0.05, tone(body, -0.2)); // hem
     L.shade();
     return { torso: 1, arms: 1, legs: 1 };
@@ -1785,7 +1836,10 @@
    ["dress_white", 0xe9e7df, "White Dress"]].forEach(function (d) {
     paintedLook(d[0], "dress", d[2], 9, d[1], { colors: { torso: d[1] } });
   });
-  paintedLook("sundress",     "sundress",     "Floral Sundress", 6,  0xf0d9a0, { colors: { torso: 0xf0d9a0, collar: 0xd86a8a } });
+  // "Floral" was the name of the deleted dot field — see PAINT.sundress. The
+  // print is a gingham check now, so the label says so (economy.js:264 carries
+  // the same string for the shop row and was renamed with it).
+  paintedLook("sundress",     "sundress",     "Gingham Sundress", 6, 0xf0d9a0, { colors: { torso: 0xf0d9a0, collar: 0xd86a8a } });
   paintedLook("sundress_blue","sundress",     "Blue Sundress",   6,  0xbcd6ea, { colors: { torso: 0xbcd6ea, collar: 0x3a6aa0 } });
   // BLOUSES — the everyday womenswear the rack was missing entirely (the only
   // female-read garments on sale were dresses).

@@ -44,9 +44,40 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  const REACH = 3.8;          // baseline interaction reach (same as the old system)
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  /* ---- INTERACT_REACH_V2 — DISCOVERABILITY -------------------------------
+     OWNER: "SHOW INTERACTION OPTION POPUPS MORE OFTEN."
+
+     The card was rare for two separate, unrelated reasons, and only one of
+     them was the distance.
+
+     (1) THE REACH. 3.8 m is the ONE number the whole fabric hangs off — it is
+     not local to this file. `interact.js:27` and `roleverbs.js:65` both read
+     `I.REACH` at load and hand it to every source they own: the ped scan, the
+     nearest car, the stash, the bin, the mailbox, the seat, the bed, the
+     wanted poster, the street object. So a person is 1.9 m of body plus arms
+     from their own centre and the anchor of a counter or a hydrant sits inside
+     its collider — 3.8 m centre-to-centre is barely past touching distance,
+     and the card only ever appeared when you had already walked THROUGH the
+     thing. 5.2 m is a stride and a half of standoff and it moves every one of
+     those sources in one assignment, because they all read this constant.
+
+     (2) THE CONE, which is the more interesting half. See `scoreOf` below —
+     a facing test is the right way to disambiguate PEOPLE, who walk into your
+     view, and the wrong way to pick a PLACE, which cannot.
+
+     Flag default ON; set CBZ.CONFIG.INTERACT_REACH_V2 = false for the exact
+     previous behaviour (3.8 m, hard cone), which is a one-line revert of both
+     halves at once. Nothing downstream needs telling either way: they read
+     CBZ.interactions.REACH. */
+  if (CBZ.CONFIG.INTERACT_REACH_V2 == null) CBZ.CONFIG.INTERACT_REACH_V2 = true;
+  const REACH_V2 = CBZ.CONFIG.INTERACT_REACH_V2 !== false;
+  const REACH = REACH_V2 ? 5.2 : 3.8;   // baseline interaction reach, shared by every source
   const HOLD_T = 0.38;        // seconds a key is down before the HOLD verb fires
   const HYSTERESIS = 0.75;    // a rival candidate must beat the current one by this
+  // How much of the facing bonus a STATIONARY candidate (a zone) is granted
+  // without having to be looked at. See scoreOf. 0 = the old hard cone.
+  const ZONE_CONE_FLOOR = REACH_V2 ? 0.5 : 0;
   const KEYS = ["e", "i", "j", "k", "l"];   // E = primary, IJKL = the established slots
 
   // OWNER DIRECTION: a RIDE never gets a popup. "AIRLINER — HIJACKABLE / Board
@@ -404,6 +435,19 @@
   }
 
   // ---- targeting --------------------------------------------------------------
+  // THE CONE IS A TEST FOR PEOPLE, NOT FOR PLACES (INTERACT_REACH_V2).
+  // A ped can walk into your view, so which one you MEAN is genuinely ambiguous
+  // and the camera ray is how you say it — that is why the facing weight exists
+  // and it stays exactly as it was for anything with a body. A ZONE cannot walk
+  // anywhere: a counter, a rope, a pump, a fishing spot, a betting window is
+  // where it has always been, and you selected it by WALKING TO IT. Scoring it
+  // as if it had to earn your gaze meant the shop counter you were standing at
+  // silently lost its card the moment you turned your head to look down the
+  // aisle — which is a large share of "the popup feels rare".
+  // So a zone keeps the cone as a PREFERENCE, not a gate: half the weight is
+  // granted for being where you are standing, half is still earned by looking.
+  // Facing a zone dead-on still scores exactly what it scored before, so this
+  // can only ever ADD cards, never re-order two things you are looking at.
   function scoreOf(c, fx, fz, px, pz) {
     let s = (c.base || 0) + (REACH - Math.min(REACH, c.d)) * 0.6;
     const t = c.t;
@@ -411,7 +455,9 @@
     const tz = t && t.pos ? t.pos.z : (t && t.z != null ? t.z : null);
     if (tx != null && c.d > 0.3) {
       const dx = tx - px, dz = tz - pz, d = Math.hypot(dx, dz) || 1;
-      s += Math.max(0, (dx / d) * fx + (dz / d) * fz) * 1.5;   // looking at it = priority
+      let face = Math.max(0, (dx / d) * fx + (dz / d) * fz);   // looking at it = priority
+      if (c.zone && ZONE_CONE_FLOOR > 0) face = ZONE_CONE_FLOOR + (1 - ZONE_CONE_FLOOR) * face;
+      s += face * 1.5;
     }
     if (c.gunpoint) s += 100;   // a drawn gun on someone overrides everything
     return s;
@@ -657,4 +703,24 @@
   // tiny standalone query for cross-module use (charpanel's [I] guard)
   CBZ.cityInteractHasSlot = hasSlot;
   CBZ.cityInteractActive = function () { return !!(current && currentRows && currentRows.length); };
+
+  // ---- ratchet / probe surface --------------------------------------------
+  // The owner's ask ("show interaction option popups MORE OFTEN") is a
+  // measurable claim, so publish the numbers that decide it rather than
+  // leaving them locked in a closure. `candidates` is what the last detection
+  // pass actually found in reach — walk up to a shop counter, a parked car, a
+  // bench, a hydrant and it should be non-zero well before you are touching
+  // the thing; `showing` is whether a card is up right now. `reach` and
+  // `coneFloor` prove which side of the flag the build is on.
+  CBZ.interactAudit = function () {
+    let zoneCands = 0;
+    for (let i = 0; i < cands.length; i++) if (cands[i] && cands[i].zone) zoneCands++;
+    return {
+      v2: REACH_V2, reach: REACH, coneFloor: ZONE_CONE_FLOOR, hysteresis: HYSTERESIS,
+      sources: sources.length, zones: zones.length,
+      candidates: cands.length, zoneCandidates: zoneCands,
+      showing: !!(current && currentRows && currentRows.length),
+      kind: current ? current.kind : null,
+    };
+  };
 })();

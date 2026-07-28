@@ -261,7 +261,7 @@
   clothing("dress_navy",    "outer", 9,  250, "Navy Dress",      0x1c2438);
   clothing("dress_emerald", "outer", 10, 340, "Emerald Dress",   0x1d5a44);
   clothing("dress_white",   "outer", 10, 380, "White Dress",     0xe9e7df);
-  clothing("sundress",      "outer", 6,  140, "Floral Sundress", 0xf0d9a0);
+  clothing("sundress",      "outer", 6,  140, "Gingham Sundress", 0xf0d9a0);
   clothing("sundress_blue", "outer", 6,  140, "Blue Sundress",   0xbcd6ea);
 
   // ---- JEWELRY (composable; renders via bling.js real meshes) --------------

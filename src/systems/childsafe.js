@@ -689,12 +689,8 @@
       "directly, by design (\"the host's word is law\"). A client-side veto here " +
       "would desync. CLOSE BY: enforcing this on the HOST's damage path, not the " +
       "client's.",
-    // --- targeting, not damage, but the owner asked for non-targetable ---
-    "src/systems/fpsmode.js:1400 findActorHit — module-private (not on CBZ), so " +
-      "it cannot be wrapped. A child stays an acquirable bullet target and still " +
-      "receives head/body aim-assist radii; the DAMAGE is refused (the seal) but " +
-      "the crosshair still snaps. CLOSE BY: one guarded line in its scan(): " +
-      "`if (CBZ.isProtectedActor && CBZ.isProtectedActor(a)) continue;`",
+    // (fpsmode.js findActorHit / the aim-assist stack was here and is CLOSED —
+    //  see the CLOSED list below. 7 -> 6.)
     // --- the feed's name-only entry ---
     "src/city/killfeed.js:112 cityLogDeath(name, cause) — takes a NAME STRING. A " +
       "caller that logs a child's death without passing the record cannot be " +
@@ -715,6 +711,19 @@
     "CBZ.gore(opts.actor) — explicit-victim gore",
     "CBZ.lockonFireTarget / lockonMissileSeek — guided-weapon lock",
     "CBZ.predatorHunt / predatorSeize — the stalk and the grab",
+    // Closed from the OTHER side, which is the pattern worth copying when a
+    // path is module-private: fpsmode.js consumes CBZ.isProtectedActor itself
+    // rather than this file trying to reach in. Under AIM_CHILD_NO_ASSIST a
+    // protected actor gets NO inflated aim-assist radii (raw silhouette only),
+    // is never a soft aim-lock candidate (lockValid — the surface that writes
+    // cam.yaw/pitch, and it also RELEASES a held lock), and never lights the
+    // hot reticle. The old OPEN entry proposed `continue` in the scan; that was
+    // rejected on purpose — it would make children ghosts you fire THROUGH,
+    // and this file's own doctrine is that the shot still cracks and the impact
+    // still lands. So the bullet stays physical and only the ASSISTANCE is
+    // withdrawn. Audit: CBZ.aimAssistAudit().
+    "fpsmode.js findActorHit + lockValid + hot reticle — the aim-assist/crosshair " +
+      "magnetism stack (targeting, not damage)",
   ];
 
   // THE NUMBER. A plain integer so the math gate can pin it in one line.
