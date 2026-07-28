@@ -636,6 +636,12 @@
   // vertical bands — the SAFER wall, the pit wall, hoardings, roof fascias —
   // want along=U, because a sponsor board reads horizontally. Without this a
   // sponsor band renders rotated 90 degrees and tiles down the wall's height.
+  // o.uFlip: MIRROR the along-track texture axis. A swept vertical band is read
+  // from exactly ONE of its two faces, and on the face whose normal looks along
+  // -n the track tangent runs to the reader's LEFT — so artwork laid on in +t
+  // order comes out backwards. This is the second half of the upside-down
+  // sponsor fault; the derivation and the ONE caller that needs it live in
+  // speedway_structures.js `board()`. Nothing else should ever set it.
   let _root = null;
   function strip(prof, o) {
     o = o || {};
@@ -661,8 +667,9 @@
         pos[p] = f.x + f.nx * u; pos[p + 1] = y; pos[p + 2] = f.z + f.nz * u;
         const q = (i * n + j) * 2;
         const uvRow = e.uv == null ? (n > 1 ? j / (n - 1) : 0) : e.uv;
-        if (o.swapUV) { uvs[q] = w * vTiles; uvs[q + 1] = uvRow; }
-        else { uvs[q] = uvRow; uvs[q + 1] = w * vTiles; }
+        const along = (o.uFlip ? (1 - w) : w) * vTiles;
+        if (o.swapUV) { uvs[q] = along; uvs[q + 1] = uvRow; }
+        else { uvs[q] = uvRow; uvs[q + 1] = along; }
       }
     }
     const idx = [];
@@ -752,6 +759,23 @@
     const GARAGE_FRONT = -38.5, GARAGE_DEPTH = 15;
     const GATE_T = 0.5, GATE_HALF = 6.5 / L;         // service gate in the outer wall
     const TURN1 = [0.12, 0.42], TURN2 = [0.58, 0.88];
+
+    // THE CONTRACT HANDED TO speedway_structures.js. Declared HERE, above the
+    // barriers, because the SAFER wall and the inner retaining walls are
+    // sponsor BOARDS and now go through the same `SU.board` solve the fascias
+    // and hoardings do — they were the first two runs to be built and the last
+    // two anyone would have thought to look at.
+    const S = {
+      root: root, frame: trackFrame, heightAt: heightAtTU, bankAt: bankAtT,
+      strip: strip, solid: solidAt, solidBox: solidBox, solidChain: solidChain,
+      L: L, CX: CX, CZ: CZ, HALFW: HALFW, APRON_W: APRON_W, TRACK_W: TRACK_W,
+      SHOULDER_W: SHOULDER_W, SKIRT_W: SKIRT_W, WALL_H: WALL_H, C: C,
+      rng: rng, label: CBZ.makeLabelSprite ? function (s, o) { return CBZ.makeLabelSprite(s, o); } : null,
+    };
+    // one line back to the pre-fix bands if the geometry ever needs comparing
+    const BOARDS = (CBZ.CONFIG.SPEEDWAY_BOARDS_V2 !== false && SU && SU.board) ? SU.board : null;
+    // the board + prop ledgers are per-build; clear them before anything draws
+    if (SU && SU.buildReset) SU.buildReset();
 
     function flat(geo, m, y, opts) {
       opts = opts || {};
@@ -1161,9 +1185,22 @@
       const wallMat = sponsorTex
         ? new THREE.MeshLambertMaterial({ color: 0xffffff, map: sponsorTex })
         : mat(C.SAFER);
-      // one swept run per arc, so each gate is a REAL hole in the wall
+      // one swept run per arc, so each gate is a REAL hole in the wall.
+      // The band on it read RIGHT-TO-LEFT for the wall's whole life — a swept
+      // vertical strip lays its texture along +t, and on the face that looks
+      // back at the track +t runs to the reader's LEFT. Both of this wall's
+      // faces have an audience (the drivers on one side, the grandstands on
+      // the other), so both are printed and each gets its own U direction.
       for (const arc of ARCS) {
-        strip(wallProf, { t0: arc[0], t1: arc[1], closed: false, step: 2.4, vLen: 12, swapUV: true, mat: wallMat, name: "speedway-safer-wall" });
+        if (BOARDS) {
+          BOARDS(S, {
+            t0: arc[0], t1: arc[1], u: WALL_U - 0.45, y0: 0, h: WALL_H, abs: false,
+            face: -1, thick: 0.9, back: "read", capColor: C.SAFER,
+            salt: 0, vLen: 12, step: 2.4, name: "speedway-safer-wall",
+          });
+        } else {
+          strip(wallProf, { t0: arc[0], t1: arc[1], closed: false, step: 2.4, vLen: 12, swapUV: true, mat: wallMat, name: "speedway-safer-wall" });
+        }
         solidChain(arc[0], arc[1], WALL_U, 1.1, 0, null, 3.0);
       }
       // hinged gate leaves parked open against the posts, both sides of each gap
@@ -1258,7 +1295,18 @@
         ? new THREE.MeshLambertMaterial({ color: 0xffffff, map: SU.tex.sponsorBand(6, 96) })
         : mat(C.CONCRETE);
       for (const seg of [TURN1, TURN2]) {
-        strip(innerProf, { t0: seg[0], t1: seg[1], closed: false, step: 2.6, vLen: 12, swapUV: true, mat: innerMat, name: "speedway-inner-wall" });
+        if (BOARDS) {
+          // this one is read from OUTBOARD: the track sits at u = 0, the wall
+          // at u = -20, so the reader is on the larger-u side. board() would
+          // derive exactly that from -sign(u); it is stated for the record.
+          BOARDS(S, {
+            t0: seg[0], t1: seg[1], u: APRON_EDGE + 0.35, y0: 0, h: 0.95, abs: false,
+            face: 1, thick: 0.7, back: "read", capColor: C.CONCRETE,
+            salt: 6, vLen: 12, step: 2.6, name: "speedway-inner-wall",
+          });
+        } else {
+          strip(innerProf, { t0: seg[0], t1: seg[1], closed: false, step: 2.6, vLen: 12, swapUV: true, mat: innerMat, name: "speedway-inner-wall" });
+        }
         solidChain(seg[0], seg[1], APRON_EDGE, 0.9, 0, function (t) { return heightAtTU(t, APRON_EDGE) + 0.95; }, 3.0);
       }
     }
@@ -1324,10 +1372,17 @@
       const signMat = new THREE.MeshLambertMaterial({ map: signTex, emissive: 0xffffff, emissiveIntensity: 0.28, emissiveMap: signTex, side: THREE.DoubleSide });
       const span = Math.abs(uOut - uIn);
       const midU = (uIn + uOut) / 2;
+      // THE SIGN SPANS THE BEAM, IT DOES NOT LIE ALONG THE TRACK. `box(...,
+      // w, h, d, yaw)` puts WIDTH on local +X and DEPTH on local +Z, and this
+      // file's own basis (surfMatrix) says local +Z is the TANGENT — so the
+      // extra +PI/2 turned a 40 m sign meant to hang across the carriageway
+      // into a 40 m billboard lying down the straight, 0.2 m thin edge-on to
+      // the cars that are supposed to read it. Same fault class as the
+      // upside-down boards: a frame written by hand instead of derived.
       U.box(grp, signMat, fG.x + fG.nx * midU, BEAM + 3.4, fG.z + fG.nz * midU,
-        span * 0.86, 2.4, 0.2, fG.heading + Math.PI / 2);
+        span * 0.86, 2.4, 0.2, fG.heading);
       U.box(grp, mat(0x22282f), fG.x + fG.nx * midU, BEAM + 3.4, fG.z + fG.nz * midU,
-        span * 0.9, 2.9, 0.34, fG.heading + Math.PI / 2);
+        span * 0.9, 2.9, 0.34, fG.heading);
       // THE LIGHT RIG: five columns, two lamps each, hung under the beam over
       // the racing surface. Kept addressable so the countdown can drive them.
       GANTRY.lamps.length = 0;
@@ -1358,10 +1413,14 @@
           U.box(grp, steel, fx + fG.tx * s * 1.5, 2.9, fz + fG.tz * s * 1.5, 0.12, 1.2, 0.12, fG.heading);
         }
         U.box(grp, acc, fx, 3.6, fz, 3.8, 0.16, 3.0, fG.heading);
-        // the flags themselves on a rack
+        // THE RACK THE FLAGS HANG FROM. Four coloured cards floated 0.37 m over
+        // the starter's deck between two uprights with nothing joining them —
+        // the same fault as the marshal posts. One rail turns four floating
+        // props into a starter's flag rack.
+        U.box(grp, steel, fx, 3.18, fz, 0.1, 0.1, 3.0, fG.heading);
         const fl = [0x101317, 0xf0c419, 0x2ba24a, 0xc23a36];
         for (let i = 0; i < fl.length; i++) {
-          U.box(grp, mat(fl[i]), fx + fG.tx * (i - 1.5) * 0.6, 2.95, fz + fG.tz * (i - 1.5) * 0.6,
+          U.box(grp, mat(fl[i]), fx + fG.tx * (i - 1.5) * 0.6, 2.93, fz + fG.tz * (i - 1.5) * 0.6,
             0.5, 0.4, 0.05, fG.heading);
         }
         solidAt(fx, fz, 3.8, 3.2, 2.4);
@@ -1375,14 +1434,6 @@
     // ====================================================================
     let grandstandAudience = [];
     if (SU) {
-      const S = {
-        root: root, frame: trackFrame, heightAt: heightAtTU, bankAt: bankAtT,
-        strip: strip, solid: solidAt, solidBox: solidBox, solidChain: solidChain,
-        L: L, CX: CX, CZ: CZ, HALFW: HALFW, APRON_W: APRON_W, TRACK_W: TRACK_W,
-        SHOULDER_W: SHOULDER_W, SKIRT_W: SKIRT_W, WALL_H: WALL_H, C: C,
-        rng: rng, label: CBZ.makeLabelSprite ? function (s, o) { return CBZ.makeLabelSprite(s, o); } : null,
-      };
-
       // --- MAIN GRANDSTAND: curved, raked, roofed, facing the pits ---
       grandstandAudience = SU.grandstand(S, {
         t0: -0.085, t1: 0.085, rows: 22, uBase: 30, plinth: 1.7,
@@ -1686,10 +1737,30 @@
         const BL = parkBlocks();
         let widest = 0;
         for (let i = 0; i < BL.length; i++) widest = Math.max(widest, BL[i].slots.length);
+        // THE TWO NEW RATCHETS.
+        //  hoardingsFlipped — every sponsor board face in the park, re-tested
+        //    from its SHIPPED position/uv buffers: V must rise with world
+        //    height and U must rise toward the reader's right. PIN AT 0. It is
+        //    reported with `hoardings` (the face count) beside it so a "fix"
+        //    that simply stops drawing boards cannot pass.
+        //  propsCut / propsKept — the campus's own decoration ledger.
+        //    `propsCut` is what THIS build refused to draw (the vomitory boxes
+        //    with no opening behind them, the surplus stair cores, three of
+        //    every four marshal flag cards), so the purge is a number and not
+        //    a claim. `propsFloating` is the honesty check on the re-seats and
+        //    is pinned at 0 — a prop whose own arithmetic puts it in the air.
+        const SS = CBZ.speedwayStructures;
+        const BA = (SS && SS.boardAudit) ? SS.boardAudit() : null;
+        const PA = (SS && SS.propAudit) ? SS.propAudit() : null;
         return {
           parked: parked, bays: SITE ? SITE.bays : 0, staff: staff, posts: posts,
           keepouts: keepouts, roadRecords: roads,
           gates: SITE ? SITE.gates : 0, fencePanels: SITE ? SITE.fencePanels : 0,
+          hoardingsFlipped: BA ? BA.flipped : -1,
+          hoardings: BA ? BA.faces : 0,
+          propsCut: PA ? PA.propsCut : 0,
+          propsKept: PA ? PA.propsKept : 0,
+          propsFloating: PA ? PA.propsFloating : -1,
           // the lot is three blocks now, and a block that REFUSED (the campus
           // did not hold it) is invisible in a bay total — so the count is
           // reported beside it. 3 means all three stood up.
@@ -1943,6 +2014,11 @@
     const goldMat = (CBZ.cmat || CBZ.mat)(0xe0b53a, { emissive: 0xe0b53a, ei: 0.25 });
     const baseMat = (CBZ.cmat || CBZ.mat)(0x2a2d33);
     const ixMax = b.w / 2 - 2.5;
+    // world offset by parent-chain sum: the build-time matrices are stale, and
+    // shell/campus/root are all unrotated, so a position walk is exact (same
+    // trick fillShowroom uses to place its real cars).
+    let ox = 0, oz = 0;
+    for (let o = b.group; o; o = o.parent) { ox += o.position.x; oz += o.position.z; }
     for (let fl = 0; fl < (b.storeys || 2); fl++) {
       const fy = fl * FH + 0.15;
       for (let i = 0; i < 5; i++) {
@@ -1952,6 +2028,9 @@
         ped.position.set(x, fy + 0.55, z); b.group.add(ped);
         const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.2, 0.9, 10), goldMat);
         cup.position.set(x, fy + 1.55, z); b.group.add(cup);
+        // a plinth you can walk through is a hologram, and this hall is
+        // enterable — the showroom next door is where you steal the cars.
+        if (fl === 0) solidAt(ox + x, oz + z, 1.2, 1.2, fy + 2.0);
       }
     }
   }

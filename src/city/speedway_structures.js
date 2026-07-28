@@ -112,6 +112,37 @@
   }
 
   // ------------------------------------------------------------------ //
+  //  THE PROP LEDGER — "every prop is interactable or gone."            //
+  //                                                                     //
+  //  OWNER: "TONS OF DUMB PROPS, I HATE DUMB PROPS." A prop earns its   //
+  //  place by reading intentional AND standing on something, or it is   //
+  //  cut. `propKeep(n, bottomY, supportY)` is where a builder DECLARES  //
+  //  what the thing it just drew is standing on — and it is not a       //
+  //  formality: `floating` counts the ones whose own arithmetic says    //
+  //  they are in the air, so a re-seat that misses by a decimal shows   //
+  //  up as a number rather than as a screenshot months later.           //
+  //  `propCut(n)` records what this build REFUSED to draw, so the purge //
+  //  is measurable instead of being a claim in a commit message.        //
+  // ------------------------------------------------------------------ //
+  const PROPS = { kept: 0, cut: 0, floating: 0 };
+  function propKeep(n, bottomY, supportY) {
+    PROPS.kept += (n == null ? 1 : n);
+    if (bottomY != null && supportY != null && bottomY - supportY > 0.06) PROPS.floating++;
+  }
+  function propCut(n) { PROPS.cut += (n == null ? 1 : n); }
+
+  // THE ONE TYRE. The trackside tyre walls and the garage bays' spare sets are
+  // both stacks of this, so a circuit tyre is one geometry and one decision.
+  let _tyreGeo = null;
+  function tyreGeom() {
+    if (!_tyreGeo) {
+      _tyreGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.34, 10);
+      _tyreGeo._shared = true;
+    }
+    return _tyreGeo;
+  }
+
+  // ------------------------------------------------------------------ //
   //  PROCEDURAL TEXTURES (deterministic — fixed arithmetic sequences,   //
   //  never Math.random; see world/materials.js concreteTex for the      //
   //  house pattern this copies)                                         //
@@ -378,6 +409,16 @@
     const stairMat = cmat(C.CONCRETE), voidMat = cmat(0x14181d);
     const stairIM = makeIM(stairMat, Math.ceil(COLS / AISLE_EVERY) * ROWS + 8, { noShadow: true });
     const vomIM = makeIM(voidMat, 12);
+    // A VOMITORY IS A HOLE, AND A HOLE IS ONLY DRAWN WHERE THERE IS ONE.
+    // The dark box went in at EVERY aisle while the seats it is supposed to be
+    // the gap in were only skipped on every THIRD aisle — and the seat skip is
+    // additionally gated on P.voms, which the box ignored entirely. So the two
+    // small stands (voms:false) each carried ~8 near-black boxes standing in
+    // the middle of their own seating with the seats still around them, and the
+    // main stand carried 6 more than it had openings. That is the owner's "lone
+    // gray box sitting mid-concourse on the stand". ONE condition now decides
+    // both, and it is the seat loop's own condition, so they cannot disagree.
+    const hasVom = function (c) { return P.voms !== false && (c % (AISLE_EVERY * 3)) < 5; };
     for (let c = 0; c < COLS; c += AISLE_EVERY) {
       if (c < 2 || c > COLS - 3) continue;
       const t = t0 + (t1 - t0) * (c + 1) / COLS;
@@ -389,12 +430,17 @@
         const x2 = f.x + f.nx * u + f.tx * SEAT_W, z2 = f.z + f.nz * u + f.tz * SEAT_W;
         pushStrut(stairIM, x1, y, z1, x2, y, z2, 0.26);
       }
-      // vomitory: a dark tunnel mouth under the rake
+      if (!hasVom(c)) { propCut(1); continue; }
+      // vomitory: the dark tunnel mouth, plus the concrete head over it that
+      // turns a box on the treads into an OPENING you can see is an opening.
       const uv = uBase + ROWS * 0.34 * TREAD;
       const vy = plinth + ROWS * 0.34 * RISE + 1.1;
-      pushStrut(vomIM,
-        f.x + f.nx * (uv - 1.2), vy, f.z + f.nz * (uv - 1.2),
-        f.x + f.nx * (uv + 2.6), vy, f.z + f.nz * (uv + 2.6), 2.2);
+      const ax = f.x + f.nx * (uv - 1.2), az = f.z + f.nz * (uv - 1.2);
+      const bx = f.x + f.nx * (uv + 2.6), bz = f.z + f.nz * (uv + 2.6);
+      pushStrut(vomIM, ax, vy, az, bx, vy, bz, 2.2);
+      box(grp, stairMat, (ax + bx) / 2, vy + 1.33, (az + bz) / 2,
+        4.2, 0.46, 2.6, f.heading);                                     // the head
+      propKeep(1, vy - 1.1, plinth + ROWS * 0.34 * RISE);
     }
     finishIM(grp, stairIM);
     finishIM(grp, vomIM);
@@ -416,12 +462,34 @@
       }),
       name: "grandstand-press",
     });
-    for (const te of [t0, (t0 + t1) / 2, t1]) {
-      const f = S.frame(te);
-      const ux = uBack + 3.2;
-      box(grp, cmat(C.STAND), f.x + f.nx * ux, (topY + 1.6) / 2, f.z + f.nz * ux,
-        5.2, topY + 1.6, 6.4, f.heading);
-      S.solid(f.x + f.nx * ux, f.z + f.nz * ux, 6.4, 7.4, topY + 1.6);
+    // STAIR CORES. Three featureless grey slabs per stand, at t0 / middle / t1
+    // whatever the stand's length, is scatter — and a blank box is a
+    // placeholder wearing a name. The count comes off the stand's own ARC (one
+    // core per ~60 m of seating — real stand egress spacing — floored at two
+    // because a bowl needs a way out at both ends, and capped at three so the
+    // rule can only ever thin), and each core now reads as the building it
+    // claims to be: a shaft with a doorway at grade you can actually walk to,
+    // a glazed stair light up the concourse face, and a parapet that oversails.
+    const cores = Math.max(2, Math.min(3, Math.round(arc / 60)));
+    if (cores < 3) propCut(3 - cores);
+    const coreCap = cmat(0x2a3038), coreDark = cmat(0x1d2229);
+    const coreGlass = new THREE.MeshLambertMaterial({
+      color: 0x9ed4ea, emissive: 0x14313f, emissiveIntensity: 0.3,
+      transparent: true, opacity: 0.55, depthWrite: false,
+    });
+    for (let ci = 0; ci < cores; ci++) {
+      const f = S.frame(t0 + (t1 - t0) * ci / (cores - 1));
+      const ux = uBack + 3.2, CH = topY + 1.6;
+      const px = f.x + f.nx * ux, pz = f.z + f.nz * ux;
+      box(grp, cmat(C.STAND), px, CH / 2, pz, 5.2, CH, 6.4, f.heading);
+      // the concourse sees the OUTBOARD face; that is where the door goes
+      const uf = ux + 2.6;
+      const fx = f.x + f.nx * uf, fz = f.z + f.nz * uf;
+      box(grp, coreDark, fx, 1.25, fz, 0.26, 2.5, 2.0, f.heading);
+      box(grp, coreGlass, fx, 1.4 + (CH - 3.4) / 2, fz, 0.18, CH - 3.4, 1.1, f.heading);
+      box(grp, coreCap, px, CH + 0.28, pz, 5.9, 0.55, 7.1, f.heading);
+      S.solid(px, pz, 6.4, 7.4, CH);
+      propKeep(1, 0, 0);
     }
 
     // ---- 5. cantilever roof + truss ----
@@ -434,14 +502,18 @@
       t0: t0, t1: t1, closed: false, step: 4.0, parent: grp, vLen: 12,
       mat: cmat(0x3a4048), name: "grandstand-roof", doubleSide: true,
     });
-    // fascia band on the leading edge — the biggest advertising surface here
-    S.strip([
-      { u: roofFrontU, dy: yFront - 1.5, abs: true, uv: 1 },
-      { u: roofFrontU, dy: yFront, abs: true, uv: 0 },
-    ], {
-      t0: t0, t1: t1, closed: false, step: 3.0, parent: grp, vLen: 16, swapUV: true,
-      mat: new THREE.MeshLambertMaterial({ map: sponsorBand(P.fasciaSalt || 1, 96), side: THREE.DoubleSide }),
-      name: "grandstand-fascia",
+    // fascia band on the leading edge — the biggest advertising surface here,
+    // and the one the owner photographed upside down. It declared uv:1 on its
+    // BOTTOM row and uv:0 on its top (every other band in the park is the other
+    // way round), which flipped it vertically; the un-mirrored U axis then
+    // flipped it horizontally, and the two together are a 180-degree rotation.
+    // board() answers both from the geometry: a stand is outboard (u > 0), so
+    // its fascia faces the racing line and nothing here states a uv at all.
+    board(S, {
+      t0: t0, t1: t1, u: roofFrontU, y0: yFront - 1.5, h: 1.5, abs: true,
+      salt: P.fasciaSalt || 1, vLen: 16, thick: 0.22, back: "panel",
+      backColor: 0x3a4048, capColor: 0x3a4048,
+      parent: grp, name: "grandstand-fascia",
     });
     // truss: rafters + back columns + a Warren web between chords
     const steelMat = cmat(C.STEEL);
@@ -549,14 +621,14 @@
     ], { t0: t0, t1: t1, closed: false, step: 3.0, parent: grp, mat: cmat(0xf0c419), name: "pit-fastlane" });
 
     // ---- pit wall (sponsor-faced) + timing stands on top ----
-    S.strip([
-      { u: WALL_U + 0.35, dy: Y, abs: true, uv: 0 },
-      { u: WALL_U + 0.35, dy: Y + 1.05, abs: true, uv: 1 },
-      { u: WALL_U - 0.35, dy: Y + 1.05, abs: true, uv: 1 },
-      { u: WALL_U - 0.35, dy: Y, abs: true, uv: 0 },
-    ], {
-      t0: t0, t1: t1, closed: false, step: 2.6, parent: grp, vLen: 12, swapUV: true,
-      mat: new THREE.MeshLambertMaterial({ map: sponsorBand(4, 96) }), name: "pit-wall",
+    // A pit wall has TWO audiences — the grandstand across the track and the
+    // crew standing behind it — so it is the one board in the park printed on
+    // both faces, and each face gets its own U direction. The track is at u = 0,
+    // outboard of a wall at u = -26, so the read face is the +u one.
+    board(S, {
+      t0: t0, t1: t1, u: WALL_U + 0.35, y0: Y, h: 1.05, abs: true, face: 1,
+      thick: 0.7, back: "read", backMap: sponsorBand(8, 96), capColor: 0xb7bcc2,
+      salt: 4, vLen: 12, step: 2.6, parent: grp, name: "pit-wall",
     });
     // pit wall colliders (a chain of AABBs — cars bounce off it like a wall)
     S.solidChain(t0, t1, WALL_U, 0.9, 0, 1.25, 3.0);
@@ -566,12 +638,16 @@
     for (let i = 0; i < BOXES; i++) {
       const t = t0 + (t1 - t0) * (i + 0.5) / BOXES;
       const f = S.frame(t);
+      // same frame note as the garage bays: w is ACROSS the lane, d ALONG it.
+      // A timing stand is long along the pit lane and shallow across it, and a
+      // monitor bank and a team board are thin plates FACING the lane.
       const sx = f.x + f.nx * (WALL_U + 0.9), sz = f.z + f.nz * (WALL_U + 0.9);
-      box(grp, standMat, sx, Y + 1.9, sz, 3.4, 0.18, 1.5, f.heading);      // gantry deck
+      box(grp, standMat, sx, Y + 1.9, sz, 1.5, 0.18, 3.4, f.heading);      // gantry deck
       box(grp, standMat, sx, Y + 1.0, sz, 0.2, 1.8, 0.2, f.heading);       // leg
       const mx = f.x + f.nx * (WALL_U + 0.35), mz = f.z + f.nz * (WALL_U + 0.35);
-      box(grp, monMat, mx, Y + 2.5, mz, 2.6, 0.9, 0.1, f.heading);         // monitor bank
-      box(grp, cmat(PANEL_BG[i % PANEL_BG.length]), sx, Y + 2.55, sz, 3.4, 1.0, 0.12, f.heading);
+      box(grp, monMat, mx, Y + 2.5, mz, 0.1, 0.9, 2.6, f.heading);         // monitor bank
+      box(grp, cmat(PANEL_BG[i % PANEL_BG.length]), sx, Y + 2.55, sz, 0.12, 1.0, 3.4, f.heading);
+      propKeep(2, Y + 2.05, Y + 2.05);
     }
 
     // ---- garage block: 12 bays with roller doors + roof terrace ----
@@ -606,6 +682,19 @@
     ], { t0: t0, t1: t1, closed: false, step: 3.0, parent: grp, mat: concrete, name: "garage-back" });
     S.solidChain(t0, t1, GF - GD + 0.3, 1.0, 0, GH, 3.2);
     // the bays themselves: pier, roller door, lintel, bay number, tool bench
+    //
+    // FRAME NOTE, and it is the same fault class as the upside-down boards.
+    // `box(..., w, h, d, yaw)` builds BoxGeometry(w, h, d) and yaws it, so with
+    // yaw = f.heading the WIDTH lies along local +X and the DEPTH along local
+    // +Z — and island_speedway.js's own published basis (surfMatrix: "+Z along
+    // the tangent, +X = Y x Z") says local +Z is ALONG the track and local +X
+    // is ACROSS it. Every plate below was authored the other way round: a
+    // roller door written (bayLen - 1.4, dh, 0.16) came out 11.6 m deep ACROSS
+    // the frontage and 0.16 m wide along it — twelve fins standing through the
+    // garage front and out into the pit lane, instead of twelve doors closing
+    // twelve bays. The numbers were right; only the two slots were swapped.
+    const tyreIM = new THREE.InstancedMesh(tyreGeom(), cmat(0x1b1d20), BOXES * 4);
+    tyreIM.count = 0; tyreIM.castShadow = false; tyreIM.receiveShadow = true;
     for (let i = 0; i < BOXES; i++) {
       const ta = t0 + (t1 - t0) * i / BOXES, tb = t0 + (t1 - t0) * (i + 1) / BOXES;
       const tm = (ta + tb) / 2;
@@ -613,23 +702,39 @@
       const bayLen = Math.abs(tb - ta) * S.L;
       // pier between bays
       box(grp, concrete, fa.x + fa.nx * (GF - 0.4), Y + GH / 2, fa.z + fa.nz * (GF - 0.4),
-        1.1, GH, 1.6, fa.heading);
+        1.6, GH, 1.1, fa.heading);
       // roller door, part-raised so the bay reads as OPEN and working
       const raise = 2.2 + ((i * 7) % 5) * 0.55;
       const dh = Math.max(0.6, GH - 1.0 - raise);
       box(grp, doorM, fm.x + fm.nx * (GF - 0.15), Y + GH - 0.5 - dh / 2, fm.z + fm.nz * (GF - 0.15),
-        bayLen - 1.4, dh, 0.16, fm.heading);
+        0.16, dh, bayLen - 1.4, fm.heading);
       // lintel + illuminated bay number strip
       box(grp, trimM, fm.x + fm.nx * (GF - 0.15), Y + GH - 0.35, fm.z + fm.nz * (GF - 0.15),
-        bayLen - 1.0, 0.7, 0.34, fm.heading);
+        0.34, 0.7, bayLen - 1.0, fm.heading);
       box(grp, warm, fm.x + fm.nx * (GF - 0.02), Y + GH - 0.35, fm.z + fm.nz * (GF - 0.02),
-        bayLen * 0.42, 0.34, 0.1, fm.heading);
-      // inside the bay: a bench and a wheel rack so it isn't a hollow box
-      box(grp, cmat(0x2f353d), fm.x + fm.nx * (GF - GD + 1.6), Y + 0.45, fm.z + fm.nz * (GF - GD + 1.6),
-        bayLen - 2.2, 0.9, 0.7, fm.heading);
-      box(grp, cmat(0x1a1d21), fm.x + fm.nx * (GF - GD + 3.0), Y + 0.35, fm.z + fm.nz * (GF - GD + 3.0),
-        1.4, 0.7, 1.4, fm.heading);
+        0.1, 0.34, bayLen * 0.42, fm.heading);
+      // inside the bay: a tool bench you cannot walk through, and the bay's
+      // spare set — REAL tyres, out of the same one geometry the trackside
+      // tyre walls are stacked from, instead of the featureless black cube
+      // that used to stand in for a wheel rack. All 12 bays are ONE draw.
+      const bx = fm.x + fm.nx * (GF - GD + 1.6), bz = fm.z + fm.nz * (GF - GD + 1.6);
+      box(grp, cmat(0x2f353d), bx, Y + 0.45, bz, 0.7, 0.9, bayLen - 2.2, fm.heading);
+      const bex = Math.abs(fm.tx) * (bayLen - 2.2) / 2 + Math.abs(fm.nx) * 0.35;
+      const bez = Math.abs(fm.tz) * (bayLen - 2.2) / 2 + Math.abs(fm.nz) * 0.35;
+      S.solidBox(bx - bex, bx + bex, bz - bez, bz + bez, 0, Y + 0.9);
+      propKeep(1, Y, Y);
+      const wx = fm.x + fm.nx * (GF - GD + 3.4), wz = fm.z + fm.nz * (GF - GD + 3.4);
+      for (let k = 0; k < 4; k++) {
+        if (tyreIM.count >= tyreIM.instanceMatrix.count) break;
+        _Q.identity(); _SC.set(1, 1, 1);
+        _V.set(wx, Y + 0.18 + k * 0.34, wz);
+        _M.compose(_V, _Q, _SC);
+        tyreIM.setMatrixAt(tyreIM.count++, _M);
+      }
+      S.solid(wx, wz, 1.5, 1.5, Y + 1.4);
+      propKeep(1, Y, Y);
     }
+    if (tyreIM.count) { tyreIM.instanceMatrix.needsUpdate = true; grp.add(tyreIM); }
     if (S.label) {
       const fm = S.frame((t0 + t1) / 2);
       const lab = S.label("PIT LANE", { color: "#ffd451" });
@@ -802,20 +907,163 @@
   }
 
   // ================================================================== //
-  //  TRACKSIDE ADVERTISING HOARDINGS (swept ribbons, 1 draw each)      //
+  //  A BOARD READS FROM ITS OWN FACE — the ONE sponsor panel builder.  //
+  //                                                                     //
+  //  OWNER: "the racing stadium has these UPSIDE DOWN BRANDS."           //
+  //                                                                     //
+  //  It was two independent arithmetic faults on one surface, and the    //
+  //  cure is to stop letting a caller state either answer by hand.       //
+  //                                                                     //
+  //  (1) THE VERTICAL AXIS IS DECIDED BY WORLD HEIGHT, NOT ROW ORDER.    //
+  //      THREE.CanvasTexture inherits flipY = true, so canvas row 0 —    //
+  //      the top of the artwork, where the ascenders are — lands at      //
+  //      V = 1 and the last canvas row at V = 0. A board therefore reads //
+  //      upright IFF its LOWEST vertex carries V = 0 and its highest     //
+  //      V = 1. That is an inequality, not a convention, and every band  //
+  //      in the park honoured it except the grandstand roof fascia,      //
+  //      which declared uv:1 on its BOTTOM row and uv:0 on its top.      //
+  //                                                                     //
+  //  (2) THE HORIZONTAL AXIS IS DECIDED BY WHICH FACE YOU READ FROM.     //
+  //      strip() puts the along-track parameter w on U when swapUV is    //
+  //      set. For a two-row vertical profile the front-face normal is    //
+  //      (b-a) x (c-a) = y_hat x T = (tz, 0, -tx) = -n_hat when the rows //
+  //      run bottom->top, and +n_hat when they run top->bottom. A reader //
+  //      on that face has forward F = -normal and right R = F x y_hat,   //
+  //      which works out to R = -T for the first case and R = +T for the //
+  //      second. Text must run along the reader's RIGHT, so U has to be  //
+  //      mirrored (1 - w) exactly when the presented face looks along    //
+  //      -n_hat. Nothing in this file did that, so EVERY sponsor band in //
+  //      the park read right-to-left; combined with (1) the roof fascia  //
+  //      came out rotated a full 180 degrees, which is what the owner    //
+  //      photographed (the panel sequence he read off the screenshot     //
+  //      steps -5 through SPONSORS, the exact reverse of the +5 the      //
+  //      canvas paints).                                                 //
+  //                                                                     //
+  //  So a caller states a POSITION and an OUTWARD DIRECTION and gets an  //
+  //  upright board; it never writes a uv or a row order again. `face` is //
+  //  +1 when the reader stands OUTBOARD (larger u) and -1 when the       //
+  //  reader stands INBOARD, and it defaults to -sign(u) because a        //
+  //  trackside board faces the racing line. Cost: a one-sided read face  //
+  //  is the same ONE draw the old DoubleSide quad was; a real board with //
+  //  a back and a capping rail is three, and it is three because a       //
+  //  single strip cannot carry two opposite U directions without         //
+  //  shearing the cap between them.                                      //
+  // ================================================================== //
+  const _boards = [];                       // {mesh, face} — audited from BUFFERS
+
+  function boardFace(S, o, u, face, m, name) {
+    const lo = o.y0 == null ? 0.05 : o.y0;
+    const hi = lo + (o.h == null ? 1.15 : o.h);
+    const abs = o.abs !== false;
+    const rows = face > 0
+      ? [{ u: u, dy: hi, abs: abs, uv: 1 }, { u: u, dy: lo, abs: abs, uv: 0 }]
+      : [{ u: u, dy: lo, abs: abs, uv: 0 }, { u: u, dy: hi, abs: abs, uv: 1 }];
+    const mesh = S.strip(rows, {
+      t0: o.t0, t1: o.t1, closed: !!o.closed, step: o.step || 3.0,
+      parent: o.parent, vLen: o.vLen || 11, swapUV: true, uFlip: face < 0,
+      mat: m, name: name, cast: !!o.cast,
+    });
+    if (mesh) _boards.push({ mesh: mesh, face: face });
+    return mesh;
+  }
+
+  /* board(S, o)
+       o.t0,o.t1,o.closed,o.step   the run along the racing line
+       o.u                         across-track offset of the READ face
+       o.y0,o.h,o.abs              foot + height (abs:false = above the surface)
+       o.face                      +1 read from outboard, -1 from inboard;
+                                   default -sign(u) — it faces the racing line
+       o.salt / o.map / o.vLen     the artwork
+       o.thick                     board depth; the back face sits at
+                                   u - face*thick
+       o.back                      "read" (printed both sides) | "panel" (plain
+                                   backing) | "none" (a single DoubleSide quad)
+       o.capColor / o.cap:false    the capping rail across the top
+     Returns {group, faces}. */
+  function board(S, o) {
+    const face = o.face == null ? (o.u > 0 ? -1 : 1) : (o.face < 0 ? -1 : 1);
+    const tex = o.map || sponsorBand(o.salt == null ? 1 : o.salt, o.texH || 96);
+    const back = o.back == null ? "panel" : o.back;
+    const faces = [];
+    if (back === "none") {
+      faces.push(boardFace(S, o, o.u, face,
+        new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }),
+        (o.name || "board") + "-face"));
+      return { group: o.parent, faces: faces };
+    }
+    const thick = o.thick == null ? 0.12 : o.thick;
+    const uBack = o.u - face * thick;
+    faces.push(boardFace(S, o, o.u, face, new THREE.MeshLambertMaterial({ map: tex }),
+      (o.name || "board") + "-face"));
+    faces.push(boardFace(S, o, uBack, -face,
+      back === "read"
+        ? new THREE.MeshLambertMaterial({ map: o.backMap || tex })
+        : cmat(o.backColor == null ? 0x3c424a : o.backColor),
+      (o.name || "board") + "-back"));
+    if (o.cap !== false) {
+      // the capping rail. Rows must run inner -> outer (increasing u): that is
+      // the order strip() turns into an UPWARD-facing triangle.
+      const lo = o.y0 == null ? 0.05 : o.y0;
+      const hi = lo + (o.h == null ? 1.15 : o.h);
+      const abs = o.abs !== false;
+      const uA = Math.min(o.u, uBack), uB = Math.max(o.u, uBack);
+      S.strip([{ u: uA, dy: hi, abs: abs }, { u: uB, dy: hi, abs: abs }], {
+        t0: o.t0, t1: o.t1, closed: !!o.closed, step: o.step || 3.0,
+        parent: o.parent, mat: cmat(o.capColor == null ? 0xb9c0c8 : o.capColor),
+        name: (o.name || "board") + "-cap",
+      });
+    }
+    return { group: o.parent, faces: faces };
+  }
+
+  /* A WORLD REBUILD MAKES A NEW PARK. Both ledgers are per-BUILD, so the
+     landmass builder clears them before it draws anything — otherwise a second
+     world would report the first one's boards (whose buffers are gone) and
+     double its prop counts. Called once, from where the S contract is declared. */
+  function buildReset() {
+    _boards.length = 0;
+    PROPS.kept = 0; PROPS.cut = 0; PROPS.floating = 0;
+  }
+
+  /* THE RATCHET. Not a counter a build loop kept: it re-reads the POSITION and
+     UV buffers of every board actually in the scene and re-runs the two tests
+     the helper is built on, so a board that stops being upright fails even if
+     it was drawn by code that believes it is fine. `flipped` is pinned at 0. */
+  function boardAudit() {
+    let flipped = 0, faces = 0, vFlip = 0, uFlip = 0;
+    for (let i = 0; i < _boards.length; i++) {
+      const rec = _boards[i], g = rec.mesh && rec.mesh.geometry;
+      if (!g || !g.attributes || !g.attributes.uv || !g.attributes.position) continue;
+      const p = g.attributes.position, uv = g.attributes.uv;
+      if (p.count < 4) continue;
+      faces++;
+      // vertices 0,1 are the two profile rows at the first along-track sample;
+      // vertex 2 is row 0 again at the NEXT sample (strip lays out i*n + j).
+      let bad = 0;
+      if ((p.getY(1) - p.getY(0)) * (uv.getY(1) - uv.getY(0)) <= 0) { vFlip++; bad = 1; }
+      // U must rise along the reader's right: +T for an outboard reader, -T for
+      // an inboard one. Vertex 0 -> 2 walks +T by construction.
+      if ((uv.getX(2) - uv.getX(0)) * (rec.face > 0 ? 1 : -1) <= 0) { uFlip++; bad = 1; }
+      flipped += bad;
+    }
+    return { boards: _boards.length, faces: faces, flipped: flipped,
+             vFlipped: vFlip, uFlipped: uFlip };
+  }
+
+  // ================================================================== //
+  //  TRACKSIDE ADVERTISING HOARDINGS — every run through board().      //
   // ================================================================== //
   function hoardings(S, runs) {
     const grp = new THREE.Group(); grp.name = "speedway-hoardings";
     S.root.add(grp);
     for (let i = 0; i < runs.length; i++) {
       const r = runs[i];
-      S.strip([
-        { u: r.u, dy: r.y0 == null ? 0.05 : r.y0, abs: r.abs !== false, uv: 0 },
-        { u: r.u, dy: (r.y0 == null ? 0.05 : r.y0) + (r.h || 1.15), abs: r.abs !== false, uv: 1 },
-      ], {
-        t0: r.t0, t1: r.t1, closed: !!r.closed, step: 3.0, parent: grp, vLen: r.vLen || 11, swapUV: true,
-        mat: new THREE.MeshLambertMaterial({ map: sponsorBand(r.salt == null ? i + 2 : r.salt, 96), side: THREE.DoubleSide }),
-        name: "hoarding-" + i,
+      board(S, {
+        t0: r.t0, t1: r.t1, closed: !!r.closed, u: r.u,
+        y0: r.y0 == null ? 0.05 : r.y0, h: r.h || 1.15, abs: r.abs !== false,
+        face: r.face, salt: r.salt == null ? i + 2 : r.salt, vLen: r.vLen || 11,
+        thick: 0.14, back: "read", capColor: 0x2d3238,
+        parent: grp, name: "hoarding-" + i,
       });
     }
     return grp;
@@ -830,23 +1078,34 @@
     const steel = cmat(0x8d949c), deck = cmat(0xc8ced5), roofM = cmat(0xc23a36),
       lightM = cmat(0xffd451, { emissive: 0xffd451, ei: 0.7 });
     const flagCols = [0xf2f4f7, 0xf0c419, 0xc23a36, 0x2ba24a, 0x2e5a8a];
+    // FOUR COLOURED CARDS HANGING IN MID-AIR IS NOT A FLAG RACK. They floated
+    // 0.56 m over the deck with nothing holding them up and nothing to wave
+    // them, which is the exact shape of a filler prop. A marshal post shows ONE
+    // flag, on a staff socketed into its own deck and canted out over the rail
+    // toward the oncoming cars — one intentional object instead of four.
+    const staffIM = makeIM(steel, spots.length + 4, { noShadow: true });
     for (let i = 0; i < spots.length; i++) {
       const sp = spots[i];
       const x = sp.x, z = sp.z, a = sp.heading || 0;
+      // local +X = -n_hat, i.e. INBOARD, toward the racing surface.
+      const ix = Math.cos(a), iz = -Math.sin(a);
       box(grp, cmat(0x6f757d), x, 0.35, z, 3.6, 0.7, 3.0, a);       // platform base
       box(grp, deck, x, 0.75, z, 3.4, 0.16, 2.8, a);
       for (const s of [-1, 1]) {
-        box(grp, steel, x + Math.cos(a) * s * 1.5, 1.9, z - Math.sin(a) * s * 1.5, 0.12, 2.3, 0.12, a);
+        box(grp, steel, x + ix * s * 1.5, 1.9, z + iz * s * 1.5, 0.12, 2.3, 0.12, a);
       }
       box(grp, roofM, x, 3.1, z, 3.8, 0.18, 3.2, a);
-      box(grp, lightM, x + Math.sin(a) * 1.4, 3.4, z + Math.cos(a) * 1.4, 0.5, 0.32, 0.32, a);
-      // the flag rack
-      for (let f = 0; f < 4; f++) {
-        const fx = x + Math.cos(a) * (f - 1.5) * 0.55, fz = z - Math.sin(a) * (f - 1.5) * 0.55;
-        box(grp, cmat(flagCols[(i + f) % flagCols.length]), fx, 1.55, fz, 0.42, 0.32, 0.05, a);
-      }
+      box(grp, lightM, x + Math.sin(a) * 1.4, 3.35, z + Math.cos(a) * 1.4, 0.5, 0.32, 0.32, a);
+      propKeep(1, 3.19, 3.19);
+      // the flag: a real staff off the deck, and the colour on its tip
+      pushStrut(staffIM, x + ix * 1.1, 0.83, z + iz * 1.1,
+        x + ix * 2.4, 2.70, z + iz * 2.4, 0.07);
+      box(grp, cmat(flagCols[i % flagCols.length]),
+        x + ix * 2.15, 2.42, z + iz * 2.15, 0.55, 0.42, 0.05, a);
+      propKeep(1, 0.83, 0.83); propCut(3);
       S.solidBox(x - 2, x + 2, z - 2, z + 2, 0, 3.3);
     }
+    finishIM(grp, staffIM);
     return grp;
   }
 
@@ -854,11 +1113,9 @@
   function tyreStacks(S, stacks) {
     const grp = new THREE.Group(); grp.name = "speedway-tyre-stacks";
     S.root.add(grp);
-    const tyreGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.34, 10);
-    tyreGeo._shared = true;
     let total = 0;
     for (const st of stacks) total += (st.n || 1) * (st.h || 3);
-    const im = new THREE.InstancedMesh(tyreGeo, cmat(0x1b1d20), total + 8);
+    const im = new THREE.InstancedMesh(tyreGeom(), cmat(0x1b1d20), total + 8);
     im.count = 0; im.castShadow = false; im.receiveShadow = true;
     const bandIM = makeIM(cmat(0xe8edf3), Math.ceil(total / 3) + 8, { noShadow: true });
     for (const st of stacks) {
@@ -939,7 +1196,9 @@
       if (i % 2 === 0) {
         box(grp, cmat(0xbfc6cd), x + 3.4, 3.3, z + 1.0, 3.6, 0.12, 9.0);
         for (const oz of [-3.6, 3.6]) box(grp, fenceM, x + 5.0, 1.65, z + 1.0 + oz, 0.1, 3.3, 0.1);
+        propKeep(1, 0, 0);
       }
+      propKeep(1, 0, 0);
       S.solidBox(x - 1.8, x + 1.8, z - 11, z + 7, 0, 4.0);
     }
 
@@ -950,9 +1209,16 @@
       const z = z1 - D * 0.16;
       box(grp, hospM, x, 1.8, z, 12.0, 3.4, 6.4);
       box(grp, roofM, x, 3.7, z, 12.8, 0.35, 7.2);
-      box(grp, cmat(PANEL_BG[(i * 5 + 1) % PANEL_BG.length]), x, 3.1, z - 3.3, 9.6, 0.9, 0.1);
+      // the sponsor band sat at z - 3.3 against a wall face at z - 3.2: a 5 cm
+      // sliver of daylight behind every one of them. Bands are BOLTED ON.
+      box(grp, cmat(PANEL_BG[(i * 5 + 1) % PANEL_BG.length]), x, 3.1, z - 3.22, 9.6, 0.9, 0.1);
       box(grp, cmat(0x6f7780), x, 0.22, z - 5.4, 12.0, 0.3, 3.4);
-      for (let r = 0; r <= 6; r++) box(grp, fenceM, x - 5.6 + r * 1.86, 0.85, z - 7.0, 0.08, 1.0, 0.08);
+      // SEVEN STICKS IN A ROW, EACH FLOATING 0.35 m, IS NOT A RAILING. Five
+      // posts standing on the ground with a rail across them is, and it is one
+      // fewer object per unit.
+      for (let r = 0; r < 5; r++) box(grp, fenceM, x - 5.0 + r * 2.5, 0.5, z - 7.0, 0.08, 1.0, 0.08);
+      box(grp, fenceM, x, 0.97, z - 7.0, 10.16, 0.07, 0.07);
+      propKeep(6, 0, 0); propCut(1);
       S.solidBox(x - 6.0, x + 6.0, z - 3.3, z + 3.3, 0, 3.6);
       if (S.label && i === Math.floor(HN / 2)) {
         const lab = S.label("PADDOCK CLUB", { color: "#ffd451" });
@@ -965,6 +1231,7 @@
       const x = x0 + 4.5, z = z0 + D * (0.12 + i * 0.19);
       box(grp, cmat(0xc23a36), x, 1.2, z, 3.0, 2.2, 2.2);
       box(grp, cmat(0x2b3138), x, 0.35, z, 3.2, 0.7, 2.4);
+      propKeep(1, 0, 0);
       S.solidBox(x - 1.7, x + 1.7, z - 1.3, z + 1.3, 0, 2.4);
     }
 
@@ -1037,14 +1304,27 @@
   // Is this point inside one of the declared openings? A gap is authored in
   // WORLD coordinates ("the road crosses here"), never as a path index, so a
   // caller can move its road without re-counting fence panels.
-  function inGap(gaps, x, z) {
-    if (!gaps) return false;
-    for (let i = 0; i < gaps.length; i++) {
-      const g = gaps[i]; if (!g) continue;
-      const h = g.half == null ? 6 : g.half;
-      if (Math.abs(x - g.x) <= h && Math.abs(z - g.z) <= h) return true;
+  //
+  // AND — a gap is not really a thing to author at all. A perimeter opens where
+  // a ROAD crosses it, and `city.roads` is the registry every road builder in
+  // this game already pushes to, so city/roadrules.js's CBZ.roadGapAt answers
+  // the same question from data both venues already carry. The declared `gaps`
+  // list stays because it is the only thing a venue can use for a crossing that
+  // is NOT a road (a footpath, a service yard mouth) and because it is the
+  // degrade path when roadrules.js is absent or ROAD_GAP_RUNS is off — but a
+  // venue whose fence is built after its own approach record no longer has to
+  // remember to declare the hole its road needs. Degrade-safe by construction:
+  // `CBZ.roadGapAt` missing => exactly the old answer.
+  function inGap(gaps, x, z, noRoad) {
+    if (gaps) {
+      for (let i = 0; i < gaps.length; i++) {
+        const g = gaps[i]; if (!g) continue;
+        const h = g.half == null ? 6 : g.half;
+        if (Math.abs(x - g.x) <= h && Math.abs(z - g.z) <= h) return true;
+      }
     }
-    return false;
+    if (noRoad || !CBZ.roadGapAt) return false;
+    return !!CBZ.roadGapAt(x, z, 0);
   }
 
   /* A PERIMETER IS A POLYLINE WITH HOLES IN IT.
@@ -1055,6 +1335,11 @@
        o.h          fabric height (default 2.4)
        o.pitch      post spacing (default 3.0)
        o.gaps       [{x,z,half}] world-space openings (gate, service road)
+       o.noRoadGaps true => do NOT also open where a city.roads carriageway
+                    crosses. The default is to open there: a fence across a
+                    live road is the bug this whole law exists for, and a
+                    perimeter that WANTS to seal a road is a checkpoint, which
+                    is a different object.
        o.solid      fn(minX,minZ,maxX,maxZ,y0,y1) — the CALLER's collider ledger
        o.colliderPitch  AABB length along the run (default 12)
        o.post/o.fabric  colours
@@ -1108,7 +1393,7 @@
         const x0 = a.x + (b.x - a.x) * t0, z0 = a.z + (b.z - a.z) * t0;
         const x1 = a.x + (b.x - a.x) * t1, z1 = a.z + (b.z - a.z) * t1;
         const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
-        if (inGap(o.gaps, mx, mz)) { flushRun(x0, z0); continue; }
+        if (inGap(o.gaps, mx, mz, o.noRoadGaps)) { flushRun(x0, z0); continue; }
         if (runX == null) { runX = x0; runZ = z0; }
         // post at the leading edge of every panel (+ the closing one below)
         pushStrut(fIM, x0, y0, z0, x0, y0 + h + 0.12, z0, 0.11); posts++;
@@ -1295,11 +1580,21 @@
       g2.fillText(String(o.sub).toUpperCase(), cw / 2, ch * 0.76);
     }
     const tex = texFrom(cv, false, false);
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(W, H),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
-    board.position.set(0, LIFT + H / 2, 0);
-    board.userData.venueSign = true;
-    grp.add(board);
+    // TWO PLANES, NOT ONE DoubleSide PLANE. A back face shows its texture
+    // MIRRORED — the U axis that ran to your right from the front runs to your
+    // left from behind — so a monument you walked past read backwards. The
+    // gatehouse beam in this same file already does it the right way (a second
+    // plane yawed by PI, whose own +X then lands on the reader's right); the
+    // monument is now the second consumer of that pattern rather than the one
+    // place it was got wrong.
+    const bm = new THREE.MeshBasicMaterial({ map: tex });
+    for (const face of [1, -1]) {
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(W, H), bm);
+      pl.position.set(0, LIFT + H / 2, face * 0.03);
+      pl.rotation.y = face > 0 ? 0 : Math.PI;
+      pl.userData.venueSign = true;
+      grp.add(pl);
+    }
     return { group: grp, tex: tex };
   }
 
@@ -1419,6 +1714,8 @@
       out[k + "Parked"] = r.parked | 0;
       out[k + "Staff"] = r.staff | 0;
       out[k + "Keepouts"] = r.keepouts | 0;
+      if (r.hoardingsFlipped != null) out.hoardingsFlipped = (out.hoardingsFlipped | 0) + (r.hoardingsFlipped | 0);
+      if (r.propsFloating != null) out.propsFloating = (out.propsFloating | 0) + (r.propsFloating | 0);
     }
     return out;
   };
@@ -1436,6 +1733,8 @@
     pylon: pylon,
     jumbotron: jumbotron,
     floodlights: floodlights,
+    board: board,
+    buildReset: buildReset,
     hoardings: hoardings,
     marshalPosts: marshalPosts,
     tyreStacks: tyreStacks,
@@ -1446,7 +1745,22 @@
       chainLink: chainLink,
       gravel: gravelTex,
       screen: screenTex,
+      tyre: tyreGeom,
     },
     util: { box: box, makeIM: makeIM, pushStrut: pushStrut, finishIM: finishIM },
+    // the two ratchets. boardAudit re-reads the shipped BUFFERS (see above);
+    // propAudit is the campus's own ledger of what it drew and what it refused.
+    boardAudit: boardAudit,
+    propAudit: function () {
+      return { propsKept: PROPS.kept, propsCut: PROPS.cut, propsFloating: PROPS.floating };
+    },
   };
+
+  /* CBZ.speedwayBoardAudit() — pin `flipped` at 0. It is a geometric re-test of
+     every board face actually in the scene, not a build-time counter, so a
+     regression anywhere (a new caller, a changed row order, a lost uFlip) fails
+     it. `boards`/`faces` are printed beside it so a "fix" that stops drawing
+     boards cannot pass. */
+  CBZ.speedwayBoardAudit = boardAudit;
+  CBZ.speedwayPropAudit = CBZ.speedwayStructures.propAudit;
 })();
