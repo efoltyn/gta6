@@ -177,6 +177,29 @@
   // old across-the-body -X vector kept the whole rifle inside the torso box).
   const LOWREADY_LONG = new THREE.Vector3(0.34, -0.82, 0.36).normalize();
   const LOWREADY_PISTOL = new THREE.Vector3(0.20, -0.90, 0.38).normalize();  // hangs down the lowered arm beside the thigh, slight forward cant
+  /* ---- A BARREL MAY NOT POINT INTO THE GROUND ------------------------------
+     OWNER: "when player is laying down and crouched make gun look right
+     especially in third person — rn gun can go under ground."
+     TWO faults, and the first one is why prone is the worst case:
+     (a) the low-ready vectors above are authored in BODY space against an
+         UPRIGHT torso, and prone PITCHES that frame by 1.42 rad. Worked
+         through: (0.34, -0.82, 0.36) leaves the pitched body pointing
+         (0.34, -0.48, -0.76) — 28° below horizontal and BACKWARD, out of a
+         hand that prone has put ~0.1 m off the deck. The rifle is under the
+         terrain before its own length is even considered. So a pitched torso
+         no longer aims the gun: past PITCH_FREE we take the body's YAW only
+         and present the rifle down-range, which is what a prone shooter does.
+     (b) even upright, "muzzle down" plus a slope, a kerb or a crouch can put
+         the tip below the floor. That is one inequality, not a stance table:
+         with the muzzle at hand + dir·len, staying clear means
+             dir.y >= (floorY + MUZZLE_CLEAR - handY) / len
+         so the direction is rotated UP to exactly that grazing angle, keeping
+         its azimuth. No pose is tested, and it covers every stance, every gun
+         length and every piece of ground the player can stand on. */
+  const PRONE_READY = new THREE.Vector3(0.16, 0.06, 0.99).normalize();  // down-range, a touch up and right
+  const PITCH_FREE = 0.8;      // rad of torso pitch past which the body stops aiming the gun
+  const MUZZLE_CLEAR = 0.05;   // m of air under the muzzle at the grazing angle
+  const _hgUpAxis = new THREE.Vector3(0, 1, 0);
 
   if (CBZ.onAlways) CBZ.onAlways(54, function () {
     const hand = mounts.hand;
@@ -226,6 +249,21 @@
         // the over-shoulder camera sits metres away — at NPC scale the held
         // gun vanished into the blocky hand; screenshot-tuned).
         hand.prop.scale.setScalar(hand.long ? 1.25 : 1.15);
+        // THE GUN'S OWN REACH, measured once per drawn weapon — the muzzle
+        // clearance below needs a length, and a per-weapon table of lengths
+        // would be wrong the day somebody adds a gun. Box3 on an unparented
+        // prop is its local box WITH the scale just set; the socket chain adds
+        // the rig's metre conversion, so multiply it in. The sniper (the game's
+        // longest barrel) is therefore the worst case and is solved by the same
+        // line as the pistol.
+        hand.len = 0;
+        if (THREE.Box3) {
+          const bb = new THREE.Box3().setFromObject(hand.prop);
+          if (isFinite(bb.min.x) && isFinite(bb.max.x)) {
+            const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70;
+            hand.len = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * hs;
+          }
+        }
       }
     }
     if (!hand.prop) return;
@@ -259,8 +297,26 @@
       //     silhouette on both sides from any angle);
       //   · pistols hang muzzle-down BESIDE the right thigh, nudged outward
       //     so the flank shows at the silhouette edge from behind.
-      ch.body.getWorldQuaternion(_hgBodyQ);
-      _hgDir.copy(hand.long ? LOWREADY_LONG : LOWREADY_PISTOL).applyQuaternion(_hgBodyQ);
+      // (a) a PITCHED torso does not aim the gun — see the note by PRONE_READY
+      const groundClear = !CBZ.CONFIG || CBZ.CONFIG.TP_GUN_GROUND_CLEAR !== false;
+      const pitched = groundClear && Math.abs(ch.body.rotation.x || 0) > PITCH_FREE;
+      if (pitched) {
+        _hgDir.copy(PRONE_READY).applyAxisAngle(_hgUpAxis, (ch.group && ch.group.rotation.y) || 0);
+      } else {
+        ch.body.getWorldQuaternion(_hgBodyQ);
+        _hgDir.copy(hand.long ? LOWREADY_LONG : LOWREADY_PISTOL).applyQuaternion(_hgBodyQ);
+      }
+      // (b) the muzzle stays above the floor, whatever the stance or the slope
+      if (groundClear && hand.len > 0 && CBZ.floorAt) {
+        hand.prop.getWorldPosition(_hgPos);
+        const yMin = (CBZ.floorAt(_hgPos.x, _hgPos.z) + MUZZLE_CLEAR - _hgPos.y) / hand.len;
+        if (_hgDir.y < yMin) {
+          const yT = yMin > 0.95 ? 0.95 : yMin;               // never past straight up
+          const h = Math.sqrt(_hgDir.x * _hgDir.x + _hgDir.z * _hgDir.z) || 1e-4;
+          const k = Math.sqrt(Math.max(0, 1 - yT * yT)) / h;  // keep the azimuth, lift the pitch
+          _hgDir.set(_hgDir.x * k, yT, _hgDir.z * k);
+        }
+      }
       _hgMat.lookAt(_hgZero, _hgDir, _hgUp);
       _hgWorldQ.setFromRotationMatrix(_hgMat);
       socket.getWorldQuaternion(_hgParentQ);

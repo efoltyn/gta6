@@ -137,10 +137,101 @@
     return _visorMat;
   }
 
+  /* ---- ARMOUR SITS ON TOP OF CLOTHES, AND "ON TOP" IS A MEASUREMENT --------
+     OWNER: "outfits with armour on glitch — the outfit and armour glitch
+     colors." Exactly the shoulder-yoke fault (entities/character.js), one file
+     over: every number above is a TYPED absolute in the adult-male body frame,
+     authored against a torso this file cannot see — so a piece lands on a plane
+     the GARMENT already owns, and two differently-coloured coplanar faces are
+     what "glitch colors" looks like. Measured on the shipped rig:
+       • the plate BAND's back face (-0.30) == the jacket shell's back (-0.30);
+       • the cummerbund side plate's inner face (0.46) == the chest's side face;
+       • the shoulder pad's bottom (1.84) == the upper arm's top face (1.84);
+       • and the instant clothes.js's shell moved to 0.62 deep (the head-
+         clearance fix in this same wave) the VEST's entire front and back would
+         have landed on it — an unoccluded stipple over the whole chest, which
+         is the loudest possible version of this bug. That one is why this is
+         derived rather than re-typed: a typed clearance is only correct until
+         somebody edits the other file.
+     So every piece is now clamped against what this rig is ACTUALLY wearing:
+     strictly PROUD of the outermost garment surface, or strictly BURIED inside
+     it, by at least CHAR_YOKE_CLEAR per face — never ON it. A buried face is as
+     safe as a proud one and cannot open a seam, which is why the two pieces
+     that were butting the body go inward and only the vest grows. Nothing is
+     re-styled: each clamp moves its piece by 0.01-0.02, and only when it would
+     otherwise share a plane. Revert with CBZ.CONFIG.CHAR_YOKE_CLEAR = false. */
+  function clearance() {
+    if (CBZ.CONFIG && CBZ.CONFIG.CHAR_YOKE_CLEAR === false) return 0;
+    return (CBZ.CHAR_YOKE_CLEAR != null) ? CBZ.CHAR_YOKE_CLEAR : 0.01;
+  }
+  function boxDims(mesh) {
+    // MEASURE, don't assume: a BoxGeometry keeps .parameters, and a DRESSED
+    // mesh keeps its flat original in userData._cbzFlat (clothes.js).
+    const g = (mesh && mesh.userData && mesh.userData._cbzFlat && mesh.userData._cbzFlat.g) || (mesh && mesh.geometry);
+    const p = g && g.parameters;
+    return (p && p.width > 0) ? p : null;
+  }
+  // The outermost dressed torso surface on THIS rig, in body-local units, plus
+  // the two landmarks the furniture butts against. Falls back to the adult-male
+  // literals this file used to hard-code, so a stub rig is unchanged.
+  function armorFit(ch) {
+    const c = clearance();
+    let halfW = 0.46, halfD = 0.25, chestHalfW = 0.46, shoulderY = 1.84;
+    const s = ch && ch.skinSlots;
+    const cb = boxDims(s && s.torso && s.torso[0]);
+    if (cb) { halfW = chestHalfW = cb.width / 2; halfD = cb.depth / 2; }
+    const jm = ch && ch._jacketMesh;                  // clothes.js's inflated shell
+    if (jm && jm.visible) {
+      const jb = boxDims(jm);
+      if (jb) { halfW = Math.max(halfW, jb.width / 2); halfD = Math.max(halfD, jb.depth / 2); }
+    }
+    const la = ch && ch.parts && ch.parts.la;         // the shoulder pivot IS the arm's top face
+    if (la && la.position && la.position.y > 0) shoulderY = la.position.y;
+    // the groin flap bridges the vest and the body BELOW the chest, so the
+    // pelvis is one of its neighbours too — and the shipped flap's back face
+    // sat exactly on it (0.24 == pelvisD/2).
+    const pb = boxDims(s && s.pelvis && s.pelvis[0]);
+    const innerHalfD = Math.min(cb ? cb.depth / 2 : 0.25, pb ? pb.depth / 2 : 0.24);
+    const vestW = Math.max(1.02, (halfW + c) * 2);
+    const vestD = Math.max(0.62, (halfD + c) * 2);
+    const VEST_Y = 1.40, VEST_H = 0.86;
+    const vestTop = VEST_Y + VEST_H / 2;
+    return {
+      vest: [vestW, 0.86, vestD],
+      // THE BAND IS DERIVED FROM THE VEST, not from the body. Its authored
+      // 0.64-at-z+0.02 was correct RELATIVE to the vest (0.03 proud, 0.01
+      // buried) and still landed on the shell, because the shell is a third
+      // box sandwiched between them: at only 0.01 of bury there was exactly
+      // one plane to hit and it hit it. Matching the vest's depth doubles the
+      // bury to 0.02 and puts the back face clear on the proud side of the
+      // shell, which holds for any shell this rig can be wearing.
+      band: [vestW + 0.02, 0.30, vestD], bandZ: 0.02,
+      // SIDE PLATE: inner face just INSIDE the chest (it is invisible in there
+      // either way — it used to be invisible AND coplanar).
+      sideX: chestHalfW - c + 0.04,
+      // SHOULDER PAD: bottom buried under BOTH planes it can meet — the arm's
+      // top face and the vest's. Clearing only the arm (the first draft of this
+      // line) simply moved the pad onto the vest's top instead; the sweep
+      // caught it, which is the whole reason clearances are solved against
+      // min/max of the real neighbours rather than against one of them.
+      padY: Math.min(shoulderY, vestTop) - c + 0.06,
+      // GROIN FLAP: it BRIDGES from proud of the vest down to buried in the
+      // body, so both ends are solved and its DEPTH falls out of them — the
+      // authored 0.08 slab was too shallow to clear both once the vest grew,
+      // and as shipped its back face was exactly on the pelvis's front. At the
+      // shipped 0.62 vest this reproduces the authored 0.08 depth at z 0.28.
+      groin: [0.36, 0.28, (vestD / 2 + c) - (innerHalfD - c)],
+      groinZ: ((vestD / 2 + c) + (innerHalfD - c)) / 2,
+    };
+  }
+  CBZ.cityArmorFit = armorFit;                        // charpanel.js's portrait mirrors it
+  function dimGeo(d) { return (CBZ.boxGeom && d) ? CBZ.boxGeom(d[0], d[1], d[2]) : null; }
+
   // build the pooled meshes for ONE chest kit + helmet onto a rig, push into out[].
   function mountKitMeshes(an, kitId, out) {
     const k = kit(kitId);
     if (!k || !an) return;
+    const fit = armorFit(an.ch);
     // tiny local mounter: pooled part + material + position onto a parent
     function put(parent, kind, mat2, x, y, z) {
       if (!mat2) return null;
@@ -152,22 +243,29 @@
     if (k.slot === "chest" && an.body && an.body.add) {
       const mat = matFor(k.id, k.color);
       const vest = acquire("vest");
-      if (vest) { vest.material = mat; vest.position.set(0, 1.40, 0); an.body.add(vest); out.push(vest); }
+      if (vest) {
+        const gm = dimGeo(fit.vest); if (gm) vest.geometry = gm;   // fitted to what it is worn OVER
+        vest.material = mat; vest.position.set(0, 1.40, 0); an.body.add(vest); out.push(vest);
+      }
       // the harder kits get a raised plate band so a SWAT reads heavier than a beat-cop vest
       if (k.id !== "softVest") {
         const band = acquire("vestHi");
-        if (band) { band.material = mat; band.position.set(0, 1.58, 0.02); an.body.add(band); out.push(band); }
+        if (band) {
+          const gb = dimGeo(fit.band); if (gb) band.geometry = gb;
+          band.material = mat; band.position.set(0, 1.58, fit.bandZ); an.body.add(band); out.push(band);
+        }
       }
       // SWAT plate → a full CARRIER (city-swat-redesign): shoulder pad blocks,
       // cummerbund side plates, groin flap. Torso box is 0.92×0.95×0.5 at
       // body-local y 1.42, so pads cap the shoulders and the flap hangs at the
       // belt line. Side plates stay slim so swinging arms don't eat them.
       if (k.id === "swatVest" && redesignOn()) {
-        put(an.body, "shPad", mat, -0.40, 1.90, 0);
-        put(an.body, "shPad", mat, 0.40, 1.90, 0);
-        put(an.body, "sidePlate", mat, -0.50, 1.32, 0);
-        put(an.body, "sidePlate", mat, 0.50, 1.32, 0);
-        put(an.body, "groin", mat, 0, 0.88, 0.28);
+        put(an.body, "shPad", mat, -0.40, fit.padY, 0);
+        put(an.body, "shPad", mat, 0.40, fit.padY, 0);
+        put(an.body, "sidePlate", mat, -fit.sideX, 1.32, 0);
+        put(an.body, "sidePlate", mat, fit.sideX, 1.32, 0);
+        const gf = put(an.body, "groin", mat, 0, 0.88, fit.groinZ);
+        if (gf) { const gg = dimGeo(fit.groin); if (gg) gf.geometry = gg; }
       }
     } else if (k.slot === "head" && an.neck && an.neck.add) {
       const mat = matFor(k.id, k.color);
@@ -217,7 +315,9 @@
   function playerAnchors() {
     const ch = CBZ.playerChar;
     if (!ch) return null;
-    return { body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra };
+    // `ch` rides along so mountKitMeshes can MEASURE the body it is armouring
+    // (armorFit) instead of assuming the adult male it was authored against.
+    return { ch: ch, body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra };
   }
   function unmountPlayer() {
     if (!_pMeshes) return;
@@ -297,7 +397,7 @@
     ped._armor = pts;                      // the soak pool
     // mount meshes (guarded: harness rigs have no body/neck)
     const ch = ped.char;
-    const an = ch ? { body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra } : null;
+    const an = ch ? { ch: ch, body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra } : null;
     if (an) {
       const out = [];
       if (map.chest) mountKitMeshes(an, map.chest, out);

@@ -875,7 +875,15 @@
     // Zero for every non-prone frame (and every NPC) — position is written
     // absolutely each frame, so there is nothing to restore.
     const proneB = playerChar._proneB || 0;
-    playerChar.group.position.set(player.pos.x, player.pos.y - PRONE_SINK * proneB, player.pos.z);
+    // SOLVED, NOT TYPED: PRONE_SINK was a single number tuned against the adult
+    // male's hip line, and the plank's lowest surface is half a torso DEPTH
+    // below that — measured 0.115 m of chest under the floor (owner: "the
+    // player [goes] a tiny bit [under ground], bad physics"). character.js owns
+    // the pose angles AND the body's box sizes, so it answers with the drop
+    // that puts the lowest surface exactly ON the floor, per body. The literal
+    // stays as the degrade path for a rig that cannot be measured.
+    const sink = (CBZ.charProneSink && CBZ.charProneSink(playerChar)) || PRONE_SINK;
+    playerChar.group.position.set(player.pos.x, player.pos.y - sink * proneB, player.pos.z);
     if (len > 0 || sliding) {
       // mid-slide the body faces the LOCKED slide heading, not the stick — the
       // feet-first pose must travel feet-first even while you pre-steer the exit.

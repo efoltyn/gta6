@@ -1216,6 +1216,22 @@
   // place their own watch with no table and no call-site edit. OFF → the export
   // returns null and every consumer falls back to its old literal.
   if (CBZ.CONFIG.CHAR_WRIST_LANDMARK == null) CBZ.CONFIG.CHAR_WRIST_LANDMARK = true;
+  // TP_GUN_GROUND_CLEAR (systems/holsterprops.js) — OWNER: "when player is
+  // laying down and crouched make gun look right especially in third person —
+  // rn gun can go under ground." The third-person low-ready barrel vector is
+  // authored in BODY space against an UPRIGHT torso, and prone pitches that
+  // frame 1.42 rad: (0.34,-0.82,0.36) comes out of it pointing 30° BELOW
+  // horizontal and BACKWARD, from a hand prone has put ~0.1 m off the deck, so
+  // the whole rifle is under the terrain. ON (default) does two things: past
+  // 0.8 rad of torso pitch the body stops aiming the gun (yaw only, presented
+  // down-range +3.4°, which is how a prone shooter holds it), and in EVERY
+  // stance the barrel is rotated up to the grazing angle if the muzzle — the
+  // gun's own measured length along its own direction — would otherwise sit
+  // below CBZ.floorAt + 0.05. The second half needs no pose test, so it also
+  // covers crouch, slopes, kerbs and the longest gun in the game. First person
+  // is unaffected: the whole hand-prop block is gated on third person and the
+  // FP viewmodel is camera-relative. OFF → the old body-space vector.
+  if (CBZ.CONFIG.TP_GUN_GROUND_CLEAR == null) CBZ.CONFIG.TP_GUN_GROUND_CLEAR = true;
   // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
   // person must never BRIGHTEN ("they turn super white, which is dumb") —
   // the hit read becomes a brief blood-dark tint on the struck head while

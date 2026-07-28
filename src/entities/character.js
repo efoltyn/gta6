@@ -131,6 +131,13 @@
   // held everywhere it did NOT z-fight. Published so city/clothes.js's jacket
   // shell measures against the same number instead of typing a second one.
   const YOKE_CLEAR = 0.01;
+  // THE PRONE PLANK'S OWN ANGLES. Named because physics.js has to drop the rig
+  // group by exactly the amount that puts this pose's LOWEST SURFACE on the
+  // floor, and it cannot solve that against literals buried in animChar — a
+  // sink and a pose that disagree is a body sunk into the terrain (owner: "the
+  // player [goes] a tiny bit [under ground]"). One place, both consumers.
+  const PRONE_PITCH = 1.42;       // torso hinge at the hips: chest to the deck
+  const PRONE_LEG_PITCH = 1.49;   // legs sweep back level (±0.03 alternation)
 
   // A gait style is a set of MULTIPLIERS on animChar's existing literals.
   // All 1 = the motion this game has always had; nothing here adds a new
@@ -1188,11 +1195,11 @@
       const pad = speed > 0.2 ? Math.sin(ch.phase) : 0;
       ch.body.position.y = damp(ch.body.position.y, 0.02, pr, dt);
       ch.body.position.z = damp(ch.body.position.z, 0, pr, dt);
-      ch.body.rotation.x = damp(ch.body.rotation.x, 1.42, pr, dt);     // hinge flat, chest down
+      ch.body.rotation.x = damp(ch.body.rotation.x, PRONE_PITCH, pr, dt);     // hinge flat, chest down
       ch.body.rotation.y = damp(ch.body.rotation.y, 0, pr, dt);
       ch.body.rotation.z = damp(ch.body.rotation.z, pad * 0.06, pr, dt);
-      if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, 1.52 + pad * 0.14, pr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.10, pr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, pr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, pr, dt); }
-      if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, 1.46 - pad * 0.14, pr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.10, pr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, pr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, pr, dt); }
+      if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, PRONE_LEG_PITCH + 0.03 + pad * 0.14, pr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.10, pr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, pr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, pr, dt); }
+      if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, PRONE_LEG_PITCH - 0.03 - pad * 0.14, pr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.10, pr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, pr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, pr, dt); }
       setKnee(J.ll, 0.06, pr); setKnee(J.rl, 0.12, pr);                // legs lie flat, not folded
       // weapon forward: gun arm out along the aim, support elbow planted wide
       const rec = ch.aimRecoil || 0;
@@ -1994,6 +2001,41 @@
       hand: handTop - capH * 0.35,
       forearmTop: 0.06,                    // the lower box tucks 0.06 into the upper
     };
+  };
+  /* ---- HOW FAR THE PRONE RIG DROPS, in METRES -----------------------------
+     OWNER: "when player is laying down… the player [goes] a tiny bit [under
+     ground], bad physics." physics.js dropped the rig group by a TYPED 0.62 to
+     lay the hip-hinged plank down, but the plank's lowest surface is not the
+     hip line — it is the underside of the pitched CHEST BOX, half a torso
+     DEPTH below it, and nobody had solved for that. Worked on the shipped
+     adult male: the hips land 0.045 m over the floor and the chest's underside
+     0.115 m UNDER it, which is exactly the sink the owner can see.
+
+     A box pitched by θ has vertical half-extent h·|cosθ| + d·|sinθ| — that is
+     the whole derivation, applied to the two boxes that can touch down (the
+     chest and the upper leg) and taken at the LOWER of the two. Read off the
+     rig's own profile and the pose's own angles, so a woman's deeper chest and
+     a child's shorter femur each get their own number instead of a constant
+     tuned against one body. Returns metres (humanScale applied); null if it
+     cannot measure, so physics.js keeps its literal. */
+  CBZ.charProneSink = function (ch) {
+    const P = ch && ch.profile;
+    if (!P) return null;
+    const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70;
+    const hipY = P.legUp + P.legLo;
+    const base = hipY - 0.005;
+    const waistH = P.waistShare > 0 ? P.waistShare * P.torsoH : 0;
+    const chestH = P.torsoH - waistH;
+    const bob = 0.02;                                     // the prone pose's body.position.y
+    const cT = Math.abs(Math.cos(PRONE_PITCH)), sT = Math.abs(Math.sin(PRONE_PITCH));
+    // chest: centre swings about the HIP pivot (lockCharacterHips holds it)
+    const chestOff = (base + waistH + chestH / 2) - hipY;
+    const chestLow = hipY + chestOff * Math.cos(PRONE_PITCH) + bob
+                   - (chestH / 2 * cT + P.torsoD / 2 * sT);
+    const cL = Math.abs(Math.cos(PRONE_LEG_PITCH)), sL = Math.abs(Math.sin(PRONE_LEG_PITCH));
+    const legLow = hipY - (P.legUp / 2) * Math.cos(PRONE_LEG_PITCH) + bob
+                 - (P.legUp / 2 * cL + P.legW / 2 * sL);
+    return Math.min(chestLow, legLow) * hs;               // drop by this → lowest surface ON the floor
   };
   CBZ.charBands = { CHILD_ADULT_AGE, bandOf };
   // One cheap question every other system asks: "is this a child?" Answers for

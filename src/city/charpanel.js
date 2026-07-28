@@ -310,9 +310,10 @@
     if (!k) return "";
     return (k.chest || "") + "|" + (k.head || "");   // hand=shield is cosmetic, skip
   }
-  function mountArmorMesh(kind, anchor, color, x, y, z, out) {
+  function mountArmorMesh(kind, anchor, color, x, y, z, out, dims) {
     if (!anchor || !anchor.add || !THREE) return;
-    const geo = ageo(kind), mat = amat(color);
+    const geo = (dims && CBZ.boxGeom) ? CBZ.boxGeom(dims[0], dims[1], dims[2]) : ageo(kind);
+    const mat = amat(color);
     if (!geo || !mat) return;
     const m = new THREE.Mesh(geo, mat);
     m.castShadow = false; m.receiveShadow = false;
@@ -333,8 +334,13 @@
     const out = [];
     const chest = k.chest && KITS[k.chest];
     if (chest) {
-      mountArmorMesh("vest", rig.body, chest.color, 0, 1.40, 0, out);
-      if (chest.id !== "softVest") mountArmorMesh("vestHi", rig.body, chest.color, 0, 1.58, 0.02, out);   // raised plate band (SWAT/plate reads heavier)
+      // FITTED, not typed — armor.js owns the one answer to "how far proud of
+      // this outfit does the armour sit" (CBZ.cityArmorFit), so the portrait
+      // cannot drift into the coplanar vest/jacket stipple the live body just
+      // had. Degrade-safe: no export → the authored shells, exactly as before.
+      const fit = CBZ.cityArmorFit && CBZ.cityArmorFit(rig);
+      mountArmorMesh("vest", rig.body, chest.color, 0, 1.40, 0, out, fit && fit.vest);
+      if (chest.id !== "softVest") mountArmorMesh("vestHi", rig.body, chest.color, 0, 1.58, fit ? fit.bandZ : 0.02, out, fit && fit.band);   // raised plate band (SWAT/plate reads heavier)
     }
     const head = k.head && KITS[k.head];
     if (head) mountArmorMesh("helmet", rig.neck, head.color, 0, 0.40, 0, out);
