@@ -110,33 +110,89 @@
   //  PELT ECONOMY — register every species' hide into cityEcon.ITEMS so the
   //  pawn shop / fence already buys it. A PRISTINE variant (clean kill) is
   //  worth ~2.1x; legendary pelts are flagged luxe (thinner fence haircut).
+  //
+  //  THE HUNT PAYS IN MEALS (2026-07-28). OWNER: "I killed a wild boar, and I
+  //  skinned it. I should get the pelt, and I should get the food. And I should
+  //  eat that food." He got both — and could eat NEITHER, because every meat
+  //  this loop registered was written `tag:"valuable"` with no `heal`. That one
+  //  word is the whole bug: `city/hunger.js`'s cityEat refuses anything without
+  //  a heal, fpsmode's hotbar only carries tag food/drug/throwable, and
+  //  interact.js's "Eat the X" pocket card matches on `.heal`. So a boar fed
+  //  nobody. Meat is FOOD now, and `meat:true` stays exactly where it was so
+  //  wildlife_tame.js's predator feeding still finds it.
+  //
+  //  THE FILL IS DERIVED, NOT TYPED. A portion's nourishment scales with how
+  //  RICH the meat is (the bestiary's own meatValue: rabbit 5 -> whale 50) and
+  //  how BIG the animal is (its own `scale`, because a big beast yields a big
+  //  cut). No species is named and no row is authored, so the next species in
+  //  the bestiary is edible for free:
+  //      fill = 26 * (meatValue/12)^0.5 * scale^0.45,  clamped 10..55
+  //  Anchored against the shop catalog it must live beside (Soda 12, Fries 20,
+  //  Hotdog 28, Pizza 34, Burger 42): a rabbit is a snack (10), venison a
+  //  proper meal (26), boar pork 27 at meatYield 2 (so ONE boar is 27-81 food),
+  //  moose 40, and a whale caps out at the 55 nothing may exceed.
   // ============================================================
+  function mealFill(meatValue, scale) {
+    const mv = Math.max(1, meatValue || 8);
+    const sc = Math.max(0.15, scale || 1);
+    const v = 26 * Math.pow(mv / 12, 0.5) * Math.pow(sc, 0.45);
+    return Math.max(10, Math.min(55, Math.round(v)));
+  }
+  CBZ.wildlifeMealFill = mealFill;
+
+  // A `fur` is a HIDE — except when the species is aquatic and the yield is the
+  // whole animal ("Fresh Fish"). A fin, a tooth and blubber are trade goods; a
+  // fish is dinner. Derived from the name, so a new fish species named "Fresh
+  // Trout" is edible with no edit here and no species table anywhere.
+  function furIsFood(sp) {
+    if (!sp || !sp.aquatic || !sp.fur) return false;
+    return /^fresh\b|\bfish$|\bfillet\b|\broe\b/i.test(sp.fur);
+  }
+
   function registerPelts() {
     const econ = CBZ.cityEcon; if (!econ || !econ.ITEMS) return;
     const S = CBZ.WILDLIFE_SPECIES || {};
     for (const id in S) {
       const sp = S[id];
       if (!sp.fur) continue;
+      const edibleFur = furIsFood(sp);
       if (!econ.ITEMS[sp.fur]) {
-        econ.ITEMS[sp.fur] = {
-          value: sp.furValue || 20, tag: "valuable",
-          luxe: sp.rarity === "legendary" || undefined,
-          pelt: true, species: id,
-        };
+        econ.ITEMS[sp.fur] = edibleFur
+          // the whole catch: food you can eat AND still sell (a fish is both)
+          ? {
+              value: sp.furValue || 8, tag: "food",
+              heal: mealFill(sp.furValue || 8, sp.scale),
+              fish: true, wild: true, species: id,
+            }
+          : {
+              value: sp.furValue || 20, tag: "valuable",
+              luxe: sp.rarity === "legendary" || undefined,
+              pelt: true, species: id,
+            };
       }
       const pri = "Pristine " + sp.fur;
-      if (sp.rarity !== "legendary" && !econ.ITEMS[pri]) {
+      if (!edibleFur && sp.rarity !== "legendary" && !econ.ITEMS[pri]) {
         econ.ITEMS[pri] = {
           value: Math.round((sp.furValue || 20) * 2.1), tag: "valuable",
           pelt: true, pristine: true, species: id,
         };
       }
-      // wild meat — a light valuable that also FEEDS your dog (see dogs.js).
+      // WILD MEAT — real food (eat it, sell it at a butcher/pawn) that also
+      // FEEDS your dog and any tamed predator (dogs.js / wildlife_tame.js read
+      // `meat`, which is why that field must stay).
       if (sp.meat && !econ.ITEMS[sp.meat]) {
-        econ.ITEMS[sp.meat] = { value: sp.meatValue || 8, tag: "valuable", meat: true, species: id };
+        econ.ITEMS[sp.meat] = {
+          value: sp.meatValue || 8, tag: "food",
+          heal: mealFill(sp.meatValue, sp.scale),
+          meat: true, wild: true, species: id,
+        };
       }
     }
   }
+  // Exported so any grant path can make sure the catalog exists before it adds
+  // (fishing.js can land a catch on a map where no wildlife build ever ran).
+  // Idempotent by construction — every write is behind an existence check.
+  CBZ.wildlifeRegisterItems = registerPelts;
 
   // ============================================================
   //  SPAWNING — stock each biome region with the species that call it home,
@@ -1302,20 +1358,28 @@
     if (!a || !a.skinnable) return;
     a.skinnable = false;
     const sp = a.species, econ = CBZ.cityEcon;
+    registerPelts();                     // idempotent; the catalog must exist to grant into
     let peltName = sp.fur, pristine = false;
-    if (sp.rarity !== "legendary" && a.cleanKill && Math.random() < 0.85) { peltName = "Pristine " + sp.fur; pristine = true; }
+    const edibleFur = furIsFood(sp);
+    if (!edibleFur && sp.rarity !== "legendary" && a.cleanKill && Math.random() < 0.85) { peltName = "Pristine " + sp.fur; pristine = true; }
+    let meatGot = 0;
     if (econ && econ.add) {
       econ.add(peltName, 1);
-      if (sp.meat) econ.add(sp.meat, 1 + ((Math.random() * (sp.meatYield || 1)) | 0));
+      if (sp.meat) { meatGot = 1 + ((Math.random() * (sp.meatYield || 1)) | 0); econ.add(sp.meat, meatGot); }
     }
     // a small on-the-spot field bounty on top of the sellable pelt.
     const bounty = Math.round((sp.furValue || 20) * (pristine ? 0.35 : 0.2) * (sp.rarity === "legendary" ? 3 : 1));
     if (CBZ.city && CBZ.city.addCash && bounty > 0) CBZ.city.addCash(bounty);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(sp.rarity === "legendary" ? 8 : 1);
-    // toast the haul.
+    // toast the haul — the HIDE is what it sells for, the MEAT is what it feeds
+    // you, and the line says both because they are two different payoffs.
     const worth = (econ && econ.ITEMS[peltName] && econ.ITEMS[peltName].value) || sp.furValue || 20;
+    const meatRow = meatGot && econ && econ.ITEMS[sp.meat];
+    const meatLine = meatGot
+      ? " · " + meatGot + "x " + sp.meat + (meatRow && meatRow.heal ? " (+" + meatRow.heal + " food each)" : "")
+      : "";
     if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note("Skinned " + sp.name + " → " + peltName + " (~$" + worth + ")" + (bounty ? " +$" + bounty : ""),
+      CBZ.city.note("Skinned " + sp.name + " → " + peltName + " (~$" + worth + ")" + meatLine + (bounty ? " +$" + bounty : ""),
         3.2, sp.rarity === "legendary" ? { urgent: true } : undefined);
     }
     // leave a "skinned" husk that fades shortly.

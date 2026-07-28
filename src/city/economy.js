@@ -23,6 +23,19 @@
     Soda:          { value: 3,   tag: "food", heal: 12 },
     "Energy Drink":{ value: 5,   tag: "food", heal: 18, boost: true },
     Fries:         { value: 4,   tag: "food", heal: 20 },
+    // REAL GROCERIES, not just counter food. The catalog carried six items,
+    // all of them fast food off a counter, which is why a grocer and a farm
+    // stand sold you a burger. These are what a market actually has — and,
+    // like every other food row, `heal` is the hunger they put back, so they
+    // ride the hotbar and eat through the ONE path (city/hunger.js's cityEat).
+    // (Five, not six: the shop menu shows `stock.slice(0, 9)`, so a sixth
+    // grocery would be a row nobody could ever buy — a stat fiction with a
+    // price tag. Everything added here is reachable from a real counter.)
+    Apple:         { value: 2,   tag: "food", heal: 10 },
+    Bread:         { value: 3,   tag: "food", heal: 24 },
+    "Canned Beans":{ value: 3,   tag: "food", heal: 22 },
+    Coffee:        { value: 3,   tag: "food", heal: 8,  boost: true },
+    Water:         { value: 2,   tag: "food", heal: 6 },
     // --- weapons ---
     Pistol:        { value: 350,  tag: "weapon", gun: "pistol",  dmg: 34, rof: 0.32, ammo: 17 },
     Revolver:      { value: 700,  tag: "weapon", gun: "revolver",dmg: 64, rof: 0.5,  ammo: 6 },
@@ -293,8 +306,9 @@
                   "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
     boutique:    ["Silk Shirt", "Designer Jeans", "Bomber Jacket", "Loafers", "Designer Shades", "Fedora",
                   "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
-    food:        ["Burger", "Hotdog", "Pizza Slice", "Soda", "Fries", "Energy Drink"],
-    gas:         ["Soda", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone"],
+    // exactly nine — the menu draws stock.slice(0, 9) and the keys are 1-9
+    food:        ["Burger", "Hotdog", "Pizza Slice", "Bread", "Apple", "Canned Beans", "Fries", "Soda", "Energy Drink"],
+    gas:         ["Soda", "Coffee", "Water", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone"],
     drugs:       ["Weed", "Pills"],
     hardware:    ["Crowbar", "Lockpick", "Bat", "Medkit"],
     electronics: ["Phone", "Laptop", "Burner Phone"],

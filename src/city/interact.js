@@ -108,7 +108,8 @@
     return name + " " + pawnHint(name);
   }
   // the first edible / drug in a ctx's pockets (gates the self options)
-  function foodIn(ctx) { const e = econ(); if (!e) return null; return Object.keys(ctx.items || {}).find((n) => ctx.items[n] > 0 && e.ITEMS[n] && e.ITEMS[n].heal) || null; }
+  function foodIn(ctx) { const e = econ(); if (!e) return null; let best = null, bh = 0;
+    for (const n in (ctx.items || {})) { const it = e.ITEMS[n]; if (ctx.items[n] > 0 && it && it.heal > bh) { bh = it.heal; best = n; } } return best; }
   function drugIn(ctx) { const e = econ(); if (!e) return null; return Object.keys(ctx.items || {}).find((n) => ctx.items[n] > 0 && e.ITEMS[n] && e.ITEMS[n].tag === "drug") || null; }
 
   // ---- gang membership / relationship helpers (all feature-detected) ----

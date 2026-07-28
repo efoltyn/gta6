@@ -82,7 +82,10 @@
   // no shop/economy file needs an edit (ITEMS is exported by reference).
   function registerChestItem() {
     const IT = items();
-    if (IT && !IT.Chest) IT.Chest = { value: CHEST_COST, tag: "tool" };
+    // `place:true` is what stops a carried chest being an inert box in the bag
+    // — it is the field city/itemicons.js reads to give it the PLACE verb.
+    if (IT && !IT.Chest) IT.Chest = { value: CHEST_COST, tag: "tool", place: true };
+    else if (IT && IT.Chest && !IT.Chest.place) IT.Chest.place = true;
   }
 
   // engine weapon id -> city item name (economy.js ITEMS `gun` uses a couple of
@@ -95,28 +98,28 @@
     return id;
   }
 
-  const ICON = {
-    // weapons / tools
-    Pistol: "", Revolver: "", "Desert Eagle": "", SMG: "", Uzi: "",
-    Shotgun: "", Rifle: "", "AK-47": "", LMG: "", Sniper: "",
-    Bazooka: "", "Rocket Launcher": "", "Grenade Launcher": "", Taser: "", Bat: "", Knife: "",
-    Grenade: "", "Ammo Box": "", Medkit: "", "Body Armor": "",
-    Lockpick: "", Crowbar: "", "Burner Phone": "", Chest: "",
-    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
-    // food / drugs
-    Burger: "", Hotdog: "", "Pizza Slice": "", Soda: "", Fries: "",
-    "Energy Drink": "", Weed: "", Coke: "", Meth: "", Pills: "",
-    // valuables
-    Wallet: "", Phone: "", Laptop: "", "Cash Stack": "", "Gold Bar": "",
-    "Briefcase of Cash": "",
-  };
-  const TAG_ICON = { weapon: "", food: "", drug: "", wearable: "", valuable: "", throwable: "", tool: "", ammo: "", resource: "" };
-  function iconFor(name) { return ICON[name] || TAG_ICON[itemTag(name)] || "▪"; }
+  // ---- ITEM FACES ---------------------------------------------------------
+  // This module used to carry its OWN name->glyph table (one of four in the
+  // game), and every entry in it had been emptied to "" by the repo-wide emoji
+  // strip — so `ICON[name] || TAG_ICON[tag] || "▪"` resolved to "▪" for EVERY
+  // item you have ever carried. That is the owner's "super unclear icons".
+  // city/itemicons.js draws the real thing from the item's KIND (so a pelt
+  // registered at runtime by a species added tomorrow is drawn too, in that
+  // animal's own colour). The "▪" stays only as the flag-off fallback.
+  function iconFor(name) { return "▪"; }
+  function itemFace(name, cls) {
+    if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, items()[name], cls); if (h) return h; }
+    return "<span class='ic'>" + iconFor(name) + "</span>";
+  }
+  function itemTitle(name, count) {
+    if (CBZ.itemTip) { try { return CBZ.itemTip(name, items()[name], count); } catch (e) {} }
+    return String(name);
+  }
   function weaponFace(id, name, className) {
     let src = "";
     try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {}
     return src ? "<img class='" + (className || "gunThumb") + "' src='" + src + "' alt=''>"
-      : "<span class='ic'>" + iconFor(name) + "</span>";
+      : itemFace(name, "");
   }
 
   // ============================================================
@@ -765,6 +768,7 @@
   //  CSS (self-mounted once) — matches the charpanel / hud.mc look
   // ============================================================
   function ensureCss() {
+    if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }   // shared item-icon sizing
     if (typeof document === "undefined" || !document.head || document.getElementById("ci2Css")) return;
     const st = document.createElement("style");
     st.id = "ci2Css";
@@ -813,15 +817,24 @@
   let cursorEl = null;
   let chestPanel = null, chestGridEl = null, chestPlayerGridEl = null;
 
+  function attr(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;"); }
   function cellHtml(e, gridKey, i) {
     let inner = "";
     if (e) {
       const equipped = isGun(e) ? (CBZ.currentWeaponId === e.id && !g.cityHolstered) : (isMelee(e) && g.cityMeleeWeapon === e.name);
-      inner = (isGun(e) ? weaponFace(e.id, e.name) : "<span class='ic'>" + iconFor(e.name) + "</span>") +
+      inner = (isGun(e) ? weaponFace(e.id, e.name) : itemFace(e.name)) +
         (e.kind === "item" && e.count > 1 ? "<span class='ct'>" + e.count + "</span>" : "") +
         (equipped ? "<span class='eq'>EQ</span>" : "");
-      return "<div class='ci2Slot" + (equipped ? " equipped" : "") + "' data-g='" + gridKey + "' data-i='" + i + "' title='" +
-        String(e.name).replace(/'/g, "&#39;") + (e.kind === "weapon" ? " — right-click to equip" : "") + "'>" + inner + "</div>";
+      // the tooltip says what it IS and what it is FOR — a pelt names its fence
+      // price, a steak names its fill. "You can't even hold it" was half an icon
+      // problem and half nobody ever telling you what the thing was worth.
+      let tip = e.kind === "weapon"
+        ? String(e.name) + "\nweapon  ·  right-click to equip"
+        : itemTitle(e.name, e.count);
+      const v = e.kind === "item" && CBZ.itemVerb ? CBZ.itemVerb(e.name, items()[e.name]) : null;
+      if (v && v.id !== "sell") tip += "\nshift + right-click: " + v.label;
+      return "<div class='ci2Slot" + (equipped ? " equipped" : "") + "' data-g='" + gridKey + "' data-i='" + i +
+        "' title='" + attr(tip) + "'>" + inner + "</div>";
     }
     return "<div class='ci2Slot' data-g='" + gridKey + "' data-i='" + i + "'></div>";
   }
@@ -838,7 +851,8 @@
     let html = "";
     for (let i = 0; i < grid.length; i++) html += cellHtml(grid[i], gridKey, i);
     if (withFooter) {
-      html += "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
+      html += "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · " +
+        "<b style='color:#9fd8a0'>Shift + right-click: eat / use</b> · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
     }
     el.innerHTML = html;
   }
@@ -864,7 +878,7 @@
     }
     if (cursor) {
       cursorEl.style.display = "block";
-      cursorEl.innerHTML = (isGun(cursor) ? weaponFace(cursor.id, cursor.name) : iconFor(cursor.name)) +
+      cursorEl.innerHTML = (isGun(cursor) ? weaponFace(cursor.id, cursor.name) : itemFace(cursor.name, "lg")) +
         (cursor.kind === "item" && cursor.count > 1 ? "<span class='ct'>" + cursor.count + "</span>" : "");
       cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px";
     } else cursorEl.style.display = "none";
@@ -885,6 +899,20 @@
   function slotClick(gridKey, i, right, shift) {
     const grid = gridByKey(gridKey); if (!grid) return;
     const s = grid[i];
+
+    // SHIFT + RIGHT-CLICK: USE the thing. The hotbar is still the primary way
+    // to eat (a number key, and a tap on touch — see hud.js's #cSlots), but a
+    // bag you can only rearrange is the "you can't even hold it" complaint, so
+    // the grid gets the verb too. Deliberately NOT plain right-click: that is
+    // the Minecraft stack split and it has to stay. Chest grids are excluded —
+    // nothing in a box is in your hands.
+    if (shift && right && s && s.kind === "item" && gridKey === "p" && CBZ.cityUseItem) {
+      const before = econ() ? econ().count(s.name) : 0;
+      CBZ.cityUseItem(s.name);
+      if (!econ() || econ().count(s.name) !== before) resync();
+      renderAllGrids();
+      return;
+    }
 
     // SHIFT-CLICK: quick-move a whole stack to the other container (chest open)
     if (shift && s && openChestRef) {
@@ -1184,7 +1212,7 @@
     let html = "";
     for (let i = 0; i < bar.length && i < 9; i++) {
       const b = bar[i];
-      const face = b.kind === "item" ? "<span class='ic'>" + iconFor(b.item || b.label) + "</span>"
+      const face = b.kind === "item" ? itemFace(b.item || b.label, "md")
         : b.kind === "gun" ? weaponFace(b.id, b.label)
         : "<span class='s'>" + String(b.short || b.label || "?").slice(0, 6) + "</span>";
       html += "<div class='ci2Slot" + (b.active ? " sel" : "") + "' data-i='" + i + "'>" + face +

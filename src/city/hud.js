@@ -140,10 +140,13 @@
         "#cHud .cSlot .gunModel{display:block;width:42px;height:27px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
         "#cHud .cSlot .a{font-size:10px;color:var(--hud-dim);line-height:1.1;margin-top:1px}" +
         "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
-        // item chip: a glyph (or short name) over a small ×count badge, sharing
-        // the gun chip's frame so the bar stays one visual run.
+        // item chip: a DRAWN pictogram (city/itemicons.js) over a small ×count
+        // badge, sharing the gun chip's frame so the bar stays one visual run.
+        // The old glyph table here was emptied by the repo-wide emoji strip, so
+        // every usable item on this bar rendered as a bare "▣".
         "#cHud .cSlot.item .ic{font-size:18px;line-height:1.05}" +
         "#cHud .cSlot.item .s{font-size:11px}" +
+        "#cHud .cSlot .itemIcn{width:26px;height:26px}" +
         "#cHud .cSlot .cnt{position:absolute;right:2px;top:1px;font-size:9px;font-weight:700;color:var(--hud-ink);background:rgba(8,11,17,.85);border-radius:6px;padding:0 3px;line-height:1.3}" +
         // the held slot is a SELECTION (interactive chrome) → the one cyan accent,
         // same for guns and melee. The old green/orange split spent the cash and
@@ -207,6 +210,7 @@
         "#cityHud.mc .cSlot.held{border-color:#e8ecf2;box-shadow:0 0 0 2px rgba(232,236,242,.85),inset 2px 2px 0 rgba(0,0,0,.35),inset -2px -2px 0 rgba(255,255,255,.14);transform:scale(1.1);z-index:1}" +
         "#cityHud.mc .cSlot .s{font-size:12px;letter-spacing:0}" +
         "#cityHud.mc .cSlot.item .ic{font-size:20px}" +
+        "#cityHud.mc .cSlot .itemIcn{width:30px;height:30px}" +
         "#cityHud.mc .cSlot.item .s{font-size:10px}" +
         "#cityHud.mc .cSlot .a{margin-top:0;font-size:9px}" +
         "#cityHud.mc .cSlot .cnt{top:auto;bottom:1px;right:3px;font-size:10px;background:none;padding:0;text-shadow:1px 1px 0 #000,0 0 3px #000}" +
@@ -224,6 +228,7 @@
         "  #cHud .cSlot .s{font-size:11px}" +
         "  #cHud .cSlot.item .ic{font-size:15px}" +
         "  #cHud .cSlot.item .s{font-size:9px}" +
+        "  #cHud .cSlot .itemIcn{width:22px;height:22px}" +
         "  #cHud .cSlot .cnt{font-size:8px}" +
         "  #cHud .cAmmo{font-size:11px}" +
         "  #cHud .cAmmo b{font-size:15px}" +
@@ -246,6 +251,10 @@
         "}" + mcIconCss();
       document.head.appendChild(st);
     }
+    // shared item-pictogram sizing (city/itemicons.js) — self-mounted once,
+    // so the hotbar's item chips are sized whether or not the [I] grid ever
+    // opened. Guarded: no module, no call, chips fall back to their glyph.
+    if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }
     root = document.createElement("div");
     root.id = "cityHud";
     root.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:20;display:none;font-family:Fredoka,system-ui,sans-serif";
@@ -1082,14 +1091,16 @@
     for (let i = 0; i < T.length; i++) { const w = T[i]; if (w && (w.label === label || (short && w.short === short))) return { w: w, i: i }; }
     return null;
   }
-  // glyphs for usable-item chips (food/drug/throwable) so the row reads at a
-  // glance; falls back to a short name when there's no glyph. (Mirrors the loot
-  // row's per-item/by-tag icon tables, defined below.)
-  function hotbarItemGlyph(name, item) {
-    if (LOOT_ITEM_ICON[name]) return LOOT_ITEM_ICON[name];
-    const tag = item && item.tag;
-    if (tag && LOOT_ICON[tag]) return LOOT_ICON[tag];
-    return "";
+  // THE FACE OF A USABLE-ITEM CHIP. This used to read two local glyph tables
+  // (LOOT_ITEM_ICON / LOOT_ICON) that the repo-wide emoji strip had emptied to
+  // "" — so every food, drug and throwable on the bar drew the bare "▣"
+  // fallback below. city/itemicons.js draws the real pictogram from the item's
+  // KIND, which also covers everything registered at runtime (species meat,
+  // pelts, the fishing catch, C4, produce) that no name table could reach.
+  // Degrade-safe: no module / flag off -> the old expression exactly.
+  function hotbarItemFace(name, item) {
+    if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, item); if (h) return h; }
+    return "<span class='ic'>▣</span>";
   }
   // The model in the player's hands and the full inventory panel carry weapon
   // names.  The moving HUD uses only a compact silhouette family so it never
@@ -1155,12 +1166,14 @@
             html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
               "<span class='key'>" + (bi + 1) + "</span>" + hotbarGunFace(m, e.id) + ammoTxt + "</div>";
           } else if (e.kind === "item") {
-            // Usable item: catalog glyph + count. Unknowns deliberately use a
-            // neutral pack icon instead of falling back to an item name.
-            const glyph = hotbarItemGlyph(e.item || e.label, ITEMS[e.item || e.label]);
+            // Usable item: its drawn pictogram + count. A stack whose name the
+            // catalog has never heard of still gets a face (the parcel), never
+            // a word — words on the moving HUD are the thing this bar removed.
+            const iname = e.item || e.label;
             const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
-            const face = "<span class='ic'>" + (glyph || "▣") + "</span>";
-            html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+            const face = hotbarItemFace(iname, ITEMS[iname]);
+            html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "' title='" +
+              String(iname).replace(/'/g, "&#39;") + "'>" +
               "<span class='key'>" + (bi + 1) + "</span>" + face + cnt + "</div>";
           }
         }
@@ -1260,19 +1273,13 @@
   //      already owns those); we surface drugs, wearables, valuables, throwables,
   //      tools and food so your loot reads at a glance without cluttering. Compact
   //      chips, value-sorted so the jackpot (a lifted Rolex / Gold Bar) leads. ------
-  const LOOT_ICON = {
-    drug: "", wearable: "", valuable: "", throwable: "", tool: "", food: "",
-    resource: "",   // B7: harvest-node materials (Wood/Stone/Scrap) fallback
-  };
-  // a handful of nicer per-item glyphs so the row reads instantly
-  const LOOT_ITEM_ICON = {
-    Grenade: "", Rolex: "", Omega: "", "Audemars Piguet": "", "Patek Philippe": "",
-    "Richard Mille": "", "Gold Bar": "", "Gold Chain": "", "Diamond Ring": "",
-    "Engagement Ring": "", Medkit: "", "Body Armor": "", Weed: "", Coke: "",
-    "Cash Stack": "", "Briefcase of Cash": "", Phone: "", Laptop: "", Wallet: "",
-    // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
-    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
-  };
+  // The two glyph tables that used to live here (LOOT_ICON by tag,
+  // LOOT_ITEM_ICON by name) are DELETED. Every entry in both had been emptied
+  // to "" by the repo-wide emoji strip, so they answered nothing for every item
+  // in the game while looking like a working table — and a name table could
+  // never have covered the half of the catalog that is registered at runtime
+  // anyway. city/itemicons.js draws item faces from KIND now; this row draws
+  // nothing at all (see below), so nothing here needs a glyph.
   function renderLoot() {
     if (!lootEl) return;
     // Carried items and guns share the boxed hotbar/inventory model. A second

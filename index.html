@@ -500,6 +500,12 @@
 <script src="src/systems/killstreaks.js"></script>
 <script src="src/systems/interact.js?v=lines3"></script>
 <script src="src/systems/interactions.js?v=mapflow2"></script>
+<!-- WHAT A THING IN YOUR BAG IS: one drawn pictogram per item KIND (so
+     runtime registrations — species pelts/meat, the fishing catch, produce,
+     C4 — are covered structurally), plus its verb and its worth. Loads
+     before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
+     city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
+<script src="src/city/itemicons.js?v=icons1"></script>
 <script src="src/systems/inventory.js?v=loot1"></script>
 <script src="src/systems/state.js?v=arrest4w10"></script>
 <script src="src/systems/save.js"></script>
@@ -929,6 +935,11 @@
 <script src="src/city/street_talk.js?v=binary3"></script>
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
 <script src="src/city/interactions_rich.js?v=arch1"></script>
+<!-- DIALOGUE IS TWO CHOICES — every talkable person answers with a line and
+     exactly two shown answers (BOARD/HIJACK card grammar); punch and walking
+     away are the two unshown exits. Loads after interactions/interact/
+     street_talk/interactions_rich; contracts.js + phone.js read lazily. -->
+<script src="src/city/dialogue.js?v=dlg1"></script>
 <script src="src/city/aim_dossier.js?v=streetread3"></script>
 <script src="src/city/captives.js?v=diegetic4"></script>
 <script src="src/city/millionaires.js?v=arch1"></script>

@@ -22,20 +22,20 @@
 
   const N_MAIN = 27, N_HOT = 9, N = N_MAIN + N_HOT; // 0..26 main, 27..35 hotbar
   const STACK = 64;
-  const ICON = {
-    "Lighter": "", "Soap": "", "Shiv": "", "Energy Bar": "",
-    "Burner Phone": "", "Ramen": "", "Gun-Room Key": "", "Gun": "",
-    "Pills": "", "Powder": "", "Pruno Hooch": "",
-    "Razor Blade": "", "Phone Charger": "", "Brass Knuckles": "",
-    "Energy Drink": "", "Burner SIM": "", "Tattoo Gun": "",
-    "Cigarette Carton": "", "Painkillers": "", "Lockpick": "",
-    "Handcuff Key": "", "Bedsheet Rope": "", "Hacksaw Blade": "",
-    "Contraband Map": "", "Stolen Wallet": "", "Cash Roll": "",
-    "Gold Tooth": "", "Gold Chain": "", "Luxury Watch": "",
-    // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
-    // + city/charpanel.js for the city-mode equivalents.
-    "Wood": "", "Stone": "", "Scrap": "", "Hatchet": "", "Pickaxe": "",
-  };
+  // THE FOURTH ICON TABLE, and like the other three every entry in it had been
+  // emptied to "" by the repo-wide emoji strip — so `ICON[name] || "▪"` drew a
+  // bare square for every item in the stash. city/itemicons.js draws the real
+  // pictogram from the item's KIND (it speaks this catalog's plural tags —
+  // goods/drugs/tools/valuables/key — as well as the city's singular ones).
+  // Degrade-safe: no module / flag off -> the "▪" this always actually drew.
+  function face(name) {
+    if (CBZ.itemIconHtml) {
+      const row = (CBZ.econ && CBZ.econ.ITEMS && CBZ.econ.ITEMS[name]) || null;
+      const h = CBZ.itemIconHtml(name, row, "md");
+      if (h) return h;
+    }
+    return "<span class='islot-ic'>▪</span>";
+  }
   // items you can FENCE for their cigarette value straight from the bag
   const FENCEABLE = new Set(["Cash Roll", "Cigarette Carton", "Stolen Wallet", "Gold Tooth", "Gold Chain", "Luxury Watch"]);
   const CONSUMABLE = new Set([
@@ -115,9 +115,10 @@
   function fill(cell, s) {
     cell.classList.remove("r-uncommon", "r-rare", "r-epic");
     if (s && s.item) {
-      cell.innerHTML = '<span class="islot-ic">' + (ICON[s.item] || "▪") + "</span>" +
+      cell.innerHTML = face(s.item) +
         (s.count > 1 ? '<span class="islot-n">' + s.count + "</span>" : "");
-      cell.title = s.item;
+      cell.title = (CBZ.itemTip && CBZ.econ && CBZ.econ.ITEMS)
+        ? CBZ.itemTip(s.item, CBZ.econ.ITEMS[s.item], s.count) : s.item;
       const it = CBZ.econ && CBZ.econ.ITEMS && CBZ.econ.ITEMS[s.item];
       if (it && it.rarity && it.rarity !== "common") cell.classList.add("r-" + it.rarity);
     } else { cell.innerHTML = ""; cell.title = ""; }
@@ -132,7 +133,7 @@
     for (let i = 0; i < N_MAIN; i++) fill(mainCells[i], slots[i]);
     if (cursor) {
       cursorEl.style.display = "block";
-      cursorEl.innerHTML = '<span class="islot-ic">' + (ICON[cursor.item] || "▪") + "</span>" +
+      cursorEl.innerHTML = face(cursor.item) +
         (cursor.count > 1 ? '<span class="islot-n">' + cursor.count + "</span>" : "");
       cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px";
     } else cursorEl.style.display = "none";

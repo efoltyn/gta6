@@ -313,14 +313,23 @@
     const sp = rollFish();
     const econ = CBZ.cityEcon;
     if (!sp || !econ || !econ.add) { note("Nothing biting today.", 1.8); return; }
+    // The catch must EXIST in the catalog before it is granted. registerPelts
+    // runs inside the wildlife build, and a quay can be fished on a map where
+    // that never happened — the stack would then be an item nothing knows
+    // anything about (no icon, no price, no way to eat it). Idempotent.
+    if (CBZ.wildlifeRegisterItems) { try { CBZ.wildlifeRegisterItems(); } catch (e) {} }
     econ.add(sp.fur, 1);
     // a bigger fish is worth filleting; the roll is the same shape wildlife.js
     // uses for its meat yield, and both items were registered by registerPelts.
     if (sp.meat && Math.random() < 0.55) econ.add(sp.meat, 1);
     playerCatches++;
-    const worth = (econ.ITEMS && econ.ITEMS[sp.fur] && econ.ITEMS[sp.fur].value) || sp.furValue || 8;
+    const row = econ.ITEMS && econ.ITEMS[sp.fur];
+    const worth = (row && row.value) || sp.furValue || 8;
     sfx("pickup");
-    note("Landed a " + sp.name + " → " + sp.fur + " (~$" + worth + ")", 2.6);
+    // A CATCH IS DINNER, and the line says so — a fresh fish is tag:"food" now,
+    // so it sits on the hotbar with a number key like any other meal.
+    note("Landed a " + sp.name + " → " + sp.fur + " (~$" + worth + ")" +
+      (row && row.heal ? " · +" + row.heal + " food" : ""), 2.6);
   }
 
   function nearestSpot(px, pz) {
