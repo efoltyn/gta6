@@ -525,6 +525,32 @@
     repeat(root, bg(0.18, 6.0, 0.18), M.steelD, pts, function () { return 3.0; });
     repeat(root, bg(0.7, 0.24, 0.7), M.lampHead, pts, function () { return 6.15; }, null,
       { emissive: M.lampHead, ei: 0.8 });
+    // SOLID. Every OTHER standing object this kit makes — the flagpole, the
+    // watchtower legs, the comms tower, the floodlight masts — takes a col();
+    // the 42 lamp standards lining the ceremonial approaches never did, so the
+    // avenue you drive up was the one thing on the estate you could drive
+    // through. city/towngen.js already collides its own 0.36 m town lamp posts.
+    for (let i = 0; i < pts.length; i++) col(pts[i].x, pts[i].z, 0.4, 0.4, 0, 6.0);
+  }
+
+  // A BOLLARD LINE IS A VEHICLE BARRIER OR IT IS DECORATION. The Capitol and
+  // City Hall both declare in their own comments that bollards ARE their
+  // protection ("a public building is protected by BOLLARDS, not by a wall"),
+  // and both drew them with NO COLLIDER at a 3.2-3.4 m pitch — a ~2.6 m clear
+  // opening, which every car in this game drives straight through. The claim
+  // was untrue twice over. The pitch is now SOLVED rather than typed: the gap
+  // has to be under a car's width and over a body's, so it is authored as the
+  // GAP and the run is re-divided to fit whole bollards into it. Still one
+  // InstancedMesh per line — the draw cost does not change with the count.
+  const BOL_GAP = 1.35;         // clear opening: a 1.1 m body passes, a 1.9 m car cannot
+  function bollardLine(root, cx, cz, half, geo, r, h) {
+    const pitch = BOL_GAP + r * 2;
+    const n = Math.max(1, Math.round((half * 2) / pitch));
+    const pts = [];
+    for (let i = 0; i <= n; i++) pts.push({ x: cx - half + (half * 2) * (i / n), z: cz });
+    repeat(root, geo, M.steelD, pts, function () { return h / 2; });
+    for (let i = 0; i < pts.length; i++) col(pts[i].x, pts[i].z, r * 2, r * 2, 0, h);
+    return pts.length;
   }
 
   // HELIPAD — the disc, the ring and a painted H, on the shared paint colour.
@@ -733,9 +759,7 @@
         lampRow(root, lamps);
         // a public building is protected by BOLLARDS, not by a wall. This is
         // the whole difference between the Capitol and the Agency.
-        const bol = [];
-        for (let i = -9; i <= 9; i++) bol.push({ x: cx + i * 3.4, z: cz + 20 });
-        repeat(root, new THREE.CylinderGeometry(0.24, 0.28, 1.0, 8), M.steelD, bol, function () { return 0.5; });
+        bollardLine(root, cx, cz + 20, 30.6, new THREE.CylinderGeometry(0.24, 0.28, 1.0, 8), 0.28, 1.0);
         // visitor parking, off the ceremonial axis and 2 m clear of the west
         // lawn's edge at -87 (two coplanar slabs is a z-fight, not a detail)
         parkingSea(root, cx - 108, cz + 66, 38, 60);               // x -127..-89, z +36..+96
@@ -963,9 +987,7 @@
         steps(root, cx, cz - 4, 30, 8, 0.3, 6, M.stone, 1);        // z -8..0
         flagpole(root, cx - 18, cz + 6, 12);
         flagpole(root, cx + 18, cz + 6, 12);
-        const bol = [];
-        for (let i = -6; i <= 6; i++) bol.push({ x: cx + i * 3.2, z: cz + 12 });
-        repeat(root, new THREE.CylinderGeometry(0.22, 0.26, 0.95, 8), M.steelD, bol, function () { return 0.48; });
+        bollardLine(root, cx, cz + 12, 19.2, new THREE.CylinderGeometry(0.22, 0.26, 0.95, 8), 0.26, 0.95);
         parkingSea(root, cx, cz + 44, 44, 34);                     // x -22..+22, z +27..+61
         const lamps = [];
         for (let i = 0; i < 4; i++) { lamps.push({ x: cx - 28, z: cz + 20 + i * 11 }); lamps.push({ x: cx + 28, z: cz + 20 + i * 11 }); }

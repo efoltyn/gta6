@@ -590,6 +590,15 @@
   // +/− chips on the map (fullmap.js) stepping the SAME clampZoom path the
   // wheel drives (tap = one step, hold = repeat). Flip false to hide them.
   if (CBZ.CONFIG.MAP_ZOOM_BUTTONS == null) CBZ.CONFIG.MAP_ZOOM_BUTTONS = true;
+  // MAP OWNS SPACE. Owner: "space bar doesnt work to clear waypoint on map."
+  // It never did — fullmap.js only ever bound Backspace/Delete and the footer
+  // advertised [Backspace]. Space is the key the hand is already on, so it
+  // clears the waypoint while the map is up; Backspace/Delete stay as silent
+  // aliases. The map also UN-LATCHES CBZ.keys[" "] for that press, because
+  // systems/input.js writes the key state from a listener that knows nothing
+  // about overlays and vehicles.js's handbrake / playeraircraft's throttle read
+  // that latch every frame. Flip false to give Space back to the world.
+  if (CBZ.CONFIG.MAP_SPACE_CLEARS == null) CBZ.CONFIG.MAP_SPACE_CLEARS = true;
   // BRIDGE WALL RULES: causeway guardrails + curb fall-guard colliders are
   // GAPPED wherever the deck crosses a registered road, so bridge walls only
   // exist over real water/gap spans — never across intersections/mouths.
@@ -779,9 +788,27 @@
   //                          Space/Ctrl, and the mouse is pure FREE-LOOK (it no
   //                          longer secretly steers the nose — that camera-yaw→
   //                          heading coupling was the "stupid controls").
+  //   FLIGHT_KEYS_OWNED    — THE PILOT OWNS THE KEYBOARD. Owner, verbatim: "e
+  //                          doesnt work to turn planes because it jumps out."
+  //                          FLIGHT_CONTROLS_V2 gave Q/E to the rudder (and to
+  //                          the heli's lateral cyclic) and systems/controls.js
+  //                          prints exactly that on the Aeroplane card — but
+  //                          city/interactions.js's keydown routes EVERY E
+  //                          through CBZ.cityTryNearestRide(), whose first
+  //                          branch is "if (P._aircraft) exit the aircraft".
+  //                          So a right-rudder input bailed you out mid-flight.
+  //                          With this on, the whole interact fabric stands
+  //                          down while you are at the controls of an aircraft:
+  //                          no E router, no panel, no verb pills, nothing to
+  //                          shadow Q/E. [F] (playeraircraft.js / bailout.js)
+  //                          stays the one and only way out, which is what the
+  //                          controls card already told the player. Ground
+  //                          vehicles are untouched — E still steps you out of
+  //                          a car. Flip false for the exact old behaviour.
   if (CBZ.CONFIG.FLIGHT_SPEED_V2 == null) CBZ.CONFIG.FLIGHT_SPEED_V2 = true;
   if (CBZ.CONFIG.FLIGHT_GAUGES_DERIVED == null) CBZ.CONFIG.FLIGHT_GAUGES_DERIVED = true;
   if (CBZ.CONFIG.FLIGHT_CONTROLS_V2 == null) CBZ.CONFIG.FLIGHT_CONTROLS_V2 = true;
+  if (CBZ.CONFIG.FLIGHT_KEYS_OWNED == null) CBZ.CONFIG.FLIGHT_KEYS_OWNED = true;
   // AMBIENT AIR TRAFFIC (city/airtraffic.js): a handful of deterministic
   // civilian aircraft (GA prop planes + a light heli) orbiting the city on
   // stacked altitude bands, banking into their turns. Pure atmosphere — no
@@ -1215,6 +1242,32 @@
   // ring). OFF = the old builders byte-for-byte, and nothing registers (the
   // audit reports zeros trivially) — the one-line revert.
   if (CBZ.CONFIG.TREES_V2 == null) CBZ.CONFIG.TREES_V2 = true;
+
+  // BIOME_SOLID_TRUNKS (city/biome_forest.js, biome_snow.js, biome_farmland.js,
+  // world/rockscliffs.js, city/biome_desert.js) — OWNER: "find things in the
+  // game that you can run through." TREES_V2 above made every tree physically
+  // possible; it never made one physically PRESENT. The whole of Redhollow
+  // (~2,600 conifers + ~250 birches, of which exactly 24 collided), all 130
+  // snow pines, all 40 alpine outcrops, every field fence in the farmland
+  // (~110 runs), and every mountain boulder rockscliffs.js has ever scattered
+  // were pure silhouette — you sprinted and drove clean through the lot.
+  // ON: the TRUNK collides (never the canopy: foliage is brushed through,
+  // timber is not), sized from the geometry's OWN base radius times the
+  // instance's OWN scale, and height-gated to its real top so anything above
+  // the treeline passes. The old "not thousands of them (perf)" reasoning does
+  // not survive contact with systems/physics.js: the broadphase is a SPATIAL
+  // GRID, so the per-frame cost is colliders-per-8m-bucket, and at an 11 m
+  // grid pitch with a hard 2.4 m separation a bucket holds one or two trunks.
+  // OFF = every one of those builders byte-for-byte as it shipped.
+  if (CBZ.CONFIG.BIOME_SOLID_TRUNKS == null) CBZ.CONFIG.BIOME_SOLID_TRUNKS = true;
+
+  // SOLID_BACKCOUNTRY (city/continent.js) — the same law for the open country
+  // between the places. That dressing stands on ground continent.js ITSELF
+  // registers as a walkable region ("The Backcountry"), so unlike the offshore
+  // backdrop range it is not scenery, and every trunk and every 1.3-2.4 m
+  // boulder in it was pass-through. Placement is a 46 m grid, so no two of
+  // these can ever share a broadphase bucket. OFF = draw-only, as before.
+  if (CBZ.CONFIG.SOLID_BACKCOUNTRY == null) CBZ.CONFIG.SOLID_BACKCOUNTRY = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

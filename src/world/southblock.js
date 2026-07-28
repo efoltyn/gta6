@@ -57,8 +57,17 @@
   roomShell({ x0: -42, x1: -24, z0: 58, z1: 80, h: 6, wall: 0x7c8590, floor: 0x6a6f78, door: { side: "E", center: 69, width: 4.2 } });
   addBox(-24, 5.4, 69, 0.2, 0.9, 4.0, 0xc85c00, { cast: false }); // sign band
   // workbenches with vices + scattered parts
+  // NO-DECOY SWEEP (owner: "find things in the game that you can run through").
+  // This file was written with `{ solid: true }` on the things whose author
+  // happened to think about it — the crate, the bus, the jersey barriers, the
+  // dumpster — and a bare `{}` on things of exactly the same size and kind
+  // standing a few metres away. The rule applied below is the one world/
+  // clutter.js already states: anything a body can meaningfully approach is
+  // solid, or it reads as a decoy. What is deliberately NOT collided is named
+  // at each site: overhead slabs, sheets and pillows lying on a solid frame,
+  // and the water tank 8 m up (its LEGS are what you walk into).
   function bench2(x, z) {
-    addBox(x, 0.8, z, 3.2, 0.18, 1.2, 0x8a939d, {});                 // top
+    addBox(x, 0.8, z, 3.2, 0.18, 1.2, 0x8a939d, { solid: true });    // top — a 3.2m steel workbench
     addBox(x - 1.4, 0.4, z, 0.2, 0.8, 1.0, 0x5b6470, { cast: false });
     addBox(x + 1.4, 0.4, z, 0.2, 0.8, 1.0, 0x5b6470, { cast: false });
     addBox(x + 1.0, 1.0, z, 0.4, 0.3, 0.4, 0x2a2f38, { cast: false }); // vice
@@ -66,7 +75,7 @@
   }
   bench2(-37, 62); bench2(-37, 76);
   // a glowing forge + sparks
-  addBox(-40, 0.9, 69, 1.6, 1.8, 2.0, 0x2a2f38, {});
+  addBox(-40, 0.9, 69, 1.6, 1.8, 2.0, 0x2a2f38, { solid: true });    // 1.8m masonry forge
   addBox(-40, 1.2, 70.2, 1.2, 0.7, 0.3, 0xff6a1a, { emissive: 0xc83000, ei: 0.9, cast: false });
   // stacked steel stock + a parts crate
   for (let i = 0; i < 4; i++) addBox(-27 + (i % 2) * 0.4, 0.3 + Math.floor(i / 2) * 0.34, 75 + (i % 2) * 0.5, 2.6, 0.28, 0.28, 0x6b7480, { cast: false });
@@ -78,12 +87,14 @@
   roomShell({ x0: 24, x1: 42, z0: 58, z1: 80, h: 6.5, wall: 0xbfb6a4, floor: 0x6e5a3c, door: { side: "W", center: 69, width: 4.2 } });
   addBox(42, 5.8, 69, 0.2, 0.9, 4.0, 0x6d5a8f, { cast: false }); // sign band
   // altar + a tall cross on the far (east) wall
-  addBox(40, 0.6, 69, 1.4, 1.2, 2.4, 0xece3d1, {});
+  addBox(40, 0.6, 69, 1.4, 1.2, 2.4, 0xece3d1, { solid: true });     // stone altar
   addBox(41, 2.6, 69, 0.22, 2.4, 0.22, 0xe8d44f, { emissive: 0x6a5a10, ei: 0.4, cast: false });
   addBox(41, 3.0, 69, 0.22, 0.22, 1.1, 0xe8d44f, { emissive: 0x6a5a10, ei: 0.4, cast: false });
   // rows of pews
   function pew(z) {
-    addBox(31, 0.45, z, 7.2, 0.16, 0.5, 0x9a6a2d, {});
+    // the seat plank is the collider (world/clutter.js's bench rule); the
+    // backrest rides inside its footprint, so one AABB, not two.
+    addBox(31, 0.45, z, 7.2, 0.16, 0.5, 0x9a6a2d, { solid: true });
     addBox(31, 0.8, z - 0.28, 7.2, 0.5, 0.12, 0x8a5e2b, { cast: false });
   }
   [62, 64.4, 66.8, 71.2, 73.6, 76]. forEach(pew);
@@ -97,14 +108,19 @@
   addBox(42, 5.4, 96, 0.2, 0.9, 3.4, 0x2f9e6a, { cast: false }); // green cross band
   addBox(42.0, 5.4, 96, 0.22, 0.6, 0.2, 0xffffff, { emissive: 0xbfeada, ei: 0.5, cast: false });
   function bed(x, z) {
-    addBox(x, 0.45, z, 1.5, 0.2, 2.6, 0x9aa0a8, {});               // frame
+    // FRAME is the collider; the sheet and pillow lie ON it and add nothing.
+    // Safe for propuse: entryOf() approaches a bed from its long side at
+    // >=0.95 m, clear of a 1.5 m-wide frame, and the settle beats deliberately
+    // skip collision (city/propuse.js) — a solid frame is the NORMAL case there
+    // (CBZ.furnish draws a 1.4 m one).
+    addBox(x, 0.45, z, 1.5, 0.2, 2.6, 0x9aa0a8, { solid: true });  // frame
     addBox(x, 0.62, z, 1.3, 0.14, 2.4, 0xeef2f5, { cast: false }); // sheet
     addBox(x, 0.78, z - 0.9, 1.1, 0.16, 0.5, 0xdfe6ec, { cast: false }); // pillow
     addBox(x - 0.95, 0.7, z, 0.08, 1.0, 2.4, 0xcfd6dc, { cast: false }); // privacy screen
   }
   bed(30, 92); bed(30, 100); bed(38, 92); bed(38, 100);
   // a supply cabinet + a glowing monitor
-  addBox(34, 0.9, 90, 1.2, 1.8, 0.7, 0xc7ccd2, {});
+  addBox(34, 0.9, 90, 1.2, 1.8, 0.7, 0xc7ccd2, { solid: true });   // supply cabinet
   addBox(34, 1.6, 90.4, 0.6, 0.4, 0.06, 0x6fb7ff, { emissive: 0x2a6ea5, ei: 0.7, cast: false });
 
   // ============================================================
@@ -115,7 +131,7 @@
   // a bank of industrial washers along the west wall
   for (let i = 0; i < 4; i++) {
     const z = 90 + i * 3.5;
-    addBox(-40, 0.9, z, 1.8, 1.8, 1.8, 0xbfc6cd, {});
+    addBox(-40, 0.9, z, 1.8, 1.8, 1.8, 0xbfc6cd, { solid: true }); // industrial washer
     addBox(-39.1, 1.2, z, 0.1, 0.9, 0.9, 0x223047, { cast: false });          // door
     addBox(-39.05, 1.2, z, 0.06, 0.7, 0.7, 0x6fb7ff, { emissive: 0x2a5e85, ei: 0.4, cast: false }); // glass glow
   }
@@ -130,7 +146,7 @@
   //  LOWER-YARD FITTINGS — hoop, weights, pull-up rig, bleachers
   // ============================================================
   // basketball hoop on the painted court
-  addBox(-11, 2.0, 84.4, 0.2, 4.0, 0.2, 0x6b7480, {});
+  addBox(-11, 2.0, 84.4, 0.2, 4.0, 0.2, 0x6b7480, { solid: true }); // 4m pole
   addBox(-11, 3.6, 85.0, 1.6, 0.12, 0.9, 0xff7a1a, { cast: false });
   addBox(-11, 3.95, 84.6, 1.4, 0.7, 0.08, 0xffffff, { cast: false });
   // weight benches + plates
@@ -142,8 +158,8 @@
   }
   weightBench(8, 100); weightBench(11, 106);
   // pull-up / dip rig
-  addBox(4, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, {});
-  addBox(13, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, {});
+  addBox(4, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, { solid: true });
+  addBox(13, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, { solid: true });
   addBox(8.5, 2.7, 110, 9.0, 0.16, 0.16, 0x6b7480, { cast: false });
   // tiered bleachers along the west edge of the infield
   for (let i = 0; i < 3; i++) addBox(-17, 0.4 + i * 0.5, 96, 2.2, 0.4, 14 - i * 2, 0x6e7682, { solid: i === 0 });
@@ -176,7 +192,12 @@
   // ---- water tower in the south-west corner (a tall landmark) ----
   (function waterTower() {
     const x = -38, z = 116;
-    for (const dx of [-1.4, 1.4]) for (const dz of [-1.4, 1.4]) addBox(x + dx, 4.0, z + dz, 0.3, 8.0, 0.3, 0x6b7480, { cast: false });
+    // THE LEGS are what you walk into — four 8 m steel columns you used to
+    // stroll straight through under the compound's tallest landmark. The TANK
+    // deliberately stays open: it spans y 7.9-10.9, so a full-height AABB on it
+    // would be a 5.2 m invisible wall standing on the ground under a tank
+    // that is three storeys over your head.
+    for (const dx of [-1.4, 1.4]) for (const dz of [-1.4, 1.4]) addBox(x + dx, 4.0, z + dz, 0.3, 8.0, 0.3, 0x6b7480, { cast: false, solid: true });
     addBox(x, 9.4, z, 5.2, 3.0, 5.2, 0x9aa3ad, {});
     addBox(x, 11.0, z, 4.0, 1.4, 4.0, 0x7d8794, { cast: false }); // conical-ish top
     addBox(x, 9.4, z + 2.65, 3.0, 1.0, 0.1, 0xc94d3a, { cast: false }); // painted band

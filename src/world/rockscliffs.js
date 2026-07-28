@@ -342,6 +342,11 @@
     const align = opts.alignToSlope == null ? 0 : Math.max(0, Math.min(1, opts.alignToSlope));
     const flatten = opts.flatten == null ? 0 : Math.max(0, Math.min(1, opts.flatten));
     const bury = opts.bury == null ? 0.18 : opts.bury;
+    // opts.solidMin: horizontal radius (metres) at or above which a rock gets a
+    // collider. 0 / absent = the old draw-only behaviour, so no existing caller
+    // changes until it asks. See the push inside the instance loop below.
+    const solidMin = (CBZ.CONFIG && CBZ.CONFIG.BIOME_SOLID_TRUNKS === false) ? 0 : (+opts.solidMin || 0);
+    let solidN = 0;
     const hashVary = !!opts.hashVary;
     const hash01 = CBZ.hash01;
     for (let v = 0; v < variantN; v++) {
@@ -381,6 +386,24 @@
         dummy.scale.set(xzS, yS, xzS * (hashVary ? 0.84 + vary * 0.32 : 1));
         dummy.updateMatrix();
         im.setMatrixAt(i, dummy.matrix);
+        // SOLIDITY (opt-in per caller, `opts.solidMin` = the smallest radius
+        // worth colliding). This file is the ONE rock factory in the game —
+        // terrain.js, terrain_overhaul.js x2, mountain_detail.js and
+        // biome_desert.js all come through here — and it had never pushed a
+        // single collider, so every boulder in every mountain range was
+        // silhouette. One AABB per rock, and only for rocks big enough that
+        // walking through one is noticeable; the pebbles stay free.
+        // The AABB is the BURIED body's real footprint: xzS is the horizontal
+        // scale actually written into the matrix above, so it can never drift
+        // from what is drawn, and the top is the instance's own yS.
+        if (solidMin > 0 && xzS >= solidMin && CBZ.colliders) {
+          const e = xzS * 0.82;                  // inset: a rounded rock is not a cube
+          CBZ.colliders.push({
+            minX: p.x - e, maxX: p.x + e, minZ: p.z - e, maxZ: p.z + e,
+            y0: 0, y1: p.y - p.s * bury + yS, ref: null, noCam: true,
+          });
+          solidN++;
+        }
       }
       im.instanceMatrix.needsUpdate = true;
       im.matrixAutoUpdate = false;
@@ -390,7 +413,7 @@
       meshes.push(im);
     }
 
-    return { count: placed.length, meshes: meshes };
+    return { count: placed.length, meshes: meshes, solids: solidN };
   }
   CBZ.scatterRocks = scatterRocks;
 })();

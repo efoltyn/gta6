@@ -35,7 +35,17 @@
 
   function tower(x, z) {
     CBZ.towers.push({ x: x, z: z });
-    addBox(x, 3, z, 2.2, 6, 2.2, 0x6b7480, {});                       // stilt body
+    // SOLID AT LAST. This file's own header has admitted since the day it
+    // shipped that the towers were "pure walk-around decoration (addBox only,
+    // no door, no collider on the cabin)" — a later pass added the ladder and
+    // the deck and STILL never made the tower itself stop anything, so eight
+    // 6 m guard towers ringing the compound were geometry you strolled clean
+    // through. The STILT is the collider (2.2 m square, full height): it is
+    // the part a body meets. The cabin above deliberately stays open — it
+    // overhangs the stilt by 0.6 m on every side at 5.85-6.95 m, i.e. over
+    // your head on the ground and under your feet on the deck, and walling it
+    // would seal the one place the ladder exists to reach.
+    addBox(x, 3, z, 2.2, 6, 2.2, 0x6b7480, { solid: true });          // stilt body
     addBox(x, 6.4, z, 3.4, 1.1, 3.4, 0x515a66, {});                   // cabin
     // windows on the cabin
     addBox(x, 6.5, z + 1.72, 2.6, 0.7, 0.08, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.5, cast: false });

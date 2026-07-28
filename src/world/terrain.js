@@ -638,6 +638,14 @@
           variants: 3,
           colorHex: 0x716b60,             // dark weathered granite, close to terrain's COL_ROCK band
           seed: 4242,
+          // SOLID: these sit on the REAL terrain height field near the spine —
+          // ground you walk and drive — and at 3-9 m across, running through
+          // one is the most obvious decoy on the mountain. The two
+          // terrain_overhaul.js scatters deliberately DO NOT opt in: those
+          // dress the offshore backdrop range, which is collision-free on
+          // purpose ("decorative mountains are not geography") and is already
+          // pinned unreachable by CBZ.backdropAudit().onPlate === 0.
+          solidMin: 1.5,
         });
         if (scat && scat.meshes) for (const m of scat.meshes) heroMeshes.push(m);
       }

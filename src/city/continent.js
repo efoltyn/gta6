@@ -1934,7 +1934,39 @@
       const rCol = V2 ? new Float32Array(nRock * 3) : null;
       const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkG) : null;
       const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(canopyG) : null;
-      let ti = 0, ri = 0;
+      // ---- SOLIDITY: a tree you can DRIVE THROUGH is the worst decoy an open
+      // world can ship, and until now every one of these trunks and every one
+      // of these boulders was pure silhouette. They stand on ground THIS FILE
+      // registers as a real walkable region ("The Backcountry", biome `wilds`),
+      // so they are not scenery the way the offshore backdrop range is.
+      //
+      // WHAT GETS A COLLIDER, AND WHAT DELIBERATELY DOES NOT:
+      //   • the TRUNK does — it is the part a body and a bumper actually meet,
+      //     and it is what city/props.js's planterTree has always collided.
+      //   • the CANOPY does NOT. Its blob is 3.8-7 m across; collide it and the
+      //     backcountry becomes a wall instead of a wood. Foliage is brushed
+      //     through, timber is not.
+      //   • a ROCK does, whole — it is a 1.3-2.4 m boulder and there is nothing
+      //     soft about it.
+      // PERF: the placement grid is CELL = 46 m, so a tree and its neighbour can
+      // never share an 8 m broadphase bucket — every one of these lands in a
+      // bucket of its own and the per-frame query cost is unchanged. One AABB
+      // per object, never one per part.
+      const SOLID_BC = CFG.SOLID_BACKCOUNTRY !== false;
+      const COLS = CBZ.colliders;
+      // yawed-box world half-extent: the instance is rotated about Y by `rot`,
+      // so re-typing the geometry's own half-width as an AABB would understate
+      // it by up to 41%. Derive it from the SAME rot the matrix was built with.
+      function yawExt(hx, hz, rot, axis) {
+        const c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot));
+        return axis === 0 ? hx * c + hz * s : hx * s + hz * c;
+      }
+      function solidAt(x, z, hx, hz, rot, ref) {
+        if (!SOLID_BC || !COLS) return;
+        const ex = yawExt(hx, hz, rot, 0), ez = yawExt(hx, hz, rot, 1);
+        COLS.push({ minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, ref: ref || null, noCam: true });
+      }
+      let ti = 0, ri = 0, solids = 0;
       for (const s of spots) {
         const scale = 0.8 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8806) : 0.5) * 0.7;
         const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8807) : 0.3) * Math.PI * 2;
@@ -1961,6 +1993,10 @@
               dummy.scale.set(sc * 0.9, sc, sc * 0.9);
             }
             dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
+            // trunk footprint = the 0.5 m base box under the instance's own
+            // xz scale (sc*0.9), taken through the instance's own yaw.
+            solidAt(s.x, s.z, 0.25 * sc * 0.9, 0.25 * sc * 0.9, rot, trunks);
+            solids++;
             if (TREES2 && tbb) {
               parts = [];
               CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
@@ -1990,6 +2026,8 @@
           } else {
             dummy.position.set(s.x, gy + 1.3 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
             dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
+            solidAt(s.x, s.z, 0.25 * scale, 0.25 * scale, rot, trunks);
+            solids++;
             dummy.position.y = (2.6 + 2.15) * scale - 0.06;
             dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
           }
@@ -1997,6 +2035,11 @@
         } else {
           dummy.position.set(s.x, reliefAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
           dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
+          // the whole rock: a 1.6 x 1.4 box under `scale` (0.8-1.5), so 1.3-2.4 m
+          // of boulder standing 1.2-1.65 m proud — well over physics.js's 0.45
+          // STEP_UP, i.e. a thing you go around, not over.
+          solidAt(s.x, s.z, 0.8 * scale, 0.7 * scale, rot, rocks);
+          solids++;
           if (V2) {
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8819) : 0.5;
             const g = 0.42 + hs * 0.22;                      // grey with a warm-brown hint
@@ -2016,6 +2059,9 @@
       trunks.frustumCulled = canopies.frustumCulled = rocks.frustumCulled = false;
       trunks.userData.terrain = canopies.userData.terrain = rocks.userData.terrain = true;
       city.root.add(trunks, canopies, rocks);
+      // published for CBZ.solidityAudit() (city/props.js) — the ONE number that
+      // says the backcountry is timber and stone rather than a painted backdrop.
+      CBZ.backcountrySolids = { trees: ti, rocks: ri, solids: solids, on: SOLID_BC };
     }
 
     // ---- the walkable underlay region(s) (registered LAST on purpose:

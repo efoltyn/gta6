@@ -1702,6 +1702,22 @@
     // world/treeaudit.js. Draw calls unchanged: 3 InstancedMeshes.
     (function pines() {
       const COUNT = 130;
+      // SOLID TRUNKS. Every pine on this mountain was pure silhouette — you
+      // rode a snowboard and drove a truck through the whole stand. Only the
+      // TRUNK collides (the canopy is a 1.5-3 m cone of foliage you brush
+      // past), sized from the geometry's OWN base radius times the instance's
+      // OWN scale, and height-gated to the trunk's real top so nothing above
+      // the treeline is walled off. Same flag as the forest: one revert covers
+      // every biome that grew a trunk collider in this pass.
+      const SOLID_TRUNKS = !(CBZ.CONFIG && CBZ.CONFIG.BIOME_SOLID_TRUNKS === false);
+      function pineSolid(x, z, sc, topY) {
+        if (!SOLID_TRUNKS) return;
+        const r = 0.32 * sc + 0.05;             // trunkG base radius 0.32
+        // y0 = 0 / y1 = the trunk's real top: on a mountain the ground is tens
+        // of metres up, so this reads as full-height from the snow but still
+        // lets anything ABOVE the treeline (a helicopter) pass cleanly.
+        pushCol(x - r, x + r, z - r, z + r, 0, topY, null);
+      }
       const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
       if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("snow");
       const trunkG = new THREE.CylinderGeometry(0.22, 0.32, 1.6, 5);
@@ -1780,6 +1796,7 @@
           m4.compose(v, q, s); capIM.setMatrixAt(n, m4);
           if (kbb) CBZ.treeAabbPush(parts, m4, kbb.min.x, kbb.min.y, kbb.min.z, kbb.max.x, kbb.max.y, kbb.max.z);
           if (tbb && cbb && kbb) CBZ.treeRegisterTree("snow", seatRef, parts);
+          pineSolid(p.x, p.z, sc, trunkTop);
           n++;
           continue;
         }
@@ -1790,6 +1807,7 @@
         v.set(p.x, gy + (1.6 + 2.1) * sc, p.z); m4.compose(v, q, s); canopyIM.setMatrixAt(n, m4);
         // snow cap — hugs the top ~44% of the canopy, flush with its slope (same q so facets align)
         v.set(p.x, gy + 4.9 * sc, p.z); m4.compose(v, q, s); capIM.setMatrixAt(n, m4);
+        pineSolid(p.x, p.z, sc, gy + 1.6 * sc);
         n++;
       }
       trunkIM.count = canopyIM.count = capIM.count = n;
@@ -1826,8 +1844,17 @@
         // T8 — skip rocks/drifts that fall in the resort village (keep the rng
         // draws above so determinism + the drift below are unchanged).
         if (!inTown(a.x, a.z) && claimNature(a.x, a.z, Math.max(0.9, sc * 0.9))) {
-          s.set(sc, sc * (0.7 + rng() * 0.5), sc); v.set(a.x, mountainHeightAt(a.x, a.z) + sc * 0.35, a.z);
+          const ry = 0.7 + rng() * 0.5;
+          s.set(sc, sc * ry, sc); v.set(a.x, mountainHeightAt(a.x, a.z) + sc * 0.35, a.z);
           m4.compose(v, q, s); rockIM.setMatrixAt(rn++, m4);
+          // SOLID: a dodecahedron up to 5.5 m across standing on open snow.
+          // (The DRIFTS below stay open on purpose — a drift is loose snow you
+          // wade through, and it is only 0.45-0.9 m proud anyway.)
+          if (!(CBZ.CONFIG && CBZ.CONFIG.BIOME_SOLID_TRUNKS === false)) {
+            const rr = 1.1 * sc * 0.92;          // rockG radius 1.1, inset for the facets
+            const gy2 = mountainHeightAt(a.x, a.z);
+            pushCol(a.x - rr, a.x + rr, a.z - rr, a.z + rr, 0, gy2 + sc * 0.35 + 1.1 * sc * ry, null);
+          }
         } else { rng(); }                        // consume the height-jitter draw
         const b = pd[i], dc = 1.4 + rng() * 3.2;
         s.set(dc, dc * (0.32 + rng() * 0.2), dc * (0.7 + rng() * 0.6));

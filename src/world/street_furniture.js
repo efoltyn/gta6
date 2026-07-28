@@ -361,6 +361,14 @@
       faces.quadWall(fx, y + mountY, fz, w, h, nx, nz, 0xffffff, DK.atlasCell(cellFront, GRID));
       const bx = x - nx * 0.045, bz = z - nz * 0.045;
       faces.quadWall(bx, y + mountY, bz, w, h, -nx, -nz, 0xffffff, DK.atlasCell(cellBack, GRID));
+      // SOLID. This kit's own policy line (detail_kit.js:688) says "only
+      // genuinely solid things get one: poles, bollards, dumpsters, cabinets,
+      // barriers" — and then every sign POLE in the world was left out, so a
+      // 3 m galvanised post standing on a kerb was pass-through while the 1 m
+      // bollard beside it was not. Same radius as the bollard (0.16 vs its own
+      // 0.09 shaft, matching city/props.js's parking-meter treatment: a body
+      // meets the post, not the paint on it).
+      DK.solid(x, z, 0.14, 0.14, null);
       DK.claim(x, z);
     }
 
@@ -431,6 +439,7 @@
       faces.quadWall(sx, y + 3.5, sz - 0.03, 1.35, 0.3, 0, -1, 0xffffff, DK.atlasCell(C_BLADE_BACK, GRID));
       faces.quadWall(sx + 0.03, y + 3.16, sz, 1.35, 0.3, 1, 0, 0xffffff, DK.atlasCell(cB, GRID));
       faces.quadWall(sx - 0.03, y + 3.16, sz, 1.35, 0.3, -1, 0, 0xffffff, DK.atlasCell(C_BLADE_BACK, GRID));
+      DK.solid(sx, sz, 0.14, 0.14, null);          // the 3.75 m mast, same rule as sign() above
       DK.claim(sx, sz);
       bladeN++;
     }

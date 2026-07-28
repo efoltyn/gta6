@@ -513,18 +513,49 @@
     root.add(roundTrunkInst);
     root.add(roundCrownInst);
 
-    // a HANDFUL of big landmark trunks get real colliders (near the spine
-    // landing) so the forest feels solid where you'd actually brush a trunk —
-    // but NOT thousands of them (perf). Pick the biggest few near the path.
+    // EVERY TRUNK IS SOLID. This used to be 24 hand-picked "landmark" trunks
+    // near the trail, on the reasoning "NOT thousands of them (perf)" — which
+    // left ~2,600 conifers and ALL ~250 birches (the round-canopy loop was
+    // never even iterated here) as pure silhouette, i.e. a whole forest you
+    // sprint and drive straight through. Two things make the perf line wrong:
+    //   • the broadphase is a SPATIAL GRID (systems/physics.js), so what costs
+    //     a frame is colliders-per-8m-bucket, not colliders-in-the-world. The
+    //     grid pitch here is 11 m with a hard 2.4 m `claimNature` separation,
+    //     so a bucket holds one or two trunks — the per-frame query is
+    //     unchanged whether this pushes 24 boxes or 2,900.
+    //   • the AABB is now the trunk's REAL radius (the geometry's own base
+    //     radius times the instance's own scale) instead of `tr*0.45 + 0.3`,
+    //     which was nearly double the timber. Tightest gap that leaves is
+    //     2.4 - 0.76 = 1.64 m: a 1.1 m body walks the woods, a 1.9 m car does
+    //     not — which is the correct difference between a forest and a lawn.
+    // FOLIAGE IS STILL FREE: only trunks. Flag: BIOME_SOLID_TRUNKS.
+    const SOLID_TRUNKS = !(CBZ.CONFIG && CBZ.CONFIG.BIOME_SOLID_TRUNKS === false);
     let placed = 0;
-    for (let i = 0; i < N && placed < 24; i++) {
-      const t = trees[i];
-      if (t.h < 16) continue;
-      if (!nearTrailZone(t.x, t.z)) continue;
-      const r = t.tr * 0.45 + 0.3;
-      CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h });
-      placed++;
+    if (SOLID_TRUNKS) {
+      for (let i = 0; i < N; i++) {
+        const t = trees[i];
+        const r = t.tr * 0.42 + 0.06;          // trunkGeo base radius 0.42 x per-instance scale
+        CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
+        placed++;
+      }
+      for (let i = 0; i < RN; i++) {
+        const t = roundTrees[i];
+        const r = t.tr * 0.20 + 0.05;          // roundTrunkGeo base radius 0.20
+        CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
+        placed++;
+      }
+    } else {
+      // legacy: the 24 landmark trunks, byte-identical (the one-line revert)
+      for (let i = 0; i < N && placed < 24; i++) {
+        const t = trees[i];
+        if (t.h < 16) continue;
+        if (!nearTrailZone(t.x, t.z)) continue;
+        const r = t.tr * 0.45 + 0.3;
+        CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h });
+        placed++;
+      }
     }
+    CBZ.forestTrunkSolids = placed;
     function nearTrailZone(x, z) {
       for (let i = 0; i < trailPts.length; i++)
         if (d2(x, z, trailPts[i].x, trailPts[i].z) < 18 * 18) return true;

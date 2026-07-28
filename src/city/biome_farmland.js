@@ -380,10 +380,34 @@
     //    perimeter. We gather post matrices across all fields → one draw call.
     // =====================================================================
     const postMats = [], railMats = [];
+    // A FENCE THAT DOES NOT FENCE IS A DRAWING OF A FENCE. Every field in this
+    // biome was ringed with ~2,400 posts and ~110 rails through
+    // `buildInstanced`, which pushes NO collider — so the one thing that tells
+    // you where a farm ends stopped nothing, and you drove through every
+    // boundary in the county. The collider goes on the RUN, not on the posts:
+    // one thin AABB the length of the whole side (~110 boxes for the entire
+    // network instead of ~2,400), which is also what actually blocks — a
+    // per-post collider would leave 4 m gaps you could walk through anyway.
+    // y-gated to the rail top (0.94), so it is a fence, not a wall: it is under
+    // the 1.0 m NPC step ledge, and a chase can still put a car through it as
+    // an obstacle rather than a cliff. Flag: BIOME_SOLID_TRUNKS (one revert
+    // for every collider this solidity pass added to the biomes).
+    let fenceCols = 0;
+    function fenceSolid(x0, z0, x1, z1) {
+      if (CBZ.CONFIG && CBZ.CONFIG.BIOME_SOLID_TRUNKS === false) return;
+      const T = 0.18;                             // half-thickness of the rail run
+      CBZ.colliders.push({
+        minX: Math.min(x0, x1) - T, maxX: Math.max(x0, x1) + T,
+        minZ: Math.min(z0, z1) - T, maxZ: Math.max(z0, z1) + T,
+        y0: 0, y1: 0.94, noCam: true,
+      });
+      fenceCols++;
+    }
     function fenceLine(x0, z0, x1, z1) {
       const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz);
       const segs = Math.max(1, Math.round(len / 4));
       const ang = Math.atan2(dx, dz);
+      fenceSolid(x0, z0, x1, z1);
       for (let i = 0; i <= segs; i++) {
         const t = i / segs, x = x0 + dx * t, z = z0 + dz * t;
         _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0);
@@ -408,6 +432,7 @@
     }
     buildInstanced(new THREE.BoxGeometry(0.12, 1.1, 0.12), M.wood, postMats, false);
     buildInstanced(new THREE.BoxGeometry(0.06, 0.08, 1), M.woodLt, railMats, false);
+    CBZ.farmFenceSolids = fenceCols;
 
     // Irrigation channels are painted into the unified surface above.
 

@@ -491,6 +491,128 @@
     };
   };
 
+  /* ======================================================================
+     CBZ.solidityAudit() — THE RATCHET FOR "YOU CAN RUN THROUGH IT".
+     ======================================================================
+     OWNER: "find things in the game that you can run through."
+
+     world/clutter.js states the law this measures: *any prop a body can
+     meaningfully approach must be solid, or it reads as a decoy.* The census
+     below is a STATIC TABLE, hand-counted file-by-file against the drawing
+     code, because most of these objects are InstancedMesh rows or merged
+     BufferGeometry — there is nothing in the live scene graph to walk and ask
+     "are you solid", and a heuristic that scanned CBZ.colliders could not tell
+     a tree's AABB from a fence post's. Where a builder CAN publish its own
+     live count it does, and this reads that instead of the table
+     (CBZ.backcountrySolids, CBZ.forestTrunkSolids, CBZ.farmFenceSolids) — the
+     CBZ.heliFleet pattern, so a future consumer costs this function no edit.
+
+     THE THREE NUMBERS THAT RATCHET, and they may only ever move one way:
+       classesBare   may only go DOWN   — a drawn class with no collider that
+                                          nobody has argued should be bare.
+       classesFixed  may only go UP     — printed beside `bare` so a "fix" that
+                                          just deletes geometry cannot pass.
+       decoyPolicy   may only go DOWN   — a class deliberately left bare. It is
+                                          NOT zero and should not be: a traffic
+                                          cone that stops a car is a bollard,
+                                          and every driver knows the difference.
+                                          But every row in it is a promise that
+                                          somebody thought about it, so the
+                                          number is published, not hidden.
+
+     WHAT THIS CANNOT SEE WITHOUT A BOOT, stated so nobody mistakes the table
+     for a measurement: the true INSTANCE counts (they are seed-dependent), and
+     whether an added collider stranded a propuse anchor — that is
+     CBZ.propUseAudit().blocked's job, and it must not rise.
+     ====================================================================== */
+  // status: "solid" (was already) · "fixed" (this pass) · "bare" (found, left,
+  // reason given) · "decoy" (deliberately non-solid, reason given)
+  const SOLIDITY = [
+    // ---- fixed in the solidity pass -----------------------------------
+    ["continent:backcountry-trunk", "fixed", "~10^3 trees on registered walkable country; trunk only, canopy free"],
+    ["continent:backcountry-rock", "fixed", "1.3-2.4 m boulders on the same ground"],
+    ["forest:conifer-trunk", "fixed", "was 24 of ~2600, capped 'for perf' against a spatial broadphase"],
+    ["forest:birch-trunk", "fixed", "the round-canopy loop was never iterated by the collider pass at all"],
+    ["snow:pine-trunk", "fixed", "130 pines, 0 colliders — you rode through the whole stand"],
+    ["snow:rocky-outcrop", "fixed", "40 dodecahedra up to 5.5 m on open snow"],
+    ["farmland:field-fence", "fixed", "one AABB per RUN (~110) beats one per post (~2400) and is what blocks"],
+    ["terrain:mountain-boulder", "fixed", "3-9 m, via rockscliffs.js's new opts.solidMin — the ONE rock factory"],
+    ["desert:rock-cluster", "fixed", "same seam; disabled by default flag, wired for when it is on"],
+    ["desert:motel-pylon", "fixed", "9 m roadside mast, the one thing at that stop with no col()"],
+    ["highway:suspension-tower-leg", "fixed", "26 m leg that ALSO stood in the outer travel lane; moved out AND collided"],
+    ["prison:watchtower-stilt", "fixed", "8 towers; the file's own header admitted this and never fixed it"],
+    ["prison:water-tower-leg", "fixed", "4 x 8 m columns under the compound's tallest landmark"],
+    ["prison:forge/altar/washer/cabinet/workbench/pew/bed", "fixed", "same rooms as the crate+bus that WERE solid"],
+    ["town:square-bench", "fixed", "4/town; 0.65 m top is over physics.js's 0.45 STEP_UP"],
+    ["town:hitching-rail", "fixed", "and its two POSTS were never drawn at all — a stick floating at waist height"],
+    ["street:sign-post", "fixed", "~90; the 1 m bollard beside it was solid, the 3 m post was not"],
+    ["street:name-blade-mast", "fixed", "~60, same rule"],
+    ["roof:water-tank", "fixed", "5.5 m on a WALKABLE roof; y-gated so it is not a column to the pavement"],
+    ["roof:hvac-chiller", "fixed", "2.3 m, same y-gate"],
+    ["marina:travel-lift-leg", "fixed", "4 x 8.4 m — the biggest machine on the waterfront"],
+    ["marina:mooring-pile", "fixed", "8 x 5.2 m driven timbers at the channel mouth"],
+    ["gov:lamp-standard", "fixed", "42 x 6 m; every other standing object in that kit took a col()"],
+    ["gov:security-bollard", "fixed", "32, and the PITCH was solved too — 3.4 m let a car through the Capitol line"],
+    ["annex:cooler/snack-rack/parts-shelf", "fixed", "free-standing, in rooms with no walls to cover them"],
+    ["town:welcome-sign", "fixed", "the INVERSE fault: an 11 m solid wall filling the gap between two posts"],
+    // ---- already solid before this pass (spot-checked, not re-listed in full)
+    ["military:perimeter-fence", "solid", "island_military.js col() runs the full 2.4 m edge, split around gates"],
+    ["venue:perimeter-fence", "solid", "speedway_structures fence() flushes contiguous AABBs; colliderPitch is BOX LENGTH, not spacing"],
+    ["gov:perimeter-wall/fence", "solid", "wallRun/wallRunFence collide per span, not per post"],
+    ["street:hydrant/mailbox/bin/meter/newsbox/planter/bikerack/propane", "solid", "props.js solidCollider"],
+    ["street:dumpster/crate/bollard/barrier", "solid", "street_furniture.js DK.solid"],
+    ["street:utility-pole/pad-transformer/cabinet", "solid", "utility_lines.js DK.solid"],
+    ["bunker:everything-but-the-ammo-crate", "solid", "best-collided file in the game"],
+    ["beach:pier/shack/stall/lifeguard/rowboat/palm", "solid", "several correctly y-gated"],
+    ["checkpoint:barrier-board", "solid", "y0/y1 gated, markCollidersDirty'd"],
+    // ---- deliberately bare, and WHY (the decoy budget) -----------------
+    ["street:traffic-cone", "decoy", "checkpoints.js: 'a cone that stops a car is a bollard'"],
+    ["alley:bin/newsbox/cone knockables", "decoy", "tonight's alley law — they tip, they do not wall"],
+    ["park:bench/hedge", "decoy", "buildings.js: 'brushable so chases never snag' (authored, and it contradicts clutter.js — flagged, not overruled)"],
+    ["terrain:offshore-backdrop-range", "decoy", "'decorative mountains are not geography'; backdropAudit().onPlate pinned 0"],
+    ["wildnature:backdrop-scatter", "decoy", "7500 trees + 2100 rocks, off-plate by construction"],
+    ["harbor:east-decor-hulls/rip-rap", "decoy", "world.js: outside the perimeter wall, over water"],
+    ["street:litter/weeds/drains/bags/pallets/bikes", "decoy", "detail_kit.js's own fine-grain policy line"],
+    ["roof:vent/dish/aerial/duct", "decoy", "sub-1 m, or dormant under PROPS_PURGE_V1"],
+    ["facade:awning/shutter/downpipe/wall-lamp", "decoy", "lowest edge 3.1 m — you walk under it"],
+    // ---- FOUND AND LEFT: the honest backlog ----------------------------
+    ["facade:fire-escape-drop-ladder", "bare", "hangs into 0.7-3.4 m body height, ~100 of them; a 1.25 m collider off a wall risks blocking the pavement it overhangs — needs a measured footprint, not a guess"],
+    ["gov:perimeter-GATE-opening", "bare", "7 complexes have a 16-24 m gap with no gate leaf at all; that is a missing OBJECT, not a missing collider"],
+    ["gov:hedge", "bare", "99 x 4.4-5.4 m parterres; hedges are the one class this pass deliberately did not decide"],
+    ["gov:watchtower-deck-rail", "bare", "deck is unreachable (no ladder) AND unfenced — fix the ladder first"],
+    ["marina:breakwater-riprap", "bare", "~92 rocks; the CAP is a walkable platform sitting on a pass-through mound"],
+    ["marina:terrace-rail/umbrella/planter", "bare", "yacht-club terrace furniture"],
+    ["bunker:ammo-crate-stack", "bare", "the single missing col() in an otherwise complete file"],
+    ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up — but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
+    ["forest:fallen-log/tent", "bare", "8 logs at 5-10 m, 3 tents at 4.8 m"],
+    ["annex:island-tree", "bare", "50 of 64 trunks, capped at 14 by an explicit comment"],
+    ["highway:elevated-pylon/deck-lamp", "bare", "DORMANT — every caller passes elevated:false and HWY_LAMPS defaults off; pre-broken if either flips"],
+  ];
+  CBZ.solidityAudit = function () {
+    const out = { classesChecked: SOLIDITY.length, classesSolid: 0, classesFixed: 0, decoyPolicy: 0, classesBare: 0, bare: [] };
+    for (let i = 0; i < SOLIDITY.length; i++) {
+      const r = SOLIDITY[i];
+      if (r[1] === "solid") out.classesSolid++;
+      else if (r[1] === "fixed") out.classesFixed++;
+      else if (r[1] === "decoy") out.decoyPolicy++;
+      else { out.classesBare++; out.bare.push(r[0] + " — " + r[2]); }
+    }
+    // LIVE counts where a builder publishes one; null means that builder did
+    // not run this boot (flag off / landmass absent), which is not a failure.
+    const bc = CBZ.backcountrySolids || null;
+    out.live = {
+      backcountry: bc ? bc.solids : null,
+      backcountryOn: bc ? !!bc.on : null,
+      forestTrunks: CBZ.forestTrunkSolids != null ? CBZ.forestTrunkSolids : null,
+      farmFenceRuns: CBZ.farmFenceSolids != null ? CBZ.farmFenceSolids : null,
+      redCurbs: (CBZ.city && CBZ.city.arena && CBZ.city.arena._redCurbs != null)
+        ? CBZ.city.arena._redCurbs
+        : ((CBZ.city && CBZ.city._redCurbs != null) ? CBZ.city._redCurbs : null),
+      colliders: (CBZ.colliders && CBZ.colliders.length) | 0,
+    };
+    return out;
+  };
+
   // LAMP_INSTANCED street-lamp bulb/glow pools (filled by cityProps once the
   // posts are placed; read by hitProp when a lamp is shot out). _zeroM4 is the
   // collapse matrix for broken instances.

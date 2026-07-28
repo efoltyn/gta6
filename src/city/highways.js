@@ -411,7 +411,18 @@
     const px = -dz, pz = dx;                    // unit perpendicular (across the deck)
     const towerT = span * 0.18;                 // towers stand 18% of the way in from each end
     const towerY = deckY + 26;                   // tower deck-top height (tall enough to read over the gap)
-    const railOff = width / 2 - 1.2;             // cables run just inboard of the guardrail line
+    // A TOWER STANDS BESIDE THE CARRIAGEWAY, NEVER IN IT. This was
+    // `width/2 - 1.2`, which put a 26 m concrete leg 1.2 m INBOARD of the deck
+    // edge — on a 24 m deck the outer travel lane ends at 11.4 and the leg
+    // occupied 10.02..11.58, i.e. squarely in traffic — and drew it with no
+    // collider, so cars drove straight THROUGH a bridge tower. Two faults, one
+    // number: pushing the offset out by exactly one leg half-width seats the
+    // leg's INNER face on the deck edge, so the silhouette still straddles the
+    // deck, the outer lane is clear, and the leg can be solid (below) without
+    // turning that lane into a trap. Cables and hangers ride the SAME constant
+    // — one object, one number (the lampMast/ATTACH law).
+    const LEG_R = 0.55;                          // half-width of the 1.1 m square leg
+    const railOff = width / 2 + LEG_R;           // cable line == tower line == deck edge + leg
 
     const towerMat = new THREE.MeshLambertMaterial({ color: 0x8b929c });
     const cableMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
@@ -431,12 +442,25 @@
       const yaw = Math.atan2(dx, dz);
       tg.rotation.y = yaw;
       const legH = towerY - tw.y;
-      const legGeo = new THREE.BoxGeometry(1.1, legH, 1.1);
+      const legGeo = new THREE.BoxGeometry(LEG_R * 2, legH, LEG_R * 2);
       for (const s of [-1, 1]) {
         const leg = new THREE.Mesh(legGeo, towerMat);
         leg.position.set(s * railOff, legH / 2, 0);
         leg.castShadow = true;
         tg.add(leg);
+        // SOLIDITY: the one piece of this bridge a body can actually reach.
+        // The group is yawed by atan2(dx,dz), so local +X maps to world
+        // (dz, -dx) — take the leg's world centre through THAT, never by
+        // re-typing an offset (the utility_lines wire bug). The AABB is the
+        // yawed square's own extent, so it is honest at any bearing, and it
+        // is FULL HEIGHT because the leg is a 26 m column: nothing on this
+        // bridge should be able to pass through it at any altitude.
+        const lx = tw.x + s * railOff * dz, lz = tw.z - s * railOff * dx;
+        const ext = LEG_R * (Math.abs(dz) + Math.abs(dx));
+        if (CBZ.colliders) CBZ.colliders.push({
+          minX: lx - ext, maxX: lx + ext, minZ: lz - ext, maxZ: lz + ext,
+          ref: leg, noCam: true,
+        });
       }
       const beam = new THREE.Mesh(new THREE.BoxGeometry(railOff * 2 + 1.1, 1.0, 1.0), towerMat);
       beam.position.set(0, legH - 3.0, 0);

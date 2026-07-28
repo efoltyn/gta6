@@ -416,6 +416,14 @@
               const P0 = put(0, 0);
               hvac.add(P0.x, roofY, P0.z, { ry: yaw, tint: 0.9 + DK.h01(bi.x, bi.z, 0x8111) * 0.6 });
               nHvac++; roofHere++;
+              // 2.3 x 1.7 x 1.05 of chiller on a walkable deck. Same y-gate as
+              // the tank below: solid between the deck and its own top, nothing
+              // at street level. Extents are the yawed box's, not the raw one.
+              {
+                const ec = Math.abs(Math.cos(yaw)), es = Math.abs(Math.sin(yaw));
+                DK.solid(P0.x, P0.z, 1.15 * ec + 0.85 * es, 1.15 * es + 0.85 * ec,
+                  null, roofY, roofY + 1.35);
+              }
               // condensers in a row beside the chiller — the same machine
               const conds = 1 + (DK.h01(bi.x, bi.z, 0x811a) < 0.55 ? 1 : 0);
               for (let k = 0; k < conds && nCond < MAX.cond; k++) {
@@ -477,7 +485,19 @@
         const sxg = DK.h01(bi.x, bi.z, 0x8115) < 0.5 ? -1 : 1;
         const szg = DK.h01(bi.z, bi.x, 0x8116) < 0.5 ? -1 : 1;
         const wx = bi.x + sxg * (rx - 2.6), wz = bi.z + szg * (rz - 2.6);
-        if (!onShaft(b, wx - bi.x, wz - bi.z)) { tanks.add(wx, roofY, wz, { ry: DK.h01(wx, wz, 0x8117) * 1.57 }); nTank++; }
+        if (!onShaft(b, wx - bi.x, wz - bi.z)) {
+          tanks.add(wx, roofY, wz, { ry: DK.h01(wx, wz, 0x8117) * 1.57 }); nTank++;
+          // SOLID, AND HEIGHT-GATED — this is the whole trick for roof plant.
+          // Roofs in this game are real walkable platforms (elevators land on
+          // them, roofloot sends you up), so a 5.5 m timber tank with no
+          // collider is a thing you walk clean through while standing on the
+          // building it sits on. But a FULL-HEIGHT AABB here would be a 2.2 m
+          // invisible column running all the way down to the PAVEMENT, which
+          // is a far worse bug than the one it fixes. y0/y1 (physics.js:133)
+          // makes the collider exist only between the deck and the tank's own
+          // top, so the street below is untouched.
+          DK.solid(wx, wz, 1.15, 1.15, null, roofY, roofY + 5.5);
+        }
       }
 
       // =================================================================

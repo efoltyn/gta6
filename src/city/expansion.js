@@ -466,12 +466,16 @@
       box(x - 6.2, 0.55, z + 5.4, 2.6, 1.1, 0.9, 0x55606e, { solid: true });           // counter
       box(x - 6.2, 1.14, z + 5.4, 2.7, 0.08, 1.0, 0xe6e8ee, { cast: false });          // worktop
       for (const off of [-2.4, 0.4]) {
-        box(x + off, 0.7, z + 5.6, 1.7, 1.4, 0.6, 0x44505c, { cast: false });          // rack body
+        // SOLID: the kiosk has NO WALLS — counter, racks and cooler stand on
+        // the open forecourt slab, so nothing else covers their footprint. The
+        // counter beside them was already solid; these two 1.4 m racks and the
+        // 2.0 m cooler below were not, on the same floor, in the same room.
+        box(x + off, 0.7, z + 5.6, 1.7, 1.4, 0.6, 0x44505c, { cast: false, solid: true }); // rack body
         for (let i = 0; i < 4; i++)
           box(x + off - 0.55 + i * 0.38, 1.55, z + 5.6, 0.28, 0.3, 0.28,
             [0xff6b5a, 0x6bbf4a, 0xffc94a, 0x5a8aff][i], { cast: false });             // snack stock
       }
-      box(x + 3.4, 1.0, z + 5.6, 1.2, 2.0, 0.8, 0x9fe0ff, { emissive: 0x9fe0ff, ei: 0.45, cast: false });  // drinks cooler
+      box(x + 3.4, 1.0, z + 5.6, 1.2, 2.0, 0.8, 0x9fe0ff, { emissive: 0x9fe0ff, ei: 0.45, cast: false, solid: true });  // drinks cooler (2 m fridge)
     }
 
     // ISLAND CARS ARE REAL CARS (user-filmed: the old two-box props read as a
@@ -518,7 +522,7 @@
       box(x - 6.2, 1.4, z - 3.4, 0.5, 0.45, 0.08, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.5, cast: false }); // terminal
       for (const off of [5.6, 7.2]) for (let i = 0; i < 3; i++)
         box(x + off, 0.26 + i * 0.45, z + 5.3, 0.9 - i * 0.12, 0.42, 0.9 - i * 0.12, 0x23262b, { cast: false }); // tyre stacks
-      box(x - 7.4, 0.8, z + 5.4, 2.2, 1.6, 0.7, 0x3a352e, { cast: false });            // parts shelf
+      box(x - 7.4, 0.8, z + 5.4, 2.2, 1.6, 0.7, 0x3a352e, { cast: false, solid: true }); // parts shelf (1.6 m, open showroom floor)
       box(x, 0.1, z + 4.2, 5.2, 0.2, 3.0, 0xc8ccd4, { cast: false });                  // feature-car plinth
       // A FULL SALES FLOOR: a grid of display cars on pale plinths so the empty
       // middle reads as inventory you'd browse (not three lonely cars). Real,

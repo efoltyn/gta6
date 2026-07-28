@@ -747,6 +747,14 @@
         dummy.position.set(sx + c[0], 0.45, sz + c[1]);
         dummy.rotation.set(0, c[0] !== 0 ? Math.PI / 2 : 0, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); benchIM.setMatrixAt(i, dummy.matrix);
+        // SOLID: a 2.2 m plank whose top is 0.65 — over physics.js's 0.45
+        // STEP_UP, so it is not something you walk over, it is something you
+        // walked THROUGH. world/clutter.js's yard bench has been solid since it
+        // shipped; the town square's four copies never were. An InstancedMesh
+        // has no per-instance collider, so the AABB is pushed here, from the
+        // SAME rotation the matrix was just built with (never re-typed).
+        const yaw90 = c[0] !== 0;
+        solid(sx + c[0], sz + c[1], yaw90 ? 0.6 : 2.2, yaw90 ? 2.2 : 0.6, 0.65);
       });
       benchIM.instanceMatrix.needsUpdate = true; benchIM.matrixAutoUpdate = false; benchIM.castShadow = true; root.add(benchIM);
       // the town-name sign. V2: a PHYSICAL welcome board on two posts at the
@@ -762,7 +770,13 @@
             (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx + bw2 / 2 - 0.3, 1.6, bz); return g; })(),
             (function () { const g = new THREE.BoxGeometry(bw2, 1.5, 0.18); g.translate(bx, 2.7, bz); return g; })(),
           ], cmat(ACCENT), { cast: true });
-          solid(bx, bz, bw2, 0.5, 3.5);
+          // THE INVERSE FAULT, and it is the same bug: a collider that does not
+          // match its geometry. This was `solid(bx, bz, bw2, 0.5, 3.5)` — an
+          // 11 m x 3.5 m WALL filling the open air between two 0.22 m posts, so
+          // the one gap you are obviously meant to walk through was sealed. The
+          // board itself spans y 1.95-3.45, over a standing head. What you can
+          // actually walk into is the two POSTS, so that is what is solid.
+          for (const ps of [-1, 1]) solid(bx + ps * (bw2 / 2 - 0.3), bz, 0.4, 0.4, 3.2);
           const s = CBZ.makeLabelSprite(cfg.name, { color: pal.sign || "#f4e7c2" });
           if (s) { s.position.set(bx, 2.7, bz + 0.16); s.scale.set(Math.min(bw2 - 0.6, cfg.name.length * 0.6 + 1.6), 1.1, 1); root.add(s); }
         } else {
@@ -878,17 +892,41 @@
       if (A) { (A._nightLamps = A._nightLamps || []).push(headIM); }
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
-    // hitching rails (frontier flavour) — two posts + a top bar, instanced bars
+    // hitching rails (frontier flavour) — two posts + a top bar, instanced.
+    // THE COMMENT ABOVE HAS ALWAYS SAID "two posts"; the code drew ONE BAR and
+    // nothing else, so every town had up to eight 3.2 m sticks floating at
+    // waist height on nothing, one metre in front of a shop door — and with no
+    // collider, so you walked through the float as well as looking at it.
+    // Both halves are fixed here: the posts are drawn (a second InstancedMesh,
+    // one extra draw call for the whole town) and the rail gets an AABB from
+    // the SAME yaw its matrix was built with.
     const railN = Math.min(8, lots.length);
     if (railN > 0) {
       const railIM = new THREE.InstancedMesh(new THREE.BoxGeometry(3.2, 0.18, 0.18), cmat(WOOD), railN);
+      const postIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.18, 1.1, 0.18), cmat(WOOD), railN * 2);
+      let pi = 0;
       for (let i = 0; i < railN; i++) {
         const lt = lots[(i * 7) % lots.length];
-        dummy2.position.set(lt.door.x + lt.door.nx * 1.0, 1.0, lt.door.z + lt.door.nz * 1.0);
-        dummy2.rotation.set(0, lt.door.nx !== 0 ? Math.PI / 2 : 0, 0); dummy2.scale.set(1, 1, 1);
+        const rx = lt.door.x + lt.door.nx * 1.0, rz = lt.door.z + lt.door.nz * 1.0;
+        const yaw90 = lt.door.nx !== 0;                 // rail runs along Z
+        dummy2.position.set(rx, 1.0, rz);
+        dummy2.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy2.scale.set(1, 1, 1);
         dummy2.updateMatrix(); railIM.setMatrixAt(i, dummy2.matrix);
+        // the two posts the rail was always described as resting on: at the bar
+        // ends, base on the ground, top just under the 1.09 bar underside.
+        for (const ps of [-1.45, 1.45]) {
+          dummy2.position.set(rx + (yaw90 ? 0 : ps), 0.55, rz + (yaw90 ? ps : 0));
+          dummy2.rotation.set(0, 0, 0);
+          dummy2.updateMatrix(); postIM.setMatrixAt(pi++, dummy2.matrix);
+        }
+        // ONE AABB for the whole rail (not one per post): it is a single
+        // waist-high fence, and y1 = 1.09 is the bar's real top.
+        solid(rx, rz, yaw90 ? 0.36 : 3.2, yaw90 ? 3.2 : 0.36, 1.09);
       }
       railIM.instanceMatrix.needsUpdate = true; railIM.matrixAutoUpdate = false; railIM.castShadow = true; root.add(railIM);
+      postIM.count = pi;
+      postIM.instanceMatrix.needsUpdate = true; postIM.matrixAutoUpdate = false; postIM.castShadow = true; root.add(postIM);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
 
     // SETTLEMENT REGISTRY — record this place so the world knows every

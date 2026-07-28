@@ -868,6 +868,7 @@
         variants: 2,
         colorHex: ROCK_GREY,                          // desert rock palette, not mountain granite
         seed: 0x5dec7 ^ 0x2222,
+        solidMin: 1.1,                                // the cluster-scale ones only; pebbles stay free
       });
     }
 
@@ -1092,6 +1093,11 @@
         (function () { const g = new THREE.BoxGeometry(0.6, 9, 0.6); g.translate(mxr - 22, 4.5, mzr - 10); return g; })(),
         (function () { const g = new THREE.BoxGeometry(5, 3, 0.4); g.translate(mxr - 22, 9.5, mzr - 10); return g; })(),
       ], cmat(0x9a7b52), { cast: true });
+      // SOLID: a 9 m mast standing on open ground at the roadside — the tallest
+      // thing at this stop after the water tower, and the only one this file
+      // never collided (`mergeAdd` is draw-only here; `solid()` is the ledger).
+      // The BOARD at 8-11 m stays open — it is over every roof in the basin.
+      solid(mxr - 22, mzr - 10, 0.8, 0.8, 9);
       if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("VACANCY"); if (s) { s.position.set(mxr - 22, 9.5, mzr - 10.3); s.scale.set(5, 1.6, 1); root.add(s); } }
 
       // -- ABANDONED MINING OUTPOST (a relic worth poking at) --------------

@@ -718,6 +718,11 @@
       const legs = [], beams = [];
       for (const lx of [wx0 + 1.5, wx1 - 1.5]) for (const lz of [WELL_Z - 4.2, WELL_Z + 4.2]) {
         legs.push(boxGeoAt(lx, QUAY_TOP + 4.2, lz, 0.7, 8.4, 0.7));
+        // SOLID: four 8.4 m steel legs standing on the quay you walk along.
+        // `boxGeoAt`/`mergeAdd` are DRAW-ONLY in this file (the collider comes
+        // from `solid()`), so the biggest machine on the waterfront was a
+        // silhouette. Legs only — the beams are 8.7-9.2 m up, over your head.
+        solid(lx, lz, 0.7, 0.7, null, QUAY_TOP, QUAY_TOP + 8.4);
       }
       for (const lz of [WELL_Z - 4.2, WELL_Z + 4.2]) beams.push(boxGeoAt((wx0 + wx1) / 2, QUAY_TOP + 8.7, lz, wx1 - wx0 - 1.4, 0.7, 0.8));
       beams.push(boxGeoAt((wx0 + wx1) / 2, QUAY_TOP + 9.2, WELL_Z, 1.4, 0.6, 9.2));
@@ -869,6 +874,10 @@
         const pz = BZ + (i % 2 ? 34 : -34);
         if (!waterAt(px, pz)) continue;
         piles.push(boxGeoAt(px, SEA_Y + 1.4, pz, 0.42, 5.2, 0.42, CBZ.hash01(px, pz, 831) * 0.3));
+        // a mooring pile is a driven timber, and a boat that motors THROUGH the
+        // piles marking its own channel mouth is the whole reason they read as
+        // paint. Full-height (they stand from the seabed up), 0.42 square.
+        solid(px, pz, 0.42, 0.42, null);
       }
       mergeAdd(piles, m(WOOD_DK), root, true);
     }

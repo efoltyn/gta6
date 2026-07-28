@@ -800,6 +800,7 @@
     //  decor: no colliders, nothing placed in a driving lane.
     // =====================================================================
     let paintRedCurb = null;   // set inside roadDetail; used after the props hook
+    let redCurbsPainted = 0;   // census for CBZ.solidityAudit()
     (function roadDetail() {
       // shared materials so hundreds of marks cost almost nothing
       const M = new Map();
@@ -954,11 +955,44 @@
 
       // ---- 6) RED CURB painter (fire lanes) --------------------------------
       //  props.js places hydrants AFTER this pass, so expose a painter the
-      //  post-props pass at the bottom of buildCity uses. A slightly larger
-      //  box wraps the existing curb segment — no z-fight, pure decor.
-      paintRedCurb = function (x, z, vertical) {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(vertical ? 0.38 : 4.2, 0.24, vertical ? 4.2 : 0.38), dm(0xc23434));
-        m.position.set(x, 0.115, z); m.receiveShadow = true; root.add(m);
+      //  post-props pass at the bottom of buildCity uses.
+      //
+      //  OWNER, with a screenshot: "the fire extinguisher thing is to prevent
+      //  people parking — cool idea but it shouldn't be geometry... when not
+      //  perfect like this in the street it's really annoying, one of those
+      //  dumb props." TWO separate faults, and the second one is already
+      //  written up as fixed 120 lines above — for the KERB, never for this:
+      //
+      //  (1) IT WAS GEOMETRY. A 4.2 x 0.24 x 0.38 BoxGeometry: a 24 cm tall red
+      //      bar lying loose in the street, with no collider, so it was a
+      //      solid-LOOKING object you drove straight through — a decoy twice
+      //      over. A no-parking fire lane is PAINT ON A KERB. It is now a flat
+      //      quad on the kerb top through the same polygonOffset `dm(...,true)`
+      //      decal idiom every stop bar, zebra and turn arrow in this pass uses.
+      //  (2) ITS OFFSET WAS STALE. The caller solved the kerb line as
+      //      (BLK + 4) / 2 - 0.2 — the EXACT expression the kerb loop above
+      //      abandoned when the road width changed ("Was (BLK+4)/2 — that left
+      //      every kerb box stranded 1.8m OUT in the carriageway"). The kerbs
+      //      moved in by 2 m; this did not, so the bar stood ~1.8 m out in the
+      //      travel lane, detached from the hydrant it belongs to. The painter
+      //      now takes the LOT and solves the line off `sidewalkHalf` ITSELF,
+      //      so no caller can re-type it and the stripe hugs whichever kerb the
+      //      hydrant fronts BY CONSTRUCTION rather than by a matching literal.
+      paintRedCurb = function (lot, px, pz) {
+        const e = sidewalkHalf - 0.2;                    // == the kerb loop's own offset
+        const dx = px - lot.cx, dz = pz - lot.cz;
+        const vertical = Math.abs(dx) > Math.abs(dz);    // kerb runs along Z
+        // 4.2 m of red centred on the hydrant, 0.34 wide = the kerb box's OWN
+        // width (line ~830), 5 mm over the kerb top (0.22) so it never z-fights
+        // and never reads as a step. Basic material: it is paint, not a solid.
+        const w = vertical ? 0.34 : 4.2, d = vertical ? 4.2 : 0.34;
+        const x = vertical ? lot.cx + (dx >= 0 ? e : -e) : px;
+        const z = vertical ? pz : lot.cz + (dz >= 0 ? e : -e);
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), dm(0xc23434, true));
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(x, 0.225, z);
+        m.receiveShadow = false; root.add(m);
+        redCurbsPainted++;
       };
     })();
 
@@ -978,7 +1012,9 @@
     //      blocks stop reading copy-paste identical. Runs AFTER the hooks
     //      because hydrants don't exist until cityProps; draws no rng. ----
     if (paintRedCurb && city.streetProps) {
-      const e = (BLK + 4) / 2 - 0.2;   // the curb line's offset from a lot centre
+      // The kerb line is NOT computed here any more — see paintRedCurb's note.
+      // This pass only decides WHICH hydrants get a fire lane and WHICH lot
+      // (i.e. which kerb) each one fronts; the painter owns the geometry.
       let painted = 0, idx = 0;
       for (const p of city.streetProps) {
         if (p.type !== "hydrant") continue;
@@ -989,12 +1025,11 @@
           if (d < bd) { bd = d; lot = l; }
         }
         if (!lot) break;
-        const dx = p.x - lot.cx, dz = p.z - lot.cz;
-        if (Math.abs(dx) > Math.abs(dz)) paintRedCurb(lot.cx + Math.sign(dx) * e, p.z, true);
-        else paintRedCurb(p.x, lot.cz + Math.sign(dz) * e, false);
+        paintRedCurb(lot, p.x, p.z);
         painted++;
       }
     }
+    city._redCurbs = redCurbsPainted;
 
     // ---- NO-DECOY FIX: the harbor's moored hulls used to be dead THREE.Mesh
     //      boxes — no collider, no cityCars entry, no [E] prompt: a boat you
