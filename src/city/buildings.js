@@ -7259,11 +7259,31 @@
     if (along) plate.rotation.y = di.nx > 0 ? -Math.PI / 2 : Math.PI / 2;
     else if (di.nz > 0) plate.rotation.y = Math.PI;
     plate.renderOrder = 2; g.add(plate);
-    // AC WINDOW UNIT jutting from a first-floor window (boxy grey unit),
-    // offset along the facade tangent away from the door.
-    const ac = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.8, 0.5, 0.5)), mat(0xb9bec6));
-    ac.position.set(di.x + onx * 0.2 + tx * (along ? d : w) * 0.28, FH + 0.55, di.z + onz * 0.2 + tz * (along ? d : w) * 0.28);
-    ac.castShadow = false; g.add(ac);
+    // AC WINDOW UNIT — CUT (owner, second screenshot: "you said they were gone
+    // but ac units are still on some buildings").
+    //
+    // THIS WAS THE SURVIVOR, and it survived because it was the only one of the
+    // four producers that was never behind a flag. The other three were all
+    // switched off in earlier waves and correctly report zero:
+    //   • buildings.js:2959   punched-window AC  — gated FACADE_AC_UNITS (false)
+    //   • buildings.js:3261   split-grammar acUnit terminal — deleted outright
+    //   • building_dress.js:551 window AC x260   — gated PROPS_PURGE_V1 (true)
+    // so every census said "acBoxes: 0" while this one kept drawing, once per
+    // residential building, unconditionally. And `resFacade` is NOT just for
+    // houses — its caller sets `lot.kind = "tower"` (line ~6936), so every
+    // apartment TOWER in the city, glass curtain wall included, wore a
+    // 0.8 x 0.5 x 0.5 grey box bolted to its elevation at FH + 0.55. That is
+    // the box in the screenshot.
+    //
+    // It is now behind the SAME flag as its sibling, so FACADE_AC_UNITS is the
+    // one switch that governs every facade AC box in the game rather than two
+    // of the three. Default false = gone.
+    if (CBZ.CONFIG && CBZ.CONFIG.FACADE_AC_UNITS === true) {
+      const ac = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.8, 0.5, 0.5)), mat(0xb9bec6));
+      ac.position.set(di.x + onx * 0.2 + tx * (along ? d : w) * 0.28, FH + 0.55, di.z + onz * 0.2 + tz * (along ? d : w) * 0.28);
+      ac.castShadow = false; g.add(ac);
+      _facadeAC++;
+    }
     // (REMOVED) the old FRONT-FACE cosmetic fire-escape ladder rig — owner-filmed
     // as "a retarded ladder on the front of a glass tower that only reaches the
     // 2nd floor." It was purely decorative (rails/rungs/landing, no collider or

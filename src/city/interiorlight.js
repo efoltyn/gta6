@@ -238,10 +238,37 @@
     im.instanceMatrix.needsUpdate = true;
     total++;
 
-    // first time a layer gets an instance, attach it under the city root so it
-    // shares the world transform / lifecycle. parent is whatever buildings.js
-    // hands us (its building/city group).
-    if (!im.parent && parent && parent.add) parent.add(im);
+    // First time a layer gets an instance, attach it. THE COMMENT ABOVE SAID
+    // "under the city root"; THE CODE ATTACHED IT TO THE BUILDING.
+    //
+    // OWNER (screenshot): dark slab boxes on a glass tower's curtain wall, one
+    // per bay across several floors, at the window head/sill line, some ANGLED
+    // and standing proud of the glass. That is these panels, and this line is
+    // why. Every instance matrix above is composed from WORLD coordinates —
+    // buildings.js:2951 passes `wx = ox + cx, wz = oz + cz` — but the pool is a
+    // SHARED InstancedMesh parented to whichever building group happened to
+    // register first, and a building group is TRANSLATED
+    // (`bgroup.position.set(ox, 0, oz)`, buildings.js:2279). So every interior
+    // panel in the city was displaced by +(ox0, 0, oz0), the first building's
+    // origin. The Y offset is 0, which is exactly why this was so easy to miss
+    // and so ugly: the panels kept their correct window-band HEIGHTS, so they
+    // landed at plausible sill/head lines on OTHER buildings, wearing the yaw
+    // of the facade they came from — hence "angled" — and outside the host's
+    // glass rather than behind it. Unlit MeshBasicMaterial in the coolDark /
+    // warmDark day tints reads as a dark grey slab, which is what got called
+    // an AC unit.
+    //
+    // buildings.js already solved this for its own pooled panes and wrote down
+    // the reason (buildings.js:226-232): "parent the pools to the city root
+    // (the building groups' parent) so they inherit the mode-visibility toggle.
+    // Records hold WORLD coords and the root is at identity ... so no
+    // re-basing." Same records, same requirement, same answer — one hop up.
+    // Fall back to `parent` if the group is not in the scene yet, so a caller
+    // that hands us an unattached group still gets its panels.
+    if (!im.parent && parent && parent.add) {
+      var host = (parent.parent && parent.parent.add) ? parent.parent : parent;
+      host.add(im);
+    }
 
     // force a night re-apply next tick so the new panel gets the right tint
     nightApplied = -1;
