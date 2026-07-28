@@ -36,6 +36,12 @@
     // + city/charpanel.js for the city-mode equivalents.
     "Wood": "", "Stone": "", "Scrap": "", "Hatchet": "", "Pickaxe": "",
   };
+  // Read-only lookup so the shared census (CBZ.itemIconAudit, city/inventory.js)
+  // can see this bag's glyph table too. Every value in ICON is "" today — the
+  // emoji purge (ea61ace) emptied it — so this answers "" for all 34 escape
+  // items and they all render the GENERIC square below.
+  CBZ.escapeBagIcon = function (name) { return ICON[name] || ""; };
+
   // items you can FENCE for their cigarette value straight from the bag
   const FENCEABLE = new Set(["Cash Roll", "Cigarette Carton", "Stolen Wallet", "Gold Tooth", "Gold Chain", "Luxury Watch"]);
   const CONSUMABLE = new Set([

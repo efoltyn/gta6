@@ -553,6 +553,41 @@ existing UNMEASURED backlog — `rankAudit()`, `roleAudit()`, `heliAudit()`, `ma
 `wiresDisconnected`/`paintThroughJunction`, `groundMatchAudit()` — all of which CLAUDE.md already declares
 and none of which has ever been run. **Write the numbers into CLAUDE.md in the same commit.**
 
+#### STEP 0.5 — INVENTORY ICON PURGE *(added 2026-07-28 on owner order; census done, drawing not started)*
+OWNER, verbatim: *"we have guns all with actual icons — every single item that can show in inventory
+should have an icon, not just a generic thing."* **CENSUS (`CBZ.itemIconAudit()`, `city/inventory.js`):
+the city catalog holds 263 inventory-visible item names — 156 static in `city/economy.js` plus 107 more
+registered at runtime by six other files (`wildlife.js` 99 pelts/pristine pelts/meat, `strategic.js`,
+`explosives.js`, `dogs.js`, `roleverbs.js`, `inventory.js`'s own Chest). THIRTEEN of them resolve to a
+real icon. All thirteen are guns. The other 250 render `▪`.** The escape/prison stash
+(`systems/inventory.js` over `systems/economy.js`) is a second surface with 34 more items and **34 of 34
+generic**, so the true figure is **284**. It is not a gap in the tables: commit `ea61ace` ("Remove every
+emoji from the game") emptied `ICON`/`TAG_ICON` in `city/inventory.js`, `ITEM_ICON`/`LOOT_ICON` in
+`city/charpanel.js` and `city/hud.js`, and `ICON` in `systems/inventory.js` — **every key survived and
+every glyph became `""`**, so the fallback is now the only branch any non-gun item can take. The city
+hotbar has the same disease one level down: every usable-item chip draws `▣` and the holster chip draws
+nothing at all. Generic, by family: composable clothing 66 · pelts 45 · pristine pelts 41 · legacy
+wearables 27 · valuables 17 · meat & fish 13 · tools 9 · food 9 · jewelry 8 · ordnance 6 · drugs 4 ·
+materials 3 · melee weapons 2.
+**THE RULE:** every inventory-visible item gets a DRAWN icon in the guns' own style — procedural,
+generated from geometry the game already builds, cached as one data URL per item. **No image assets, no
+font glyph, no letter, no emoji.** `city/weapon_thumbnails.js` is the whole pattern and it is 63 lines:
+one lazy offscreen `WebGLRenderer`, `CBZ.buildActorWeapon(id)`, an orthographic camera framed on the
+model's own bounding box, `toDataURL` once per id. **Author the SUBJECT, never a second renderer** — and
+for four fifths of the list the subject already exists: `CBZ.cityComposableSpec(visualId).draw()`
+(`clothes.js`) is a mesh factory for all 66 composable garments and all 8 jewels, `bling.js` owns the
+jewellery looks, and every pelt/pristine/meat name comes off a `WILDLIFE_SPECIES` row that already
+carries its own `color` (only the 27 legacy `wearable` rows carry no `visualId` and need drawing). **200 of the 250 are apparel (101) or wildlife goods (99)** — two families, two
+derived icon paths — leaving **50** that need genuinely new drawing: 17 valuables · 9 tools · 9 foods ·
+6 ordnance · 4 drugs · 3 materials · 2 melee weapons.
+**Flags:** `ITEM_ICONS_V2` (off → the `▪` fallback, one-line revert). **Territory:** `city/inventory.js`
+· `city/hud.js` · `city/charpanel.js` · `systems/inventory.js` · NEW `city/item_thumbnails.js`.
+**Ratchet: `CBZ.itemIconAudit()` — `generic` pinned at 250 and `bag.generic` at 34, both DOWN-ONLY to 0**;
+`items` · `withIcon` · `guns` · `glyphs` · `byFamily` printed beside them so a "fix" that shrinks the
+catalog or stops counting cannot pass. **RECALIBRATE:** nothing. **PRESERVE:** the standing set; the item
+catalog is read live off `cityEcon.ITEMS`, so a species or a good added later must appear in the census
+with no edit to the audit.
+
 ### WAVE 1 — THE LAW, THE BUDGET, THE STAMP *(three parallel territories)*
 **1A · WITNESS W1 — the law and the proof.** NEW `city/witness.js` · `city/wildlife.js` (2 sites) ·
 `city/worldstate.js` (2 lines) · `city/schedule.js` (worth clause + trim clause + `e.w`) ·
