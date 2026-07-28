@@ -1318,6 +1318,50 @@ runs each audit first writes the number in; do not pin a guess.
   lock, `ordnanceSeek` grabs `lockonFireTarget()` at trigger time. Bombs stay
   ballistic (buster/nuke never home; JDAM steers to a point, doesn't chase).
 
+## THE 2026-07-27 LATE-NIGHT BATCH (owner screenshot session)
+
+- **Ring-print pattern class DELETED at the generator** (clothes.js patternRow ban
+  comment; sundress wears gingham now). **One speedometer**: carcluster owns it,
+  hud.js stands down via CBZ.carClusterSpeedOwned() (the two writers shared a DOM
+  id and disagreed on the unit). **INTERACT_REACH_V2**: reach 3.8→5.2, zone cone
+  floor 0.5 — cards show up. **AIM_CHILD_NO_ASSIST**: aim magnetism/soft-lock/hot
+  reticle all refuse protected actors (childSafeAudit OPEN 7→6); ballistics
+  unchanged.
+- **AN ALLEY IS A ROUTE, NOT A SHELF** — CBZ.alleyGapAt/alleyOk (props.js), widths
+  solved from the player capsule (RUN 2.4 · SLOT 3.2 · OPEN 8.0), one shared
+  budget map across all six scatter passes via DK.free. Window AC units CUT (260,
+  no windows behind them), roof lattice → one plant deck, barriers/cones/boards
+  cut, PROPS_KNOCK_PLAYER tips bins at a sprint via the existing car-knock arc.
+  Flag PROPS_PURGE_V1, flag-off byte-identical (rng draws preserved). Ratchet:
+  CBZ.propPurgeAudit() — alleysBlocked structural 0, acBoxes pin 0.
+- **INTERIORS STAY INSIDE THEIR SHELL** — root cause: dressers disagreed about
+  where the wall IS (roomKit measures inner face, furnishInterior the OUTER —
+  Meridian Trust's bank partition ended 0.20 m onto the pavement). Structural
+  fix: CBZ.interiorBounded wraps the ONE lbox seam — outside refused, straddle
+  trimmed to the wall face; interiorAudit().spill pinned 0 with spillUnbounded
+  printed beside. **INTERIOR_COHERENCE_V1**: CBZ.interiorMix data rows +
+  ABOVE_TRADE (banks get workspace floors, shops get flats — never living rooms
+  over a vault); new `residential` program (corridor + party walls + per-flat
+  kitchen + roomPlan bedrooms, cap rides the tower) and `breakroom` (the ONE
+  sanctioned office kitchen, on a cadence). CBZ.roomExecute extracted (plan once,
+  draw many). **INTERIOR_LIFE_V1**: door guards + sleeping residents via
+  citystaff rows (INTERIOR_LIFE_MAX_POSTS 150), CBZ.interiorRobbery — one
+  citywide walk-in robbery through ped.guard/cityScare/panic/kill-bus, no
+  mission system (the terrorist-shootup seam is contracts.js + mission.start,
+  proposed not built). Night sweep beds idle upper-storey peds via propSeatNpc.
+- **GA TRAFFIC**: AIR_TRAFFIC_CLEARANCE default FALSE (climb mode kept, one line
+  back); **AIR_TRAFFIC_COLLIDE default TRUE** — original bands, and a hull inside
+  a building fires the SAME downTraffic crash a bullet does (wall-face blast,
+  byPlayer false, unattributed killfeed). Armed-shortlist detection: per-frame
+  cost only for craft whose ring crosses something tall. Fixed fallTraffic
+  detonating wrecks on rooftops ABOVE themselves. airTrafficAudit().clipping
+  pin 0 (armed/candidates printed beside).
+- **THE BLACK MOUNTAIN IS GONE** — terrain_overhaul's offshore range was the only
+  LIT-material range (why it went near-black under every sun); TERRAIN_DARK_RANGE
+  default false gates its one relief sector — tiles survive (they are the
+  seabed), unlit ranges untouched, backdropAudit gains rangeRemoved and still
+  sweeps (reliefCells 0 IS the proof).
+
 ## Hard rules that keep the game correct
 
 - **Determinism**: world builds must be byte-identical per seed across

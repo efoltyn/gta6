@@ -265,7 +265,7 @@
   //         host owns the floor (stair strip, door aisle, lift chase). Sampled
   //         once into the circulation grid; a piece straddling it is refused.
   // ->      { pieces:[{fn,x,z,yaw,opts,...}], ok, blocked, coverage, program }
-  CBZ.roomPlan = function (rect, program, opts) {
+  function planRoom(rect, program, opts) {
     opts = opts || {};
     program = String(program || "empty");
     const out = { pieces: [], ok: false, blocked: 0, coverage: 0, program: program, dropped: [] };
@@ -791,6 +791,23 @@
     out.coverage = coverage(pieces);
     out.sparse = out.coverage < DENS_MIN;      // intentional, not a failure
     return out;
+  }
+  // THE LEDGER LIVES ON THE SOLVE, NOT ON THE DRAW. It used to be incremented
+  // inside roomFurnish, which made `calls` mean "roomFurnish invocations" — so a
+  // caller that legitimately plans ONCE and DRAWS MANY (interior_programs.js's
+  // corridor of identical flats: one solve, replayed at every unit) was invisible
+  // to the one number that says whether the planner is being used at all. It is
+  // counted here now, so every planner invocation counts exactly once and
+  // roomFurnish's own delegation is not double-billed.
+  CBZ.roomPlan = function (rect, program, opts) {
+    const out = planRoom(rect, program, opts);
+    LED.calls++;
+    LED.programs[out.program] = (LED.programs[out.program] | 0) + 1;
+    LED.blocked += out.blocked | 0;
+    LED.dropped += (out.dropped && out.dropped.length) | 0;
+    LED.pieces += out.pieces.length;
+    if (out.pieces.length) LED.planned++; else LED.empty++;
+    return out;
   };
 
   // ============================================================
@@ -823,24 +840,40 @@
     LED.programs = {};
   };
 
-  CBZ.roomFurnish = function (rect, program, opts) {
+  // ============================================================
+  //  CBZ.roomExecute — the DRAW half, on its own.
+  // ============================================================
+  // This was the body of roomFurnish, and it is split out for one reason: a
+  // caller that plans ONCE and draws MANY had no way to reach it.
+  // city/interior_programs.js's `residential` program is exactly that — a
+  // corridor of IDENTICAL flats is one solve replayed at every unit — and
+  // without this it had to re-type the loop, which means re-typing the ox/oz
+  // forwarding (whose absence was this file's headline latent bug), lamp's
+  // yaw-less signature, and the seat re-file. A second executor is a second set
+  // of rules about the same three things.
+  //
+  //   opts   — everything roomFurnish takes (box · ox · oz · oy · lot · solid ·
+  //            tone), plus:
+  //     dx, dz    shift every piece by this much (the replay offset)
+  //     max       execute only the first N pieces (already prio-ordered)
+  //     accept(x, z, piece) -> bool   per-piece gate at its REAL position
+  //   -> { executed, seatsInKeepout, beds:[…] }   `beds` so a caller can put
+  //      somebody in what it just drew without a coordinate search.
+  CBZ.roomExecute = function (plan, rect, opts) {
     opts = opts || {};
-    const plan = CBZ.roomPlan(rect, program, opts);
-    plan.executed = 0;
-    plan.seatsInKeepout = 0;
-    LED.calls++;
-    LED.programs[plan.program] = (LED.programs[plan.program] | 0) + 1;
-    LED.blocked += plan.blocked | 0;
-    LED.dropped += (plan.dropped && plan.dropped.length) | 0;
-    LED.pieces += plan.pieces.length;
-    if (plan.pieces.length) LED.planned++; else LED.empty++;
+    const out = { executed: 0, seatsInKeepout: 0, beds: [] };
     const F = CBZ.furnish;
-    if (!F || !plan.pieces.length) return plan;
+    if (!plan || !plan.pieces || !plan.pieces.length || !F) return out;
     const y = (rect && rect.y) || 0;
-    for (let i = 0; i < plan.pieces.length; i++) {
+    const dx = opts.dx || 0, dz = opts.dz || 0;
+    const keep = plan.keepout || [];
+    const n = opts.max != null ? Math.min(plan.pieces.length, opts.max | 0) : plan.pieces.length;
+    for (let i = 0; i < n; i++) {
       const p = plan.pieces[i];
       const fn = F[p.fn];
       if (typeof fn !== "function") continue;
+      const px = p.x + dx, pz = p.z + dz;
+      if (opts.accept && !opts.accept(px, pz, p)) continue;
       const o = {};
       for (const k in p.opts) if (Object.prototype.hasOwnProperty.call(p.opts, k)) o[k] = p.opts[k];
       if (opts.box != null && o.box == null) o.box = opts.box;
@@ -862,10 +895,12 @@
       // (x, y, z, yaw, opts). Called through the namespace so a kit written
       // with `this` still works.
       try {
-        r = (p.fn === "lamp") ? F.lamp(p.x, y, p.z, o) : F[p.fn](p.x, y, p.z, p.yaw, o);
+        r = (p.fn === "lamp") ? F.lamp(px, y, pz, o) : F[p.fn](px, y, pz, p.yaw, o);
       } catch (e) { r = null; }
       p.result = r || null;
-      plan.executed++;
+      out.executed++;
+      if (r && r.beds && r.beds.length)
+        for (let q = 0; q < r.beds.length; q++) if (r.beds[q]) out.beds.push(r.beds[q]);
       // Belt and braces: re-file the kit's own seat anchors through the
       // load-order shim, CARRYING THE CUSHION GEOMETRY. propuse dedupes on a
       // decimetre key over the exact same x/y/z the kit passed, so when the kit
@@ -881,23 +916,38 @@
           const face = st.face != null ? st.face : (st.yaw != null ? st.yaw : p.yaw);
           const geom = st.cushion != null ? { cushion: st.cushion, floorBelow: 0 } : null;
           const sy = st.y != null ? st.y : y;
-          CBZ.roomSeatAnchor(st.x != null ? st.x : p.x, sy, st.z != null ? st.z : p.z,
+          CBZ.roomSeatAnchor(st.x != null ? st.x : px, sy, st.z != null ? st.z : pz,
             face, st.kind || p.fn, o.lot || null, geom);
           // the boss office's approach corridor must stay EMPTY: report any
           // seat the kit landed inside a keepout instead of silently allowing it.
           // The anchor is WORLD, the keepout is the RECT's own space — subtract
           // the host origin or this test silently reads true for every seat in
-          // any building that is not sitting on the world origin.
-          const kx = st.x - (opts.ox || 0), kz = st.z - (opts.oz || 0);
-          for (let k = 0; k < plan.keepout.length; k++) {
-            const K = plan.keepout[k];
-            if (kx > K.minX && kx < K.maxX && kz > K.minZ && kz < K.maxZ) { plan.seatsInKeepout++; break; }
+          // any building that is not sitting on the world origin. A REPLAYED
+          // piece is measured in the template's frame, so the offset comes back
+          // off as well.
+          const kx = st.x - (opts.ox || 0) - dx, kz = st.z - (opts.oz || 0) - dz;
+          for (let k = 0; k < keep.length; k++) {
+            const K = keep[k];
+            if (kx > K.minX && kx < K.maxX && kz > K.minZ && kz < K.maxZ) { out.seatsInKeepout++; break; }
           }
         }
       }
     }
-    LED.executed += plan.executed;
-    LED.seatsInKeepout += plan.seatsInKeepout;
+    LED.executed += out.executed;
+    LED.seatsInKeepout += out.seatsInKeepout;
+    return out;
+  };
+
+  CBZ.roomFurnish = function (rect, program, opts) {
+    opts = opts || {};
+    // (the plan-side ledger — calls/programs/blocked/dropped/pieces/planned/empty
+    //  — is billed inside CBZ.roomPlan above, so it counts a solve WHOEVER asked
+    //  for it; the execution half is billed inside CBZ.roomExecute.)
+    const plan = CBZ.roomPlan(rect, program, opts);
+    const ex = CBZ.roomExecute(plan, rect, opts);
+    plan.executed = ex.executed;
+    plan.seatsInKeepout = ex.seatsInKeepout;
+    plan.beds = ex.beds;
     return plan;
   };
 })();

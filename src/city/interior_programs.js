@@ -98,6 +98,109 @@
   };
   const PWT = 0.16;       // thin partition thickness (roomKit idiom)
 
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  // INTERIOR_COHERENCE_V1 — an interior is an ANSWER to "what is this building
+  // for" (CBZ.interiorMix + the `residential`/`breakroom` programs). Off →
+  // every dispatch falls back to the archetype roll it used before.
+  if (CFG.INTERIOR_COHERENCE_V1 == null) CFG.INTERIOR_COHERENCE_V1 = true;
+  // INTERIOR_LIFE_V1 — the people and the stakes: declared interior jobs
+  // (through city/citystaff.js), residents asleep in real beds after dark, and
+  // the occasional robbery in progress. Off → interiors are furnished and empty.
+  if (CFG.INTERIOR_LIFE_V1 == null) CFG.INTERIOR_LIFE_V1 = true;
+  // citywide ceiling on DECLARED interior jobs. citystaff.js caps live BODIES
+  // (VENUE_STAFF_MAX); this caps how many rows we ever push into its list, so a
+  // 400-lot city cannot bury the marina and the airside in office receptionists.
+  if (CFG.INTERIOR_LIFE_MAX_POSTS == null) CFG.INTERIOR_LIFE_MAX_POSTS = 150;
+  // (INTERIOR_SHELL_CLAMP is deliberately NOT defaulted here. The clamp below is
+  //  a BUG FIX, not a feature — a piece of furniture outside its own building is
+  //  never the design. `CBZ.CONFIG.INTERIOR_SHELL_CLAMP = false` remains an
+  //  escape hatch if a host ever legitimately draws past its own footprint.)
+
+  // ========================================================================
+  //  THE SHELL IS THE LAW — an interior never leaves its building.
+  //
+  //  OWNER: "INTERIORS SHOULD NOT SPILL ONTO THE STREET AS MANY LIKE MERIDIAN
+  //  TRUST DO."  Meridian Trust is buildings.js's bank, and the spill is not a
+  //  bank bug — it is an ARITHMETIC DIALECT problem, and every dresser in the
+  //  game speaks a different one:
+  //
+  //    roomKit / interiorFloorRoom measure from  ±(w/2 − wt − 0.4)   (inside)
+  //    furnishInterior (the SHOP dresser, and the one that dresses the bank)
+  //      measures every `lat` and `inDepth` from  ±w/2                (OUTSIDE)
+  //
+  //  So in the shop dresser "hug the side wall" is written as `halfTan − 1.1`
+  //  and lands 0.3 m INSIDE the plaster, and the bank's vault partition
+  //  (`vlat ± 2.2` about `halfTan − 2.0`) runs to `halfTan + 0.2` — a
+  //  full-height pale slab ending 0.2 m OUT THROUGH THE FACADE, on the street.
+  //  Chasing those call sites one at a time is the wrong fix; the next dresser
+  //  re-types the same mistake. So the law lives in ONE place and every pass
+  //  inherits it:
+  //
+  //    CBZ.interiorShellRect(b)     — the building's own inside, host-local
+  //    CBZ.interiorBounded(b, fn)   — run a furnish pass with `b.lbox` clamped
+  //
+  //  Because EVERY interior box in this game is drawn through the host's own
+  //  `lbox` — this kit's programs (`h.b.lbox`), roombuild.js's planner
+  //  (`opts.box`), furniture.js's pieces (`opts.box`) and buildings.js's own
+  //  furnishers — wrapping that ONE function for the duration of a pass covers
+  //  all of them with no edit to any of them. A box wholly outside is REFUSED;
+  //  a box straddling a wall is TRIMMED to the wall face rather than moved, so
+  //  the design's alignment survives and only the part in the street is lost.
+  // ========================================================================
+  const SPILL = { checked: 0, clamped: 0, refused: 0, escaped: 0, unbounded: 0, sites: Object.create(null) };
+  const SPILL_EPS = 0.005;
+
+  CBZ.interiorShellRect = function (b) {
+    if (!b || b.w == null || b.d == null) return null;
+    const wt = b.wt != null ? b.wt : 0.4;
+    const r = { x0: -b.w / 2 + wt, x1: b.w / 2 - wt, z0: -b.d / 2 + wt, z1: b.d / 2 - wt };
+    if (!(r.x1 - r.x0 > 0.5) || !(r.z1 - r.z0 > 0.5)) return null;
+    return r;
+  };
+  // clamp a host-LOCAL rect to the shell. The room resolver runs every rect it
+  // hands out through this, so no program can even be ASKED to dress a band
+  // that leaves the building.
+  CBZ.interiorClampRect = function (b, rect) {
+    const R = CBZ.interiorShellRect(b);
+    if (!R || !rect) return rect;
+    const x0 = Math.max(rect.x0, R.x0), x1 = Math.min(rect.x1, R.x1);
+    const z0 = Math.max(rect.z0, R.z0), z1 = Math.min(rect.z1, R.z1);
+    if (x0 !== rect.x0 || x1 !== rect.x1 || z0 !== rect.z0 || z1 !== rect.z1) {
+      rect.x0 = x0; rect.x1 = x1; rect.z0 = z0; rect.z1 = z1;
+    }
+    return rect;
+  };
+  CBZ.interiorBounded = function (b, fn, site) {
+    if (typeof fn !== "function") return null;
+    const R = (CFG.INTERIOR_SHELL_CLAMP === false) ? null : CBZ.interiorShellRect(b);
+    // nested pass (a furnisher calling a program calling the planner): the
+    // outer wrap already owns b.lbox, so re-wrapping would double-count.
+    if (!R || !b || typeof b.lbox !== "function" || b._interiorBound) {
+      if (!R && b && typeof b.lbox === "function") SPILL.unbounded++;
+      return fn();
+    }
+    const raw = b.lbox;
+    const key = site || "interior";
+    b._interiorBound = true;
+    b.lbox = function (lx, ly, lz, bw, bh, bd, col, o) {
+      SPILL.checked++;
+      const hx = Math.abs(bw) / 2, hz = Math.abs(bd) / 2;
+      const x0 = lx - hx, x1 = lx + hx, z0 = lz - hz, z1 = lz + hz;
+      if (x0 < R.x0 - SPILL_EPS || x1 > R.x1 + SPILL_EPS ||
+          z0 < R.z0 - SPILL_EPS || z1 > R.z1 + SPILL_EPS) {
+        SPILL.sites[key] = (SPILL.sites[key] | 0) + 1;
+        const cx0 = Math.max(x0, R.x0), cx1 = Math.min(x1, R.x1);
+        const cz0 = Math.max(z0, R.z0), cz1 = Math.min(z1, R.z1);
+        if (cx1 - cx0 < 0.03 || cz1 - cz0 < 0.03) { SPILL.refused++; return null; }
+        SPILL.clamped++;
+        lx = (cx0 + cx1) / 2; lz = (cz0 + cz1) / 2;
+        bw = cx1 - cx0; bd = cz1 - cz0;
+      }
+      return raw.call(b, lx, ly, lz, bw, bh, bd, col, o);
+    };
+    try { return fn(); } finally { b.lbox = raw; b._interiorBound = false; }
+  };
+
   // host accessors — a buildings.js `b` satisfies this natively; other
   // builders pass any object with the same three-to-six fields.
   function host(ctx) {
@@ -889,6 +992,238 @@
   }
 
   // ========================================================================
+  //  (a/c) RESIDENTIAL — A FLOOR OF FLATS, NOT ONE FLAT.
+  //
+  //  OWNER: "HERES AN INTERIOR, A FULL FLOOR OF TINY APARTMENTS EACH WITH A BED
+  //  THATS IT, TINY TINY APARTMENTS."  Every residential storey in this game was
+  //  ONE dwelling spread over the whole plate — on a 27 m lot that is a
+  //  penthouse on floor 2, floor 3 and floor 4 of a tenement. A residential
+  //  FLOOR is a corridor with doors off it.
+  //
+  //  The unit width is not a taste: 3.2-4.6 m is the real width of a studio /
+  //  SRO bay, and the corridor is 1.7 m (over the 1.12 m egress minimum, because
+  //  the player capsule is 0.55 m and a 1.12 m hall reads as a coffin). The unit
+  //  COUNT falls out of the plate — nobody types it.
+  //
+  //  IT AUTHORS NO FURNITURE. Each unit is planned ONCE per building through
+  //  world/roombuild.js (`bedroom`: headboard to a wall, a wardrobe, a little
+  //  desk, real propuse cushions, a flood-fill that DROPS anything you could not
+  //  walk to) and that ONE plan is replayed at every unit on every storey — which
+  //  is both 1 planner call instead of ~100 and, exactly, the monotony doctrine:
+  //  the flats are identical because they were built identical. The only thing
+  //  drawn here is the KITCHEN RUN, because a kitchenette is joinery, not
+  //  furniture, and roombuild has no verb for it.
+  // ========================================================================
+  // MESH BUDGET, the same law the desk farm and the rack floor already carry: a
+  // flat costs ~20 boxes, and BOTH the flat count and the storeys grow with the
+  // plate. FLAT_CAP bounds the FLOOR (a wider plate gets wider flats, not more
+  // of them — which is also true of a real building: downtown flats are bigger),
+  // and the per-flat piece cap (solved below off the bay's own area) takes the
+  // top-priority pieces of the plan, which is the owner's brief read literally:
+  // "EACH WITH A BED THATS IT".
+  const UNIT_MIN = 3.0, CORR_W = 1.7, UNIT_CAP = 8;
+  const FLAT_CAP = 12;
+  function progResidential(r, h, opts) {
+    const w = r.x1 - r.x0, d = r.z1 - r.z0;
+    const alongX = w >= d;                        // corridor runs down the LONG axis
+    const runLo = alongX ? r.x0 : r.z0, runHi = alongX ? r.x1 : r.z1;
+    const crossLo = alongX ? r.z0 : r.x0, crossHi = alongX ? r.z1 : r.x1;
+    const runLen = runHi - runLo, cross = crossHi - crossLo;
+    // two ranks of flats only when the plate can face them off across a hall
+    const twoSided = cross >= CORR_W + 2 * 2.9;
+    const unitD = twoSided ? (cross - CORR_W) / 2 : (cross - CORR_W);
+    // how many flats the RUN can hold at the real minimum bay width…
+    const room = Math.min(UNIT_CAP, Math.floor(runLen / UNIT_MIN));
+    // DECLINE rather than half-build: a plate that cannot hold two flats IS one
+    // flat, and buildings.js's single-dwelling dresser does that better. Nothing
+    // has been drawn yet at this point, so the caller's fallback is clean.
+    if (unitD < 2.7 || room < 2) return null;
+    // …and the BAY WIDTH is proportioned off the depth the plate actually
+    // leaves, so a shallow shop-house gets true 3 m SRO bays and a deep point
+    // block gets 6 m two-beds instead of a 4 m x 12 m bowling alley. Never below
+    // two flats, never past the floor's mesh budget.
+    const ranks = twoSided ? 2 : 1;
+    const target = Math.max(3.4, Math.min(6.2, unitD * 0.5));
+    // …and the budget RIDES THE TOWER. A 5-storey walk-up can afford 12 flats a
+    // floor; the 52-storey flagship cannot afford 12 x 49 of them, and its
+    // storeys all get dressed. The cap falls with height and floors at 5, which
+    // on a 27 m plate is a real point block — five doors round a core.
+    const st = Math.max(1, (h.b.storeys | 0) || 1);
+    const flatCap = Math.max(5, Math.min(FLAT_CAP, Math.round(140 / st)));
+    const units = Math.max(2, Math.min(room, Math.ceil(flatCap / ranks),
+      Math.max(1, Math.round(runLen / target))));
+    const UW = runLen / units;
+    // "EACH WITH A BED THATS IT" is the brief for a 12 m² bay; a 70 m² one can
+    // carry the whole plan. The planner already RANKED its pieces (bed 9,
+    // wardrobe 5, desk 4, lamp 2), so this is a cut, never a choice.
+    const pieceCap = Math.max(2, Math.min(5, Math.round((UW * unitD) / 18) + 1));
+
+    shell(h, r);
+    const anchors = [], beds = [];
+    const y = r.y, wallH = h.fh - 0.1;
+    const cMid = (crossLo + crossHi) / 2;
+    const cLo = cMid - CORR_W / 2, cHi = cMid + CORR_W / 2;
+    // ---- one frame, four rotations (progMeeting's alongX trick) -------------
+    const P = function (run, cr) { return alongX ? { x: run, z: cr } : { x: cr, z: run }; };
+    // a wall RUNNING along the corridor at a fixed cross coordinate
+    const wallRun = function (crossAt, a, b2, gap, gapW) {
+      if (alongX) wallX(h, y, crossAt, a, b2, gap, gapW, wallH);
+      else wallZ(h, y, crossAt, a, b2, gap, gapW, wallH);
+    };
+    // a party wall ACROSS the corridor at a fixed run coordinate (never gapped)
+    const wallCross = function (runAt, a, b2) {
+      if (alongX) wallZ(h, y, runAt, a, b2, b2 + 1e6, 1.8, wallH);
+      else wallX(h, y, runAt, a, b2, b2 + 1e6, 1.8, wallH);
+    };
+    const sides = twoSided ? [-1, 1] : [-1];
+    // ---- the PLAN, once per building, one per side --------------------------
+    // (side −1's door is on its +cross wall and side +1's on its −cross wall, so
+    //  the two ranks are mirror images and each needs its own solve.)
+    const seed = (Math.round(h.ox) * 401) ^ (Math.round(h.oz) * 733);
+    const uRun0 = runLo + 0.14, uRun1 = runLo + UW - 0.14;
+    function planFor(side) {
+      if (!CBZ.roomPlan || CFG.INTERIOR_COHERENCE_V1 === false) return null;
+      const c0 = side < 0 ? crossLo + 0.14 : cHi + 0.14;
+      const c1 = side < 0 ? cLo - 0.14 : crossHi - 0.14;
+      const a = P(uRun0, c0), b2 = P(uRun1, c1);
+      const door = P((uRun0 + uRun1) / 2, side < 0 ? cLo : cHi);
+      let p = null;
+      try {
+        p = CBZ.roomPlan({ x0: Math.min(a.x, b2.x), x1: Math.max(a.x, b2.x),
+                           z0: Math.min(a.z, b2.z), z1: Math.max(a.z, b2.z), y: y },
+          "bedroom", { seed: seed + (side < 0 ? 0 : 17), door: door, inset: 0.08,
+                       tone: (opts && opts.tone) || "warm" });
+      } catch (e) { p = null; }
+      if (!p || !p.pieces || !p.pieces.length) return null;
+      // the flat is TINY: keep the highest-priority pieces (the bed first — the
+      // planner already ranked them) and let the rest go. Re-ordering the plan's
+      // own array is what lets `max` below mean "the important ones".
+      p.pieces.sort(function (m, q) { return (q.prio | 0) - (m.prio | 0); });
+      return p;
+    }
+    // TWO SOLVES A FLOOR — which is exactly the cost of the two `planSet` calls
+    // (living room + bedroom) this program replaces on every apartment storey,
+    // so the world build pays no more than it already did. The seed is the
+    // BUILDING, so every storey of a tower plans the identical flat: the flats
+    // are identical because they were BUILT identical, which is the monotony
+    // doctrine rather than an economy.
+    const plans = { "-1": planFor(-1), "1": twoSided ? planFor(1) : null };
+    // replay ONE unit's plan, shifted along the run, THROUGH THE ONE EXECUTOR
+    // (roombuild.js's CBZ.roomExecute) — never a second copy of the ox/oz
+    // forwarding, the lamp signature and the seat re-file. Every piece is
+    // re-gated on the host's own aisle/stair/chase predicate at its REAL
+    // position: the plan is a layout, not a permit.
+    function replay(plan, dRun) {
+      if (!plan || !CBZ.roomExecute) return 0;
+      const ex = CBZ.roomExecute(plan, { y: y }, {
+        box: h.b.lbox, ox: h.ox, oz: h.oz, tone: (opts && opts.tone) || null,
+        dx: alongX ? dRun : 0, dz: alongX ? 0 : dRun, max: pieceCap,
+        accept: function (px, pz) { return inRect(r, px, pz, 0.25) && h.clear(px, pz, 0.45); },
+      });
+      for (let q = 0; q < ex.beds.length; q++) beds.push(ex.beds[q]);
+      return ex.executed;
+    }
+    // ---- the floor: corridor walls with a door per flat, party walls between,
+    //      a kitchen run inside each, and one strip light down the hall --------
+    // A flat is only built where its OWN FRONT DOOR is walkable. The ground
+    // storey's entrance aisle, the stair strip and the lift chase therefore
+    // punch a clean hole in the rank (the roomKit idiom) instead of a corridor
+    // wall standing across the way in — which is the same discipline every
+    // other program in this kit uses, applied to a whole dwelling.
+    const kept = { "-1": [], "1": [] };
+    let live = 0;
+    for (let u = 0; u < units; u++) {
+      const a = runLo + u * UW, b2 = a + UW;
+      const mid = (a + b2) / 2;
+      for (let s = 0; s < sides.length; s++) {
+        const side = sides[s], key = side < 0 ? "-1" : "1";
+        const crossAt = side < 0 ? cLo : cHi;
+        const dp = P(mid, crossAt);
+        if (!inRect(r, dp.x, dp.z, 0.2) || !h.clear(dp.x, dp.z, 0.8)) { kept[key][u] = false; continue; }
+        kept[key][u] = true; live++;
+        wallRun(crossAt, a, b2, mid, 1.0);                    // the flat's own front door
+        if (u > 0 && kept[key][u - 1]) {                      // party wall between flats
+          if (side < 0) wallCross(a, crossLo, cLo);
+          else wallCross(a, cHi, crossHi);
+        }
+        // KITCHEN RUN against the corridor wall, beside the door — cabinets and
+        // a worktop, two boxes, the one thing roombuild has no verb for. Its
+        // length is what actually FITS between the doorway and the party wall
+        // (door half 0.5 + a 0.12 shin gap on one side, 0.13 off the wall on the
+        // other), so it can neither block the way in nor cross into next door.
+        const kLen = Math.min(UW / 2 - 0.75, 1.6);
+        const kOff = 0.62 + kLen / 2;
+        const kIn = side < 0 ? -0.42 : 0.42;
+        const kp = P(mid - kOff, crossAt + kIn);
+        if (kLen >= 0.7 && inRect(r, kp.x, kp.z, 0.3) && h.clear(kp.x, kp.z, 0.5)) {
+          h.b.lbox(kp.x, y + 0.45, kp.z, alongX ? kLen : 0.62, 0.9, alongX ? 0.62 : kLen, P_KIT.body, { cast: false });
+          h.b.lbox(kp.x, y + 0.93, kp.z, alongX ? kLen + 0.06 : 0.68, 0.06, alongX ? 0.68 : kLen + 0.06, P_KIT.top, { cast: false });
+        }
+        replay(plans[key], (u * UW));
+      }
+    }
+    if (!live) return { anchors: anchors, beds: beds, units: 0 };
+    // the hall itself: one long strip light, which is the whole read from the
+    // stairhead — a lit corridor with doors down it.
+    ceilingStrip(h.b.lbox(cx(r), y + h.fh - 0.26, cz(r),
+      alongX ? Math.min(runLen - 1.0, 14) : 0.3, 0.06,
+      alongX ? 0.3 : Math.min(runLen - 1.0, 14), P.light,
+      { emissive: P.light, ei: 0.26, cast: false }));
+    RES_TALLY.floors++; RES_TALLY.units += live; RES_TALLY.beds += beds.length;
+    return { anchors: anchors, beds: beds, units: live };
+  }
+  const P_KIT = { body: 0x55606e, top: 0xc9ccd2 };   // existing kitchen buckets
+  const RES_TALLY = { floors: 0, units: 0, beds: 0 };
+
+  // ========================================================================
+  //  (b) BREAKROOM — the ONE coherent kitchen in an office building.
+  //
+  //  OWNER: "ONE PACKED WITH DESKS LIKE WE HAVE, BUT RANDOM KITCHENS AND
+  //  OFFICES."  A kitchen counter in the middle of a desk floor is nobody's
+  //  plan; a break floor every fourth storey is how a real tower is stacked.
+  //  So the kitchen does not disappear — it is CONFINED to a program that says
+  //  what it is, and CBZ.interiorMix decides when a tower gets one.
+  //
+  //  It authors nothing either: roombuild.js's `breakroom` grammar is a counter
+  //  on the far wall you queue at and one free-standing table you sit at, with
+  //  the ring of chairs reserved. Degrade path is the kit's own two boxes.
+  // ========================================================================
+  function progBreakroom(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const y = r.y;
+    let planned = 0;
+    if (CBZ.roomFurnish) {
+      const dp = A.at(0, 0);
+      let p = null;
+      try {
+        p = CBZ.roomFurnish({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, y: y }, "breakroom", {
+          box: h.b.lbox, ox: h.ox, oz: h.oz, clear: h.b.clearFloorPoint || null,
+          door: { x: dp.x, z: dp.z }, inset: 0.1,
+          seed: (Math.round(h.ox) * 401) ^ (Math.round(h.oz) * 733),
+          tone: (opts && opts.tone) || "cool",
+        });
+      } catch (e) { p = null; }
+      planned = (p && p.executed) | 0;
+    }
+    if (!planned) {
+      // degrade path — a counter run and a table, from this kit's own buckets
+      const c = A.at(Math.max(1.8, A.depth - 1.6), 0);
+      A.obox(c, 0.46, Math.min(A.span - 1.6, 3.0), 0.92, 0.7, P.desk, { pad: 0.6 });
+      A.obox(c, 0.95, Math.min(A.span - 1.5, 3.1), 0.06, 0.8, P.worktop, { pad: 0.6 });
+      const t = A.at(A.depth * 0.45, 0);
+      A.obox(t, 0.38, 1.2, 0.08, 1.2, P.worktop, { pad: 0.7 });
+      A.obox(t, 0.2, 0.9, 0.36, 0.9, P.desk, { pad: 0.7 });
+    }
+    // a vending machine in the corner: the detail that says "this is the floor
+    // people come to", one lit face, two boxes.
+    const v = A.at(A.depth - 0.9, A.lat(A.span / 2 - 1.2, 1.0));
+    if (A.obox(v, 0.9, 0.9, 1.8, 0.7, P.steel, { pad: 0.5 }))
+      A.obox(v, 1.15, 0.62, 1.0, 0.06, P.glow, { emissive: P.glow, ei: 0.4, pad: 0.5 });
+    return { anchors: [] };
+  }
+
+  // ========================================================================
   //  PER-FLOOR ROOM RECT — the resolver occupy.js and every future per-floor
   //  caller needs, and the one function this kit was missing. It reproduces
   //  buildings.js's own roomKit() usable band EXACTLY (facade thickness, the
@@ -912,7 +1247,15 @@
     const z1 = b.d / 2 - wt - 0.4;
     if (x1 - x0 < 1.4 || z1 - z0 < 1.4) return null;
     const y = tops ? tops[k] : (k <= 0 ? 0.14 : k * fh);
-    return { x0: x0, x1: x1, z0: z0, z1: z1, y: y, floor: k, fh: fh, w: x1 - x0, d: z1 - z0 };
+    // THE SHELL IS THE LAW, applied at the source: a rect handed out from here
+    // is intersected with the building's own inside, so no program can be ASKED
+    // to dress a band that leaves the facade. (For a plain rectangular shell the
+    // band above is already 0.4 m inside it and this is a no-op — it is the
+    // hosts with a stair strip, an odd wt or a hand-passed w/d that need it.)
+    const room = CBZ.interiorClampRect(b, { x0: x0, x1: x1, z0: z0, z1: z1 });
+    if (room.x1 - room.x0 < 1.4 || room.z1 - room.z0 < 1.4) return null;
+    return { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1,
+             y: y, floor: k, fh: fh, w: room.x1 - room.x0, d: room.z1 - room.z0 };
   };
   CBZ.interiorFloorCount = function (b) {
     if (!b) return 0;
@@ -924,17 +1267,30 @@
   const PROGRAMS = {
     empty: progEmpty, deskfarm: progDeskFarm, meeting: progMeeting, storage: progStorage, lobby: progLobby,
     checkpoint: progCheckpoint, quarters: progQuarters, bosssuite: progBossSuite,
+    residential: progResidential, breakroom: progBreakroom,
   };
+  const PROG_TALLY = Object.create(null);
   CBZ.interiorProgram = function (name, room, ctx) {
     armReset();                        // see armReset: propuse.js parses AFTER this file
     const h = host(ctx);
     const fn = PROGRAMS[name];
     if (!h || !fn || !room) return null;
     if (!(room.x1 - room.x0 > 2) || !(room.z1 - room.z0 > 2)) return null;   // degenerate plate
-    const r = { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y || 0 };
-    return fn(r, h, (ctx && ctx.opts) || null);
+    const r = CBZ.interiorClampRect(h.b,
+      { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1 });
+    r.y = room.y || 0;
+    if (!(r.x1 - r.x0 > 2) || !(r.z1 - r.z0 > 2)) return null;
+    // THE SHELL IS THE LAW — every box this program draws (its own, roombuild's
+    // planner pieces, furniture.js's kit) goes through the host's lbox, so one
+    // wrap here covers all three and no program has to know the rule exists.
+    const out = CBZ.interiorBounded(h.b, function () {
+      return fn(r, h, (ctx && ctx.opts) || null);
+    }, "program:" + name);
+    if (out) PROG_TALLY[name] = (PROG_TALLY[name] | 0) + 1;
+    return out;
   };
-  CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint", "quarters", "bosssuite"];
+  CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint",
+    "quarters", "bosssuite", "residential", "breakroom"];
   // THE PARTITION ALONE — one thin full-run wall with ONE doorway and a lintel
   // over it, in the host's local frame. It is the only wall this kit draws and
   // it was private to `meeting` and `bosssuite`; a caller that wants to make a
@@ -965,6 +1321,333 @@
     shell(h, { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y || 0 }, !!dark);
     return true;
   };
+
+  /* ========================================================================
+     AN INTERIOR IS AN ANSWER TO "WHAT IS THIS BUILDING FOR" — CBZ.interiorMix.
+
+     OWNER: "EVERY SINGLE INTERIOR SHOULD CONNECT TO THE TYPE OF BUILDING AND
+     SHOULD ANSWER THE QUESTION WHY DOES IT MATTER."
+
+     Before this there was no such answer anywhere — there was a 4-way roll on a
+     building hash (`officeArchetype`) and, for every other building in the game,
+     a hard-wired single dresser. So a bank's upper storeys were somebody's
+     LIVING ROOM (buildings.js ran `furnishApartmentFloor` over every storey of
+     every shop, bank included) and an office tower could be a kitchen counter
+     bolted into a desk floor.
+
+     The mix is DATA and it is declared once. A family says what stands on floor
+     k of n: a `ground` floor, a `body` module that repeats (which IS the
+     monotony doctrine — a real tower is one module stacked, not a fresh scatter
+     per storey), and an `amenity` storey on a cadence, because a break floor
+     every fifth storey is how a tower is actually stacked and a kitchen in the
+     middle of a bullpen is nobody's plan.
+
+     IT REFINES THE EXISTING ARCHETYPE RATHER THAN REPLACING IT. `officeArchetype`
+     still decides empty-vs-programmed on its own per-building hash — so the 46%
+     intentionally-empty share the owner endorsed is untouched, and so is the
+     mesh budget of a tower that rolled `storage` — and the family only decides
+     what a PROGRAMMED tower stacks.
+
+     Adoption is one line and degrade-safe:
+        const prog = CBZ.interiorMix ? CBZ.interiorMix({...}) : null;
+        if (!prog || !dressWith(prog)) <the caller's old dresser>
+     ======================================================================== */
+  const MIX = {
+    empty:     { ground: "empty",       body: ["empty"], amenity: null, every: 0 },
+    // a working tower: desks, a floor of meeting rooms, a break floor
+    office:    { ground: "lobby",       body: ["deskfarm", "deskfarm", "deskfarm", "meeting"], amenity: "breakroom", every: 5 },
+    // the boutique/consultancy read: rooms rather than a bullpen
+    suite:     { ground: "lobby",       body: ["meeting", "deskfarm"], amenity: "breakroom", every: 6 },
+    // records: racks with the clerks who file them
+    archive:   { ground: "lobby",       body: ["storage", "storage", "deskfarm"], amenity: "breakroom", every: 7 },
+    // a public counter downstairs, offices and records above
+    civic:     { ground: "lobby",       body: ["deskfarm", "storage"], amenity: "breakroom", every: 5 },
+    // somebody LIVES here — a corridor of flats on every storey
+    home:      { ground: "residential", body: ["residential"], amenity: null, every: 0 },
+    // …and over a storefront (the ground floor belongs to the trade dresser)
+    flats:     { ground: null,          body: ["residential"], amenity: null, every: 0 },
+    // …or the trade's own back office over its own counter
+    workspace: { ground: null,          body: ["deskfarm", "deskfarm", "meeting"], amenity: "breakroom", every: 4 },
+  };
+  // WHAT STANDS OVER A STOREFRONT. A trade whose ground floor is a public
+  // counter has its own admin above it; everything else has tenants. This is the
+  // one table that says a bank is not a block of flats.
+  const ABOVE_TRADE = {
+    bank: "workspace", security: "workspace", realtor: "workspace", casino: "workspace",
+    hospital: "workspace", transit: "workspace", airfield: "workspace", arena: "workspace",
+    raceway: "workspace", racepark: "workspace", cityhall: "civic", courthouse: "civic",
+    federal: "civic", cityannex: "civic", postoffice: "civic", dmv: "civic", library: "civic",
+    firestation: "workspace",
+  };
+  const ARCH_FAMILY = { empty: "empty", deskfarm: "office", meeting: "suite", storage: "archive" };
+  const HOME_KINDS = { home: 1, tower: 1, apartment: 1, apartments: 1, residence: 1, residential: 1 };
+
+  // which family does a building of this KIND belong to?
+  //   where "above" → the storeys stacked over a storefront of that trade
+  CBZ.interiorFamily = function (kind, where) {
+    const k = String(kind || "").toLowerCase();
+    if (where === "above") return ABOVE_TRADE[k] || "flats";
+    if (HOME_KINDS[k]) return "home";
+    if (k === "office") return "office";
+    return ABOVE_TRADE[k] || "office";
+  };
+  CBZ.interiorMix = function (spec) {
+    if (!spec || CFG.INTERIOR_COHERENCE_V1 === false) return null;
+    // the archetype the CALLER already rolled always wins the empty question —
+    // this never turns an intentionally empty tower into a programmed one.
+    let famName = spec.family || null;
+    if (!famName && spec.archetype) famName = ARCH_FAMILY[spec.archetype] || null;
+    if (!famName) famName = CBZ.interiorFamily(spec.kind, spec.where);
+    const fam = MIX[famName];
+    if (!fam) return null;
+    const n = Math.max(1, spec.floors | 0), k = Math.max(0, spec.floor | 0);
+    if (k === 0 && fam.ground) return fam.ground;
+    if (k === 0 && !fam.ground) return null;          // the trade dresser owns it
+    if (fam.amenity && fam.every > 0 && n > fam.every && (k % fam.every) === 0) return fam.amenity;
+    // the module repeats on a per-BUILDING phase, so one tower reads as one
+    // legible stack and two towers do not read cloned.
+    const ph = (CBZ.hash01 && spec.b)
+      ? ((CBZ.hash01(spec.b.ox || 0, spec.b.oz || 0, 0x1F1C) * fam.body.length) | 0) : 0;
+    return fam.body[(k + ph) % fam.body.length];
+  };
+
+  /* ========================================================================
+     THE PEOPLE — CBZ.interiorPeople.
+
+     OWNER: "MOST INTERIORS ARE EMPTY INSTEAD OF WITH NPC EMPLOYEES TO INTERACT
+     WITH OR SECURITY."
+
+     THIS FILE MINTS NOBODY. city/citystaff.js already owns "a declared job that
+     grows a real ped only when somebody is near enough to see it, and stays
+     EMPTY when that ped is killed" — that is exactly the contract an interior
+     needs, and it is why there is no interior spawner here. Adoption is a list
+     of {x,z,face,job} rows; everything else (the body, the seat, the reap, the
+     killfeed, the Lv.N pill, the dossier) comes free.
+
+     TWO GUARDS ON THE BUDGET, and they are different guards:
+       • citystaff's VENUE_STAFF_MAX caps live BODIES citywide (shared with the
+         marina, the airside and the casino — this must not starve them), and
+       • INTERIOR_LIFE_MAX_POSTS caps how many ROWS a 400-lot city ever pushes
+         into that list at all.
+     `stations` is kept equal to the rows we declare, so venueStaffAudit's
+     `unstaffed` pin at 0 holds by construction.
+     ======================================================================== */
+  const PEOPLE = { posts: 0, opened: false, ids: Object.create(null), robberies: 0 };
+  function peopleOpen() {
+    if (PEOPLE.opened) return;
+    PEOPLE.opened = true;
+    // re-declaring the venue CLEARS its previous rows, so a world rebuild can
+    // never inherit ghost jobs from the last arena.
+    if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("interiors", { stations: 0, note: "building interiors" });
+  }
+  CBZ.interiorPeople = function (id, jobs) {
+    if (CFG.INTERIOR_LIFE_V1 === false || !CBZ.cityStaffPost || !id || !jobs || !jobs.length) return 0;
+    if (PEOPLE.posts >= (CFG.INTERIOR_LIFE_MAX_POSTS | 0)) return 0;
+    peopleOpen();
+    let n = 0;
+    for (let i = 0; i < jobs.length; i++) {
+      const j = jobs[i];
+      if (!j || j.x == null || j.z == null) continue;
+      if (PEOPLE.posts >= (CFG.INTERIOR_LIFE_MAX_POSTS | 0)) break;
+      const pid = id + ":" + i;
+      if (PEOPLE.ids[pid]) continue;                 // idempotent across rebuilds
+      const p = CBZ.cityStaffPost({
+        venue: "interiors", id: pid, x: j.x, z: j.z, face: j.face || 0,
+        job: j.job || null, archetype: j.archetype || null, opts: j.opts || null,
+        seat: j.seat || null, bed: j.bed || null, alive: j.alive || null,
+        pose: j.pose || null,
+        // a body indoors is invisible from outside anyway, so a short leash
+        // keeps the shared live-body budget for the venue you are standing in.
+        near: j.near != null ? j.near : 120, far: j.far != null ? j.far : 210,
+      });
+      if (!p) continue;
+      PEOPLE.ids[pid] = true; PEOPLE.posts++; n++;
+    }
+    if (n && CBZ.cityStaffStations) CBZ.cityStaffStations("interiors", PEOPLE.posts);
+    return n;
+  };
+  // the two rows every interior of consequence wants, derived from the door the
+  // building already declared — so a caller types no coordinates.
+  //   "guard"  a posted watch just inside the door, facing the street
+  //   "clerk"  a body behind the counter/desk at `inD` metres in
+  CBZ.interiorDoorPost = function (b, inD, lat) {
+    const d = b && b.localDoor;
+    if (!d || d.nx == null) return null;
+    const nx = d.nx, nz = d.nz, tx = -nz, tz = nx;
+    const lx = d.x + nx * (inD || 3.0) + tx * (lat || 0);
+    const lz = d.z + nz * (inD || 3.0) + tz * (lat || 0);
+    if (b.clearFloorPoint && !b.clearFloorPoint(lx, lz, 0.6)) return null;
+    return { x: (b.ox || 0) + lx, z: (b.oz || 0) + lz, face: Math.atan2(-nx, -nz) };
+  };
+
+  /* ========================================================================
+     THE STAKES — CBZ.interiorRobbery(lot).
+
+     OWNER: "…OR RANDOM PEOPLE TRYING TO ROB IT."
+
+     A robbery here is a DRESSING, not a mission: two armed men over a till, a
+     clerk who has stopped being a shopkeeper, and a decision for you. It runs on
+     systems that already exist and adds none —
+        cityPostNpc     the bodies (occupy.js's atom)
+        ped.guard       peds.js's own "challenge whoever walks in" brain, which
+                        is what makes walking through the door a decision
+        cityScare       freeze-or-bolt for the clerk, off the ONE decision fn
+        cityPanicRaise  the contagion field, so the street empties as a wave
+        killfeed        every death, because these are ordinary cityPeds
+     — and it OWNS no HUD, no objective and no payout. If you shoot them it is a
+     shooting; if you walk out it resolves itself and they leave.
+
+     NOT A MISSION SYSTEM, ON PURPOSE. A terrorist attack, a heist you can join,
+     a police response with a negotiation — those are core/mission.js's job and
+     want a giver in contracts.js. This is the ambient half.
+     ======================================================================== */
+  const ROBS = [];                     // live scenes: {lot, peds[], t, life}
+  const ROB_CAP = 1;                   // one in the whole city at a time
+  function robberSpot(b, inD, lat) {
+    const p = CBZ.interiorDoorPost(b, inD, lat);
+    return p;
+  }
+  CBZ.interiorRobbery = function (lot, opts) {
+    if (CFG.INTERIOR_LIFE_V1 === false || !CBZ.cityPostNpc) return null;
+    if (ROBS.length >= ROB_CAP) return null;
+    const b = lot && lot.building;
+    if (!b || !b.localDoor || lot.demolished) return null;
+    for (let i = 0; i < ROBS.length; i++) if (ROBS[i].lot === lot) return null;
+    opts = opts || {};
+    const n = 1 + ((Math.random() < 0.45) ? 1 : 0);          // runtime FX, not a build path
+    const peds = [];
+    for (let i = 0; i < n; i++) {
+      const sp = robberSpot(b, 4.2 + i * 0.9, (i === 0 ? -1.1 : 1.3));
+      if (!sp) continue;
+      let ped = null;
+      try {
+        ped = CBZ.cityPostNpc(sp.x, sp.z, {
+          face: sp.face + Math.PI, src: "interior:robbery", archetype: "thug", kind: "thug",
+          job: "armed robber", aggr: 0.9, nerve: 0.8, armed: true,
+          weapon: i === 0 ? "Pistol" : "Shotgun", cash: 120 + ((Math.random() * 260) | 0),
+          // ped.guard is the EXISTING brain that makes a body hold a spot and
+          // challenge whoever comes at it. They are not hunting you — they are
+          // busy, and that is what makes walking in your choice, not theirs.
+          guard: { x: sp.x, z: sp.z },
+        });
+      } catch (e) { ped = null; }
+      if (!ped) continue;
+      // the field every tactical surface reads (origins.js's `huntPlayer > 0`).
+      // Explicitly ZERO: they are here for the till, not for you — which is
+      // what makes walking through that door your decision and not theirs.
+      ped.huntPlayer = 0;
+      ped._interiorRobber = true;
+      peds.push(ped);
+    }
+    if (!peds.length) return null;
+    // the person behind the counter stops being a shopkeeper. ONE call — the
+    // shared freeze-or-bolt decision, with the seat bias a trapped body gets.
+    const clerk = b.vendor;
+    if (clerk && !clerk.dead && CBZ.cityScare) { try { CBZ.cityScare(clerk, peds[0], { bias: 0.25 }); } catch (e) {} }
+    if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(peds[0].pos.x, peds[0].pos.z, 1.4);
+    const rec = { lot: lot, peds: peds, t: 0, life: 26 + Math.random() * 22 };
+    ROBS.push(rec); PEOPLE.robberies++;
+    return rec;
+  };
+  function robberyTick(dt) {
+    for (let i = ROBS.length - 1; i >= 0; i--) {
+      const R = ROBS[i];
+      R.t += dt;
+      let alive = 0;
+      for (let q = R.peds.length - 1; q >= 0; q--) {
+        const p = R.peds[q];
+        if (!p || p.dead || (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0)) { R.peds.splice(q, 1); continue; }
+        alive++;
+        if (CBZ.cityPanicRaise && (R.t % 4) < dt) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.5);
+      }
+      if (!alive) { ROBS.splice(i, 1); continue; }
+      if (!R.leaving) {
+        if (R.t < R.life) continue;
+        // they got what they came for and LEAVE — released to the ordinary
+        // crowd brain rather than deleted where you can see it happen.
+        R.leaving = true;
+        for (let q = 0; q < R.peds.length; q++) {
+          const p = R.peds[q];
+          p.guard = null; p.homeGuard = null; p._interiorRobber = false;
+          p.state = "walk"; p.aggr = 0.5;
+        }
+        continue;
+      }
+      // …and are reaped once nobody is watching, so a long session cannot
+      // accumulate armed strangers. The hard stop is a backstop, not the plan.
+      const P = CBZ.player;
+      const far = !P || !P.pos || (function () {
+        for (let q = 0; q < R.peds.length; q++) {
+          const p = R.peds[q];
+          const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z;
+          if (dx * dx + dz * dz < 70 * 70) return false;
+        }
+        return true;
+      })();
+      if (!far && R.t < R.life + 75) continue;
+      if (CBZ.cityUnpostNpc) for (let q = 0; q < R.peds.length; q++) {
+        try { CBZ.cityUnpostNpc(R.peds[q]); } catch (e) {}
+      }
+      ROBS.splice(i, 1);
+    }
+  }
+  CBZ.interiorRobberies = function () { return ROBS.length; };
+
+  /* ========================================================================
+     AFTER DARK, SOMEBODY IS HOME — the night claim sweep.
+
+     OWNER: interiors "don't matter" and "NPCS DON'T INTERACT WITH INTERIORS
+     SMARTLY". A corridor of flats with real beds in it is scenery until
+     somebody is asleep in one. The beds are ALREADY registered by
+     CBZ.furnish.bed (real lie geometry, real entry points) — so this reuses
+     propuse.js's own verb on peds that already exist and adds no brain:
+     an idle body standing on a residential storey at night takes the nearest
+     free bed. Rate-limited to one claim a sweep; it is a garnish, not a system.
+     ======================================================================== */
+  let lifeAcc = 0, robScan = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(41.87, function (dt) {
+    if (CFG.INTERIOR_LIFE_V1 === false) return;
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    if (ROBS.length) robberyTick(dt || 0);
+    lifeAcc += dt || 0;
+    if (lifeAcc < 2.5) return;
+    lifeAcc = 0;
+    const P = CBZ.player;
+    if (!P || !P.pos || P.dead) return;
+    const night = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
+    // (a) somebody goes to bed
+    if (night > 0.5 && CBZ.propSeatNpc && CBZ.cityPeds) {
+      const list = CBZ.cityPeds;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a || a.dead || a.isPlayer || a.controlled || a.vendor) continue;
+        if (a._propBed || a._propSeat || a._npcAttached || a.driving) continue;
+        if (a.staffPost || a.rage || a.guard) continue;
+        if (!a.pos || a.pos.y < 1.5) continue;                 // upper storeys only
+        const dx = a.pos.x - P.pos.x, dz = a.pos.z - P.pos.z;
+        if (dx * dx + dz * dz > 90 * 90) continue;
+        if (CBZ.propSeatNpc(a, 6.5, "bed")) break;             // one a sweep
+      }
+    }
+    // (b) very occasionally, a shop is being robbed when you get there
+    const A = CBZ.city && CBZ.city.arena;
+    const shops = A && A.shopLots;
+    if (!shops || !shops.length || ROBS.length >= ROB_CAP) return;
+    if (Math.random() > 0.06) return;                          // ~1 chance / 42 s
+    const SCAN = Math.min(shops.length, 24);
+    for (let k = 0; k < SCAN; k++) {
+      const lot = shops[(robScan + k) % shops.length];
+      const b = lot && lot.building;
+      if (!b || !b.door || lot.demolished || !b.localDoor) continue;
+      const dx = b.door.x - P.pos.x, dz = b.door.z - P.pos.z, d2 = dx * dx + dz * dz;
+      // near enough to walk into, far enough that nobody watches them arrive
+      if (d2 < 55 * 55 || d2 > 150 * 150) continue;
+      if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(b.door.x, b.door.z)) continue;
+      robScan = (robScan + k + 1) % shops.length;
+      if (CBZ.interiorRobbery(lot)) return;
+    }
+    robScan = (robScan + SCAN) % shops.length;
+  });
 
   // ========================================================================
   //  THE WORKERS — real peds seated at the desks, DOING something.
@@ -1053,6 +1736,26 @@
                                `mismatched` beside them (furnitureAudit's own
                                pin, which must stay 0) — the proof that a
                                furnished room is SITTABLE and not scenery.
+       spill                   interior geometry that LEFT its own building —
+                               the owner's Meridian Trust complaint, as a number.
+                               STRUCTURALLY 0: every furnish pass runs inside
+                               CBZ.interiorBounded, which cannot let one out.
+                               `spillCaught` (refused + clamped) sits beside it
+                               with `spillSites` naming WHICH dresser still types
+                               out-of-shell coordinates, so a "fix" that just
+                               stops drawing cannot pass and the residue is
+                               attributable. spillCaught may only go DOWN;
+                               `spillUnbounded` counts passes that ran with no
+                               shell rect to clamp against (a host that declared
+                               no w/d) — the only way spill could ever be
+                               non-zero, so it is printed too.
+       units / homeFloors      flats built by the `residential` program. A
+                               residential FLOOR is a corridor with doors off it;
+                               `units` is how many dwellings the city actually
+                               has, and it may only go UP from the one-flat-
+                               per-storey world this replaced.
+       people / robberies      declared interior jobs (rows in citystaff.js) and
+                               robberies dressed this session.
      ======================================================================== */
   CBZ.interiorAudit = function () {
     const gov = (typeof CBZ.govInteriorCounts === "function") ? CBZ.govInteriorCounts() : null;
@@ -1060,7 +1763,25 @@
     const fa = (typeof CBZ.furnishAudit === "function") ? CBZ.furnishAudit() : null;
     const ev = {};
     for (const k in EMPTY_TALLY) ev[k] = EMPTY_TALLY[k];
+    const sites = {};
+    for (const k in SPILL.sites) sites[k] = SPILL.sites[k];
+    const progs = {};
+    for (const k in PROG_TALLY) progs[k] = PROG_TALLY[k];
     return {
+      spill: SPILL.escaped,                      // <- PIN 0. Structural.
+      spillCaught: SPILL.clamped + SPILL.refused, // <- only ever DOWN
+      spillClamped: SPILL.clamped,
+      spillRefused: SPILL.refused,
+      spillChecked: SPILL.checked,
+      spillUnbounded: SPILL.unbounded,
+      spillSites: sites,
+      programs: progs,                           // program name -> floors dressed
+      homeFloors: RES_TALLY.floors,
+      units: RES_TALLY.units,                    // <- only ever UP
+      unitBeds: RES_TALLY.beds,
+      people: PEOPLE.posts,                      // declared interior jobs
+      robberies: PEOPLE.robberies,
+      robberiesLive: ROBS.length,
       govFurnished: gov ? gov.buildings : 0,     // gov shells with at least one designed floor
       govBare: gov ? gov.bare : 0,               // <- PIN. Only ever down.
       govFloors: gov ? gov.floors : 0,
@@ -1080,6 +1801,16 @@
   // the same reset, marker-guarded like the explosion wrappers.
   CBZ.interiorAuditReset = function () {
     for (const k in EMPTY_TALLY) EMPTY_TALLY[k] = 0;
+    for (const k in PROG_TALLY) delete PROG_TALLY[k];
+    SPILL.checked = SPILL.clamped = SPILL.refused = SPILL.escaped = SPILL.unbounded = 0;
+    for (const k in SPILL.sites) delete SPILL.sites[k];
+    RES_TALLY.floors = RES_TALLY.units = RES_TALLY.beds = 0;
+    // the interior job rows go with the arena they described — re-opening the
+    // venue on the next declaration CLEARS citystaff's own list for us, so a
+    // rebuilt city can never inherit a job from a demolished building.
+    PEOPLE.posts = 0; PEOPLE.opened = false; PEOPLE.robberies = 0;
+    for (const k in PEOPLE.ids) delete PEOPLE.ids[k];
+    for (let i = ROBS.length - 1; i >= 0; i--) ROBS.splice(i, 1);
     if (CBZ.roomPlanAuditReset) CBZ.roomPlanAuditReset();
   };
   // LAZY RETRY — this file is index.html:530 and city/propuse.js is :667, so

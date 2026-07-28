@@ -3803,6 +3803,23 @@
   // upper floor (the furnishPenthouse/furnishHome precedent).
   const PWT = 0.16;          // thin partition thickness (one place, shared by pool floor too)
   const PCOL = 0xb9bcc4;     // one shared partition colour bucket
+
+  // ---- THE SHELL IS THE LAW ------------------------------------------------
+  // OWNER: "INTERIORS SHOULD NOT SPILL ONTO THE STREET AS MANY LIKE MERIDIAN
+  // TRUST DO."  The dressers in this file do not agree with each other about
+  // where the wall is: roomKit measures from ±(w/2 − wt − 0.4) and
+  // furnishInterior measures every `lat`/`inDepth` from ±w/2 — the OUTSIDE of
+  // the building — so "hug the side wall" lands inside the plaster and the
+  // bank's vault partition ran clean through the facade. Rather than re-typing
+  // ~200 coordinates (and having the next dresser re-type the mistake), every
+  // furnish pass runs inside city/interior_programs.js's ONE clamp: a box
+  // outside the shell is refused, a box straddling a wall is trimmed to the
+  // wall face. It covers this file's boxes, the interior programs' boxes,
+  // roombuild.js's planner and furniture.js's kit, because all four draw
+  // through the SAME `b.lbox`. Degrade-safe: no kit, no clamp, no change.
+  function bounded(b, site, fn) {
+    return CBZ.interiorBounded ? CBZ.interiorBounded(b, fn, site) : fn();
+  }
   function roomKit(b, baseY) {
     const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
     const WALLH = FHl - 0.05;
@@ -4050,6 +4067,9 @@
   //   IN  = direction from door into the room  =  (door.nx, door.nz)
   //   the BACK wall sits at  IN*roomHalf;  side walls run along the TANGENT.
   function furnishInterior(b, kind, door) {
+    return bounded(b, "shop:" + kind, function () { return furnishInteriorBody(b, kind, door); });
+  }
+  function furnishInteriorBody(b, kind, door) {
     const W = b.w, D = b.d, FHl = b.FH;
     const inx = door.nx, inz = door.nz;            // inward unit (one axis is 0)
     const tx = -inz, tz = inx;                     // tangent (perpendicular) unit
@@ -4807,9 +4827,19 @@
         // SPACE DOCTRINE: the vault room's read is bank.js's REAL steel vault
         // (the heist drill point) standing inside these walls — the old floating
         // deco door slab that doubled it mid-room is cut.
+        // MERIDIAN TRUST, THE ACTUAL SPILL. This frame measures `lat` from
+        // ±halfTan — the OUTER face of the shell — so `vlat + 2.2` resolves to
+        // `halfTan + 0.2`: a FULL-HEIGHT (FH − 0.05 ≈ 4.55 m) pale partition
+        // whose end stood 0.6 m past the inner wall face and 0.2 m out in the
+        // open air, on the pavement, on every bank lot in the world. Both ends
+        // now stop at the wall's inner face. (interior_programs.js's shell clamp
+        // catches this whole CLASS structurally; the coordinates are corrected
+        // here too, because a clamped box is a TRIMMED box and a design should
+        // not need trimming to fit inside its own building.)
+        const wIn = b.wt != null ? b.wt : WT;
         const vd0 = 2 * halfIn - 6.0, vlat = halfTan - 2.0;
-        partAlong(vd0, vlat - 2.2, vlat + 2.2);                      // vault front wall (no gap — the steel vault is the read)
-        partIn(vd0, 2 * halfIn - 0.5, vlat - 2.2);                   // vault -side wall
+        partAlong(vd0, vlat - 2.2, halfTan - wIn);                   // vault front wall (no gap — the steel vault is the read)
+        partIn(vd0, 2 * halfIn - wIn, vlat - 2.2);                   // vault -side wall
         // manager office on the opposite side: a glass-front cell holding ONE
         // desk with a lit screen, one chair, and SPACE (owner doctrine — a
         // separate room is an office with one desk, not a cram). Cell widened
@@ -4882,6 +4912,9 @@
   CBZ.cityFurnishInterior = function (b, kind, door) { furnishInterior(b, kind, door); };
 
   function furnishHome(b, rng, tier, baseY) {
+    return bounded(b, "home", function () { return furnishHomeBody(b, rng, tier, baseY); });
+  }
+  function furnishHomeBody(b, rng, tier, baseY) {
     // a real living space dressed to the home's TIER so each rung of the ladder
     // feels DISTINCT and lived-in — a bare studio at the bottom, a richly
     // appointed aerie near the top. Every piece is gated by clearFloorPoint so the
@@ -5087,6 +5120,21 @@
   // calls; merged tris only). `idx` rotates the linen/sofa/rug palettes so
   // stacked flats don't read copy-pasted. Exposed below for the island annex.
   function furnishApartmentFloor(b, baseY, idx) {
+    // TYPE COHERENCE (INTERIOR_COHERENCE_V1). OWNER: "A FULL FLOOR OF TINY
+    // APARTMENTS EACH WITH A BED THATS IT, TINY TINY APARTMENTS." A residential
+    // storey is a CORRIDOR WITH DOORS OFF IT, not one dwelling spread over the
+    // whole plate — which on a 27 m lot is a penthouse on every floor of a
+    // tenement. The `residential` program DECLINES a plate too small to hold two
+    // flats (which genuinely IS one flat) and the dresser below still owns that
+    // case, so nothing regresses on a small shell.
+    const res = coherentFloor(b, baseY, "home");
+    if (res) {
+      if (res.beds && res.beds.length) declareResidents(b, res.beds);
+      return;
+    }
+    return bounded(b, "apartment", function () { return furnishApartmentFloorBody(b, baseY, idx); });
+  }
+  function furnishApartmentFloorBody(b, baseY, idx) {
     const W = b.w, D = b.d, Y = baseY || 0;
     idx = idx | 0;
     // INTERIORS INTENTIONALITY: one building is ONE design. The plan/palette
@@ -5201,13 +5249,94 @@
     if (r < 0.93) return "meeting";    // one room, one table, space
     return "storage";                  // uniform archive racks
   }
+  // ---- TYPE COHERENCE (INTERIOR_COHERENCE_V1) ------------------------------
+  // OWNER: "EVERY SINGLE INTERIOR SHOULD CONNECT TO THE TYPE OF BUILDING."
+  // The three lines below are the whole adoption: ask the ONE mix table what
+  // stands on this floor of this kind of building, dress it, and fall back to
+  // whatever the caller drew before if the program declines the plate.
+  // CBZ.interiorMix REFINES officeArchetype rather than replacing it, so the
+  // owner-endorsed 46% intentionally-empty share is untouched.
+  function floorIdx(b, baseY) { return Math.max(0, Math.round((baseY || 0) / (b.FH || FH))); }
+  function floorsOf(b) {
+    return CBZ.interiorFloorCount ? Math.max(1, CBZ.interiorFloorCount(b)) : Math.max(1, b.storeys | 0);
+  }
+  // dress ONE floor with a NAMED program. null → the caller keeps its own dresser.
+  function dressFloorWith(b, baseY, prog, opts) {
+    if (!interiorsV2() || !prog) return null;
+    const k = roomKit(b, baseY);
+    if (k.xHi - k.xLo < 2.4 || k.zHi - k.zLo < 2.4) return null;
+    const o = { door: b.localDoor || null };
+    if (opts) for (const q in opts) o[q] = opts[q];
+    return CBZ.interiorProgram(prog, { x0: k.xLo, x1: k.xHi, z0: k.zLo, z1: k.zHi, y: baseY || 0 },
+      { b: b, opts: o });
+  }
+  // ask the mix, then dress. `where:"above"` = the storeys over a storefront.
+  function coherentFloor(b, baseY, kind, where, archetype) {
+    if (!interiorsV2() || !CBZ.interiorMix || CBZ.CONFIG.INTERIOR_COHERENCE_V1 === false) return null;
+    // a VACANT residential tower keeps its vacancy — the empty vocabulary is the
+    // design (an unlet floor mid-renovation), not an absence of one.
+    let prog;
+    if (kind === "home" && CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 !== false && CBZ.hash01
+        && CBZ.hash01(b.ox || 0, b.oz || 0, 0x0A97) < 0.34) prog = "empty";
+    else prog = CBZ.interiorMix({ kind: kind, where: where || null, archetype: archetype || null,
+      floor: floorIdx(b, baseY), floors: floorsOf(b), b: b });
+    return prog ? dressFloorWith(b, baseY, prog) : null;
+  }
+  // ---- WHO IS INSIDE (INTERIOR_LIFE_V1) ------------------------------------
+  // peds.js's lazy vendor pass already stands a clerk at every shop counter.
+  // What a bank, a jeweller, a casino or an office lobby has that this game did
+  // not is somebody WATCHING THE DOOR. One declared job through
+  // city/citystaff.js — no spawner, no brain, no budget of its own.
+  const GUARD_TRADES = { bank: 1, jewelry: 1, casino: 1, security: 1, cityhall: 1, courthouse: 1,
+    federal: 1, cityannex: 1, hospital: 1, pawn: 1, guns: 1, transit: 1 };
+  function declareInteriorGuard(b, id, n) {
+    if (!CBZ.interiorPeople || !CBZ.interiorDoorPost) return 0;
+    // occupy.js's ROLES table is the ONE declaration of what a guard IS — never
+    // a second set of numbers here (its `job` is a real aigoals CITY_JOBS row,
+    // which is what keeps the Lv.N pill and the shift honest).
+    const R = (CBZ.cityOccupyRoles && CBZ.cityOccupyRoles.guard) || null;
+    const jobs = [];
+    for (let i = 0; i < (n || 1); i++) {
+      const p = CBZ.interiorDoorPost(b, 3.6 + i * 0.8, i === 0 ? 2.1 : -2.1)
+        || CBZ.interiorDoorPost(b, 3.6 + i * 0.8, i === 0 ? -2.1 : 2.1);
+      if (!p) continue;
+      const o = { guard: { x: p.x, z: p.z } };
+      if (R) { for (const q in R) if (q !== "job" && q !== "archetype" && q !== "pose") o[q] = R[q]; }
+      else { o.kind = "security"; o.armed = true; o.weapon = "Pistol"; o.aggr = 0.6; }
+      jobs.push({ x: p.x, z: p.z, face: p.face, pose: (R && R.pose) || "foldarms",
+        job: (R && R.job) || "security guard", archetype: (R && R.archetype) || "security", opts: o });
+    }
+    return jobs.length ? CBZ.interiorPeople(id, jobs) : 0;
+  }
+  // ONE resident per residential building, asleep in a REAL bed the corridor of
+  // flats registered — the `alive` gate is the clock, so he exists at night and
+  // the row costs nothing by day. He is given NO job string on purpose: peds.js
+  // deals him a trade (CLAUDE.md — "resident" is not a role).
+  function declareResidents(b, beds) {
+    if (!CBZ.interiorPeople || !beds || !beds.length || b._interiorResidents) return 0;
+    b._interiorResidents = true;
+    // Not every block: a body is ~16 draw calls and citystaff's live budget is
+    // shared with the marina, the airside and the casino. About half the
+    // residential buildings carry a sleeper, picked on the building hash — so
+    // it is the same buildings every run, and a lit window with somebody in it
+    // means something because the next one is dark.
+    if (CBZ.hash01 && CBZ.hash01(b.ox || 0, b.oz || 0, 0x1E5D) >= 0.5) return 0;
+    const pick = beds[(Math.abs(Math.round(b.ox || 0)) + Math.abs(Math.round(b.oz || 0))) % beds.length];
+    if (!pick) return 0;
+    return CBZ.interiorPeople("home:" + Math.round(b.ox || 0) + ":" + Math.round(b.oz || 0), [{
+      x: pick.x, z: pick.z, face: pick.face || 0, bed: pick,
+      opts: { floorY: pick.y || 0 },
+      alive: function () { return (CBZ.nightAmount == null ? 0 : CBZ.nightAmount) > 0.45; },
+      near: 60, far: 110,
+    }]);
+  }
+
   function furnishOfficeFloorV2(b, baseY) {
-    const k = roomKit(b, baseY);       // bounds only — the program draws everything
-    const res = CBZ.interiorProgram(officeArchetype(b),
-      { x0: k.xLo, x1: k.xHi, z0: k.zLo, z1: k.zHi, y: baseY },
-      // the door orients the program (the meeting divider sits in the far
-      // half with its doorway on the approach line — never across the walk-in)
-      { b: b, opts: { door: b.localDoor || null } });
+    const arch = officeArchetype(b);
+    // the mix decides WHICH program on THIS storey (desks, a meeting floor, one
+    // break floor on a cadence); the archetype still decides empty-vs-programmed.
+    const res = coherentFloor(b, baseY, "office", null, arch)
+      || dressFloorWith(b, baseY, arch);
     return (res && res.anchors) || [];
   }
 
@@ -5231,6 +5360,9 @@
     // (idx — the per-floor palette/scatter rotator — is deliberately unused
     // there: variation between storeys is exactly what the owner killed.)
     if (interiorsV2()) return furnishOfficeFloorV2(b, baseY);
+    return bounded(b, "office", function () { return furnishOfficeFloorBody(b, baseY, idx); });
+  }
+  function furnishOfficeFloorBody(b, baseY, idx) {
     const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
     idx = idx | 0;
     const anchors = [];
@@ -5352,6 +5484,9 @@
   // the penthouse door both land the owner right here. Draw-call-cheap (shared
   // cached mats via b.lbox; no per-floor furniture — only the top floor is dressed).
   function furnishPenthouse(b, baseY) {
+    return bounded(b, "penthouse", function () { return furnishPenthouseBody(b, baseY); });
+  }
+  function furnishPenthouseBody(b, baseY) {
     const W = b.w, D = b.d, FHl = b.FH || FH;
     const Y = baseY || 0;
     const lb = (x, y, z, w, h, d, c, o) => b.lbox(x, Y + y, z, w, h, d, c, o || { cast: false });
@@ -5503,6 +5638,9 @@
   // treats just the OUTDOOR ocean as water, so an upper-floor emissive slab is
   // safe; the deck is a solid walkable floor like every other interior slab.
   function furnishPoolFloor(b, baseY) {
+    return bounded(b, "pool", function () { return furnishPoolFloorBody(b, baseY); });
+  }
+  function furnishPoolFloorBody(b, baseY) {
     const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
     const lb = (x, y, z, w, h, d, c, o) => b.lbox(x, Y + y, z, w, h, d, c, o || { cast: false });
     const glow = (x, y, z, w, h, d, c, ei) => b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
@@ -5600,6 +5738,9 @@
   // (each real-car visual is detailed). Returns how many cars it placed so the
   // caller can advance the catalog index for the next floor.
   function showroomFloor(b, kind, door, baseY, startIdx) {
+    return bounded(b, "showroom", function () { return showroomFloorBody(b, kind, door, baseY, startIdx); });
+  }
+  function showroomFloorBody(b, kind, door, baseY, startIdx) {
     const cars = (CBZ.cityEcon && Array.isArray(CBZ.cityEcon.CARS) && CBZ.cityEcon.CARS.length) ? CBZ.cityEcon.CARS : null;
     const W = b.w, D = b.d, Y = baseY || 0;
     const inx = door.nx, inz = door.nz;
@@ -6465,8 +6606,23 @@
           let carIdx = 10;
           for (let k = 1; k < shopStoreys; k++) carIdx += showroomFloor(b, dealKind, door, k * FH, carIdx);
         } else {
-          for (let k = 1; k < shopStoreys; k++) furnishApartmentFloor(b, k * FH, (lot.i | 0) * 7 + (lot.j | 0) + k);
+          // WHAT STANDS OVER A STOREFRONT IS A PROPERTY OF THE TRADE. Every
+          // shop in this game — the bank, City Hall, the hospital — used to get
+          // somebody's LIVING ROOM on every storey above its counter, because
+          // this line was `furnishApartmentFloor` for all of them. The mix table
+          // answers it once: a public counter has its own admin above it, a
+          // storefront has tenants. The apartment dresser is still the fallback.
+          for (let k = 1; k < shopStoreys; k++) {
+            if (!coherentFloor(b, k * FH, shop.kind, "above"))
+              furnishApartmentFloor(b, k * FH, (lot.i | 0) * 7 + (lot.j | 0) + k);
+          }
         }
+        // …and somebody watching the door of the trades that need one. The
+        // clerk at the counter already exists (peds.js's lazy vendor pass) —
+        // this is the guard the game never had. ONE declared job.
+        if (GUARD_TRADES[shop.kind] && CBZ.CONFIG.INTERIOR_LIFE_V1 !== false)
+          declareInteriorGuard(b, "shop:" + (lot.i | 0) + ":" + (lot.j | 0),
+            (shop.kind === "bank" || shop.kind === "casino" || shop.kind === "jewelry") ? 2 : 1);
         if (shop.chop) {
           chopShop = lot;
           // a drive-in sell bay just outside the door
@@ -6693,6 +6849,13 @@
           const walkIns = [];
           for (let a = 0; a < deskAnchors.length; a++) if (!deskAnchors[a]._staffed) walkIns.push(deskAnchors[a]);
           if (walkIns.length) CBZ.cityRegisterOfficeDesks && CBZ.cityRegisterOfficeDesks(lot, walkIns);
+          // A LOBBY WITH A DESK AND NOBODY BEHIND IT IS A STAGE SET. The
+          // receptionist is seated above (npclife); this is the security desk —
+          // one declared job through citystaff, live only when you are close
+          // enough to walk past it. Programmed towers only: an intentionally
+          // empty shell has nothing to guard, which is the point of it.
+          if (v2 && officeArchetype(b) !== "empty" && CBZ.CONFIG.INTERIOR_LIFE_V1 !== false)
+            declareInteriorGuard(b, "office:" + (lot.i | 0) + ":" + (lot.j | 0), 1);
           lot.kind = "office";
           lot.building = { ...b, name: "Office Tower", sign: color, side, door: doorPt, office: true, deskCount: walkIns.length };
           placed.push(lot);
