@@ -2290,10 +2290,23 @@
     // decrements the roster EXACTLY once. Cops aren't part of the civilian
     // populace and never route through cityKillPed, so the headcount stays clean.
     if (CBZ.cityPopulationDie) CBZ.cityPopulationDie(1);
-    // an armed ped drops their gun where they fall (anyone can grab it)
-    if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo);
-    ped.armed = false; ped.weapon = null; ped.ammo = 0;
-    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    // AN ARMED PED DROPS THEIR GUN WHERE THEY FALL — and "where they fall" is
+    // the whole reason this is no longer four lines of local code. The lines
+    // below dropped at ped.pos unconditionally, which is correct for a man
+    // shot on the pavement and WRONG for the three cases the crewed-seats
+    // waves created: a body in a helicopter seat is at its seat's WORLD
+    // position, so his SMG was spawned 150 m over the city and the wreck
+    // landed empty. city/morgue.js's cityDeathDrop owns the whole contract now
+    // — the gun, the ammo, the held-prop resync AND the armour stamp
+    // interact.js's "Take armor" reads — and DEFERS the payout for a body with
+    // no resting place yet, paying it at the wreck once the body is down.
+    // Degrade-safe: no morgue.js, and this is byte-for-byte what it always was.
+    if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(ped);
+    else {
+      if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo);
+      ped.armed = false; ped.weapon = null; ped.ammo = 0;
+      if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    }
     // bodies carry WAY more than you'd lift off the living — loot the corpse
     rollDeadLoot(ped);
     if (CBZ.gore && ped.pos) {
@@ -2606,11 +2619,31 @@
   };
   const NPC_GUN_DEF = { dmg: 14, dspr: 10, cd: 0.55, cspr: 0.5 };
 
-  function npcAttack(att, tgt) {
+  // COMPETENCE, not a constant (systems/combat_iq.js). WHAT this person is and
+  // WHAT they hold decides reaction time, aim settle, burst rhythm, accuracy
+  // and the per-hit damage that holds their DPS on the table's ladder. Absent
+  // the module (or with NPC_COMBAT_IQ off) every line below falls back to the
+  // exact old NPC_GUN roll, byte for byte.
+  function iq() { return (CBZ.CONFIG.NPC_COMBAT_IQ !== false) ? CBZ.combatIQ : null; }
+  // BLOCK LAW #5 — adoption is DECLARED, not sniffed (the predatorAudit lesson).
+  // The buffered `else` makes it script-order-proof.
+  (function () {
+    const ids = ["peds:npc-attack", "peds:fight-band", "peds:rage-engage"];
+    if (CBZ.combatIQ && CBZ.combatIQ.adopt) { for (let i = 0; i < ids.length; i++) CBZ.combatIQ.adopt(ids[i]); }
+    else { CBZ._combatIQAdopted = (CBZ._combatIQAdopted || []).concat(ids); }
+  })();
+
+  function npcAttack(att, tgt, dt) {
     if (att.attackCD > 0 || !tgt || tgt.dead) return;
     const dx = att.pos.x - tgt.pos.x, dz = att.pos.z - tgt.pos.z;
     const dh = Math.hypot(dx, dz);                        // horizontal gap
-    if (att.armed && att.ammo > 0 && dh < 26) {
+    // A RIFLE'S RANGE IS THE RIFLE'S. The old flat 26 was the same for a
+    // snub-nose and an AK; the profile's own band is what a carrier will
+    // actually engage at, and move() holds the matching standoff.
+    const IQ = iq();
+    const prf = IQ && IQ.profile ? IQ.profile(att) : null;
+    const gunReach = prf && prf.cls !== "none" ? prf.hi + 4 : 26;
+    if (att.armed && att.ammo > 0 && dh < gunReach) {
       // aim first so the muzzle is oriented, then test a REAL line of fire from the
       // muzzle to the target in 3D (angle + elevation + walls all count).
       if (CBZ.actorAimAt) CBZ.actorAimAt(att, tgt);
@@ -2635,7 +2668,16 @@
       }
       // clear line — take the real shot (cadence + damage from the gun's profile).
       const prof = NPC_GUN[att.weapon] || NPC_GUN_DEF;
-      att.attackCD = prof.cd + rng() * prof.cspr; att.ammo--;
+      const baseDmg = prof.dmg + rng() * prof.dspr;
+      // THE FIRE GATE. combat_iq owns the reaction beat, the aim settle and the
+      // burst rhythm, and hands back the cooldown THIS field already holds —
+      // one timer, not two. It also hands back the per-hit damage scaled so
+      // this shooter's DPS lands on its row of the ladder, which is the whole
+      // counterweight: a soldier who now hits far more often hits for less.
+      const shot = IQ && IQ.shot ? IQ.shot(att, tgt, dh, dt || 0.016, baseDmg) : null;
+      if (shot && !shot.fire) { att.attackCD = Math.max(0.05, shot.cd); return; }   // still reacting
+      att.attackCD = shot ? shot.cd : (prof.cd + rng() * prof.cspr);
+      att.ammo--;
       const to = { x: tgt.pos.x, y: ty, z: tgt.pos.z };
       if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.0 });
       else if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
@@ -2650,8 +2692,13 @@
       // through a showroom front or a half-broken window BREAKS it, and the
       // follow-ups fly through the hole (cityShotHole lets LOS/tracers pass).
       if (CBZ.cityShatterRay) CBZ.cityShatterRay(from.x, from.y, from.z, to.x - from.x, to.y - from.y, to.z - from.z, d3 + 0.6, true);
-      const hit = rng() < Math.max(0.15, 0.8 - d3 * 0.03);
-      if (hit) hurtActor(att, tgt, prof.dmg + rng() * prof.dspr, false);
+      const hit = shot ? (rng() < shot.hit) : (rng() < Math.max(0.15, 0.8 - d3 * 0.03));
+      if (hit) hurtActor(att, tgt, shot ? shot.dmg : baseDmg, false);
+      // INCOMING IS A THING THAT HAPPENS TO YOU. A round that goes past an
+      // armed bystander's ear makes THEM shoot worse and want the wall — the
+      // one line that turns "covering fire" from a word in a comment into a
+      // mechanic. Only ever suppresses the person being shot AT.
+      if (IQ && IQ.suppress && tgt.armed && !tgt.isPlayer) IQ.suppress(tgt, 1.4);
       // a round only catches a bystander when it actually traveled the lane (it had
       // LOS); a blocked shot never fires, so there's no phantom crossfire behind cover.
       crossfire(att, tgt, !hit);
@@ -2659,9 +2706,26 @@
     } else if (dh < 2.4) {
       // melee — needs a real reach: no clubbing a rooftop target from the street below.
       if (Math.abs((tgt.pos.y || 0) - (att.pos.y || 0)) > 2.2) return;
+      // A PUNCH IS AN EXCHANGE (systems/combat_iq.js). This branch used to be
+      // three lines — cooldown, sound, damage — with NO wind-up at all, which
+      // is exactly why city/combat.js had to fake a telegraph from the outside
+      // and why two brawlers stood inside each other trading invisible hits.
+      // melee() runs the beat (approach, circle at the edge of reach, guard an
+      // incoming swing, telegraph, commit, recover) and returns "swing" on the
+      // ONE tick the blow actually lands; everything else is footwork, and the
+      // wind-up it raises is the SAME _windup/char.windup the rig and the
+      // player's parry window already read.
+      // attackCD stays at ZERO between beats on purpose: the FSM advances by the
+      // frame dt handed to it, so it must be called every frame or its beats run
+      // long by exactly the throttle ratio. (The armed branch above does not need
+      // this — posture() ticks that shooter's timers every frame from move().)
+      const beat = IQ && IQ.melee ? IQ.melee(att, tgt, dt || 0.016, { reach: 1.85 }) : null;
+      if (beat && beat !== "swing") { att.attackCD = 0; return; }
       att.attackCD = 0.5 + rng() * 0.4;
       if (CBZ.sfx) CBZ.sfx("punch");
       hurtActor(att, tgt, 16 + rng() * 8, true);
+    } else if (att._iqM && IQ && IQ.meleeReset) {
+      IQ.meleeReset(att);                                  // out of the bout — drop the beat state
     }
   }
 
@@ -3243,7 +3307,12 @@
       ped.group.rotation.y = Math.atan2(threat.pos.x - ped.pos.x, threat.pos.z - ped.pos.z);
       const d = Math.hypot(threat.pos.x - ped.pos.x, threat.pos.z - ped.pos.z);
       ped.target.set(d > 13 ? threat.pos.x : ped.pos.x, 0, d > 13 ? threat.pos.z : ped.pos.z);   // close to ~13m, then hold + fire
-      npcAttack(ped, threat);
+      // your crew fights with the same competence model everyone else does —
+      // posture writes the cover/standoff point over the plain hold above.
+      if (CBZ.combatIQ && CBZ.combatIQ.posture && CBZ.CONFIG.NPC_COMBAT_IQ !== false && ped.armed) {
+        CBZ.combatIQ.posture(ped, threat, dt);
+      }
+      npcAttack(ped, threat, dt);
     } else {
       ped.state = "walk";
       const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
@@ -3985,15 +4054,17 @@
       else {
         ped.state = "fight";
         ped.target.set(ped.rage.pos.x, 0, ped.rage.pos.z);
-        // TACTICAL HANDOFF (feature-detected, additive): an important/named civilian
-        // — someone you know by name, a boss, a bounty, a protected family member, a
-        // recruit — mid-fight refines its OWN walk-straight-at-target line into real
-        // cover/flank positioning via the shared tactical-AI module another task in
-        // this wave is building (CBZ.aiTactics). It may not exist yet (load order
-        // across this wave isn't guaranteed) and even when it does we only spend the
-        // extra per-frame work on the handful of named fighters — ordinary ambient
-        // civilians keep the bare cheap path (ped.target straight at the foe, above).
-        if (CBZ.aiTactics && ped.armed &&
+        // TACTICAL HANDOFF. This USED to be the whole of the smart-fighting
+        // story, and it was gated on being SOMEBODY — named, a boss, a bounty,
+        // protected, recruited — so an ordinary armed ganger, terrorist or
+        // soldier got NOTHING and simply walked at you in a straight line. That
+        // gate is why the owner's complaint was true. Every armed fighter now
+        // runs the fuller composition (cover + shooter token + weapon band) in
+        // move(), every frame, via systems/combat_iq.js; aitactics' engage stays
+        // as the exact fallback for a build with combat_iq off or absent, so
+        // nothing regresses to the pre-tactics path.
+        const _iqOn = !!(CBZ.combatIQ && CBZ.combatIQ.posture && CBZ.CONFIG.NPC_COMBAT_IQ !== false);
+        if (!_iqOn && CBZ.aiTactics && ped.armed &&
             (ped.nameKnown || ped.isBoss || ped.rank === "boss" || ped.bounty > 0 || ped.protectGang || ped.protectedBy || ped.recruited)) {
           const tac = CBZ.aiTactics;
           try {
@@ -4001,8 +4072,15 @@
             else if (tac.tick) tac.tick(ped, ped.rage, dt);
           } catch (e) {}
         }
-        // disengage if badly hurt and not truly violent
-        if (ped.hp < ped.maxHp * 0.3 && ped.aggr < (B.violent || 0.88)) { ped.rage = null; ped.state = "flee"; fleeFrom(ped, ped.pos.x + ddx, ped.pos.z + ddz); }
+        // SELF-PRESERVATION. Breaking contact is the LAST answer, not the first:
+        // a hurt fighter with a wall within reach gets behind it (posture's own
+        // fallback branch) and keeps fighting; only one with nowhere to go runs.
+        // The old line sent every wounded body sprinting into the open street,
+        // which is most of "they dont make a good effort at staying alive".
+        const _hurtBail = ped.hp < ped.maxHp * 0.3 && ped.aggr < (B.violent || 0.88);
+        if (_hurtBail && !(_iqOn && ped.armed && CBZ.combatIQ.cover && CBZ.combatIQ.cover(ped, ped.rage.pos.x, ped.rage.pos.z))) {
+          ped.rage = null; ped.state = "flee"; fleeFrom(ped, ped.pos.x + ddx, ped.pos.z + ddz);
+        }
         return;
       }
     }
@@ -4067,6 +4145,50 @@
         // bold + (usually armed): draw and fight back — a Mexican stand-off
         ped.rage = CBZ.city.playerActor; ped.state = "fight";
         if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.4);
+        return;
+      }
+    }
+
+    // ---- SHOOT FIRST -------------------------------------------------------
+    // OWNER: "make some of them shoot first sometimes." Every violent path in
+    // this file needed to be PROVOKED first — hit, aimed at, rallied — so no
+    // armed NPC in the game had ever opened on the player unbidden. The rule
+    // that keeps it from being a nuisance: THE WORLD SUPPLIES THE REASON. We
+    // never invent hostility; we read a context that already exists (you are
+    // standing on a provoked crew's turf, or armed inside a perimeter somebody
+    // is paid to hold) and ask systems/combat_iq.js whether THIS person is the
+    // one who starts it. That answer is a stable trait off the body's own spawn
+    // hash, so the same man is always the eager one — and ROLE.civ's eagerness
+    // is zero, so a law-abiding person with a gun never opens fire.
+    if (active && ped.armed && ped.ammo > 0 && !ped.rage && !ped.surrender && !P.dead &&
+        !g.busted && dpl < 30 && CBZ.combatIQ && CBZ.combatIQ.shootFirst && (ped._sfCD || 0) <= 0) {
+      ped._sfCD = 1.4 + rng() * 1.6;
+      let ctx = null, bias = 0;
+      // (a) TURF. A crew you have already crossed, on ground they own.
+      if (ped.gang && CBZ.cityGangOf && CBZ.cityGangOf(px, pz) === ped.gang) {
+        const prov = CBZ.cityGangProvoked ? CBZ.cityGangProvoked(ped.gang) : 0;
+        const stand = CBZ.cityGangStanding ? CBZ.cityGangStanding(ped.gang) : 0;
+        if (prov > 0.35 || stand < -10) { ctx = "turf"; bias = Math.min(0.12, prov * 0.1); }
+      }
+      // (b) A PERIMETER SOMEBODY IS PAID TO HOLD. An armed stranger walking a
+      //     guarded line is the one case where opening fire is the JOB, and it
+      //     is what makes a military fence or a compound read as defended.
+      if (!ctx && playerArmed && (ped.guard || ped.kind === "security" || ped.milRank || ped.kind === "military")) {
+        const leash = ped.guard || null;
+        const inside = !leash || Math.hypot(px - (leash.x != null ? leash.x : ped.pos.x), pz - (leash.z != null ? leash.z : ped.pos.z)) < (leash.r || 26);
+        if (inside && dpl < 24) { ctx = "perimeter"; bias = 0.08; }
+      }
+      // (a rampage never reaches here — rampageThink returns at the top of
+      //  think() and owns that brain completely. combat_iq's own default
+      //  context covers it for any other caller.)
+      if (ctx && CBZ.clearLineOfFire &&
+          CBZ.clearLineOfFire(ped.pos.x, (ped.pos.y || 0) + 1.4, ped.pos.z, px, (P.pos.y || 0) + 1.55, pz) &&
+          CBZ.combatIQ.shootFirst(ped, CBZ.city.playerActor, { context: ctx, bias: bias })) {
+        ped.rage = CBZ.city.playerActor; ped.state = "fight";
+        ped.target.set(px, 0, pz);
+        if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.25);
+        // the street hears it start — the same alarm any opened fight raises.
+        if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(ped.pos.x, ped.pos.z, 0.6);
         return;
       }
     }
@@ -4883,11 +5005,52 @@
     // costs nothing to clean up — never persisted onto baseSpeed).
     if (spd > 0 && (st === "walk" || st === "wander") && ped._role === "jogger") spd *= 1.5;
 
-    // engagement: attack when in range
+    // ---- engagement ---------------------------------------------------------
+    // WHY THIS LIVES IN move() AND NOT think(): think() is time-sliced (stride 4
+    // for an active ped, 20 for a far one) while move() runs every frame for
+    // anything visible or important. Tactical steering re-solved at 15 Hz reads
+    // as a body twitching between decisions; the LOS/cover probes inside are
+    // themselves throttled, so running the composition every frame costs a
+    // handful of compares and buys smooth footwork.
     if (st === "fight" && ped.rage && !ped.rage.dead) {
       const d = Math.hypot(ped.rage.pos.x - ped.pos.x, ped.rage.pos.z - ped.pos.z);
-      const want = ped.armed ? 9 : 1.7;
-      if (d <= want + 0.4) { spd = 0; npcAttack(ped, ped.rage); }
+      const IQ = iq();
+      const prf = IQ && IQ.profile ? IQ.profile(ped) : null;
+      // POSTURE (systems/combat_iq.js) — cover, the shooter token, the weapon's
+      // own standoff band and the anti-clump spacing, written into ped.target,
+      // which is the field this function already steers by. It returns the
+      // slot: only a token holder is allowed to be shooting at all, which is
+      // the whole answer to "a group of them all with guns is just chaos".
+      let slot = "fire";
+      if (IQ && IQ.posture && ped.armed && ped.ammo > 0) {
+        slot = IQ.posture(ped, ped.rage, dt) || "fire";
+        // a fighter is not running errands. A stale routine path left over from
+        // before the fight would otherwise get shift()ed one node per frame the
+        // moment the body settles onto its tactical point (the arrival branch
+        // below consumes a path whenever it is standing on its target).
+        if (ped.path) ped.path = null;
+      }
+      // THE 9 WAS THE BUG. Every armed NPC used to walk to 9.4 m before it was
+      // allowed to pull the trigger, whatever it was holding — a rifleman closed
+      // into shotgun range to open fire. The engagement distance is the WEAPON'S
+      // now (pistol 14, rifle 26, sniper 46, shotgun 10).
+      const gunner = !!(prf && prf.cls !== "none");
+      // a fistfighter engages at the melee beat's own reach (the FSM needs to be
+      // ticking while it circles at the edge of it); npcAttack still gates the
+      // blow itself on 2.4 exactly as before.
+      const want = gunner ? prf.hi + 0.4 : (ped.armed ? 9 : (ped._iqM ? 2.35 : 1.7));
+      const mayFire = !gunner || slot === "fire" || slot === "peek";
+      if (d <= want + 0.4 && mayFire) {
+        npcAttack(ped, ped.rage, dt);
+        // A FIGHTER HOLDING A POSITION IS NOT A STATUE, but one that has reached
+        // the spot it chose should plant and shoot. The old code zeroed speed
+        // for everybody the instant they were in range, which is why a firefight
+        // was a row of parked bodies.
+        const goalD = Math.hypot(ped.target.x - ped.pos.x, ped.target.z - ped.pos.z);
+        if (goalD < (gunner ? 0.9 : 0.5) || (!prf && !ped._iqM)) spd = 0;
+      }
+    } else if (ped._iqM && CBZ.combatIQ && CBZ.combatIQ.meleeReset) {
+      CBZ.combatIQ.meleeReset(ped);                        // fight's over — drop the beat state
     }
 
     // loot pickup
@@ -4901,6 +5064,7 @@
     if (ped.posePoint > 0) ped.posePoint -= dt;   // the snitch point-out gesture window
     if (ped._probeT > 0) ped._probeT -= dt;   // far-walker wall-probe rate gate
     if (ped._rampT > 0) ped._rampT -= dt;      // rampager re-target / re-arm cadence
+    if (ped._sfCD > 0) ped._sfCD -= dt;        // shoot-first re-check cadence (combat_iq)
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
     if (ped.pause > 0) ped.pause -= dt;
     // SIT-DOWN (C3): an office worker routed to a CLAIMED desk (finalGoal.sitDesk,
@@ -5086,12 +5250,26 @@
       if (p.dead) {
         if (p.tag) p.tag.visible = false;
         p.deadT += dt;
-        // bodies STAY on the ground (loot them as long as they're there). After a
-        // short response delay they flag for pickup; city/medics.js dispatches a
-        // paramedic who walks over and carries them off (sets p.collected). A long
-        // fallback prevents a leak if no medic ever reaches it.
-        if (p.deadT > 4) p.needsPickup = true;
-        if ((p.collected || p.deadT > 75) && !p.culled) { p.culled = true; if (p.group.parent) p.group.parent.remove(p.group); }
+        // A CORPSE IS DRAWN LIKE ANY OTHER BODY. The dead branch used to skip
+        // the render LOD entirely, so a body that died on screen kept drawing
+        // at any range forever — harmless when it was deleted after 75 s, and
+        // the whole cost of persistence if it is not. Same VIS_D2 every living
+        // rig below uses; this is what makes a held corpse past 95 m free.
+        {
+          const cdx = p.pos.x - camx, cdz = p.pos.z - camz;
+          if (p.group) p.group.visible = cdx * cdx + cdz * cdz < VIS_D2;
+        }
+        // BODIES STAY UNTIL SOMEBODY COMES FOR THEM (city/morgue.js). The old
+        // rule was two timers: flag for pickup at 4 s so medics.js could walk a
+        // paramedic in out of thin air, then DELETE the body at 75 s whether
+        // anyone had collected it or not. Both are gone. `needsPickup` is now
+        // set by the ambulance that actually arrived, and the cull is governed
+        // by the persistence law — the nearest N bodies never reap, and nothing
+        // reaps where you could be looking at it. Degrade-safe both ways: no
+        // morgue.js and this is the exact pair of timers it always was.
+        if (!CBZ.corpseMayReap && p.deadT > 4) p.needsPickup = true;
+        const mayCull = CBZ.corpseMayReap ? CBZ.corpseMayReap(p) : (p.collected || p.deadT > 75);
+        if (mayCull && !p.culled) { p.culled = true; if (p.group.parent) p.group.parent.remove(p.group); }
         continue;
       }
       // A reusable placement owns actors seated on a moving parent (currently
@@ -5227,7 +5405,15 @@
         CBZ.city && CBZ.city.note("Picked up " + d.weapon, 1.4);
         removeDrop(i); continue;
       }
-      if (d.t > 30) removeDrop(i);
+      // A DEATH DROP BELONGS TO THE BODY. An ordinary dropped gun ages out in
+      // 30 s, which was fine when a corpse was deleted at 75 s and is a lie now
+      // that one can lie there for minutes: you would walk back to a body with
+      // an empty patch of pavement where his rifle had been. morgue.js's
+      // cityDropHeld answers "the owner of this drop is still on the ground";
+      // when he is collected (or culled) the drop resumes its normal 30 s life
+      // from that moment. Degrade-safe: no morgue.js → the old flat 30 s.
+      if (d.t > 30 && !(CBZ.cityDropHeld && CBZ.cityDropHeld(d))) removeDrop(i);
+      else if (d.t > 30) d.t = 29;
     }
   });
 })();

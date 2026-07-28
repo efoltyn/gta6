@@ -1362,6 +1362,26 @@ runs each audit first writes the number in; do not pin a guess.
   seabed), unlit ranges untouched, backdropAudit gains rangeRemoved and still
   sweeps (reliefCells 0 IS the proof).
 
+- **HOW WELL A PERSON FIGHTS** — `CBZ.combatIQ` in `systems/combat_iq.js`. OWNER:
+  "make npcs better at fighting… some of them shoot first… a group of them all
+  with guns its just chaos… maybe you make it so much better it has to do LESS
+  damage lol." Four arithmetic faults, not taste: **an armed ped never fired
+  past 9.4 m** (peds.js's flat `want = 9` while npcAttack allowed 26 — every
+  rifleman walked into pistol range), **nobody took turns** (N gunmen = N× DPS,
+  all in the open), **the cover code was dead** (squadai.js scanned
+  `cols[0..64]` — the first 64 entries of the GLOBAL collider array;
+  `CBZ.queryCollidersNear` existed and no combat code called it), and **a gun
+  was a damage number** (NPC_GUN had ONE row). `CBZ.combatIQ.posture(a,tgt,dt)`
+  is the one call an armed brain makes. **The table is a DPS LADDER** — every
+  cell is HP/s at 10 m and per-hit damage is DERIVED from it, so raising a
+  tier's hit rate automatically lowers its damage; `DPS_CAP = 26` is enforced
+  on the RESULT (nothing may out-damage the SWAT officer that already ships).
+  Measured TTK: civ+pistol 7.9→25.0 s · thug+AK 7.9→7.7 s (unchanged) · beat
+  cop 10.5→10.5 s (unchanged) · soldier+AK 7.9→4.5 s · SWAT 3.8→4.0 s; four AK
+  gangers on one target 2.0→3.8 s. Adding a trade or a gun is a ROW. Flags
+  `NPC_COMBAT_IQ` (master) · `_TIERS` · `_COVER` · `_SQUAD` · `_SHOOTFIRST` ·
+  `_MELEE`. Ratchet: **`CBZ.combatIQAudit().legacy` pinned at 0**, adopted 7.
+
 ## Hard rules that keep the game correct
 
 - **Determinism**: world builds must be byte-identical per seed across

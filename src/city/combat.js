@@ -637,6 +637,17 @@
   // ============================================================
   if (CBZ.CONFIG.NPC_AIM_V2 == null) CBZ.CONFIG.NPC_AIM_V2 = true;             // gun-arm elevation toward target
   if (CBZ.CONFIG.NPC_TRACER_SPREAD == null) CBZ.CONFIG.NPC_TRACER_SPREAD = true; // per-shot bullet spread on NPC tracers
+  // ============================================================
+  //  NPC_COMBAT_IQ — the master switch for HOW WELL A PERSON FIGHTS
+  //  (systems/combat_iq.js: the role x weapon competence table, real
+  //  collider-derived cover, the shooter token that stops a crew firing all at
+  //  once, unprovoked openings, and the punch exchange). Declared HERE as well
+  //  as in the module itself so the flag exists whichever of the two a stripped
+  //  build happens to load — the null-check makes both writes idempotent, and
+  //  every consumer reads it at CALL time, never caching it at load.
+  //  ?cfg_NPC_COMBAT_IQ=0 restores the pre-wave brains exactly.
+  // ============================================================
+  if (CBZ.CONFIG.NPC_COMBAT_IQ == null) CBZ.CONFIG.NPC_COMBAT_IQ = true;
 
   const AIM_ELEV_MAX = 0.70;   // rad (~40°) arm pitch clamp (reactions used 0.55; raised for rooftops)
   const AIM_DAMP = 0.0008;     // damp base → ~130ms acquire/release blend (k = 1 - AIM_DAMP^dt)
@@ -714,7 +725,7 @@
   // jitter the endpoint around the true muzzle→target direction by a per-slot
   // angle, then clip the JITTERED ray against the LOS grid so a spread round
   // that now grazes a corner ends at the wall instead of poking through it.
-  function jitterEndpoint(from, to, slot) {
+  function jitterEndpoint(from, to, slot, shooter) {
     let dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
     const dist = Math.hypot(dx, dy, dz) || 0.001;
     dx /= dist; dy /= dist; dz /= dist;
@@ -725,6 +736,16 @@
     const vx = dy * uz, vy = dz * ux - dx * uz, vz = -dy * ux;   // dir × u
     const tbl = CBZ.NPC_SPREAD || SPREAD_DEF;
     let s = tbl[slot] != null ? tbl[slot] : (tbl._def != null ? tbl._def : SPREAD_DEF._def);
+    // THE STREAK SHOULD LOOK LIKE THE SHOOTER. The spread was per-WEAPON only,
+    // so a terrified clerk's looted pistol and a SWAT officer's sidearm drew
+    // identical cones — the visual disagreed with the hit rate the competence
+    // table had just computed. Widening it by (1 - accuracy) makes the tracer
+    // the honest readout of the man behind it, and costs one multiply.
+    // Degrade-safe: no combat_iq, no scaling, exactly the old cone.
+    if (CBZ.CONFIG.NPC_COMBAT_IQ !== false && CBZ.combatIQ && CBZ.combatIQ.profile && shooter) {
+      const pr = CBZ.combatIQ.profile(shooter);
+      if (pr) s *= 0.55 + (1 - Math.min(0.95, pr.hit10)) * 1.5;
+    }
     // runtime-only FX randomness (NEVER the shared seeded rng streams — the
     // fire paths draw from those and extra draws would shift world state)
     if (Math.random() < SPREAD_CENTER_FRAC) s *= SPREAD_CENTER_MUL;
@@ -930,7 +951,7 @@
                          ? _pendingShot.a : null;
         _pendingShot.a = null;   // consume regardless
         if (shooter && CBZ.CONFIG.NPC_TRACER_SPREAD) {
-          to = jitterEndpoint(from, to, slotOf(shooter));
+          to = jitterEndpoint(from, to, slotOf(shooter), shooter);
         }
       }
       return _origTracer.call(this, from, to, opts);
@@ -1033,11 +1054,17 @@
   });
 
   // ---- INCOMING-MELEE TELEGRAPH (so the parry is a SKILL, not a guess) -----
-  // peds.js lands its melee instantly with no wind-up, which makes the parry
-  // window pure luck. We can't touch peds.js — so we read its public state and
-  // RAISE A TELL ourselves: the nearest aggressive, in-range, facing-you melee
-  // foe whose attackCD is about to come up gets a `_windup` flag (their rig can
-  // wind back) and we flash a PARRY prompt. Cheap: one nearest-scan per frame.
+  // peds.js USED to land its melee instantly with no wind-up, which made the
+  // parry window pure luck — so this pass faked a tell from the OUTSIDE, by
+  // reading attackCD and stamping `_windup` on whoever looked about to swing.
+  // That is a shim around a missing beat, and the beat now exists: peds.js's
+  // melee branch runs systems/combat_iq.js's exchange (approach, circle at the
+  // edge of reach, guard, TELEGRAPH, commit, recover) and authors a real
+  // `_windup` whose length is the fighter's own competence — a brawler tells
+  // for 0.42 s, a SWAT officer for 0.20. So this pass now DEFERS: it skips any
+  // foe already running the real beat and remains the fallback for anything
+  // that isn't (flag off, or a melee path outside peds.js). The decay loop at
+  // the bottom is untouched and still owns both.
   let _telegraphT = 0;
   CBZ.onUpdate(15, function (dt) {
     if (g.mode !== "city" || g.state !== "playing" || P.dead) return;
@@ -1046,6 +1073,7 @@
     const scan = function (a) {
       if (!a || a.dead || a.ko > 0 || a.surrender || a.armed && a.ammo > 0) return;
       if (a._broken > 0 || a.stun > 0) return;
+      if (a._iqM) return;                            // running the real exchange — it owns its own tell
       const aggressive = (a.rage === CBZ.city.playerActor) || (a.finalGoal && a.finalGoal._chase) || (a.aggr || 0) >= 0.7;
       if (!aggressive) return;
       const dx = P.pos.x - a.pos.x, dz = P.pos.z - a.pos.z, dd = dx * dx + dz * dz;

@@ -62,6 +62,14 @@
   // detected: if the module didn't load, the calls below just no-op and this
   // file falls back to its original standoff/strafe/cover-bias behavior.
   const AT = CBZ.aiTactics || null;
+  // COMPETENCE (systems/combat_iq.js): the weapon's real standoff band and the
+  // cover query that finally makes this file's own header promise true. See
+  // coverBias below for the dead-scan this replaces.
+  (function () {
+    const ids = ["squadai:standoff"];
+    if (CBZ.combatIQ && CBZ.combatIQ.adopt) { for (let i = 0; i < ids.length; i++) CBZ.combatIQ.adopt(ids[i]); }
+    else { CBZ._combatIQAdopted = (CBZ._combatIQAdopted || []).concat(ids); }
+  })();
 
   function on() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SMART_COMBAT !== false; }
   function inCity() { return g && g.mode === "city" && g.state === "playing"; }
@@ -118,6 +126,24 @@
   //      reads as a person. Bounded scan, cached per ped for ~0.5s. ----
   function coverBias(p, fx, fz, out) {
     out.has = false;
+    // ---- THE SCAN BELOW WAS DEAD CODE, AND THIS IS THE FIX -----------------
+    // `cols[0 .. 64]` is the FIRST 64 entries of the GLOBAL collider array —
+    // whatever the world builder happened to push first, which for a shooter
+    // anywhere in the city is essentially never within 9 m of him. So this
+    // function has been returning has:false for its whole life and the file's
+    // own header promise ("slide toward nearby COVER when a wall is handy")
+    // was never once kept. systems/combat_iq.js answers the same question
+    // against physics.js's GRID-ACCELERATED broadphase (the boxes actually
+    // near this body) and returns the far side of one, not just a point to
+    // hug — so a fighter ends up WITH the wall between him and the gun rather
+    // than pressed against the side facing it. Degrade-safe: no module and the
+    // original bounded scan runs exactly as it did.
+    const M = (!CBZ.CONFIG || CBZ.CONFIG.NPC_COMBAT_IQ !== false) ? CBZ.combatIQ : null;
+    if (M && M.cover) {
+      const cv = M.cover(p, fx, fz);
+      if (cv) { out.has = true; out.x = cv.x; out.z = cv.z; }
+      return out;
+    }
     const cols = CBZ.colliders;
     if (!cols || !cols.length) return out;
     // throttle: reuse last result most frames
@@ -234,10 +260,16 @@
       dx = ped.target.x + tx * strafe * 0.5;
       dz = ped.target.z + tz * strafe * 0.5;
     } else {
-      // UNSHAPED lone fighter → full standoff band: 7–11m off the foe, perpendicular
-      // strafe offset. Closer → back out; farther → step in; in-band → hold + strafe.
+      // UNSHAPED lone fighter → full standoff band, perpendicular strafe offset.
+      // Closer → back out; farther → step in; in-band → hold + strafe.
+      // THE BAND IS THE WEAPON'S. A flat 7–11 m was the same for a snub-nose
+      // and a rifle — the same class of error as peds.js's flat 9 — so a
+      // rifleman walked inside a shotgun's best range to hold a "standoff".
+      // systems/combat_iq.js reads it off what the man is actually holding.
       let want = d;
-      const LO = 7, HI = 11;
+      const _bnd = (!CBZ.CONFIG || CBZ.CONFIG.NPC_COMBAT_IQ !== false) && CBZ.combatIQ && CBZ.combatIQ.band
+        ? CBZ.combatIQ.band(ped) : null;
+      const LO = _bnd ? Math.max(3, _bnd.lo) : 7, HI = _bnd ? Math.max(LO + 2, _bnd.hi * 0.62) : 11;
       if (d < LO) want = LO + 0.6;
       else if (d > HI) want = HI - 0.6;
       dx = F.x + ax * want + tx * strafe;

@@ -54,6 +54,21 @@
   let _sStream = null;   // set at spawn from CBZ.seedStream("gangs") when GANG_SEEDED
   function rng() { if (_sStream) return _sStream(); _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
+  // COMPETENCE (systems/combat_iq.js). A crew's ARC shooters do not run their
+  // own gunfight — shapeSquad hands them a slot and a mark and peds.js's brain
+  // owns the duel, so the moment that brain started fighting through the shared
+  // competence layer, every ganger did too: the weapon's real engagement band
+  // instead of a flat 9 m, the shooter token instead of the whole set opening
+  // at once, and a rank-derived tier (rank-and-file "thug", made "pro",
+  // enforcer/brass "elite"). What this file still owns is the SHAPE, and the
+  // one thing it authored badly — falling straight back down an open street —
+  // is the fallBack migration below.
+  (function () {
+    const ids = ["gangs:war-arc"];
+    if (CBZ.combatIQ && CBZ.combatIQ.adopt) { for (let i = 0; i < ids.length; i++) CBZ.combatIQ.adopt(ids[i]); }
+    else { CBZ._combatIQAdopted = (CBZ._combatIQAdopted || []).concat(ids); }
+  })();
+
   CBZ.cityGangs = CBZ.cityGangs || [];
   let warT = 0;          // ambient rival-vs-rival war director cooldown
   let incomeT = 0;       // territory payday cooldown (GTA: turf = money)
@@ -2179,6 +2194,16 @@
   function fallBack(m, E, dist) {
     let bx = m.pos.x - E.x, bz = m.pos.z - E.z; const bl = Math.hypot(bx, bz) || 1; bx /= bl; bz /= bl;
     let px = m.pos.x + bx * dist, pz = m.pos.z + bz * dist;
+    // FALLING BACK MEANS GETTING BEHIND SOMETHING. Straight backward along the
+    // threat axis is a body reversing down the middle of an open street with
+    // its back to the gun; systems/combat_iq.js answers with the far side of an
+    // actual collider (the same boxes the player walks into) when one is within
+    // reach. Degrade-safe: no module, no cover, and this is the old line.
+    const _M = (CBZ.CONFIG && CBZ.CONFIG.NPC_COMBAT_IQ !== false) ? CBZ.combatIQ : null;
+    if (_M && _M.cover) {
+      const cv = _M.cover(m, E.x, E.z, { force: true, range: dist + 4 });
+      if (cv) { px = cv.x; pz = cv.z; }
+    }
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.clampToCity) { const p = { x: px, z: pz }; A.clampToCity(p, 1.5); px = p.x; pz = p.z; }
     m._wRole = "back"; m._wT = 12;

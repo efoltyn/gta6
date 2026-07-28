@@ -50,6 +50,19 @@
   // didn't load (stripped/old build), AT is null and every call site below
   // falls back to skipping that tactic (cop still functions, just dumber).
   const AT = CBZ.aiTactics || null;
+  // COMPETENCE (systems/combat_iq.js): reaction time, aim settle, burst rhythm,
+  // accuracy and the DERIVED per-hit damage that holds a shooter's output on the
+  // one DPS ladder every armed NPC in the game is now measured against. A cop
+  // reads as tier "pro" and a SWAT officer as tier "swat" off fields this file
+  // already writes (c.swat, and the police rank ladder in city/factions.js), so
+  // no spawner changed. Looked up at CALL time, never cached at load: the module
+  // is a flag away from being off and this file must degrade to its old rolls.
+  function IQ() { return (CBZ.CONFIG && CBZ.CONFIG.NPC_COMBAT_IQ !== false) ? CBZ.combatIQ : null; }
+  (function () {
+    const ids = ["police:fire-at", "police:hunt-cover"];
+    if (CBZ.combatIQ && CBZ.combatIQ.adopt) { for (let i = 0; i < ids.length; i++) CBZ.combatIQ.adopt(ids[i]); }
+    else { CBZ._combatIQAdopted = (CBZ._combatIQAdopted || []).concat(ids); }
+  })();
 
   // ---- IN-MODULE TUNING (owner rule: never edit config.js — a parallel agent
   //      owns it; self-default flags here + nudge CBZ.CITY at load) ------------
@@ -1692,11 +1705,20 @@
       // disposer. Detaching first is not tidiness, it is the difference between
       // a corpse on the ground and a destroyed character rig.
       unseatCop(p);                      // a body only ever leaves a seat by detaching
-      if (p.dead) continue;
+      // EVERY BODY COMES DOWN WITH THE AIRFRAME, including one already dead in
+      // his seat. This block used to `continue` on p.dead BEFORE the placement,
+      // so a crewman shot through the glass at 150 m was detached and left at
+      // the coordinates of a seat that no longer existed — invisible, still
+      // flagged _airPilot, and (since city/morgue.js) holding a drop that could
+      // never be paid because the body never reached a resting place. The
+      // placement and the flag clearing are unconditional now; only the KILLING
+      // is skipped for a man who is already dead. (aircraft.js's releaseMilitary
+      // already had this ordering — this is police.js catching up to it.)
       p._airPilot = false;               // corpse takes the normal dead-cop path (deadT tick + cull)
       if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
       p.pos.set(ix + 1.6 + i * 1.3, surfY, iz + 1.1 - i * 0.9);   // thrown clear of the fireball
       if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
+      if (p.dead) continue;
       if (CBZ.cityHurtCop) CBZ.cityHurtCop(p, 99999, { byPlayer: true, fromX: ix, fromZ: iz, force: 13 });
       else { p.dead = true; p.deadT = 0; }
       // the ONE sanctioned death popup is the killfeed — cityHurtCop predates
@@ -2176,12 +2198,23 @@
       // department's stand-down order until a successor is appointed — see
       // §THE DEPARTMENT IS AN ORG WITH RUNGS. No-op for the other 99% of cops.
       if (cop._watch) watchLost(cop);
-      // CORPSE ARMOR LOOT: stamp the kit pieces this cop wore so the body offers
-      // "Take their armor" (read by interact.js). Only when they actually had a kit.
-      if (cop._armorKit && cop._armorKit.length) cop._armorLoot = cop._armorKit.slice();
-      if (CBZ.cityDropWeapon) CBZ.cityDropWeapon(cop.pos.x, cop.pos.z, cop.swat ? "SMG" : "Pistol", 30);   // disarmed
-      cop.armed = false; cop.weapon = null;
-      if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
+      // WHAT AN OFFICER LEAVES BEHIND — one call, city/morgue.js. These four
+      // lines were the ONLY place in the game that stamped `_armorLoot`, which
+      // is why a SWAT plate carrier was strippable off a cop shot by
+      // cityHurtCop and unstrippable off the identical vest on a power.js
+      // bodyguard or a militia soldier. The shared routine reads the officer's
+      // OWN weapon field instead of re-deriving swat?SMG:Pistol (they are set
+      // together at makeCop, and two constants describing one object drift),
+      // and DEFERS the drop for a body with no resting place — an Air-1
+      // crewman killed in his seat drops at the wreck, not in the sky.
+      // Degrade-safe: no morgue.js and this is exactly what it always was.
+      if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(cop);
+      else {
+        if (cop._armorKit && cop._armorKit.length) cop._armorLoot = cop._armorKit.slice();
+        if (CBZ.cityDropWeapon) CBZ.cityDropWeapon(cop.pos.x, cop.pos.z, cop.swat ? "SMG" : "Pistol", 30);   // disarmed
+        cop.armed = false; cop.weapon = null;
+        if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
+      }
       if (CBZ.gore) {
         let dir = imp && imp.dir ? { x: imp.dir.x || 0, z: imp.dir.z || 0 }
           : (imp && imp.fromX != null ? { x: cop.pos.x - imp.fromX, z: cop.pos.z - imp.fromZ } : null);
@@ -2819,6 +2852,15 @@
       // re-issue armor on a recycled officer (refills the soak pool, re-mounts the
       // vest/helmet if the kill stripped them, clears the prior corpse loot stamp)
       c._armorLoot = null;
+      // ...and the rest of the corpse state, for the same reason. The pool only
+      // ever hands back a LIVING officer (see the guard above), so none of these
+      // can be set today — but `_deathDropped` is a one-way latch, and a single
+      // future path that recycles a dead record would silently produce an armed
+      // officer who can never drop his weapon again. Clear it where the other
+      // corpse stamps are cleared, not in a comment somewhere.
+      c._deathDropped = false; c._dropPending = false; c._morgueSeen = false;
+      c._morgueKeep = false; c._morgueClaimed = false; c._armorTaken = false;
+      c._clothesTaken = false; c.collected = false; c.needsPickup = false;
       if (CBZ.cityArmorDressPed) {
         if (c.swat) CBZ.cityArmorDressPed(c, ["swatVest", "helmet"]);
         else if (!c._armorKit && rng() < 0.5) CBZ.cityArmorDressPed(c, ["softVest"]);
@@ -3126,7 +3168,25 @@
       if (c.dead) {
         if (c.tag) c.tag.visible = false;
         c.deadT += dt;
-        if (c.deadT > 8 && !c.culled) { c.culled = true; if (c.group.parent) c.group.parent.remove(c.group); cops.splice(i, 1); }
+        // A DEAD OFFICER USED TO LAST EIGHT SECONDS. That number is the owner's
+        // "even those cops" in one constant: interact.js's corpse verbs scan
+        // CBZ.cityCops, so a uniform and a plate carrier were lootable in
+        // principle and unreachable in practice — you could not cross the
+        // street before the body deleted itself. city/morgue.js's persistence
+        // law replaces the timer (nearest-N never reap; nothing reaps inside
+        // the padded screen), and an ambulance is what actually clears him.
+        // Every loop in this file already guards `c.dead`, so a held corpse
+        // costs the roster nothing — liveCops()/liveSwat()/liveAmbient() all
+        // skip it and the finite-force pool is untouched.
+        // Degrade-safe: no morgue.js → the exact 8 s cull it always had.
+        const mayCull = CBZ.corpseMayReap ? CBZ.corpseMayReap(c) : c.deadT > 8;
+        if (mayCull && !c.culled) { c.culled = true; if (c.group.parent) c.group.parent.remove(c.group); cops.splice(i, 1); }
+        // hold the render LOD on a persisted body exactly like a live one, so
+        // a corpse across the map costs no draw call while it waits for EMS.
+        else if (!c.culled && c.group) {
+          const cdx = c.pos.x - camx, cdz = c.pos.z - camz;
+          c.group.visible = cdx * cdx + cdz * cdz < 95 * 95;
+        }
         continue;
       }
       // The helicopter's pilot is still this exact roster NPC, seated in Air-1.
@@ -3203,9 +3263,13 @@
         // officers hold fire until deep heat (4★+) or the force has been fired
         // upon. Flag off = the old fire-on-sight wall.
         const postLethal = !arrestFirst() || stars >= 4 || (CBZ.now - (g._copsFiredUponT || -1e9)) < 15000;
+        // the reaction/settle beat has to advance EVERY frame, not only on the
+        // frames the cooldown happens to be up — otherwise a posted officer's
+        // reaction timer ticks once per shot cycle and never elapses at all.
+        { const _M = IQ(); if (_M && _M.aimTick && c.sees) _M.aimTick(c, CBZ.city.playerActor, dt); }
         if (c.sees && postLethal && c.shootCD <= 0) {
           c.shootCD = (c.swat ? 0.2 : 0.55) + rng() * 0.3;
-          fireAt(c, CBZ.city.playerActor, pd);
+          fireAt(c, CBZ.city.playerActor, pd, dt);
         }
         standIdle(c, c.sees ? Math.atan2(pdx, pdz) : Math.atan2(post.fx, post.fz), dt, nearB);
         continue;
@@ -3384,15 +3448,51 @@
         //      bursts. The c.sees flag already proves a torso-height sightline; here
         //      we re-check from the actual MUZZLE so a barrel poking past a corner
         //      can't squeeze a shot through a wall the body can't see through.
-        if (wantShoot && c.sees && dist < 30) {
+        const M = IQ();
+        // KEEP THE REACTION BEAT TICKING BETWEEN SHOTS. fireAt only runs when
+        // shootCD has elapsed, so without this the settle/reaction timers would
+        // only advance on trigger frames and a cop would appear to "snap" onto
+        // a target he had actually been tracking for a second.
+        if (M && M.aimTick && c.sees) M.aimTick(c, tgt, dt);
+        // THE SHOOTER TOKEN — the anti-chaos, applied to the police too. Six
+        // responding units used to unload simultaneously the instant they had a
+        // line; at most two (three for a SWAT stack) hold fire authority on one
+        // mark now, and the rest work angles or hold cover. NOBODY got weaker:
+        // the same officers put out the same rounds, they take turns doing it.
+        let mayShoot = true;
+        if (M && M.slot && wantShoot && c.sees) {
+          const sl = M.slot(c, tgt, dt);
+          mayShoot = (sl === "fire");
+          c._iqSlot = sl;
+        }
+        if (wantShoot && c.sees && dist < 30 && mayShoot) {
           if (c.shootCD <= 0) {
-            c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;
-            fireAt(c, tgt, dist);   // fireAt does the final muzzle→target clearLineOfFire gate
+            c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;   // fireAt overwrites this when the tier layer is live
+            fireAt(c, tgt, dist, dt);   // fireAt does the final muzzle→target clearLineOfFire gate
             // after a burst, an armed target may make a cop break to cover briefly
             if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) {
               if (AT) AT.coverArm(c, { dur: 1.0 + rng(), rng });
               else { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
             }
+          }
+        }
+
+        // ---- HOLD A POSITION SOMEBODY IS PAID TO HOLD. An officer without the
+        //      fire token, or one below his nerve, gets a REAL wall between him
+        //      and the gun instead of shuffling sideways in the open. The cover
+        //      point comes from combat_iq's collider query — the same boxes the
+        //      player collides with, so anything solid enough to stop a body is
+        //      solid enough to stop a round. Falls straight through to the
+        //      perpendicular sidestep below when there is nothing to hide behind.
+        if (M && M.cover && wantShoot && (c._iqSlot === "cover" || (c.hp != null && c.maxHp && c.hp < c.maxHp * 0.34))) {
+          const cv = M.cover(c, tx, tz);
+          if (cv) {
+            const cdx = cv.x - c.pos.x, cdz = cv.z - c.pos.z;
+            if (Math.hypot(cdx, cdz) > 1.1) { stepTo(c, cdx, cdz, c.baseSpeed * 1.15, dt, near); continue; }
+            c.speed = 0;
+            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
+            finalizeMove(c); if (near) animChar(c.char, 0, dt);
+            continue;
           }
         }
 
@@ -3689,7 +3789,23 @@
     }
   }
 
-  function fireAt(c, tgt, dist) {
+  // fireAt(c, tgt, dist, dt) — dt is optional and only used by the competence
+  // layer (systems/combat_iq.js). Returns true if a round actually left the gun.
+  function fireAt(c, tgt, dist, dt) {
+    // COMPETENCE FIRST, before any of the visual commitment below: a shooter who
+    // has just swung onto a new mark has not finished REACTING yet, and a cop
+    // who fires on the frame he sees you is the "they're really bad at shooting"
+    // bug wearing the opposite mask. shot() also hands back the cooldown, so the
+    // burst rhythm lives in ONE place instead of being retyped at both call
+    // sites — and the damage it returns is scaled to hold this officer's DPS on
+    // the shared ladder (a beat cop 9.5 HP/s, a SWAT officer 25).
+    const M = IQ();
+    let _shot = null;
+    if (M && M.shot) {
+      const base = (c.swat ? 10 : 7) + rng() * 5;
+      _shot = M.shot(c, tgt, dist, dt || 0, base);
+      if (_shot && !_shot.fire) { c.shootCD = Math.max(c.shootCD || 0, _shot.cd); return false; }
+    }
     // the gun is OUT and aimed now (clear any challenge/occlusion lowering;
     // a still-holstered cop forced into a fire path ALWAYS clears leather first)
     c._gunLowered = false; c._gunHidden = false;
@@ -3705,19 +3821,26 @@
     const ty = tgt.isPlayer ? 1.55 : 1.3;
     if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z, tgt.pos.x, ty, tgt.pos.z)) {
       c.sees = false; c.lostT = (c.lostT || 0) + 0.25;   // treat as a momentary loss → flank/reposition
-      return;
+      return false;
     }
     if (CBZ.tracer) CBZ.tracer(from, { x: tgt.pos.x, y: ty, z: tgt.pos.z }, { muzzleScale: c.swat ? 1.15 : 0.95 });
     // distance to the LISTENER (the player), not to the cop's target
     if (CBZ.gunVoice) CBZ.gunVoice(c.weapon || (c.swat ? "smg" : "sidearm"), CBZ.player ? Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) : 0);
     else if (CBZ.sfx) CBZ.sfx("report");
-    const hitP = Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
-    if (rng() >= hitP) return;
-    let dmg = (c.swat ? 10 : 7) + rng() * 5;
+    // the burst rhythm is the shooter's, not this call site's
+    if (_shot) c.shootCD = _shot.cd;
+    // A ROUND THAT GOES PAST YOUR EAR MAKES YOU SHOOT WORSE. One line, and it
+    // is what turns two units trading fire into one pinning while the other
+    // moves — the officer's own posture already reads _iqSupp.
+    if (M && M.suppress && !tgt.isPlayer && tgt.armed) M.suppress(tgt, 1.4);
+    const hitP = _shot ? _shot.hit
+      : Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
+    if (rng() >= hitP) return true;
+    let dmg = _shot ? _shot.dmg : ((c.swat ? 10 : 7) + rng() * 5);
     if (tgt.isPlayer) {
       // a REMOTE player (multiplayer): the wound travels over the wire and is
       // applied by the victim's own client
-      if (tgt.netHurt) { tgt.netHurt(dmg, c.pos.x, c.pos.z, "gunned down by police"); return; }
+      if (tgt.netHurt) { tgt.netHurt(dmg, c.pos.x, c.pos.z, "gunned down by police"); return true; }
       // pass the cop ACTOR so death.js can spectate them; cityHurtPlayer derives
       // the "a SWAT officer" / "the police" display name from it (killfeed + title).
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", rng() < 0.012, c);
@@ -3727,6 +3850,7 @@
       if (tgt.hp <= 0) CBZ.cityKillPed && CBZ.cityKillPed(tgt, { fromX: c.pos.x, fromZ: c.pos.z, attacker: c, byPlayer: false, force: 5, fling: 4 }, "shot by police");
       else if (CBZ.body) CBZ.body.hit(tgt, { fromX: c.pos.x, fromZ: c.pos.z, force: 3 });
     }
+    return true;
   }
 
   // NOTE: CBZ.citySpawnCop intentionally stays the POSITIONAL (x, z, swat) spawner
