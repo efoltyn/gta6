@@ -518,14 +518,38 @@ CBZ.arenaVenue = {
     if (CBZ.terrainFlattenUnder) {
       CBZ.terrainFlattenUnder({ name: "Ironjaw Arena deck", cx: CX, cz: CZ, r: DECK_R + 3, pad: 4 });
     }
-    // THE WALKABLE APRON IS A STAIRCASE, AND THE SITE HAS TO KNOW ITS SHAPE.
-    // These bands are a coarse rectangular approximation of the round deck —
-    // out to 107 on the ±x axis but only 30 at the poles — and anything the
-    // SITE builder puts on the ring (fence, car park, lamps) has to stay
-    // inside them or the player walks off the platform stack onto the island
-    // top 0.9 units below. They are published on the handle (metrics.apron)
-    // so arena_fights.js measures the free ring instead of re-typing it.
-    var APRON_BANDS = [[30, 107], [60, 94], [82, 75], [98, 53], [107, 30]];
+    // THE WALKABLE APRON IS A STAIRCASE, AND THE STAIRCASE IS DERIVED.
+    // The deck you SEE is a disc of radius DECK_R; the deck you can STAND on is
+    // this stack of rectangles. They were five hand-typed bands and the two
+    // surfaces disagreed over 4,216 m2 — 11% of the drawn apron had no platform
+    // record under it at all, so walking the "flat concrete" dropped you 0.9-1.1
+    // units into it at invisible seams. That is the owner's "dumb physics"
+    // around this building, and it is arithmetic, not taste: a 5-step staircase
+    // is simply a bad inscription of a 112 m circle.
+    //
+    // Now the z ladder is authored and every half-width is SOLVED — the largest
+    // whole metre strictly inside the circle at that band's OUTER z, so no
+    // platform can ever reach past the drawn disc no matter what DECK_R becomes.
+    // Thirteen bands cut the disagreement to ~1,980 m2 (a max radial error under
+    // 1.2 m instead of 22) for 25 platform records instead of 9.
+    //
+    // The FIRST band is pinned at z=30: arena_fights.js reads apron[0][1] for
+    // its gate x, and the causeway ramp hands over to the apron at that exact
+    // line. Moving it would put the gatehouse on the ramp.
+    //
+    // Published on the handle (metrics.apron) so arena_fights.js measures the
+    // free ring instead of re-typing it.
+    var APRON_Z = [30, 40, 50, 60, 70, 78, 85, 91, 96, 100, 104, 107, 110];
+    var APRON_BANDS = (function () {
+      var out = [], i, hx;
+      for (i = 0; i < APRON_Z.length; i++) {
+        // strictly inside the drawn disc: sqrt(R^2 - z^2), minus half a metre
+        // of margin, floored to a whole metre.
+        hx = Math.floor(Math.sqrt(Math.max(0, DECK_R * DECK_R - APRON_Z[i] * APRON_Z[i])) - 0.5);
+        if (hx > 0) out.push([APRON_Z[i], hx]);
+      }
+      return out;
+    })();
     (function () {
       var bands = APRON_BANDS;
       var prev = 0;
@@ -1402,6 +1426,13 @@ CBZ.arenaVenue = {
         // the fence, the car park and the gate with it — nothing to re-sync.
         faceX: +(A + D_FACE).toFixed(2), faceZ: +(B + D_FACE).toFixed(2),
         coreA: A, coreB: B, faceD: +D_FACE.toFixed(2),
+        // THE WALL IS NOT THE WIDEST PART OF THE BUILDING. The vertical fins
+        // stand at D_OUT + 2.15 with a 0.6 depth and the outermost canopy band
+        // reaches CANOPY_OUT + 0.1 — both PAST the facade plane. A site builder
+        // that stands things off `faceD` alone stands them off the wrong number,
+        // so the true outer envelope is published and is what clearance is
+        // measured against.
+        faceEnvD: +Math.max(D_FACE + 0.45, CANOPY_OUT + 0.1).toFixed(2),
         deckR: DECK_R, apron: APRON_BANDS, marqueeX: +(A + D_FACE + 9).toFixed(2),
         crowdTotal: crowdTotal, crowdCap: crowdCap,
         colliders: colliders.length, standColliders: standColliders,

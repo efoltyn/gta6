@@ -76,6 +76,13 @@ if(CFG.ARENA_CROWD_PANIC==null)CFG.ARENA_CROWD_PANIC=true;
 // who work the front door. Off → the pre-fix walk-in island, exactly as it
 // shipped.
 if(CFG.ARENA_SITE==null)CFG.ARENA_SITE=true;
+// ARENA_OVERFLOW_LOT — the big car park out on the causeway approach, on the
+// strip between the Mercy highway and the island. It is the only ground within
+// reach that can hold one (see THE CAR PARK below for the arithmetic), and it
+// is the one part of this site that claims land the file has never surveyed —
+// so it self-tests against every region and lot already claimed and refuses to
+// build rather than overwrite. Off → the island's own bays and nothing else.
+if(CFG.ARENA_OVERFLOW_LOT==null)CFG.ARENA_OVERFLOW_LOT=true;
 // (arena_venue.js self-defaults ARENA_VENUE_V2 / ARENA_CROWD_PROXY /
 //  ARENA_LIGHT_RIG / ARENA_JUMBOTRON — the building half of the same feature.)
 
@@ -93,9 +100,33 @@ var PY=1.1;                      // arena floor / plaza deck top height
 // as "super super short" no matter how many rows they had. The venue floor is
 // now 52 x 70 and the surfaces are pulled in to match it. Every clamp, prompt
 // and sim radius below is derived, so nothing else had to move.
-var RX=CX-13, RZ=CZ, RY=PY+0.9;    // boxing ring centre + canvas height
-var CGX=CX+13, CGZ=CZ, CGY=PY+0.5; // MMA cage centre + mat height
-var PX=CX, PZ=CZ+21, PITY=PY+0.02; // beast pit centre + sand height
+// THE ENSEMBLE IS CENTRED ON THE BOWL, AND THE PIT IS THE CENTREPIECE.
+// OWNER: "make sure the fighting pit is actually centered in the arena, it
+// ain't rn." It was not, and neither was anything else: ring at x-13, cage at
+// x+13 and pit at z+21 put the three surfaces in an L, with the pit 21 m north
+// of the focal point the jumbotron, the four spotlights and the bowl's own
+// `focus` all aim at, and 21 m of dead floor to the south. From a seat the
+// house looked built for a room that wasn't there.
+//
+// The re-lay is arithmetic, not taste. The bowl floor is a rounded rectangle:
+// half-extents 26 (x) by 35 (z) — the long axis is z, and it is the ONLY axis
+// with room for three surfaces, because on x the pit's 9.6 outer wall plus two
+// 4.8/6.9 half-spans plus walkways needs 44 m against 52 available and the
+// two ends would touch the bowl front. So:
+//   • the pit sits ON the centre — it is the biggest surface, it is what the
+//     grand west tunnel now opens onto at 16 m, and it is under the screen;
+//   • the ring and the cage sit at ±FIGHT_SPAN on z, symmetric about it.
+// FIGHT_SPAN is solved from the parts, not chosen: the pit's outer wall is
+// PIT_WALL_R + coping = 9.6, the ring's walk-up stair reaches RING_APRON + 2.3
+// = 7.1 back toward it and the cage's base disc reaches CAGE_MAT_R + 0.3 = 6.9,
+// so 21 leaves a 4.3 m walkway on the ring side and 4.5 m on the cage side, and
+// still keeps 8.4 / 6.4 m of floor beyond each of them before the bowl front at
+// 34.3. The ring's rope gap and stair already face +z and the cage's door faces
+// -x, so both still open onto open floor with no geometry change.
+var FIGHT_SPAN=21;
+var RX=CX, RZ=CZ-FIGHT_SPAN, RY=PY+0.9;    // boxing ring centre + canvas height
+var CGX=CX, CGZ=CZ+FIGHT_SPAN, CGY=PY+0.5; // MMA cage centre + mat height
+var PX=CX, PZ=CZ, PITY=PY+0.02;            // beast pit centre + sand height
 
 // ============================================================ GEOMETRY LAW
 // ONE source of truth per fight surface. Every clamp / spawn / prompt / sim
@@ -113,11 +144,19 @@ var PIT_WALL_R  = 9.2;                       // pit wall ring radius
 var PIT_SAND_R  = 8.6;                       // sand floor radius
 var PIT_INSET   = 1.8;                       // beasts stay this far off the wall
 var PIT_FIGHT   = PIT_WALL_R - PIT_INSET;    // 7.4 — clampPitXZ radius
-// Prompt zones: the venue footprint plus a standing-room margin, so the prompt
-// still fires from the walkway around each surface.
-var RING_ZONE   = RING_APRON + 8.2;          // 13
-var CAGE_ZONE   = CAGE_MAT_R + 4.4;          // 11
-var PIT_ZONE    = PIT_WALL_R + 4.8;          // 14
+// Prompt zones: the venue footprint plus a standing-room margin — and now that
+// the three surfaces are in a row, those margins are what PARTITION the floor
+// between them. RING_ZONE + PIT_ZONE and CAGE_ZONE + PIT_ZONE both equal
+// FIGHT_SPAN, so each boundary falls exactly on the midpoint of its walkway and
+// no point on the floor can ever offer two different fights on the SAME KEY.
+// (The old margins summed to 27 against a 24.7 separation, so a 2.3 m band
+// already answered [J] with the boxing match or a beast bout depending on
+// registration order — at 21 m apart those numbers would have made that band
+// 6 m wide. This is the bug the re-lay would have caused if the radii had been
+// left alone, which is exactly why they were derived from the span.)
+var PIT_ZONE    = PIT_WALL_R + 2.4;          // 11.6 — 2.4 m of rail to stand at
+var RING_ZONE   = FIGHT_SPAN - PIT_ZONE;     // 9.4  — RING_APRON + 4.6
+var CAGE_ZONE   = FIGHT_SPAN - PIT_ZONE;     // 9.4  — CAGE_MAT_R + 2.8, past its ramp
 // Simulation gating: a bout must keep running while ANY spectator seat can see
 // it, so the radius is (offset of the surface from the venue centre) + the
 // furthest walkable point of the bowl. Grow the bowl and these grow with it.
@@ -154,6 +193,29 @@ var RAMP_X0=477.5;                   // where the deck lifts off the highway
 var SITE_INSET=3.5;                  // how far inside the walkable apron the site sits
 var APRON_FALLBACK=[[30,107],[60,94],[82,75],[98,53],[107,30]];
 var FACE_FALLBACK={x:76.7,z:85.7};   // recomputed from venue.metrics when present
+// ---- WHAT A REAL ARENA KEEPS CLEAR, AND WHY THESE ARE THE NUMBERS ----------
+// The ground beside a building this tall is not a matter of taste; IFC Appendix
+// D governs it, and it is the only hard dimension in the whole site program:
+//   D105.1  a building over 9.14 m tall needs AERIAL apparatus access. This
+//           bowl is ~26 m to the parapet, so it qualifies with 17 m to spare.
+//   D105.2  that lane is 7.92 m of UNOBSTRUCTED width.
+//   D105.3  and it sits NOT LESS THAN 4.57 m and NOT MORE THAN 9.14 m from the
+//           building face, running parallel to at least one entire side.
+//   503.2.1 every other approach road is 6.1 m minimum.
+// FIRE_STANDOFF is therefore the line nothing may cross toward the wall, and it
+// is what every clearance below is measured against — the fence, the car park,
+// the masts, the planters and the service yard. The site had NO such rule: the
+// perimeter came within 2.3 m of a 26 m wall and the car park's north-east
+// stall within 1.9 m, both by accident rather than by any decision.
+var FIRE_STANDOFF=4.6;               // IFC D105.3 minimum, rounded up
+var FIRE_LANE=7.92;                  // IFC D105.2 aerial lane width
+var FACE_CLEAR=FIRE_STANDOFF;        // nothing stands closer to the wall than this
+// Real 90-degree surface-parking geometry (ULI, Dimensions of Parking): a
+// standard stall is 2.74 x 5.49 m and a two-way aisle is 7.32 m, so a
+// double-loaded module is 18.30 m and an efficient lot lands near 30 m2 a
+// space. The shipped bays were 2.7 x 5.2 on a 6.3 aisle — a compact-car lot
+// pretending to be a standard one.
+var STALL_W=2.74, STALL_D=5.49, AISLE_W=7.32;
 
 var arenaRoot=null, venue=null;
 var siteInfo=null;                   // {fencePanels, gates, bays, keepouts, park:[…]}
@@ -358,9 +420,17 @@ CBZ.addLandmass(function(city){
         {x:CX,z:CZ,y:PY,angle:0.62,intensity:1.1},
         {x:PX,z:PZ,y:PITY,angle:0.5,intensity:1.5}
       ],
-      floorSeatRings:[            // ringside chairs, clear of the ring stair /
-        {x:RX,z:RZ,r0:7.0,rings:2},      // cage ramp footprints
-        {x:CGX,z:CGZ,r0:8.6,rings:2}
+      // Ringside chairs, and BOTH radii are the surface's own furniture, not a
+      // taste. The ring's walk-up stair reaches RING_APRON + 2.3 = 7.1, so the
+      // first band starts past it at 7.6 and the second (9.1) still stops 2.3 m
+      // short of the pit's 9.6 wall. The cage carries its step-up ramp out to
+      // CAGE_MAT_R + 2.4 = 9.0 on its -x face, so its band starts at 9.4 — and
+      // it gets ONE band, because a second at 10.9 would put a chair 0.5 m from
+      // the pit rail on the -z side. (The old 7.0 put a chair ON the ring stair;
+      // its comment claimed the opposite.)
+      floorSeatRings:[
+        {x:RX,z:RZ,r0:7.6,rings:2},
+        {x:CGX,z:CGZ,r0:9.4,rings:1}
       ]
     });
   }
@@ -592,7 +662,8 @@ CBZ.addLandmass(function(city){
     if(!CFG.ARENA_SITE)return;
     var VS=CBZ.venueSite;
     var M=(venue&&venue.metrics)||null;
-    siteInfo={fencePanels:0,gates:0,bays:0,keepouts:0,park:[]};
+    siteInfo={fencePanels:0,gates:0,bays:0,keepouts:0,park:[],
+              faceClear:0,fenceVerts:0,onSiteBays:0,overflowBays:0};
 
     // ---- 0. KEEP-OUTS come first because they are the one part that does not
     //         depend on the building existing. A wandering civilian has no
@@ -621,14 +692,80 @@ CBZ.addLandmass(function(city){
     var FACE_X=M.faceX||FACE_FALLBACK.x;
     var MARQ=M.marqueeX||(FACE_X+9);
 
-    // THE RING IS A STAIRCASE, NOT A CIRCLE. The apron's walkable platforms are
-    // a stack of rectangles (107 wide on the +/-x axis, only 30 at the poles),
-    // so a perimeter drawn as a circle would leave a third of itself hanging
-    // over a 0.9 m drop onto the island top. This walks the same bands the
-    // platforms were registered from, inset one body-width.
-    function ringPath(inset){
-      var i,p=[],hx=[],zz=[],n=APRON.length;
-      for(i=0;i<n;i++){ hx.push(APRON[i][1]-inset); zz.push(APRON[i][0]-inset); }
+    // ---- THE BUILDING'S OWN FOOTPRINT, WHICH THIS FILE HAD NEVER ASKED FOR --
+    // The bowl is not a circle and it is not a box: arena_venue.js builds every
+    // ring of it as a rounded rectangle — a core rect of half-extents coreA x
+    // coreB, offset outward by a distance. So "how far is this point from the
+    // building" is the distance to that CORE RECT, and "how wide is the building
+    // at this z" is the same relation solved for x. Both are three lines, both
+    // read published metrics, and NEITHER EXISTED: the site imported faceX for
+    // one service-yard offset, declared a faceZ fallback it never used once, and
+    // laid its entire perimeter without ever testing a vertex against the thing
+    // it was supposed to be ringing.
+    var CORE_A=M.coreA!=null?M.coreA:15, CORE_B=M.coreB!=null?M.coreB:24;
+    // the OUTER envelope, not the wall plane — fins and canopy stand proud of it
+    var FACE_D=M.faceEnvD!=null?M.faceEnvD:((M.faceD!=null?M.faceD:61.7)+0.5);
+    function coreDist(x,z){
+      var dx=Math.max(0,Math.abs(x-CX)-CORE_A), dz=Math.max(0,Math.abs(z-CZ)-CORE_B);
+      return Math.sqrt(dx*dx+dz*dz);
+    }
+    function faceClear(x,z){ return coreDist(x,z)-FACE_D; }
+    // half-width of the building envelope at this z (0 where it does not reach)
+    function faceHalfX(z,pad){
+      var r=FACE_D+(pad||0), dz=Math.abs(z-CZ)-CORE_B;
+      if(dz<0)dz=0;
+      if(dz>=r)return 0;
+      return CORE_A+Math.sqrt(r*r-dz*dz);
+    }
+
+    // THE RING IS A STAIRCASE, NOT A CIRCLE, AND IT NOW ANSWERS TO TWO EDGES.
+    // The apron's walkable platforms are a stack of rectangles, so a perimeter
+    // drawn as a circle would leave a third of itself hanging over a 0.9 m drop
+    // onto the island top: the path walks the same bands the platforms were
+    // registered from, inset one body-width.
+    //
+    // THE FAULT THE OWNER SAW: that was the ONLY edge it walked. The apron
+    // staircase is an approximation of a DISC and the bowl is a rounded
+    // rectangle 9 m longer in z than in x with 62 m corner arcs, so the two
+    // shapes cross: where the old five-band staircase stepped from |x|=71.5 to
+    // |x|=49.5 at |z|=78.5, the building's own corner arc was still 55.2 out —
+    // the perimeter dived INSIDE the facade's shadow and ran 2.3 m from a 26 m
+    // wall, with the fence's collider AABBs 0.16 m either side of it. Nothing in
+    // the build had ever measured it, so nothing failed.
+    //
+    // The cure is in two places and the order matters. arena_venue.js's apron is
+    // now a 13-band inscription instead of a 5-band one, which is what gives the
+    // ring somewhere to BE (the pinch was a real conflict: at a step corner the
+    // deck edge and the wall are the same constraint from opposite sides, and no
+    // amount of moving the fence could have satisfied both). This function then
+    // enforces the standoff BY CONSTRUCTION rather than by luck: a run that
+    // would stand inside FACE_CLEAR of the envelope is pushed back out, trading
+    // the comfort inset down to a 0.6 m lip margin before it gives up — and what
+    // it actually achieves is measured and published, never assumed.
+    // The band table, solved ONCE and then shared: the fence walks it and
+    // everything that must stay inside the fence asks it. Each run at
+    // half-width hx[i] spans |z| from zz[i-1] to zz[i], and the facade is
+    // WIDEST at the smallest |z| in that span — so that is the binding test.
+    var FHX=[],FZZ=[];
+    (function(){
+      var i,n=APRON.length,zLo,need;
+      for(i=0;i<n;i++){ FHX.push(APRON[i][1]-SITE_INSET); FZZ.push(APRON[i][0]-SITE_INSET); }
+      for(i=0;i<n;i++){
+        zLo=(i===0)?0:FZZ[i-1];
+        need=faceHalfX(CZ+zLo,FACE_CLEAR);
+        // give up comfort before safety: never past the platform's own lip
+        if(need>FHX[i])FHX[i]=Math.min(need,APRON[i][1]-0.6);
+      }
+    })();
+    // how far out anything may stand at this z and still be inside the
+    // perimeter (0 = past the walkable apron entirely, i.e. refuse)
+    function fenceHalf(z){
+      var i,az=Math.abs(z-CZ);
+      for(i=0;i<FZZ.length;i++)if(az<=FZZ[i])return FHX[i];
+      return 0;
+    }
+    function ringPath(){
+      var i,p=[],hx=FHX,zz=FZZ,n=FHX.length;
       p.push({x:CX+hx[0],z:CZ-zz[0]});
       for(i=0;i<n-1;i++){ p.push({x:CX+hx[i],z:CZ+zz[i]}); p.push({x:CX+hx[i+1],z:CZ+zz[i]}); }
       p.push({x:CX+hx[n-1],z:CZ+zz[n-1]});
@@ -645,9 +782,27 @@ CBZ.addLandmass(function(city){
     var GATE_X=CX-RING_X, SVC_X=CX+RING_X;
 
     // ---- 1. the perimeter, and the TWO places you cross it -----------------
+    // MEASURED, NOT ASSUMED. Every segment is sampled against the building
+    // envelope and the worst clearance in the whole loop is published on the
+    // census, so a re-tiered bowl that pushes the facade back into the fence
+    // shows up as a NUMBER instead of as a screenshot. Build-time only: 78
+    // vertices at 8 samples is a few hundred hypots, once.
+    var sitePath=ringPath();
+    (function(){
+      var worst=1e9,i,t,a,b,x,z,c;
+      for(i=0;i<sitePath.length;i++){
+        a=sitePath[i]; b=sitePath[(i+1)%sitePath.length];
+        for(t=0;t<=8;t++){
+          x=a.x+(b.x-a.x)*t/8; z=a.z+(b.z-a.z)*t/8;
+          c=faceClear(x,z); if(c<worst)worst=c;
+        }
+      }
+      siteInfo.faceClear=+worst.toFixed(2);
+      siteInfo.fenceVerts=sitePath.length;
+    })();
     if(VS&&VS.fence){
       var fr=VS.fence({
-        root:root, name:"ironjaw-perimeter", path:ringPath(SITE_INSET), closed:true,
+        root:root, name:"ironjaw-perimeter", path:sitePath, closed:true,
         y:PY, h:2.6, pitch:4.0, colliderPitch:12, solid:solid,
         post:0x39404a, fabric:0xa8b0ba,
         gaps:[{x:GATE_X,z:CZ,half:11},{x:SVC_X,z:CZ,half:7}]
@@ -678,30 +833,234 @@ CBZ.addLandmass(function(city){
         sub:"Boxing · MMA · The Beast Pit",bg:0x0c0f14,fg:0xffd24a,accent:0xd8a020,
         solid:solid,name:"ironjaw-monument"});
     }
-    // ---- 4. THE CAR PARK, and its size is the GROUND's answer, not a wish.
-    //         The lot is boxed on three sides by things that were already
-    //         there: the perimeter to the west (the apron's 94-unit band once
-    //         |z| passes 30), the bowl's own facade to the east (a corner arc
-    //         at this bearing, so it comes no further west than CX-76.7), and
-    //         arena_venue.js's marquee + ticket booths to the north, which own
-    //         z = CZ +/- 16. Four stalls wide by four rows is what is left:
-    //         SIXTEEN bays, not the sixty a bigger rectangle would have
-    //         painted and never filled. --------------------------------------
-    var PARK_COLS=4, PARK_ROWS=4;
-    var PARK_X0=CX-89, PARK_Z0=CZ-58;
-    var lot=(VS&&VS.bays)?VS.bays({x0:PARK_X0,z0:PARK_Z0,cols:PARK_COLS,rows:PARK_ROWS,
-                                   stallW:2.7,stallD:5.2,aisle:6.3}):null;
-    if(lot){
-      siteInfo.bays=lot.slots.length;
-      siteInfo.park=lot.slots;
-      var st;
-      for(var si2=0;si2<lot.stripes.length;si2++){
+    // ---- 3b. THE FIRE LANE, which is the reason the rest of this ring is
+    //          empty. A building over 9.14 m tall owes IFC D105 an AERIAL
+    //          apparatus road: 7.92 m of unobstructed width, standing off the
+    //          wall by at least 4.57 m, running parallel to at least one whole
+    //          side. This bowl is 26 m tall and had NOTHING — which is exactly
+    //          why the perimeter, the car park and the planters were all free
+    //          to creep up to the wall. Drawing the lane makes the rule
+    //          VISIBLE: everything above and below now stands outside it
+    //          because there is a road there, not because a comment said so.
+    //
+    //          It is drawn as the building is built — a rounded rectangle
+    //          walked at a fixed offset from the same core rect — so it can
+    //          never drift from the facade it rings. Two instanced pools it
+    //          already flushes, no new draw call.
+    function ringWalk(d,pitch,cb){
+      var i,n,step,a,k,side;
+      // four straights along the core rect's faces
+      var st=[[1,0,CORE_A+d,-CORE_B,CORE_B],[0,1,CORE_B+d,CORE_A,-CORE_A],
+              [-1,0,-CORE_A-d,CORE_B,-CORE_B],[0,-1,-CORE_B-d,-CORE_A,CORE_A]];
+      for(side=0;side<4;side++){
+        var nx=st[side][0],nz=st[side][1],fix=st[side][2],a0=st[side][3],a1=st[side][4];
+        n=Math.max(1,Math.round(Math.abs(a1-a0)/pitch)); step=(a1-a0)/n;
+        for(i=0;i<n;i++){
+          k=a0+step*(i+0.5);
+          cb(CX+(nx?fix:k),CZ+(nx?k:fix),Math.atan2(nx,nz),Math.abs(step));
+        }
+        // the corner arc that follows this straight
+        var ox=CX+((side===0||side===3)?CORE_A:-CORE_A);
+        var oz=CZ+((side===0||side===1)?CORE_B:-CORE_B);
+        var a2=side*Math.PI/2; n=Math.max(2,Math.round(d*(Math.PI/2)/pitch));
+        step=(Math.PI/2)/n;
+        for(i=0;i<n;i++){
+          a=a2+step*(i+0.5);
+          cb(ox+Math.cos(a)*d,oz+Math.sin(a)*d,Math.atan2(Math.cos(a),Math.sin(a)),d*step);
+        }
+      }
+    }
+    // The ring is the GENERAL access road (IFC 503.2.1, 6.1 m) all the way
+    // round, because that is what fits at the poles; the mandated AERIAL width
+    // is added as a hardstanding widening on the EAST straight, which is where
+    // a fire crew would actually set up — the loading docks, the yard and the
+    // service gate are all on that side, and it is the only side arena_venue.js
+    // has not already filled with a marquee and two ticket booths.
+    var RING_IN=FACE_D+1.0, RING_W=6.1, RING_D=RING_IN+RING_W/2;
+    ringWalk(RING_D,5.0,function(lx,lz,lyaw,llen){
+      // the loading dock stands in the road here, which is what a dock IS —
+      // the carriageway breaks for it and the aerial apron outboard carries on.
+      if(lx>CX+CORE_A&&Math.abs(lz-CZ)<7.0)return;
+      dark.push({x:lx,y:PY+0.03,z:lz,sx:llen+0.06,sy:0.06,sz:RING_W,ry:lyaw});
+      white.push({x:lx,y:PY+0.065,z:lz,sx:llen*0.62,sy:0.03,sz:0.14,ry:lyaw});   // edge line
+    });
+    ringWalk(RING_IN+RING_W+0.35,7.0,function(lx,lz,lyaw,llen){
+      dark.push({x:lx,y:PY+0.09,z:lz,sx:llen+0.06,sy:0.18,sz:0.3,ry:lyaw});      // outer kerb
+    });
+    // the aerial widening: from the ring's outer edge out to the far side of
+    // the 7.92 m band, so the whole 4.6 -> 12.52 zone D105.3 asks for is one
+    // unobstructed hardstanding. Everything the yard puts down now starts past
+    // its outer edge.
+    var AER_IN=CORE_A+RING_IN+RING_W, AER_OUT=CORE_A+FACE_D+FIRE_STANDOFF+FIRE_LANE;
+    dark.push({x:CX+(AER_IN+AER_OUT)/2,y:PY+0.03,z:CZ,
+               sx:AER_OUT-AER_IN,sy:0.06,sz:CORE_B*2+8});
+    for(var fl=-1;fl<=1;fl+=2){
+      white.push({x:CX+(AER_IN+AER_OUT)/2,y:PY+0.065,z:CZ+fl*(CORE_B+3.6),
+                  sx:AER_OUT-AER_IN-1.2,sy:0.03,sz:0.14});
+    }
+
+    // ---- 4. THE CAR PARK, and its size is the GROUND's answer, not a wish —
+    //         but the answer is now MEASURED, and it is brutal. Real planning
+    //         ratios put a standalone arena at one space per 3.5-4 seats (Wells
+    //         Fargo Center: ~21,000 seats, 6,000+ spaces); this bowl seats
+    //         twenty-odd thousand, so code parking is ~5,500 spaces, and an
+    //         efficient 90-degree lot needs ~30 m2 each — SIXTEEN HECTARES. The
+    //         island is under four and the building eats 2.3 of them. There is
+    //         no arrangement of this land that parks an arena crowd, and the
+    //         old lot's 16 bays were not a design decision, they were what was
+    //         left after nobody measured anything.
+    //
+    //         So the site does what a tight-site arena really does (Chase
+    //         Center parks 950 cars for 18,000 seats and the city absorbs the
+    //         rest): the ISLAND keeps the two blocks that genuinely fit — the
+    //         north and south poles, the only ground where the building's arc
+    //         has pulled away and the ring road is behind you — and the volume
+    //         goes to an overflow lot out on the approach, below.
+    //
+    //         Both blocks are solved, not placed: the row sits one module
+    //         (STALL_D + AISLE_W = 12.81) inside the perimeter, starting where
+    //         the ring road's outer kerb ends, and its width is the narrowest
+    //         the fence gets across that module. Real ULI dimensions throughout
+    //         — the shipped 2.7 x 5.2 on a 6.3 aisle was a compact-car lot
+    //         wearing a standard lot's name.
+    //         The stall ROW is deliberately the inboard half and the aisle the
+    //         outboard one: the deck tapers hard at the poles, so putting the
+    //         stalls where the fence is still 52 m out buys 31 bays a side
+    //         where the other way round buys 11.
+    var lots=[];
+    if(VS&&VS.bays){
+      for(var pv=-1;pv<=1;pv+=2){
+        var zIn=CZ+pv*(CORE_B+RING_IN+RING_W+0.3);   // just past the ring's kerb
+        var zOut=zIn+pv*STALL_D;
+        var half=Math.min(fenceHalf(zIn),fenceHalf(zOut))-1.0;
+        var cols=Math.max(0,Math.floor(half*2/STALL_W));
+        if(cols<4)continue;
+        var bx0=CX-cols*STALL_W/2;
+        var blk=VS.bays({x0:bx0,z0:Math.min(zIn,zOut),cols:cols,rows:1,
+                         stallW:STALL_W,stallD:STALL_D,aisle:AISLE_W});
+        if(!blk)continue;
+        blk.x0=bx0; blk.zIn=zIn;
+        // nose INBOARD, toward the venue — you walk out of the car at the arena
+        for(var fz=0;fz<blk.slots.length;fz++)blk.slots[fz].heading=(pv<0)?0:Math.PI;
+        lots.push(blk);
+      }
+    }
+    for(var li=0;li<lots.length;li++){
+      var lot=lots[li],st,si2;
+      siteInfo.onSiteBays+=lot.slots.length;
+      for(si2=0;si2<lot.slots.length;si2++)siteInfo.park.push(lot.slots[si2]);
+      for(si2=0;si2<lot.stripes.length;si2++){
         st=lot.stripes[si2];
         white.push({x:st.x,y:PY+0.015,z:(st.z0+st.z1)/2,sx:0.12,sy:0.03,sz:st.z1-st.z0});
       }
-      dark.push({x:PARK_X0+lot.w/2,y:PY+0.02,z:PARK_Z0-0.25,sx:lot.w+1.4,sy:0.16,sz:0.3});
-      dark.push({x:PARK_X0+lot.w/2,y:PY+0.02,z:PARK_Z0+lot.d+0.25,sx:lot.w+1.4,sy:0.16,sz:0.3});
+      dark.push({x:lot.x0+lot.w/2,y:PY+0.02,z:lot.zIn,sx:lot.w+1.4,sy:0.16,sz:0.3});
+      // ACCESSIBLE BAYS ARE A DIMENSION, NOT A BLUE RECTANGLE. The ADA pull-up
+      // is 2.44 x 6.1 with a 1.52 m access aisle running its FULL length (US
+      // Access Board ch.5) — the aisle is the bay's whole point, so it gets
+      // painted, on the pair nearest the venue's own axis.
+      var mid=(lot.slots.length/2)|0;
+      for(var ab=mid-1;ab<=mid;ab++){
+        if(ab<0||ab>=lot.slots.length)continue;
+        blueP.push({x:lot.slots[ab].x,y:PY+0.018,z:lot.slots[ab].z,
+                    sx:STALL_W-0.24,sy:0.03,sz:STALL_D-0.3});
+      }
+      if(mid<lot.slots.length){
+        white.push({x:lot.slots[mid].x+STALL_W/2,y:PY+0.02,z:lot.slots[mid].z,
+                    sx:0.1,sy:0.03,sz:STALL_D-0.2});
+      }
     }
+    // ---- 4b. THE OVERFLOW LOT — the parking that could not be on the island.
+    //          OWNER: huge parking lots. The arithmetic above says the island
+    //          cannot hold one, and the real world agrees: an arena's lot is
+    //          never under the arena, it is out on the approach. This is that
+    //          lot, and the approach is the only land it can use — the 32 m
+    //          strip between the Mercy Causeway's east kerb (x 484.3, where
+    //          biome_snow.js's berm ends) and the island's own edge at CX - R.
+    //
+    //          Real 90-degree geometry throughout: 2.74 x 5.49 stalls on a 7.32
+    //          two-way aisle, so a double-loaded module is 18.30 m and the lot
+    //          measures 31.2 m2 a space — inside ULI's 28-32 band for an
+    //          efficient surface lot. Two blocks, one either side of the
+    //          causeway, each four modules deep: 176 bays. With the island's own
+    //          52 that is 228 against the 16 that shipped, and it is STILL only
+    //          about one space per 90 seats. That is not a failure of this lot,
+    //          it is what a 120 m island costs you — the same trade Chase Center
+    //          made at 950 spaces for 18,000 seats.
+    //
+    //          IT REFUSES RATHER THAN OVERWRITES. The strip is backcountry this
+    //          file has never surveyed, so each block is tested against every
+    //          region and lot the world has already claimed and simply is not
+    //          built if the ground is taken — the govcomplex.js rule. What it
+    //          does build, it makes honest: terrainFlattenUnder declares it as
+    //          built ground (that call can only ever LOWER relief, so no biome
+    //          gate can move the wrong way) and a platform record makes the
+    //          drawn slab the surface you actually stand on.
+    if(CFG.ARENA_OVERFLOW_LOT&&VS&&VS.bays){
+      var OV_X0=487.0, OV_COLS=11, OV_ROWS=8;
+      var OV_W=OV_COLS*STALL_W;                        // 30.14
+      var OV_GAP=13.0;                                 // clear of the causeway deck
+      var OV_D=(OV_ROWS/2)*(STALL_D*2+AISLE_W);        // 4 modules = 73.2
+      var landFree=function(a0,a1,b0,b1){
+        var i,r,hx,hz,rr=(city&&city.regions)||[],lt=(city&&city.lots)||[];
+        for(i=0;i<rr.length;i++){
+          r=rr[i]; if(!r||r.minX==null)continue;
+          if(r.maxX<a0||r.minX>a1||r.maxZ<b0||r.minZ>b1)continue;
+          return false;
+        }
+        for(i=0;i<lt.length;i++){
+          r=lt[i]; if(!r||r.x==null)continue;
+          hx=(r.w!=null?r.w:(r.width||0))/2+2; hz=(r.d!=null?r.d:(r.depth||0))/2+2;
+          if(r.x+hx<a0||r.x-hx>a1||r.z+hz<b0||r.z-hz>b1)continue;
+          return false;
+        }
+        return true;
+      };
+      for(var ov=-1;ov<=1;ov+=2){
+        var oz0=(ov<0)?(CZ-OV_GAP-OV_D):(CZ+OV_GAP);
+        if(!landFree(OV_X0-3,OV_X0+OV_W+3,oz0-3,oz0+OV_D+3))continue;
+        var ob=VS.bays({x0:OV_X0,z0:oz0,cols:OV_COLS,rows:OV_ROWS,
+                        stallW:STALL_W,stallD:STALL_D,aisle:AISLE_W});
+        if(!ob)continue;
+        // The ground first, then the paint. The slab is flush with the
+        // causeway deck AND runs right up to its kerb (CZ +/- 7.0, inside the
+        // deck platform's own 7.4) — a lot you cannot drive into off the road
+        // it sits beside is a texture, and a 3 m strip of unplatformed grass
+        // between them is the same fall-through this whole change is about.
+        var zNear=CZ+ov*7.0, zFar=oz0+((ov<0)?-2.5:(OV_D+2.5));
+        var zLo=Math.min(zNear,zFar), zHi=Math.max(zNear,zFar);
+        concrete.push({x:OV_X0+OV_W/2,y:CW_Y-0.5,z:(zLo+zHi)/2,
+                       sx:OV_W+5.0,sy:1.0,sz:zHi-zLo});
+        plat(OV_X0-2.5,zLo,OV_X0+OV_W+2.5,zHi,CW_Y);
+        if(CBZ.terrainFlattenUnder){
+          CBZ.terrainFlattenUnder({name:"Ironjaw overflow lot",
+            minX:OV_X0-4,maxX:OV_X0+OV_W+4,minZ:zLo-2,maxZ:zHi+2});
+        }
+        var os;
+        for(os=0;os<ob.stripes.length;os++){
+          var ost=ob.stripes[os];
+          white.push({x:ost.x,y:CW_Y+0.015,z:(ost.z0+ost.z1)/2,
+                      sx:0.12,sy:0.03,sz:ost.z1-ost.z0});
+        }
+        for(os=0;os<ob.slots.length;os++){ ob.slots[os].y=CW_Y; siteInfo.park.push(ob.slots[os]); }
+        siteInfo.overflowBays+=ob.slots.length;
+        // kerbs on the two long edges, and a low fence line facing the road so
+        // the lot has an EDGE instead of fading into the grass
+        dark.push({x:OV_X0-2.2,y:CW_Y+0.02,z:(zLo+zHi)/2,sx:0.35,sy:0.18,sz:zHi-zLo});
+        dark.push({x:OV_X0+OV_W+2.2,y:CW_Y+0.02,z:(zLo+zHi)/2,sx:0.35,sy:0.18,sz:zHi-zLo});
+        dark.push({x:OV_X0+OV_W/2,y:CW_Y+0.02,z:(ov<0)?zLo:zHi,
+                   sx:OV_W+5.0,sy:0.18,sz:0.35});
+        if(VS.lampRow){
+          var olp=[],ol;
+          for(ol=0;ol<5;ol++){
+            olp.push({x:OV_X0-1.4,z:oz0+OV_D*(ol+0.5)/5,fx:1,fz:0});
+            olp.push({x:OV_X0+OV_W+1.4,z:oz0+OV_D*(ol+0.5)/5,fx:-1,fz:0});
+          }
+          VS.lampRow({root:root,pts:olp,y:CW_Y,poleH:8.2,reach:2.4,rise:0.34,
+                      poleR:0.14,solid:solid});
+        }
+      }
+    }
+    siteInfo.bays=siteInfo.onSiteBays+siteInfo.overflowBays;
     // ---- 5. lamps: down the causeway, across the forecourt, over the lot ---
     if(VS&&VS.lampRow){
       var lp=[],i2;
@@ -714,18 +1073,17 @@ CBZ.addLandmass(function(city){
       lp=[];
       for(i2=-1;i2<=1;i2+=2){                               // the forecourt
         lp.push({x:CX-96,z:CZ+i2*11,fx:0,fz:-i2});
-        lp.push({x:CX-84,z:CZ+i2*11,fx:0,fz:-i2});
+        lp.push({x:CX-86.5,z:CZ+i2*11,fx:0,fz:-i2});
       }
       lp.push({x:CX-96,z:CZ+24,fx:0,fz:-1});
-      // Over the lot: on the NORTH kerb and on the back-to-back line between
-      // rows 1 and 2. Never in an aisle — that is where the cars turn.
-      // Over the lot: on its two KERBS, never on the back-to-back line between
-      // rows (that divider is 0 m wide here, so a pole there stands in the
-      // noses of two rows of cars) and never in an aisle.
-      if(lot)for(i2=0;i2<3;i2++){
-        var plx=PARK_X0+lot.w*(i2+0.5)/3;
-        lp.push({x:plx,z:PARK_Z0+lot.d+1.4,fx:0,fz:-1});                 // north kerb
-        lp.push({x:plx,z:PARK_Z0-1.4,fx:0,fz:1});                        // south kerb
+      // Over the pole lots: on the INBOARD kerb only. Never in the aisle —
+      // that is where the cars turn — and never on the row's own outboard
+      // edge, which is where the noses are.
+      for(var lk=0;lk<lots.length;lk++){
+        var lkl=lots[lk], face=(lkl.zIn>CZ)?1:-1;
+        for(i2=0;i2<4;i2++){
+          lp.push({x:lkl.x0+lkl.w*(i2+0.5)/4,z:lkl.zIn-face*1.6,fx:0,fz:face});
+        }
       }
       VS.lampRow({root:root,pts:lp,y:PY,poleH:6.4,reach:2.1,rise:0.32,poleR:0.12,solid:solid});
     }
@@ -779,7 +1137,7 @@ CBZ.addLandmass(function(city){
     // 107-unit apron band, so every one of them stands on real platform
     var PLANT=[-22,-14,14,22,29];
     for(var pl2=0;pl2<PLANT.length;pl2++){
-      var px2=CX-99, pz2=CZ+PLANT[pl2];
+      var px2=CX-97, pz2=CZ+PLANT[pl2];
       concrete.push({x:px2,y:PY+0.35,z:pz2,sx:2.2,sy:0.7,sz:2.2});
       dark.push({x:px2,y:PY+0.76,z:pz2,sx:1.9,sy:0.16,sz:1.9});
       solid(px2-1.1,pz2-1.1,px2+1.1,pz2+1.1,PY,PY+0.7);
@@ -788,8 +1146,15 @@ CBZ.addLandmass(function(city){
     //         has no front. The east ring gets what an arena's east ring has:
     //         skips, stillages, a loading dock and nobody's idea of a plaza. --
     (function serviceYard(){
-      var yx=CX+FACE_X+9;
-      concrete.push({x:yx+5,y:PY+0.06,z:CZ,sx:22,sy:0.12,sz:30});     // yard slab
+      // OUTBOARD OF THE FIRE LANE, and that is what moved it. The yard used to
+      // start at FACE_X + 9, i.e. 9 m off a 26 m wall, which put its skips and
+      // its slab squarely inside the aerial-apparatus zone the building is owed
+      // — the one strip on the whole site that has to stay unobstructed. It now
+      // begins where that hardstanding ends and stops 1.5 m short of the
+      // perimeter, so back-of-house occupies exactly the band left over.
+      var yx=CX+AER_OUT+2.5, yOut=CX+fenceHalf(CZ)-1.5;
+      concrete.push({x:(yx-2.5+yOut)/2,y:PY+0.06,z:CZ,
+                     sx:yOut-yx+2.5,sy:0.12,sz:30});                   // yard slab
       for(var d2=0;d2<5;d2++){
         var dz2=CZ-13+d2*6.5;
         dark.push({x:yx,y:PY+0.9,z:dz2,sx:2.2,sy:1.8,sz:4.4});         // skip
@@ -797,7 +1162,7 @@ CBZ.addLandmass(function(city){
         solid(yx-1.2,dz2-2.3,yx+1.2,dz2+2.3,PY,PY+1.9);
       }
       for(var cr=0;cr<7;cr++){
-        var cx2=yx+7+(cr%3)*2.4, cz2=CZ-9+Math.floor(cr/3)*7.5;
+        var cx2=yx+4+(cr%3)*2.4, cz2=CZ-9+Math.floor(cr/3)*7.5;
         var ch2=0.9+CBZ.hash01(cx2,cz2,0x2B)*0.7;
         concrete.push({x:cx2,y:PY+ch2/2,z:cz2,sx:1.8,sy:ch2,sz:1.8,
                        ry:CBZ.hash01(cx2,cz2,0x2C)*0.5-0.25});
@@ -810,9 +1175,11 @@ CBZ.addLandmass(function(city){
       concrete.push({x:CX+FACE_X+2.4,y:PY+0.6,z:CZ,sx:4.4,sy:1.2,sz:9});
       plat(CX+FACE_X+0.2,CZ-4.5,CX+FACE_X+4.6,CZ+4.5,PY+1.2);
       // A 1.2 m dock is well over physics.js's 0.45 STEP_UP, so it needs steps
-      // or it is a platform nothing can reach. Three treads at 0.4 each.
+      // or it is a platform nothing can reach. Three treads at 0.4 each — and
+      // they climb INWARD, alongside the dock, instead of marching east out of
+      // the standoff and into the fire lane where they used to end up.
       for(var tr=0;tr<3;tr++){
-        var ty=PY+0.4*(tr+1), tx2=CX+FACE_X+5.0+(2-tr)*0.9;
+        var ty=PY+0.4*(tr+1), tx2=CX+FACE_X+2.6-tr*0.9;
         concrete.push({x:tx2,y:ty-0.2,z:CZ+5.6,sx:0.9,sy:0.4,sz:2.6});
         plat(tx2-0.45,CZ+4.3,tx2+0.45,CZ+6.9,ty);
       }
@@ -853,12 +1220,13 @@ CBZ.addLandmass(function(city){
       posts.push({id:"ironjaw:food",job:"street vendor",archetype:"merchant",
         x:food.x,z:food.z,face:food.face,pose:"table",
         opts:{wealth:0.36,aggr:0.05,floorY:PY}});
-      if(lot){
-        // at the lot MOUTH — the north kerb, where the forecourt feeds it —
+      for(var lq=0;lq<lots.length;lq++){
+        // at the lot MOUTH — the inboard kerb, where the ring road feeds it —
         // rather than standing in the middle of somebody's stall.
-        posts.push({id:"ironjaw:park",job:"security guard",archetype:"worker",
-          x:PARK_X0+lot.w+2.4,z:PARK_Z0+lot.d-2.0,face:-Math.PI/2,
-          opts:{wealth:0.24,aggr:0.06,floorY:PY}});
+        var lql=lots[lq], lqf=(lql.zIn>CZ)?1:-1;
+        posts.push({id:"ironjaw:park:"+(lqf>0?"n":"s"),job:"security guard",
+          archetype:"worker",x:lql.x0+lql.w+2.4,z:lql.zIn-lqf*2.2,
+          face:lqf>0?Math.PI:0,opts:{wealth:0.24,aggr:0.06,floorY:PY}});
       }
       CBZ.cityStaffVenue("ironjaw",{stations:posts.length,
         note:"gate booth, 2 ticket windows, merch + food stalls, car park"});
@@ -961,7 +1329,16 @@ CBZ.addLandmass(function(city){
 // been empty ever since; airside.js:1261 documents the same one-shot trick.)
 // `parkRoot` rather than a done-flag, because cityAddParkedCar purges every
 // fixture whose arena root is stale, so a world rebuild has to re-fill.
-var ARENA_PARK_FILL=0.65;
+// A REAL LOT IS MOSTLY EMPTY, AND METAL IS THE EXPENSIVE PART. The bay count
+// went from 16 to ~240 in this change, and 0.65 of that is 156 full vehicle
+// rigs standing on one island — a frame cost paid for scenery. A dark arena's
+// lot is nearly empty anyway (that is the whole reason ARENA_CROWD_EVENT
+// exists), so the fill is a rate AND a hard ceiling, and the ceiling bites in
+// list order: the island's own bays are pushed first, so the cars that DO
+// exist are the ones parked closest to the door — which is exactly how a lot
+// fills before a card.
+var ARENA_PARK_FILL=0.34;
+var ARENA_PARK_CARS=42;
 var parkRoot=null;
 CBZ.onUpdate(55.44,function(){
   if(!CFG.ARENA_FIGHTS||!CFG.ARENA_SITE)return;
@@ -973,12 +1350,14 @@ CBZ.onUpdate(55.44,function(){
   // WHICH BAYS ARE TAKEN IS A POSITION HASH. This runs long after the build,
   // so a draw on any shared seeded stream here would be order-dependent and
   // could not be byte-identical per seed; hash01 is position-pure and is.
-  for(var i=0;i<siteInfo.park.length;i++){
+  var made=0;
+  for(var i=0;i<siteInfo.park.length&&made<ARENA_PARK_CARS;i++){
     var s=siteInfo.park[i];
     if(CBZ.hash01&&CBZ.hash01(s.x,s.z,0x1A7)>ARENA_PARK_FILL)continue;
     var c=null;
     try{ c=CBZ.cityAddParkedCar(s.x,s.z,s.heading,{}); }catch(e){ c=null; }
     if(!c)continue;
+    made++;
     c._venueSite="ironjaw";
     if(c.group)c.group.userData.arenaPark=true;
   }
@@ -1008,7 +1387,22 @@ if(CBZ.venueSite&&CBZ.venueSite.census){
     return {parked:parked,bays:siteInfo?siteInfo.bays:0,staff:staff,posts:posts,
       keepouts:keepouts,roadRecords:roads,gates:siteInfo?siteInfo.gates:0,
       fencePanels:siteInfo?siteInfo.fencePanels:0,
-      fill:(siteInfo&&siteInfo.bays)?+(parked/siteInfo.bays).toFixed(2):0};
+      // THE PERIMETER'S WORST STANDOFF FROM THE BUILDING, in metres, measured
+      // over the real polyline at build time. It shipped at 2.30 against a 26 m
+      // wall and nothing could see it; it is a NUMBER now and it may only ever
+      // go UP. Below FIRE_STANDOFF (4.6) the site is standing in the fire lane.
+      faceClear:siteInfo?siteInfo.faceClear:0,
+      fenceVerts:siteInfo?siteInfo.fenceVerts:0,
+      onSiteBays:siteInfo?siteInfo.onSiteBays:0,
+      overflowBays:siteInfo?siteInfo.overflowBays:0,
+      // `parked` is capped on purpose (ARENA_PARK_CARS) — a 240-bay lot with
+      // 240 vehicle rigs in it is a frame budget spent on scenery, and a real
+      // lot is nearly empty when the house is dark. So `fill` is reported
+      // against the CAP, and the cap is reported beside it: a lot that stops
+      // filling still shows up, and one that was never built reads 0 bays.
+      carCap:ARENA_PARK_CARS,
+      fill:(siteInfo&&siteInfo.bays)
+        ?+(parked/Math.min(siteInfo.bays,ARENA_PARK_CARS)).toFixed(2):0};
   });
 }
 
