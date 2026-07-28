@@ -262,6 +262,9 @@
   const camV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };
   const cineV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };            // scripted-scene dolly
   const _cineLook = new THREE.Vector3();                              // scripted-scene look ease
+  const airCineV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };         // live aircraft shot dolly
+  const _airCineLook = new THREE.Vector3();                            // live aircraft shot look ease
+  let airCineOn = false;
   const look = new THREE.Vector3(player.pos.x, player.pos.y + 1.4, player.pos.z);
   const lookV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };
   let fov = 62, fovV = { v: 0 }, heightV = { v: 0 };
@@ -429,6 +432,7 @@
     // CUT. Highest priority: a cutscene must win over FP/driving/shoulder.
     const cc0 = CBZ.cineCam;
     if (cc0 && cc0.active) {
+      airCineOn = false;
       introT = 0; prev.copy(player.pos); shakeAmt = 0;
       if (cc0.snap) {
         cc0.snap = false;
@@ -445,6 +449,49 @@
       _cineLook.z += (cc0.lz - _cineLook.z) * (1 - Math.exp(-6 * fdt));
       camera.lookAt(_cineLook);
       return;
+    }
+    // LIVE AIRCRAFT SHOT. The ordnance/mission layer may publish framing
+    // coordinates, but this shared module remains the sole camera transform
+    // writer. Unlike CBZ.cineCam this does not freeze the player or flight
+    // physics: it is a lens override while the aircraft keeps flying.
+    let acv = null;
+    if (typeof CBZ.aircraftCinematicView === "function") {
+      try { acv = CBZ.aircraftCinematicView(); } catch (e) { acv = null; }
+    }
+    if (acv && acv.active && player._aircraft && !player.dead) {
+      introT = 0;
+      prev.copy(player.pos);
+      bankK = 0;
+      if (acv.snap || !airCineOn) {
+        camera.position.set(acv.x, acv.y, acv.z);
+        airCineV.x.v = airCineV.y.v = airCineV.z.v = 0;
+        _airCineLook.set(acv.lx, acv.ly, acv.lz);
+      } else {
+        camera.position.x = smoothDamp(camera.position.x, acv.x, airCineV.x, 0.10, fdt);
+        camera.position.y = smoothDamp(camera.position.y, acv.y, airCineV.y, 0.10, fdt);
+        camera.position.z = smoothDamp(camera.position.z, acv.z, airCineV.z, 0.10, fdt);
+        const lk = 1 - Math.exp(-8 * fdt);
+        _airCineLook.x += (acv.lx - _airCineLook.x) * lk;
+        _airCineLook.y += (acv.ly - _airCineLook.y) * lk;
+        _airCineLook.z += (acv.lz - _airCineLook.z) * lk;
+      }
+      camera.lookAt(_airCineLook);
+      if (shakeAmt > 0.001) {
+        camera.position.x += (Math.random() - 0.5) * shakeAmt;
+        camera.position.y += (Math.random() - 0.5) * shakeAmt;
+        camera.position.z += (Math.random() - 0.5) * shakeAmt;
+        shakeAmt *= Math.pow(0.0006, fdt);
+        if (shakeAmt < 0.01) shakeAmt = 0;
+      }
+      fov = smoothDamp(fov, acv.fov || 52, fovV, 0.14, fdt);
+      if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      airCineOn = true;
+      return;
+    }
+    if (airCineOn) {
+      airCineOn = false;
+      camV.x.v = camV.y.v = camV.z.v = 0;
+      lookV.x.v = lookV.y.v = lookV.z.v = 0;
     }
     const sv = CBZ.simView;
     if (sv && sv.active && CBZ.game.mode === "escape") {

@@ -3,9 +3,10 @@
    bunker-buster, and the nuke. Partner file to city/bunkers.js.
 
    WHY ONE LAYER, NOT THREE BOLT-ONS (owner mandate): the pieces chain —
-   the military bunker's vault holds THE one nuclear device per world and
-   its armory stocks the bunker-busters; the B-2 on the Fort Brandt apron
-   is the delivery platform for both; the buster is the only weapon that
+   the military bunker's vault holds the one PORTABLE nuclear device for
+   planting and its armory stocks the bunker-busters; every B-2 also carries
+   three flight-only nuclear weapons. The B-2 on the Fort Brandt apron is
+   the delivery platform; the buster is the only weapon that
    kills THROUGH a bunker roof, which matters because an intact bunker is
    the only thing that shelters you from the nuke. Steal the bomber, raid
    the vault, and the end of the world is a payload switch away.
@@ -37,8 +38,8 @@
    fire, load-path failure, a real pancake collapse). What this file still
    owns is what only it knows: what was dropped, from where, by whom, and
    the consequences that are not blast (crime/stars, the bunker shelter
-   guarantee, the lingering radiation zone, the one-device-per-world
-   scarcity rule). NEW ORDNANCE IS A TABLE ROW — "buster" is defined via
+   guarantee, the lingering radiation zone, and portable-device planting).
+   NEW ORDNANCE IS A TABLE ROW — "buster" is defined via
    CBZ.impact.define() below, with a high `pen` so it punches through the
    roof and detonates INSIDE, which is exactly what `pen` models.
 
@@ -49,7 +50,7 @@
    layer can hang "bomb the city" off it without touching this file. With no
    B-2 in the air the SAME seam flies a CALLED sortie off-map
    (CBZ.strategicCallStrike), which is what the bunker's map table tasks.
-   [X] cycles the payload: Mk-84 · JDAM · GBU bunker buster · THE DEVICE.
+   [X] cycles the payload: Mk-84 · JDAM · GBU bunker buster · nuclear weapon.
 
    BALLISTICS ARE SOLVED, NOT INTEGRATED. y(t) = y0 + vy t - 1/2 g t^2 and the
    landing time is the positive root of the quadratic, so a round's impact
@@ -65,7 +66,8 @@
 
    An INTACT bunker (bunkers.js) still shelters anyone inside a nuke; a
    breached one does not. Max wanted via the military-reason star API. NO
-   new HUD — the killfeed carries the story; the flash/cloud are world FX.
+   new HUD element — the flight strip carries the held-B tally, the killfeed
+   carries individual deaths, and the flash/cloud are world FX.
 
    DETERMINISM: placement/build = hash01 only. Combat-time FX = runtime,
    Math.random allowed (same rule the C4/grenade paths follow). New FX
@@ -98,6 +100,9 @@
   // the payload state is invisible again, exactly as it shipped. See the long
   // note above drawPayloadHud() for WHY a toast could never have worked.
   if (CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK == null) CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK = true;
+  // HOLD-[B] B-2 bomb camera. The shared camera remains the sole transform
+  // writer; this module only publishes the moving shot target.
+  if (CBZ.CONFIG.STRAT_BOMB_CINEMATIC == null) CBZ.CONFIG.STRAT_BOMB_CINEMATIC = true;
 
   function h01(x, z, s) { return CBZ.hash01 ? CBZ.hash01(x, z, s) : 0.5; }
   function cm(hex, opts) { return CBZ.cmat ? CBZ.cmat(hex, opts) : (CBZ.mat ? CBZ.mat(hex, opts) : new THREE.MeshLambertMaterial({ color: hex })); }
@@ -802,7 +807,7 @@
   // agent's active surface) stays untouched.
   // A B-2 carries 80x Mk-82 or 16x 2000 lb-class. We fly the 2000 lb loadout,
   // so 16 iron + 4 of them swapped for guidance kits.
-  const B2_BOMBS = 16, B2_MISSILES = 8, B2_JDAMS = 4;
+  const B2_BOMBS = 16, B2_MISSILES = 8, B2_JDAMS = 4, B2_NUKES = 3;
   let _bayT = 0, _bayOpen = 0;
   function flyingB2() {
     const P = CBZ.player;
@@ -819,6 +824,8 @@
       c.maxAmmo = B2_MISSILES;
       c.bombAmmo = B2_BOMBS;
       c.jdamAmmo = B2_JDAMS;
+      c.nukeAmmo = B2_NUKES;
+      c.maxNukeAmmo = B2_NUKES;
       c.displayName = "B-2 SPIRIT";
       payload = "bomb";
       _payFlash = 0; _payTag = "";
@@ -828,7 +835,7 @@
       // why the old version of this line ("[B] tap: release · … · LMB missiles")
       // was never delivered to anybody. The keys are taught on the flight strip
       // instead (payloadHudText); this is the loadout, for the phone's record.
-      note("B-2 SPIRIT airborne — bay loaded with sixteen Mk-84 and four JDAM. Penetrators only bite fast and high.",
+      note("B-2 SPIRIT airborne — bay loaded with sixteen Mk-84, four JDAM, and three nuclear weapons. Penetrators only bite fast and high.",
         5.4, { from: "Flight Ops", app: "messages" });
     }
     // bay doors ease open around a drop window, then seal
@@ -881,7 +888,7 @@
     if (k === "bomb") return craft && (craft.bombAmmo | 0) > 0;
     if (k === "jdam") return CBZ.CONFIG.STRAT_JDAM !== false && craft && (craft.jdamAmmo | 0) > 0;
     if (k === "buster") return CBZ.CONFIG.STRAT_BUNKER_BUSTER !== false && invCount("Bunker Buster") > 0;
-    if (k === "nuke") return CBZ.CONFIG.STRAT_NUKE !== false && invCount("Nuclear Device") > 0;
+    if (k === "nuke") return CBZ.CONFIG.STRAT_NUKE !== false && craft && (craft.nukeAmmo | 0) > 0;
     return false;
   }
   // How many of `k` are actually aboard. ONE answer — the strip, the label and
@@ -890,16 +897,16 @@
     if (k === "bomb") return c ? (c.bombAmmo | 0) : 0;
     if (k === "jdam") return c ? (c.jdamAmmo | 0) : 0;
     if (k === "buster") return invCount("Bunker Buster");
-    return invCount("Nuclear Device");
+    return c ? (c.nukeAmmo | 0) : 0;
   }
   // Instrument names — short enough to sit in the flight strip's one line
   // beside the altitude and the missile count.
-  const PAY_SHORT = { bomb: "MK-84", jdam: "JDAM", buster: "GBU-57", nuke: "THE DEVICE" };
+  const PAY_SHORT = { bomb: "MK-84", jdam: "JDAM", buster: "GBU-57", nuke: "NUKE" };
   function payloadLabel(k, c) {
     if (k === "bomb") return "Payload: Mk-84 bombs (" + payloadCount("bomb", c) + ")";
     if (k === "jdam") return "Payload: GBU-31 JDAM — guided (" + payloadCount("jdam", c) + ")";
     if (k === "buster") return "Payload: GBU-57 BUNKER BUSTER (" + payloadCount("buster", c) + ")";
-    return "Payload: THE DEVICE";
+    return "Payload: NUCLEAR WEAPON (" + payloadCount("nuke", c) + ")";
   }
   function cyclePayload() {
     const c = flyingB2();
@@ -918,11 +925,11 @@
       // CORRECTED: neither special is BOUGHT and neither comes from the vault
       // alone — the GBU-57s are taken free from the ordnance crate in the Fort
       // Brandt Deep Shelter's armory (bunkers.js:607/331, restocks daily) and
-      // THE DEVICE is taken free from the vault cradle inside the same shelter
-      // (bunkers.js:681/361). Saying "bought" sent the player shopping.
+      // the B-2's nuclear rack is flight-only. The single vault device remains
+      // a portable planting item; it is not secretly a fourth aircraft round.
       payloadFlash("NO OTHER STORES", 2.4);
       note("No other stores aboard — JDAM rack " + (CBZ.CONFIG.STRAT_JDAM === false ? "is disabled" : "spent")
-        + ". GBU-57 penetrators are in the Fort Brandt Deep Shelter's ordnance crate; the device is in its vault.",
+        + ". GBU-57 penetrators are in the Fort Brandt Deep Shelter's ordnance crate; the nuclear rack is spent.",
         3.2, { from: "Flight Ops", app: "messages" });
       return payload;
     }
@@ -931,7 +938,7 @@
     // The two SPECIALS are genuine headlines and belong in the record; the two
     // ordinary racks are not, and a news push per keypress would be spam.
     if ((payload === "buster" || payload === "nuke") && CBZ.city && CBZ.city.big) {
-      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED — THE DEVICE" : "BAY ARMED — GBU-57 PENETRATOR"); } catch (e) {}
+      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED — NUCLEAR WEAPON" : "BAY ARMED — GBU-57 PENETRATOR"); } catch (e) {}
     }
     sfx("switch", { pitch: 1.2, volume: 0.3 });
     return payload;
@@ -967,13 +974,23 @@
      is bent: this is the aircraft's own instrument line, in its own grammar. */
   const HUD_MARK = "  ✦";              // ✦ — this readout's own glyph
   let _payFlash = 0, _payTag = "", _b2Legend = 0;
+  const bombCine = {
+    active: false, snap: false, kills0: 0, kills: 0,
+    released: 0, impacts: 0, linger: 0,
+    hasImpact: false, lastX: 0, lastY: 0, lastZ: 0,
+  };
+  function bombCineDeaths() {
+    if (bombCine.active) {
+      bombCine.kills = Math.max(bombCine.kills, Math.max(0, ((g && g.kills) | 0) - bombCine.kills0));
+    }
+    return bombCine.kills | 0;
+  }
   function payloadFlash(tag, secs) { _payTag = tag || ""; _payFlash = secs || 2; }
   function payloadHudText(c) {
     const n = payloadCount(payload, c);
-    // THE DEVICE is one per world by construction (bunkers.js's single cradle),
-    // so a "×1" beside it is noise.
-    return HUD_MARK + PAY_SHORT[payload] + (payload === "nuke" ? "" : " ×" + n) +
+    return HUD_MARK + PAY_SHORT[payload] + " ×" + n +
       (_payFlash > 0 && _payTag ? "  " + _payTag : "") +
+      (bombCine.active ? "   BOMB CAM · IMPACTS " + bombCine.impacts + " · DEATHS " + bombCineDeaths() : "") +
       // A 14 s legend, then silence. The permanent tutorial this repo bans is a
       // legend that never leaves; the owner cannot discover [X] any other way,
       // because the note that used to teach it is deleted upstream. Never on
@@ -1145,6 +1162,109 @@
     return _bayWorld.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
   }
 
+  /* ---- THE HELD-B SHOT ----------------------------------------------------
+     Strategic weapons publish a shot; systems/camera.js remains the only code
+     that writes the camera transform. The lens sits ahead and off one wing,
+     looking BACK through the B-2 toward the falling stick and then the latest
+     impact. It stays up until every released round lands, then holds the last
+     blast long enough to read the confirmed death tally.
+
+     Deaths are the canonical game.kills delta. We do not estimate victims from
+     the blast radius and we do not wrap a kill function: if the shared death
+     bus has not confirmed a kill, this number does not move.                 */
+  const _bombCinePoint = { x: 0, y: 0, z: 0, vy: 0 };
+  const _bombCineView = {
+    active: false, snap: false,
+    x: 0, y: 0, z: 0, lx: 0, ly: 0, lz: 0, fov: 52,
+  };
+  function startBombCine(c) {
+    if (CBZ.CONFIG.STRAT_BOMB_CINEMATIC === false || !c) return false;
+    if (bombCine.active) return true;                 // extend one continuous run/re-hold
+    bombCine.active = true;
+    bombCine.snap = true;
+    bombCine.kills0 = (g && g.kills) | 0;
+    bombCine.kills = 0;
+    bombCine.released = 0;
+    bombCine.impacts = 0;
+    bombCine.linger = 0;
+    bombCine.hasImpact = false;
+    bombCine.lastX = c.pos.x;
+    bombCine.lastY = c.pos.y;
+    bombCine.lastZ = c.pos.z;
+    return true;
+  }
+  function stopBombCine() {
+    if (!bombCine.active) return;
+    bombCineDeaths();
+    bombCine.active = false;
+    bombCine.snap = false;
+  }
+  function bombCineRelease() {
+    if (bombCine.active) bombCine.released++;
+  }
+  function bombCineImpact(b) {
+    if (!bombCine.active || !b || !b.sol) return;
+    bombCine.impacts++;
+    bombCine.hasImpact = true;
+    bombCine.lastX = b.sol.x;
+    bombCine.lastY = b.sol.y;
+    bombCine.lastZ = b.sol.z;
+    bombCine.linger = 4.0;
+  }
+  function tickBombCine(dt, c) {
+    if (!bombCine.active) return;
+    bombCineDeaths();
+    if (CBZ.CONFIG.STRAT_BOMB_CINEMATIC === false || !c || !g ||
+        g.mode !== "city" || (CBZ.player && CBZ.player.dead)) {
+      stopBombCine();
+      return;
+    }
+    if (_bHeld || run.active || bombs.length) return;
+    if (!bombCine.hasImpact) { stopBombCine(); return; }
+    bombCine.linger -= dt;
+    if (bombCine.linger <= 0) stopBombCine();
+  }
+  CBZ.aircraftCinematicView = function () {
+    const c = flyingB2();
+    if (!bombCine.active || !c || CBZ.CONFIG.STRAT_BOMB_CINEMATIC === false) return null;
+    const hd = c.heading || 0;
+    const fx = Math.sin(hd), fz = Math.cos(hd);
+    const rx = Math.cos(hd), rz = -Math.sin(hd);
+    const span = Math.max(34, (c.sourceRec && c.sourceRec.footW) || 52);
+    const ahead = Math.max(68, Math.min(96, span * 1.5));
+    const side = Math.max(10, Math.min(18, span * 0.26));
+    const up = Math.max(17, Math.min(25, span * 0.38));
+    _bombCineView.x = c.pos.x + fx * ahead + rx * side;
+    _bombCineView.y = c.pos.y + up;
+    _bombCineView.z = c.pos.z + fz * ahead + rz * side;
+
+    if (bombCine.hasImpact) {
+      _bombCineView.lx = bombCine.lastX;
+      _bombCineView.ly = bombCine.lastY + 6;
+      _bombCineView.lz = bombCine.lastZ;
+    } else {
+      let next = null, remain = Infinity;
+      for (let i = 0; i < bombs.length; i++) {
+        const b = bombs[i], r = b.sol.t - b.t;
+        if (r < remain) { remain = r; next = b; }
+      }
+      if (next) {
+        bombAt(next, Math.min(next.t, next.sol.t), _bombCinePoint);
+        _bombCineView.lx = _bombCinePoint.x;
+        _bombCineView.ly = _bombCinePoint.y;
+        _bombCineView.lz = _bombCinePoint.z;
+      } else {
+        _bombCineView.lx = c.pos.x - fx * 70;
+        _bombCineView.ly = c.pos.y - 28;
+        _bombCineView.lz = c.pos.z - fz * 70;
+      }
+    }
+    _bombCineView.active = true;
+    _bombCineView.snap = bombCine.snap;
+    bombCine.snap = false;
+    return _bombCineView;
+  };
+
   /* ---- STRAIGHT DOWN — the release velocity, once ------------------------
      OWNER: "bombs should drop straight down."
 
@@ -1201,6 +1321,11 @@
     } catch (e) {}
   }
 
+  function nuclearChannelBusy() {
+    if (nk || (armed && armed.length)) return true;
+    for (let i = 0; i < bombs.length; i++) if (bombs[i].kind === "nuke") return true;
+    return false;
+  }
   function dropPayload(force) {
     const c = flyingB2();
     if (!c || !g || g.mode !== "city") return false;
@@ -1211,12 +1336,23 @@
     // nothing and read as a broken key. The strip is the surface that works.
     if (agl < 14) { if (!force) { payloadFlash("TOO LOW — CLIMB", 1.8); note("Too low — climb before releasing.", 1.4); } return false; }
     if (!payloadAvailable(payload, c)) { cyclePayload(); if (!payloadAvailable(payload, c)) { if (!force) { payloadFlash("BAY EMPTY", 1.8); note("Bay's empty.", 1.2); } return false; } }
+    // The nuke resolver intentionally admits one propagating apocalypse at a
+    // time. Refuse a second release BEFORE charging the rack so all three
+    // onboard weapons remain usable instead of later rounds becoming silent
+    // duds while the first wave is still resolving.
+    if (payload === "nuke" && nuclearChannelBusy()) {
+      if (!force) {
+        payloadFlash("NUCLEAR CHANNEL BUSY", 2.0);
+        note("Nuclear channel busy — wait for the current weapon to resolve.", 2.0, { from: "Flight Ops", app: "messages" });
+      }
+      return false;
+    }
     if (c._dropCD > 0) return false;
     const kind = payload;
     if (kind === "bomb") c.bombAmmo--;
     else if (kind === "jdam") c.jdamAmmo--;
     else if (kind === "buster") { if (!invTake("Bunker Buster")) return false; }
-    else if (kind === "nuke") { if (!invTake("Nuclear Device")) return false; }
+    else if (kind === "nuke") c.nukeAmmo--;
     c._dropCD = kind === "bomb" ? 0.2 : kind === "jdam" ? 0.6 : 1.4;
     _bayT = 1.3;                                     // bay doors swing for the release
 
@@ -1242,6 +1378,7 @@
       b.seek = ordSeek("strategic:jdam") || null;
       reaimGuided(b);
     }
+    bombCineRelease();
 
     sfx("whoosh", { pitch: 0.8, volume: 0.5 });
     // dropping ordnance on the city is a crime the moment it leaves the bay
@@ -1287,6 +1424,7 @@
   function resolveImpact(b) {
     if (!g || g.mode !== "city") return;
     const s = b.sol;
+    bombCineImpact(b);
     // a roof hit blooms ON the roof; ground level gets a little standoff
     const iy = s.y > 2.5 ? s.y : Math.max(0.6, s.y) + 1.0;
     if (b.kind === "buster") { resolveBuster(s.x, s.z, s.y, b.vx, b.vz, s.speed); return; }
@@ -1361,7 +1499,7 @@
     const kind = opts.kind || (payload === "nuke" ? "bomb" : payload);   // never carpet the device
     if (!payloadAvailable(kind, c)) return false;
     payload = kind;
-    const stock = kind === "bomb" ? (c.bombAmmo | 0) : kind === "jdam" ? (c.jdamAmmo | 0) : invCount(kind === "buster" ? "Bunker Buster" : "Nuclear Device");
+    const stock = payloadCount(kind, c);
     run.active = true;
     run.kind = kind;
     run.want = Math.max(1, Math.min(RUN_MAX, opts.count || stock));
@@ -1486,7 +1624,7 @@
         _bT += dt;
         if (_bT >= RUN_HOLD && !_bRan && !run.active && CBZ.CONFIG.STRAT_BOMB_RUN !== false) {
           _bRan = true;
-          startRun({});
+          if (startRun({})) startBombCine(c);
         }
       }
     }
@@ -1515,10 +1653,10 @@
         if (run.active && run.sent >= run.want) endRun("done");
       }
     }
-    if (!bombs.length) return;
-    if (g.mode !== "city") {                            // mode flip: sweep the sky
+    if (!g || g.mode !== "city") {                      // mode flip: sweep the sky
       for (const b of bombs) if (b.mesh && b.mesh.parent) b.mesh.parent.remove(b.mesh);
       bombs.length = 0;
+      stopBombCine();
       return;
     }
     // ---- THE FALL. Pure evaluation of each round's analytic arc; the impact
@@ -1548,6 +1686,7 @@
       b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
       b.mesh.rotation.x = Math.atan2(-_bp.vy, hsp > 0.001 ? hsp : 0.001);
     }
+    tickBombCine(dt, c);
   });
 
   /* ==========================================================================
@@ -2128,6 +2267,17 @@
       inAir: bombs.length, cap: bombCap(), collapses: _runCollapses,
     };
   };
+  CBZ.strategicBombCameraState = function () {
+    return {
+      active: bombCine.active,
+      released: bombCine.released,
+      impacts: bombCine.impacts,
+      deaths: bombCineDeaths(),
+      linger: +Math.max(0, bombCine.linger).toFixed(2),
+      hasImpact: bombCine.hasImpact,
+      enabled: CBZ.CONFIG.STRAT_BOMB_CINEMATIC !== false,
+    };
+  };
   /* NUMERIC PROBE (CLAUDE.md's closed loop is math over live state, never
      frames). Answers, without dropping anything: where would a release from
      (x,y,z) at (vx,vy,vz) land, when, how fast, and how deep would a buster
@@ -2194,10 +2344,13 @@
       bombs: c ? (c.bombAmmo | 0) : 0,
       jdams: c ? (c.jdamAmmo | 0) : 0,
       busters: invCount("Bunker Buster"),
-      nukes: invCount("Nuclear Device"),
+      nukes: c ? (c.nukeAmmo | 0) : 0,
+      maxNukes: c ? (c.maxNukeAmmo | 0) : B2_NUKES,
+      portableNukes: invCount("Nuclear Device"),
       armed: armed.length,
       inAir: bombs.length, cap: bombCap(),
       run: run.active ? { kind: run.kind, sent: run.sent, want: run.want, called: run._called != null } : null,
+      bombCamera: CBZ.strategicBombCameraState(),
       nukeActive: !!nk,
       rad: radZones.length,
       bus: !!CBZ.detonate, ledger: !!CBZ.structure,

@@ -1074,8 +1074,9 @@
   // STRAT_BUNKER_BUSTER: the penetrator payload — the ONLY weapon that
   // kills through a bunker roof (and one-shots a building through its roof).
   // OFF → a buster impact resolves as a plain heavy bomb.
-  // STRAT_NUKE: the one-per-world device (military vault) — B-2 drop or a
-  // planted 45s timer; staged city-flattening blast, kill-bus deaths
+  // STRAT_NUKE: every B-2 carries three flight-only nuclear weapons; the
+  // military vault separately holds one portable device for a planted 45s
+  // timer. Staged city-flattening blast, kill-bus deaths
   // ("nuclear blast" in the corner feed), 5★, lingering radiation zone.
   // OFF → a nuke impact resolves as a plain heavy blast.
   if (CBZ.CONFIG.STRAT_BUNKERS == null) CBZ.CONFIG.STRAT_BUNKERS = true;
