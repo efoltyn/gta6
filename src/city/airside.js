@@ -481,7 +481,11 @@
       kerbX0: -130 + dx, kerbX1: 50 + dx,
       dx: dx, dz: dz,
     };
-    f.kerbBackZ = f.hsBackZ;              // the loop's return leg is the corridor
+    // The head-of-stand north lane is AIRSIDE ONLY. It used to double as the
+    // landside kerb loop's return leg, which is what put ordinary cars in a
+    // circle around the terminal (see ROUTES.kerb) — kept as a published field
+    // so the paving/audit can still name the lane, never again as a car route.
+    f.kerbBackZ = f.hsBackZ;
     // last guard: nothing in the network may sit on the runway.
     const lanes = [f.hsZ, f.hsBackZ, f.laneZ, f.fmZ, f.kerbZ];
     for (let i = 0; i < lanes.length; i++) {
@@ -621,10 +625,20 @@
     }
     return moved;
   }
+  // How many SEGMENTS a route has. A circuit closes (n segments, the last one
+  // running from the final node back to the first); a ONE-WAY LANE does not
+  // (n-1). Getting this wrong is not cosmetic: routePoint staggers the fleet by
+  // arclength, so a phantom closing segment across the airfield would place a
+  // car in mid-field on the first frame.
+  function routeSpan(r) {
+    const n = r.pts.length;
+    return (r.loop === false && n > 1) ? n - 1 : n;
+  }
   function routeLen(r) {
+    const n = r.pts.length, span = routeSpan(r);
     let s = 0;
-    for (let i = 0; i < r.pts.length; i++) {
-      const a = r.pts[i], b = r.pts[(i + 1) % r.pts.length];
+    for (let i = 0; i < span; i++) {
+      const a = r.pts[i], b = r.pts[(i + 1) % n];
       s += Math.hypot(b.x - a.x, b.z - a.z);
     }
     return s;
@@ -632,21 +646,21 @@
   // Point at arclength `s` around a route — used to STAGGER the fleet so five
   // vehicles do not start nose to tail on the same node.
   function routePoint(r, s) {
-    const pts = r.pts, n = pts.length;
+    const pts = r.pts, m = pts.length, n = routeSpan(r);
     let left = s % Math.max(1, routeLen(r));
     for (let i = 0; i < n; i++) {
-      const a = pts[i], b = pts[(i + 1) % n];
+      const a = pts[i], b = pts[(i + 1) % m];
       const seg = Math.hypot(b.x - a.x, b.z - a.z);
       if (left <= seg || i === n - 1) {
         const t = seg > 0.001 ? Math.max(0, Math.min(1, left / seg)) : 0;
         return {
           x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t,
-          heading: Math.atan2(b.x - a.x, b.z - a.z), next: (i + 1) % n,
+          heading: Math.atan2(b.x - a.x, b.z - a.z), next: (i + 1) % m,
         };
       }
       left -= seg;
     }
-    return { x: pts[0].x, z: pts[0].z, heading: 0, next: 1 % n };
+    return { x: pts[0].x, z: pts[0].z, heading: 0, next: 1 % m };
   }
 
   function buildRoutes(f, stands) {
@@ -748,26 +762,64 @@
       ],
     };
 
-    // LANDSIDE KERB — ordinary road traffic, one-way around the terminal's
-    // landside end: east along the departures kerb (stopping AT it), south
-    // round the terminal's east wall, west along the corridor's north lane,
-    // north round the west wall. Cars stop at the kerb and pull out again,
-    // which is the whole read of an airport frontage.
+    /* LANDSIDE KERB — the DEPARTURES LANE, and it is a LANE, not a lap.
+       OWNER BUG (2026-07-27, verbatim): "there are still cars driving in a
+       circle around the airport building which is not a road for normal cars."
+
+       That circle was THIS route, and the offending leg is named in the old
+       comment: the loop ran east along the frontage, "south round the
+       terminal's east wall, WEST ALONG THE CORRIDOR'S NORTH LANE, north round
+       the west wall". The corridor is `f.kerbBackZ === f.hsBackZ` — the
+       HEAD-OF-STAND SERVICE ROAD, under the parked airliners' tailcones,
+       inside the airside keep-out (z 8.6 against the zone's 9.0 ceiling) and
+       published to city.roads with `access: "service"` precisely because an
+       ordinary car does not belong on it. Four saloons and taxis lapped the
+       building through it, for ever. It was a closed loop because the frontage
+       strip is a DEAD END, and a dead end was answered by cutting across the
+       apron.
+
+       A real departures kerb is not a circuit either. It is a ONE-WAY LANE you
+       enter from the landside road and leave by the same road, and the landside
+       road now EXISTS: island_airport.js pushes a kerb road along the north
+       edge and a perimeter spur down the island's east side (the two records
+       the causeway feeds). So the route is that lane —
+
+         west end of the frontage → three kerb stops → east end
+           → east along the north-edge kerb road
+           → SOUTH down the east perimeter, away from the terminal
+
+       — and the drive loop RECYCLES a car from the far end back to the head
+       (see advance()), never in view. Nothing here ever enters the airside,
+       and both legs clear it a different way: the frontage runs at kerbZ (39),
+       thirty metres NORTH of the keep-out's z ceiling, and the perimeter runs
+       at A_MAXX - 22, ten metres EAST of the keep-out's x edge (A_MAXX - 32)
+       and twenty-eight metres east of the runway's own threshold.
+
+       THE PERIMETER EXTENSION IS OPTIONAL, and deliberately so: it is the only
+       part that leaves ground this file measured itself, so each node is asked
+       (roadPointOpen, the shared query) before it is appended. A layout that
+       puts the island's east side in the water gets the frontage lane alone
+       rather than losing the frontage traffic entirely — the kerb must stay
+       busy (it IS ordinary traffic, and that is doctrine). */
     const kerbStops = [];
     for (let i = 0; i < 3; i++) {
       const kx = f.termX0 + 18 + i * ((f.termX1 - f.termX0 - 36) / 2);
       kerbStops.push(node(kx, f.kerbZ, { dwell: 6 + h01(kx, f.kerbZ, 5205) * 9 }));
     }
-    ROUTES.kerb = {
-      name: "kerb", loop: true,
-      pts: [node(f.kerbX0, f.kerbZ)].concat(kerbStops, [
-        node(f.kerbX1, f.kerbZ),
-        node(f.kerbX1, f.termZ0 + 6),        // ease down the terminal's east side
-        node(f.kerbX1, f.kerbBackZ),
-        node(f.kerbX0, f.kerbBackZ),
-        node(f.kerbX0, f.termZ0 + 6),        // and back up the west side
-      ]),
-    };
+    const kerbPts = [node(f.kerbX0, f.kerbZ)].concat(kerbStops, [node(f.kerbX1, f.kerbZ)]);
+    // island_airport.js's east perimeter spur: PERIM_X = A_MAXX - 22, and
+    // f.maxX IS A_MAXX (recovered from the airport audit record in field()).
+    // One number, read off the same bound, so a world move carries both.
+    const perimX = f.maxX - 22;
+    const exitZ = f.kerbZ - 160;              // 160 m south — well clear of the frontage
+    if (perimX > f.kerbX1 + 30) {
+      const tail = [node(perimX, f.kerbZ), node(perimX, exitZ, { dwell: 3 })];
+      let ok = true;
+      for (let i = 0; i < tail.length && ok; i++) ok = nodeDrivable(tail[i].x, tail[i].z);
+      if (ok) kerbPts.push.apply(kerbPts, tail);
+    }
+    // loop:false + shuttle:true — an open lane with an off-screen recycle.
+    ROUTES.kerb = { name: "kerb", loop: false, shuttle: true, pts: kerbPts };
   }
 
   // ============================================================
@@ -1065,15 +1117,14 @@
     pave(root, airsideRibbon, 0x35383d, 0);
 
     // The kerb strip is ~3 m of land between the terminal wall and the island
-    // edge, so the kerb lane is painted to fit it exactly; the loop's return
-    // leg is the corridor above and is deliberately NOT painted twice.
+    // edge, so the kerb lane is painted to fit it exactly. It is a ONE-WAY LANE
+    // and the paint says so: the two legs that used to run down the terminal's
+    // east and west walls are GONE with the loop they served (a car turning
+    // there was the "circle around the airport building"), and the lane's east
+    // continuation is island_airport.js's own kerb road, which paints itself.
     const kerbRibbon = ribbonGeom([
       { x: f.kerbX0, z: f.kerbZ }, { x: f.kerbX1, z: f.kerbZ },
-      { x: f.kerbX1, z: f.termZ0 + 1.4 },
     ], 2.6, y);
-    kerbRibbon.push.apply(kerbRibbon, ribbonGeom([
-      { x: f.kerbX0, z: f.kerbZ }, { x: f.kerbX0, z: f.termZ0 + 1.4 },
-    ], 2.6, y));
     pave(root, kerbRibbon, 0x3b3f45, 1);
 
     // Hold-short hatching where the service road crosses the LIVE taxiway.
@@ -1249,10 +1300,17 @@
   //
   //  We ask the world first: if a road record actually serves the terminal
   //  frontage, roadPick/roadPlace own the placement and we adopt the block
-  //  rather than re-typing a lane draw. It does not today — the only road
-  //  record on this island is the causeway deck, which ends 290 m south of the
-  //  terminal — so the fallback runs its own short kerb loop, which is exactly
-  //  the arrangement roadrules.js's header describes.
+  //  rather than re-typing a lane draw. Since island_airport.js pushed its
+  //  north-edge kerb road and east perimeter spur it usually DOES, and
+  //  ROUTES.kerb now runs out onto that spur — but the lane itself stays
+  //  authored here, because the 3 m frontage strip is narrower than any road
+  //  record's deck and roadPlace would centre a car in the terminal wall.
+  //
+  //  THESE ARE THE ONLY ORDINARY CARS THIS FILE OWNS, and the route they run
+  //  is a one-way lane, never a lap of the building (see ROUTES.kerb). The
+  //  service fleet's own two published records carry access:"service", so
+  //  roadOpen/roadPick refuse to seed an ambient car onto the apron or the
+  //  head-of-stand corridor no matter what the keep-out list says.
   //
   //  Deferred to a one-shot updater (island_airport.js:2167 uses the same
   //  trick) because cityAddParkedCar needs a live CBZ.city.arena, which does
@@ -1296,7 +1354,8 @@
         rec: rec, grp: rec.group, pos: rec.pos, kind: "kerb", name: "Kerb Traffic",
         wheels: wheels, beacon: null, mast: null, carts: [], trail: [],
         route: r, i: p.next, v: 0, maxV: 7.5 + h01(p.x, p.z, 5602) * 3,
-        acc: 3.4, brake: 7.0,
+        acc: 3.4, brake: 7.0, turnK: 0.0016,       // a car turns like a car
+
         dwellT: 0, holdT: 0, held: false, cleared: false, released: false, beaconT: 0,
       });
     }
@@ -1362,6 +1421,28 @@
     u.i++;
     if (u.i >= r.pts.length) {
       if (r.loop) u.i = 0;
+      else if (r.shuttle) {
+        /* A ONE-WAY LANE HAS AN END, and a departures kerb is a one-way lane.
+           The car that reaches the far end of the perimeter has DRIVEN AWAY;
+           putting it back at the head of the lane is the only way to keep the
+           frontage busy without making it lap the terminal. The recycle is
+           governed by the SHARED contract, never by a distance guess:
+           CBZ.npcTransitionSafe is a padded-screen projection (config.js), the
+           same one crowd.js's promotion and citystaff's minting ask, so a car
+           can never be seen to vanish or to appear. Refused → hold at the end
+           and ask again in a few seconds, which reads as a taxi waiting. */
+        const head = r.pts[0];
+        const safe = !CBZ.npcTransitionSafe ||
+          (CBZ.npcTransitionSafe(head.x, head.z) && CBZ.npcTransitionSafe(u.pos.x, u.pos.z));
+        if (!safe) { u.i = r.pts.length - 1; u.dwellT = 3.5; return; }
+        u.i = 1 % r.pts.length;
+        const nx = r.pts[u.i];
+        u.pos.x = head.x; u.pos.z = head.z;          // u.pos IS rec.pos IS grp.position
+        u.rec.heading = Math.atan2(nx.x - head.x, nx.z - head.z);
+        if (u.grp) u.grp.rotation.y = u.rec.heading;
+        u.v = 0; u.rec.v = 0;
+        u.trail.length = 0;
+      }
       else {
         // the inspection run is over: vacate, drop the clearance, go back to
         // the taxiway beat.
@@ -1599,7 +1680,60 @@
         u.beacon.emissiveIntensity = ((u.beaconT % 1.1) < 0.5) ? 1.5 : 0.08;
       }
     }
+    crewHold();
   });
+
+  /* ---- THE CREW HOLD — ONE OWNER FOR A DRIVER'S FACING --------------------
+     OWNER BUG (2026-07-27, verbatim): "the driver of the prop cars at the
+     airports their heads glitch side to straight."
+
+     TWO WRITERS. That is the entire fault, and neither of them is wrong on its
+     own:
+
+       (1) npclife.js's syncAttached (order 33.8) RE-ASSERTS an attached body's
+           seat transform every frame — for a crew rig, the anchor crewUp
+           declared: local yaw 0, i.e. facing the way the cab faces. This is
+           the law ("A seated body holds its seat") and it is correct.
+
+       (2) any of the ~40 CBZ.cityPeds sweeps that run AFTER 33.8 and write a
+           WORLD-space group.rotation.y with no _npcAttached guard — the goal
+           brain's face() (aigoals.js, order 33/35/36), a social vignette
+           (34.5/34.6), a turn-to-look. CLAUDE.md already names this class:
+           "41 files iterate that list and write group.rotation.y with no
+           _npcAttached guard". On a body parented to a MOVING vehicle's crew
+           node, a world bearing lands as a LOCAL yaw — a side-look, and one
+           that does not even track the cab as it turns.
+
+     Why it SNAPS rather than simply sitting wrong: those sweeps are TIME-
+     SLICED. aigoals.js ticks 1/30th of the ped roster per frame, so the
+     side-look is written about twice a second and wiped by syncAttached on
+     every frame in between. Side, straight, side, straight.
+
+     ONE OWNER, and it is the seat. This runs inside our OWN drive tick (37.35
+     — after peds.js 34, social.js 34.6 and aigoals.js 36), so nothing that
+     fights for the transform can get the last word within a frame, and it
+     writes the pose ABSOLUTELY so nothing can accumulate. It is the same shape
+     as island_airport.js's cabinPassengerHold, it is five bodies, and it adds
+     no state: the anchor npclife already stores IS the answer. */
+  function crewHold() {
+    for (let i = 0; i < V.length; i++) {
+      const u = V[i];
+      const a = u && u.driver;
+      if (!a || a.dead || !a.group) continue;
+      const rec = a._npcAttached;
+      const an = rec && rec.anchor;
+      if (!an || rec.parent !== a.group.parent) continue;   // no longer in this seat
+      if (CBZ.propArcActive && CBZ.propArcActive(a)) continue;
+      const g2 = a.group;
+      if (g2.position.x !== an.x || g2.position.y !== an.y || g2.position.z !== an.z) {
+        g2.position.set(an.x || 0, an.y || 0, an.z || 0);
+      }
+      // pitch/roll too: a drafted street body can arrive carrying a knockdown's
+      // leftover rotation.z and nothing in the attached path eases it back.
+      const r2 = g2.rotation, yaw = an.yaw || 0;
+      if (r2.y !== yaw || r2.x !== 0 || r2.z !== 0) r2.set(0, yaw, 0);
+    }
+  }
 
   // ============================================================
   //  13. THE AUDIT (CLAUDE.md BLOCK LAW #5)

@@ -428,6 +428,10 @@
   // attached body trips peds.js's seatedCorpse gate and the corpse freezes
   // mid-air. Flag AIR_CABIN_SPILL reverts to the old vanish/freeze behaviour.
   if (CBZ.CONFIG.AIR_CABIN_SPILL == null) CBZ.CONFIG.AIR_CABIN_SPILL = true;
+  // A body leaving an aircraft seat with no landing point of its own is put
+  // down at the foot of the airstairs instead of at its seat's world pose (see
+  // cityUnseat). One-line revert to the old fall-through-the-deck behaviour.
+  if (CBZ.CONFIG.AIRCRAFT_EXIT_BY_DOOR == null) CBZ.CONFIG.AIRCRAFT_EXIT_BY_DOOR = true;
   // ---- TAKE A BODY OUT OF A SEAT (CBZ.cityUnseat) ---------------------------
   // syncAttached() now RE-ASSERTS an attached body's seat transform every
   // frame, so a seated body cannot be nudged, shoved or teleported out of a
@@ -444,6 +448,42 @@
     opts = opts || {};
     a._seatHold = false;
     if (opts.seat && opts.seat.occupant === a) opts.seat.occupant = null;
+    /* ---- A BODY LEAVES AN AIRCRAFT THROUGH THE DOOR ----------------------
+       OWNER BUG (2026-07-27, verbatim): "when i board an airplane the
+       passengers are able to exit without going out the door — they just get
+       up and automatically are out of the plane."
+
+       They do, and it was arithmetic. detach() puts a freed body at its
+       decomposed world pose — which for a cabin seat is a point 3.6 m up,
+       INSIDE the fuselage — and peds.js's ordinary brain then clamps
+       `pos.y = 0` on its next tick. The body falls through the deck, through
+       the hull (whose AABB is detached the whole time the player is aboard)
+       and stands on the tarmac. Nobody wrote a teleport; a height clamp did
+       it. EVERY non-lethal exit in the game took that route: the scare-bolt
+       (peds.js), npclife's prune-release, the orphan detach, the mode reset —
+       none of which is a file that should have to know an aircraft has a door.
+
+       So the DEFAULT landing point for a body leaving an aircraft seat is now
+       the foot of its own airstairs, and callers get it for free. Explicit
+       x/z still wins (cityVacateFlightDeck spaces its crew by hand), and
+       `keepPose:true` is the opt-out for the one caller that genuinely wants
+       the seat pose — citySpillCabin, where the body must ragdoll from where
+       it was sitting. */
+    if (opts.x == null && !opts.keepPose && CBZ.CONFIG.AIRCRAFT_EXIT_BY_DOOR !== false) {
+      const rec0 = a._npcAttached;
+      const host = rec0 && rec0.parent;
+      const cab0 = host && host.userData && host.userData.cabin;
+      // npclife's normalizeSeat drops the raw `cockpit` flag but keeps `role`
+      // and a `source` back-pointer, so ask all three rather than the one that
+      // happens to survive normalisation today.
+      const anc0 = rec0 && rec0.anchor;
+      const cockpit0 = !!(anc0 && (anc0.cockpit || anc0.role === "pilot" ||
+        (anc0.source && anc0.source.cockpit)));
+      if (cab0 && !cockpit0) {
+        const foot = doorFootWorld(host, cab0, 0);
+        if (foot) { opts.x = foot.x; opts.z = foot.z; if (opts.ground == null) opts.ground = true; }
+      }
+    }
     let left = false;
     const NL = CBZ.npcLife;
     try { if (NL && NL.detach) left = !!NL.detach(a, { state: opts.state || (a.dead ? "dead" : "walk") }); } catch (e) {}
@@ -466,7 +506,9 @@
       const a = hook.seats[si] && hook.seats[si].occupant;
       if (!a || a === CBZ.player || !a.group) continue;
       const wasDead = !!a.dead;
-      cityUnseat(a, { state: wasDead ? "dead" : "walk" });
+      // keepPose: a spill is a BLAST, and a blast throws the body from where it
+      // was sitting. This is the one exit that must NOT walk to the door.
+      cityUnseat(a, { state: wasDead ? "dead" : "walk", keepPose: true });
       if (!wasDead) {
         if (CBZ.cityKillPed) { try { CBZ.cityKillPed(a, { fromX: x, fromZ: z, force: 14, byPlayer: !!byPlayer }, "explosion"); } catch (e) {} }
       } else if (CBZ.cityRagdoll && a.pos) {
@@ -612,6 +654,24 @@
     const cab = rec.group.userData.cabin;
     return cabinWorld(rec, cab.doorX, cab.doorZ);
   }
+  // Local→world for a cabin whose RECORD we may not have (an attached body only
+  // knows the group it hangs from). cabinWorld's arithmetic, one level down.
+  function cabinWorldG(grp, lx, lz) {
+    const th = grp.rotation.y, c = Math.cos(th), s = Math.sin(th);
+    return { x: grp.position.x + lx * c + lz * s, z: grp.position.z - lx * s + lz * c };
+  }
+  // How far OUT of the door the airstairs put you down. aircraft_doors.js's
+  // own outLocal for the panel door is `doorZ - 1.6*scale`; one more step
+  // clears the bottom tread so a released body is not standing on it.
+  function doorFootLocal(cab, n) {
+    const sc = cab.scale || 1;
+    return { x: cab.doorX + (n || 0) * 1.3, z: cab.doorZ - (1.6 * sc + 1.4) };
+  }
+  function doorFootWorld(grp, cab, n) {
+    if (!grp || !cab || cab.doorX == null || !grp.position) return null;
+    const l = doorFootLocal(cab, n);
+    return cabinWorldG(grp, l.x, l.z);
+  }
   function cabinRemovePlatform() {
     if (cabinState.platform && CBZ.platforms) {
       const i = CBZ.platforms.indexOf(cabinState.platform);
@@ -714,6 +774,263 @@
     return n;
   };
 
+  /* ======================================================================
+      THE DOOR IS YOURS  (CBZ.CONFIG.AIRLINER_DOOR_MANUAL)
+
+      OWNER: "i should be able to open and close the door."
+
+      Every door in this file already eased itself on PROXIMITY and nothing
+      else: walk up, it slides; walk away, it shuts. aircraft_doors.js can
+      force one open for the length of a boarding arc (`rec._doorArcOpen`) and
+      that is the ONLY writer that ever outranked the proximity rule — there
+      was no "is it open" query and no way for a person to hold one shut.
+
+      This adds ONE nullable field, `cab.doorManual`, and no second animation
+      path: null = the automatic rule, true = you are holding it open, false =
+      you are holding it shut. The easing at 55.2 is unchanged apart from the
+      one branch that reads it, and it sits BELOW the arc flags on purpose —
+      an automated board or deplane still opens the door it needs, exactly as
+      it did before, so a door you shut can never deadlock a boarding.
+     ====================================================================== */
+  if (CBZ.CONFIG.AIRLINER_DOOR_MANUAL == null) CBZ.CONFIG.AIRLINER_DOOR_MANUAL = true;
+  // The door hardware on this airframe, whichever kind it wears. `t` is the
+  // live open fraction of the thing you can SEE moving, so a caller never has
+  // to know whether it is looking at a sliding panel or a hinged airstair.
+  function aircraftDoor(rec) {
+    const ud = rec && rec.group && rec.group.userData;
+    if (!ud) return null;
+    if (ud.cabin && ud.cabin.panel) return { kind: "panel", cab: ud.cabin, t: ud.cabin.doorT || 0 };
+    if (ud.doorRig && ud.doorRig.panel) return { kind: "stair", cab: ud.doorRig, t: ud.doorRig.t || 0 };
+    if (ud.cabin) return { kind: "panel", cab: ud.cabin, t: ud.cabin.doorT || 0 };
+    return null;
+  }
+  // THE ONE "is this aircraft's door open" answer. aircraft_doors.js never had
+  // one — `rec._doorArcOpen` only says an arc is FORCING it, not what the
+  // hardware is actually doing — so anything that needed to know guessed.
+  CBZ.cityAircraftDoor = function (rec) {
+    const d = aircraftDoor(rec);
+    if (!d) return null;
+    return {
+      kind: d.kind, t: d.t, open: d.t > 0.5,
+      manual: d.cab.doorManual == null ? null : !!d.cab.doorManual,
+      arc: !!(rec && rec._doorArcOpen),
+    };
+  };
+  // Hold it open / hold it shut / hand it back to the automatic rule (null).
+  CBZ.cityAircraftDoorSet = function (rec, open) {
+    const d = aircraftDoor(rec);
+    if (!d) return false;
+    d.cab.doorManual = (open == null) ? null : !!open;
+    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    return true;
+  };
+
+  /* ======================================================================
+      DEPLANING USES THE DOOR  (CBZ.CONFIG.AIRCRAFT_DEPLANE)
+
+      OWNER: "the passengers are able to exit without going out the door."
+
+      cityUnseat above stops a freed body materialising on the tarmac. This is
+      the other half: the ORDERLY exit, which is the boarding grammar run
+      backwards. aircraft_doors.js's board arc is walk → open → step →
+      handover → close; a deplane is open → stand → aisle → door → stairs →
+      released, and the beats are named the same way for the same reason.
+
+      HOW A PASSENGER IS DRIVEN, and this is the whole trick: they are NOT
+      detached and handed to the street brain, which is what would let them
+      walk through the fuselage. They stay ATTACHED, and the arc mutates the
+      anchor npclife already stores — so npclife's own syncAttached (33.8)
+      moves them, peds.js keeps skipping them entirely (no wander, no path, no
+      y-clamp), they ride a plane that is being pushed back, and the ONLY
+      thing this file authors is a path and a clock. The body is detached once
+      it is standing on the apron, which is the first moment the street brain
+      is the right owner.
+
+      They leave ONE AT A TIME through a real aisle, because a queue at the
+      door is what deplaning looks like and because two bodies on the same
+      aisle centreline would interpenetrate.
+     ====================================================================== */
+  if (CBZ.CONFIG.AIRCRAFT_DEPLANE == null) CBZ.CONFIG.AIRCRAFT_DEPLANE = true;
+  const DEPLANE_SPD = 1.15;            // m/s down the aisle — an unhurried walk
+  const deplanes = [];                 // live arcs, one per aircraft
+
+  function deplaneOf(rec) {
+    for (let i = 0; i < deplanes.length; i++) if (deplanes[i].rec === rec) return deplanes[i];
+    return null;
+  }
+  // Everyone still sitting in a PASSENGER seat, front to back — the order a
+  // cabin actually empties. Dedupe is by ACTOR, not by the wrapper record, so
+  // calling cityDeplane twice on the same aircraft cannot queue anybody twice.
+  function deplaneHas(d, a) {
+    if (d.walking && d.walking.a === a) return true;
+    for (let i = 0; i < d.queue.length; i++) if (d.queue[i].a === a) return true;
+    return false;
+  }
+  function deplaneQueue(cab) {
+    const out = [];
+    for (let i = 0; i < cab.seats.length; i++) {
+      const s = cab.seats[i], a = s && s.occupant;
+      if (!a || a === CBZ.player || s.cockpit || s.pose === "stand") continue;
+      if (!a.group || a.dead || !a._npcAttached) continue;
+      out.push({ seat: s, a: a });
+    }
+    out.sort(function (p, q) { return q.seat.x - p.seat.x; });   // +X is the nose: forward rows first
+    return out;
+  }
+
+  // Start (or top up) the orderly deplane of one aircraft. Returns how many
+  // passengers are queued. Safe to call repeatedly.
+  CBZ.cityDeplane = function (rec, opts) {
+    opts = opts || {};
+    if (CBZ.CONFIG.AIRCRAFT_DEPLANE === false) return 0;
+    const cab = rec && rec.group && rec.group.parent && rec.group.userData && rec.group.userData.cabin;
+    if (!cab || !cab.seats || rec.destroyed) return 0;
+    const q = deplaneQueue(cab);
+    if (!q.length) return 0;
+    let d = deplaneOf(rec);
+    if (!d) { d = { rec: rec, cab: cab, queue: [], walking: null, gap: 0 }; deplanes.push(d); }
+    for (let i = 0; i < q.length; i++) {
+      if (opts.limit > 0 && d.queue.length >= opts.limit) break;
+      if (!deplaneHas(d, q[i].a)) d.queue.push(q[i]);
+    }
+    return d.queue.length;
+  };
+
+  // Take a passenger OUT of the seat record but leave them attached: the seat
+  // is free the moment they stand, which is also what stops cabinHoldSeats
+  // (which iterates seats, not bodies) from dragging a walker back into it.
+  function deplaneStand(w) {
+    const a = w.a, rec0 = a._npcAttached;
+    if (!rec0 || !rec0.anchor) return false;
+    if (w.seat.occupant === a) w.seat.occupant = null;
+    const an = rec0.anchor;
+    w.from = { x: an.x, y: an.y, z: an.z };
+    an.pose = "stand"; an.state = "walk";
+    if (a.char) { a.char.sitting = false; a.char.seatRef = null; }
+    a._deplaning = true;
+    w.phase = "stand"; w.t = 0;
+    return true;
+  }
+
+  // ONE path, in plane-local metres, and every leg of it is a straight line a
+  // real person could walk: out of the row into the aisle, forward up the
+  // aisle, square to the door, then down the stairs to the apron.
+  function deplaneLegs(cab, w) {
+    const f = doorFootLocal(cab, 0);
+    return [
+      { x: w.from.x, z: 0, y: cab.floorTop },                    // into the aisle
+      { x: cab.doorX, z: 0, y: cab.floorTop },                   // up the aisle
+      { x: cab.doorX, z: cab.doorZ, y: cab.floorTop },           // square to the door
+      { x: f.x, z: f.z, y: 0 },                                  // down the airstairs
+    ];
+  }
+
+  function deplaneStep(d, dt) {
+    const cab = d.cab, rec = d.rec;
+    const grp = rec.group;
+    if (!grp || !grp.parent || rec.destroyed) return true;       // aircraft gone: drop the arc
+    // THE DOOR OPENS FIRST, through the SAME flag the boarding arc uses, so the
+    // panel/airstair plays its one existing animation and a manually shut door
+    // is overridden for exactly as long as people are getting off.
+    rec._doorArcOpen = true;
+    const w = d.walking;
+    if (!w) {
+      d.gap -= dt;
+      if (d.gap > 0) return false;
+      if (!d.queue.length) return true;                          // everyone is off
+      const nx = d.queue.shift();
+      if (!nx.a || nx.a.dead || !nx.a._npcAttached) return false;
+      if (!deplaneStand(nx)) return false;
+      nx.legs = deplaneLegs(cab, nx);
+      nx.leg = 0;
+      d.walking = nx;
+      return false;
+    }
+    const a = w.a, rec0 = a._npcAttached;
+    if (!a.group || !rec0 || !rec0.anchor) { a._deplaning = false; d.walking = null; d.gap = 0.4; return false; }
+    // SHOT ON THE AISLE. The body drops where it stands (keepPose) — a corpse
+    // does not finish walking to the door, and the queue behind it moves up.
+    if (a.dead) {
+      a._deplaning = false;
+      try { cityUnseat(a, { state: "dead", keepPose: true }); } catch (e) {}
+      d.walking = null; d.gap = 0.5;
+      return false;
+    }
+    const an = rec0.anchor, tgt = w.legs[w.leg];
+    const dx = tgt.x - an.x, dz = tgt.z - an.z;
+    const dist = Math.hypot(dx, dz);
+    const stepD = DEPLANE_SPD * dt;
+    if (dist <= stepD || dist < 0.02) {
+      an.x = tgt.x; an.z = tgt.z; an.y = tgt.y;
+      w.leg++;
+      if (w.leg >= w.legs.length) {
+        // ON THE APRON — and only NOW is the street brain the right owner.
+        const out = doorFootWorld(grp, cab, 0);
+        a._deplaning = false;
+        cityUnseat(a, { state: "walk", x: out && out.x, z: out && out.z, ground: true });
+        if (!a.dead && a.target && a.target.set) {
+          a.pause = 0.2;
+          // and they WALK OFF the stand rather than standing in the stairs'
+          // footprint waiting for the next person to land on top of them.
+          const far = cabinWorldG(grp, cab.doorX, cab.doorZ - 7.5 * (cab.scale || 1));
+          a.target.set(far.x, 0, far.z);
+        }
+        d.walking = null;
+        d.gap = 1.1;                                             // the queue steps up
+        return false;
+      }
+      return false;
+    }
+    const k = stepD / dist;
+    an.x += dx * k; an.z += dz * k;
+    // y is carried by the SAME fraction of the leg that x/z are, so standing up
+    // is a lift and the airstair descent is a ramp — never a snap, and it lands
+    // exactly on the leg's height at the moment the leg ends.
+    an.y += (tgt.y - an.y) * k;
+    an.yaw = Math.atan2(dx, dz);
+    an.pitch = 0; an.roll = 0;
+    if (CBZ.animChar && a.char && a.group.visible) {
+      try { CBZ.animChar(a.char, DEPLANE_SPD, dt); } catch (e) {}
+    }
+    return false;
+  }
+
+  function deplaneTick(dt) {
+    for (let i = deplanes.length - 1; i >= 0; i--) {
+      const d = deplanes[i];
+      let done = false;
+      try { done = deplaneStep(d, dt); } catch (e) { done = true; }
+      if (!done) continue;
+      // hand the door back to whatever owns it next (the manual flag, or the
+      // proximity rule) — this arc must not leave a plane propped open.
+      // Hand the door back — but never out from under a LIVE player boarding
+      // arc, which owns the same flag (aircraft_doors.js setDoorFlag).
+      if (d.rec && !(CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active)) d.rec._doorArcOpen = false;
+      if (d.walking && d.walking.a) d.walking.a._deplaning = false;
+      deplanes.splice(i, 1);
+    }
+  }
+  function deplaneReset() {
+    for (let i = 0; i < deplanes.length; i++) {
+      const d = deplanes[i];
+      // Hand the door back — but never out from under a LIVE player boarding
+      // arc, which owns the same flag (aircraft_doors.js setDoorFlag).
+      if (d.rec && !(CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active)) d.rec._doorArcOpen = false;
+      if (d.walking && d.walking.a) d.walking.a._deplaning = false;
+    }
+    deplanes.length = 0;
+  }
+  // Census for the audit: how many arcs are live and how many bodies are on
+  // the aisle right now.
+  function deplaneCensus() {
+    let walking = 0, queued = 0;
+    for (let i = 0; i < deplanes.length; i++) {
+      if (deplanes[i].walking) walking++;
+      queued += deplanes[i].queue.length;
+    }
+    return { arcs: deplanes.length, walking: walking, queued: queued };
+  }
+
   function cabinCompleteBoard(rec) {
     const P = CBZ.player;
     if (!P || P.dead || P.driving || P._aircraft) return;
@@ -750,7 +1067,20 @@
     P.vy = 0; P.grounded = true;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     cabinState.inside = true; cabinState.rec = rec;
+    // A manually shut door cannot survive you walking through it.
+    if (cab.doorManual === false) cab.doorManual = null;
     if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    // YOU BOARDED, SO THEY GET OFF. This is the moment the owner was watching
+    // when he reported passengers leaving without using the door: an airframe
+    // at the gate with a full cabin and somebody walking up the airstairs is
+    // an aircraft that is turning round. The arc queues them and the door
+    // stays open for as long as it takes; nothing else about boarding changes.
+    // Eight, not the whole cabin: a steady file of people past you IS the read,
+    // and 26 of them at an unhurried walking pace would still be going ten
+    // minutes after you had flown the aircraft away.
+    if (CBZ.CONFIG.AIRCRAFT_DEPLANE !== false) {
+      try { CBZ.cityDeplane(rec, { limit: 8 }); } catch (e) {}
+    }
   }
 
   function cabinCompleteExit(rec) {
@@ -937,6 +1267,93 @@
           onSelect: function () {
             if (!cabinState.inside) return;
             cabinState.pending = { rec: cabinState.rec, t: 0.5, dir: "out" };
+          },
+        },
+      ],
+    });
+    /* THE DOOR, FROM INSIDE — a zone of its own, and it has to be, because
+       interactions.js resolves exactly ONE verb per candidate (resolveRows)
+       and `slot:"e"` scores +18, so a door option sharing the cabin zone with
+       "Exit the airliner" could never surface. Two zones is also the honest
+       shape: you stand AT the doorway to work the door and in the AISLE to
+       leave, so the tighter radius wins where the door is what you meant and
+       the exit verb comes straight back one step inboard. The exit is
+       deliberately NOT gated on the door being open — the exit arc sets
+       `pending`, which force-opens the panel, so a shut door can never trap
+       anybody in the cabin. */
+    const inDoorTarget = { x: 0, z: 0 };
+    CBZ.interactions.registerZone({
+      id: "airliner_doorway", kind: "aircraft_door", prio: 6, radius: 1.6,
+      find: function () {
+        if (CBZ.CONFIG.AIRLINER_DOOR_MANUAL === false) return null;
+        if (!cabinState.inside || cabinState.pending) return null;
+        const rec = cabinState.rec;
+        if (!rec || rec.taken || !rec.group || !rec.group.userData.cabin) return null;
+        const d = cabinDoorWorld(rec);
+        inDoorTarget.x = d.x; inDoorTarget.z = d.z;
+        return inDoorTarget;
+      },
+      options: [
+        {
+          id: "airliner_door_in", slot: "e",
+          label: function () {
+            const d = CBZ.cityAircraftDoor(cabinState.rec);
+            return (d && d.open) ? "Close the door" : "Open the door";
+          },
+          onSelect: function () {
+            const rec = cabinState.rec;
+            const d = rec && CBZ.cityAircraftDoor(rec);
+            if (!d) return;
+            CBZ.cityAircraftDoorSet(rec, !d.open);
+          },
+        },
+      ],
+    });
+    /* THE DOOR, from outside. A separate zone because out here there is no
+       cabin zone to hang it on, and it deliberately outranks the milvehicle
+       ride card (prio 3) — at arm's length from an open doorway, "open/close
+       the door" is the verb you meant, and stepping back one metre gives
+       BOARD/HIJACK straight back. The radius is the same 3.2 the automatic
+       proximity ease already uses, so the verb appears exactly when the door
+       is reacting to you anyway; on an airliner whose hull AABB keeps you
+       further out than that, it simply never appears and nothing regresses. */
+    const outDoorTarget = { x: 0, z: 0, rec: null };
+    CBZ.interactions.registerZone({
+      id: "aircraft_door_out", kind: "aircraft_door", prio: 5, radius: 3.2,
+      find: function (px, pz) {
+        if (CBZ.CONFIG.AIRLINER_DOOR_MANUAL === false) return null;
+        if (cabinState.inside || cabinState.pending) return null;
+        const P = CBZ.player;
+        if (!P || P.dead || P.driving || P._aircraft) return null;
+        let best = null, bd = 3.2 * 3.2;
+        for (let i = 0; i < placed.length; i++) {
+          const rec = placed[i];
+          if (!rec || rec.taken || rec.destroyed || !rec.group || !rec.group.parent) continue;
+          const ud = rec.group.userData;
+          const rig = ud && ud.doorRig;
+          const cab = ud && ud.cabin;
+          let w = null;
+          if (cab && cab.panel) w = cabinWorld(rec, cab.doorX, cab.doorZ);
+          else if (rig && rig.panel) w = cabinWorld(rec, rig.doorX, rig.doorZ);
+          if (!w) continue;
+          const dd = (w.x - px) * (w.x - px) + (w.z - pz) * (w.z - pz);
+          if (dd < bd) { bd = dd; best = { rec: rec, x: w.x, z: w.z }; }
+        }
+        if (!best) return null;
+        outDoorTarget.x = best.x; outDoorTarget.z = best.z; outDoorTarget.rec = best.rec;
+        return outDoorTarget;
+      },
+      options: [
+        {
+          id: "aircraft_door_toggle", slot: "e",
+          label: function (t) {
+            const d = t && CBZ.cityAircraftDoor(t.rec);
+            return (d && d.open) ? "Close the door" : "Open the door";
+          },
+          onSelect: function (t) {
+            const d = t && CBZ.cityAircraftDoor(t.rec);
+            if (!d) return;
+            CBZ.cityAircraftDoorSet(t.rec, !d.open);
           },
         },
       ],
@@ -1130,6 +1547,9 @@
         const want = s.heading == null ? Math.PI / 2 : s.heading;
         let d = (g2.rotation.y - want) % (Math.PI * 2);
         if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+        // A passenger walking the aisle is deliberately not in his seat and is
+        // deliberately not facing it — the deplane arc owns him.
+        if (a._deplaning) continue;
         if (Math.abs(d) > MISALIGN || Math.abs(g2.rotation.x) > MISALIGN || Math.abs(g2.rotation.z) > MISALIGN) misaligned++;
         if (!a.job || !String(a.job).trim()) roleless++;    // in a crew seat with no job
       }
@@ -1143,7 +1563,29 @@
       if (!p || !p._airportPlaced || p.dead) continue;
       if (!p.job || !String(p.job).trim()) roleless++;
     }
-    return { seats: seats, occupied: occupied, misaligned: misaligned, roleless: roleless };
+    /* THE DEPLANE INVARIANT — `outside` is the owner's bug as a number.
+       A body that is still attached to a cabin but is standing OUTSIDE the
+       fuselage envelope has left through the wall, which is exactly the thing
+       the door arc exists to make impossible. It may only ever read 0.
+       `walking`/`queued` are census beside it so a "fix" that simply never
+       deplanes anybody cannot pass. */
+    const dc = deplaneCensus();
+    let outside = 0;
+    for (let i = 0; i < deplanes.length; i++) {
+      const d = deplanes[i], w = d.walking;
+      const an = w && w.a && w.a._npcAttached && w.a._npcAttached.anchor;
+      if (!an || !d.cab) continue;
+      // the walkable envelope: the cabin box, plus the stair run out of the door
+      const sc = d.cab.scale || 1;
+      const inCabin = Math.abs(an.z) <= 2.0 * sc && an.x > -14.5 * sc && an.x < 15.0 * sc;
+      const onStair = Math.abs(an.x - d.cab.doorX) <= 2.0 * sc &&
+        an.z <= d.cab.doorZ + 0.2 && an.z >= d.cab.doorZ - (1.6 * sc + 2.0);
+      if (!inCabin && !onStair) outside++;
+    }
+    return {
+      seats: seats, occupied: occupied, misaligned: misaligned, roleless: roleless,
+      deplaneArcs: dc.arcs, walking: dc.walking, queued: dc.queued, outside: outside,
+    };
   };
 
   // per-frame: door easing, delayed board/exit, and inside upkeep (clamp the
@@ -1151,6 +1593,7 @@
   // plane is stolen, the player dies, or the mode changes)
   CBZ.onUpdate(55.2, function (dt) {
     if (!CBZ.game || CBZ.game.mode !== "city") {
+      if (deplanes.length) deplaneReset();     // never freeze a body mid-aisle
       if (cabinState.inside || cabinState.pending) cabinForceClear(true);
       return;
     }
@@ -1161,6 +1604,12 @@
     // (any time), so a hold gated on "am I aboard" would leave every cabin you
     // can see through the windows sitting wrong.
     cabinPassengerHold();
+    // ...and the deplane arc runs immediately after it, for the same reason it
+    // is ordered here at all: cabinHoldSeats owns a body while it is IN a seat,
+    // this owns it from the moment it stands until its feet are on the apron,
+    // and the two can never disagree because a walker's seat record is already
+    // cleared (deplaneStand) before the first step is taken.
+    deplaneTick(dt);
     seatGateLounge();
     const P = CBZ.player;
     // door panels ease toward open near the player / while boarding / inside
@@ -1185,7 +1634,10 @@
         // so the arc's open-flag must win over the taken gate
         if (rec._doorArcOpen) rigOpen = true;
         else if (!rec.taken) {
-          if (P && !P.dead && !P.driving && !P._aircraft) {
+          // YOU OWN IT if you set it (see AIRLINER_DOOR_MANUAL); the arc flag
+          // above still outranks you, so an automated board/deplane self-opens.
+          if (rig.doorManual != null && CBZ.CONFIG.AIRLINER_DOOR_MANUAL !== false) rigOpen = !!rig.doorManual;
+          else if (P && !P.dead && !P.driving && !P._aircraft) {
             const dw = cabinWorld(rec, rig.doorX, rig.doorZ);
             rigOpen = Math.hypot(P.pos.x - dw.x, P.pos.z - dw.z) < 3.2;
           }
@@ -1202,8 +1654,14 @@
       // rec is already marked taken (the theft commits at door-open)
       if (rec._doorArcOpen && rec.group.parent) wantOpen = true;
       else if (!rec.taken && rec.group.parent) {
-        if ((cabinState.inside && cabinState.rec === rec) ||
-            (cabinState.pending && cabinState.pending.rec === rec)) wantOpen = true;
+        if (cabinState.pending && cabinState.pending.rec === rec) wantOpen = true;
+        // MANUAL BEATS PROXIMITY, AND AN ARC BEATS MANUAL. Standing inside the
+        // cabin used to force the door open for ever — which is precisely why
+        // "close the door" had nowhere to live. The board/exit arcs and the
+        // deplane still set _doorArcOpen/pending above, so nothing automated
+        // can be locked out by a door you shut.
+        else if (cab.doorManual != null && CBZ.CONFIG.AIRLINER_DOOR_MANUAL !== false) wantOpen = !!cab.doorManual;
+        else if (cabinState.inside && cabinState.rec === rec) wantOpen = true;
         else if (P && !P.dead && !P.driving && !P._aircraft) {
           const d = cabinDoorWorld(rec);
           wantOpen = Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 3.4;
@@ -1317,7 +1775,7 @@
     // + one-shot guard so the rebuilt fleet re-registers as boardable, and
     // drop any stale cabin-boarding state (platform/collider refs die with
     // the old groups).
-    placed.length = 0; _reg = false; cabinReset(); resetPassengerCabins();
+    placed.length = 0; _reg = false; deplaneReset(); cabinReset(); resetPassengerCabins();
     // the gate-lounge anchors die with the propuse reset cityBuildings already
     // ran (it runs BEFORE the landmass hooks), so only our index needs clearing
     gateSeats.length = 0; gateSeated = false;
@@ -2906,7 +3364,18 @@
          service road is not airside. The east edge is now A_MAXX - 32
          (= 258 + ADX), which still sits 18 m EAST of RWY_X1 (240 + ADX), so
          the runway and its full strip stay inside the keep-out while the road
-         (centreline 268, kerbs 261-275) falls outside it. */
+         (centreline 268, kerbs 261-275) falls outside it. THE RECT NOW STOPS
+         AT THE KERB, which is the condition math-gate.mjs's zoneCrossings pin
+         was waiting on: it is pinned at 0, not 1.
+
+         THIS ROAD IS THE TERMINAL'S LANDSIDE ACCESS and is deliberately left
+         OPEN to ordinary traffic — the kerb IS ordinary traffic. The thing the
+         owner saw lapping the terminal was never this record: it was
+         airside.js's ROUTES.kerb, a closed waypoint loop whose return leg ran
+         down the head-of-stand SERVICE corridor behind the building. That is
+         fixed where it lived, in airside.js, and the two service records that
+         file publishes carry access:"service" so roadOpen/roadPick refuse an
+         ambient car on them regardless of what any keep-out says. */
       const PERIM_X = A_MAXX - 22;              // east perimeter, clear of RWY_X1
       const TERM_X = -40 + ADX;                 // terminal centreline (APRON_X, which is scoped to the paint pass)
       const KERB_Z = 38.5 + ADZ;                // the departures kerb strip
