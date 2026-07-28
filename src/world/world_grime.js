@@ -308,8 +308,13 @@
       }
       // Never claim: these are flat stains with no volume, and reserving the
       // ground under them would starve the (later) building-dressing pass.
+      // `alley: false` is the same argument applied to city/props.js's ALLEY
+      // LAW: nothing in this pass is a PROP — it is paint, wear and water —
+      // so none of it may spend an alley's one-solid budget. This whole file
+      // is deliberately untouched by PROPS_PURGE_V1 for exactly that reason:
+      // it places no collider and blocks nothing.
       return false;
-    }, { band: 1.0, free: { door: false, props: false, roadMargin: -0.4 } });
+    }, { band: 1.0, free: { door: false, props: false, roadMargin: -0.4, alley: false } });
 
     // =====================================================================
     //  5) DOORWAY WEAR

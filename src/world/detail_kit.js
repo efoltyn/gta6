@@ -658,6 +658,18 @@
     if (o.door !== false && DK.nearDoor(x, z, o.doorR)) return false;
     if (o.build !== false && DK.insideBuilding(x, z, o.buildPad)) return false;
     if (o.props !== false && DK.occupied(x, z, o.ring)) return false;
+    // A GAP BETWEEN TWO BUILDINGS IS A ROUTE, NOT A SHELF (city/props.js's
+    // ALLEY LAW). Every dressing pass funnels through this oracle, and THREE of
+    // them fill the back of a block — the dumpster/crate/barrier walk, the
+    // bollard triples, the weeds — with no idea whether the metre they were
+    // filling was a pavement or the only way through. One call here and all of
+    // them inherit it, exactly like the roadPropClear adoption above.
+    //   o.alley = {solid, r}  declare a collider and its half-width
+    //   o.alley = false       opt out (nothing does today)
+    // LAST on purpose: alleyOk CLAIMS the slot on success, so it must not be
+    // spent on a point some cheaper test above was going to refuse anyway.
+    // Degrade-safe: no props.js, original behaviour.
+    if (o.alley !== false && CBZ.alleyOk && !CBZ.alleyOk(x, z, o.alley || null)) return false;
     return true;
   };
 

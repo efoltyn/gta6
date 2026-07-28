@@ -242,6 +242,50 @@
   DK.register(40, "building-dress", function (city, DK) {
     if (CBZ.CONFIG.DETAIL_BUILDING_DRESS === false) return;
     const root = city.root;
+    /* ==================================================================
+       PROPS_PURGE_V1 — WHAT CAME OFF THE BUILDINGS, AND WHY.
+       ==================================================================
+       OWNER: "DUMB AC BOXES OUTSIDE WINDOWS ... AND DUMB THINGS ON ROOFS
+       OF BUILDINGS, GET RID OF THE DUMB PROPS."
+
+       THE HISTORY IS THE ARGUMENT. city/props.js used to scatter exactly
+       this kit and DELETED it — its own surviving comment reads "Generic
+       AC/vent/tank/dish/mast clutter was pure silhouette noise and has
+       been removed. Keep only fall-prevention rails and the rare rentable
+       ad: both have a direct gameplay reason to exist." It even preserved
+       the rng draws so the removal was reversible. Then THIS pass, four
+       files later, put the whole thing back and made it denser. That is
+       the exact failure mode CLAUDE.md's block law exists to stop, and it
+       is why the census below is written down rather than just done.
+
+       CUT OUTRIGHT
+         • WINDOW AC UNITS — up to 260 of them, six per elevation, hung on
+           a hash off a wall with no window behind them (this pass does not
+           read the facade; buildings.js owns the glazing, and nothing here
+           asks it where a window is). A box bolted to blank concrete is
+           the owner's screenshot. The DRIP STAIN that went with each one
+           goes too — a stain under nothing is worse than the unit.
+         • SATELLITE DISHES + AERIAL MASTS — laid on the same lattice at a
+           hashed yaw, so a dish pointed at a different sky on every roof
+           and an aerial stood in the middle of nowhere guyed to nothing.
+           A dish has an azimuth or it is a prop.
+         • DUCT RUNS — a 3.2m duct on legs with no plant at either end.
+
+       KEPT, AND MADE INTENTIONAL
+         • ROOF PLANT is now a DECK, not a scatter: one contiguous
+           mechanical run inset from ONE parapet — chiller, its condensers
+           beside it, its vents at the end — on buildings big enough to
+           need plant (>=9m either way, >=2 storeys) instead of on every
+           shed with a 6m footprint. A lattice of eleven unrelated boxes
+           reads generated; four related ones on one deck reads built.
+         • THE WATER TANK keeps its rule unchanged (low/mid-rise, one
+           corner) — it was already the most legible thing on the skyline.
+         • Downpipes, fire escapes, awnings, shutters, wall lamps, house
+           numbers and the roofline/sill weathering all stay: every one of
+           them is anchored to something the building actually has.
+       ================================================================== */
+    const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
+    let cutN = 0;
 
     const hvac = DK.batch("roof-hvac", hvacProto(), { cls: "decor", cast: true });
     const cond = DK.batch("roof-condenser", condenserProto(), { cls: "decor", cast: true });
@@ -320,7 +364,78 @@
       // (where hatches, helipads and city/roofloot.js's own content live) and
       // any published shaft rect. Everything is position-hashed, so a given
       // roof always gets the same kit.
-      if (bi.w > 6 && bi.d > 6) {
+      if (PURGED) {
+        // ---- THE PLANT DECK ------------------------------------------
+        // A real roof's mechanical plant sits together, on one side, set
+        // back from the parapet, with a walkway around it — because a
+        // fitter has to reach it and a crane had to land it. So: pick a
+        // side from the position hash, run the chiller down it with its
+        // condensers beside it and its vents at the end, and leave the
+        // rest of the roof EMPTY. Everything is still position-hashed, so
+        // a given roof always gets the same deck.
+        if (bi.w >= 9 && bi.d >= 9 && bi.storeys >= 2 && nHvac < MAX.hvac) {
+          const INSET = 2.6;
+          let side = (DK.h01(bi.x, bi.z, 0x8118) * 4) | 0;
+          // (ex,ez) = the OUTWARD normal of the chosen parapet; the deck
+          // sits INSET inside it and runs along the tangent.
+          let ex = 0, ez = 0, half = 0, run = 0;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            const s = (side + attempt) & 3;
+            ex = s === 2 ? -1 : (s === 3 ? 1 : 0);
+            ez = s === 0 ? -1 : (s === 1 ? 1 : 0);
+            half = ex ? rx : rz;                    // depth toward that parapet
+            run = ex ? bi.d : bi.w;                 // length along it
+            const dx = ex * (half - INSET), dz = ez * (half - INSET);
+            if (!onShaft(b, dx, dz)) { side = s; break; }
+            if (attempt === 3) { half = 0; }        // every side blocked — no deck
+          }
+          // AVAIL is the usable half-length along that parapet, and it is what
+          // decides how much deck this roof gets — NOT a per-building fudge.
+          // A 9m roof fits the chiller alone; a 16m one fits the whole run.
+          // Every item is admitted only if its own half-width still lands
+          // inside AVAIL, so nothing can ever hang off a parapet edge (the
+          // failure the lattice above could not have, and which is exactly
+          // what a "floating roof prop" screenshot looks like).
+          const avail = run / 2 - INSET;
+          if (half > 0 && avail > 1.3) {
+            const tx = -ez, tz = ex;                // along the parapet
+            const cx0 = ex * (half - INSET), cz0 = ez * (half - INSET);
+            // a deterministic slide so not every deck is dead-centre
+            const slide = DK.h11(bi.z, bi.x, 0x8119) * Math.max(0, avail - 3.9);
+            const fits = function (t, hw) { return Math.abs(slide + t) + hw <= avail; };
+            // local +z points at the parapet, so the chiller's long axis
+            // (its 2.3m x) runs ALONG the deck by construction
+            const yaw = Math.atan2(ex, ez);
+            const put = function (t, off) {
+              return {
+                x: bi.x + cx0 + tx * (slide + t) - ex * (off || 0),
+                z: bi.z + cz0 + tz * (slide + t) - ez * (off || 0),
+              };
+            };
+            if (fits(0, 1.25)) {
+              const P0 = put(0, 0);
+              hvac.add(P0.x, roofY, P0.z, { ry: yaw, tint: 0.9 + DK.h01(bi.x, bi.z, 0x8111) * 0.6 });
+              nHvac++; roofHere++;
+              // condensers in a row beside the chiller — the same machine
+              const conds = 1 + (DK.h01(bi.x, bi.z, 0x811a) < 0.55 ? 1 : 0);
+              for (let k = 0; k < conds && nCond < MAX.cond; k++) {
+                const t = 2.05 + k * 1.25;
+                if (!fits(t, 0.58)) break;
+                const P = put(t, 0);
+                cond.add(P.x, roofY, P.z, { ry: yaw }); nCond++; roofHere++;
+              }
+              // and its flues at the other end of the deck
+              const vN = 1 + (DK.h01(bi.z, bi.x, 0x811b) < 0.5 ? 1 : 0);
+              for (let k = 0; k < vN && nVent < MAX.vent; k++) {
+                const t = -1.9 - k * 0.85;
+                if (!fits(t, 0.32)) break;
+                const P = put(t, k * 0.6);
+                vents.add(P.x, roofY, P.z, { ry: yaw, sy: k ? 0.8 : 1 }); nVent++; roofHere++;
+              }
+            }
+          }
+        }
+      } else if (bi.w > 6 && bi.d > 6) {
         const inset = 2.1;
         const gx = Math.max(1, Math.floor((bi.w - inset * 2) / 3.4));
         const gz = Math.max(1, Math.floor((bi.d - inset * 2) / 3.4));
@@ -352,13 +467,17 @@
             }
           }
         }
-        // a timber water tank on the low/mid-rise stock, in one corner
-        if (bi.storeys >= 3 && bi.storeys <= 14 && bh < 0.30 && nTank < MAX.tank) {
-          const sxg = DK.h01(bi.x, bi.z, 0x8115) < 0.5 ? -1 : 1;
-          const szg = DK.h01(bi.z, bi.x, 0x8116) < 0.5 ? -1 : 1;
-          const wx = bi.x + sxg * (rx - 2.6), wz = bi.z + szg * (rz - 2.6);
-          if (!onShaft(b, wx - bi.x, wz - bi.z)) { tanks.add(wx, roofY, wz, { ry: DK.h01(wx, wz, 0x8117) * 1.57 }); nTank++; }
-        }
+      }
+      // A TIMBER WATER TANK on the low/mid-rise stock, in one corner. Hoisted
+      // OUT of the lattice branch so it survives the purge unchanged: it was
+      // never the problem — it is the one rooftop object in this pass that a
+      // player can name from the street, and it is one per roof by rule, in a
+      // corner, on exactly the building stock that really carries them.
+      if (bi.w > 6 && bi.d > 6 && bi.storeys >= 3 && bi.storeys <= 14 && bh < 0.30 && nTank < MAX.tank) {
+        const sxg = DK.h01(bi.x, bi.z, 0x8115) < 0.5 ? -1 : 1;
+        const szg = DK.h01(bi.z, bi.x, 0x8116) < 0.5 ? -1 : 1;
+        const wx = bi.x + sxg * (rx - 2.6), wz = bi.z + szg * (rz - 2.6);
+        if (!onShaft(b, wx - bi.x, wz - bi.z)) { tanks.add(wx, roofY, wz, { ry: DK.h01(wx, wz, 0x8117) * 1.57 }); nTank++; }
       }
 
       // =================================================================
@@ -405,6 +524,10 @@
         }
 
         // ---- window AC units, floor by floor ---------------------------
+        // PURGED. The loop still RUNS under the flag so the census can report
+        // how many boxes came off the city's walls, but it places nothing and
+        // its drip stains go with it — a drip stain under no unit is a smear
+        // on a blank wall, which is worse than the unit was.
         if (nAc < MAX.ac && acHere < AC_PER && bi.storeys >= 2) {
           const cols = Math.max(1, Math.floor(fc.span / 2.6));
           const rows = Math.min(bi.storeys - 1, 8);
@@ -414,6 +537,7 @@
               const ax = wallX + tx * t, az = wallZ + tz * t;
               const ay = bi.y0 + r2 * 3.2 + 1.15;
               if (DK.h01(ax + r2 * 7.3, az - r2 * 3.1, 0x8131) > 0.16) continue;
+              if (PURGED) { cutN++; acHere++; continue; }
               acs.add(ax, ay, az, { ry: yaw });
               nAc++; acHere++;
               if (nGrime < MAX.grime && grimeHere < GRIME_PER) {
@@ -493,5 +617,17 @@
     // driver (city._nightLamps, walked every frame at props.js:2115) instead
     // of standing up a second lighting loop.
     if (lampMesh && city._nightLamps) { try { city._nightLamps.push(lampMesh); } catch (e) { /* driver absent */ } }
+
+    // hand the census to city/props.js's ratchet (CBZ.propPurgeAudit).
+    // acBoxes is the pinned one and it is STRUCTURALLY 0 under the flag;
+    // roofItems is printed beside it so a future pass cannot re-grow the
+    // skyline clutter without the number saying so.
+    if (CBZ.propPurgeCensus) {
+      CBZ.propPurgeCensus({
+        acBoxes: nAc,
+        roofItems: nHvac + nCond + nVent + nDuct + nTank + nDish + nAerial,
+        acRemoved: cutN,
+      });
+    }
   });
 })();

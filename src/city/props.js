@@ -36,6 +36,274 @@
   if (CBZ.CONFIG.JUNCTION_DETAIL == null) CBZ.CONFIG.JUNCTION_DETAIL = true;
   if (CBZ.CONFIG.JUNCTION_CURB_TRIM == null) CBZ.CONFIG.JUNCTION_CURB_TRIM = true;
   if (CBZ.CONFIG.JUNCTION_MAX == null) CBZ.CONFIG.JUNCTION_MAX = 260;
+  // PROPS_PURGE_V1 (owner: "MOST INTERIORS AND BUILDING EXTERIOR THERE ARE MANY
+  // DUMB PROPS THAT DONT HAVE PHYSICS OR PURPOSE, LIKE ALLEYS FILLED WITH TRASH
+  // CANS AND NEWSPAPER BUYING STANDS SO I CANT RUN THROUGH ALLEYS, AND DUMB AC
+  // BOXES OUTSIDE WINDOWS ... GET RID OF THE DUMB PROPS.") — the alley-corridor
+  // law below plus the per-pass cuts in this file, world/street_furniture.js and
+  // world/building_dress.js. ONE line back to the old clutter, and every rng()
+  // draw is preserved on both sides of the flag (see the `// purged:` markers)
+  // so flipping it off rebuilds the OLD world byte-for-byte, not a third one.
+  if (CBZ.CONFIG.PROPS_PURGE_V1 == null) CBZ.CONFIG.PROPS_PURGE_V1 = true;
+  // PROPS_KNOCK_PLAYER — a body at a run tips a can/box/cone, through the exact
+  // tipProp() a bumper already uses. Separately revertible because it is the one
+  // half of the purge that changes a RUNTIME reaction rather than a placement.
+  if (CBZ.CONFIG.PROPS_KNOCK_PLAYER == null) CBZ.CONFIG.PROPS_KNOCK_PLAYER = true;
+
+  /* ======================================================================
+     THE ALLEY LAW — A GAP BETWEEN TWO BUILDINGS IS A ROUTE, NOT A SHELF.
+     ======================================================================
+     OWNER: "alleys filled with trash cans and newspaper buying stands so I
+     cant run through alleys."
+
+     He is describing a structural fact nobody had ever measured. SIX separate
+     scatter passes place street furniture off a lot EDGE or a building's REAR
+     FACE — props.js's nine per-lot rolls, street_furniture.js's dumpster/
+     crate/barrier walk, its bollard triples — and not one of them knew whether
+     the metre it was filling was a pavement or the only way through a block.
+     A lot edge that faces a street has 18 m of road behind it; the identical
+     edge on the other side of the same lot may have 4 m of gap and a wall.
+     The passes could not tell those apart, so the narrow one collected the
+     same six props as the wide one, every collider landed in the 4 m, and the
+     alley became a wall you could see down and not walk down.
+
+     A CORRIDOR IS DERIVED, NEVER AUTHORED — the same grammar roadrules.js
+     used for junctions. `lot.building` has carried a real footprint rect since
+     buildings.js shipped; the corridor width at a point is just the distance
+     to the nearest wall on each side of each axis, and the narrower of the two
+     spans is how wide the gap you are standing in actually is. Nothing is
+     declared, no builder tags an "alley", and a building added tomorrow is
+     inside the law for free.
+
+     THE NUMBERS ARE SOLVED, NOT TASTED. physics.js gives the player capsule a
+     0.55 m radius (physics.js:108), so a body is 1.10 m wide:
+       RUN  2.4  the clear width a SPRINT needs — the body plus 0.65 m of
+                 slack either side, i.e. you do not have to hug a wall.
+       SLOT 3.2  below this a corridor cannot carry the run AND a 0.4 m prop
+                 clear of both walls, so nothing generic stands in it at all.
+       OPEN 8.0  RUN + two 1.1 m dumpsters + their standoff. Wider than this
+                 and the "gap" is a yard or a street; the law steps aside and
+                 the old placement rules apply unchanged.
+       CELL 14   one building's rear face. The budget is per cell, which is
+                 what turns "6 bins and 2 stands" into "one dumpster" without
+                 any pass being told how many its neighbours placed.
+
+     ADOPTION IS ONE LINE and degrade-safe:
+         if (CBZ.alleyOk && !CBZ.alleyOk(x, z, { solid: true, r: 1.05 })) return;
+     `solid` means the prop carries a collider (the only kind that can block a
+     route); `r` is its half-width across the corridor. It CLAIMS on success —
+     that is deliberate, because the alternative is every caller writing a
+     check AND a claim, which is exactly the two-line adoption cost that killed
+     proptypes.js. A claim spent on a prop that then fails some later test only
+     makes an alley emptier, which is the direction we want to be wrong in.
+     world/detail_kit.js routes DK.free() through it, so all four dressing
+     passes inherit the law without changing a line. */
+  const ALLEY = {
+    OPEN: 8.0, RUN: 2.4, SLOT: 3.2, CELL: 14, ITEMS: 2, SOLIDS: 1, SCAN: 16,
+  };
+  CBZ.ALLEY_LAW = ALLEY;
+  // {rects, grid, cell, claims} — rebuilt per world by alleyIndex(city).
+  let AIDX = null;
+  // live census: what the purge refused, and what each pass reported cutting
+  const PURGE = { refused: 0, kept: 0, cut: Object.create(null) };
+
+  function alleyKey(ix, iz) { return ix * 8192 + iz; }
+  function alleyIndex(city) {
+    PURGE.refused = 0; PURGE.kept = 0; PURGE.cut = Object.create(null);
+    AIDX = null;
+    if (!city) return;
+    const rects = [];
+    const sets = [city.lots || []];
+    if (city.annex && city.annex.lots) sets.push(city.annex.lots);
+    for (let s = 0; s < sets.length; s++) {
+      const set = sets[s];
+      for (let i = 0; i < set.length; i++) {
+        const lot = set[i], b = lot && lot.building;
+        // A park's stub building has an owner and no structure — it walls
+        // nothing, so it must not read as one side of a corridor.
+        if (!b || b.park || !(b.w > 0) || !(b.d > 0)) continue;
+        const ox = Number.isFinite(b.ox) ? b.ox : lot.cx;
+        const oz = Number.isFinite(b.oz) ? b.oz : lot.cz;
+        if (!Number.isFinite(ox) || !Number.isFinite(oz)) continue;
+        rects.push({ minX: ox - b.w / 2, maxX: ox + b.w / 2, minZ: oz - b.d / 2, maxZ: oz + b.d / 2 });
+      }
+    }
+    const CELL = 32, grid = new Map();
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      // padded by SCAN on insert, so one bucket lookup answers a query that
+      // has to see every wall within SCAN of the point
+      const i0 = Math.floor((r.minX - ALLEY.SCAN) / CELL), i1 = Math.floor((r.maxX + ALLEY.SCAN) / CELL);
+      const j0 = Math.floor((r.minZ - ALLEY.SCAN) / CELL), j1 = Math.floor((r.maxZ + ALLEY.SCAN) / CELL);
+      for (let ix = i0; ix <= i1; ix++) for (let iz = j0; iz <= j1; iz++) {
+        const k = alleyKey(ix, iz);
+        let a = grid.get(k); if (!a) { a = []; grid.set(k, a); }
+        a.push(r);
+      }
+    }
+    AIDX = { rects: rects, grid: grid, cell: CELL, claims: new Map() };
+  }
+  CBZ.alleyIndex = alleyIndex;
+
+  /* How wide is the walkable corridor at this point?
+       -> {w, ax, az, inside}
+     ax/az are the free spans across x and z; `w` is the narrower of the two,
+     i.e. the width of the gap you are standing in. A side with no wall within
+     SCAN contributes SCAN, so an open pavement reads >= SCAN and is never an
+     alley. `inside` means the point is buried in a building footprint. */
+  CBZ.alleyGapAt = function (x, z) {
+    const R = ALLEY.SCAN, wide = R * 2;
+    const out = { w: wide, ax: wide, az: wide, inside: false };
+    if (!AIDX || !Number.isFinite(x) || !Number.isFinite(z)) return out;
+    const a = AIDX.grid.get(alleyKey(Math.floor(x / AIDX.cell), Math.floor(z / AIDX.cell)));
+    if (!a) return out;
+    let xp = R, xn = R, zp = R, zn = R;
+    for (let i = 0; i < a.length; i++) {
+      const r = a[i];
+      const inX = x > r.minX && x < r.maxX;
+      const inZ = z > r.minZ && z < r.maxZ;
+      if (inX && inZ) { out.inside = true; out.w = out.ax = out.az = 0; return out; }
+      // a wall only bounds the X corridor if it actually spans our Z (and v.v.)
+      if (inZ) {
+        if (r.minX >= x) { const d = r.minX - x; if (d < xp) xp = d; }
+        else if (r.maxX <= x) { const d = x - r.maxX; if (d < xn) xn = d; }
+      }
+      if (inX) {
+        if (r.minZ >= z) { const d = r.minZ - z; if (d < zp) zp = d; }
+        else if (r.maxZ <= z) { const d = z - r.maxZ; if (d < zn) zn = d; }
+      }
+    }
+    out.ax = xp + xn; out.az = zp + zn;
+    out.w = Math.min(out.ax, out.az);
+    return out;
+  };
+
+  /* Is this point ON a building — inside its footprint, or glued to its wall
+     line? The audit needs it to tell a WALL from a thing standing in front of
+     one: a wall segment's collider is centred on the footprint boundary, so
+     without this every alley in the world would read as blocked by the two
+     buildings that make it. 0.7 m clears a facade fitting and still counts a
+     dumpster (placed 1.25 m off the wall). */
+  function alleyOnWall(x, z, pad) {
+    if (!AIDX) return false;
+    const a = AIDX.grid.get(alleyKey(Math.floor(x / AIDX.cell), Math.floor(z / AIDX.cell)));
+    if (!a) return false;
+    const p = pad == null ? 0.7 : pad;
+    for (let i = 0; i < a.length; i++) {
+      const r = a[i];
+      if (x >= r.minX - p && x <= r.maxX + p && z >= r.minZ - p && z <= r.maxZ + p) return true;
+    }
+    return false;
+  }
+
+  /* May a generic prop stand here? CLAIMS on success (see the block comment).
+       o.solid  the prop carries a collider   o.r  its half-width, metres */
+  CBZ.alleyOk = function (x, z, o) {
+    if (CBZ.CONFIG.PROPS_PURGE_V1 === false) return true;
+    const g = CBZ.alleyGapAt(x, z);
+    if (g.inside) { PURGE.refused++; return false; }
+    if (g.w >= ALLEY.OPEN) return true;                 // open ground — not an alley
+    if (g.w < ALLEY.SLOT) { PURGE.refused++; return false; }
+    const r = (o && o.r != null) ? +o.r : 0.4;
+    const solid = !!(o && o.solid);
+    // NOTHING may eat the run — not just colliders. A 2 m parasol you can walk
+    // THROUGH still reads as a plugged alley, and "you can walk through it" is
+    // its own bug (world/clutter.js's NO-DECOY header). `solid` decides the
+    // budget below; the clearance is owed by anything with a footprint.
+    if (g.w - r * 2 < ALLEY.RUN) { PURGE.refused++; return false; }
+    const key = alleyKey(Math.round(x / ALLEY.CELL), Math.round(z / ALLEY.CELL));
+    const c = AIDX ? AIDX.claims.get(key) : null;
+    const n = c ? c.n : 0, sN = c ? c.s : 0;
+    if (n >= ALLEY.ITEMS || (solid && sN >= ALLEY.SOLIDS)) { PURGE.refused++; return false; }
+    if (AIDX) AIDX.claims.set(key, { n: n + 1, s: sN + (solid ? 1 : 0) });
+    PURGE.kept++;
+    return true;
+  };
+
+  /* A dressing pass reports what it cut, so propPurgeAudit can name it. Keys
+     are per-pass and LAST WRITE WINS, so two passes must never share one —
+     that is why the removal counts are `alleyRemoved` (street_furniture) and
+     `acRemoved` (building_dress) rather than both being "removed".
+       CBZ.propPurgeCensus({ acBoxes: 0, roofItems: 41, acRemoved: 118 }) */
+  CBZ.propPurgeCensus = function (o) {
+    if (!o) return;
+    for (const k in o) { const v = +o[k]; if (Number.isFinite(v)) PURGE.cut[k] = v; }
+  };
+
+  /* ======================================================================
+     CBZ.propPurgeAudit() — THE RATCHET (BLOCK LAW #5).
+     ======================================================================
+     Computed LIVE against the world, never against this file's bookkeeping:
+     it re-walks CBZ.colliders — the list EVERY prop producer in the game
+     already pushes to — and asks the alley oracle where each one is standing.
+     That is deliberate and it is the whole value: a collider dropped in an
+     alley by a file that has never heard of this law still shows up here.
+
+       alleysBlocked  alley cells whose residual clear width, after every
+                      collider standing in them, is under a sprint's RUN.
+                      STRUCTURAL TARGET 0 — under the law at most one solid
+                      may stand in a cell and only if it leaves RUN. A
+                      non-zero reading names a producer that has not adopted
+                      it, and `worst` gives you its coordinates.
+       solidInAlley   colliders inside a corridor narrower than OPEN. NOT a
+                      failure — one dumpster in an alley is the point. It is
+                      printed BESIDE alleysBlocked so a "fix" that empties
+                      every alley cannot pass as an improvement.
+       acBoxes        window air-conditioners hung off facades. Pinned 0.
+       roofItems      rooftop plant instances still standing.
+       propsRemoved   placements this purge refused, across every pass.
+     ====================================================================== */
+  CBZ.propPurgeAudit = function () {
+    const out = {
+      enabled: CBZ.CONFIG.PROPS_PURGE_V1 !== false,
+      alleysBlocked: 0, solidInAlley: 0,
+      acBoxes: PURGE.cut.acBoxes | 0,
+      roofItems: PURGE.cut.roofItems | 0,
+      propsRemoved: (PURGE.refused | 0) + (PURGE.cut.alleyRemoved | 0) + (PURGE.cut.acRemoved | 0),
+      alleyCells: 0, alleyKept: PURGE.kept | 0, indexed: AIDX ? AIDX.rects.length : 0,
+      worst: null, cut: PURGE.cut,
+    };
+    if (!AIDX) return out;
+    const cols = CBZ.colliders || [];
+    const cells = new Map();
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || !Number.isFinite(c.minX) || !Number.isFinite(c.minZ)) continue;
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+      if (!(w > 0) || !(d > 0)) continue;
+      // A STRUCTURE IS NOT STREET FURNITURE. A wall/shell/plinth is what MAKES
+      // the corridor, and counting it as an obstruction inside it would read
+      // every alley in the world as blocked by its own two walls. Three
+      // filters, cheapest first: a big box on both axes, anything longer than
+      // the widest thing this game puts on a pavement (the 3.4 m bus shelter),
+      // and — the one that actually catches walls — a centre sitting ON a
+      // building's footprint line.
+      if (w > 3.2 && d > 3.2) continue;
+      if (w > 4.0 || d > 4.0) continue;
+      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+      if (alleyOnWall(cx, cz, 0.7)) continue;
+      const g = CBZ.alleyGapAt(cx, cz);
+      if (g.inside || g.w >= ALLEY.OPEN) continue;
+      out.solidInAlley++;
+      // how much of the corridor it eats, measured ACROSS the narrow axis
+      const eat = (g.ax <= g.az) ? w : d;
+      const key = Math.round(cx / ALLEY.CELL) + "," + Math.round(cz / ALLEY.CELL);
+      let e = cells.get(key);
+      if (!e) { e = { w: g.w, eat: 0, x: cx, z: cz, n: 0 }; cells.set(key, e); }
+      if (g.w < e.w) e.w = g.w;
+      e.eat += eat; e.n++;
+    }
+    out.alleyCells = cells.size;
+    cells.forEach(function (e) {
+      const clear = e.w - e.eat;
+      if (clear >= ALLEY.RUN) return;
+      out.alleysBlocked++;
+      if (!out.worst || clear < out.worst.clear) {
+        out.worst = { x: Math.round(e.x), z: Math.round(e.z), gap: +e.w.toFixed(2), clear: +clear.toFixed(2), props: e.n };
+      }
+    });
+    return out;
+  };
 
   // ---- shared cached DIEGETIC sign panel ---------------------------------
   // Historical callers still use the makeLabelSprite name, but this is no
@@ -608,11 +876,44 @@
   // frame's car.pos/car.v) but its OWN slot — city/combat.js already owns 15
   // (a melee telegraph scan, unrelated but no need to tie-break against it).
   if (CBZ.onUpdate) CBZ.onUpdate(14.7, function (dt) {
-    if (!carKnockables.length || !CBZ.cityCars || !CBZ.cityCars.length) return;
+    if (!carKnockables.length) return;
     const gm = CBZ.game; if (!gm || gm.mode !== "city") return;
+    const cars = (CBZ.cityCars && CBZ.cityCars.length) ? CBZ.cityCars : null;
+    // PROPS_KNOCK_PLAYER — A BODY AT A RUN DOES WHAT A BUMPER DOES.
+    // OWNER: "alleys filled with trash cans and newspaper buying stands so I
+    // cant run through alleys." The alley law upstream decides WHAT stands in a
+    // gap; this decides what happens when you meet the one that still does. It
+    // is deliberately NOT a new system: same carKnockables list, same tipProp()
+    // arc, same 10 Hz proximity scan gunfire and traffic already share — the
+    // only new thing is a second thing that can do the knocking.
+    // A METER IS EXCLUDED ON PURPOSE: hitProp calls it "bolted steel", a car
+    // bends the post and a shoulder does not. A can, a news box and a cone are
+    // the three you should be able to run straight through.
+    const P = CBZ.player;
+    const runner = (CBZ.CONFIG.PROPS_KNOCK_PLAYER !== false && P && P.pos && !P.dead && !P.driving
+      && isFinite(P.pos.x) && isFinite(P.pos.z) && (P.speed || 0) > 2.6) ? P : null;
+    if (!cars && !runner) return;
     _carKnockT += dt;
     if (_carKnockT < 0.1) return;                 // 10Hz — a bumper clip doesn't need 60Hz reaction
     _carKnockT = 0;
+    if (runner) {
+      const pr = runner.radius || 0.55;           // the player capsule (physics.js:108)
+      for (let i = 0; i < carKnockables.length; i++) {
+        const s = carKnockables[i];
+        if (s.over || (s.type !== "bin" && s.type !== "newsbox" && s.type !== "cone")) continue;
+        const dx = s.x - runner.pos.x, dz = s.z - runner.pos.z;
+        const hitR = s.r + pr;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > hitR * hitR) continue;
+        // AWAY FROM THE BODY, not along a heading — you are inside its radius,
+        // so the vector from you to it IS the push, and it needs no yaw
+        // convention to get wrong (the sign-error trap CLAUDE.md warns about).
+        const light = s.type === "cone";
+        tipProp(s, d2 > 1e-4 ? dx : 1, d2 > 1e-4 ? dz : 0, light ? 0.24 : 0.06, light ? 1.1 : 0.4);
+        if (CBZ.sfx) CBZ.sfx("clank");
+      }
+    }
+    if (!cars) return;
     for (let i = 0; i < carKnockables.length; i++) {
       const s = carKnockables[i];
       if (s.over) continue;
@@ -866,6 +1167,11 @@
   CBZ.cityProps = function (city) {
     const root = city.root, rng = city.rng;
     city.streetProps = city.streetProps || [];
+    // THE ALLEY LAW needs the finished footprints, and every prop in this file
+    // and in the four world-dressing passes is placed after this point — so one
+    // index here covers all six scatter passes. Draws no rng.
+    alleyIndex(city);
+    const PURGED = CBZ.CONFIG.PROPS_PURGE_V1 !== false;
     // fresh world: drop every shootable record/animation from the old one
     shootables = [];
     carKnockables.length = 0;
@@ -1783,6 +2089,29 @@
       }
       return p;
     }
+    // IS THIS EDGE A FRONTAGE? A lot has four edges and only some of them face
+    // a street; the rest face the back of the next block. Kerb furniture that
+    // has no verb (a planter, a shrub box) earns its place by LINING a kerb, so
+    // it may only stand where there is a carriageway to line. Same arithmetic
+    // clearOfRoadSurface already runs, asking the opposite question.
+    // the purge's thinning gate: a SEEDED position hash, so it costs the
+    // shared city.rng stream nothing. Degrade-safe — with seed.js absent every
+    // gate reads 0.5, which keeps the prop rather than dropping it.
+    function ph(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
+    function roadNear(x, z, m) {
+      const margin = m == null ? 4.0 : m;
+      for (const r of city.roads) {
+        const half = (r.w != null ? r.w : city.ROAD) / 2 + margin;
+        if (r.vertical) {
+          if (Math.abs(z - r.z) > r.len / 2 + 1) continue;
+          if (Math.abs(x - r.x) < half) return true;
+        } else {
+          if (Math.abs(x - r.x) > r.len / 2 + 1) continue;
+          if (Math.abs(z - r.z) < half) return true;
+        }
+      }
+      return false;
+    }
     function edgePoint(lot, edge, t, outBand) {
       const band = outBand == null ? 1.4 : outBand;
       const w2 = lot.w / 2, d2 = (lot.d != null ? lot.d : lot.w) / 2;
@@ -2207,6 +2536,38 @@
     //  PLACEMENT — march props around every block's sidewalk; bias the corners
     //  for hydrants/meters and put the bigger landmark props (shelters, big
     //  billboards) only where there's room (corner lots / wide frontage).
+    //
+    //  PROPS_PURGE_V1 CENSUS — what this pass stopped doing, and why. The rule
+    //  applied is the owner's: a prop stays if it has a VERB (something you can
+    //  DO to it) or a reaction; otherwise it gets out of the way or it is gone.
+    //
+    //    KEPT, now alley-gated — meter (jimmy the coin box, roleverbs.js) ·
+    //      hydrant (crack the cap) · bin + newsbox (rummage, interact.js) ·
+    //      mailbox (check the mail) · bus shelter (route board) · patio (a
+    //      registered propuse SEAT) · propane cage (cooks off when shot) ·
+    //      per-shop board (it names the shop it stands in front of) · bike rack.
+    //      All of these keep their collider; the alley law is what stops them
+    //      standing in the one gap you need to run down.
+    //    THINNED — planters/street trees 0.75 -> ~0.42 effective per lot and
+    //      STREET-FACING ONLY. A planter has no verb; it earns its place by
+    //      lining a kerb, and a shrub box wedged in a service gap is the
+    //      definition of the dumb prop. Bins/newsboxes 0.70 -> ~0.50 for the
+    //      same reason: the owner's complaint is DENSITY, and one bin per two
+    //      lots still reads as a city.
+    //    CUT — the generic sandwich board (a radio ad on a board nobody put
+    //      there, at a random lot edge: no verb, no owner, pure noise; the
+    //      PER-SHOP board at a storefront stays) and the three-cone "roadwork
+    //      feel" cluster (a work zone with no work, three colliders deep, and
+    //      the single most common thing to trip over on a pavement).
+    //
+    //  EVERY rng() DRAW BELOW IS PRESERVED, ON BOTH SIDES OF THE FLAG — the
+    //  same discipline the rooftop purge further down already used ("// former
+    //  x"). city.rng is a shared stream and props.js is its LAST consumer
+    //  before this file's own camps and rooftops, so dropping one draw would
+    //  reshuffle those too and the flag would revert to a THIRD world rather
+    //  than to the one the owner is looking at. That is why every THINNING is
+    //  a CBZ.hash01 position gate and never a lowered rng() threshold, and why
+    //  a skipped builder replays the draws it would have taken itself.
     // =====================================================================
     const lots = city.lots;
     let lotIdx = 0;
@@ -2220,6 +2581,7 @@
         for (let m = 0; m < meters; m++) {
           const p = edgePoint(lot, edge, start + m * 2.2, 1.0);
           if (nearDoor(p.x, p.z, 1.8)) continue;
+          if (PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.16 })) continue;
           parkingMeter(p.x, p.z, p.yaw);
         }
       }
@@ -2227,59 +2589,92 @@
       if (rng() < 0.5) {
         const edge = (rng() * 4) | 0;
         const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.8, 1.2);
-        if (!nearDoor(p.x, p.z, 2.0)) fireHydrant(p.x, p.z);
+        if (!nearDoor(p.x, p.z, 2.0)
+          && !(PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.26 }))) fireHydrant(p.x, p.z);
       }
-      // 3) trash + news boxes near a corner (decor, no collide)
+      // 3) trash + news boxes near a corner
       if (rng() < 0.7) {
         const edge = (rng() * 4) | 0;
         const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.7, 1.1);
+        // THINNED 0.70 -> ~0.50 effective. THE THINNING GATE IS A POSITION
+        // HASH, NEVER A LOWERED rng() THRESHOLD. Lowering the roll above would
+        // have skipped the three draws inside this branch on every lot it
+        // newly rejected, and props.js is the last consumer of city.rng before
+        // its OWN camps and rooftops — so the flag would have reshuffled half
+        // the world behind it instead of reverting to it. hash01 folds
+        // WORLD_SEED, so it is per-seed, order-independent and stream-free.
+        const thin = PURGED && ph(p.x, p.z, 0x9101) >= 0.71;
         if (!nearDoor(p.x, p.z, 1.6)) {
-          if (rng() < 0.5) trashCan(p.x, p.z);
-          else newsBox(p.x, p.z, p.yaw, (rng() * NEWS_COLORS.length) | 0);
+          // one draw either way, exactly as before — the branch decides how
+          // many MORE it takes, and that is preserved inside each arm.
+          if (rng() < 0.5) {
+            if (!thin && (!PURGED || CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.24 }))) trashCan(p.x, p.z);
+          } else {
+            const ci = (rng() * NEWS_COLORS.length) | 0;
+            if (!thin && (!PURGED || CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.22 }))) newsBox(p.x, p.z, p.yaw, ci);
+          }
         }
       }
       // 4) a mailbox
       if (rng() < 0.35) {
         const edge = (rng() * 4) | 0;
         const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.6, 1.3);
-        if (!nearDoor(p.x, p.z, 2.2)) mailbox(p.x, p.z, p.yaw + Math.PI);
+        if (!nearDoor(p.x, p.z, 2.2)
+          && !(PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 0.36 }))) mailbox(p.x, p.z, p.yaw + Math.PI);
       }
-      // 5) planters / street trees spaced along an edge
+      // 5) planters / street trees spaced along an edge — STREET-FACING only.
+      //    edgePoint's own band puts the row 1.6m outside the lot line, so
+      //    "is there a carriageway behind me" is the honest test for whether
+      //    this edge is a frontage or the back of the block.
       if (rng() < 0.75) {
         const edge = (rng() * 4) | 0;
         const trees = 1 + ((rng() * 3) | 0);
         const start = -(trees - 1) * 2.2;
         for (let m = 0; m < trees; m++) {
           const p = edgePoint(lot, edge, start + m * 4.4 + (rng() - 0.5), 1.6);
-          if (nearDoor(p.x, p.z, 2.4)) continue;
-          planterTree(p.x, p.z, rng() < 0.65);
+          if (nearDoor(p.x, p.z, 2.4)) continue;         // no draw here, exactly as before
+          const withTree = rng() < 0.65;                 // was planterTree's third argument
+          // THINNED 0.75 -> ~0.42 effective, by position hash (see #3) — plus
+          // the two structural gates: a planter must LINE A KERB, and it may
+          // never be the thing standing in an alley.
+          const skip = PURGED && (ph(p.x, p.z, 0x9102) >= 0.56
+            || !roadNear(p.x, p.z, 4.0)
+            || !CBZ.alleyOk(p.x, p.z, { solid: true, r: withTree ? 0.5 : 0.55 }));
+          if (skip) {
+            rng();                                       // purged: the FOLIAGE draw planterTree would have taken
+            continue;
+          }
+          planterTree(p.x, p.z, withTree);
         }
       }
-      // 6) RARELY a generic sandwich board out on the sidewalk (NOT a per-shop
-      //    door sign — those are gone; the store name lives on the facade now).
-      //    Carries a city brand/radio ad, placed on a clear kerb away from doors.
+      // 6) purged: the generic sandwich board. Draws preserved.
       if (rng() < 0.06) {
         const edge = (rng() * 4) | 0;
         const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.5, 1.2);
         if (!nearDoor(p.x, p.z, 2.6)) {
           const mix = rng() < 0.5 ? BRAND_ADS : RADIO_ADS;
-          aFrameSign(p.x, p.z, p.yaw, mix[(rng() * mix.length) | 0]);
+          const ad = mix[(rng() * mix.length) | 0];
+          if (!PURGED) aFrameSign(p.x, p.z, p.yaw, ad);
         }
       }
       // 7) a bus shelter occasionally, on a long clear edge
       if (rng() < 0.12) {
         const edge = (rng() * 4) | 0;
         const p = edgePoint(lot, edge, 0, 2.2);
-        if (!nearDoor(p.x, p.z, 3.0) && Math.abs(p.x) < 9990) {
+        if (!nearDoor(p.x, p.z, 3.0) && Math.abs(p.x) < 9990
+          && !(PURGED && !CBZ.alleyOk(p.x, p.z, { solid: true, r: 1.7 }))) {
           const yaw = edge < 2 ? 0 : Math.PI / 2;
           busShelter(p.x, p.z, yaw + (edge === 0 || edge === 2 ? 0 : Math.PI));
         }
       }
-      // 8) a few traffic cones in a little cluster (roadwork feel)
+      // 8) purged: the three-cone "roadwork" cluster. Draws preserved.
       if (rng() < 0.18) {
         const edge = (rng() * 4) | 0;
         const p0 = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.6, 0.7);
-        for (let c = 0; c < 3; c++) trafficCone(p0.x + (rng() - 0.5) * 1.2, p0.z + (rng() - 0.5) * 1.2);
+        for (let c = 0; c < 3; c++) {
+          const jx = (rng() - 0.5) * 1.2, jz = (rng() - 0.5) * 1.2;
+          if (!PURGED) trafficCone(p0.x + jx, p0.z + jz);
+        }
       }
       // 9) PER-SHOP sidewalk dressing keyed to the storefront kind. Placed on the
       //    door-facing edge but OFFSET to the side of the door (so it dresses the
@@ -2290,25 +2685,35 @@
         // the storefront edge (door side); offset the prop along it, away from centre.
         const sEdge = lot.building.side != null ? lot.building.side : (rng() * 4) | 0;
         const t = (rng() < 0.5 ? -1 : 1) * (lot.w * 0.26 + 1.0);   // off to one side of the door
-        const place = (band, fn, prob) => {
+        // `o.draws` is how many rng() draws the BUILDER itself consumes
+        // (patioSet 1 for its parasol colour, propaneCage 3 for bottle jitter).
+        // A placement the alley law refuses replays them, so the shared stream
+        // is identical whether or not the prop went down. Anything else here
+        // draws nothing of its own.
+        const place = (band, fn, prob, o) => {
           if (rng() >= prob) return;
           const p = edgePoint(lot, sEdge, t, band);
           if (Math.abs(p.x) > 9990 || nearDoor(p.x, p.z, 2.6)) return;
+          const oo = o || {};
+          if (PURGED && !CBZ.alleyOk(p.x, p.z, { solid: !!oo.solid, r: oo.r == null ? 0.4 : oo.r })) {
+            for (let d = 0; d < (oo.draws | 0); d++) rng();
+            return;
+          }
           fn(p.x, p.z, p.yaw);
         };
         if (kind === "food" || kind === "bar") {
           // a patio table out front + a matching sandwich board
-          place(2.0, (x, z, yaw) => patioSet(x, z, yaw), 0.7);
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.45);
+          place(2.0, (x, z, yaw) => patioSet(x, z, yaw), 0.7, { r: 1.1, draws: 1 });
+          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.45, { r: 0.4 });
         } else if (kind === "gym") {
-          place(1.4, (x, z, yaw) => bikeRack(x, z, yaw), 0.7);
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.4);
+          place(1.4, (x, z, yaw) => bikeRack(x, z, yaw), 0.7, { solid: true, r: 0.4 });
+          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.4, { r: 0.4 });
         } else if (kind === "hardware") {
-          place(1.4, (x, z, yaw) => propaneCage(x, z, yaw), 0.7);
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.4);
+          place(1.4, (x, z, yaw) => propaneCage(x, z, yaw), 0.7, { solid: true, r: 0.55, draws: 3 });
+          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.4, { r: 0.4 });
         } else {
           // every other storefront just gets the occasional per-shop board
-          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.35);
+          place(1.2, (x, z, yaw) => shopBoard(x, z, yaw, kind), 0.35, { r: 0.4 });
         }
       }
     }

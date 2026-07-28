@@ -319,6 +319,24 @@
   DK.register(20, "street-furniture", function (city, DK) {
     if (CBZ.CONFIG.DETAIL_STREET_FURNITURE === false) return;
     const root = city.root;
+    // PROPS_PURGE_V1 (city/props.js owns the flag and the ALLEY LAW). What this
+    // pass stopped doing:
+    //   CUT — the site BARRIER. An orange A-frame is a work zone, and there is
+    //     no work: no dig, no cone taper, no plate, nothing it is guarding. It
+    //     was a 1.5m SOLID standing at the back of a building — i.e. the single
+    //     worst thing in this file for the owner's complaint, and the only one
+    //     with neither a verb nor a reason.
+    //   THINNED — pallet stacks 1-3 -> 1. A 3-high stack is 0.78m of geometry
+    //     with NO collider, which is the decoy world/clutter.js's own header
+    //     bans by name; one pallet is 0.26m, under physics.js's 0.45 STEP_UP,
+    //     so walking over it is honest.
+    //   GATED — dumpster, crate and bollard now declare their collider and
+    //     half-width to CBZ.alleyOk through DK.free, so at most ONE of them can
+    //     stand in any 14m of alley and only where it leaves a 2.4m run. The
+    //     flat grain (litter, weeds, drains) opts OUT: a stain is not a prop
+    //     and must not spend an alley's budget.
+    const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
+    let cutN = 0;
 
     const posts = DK.batch("sign-post", signPostProto(), { cls: "decor", cast: false });
     const faces = DK.sheet("sign-face", { cls: "decor", map: signAtlas(), alphaTest: 0.45, unlit: false });
@@ -448,11 +466,11 @@
       // (c) bollard — guards a shopfront or a plaza corner
       if (h > 0.60 && h < 0.66 && bollN < BOLL_MAX) {
         const bx = p.x + p.nx * 0.5, bz = p.z + p.nz * 0.5;
-        if (!DK.free(bx, bz, { doorR: 2.6, ring: 1 })) return false;
+        if (!DK.free(bx, bz, { doorR: 2.6, ring: 1, alley: { solid: true, r: 0.18 } })) return false;
         // Bollards come in threes on real pavements.
         for (let k = -1; k <= 1; k++) {
           const ox = bx - p.nz * k * 1.35, oz = bz + p.nx * k * 1.35;
-          if (!DK.free(ox, oz, { doorR: 2.4, ring: 0 })) continue;
+          if (!DK.free(ox, oz, { doorR: 2.4, ring: 0, alley: { solid: true, r: 0.18 } })) continue;
           bollards.add(ox, DK.groundY(ox, oz), oz, { tint: 0.92 + DK.h01(ox, oz, 0x4433) * 0.16 });
           DK.solid(ox, oz, 0.16, 0.16, null);
           DK.claim(ox, oz);
@@ -473,7 +491,10 @@
         return true;
       }
       return false;
-    }, { band: 1.05, free: { doorR: 2.4, ring: 0 } });
+      // alley:false at the WALKER level — this walk visits every kerb point in
+      // the world and only some of them become props, so a claim here would be
+      // spent by the walk itself. Each branch above declares its own.
+    }, { band: 1.05, free: { doorR: 2.4, ring: 0, alley: false } });
 
     // =====================================================================
     //  4) THE ALLEY — what lives at the BACK of a building
@@ -483,7 +504,7 @@
     // nothing where the player rarely looks straight on.
     let dumpN = 0, bagN = 0, palN = 0, crateN = 0, barN = 0;
     const DUMP_MAX = DK.count(55), BAG_MAX = DK.count(110), PAL_MAX = DK.count(70),
-      CRATE_MAX = DK.count(95), BAR_MAX = DK.count(32);
+      CRATE_MAX = DK.count(95), BAR_MAX = PURGED ? 0 : DK.count(32);
     DK.eachBuilding(city, function (bi) {
       const facesOf = DK.buildingFaces(bi);
       // rank faces: never the door face, prefer the one facing away from any road
@@ -504,7 +525,10 @@
       // dumpster on the bigger back walls
       if (dumpN < DUMP_MAX && face.span > 7 && DK.h01(bi.x, bi.z, 0x4442) < 0.5) {
         const ox = baseX + tx * (face.span * 0.22), oz = baseZ + tz * (face.span * 0.22);
-        if (DK.free(ox, oz, { doorR: 3.2, ring: 1 })) {
+        // 1.05 = the dumpster's long half-extent; a 2.1m box is the biggest
+        // single thing this file can put in an alley, so it is the one that
+        // most needs to prove it leaves a run behind it.
+        if (DK.free(ox, oz, { doorR: 3.2, ring: 1, alley: { solid: true, r: 1.05 } })) {
           const yaw = Math.atan2(face.nx, face.nz);
           dumps.add(ox, DK.groundY(ox, oz), oz, { ry: yaw, tint: 0.88 + DK.h01(ox, oz, 0x4443) * 0.24 });
           // a real dumpster is solid: cars dent on it, you can hide behind it
@@ -517,7 +541,9 @@
           for (let k = 0; k < 2 && bagN < BAG_MAX; k++) {
             const gx = ox + tx * (1.5 + k * 0.8) + face.nx * 0.2;
             const gz = oz + tz * (1.5 + k * 0.8) + face.nz * 0.2;
-            if (!DK.free(gx, gz, { doorR: 2.6, ring: 0 })) continue;
+            // bags are 0.3m soft, no collider, and hugging the dumpster that
+            // already paid for this alley's slot — they never spend one
+            if (!DK.free(gx, gz, { doorR: 2.6, ring: 0, alley: false })) continue;
             bags.add(gx, DK.groundY(gx, gz), gz, { ry: DK.h01(gx, gz, 0x4444) * 6.28, sx: 0.85 + DK.h01(gx, gz, 0x4445) * 0.4, sz: 0.85 + DK.h01(gz, gx, 0x4446) * 0.4 });
             DK.claim(gx, gz); bagN++;
           }
@@ -526,10 +552,15 @@
       // pallets / crates / a site barrier further along the same wall
       const h2 = DK.h01(bi.z, bi.x, 0x4447);
       const ox2 = baseX - tx * (face.span * 0.26), oz2 = baseZ - tz * (face.span * 0.26);
-      if (DK.free(ox2, oz2, { doorR: 3.0, ring: 1 })) {
+      // 0.6 = the crate's own half-extent, which is the largest thing this
+      // branch can produce; a pallet and a barrier are both smaller.
+      if (DK.free(ox2, oz2, { doorR: 3.0, ring: 1, alley: { solid: h2 >= 0.30, r: 0.6 } })) {
         const yaw = Math.atan2(face.nx, face.nz) + DK.h11(ox2, oz2, 0x4448) * 0.35;
         if (h2 < 0.30 && palN < PAL_MAX) {
-          const stack = 1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0);
+          // ONE pallet, flat. See the purge note at the top of the pass: a
+          // 3-high stack is 0.78m of walk-through geometry.
+          const stack = PURGED ? 1 : 1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0);
+          if (PURGED) cutN += (1 + ((DK.h01(ox2, oz2, 0x4449) * 3) | 0)) - 1;
           for (let k = 0; k < stack; k++) pallets.add(ox2, DK.groundY(ox2, oz2) + k * 0.26, oz2, { ry: yaw + k * 0.06 });
           DK.claim(ox2, oz2); palN++;
         } else if (h2 < 0.62 && crateN < CRATE_MAX) {
@@ -540,10 +571,15 @@
           }
           DK.solid(ox2, oz2, 0.48, 0.48, null);
           DK.claim(ox2, oz2); crateN++;
-        } else if (h2 < 0.72 && barN < BAR_MAX) {
-          barriers.add(ox2, DK.groundY(ox2, oz2), oz2, { ry: yaw + Math.PI / 2 });
-          DK.solid(ox2, oz2, 0.28, 0.75, null);
-          DK.claim(ox2, oz2); barN++;
+        } else if (h2 < 0.72) {
+          // PURGED: the site barrier. A work zone with no work — see the note
+          // at the top of the pass. BAR_MAX is 0 under the flag, so the whole
+          // slice draws nothing and the alley simply has a gap in it.
+          if (barN < BAR_MAX) {
+            barriers.add(ox2, DK.groundY(ox2, oz2), oz2, { ry: yaw + Math.PI / 2 });
+            DK.solid(ox2, oz2, 0.28, 0.75, null);
+            DK.claim(ox2, oz2); barN++;
+          } else if (PURGED) cutN++;
         }
       }
     });
@@ -579,7 +615,9 @@
         weedN++; did = true;
       }
       return did;
-    }, { band: 1.0, free: { doorR: 1.6, ring: 0, props: false } });
+      // litter and weeds are FLAT GRAIN with no collider — they are what makes
+      // an alley read as an alley, and they must never spend its budget.
+    }, { band: 1.0, free: { doorR: 1.6, ring: 0, props: false, alley: false } });
 
     // weeds also creep up the base of every building wall
     DK.eachBuilding(city, function (bi) {
@@ -617,5 +655,7 @@
     bikes.build(root);
     litter.build(root);
     weeds.build(root);
+    // hand the census to city/props.js's ratchet (CBZ.propPurgeAudit)
+    if (CBZ.propPurgeCensus) CBZ.propPurgeCensus({ alleyRemoved: cutN, alleySolids: dumpN + crateN + barN + bollN });
   });
 })();
