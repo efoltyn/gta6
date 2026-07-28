@@ -759,3 +759,126 @@ line, in the pillar's own section, naming what actually shipped, what the first 
 ratchet in §8 says UNMEASURED and every one of them is a promise to write a number), and what is still
 owed.** A pillar section that still claims a plan after its wave has landed is the stale-claim problem
 this repo keeps catching itself in; the fix is the same every time, and it is one paragraph of honesty.
+
+---
+
+## 10. PILLAR UPDATE: THE RIM WORLD (2026-07-28)
+
+**Full plan: `plan/pillar-rim.md`.** It EXTENDS §3.2 (the scale plan) and §6's wave sequence rather
+than replacing them; §5 of that document reconciles the two line by line and names six changes.
+Wave planners working on terrain, layout, biomes or the airfield network read it BEFORE §3.2.
+
+OWNER, verbatim: *"the entire RIM of the map — instead of the center — should be the mountains and
+snow, instead of right near the city. the entire rim of map: one corner a MASSIVE version of our
+desert biome, one corner a massive mountain range and ice like we have, and one corner ice too, and
+BIG FOREST. make the terrain feel massive. this goes with the big airport gameplan we made for
+making many more airports."*
+
+- **THE RIM ALREADY EXISTS AND IT IS BLANK.** `CONTINENT_COUNTRY_MARGIN = 2200` (`continent.js:61`)
+  pads the plate past the region union, so measured off the file's own stage-4 derivation
+  (`continent.js:444-448`) the world is **97.4 km² of already-built, already-drawn backcountry
+  against 78.3 km² of settled world — 55% of the map is ALREADY rim.** One corner of that belt is
+  **2.3× the entire Saltlands.** It is flat because `RIM_CEIL = 23` (`continent.js:702`) caps every
+  metre of it, deliberately, *"strictly under the 25 u doctrine line"* so a mountains-outside-snow
+  cell is impossible by construction. **The rim world is a GATE problem before it is a terrain
+  problem.**
+- **NOTHING MOVES, AND THAT IS THE ARGUMENT FOR THIS DESIGN.** `SPREAD_V5` is a **no-op on every
+  existing landmass**: every strait, causeway, pinned axis (`layout.js:311-357`), the seven
+  free-country lane literals and GOLDEN's lots/shops/roads all stay. A world re-lay is the most
+  expensive thing in this repo's history; **a 70%-frontier map does not need one.** The four
+  existing biomes are not shrunk — they are **re-cast as the middle ground**, the *medium
+  triangles* that make the rim read enormous (BOTW's CEDEC 2017 rule: contrast is load-bearing).
+- **THE SIZE, WITH ITS CEILING ARITHMETIC.** `RIM_BELT` 2,200 → **4,200** ⇒ plate **17,896 ×
+  16,645 = 297.9 km²** (was 175.7), rim ring **219.6 km² = 73.7%** of the world, each corner
+  17.6 km² = **8.3× today's Saltlands**. **HARD BLOCKER: 17,896 > `W_ROOF` 15,500 and past the roof
+  the build `return`s — it silently deletes the continent.** §3.2's clamp-instead-of-return lands
+  first or nothing else may. `PLATE_SEG` needs 471 against a 448 cap ⇒ **plate tiling required**
+  (2×2 ⇒ 236 seg/tile, 225 k verts, four draws — a **net win**, because today the continent is one
+  draw with one bounding sphere and is therefore never frustum-culled). `PLATE_G`, `plateClear()`,
+  `terrainRingRadii`, `WORLD_SEA_SPAN` and `TERRAIN_FLATTEN_UNDER_BUILT`'s band **all derive and
+  need no edit at all**; `TERRAIN_RING_AMP` needs **×1.27** (k 3.92 → 4.97) or the backdrop shrinks
+  as the world grows.
+- **ONE WIND EXPLAINS ALL FOUR CORNERS.** West-northwesterlies off the western ocean → drench the
+  west (BIG FOREST, the windward flank) → lift over the northern wall (glaciated crest + ice cap) →
+  pool as cold *dry* air northeast (the ICE SHIELD — the Gobi-Altai case, where aridity not cold
+  gates the ice) → descend hot and dry into the southeast lee (the MASSIVE ERG). The settled
+  interior is the partial shadow: prairie, the Great Plains gradient. **No corner is arbitrary;
+  they are one rain shadow read clockwise.** Six sectors: the Mercy Wall (36 km²) · the Kesh Shield
+  (44) · the Sandur (11.5) · the Great Sand Sea (39.8) · the Redhollow Reach (52.3) · the South
+  Belt (26). Each swallows a nation town that is currently marooned in blank country and gives it
+  an identity — Kesh becomes Askole, the last village before the glacier — **for zero lines.**
+- **FOUR SEAMS, FOUR SANCTIONED ANSWERS, EACH FROM A SHIPPED GAME OR A REAL LANDFORM.**
+  forest↔range = **gradient by treeline fraction** (`RIM_TREELINE_FRAC = 0.30 C`, the sibling of
+  §3.2's fractional snowline; today's ramp is ~3× too low at 0.167) · range↔ice = **gradient by the
+  Vatnajökull grammar** (cap over highland, outlet lobes, nunataks) · ice↔desert = **THE SANDUR**,
+  the one authored hybrid — Skeiðarársandur is 1,300 km² of flat braided grey-black sand and is
+  *geomorphologically a desert made by a glacier*; it costs **~30 lines because a sandur is flat** ·
+  desert↔forest = **THEY NEVER TOUCH** (a pure climate gradient needs a 300-500 km belt; Just Cause
+  4's answer is to route both through the hub, and our hub is the settled interior).
+  **A CONTINUOUS MOUNTAIN RING IS REFUSED**: Skyrim rings its whole province and players read it as
+  a bowl — *"fenced in"*, *"abrupt, jagged walls"*. Relief on one side only.
+- **THE GATE INVARIANT NEEDS A THIRD FORM.** §3.2's `mtnUncovered` (high + no snow, pinned 0) would
+  **fail a legitimate bare desert massif**. Replace with **`mtnUnclaimed`** — a cell above MTN
+  inside no declared sector whose regime permits relief, and carrying no snow — **pinned 0**, with
+  `mtnUncovered` and `mtnOutSnow` printed beside it forever. The original intent was never
+  "mountains live in a rectangle"; it was **"you never see a bare green mountain."**
+  **HARD REQUIREMENT, and it is the likeliest way the wave breaks:** the gate takes
+  `max(terrainHeight, snowTerrainHeightAt)` and `snowTerrainHeightAt` is a *separate* oracle that
+  does not run through `TERRAIN_FLATTEN_UNDER_BUILT` — so every rim regime field must pass through
+  that gate or the first seed with a nation town near a crest fails `cityOnMountain 0`.
+- **LIVE DEFECT FOUND: the rim metric is not keyed to where people live.** `rimT`
+  (`continent.js:705-708`) normalises against the PLATE, whose centre is dragged **~1,700 u north**
+  by the Greater Mercy backdrop envelope — so `RIM_IN 0.42` puts the rim's inner edge at z = +278
+  while Goldspire sits at 1,370 and Cape Harbor at 995. **Both southern mini-cities are already
+  inside the rim band**, invisible only because it is capped at 23 u. `RIM_METRIC_SETTLED` re-keys
+  it to the settled union and must land before any sector carries amplitude.
+- **TRAVEL BUDGET — it lands inside the only published tolerance band.** Fondly-remembered
+  crossings cluster at **8-20 min** (GTA V 8 min best-route / 17:52 scenic on 75.84 km²; RDR2 16 min
+  at gallop; FUEL's 14,400 km² Guinness record was panned as *"long and boring road trips"*). Rim
+  plate: **7.5 min** across at 40 m/s, **10.2 min** diagonal, **16.3 min** at a realistic 25 —
+  **~3.9× GTA V's area at ~1.3× its crossing time**, with the settled interior unchanged at 4.0 min.
+  **The longest airliner leg is ~3-4 min gate to gate — half of GTA V's cross-map DRIVE.** Do NOT
+  slow the cars (Rockstar compresses the MAP, not vehicle speed); slow the *frontier* — unpaved
+  track, bending loop, real terrain pitch — and let the plane be the fast way. Menu warps erase
+  scale; a stolen jet compresses it while keeping it visible, which is why GTA V shipped with no
+  fast travel at all.
+- **THE NUMBER THIS PILLAR LIVES OR DIES ON.** Elden Ring's Mountaintops and Consecrated Snowfield
+  are its literal rim and its weakest content: the escalation in vista **was not matched by
+  escalation in density**. Counter-measure is a ratchet, not a promise —
+  **`rimAudit().poiGapMax ≤ 4,200 u`** along the frontier loop (Witcher 3's on-record 40-second
+  rule → 1,400 u ideal; the 120 s design consensus → 4,200 u ceiling; the 67,562 u loop therefore
+  needs **16 POIs minimum, 48 at the ideal**). All sixteen are reachable from generators that
+  already exist or are already planned — `cityGridStamp`, `airfieldKit`, the four nation towns,
+  `venueSite`, `fishSpotRegister`, a legendary's range, a `contracts.js` giver. **It is
+  scheduling, not new work.**
+- **THE EDGE FICTION COSTS NOTHING.** Sea on south/east/west with GTA V's exact answer already
+  shipped here (`wildlife_shark.js` on `predatorHunt`/`predatorSeize`, plus `SWIM_SINK`'s 28 s
+  breath meter); the Mercy Wall stops you because `snowCover`'s shed law makes it bare rock past
+  ~45° and the ridge simply gets steeper; the camera-centred ocean disc gives Just Cause 3's soft
+  infinite fade for free. **No invisible wall anywhere.** Cold as a diegetic cost is named as a
+  candidate and is explicitly NOT a dependency.
+- **WAVES.** R1 the law (six sectors declared at today's 23 u — **the world must come out
+  byte-identical**, that is the proof) · R2 the belt and the gate · R3 the amplitude (the wave the
+  owner sees) · R4 **the fill**, which is §3.2's wave 4 promoted out of optional. Flags
+  `WORLD_RIM_V1` · `RIM_BELT` · `RIM_METRIC_SETTLED` · `RIM_SECTORS` · `RIM_RANGE_AMP` ·
+  `RIM_TREELINE_FRAC` · `RIM_SANDUR` · `RIM_ERG_MEGADUNE` · `RIM_TAIGA_TREES`.
+- **THE ONE REAL FRAME COST, NOT SOFTENED:** the taiga sector at `biome_forest.js:367`'s
+  `STEP = 11 × √FSC` is **~4× today's tree count**, on a renderer measured at 2,668 calls with
+  *"safe headroom mostly exhausted"*. It has its own flag so it can be turned off alone, and it
+  must land under `drawBudgetAudit().predictedCalls` or ride the fauna pillar's instanced proxy.
+
+**Contract line other pillars cite, verbatim:**
+> **`CBZ.rimSector(id, {bearing, arc, regime, biome, tone})`** — a sector declares **which way it
+> faces and what kind of place it is**; the rect, reach, seam band, ceiling, amplitude, treeline and
+> cover ramp all derive from the live plate and the settled union. **No sector types a coordinate,
+> and a fifth corner is a ROW.** It registers its region with **`underlay: true`**, and that one
+> word buys two pinned invariants at once — `roadrules.js:902` skips underlay regions (so
+> `roadClearanceAudit().violations` stays 0 and the frontier loop is not clamped out of the sectors
+> it exists to cross) and the math gate's overlap sweep filters `!r.underlay` (so region overlaps
+> stay 0 with six new adjacent rects). Three consumers migrated in the same change, and all three
+> are **deletions of a special case**: `continent.js`'s uniform `RIM_CEIL` band, `terrain_overhaul.js`'s
+> hardcoded `snowSector` window, and `biome_desert.js`'s outward feather.
+
+**The sentence for the owner:** *the map already has 97 km² of empty rim you have never had a reason
+to drive to; this makes it 220, gives each corner a climate that explains the one next to it, and
+puts the far edge four minutes away by air instead of sixteen by road.*
