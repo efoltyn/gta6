@@ -144,7 +144,7 @@
     // PERMADEATH (city/death.js): once the run is declared over and the slot
     // wiped, nothing may write it back — the 5s autosave would otherwise
     // resurrect the erased world between the GAME OVER card and the reload.
-    if (g._cityGameOver) return;
+    if (g._cityGameOver || g._citySaveBlocked) return;
     w.lastSaved = now();
     let json = null;
     try { json = JSON.stringify(w); } catch (e) { return; }
@@ -487,7 +487,7 @@
   }
 
   CBZ.onUpdate(32.4, function (dt) {
-    if (g.mode !== "city") return;
+    if (g.mode !== "city" || g._citySaveBlocked) return;
     ensureGangResetWrap();
     const w = ensure();
     w.world.panic = Math.max(0, (w.world.panic || 0) - dt * 0.18);

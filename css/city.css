@@ -74,6 +74,24 @@ body.mode-city .mode-survival-only { display: none; }
   font-size: 11px; font-weight: 600; color: #a08363; letter-spacing: .2px;
 }
 
+/* Destructive by meaning, secondary by placement: PLAY stays the dominant
+   action. The two-line copy makes it impossible to mistake this for another
+   story preset, and the confirm in systems/newlife.js is the second guard. */
+body.mode-city .new-life-btn {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+  pointer-events: auto; cursor: pointer; margin: 13px auto 0; padding: 8px 16px 7px;
+  border: 2px solid #8d3131; border-bottom-width: 4px; border-radius: 10px;
+  background: #fff8f5; color: #742626; font-family: inherit;
+  transition: transform .08s, background .12s, box-shadow .12s;
+}
+.new-life-btn span {
+  font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+}
+.new-life-btn small { color: #9a6860; font-size: 10px; font-weight: 600; }
+.new-life-btn:hover { background: #ffe9e3; box-shadow: 0 0 0 3px rgba(141,49,49,.1); }
+.new-life-btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+.new-life-btn:disabled { cursor: wait; opacity: .65; transform: none; }
+
 /* hide the prison + survival HUD panels in the city (city has its own) */
 body.mode-city #objective,
 body.mode-city #topright,

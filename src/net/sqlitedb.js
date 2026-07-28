@@ -500,6 +500,7 @@
   let worker = null, msgSeq = 0;
   const pending = Object.create(null);
   let inFlight = false, queuedWrite = null; // simple one-writer-at-a-time coalescing
+  let writesBlocked = false;                // a confirmed NEW LIFE blocks resurrection until reload
 
   function logBackendOnce() {
     if (warnedBackend) return;
@@ -743,6 +744,7 @@
   // still flushing is coalesced into "run once more after this one" rather
   // than piling up an unbounded queue.
   function flushWrite(w, jsonStr) {
+    if (writesBlocked) return;
     if (inFlight) { queuedWrite = { w, jsonStr }; return; }
     inFlight = true;
     const { structRows, containerRows, baseRows } = extractRowsFromWorld(w);
@@ -760,6 +762,32 @@
     });
   }
 
+  // Permanently forget the single-player world. This cannot be implemented as
+  // saveWorld(null): that stores a literal "null" blob, leaves extracted
+  // structure/base rows behind, and (because saveWorld is fire-and-forget) can
+  // lose a race with the page reload. NEW LIFE awaits this transaction before
+  // reloading, so an OPFS/kvvfs save cannot resurrect the character that was
+  // just cleared from localStorage.
+  function clearWorld() {
+    writesBlocked = true;
+    queuedWrite = null;
+    cache = null;
+    return ready().then(function (kind) {
+      if (!kind || !backend) return false;   // localStorage-only browser: already cleared by the caller
+      return backend.run([
+        { sql: "DELETE FROM containers", params: [] },
+        { sql: "DELETE FROM structures", params: [] },
+        { sql: "DELETE FROM bases", params: [] },
+        { sql: "DELETE FROM people", params: [] },
+        { sql: "DELETE FROM worldmeta", params: [] },
+        { sql: "DELETE FROM econ", params: [] },
+        { sql: "DELETE FROM polity", params: [] },
+        { sql: "DELETE FROM blobs WHERE kind = ? AND id = ?", params: [WORLD_BLOB_KIND, WORLD_BLOB_ID] },
+        { sql: "DELETE FROM blob_meta WHERE kind = ? AND id = ?", params: [WORLD_BLOB_KIND, WORLD_BLOB_ID] },
+      ]).then(function () { cache = null; return true; });
+    });
+  }
+
   const api = Object.assign({}, pureApi, {
     ready: ready,                       // call CBZ.sqlitedb.ready() to (re)kick off init; resolves to backendKind|null
     isAvailable: function () { return !!backendKind; },
@@ -770,9 +798,10 @@
     // NOT depend on this for durability until then; localStorage is still
     // the source of truth in that window, exactly as before this file existed.
     saveWorld: function (w, jsonStr) {
-      if (!backendKind || !backend) return false;
+      if (writesBlocked || !backendKind || !backend) return false;
       try { flushWrite(w, jsonStr != null ? jsonStr : JSON.stringify(w)); return true; } catch (e) { return false; }
     },
+    clearWorld: clearWorld,
     // warnMirrorSkipOnce: city/worldstate.js's save() calls this instead of
     // silently swallowing a localStorage QuotaExceededError once sqlite is
     // primary — "this is exactly the cap dying" (BUILD-PLAN.md S5's own words).

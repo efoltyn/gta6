@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=ipad4">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
 <link rel="stylesheet" href="css/inventory.css?v=ctrl1">
-<link rel="stylesheet" href="css/city.css?v=city2w9">
+<link rel="stylesheet" href="css/city.css?v=city2w10">
 <link rel="stylesheet" href="css/campaign.css?v=story2">
 </head>
 <body class="campaign-build">
@@ -208,6 +208,9 @@
     </div>
 
     <button class="btn" id="playBtn">Play</button>
+    <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
+      <span>New Life</span><small>Clear every saved city character</small>
+    </button>
     <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
     <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars — get cuffed and it's the jail game.</div>
     <div class="smallnote mode-escape-only" id="bestStat"></div>
@@ -673,7 +676,7 @@
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=arrest4"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=hub2"></script>
+<script src="src/city/worldstate.js?v=hub3"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
@@ -1260,7 +1263,7 @@
      everything it might touch already exists" placement as net/
      netpersist.js above. Absent/failed sqlite-wasm changes nothing —
      day one (localStorage-only) behavior is untouched. -->
-<script src="src/net/sqlitedb.js?v=sql1"></script>
+<script src="src/net/sqlitedb.js?v=sql2"></script>
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
@@ -1274,6 +1277,7 @@
 <script src="src/games/government.js?v=pkg1"></script>
 <script src="src/games/police.js?v=pkg2"></script>
 <script src="src/games/jail.js?v=pkg1"></script>
+<script src="src/systems/newlife.js?v=newlife1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale8"></script>
