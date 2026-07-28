@@ -22,6 +22,23 @@
                               cheapest, highest-impact beat in the game: one
                               composited layer, no fill cost in GL at all.
                               Never dropped, at any quality tier.
+     0.00-1.47  WHITE DOME    (NUKE_FX_V2) the beat this file used to skip
+                              entirely: a pure white, unlit, un-fogged,
+                              OPAQUE hemisphere swelling off the deck, with
+                              no detail inside it at all, silhouetting the
+                              skyline. Radius is the Taylor-Sedov similarity
+                              law R ∝ t^(2/5) — the same exponent G.I. Taylor
+                              read Trinity's yield off the published film —
+                              normalised so it reaches the 126 m maximum
+                              fireball radius at 1.05 s, which is about how
+                              long a near-surface fireball sits on the ground
+                              before buoyancy lifts it. It then FADES AND
+                              RISES over 0.42 s, revealing the graded
+                              additive fireball that was behind it all along.
+                              The double flash rides it too, and because it
+                              is the only OPAQUE layer here, the minimum
+                              genuinely gives the skyline back for a few
+                              frames.
      0.00-0.55  FIRST MAXIMUM the isothermal ball. BLUE-WHITE, not orange, and
                               deliberately drawn OVERBRIGHT (colour > 1.0, see
                               flashRadiance) so core/renderer.js's tone mapper
@@ -81,13 +98,64 @@
                               read by the fireball, the cap, the stem and the
                               roll, so they cannot disagree about how high the
                               cloud is.
-     0.70-25.0  MUSHROOM      four pooled InstancedMeshes form a genuinely 3D
+     0.70-25.0  MUSHROOM      six pooled InstancedMeshes form a genuinely 3D
                               hot core, thin rising stem, broad lobed cap and
                               filled ground cloud. Procedural billboards add
                               roiling surface detail but no longer have to carry
                               the silhouette alone.
+     0.60-10.0  CAP GLOW      (NUKE_FX_V2) the cap is INCANDESCENT INSIDE while
+                              its surface has already gone to soot — that is
+                              the whole reason a mushroom photograph reads as
+                              a light source. One additive instanced layer,
+                              kept strictly inside the cap's own lobes (seed
+                              r <= 0.62) with depthTest on, so the front lobes
+                              occlude it and the heat comes out from BETWEEN
+                              the lumps. White-hot -> yellow -> deep orange.
+     1.50-25.0  COLLAR        (NUKE_FX_V2) the skirt hanging under the cap's
+                              rim. This is what makes the cap OVERHANG its
+                              stem; without it the head is a disc balanced on
+                              a column. Wide and low by construction (1.42
+                              lateral vs 0.56 vertical on every lobe).
+     2.60-25.0  CROWN         (NUKE_FX_V2) dark cauliflower boiling over the
+                              top, placed on the cap's own dome profile
+                              sqrt(1-r^2) so it sits ON the head rather than
+                              floating above it. Deliberately LATE: a fresh
+                              cloud top is still incandescent and there is
+                              nothing dark up there to draw. Shares ONE
+                              InstancedMesh with the collar — same material,
+                              two slices, one draw call for both.
+     1.40-14.0  CAP FLATTENS  (NUKE_FX_V2) vertical scale walks 1.00 -> 0.62
+                              across the rise. A young head is a rising ball;
+                              a stabilised one is an anvil, because the
+                              tropopause (~11 km) is an inversion it cannot
+                              climb through and everything going up goes
+                              sideways instead. Real 20 kt: ~10-12 km top,
+                              cap kilometres across, ~5 minutes — a ~23x
+                              compression into riseT, and it is named.
+     0.75-22.0  BASE SURGE    a red-brown curtain of pulverised ground rolling
+                              OUT along the deck from the foot of the stem.
+                              Crossroads Baker is the measurement: ~45 m/s
+                              outward initially, ~300 m radius by 10 s, ~1 km
+                              by a minute, decelerating throughout — which is
+                              why the growth is an ease and not a ramp. Under
+                              NUKE_FX_V2 every lobe also SPINS about its own
+                              tangential axis (slower the further out, as it
+                              decelerates) so the curtain rolls instead of
+                              sliding, and lobe heights alternate hard so the
+                              low ones fall into shadow and go near-black.
+                              Those black lobes carry the scale.
      8.00+      ASH FALL      CBZ.fx.particleCloud in fall mode around the
                               lens. Reused, not rebuilt.
+     THROUGHOUT THE LIGHT     (NUKE_FX_V2) sun + hemisphere + bounce ride the
+                              fireball's own luminosity at onAlways(94.6) —
+                              the one slot after core/gfx.js's finalize(),
+                              which is the last writer of those values and
+                              would otherwise clobber this silently. White at
+                              the flash, orange through the burn, ember at the
+                              end. No light is ADDED (an added light in r128
+                              recompiles every material in the world); only
+                              values are written, and daynight+finalize
+                              rewrite them next frame, so it is stateless.
      THROUGHOUT ATMOSPHERE    scene.fog.color is lerped white -> orange -> ash
                               for the whole arc. core/sky.js paints its horizon
                               band FROM that colour, so the entire sky turns
@@ -100,13 +168,26 @@
 
    PROPORTIONS — the thing films get wrong and the thing this file got wrong.
    The stock nuke row draws a 126 m maximum-radius fireball, a compressed game
-   stabilisation altitude of ~907 m over the burst, a cap that blooms to ~488 m
+   stabilisation altitude of ~907 m over the burst, a cap that blooms to ~489 m
    across and a stem ~35 m across (~60 m by full rise). That is a cloud
-   TOP:CAP WIDTH of 2.19:1 and a CAP:STEM
-   of 9.8:1. Both were wrong before — 1.75:1 and 6.5:1, a squat cloud on a fat
-   stalk, which is exactly the silhouette films draw and real film does not.
-   Both are reported by CBZ.nukeFxAudit().proportions so they cannot drift back
-   without somebody having to change a number they can see.
+   TOP:CAP WIDTH of 2.06:1 and a CAP:STEM of 8.15:1. Both were wrong before —
+   1.75:1 and 6.5:1, a squat cloud on a fat stalk, which is exactly the
+   silhouette films draw and real film does not.
+
+   (TOP:CAP reads 2.06 rather than the 2.19 this block used to claim because
+   the head now FLATTENS to 0.62 of its vertical extent as it stabilises —
+   see capFlatAt. The cloud did not get shorter; its top stopped being a
+   dome. The audit computes the reported number through the same CAP_FLAT the
+   renderer uses, so the two can never diverge.)
+
+   THE THIRD PROPORTION, and the one the reference photograph is actually
+   about: OVERHANG. The collar hangs at 0.98 of the cap radius and the stem
+   is 60 m across, so the skirt is 7.98x the stem's width and the cap
+   visibly sits OUT PAST its own column. A cap that does not overhang is a
+   disc balanced on a pole, which is what this file drew before.
+
+   All three are reported by CBZ.nukeFxAudit().proportions so they cannot
+   drift back without somebody having to change a number they can see.
 
    WHAT THIS FILE DOES NOT OWN: gameplay blast, thermal and glass zones remain
    the bus's and ledger's. This file renders consequences—cloud, dust, world
@@ -190,6 +271,37 @@
   // past the blast reach. false => the old three fixed-clock passes that all
   // landed INSIDE the flattened zone.
   if (CBZ.CONFIG.NUKE_FX_GLASS == null) CBZ.CONFIG.NUKE_FX_GLASS = true;
+
+  /* ============================================================
+     NUKE_FX_V2 (2026-07-28) — THE REDRAW. Four beats the file did not have,
+     each one a thing test film shows and this sequence did not:
+
+       (a) THE WHITE DOME. The first second of a near-surface burst is a
+           featureless, blinding white HEMISPHERE swelling off the deck —
+           no detail inside it at all, so bright it silhouettes the skyline
+           and washes the horizon to a line. This file drew the light (a DOM
+           div) and the fireball (a graded additive shell) and never drew the
+           thing itself. It grows on the Taylor-Sedov law, not on a taste
+           curve — see WDOME below.
+       (b) THE COLLAR AND THE CROWN. A mature cloud OVERHANGS its own stem
+           with a skirt, and its top boils over into dark cauliflower as it
+           cools. The cap here was a disc of lobes with nothing under its rim
+           and nothing dark on top, which is why it read as smoke rather than
+           as a cloud with a shape.
+       (c) THE CAP GLOWS FROM WITHIN. The reason a mushroom photograph reads
+           as a light source is that the cap is still incandescent inside
+           while its surface has already gone to soot. One additive layer,
+           inside the cap lobes, retired as it cools.
+       (d) THE WORLD IS LIT BY IT. scene.fog already turned the sky; nothing
+           turned the GROUND. The sun and the hemisphere ambient now ride the
+           fireball's own luminosity, so every wall and roof for hundreds of
+           metres goes orange and then dark — which is the whole difference
+           between a picture of an explosion and being next to one.
+
+     false => every one of those four is skipped and the sequence is the
+     pre-2026-07-28 one, beat for beat. */
+  if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
+  function v2() { return CBZ.CONFIG.NUKE_FX_V2 !== false; }
 
   // ---- deterministic seeded LCG (NEVER Math.random — replay/MP sync) --------
   let _rs = 0x51ed77;
@@ -472,12 +584,20 @@
      can never swallow it into a merged buffer.
      ============================================================ */
   const POOL = {
-    shell: null, dome: null, bills: [],
+    shell: null, dome: null, bills: [], wdome: null,
     capVol: null, stemVol: null, surgeVol: null, hotVol: null,
+    crownVol: null, glowVol: null,
   };
   const MAX_BILLS = 5;
-  const VOL_MAX = { cap: 28, stem: 16, surge: 24, hot: 16 };
-  const VOL_SEED = { cap: [], stem: [], surge: [], hot: [] };
+  /* THE CROWN AND THE COLLAR SHARE ONE MESH, and that is the whole reason
+     this redraw costs three draw calls and not four. Both are the same
+     material — cold, dark, flat-shaded cauliflower — so they are two SLICES
+     of one instanced field: [0, CROWN_N) boil over the cap's top, [CROWN_N,
+     crown) hang under its rim as the skirt. One buffer, one upload, one
+     draw, and a budget cut decimates both together. */
+  const VOL_MAX = { cap: 28, stem: 16, surge: 34, hot: 16, crown: 26, glow: 14 };
+  const CROWN_N = 16;                       // of VOL_MAX.crown; the rest is collar
+  const VOL_SEED = { cap: [], stem: [], surge: [], hot: [], crown: [], glow: [] };
 
   // One deterministic layout, reused by every detonation. The instances move
   // and swell, but never allocate. A 3D lobe cloud remains a mushroom from the
@@ -514,6 +634,43 @@
         a: a, r: 0.18 + Math.sqrt(rng()) * 0.72,
         y: (rng() - 0.35) * 0.9,
         s: 0.14 + rng() * 0.12,
+      });
+    }
+    /* CROWN then COLLAR, in ONE seed array (see VOL_MAX's note).
+       CROWN: lobes riding the cap's UPPER surface. `r` is the normalised
+       distance from the axis and the height is the cap's own dome profile
+       sqrt(1 - r^2), so the crown genuinely sits ON the cap instead of
+       floating in a plane above it — that curvature is what makes it read as
+       boiling over rather than as a hat.
+       COLLAR: a ring UNDER the rim, deliberately at 0.70..0.98 of the cap
+       radius and BELOW its centre. That is the overhang: a real cloud's cap
+       is wider than the top of its stem and the skirt is what says so. */
+    for (let i = 0; i < VOL_MAX.crown; i++) {
+      if (i < CROWN_N) {
+        const r = Math.sqrt((i + 0.35) / CROWN_N) * 0.92;
+        VOL_SEED.crown.push({
+          crown: true, a: i * 2.399963 + rng() * 0.3, r: r,
+          y: Math.sqrt(Math.max(0, 1 - r * r)),
+          s: 0.15 + rng() * 0.13, spin: (rng() - 0.5) * 0.22,
+        });
+      } else {
+        const k = (i - CROWN_N + 0.5) / (VOL_MAX.crown - CROWN_N);
+        VOL_SEED.crown.push({
+          crown: false, a: k * 6.2832 + rng() * 0.5, r: 0.70 + rng() * 0.28,
+          y: -(0.30 + rng() * 0.26),
+          s: 0.17 + rng() * 0.12, spin: (rng() - 0.5) * 0.16,
+        });
+      }
+    }
+    // GLOW: the incandescent core INSIDE the cap. Tight to the axis (r <=
+    // 0.62) so the cap's own lobes always cover it — a glow that reaches the
+    // silhouette stops being "lit from within" and becomes a second fireball.
+    for (let i = 0; i < VOL_MAX.glow; i++) {
+      VOL_SEED.glow.push({
+        a: i * 2.399963 + rng() * 0.4,
+        r: Math.sqrt(rng()) * 0.62,
+        y: (rng() - 0.45) * 0.55,
+        s: 0.22 + rng() * 0.16,
       });
     }
   }
@@ -592,6 +749,64 @@
     });
     hotMat._shared = true;
     POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat, 7);
+
+    /* ---- THE CROWN + COLLAR: cold, dark, flat-shaded cauliflower --------
+       Lambert with flatShading, drawn at renderOrder 5.3 — i.e. immediately
+       AFTER the cap (5.2) so a crown lobe sitting on the cap's shoulder wins
+       the depth tie, and BEFORE the surface billboards (5) can... no: 5.3 is
+       after 5.2 and after 5, which is the order the silhouette needs. There
+       is deliberately no emissive floor: the whole point of the crown is
+       that it is the part of the cloud that has already gone COLD, and it is
+       what the incandescent glow underneath is contrasted against. */
+    POOL.crownVol = volumeMesh("cap-crown", VOL_MAX.crown,
+      volumeMat(0x3b3129, 0x150803, 0.97), 5.3);
+    /* ---- THE CAP GLOW: incandescent, additive, inside the cap ------------
+       MeshBasic (never lit — it IS the light), additive so it brightens the
+       cap lobes it shines through rather than replacing them, and depthTest
+       ON so the cap's own front lobes still occlude it. That combination is
+       what reads as "glowing from within" instead of "a hot ball parked in
+       front of a cloud". Retired by ~11 s, long before the cloud is. */
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xffd27a, transparent: true, opacity: 0,
+      depthWrite: false, depthTest: true, fog: true,
+      blending: THREE.AdditiveBlending,
+    });
+    glowMat._shared = true;
+    POOL.glowVol = volumeMesh("cap-glow", VOL_MAX.glow, glowMat, 5.25);
+
+    /* ---- THE WHITE DOME — the first second, and the single biggest thing
+       missing from this sequence.
+
+       It is a HEMISPHERE, unlit, un-fogged, opaque white, and it is drawn
+       ABOVE everything else in the sequence (renderOrder 11) because for
+       that first second there IS nothing else: the reference plate has no
+       detail inside the dome at all, only a solid light with a soft halo.
+
+       WHY fog:false. Every other layer here mixes toward scene.fog so it
+       sits in the same haze the city does. This one must not: it is the
+       BRIGHTEST OBJECT IN THE WORLD, and fogging it would tint a pure white
+       light source toward the colour of the air in front of it — which is
+       backwards, because at that moment the air in front of it is being lit
+       BY it. (The atmosphere drive handles that half.)
+
+       WHY NormalBlending and not additive. Additive has no "behind", so an
+       additive dome would let the skyline show straight through the thing
+       that is supposed to be silhouetting it. depthWrite is still off, and
+       depthTest is on, so buildings IN FRONT correctly occlude it — which is
+       exactly the plate: a black skyline against a white dome.
+
+       WHY DoubleSide. The player can be inside its radius. At 126 m and a
+       R_PLAYER of 160 m that is a common death, and a single-sided dome
+       would vanish at the one moment it should be the whole screen. */
+    const hemiGeo = new THREE.SphereGeometry(1, 30, 15, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    hemiGeo._shared = true;
+    const wdMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, depthTest: true, fog: false,
+      side: THREE.DoubleSide, blending: THREE.NormalBlending,
+    });
+    wdMat._shared = true;
+    POOL.wdome = park(new THREE.Mesh(hemiGeo, wdMat), 11);
 
     for (let i = 0; i < MAX_BILLS; i++) {
       const mat = new THREE.ShaderMaterial({
@@ -879,6 +1094,62 @@
     return 0.35 + 0.9 * ease((t - 1.2) / (P.riseT * 0.85)) + 0.16 * spread;
   }
 
+  /* ============================================================
+     THE WHITE DOME — geometry, and it is SOLVED, not eased.
+
+     The early fireball is a strong shock, and a strong shock obeys the
+     Taylor-Sedov similarity solution: for energy E into ambient density
+     rho0,
+
+         R(t) = S * (E / rho0)^(1/5) * t^(2/5),   S ~= 1.03
+
+     The constant does not matter here — the SHAPE does, and the shape is
+     the 2/5 = 0.4 power. That is why a nuclear fireball looks the way it
+     does in the first frames and why every eased "grow the sphere" curve
+     looks wrong: at t^0.4 the ball is already at 31% of its final radius
+     after 5% of the window and at 76% after half of it. A smoothstep is at
+     1.4% and 50%. G.I. Taylor famously read Trinity's yield off exactly
+     this exponent from the published film frames.
+
+     Anchors this is normalised against:
+       R_max  = 50 * W^(1/3) m — the published maximum-fireball relation,
+                126 m at the ~15 kt this file's nuke row is priced for
+                (already the basis of STYLE.nuke.rFrac; see fireR).
+       t_max  the fireball is at its maximum radius within a few tenths of a
+                second (Glasstone's second thermal maximum for 15 kt is
+                0.0417*W^0.44 = 0.136 s), and a NEAR-SURFACE burst then sits
+                on the ground as a hemisphere for roughly the first second
+                before buoyancy lifts it clear at ~100 m/s.
+     WDOME_T = 1.05 s is that "sits on the ground" second, which is the beat
+     the reference plate is a photograph of. The dome then hands over: it
+     fades across WDOME_OUT while the additive fireball shell (which has been
+     growing behind it the whole time, hidden) is revealed rising. Nothing
+     is created or destroyed at the handover — the dome is simply the OPAQUE
+     reading of the same ball, and the fireball is the graded one. */
+  const WDOME_T = 1.05;        // s — dome reaches full radius / starts to lift
+  const WDOME_OUT = 0.42;      // s — the fade that reveals the rising fireball
+  const WDOME_P = 0.4;         // the Taylor-Sedov exponent. Do not tune this.
+  function wdomeRadius(t, L) {
+    return L.R * Math.pow(clamp(t / WDOME_T, 0, 1), WDOME_P);
+  }
+
+  /* THE CAP FLATTENS. A young cloud head is a rising ball — taller than it
+     is wide. A stabilised one is an ANVIL: the tropopause (~11 km at mid
+     latitudes) is a temperature inversion, the cloud cannot climb through
+     it, and everything that was going up goes sideways instead. A 20 kt
+     cloud tops out near 10-12 km with a cap several kilometres across, and
+     it gets there in about five minutes — compressed here into riseT, a
+     ~23x speed-up which is the same order of compression the double flash
+     takes and is named for the same reason.
+     bloomAt already widens the cap. This is the other half: the vertical
+     scale walks from 1.0 to CAP_FLAT across the rise, so the head genuinely
+     changes SHAPE rather than just growing. */
+  const CAP_FLAT = 0.62;
+  function capFlatAt(t, L) {
+    if (!v2()) return 1;
+    return 1 - (1 - CAP_FLAT) * ease((t - 1.4) / Math.max(1, L.style.riseT * 0.9));
+  }
+
   // Billboard ROLES in priority order. At tier 0 only the first survives, and
   // the cap alone still reads as "a mushroom went up over there".
   const ROLES = ["cap", "stem", "surge", "cap2", "collar"];
@@ -890,7 +1161,9 @@
   let live = null;
 
   function beginSequence(x, y, z, styleName, row, opts) {
-    if (!POOL.shell || !POOL.capVol) return null;   // pool never built (no THREE/scene)
+    // pool never built (no THREE/scene), or built only partway through a
+    // throw — either way the composers degrade to the near field.
+    if (!POOL.shell || !POOL.capVol || !POOL.crownVol || !POOL.glowVol) return null;
     const P = STYLE[styleName] || STYLE.nuke;
     const q = q01();
     const gy = floorAt(x, z);
@@ -984,12 +1257,34 @@
         stem: count(nuke ? 8 : 5, nuke ? VOL_MAX.stem : 10),
         surge: count(nuke ? 10 : 7, nuke ? VOL_MAX.surge : 15),
         hot: count(nuke ? 8 : 6, nuke ? VOL_MAX.hot : 11),
+        crown: 0, glow: 0,
       };
+      /* THE CROWN/COLLAR AND THE GLOW ARE NUCLEAR-ONLY, and that is not a
+         budget decision — a MOAB's smoke column has no incandescent head and
+         no overhanging skirt, so drawing them on it would be a fiction. The
+         crown's tier walk DECIMATES both of its slices evenly (the same rule
+         the glass ladder uses): a budget cut must cost resolution, never the
+         SHAPE, and a collar with no lobes left in it stops the cap
+         overhanging at exactly the tier that can least afford a second
+         silhouette read. */
+      if (nuke && v2()) {
+        const cn = count(10, VOL_MAX.crown);
+        live.volN.crown = cn;
+        // The crown keeps its share of whatever budget survived, and BOTH
+        // slices are guaranteed at least 3 lobes — a collar decimated to
+        // nothing stops the cap overhanging, which is the one silhouette
+        // read a low tier can least afford to lose.
+        live.crownN = clamp(Math.round(cn * (CROWN_N / VOL_MAX.crown)), 3, cn - 3);
+        live.volN.glow = count(6, VOL_MAX.glow);
+      }
       POOL.capVol.count = live.volN.cap;
       POOL.stemVol.count = live.volN.stem;
       POOL.surgeVol.count = live.volN.surge;
       POOL.hotVol.count = live.volN.hot;
-      const vv = [POOL.surgeVol, POOL.stemVol, POOL.capVol, POOL.hotVol];
+      POOL.crownVol.count = live.volN.crown;
+      POOL.glowVol.count = live.volN.glow;
+      const vv = [POOL.surgeVol, POOL.stemVol, POOL.capVol, POOL.hotVol,
+                  POOL.crownVol, POOL.glowVol];
       for (let i = 0; i < vv.length; i++) {
         vv[i].position.set(x, gy, z);
         vv[i].visible = true;
@@ -998,6 +1293,30 @@
       POOL.stemVol.material.opacity = 0;
       POOL.surgeVol.material.opacity = 0;
       POOL.hotVol.material.opacity = 0;
+      POOL.crownVol.material.opacity = 0;
+      POOL.glowVol.material.opacity = 0;
+      if (!live.volN.crown) POOL.crownVol.visible = false;
+      if (!live.volN.glow) POOL.glowVol.visible = false;
+    }
+
+    /* ---- THE WHITE DOME. Seated on the DECK, not at the burst height.
+       Both routes to a nuclear detonation in this game end at a surface —
+       the bomb's own impact point, or the planted device's floor — so the
+       near-surface hemisphere IS the case, and it is the case the reference
+       plate shows. The seat is nudged up only when a stray burst height
+       genuinely lifts the ball off the ground (a debug teleport, or a fuze
+       change later), where a hemisphere on the deck would be a lie; the
+       0.55 factor keeps its equator at the ball's centre either way.
+       Never at tier 0? No: this is the ONE layer that is never dropped. It
+       is a single 450-triangle mesh, alive for 1.5 s, and it is the beat. */
+    live.wdome = v2() && P.dbl ? POOL.wdome : null;
+    if (live.wdome) {
+      const lift = Math.max(0, burstY - gy);
+      live.wdomeY = gy + Math.min(lift, R * 0.55);
+      live.wdome.position.set(x, live.wdomeY, z);
+      live.wdome.scale.setScalar(0.01);
+      live.wdome.material.opacity = 0;
+      live.wdome.visible = true;
     }
 
     /* ---- SCHEDULED BEATS. All of them route into systems that are already
@@ -1188,12 +1507,31 @@
   const _volDummy = new THREE.Object3D();
   const VOL_HOT = new THREE.Color(0xff7a18);
   const VOL_ASH = new THREE.Color(0x332f2c);
-  const VOL_STEM_HOT = new THREE.Color(0x5e3b2b);
+  /* THE STEM IS ORANGE-RED, NOT BROWN, and THE BASE SURGE IS RED-BROWN.
+     The column under a fresh cap is convecting air off a fireball that is
+     still radiating into it, so it is LIT from inside along its whole
+     length — that is the single loudest colour in the reference plate and
+     the old 0x5e3b2b read as a dust column standing beside an explosion
+     rather than rising out of one. The surge is pulverised GROUND thrown
+     out along the deck and lit from one side, so its lit face is warm
+     red-brown and its shadowed lobes go nearly black; those black lobes are
+     what carry the plate's scale, and the old pair (0x806456/0x5a5651) was
+     two greys with a hint of tan.
+
+     BOTH PAIRS ARE KEPT AND CHOSEN PER FRAME rather than resolved once at
+     load. A colour frozen by a flag read at module scope is a flag that
+     cannot be flipped at runtime, and every other revert in this file can
+     be — so these are two-element tables indexed by v2(), not a ternary. */
+  const VOL_STEM_HOT_V = [new THREE.Color(0x5e3b2b), new THREE.Color(0xa8401c)];
   const VOL_STEM_ASH = new THREE.Color(0x292725);
-  const VOL_DUST_HOT = new THREE.Color(0x806456);
-  const VOL_DUST_ASH = new THREE.Color(0x5a5651);
+  const VOL_DUST_HOT_V = [new THREE.Color(0x806456), new THREE.Color(0x8a3f22)];
+  const VOL_DUST_ASH_V = [new THREE.Color(0x5a5651), new THREE.Color(0x38251c)];
   const VOL_EMBER = new THREE.Color(0x7a2a0b);
   const VOL_EMBER_OFF = new THREE.Color(0x080604);
+  // the crown: cold soot at the top of the cloud, cooling further to ash
+  const VOL_CROWN_HOT = new THREE.Color(0x4a3325);
+  const VOL_CROWN_ASH = new THREE.Color(0x2a2723);
+  const VOL_CROWN_EMBER = new THREE.Color(0x2c0d03);
 
   function putVolume(mesh, i, x, y, z, sx, sy, sz, ry) {
     _volDummy.position.set(x, y, z);
@@ -1223,9 +1561,13 @@
 
     // CAP — a broad, deep mass of overlapping lobes. The slight vertical
     // circulation is the mushroom's overturn, without exposing a donut mesh.
+    // `flat` walks the head from a rising ball to a stabilised anvil (see
+    // capFlatAt); it multiplies the vertical SPREAD and the lobes' own
+    // height, so the cap gets wider AND squatter instead of merely bigger.
     const cap = POOL.capVol;
     const capIn = ease((t - 0.55) / 1.15);
     const capRadius = L.capW * bloom * 0.5;
+    const flat = capFlatAt(t, L);
     for (let i = 0; i < L.volN.cap; i++) {
       const s = VOL_SEED.cap[i];
       const a = s.a + roll * (0.35 + s.r * 0.45) + s.spin * t;
@@ -1234,15 +1576,102 @@
       const overturn = Math.sin(a * 1.7 + t * 0.55) * capRadius * 0.035;
       putVolume(cap, i,
         Math.cos(a) * rr,
-        capY + capRadius * s.y + overturn,
+        capY + (capRadius * s.y + overturn) * flat,
         Math.sin(a) * rr,
-        lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18), lobe,
+        lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
         a * 0.35);
     }
     cap.material.opacity = 0.96 * capIn * endFade;
     cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
     cap.visible = cap.material.opacity > 0.004;
     cap.instanceMatrix.needsUpdate = true;
+
+    /* ---- THE CAP GLOWS FROM WITHIN --------------------------------------
+       This is the layer that makes the reference plate read as a LIGHT
+       SOURCE. It lives strictly inside the cap's own lobes (seed r <= 0.62,
+       and it is scaled off the same capRadius), it is additive so it
+       brightens what it shines through, and depthTest leaves the cap's front
+       lobes occluding it — so what you see is heat coming out from between
+       the lumps, never a ball in front of a cloud.
+       It comes up WITH the cap and dies on the cloud's own cooling curve
+       (cloudCool reaches 1 at t = 11.7 s), because that is what stops the
+       cloud looking hot forever. */
+    const glow = POOL.glowVol;
+    if (L.volN.glow) {
+      const glowIn = ease((t - 0.60) / 1.0);
+      const glowOut = Math.max(0, 1 - ease((t - 2.6) / 7.4));
+      for (let i = 0; i < L.volN.glow; i++) {
+        const s = VOL_SEED.glow[i];
+        const a = s.a + roll * 0.5;
+        const rr = capRadius * s.r;
+        // 0.70: the glow lobes must stay strictly INSIDE the cap's own
+        // envelope. The cap's outermost lobe reaches 0.86R + its own radius;
+        // at this size the glow's furthest reach is comfortably under that,
+        // so heat bleeds between the lumps instead of breaking the
+        // silhouette and becoming a second fireball.
+        const lobe = capRadius * s.s * 0.70;
+        putVolume(glow, i,
+          Math.cos(a) * rr,
+          capY + capRadius * s.y * 0.55 * flat,
+          Math.sin(a) * rr,
+          lobe * 1.15, lobe * flat, lobe, a);
+      }
+      // white-hot -> yellow -> deep orange, the same walk the fireball took
+      // but slower: a cap is a much bigger mass and cools far more slowly.
+      glow.material.color.setHex(t < 1.6 ? 0xfff2c8 : t < 4.5 ? 0xffc45a : 0xd96a1e);
+      glow.material.opacity = 0.62 * glowIn * glowOut * endFade;
+      glow.visible = glow.material.opacity > 0.004;
+      glow.instanceMatrix.needsUpdate = true;
+    }
+
+    /* ---- THE COLLAR AND THE CROWN, one mesh, two slices -----------------
+       COLLAR first (it arrives earlier): the skirt hanging under the cap's
+       rim, which is the thing that makes the cap OVERHANG its stem. Without
+       it the head is a disc balanced on a column; with it there is a shape.
+       CROWN second: dark cauliflower boiling over the top. It fades in
+       LATER than everything else on purpose — the top of a fresh cloud is
+       still incandescent and there is nothing dark up there to draw. It is
+       the visible fact that the cloud is cooling from the top down. */
+    const crown = POOL.crownVol;
+    if (L.volN.crown) {
+      const collarIn = ease((t - 1.5) / 1.8);
+      const crownIn = ease((t - 2.6) / 3.4);
+      /* THE SLICE MAP, and it is not `i` — that was a real bug worth naming.
+         The seed array is laid out [0, CROWN_N) crown then the rest collar,
+         but the INSTANCE array is only volN.crown long and its crown share
+         is crownN. At full count those coincide; at any reduced tier they do
+         NOT, so reading VOL_SEED.crown[i] would have handed a CROWN seed
+         (positive y, riding the cap's dome) to a slot the loop was about to
+         place and shape as a COLLAR lobe — a wide flat saucer floating above
+         the head instead of a skirt hanging under it, at exactly the quality
+         tiers nobody profiles. Each slot therefore maps into its OWN slice,
+         evenly decimated, and the map is the identity at full count. */
+      const nC = Math.max(1, Math.min(L.volN.crown - 1, L.crownN || CROWN_N));
+      const nK = L.volN.crown - nC;
+      const COLLAR_N = VOL_MAX.crown - CROWN_N;
+      for (let i = 0; i < L.volN.crown; i++) {
+        const isCrown = i < nC;
+        const si = isCrown
+          ? Math.min(CROWN_N - 1, Math.floor(i * CROWN_N / nC))
+          : CROWN_N + Math.min(COLLAR_N - 1, Math.floor((i - nC) * COLLAR_N / Math.max(1, nK)));
+        const s = VOL_SEED.crown[si];
+        const grow = isCrown ? crownIn : collarIn;
+        const a = s.a + roll * (isCrown ? 0.42 : 0.24) + s.spin * t;
+        const rr = capRadius * s.r * (isCrown ? 1 : 1.04);
+        const lobe = capRadius * s.s * (0.5 + 0.5 * grow);
+        putVolume(crown, i,
+          Math.cos(a) * rr,
+          capY + capRadius * s.y * (isCrown ? 0.46 : 0.62) * flat,
+          Math.sin(a) * rr,
+          // the collar is deliberately WIDE and LOW (a skirt, not a bead)
+          lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
+          lobe * (isCrown ? 1.05 : 1.42), a * 0.5);
+      }
+      crown.material.opacity = 0.95 * Math.max(collarIn, crownIn) * endFade;
+      cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH, cloudCool, VOL_CROWN_EMBER);
+      crown.visible = crown.material.opacity > 0.004;
+      crown.instanceMatrix.needsUpdate = true;
+    }
 
     // STEM — overlapping vertical billows leave no chair-leg-thin cylinder and
     // no gap under the cap. A mild spiral makes sucked-up debris visibly rise.
@@ -1263,31 +1692,54 @@
         a);
     }
     stem.material.opacity = 0.91 * stemIn * endFade;
-    cloudColor(stem.material, VOL_STEM_HOT, VOL_STEM_ASH, cloudCool);
+    cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH, cloudCool);
     stem.visible = stem.material.opacity > 0.004;
     stem.instanceMatrix.needsUpdate = true;
 
     // BASE SURGE — a FILLED, irregular dust cloud. It occupies area; it never
     // traces the pressure radius as a line.
+    /* THE BASE SURGE, and its one researched number.
+       Crossroads Baker (23 kt, 1946) is the canonical measurement: the surge
+       rolled outward from the foot of the column at roughly 45 m/s and was
+       ~300 m in radius by 10 s, ~1 km by a minute, decelerating the whole
+       time. The land-burst equivalent is the ground-shock dust skirt driven
+       by the afterwinds — same picture, same law: fast then slowing, which
+       is what the ease() below is and why it is not linear.
+       WHAT V2 ADDS is the LOBES. Each one now also YAWS at a rate set by
+       how far out it is (slower further out, exactly as it decelerates) —
+       putVolume only carries a Y rotation, and that is enough here because
+       these lobes are deliberately NOT axisymmetric (1.25 across the roll
+       axis against 1.0 along it), so a yaw churns the curtain instead of
+       sliding it. And the lobe heights ALTERNATE HARD, so a Lambert light
+       from above leaves every other one in its neighbour's shadow and
+       nearly black. Those black shadowed lobes are what carry the scale of
+       the reference plate — a uniform apron reads as fog. */
     const surge = POOL.surgeVol;
     const surgeIn = ease((t - 0.75) / 2.0);
     const surgeFade = Math.max(0, 1 - ease((t - Math.min(15, L.dur - 5)) / 7));
     const surgeMax = Math.min(L.maxR * 0.72, L.R * 3.6);
     const surgeR = surgeMax * (0.12 + 0.88 * ease((t - 0.55) / 6.2));
+    const deep = v2();
     for (let i = 0; i < L.volN.surge; i++) {
       const s = VOL_SEED.surge[i];
       const a = s.a + Math.sin(t * 0.16 + i) * 0.08;
       const rr = surgeR * s.r;
       const lobe = Math.max(L.R * 0.075, surgeMax * (0.055 + s.s * 0.028));
+      // alternating tall/low lobes: the low ones fall into their neighbours'
+      // shadow and go black, which is the whole reason this row exists.
+      const tall = deep ? (0.72 + ((i & 1) ? 0.62 : 0.02)) : 1;
+      // the churn — slower the further out, exactly as the surge decelerates
+      const spin = deep ? -t * (0.55 / (0.45 + s.r * 1.6)) : 0;
       putVolume(surge, i,
         Math.cos(a) * rr,
-        lobe * (0.24 + 0.10 * Math.sin(i * 1.7)),
+        lobe * (0.24 + 0.10 * Math.sin(i * 1.7)) * tall,
         Math.sin(a) * rr,
-        lobe * 1.25, lobe * 0.38, lobe,
-        a);
+        lobe * 1.25, lobe * 0.38 * tall, lobe,
+        a + spin);
     }
-    surge.material.opacity = 0.82 * surgeIn * surgeFade;
-    cloudColor(surge.material, VOL_DUST_HOT, VOL_DUST_ASH, cloudCool * 0.85);
+    surge.material.opacity = (deep ? 0.90 : 0.82) * surgeIn * surgeFade;
+    cloudColor(surge.material, VOL_DUST_HOT_V[deep ? 1 : 0], VOL_DUST_ASH_V[deep ? 1 : 0],
+      cloudCool * 0.85);
     surge.visible = surge.material.opacity > 0.004;
     surge.instanceMatrix.needsUpdate = true;
 
@@ -1346,10 +1798,19 @@
     u.uScroll.value.set(b.seed + b.sx * t, b.seed - (b.sy + shear) * t);
     u.uScroll2.value.set(b.seed * 0.7 - b.sx * 0.42 * t, b.seed * 1.3 + (b.sy + shear * 1.6) * 0.37 * t);
 
+    /* THE DETAIL PLANES MUST TRACK THE FLATTENING HEAD. These quads are
+       surface texture painted over the 3D cap, so if the volume squats to
+       CAP_FLAT and the quads do not, the roiling detail ends up standing
+       proud of the silhouette it is supposed to be ON — a paper oval above
+       an anvil, which is the exact failure the `if (L.volume) op *= 0.46`
+       line at the bottom of this function exists to prevent. capFlatAt is
+       1 when NUKE_FX_V2 is off, so this line is inert on the revert path. */
+    const flat = capFlatAt(t, L);
+
     switch (b.role) {
       case "cap":
         m.position.set(L.x, capY, L.z);
-        m.scale.set(L.capW * bloom, L.capW * bloom * 0.66, 1);
+        m.scale.set(L.capW * bloom, L.capW * bloom * 0.66 * flat, 1);
         u.uLife.value = clamp(t / 9, 0, 1);
         u.uErode.value = 0.14;
         op *= 0.95;
@@ -1358,8 +1819,8 @@
         // OFFSET, never a multiply on an absolute world Y — `capY` already
         // includes the ground height, so `capY * 1.05` drifted the second cap
         // further from the first the higher the terrain under ground zero was.
-        m.position.set(L.x + L.capW * 0.16, capY + L.capW * 0.05, L.z - L.capW * 0.1);
-        m.scale.set(L.capW * bloom * 0.72, L.capW * bloom * 0.5, 1);
+        m.position.set(L.x + L.capW * 0.16, capY + L.capW * 0.05 * flat, L.z - L.capW * 0.1);
+        m.scale.set(L.capW * bloom * 0.72, L.capW * bloom * 0.5 * flat, 1);
         u.uLife.value = clamp(t / 8 + 0.05, 0, 1);
         u.uErode.value = 0.22;
         op *= 0.7;
@@ -1374,8 +1835,8 @@
         break;
       }
       case "collar":
-        m.position.set(L.x, capY - L.capW * 0.30 * bloom, L.z);
-        m.scale.set(L.capW * bloom * 0.62, L.capW * bloom * 0.26, 1);
+        m.position.set(L.x, capY - L.capW * 0.30 * bloom * flat, L.z);
+        m.scale.set(L.capW * bloom * 0.62, L.capW * bloom * 0.26 * flat, 1);
         u.uLife.value = clamp(0.22 + t / 18, 0, 1);
         u.uErode.value = 0.26;
         op *= 0.62;
@@ -1467,6 +1928,43 @@
           const px = L.x + Math.cos(a) * r, pz = L.z + Math.sin(a) * r;
           try { CBZ.cityDustKick(px, floorAt(px, pz) + 0.6, pz, 1.5 + L.q); } catch (e) {}
         }
+      }
+    }
+
+    /* ---- (a) THE WHITE DOME. The first 1.5 seconds, and the beat this
+       sequence never had. Radius is the Taylor-Sedov t^0.4 law (wdomeRadius,
+       which is where the arithmetic is written down); everything else here
+       is the handover.
+
+       THE DOUBLE FLASH IS ON IT TOO, and that matters more here than
+       anywhere: this is the only OPAQUE layer in the sequence, so when the
+       shock front goes dark the dome does not merely dim — it stops hiding
+       what is behind it, and the skyline it was silhouetting comes back for
+       a few frames before the second pulse buries it again. That is the
+       physical reading of the minimum and it is free.
+
+       THE LIFT is the last thing it does: over WDOME_OUT the dome fades and
+       rises off its seat, revealing the additive fireball shell that has
+       been growing behind it since t=0. Nothing is created at the handover;
+       the dome is the opaque reading of the same ball and the shell is the
+       graded one, so they cannot disagree about where the fireball is. */
+    if (L.wdome) {
+      const rad = wdomeRadius(t, L);
+      // it lifts as it lets go — the buoyant rise starts at about 1 s, and
+      // riseAt's own window opens at 0.9, so this is the seam between them.
+      const lift = clamp((t - WDOME_T) / WDOME_OUT, 0, 1);
+      L.wdome.position.set(L.x, L.wdomeY + rad * 0.30 * lift, L.z);
+      // never a zero scale: t^0.4 is exactly 0 at t=0 and a singular matrix
+      // is how a mesh ends up with NaN in its bounds. (frustumCulled is
+      // already off via park(), so a 1 cm sphere for one frame costs nothing.)
+      const sr = Math.max(0.01, rad);
+      L.wdome.scale.set(sr, sr * (0.92 + 0.16 * lift), sr);
+      // Opaque through the first second (the plate has NO detail inside it),
+      // then out. rad0 is the shared pulse: one curve, and now five readers.
+      const op = (1 - ease(lift)) * (0.10 + 0.90 * rad0);
+      L.wdome.material.opacity = Math.max(0, op);
+      if (lift >= 1 || L.wdome.material.opacity <= 0.004) {
+        L.wdome.visible = false; L.wdome = null;
       }
     }
 
@@ -1628,8 +2126,9 @@
     // Runs even from a half-built sequence (a throw in beginSequence), which
     // is the only way geometry could ever be stranded visible in the world.
     const mm = [
-      POOL.shell, POOL.dome,
+      POOL.shell, POOL.dome, POOL.wdome,
       POOL.capVol, POOL.stemVol, POOL.surgeVol, POOL.hotVol,
+      POOL.crownVol, POOL.glowVol,
     ];
     for (let i = 0; i < mm.length; i++) {
       const m = mm[i];
@@ -1941,6 +2440,107 @@
   });
 
   /* ============================================================
+     (e) THE FIREBALL LIGHTS THE WORLD — onAlways(94.6).
+
+     scene.fog already turned the SKY (see the atmosphere drive above, which
+     core/sky.js paints its horizon band from). Nothing turned the GROUND,
+     and that is the difference between a picture of an explosion and being
+     next to one: in the reference plate every surface for kilometres is
+     orange, and the shadows all point away from the cloud.
+
+     WHY 94.6 AND NOT 9.62 (this is the whole trick, and getting it wrong
+     would have made the feature a silent no-op):
+       core/loop.js runs EVERY onUpdate, then EVERY onAlways. Inside the
+       always chain the order is
+           core/daynight.js @2      writes sun/hemi colour + intensity
+           city/nukefx.js   @9.62   the sequence (fog drive lives here)
+           core/gfx.js      @94.5   lightRig.finalize() — REWRITES sun and
+                                    hemi from the keyframes, then applies the
+                                    tone-map gain
+           core/sky.js      @99     paints the dome from scene.fog.color
+     A light write at 9.62 is therefore clobbered 85 orders later by a
+     function whose entire job is to be the last writer. core/lights.js's
+     own header calls this "the three-writer problem" and names the three;
+     this is the fourth, and it takes the one slot that survives.
+
+     IT IS STATELESS, exactly like the fog drive, and for the same reason:
+     daynight@2 and finalize@94.5 rewrite all four values every single frame,
+     so there is nothing to save, nothing to restore, and an abort mid-arc —
+     or a mode flip, or the player dying — leaves nothing behind.
+
+     IT ADDS NO LIGHT. In r128 the shader program cache key depends on the
+     COUNT and TYPES of lights in the scene, so introducing a PointLight at
+     the fireball would recompile every material in the world in the frame a
+     warhead lands. Only values are written here, which costs nothing.
+
+     THE HEMISPHERE IS PUSHED HARDER THAN THE SUN, and that is physics, not
+     a dodge: during the thermal pulse the burst overwhelms the sun from a
+     direction the shadow cascade is not aimed at, so what you actually see
+     is flat blinding light with the shadows WASHED OUT — then, as the
+     hemisphere falls back, the sun's shadows return under an orange sky.
+     Re-aiming the one shadow-casting light at a moving fireball would force
+     a full cascade re-render every frame for a 30 s effect; this reproduces
+     the read for free.
+     ============================================================ */
+  const LIGHT = {
+    SUN_K: 2.4,        // peak multiplier added to sun intensity
+    HEMI_K: 4.2,       // ...and to the ambient. Higher on purpose — see above.
+    SUN_MIX: 0.88,     // how far the sun's colour is pulled to the fire
+    HEMI_MIX: 0.94,
+    NEAR: 300,         // m — full authority inside this
+    FAR: 2400,         // m — floored at FLOOR past this
+    FLOOR: 0.22,
+  };
+  const _lightC = new THREE.Color();
+  const FIRE_WHITE = new THREE.Color(0xfff6e4);
+  const FIRE_ORANGE = new THREE.Color(0xff7c2a);
+  const FIRE_EMBER = new THREE.Color(0xc4491a);
+  // luminosity 0..1 of the event AT THE LENS, for a given sequence time.
+  // Exported through the audit so the curve is a number, never a screenshot.
+  function fireLum(t, L) {
+    const P = L.style;
+    // the thermal pulse owns the first ~72% of the whiteout window and rides
+    // the SAME curve the div, the fireball, the sky and the dome ride.
+    const pulse = flashRadiance(t, P);
+    const flashK = Math.max(0, 1 - t / Math.max(0.01, P.white * 0.72));
+    // ...then the burn: the fireball and the incandescent cap, decaying, and
+    // shut cleanly off across the sequence's own last 10 s.
+    const tail = 1 - ease((t - (P.dur - 10)) / 10);
+    const burn = Math.exp(-Math.max(0, t - 0.6) / 5.2) * Math.max(0, tail);
+    return clamp(Math.max(flashK * pulse, burn * 0.72), 0, 1);
+  }
+  function lightAtten(L) {
+    const d = camDist(L.x, L.by + L.R, L.z);
+    if (d <= LIGHT.NEAR) return 1;
+    const u = clamp((d - LIGHT.NEAR) / (LIGHT.FAR - LIGHT.NEAR), 0, 1);
+    return 1 - (1 - LIGHT.FLOOR) * u;
+  }
+  if (CBZ.onAlways) CBZ.onAlways(94.6, function () {
+    if (!live || !v2() || !CBZ.CONFIG.NUKE_FX_SKY) return;
+    const L = live;
+    const k = fireLum(L.t, L) * lightAtten(L);
+    if (k <= 0.004) return;
+    // white at the flash, orange through the burn, ember at the end
+    if (L.t < 0.45) _lightC.copy(FIRE_WHITE).lerp(FIRE_ORANGE, L.t / 0.45);
+    else _lightC.copy(FIRE_ORANGE).lerp(FIRE_EMBER, clamp((L.t - 0.45) / 7, 0, 1));
+    const sun = CBZ.sun, hemi = CBZ.hemi, bnc = CBZ.bounce;
+    if (sun) {
+      sun.intensity *= 1 + LIGHT.SUN_K * k;
+      if (sun.color) sun.color.lerp(_lightC, LIGHT.SUN_MIX * k);
+    }
+    if (hemi) {
+      hemi.intensity *= 1 + LIGHT.HEMI_K * k;
+      if (hemi.color) hemi.color.lerp(_lightC, LIGHT.HEMI_MIX * k);
+      // the GROUND ambient goes too — the deck under everything is lit by
+      // this, and a ground colour that stayed green is the tell.
+      if (hemi.groundColor) hemi.groundColor.lerp(_lightC, 0.78 * k);
+    }
+    // the bounce fill carries the colour of what it bounced off, and today
+    // what it bounced off is on fire.
+    if (bnc && bnc.color) { bnc.color.lerp(_lightC, 0.85 * k); bnc.intensity *= 1 + 1.8 * k; }
+  });
+
+  /* ============================================================
      DEV/QA — read the whole spectacle's numbers from a CDP probe with no
      rendering at all (CLAUDE.md's closed loop is math over live state).
      ============================================================ */
@@ -1962,6 +2562,13 @@
         shell: !!live.shell, dome: !!live.dome,
         volume: !!live.volume, volumeCounts: live.volN || null,
         groundRings: 0,
+        // NUKE_FX_V2 live state
+        wdome: !!live.wdome,
+        wdomeR: +wdomeRadius(live.t, live).toFixed(1),
+        capFlat: +capFlatAt(live.t, live).toFixed(3),
+        lum: +fireLum(live.t, live).toFixed(3),
+        lumAtLens: +(fireLum(live.t, live) * lightAtten(live)).toFixed(3),
+        crownN: live.crownN || 0,
       } : null,
       flash: flash ? { t: +flash.t.toFixed(2), dur: flash.dur, peak: flash.peak, keys: flash.keys.length } : null,
       walks: walks.map(function (w) { return { kind: w.kind, i: w.i, n: w.pts.length }; }),
@@ -1973,7 +2580,7 @@
         sky: !!CBZ.CONFIG.NUKE_FX_SKY, walk: !!CBZ.CONFIG.BOMB_WALK_V1,
         pulse: !!CBZ.CONFIG.NUKE_FX_PULSE, veil: !!CBZ.CONFIG.NUKE_FX_VEIL,
         rise: !!CBZ.CONFIG.NUKE_FX_RISE, roll: !!CBZ.CONFIG.NUKE_FX_ROLL,
-        glass: !!CBZ.CONFIG.NUKE_FX_GLASS,
+        glass: !!CBZ.CONFIG.NUKE_FX_GLASS, v2: v2(),
       },
     };
   };
@@ -1996,6 +2603,16 @@
     const R = Math.max(5, eff * P.rFrac);
     const sc = (opts.scale > 0 ? +opts.scale : 1);
     const reach = (row.wave ? row.wave.maxR : eff * 4) * (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1) * sc;
+    /* THE DRAW-CALL BUDGET, published. The four original instanced volumes
+       (surge / stem / cap / hot) plus, for the nuclear style under V2, the
+       incandescent cap glow and the ONE mesh that carries both the crown and
+       the collar: SIX. Plus the white dome, which is one 450-triangle mesh
+       alive for 1.5 s and is the only layer in the file that is never
+       dropped at any quality tier. The MOAB keeps four — a chemical column
+       has no incandescent head and no overhanging skirt, and drawing them on
+       it would be a fiction rather than a saving. */
+    const v2n = kind === "nuke" && v2();
+    const volumeDraws = P.volume ? (v2n ? 6 : 4) : 0;
     return {
       kind: kind, nearField: +eff.toFixed(1), fireball: +R.toFixed(1), R: +R.toFixed(1),
       capW: +(R * P.capK).toFixed(1), capY: +(R * P.riseK).toFixed(1),
@@ -2003,9 +2620,11 @@
       burnR: +(P.thermK > 0 ? reach * P.thermK : 0).toFixed(1),
       bills: Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
       shell: !!(CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28),
-      volumeDraws: P.volume ? 4 : 0,
+      volumeDraws: volumeDraws,
+      whiteDome: v2n && !!P.dbl,
       groundRings: 0,
-      addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + (P.volume ? 4 : 0),
+      addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + volumeDraws +
+                 (v2n && P.dbl ? 1 : 0),
     };
   };
 
@@ -2060,11 +2679,21 @@
       if (FLASH_DOUBLE[i][1] > pk2V) { pk2V = FLASH_DOUBLE[i][1]; pk2T = FLASH_DOUBLE[i][0]; }
     }
 
-    // the mushroom, at full rise and full bloom (bloomAt's ceiling)
+    // the mushroom, at full rise and full bloom (bloomAt's ceiling). Under
+    // V2 the head has also FLATTENED to CAP_FLAT of its vertical extent by
+    // then, and the reported cloud top has to say so or the audit is
+    // describing a silhouette the file stopped drawing.
     const bloomMax = 0.35 + 0.9 + 0.16;
     const capWide = S.capW * bloomMax;
-    const cloudTop = S.capY + capWide * 0.66 * 0.5;
+    const flatK = (kind === "nuke" && v2()) ? CAP_FLAT : 1;
+    const cloudTop = S.capY + capWide * 0.66 * 0.5 * flatK;
     const stemWide = S.R * P.stemK * 1.7;              // widened by the rise term
+    // THE OVERHANG. The collar seeds sit at 0.70..0.98 of the cap radius and
+    // the cap radius is capWide/2, so the skirt's outer edge is this — and
+    // it must be comfortably wider than the stem or the cap is not
+    // overhanging anything, which is the single most recognisable thing
+    // about the silhouette in the reference plate.
+    const collarWide = capWide * 0.98;
 
     const glassK = GLASS_K;
     const zones = {
@@ -2092,6 +2721,15 @@
       stemIn: 0.65, capIn: 0.55, surgeIn: 0.75, cap2In: 1.9, collarIn: 2.2,
       thermalIgnitionIn: 0.9,
       shellOut: 3.9,
+      // ---- NUKE_FX_V2 beats. -1 means "this style does not have one".
+      whiteDomeIn: S.whiteDome ? 0 : -1,
+      whiteDomeFull: S.whiteDome ? WDOME_T : -1,
+      whiteDomeOut: S.whiteDome ? +(WDOME_T + WDOME_OUT).toFixed(2) : -1,
+      capGlowIn: S.whiteDome ? 0.60 : -1,
+      capGlowOut: S.whiteDome ? 10.0 : -1,
+      collar3dIn: S.whiteDome ? 1.50 : -1,
+      crownIn: S.whiteDome ? 2.60 : -1,
+      capFlattenAt: S.whiteDome ? +(1.4 + P.riseT * 0.9).toFixed(2) : -1,
       riseStart: 0.9, riseEnd: +(0.9 + P.riseT).toFixed(2),
       glassAt: glassK.map(function (k) { return +Math.max(0.3, S.reach * k / spd).toFixed(2); }),
       ashIn: P.ash ? 8 : -1,
@@ -2102,20 +2740,46 @@
       cloudTop: +cloudTop.toFixed(1),
       capWidth: +capWide.toFixed(1),
       stemWidth: +stemWide.toFixed(1),
+      collarWidth: +collarWide.toFixed(1),
       topOverCap: +(cloudTop / capWide).toFixed(2),
       capOverStem: +(capWide / stemWide).toFixed(2),
+      overhang: +(collarWide / stemWide).toFixed(2),
+      capFlatten: flatK,
       burnOverFlatten: +(zones.burn / Math.max(1, zones.flatten)).toFixed(3),
     };
+
+    /* THE WHITE DOME, sampled. The claim in the header is that it grows on
+       the Taylor-Sedov t^0.4 law, and a claim in a comment is worth nothing
+       — so the curve is published at four stations. The signature of the
+       exponent is that it is FAST then slow: 31% of full radius after 5% of
+       the window, 76% after half. A smoothstep reads 1.4% and 50%, so these
+       four numbers alone tell a probe which curve is actually running. */
+    const domeCurve = S.whiteDome
+      ? [0.05, 0.25, 0.50, 1.00].map(function (u) {
+          return +(Math.pow(u, WDOME_P)).toFixed(3);
+        })
+      : null;
 
     return {
       // `rings` aliases numeric zones for older probes; it never means drawn
       // geometry. `layers.groundRings` is the visual contract.
       kind: kind, zones: zones, rings: zones, beats: beats, proportions: proportions,
       pulse: { min: dipV, secondMax: pk2V, keys: FLASH_DOUBLE.length },
+      dome: S.whiteDome
+        ? { r: +S.fireball.toFixed(1), t: WDOME_T, out: WDOME_OUT, p: WDOME_P, curve: domeCurve }
+        : null,
+      // the world-lighting curve as numbers, sampled across the arc
+      light: v2() && CBZ.CONFIG.NUKE_FX_SKY
+        ? { sunK: LIGHT.SUN_K, hemiK: LIGHT.HEMI_K, near: LIGHT.NEAR, far: LIGHT.FAR,
+            lum: [0, 0.5, 2, 6, 15].map(function (tt) {
+              return +fireLum(tt, { style: P }).toFixed(3);
+            }) }
+        : null,
       layers: {
         bills: S.bills, shell: S.shell,
         dome: !!(S.shell && P.dome && q01() > 0.45),
         volumeDraws: S.volumeDraws,
+        whiteDome: !!S.whiteDome,
         groundRings: 0,
       },
       ok: {
@@ -2129,7 +2793,30 @@
         noGroundRings: S.groundRings === 0,
         fullNuclearFireball: kind !== "nuke" ||
           (S.fireball === S.nearField && S.R === S.fireball),
-        volumetricCloud: !P.volume || S.volumeDraws === 4,
+        volumetricCloud: !P.volume || S.volumeDraws >= 4,
+        /* ---- NUKE_FX_V2 GATES. Each one pins a claim the header makes.
+           They are structurally true when the flag is off, so a revert never
+           turns the audit red — it turns the claims off. */
+        // the dome grows on the Sedov exponent, not on an ease. A smoothstep
+        // is at 0.014 by 5% of the window; t^0.4 is at 0.31.
+        domeIsSedov: !S.whiteDome || (domeCurve[0] > 0.25 && domeCurve[2] > 0.70 &&
+                                      domeCurve[3] === 1),
+        // ...and it reaches the real fireball radius, not some fraction of it
+        domeReachesFireball: !S.whiteDome || S.fireball === S.R,
+        // THE CAP OVERHANGS ITS STEM. This is the silhouette, and it is the
+        // one thing the collar exists to buy.
+        capOverhangs: !S.whiteDome || proportions.overhang > 6,
+        // the head genuinely CHANGES SHAPE as it stabilises (anvil, not ball)
+        capFlattens: !S.whiteDome || (flatK < 0.85 && flatK > 0.3),
+        // the crown arrives AFTER the collar, which arrives after the cap:
+        // a cloud cools from the top down and the beats have to say so.
+        crownIsLate: !S.whiteDome ||
+          (beats.crownIn > beats.collar3dIn && beats.collar3dIn > beats.capIn),
+        // the incandescent cap dies before the cloud does, or it is a lamp
+        glowCoolsFirst: !S.whiteDome || beats.capGlowOut < P.dur,
+        // the world-light curve peaks at the flash and reaches zero by the end
+        lightPeaksAtFlash: !(v2() && CBZ.CONFIG.NUKE_FX_SKY) ||
+          (fireLum(0, { style: P }) >= 0.98 && fireLum(P.dur, { style: P }) <= 0.02),
         thermalOutranges: P.thermK === 0 || zones.burn > zones.flatten,
         dipPresent: !P.dbl || dipV < 0.2,
         secondBrighter: !P.dbl || pk2V >= FLASH_DOUBLE[0][1],
@@ -2137,7 +2824,7 @@
            bomb's column is legitimately squatter and stubbier than a mushroom —
            holding the MOAB to the nuke's 2.19:1 and 9.8:1 would be asserting a
            fiction, and quietly exempting it would be worse. So the nuclear
-           style is gated at 1.8 / 6.0 (it reads 2.19 / 8.15) and the chemical
+           style is gated at 1.8 / 6.0 (it reads 2.06 / 8.15) and the chemical
            style at 1.5 / 4.5 (it reads 1.86 / 5.12). Neither has slack enough
            to absorb a careless riseK/capK/stemK edit unnoticed, which is the
            entire job of a gate. */

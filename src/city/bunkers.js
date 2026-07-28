@@ -54,6 +54,13 @@
   const THREE = window.THREE;
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.STRAT_BUNKERS == null) CBZ.CONFIG.STRAT_BUNKERS = true;
+  // NUKE_STASH_TRIPLE — the vault cradle carries THREE warheads on a handling
+  // rack instead of one bare casing. It is still ONE inventory item and one
+  // usable weapon (see the stash block in furnishCommand): the count, the
+  // one-per-world scarcity and every existing gate are unchanged. false =>
+  // the single casing, byte-for-byte. Declared here too so this file degrades
+  // correctly when config.js is older than it is.
+  if (CBZ.CONFIG.NUKE_STASH_TRIPLE == null) CBZ.CONFIG.NUKE_STASH_TRIPLE = true;
 
   // ---- deterministic stream (never Math.random in a build path) -----------
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
@@ -351,7 +358,13 @@
       find: function (px, pz) { return nearestTok(vaultTokens, px, pz, 2.8); },
       options: [{
         id: "nukevault-take", slot: "e", bad: true,
-        label: function (t) { return t.taken ? "An empty cradle" : "Take the nuclear device"; },
+        // THREE WARHEADS, ONE NUKE: the label says what is on the rack, the
+        // ledger below still moves exactly one item.
+        label: function (t) {
+          if (t.taken) return "An empty rack";
+          return CBZ.CONFIG.NUKE_STASH_TRIPLE === false
+            ? "Take the nuclear device" : "Take the nuclear stash (3 warheads)";
+        },
         onSelect: function (t) {
           if (t.taken) return;
           const e = CBZ.cityEcon;
@@ -360,7 +373,12 @@
           if (t.deviceMesh) t.deviceMesh.visible = false;
           if (e && e.add) e.add("Nuclear Device", 1);
           if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("You are carrying a NUCLEAR DEVICE."); } catch (er) {} }
-          if (CBZ.city && CBZ.city.note) CBZ.city.note("Deploy: plant it on foot (it offers a 45s timer), or load the B-2's bay.", 4.2);
+          if (CBZ.city && CBZ.city.note) {
+            // The timer belongs to strategic.js; read it rather than retyping
+            // it — this line was still advertising 45 s long after it moved.
+            const sec = (CBZ.strategicState && CBZ.strategicState().plantTimer) || 90;
+            CBZ.city.note("Deploy: plant it on foot (" + sec + "s on the clock), or load the B-2's bay.", 4.2);
+          }
           if (CBZ.sfx) { try { CBZ.sfx("alarm"); } catch (er) {} }
           // walking out with the country's deterrent is the loudest theft there is
           if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { x: t.x, z: t.z, type: "grand-theft-military", instant: true }); } catch (er) {} }
@@ -368,7 +386,12 @@
       }],
     });
     if (I.describe) I.describe("nukevault", function () {
-      return { label: "Weapons Vault", note: "One device. One per world. No second chances." };
+      return {
+        label: "Weapons Vault",
+        note: CBZ.CONFIG.NUKE_STASH_TRIPLE === false
+          ? "One device. One per world. No second chances."
+          : "Three warheads, one stash. One per world. No second chances.",
+      };
     });
 
     /* ---- THE STRIKE CONSOLE ------------------------------------------------
@@ -657,28 +680,99 @@
     vdoor.colRec.y0 = FY; vdoor.colRec.y1 = FY + 2.5;
     rec.doors.push(vdoor);
     doorTokens.push({ x: vx1 + 0.9, z: vz1 - 0.9, door: vdoor, name: "Weapons Vault" });
-    // the CRADLE + THE DEVICE (one per world): polished casing on a steel
-    // saddle under a red cage lamp — the room exists for this one object.
+    /* ---- THE STASH: THREE WARHEADS, ONE NUKE ---------------------------
+       OWNER: "theres one nuclear stash — it should actually have 3 warheads
+       in it but be considered one nuke."
+
+       So the ROOM changes and the RULES do not. What is drawn is a real
+       handling rack carrying three complete weapons — this is the best-built
+       room in the game and it exists for this one object, so it gets the
+       hardware: A-frame standards, longitudinal rails, saddle cradles,
+       tie-down straps, a stencilled kerb. What is BOOKKEPT is untouched:
+       one `vaultTokens` entry, one "Nuclear Device" item, one per world,
+       the same theft crime, the same "you already carry it" refusal. Taking
+       it takes all three as a unit and the whole rack goes with them.
+
+       THE LATENT BUG THIS FIXES, found by reading core/batch.js rather than
+       by running anything: the old code tagged `dev.userData.nukeDevice` on
+       the GROUP, but batch.js's walk() only refuses to DESCEND on
+       `userData.dynamic` / `.mover`; it then judges each MESH on its own
+       userData (batch.js:421,429). Every casing mesh underneath carried an
+       EMPTY userData, so the device was eligible to be swallowed into a
+       merged buffer — after which `deviceMesh.visible = false` on the group
+       hides nothing at all and the vault keeps a bomb you have already
+       taken. Every mesh in the stash is stamped below, which is what the
+       batcher actually reads.                                             */
     const devX = vx0 + 2.6, devZ = vz0 + 2.6;
-    box(g, devX, FY + 0.35, devZ, 2.0, 0.7, 1.2, M.steelD);
-    for (const s of [-0.55, 0.55]) box(g, devX + s, FY + 0.82, devZ, 0.16, 0.28, 1.1, M.steel);
-    const dev = new THREE.Group();
-    const shellM = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 1.7, 12), cm(M.device));
-    shellM.rotation.z = Math.PI / 2; dev.add(shellM);
-    const noseM = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 8), cm(M.device));
-    noseM.position.x = 0.85; dev.add(noseM);
-    const tailM = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 0.5, 12), cm(M.deviceD));
-    tailM.rotation.z = Math.PI / 2; tailM.position.x = -1.05; dev.add(tailM);
-    const bandM = new THREE.Mesh(new THREE.CylinderGeometry(0.435, 0.435, 0.18, 12), cm(M.red));
-    bandM.rotation.z = Math.PI / 2; bandM.position.x = 0.2; dev.add(bandM);
-    dev.position.set(devX, FY + 1.15, devZ);
-    dev.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    dev.userData.nukeDevice = true;               // spare from the merger (we hide it on take)
-    g.add(dev);
-    col(devX - 1.1, devX + 1.1, devZ - 0.7, devZ + 0.7, FY, FY + 1.5);
+    const stash = new THREE.Group();
+    if (CBZ.CONFIG.NUKE_STASH_TRIPLE !== false && CBZ.nukeWarhead) {
+      const N = 3, PITCH = 0.68;                  // three abreast, 0.68 m centres
+      const RACK_L = 2.86, RACK_W = PITCH * (N - 1) + 0.92;
+      const AXIS_Y = FY + 0.98;                   // the weapons' centreline
+      // base skid + two longitudinal rails the saddles bolt to
+      box(g, devX, FY + 0.11, devZ, RACK_L, 0.22, RACK_W, M.steelD);
+      for (const s of [-1, 1]) {
+        box(g, devX, FY + 0.30, devZ + s * (RACK_W / 2 - 0.14), RACK_L, 0.16, 0.16, M.steel);
+      }
+      // A-frame end standards: two uprights per end, cross-braced
+      for (const ex of [-1, 1]) {
+        const sx = devX + ex * (RACK_L / 2 - 0.18);
+        for (const s of [-1, 1]) {
+          box(g, sx, FY + 0.60, devZ + s * (RACK_W / 2 - 0.16), 0.14, 0.78, 0.14, M.steel);
+        }
+        box(g, sx, FY + 0.97, devZ, 0.12, 0.12, RACK_W - 0.28, M.steel);
+      }
+      for (let i = 0; i < N; i++) {
+        const wz = devZ + (i - (N - 1) / 2) * PITCH;
+        /* Two saddle cradles per casing, and their heights are SOLVED, not
+           picked: the rail tops sit at FY+0.38 and the casing's underside at
+           AXIS_Y - RAD, so a saddle that spans exactly that gap touches both
+           and nothing floats. The tie-down strap then lands one centimetre
+           proud of the casing's crown. Re-derive these if WH.RAD moves. */
+        const railTop = FY + 0.38, saddleTop = AXIS_Y - 0.21;
+        for (const s of [-0.86, 0.86]) {
+          box(g, devX + s, (railTop + saddleTop) / 2, wz,
+              0.20, saddleTop - railTop, 0.50, M.steelD);
+          box(g, devX + s, saddleTop + 0.43, wz, 0.10, 0.06, 0.46, M.warn); // tie-down strap
+        }
+        const w = CBZ.nukeWarhead({ mat: cm, geo: bg, chute: false });
+        w.position.set(devX, AXIS_Y, wz);
+        // Alternate which way the noses point, the way a real rack is loaded
+        // (lugs alternate so the standards carry an even load) — and it stops
+        // three identical objects reading as a copy-paste.
+        if (i === 1) w.rotation.y = Math.PI;
+        stash.add(w);
+      }
+      // stencilled kerb line in front of the rack — the room says NO ENTRY
+      for (let i = 0; i < 4; i++) {
+        glow(g, devX - 1.2 + i * 0.8, FY + 0.04, devZ + RACK_W / 2 + 0.46, 0.56, 0.03, 0.16, M.warn, 0.25);
+      }
+      col(devX - RACK_L / 2 - 0.1, devX + RACK_L / 2 + 0.1,
+          devZ - RACK_W / 2 - 0.1, devZ + RACK_W / 2 + 0.1, FY, FY + 1.35);
+    } else {
+      // REVERT PATH — the single casing on its saddle, byte-for-byte.
+      box(g, devX, FY + 0.35, devZ, 2.0, 0.7, 1.2, M.steelD);
+      for (const s of [-0.55, 0.55]) box(g, devX + s, FY + 0.82, devZ, 0.16, 0.28, 1.1, M.steel);
+      const shellM = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 1.7, 12), cm(M.device));
+      shellM.rotation.z = Math.PI / 2; stash.add(shellM);
+      const noseM = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 8), cm(M.device));
+      noseM.position.x = 0.85; stash.add(noseM);
+      const tailM = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 0.5, 12), cm(M.deviceD));
+      tailM.rotation.z = Math.PI / 2; tailM.position.x = -1.05; stash.add(tailM);
+      const bandM = new THREE.Mesh(new THREE.CylinderGeometry(0.435, 0.435, 0.18, 12), cm(M.red));
+      bandM.rotation.z = Math.PI / 2; bandM.position.x = 0.2; stash.add(bandM);
+      stash.position.set(devX, FY + 1.15, devZ);
+      col(devX - 1.1, devX + 1.1, devZ - 0.7, devZ + 0.7, FY, FY + 1.5);
+    }
+    stash.userData.nukeDevice = true;
+    // ...and the stamp the batcher ACTUALLY reads (see the note above).
+    stash.traverse(function (o) {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.nukeDevice = true; }
+    });
+    g.add(stash);
     glow(g, devX, CEIL - 0.2, devZ, 0.5, 0.14, 0.5, 0xc23a2e, 0.9);           // red cage lamp
     for (let i = 0; i < 3; i++) glow(g, vx0 + 0.9 + i * 1.6, FY + 0.05, vz1 - 0.6, 1.1, 0.04, 0.24, M.warn, 0.25); // floor stripes
-    vaultTokens.push({ x: devX, z: devZ, taken: false, deviceMesh: dev });
+    vaultTokens.push({ x: devX, z: devZ, taken: false, deviceMesh: stash });
   }
 
   // ---- OUTPOST TIER (mountain / desert): one abandoned room, themed --------

@@ -1102,14 +1102,44 @@
   // kills through a bunker roof (and one-shots a building through its roof).
   // OFF → a buster impact resolves as a plain heavy bomb.
   // STRAT_NUKE: every B-2 carries three flight-only nuclear weapons; the
-  // military vault separately holds one portable device for a planted 45s
-  // timer. Staged city-flattening blast, kill-bus deaths
+  // military vault separately holds one portable device (drawn as three
+  // warheads on a rack, taken and used as ONE) for a planted armed
+  // countdown. Staged city-flattening blast, kill-bus deaths
   // ("nuclear blast" in the corner feed), 5★, lingering radiation zone.
   // OFF → a nuke impact resolves as a plain heavy blast.
   if (CBZ.CONFIG.STRAT_BUNKERS == null) CBZ.CONFIG.STRAT_BUNKERS = true;
   if (CBZ.CONFIG.STRAT_B2 == null) CBZ.CONFIG.STRAT_B2 = true;
   if (CBZ.CONFIG.STRAT_BUNKER_BUSTER == null) CBZ.CONFIG.STRAT_BUNKER_BUSTER = true;
   if (CBZ.CONFIG.STRAT_NUKE == null) CBZ.CONFIG.STRAT_NUKE = true;
+  // ---- THE NUCLEAR REDRAW (2026-07-28) -----------------------------------
+  // Three one-line reverts. Each is also null-checked in its OWNING file, so
+  // any of these modules still degrades correctly when loaded standalone.
+  //
+  // NUKE_FX_V2 (city/nukefx.js + city/strategic.js) — the weapon as it is
+  //   SEEN. In the air: a real gravity-bomb body (ogive nose, boat-tail,
+  //   cruciform fins, an arming band) that tumbles on release, settles
+  //   nose-down, and streams a ribbon parachute when the delivery profile
+  //   calls for a retarded fall. On the ground: the Trinity beat order —
+  //   a pure-white hemispherical DOME growing off the deck on the
+  //   Taylor-Sedov R ∝ t^0.4 law, the double flash, the dome detaching and
+  //   cooling as it lifts, an incandescent cap that OVERHANGS its stem with
+  //   a collar and a dark cauliflower crown boiling over the top, a
+  //   red-brown base surge rolling out along the ground, and the fireball
+  //   LIGHTING the world (sun/hemisphere/fog) instead of only tinting sky.
+  //   false → the pre-2026-07-28 sequence, byte-for-byte.
+  // NUKE_STASH_TRIPLE (city/bunkers.js) — the vault cradle holds THREE
+  //   physical warheads on a handling rack instead of one bare casing. It is
+  //   still ONE inventory item and one usable weapon: the stash is taken as a
+  //   unit and every existing gate (one per world, the theft crime, the
+  //   "already carry" refusal) is untouched. false → the single casing.
+  // NUKE_GROUND_COUNTDOWN (city/strategic.js) — the planted device becomes a
+  //   real ARMED COUNTDOWN: a three-beat arming sequence, a clock long enough
+  //   that the escape IS the mission (see NK.TIMER's derivation), escalating
+  //   audible/visual cues, and the same abort the arc always had.
+  //   false → the flat 45 s timer with no arming beat.
+  if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
+  if (CBZ.CONFIG.NUKE_STASH_TRIPLE == null) CBZ.CONFIG.NUKE_STASH_TRIPLE = true;
+  if (CBZ.CONFIG.NUKE_GROUND_COUNTDOWN == null) CBZ.CONFIG.NUKE_GROUND_COUNTDOWN = true;
 
   // ---- character/combat reads (owner reports, one flag each) --------------
   // CHAR_SEAT_POSE_V2 (entities/character.js): REAL chair sit for seats that

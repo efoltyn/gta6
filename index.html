@@ -332,7 +332,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=worldphysics4"></script>
+<script src="src/config.js?v=nukev2"></script>
 <script src="src/core/seed.js"></script>
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
@@ -640,7 +640,7 @@
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
-<script src="src/city/bunkers.js?v=strat1"></script>
+<script src="src/city/bunkers.js?v=nukev2"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -769,7 +769,7 @@
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
 <script src="src/systems/impactbus.js?v=bus1x0"></script>
 <script src="src/city/structural.js?v=struct1"></script>
-<script src="src/city/nukefx.js?v=nuke3"></script>
+<script src="src/city/nukefx.js?v=nukev2"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -909,7 +909,7 @@
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Every blast routes through
      the WRAPPED cityExplosion chain; deaths route through the kill bus. -->
-<script src="src/city/strategic.js?v=b2bombcam3"></script>
+<script src="src/city/strategic.js?v=nukev2"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=sim1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->

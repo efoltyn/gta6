@@ -3,13 +3,27 @@
    bunker-buster, and the nuke. Partner file to city/bunkers.js.
 
    WHY ONE LAYER, NOT THREE BOLT-ONS (owner mandate): the pieces chain —
-   the military bunker's vault holds the one PORTABLE nuclear device for
-   planting and its armory stocks the bunker-busters; every B-2 also carries
+   the military bunker's vault holds the one PORTABLE nuclear stash (drawn
+   as three warheads on a handling rack; taken, carried and used as ONE
+   device) and its armory stocks the bunker-busters; every B-2 also carries
    three flight-only nuclear weapons. The B-2 on the Fort Brandt apron is
    the delivery platform; the buster is the only weapon that
    kills THROUGH a bunker roof, which matters because an intact bunker is
    the only thing that shelters you from the nuke. Steal the bomber, raid
    the vault, and the end of the world is a payload switch away.
+
+   TWO ROUTES TO A DETONATION, and they converge on the same row:
+     AIR    — load the bay, fly, release. The weapon is a real gravity bomb
+              (CBZ.nukeWarhead) that tumbles off the ejector, settles
+              nose-down, and — when the free fall would not already give the
+              bomber its escape — STREAMS A RIBBON PARACHUTE, which is the
+              actual B61 delivery rule. See the retardFor block for the
+              arithmetic and the measured table.
+     GROUND — plant it, run a three-beat ARMING sequence, then a 90 s clock
+              solved against the distance a player can actually cover (see
+              NK). The escape IS the mission and the answer is a vehicle.
+   Both end in nukeDetonate() -> CBZ.detonate(.., "nuke") -> the bus, so the
+   spectacle, the wave, the ledger and the consequences are one path.
 
    THE B-2: a chunky voxel flying wing (sawtooth trailing edge, no tail)
    parked on the military apron. It registers through the EXISTING
@@ -87,6 +101,19 @@
   if (CBZ.CONFIG.STRAT_B2 == null) CBZ.CONFIG.STRAT_B2 = true;
   if (CBZ.CONFIG.STRAT_BUNKER_BUSTER == null) CBZ.CONFIG.STRAT_BUNKER_BUSTER = true;
   if (CBZ.CONFIG.STRAT_NUKE == null) CBZ.CONFIG.STRAT_NUKE = true;
+  /* ---- THE NUCLEAR REDRAW (2026-07-28). Both are also declared in
+     config.js; the `== null` idiom is idempotent, so whichever file the page
+     loads first wins and this module still degrades on its own. ---------- */
+  // NUKE_FX_V2 — the weapon AS SEEN. In this file: the real gravity-bomb
+  // body (CBZ.nukeWarhead — ogive nose, boat-tail, cruciform fins, arming
+  // band), the release tumble that settles nose-down, and the RETARDED FALL
+  // with its streamed ribbon parachute (see the retardFor block). false =>
+  // the generic 2.4 m drum on a plain parabola, exactly as before.
+  if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
+  // NUKE_GROUND_COUNTDOWN — the planted device runs a three-beat ARMING
+  // sequence and then a clock derived from the escape distance (see NK).
+  // false => the flat 45 s timer with no arming beat.
+  if (CBZ.CONFIG.NUKE_GROUND_COUNTDOWN == null) CBZ.CONFIG.NUKE_GROUND_COUNTDOWN = true;
   // HOLD-[B] carpet bombing. false => [B] is a single release exactly as
   // before (one-line revert of the whole run machinery).
   if (CBZ.CONFIG.STRAT_BOMB_RUN == null) CBZ.CONFIG.STRAT_BOMB_RUN = true;
@@ -1033,8 +1060,285 @@
     for (const k in BGEO) BGEO[k]._shared = true;
     for (const k in BMAT) BMAT[k]._shared = true;
   }
+
+  /* ==========================================================================
+     CBZ.nukeWarhead(opts) — WHAT A NUCLEAR GRAVITY BOMB LOOKS LIKE.
+
+     ONE model, TWO consumers, and that is the whole reason it is exported:
+     city/bunkers.js's vault rack and this file's falling round used to be two
+     unrelated piles of cylinders that disagreed about the shape of the same
+     object (the vault's was a 1.7 m sausage with a ball nose; the flight
+     body was a bare 2.4 m drum with two flat plates for fins). A weapon you
+     pick up and the weapon you drop must be the same weapon.
+
+     PROPORTIONS ARE REAL, then scaled ONCE. The reference is the B61 family —
+     the US air-delivered gravity bomb, and the one that actually has the
+     parachute-retarded delivery this file models:
+
+         B61      length 141.6 in = 3.58 m   diameter 13.3 in = 0.338 m
+                  mass ~700 lb = 320 kg      four tail fins
+                  fineness ratio L/D = 10.6
+         B83      length 3.7 m  diameter 0.46 m  L/D = 8.0
+
+     A 10.6:1 pencil is unreadable at this game's scale (it is 0.34 m across
+     against a 0.55 m player capsule and the camera is usually 60 m up), so
+     the casing is drawn at L/D = 6.0 — between the B83 and Fat Man's 3.3:1 —
+     with the LENGTH honest at 2.52 m and the DIAMETER thickened. That is a
+     deliberate, named liberty; every other proportion below is off the real
+     article.
+
+     THE NOSE IS A COMPUTED TANGENT OGIVE, not a taste. For nose length L and
+     base radius R the ogive radius is rho = (R^2 + L^2) / 2R, and the profile
+     measured from the tip is
+
+         r(x) = sqrt(rho^2 - (L - x)^2) + R - rho,   x in [0, L]
+
+     which is exactly 0 at the tip and exactly R at the shoulder. It is
+     evaluated at NOSE_SEG stations and drawn as that many CylinderGeometry
+     frusta. Frusta rather than a LatheGeometry on purpose: a lathe's face
+     winding depends on the profile's point order, the fix for a mis-wound
+     lathe is `side: DoubleSide`, and the only material this could take that
+     from is CBZ.cmat's CACHED SHARED one — mutating `.side` on a cached
+     material is the exact bug class CLAUDE.md records against boxGeom's
+     shared geometry. Four frusta cost four tiny meshes and cannot be wrong.
+
+     opts:
+       mat(hex, opts)  material factory. bunkers.js passes its cmat() so the
+                       static batcher can collapse the vault rack; this file
+                       passes its own pooled MeshLambertMaterials.
+       geo(w, h, d)    box-geometry factory (CBZ.boxGeom, or raw).
+       len, rad        casing length / body radius (defaults below).
+       chute           build the ribbon-parachute assembly as a hidden child
+                       (`group.userData.chute`). Flight only.
+       lugs            draw the two lifting lugs (a stowed weapon has them).
+     Returns a Group with the NOSE ALONG +X and the origin at mid-length, so a
+     caller only ever writes rotation.y (bearing) and rotation.x (dive).
+  ========================================================================== */
+  const WH = {
+    LEN: 2.52,          // casing length, metres (B61's 3.58 m at game scale)
+    RAD: 0.21,          // body radius — L/D 6.0, see the note above
+    NOSE: 0.62,         // ogive length: 0.246 of overall, the B61's own share
+    TAIL: 0.30,         // boat-tail
+    NOSE_SEG: 4,        // frusta the ogive is drawn with
+    FIN_N: 4,           // cruciform, like every B61 mod
+    FIN_SWEEP: 0.22,    // rad of leading-edge sweep
+  };
+  const WH_COL = {
+    skin: 0xb9c0c7,     // the unpainted light-grey a stockpile weapon wears
+    skinD: 0x7c838c,    // shadowed hardware: fins, tail kit, lugs
+    band: 0xd4a017,     // yellow: the stencil / handling band
+    arm: 0xb43a32,      // red: the arming band and the safing plate
+    stencil: 0x2c3138,  // black stencilling plate
+    chute: 0xd8d2c2,    // ribbon-chute canopy, undyed nylon/Kevlar
+    chuteD: 0x8a8478,   // the woven ribbon slots
+  };
+  function _defMat(hex) { return cm(hex); }
+  function _defGeo(w, h, d) { return bg(w, h, d); }
+  CBZ.nukeWarhead = function (opts) {
+    opts = opts || {};
+    const M = typeof opts.mat === "function" ? opts.mat : _defMat;
+    const B = typeof opts.geo === "function" ? opts.geo : _defGeo;
+    const L = +opts.len > 0 ? +opts.len : WH.LEN;
+    const R = +opts.rad > 0 ? +opts.rad : WH.RAD;
+    // The three casing sections must sum to L, so the nose/tail scale with it.
+    const noseL = WH.NOSE * (L / WH.LEN), tailL = WH.TAIL * (L / WH.LEN);
+    const bodyL = Math.max(0.1, L - noseL - tailL);
+    const gp = new THREE.Group();
+    const x0 = -L / 2;                                   // tail end, local +X forward
+
+    function cyl(rTop, rBot, h, x, hex, seg) {
+      // CylinderGeometry is Y-axis; -90 deg about Z takes +Y to +X, so the
+      // frustum's "top" (rTop) ends up FORWARD. Nose-forward by construction.
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, seg || 12), M(hex));
+      m.rotation.z = -Math.PI / 2;
+      m.position.x = x;
+      gp.add(m);
+      return m;
+    }
+
+    // ---- NOSE: the computed tangent ogive, tip at x0 + L -------------------
+    const rho = (R * R + noseL * noseL) / (2 * R);
+    function ogive(x) {                                  // x measured from the TIP
+      const s = noseL - Math.max(0, Math.min(noseL, x));
+      return Math.max(0.004, Math.sqrt(Math.max(0, rho * rho - s * s)) + R - rho);
+    }
+    const noseX0 = x0 + tailL + bodyL;                   // the shoulder
+    for (let i = 0; i < WH.NOSE_SEG; i++) {
+      const seg = noseL / WH.NOSE_SEG;
+      const xa = noseL - i * seg, xb = noseL - (i + 1) * seg;   // from shoulder forward
+      cyl(ogive(xb), ogive(xa), seg, noseX0 + i * seg + seg / 2, WH_COL.skin);
+    }
+
+    // ---- PARALLEL BODY + BOAT-TAIL ----------------------------------------
+    cyl(R, R, bodyL, x0 + tailL + bodyL / 2, WH_COL.skin, 14);
+    // A real gravity bomb tapers into its tail kit; the drum this replaces did
+    // not, which is most of why it read as a propane tank.
+    cyl(R, R * 0.78, tailL, x0 + tailL / 2, WH_COL.skinD, 14);
+
+    // ---- BANDS. Each is a hair proud of the skin so it reads as applied ----
+    // the RED arming band sits over the physics package, forward of centre —
+    // where the real stencil ring goes.
+    cyl(R * 1.035, R * 1.035, 0.115, x0 + tailL + bodyL * 0.72, WH_COL.arm, 14);
+    // the YELLOW handling/stencil band, aft
+    cyl(R * 1.03, R * 1.03, 0.085, x0 + tailL + bodyL * 0.24, WH_COL.band, 14);
+    // the joint ring between the physics package and the tail section
+    cyl(R * 1.02, R * 1.02, 0.06, x0 + tailL + 0.02, WH_COL.skinD, 14);
+
+    // Black stencil plate ON THE FLANK (markings, without a texture). The
+    // box is thin in Y, so RotX(90 deg) swaps Y and Z and makes it thin in Z
+    // — a plate lying against the side. It is seated at 0.975 R so its outer
+    // face stands 0.6 cm proud of the 0.21 m casing surface and reads as
+    // applied rather than sunk into it.
+    const st = new THREE.Mesh(B(bodyL * 0.30, 0.012, R * 0.62), M(WH_COL.stencil));
+    st.position.set(x0 + tailL + bodyL * 0.50, 0, R * 0.975);
+    st.rotation.x = Math.PI / 2;
+    gp.add(st);
+
+    // ---- LIFTING LUGS. The real article's suspension lugs are on the NATO
+    // 14-inch standard = 0.356 m, and this casing is drawn at 2.52 m against
+    // the B61's 3.58 m, so the scaled spacing is 0.356 * (2.52/3.58) =
+    // 0.2506 m — i.e. +/- 0.0497 of the overall length. Typed as the ratio
+    // rather than the answer so it survives a change of `len`.
+    if (opts.lugs !== false) {
+      const LUG_HALF = 0.0497;
+      for (const s of [-LUG_HALF, LUG_HALF]) {
+        const lug = new THREE.Mesh(B(0.10, 0.13, 0.07), M(WH_COL.skinD));
+        lug.position.set(x0 + tailL + bodyL * 0.5 + s * L, R + 0.055, 0);
+        gp.add(lug);
+      }
+    }
+
+    // ---- TAIL: four swept fins in a cruciform + the tail-kit ring ----------
+    const finC = L * 0.155, finS = R * 1.30, finT = 0.028;   // chord / span / thickness
+    const finX = x0 + tailL * 0.55;
+    const finGeo = B(finC, finS, finT);
+    for (let i = 0; i < WH.FIN_N; i++) {
+      const a = i * (Math.PI * 2 / WH.FIN_N);
+      const f = new THREE.Mesh(finGeo, M(WH_COL.skinD));
+      // rotation order XYZ => matrix RotX * RotY * RotZ: the fin is FIRST
+      // swept in its own plane (Z), THEN spun onto its cruciform arm (X).
+      f.rotation.set(a, 0, -WH.FIN_SWEEP);
+      const rMid = R * 0.86 + finS / 2;
+      f.position.set(finX, Math.cos(a) * rMid, Math.sin(a) * rMid);
+      gp.add(f);
+    }
+    // the tail-kit band that joins the fin roots (open-ended: it is a hoop,
+    // and an open cylinder in r128 draws only its wall).
+    const ring = new THREE.Mesh(
+      new THREE.CylinderGeometry(R * 1.08, R * 1.08, 0.07, 16, 1, true), M(WH_COL.skinD));
+    ring.rotation.z = -Math.PI / 2;
+    ring.position.x = x0 + 0.05;
+    gp.add(ring);
+
+    // ---- THE RIBBON PARACHUTE (flight only, stowed until it is streamed) ---
+    /* THE B61 REALLY DOES HAVE ONE, which is why it is drawn. Retarded and
+       laydown delivery stream a nylon/Kevlar RIBBON chute from the tail so
+       the delivery aircraft can escape; the mod-11 canopy is 24 ft = 7.3 m
+       across. Terminal velocity under it is the standard drag balance
+
+           v = sqrt( 2 m g / (rho Cd A) )
+             = sqrt( 2 * 320 * 9.81 / (1.225 * 0.52 * pi * 3.65^2) )
+             = sqrt( 6278 / 26.7 ) = 15.3 m/s
+
+       against a free-fall terminal near 340 m/s — a 22:1 retard. The canopy
+       here is drawn at 1/3 of true scale (2.4 m) so it stays legible beside a
+       2.5 m casing at the ranges this game views a bomb from; the RATE it
+       actually falls at is solved in retardFor(), not from this mesh. */
+    if (opts.chute) {
+      const ch = new THREE.Group();
+      const canR = 1.20, canH = 0.62;
+      // canopy: an upper hemisphere. A parachute is seen from BELOW as often
+      // as above, so this one material genuinely needs DoubleSide — and this
+      // caller mints its own material rather than mutating a cached one.
+      const canMat = new THREE.MeshLambertMaterial({
+        color: WH_COL.chute, side: THREE.DoubleSide,
+      });
+      canMat._shared = true;
+      /* The chute group hangs off the TAIL (local -X, since the nose is +X),
+         so everything inside it has a NEGATIVE x. RotZ(+90 deg) maps the
+         hemisphere's +Y pole onto -X, i.e. the dome's convex side points
+         away from the weapon — which is the side the airstream is on. */
+      const canX = -1.55;
+      const can = new THREE.Mesh(
+        new THREE.SphereGeometry(canR, 14, 7, 0, Math.PI * 2, 0, Math.PI * 0.5), canMat);
+      can.scale.set(1, canH / canR, 1);
+      can.rotation.z = Math.PI / 2;
+      can.position.x = canX;
+      ch.add(can);
+      // the RIBBON SLOTS — a ribbon chute is a woven grid, not a sheet. Two
+      // hoops of the darker weave read as that at any distance we see it from.
+      const ribMat = new THREE.MeshLambertMaterial({
+        color: WH_COL.chuteD, side: THREE.DoubleSide,
+      });
+      ribMat._shared = true;
+      for (const k of [0.55, 0.85]) {
+        const rr = canR * Math.sqrt(Math.max(0.02, 1 - k * k));
+        const hoop = new THREE.Mesh(
+          new THREE.CylinderGeometry(rr, rr, 0.05, 14, 1, true), ribMat);
+        hoop.rotation.z = Math.PI / 2;
+        hoop.position.x = canX - canH * k;
+        ch.add(hoop);
+      }
+      // rigging: six suspension lines splayed from the tail bridle (local 0)
+      // out to the canopy skirt. The splay angle is the geometry, not a guess:
+      // atan(skirt radius / line run).
+      const lineRun = -canX, skirtR = canR * 0.46;
+      const splay = Math.atan2(skirtR, lineRun);
+      const lineGeo = B(Math.hypot(lineRun, skirtR), 0.022, 0.022);
+      for (let i = 0; i < 6; i++) {
+        const a = i * (Math.PI * 2 / 6);
+        const ln = new THREE.Mesh(lineGeo, M(WH_COL.chuteD));
+        // XYZ order => RotX(a) * RotZ(splay): splay the line outward in its own
+        // plane first, then spin it onto its bearing around the body axis.
+        ln.rotation.set(a, 0, Math.PI - splay);
+        ln.position.set(canX * 0.5, Math.cos(a) * skirtR * 0.5, Math.sin(a) * skirtR * 0.5);
+        ch.add(ln);
+      }
+      ch.visible = false;
+      ch.position.x = x0;                              // streams off the tail
+      ch.scale.setScalar(0.01);                        // packed until the snatch
+      gp.add(ch);
+      gp.userData.chute = ch;
+      // the stowed pack, which is what you see before it streams
+      const pack = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 0.74, R * 0.62, 0.24, 12), M(WH_COL.skinD));
+      pack.rotation.z = -Math.PI / 2;
+      pack.position.x = x0 - 0.10;
+      gp.add(pack);
+      gp.userData.chutePack = pack;
+    }
+
+    gp.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    return gp;
+  };
+
   function bombMesh(kind) {
     bombAssets();
+    /* THE NUCLEAR ROUND IS NOT THE GENERIC CYLINDER ANY MORE. It gets the
+       shared warhead above — ogive, boat-tail, cruciform fins, arming band
+       and a stowed ribbon chute — while the Mk-84 and the GBU keep the cheap
+       pooled bodies they always had. One flag, one line back. */
+    if (kind === "nuke" && CBZ.CONFIG.NUKE_FX_V2 !== false) {
+      const w = CBZ.nukeWarhead({
+        mat: function (hex) { return nukeMat(hex); },
+        geo: bg, chute: true,
+      });
+      /* THE NOSE CONVENTION IS NOT NEGOTIABLE HERE. Every other round in this
+         file is built with its nose along +Z, and the flight loop's attitude
+         (rotation.y = atan2(vx,vz), rotation.x = atan2(-vy,hsp)) is written
+         for exactly that. CBZ.nukeWarhead builds nose-along-+X because that
+         is the axis a laid-down CylinderGeometry naturally takes. One outer
+         Group with a single yaw reconciles them — RotY(-90 deg) maps +X onto
+         +Z — so NOT ONE LINE of the flight attitude changes and there is no
+         second sign convention to get wrong later. */
+      const outer = new THREE.Group();
+      w.rotation.y = -Math.PI / 2;
+      outer.add(w);
+      outer.userData.warhead = true;
+      outer.userData.chute = w.userData.chute || null;
+      outer.userData.chutePack = w.userData.chutePack || null;
+      return outer;
+    }
     const gp = new THREE.Group();
     const body = new THREE.Mesh(kind === "buster" ? BGEO.buster : kind === "nuke" ? BGEO.nuke : BGEO.body,
       kind === "buster" ? BMAT.buster : kind === "nuke" ? BMAT.nuke : BMAT.body);
@@ -1052,6 +1356,20 @@
     }
     gp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
     return gp;
+  }
+  /* The flight body's own material pool. NOT CBZ.cmat: a cached city material
+     is shared with static geometry the batcher may merge, and a falling bomb
+     must never be able to hand one of those a different `side` or a different
+     emissive. Pooled per colour, minted at most once each per session. */
+  const _nukeMats = Object.create(null);
+  function nukeMat(hex) {
+    let m = _nukeMats[hex];
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({ color: hex });
+      m._shared = true;
+      _nukeMats[hex] = m;
+    }
+    return m;
   }
   const bombs = [];                          // {mesh,kind,x0,y0,z0,vx,vy,vz,t,sol,seek}
   const GRAV = 14;                                   // gamey-fast fall — reads right at flight alt
@@ -1114,6 +1432,143 @@
     return { t: t, x: hx, y: ys, z: hz, speed: Math.hypot(vx, vyImp, vz) };
   }
 
+  /* ==========================================================================
+     THE RETARDED FALL — a parachute, solved, not integrated.
+
+     RESEARCH. The B61 has three selectable delivery options and the choice is
+     made by PROFILE, not by taste:
+       • FREE-FALL / ballistic — a high release. The fall time alone is the
+         aircraft's escape. Little Boy: released at 9,470 m, burst at 600 m,
+         8,870 m of fall in a measured 44.4 s. The vacuum answer for that drop
+         is sqrt(2h/g) = sqrt(2*8870/9.81) = 42.5 s, so a dense streamlined
+         casing falls at 1.045x the vacuum time over kilometres — drag is
+         almost irrelevant and the closed-form parabola above is honest.
+         (Fat Man agrees: 8,800 m released, 503 m burst, 43 s.)
+       • RETARDED — a ribbon chute is streamed so the delivery aircraft can
+         out-run its own weapon from a LOW release, where the fall time alone
+         would not clear it. Mod-11 canopy 24 ft = 7.3 m; terminal velocity
+         under it is 15.3 m/s (the drag balance is worked in CBZ.nukeWarhead)
+         against a ~340 m/s free-fall terminal — a 22:1 retard.
+       • LAYDOWN — chute, ground contact, then a fuze delay of tens of seconds
+         while the aircraft leaves. That is the GROUND route in section 5,
+         not this one.
+
+     SO THE CHUTE IS NOT ALWAYS DEPLOYED, AND THE RULE IS THE REAL RULE:
+     stream it only when the ballistic fall does not already buy the escape.
+
+     THE ESCAPE NUMBER, derived from this game's own two constants:
+         the weapon's reach   = the bus's nuke wave maxR   = 900 m
+         the bomber's speed   = the airliner/heavy row vmax = 105 m/s
+         => t_clear = 900 / 105 = 8.57 s
+     A straight-line dash is optimistic (you have to roll out of the release
+     heading), so the target is 1.40x that: T_ESCAPE = 12.0 s. Above the
+     altitude where free-fall already takes 12 s the chute stays stowed and
+     the round is a plain ballistic drop, exactly like the high-release
+     profile above. At GRAV 14 that crossover is h = 0.5*14*12^2 = 1,008 m.
+
+     THE CANOPY'S DESCENT RATE IS THEN SOLVED PER DROP, not typed:
+         t0  = 2.8 s of clean fall before the canopy is streamed (the real
+               sequence lets the weapon separate and stabilise first)
+         h0  = 0.5*g*t0^2 + eject*t0 = 0.5*14*7.84 + 1.5*2.8 = 59.1 m
+         v0  = g*t0 + eject = 40.7 m/s at the moment of the snatch
+         vt  = (h - h0) / (T_ESCAPE - t0)
+     At a 300 m release that is (300-59)/9.2 = 26 m/s, i.e. the canopy takes
+     the weapon from 40.7 m/s down to 26 — a 36% bite, visible as a snatch.
+     Clamped to [16, 70] m/s so it can never become a fiction in either
+     direction, and REFUSED outright when the solved vt is not meaningfully
+     below the speed the weapon already has (vt >= 0.92*v0): a "chute" that
+     accelerates its own bomb is worse than no chute.
+
+     The chute phase is still CLOSED FORM, which is this file's whole
+     doctrine. Velocity approaches vt exponentially with time constant tau,
+     so with d = t - t0:
+         v(d) = vt + (v0 - vt) e^(-d/tau)
+         y(d) = y0 - vt*d - tau*(v0 - vt)(1 - e^(-d/tau))
+     y is strictly decreasing, so the impact time is one bracketed bisection
+     — 28 halvings of a 60 s bracket is 2e-7 s, run ONCE at release. The
+     horizontal leg decays on the same tau (a canopy kills cross-range too),
+     which is what makes a retarded round land where the aircraft was rather
+     than downrange of it.
+
+     MEASURED, across the whole release band (agl / profile / fall s /
+     canopy vt / how much it takes off the speed at the snatch / how far a
+     105 m/s bomber is when it goes off):
+
+        50 m  ballistic   2.78 s     —          —      (lands before deploy)
+        80 m  chute       3.55 s   16 m/s     -61%      372 m
+       150 m  chute       7.79 s   16 m/s     -61%      818 m
+       200 m  chute      10.91 s   16 m/s     -61%    1,146 m
+       300 m  chute      11.75 s   26 m/s     -36%    1,234 m
+       400 m  chute      11.96 s   37 m/s      -9%    1,255 m
+       600 m  ballistic   9.37 s     —          —        984 m
+     1,008 m  ballistic  12.11 s     —          —      1,272 m   <- crossover
+     2,000 m  ballistic  17.01 s     —          —      1,786 m
+
+     TWO HONEST LIMITS, both left in on purpose. Near the crossover the
+     canopy only trims (-9% at 400 m) — it does exactly as much as the
+     profile demands and no more. And below ~200 m NOTHING clears 900 m:
+     the canopy is already at its VT_MIN floor and there is not enough sky
+     left. That is the real laydown problem, not a bug, and it is why the
+     bay already refuses a release under 14 m AGL.
+  ========================================================================== */
+  const RET = {
+    T_ESCAPE: 12.0,     // s — 1.40 x (900 m reach / 105 m/s bomber). See above.
+    T0: 2.8,            // s — clean fall before the canopy is streamed
+    TAU: 0.45,          // s — the snatch; the exponential's time constant
+    VT_MIN: 16,         // m/s — a canopy this small cannot do better
+    VT_MAX: 70,         // m/s — past this it is not retarding anything
+    BITE: 0.92,         // refuse a "retard" that is not one
+  };
+  // null => this round falls ballistically (the high-release profile).
+  function retardFor(kind, y0, vy, ys) {
+    if (kind !== "nuke" || CBZ.CONFIG.NUKE_FX_V2 === false) return null;
+    const h = y0 - ys;
+    if (!(h > 0)) return null;
+    const t0 = RET.T0;
+    // the weapon must still BE in the air when the canopy is due
+    const h0 = 0.5 * GRAV * t0 * t0 - vy * t0;
+    if (h0 >= h) return null;                          // it lands before deploy
+    const span = RET.T_ESCAPE - t0;
+    if (!(span > 0.5)) return null;
+    let vt = (h - h0) / span;
+    const v0 = GRAV * t0 - vy;                         // downward speed at deploy
+    if (!(v0 > 0)) return null;
+    if (vt >= v0 * RET.BITE) return null;              // free-fall already clears it
+    vt = Math.max(RET.VT_MIN, Math.min(RET.VT_MAX, vt));
+    if (vt >= v0 * RET.BITE) return null;              // ...and again after the clamp
+    return { t0: t0, vt: vt, tau: RET.TAU, v0: v0, y0: y0 - h0, x0: 0, z0: 0, hx: 0, hz: 0 };
+  }
+  // Fill in the deploy-point position/impact time for a solved retard. `bal`
+  // is the round's own BALLISTIC solve, which already found the surface.
+  function solveRetard(b, ret, bal) {
+    ret.x0 = b.x0 + b.vx * ret.t0;
+    ret.z0 = b.z0 + b.vz * ret.t0;
+    const ys = bal.y;
+    const dv = ret.v0 - ret.vt;
+    function yAt(d) {
+      const e = Math.exp(-d / ret.tau);
+      return ret.y0 - ret.vt * d - ret.tau * dv * (1 - e);
+    }
+    // BISECTION on a strictly decreasing function. lo is above the surface by
+    // construction (retardFor refused otherwise); grow hi until it is below.
+    let lo = 0, hi = 4;
+    while (yAt(hi) > ys && hi < 60) hi *= 2;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) * 0.5;
+      if (yAt(mid) > ys) lo = mid; else hi = mid;
+    }
+    const d = (lo + hi) * 0.5;
+    const e = Math.exp(-d / ret.tau);
+    const vyImp = -(ret.vt + dv * e);
+    const hk = ret.tau * (1 - e);                      // horizontal decay integral
+    ret.hx = ret.x0 + b.vx * hk;
+    ret.hz = ret.z0 + b.vz * hk;
+    return {
+      t: ret.t0 + d, x: ret.hx, y: ys, z: ret.hz,
+      speed: Math.hypot(b.vx * e, vyImp, b.vz * e),
+    };
+  }
+
   // GUIDED SOLVE. A JDAM is an INS/GPS bomb: it steers to an AIMPOINT, it does
   // not chase like a missile. So the guidance is one BENT PARABOLA, not a
   // per-frame homing integration — fall to the target's altitude, then set the
@@ -1135,8 +1590,20 @@
     };
   }
 
-  // where the round is at local time t on its parabola (pure evaluation)
+  // where the round is at local time t on its parabola (pure evaluation).
+  // With a streamed canopy the arc has TWO closed-form legs — see the block
+  // above — and this is still one evaluation, never an integration.
   function bombAt(b, t, out) {
+    const R = b.ret;
+    if (R && t > R.t0) {
+      const d = t - R.t0, e = Math.exp(-d / R.tau), dv = R.v0 - R.vt;
+      const hk = R.tau * (1 - e);
+      out.x = R.x0 + b.vx * hk;
+      out.y = R.y0 - R.vt * d - R.tau * dv * (1 - e);
+      out.z = R.z0 + b.vz * hk;
+      out.vy = -(R.vt + dv * e);
+      return out;
+    }
     out.x = b.x0 + b.vx * t;
     out.y = b.y0 + b.vy * t - 0.5 * GRAV * t * t;
     out.z = b.z0 + b.vz * t;
@@ -1361,6 +1828,21 @@
       vx: rv.vx, vy: rv.vy, vz: rv.vz,
     };
     b.sol = solveFall(b.x0, b.y0, b.z0, b.vx, b.vy, b.vz);
+    /* THE DELIVERY PROFILE, chosen the way a real one is: ballistic unless the
+       free fall does not already buy the aircraft its escape (see retardFor).
+       Solved HERE, at release, so the impact point/time/speed the whole file
+       hangs off — the walk delay, the over-cap snap, the cinematic's aim —
+       stay one number that nothing has to re-derive. */
+    b.ret = retardFor(kind, b.y0, b.vy, b.sol.y);
+    if (b.ret) b.sol = solveRetard(b, b.ret, b.sol);
+    // Release tumble: a store leaves the bay with residual pitch/yaw and
+    // settles nose-down within about a second. `spin` is the amplitude and
+    // `phase` de-syncs successive rounds. Runtime-only, so a plain rng is
+    // legal here (this is not a build path) — but it is derived from the
+    // release position instead, which keeps a replay identical for free.
+    b.tumble = 1.0;
+    b.age = 0;
+    b.phase = ((Math.abs(b.x0 * 12.9898 + b.z0 * 78.233) * 43758.5453) % 1) * 6.2832;
 
     // GUIDED: acquisition is lockon.js's — asked through the shared ordnance
     // law so this bay speaks the RPG's sentence — and the solve is ours (see
@@ -1658,6 +2140,9 @@
     for (let i = bombs.length - 1; i >= 0; i--) {
       const b = bombs[i];
       b.t += dt;
+      // time since RELEASE, which reaimGuided must not be able to rewind —
+      // see the release-attitude block below for why that matters.
+      b.age = (b.age || 0) + dt;
       // GUIDED: re-solve the aimpoint a few times a second so a moving target
       // is still hit, then keep flying ONE parabola between solves.
       if (b.seek) {
@@ -1678,6 +2163,53 @@
       const hsp = Math.hypot(b.vx, b.vz);
       b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
       b.mesh.rotation.x = Math.atan2(-_bp.vy, hsp > 0.001 ? hsp : 0.001);
+      /* ---- RELEASE ATTITUDE. A store does not leave a bay already pointing
+         where it is going: it pitches and yaws off the ejector, then the fins
+         weathercock it nose-down within about a second. `tumble` is that
+         settling, and it decays as e^(-3t) — 5% left by 1.0 s — so the beat
+         is over before the round is small on screen. rotation.z is FREE on a
+         +Z-nose body (it is roll), which is why the wobble can be added
+         without disturbing the yaw/pitch solve above. */
+      /* IT RIDES `age`, NOT `t`, AND THAT IS THE WHOLE POINT OF THE FIELD.
+         `b.t` is time on the CURRENT parabola, and reaimGuided resets it to
+         0 every REAIM (0.35 s) when it re-solves a JDAM onto a moved
+         aimpoint. A settle keyed to b.t would therefore restart four times a
+         second and a guided round would wobble the entire way down instead
+         of for the first second. `age` is time since the store left the bay
+         and nothing resets it. */
+      if (b.tumble > 0) {
+        b.tumble = Math.exp(-3.0 * b.age);
+        if (b.tumble < 0.02) b.tumble = 0;
+        const w = b.tumble, p = b.phase || 0, ta = b.age;
+        b.mesh.rotation.x += Math.sin(ta * 7.4 + p) * 0.55 * w;
+        b.mesh.rotation.y += Math.sin(ta * 5.1 + p * 1.7) * 0.40 * w;
+        b.mesh.rotation.z = Math.sin(ta * 9.3 + p * 0.6) * 0.75 * w;
+      } else if (!b.ret) {
+        b.mesh.rotation.z = 0;
+      }
+      /* ---- THE CANOPY. It is streamed at ret.t0 and inflates over TAU, so
+         the visible snatch and the arithmetic that actually slows the weapon
+         are the SAME event — the bomb is seen to decelerate at the frame the
+         solve says it does. Under the canopy the body hangs nose-down and
+         swings gently on the risers, which is the one thing that makes a
+         retarded weapon read differently from a falling one. */
+      const CH = b.mesh.userData && b.mesh.userData.chute;
+      if (b.ret && CH) {
+        const d = b.t - b.ret.t0;
+        if (d >= 0) {
+          const inf = 1 - Math.exp(-d / (b.ret.tau * 0.8));   // canopy inflation
+          CH.visible = true;
+          CH.scale.setScalar(Math.max(0.01, inf));
+          if (b.mesh.userData.chutePack) b.mesh.userData.chutePack.visible = d < 0.12;
+          // riser swing: a decaying pendulum about the hang point
+          const sw = Math.exp(-d * 0.35) * 0.16;
+          b.mesh.rotation.x += Math.sin(d * 2.3 + (b.phase || 0)) * sw;
+          b.mesh.rotation.z = Math.sin(d * 1.7 + (b.phase || 0) * 1.3) * sw * 1.4;
+          if (!b.chuteSfx) { b.chuteSfx = true; sfx("whoosh", { pitch: 1.25, volume: 0.45 }); }
+        } else if (CH.visible) {
+          CH.visible = false;
+        }
+      }
     }
     tickBombCine(c);
   });
@@ -1866,8 +2398,44 @@
     R_PLAYER: 160,       // instant unsheltered player death radius
     RAD_R: 70,           // lingering radiation zone radius
     RAD_DAYS: 1.2,       // in-game days the zone stays hot
-    TIMER: 45,           // planted-device countdown (seconds, real)
+    /* ---- THE PLANTED-DEVICE CLOCK, and why it is not 45 any more ---------
+       RESEARCH. The real article is the SADM (Special Atomic Demolition
+       Munition, W54) and its bigger brother the MADM (W45): hand-emplaced by
+       a two-man team, armed by a deliberate multi-step sequence and fired by
+       a MECHANICAL TIMER whose only job was to outlast the team's withdrawal.
+       The doctrinal problem with the whole weapon class was exactly that
+       arithmetic — the delay had to beat the distance a team on foot could
+       cover, and for many assigned targets it did not. That tension is the
+       mechanic; it is not something to design around.
+
+       SO THE NUMBER IS SOLVED AGAINST THIS GAME'S OWN DISTANCES:
+         the weapon's gameplay reach  = the bus's nuke wave maxR   = 900 m
+         instant unsheltered death    = R_PLAYER                   = 160 m
+         a sprinting player           = walk 7 * sprint 1.7        = 11.9 m/s
+                                        (systems/physics.js's own numbers)
+         a car in traffic             = ~22 m/s sustained
+       => clear the kill radius on foot    160 / 11.9 =  13.4 s
+       => clear the FULL reach on foot     900 / 11.9 =  75.6 s
+       => clear the full reach by car      900 / 22   =  40.9 s
+
+       TIMER = 90 s. A dead-straight sprint clears everything with ~14 s
+       spare — and you will not get a dead-straight sprint, because planting
+       is a crime, the streets are not empty and the doors are not aligned.
+       Take a car and it is comfortable. That gap between 75.6 and 90 is the
+       whole design: the escape IS the mission, and the answer is a vehicle.
+       45 s was under the on-foot figure, i.e. it was not an escape at all.
+
+       ARM = 6 s of arming BEFORE the clock starts, in three beats. Real
+       weapons cannot be made live by putting them down: a PAL unlock, then
+       arming, then the timer. It is fully abortable, which is what makes
+       setting it a decision rather than a button. */
+    TIMER: 90,           // planted-device countdown (seconds, real)
+    ARM: 6,              // arming sequence before the clock starts
+    ARM_BEATS: 3,        // safe -> armed -> hot
   };
+  // Flag-off returns the pre-2026-07-28 arc verbatim: 45 s, no arming beat.
+  function nkTimer() { return CBZ.CONFIG.NUKE_GROUND_COUNTDOWN === false ? 45 : NK.TIMER; }
+  function nkArm() { return CBZ.CONFIG.NUKE_GROUND_COUNTDOWN === false ? 0 : NK.ARM; }
   let nk = null;                                     // the one live resolution
   const radZones = [];                               // {x,z,r,until}
 
@@ -2074,17 +2642,79 @@
      Both verbs live in the ONE interaction registry (touch pills for free,
      HUD doctrine intact: no new chrome, the killfeed carries the deaths).
   ========================================================================== */
-  const armed = [];                                   // {x,z,t,mesh,beep}
+  const armed = [];                                   // {x,z,t,arm,mesh,beep,phase}
+  /* THE PLANTED DEVICE. Same warhead the vault holds and the bay drops — it
+     lies on its own transport skid with an arming panel bolted to the flank,
+     because what you set down is a weapon, not a prop. The LED is the one
+     thing on it that moves, and it says which PHASE the device is in: amber
+     while it arms, red once the clock is running, and its strobe rate rides
+     the clock down. Parked colours are minted once (module-lifetime, like
+     every other pooled material here). */
+  let _ledAmber = null, _ledRed = null, _ledDark = null;
+  function ledMats() {
+    if (_ledRed) return;
+    _ledRed = new THREE.MeshBasicMaterial({ color: 0xff3030 });
+    _ledAmber = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+    _ledDark = new THREE.MeshBasicMaterial({ color: 0x321208 });
+    _ledRed._shared = _ledAmber._shared = _ledDark._shared = true;
+  }
   function deviceMesh() {
     bombAssets();
-    const gp = bombMesh("nuke");
-    gp.rotation.x = 0;                                // lies flat on the ground
-    gp.rotation.z = Math.PI / 2;
-    const led = new THREE.Mesh(bg(0.12, 0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xff3030 }));
-    led.position.set(0, 0.55, 0);
+    ledMats();
+    if (CBZ.CONFIG.NUKE_FX_V2 === false || !CBZ.nukeWarhead) {
+      const gp0 = bombMesh("nuke");
+      gp0.rotation.x = 0;                             // lies flat on the ground
+      gp0.rotation.z = Math.PI / 2;
+      const led0 = new THREE.Mesh(bg(0.12, 0.12, 0.12), _ledRed);
+      led0.position.set(0, 0.55, 0);
+      gp0.add(led0);
+      gp0.userData.led = led0;
+      return gp0;
+    }
+    const gp = new THREE.Group();
+    // the weapon itself, lying on its side, nose along +X (no rotation needed)
+    const w = CBZ.nukeWarhead({ mat: nukeMat, geo: bg, chute: false });
+    gp.add(w);
+    // a low transport skid so it is not floating on its own curvature
+    const skid = new THREE.Mesh(bg(1.9, 0.10, 0.72), nukeMat(0x4a5058));
+    skid.position.set(0, -WH.RAD - 0.05, 0);
+    gp.add(skid);
+    for (const s of [-0.62, 0.62]) {
+      const chock = new THREE.Mesh(bg(0.16, 0.20, 0.60), nukeMat(0x3a4046));
+      chock.position.set(s, -WH.RAD + 0.08, 0);
+      gp.add(chock);
+    }
+    // THE ARMING PANEL — the reason this reads as armed and not as dropped
+    const panel = new THREE.Mesh(bg(0.42, 0.26, 0.06), nukeMat(0x24282d));
+    panel.position.set(-0.18, WH.RAD * 0.42, WH.RAD * 0.94);
+    gp.add(panel);
+    const led = new THREE.Mesh(bg(0.09, 0.09, 0.09), _ledRed);
+    led.position.set(-0.05, WH.RAD * 0.42, WH.RAD * 1.02);
     gp.add(led);
     gp.userData.led = led;
+    // the safing pin's pigtail, pulled: a small red flag on the tail
+    const flag = new THREE.Mesh(bg(0.02, 0.13, 0.16), nukeMat(WH_COL.arm));
+    flag.position.set(-WH.LEN * 0.5 + 0.10, WH.RAD + 0.10, 0);
+    gp.add(flag);
+    gp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
     return gp;
+  }
+  // The device's LED, driven by phase. Swapping the MATERIAL rather than
+  // toggling `visible` keeps the strobe readable from the far side of a
+  // street, where a 9 cm cube blinking out reads as nothing at all.
+  function ledPhase(a) {
+    const led = a.mesh && a.mesh.userData && a.mesh.userData.led;
+    if (!led) return;
+    if (a.arm > 0) {
+      // arming: a slow, deliberate amber pulse, one per beat
+      const beat = NK.ARM / Math.max(1, NK.ARM_BEATS);
+      led.material = ((a.arm % beat) / beat) < 0.55 ? _ledAmber : _ledDark;
+      return;
+    }
+    // running: the strobe accelerates all the way down, so the device is
+    // legible as "how long have I got" without a HUD element existing.
+    const hz = a.t < 10 ? 8 : a.t < 30 ? 4 : 2;
+    led.material = ((a.t * hz) % 1) < 0.5 ? _ledRed : _ledDark;
   }
   let _plantWired = false;
   function wirePlantZones() {
@@ -2103,15 +2733,27 @@
       },
       options: [{
         id: "nuke-plant-arm", slot: "e", bad: true,
-        label: function () { return "Plant the nuclear device (" + NK.TIMER + "s)"; },
+        label: function () { return "Plant the nuclear device (" + nkTimer() + "s)"; },
         onSelect: function (t) {
           if (!invTake("Nuclear Device")) return;
           const gy = CBZ.floorAt ? CBZ.floorAt(t.x, t.z) : 0;
           const m = deviceMesh();
           m.position.set(t.x, gy + 0.45, t.z);
           if (CBZ.scene) CBZ.scene.add(m);
-          armed.push({ x: t.x, z: t.z, t: NK.TIMER, mesh: m, beep: 0 });
-          note("DEVICE ARMED — " + NK.TIMER + " seconds. Run.", 3.2);
+          armed.push({
+            x: t.x, z: t.z, t: nkTimer(), arm: nkArm(), mesh: m, armBeep: -1,
+            // seed the beep at the FIRST mark the clock will produce, so the
+            // opening tone is not fired in the same frame as the arming alarm
+            // (two cues 16 ms apart read as one doubled sample, which is the
+            // exact note city/nukefx.js's own sfx block makes about `force`).
+            beep: Math.ceil(nkTimer() / 10) * 10,
+          });
+          if (nkArm() > 0) {
+            note("ARMING — hold the sequence. " + nkTimer() + " seconds once it goes hot.", 3.4,
+              { from: "Device", app: "messages" });
+          } else {
+            note("DEVICE ARMED — " + nkTimer() + " seconds. Run.", 3.2);
+          }
           sfx("alarm");
           if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { x: t.x, z: t.z, type: "planting-explosives" }); } catch (e) {} }
         },
@@ -2132,20 +2774,31 @@
       },
       options: [{
         id: "nuke-abort-do", slot: "e",
-        label: function (a) { return "Abort the countdown (" + Math.ceil(a.t) + "s)"; },
+        // The verb changes with the phase: you SAFE a device that is still
+        // arming and you ABORT one whose clock is already running. Same
+        // action, and it is available in both — a sequence you cannot stop
+        // is not a decision, it is a cutscene.
+        label: function (a) {
+          return a.arm > 0
+            ? "Safe the device (" + Math.ceil(a.arm) + "s to hot)"
+            : "Abort the countdown (" + Math.ceil(a.t) + "s)";
+        },
         onSelect: function (a) {
           const i = armed.indexOf(a);
           if (i < 0) return;
           armed.splice(i, 1);
           if (a.mesh && a.mesh.parent) a.mesh.parent.remove(a.mesh);
           invAdd("Nuclear Device");
-          note("Countdown aborted. Your hands are still shaking.", 2.4);
+          note(a.arm > 0 ? "Safed. The pin goes back in."
+                         : "Countdown aborted. Your hands are still shaking.", 2.4);
           sfx("clank");
         },
       }],
     });
     if (I.describe) I.describe("nukearmed", function (a) {
-      return { label: "ARMED DEVICE", note: Math.ceil(a.t) + " seconds on the clock" };
+      return a.arm > 0
+        ? { label: "ARMING", note: Math.ceil(a.arm) + " seconds to hot" }
+        : { label: "ARMED DEVICE", note: Math.ceil(a.t) + " seconds on the clock" };
     });
     _plantWired = true;
   }
@@ -2162,12 +2815,44 @@
     }
     for (let i = armed.length - 1; i >= 0; i--) {
       const a = armed[i];
+      /* ---- PHASE 1: ARMING. Three beats, one tone each, amber LED. Nothing
+         about the world is committed yet and the safe verb is live. */
+      if (a.arm > 0) {
+        a.arm -= dt;
+        ledPhase(a);
+        const beat = NK.ARM / Math.max(1, NK.ARM_BEATS);
+        const b = Math.ceil(a.arm / beat);
+        if (b !== a.armBeep) {
+          a.armBeep = b;
+          sfx("key", { pitch: 0.72 + (NK.ARM_BEATS - b) * 0.16, volume: 0.55 });
+        }
+        if (a.arm <= 0) {
+          a.arm = 0;
+          // GOING HOT is the loudest single cue this arc has, and it is the
+          // frame the clock actually starts.
+          sfx("alarm", { volume: 0.9 });
+          note("DEVICE HOT — " + Math.ceil(a.t) + " seconds. Get a vehicle.", 3.6);
+          if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("NUCLEAR DEVICE ARMED"); } catch (e) {} }
+          if (CBZ.shake) { try { CBZ.shake(1.2); } catch (e) {} }
+        }
+        continue;
+      }
+      /* ---- PHASE 2: THE CLOCK. -------------------------------------------
+         The cadence is CONTINUOUS, not a last-ten special case: one tone per
+         10 s down to T-30, per 5 s to T-10, then per second. That is what
+         makes the device audible as a rising pressure from across a block
+         instead of silent until it is already too late to run. */
       a.t -= dt;
-      const led = a.mesh && a.mesh.userData.led;
-      if (led) led.visible = ((a.t * (a.t < 10 ? 6 : 2)) % 1) < 0.5;
-      if (a.t <= 10 && Math.ceil(a.t) !== a.beep) {
-        a.beep = Math.ceil(a.t);
-        sfx("key", { pitch: 1.2 + (10 - a.beep) * 0.06, volume: 0.5 });
+      ledPhase(a);
+      const step = a.t > 30 ? 10 : a.t > 10 ? 5 : 1;
+      const mark = Math.ceil(a.t / step) * step;
+      if (mark !== a.beep) {
+        a.beep = mark;
+        const u = 1 - Math.max(0, Math.min(1, a.t / Math.max(1, nkTimer())));
+        sfx("key", { pitch: 0.95 + u * 0.75, volume: 0.42 + u * 0.28 });
+        // three spoken milestones, on the channel this file already uses
+        if (mark === 60 || mark === 30) note(mark + " seconds.", 1.6, { from: "Device", app: "messages" });
+        if (mark === 10 && CBZ.city && CBZ.city.big) { try { CBZ.city.big("10"); } catch (e) {} }
       }
       if (a.t <= 0) {
         armed.splice(i, 1);
@@ -2370,8 +3055,52 @@
       nukeActive: !!nk,
       rad: radZones.length,
       bus: !!CBZ.detonate, ledger: !!CBZ.structure,
+      /* ---- THE TWO ROUTES TO A DETONATION, AS NUMBERS ------------------
+         Both are here so a probe can assert on them without dropping a
+         weapon: the ground clock and its arming beat, and the air route's
+         delivery profile at any release altitude. `deliveryAt(h)` is the
+         one honest answer to "how long from when it leaves the bay". */
+      plantTimer: nkTimer(), plantArm: nkArm(),
+      plantLive: armed.map(function (a) {
+        return { arm: +Math.max(0, a.arm).toFixed(2), t: +Math.max(0, a.t).toFixed(2) };
+      }),
+      escape: {
+        // the derivation NK.TIMER is solved from — see its comment
+        reach: 900, onFoot: +(900 / 11.9).toFixed(1), byCar: +(900 / 22).toFixed(1),
+        bomberClear: +(900 / 105).toFixed(2), targetFall: RET.T_ESCAPE,
+      },
+      /* THE DELIVERY PROFILE AT EVERY BAND, AS A TABLE. Deliberately an
+         ARRAY OF PLAIN OBJECTS and not a function(agl): a CDP probe reads
+         this through Runtime.evaluate with returnByValue, and JSON drops a
+         function property SILENTLY — an audit surface that vanishes when
+         serialised is worse than no audit surface. These are the same
+         altitudes the retardFor block's measured table quotes, so the
+         comment and the runtime can be diffed against each other. */
+      delivery: [80, 150, 300, 600, 1200].map(deliveryProfile),
     };
   };
+  // one row of the table above: what a nuclear round released at `agl` does.
+  function deliveryProfile(agl) {
+    const h = Math.max(1, +agl || 300);
+    const bal = (EJECT_MS + Math.sqrt(EJECT_MS * EJECT_MS + 2 * GRAV * h)) / GRAV;
+    const r = retardFor("nuke", h, -EJECT_MS, 0);
+    if (!r) {
+      return { agl: h, retarded: false, fall: +bal.toFixed(2), ballistic: +bal.toFixed(2),
+               vt: 0, deploy: -1, snatch: 0, bomberClear: Math.round(bal * 105) };
+    }
+    // the same bracketed bisection solveRetard runs, on a zero-surface column
+    const dv = r.v0 - r.vt;
+    const yA = function (d) { return r.y0 - r.vt * d - r.tau * dv * (1 - Math.exp(-d / r.tau)); };
+    let lo = 0, hi = 4;
+    while (yA(hi) > 0 && hi < 60) hi *= 2;
+    for (let i = 0; i < 28; i++) { const m = (lo + hi) * 0.5; if (yA(m) > 0) lo = m; else hi = m; }
+    const fall = r.t0 + (lo + hi) * 0.5;
+    return {
+      agl: h, retarded: true, fall: +fall.toFixed(2), ballistic: +bal.toFixed(2),
+      vt: +r.vt.toFixed(1), deploy: r.t0, snatch: +r.v0.toFixed(1),
+      bomberClear: Math.round(fall * 105),
+    };
+  }
 
   // ---- PREWARM PARK: the lazy materials this file spawns mid-fight (bombs,
   // the device) sit invisible in the scene from load, so core/fxwarm's
