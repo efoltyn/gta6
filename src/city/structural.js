@@ -879,9 +879,26 @@
           if (near) {
             const side = Math.random() < 0.5 ? -1 : 1;
             const horiz = Math.random() < 0.5;
-            const fx = b.ox + (horiz ? (Math.random() - 0.5) * b.w * 0.8 : side * b.w * 0.5);
-            const fz = b.oz + (horiz ? side * b.d * 0.5 : (Math.random() - 0.5) * b.d * 0.8);
-            try { CBZ.cityCrashSmoke(fx, f.f * FH + FH * 0.6, fz); } catch (e) {}
+            // PLUME STANDOFF + a hot root. This emitted AT the wall plane
+            // (`side * b.w * 0.5` IS the face), and cityCrashSmoke jitters every
+            // puff +/-0.75 u laterally at scale 1 — so HALF the column was born
+            // INSIDE the building and the rest lay flat on the facade. Sprites
+            // are camera-facing, so at zero standoff a burning floor read as
+            // dark blobs PAINTED on the glass: the same defect the owner just
+            // purged from the blast wounds (crashfx.js FX_WALL_WOUNDS).
+            // PLUME_OUT is 1.1 because it must strictly EXCEED that 0.75 jitter
+            // — 0.6 would still birth a third of the plume inside the wall — so
+            // every puff now starts in open air and the column reads as smoke
+            // pouring OUT of a burning floor. `flame` adds the warm additive
+            // lick under the smoke, because a fire that emits nothing but
+            // near-black smoke IS a blob cluster, which is the other half of
+            // why this read as a stain instead of as burning. The emitter's
+            // rate, lifetime and self-termination are deliberately untouched.
+            const PLUME_OUT = 1.1;
+            const fnx = horiz ? 0 : side, fnz = horiz ? side : 0;
+            const fx = b.ox + (horiz ? (Math.random() - 0.5) * b.w * 0.8 : side * b.w * 0.5) + fnx * PLUME_OUT;
+            const fz = b.oz + (horiz ? side * b.d * 0.5 : (Math.random() - 0.5) * b.d * 0.8) + fnz * PLUME_OUT;
+            try { CBZ.cityCrashSmoke(fx, f.f * FH + FH * 0.6, fz, { flame: true }); } catch (e) {}
           }
         }
       }

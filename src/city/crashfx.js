@@ -563,7 +563,8 @@
   // A bounded reusable wreck plume for aircraft modules. Several callers have
   // long feature-detected this hook; defining it here keeps those crashes on
   // the same pooled smoke sprites as explosions instead of silently doing
-  // nothing. Each call is capped at six puffs and they return to puffPool.
+  // nothing. Each call is capped at six smoke puffs (plus two short flame licks
+  // when opts.flame is set) and every one of them returns to puffPool.
   CBZ.cityCrashSmoke = function (x, y, z, opts) {
     opts = opts || {};
     const cy = Number.isFinite(+y) ? +y : 0.8;
@@ -581,6 +582,26 @@
           vx: Math.cos(a) * drift, vy: 1.2 + rng() * 1.0,
           vz: Math.sin(a) * drift, delay: i * 0.08 + rng() * 0.1,
         });
+    }
+    // ---- opts.flame — a warm additive lick UNDER the smoke (OPT-IN) ---------
+    // A SUSTAINED fire that emits only near-black smoke (shade 0.09-0.15) reads
+    // as a blob cluster, not as burning — that is structural.js's burning-floor
+    // case, where the same plume repeats for the life of the fire with nothing
+    // hot at its root. This is the recipe the blast wound's first beats already
+    // used: a small additive puff low in the column, short-lived and bright, so
+    // the plume HAS a source. updatePuffs already ramps a non-smoke puff
+    // white->yellow->orange->red for free, so this adds no material and no draw
+    // call class — it borrows two slots from the same pooled sprite budget.
+    // Default OFF: every existing wreck / chopper / nukefx caller is unchanged.
+    if (opts.flame) {
+      for (let i = 0; i < 2; i++) {
+        spawnPuff(x + (rng() - 0.5) * 0.7 * scale, cy + rng() * 0.5 * scale, z + (rng() - 0.5) * 0.7 * scale, {
+          additive: true, base: 0.5 * scale, pop: (1.5 + rng() * 1.1) * scale,
+          life: 0.55 + rng() * 0.45, maxOp: 0.85,
+          vy: 1.4 + rng() * 0.9, spin: (rng() - 0.5) * 2,
+          delay: i * 0.12 + rng() * 0.08,
+        });
+      }
     }
   };
 
