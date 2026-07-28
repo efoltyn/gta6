@@ -94,11 +94,20 @@
   // Engine fire when the player is at the throttle (owner: "no fire comes out
   // the back"). false => cold trenches exactly as before.
   if (CBZ.CONFIG.STRAT_B2_PLUME == null) CBZ.CONFIG.STRAT_B2_PLUME = true;
+  // THE ORDNANCE READOUT on the flight strip + the switch headline. false =>
+  // the payload state is invisible again, exactly as it shipped. See the long
+  // note above drawPayloadHud() for WHY a toast could never have worked.
+  if (CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK == null) CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK = true;
 
   function h01(x, z, s) { return CBZ.hash01 ? CBZ.hash01(x, z, s) : 0.5; }
   function cm(hex, opts) { return CBZ.cmat ? CBZ.cmat(hex, opts) : (CBZ.mat ? CBZ.mat(hex, opts) : new THREE.MeshLambertMaterial({ color: hex })); }
   function bg(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
-  function note(m, s) { if (CBZ.city && CBZ.city.note) { try { CBZ.city.note(m, s); } catch (e) {} } }
+  // `opts` is NOT optional decoration: city/mode.js's note() runs every string
+  // through phoneWorthy(), which returns FALSE for anything without a named
+  // in-world sender unless it happens to match its money/danger vocabulary. An
+  // unsigned "Payload: Mk-84 bombs (16)" is deleted at that chokepoint and
+  // never reaches any surface at all. {from, app} is what makes it a delivery.
+  function note(m, s, opts) { if (CBZ.city && CBZ.city.note) { try { CBZ.city.note(m, s, opts); } catch (e) {} } }
   function sfx(n, o) { if (CBZ.sfx) { try { CBZ.sfx(n, o); } catch (e) {} } }
 
   /* ---- THE ORDNANCE BUS ---------------------------------------------------
@@ -812,8 +821,15 @@
       c.jdamAmmo = B2_JDAMS;
       c.displayName = "B-2 SPIRIT";
       payload = "bomb";
-      // one note, not two — city.note replaces rather than queues
-      note("B-2 SPIRIT — [B] tap: release · HOLD [B]: carpet run · [X] payload · LMB missiles. Penetrators only bite fast and high.", 5.4);
+      _payFlash = 0; _payTag = "";
+      _b2Legend = 14;                              // the on-strip legend, then silence
+      // ONE note. It carries NO key glyph on purpose: mode.js:91's NOTE_KEYBIND
+      // deletes any string containing one, from every channel, which is exactly
+      // why the old version of this line ("[B] tap: release · … · LMB missiles")
+      // was never delivered to anybody. The keys are taught on the flight strip
+      // instead (payloadHudText); this is the loadout, for the phone's record.
+      note("B-2 SPIRIT airborne — bay loaded with sixteen Mk-84 and four JDAM. Penetrators only bite fast and high.",
+        5.4, { from: "Flight Ops", app: "messages" });
     }
     // bay doors ease open around a drop window, then seal
     if (b2rec && b2rec.group && b2rec.group.userData.bayL) {
@@ -850,6 +866,10 @@
         p.s.scale.set(p.bx * (0.85 + 0.3 * f), p.by * (0.8 + 0.5 * f) * (0.6 + 0.4 * thr), 1);
       }
     }
+    // LAST in this updater, and this updater is 12.35 — playeraircraft.js's
+    // drawHud() has already rewritten #cityFlightHud at order 12 this frame, so
+    // the ordnance group appends cleanly onto the end of the instrument line.
+    drawPayloadHud(c, dt);
   });
 
   /* ==========================================================================
@@ -864,10 +884,21 @@
     if (k === "nuke") return CBZ.CONFIG.STRAT_NUKE !== false && invCount("Nuclear Device") > 0;
     return false;
   }
+  // How many of `k` are actually aboard. ONE answer — the strip, the label and
+  // the audit all read it, so a readout can never disagree with the rack.
+  function payloadCount(k, c) {
+    if (k === "bomb") return c ? (c.bombAmmo | 0) : 0;
+    if (k === "jdam") return c ? (c.jdamAmmo | 0) : 0;
+    if (k === "buster") return invCount("Bunker Buster");
+    return invCount("Nuclear Device");
+  }
+  // Instrument names — short enough to sit in the flight strip's one line
+  // beside the altitude and the missile count.
+  const PAY_SHORT = { bomb: "MK-84", jdam: "JDAM", buster: "GBU-57", nuke: "THE DEVICE" };
   function payloadLabel(k, c) {
-    if (k === "bomb") return "Payload: Mk-84 bombs (" + (c ? (c.bombAmmo | 0) : 0) + ")";
-    if (k === "jdam") return "Payload: GBU-31 JDAM — guided (" + (c ? (c.jdamAmmo | 0) : 0) + ")";
-    if (k === "buster") return "Payload: GBU-57 BUNKER BUSTER (" + invCount("Bunker Buster") + ")";
+    if (k === "bomb") return "Payload: Mk-84 bombs (" + payloadCount("bomb", c) + ")";
+    if (k === "jdam") return "Payload: GBU-31 JDAM — guided (" + payloadCount("jdam", c) + ")";
+    if (k === "buster") return "Payload: GBU-57 BUNKER BUSTER (" + payloadCount("buster", c) + ")";
     return "Payload: THE DEVICE";
   }
   function cyclePayload() {
@@ -879,16 +910,91 @@
       const cand = PAYLOADS[(i + k) % PAYLOADS.length];
       if (payloadAvailable(cand, c)) { payload = cand; break; }
     }
+    _b2Legend = 0;                          // you found the key; stop teaching it
     if (payload === before) {
       // [X] with nothing to switch TO must say WHY, or it reads as a dead key
       // (owner: "theres no way to change payload"). Name where the other
       // stores come from instead of silently re-picking the same rack.
-      note("No other stores aboard — JDAM rack " + (CBZ.CONFIG.STRAT_JDAM === false ? "is disabled" : "spent") + "; Bunker Buster & THE DEVICE are bought at the bunker vault.", 3.2);
+      // CORRECTED: neither special is BOUGHT and neither comes from the vault
+      // alone — the GBU-57s are taken free from the ordnance crate in the Fort
+      // Brandt Deep Shelter's armory (bunkers.js:607/331, restocks daily) and
+      // THE DEVICE is taken free from the vault cradle inside the same shelter
+      // (bunkers.js:681/361). Saying "bought" sent the player shopping.
+      payloadFlash("NO OTHER STORES", 2.4);
+      note("No other stores aboard — JDAM rack " + (CBZ.CONFIG.STRAT_JDAM === false ? "is disabled" : "spent")
+        + ". GBU-57 penetrators are in the Fort Brandt Deep Shelter's ordnance crate; the device is in its vault.",
+        3.2, { from: "Flight Ops", app: "messages" });
       return payload;
     }
-    note(payloadLabel(payload, c), 1.6);
+    payloadFlash("SELECTED", 2.0);
+    note(payloadLabel(payload, c), 1.6, { from: "Flight Ops", app: "messages" });
+    // The two SPECIALS are genuine headlines and belong in the record; the two
+    // ordinary racks are not, and a news push per keypress would be spam.
+    if ((payload === "buster" || payload === "nuke") && CBZ.city && CBZ.city.big) {
+      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED — THE DEVICE" : "BAY ARMED — GBU-57 PENETRATOR"); } catch (e) {}
+    }
     sfx("switch", { pitch: 1.2, volume: 0.3 });
     return payload;
+  }
+
+  /* ---- THE ORDNANCE READOUT — the ONE surface a pilot can actually see -----
+     OWNER: "it doesn't show when i switch payload." It never could. EVERY
+     prose channel in this game funnels through city/mode.js, and every one of
+     them is phone-only now:
+       • city.note()  — mode.js:190 bails on phoneWorthy() (mode.js:116), which
+         returns FALSE for anything that is not an authored communication, then
+         routes what survives to cityPhoneNotify. Nothing is drawn on screen.
+       • city.big()   — mode.js:240, same gate, straight to the phone's News app.
+       • flashToast / flashHint / setObjective — systems/hud.js:33 routeCityText
+         BLANKS the DOM element in city mode and forwards to the handset.
+       • cityFeed     — city/hud.js:409 renderFeed() empties the element and
+         sets display:none unconditionally.
+     And mode.js's NOTE_KEYBIND (mode.js:91) drops any string carrying a key
+     glyph outright — which is why this file's first-flight legend ("[B] tap:
+     release · HOLD [B] … · [X] payload · LMB missiles") has never once been
+     seen by anybody. Shouting louder cannot open a closed channel.
+
+     What IS on screen while you fly is playeraircraft.js's #cityFlightHud
+     instrument strip: altitude · speed · missiles · integrity. A bomb bay is
+     ordnance state exactly like the missile count already sitting in it, so the
+     payload belongs THERE — permanent, not a toast you have to catch.
+
+     WHY THIS DOES NOT TOUCH playeraircraft.js: its drawHud() rewrites the
+     element's textContent inside the order-12 updater; this file's B-2 updater
+     is order 12.35, so appending here lands after it, every frame, forever. The
+     HUD_MARK indexOf guard makes a frame where drawHud did NOT run a no-op
+     instead of doubling the suffix. No element is created and no HUD doctrine
+     is bent: this is the aircraft's own instrument line, in its own grammar. */
+  const HUD_MARK = "  ✦";              // ✦ — this readout's own glyph
+  let _payFlash = 0, _payTag = "", _b2Legend = 0;
+  function payloadFlash(tag, secs) { _payTag = tag || ""; _payFlash = secs || 2; }
+  function payloadHudText(c) {
+    const n = payloadCount(payload, c);
+    // THE DEVICE is one per world by construction (bunkers.js's single cradle),
+    // so a "×1" beside it is noise.
+    return HUD_MARK + PAY_SHORT[payload] + (payload === "nuke" ? "" : " ×" + n) +
+      (_payFlash > 0 && _payTag ? "  " + _payTag : "") +
+      // A 14 s legend, then silence. The permanent tutorial this repo bans is a
+      // legend that never leaves; the owner cannot discover [X] any other way,
+      // because the note that used to teach it is deleted upstream. Never on
+      // touch — CLAUDE.md forbids key glyphs there, and the touch layer's own
+      // pills (CBZ.strategicPayloadCycle / strategicBombHold) say the words.
+      (_b2Legend > 0 && !CBZ.touchMode ? "   X:payload  B:drop (hold: carpet)" : "");
+  }
+  // Append our group to the flight strip. Returns nothing; safe on every path.
+  function drawPayloadHud(c, dt) {
+    if (_payFlash > 0) _payFlash = Math.max(0, _payFlash - dt);
+    if (_b2Legend > 0) _b2Legend = Math.max(0, _b2Legend - dt);
+    if (CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK === false) return;
+    if (typeof document === "undefined" || !document.getElementById) return;
+    const el = document.getElementById("cityFlightHud");
+    if (!el || el.style.display === "none") return;
+    const t = el.textContent || "";
+    if (t.indexOf(HUD_MARK) >= 0) return;   // drawHud did not run this frame
+    if (c) { el.textContent = t + payloadHudText(c); return; }
+    // NOT the B-2: the only thing worth saying here is why the bomb keys did
+    // nothing, and only right after you pressed one (see the keydown handler).
+    if (_payFlash > 0 && _payTag) el.textContent = t + HUD_MARK + _payTag;
   }
 
   // ---- the falling-ordnance pool (shared geo/mats — explosives.js idiom) ---
@@ -1100,8 +1206,11 @@
     if (!c || !g || g.mode !== "city") return false;
     // bomber discipline: a release on the deck detonates under your own tail
     const agl = c.pos.y - (CBZ.floorAt ? CBZ.floorAt(c.pos.x, c.pos.z) : 0);
-    if (agl < 14) { if (!force) note("Too low — climb before releasing.", 1.4); return false; }
-    if (!payloadAvailable(payload, c)) { cyclePayload(); if (!payloadAvailable(payload, c)) { if (!force) note("Bay's empty.", 1.2); return false; } }
+    // A REFUSED RELEASE IS THE SAME BUG AS THE INVISIBLE PAYLOAD SWITCH: both
+    // notes below are deleted upstream (mode.js phoneWorthy), so [B] simply did
+    // nothing and read as a broken key. The strip is the surface that works.
+    if (agl < 14) { if (!force) { payloadFlash("TOO LOW — CLIMB", 1.8); note("Too low — climb before releasing.", 1.4); } return false; }
+    if (!payloadAvailable(payload, c)) { cyclePayload(); if (!payloadAvailable(payload, c)) { if (!force) { payloadFlash("BAY EMPTY", 1.8); note("Bay's empty.", 1.2); } return false; } }
     if (c._dropCD > 0) return false;
     const kind = payload;
     if (kind === "bomb") c.bombAmmo--;
@@ -1958,11 +2067,21 @@
     if (k !== "b" && k !== "x") return;
     if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
     if (!g || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
-    if (!flyingB2()) return;                          // only the B-2 owns these keys
+    if (!flyingB2()) {
+      // A DEAD KEY MUST SAY SO. Fort Brandt parks a "Heavy Bomber"
+      // (island_military.js:1218) that looks exactly like the aircraft these
+      // keys belong to and has no bay at all — same for the gunship, the
+      // airliner and the Raptor. Pressing [B] in one of them was silent, which
+      // reads as a broken control rather than the wrong airframe. We do NOT
+      // preventDefault here: the key still belongs to whoever else wants it.
+      if (!e.repeat && CBZ.player && CBZ.player._aircraft) payloadFlash("NO BOMB BAY — TAKE THE B-2", 2.6);
+      return;                                         // only the B-2 owns these keys
+    }
     e.preventDefault();
     if (k === "x") { if (!e.repeat) cyclePayload(); return; }
     if (e.repeat || _bHeld) return;
     _bHeld = true; _bT = 0; _bRan = false;
+    _b2Legend = 0;                                    // you found the key
   });
   addEventListener("keyup", function (e) {
     if ((e.key || "").toLowerCase() !== "b" || !_bHeld) return;
@@ -2051,6 +2170,22 @@
     }
     out.frac = out.lots ? +(out.collapsed / out.lots).toFixed(4) : 0;
     return out;
+  };
+  /* The payload readout, as a NUMBER a probe can assert on (CLAUDE.md's closed
+     loop is math over live state, never frames). `strip` is the exact string
+     appended to #cityFlightHud, so a probe can prove the switch is VISIBLE
+     without taking a screenshot: cycle, read strip, assert it changed. */
+  CBZ.strategicPayloadReadout = function () {
+    const c = flyingB2();
+    return {
+      b2: !!c, payload: payload, short: PAY_SHORT[payload],
+      count: payloadCount(payload, c),
+      strip: c ? payloadHudText(c) : "",
+      flash: +_payFlash.toFixed(2), tag: _payTag, legend: +_b2Legend.toFixed(2),
+      feedback: CBZ.CONFIG.STRAT_PAYLOAD_FEEDBACK !== false,
+      el: (typeof document !== "undefined" && document.getElementById)
+        ? !!document.getElementById("cityFlightHud") : false,
+    };
   };
   CBZ.strategicState = function () {
     const c = flyingB2();
