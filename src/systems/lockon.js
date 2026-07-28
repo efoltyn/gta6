@@ -100,6 +100,30 @@
   // air at all). false = the pre-universal two-acquire behaviour.
   if (CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS == null) CBZ.CONFIG.LOCKON_UNIVERSAL_TARGETS = true;
 
+  // ---- LOCKON_LOS: A TARGET YOU CANNOT SEE IS NOT A TARGET -----------------
+  // Owner's screenshot: hollow green squares and a red lock painted on the
+  // Ironjaw arena's facade, over craft standing BEHIND 25 m of concrete.
+  //
+  // This file has had losBlockedTo() since it shipped, so the reflex reading
+  // ("no LOS test exists") is wrong — the fault is that the ANSWER lived on
+  // the SLOT, and a slot is the wrong place to keep it:
+  //   • a fresh binding started losBlocked = FALSE, i.e. DRAWABLE. Every
+  //     candidate was painted green from the frame it entered the pool until
+  //     its round-robin turn came up.
+  //   • exactly ONE candidate was tested per frame (losRR), so with 8 craft on
+  //     screen an answer was ~8 frames old.
+  //   • bindSlot resets that flag whenever s.obj or s.key changes, and the car
+  //     keys are "car" + INDEX IN CBZ.cityCars. One car despawning renumbers
+  //     everything behind it; merely PANNING the camera changes which craft
+  //     passes the cone filter first and therefore who lands in pooled slot 0.
+  //     In a live city the flag was being reset to "clear" faster than the
+  //     round-robin could ever set it, so the gate was open in practice.
+  // The answer is now cached per ACTOR (object identity, not slot index) so it
+  // survives slot churn, the whole drawable set is swept every frame against a
+  // cast budget, and an actor that has NEVER been tested counts as BLOCKED.
+  // false = the pre-fix per-slot round-robin, byte-identical (one-line revert).
+  if (CBZ.CONFIG.LOCKON_LOS == null) CBZ.CONFIG.LOCKON_LOS = true;
+
   const DEG = Math.PI / 180;
 
   /* ==========================================================================
@@ -121,6 +145,13 @@
   const MAX_CANDS = 24;                   // scoring pool cap
   const LOS_GRACE = 0.45;                 // s a LOCK survives behind cover before breaking
   const AIM_HYST = 0.75;                  // rival must beat the current acquiring score by this (interactions.js idiom)
+  // LOS budget. A cast is one CBZ.losRaycast through core/losgrid.js's broad
+  // phase (~10-100 slab tests, not the 17k-mesh walk), so this is cheap — but
+  // it is still the only per-frame raycast this system does, so it is capped.
+  // CACHE_S is the acquisition cadence, not a frame: an answer is reused for
+  // 0.2 s, which at 60 fps means a steady 8-craft pool costs ~0.7 casts/frame.
+  const LOS_CACHE_S = 0.20;               // s an actor's LOS answer is reused
+  const LOS_BUDGET = MAX_SQUARES;         // fresh candidate casts per frame (a cold pool warms in 1-3 frames)
 
   // ---- scratch (no per-frame allocation) ----
   const _aimO = new THREE.Vector3();      // aim ray origin (world)
@@ -132,14 +163,18 @@
 
   // ---- candidate slots (persistent pool; obj-keyed for hysteresis) ----
   function makeSlot() {
+    // losBlocked starts CLOSED: a candidate nothing has looked through yet is
+    // not a candidate. The sweep in lockTick overwrites it every frame from the
+    // per-actor cache, so this is only the value a never-swept slot can show.
     return { used: false, obj: null, key: "", kind: "", seek: null,
       x: 0, y: 0, z: 0, radius: 2, dist: 0, dot: 0, score: 0,
-      losBlocked: false, losT: -9, sx: 50, sy: 50, px: 40, inView: false };
+      losBlocked: true, sx: 50, sy: 50, px: 40, inView: false };
   }
   const slots = [];
   for (let i = 0; i < MAX_CANDS; i++) slots.push(makeSlot());
   let slotCount = 0;
   const order = [];                        // sort indices (persistent, ints only)
+  function byScore(a, b) { return slots[a].score - slots[b].score; }
 
   // seek closures are allocated only when a slot BINDS a new object (rare),
   // never per frame. Cars/military records are live objects; every other
@@ -214,7 +249,18 @@
   let lockFlash = 0;                       // brief square pop on lock / on launch
   let launchAt = -1, launchKind = "";      // CBZ.lockonLastLaunch feedback
   let platKey = "";                        // "" | "rpg" | "air" | "tank" | "car"
-  let losRR = 0;                           // round-robin cursor for green-candidate LOS
+  let losRR = 0;                           // round-robin cursor (LEGACY path only — LOCKON_LOS off)
+
+  // RATCHET (CBZ.lockonLosAudit). drawnBlocked / drawnUnverified are CUMULATIVE
+  // and must both stay 0: a square drawn over a craft with no line of sight, or
+  // over one whose sight line nobody has checked inside two cache lifetimes, is
+  // the wallhack this flag exists to kill. candidates / drawn / casts are the
+  // live snapshot printed BESIDE them, so a "fix" that simply stops drawing
+  // squares cannot pass. lockGraceDraws counts the sanctioned red-square frames
+  // inside LOS_GRACE — that number is allowed to be non-zero and is what tells
+  // the two apart.
+  const _aud = { candidates: 0, occluded: 0, drawn: 0, casts: 0,
+    drawnBlocked: 0, drawnUnverified: 0, lockGraceDraws: 0 };
 
   function sfx(n, o) { if (CBZ.sfx) { try { CBZ.sfx(n, o); } catch (e) {} } }
 
@@ -281,10 +327,65 @@
     return !!(hits && hits.length);
   }
 
+  /* ---- per-ACTOR LOS cache (LOCKON_LOS) ------------------------------------
+     Keyed on the craft RECORD, never on the slot or on the "car"+index key —
+     that is the whole point: slot bindings and list indices churn every time
+     the player pans, and the old per-slot flag was reset to "clear" by that
+     churn. A WeakMap means a despawned car takes its answer with it. The two
+     legacy single-best acquire fallbacks bind a STRING id ("police-air" /
+     "civil-air") instead of a record, so those land in a small bounded Map. */
+  const _losObjCache = typeof WeakMap === "function" ? new WeakMap() : null;
+  const _losKeyCache = new Map();
+  let losClock = 0;                        // seconds, monotonic within a session
+  let losCasts = 0;                        // casts spent THIS frame (budget)
+  function losRecOf(obj, key) {
+    if (obj && typeof obj === "object" && _losObjCache) return _losObjCache.get(obj) || null;
+    return _losKeyCache.get(key) || null;
+  }
+  function losStore(obj, key, blocked) {
+    let rec = losRecOf(obj, key);
+    if (!rec) {
+      rec = { blocked: blocked, t: losClock };
+      if (obj && typeof obj === "object" && _losObjCache) _losObjCache.set(obj, rec);
+      else {
+        if (_losKeyCache.size > 64) _losKeyCache.clear();   // only the 2 string ids ever live here
+        _losKeyCache.set(key, rec);
+      }
+    }
+    rec.blocked = blocked; rec.t = losClock;
+    return rec;
+  }
+  // CANDIDATE gate — cached, budgeted, and CLOSED BY DEFAULT. An actor with no
+  // cached answer and no budget left this frame is treated as occluded: it may
+  // not draw a square and may not be picked up by the acquire sweep. Costs one
+  // frame of a missing square in the worst case, which is the right trade
+  // against painting a wallhack.
+  function losGate(s) {
+    if (CBZ.CONFIG.LOCKON_LOS === false) return s.losBlocked;
+    const rec = losRecOf(s.obj, s.key);
+    if (rec && losClock - rec.t < LOS_CACHE_S) return rec.blocked;
+    if (losCasts >= LOS_BUDGET) return rec ? rec.blocked : true;
+    losCasts++;
+    const b = losBlockedTo(s.x, s.y, s.z, s.dist);
+    losStore(s.obj, s.key, b);
+    return b;
+  }
+  // ACQUIRING / LOCKED gate — these two gate REAL homing, so they are cast
+  // every frame with no cache age and no budget (exactly as before this flag
+  // existed). The answer is written back so the square agrees with the missile.
+  function losHard(obj, key, x, y, z, dist) {
+    const b = losBlockedTo(x, y, z, dist);
+    if (CBZ.CONFIG.LOCKON_LOS !== false) losStore(obj, key, b);
+    return b;
+  }
+
   function bindSlot(s, obj, key, kind, seek, x, y, z, radius, dist, dot) {
-    if (s.obj !== obj || s.key !== key) {   // new binding → fresh closure + LOS state
-      s.obj = obj; s.key = key; s.losBlocked = false; s.losT = -9;
-      s.seek = seek;
+    if (s.obj !== obj || s.key !== key) {   // new binding → fresh closure
+      s.obj = obj; s.key = key; s.seek = seek;
+      // NOT "s.losBlocked = false" any more. The LOS answer no longer lives on
+      // the slot at all (see LOCKON_LOS): the sweep re-reads it per ACTOR each
+      // frame, so a rebind can no longer launder an occluded craft into view.
+      s.losBlocked = CBZ.CONFIG.LOCKON_LOS !== false;
     } else if (seek && kind !== "car" && kind !== "mil") {
       s.seek = seek;                        // aircraft getters refresh each frame
     }
@@ -424,14 +525,40 @@
     if (platKey !== prevPlat) resetAll();   // switching seat/weapon drops the lock
     const T = PLATFORMS[platKey];
     gatherCandidates(T);
+    losClock += dt;
+    losCasts = 0;
 
-    // LOS budget: one green candidate per frame round-robin; the acquiring +
-    // locked targets are checked EVERY frame (they gate real homing).
-    if (slotCount > 0) {
-      losRR = (losRR + 1) % slotCount;
-      const s = slots[losRR];
-      if (s.used) { s.losBlocked = losBlockedTo(s.x, s.y, s.z, s.dist); s.losT = 0; }
+    // score order — built ONCE per frame here (it used to be rebuilt inside
+    // drawSquares) so the LOS sweep below spends its cast budget on the
+    // nearest-to-crosshair craft, i.e. exactly the ones that can draw a square
+    // or be acquired this frame.
+    order.length = 0;
+    for (let i = 0; i < slotCount; i++) if (slots[i].used) order.push(i);
+    if (order.length > 1) order.sort(byScore);
+
+    if (CBZ.CONFIG.LOCKON_LOS === false) {
+      // LEGACY (flag off): one green candidate per frame, round-robin, and a
+      // fresh binding shows through until its turn comes up. Kept verbatim so
+      // the flag is a true one-line revert.
+      if (slotCount > 0) {
+        losRR = (losRR + 1) % slotCount;
+        const s = slots[losRR];
+        if (s.used) s.losBlocked = losBlockedTo(s.x, s.y, s.z, s.dist);
+      }
+    } else {
+      // THE SWEEP. Every drawable candidate gets a current answer, from the
+      // per-actor cache when it is fresh and from a real cast when it is not.
+      let occ = 0;
+      for (let oi = 0; oi < order.length; oi++) {
+        const s = slots[order[oi]];
+        s.losBlocked = losGate(s);
+        if (s.losBlocked) occ++;
+      }
+      _aud.occluded = occ;
     }
+    _aud.candidates = order.length;
+    _aud.casts = losCasts;
+    _aud.drawn = 0;
 
     // ---- LOCKED: validate or break ----
     if (lockObj) {
@@ -443,8 +570,12 @@
         lockDist = d;
         const dot = d > 1e-4 ? (dx * _aimD.x + dy * _aimD.y + dz * _aimD.z) / d : 1;
         if (d > T.range * 1.15 || dot < T.keep) ok = false;
-        else if (losBlockedTo(p.x, p.y, p.z, d)) {
-          lockLosT += dt;                       // grace: cover must HOLD to break the lock
+        else if (losHard(lockObj, lockKey, p.x, p.y, p.z, d)) {
+          // GRACE (unchanged, and this is the existing lock-break grammar —
+          // nothing new was invented for occlusion): cover has to HOLD for
+          // LOS_GRACE before the lock drops, so clipping a lamppost or a light
+          // mast mid-flight does not dump a shot you already committed to.
+          lockLosT += dt;
           if (lockLosT > LOS_GRACE) ok = false;
         } else lockLosT = 0;
       }
@@ -474,7 +605,7 @@
           aimSeek = best.seek; aimRadius = best.radius;
         }
         // per-frame LOS on the acquiring target — never walk a lock up through a wall
-        if (losBlockedTo(best.x, best.y, best.z, best.dist)) { best.losBlocked = true; aimProgress = Math.max(0, aimProgress - dt * 2); }
+        if (losHard(best.obj, best.key, best.x, best.y, best.z, best.dist)) { best.losBlocked = true; aimProgress = Math.max(0, aimProgress - dt * 2); }
         else {
           aimProgress += dt / T.lockT;
           if (aimProgress >= 1) {
@@ -565,13 +696,15 @@
     buildOverlay();
     if (!overlay || !CBZ.camera) return;
     const fovTan = Math.tan(((CBZ.camera.fov || 60) * DEG) / 2);
-    // sort candidate indices by score (persistent int array — no allocation)
-    order.length = 0;
-    for (let i = 0; i < slotCount; i++) if (slots[i].used) order.push(i);
-    order.sort(function (a, b) { return slots[a].score - slots[b].score; });
+    // `order` (score-sorted candidate indices) is built once per frame in
+    // lockTick, before the LOS sweep — the draw pass just reads it.
     let qi = 0;
-    // RED square first — the locked target always gets a square.
+    // RED square first — the locked target always gets a square. It is drawn
+    // through the LOS_GRACE window ON PURPOSE: during the grace the lock is
+    // still live and the missile still homes, so hiding the square there would
+    // lie about a shot the player can actually take.
     if (lockObj) {
+      if (lockLosT > 0) _aud.lockGraceDraws++;
       const p = lockSeek && lockSeek();
       if (p) {
         // project directly (the lock may not occupy a slot this frame)
@@ -591,6 +724,17 @@
       if (s.losBlocked) continue;                                          // behind a wall → no square
       projectSlot(s, fovTan);
       if (!s.inView) continue;
+      // AUDIT: a drawn square must rest on a CURRENT answer. `drawnBlocked` is
+      // structurally impossible (the continue above) and is counted anyway so a
+      // future edit that removes it shows up; `drawnUnverified` is the real
+      // measure of the bug this flag fixes — a square painted over a craft
+      // whose line of sight nobody had checked recently enough to trust.
+      _aud.drawn++;
+      if (s.losBlocked) _aud.drawnBlocked++;
+      if (CBZ.CONFIG.LOCKON_LOS !== false) {
+        const rec = losRecOf(s.obj, s.key);
+        if (!rec || losClock - rec.t > LOS_CACHE_S * 2) _aud.drawnUnverified++;
+      }
       if (!lockObj && aimObj && (s.obj === aimObj || s.key === aimKey)) {
         // YELLOW: the acquiring square TIGHTENS onto the target (scale 1.75→1 as
         // progress walks to the lock). The old build ALSO spun it 135°→0°, which
@@ -677,6 +821,19 @@
     };
   };
   CBZ.lockonLastLaunch = function () { return launchAt >= 0 ? { t: launchAt, kind: launchKind } : null; };
+  // RATCHET — see _aud. `drawnBlocked` and `drawnUnverified` are pinned at 0.
+  // A probe drives it by equipping a launcher, aiming at craft behind a wall
+  // and stepping CBZ.stepSim: `occluded` must rise and `drawn` must not.
+  CBZ.lockonLosAudit = function () {
+    return {
+      on: CBZ.CONFIG.LOCKON_LOS !== false,
+      candidates: _aud.candidates, occluded: _aud.occluded, drawn: _aud.drawn,
+      casts: _aud.casts, cacheS: LOS_CACHE_S, budget: LOS_BUDGET, graceS: LOS_GRACE,
+      drawnBlocked: _aud.drawnBlocked, drawnUnverified: _aud.drawnUnverified,
+      lockGraceDraws: _aud.lockGraceDraws,
+      blockers: (CBZ.losBlockers && CBZ.losBlockers.length) | 0,
+    };
+  };
   // TOUCH_AIM_ASSIST read surface (systems/touch.js): project the LIVE candidate
   // pool to screen so the touch layer can add gentle reticle friction + a small
   // magnetism nudge. PURE READ — never mutates aim / lock / acquire state (no

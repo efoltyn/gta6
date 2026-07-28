@@ -90,6 +90,21 @@ if (CFG.ARENA_STAND_SOLID == null) CFG.ARENA_STAND_SOLID = true;
 // ARENA_CROWD_EVENT — occupancy follows whether an event is actually running.
 // OFF → the crowd sits at a fixed fill exactly like before.
 if (CFG.ARENA_CROWD_EVENT == null) CFG.ARENA_CROWD_EVENT = true;
+// ARENA_LOS_FULL — THE PROXY THAT BLOCKS SIGHT IS THE WALL YOU SEE.
+// The facade's line-of-sight proxy was twelve hand-sized boxes: four slabs on
+// the straights, four 11 x 11 blocks at the corners, all of them 16 m tall.
+// Their POSITIONS derive from the plan (q = df2 * cos45) but their EXTENTS were
+// typed for the OLD bowl, and when ARENA_TIERS went 2 -> 20 the ring walked
+// outward with them frozen. Measured on the shipped venue: the facade is
+// 24.98 m tall on a 537 m perimeter; the proxy covered 218 m of it at 16 m —
+// so 59% of the wall (the four 95 m corner ARCS, each answered by one 11 m box)
+// and the top 9 m everywhere had NO blocker at all. Every LOS consumer in the
+// game read straight through it: cop vision, clearLineOfFire, camera occlusion,
+// and the owner's screenshot — missile lock squares painted on the concrete,
+// tracking craft standing behind it. The corner proxies now WALK THE SAME ARC
+// the facade geometry walks (runCorner), and the height comes off ROOF_Y, so
+// the two cannot drift apart again. OFF → the twelve frozen boxes.
+if (CFG.ARENA_LOS_FULL == null) CFG.ARENA_LOS_FULL = true;
 
 var mat = CBZ.cmat || CBZ.mat;
 if (!mat) return;
@@ -969,20 +984,41 @@ CBZ.arenaVenue = {
     walkRing(D_OUT + 1.0, 6.0, function (s) {
       put("dark", { x: s.x, y: ROOF_Y + 0.9, z: s.z, sx: s.len + 0.1, sy: 1.8, sz: 2.3, ry: s.yaw });
     });
-    // LOS proxies — four facade slabs, four corner blocks, four seating masses.
-    // Twelve invisible boxes is enough to make the venue opaque to AI vision
-    // without feeding 300 meshes into the losgrid.
+    // LOS proxies — the facade, made opaque to every sight query in the game.
+    // The straights are one slab each; the CORNERS are walked, because a corner
+    // here is a quarter-arc of radius df2 and df2 rides the bowl (60.7 m at 20
+    // tiers, so 95 m of arc per corner — see ARENA_LOS_FULL for the measurement
+    // and for what the old single 11 x 11 block per corner left open). Both the
+    // arc walk and the box height come from the same plan values the facade
+    // geometry above is built from, so the proxy cannot drift from the wall.
+    // ~36 invisible boxes, still nothing next to the losgrid's 17k meshes.
     (function () {
       var df2 = D_OUT + 1;
-      losBox(CX + A + df2, PY + 8, CZ, 2.4, 16, 2 * B);
-      losBox(CX - A - df2, PY + 8, CZ, 2.4, 16, 2 * B);
-      losBox(CX, PY + 8, CZ + B + df2, 2 * A, 16, 2.4);
-      losBox(CX, PY + 8, CZ - B - df2, 2 * A, 16, 2.4);
-      var q = df2 * 0.7071;
-      losBox(CX + A + q, PY + 8, CZ + B + q, 11, 16, 11);
-      losBox(CX - A - q, PY + 8, CZ + B + q, 11, 16, 11);
-      losBox(CX + A + q, PY + 8, CZ - B - q, 11, 16, 11);
-      losBox(CX - A - q, PY + 8, CZ - B - q, 11, 16, 11);
+      var full = CFG.ARENA_LOS_FULL !== false;
+      var LH = full ? (ROOF_Y - PY) : 16;          // facade height, not a typed 16
+      var LY = PY + LH / 2;
+      losBox(CX + A + df2, LY, CZ, 2.4, LH, 2 * B);
+      losBox(CX - A - df2, LY, CZ, 2.4, LH, 2 * B);
+      losBox(CX, LY, CZ + B + df2, 2 * A, LH, 2.4);
+      losBox(CX, LY, CZ - B - df2, 2 * A, LH, 2.4);
+      if (full) {
+        // Walk each corner arc with the SAME helper the facade ring uses. Each
+        // sample is an oriented chord; losBox is axis-aligned, so take the
+        // chord's AABB exactly the way ringSolid does for its colliders.
+        for (var ci = 0; ci < 4; ci++) {
+          runCorner(ci, df2, 12.0, function (s) {
+            var c = Math.abs(Math.cos(s.yaw)), sn = Math.abs(Math.sin(s.yaw));
+            var hx = s.len / 2, hz = 1.2;
+            losBox(s.x, LY, s.z, 2 * (hx * c + hz * sn), LH, 2 * (hx * sn + hz * c));
+          });
+        }
+      } else {
+        var q = df2 * 0.7071;
+        losBox(CX + A + q, LY, CZ + B + q, 11, LH, 11);
+        losBox(CX - A - q, LY, CZ + B + q, 11, LH, 11);
+        losBox(CX + A + q, LY, CZ - B - q, 11, LH, 11);
+        losBox(CX - A - q, LY, CZ - B - q, 11, LH, 11);
+      }
       // NOTE: deliberately NO blocker over the seating mass itself. A slab
       // there would make every spectator in the bowl unshootable from the
       // floor (losgrid is front-face-only, so it blocks from outside but not
