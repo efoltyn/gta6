@@ -149,8 +149,9 @@
   //  isolated offscreen rig. So we mount the SAME pieces here directly,
   //  reusing the engine's shared CBZ.boxGeom / CBZ.cmat primitives, at
   //  the EXACT local transforms bling.js uses (character.js rig space:
-  //  torso front face z≈0.25, collar ≈ y1.75, forearm end y≈-0.66,
-  //  hand front edge y≈-0.80). Meshes are built once and re-pointed on
+  //  torso front face z≈0.25, yoke ≈ y1.75; the wrist and the knuckle line
+  //  come from CBZ.charArmLandmarks, never from a literal — watchParts below).
+  //  Meshes are built once and re-pointed on
   //  change — no per-frame allocation, no global state touched.
   // ============================================================
   const JG = {};                                   // shared jewellery geometry by kind
@@ -199,20 +200,31 @@
       { kind: "pendant", mat: pmat, x: 0, y: 1.515, z: 0.272 },
     ];
   }
-  function watchParts(name) {
+  // THE WRIST AND THE HAND ARE NOT TYPED HERE EITHER. This portrait is the
+  // third file that hangs hardware in the ELBOW frame, and it had its own copy
+  // of a constant the live body had already moved twice (owner: "watches are on
+  // HANDS now"). Both landmarks come off the rig being drawn, so the portrait
+  // and the street can no longer disagree about where a wrist is — and a
+  // portrait of a woman or a child puts the watch on HER wrist. Degrade-safe:
+  // no export (or CHAR_WRIST_LANDMARK=false) → the adult-male literals.
+  function armLM(rig) {
+    return (CBZ.charArmLandmarks && CBZ.charArmLandmarks(rig)) || { wrist: -0.22, hand: -0.34 };
+  }
+  function watchParts(name, rig) {
     const M = jmats(); if (!M) return null;
     const s = String(name).toLowerCase();
     let band = M.gold, face = M.gold;
     if (s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0) { band = M.ice; face = M.glint; }
     else if (s.indexOf("omega") >= 0) { band = M.silver; face = M.silver; }
+    const w = armLM(rig).wrist;
     return [
-      { kind: "cuff", mat: band, x: 0, y: -0.20, z: 0 },
-      { kind: "face", mat: face, x: 0, y: -0.20, z: 0.165 },
+      { kind: "cuff", mat: band, x: 0, y: w, z: 0 },
+      { kind: "face", mat: face, x: 0, y: w, z: 0.165 },
     ];
   }
-  function ringParts() {
+  function ringParts(rig) {
     const M = jmats(); if (!M) return null;
-    return [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.34, z: 0.17 }];
+    return [{ kind: "ring", mat: M.glint, x: 0.10, y: armLM(rig).hand, z: 0.17 }];
   }
 
   // a stable signature of the player's WORN jewellery — chains/watch/ring re-mount
@@ -258,8 +270,8 @@
     const la = rig.low && rig.low.la || (rig.parts && rig.parts.la);
     const ra = rig.low && rig.low.ra || (rig.parts && rig.parts.ra);
     if (neck) mountJewelParts(chainParts(neck), rig.body, out);
-    if (wrist) mountJewelParts(watchParts(wrist), la, out);
-    if (ring) mountJewelParts(ringParts(), ra, out);
+    if (wrist) mountJewelParts(watchParts(wrist, rig), la, out);
+    if (ring) mountJewelParts(ringParts(rig), ra, out);
     if (out.length) rig._cpJewel = out;
   }
 

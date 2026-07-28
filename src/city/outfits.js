@@ -527,7 +527,27 @@
     if (!pp || !pp.legs) { paint(s.legs, c.legs); paint(s.legsLower, c.legs); }
     if (!pp || !pp.torso) paint(s.torso, c.torso);
     if (!pp || !pp.arms) { const ah = c.arms != null ? c.arms : c.torso; paint(s.arms, ah); paint(s.armsLower, ah); }
-    paint(s.collar, c.collar != null ? c.collar : c.torso);
+    // THE YOKE IS NOT A SECOND COLLAR. character.js's collar box is the
+    // SHOULDER YOKE — the top of the torso column, a flat slab that no painted
+    // garment ever reaches (applyClothes dresses torso/arms/legs/jacket and
+    // never this). Every other slot above respects `pp`: a part the canvas
+    // painted is left alone. This line did not, so a PAINTED uniform got a
+    // contrasting flat band stamped around its neck on top of the collar the
+    // painter had already drawn — `security`'s is 0xe8e8e8 on a 0x1c1f26 shirt,
+    // which is the owner's "WHITE NECK ROLL … it disrupts outfits", and the
+    // same fault the tuxedo's own comment above calls "the priest look".
+    // charpanel.js already hides this box on the PORTRAIT for exactly this
+    // reason ("on a plain tee it reads as a rigid white ring around the neck");
+    // this is the world-side half of that judgement, and it makes the two agree.
+    // Under a painted garment the yoke therefore wears the GARMENT's own cloth
+    // colour and disappears into it; a flat (unpainted) fit keeps its accent,
+    // which is the only place a collar band was ever the design.
+    // One-line revert: CBZ.CONFIG.CITY_YOKE_GARMENT = false.
+    const yokeGarment = !CBZ.CONFIG || CBZ.CONFIG.CITY_YOKE_GARMENT !== false;
+    const yokeHex = (yokeGarment && pp && pp.torso && c.torso != null)
+      ? c.torso
+      : (c.collar != null ? c.collar : c.torso);
+    paint(s.collar, yokeHex);
     paint(s.shoes, c.shoes != null ? c.shoes : 0x2b2b2b);
     sheen(s.shoes, !!c.gloss);
     // GANG colors = a SOLID shirt (painted above by the flat path) + a small

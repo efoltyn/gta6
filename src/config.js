@@ -1177,6 +1177,45 @@
   // identical (build path adds/removes no meshes the math gate counts on the
   // painted side). Flip false to bring geometric belts back in one line.
   if (CBZ.CONFIG.CHAR_BELT_PAINTED == null) CBZ.CONFIG.CHAR_BELT_PAINTED = true;
+  // CHAR_YOKE_CLEAR (entities/character.js + city/clothes.js) — OWNER: "security
+  // guards and my player sometimes have what looks like a WHITE NECK ROLL — it
+  // disrupts outfits and FLICKERS, meaning it must be overlapping." The flicker
+  // was arithmetic: the shoulder-yoke box (skinSlots.collar) and the jacket
+  // shell were sized from profile fields authored against nothing, and three
+  // pairs came out EXACTLY coplanar on shipped bodies — ADULT_F's yoke depth ==
+  // her chest depth (a stipple across the whole upper chest, drawn in the yoke's
+  // flat colour), ADULT_F's shell top == her yoke top, ADULT_M's yoke half-width
+  // == his arm socket's inner plane, and ADULT_M's shell depth == his head's.
+  // ON (default) clamps every one of those to a minimum 0.01 per face — proud or
+  // buried, never ON the plane — so a z-fight there is impossible by
+  // construction. Adult-male geometry is unchanged except the yoke's width
+  // (+0.02, entirely inside the arm socket) and the shell's depth (+0.02). Build
+  // path only, no rng, headless-identical. OFF → the exact old boxes.
+  if (CBZ.CONFIG.CHAR_YOKE_CLEAR == null) CBZ.CONFIG.CHAR_YOKE_CLEAR = true;
+  // CITY_YOKE_GARMENT (city/outfits.js) — the other half of the same bug. That
+  // yoke box is the top of the TORSO COLUMN and no painted garment ever reaches
+  // it (clothes.js dresses torso/arms/legs/jacket), yet recolorRig stamped the
+  // outfit's `collar` ACCENT on it unconditionally — the one slot that ignored
+  // the painted-parts guard. So a painted uniform wore a contrasting flat band
+  // around its neck on top of the collar its own canvas had already drawn:
+  // `security` is 0xe8e8e8 on a 0x1c1f26 shirt, which is the "white neck roll",
+  // and the tuxedo comment in that file already named this fault "the priest
+  // look". ON (default): under a PAINTED torso the yoke wears the garment's own
+  // cloth colour and disappears into it; a flat (unpainted) fit is untouched and
+  // keeps its accent band. charpanel.js already hid this box on the portrait for
+  // the same reason, so this makes the portrait and the street agree. OFF →
+  // every fit stamps its accent again.
+  if (CBZ.CONFIG.CITY_YOKE_GARMENT == null) CBZ.CONFIG.CITY_YOKE_GARMENT = true;
+  // CHAR_WRIST_LANDMARK (entities/character.js) — OWNER: "watches are on HANDS
+  // now — move them up to WRISTS." Three files hang hardware in the ELBOW frame
+  // (bling.js's watch/bracelet, charpanel.js's portrait watch, restrain.js's zip
+  // ties) and each had typed its own constant against the adult male, measured
+  // against the wrist SOCKET rather than the hand that is actually DRAWN — so
+  // two of them sat inside the hand box. CBZ.charArmLandmarks() answers it once,
+  // off the rig's own armLo/handH, so a woman's and a child's shorter forearm
+  // place their own watch with no table and no call-site edit. OFF → the export
+  // returns null and every consumer falls back to its old literal.
+  if (CBZ.CONFIG.CHAR_WRIST_LANDMARK == null) CBZ.CONFIG.CHAR_WRIST_LANDMARK = true;
   // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
   // person must never BRIGHTEN ("they turn super white, which is dumb") —
   // the hit read becomes a brief blood-dark tint on the struck head while

@@ -80,6 +80,17 @@
       // two-segment arms: the wrist lives in the elbow group's frame — mount
       // there so the cuff rides the forearm when the elbow bends. Falls back
       // to the old shoulder-frame offset on a legacy single-segment rig.
+      //
+      // KNOWN, AND DELIBERATELY NOT MOVED: -0.42 is inside the DRAWN hand cap
+      // (which spans -armLo-0.03 -> handH-armLo, i.e. -0.49 -> -0.26 on an
+      // adult male), so this tie is round the hand rather than the wrist — the
+      // same fault CBZ.charArmLandmarks() just cured for bling.js's watch. It
+      // cannot be fixed by moving this line alone: pinArm() below drives the
+      // forearm END (L2 = 0.46) onto a FIXED body-local target and the bridge
+      // mesh is parked between those targets, so a cuff moved 0.20 up the
+      // forearm would float off the bridge that joins it. Retargeting the IK
+      // to the wrist crease and re-seating the bridge is one coherent change,
+      // and it is not this one.
       const low = arm.userData && arm.userData.low;
       if (low) { m.position.set(0, -0.42, 0); low.add(m); }
       else { m.position.set(0, -0.66, 0); arm.add(m); }

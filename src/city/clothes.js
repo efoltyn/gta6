@@ -89,6 +89,12 @@
   //  (0.92/0.95/0.50 and 0.98/1.00/0.60) and its waistShare is 0, so an adult
   //  male — and any legacy rig with no .profile — comes out byte-identical to
   //  before this change. One-line revert: CBZ.CONFIG.CLOTHES_BODY_FIT=false.
+  //  ONE EXCEPTION, added later and flagged separately: jacketFit() now holds
+  //  the shell clear of the yoke's and the head's planes (CHAR_YOKE_CLEAR), so
+  //  an adult male's shell is 0.62 deep rather than 0.60. Everything else here
+  //  is still the literal. See the note in jacketFit for why 0.60 could not
+  //  stay: it was EXACTLY the head's depth, and the head's bottom sits inside
+  //  the shell — a z-fight band right under the chin on every jacketed fit.
   // ============================================================
   if (CBZ.CONFIG && CBZ.CONFIG.CLOTHES_BODY_FIT == null) CBZ.CONFIG.CLOTHES_BODY_FIT = true;
   function bodyFit() {
@@ -163,7 +169,36 @@
   function jacketFit(ch) {
     const P = ch && ch.profile;
     if (!P || !bodyFit()) return null;
-    return { dims: [P.jacketW, P.jacketH, P.jacketD], y: -torsoSplit(P).waistH / 2 };
+    let y = -torsoSplit(P).waistH / 2;
+    let d = P.jacketD;
+    /* THE SHELL MUST NOT SHARE A PLANE WITH ANYTHING IT OVERLAPS. Same fault
+       as the shoulder yoke (see entities/character.js): this shell and the
+       boxes it wraps are sized from independent profile fields, and two pairs
+       came out EXACTLY equal on shipped bodies —
+         • ADULT_F: the shell's TOP face and the yoke's TOP face both land at
+           1.8650, two up-facing, both-visible surfaces, i.e. a stipple ring
+           across the shoulders of every jacketed fit;
+         • ADULT_M: jacketD 0.60 == headSize 0.60, and the head's bottom 0.04
+           sits INSIDE the shell — so the head's front/back faces and the
+           shell's share a plane in a band right under the chin.
+       Both are cured by measuring what is actually on THIS rig and holding the
+       shared CHAR_YOKE_CLEAR off it. The adult male comes out byte-identical
+       (his shell top already cleared the yoke by exactly 0.01) except for the
+       head clearance, which grows the shell 0.02 in depth — 7mm a side, buried
+       under the jaw. One-line revert: CBZ.CONFIG.CHAR_YOKE_CLEAR = false. */
+    const clear = (CBZ.CHAR_YOKE_CLEAR != null) ? CBZ.CHAR_YOKE_CLEAR : 0.01;
+    if (!CBZ.CONFIG || CBZ.CONFIG.CHAR_YOKE_CLEAR !== false) {
+      const s = ch.skinSlots || {};
+      const cb = boxOf(s.torso && s.torso[0]);
+      const yb = boxOf(s.collar && s.collar[0]);
+      if (cb && yb) {
+        const over = (cb.y + y + P.jacketH / 2) - (yb.y + yb.h / 2 - clear);
+        if (over > 0) y -= over;                 // drop the shell just under the yoke
+      }
+      const head = P.headSize > 0 ? P.headSize : 0.60;
+      if (Math.abs(d - head) < 2 * clear) d = head + 2 * clear;
+    }
+    return { dims: [P.jacketW, P.jacketH, d], y: y };
   }
   // COMPOSITE items (collar/tie/bow meshes) are authored in the adult-male
   // torso frame (a 0.92 x 0.95 x 0.50 box centred on the origin). On a female
@@ -1867,11 +1902,15 @@
     const shirt = comp.shirt != null ? comp.shirt : 0xf2f2f2;
     let legs = comp.legs != null ? comp.legs : 0x39414f;
     // a fully-painted special (tuxedo/suit/dress…) short-circuits the whole stack
-    let painted = null, paintRec = null, shell = null;
+    let painted = null, paintRec = null, shell = null, paintedHex = null;
     for (let i = 0; i < items.length; i++) {
       const sp = COMP[items[i]];
       if (!sp) continue;
-      if (sp.painted) { painted = sp.painted; paintRec = sp.paintRec || null; }
+      if (sp.painted) {
+        painted = sp.painted; paintRec = sp.paintRec || null;
+        paintedHex = (paintRec && paintRec.colors && paintRec.colors.torso != null)
+          ? paintRec.colors.torso : (sp.color != null ? sp.color : null);
+      }
       if (sp.shell) shell = items[i];
       if (sp.legsHex != null) legs = sp.legsHex;
     }
@@ -1879,6 +1918,24 @@
     if (painted) {                                   // e.g. tuxedo → the painted look
       const rec = paintRec ? Object.assign({ id: painted }, paintRec) : { id: painted };
       applyClothes(ch, rec);
+      // THE YOKE IS NOT A SECOND COLLAR (the long note in outfits.js's
+      // recolorRig). skinSlots.collar is a flat slab at the top of the torso
+      // column that no painted garment ever reaches — and this branch never
+      // touched it AT ALL, so it kept whatever the LAST look left there. The
+      // player's default composite is a white tee, which sets it to 0xf2f2f2;
+      // switching into a black hoodie therefore left a white ring round his
+      // neck that no outfit had asked for, and that is the owner's "my player
+      // sometimes". Give it the garment's own cloth colour so it disappears
+      // into the look. Revert: CBZ.CONFIG.CITY_YOKE_GARMENT = false.
+      if (paintedHex != null && (!CBZ.CONFIG || CBZ.CONFIG.CITY_YOKE_GARMENT !== false)) {
+        const yoke = ch.skinSlots.collar;
+        if (CBZ.cityPaintSlot) CBZ.cityPaintSlot(yoke, paintedHex);
+        else if (yoke) for (const m of yoke) {
+          if (!m || !m.material || !m.material.color) continue;
+          if (m.material._shared) m.material = m.material.clone();
+          m.material.color.setHex(paintedHex);
+        }
+      }
       return true;
     }
     // PLAIN base: strip any painted look, then flat-tint via recolorRig if the

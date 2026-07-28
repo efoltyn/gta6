@@ -151,14 +151,19 @@
 
   // ---- LOOKS: each wearable is a small list of PARTS (kind + finish + local
   // transform). Positions are in the anchor's local space (character.js):
-  //   body — torso front face at z 0.25, collar bottom ≈ y 1.75
-  //   la/ra — arm pivots; arm box 0..-0.92, hand cap spans y -0.92..-0.72
+  //   body — torso front face at z 0.25, yoke bottom ≈ y 1.75
+  //   la/ra — THE ELBOW GROUP (anchorsOf resolves `low`), NOT the shoulder:
+  //           the forearm runs +0.06 -> -armLo and the drawn hand cap spans
+  //           -armLo - 0.03 -> handH - armLo. Anything on this anchor declares
+  //           `at:"wrist"` or `at:"hand"` and lets CBZ.charArmLandmarks place
+  //           it — the two stale absolute y's that used to be documented here
+  //           are what put the watch on the back of the hand, twice.
   //   neck — hair box at y 0.62
   // CHAIN: a shallow flat V hugging the upper chest — strand tops at x ±0.20
-  // y 1.76 (under the collar), meeting at (0, 1.54); each strand is 0.30 long
+  // y 1.76 (under the yoke), meeting at (0, 1.54); each strand is 0.30 long
   // tilted ±0.83 rad, sitting ~0.03 proud of the torso face. Pendant hangs at
-  // the meet. WATCH: band at y -0.66 (forearm end, ABOVE the hand) + a face
-  // plate on the outer front. RING: a dot on the front edge of the hand.
+  // the meet. WATCH: band ON THE WRIST + a face plate on the outer front.
+  // RING: a dot on the front edge of the hand, at the knuckle line.
   const CHAIN_Y = 1.65, CHAIN_Z = 0.268, CHAIN_TILT = 0.83;
   let _looks = null;
   function looks() {
@@ -170,26 +175,24 @@
         { kind: kind, mat: mat, x: 0.10, y: CHAIN_Y, z: CHAIN_Z, rz: CHAIN_TILT },
       ];
     };
+    /* THE WRIST IS DERIVED NOW, NOT TYPED (owner: "watches are on HANDS now —
+       move them up to WRISTS"). Every `at:"wrist"` / `at:"hand"` part below
+       carries an OFFSET from a landmark that mountParts resolves against the
+       rig it is being mounted on (CBZ.charArmLandmarks, entities/character.js).
+
+       WHY THIS FILE KEPT GETTING IT WRONG: the anchor is the ELBOW group, and
+       the previous two passes both measured against `leftHand` — the wrist
+       SOCKET, at -armLo - 0.01 — when the thing you can actually SEE is
+       limb()'s hand `cap`, which starts 0.03 lower and is (handH + 0.03) tall,
+       so it reaches UP to handH - armLo = -0.26 on an adult male. -0.36 is
+       0.10 inside that box: the watch was on the back of the hand. There is no
+       constant to get wrong any more, and it is no longer authored for one
+       body — a woman's shorter forearm and a child's much shorter one place
+       their own watch correctly with no table here. */
     const watch = function (band, faceM) {
       return [
-      // THE WRIST, MEASURED — not guessed. bling.js mounts to anchorsOf()'s
-      // `laLow` / `raLow`, which is character.js's `low` group: the ELBOW pivot,
-      // not the limb root. So y here is distance BELOW THE ELBOW. In that frame
-      // character.js puts the hand at `-P.armLo - 0.01` (armLo ~0.45), i.e.
-      // y = -0.46, and the forearm runs 0 -> -0.45.
-      //
-      // My previous pass moved these to -0.60 on the strength of a stale
-      // comment claiming "hand top is y -0.72" — a number from a DIFFERENT
-      // frame. -0.60 is 0.14 BELOW the hand, so the watch hung in mid-air past
-      // the fingertips, which is exactly what the owner saw. -0.36 is the
-      // wrist: just above the hand, on the last third of the forearm.
-      //
-      // The original -0.20 was not the real bug either; it was mid-forearm and
-      // survivable. The bug was the 0.32 BOX around a 0.30 arm — 1cm of
-      // clearance per side, which any sleeve swallowed. That is what the torus
-      // below fixes, and it is why the band can now sit properly on the wrist.
-        { kind: "cuff", mat: band, x: 0, y: -0.36, z: 0 },
-        { kind: "face", mat: faceM, x: 0, y: -0.36, z: 0.175 },   // the dial rides ON the band
+        { kind: "cuff", at: "wrist", mat: band, x: 0, y: 0, z: 0 },
+        { kind: "face", at: "wrist", mat: faceM, x: 0, y: 0, z: 0.175 },   // the dial rides ON the band
       ];
     };
     _looks = {
@@ -197,18 +200,19 @@
       chainGold: v("link", M.gold).concat([{ kind: "pendant", mat: M.gold, x: 0, y: 1.515, z: 0.272 }]),
       chainDiamond: v("linkThin", M.silver).concat([{ kind: "pendant", mat: M.glint, x: 0, y: 1.515, z: 0.272 }]),
       chainIced: v("linkThick", M.ice).concat([{ kind: "pendant", mat: M.ice, x: 0, y: 1.515, z: 0.272 }]),
-      // watches — thin band + face, on the WRIST (hand top is y -0.72)
+      // watches — thin band + face, on the WRIST (see `watch` above)
       watchGold: watch(M.gold, M.gold),
       watchSilver: watch(M.silver, M.silver),
       watchIced: watch(M.ice, M.glint),
       watchSteel: watch(M.silver, M.silver),                                   // clean steel dress watch
-      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.36, z: 0 },      // steel band, on the wrist
-        { kind: "face", mat: M.blueDial, x: 0, y: -0.36, z: 0.175 },           // signature blue dial
-        { kind: "ring", mat: M.glint, x: 0, y: -0.30, z: 0.19 }],              // lume pip
+      watchDiver: [{ kind: "cuff", at: "wrist", mat: M.silver, x: 0, y: 0, z: 0 },     // steel band, on the wrist
+        { kind: "face", at: "wrist", mat: M.blueDial, x: 0, y: 0, z: 0.175 },          // signature blue dial
+        { kind: "ring", at: "wrist", mat: M.glint, x: 0, y: 0.06, z: 0.19 }],          // lume pip
       // tennis bracelet — band only
-      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.30, z: 0 }],   // sits just above the watch, on skin
-      // ring — a glint dot on the hand's front edge
-      ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.34, z: 0.17 }],
+      bracelet: [{ kind: "cuff", at: "wrist", mat: M.ice, x: 0, y: 0.06, z: 0 }],   // a band's width above the watch line, on skin
+      // ring — a glint dot on the hand's front edge (the ONE piece that really
+      // does belong on the hand: `at:"hand"` is the knuckle line, not the wrist)
+      ring: [{ kind: "ring", at: "hand", mat: M.glint, x: 0.10, y: 0, z: 0.17 }],
       // grill — a small iced bar across the lower face (the mouth)
       grill: [{ kind: "grill", mat: M.glint, x: 0, y: 0.28, z: 0.265 }],
       // shades — two lenses + bridge + temples sitting on the eyes (neck-local,
@@ -289,14 +293,26 @@
     if (pool && pool.length < POOL_MAX) pool.push(mesh);
   }
 
+  // Landmarks in the forearm (ELBOW group) frame for the rig being dressed —
+  // one call per dress, not per part. Degrade-safe: an old character.js with no
+  // export, or CHAR_WRIST_LANDMARK=false, falls back to the adult-male numbers
+  // this table used to hard-code, so nothing can be left unmounted.
+  const LM_FALLBACK = { wrist: -0.22, hand: -0.34 };
+  function armLandmarks(ch) {
+    const f = CBZ.charArmLandmarks && CBZ.charArmLandmarks(ch);
+    return f || LM_FALLBACK;
+  }
   // mount one slot's parts onto an anchor; pushes the pooled meshes into `out`.
-  function mountParts(parts, parent, out) {
+  // `lm` resolves a part's `at:` landmark — its y is then an OFFSET from that
+  // point on THIS body, instead of an absolute authored for the adult male.
+  function mountParts(parts, parent, out, lm) {
     if (!parent || !parent.add) return;          // harness rigs have empty parts — skip slot
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       const mesh = acquire(p.kind);
       mesh.material = p.mat;
-      mesh.position.set(p.x, p.y, p.z);
+      const base = (p.at && lm && lm[p.at] != null) ? lm[p.at] : 0;
+      mesh.position.set(p.x, base + p.y, p.z);
       mesh.rotation.set(p.rx || 0, 0, p.rz || 0);
       parent.add(mesh);
       out.push(mesh);
@@ -352,10 +368,11 @@
     const an = anchorsOf(ped);
     if (!an) return;
     const meshes = [];
+    const lm = armLandmarks(ped.char);
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];
       const parts = want[key]; if (!parts) continue;
-      mountParts(parts, an[SLOTS[key]], meshes);
+      mountParts(parts, an[SLOTS[key]], meshes, lm);
     }
     if (!meshes.length) return;
     ped._bling = {
@@ -511,7 +528,7 @@
     if (!ch) { _pSig = ""; return; }           // rig not up — retry next tick
     // wristL(watch)/wristR(bracelet)/ring hang from the "la"/"ra" slot, which on
     // the two-segment rig MUST resolve to the ELBOW group (forearm frame) — the
-    // watch offset (y -0.20) reads at the wrist there. Resolving to ch.parts.la
+    // watch's `at:"wrist"` landmark is solved in that frame. Resolving to ch.parts.la
     // (the SHOULDER pivot) instead put the player's watch up at the ARMPIT while
     // every ped + the portrait card (charpanel.js) used the elbow. Mirror
     // anchorsOf() exactly so all three paths agree.
@@ -519,10 +536,11 @@
     const raA = (ch.low && ch.low.ra) || (ch.parts && ch.parts.ra && ch.parts.ra.userData.low) || (ch.parts && ch.parts.ra);
     const an = { body: ch.body, neck: ch.neck, la: laA, ra: raA };
     const meshes = [];
+    const lm = armLandmarks(ch);
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];
       const parts = res.want[key]; if (!parts) continue;
-      mountParts(parts, an[SLOTS[key]], meshes);
+      mountParts(parts, an[SLOTS[key]], meshes, lm);
     }
     if (meshes.length) _pMeshes = meshes;
   }

@@ -125,6 +125,12 @@
   // fraction of this, so the whole table stays unit-free.
   const ADULT_TOP = 2.48;
   const WAIST_TUCK = 0.06;      // waist box tucks UP into the chest box (limb-joint trick)
+  // THE ONE Z-FIGHT CLEARANCE. Minimum distance between any two parallel faces
+  // of this rig that overlap and are both visible — 0.01 authored is 7mm at
+  // HUMAN_SCALE 0.70, which is the clearance the shipped adult-male rig already
+  // held everywhere it did NOT z-fight. Published so city/clothes.js's jacket
+  // shell measures against the same number instead of typing a second one.
+  const YOKE_CLEAR = 0.01;
 
   // A gait style is a set of MULTIPLIERS on animChar's existing literals.
   // All 1 = the motion this game has always had; nothing here adds a new
@@ -674,7 +680,46 @@
       waist.castShadow = waist.receiveShadow = true;
       body.add(waist);
     }
-    const collar = new THREE.Mesh(boxGeom(P.collarW, P.collarH, P.collarD), cmat(c.collar || c.torso));
+    /* ---- the SHOULDER YOKE (rig.skinSlots.collar) -------------------------
+       OWNER BUG: "security guards and my player sometimes have what looks like
+       a WHITE NECK ROLL — it disrupts outfits and FLICKERS, meaning it must be
+       overlapping." It does overlap, and the flicker is ARITHMETIC, not taste:
+       collarW/collarD were authored in the profile table against NOTHING, and
+       on shipped bodies they came out EXACTLY equal to a plane they sit on.
+         • ADULT_F  collarD 0.46 == torsoD 0.46 — the yoke's front AND back
+           faces share a plane with the chest's over the whole 0.145 they
+           overlap. BOTH are front-facing and BOTH are visible, which is a
+           guaranteed z-fight stipple across the upper chest, drawn in the
+           yoke's flat colour (outfits.js's `security` is 0xe8e8e8 — a near-
+           white band). Every child body from ~15 up lands on it too.
+         • ADULT_M  collarW/2 0.47 == armX - armW/2 0.47 — the yoke butts the
+           arm sockets on exactly their inner plane.
+       So the box is no longer authored against nothing: it is CLAMPED into the
+       gaps it actually bridges. PROUD of the chest and BURIED into each arm
+       socket by a minimum YOKE_CLEAR per face — the 0.01-0.03 clearance family
+       the belt block below already uses, and the same overlap trick limb()
+       uses at the elbow and the pelvis uses over the leg caps, so no seam can
+       open when gait, lean and a hit reaction blend on one frame. Coplanarity
+       is now impossible BY CONSTRUCTION instead of by luck, for every body the
+       table can build. ADULT_M's depth is unchanged (0.50 + 2x0.01 IS the
+       authored 0.52); its width grows 0.02, every millimetre of it inside the
+       arm socket where nothing can see it.
+       One-line revert: CBZ.CONFIG.CHAR_YOKE_CLEAR = false. */
+    const yokeClear = !CBZ.CONFIG || CBZ.CONFIG.CHAR_YOKE_CLEAR !== false;
+    // clear the plane, whichever side of it you are on — a face that is BURIED
+    // is as safe as a face that is PROUD, and only a face that is ON it fights.
+    const clearOf = (v, plane) => (Math.abs(v - plane) < 2 * YOKE_CLEAR ? plane + 2 * YOKE_CLEAR : v);
+    let collarD = P.collarD, collarW = P.collarW;
+    if (yokeClear) {
+      collarD = Math.max(collarD, P.torsoD + 2 * YOKE_CLEAR);
+      collarW = Math.max(collarW, (P.armX - P.armW / 2 + YOKE_CLEAR) * 2);
+      // …and the HEAD sits IN the yoke on a young body (neckDrop sinks it), so
+      // its faces are a plane the yoke can land on too: at age ~2.5 the clamps
+      // above put the yoke's depth within 0.8mm of the skull's.
+      collarD = clearOf(collarD, P.headSize);
+      collarW = clearOf(collarW, P.headSize);
+    }
+    const collar = new THREE.Mesh(boxGeom(collarW, P.collarH, collarD), cmat(c.collar || c.torso));
     collar.position.y = neckY - 0.04;
     body.add(collar);
 
@@ -1909,6 +1954,47 @@
   // duplicated geometry constant that drifts is a seam nobody notices until
   // a hemline is 6cm wrong on every woman in the city.
   CBZ.CHAR_WAIST_TUCK = WAIST_TUCK;
+  CBZ.CHAR_YOKE_CLEAR = YOKE_CLEAR;
+  /* ---- WHERE THE WRIST IS, in the ELBOW group's frame -------------------
+     (`rig.low.la` / `part.userData.low` — the frame every forearm accessory
+     in this game mounts into.)
+
+     OWNER BUG: "watches are on HANDS now — move them up to WRISTS." THREE
+     files hang hardware off the forearm (bling.js's watch + bracelet,
+     charpanel.js's portrait watch, restrain.js's zip-ties) and every one of
+     them had typed its OWN constant against the adult-male rig. Two of the
+     three landed inside the hand box, because they were measured against the
+     wrist SOCKET (`leftHand`, at -armLo - 0.01) rather than against the hand
+     that is actually DRAWN — and the drawn hand is limb()'s `cap`, which is
+     0.03 lower and (capH + 0.03) TALL, so it reaches up to `capH - lowerH`.
+     That is 0.20 - 0.46 = -0.26 on an adult male: bling's watch at -0.36 and
+     restrain's tie at -0.42 were both buried in it.
+
+     Nothing here is a taste number — every line is limb()'s own placement
+     solved for its landmarks, read off THIS rig's profile, so a woman's
+     shorter forearm and a child's much shorter one put their own hardware on
+     their own wrist with no per-body table anywhere and no call-site edit.
+     Degrade-safe: returns null with the flag off (each caller keeps its old
+     literal as the fallback) and never throws on a stub rig. */
+  CBZ.charArmLandmarks = function (ch) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CHAR_WRIST_LANDMARK === false) return null;
+    const P = ch && ch.profile;
+    const armLo = (P && P.armLo > 0) ? P.armLo : ARM_LO;   // elbow -> wrist
+    const handH = (P && P.handH > 0) ? P.handH : 0.20;     // limb()'s capH
+    const capH = handH + 0.03;                             // the cap is capH + 0.03 tall
+    const handTop = handH - armLo;                         // = the wrist crease
+    return {
+      handTop: handTop,                    // top face of the drawn hand
+      handBottom: -armLo - 0.03,           // bottom face of the drawn hand
+      // A BAND GOES HERE: just proximal of the crease, on the last of the
+      // forearm. The rise clears the fattest band in the game (bling's torus
+      // tube is 0.028) with a millimetre of skin to spare.
+      wrist: handTop + 0.04,
+      // A RING GOES HERE: the knuckle line, in the upper third of the hand.
+      hand: handTop - capH * 0.35,
+      forearmTop: 0.06,                    // the lower box tucks 0.06 into the upper
+    };
+  };
   CBZ.charBands = { CHILD_ADULT_AGE, bandOf };
   // One cheap question every other system asks: "is this a child?" Answers for
   // a rig, a ped, or a bare Object3D (the root carries userData.charBand), and
