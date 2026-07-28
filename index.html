@@ -475,6 +475,14 @@
 <script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=npcgoal51"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
+<!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
+     role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
+     real collider-derived cover, the shooter token that stops a crew firing
+     all at once, and the punch exchange. Loads right after aitactics.js
+     (whose LOS/search/flank primitives it composes and never re-implements)
+     and BEFORE every consumer: gangs.js, peds.js, police.js, city/combat.js.
+     Revert with ?cfg_NPC_COMBAT_IQ=0. -->
+<script src="src/systems/combat_iq.js?v=iq1"></script>
 <script src="src/systems/capture.js?v=npc-react1"></script>
 <script src="src/systems/markers.js?v=threats55"></script>
 <script src="src/systems/music.js?v=samples1"></script>
@@ -967,6 +975,17 @@
 <script src="src/city/inventory.js?v=gunthumb3"></script>
 <script src="src/city/phone.js?v=story3"></script>
 <script src="src/city/killfeed.js?v=deathphone1"></script>
+<!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
+     leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
+     same way killfeed.js does — so it loads AFTER killfeed, leaving the feed
+     line to be filed first — and sweeps the ten death sites that set
+     `.dead = true` directly and route through no wrap at all. It owns the ONE
+     death-drop routine (gun + armour, deferred for a body still falling), the
+     corpse-persistence law both peds.js and police.js now cull through, and
+     the EMS dispatcher that puts traffic.js's ambulance and medics.js's
+     paramedic on the same scene. Needs peds.js, police.js, traffic.js,
+     armor.js and interact.js — all above. -->
+<script src="src/city/morgue.js?v=morgue1"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all

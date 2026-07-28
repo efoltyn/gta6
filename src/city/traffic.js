@@ -627,14 +627,28 @@
 
   /* ============================================================
      EMERGENCY VEHICLES — self-contained meshes that drive to incidents.
-       AMBULANCE  → a fresh dead body (complements medics.js: the truck
-                    rolls up, parks, and flags nearby bodies for pickup so
-                    the on-foot paramedic dispatches fast).
+       AMBULANCE  → a body on the ground. WHO DECIDES which body: under
+                    EMS_RESPONSE, city/morgue.js. This file keeps everything
+                    that makes an ambulance an ambulance — the road router,
+                    the kerb park, the siren, the lightbar, the fact that it
+                    is a real registered stealable CBZ.cityCars record — and
+                    stops being the dispatcher. It had to: its own scan
+                    grabbed ONE body at a time with no clustering, no staging
+                    against a live firefight, and no idea whether the player
+                    had witnessed the death, and its 3.5 s "work" beat expired
+                    long before any crew could load anybody.
        FIRE TRUCK → a burning car (extinguishes it if it reaches it in time;
-                    otherwise works the smoking scene afterward).
+                    otherwise works the smoking scene afterward). Unchanged —
+                    this file remains its only dispatcher.
      Shared geometry/materials, a hard cap, distance LOD + culling.
   ============================================================ */
-  const EMG_MAX = { ambulance: 1, firetruck: 1 };
+  // 2 ambulances, not 1: the morgue clusters deaths, so one unit already
+  // serves a whole scene — the second exists so a second incident across town
+  // is not queued behind a shootout's clean-up. (Owner's cap: 2-3.)
+  const EMG_MAX = { ambulance: 2, firetruck: 1 };
+  function morgueOwnsEms() {
+    return !!(CBZ.CONFIG && CBZ.CONFIG.EMS_RESPONSE !== false && CBZ.morgueUnitScene);
+  }
   const emg = [];
   let emgScanT = 0;
 
@@ -855,6 +869,15 @@
 
   function countKind(kind) { let n = 0; for (const e of emg) if (e.kind === kind) n++; return n; }
 
+  // THE UNITS ON DUTY, read-only. medics.js needs to know a van is parked and
+  // working before it can step a crew out of one, and city/morgue.js needs to
+  // hold a scene against the unit it dispatched. Handing back the live array
+  // (never a copy) keeps the record identity — the ambulance IS a cityCars
+  // record — so a consumer can compare against e.player/e.dead/e.state exactly
+  // as this file does. Nobody outside owns the lifecycle; despawnEmergency
+  // still does.
+  CBZ.cityEmergencyUnits = function () { return emg; };
+
   function incidentTarget(kind, x, z, opts) {
     opts = opts || {};
     return {
@@ -873,12 +896,28 @@
   CBZ.cityDispatchEmergencyAt = function (kind, x, z, opts) {
     if (kind !== "firetruck" && kind !== "ambulance") return null;
     if (g.mode !== "city" || !CBZ.city || !CBZ.city.arena) return null;
-    let e = null;
+    // RE-TASK ONLY WHAT IS ACTUALLY FREE. This loop used to grab the first unit
+    // of the right kind, full stop — which was harmless while the cap was ONE
+    // and this was the only dispatcher, and is not now: a second call would
+    // walk an ambulance off a scene where a crew was mid-carry, leaving two
+    // paramedics standing over a body next to nothing. A unit committed to a
+    // city/morgue.js scene is skipped in favour of spawning a fresh one, and is
+    // only ever stolen as the LAST resort (below), so the old "a major impact
+    // must not be ignored because one truck was busy" contract still holds.
+    let e = null, busy = null;
     for (let i = 0; i < emg.length; i++) {
-      if (emg[i] && emg[i].kind === kind && !emg[i].player && !emg[i].dead) { e = emg[i]; break; }
+      const u = emg[i];
+      if (!u || u.kind !== kind || u.player || u.dead) continue;
+      if (u._morgueScene) { if (!busy) busy = u; continue; }
+      e = u; break;
     }
     const target = incidentTarget(kind, x, z, opts);
-    if (!e) e = spawnEmergency(kind, x, z);
+    if (!e && countKind(kind) < (EMG_MAX[kind] || 1)) e = spawnEmergency(kind, x, z);
+    if (!e && busy) {                       // at the cap and every unit is on a scene
+      if (CBZ.morgueReleaseUnit) CBZ.morgueReleaseUnit(busy);
+      busy._morgueScene = null;
+      e = busy;
+    }
     if (!e) return null;
     if (e.target) e.target._emgClaimed = false;
     e.target = target; e.tx = x; e.tz = z; e.state = "drive"; e.t = 0; e.stuckT = 0;
@@ -941,7 +980,12 @@
         if (e) { e.target = f; f._emgClaimed = true; }   // (no toast — the siren announces it)
       }
     }
-    if (countKind("ambulance") < EMG_MAX.ambulance) {
+    // AMBULANCES: the morgue is the dispatcher when it is live (it clusters,
+    // it prioritises what you actually witnessed, and it STAGES against a hot
+    // scene). Two dispatchers fighting over one body is how you get a truck
+    // that turns around at the kerb, so this scan stands down entirely rather
+    // than being merged. Degrade-safe: no morgue.js → the original scan runs.
+    if (!morgueOwnsEms() && countKind("ambulance") < EMG_MAX.ambulance) {
       const b = findBodyIncident();
       if (b) {
         const e = spawnEmergency("ambulance", b.pos.x, b.pos.z);
@@ -1150,22 +1194,34 @@
         // (no toast either way — the smoke clearing / the cold wreck tells it)
       }
     } else {
-      // ambulance: flag nearby bodies for pickup NOW so medics.js dispatches the
-      // stretcher team immediately (the dramatic roll-up + the on-foot lift).
-      const peds = CBZ.cityPeds;
-      if (peds) {
-        for (let i = 0; i < peds.length; i++) {
-          const p = peds[i];
+      // AMBULANCE ARRIVED. The truck is at the kerb; from here it is a crew
+      // problem, and medics.js owns the crew. Two pools, because the owner's
+      // ask names both: "even those cops" — cop corpses live in CBZ.cityCops
+      // and were never flagged here at all, which is a second reason an
+      // officer's body could only ever be cleared by the 8 s delete.
+      const RT2 = 14 * 14, RS2 = 12 * 12;
+      const pools = [CBZ.cityPeds, CBZ.cityCops];
+      for (let q = 0; q < pools.length; q++) {
+        const arr = pools[q]; if (!arr) continue;
+        for (let i = 0; i < arr.length; i++) {
+          const p = arr[i];
           if (!(p.dead && !p.collected && !p.culled)) continue;
-          // near the TRUCK — or near the SCENE it parked at the curb for (the
-          // curb stop can leave the body a block-interior walk away; the on-foot
-          // stretcher team covers that last leg, not the truck)
+          // near the TRUCK — or near the SCENE it parked at the kerb for (the
+          // kerb stop can leave the body a block-interior walk away; the
+          // on-foot crew covers that last leg, not the truck)
           const dT = (p.pos.x - e.pos.x) * (p.pos.x - e.pos.x) + (p.pos.z - e.pos.z) * (p.pos.z - e.pos.z);
           const dS = (p.pos.x - e.tx) * (p.pos.x - e.tx) + (p.pos.z - e.tz) * (p.pos.z - e.tz);
-          if (dT < 12 * 12 || dS < 10 * 10) p.needsPickup = true;
+          if (dT < RT2 || dS < RS2) {
+            p.needsPickup = true;
+            // register any body the morgue has not logged yet (one that died
+            // before its first tick, or through a path nothing sweeps) so the
+            // crew that is already standing here collects it on this stop
+            // rather than it costing a second dispatch later.
+            if (CBZ.morgueReportDeath) CBZ.morgueReportDeath(p);
+          }
         }
       }
-      // (no toast — the stretcher team rolling up IS the scene)
+      // (no toast — the crew stepping out of the van IS the scene)
     }
   }
 
@@ -1222,7 +1278,12 @@
           if (e.kind === "firetruck" && (e.target.dead || e.target._exploded || (!e.target._onFire && !e.target._smoking))) {
             // fire's already out / car blew — bail
             e.state = "leave"; e.t = 0;
-          } else if (e.kind === "ambulance" && (e.target.collected || e.target.culled || !e.target.dead)) {
+          } else if (e.kind === "ambulance" && (e.target.collected || e.target.culled || !e.target.dead) &&
+                     !(CBZ.morgueUnitBusy && CBZ.morgueUnitBusy(e))) {
+            // ONE body being collected is not the scene being over. The morgue
+            // re-points e.target at the next body every half-second; without
+            // this guard a truck en route to a five-body scene turned around
+            // the instant the FIRST of them was cleared by something else.
             e.state = "leave"; e.t = 0;
           } else {
             e.tx = e.target.pos.x; e.tz = e.target.pos.z;
@@ -1245,7 +1306,14 @@
         }
       } else if (e.state === "work") {
         e.t += dt; e.v *= Math.pow(0.1, dt);
-        if (e.t > 3.5) { e.state = "leave"; e.t = 0; if (e.target) e.target._emgClaimed = false; }
+        // AN AMBULANCE WAITS FOR ITS CREW. 3.5 s is a fire truck's beat (hose
+        // the car, go); a body has to be walked to, worked and carried back,
+        // and if the scene is still hot the crew is STAGING and has not got out
+        // of the van at all. morgueUnitBusy answers both — bodies left, or a
+        // scene not yet declared safe — and is capped its own end (UNIT_TTL) so
+        // a truck can never park forever. Degrade-safe: no morgue → old 3.5 s.
+        const held = CBZ.morgueUnitBusy ? CBZ.morgueUnitBusy(e) : false;
+        if (!held && e.t > 3.5) { e.state = "leave"; e.t = 0; if (e.target) e.target._emgClaimed = false; }
       } else { // leave: roll off ALONG A ROAD toward the nearest edge, then despawn
         e.t += dt;
         // exit along the dominant axis, but down a real road line (the router
