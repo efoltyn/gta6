@@ -5,8 +5,8 @@
      root (g)            ← world transform (position / facing / KO)
       ├─ ll, rl          ← leg pivots at the HIPS
       │    └─ low        ← KNEE pivot (shin + shoe cap live here)
-      └─ body            ← everything above the hips; bob / sway / lean
-          ├─ torso, collar
+      └─ body            ← hip-locked pelvis + upper body; bob / sway / lean
+          ├─ pelvis, torso, collar
           ├─ la, ra      ← arm pivots at the SHOULDERS
           │    └─ low    ← ELBOW pivot (forearm + hand cap + hand socket)
           └─ neck → head ← head pivot for look / bob
@@ -639,12 +639,22 @@
     // a paused cinematic) would otherwise stand in a stance it never had.
     ll.rotation.z = P.stanceZ; rl.rotation.z = -P.stanceZ;
     model.add(ll, rl);
-    // A shallow pelvis overlaps both leg caps and the bottom of the torso.
-    // Besides reading anatomically, it hides sub-frame gaps when gait, hit
-    // reaction and body lean all blend on the same frame.
+
+    // ---- hip-locked body (pelvis and everything above it) ----------------
+    const body = new THREE.Group();
+    body.position.y = 0; // bob/sway/lean applied here
+    model.add(body);
+
+    // A shallow pelvis overlaps both leg caps and the bottom of the torso. It
+    // MUST live on `body`, not beside it on `model`: walking rotates and bobs
+    // body around the hip socket. A model-level pelvis stays still, so its
+    // horizontal top-back corner repeatedly crosses the animated lower-back
+    // face and appears as a flickering pants-coloured shelf through the back.
+    // Sharing the hip-locked transform makes that overlap rigid while the
+    // existing lower tuck continues to cover the independently swinging legs.
     const pelvis = new THREE.Mesh(boxGeom(P.pelvisW, P.pelvisH, P.pelvisD), cmat(c.legs));
     pelvis.position.set(0, hipY + 0.03, 0); pelvis.castShadow = pelvis.receiveShadow = true;
-    model.add(pelvis);
+    body.add(pelvis);
 
     // Stature is BAKED INTO THE SEGMENTS now (a female rig is shorter because
     // her femur and torso boxes are shorter, a toddler because all of them
@@ -652,11 +662,6 @@
     // non-uniform `scale.y * 0.97` fem squash is gone: squashing a body is what
     // made women read as compressed men rather than differently proportioned.
     model.scale.setScalar(humanScale);
-
-    // ---- body (everything above the hips) ----
-    const body = new THREE.Group();
-    body.position.y = 0; // bob/sway/lean applied here
-    model.add(body);
 
     // ---- torso column: chest, plus an optional WAIST box ----------------
     // base sits a whisker below the hip pivot so the column overlaps the pelvis
