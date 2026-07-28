@@ -2131,6 +2131,11 @@
 
     function buildAirliner(x, z, heading, livery) {
       const g = new THREE.Group();
+      // The complete airframe is one movable object. Without this root tag the
+      // static batcher descends into the plane, extracts eligible cabin meshes,
+      // and bakes them into world space at the gate. Flying the remaining group
+      // then leaves that cabin shell behind.
+      g.userData.dynamic = true;
       g.position.set(x, 0, z); g.rotation.y = heading;
       const acc = accentMat(livery || 0x2d5fb0);
       // scale-baking part kit: every geometry the airliner and its cabin submit
@@ -2287,6 +2292,8 @@
 
     function buildPrivateJet(x, z, heading, livery) {
       const g = new THREE.Group();
+      // Keep the mini-cabin and exterior under the same movable transform.
+      g.userData.dynamic = true;
       g.position.set(x, 0, z); g.rotation.y = heading;
       const acc = accentMat(livery || 0x355c8a);
       const K = partKit();
