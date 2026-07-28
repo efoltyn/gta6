@@ -72,6 +72,18 @@
       if (ra) { ra.rotation.x = damp(ra.rotation.x, -1.22, r, dt); ra.rotation.z = damp(ra.rotation.z, 0.56, r, dt); }
       elbow(J.la, -1.40, dt, r); elbow(J.ra, -1.50, dt, r);
     },
+    // both hands reaching down and forward, elbows well bent — somebody
+    // WORKING with their hands at knee height on the thing in front of them.
+    // The paramedic's beat over a body (city/medics.js) and the shape any
+    // future kneeling repair/treat verb wants; it is a row here rather than
+    // arm math inside medics.js precisely so the next one is also a row.
+    tend(ch, dt) {
+      const J = ch.low || {}, r = 14;
+      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
+      if (la) { la.rotation.x = damp(la.rotation.x, -0.62, r, dt); la.rotation.z = damp(la.rotation.z, 0.26, r, dt); }
+      if (ra) { ra.rotation.x = damp(ra.rotation.x, -0.62, r, dt); ra.rotation.z = damp(ra.rotation.z, -0.26, r, dt); }
+      elbow(J.la, -1.35, dt, r); elbow(J.ra, -1.35, dt, r);
+    },
     // explicit neutral (defensive no-op; setCharPose maps "stand" -> null so the
     // idle gait owns the arms instead of freezing them here).
     stand(ch, dt) {},
