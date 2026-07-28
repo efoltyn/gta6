@@ -1048,6 +1048,10 @@
 <script src="src/city/births.js?v=famtree1"></script>
 <script src="src/city/marriage.js?v=famtree1"></script>
 <script src="src/city/familypanel.js?v=famtree1"></script>
+<!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
+     greetings, grief, homecoming. Loads after familypanel (reads the whole
+     family cluster lazily; only hard dep is entities/poses.js far above). -->
+<script src="src/city/kinship.js?v=kin1"></script>
 
 <!-- B8: single-player persistence bridge for player building's piece
      geometry (localStorage ledger, arena-gated deferred apply) — see that

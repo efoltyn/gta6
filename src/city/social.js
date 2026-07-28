@@ -508,21 +508,50 @@
     // clearCityPeds (they live in CBZ.cityPeds); just drop our stale refs.
     _familySpawns.length = 0;
     const civ = CBZ.cityPeds.filter((p) => p.kind === "civilian" && !p.vendor && !p.gang);
-    // shuffle-ish pairing into couples (45%)
+    // ============================================================
+    //  A COUPLE IS TWO PEOPLE WHO ARE ACTUALLY NEAR EACH OTHER.
+    //  OWNER (2026-07-28): the family/friend layer is "coded mathematically
+    //  and not in reality". THIS was the sharpest case of it. The pairing used
+    //  to walk the ped ARRAY two slots at a time and marry i to i+1 — array
+    //  adjacency, which has nothing to do with where anybody is standing. Half
+    //  the city's marriages were between two strangers four hundred metres
+    //  apart who would never once be in the same shot, and city/kinship.js
+    //  (which walks couples side by side) could never form a unit from one.
+    //  So the candidate search is now SPATIAL: the nearest un-partnered
+    //  civilian inside COUPLE_R, opposite gender preferred, with the old
+    //  scan-ahead kept verbatim as the fallback when nobody is close enough.
+    //  DETERMINISM: the search is a pure scan and draws NOTHING — the rng()
+    //  sequence below (the 0.45 roll, the `together` roll) is untouched in
+    //  order and in count, so no downstream value in this module's stream
+    //  shifts. Only WHICH body is picked changes.
+    // ============================================================
+    const COUPLE_R = 55;
+    const nearestFree = (a, wantOpposite) => {
+      let best = null, bd = COUPLE_R * COUPLE_R;
+      for (let s = 0; s < civ.length; s++) {
+        const c = civ[s];
+        if (!c || c === a || c.partner || !c.pos) continue;
+        if (wantOpposite && c.gender === a.gender) continue;
+        const dx = c.pos.x - a.pos.x, dz = c.pos.z - a.pos.z, dd = dx * dx + dz * dz;
+        if (dd < bd) { bd = dd; best = c; }
+      }
+      return best;
+    };
     for (let i = 0; i + 1 < civ.length; i += 2) {
       const a = civ[i];
-      if (a.partner) continue;   // already claimed by an earlier scan-ahead below
+      if (a.partner) continue;   // already claimed by an earlier pick below
       if (rng() < 0.45) {
-        // prefer an OPPOSITE-GENDER partner: scan a short deterministic window
-        // ahead (this module's seeded rng) before falling back to the plain
-        // next-slot pairing — O(n), and we don't force it: a same-gender
-        // couple is fine when the scan misses.
-        let bi = i + 1;
-        for (let s = i + 1; s < Math.min(civ.length, i + 6); s++) {
-          if (!civ[s].partner && civ[s].gender !== a.gender) { bi = s; break; }
+        // prefer an OPPOSITE-GENDER partner within walking distance; a
+        // same-gender couple is fine when the near scan only finds one.
+        let b = a.pos ? (nearestFree(a, true) || nearestFree(a, false)) : null;
+        if (!b) {
+          let bi = i + 1;
+          for (let s = i + 1; s < Math.min(civ.length, i + 6); s++) {
+            if (!civ[s].partner && civ[s].gender !== a.gender) { bi = s; break; }
+          }
+          b = civ[bi];
         }
-        const b = civ[bi];
-        if (b.partner) continue;   // the fallback slot got claimed by a scan-ahead pick
+        if (!b || b.partner) continue;   // the fallback slot got claimed by an earlier pick
         a.partner = b; b.partner = a;
         a.family = [b]; b.family = [a];
         a.together = b.together = 0.5 + rng() * 0.5;   // relationship strength
@@ -541,14 +570,39 @@
         if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(b, a);
       }
     }
-    // friend cliques: small groups (3-5) of nearby civilians who hang together,
-    // share gossip fastest, and react when one of their own gets hurt.
+    // friend cliques: small groups (3-5) of NEARBY civilians who hang
+    // together, share gossip fastest, and react when one of their own gets
+    // hurt. Same correction as the couples above: the comment always said
+    // "nearby" and the code took consecutive ARRAY SLOTS, so a clique was five
+    // people scattered across the map. The SLOT BUDGET still advances exactly
+    // as it did (g0 += size), which is what keeps the rng() sequence — one
+    // `size` draw and one 0.7 roll per iteration — identical in count and
+    // order; only the membership is spatial now.
+    const CLIQUE_R = 42;
     let g0 = 0;
     while (g0 < civ.length) {
       const size = 3 + ((rng() * 3) | 0);
+      const seed = civ[g0];
       const clique = [];
-      for (let k = 0; k < size && g0 < civ.length; k++, g0++) clique.push(civ[g0]);
-      if (clique.length >= 2 && rng() < 0.7) {
+      if (seed && !seed.cliqueId && seed.pos) {
+        clique.push(seed);
+        for (let k = 1; k < size; k++) {
+          let best = null, bd = CLIQUE_R * CLIQUE_R;
+          for (let s = 0; s < civ.length; s++) {
+            const c = civ[s];
+            if (!c || c === seed || c.cliqueId || !c.pos || clique.indexOf(c) >= 0) continue;
+            const dx = c.pos.x - seed.pos.x, dz = c.pos.z - seed.pos.z, dd = dx * dx + dz * dz;
+            if (dd < bd) { bd = dd; best = c; }
+          }
+          if (!best) break;
+          clique.push(best);
+        }
+      }
+      g0 += size;                                     // the slot budget, unchanged
+      // the roll is ALWAYS drawn (never short-circuited past) so the stream
+      // stays aligned whatever the spatial scan found.
+      const roll = rng();
+      if (clique.length >= 2 && roll < 0.7) {
         const cid = "clq" + g0;
         for (const p of clique) {
           p.friends = clique.filter((q) => q !== p);
@@ -762,6 +816,10 @@
 
   CBZ.citySocialReset = function () {
     g.cityPartner = null; g.citySpouse = false; g.cityHostage = null;
+    // the visible layer that steers bonded walkers off THIS file's couples and
+    // cliques must let go of every body before we wipe the graph underneath it
+    // (kinship.js restores baseSpeed / controlled / poses on the way out).
+    if (CBZ.cityKinshipReset) { try { CBZ.cityKinshipReset(); } catch (e) {} }
     clearBeacon(); kidnapCD = 12;
     // retire any live subtitle + pending rumors
     speechT = 0; speechPed = null; if (speechEl) speechEl.classList.remove("show");
@@ -870,6 +928,15 @@
   // and also pollable when any civilian dies.
   CBZ.citySocialWitnessKill = function (victim, byPlayer) {
     if (!victim) return;
+    // THE MOURNING BEAT (city/kinship.js). Everything below this line moves
+    // NUMBERS on the people who loved the victim — mood, opinion, grudge, an
+    // ambush timer — and none of it is visible from the pavement. One guarded
+    // call hands the same event to the layer that puts a BODY on it: a wife
+    // breaks formation, runs to the corpse and kneels beside it before the
+    // panic below takes her. kinshipMourn is idempotent per victim (a death
+    // funnels through several wrappers) and never touches the death pipeline
+    // itself — it only poses the LIVING.
+    if (CBZ.kinshipMourn) { try { CBZ.kinshipMourn(victim, byPlayer); } catch (e) {} }
     const mourners = [];
     if (victim.partner && !victim.partner.dead) mourners.push(victim.partner);
     if (victim.friends) for (const f of victim.friends) if (f && !f.dead) mourners.push(f);

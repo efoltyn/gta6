@@ -307,10 +307,12 @@
     const role = m._role;
     // NIGHT / very early — indoors, no wandering
     if (h < 7 || h >= 21) return { x: fam.houseX, z: fam.houseZ, hold: true };
-    // MEALS: gather at the back door (house side of the yard)
+    // MEALS: gather at the back door (house side of the yard). `meal` is what
+    // the tick reads to try a REAL TABLE first (CBZ.propSeatNpc) — this point
+    // is the fallback for a house with no registered seat in reach.
     if ((h >= 12 && h < 13) || (h >= 18 && h < 19)) {
       const mx = (fam.houseX + fam.homeX) / 2, mz = (fam.houseZ + fam.homeZ) / 2;
-      return { x: mx + (role === "kid" ? 0.8 : -0.8), z: mz, hold: true };
+      return { x: mx + (role === "kid" ? 0.8 : -0.8), z: mz, hold: true, meal: true };
     }
     // AFTERNOON relax (13-17): a MANSION (tier>=4) has the pool INDOORS now
     // (the indoor pool FLOOR in buildings.js), so its family heads to the door
@@ -340,13 +342,78 @@
     return { x: (fam.houseX + fam.homeX) / 2 + (rng() - 0.5) * 4, z: (fam.houseZ + fam.homeZ) / 2 + (rng() - 0.5) * 4 };
   }
 
+  // ============================================================
+  //  HOMECOMING — WHAT A HOUSE DOES WHEN YOU WALK INTO IT.
+  //  OWNER (2026-07-28): family is "coded mathematically and not in reality
+  //  and not artistically". The arrival beat below this comment used to be ONE
+  //  LINE: every member's target was set 1.5 m in front of the player and left
+  //  there, so a wife and a six-year-old greeted you identically, by standing.
+  //  A family that welcomes you the same way it would welcome furniture is a
+  //  waypoint with names on it.
+  //  So the welcome is ROLE-SHAPED, and — this is the part that matters — it
+  //  authors no beat of its own. city/kinship.js owns the stop/face/gesture/
+  //  line grammar for the whole city; this file CALLS it:
+  //    · the KIDS run in (CBZ.kinshipPace — the ONE sanctioned speed override,
+  //      with kinship.js's own self-healing restore) and then ORBIT you, which
+  //      is exactly what small children do and what nothing in this game has
+  //      ever done.
+  //    · the SPOUSE walks to conversation distance, stops, and faces you
+  //      through CBZ.kinshipGreet — the same beat two people who know each
+  //      other get in the street, aimed at you.
+  //    · everybody else drifts over and hangs back a step.
+  //  Degrade-safe: with kinship.js absent every branch falls back to the old
+  //  single target write, which is what this used to be.
+  // ============================================================
+  function orbitPhase(m) {
+    if (m._famOrbit == null) {
+      m._famOrbit = (CBZ.hash01 ? CBZ.hash01(m.pos.x, m.pos.z, 0x0b17) : 0.5) * 6.2832;
+    }
+    return m._famOrbit;
+  }
+  function welcomeHome(fam, m, P) {
+    const role = m._role;
+    const dx = P.pos.x - m.pos.x, dz = P.pos.z - m.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (role === "kid" && CBZ.kinshipPace) {
+      // RUN in, then CIRCLE. The orbit phase is stable per child so two kids
+      // never stack on one point, and the radius is a real child's idea of
+      // personal space — about a metre and a half.
+      CBZ.kinshipPace(m, d > 4 ? 1.85 : 1.35);
+      const a = orbitPhase(m) + clock * (d > 4 ? 0.0 : 1.25);
+      const r = d > 4 ? 0 : 1.5;
+      if (m.target && m.target.set) m.target.set(P.pos.x + Math.cos(a) * r, 0, P.pos.z + Math.sin(a) * r);
+      m.path = null; m.pause = 0;
+      if (m.state !== "walk") m.state = "walk";
+      return;
+    }
+    if (role === "wife" || role === "mistress") {
+      // walk to conversation distance and STOP there — close, facing you.
+      if (d > 1.9) {
+        const k = 1.5 / (d || 1);
+        if (m.target && m.target.set) m.target.set(P.pos.x - dx * k, 0, P.pos.z - dz * k);
+        m.path = null; m.pause = 0;
+        if (m.state !== "walk") m.state = "walk";
+        m._famGreeted = false;
+        return;
+      }
+      if (!m._famGreeted) {
+        m._famGreeted = true;
+        if (CBZ.kinshipGreet) CBZ.kinshipGreet(m, P, { kind: "warm", secs: 2.6 });
+      }
+      return;
+    }
+    if (m.target && m.target.set) m.target.set(P.pos.x + (rng() - 0.5) * 2, 0, P.pos.z - 1.8);
+  }
+
   // ---- HOME LIFE TICK ------------------------------------------------------
-  let tick = 0, reactCD = 0;
+  let tick = 0, reactCD = 0, clock = 0, porchCD = 14;
   CBZ.onUpdate(36.2, function (dt) {
     if (g.mode !== "city") return;
     buildPools();
     castFamilies();
     tick += dt;
+    clock += dt;                                   // real-time clock (orbits, beat gates)
+    porchCD -= dt;
     reactCD -= dt;
     // home-life cadence rides the perf/quality slider — tier0 ticks every 3s
     // instead of 1.2s (the family sweep is sim-correctness tolerant; goals just
@@ -356,12 +423,47 @@
     const P = CBZ.player;
     const playerHurt = !!(P && !P.dead && P.maxHp && P.hp < P.maxHp * 0.45);
     const playerHot = (g.wanted | 0) >= 3;
+    // which meal block we are in (0 = none): the id a member stamps so the
+    // seat search is tried once per sitting, not once per 1.2 s tick.
+    const _h = hourNow();
+    const mealId = (_h >= 12 && _h < 13) ? 1 : (_h >= 18 && _h < 19) ? 2 : 0;
     for (const fam of families) {
       // is the player HOME? (only meaningful for his own family)
       let playerHome = false;
       if (fam.mine && P && !P.dead && P.pos) {
         const ddx = P.pos.x - fam.houseX, ddz = P.pos.z - fam.houseZ;
         playerHome = (ddx * ddx + ddz * ddz) < 14 * 14;
+      }
+      // WALKED BACK OUT. Hand every borrowed leg back the moment you leave —
+      // the excited-kid pace override carries its own TTL, but an explicit
+      // release is what stops a child sprinting round an empty yard for two
+      // seconds after you've gone, and it re-arms the spouse's greeting so
+      // coming home again is a welcome and not a shrug.
+      if (fam._wasHome && !playerHome) {
+        for (const m of fam.members) {
+          if (!m) continue;
+          m._famGreeted = false;
+          if (CBZ.kinshipPaceClear) CBZ.kinshipPaceClear(m);
+        }
+      }
+      fam._wasHome = playerHome;
+      // ---- THE HOUSE IS ALIVE WITHOUT YOU IN THE MIDDLE OF IT --------------
+      // Two of your people standing in the same yard used to have nothing to
+      // say to each other — the whole family sim pointed at the player and
+      // went quiet when he left. A porch beat between two MEMBERS (kinship.js's
+      // shared stop/face/gesture/line grammar, not a second one) is what makes
+      // the household read as people who live together.
+      if (porchCD <= 0 && CBZ.kinshipGreet && fam.members.length > 1) {
+        const free = fam.members.filter((m) => m && !m.dead && !m.kidnapped && !m._kidHeld &&
+          !m._kidInside && !m._kinBeat && !m._kinGrief && m.state !== "flee" && !(m.alarmed > 0));
+        if (free.length > 1) {
+          const a = free[(rng() * free.length) | 0];
+          const b = free.find((q) => q !== a && Math.hypot(q.pos.x - a.pos.x, q.pos.z - a.pos.z) < 5.5);
+          if (b) {
+            porchCD = 26 + rng() * 34;
+            CBZ.kinshipGreet(a, b, { kind: a._role === "wife" && b._role === "kid" ? "warm" : "chat" });
+          }
+        }
       }
       for (const m of fam.members) {
         if (!m || m.dead) continue;
@@ -375,8 +477,33 @@
         // "whoever holds the legs owns them" convention `controlled` already
         // encodes everywhere else in this codebase.
         if (m._kidHeld || m._kidInside) continue;
+        // city/kinship.js is mid-beat on this body (a greeting on the porch, a
+        // mourning kneel beside somebody they loved, a walk with a sibling).
+        // Same "whoever holds the legs owns them" convention as the line above:
+        // it runs at 36.4 and we run at 36.2, so without this skip our yard
+        // goal would simply be overwritten every frame and the beat would look
+        // like a stutter. One flag, one skip.
+        if (m._kinBeat || m._kinGrief || m._kinUnit) continue;
         // routine target for this hour
         const goal = dayGoalFor(m, fam);
+        // ---- DINNER IS A TABLE, NOT A PAVING SLAB -------------------------
+        // A meal used to be "everybody stands on the same spot near the back
+        // door", which is the exact shape of the owner's complaint: the logic
+        // was right and the reality was missing. propuse.js has owned the
+        // one-line NPC seating verb since it shipped — CBZ.propSeatNpc walks a
+        // body to a real registered chair and hands off to peds.js's OWN
+        // sitDesk routing, which arrives, snaps, poses and holds the seat —
+        // and no family in this game had ever called it. Tried ONCE per meal
+        // block per person; a house with no seat in reach falls straight back
+        // to the old gather, unchanged. propuse owns the body while seated, so
+        // we skip them entirely until the meal is over.
+        if (m._propSeat) {
+          if (goal.meal) continue;                       // at the table — hands off
+          if (CBZ.propStand) CBZ.propStand(m);           // meal's over; get up properly
+        } else if (goal.meal && CBZ.propSeatNpc && m._famMealAt !== mealId) {
+          m._famMealAt = mealId;
+          if (CBZ.propSeatNpc(m, 13)) continue;
+        } else if (!goal.meal) m._famMealAt = 0;
         // RELAX: hand a calm member to the lounger sit-rig (reuses peds.js seat)
         if (goal.sit && !m.rage) {
           m.finalGoal = { sitDesk: true, anchor: { x: goal.x, z: goal.z, face: goal.face, y: 0 } };
@@ -388,8 +515,7 @@
         // PLAYER REACTIONS (own family only) override the wander this tick
         if (fam.mine && P && !P.dead && P.pos) {
           if (playerHome && !goal.sit) {
-            // gather toward him to greet — then drift back next tick
-            if (m.target && m.target.set) { m.target.set(P.pos.x + (rng() - 0.5) * 2, 0, P.pos.z - 1.5); }
+            welcomeHome(fam, m, P);                       // see the HOMECOMING block above
             if (reactCD <= 0 && (playerHurt || playerHot)) {
               reactCD = 12;
               if (CBZ.cityFlavor) CBZ.cityFlavor(playerHurt

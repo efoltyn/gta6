@@ -98,7 +98,21 @@
     let social = "";
     if (rel) social += row("Respect", Math.round(rel.respect || 0) + "/100") + row("Fear", Math.round(rel.fear || 0) + "/100") +
       row("Loyalty", Math.round(rel.loyalty || 0) + "/100") + row("Affection", Math.round(rel.affection || 0) + "/100") + row("Grudge", Math.round(rel.grudge || 0) + "/100", (rel.grudge || 0) > 50 ? "hot" : "");
-    social += row("Connections", (a.partner ? "partner" : "") + (a.friends && a.friends.length ? (a.partner ? " · " : "") + a.friends.length + " friends" : ""));
+    // WHO THEY ARE TO OTHER PEOPLE. This row used to read "partner · 3
+    // friends" — a count, which is the number and not the person. The city has
+    // kept a real, persisted genealogy (city/familytree.js) plus live kin,
+    // clique and couple links for months and NOTHING in the game rendered a
+    // single name off any of it. city/kinship.js resolves those sources into
+    // one line ("Married to Dana · children Maya, Theo"), and a second line
+    // for the thing you can watch change: who they are out with RIGHT NOW.
+    // Degrade-safe — with kinship.js absent this is exactly the old count.
+    const kin = CBZ.kinshipOf ? CBZ.kinshipOf(a) : null;
+    const withLine = CBZ.kinshipWithLine ? CBZ.kinshipWithLine(a) : null;
+    social += row("Family", kin && kin.line ? kin.line : null);
+    social += row("With", withLine);
+    if (!kin || !kin.line) {
+      social += row("Connections", (a.partner ? "partner" : "") + (a.friends && a.friends.length ? (a.partner ? " · " : "") + a.friends.length + " friends" : ""));
+    }
     let identity = "";
     if (ident) {
       const knownKind = String(ident.kind || "known figure").replace(/[_-]+/g, " ");
