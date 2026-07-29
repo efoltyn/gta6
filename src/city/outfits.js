@@ -1358,6 +1358,19 @@
     }
     const a = spec.archetype || "";
     const seed = Math.abs((spec.seed | 0) || 0);
+    // ---- BUM RAGS: peds.js has THREE bum producers now (spawnVagrants' camp,
+    //      aigoals' evictions, and cityDealRole's dealt bums) and they share one
+    //      identity (vagrant) — so they share one wardrobe: the same drab
+    //      palette spawnVagrants already paints its camp with, dealt off the
+    //      body's own seed. No painted atlas — rags are the ABSENCE of a
+    //      garment, which is exactly what the PLAIN path renders. Without this
+    //      row a dealt bum kept whatever shirt he was wearing when the caster
+    //      reached him. ----
+    if (a === "vagrant") {
+      const RAGS = [0x4a4438, 0x5a5244, 0x3e3a33, 0x6b5d4a];
+      const rag = RAGS[h32(seed, 151) % RAGS.length];
+      return recolored(CAT.street, { torso: rag, arms: rag, collar: tone(rag, -0.18), legs: tone(rag, -0.3), shoes: 0x2b241c });
+    }
     // ---- THE SUITED CROWD: higher archetypes wear VARIED painted suits
     //      (suit|N) so the rich read as bespoke, each one different. The mapping:
     //        mobster/made          → pinstripe
@@ -1383,7 +1396,7 @@
     // ---- STREETWEAR: hustle archetypes cycle through the new painted street
     //      garments so corners aren't all the same tracksuit. Feature-detected —
     //      a missing painter falls back to the flat CAT colors. ----
-    if (a === "dealer" || a === "hustler" || a === "cornerkid" || a === "corner") {
+    if (a === "dealer" || a === "hustler" || a === "cornerkid" || a === "corner" || a === "thug") {
       const street = streetwearFor(seed);
       if (street) return street;
     }
