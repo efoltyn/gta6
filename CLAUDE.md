@@ -1382,6 +1382,214 @@ runs each audit first writes the number in; do not pin a guess.
   `NPC_COMBAT_IQ` (master) · `_TIERS` · `_COVER` · `_SQUAD` · `_SHOOTFIRST` ·
   `_MELEE`. Ratchet: **`CBZ.combatIQAudit().legacy` pinned at 0**, adopted 7.
 
+## FROM GPT TO CLAUDE — 2026-07-28 dogfood: world facts below, game rules above
+
+The owner's “cinematic vs realistic vs fun/gamey” pull is not three competing
+modes. It is the three-part authoring contract:
+
+1. **WORLD MODEL owns truth** — a course, person, car, gun, door, surface,
+   collider, inventory object. If a thing exists physically, every game asks
+   the same owner for it.
+2. **GAME PACKAGE owns the WHY** — stakes, eligibility, progression, surrender,
+   victory and loss. It composes world things; it never redraws a person, writes
+   a second vehicle brain or copies a venue.
+3. **PRESENTATION owns emphasis** — camera, sound, HUD and spectacle make the
+   important beat legible. Presentation may reveal truth; it may not replace it.
+
+That is how one beat can be all three: a real car follows the real course
+(realistic), three laps and a purse create a game (gamey), and the gantry/result
+beat makes the finish land (cinematic). New work should add a world capability
+or a package using capabilities, never another vertical stack.
+
+- **A RACE AUTHORS A COURSE, NOT A SECOND TRACK** — `CBZ.raceKit` in
+  `city/racedrivers.js` now owns `registerCourse/course/pathCourse` plus course-
+  derived driver spawning and scoring. `island_speedway.js` publishes the ONE
+  Diamond course (`line`, measured length, track half-width, grid slots,
+  nearest parameter and surface). Three consumers adopted it in the same
+  change: the legal Speedway weekend, APEX Night and the street race. APEX's
+  private copy of the entire tri-oval/grid solve is deleted. Raw fields remain
+  the one-switch degrade path. Ratchet: `CBZ.raceToolAudit()` —
+  **legacy pinned 0, adoption pinned at 3**.
+- **THE RACER IS A STORY MADE OF DURABLE RESULTS** — the title screen's tenth
+  origin lands at the course-derived paddock and starts a five-beat career:
+  report → finish a legal race → APEX podium → APEX win → APEX title.
+  `cityRacerCareer` owns no championship save; it reads the legal/APEX records
+  written by canonical `cityEvent("race-finish"/"race-title")` events. A new
+  race integrates by emitting the event, not by editing the career. Ratchet:
+  `CBZ.racerCareerAudit()` — 5 stages, 2 persistent sources, private state 0.
+- **WAR BAND IS THE PACKAGE BOUNDARY PROOF** — `games/warband.js` is one small
+  game file: muster real city peds → fight with shared weapons/combat/squad
+  posture → a physically outnumbered remnant surrenders → recruit that same
+  surviving actor or ransom them → take three banners. It authors no character
+  mesh, animation, damage, gun, corpse cleanup, wallet, save system or mission
+  UI. A Roman version should be outfits/carried assets/rules over the same
+  actors, not another engine. `PKG_WARBAND` is the revert; math-gate pins the
+  package rule surface at company 8 / banners 3.
+- **PACKAGE PANELS NOW MATCH HOW AUTHORS USED THEM** — `ctx.hud.panel` accepts
+  both `(html, handlers)` and `(headerHtml, bodyHtml, handlers)`, and passes the
+  clicked `[data-act]` element to the handler. This fixes repeated row controls
+  (`data-i`, `data-s`) for APEX, airport and every existing package instead of
+  teaching each game another workaround.
+
+## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
+
+The owner's own words, and they outrank every system doctrine below. **A game is a
+why-machine.** Everything here exists to answer "why am I doing this", and a thing
+that cannot answer it is noise however polished.
+
+**LAW 1 — THE WHY IS DISCOVERED, NOT ASSIGNED.** The keycard story is the whole
+theory. In the jail minigame the owner ran for the keycard hundreds of times with
+nothing new to test — and NOT for the designed whys (escape, cigarettes). He ran
+because the keycard opened a door to a bigger room, and that room had another door,
+and behind it was THE GUN ROOM. Verbatim: *"the jail is dumb but I ran to get the
+keycard relentlessly… that's what makes it a game."* So: **build gradients of
+visible access and power, not objectives.** A player chases the strongest gradient
+he can SEE. Doors beat markers. It does not matter if the thing you are doing is
+dumb if it answers why.
+
+**THE GUN-ROOM GRAMMAR — why that room worked, and the pattern to repeat:**
+(a) **it was LOCKED** — a key is a promise, and a locked door with something visible
+behind it out-motivates any quest marker; (b) **it was the best-made room in the
+game** and the owner noticed ("better interior than anything in my GTA game") —
+**craft is a signal; polish spread evenly creates no gradient, so nothing pulls.
+Spend polish ASYMMETRICALLY on the rooms that matter**; (c) **the reward changed his
+CATEGORY, not his number** — "the only character with a gun in the jail." Categorical
+asymmetry is the reward that works. The bunker vault (blast door inside a blast door,
+THE DEVICE on a cradle, one per world) is this game's one existing instance of the
+grammar. It should be the SPINE, not a one-off: **a ladder of gun rooms**, each
+loyalty rung unlocking a crafted, locked PLACE holding the tools of the next rung.
+Corollary the owner named: glowing floor pickups make it "Subway Surfers" — physical,
+crafted, locked things make the gradient.
+
+**LAW 2 — THE WHY IS PEOPLE. The atom is LOYALTY + WEAPONS.** Money → people →
+power. A gang, a prison gang, election supporters, a CIA cell, a corporation's
+security, an army unit: *"anytime you have a ton of people loyal to you with weapons
+could be a gang"* — Haiti is the owner's cited proof. Every endgame is that atom
+spent: buy the city and build the tallest tower and fill it with your people; run for
+mayor→governor→president; coup with the military or an agency; rob the armory to arm
+a crew; take a hostage whose family is rich; dominate as racer or fighter, convert
+fame into office into dictatorship. **We have already built the organs without naming
+the creature** (factions/ranks-as-verbs, power details, elections + officeholders,
+prison gangs, the armory, standing/wages/succession). What is missing is ONE spine:
+the ledger that counts who is loyal to YOU and how armed they are, plus the threshold
+verbs it unlocks. That block outranks the rest of the roadmap; a 10x city matters
+because it is more to OWN.
+
+**LAW 3 — THE ROME TEST (this is a game ENGINE).** Owner: *"I don't want to make
+Roman-age Bannerlord, but I could easier than from scratch using my current code…
+future Claudes don't need to draw and animate an NPC — that alone is worth my code —
+they just draw the outfit and add animations and interactions."* So judge every block:
+**does it survive a total setting change, or is it welded to modern-day gangs?** The
+walking/fighting/sitting/ranked/covered/dying NPC is the asset. Scenarios are costumes.
+
+**THE ITEM EXISTENCE TEST (falls out of the three laws).** *"Everything in inventory
+is a physical asset."* An item must (1) have a physical asset, and (2) sit on a chain
+you can walk to a why. Minecraft's inventory IS its game; ours must shrink until the
+WORLD is the inventory. Guns and clothes are worn. Trade goods are CARGO in trunks,
+not pocket abstractions — which answers the animal: the carcass is the item you carry
+and sell, so the skin-popup and 13 abstract meat names both die. The pocket keeps
+only what a person pockets: cash, phone, keys/keycards, medkit, grenades, bricks.
+**An item that cannot produce an icon from its own asset fails the existence test —
+refusing to draw an icon IS the reversible soft-cut.** Full analysis and the family
+verdicts: `docs/plan/doctrine-items.md`.
+
+**WHERE THE THINKING LIVES.** `GAMEPLAN.md` is the master plan (witness · scale ·
+airline network · fauna · mantle · flag purge · §10 rim world · Step 0.5 icon purge).
+`docs/plan/` holds every recon and pillar document behind it, including
+`doctrine-items.md` (item purpose vs Minecraft/Rust/Bannerlord; the ~80%-built
+arbitrage engine pointed at the wrong scope) and `doctrine-globe.md` (**true sphere
+REFUSED on arithmetic** — a sphere with our area gives a 129 m horizon, one big
+enough to keep a horizon gives 6 m of sag; staged answer is biome science → visual
+globe → rim → maybe a one-axis ocean wrap; plus the 9-step Köppen/orography rule
+table that VALIDATES eight of our shipped biome placements).
+
+## THE 2026-07-28 SESSION — fixes that were laws, not patches
+
+Owner played and reported; each of these turned out to be arithmetic, and each fix is
+a law so the class cannot return. Short list, with the number that proves it:
+- **GHOST CITIES** — not displacement: `interiorlight.js`'s shared glow-panel pool was
+  parented to the first-registering *translated building group* while its records hold
+  WORLD coords, so every panel in the city shifted by that building's offset (280-540 m
+  toward the mountains, ~15-20 slab lattices + one 52-storey column — the 1400-instance
+  cap exhausts inside the mainland, which is exactly what the owner saw). Now every pool
+  resolves a true identity host, declares `userData.worldSpacePool`, and
+  **`CBZ.poolParentAudit().atTranslatedParent` is pinned 0 in the gate** (0 is the LAW
+  here, not a measured baseline). Second half: `farcull`'s ×3 slack term exempted every
+  populated pool from culling forever, and four builders (govcomplex, military, terminal,
+  forest cabins) never registered in the lot list the distance proxy reads — hence walls
+  culling while windows stayed. Hysteresis now derives from viewer SPEED (a 20 u band
+  against a 1 s amortised retest is nothing at 150 m/s), and detail fittings yield above
+  320 m AGL (a 2 m fire escape is 6 px there).
+- **A WALL MEETS A ROAD AND YIELDS** — `CBZ.roadGapRun/roadGapDefer/roadGapAt`
+  (roadrules.js). The mainland seawall's ONLY openings were four hand-typed literals,
+  each added after somebody hit an invisible knee-wall at one causeway. The derived gap
+  (`max(travelled way, deck/2) + 1.5`) REPRODUCES those authored gates; 6 producers
+  migrated (the Mercy berm's magic z-range literal is deleted), an order-98.6 sweep
+  catches non-adopters, buildings are structurally untouchable and 3-6 m prison/gov walls
+  are MEASURED not punched. Ratchet `roadBlockAudit().crossingsRemaining` 0.
+- **THE WORLD STOPS BEING WALK-THROUGH** — the answer to "find things you can run
+  through" was VEGETATION: thousands of trees, boulders and field fences drawn and never
+  collided. 26 classes fixed across 19 files (plus a 26 m bridge-tower leg standing in a
+  travel lane, Capitol bollards you could drive between, and a town welcome sign that was
+  the inverse fault — an invisible 11 m wall). `CBZ.solidityAudit()`.
+- **AN ALLEY IS A ROUTE** (`CBZ.alleyGapAt/alleyOk`), widths solved from the player
+  capsule, one shared budget across all six scatter passes; window AC units cut (260 of
+  them, hung on walls with no windows behind them — a SECOND producer was found later in
+  buildings.js, and the boxes the owner then saw were the ghost glow panels).
+- **A LYING BODY'S FEET ARE NOT ITS MIDDLE** — the sleep pose put the rig's ORIGIN
+  (its feet) at the mattress centre, so the crown ended 0.82 m past the headboard in
+  mid-air. Player and NPC now share ONE `propLiePlace` derived from the rig's measured
+  height; loungers fixed by the same call.
+- **ARMOUR SITS PROUD, PRONE RIFLES REFUSE THE DIRT** — `cityArmorFit` clamps every
+  armour piece ≥0.01 off the outermost garment (the sweep caught that the previous
+  jacket fix would have put the WHOLE VEST on the jacket plane); the prone gun solves one
+  grazing-angle inequality that covers every stance/slope/barrel length, and `PRONE_SINK`
+  now derives from the pitched chest box (it was tuned to the hip line, so the chest was
+  0.11 m under the floor).
+- **THE WALL STOPS WEARING THE EXPLOSION** — `FX_WALL_WOUNDS` default false kills the
+  60-90 s wall-anchored smoke emitter and the 8 cm-proud scorch quad (both had been
+  diagnosed and deleted ONCE before, then reintroduced one function over); detonation FX
+  and GROUND scorch stay. Burning buildings emit at a real standoff with a flame root.
+- **LOCK-ON STOPS SEEING THROUGH WALLS** — squares defaulted to VISIBLE on churning slot
+  bindings faster than the one-per-frame LOS test could answer, AND the arena's invisible
+  LOS proxy was still sized for the 2-tier bowl (16 m against a 25 m wall — 59% of the
+  facade transparent to cops, cameras and locks). Per-actor cached LOS + the proxy walking
+  the real arcs.
+- **THE DRIVE-BY IS A REAL CAR** — it was never in `CBZ.cityCars` (so every bullet and
+  explosion in the game was blind to it BY CONSTRUCTION), sat at a literal y=0, and the
+  man leaning out the window did not exist. Now a factory car on real suspension with a
+  real crew: kill the shooter and the gun stops; kill the driver and it coasts to a halt
+  as a stealable gang car with bodies in it. Census cleared every other event vehicle;
+  `heists.js`'s bespoke box truck is the one remaining offender (duplicates armored.js).
+- **THE DEAD KEEP THEIR WEIGHT** — `city/morgue.js`. Heli crews dropped weapons AT
+  150 m (their seat's world position); cop corpses were deleted after EIGHT SECONDS; ten
+  `.dead = true` sites dropped nothing; `_armorKit` was never convertible to loot, so
+  guards were unstrippable BY CONSTRUCTION. One drop routine at the kill choke point that
+  DEFERS until the body rests, corpse persistence (costs nothing new — a corpse already
+  held its list slot forever), and a real EMS arc: van drives up, medic works the body,
+  **shoulder-carries it** (`ragdollPin`'s second consumer) to the tailgate; staging waits
+  out hot scenes.
+- **HOW WELL A PERSON FIGHTS** — see the `combatIQ` entry above; the headline is that
+  **no armed NPC has ever fired past 9.4 m** and the cover code scanned the first 64
+  entries of the global collider array (dead its whole life).
+- **THE NUKE IS 16 KILOTONS AND KNOWS IT** — the yield is INVERTED from the bus row's
+  own fireball radius (`W=(126/50)³`), so spectacle, ring damage and death toll can never
+  drift. Cap 5.1 km wide / 10 km top (tropopause = a ceiling, not W^(1/3)), rendered as a
+  sky-locked quad at true ANGULAR size because the honest cloud is 10× the frustum;
+  cap:stem 8:1 → 3:1 (it was a chimney under a hat, and the gate meant to catch that was
+  ONE-SIDED); Hiroshima's measured fatality curve replaces a cliff (everyone inside 675 m
+  died, nobody outside), rolled on a POSITION HASH so clients agree; buildings collapse at
+  5 psi (1.1 km), gutted at 2 psi (2 km), glass at 3.3 km; instant player death is now the
+  fireball ONLY. Ground detonation is a real 90 s countdown — derived from this game's own
+  sprint speed vs the blast reach, because the old 45 s was less than the time needed to
+  run clear, i.e. never an escape.
+- Also: County Jail is a real building on its own claimed land (the whole move cost
+  `wanted.js` ZERO changes — the anchor seam absorbed it); the airport's fence stood
+  INSIDE its own kerb road for 1,190 m and the arrival's first leg (268 m) never existed;
+  the speedway's sponsor boards were flipped on BOTH axes and its lot was boxed in by a
+  fence nobody measured; E ejected you from planes because every E press ran the ride
+  router first; Space never cleared the map waypoint because it was never bound.
+
 ## Hard rules that keep the game correct
 
 - **Determinism**: world builds must be byte-identical per seed across
