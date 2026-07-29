@@ -11,13 +11,13 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=diegetictext1y">
+<link rel="stylesheet" href="css/hud.css?v=sasubtitle1">
 <link rel="stylesheet" href="css/screens.css?v=intro2">
-<link rel="stylesheet" href="css/mobile.css?v=ipad4">
+<link rel="stylesheet" href="css/mobile.css?v=seawave1">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
 <link rel="stylesheet" href="css/inventory.css?v=ctrl1">
 <link rel="stylesheet" href="css/city.css?v=city2w10">
-<link rel="stylesheet" href="css/campaign.css?v=story2">
+<link rel="stylesheet" href="css/campaign.css?v=sasubtitle1">
 </head>
 <body class="campaign-build">
 <div id="game"></div>
@@ -300,7 +300,7 @@
 <script src="src/vendor/noise.js"></script>
 <!-- world layout dial: per-biome anchor offsets (map-enlargement stage 1;
      all-zero today). Must load before terrain + every biome/island file. -->
-<script src="src/world/layout.js?v=stage2w9zs"></script>
+<script src="src/world/layout.js?v=seawave1"></script>
 <script src="src/world/rockscliffs.js?v=rock2"></script>
 <script src="src/world/terrain.js?v=rings1"></script>
 <!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
@@ -333,13 +333,23 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=nukev2"></script>
+<script src="src/config.js?v=weaponphysics1"></script>
 <script src="src/core/seed.js"></script>
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
 <script src="src/world/treeaudit.js?v=law1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/interfaces.js?v=arch2"></script>
+<!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
+     which ~290 are the contracts index's prose and the rest is a single
+     CBZ.INTERFACES list of 16 strings that, measured across src/, index.html,
+     tools/ and docs/, has ZERO readers anywhere — the file implements nothing
+     and executes nothing, so parsing it every boot bought exactly nothing.
+     THE FILE STAYS WHERE IT IS ON PURPOSE: eight comments across the repo
+     cite "core/interfaces.js #4", "#6", "#12" as documentation, and moving it
+     would make all eight stale to save nothing. It is a reference document
+     that is deliberately not a script. (CLAUDE.md names it as the canonical
+     failed block: shipped July 1-2, zero adopters ever.) -->
+
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
@@ -426,15 +436,15 @@
 <script src="src/weapons/appearances/uzi.js"></script>
 <script src="src/weapons/appearances/sniper.js?v=optic2"></script>
 <script src="src/weapons/appearances/lmg.js?v=bipod3"></script>
-<script src="src/systems/actorweapons.js?v=gunorigin1"></script>
+<script src="src/systems/actorweapons.js?v=weaponphysics1"></script>
 <script src="src/city/weapon_thumbnails.js?v=gunthumb1"></script>
-<script src="src/systems/holsterprops.js?v=mounts2"></script>
+<script src="src/systems/holsterprops.js?v=weaponphysics1"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js"></script>
 <script src="src/world/lounge.js?v=screen1"></script>
-<script src="src/world/gunroom.js?v=scale2"></script>
+<script src="src/world/gunroom.js?v=seawave1"></script>
 <script src="src/world/ventilation.js"></script>
 <script src="src/world/escape_routes.js?v=mapflow2"></script>
 <script src="src/world/southblock.js?v=bigmap1"></script>
@@ -510,7 +520,7 @@
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=rideexit2"></script>
-<script src="src/systems/fpsmode.js?v=sharedreticle3w9"></script>
+<script src="src/systems/fpsmode.js?v=weaponphysics1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -630,9 +640,9 @@
      frame island_speedway.js publishes; both run at world-build time so either
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=circuit1z"></script>
+<script src="src/city/island_speedway.js?v=seawave1"></script>
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
-<script src="src/city/island_military.js?v=livebase5w11"></script>
+<script src="src/city/island_military.js?v=seawave1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=organicforest5"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
@@ -641,7 +651,7 @@
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
-<script src="src/city/bunkers.js?v=nukev2"></script>
+<script src="src/city/bunkers.js?v=seawave1"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -659,8 +669,8 @@
 <script src="src/city/wildlife/snow_ungulates.js?v=wild1"></script>
 <script src="src/city/wildlife/small_game.js?v=wild1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=wild1"></script>
-<script src="src/city/wildlife.js?v=physics5"></script>
+<script src="src/city/wildlife/aquatic.js?v=seawave1"></script>
+<script src="src/city/wildlife.js?v=seawave1"></script>
 <script src="src/city/wildlife_tame.js?v=mounttap2"></script>
 <script src="src/city/dogs.js?v=physics3"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
@@ -678,7 +688,7 @@
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=purpose1w9"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
-<script src="src/city/mode.js?v=unmute1"></script>
+<script src="src/city/mode.js?v=seawave1"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
 <script src="src/city/clothes.js?v=fit5"></script>
 <script src="src/city/outfits.js?v=fits2y"></script>
@@ -691,12 +701,12 @@
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=faction2r"></script>
 <script src="src/city/gangs.js?v=fortress1r"></script>
-<script src="src/city/social.js?v=subtitle1"></script>
+<script src="src/city/social.js?v=sasubtitle1"></script>
 <script src="src/city/realestate.js?v=fortress1"></script>
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=notags2yr"></script>
+<script src="src/city/peds.js?v=weaponphysics1"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -712,9 +722,9 @@
 <script src="src/city/crowd.js?v=real1y"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
-<script src="src/city/security.js?v=fortress1"></script>
+<script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=localheli2w9w11r"></script>
+<script src="src/city/police.js?v=weaponphysics1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=localheli2w11"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -778,7 +788,7 @@
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=tornado1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
-<script src="src/city/shops.js?v=city3"></script>
+<script src="src/city/shops.js?v=seawave1"></script>
 <script src="src/city/gunstore.js?v=mods1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
@@ -839,7 +849,7 @@
      authors placement, cones and a barrier, and nothing else. Its radar is
      what roadrules.js asks when deciding whether your speeding was witnessed.
      After police.js and vehicles.js. Revert with ?cfg_HWY_CHECKPOINTS=0. -->
-<script src="src/city/checkpoints.js?v=cp1"></script>
+<script src="src/city/checkpoints.js?v=seawave1"></script>
 <!-- THE INSTRUMENT CLUSTER: speed, the posted limit for the area, and the fuel
      gauge that city/fuel.js finally gave something real to read. Cars only —
      aircraft have diegetic glass in city/cockpit*.js and a second readout
@@ -859,7 +869,7 @@
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=roles1"></script>
-<script src="src/city/restrain.js?v=collar2"></script>
+<script src="src/city/restrain.js?v=weaponphysics1"></script>
 <script src="src/city/combat.js?v=punch2"></script>
 <!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
      CBZ.CITY already loaded, and CBZ.cityEcon's new Wood/Stone/Scrap/
@@ -882,7 +892,7 @@
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
 <script src="src/city/family.js?v=fam2"></script>
-<script src="src/city/swim.js?v=waterv2y"></script>
+<script src="src/city/swim.js?v=seawave1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -904,7 +914,7 @@
 <script src="src/city/story.js?v=night1"></script>
 <script src="src/city/wealth.js?v=night1"></script>
 <script src="src/city/turf.js?v=hudmin2"></script>
-<script src="src/city/gangops.js?v=living1"></script>
+<script src="src/city/gangops.js?v=seawave1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=meshboard2"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
@@ -912,14 +922,14 @@
      the WRAPPED cityExplosion chain; deaths route through the kill bus. -->
 <script src="src/city/strategic.js?v=nukev2"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
-<script src="src/city/loyalty.js?v=sim1"></script>
+<script src="src/city/loyalty.js?v=seawave1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=sim2"></script>
 <script src="src/city/citytemplates.js?v=sim2"></script>
 <script src="src/city/minicities.js?v=sim4w9x"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
-<script src="src/city/scenedirector.js?v=sim3"></script>
+<script src="src/city/scenedirector.js?v=seawave1"></script>
 <script src="src/city/race_livery.js?v=sim2"></script>
 <script src="src/city/racing.js?v=sim4"></script>
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
@@ -957,7 +967,17 @@
      species to aquatic.js makes it catchable with no edit here. After
      marina/boatyard (it registers spots on their quays) and after wildlife.
      Revert with ?cfg_FISHING=0. -->
-<script src="src/city/fishing.js?v=fish1"></script>
+<script src="src/city/fishing.js?v=seawave1"></script>
+<!-- YACHTS + SEA CREW. yachts.js owns the superyacht class (helideck, tender
+     garage, car deck) and the small-craft fleet; every hull goes through
+     CBZ.cityRegisterVehicle and CBZ.marineHulls so it is drivable, damageable
+     and stealable like anything else — never scenery. seacrew.js declares the
+     crew as REAL posted jobs through citystaff.js (Captain / Mate / Bosun /
+     Steward / Deckhand / Engineer), so a vessel with a bridge has somebody on
+     it. After marina/boatyard (berths), aircraft (the helideck), vehicles
+     (registration), citystaff (posts) and wildlife (the sea it sails on). -->
+<script src="src/city/yachts.js?v=yacht1"></script>
+<script src="src/city/seacrew.js?v=yacht1"></script>
 <script src="src/city/armor.js?v=armor1"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
 <script src="src/city/gigs.js?v=gig5"></script>
@@ -973,7 +993,7 @@
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=gunthumb3"></script>
+<script src="src/city/inventory.js?v=weaponphysics1"></script>
 <script src="src/city/phone.js?v=story3"></script>
 <script src="src/city/killfeed.js?v=deathphone1"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
@@ -986,15 +1006,15 @@
      the EMS dispatcher that puts traffic.js's ambulance and medics.js's
      paramedic on the same scene. Needs peds.js, police.js, traffic.js,
      armor.js and interact.js — all above. -->
-<script src="src/city/morgue.js?v=morgue1"></script>
+<script src="src/city/morgue.js?v=weaponphysics1"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=binary3w11x"></script>
+<script src="src/city/origins.js?v=seawave1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=story3"></script>
+<script src="src/city/campaign_ui.js?v=sasubtitle1"></script>
 <script src="src/city/campaign.js?v=story8"></script>
 <script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
@@ -1009,7 +1029,7 @@
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=predator2"></script>
+<script src="src/systems/predator.js?v=seawave1"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
@@ -1025,7 +1045,7 @@
 <script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=shark1"></script>
+<script src="src/city/wildlife_shark.js?v=seawave1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact
@@ -1036,7 +1056,7 @@
 
 <!-- multiplayer (host-your-own RP servers) — inert when offline/solo; loads
      after the whole city block so every CBZ hook it wraps already exists -->
-<script src="src/net/net.js?v=mp3"></script>
+<script src="src/net/net.js?v=seawave1"></script>
 <script src="src/net/netpersist.js?v=mp3"></script>
 <script src="src/net/netactors.js?v=mp2"></script>
 <script src="src/net/networld.js?v=mp3"></script>
@@ -1128,10 +1148,10 @@
      every office's guard lifecycle (officials.js's calls are runtime-lazy so
      load order is soft either way, but this keeps "the record before its
      first consumer" honest). -->
-<script src="src/city/protection.js?v=fortress1"></script>
-<script src="src/city/officials.js?v=pol1"></script>
+<script src="src/city/protection.js?v=seawave1"></script>
+<script src="src/city/officials.js?v=seawave1"></script>
 <script src="src/city/approval.js?v=pol1"></script>
-<script src="src/city/elections.js?v=pol1"></script>
+<script src="src/city/elections.js?v=seawave1"></script>
 
 <!-- X-wave: the world -->
 <script src="src/systems/hunger.js?v=nosurv1"></script>
@@ -1161,7 +1181,7 @@
      LAST in the P/X-wave block: it reads CBZ.relations.warPressure +
      CBZ.hunger.miseryIndex (both above) on top of polity/approval/elections
      (also above), so every dependency is already live by the time it parses. -->
-<script src="src/city/regimes.js?v=pol1"></script>
+<script src="src/city/regimes.js?v=seawave1"></script>
 <!-- P6b: the crown as a bloodline (monarchy succession/legitimacy/royal
      marriages) — regimes.js's own tickCountry() deliberately never enters
      monarchy; this file owns that regime entirely. Loads LAST in the P/X-
@@ -1178,13 +1198,13 @@
      details(), CBZ.cityGangs/cityGangById, CBZ.polity/regimes' govType, and
      CBZ.cityLedgerEntry/cityPoliceForceAdd — every one of those already live
      above. -->
-<script src="src/city/militia.js?v=pol2r"></script>
+<script src="src/city/militia.js?v=seawave1"></script>
 <!-- JOB GIVERS. The rule is binding: the generator picks the VERB, the WORLD
      supplies the specifics — never spawn a target for a contract, bind to the
      officeholder/lot/vehicle the simulation was already running. Loads last of
      this family: needs factions, mission, polity, officials, militaryvehicles,
      interactions and militia all present. -->
-<script src="src/city/contracts.js?v=contract2"></script>
+<script src="src/city/contracts.js?v=seawave1"></script>
 <!-- P8: state/country wars — generalizes the gang-war machinery (declare/
      upkeep/decay, treasury-funded raids) to whole polities: counted
      matériel (soldiers/planes/missiles) per country, fronts at causeway
@@ -1242,10 +1262,10 @@
      officialdom (the office/seat queries) → candidacy (running for it) →
      civic (what the buildings DO) → statecraft (what you do once you hold it,
      including a curfew that enforces your own law on your own body). -->
-<script src="src/city/officialdom.js?v=gov1"></script>
-<script src="src/city/candidacy.js?v=gov1"></script>
+<script src="src/city/officialdom.js?v=seawave1"></script>
+<script src="src/city/candidacy.js?v=seawave1"></script>
 <script src="src/city/civic.js?v=gov1"></script>
-<script src="src/city/statecraft.js?v=gov1"></script>
+<script src="src/city/statecraft.js?v=seawave1"></script>
 
 <!-- THE PROTECTION LAYER (owner: "a mob boss and soldiers protecting, or gov
      and police protecting — see how NPCs interact based on roles and levels
@@ -1258,7 +1278,22 @@
      the level+role the pill already shows. After officials.js/officialdom.js
      (it binds real officeholders) and police.js (state principals inherit the
      posted-officer brain). Revert with ?cfg_POWER_PROTECTION=0. -->
-<script src="src/city/power.js?v=power1"></script>
+<script src="src/city/power.js?v=seawave1"></script>
+<!-- GARRISON. A stationed job is a job that requires you to BE SOMEWHERE.
+     Fourth consumer of police.js's `_post` standing brain (roadblock,
+     checkpoints, power details were the first three) — soldiers, sentries and
+     every other posted trade hold a slot instead of wandering off it, and can
+     still bolt or put hands up through cityScare. After police, militia,
+     checkpoints, citystaff and power: it posts bodies those files already
+     cast. -->
+<script src="src/city/garrison.js?v=garrison1"></script>
+<!-- PIRACY. Armed skiffs take a vessel, and the crew aboard it are the same
+     posted people seacrew.js declared — a hostage is a real actor with a
+     family, a ransom is real money, and the buyer of that money is a gang, a
+     cartel, an insurer or the victim's own relatives. Loads LAST of the sea
+     family: it needs marine hulls, berths, yachts, sea crew, factions, gangs,
+     captives, mission, power details and garrison all present above. -->
+<script src="src/city/piracy.js?v=piracy1"></script>
 
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the
@@ -1291,11 +1326,20 @@
 <script src="src/games/casino.js?v=pkg1"></script>
 <script src="src/games/ocean.js?v=pkg1"></script>
 <script src="src/games/racing.js?v=pkg3"></script>
-<script src="src/games/warband.js?v=pkg1"></script>
+<!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
+     was a dumb idea, but it's really what this whole game's point is: get
+     enough people recruited, or get enough money, or enough guns, or somehow
+     get key cards and access and everything, to get to the nuke." So its two
+     good rules were promoted OUT of the minigame and into the world, where you
+     already have people and enemies: the outnumbered-remnant SURRENDER and the
+     recruit-or-ransom PRISONER are now CBZ.citySurrenderSweep and
+     CBZ.cityTakePrisoner in city/loyalty.js, usable in any fight anywhere. The
+     desert camp, the two standards, the prisoner rail and the three-banner
+     scoreboard existed only to host those two rules and are gone with it. -->
 <script src="src/games/boxing.js?v=pkg1y"></script>
 <script src="src/games/airport.js?v=pkg2"></script>
 <script src="src/games/military.js?v=pkg2"></script>
-<script src="src/games/government.js?v=pkg2"></script>
+<script src="src/games/government.js?v=seawave1"></script>
 <script src="src/games/police.js?v=pkg2"></script>
 <script src="src/games/jail.js?v=pkg1"></script>
 <script src="src/systems/newlife.js?v=newlife1"></script>
@@ -1312,7 +1356,7 @@
      with a yaw-ACCELERATION cap, which is what makes the yacht take seconds
      to answer the helm rather than merely being slow. Both before core/loop.js
      — it sorts CBZ.updaters once at parse time. -->
-<script src="src/world/water_hulls.js?v=boats1"></script>
+<script src="src/world/water_hulls.js?v=seawave1"></script>
 <script src="src/world/water_helm.js?v=boats1"></script>
 
 <!-- WATER V2 runtime: submerged-camera state, boat buoyancy off the live wave

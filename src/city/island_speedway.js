@@ -2342,11 +2342,17 @@
     // === the player takes the last grid slot (you qualify at the back —
     //     beating the champions means DRIVING through them) ===
     const ps = gridSlot(RACE.drivers.length);
+    // The grid is BANKED. Both of these writes used to be a literal y = 0 —
+    // the exact class CLAUDE.md names ("every car sat at a literal y = 0") —
+    // which drops the car through the tri-oval's own banking on frame one and
+    // makes the player's first frame a fall. speedwaySurfaceY IS the drawn
+    // surface, so ask it rather than assuming the sea-level plate.
+    const py = speedwaySurfaceY(ps.x, ps.z);
     car.pos.x = ps.x; car.pos.z = ps.z; car.heading = ps.heading;
     car.v = 0; car.vx = 0; car.vz = 0;
-    car.group.position.set(ps.x, 0, ps.z);
+    car.group.position.set(ps.x, py, ps.z);
     car.group.rotation.y = ps.heading;
-    P.pos.set(ps.x, 0, ps.z);
+    P.pos.set(ps.x, py, ps.z);
     RACE.playerLastT = paramAt(ps.x, ps.z);
 
     // === the scorer ===
@@ -2371,6 +2377,117 @@
     const rnd = RC ? (RC.round + 1) : 1;
     note("ROUND " + rnd + " — " + RACE.drivers.length + " championship cars on the grid. Lights out and away we go…", 3.0);
   }
+
+  // ---- START THE RUN ALREADY ON THE GRID ----------------------------------
+  // OWNER (2026-07-29): "the racer story is poorly built, like the pilot — it
+  // should START IN RACE."
+  //
+  // He is naming a real asymmetry. The PILOT origin opens at 1,750 m doing
+  // 150 m/s because playeraircraft.js publishes CBZ.cityAirborneStart, and the
+  // reason that reads so well is that it drops you INTO a situation instead of
+  // next to one. The RACER origin had no such call, so `speedwaySpawn()` stood
+  // you on the GRASS eighteen metres outside the barrier, on foot, facing away
+  // from the track, with $350 and a five-stage career whose first beat was to
+  // walk somewhere. Its own blurb already promised the opposite — "a loaner, a
+  // BACK-ROW START, one way up" — and the code did not honour a word of it.
+  //
+  // This is deliberately NOT a second race path. It is the loaner plus the one
+  // call the RACE verb already dispatches through (startRace → startRaceRD or
+  // the legacy field), living HERE rather than in origins.js for exactly the
+  // reason cityAirborneStart lives in playeraircraft.js: the grid geometry, the
+  // banking and the lights convention belong to the file that owns them, and a
+  // future mission that wants to open on a grid gets this for free.
+  //
+  // opts: {style} detailStyle of the loaner (default "muscle") · {color} paint
+  // · {number} the door number · {slot} grid index (default: the back row).
+  // Returns the player's car, or null if the world cannot supply a race — in
+  // which case the caller stands the player up and prints its own feed line.
+  const LOANER_COLOR = 0x9aa4b2;      // primer grey: a lent car, not a livery
+  function loanerCar(opts) {
+    if (!CBZ.cityMakeCar || !CBZ.city || !CBZ.city.arena) return null;
+    const back = opts.slot != null ? opts.slot : (useRD() ? FIELD_RD : FIELD_N);
+    const slot = gridSlot(back);
+    // Same model lookup racedrivers.js's modelForStyle uses, so the loaner is
+    // the same CLASS of car as the field it is lining up behind — and it is a
+    // by-name catalog read, never a draw on the seeded rng (determinism law).
+    const CARS = (CBZ.cityEcon && CBZ.cityEcon.CARS) || [];
+    let base = null;
+    for (const c of CARS) { if (c.detailStyle === (opts.style || "muscle")) { base = c; break; } }
+    if (!base && CARS.length) base = CARS[0];
+    if (!base) return null;
+    // Clone, never mutate the catalog. The clone also carries a TOKEN value:
+    // `owned` below is what stops the opening frame being filed as Grand Theft
+    // Auto, but vehicles.js pays the OWNED chop fraction (0.85 vs 0.42), so a
+    // full-value loaner would be a rookie's instant $30k faucet on minute one.
+    // A race-prepped car with 99 on the door is not a resaleable street car.
+    const model = Object.assign({}, base, {
+      color: opts.color != null ? opts.color : LOANER_COLOR,
+      value: Math.min(base.value || 0, 3500),
+    });
+    let car = null;
+    try { car = CBZ.cityMakeCar(slot.x, slot.z, slot.heading, false, model, 0.3); } catch (e) { return null; }
+    if (!car) return null;
+    // A LOANER IS LENT, NOT STOLEN. Without this, cityEnterVehicle files the
+    // opening frame of the story as Grand Theft Auto and hands the rookie a
+    // wanted level before the lights have gone out.
+    car.owned = true; car._raceCar = true; car._loaner = true;
+    car.group.position.y = speedwaySurfaceY(slot.x, slot.z);
+    if (CBZ.cityApplyRaceLivery) {
+      try {
+        CBZ.cityApplyRaceLivery(car.group, {
+          number: opts.number != null ? opts.number : 99,
+          base: model.color, accent: 0xeef2f6,
+        });
+      } catch (e) { /* headless rigs have no livery painter */ }
+    }
+    return car;
+  }
+
+  CBZ.cityRaceStart = function (opts) {
+    opts = opts || {};
+    const P = CBZ.player;
+    if (!P || !CBZ.city || !CBZ.city.arena) return null;
+    if (RACE.active) return P._vehicle || null;      // already racing: idempotent
+    // The track is lazy maths around world constants, but a world that never
+    // built the venue has no arena root to put a car in and no table to solve.
+    let L = 0;
+    try { L = ensureTable().L; } catch (e) { return null; }
+    if (!(L > 0)) return null;
+
+    // Race the car you are in if you are in one; otherwise you are lent one.
+    let car = (P.driving && P._vehicle && !P._vehicle.dead) ? P._vehicle : null;
+    let lent = false;
+    if (!car) {
+      car = loanerCar(opts);
+      if (!car) return null;
+      if (!CBZ.cityEnterVehicle || !CBZ.cityEnterVehicle(car)) return null;
+      lent = true;
+    }
+
+    // startRaceRD re-seats the player on the back row itself; the LEGACY field
+    // does not, so put the car on the grid HERE and both paths open the same
+    // way. (This is also what makes the loaner's first frame legal on a banked
+    // surface rather than hovering over the sea-level plate.)
+    if (!lent) {
+      const slot = gridSlot(useRD() ? FIELD_RD : FIELD_N);
+      car.pos.x = slot.x; car.pos.z = slot.z; car.heading = slot.heading;
+      car.v = 0; car.vx = 0; car.vz = 0;
+      car.group.position.set(slot.x, speedwaySurfaceY(slot.x, slot.z), slot.z);
+      car.group.rotation.y = slot.heading;
+    }
+    P.pos.set(car.group.position.x, car.group.position.y, car.group.position.z);
+    P.vy = 0; P.grounded = true;
+    if (CBZ.cam) { CBZ.cam.yaw = car.heading; CBZ.cam.pitch = 0.12; }
+
+    startRace();
+    if (!RACE.active) {
+      // The dispatcher refused (no drivers, no kit, a broken RD rig that also
+      // failed legacy). Hand the loaner back rather than leaving an orphan.
+      if (lent && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+      return null;
+    }
+    return car;
+  };
 
   function tickRD(dt) {
     const P = CBZ.player;

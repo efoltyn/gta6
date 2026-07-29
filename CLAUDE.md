@@ -1477,6 +1477,22 @@ and not part of this case. The ratchets are the claim: race adoption 3 with lega
 8 / banners 3. If those numbers do not hold, do not merge around them—fix the
 shared boundary.
 
+- **A GUN IS GEOMETRY WITH MASS, HELD OR DROPPED** —
+  `CBZ.weaponPhysics` lives with the canonical gun models in
+  `systems/actorweapons.js`. Its held solve samples the whole hand-to-muzzle
+  segment against `groundAt`; its released solve carries velocity and spin,
+  substeps walls and support, bounces, then sets the model's measured lowest
+  vertex on the highest support under its footprint. Third-person hands,
+  inventory/death pickups and the FPS death release are consumers, not private
+  approximations. `CBZ.weaponPhysicsAudit()` requires all three, a zero-
+  penetration ramp solve and zero active underground bodies.
+- **SPOKEN WORDS ARE SUBTITLES, NOT PANELS** — `.world-subtitle` in `hud.css`
+  is the one observed-world dialogue grammar used by both `citySay` and
+  `campaignUI.say`: lower-centre, heavy white type, black outline, no box.
+  Speaker identity remains accessible but visually yields to the spoken line.
+  A campaign choice deliberately restores the speaker and dark choice panel,
+  because a decision is interactive UI rather than passing speech.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a
@@ -1643,6 +1659,48 @@ a law so the class cannot return. Short list, with the number that proves it:
   the speedway's sponsor boards were flipped on BOTH axes and its lot was boxed in by a
   fence nobody measured; E ejected you from planes because every E press ran the ride
   router first; Space never cleared the map waypoint because it was never bound.
+
+## THE GATE WAS NOT RUNNING SEVEN OF ITS OWN RATCHETS (measured 2026-07-29)
+
+Run `node tools/math-gate.mjs --seeds 90210` against a CLEAN `HEAD` worktree and
+you got `predator - | checkpoints - | beach -`, `venues - | fishing - | ranks -`,
+`street - | stunts -`, `power -` and `fxwarm -`. Not "zero". **Blank.** Two
+statements in the PASS block string-concatenated an `Object.create(null)` MAP —
+`venueStaffAudit().venues` and `rankAudit().orgs` — which raises "Cannot convert
+object to primitive value", and **the throw aborted the whole ratchet block from
+that point down.** Every audit below the first one asserted NOTHING. The same
+line also read `vs.staffed`, a field that has never existed (it is `manned`), and
+`rankAudit`'s `emptyRanks`/`verblessRungs` are ARRAYS, not counts, so `empty=` was
+printing the array. Both are fixed and the offenders are now NAMED in the output,
+because "which rung has no holder" is the entire value of that number.
+
+This is CLAUDE.md's own law turned on the gate itself: **an audit nobody has
+executed is not a measurement.** The `propUseAudit` lesson had a sibling nobody
+had noticed. THE MEASURED TRUTH on clean `HEAD`, first time these ever ran:
+
+| ratchet | claimed here | **MEASURED** |
+|---|---|---|
+| `venueStaffAudit().unstaffed` | **pinned 0** | **5** — the pin has been failing silently |
+| `fishAudit().refused` | **pinned 0** | **3** — three spots stand on dry land |
+| `rankAudit()` | NOT YET PINNED | **7 orgs / 34 rungs / held 18 / verbed 30 / empty 1 / verbless 4** |
+| ↳ `emptyRanks` | — | `gang:prospect` |
+| ↳ `verblessRungs` | — | `campaign:{volunteer,organizer,operative,boss}` |
+| `powerAudit().legacyGuardSites` | baseline 9 | **8** |
+| `predatorAudit()` | 0 / 9 | **0 / 9** confirmed |
+| `checkpointAudit()` | — | **4/4 manned** |
+| `streetAudit()` | NOT YET PINNED | **1575 poles · disc 0 · thru 0 · noCol 0 · junc 259/260 · paintThru 0** |
+| `groundMatchAudit().maxErr` | — | **0.34 m, over the gate's own 0.30 limit** |
+| `fxwarm` bad materials | — | **8** |
+| `roadClearanceAudit().propsInside` | pinned 15 | **16** |
+| GOLDEN roads (seed 90210) | 178 | **202**, and the biome set gained `annex` |
+
+**The last four rows are live, pre-existing FAILURES on `main`** — i.e. the
+deployed site. They are not this or any recent wave's doing (verified by running
+the fixed gate against a clean `HEAD` worktree and diffing). They are the cost of
+the "no testing just building" waves: the gate was red and nobody looked. **Do
+not re-pin a ratchet upward to make it green.** The two GOLDEN rows are stale
+CALIBRATION and should be recalibrated deliberately (`--calibrate`); the other
+two are real drift and want a fix.
 
 ## Hard rules that keep the game correct
 

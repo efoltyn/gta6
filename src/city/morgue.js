@@ -172,6 +172,7 @@
 
     const x = opts.x != null ? opts.x : (a.pos ? a.pos.x : 0);
     const z = opts.z != null ? opts.z : (a.pos ? a.pos.z : 0);
+    const y = opts.y != null ? opts.y : (a.pos ? a.pos.y : 0);
 
     // --- the gun becomes a REAL ground pickup ------------------------------
     // CBZ.cityDropWeapon is peds.js's existing record + mesh (and inventory.js
@@ -180,7 +181,7 @@
     // same one a live ped runs to grab (peds.js's "loot" state).
     const gun = carriedGun(a);
     if (gun && CBZ.cityDropWeapon) {
-      CBZ.cityDropWeapon(x, z, gun.name, gun.ammo);
+      CBZ.cityDropWeapon(x, z, gun.name, gun.ammo, { y: y, body: a });
       dropsSpawned++;
       // a DEATH drop belongs to the body, so it lives as long as the body does
       // (peds.js ages ordinary drops out at 30 s — a corpse held for minutes

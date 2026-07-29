@@ -56,6 +56,7 @@
   function floorY(x, z) { if (CBZ.floorAt) { try { return CBZ.floorAt(x, z) || 0; } catch (e) {} } return 0; }
   function note(m, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, s); }
   function sfx(n) { if (CBZ.sfx) { try { CBZ.sfx(n); } catch (e) {} } }
+  if (CBZ.weaponPhysics && CBZ.weaponPhysics.adopt) CBZ.weaponPhysics.adopt("inventory-drops");
 
   // ============================================================
   //  CATALOG GLUE
@@ -393,34 +394,58 @@
     let mesh = null;
     const root = arenaRoot();
     const y0 = payload.y != null ? payload.y : floorY(x, z);
+    const physicalGun = !!(payload.weaponId && CBZ.weaponPhysics &&
+      CBZ.weaponPhysics.drop && (!CBZ.CONFIG || CBZ.CONFIG.WEAPON_GROUND_PHYSICS !== false));
     if (root) {
       mesh = makePhysicalDrop(payload);
-      mesh.position.set(x, y0 + (payload.weaponId || payload.melee ? 0.18 : 0.03), z);
+      // A physical gun leaves hand/hip height and falls. Non-gun items retain
+      // their old static placement until they gain an honest body contract.
+      mesh.position.set(x, y0 + (physicalGun ? 0.78 : (payload.weaponId || payload.melee ? 0.18 : 0.03)), z);
       mesh.rotation.y = (x * 7 + z * 13) % 6.28;
       root.add(mesh);
     }
-    CBZ.cityItemDrops.push({
+    const rec = {
       x, z, y0, t: 0, ttl: payload.ttl != null ? payload.ttl : 120, mesh,
       name: payload.name || null, count: payload.count || 1,
       weaponId: payload.weaponId || null, ammo: payload.ammo != null ? payload.ammo : 30,
       melee: payload.melee || null, cash: Math.max(0, Math.round(payload.cash || 0)),
-    });
+    };
+    CBZ.cityItemDrops.push(rec);
+    if (mesh && physicalGun) {
+      const a = (x * 0.731 + z * 1.173) % (Math.PI * 2);
+      rec._weaponBody = CBZ.weaponPhysics.drop(mesh, {
+        record: rec, source: "inventory-drops",
+        vx: Math.cos(a) * 0.7, vy: 1.15, vz: Math.sin(a) * 0.7,
+        wx: Math.sin(a * 1.7) * 7.5, wy: Math.cos(a * 0.9) * 5.5, wz: Math.sin(a * 2.3) * 8.5,
+      });
+    }
   };
 
   function physicalizeNpcDrop(d) {
     if (!d || d._inv2Physical || !d.mesh) return;
     const old = d.mesh, parent = old.parent || arenaRoot();
     if (!parent) return;
-    const y = floorY(d.x, d.z);
+    const y = (typeof d.y === "number" && isFinite(d.y)) ? d.y
+      : (d.body && d.body.pos && isFinite(d.body.pos.y) ? d.body.pos.y : floorY(d.x, d.z));
     if (old.parent) old.parent.remove(old);
     if (old.geometry && old.geometry.dispose && !old.geometry._shared) old.geometry.dispose();
     if (old.material && old.material.dispose && !old.material._shared) old.material.dispose();
     const prop = makeWeapon((CBZ.weaponIdFromName && CBZ.weaponIdFromName(d.weapon)) || d.weapon || "Pistol");
     prop.userData.transient = true; prop.userData._invPhysicalDrop = true;
-    prop.position.set(d.x, y + 0.18, d.z);
+    const physicalGun = !!(CBZ.weaponPhysics && CBZ.weaponPhysics.drop &&
+      (!CBZ.CONFIG || CBZ.CONFIG.WEAPON_GROUND_PHYSICS !== false));
+    prop.position.set(d.x, y + (physicalGun ? 0.72 : 0.18), d.z);
     prop.rotation.y = (d.x * 7 + d.z * 13) % 6.28;
     parent.add(prop);
     d.mesh = prop; d._inv2Physical = true;
+    if (physicalGun) {
+      const a = (d.x * 0.619 + d.z * 1.037) % (Math.PI * 2);
+      d._weaponBody = CBZ.weaponPhysics.drop(prop, {
+        record: d, source: "inventory-drops",
+        vx: Math.cos(a) * 0.55, vy: 0.95, vz: Math.sin(a) * 0.55,
+        wx: Math.sin(a * 1.4) * 7, wy: Math.cos(a * 0.8) * 5, wz: Math.sin(a * 2.1) * 8,
+      });
+    }
   }
 
   // NPC gun drops use the same real weapon appearance as carried actors.
@@ -444,6 +469,9 @@
   }
   function removeItemDrop(i) {
     const d = CBZ.cityItemDrops[i];
+    if (d && d._weaponBody && CBZ.weaponPhysics && CBZ.weaponPhysics.release) {
+      CBZ.weaponPhysics.release(d._weaponBody);
+    }
     if (d && d.mesh && d.mesh.parent) d.mesh.parent.remove(d.mesh);   // pooled mat + shared geo: never dispose
     CBZ.cityItemDrops.splice(i, 1);
   }

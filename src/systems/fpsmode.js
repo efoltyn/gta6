@@ -21,6 +21,7 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
+  if (CBZ.weaponPhysics && CBZ.weaponPhysics.adopt) CBZ.weaponPhysics.adopt("fps-death");
 
   const SENS = (CBZ.TUNE && CBZ.TUNE.sens) || 0.0024;
   const MELEE = 1.9;
@@ -1085,13 +1086,16 @@
   // and ammo survive the respawn and NPCs can't loot it (it's not a cityDrop).
   let ddT = -1;                        // >=0 while the viewmodel tumble plays
   const DD_DUR = 0.5;
-  let dropMesh = null, dropVx = 0, dropVy = 0, dropVz = 0,
+  let dropMesh = null, dropBody = null, dropVx = 0, dropVy = 0, dropVz = 0,
     dropSx = 0, dropSy = 0, dropSz = 0, dropLife = 0, dropLanded = false;
   function clearWorldDrop() {
     if (!dropMesh) return;
+    if (dropBody && CBZ.weaponPhysics && CBZ.weaponPhysics.release) CBZ.weaponPhysics.release(dropBody);
     if (dropMesh.parent) dropMesh.parent.remove(dropMesh);
-    dropMesh.traverse((o) => { if (o.geometry && o.geometry.dispose) o.geometry.dispose(); });   // materials are the shared kit — never disposed
-    dropMesh = null;
+    dropMesh.traverse((o) => {
+      if (o.geometry && o.geometry.dispose && !o.geometry._shared) o.geometry.dispose();
+    });   // actorweapons geometries + materials are shared — never dispose them
+    dropMesh = null; dropBody = null;
   }
   function spawnWorldDrop(w) {
     clearWorldDrop();
@@ -1108,12 +1112,25 @@
     dropVy = 2.0 + rng() * 1.2;
     dropSx = (rng() - 0.5) * 14; dropSy = (rng() - 0.5) * 10; dropSz = (rng() - 0.5) * 14;
     dropLife = 30; dropLanded = false;
+    if (CBZ.weaponPhysics && CBZ.weaponPhysics.drop) {
+      dropBody = CBZ.weaponPhysics.drop(dropMesh, {
+        source: "fps-death", sound: "shell",
+        vx: dropVx, vy: dropVy, vz: dropVz,
+        wx: dropSx, wy: dropSy, wz: dropSz,
+      });
+    }
   }
   // called by city/death.js the frame you die; returns true when the
   // first-person tumble plays (death.js holds the orbit cam a beat for it)
   CBZ.fpsDeathDrop = function () {
     if (!armed()) return false;
-    spawnWorldDrop(weapon());          // the body lets go — the gun lands beside it
+    // City Inventory V2 creates the REAL lootable gun(s) at this same death
+    // choke point. Do not add a second cosmetic duplicate beside them. Other
+    // modes retain this view-owned world prop, now on the shared weapon body.
+    const realCityDrop = CBZ.game && CBZ.game.mode === "city" &&
+      (!CBZ.CONFIG || CBZ.CONFIG.INVENTORY_V2 !== false) &&
+      typeof CBZ.cityDropItem === "function";
+    if (!realCityDrop) spawnWorldDrop(weapon());
     carriedGun.visible = false;        // third person: nothing left in the grip
     if (!fps.active) return false;
     ddT = 0;                           // first person: the viewmodel tumbles away
@@ -3298,7 +3315,7 @@
       gun.rotation.set(k * 1.9, -k * 0.8, k * 1.1);            // pitches forward, yaws + rolls free
       if (k >= 1) { ddT = -1; gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); vm.visible = false; }
     }
-    if (dropMesh) {
+    if (dropMesh && !dropBody) {
       dropLife -= dt;
       if (dropLife <= 0) clearWorldDrop();
       else if (!dropLanded) {

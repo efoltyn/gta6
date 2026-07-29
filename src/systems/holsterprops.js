@@ -30,6 +30,7 @@
   const THREE = window.THREE;
   if (CBZ.CONFIG.CHAR_WEAPON_MOUNTS == null) CBZ.CONFIG.CHAR_WEAPON_MOUNTS = true;
   if (CBZ.CONFIG.CHAR_TP_HAND_GUN == null) CBZ.CONFIG.CHAR_TP_HAND_GUN = true;
+  if (CBZ.weaponPhysics && CBZ.weaponPhysics.adopt) CBZ.weaponPhysics.adopt("tp-held");
 
   // hip = pistol-ish slots; back = everything long. utility (taser) stays
   // beltable; heavy launchers ride the back like rifles.
@@ -282,6 +283,15 @@
       _hgDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
       _hgTarget.copy(CBZ.camera.position).addScaledVector(_hgDir, 120);
       _hgDir.copy(_hgTarget).sub(_hgPos).normalize();
+      // Physics wins over a point-blank aim ray: when crouched/prone beside a
+      // slope, the crosshair may be below the muzzle's physically possible
+      // line. Keep the bullet ray authoritative, but do not render half the gun
+      // inside the ground. The shared solver samples hand→muzzle, not just the
+      // floor under the hand.
+      if ((!CBZ.CONFIG || CBZ.CONFIG.TP_GUN_GROUND_CLEAR !== false) &&
+          hand.len > 0 && CBZ.weaponPhysics && CBZ.weaponPhysics.clearDirection) {
+        CBZ.weaponPhysics.clearDirection(_hgPos, _hgDir, hand.len, MUZZLE_CLEAR);
+      }
       _hgMat.lookAt(_hgZero, _hgDir, _hgUp);       // -Z along the aim dir = barrel on target
       _hgWorldQ.setFromRotationMatrix(_hgMat);
       socket.getWorldQuaternion(_hgParentQ);
@@ -307,7 +317,13 @@
         _hgDir.copy(hand.long ? LOWREADY_LONG : LOWREADY_PISTOL).applyQuaternion(_hgBodyQ);
       }
       // (b) the muzzle stays above the floor, whatever the stance or the slope
-      if (groundClear && hand.len > 0 && CBZ.floorAt) {
+      if (groundClear && hand.len > 0 && CBZ.weaponPhysics && CBZ.weaponPhysics.clearDirection) {
+        hand.prop.getWorldPosition(_hgPos);
+        CBZ.weaponPhysics.clearDirection(_hgPos, _hgDir, hand.len, MUZZLE_CLEAR);
+      } else if (groundClear && hand.len > 0 && CBZ.floorAt) {
+        // Degrade path for a partial load without actorweapons.js's shared
+        // physics owner. It keeps the old under-hand sample; the normal path
+        // above additionally samples the muzzle and every point between.
         hand.prop.getWorldPosition(_hgPos);
         const yMin = (CBZ.floorAt(_hgPos.x, _hgPos.z) + MUZZLE_CLEAR - _hgPos.y) / hand.len;
         if (_hgDir.y < yMin) {

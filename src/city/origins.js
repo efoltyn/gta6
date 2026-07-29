@@ -1124,6 +1124,11 @@
       airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
       corner:     { find: null,            feed: "" },   // the street IS the place — never fails
       motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
+      // The racer does NOT start beside the track — placeComposition below
+      // intercepts `speedway` and hands off to CBZ.cityRaceStart, so the story
+      // opens on the back row with the lights counting down. `resolve` is now
+      // purely the DEGRADE path: a world that could not field a race stands
+      // you at the gate and prints the feed, which is the old opening.
       speedway:   { resolve: speedwaySpawn, feed: "The paddock is closed. You wait at the Speedway gate." },
     },
 
@@ -1443,6 +1448,58 @@
     }
   }
 
+  /* THE GRID START, retried until the speedway can hold a race.
+
+     OWNER (2026-07-29): "the racer story is poorly built, like the pilot — it
+     should start in race." The pilot got a deferred launch and the racer never
+     did, so the two stories that both promise to open you INTO something read
+     completely differently: one opens at 1,750 m, the other opened standing on
+     the grass outside a closed paddock.
+
+     Same deferral, and for the SAME reason it was needed for the plane: the
+     RD field is built from cityRacing's standings and cityMakeCar's catalog,
+     and neither is guaranteed live at the frame a mode reset applies an
+     origin. So we do not race it — stand the player somewhere safe, arm a
+     pending grid start, and fire the moment the world can answer, which is
+     within a frame or two and long before the player has control.
+
+     The verb is NOT re-armed here (unlike tryAirborne, which double-fires it):
+     runComposition already called startVerb the moment the placement returned,
+     and racing.js's own 0.8 s career tick re-arms the card for any racer whose
+     story is unfinished — so a second start would only race that singleton. */
+  const PENDING_RACE_SEC = 6;
+  let pendingRace = null;
+
+  function tryRace() {
+    if (!pendingRace || !CBZ.cityRaceStart) return false;
+    const car = CBZ.cityRaceStart({ style: "muscle", number: 99 });
+    if (!car) return false;
+    pendingRace = null;
+    if (CBZ.city) CBZ.city.note("A loaner, the back of the grid, and the championship in front of you.", 3.4);
+    return true;
+  }
+
+  function tickRace(dt) {
+    if (!pendingRace) return;
+    pendingRace.t += dt;
+    if (tryRace()) return;
+    if (pendingRace.t > PENDING_RACE_SEC) {
+      pendingRace = null;
+      // The world could not put a race together this seed. Fall back to the
+      // ORIGINAL opening — on foot at the gate — rather than hanging, and say
+      // so, because a silent fallback is how the old one went unnoticed.
+      const site = speedwaySpawn();
+      const P = CBZ.player;
+      if (site && P) {
+        P.pos.set(site.x, site.y != null ? site.y : 0.14, site.z);
+        P.vy = 0; P.grounded = true;
+        if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, site.heading || 0, 0); }
+        if (CBZ.cam) { CBZ.cam.yaw = site.heading || 0; CBZ.cam.pitch = 0.3; }
+      }
+      if (CBZ.city) CBZ.city.note((AXES.where.speedway.feed) || "You wait at the Speedway gate.", 3.4);
+    }
+  }
+
   /* WHERE, made real. Returns the intro opts the camera wants, or null so the
      caller falls back to the street exactly as the originals do. */
   function placeComposition(comp, game) {
@@ -1466,6 +1523,18 @@
       pendingAir = { comp: comp, t: 0 };
       if (!tryAirborne()) return { compact: false, aerial: true, pending: true };
       return { compact: false, aerial: true };
+    }
+
+    // SPEEDWAY — the racer's answer to the pilot's opening. Delegated to
+    // island_speedway.js's CBZ.cityRaceStart so the grid geometry, the banking
+    // and the lights convention stay in the file that owns them. Deferred for
+    // the same reason the airframe registry is: the field is built from live
+    // standings and the car catalog, neither guaranteed up at reset.
+    if (comp.where === "speedway") {
+      genericSafeSpawn();
+      pendingRace = { comp: comp, t: 0 };
+      if (!tryRace()) return { compact: false, onGrid: true, pending: true };
+      return { compact: false, onGrid: true };
     }
 
     // GROUND — find the lot this story wants and stand the player in it.
@@ -1900,7 +1969,7 @@
     // HEAT runs whether or not a scripted scene is live — a hunted origin is
     // a standing condition of the character, not a beat that finishes. It is
     // its own guard clause so a story with no heat costs one comparison.
-    if (g.mode === "city" && g.state === "playing") { tickHeat(dt); tickAirborne(dt); }
+    if (g.mode === "city" && g.state === "playing") { tickHeat(dt); tickAirborne(dt); tickRace(dt); }
     if (!scene) return;
     if (g.mode !== "city") { clearScene(); return; }
     if (g.state !== "playing") return;

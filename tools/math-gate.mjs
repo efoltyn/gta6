@@ -221,6 +221,19 @@ const PASS = `(() => {
     if (rpg && rpg.overheadMs > 20) out.fails.push("RPG 30m FLIGHT OVERHEAD rose to " + rpg.overheadMs + "ms (ratchet 20)");
     if (gl && gl.overheadMs > 0) out.fails.push("GRENADE-LAUNCHER OVERHEAD nonzero: " + gl.overheadMs + "ms");
   } catch (e) { out.fails.push("weaponLatencyAudit threw: " + (e && e.message)); } }
+  // ---- weapon ground physics: one owner for held and dropped firearms.
+  // The synthetic ramp/kerb solve is pure geometry and must report no barrel
+  // samples below ground. All three presentation/loot paths must adopt it, and
+  // no actively integrated body may finish a frame below its support surface.
+  if (CBZ.weaponPhysicsAudit) { try {
+    const wp = CBZ.weaponPhysicsAudit();
+    out.weaponPhysics = wp.adopted + "/" + wp.required + " adopted active=" + wp.active +
+      " under=" + wp.underground + " solve=" + wp.solverPenetration;
+    if (wp.missing.length) out.fails.push("WEAPON PHYSICS CONSUMERS MISSING: " + wp.missing.join(","));
+    if (wp.solverPenetration) out.fails.push("HELD GUN GROUND SOLVER PENETRATES: " + wp.solverPenetration);
+    if (wp.underground) out.fails.push("ACTIVE GUN BODIES UNDERGROUND: " + wp.underground);
+  } catch (e) { out.fails.push("weaponPhysicsAudit threw: " + (e && e.message)); } }
+  else out.fails.push("weaponPhysicsAudit missing");
 
   // ---- BLOCK-LAW RATCHETS (CLAUDE.md #5). Each of these is a HARD invariant
   // — a physical-plausibility or handover fact that must hold in every build,
@@ -330,15 +343,34 @@ const PASS = `(() => {
         out.fails.push("RACER CAREER CONTRACT DRIFT: " + JSON.stringify(rc));
       }
     } else out.fails.push("racerCareerAudit missing");
-    // WAR BAND proves the package boundary can express a complete game from
-    // real city actors, combat, money, missions and persistence in one file.
-    // The gate pins its rule surface, not a live battle outcome.
-    if (CBZ.games && CBZ.games._defs) {
-      const wd = CBZ.games._defs().find((d) => d && d.id === "warband");
-      const wr = wd && wd.api && wd.api.rules;
-      out.warband = wr ? ("company=" + wr.maxCompany + " banners=" + wr.winBanners) : "missing";
-      if (!wr || wr.maxCompany !== 8 || wr.winBanners !== 3) out.fails.push("WAR BAND PACKAGE/RULES MISSING");
-    } else out.fails.push("game package registry missing");
+    // WAR BAND'S REPLACEMENT. The package was DELETED 2026-07-29 — owner:
+    // "the whole war band code, it was a dumb idea, but it's really what this
+    // whole game's point is". Its two good rules were promoted to world
+    // capabilities (citySurrenderSweep / cityTakePrisoner) and its atom —
+    // loyal people + weapons + money + access — became the LOYALTY LEDGER, so
+    // what this slot pins now is the SPINE, not a minigame's rule surface.
+    //
+    // mirrors is the one that matters: the ledger READS the four registries
+    // that already exist and writes none of them. A ledger that mirrors is the
+    // parallel-bookkeeping trap that killed proptypes.js, so mirrors may only
+    // ever be 0. verblessRungs is the stat-fiction ban applied to the ladder,
+    // and lockCount may only go UP — it counts doors that actually refuse.
+    // (NO BACKTICKS IN THIS BLOCK. The whole PASS body is one template
+    //  literal; a backtick in a comment ends it and the SyntaxError lands on
+    //  an innocent word thirty lines away. CLAUDE.md documents this.)
+    if (CBZ.loyaltyAudit) {
+      const la = CBZ.loyaltyAudit();
+      out.loyalty = "regs=" + la.registries + " mirrors=" + la.mirrors +
+        " rungs=" + la.rungs + "/" + la.verbs + "v verbless=" + la.verblessRungs +
+        " locks=" + la.lockCount + " power=" + (Math.round((la.power || 0) * 100) / 100);
+      if (la.mirrors !== 0) out.fails.push("LOYALTY LEDGER MIRRORS STATE: " + la.mirrors);
+      if (la.verblessRungs !== 0) out.fails.push("LOYALTY RUNG WITH NO VERB: " + la.verblessRungs);
+      if (la.registries < 4) out.fails.push("LOYALTY LEDGER LOST A REGISTRY: " + la.registries);
+      if (la.rungs < 6) out.fails.push("LOYALTY LADDER SHRANK: " + la.rungs);
+      if (la.verbs < 7) out.fails.push("LOYALTY VERBS LOST: " + la.verbs);
+      if (la.lockCount < 4) out.fails.push("LOCKED DOORS UNLOCKED: " + la.lockCount);
+    } else out.fails.push("loyaltyAudit missing");
+    if (!(CBZ.games && CBZ.games._defs)) out.fails.push("game package registry missing");
     // airside: service vehicles must never be on the active runway.
     // onRunwayRaw is printed beside it deliberately — the ratchet must not be
     // satisfiable by widening what counts as "cleared for the runway".
@@ -481,7 +513,18 @@ const PASS = `(() => {
     // buildings and no people is a stage set. unstaffed is the ratchet.
     if (CBZ.venueStaffAudit) {
       const vs = CBZ.venueStaffAudit();
-      out.venues = vs.venues + "v " + vs.staffed + "/" + vs.stations + " staffed unstaffed=" + vs.unstaffed + " live=" + (vs.live || 0);
+      // THIS LINE THREW, AND THE THROW ATE SEVEN RATCHETS. vs.venues is an
+      // Object.create(null) MAP keyed by venue id, and string-concatenating a
+      // null-prototype object raises "Cannot convert object to primitive
+      // value" — so this statement aborted the whole ratchet block and every
+      // audit below it (fishing, ranks, predator, checkpoints, beach, power)
+      // has been silently unmeasured, printing "-" and asserting NOTHING.
+      // Confirmed against a clean HEAD worktree, so it is not this wave's.
+      // CLAUDE.md's own law, applied to the gate itself: an audit nobody has
+      // executed is not a measurement. Two bugs in one statement — vs.staffed
+      // never existed either (the field is spelled manned).
+      const vcount = Object.keys(vs.venues || {}).length;
+      out.venues = vcount + "v " + vs.manned + "/" + vs.stations + " manned unstaffed=" + vs.unstaffed + " live=" + (vs.live || 0);
       if (vs.unstaffed > 0) out.fails.push("VENUE STATIONS WITH NOBODY WORKING THEM: " + vs.unstaffed);
     }
     // FISHING — a spot that lies about standing on water refuses itself and is
@@ -499,8 +542,19 @@ const PASS = `(() => {
     // RANK LADDERS — a rung nobody holds, or one that unlocks no verb, is the
     // vanity XP bar CLAUDE.md bans. Both must fall, never rise.
     if (CBZ.rankAudit) {
+      // SAME BUG AS THE VENUES LINE, one audit later, and it ate the four
+      // ratchets below it too. rankAudit().orgs is an Object.create(null) MAP
+      // and emptyRanks / verblessRungs are ARRAYS of "org:rung" strings, not
+      // counts — so this line threw and ranks/street/stunts/power have never
+      // been measured either. Print the LENGTHS, and name the offenders,
+      // because "which rung has no holder" is the whole value of the number.
       const rk = CBZ.rankAudit();
-      out.ranks = (rk.orgs || 0) + "orgs rungs=" + (rk.rungs || 0) + " empty=" + (rk.emptyRanks || 0) + " verbless=" + (rk.verblessRungs || 0);
+      const rkEmpty = (rk.emptyRanks || []).length, rkVerbless = (rk.verblessRungs || []).length;
+      out.ranks = Object.keys(rk.orgs || {}).length + "orgs rungs=" + (rk.rungs || 0) +
+        " held=" + (rk.held || 0) + " verbed=" + (rk.verbed || 0) +
+        " empty=" + rkEmpty + " verbless=" + rkVerbless;
+      out.ranksEmpty = (rk.emptyRanks || []).join(",");
+      out.ranksVerbless = (rk.verblessRungs || []).join(",");
     }
     // STREET — wires that land on nothing, poles you walk through, lane paint
     // running through a junction.
@@ -644,10 +698,13 @@ async function runSeed(seed, label) {
   // an audit whose output nobody can see is one nobody will notice regressing.
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
-  tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"} | warband ${r.warband || "-"}`);
+  tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
+  tmark(`${label}: loyalty ${r.loyalty || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
   tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
+  if (r.ranksEmpty) tmark(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
+  if (r.ranksVerbless) tmark(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
   tmark(`${label}: pools ${r.pools || "-"}`);

@@ -1275,6 +1275,14 @@
   // is unaffected: the whole hand-prop block is gated on third person and the
   // FP viewmodel is camera-relative. OFF → the old body-space vector.
   if (CBZ.CONFIG.TP_GUN_GROUND_CLEAR == null) CBZ.CONFIG.TP_GUN_GROUND_CLEAR = true;
+  // WEAPON_GROUND_PHYSICS (systems/actorweapons.js) — every firearm uses one
+  // measured ground law. Held guns sample the full hand→muzzle segment against
+  // terrain/platforms; released guns carry velocity and angular momentum,
+  // substep walls/ground, bounce, then place their actual lowest model vertex
+  // on the support beneath them. Inventory/NPC/death pickups follow the moving
+  // model instead of remaining at their spawn marker. OFF → the prior held-gun
+  // guard plus static inventory pickups / fpsmode's private cosmetic tumble.
+  if (CBZ.CONFIG.WEAPON_GROUND_PHYSICS == null) CBZ.CONFIG.WEAPON_GROUND_PHYSICS = true;
   // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
   // person must never BRIGHTEN ("they turn super white, which is dumb") —
   // the hit read becomes a brief blood-dark tint on the struck head while
