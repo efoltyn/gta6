@@ -232,12 +232,20 @@
   function track(p) { if (restrained.indexOf(p) < 0) restrained.push(p); }
   function untrack(p) { const i = restrained.indexOf(p); if (i >= 0) restrained.splice(i, 1); }
 
-  function cuff(ped) {
+  // WHOSE HANDS TIED THEM. `by` defaulted to the literal "player" because for
+  // this file's whole life the player was the only thing in the game that could
+  // cuff anybody. A pirate crew tying up a steward four hundred metres offshore
+  // made that assumption expensive: the kidnapping charge below landed on the
+  // PLAYER, who was not there. Both existing callers pass no opts and are
+  // therefore byte-identical.
+  function cuff(ped, opts) {
     if (!cuffablePed(ped)) return false;
-    ped.restraint = { state: "cuffed", by: "player", t: 0, vehicle: null };
+    ped.restraint = { state: "cuffed", by: (opts && opts.by) || "player", t: 0, vehicle: null };
     track(ped);
     // hands are tied: whatever they were holding hits the pavement
-    if (ped.armed && ped.weapon && CBZ.cityDropWeapon) CBZ.cityDropWeapon(ped.pos.x, ped.pos.z, ped.weapon, 12);
+    if (ped.armed && ped.weapon && CBZ.cityDropWeapon) {
+      CBZ.cityDropWeapon(ped.pos.x, ped.pos.z, ped.weapon, 12, { y: ped.pos.y });
+    }
     ped.armed = false; ped.weapon = null;
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
     ped.controlled = true; ped.rage = null; ped.state = "walk"; ped.speed = 0;
@@ -250,7 +258,12 @@
     addCuffs(ped);
     if (CBZ.sfx) CBZ.sfx("reload");                        // the ratchet click
     // tying up a clean citizen IS a crime — the block sees it like any mugging.
-    if (!isWanted(ped) && CBZ.cityCrime) CBZ.cityCrime(50, { x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
+    // But only when it was YOU: `by` is the taker, and an NPC crew's kidnapping
+    // is that crew's business, not a charge filed against a player who was not
+    // in the same postcode.
+    if (ped.restraint.by === "player" && !isWanted(ped) && CBZ.cityCrime) {
+      CBZ.cityCrime(50, { x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
+    }
     I.refresh();
     return true;
   }

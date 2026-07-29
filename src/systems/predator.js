@@ -3036,6 +3036,12 @@
     // animal uses, with `nonLethal` so its worst outcome is "taken". MIGRATED in
     // the change that added the id; nothing here was ever hand-rolled.
     "police:arrest-tackle",
+    // piracy.js: THE BOARDING GRAB. The SECOND non-lethal human consumer — a
+    // crew takes somebody off a deck through the same wind->strike->hold FSM,
+    // resolving to "taken" rather than "killed", with the drag style so being
+    // hauled off your own boat feels different from being tackled on a
+    // pavement. MIGRATED in the change that added the id; nothing hand-rolled.
+    "piracy:boarding-seize",
   ];
 
   CBZ.predatorAudit = function () {
