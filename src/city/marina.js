@@ -97,20 +97,37 @@
      ============================================================ */
   const berths = [];
   let _beached = 0;               // THE RATCHET: marine hulls spawned on dry land
+  let _snapDropped = 0;           // DIAGNOSIS: berths silently lost to the snap radius
   let _fallbackDone = false;
 
-  function clearBerths() { berths.length = 0; _fallbackDone = false; }
+  function clearBerths() { berths.length = 0; _fallbackDone = false; _snapDropped = 0; }
 
   // Register one berth. Water is VERIFIED here (and snapped to the nearest
   // navigable point if the authored coordinate drifted onto a sandbar), so a
   // berth that survives registration is always somewhere a hull can float.
+  // THE SNAP RADIUS IS A TRAP AND IT IS NOW COUNTED. 90 m was sized for a
+  // finger berth authored a few metres off the quay it belongs to, and for that
+  // it is right. But it is SHORTER THAN ONE HULL LENGTH for anything over 90 m,
+  // and the failure is silent — a null return, no record, no warning — so a
+  // caller registering an offshore anchorage can lose every berth it asked for
+  // and read the result as "the feature is off". That is exactly how the
+  // superyacht roadstead vanished for a whole merge. A caller that knows it is
+  // working at scale passes its own `spec.snap`; everything already in the game
+  // keeps 90 and is byte-identical.
+  const SNAP_R = 90;
   function registerBerth(spec) {
     if (!spec || !isFinite(spec.x) || !isFinite(spec.z)) return null;
     let x = +spec.x, z = +spec.z;
     if (!waterAt(x, z)) {
       const wf = CBZ.waterField;
-      const near = wf && wf.nearestWater ? wf.nearestWater(x, z, 0.4, 90) : null;
-      if (!near) return null;                       // no water here — drop it, don't lie
+      const snap = Math.max(SNAP_R, +spec.snap || 0);
+      const near = wf && wf.nearestWater ? wf.nearestWater(x, z, 0.4, snap) : null;
+      if (!near) {
+        // no water here — drop it, don't lie, but SAY SO.
+        _snapDropped++;
+        if (window.console) console.warn("[berth] '" + (spec.id || "?") + "' dropped: no water within " + Math.round(snap) + "m of " + (x | 0) + "," + (z | 0));
+        return null;
+      }
       x = near.x; z = near.z;
     }
     const b = {
@@ -304,7 +321,16 @@
   };
   // THE RATCHET (CLAUDE.md block law #5). Marine hulls that still spawned on
   // dry ground this run. Pin at 0 in tools/math-gate.mjs; may only go DOWN.
+  // SHAPE IS LOAD-BEARING: it returns a NUMBER and the gate pins that number.
+  // The snap diagnosis below is deliberately a separate export rather than a
+  // field on this, because widening the return type would break the pin.
   CBZ.cityBerthAudit = function () { return _beached | 0; };
+  // Berths a caller asked for and silently did not get. Not a ratchet — a
+  // DIAGNOSIS. A non-zero reading here means somebody's water-side feature is
+  // quietly missing, which is precisely the failure mode that hid the
+  // superyacht roadstead. Widening a snap can only ever ADD berths, so it can
+  // never push cityBerthAudit() (hulls with NO berth at all) off zero.
+  CBZ.cityBerthSnapDropped = function () { return _snapDropped | 0; };
 
   if (!wrapSpawn() && CBZ.onUpdate) {
     // vehicles.js parses after us in some orders — retry cheaply until it exists.

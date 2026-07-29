@@ -513,7 +513,7 @@
     // ---- 9) SIDE SHELL GARAGES: a door panel in the flank each side, and the
     // tender/car deck behind it. The panel is a separate NAMED mesh so the
     // garage driver can swing it without touching the merged hull.
-    const doors = [];
+    const doors = [], stowed = [];
     if (C.YACHT_GARAGE !== false && S.garage) {
       const GA = S.garage;
       [1, -1].forEach(function (side, i) {
@@ -524,6 +524,31 @@
         // across the beam for the hull's width there. An earlier draft had these
         // two swapped, which drew a 21 m sole athwart a 22 m hull.
         K.addBox(b, hbAt * 1.7, 0.14, GA.len * 0.9, 0, GA.y, GA.z, grey);          // garage sole
+        // THE TENDER ON ITS CRADLE. A garage with nothing in it is the same
+        // stat fiction as a helideck with no pad: the owner asked for "small
+        // boats attached", and the thing you see stowed here IS the thing
+        // launchTender() puts in the water (it hides this node and mints the
+        // real 4.5 m RIB from the same registry). One named group, noMerge, so
+        // hiding it costs nothing.
+        const stow = new THREE.Group();
+        stow.name = "yacht_tender_" + (side > 0 ? "p" : "s");
+        stow.userData.noMerge = true;
+        stow.position.set(side * (hbAt - 1.5), GA.y + 0.45, GA.z);
+        stow.rotation.y = Math.PI / 2;
+        const tl = Math.min(GA.len * 0.42, 6.4);
+        const tub = K.roleMat("yc-tender", "plastic", 0x2b3138);
+        stow.add(new THREE.Mesh(K.boxGeo(1.55, 0.42, tl), K.roleMat("yc-tenderh", "paint", 0xdfe4e8)));
+        [1, -1].forEach(function (sd) {
+          const t = new THREE.Mesh(K.cylGeo(0.24, 0.24, tl * 0.92, 8), tub);
+          t.position.set(sd * 0.72, 0.26, 0); t.rotation.x = Math.PI / 2; stow.add(t);
+        });
+        const con = new THREE.Mesh(K.boxGeo(0.5, 0.55, 0.5), dark);
+        con.position.set(0, 0.5, tl * 0.10); stow.add(con);
+        const cr = new THREE.Mesh(K.boxGeo(1.9, 0.5, 0.3), grey);
+        cr.position.set(0, -0.42, 0); stow.add(cr);
+        b.add(stow);
+        stowed.push(stow.name);
+
         const d = new THREE.Mesh(K.boxGeo(0.16, GA.h, GA.len), cream);
         d.position.set(side * hbAt, GA.y + GA.h * 0.5, GA.z);
         d.name = "yacht_door_" + (side > 0 ? "p" : "s");
@@ -544,7 +569,7 @@
     const root = K.finish(b, {
       width: S.beam, length: L, height: S.airDraft, wheelbase: L * 0.6,
     });
-    root.userData.yacht = { solve: S, pads: padded, doors: doors };
+    root.userData.yacht = { solve: S, pads: padded, doors: doors, stowed: stowed };
     return root;
   }
 
@@ -1060,63 +1085,295 @@
   /* ==========================================================================
      8. THE WORLD — vessels afloat, at anchor and under way
 
-     Anchorages are DERIVED, not authored: waterfield.js's depthAt() is
-     depth = 1.1 + 0.075 * |shoreAt|, so the offshore clearance a hull needs to
-     float is the inverse of its own draft. A 6 m draft needs 65 m of shore
-     clearance; nobody types a coordinate and hopes.
+     THIS SECTION SHIPPED BROKEN AND THE POST-MORTEM IS THE DESIGN.
+     ------------------------------------------------------------
+     The first version put the roadstead at `A.maxX + 26 + {210,340,520}`,
+     inheriting marina.js's fallback comment that `A.maxX + 26` is "the east
+     seawall line". It is not. There is land east of A.maxX in this world, so
+     every step of those offsets walked further INLAND, and the probe measured
+     all three anchor points on dry ground. Then the second fault finished the
+     job: the required clearance was `max(loa*0.55, (draft*1.6 - 1.1)/0.075)` =
+     146 m for the biggest berth, i.e. 12 m of water, demanded inside a 900 m
+     ring search AROUND AN INLAND POINT. `nearestWater` only succeeds where
+     `shoreAt < -clearance`, so it returned null three times, `anchorages` read
+     0, and the three superyachts — the whole headline — never existed. The
+     small craft survived only because their clearances are small.
+
+     TWO RULES CAME OUT OF IT AND BOTH ARE ENFORCED BELOW.
+
+     (1) DO NOT NAME A PLACE IN THE SEA. Derive it — from the harbour the world
+         already built (marina.js's berths are water-verified at registration)
+         or, failing that, whatever water the field can find near the city.
+         Never a coordinate.
+
+         v2 of this derived it by GRADIENT DESCENT on the signed shoreline
+         field and that was wrong for a reason that generalises: A SIGNED
+         DISTANCE FIELD IS NOT A MAP. continent.js carves the harbour as a
+         28..95 u ring whose signed value is a V pinned at -33.5 (= 3.61 m of
+         water), and the COUNTRY BELT between that ring and the ocean is a
+         RIDGE. Descent walked to the bottom of the V and stopped, because
+         crossing a ridge is precisely what descent cannot do. See THE
+         NAVIGATOR below: the roadstead is now RAY MARCHED outward on a fan of
+         bearings, which crosses whatever is in the way.
+
+     (2) A REFUSAL MUST BE LOUD. `superyachts: 0` looked like configuration for
+         a whole merge because one `refused` counter covered two unrelated
+         causes and nothing recorded WHY. The audit now carries
+         `refusedNoWater` / `refusedNoFit` separately, an `anchorFail` reason
+         string, and `anchorDepth` — the depth actually achieved — so the next
+         time this cannot supply an anchorage it says so in words.
+
+     And the demand itself is honest: `depthAt` is 1.1 + 0.075*|shoreAt|, so
+     8.7 m of water is 101 m of shore clearance. A ship needs under-keel
+     clearance, not a canyon: draft*1.35 + 0.6 (a 6 m draft anchors in 8.7 m)
+     with a swinging-room floor of 0.35 * LOA. `CBZ.yachtDepthProfile()` prints
+     the sounding outward from the harbour so this can be checked rather than
+     argued about, and `anchorFloats` evaluates the acceptance test in place.
      ========================================================================== */
-  const AFLOAT = [];             // {rec, key, kind, berth}
+  const AFLOAT = [];             // {key, car, berth}
   let anchorage = [];            // registered deep-water berths
-  let placedCount = 0, refusedCount = 0;
+  // THREE REFUSAL SCOPES, and they are separate because the retry below runs
+  // twice a second: a counter that ACCUMULATES across retries would report a
+  // single unplaceable hull as hundreds of refusals and bury the real number.
+  // Each scope is RESET by the pass that owns it, so every reading is the
+  // current state of the world rather than a history of attempts.
+  let placedCount = 0;
+  let refusedWater = 0, refusedFit = 0;   // small craft — reset by spawnFleet
+  let roadNoWater = 0, roadNoFit = 0;     // the roadstead — reset by registerAnchorage
+  let bigNoFit = 0;                       // big-hull placement — reset by placeBigs
+  let anchorFail = null;         // WHY there is no roadstead, in words
+  let anchorDepth = 0;           // metres of water actually achieved
+  let anchorRange = 0;           // metres from the harbour to the roadstead
+  let anchorTries = 0, bigTries = 0, bigsDone = false;
 
   function rng() {
     return CBZ.seedStream ? CBZ.seedStream("yachts") : (function () { let s = 981731; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })();
   }
+  // The inverse of waterfield.js's own depthAt(), at a real under-keel factor.
   function clearanceFor(draft, loa) {
-    // depthAt inverse, with a 1.6x under-keel factor, and never less than half
-    // a hull length of swinging room.
-    return Math.max(loa * 0.55, (Math.max(0.4, draft) * 1.6 - 1.1) / 0.075);
+    const wantDepth = Math.max(1.4, +draft || 0.5) * 1.35 + 0.6;
+    return Math.max((loa || 6) * 0.35, (wantDepth - 1.1) / 0.075);
   }
+  function depthOf(shore) { return shore >= 0 ? 0 : Math.min(62, 1.1 + (-shore) * 0.075); }
   function hullRec(key) {
     return (CBZ.marineHulls && CBZ.marineHulls.get) ? CBZ.marineHulls.get(key) : null;
   }
 
-  // Register the deep-water anchorage berths. THIS IS WHY IT MATTERS: marina.js's
-  // freeBerth() picks the smallest berth that FITS, and its largest is the 34 m
-  // Med quay — so without this a 156 m hull retrieved from a garage would be
-  // dropped into a 34 m slot, or (worse) counted as beached. One call each.
+  /* ---- THE NAVIGATOR ------------------------------------------------------
+     v1 of this marched DOWN the signed shoreline field (gradient descent) and
+     it was wrong for a reason worth writing down, because it is a whole class
+     of bug: A SIGNED DISTANCE FIELD IS NOT A MAP, AND IT HAS TROUGHS.
+
+     continent.js:569 carves the harbour as a Chebyshev RING around the city
+     rect, BAY0 28 u to BAY1 95 u, and the signed value inside it is
+        sBay = -min(bd - 28, 95 - bd)
+     which is a V: deepest at the ring's midline, bd = 61.5, where it reads
+     exactly -33.5 — and shoreField takes the MIN of that against everything
+     else, so -33.5 is a HARD CEILING on depth anywhere in the harbour. Through
+     waterfield.js's own depthAt (1.1 + 0.075*|shore|) that is 3.61 m. The probe
+     measured 3.6. Gradient descent walked to the bottom of that V, found every
+     neighbouring step shallower, fanned out, failed, and stopped — correctly,
+     by its own contract, in the deepest water it could see.
+
+     And it could never have done better, because between the harbour moat and
+     the open ocean lies the COUNTRY BELT (continent.js's east/west/north/south
+     underlay bands, from BAY1 out to the plate edge). That is a RIDGE in the
+     field. No descent method crosses a ridge — that is what descent means.
+
+     So the roadstead is not found by feel. It is found the way a ship finds
+     one: point the bow away from the land and keep going until the sounding is
+     deep enough. This RAY MARCHES outward on a fan of bearings, crossing
+     whatever is in the way, and takes the NEAREST bearing that answers — so
+     the anchorage is as close to the harbour as the geography permits and not
+     one metre closer. A deep-water roadstead being a real voyage out of the
+     harbour is the honest shape of this world, not a defect in it.
+  ------------------------------------------------------------------------- */
+  const BAY_CAP_SHORE = -33.5;   // continent.js's harbour-ring floor, for reporting
+
+  // Outward: away from the landmass, so "seaward" is a fact about the plate
+  // rather than a guess about the coast.
+  function outwardBearing(seed, A) {
+    const P = CBZ.CONTINENT_PLATE;
+    const cx = P ? (P.minX + P.maxX) * 0.5 : (A && A.center ? A.center.x : 0);
+    const cz = P ? (P.minZ + P.maxZ) * 0.5 : (A && A.center ? A.center.z : 0);
+    const dx = seed.x - cx, dz = seed.z - cz;
+    return (dx * dx + dz * dz > 1) ? Math.atan2(dz, dx) : 0;
+  }
+  function marchReach(A) {
+    const P = CBZ.CONTINENT_PLATE;
+    // far enough to clear the plate and then run out into open water
+    if (P) return Math.max(4000, Math.hypot(P.maxX - P.minX, P.maxZ - P.minZ) * 0.6 + 3500);
+    return 9000;
+  }
+
+  // The nearest point on a fan of outward bearings where the water is genuinely
+  // deep enough. Returns the deepest point SEEN when nothing qualifies, so the
+  // audit can still say how close it got instead of reporting nothing.
+  function offshore(seed, need, A) {
+    const wf = CBZ.waterField;
+    if (!wf || !wf.shoreAt) return null;
+    const base = outwardBearing(seed, A);
+    const reach = marchReach(A), STEP = 110;
+    let best = null, deepest = null;
+    // +-90 deg in 15 deg steps. Wide on purpose: a harbour can face into a bay
+    // whose mouth is square to the plate-centre bearing, and a fan too narrow
+    // to see the mouth is the same class of failure as a descent too local to
+    // leave the trough. 13 bearings is free — this runs ONCE per world.
+    for (let k = -6; k <= 6; k++) {
+      const a = base + k * (Math.PI / 12);
+      const ca = Math.cos(a), sa = Math.sin(a);
+      // Nothing past the best radius found so far can beat it, so later
+      // bearings march only as far as they could still win.
+      const lim = best ? Math.min(reach, best.r) : reach;
+      for (let r = STEP; r <= lim; r += STEP) {
+        const x = seed.x + ca * r, z = seed.z + sa * r;
+        const sh = wf.shoreAt(x, z);
+        if (!deepest || sh < deepest.shore) deepest = { x: x, z: z, shore: sh, r: r, bearing: a };
+        if (sh < -need && CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) {
+          if (!best || r < best.r) best = { x: x, z: z, shore: sh, r: r, bearing: a, deep: true };
+          break;                                    // this bearing is answered
+        }
+      }
+    }
+    if (best) return best;
+    if (!deepest) return null;
+    deepest.deep = false;
+    return deepest;
+  }
+
+  // A point we KNOW is water, derived from what the world built. The marina's
+  // berths went through registerBerth's own water verification, so they are the
+  // best seed in the game; the field search is the belt and braces.
+  function harbourSeed(A) {
+    if (CBZ.cityBerth && CBZ.cityBerth.list) {
+      try {
+        const list = CBZ.cityBerth.list();
+        let best = null, bs = 0;
+        for (const b of list) {
+          const s = CBZ.waterField.shoreAt(b.x, b.z);
+          if (s < bs) { bs = s; best = b; }         // the wettest berth on the quay
+        }
+        if (best) return { x: best.x, z: best.z, from: "berth:" + best.id };
+      } catch (e) {}
+    }
+    const wf = CBZ.waterField;
+    if (wf && wf.nearestWater && A) {
+      const cx = A.center ? A.center.x : 0, cz = A.center ? A.center.z : 0;
+      // Small clearance on purpose: this only has to be WATER. Depth is the
+      // march's job, and asking for depth here is exactly the mistake that
+      // broke the first version.
+      const p = wf.nearestWater(cx, cz, 6, 6000);
+      if (p) return { x: p.x, z: p.z, from: "field" };
+    }
+    return null;
+  }
+
+  /* ---- THE ROADSTEAD ------------------------------------------------------
+     One berth per superyacht, sized from the HULL rather than from three typed
+     numbers, marched out to water that will actually float it, and spread along
+     the coast so three ships do not anchor on top of each other.            */
+  const BIGS = ["yacht46", "yacht88", "yacht156"];
   function registerAnchorage(city) {
     anchorage = [];
-    if (!CBZ.cityBerth || !CBZ.cityBerth.register) return;
+    anchorFail = null;
+    anchorDepth = 0; anchorRange = 0;
+    roadNoWater = 0; roadNoFit = 0;
+    anchorTries++;
+    if (!CBZ.cityBerth || !CBZ.cityBerth.register) { anchorFail = "no-berth-block"; return; }
     const A = city || (CBZ.city && CBZ.city.arena);
-    if (!A) return;
-    const cz = A.center ? A.center.z : 0;
-    const EEx = A.maxX + 26;
+    if (!A) { anchorFail = "no-arena"; return; }
     const wf = CBZ.waterField;
-    // Three roadstead berths of increasing size, walking out from the harbour.
-    // Each is validated against the real water field before it is registered;
-    // registerBerth also snaps to nearest water, so a moved coastline degrades
-    // into a slightly different anchorage rather than a lie.
-    const want = [
-      { id: "yacht-road-0", loa: 60, beam: 12, off: 210, dz: 250 },
-      { id: "yacht-road-1", loa: 100, beam: 17, off: 340, dz: 60 },
-      { id: "yacht-road-2", loa: 175, beam: 26, off: 520, dz: -190 },
-    ];
-    for (const w of want) {
-      let x = EEx + w.off, z = cz + w.dz;
-      const need = clearanceFor(w.loa * 0.043, w.loa);
-      if (wf && wf.nearestWater) {
-        const p = wf.nearestWater(x, z, need, 900);
-        if (!p) { refusedCount++; continue; }
-        x = p.x; z = p.z;
-      } else if (CBZ.cityWaterAt && !CBZ.cityWaterAt(x, z)) { refusedCount++; continue; }
-      const b = CBZ.cityBerth.register({
-        id: w.id, x: x, z: z, heading: -Math.PI / 2,
-        loa: w.loa, beam: w.beam, kind: "anchorage",
-        label: "Outer Roadstead " + (anchorage.length + 1),
-      });
-      if (b) anchorage.push(b); else refusedCount++;
+    if (!wf || !wf.shoreAt) { anchorFail = "no-waterfield"; return; }
+    const seed = harbourSeed(A);
+    if (!seed) { anchorFail = "no-water-near-city"; return; }
+
+    // Nearest genuinely deep water, sized on the LARGEST hull's need.
+    const big = hullRec("yacht156");
+    const bigNeed = big && big.spec ? clearanceFor(big.spec.draft, big.spec.loa) : 101;
+    const road = offshore(seed, bigNeed, A);
+    if (!road) { anchorFail = "march-failed:" + seed.from; return; }
+    anchorDepth = +depthOf(road.shore).toFixed(1);
+    anchorRange = Math.round(road.r || 0);
+    if (!road.deep) {
+      // Say WHY it is shallow, not just that it is. If we are pinned at the
+      // harbour ring's own floor then the march never left the moat and the
+      // diagnosis is the field's V, not the sea.
+      anchorFail = (road.shore > BAY_CAP_SHORE - 1.5 && road.shore < BAY_CAP_SHORE + 1.5)
+        ? ("trapped-in-harbour-ring:" + anchorDepth + "m")
+        : ("shallow-roadstead:" + anchorDepth + "m@" + anchorRange + "m");
     }
+
+    // Spread the row ACROSS the outward bearing — a line of ships at anchor,
+    // all the same distance offshore.
+    const bh = road.bearing || 0;
+    const tx = -Math.sin(bh), tz = Math.cos(bh);
+    for (let i = 0; i < BIGS.length; i++) {
+      const rec = hullRec(BIGS[i]);
+      if (!rec || !rec.spec) { roadNoFit++; continue; }
+      const S = rec.spec;
+      const off = (i - 1) * Math.max(210, S.loa * 1.7);
+      let x = road.x + tx * off, z = road.z + tz * off;
+      // The offset can slide onto a bank or a headland, and `road` is the point
+      // we PROVED. Verify the offset and fall back rather than lose the berth —
+      // three hulls anchored closer together than ideal is a rounding error, a
+      // missing 156 m superyacht is the bug that shipped.
+      const need = clearanceFor(S.draft, S.loa);
+      const sh = wf.shoreAt(x, z);
+      if (!(sh < -need) || !CBZ.cityWaterAt || !CBZ.cityWaterAt(x, z)) { x = road.x; z = road.z; }
+      if (!CBZ.cityWaterAt || !CBZ.cityWaterAt(x, z)) { roadNoWater++; continue; }
+      const b = CBZ.cityBerth.register({
+        id: "yacht-road-" + i,
+        x: x, z: z,
+        heading: bh + Math.PI,          // bow back toward the land she came from
+        // Berth dimensions come off the HULL, not from three typed numbers —
+        // the old {60,100,175} row was also where the 146 m clearance demand
+        // came from (it estimated draft as berthLoa*0.043 = 7.5 m). 1.12 x LOA
+        // and 1.30 x beam clear marina.js's fits() — `(b.beam + 0.5) >= beam` —
+        // with room to spare at every size.
+        loa: S.loa * 1.12, beam: S.beam * 1.30, kind: "anchorage",
+        // Already verified water, so marina.js's own 90 m snap never fires.
+        // Passed anyway as belt and braces: 90 m is shorter than one hull
+        // length here, and a berth silently dropped is exactly how this feature
+        // vanished the first time.
+        snap: Math.max(120, S.loa * 1.5),
+        label: "Outer Roadstead " + (i + 1),
+      });
+      if (b) anchorage.push(b); else roadNoWater++;
+    }
+    if (!anchorage.length && !anchorFail) anchorFail = "no-berth-registered";
+  }
+
+  /* ---- PLACING THE BIG HULLS. Idempotent, so the retry below is free. ---- */
+  function placeBigs() {
+    if (C.YACHT_AFLOAT === false) { bigsDone = true; return; }
+    if (!CBZ.cityMakeCar || !CBZ.cityEcon || !CBZ.cityEcon.carByName) return;
+    if (!CBZ.city || !CBZ.city.arena) return;
+    // Bounded independently of the roadstead's own tries: a roadstead that
+    // EXISTS but cannot seat a hull would otherwise retry for ever at 2 Hz.
+    if (++bigTries > 30) { bigsDone = true; return; }
+    if (!anchorage.length) registerAnchorage(CBZ.city.arena);
+    if (!anchorage.length) return;                  // retry next tick
+    bigNoFit = 0;                                   // this pass, not the history
+    let placed = 0;
+    for (let i = 0; i < BIGS.length; i++) {
+      const key = BIGS[i];
+      let already = false;
+      for (const a of AFLOAT) if (a.key === key) { already = true; break; }
+      if (already) { placed++; continue; }
+      const rec = hullRec(key);
+      if (!rec || !rec.model) { bigNoFit++; continue; }
+      // The smallest FREE berth that fits — the same rule marina.js's
+      // freeBerth() uses, so a 46 m hull never squats the 175 m roadstead.
+      let berth = null;
+      for (const b of anchorage) {
+        if (b.occupant && !b.occupant.dead) continue;
+        if (rec.spec.loa > b.loa + 0.5 || rec.spec.beam > b.beam + 0.5) continue;
+        if (!berth || (b.loa * b.beam) < (berth.loa * berth.beam)) berth = b;
+      }
+      if (!berth) { bigNoFit++; continue; }
+      if (place(key, rec, berth.x, berth.z, berth.heading, berth)) placed++;
+    }
+    if (placed >= BIGS.length) bigsDone = true;
   }
 
   // Put the fleet in the water. Called off spawnCityTraffic (which needs
@@ -1133,23 +1390,17 @@
     // placement. Our own bookkeeping goes with it.
     AFLOAT.length = 0;
     GARAGES.length = 0;
-    placedCount = 0;
-    if (!anchorage.length) registerAnchorage(CBZ.city.arena);
+    placedCount = 0; refusedWater = 0; refusedFit = 0;
+    bigsDone = false; anchorTries = 0; bigTries = 0;
+    for (const b of anchorage) b.occupant = null;
 
+    // 1) THE SUPERYACHTS at anchor. If the roadstead is not ready yet the tick
+    //    below retries — it must never be a one-shot again.
+    placeBigs();
+
+    // 2) THE WORKING WATER. Small craft scattered over the near coastal band.
+    //    Seeded from the HARBOUR, not from A.maxX: same lesson, same fix.
     const r = rng();
-    // 1) THE SUPERYACHTS at anchor — biggest berth gets the biggest hull.
-    const bigs = ["yacht46", "yacht88", "yacht156"];
-    for (let i = 0; i < anchorage.length && i < bigs.length; i++) {
-      const key = bigs[i];
-      const rec = hullRec(key);
-      if (!rec || !rec.model) continue;
-      const b = anchorage[i];
-      if (rec.spec.loa > b.loa + 0.5) continue;      // never squat a berth it does not fit
-      place(key, rec, b.x, b.z, b.heading, b);
-    }
-    // 2) THE WORKING WATER. Small craft scattered over the near coastal band —
-    // trawlers and skiffs out on the fishing ground, a sloop and a sportfisher
-    // nearer in. Every position is validated water at the hull's own clearance.
     const work = [
       { key: "trawler", n: 3, r0: 260, r1: 1450 },
       { key: "skiff", n: 4, r0: 120, r1: 900 },
@@ -1157,23 +1408,38 @@
       { key: "sloop", n: 2, r0: 200, r1: 1200 },
       { key: "dinghy", n: 2, r0: 100, r1: 620 },
     ];
-    const A = CBZ.city.arena;
-    const cx = A.maxX + 60, cz = A.center ? A.center.z : 0;
+    // WHERE THE WORKING FLEET LIVES. Seeded from the ROADSTEAD when there is
+    // one, not the harbour: the flagship now lies in genuinely deep water some
+    // way offshore, and the sea you cross to reach her should be a working one
+    // rather than empty. It also cures the refusals — a trawler needs 36.5 m of
+    // shore clearance and the harbour ring is capped at 33.5, so trawlers
+    // seeded inside the moat could never be placed there by construction.
+    const road0 = anchorage.length ? anchorage[Math.min(1, anchorage.length - 1)] : null;
+    const seed = road0 || harbourSeed(CBZ.city.arena);
+    const cx = seed ? seed.x : (CBZ.city.arena.center ? CBZ.city.arena.center.x : 0);
+    const cz = seed ? seed.z : (CBZ.city.arena.center ? CBZ.city.arena.center.z : 0);
     const wf = CBZ.waterField;
     for (const w of work) {
       const rec = hullRec(w.key);
-      if (!rec || !rec.model) continue;
+      if (!rec || !rec.model) { refusedFit++; continue; }
       const need = clearanceFor(rec.spec.draft, rec.spec.loa);
       for (let i = 0; i < w.n; i++) {
+        // ALL THREE DRAWS UP FRONT. A `continue` between them would make the
+        // number of draws on this stream depend on how many placements the
+        // water field refused — self-consistent here (the world is
+        // deterministic per seed) but exactly the order-fragile shape
+        // CLAUDE.md bans, and one shared-stream refactor away from being a
+        // real desync.
         const a = r() * Math.PI * 2;
         const rad = w.r0 + r() * (w.r1 - w.r0);
+        const hd = r() * Math.PI * 2;
         let x = cx + Math.cos(a) * rad, z = cz + Math.sin(a) * rad;
         if (wf && wf.nearestWater) {
-          const p = wf.nearestWater(x, z, need, 700);
-          if (!p) { refusedCount++; continue; }
+          const p = wf.nearestWater(x, z, need, 900);
+          if (!p) { refusedWater++; continue; }
           x = p.x; z = p.z;
-        } else if (CBZ.cityWaterAt && !CBZ.cityWaterAt(x, z)) { refusedCount++; continue; }
-        place(w.key, rec, x, z, r() * Math.PI * 2, null);
+        } else if (CBZ.cityWaterAt && !CBZ.cityWaterAt(x, z)) { refusedWater++; continue; }
+        place(w.key, rec, x, z, hd, null);
       }
     }
   }
@@ -1183,10 +1449,10 @@
     // carByName NEVER returns null (economy.js ends `|| CARS[0]`), so a name we
     // did not get back is a ROAD CAR and must be refused — the exact trap
     // boatyard.js documents.
-    if (!model || model.name !== rec.model) { refusedCount++; return null; }
+    if (!model || model.name !== rec.model) { refusedFit++; return null; }
     let car = null;
     try { car = CBZ.cityMakeCar(x, z, heading, false, model, 0); } catch (e) { car = null; }
-    if (!car) { refusedCount++; return null; }
+    if (!car) { refusedFit++; return null; }
     car.ai = false; car.v = 0; car.baseV = 0; car.road = null;   // moored/at anchor
     car._yacht = key;
     if (berth) { berth.occupant = car; car._berthId = berth.id; }
@@ -1221,10 +1487,14 @@
     let info = null;
     car.group.traverse(function (o) { if (!info && o.userData && o.userData.yacht) info = o.userData.yacht; });
     if (!info) return null;
-    const doors = [];
-    car.group.traverse(function (o) { if (o.userData && o.userData.yachtDoor) doors.push(o); });
+    const doors = [], stow = [];
+    car.group.traverse(function (o) {
+      if (o.userData && o.userData.yachtDoor) doors.push(o);
+      else if (o.name && o.name.indexOf("yacht_tender_") === 0) stow.push(o);
+    });
     const g = {
       car: car, doors: doors, open: 0, want: 0, tenders: [], cars: [],
+      stow: stow, aboard: stow.length,
       solve: info.solve, pads: info.pads || [],
     };
     GARAGES.push(g);
@@ -1304,6 +1574,10 @@
     try { t = CBZ.cityMakeCar(x, z, hd, false, model, 0); } catch (e) { t = null; }
     if (!t) return null;
     t.ai = false; t.v = 0; t.baseV = 0; t.road = null; t._yachtTender = g.car;
+    // THE BOAT YOU SAW IS THE BOAT YOU GET: strike the stowed one off its
+    // cradle as the real hull enters the water. Leaving both would be a lie.
+    const cradle = g.stow && g.stow.length ? g.stow[g.tenders.length % g.stow.length] : null;
+    if (cradle) { cradle.visible = false; g.aboard = Math.max(0, (g.aboard | 0) - 1); }
     g.tenders.push(t);
     return t;
   }
@@ -1350,11 +1624,17 @@
      fleet, one cheap scan for garages/helidecks, one eased door driver.
      ========================================================================== */
   if (CBZ.addLandmass) {
-    CBZ.addLandmass(function (city) {
+    // RESET ONLY. The first version ALSO registered the roadstead here, at
+    // landmass order 67 — one shot, mid-build, and if it came back empty the
+    // superyachts simply never existed for the rest of the session with no
+    // record of why. Registration now happens at spawn time and RETRIES, so a
+    // water field that is not ready costs a tick instead of the whole feature.
+    CBZ.addLandmass(function () {
       anchorage = [];
       AFLOAT.length = 0; GARAGES.length = 0;
-      placedCount = 0; refusedCount = 0;
-      registerAnchorage(city);
+      placedCount = 0; refusedWater = 0; refusedFit = 0;
+      roadNoWater = 0; roadNoFit = 0; bigNoFit = 0;
+      anchorFail = null; anchorDepth = 0; anchorRange = 0; anchorTries = 0; bigTries = 0; bigsDone = false;
       return null;
     }, 67);                            // right after marina.js (66) — berths first
   }
@@ -1385,6 +1665,13 @@
     fitT += dt;
     if (fitT < 0.5) return;
     fitT = 0;
+    // THE RETRY. `anchorages: 0` must never again be a permanent state reached
+    // silently: if the roadstead did not come up, try again. Bounded at 30
+    // attempts (15 s) so a world that genuinely has no deep water stops asking
+    // and leaves `anchorFail` in the audit as the explanation.
+    if (!bigsDone && anchorTries < 30 && C.YACHT_AFLOAT !== false) {
+      try { placeBigs(); } catch (e) { /* never let a retry break the tick */ }
+    }
     for (let i = 0; i < AFLOAT.length; i++) {
       const a = AFLOAT[i];
       if (!a.car || a.car.dead || a.car._garageTried) continue;
@@ -1423,7 +1710,7 @@
         },
         {
           id: "yacht-tender", slot: "i",
-          canShow: function (t) { return !!(t && t.g && t.g.open > 0.6); },
+          canShow: function (t) { return !!(t && t.g && t.g.open > 0.6 && (t.g.aboard | 0) > 0); },
           label: function () { return "Launch the tender"; },
           onSelect: function (t) {
             if (!t || !t.g) return;
@@ -1470,6 +1757,7 @@
   CBZ.yachtAudit = function () {
     let registered = 0, unregistered = 0, beached = 0, propless = 0;
     let superyachts = 0, helidecks = 0, garages = 0, tenders = 0, holdCars = 0, rigs = 0;
+    let tenderBays = 0, tendersAboard = 0;
     for (const k of REGISTERED) {
       const r = hullRec(k);
       if (r) registered++; else unregistered++;
@@ -1484,7 +1772,8 @@
       if (r && r.deck && r.spec && r.spec.loa >= 40) superyachts++;
     }
     for (const g of GARAGES) {
-      if (g.solve && g.solve.garage) garages++;
+      if (g.solve && g.solve.garage) { garages++; tenderBays++; }
+      tendersAboard += (g.aboard | 0);
       if (g.pads && g.pads.length) helidecks += g.pads.length;
       tenders += g.tenders.length;
       holdCars += g.cars.length;
@@ -1493,8 +1782,31 @@
       hulls: REGISTERED.length, registered: registered, unregistered: unregistered,
       afloat: AFLOAT.length, superyachts: superyachts,
       beached: beached, propless: propless,
-      anchorages: anchorage.length, refused: refusedCount, placed: placedCount,
-      helidecks: helidecks, garages: garages, tenders: tenders, holdCars: holdCars,
+      anchorages: anchorage.length, placed: placedCount,
+      // ONE COUNTER COVERING TWO CAUSES IS WHAT LET THE ROADSTEAD BUG HIDE for a
+      // whole merge. `refused` is kept as the total for continuity; the split is
+      // the diagnosis. noWater = the field could not supply water deep enough;
+      // noFit = there was water but no berth the hull fits.
+      refused: refusedWater + refusedFit + roadNoWater + roadNoFit + bigNoFit,
+      refusedNoWater: refusedWater + roadNoWater,
+      refusedNoFit: refusedFit + roadNoFit + bigNoFit,
+      // WHY there is no roadstead, in words, and how deep it actually got.
+      // `superyachts: 0` must never again be indistinguishable from a config.
+      anchorFail: anchorFail, anchorDepth: anchorDepth, anchorRange: anchorRange,
+      anchorTries: anchorTries,
+      // The acceptance test, evaluated in-place so it cannot drift from the law
+      // the berth was sized by: the deepest hull afloat must have real water
+      // under her keel, not merely a berth record.
+      anchorFloats: (function () {
+        const bg = hullRec("yacht156");
+        if (!bg || !bg.spec) return null;
+        return anchorDepth >= bg.spec.draft * 1.35 + 0.6;
+      })(),
+      helidecks: helidecks, garages: garages,
+      tenderBays: tenderBays,        // garages with a shell door (structural)
+      tendersAboard: tendersAboard,  // tenders stowed on their cradles right now
+      tenders: tenders,              // tenders launched into the water (a verb)
+      holdCars: holdCars,
       maxDeckRigs: rigs,
       enabled: C.YACHTS !== false,
     };
@@ -1502,5 +1814,60 @@
 
   CBZ.yachtFleet = function () { return AFLOAT.slice(); };
   CBZ.yachtOf = function (car) { return car && car._yacht ? hullRec(car._yacht) : null; };
-  CBZ.yachtReset = function () { AFLOAT.length = 0; GARAGES.length = 0; anchorage = []; placedCount = 0; refusedCount = 0; };
+  CBZ.yachtReset = function () {
+    AFLOAT.length = 0; GARAGES.length = 0; anchorage = [];
+    placedCount = 0; refusedWater = 0; refusedFit = 0;
+    roadNoWater = 0; roadNoFit = 0; bigNoFit = 0;
+    anchorFail = null; anchorDepth = 0; anchorRange = 0; anchorTries = 0; bigTries = 0; bigsDone = false;
+  };
+  /* THE SOUNDING LINE. The orchestrator asked for a depth profile outward from
+     the harbour to decide "is the sea shallow" vs "is the search stuck"; this
+     answers it permanently instead of once. Pure read, allocation-light, safe
+     any time after the world builds. `bayCapDepth` is the arithmetic ceiling
+     continent.js's harbour ring imposes (shoreAt is clamped to -33.5 anywhere
+     inside it) and `saturateDepthAt` is where waterfield.js's depthAt tops out
+     at 62 m — between them they bracket every reading this table can produce. */
+  CBZ.yachtDepthProfile = function (ranges, bearingDeg) {
+    const wf = CBZ.waterField;
+    const A = CBZ.city && CBZ.city.arena;
+    if (!wf || !wf.shoreAt || !A) return { error: "no-world" };
+    const seed = harbourSeed(A);
+    if (!seed) return { error: "no-water-near-city" };
+    const base = bearingDeg == null ? outwardBearing(seed, A) : (bearingDeg * Math.PI / 180);
+    const R = ranges || [0, 250, 500, 1000, 2000, 3000, 5000, 8000];
+    const ca = Math.cos(base), sa = Math.sin(base);
+    const rows = R.map(function (r) {
+      const x = seed.x + ca * r, z = seed.z + sa * r;
+      const sh = wf.shoreAt(x, z);
+      return {
+        m: r, x: Math.round(x), z: Math.round(z),
+        shore: Math.round(sh), depth: +depthOf(sh).toFixed(1),
+        water: CBZ.cityWaterAt ? !!CBZ.cityWaterAt(x, z) : null,
+      };
+    });
+    const bg = hullRec("yacht156");
+    return {
+      seed: { x: Math.round(seed.x), z: Math.round(seed.z), from: seed.from },
+      bearingDeg: Math.round(base * 180 / Math.PI),
+      reach: Math.round(marchReach(A)),
+      needFlagship: bg && bg.spec ? +clearanceFor(bg.spec.draft, bg.spec.loa).toFixed(1) : null,
+      bayCapDepth: +depthOf(BAY_CAP_SHORE).toFixed(2),
+      saturateDepthAt: Math.round((62 - 1.1) / 0.075),
+      rows: rows,
+    };
+  };
+
+  // The roadstead, in words, for a probe that wants the diagnosis rather than
+  // the counters.
+  CBZ.yachtRoadstead = function () {
+    return anchorage.map(function (b) {
+      return {
+        id: b.id, x: Math.round(b.x), z: Math.round(b.z),
+        loa: +b.loa.toFixed(1), beam: +b.beam.toFixed(1),
+        water: CBZ.cityWaterAt ? !!CBZ.cityWaterAt(b.x, b.z) : null,
+        shore: CBZ.waterField ? Math.round(CBZ.waterField.shoreAt(b.x, b.z)) : null,
+        occupied: !!(b.occupant && !b.occupant.dead),
+      };
+    });
+  };
 })();
