@@ -134,6 +134,9 @@
   // keeps its attitude flat, because nobody can see the attitude of a car they
   // cannot see. ~150 cars, mostly far: ≈ 300 probes/frame ≈ 0.1 ms/s.
   if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_TERRAIN == null) CBZ.CONFIG.VEHICLE_TERRAIN = true;
+  // touch-stick air flips over stunt ramps (input arrives only from the touch
+  // drive layer's freed vertical axis — desktop has no producer for it).
+  if (CBZ.CONFIG && CBZ.CONFIG.CAR_AIR_FLIP == null) CBZ.CONFIG.CAR_AIR_FLIP = true;
   const TERRAIN_ON = function () {
     return (!CBZ.CONFIG || CBZ.CONFIG.VEHICLE_TERRAIN !== false) && !!CBZ.floorAt;
   };
@@ -2815,13 +2818,36 @@
     if (car._airborne) {
       car._airVy -= 19.2 * dt;
       car._airY += car._airVy * dt;
-      const flightPitch = Math.max(-0.34, Math.min(0.30, -car._airVy * 0.026));
-      car._airPitch += (flightPitch - (car._airPitch || 0)) * Math.min(1, dt * 4.5);
+      // CAR_AIR_FLIP (owner, iPad): in the air the touch stick's freed
+      // vertical axis FLIPS the car — push forward to front-flip, pull back
+      // to back-flip (nose-up is NEGATIVE rotation.x on this rig, so +input
+      // rotates nose-down-over). The input is nonzero only while the touch
+      // drive layer owns the stick (touch.js publishes CBZ.touchDriveFlip),
+      // so desktop stays byte-identical. A started flip latches _flipHeld:
+      // the passive attitude easing must never wind a half-done flip
+      // backward through the air.
+      const flip = (!CBZ.CONFIG || CBZ.CONFIG.CAR_AIR_FLIP !== false) && CBZ.touchDriveFlip ? CBZ.touchDriveFlip() : 0;
+      if (flip) {
+        car._airPitch = (car._airPitch || 0) + flip * 5.2 * dt;
+        car._flipHeld = true;
+      } else if (!car._flipHeld) {
+        const flightPitch = Math.max(-0.34, Math.min(0.30, -car._airVy * 0.026));
+        car._airPitch += (flightPitch - (car._airPitch || 0)) * Math.min(1, dt * 4.5);
+      }
       const flightRoll = Math.max(-0.24, Math.min(0.24, -(car._steerInput || 0) * Math.min(1, vmag / 16) * 0.18));
       car._airRoll += (flightRoll - (car._airRoll || 0)) * Math.min(1, dt * 3.5);
       if (car._airY <= 0 && car._airVy < 0) {
         const impactV = -car._airVy;
         car._airY = 0; car._airVy = 0; car._airborne = false;
+        // land mid-flip: normalize to (-π, π] so the ground decay settles the
+        // SHORT way — a completed 350° flip reads as -10° and finishes,
+        // instead of unwinding a whole revolution on the tarmac.
+        if (car._flipHeld) {
+          const TAU = Math.PI * 2;
+          let fp = (car._airPitch || 0) % TAU;
+          if (fp > Math.PI) fp -= TAU; else if (fp < -Math.PI) fp += TAU;
+          car._airPitch = fp; car._flipHeld = false;
+        }
         if (impactV > 10) {
           damageEngine(car, Math.max(0, (impactV - 9) * 1.8), false);
           if (CBZ.shake) CBZ.shake(Math.min(1.4, impactV * 0.07));

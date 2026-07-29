@@ -418,12 +418,41 @@
     "#shopliftPrompt, #cityStoragePrompt, #cityAircraftPrompt";
   const inUI = (t) => t && t.closest && t.closest(UI_SEL);
 
+  // TOUCH_DRIVE_PEDALS (owner, iPad): "it shouldn't be driving around with a
+  // keypad — add a gas next to the brake, and make the [stick] for flipping in
+  // air and for turning." In a car the stick is the WHEEL, not the pedals:
+  // horizontal keeps steering (a/d), but the vertical axis stops writing
+  // throttle — GAS/BRAKE are held pills in touch_vehicle.js (which owns the
+  // flag default) — and is published as the air-flip axis vehicles.js reads
+  // while the car is airborne. On foot / aircraft / everywhere else the stick
+  // is byte-identical. touch_vehicle.js's onUpdate(10) key pump re-asserts a
+  // held GAS over the k.w=false this writes, so pedal and stick never fight.
+  let driveFlipY = 0;
+  function drivePedals() {
+    return CBZ.touchVehicleMode && CBZ.touchVehicleMode() === "drive" &&
+      (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_DRIVE_PEDALS !== false);
+  }
   function setMove(nx, ny) {
     const k = CBZ.keys;
+    if (drivePedals()) {
+      k["a"] = nx < -DEAD; k["d"] = nx > DEAD;
+      k["w"] = k["s"] = false;
+      driveFlipY = (ny < -DEAD || ny > DEAD) ? Math.max(-1, Math.min(1, -ny)) : 0;
+      stickMag = Math.hypot(nx, ny);
+      return;
+    }
+    driveFlipY = 0;
     k["w"] = ny < -DEAD; k["s"] = ny > DEAD; k["a"] = nx < -DEAD; k["d"] = nx > DEAD;
     stickMag = Math.hypot(nx, ny);   // the gait pump maps this to walk/sprint
   }
-  function clearMove() { const k = CBZ.keys; k["w"] = k["a"] = k["s"] = k["d"] = false; stickMag = 0; }
+  function clearMove() { const k = CBZ.keys; k["w"] = k["a"] = k["s"] = k["d"] = false; stickMag = 0; driveFlipY = 0; }
+  // the drive-mode air-flip axis: +1 = stick pushed up (forward flip), 0 when
+  // the stick is idle or the layer isn't in drive mode. vehicles.js reads it
+  // in its airborne block; desktop never has a touch stick so it reads 0.
+  CBZ.touchDriveFlip = function () { return driveFlipY; };
+  // Testability hook (probe seam — same doctrine as CBZ.cityTapWorld): drive
+  // the stick axes exactly as a touchmove would, headless.
+  CBZ.touchStickSet = function (nx, ny) { setMove(nx, ny); };
 
   // deflect the knob + movement keys from the stick centre (fixed: the anchor;
   // dynamic: wherever the press recentred it) — shared by touchstart/touchmove

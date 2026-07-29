@@ -8,12 +8,23 @@
    appears — buttons that SAY what they do — plus a real racing-game
    dial speedometer (km/h) instead of a floating text readout.
 
-     DRIVING  stick = steer/throttle (unchanged; it writes WASD).
-              BRAKE  = hold  → CBZ.keys[" "]  (the space handbrake/drift)
+     DRIVING  (TOUCH_DRIVE_PEDALS — owner: "it shouldn't be driving around
+              with a keypad… add a gas next to the brake, and make the
+              [stick] for flipping in air and for turning")
+              stick  = the WHEEL: horizontal steers (a/d); the vertical
+                       axis is the AIR-FLIP input while airborne
+                       (touch.js publishes CBZ.touchDriveFlip; vehicles.js
+                       consumes it) and does nothing on the ground.
+              GAS    = hold  → CBZ.keys["w"]  (throttle)
+              BRAKE  = hold  → CBZ.keys["s"]  (brake; held at a stop =
+                       reverse — the same S the desktop uses)
+              DRIFT  = hold  → CBZ.keys[" "]  (the space handbrake)
               EXIT   = tap   → CBZ.cityExitVehicle() (the same path the
                        interact registry's "Step out" verb calls)
               LOOK BACK = hold → CBZ.camLookBack(down) (camera agent's
                        feature-detected hook; button hides if absent)
+              (TOUCH_DRIVE_PEDALS=false restores stick-throttle + the old
+              single BRAKE-as-handbrake pill.)
      HELI     stick = yaw/thrust (unchanged).
               UP     = hold  → CBZ.keys[" "]        (collective up)
               DOWN   = hold  → CBZ.keys["control"]  (collective down —
@@ -42,7 +53,11 @@
   "use strict";
   const CBZ = window.CBZ;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_VEHICLE == null) CBZ.CONFIG.TOUCH_VEHICLE = true;
+  // GAS/BRAKE pedal pills + stick-as-wheel (touch.js reads this too; the
+  // default lives here because this file owns the drive-mode grammar).
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_DRIVE_PEDALS == null) CBZ.CONFIG.TOUCH_DRIVE_PEDALS = true;
   const on = () => !!(CBZ.touchMode) && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VEHICLE !== false);
+  const pedals = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_DRIVE_PEDALS !== false;
 
   let root = null, dial = null, dialCtx = null, btnWrap = null, ammoEl = null;
   let mode = "";               // "" | "drive" | "heli" | "wing"
@@ -128,7 +143,12 @@
     const VIEW_BTN = pill("tvView", "VIEW", "tv-sm");
     let html = "";
     if (next === "drive") {
-      html = pill("tvBrake", "BRAKE", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+      // pedals: GAS sits FIRST (column-reverse → bottom, nearest the resting
+      // thumb), BRAKE above it, the handbrake keeps its own small DRIFT pill.
+      html = pedals()
+        ? pill("tvGas", "GAS", "tv-big tv-go") + pill("tvBrake", "BRAKE", "tv-big tv-warn") +
+          pill("tvDrift", "DRIFT", "tv-sm") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm")
+        : pill("tvBrake", "BRAKE", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "heli") {
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
         FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
@@ -156,7 +176,11 @@
     btnWrap.innerHTML = html;
     const q = (id) => btnWrap.querySelector("#" + id);
     if (q("tvExit")) tapBtn(q("tvExit"), doExit);
-    if (q("tvBrake")) holdBtn(q("tvBrake"), " ");
+    // with pedals, BRAKE is the real brake/reverse (S); the Space handbrake
+    // moves to its own DRIFT pill. Flag off → the old BRAKE-as-handbrake.
+    if (q("tvGas")) holdBtn(q("tvGas"), "w");
+    if (q("tvBrake")) holdBtn(q("tvBrake"), next === "drive" && pedals() ? "s" : " ");
+    if (q("tvDrift")) holdBtn(q("tvDrift"), " ");
     if (q("tvUp")) holdBtn(q("tvUp"), " ");
     if (q("tvDown")) holdBtn(q("tvDown"), "control");
     // throttle reuses the heli's power grammar (Space up / Ctrl down) so the
