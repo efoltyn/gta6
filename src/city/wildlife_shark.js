@@ -57,12 +57,16 @@
   const SHADOW_DEPTH = 9;       // m of water that fully swallows the shadow
   const SHADOW_ALPHA = 0.34;    // its darkest (near-surface) opacity
 
-  // ---- tuning (one screen; every constant the encounter has) -------------
-  const SENSE_R = 110;          // u — it notices a swimmer this far out
-  const CHUM_R = 220;           // u — blood in the water pulls it from much further
-  const CIRCLE_R = 26;          // u — inside this it stops closing and starts orbiting
-  const ORBIT_R = 18;           // u — the orbit it holds while it decides
-  const CIRCLE_T = 6.5;         // s  — base time spent circling (predatorHunt jitters it)
+  // ---- tuning ------------------------------------------------------------
+  // THE HUNT'S OWN NUMBERS ARE GONE FROM THIS FILE. senseR / chumR / circleR /
+  // orbitR / circleT / bumpDmg / rate / reach / cruiseSpeed / rushSpeed and the
+  // whole seize block now come from CBZ.predatorKit — see section "THE
+  // MIGRATION" in ensure(). What is left below is what the kit genuinely cannot
+  // know: how this file DRAWS a shark and how it MOVES one.
+  //
+  // SENSE_R survives as a single LOD fallback (the fin/body draw radii are read
+  // off the live kit and only fall back to this if the kit is absent).
+  const SENSE_R = 110;          // u — great-white reference sense radius
   // OWNER: "I want to see scary ass sharks." At 0.18 the BODY only rendered
   // inside 110 * 0.18 = 20 units — so unless a shark was practically on top of
   // you, all you ever got was a fin and an empty sea. The fin is the dread cue,
@@ -71,10 +75,7 @@
   // body on screen from ~68u, which is far enough to watch one come at you and
   // still short enough that the LOD budget holds.
   const SHOW_F = 0.62;          // fraction of SENSE_R inside which the BODY is visible
-  const FIN_F = 1.25;           // fin/wake proxy draws inside SENSE_R * this
-  const BUMP_DMG = 6;           // the investigatory shoulder-nudge
-  const HOLD_S = 2.6;           // seize duration
-  const ESCAPE_P = 0.35;        // base chance the player breaks free
+  const FIN_F = 1.25;           // fin/wake proxy draws inside senseR * this
   const TURN_RATE = 1.15;       // rad/s — a shark turns with its whole body
   const STUCK_BAIL = 0.9;       // s of blocked movement before it gives up the hunt
   // depth targets, as a MULTIPLE of the species' authored swim depth
@@ -294,25 +295,10 @@
     // theirs at spawn — this is the belt-and-braces for anything hand-made.
     if (!a._waterMove) a._waterMove = { x: 0, z: 0, heading: 0, blocked: false, shore: -999 };
     const label = String(sp.name || sp.id || "shark").toLowerCase();
-    // MEGALODON tunes the same knobs harder: it finds you further out, circles
-    // roughly twice as long, sounds far deeper, holds twice as long and is half
-    // as escapable. No second code path, just bigger numbers.
-    s.opts = {
-      senseR: meg ? SENSE_R * 1.45 : SENSE_R,
-      chumR: meg ? CHUM_R * 1.5 : CHUM_R,
-      circleR: meg ? CIRCLE_R * 1.45 : CIRCLE_R,
-      orbitR: meg ? ORBIT_R * 1.45 : ORBIT_R,
-      circleT: meg ? CIRCLE_T * 1.7 : CIRCLE_T,
-      cruiseSpeed: (sp.spd || 2.5) * 2.4,
-      rushSpeed: (sp.spd || 2.5) * (meg ? 7.5 : 8.5),
-      bumpDmg: meg ? BUMP_DMG * 1.8 : BUMP_DMG,
-      style: "lunge",
-      medium: "water",
-      reach: 2.2 + (sp.scale || 1) * 1.6,
-      rate: meg ? 2.2 : 1.5,
-      dmg: sp.bite || 30,
-      name: sp.name || "shark",
-      canReach: function (t) { return inWater(t); },
+
+    // ---- THE SEAMS. These are the four things predatorKit CANNOT derive, and
+    // three of them are the reason this file exists at all.
+    const SEAMS = {
       // THE ONE MOVER. predatorHunt drives it directly, and predator.js also
       // forwards it to creature_combat's approach branch (as its opts.move) so
       // the last few metres of a rush go through waterField + the CLEAR table
@@ -325,13 +311,65 @@
       onHit: function (d) {
         if (CBZ.cityAnimalStrikePlayer) { try { CBZ.cityAnimalStrikePlayer(a, d, "lunge"); } catch (e) {} }
       },
+      // NOT COSMETIC, and the kit's own inWaterOnly() is NOT a substitute: it
+      // tests predatorMedium(target.pos) alone, and a swimming player whose
+      // pos.y reads a hair above the live swell would come back UNREACHABLE.
+      // That is the single worst bug this feature could ship (see the header),
+      // so the player special-case stays and stays here.
+      canReach: function (t) { return inWater(t); },
+      seize: {
+        // The killfeed string. The kit leaves `cause` undefined and
+        // seizeOptsFor then writes "mauled by a Great White Shark" in Title
+        // Case; this keeps the lowercase line the feed has always shown.
+        cause: "mauled by a " + label,
+        // PARITY, deliberately. predatorKit assigns qteMax 1 to the "shake"
+        // grab, but predatorSeize's own default — the one every shark in this
+        // game has ever been fought with — is 2. Taking the kit's value would
+        // silently HALVE the player's break-free windows against sharks, which
+        // is a difficulty change dressed up as a refactor. If the two ever want
+        // to agree, that is a decision to make on purpose, in the archetype.
+        qteMax: 2,
+      },
+    };
+
+    // ---- THE MIGRATION (CLAUDE.md: "the next debt owed").
+    // This file used to hand-write twenty radii, speeds, holds and escape
+    // probabilities, and it was the LAST consumer doing so — which is exactly
+    // why ARCH.lunge and the shark were free to drift apart. ARCH.lunge was
+    // SOLVED against these very numbers, so the kit reproduces all eleven
+    // shared fields on the great white to under 1%, and on the megalodon to
+    // under 3% on every field but bumpDmg (the archetype says 12, the old
+    // hand-typed ladder said 10.8 — an 11% divergence the kit now owns, and
+    // owning it in ONE place is the point of the migration).
+    //
+    // What went away with it: SENSE_R / CHUM_R / CIRCLE_R / ORBIT_R / CIRCLE_T
+    // / BUMP_DMG / HOLD_S / ESCAPE_P and every `meg ? x * k : x` ladder. The
+    // megalodon is no longer "the same knobs typed harder" — it is bigger, and
+    // the power laws do the rest, so a THIRD shark costs nothing.
+    s.opts = (CBZ.predatorKit ? CBZ.predatorKit(a, SEAMS) : null) || {
+      // DEGRADE PATH ONLY (predator.js absent, or PREDATOR_KIT flagged off).
+      // These are the archetype's own values for this species written out, so
+      // the flag-off build behaves and cannot silently lose its radii.
+      senseR: 110 * Math.sqrt(sp.scale || 1) / Math.sqrt(1.2),
+      chumR: 220 * Math.sqrt(sp.scale || 1) / Math.sqrt(1.2),
+      circleR: 26 * Math.sqrt(sp.scale || 1) / Math.sqrt(1.2),
+      orbitR: 18 * Math.sqrt(sp.scale || 1) / Math.sqrt(1.2),
+      circleT: 6.5 * Math.pow((sp.scale || 1) / 1.2, 0.7),
+      cruiseSpeed: (sp.spd || 2.5) * 2.4,
+      rushSpeed: (sp.spd || 2.5) * 8.7 * Math.pow(sp.scale || 1, -0.13),
+      bumpDmg: (sp.bite || 30) * 0.2,
+      style: "lunge", medium: "water",
+      reach: 2.2 + (sp.scale || 1) * 1.6,
+      rate: 1.37 * Math.sqrt(sp.scale || 1),
+      dmg: sp.bite || 30,
+      canReach: SEAMS.canReach, move: SEAMS.move, onState: SEAMS.onState, onHit: SEAMS.onHit,
       seize: {
         jaw: CBZ.creatureJawPoint ? CBZ.creatureJawPoint(a) : { x: 2, y: 0.7, z: 0 },
-        dps: meg ? 34 : 22,
-        hold: meg ? HOLD_S * 2 : HOLD_S,
-        escape: meg ? ESCAPE_P * 0.5 : ESCAPE_P,
+        dps: 10 + (sp.bite || 30) * 0.4,
+        hold: 2.23 * Math.pow(sp.scale || 1, 0.9),
+        escape: Math.max(0.05, Math.min(0.9, 0.41 * Math.pow(sp.scale || 1, -0.9))),
         thrash: 1, medium: "water", style: "shake",
-        cause: "mauled by a " + label,
+        cause: SEAMS.seize.cause, qteMax: 2,
       },
     };
     return s;

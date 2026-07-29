@@ -482,20 +482,35 @@
      plate.
 
      So it derives: the furthest FLAT corner from the sea's centre, plus
-     the continent margin (the plate is FLAT + that belt), x1.7 for the
-     open water past the last beach. Stage 4 measures
+     the continent margin (the plate is FLAT + that belt), x OPEN_WATER for
+     the water past the last beach. Stage 4 measures
        max(|-4800-310|, |4770-310|, |-4320+750|, |1790+750|) = 5110
        (5110 + 2200) x 1.7 = 12427  ->  half 12500, span 25000
      which clears the stage-4 plate (x +-6966 / z -8700..3945) on every
      side. Flag off -> null -> world.js keeps its 16000 literal.
+
+     OWNER (2026-07-29): "make water absolutely massive". OPEN_WATER 1.7 ->
+     2.3 is the ONE number that grows the sea, and it is the honest place to
+     do it: the land is untouched (this reads the FLAT rect, it does not
+     write it), so no region moves, no biome rect changes and the terrain
+     gate's mountains-outside-snow / city-on-mountain sets are identical.
+       (5110 + 2200) x 2.3 = 16813  ->  half 17000, span 34000
+     25000 -> 34000 across, i.e. 625 km^2 -> 1156 km^2 of published sea, and
+     it still clears the plate by 10.0 km on the tightest side (x) instead of
+     5.5 km. The drawn ocean does not change at all — it is a camera-centred
+     disc — so this costs nothing to render; what it buys is that every
+     consumer that asks "is this open sea" agrees out to 17 km instead of
+     12.5 km, which is what makes a long offshore passage in a 156 m hull a
+     real voyage rather than a swim to the edge of the record.
   ------------------------------------------------------------------ */
+  const SEA_OPEN_WATER = 2.3;            // sea half-span as a multiple of the land's reach
   CBZ.WORLD_SEA_SPAN = null;
   if (V4 && CBZ.WORLD_ENLARGE_FLAT) {
     const F = CBZ.WORLD_ENLARGE_FLAT, SCX = 310, SCZ = -750;
     const reach = Math.max(Math.abs(F.minX - SCX), Math.abs(F.maxX - SCX),
                            Math.abs(F.minZ - SCZ), Math.abs(F.maxZ - SCZ));
     const margin = 2200;                 // CONTINENT_COUNTRY_MARGIN (config.js, enlarged)
-    const span = 2 * (reach + margin) * 1.7;
+    const span = 2 * (reach + margin) * SEA_OPEN_WATER;
     CBZ.WORLD_SEA_SPAN = Math.max(16000, Math.ceil(span / 1000) * 1000);
   }
 

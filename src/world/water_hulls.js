@@ -566,6 +566,58 @@
     if (mastY != null) addBox(root, s, s * 1.2, s, 0, mastY, zBow * 0.35, M.navWhite());
   }
 
+  // ============================================================
+  //  3b. THE KIT — the drawing surface every OTHER hull author uses
+  // ============================================================
+  // BLOCK LAW. city/yachts.js needs exactly the helpers above: the same cached
+  // materials (or it becomes raw-material construction #567), the same cached
+  // box/prism/cylinder geometry, the same rail/stair grammar, the same
+  // merge-by-material pass that keeps a whole vessel inside a handful of draw
+  // calls, and the same `finish()` nesting that stops city/vehicles.js's
+  // buildUnifiedCar dropping a black interior shell inside a superyacht.
+  //
+  // Publishing it is what makes a new hull a ROW rather than a second copy of
+  // this file. It is deliberately the PRIVATE surface verbatim — no wrapper, no
+  // adapter — so a consumer that draws through it draws exactly what the fleet
+  // below draws.
+  //
+  // LOAD ORDER, and it is the whole reason this is a lazy read: city/yachts.js
+  // parses at index.html:969 and this file at :1333, so `CBZ.marineHulls.kit`
+  // does not exist when yachts.js runs its IIFE. Every consumer therefore reads
+  // it INSIDE its build() — which is only ever called when a hull is actually
+  // spawned, long after boot.
+  const KIT = {
+    THREE: THREE,
+    roleMat: roleMat, sharedMat: sharedMat, glassMat: glassMat, chromeMat: chromeMat,
+    boxGeo: boxGeo, prismGeo: prismGeo, cylGeo: cylGeo,
+    addBox: addBox, addPrism: addPrism, addCyl: addCyl,
+    addRail: addRail, addStairs: addStairs, stairDecks: stairDecks,
+    mergeByMaterial: mergeByMaterial, finish: finish,
+    M: M, propGroup: propGroup, navLights: navLights,
+  };
+  CBZ.marineHulls.kit = KIT;
+
+  // ---- THE DEFERRED REGISTRATION QUEUE -------------------------------------
+  // Same load-order fact, the other way round: a file that parses BEFORE this
+  // one cannot call register(). It pushes a register-shaped record onto
+  // CBZ.marineHullPending instead and this drains it in section 4, so the hull
+  // is derived, registered, priced and pushed into the economy by exactly the
+  // code path the authored fleet uses. Nothing gets a second registration
+  // function. A file that parses AFTER us simply calls register() directly and
+  // then CBZ.marineHulls.pushEconomy() to catch the catalog up.
+  if (!Array.isArray(CBZ.marineHullPending)) CBZ.marineHullPending = [];
+  function drainPending() {
+    const q = CBZ.marineHullPending;
+    if (!Array.isArray(q)) return 0;
+    let n = 0;
+    while (q.length) {
+      const e = q.shift();
+      if (!e || !e.key || REG.has(e.key)) continue;
+      try { if (register(e.key, e)) n++; } catch (err) { /* one bad row must never cost the fleet */ }
+    }
+    return n;
+  }
+
   // ---- DINGHY — Calanque Tender 15 (4.5m RIB) ------------------------------
   // Rigid-hull inflatable: GRP deep-V pan, a hypalon tube collar running the
   // full length and wrapping the transom, a jockey console, a single outboard.
@@ -1024,6 +1076,11 @@
     feel: { accel: 0.22, top: 0.40, turn: 0.16, drift: 0.7, roll: 0.35 },
   });
 
+  // Every hull queued by an earlier-parsing file joins the fleet HERE — after
+  // the authored four, before the economy push, so a queued hull is indexed,
+  // priced, buyable and berth-sizable exactly like an authored one.
+  drainPending();
+
   // ============================================================
   //  5. THE ECONOMY — push, never edit economy.js
   // ============================================================
@@ -1150,6 +1207,11 @@
     } catch (e) { /* an audit must never throw */ }
     return legacy;
   };
+
+  // Late registrants (a file parsing after us) get the same catalog treatment
+  // with one call instead of a copy of pushEconomy's body.
+  CBZ.marineHulls.pushEconomy = function () { return pushEconomy(); };
+  CBZ.marineHulls.drainPending = drainPending;
 
   // Diagnostics for the marina / dealer packages.
   CBZ.marineHullReport = function () {

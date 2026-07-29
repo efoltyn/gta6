@@ -73,6 +73,10 @@
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.CITY_FISHING == null) CFG.CITY_FISHING = true;
   if (CFG.CITY_FISHING_PLAYER == null) CFG.CITY_FISHING_PLAYER = true;
+  // FISH_CHUM — a landed fish bleeds into the water gore.js's chum bus
+  // publishes, so a busy fishing spot eventually draws something with teeth.
+  // One-line revert to a fishing spot that costs nothing but time.
+  if (CFG.FISH_CHUM == null) CFG.FISH_CHUM = true;
   function on() { return CFG.CITY_FISHING !== false; }
 
   const REACH = 3.4;             // how close you stand to a station to use it
@@ -321,6 +325,28 @@
     const worth = (econ.ITEMS && econ.ITEMS[sp.fur] && econ.ITEMS[sp.fur].value) || sp.furValue || 8;
     sfx("pickup");
     note("Landed a " + sp.name + " → " + sp.fur + " (~$" + worth + ")", 2.6);
+
+    // BLOOD IN THE WATER. A landed fish bleeds where it came out, and gore.js's
+    // chum bus is what turns that into a consequence: predator.js polls
+    // CBZ.goreChumList() at 2.5 Hz and every shark's chumR reaches 200+ units,
+    // so working one spot long enough draws something bigger than what you are
+    // catching. That is the whole point — the sea should have an opinion about
+    // you standing at its edge pulling fish out of it.
+    //
+    // No new blood system: ONE goreChum handle at the station's own water
+    // point (fishSpotRegister already VALIDATED that point is water, so this
+    // can never chum a car park). The rate rides the fish's own value, so a
+    // mackerel is a whiff and a big fish is a signal, and the whole thing costs
+    // nothing when GORE_WATER is off — goreChum returns null.
+    if (CBZ.goreChum && CFG.FISH_CHUM !== false) {
+      const w = spot && spot.water ? spot.water : spot;
+      if (w && Number.isFinite(w.x) && Number.isFinite(w.z)) {
+        const y = (CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(w.x, w.z) : 0) - 0.4;
+        // 0.22 for a mackerel (value 8) up to the 1.0 cap for anything serious.
+        const rate = Math.max(0.2, Math.min(1, 0.18 + worth / 90));
+        try { CBZ.goreChum(w.x, y, w.z, rate, 9 + rate * 10); } catch (e) {}
+      }
+    }
   }
 
   function nearestSpot(px, pz) {

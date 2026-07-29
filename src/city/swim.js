@@ -136,6 +136,10 @@
   // extra — you just stop pressing. The sink is deliberately slower than the
   // ascent (0.85 vs 2.0 m/s) so Space always wins, immediately, from any depth.
   if (CFG.SWIM_SINK == null) CFG.SWIM_SINK = true;
+  // SWIM_CHUM — a wounded swimmer bleeds into the water and sharks smell it.
+  // One-line revert: false and the goreChum handle is never opened, which is
+  // byte-identical to the behaviour before this existed.
+  if (CFG.SWIM_CHUM == null) CFG.SWIM_CHUM = true;
 
   function v2On() { return CFG.WATER_SWIM_V2 !== false && CFG.WATER_V2 !== false; }
 
@@ -595,6 +599,7 @@
   function exitWater(P, spot) {
     swimming = false;
     P._swim = false;
+    chumStop();                  // out of the water is out of the food chain
     S.vx = S.vz = S.vy = 0;
     S.drownT = 0; S.hurtT = 0;
     P._fallPeak = 0;
@@ -667,6 +672,75 @@
     v2Step(A, P, dt);
   });
 
+  /* ==================================================================
+     BLOOD IN THE WATER — a wounded swimmer is chum.
+
+     OWNER: "sharks like blood that's a huge feature."
+
+     The seam already existed and was almost unconsumed: gore.js publishes
+     CBZ.goreChumList() (a live, allocation-free array of every bleeder in
+     water), predator.js's chumNear() polls it at 2.5 Hz, and every shark's
+     chumR is 200+ units — nearly twice its sense radius. But there were only
+     TWO producers in the whole game (gore.js's own wet-kill branch and the
+     ocean minigame), so the one thing that should obviously make a shark come
+     for you — being hurt and then swimming — did nothing at all.
+
+     This is that producer. It is deliberately NOT a new blood system: one
+     goreChum handle, whose x/y/z are FUNCTIONS (the shape gore.js already
+     supports at gore.js:545, `cval`), so the trail follows the swimmer for
+     free and the plume/slick FX come from gore.js's own emitter.
+
+     WHEN IT RUNS is the whole design, and it is a threshold, not a dice roll:
+     below CHUM_HP of your health you are bleeding, and bleeding in water is a
+     dinner bell. Above it you are not. That makes "can I make it to the boat"
+     a decision you can actually reason about — which is the difference between
+     a scare and a tax.
+
+     `strength` scales with how badly you are hurt, so a scratch draws a shark
+     that happens to be nearby and a near-death swim pulls one in from 220 u.
+
+     This is also the FIRST caller of CBZ.goreChumStop anywhere in the repo —
+     the handle is released the moment you leave the water or stop bleeding,
+     rather than being left to time out inside gore.js's 12-slot cap.
+  ================================================================== */
+  const CHUM_HP = 0.72;                 // bleed below 72% health
+  const CHUM_TTL = 6;                   // s — refreshed while it still applies
+  let chumH = null, chumT = 0;
+  function playerHurtFrac(P) {
+    const g = CBZ.game;
+    const hp = (P && P.hp != null) ? +P.hp : (g && g.health != null ? +g.health : 100);
+    const max = (P && P.hpMax) || (g && g.healthMax) || 100;
+    if (!(max > 0)) return 0;
+    return Math.max(0, Math.min(1, 1 - hp / max));
+  }
+  function chumStop() {
+    if (!chumH) return;
+    if (CBZ.goreChumStop) { try { CBZ.goreChumStop(chumH); } catch (e) {} }
+    chumH = null; chumT = 0;
+  }
+  function chumStep(P, dt, sub) {
+    if (CFG.SWIM_CHUM === false || !CBZ.goreChum) { chumStop(); return; }
+    // Genuinely IN the water — a wet ankle is not a blood trail.
+    if (!P || P.dead || sub < 0.25) { chumStop(); return; }
+    const hurt = playerHurtFrac(P);
+    if (hurt < 1 - CHUM_HP) { chumStop(); return; }
+    chumT -= dt;
+    if (chumH && chumT > 0) return;
+    chumStop();
+    // rate 0.25 at the threshold, 1.0 at death's door
+    const rate = Math.max(0.2, Math.min(1, (hurt - (1 - CHUM_HP)) / CHUM_HP * 1.4 + 0.22));
+    chumH = CBZ.goreChum(
+      function () { return P.pos.x; },
+      function () { return P.pos.y + 0.35; },
+      function () { return P.pos.z; },
+      rate, CHUM_TTL);
+    chumT = CHUM_TTL * 0.6;             // refresh well before it expires
+  }
+  // Anything that ends the swim ends the trail. Exported so a caller outside
+  // the water column (a rescue, a mode change) can end it too.
+  CBZ.citySwimChumStop = chumStop;
+  CBZ.citySwimBleeding = function () { return !!chumH; };
+
   function bail(P, dt) {
     if (swimming) {
       swimming = false;
@@ -674,6 +748,7 @@
       if (CBZ.playerChar) CBZ.playerChar.swimming = false;
       hidePrompt();
     }
+    chumStop();
     S.sub = 0; S.headUnder = false; S.diving = false; S.treading = false;
     if (P && P.pos) { px = P.pos.x; pz = P.pos.z; S.y = P.pos.y; }
     // Death / a vehicle / leaving the mode all give you your air back.
@@ -843,6 +918,7 @@
     breathStep(P, surf, dt);
     tireStep(P, dt, hard);
     climbStep(A, P, dt, sub);
+    chumStep(P, dt, sub);
     publish(P);
   }
 
@@ -1121,6 +1197,13 @@
       sinkOn: on,
       breath: +(breath / BREATH_MAX).toFixed(3),
       swimming: swimming,
+      // BLOOD IN THE WATER. `bleeding` is whether a live chum handle is open
+      // right now; `chumOn` proves which side of the flag the build is on;
+      // `chumSources` is gore.js's whole live bleeder list, so a probe can see
+      // this producer land in the array predator.js actually reads.
+      bleeding: !!chumH,
+      chumOn: CFG.SWIM_CHUM !== false,
+      chumSources: (function () { try { return CBZ.goreChumList ? CBZ.goreChumList().length : -1; } catch (e) { return -1; } })(),
     };
   };
 

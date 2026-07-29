@@ -74,8 +74,21 @@
   // LOD-hide beyond a tier-driven visibility radius, and frustum culling does
   // the rest. Gameplay content is never clamped by a hardcoded perf number.
   const ANIMAL_VIS = [90, 130, 190, 270, 360];   // vis radius (u) per quality tier 0..4
-  const AQUATIC_R0 = 560;        // ocean band (from field centre) inner radius
-  const AQUATIC_R1 = 1500;       // ..outer radius (still inside the terrain ring)
+  // THE OCEAN BAND. OWNER: "make water absolutely massive and make fish and
+  // potential predator like shark spawn in like npc in that water."
+  //
+  // 560..1500 was measured against a sea whose FLAT rect reached ~6.1 km; the
+  // world is V4-scale now (CBZ.WORLD_SEA_SPAN 25000, half-span 12500), and a
+  // 940 u-wide annulus in a 25 km sea is a puddle with fish in it. The outer
+  // edge walks out to 2200, which is 2.4x the AREA (1.94 Mu^2 -> 4.57 Mu^2) and
+  // still well inside the terrain ring, and the inner edge comes in to 520 so
+  // the band actually reaches the water a swimmer is in rather than starting
+  // half a kilometre past it. Every candidate point is still validated against
+  // the real bathymetry by waterField.randomWaterPoint at the species' OWN
+  // declared clearance, so widening the band can never put an animal on land —
+  // it only gives the validator more sea to choose from.
+  const AQUATIC_R0 = 520;        // ocean band (from field centre) inner radius
+  const AQUATIC_R1 = 2200;       // ..outer radius (still inside the terrain ring)
   const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
   const SKIN_REACH = 4.2;        // how close you must be to skin a carcass
   const CARCASS_LINGER = 150;    // s a skinned/ignored carcass stays before fading
@@ -166,6 +179,15 @@
 
   function aquaticClearance(sp) {
     if (!sp) return 18;
+    // A SPECIES DECLARES ITS OWN WATER. This used to be a name table and
+    // nothing else, so a new row could not be honest about where it lives —
+    // every fish added after the original four got the same generic band, and
+    // "a whale does not swim in 2 m of surf" was true only for the four names
+    // typed here. `clearance` is metres of shore clearance the animal needs;
+    // wildlife.js converts it through the same bathymetry every spawn uses. The
+    // four names below stay as the authored fallback so this change is
+    // byte-identical for them.
+    if (Number.isFinite(sp.clearance)) return Math.max(4, +sp.clearance);
     if (sp.id === "megalodon") return 88;
     if (sp.id === "humpback_whale") return 58;
     if (sp.id === "great_white_shark") return 34;
@@ -176,6 +198,8 @@
   // animals retain a dorsal/back read; little fish remain genuinely submerged.
   function aquaticBodyDepth(sp) {
     if (!sp) return 1;
+    // Declared per row, same reason and same fallback as aquaticClearance.
+    if (Number.isFinite(sp.swimDepth)) return Math.max(0.15, +sp.swimDepth);
     if (sp.id === "megalodon") return 7.8;
     if (sp.id === "humpback_whale") return 2.8;
     if (sp.id === "great_white_shark") return 2.45;
@@ -816,7 +840,13 @@
   // budget: distant animals FREEZE (see tick) and LOD-hide (quality slider), so
   // only the herds near you actually think and draw — the world scales cheaply.
   const DENSITY = 850;
-  const BIOME_SHARE = { forest: 0.25, farmland: 0.16, desert: 0.23, snow: 0.16, water: 0.20 };
+  // water 0.20 -> 0.30. The share is a PER-BIOME multiplier of DENSITY, not a
+  // slice of a fixed pie (each biome's target is DENSITY * its own share), so
+  // this adds sea life without taking one animal off the land. 170 -> 255
+  // bodies, spread over 2.4x the area and 13 species instead of 5 — which is
+  // roughly the same density you could already swim through, in an ocean that
+  // now has regions: bull sharks in the surf, marlin and orca in blue water.
+  const BIOME_SHARE = { forest: 0.25, farmland: 0.16, desert: 0.23, snow: 0.16, water: 0.30 };
   const RARITY_WEIGHT = { common: 12, uncommon: 4, rare: 1 };
   const PRED_MAX = 0.20;                    // ≤ ~1 predator per 4 prey per biome
   // TROPHIC ROLE (diet), for the pyramid — distinct from `danger` (will it hurt
