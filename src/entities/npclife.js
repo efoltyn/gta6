@@ -294,7 +294,13 @@
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (let i = 0; i < mats.length; i++) {
           const m = mats[i];
-          if (m && !m._shared && m.dispose) { try { m.dispose(); } catch (_) {} }
+          // `_cbzClothKey` = city/clothes.js painted cloth. The SHARED atlas
+          // material is `_shared` and already skipped, but the per-rig ISO CLONE
+          // deliberately is not — and a clone is a legal door into the one
+          // CanvasTexture every wearer of that outfit key samples. Skip both, by
+          // name, at every teardown: the clone is per-rig and about to be
+          // garbage anyway, so refusing to dispose it costs nothing.
+          if (m && !m._shared && !m._cbzClothKey && m.dispose) { try { m.dispose(); } catch (_) {} }
         }
       }
     });

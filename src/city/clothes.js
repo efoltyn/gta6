@@ -1489,6 +1489,81 @@
     return null;                                    // leather/tactical/designer… stay flat
   }
 
+  // ============================================================
+  //  THE DEFAULT-LOOK GUARANTEE — a cloth region may never render NOTHING.
+  //
+  //  OWNER (2026-07-29, verbatim): "there's some weird NPCs that have no
+  //  outfit, and it's like invisible where the outfit should be. It's dumb —
+  //  instead of just having a default look."
+  //
+  //  The producer that shipped is named in entities/character.js (a rig never
+  //  tagged itself `userData.dynamic`, so the build-time static passes merged
+  //  its untagged chest / yoke / pelvis out of the scene graph). This block is
+  //  the SECOND failure the same symptom has available to it, closed the same
+  //  day, because it is the one no caller audit could ever prevent.
+  //
+  //  WHY THIS LIVES AT THE MATERIAL SEAM AND NOT AT THE CALLERS. Every painted
+  //  garment in this game is ONE MeshLambertMaterial + ONE CanvasTexture per
+  //  outfit KEY, shared by every wearer, and it wears `alphaTest: 0.5`. That
+  //  combination has a failure mode nothing else in the engine has: if the
+  //  texture ever stops sampling, EVERY texel fails the alpha test and the mesh
+  //  is DISCARDED ENTIRELY — so torso/arms/legs vanish while the head, hands,
+  //  hair and shoes (which are not on the atlas) keep drawing, for every wearer
+  //  of that key at once. That is the owner's screenshot exactly, and a caller
+  //  audit can never prevent it, because the caller did nothing wrong.
+  //
+  //  So the cache validates ITSELF (getSet below rebuilds a dead entry), the
+  //  clone bank re-clones off the live entry, dress() refuses to install a
+  //  degenerate box, and restore() refuses to hand a dead material back to a
+  //  body. Whoever kills a texture, the next dress heals it — and outfits.js's
+  //  sweep re-dresses the bodies that were already wearing the corpse.
+  //
+  //  Flag: CBZ.CONFIG.CITY_OUTFIT_GUARANTEE (declared in city/outfits.js, the
+  //  file that owns the repair; undefined reads ON — the plainCivvies() shape).
+  //  Off = this file behaves exactly as it did.
+  // ============================================================
+  function outfitGuarantee() {
+    const C = CBZ.CONFIG;
+    return !C || C.CITY_OUTFIT_GUARANTEE == null || !!C.CITY_OUTFIT_GUARANTEE;
+  }
+  const DEFAULT_CLOTH = 0x8a939c;                  // outfits.js's own civShirtFor fallback grey
+  const DEFAULT_LEGS = 0x39414f;                   // == outfits.js JEAN
+  // Is this material capable of putting pixels on the screen? A flat material
+  // always is. A PAINTED one is only as good as its atlas: r128 leaves no
+  // "disposed" flag on a Texture, so buildSet marks its own (below) and we also
+  // read the canvas the texture actually samples — a zero-sized or detached
+  // image is the other way a CanvasTexture goes quiet.
+  function clothMatOk(mat) {
+    if (!mat) return false;
+    if (mat.visible === false) return false;
+    if (mat.transparent && mat.opacity <= 0.02) return false;
+    const map = mat.map;
+    if (!map) return true;
+    if (map._cbzDead) return false;
+    const img = map.image;
+    return !!(img && img.width > 0 && img.height > 0);
+  }
+  function geomOk(g) {
+    if (!g) return false;
+    const p = g.parameters;
+    if (p && !(p.width > 0 && p.height > 0 && p.depth > 0)) return false;
+    const pos = g.attributes && g.attributes.position;
+    return !pos || pos.count > 0;
+  }
+  // "is this cloth mesh actually drawing?" — the ONE question the repair sweep
+  // asks. Deliberately tests the MESH, never its ancestors: gore.js's
+  // dismemberment hides the limb PIVOT (ch.parts.ll), so a severed leg is not a
+  // bare leg and must never be repaired back on.
+  function clothMeshRenders(mesh) {
+    if (!mesh) return false;
+    if (mesh.visible === false) return false;
+    if (!mesh.parent) return false;
+    if (!geomOk(mesh.geometry)) return false;
+    return clothMatOk(mesh.material);
+  }
+  CBZ.cityClothMatOk = clothMatOk;
+  CBZ.cityClothMeshRenders = clothMeshRenders;
+
   function buildSet(key, rec) {
     const cv = document.createElement("canvas");
     cv.width = W; cv.height = H;
@@ -1518,17 +1593,51 @@
     if (!parts) return null;
     const tex = new THREE.CanvasTexture(cv);
     tex.magFilter = THREE.LinearFilter;
+    // THIS CACHE IS PERMANENT — but nothing else in the engine knows that. Two
+    // teardown sweeps walk a whole rig and dispose every material/geometry they
+    // find (peds.js clearCityPeds, entities/npclife.js destroyCity); both SKIP
+    // `_shared`, and an iso CLONE is deliberately NOT _shared, so a clone is a
+    // legal door into the shared texture behind it. r128 leaves no flag when a
+    // Texture dies, so we leave our own: the death becomes OBSERVABLE (getSet
+    // rebuilds, outfitIntegrityAudit counts it) instead of silently emptying
+    // every body wearing this outfit key. One closure per outfit, ever.
+    const _texDispose = tex.dispose;
+    tex.dispose = function () { tex._cbzDead = true; return _texDispose.apply(this, arguments); };
     const m = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 });
     m._shared = true;                               // clearCityPeds must never dispose it
+    m._cbzClothKey = key;                           // the audit's "this is painted cloth" mark
     return { mat: m, tex, parts };
   }
 
+  // a cached set is only worth handing out while it can still paint pixels
+  function setAlive(s) {
+    if (!s) return true;                            // null = a deliberate "no painted look"
+    if (!s.tex || s.tex._cbzDead) return false;
+    const img = s.tex.image;
+    if (!img || !(img.width > 0) || !(img.height > 0)) return false;
+    return !!(s.mat && s.mat.map === s.tex && s.mat.visible !== false);
+  }
+  let _setsRebuilt = 0;
+  CBZ.cityClothesSetsRebuilt = function () { return _setsRebuilt; };
   function getSet(recOrId, ch) {
     const rec = typeof recOrId === "string" ? { id: recOrId } : recOrId;
     const key = keyOf(rec, ch);
     if (!key) return null;
     let s = sets[key];
     if (s === undefined) { s = sets[key] = buildSet(key, rec); }
+    // SELF-HEALING CACHE (see THE DEFAULT-LOOK GUARANTEE above). An atlas that
+    // stops sampling takes every wearer of its key with it, so the cache checks
+    // its own entry rather than trusting that nobody ever disposed it. Two
+    // property reads on a path that only runs when a body changes clothes.
+    else if (s !== null && outfitGuarantee() && !setAlive(s)) {
+      s = buildSet(key, rec); _setsRebuilt++;
+      // A REBUILD THAT IS ALSO DEAD MUST NOT BE RETRIED FOREVER — that would
+      // allocate a canvas + texture on every dress. Cache the refusal as null,
+      // which is already a first-class state here: "this outfit has no painted
+      // look", so recolorRig flat-paints the body. THE DEFAULT LOOK, by the
+      // path the file already had. One canvas per key, ever, even pathological.
+      sets[key] = setAlive(s) ? s : (s = null);
+    }
     return s;
   }
   CBZ.cityClothesTex = getSet;
@@ -1542,8 +1651,22 @@
   // arm shows ~the top half of the sleeve row; the forearm shows the bottom —
   // so a cuff painted low in the row still lands on the actual wrist.
   function clothGeom(part, dims, band) {
-    const d = dims || DIMS[part];
-    const b0 = band ? band[0] : 0, b1 = band ? band[1] : 1;
+    let d = dims || DIMS[part];
+    let b0 = band ? band[0] : 0, b1 = band ? band[1] : 1;
+    // A DEGENERATE BOX IS AN INVISIBLE PERSON. clothDims/clothBand are tagged
+    // off a PROFILE (character.js stamps every split segment from P.armW /
+    // P.legW / P.armUp…, and fitTorso measures the real chest+waist), so a stub
+    // rig, a hand-built rig or a profile field that came back 0/NaN hands us an
+    // edge with no area — and the wearer loses that whole region while the rest
+    // of the body draws. A shirt one size off beats a missing torso, so fall
+    // back to the authored part dims and to the whole garment row. On every
+    // healthy rig in the game this is a no-op (all four dims are positive and
+    // both band ends land in [0,1]), which is why it is safe to leave in the
+    // hot path. Gated with the guarantee so the revert is exact.
+    if (outfitGuarantee()) {
+      if (!d || d.length < 3 || !(d[0] > 0) || !(d[1] > 0) || !(d[2] > 0)) d = DIMS[part];
+      if (!(b0 >= 0) || !(b1 > b0)) { b0 = 0; b1 = 1; }
+    }
     const key = band || dims ? part + "|" + d.join(",") + "|" + b0.toFixed(3) + "," + b1.toFixed(3) : part;
     let g = geoms[key];
     if (g) return g;
@@ -1571,6 +1694,7 @@
   // ============================================================
   function dress(list, part, m) {
     if (!list) return;
+    if (outfitGuarantee() && !m) return;             // never hand a mesh a material it can't draw
     for (let i = 0; i < list.length; i++) {
       const mesh = list[i];
       if (!mesh) continue;
@@ -1578,22 +1702,56 @@
       // split-limb segments carry their own dims + row band (character.js tags)
       mesh.geometry = clothGeom(part, mesh.userData.clothDims, mesh.userData.clothBand);
       mesh.material = m;
+      mesh.userData._cbzPart = part;                 // "this mesh is wearing painted cloth" (audit read)
     }
   }
   function restore(list) {
     if (!list) return;
+    const guard = outfitGuarantee();
     for (let i = 0; i < list.length; i++) {
       const mesh = list[i], f = mesh && mesh.userData._cbzFlat;
-      if (f) { mesh.geometry = f.g; mesh.material = f.m; }
+      if (!f) continue;
+      if (!guard) { mesh.geometry = f.g; mesh.material = f.m; continue; }
+      // A FLAT ORIGINAL THAT DIED TAKES THE BODY WITH IT. `_cbzFlat` is captured
+      // ONCE, at the very first dress, and then held for the whole life of the
+      // rig — which is long enough for a teardown sweep to have disposed it, for
+      // a graphics-tier swap to have orphaned its Lambert/Standard twin, or for
+      // it simply never to have existed on a stub rig. Putting an unrenderable
+      // material back on the body IS the owner's bug, so a dead stash falls
+      // through to a live flat default instead of onto a person.
+      if (geomOk(f.g)) mesh.geometry = f.g;
+      mesh.material = clothMatOk(f.m) ? f.m : defaultFlat(mesh);
+      mesh.userData._cbzPart = null;
     }
+  }
+  // the last-resort cloth material: keep whatever colour the body was reading
+  // if it can still be read, else the same mid grey outfits.js's civShirtFor
+  // falls back to. Comes off the SHARED cmat cache — no per-rig allocation.
+  function defaultFlat(mesh, hex) {
+    let c = hex;
+    if (c == null) {
+      const m = mesh && mesh.material;
+      c = (m && m.color && m.color.getHex) ? m.color.getHex() : DEFAULT_CLOTH;
+      if (c === 0xffffff) c = DEFAULT_CLOTH;         // a painted material's untouched white base
+    }
+    return cmat(c);
   }
   // per-rig isolated clone of a shared set material (crowd.js's pooled rigs
   // tint materials in place — give them their OWN instance so a setHex can
   // never bleed onto every other wearer of the outfit). Cached per rig+key.
   function isoMat(ch, key, m) {
     const bank = ch._clothesIso || (ch._clothesIso = {});
-    if (!bank[key]) bank[key] = m.clone();          // clone shares the texture; _shared not copied → disposable
-    return bank[key];
+    let c = bank[key];
+    // A CLONE OUTLIVES THE CACHE ENTRY IT CAME FROM. This bank is per-rig and
+    // never cleared, so a clone taken before getSet() rebuilt a dead set still
+    // points at the corpse — and being a clone it is NOT `_shared`, which is
+    // exactly why the teardown sweeps are allowed to dispose it in the first
+    // place. Re-clone whenever it no longer matches the LIVE set material.
+    if (!c || (outfitGuarantee() && (c.map !== m.map || !clothMatOk(c)))) {
+      c = bank[key] = m.clone();                    // clone shares the texture; _shared not copied → disposable
+      c._cbzClothKey = key;
+    }
+    return c;
   }
 
   function applyClothes(ch, rec, opts) {
@@ -1608,6 +1766,12 @@
         restore(s.armsLower); restore(s.legsLower);
         if (ch._jacketMesh) ch._jacketMesh.visible = false;
         ch._clothesKey = null;
+        // …and the MATERIAL memo with it. Behaviourally a no-op today (the
+        // "already wearing it" early-out below needs BOTH to match and the key
+        // is now null), but leaving a stripped rig pointing at the garment it
+        // no longer wears is what lets a repair or a future caller believe a
+        // bare body is dressed. The two fields are one fact; clear them together.
+        ch._clothesMat = null;
       }
       return null;
     }
@@ -1645,6 +1809,115 @@
 
   CBZ.applyClothes = applyClothes;       // the character.js opt-in seam
   CBZ.cityApplyClothes = applyClothes;   // city-side name (outfits.js routes here)
+
+  // ============================================================
+  //  CBZ.cityClothesRepairRig(ch, colors) → count of meshes rescued
+  //
+  //  THE FLOOR UNDER EVERY DRESSER. Walk this rig's cloth slots and give a
+  //  LIVE flat material + a real box to anything that is currently drawing
+  //  nothing. It authors no look and makes no wardrobe decision — it only
+  //  guarantees that the region EXISTS, so the ordinary dressing path
+  //  (outfits.js recolorRig → applyClothes) has a body to paint. Clearing
+  //  `_clothesKey`/`_clothesMat` is what makes the re-dress that follows
+  //  actually run: applyClothes short-circuits on "already wearing it", and a
+  //  rig that lost its garment is still nominally wearing the key that broke.
+  //
+  //  `visible` is FORCED on a rescued mesh, and that is safe by census: the
+  //  only `.visible=false` writes that touch a rig in this codebase are on the
+  //  limb PIVOTS (gore.js severBody / peds.js's explosion dismemberment, both
+  //  ch.parts.*) and on ch._jacketMesh — never on a skinSlots mesh. So a
+  //  severed limb stays severed and only a genuinely orphaned garment is
+  //  brought back.
+  // ============================================================
+  // [slot, cloth part, wears the LEG colour, may have its box re-synthesised]
+  // Only a DRESSABLE slot gets a synthesised box: dress() itself would give
+  // that mesh exactly this geometry, so the fallback is the file's own answer.
+  // The pelvis and the yoke are never dressed, so a wrong-sized box there would
+  // be a worse lie than the broken one — those get their material back only.
+  const REPAIR_SLOTS = [
+    ["torso", "torso", 0, 1], ["collar", "torso", 0, 0],
+    ["arms", "arm", 0, 1], ["armsLower", "arm", 0, 1],
+    ["legs", "leg", 1, 1], ["legsLower", "leg", 1, 1], ["pelvis", "leg", 1, 0],
+  ];
+  // WHERE A GARMENT HANGS, derived from the rig instead of remembered. This is
+  // what lets the repair put back a mesh that was taken clean OUT of the scene
+  // graph (core/batch.js merges an untagged static mesh and removes the
+  // original) — the mesh keeps its LOCAL transform through all of that, so
+  // re-adding it to the node it was built under restores it exactly.
+  const LIMB_OF = { arms: ["la", "ra"], armsLower: ["la", "ra"], legs: ["ll", "rl"], legsLower: ["ll", "rl"] };
+  function repairHost(ch, slot, i) {
+    const keys = LIMB_OF[slot];
+    if (!keys) return ch.body || ch.group || null;   // torso / yoke / pelvis ride the hip-locked body
+    const pivot = ch.parts && ch.parts[keys[i]];
+    if (!pivot) return null;
+    if (slot === "armsLower" || slot === "legsLower") return (pivot.userData && pivot.userData.low) || null;
+    return pivot;
+  }
+  // ONE definition of "this body has a hole in its clothes", shared by the
+  // repair below and by outfits.js's ratchet — so the number the audit reports
+  // and the condition the sweep acts on can never disagree.
+  function cityClothesBare(ch) {
+    if (!ch || !ch.skinSlots) return 0;
+    const s = ch.skinSlots;
+    let n = 0;
+    for (let k = 0; k < REPAIR_SLOTS.length; k++) {
+      const list = s[REPAIR_SLOTS[k][0]];
+      if (!list) continue;
+      for (let i = 0; i < list.length; i++) if (list[i] && !clothMeshRenders(list[i])) n++;
+    }
+    const jm = ch._jacketMesh;
+    if (jm && jm.visible && !clothMatOk(jm.material)) n++;
+    return n;
+  }
+  CBZ.cityClothesBare = cityClothesBare;
+
+  function cityClothesRepairRig(ch, colors) {
+    if (!ch || !ch.skinSlots || !outfitGuarantee()) return 0;
+    if (!cityClothesBare(ch)) return 0;              // healthy body → never touched
+    // UNDRESS FIRST, THROUGH THE ONE STRIP PATH. A rig that lost ONE region is
+    // still nominally wearing the outfit key that broke, and half its slots may
+    // still carry a live atlas — leaving that state behind would hand the next
+    // setLook a painted material to tint (the orange-tux bug). applyClothes(null)
+    // is the sanctioned strip and, with the guarantee on, its restore() now
+    // refuses to hand a dead flat original back, so this alone rescues most
+    // bodies. It also clears _clothesKey, which is what lets the re-dress that
+    // follows actually run instead of short-circuiting on "already wearing it".
+    if (ch._clothesKey != null) applyClothes(ch, null);
+    ch._clothesKey = null; ch._clothesMat = null;
+    const s = ch.skinSlots, c = colors || {};
+    const torsoHex = c.torso != null ? c.torso : DEFAULT_CLOTH;
+    const legHex = c.legs != null ? c.legs : DEFAULT_LEGS;
+    let n = 0;
+    for (let k = 0; k < REPAIR_SLOTS.length; k++) {
+      const row = REPAIR_SLOTS[k], list = s[row[0]];
+      if (!list) continue;
+      for (let i = 0; i < list.length; i++) {
+        const mesh = list[i];
+        if (!mesh || clothMeshRenders(mesh)) continue;
+        // BACK ONTO THE SKELETON FIRST — a garment merged out of the graph is
+        // not a colour problem, it is a missing limb of the body.
+        if (!mesh.parent) {
+          const host = repairHost(ch, row[0], i);
+          if (host && host.add) host.add(mesh);
+        }
+        const f = mesh.userData && mesh.userData._cbzFlat;
+        if (f && geomOk(f.g)) mesh.geometry = f.g;
+        if (row[3] && !geomOk(mesh.geometry)) {
+          mesh.geometry = clothGeom(row[1], mesh.userData && mesh.userData.clothDims, mesh.userData && mesh.userData.clothBand);
+        }
+        if (!clothMatOk(mesh.material)) mesh.material = defaultFlat(mesh, row[2] ? legHex : torsoHex);
+        mesh.visible = true;
+        mesh.userData._cbzPart = null;
+        n++;
+      }
+    }
+    // the shell is a garment too — a dead atlas leaves an open jacket drawing
+    // nothing at all, and no jacket is a better look than a hole in a chest.
+    const jm = ch._jacketMesh;
+    if (jm && jm.visible && !clothMatOk(jm.material)) { jm.visible = false; n++; }
+    return n;
+  }
+  CBZ.cityClothesRepairRig = cityClothesRepairRig;
 
   // ============================================================
   //  GANG BANDANA — a small MESH accessory (NOT painted canvas), worn at the

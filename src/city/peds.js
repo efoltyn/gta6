@@ -2212,7 +2212,12 @@
       if (p.group) p.group.traverse(function (o) {
         if (o.isSprite) return;     // sprites share an r128 geometry singleton — never dispose
         if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
-        if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+        // `_cbzClothKey` = city/clothes.js painted cloth. The SHARED atlas is
+        // `_shared` and already skipped — but the per-rig ISO CLONE deliberately
+        // is not, and a clone is a legal door into the one CanvasTexture EVERY
+        // wearer of that outfit key samples. Skip both by name (the clone is
+        // per-rig and about to be garbage anyway, so this costs nothing).
+        if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && !x._cbzClothKey && x.dispose && x.dispose()); else if (!m._shared && !m._cbzClothKey && m.dispose) m.dispose(); }
       });
     }
     CBZ.cityPeds.length = 0;
@@ -2278,7 +2283,8 @@
     if (ped.group) ped.group.traverse(function (o) {
       if (o.isSprite) return;   // sprites share an r128 geometry singleton — never dispose
       if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
-      if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+      // painted cloth (`_cbzClothKey`) is never disposed here — see clearCityPeds
+      if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && !x._cbzClothKey && x.dispose && x.dispose()); else if (!m._shared && !m._cbzClothKey && m.dispose) m.dispose(); }
     });
   }
   CBZ.onUpdate(35.4, function () {
