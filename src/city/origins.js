@@ -1085,6 +1085,19 @@
      them into somebody else.
      ================================================================== */
 
+  // A site resolver is the ground-origin equivalent of a lot finder: it asks a
+  // world capability for a spawn, never types another venue coordinate.
+  function speedwaySpawn() {
+    const c = (CBZ.raceKit && CBZ.raceKit.course && CBZ.raceKit.course("speedway")) || CBZ.speedwayCourse;
+    if (!c || typeof c.line !== "function") return null;
+    const f = c.line(c.startT || 0), out = (c.trackHalf || 11) + 18;
+    const x = f.x + f.nx * out, z = f.z + f.nz * out;
+    return {
+      x: x, z: z, y: CBZ.floorAt ? CBZ.floorAt(x, z) : 0.14,
+      heading: f.heading + Math.PI,
+    };
+  }
+
   const AXES = {
     // ---- WHO: the costume, the title, and where you sit in the world -----
     who: {
@@ -1096,6 +1109,7 @@
       hustler: { name: "The Hustler",   outfit: "street",     title: "Hustler",       blurb: "a corner and a mouth on you" },
       debtor:  { name: "The Debtor",    outfit: "street",     title: "Mark",          blurb: "you are three weeks late" },
       wick:    { name: "The Marked",    outfit: "suit",       title: "Open Contract", blurb: "every single person wants the money" },
+      racer:   { name: "The Racer",     outfit: "coveralls",  title: "Rookie",        blurb: "a loaner, a back-row start, one way up" },
     },
 
     // ---- WHERE: a lot the CITY BUILT. Never a room this file authors. ----
@@ -1110,6 +1124,7 @@
       airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
       corner:     { find: null,            feed: "" },   // the street IS the place — never fails
       motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
+      speedway:   { resolve: speedwaySpawn, feed: "The paddock is closed. You wait at the Speedway gate." },
     },
 
     // ---- PURSE: cash / bank / debt. The three numbers a start is made of.
@@ -1122,6 +1137,7 @@
       street:     { cash: 60,      bank: 0,       debt: 0 },
       underwater: { cash: 0,       bank: 0,       debt: 48000 },    // the debtor
       warchest:   { cash: 15000,   bank: 0,       debt: 0 },        // the marked man
+      rookie:     { cash: 350,     bank: 0,       debt: 0 },        // enough for entry, not a career
     },
 
     // ---- ARMS: what is on you when the camera hands over control. --------
@@ -1157,6 +1173,10 @@
       landit:  { id: "origin_land",    title: "Put it on the ground", goal: "custom", reward: 0 },
       earn:    { id: "origin_earn",    title: "Make your first $500", goal: "custom", reward: 0 },
       settle:  { id: "origin_settle",  title: "Pay what you owe",   goal: "custom", reward: 0 },
+      racecareer: {
+        id: "origin_racer_career", title: "Rookie to APEX Champion", goal: "custom", reward: 0,
+        start: function () { return CBZ.cityRacerCareer && CBZ.cityRacerCareer.start(); },
+      },
       none:    null,
     },
   };
@@ -1188,6 +1208,7 @@
     hustler: { who: "hustler", where: "corner",    purse: "street",     arms: "none",     heat: "none",     verb: "earn" },
     debtor:  { who: "debtor",  where: "motel",     purse: "underwater", arms: "none",     heat: "shark",    verb: "settle" },
     wick:    { who: "wick",    where: "unit",      purse: "warchest",   arms: "full",     heat: "everyone", verb: "survive" },
+    racer:   { who: "racer",   where: "speedway",  purse: "rookie",     arms: "none",     heat: "none",     verb: "racecareer" },
   };
 
   /* ---- THE ROLL ---------------------------------------------------------
@@ -1211,6 +1232,7 @@
     // 1. an address the person would actually have
     if (comp.who === "pilot") comp.where = "airborne";
     else if (comp.who === "exec") comp.where = "tower_top";
+    else if (comp.who === "racer") comp.where = "speedway";
     else if (comp.where === "airborne") comp.where = "corner";   // only a pilot starts in the air
     // 2. hunted people are armed
     const h = AXES.heat[comp.heat];
@@ -1221,6 +1243,7 @@
     if (comp.verb === "descend" && comp.where !== "tower_top") comp.verb = "earn";
     if (comp.verb === "landit" && comp.where !== "airborne") comp.verb = "earn";
     if (comp.verb === "contract" && comp.arms === "none") comp.arms = "quiet";
+    if (comp.verb === "racecareer") { comp.who = "racer"; comp.where = "speedway"; }
     return comp;
   }
   CBZ.cityOriginRoll = rollOrigin;             // exposed for the title screen's re-roll
@@ -1446,11 +1469,17 @@
     }
 
     // GROUND — find the lot this story wants and stand the player in it.
+    const site = WH.resolve ? WH.resolve() : null;
     const lot = WH.find ? WH.find() : null;
+    if (WH.resolve && !site) return null;
     if (WH.find && !lot) return null;                 // caller prints WH.feed
     const A = arena(); const P = CBZ.player;
-    let px, pz, floorY = 0.14;
-    if (lot && lot.building) {
+    let px, pz, floorY = 0.14, heading = 0;
+    if (site) {
+      px = site.x; pz = site.z;
+      floorY = site.y != null ? site.y : (CBZ.floorAt ? CBZ.floorAt(px, pz) : 0.14);
+      heading = site.heading || 0;
+    } else if (lot && lot.building) {
       const b = lot.building;
       const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
       // Inside a building we must land on a REAL floor: tower_top rides the
@@ -1468,8 +1497,8 @@
     } else return null;
 
     P.pos.set(px, floorY, pz); P.vy = 0; P.grounded = true;
-    if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, 0, 0); }
-    if (CBZ.cam) { CBZ.cam.yaw = 0; CBZ.cam.pitch = 0.3; }
+    if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, heading, 0); }
+    if (CBZ.cam) { CBZ.cam.yaw = heading; CBZ.cam.pitch = 0.3; }
     scene = null;
     return { compact: comp.where !== "corner" };
   }
@@ -1482,7 +1511,9 @@
      spawns a mark. */
   function startVerb(comp) {
     const V = AXES.verb[comp.verb];
-    if (!V || !CBZ.mission || !CBZ.mission.start) return;
+    if (!V) return;
+    if (typeof V.start === "function") { try { return V.start(comp); } catch (e) { return null; } }
+    if (!CBZ.mission || !CBZ.mission.start) return;
     const A = arena();
     const opts = { id: V.id, title: V.title, goal: V.goal, reward: V.reward || 0 };
     if (V.goal === "reach") {
@@ -1524,7 +1555,7 @@
   // originals keep their hand-written scenes (they are better than a generated
   // one and the owner likes them); the new stories run the generator.
   (function registerComposed() {
-    const NEW = ["hitman", "pilot", "hustler", "debtor", "wick"];
+    const NEW = ["hitman", "pilot", "hustler", "debtor", "wick", "racer"];
     for (let i = 0; i < NEW.length; i++) {
       const id = NEW[i], comp = PRESETS[id], W = AXES.who[comp.who];
       ORIGINS[id] = {

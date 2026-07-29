@@ -165,6 +165,7 @@
         <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b><span>Top floor. Crash. Street. Jail if you slip.</span></button>
         <button class="origin-btn" type="button" data-origin="hitman"><b>The Hitman</b><span>A motel, a silencer, and one name.</span></button>
         <button class="origin-btn" type="button" data-origin="pilot"><b>The Pilot</b><span>You start airborne. Pick the airframe.</span></button>
+        <button class="origin-btn" type="button" data-origin="racer"><b>The Racer</b><span>Back row at Diamond. Earn the APEX title.</span></button>
         <button class="origin-btn" type="button" data-origin="hustler"><b>The Hustler</b><span>A corner, $60, and a mouth on you.</span></button>
         <button class="origin-btn" type="button" data-origin="debtor"><b>The Debtor</b><span>$48,000 down. The collector is walking.</span></button>
         <button class="origin-btn" type="button" data-origin="wick"><b>The Marked</b><span>Open contract. Everyone wants the money.</span></button>
@@ -629,7 +630,7 @@
      frame island_speedway.js publishes; both run at world-build time so either
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=circuit1y"></script>
+<script src="src/city/island_speedway.js?v=circuit1z"></script>
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
 <script src="src/city/island_military.js?v=livebase5w11"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
@@ -684,7 +685,7 @@
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=arrest4"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=hub3"></script>
+<script src="src/city/worldstate.js?v=hub4"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
@@ -791,7 +792,7 @@
 <script src="src/systems/lockon.js?v=lockon2"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
 <script src="src/city/careers.js?v=citysec3r"></script>
-<script src="src/city/activities.js?v=hub3"></script>
+<script src="src/city/activities.js?v=hub4"></script>
 <script src="src/city/heists.js?v=night6"></script>
 <script src="src/city/interactions.js?v=binary3"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
@@ -920,9 +921,9 @@
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=sim3"></script>
 <script src="src/city/race_livery.js?v=sim2"></script>
-<script src="src/city/racing.js?v=sim3"></script>
+<script src="src/city/racing.js?v=sim4"></script>
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
-<script src="src/city/racedrivers.js?v=race1"></script>
+<script src="src/city/racedrivers.js?v=race2"></script>
 <script src="src/city/racehud.js?v=race2"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <script src="src/systems/custom_dialogue.js?v=ce1"></script>
@@ -990,7 +991,7 @@
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=binary3w10x"></script>
+<script src="src/city/origins.js?v=binary3w11x"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=story3"></script>
@@ -1286,10 +1287,11 @@
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=pkg6"></script>
+<script src="src/core/packages.js?v=pkg7"></script>
 <script src="src/games/casino.js?v=pkg1"></script>
 <script src="src/games/ocean.js?v=pkg1"></script>
-<script src="src/games/racing.js?v=pkg2"></script>
+<script src="src/games/racing.js?v=pkg3"></script>
+<script src="src/games/warband.js?v=pkg1"></script>
 <script src="src/games/boxing.js?v=pkg1y"></script>
 <script src="src/games/airport.js?v=pkg2"></script>
 <script src="src/games/military.js?v=pkg2"></script>

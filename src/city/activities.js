@@ -936,6 +936,9 @@
         finish. If the player is not in a car it offers a fully
         simulated race instead (rivals + bet + payout).
   ========================================================= */
+  // Load-order-safe declaration: activities.js parses before racedrivers.js,
+  // so the latter consumes this handshake when it installs the course API.
+  (CBZ._raceCourseConsumers || (CBZ._raceCourseConsumers = Object.create(null)))["street-race"] = true;
   let raceRun = null, raceBeacons = [];
   CBZ.cityStreetRaceState = function () { return raceRun; };   // probe/debug peek (headless gates)
   function clearRaceBeacons() {
@@ -1024,10 +1027,10 @@
     return path;
   }
   const RIVAL_NAMES = ["Crimson", "Viper", "Ghost", "Nitro"];
-  function spawnStreetRivals(s, course) {
+  function spawnStreetRivals(s, course, courseModel) {
     const RD = CBZ.raceDrivers;
     if (!RD || !RD.enabled() || !CBZ.cityMakeCar) return null;
-    const path = buildRivalPath(course);
+    const path = courseModel ? courseModel.path : buildRivalPath(course);
     if (path.length < 2) return null;
     const P = CBZ.player, car = P._vehicle;
     const h = (car && car.heading) || 0;
@@ -1049,8 +1052,11 @@
         name: name, number: number,
         skill: 0.68 + i * 0.07 + Math.min(0.12, s.driverRep * 0.001),
         aggr: 0.55 + i * 0.1, consistency: 0.55 + i * 0.08,
-        tag: "street", mode: "path",
-        path: path.map((p) => ({ x: p.x, z: p.z, cp: p.cp })),   // own copy per driver
+        tag: "street",
+        // One immutable path-course object feeds every driver and the scorer.
+        // Legacy fields remain the feature-detected degrade path.
+        course: courseModel,
+        mode: "path", path: courseModel ? null : path.map((p) => ({ x: p.x, z: p.z, cp: p.cp })),
         cpTotal: course.length,
       });
       if (m) { m.state = "race"; drivers.push(m); }
@@ -1075,13 +1081,18 @@
     clearRaceBeacons();
     // REAL rivals when the driver brain is loaded; virtual progress ghosts as
     // the one-line-revert fallback (CBZ.CONFIG.RACE_REAL_DRIVERS = false).
-    const rivalDrivers = spawnStreetRivals(s, course);
+    const path = buildRivalPath(course);
+    const courseModel = CBZ.raceKit && CBZ.raceKit.pathCourse
+      ? CBZ.raceKit.pathCourse("street-live", course, path)
+      : null;
+    if (CBZ.raceKit && CBZ.raceKit.adopt) CBZ.raceKit.adopt("street-race");
+    const rivalDrivers = spawnStreetRivals(s, course, courseModel);
     const rivals = [];
     if (!rivalDrivers) {
       for (let i = 0; i < s.rivalCount; i++) rivals.push({ name: RIVAL_NAMES[i] || "Rival", prog: 0, skill: 0.9 + Math.random() * 0.35 });
     }
     raceRun = {
-      setup: s, stage: "live", course, cp: 0, rivals, rivalDrivers,
+      setup: s, stage: "live", course, courseModel, cp: 0, rivals, rivalDrivers,
       t: 0, limit: 18 + course.length * 8, startPos: { x: CBZ.player.pos.x, z: CBZ.player.pos.z },
       playerProg: 0, totalLen: course.length,
     };
@@ -1101,10 +1112,10 @@
         progress: function () { return raceRun ? playerStreetProgress(raceRun) : 0; },
         speed: function () { const c = CBZ.player && CBZ.player._vehicle; return Math.abs((c && c.v) || 0); },
       });
-      // trackLen ≈ course span so progress gaps convert to honest seconds
+      // The same driven path that steers rivals prices progress gaps.
       let L = 0;
-      for (let i = 1; i < course.length; i++) L += Math.hypot(course[i].x - course[i - 1].x, course[i].z - course[i - 1].z);
-      raceRun.kit = CBZ.raceKit.create({ laps: 1, trackLen: Math.max(120, L), entrants: entrants });
+      if (!courseModel) for (let i = 1; i < course.length; i++) L += Math.hypot(course[i].x - course[i - 1].x, course[i].z - course[i - 1].z);
+      raceRun.kit = CBZ.raceKit.create({ course: courseModel, laps: 1, trackLen: courseModel ? undefined : Math.max(120, L), entrants: entrants });
       if (CBZ.raceHud) { CBZ.raceHud.show(); }
     }
     // place first two beacons

@@ -209,14 +209,30 @@
       "border:2px solid rgba(232,182,76,.4);border-radius:14px;color:#fff6e2;" +
       "font-family:'Trebuchet MS','Segoe UI',Verdana,system-ui,sans-serif;pointer-events:auto;";
     panelEl.addEventListener("click", (e) => {
-      const act = e.target && e.target.getAttribute && e.target.getAttribute("data-act");
-      if (act && panelHandlers && panelHandlers[act]) panelHandlers[act]();
+      const el = e.target && e.target.closest ? e.target.closest("[data-act]") : e.target;
+      const act = el && el.getAttribute && el.getAttribute("data-act");
+      // Pass the actual control. Package rows commonly carry data-i/data-s;
+      // without this, every repeated TAKE/STAKE button silently selected row 0.
+      if (act && panelHandlers && panelHandlers[act]) panelHandlers[act](el, e);
     });
     document.body.appendChild(panelEl);
     window.addEventListener("keydown", (e) => { if (e.code === "Escape" && panelEl.style.display !== "none") closePanel(); });
     return panelEl;
   }
-  function openPanel(html, handlers) { ensurePanel(); panelHandlers = handlers || null; panelEl.innerHTML = html; panelEl.style.display = "block"; }
+  function openPanel(html, bodyOrHandlers, handlers) {
+    ensurePanel();
+    // Both are sanctioned authoring forms:
+    //   panel(html, handlers)
+    //   panel(headerHtml, bodyHtml, handlers)
+    // The second form already had many honest consumers, but JavaScript's
+    // ignored extra argument made their body become the handler table.
+    if (typeof bodyOrHandlers === "string") {
+      html = (html || "") + bodyOrHandlers;
+      panelHandlers = handlers || null;
+    } else panelHandlers = bodyOrHandlers || null;
+    panelEl.innerHTML = html || "";
+    panelEl.style.display = "block";
+  }
   function closePanel() { if (!panelEl) return; panelEl.style.display = "none"; panelEl.innerHTML = ""; panelHandlers = null; }
 
   /* ---------------- ctx factory ------------------------------------------ */

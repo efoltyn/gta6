@@ -309,8 +309,36 @@ const PASS = `(() => {
       const oa = CBZ.cityOriginAudit();
       out.origins = oa.stories + " stories (" + oa.composed + " composed / " + oa.bespoke + " bespoke/" + (oa.resumeOnly || 0) + " resume)";
       if (oa.bespoke > 3) out.fails.push("BESPOKE ORIGIN SCENES rose to " + oa.bespoke + " (ratchet 3)");
-      if (oa.stories < 9) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 9)");
+      if (oa.stories < 10) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 10)");
     }
+    // RACE AUTHORING TOOL: Diamond's legal weekend, APEX Night and the street
+    // activity must all consume a course instead of copying track/path math.
+    // legacy is the missing-adopter count, so zero is a structural pin.
+    if (CBZ.raceToolAudit) {
+      const ra = CBZ.raceToolAudit();
+      out.raceTools = ra.courses + " courses " + ra.adopted + "/" + ra.required + " adopted legacy=" + ra.legacy;
+      if (ra.legacy !== 0) out.fails.push("RACE COURSE CONSUMERS MISSING: " + ra.missing.join(","));
+      if (ra.adopted < 3) out.fails.push("race-course adoption fell to " + ra.adopted + " (ratchet 3)");
+    } else out.fails.push("raceToolAudit missing");
+    // The Racer story is an event/ledger consumer, not a second championship
+    // save. Five beats are authored; durable truth has exactly two owners:
+    // legal and APEX records in worldstate.
+    if (CBZ.racerCareerAudit) {
+      const rc = CBZ.racerCareerAudit();
+      out.racerCareer = rc.stages + " stages sources=" + rc.persistentSources + " private=" + rc.privateRaceState;
+      if (rc.stages !== 5 || rc.persistentSources !== 2 || rc.privateRaceState !== 0) {
+        out.fails.push("RACER CAREER CONTRACT DRIFT: " + JSON.stringify(rc));
+      }
+    } else out.fails.push("racerCareerAudit missing");
+    // WAR BAND proves the package boundary can express a complete game from
+    // real city actors, combat, money, missions and persistence in one file.
+    // The gate pins its rule surface, not a live battle outcome.
+    if (CBZ.games && CBZ.games._defs) {
+      const wd = CBZ.games._defs().find((d) => d && d.id === "warband");
+      const wr = wd && wd.api && wd.api.rules;
+      out.warband = wr ? ("company=" + wr.maxCompany + " banners=" + wr.winBanners) : "missing";
+      if (!wr || wr.maxCompany !== 8 || wr.winBanners !== 3) out.fails.push("WAR BAND PACKAGE/RULES MISSING");
+    } else out.fails.push("game package registry missing");
     // airside: service vehicles must never be on the active runway.
     // onRunwayRaw is printed beside it deliberately — the ratchet must not be
     // satisfiable by widening what counts as "cleared for the runway".
@@ -574,7 +602,10 @@ const PASS = `(() => {
     if (CBZ.cityBeachSeats) { const b = CBZ.cityBeachSeats(); out.beachSeats = b.loungers + "L/" + b.deckchairs + "D/" + b.occupied + "used"; }
     if (CBZ.factionAudit) out.factions = CBZ.factionAudit();
     if (CBZ.missionAudit) { const m = CBZ.missionAudit(); out.missions = (m && m.legacy != null) ? m.legacy : m; }
-  } catch (e) { out.fails.push("ratchet block threw: " + (e && e.message)); }
+  } catch (e) {
+    const where = e && e.stack ? String(e.stack).split("\\n").slice(0, 2).join(" @ ") : "";
+    out.fails.push("ratchet block threw: " + (e && e.message) + (where ? " [" + where + "]" : ""));
+  }
 
   out.peds = (CBZ.cityPeds || []).length;
   return out;
@@ -613,6 +644,7 @@ async function runSeed(seed, label) {
   // an audit whose output nobody can see is one nobody will notice regressing.
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
+  tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"} | warband ${r.warband || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
   tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);

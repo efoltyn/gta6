@@ -232,6 +232,109 @@
   CBZ.cityRacing = cityRacing;
 
   // ============================================================
+  //  PLAYER RACER CAREER — story made from engine facts.
+  //
+  //  No private race state lives here. The career reads worldstate.js's
+  //  durable race records, which are written by the legal speedway, APEX and
+  //  street-race event emitters. Adding a future race therefore costs one
+  //  `cityEvent("race-finish", ...)`, not another career integration.
+  // ============================================================
+  let careerMission = null, careerCheckT = 0;
+  const CAREER_ID = "origin_racer_career";
+  function careerWorld() {
+    try { return CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : (g && g.cityWorld) || null; }
+    catch (e) { return (g && g.cityWorld) || null; }
+  }
+  function careerRecord(kind) {
+    const w = careerWorld();
+    return (w && w.records && w.records.races && w.records.races[kind]) || {};
+  }
+  function careerTarget() {
+    const c = (CBZ.raceKit && CBZ.raceKit.course && CBZ.raceKit.course("speedway")) || CBZ.speedwayCourse;
+    if (c && typeof c.line === "function") {
+      const f = c.line(c.startT || 0), out = (c.trackHalf || 11) + 18;
+      return { x: f.x + f.nx * out, z: f.z + f.nz * out };
+    }
+    return { x: SPEED.cx, z: SPEED.cz };
+  }
+  function careerComplete() { return (careerRecord("apex").titles || 0) >= 1; }
+  function careerSnapshot() {
+    const legal = careerRecord("legal"), apex = careerRecord("apex");
+    return {
+      legalStarts: legal.starts || 0,
+      legalPodiums: legal.podiums || 0,
+      apexStarts: apex.starts || 0,
+      apexPodiums: apex.podiums || 0,
+      apexWins: apex.wins || 0,
+      apexTitles: apex.titles || 0,
+      complete: careerComplete(),
+      stage: careerMission && careerMission.alive && careerMission.alive() ? careerMission.stageId() : null,
+    };
+  }
+  function startRacerCareer(force) {
+    if (!CBZ.mission || !CBZ.mission.start) return null;
+    if (careerComplete()) return null;
+    if (careerMission && careerMission.alive && careerMission.alive()) return careerMission;
+    if (!force && (!g || g.cityOrigin !== "racer")) return null;
+    careerMission = CBZ.mission.start({
+      id: CAREER_ID,
+      title: "Rookie to APEX Champion",
+      giver: "Diamond Speedway",
+      brief: "Earn the right to the paddock, then take the whole night.",
+      reward: { respect: 20 },
+      doneText: "APEX CHAMPION — you arrived as a rookie and own the night.",
+      stages: [
+        {
+          id: "report", goal: "reach", text: "Report to the Diamond Speedway paddock",
+          at: careerTarget, radius: 28,
+        },
+        {
+          id: "legal-finish", goal: "custom", text: "Finish a legal Diamond Speedway race",
+          done: function () { return (careerRecord("legal").starts || 0) >= 1; },
+        },
+        {
+          id: "apex-podium", goal: "custom", text: "Finish on the APEX Night podium",
+          done: function () { return (careerRecord("apex").podiums || 0) >= 1; },
+        },
+        {
+          id: "apex-win", goal: "custom", text: "Win an APEX Night race",
+          done: function () { return (careerRecord("apex").wins || 0) >= 1; },
+        },
+        {
+          id: "apex-title", goal: "custom", text: "Win the three-race APEX Night title",
+          done: function () { return (careerRecord("apex").titles || 0) >= 1; },
+        },
+      ],
+      onComplete: function () { careerMission = null; },
+    });
+    return careerMission;
+  }
+  CBZ.cityRacerCareer = {
+    start: function () { return startRacerCareer(true); },
+    target: careerTarget,
+    state: careerSnapshot,
+    complete: careerComplete,
+  };
+  CBZ.racerCareerAudit = function () {
+    const s = careerSnapshot();
+    return { stages: 5, persistentSources: 2, privateRaceState: 0, complete: s.complete, stage: s.stage };
+  };
+  // Resume the story for this character after reload/swap. If the player
+  // changes character, retire the old foreground card instead of leaking it
+  // across identities.
+  CBZ.onUpdate(35.84, function (dt) {
+    if (!g || g.mode !== "city") return;
+    careerCheckT -= dt; if (careerCheckT > 0) return; careerCheckT = 0.8;
+    const isRacer = g.cityOrigin === "racer";
+    if (!isRacer) {
+      if (careerMission && careerMission.alive && careerMission.alive() && careerMission.retire) careerMission.retire("character changed");
+      careerMission = null;
+      return;
+    }
+    if (!careerComplete()) startRacerCareer(false);
+  });
+
+  // ============================================================
   //  PERMANENCE — racing.js's wiring into city/identity.js (this wave's new
   //  registry, feature-detected since cross-file load order isn't guaranteed).
   //  Fixes the racing-permanence bug: a killed racer used to just vanish from

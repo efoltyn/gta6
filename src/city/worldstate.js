@@ -27,6 +27,9 @@
   function now() { return Date.now ? Date.now() : 0; }
 
   function blankRecord() { return { starts: 0, wins: 0, losses: 0, profit: 0 }; }
+  function blankRaceRecord() {
+    return { starts: 0, wins: 0, losses: 0, podiums: 0, bestPlace: 0, titles: 0, profit: 0 };
+  }
 
   function fresh() {
     const factions = {
@@ -93,7 +96,7 @@
       jailHistory: { busts: 0, escapes: 0, visits: 0 },
       reputation: { driver: 0, fighter: 0, paintball: 0, hitman: 0, political: 0, gang: 0 },
       records: {
-        races: { legal: blankRecord(), street: blankRecord(), drag: blankRecord(), horse: blankRecord(), greyhound: blankRecord() },
+        races: { legal: blankRaceRecord(), apex: blankRaceRecord(), street: blankRaceRecord(), drag: blankRaceRecord(), horse: blankRaceRecord(), greyhound: blankRaceRecord() },
         fights: { boxing: blankRecord(), mma: blankRecord(), street: blankRecord() },
         betting: { wins: 0, losses: 0, profit: 0, staked: 0 },
         casino: { wins: 0, losses: 0, profit: 0, vip: 0 },
@@ -365,9 +368,20 @@
 
     if (type === "race-finish") {
       const kind = data.race || "street";
-      addRecord(w.records.races[kind] || (w.records.races[kind] = blankRecord()), !!data.win, data.profit || 0);
+      const rec = w.records.races[kind] || (w.records.races[kind] = blankRaceRecord());
+      addRecord(rec, !!data.win, data.profit || 0);
+      // Old saves acquire these fields lazily. Place is durable career truth;
+      // the live HUD/result table remains the presentation owner.
+      if (data.podium || (!data.dnf && data.place > 0 && data.place <= 3)) rec.podiums = (rec.podiums || 0) + 1;
+      if (!data.dnf && data.place > 0) rec.bestPlace = !rec.bestPlace ? data.place : Math.min(rec.bestPlace, data.place);
       if (data.illegal) w.criminalRecord.charges.unshift("illegal racing");
       addLog(w, type, (data.win ? "Won " : "Lost ") + kind + " race");
+    } else if (type === "race-title") {
+      const kind = data.race || "legal";
+      const rec = w.records.races[kind] || (w.records.races[kind] = blankRaceRecord());
+      rec.titles = (rec.titles || 0) + 1;
+      rec.profit = (rec.profit || 0) + (data.profit || 0);
+      addLog(w, type, "Won " + (data.title || kind + " title"));
     } else if (type === "fight-result") {
       const kind = data.fight || "boxing";
       addRecord(w.records.fights[kind] || (w.records.fights[kind] = blankRecord()), !!data.win, data.profit || 0);

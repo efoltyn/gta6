@@ -84,6 +84,100 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   // ============================================================
+  //  COURSE CONTRACT — the thing an authored race supplies.
+  //
+  //  Before this block, every caller had to understand the driver's private
+  //  plumbing (`mode`, `line`, `lineLen`, `trackHalf`, `path`, `cpTotal`) and
+  //  the scorer asked for the length again. That made APEX Night copy the
+  //  Diamond Speedway's complete oval/grid implementation just to run another
+  //  event on the SAME track. A course is now one small world-model object:
+  //  geometry + placement + scoring facts. Games author stakes and an arc;
+  //  they do not re-derive a venue.
+  //
+  //  Line course:
+  //    {mode:"line", line(t), lineLen:number|fn, trackHalf, gridSlot(i),
+  //     paramAt(x,z), surfaceY(x,z)}
+  //  Path course:
+  //    raceKit.pathCourse(id, checkpoints, drivenPath)
+  //
+  //  All fields remain accepted directly by spawn/create for the one-switch
+  //  degrade path. This is an adoption, not a flag-day rewrite.
+  // ============================================================
+  const COURSES = Object.create(null);
+  const COURSE_ADOPT = Object.create(null);
+  const COURSE_REQUIRED = ["speedway-weekend", "apex-night", "street-race"];
+
+  function courseNumber(c, key, fallback) {
+    if (!c) return fallback;
+    const v = c[key];
+    if (typeof v === "function" && (key === "lineLen" || key === "trackLen")) {
+      try { const n = Number(v()); return Number.isFinite(n) ? n : fallback; } catch (e) { return fallback; }
+    }
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function normalizeCourse(id, spec) {
+    if (!spec) return null;
+    const c = Object.assign({}, spec);
+    c.id = id || c.id || "course";
+    c.mode = c.mode || (c.path ? "path" : "line");
+    if (c.mode === "line" && typeof c.line !== "function") return null;
+    if (c.mode === "path" && (!Array.isArray(c.path) || c.path.length < 2)) return null;
+    return c;
+  }
+  function registerCourse(id, spec) {
+    if (!id) return null;
+    const c = normalizeCourse(id, spec);
+    if (!c) return null;
+    COURSES[id] = c;
+    return c;
+  }
+  function course(id) {
+    if (id && typeof id === "object") return normalizeCourse(id.id, id);
+    if (!id) return null;
+    // island_speedway.js loads before this file. Feature-detect the published
+    // course too so a partial/dev harness can install it after us.
+    if (!COURSES[id] && id === "speedway" && CBZ.speedwayCourse) registerCourse(id, CBZ.speedwayCourse);
+    return COURSES[id] || null;
+  }
+  function pathLength(path) {
+    let n = 0;
+    for (let i = 1; i < (path || []).length; i++) {
+      n += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+    }
+    return Math.max(1, n);
+  }
+  function pathCourse(id, checkpoints, path, opts) {
+    opts = opts || {};
+    const c = normalizeCourse(id, {
+      mode: "path",
+      path: (path || []).map(function (p) { return { x: p.x, z: p.z, cp: p.cp == null ? null : p.cp }; }),
+      checkpoints: (checkpoints || []).map(function (p) { return { x: p.x, z: p.z }; }),
+      cpTotal: (checkpoints || []).length,
+      lineLen: Math.max(120, pathLength(path)),
+    });
+    if (!c) return null;
+    if (opts.register !== false && id) COURSES[id] = c;
+    return c;
+  }
+  function adoptCourse(id) {
+    if (!id) return;
+    COURSE_ADOPT[id] = true;
+    (CBZ._raceCourseConsumers || (CBZ._raceCourseConsumers = Object.create(null)))[id] = true;
+  }
+  function raceToolAudit() {
+    const declared = CBZ._raceCourseConsumers || {};
+    const missing = COURSE_REQUIRED.filter(function (id) { return !COURSE_ADOPT[id] && !declared[id]; });
+    return {
+      courses: Object.keys(COURSES).length,
+      adopted: COURSE_REQUIRED.length - missing.length,
+      required: COURSE_REQUIRED.length,
+      legacy: missing.length,
+      missing: missing,
+    };
+  }
+
+  // ============================================================
   //  THE DRIVER LIST
   // ============================================================
   const D = { list: [] };
@@ -115,6 +209,19 @@
      }                                                                       */
   function spawn(opts) {
     if (!CBZ.cityMakeCar || !CBZ.city || !CBZ.city.arena) return null;
+    const C = course(opts.course);
+    if (C) {
+      // Clone the option row: callers commonly reuse it to spawn a field, and
+      // course expansion must never leak mutable driver state back into it.
+      opts = Object.assign({}, opts, {
+        mode: C.mode,
+        line: C.line || null,
+        lineLen: courseNumber(C, "lineLen", 700),
+        trackHalf: courseNumber(C, "trackHalf", 7),
+        path: C.path || null,
+        cpTotal: courseNumber(C, "cpTotal", 0),
+      });
+    }
     const model = opts.model || modelForStyle(opts.style || "muscle", opts.color);
     let car = null;
     try { car = CBZ.cityMakeCar(opts.x, opts.z, opts.heading || 0, false, model, 0.3); } catch (e) { return null; }
@@ -474,9 +581,11 @@
   //               speed:    fn -> m/s }]
   // ============================================================
   function createRace(opts) {
+    const C = course(opts.course);
     const kit = {
       laps: opts.laps || 1,
-      trackLen: opts.trackLen || 700,        // metres per progress-unit (gap→seconds)
+      trackLen: opts.trackLen || courseNumber(C, "lineLen", 700), // metres per progress-unit (gap→seconds)
+      course: C || null,
       entrants: opts.entrants.map(function (e) {
         return {
           id: e.id, name: e.name, number: e.number, color: e.color,
@@ -556,5 +665,17 @@
     list: function (tag) { return tag ? D.list.filter((m) => m.tag === tag) : D.list.slice(); },
     enabled: function () { return CBZ.CONFIG.RACE_REAL_DRIVERS !== false; },
   };
-  CBZ.raceKit = { create: createRace };
+  CBZ.raceKit = {
+    create: createRace,
+    registerCourse: registerCourse,
+    course: course,
+    pathCourse: pathCourse,
+    adopt: adoptCourse,
+    courseLength: function (c) { return courseNumber(course(c), "lineLen", 0); },
+  };
+  CBZ.raceToolAudit = raceToolAudit;
+  if (CBZ.speedwayCourse) {
+    registerCourse("speedway", CBZ.speedwayCourse);
+    adoptCourse("speedway-weekend");
+  }
 })();

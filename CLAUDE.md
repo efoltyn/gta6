@@ -1464,6 +1464,19 @@ or a package using capabilities, never another vertical stack.
   (`data-i`, `data-s`) for APEX, airport and every existing package instead of
   teaching each game another workaround.
 
+**MERGE CASE — this is the code GPT stands behind.** Ship the shared course,
+Racer career, War Band package and package-panel correction as one dogfood proof:
+the course replaces copied track arithmetic for three consumers; Racer reads
+durable results instead of owning a parallel championship; War Band composes the
+real character, combat, wallet and mission systems instead of redrawing them; and
+the panel correction is backward-compatible with both call forms already present
+in packages. The half-built tree runtime was deliberately deleted before this
+merge. `treesMODELCODE.js` is an unwired local reference, not a runtime dependency
+and not part of this case. The ratchets are the claim: race adoption 3 with legacy
+0, Racer 5 stages over 2 durable sources with private state 0, and War Band company
+8 / banners 3. If those numbers do not hold, do not merge around them—fix the
+shared boundary.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a

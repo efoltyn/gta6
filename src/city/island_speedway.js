@@ -2280,6 +2280,23 @@
     return { x, z, heading: trackFrame(t).heading };
   }
 
+  // THE SPEEDWAY AS A TOOL. A second event asks for this object instead of
+  // copying 120 lines of tri-oval constants, a nearest-point solver and grid
+  // arithmetic. racedrivers.js registers it as `raceKit.course("speedway")`;
+  // publishing the plain object here keeps load order degrade-safe.
+  CBZ.speedwayCourse = {
+    id: "speedway",
+    mode: "line",
+    line: trackFrame,
+    lineLen: lineLen,
+    trackHalf: TRACK_W / 2,
+    gridSlot: gridSlot,
+    paramAt: paramAt,
+    surfaceY: speedwaySurfaceY,
+    startT: SF_T,
+  };
+  (CBZ._raceCourseConsumers || (CBZ._raceCourseConsumers = Object.create(null)))["speedway-weekend"] = true;
+
   function startRaceRD() {
     const P = CBZ.player, car = P._vehicle;
     if (!car) { note("Get in a car to race.", 1.8); return; }
@@ -2307,8 +2324,7 @@
         aggr: 0.35 + (racer.skill || 0.8) * 0.45,
         consistency: 0.55 + (racer.skill || 0.8) * 0.4,
         lane0: (i % 2 === 0 ? 1 : -1) * 2.6,     // hold your grid column off the launch
-        tag: "speedway", mode: "line",
-        line: trackFrame, lineLen: lineLen(), trackHalf: TRACK_W / 2,
+        tag: "speedway", course: "speedway",
         playerProgress: function () { return RACE.playerTotal; },
       });
       if (!m) continue;
@@ -2349,7 +2365,7 @@
       speed: function () { const c = CBZ.player && CBZ.player._vehicle; return Math.abs((c && c.v) || 0); },
       lapFloor0: -1,
     });
-    RACE.kit = CBZ.raceKit.create({ laps: RACE.laps, trackLen: lineLen(), entrants: entrants });
+    RACE.kit = CBZ.raceKit.create({ course: "speedway", laps: RACE.laps, entrants: entrants });
 
     if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
     const rnd = RC ? (RC.round + 1) : 1;
@@ -2439,7 +2455,9 @@
     const roundMul = RC ? (1 + RC.round * 0.10) : 1;
     const purse = opts.dnf ? 0 : Math.max(500, Math.round(LAP_PURSE * (7 - Math.min(7, place)) / 6 * RACE.laps * roundMul));
     if (purse && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(purse);
-    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(place <= 1 ? 12 : place <= 3 ? 5 : 1);
+    // cityEvent below owns respect/reputation when present; only old/partial
+    // harnesses use the direct fallback (never award the same finish twice).
+    if (!CBZ.cityEvent && CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(place <= 1 ? 12 : place <= 3 ? 5 : 1);
 
     // === settle the ticket-office book on this round's winner ===
     const w = order[0];
@@ -2470,6 +2488,20 @@
     }
     const ord = place === 1 ? "1st — CHECKERED FLAG!" : place === 2 ? "2nd" : place === 3 ? "3rd" : place + "th";
     note(opts.dnf ? "DNF — the field takes the money." : ("FINISH: " + ord + "  +$" + fmt(purse)), 4.0);
+    // The career ledger hears the same result the player just saw. Previously
+    // Diamond Speedway awarded a private NPC championship and paid cash but
+    // left no durable evidence that the PLAYER had raced here.
+    if (CBZ.cityEvent) CBZ.cityEvent("race-finish", {
+      race: "legal",
+      place: place,
+      podium: !opts.dnf && place <= 3,
+      win: !opts.dnf && place === 1,
+      dnf: !!opts.dnf,
+      profit: purse,
+      driver: opts.dnf ? 0 : place === 1 ? 8 : place <= 3 ? 5 : 2,
+      respect: opts.dnf ? 0 : place === 1 ? 12 : place <= 3 ? 5 : 1,
+      message: opts.dnf ? "Diamond Speedway DNF." : "Diamond Speedway P" + place + ".",
+    });
 
     // === SEASON FINALE: crown the champion when the calendar wraps ===
     if (RC && RC.round === 0 && RC.standings) {

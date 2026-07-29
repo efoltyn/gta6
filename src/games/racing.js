@@ -22,11 +22,9 @@
              CBZ.raceKit (laps/positions/gaps/best), CBZ.raceHud (the live
              strip + red-light sequence), CBZ.cityMakeCar / cityEnterVehicle
              (the player drives a REAL vehicle — own ride or a paddock
-             loaner), the tri-oval TRACK itself (its centreline is
-             re-derived read-only from island_speedway's fixed constants —
-             the same accepted pattern racedrivers.js uses to mirror
-             vehicles.js carDynamics; the oval is a literal, not seeded, so
-             this is byte-identical every seed), and CBZ.cityRacing's roster.
+             loaner), CBZ.raceKit.course("speedway") (the actual island's
+             frame/grid/nearest-point/length contract), and
+             CBZ.cityRacing's roster.
      ADDED   the EVENT loop (qualify→grid→race→purse→bet→championship night),
              the salvaged ECON math from games/racing.html (entry/purse/odds/
              points/champion bonus/jump penalty), the paddock dressing
@@ -63,58 +61,37 @@
   function note(m, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, s || 2.2); }
 
   /* ============================================================
-     MIRRORED TRACK GEOMETRY — read-only re-derivation of the
-     island_speedway.js tri-oval. These are the SAME fixed literals
-     the island uses (CX/CZ are not seeded — the speedway is always at
-     one place), so the centreline is byte-identical across seeds and
-     clients (determinism law #12). Kept in one block so a drift is a
-     one-line fix, exactly like racedrivers.js's carDynamics mirror.
-  ============================================================ */
-  // stage-2 dial: the speedway CAN move now — mirror its anchor exactly
-  // (island_speedway.js routes the same worldOff) so the centreline stays
-  // byte-identical to the island's own frame at any offset.
-  const _SPOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
-  const CX = 490 + _SPOFF.dx, CZ = -350 + _SPOFF.dz, OVAL_RX = 150, OVAL_RZ = 103, TRIBULGE = 12, TRACK_W = 22, SF_T = 0.0;
+     THE TRACK IS A WORLD-MODEL OBJECT, NOT PACKAGE CODE.
 
-  // world-space frame at param t — MATCHES island_speedway CBZ_FRAME exactly
-  // (race normal convention nx:-tz, nz:tx) so CBZ.raceDrivers line-mode and the
-  // grid geometry behave precisely as the island's own weekend already proved.
-  function frame(t) {
-    const a = t * Math.PI * 2;
-    let x = CX + Math.cos(a) * OVAL_RX;
-    let z = CZ + Math.sin(a) * OVAL_RZ;
-    z += Math.max(0, Math.sin(a)) * Math.max(0, Math.sin(a)) * TRIBULGE;
-    const a2 = (t + 0.0015) * Math.PI * 2;
-    let x2 = CX + Math.cos(a2) * OVAL_RX, z2 = CZ + Math.sin(a2) * OVAL_RZ;
-    z2 += Math.max(0, Math.sin(a2)) * Math.max(0, Math.sin(a2)) * TRIBULGE;
-    const dx = x2 - x, dz = z2 - z, len = Math.hypot(dx, dz) || 1;
-    const tx = dx / len, tz = dz / len;
-    return { x, z, tx, tz, nx: -tz, nz: tx, heading: Math.atan2(tx, tz) };
+     This package used to mirror the island's oval constants, spline, length
+     sampler, nearest-point scan and grid solver here. That was precisely the
+     pile-of-layers failure this package system is meant to prevent. The island
+     now publishes one course; APEX contributes only event rules and dressing.
+  ============================================================ */
+  function speedwayCourse() {
+    return (CBZ.raceKit && CBZ.raceKit.course && CBZ.raceKit.course("speedway")) || CBZ.speedwayCourse || null;
   }
-  let LINE_LEN = 0;
+  function frame(t) {
+    const c = speedwayCourse();
+    if (!c || typeof c.line !== "function") return { x: 0, z: 0, tx: 0, tz: 1, nx: -1, nz: 0, heading: 0 };
+    return c.line(t);
+  }
   function lineLen() {
-    if (LINE_LEN) return LINE_LEN;
-    let L = 0, p = frame(0);
-    for (let i = 1; i <= 96; i++) { const f = frame(i / 96); L += Math.hypot(f.x - p.x, f.z - p.z); p = f; }
-    return (LINE_LEN = L);
+    const c = speedwayCourse(); if (!c) return 700;
+    return typeof c.lineLen === "function" ? c.lineLen() : (c.lineLen || 700);
   }
   function paramAt(x, z) {
-    let best = 0, bd = 1e9;
-    for (let i = 0; i < 64; i++) { const t = i / 64, f = frame(t); const d = (x - f.x) * (x - f.x) + (z - f.z) * (z - f.z); if (d < bd) { bd = d; best = t; } }
-    return best;
+    const c = speedwayCourse();
+    return c && typeof c.paramAt === "function" ? c.paramAt(x, z) : 0;
   }
-  // grid slot i (0 = pole) — the SAME staggered two-column geometry
-  // island_speedway.gridSlot() lays down, so the painted grid boxes line up.
   function gridSlot(i) {
-    const f = frame(SF_T);
-    const row = i >> 1, lane = (i % 2 === 0) ? 1 : -1;
-    const COLW = 2.6, ROWGAP = 6.0;
-    const back = -(row * ROWGAP + (lane > 0 ? 0 : ROWGAP * 0.5) + 3.0);
-    const x = f.x + f.tx * back + f.nx * (lane * COLW);
-    const z = f.z + f.tz * back + f.nz * (lane * COLW);
-    const t = ((back / lineLen()) % 1 + 1) % 1;
-    return { x, z, heading: frame(t).heading };
+    const c = speedwayCourse();
+    return c && typeof c.gridSlot === "function" ? c.gridSlot(i) : { x: 0, z: -3 - i * 6, heading: 0 };
   }
+  function trackWidth() { const c = speedwayCourse(); return c ? (c.trackHalf || 11) * 2 : 22; }
+  function startT() { const c = speedwayCourse(); return c && c.startT != null ? c.startT : 0; }
+  (CBZ._raceCourseConsumers || (CBZ._raceCourseConsumers = Object.create(null)))["apex-night"] = true;
+  if (CBZ.raceKit && CBZ.raceKit.adopt) CBZ.raceKit.adopt("apex-night");
 
   /* ============================================================
      SALVAGED EVENT ECONOMY — ported verbatim from games/racing.html's
@@ -337,7 +314,7 @@
           style: r.homeStyle || "muscle", color: r.teamColor, livery: liveryFor(r),
           name: r.name, number: r.number, skill: r.skill || 0.8,
           aggr: 0.35 + (r.skill || 0.8) * 0.45, consistency: 0.55 + (r.skill || 0.8) * 0.4,
-          lane0: lane0, tag: "apex", mode: "line", line: frame, lineLen: lineLen(), trackHalf: TRACK_W / 2,
+          lane0: lane0, tag: "apex", course: "speedway",
           playerProgress: function () { return NIGHT.playerTotal; },
         });
         if (m) { m.laps = -1; m._racer = r; rec = { racer: r, real: m, ghost: null }; }
@@ -373,7 +350,7 @@
       progress: function () { return NIGHT.playerTotal; },
       speed: function () { const c = playerCar(); return Math.abs((c && c.v) || 0); }, lapFloor0: -1,
     });
-    NIGHT.kit = CBZ.raceKit ? CBZ.raceKit.create({ laps: ECON.LAPS, trackLen: lineLen(), entrants: entrants }) : null;
+    NIGHT.kit = CBZ.raceKit ? CBZ.raceKit.create({ course: "speedway", laps: ECON.LAPS, entrants: entrants }) : null;
     if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
     setGantry(0, false);
     note("RACE " + (NIGHT.raceIx + 1) + " — lights are coming on. Hold the brake!", 3.0);
@@ -423,6 +400,16 @@
     NIGHT.bet = null;
 
     const st = bag(); st.races++; if (place === 1 && !pRow.dnf) st.wins++; if (place <= 3 && !pRow.dnf) st.podiums++; st.points = NIGHT.playerPts; save();
+    if (CBZ.cityEvent) CBZ.cityEvent("race-finish", {
+      race: "apex",
+      place: place,
+      podium: !pRow.dnf && place <= 3,
+      win: !pRow.dnf && place === 1,
+      dnf: !!pRow.dnf,
+      profit: purse + betPay,
+      driver: pRow.dnf ? 0 : place === 1 ? 8 : place <= 3 ? 5 : 2,
+      message: pRow.dnf ? "APEX Night DNF." : "APEX Night P" + place + ".",
+    });
 
     // podium toast + checkered flag wave
     waveFlag(2);
@@ -448,7 +435,13 @@
     let best = NIGHT.playerPts, champ = "YOU", isPlayer = true;
     for (const r of rosterField()) { const p = NIGHT.aiPts[r.number] || 0; if (p > best) { best = p; champ = r.name; isPlayer = false; } }
     let bonus = 0;
-    if (isPlayer && !walked) { bonus = ECON.championBonus; C.wallet.give(bonus, "APEX NIGHT champion bonus"); NIGHT.night$ += bonus; bag().titles++; }
+    if (isPlayer && !walked) {
+      bonus = ECON.championBonus; C.wallet.give(bonus, "APEX NIGHT champion bonus"); NIGHT.night$ += bonus; bag().titles++;
+      if (CBZ.cityEvent) CBZ.cityEvent("race-title", {
+        race: "apex", title: "APEX NIGHT", profit: bonus, driver: 10,
+        message: "Won the APEX Night title.",
+      });
+    }
     const st = bag(); if (NIGHT.night$ > st.bestNet) st.bestNet = NIGHT.night$; save();
     NIGHT.active = false; NIGHT.phase = "idle"; clearLoaner();
     openEndingPanel(walked, isPlayer, champ, bonus);
@@ -561,8 +554,8 @@
   ============================================================ */
   // local point: b metres along track (+forward), s metres along the normal
   // (+ = inboard / infield, since the frame normal points to oval centre).
-  function localPt(b, s) { const f = frame(SF_T); return { x: f.tx * b + f.nx * s, z: f.tz * b + f.nz * s }; }
-  const HEAD = frame(SF_T).heading;
+  function localPt(b, s) { const f = frame(startT()); return { x: f.tx * b + f.nx * s, z: f.tz * b + f.nz * s }; }
+  const HEAD = frame(startT()).heading;
 
   function build(ctx, venue) {
     C = ctx; VENUE = venue;
@@ -570,6 +563,7 @@
 
     // ---- START GANTRY over the S/F line: posts → beam → 5 hanging light pods.
     //      (support chain: posts on the ground, beam on posts, pods on beam.)
+    const TRACK_W = trackWidth();
     const postO = localPt(0, TRACK_W / 2 + 1.7), postI = localPt(0, -(TRACK_W / 2 + 1.7));
     const steel = ctx.mat(0x3a4048);
     ctx.box(g, postO.x, 3.8, postO.z, 0.55, 7.6, 0.55, steel, HEAD);
@@ -759,7 +753,7 @@
         standTable() +
         "<div style='margin-top:8px'>" + btn("qual", "GO TO QUALIFYING", "#1c6b40") + btn("cashout", "CASH OUT & LEAVE", "#7c1626") + "</div>";
     }
-    C.hud.panel(head("APEX NIGHT", "Diamond Speedway"), body, {
+    C.hud.panel(head("APEX NIGHT", "Diamond Speedway") + body, {
       start: startNight, qual: beginQualify, cashout: function () { endNight(true); }, close: function () { C.hud.closePanel(); },
     });
   }
@@ -768,7 +762,7 @@
     if (!C) return;
     // standalone = opened from the bookmaker stand outside qualifying flow
     if (standalone && (!NIGHT.active || NIGHT.phase !== "bet" && NIGHT.grid == null)) {
-      C.hud.panel(head("THE BOOKMAKER", "side bets"),
+      C.hud.panel(head("THE BOOKMAKER", "side bets") +
         "<div style='margin:6px 0;font-size:13px'>Qualify first — your grid slot sets the odds. Back yourself to WIN; only P1 pays.</div>" + btn("close", "Close", "#26343c"),
         { close: function () { C.hud.closePanel(); } });
       return;
@@ -779,7 +773,7 @@
       "<br>Back yourself to WIN at <b style='color:#e8b64c'>" + odds + "x</b> — only a win pays.</div>";
     body += ECON.stakes.map((s) => s === 0 ? btn("stake", "NO BET", "#26343c") : btn("stake", "$" + s + " → " + fmtCash(s * odds), "#16301f", C.wallet.cash() < s, { s: s })).join("");
     body += "<div style='margin-top:8px'>" + btn("grid", "GO TO THE GRID →", "#c98f22") + "</div>";
-    C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + " · " + odds + "x"), body, {
+    C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + " · " + odds + "x") + body, {
       stake: function (el) {
         const s = el && el.getAttribute ? (el.getAttribute("data-s") | 0) : 0;
         if (s > 0) { if (!C.wallet.spend(s, "Side bet on yourself")) return; NIGHT.bet = { stake: s }; NIGHT.night$ -= s; note("" + fmtCash(s) + " on YOU @ " + odds + "x.", 2.2); }
@@ -813,7 +807,7 @@
     const body = "<div style='margin:2px 0 6px;font-size:13px'>" + msg + "</div>" + tbl +
       "<div style='font-size:12px;color:#9fb4dd;margin:4px 0'>Championship</div>" + standTable() +
       "<div style='margin-top:8px'>" + (last ? btn("finale", "FINAL RESULT →", "#c98f22") : btn("next", "NEXT RACE →", "#c98f22") + btn("cashout", "CASH OUT & LEAVE", "#7c1626")) + "</div>";
-    C.hud.panel(head("RACE " + (NIGHT.raceIx + 1) + " RESULT", "Diamond Speedway"), body, {
+    C.hud.panel(head("RACE " + (NIGHT.raceIx + 1) + " RESULT", "Diamond Speedway") + body, {
       next: function () { NIGHT.raceIx++; beginQualify(); },
       finale: function () { endNight(false); },
       cashout: function () { endNight(true); },
@@ -830,7 +824,7 @@
       "<br>Night net <b style='color:" + (NIGHT.night$ >= 0 ? "#7ed957" : "#ff9aa2") + "'>" + (NIGHT.night$ >= 0 ? "+" : "−") + fmtCash(Math.abs(NIGHT.night$)).slice(1) + "</b> · " +
       "career: " + st.wins + " wins · " + st.titles + " titles</div>" +
       btn("close", "DONE", "#1c6b40");
-    C.hud.panel(head("APEX NIGHT", "the night is over"), body, { close: function () { C.hud.closePanel(); } });
+    C.hud.panel(head("APEX NIGHT", "the night is over") + body, { close: function () { C.hud.closePanel(); } });
   }
 
   /* ============================================================
@@ -849,13 +843,13 @@
         const regs = A.regions || (CBZ.city && CBZ.city.regions) || [];
         const has = regs.some((r) => r && (r.biome === "speedway" || /speedway/i.test(r.name || "")));
         if (!has) return null;                 // no speedway in this world → never mount
-        const f = frame(SF_T); return { x: f.x, z: f.z };
+        const f = frame(startT()); return { x: f.x, z: f.z };
       },
     },
     build: build,
     update: function (ctx, dt) { if (ctx.venue && ctx.venue._pendingCast) tryDrainCast(ctx, ctx.venue); update(ctx, dt); },
     api: {
-      rules: { ECON: ECON, purseFor, pointsFor, oddsForGrid, settleBet, raceSim, nightSim, frame, lineLen, gridSlot, paramAt },
+      rules: { ECON: ECON, purseFor, pointsFor, oddsForGrid, settleBet, raceSim, nightSim, frame, lineLen, gridSlot, paramAt, speedwayCourse },
       // probe surface — a gate asserts THROUGH these (no live driving needed)
       open: function () { openHub(); },
       simRace: function (n, opts) { const out = []; for (let i = 0; i < (n || 1); i++) out.push(raceSim(Object.assign({ seed: opts && opts.seed != null ? opts.seed + i : null }, opts))); return out; },
