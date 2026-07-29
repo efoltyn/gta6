@@ -1053,7 +1053,14 @@
       c.copRank = spec.key;                            // the roster slot does not decide brass
       c.name = spec.pip;                               // the killfeed says who you dropped
       c._watch = true;
-      c._post = { x: px, z: pz, fx: ox, fz: oz, mount: null, mountT: 0, relaxed: true };
+      // THE SHARED POST RECORD (city/garrison.js) — see the roadblock site for
+      // why. The watch names NO {org, verb}: the brass ARE the authority, and
+      // gating the Chief's own post on a rung he holds would tear the chain of
+      // command down the instant its first link died. The vacancy below is the
+      // consequence; a cascade would be a bug.
+      c._post = CBZ.cityPostStand
+        ? CBZ.cityPostStand(c, { x: px, z: pz, fx: ox, fz: oz, relaxed: true, kind: "watch", tag: "police:watch:" + spec.key, job: "police officer" })
+        : { x: px, z: pz, fx: ox, fz: oz, mount: null, mountT: 0, relaxed: true };
       holsterGun(c);                                   // a watch commander is not gunned up
       A.root.add(c.group);
       CBZ.cityCops.push(c);
@@ -2211,7 +2218,9 @@
       if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(cop);
       else {
         if (cop._armorKit && cop._armorKit.length) cop._armorLoot = cop._armorKit.slice();
-        if (CBZ.cityDropWeapon) CBZ.cityDropWeapon(cop.pos.x, cop.pos.z, cop.swat ? "SMG" : "Pistol", 30);   // disarmed
+        if (CBZ.cityDropWeapon) {
+          CBZ.cityDropWeapon(cop.pos.x, cop.pos.z, cop.swat ? "SMG" : "Pistol", 30, { y: cop.pos.y });
+        }   // disarmed
         cop.armed = false; cop.weapon = null;
         if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
       }
@@ -2953,7 +2962,15 @@
     for (let k = 0; k < lanes.length; k++) {
       const c = rbCop(bx + ux * 3.6 + lx * lanes[k], bz + uz * 3.6 + lz * lanes[k], stars >= 5);
       if (!c) continue;
-      c._post = { x: c.pos.x, z: c.pos.z, fx: -ux, fz: -uz, mount: null, mountT: 0 };
+      // THE SHARED POST RECORD (city/garrison.js). Same field, same shape, same
+      // meaning — the branch at §POSTED reads `c._post` exactly as it always
+      // did — but the record is now the ONE the whole game stands bodies on,
+      // so a roadblock officer shows up in cityPostAudit() alongside a
+      // checkpoint, a VIP detail and a garrison sentry. Degrade-safe: no
+      // garrison.js, the literal this replaced.
+      c._post = CBZ.cityPostStand
+        ? CBZ.cityPostStand(c, { x: c.pos.x, z: c.pos.z, fx: -ux, fz: -uz, kind: "roadblock", org: "police", verb: "roadblock", tag: "police:roadblock" })
+        : { x: c.pos.x, z: c.pos.z, fx: -ux, fz: -uz, mount: null, mountT: 0 };
       drawGun(c);
       RB.cops.push(c);
     }

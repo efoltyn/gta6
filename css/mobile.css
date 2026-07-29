@@ -138,7 +138,11 @@ body.touch .ikey { display: none !important; }
 body.touch #cityStoragePrompt, body.touch #cityAircraftPrompt, body.touch #bankPrompt,
 body.touch #pawnPrompt, body.touch #jewelryPrompt, body.touch #clothingPrompt,
 body.touch #gunstorePrompt, body.touch #shopliftPrompt {
-  bottom: calc(158px + env(safe-area-inset-bottom, 0px)) !important;
+  /* 158 -> 168: the spoken-word band (below) now occupies 120..~160 on a
+     landscape tablet, which is where the pill's own top edge used to sit. Ten
+     pixels is the whole correction — a 52px pill still runs 168..220 and the
+     #interact card at 224 clears it exactly as it always did. */
+  bottom: calc(168px + env(safe-area-inset-bottom, 0px)) !important;
   background: transparent !important; border: none !important; padding: 0 !important;
   pointer-events: none !important; max-width: 78vw;
 }
@@ -277,6 +281,36 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
   #fullMapClose { min-height: 44px; padding: 8px 14px; }
   /* keep the shared bottom panel clear of the home-indicator / rounded corner */
   #pkgPanel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
+}
+
+/* ---- THE SPOKEN-WORD BAND ON TOUCH ---------------------------------------
+   hud.css declares the band (--subtitle-floor / --subtitle-line) against the
+   bottom-CENTRE cluster, which is the only thing in a keyboard player's way.
+   A touch player has two more walls and they are in the CORNERS, so the answer
+   here is a narrower column rather than a higher one — lifting the band over
+   #tstick (top edge 232px) would put dialogue a third of the way up an iPad.
+
+   The free centre channel is measured off the two touch clusters as they are
+   actually laid out above:
+     left   #tstick.tfixed  left:88px  width:168px          -> ends at 256px
+     right  #tbtns          right:16px width:64px, and
+            #tfireup at right:calc(100% + 12px)             -> starts at W-156
+   A CENTRED box can therefore only be 2*(50vw - 256px) = (100vw - 512px) wide
+   before it reaches the joystick. Below ~810px of width that leaves too little
+   to read, so the 46vw floor deliberately lets a long line pass behind the
+   joystick's 35%-opacity ring — the type carries a 1.6px black stroke and wins
+   that fight, which is a better trade than a two-word column.
+
+   Vertically 120px clears #cWpn (whose top is ~115px: see hud.css), and the
+   walk-up prompt band above was moved 158 -> 168 to make room for the band's
+   second line. */
+body.touch{
+  --subtitle-line: clamp(16px, 2.35vh, 24px);
+  --subtitle-slot: calc(clamp(16px, 2.35vh, 24px) * 2.35);
+  --subtitle-floor: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+body.touch .world-subtitle{
+  width: max(46vw, min(640px, calc(100vw - 512px)));
 }
 
 /* ---- responsive scaling for small / portrait screens ---- */

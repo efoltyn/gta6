@@ -490,7 +490,14 @@
     // officer belongs on his slot, and the post brain walks him back anyway.
     if (c.pos && c.pos.set) c.pos.set(slot.x, 0, slot.z);
     if (c.group) c.group.position.set(slot.x, 0, slot.z);
-    c._post = { x: slot.x, z: slot.z, fx: slot.fx, fz: slot.fz, mount: null, mountT: 0, relaxed: true };
+    // THE SHARED POST RECORD (city/garrison.js) — the migration §THE ONE EDIT
+    // OWED at the foot of this file asked for. Same field, same shape, so
+    // police.js's posted branch AND THE FOLLOW (we move his SLOT, not him) are
+    // both unchanged. No {org, verb}: a private detail is not a chain of
+    // command, and the principal's own death already dissolves it.
+    c._post = CBZ.cityPostStand
+      ? CBZ.cityPostStand(c, { x: slot.x, z: slot.z, fx: slot.fx, fz: slot.fz, relaxed: true, kind: "detail", tag: "power:cop", job: "police officer" })
+      : { x: slot.x, z: slot.z, fx: slot.fx, fz: slot.fz, mount: null, mountT: 0, relaxed: true };
     c._powerOf = rec;
     c._powerCop = true;
     if (rec.kit.armor && CBZ.cityArmorDressPed) {
@@ -535,7 +542,16 @@
     if (!q) return null;
     q.ammo = k.ammo;
     q.maxHp = k.guardHp;
-    q._post = { x: slot.x, z: slot.z, fx: slot.fx, fz: slot.fz, mount: null, mountT: 0, relaxed: true };
+    // THE SHARED POST RECORD (city/garrison.js), second site. `driven:true` is
+    // the seam that makes the record shareable without the brain being taken
+    // over: protection.js's exported follow already steps this body every frame
+    // (and §4's whole trick is that we move his SLOT, not him), so garrison.js
+    // registers the post, counts it, and does not tick it. Sharing a record is
+    // not the same as surrendering a brain — that distinction is what let all
+    // five call sites migrate in one change.
+    q._post = CBZ.cityPostStand
+      ? CBZ.cityPostStand(q, { x: slot.x, z: slot.z, fx: slot.fx, fz: slot.fz, relaxed: true, kind: "detail", tag: "power:private", driven: true, job: "close protection" })
+      : { x: slot.x, z: slot.z, fx: slot.fx, fz: slot.fz, mount: null, mountT: 0, relaxed: true };
     q._powerOf = rec;
     q._vipGuard = true;             // sizeup.js already reads this as the principal's backup
     if (k.armor && CBZ.cityArmorDressPed) { try { CBZ.cityArmorDressPed(q, k.armor.slice()); } catch (e) {} }

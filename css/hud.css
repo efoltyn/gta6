@@ -333,25 +333,122 @@ body.full-map-open #waypointGuide{display:none;}
 body.full-map-open #crosshair,
 body.full-map-open #interact{display:none !important;}
 
-/* Attributed character speech. Dialogue is screen-space UI, never a label
-   parented to a head or a camera-facing billboard in the world. */
+/* THE SPOKEN-DIALOGUE SURFACE. Nearby speech and authored campaign dialogue
+   both adopt this class. It is screen-space language, never a bubble parented
+   to a head and never another dark HUD card: lower-centre, heavy white type,
+   black game-readable outline, no chrome. Speaker identity remains in an
+   accessible clipped node; interaction choices may reveal it in their own
+   panel because a decision is UI rather than a passing subtitle.
+
+   ---------------------------------------------------------------------------
+   THE BAND IS DERIVED FROM THE HUD IT MUST CLEAR, NOT CHOSEN.
+
+   OWNER (2026-07-29): "dialogue overlaps shit right now, it needs to move a bit
+   up the screen." It did, and the arithmetic says exactly how far. The old
+   anchor was `max(safe + 68px, 11vh)` = 118.8px on a 1080p screen, and the
+   bottom-centre cluster city/hud.js draws (#cWpn: --hud-pad-b 14 + MC vitals 23
+   + gap 5 + hotbar slots 44 + gap 5 + ammo line 24 = 115px, and up to ~155px
+   once the armour row and the carried-loot row are showing) reaches straight
+   through it. The subtitle was rendering ON the hearts, the hotbar and the
+   ammo line — with the type having tripled (17px -> up to 36px) in the same
+   change that lowered it.
+
+   city/hud.js has ALREADY solved "where does the bottom-centre cluster end":
+   it parks #cCtx (the relationship chip + melee posture bars) at bottom:170px
+   under the MC skin and 150px under its own small-screen skin. Those are the
+   measured cluster tops, so the band is those numbers plus the #cRel chip
+   (~26px) plus 10px of air. It keys off the IDENTICAL media query hud.js uses,
+   so the two can never drift apart:
+
+       206px = 170 (#cCtx MC anchor) + 26 (#cRel chip) + 10 (air)
+       186px = 150 (#cCtx small-screen anchor) + 26 + 10
+
+   #cPost (the melee posture bars) can push #cCtx's own stack taller than that,
+   and it is deliberately not accounted for: you are not reading a passing
+   subtitle in the middle of a fistfight, and lifting the whole band for a case
+   that never co-occurs would push dialogue a third of the way up the screen.
+
+   The type also gained a HEIGHT term (`min(2.45vw, 4.2vh)`). Every desktop
+   aspect is byte-identical — 1920x1080 still resolves to the 36px cap, 1280x800
+   still to 31.4px — but a short/letterboxed viewport, where the HUD cluster
+   already eats a third of the screen, now shrinks the line instead of stacking
+   three of them into the crosshair.
+   --------------------------------------------------------------------------- */
+:root{
+  /* ONE line of subtitle type. Declared here (not inline on the line element)
+     because the stack reservation below has to be able to measure it. */
+  --subtitle-line:clamp(21px,min(2.45vw,4.2vh),36px);
+  /* what ONE subtitle layer is allowed to occupy: two lines at line-height 1.1
+     (2.2em) plus a little air. This is the rung height of the stack. */
+  --subtitle-slot:calc(var(--subtitle-line) * 2.35);
+  --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 206px);
+}
+@media (max-width:900px),(max-height:560px){
+  :root{ --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 186px); }
+}
+.world-subtitle{
+  --subtitle-shadow:
+    -2px -2px 0 #090909, 2px -2px 0 #090909,
+    -2px 2px 0 #090909, 2px 2px 0 #090909,
+    0 3px 1px rgba(0,0,0,.9);
+  position:fixed;
+  left:50%;
+  bottom:calc(var(--subtitle-floor) + var(--subtitle-rank,0px));
+  width:min(940px,calc(100vw - 34px));
+  box-sizing:border-box;
+  font-family:Fredoka,"Arial Rounded MT Bold","Trebuchet MS",system-ui,sans-serif;
+  text-align:center;
+}
+
+/* TWO SUBTITLE LAYERS NEVER SHARE PIXELS.
+   #citySpeech (social.js, z-47) and #campaignDialogue (campaign_ui.js, z-125)
+   are independent fixed elements that adopt the SAME class, so before this rule
+   a street bark and an authored campaign line rendered on top of each other,
+   character for character — the campaign layer simply painted over the world
+   layer 78 z-indexes higher. They are ranked instead of hidden, because losing
+   half a conversation is not better than overlapping it:
+
+     rung 0 — the authored campaign line. It keeps the readable base slot: it is
+              the beat you are not allowed to miss, and (with choices) it is the
+              one that owns a real panel.
+     rung 1 — ambient world speech, lifted by exactly one slot.
+
+   campaign_ui.js already stamps `campaign-dialogue-active` on <body> for the
+   whole life of a line (say() adds it, finishDialogue() removes it), so this
+   costs no new state anywhere. --subtitle-rank defaults to 0px, so a world
+   subtitle with no campaign line above it is unmoved. */
+body.campaign-dialogue-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
+.world-subtitle .world-subtitle-speaker{
+  position:absolute!important;
+  width:1px!important;
+  height:1px!important;
+  padding:0!important;
+  margin:-1px!important;
+  overflow:hidden!important;
+  clip:rect(0,0,0,0)!important;
+  white-space:nowrap!important;
+  border:0!important;
+}
+.world-subtitle .world-subtitle-line{
+  margin:0;
+  color:#fff;
+  font-size:var(--subtitle-line);
+  font-weight:700;
+  line-height:1.1;
+  letter-spacing:.005em;
+  text-align:center;
+  text-wrap:balance;
+  -webkit-text-stroke:1.6px #090909;
+  paint-order:stroke fill;
+  text-shadow:var(--subtitle-shadow);
+}
+
 #citySpeech{
-  --speaker-color:#dfe7ff;
-  position:fixed; left:50%; bottom:clamp(92px,13vh,150px); z-index:47;
-  width:min(620px,calc(100vw - 36px)); box-sizing:border-box;
+  z-index:47;
   transform:translate(-50%,10px); opacity:0; pointer-events:none;
-  padding:10px 16px 11px; border-left:3px solid var(--speaker-color);
-  border-radius:4px 10px 10px 4px; background:rgba(8,12,18,.86);
-  box-shadow:0 8px 24px rgba(0,0,0,.35); backdrop-filter:blur(4px);
   transition:opacity .14s ease,transform .14s ease;
-  font-family:Fredoka,system-ui,sans-serif; text-shadow:0 1px 2px #000;
 }
 #citySpeech.show{opacity:1;transform:translate(-50%,0);}
-#citySpeech .citySpeechSpeaker{
-  color:var(--speaker-color); font-size:11px; font-weight:800;
-  letter-spacing:1.1px; text-transform:uppercase;
-}
-#citySpeech .citySpeechLine{margin-top:3px;color:#f3f6f9;font-size:17px;line-height:1.3;}
 /* `body.city-menu-open` was a second selector here and could never match:
    CBZ.cityMenuOpen is a plain JS boolean (playergang.js, realestate.js,
    zillow.js) that is never mirrored onto document.body.classList, unlike

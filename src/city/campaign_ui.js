@@ -480,13 +480,13 @@
       if (button) selectApp(button.getAttribute("data-app"));
     });
 
-    dialogueEl = make("section", "campaign-dialogue");
+    dialogueEl = make("section", "campaign-dialogue world-subtitle");
     dialogueEl.id = "campaignDialogue";
     dialogueEl.setAttribute("aria-live", "polite");
     dialogueEl.innerHTML =
       "<div class='campaign-dialogue-line'>" +
-      "  <div class='campaign-dialogue-speaker campaign-title'></div>" +
-      "  <div class='campaign-dialogue-text'></div>" +
+      "  <div class='campaign-dialogue-speaker campaign-title world-subtitle-speaker'></div>" +
+      "  <div class='campaign-dialogue-text world-subtitle-line'></div>" +
       "</div>" +
       "<div class='campaign-dialogue-choices'></div>";
     document.body.appendChild(dialogueEl);
@@ -914,7 +914,10 @@
         dialogueChoices.appendChild(button);
       });
     }
-    if (dialogueEl) dialogueEl.classList.add("show");
+    if (dialogueEl) {
+      dialogueEl.classList.toggle("has-choices", normalized.length > 0);
+      dialogueEl.classList.add("show");
+    }
     document.body.classList.add("campaign-dialogue-active");
     return new Promise(function (resolve) { choiceResolve = resolve; });
   }

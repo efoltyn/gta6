@@ -422,20 +422,15 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
 
 /* ---------- the one allowed prose surface outside the phone: speech ---------- */
 .campaign-dialogue {
-  position: fixed;
   z-index: 125;
-  left: 50%;
-  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
   display: flex;
   visibility: hidden;
-  width: min(720px, calc(100vw - 32px));
   flex-direction: column;
   gap: 8px;
   transform: translate(-50%, 12px);
   opacity: 0;
   pointer-events: none;
   transition: opacity .16s ease, transform .16s ease, visibility 0s linear .18s;
-  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
 }
 .campaign-dialogue.show {
   visibility: visible;
@@ -444,6 +439,14 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
   transition: opacity .16s ease, transform .16s ease;
 }
 .campaign-dialogue-line {
+  min-width: 0;
+}
+.campaign-dialogue.has-choices {
+  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+  width: min(720px, calc(100vw - 32px));
+  text-align: left;
+}
+.campaign-dialogue.has-choices .campaign-dialogue-line {
   padding: 13px 17px 14px;
   border: 1px solid rgba(255, 255, 255, .17);
   border-left: 4px solid var(--campaign-blue);
@@ -453,8 +456,29 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
-.campaign-dialogue-speaker { color: var(--campaign-blue); font-size: 11px; }
-.campaign-dialogue-text { margin-top: 5px; color: #f0f4f7; font-size: 17px; line-height: 1.4; text-shadow: 0 1px 2px #000; }
+.campaign-dialogue.has-choices .campaign-dialogue-speaker {
+  position: static!important;
+  width: auto!important;
+  height: auto!important;
+  margin: 0!important;
+  overflow: visible!important;
+  clip: auto!important;
+  white-space: normal!important;
+  color: var(--campaign-blue);
+  font-size: 11px;
+}
+.campaign-dialogue.has-choices .campaign-dialogue-text {
+  margin-top: 5px;
+  color: #f0f4f7;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-align: left;
+  text-wrap: wrap;
+  -webkit-text-stroke: 0;
+  text-shadow: 0 1px 2px #000;
+}
 .campaign-dialogue-choices { display: grid; gap: 6px; pointer-events: auto; }
 .campaign-dialogue-choices:empty { display: none; }
 .campaign-dialogue-choice {
@@ -603,8 +627,8 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
   }
   .campaign-phone-layer.open .campaign-phone-device { transform: translate(50%, 0) rotate(0) scale(1); }
   .campaign-phone-scrim { background: rgba(1, 4, 7, .22); }
-  .campaign-dialogue { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
-  .campaign-dialogue-text { font-size: 15px; }
+  .campaign-dialogue.has-choices { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .campaign-dialogue.has-choices .campaign-dialogue-text { font-size: 15px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

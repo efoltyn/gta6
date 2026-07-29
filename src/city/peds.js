@@ -2097,6 +2097,16 @@
   CBZ.cityAlarm = function (x, z, radius, intensity, offender) {
     radius = radius || 18; intensity = intensity || 1;
     const r2 = radius * radius;
+    // A PERIMETER HEARS AS ONE. Every alarm in the game already funnels through
+    // here, so ringing city/garrison.js's post bus from this one place gives
+    // every standing sentry, checkpoint and gate guard in earshot the same
+    // notice — the alternative is each of them running its own scan and
+    // discovering the shot three seconds apart. Deliberately WIDER than the
+    // crowd radius (a rifle is heard a long way past the people it scares) and
+    // it hands over NO target: it only wakes them — they look further and they
+    // look now — and security.js's intruder filter still decides whether there
+    // is anybody to fight, then cityScare still decides hold / engage / bolt.
+    if (CBZ.cityPostAlert) { try { CBZ.cityPostAlert(x, z, radius * 2.4 + 30, offender || null); } catch (e) {} }
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.vendor || p.staffPost) continue;   // posted staff hold their station
       const dx = p.pos.x - x, dz = p.pos.z - z;
@@ -2303,7 +2313,7 @@
     // Degrade-safe: no morgue.js, and this is byte-for-byte what it always was.
     if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(ped);
     else {
-      if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo);
+      if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo, { y: ped.pos.y, body: ped });
       ped.armed = false; ped.weapon = null; ped.ammo = 0;
       if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
     }
@@ -2491,22 +2501,31 @@
   };
 
   // ---- dropped weapons ----
-  function dropWeapon(x, z, weapon, ammo) {
+  function dropWeapon(x, z, weapon, ammo, opts) {
+    opts = opts || {};
+    const y = (typeof opts.y === "number" && isFinite(opts.y)) ? opts.y
+      : (CBZ.floorAt ? CBZ.floorAt(x, z) : 0);
     let mesh = null;
     if (CBZ.city && CBZ.city.arena) {
       // Inventory V2 swaps this compatibility proxy for the authored weapon
       // model before presentation. Keep even the fallback neutral: a dropped
       // gun must never become a glowing green pickup marker for one frame.
       mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.22), CBZ.mat(0x1c1f24));
-      mesh.position.set(x, 0.25, z); mesh.userData.transient = true;
+      mesh.position.set(x, y + 0.25, z); mesh.userData.transient = true;
       CBZ.city.arena.root.add(mesh);
     }
-    CBZ.cityDrops.push({ x, z, weapon: weapon || "Pistol", ammo: ammo || 24, t: 0, mesh });
+    CBZ.cityDrops.push({
+      x, y, z, weapon: weapon || "Pistol", ammo: ammo || 24, t: 0, mesh,
+      body: opts.body || null,
+    });
   }
   CBZ.cityDropWeapon = dropWeapon;
 
   function removeDrop(i) {
     const d = CBZ.cityDrops[i];
+    if (d && d._weaponBody && CBZ.weaponPhysics && CBZ.weaponPhysics.release) {
+      CBZ.weaponPhysics.release(d._weaponBody);
+    }
     if (d && d.mesh && d.mesh.parent) { d.mesh.parent.remove(d.mesh); if (d.mesh.geometry) d.mesh.geometry.dispose(); if (d.mesh.material) d.mesh.material.dispose(); }
     CBZ.cityDrops.splice(i, 1);
   }
@@ -5318,7 +5337,13 @@
       // that leaked thousands of draw calls. Preserve global presentation only
       // for actors explicitly owned/scripted by the player; every other actor
       // remains a full, hittable rig throughout the existing 95m q3 contract.
-      const important = p.rage || p.guard || p.controlled || (p.npcWanted | 0) >= 1 || p.armed || p.reportState || p.approach;
+      // `p._post` (city/garrison.js): a body whose JOB is to be somewhere has to
+      // keep thinking while you are not looking, or a sentry you walked past
+      // stops holding his slot the moment he leaves the 58 m active band and
+      // you turn round to find him drifted into the road. This is SIMULATION
+      // importance only — `renderImportant` below is untouched, so his rig
+      // still stops drawing at the same 95 m as everybody else's.
+      const important = p.rage || p.guard || p._post || p.controlled || (p.npcWanted | 0) >= 1 || p.armed || p.reportState || p.approach;
       const renderImportant = p.controlled || p.companion || p.recruited || p.faction === "player" || p === g.cityPartner;
       const active = near || important;
       // render LOD: peds far from the camera stop drawing entirely (the single

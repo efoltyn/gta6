@@ -197,7 +197,15 @@
       // brain will walk him back to it anyway.
       if (c.pos && c.pos.set) c.pos.set(s.x, 0, s.z);
       if (c.group) c.group.position.set(s.x, 0, s.z);
-      c._post = { x: s.x, z: s.z, fx: S.nx, fz: S.nz, mount: null, mountT: 0, relaxed: true };
+      // THE SHARED POST RECORD (city/garrison.js). This file was `_post`'s
+      // SECOND consumer and it is now declared through the block: same field,
+      // same shape, so police.js's posted branch is byte-identical, plus the
+      // record's {org, verb} — a checkpoint is a STANDING ORDER, and a
+      // department with no Sergeant alive to hold `roadblock` has nobody who
+      // can mount one. Degrade-safe: no garrison.js, the literal it replaced.
+      c._post = CBZ.cityPostStand
+        ? CBZ.cityPostStand(c, { x: s.x, z: s.z, fx: S.nx, fz: S.nz, relaxed: true, kind: "checkpoint", org: "police", verb: "roadblock", tag: "police:checkpoint", job: "police officer" })
+        : { x: s.x, z: s.z, fx: S.nx, fz: S.nz, mount: null, mountT: 0, relaxed: true };
       c._checkpoint = true;
       cops.push(c);
     }

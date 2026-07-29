@@ -281,18 +281,22 @@
   // ===========================================================================
 
   // Dialogue belongs to the speaker, but not to their skeleton. One bottom-
-  // centre subtitle identifies who spoke and carries the line; new nearby
-  // speech replaces the prior line instead of filling the scene with bubbles.
+  // centre subtitle carries the line; new nearby speech replaces the prior
+  // line instead of filling the scene with bubbles. The speaker name stays in
+  // the accessible text, but the observed-world presentation is the clean GTA
+  // subtitle grammar shared with campaign_ui.js: white, outlined, no panel.
   let speechEl = null, speechNameEl = null, speechTextEl = null;
   let speechT = 0, speechPed = null;
   function ensureSpeech() {
     if (speechEl) return speechEl;
     speechEl = document.createElement("div");
     speechEl.id = "citySpeech";
-    speechEl.className = "citySpeech";
+    speechEl.className = "citySpeech world-subtitle";
     speechEl.setAttribute("role", "status");
     speechEl.setAttribute("aria-live", "polite");
-    speechEl.innerHTML = "<div class='citySpeechSpeaker'></div><div class='citySpeechLine'></div>";
+    speechEl.innerHTML =
+      "<div class='citySpeechSpeaker world-subtitle-speaker'></div>" +
+      "<div class='citySpeechLine world-subtitle-line'></div>";
     document.body.appendChild(speechEl);
     speechNameEl = speechEl.querySelector(".citySpeechSpeaker");
     speechTextEl = speechEl.querySelector(".citySpeechLine");

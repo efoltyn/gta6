@@ -54,6 +54,23 @@
         if (!ped) continue;
         ped.protectLot = lot;
         if (armed) ped.ammo = 36;
+        // THE SHARED POST (city/garrison.js). This file already said "these
+        // guards are ordinary city peds with a job, a post and a local threat
+        // scan" — but the POST was two coordinate pairs (`guard`/`homeGuard`),
+        // i.e. a WANDER LEASH, so a bank guard drifted in a lazy circle facing
+        // whichever way he last walked. He stands ON the door now and faces OUT
+        // of it, he returns after being shoved, and — because the shared brain
+        // routes his threat read through this file's OWN citySecurityIntruder —
+        // not one line of the response logic below is duplicated.
+        // `guard`/`homeGuard` are deliberately KEPT: peds.js reads them for the
+        // off-post branch and for the `important` simulation tier, so this is a
+        // migration of the brain, not a replacement of the fields.
+        if (CBZ.cityPostStand) {
+          CBZ.cityPostStand(ped, {
+            x: x, z: z, face: Math.atan2(d.nx, d.nz), kind: "guard",
+            relaxed: true, job: "private security", tag: "security:" + (lot.kind || "shop"),
+          });
+        }
         CBZ.citySecurity.push(ped);
       }
     }
@@ -81,7 +98,12 @@
   // shared teardown (occupy.js) is the matching half of the shared post, so
   // now it actually unposts them.
   CBZ.citySecurityReset = function () {
-    if (CBZ.cityUnpostNpc) for (let i = 0; i < CBZ.citySecurity.length; i++) CBZ.cityUnpostNpc(CBZ.citySecurity[i]);
+    for (let i = 0; i < CBZ.citySecurity.length; i++) {
+      // drop the shared post BEFORE the body, so garrison.js's registry never
+      // holds a reference to a rig occupy.js is about to dispose.
+      if (CBZ.cityPostRelease) CBZ.cityPostRelease(CBZ.citySecurity[i], "reset");
+      if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(CBZ.citySecurity[i]);
+    }
     CBZ.citySecurity.length = 0;
   };
 })();

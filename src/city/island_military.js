@@ -1430,8 +1430,30 @@
       return made;
     }
     fillParade(2);                       // establish the post; finish incrementally
-    // gate guards (stationed — stand the post)
-    const guardSetup = function (g) { g.state = "idle"; g.pause = 9e9; g._stationed = { x: g.pos.x, z: g.pos.z }; };
+    // GATE GUARDS — the fourth "a body is stationed here" record shape in this
+    // repo (`_stationed`), and the one this file authored for itself. It now
+    // ALSO declares the shared post (city/garrison.js), which is what buys the
+    // three beats `_stationed` never had: he consults cityScare instead of
+    // standing through a grenade, he RETURNS when it is quiet, and his post
+    // names the Sergeant who ordered it — kill the guard commander and the gate
+    // goes soft. `_stationed` is deliberately KEPT so the tick below (aircrew,
+    // respawn, the drill salute, the 5-star sortie) is untouched; the shared
+    // brain claims only the non-drill bodies, and only when it is present.
+    const guardSetup = function (g) {
+      g.state = "idle"; g.pause = 9e9; g._stationed = { x: g.pos.x, z: g.pos.z };
+      if (CBZ.cityPostStand) {
+        CBZ.cityPostStand(g, {
+          x: g.pos.x, z: g.pos.z, face: Math.atan2(-1, 0), kind: "sentry",
+          relaxed: true, job: "soldier", tag: "fort:gate",
+          org: "army", verb: "post", alertVerb: "standto",
+          home: { x: MAXX - 60, z: MINZ + 60 },
+          // THIS file's updater already owns these bodies (aircrew, respawn,
+          // the sortie). `driven` keeps garrison.js's own sweep off them so the
+          // brain runs exactly once, from the loop that was always here.
+          driven: true,
+        });
+      }
+    };
     trooper(cw.gx + 2, CW_MINZ + 2, { aggr: 0.35 }, null, guardSetup);
     trooper(cw.gx + 2, CW_MAXZ - 2, { aggr: 0.35 }, null, guardSetup);
     // NO-SPAWN keep-out: the active runway strip (owner's rule — nobody
@@ -1507,6 +1529,14 @@
           const combat = !!(t.rage || t.npcWanted || t.state === "fight" || t.state === "flee" || t.state === "shoot");
           if (combat) { t.pause = 0; t.activityState = t.state; continue; }
           if (t._stationed) {
+            // THE SHARED BRAIN OWNS THE NON-DRILL POSTS. A body carrying a
+            // garrison.js record gets the full stationed arc there (scare,
+            // abandon, return, the order gate, combatIQ posture with a leash)
+            // and this loop must not fight it for the same transform. The DRILL
+            // ranks keep the branch below on purpose: the salute beat and the
+            // 0.4 m parade tolerance are this file's own choreography, and
+            // handing them to a generic sentry brain would delete them.
+            if (t._post && !t._drill && CBZ.cityPostTick) { CBZ.cityPostTick(t, dt); continue; }
             const dx = t._stationed.x - t.pos.x, dz = t._stationed.z - t.pos.z;
             const postRadius2 = t._drill ? 0.16 : 9;
             if (dx * dx + dz * dz > postRadius2) {          // wandered/shoved off post
@@ -1617,6 +1647,26 @@
     }
 
     // expose a tiny debug handle (no UI, no hidden stats — just a console aid)
-    CBZ._militaryBase = { center: { x: CEN_X, z: CEN_Z }, minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, armoryWired: armoryWired, boardable: placed.length };
+    // PUBLISH THE ANCHORS, DO NOT MAKE ANYBODY RE-TYPE THEM. city/garrison.js
+    // stands sentries on this base and every one of these coordinates is
+    // already a real thing this file drew — the gate it fenced, the flagpole it
+    // raised, the barracks row it named as the soldiers' home, the motor pool
+    // its own work-anchor ring walks. Copying those literals into a second file
+    // is the copy-rect disease CLAUDE.md keeps catching (terrain_overhaul's
+    // snowSector, biome_farmland's DESERT_MINZ), and it is how a base move
+    // silently leaves sentries standing in a field. One object, derived here,
+    // where the numbers live.
+    CBZ._militaryBase = {
+      center: { x: CEN_X, z: CEN_Z }, minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ,
+      armoryWired: armoryWired, boardable: placed.length,
+      gate: { x: cw.gx + 2, z: CW_CZ },
+      hq: { x: hqX, z: hqZ },
+      flag: { x: hqX - 12, z: hqZ + 18 },
+      armory: { x: armoryX, z: armoryZ },
+      motorPool: { x: CEN_X - 70, z: CEN_Z - 70 },
+      parade: { x: CEN_X - 90, z: CEN_Z + 40 },
+      barracks: { x: MAXX - 60, z: MINZ + 60 },
+      runway: { x: CEN_X, z: MAXZ - 70, len: 360, w: 26 },
+    };
   }, 22);
 })();

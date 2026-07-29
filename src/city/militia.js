@@ -518,7 +518,27 @@
   //                enlist            THIS FILE — the recruiting desk needs an
   //                                  NCO; a private cannot swear you in
   //                vouch             level.js — sees through a military cover
+  //                post              city/garrison.js — MOUNTS THE GUARD. Every
+  //                                  standing sentry in the game names {org:
+  //                                  "army", verb:"post"} as its author, and a
+  //                                  post whose author is dead is orphaned,
+  //                                  goes relaxed and is struck. Detailing a
+  //                                  man to a slot is an NCO's job in every
+  //                                  army that has ever existed, and the
+  //                                  Sergeant of the Guard is a body standing
+  //                                  at the gate you can walk up to and shoot.
   //    Lieutenant  army:carpet       contracts.js minRank 4
+  //                standto           city/garrison.js — ORDERS THE WIRE HOT.
+  //                                  The rung that separates a lieutenant from
+  //                                  a sergeant, and the one this file's own
+  //                                  header said it could not name in 2026-07:
+  //                                  it lives in garrison.js now, so the rung
+  //                                  is no longer a promise made in somebody
+  //                                  else's file. With no holder alive the
+  //                                  sentries WATCH and never draw — a
+  //                                  perimeter with no officer is a perimeter
+  //                                  that cannot go weapons-up, which you can
+  //                                  see from outside the fence.
   //    General     crackdown         THIS FILE — the ONE rung that can order an
   //                                  unsanctioned militia disarmed. He is a
   //                                  real, findable person: govcomplex.js's
@@ -542,8 +562,9 @@
     { key: "recruit",    pip: "Recruit",    lvl: 12 },
     { key: "private",    pip: "Private",    lvl: 15 },
     { key: "corporal",   pip: "Corporal",   lvl: 20 },
-    { key: "sergeant",   pip: "Sergeant",   lvl: 27, grants: ["enlist", "vouch"] },
-    { key: "lieutenant", pip: "Lieutenant", lvl: 36 },
+    { key: "sergeant",   pip: "Sergeant",   lvl: 27, grants: ["enlist", "vouch", "post"] },
+    { key: "lieutenant", pip: "Lieutenant", lvl: 36, grants: ["standto"],
+      unlock: "Guard authority: the perimeter may go weapons-up on your word." },
     { key: "general",    pip: "General",    lvl: 85, locked: true, grants: ["crackdown", "vouch"],
       unlock: "Command authority: an unsanctioned militia can be ordered disarmed." },
   ];
