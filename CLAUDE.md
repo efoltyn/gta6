@@ -44,6 +44,12 @@ state directly and steps the sim by hand. Use after EVERY change:
    update-path crashes surface) cost seconds. Re-runs the first seed and
    asserts byte-identical counts + biome histogram (determinism law).
    Must print `MATHGATE: ok`. ~1-2 min for two seeds + determinism.
+   EDITING math-gate.mjs: the whole per-seed pass is ONE JS template literal
+   (`PASS`) sent via Runtime.evaluate — a BACKTICK anywhere in an added
+   comment terminates it early and the SyntaxError points at an innocent word
+   (this repo's comment style uses backticks constantly). Same family: a
+   ratio like `s*/s` inside a `/* */` block comment closes the comment.
+   Always `node --check tools/math-gate.mjs` after touching it.
 3. **Targeted in-page probes** — for behavior, write a throwaway CDP script
    (copy the boot boilerplate from `tools/math-gate.mjs`): boot headless
    Chromium, wait for `CBZ.bootComplete`, `Runtime.evaluate` straight into
@@ -109,6 +115,19 @@ confident code that does not execute — this repo has already seen a wave leave
 `world.js` throwing mid-edit. Builders trade verification for reading time; the
 orchestrator owes them the verification back.
 
+HOW A WAVE RUNS (the shape that has shipped cleanly): cheap recon scouts map
+each territory FIRST with file:line evidence; the orchestrator writes dense
+briefs embedding the recon + owner doctrine + explicit territory fences
+("do not touch X, another agent owns it" — fenced briefs are what make
+builders reliable); builders build in parallel in the shared tree; the
+orchestrator itself applies the cross-territory seam patches at merge (the
+one-liners no single builder could own), gates ONCE, commits by territory.
+The recurring Edit-race files are `index.html` and `src/config.js` — declare
+new flag defaults in the OWNING file via the null-check pattern instead of
+config.js. Before pushing, `git fetch` and check `git log`: another live
+session (local or the cloud fleet) may have landed commits mid-wave; expect
+surgical foreign commits and merge, don't panic.
+
 Escalate depth with risk: a color tweak needs (1); logic needs (1)+(2);
 behavior/systems work needs all three. Never commit on (1) alone.
 
@@ -119,6 +138,20 @@ behavior/systems work needs all three. Never commit on (1) alone.
   --enable-unsafe-swiftshader --no-sandbox`. Serve via
   `PORT=<n> python3 tools/devserver.py` (CDN is blocked; three.js is
   vendored locally — keep it that way).
+- **macOS (the owner's machine): `/opt/pw-browsers/chromium` does NOT exist.**
+  Every gate/probe falls back to
+  `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` (override:
+  `CBZ_CHROME=<path>`; math-gate gained the fallback 2026-07-21). A new tool
+  that spawns Chrome must copy this resolution or it ENOENTs on this machine.
+- `?cfg_<FLAG>=0/1` URL params override any `CBZ.CONFIG` flag BEFORE boot —
+  the only way to A/B a build-time flag headless (a same-page reset reuses
+  the already-built world, so flipping after boot proves nothing).
+- Probes sending synthetic keys: create ONE KeyboardEvent per press and
+  dispatch it ONCE — dispatching the same event object twice throws silently
+  and the key never registers.
+- Probes that need free play: the campaign boots into a rooftop prologue;
+  jump straight to free play with
+  `CBZ.game.cityCampaign.phase = "endless_contracts"`.
 - **Baseline console noise**: exactly one `ProgressEvent` error is
   pre-existing and acceptable; rare seed-dependent `computeBoundingSphere`
   NaN too. ANY other error is yours.
@@ -1492,6 +1525,14 @@ only what a person pockets: cash, phone, keys/keycards, medkit, grenades, bricks
 **An item that cannot produce an icon from its own asset fails the existence test —
 refusing to draw an icon IS the reversible soft-cut.** Full analysis and the family
 verdicts: `docs/plan/doctrine-items.md`.
+
+**STANDING OWNER MANDATES (2026-07-12, older than the laws above, still
+binding):** FIRST PERSON IS SACRED — "first person is amazing as is"; polish
+third-person freely, never rework first-person feel. NO CRAFTING — "kill
+crafting"; acquisition is buy/steal/loot in the world, never a recipe UI.
+PERMADEATH is the design — brutal deaths (headshot/explosion/fall/execution)
+are GAME OVER + save wipe (`CITY_PERMADEATH`, `city/death.js`; scripted kills
+pass `imp.fatal`), survivable hits hospital-respawn.
 
 **WHERE THE THINKING LIVES.** `GAMEPLAN.md` is the master plan (witness · scale ·
 airline network · fauna · mantle · flag purge · §10 rim world · Step 0.5 icon purge).
