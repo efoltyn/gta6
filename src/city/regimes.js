@@ -700,8 +700,88 @@
     reapplyStaticEffects();
   }
 
+  /* ============================================================
+     §DECLARE A DOCTRINE — the producer that never existed.
+
+     THE FICTION, measured 2026-07-29: NINE code paths across six files branch
+     on `govType === "communism"` or `"fascism"` —
+       regimes.js:277 (communism effects) · :296 (removal) · :530
+       (dividendsAllowed) · :679 (price controls on reload)
+       polwar.js:184,195,519 (war pressure ×1.4, conscription approval, the
+       whole aggressive-war path) · civilwar.js:600 · militia.js:338,345,362
+       (formation, crackdown, armed crackdown) · sim/centralbank.js:221,242
+       (independence 0.2/0.3, the authoritarian check) · market.js:94,111
+       (maxP price clamp) · stocks.js:326 (dividends suspended) ·
+       migration.js:299,300,306 (border decrees) · wanted.js:195 (heat ×1.4)
+     — and NO PRODUCER ANYWHERE ASSIGNS EITHER VALUE. Every govType write in
+     the repo is "democracy" (polity.js:165), "monarchy" (countries.js:209,
+     crown.js:573,619), "dictatorship" (regimes.js:635), "emergencyRule"
+     (crown.js:422), "anarchism" (civilwar.js:858), "insurgency"/"juntaRebel"
+     (civilwar.js:447) or "dissolved" (civilwar.js:745). Complete, working,
+     tuned effect code sat behind a door that could not open.
+
+     THE FIX IS A VERB, NOT A DELETION. CLAUDE.md bans stat fictions and the
+     owner's LAW 2 names "become president" and "hold the nation hostage" as
+     real endings — so what was missing was never the effects, it was somebody
+     with the standing to order them. A doctrine is now something you DECLARE
+     over a state you actually hold, gated on city/loyalty.js's apex rung.
+     It writes no effects of its own: `transition()` above is the one place a
+     regime changes and it already knows both words.                        */
+  function playerSid() { return (CBZ.officials && CBZ.officials.PLAYER_SID) || "player"; }
+  // every polity the PLAYER personally holds the office of, largest first —
+  // a doctrine is proclaimed over the biggest thing you hold.
+  function heldByPlayer() {
+    if (!CBZ.polity) return [];
+    const sid = playerSid(), out = [];
+    const kinds = ["country", "federal", "state", "city"];
+    for (let k = 0; k < kinds.length; k++) {
+      const recs = CBZ.polity.list(kinds[k]) || [];
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        if (r && r.office && r.office.holder === sid) out.push(r);
+      }
+    }
+    return out;
+  }
+  CBZ.regimeHeldByPlayer = heldByPlayer;
+  const DOCTRINES = {
+    fascism:   { name: "Fascist Rule", line: "ONE STATE. ONE ORDER.", shock: -12 },
+    communism: { name: "Communism",    line: "THE STATE TAKES THE MARKET.", shock: -8 },
+    dictatorship: { name: "Personal Rule", line: "THE STATE IS YOU.", shock: -10 },
+  };
+  CBZ.regimeDoctrines = function () { return Object.keys(DOCTRINES); };
+  CBZ.regimeCanDeclare = function () {
+    // degrade-safe in CLAUDE.md's exact rankKnows shape: if the ledger has
+    // never heard of `doctrine` (loyalty.js absent or LOYALTY_LEDGER off) the
+    // gate stands DOWN rather than slamming shut, and holding office is the
+    // only requirement — which is the behaviour before this block existed.
+    if (!heldByPlayer().length) return false;
+    if (CBZ.cityPowerKnows && CBZ.cityPowerKnows("doctrine")) return !!(CBZ.cityPowerCan && CBZ.cityPowerCan("doctrine"));
+    return true;
+  };
+  CBZ.regimeDeclareDoctrine = function (gov, opts) {
+    const D = DOCTRINES[gov];
+    if (!D) return { ok: false, reason: "no such doctrine" };
+    const held = heldByPlayer();
+    if (!held.length) return { ok: false, reason: "you hold no office" };
+    if (!CBZ.regimeCanDeclare()) {
+      const need = (CBZ.cityPowerNeed && CBZ.cityPowerNeed("doctrine")) || null;
+      return { ok: false, reason: "not enough behind you" + (need && need.line ? " — " + need.line : "") };
+    }
+    const rec = (opts && opts.rec) || held[0];
+    if (rec.govType === gov) return { ok: false, reason: "already " + D.name };
+    const day = CBZ.worldDay ? CBZ.worldDay() : 0;
+    transition(rec, gov, day, D.shock);
+    if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(D.line); } catch (e) {} }
+    if (CBZ.cityFeed) CBZ.cityFeed("" + (rec.name || "The state") + " is proclaimed under " + D.name + ".", "#ffd76a");
+    return { ok: true, gov: gov, polity: rec.id, name: D.name };
+  };
+
   CBZ.regimes = {
     tickCountry, transition, dictatorVacuum, strongmanRestore,
+    // §DOCTRINE — the producer for "communism"/"fascism" (see the block above)
+    declareDoctrine: CBZ.regimeDeclareDoctrine, canDeclare: CBZ.regimeCanDeclare,
+    doctrines: CBZ.regimeDoctrines, heldByPlayer: heldByPlayer,
     convertAllCops, convertCop,
     gangBoostMul, policeAllowed, dividendsAllowed,
     maxWarPressure,

@@ -68,7 +68,46 @@
     ws.send(JSON.stringify(obj));
   };
   net.sendEv = function (obj) { obj.t = "ev"; net.send(obj); };
-  net.chat = function (text) { net.send({ t: "chat", text }); };
+  /* ---- CHAT: /me /do /ooc /players /help ---------------------------------
+     netui.js has STYLED three roleplay modes since it shipped (netui.js:153-156,
+     three CSS classes, three render branches) and its input placeholder
+     advertises all five — but nothing anywhere has ever set `m.kind`. This
+     function sent `{t:"chat", text}` flat, and no slash parse existed in the
+     repo. Five advertised commands, zero reachable: CLAUDE.md's banned "stat
+     fiction", and the cheapest one in the codebase to make true, because the
+     rendering half was already written and good.
+
+     THE PARSE BELONGS HERE, NOT IN THE UI. net.chat is the one call every
+     client entry point routes through (the textbox today; a gamepad, console
+     or bot tomorrow), so parsing in netui.js would have left the same hole for
+     the next caller. /players and /help are answered LOCALLY off state this
+     file already holds — they never touch the wire. A server that strips
+     unknown fields simply delivers a plain line, so nothing can regress. */
+  const CHAT_KINDS = { me: 1, do: 1, ooc: 1 };
+  function localAnswer(verb) {
+    // plain text: netui's sys handler runs every line through esc(), so a
+    // pre-escaped entity here would render as its own literal source.
+    if (verb === "help") return "/me action · /do scene · /ooc aside · /players · /help";
+    const names = [];
+    try { net.players.forEach(function (p) { if (p && p.name) names.push(p.name); }); } catch (e) {}
+    if (!names.length) return "You're the only one here.";
+    return names.length + " online: " + names.join(", ");
+  }
+  net.chat = function (text) {
+    let s = String(text == null ? "" : text);
+    let kind = null;
+    const m = /^\/([a-z]+)[ \t]*([\s\S]*)$/i.exec(s);
+    if (m) {
+      const verb = m[1].toLowerCase();
+      if (CHAT_KINDS[verb]) { kind = verb; s = m[2]; }
+      else if (verb === "players" || verb === "help") { emit(net._handlers, "sys", { text: localAnswer(verb) }); return; }
+      // any other slash word is left alone and sent verbatim — swallowing an
+      // unknown command silently is how a player loses a message.
+    }
+    s = s.trim();
+    if (!s) return;
+    net.send(kind ? { t: "chat", text: s, kind: kind } : { t: "chat", text: s });
+  };
 
   net.hasFeat = function (f) { return net.feat.indexOf(f) >= 0; };
   // targeted relay (servers advertising feat "to"): the server unwraps d and

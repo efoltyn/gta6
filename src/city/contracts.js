@@ -263,6 +263,13 @@
   // second table).
   function titleOf(rec, ident) {
     if (!rec) return "Official";
+    // DELEGATE FIRST (2026-07-29). officials.js's titleFor is no longer
+    // module-private; it is THE derivation, and this block was one of nine
+    // hand-typed copies whose fallbacks disagreed with it on the monarchy
+    // branch. What follows stays as the degrade path only.
+    if (CBZ.officials && CBZ.officials.titleFor) {
+      try { const t = CBZ.officials.titleFor(rec, ident); if (t) return t; } catch (e) {}
+    }
     if (rec.kind === "country") {
       if (rec.govType !== "monarchy") return "President";
       return (ident && ident.gender === "m") ? "King" : "Queen";

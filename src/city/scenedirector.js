@@ -412,7 +412,13 @@
     if (mugger.target && mugger.target.set) mugger.target.set(mx, 0, mz);
     mugger.approach = "rob";
     // the mark freezes (hands-up), then breaks for it once the beat plays
-    mark.fear = 3; mark.surrender = true; mark.state = "idle";
+    // ONE SURRENDER. This was the last hand-typed copy of the three-field
+    // stanza; citySurrender (loyalty.js) is the shared one, and it deliberately
+    // does NOT disarm or take a prisoner unless asked — a mugging victim is
+    // shaken down, not captured. The literal stays as the degrade path.
+    mark.fear = 3;
+    if (CBZ.citySurrender) CBZ.citySurrender(mark, { hold: 999, fear: 3, panic: false });
+    else { mark.surrender = true; mark.state = "idle"; }
     if (mark.target && mark.target.set) mark.target.set(mx, 0, mz);
     SCENE.kind = "mugging"; SCENE.actors = [mugger, mark];
     SCENE.anchor = { x: mx, z: mz };

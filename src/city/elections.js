@@ -237,11 +237,28 @@
   // state-tier 14d). Title/job by KIND (+ tier for "village" chiefs) — no
   // per-id map, so a new country's mayors/governors/president need zero
   // edits here. ---------------------------------------------------------
+  // officials.js OWNS both derivations and now exports them (officials.js:171,
+  // 173). This file kept a VERBATIM duplicate of KIND_TERM_DAYS and a titleFor
+  // with NO MONARCHY BRANCH — its own comment asserted "monarchy never reaches
+  // here", which is true only because of three separate govType guards below
+  // (elections.js:750, :875, :915) that four call sites do not share. An
+  // invariant asserted in a comment is not enforced, and this was the one copy
+  // that would announce a King as "President". Delegate; keep the local answer
+  // as a degrade fallback with the monarchy branch it should always have had.
   const KIND_TERM_DAYS = { city: 7, state: 14, federal: 14, country: 28 };
-  function termDaysFor(rec) { return (rec && KIND_TERM_DAYS[rec.kind]) || 7; }
+  function termDaysFor(rec) {
+    if (CBZ.officials && CBZ.officials.termDaysFor) { try { return CBZ.officials.termDaysFor(rec); } catch (e) {} }
+    return (rec && KIND_TERM_DAYS[rec.kind]) || 7;
+  }
   function titleFor(rec) {
+    if (CBZ.officials && CBZ.officials.titleFor) { try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {} }
     if (!rec) return "Official";
-    if (rec.kind === "country") return "President";   // monarchy never reaches here — govType guard below skips it
+    if (rec.kind === "country") {
+      if (rec.govType !== "monarchy") return "President";
+      const id = (CBZ.officials && CBZ.officials.identityOf && rec.office && rec.office.holder)
+        ? CBZ.officials.identityOf(rec.office.holder) : null;
+      return (id && id.gender === "m") ? "King" : "Queen";
+    }
     if (rec.kind === "state" || rec.kind === "federal") return "Governor";
     if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
     return "Official";

@@ -405,14 +405,23 @@
     // the staged face-to-face so the tension + money are visible/real.
     m.speed = 0; m.pause = Math.max(m.pause || 0, 0.5); m.state = "idle";
     if (m.group) m.group.rotation.y = Math.atan2(mark.pos.x - m.pos.x, mark.pos.z - m.pos.z);
+    // MIGRATED to city/loyalty.js's CBZ.citySurrender — the one hands-up write
+    // in the game. A shakedown is the TRANSIENT kind: the mark keeps whatever
+    // he is carrying and is not a prisoner, which is why neither `disarm` nor
+    // `prisoner` is passed. Degrade-safe: with loyalty.js absent the inline
+    // fallback below is the original eight lines, byte for byte.
     mark.fear = Math.min(10, (mark.fear || 0) + 5);
-    mark.alarmed = Math.max(mark.alarmed || 0, 4);
-    mark.surrenderT = Math.max(mark.surrenderT || 0, 1.0);
-    mark.surrender = true; mark.state = "surrender"; mark.speed = 0;
-    mark.pause = Math.max(mark.pause || 0, 0.5);
-    mark.poseHandsUp = true; mark.poseAimBack = false;
-    mark.rage = null;
-    if (mark.group) mark.group.rotation.y = Math.atan2(m.pos.x - mark.pos.x, m.pos.z - mark.pos.z);
+    if (CBZ.citySurrender) {
+      CBZ.citySurrender(mark, { hold: 1.0, pause: 0.5, alarmed: 4, fear: mark.fear, toward: m, panic: false });
+    } else {
+      mark.alarmed = Math.max(mark.alarmed || 0, 4);
+      mark.surrenderT = Math.max(mark.surrenderT || 0, 1.0);
+      mark.surrender = true; mark.state = "surrender"; mark.speed = 0;
+      mark.pause = Math.max(mark.pause || 0, 0.5);
+      mark.poseHandsUp = true; mark.poseAimBack = false;
+      mark.rage = null;
+      if (mark.group) mark.group.rotation.y = Math.atan2(m.pos.x - mark.pos.x, m.pos.z - mark.pos.z);
+    }
     m._exT = (m._exT || 0) + dt;
     if (!op.barked) { op.barked = true; opBark(gang, m, EXTORT_BARK); }
     if (m._exT >= 1.4 && !m._exDone) {

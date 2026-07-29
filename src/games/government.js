@@ -220,11 +220,15 @@
     if (CBZ.officials && CBZ.officials.titleFor) {
       try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {}
     }
-    if (!rec) return "Councilmember";
-    if (rec.kind === "country") return rec.govType === "monarchy" ? "Monarch" : "President";
+    // Two disagreements with the owner, both corrected: "Monarch" (which
+    // officials.js never returns — it says Queen/King) and "Councilmember" as
+    // the null/unknown default, where every other copy in the repo says
+    // "Official". This was the only file in 264k lines using that word.
+    if (!rec) return "Official";
+    if (rec.kind === "country") return rec.govType === "monarchy" ? "Queen" : "President";
     if (rec.kind === "state" || rec.kind === "federal") return "Governor";
     if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
-    return "Councilmember";
+    return "Official";
   }
   // real officeholders + deputies, in a sensible seniority order, deduped.
   function gatherOfficials() {
@@ -441,6 +445,39 @@
       C.hud.panel(body + btn("close", "Leave", "#26343c"), { close: function () { C.hud.closePanel(); } });
       return;
     }
+    /* §PROCLAIM A DOCTRINE — the door the "communism"/"fascism" effect code
+       has been waiting behind. Nine gates across six files were tuned and
+       live and could never fire, because nothing in 264k lines ever assigned
+       either govType. The producer is city/regimes.js's regimeDeclareDoctrine;
+       this is simply where a person who HOLDS a seat can reach it, which is
+       the owner's "become president… or hold the nation hostage" ending made
+       pressable. Nothing renders unless you actually hold an office, so a
+       player who has never won anything sees the clerk's window unchanged. */
+    const doctH = {};   // doctrine handlers, folded into every panel below
+    const holds = (CBZ.regimeHeldByPlayer && CBZ.regimeHeldByPlayer()) || [];
+    if (holds.length && CBZ.regimeDeclareDoctrine) {
+      const seat = holds[0];
+      const canD = !!(CBZ.regimeCanDeclare && CBZ.regimeCanDeclare());
+      const need = (!canD && CBZ.cityPowerNeed) ? CBZ.cityPowerNeed("doctrine") : null;
+      const govs = (CBZ.regimeDoctrines && CBZ.regimeDoctrines()) || [];
+      let dbody = "<div style='margin:2px 0 8px;padding:6px 0;border-top:1px solid #2c3140;line-height:1.5'>" +
+        "You hold <b style='color:#8fe08a'>" + (seat.name || seat.id) + "</b>. A state can be REMADE by the person who holds it." +
+        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet — " + ((need && need.line) || "you need more behind you") + ".</span>") +
+        "</div>";
+      for (let i = 0; i < govs.length; i++) {
+        (function (gov, i) {
+          const same = seat.govType === gov;
+          dbody += btn("doct" + i, "PROCLAIM " + gov.toUpperCase(), same ? "#3a3f46" : "#7c1626", same || !canD);
+          doctH["doct" + i] = function () {
+            const r = CBZ.regimeDeclareDoctrine(gov, { rec: seat });
+            if (r && r.ok) C.hud.feed(seat.name + " is now under " + r.name + ".", "#ffd76a");
+            else if (r && r.reason) C.hud.feed(r.reason, "#ff9aa2");
+            C.hud.closePanel();
+          };
+        })(govs[i], i);
+      }
+      body += dbody;
+    }
     let list = [];
     try { list = R.offices() || []; } catch (e) { list = []; }
     const st = runState();
@@ -452,19 +489,19 @@
         (st.scandal ? " · scandal <b style='color:#ff6a5e'>" + Math.round(st.scandal) + "</b>" : "") + "</div>";
       if (held) body += "<div style='opacity:.8;margin-bottom:6px'>You already hold a seat. Defending it is the same ballot.</div>";
       body += btn("withdraw", "Withdraw the papers", "#7c1626") + btn("close", "Leave", "#26343c");
-      C.hud.panel(body, {
+      C.hud.panel(body, Object.assign({
         withdraw: function () { try { R.withdraw(); } catch (e) {} C.hud.closePanel(); },
         close: function () { C.hud.closePanel(); },
-      });
+      }, doctH));
       return;
     }
     if (!list.length) {
       body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course — come back when a seat's up, or when one comes up the hard way.”</div>";
-      C.hud.panel(body + btn("close", "Leave", "#26343c"), { close: function () { C.hud.closePanel(); } });
+      C.hud.panel(body + btn("close", "Leave", "#26343c"), Object.assign({ close: function () { C.hud.closePanel(); } }, doctH));
       return;
     }
     body += "<div style='opacity:.85;margin-bottom:6px'>“Fee's the fee. Signatures are yours to get. Ballot closes when it closes.”</div>";
-    const h = { close: function () { C.hud.closePanel(); } };
+    const h = Object.assign({ close: function () { C.hud.closePanel(); } }, doctH);
     for (let i = 0; i < list.length && i < 6; i++) {
       (function (o, i) {
         const ok = o.canFile !== false;

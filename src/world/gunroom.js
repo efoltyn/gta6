@@ -133,11 +133,34 @@
 
   // key-gated opening + rack pickups
   CBZ.onUpdate(41, function (dt) {
+    // Register with the lock ledger LAZILY: index.html loads this file at :447
+    // and city/loyalty.js at :925, so CBZ.cityLockRegister does not exist at
+    // this module's parse time. Doing it on the first tick costs one boolean.
+    if (!armory._lockReg && CBZ.cityLockRegister) { armory._lockReg = true; CBZ.cityLockRegister("prison-armory"); }
     if (!armory.open) {
       const dx = CBZ.player.pos.x - 19, dz = CBZ.player.pos.z - 1;
       const near = dx * dx + dz * dz < 14;
       if (near) {
-        if (CBZ.game.hasKey || CBZ.game.role === "cop") {
+        /* §THE ORIGINAL GUN ROOM, MIGRATED TO THE SHARED LOCK.
+           OWNER (the keycard story, CLAUDE.md LAW 1): "the jail is dumb but I
+           ran to get the keycard relentlessly… that's what makes it a game."
+           THIS is the door he ran for, and it is the archetype the loyalty
+           ledger's lock was written from — so it adopts the law rather than
+           staying the one special case that inspired it.
+
+           The KEYCARD STILL WINS. `have` is the file's own original condition,
+           byte-for-byte, and the lock returns immediately on it — a key is a
+           key and no amount of power takes that away. What is ADDED is the
+           second route (a crew strong enough to simply take the rack) and,
+           when neither is true, a sentence that names the route instead of
+           repeating "it wants a keycard" forever. In the prison you have no
+           people, so the ledger route is honestly unreachable there and the
+           key is the only way — which is exactly the story. */
+        const have = !!(CBZ.game.hasKey || CBZ.game.role === "cop");
+        const L = CBZ.cityLock
+          ? CBZ.cityLock({ id: "prison-armory", verb: "press", label: "The armory door", have: have, keys: ["Keycard"], orgs: ["police"] })
+          : { open: have, line: "The armory door won't budge — it wants a keycard." };
+        if (L.open) {
           armory.open = true;
           const i = CBZ.colliders.indexOf(armory.collider);
           if (i >= 0) CBZ.colliders.splice(i, 1);
@@ -147,7 +170,7 @@
           CBZ.sfx("door");
           CBZ.flashHint("The armory rack's open — take what you need.", 2.6);
         } else {
-          CBZ.flashHint("The armory door won't budge — it wants a keycard.", 1.2);
+          CBZ.flashHint(L.line || "The armory door won't budge — it wants a keycard.", 1.4);
         }
       }
     } else if (armory.t < 1) {

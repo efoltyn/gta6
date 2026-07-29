@@ -460,8 +460,14 @@
     if (kind === "transit") s.push({ key: "t", label: "Routes", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Transit") });
     if (kind === "cityhall") s.push({ key: "p", label: "Civic", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Civic") });
     if (kind === "airfield") s.push({ key: "w", label: "Contracts", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Emergency") });
-    // electronics: spend on a phone upgrade that pings nearby loot/cash on people
-    if (kind === "electronics") s.push({ key: "u", label: (g.cityPhoneTier ? "Upgrade $" : "Phone $") + phoneUpgCost(), fn: phoneUpgrade });
+    /* THE PHONE TIER IS DELETED (2026-07-29). It sold four upgrades for
+       $250/$600/$950/$1300 promising "better deals & street intel" and
+       `g.cityPhoneTier` was read by NOTHING in 264k lines except the four
+       lines that sold it, capped it and printed it. That is CLAUDE.md's
+       banned "stat fiction" in its purest form — and the shop row was its
+       storefront, so the row goes with the flag. Killing the fiction without
+       killing the counter that advertises it just hides the lie.
+       The electronics shop keeps its real stock; it no longer sells nothing. */
     // jewelry: ICE OUT — buy the whole chain+ring+grill set at a bundle discount
     if (kind === "jewelry") s.push({ key: "u", label: "Ice out", fn: iceOut });
     // THE CIVIC DESKS (city/civic.js): the seven government trades
@@ -715,17 +721,9 @@
     return f ? f.swag : 0;
   }
 
-  // ---- electronics: a phone upgrade money sink (utility flex) ----------------
-  function phoneUpgCost() { return 250 + (g.cityPhoneTier || 0) * 350; }
-  function phoneUpgrade() {
-    const cost = phoneUpgCost();
-    if ((g.cityPhoneTier || 0) >= 4) { CBZ.city.note("Top-tier phone already — nothing better in stock.", 1.8); return; }
-    if (!CBZ.city.spend(cost)) { CBZ.city.note("Need " + fmt$(cost) + ".", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
-    g.cityPhoneTier = (g.cityPhoneTier || 0) + 1;
-    if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("New phone — better deals & street intel.", 2.2);
-    render();
-  }
+  // ---- electronics: the phone-upgrade money sink is DELETED --------------
+  // (phoneUpgCost / phoneUpgrade / g.cityPhoneTier). See the note at the
+  // electronics row above: four paid tiers, zero readers, a stat fiction.
 
   // ---- jewelry: ICE OUT bundle (buy the full flex set at a discount) ---------
   // ONE piece per jewelry slot (chain/ring/watch/glasses) so it's a coherent fit

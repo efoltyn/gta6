@@ -503,7 +503,11 @@
     if (!CBZ.city || !CBZ.city.canAfford(cost)) return { ok: false, reason: "can't afford", cost };
     CBZ.city.spend(cost);
     ped._subornT = SUBORN_WINDOW;
-    ped.surrender = true; ped.poseHandsUp = true; ped.rage = null;
+    // MIGRATED to city/loyalty.js's CBZ.citySurrender. A BRIBED guard steps
+    // aside — he keeps his sidearm and he is nobody's prisoner, so this is the
+    // transient form. The original three-field write is the degrade fallback.
+    if (CBZ.citySurrender) CBZ.citySurrender(ped, { hold: SUBORN_WINDOW, fear: 0, panic: false });
+    else { ped.surrender = true; ped.poseHandsUp = true; ped.rage = null; }
     if (CBZ.cityFeed) CBZ.cityFeed("" + (ped.name || "A guard") + " steps aside for " + SUBORN_WINDOW + "s.", "#7ed957");
     return { ok: true, cost, seconds: SUBORN_WINDOW };
   }

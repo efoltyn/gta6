@@ -1,6 +1,16 @@
 /* ============================================================
    core/interfaces.js — THE CONTRACTS INDEX.
 
+   *** NOT LOADED. This is a REFERENCE DOCUMENT, not a script. ***
+   Its <script> tag was removed from index.html on 2026-07-29: the file
+   implements nothing, executes nothing, and its one runtime export
+   (CBZ.INTERFACES, a list of 16 strings) has zero readers anywhere in
+   src/, index.html, tools/ or docs/ — measured, not assumed. It stays
+   at this path because eight comments across the repo cite it by name
+   and line ("core/interfaces.js #4/#6/#12"); moving it would make all
+   eight stale to save nothing. Read it, cite it, do not load it.
+   CLAUDE.md names this file as the canonical failed shared block.
+
    This engine has no type system and no module boundaries beyond
    "everything hangs off window.CBZ" — so the load-bearing agreements
    between files live only in scattered comments (a `grep -rn contract

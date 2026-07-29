@@ -221,7 +221,8 @@
   function titleOf(rec) {
     if (CBZ.officials && CBZ.officials.titleFor) { try { return CBZ.officials.titleFor(rec); } catch (e) {} }
     if (!rec) return "Official";
-    if (rec.kind === "country") return rec.govType === "monarchy" ? "Monarch" : "President";
+    // "Monarch" disagreed with the owner (officials.js says Queen/King).
+    if (rec.kind === "country") return rec.govType === "monarchy" ? "Queen" : "President";
     if (rec.kind === "state" || rec.kind === "federal") return "Governor";
     if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
     return "Official";

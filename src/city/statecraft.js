@@ -222,10 +222,12 @@
     return [].concat(CBZ.polity.list("city"), CBZ.polity.list("state"),
       CBZ.polity.list("federal"), CBZ.polity.list("country"));
   }
-  // contracts.js's own derivation, verbatim in spirit: officials.js's
-  // titleFor() is module-private, so read the same answer off the record's
-  // public kind/tier/govType fields rather than growing a second table.
+  // officials.js's titleFor() is NO LONGER module-private (officials.js:807)
+  // — the comment this replaced was written before it was exported and was
+  // stale for months. Call the owner; the local branches below stay only as
+  // the degrade fallback, and they already agree with it.
   function titleOf(rec) {
+    if (CBZ.officials && CBZ.officials.titleFor) { try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {} }
     if (!rec) return "Official";
     if (rec.kind === "country") {
       if (rec.govType !== "monarchy") return "President";

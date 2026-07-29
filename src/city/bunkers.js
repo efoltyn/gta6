@@ -298,6 +298,28 @@
     }
     return best;
   }
+  /* ---- §DOORS THAT ANSWER TO THE LEDGER -----------------------------------
+     ONE-LINE ADOPTION of city/loyalty.js's CBZ.cityLock, degrade-safe: with
+     loyalty.js absent every door behaves exactly as it did before (open), so
+     flipping LOYALTY_LOCKS off is a true one-line revert and cannot strand a
+     player inside a shelter. A token declares `lock` and nothing else; the
+     sentence and the routes are the shared law's business, not this file's. */
+  function doorLock(t) {
+    if (!t || !t.lock) return { open: true, line: "" };
+    if (!CBZ.cityLock) return { open: true, line: "" };
+    return CBZ.cityLock({
+      id: t.lock.id, verb: t.lock.verb, label: t.name || "The door",
+      orgs: t.lock.orgs, keys: t.lock.keys, minTier: t.lock.minTier,
+      // this door was UNGATED before this wave: a flag-off must re-open it,
+      // never seal the endgame behind a switch. (The prison armory, which was
+      // already key-gated, deliberately does NOT pass this.)
+      wasOpen: true,
+      // FORCE IS ALWAYS A KEY. A door already blown open by a bunker buster,
+      // or one somebody has opened, must never re-lock behind the player.
+      have: !!(t.door && (t.door.disabled || t.door.target === 1)),
+    });
+  }
+
   function wireZones() {
     if (_zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     const I = CBZ.interactions;
@@ -306,16 +328,41 @@
       find: function (px, pz) { return nearestTok(doorTokens, px, pz, 4.2); },
       options: [{
         id: "bunkerdoor-open", slot: "e",
-        label: function (t) { return t.door.disabled ? "The door hangs blasted open" : (t.door.target === 1 ? "Seal the blast door" : "Open the blast door"); },
+        /* §THE VAULT IS LOCKED, AND THE LOCK SAYS WHAT WOULD OPEN IT.
+           The apex prize of the whole game — the one nuclear stash in the world
+           — stood behind a blast door with the SAME ungated [E] as a supply
+           cupboard. Any player who walked into Fort Brandt took it, at hour
+           one, with nothing. That is not a gun room; it is a shelf.
+           OWNER LAW 1: "a locked door with something visible behind it
+           out-motivates any quest marker". So the door answers to the loyalty
+           ledger, and refusing SAYS the route — the door is the quest giver.
+           `have` is a blasted/already-open leaf: force is always a valid key,
+           which is what keeps the bunker-buster path honest.                */
+        label: function (t) {
+          if (t.door.disabled) return "The door hangs blasted open";
+          if (t.door.target === 1) return "Seal the blast door";
+          const L = doorLock(t);
+          return L.open ? "Open the blast door" : (t.name || "The door") + " won't move";
+        },
         onSelect: function (t) {
           if (t.door.disabled) return;
-          if (t.door.target === 1) { t.door.target = 0; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } }
-          else setDoor(t.door, true);
+          if (t.door.target === 1) { t.door.target = 0; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } return; }
+          const L = doorLock(t);
+          if (!L.open) {
+            if (CBZ.city && CBZ.city.note) CBZ.city.note(L.line, 3.4);
+            if (CBZ.sfx) { try { CBZ.sfx("clank"); } catch (e) {} }
+            return;
+          }
+          setDoor(t.door, true);
         },
       }],
     });
     if (I.describe) I.describe("bunkerdoor", function (t) {
-      return { label: t.name || "Blast Door", note: "Hardened shelter — the door is the only way in" };
+      const L = doorLock(t);
+      return {
+        label: t.name || "Blast Door",
+        note: L.open ? "Hardened shelter — the door is the only way in" : "SEALED — " + (t.lockNote || "it answers to somebody who has more than you"),
+      };
     });
     I.registerZone({
       id: "bunker-crates", kind: "bunkercrate", radius: 3.2,
@@ -332,6 +379,14 @@
         onSelect: function (t) {
           const e = CBZ.cityEcon;
           if (t.kind === "armory") {
+            /* THE RUNG BELOW THE VAULT. Bunker-buster penetrators are the tool
+               that opens the tier above (they are what blows a blast door), so
+               the crate that holds them is itself a gun room one step down —
+               CLAUDE.md's "ladder of gun rooms, each rung unlocking the tools
+               of the next". Ungated, it handed the vault's own counter-key to
+               anyone on day one. */
+            const L = CBZ.cityLock ? CBZ.cityLock({ id: "bunker-armory", verb: "armory", label: "The ordnance crate", orgs: ["army", "military"], wasOpen: true }) : { open: true };
+            if (!L.open) { if (CBZ.city && CBZ.city.note) CBZ.city.note(L.line, 3.2); return; }
             const day = CBZ.dayCount ? CBZ.dayCount() : 0;
             if (day < t.nextRestock) { if (CBZ.city && CBZ.city.note) CBZ.city.note("The quartermaster restocks the penetrators daily.", 2); return; }
             t.nextRestock = day + 1;
@@ -418,6 +473,11 @@
           return wp ? "Call a B-2 strike on your waypoint" : "Mark a waypoint on the map first";
         },
         onSelect: function (t) {
+          /* AN ORDER NEEDS SOMEBODY WHO CAN GIVE IT. Tasking a bomber is the
+             purest "categorical, not numeric" power in the game and it stood
+             open to a man with a pistol. `siege` is the rung that opens it. */
+          const L = CBZ.cityLock ? CBZ.cityLock({ id: "bunker-strike", verb: "siege", label: "The strike console", orgs: ["army", "military"], wasOpen: true }) : { open: true };
+          if (!L.open) { if (CBZ.city && CBZ.city.note) CBZ.city.note(L.line, 3.2); return; }
           const wp = waypoint();
           if (!wp) {
             if (CBZ.city && CBZ.city.note) CBZ.city.note("Open the map and mark the grid you want flattened.", 2.6);
@@ -443,6 +503,7 @@
         note: wp ? "Tasks the B-2 against your marked waypoint" : "Needs a map waypoint to task",
       };
     });
+    if (CBZ.cityLockRegister) { CBZ.cityLockRegister("bunker-armory"); CBZ.cityLockRegister("bunker-strike"); }
     _zonesWired = true;
   }
   // the ONE waypoint in the game (systems/fullmap.js) — never a second one
@@ -679,7 +740,17 @@
     vdoor.y0 = FY; vdoor.y1 = FY + 2.5;
     vdoor.colRec.y0 = FY; vdoor.colRec.y1 = FY + 2.5;
     rec.doors.push(vdoor);
-    doorTokens.push({ x: vx1 + 0.9, z: vz1 - 0.9, door: vdoor, name: "Weapons Vault" });
+    /* THE ONE LOCKED DOOR THAT MATTERS. Three routes, and every one is a thing
+       the world already models: a Colonel's card you looted, the army itself
+       (a real rank inside it, or a uniform they still believe), or simply
+       enough people, guns, money and access that nobody can stop you. That
+       last one is the owner's sentence made mechanical. */
+    doorTokens.push({
+      x: vx1 + 0.9, z: vz1 - 0.9, door: vdoor, name: "Weapons Vault",
+      lockNote: "an army rank, a card, or a force big enough to take it",
+      lock: { id: "bunker-vault", verb: "vault", orgs: ["army", "military"], keys: ["Vault Card", "Officer's Keycard"], minTier: 4 },
+    });
+    if (CBZ.cityLockRegister) CBZ.cityLockRegister("bunker-vault");
     /* ---- THE STASH: THREE WARHEADS, ONE NUKE ---------------------------
        OWNER: "theres one nuclear stash — it should actually have 3 warheads
        in it but be considered one nuke."

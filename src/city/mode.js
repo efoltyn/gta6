@@ -577,6 +577,20 @@
       if (CBZ.cityFamilyTreeReset) CBZ.cityFamilyTreeReset(); // W6: fresh run starts with no kinship edges
       if (CBZ.polityReset) CBZ.polityReset(); // P1: fresh run rebuilds the jurisdiction roster + worldDay=0
       if (CBZ.relationsReset) CBZ.relationsReset(); // X6: fresh run reseeds the affinity matrix
+      // THE SEVEN SIBLINGS relationsReset WAS ALONE AMONG (found 2026-07-29 by
+      // the trash census). Every one of these modules exports a reset and this
+      // teardown called exactly one of them, so a NEW LIFE INHERITED THE LAST
+      // RUN'S WORLD: the regime you installed, the wars you declared, a live
+      // civil war, the crown, border policy, the approval rating and every
+      // statecraft policy all survived a fresh start. Each is a null-checked
+      // one-liner, so a world that never loaded the module costs a comparison.
+      if (CBZ.regimesReset) CBZ.regimesReset();     // govType back to the seed's own
+      if (CBZ.polwarReset) CBZ.polwarReset();       // no inherited state wars
+      if (CBZ.civilwarReset) CBZ.civilwarReset();   // no inherited insurgency
+      if (CBZ.crownReset) CBZ.crownReset();         // the throne is not hereditary across lives
+      if (CBZ.migrationReset) CBZ.migrationReset(); // borders reopen
+      if (CBZ.approvalReset) CBZ.approvalReset();   // you are nobody again
+      if (CBZ.govReset) CBZ.govReset();             // policies back to default
       if (CBZ.cityBirthsReset) CBZ.cityBirthsReset();     // W11: fresh cadence timer for the birth tick
       if (CBZ.cityMarriageReset) CBZ.cityMarriageReset(); // W13: fresh run starts with zero marriage strain
       if (CBZ.citySocialReset) CBZ.citySocialReset();

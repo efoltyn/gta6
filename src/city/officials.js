@@ -804,7 +804,21 @@
     mayorSid: function () { ensureState(); return g.officials.mayorSid; },
     officeOf: officeOf,
     identityOf: identityOf,
-    titleFor: titleFor,   // contracts.js and city/candidacy.js both re-derived this; one copy is enough
+    /* THE ONE TITLE DERIVATION. Re-measured 2026-07-29: EIGHT files carry a
+       kind->title block (officials · officialdom · contracts · civic ·
+       statecraft · candidacy · elections · games/government) plus a ninth
+       partial copy of the King/Queen rule in crown.js:412,433. FOUR of them
+       already delegate here and keep theirs only as a fallback — but the
+       fallbacks DISAGREED with this function on the monarchy branch (three
+       returned "Monarch", a title this file has never produced; elections.js
+       had no monarchy branch at all and would hand you "President" for a
+       kingdom; games/government.js defaulted to "Councilmember" where every
+       other copy says "Official"). Those are now corrected in place, and
+       termDaysFor/jobFor are exported so elections.js can stop keeping a
+       verbatim duplicate of KIND_TERM_DAYS. */
+    titleFor: titleFor,
+    termDaysFor: termDaysFor,
+    jobFor: jobFor,
     reset: reset,
     serialize: function () {
       ensureState();

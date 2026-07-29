@@ -124,7 +124,10 @@
     if (!t) {
       t = "Official";
       if (!rec) return t;
-      if (rec.kind === "country") t = rec.govType === "monarchy" ? "Monarch" : "President";
+      // "Monarch" is a title officials.js has NEVER produced — it says Queen
+      // or King by the holder's rolled gender. A fallback that disagrees with
+      // its owner is a bug waiting for the owner to be absent.
+      if (rec.kind === "country") t = rec.govType === "monarchy" ? "Queen" : "President";
       else if (rec.kind === "state" || rec.kind === "federal") t = "Governor";
       else if (rec.kind === "city") t = rec.tier === "village" ? "Chief" : "Mayor";
     }
