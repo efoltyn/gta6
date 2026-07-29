@@ -370,6 +370,43 @@ const PASS = `(() => {
       if (la.verbs < 7) out.fails.push("LOYALTY VERBS LOST: " + la.verbs);
       if (la.lockCount < 4) out.fails.push("LOCKED DOORS UNLOCKED: " + la.lockCount);
     } else out.fails.push("loyaltyAudit missing");
+    // A TAKE IS A TRANSFER, NOT A ROLL. OWNER: "i hate ransoms and robberies
+    // with dumb hardcoded limit, imagine what a dumb thing that is to reality."
+    // mintedTakes counts money that arrived with no balance behind it;
+    // cappedTakes counts a take still clamped to a magic constant; spawnMinted
+    // counts a body rolled with a cohort available and not scaled against it.
+    // All three are the thing being deleted, so all three are hard zeros.
+    // unverifiedTakes is a take through a provider that could not re-answer
+    // afterwards: NOT proof money was created, but never counted as clean.
+    // maxTake and providers are printed beside them so a "fix" that simply
+    // stops taking anything, or that quietly re-lids the curve, cannot pass.
+    if (CBZ.takeAudit) {
+      const ta = CBZ.takeAudit();
+      out.take = "src=" + ta.sources + " minted=" + ta.mintedTakes + " capped=" + ta.cappedTakes +
+        " spawnMinted=" + (ta.spawnMinted | 0) + " unver=" + (ta.unverifiedTakes | 0) +
+        " moved=$" + Math.round(ta.transferred || 0) + " max=$" + Math.round(ta.maxTake || 0) +
+        " prov=" + (ta.providers | 0) + " places=" + !!(ta.wired && ta.wired.places);
+      if (ta.mintedTakes !== 0) out.fails.push("MONEY CREATED FROM NOTHING: " + ta.mintedTakes);
+      if (ta.cappedTakes !== 0) out.fails.push("TAKE STILL CLAMPED TO A CONSTANT: " + ta.cappedTakes);
+      if ((ta.spawnMinted | 0) !== 0) out.fails.push("SPAWN CASH MINTED PAST A LIVE COHORT: " + ta.spawnMinted);
+      if ((ta.unverifiedTakes | 0) !== 0) out.fails.push("TAKE THROUGH AN OPAQUE PROVIDER: " + ta.unverifiedTakes);
+      if ((ta.providers | 0) < 1) out.fails.push("PLACE PROVIDER LOST: " + ta.providers);
+    } else out.fails.push("takeAudit missing");
+    // The till half of the same law. minted is its own printer detector;
+    // legacyFlat counts answers still coming from the old per-kind constant.
+    // spread (fattest live drawer over the mean) and empty are the EVIDENCE:
+    // a world of identical constants reads spread 1.0 and empty 0, so they are
+    // printed and deliberately NOT pinned until measured on a real world.
+    if (CBZ.cityTillAudit) {
+      const tl = CBZ.cityTillAudit();
+      out.till = "pts=" + tl.points + " reg=" + tl.registers + " minted=" + tl.minted +
+        " flat=" + tl.legacyFlat + " empty=" + tl.empty + "/" + tl.points +
+        " spread=" + (Math.round((tl.spread || 0) * 100) / 100) +
+        " hi=$" + Math.round(tl.hi || 0) + " mean=$" + Math.round(tl.mean || 0) +
+        " flow=" + tl.flowSource;
+      if (tl.minted !== 0) out.fails.push("TILL MINTED MONEY: " + tl.minted);
+      if (tl.legacyFlat !== 0) out.fails.push("TILL STILL ANSWERING FROM A CONSTANT: " + tl.legacyFlat);
+    } else out.fails.push("cityTillAudit missing");
     if (!(CBZ.games && CBZ.games._defs)) out.fails.push("game package registry missing");
     // airside: service vehicles must never be on the active runway.
     // onRunwayRaw is printed beside it deliberately — the ratchet must not be
@@ -700,6 +737,8 @@ async function runSeed(seed, label) {
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
   tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
   tmark(`${label}: loyalty ${r.loyalty || "-"}`);
+  tmark(`${label}: take ${r.take || "-"}`);
+  tmark(`${label}: till ${r.till || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
   tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);

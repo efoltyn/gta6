@@ -465,6 +465,23 @@
     run: function (p) { CBZ.cityCabRide(p); },
   };
 
+  /* ------------------------------------------------------------- the counter */
+  // THE DESK JOBS DELEGATE. city/insurance.js owns the branch, the ladder, the
+  // book and the money; what it needs from HERE is a row, because this file is
+  // the one registration that turns a trade into a keyboard line and a tappable
+  // pill on both inputs. One shared row for all five insurance rungs — WHICH
+  // verb you get is a rank question and the owning file answers it, so a new
+  // rung never touches this file either.
+  //
+  // Written as a delegate rather than inline for the same reason ROW_LIFT calls
+  // shops.js's fare: the effect belongs to whoever owns the balance it moves.
+  const ROW_INSURANCE = {
+    id: "rv-insurance",
+    can: function (p, ctx) { return !!(CBZ.insuranceVerb && CBZ.insuranceVerb(p, ctx)); },
+    label: function (p, ctx) { const v = CBZ.insuranceVerb && CBZ.insuranceVerb(p, ctx); return v ? v.label : ""; },
+    run: function (p, ctx) { const v = CBZ.insuranceVerb && CBZ.insuranceVerb(p, ctx); if (v && v.run) v.run(p, ctx); },
+  };
+
   /* =================== THE TABLE: job string -> one verb =================== */
   // Keyed on CBZ.cityJobs's own keys (aigoals.js CITY_JOBS + citystaff.js
   // TRADES). A new trade is a ROW. Rows are shared objects on purpose — a
@@ -498,6 +515,10 @@
     "croupier": ROW_TABLES, "cage cashier": ROW_TABLES, "pit boss": ROW_TABLES,
     // --- the wheel
     "chauffeur": ROW_LIFT,
+    // --- the counter that pays when the roof comes in (city/insurance.js)
+    "insurance clerk": ROW_INSURANCE, "insurance adjuster": ROW_INSURANCE,
+    "underwriter": ROW_INSURANCE, "claims manager": ROW_INSURANCE,
+    "insurance director": ROW_INSURANCE,
   };
 
   /* ------------------------------------------ the floor: one verb per class */

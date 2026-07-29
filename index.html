@@ -1139,6 +1139,23 @@
 <script src="src/sim/corporations.js?v=econ1"></script>
 <script src="src/sim/stocks.js?v=econ1"></script>
 <script src="src/sim/billionaires.js?v=econ1"></script>
+<!-- TAKE. OWNER (2026-07-29): "i hate ransoms and robberies with dumb
+     hardcoded limit — imagine what a dumb thing that is to reality." A take is
+     a TRANSFER: what you get is what the target actually HAS, it comes OUT of
+     a balance the simulation already keeps, and that balance is poorer
+     afterwards. Loads AFTER npcecon/billionaires (the cohort wallets and the
+     real net worth it reads) and after economy/companies/wealth. Every
+     consumer calls it degrade-safely, so load order can only ever cost the
+     old inline number, never a throw. -->
+<script src="src/city/take.js?v=take1"></script>
+<!-- INSURANCE. OWNER: "if you made businesses real, in real life businesses
+     don't go away" — a building the player blows up is a CLAIM, not a hole. A
+     real trade with a real ladder, a real office whose desks are occupied by
+     people who commute to them, and a payer of last resort behind the take
+     ledger. Loads after take.js (it is the counterparty to a loss), after
+     citystaff/roleverbs (its desks are posts and its rungs are verbs) and
+     after structural/demolition (the losses it underwrites). -->
+<script src="src/city/insurance.js?v=ins1"></script>
 <script src="src/sim/motorsport.js?v=econ1"></script>
 
 <!-- P-wave: politics -->

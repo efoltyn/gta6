@@ -59,7 +59,16 @@
         if (d.lot === lot && Math.abs(d.x - a.x) < 0.05 && Math.abs(d.z - a.z) < 0.05 && Math.abs((d.y || 0) - (a.y || 0)) < 0.05) { dup = true; break; }
       }
       if (dup) continue;
-      list.push({ lot: lot, x: a.x, y: a.y || 0, z: a.z, face: a.face || 0, occupant: null });
+      // CARRY THE SEAT GEOMETRY. buildings.js authors every desk anchor with a
+      // `cushionH` (0.48) and a `floorBelow`, because the V2 chair pose solves
+      // FEET ON THE DECK from the declared cushion — and this registry used to
+      // drop both on the floor. Every consumer that seats a body off one of
+      // these records (npcLife.attach, propSit) was therefore working from the
+      // legacy "squat on top of the box" defaults, with no way to recover the
+      // numbers the furnisher had already measured. Additive: a caller that
+      // never passed them reads undefined exactly as it did before.
+      list.push({ lot: lot, x: a.x, y: a.y || 0, z: a.z, face: a.face || 0,
+        cushionH: a.cushionH, floorBelow: a.floorBelow, occupant: null });
     }
   };
 
@@ -194,6 +203,14 @@
     for (let i = 0; i < list.length; i++) {
       const d = list[i];
       if (d.lot !== lot || !d.occupant || d.occupant.dead) continue;
+      // A DECLARED JOB IS NOT A BENCH. citystaff.js posts (a venue's own
+      // workers — an insurance underwriter, a gate agent, a croupier) hold the
+      // rung their POST declared them at; crowning one "floor manager" would
+      // put a second, contradictory ladder on a body that already has one, and
+      // repaint their tag. Only walk-in desk workers — the ones who claimed a
+      // seat through cityClaimDesk and are accruing tenure in it — are on the
+      // bench. Cheap and honest: a posted body has no `_deskAnchor` either.
+      if (d.occupant._venueStaff) continue;
       const t = deskTenure(d.occupant);
       if (t > bestT) { bestT = t; best = d.occupant; }
     }
