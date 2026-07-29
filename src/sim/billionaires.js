@@ -212,6 +212,72 @@
     for (let i = 0; i < list.length; i++) if (list[i].sid === sid) return list[i];
     return null;
   }
+  function coBySym(sym) {
+    if (!sym || !CBZ.corps || !CBZ.corps.get || !Array.isArray(CBZ.corps.COMPANIES)) return null;
+    for (const spec of CBZ.corps.COMPANIES) {
+      if (spec.sym !== sym) continue;
+      try { return CBZ.corps.get(spec.id); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  // ---- FORCED LIQUIDATION -------------------------------------------------
+  // liquidate(sid, dollars, opts) -> the dollars ACTUALLY raised by selling
+  // this identity's stock under duress, and the shares are GONE afterwards.
+  //
+  // WHY THIS LIVES HERE. netWorthOf() has answered "what is this person worth"
+  // since E8 and until now NOTHING could act on the answer — a phone readout
+  // and two leaderboards were its only consumers, so a founder's fortune was a
+  // number you could read and never touch. city/take.js's law ("a take is a
+  // transfer, and the balance is poorer afterwards") needs exactly one thing
+  // this file was missing: a way to turn shares into money. Putting it beside
+  // holdingsOf/setHolding keeps the holdings map private, which is the reason
+  // it was private in the first place.
+  //
+  // TWO FACTS OF A BLOCK SALE, both of which are also the anti-money-printer:
+  //   · IT CLEARS UNDER THE SCREEN PRICE (`haircut`) — a distressed seller
+  //     never gets the tape's number.
+  //   · THE TAPE SEES IT. Dumping a slice of the float pushes momentum down by
+  //     shockK x that slice, through sim/stocks.js's own shock(), so the whole
+  //     market pays for what you did to one family. NOT a second price model.
+  // Uncapped by construction: sell more, raise more, until the shares run out —
+  // and when they run out the answer is 0, which is the "no free lunch" half.
+  function liquidate(sid, dollars, opts) {
+    opts = opts || {};
+    const want = +dollars;
+    if (!sid || !(want > 0)) return 0;
+    const h = holdingsOf(sid);
+    if (!h) return 0;
+    const haircut = (opts.haircut > 0 && opts.haircut <= 1) ? opts.haircut : 0.82;
+    const shockK = (opts.shockK != null && isFinite(opts.shockK)) ? opts.shockK : 0.55;
+    let raised = 0;
+    for (const sym in h) {
+      if (raised >= want) break;
+      const qty = h[sym] || 0;
+      if (!(qty > 0)) continue;
+      const st = CBZ.stocks && CBZ.stocks.get ? CBZ.stocks.get(sym) : null;
+      const price = st ? st.price : 0;
+      if (!(price > 0)) continue;
+      const per = price * haircut;
+      // FLOOR, not ceil: a seller stops at the last WHOLE share that still fits
+      // inside the ask, so a liquidation can come up a few dollars short but can
+      // never overshoot into money nobody asked for (city/take.js's mint
+      // assertion is what noticed). The `|| 1` is the one honest exception —
+      // if a single share is worth more than the whole ask, you sell one share.
+      const sell = Math.min(qty, Math.floor((want - raised) / per) || 1);
+      if (!(sell > 0)) continue;
+      setHolding(sid, sym, qty - sell);
+      raised += sell * per;
+      const co = coBySym(sym);
+      const float = (co && co.sharesOutstanding) || 0;
+      if (float > 0 && CBZ.stocks && typeof CBZ.stocks.shock === "function") {
+        // clamped against the SLICE, never against a dollar figure: a bigger
+        // sale is always a bigger move, it just cannot exceed a full crash.
+        try { CBZ.stocks.shock(sym, -Math.min(0.9, shockK * (sell / float))); } catch (e) {}
+      }
+    }
+    return Math.round(raised);
+  }
 
   // ---- FOUNDER MINT (one-shot, lazy — the first tick a live city exists) ---
   function mintFounderFor(co) {
@@ -388,6 +454,7 @@
   CBZ.billionaires = {
     netWorthOf: netWorthOf,
     holdingsOf: holdingsOf,
+    liquidate: liquidate,
     founders: function () { ensureState(); return g.billionaires.founders.slice(); },
     founderOf: function (companyId) {
       ensureState();

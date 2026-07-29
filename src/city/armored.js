@@ -217,6 +217,36 @@
     c.armoredHaul = c.fullRoute
       ? Math.round(ri(TUNE.haulFullMin, TUNE.haulFullMax) / 1000) * 1000
       : Math.round(ri(TUNE.haulMin, TUNE.haulMax) / 1000) * 1000;
+    // A TAKE IS A TRANSFER (city/shops.js's CBZ.cityTill). Two things change,
+    // and the second is the one that matters:
+    //  (1) A TRUCK CARRIES WHAT THE NEIGHBOURHOOD BANKS. The researched
+    //      $260k-$2M band above is a real-world load and stays the SCALE, but
+    //      a truck working the projects and a truck working the island were
+    //      the same roll. The load now rides the ratio of this district's
+    //      actual cash flow to the citywide mean — the same districtCash() a
+    //      bank vault is derived from, so the two can never disagree.
+    //  (2) IT IS A REAL BALANCE. Declared as a cash point, so the spilled
+    //      piles are TAKES out of it, an already-looted truck holds what is
+    //      left, and CBZ.cityHolds/cityTake can answer for it like anything
+    //      else in the world.
+    const TL = CBZ.cityTill;
+    if (TL && TL.districtCash && TL.districtOf) {
+      try {
+        const dk = TL.districtOf({ cx: x, cz: z });
+        const here = TL.districtCash(dk).cash;
+        let tot = 0, n = 0;
+        const E = CBZ.cityEcon;
+        const keys = (E && E.DISTRICTS) ? Object.keys(E.DISTRICTS) : [dk];
+        for (let i = 0; i < keys.length; i++) { const v = TL.districtCash(keys[i]).cash; if (v > 0) { tot += v; n++; } }
+        const mean = n > 0 ? tot / n : 0;
+        // clamped to a half..double band: a route crosses several districts,
+        // so where it happens to be is a lean, not the whole story.
+        if (mean > 0 && here > 0) c.armoredHaul = Math.round(c.armoredHaul * Math.max(0.5, Math.min(2, here / mean)) / 1000) * 1000;
+      } catch (e) { /* no ledger yet — the researched roll stands */ }
+    }
+    if (TL && TL.declare) {
+      TL.declare(c, { name: "Agent Brinks truck", kind: "armored", point: "vault", amount: c.armoredHaul });
+    }
     if (c.fullRoute) c.armoredHull = Math.round(TUNE.hullHp * 1.25);   // fat trucks are even tougher
 
     try { dressTruck(c.group); } catch (e) { /* dressing is cosmetic — a failure must not lose the truck */ }
@@ -270,7 +300,14 @@
     if (CBZ.cityDamageCar) CBZ.cityDamageCar(truck, 999, { byPlayer: true });
     deployGuards("crack");                       // any guards not already out pile out now (also spikes heat)
     spikeHeat("crack");                          // ensure a 4★ armed-robbery spike even if guards were already out
-    spillCash(x, z, truck.armoredHaul);
+    // the doors are open, so the load LEAVES the truck's balance and lands on
+    // the street as piles you can walk to. A truck that has already been
+    // partly emptied spills only what is still aboard — the take can never
+    // exceed the load, by construction rather than by a clamp.
+    const TL = CBZ.cityTill;
+    const spill = (TL && TL.take) ? TL.take(truck, { by: "player" }).taken : truck.armoredHaul;
+    truck.armoredHaul = spill;
+    spillCash(x, z, spill);
     if (CBZ.sfx) CBZ.sfx("explosion");
     if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored truck cracked open downtown — $" + fmt(truck.armoredHaul) + " loose on the street.", 3, { from: "Scanner", app: "news" });
     if (CBZ.city && CBZ.city.note) CBZ.city.note("Doors are open. Grab it and go — sirens already rolling.", 3, { from: "UNKNOWN NUMBER" });

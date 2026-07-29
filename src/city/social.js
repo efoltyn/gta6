@@ -714,8 +714,31 @@
     ped.controlled = false; ped.hostage = false; ped.alarmed = 8; ped.fear = 10;
     g.cityHostage = null;
     if (ransom) {
-      const pay = 200 + ((ped.wealth || 0.3) * 800) | 0;
-      CBZ.city.addCash(pay); CBZ.city.big("RANSOM PAID + $" + pay);
+      /* A TAKE IS A TRANSFER (city/take.js). This line used to read
+             const pay = 200 + ((ped.wealth || 0.3) * 800) | 0;
+         — a ceiling of $1,040 on every human being alive, and `addCash` MINTED
+         it: the person you shook down was exactly as rich as before. What
+         happens now is a real shakedown of a real balance — their pockets, then
+         their household's savings in sim/npcecon.js's cohort wallets — so the
+         money comes OUT of them, the district it came from spends less next
+         hour, and doing it twice to the same person finds nothing the second
+         time. NO raise, no waiting: that is what separates letting somebody buy
+         their way out on the pavement from city/piracy.js's ransom arc, where
+         the payer is somebody ELSE and needs time to find the money.
+         Degrade-safe: with the block absent the old line runs, byte for byte,
+         and says so through takeAudit().cappedTakes. */
+      let pay = 0;
+      if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+        let r = null;
+        try { r = CBZ.cityTake(ped, { frac: 0.6, to: "player", by: "player", site: "social:hostage" }); } catch (e) { r = null; }
+        pay = r ? Math.round(r.taken) : 0;
+        if (pay > 0) CBZ.city.big("RANSOM PAID + $" + pay.toLocaleString());
+        else CBZ.city.note((ped.name || "They") + " has nothing on them worth taking.", 2);
+      } else {
+        if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("social:hostage"); } catch (e) {} }
+        pay = 200 + ((ped.wealth || 0.3) * 800) | 0;
+        CBZ.city.addCash(pay); CBZ.city.big("RANSOM PAID + $" + pay);
+      }
       CBZ.cityRelShift(ped, "extorted", 1.5);          // bled for cash → lasting hatred
       CBZ.cityCrime && CBZ.cityCrime(30, { type: "extortion" });
     } else {

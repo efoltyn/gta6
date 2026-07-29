@@ -198,7 +198,39 @@
     // stash is the real score — that's WHY their roofs are worth provoking them.
     let cash = 80 + (b.storeys || 1) * 35 + ((rng() * 120) | 0);
     if (st.rich) cash = Math.round(cash * 2.4) + 150;
-    CBZ.city.addCash(cash);
+    const gid = gangAt(st.lot);
+    // A TAKE IS A TRANSFER (city/shops.js's CBZ.cityTill). A SET'S ROOF STASH
+    // IS THE SET'S MONEY — it was minted out of nothing, so you could crack
+    // the same crew's stash all night and their war chest never moved. It now
+    // comes out of gang.treasury, the number gangs.js already spends on wars,
+    // raids and promotions: rob a crew's roofs and they genuinely cannot
+    // afford the fight they are about to pick with you. The ledger reads and
+    // writes THEIR record — it never keeps a copy.
+    const TL = CBZ.cityTill;
+    if (st.rich && gid && TL && TL.declare) {
+      const gang = (CBZ.cityGangs || []).find(function (x) { return x && x.id === gid; });
+      if (gang) {
+        if (!st._tillSpec) TL.declare(st, {
+          name: (gang.name || "the set") + "'s roof stash", kind: "stash", point: "safe",
+          // a set does not keep its whole war chest in one duffel on one roof:
+          // the stash is the cut this block kicked up, capped by what the set
+          // actually has. Both halves are the gang's own record, never ours.
+          amount: function () { return Math.min(cash, Math.max(0, gang.treasury || 0)); },
+          drain: function (n) { gang.treasury = Math.max(0, (gang.treasury || 0) - n); },
+        });
+        const got = TL.take(st, { by: "player" });
+        // a broke set's roof really is empty — that IS the information the
+        // climb bought you, and it is the anti-farm rule with no timer.
+        cash = got.taken;
+      }
+    }
+    if (cash > 0) CBZ.city.addCash(cash);
+    else {
+      CBZ.city.note("Cracked it open — the set's tapped out. Nothing in the bag.", 2.4);
+      if (CBZ.cityGangProvoke && gid) CBZ.cityGangProvoke(gid, 0.8);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      return;
+    }
     let extra = "";
     const econ = CBZ.cityEcon;
     if (st.rich && econ && econ.add) {
@@ -215,7 +247,6 @@
     if (st.rich && CBZ.city.big) CBZ.city.big("ROOF STASH + $" + cash);
     // taking THEIR stash provokes the set that holds the block NOW — but no
     // cops: a roof job has no street witnesses. That's the whole appeal.
-    const gid = gangAt(st.lot);
     if (st.rich && gid && CBZ.cityGangProvoke) {
       CBZ.cityGangProvoke(gid, 0.8);
       CBZ.city.note("Cracked the set's roof stash — $" + cash + extra + ". They'll know it was light.", 2.8);

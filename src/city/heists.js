@@ -435,7 +435,18 @@
       const needGun = t.gun && !hasGun();
       const needCrew = t.minCrew > crew;
       const canStart = ready && !needGun && h.phase === "idle" && h.cooldown <= 0;
-      const est = Math.round(t.take * crewMul(Math.min(crew, 4)) * repPremium());
+      // WHAT IS ACTUALLY IN THERE. The board used to quote tier.take — the
+      // same number for every corner store in the world, forever. It now
+      // reads the standing target's real balance, so casing the block is a
+      // real decision: this bar tonight, not that one; after close, not at
+      // opening. tier.take is the fallback when no target is in reach.
+      const tgt = a && a.target;
+      let est = Math.round(t.take * crewMul(Math.min(crew, 4)) * repPremium());
+      let live = false;
+      if (tgt && CBZ.cityTill) {
+        const hold = CBZ.cityTill.holds(tgt, { point: "best" });
+        if (hold.point) { est = Math.min(est, hold.amount); live = true; }
+      }
       let why = "";
       if (h.cooldown > 0) why = "lay low (" + Math.ceil(h.cooldown) + "s)";
       else if (!ready) why = t.id === "armored" ? "stand on a street" : "walk up to a " + (t.kinds[0]) + "-type spot";
@@ -449,7 +460,8 @@
         "color:#e8eef7;cursor:" + (canStart ? "pointer" : "default") + ";opacity:" + (canStart ? "1" : ".6") + "'>" +
         "<div style='display:flex;justify-content:space-between;align-items:center'>" +
         "<span style='font-size:15px'>" + t.icon + " " + t.name + "</span>" +
-        "<span style='color:#7ed957;font-size:13px'>~" + fmt$(est) + "</span></div>" +
+        "<span style='color:" + (live && est <= 0 ? "#ff7a7a" : "#7ed957") + ";font-size:13px'>" +
+        (live ? (est > 0 ? fmt$(est) + " in there now" : "empty right now") : "~" + fmt$(est)) + "</span></div>" +
         "<div style='margin-top:4px;font-weight:500;color:#aeb8c6;font-size:12px'>" + t.desc + "</div>" +
         "<div style='margin-top:6px;font-size:11px;color:#8a93a3'>" +
         "★".repeat(t.stars) + " heat · " + fee + " · " + (t.gun ? "armed" : "unarmed-ok") +
@@ -605,7 +617,22 @@
         const v = CBZ.cityBankVault();
         if (v) { tx = v.x; tz = v.z; }
       }
-      target = { x: tx, z: tz, name: name, lotKind: kind };
+      target = { x: tx, z: tz, name: name, lotKind: kind, lot: lot };
+    }
+
+    // WHAT IS ACTUALLY IN THERE, before a cent of setup is spent. A TAKE IS A
+    // TRANSFER (city/shops.js's CBZ.cityTill): casing a place that has already
+    // been emptied has to TELL you so, and it must not bill you for masks
+    // first — that would be a hardcoded score with a hidden cover charge.
+    let tillSrc = null, tillPt = "", tillHave = -1;
+    if (CBZ.cityTill && target && target.lot) {
+      const hold = CBZ.cityTill.holds(target.lot, { point: "best" });
+      if (hold.point) { tillSrc = target.lot; tillPt = hold.point; tillHave = hold.amount; }
+    }
+    if (tillSrc && tillHave <= 0) {
+      note("Cased it — " + target.name + " is empty right now. They've already dropped the takings.", 3.2);
+      sfx("glass");
+      return;
     }
 
     // SETUP FEE (masks/tools/intel) — never refunded, GTA-style.
@@ -621,7 +648,26 @@
     h.target = target;
     h.crew = crew;
     h.cut = cutForCrew(crew);
+    // A TAKE IS A TRANSFER (city/shops.js's CBZ.cityTill). The bag is bounded
+    // by WHAT THIS BUILDING ACTUALLY HAS AT THIS HOUR, not by tier.take — so
+    // the same corner store is a different score at 09:00 and at 22:45, a
+    // branch you already drilled this week is thin, and the board tells you
+    // which target is fat right now. tier.take survives ONLY as the degrade
+    // path for a target the ledger can't answer for (the armored truck stages
+    // its own balance in city/armored.js).
     h.bagMax = Math.round(tier.take * crewMul(crew) * repPremium() * rnd(0.85, 1.15));
+    h.tillSrc = tillSrc; h.tillPt = tillPt;
+    if (tillSrc) {
+      // TWO DIFFERENT LIMITS, and keeping them separate is the whole point.
+      // tier.take × crew × rep is BAG CAPACITY — what you can physically carry
+      // out before the response overwhelms you, which is what this file has
+      // always modelled and what keeps the shipped balance intact. The
+      // ledger is the CEILING — what is actually in the building. You can
+      // never carry more than the response allows, and you can never take
+      // more than is there. Before this, only the first limit existed, so an
+      // emptied shop still paid the full tier every time.
+      h.bagMax = Math.min(h.bagMax, tillHave);
+    }
     h.bag = 0; h.grabbed = 0; h.t = 0; h.heat = 0; h.downed = false;
     // BANK: lock in this job's vault holdings + the dye-pack rig. The drillable
     // vault is far bigger than the bag you'll realistically pull — your take is
@@ -629,14 +675,30 @@
     h.drilled = 0; h.getaway = 0; h.getawayMax = tier.getaway || 0;
     h.dyed = false; h.silent = false; h.guards = h.guards || [];
     if (tier.bank) {
+      // the vault total is the branch's REAL holdings when the ledger can
+      // answer; the researched $120k-$250k band is the fallback (and the
+      // ledger's own derivation was calibrated to land inside it).
       const band = tier.vaultTotal || [120000, 250000];
-      h.vaultTotal = Math.round(rnd(band[0], band[1]) * repPremium());
+      const real = h.tillSrc ? CBZ.cityTill.holds(h.tillSrc, { point: "vault" }).amount : 0;
+      h.vaultTotal = real > 0 ? real : Math.round(rnd(band[0], band[1]) * repPremium());
+      // …and the BAG stays capacity-limited (tier.take × crew × rep) with the
+      // vault as its ceiling one line down, so a rich district's branch does
+      // not silently become a ten-times-bigger score than the one that
+      // shipped — it becomes a branch you can go back to twice.
       const df = tier.dyeFrac || [0.14, 0.26];
       h.dyeFrac = rnd(df[0], df[1]);
       // your realistic bag = the smaller of "what you can grab" and the vault —
       // but cap the bag at the vault holdings so you can never bag more than the
       // branch actually has (a small unlucky vault is a leaner score).
       h.bagMax = Math.min(h.bagMax, h.vaultTotal);
+    }
+    if (!(h.bagMax > 0)) {
+      note("Cased it — there's nothing in there right now. Come back when they've traded.", 3);
+      sfx("glass");
+      h.phase = "idle"; h.tierId = null; h.target = null; h.tillSrc = null;
+      cleanupTruck();
+      renderHud();
+      return;
     }
 
     // take the shared handle now that the bag/cut/crew are locked in — the CASE
@@ -746,6 +808,17 @@
     const tier = tierById(h.tierId);
     if (truckObj && truckObj.doorMat) truckObj.doorMat.emissive.setHex(0x000000);
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
+    // THE MONEY LEAVES THE BUILDING HERE. Up to this frame the bag was a
+    // promise; the grab is over, so the dollars actually move out of the
+    // vault/safe/drawer's balance and the business's books take the loss. Get
+    // busted on the way out and the place still does NOT get it back (the
+    // recovery is the police's, not the shop's) — which is what stops a
+    // target being farmed by aborting the escape over and over.
+    if (h.tillSrc && CBZ.cityTill) {
+      const moved = CBZ.cityTill.take(h.tillSrc, { point: h.tillPt || "best", max: Math.round(h.bag), by: "player", rob: true });
+      h.bag = Math.min(h.bag, moved.taken);
+      h.tillSrc = null;
+    }
     big("GO GO GO — " + fmt$(h.bag) + " in the bag!");
     sfx("whoosh");
     if (tier && tier.bank) {

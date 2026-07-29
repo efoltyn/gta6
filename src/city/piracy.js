@@ -342,17 +342,32 @@
   // The persistent tree answers with SIDs, not bodies. A relative who is only a
   // NAME is still a real relative — familytree.js has been keeping them across
   // saves — and a family that is a phone call is exactly what a ransom is.
-  function treeKin(ped) {
+  //
+  // IT RETURNS THE WHOLE HOUSEHOLD NOW, not the first name it finds. That was
+  // never cosmetic: the payer's WEALTH is what a ransom costs, and the one kin
+  // this used to return was whoever `spouseOf` happened to answer with. Kidnap
+  // a founder's daughter and the person who pays is her FATHER — the identity
+  // holding 55% of a listed corporation — and he sat one branch further down.
+  function treeKinAll(ped) {
     const T = CBZ.cityFamilyTree, sid = ped && ped._sid;
-    if (!T || !sid) return null;
-    let s = null;
-    try { s = T.spouseOf(sid); } catch (e) { s = null; }
-    if (!s) { try { const k = T.kidsOf(sid); s = (k && k.length) ? k[0] : null; } catch (e) { s = null; } }
-    if (!s) { try { const p = T.parentsOf(sid); s = (p && p.length) ? p[0] : null; } catch (e) { s = null; } }
-    if (!s) return null;
-    const led = CBZ.cityLedgerEntry ? CBZ.cityLedgerEntry(s) : null;
-    return { sid: s, name: (led && (led.name || led.who)) || "next of kin" };
+    const out = [];
+    if (!T || !sid) return out;
+    function add(s) {
+      if (!s || s === sid) return;
+      for (let i = 0; i < out.length; i++) if (out[i].sid === s) return;
+      const led = CBZ.cityLedgerEntry ? CBZ.cityLedgerEntry(s) : null;
+      if (led && led.alive === false) return;              // the dead pay nobody
+      out.push({ sid: s, name: (led && (led.name || led.who)) || "next of kin" });
+    }
+    try { add(T.spouseOf(sid)); } catch (e) {}
+    try { const k = T.kidsOf(sid); if (k) for (let i = 0; i < k.length; i++) add(k[i]); } catch (e) {}
+    try { const p = T.parentsOf(sid); if (p) for (let i = 0; i < p.length; i++) add(p[i]); } catch (e) {}
+    return out;
   }
+  // (the old single-kin `treeKin` is DELETED — ransomFor takes the whole
+  // household as the payer and uses kin[0] only for the NAME on the card, so a
+  // one-relative accessor no longer has a caller and dead code is the thing
+  // this repo keeps catching itself in.)
   function gangOf(ped) {
     if (!ped || ped.gang == null) return null;
     return CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
@@ -378,15 +393,60 @@
   }
 
   // ---- 2b. THE NUMBER -----------------------------------------------------
-  // DERIVED, not tasted. Two terms, both of which are numbers the game already
-  // keeps about this exact person:
-  //   `wealth`  (0..1)  — what their people can actually raise;
-  //   trueLevel (1..100)— how big a deal they are, which is the game's own
-  //                       answer to "how much is this person worth".
-  // The cubic wealth term is what makes a shipping heiress and a deckhand two
-  // different events instead of two draws from one bracket. The FLOOR is
-  // social.js's old formula at its own maximum, so nothing ever got cheaper.
-  function baseAmount(ped) {
+  /* A RANSOM IS WHAT THE PAYER HAS, AND IT LEAVES THEM.
+
+     OWNER (2026-07-29, verbatim): "i hate ransoms and robberies with dumb
+     hardcoded limit — imagine what a dumb thing that is to reality".
+
+     He was describing this function. It used to read
+
+         n = 220 + 2400*w + 55*lvl*(0.4 + w);   n *= (1 + 1.6*w*w*w);
+
+     and with w <= 1 and lvl <= 100 that is 220 + 2400 + 7700 = 10320, times
+     2.6 = $26,832. THE RICHEST, MOST POWERFUL HUMAN BEING IN THIS WORLD WAS
+     WORTH AT MOST $26,800 TO KIDNAP. Worse, the payout went through
+     mission.start({reward}) and NOBODY'S BALANCE MOVED — the family that
+     "paid" was exactly as rich the second afterwards.
+
+     Now the number is a QUESTION asked of city/take.js: what does the payer
+     actually hold, right now, across every balance the simulation already
+     keeps for them — pocket, ledger page, household savings in the cohort
+     wallets, a gang's war chest, a firm's till, and 55% of a listed
+     corporation marked to the live tape. There is no ceiling because reality
+     has no ceiling: a shipping heiress's family raises what a shipping
+     heiress's family can raise, a dock hand's raises three figures, and the
+     phone says which one you are holding.
+
+     AND THEY ARE POORER AFTERWARDS. settle() moves the money out of those same
+     balances, so the rich list, the phone, the leaderboards, the vacancy rate
+     of the district you drained and the NEXT ransom you try to run on the same
+     family all read the hole you left. */
+
+  // WILLINGNESS — what share of everything they have this payer will part
+  // with. A RATE, not a lid: multiply it by a bigger balance and you get a
+  // bigger number, forever.
+  //   wait = the FLOOR on "we are raising it" — a frightened husband is faster
+  //          than an underwriter. The illiquid part of the bag adds to it (see
+  //          shapeDemand), and that delay is the whole reason holding somebody
+  //          for real money is dangerous.
+  const PAYER_KIND = {
+    family: { frac: 0.45, wait: 55, label: "family" },
+    gang: { frac: 0.35, wait: 40, label: "their people" },
+    firm: { frac: 0.26, wait: 120, label: "their employer" },
+  };
+
+  function takeOn() { return !!(CBZ.cityHolds && CBZ.cityTake && C.TAKE_IS_TRANSFER !== false); }
+  function round100(n) { return Math.max(0, Math.round(num(n, 0) / 100) * 100); }
+  // what you would get by simply going through their pockets — the DERIVED
+  // floor under "is this worth doing at all". Never a constant.
+  function pocketWorth(ped) { return Math.max(0, num(ped && ped.cash, 0)); }
+
+  /* THE DEGRADE PATH, kept byte-for-byte as the curve above. It runs when
+     city/take.js is absent or TAKE_IS_TRANSFER is off, and every call counts
+     against takeAudit().cappedTakes — which is the migration ratchet, pinned
+     at 0 and allowed only to fall. */
+  function legacyAmount(ped) {
+    if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("piracy:ransom"); } catch (e) {} }
     const w = clamp(num(ped && ped.wealth, 0.35), 0, 1);
     let lvl = 6;
     if (CBZ.cityTrueLevel) { try { lvl = clamp(CBZ.cityTrueLevel(ped), 1, 100); } catch (e) { lvl = 6; } }
@@ -396,18 +456,45 @@
     return Math.max(1000, Math.round(n / 100) * 100);
   }
 
-  const PAYER_KIND = {
-    // mul  = what this payer will actually part with
-    // wait = seconds of "we are raising it" before the drop can be made. An
-    //        underwriter is slower than a frightened husband, and that delay is
-    //        the whole reason holding somebody is dangerous.
-    family: { mul: 1.00, wait: 55, label: "family" },
-    gang: { mul: 0.78, wait: 40, label: "their people" },
-    firm: { mul: 0.58, wait: 120, label: "their employer" },
-  };
+  // Everybody who would raid a savings account for this person: the victim
+  // themselves (a household's money is shared, and whatever is in their own
+  // pockets goes in the bag), every living relative the sim is running, and
+  // every kin the persistent tree remembers by name.
+  function familySources(ped) {
+    const out = [ped];
+    const rel = livingRelatives(ped);
+    for (let i = 0; i < rel.length; i++) out.push(rel[i]);
+    const kin = treeKinAll(ped);
+    for (let i = 0; i < kin.length; i++) out.push({ sid: kin[i].sid });
+    return out;
+  }
 
-  // THE ONE ANSWER. Never invents a payer; returns kind "state" (refuses) or
-  // "none" (there is no ransom to make) rather than making a number up.
+  /* ONE demand, shaped from one source. `frac` of what they hold, rounded to
+     the hundred the whole ransom vocabulary already speaks in, plus the wait
+     the ILLIQUID half of that bag costs — cityHolds already answered how much
+     of it has to be sold rather than counted. */
+  function shapeDemand(ped, source, k, legacyMul) {
+    if (!takeOn()) {
+      const amt = legacyAmount(ped) * (legacyMul == null ? 1 : legacyMul);
+      return { amount: round100(amt), wait: k.wait, source: source, purse: null, legacy: true };
+    }
+    let purse = null;
+    try { purse = CBZ.cityHolds(source, { site: "piracy:ransom" }); } catch (e) { purse = null; }
+    if (!purse || !purse.depletes) return { amount: 0, wait: k.wait, source: source, purse: purse, legacy: false };
+    const secs = CBZ.cityTakeLiquidateSecs ? CBZ.cityTakeLiquidateSecs() : 240;
+    return {
+      amount: round100(purse.amount * k.frac),
+      wait: Math.round(k.wait + (purse.slowShare || 0) * secs),
+      source: source, purse: purse, legacy: false,
+    };
+  }
+  // Is this number worth anybody's time? Not a constant — it is measured
+  // against what the captor could get by robbing the body in front of them.
+  function tooSmall(ped, d) { return !(d.amount > 0) || d.amount < pocketWorth(ped); }
+
+  // THE ONE ANSWER. Never invents a payer; returns kind "state" (refuses),
+  // "broke" (they exist and cannot pay) or "none" (nobody is looking) rather
+  // than making a number up.
   function ransomFor(ped) {
     if (!ped) return null;
     if (holdsOffice(ped)) {
@@ -417,40 +504,56 @@
       };
     }
     const rel = livingRelatives(ped);
-    if (rel.length) {
+    const kin = treeKinAll(ped);
+    if (rel.length || kin.length) {
       const k = PAYER_KIND.family;
+      const d = shapeDemand(ped, familySources(ped), k, rel.length ? 1 : 0.85);
+      const who = rel.length ? rel[0] : null;
+      const name = who ? nameOf(who, "their family") : (kin.length ? kin[0].name : "their family");
+      if (tooSmall(ped, d)) {
+        return {
+          kind: "broke", pays: false, amount: 0, who: who, org: null, name: name,
+          source: d.source, wait: 0,
+          why: name + " would pay. " + (rel.length || kin.length ? "They have nothing to pay with." : ""),
+        };
+      }
       return {
-        kind: "family", pays: true, who: rel[0], org: null,
-        name: nameOf(rel[0], "their family"),
-        amount: Math.round(baseAmount(ped) * k.mul / 100) * 100,
-        wait: k.wait, why: "Their people will find it.",
-      };
-    }
-    const kin = treeKin(ped);
-    if (kin) {
-      const k = PAYER_KIND.family;
-      return {
-        kind: "family", pays: true, who: null, org: null, sid: kin.sid, name: kin.name,
-        amount: Math.round(baseAmount(ped) * k.mul * 0.85 / 100) * 100,
-        wait: k.wait + 25, why: "Somebody out there still answers for them.",
+        kind: "family", pays: true, who: who, org: null, sid: kin.length ? kin[0].sid : null,
+        name: name, amount: d.amount, wait: d.wait, source: d.source, purse: d.purse,
+        why: rel.length ? "Their people will find it." : "Somebody out there still answers for them.",
       };
     }
     const gang = gangOf(ped);
     if (gang) {
       const k = PAYER_KIND.gang;
+      const d = shapeDemand(ped, gang, k);
+      if (tooSmall(ped, d)) {
+        return {
+          kind: "broke", pays: false, amount: 0, who: null, org: gang.id, name: (gang.name || "the set"),
+          source: gang, wait: 0, why: (gang.name || "The set") + " has nothing in the box.",
+        };
+      }
       return {
         kind: "gang", pays: true, who: null, org: gang.id, name: (gang.name || "the set"),
-        amount: Math.round(baseAmount(ped) * k.mul / 100) * 100,
-        wait: k.wait, why: "The set buys its own back. And it remembers who asked.",
+        amount: d.amount, wait: d.wait, source: d.source, purse: d.purse,
+        why: "The set buys its own back. And it remembers who asked.",
       };
     }
     const firm = firmOf(ped);
     if (firm) {
       const k = PAYER_KIND.firm;
+      const d = shapeDemand(ped, firm, k);
+      if (tooSmall(ped, d)) {
+        return {
+          kind: "broke", pays: false, amount: 0, who: firm.owner || null, org: null,
+          name: (firm.name || "their employer"), source: firm, wait: 0,
+          why: (firm.name || "The firm") + " is not going to spend what it does not have.",
+        };
+      }
       return {
         kind: "firm", pays: true, who: firm.owner || null, org: null, name: (firm.name || "their employer"),
-        amount: Math.round(baseAmount(ped) * k.mul / 100) * 100,
-        wait: k.wait, why: "An underwriter will pay. An underwriter will also take its time.",
+        amount: d.amount, wait: d.wait, source: d.source, purse: d.purse,
+        why: "An underwriter will pay. An underwriter will also take its time.",
       };
     }
     return {
@@ -597,8 +700,15 @@
       t: opts.limit != null ? +opts.limit : 300,
       wait: pay && pay.pays ? pay.wait : 0,
       x: px, z: pz,
-      mission: null, drop: null, paid: 0, closed: false,
+      mission: null, drop: null, paid: 0, closed: false, raised: null,
     };
+    // THE CLOCK IS THE RAISE. A bag that has to come out of a share portfolio
+    // takes minutes to assemble, and a 300 s deadline would expire before the
+    // payer could ever meet it — a big number that is structurally
+    // uncollectable is just the old ceiling wearing a hat. Deriving the limit
+    // from the wait is also the honest anti-printer: seven figures means
+    // MINUTES standing over a body while the whole city looks for you.
+    if (pay && pay.pays && opts.limit == null) h.t = Math.max(h.t, Math.round(h.wait * 1.5 + 90));
     holds.push(h);
     publish(h);
     _taken++;
@@ -667,10 +777,15 @@
     const p = h.payer;
     const who = nameOf(h.ped, "them");
     if (!p || !p.pays) {
-      // NO FICTION. Say plainly that this person is worth nothing and why.
-      phone((p && p.kind === "state")
+      // NO FICTION, AND THE REFUSAL NAMES ITSELF. There are three different
+      // ways to be worth nothing and the player is owed the difference: the
+      // state will not deal, or somebody would pay and cannot, or nobody is
+      // looking. A silent clamp to a floor said none of them.
+      phone(p && p.kind === "state"
         ? who + " is on the state's books. Nobody is coming with a bag — but somebody is coming."
-        : "Nobody's asking after " + who + ". There's no number here.",
+        : (p && p.kind === "broke"
+          ? (p.why || (p.name + " has nothing.")) + " There is no number to ask for."
+          : "Nobody's asking after " + who + ". There's no number here."),
         "THE WIRE", 5.5);
       if (p && p.kind === "state") heatUpFor(h);
       return;
@@ -683,11 +798,17 @@
     h.drop = drop;
     const M = CBZ.mission;
     if (!M || !M.start) return;
+    // WHERE THE MONEY IS COMING FROM is worth one clause, because it is the
+    // whole reason a big number takes long enough to get you caught: cash in a
+    // safe is a phone call, a block of stock is a fire sale.
+    const slowNote = (p.purse && p.purse.slow > p.purse.liquid)
+      ? " Most of it isn't cash — they're selling to raise it, and that takes time."
+      : "";
     h.mission = M.start({
       id: "ransom:" + (h.ped._sid || Math.round(h.x) + ":" + Math.round(h.z)),
       title: "Ransom " + who,
       brief: "You have " + who + " tied up. " + p.name + " is raising " + money(h.amount) +
-        ". Keep them alive and breathing while it's counted, then take the handover at " + drop.name + ".",
+        "." + slowNote + " Keep them alive and breathing while it's counted, then take the handover at " + drop.name + ".",
       color: 0x2fae8a,
       reward: { cash: h.amount, respect: 2 },
       stages: [
@@ -736,13 +857,63 @@
   // ---- 2g. WHAT THE MONEY COSTS ------------------------------------------
   // The mission block has already put the cash in your hand. This is the part
   // that decides whether you keep it — and it is the CHAIN the owner asked for.
+  /* THE MONEY LEAVES SOMEBODY. Called the instant the payer finishes raising
+     (tickHolds flips "raising" -> "counted"), which is the moment a real bag
+     physically exists: from here on the handover just delivers it.
+
+     THE ORDER MATTERS AND IT IS THE WHOLE ANTI-MINT. core/mission.js pays
+     def.reward.cash through walletGive BEFORE onComplete runs, so if we took
+     the money afterwards and the payer came up short, the difference would
+     have been created out of nothing. Instead we take FIRST and then RE-PIN
+     def.reward.cash to exactly what moved — the mission block still owns the
+     card, the HUD line, the waypoint and the payout; it just pays a number
+     that a real balance is now missing. */
+  function collectRansom(h) {
+    if (h.raised != null) return h.raised;
+    const p = h.payer;
+    if (!p || !p.pays) { h.raised = 0; return 0; }
+    if (!(CBZ.cityTake && C.TAKE_IS_TRANSFER !== false) || !p.source) {
+      // DEGRADE: no take block. The old fiction runs (the mission mints it) and
+      // says so through the ratchet, which may only ever fall.
+      if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("piracy:settle"); } catch (e) {} }
+      h.raised = h.amount;
+      return h.raised;
+    }
+    let res = null;
+    try { res = CBZ.cityTake(p.source, { max: h.amount, by: "player", site: "piracy:ransom" }); } catch (e) { res = null; }
+    const got = res ? Math.max(0, Math.round(res.taken)) : 0;
+    h.raised = got;
+    h.emptied = !!(res && res.emptied);
+    // HOLD THE HANDLE. The bag exists but it is not yours yet; if you never
+    // turn up for the handover, release() puts every dollar back into the exact
+    // balances it came out of. Money you did not collect must not vanish from
+    // the world — that would make abandoning hostages a way to grind a
+    // district's wallets to zero.
+    h.takeRes = res;
+    // RE-PIN THE REWARD to what actually left them. The def object is what
+    // mission.js reads at completion, so this is the payout.
+    if (h.mission && h.mission.def && h.mission.def.reward && typeof h.mission.def.reward === "object") {
+      h.mission.def.reward.cash = got;
+    }
+    if (got <= 0) {
+      phone(p.name + " couldn't raise a cent. There is no bag.", "THE WIRE", 5);
+    } else if (got < h.amount * 0.995) {
+      // 0.5% — a bag can land a few dollars short because the last thing sold
+      // was an indivisible whole share, and that is not a story beat.
+      phone("The bag is light — " + money(got) + ". That is everything " + p.name + " had.", "THE WIRE", 5);
+    }
+    h.amount = got;
+    return got;
+  }
+
   function settle(h, paid) {
     if (h.closed) return;
     h.closed = true;
-    // The mission block has ALREADY put the money in the wallet (walletGive runs
-    // before onComplete), and it reports the true figure — use that, never our
-    // own copy, or the cut below could be taken against a number nobody got.
-    const got = Math.max(0, Math.round(num(paid && paid.cash, h.amount)));
+    h.takeRes = null;             // collected for real — nothing to hand back
+    // The money already left a real balance in collectRansom(); the mission
+    // block then paid exactly that figure. Use ITS report, never our own copy,
+    // or the cut below could be taken against a number nobody got.
+    const got = Math.max(0, Math.round(num(paid && paid.cash, h.raised != null ? h.raised : h.amount)));
     h.paid = got;
     _paid++;
     _paidCash += got;
@@ -774,8 +945,16 @@
     // (2) NOBODY MOVED IT -> the money is hot, and the payment itself is the
     //     evidence. wanted.js already models extortion; this is that crime,
     //     fired by the thing that actually caused it.
+    //
+    //     AND THE HEAT NOW SCALES WITH THE NUMBER, which is the fourth honest
+    //     limiter on an uncapped ransom (the others are that the balance is
+    //     finite, that a big raise takes minutes, and that liquidation is loud):
+    //     a $2,000 bag is a police report and a seven-figure one is a manhunt.
+    //     Logarithmic, so it grows forever without ever being a step function —
+    //     and wanted.js, not this file, decides what a star costs.
     if (!fenced) {
-      if (CBZ.cityCrime) { try { CBZ.cityCrime(55, { type: "extortion", x: h.x, z: h.z }); } catch (e) {} }
+      const heat = Math.round(55 * (1 + Math.log10(1 + Math.max(0, got) / 5000)));
+      if (CBZ.cityCrime) { try { CBZ.cityCrime(heat, { type: "extortion", x: h.x, z: h.z }); } catch (e) {} }
       phone("That money's got a serial on it. Somebody's going to come asking.", "THE WIRE", 4.5);
       _hot++;
     }
@@ -805,6 +984,13 @@
     const h = holdOf(ped);
     if (!h) return false;
     const i = holds.indexOf(h); if (i >= 0) holds.splice(i, 1);
+    // THE BAG GOES BACK unless you actually took it. A payer who raised the
+    // money and then watched nobody arrive keeps it — the alternative is that
+    // every abandoned hold silently deletes real money from the city.
+    if (why !== "paid" && h.takeRes && h.takeRes.refund) {
+      try { h.takeRes.refund(); } catch (e) {}
+      h.takeRes = null; h.raised = null;
+    }
     unpublish(ped);
     if (CBZ.cityRestrain && CBZ.cityRestrain.release) { try { CBZ.cityRestrain.release(ped); } catch (e) {} }
     if (ped && !ped.dead) {
@@ -874,7 +1060,19 @@
           if ((g.cash || 0) >= h.amount) {
             if (CBZ.city && CBZ.city.note) CBZ.city.note("[E] Pay " + money(h.amount) + " for " + nameOf(ped, "them"), 1.3);
             if (CBZ.keys && (CBZ.keys.e || CBZ.keys.E)) {
-              if (CBZ.city && CBZ.city.spend && CBZ.city.spend(h.amount)) {
+              // THE SAME LAW POINTED AT YOU. Paying is a take out of the
+              // player's own balance and it goes through the one block, so the
+              // ratchet sees both directions of every ransom in the game.
+              let paidOut = false;
+              if (CBZ.cityTake && C.TAKE_IS_TRANSFER !== false) {
+                let r = null;
+                try { r = CBZ.cityTake("player", { max: h.amount, site: "piracy:pay", by: "player" }); } catch (e) { r = null; }
+                paidOut = !!(r && r.taken >= h.amount);
+              } else if (CBZ.city && CBZ.city.spend) {
+                if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("piracy:pay"); } catch (e) {} }
+                paidOut = !!CBZ.city.spend(h.amount);
+              }
+              if (paidOut) {
                 _paidByPlayer++;
                 if (crew) standDown(crew, "paid");
                 release(ped, "paid");
@@ -897,7 +1095,23 @@
       }
 
       // The player is holding them. The clock is the payer's patience.
-      if (h.state === "raising") { h.wait -= dt; if (h.wait <= 0) h.state = "counted"; }
+      if (h.state === "raising") {
+        h.wait -= dt;
+        if (h.wait <= 0) {
+          h.state = "counted";
+          // THE BAG EXISTS NOW, and somebody is poorer for it.
+          const got = collectRansom(h);
+          if (got <= 0) {
+            // A payer who genuinely cannot pay is not a softer outcome, it is a
+            // different one: the job dies here and you are still holding a
+            // person nobody is coming for.
+            if (h.mission && h.mission.alive && h.mission.alive()) { try { h.mission.fail("nobody could pay"); } catch (e) {} }
+            h.state = "worthless";
+            release(ped, "unpaid");
+            continue;
+          }
+        }
+      }
       if (h.t <= 0) {
         phone("You held too long. They stopped answering.", "THE WIRE", 4.5);
         release(ped, "expired");
@@ -928,7 +1142,9 @@
         ped.alarmed = 8; ped.fear = 10;
         phone(pay && pay.kind === "state"
           ? "You're holding somebody the state won't buy. Put them down and run."
-          : "Nobody's asking after " + nameOf(ped, "them") + ". There's no number.", "THE WIRE", 4.5);
+          : (pay && pay.kind === "broke"
+            ? (pay.why || (pay.name + " has nothing.")) + " There is no number."
+            : "Nobody's asking after " + nameOf(ped, "them") + ". There's no number."), "THE WIRE", 4.5);
         if (pay && pay.kind === "state") { if (CBZ.cityCrime) { try { CBZ.cityCrime(140, { type: "kidnapping", instant: true }); } catch (e) {} } }
         return;
       }
@@ -1604,7 +1820,16 @@
     if (cr.state === "grab") {
       const grabber = crewHolder(cr, "board") || lead;
       if (!grabber) { cr.state = "leave"; return; }
-      const victim = tgt.player ? null : pickHostage(tgt);
+      /* CACHED, and that is not a micro-optimisation. This state persists for
+         the whole ~2.6 s seize, so pickHostage() ran EVERY FRAME — which was
+         free when a ransom was a wealth curve and is not free now that it asks
+         city/take.js what four people's families actually hold. Re-picked only
+         if the boat changed or the chosen body died in the meantime. */
+      if (cr._pickFor !== tgt || (cr._pick && (cr._pick.dead || cr._pick.restraint))) {
+        cr._pickFor = tgt;
+        cr._pick = tgt.player ? null : pickHostage(tgt);
+      }
+      const victim = tgt.player ? null : cr._pick;
       if (!victim && !tgt.player) {
         // Nothing aboard is worth a number. They take the boat's value and go —
         // which is a real outcome, not a failure state.
@@ -2005,7 +2230,12 @@
       }
     }
     for (let i = 0; i < holds.length; i++) if (holds[i].ped && !holds[i].ped.dead) live++;
-    const legacy = (CBZ.cityReleaseHostage && CBZ.cityReleaseHostage._ransomWrapped) ? 0 : 1;
+    let legacy = (CBZ.cityReleaseHostage && CBZ.cityReleaseHostage._ransomWrapped) ? 0 : 1;
+    // A RANSOM THAT COMES OUT OF NOBODY IS STILL A MAGIC NUMBER. The wrap above
+    // only proved the OLD payout was replaced; until city/take.js shipped, the
+    // replacement was itself a curve with a $26,832 ceiling that minted its own
+    // money. `legacyRansom` now counts that too, so the pin at 0 means both.
+    if (!(CBZ.cityHolds && CBZ.cityTake && C.TAKE_IS_TRANSFER !== false)) legacy++;
     // every rung must open a verb — asked of OUR ladder, not of a promise
     let verblessRungs = 0;
     for (let i = 0; i < LADDER.length; i++) if (!LADDER[i].grants || !LADDER[i].grants.length) verblessRungs++;
@@ -2024,6 +2254,11 @@
       holdsLive: live, taken: _taken, ransomsPaid: _paid, ransomCash: _paidCash,
       paidByPlayer: _paidByPlayer, executed: _executed, rescued: _rescued,
       fenced: _cuts, hotMoney: _hot,
+      // A RANSOM IS A TRANSFER NOW. `ransomTransfer` false means every number
+      // this file quotes is a curve again; `ransomCeiling` is null on purpose —
+      // the old one was $26,832 and there isn't one any more.
+      ransomTransfer: !!(CBZ.cityHolds && CBZ.cityTake && C.TAKE_IS_TRANSFER !== false),
+      ransomCeiling: null,
     };
   };
   CBZ.piracyAudit.detail = function () {

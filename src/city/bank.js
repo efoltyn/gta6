@@ -744,9 +744,57 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
-  function withdraw(amount) {
-    const amt = Math.min(amount || 500, num(g.cityBank, 0));
+  // THE MACHINE HAS TO HAVE THE NOTES. A TAKE IS A TRANSFER (city/shops.js's
+  // CBZ.cityTill), and that cuts both ways: an ATM dispensing your OWN money
+  // is still a physical box with a cash cassette in it, and cassettes run
+  // out. The cassette is a declared cash point on the ledger, so it is one
+  // balance — the machine can be emptied by ordinary withdrawals, it refills
+  // on the branch's own service run, and anything that wants to TAKE it (a
+  // crowbar, a truck and a chain) asks the same ledger every other score in
+  // the game asks. Real cassettes carry $20k-$200k; this one is derived, not
+  // typed — see atmCassette().
+  function atmCassette() {
+    if (!S.lot) return null;
+    if (S._atmBox) return S._atmBox;
+    const TL = CBZ.cityTill;
+    if (!TL || !TL.declare || !TL.districtCash) return null;
+    // a branch's ATM is stocked out of the same district cash the branch's own
+    // vault is derived from: one service run's worth (a day) of what this part
+    // of town physically banks, split across the branches serving it. That
+    // puts a downtown machine near the top of the real $20k-$200k band and a
+    // projects machine near the bottom, with no number typed here.
+    const box = { _atmOf: 0 };
+    TL.declare(box, {
+      name: "Meridian Trust ATM", kind: "atm", point: "vault",
+      amount: function () { return box._atmBal; },
+      drain: function (n) { box._atmBal = Math.max(0, box._atmBal - n); },
+    });
+    const dk = TL.districtOf(S.lot), dc = TL.districtCash(dk);
+    box._atmOf = Math.max(2000, Math.round(dc.cash * 24 / Math.max(1, dc.branches)));
+    box._atmBal = box._atmOf;
+    box._atmSvc = 0;
+    S._atmBox = box;
+    return box;
+  }
+  // the service run: a machine is restocked on the same daily cadence the
+  // rest of the ledger banks on. No timer of its own — it reads the clock.
+  function atmService(box) {
+    const day = (CBZ.dayCount ? CBZ.dayCount() : 0) | 0;
+    if (box._atmSvc !== day) { box._atmSvc = day; box._atmBal = box._atmOf; }
+  }
+  function withdraw(amount, atMachine) {
+    let amt = Math.min(amount || 500, num(g.cityBank, 0));
     if (amt <= 0) { note("Bank's empty.", 1.4); return; }
+    if (atMachine) {
+      const box = (CBZ.cityTill && CBZ.cityTill.take) ? atmCassette() : null;
+      if (box) {
+        atmService(box);
+        const got = CBZ.cityTill.take(box, { max: amt, by: "player" });
+        if (!(got.taken > 0)) { note("This machine's out of cash. Try the teller.", 2.2, { from: "Meridian Trust", app: "bank" }); return; }
+        if (got.taken < amt) note("Machine could only dispense " + fmt$(got.taken) + ".", 2, { from: "Meridian Trust", app: "bank" });
+        amt = got.taken;
+      }
+    }
     g.cityBank = num(g.cityBank, 0) - amt;
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt); else g.cash = num(g.cash, 0) + amt;
     if (CBZ.sfx) CBZ.sfx("coin");
@@ -892,7 +940,7 @@
       else deposit();
       return;
     }
-    if (st.kind === "atm") { withdraw(500); return; }
+    if (st.kind === "atm") { withdraw(500, true); return; }
     if (st.kind === "loan") { openPanel(); return; }
   }
 
@@ -988,13 +1036,33 @@
   // the dumb generic "Shop here" vendor verb when the branch self-prompts.
   CBZ.cityBankLive = function (lot) { return !!(S.built && S.lot && (!lot || lot === S.lot)); };
   CBZ.cityBankLot = function () { return (S.built && S.lot) || null; };
-  // THE VAULT (contract for heists.js): where is the real steel vault, and how to
-  // light it up mid-crack. heists.js drills THIS spot for the BANK score so the
-  // grab happens at the actual vault, not just "the lot centre". Heat/glow only —
-  // the branch's own cash pool is untouched; the heist mints its own bag.
+  // THE VAULT (contract for heists.js): where is the real steel vault, what is
+  // IN it, and how to light it up mid-crack. heists.js drills THIS spot for
+  // the BANK score so the grab happens at the actual vault, not just "the lot
+  // centre".
+  //
+  // This used to end "the branch's own cash pool is untouched; the heist mints
+  // its own bag" — an honest confession that the score came from nowhere and
+  // that a branch could be drilled every night forever. A TAKE IS A TRANSFER
+  // now: `holds` is the branch's real vault balance out of city/shops.js's
+  // CBZ.cityTill (derived from what the businesses in this district actually
+  // bank — which is why it lands inside the researched $120k-$250k band that
+  // heists.js used to type by hand), and drilling it MOVES that balance. A
+  // branch you emptied on Monday is a thin score on Tuesday.
   CBZ.cityBankVault = function () {
     if (!(S.built && S.vault)) return null;
-    return { x: S.vault.x, z: S.vault.z };
+    const TL = CBZ.cityTill;
+    const h = (TL && S.lot) ? TL.holds(S.lot, { point: "vault" }) : null;
+    return { x: S.vault.x, z: S.vault.z, lot: S.lot || null, holds: h ? h.amount : 0, of: h ? h.of : 0 };
+  };
+  // what is in the lobby machine right now (and what it holds when full) —
+  // one read for a UI, a marker, or anybody who wants to crack it open.
+  CBZ.cityBankATM = function () {
+    const box = (S.built && S.lot) ? atmCassette() : null;
+    if (!box) return null;
+    atmService(box);
+    const h = CBZ.cityTill.holds(box, {});
+    return { holds: h.amount, of: box._atmOf, name: h.name };
   };
   // glow the vault door (0..1) while it's being drilled; 0 clears it. Safe no-op
   // if the branch isn't built (headless / not near a bank).

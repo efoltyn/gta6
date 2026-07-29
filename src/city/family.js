@@ -480,7 +480,21 @@
       });
       if (c) { registerPed(c); captors.push(c); }
     }
-    const ransom = Math.max(2000, Math.round((g.cash || 0) * 0.12 / 100) * 100);
+    /* WHAT THEY ASK IS WHAT YOU HAVE. The old line read only `g.cash`, so
+       stashing your money in the bank made your own family cheap to buy back,
+       and a broke player and a player worth $40M were quoted numbers a
+       thousandth of a percent apart. city/take.js's cityHolds is the one
+       question "what does this source actually hold" — asked of YOU, with the
+       bank included, because a crew holding your girl does not care which
+       pocket it comes out of. A rate, never a lid: the richer you get the more
+       your people cost to get back, forever. The $2,000 floor stays — it is a
+       floor, not a ceiling, and it is what stops the demand collapsing to
+       nothing when you are broke. */
+    let worth = (g.cash || 0);
+    if (CBZ.cityHolds && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+      try { const h = CBZ.cityHolds("player", { bank: true, site: "family:kidnap" }); if (h) worth = h.amount; } catch (e) {}
+    } else if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("family:kidnap"); } catch (e) {} }
+    const ransom = Math.max(2000, Math.round(worth * 0.12 / 100) * 100);
     ped.ransom = ransom; ped.captiveT = 180;
     kidnap = { ped, gangId: gang.id, captors, ransom, t: 180, x: hx, z: hz, authored: !!opts.authored };
     if (CBZ.cityFeed) CBZ.cityFeed("The " + gang.name + " took " + (ped.name || "your girl") + ". They want $" + ransom.toLocaleString() + ".", "#ff7a7a");
@@ -530,8 +544,26 @@
         if ((g.cash || 0) >= k.ransom) {
           if (CBZ.city && CBZ.city.note) CBZ.city.note("[E] Pay $" + k.ransom.toLocaleString() + " — or kill the three holding " + (k.ped.name || "them"), 1.4);
           if (CBZ.keys && (CBZ.keys["e"] || CBZ.keys["E"])) {
-            g.cash -= k.ransom;
-            if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+            /* THE MONEY GOES SOMEWHERE. `g.cash -= k.ransom` DESTROYED it: the
+               crew that took your family got not one dollar richer for it, so
+               the most personal shakedown in the game had no consequence on the
+               other side of the table. It lands in that gang's treasury now —
+               and gangs.js:869 SPENDS the treasury on raids, so the price of
+               buying your girl back is a better-funded set on your block. That
+               is the same law as the ransom you collect, pointed at you. */
+            let paidOut = false;
+            const gangRec = CBZ.cityGangById ? CBZ.cityGangById(k.gangId) : null;
+            if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+              let r = null;
+              try { r = CBZ.cityTake("player", { max: k.ransom, to: gangRec || k.gangId, site: "family:kidnap", by: "player" }); } catch (e) { r = null; }
+              paidOut = !!(r && r.taken >= k.ransom);
+            } else {
+              if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("family:kidnap"); } catch (e) {} }
+              g.cash -= k.ransom;
+              if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+              paidOut = true;
+            }
+            if (!paidOut) return;
             for (const c of k.captors) if (c && !c.dead) { c.rage = null; c.state = "walk"; }
             endKidnap(true, "You paid. " + (k.ped.name || "They") + " walks home. The number is a memory now.", "#ffce7a");
             return;

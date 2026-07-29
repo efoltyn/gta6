@@ -222,11 +222,30 @@
       }
     }
 
-    // ---- rob at gunpoint: [G] while aiming at a held-up inmate ----
+    /* ---- rob at gunpoint: [G] while aiming at a held-up inmate ----
+       A SHAKEDOWN IS A TRANSFER, and this one always was — systems/economy.js's
+       lootActor moves the cigarettes and items off the man's own loadout, so
+       nothing here was ever minting. What it lacked was an ANSWER: robbing
+       somebody you already stripped did nothing at all, silently, so the world
+       gave you no way to learn that a person is a finite thing.
+       It routes through city/take.js now, which DELEGATES straight back to
+       lootActor (no second loot path, no duplicated currency) and reports what
+       moved — cigs in `units`, and `taken` DOLLARS pinned at zero, because
+       there are no dollars in here and pretending otherwise would be the exact
+       fiction the block exists to delete. */
     const robNow = !!(CBZ.keys && CBZ.keys["g"]);
     if (robNow && !robWas && target && target.intimidMode === "scared" &&
-        !target.looted && playerDist(target) < ROB_RANGE) {
-      CBZ.econ && CBZ.econ.lootActor && CBZ.econ.lootActor(target); // shows its own loot toast
+        playerDist(target) < ROB_RANGE) {
+      if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+        let r = null;
+        try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
+        if (!r || (!r.units && (!r.items || !r.items.length))) {
+          CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
+        }
+      } else if (!target.looted) {
+        if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }
+        CBZ.econ && CBZ.econ.lootActor && CBZ.econ.lootActor(target); // shows its own loot toast
+      }
       target.intimidT = HOLD;                                       // keep them terrified
     }
     robWas = robNow;

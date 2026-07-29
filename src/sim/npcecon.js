@@ -224,19 +224,47 @@
     if (!row) return;
     row.wallet = Math.max(0, row.wallet - amount);
   }
+  // credit(district, class, amount) -> the exact inverse of debit(). city/
+  // take.js needs it for ONE reason and it is not decoration: a ransom is
+  // COLLECTED when the payer finishes raising it, minutes before the handover,
+  // so a captor who never shows up would otherwise have deleted that money from
+  // the world — a hostage nobody collects must leave the family exactly as rich
+  // as it was, or abandoning holds becomes a way to grind a district to zero.
+  // Same guards as debit: no-ops on a bad amount or an unknown district/class.
+  function credit(dk, cls, amount) {
+    if (!(amount > 0)) return;
+    const row = rowFor(dk, cls);
+    if (!row) return;
+    row.wallet = Math.max(0, row.wallet + amount);
+  }
+  // districtHealth(district) -> THAT district's cohort wallets as a ratio of
+  // their seeded baseline, clamped 0.2..1.5. 1.0 is untouched; below 1.0 the
+  // district has been drained; above 1.0 it has been earning.
+  //
+  // THIS NUMBER ALREADY EXISTED — it was computed inside vacancyRate() and
+  // thrown away, so the only per-district drain signal in the game was locked
+  // behind a 0..0.35 vacancy chance and nothing else could read it. The
+  // citywide walletHealth() has three real consumers and CANNOT answer "does
+  // THIS block feel robbed". Promoting the ratio and deriving vacancyRate from
+  // it is a MIGRATION, not an addition: there is one number now, and the two
+  // can never disagree. vacancyRate's arithmetic is unchanged, including the
+  // 0 it returns for an unknown district (an unknown one has health 1.0, and
+  // (1 - 1.0) * 0.4 is exactly the 0 it used to return early with).
+  function districtHealth(dk) {
+    ensureInit();
+    const M = g.npcEcon;
+    const init = M.initByDist[dk];
+    if (!(init > 0)) return 1.0;
+    let cur = 0;
+    for (const row of M.rows) if (row.d === dk) cur += row.wallet;
+    return clampNum(0.2, 1.5, cur / init);
+  }
   // vacancyRate(district) -> 0..0.35, how likely an owned unit in this
   // district sits empty next zillow income cycle. Reads how far this
   // district's cohort wallets have fallen from their seeded baseline —
   // strip-mine a district and its buildings start going vacant for real.
   function vacancyRate(dk) {
-    ensureInit();
-    const M = g.npcEcon;
-    const init = M.initByDist[dk];
-    if (!(init > 0)) return 0;
-    let cur = 0;
-    for (const row of M.rows) if (row.d === dk) cur += row.wallet;
-    const health = clampNum(0.2, 1.5, cur / init);
-    return clampNum(0, 0.35, (1 - health) * 0.4);
+    return clampNum(0, 0.35, (1 - districtHealth(dk)) * 0.4);
   }
   // walletHealth() -> CITY-WIDE aggregate wallet / seeded initial total,
   // clamped 0.5..1.5. Consumed by sim/econstate.js's daily wagesProxy (a
@@ -288,6 +316,19 @@
     if (!delta || !dk) return 0;
     for (const row of g.npcEcon.rows) if (row.d === dk) row.employedFrac = clampNum(0, 1, row.employedFrac + delta);
     return delta;
+  }
+  // rowOf(district, class) -> a READ-ONLY COPY of ONE cohort row's live pop +
+  // wallet. city/take.js (the take-is-a-transfer block) asks it twice per take:
+  // once to size a household's remaining savings — a strip-mined district
+  // genuinely has less to give up — and once AFTER calling debit(), to read the
+  // wallet back and PROVE the dollars moved. That read-back is the whole reason
+  // this exists rather than the caller trusting debit()'s silence: takeAudit()'s
+  // `mintedTakes` is an assertion, not a tautology. summary() would answer both
+  // questions but allocates all 20 rows to do it.
+  function rowOf(dk, cls) {
+    const row = rowFor(dk, cls);
+    if (!row) return null;
+    return { d: row.d, c: row.c, pop: row.pop, wallet: row.wallet, employedFrac: row.employedFrac };
   }
   // summary() -> a COPY of the 20 rows (diagnostics / a future phone app;
   // callers can't mutate the live state through it).
@@ -412,12 +453,15 @@
     classFor: classFor,
     drawCash: drawCash,
     debit: debit,
+    credit: credit,
+    districtHealth: districtHealth,
     vacancyRate: vacancyRate,
     walletHealth: walletHealth,
     entPool: entPool,
     drainEntPool: drainEntPool,
     adjustEmployedFrac: adjustEmployedFrac,
     adjustEmployedFracForDistrict: adjustEmployedFracForDistrict,
+    rowOf: rowOf,
     summary: summary,
     serialize: serialize,
     apply: apply,

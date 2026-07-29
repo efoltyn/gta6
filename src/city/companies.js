@@ -449,6 +449,29 @@
   };
   CBZ.cityCompaniesReset = CBZ.cityCompanies.reset;
 
+  // ---- A TAKE IS A TRANSFER: the business is poorer ------------------------
+  // sim/corporations.js has answered this for CHAIN outlets since E5 (its
+  // robOutlet), which left every independently-owned storefront in the world
+  // minting money when it was robbed — the till came from nowhere and hit
+  // nobody's books. A company that owns the lot is a real record with real
+  // cash (co.cash — the number companyValue/ownerNetWorth, the phone and the
+  // wealth leaderboards already read), so the dollars come off it.
+  //
+  // ONE guarded call from city/shops.js's till ledger, no schema, no
+  // registration: a lot with no company owner is a silent no-op, which is
+  // most of them. Returns the company name when it actually landed, so a
+  // caller can say WHOSE money it was.
+  CBZ.cityCompanyRob = function (lot, amount) {
+    const co = lot && lot._company;
+    if (!co || !(amount > 0)) return null;
+    co.cash = Math.max(0, (co.cash || 0) - amount);
+    // being robbed is a real operating loss on the day's book, not a
+    // mysteriously smaller treasury: it rolls through the same growth signal
+    // an expansion or a divestment does.
+    co.robbed = (co.robbed || 0) + amount;
+    return co.name;
+  };
+
   // tick: (re)build lazily for a fresh arena, then run periodic market moves
   // + the owner-permanence sweep (cheap: ≤14 companies, one ped check each).
   let serveT = 0;

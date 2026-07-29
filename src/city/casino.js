@@ -174,6 +174,16 @@
     b.lbox(-hx * 0.8, floorY + 0.6, -hz * 0.8, Math.min(3.2, hx), 1.1, 0.7, 0x3a2a1c, { solid: true });
     b.lbox(hx * 0.8, floorY + 0.7, -hz * 0.8, Math.min(2.6, hx), 1.4, 0.7, 0x2a2620, { solid: true });
     b.lbox(hx * 0.8, floorY + 1.5, -hz * 0.8, Math.min(2.6, hx), 0.1, 0.7, GOLD, { emissive: GOLD, ei: 0.5, cast: false });
+    // THE CAGE IS A PLACE, AND THE MONEY IN IT IS REAL. A TAKE IS A TRANSFER
+    // (city/shops.js's CBZ.cityTill): the old model said every casino in the
+    // world held exactly $2,200, forever, however many people had lost
+    // however much in it. The count room's balance is now this house's share
+    // of sim/npcecon.js's entPool — the entertainment money the city's
+    // cohorts actually lost — and the ledger drains that same pool when it is
+    // taken. We author no balance here; we publish WHERE it physically is, so
+    // a score binds to the cage counter you can walk up to instead of to an
+    // abstract lot property.
+    lot._cageSpot = { x: ox + hx * 0.8, z: oz - hz * 0.8, y: floorY };
     // ...and the two people those two counters are FOR. Both stand behind
     // their own counter (between it and the wall) facing the floor, which is
     // the only side of a cage or a bar anybody ever works from.
@@ -274,4 +284,14 @@
   }, 90);
 
   CBZ.dressCasino = dressCasino;
+  // WHERE THE CAGE IS + WHAT IS IN IT. One read for anything that wants to
+  // put a score, a guard or a marker on the count room — heists.js binds its
+  // take-zone to `spot` and the amount comes from the ONE ledger, never from
+  // a number typed here. Returns null for a casino that has not been dressed.
+  CBZ.cityCasinoCage = function (lot) {
+    if (!lot || lot.kind !== "casino" || !lot._cageSpot) return null;
+    const TL = CBZ.cityTill;
+    const held = (TL && TL.holds) ? TL.holds(lot, { point: "vault" }) : null;
+    return { spot: lot._cageSpot, holds: held ? held.amount : 0, of: held ? held.of : 0 };
+  };
 })();

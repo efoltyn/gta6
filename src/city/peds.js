@@ -699,14 +699,56 @@
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
     let cash = opts.cash != null ? opts.cash
       : (econ && econ.rollCashFor ? econ.rollCashFor(archetype, mWealth, r) : fallbackCashFor(archetype, mWealth, r));
-    // E4 CIRCULATION (sim/npcecon.js): an ordinary resident's spawn cash is
-    // drawn from their district cohort's wallet mean instead of pure RNG —
-    // this closes the robbery money-printer (strip-mine a district and its
-    // FUTURE spawns carry less, not just its current pedestrians).
-    if (opts.cash == null && archetype === "resident" && CBZ.npcEcon && CBZ.npcEcon.drawCash && econ && econ.districtAt) {
-      const drawn = CBZ.npcEcon.drawCash(econ.districtAt(x, z), mWealth, r);
-      if (drawn != null) cash = drawn;
+    /* E4 CIRCULATION (sim/npcecon.js) — THE SPAWN-SIDE MONEY PRINTER.
+
+       The comment here used to claim this "closes the robbery money-printer
+       (strip-mine a district and its FUTURE spawns carry less)". It closed it
+       for RESIDENTS AND NOBODY ELSE: the gate was `archetype === "resident"`,
+       so every tycoon, mobster, dealer, socialite, tourist and panhandler kept
+       spawning with cash minted straight out of economy.js's rollCashFor, and
+       a district you had stripped to the floor went on producing them at full
+       richness forever. Same fault class the ransom had, one layer down.
+
+       THE FIX IS NOT TO WIDEN THE GATE. drawCash hands back the district+class
+       cohort MEAN, so giving it to a tycoon would flatten him to cohort-average
+       and delete the archetype spread rollCashFor exists to build — the whole
+       point that "a rare tycoon is walking around with a Richard Mille".
+       Instead: THE ARCHETYPE KEEPS ITS SHAPE, THE COHORT SUPPLIES ITS SCALE.
+       Roll exactly as before, then multiply by the district's own depletion
+       ratio, so a panhandler stays a panhandler and a tycoon stays a tycoon
+       while both get poorer on a block that has been worked over.
+
+       ONE-SIDED ON PURPOSE (min(1, health)): cohort wallets bank ~25% of
+       income every hour, so health drifts UP over a long session and a
+       two-sided multiplier would quietly become a printer of its own — the
+       exact thing being closed. Strip-mining makes people poorer; hoarding
+       does not make them richer. Carried cash is a habit, not a savings graph.
+
+       DAY ONE IS BYTE-IDENTICAL: spawnCityPeds() resets npcEcon immediately
+       before this runs, so a fresh world has health exactly 1.0 and the
+       multiplier is exactly 1. Nothing changes until somebody is robbed.
+
+       DETERMINISM: districtHealth() draws no rng, and the resident branch below
+       still consumes exactly the one r() that drawCash always consumed, under
+       exactly the same conditions — no draw added, none removed, order
+       unchanged. Degrade-safe: no npcEcon -> the roll stands as it was. */
+    let _cashScaled = false, _cashDk = null;
+    if (opts.cash == null && CBZ.npcEcon && econ && econ.districtAt) {
+      _cashDk = econ.districtAt(x, z);
+      if (archetype === "resident" && CBZ.npcEcon.drawCash) {
+        // A RESIDENT IS THE COHORT. Not a roll to be scaled — the cohort's own
+        // live per-head mean IS the honest answer for the majority archetype,
+        // and this path is unchanged from the day it shipped.
+        const drawn = CBZ.npcEcon.drawCash(_cashDk, mWealth, r);
+        if (drawn != null) { cash = drawn; _cashScaled = true; }
+      } else if (CBZ.npcEcon.districtHealth) {
+        const health = CBZ.npcEcon.districtHealth(_cashDk);
+        if (health >= 0) { cash = Math.max(1, Math.round(cash * Math.min(1, health))); _cashScaled = true; }
+      }
     }
+    // measurable, not asserted: takeAudit().spawnMinted is the count of rolled
+    // spawns that had a cohort to answer to and were NOT scaled by it.
+    if (opts.cash == null && CBZ.cityTakeSpawn) { try { CBZ.cityTakeSpawn(_cashDk, _cashScaled); } catch (e) {} }
     // valuables: array of item NAMES this ped carries (watch/ring/chain/etc). Most
     // people none/Phone; the whales carry a luxury jackpot. Guarded per contract.
     const valuables = opts.valuables != null ? opts.valuables

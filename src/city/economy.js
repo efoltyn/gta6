@@ -1412,7 +1412,22 @@
     for (let i = 0; i < fs.length; i++) if (fs[i].sid === sid) return fs[i];
     return null;
   }
+  /* A FORTUNE YOU CAN TAKE FROM IS A FORTUNE THAT FALLS.
+     Six of the seven branches below are COMPUTED — a power law, a treasury
+     multiple, a VIP tier, a wage-class cushion. There is no wallet behind them,
+     so before city/take.js there was no way to make one of them poorer: you
+     could ransom a tycoon's daughter and the rich list showed him unchanged the
+     next second. `_drained` is the dollars that have actually been taken off
+     this person (written ONLY by city/take.js's estate pool, which is the one
+     place that can move a computed fortune), and every readout in the game —
+     the phone, both leaderboards, the dossier, the next ransom's own purse —
+     reads this function, so subtracting it once here is the whole fix.
+     Byte-identical for anybody who has never been taken from. */
+  function drainedOf(p) { const d = p && p._drained; return (typeof d === "number" && isFinite(d) && d > 0) ? d : 0; }
   function netWorthOf(p) {
+    return Math.max(0, netWorthGross(p) - drainedOf(p));
+  }
+  function netWorthGross(p) {
     if (!p) return 0;
     const pk = pocketOf(p);
     if (!(CBZ.CONFIG && CBZ.CONFIG.ECONOMY_V2)) return pk + (p.bounty || 0);

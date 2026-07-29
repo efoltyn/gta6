@@ -426,8 +426,24 @@
     if (!op.barked) { op.barked = true; opBark(gang, m, EXTORT_BARK); }
     if (m._exT >= 1.4 && !m._exDone) {
       m._exDone = true;
-      const take = 20 + ((rng() * 60) | 0);
-      if (gang) {
+      /* THE MARK ACTUALLY PAYS. `take` was minted: the crew's treasury went up
+         and the man they leaned on was not one dollar poorer, so the street
+         racket was a faucet with no tap. It goes through city/take.js now — the
+         SAME law as the player's own ransom, pointed at an NPC-on-NPC shake —
+         so the money comes out of his pocket and out of his district's cohort
+         wallet, and a block that has been worked over all week has less to
+         give. The roll stays exactly as it was (it is the crew's ASK, drawn on
+         the seeded stream, and removing a draw would break determinism); what
+         changed is that the ask can now come back smaller than it was asked
+         for. Degrade-safe: block absent -> the old line, byte for byte. */
+      const ask = 20 + ((rng() * 60) | 0);
+      let take = ask;
+      if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+        let r = null;
+        try { r = CBZ.cityTake(mark, { max: ask, by: gang ? gang.name : "a crew", site: "gangops:extort" }); } catch (e) { r = null; }
+        take = r ? Math.round(r.taken) : 0;
+      } else if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("gangops:extort"); } catch (e) {} }
+      if (gang && take > 0) {
         gang.treasury = Math.min(8000, (gang.treasury || 0) + take);
         if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(m); s.contrib = (s.contrib || 0) + take * 0.6; }
       }
