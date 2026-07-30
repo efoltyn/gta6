@@ -41,6 +41,28 @@
         never blocked LOS), so returning that specific mesh keeps the
         LOS-blocker count identical: 1 per crate, not 3.
 
+   THE CHESTS ARE NOT THE POINT (PRISON_ARMORY_SPINE, declared in world/
+   gunroom.js). OWNER, verbatim: "it's not about getting cigarettes and opening
+   the dumb chests — it's getting a keycard which already gets you into a very
+   cool armory room." These crates were competing with that: bright orange-tan
+   lumber shouting from across the yard, a gold-trimmed prompt chip, and a
+   payout in the one currency the game already drowns in. Two changes, and
+   NEITHER deletes a crate — a crate is still cover, still pryable, still worth
+   something:
+     1. THEY STOP SHOUTING. The palette drops to a weathered, desaturated
+        grey-brown and the chip's gold accent goes to steel, so the eye lands
+        on the ARMORY sign across the yard instead of on a box.
+     2. TWO OF THEM SERVE THE SPINE. The two crates nearest the armory approach
+        (11,17) and (0,11) hold a TOOL instead of only smokes — a Hacksaw Blade
+        and a Lockpick. The blade is the point: world/gunroom.js's inner cage
+        now grinds open under one, which is the first verb "Hacksaw Blade" has
+        ever had in this game (it was fence-value loot and nothing else). A
+        tool crate pays roughly half the cigs, so the yard's total contraband
+        barely moves — the crates were re-POINTED, not nerfed.
+   Flag off (?cfg_PRISON_ARMORY_SPINE=0) restores the original colours, the
+   original chip and a cigs-only payout on all five, with the rng stream drawn
+   in the same order either way.
+
    NOTE (documented, not "papered over"): addBox's collider omits y0/y1
    entirely for crates (never passed), which systems/physics.js treats as
    an unconditionally full-height wall that can never be stepped/vaulted
@@ -61,14 +83,27 @@
   const REACH = 2.2;          // [E] pry reach — a hair tighter than roofloot (ground-level, tighter yard)
   const CRACK_T = 0.9;        // the SAME pry-beat timing roofloot.js's CRACK_T uses
 
+  // gunroom.js is the OWNING file for this flag (loads at index.html:447, this
+  // at :630). Undefined reads as ON so a load-order accident cannot silently
+  // put the shouting crates back.
+  const SPINE = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_ARMORY_SPINE === false);
+  // weathered, rained-on lumber instead of fresh orange pine. Same three boxes.
+  const C_MAIN = SPINE ? 0x6f5a3d : COL.CRATE;
+  const C_BAND = SPINE ? 0x53422c : COL.CRATE_D;
+  const C_LID = SPINE ? 0x4a3c26 : 0x6e4a22;
+
   // deterministic LCG — same seed shape every existing file in this codebase
   // uses; loot amount/flavor never shuffles between runs.
   let _s = 51301;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
-  const crateList = [];   // {x,z,s,lid,cracked}
+  const crateList = [];   // {x,z,s,lid,cracked,tool}
 
-  function crate(x, z, s) {
+  // `tool` is an economy.js item name; a crate that carries one is a crate that
+  // feeds the keycard→armory chain instead of competing with it. It is a fixed
+  // property of the CRATE, never a roll — the world keeps the same promise
+  // every run, which is what makes a route learnable.
+  function crate(x, z, s, tool) {
     s = s || 2.6;
     const half = s / 2;
     let lid = null;   // captured out of build() so the pry-open loot path can swap it dark
@@ -77,13 +112,13 @@
       footprint: { hx: half, hz: half },
       y0: -half, y1: half, // world y-range [0, s] once offset by pos.y (=half)
       build: function () {
-        const main = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), CBZ.mat(COL.CRATE, {}));
+        const main = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), CBZ.mat(C_MAIN, {}));
         main.castShadow = true;
         main.receiveShadow = true;
 
         // darker plank banding so it reads as wood, not a flat cube
         // (same x/z/pos as the main box in the old code -> local (0,0,0))
-        const band = new THREE.Mesh(new THREE.BoxGeometry(s + 0.06, s * 0.34, s + 0.06), CBZ.mat(COL.CRATE_D, {}));
+        const band = new THREE.Mesh(new THREE.BoxGeometry(s + 0.06, s * 0.34, s + 0.06), CBZ.mat(C_BAND, {}));
         band.castShadow = false;
         band.receiveShadow = true;
         main.add(band);
@@ -93,7 +128,7 @@
         // `lid` so crackOpen can swap it dark once busted open (roofloot's
         // "material SWAP reads looted" trick) — cloned mat so the swap never
         // repaints every crate sharing the cached CBZ.mat instance.
-        const bracket = new THREE.Mesh(new THREE.BoxGeometry(s * 1.02, 0.08, s * 1.02), CBZ.mat(0x6e4a22, {}).clone());
+        const bracket = new THREE.Mesh(new THREE.BoxGeometry(s * 1.02, 0.08, s * 1.02), CBZ.mat(C_LID, {}).clone());
         bracket.position.set(0, s * 0.42, 0);
         bracket.castShadow = false;
         bracket.receiveShadow = true;
@@ -105,26 +140,41 @@
     };
 
     const piece = CBZ.spawnPiece(def, { pos: { x: x, y: half, z: z }, solid: true, blockLOS: true });
-    crateList.push({ x, z, s, lid, cracked: false });
+    crateList.push({ x, z, s, lid, cracked: false, tool: (SPINE && tool) || null });
     return piece;
   }
 
   crate(-9, 22);
   crate(8, 28);
   crate(-12, 36);
-  crate(11, 17);
-  crate(0, 11, 2.2);
+  // the two on the armory approach. The blade is the one that matters: it is
+  // the second route through world/gunroom.js's inner cage, and until now
+  // "Hacksaw Blade" was an item with a fence price and no verb anywhere.
+  crate(11, 17, 2.6, "Hacksaw Blade");
+  crate(0, 11, 2.2, "Lockpick");
 
   // ---- CRACKING ONE OPEN (mirrors roofloot.js's crackOpen exactly) ----------
+  // TOOL FLAVOUR: a line that points at the door the tool opens, not at the
+  // number it added. "+4 cigs" teaches the player that crates are the point;
+  // "that'll bite through a padlock" teaches him where to walk next.
+  const TOOL_LINE = {
+    "Hacksaw Blade": "Hacksaw blade — that'll bite through a padlock.",
+    "Lockpick": "A lockpick. Somebody was planning something.",
+  };
   function crackOpen(ct) {
     ct.cracked = true;
     if (ct.lid && ct.lid.material) ct.lid.material.color.setHex(0x2c2416);   // busted-open = dark, dead lid
     // a small haul — cigs are the only currency escape-mode actually has
-    // (see entities/ai.js / guards.js CBZ.econ.addCigs call sites).
-    const cigs = 2 + ((rng() * 5) | 0);
+    // (see entities/ai.js / guards.js CBZ.econ.addCigs call sites). ONE rng()
+    // draw either way, so the stream reads identically with the flag off.
+    const roll = rng();
+    const cigs = ct.tool ? (1 + ((roll * 3) | 0)) : (2 + ((roll * 5) | 0));
     if (CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(cigs);
-    if (CBZ.sfx) CBZ.sfx("coin");
-    flashChip("Cracked the crate — +" + cigs + " cigs", 2.0);
+    if (ct.tool && CBZ.econ && CBZ.econ.addItem) CBZ.econ.addItem(ct.tool, 1);
+    if (CBZ.sfx) CBZ.sfx(ct.tool ? "key" : "coin");
+    flashChip(ct.tool
+      ? (TOOL_LINE[ct.tool] || (ct.tool + " — pocketed.")) + "  (+" + cigs + " cigs)"
+      : "Cracked the crate — +" + cigs + " cigs", ct.tool ? 2.8 : 2.0);
   }
 
   // ---- the tiny prompt chip (one DOM node, hidden when idle; headless-safe) —
@@ -135,12 +185,20 @@
     try {
       chip = document.createElement("div");
       chip.id = "crateChip";
+      // gold trim reads as "treasure". A crate is a crate: steel trim, cooler
+      // type colour, so the only warm light in the yard is the armory's.
       chip.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:278px;z-index:24;display:none;" +
-        "padding:6px 12px;border-radius:9px;background:rgba(8,14,22,.78);border:1px solid rgba(255,209,102,.30);" +
-        "color:#ffe9bd;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;pointer-events:none;text-shadow:0 1px 2px #000";
+        "padding:6px 12px;border-radius:9px;background:rgba(8,14,22,.78);border:1px solid " +
+        (SPINE ? "rgba(139,149,161,.26)" : "rgba(255,209,102,.30)") + ";" +
+        "color:" + (SPINE ? "#cdd6e0" : "#ffe9bd") + ";font:600 13px/1.2 'Fredoka',system-ui,sans-serif;pointer-events:none;text-shadow:0 1px 2px #000";
       document.body.appendChild(chip);
     } catch (e) { chip = null; }
   }
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js) ----
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "crate", act: "e", was: "[E] Pry the crate open" }
+  );
+
   let _chipLast, _chipHoldT = 0;
   function chipText(t) {
     if (t === _chipLast) return;
@@ -191,7 +249,16 @@
     if (_promptT >= 1 / 12) {
       _promptT = 0;
       const ct = crateNear();
-      chipText(ct ? "[E] Pry the crate open" : null);
+      // PRISON_TOUCH_PROMPTS: "[E]" is unactionable on a touchscreen, and this
+      // chip is a textContent slot (chipText, line 150) so pill HTML cannot go
+      // in it. On touch the prompt becomes a real pill in the shared band.
+      // Unlike the polled prison verbs this one can fire the PLAIN "e" key:
+      // onKey below is a genuine document keydown listener, so touch.js's
+      // synthesized KeyboardEvent reaches it.
+      const pilled = !!(ct && CBZ.prisonPrompt &&
+        CBZ.prisonPrompt("crate", "e", "Pry the crate open", null));
+      if (!ct && CBZ.prisonPromptClear) CBZ.prisonPromptClear("crate");
+      chipText(pilled ? null : (ct ? "[E] Pry the crate open" : null));
     }
   });
 
@@ -208,4 +275,17 @@
     if (CBZ.sfx) CBZ.sfx("clank");
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
+
+  /* Ratchet for "the chests are not the point": `toolCrates` counts crates
+     whose payout FEEDS the keycard→armory spine rather than competing with it,
+     and may only go UP; `crates` is printed beside it so a "fix" that deletes
+     boxes cannot pass (the owner asked for quieter crates, not fewer). */
+  CBZ.crateAudit = function () {
+    let tools = 0, cracked = 0;
+    for (let i = 0; i < crateList.length; i++) {
+      if (crateList[i].tool) tools++;
+      if (crateList[i].cracked) cracked++;
+    }
+    return { spine: SPINE, crates: crateList.length, toolCrates: tools, cracked: cracked, muted: SPINE };
+  };
 })();
