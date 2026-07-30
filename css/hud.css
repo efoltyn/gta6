@@ -148,6 +148,12 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #hint.show{opacity:1; transform:translateX(-50%) translateY(0);}
 @media (max-width:900px),(max-height:560px){ #hint{font-size:13px; padding:7px 12px; bottom:188px} }
 
+/* THE CENTRE TOAST — the legacy skin. 64px of white type over a four-layer
+   RED shadow ladder, slammed in at 38% of the screen with a rotate-pop. It is
+   kept EXACTLY as it was so `?cfg_PRISON_QUIET_TOASTS=0` is a true revert: the
+   flag (declared in systems/hud.js, the owning file) both stops the JS routing
+   and never stamps the `quiet-toasts` body class, so with it off nothing below
+   matches and THIS is what you get back — unchanged, character for character. */
 #toast{
   position:absolute; left:50%; top:38%; transform:translate(-50%,-50%) scale(.7);
   font-size:64px; font-weight:700; letter-spacing:3px; color:#fff;
@@ -161,6 +167,155 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
   30%{transform:translate(-50%,-50%) scale(1) rotate(0);}
   80%{opacity:1;}
   100%{opacity:0; transform:translate(-50%,-58%) scale(1);}
+}
+
+/* ---- THE TOAST AS A STATE BANNER (body.quiet-toasts) ----------------------
+   OWNER (2026-07-30, on an iPad): "I just got a popup on screen luxury watch
+   in red huge in screen that's dumb af."
+
+   TWO separate faults were wearing one skin. The first is routing — an item
+   pickup was using the toast at all — and that is fixed in systems/hud.js,
+   which sends pickups to #pickupFeed below. The second is the skin itself.
+   What is LEFT on the toast once the pickups leave is exactly four kinds of
+   line, all of them state changes: "LOCKDOWN" / "ALL CLEAR", "CUFFED — BACK TO
+   YOUR CELL", "TIME SERVED — GATE'S OPEN", "INCOMING" / "BRACE!". Those are
+   announcements, and an announcement is a BANNER — legible, over in a beat,
+   confident — not a comic-book explosion. So: ~half the type, a real dark pill
+   with the HUD's own panel rgba and radius, no red ladder, no rotate.
+
+   Scoped to the body class rather than restated on #toast because
+   css/mobile.css:323 loads AFTER this sheet and pins `#toast{font-size:44px}`
+   under 820px — the width an iPad in portrait reports. A bare #toast rule here
+   loses that cascade on the exact device the owner is holding; `body.quiet-
+   toasts #toast` (0,1,1,1) wins it everywhere. */
+body.quiet-toasts #toast{
+  top:32%;
+  box-sizing:border-box;
+  max-width:min(86vw,760px);
+  padding:11px 26px 12px;
+  border:1px solid var(--hud-line,rgba(232,236,242,.12));
+  border-radius:14px;
+  background:rgba(8,11,17,.72);
+  -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+  box-shadow:0 12px 34px rgba(0,0,0,.5);
+  /* a HEIGHT term as well as a width one, for the same reason .world-subtitle
+     carries one: a short/letterboxed viewport already spends a third of itself
+     on HUD, and a banner is not allowed to become the screen. */
+  font-size:clamp(21px,min(3.1vw,5.2vh),34px);
+  font-weight:700; letter-spacing:2.2px; text-transform:uppercase;
+  color:var(--hud-ink,#e8ecf2);
+  text-shadow:0 2px 6px rgba(0,0,0,.75);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+/* DANGER STILL READS AS DANGER — but as an edge, not as shouting. The red is a
+   border tint plus a faint bloom; the type stays warm-white so the words are
+   the loudest thing about the banner. systems/hud.js applies this class off a
+   phrase test built from the real caller list (LOCKDOWN / STRIKE / CUFFED /
+   BACK TO / INCOMING / BRACE / NUKE / POWER OUT …) — "ALL CLEAR", "POWER
+   RESTORED" and "TIME SERVED" deliberately stay neutral. */
+body.quiet-toasts #toast.toast-alarm{
+  border-color:rgba(226,74,58,.6);
+  background:rgba(26,9,10,.76);
+  box-shadow:0 12px 34px rgba(0,0,0,.5), 0 0 26px rgba(226,74,58,.18);
+  color:#ffe6e0;
+}
+body.quiet-toasts #toast.pop{animation:toastBanner 1.5s cubic-bezier(.2,.9,.3,1) forwards;}
+@keyframes toastBanner{
+  0%{opacity:0; transform:translate(-50%,-50%) scale(.97) translateY(9px);}
+  9%{opacity:1; transform:translate(-50%,-50%) scale(1) translateY(0);}
+  78%{opacity:1; transform:translate(-50%,-50%) scale(1) translateY(0);}
+  100%{opacity:0; transform:translate(-50%,-50%) scale(1) translateY(-11px);}
+}
+
+/* ============================================================
+   THE PICKUP FEED (#pickupFeed, systems/hud.js) — what a pickup gets
+   INSTEAD of the centre toast: the corner-killfeed grammar, on the left.
+   Small dark pill, item name in ink, newest at the bottom, gone in 2.5 s.
+   Same visual family as `#objective .kfeed` at the foot of this sheet and
+   city/killfeed.js's corner strips, on purpose — three feeds, one language.
+
+   ---------------------------------------------------------------------------
+   THE FLOOR IS MEASURED OFF THE CLUSTER IT MUST CLEAR, NOT CHOSEN. Same method
+   as --subtitle-floor below, and the same reason: every one of these numbers
+   is somebody else's element and will move.
+
+     jail / survival (base)   #gangHud sits at bottom:86 and wraps to ~3 rows
+                              of 11px chips (~74px) -> top ~160.  FLOOR 172.
+     city                     the bottom-left instrument stack: #cRadar
+                              (pad-b + 190) then #cTurf (pad-b+196, 13px) then
+                              #cHomeLine (pad-b+215, 12px) -> top safe+244.
+                              (#cMemb, higher still, is display:none in
+                              city.css's play-state declutter.)  FLOOR 256.
+     city, small screen       city/hud.js's OWN breakpoint pulls that stack in
+                              (#cHomeLine -> pad-b+168 at 11px, radar -> 146px)
+                              -> top safe+196.  FLOOR 208.  The query below is
+                              character-identical to city/hud.js's so the two
+                              cannot drift apart.
+     touch (any mode)         the bottom-left corner is the FIXED JOYSTICK:
+                              #tstick.tfixed bottom:64 + 168px tall -> top
+                              safe+232.  FLOOR 244, applied with max() over
+                              whatever the mode already asked for, so a touch
+                              player never loses the city floor and a portrait
+                              iPad (which trips the 900px query above) never
+                              drops the feed onto the thumb ring.
+   --------------------------------------------------------------------------- */
+:root{ --pickup-floor:calc(env(safe-area-inset-bottom,0px) + 172px); }
+body.mode-city{ --pickup-floor:calc(env(safe-area-inset-bottom,0px) + 256px); }
+@media (max-width:900px),(max-height:560px){
+  body.mode-city{ --pickup-floor:calc(env(safe-area-inset-bottom,0px) + 208px); }
+}
+#pickupFeed{
+  /* z 46 is deliberately the LOWEST of the floating layers — under #citySpeech
+     (47), #waypointGuide (48), the full map (60) and the kill feed (70). A
+     pickup is the least important thing that can be on screen. */
+  position:fixed; z-index:46; pointer-events:none;
+  /* the canonical HUD inset token from the top of this sheet — not a retyped
+     calc(14px + env(...)), which is how two numbers describing one edge drift. */
+  left:var(--hud-pad-l,14px);
+  bottom:var(--pickup-floor);
+  display:flex; flex-direction:column; align-items:flex-start; gap:4px;
+  max-width:min(300px,52vw);
+  font-family:Fredoka,"Trebuchet MS",system-ui,sans-serif;
+}
+body.touch #pickupFeed{ bottom:max(var(--pickup-floor),calc(244px + env(safe-area-inset-bottom,0px))); }
+#pickupFeed .pnRow{
+  display:flex; align-items:baseline; gap:7px;
+  max-width:100%; box-sizing:border-box;
+  padding:3px 11px 4px;
+  border-radius:var(--radius,9px);
+  border-left:3px solid var(--hud-line,rgba(232,236,242,.12));
+  background:var(--panel-bg,rgba(8,11,17,.55));
+  box-shadow:0 2px 8px rgba(0,0,0,.4);
+  font-size:13px; font-weight:600; line-height:1.3; letter-spacing:.2px;
+  color:var(--hud-dim,#9fb0c6);
+  text-shadow:0 1px 2px rgba(0,0,0,.65);
+  opacity:0; transform:translateX(-10px);
+  transition:opacity .2s ease, transform .2s ease;
+}
+#pickupFeed .pnRow.in{ opacity:1; transform:translateX(0); }
+#pickupFeed .pnRow.out{ opacity:0; transform:translateX(-8px); }
+#pickupFeed .pnName{
+  flex:0 1 auto; min-width:0;
+  color:var(--hud-ink,#e8ecf2); font-weight:700;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#pickupFeed .pnX{ flex:none; font-weight:700; }
+#pickupFeed .pnTag{ flex:none; font-size:9.5px; font-weight:700; letter-spacing:.9px; text-transform:uppercase; opacity:.7; }
+/* the spans are always in the row; the sheet hides the empty ones so a count
+   bump is one textContent write with no DOM surgery. */
+#pickupFeed .pnX:empty, #pickupFeed .pnTag:empty{ display:none; }
+/* RARE is a subtle GOLD — the same #e7bd55 city/killfeed.js already spends on
+   "this line is about you", not the reserved wanted/rank --gold and never, on
+   any surface, red. It tints the name and the edge and nothing else. */
+#pickupFeed .pnRow.rare{ border-left-color:#e7bd55; }
+#pickupFeed .pnRow.rare .pnName{ color:#e7bd55; }
+/* iPad: the owner's screen. High-DPI and held close, but a 13px pill next to
+   64px type still reads as an afterthought — the touch skin is one step up in
+   size and padding, matching how mobile.css fattens every other touch surface. */
+body.touch #pickupFeed .pnRow{ font-size:14.5px; padding:4px 13px 5px; }
+body.touch #pickupFeed{ gap:5px; max-width:min(330px,46vw); }
+@media (max-width:900px),(max-height:560px){
+  #pickupFeed .pnRow{ font-size:12px; padding:3px 9px; }
 }
 
 /* COD-style kill streak callout */

@@ -113,13 +113,195 @@
     if (_hintT > 0) { _hintT -= dt; if (_hintT <= 0) hideHint(); }
   });
 
-  function flashToast(t) {
-    if (routeCityText(t, "news", "City Desk")) {
-      el.toast.classList.remove("pop");
-      el.toast.textContent = "";
+  // ============================================================
+  //  A PICKUP IS A FEED LINE, NOT A SHOUT.
+  //
+  //  OWNER (2026-07-30, playing on an iPad), verbatim: "I just got a popup on
+  //  screen luxury watch in red huge in screen that's dumb af". He is right
+  //  twice over. #toast is a 64px white-on-RED comic-book slam in the middle of
+  //  the screen (44px on a narrow one — css/mobile.css:323) with a rotate-pop,
+  //  and systems/economy.js fired it for an INVENTORY PICKUP: the moment a
+  //  frisk turned up a rare/epic item it called
+  //  `flashToast(rare.toUpperCase() + "!")`. A found watch is close to the
+  //  smallest event this game has and it was shouting louder than a lockdown.
+  //
+  //  CLAUDE.md's HUD doctrine settles what replaces it: the ONE sanctioned
+  //  popup is the corner killfeed, and rich info lives in quiet feeds, never
+  //  floating centre cards. So a pickup gets the killfeed's own grammar — a
+  //  small dark pill on the left edge, the item name in ink, stacked newest at
+  //  the bottom, gone in 2.5 s. That is deliberately the SAME shape as the
+  //  survival `.kfeed` rows above it in this file and as city/killfeed.js's
+  //  corner strips: three feeds that read as one HUD language rather than
+  //  three notification systems.
+  //
+  //  WHERE IT SITS is derived, not chosen — see the `--pickup-floor` block in
+  //  css/hud.css, which measures the bottom-left cluster it has to clear in
+  //  each mode (jail #gangHud / city radar stack / the touch joystick).
+  // ============================================================
+  const PICK_MAX = 4;      // four lines is a feed; more is wallpaper
+  const PICK_LIFE = 2.5;   // seconds a row is on screen
+  const PICK_FADE = 0.45;  // the tail of that life spent fading out
+  let pickEl = null;
+  const picks = [];
+  // Same lazy-attach shape systems/killstreaks.js:22 uses for #streakHud: mount
+  // on the HUD root, style it in css/hud.css. Re-checks parentNode so a mode
+  // teardown that wipes the root can never leave us writing into an orphan.
+  function pickRoot() {
+    if (pickEl && pickEl.parentNode) return pickEl;
+    if (typeof document === "undefined") return null;
+    const host = document.getElementById("hud") || document.body;
+    if (!host) return null;
+    pickEl = document.createElement("div");
+    pickEl.id = "pickupFeed";
+    pickEl.setAttribute("aria-live", "polite");
+    host.appendChild(pickEl);
+    return pickEl;
+  }
+  // ×N shows only once there IS an N; the spans are always present and the
+  // sheet hides the empty ones, so a bump costs one textContent write.
+  function pickCount(rec) { if (rec.xEl) rec.xEl.textContent = rec.n > 1 ? "×" + rec.n : ""; }
+
+  // CBZ.pickupNote(text, opts) — one quiet line in the bottom-left feed.
+  //   text        the thing picked up, in its own casing ("Luxury Watch").
+  //   opts.rare   truthy → gold name + gold edge. SUBTLE, and gold because
+  //               city/killfeed.js already spends gold on "this line is about
+  //               you" — never red, and never anywhere near screen centre.
+  //   opts.count  >1 → a dim "×N" after the name.
+  //   opts.note   short tag rendered small/dim on the right ("EPIC", "$70").
+  //   opts.life   seconds on screen (default 2.5).
+  // Callers guard (`CBZ.pickupNote && CBZ.pickupNote(...)`), so this may be
+  // absent; it must never throw when present.
+  function pickupNote(text, opts) {
+    const name = String(text == null ? "" : text).trim();
+    if (!name) return;
+    opts = opts || {};
+    const root = pickRoot();
+    if (!root) return;
+    const rare = !!opts.rare;
+    const add = Math.max(1, (+opts.count || 1) | 0);
+    // REPEATS COLLAPSE. Three planks out of one crate is one line counting to
+    // three, not three lines — city/hud.js's feed collapses on the same
+    // principle (its " (xN)" suffix). Only the NEWEST row can absorb a repeat
+    // and only while it is still fully lit: a row that has begun fading has
+    // already said its piece.
+    const last = picks.length ? picks[picks.length - 1] : null;
+    if (last && !last.fading && last.name === name && last.rare === rare) {
+      last.n += add; last.t = 0; pickCount(last);
       return;
     }
+    const row = document.createElement("div");
+    row.className = "pnRow" + (rare ? " rare" : "");
+    const nameEl = document.createElement("span");
+    nameEl.className = "pnName";
+    nameEl.textContent = name;          // textContent, so a loot name can never carry markup
+    const xEl = document.createElement("span");
+    xEl.className = "pnX";
+    const tagEl = document.createElement("span");
+    tagEl.className = "pnTag";
+    tagEl.textContent = opts.note ? String(opts.note) : "";
+    row.appendChild(nameEl); row.appendChild(xEl); row.appendChild(tagEl);
+    root.appendChild(row);
+    void row.offsetWidth;               // reflow so the slide-in plays (same as pushKill)
+    row.classList.add("in");
+    const rec = { el: row, xEl: xEl, name: name, rare: rare, n: add, t: 0, life: Math.max(0.6, +opts.life || PICK_LIFE), fading: false };
+    pickCount(rec);
+    picks.push(rec);
+    // oldest is at the TOP of the column (newest is appended at the bottom,
+    // nearest the anchor), so overflow sheds from the front.
+    while (picks.length > PICK_MAX) { const old = picks.shift(); if (old.el.parentNode) old.el.parentNode.removeChild(old.el); }
+  }
+  // aged on the always chain like the survival feed above — game time, so a
+  // paused game does not silently burn the line you were reading.
+  CBZ.onAlways(93, function (dt) {
+    if (!picks.length) return;
+    for (let i = picks.length - 1; i >= 0; i--) {
+      const p = picks[i]; p.t += dt;
+      if (!p.fading && p.t > p.life - PICK_FADE) { p.fading = true; p.el.classList.add("out"); }
+      if (p.t > p.life) { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); picks.splice(i, 1); }
+    }
+  });
+
+  // ---- QUIET TOASTS -------------------------------------------------------
+  // One flag covers both halves of the fix, so it is one line back to the old
+  // screen: the JS below stops routing pickups into #toast, and the body class
+  // it stamps is what css/hud.css hangs the civilised banner skin off (a
+  // stylesheet cannot read CBZ.CONFIG, and a revert that only half-applies is
+  // not a revert). Declared HERE, in the owning file, per CLAUDE.md — never in
+  // config.js, which is an Edit-race file.
+  const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
+  if (CFG.PRISON_QUIET_TOASTS == null) CFG.PRISON_QUIET_TOASTS = true;
+  function armQuietToasts() {
+    if (!CFG.PRISON_QUIET_TOASTS || typeof document === "undefined" || !document.body) return;
+    document.body.classList.add("quiet-toasts");
+  }
+  armQuietToasts();
+
+  // AN ITEM SHOUT IS PROVED AGAINST THE ITEM TABLE, NEVER GUESSED AT.
+  // "LUXURY WATCH!" is a pickup and "CUFFED — BACK TO YOUR CELL" is a state
+  // banner, and no regex over shouty text separates those two reliably.
+  // systems/economy.js already owns the ONE list of things a body can be
+  // carrying, so the test is a lookup in it: strip the "!", match a key,
+  // inherit that key's own casing and rarity. Anything the table has never
+  // heard of stays a toast, which means a missing or late CBZ.econ costs us
+  // only the routing — never the message.
+  //
+  // The jail keycard is the one pickup with no ITEMS row (it lives on
+  // game.hasKeycard and already lights the #keycard chip), so it is NAMED here
+  // rather than pattern-guessed — systems/interactions.js:30.
+  const EXTRA_PICKUPS = { KEYCARD: "rare" };
+  let itemIdx = null, itemIdxSrc = null;
+  function itemIndex() {
+    const tbl = CBZ.econ && CBZ.econ.ITEMS;
+    if (!tbl) return null;
+    if (itemIdx && itemIdxSrc === tbl) return itemIdx;   // rebuilt only if econ re-declares the table
+    itemIdxSrc = tbl; itemIdx = Object.create(null);
+    for (const k in tbl) itemIdx[k.toUpperCase()] = { name: k, rarity: (tbl[k] && tbl[k].rarity) || "common" };
+    return itemIdx;
+  }
+  function itemShout(t) {
+    const s = String(t == null ? "" : t).trim();
+    if (s.length < 3 || s.length > 26 || s.charAt(s.length - 1) !== "!") return null;
+    const shout = s.slice(0, -1).trim();
+    // an em-dash or a comma means a SENTENCE, which is the grammar every mode
+    // banner uses ("STRIKE 2 — FINAL WARNING"). A plain hyphen is allowed —
+    // "Gun-Room Key" is a real item.
+    if (!shout || /[—,;:]/.test(shout)) return null;
+    const idx = itemIndex();
+    const hit = (idx && idx[shout.toUpperCase()]) || null;
+    if (hit) return hit;
+    const extra = EXTRA_PICKUPS[shout.toUpperCase()];
+    return extra ? { name: shout.charAt(0) + shout.slice(1).toLowerCase(), rarity: extra } : null;
+  }
+
+  // Mode banners keep a red-tinted EDGE so danger still reads as danger — a
+  // border and a faint bloom, not the old four-layer red text ladder. Built
+  // from the real caller list (capture.js / lockdown.js / disasters.js /
+  // killstreaks.js / reinforcements.js / interactions.js); "ALL CLEAR",
+  // "POWER RESTORED" and "TIME SERVED — GATE'S OPEN" are deliberately not in it.
+  const TOAST_ALARM_RE = /\b(?:LOCKDOWN|STRIKE|CUFFED|BACK TO|BUSTED|ALARM|MANHUNT|INCOMING|BRACE|SWEPT|NUKE|POWER OUT|REINFORCEMENTS)\b/i;
+
+  function flashToast(t) {
+    // A pure item shout leaves the centre of the screen entirely, in EVERY
+    // mode — this runs ahead of routeCityText because "LUXURY WATCH!" pushed
+    // to the handset as a City Desk news item would be just as wrong as
+    // slamming it over the crosshair. The real fix for the loot path lands in
+    // its own file (economy.js calls CBZ.pickupNote directly); this gate is
+    // what catches the callers that still shout, and the flag turns it off.
+    if (CFG.PRISON_QUIET_TOASTS) {
+      const it = itemShout(t);
+      if (it) {
+        pickupNote(it.name, { rare: it.rarity === "rare" || it.rarity === "epic", note: it.rarity === "common" ? "" : it.rarity });
+        return;
+      }
+    }
+    if (routeCityText(t, "news", "City Desk")) {
+      if (el.toast) { el.toast.classList.remove("pop", "toast-alarm"); el.toast.textContent = ""; }
+      return;
+    }
+    if (!el.toast) return;
+    armQuietToasts();          // idempotent; a rare path, and it makes the skin unmissable
     el.toast.textContent = t;
+    el.toast.classList.toggle("toast-alarm", TOAST_ALARM_RE.test(String(t == null ? "" : t)));
     el.toast.classList.remove("pop");
     void el.toast.offsetWidth; // reflow to restart the animation
     el.toast.classList.add("pop");
@@ -245,6 +427,9 @@
   CBZ.hideHint = hideHint;
   CBZ.flashHint = flashHint;
   CBZ.flashToast = flashToast;
+  // the quiet pickup feed — callers guard it (`CBZ.pickupNote && ...`) so the
+  // whole surface degrades to nothing if this file is ever pulled.
+  CBZ.pickupNote = pickupNote;
   CBZ.fmtTime = fmtTime;
   CBZ.refreshInventory = refreshInventory;
   CBZ.refreshGangHud = refreshGangHud;
