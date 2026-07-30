@@ -1,19 +1,74 @@
 /* ============================================================
    systems/interact.js — Red Dead-style contextual prompt. Walk up to
-   anyone and the options fade in beside them. Four social verbs,
-   keys 1–4:
+   anyone and the options fade in beside them. Four social verbs on the
+   home-row cluster (the numbers belong to the inventory hotbar):
 
-       [1] Romance   [2] Insult   [3] Fight   [4] Befriend / Suck-up
+       [I] Romance   [J] Insult   [K] Befriend   [L] Steal
+       (fight is left-click / the touch trigger, never a menu row)
 
-   Merchants, the dealer and bent cops also expose a contextual
-   [5] Trade. Befriend routes through systems/quests.js (favors, rep,
-   and the "they let you walk out" win); Romance is its own way out.
+   Merchants, the dealer and bent cops swap a row for Trade, guards for
+   Bribe / Pay off, a cop player for Question / Warn / Cuff / Search,
+   and an approaching NPC replaces the lot with its own offer. Befriend
+   routes through systems/quests.js (favors, rep, and the "they let you
+   walk out" win); Romance is its own way out.
+
+   ON TOUCH the whole card is REPLACED rather than restyled — four
+   square verb buttons beside the first-person eye, pills for every
+   remaining verb, and dialogue instead of a panel. See the
+   PRISON_INTERACT_TOUCH block below and css/interact_touch.css.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const el = CBZ.el;
   const RANGE = 3.6;
+
+  // ---------------------------------------------------------------------------
+  //  PRISON_INTERACT_TOUCH — the iPad answer to this card.
+  //
+  //  OWNER, verbatim: "I'm on iPad, for interaction options with ai I want
+  //  directly on the left of the eye icon I want 4 buttons and on the left of
+  //  those buttons should be the interaction options and instead of the current
+  //  text options use from the gang city game that exact look of dialogue."
+  //  And the standing complaint behind it: "many things on iPad where a pop will
+  //  say press g or shift DUH i can't do that... like turning tips off is a key
+  //  I can't press."
+  //
+  //  This card was a keyboard artefact end to end: four [I][J][K][L] chips, a
+  //  fifth verb silently DROPPED by cap4 because there were only four keys to
+  //  reach it with, and an "[H] Tips: ON" footer whose only affordance was a key
+  //  no tablet has. On touch it becomes:
+  //    • FOUR square verb buttons in a row, vertically centred on #tview (the
+  //      first-person EYE button) and seated just left of the #tbtns cluster;
+  //    • every REMAINING contextual verb as a compact pill to the left of those
+  //      four, wrapping UPWARD, so nothing the context offers is unreachable;
+  //    • the actor's name / read / ONE teaching line above the row in the
+  //      gang-city dialogue treatment (white Fredoka 700, black stroke, no box)
+  //      instead of a panel of prose beside the NPC;
+  //    • every verb RESULT spoken as a bottom-centre subtitle in that same
+  //      grammar rather than a HUD hint panel (desktop gets this too — it is the
+  //      one part of the ask that is not touch-specific);
+  //    • a tappable TIPS pill replacing the "[H]" footer.
+  //  Desktop keyboard play is untouched: same panel, same rows, same I/J/K/L.
+  //
+  //  Flags (one-line reverts, declared here rather than in config.js so a
+  //  parallel wave never races this file against that one):
+  //    PRISON_INTERACT_TOUCH    — the whole touch layer (false = legacy card)
+  //    PRISON_INTERACT_SUBTITLE — result lines as subtitles (false = flashHint)
+  // ---------------------------------------------------------------------------
+  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_INTERACT_TOUCH == null) CBZ.CONFIG.PRISON_INTERACT_TOUCH = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_INTERACT_SUBTITLE == null) CBZ.CONFIG.PRISON_INTERACT_SUBTITLE = true;
+  // systems/touch.js's CBZ.touchMode latch is the ONE touch-mode signal in this
+  // codebase (it stamps body.touch at the same moment). Never a second detector.
+  function touchUI() {
+    return !!(CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.PRISON_INTERACT_TOUCH !== false));
+  }
+  function subtitleOn() { return !CBZ.CONFIG || CBZ.CONFIG.PRISON_INTERACT_SUBTITLE !== false; }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;";
+    });
+  }
 
   function approachAction(a, action) {
     if ((a.kind === "guard" || a.kind === "warden") && CBZ.resolveGuardApproach) return CBZ.resolveGuardApproach(a, action);
@@ -378,6 +433,183 @@
     }
   }
 
+  // ===========================================================================
+  //  THE SPOKEN LINE — the gang-city dialogue look (PRISON_INTERACT_SUBTITLE)
+  //
+  //  hud.css's .world-subtitle is this game's ONE observed-world dialogue
+  //  grammar: bottom-centre, Fredoka 700 white, 1.6px black stroke + layered
+  //  shadow, NO box, safe-area-aware floor. citySay and campaign_ui already
+  //  speak in it; the prison card answered every verb with a HUD hint panel
+  //  instead. css/interact_touch.css reproduces that treatment under
+  //  .pi-subtitle, so this file owns its own element and never reaches into a
+  //  city module for one.
+  // ===========================================================================
+  let sayEl = null, sayLine = null, saySpeaker = null, sayT = 0;
+  function ensureSay() {
+    if (sayEl) return sayEl;
+    sayEl = document.createElement("div");
+    sayEl.id = "pinteractSay";
+    sayEl.className = "pi-subtitle";
+    sayEl.setAttribute("role", "status");
+    sayEl.setAttribute("aria-live", "polite");
+    // speaker stays in the accessible text and out of the picture, exactly the
+    // split .world-subtitle-speaker makes — the observed world shows the LINE.
+    sayEl.innerHTML = '<div class="pi-subtitle-speaker"></div><div class="pi-subtitle-line"></div>';
+    document.body.appendChild(sayEl);
+    saySpeaker = sayEl.querySelector(".pi-subtitle-speaker");
+    sayLine = sayEl.querySelector(".pi-subtitle-line");
+    return sayEl;
+  }
+  // EVERY verb result goes through here. Flag off → the legacy CBZ.flashHint
+  // panel, byte-identical to what shipped.
+  function sayResult(who, msg, secs) {
+    if (!msg) return;
+    if (!subtitleOn()) { if (CBZ.flashHint) CBZ.flashHint(msg, secs || 2.8); return; }
+    ensureSay();
+    saySpeaker.textContent = who || "";
+    sayLine.textContent = String(msg).replace(/^[“"]|[”"]$/g, "");
+    sayEl.classList.add("show");
+    sayT = secs || 2.8;
+  }
+  function saySilence() { sayT = 0; if (sayEl) sayEl.classList.remove("show"); }
+  function tickSay(dt) {
+    if (sayT <= 0) return;
+    sayT -= dt;
+    if (sayT <= 0) saySilence();
+  }
+
+  // ===========================================================================
+  //  THE TOUCH ROW (PRISON_INTERACT_TOUCH)
+  //
+  //  Anchoring is DERIVED from mobile.css's cluster, never guessed — see the
+  //  arithmetic block at the top of css/interact_touch.css. All this file does
+  //  is build and fill the DOM; where it lands is one CSS decision.
+  // ===========================================================================
+  let piRoot = null, piWho = null, piName = null, piNote = null, piTip = null;
+  let piVerbs = null, piOpts = null, piSig = "", piShown = false, piQuiet = null;
+
+  function buildTouchUI() {
+    if (piRoot) return piRoot;
+    piRoot = document.createElement("div");
+    piRoot.id = "pinteract";
+    // #pverbs FIRST in source and the row is row-reverse, so the four squares
+    // sit at the RIGHT (against the eye button) and the pills flow leftward.
+    piRoot.innerHTML =
+      '<div id="pinteractWho">' +
+        '<span class="piw-name"></span>' +
+        '<span class="piw-note"></span>' +
+        '<span class="piw-tip"></span>' +
+      "</div>" +
+      '<div class="pi-row"><div id="pverbs"></div><div id="poptions"></div></div>';
+    document.body.appendChild(piRoot);
+    piWho = piRoot.querySelector("#pinteractWho");
+    piName = piRoot.querySelector(".piw-name");
+    piNote = piRoot.querySelector(".piw-note");
+    piTip = piRoot.querySelector(".piw-tip");
+    piVerbs = piRoot.querySelector("#pverbs");
+    piOpts = piRoot.querySelector("#poptions");
+    // Delegated so it survives every re-render. CLICK (not touchstart): a verb
+    // here can be Fight / Steal / Cuff, and a press you can still slide off is
+    // the right contract for those — the same call .iopt and .tpill already make.
+    piRoot.addEventListener("click", function (e) {
+      const b = e.target && e.target.closest ? e.target.closest("[data-pi]") : null;
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      const act = b.getAttribute("data-pi");
+      if (act === "tips") { tipsToggle(); return; }
+      const i = parseInt(act, 10);
+      if (i >= 0) doAction(i);
+    });
+    return piRoot;
+  }
+
+  // The square button and the pill carry a WORD — touch.js's doctrine is that
+  // interaction surfaces spell the verb out and never render a key. VERB[]
+  // already owns that word; an AUTHORED campaign verb has none, so its full
+  // sentence is cut at the first dash ("Take the deal — work as the warden's
+  // spy" → "Take the deal") and the sentence itself lives on as the aria-label.
+  function shortLabel(a, v) {
+    if (VERB[v] && VERB[v].label) return VERB[v].label;
+    const raw = String(labelFor(a, v) || v);
+    return shortText(raw.split(/\s+[—–-]\s+/)[0], 18);
+  }
+  // The status chip (price / meter / "armed") rides along; the FULL authored
+  // line ("Pay 8 to keep Marcus quiet") stays on the button as its aria-label,
+  // so nothing is lost — it is read out rather than printed as a wall.
+  function optButton(cls, idx, a, v, subMax) {
+    const sub = subFor(a, v);
+    return '<button type="button" class="' + cls + '" data-pi="' + idx + '" aria-label="' +
+      esc(labelFor(a, v)) + '"><span class="pi-lab">' + esc(shortLabel(a, v)) + "</span>" +
+      (sub ? '<span class="pi-sub">' + esc(shortText(sub, subMax || 12)) + "</span>" : "") + "</button>";
+  }
+
+  function renderTouch(a, core, rest, rawNote) {
+    buildTouchUI();
+    const name = cleanName(a).toUpperCase();
+    const note = shortText(rawNote, 74);
+    // ONE teaching line, never a wall: the first verb on offer this player has
+    // never used. Tips off — or everything learned — leaves the row silent.
+    let tip = "";
+    if (helpOn) {
+      const order = core.concat(rest);
+      for (let i = 0; i < order.length; i++) {
+        const v = order[i];
+        if (learned[v]) continue;
+        const d = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
+        if (d) { tip = shortLabel(a, v) + " — " + d; break; }
+      }
+    }
+    let btns = "";
+    for (let i = 0; i < core.length; i++) btns += optButton("pv-btn", i, a, core[i], 12);
+    let pills = "";
+    for (let i = 0; i < rest.length; i++) pills += optButton("po-pill", core.length + i, a, rest[i], 18);
+    // the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach
+    pills += '<button type="button" class="po-pill po-tips' + (helpOn ? " on" : "") +
+      '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
+      '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
+
+    // renderPanel runs EVERY frame while somebody is in range; only touch the
+    // DOM when what it would say actually changed.
+    const sig = [name, note, tip, btns, pills].join("\u0001");
+    if (sig === piSig) return;
+    piSig = sig;
+    piName.textContent = name;
+    piNote.textContent = note;
+    piNote.style.display = note ? "" : "none";
+    piTip.textContent = tip;
+    piTip.style.display = tip ? "" : "none";
+    piVerbs.innerHTML = btns;
+    piOpts.innerHTML = pills;
+  }
+
+  function showTouchUI(on) {
+    if (on && !piRoot) return;        // nothing built yet — never latch a lie
+    if (on === piShown) return;
+    piShown = on;
+    if (piRoot) piRoot.classList.toggle("show", on);
+  }
+  // On touch the legacy card is replaced, not decorated: it stops rendering
+  // rows entirely (so no [I]/[J]/[K]/[L] chip and no "[H]" footer can survive
+  // the switch) and css/interact_touch.css collapses it. `.show` is still
+  // added/removed exactly as before, because CBZ.interactionMenuOpen() — which
+  // inventory.js and dashboard.js read to know who owns I/J/K/L — is keyed off
+  // that class and must keep meaning the same thing.
+  //
+  // SCOPED TO ESCAPE MODE ON PURPOSE. #interact is a SHARED element: city/
+  // interactions.js raises the very same card in the open city, and there is no
+  // `body.mode-escape` class to key CSS off (state.js stamps only mode-city /
+  // mode-survival). A latch left on after leaving the prison would blank the
+  // city's card on every iPad, so the class is driven from mode every frame
+  // rather than from touchMode once.
+  function syncQuiet() {
+    const q = touchUI() && !!CBZ.game && CBZ.game.mode === "escape";
+    if (q === piQuiet) return;
+    piQuiet = q;
+    el.interact.classList.toggle("pi-quiet", q);
+    if (q) el.interactOpts.innerHTML = "";
+  }
+  function tipsToggle() { helpOn = !helpOn; persist(); piSig = ""; }
+
   let current = null, cooldown = 0;
 
   function candidates() {
@@ -399,8 +631,25 @@
   }
 
   function renderPanel(a) {
+    const note = panelNote(a);
     el.interactName.textContent = cleanName(a).toUpperCase();
-    el.interactNote.textContent = panelNote(a);
+    el.interactNote.textContent = note;
+
+    if (touchUI()) {
+      // TOUCH: the four priority verbs become the square row beside the eye
+      // button, and EVERYTHING ELSE this context offers becomes a pill rather
+      // than being thrown away. cap4 exists because there are only four keys —
+      // a thumb has no fifth key, so on touch its overflow would be UNREACHABLE
+      // rather than merely unlisted, which is a different (and worse) thing.
+      // _verbs keeps the four core verbs at indices 0-3, so I/J/K/L and every
+      // existing doAction caller still mean exactly what they meant.
+      const all = verbsFor(a);
+      const core = cap4(all);
+      const rest = all.filter((v) => core.indexOf(v) < 0);
+      a._verbs = core.concat(rest);
+      renderTouch(a, core, rest, note);
+      return;
+    }
 
     const verbs = cap4(verbsFor(a));
     a._verbs = verbs;
@@ -442,7 +691,12 @@
   CBZ.interactionMenuOpen = function () { return !!(el.interact.classList.contains("show") && CBZ.game.state === "playing"); };
 
   function update(dt) {
-    if (CBZ.game.mode !== "escape") { if (current) { current = null; el.interact.classList.remove("show"); } return; }
+    syncQuiet();
+    if (CBZ.game.mode !== "escape") {
+      if (current) { current = null; el.interact.classList.remove("show"); }
+      showTouchUI(false);
+      return;
+    }
     if (cooldown > 0) cooldown -= dt;
     const a = nearest();
     if (a !== current) {
@@ -450,29 +704,35 @@
       if (a) { renderPanel(a); el.interact.classList.add("show"); }
       else el.interact.classList.remove("show");
     } else if (a) renderPanel(a);
+    // ONE visibility decision per frame (showTouchUI is a no-op when it does
+    // not change). CBZ.invOpen is systems/inventory.js's own open latch, read
+    // only — the stash grid owns the whole screen while it is up.
+    showTouchUI(!!(a && touchUI() && !CBZ.invOpen && CBZ.game.state === "playing"));
+    if (piRoot) piRoot.classList.toggle("cool", cooldown > 0);
   }
 
   function doAction(idx) {
     if (!current || cooldown > 0 || CBZ.game.state !== "playing") return;
     const verbs = current._verbs || cap4(verbsFor(current));
-    if (idx >= verbs.length) return;
+    if (!(idx >= 0) || idx >= verbs.length) return;
     cooldown = 0.35;
     const v = verbs[idx];
-    if (!learned[v]) { learned[v] = true; persist(); } // seen it → stop teaching it
+    const who = cleanName(current);
+    if (!learned[v]) { learned[v] = true; persist(); piSig = ""; } // seen it → stop teaching it
     const res = CBZ.cityCampaignPrisonAct && CBZ.cityCampaignPrisonAct(v, current);
     if (res && res.handled) {
-      if (res.msg) CBZ.flashHint(res.msg, 2.8);
+      if (res.msg) sayResult(who, res.msg, 2.8);
       return;
     }
     if (!VERB[v]) return;
     const fallback = VERB[v].fn(current);
-    if (fallback && fallback.msg) CBZ.flashHint(fallback.msg, 2.8);
+    if (fallback && fallback.msg) sayResult(who, fallback.msg, 2.8);
   }
 
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === "h") { helpOn = !helpOn; persist(); return; }
+    if (k === "h") { tipsToggle(); return; }
     // only consume the option keys while a panel is actually up
     if (!CBZ.interactionMenuOpen()) return;
     const i = OPT_KEYS.indexOf(k);
@@ -485,10 +745,21 @@
     if (row && row.dataset.i != null) doAction(+row.dataset.i);
   });
   CBZ.doInteract = doAction;       // touch buttons call this
-  CBZ.toggleHelp = function () { helpOn = !helpOn; persist(); };
+  CBZ.toggleHelp = tipsToggle;
 
   CBZ.onUpdate(45, update);
-  CBZ.onAlways(96, function () {
-    if (CBZ.game.state !== "playing" && current) { current = null; el.interact.classList.remove("show"); }
+  CBZ.onAlways(96, function (dt) {
+    tickSay(dt);
+    // onUpdate stops dead at the pause/title screen, so the quiet latch is
+    // re-evaluated here too — a mode change that happens while paused (title →
+    // city) must still hand #interact back to whoever owns it next.
+    syncQuiet();
+    if (CBZ.game.state !== "playing") {
+      if (current) { current = null; el.interact.classList.remove("show"); }
+      showTouchUI(false);
+      // a line still playing when the world stops is left over from a run that
+      // is no longer on screen — the subtitle goes with it.
+      saySilence();
+    } else if (CBZ.game.mode !== "escape") showTouchUI(false);
   });
 })();
