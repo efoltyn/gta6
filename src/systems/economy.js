@@ -569,36 +569,138 @@
     return actor.loadout;
   }
 
-  // Loot a downed/KO'd actor: grant everything they carry, once, with a
-  // flourish. pickpocket=partial-and-repeatable; otherwise it's a full frisk.
+  /* ------------------------------------------------------------------
+     THE ONE DROP ROLL.
+
+     rollLoadout() above is the ONE TABLE — the maybe() block that decides
+     what a warden, a dealer, a thief or a gang inmate is actually carrying.
+     This is the ONE ROLL against it: it TAKES what comes off the body and
+     hands the set to whoever asked. Two consumers, and the split is exactly
+     why it exists:
+
+       · lootActor()      — the frisk. You take it straight into the bag.
+       · CBZ.prisonDrop() — systems/prisondrops.js. The SAME set becomes
+                            physical objects lying on the floor next to the
+                            body. OWNER: "when someone dies things they drop
+                            are the actual things".
+
+     Because the roll CONSUMES, a corpse can never pay out twice: whichever
+     consumer gets there first empties the pockets, and the other finds an
+     already-looted body and returns nothing. That is the whole reason this
+     is one function and not two tables.
+
+       opts.pickpocket   partial + repeatable (leaves the body lootable)
+       opts.peek         read WITHOUT taking (nothing is consumed)
+     ------------------------------------------------------------------ */
+  let _deathFrisks = 0, _koFrisks = 0, _pickpockets = 0, _rolls = 0;
+  function rollDrops(actor, opts) {
+    opts = opts || {};
+    if (!actor) return { cigs: 0, items: [] };
+    const load = rollLoadout(actor);
+    if (opts.peek) return { cigs: load.cigs, items: load.items.slice() };
+    _rolls++;
+    if (opts.pickpocket) {
+      _pickpockets++;
+      const cigs = Math.min(load.cigs, 1 + Math.floor(rng() * 4));
+      load.cigs -= cigs;
+      const items = [];
+      if (load.items.length && rng() < 0.5) items.push(load.items.splice(Math.floor(rng() * load.items.length), 1)[0]);
+      return { cigs: cigs, items: items };
+    }
+    actor.looted = true;                       // the pockets are empty now
+    const out = { cigs: load.cigs, items: load.items.slice() };
+    load.items.length = 0; load.cigs = 0;
+    return out;
+  }
+
+  /* ONE QUIET LINE PER THING YOU TOOK.
+     OWNER, verbatim: "a popup on screen luxury watch in red huge in screen
+     that's dumb af". The old announce was a flashHint list PLUS a full-screen
+     flashToast shout for anything rare or epic. A toast is the world shouting
+     at you; putting something in your pocket is not that. systems/hud.js owns
+     CBZ.pickupNote (the corner ticker); until it is present we degrade to one
+     compact hint line — never to a toast, and never one hint per item, which
+     would just overwrite itself four times. */
+  function isRare(n) { const it = ITEMS[n]; return !!(it && (it.rarity === "rare" || it.rarity === "epic")); }
+  function announceLoot(cigs, items) {
+    if (CBZ.pickupNote) {
+      // one row per thing, and the feed COLLAPSES repeats into "×N" itself —
+      // so the count goes in opts.count, never also into the name, or a
+      // twelve-cigarette haul reads "12 cigarettes ×12".
+      for (let i = 0; i < items.length; i++) CBZ.pickupNote(items[i], { rare: isRare(items[i]) });
+      if (cigs > 0) CBZ.pickupNote("Cigarettes", { count: cigs });
+      return;
+    }
+    const parts = [];
+    if (cigs > 0) parts.push(cigs + " cigs");
+    for (let i = 0; i < items.length; i++) parts.push(items[i]);
+    if (parts.length) CBZ.flashHint && CBZ.flashHint(parts.join(", "), 1.8);
+  }
+
+  // Loot a downed/KO'd actor: grant everything they carry, once, quietly.
+  // pickpocket=partial-and-repeatable; otherwise it's a full frisk. The roll
+  // itself lives in rollDrops above — this is only the GRANT + the note.
   function lootActor(actor, opts) {
     opts = opts || {};
     if (!actor || actor.looted) return null;
-    const load = rollLoadout(actor);
-    let cigs = 0; const got = [];
-    if (opts.pickpocket) {
-      cigs = Math.min(load.cigs, 1 + Math.floor(rng() * 4));
-      load.cigs -= cigs; if (cigs) addCigs(cigs);
-      if (load.items.length && rng() < 0.5) { const it = load.items.splice(Math.floor(rng() * load.items.length), 1)[0]; addItem(it, 1); got.push(it); }
-    } else {
-      actor.looted = true;
-      cigs = load.cigs; if (cigs) addCigs(cigs);
-      for (const it of load.items) { addItem(it, 1); got.push(it); }
-      load.items.length = 0; load.cigs = 0;
+    // THE RATCHET READS HERE, NOT IN THE ROLL. A frisk on a body that is
+    // already DEAD is loot teleporting into the bag instead of landing on the
+    // floor — the owner's complaint, counted. A frisk on a KO'd body is a
+    // different thing entirely (you searched a man who gets up again) and is
+    // counted separately. Escape only: city bodies are morgue.js's beat and
+    // city/take.js's frisk there is an explicit walk-up verb, not a payout.
+    if (!opts.pickpocket && CBZ.game && CBZ.game.mode === "escape") {
+      if (actor.dead) _deathFrisks++; else _koFrisks++;
     }
-    if (!opts.silent && (cigs > 0 || got.length)) {
-      const parts = [];
-      if (cigs > 0) parts.push(cigs + "");
-      parts.push(...got);
-      if (parts.length) {
-        CBZ.flashHint && CBZ.flashHint("Looted: " + parts.join(", "), 2.2);
-        CBZ.sfx && CBZ.sfx("loot");
-        const rare = got.find((n) => ITEMS[n] && (ITEMS[n].rarity === "rare" || ITEMS[n].rarity === "epic"));
-        if (rare) { CBZ.flashToast && CBZ.flashToast(rare.toUpperCase() + "!"); CBZ.sfx && CBZ.sfx("key"); }
-      }
+    const got = rollDrops(actor, { pickpocket: !!opts.pickpocket });
+    const cigs = got.cigs, items = got.items;
+    if (cigs) addCigs(cigs);
+    for (let i = 0; i < items.length; i++) addItem(items[i], 1);
+    if (!opts.silent && (cigs > 0 || items.length)) {
+      announceLoot(cigs, items);
+      CBZ.sfx && CBZ.sfx("loot");
     }
-    return { cigs, items: got };
+    return { cigs: cigs, items: items };
   }
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, lootActor, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed };
+  // A NEW RUN puts everybody back on their feet, so it has to put their
+  // pockets back too. rollLoadout CACHES on the actor and rollDrops empties
+  // it, so without this a restarted prison run frisks nothing but hollow
+  // bodies — and every physical death drop would be a body with nothing to
+  // leave. Called by systems/prisondrops.js when it sees the clock restart.
+  function resetLoadouts() {
+    const lists = [CBZ.npcs, CBZ.guards];
+    let n = 0;
+    for (let q = 0; q < lists.length; q++) {
+      const arr = lists[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i]; if (!a) continue;
+        a._dropped = false;
+        // entities/crowd.js's pooled inmates own their own pockets — assignRig
+        // writes a fresh loadout out of the analytical store every time a rig
+        // is handed to a new person, so nulling it here would only replace a
+        // real one with a generic re-roll.
+        if (a._crowd) { n++; continue; }
+        a.loadout = null; a.looted = false; n++;
+      }
+    }
+    _deathFrisks = 0; _koFrisks = 0; _pickpockets = 0; _rolls = 0;
+    return n;
+  }
+
+  /* RATCHET — CBZ.econ.lootAudit()
+       deathFrisks  full frisks paid out on an ALREADY-DEAD body, i.e. loot
+                    that teleported into your bag instead of landing on the
+                    floor where the owner asked it to land. PIN AT 0: every
+                    death should reach the player through CBZ.prisonDrop.
+       itemToasts   structurally 0 — there is no flashToast path left in this
+                    file, so a re-introduced item shout shows up here.        */
+  function lootAudit() {
+    return {
+      rolls: _rolls, deathFrisks: _deathFrisks, koFrisks: _koFrisks,
+      pickpockets: _pickpockets, itemToasts: 0,
+    };
+  }
+
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, resetLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed };
 })();

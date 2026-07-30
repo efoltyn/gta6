@@ -3137,6 +3137,14 @@
     if (victim.gang >= 0 && killer && CBZ.playerChar && killer.group === CBZ.playerChar.group) {
       noteGangIncident(victim, "kill", victim.isLeader ? 18 : 13, { source: "killing" });
     }
+    // THE BODY LEAVES ITS THINGS ON THE FLOOR (systems/prisondrops.js). This
+    // is the ONE prison kill choke point — combat.js, fpsmode, capture.js and
+    // killstreaks all arrive here through CBZ.aiKill — so it is the only place
+    // the drop needs hooking. prisonDrop takes the man's pockets PHYSICALLY
+    // (economy.js's rollDrops consumes them), so the frisk below finds an
+    // already-looted body and pays nothing twice. Flag it off and the frisk
+    // gets its loot back untouched.
+    if (CBZ.prisonDrop) CBZ.prisonDrop(victim);
     // loot: a PLAYER kill frisks the body for everything they were carrying;
     // an NPC-vs-NPC death just leaves a small stash pack on the ground.
     const playerKill = killer && CBZ.playerChar && killer.group === CBZ.playerChar.group;
