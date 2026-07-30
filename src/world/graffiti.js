@@ -20,6 +20,35 @@
    runs (nothing run-specific is stored), so there is nothing to
    reset. We also never register per-frame work — matches the
    load-time-only world modules (clutter.js, etc.).
+
+   ------------------------------------------------------------
+   2026-07-30 — DETERMINISM, DERIVED WALLS, AND SCRATCH MARKS.
+   ------------------------------------------------------------
+   THREE CHANGES, IN ORDER OF HOW MUCH THEY MATTER.
+
+   (1) IT USED Math.random AT LOAD TIME. This is a world-build path —
+   CLAUDE.md's first hard rule — so the wall art reshuffled on every
+   reload and differed between clients. It now runs on the named
+   stream `seedStream("prison-graffiti")`, isolated by construction,
+   exactly the fix world/clutter.js already made for the yard props.
+   Same look, same statistics, reproducible.
+
+   (2) THE WALL COORDINATES WERE LITERALS. -29.5 / 29.5 / -43.5 were
+   typed in, so moving a wall in CBZ.WORLD left the paint floating in
+   mid-air. Every face is now DERIVED from CBZ.WORLD (the rect the
+   perimeter, the towers, the razorwire, the clamp and the minimap all
+   already read), with the old literals kept as the degrade fallback.
+   That is also what let the vocabulary reach three more surfaces
+   without typing a single new number: the cell block's INTERIOR side
+   walls and the south block's perimeter.
+
+   (3) THE VOCABULARY WAS ALL PAINT. Every mark was sprayed — but the
+   marks a cell actually carries are SCRATCHED: a day count, a name, a
+   date, a crown for whoever runs the tier. Three monochrome scratch
+   painters (crown, scratched notes, a multi-block cell count) join the
+   sprayed ones, and they are the only kind placed inside the cells —
+   nobody smuggles a can of paint into a cell, and that difference is
+   the whole reason the inside should not look like the yard.
 ============================================================ */
 (function () {
   "use strict";
@@ -35,7 +64,11 @@
   const scene = CBZ.prisonRoot || CBZ.scene;
   const YH = (CBZ.DIM && CBZ.DIM.YH) || 11;   // yard wall height
   const WH = (CBZ.DIM && CBZ.DIM.WH) || 9;    // cell-block wall height
-  const rnd = Math.random;
+  // DETERMINISM: load-time world geometry must be byte-identical per seed on
+  // every client. One named stream replaces ~30 Math.random() calls; being
+  // named makes it isolated, so adding a painter here can never shift another
+  // module's layout (the whole point of the seedStream API).
+  const rnd = CBZ.seedStream ? CBZ.seedStream("prison-graffiti") : Math.random;
   const rng = (a, b) => a + (b - a) * rnd();
   const pick = (arr) => arr[(rnd() * arr.length) | 0];
 
@@ -66,24 +99,40 @@
     });
   }
 
+  // ---- the surfaces we can paint on, DERIVED from CBZ.WORLD --------------
+  // Every wall in the compound is 1 unit thick and centred on its rect edge,
+  // so an inner face is edge +/- 0.5. Deriving instead of typing is what stops
+  // the art floating the next time a wall moves — and it is what let the three
+  // new surfaces below be added without a single new literal.
+  const W = CBZ.WORLD || {};
+  const NY = W.northYard || { x0: -30, x1: 30, z0: -8, z1: 52 };
+  const CB = W.cellBlock || { x0: -16, x1: 16, z0: -44, z1: -8 };
+  const SB = W.southBlock || { x0: -44, x1: 44, z0: 52, z1: 128 };
+  //  nx/nz = the face's outward normal (which way the paint looks)
+  //  top   = the open wall top, so a decal can never poke over it
+  const WALLS = {
+    west: { x: NY.x0 + 0.5, nx: 1, nz: 0, top: YH },     // west yard wall
+    east: { x: NY.x1 - 0.5, nx: -1, nz: 0, top: YH },    // east yard wall
+    north: { z: CB.z0 + 0.5, nx: 0, nz: 1, top: WH },    // north cell-block wall
+    cellW: { x: CB.x0 + 0.5, nx: 1, nz: 0, top: WH },    // INSIDE the cell block, west
+    cellE: { x: CB.x1 - 0.5, nx: -1, nz: 0, top: WH },   // INSIDE the cell block, east
+    southW: { x: SB.x0 + 0.5, nx: 1, nz: 0, top: YH },   // south-block perimeter, west
+    southE: { x: SB.x1 - 0.5, nx: -1, nz: 0, top: YH },  // south-block perimeter, east
+    southS: { z: SB.z1 - 0.5, nx: 0, nz: -1, top: YH },  // the far south wall (the gate wall)
+  };
+
   // place a plane flush on a wall face.
-  //  side: 'west' (+x normal), 'east' (-x normal), 'north' (+z normal)
-  //  along = position along the wall (z for E/W, x for north)
+  //  side  = a key of WALLS
+  //  along = position along the wall (z on an x-facing wall, x on a z-facing one)
   //  y = centre height, w/h = plane size, rotZ = optional in-plane spin
   const OFF = 0.1; // standoff from the wall surface
   function placeDecal(side, along, y, w, h, mat, rotZ) {
+    const F = WALLS[side] || WALLS.west;
     const geo = new THREE.PlaneGeometry(w, h);
     const m = new THREE.Mesh(geo, mat);
-    if (side === "west") {
-      m.position.set(-29.5 + OFF, y, along);
-      m.rotation.y = Math.PI / 2;              // face +x
-    } else if (side === "east") {
-      m.position.set(29.5 - OFF, y, along);
-      m.rotation.y = -Math.PI / 2;             // face -x
-    } else { // north cell-block wall
-      m.position.set(along, y, -43.5 + OFF);
-      m.rotation.y = 0;                         // face +z
-    }
+    if (F.nx) m.position.set(F.x + F.nx * OFF, y, along);
+    else m.position.set(along, y, F.z + F.nz * OFF);
+    m.rotation.y = Math.atan2(F.nx, F.nz);      // +x face -> PI/2, +z face -> 0
     if (rotZ) m.rotation.z = rotZ;
     m.castShadow = false;
     m.receiveShadow = false;
@@ -281,6 +330,156 @@
     return c;
   }
 
+  // ========================================================================
+  //  SCRATCH VOCABULARY — what a CELL wall carries
+  // ========================================================================
+  // Paint is a yard thing. Inside, the marks are cut into the render with
+  // whatever somebody had: a spoon handle, a zip, a filed spork. So these
+  // three are strictly MONOCHROME and strictly incised — the shared `scored`
+  // helper draws every stroke twice, a dark groove with a bright lip one pixel
+  // up-left, which is the whole trick that makes a line read as cut into
+  // concrete instead of drawn onto it.
+  function scored(g, draw, w) {
+    g.lineCap = "round";
+    g.lineJoin = "round";
+    g.strokeStyle = "rgba(28,26,24,0.72)";      // the groove
+    g.lineWidth = w;
+    draw();
+    g.strokeStyle = "rgba(232,228,216,0.55)";   // the fresh lip of the cut
+    g.lineWidth = Math.max(0.8, w * 0.55);
+    g.save(); g.translate(-1, -1); draw(); g.restore();
+  }
+
+  // A CROWN. Whoever runs the tier scratches one, and everybody knows whose
+  // it is. Deliberately crude: five points off one baseline, uneven, with a
+  // couple of stray reinforcing strokes where the hand went over it again.
+  function paintCrown() {
+    const cc = makeCtx(256, 256);
+    if (!cc) return null;
+    const c = cc.c, g = cc.g;
+    const cx = 128, base = 178, halfW = rng(62, 86), peak = rng(52, 80);
+    const pts = [];
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      const x = cx - halfW + t * halfW * 2;
+      // outer points ride lower than the centre spike — a crown, not a comb
+      const dip = i % 2 ? 0.34 : 1.0;
+      const lean = (i - 2) * rng(-3, 3);
+      pts.push([x + lean, base - peak * dip * rng(0.86, 1.12)]);
+    }
+    // Freeze the jitter BEFORE `scored` runs, because scored() draws the same
+    // path twice (groove + lip) and a fresh rng() inside the callback would
+    // make the two passes different shapes — a blurred smear, not a cut.
+    const valleys = [], skirtL = rng(2, 9), skirtR = rng(2, 9);
+    for (let i = 1; i < pts.length; i++) valleys.push(base - rng(2, 12));
+    scored(g, function () {
+      g.beginPath();
+      g.moveTo(cx - halfW - skirtL, base);
+      for (let i = 0; i < pts.length; i++) {
+        if (i) g.lineTo((pts[i - 1][0] + pts[i][0]) / 2, valleys[i - 1]);
+        g.lineTo(pts[i][0], pts[i][1]);
+      }
+      g.lineTo(cx + halfW + skirtR, base);
+      g.stroke();
+    }, rng(3.5, 5.5));
+    // the band across the bottom, gone over twice like a real scratch
+    for (let i = 0; i < 2; i++) {
+      const y = base + 6 + i * rng(7, 12);
+      const j0 = rng(-2, 2), j1 = rng(-2, 2), e0 = rng(0, 6), e1 = rng(0, 6);
+      scored(g, function () {
+        g.beginPath();
+        g.moveTo(cx - halfW - e0, y + j0);
+        g.lineTo(cx + halfW + e1, y + j1);
+        g.stroke();
+      }, rng(2.5, 4));
+    }
+    return c;
+  }
+
+  // SCRATCHED NOTES — a name, a cell, a date, a sentence length. Short lines
+  // in a thin hand, each on its own slight angle, some underscored. This is
+  // the mark that makes a blank wall read as somewhere people were KEPT.
+  const NOTES = [
+    "C-7", "D BLOCK", "37 DAYS", "8 MORE", "M.R.", "J+A", "1994",
+    "DAY 214", "NOT ME", "SOON", "COUNT", "LIFER", "K.O.", "RIP DOC",
+  ];
+  function paintNotes() {
+    const cc = makeCtx(256, 128);
+    if (!cc) return null;
+    const c = cc.c, g = cc.g;
+    const lines = 2 + ((rnd() * 3) | 0);
+    for (let i = 0; i < lines; i++) {
+      const txt = pick(NOTES);
+      const size = rng(19, 30) | 0;
+      const x = rng(18, 70), y = 26 + i * (rng(26, 34));
+      if (y > 116) break;
+      g.save();
+      g.translate(x, y);
+      g.rotate(rng(-0.12, 0.12));
+      g.font = "600 " + size + "px Consolas, Courier New, monospace";
+      g.textBaseline = "middle";
+      // the same two-pass cut, as fill rather than stroke
+      g.fillStyle = "rgba(28,26,24,0.66)";
+      g.fillText(txt, 0, 0);
+      g.fillStyle = "rgba(232,228,216,0.5)";
+      g.fillText(txt, -1, -1);
+      if (rnd() < 0.45) {
+        // jitter frozen before the callback — see the note in paintCrown
+        const w = g.measureText(txt).width + rng(-4, 8), dy = rng(-3, 3);
+        scored(g, function () {
+          g.beginPath();
+          g.moveTo(-2, size * 0.62);
+          g.lineTo(w, size * 0.62 + dy);
+          g.stroke();
+        }, 2);
+      }
+      g.restore();
+    }
+    return c;
+  }
+
+  // A CELL COUNT — not one tally row but a WALL of them, in blocks, at
+  // different scales and pressures, the way a count kept for months actually
+  // accumulates. Blocks are boxed off in fives-of-fives (a month a block).
+  function paintCount() {
+    const cc = makeCtx(256, 256);
+    if (!cc) return null;
+    const c = cc.c, g = cc.g;
+    const cols = 2 + ((rnd() * 2) | 0), rows = 2 + ((rnd() * 3) | 0);
+    for (let bx = 0; bx < cols; bx++) {
+      for (let bz = 0; bz < rows; bz++) {
+        const ox = 16 + bx * (232 / cols), oy = 22 + bz * (224 / rows);
+        const hgt = Math.min(40, (224 / rows) - 12) * rng(0.7, 1.0);
+        const groups = 1 + ((rnd() * 3) | 0);
+        let x = ox;
+        for (let gi = 0; gi < groups; gi++) {
+          const w = rng(1.8, 3.2);
+          for (let i = 0; i < 4; i++) {
+            // jitter frozen before the callback — see the note in paintCrown
+            const jx = x + rng(-1.2, 1.2), y0 = oy + rng(-2, 2);
+            const jx2 = jx + rng(-2.5, 2.5), y1 = oy + hgt + rng(-2, 2);
+            scored(g, function () {
+              g.beginPath();
+              g.moveTo(jx, y0);
+              g.lineTo(jx2, y1);
+              g.stroke();
+            }, w);
+            x += 5.5;
+          }
+          scored(g, function () {                      // the fifth, struck across
+            g.beginPath();
+            g.moveTo(x - 23, oy + hgt);
+            g.lineTo(x + 2, oy);
+            g.stroke();
+          }, w);
+          x += 12;
+          if (x > ox + (232 / cols) - 24) break;
+        }
+      }
+    }
+    return c;
+  }
+
   // ---- placement plan ---------------------------------------------------
   // Hand-tuned spots that sit on real wall runs, biased low/eye-level.
   // Each: [side, along, y, w, h, kind, opacityRange]
@@ -289,6 +488,7 @@
   // North block wall runs x [-16, 16]; we stay within [-14.5, 14.5]
   // (and dodge the barred windows centred at x=-11,0,11, y~6).
   const TAGS = "tag", SCR = "scrawl", RUST = "rust", CRK = "crack", TAL = "tally";
+  const CRWN = "crown", NOTE = "notes", CNT = "count";   // the scratch vocabulary
 
   const plan = [
     // ---- west yard wall (faces +x) ----
@@ -314,6 +514,43 @@
     ["north", 14.5,  2.8, 2.0, 3.4, CRK,  [0.8, 1.0]],
   ];
 
+  // ---- everything below is PRISON_DRESS_V2 (flag home: world/southblock.js).
+  // The determinism and derived-wall fixes above are unconditional (they are
+  // doctrine, and the derived numbers equal the old literals exactly); the new
+  // SURFACES are the part a revert should take back, so they live behind the
+  // one switch the rest of the prison dressing uses.
+  if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
+  if (CBZ.CONFIG.PRISON_DRESS_V2) plan.push.apply(plan, [
+    // ---- INSIDE the cell block (faces +x / -x) ----
+    // SCRATCH ONLY. Nobody paints a cell — they cut it, at arm's reach from a
+    // bunk, which is why every y here is 1.5-2.3 and every kind is incised.
+    // Kept clear of the bunks (x +/-12.5, z=-41), the toilet block (-14.4,-34)
+    // and the cell bars (x -7..-4, z=-37.5) — all of which stand off these
+    // walls, so nothing here is buried behind furniture.
+    ["cellW", -41.0, 1.75, 1.7, 1.7, CNT,  [0.85, 1.0]],
+    ["cellW", -34.0, 1.65, 1.5, 0.9, NOTE, [0.9, 1.0]],
+    ["cellW", -25.5, 2.05, 1.4, 1.4, CRWN, [0.85, 1.0]],
+    ["cellE", -41.0, 1.7,  1.5, 0.9, NOTE, [0.9, 1.0]],
+    ["cellE", -33.0, 1.8,  1.8, 1.8, CNT,  [0.85, 1.0]],
+    ["cellE", -22.0, 2.1,  1.3, 1.3, CRWN, [0.8, 0.95]],
+
+    // ---- south block perimeter (the long walk to the gate) ----
+    // The yard side of the newest, biggest, emptiest walls in the compound.
+    // Sprayed again out here, plus one count where people wait.
+    ["southW", 62,  3.0, 4.8, 2.5, TAGS, [0.9, 1.0]],
+    ["southW", 84,  4.2, 3.2, 6.4, RUST, [0.85, 1.0]],
+    ["southW", 120, 2.2, 2.0, 2.0, CNT,  [0.85, 1.0]],
+    ["southE", 58,  2.8, 4.2, 2.2, SCR,  [0.7, 0.95]],
+    ["southE", 76,  5.4, 4.2, 4.2, CRK,  [0.8, 1.0]],
+    ["southE", 98,  3.1, 4.6, 2.4, TAGS, [0.9, 1.0]],
+    ["southE", 118, 2.4, 1.9, 1.1, NOTE, [0.9, 1.0]],
+    // the gate wall itself — the last thing you read on the way out, and the
+    // one place a crown belongs in the open
+    ["southS", -14, 2.7, 4.4, 2.3, TAGS, [0.9, 1.0]],
+    ["southS", -25, 3.6, 2.4, 5.0, RUST, [0.85, 1.0]],
+    ["southS", 13,  2.4, 1.9, 1.9, CRWN, [0.85, 1.0]],
+  ]);
+
   function paintFor(kind) {
     switch (kind) {
       case TAGS: return paintTag();
@@ -321,9 +558,13 @@
       case RUST: return paintRust();
       case CRK:  return paintCrack();
       case TAL:  return paintTally();
+      case CRWN: return paintCrown();
+      case NOTE: return paintNotes();
+      case CNT:  return paintCount();
       default:   return paintScrawl();
     }
   }
+  const ASKEW = { tag: 1, scrawl: 1, tally: 1, crown: 1, notes: 1, count: 1 };
 
   // build them all, once, at load. Wrapped so a single canvas/painter
   // hiccup can't abort the module (partial decals are harmless scenery).
@@ -332,15 +573,16 @@
       const p = plan[i];
       const side = p[0], along = p[1], y = p[2], w = p[3], h = p[4];
       const kind = p[5], opr = p[6];
-      // clamp height so a decal never pokes above the (open-topped) wall
-      const wallTop = side === "north" ? WH : YH;
+      // clamp height so a decal never pokes above the (open-topped) wall —
+      // the top now comes from the WALL, not from a side-name test, so the
+      // five surfaces added in 2026-07 are clamped correctly too
+      const wallTop = ((WALLS[side] || WALLS.west).top) || YH;
       const yc = Math.min(y, wallTop - h / 2 - 0.4);
       const canvas = paintFor(kind);
       if (!canvas) continue;                   // ctx unavailable — skip cleanly
       const op = rng(opr[0], opr[1]);
-      // graffiti/scrawl/tally can sit a touch askew; grime stays upright
-      const rotZ = (kind === TAGS || kind === SCR || kind === TAL)
-        ? rng(-0.08, 0.08) : 0;
+      // hand-made marks sit a touch askew; weathering stays upright
+      const rotZ = ASKEW[kind] ? rng(-0.08, 0.08) : 0;
       placeDecal(side, along, yc, w, h, decalMat(canvas, op), rotZ);
     }
   } catch (err) {

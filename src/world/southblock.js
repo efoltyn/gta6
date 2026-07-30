@@ -14,15 +14,57 @@
   const scene = CBZ.prisonRoot || CBZ.scene;
   const S = CBZ.WORLD.southBlock;
 
-  // ---- ground: a worn asphalt apron + the walkway leading to the gate ----
-  function slab(x, z, w, d, a, b, rx, rz) {
-    const tex = CBZ.checkerTex(a, b, 2); tex.repeat.set(rx, rz);
+  /* ============================================================
+     PRISON_DRESS_V2 — THE FLAG'S HOME. (2026-07-30)
+     ============================================================
+     OWNER: the prison escape game gets the craft bar of gang city's county
+     jail. CLAUDE.md's gun-room grammar says polish spent EVENLY creates no
+     gradient and therefore pulls nobody — so it goes on the rooms the game
+     actually sends you to. systems/capture.js's DAY_BEAT rotates the whole
+     block through four calls (YARD · CHOW · REC · LOCKDOWN, :273-278), which
+     makes the yard, the chow hall and the dayroom load-bearing rooms rather
+     than scenery, and this flag is the one switch over all three plus the
+     south block's institutional texture.
+
+     ON  → serving lines, dayroom fittings, wayfinding paint, wall wear, pipe
+           runs, caged lamps, fire kit, door heads, bolted yard chow tables.
+     OFF → the rooms exactly as they shipped, including the old cafeteria
+           table rows and the lounge TV's original (floating) coordinate.
+
+     DECLARED HERE, READ EVERYWHERE: index.html parses cafeteria (:445) and
+     lounge (:446) BEFORE this file (:450), so all four prison-dress files
+     carry the same `== null` line. The idiom is idempotent — whichever runs
+     first wins and the rest are no-ops — which is exactly why CLAUDE.md
+     prefers it to a src/config.js edit (that file is an Edit-race magnet).
+  ============================================================ */
+  if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
+  const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
+  const PD = CBZ.prisonDress || null;   // world/cafeteria.js; degrade-safe
+
+  // ---- ground: a poured concrete apron + the walkway leading to the gate ----
+  // PRISON_GROUND_V2 (owner: "the checkered ground is dumb" — world/ground.js
+  // owns the flag). The apron is a slab, so it gets REAL EXPANSION JOINTS on a
+  // ~3.1 m panel grid instead of a draughts board; joints are drawn on the
+  // tile seam as well as mid-tile, so the place the texture wraps IS a joint.
+  // The central path is bitumen and now reads as bitumen. Same planes, same
+  // positions, same `tex.repeat.set(rx, rz)` shape — only the canvas changed.
+  const GV2 = !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_V2 && CBZ.prisonGroundTex);
+  function slab(x, z, w, d, a, b, rx, rz, kind) {
+    const tex = GV2 ? CBZ.prisonGroundTex(kind || "concrete", { a: a, b: b })
+      : CBZ.checkerTex(a, b, 2);
+    tex.repeat.set(rx, rz);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ map: tex }));
     m.rotation.x = -Math.PI / 2; m.position.set(x, 0.012, z); m.receiveShadow = true; scene.add(m);
     return m;
   }
-  slab(0, 90, 88, 76, "#586069", "#4f5760", 14, 12);          // lower-yard asphalt
-  slab(0, 90, 9, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, 2, 16); // central path to the gate
+  // apron: repeat UNCHANGED at 14x12 on purpose — that is a 6.3 m tile, and at
+  // two panels per tile the joints land on 3.15 m centres, which is what a
+  // real poured apron uses. A slab is the one tiling surface allowed to show
+  // where it repeats.
+  slab(0, 90, 88, 76, "#586069", "#4f5760", 14, 12, "concrete");   // lower-yard apron
+  // path: 1x8 -> a ~9 m square tile. The old 2x16 repeated a 4.6 m cell
+  // sixteen times down the corridor you walk the whole length of.
+  slab(0, 90, 9, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? 8 : 16, "asphalt"); // central path to the gate
 
   // a basketball half-court painted into the apron
   (function court() {
@@ -226,5 +268,199 @@
     CBZ.addPack(-31, 99, 5);   // laundry
     CBZ.addPack(8, 106, 7);    // weights
     CBZ.addPack(16, 120, 8);   // by the transport bus
+  }
+
+  // ========================================================================
+  //  INSTITUTIONAL TEXTURE  (PRISON_DRESS_V2)
+  // ========================================================================
+  // The south block had four good ROOMS standing in a very empty yard: 88 x 76
+  // metres of apron with a hoop, some weights and nothing that says a
+  // government runs this place. What follows is the layer every institution
+  // accumulates and no generated one has — paint on the deck, wear at shoulder
+  // height, pipework under the wall head, caged light, fire kit, and a chow
+  // pad you can actually sit at.
+  //
+  // GEOMETRY IT IS BUILT AGAINST — measured, not guessed:
+  //   perimeter inner faces  x = -43.5 / +43.5, south z = 127.5 (gate gap x +/-4)
+  //   central path slab      x[-4.5,4.5], z 52..128
+  //   half-court             x[-19,-3]  z[85,107]      bleachers x[-18.1,-15.9] z[89,103]
+  //   workshop  x[-42,-24] z[58,80]  door E z[66.9,71.1]
+  //   chapel    x[ 24, 42] z[58,80]  door W z[66.9,71.1]
+  //   infirmary x[ 26, 42] z[88,104] door W z[94,98]
+  //   laundry   x[-42,-26] z[88,104] door E z[94,98]
+  //   sally port pillars (+/-6.5,118), boom y=3.4, barriers (+/-10,124)
+  //   guard hut x[-22,-14] z[116,124] door E z[118.9,121.1]
+  // ROUTES HELD: the 9 m central path is never built on (only painted), every
+  // door lane above stays clear by >= 1.2 m, and the exit gap x[-4,4] at
+  // z=128 keeps both its width and its approach.
+  if (DRESS && PD) (function institutional() {
+    const WX = 43.5, SZ1 = 127.5;                 // perimeter inner faces
+
+    // ---- 1. WAYFINDING PAINT ---------------------------------------------
+    // Prisons and hospitals route people with COLOURED LINES ON THE DECK, and
+    // a line on the deck is the only wayfinding a third-person camera can read
+    // at this scale. Each trunk peels off at the z of the door it serves, so
+    // the paint is a map of the block rather than decoration.
+    const GATE = 0xe8c33c, MED = 0x4fbf7a, WORK = 0x3f7fd0, CHAP = 0x9a7ad0, LAUN = 0xd8d2c4;
+    PD.floorLine(-0.6, 89, 70, "z", GATE);          // trunk: the gate, z 54..124
+    PD.floorLine(-1.6, 75, 42, "z", MED);           // trunk: medical, z 54..96
+    PD.floorLine(11.9, 96, 27, "x", MED, { y: 0.047 });   // branch east to the infirmary door
+    PD.floorLine(-1.1, 61.5, 15, "z", WORK);        // trunk: workshop, z 54..69
+    PD.floorLine(-12.3, 69, 22.4, "x", WORK, { y: 0.047 }); // branch west to the workshop door
+    PD.floorLine(11.4, 69.6, 24.1, "x", CHAP, { y: 0.047 }); // branch east to the chapel door
+    // the laundry gets a DOOR LEG only: a full branch at this z would run
+    // under the bleachers (x -18.1..-15.9) and across the painted half-court,
+    // i.e. a line you cannot see for half its length.
+    PD.floorLine(-22.6, 96.6, 6.2, "x", LAUN, { y: 0.047 });
+    PD.chevron(-0.6, 112, "z", 1, GATE);
+    PD.chevron(-0.6, 84, "z", 1, GATE);
+    PD.chevron(18, 96, "x", 1, MED);
+    PD.chevron(-18, 69, "x", -1, WORK);
+    // The same colours carried onto the wall each line ends at, so a lane and
+    // a doorway are the same idea in two places. Each x is the wall's YARD
+    // face plus a hair — a roomShell wall is 0.5 thick and centred on the rect
+    // edge, so the yard face is edge -/+ 0.25 and getting the sign wrong hides
+    // the stripe inside the concrete.
+    // Each band sits BESIDE its doorway, never across it: a roomShell door gap
+    // is a full-height hole in the wall, so a stripe centred on the door
+    // centreline would hang in the opening with nothing behind it.
+    PD.band(-23.72, 1.55, 73.2, 3.6, "z", WORK);    // workshop east face (yard side x > -23.75)
+    PD.band(23.72, 1.55, 73.2, 3.6, "z", CHAP);     // chapel west face   (yard side x <  23.75)
+    PD.band(25.72, 1.55, 100.2, 3.4, "z", MED);     // infirmary west face
+    PD.band(-25.72, 1.55, 100.2, 3.4, "z", LAUN);   // laundry east face
+
+    // ---- 2. PERIMETER WEAR ------------------------------------------------
+    // A 76 m concrete wall with one red trim line on top is a boundary; the
+    // same wall with a scuffed hand-height band is somewhere people have been
+    // walked past ten thousand times.
+    PD.scuff(-WX + 0.04, 1.4, 90, 74, "z", { color: 0x7a828c, h: 0.12 });
+    PD.scuff(WX - 0.04, 1.4, 90, 74, "z", { color: 0x7a828c, h: 0.12 });
+    PD.band(-WX + 0.04, 0.55, 90, 74, "z", 0x8a929c, { h: 0.5 });     // kerb wash
+    PD.band(WX - 0.04, 0.55, 90, 74, "z", 0x8a929c, { h: 0.5 });
+    for (const s of [-1, 1]) {                                        // south wall, each side of the gate
+      PD.scuff(s * 23.75, 1.4, SZ1 - 0.04, 39.5, "x", { color: 0x7a828c, h: 0.12 });
+    }
+
+    // ---- 3. THE ROOMS -----------------------------------------------------
+    // One table, four rooms. Each row is the shell rect, the wall the yard
+    // sees, and where its door lane is — so nothing below is a hand-typed
+    // coordinate that can drift away from the shell it belongs to.
+    //   [id, x0,x1,z0,z1, wallTop, doorSide, doorCenter, doorWidth, signY]
+    const ROOMS = [
+      ["workshop", -42, -24, 58, 80, 6, "E", 69, 4.2, 5.4],
+      ["chapel", 24, 42, 58, 80, 6.5, "W", 69, 4.2, 5.8],
+      ["infirmary", 26, 42, 88, 104, 6, "W", 96, 4.0, 5.4],
+      ["laundry", -42, -26, 88, 104, 6, "E", 96, 4.0, 5.4],
+    ];
+    for (const R of ROOMS) {
+      const x0 = R[1] + 0.25, x1 = R[2] - 0.25, z0 = R[3] + 0.25, z1 = R[4] - 0.25;  // inner faces
+      const h = R[5], side = R[6], dc = R[7], dw = R[8], signY = R[9];
+      const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, dz = z1 - z0;
+      const east = side === "E";
+      const wallX = east ? R[2] : R[1];                     // the wall the door is in
+      const inX = east ? x1 : x0;                           // its inner face
+      const outX = east ? R[2] + 0.25 : R[1] - 0.25;        // its outer (yard) face
+      const dirIn = east ? -1 : 1;                          // into the room from that wall
+
+      // A DOORWAY NEEDS A HEAD. roomShell splits its wall floor-to-top for the
+      // gap, so every door in this block is a 6 m slot. One box makes it an
+      // opening, with 3.1 m of clearance — nothing that walks is near it.
+      // It stops UNDER the existing sign band (a 0.2 m-deep box at the wall
+      // centreline): run the head to the wall top instead and it swallows the
+      // sign whole, which is how you lose four signs in one line.
+      const headTop = signY - 0.45;
+      addBox(wallX, (3.1 + headTop) / 2, dc, 0.5, headTop - 3.1, dw,
+        R[0] === "chapel" ? 0xbfb6a4 : 0x7c8590, { cast: false });
+      addBox(outX + (east ? 0.07 : -0.07), 3.02, dc, 0.14, 0.16, dw + 0.2, 0x5b6470, { cast: false }); // drip nose, tight under the head
+      // a hooded light over the door, outside — 2 meshes, and it is the thing
+      // that makes a doorway read as an entrance at night
+      addBox(outX + (east ? 0.16 : -0.16), 3.25, dc, 0.32, 0.14, 0.7, 0x3c424d, { cast: false });
+      addBox(outX + (east ? 0.16 : -0.16), 3.13, dc, 0.24, 0.1, 0.5, 0xffe9a8,
+        { emissive: 0xffcf66, ei: 0.8, cast: false });
+
+      // interior wear: the dado + scuff on the long wall opposite the door,
+      // which is the wall you look at from the doorway.
+      const farX = east ? x0 : x1;
+      PD.dado(farX + (east ? 0.03 : -0.03), 0.5, cz, dz, "z", 0x6f7a86);
+      PD.scuff(farX + (east ? 0.03 : -0.03), 1.32, cz, dz, "z", { color: 0x59616b });
+      // service run under the wall head, with hangers — the chapel is exempt:
+      // a nave does not have exposed conduit, and that difference is what
+      // makes the other three read as working rooms.
+      if (R[0] !== "chapel") {
+        PD.pipe(inX + dirIn * 0.45, h - 0.85, cz, dz - 1.2, "z", 0.09, 0x6f7a86);
+        for (const t of [-0.3, 0.3]) PD.hanger(inX + dirIn * 0.45, h - 0.76, cz + t * dz, 0.5);
+      }
+      // one caged lamp inside, on the door wall so it lights the room you enter
+      PD.lamp(inX + dirIn * 0.06, 3.6, dc + (dw / 2 + 1.4), east ? "x-" : "x+");
+    }
+
+    // ---- 4. FIRE KIT ------------------------------------------------------
+    // Red is the only colour in this block that is not a warning stripe, so
+    // it has to be earned: a cabinet where a hose really would be racked
+    // (the workshop, which contains the only open flame in the compound) and
+    // extinguishers where a fire would start.
+    PD.hoseCab(-24.6, 1.6, 73.2, "x-");                 // workshop, inside the door wall
+    PD.extinguisher(-24.55, 1.1, 64.4, "x-");           // workshop, by the forge end
+    PD.extinguisher(-26.6, 1.1, 92.6, "x-");            // laundry (dryers)
+    PD.extinguisher(26.6, 1.1, 100.4, "x+");            // infirmary
+
+    // ---- 5. THE CHOW PAD --------------------------------------------------
+    // Bolted round tables on a poured pad, south-east of the path and clear of
+    // the chapel's door lane (which starts at z 66.9). This is where the yard
+    // eats when the hall is full, and it is the one place in 6,700 m2 of apron
+    // with a reason to stand still. Seats register with city/propuse.js at
+    // their real cushion height, so bodies can be sat here with no new code.
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(9, 6.5),
+      new THREE.MeshLambertMaterial({ color: 0x6a7078 }));
+    pad.rotation.x = -Math.PI / 2; pad.position.set(18, 0.028, 60.6); pad.receiveShadow = true;
+    scene.add(pad);
+    PD.roundTable(15.6, 59.6, { seatTone: 0x3a6ea5 });
+    PD.roundTable(20.4, 59.6, { seatTone: 0x2f6b3a, spin: 1.2 });
+    addBox(15.6, 0.815, 59.6, 0.5, 0.06, 0.36, 0xffd451, { cast: false });   // a left tray
+    // a lidded bin at the pad edge (the yard's only bussing point)
+    (function bin() {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.34, 1.0, 10), CBZ.cmat(0x2f6b3a));
+      b.position.set(21.8, 0.5, 62.0); b.castShadow = true; b.receiveShadow = true; scene.add(b);
+      addBox(21.8, 1.03, 62.0, 0.82, 0.08, 0.82, 0x274f2c, { cast: false });
+      if (CBZ.colliders) CBZ.colliders.push({ minX: 21.42, maxX: 22.18, minZ: 61.62, maxZ: 62.38, ref: b });
+    })();
+
+    // ---- 6. THE SALLY PORT ------------------------------------------------
+    // The last thing between you and the gate should look like it was built to
+    // stop a vehicle, not like two posts and a stick.
+    for (const s of [-1, 1]) {
+      PD.band(s * 6.5, 2.4, 117.48, 1.0, "x", 0xe8c33c, { h: 0.3, t: 0.06 });   // hazard band, pillar face
+      PD.band(s * 6.5, 1.8, 117.48, 1.0, "x", 0xe8c33c, { h: 0.3, t: 0.06 });
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.1, 8), CBZ.cmat(0xe8c33c));
+      b.position.set(s * 4.2, 0.55, 118); b.castShadow = false; scene.add(b);       // bollards
+      if (CBZ.colliders) CBZ.colliders.push({ minX: s * 4.2 - 0.16, maxX: s * 4.2 + 0.16, minZ: 117.84, maxZ: 118.16, ref: b });
+    }
+    PD.floorLine(0, 115.6, 9, "x", 0xe8e2d2, { w: 0.3, y: 0.05 });            // stop line
+    for (let i = -2; i <= 2; i++)                                              // hatched no-stand box
+      PD.floorLine(i * 1.8, 121, 3.6, "z", 0xe8c33c, { w: 0.1, y: 0.043 });
+    PD.pipe(0, 4.05, 118, 13.4, "x", 0.07, 0x66717c);                          // conduit over the boom
+    // The rules board on the guard hut's yard face — the last words you read.
+    // SOUTH of the hut's own doorway (z 118.9..121.1), not across it.
+    addBox(-13.70, 2.3, 117.2, 0.08, 1.3, 1.8, 0x6a563c, { cast: false });
+    addBox(-13.645, 2.3, 117.2, 0.03, 1.14, 1.64, 0x3f4a3c, { cast: false });
+    for (const n of [[2.72, 116.7, 0.42, 0.32], [2.7, 117.7, 0.4, 0.28],
+    [2.18, 116.9, 0.38, 0.42]])
+      PD.paper(-13.61, n[0], n[1], "x+", n[2], n[3], {});
+    // Caged lamps at the gate and the hut. Every plate sits FLUSH on a real
+    // face: the hut's east wall face is -13.75 and the pillars' inner faces
+    // are +/-6.0, and the hut lamp ducks under its own 3.2-3.6 m roof slab.
+    PD.lamp(-13.69, 2.9, 122.4, "x+");
+    PD.lamp(5.94, 3.2, 118, "x-", { w: 0.4 });
+  })();
+
+  // The facade pass (world/building_dress.js) dresses whatever registers here.
+  if (PD && PD.shell) {
+    // `face` = the elevation the yard actually looks at. `quiet` = do not punch
+    // windows: the chapel already has authored stained-glass slits, and a
+    // barred window is the wrong idea for a nave.
+    PD.shell({ id: "workshop", x0: -42, x1: -24, z0: 58, z1: 80, h: 6, door: "E", dc: 69, dw: 4.2, tone: 0x7c8590, face: "E" });
+    PD.shell({ id: "chapel", x0: 24, x1: 42, z0: 58, z1: 80, h: 6.5, door: "W", dc: 69, dw: 4.2, tone: 0xbfb6a4, face: "W", quiet: true });
+    PD.shell({ id: "infirmary", x0: 26, x1: 42, z0: 88, z1: 104, h: 6, door: "W", dc: 96, dw: 4.0, tone: 0xd7dde2, face: "W" });
+    PD.shell({ id: "laundry", x0: -42, x1: -26, z0: 88, z1: 104, h: 6, door: "E", dc: 96, dw: 4.0, tone: 0x8a929c, face: "E" });
   }
 })();

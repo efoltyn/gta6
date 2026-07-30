@@ -650,4 +650,111 @@
       });
     }
   });
+
+  // =====================================================================
+  //  THE PRISON FACADE PASS  (PRISON_DRESS_V2)
+  // =====================================================================
+  // The city pass above dresses city/buildings.js's lots. The PRISON is a
+  // different world — a handful of hand-raised roomShell boxes under
+  // CBZ.prisonRoot — and from inside the yard those boxes are 6 m of blank
+  // render with a coloured sign band on them. Same disease, same cure, so it
+  // lives in the same file: the elevation you stare at while you walk the
+  // yard gets the layer a real building has.
+  //
+  // IT DRESSES ONLY WHAT REGISTERS. CBZ.prisonShells is pushed by the rooms
+  // that own themselves (cafeteria, lounge, and the south block's four), so
+  // nothing here reaches into a shell another file owns — no cell block, no
+  // armory, no guard hut. A room opts in with one line.
+  //
+  // TIMING: this runs at PARSE, not inside a DK pass. index.html parses the
+  // prison at :383-:450 and this file at :1408, so every shell already exists
+  // and core/batch.js (:1413, fires on `load`) still merges the result.
+  //
+  // WIRE: none. world/razorwire.js owns every coil in the compound and crowns
+  // the PERIMETER on purpose — a 6 m room roof inside the wire is not a
+  // climbing risk, so wiring it would be decoration pretending to be security.
+  // What these roofs get instead is the thing they were actually missing: a
+  // coping band, so the top of the wall reads as an edge.
+  (function prisonFacade() {
+    const CFG = CBZ.CONFIG || {};
+    if (CFG.PRISON_DRESS_V2 === false) return;
+    const shells = CBZ.prisonShells;
+    const PD = CBZ.prisonDress;
+    if (!shells || !shells.length || !PD || !CBZ.addBox) return;
+    const addBox = CBZ.addBox;
+    let nWin = 0, nPipe = 0, nBand = 0;
+
+    for (let i = 0; i < shells.length; i++) {
+      const s = shells[i];
+      if (!s || !s.face) continue;
+      const f = s.face;
+      const xAxis = (f === "E" || f === "W");
+      const sign = (f === "E" || f === "S") ? 1 : -1;          // outward direction
+      // the wall's centreline, its OUTER face (walls are 0.5 thick, centred on
+      // the rect edge), and the span of the elevation along its own axis
+      const edge = f === "E" ? s.x1 : f === "W" ? s.x0 : f === "S" ? s.z1 : s.z0;
+      const out = edge + sign * 0.25;
+      const a0 = xAxis ? s.z0 : s.x0, a1 = xAxis ? s.z1 : s.x1;
+      const span = a1 - a0, mid = (a0 + a1) / 2;
+      const h = s.h || 6;
+      const tone = s.tone != null ? s.tone : 0x8a929c;
+      // is `p` inside this elevation's door gap (plus a reveal either side)?
+      const isDoorFace = s.door === f;
+      const clearOfDoor = function (p, half) {
+        if (!isDoorFace || s.dc == null) return true;
+        return Math.abs(p - s.dc) > (s.dw || 3.4) / 2 + half + 0.7;
+      };
+      const at = function (p, offset, w, hgt, thick, color, opts) {
+        // one call places a box on this elevation without the caller ever
+        // knowing which axis it is on
+        return xAxis
+          ? addBox(out + sign * offset, hgt, p, thick, opts.h, w, color, opts)
+          : addBox(p, hgt, out + sign * offset, w, opts.h, thick, color, opts);
+      };
+
+      // ---- COPING: the drip edge along the top of the elevation -----------
+      // One box, and it is the highest-value line in the pass: it is what
+      // stops a wall and a sky meeting at a hard unshaded corner.
+      at(mid, 0.06, span + 0.5, h - 0.16, 0.22, 0x6f7a86, { h: 0.22, cast: false });
+      nBand++;
+
+      // ---- BARRED WINDOWS: a rhythm, not a scatter ------------------------
+      // Institutions repeat a bay. Count comes from the span, positions are
+      // symmetric about the centre, and any bay that lands on the doorway is
+      // simply not built — the rhythm survives the gap, which is exactly how
+      // a real elevation handles its entrance.
+      if (!s.quiet) {
+        const bays = Math.max(2, Math.min(4, Math.floor(span / 5.0)));
+        const step = span / (bays + 1);
+        const wy = h * 0.6;
+        for (let b = 1; b <= bays; b++) {
+          const p = a0 + b * step;
+          if (!clearOfDoor(p, 0.7)) continue;
+          at(p, 0.05, 1.32, wy, 0.14, 0x161a20, { h: 1.14, cast: false });      // reveal
+          for (const k of [-1, 1])                                               // bars, proud of the reveal
+            at(p + k * 0.28, 0.16, 0.075, wy, 0.075, 0x2a2f38, { h: 1.06, cast: false });
+          at(p, 0.1, 1.5, wy - 0.66, 0.2, 0xa8b0b8, { h: 0.1, cast: false });     // sill
+          nWin++;
+        }
+      }
+
+      // ---- DOWNPIPE at the yard-side corner of the elevation --------------
+      // Rainwater has to come off a roof somewhere. Placed at the corner
+      // furthest from the door so it never lands in a doorway reveal.
+      const corner = (isDoorFace && s.dc != null && s.dc > mid) ? a0 + 0.45 : a1 - 0.45;
+      const px = xAxis ? out + sign * 0.16 : corner;
+      const pz = xAxis ? corner : out + sign * 0.16;
+      PD.pipe(px, (h - 0.3) / 2 + 0.15, pz, h - 0.3, "y", 0.075, 0x8b8f8c);
+      addBox(px + (xAxis ? sign * 0.06 : 0), 0.24, pz + (xAxis ? 0 : sign * 0.06),
+        xAxis ? 0.26 : 0.2, 0.34, xAxis ? 0.2 : 0.26, 0x7c817e, { cast: false });  // shoe
+      nPipe++;
+    }
+
+    // Census, printed the way the city pass prints its own — an audit nobody
+    // has executed is not a measurement (CLAUDE.md), so it is at least
+    // countable from the console the first time somebody looks.
+    CBZ.prisonFacadeAudit = function () {
+      return { shells: shells.length, windows: nWin, downpipes: nPipe, copings: nBand };
+    };
+  })();
 })();
