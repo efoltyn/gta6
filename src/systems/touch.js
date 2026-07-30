@@ -444,6 +444,11 @@
     look.id = null;
     if (look.free) { look.free = false; try { if (CBZ.camFreeLook) CBZ.camFreeLook(false); } catch (err) {} }
   }
+  // Road cars own explicit LEFT/RIGHT/GAS/BRAKE buttons. Aircraft and boats
+  // deliberately return false here so their well-liked joystick stays intact.
+  function carButtonsActive() {
+    return !!(CBZ.touchVehicleMode && CBZ.touchVehicleMode() === "drive");
+  }
 
   // TOUCH_AIM_ASSIST: nearest lock-on candidate to the crosshair (screen centre)
   // in NDC, read from the live lock-on candidate pool (missile / vehicle targets)
@@ -811,7 +816,7 @@
       if (inUI(t.target)) continue;
       cancelWalk();   // any deliberate touch takes back manual control
       let grab = false;
-      if (stick.id === null) {
+      if (stick.id === null && !carButtonsActive()) {
         if (FIXED) {
           // FIXED stick: only a touch BORN inside the catch zone (STICK_ZONE ×
           // the visible disc) drives movement; every other left-half touch
@@ -1027,6 +1032,10 @@
       if (walk.on) cancelWalk();
       return;
     }
+    // touch_vehicle's context watcher runs at 97, immediately before this one.
+    // If the player entered a road car while still holding the on-foot stick,
+    // release it before another frame can leak its WASD into the car.
+    if (carButtonsActive() && stick.id !== null) releaseStick();
     const armed = !!((CBZ.cityHasGun && CBZ.cityHasGun()) || (CBZ.fps && CBZ.fps.active));
     const sw = document.getElementById("tswap"), rl = document.getElementById("treload");
     if (sw) sw.style.display = armed ? "" : "none";

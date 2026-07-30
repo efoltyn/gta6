@@ -245,6 +245,39 @@ body.touch #interact .iopt.tverb.tno .ilab { font-size: 13.5px; font-weight: 700
   border-radius: 11px; background: #0d1a28; border: 1px solid rgba(255,255,255,.35);
   font: 700 11px/1.4 Fredoka, system-ui, sans-serif; text-align: center;
 }
+/* ROAD CAR grammar: the joystick yields to conventional left/right buttons on
+   the left and brake/gas pedals on the right. Boats and aircraft never receive
+   .tveh-car, so every existing joystick layout remains byte-for-byte intact. */
+body.tveh-car #tstick { display: none !important; }
+#tveh #tvBtns.tv-car { display: block; }
+#tveh #tvBtns.tv-car .tv-car-steer {
+  position: fixed; display: flex; gap: 10px;
+  left: calc(52px + env(safe-area-inset-left, 0px));
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+}
+#tveh #tvBtns.tv-car .tv-car-pedals {
+  position: fixed; display: flex; gap: 10px; align-items: flex-end;
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(38px + env(safe-area-inset-bottom, 0px));
+}
+#tveh #tvBtns.tv-car .tv-car-utils {
+  position: fixed; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 9px;
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+}
+#tveh #tvBtns.tv-car .tv-car-steer .tvbtn {
+  min-width: 104px; min-height: 82px; padding: 8px 12px;
+}
+#tveh #tvBtns.tv-car .tv-car-pedals .tvbtn {
+  min-width: 104px; min-height: 96px; padding: 8px 12px; font-size: 20px;
+}
+#tveh #tvBtns.tv-car .tv-tilt.tilt-on {
+  border-color: rgba(125,231,255,.78); background: rgba(20,104,132,.7); color: #e9fbff;
+}
+body.tveh-car #tveh #tvDial {
+  position: fixed; right: calc(246px + env(safe-area-inset-right, 0px));
+  bottom: calc(168px + env(safe-area-inset-bottom, 0px));
+}
 /* while a vehicle layout is live: the on-foot cluster yields the corner, and
    the dial replaces the HUD's text speed + the floating flight readout */
 body.tveh-on #tbtns { display: none !important; }
@@ -325,6 +358,14 @@ body.touch .world-subtitle{
   /* tighter vehicle cluster so dial + buttons still fit beside the stick */
   #tveh #tvDial { right: 118px; width: 108px; height: 108px; }
   #tveh .tv-big { min-width: 108px; font-size: 17px; }
+  #tveh #tvBtns.tv-car .tv-car-steer {
+    left: calc(18px + env(safe-area-inset-left, 0px));
+  }
+  #tveh #tvBtns.tv-car .tv-car-steer .tvbtn,
+  #tveh #tvBtns.tv-car .tv-car-pedals .tvbtn { min-width: 88px; }
+  body.tveh-car #tveh #tvDial {
+    right: calc(204px + env(safe-area-inset-right, 0px));
+  }
 }
 @media (max-width: 520px) {
   #objective { max-width: 58vw; font-size: 13px; }

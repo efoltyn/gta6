@@ -8,12 +8,15 @@
    appears — buttons that SAY what they do — plus a real racing-game
    dial speedometer (km/h) instead of a floating text readout.
 
-     DRIVING  stick = steer/throttle (unchanged; it writes WASD).
-              BRAKE  = hold  → CBZ.keys[" "]  (the space handbrake/drift)
+     DRIVING  LEFT / RIGHT = steering; GAS / BRAKE = W / S through the
+              existing car model (BRAKE slows first, then reverses at rest).
+              The on-foot joystick stands down only for road cars.
+              TILT is an optional, calibrated low-sensitivity analog steer.
               EXIT   = tap   → CBZ.cityExitVehicle() (the same path the
                        interact registry's "Step out" verb calls)
               LOOK BACK = hold → CBZ.camLookBack(down) (camera agent's
                        feature-detected hook; button hides if absent)
+     BOAT     stick = steer/throttle (unchanged). BRAKE = Space astern.
      HELI     stick = yaw/thrust (unchanged).
               UP     = hold  → CBZ.keys[" "]        (collective up)
               DOWN   = hold  → CBZ.keys["control"]  (collective down —
@@ -45,9 +48,93 @@
   const on = () => !!(CBZ.touchMode) && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VEHICLE !== false);
 
   let root = null, dial = null, dialCtx = null, btnWrap = null, ammoEl = null;
-  let mode = "";               // "" | "drive" | "heli" | "wing"
+  let mode = "";               // "" | "drive" | "boat" | "heli" | "wing" | ...
   const held = Object.create(null);   // key -> true while a hold-button is down
   let lastDraw = 0, lastSpeed = -1, lastSub = "";
+
+  // ---- optional car tilt steering -------------------------------------------
+  // Tilt does not synthesize twitchy A/D taps. It publishes one gentle analog
+  // value into vehicles.js's existing smoothed steering seam. Four degrees of
+  // hand wobble are ignored, full lock takes a deliberate 26-degree lean, the
+  // curve eases in/out, and a 6/s low-pass removes sensor chatter.
+  const TILT_DEAD = 4, TILT_FULL = 26, TILT_MAX = 0.88, TILT_RESPONSE = 6;
+  let tiltOn = false, tiltBusy = false, tiltListening = false;
+  let tiltCenter = null, tiltValue = 0, tiltSeen = 0, tiltAt = 0;
+
+  function resetTiltCenter() {
+    tiltCenter = null; tiltValue = 0; tiltSeen = 0; tiltAt = 0;
+  }
+  function deviceLateral(e) {
+    const so = window.screen && window.screen.orientation;
+    let a = so && Number.isFinite(so.angle) ? so.angle : Number(window.orientation || 0);
+    a = ((a % 360) + 360) % 360;
+    if (a === 90) return Number.isFinite(e.beta) ? e.beta : null;
+    if (a === 270) return Number.isFinite(e.beta) ? -e.beta : null;
+    if (a === 180) return Number.isFinite(e.gamma) ? -e.gamma : null;
+    return Number.isFinite(e.gamma) ? e.gamma : null;
+  }
+  function onOrientation(e) {
+    if (!tiltOn || mode !== "drive") return;
+    const raw = deviceLateral(e);
+    if (!Number.isFinite(raw)) return;
+    const now = performance.now();
+    if (tiltCenter == null) {
+      tiltCenter = raw; tiltValue = 0; tiltSeen = now; tiltAt = now;
+      return;
+    }
+    let d = raw - tiltCenter;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    const n0 = Math.max(0, Math.min(1, (Math.abs(d) - TILT_DEAD) / (TILT_FULL - TILT_DEAD)));
+    const eased = n0 * n0 * (3 - 2 * n0);
+    // Vehicle steering uses +left / -right. Positive device lateral is right.
+    const target = -Math.sign(d) * eased * TILT_MAX;
+    const dt = Math.max(1 / 120, Math.min(0.1, (now - (tiltAt || now - 16)) / 1000));
+    tiltValue += (target - tiltValue) * (1 - Math.exp(-TILT_RESPONSE * dt));
+    tiltSeen = tiltAt = now;
+  }
+  function paintTiltButton() {
+    if (!btnWrap) return;
+    const b = btnWrap.querySelector("#tvTilt");
+    if (!b) return;
+    b.textContent = tiltBusy ? "TILT…" : (tiltOn ? "TILT ON" : "TILT OFF");
+    b.classList.toggle("tilt-on", tiltOn);
+    b.setAttribute("aria-pressed", tiltOn ? "true" : "false");
+  }
+  async function setTilt(want) {
+    want = !!want;
+    if (tiltBusy || want === tiltOn) return tiltOn;
+    if (!want) {
+      tiltOn = false; resetTiltCenter(); paintTiltButton();
+      return false;
+    }
+    tiltBusy = true; paintTiltButton();
+    try {
+      const DOE = window.DeviceOrientationEvent;
+      if (!DOE) {
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Tilt steering needs an HTTPS game link on this device.", 2.6);
+        return false;
+      }
+      if (typeof DOE.requestPermission === "function") {
+        const permission = await DOE.requestPermission();
+        if (permission !== "granted") {
+          if (CBZ.city && CBZ.city.note) CBZ.city.note("Tilt steering needs Motion & Orientation access.", 2.4);
+          return false;
+        }
+      }
+      if (!tiltListening) {
+        window.addEventListener("deviceorientation", onOrientation, true);
+        tiltListening = true;
+      }
+      tiltOn = true; resetTiltCenter();
+      return true;
+    } catch (err) {
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Tilt steering was not available.", 2.0);
+      return false;
+    } finally {
+      tiltBusy = false; paintTiltButton();
+    }
+  }
 
   // ---- DOM -------------------------------------------------------------------
   function pill(id, label, cls) {
@@ -78,10 +165,17 @@
     el.addEventListener("mouseleave", up);
   }
   function tapBtn(el, fn) {
-    el.addEventListener("touchstart", (e) => { e.preventDefault(); el.classList.add("on"); }, { passive: false });
-    el.addEventListener("touchend", (e) => { e.preventDefault(); el.classList.remove("on"); fn(); }, { passive: false });
+    let touchAt = -1e9;   // suppress the compatibility mousedown after a real tap
+    el.addEventListener("touchstart", (e) => {
+      e.preventDefault(); touchAt = performance.now(); el.classList.add("on");
+    }, { passive: false });
+    el.addEventListener("touchend", (e) => {
+      e.preventDefault(); touchAt = performance.now(); el.classList.remove("on"); fn();
+    }, { passive: false });
     el.addEventListener("touchcancel", () => el.classList.remove("on"), { passive: false });
-    el.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
+    el.addEventListener("mousedown", (e) => {
+      e.preventDefault(); if (performance.now() - touchAt < 700) return; fn();
+    });
   }
   // press-and-hold that drives a callback instead of a key (camera hooks)
   function holdFn(el, fn) {
@@ -101,6 +195,7 @@
   // every held key + lit button the moment the page leaves the foreground.
   // Desktop never builds this layer (root stays null), so it is untouched.
   function releaseAllHeld() {
+    resetTiltCenter();   // resume calibrates from the iPad's new held angle
     if (!root) return;
     clearHeld();
     if (btnWrap) btnWrap.querySelectorAll(".tvbtn.on").forEach((el) => el.classList.remove("on"));
@@ -118,7 +213,8 @@
     mode = next;
     clearHeld();
     if (!btnWrap) return;
-    if (!next) { btnWrap.innerHTML = ""; ammoEl = null; return; }
+    btnWrap.className = next === "drive" ? "tv-car" : "";
+    if (!next) { btnWrap.innerHTML = ""; ammoEl = null; resetTiltCenter(); return; }
     // #tvBtns is column-REVERSE: the FIRST button here sits at the BOTTOM,
     // nearest the resting thumb — so the big primary hold goes first.
     const FIRE_BTN = '<button type="button" id="tvFire" class="tvbtn tv-fire" style="display:none">' + FIRE_SVG + '<span id="tvAmmo" class="tvAmmo"></span></button>';
@@ -128,7 +224,21 @@
     const VIEW_BTN = pill("tvView", "VIEW", "tv-sm");
     let html = "";
     if (next === "drive") {
-      html = pill("tvBrake", "BRAKE", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+      html =
+        '<div class="tv-car-steer">' +
+          pill("tvLeft", "LEFT", "tv-big tv-steer") + pill("tvRight", "RIGHT", "tv-big tv-steer") +
+        "</div>" +
+        '<div class="tv-car-pedals">' +
+          pill("tvCarBrake", "BRAKE", "tv-big tv-warn") + pill("tvGas", "GAS", "tv-big tv-go") +
+        "</div>" +
+        '<div class="tv-car-utils">' +
+          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm") +
+        "</div>";
+      resetTiltCenter();
+    } else if (next === "boat") {
+      // Boats keep the exact joystick helm the owner likes. Space is the
+      // water_helm crash-stop / astern path, not a road-car service brake.
+      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "heli") {
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
         FIRE_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
@@ -157,6 +267,11 @@
     const q = (id) => btnWrap.querySelector("#" + id);
     if (q("tvExit")) tapBtn(q("tvExit"), doExit);
     if (q("tvBrake")) holdBtn(q("tvBrake"), " ");
+    if (q("tvLeft")) holdBtn(q("tvLeft"), "a");
+    if (q("tvRight")) holdBtn(q("tvRight"), "d");
+    if (q("tvGas")) holdBtn(q("tvGas"), "w");
+    if (q("tvCarBrake")) holdBtn(q("tvCarBrake"), "s");
+    if (q("tvTilt")) tapBtn(q("tvTilt"), () => { setTilt(!tiltOn); });
     if (q("tvUp")) holdBtn(q("tvUp"), " ");
     if (q("tvDown")) holdBtn(q("tvDown"), "control");
     // throttle reuses the heli's power grammar (Space up / Ctrl down) so the
@@ -176,6 +291,7 @@
     if (q("tvRise")) holdBtn(q("tvRise"), " ");
     if (q("tvDive")) holdBtn(q("tvDive"), "control");
     ammoEl = btnWrap.querySelector("#tvAmmo");
+    paintTiltButton();
     lastSpeed = -1; lastSub = "";   // force a dial repaint for the new context
   }
 
@@ -186,6 +302,46 @@
   // the cluster draws exactly as it always did.
   CBZ.touchVehicleActive = function () { return !!(on() && mode); };
   CBZ.touchVehicleMode = function () { return mode || ""; };
+  CBZ.touchCarTiltSet = setTilt;
+  CBZ.touchCarTiltState = function () {
+    return {
+      enabled: tiltOn, calibrated: tiltCenter != null,
+      value: tiltValue, sampleAgeMs: tiltSeen ? performance.now() - tiltSeen : null,
+      deadDegrees: TILT_DEAD, fullDegrees: TILT_FULL, maxSteer: TILT_MAX,
+    };
+  };
+  // Manual LEFT/RIGHT always wins. Otherwise a fresh tilt sample feeds the same
+  // steering smoother as keyboard/buttons; null means "use ordinary A/D".
+  CBZ.touchCarSteerValue = function (car) {
+    const P = CBZ.player, k = CBZ.keys || {};
+    if (!on() || mode !== "drive" || !tiltOn || !car || !P || P._vehicle !== car) return null;
+    if (k["a"] || k["d"] || !tiltSeen || performance.now() - tiltSeen > 800) return null;
+    return tiltValue;
+  };
+  CBZ.touchVehicleAudit = function () {
+    const ids = btnWrap ? Array.from(btnWrap.querySelectorAll(".tvbtn")).map((b) => b.id) : [];
+    return {
+      mode: mode || "", joystick: mode !== "drive", controls: ids,
+      carControls: ["tvLeft", "tvRight", "tvGas", "tvCarBrake"].every((id) => ids.indexOf(id) >= 0),
+      tilt: CBZ.touchCarTiltState(),
+    };
+  };
+
+  function marine(car) {
+    if (CBZ.isMarineHull) return !!CBZ.isMarineHull(car);
+    if (!car) return false;
+    if (car._playerCarFeel) return !!car._playerCarFeel.marine;
+    return !!(car._hullSpec || (car.model && car.model.body === "boat"));
+  }
+  function rideMode(P) {
+    if (!P) return "";
+    if (P._aircraft) return P._aircraft.kind === "heli" ? "heli" : "wing";
+    if (P.driving && P._vehicle) return marine(P._vehicle) ? "boat" : "drive";
+    return "";
+  }
+  // Pure classification hook: runtime audits can prove car/boat/heli/wing
+  // routing without fabricating a half-built aircraft in the live world.
+  CBZ.touchVehicleModeFor = rideMode;
 
   function doExit() {
     const P = CBZ.player; if (!P) return;
@@ -274,17 +430,19 @@
     // any other pill set on screen while you are falling is a lie.
     const chute = active && CBZ.cityChuteState ? CBZ.cityChuteState() : null;
     if (chute) next = "chute";
-    else if (active && P._aircraft) next = P._aircraft.kind === "heli" ? "heli" : "wing";
-    else if (active && P.driving && P._vehicle) next = "drive";
-    // In the water the thumb needs the vertical axis (dive/rise). Same
-    // precedence slot as a vehicle: the swim owns the body right now.
-    else if (active && CBZ.citySwimming && CBZ.citySwimming()) next = "swim";
+    else if (active) {
+      next = rideMode(P);
+      // In the water the thumb needs the vertical axis (dive/rise). Same
+      // precedence slot as a vehicle: the swim owns the body right now.
+      if (!next && CBZ.citySwimming && CBZ.citySwimming()) next = "swim";
+    }
     if (!root && next) build();
     if (!root) return;
     if (next !== mode) {
       layout(next);
       root.style.display = next ? "block" : "none";
       document.body.classList.toggle("tveh-on", !!next);
+      document.body.classList.toggle("tveh-car", next === "drive");
     }
     if (!next) return;
 
@@ -348,7 +506,7 @@
         lastSpeed = agl; lastSub = sub;
         drawDial(agl, 400, "AGL m", sub, warn);
       }
-    } else if (mode === "drive") {
+    } else if (mode === "drive" || mode === "boat") {
       const car = P._vehicle;
       const kmh = Math.abs((car && car.v) || 0) * 4.8;   // hud.js mph≈v*3 → km/h≈v*4.8
       const key = Math.round(kmh);

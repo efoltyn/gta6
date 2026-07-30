@@ -65,7 +65,12 @@
   const C = CBZ.controls = {
     declare: function (id, def) {
       if (!id || !def) return;
-      defs[id] = { title: def.title || id, rows: def.rows || [], note: def.note || "" };
+      defs[id] = {
+        title: def.title || id,
+        rows: def.rows || [], note: def.note || "",
+        touchRows: def.touchRows || null,
+        touchNote: def.touchNote == null ? null : def.touchNote,
+      };
     },
     has: function (id) { return !!defs[id]; },
     ids: function () { return Object.keys(defs); },
@@ -92,7 +97,10 @@
     if (craft) return craft.kind === "heli" ? "heli" : "plane";
     if (P.driving && P._vehicle) {
       const feel = P._vehicle._playerCarFeel;
-      return (feel && feel.class === "marine") ? "boat" : "drive";
+      const marine = CBZ.isMarineHull ? CBZ.isMarineHull(P._vehicle)
+        : !!((feel && (feel.marine || feel.class === "marine")) ||
+          (P._vehicle.model && P._vehicle.model.body === "boat"));
+      return marine ? "boat" : "drive";
     }
     return "foot";
   }
@@ -170,18 +178,20 @@
     build();
     const d = defs[openId];
     if (!d) { el.style.display = "none"; return; }
+    const touch = isTouch();
+    const rowDefs = touch && d.touchRows ? d.touchRows : d.rows;
     let rows = "";
-    for (let i = 0; i < d.rows.length; i++) {
-      const r = d.rows[i];
+    for (let i = 0; i < rowDefs.length; i++) {
+      const r = rowDefs[i];
       rows += '<tr><td class="k">' + keys(r[0]) + '</td><td class="d">' + esc(r[1]) + "</td></tr>";
     }
-    const touch = isTouch();
+    const note = touch && d.touchNote != null ? d.touchNote : d.note;
     const dismiss = touch
       ? '<button type="button" class="close">Got it</button>'
       : '<div class="dismiss">' + keys("Space") + " / " + keys("Esc") + " to close</div>";
     el.innerHTML =
       "<h3>" + esc(d.title) + "</h3><table>" + rows + "</table>" +
-      (d.note ? '<div class="note">' + esc(d.note) + "</div>" : "") +
+      (note ? '<div class="note">' + esc(note) + "</div>" : "") +
       dismiss;
     el.style.display = "block";
     const b = el.querySelector(".close");
@@ -259,7 +269,14 @@
       ["V", "Cockpit view"],
       ["F", "Get out — in the air, that means jump"],
     ],
+    touchRows: [
+      ["STICK", "Pitch and roll — bank to turn"],
+      ["THR + / THR −", "Throttle up / down"],
+      ["VIEW", "Cockpit view"],
+      ["FIRE / EXIT", "Fire weapons / get out"],
+    ],
     note: "Throttle is Space, not W. W and S fly the nose. You need speed before the wings will lift you — hold Space down the runway first.",
+    touchNote: "Build speed with THR + before pulling the joystick back to lift off.",
   });
 
   C.declare("heli", {
@@ -273,6 +290,12 @@
       ["V", "Cockpit view"],
       ["F", "Get out"],
     ],
+    touchRows: [
+      ["STICK", "Fly forward / back and turn"],
+      ["UP / DOWN", "Climb / descend"],
+      ["VIEW", "Cockpit view"],
+      ["FIRE / EXIT", "Fire weapons / get out"],
+    ],
   });
 
   // bailout.js
@@ -282,6 +305,10 @@
       ["Space", "Pull the canopy"],
       ["A / D", "Steer"],
       ["S", "Flare — bleed speed before you land"],
+    ],
+    touchRows: [
+      ["PULL", "Open the canopy"],
+      ["STICK", "Steer; pull back to flare"],
     ],
     note: "Pull high enough and you can steer where you land. Pull too late and the ground decides.",
   });
@@ -294,7 +321,14 @@
       ["Space", "Handbrake"],
       ["F", "Get out"],
     ],
+    touchRows: [
+      ["GAS / BRAKE", "Accelerate / brake and reverse"],
+      ["LEFT / RIGHT", "Steer"],
+      ["TILT", "Optional gentle tilt steering"],
+      ["EXIT", "Get out"],
+    ],
     note: "Watch the fuel bar on the dash — run dry and the engine quits. Gas stations refuel on E.",
+    touchNote: "Tilt is optional and calibrates from how you are holding the iPad when you switch it on.",
   });
 
   C.declare("boat", {
@@ -303,6 +337,11 @@
       ["W / S", "Throttle ahead / astern"],
       ["A / D", "Steer"],
       ["F", "Step off"],
+    ],
+    touchRows: [
+      ["STICK", "Throttle and steer"],
+      ["ASTERN", "Crash-stop / reverse thrust"],
+      ["EXIT", "Step off"],
     ],
   });
 

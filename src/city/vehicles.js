@@ -79,6 +79,9 @@
     wallHard: 20, wallCatastrophic: 30,   // ~48 / ~72 mph into a fixed wall
     carHard: 14, carCatastrophic: 30,     // ~real body damage / total-loss closing severity
     pedLethal: 14, npcDriverLethal: 30,
+    // Speedway loaners + race-grid cars are race-prepped, not disposable.
+    // Crashes still crumple/smoke/disable them; bullets and blasts stay full force.
+    raceCrashDamageMul: 0.72, raceForceFire: 44,
   };
 
   // ---- MARINE (boat) HANDLING — NO-DECOY FIX -------------------------------
@@ -1560,6 +1563,7 @@
     if (!car || car.dead) return;
     if (car.engineHp == null) car.engineHp = 100;
     const fromGun = !!mode;                       // anything that is not a crash
+    if (!fromGun && car._raceCar) amount *= CRASH.raceCrashDamageMul;
     const armor = Math.max(0, Math.min(0.35, car.armor || 0));
     amount *= Math.max(0.55, 1 - armor * (fromGun ? 1.25 : 0.85));
     car.engineHp = Math.max(-50, car.engineHp - amount);
@@ -2623,9 +2627,12 @@
     // ---- steering: smooth input + speed-sensitive bicycle-model yaw. This
     //      keeps low-speed parking controllable and removes instant high-speed
     //      direction changes while preserving arcade authority. ----
-    let steer = 0;
-    if (k["a"]) steer += 1;
-    if (k["d"]) steer -= 1;
+    const touchSteer = CBZ.touchCarSteerValue ? CBZ.touchCarSteerValue(car) : null;
+    let steer = Number.isFinite(touchSteer) ? touchSteer : 0;
+    if (!Number.isFinite(touchSteer)) {
+      if (k["a"]) steer += 1;
+      if (k["d"]) steer -= 1;
+    }
     const vmag = Math.abs(car.v);
     // brake lights: S while rolling forward, or the handbrake at speed
     setBrake(car, (throttle < 0 && car.v > 0.4) || (handbrake && vmag > 1));
@@ -2866,12 +2873,14 @@
       damageEngine(car, crashE, false);
       // TOP-SPEED ram ALWAYS ignites → explodes (fast-impact-velocity-detonate
       // "things hitting things BLOW UP when they should"): a genuinely flat-out
-      // slam (vmag>=38 ≈ 91mph, near a car's top end) is past the point where it
-      // merely smokes — it GUARANTEES a cook-off, overriding the rare-fire roll.
+      // slam (normally vmag>=38 ≈ 91mph, near a car's top end) is past the point
+      // where it merely smokes — it GUARANTEES a cook-off, overriding the
+      // rare-fire roll. Race-prepped cars get a little more escape room (44).
       // A mid-catastrophic ram (30..38) keeps the realistic odds (usually a
       // disabled smoker, sometimes a slow burn). Guarded so a freak engine state
       // never double-ignites. The breach above + the wreck flag dedup the carve.
-      if (catastrophic && vmag >= 38 && !car._onFire && !car._exploded && !car.dead) {
+      const forceFireAt = car._raceCar ? CRASH.raceForceFire : 38;
+      if (catastrophic && vmag >= forceFireAt && !car._onFire && !car._exploded && !car.dead) {
         car._smoking = true; car._crashFireRolled = true;   // we're forcing it — skip the chance roll
         igniteCar(car, true);                               // slow crash-fire fuse → time to bail, then detonates
         car._burnsOut = false;                              // a top-speed ram fireball does NOT just burn out
