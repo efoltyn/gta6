@@ -37,7 +37,10 @@
   // ---- basketball hoop against the west wall ----
   (function hoop(x, z) {
     addBox(x, 2.5, z, 0.25, 5, 0.25, 0x3c424d, { cast: false });        // pole
-    addBox(x + 0.9, 4.6, z, 1.5, 1.0, 0.12, 0xffffff, { cast: false }); // backboard
+    // backboard face must be perpendicular to the rim's overhang (+X): thin in
+    // X, wide in Z. It shipped swapped (wide in X), i.e. rotated 90° from its
+    // own rim — found when the court paint was laid along the true rim axis.
+    addBox(x + 0.9, 4.6, z, 0.12, 1.0, 1.5, 0xffffff, { cast: false }); // backboard
     addBox(x + 1.5, 4.2, z, 0.5, 0.1, 0.5, 0xff7a1a, { cast: false });  // rim
   })(-28, 14);
 

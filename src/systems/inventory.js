@@ -307,6 +307,42 @@
   document.body.appendChild(screen);
   document.body.appendChild(cursorEl);
 
+  // ---------- touch access (merge seam, rides PRISON_TOUCH_PROMPTS) ----------
+  // CBZ.toggleInventory existed with ZERO touch surfaces calling it — on an
+  // iPad the 27-slot stash was unreachable. The BAG cell is a CHILD of the
+  // hotbar so it inherits every show/hide the bar already has (mode gates,
+  // mode-survival hide) with no JS sync; body.touch is the only extra gate
+  // (css). The panel gets a real ✕ because Esc does not exist on glass.
+  const touchUI = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_TOUCH_PROMPTS === false);
+  let bagBtn = null, invX = null;
+  if (touchUI) {
+    bagBtn = document.createElement("div"); bagBtn.id = "invBagBtn"; bagBtn.textContent = "BAG";
+    bar.appendChild(bagBtn);
+    bagBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); toggle(); });
+    invX = document.createElement("div"); invX.className = "invClose"; invX.textContent = "✕";
+    panel.appendChild(invX);
+    invX.addEventListener("mousedown", (e) => { e.preventDefault(); close(); });
+    // long-press on a stash cell = the right-click path (use/fence). Compat
+    // mouse events fire at touchend on iOS, so a held press preventDefault()s
+    // them away and fires slotClick(i, true) itself; a short tap changes
+    // nothing and falls through to the existing mousedown pick/place.
+    let lpEl = null, lpT = 0, lpX = 0, lpY = 0;
+    screen.addEventListener("touchstart", (e) => {
+      const c = e.target.closest && e.target.closest(".islot"); if (!c) return;
+      lpEl = c; lpT = performance.now(); lpX = e.touches[0].clientX; lpY = e.touches[0].clientY;
+    }, { passive: true });
+    screen.addEventListener("touchmove", (e) => {
+      if (!lpEl || !e.touches[0]) return;
+      if (Math.hypot(e.touches[0].clientX - lpX, e.touches[0].clientY - lpY) > 12) lpEl = null;
+    }, { passive: true });
+    screen.addEventListener("touchend", (e) => {
+      const c = lpEl; lpEl = null;
+      if (!c || performance.now() - lpT < 450) return;
+      e.preventDefault();
+      slotClick(+c.dataset.slot, true);
+    });
+  }
+
   // ---------- sync slots <- game.inventory (count truth) ----------
   function firstFree() {
     for (let i = N_MAIN; i < N; i++) if (!slots[i].item) return slots[i]; // hotbar first
@@ -436,6 +472,11 @@
   // ---------- open / close ----------
   function open() {
     if (invOpen) return; invOpen = true; CBZ.invOpen = true;
+    // touchMode latches after this module loads, so the hint is chosen per
+    // open, not at build — the string must never name a key glass doesn't have.
+    hint.textContent = CBZ.touchMode
+      ? "Tap to move · hold to use or fence · ✕ closes"
+      : "Left-click move · Right-click use/fence · B or Esc to close";
     screen.style.display = "flex";
     if (!CBZ.touchMode && document.exitPointerLock) document.exitPointerLock();
     resync();

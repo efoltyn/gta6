@@ -748,5 +748,13 @@
     };
   };
 
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js).
+  // The saw pill adopts the prompt wave's contract; declaring the site here is
+  // what lets its audit count us — an undeclared site is invisible to the
+  // ratchet, which is the whole reason there is only one census array.
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "gunroom-cage", act: "e", was: "hold [E] to saw the padlock" }
+  );
+
   CBZ.armory = armory;
 })();
