@@ -99,11 +99,20 @@
   // refreshed each frame so guards that spawn / wake mid-lockdown join in.
   function whipGuards() {
     if (!CBZ.guards) return;
+    // A man standing his own count is where he is supposed to be. The screws
+    // stay whipped up (the block is still sealed) but they stop being AIMED at
+    // you — an existing hunt simply runs down instead of being topped up. This
+    // is the grace, and it is a decision the player makes, not a stat.
+    const grace = playerAtCount();
+    if (grace !== graceSaid) {
+      graceSaid = grace;
+      if (grace && CBZ.flashHint) try { CBZ.flashHint("Count time — stay in your cell and they walk past.", 2.2); } catch (e) {}
+    }
     for (const gd of CBZ.guards) {
       if (!able(gd)) continue;
       // keep them locked onto the player
-      if (!(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
-      gd.alert = Math.max(gd.alert || 0, 1.0);
+      if (!grace && !(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
+      gd.alert = Math.max(gd.alert || 0, grace ? 0.6 : 1.0);
       // apply the boost once per guard; the ledger remembers its real base
       // speed (snapshotted on first scale) so repeats can never compound
       if (typeof gd.speed === "number" && CBZ.jailBoost && !CBZ.jailBoost.held("lockdown", gd)) {
@@ -117,6 +126,256 @@
     // boosted value as baseSpeed after a reset / combat join)
     if (CBZ.jailBoost) CBZ.jailBoost.restoreAll("lockdown");
   }
+
+  /* ============================================================
+     CBZ.cellMuster(on) — THE BLOCK GOES TO ITS CELLS.
+
+     A lockdown that only reddens the screen and speeds the guards up is a
+     light cue. What a lockdown IS, is the block being put behind doors: every
+     inmate with a bunk walks to it and the doors rack shut behind them.
+
+     TWO CONSUMERS in this change, which is the whole reason it lives here as
+     a call rather than inline: this file's LOCKDOWN/ALL CLEAR, and
+     capture.js's day-beat LOCKUP phase (count time). Both are the same
+     routine; neither owns it.
+
+     HOW AN INMATE IS DRIVEN, and why it is not a new movement system.
+     entities/npc.js integrates every actor toward n.target every frame, and
+     entities/ai.js's brain re-picks that target only from its `wander` branch
+     and only when n.aiTimer expires. So a mustered inmate is given a state
+     that is NOT wander (which also stands npc.js's purposeful-routine layer
+     down — it yields to any real brain state, exactly as a fight does) and an
+     aiTimer that will not expire. No pathfinder, no second updater, no edit
+     to ai.js or npc.js. The bases are held in the SHARED CBZ.jailBoost ledger
+     under tag "cellmuster", so a run reset or a state exit restores them the
+     same way a boosted guard speed is restored — this file's own discipline.
+
+     WHAT IT REFUSES TO TOUCH, because a fight outranks a count: anyone
+     hunting, fighting, snitching, approaching or held at gunpoint is skipped
+     and re-scanned each tick, so they are pulled in the moment they calm
+     down. And the PLAYER's cell is never touched at all — systems/capture.js
+     owns that one door, and two owners over one collider is how a player
+     ends up sealed in for good.
+  ============================================================ */
+  const MUSTER_TAG = "cellmuster";
+  const LOCKUP_STATE = "lockup";     // not "wander" — that is the whole trick
+  const SEAL_DELAY = 4.5;            // seconds after the call before doors rack
+  const HOLD_TIMER = 1e9;            // an aiTimer the brain will never run down
+  let musterOn = false, musterT = 0;
+  const mustered = new Set();        // inmates we are driving
+  const sealedCells = new Set();     // cell indices WE locked (never any other)
+
+  function beatOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_CELL_BEAT); }
+  function wing() {
+    const c = CBZ.cellblock;
+    return (c && Array.isArray(c.cells)) ? c : null;
+  }
+  function cellIndex(w, k) {
+    const r = w.cells[k];
+    return (r && typeof r.i === "number" && r.i >= 0) ? r.i : k;
+  }
+  function playerCellIndex() {
+    const c = CBZ.cellblock;
+    if (!c || c.playerCell == null) return -1;
+    const pc = c.playerCell;
+    if (typeof pc === "number") return pc;
+    if (typeof pc === "object" && typeof pc.i === "number") return pc.i;
+    const w = wing();
+    if (!w) return -1;
+    const k = w.cells.indexOf(pc);
+    return k >= 0 ? cellIndex(w, k) : -1;
+  }
+  function inCell(cell, x, z, pad) {
+    if (!cell) return false;
+    const cx = +cell.x, cz = +cell.z, h = +cell.half;
+    if (!isFinite(cx) || !isFinite(cz) || !isFinite(h) || h <= 0) return false;
+    const r = h - (pad || 0);
+    if (r <= 0) return false;
+    return Math.abs(x - cx) <= r && Math.abs(z - cz) <= r;
+  }
+  function doorSet(i, locked) {
+    const c = CBZ.cellblock;
+    if (!c || typeof c.setDoor !== "function" || !(i >= 0)) return false;
+    try { c.setDoor(i, !!locked); return true; } catch (e) { return false; }
+  }
+  function musterable(n) {
+    return !!(n && n.group && n.target && !n.dead && !n.escaped && !(n.ko > 0) && !n._crowd &&
+      n.aiState != null);          // aiState null = ai.js has not initialised it yet
+  }
+  // a count never interrupts a fight
+  function busy(n) {
+    const s = n.aiState;
+    return !!((n.huntPlayer || 0) > 0 || n.foe || n.approach || n.intimidMode ||
+      s === "fight" || s === "snitch" || s === "flee" || s === "approachPlayer" ||
+      s === "pressurePlayer" || s === "interceptThreat" || s === "diversion" ||
+      s === "rumorHuddle");
+  }
+  // the centre of the wing, and how far out an inmate may be and still be
+  // walked home. DERIVED from the cells themselves — a straight-line walk is
+  // all npc.js can do, so anyone across the compound is left where they are
+  // rather than shoved into a wall for the whole lockdown.
+  let hubX = 0, hubZ = 0, hubR = 0, hubFor = null, hubN = -1;
+  function hub(w) {
+    if (hubFor === w.cells && hubN === w.cells.length) return true;
+    let n = 0, sx = 0, sz = 0;
+    for (let k = 0; k < w.cells.length; k++) {
+      const r = w.cells[k];
+      if (!r || !isFinite(+r.x) || !isFinite(+r.z)) continue;
+      sx += +r.x; sz += +r.z; n++;
+    }
+    if (!n) return false;
+    hubX = sx / n; hubZ = sz / n;
+    let far = 0;
+    for (let k = 0; k < w.cells.length; k++) {
+      const r = w.cells[k];
+      if (!r || !isFinite(+r.x) || !isFinite(+r.z)) continue;
+      const dx = +r.x - hubX, dz = +r.z - hubZ;
+      far = Math.max(far, Math.hypot(dx, dz));
+    }
+    hubR = far + 40;                    // the wing, plus a corridor's walk home
+    hubFor = w.cells; hubN = w.cells.length;
+    return true;
+  }
+  // the cell this inmate belongs in: the one that already owns them, else a
+  // free bunk claimed through the wing's OWN assign() — we never write .owner.
+  let assignBroken = false;          // one probe, then never call assign again
+  function cellFor(w, n, pIdx) {
+    const cells = w.cells;
+    for (let k = 0; k < cells.length; k++) if (cells[k] && cells[k].owner === n) return cells[k];
+    if (assignBroken || typeof CBZ.cellblock.assign !== "function") return null;
+    const dx = n.group.position.x - hubX, dz = n.group.position.z - hubZ;
+    if (dx * dx + dz * dz > hubR * hubR) return null;      // too far to walk home
+    for (let k = 0; k < cells.length; k++) {
+      const r = cells[k], i = cellIndex(w, k);
+      if (!r || r.owner != null || i === pIdx) continue;
+      try { CBZ.cellblock.assign(n, i); } catch (e) { assignBroken = true; return null; }
+      // it took, or the contract does not record owners the way we read them —
+      // in which case stop asking rather than re-probing every actor, every frame.
+      if (r.owner === n) return r;
+      assignBroken = true;
+      return null;
+    }
+    return null;
+  }
+  const STALL_GIVEUP = 4.0;        // seconds of no progress before we let go
+  function hold(n, cell, dt) {
+    if (!mustered.has(n)) {
+      CBZ.jailBoost.apply(MUSTER_TAG, n, { aiState: LOCKUP_STATE, aiTimer: HOLD_TIMER });
+      mustered.add(n);
+      n._musterD2 = null; n._musterStall = 0;
+    } else { n.aiState = LOCKUP_STATE; n.aiTimer = HOLD_TIMER; }
+    const gp = n.group.position;
+    if (inCell(cell, gp.x, gp.z, 0)) {
+      // settled on the bunk: npc.js's pause branch holds the idle pose
+      n.target.set(gp.x, 0, gp.z);
+      n.pause = Math.max(n.pause || 0, 0.6);
+      n._musterD2 = null; n._musterStall = 0;
+      if (CBZ.lerpAngle && isFinite(+cell.doorX) && isFinite(+cell.doorZ)) {
+        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y,
+          Math.atan2(+cell.doorX - gp.x, +cell.doorZ - gp.z), 1 - Math.pow(0.02, dt));
+      }
+      return true;
+    }
+    // two legs: the door mouth, then the bunk — a straight line from the yard
+    // to a cell interior runs through the wall the door is set in.
+    const useDoor = isFinite(+cell.doorX) && isFinite(+cell.doorZ) &&
+      !inCell(cell, gp.x, gp.z, -1.2);
+    const tx = useDoor ? +cell.doorX : +cell.x, tz = useDoor ? +cell.doorZ : +cell.z;
+    n.target.set(tx, 0, tz);
+    n.pause = 0;
+    // npc.js's stuck-recovery only runs for roaming actors, and a lockup state
+    // is deliberately not one — so this owns the give-up. There is no
+    // pathfinder here: a body grinding on a corner for a whole lockdown reads
+    // far worse than one that never left the yard.
+    const d2 = (tx - gp.x) * (tx - gp.x) + (tz - gp.z) * (tz - gp.z);
+    if (n._musterD2 != null && d2 > n._musterD2 - 0.02) n._musterStall = (n._musterStall || 0) + dt;
+    else n._musterStall = 0;
+    n._musterD2 = d2;
+    return n._musterStall < STALL_GIVEUP;
+  }
+  function unhold(n) {
+    if (!mustered.has(n)) return;
+    // THE BRAIN MAY HAVE MOVED ON FIRST. npc.js thinks at priority 22 and this
+    // drives at 72, so a man jumped mid-walk is already in "fight" by the time
+    // busy() catches him here — and a blind ledger restore would write our
+    // snapshotted "wander" straight over it and cancel the fight. The ledger
+    // entry is always dropped (a stale base must never survive to a reset);
+    // the STATE is only put back when it is still ours to put back.
+    const cur = n.aiState, curT = n.aiTimer, mine = (cur === LOCKUP_STATE);
+    if (CBZ.jailBoost) CBZ.jailBoost.restore(MUSTER_TAG, n);
+    if (!mine) { n.aiState = cur; n.aiTimer = curT; }
+    else {
+      if (n.aiState == null || n.aiState === LOCKUP_STATE) n.aiState = "wander";
+      n.aiTimer = 0;               // re-decide on the very next think
+      n.pause = 0;
+    }
+    n._musterD2 = null; n._musterStall = 0;
+    mustered.delete(n);
+  }
+  function musterRelease() {
+    const was = musterOn || mustered.size || sealedCells.size;
+    musterOn = false; musterT = 0;
+    sealedCells.forEach(function (i) { doorSet(i, false); });
+    sealedCells.clear();
+    const list = [];
+    mustered.forEach(function (n) { list.push(n); });
+    for (const n of list) unhold(n);
+    if (CBZ.jailBoost) CBZ.jailBoost.restoreAll(MUSTER_TAG);   // belt and braces
+    mustered.clear();
+    // the give-up marks are per-muster, not per-run
+    if (was) { const all = CBZ.npcs || []; for (let k = 0; k < all.length; k++) if (all[k]) all[k]._musterGaveUp = false; }
+  }
+  function musterDrive(dt) {
+    if (!musterOn) return;
+    const w = wing();
+    if (!w || !CBZ.jailBoost || !hub(w)) return;
+    musterT += dt;
+    const pIdx = playerCellIndex();
+    const npcs = CBZ.npcs || [];
+    for (let k = 0; k < npcs.length; k++) {
+      const n = npcs[k];
+      if (!musterable(n)) { if (n && mustered.has(n)) unhold(n); continue; }
+      if (n._musterGaveUp) continue;                  // couldn't get home this muster
+      if (busy(n)) { unhold(n); continue; }
+      const cell = cellFor(w, n, pIdx);
+      if (!cell) { unhold(n); continue; }
+      if (!hold(n, cell, dt)) { unhold(n); n._musterGaveUp = true; }
+    }
+    if (musterT < SEAL_DELAY) return;
+    for (let k = 0; k < w.cells.length; k++) {
+      const r = w.cells[k], i = cellIndex(w, k);
+      if (!r || i < 0 || i === pIdx || sealedCells.has(i)) continue;
+      // HARD INVARIANT: this routine never shuts a door on the player. pIdx
+      // covers it whenever the wing declares a playerCell; this covers the
+      // case where it does not, and costs two comparisons.
+      if (CBZ.player && CBZ.player.pos && inCell(r, CBZ.player.pos.x, CBZ.player.pos.z, 0)) continue;
+      const own = r.owner;
+      // an empty cell seals with the block; an occupied one waits for its man
+      if (own && !(own.group && inCell(r, own.group.position.x, own.group.position.z, 0))) continue;
+      if (doorSet(i, true)) sealedCells.add(i);
+    }
+  }
+
+  // ONE-LINE ADOPTION, degrade-safe: with no wing published, no ledger, or the
+  // flag off, this is a no-op and every caller behaves exactly as it did.
+  CBZ.cellMuster = function (on) {
+    if (!beatOn() || !wing() || !CBZ.jailBoost) { if (!on) musterRelease(); return false; }
+    if (!on) { musterRelease(); return false; }
+    if (!musterOn) { musterOn = true; musterT = 0; }
+    return true;
+  };
+  CBZ.cellMusterActive = function () { return musterOn; };
+  CBZ.cellMusterAudit = function () {
+    return { active: musterOn, held: mustered.size, sealed: sealedCells.size,
+      cells: wing() ? wing().cells.length : 0 };
+  };
+
+  // count time in your OWN cell is compliance, not evasion — capture.js is the
+  // one place that answers where your cell is.
+  function playerAtCount() {
+    return !!(CBZ.playerInOwnCell && CBZ.playerInOwnCell());
+  }
+  let graceSaid = false;
 
   // ---- begin / end ----
   function begin() {
@@ -142,8 +401,12 @@
     // (whipped up to beat/bed inmates). No annoying sustained loop.
     if (CBZ.sfx) try { CBZ.sfx("lockdown"); } catch (e) {}
 
+    graceSaid = false;
     whipGuards();
     if (CBZ.closeDoor) try { CBZ.closeDoor(); } catch (e) {}
+    // ...and the block goes behind its doors. The seal itself lands SEAL_DELAY
+    // later, so there is a walk between the siren and the racking of the bars.
+    if (CBZ.cellMuster) try { CBZ.cellMuster(true); } catch (e) {}
   }
 
   function end() {
@@ -151,6 +414,8 @@
     active = false;
     fading = true;       // overlay eases out in the always-tick
     restoreGuards();
+    musterRelease();     // ALL CLEAR reopens every door WE racked shut
+    graceSaid = false;
 
     if (CBZ.flashToast) try { CBZ.flashToast("ALL CLEAR"); } catch (e) {}
     if (CBZ.setObjective) try { CBZ.setObjective("The block calms down. Keep your head low."); } catch (e) {}
@@ -166,11 +431,16 @@
   // (no fade) and restores guard speeds immediately.
   function teardown() {
     restoreGuards();
+    musterRelease();     // no inmate keeps a lockup state across a run reset
+    graceSaid = false;
     active = false;
     fading = false;
     sirenT = 0; clearT = 0; elapsedT = 0; pulse = 0;
     if (overlay) overlay.style.opacity = "0";
   }
+  // leaving play must also hand the block back — the live driver below only
+  // runs while playing, so it cannot be the thing that releases.
+  if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) CBZ.jailBoost.onStateExit(teardown);
 
   // watch for a new run: elapsed resets to ~0 in state.js resetGame().
   // Returns true if a reset was just detected (and torn down). One shared
@@ -190,6 +460,11 @@
     // clamp dt so a tab-stall can't fire dozens of sirens at once
     const d = dt > 0.1 ? 0.1 : (dt > 0 ? dt : 0);
 
+    // The muster is driven BEFORE the active gate: capture.js's day-beat LOCKUP
+    // runs it with no lockdown in sight, and a mustered inmate must be
+    // re-asserted every frame or ai.js's next think walks him back to the yard.
+    musterDrive(d);
+
     if (!active) {
       // arm the lockdown when heat tops out
       if (typeof g.detection === "number" && g.detection >= TRIGGER_HEAT) begin();
@@ -206,6 +481,11 @@
     // ---- lift condition: unseen AND cool for CLEAR_SECS continuous ----
     let seen = false;
     if (CBZ.witnessGuard) { try { seen = !!CBZ.witnessGuard(); } catch (e) { seen = false; } }
+    // Being SEEN standing your own count is not being spotted — without this
+    // the one correct answer to a lockdown (get in your cell) is also the one
+    // that can never lift it, because the screw at your door sees you forever.
+    // Heat must still cool: compliance ends the search, not the record.
+    if (seen && playerAtCount()) seen = false;
     const cool = typeof g.detection === "number" ? g.detection < COOL_HEAT : true;
 
     if (!seen && cool && elapsedT >= GRACE) {
