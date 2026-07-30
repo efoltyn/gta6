@@ -2155,11 +2155,24 @@
     setAmmoHud();
   }
 
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js).
+  // act:null = the key glyph is gone but the ACTION already had a touch
+  // surface, so a second pill would be duplicate chrome.
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "dryfire", act: null, was: "Empty - press R", surface: "#treload" }
+  );
+
   function dryClick() {
     if (dryCD > 0) return;
     dryCD = 0.22;
     CBZ.sfx && CBZ.sfx("empty");
-    CBZ.flashHint && CBZ.flashHint(fps.reserve > 0 ? "Empty - press R" : "No reserve ammo", 1.0);
+    // PRISON_TOUCH_PROMPTS: "press R" is unactionable on a touchscreen. No pill
+    // is needed here — touch.js already ships a RELOAD button (#treload, wired
+    // to CBZ.fpsReload), so the fix is to name the surface the player HAS.
+    const ptp = !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
+    const touch = !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch")));
+    const dry = ptp && touch ? "Empty - tap RELOAD" : "Empty - press R";
+    CBZ.flashHint && CBZ.flashHint(fps.reserve > 0 ? dry : "No reserve ammo", 1.0);
   }
 
   function shoot() {

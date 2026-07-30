@@ -15,9 +15,24 @@
     { n: 7,  name: "RIOT PACKAGE",     sub: "The block is watching now." },
     { n: 10, name: "CHOPPER ALERT",    sub: "Maximum noise. Maximum heat." },
     { n: 15, name: "EMP BLAST",        sub: "Searchlights stumble." },
-    { n: 25, name: "TACTICAL NUKE",    sub: "Press N for TACTICAL NUKE." },
+    { n: 25, name: "TACTICAL NUKE",    sub: "Ready. End the whole block." },
   ];
   const NUKE_KEY = "N";
+
+  /* PRISON_TOUCH_PROMPTS (flag declared in systems/interactions.js).
+     "Press N for TACTICAL NUKE" is unactionable on a touchscreen, and this one
+     could not be cured by re-skinning the text where it already lives: the
+     callout is #streakHud, which css/hud.css:167 sets `pointer-events:none`
+     and whose .pop animation ends at opacity 0 — a button in there is
+     invisible and untappable within 1.55 s. The nuke gets a real pill in the
+     shared prompt band instead, armed for as long as it is actually armed. */
+  const PTP = () => !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
+  const onTouch = () => !!(CBZ.touchMode ||
+    (document.body && document.body.classList.contains("touch")));
+  // Desktop keeps its exact legacy sentence; touch is pointed at the pill.
+  const nukeCue = () => (PTP() && onTouch()
+    ? " - Tap the TACTICAL NUKE button."
+    : " - Press " + NUKE_KEY + " for TACTICAL NUKE.");
 
   const hud = document.getElementById("hud") || document.body;
   const box = document.createElement("div");
@@ -79,7 +94,7 @@
   function showReward(r) {
     if (CBZ.game && CBZ.game.mode === "city") return;
     title.textContent = r.n + " KILL STREAK!";
-    sub.textContent = r.name + (r.n === 25 ? " - Press " + NUKE_KEY + " for TACTICAL NUKE." : "");
+    sub.textContent = r.name + (r.n === 25 ? nukeCue() : "");
     points.textContent = "+50";
     killed.textContent = r.n === 25 ? "TACTICAL NUKE READY" : r.sub;
     pop(r.n === 25 ? "nuke" : "");
@@ -188,6 +203,18 @@
     detonateNuke();
   });
 
+  /* The pill's target. It fires "@prisonNukeDetonate" rather than a synthesized
+     "n" for a reason worth writing down: buildmode.js claims N with a
+     CAPTURE-phase WINDOW listener that stopPropagation()s, and the listener
+     above is a BUBBLE-phase window listener — so a synthetic keydown can be
+     swallowed before it ever reaches the nuke. Calling the function directly
+     cannot be intercepted, and this wrapper re-applies the identical
+     build-mode guard so a tap and a keypress remain the same act. */
+  CBZ.prisonNukeDetonate = function () {
+    if (CBZ.buildMode && CBZ.buildMode.active) return;
+    detonateNuke();
+  };
+
   CBZ.killstreakOnDown = onDown;
   CBZ.killstreakReset = reset;
   CBZ.killstreakBreak = breakStreak;
@@ -202,5 +229,17 @@
     if (el + 0.001 < lastElapsed) reset();
     lastElapsed = el;
     setMeter();
+    // Armed = tappable. Re-armed every frame; interactions.js's TTL sweep
+    // retires the pill the instant the nuke is spent, the streak breaks or the
+    // run ends, so a live nuke button can never outlive the nuke.
+    if (nukeReady && !nukeUsed && CBZ.prisonPrompt &&
+        !(CBZ.buildMode && CBZ.buildMode.active)) {
+      CBZ.prisonPrompt("nuke", "@prisonNukeDetonate", "TACTICAL NUKE", null);
+    }
   });
+
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js) ----
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "nuke", act: "@prisonNukeDetonate", was: "Press N for TACTICAL NUKE." }
+  );
 })();

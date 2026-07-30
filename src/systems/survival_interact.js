@@ -41,6 +41,13 @@
 
   let verbs = [], shown = false, cd = 0;
 
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js).
+  // act:null = the key glyph is gone but the ACTION already had a touch
+  // surface (#survVerbs), so a second pill would be duplicate chrome.
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "carry", act: null, was: "LMB throws · E sets down", surface: "#survVerbs" }
+  );
+
   // ---- TOUCH: the same verbs as tappable BUTTONS docked by the right-thumb
   //      cluster (left of #tbtns), instead of a floating card you'd have to
   //      reach across the screen for. Fixed spot + fixed order = muscle
@@ -111,7 +118,14 @@
   function render(held) {
     verbs = held ? HOLD_VERBS : FREE_VERBS;
     el.name.textContent = held ? "CARRYING" : "SURVIVOR";
-    el.note.textContent = held ? "LMB throws · E sets down" : "in reach";
+    // PRISON_TOUCH_PROMPTS: "LMB" and "E" are unactionable on a touchscreen.
+    // No pill is needed — renderDock() below already puts BOTH verbs on screen
+    // as tappable .svbtn buttons, so touch just gets told what it can see.
+    const ptp = !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
+    const touch = !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch")));
+    el.note.textContent = held
+      ? (ptp && touch ? "throw or set down" : "LMB throws · E sets down")
+      : "in reach";
     el.opts.innerHTML = verbs.map((v, i) =>
       `<div class="iopt" data-i="${i}"><span class="ikey">${OPT_KEYS[i].toUpperCase()}</span>` +
       `<span class="ilab">${v.label}</span><span class="isub">${v.sub}</span></div>`).join("");

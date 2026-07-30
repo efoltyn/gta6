@@ -9,8 +9,8 @@
      • SCARED  — unarmed or low-nerve inmates throw their HANDS UP:
                  they freeze, hunch, go wide-eyed and terrified
                  (posed by systems/reactions.js). While they're held
-                 up you can ROB them at gunpoint ([G] to shake them
-                 down — a one-time full frisk).
+                 up you can ROB them at gunpoint ([G], or the ROB pill
+                 on touch — a one-time full frisk).
 
      • DRAW    — armed, hard inmates may instead pull their OWN gun
                  and aim back: a Mexican stand-off. Keep your gun on
@@ -37,6 +37,15 @@
 
   const HOLD = 0.85;        // how long a reaction lingers after you look away
   const ROB_RANGE = 6.5;    // max distance to shake someone down
+
+  // PRISON_TOUCH_PROMPTS (declared in systems/interactions.js): "[G] to rob"
+  // names a key a touch player does not have. The CUE loses the glyph on touch
+  // and a real ROB pill is armed for as long as the shakedown is actually
+  // possible — see the tick loop. Desktop and flag-off are unchanged.
+  const PTP = () => !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
+  const onTouch = () => !!(CBZ.touchMode ||
+    (document.body && document.body.classList.contains("touch")));
+  const robCue = () => (PTP() && onTouch() ? "rob him" : "[G] to rob");
 
   function alive(a) { return a && !a.dead && !(a.ko > 0) && !a.escaped; }
   function playerDist(n) {
@@ -124,7 +133,7 @@
       if (CBZ.npcEmote) CBZ.npcEmote(n, "");
       if (!n._reactHinted) {
         n._reactHinted = true;
-        CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " freezes up — [G] to rob", 1.7);
+        CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " freezes up — " + robCue(), 1.7);
       }
     }
   }
@@ -222,7 +231,8 @@
       }
     }
 
-    /* ---- rob at gunpoint: [G] while aiming at a held-up inmate ----
+    /* ---- rob at gunpoint: [G] (or the ROB pill) while aiming at a held-up
+       inmate ----
        A SHAKEDOWN IS A TRANSFER, and this one always was — systems/economy.js's
        lootActor moves the cigarettes and items off the man's own loadout, so
        nothing here was ever minting. What it lacked was an ANSWER: robbing
@@ -233,23 +243,43 @@
        moved — cigs in `units`, and `taken` DOLLARS pinned at zero, because
        there are no dollars in here and pretending otherwise would be the exact
        fiction the block exists to delete. */
-    const robNow = !!(CBZ.keys && CBZ.keys["g"]);
-    if (robNow && !robWas && target && target.intimidMode === "scared" &&
-        playerDist(target) < ROB_RANGE) {
-      if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
-        let r = null;
-        try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
-        if (!r || (!r.units && (!r.items || !r.items.length))) {
-          CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
-        }
-      } else if (!target.looted) {
-        if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }
-        CBZ.econ && CBZ.econ.lootActor && CBZ.econ.lootActor(target); // shows its own loot toast
-      }
-      target.intimidT = HOLD;                                       // keep them terrified
+    // A shakedown is possible RIGHT NOW — arm the tappable pill for exactly as
+    // long as that stays true (the TTL sweep in interactions.js retires it the
+    // moment this stops being re-armed, e.g. you lower the gun or he bolts).
+    // The pill fires "@prisonRobTarget", never a synthesized "g": this verb is
+    // POLLED off CBZ.keys and a synthetic keydown/keyup pair is already over
+    // before the next frame reads it.
+    if (CBZ.prisonPrompt && canRob(target)) {
+      CBZ.prisonPrompt("rob", "@prisonRobTarget", "Rob " + shortName(target), null);
     }
+
+    const robNow = !!(CBZ.keys && CBZ.keys["g"]);
+    if (robNow && !robWas) doRob(target);
     robWas = robNow;
   }
+
+  function canRob(t) {
+    return !!(t && t.intimidMode === "scared" && alive(t) && playerDist(t) < ROB_RANGE);
+  }
+
+  // The one implementation both the [G] key path and the ROB pill run.
+  function doRob(target) {
+    if (!canRob(target)) return;
+    if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+      let r = null;
+      try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
+      if (!r || (!r.units && (!r.items || !r.items.length))) {
+        CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
+      }
+    } else if (!target.looted) {
+      if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }
+      CBZ.econ && CBZ.econ.lootActor && CBZ.econ.lootActor(target); // shows its own loot toast
+    }
+    target.intimidT = HOLD;                                       // keep them terrified
+  }
+
+  // Pill target: acts on whoever is currently under the gun, re-validated.
+  CBZ.prisonRobTarget = function () { doRob(currentTarget); };
 
   const intimidate = {
     // called by ai.js aiThink: returns a move speed (0 = frozen) while this
@@ -265,6 +295,11 @@
     target: function () { return currentTarget; },
   };
   CBZ.intimidate = intimidate;
+
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js) ----
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "rob", act: "@prisonRobTarget", was: "… freezes up — [G] to rob" }
+  );
 
   // SENSE before the npc brain (npc.js @22) so think() sees fresh intent.
   CBZ.onUpdate(19, tick);

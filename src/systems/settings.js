@@ -143,6 +143,13 @@
       "</div>";
   }
 
+  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js).
+  // act:null = the key glyph is gone but the ACTION already had a touch
+  // surface (the panel's own Done button), so a pill would be duplicate chrome.
+  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
+    { id: "settingsClose", act: null, was: "Close [Esc]", surface: "#stgCloseBtn" }
+  );
+
   function build() {
     if (panel) return panel;
     panel = document.createElement("div");
@@ -151,7 +158,7 @@
     panel.innerHTML =
       "<div class='stg-head'>" +
         "<div class='stg-title'>SETTINGS</div>" +
-        "<div class='stg-hint'>Close <b>[Esc]</b></div>" +
+        "<div class='stg-hint' id='stgCloseHint'>Close <b>[Esc]</b></div>" +
       "</div>" +
       "<div class='stg-section'>" +
         "<h4>PERFORMANCE — QUALITY</h4>" +
@@ -272,6 +279,16 @@
     open_ = true;
     CBZ.settingsOpen = true; // set BEFORE exitPointerLock — camera.js reads this
     build();
+    // PRISON_TOUCH_PROMPTS: [Esc] is unactionable on a touchscreen. No pill is
+    // needed — the panel's own "Done" button already closes it — so touch is
+    // simply pointed at the surface it has. Re-evaluated on every open (the
+    // panel's HTML is built once, on first open, which may predate touch).
+    const hintEl = panel.querySelector("#stgCloseHint");
+    if (hintEl) {
+      const ptp = !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
+      const touch = !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch")));
+      hintEl.innerHTML = ptp && touch ? "Tap <b>Done</b> to close" : "Close <b>[Esc]</b>";
+    }
     panel.style.display = "block";
     panel._refresh();
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
