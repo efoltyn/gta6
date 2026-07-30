@@ -413,6 +413,7 @@
   // by id: on touch they carry tappable verb pills (several were click-wired
   // all along), and #cRadar / #minimap taps open the full map (fullmap.js).
   const UI_SEL = "#tbtns, #tveh, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
+    "#raceBoard, #speedwayStandings, #speedwayBook, " +
     "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, " +
     "#bankPrompt, #pawnPrompt, #jewelryPrompt, #clothingPrompt, #gunstorePrompt, " +
     "#shopliftPrompt, #cityStoragePrompt, #cityAircraftPrompt";

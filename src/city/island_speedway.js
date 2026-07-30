@@ -2791,16 +2791,44 @@
     if (standEl) return standEl;
     standEl = document.createElement("div");
     standEl.id = "speedwayStandings";
+    standEl.setAttribute("role", "dialog");
+    standEl.setAttribute("aria-modal", "true");
+    standEl.setAttribute("aria-label", "Championship standings");
     standEl.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;width:min(560px,92vw);max-height:84vh;overflow:auto;background:rgba(12,14,20,.97);border:2px solid #2c3140;border-radius:12px;padding:14px 18px;box-sizing:border-box;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 14px 44px rgba(0,0,0,.6)";
+    const closeFromTap = function (e) {
+      const t = e.target && e.target.closest && e.target.closest("[data-speedway-close]");
+      if (!t) return;
+      e.preventDefault(); e.stopPropagation(); toggleStandings(false);
+    };
+    standEl.addEventListener("click", closeFromTap);
+    standEl.addEventListener("touchend", closeFromTap, { passive: false });
     document.body.appendChild(standEl);
     return standEl;
   }
   function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, (c) => c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"); }
   function hex6(n) { return "#" + ("000000" + ((n >>> 0).toString(16))).slice(-6); }
+  function touchUI() {
+    if (CBZ.touchMode) return true;
+    try {
+      if (document.body && document.body.classList.contains("touch")) return true;
+      return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    } catch (e) { return false; }
+  }
+  function standingsFoot() {
+    if (!touchUI()) {
+      return "<div style='font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px'>Win rounds to climb · Esc closes</div>";
+    }
+    return "<div style='display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:#8a93a3;margin-top:8px;border-top:1px solid #2c3140;padding-top:8px'>" +
+      "<span>Win rounds to climb.</span>" +
+      "<button type='button' data-speedway-close data-testid='speedway-standings-close' style='min-width:78px;min-height:42px;padding:8px 14px;border-radius:999px;cursor:pointer;touch-action:manipulation;background:#1b3440;border:2px solid rgba(125,231,255,.55);color:#eaf6ff;font:700 13px Fredoka,system-ui,sans-serif'>CLOSE</button></div>";
+  }
   function renderStandings() {
     const el = standOverlay();
     const RC = CBZ.cityRacing;
-    if (!RC || !RC.standings) { el.innerHTML = "<div style='font-size:13px;color:#8a93a3'>Championship not loaded.</div>"; return; }
+    if (!RC || !RC.standings) {
+      el.innerHTML = "<div style='font-size:13px;color:#8a93a3'>Championship not loaded.</div>" + standingsFoot();
+      return;
+    }
     const rows = RC.standings();
     const cols = "26px 26px 1.4fr 70px 56px 74px";
     let h = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px'>" +
@@ -2820,7 +2848,7 @@
         "<span style='text-align:right;color:#aeb6c2'>" + wtxt + "</span>" +
         "</div>";
     });
-    h += "<div style='font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px'>Win rounds to climb · Esc closes</div>";
+    h += standingsFoot();
     el.innerHTML = h;
   }
   function toggleStandings(force) {

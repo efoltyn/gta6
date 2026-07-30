@@ -20,8 +20,9 @@
      CBZ.raceHud.lights(n)                   — 0..3 red lamps lit; "go" flashes green; -1 hides
      CBZ.raceHud.update(state)               — {pos,count,lap,laps,lapT,best,
                                                 gapA:{name,s},gapB:{name,s},flash}
-     CBZ.raceHud.results(rows,{title,sub})   — finish board; rows = {pos,name,
-                                                number,color,time,pts,purse,you,dnf}
+     CBZ.raceHud.results(rows,{title,sub,foot,touchFoot})
+                                             — finish board; rows = {pos,name,
+                                               number,color,time,pts,purse,you,dnf}
      CBZ.raceHud.closeResults() / .hide()    — tear down
 ============================================================ */
 (function () {
@@ -61,9 +62,12 @@
       "@keyframes rGoPulse{0%{transform:scale(.7);opacity:0}30%{transform:scale(1.15);opacity:1}100%{transform:scale(1);opacity:1}}" +
       // results board
       "#raceBoard{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;width:min(560px,92vw);max-height:84vh;overflow:auto;background:rgba(12,14,20,.97);border:2px solid #2c3140;border-radius:12px;padding:14px 18px;box-sizing:border-box;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;font-variant-numeric:tabular-nums;box-shadow:0 14px 44px rgba(0,0,0,.6)}" +
-      "#raceBoard .hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}" +
+      "#raceBoard .hd{display:flex;align-items:center;gap:10px;margin-bottom:8px}" +
+      "#raceBoard .headcopy{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex:1;min-width:0}" +
       "#raceBoard .ttl{font-size:18px;font-weight:700}" +
       "#raceBoard .sub{font-size:12px;color:#8a93a3}" +
+      "#raceBoard .rClose{flex:0 0 auto;min-width:78px;min-height:42px;padding:8px 14px;border-radius:999px;cursor:pointer;touch-action:manipulation;background:#1b3440;border:2px solid rgba(125,231,255,.55);color:#eaf6ff;font:700 13px Fredoka,system-ui,sans-serif;letter-spacing:.5px;box-shadow:0 3px 0 rgba(0,0,0,.35)}" +
+      "#raceBoard .rClose:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(0,0,0,.35);background:#28566a}" +
       "#raceBoard .row{display:grid;grid-template-columns:26px 26px 1.4fr 84px 52px 74px;gap:6px;align-items:center;font-size:13px;padding:3px 4px;border-radius:6px}" +
       "#raceBoard .row.you{background:rgba(125,231,255,.08);border:1px solid rgba(125,231,255,.25)}" +
       "#raceBoard .row .p1{color:#ffd166;font-weight:700}" +
@@ -71,7 +75,8 @@
       "#raceBoard .row .tm{text-align:right;color:#aeb6c2}" +
       "#raceBoard .row .pts{text-align:right;color:#9fe6c8}" +
       "#raceBoard .row .cash{text-align:right;color:#7ed957;font-weight:700}" +
-      "#raceBoard .ft{font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px}";
+      "#raceBoard .ft{font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px}" +
+      "@media(max-width:620px){#raceBoard .headcopy{display:block}#raceBoard .sub{margin-top:2px}#raceBoard .row{grid-template-columns:22px 22px 1.4fr 72px 44px 64px;gap:4px}}";
     document.head.appendChild(st);
   }
 
@@ -102,6 +107,8 @@
 
     boardEl = document.createElement("div");
     boardEl.id = "raceBoard";
+    boardEl.setAttribute("role", "dialog");
+    boardEl.setAttribute("aria-modal", "true");
     document.body.appendChild(boardEl);
   }
 
@@ -112,6 +119,20 @@
   }
   function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, (c) => c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"); }
   function hex6(n) { return "#" + ("000000" + ((n >>> 0).toString(16))).slice(-6); }
+  function touchUI() {
+    if (CBZ.touchMode) return true;
+    try {
+      if (document.body && document.body.classList.contains("touch")) return true;
+      return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    } catch (e) { return false; }
+  }
+  function withoutKeyboardClose(s) {
+    return String(s == null ? "" : s)
+      .replace(/\s*[·•]\s*Esc(?:ape)?\s+closes?\b/gi, "")
+      .replace(/\s*\(\s*Esc(?:ape)?\s*\)/gi, "")
+      .replace(/\[\s*Esc(?:ape)?\s*\]\s*(?:close|closes)?/gi, "")
+      .trim();
+  }
 
   const raceHud = {
     show: function () { build(); root.style.display = "block"; },
@@ -155,8 +176,15 @@
     results: function (rows, opts) {
       build();
       opts = opts || {};
-      let h = "<div class='hd'><div class='ttl'>" + esc(opts.title || "RACE RESULTS") + "</div>" +
-        "<div class='sub'>" + esc(opts.sub || "") + "</div></div>";
+      const touch = touchUI();
+      const rawFoot = opts.foot || "Drive off to continue · Esc closes";
+      const foot = touch
+        ? (opts.touchFoot != null ? String(opts.touchFoot) : withoutKeyboardClose(rawFoot))
+        : rawFoot;
+      let h = "<div class='hd'><div class='headcopy'><div class='ttl'>" + esc(opts.title || "RACE RESULTS") + "</div>" +
+        "<div class='sub'>" + esc(opts.sub || "") + "</div></div>" +
+        (touch ? "<button type='button' class='rClose' data-testid='race-results-close' aria-label='Close race results'>CLOSE</button>" : "") +
+        "</div>";
       h += "<div class='row' style='font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140'>" +
         "<span>#</span><span>Car</span><span>Driver</span><span style='text-align:right'>Time / Gap</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Purse</span></div>";
       (rows || []).forEach(function (r) {
@@ -169,12 +197,29 @@
           "<span class='cash'>" + (r.purse ? "$" + r.purse : "") + "</span>" +
           "</div>";
       });
-      h += "<div class='ft'>" + esc(opts.foot || "Drive off to continue · Esc closes") + "</div>";
+      h += "<div class='ft'>" + esc(foot) + "</div>";
       boardEl.innerHTML = h;
+      boardEl.setAttribute("aria-label", opts.title || "Race results");
       boardEl.style.display = "block";
+      const close = boardEl.querySelector(".rClose");
+      if (close) {
+        const dismiss = function (e) { e.preventDefault(); e.stopPropagation(); raceHud.closeResults(); };
+        close.addEventListener("click", dismiss);
+        close.addEventListener("touchend", dismiss, { passive: false });
+      }
     },
     closeResults: function () { if (boardEl) boardEl.style.display = "none"; },
     resultsOpen: function () { return !!(boardEl && boardEl.style.display === "block"); },
+    auditResults: function () {
+      const close = boardEl && boardEl.querySelector(".rClose");
+      const text = boardEl ? boardEl.innerText : "";
+      return {
+        open: raceHud.resultsOpen(), touch: touchUI(), text: text,
+        closeCount: boardEl ? boardEl.querySelectorAll(".rClose").length : 0,
+        closeVisible: !!(close && getComputedStyle(close).display !== "none" && close.getBoundingClientRect().width > 0),
+        keyboardHint: /\b(?:Esc|Escape|Enter|Space)\b/i.test(text),
+      };
+    },
     fmtT: fmtT,
   };
   CBZ.raceHud = raceHud;

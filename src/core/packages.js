@@ -200,6 +200,27 @@
 
   /* ---------------- the package panel (one DOM overlay, engine-owned) ----- */
   let panelEl = null, panelHandlers = null;
+  function touchPanel() {
+    if (CBZ.touchMode) return true;
+    try {
+      if (document.body && document.body.classList.contains("touch")) return true;
+      return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    } catch (e) { return false; }
+  }
+  // Package authors historically put "Esc closes" in their heading. The
+  // package panel is shared by racing/casino/airport/police/government, so
+  // scrub that desktop-only copy once here instead of chasing every game.
+  function scrubTouchCloseHints(el) {
+    if (!touchPanel() || !el || !document.createTreeWalker) return;
+    const walk = document.createTreeWalker(el, 4);
+    let n;
+    while ((n = walk.nextNode())) {
+      n.nodeValue = n.nodeValue
+        .replace(/(\s*[·•]\s*)?Esc(?:ape)?\s+closes?\b/gi, "")
+        .replace(/\s*\(\s*Esc(?:ape)?\s*\)/gi, "")
+        .replace(/\[\s*Esc(?:ape)?\s*\]/gi, "");
+    }
+  }
   function ensurePanel() {
     if (panelEl) return panelEl;
     panelEl = document.createElement("div");
@@ -231,6 +252,7 @@
       panelHandlers = handlers || null;
     } else panelHandlers = bodyOrHandlers || null;
     panelEl.innerHTML = html || "";
+    scrubTouchCloseHints(panelEl);
     panelEl.style.display = "block";
   }
   function closePanel() { if (!panelEl) return; panelEl.style.display = "none"; panelEl.innerHTML = ""; panelHandlers = null; }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Real-Chrome iPad contract for road-car buttons, optional tilt steering,
-// boat/aircraft joystick routing, and race-prepped crash durability.
+// boat/aircraft joystick routing, race-prepped crash durability, and race
+// overlays that never strand a touchscreen player behind an Escape key.
 
 import { spawn } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -263,9 +264,55 @@ try {
     "Racer crash tune/tag is missing", JSON.stringify(race));
   check(minRace > maxNormal + 15, "race-prepped cars did not survive the same collision better", JSON.stringify(race));
 
-  const relevantErrors = runtimeErrors.filter((e) => /touch_vehicle\.js|touch\.js|vehicles\.js/.test(e));
+  const raceResults = await json(`(() => {
+    CBZ.raceHud.results([
+      {pos:1,name:"YOU",number:null,color:0x5ad1ff,time:"1:13.0",pts:25,purse:24750,you:true,dnf:false},
+      {pos:2,name:"Kai Mercer",number:2,color:0x288cff,time:"+1.1s",pts:18,purse:0,you:false,dnf:false},
+    ], {
+      title:"CHECKERED FLAG — YOU WIN!",
+      sub:"Diamond Speedway · Season 1",
+      foot:"Purse $24,750 · +25 championship points · Esc closes",
+    });
+    const before=CBZ.raceHud.auditResults();
+    const close=document.querySelector("[data-testid='race-results-close']");
+    if(close)close.dispatchEvent(new Event("touchend",{bubbles:true,cancelable:true}));
+    return {before,closed:!CBZ.raceHud.resultsOpen()};
+  })()`);
+  check(raceResults.before.touch && raceResults.before.closeCount === 1 && raceResults.before.closeVisible,
+    "race results did not expose one visible iPad CLOSE button", JSON.stringify(raceResults));
+  check(!raceResults.before.keyboardHint && !/\bEsc(?:ape)?\b/i.test(raceResults.before.text),
+    "race results still expose a keyboard-only hint on iPad", raceResults.before.text);
+  check(raceResults.closed, "race-results touchend did not close the board");
+
+  const standings = await json(`(() => {
+    CBZ.cityShowChampionship(true);
+    const el=document.getElementById("speedwayStandings");
+    const text=el?el.innerText:"";
+    const close=el&&el.querySelector("[data-testid='speedway-standings-close']");
+    const before={open:!!el&&getComputedStyle(el).display!=="none",text,close:!!close&&close.getBoundingClientRect().width>0};
+    if(close)close.dispatchEvent(new Event("touchend",{bubbles:true,cancelable:true}));
+    return {before,closed:!!el&&getComputedStyle(el).display==="none"};
+  })()`);
+  check(standings.before.open && standings.before.close && !/\bEsc(?:ape)?\b/i.test(standings.before.text),
+    "Speedway standings are not touch-closeable or still name Escape", JSON.stringify(standings));
+  check(standings.closed, "standings touchend did not close the overlay");
+
+  const packagePanel = await json(`(() => {
+    const api=CBZ.games&&CBZ.games.api&&CBZ.games.api.racing;
+    if(api&&api.open)api.open();
+    const el=document.getElementById("pkgPanel"),text=el?el.innerText:"";
+    const out={open:!!el&&getComputedStyle(el).display!=="none",text,keyboard:/\bEsc(?:ape)?\b/i.test(text)};
+    const close=el&&el.querySelector("[data-act='close']");
+    if(close)close.dispatchEvent(new MouseEvent("click",{bubbles:true}));
+    else if(CBZ.games&&CBZ.games.hubCtx)CBZ.games.hubCtx("racing").hud.closePanel();
+    return out;
+  })()`);
+  check(packagePanel.open && !packagePanel.keyboard,
+    "shared racing package panel leaked an Escape hint on iPad", JSON.stringify(packagePanel));
+
+  const relevantErrors = runtimeErrors.filter((e) => /touch_vehicle\.js|touch\.js|vehicles\.js|racehud\.js|island_speedway\.js|packages\.js/.test(e));
   check(!relevantErrors.length, "relevant browser runtime exception", relevantErrors.slice(0, 3).join(" | "));
-  console.log(JSON.stringify({ setup, road, guide, held, tilt, routing, race, screenshot: shotPath, relevantErrors, failures }, null, 2));
+  console.log(JSON.stringify({ setup, road, guide, held, tilt, routing, race, raceResults, standings, packagePanel, screenshot: shotPath, relevantErrors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } finally {
   if (ws) try { ws.close(); } catch (_) {}
