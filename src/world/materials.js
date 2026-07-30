@@ -224,6 +224,360 @@
     return t;
   }
 
+  // ============================================================
+  //  CBZ.prisonGroundTex(kind, opts) — INSTITUTIONAL GROUND.
+  //
+  //  OWNER, on the prison escape game: "the checkered ground is dumb."
+  //
+  //  He is right, and it is not a taste call. checkerTex(a, b, 2) draws a
+  //  literal two-tone draughts board — the universal DEBUG texture, the thing
+  //  every engine ships as "this surface has no material yet".
+  //  world/disaster_arena.js:111 already named the disease in its own comment
+  //  ("the old two-tone checker tiling read as a debug texture") and then
+  //  solved it privately, for one arena. This is the SHARED answer, so no
+  //  ground surface in the compound has to reach for the checker again.
+  //
+  //  KINDS — each is a real institutional surface, never a pattern:
+  //    "yard-grass"   worn exercise-yard turf: an irregular light/dark mottle
+  //                   with bald khaki patches where feet killed the grass.
+  //    "field-grass"  the same author, calmer — the open country outside the
+  //                   wall, which has nobody walking on it.
+  //    "asphalt"      near-uniform bitumen: fine aggregate speckle, faint
+  //                   repair blotching, tyre/oil staining, hairline cracks.
+  //    "concrete"     a poured slab with real EXPANSION JOINTS on a panel
+  //                   grid, plus pore speckle, water staining and cracks.
+  //
+  //  THE JOINT GRID IS ALSO THE SEAM HIDER. Joints are drawn at u/v = 0 as
+  //  well as mid-tile, so the place where the texture wraps IS a joint. A
+  //  repeating concrete slab is the one tiling surface allowed to show you
+  //  exactly where it repeats, because a real slab does.
+  //
+  //  TONES COME FROM CBZ.COL AND THE MEAN IS PRESERVED. Each kind mottles
+  //  between the SAME two tones the checker used, so the average colour of
+  //  every surface — and therefore how it reads under the compound's lights —
+  //  is what it always was. Only the pattern changed.
+  //
+  //  WHY NOT world/textures_surface.js's asphalt/concrete/grass. That library
+  //  is the right answer for a MeshStandardMaterial and stays the right answer
+  //  everywhere it fits, but it cannot serve these call sites:
+  //    - it hands back CACHED, SHARED texture instances with a uniform repeat
+  //      already baked in. The prison ground needs per-surface, NON-uniform
+  //      repeats (the walkway is 1 x 6), and writing .repeat on a shared
+  //      instance would corrupt every other consumer of that cache entry;
+  //    - it tags colour maps THREE.sRGBEncoding, correct on its own terms, but
+  //      this compound's palette (mat / cmat / checkerTex / concreteTex) is
+  //      authored UNTAGGED, so a tagged map reads visibly darker than the wall
+  //      it meets;
+  //    - it is tier-gated off entirely on quality tier 0, and the ground may
+  //      not vanish on a weak GPU;
+  //    - and it authors no expansion joints and no worn turf, which is the
+  //      whole institutional character being asked for.
+  //  What IS reused: the house determinism law (CBZ.hashN, world-seed folded,
+  //  never Math.random) and the periodic-lattice trick that makes a value
+  //  noise field wrap seamlessly.
+  //
+  //  Returns a FRESH THREE.CanvasTexture over a CACHED canvas, so a caller may
+  //  set .repeat freely while the expensive part — the noise bake — is shared.
+  // ============================================================
+  const GROUND_KINDS = ["yard-grass", "field-grass", "asphalt", "concrete"];
+  const groundCanvases = new Map();     // bake key -> HTMLCanvasElement
+  let groundTexCalls = 0;
+
+  function ci(v) { return v < 0 ? 0 : v > 255 ? 255 : Math.round(v); }
+  function cl(v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+  // "#rrggbb" | 0xrrggbb -> {r,g,b} in 0..255
+  function rgb255(c) {
+    let n;
+    if (typeof c === "string") {
+      const s = c.charAt(0) === "#" ? c.slice(1) : c;
+      n = parseInt(s, 16);
+      if (!isFinite(n)) n = 0x808080;
+    } else n = c | 0;
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function shadeHex(c, k) {
+    const p = rgb255(c);
+    return (ci(p.r * k) << 16) | (ci(p.g * k) << 8) | ci(p.b * k);
+  }
+
+  // ---- deterministic periodic value noise ---------------------------------
+  // CBZ.hashN (core/seed.js) folds CBZ.WORLD_SEED, so a texture is stable for
+  // a seed and differs between seeds — the determinism law, never Math.random.
+  // Lattice points are wrapped modulo the octave period BEFORE hashing, which
+  // is exactly what makes every field below tile without a visible seam.
+  function gHash(x, y, salt) {
+    if (CBZ.hashN) return CBZ.hashN(x | 0, y | 0, salt | 0) / 4294967296;
+    let h = (Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(salt | 0, 2246822519)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function latGrid(per, salt) {
+    const a = new Float32Array(per * per);
+    for (let y = 0; y < per; y++) for (let x = 0; x < per; x++) a[y * per + x] = gHash(x, y, salt);
+    return a;
+  }
+  function smoothT(t) { return t * t * (3 - 2 * t); }
+  function vsample(a, per, u, v) {
+    const x = u * per, y = v * per;
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const fx = smoothT(x - xi), fy = smoothT(y - yi);
+    const x0 = ((xi % per) + per) % per, y0 = ((yi % per) + per) % per;
+    const x1 = (x0 + 1) % per, y1 = (y0 + 1) % per;
+    const p = a[y0 * per + x0], q = a[y0 * per + x1];
+    const r = a[y1 * per + x0], s = a[y1 * per + x1];
+    const t0 = p + (q - p) * fx, t1 = r + (s - r) * fx;
+    return t0 + (t1 - t0) * fy;
+  }
+  // fbm with its octave lattices PRE-BUILT: the per-pixel loop then costs a
+  // handful of typed-array reads instead of a hash call, which is the whole
+  // reason a 512px bake is affordable at boot.
+  function fbmField(base, oct, salt) {
+    const lay = [];
+    let per = Math.max(2, base | 0), amp = 0.5, norm = 0;
+    for (let o = 0; o < oct; o++) {
+      lay.push([latGrid(per, salt + o * 7919), per, amp]);
+      norm += amp; amp *= 0.5; per *= 2;
+    }
+    const inv = 1 / (norm || 1);
+    return function (u, v) {
+      let s = 0;
+      for (let i = 0; i < lay.length; i++) s += vsample(lay[i][0], lay[i][1], u, v) * lay[i][2];
+      return s * inv;
+    };
+  }
+  // Rasterise an fbm field into a full NxN Float32Array so the per-pixel loop
+  // below is pure typed-array reads. THE BAKE IS BOOT-TIME WORK, so a field is
+  // evaluated on the COARSEST grid that can still carry it and bilinearly
+  // upsampled: a mottle whose finest octave has an 18 px period holds no
+  // information at 1 px, and sampling it per-pixel is what would have made a
+  // 512px bake cost a visible fraction of a second. Only the grain/aggregate
+  // fields (period ~1-4 px) actually run at full resolution.
+  function rasterField(N, base, oct, salt) {
+    const top = Math.max(2, base | 0) << Math.max(0, oct - 1);   // finest lattice period
+    let M = 4;
+    while (M < top * 4 && M < N) M <<= 1;                        // >= 4 samples per cell
+    if (M > N) M = N;
+    const f = fbmField(base, oct, salt);
+    const coarse = new Float32Array(M * M);
+    for (let y = 0; y < M; y++) for (let x = 0; x < M; x++) coarse[y * M + x] = f(x / M, y / M);
+    if (M === N) return coarse;
+    const out = new Float32Array(N * N);
+    const s = M / N;
+    for (let y = 0; y < N; y++) {
+      const fy = y * s, y0 = fy | 0, ty = fy - y0;
+      const r0 = y0 * M, r1 = ((y0 + 1) % M) * M;
+      const row = y * N;
+      for (let x = 0; x < N; x++) {
+        const fx = x * s, x0 = fx | 0, tx = fx - x0, x1 = (x0 + 1) % M;
+        const a = coarse[r0 + x0], b = coarse[r0 + x1];
+        const c = coarse[r1 + x0], e = coarse[r1 + x1];
+        const p = a + (b - a) * tx, q = c + (e - c) * tx;
+        out[row + x] = p + (q - p) * ty;
+      }
+    }
+    return out;
+  }
+  // x^40 by repeated squaring — this runs once per pixel and Math.pow is the
+  // single most expensive call in the whole bake.
+  //
+  // WHY 40 AND NOT 24. A crack is the level set of the ridged field, so TWO
+  // numbers control it and they pull opposite ways: the field's frequency sets
+  // how MANY cracks cross the tile, the exponent sets how WIDE each one is.
+  // Tuning only the exponent is what produced a measurably crazed surface —
+  // at base 9 / exponent 24 the bake came out 9% darker than the tone it was
+  // supposed to preserve, i.e. the "hairline" cracks covered several percent
+  // of the ground. Frequency is now low (a crack every ~1.5 m) and the
+  // exponent high (a ~3 px line), which is a cracked road instead of a
+  // shattered one, and the mean tone survives.
+  function pow40(x) { const a = x * x, b = a * a, c = b * b, d = c * c, e = d * d; return e * c; }
+
+  // kind string -> a stable salt (FNV-1a), so two kinds never share a field
+  function strSalt(s) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return (h & 0x7fffffff) | 0;
+  }
+
+  // SIZE IS A BUDGET, NOT A CONSTANT. The bake is synchronous boot work, so
+  // each kind gets the smallest power of two that still carries what it is
+  // FOR at the scale it is actually seen (a POT edge is required: these wrap,
+  // and WebGL1 refuses RepeatWrapping + mipmaps on a NPOT texture).
+  //   yard-grass 512 — a 12 m tile you stand on; the worn patches are the point
+  //   asphalt    512 — a 9 m tile down the walkway you spend the game on
+  //   concrete   256 — a 6.3 m apron tile, ~40 px/m, and its detail is joints
+  //   field-grass 256 — a 26 m tile out past the wall, seen at distance
+  function groundDefaults(kind) {
+    const C = CBZ.COL || {};
+    if (kind === "field-grass") {
+      // The open country plane outside the wall. These two tones average to
+      // 0x4ea84e — the exact flat green that plane used to be painted — so the
+      // horizon tone does not move, it only stops being a sheet of one colour.
+      return { a: "#56b156", b: "#469f46", size: 256, wear: 0.20, patch: 3, grain: 48, joint: 0 };
+    }
+    if (kind === "asphalt") {
+      return { a: C.ASPHALT_A || "#5b626c", b: C.ASPHALT_B || "#535a64", size: 512, wear: 0, patch: 3, grain: 96, joint: 0 };
+    }
+    if (kind === "concrete") {
+      const cc = C.CONCRETE != null ? C.CONCRETE : 0x6e7682;
+      return { a: cc, b: shadeHex(cc, 0.92), size: 256, wear: 0, patch: 3, grain: 80, joint: 2 };
+    }
+    return { a: C.GRASS_A || "#57b257", b: C.GRASS_B || "#4aa14a", size: 512, wear: 0.58, patch: 4, grain: 64, joint: 0 };
+  }
+
+  function bakeGround(kind, o) {
+    const N = o.size;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = N;
+    const ctx = cv.getContext("2d");
+    const img = ctx.createImageData(N, N);
+    const d = img.data;
+    const salt = strSalt(kind);
+    const A = rgb255(o.a), B = rgb255(o.b);
+
+    if (kind === "yard-grass" || kind === "field-grass") {
+      // Worn earth DERIVED from the turf tone (warmer, lighter, desaturated),
+      // so a palette change to GRASS_A/B drags the bald patches with it.
+      const mr = (A.r + B.r) * 0.5, mg = (A.g + B.g) * 0.5, mb = (A.b + B.b) * 0.5;
+      const Er = mr * 0.55 + 96, Eg = mg * 0.42 + 44, Eb = mb * 0.50 + 28;
+      const fPatch = rasterField(N, o.patch, 3, salt + 11);   // light/dark mottle
+      const fWear = rasterField(N, 9, 2, salt + 29);          // where feet killed it
+      const fGrain = rasterField(N, o.grain, 2, salt + 47);   // blade grain
+      const thr = 1 - o.wear * 0.72, span = (1 - thr) || 1;
+      const worn = o.wear > 0;
+      for (let i = 0, n = N * N; i < n; i++) {
+        const p = fPatch[i];
+        let r = B.r + (A.r - B.r) * p, g = B.g + (A.g - B.g) * p, b = B.b + (A.b - B.b) * p;
+        if (worn) {
+          let w = (fWear[i] - thr) / span;
+          if (w > 0) {
+            if (w > 1) w = 1;
+            w *= 0.9;
+            r += (Er - r) * w; g += (Eg - g) * w; b += (Eb - b) * w;
+          }
+        }
+        const k = 1 + (fGrain[i] - 0.5) * 0.16;
+        const i4 = i * 4;
+        d[i4] = cl(r * k); d[i4 + 1] = cl(g * k); d[i4 + 2] = cl(b * k); d[i4 + 3] = 255;
+      }
+    } else if (kind === "asphalt") {
+      const mr = (A.r + B.r) * 0.5, mg = (A.g + B.g) * 0.5, mb = (A.b + B.b) * 0.5;
+      const fBlot = rasterField(N, 3, 3, salt + 3);        // repair patches / sun bleach
+      const fAgg = rasterField(N, o.grain, 2, salt + 13);  // aggregate speckle
+      const fStain = rasterField(N, 5, 2, salt + 23);      // oil + tyre staining
+      const fCrack = rasterField(N, 3, 2, salt + 31);      // hairline cracks
+      for (let i = 0, n = N * N; i < n; i++) {
+        let l = 1 + (fBlot[i] - 0.5) * 0.10 + (fAgg[i] - 0.5) * 0.15;
+        const st = fStain[i];
+        l -= st * st * st * 0.20;
+        l -= pow40(1 - Math.abs(fCrack[i] * 2 - 1)) * 0.50;
+        const i4 = i * 4;
+        // bitumen reads faintly cool, the way real asphalt does
+        d[i4] = cl(mr * l * 0.99); d[i4 + 1] = cl(mg * l); d[i4 + 2] = cl(mb * l * 1.03); d[i4 + 3] = 255;
+      }
+    } else {
+      const fStain = rasterField(N, o.patch, 3, salt + 5);
+      const fPore = rasterField(N, o.grain, 2, salt + 17);
+      const fCrack = rasterField(N, 3, 2, salt + 37);
+      const panels = Math.max(1, o.joint | 0);
+      const pw = N / panels;
+      const core = Math.max(1, N / 380), soft = core + 3.5;
+      for (let y = 0; y < N; y++) {
+        const my = y % pw, dy = my < pw - my ? my : pw - my;
+        const row = y * N;
+        for (let x = 0; x < N; x++) {
+          const i = row + x;
+          const s = fStain[i];
+          const r = B.r + (A.r - B.r) * s, g = B.g + (A.g - B.g) * s, b = B.b + (A.b - B.b) * s;
+          let l = 1 + (fPore[i] - 0.5) * 0.08;
+          l -= pow40(1 - Math.abs(fCrack[i] * 2 - 1)) * 0.30;
+          // EXPANSION JOINT: distance in pixels to the nearest panel gridline.
+          // Squared falloff = a dark hairline with a soft grime halo, which is
+          // what a swept sealant joint actually looks like. Joints land on
+          // u/v = 0 as well as mid-tile, so the wrap seam IS a joint.
+          const mx = x % pw, dx = mx < pw - mx ? mx : pw - mx;
+          const dj = dx < dy ? dx : dy;
+          if (dj < soft) {
+            const jk = dj <= core ? 1 : 1 - (dj - core) / (soft - core);
+            l *= 1 - 0.38 * jk * jk;
+          }
+          const i4 = i * 4;
+          d[i4] = cl(r * l); d[i4 + 1] = cl(g * l); d[i4 + 2] = cl(b * l); d[i4 + 3] = 255;
+        }
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+    return cv;
+  }
+
+  function groundAniso() {
+    try {
+      const r = CBZ.renderer;
+      const max = r && r.capabilities && r.capabilities.getMaxAnisotropy ? r.capabilities.getMaxAnisotropy() : 1;
+      return Math.max(1, Math.min(8, max));
+    } catch (e) { return 1; }
+  }
+
+  function prisonGroundTex(kind, opts) {
+    opts = opts || {};
+    const k = GROUND_KINDS.indexOf(kind) >= 0 ? kind : "concrete";
+    const def = groundDefaults(k);
+    const o = {
+      a: opts.a != null ? opts.a : def.a,
+      b: opts.b != null ? opts.b : def.b,
+      size: opts.size ? Math.max(64, opts.size | 0) : def.size,
+      wear: opts.wear != null ? +opts.wear : def.wear,
+      patch: opts.patch != null ? (opts.patch | 0) : def.patch,
+      grain: opts.grain != null ? (opts.grain | 0) : def.grain,
+      joint: opts.joint != null ? (opts.joint | 0) : def.joint,
+    };
+    if (o.b == null) o.b = o.a;
+    const key = k + "|" + o.a + "|" + o.b + "|" + o.size + "|" + o.wear + "|" + o.patch + "|" + o.grain + "|" + o.joint;
+    let canvas = groundCanvases.get(key);
+    if (!canvas) { canvas = bakeGround(k, o); groundCanvases.set(key, canvas); }
+    groundTexCalls++;
+    const t = new THREE.CanvasTexture(canvas);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    if (opts.repeat && opts.repeat.length === 2) t.repeat.set(+opts.repeat[0], +opts.repeat[1]);
+    t.anisotropy = groundAniso();
+    // Deliberately NOT tagged THREE.sRGBEncoding — see the WHY NOT note above.
+    // Everything else in this compound is authored untagged; a tagged map here
+    // would read visibly darker than the wall standing on it.
+    t.needsUpdate = true;
+    t._cbzGround = k;
+    return t;
+  }
+  CBZ.prisonGroundTex = prisonGroundTex;
+  CBZ.PRISON_GROUND_KINDS = GROUND_KINDS;
+
+  // Ratchet. `legacy` counts GROUND surfaces in the compound (a plane laid
+  // flat, or a slab wider than it is thick) still wearing a map that did NOT
+  // come from prisonGroundTex — i.e. the remaining checker/legacy debt. It may
+  // only ever go DOWN. `adopted` is printed beside it so a "fix" that simply
+  // stops drawing ground cannot pass. NOT YET PINNED: run it and write the
+  // number in rather than pinning a guess.
+  CBZ.prisonGroundAudit = function () {
+    let adopted = 0, legacy = 0;
+    const root = CBZ.prisonRoot || CBZ.scene;
+    if (root && root.traverse) {
+      root.traverse(function (ob) {
+        if (!ob.isMesh || !ob.material || !ob.material.map || !ob.geometry) return;
+        const g = ob.geometry, p = g.parameters;
+        if (!p) return;
+        const flat = (g.type === "PlaneGeometry" || g.type === "PlaneBufferGeometry") &&
+          Math.abs(ob.rotation.x + Math.PI / 2) < 0.02;
+        const slab = (g.type === "BoxGeometry" || g.type === "BoxBufferGeometry") &&
+          p.height != null && p.height < 0.6 && p.width > 4 && p.depth > 4;
+        if (!flat && !slab) return;
+        if (ob.material.map._cbzGround) adopted++; else legacy++;
+      });
+    }
+    return {
+      kinds: GROUND_KINDS.length, calls: groundTexCalls,
+      canvases: groundCanvases.size, adopted: adopted, legacy: legacy,
+    };
+  };
+
   // speckled concrete texture for indoor floors / walls
   function concreteTex(base, speck) {
     const c = document.createElement("canvas");
