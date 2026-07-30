@@ -32,9 +32,38 @@
   beam.position.set(EX, 9, EZ);
   scene.add(beam);
 
-  // gentle pulse on the pad so it reads as "the goal"
+  // ---- THE DOOR TELLS YOU WHETHER YOU ARE FAST -------------------------
+  // OWNER: "escape fast is cool". A record you can only read after the run is
+  // a scoreboard; a record you can see WHILE you sprint for the gate is a
+  // gradient, and CLAUDE.md's why-constitution says the gradient is the game.
+  // So the pad and the light shaft go GOLD for as long as the run clock is
+  // still under your best escape (systems/runstats.js -> CBZ.runStatsPace),
+  // and drop back to the ordinary green the moment you go over it.
+  //
+  // This authors no clock, no record and no state: it reads one function and
+  // flips two colours it already owns (both materials are built right here —
+  // the framing pillars use addBox's POOLED materials and are deliberately
+  // left alone, because tinting one of those would tint every glow box in the
+  // prison). Flag-off is byte-identical to the original one-line pulse.
+  if (CBZ.CONFIG.PRISON_GATE_PACE == null) CBZ.CONFIG.PRISON_GATE_PACE = true;
+  const PACE_HEX = 0xffd166;                       // css --gold, the record colour
+  let paceOn = null;                               // tri-state: null = never set
   CBZ.onAlways(6, function () {
-    pad.material.opacity = 0.4 + 0.2 * Math.sin(CBZ.now * 0.004);
+    let ahead = false;
+    if (CBZ.CONFIG.PRISON_GATE_PACE && CBZ.runStatsPace) {
+      const p = CBZ.runStatsPace();
+      ahead = !!(p && p.ahead);
+    }
+    // colour is written only on the FLIP, not every frame
+    if (ahead !== paceOn) {
+      paceOn = ahead;
+      const hex = ahead ? PACE_HEX : GLOW;
+      pad.material.color.setHex(hex);
+      beam.material.color.setHex(hex);
+    }
+    // on pace the pulse also runs a touch hotter and quicker — the same cue
+    // read twice, so it still lands for a colour-blind player.
+    pad.material.opacity = (ahead ? 0.5 : 0.4) + 0.2 * Math.sin(CBZ.now * (ahead ? 0.0062 : 0.004));
   });
 
   CBZ.EXIT = new THREE.Vector3(EX, 0, EZ);
