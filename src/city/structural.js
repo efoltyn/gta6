@@ -268,11 +268,24 @@
      addressing so the two ledgers agree on identity.
      ============================================================ */
   const ledger = new Map();          // lot -> rec
+  // Active subsets. The old tickers walked the ENTIRE damaged ledger every
+  // frame to find countdowns and every 0.25 s to find fires. A nuclear wave
+  // leaves thousands of scarred-but-inactive records, turning one event into a
+  // permanent world-scan tax. Sets make cost follow active work instead.
+  const yielding = new Set();        // recs with a live collapse countdown
+  const burningRecs = new Set();     // recs with one or more live floor fires
   const collapsing = [];             // active collapse choreographies
   // Buildings condemned while the animated-collapse cap was full. Drained a
   // few per frame (see drainCondemned) so levelling a district costs a steady
   // trickle of geometry rather than one catastrophic frame.
   const condemned = [];
+  // A nuclear ring can discover a whole block in one admission pass. Discovery
+  // is cheap; S.hit is not (ledger allocation, fire, stage FX and possible
+  // condemnation). Deferred batches preserve the exact radial admission and
+  // amount while limiting execution to a fixed number per frame.
+  const deferredSweeps = [];
+  let deferredSweepHead = 0, deferredSweepCount = 0;
+  const deferredByWave = new Map();       // waveId -> Set<lot>, prevents re-queue while pending
   const S = (CBZ.structure = {});
   S.STAGE = STAGE;
   S.onStage = null;                  // fn(rec, stage) — mission/HUD seam
@@ -588,16 +601,56 @@
      every building whose footprint lies in the annulus [r0, r1). A nuke rolls
      outward through a district using this and nothing else.
 
-     COST: one pass over lots per ring tick. Bounded by the wave's own tick
-     rate (20 Hz) and by the number of lots, and it early-outs on the cheap
-     centre-distance test before touching a rec.
+     COST: one admission pass over lots per ring tick. Ordinary blast waves
+     execute admitted hits immediately. A city-scale row passes `defer:true`:
+     admission remains radial and exact, while the expensive S.hit work is
+     queued in shared batches and drained at a fixed per-frame budget.
      ============================================================ */
+  function applySweptLot(lot, x, z, amount, opts) {
+    const b = lot && lot.building;
+    if (!b || lot.demolished) return false;
+    if (opts.waveId) {
+      const rec0 = ledger.get(lot);
+      if (rec0 && rec0.waveId === opts.waveId) return false;
+    }
+    // HEIGHT GATE (restored from the legacy demolition loop): a blast seated
+    // well above the roofline never touched this building. Without it an
+    // airburst 300m up wounds every footprint beneath its ground projection.
+    if (opts.y != null && opts.y > b.h + 4) return false;
+    let nx = b.ox - x, nz = b.oz - z;
+    const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+    // Seat the hit at the blast height where that is meaningful, so a rooftop
+    // detonation damages the top floors and a street blast the bottom ones.
+    const seatY = opts.y != null
+      ? Math.max(0.5, Math.min(b.h - 0.5, opts.y))
+      : Math.min(b.h * 0.5, 8);
+    S.hit(b.ox, seatY, b.oz, amount, {
+      kind: opts.kind, fire: opts.fire, dirx: nx, dirz: nz,
+      // A shock front is the textbook sudden load. Passing it through gives a
+      // nuke its flattened core, failing middle and wounded outer band.
+      sudden: opts.sudden, by: opts.by, byPlayer: opts.byPlayer, lot: lot, pen: 0,
+    });
+    // Stamp AFTER the hit — S.hit creates the record on first contact.
+    if (opts.waveId) {
+      const rec = ledger.get(lot);
+      if (rec) rec.waveId = opts.waveId;
+    }
+    return true;
+  }
+
   S.sweep = function (x, z, r0, r1, amount, opts) {
     opts = opts || {};
     if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || !(amount > 0)) return 0;
     const A = arena();
     if (!A || !A.lots) return 0;
-    let n = 0;
+    // Partial-load safety: without the shared updater there is nobody to drain
+    // a queue, so execute immediately just as the pre-queue build did.
+    const defer = !!opts.defer && !!opts.waveId && !!CBZ.onUpdate;
+    let queued = null, pending = null, n = 0;
+    if (defer) {
+      pending = deferredByWave.get(opts.waveId);
+      if (!pending) { pending = new Set(); deferredByWave.set(opts.waveId, pending); }
+    }
     for (let i = 0; i < A.lots.length; i++) {
       const lot = A.lots[i], b = lot.building;
       if (!b || lot.demolished) continue;
@@ -609,11 +662,10 @@
 
          The straddle test above is the right ADMISSION test — a building is
          caught the moment the front touches any part of its footprint, which
-         is what makes a wide building at the rim get hit at all. But the front
-         only advances `speed * 0.05` metres per tick: about 9.5 m for a nuke,
-         4.5 m for an airliner's wave. Against a 28 m footprint that is three
-         to seven consecutive ticks in which the SAME building straddles the
-         SAME front and eats a full ring's damage each time.
+         is what makes a wide building at the rim get hit at all. Against a
+         wide footprint there can be several consecutive ticks in which the
+         SAME building straddles the SAME front and would eat a full ring's
+         damage each time.
 
          Measured cost of the bug: a 4-storey block 40 m from an airliner
          strike took ~245 damage against a capacity of 70 — it was deleted
@@ -624,36 +676,32 @@
 
          The fix is a stamp, not a geometry change: the admission test keeps its
          shape (so nothing about WHICH buildings a wave reaches moves), and the
-         ledger simply refuses a second bite from the same wave. */
+         ledger refuses a second bite. The deferred set extends that guarantee
+         to the time between admission and execution. */
       if (opts.waveId) {
         const rec0 = ledger.get(lot);
         if (rec0 && rec0.waveId === opts.waveId) continue;
+        if (pending && pending.has(lot)) continue;
       }
-      // HEIGHT GATE (restored from the legacy demolition loop): a blast seated
-      // well above the roofline never touched this building. Without it an
-      // airburst 300m up wounds every footprint beneath its ground projection.
-      // `opts.y == null` means the caller has no seat (a pure ground ring), in
-      // which case every building in the annulus is fair game.
       if (opts.y != null && opts.y > b.h + 4) continue;
-      let nx = b.ox - x, nz = b.oz - z;
-      const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
-      // Seat the hit at the blast height where that is meaningful, so a rooftop
-      // detonation damages the top floors and a street blast the bottom ones —
-      // the flat `min(h*0.5, 8)` always hit the ground floor.
-      const seatY = opts.y != null ? Math.max(0.5, Math.min(b.h - 0.5, opts.y)) : Math.min(b.h * 0.5, 8);
-      S.hit(b.ox, seatY, b.oz, amount, {
-        kind: opts.kind, fire: opts.fire, dirx: nx, dirz: nz,
-        // A shock front is the textbook sudden load — it is the case the
-        // dynamic amplification factor was measured on. Passing it through is
-        // what gives a nuke its three readable bands instead of one flat
-        // radius: a core out-damaged outright, a middle where the overpressure
-        // condemns buildings that then come down over the following minute,
-        // and an edge that is scorched and standing.
-        sudden: opts.sudden, by: opts.by, byPlayer: opts.byPlayer, lot: lot, pen: 0,
-      });
-      // stamp AFTER the hit — S.hit is what creates the rec on first contact
-      if (opts.waveId) { const r2 = ledger.get(lot); if (r2) r2.waveId = opts.waveId; }
+      if (defer) {
+        if (!queued) queued = [];
+        pending.add(lot);
+        queued.push(lot);
+      } else {
+        applySweptLot(lot, x, z, amount, opts);
+      }
       n++;
+    }
+    if (queued && queued.length) {
+      // One batch object per ring, not one options object per building.
+      deferredSweeps.push({
+        lots: queued, i: 0, x: x, z: z, amount: amount,
+        opts: opts, pending: pending,
+      });
+      deferredSweepCount += queued.length;
+    } else if (defer && pending && !pending.size) {
+      deferredByWave.delete(opts.waveId);
     }
     return n;
   };
@@ -712,6 +760,7 @@
     const left = YIELD_MAX * (1 - overload) * (1 - overload);
     if (!rec.yield || rec.yield.floor !== floor) {
       rec.yield = { floor: floor, left: left, t: 0, beat: 0 };
+      yielding.add(rec);
       return;
     }
     // Already counting down on this floor. A SUDDEN new load (another strike
@@ -731,14 +780,14 @@
   // groan, the ones across the district just quietly come down later. Over the
   // cap we degrade by skipping the beat, never by queueing it.
   function stepYields(dt) {
-    if (!ledger.size) return;
+    if (!yielding.size) return;
     let tells = Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(2, 5) : 4));
     const cam = CBZ.camera && CBZ.camera.position;
     const cull = (CBZ.cityCullRadius || 320);
     const fired = [];
-    ledger.forEach(function (rec) {
+    yielding.forEach(function (rec) {
       const y = rec.yield;
-      if (!y || rec.stage >= STAGE.COLLAPSING) return;
+      if (!y || rec.stage >= STAGE.COLLAPSING) { yielding.delete(rec); return; }
       y.t += dt;
       // THE TELL. A structure about to go announces it: a groan of steel, dust
       // jetting out of the wound, a shiver through the block. Cadence tightens
@@ -765,7 +814,11 @@
       }
       // Never mutate the ledger from inside its own forEach — collect and act
       // after. beginCollapse can reach demolition.js, which can touch the map.
-      if (y.t >= y.left) { rec.yield = null; fired.push(rec); }
+      if (y.t >= y.left) {
+        rec.yield = null;
+        yielding.delete(rec);
+        fired.push(rec);
+      }
     });
     for (let i = 0; i < fired.length; i++) {
       const rec = fired[i];
@@ -782,7 +835,7 @@
   };
   S.doomed = function () {
     const out = [];
-    ledger.forEach(function (rec) {
+    yielding.forEach(function (rec) {
       if (rec.yield) out.push({ x: rec.b.ox, z: rec.b.oz, lot: rec.lot, secs: +(rec.yield.left - rec.yield.t).toFixed(2), floor: rec.yield.floor });
     });
     return out;
@@ -825,17 +878,22 @@
     for (let i = 0; i < rec.fires.length; i++) if (rec.fires[i].f === floor) return;
     if (rec.fires.length >= 8) return;               // bounded: a tower shows at most 8 burning floors
     rec.fires.push({ f: floor, t: 0, spread: 0, puff: 0 });
+    burningRecs.add(rec);
     if (rec.stage < STAGE.BURNING) { rec.stage = STAGE.BURNING; rec.t = 0; if (typeof S.onStage === "function") { try { S.onStage(rec, rec.stage); } catch (e) {} } }
   }
   S.ignite = function (lot, floor) { const r = lot && ledger.get(lot); if (r) ignite(r, floor | 0); };
 
   let fireAcc = 0;
   function stepFires(dt) {
+    if (!burningRecs.size) return;
     fireAcc += dt;
     if (fireAcc < FIRE_TICK) return;
     const step = fireAcc; fireAcc = 0;
-    ledger.forEach(function (rec) {
-      if (!rec.fires.length || rec.stage >= STAGE.COLLAPSING) return;
+    burningRecs.forEach(function (rec) {
+      if (!rec.fires.length || rec.stage >= STAGE.COLLAPSING) {
+        burningRecs.delete(rec);
+        return;
+      }
       const b = rec.b, FH = b.FH || 3.2;
       let structural = 0;
       for (let i = rec.fires.length - 1; i >= 0; i--) {
@@ -907,6 +965,7 @@
         rec.dmg += structural;
         advance(rec, {});
       }
+      if (!rec.fires.length) burningRecs.delete(rec);
     });
   }
 
@@ -1299,6 +1358,8 @@
     rec.stage = STAGE.RUBBLE;
     rec.fires.length = 0;
     rec.yield = null;
+    burningRecs.delete(rec);
+    yielding.delete(rec);
 
     // AFTERMATH IS demolition.js's JOB. It already owns the deterministic
     // rubble pile, the in-game-calendar rebuild arc, the save blob and the
@@ -1346,6 +1407,44 @@
      by a wave this frame collapses and hands off within the same frame.
      Costs two length checks when nothing is damaged.
      ============================================================ */
+  function drainDeferredSweeps() {
+    if (!deferredSweepCount) return;
+    // S.hit can allocate a ledger row, light floors, emit a stage beat and
+    // condemn a building. Eight is the high-tier ceiling for all of that work
+    // in one frame; low tiers drain two. The queue is finite: at most one entry
+    // per lot per live wave.
+    let budget = Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(2, 8) : 6));
+    while (budget-- > 0 && deferredSweepCount > 0) {
+      let batch = deferredSweeps[deferredSweepHead];
+      while (batch && batch.i >= batch.lots.length) {
+        if (batch.pending && !batch.pending.size && batch.opts.waveId) {
+          deferredByWave.delete(batch.opts.waveId);
+        }
+        deferredSweepHead++;
+        batch = deferredSweeps[deferredSweepHead];
+      }
+      if (!batch) {
+        deferredSweepCount = 0;
+        break;
+      }
+      const lot = batch.lots[batch.i++];
+      deferredSweepCount--;
+      if (batch.pending) batch.pending.delete(lot);
+      applySweptLot(lot, batch.x, batch.z, batch.amount, batch.opts);
+    }
+    // Compact only after many completed batches. This never runs per lot and
+    // keeps a long session from retaining old batch arrays.
+    if (deferredSweepHead > 32 && deferredSweepHead * 2 >= deferredSweeps.length) {
+      deferredSweeps.splice(0, deferredSweepHead);
+      deferredSweepHead = 0;
+    }
+    if (!deferredSweepCount) {
+      deferredSweeps.length = 0;
+      deferredSweepHead = 0;
+      deferredByWave.clear();
+    }
+  }
+
   // Drain the condemnation queue at a fixed budget per frame. Nearest-first,
   // so what the player can actually see comes down first and the far side of
   // the district catches up over the next second or two — the same priority
@@ -1354,21 +1453,24 @@
     if (!condemned.length) return;
     let budget = Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(1, 3) : 2));
     const cam = CBZ.camera && CBZ.camera.position;
-    if (cam && condemned.length > 1) {
-      // Key ONCE per record, then compare numbers. The comparator used to call
-      // Math.hypot TWICE per comparison, and this whole sort re-runs EVERY
-      // frame for as long as the queue drains (2-3 per frame) — so a nuke that
-      // condemns 200 lots was ~2x200xlog2(200) = 3000 square roots a frame for
-      // a hundred frames, in the exact scenario the brief says must not cost
-      // frames. Squared distance orders identically; no sqrt at all now.
-      for (let i = 0; i < condemned.length; i++) {
-        const r = condemned[i], dx = r.b.ox - cam.x, dz = r.b.oz - cam.z;
-        r._camD2 = dx * dx + dz * dz;
-      }
-      condemned.sort(function (a, c) { return a._camD2 - c._camD2; });
-    }
     while (budget-- > 0 && condemned.length) {
-      const rec = condemned.shift();
+      // Select only the next visible-priority record. The old implementation
+      // sorted the ENTIRE queue every frame, then shift() moved every remaining
+      // element for each removal. A nuke made that O(frames*N log N). A bounded
+      // nearest scan is O(budget*N), uses squared distance, and swap-removes in
+      // O(1). Same nearest-first result, no repeated global reorder.
+      let best = condemned.length - 1;
+      if (cam && condemned.length > 1) {
+        let bd = Infinity;
+        for (let i = 0; i < condemned.length; i++) {
+          const r = condemned[i], dx = r.b.ox - cam.x, dz = r.b.oz - cam.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < bd) { bd = d2; best = i; }
+        }
+      }
+      const rec = condemned[best];
+      condemned[best] = condemned[condemned.length - 1];
+      condemned.pop();
       if (!rec || rec.stage === STAGE.RUBBLE) continue;
       // Promote back to the animated path if a slot has opened since — the
       // spectacle is free when the budget allows it.
@@ -1383,8 +1485,9 @@
 
   if (CBZ.onUpdate) CBZ.onUpdate(34.45, function (dt) {
     if (!inCity()) return;
-    if (!ledger.size && !collapsing.length && !condemned.length) return;
+    if (!ledger.size && !collapsing.length && !condemned.length && !deferredSweepCount) return;
     const d = dt > 0.25 ? 0.25 : dt;
+    if (deferredSweepCount) drainDeferredSweeps();
     if (collapsing.length) stepCollapse(d);
     if (condemned.length) drainCondemned();
     stepYields(d);
@@ -1414,7 +1517,9 @@
   S.stateAt = function (x, z) { const lot = lotAt(x, z, 6); return lot ? S.state(lot) : null; };
   S.burning = function () {                                   // mission/HUD seam: every building on fire
     const out = [];
-    ledger.forEach(function (rec) { if (rec.fires.length) out.push({ x: rec.b.ox, z: rec.b.oz, floors: rec.fires.length, stage: rec.stage }); });
+    burningRecs.forEach(function (rec) {
+      if (rec.fires.length) out.push({ x: rec.b.ox, z: rec.b.oz, floors: rec.fires.length, stage: rec.stage });
+    });
     return out;
   };
   S.collapsingCount = function () { return collapsing.length; };
@@ -1446,6 +1551,12 @@
     collapsing.length = 0;
     // queued-but-untouched condemnations never ran hideReal, so they just drop
     condemned.length = 0;
+    deferredSweeps.length = 0;
+    deferredSweepHead = 0;
+    deferredSweepCount = 0;
+    deferredByWave.clear();
+    yielding.clear();
+    burningRecs.clear();
     ledger.clear();
     fireAcc = 0;
   };
@@ -1453,8 +1564,8 @@
   S.debug = function () {
     return {
       damaged: ledger.size, collapsing: collapsing.length,
-      queued: condemned.length,
-      maxConcurrent: maxCollapses(), burning: S.burning().length,
+      queued: condemned.length, waveHitsPending: deferredSweepCount,
+      maxConcurrent: maxCollapses(), burning: burningRecs.size, yielding: yielding.size,
       maxStoreys: maxCollapseStoreys(),
       flags: { ledger: !!CBZ.CONFIG.STRUCT_LEDGER, collapse: !!CBZ.CONFIG.STRUCT_COLLAPSE_V1, fire: !!CBZ.CONFIG.STRUCT_FIRE },
     };

@@ -1492,6 +1492,21 @@ shared boundary.
   Speaker identity remains accessible but visually yields to the spoken line.
   A campaign choice deliberately restores the speaker and dark choice panel,
   because a decision is interactive UI rather than passing speech.
+- **THE NUKE MAY DESTROY A CITY; IT MAY NOT EXECUTE ONE IN A FRAME** —
+  the white dome and coherent mushroom were not the freeze. The gameplay
+  handoff behind them was: a 17.2 s wave on a universal 20 Hz cadence caused
+  ~344 whole-world evaluations; a newly reached band executed every structural
+  hit immediately; the condemnation queue re-sorted itself every frame; the
+  fire/yield tickers scanned every damaged lot forever; and one surviving cop
+  kept the entire cop roster scanning for the full 24 s aftermath. The owners
+  now state the law: the nuclear wave queries at 5 Hz without changing its
+  190 m/s propagation, crowd owns a one-pass annulus, structural admission
+  feeds a maximum-eight-hits-per-frame queue, admitted cars drain at 24/frame,
+  active sets own fires/yields, and the cop roster is snapshotted and
+  cursor-drained once. Prove it without a
+  renderer using `node tools/test-nuke-freeze-node.mjs`: its 5,000-lot stress
+  world must finish the wave, drain to zero, use zero legacy crowd discs and
+  never exceed eight structural hits in one simulated frame.
 
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 

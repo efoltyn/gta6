@@ -449,11 +449,12 @@
        flash takes, and it is what makes the front something you WATCH
        arrive. 3,276 / 190 = 17.2 s, comfortably inside nukefx's 34 s arc.
 
-       THE PER-TICK COST DOES NOT GROW WITH maxR. sweepRing is a full scan of
-       the ped roster with a distance test whatever the radius is, and the
-       car pass is capped per tick — a wider wave costs more TICKS, not more
-       work per tick, and WAVE_TICK already bounds those. */
-    wave: { speed: 190, maxR: 3276, thermal: 0.615, lethal: "nuclear" },
+       THE TOTAL COST *DOES* GROW WITH maxR because a wider wave runs for more
+       ticks. At the universal 0.05 s cadence this row paid ~344 whole-world
+       evaluations after the flash. `tick:0.20` keeps the same 190 m/s arrival
+       law with at most 0.2 s / 38 m temporal granularity, cuts roster/lot
+       scans by 4x, and structural.js amortizes admitted lots separately. */
+    wave: { speed: 190, maxR: 3276, thermal: 0.615, lethal: "nuclear", tick: 0.20 },
   });
 
   // ---- environmental (city/disasters wiring) ------------------------------
@@ -1008,10 +1009,15 @@
      what newly fell inside r(t), so a nuke visibly rolls outward and you can
      watch it come. r(t) = speed * t, capped at maxR.
 
-     COST: one pass over lots + one crowd/ped sweep per TICK (not per frame —
-     see WAVE_TICK), bounded by maxR and by a hard cap of 2 live waves. On the
-     lowest quality tier the tick rate halves and maxR is clamped, so levelling
-     a district degrades to fewer, coarser rings rather than a frame cliff.
+     COST: one pass over lots + one crowd/ped sweep per TICK (not per frame),
+     bounded by maxR and by a hard cap of 2 live waves. Each row may request a
+     coarser cadence. That matters for the nuke: its researched 3,276 m reach
+     lasts 17.2 s, so the old universal 20 Hz cadence paid for ~344 complete
+     world scans after the flash. A 5 Hz nuclear front is still temporally
+     accurate to 0.2 s / 38 m while cutting that repeated work by 4x. Structural
+     hits from that row are additionally handed to structural.js's bounded
+     queue; the ring may discover a district at once, but it may never execute
+     a district at once.
      ============================================================ */
   const waves = [];
   // hoisted billCar bag for the ring's vehicle pass — a wave ticks 20 Hz for
@@ -1022,7 +1028,7 @@
   const _ringBill = { x: 0, y: 0, z: 0, byPlayer: false, sev: 1, ignite: 0, cause: "explosion" };
   let waveSeq = 0;
   const WAVE_MAX = 2;
-  const WAVE_TICK = 0.05;               // seconds between ring evaluations
+  const WAVE_TICK = 0.05;               // default seconds between ring evaluations
 
   function queueWave(x, y, z, row, opts, fxScale, strScale) {
     if (waves.length >= WAVE_MAX) waves.shift();      // oldest wave gives way
@@ -1043,6 +1049,9 @@
       // byte-for-byte unchanged.
       thermal: row.wave.thermal ? row.wave.maxR * q * fxScale * row.wave.thermal : 0,
       speed: row.wave.speed,
+      // Radius still advances by speed*elapsed. This changes query cadence,
+      // never propagation speed or the final footprint.
+      tick: Math.max(WAVE_TICK, +row.wave.tick || WAVE_TICK),
       /* THE LETHALITY MODEL AND THE YIELD KEY IT NEEDS. `lethal` names which
          casualty curve this wave runs (only the nuke row declares one, so
          every other wave keeps the legacy boolean). `fireR` is the row's
@@ -1070,16 +1079,48 @@
       // this ring starts at row.radius and the two bands overlap, so without a
       // shared identity a nuke would hit the same car twice on its way out.
       carBlastId: opts._carBlastId || 0,
+      // Cars admitted by a coarse nuclear band are drained 24/frame. Keeping
+      // the old 24-per-BAND cap while widening a band 4x would silently spare
+      // the 25th car in a parking lot; a finite queue preserves every admitted
+      // car without executing the whole lot in one frame.
+      carQueue: [], carHead: 0,
       acc: 0, done: false,
     });
+  }
+
+  function drainWaveCars(w) {
+    if (!w.carQueue || w.carHead >= w.carQueue.length) return;
+    let budget = 24;                                   // the established per-frame ceiling
+    while (budget-- > 0 && w.carHead < w.carQueue.length) {
+      const job = w.carQueue[w.carHead++], cv = job.cv, frac = job.frac;
+      _ringBill.x = w.x; _ringBill.y = w.y; _ringBill.z = w.z;
+      _ringBill.byPlayer = w.byPlayer; _ringBill.sev = frac;
+      _ringBill.cause = w.kind === "nuke" ? "nuclear blast" : "explosion";
+      billCar(cv, w.carBlastId, 240 * frac, _ringBill);
+    }
+    if (w.carHead >= w.carQueue.length) {
+      w.carQueue.length = 0;
+      w.carHead = 0;
+    } else if (w.carHead > 96 && w.carHead * 2 >= w.carQueue.length) {
+      w.carQueue.splice(0, w.carHead);
+      w.carHead = 0;
+    }
   }
 
   function stepWaves(dt) {
     if (!waves.length) return;
     for (let i = waves.length - 1; i >= 0; i--) {
       const w = waves[i];
+      drainWaveCars(w);
+      if (w.done) {
+        if (!w.carQueue.length) waves.splice(i, 1);
+        continue;
+      }
       w.acc += dt;
-      if (w.acc < WAVE_TICK) continue;
+      // 12 × 1/60 is microscopically below 0.2 in binary floating point.
+      // Epsilon keeps a declared 5 Hz row at 5 Hz instead of silently making
+      // it ~4.6 Hz / 41 m bands.
+      if (w.acc + 1e-9 < w.tick) continue;
       const step = w.speed * w.acc;
       const r0 = w.r, r1 = Math.min(w.maxR, w.r + step);
       w.acc = 0;
@@ -1120,7 +1161,10 @@
           } catch (e) {}
         }
       }
-      if (r1 >= w.maxR) waves.splice(i, 1);
+      if (r1 >= w.maxR) {
+        w.done = true;
+        if (!w.carQueue.length) waves.splice(i, 1);
+      }
     }
   }
 
@@ -1162,10 +1206,10 @@
     //     "kills a huge amount of people", and duplicating it here would let
     //     the two drift apart. Reuse beats re-derive.
     // cityCrowdCircleKill takes a DISC, not a ring, so every call re-scans the
-    // already-cleared core. Over a nuke's ~66 ring ticks that is 66 full sweeps
-    // of the crowd system to find the handful of agents in the new band. It is
-    // correct either way (the dead stay dead) — it is purely wasted work — so
-    // gate it on the front having actually advanced a useful distance.
+    // already-cleared core. Worse, the old low-probability branch called it SIX
+    // times per band. cityCrowdAnnulusKill is the canonical one-pass form: one
+    // scan, only the newly reached band, deterministic thinning. The disc path
+    // remains solely as a partial-load fallback.
     /* ---- HOW MANY OF THEM DIE, AND IT IS A MEASURED NUMBER ----------------
        OWNER: "the amount of DEATH in the radius should also be REAL based on
        the research — the percentage."
@@ -1187,39 +1231,48 @@
        standing up afterwards, and CBZ.hash01(x, z, salt) is this repo's
        determinism primitive. Same person, same wave, same verdict, every
        machine. */
-    if (CBZ.cityCrowdCircleKill && frac > 0.35 && r1 - (w.crowdR || 0) > 18) {
+    if ((CBZ.cityCrowdAnnulusKill || CBZ.cityCrowdCircleKill) &&
+        frac > 0.35 && r1 - (w.crowdR || 0) > 18) {
       w.crowdR = r1;
       const pk = lethalFor(w, r1);
-      /* The instanced crowd has no individual identity to roll against, so
-         it is killed as a DISC while the fatality is above half and then
-         thinned in PATCHES: n discs of radius rp sprinkled through the
-         annulus, sized so the covered area is p x the annulus area. Real
-         casualty maps are patchy for exactly this reason (shielding), so
-         this is closer to the truth than a uniform cull would be — and it
-         needs no edit to city/crowd.js, which owns that array. */
-      if (pk >= 0.5) {
+      if (CBZ.cityCrowdAnnulusKill) {
         try {
-          CBZ.cityCrowdCircleKill(w.x, w.z, r1, {
+          CBZ.cityCrowdAnnulusKill(w.x, w.z, r0, r1, pk >= 0.5 ? 1 : pk, {
             byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
             noCrime: !w.byPlayer, byPlayer: w.byPlayer,
             cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
+            salt: (w.id | 0) + 0x6e75,
           });
         } catch (e) {}
-      } else if (pk > 0.004 && r1 > r0) {
-        const band = Math.PI * (r1 * r1 - r0 * r0);
-        const N = 6;                                     // hard cap: 6 scans
-        const rp = Math.sqrt(Math.max(1, pk * band / (Math.PI * N)));
-        for (let k = 0; k < N; k++) {
-          const hs = hash01(w.x + k * 37.1, w.z + r1, (w.id | 0) + k);
-          const a = hs * 6.2832;
-          const rr = r0 + (r1 - r0) * hash01(w.z + k * 11.7, w.x + r1, (w.id | 0) + k + 91);
+      } else {
+        /* Partial-load fallback. The instanced crowd has no exposed identity,
+           so the pre-annulus build used a full disc above 50% lethality and
+           six deterministic patches below it. Keep that established visual
+           result only when crowd.js has not loaded the one-pass owner. */
+        if (pk >= 0.5) {
           try {
-            CBZ.cityCrowdCircleKill(w.x + Math.cos(a) * rr, w.z + Math.sin(a) * rr, rp, {
+            CBZ.cityCrowdCircleKill(w.x, w.z, r1, {
               byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
               noCrime: !w.byPlayer, byPlayer: w.byPlayer,
               cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
             });
           } catch (e) {}
+        } else if (pk > 0.004 && r1 > r0) {
+          const band = Math.PI * (r1 * r1 - r0 * r0);
+          const N = 6;                                   // fallback-only cap
+          const rp = Math.sqrt(Math.max(1, pk * band / (Math.PI * N)));
+          for (let k = 0; k < N; k++) {
+            const hs = hash01(w.x + k * 37.1, w.z + r1, (w.id | 0) + k);
+            const a = hs * 6.2832;
+            const rr = r0 + (r1 - r0) * hash01(w.z + k * 11.7, w.x + r1, (w.id | 0) + k + 91);
+            try {
+              CBZ.cityCrowdCircleKill(w.x + Math.cos(a) * rr, w.z + Math.sin(a) * rr, rp, {
+                byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
+                noCrime: !w.byPlayer, byPlayer: w.byPlayer,
+                cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
+              });
+            } catch (e) {}
+          }
         }
       }
     }
@@ -1266,8 +1319,9 @@
     //      whoever was inside) and is already wrapped by armored.js and
     //      modshop.js for armour and mods. Re-deriving any of that here would
     //      be exactly the second implementation this file exists to prevent.
-    //      Bounded: the ring band is thin, and the pass is capped per tick so
-    //      a nuke over a car park cannot spike a frame.
+    //      Bounded: admission scans the roster once per ring; actual vehicle
+    //      damage drains from the wave queue at 24/frame, so a nuke over a car
+    //      park cannot spike a frame or silently spare cars past the old cap.
     //      SHARED BILLING (2026-07-27): the per-car work moved into `billCar`
     //      below so this ring pass and the near-field wrapper cannot disagree
     //      about what a blast does to a vehicle — and, more importantly, so a
@@ -1278,18 +1332,14 @@
     //      or the 240*frac amount moved.
     if (CBZ.cityDamageCar && CBZ.cityCars && frac > 0.15) {
       const cars = CBZ.cityCars;
-      let hurt = 0;
-      const CAP = 24;                                 // vehicles touched per ring tick
-      for (let i = 0; i < cars.length && hurt < CAP; i++) {
+      for (let i = 0; i < cars.length; i++) {
         const cv = cars[i];
         if (!cv || cv.dead || !cv.pos) continue;
         const d = Math.hypot(cv.pos.x - w.x, cv.pos.z - w.z);
         if (d < r0 || d >= r1) continue;
-        hurt++;
-        _ringBill.x = w.x; _ringBill.y = w.y; _ringBill.z = w.z;
-        _ringBill.byPlayer = w.byPlayer; _ringBill.sev = frac;
-        _ringBill.cause = w.kind === "nuke" ? "nuclear blast" : "explosion";
-        billCar(cv, w.carBlastId, 240 * frac, _ringBill);
+        if (cv._impactWaveQueued === w.id) continue;
+        cv._impactWaveQueued = w.id;
+        w.carQueue.push({ cv: cv, frac: frac });
       }
     }
 
@@ -1326,6 +1376,10 @@
           by: w.by, byPlayer: w.byPlayer,
           sudden: true,                     // a shock front is THE sudden load
           waveId: w.id,                     // one bite per building per wave
+          // A nuclear band can admit scores of lots in one evaluation. The
+          // ledger discovers them now but executes the hit/stage/fire work
+          // through its bounded per-frame queue.
+          defer: w.kind === "nuke",
           // Seat the ring at the DETONATION HEIGHT. structural.js restored a
           // height gate for exactly this ("an airburst 300 m up must not wound
           // every footprint beneath its ground projection") and then never
@@ -1340,7 +1394,9 @@
 
   I.waveCount = function () { return waves.length; };
   I.waveState = function () {
-    return waves.map(function (w) { return { kind: w.kind, r: +w.r.toFixed(1), maxR: +w.maxR.toFixed(1) }; });
+    return waves.map(function (w) {
+      return { kind: w.kind, r: +w.r.toFixed(1), maxR: +w.maxR.toFixed(1), tick: w.tick };
+    });
   };
   I.clearWaves = function () { waves.length = 0; rumble = null; };
 

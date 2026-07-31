@@ -2201,6 +2201,43 @@
     }
     return n;
   };
+  /* One pass over a newly reached blast band. The impact bus used to express
+     a low-probability nuclear annulus as SIX circle kills. Each circle scanned
+     the whole crowd, and the high-probability path repeatedly scanned the
+     already-dead core as the radius grew. This owner has the flat position
+     arrays, so it can answer the real question directly: is this agent in
+     [r0,r1), and did its deterministic casualty roll land?
+
+     `chance` is deliberately a scalar. impactbus owns the researched lethality
+     curve and samples it at the band's outer edge, exactly as its former patch
+     calculation did; crowd.js owns only admission and one deterministic roll.
+     No square roots, no allocations, no repeated core. */
+  CBZ.cityCrowdAnnulusKill = function (x, z, r0, r1, chance, opts) {
+    chance = Math.max(0, Math.min(1, +chance || 0));
+    if (!(chance > 0) || !(r1 > r0)) return 0;
+    opts = opts || {};
+    const inner = Math.max(0, r0), a2 = inner * inner, b2 = r1 * r1;
+    const salt = (opts.salt | 0) || 0x6e75;
+    let n = 0;
+    for (let i = 0; i < count; i++) {
+      if (!shootable(i)) continue;
+      const dx = px[i] - x, dz = pz[i] - z, d2 = dx * dx + dz * dz;
+      if (d2 < a2 || d2 >= b2) continue;
+      if (chance < 1) {
+        let roll;
+        if (CBZ.hash01) roll = CBZ.hash01(px[i], pz[i], salt);
+        else {
+          // Partial-load deterministic fallback. A gameplay death may never
+          // become Math.random merely because seed.js loaded late.
+          const h = Math.sin(px[i] * 12.9898 + pz[i] * 78.233 + salt * 0.001) * 43758.5453;
+          roll = h - Math.floor(h);
+        }
+        if (roll >= chance) continue;
+      }
+      if (CBZ.cityCrowdKill(i, opts)) n++;
+    }
+    return n;
+  };
 
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {

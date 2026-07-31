@@ -2594,7 +2594,12 @@
        still rolling — i.e. the last ring would have killed the people the
        berm was supposed to be protecting. 24 s covers it with margin for the
        fires the wave lit to settle. */
-    nk = { t: 0, x: x, z: z, hold: 24 };
+    nk = {
+      t: 0, x: x, z: z, hold: 24,
+      // Built lazily on the first aftermath tick so every officer present at
+      // detonation is considered exactly once, in bounded slices.
+      copQueue: null, copI: 0, copExamined: 0, copsDone: false,
+    };
 
     // degrade path only — see whiteout()'s note. With nukefx.js loaded the
     // composer owns the flash, the fireball, the stem and the cap.
@@ -2668,15 +2673,18 @@
        of losing nobody. The roll is a POSITION HASH, not Math.random: a
        death has to be identical on every client in a multiplayer city. */
     if (!nk.copsDone) {
-      let killed = 0, seen = 0;
+      if (!nk.copQueue) nk.copQueue = (CBZ.cityCops || []).slice();
+      let killed = 0, examined = 0;
+      const EXAMINE_CAP = 24;                       // roster work per frame
       const RK = nkKillR(), R2 = RK * RK;
-      for (const cp of (CBZ.cityCops || [])) {
-        if (killed >= 12) break;
+      while (nk.copI < nk.copQueue.length && examined < EXAMINE_CAP && killed < 12) {
+        const cp = nk.copQueue[nk.copI++];
+        examined++;
+        nk.copExamined++;
         if (!cp || cp.dead || !cp.pos) continue;
         const dx = cp.pos.x - nk.x, dz = cp.pos.z - nk.z;
         const d2 = dx * dx + dz * dz;
         if (d2 > R2) continue;
-        seen++;
         if (CBZ.strategicBunkerShelterAt && CBZ.strategicBunkerShelterAt(cp.pos.x, cp.pos.y, cp.pos.z)) continue;
         const pk = lethalAt(Math.sqrt(d2));
         const roll = CBZ.hash01 ? CBZ.hash01(cp.pos.x, cp.pos.z, 0x4e0c) : Math.random();
@@ -2684,10 +2692,16 @@
         if (CBZ.cityHurtCop) { try { CBZ.cityHurtCop(cp, 9999, { byPlayer: true, fromX: nk.x, fromZ: nk.z }); } catch (e) {} }
         killed++;
       }
-      // `seen` and not `killed`: with a graded curve a pass can legitimately
-      // kill nobody and still have work left, so the old `killed === 0` exit
-      // would have retired the sweep on its first tick out at the rim.
-      if (seen === 0 && nk.t > 3) nk.copsDone = true;
+      /* The old completion test was `seen === 0`. Any officer inside the radius
+         who SURVIVED the probability roll made `seen` positive forever, so the
+         entire cop roster was rescanned every frame for the full 24-second
+         aftermath. A snapshot cursor gives the intended semantics directly:
+         every officer present at detonation gets one deterministic verdict,
+         then the work ends. */
+      if (nk.copI >= nk.copQueue.length) {
+        nk.copsDone = true;
+        nk.copQueue = null;
+      }
     }
 
     // (vehicles: see the note on NK — the bus's blast ring owns them now)
