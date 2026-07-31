@@ -925,7 +925,9 @@
   // sprite system, same shared damage path; just dialed up: a larger white-hot
   // fireball that balloons up into a mushroom head, a tall lingering black smoke
   // COLUMN, more debris + sparks, a heavier shake and a touch more slow-mo.
-  // opts: { power, radius, byPlayer, y } — y = optional detonation height (air-burst).
+  // opts: { power, radius, byPlayer, y, noVisual } — y = optional detonation
+  // height (air-burst). noVisual lets a purpose-built composer own the picture
+  // while this shared path still owns damage, structure damage, sound and shake.
   // ============================================================
   CBZ.cityAirstrikeExplosion = function (x, z, opts) {
     opts = opts || {};
@@ -935,6 +937,13 @@
     const seat = Math.max(0, (opts.y || 0));
     const cy = 1.2 + seat * 0.5;
 
+    /* A nuke has its own physically staged dome/fireball/cloud composer. Before
+       `noVisual`, this generic prefab still added roughly 400 independent
+       flame, smoke, ember and debris requests underneath it. That was both the
+       post-flash frame spike and the opaque plume hiding the nuclear silhouette.
+       Keep every gameplay/feedback owner below this block running; skip only
+       this prefab's redundant picture. */
+    if (opts.noVisual !== true) {
     // ---- FLASH: a huge blinding white-hot core, brighter + a beat longer ----
     spawnPuff(x, cy + 0.3, z, { additive: true, base: 10 * P, pop: 11 * P, life: 0.14, maxOp: 1 });
     spawnPuff(x, cy + 0.3, z, { additive: true, base: 1.5, pop: 7 * P, life: 0.3, maxOp: 1 });
@@ -1025,6 +1034,7 @@
     }
     addChunks(x, z, Math.round(18 * P), 9 + 7 * power, true);   // lots of chunky glowing debris
     addScorch(x, z, R * 0.55, 16);                              // big, long-lasting crater scorch
+    }
 
     // ---- IMPACT FEEDBACK: bigger boom, harder shake, more slow-mo, screen flash --
     // Same treatment as cityExplosion above: distance in, power-scaled volume

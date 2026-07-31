@@ -106,7 +106,8 @@
         stamp.textContent =
           `actual nukefx.js  t=${target.toFixed(2)}s\n` +
           `phase ${live.cloudPhase ?? "-"} · cap ${live.capWNow ?? "-"}m · altitude ${live.capYNow ?? "-"}m\n` +
-          `generic puff events ${live.genericPuffEvents ?? "-"} · ${live.impostor ? "far tier" : "3D tier"}`;
+          `generic puff events ${live.genericPuffEvents ?? "-"} · ` +
+          `${live.coherentCloud ? "coherent density cloud" : (live.impostor ? "far tier" : "3D tier")}`;
         window.__NUKE_DEBUG__ = debug;
         window.__NUKE_READY__ = true;
       } catch (error) {

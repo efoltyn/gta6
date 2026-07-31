@@ -283,8 +283,11 @@
   // The fresnel shock/condensation shells — the two biggest fill-rate items in
   // the sequence. false => the volumetric cloud and whiteout still run.
   if (CBZ.CONFIG.NUKE_FX_SHELL == null) CBZ.CONFIG.NUKE_FX_SHELL = true;
-  // The late ash-fall particle cloud (borrowed from systems/fx.js).
-  if (CBZ.CONFIG.NUKE_FX_ASH == null) CBZ.CONFIG.NUKE_FX_ASH = true;
+  // The late camera-local ash particle cloud. It used 260 extra sprites after
+  // eight seconds and could veil the mushroom the player was trying to watch.
+  // The coherent cloud carries its own soot; opt this legacy foreground layer
+  // back in only for an A/B.
+  if (CBZ.CONFIG.NUKE_FX_ASH == null) CBZ.CONFIG.NUKE_FX_ASH = false;
   // THE ATMOSPHERE DRIVE — the single cheapest "this is nuclear" cue there is.
   // Lerps scene.fog.color along the timeline (white-out -> orange -> ash grey);
   // core/sky.js@99 paints its horizon band from scene.fog.color, so the whole
@@ -372,6 +375,23 @@
   if (CBZ.CONFIG.NUKE_FX_PHASED_CLOUD == null) CBZ.CONFIG.NUKE_FX_PHASED_CLOUD = true;
   function phasedCloud() {
     return real() && CBZ.CONFIG.NUKE_FX_PHASED_CLOUD !== false;
+  }
+
+  /* THE POST-FLASH CLOUD HAS ONE OWNER. The old near tier drew six fields of
+     smooth icosahedra (cap/stem/surge/hot/crown/glow), then five detail planes,
+     then cross-faded all of that into the far mushroom. Smooth shading did not
+     change the underlying fact: the smoke was a pile of giant solid balls, the
+     translucent overdraw hid the silhouette behind it, and the post-flash frame
+     paid for up to 134 moving instances plus five redundant planes.
+
+     The coherent path makes the phased mushroom mask the sole nuclear cloud
+     from the instant the white dome hands over. Its alpha is one continuous
+     density field (cap + collar + stem + base), with turbulence changing
+     density INSIDE that volume instead of defining it as separate circles.
+     MOABs keep their compact 3D billows; false restores the old nuclear stack. */
+  if (CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD == null) CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD = true;
+  function coherentCloud() {
+    return phasedCloud() && CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD !== false;
   }
 
   /* Legacy decorative blasts are deliberately OFF for a nuke. They scheduled
@@ -479,7 +499,7 @@
   }
 
   /* ============================================================
-     THE MUSHROOM IMPOSTOR TEXTURE — the far tier, baked once at load.
+     THE MUSHROOM DENSITY TEXTURE — the post-flash cloud, baked once at load.
 
      WHY THIS EXISTS. The honest cloud for this device is 5,106 m across and
      10,000 m tall (see nukeDims). core/scene.js's camera is
@@ -510,43 +530,50 @@
      it is behind the fog, not in it.
 
      WHAT IS IN THE THREE CHANNELS:
-        A  the silhouette — knobbly cap, twisted stem, broad dust base
+        A  one continuous density field — cap, collar, stem and dust base
         R  incandescence  — 1 in the cap core and up the stem's spine
         G  coolness       — 1 at the boiled-over crown and the dust base
-     R and G are read by BILL_FS (see uCool). The LOBE STATISTICS are the
-     whole craft here and they are the owner's note: a real cap's lumps are
-     BIG AND FEW near the crown and SMALL AND DENSE at the rim, so lobe
-     radius falls with distance from the axis while lobe COUNT rises with it.
+     R and G are read by IMP_FS (see uCool). Crucially, turbulence modulates
+     density WITHIN the connected field; no circle or sphere defines smoke.
      ============================================================ */
   const IMP_W = 256, IMP_H = 512;
+
+  // Deterministic value noise for the baked density field. Integer hashing
+  // avoids Math.random and avoids consuming the replay RNG used by live FX.
+  function maskHash(x, y, seed) {
+    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^
+            Math.imul(seed | 0, 69069);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  }
+  function maskNoise(x, y, seed) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = maskHash(ix, iy, seed), b = maskHash(ix + 1, iy, seed);
+    const c = maskHash(ix, iy + 1, seed), d = maskHash(ix + 1, iy + 1, seed);
+    return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
+  }
+  function maskFbm(x, y) {
+    return maskNoise(x, y, 91) * 0.54 +
+           maskNoise(x * 2.07 + 13.1, y * 2.07 - 7.3, 173) * 0.30 +
+           maskNoise(x * 4.19 - 5.7, y * 4.19 + 11.9, 251) * 0.16;
+  }
+  function maskSmooth(a, b, x) {
+    const u = clamp((x - a) / Math.max(0.00001, b - a), 0, 1);
+    return u * u * (3 - 2 * u);
+  }
+
   function makeMushroomTexture(stage) {
     stage = stage == null ? 2 : clamp(stage | 0, 0, 2);
     const c = document.createElement("canvas");
     c.width = IMP_W; c.height = IMP_H;
     const ctx = c.getContext("2d");
-    ctx.clearRect(0, 0, IMP_W, IMP_H);
-    ctx.globalCompositeOperation = "lighter";
 
     // The canvas is laid out in the cloud's OWN metres so every station below
     // is the researched number, not a fraction somebody guessed. The quad is
     // later scaled to (capW, top), so these two mappings are exact.
     const D = nukeDims(126);
-    const SX = IMP_W / D.capW, SY = IMP_H / D.top;
-    function px(wx) { return IMP_W * 0.5 + wx * SX; }
-    function py(wy) { return IMP_H - wy * SY; }        // canvas y grows downward
-
-    // one cauliflower lobe. hot/cold are 0..1 and land in R and G.
-    function lobe(wx, wy, wr, hot, cold, alpha) {
-      const x = px(wx), y = py(wy), r = Math.max(1.5, wr * SX);
-      const R8 = Math.round(clamp(hot, 0, 1) * 255);
-      const G8 = Math.round(clamp(cold, 0, 1) * 255);
-      const g = ctx.createRadialGradient(x, y, r * 0.12, x, y, r);
-      g.addColorStop(0.0, "rgba(" + R8 + "," + G8 + ",0," + alpha.toFixed(3) + ")");
-      g.addColorStop(0.62, "rgba(" + R8 + "," + G8 + ",0," + (alpha * 0.72).toFixed(3) + ")");
-      g.addColorStop(1.0, "rgba(" + R8 + "," + G8 + ",0,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
-    }
 
     /* Three masks describe three DIFFERENT objects rather than scaling the
        finished silhouette. Stage 0 is the compact rising bulb and short dirty
@@ -559,91 +586,127 @@
     const capY = [900, 3600, D.capY][stage];
     const capRx = D.capW * 0.5 * capScale;
     const capRy = D.capH * 0.5 * capHScale;
-    const capBase = capY - capRy;
     const stemRx = D.stemW * 0.5 * [0.33, 0.68, 1][stage];
-    const baseR = D.base * [0.28, 0.62, 1][stage];
+    const baseRx = D.base * 0.5 * [0.28, 0.62, 1][stage];
     const baseH = D.top * [0.025, 0.045, 0.055][stage];
+    /* Each phase owns its OWN current physical box and fills the same UV
+       rectangle. The runtime scales that rectangle to the live cap width/top.
+       Previously all three were painted into the mature 10 km box at y=900,
+       y=3600 and y=8004, so a cross-fade literally displayed two heads. */
+    // Transparent breathing room is part of the texture contract. The old
+    // 2.08-wide box left only four per cent beside the cap; the young stem's
+    // foot could reach that edge and ClampToEdgeWrapping repeated its last
+    // opaque texel as a rectangular smoke sheet. Runtime uses the matching
+    // 1.30/1.12 factors, so the cloud's researched dimensions do not change.
+    const shapeW = capRx * 2.60;
+    const shapeTop = capY + capRy * 1.12;
 
-    /* ---- THE DUST BASE. Broad, low, DARK, and wider than the stem — it is
-       the ground-shock skirt and it is what gives the photograph its scale.
-       Drawn first so everything else sits in front of it. */
-    for (let i = 0; i < 40; i++) {
-      const u = (rng() * 2 - 1);
-      const wx = u * baseR * (0.35 + 0.65 * Math.sqrt(rng()));
-      const wy = baseH * (0.10 + rng() * 0.95) * (1 - Math.abs(wx) / (baseR * 1.15));
-      const wr = baseH * (0.52 + rng() * 0.55);
-      lobe(wx, Math.max(baseH * 0.06, wy), wr, 0.04 + rng() * 0.06, 0.86 + rng() * 0.14, 0.55);
-    }
+    /* One analytic UNION, sampled into pixels. The cap is an asymmetric
+       superellipse (wide/flat above, deeper below), the collar is a low shelf
+       under it, the stem is one flared connected column, and the base is a
+       low ground-hugging mass. Noise perturbs the boundary and density; it
+       never creates a freestanding circle. */
+    const img = ctx.createImageData(IMP_W, IMP_H);
+    const data = img.data;
+    const stemBottom = baseH * 0.28;
+    for (let iy = 0; iy < IMP_H; iy++) {
+      const wy = (1 - (iy + 0.5) / IMP_H) * shapeTop;
+      for (let ix = 0; ix < IMP_W; ix++) {
+        const wx = ((ix + 0.5) / IMP_W - 0.5) * shapeW;
+        const noise = maskFbm(ix / 31, iy / 31);
+        const fine = maskFbm(ix / 12 + 4.7, iy / 12 - 2.1);
 
-    /* ---- THE STEM. A TWISTED convective column, not a cylinder: the
-       azimuth advances STEM_TURNS over the column height, and the radius
-       flares at both ends (see stemProfile). Lit from inside along its
-       spine — that is the orange-brown roil in the reference plate — and
-       cooling toward its own edges. */
-    const STEM_TURNS = 0.85;
-    for (let i = 0; i < 46; i++) {
-      const f = (i + 0.5) / 46;                       // 0 at the deck, 1 at the cap
-      const wy = baseH * 0.35 + (capBase - baseH * 0.35) * f;
-      const prof = stemProfile(f);
-      const th = f * STEM_TURNS * 6.2832 + rng() * 0.9;
-      // project the helix: the silhouette only sees its x component
-      const off = Math.cos(th) * stemRx * prof * 0.42;
-      const side = (rng() * 2 - 1) * stemRx * prof * 0.72;
-      const wx = off + side;
-      const wr = stemRx * prof * (0.30 + rng() * 0.20);
-      // the spine is incandescent; the flanks are cooler; the foot is dust
-      const axial = 1 - Math.min(1, Math.abs(wx) / (stemRx * prof));
-      const hot = clamp((0.30 + 0.62 * axial) * (0.35 + 0.75 * f), 0, 1);
-      lobe(wx, wy, wr, hot, clamp(0.72 - 0.55 * axial + 0.30 * (1 - f), 0, 1), 0.62);
-    }
+        const capDy = wy - capY;
+        const capYn = capDy >= 0
+          ? capDy / Math.max(1, capRy)
+          : capDy / Math.max(1, capRy * 0.86);
+        const capXn = Math.abs(wx) / Math.max(1, capRx);
+        const capField = 1 - Math.pow(capXn, 3.0) - Math.pow(Math.abs(capYn), 2.6);
 
-    /* ---- THE SKIRT / OVERHANG. A band of lobes hanging under the cap's rim
-       and reaching slightly WIDER than the cap body (1.04x). This is the
-       single feature that makes the head read as a mushroom instead of a
-       ball on a stick, and it is why the cap:stem ratio alone is not enough:
-       the cap has to visibly HANG OUT past its own column. */
-    for (let i = 0; i < 26; i++) {
-      const s = (i + 0.5) / 26, side = s < 0.5 ? -1 : 1;
-      const u = 0.52 + 0.52 * ((s * 2) % 1);
-      const wx = side * capRx * u * 1.04;
-      const wy = capBase + capRy * (0.02 + rng() * 0.30) - capRy * 0.16;
-      const wr = capRy * (0.13 + rng() * 0.09);
-      lobe(wx, wy, wr, 0.24 + rng() * 0.22, 0.44 + rng() * 0.22, 0.60);
-    }
+        // The toroidal overhang is real, but a mathematically level shelf
+        // reads as a sprite seam. Low-frequency convection bends its lower
+        // edge while keeping it part of the same cap mass.
+        const collarWarp =
+          (maskNoise(ix / 41, stage * 3.7 + 0.8, 417) - 0.5) * capRy * 0.16 +
+          Math.sin((wx / Math.max(1, capRx)) * 4.2 + stage) * capRy * 0.035;
+        const collarY = capY - capRy * 0.52 + collarWarp;
+        const collarField = 1 -
+          Math.pow(Math.abs(wx) / Math.max(1, capRx * 1.02), 4.0) -
+          Math.pow(Math.abs(wy - collarY) / Math.max(1, capRy * 0.30), 2.2);
 
-    /* ---- THE CAP. THE SIZE LAW IS THE OWNER'S NOTE, IMPLEMENTED:
-         lobe radius  falls  as (0.30 - 0.19*|u|^1.4) of the cap half-height
-         lobe count   rises  with |u|, because u is drawn area-uniform
-       so the crown carries a handful of very big lumps and the rim carries
-       a dense fringe of small ones. That distribution, not any shader, is
-       what makes a silhouette read as cauliflower.
-       The vertical extent follows the cap's own LENS profile sqrt(1-u^2), so
-       the head is thick through the middle and tapers to the rim, which is
-       the shape a vortex ring actually takes. */
-    for (let i = 0; i < 92; i++) {
-      const u = (rng() < 0.5 ? -1 : 1) * Math.sqrt(rng()) * 0.97;
-      const lens = Math.sqrt(Math.max(0.02, 1 - u * u));
-      const wx = u * capRx;
-      const wy = capY + capRy * lens * (rng() * 1.72 - 0.86);
-      const wr = capRy * (0.30 - 0.19 * Math.pow(Math.abs(u), 1.4)) * (0.80 + rng() * 0.44);
-      // the CROWN (top third) has boiled over and gone dark; the CORE is
-      // still white-hot; the flanks are the orange cauliflower between them.
-      const up = (wy - capY) / (capRy * Math.max(0.1, lens));   // -1 bottom .. +1 top
-      const core = (1 - Math.abs(u) / 0.62) * (1 - Math.abs(up) * 0.55);
-      const hot = clamp(0.26 + 0.86 * core, 0, 1);
-      const cold = clamp(0.10 + 0.62 * Math.max(0, up) + 0.34 * Math.abs(u), 0, 1);
-      lobe(wx, wy, wr, hot, cold, 0.66);
-    }
+        /* The stem continues well INTO the cap and base, then fades there.
+           A hard y-range used to end the stem on one scanline immediately
+           below the cap, producing the horizontal shelf visible in phase
+           previews. This is a signed intersection of its lateral and axial
+           fields instead: one uninterrupted convective column. */
+        // Carry the hot column well into the head. Its axial fade is buried
+        // across the cap rather than ending at the cap/stem silhouette.
+        const stemTop = capY + capRy * 0.30;
+        let stemF = clamp((wy - stemBottom) /
+          Math.max(1, stemTop - stemBottom), 0, 1);
+        // A young column may flare, but it cannot be wider than its own head.
+        // The ground surge carries the broad foot separately.
+        const width = Math.min(stemRx * stemProfile(stemF), capRx * 0.74);
+        const centre = Math.sin(stemF * 5.1 + stage * 0.35) * width * 0.10 +
+          (maskNoise(stemF * 6.0, 1.7, 331) - 0.5) * width * 0.16;
+        const stemDistance = Math.abs(wx - centre) / Math.max(1, width);
+        const lateralField = 1 - stemDistance;
+        const axialField = Math.min(
+          (wy - stemBottom) / Math.max(1, Math.max(baseH * 0.55, capRy * 0.10)),
+          (stemTop - wy) / Math.max(1, Math.max(capRy * 0.85, baseH * 0.35))
+        );
+        const stemField = Math.min(lateralField, axialField);
+        const stemJoin = maskSmooth(-0.06, 0.34, axialField);
+        const stemAxial = clamp(lateralField, 0, 1) * stemJoin;
 
-    /* ---- THE CORE, painted last and painted BRIGHT. In the reference plate
-       the white-yellow heart burns THROUGH the orange lobes; with `lighter`
-       compositing this pass adds straight onto them, which is exactly that
-       reading and costs no second layer. */
-    for (let i = 0; i < 16; i++) {
-      const u = (rng() * 2 - 1) * 0.40;
-      const wy = capY + capRy * (rng() * 0.9 - 0.55);
-      lobe(u * capRx, wy, capRy * (0.16 + rng() * 0.14), 1, 0, 0.50);
+        const baseField = 1 -
+          Math.pow(Math.abs(wx) / Math.max(1, baseRx), 2.6) -
+          Math.pow(Math.abs(wy - baseH * 0.38) / Math.max(1, baseH * 0.62), 2.2);
+
+        const structure = Math.max(capField, collarField, stemField, baseField);
+        // Boundary displacement is strongest at the edge and quiet inside:
+        // smoke occupies a mass, then carries roil within that mass.
+        const edgeK = 1 - Math.min(1, Math.abs(structure));
+        const field = structure + (noise - 0.5) * (0.24 + 0.44 * edgeK);
+        let alpha = maskSmooth(-0.16, 0.18, field);
+        alpha *= 0.82 + fine * 0.18;
+        if (alpha <= 0.002) continue;
+
+        const capMask = maskSmooth(-0.14, 0.30, Math.max(capField, collarField));
+        const stemMask = maskSmooth(-0.08, 0.30, stemField);
+        const baseMask = maskSmooth(-0.10, 0.28, baseField);
+        const capBand = 1 - Math.min(1,
+          Math.abs(capDy + capRy * 0.04) / Math.max(1, capRy * 0.58));
+        const capCore = (1 - Math.min(1, capXn / 0.86)) * capBand;
+        // Heat climbs as a narrow, turbulent spine. Using the full linear
+        // stem field painted a pale rectangular column inside an otherwise
+        // organic silhouette—the same "geometry pretending to be smoke"
+        // problem this path exists to remove.
+        const stemHeat = Math.pow(stemAxial, 1.65) *
+          (0.58 + noise * 0.50);
+        const hot = clamp(Math.max(
+          capMask * capCore * (1 - stage * 0.10),
+          stemMask * stemHeat * (0.38 + stemF * 0.62)
+        ) * (0.84 + fine * 0.20), 0, 1);
+        const capCool = capMask * clamp(0.08 +
+          0.62 * Math.max(0, capYn) + 0.32 * capXn, 0, 1);
+        const stemCool = stemMask * clamp(0.20 + (1 - stemAxial) * 0.52 +
+          (1 - stemF) * 0.18, 0, 1);
+        const cool = clamp(Math.max(baseMask * 0.94, capCool, stemCool), 0, 1);
+
+        const o = (iy * IMP_W + ix) * 4;
+        data[o] = Math.round(hot * 255);
+        data[o + 1] = Math.round(cool * 255);
+        data[o + 2] = 0;
+        data[o + 3] = Math.round(clamp(alpha, 0, 1) * 255);
+      }
     }
+    ctx.putImageData(img, 0, 0);
+
+    // The removed lobe painter consumed exactly 898 replay-RNG samples per
+    // stage before seedVolumes(). Advance by the same amount so the MOAB and
+    // the coherent-cloud flag-off path keep their established layouts.
+    for (let i = 0; i < 898; i++) rng();
 
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
@@ -900,6 +963,9 @@
     "  if (alpha <= 0.004) discard;",
     "  float life = clamp(uLife + uCool * m.g * 0.55, 0.02, 0.98);",
     "  vec3 c = texture2D(uLut, vec2(life, 0.5)).rgb;",
+    "  float roil = clamp(n1 * 0.62 + n2 * 0.38, 0.0, 1.0);",
+    "  c *= 0.58 + 0.78 * roil;",
+    "  c *= 1.0 - 0.28 * m.g;",
     "  c *= 0.72 + uGlow * m.r * (0.6 + 0.7 * n1);",
     "  gl_FragColor = vec4(c, alpha);",
     TAIL_FOG,
@@ -1834,7 +1900,9 @@
     const burstY = Math.max(gy, Math.min(gy + R * 3, y == null ? gy : (+y || gy)));
     const dist = camDist(x, burstY + R, z);
 
-    const nBills = Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills)));
+    const oneCloud = styleName === "nuke" && coherentCloud();
+    const nBills = oneCloud ? 0
+      : Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills)));
     const bills = [];
     for (let i = 0; i < nBills; i++) {
       const mesh = POOL.bills[i];
@@ -1874,6 +1942,7 @@
       mode: (CBZ.game && CBZ.game.mode) || null,
       quiet: !!opts.quiet, noDamage: !!opts.noDamage, byPlayer: !!opts.byPlayer,
       legacyPuffs: legacyPuffs, genericPuffEvents: 0,
+      coherentCloud: oneCloud,
     };
 
     /* ---- REAL TO SIZE. Every drawn dimension is now the researched one,
@@ -1935,7 +2004,9 @@
     // Four base InstancedMeshes. Hot/glow detail counts ride quality; the
     // phased nuke's cold silhouette stays dense because its whole full-count
     // field is ~43k triangles and six bounded draws—far cheaper than puff spam.
-    live.volume = !!P.volume;
+    // A nuclear cloud is now the one continuous phased density field. The
+    // instanced lobe volumes remain available to the MOAB and the flag-off A/B.
+    live.volume = !!P.volume && !live.coherentCloud;
     if (live.volume) {
       const nuke = styleName === "nuke";
       const count = function (lo, hi) {
@@ -2229,8 +2300,18 @@
        MASK grows through it. The legacy path keeps its old whole-mushroom
        scaling for an exact visual A/B. */
     const grow = 0.30 + 0.70 * rise;
-    const w = L.impW * (phasedCloud() ? 1 : grow);
-    const h = L.impH * (phasedCloud() ? 1 : grow);
+    const capNow = L.capW * bloomAt(t, L);
+    /* Coherent phase masks all fill one normalized UV box. Grow that box from
+       the live cap and cap-centre curves, so one cloud physically rises and
+       expands. The old fixed mature box forced phase textures painted at
+       different altitudes to overlap during every morph. */
+    const w = L.coherentCloud ? capNow * 1.30
+      : L.impW * (phasedCloud() ? 1 : grow);
+    const h = L.coherentCloud
+      ? Math.max(L.R * 0.55,
+          capYAt(rise, L) - L.y +
+          capNow * (L.capThick || 0.782) * 0.5 * 1.12)
+      : L.impH * (phasedCloud() ? 1 : grow);
     const cx = L.x, cz = L.z, cyc = L.y + h * 0.5;
     const d = Math.max(1, Math.hypot(cx - c.x, cyc - c.y, cz - c.z));
     const D = camFar() * 0.86;
@@ -2263,7 +2344,9 @@
     const u = imp.material.uniforms;
     // the whole cloud cools along the shared LUT; uCool then spreads the
     // crown and the dust base further along it than the core (see BILL_FS).
-    u.uLife.value = clamp(0.06 + t / 26, 0, 0.55);
+    // The cloud stays incandescent through the visibly forming mushroom,
+    // while the mask's cool channel can still drive its crown/base to soot.
+    u.uLife.value = clamp(0.04 + t / 40, 0, 0.55);
     u.uPhase.value = cloudPhaseAt(t, L);
     u.uScroll.value.set(0.013 * t, -0.021 * t);
     u.uScroll2.value.set(-0.008 * t, 0.011 * t);
@@ -2941,7 +3024,10 @@
        cap's far edge is to the far plane — so the handoff happens exactly
        when the near geometry stops being renderable and never on a clock.
        Both are stepped every frame; each fades the other out. */
-    const mix = real() ? impostorMix(L) : 0;
+    // The coherent nuclear cloud never cross-fades through the solid-lobe
+    // tier: the phased density mask owns the whole post-flash silhouette.
+    // Legacy/chemical styles retain the geometric frustum handoff.
+    const mix = L.coherentCloud ? 1 : (real() ? impostorMix(L) : 0);
     L.mix = mix;
     stepImpostor(t, L, mix);
     // The 3D volumes carry the actual mushroom silhouette from every angle.
@@ -3062,6 +3148,11 @@
         y: y,
         byPlayer: !!opts.byPlayer, noDamage: !!opts.noDamage,
         ordnance: row.id || "nuke", _impact: true,
+        // The nuclear composer owns the dome, fireball and cloud. Asking the
+        // generic airstrike prefab for another ~400 flame/smoke sprites is the
+        // obscuring pile and frame spike this path exists to remove; damage,
+        // structure damage, sound, shake and hit-stop still run in crashfx.
+        noVisual: (row.id || "nuke") === "nuke" && coherentCloud(),
       });
     } catch (e) {}
   }
@@ -3461,6 +3552,7 @@
         cloudPhase: +cloudPhaseAt(live.t, live).toFixed(3),
         genericPuffEvents: live.genericPuffEvents || 0,
         legacyPuffs: !!live.legacyPuffs,
+        coherentCloud: !!live.coherentCloud,
       } : null,
       flash: flash ? { t: +flash.t.toFixed(2), dur: flash.dur, peak: flash.peak, keys: flash.keys.length } : null,
       walks: walks.map(function (w) { return { kind: w.kind, i: w.i, n: w.pts.length }; }),
@@ -3474,6 +3566,7 @@
         rise: !!CBZ.CONFIG.NUKE_FX_RISE, roll: !!CBZ.CONFIG.NUKE_FX_ROLL,
         glass: !!CBZ.CONFIG.NUKE_FX_GLASS, v2: v2(),
         phasedCloud: phasedCloud(),
+        coherentCloud: coherentCloud(),
         legacyPuffs: CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS === true,
       },
     };
@@ -3506,7 +3599,8 @@
        has no incandescent head and no overhanging skirt, and drawing them on
        it would be a fiction rather than a saving. */
     const v2n = kind === "nuke" && v2();
-    const volumeDraws = P.volume ? (v2n ? 6 : 4) : 0;
+    const oneCloud = kind === "nuke" && coherentCloud();
+    const volumeDraws = P.volume ? (oneCloud ? 0 : (v2n ? 6 : 4)) : 0;
     /* THE CLOUD'S OWN DIMENSIONS. Under NUKE_REAL_SCALE these are the
        researched ones (nukeDims), NOT the framing-scale k-multiples — the
        whole point of the flag is that the published size is the physical
@@ -3526,13 +3620,14 @@
       impostorDraws: RD ? 1 : 0,
       reach: +reach.toFixed(1),
       burnR: +(P.thermK > 0 ? reach * P.thermK : 0).toFixed(1),
-      bills: Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
+      bills: oneCloud ? 0
+        : Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
       shell: !!(CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28),
       volumeDraws: volumeDraws,
       whiteDome: v2n && !!P.dbl,
       groundRings: 0,
       addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + volumeDraws +
-                 (v2n && P.dbl ? 1 : 0),
+                 (v2n && P.dbl ? 1 : 0) + (oneCloud ? 1 : 0),
     };
   };
 
@@ -3761,6 +3856,7 @@
         bills: S.bills, shell: S.shell,
         dome: !!(S.shell && P.dome && q01() > 0.45),
         volumeDraws: S.volumeDraws,
+        coherentCloud: kind === "nuke" && coherentCloud(),
         whiteDome: !!S.whiteDome,
         groundRings: 0,
         genericPuffEvents: formation ? formation.genericPuffEvents : 0,
@@ -3781,7 +3877,15 @@
            formation.handoffPhase < 0.10),
         fullNuclearFireball: kind !== "nuke" ||
           (S.fireball === S.nearField && S.R === S.fireball),
-        volumetricCloud: !P.volume || S.volumeDraws >= 4,
+        // Compatibility key retained. On the coherent path the stronger
+        // contract is exactly one cloud draw and zero lobe/detail draws.
+        volumetricCloud: !P.volume ||
+          (kind === "nuke" && coherentCloud()
+            ? (S.impostorDraws === 1 && S.volumeDraws === 0 && S.bills === 0)
+            : S.volumeDraws >= 4),
+        coherentPostFlash: kind !== "nuke" || !coherentCloud() ||
+          (S.impostorDraws === 1 && S.volumeDraws === 0 && S.bills === 0 &&
+           CBZ.CONFIG.NUKE_FX_ASH === false),
         /* ---- NUKE_FX_V2 GATES. Each one pins a claim the header makes.
            They are structurally true when the flag is off, so a revert never
            turns the audit red — it turns the claims off. */

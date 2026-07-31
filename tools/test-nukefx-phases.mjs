@@ -26,13 +26,33 @@ match(
   "shock-front cityDustKick walker must live behind the legacy gate"
 );
 match(
-  /const billowGeo = new THREE\.IcosahedronGeometry\(1, 2\)/,
-  "cloud lobes must use the smooth 320-triangle geometry"
+  /NUKE_FX_COHERENT_CLOUD == null\) CBZ\.CONFIG\.NUKE_FX_COHERENT_CLOUD = true/,
+  "the one-owner nuclear cloud must default on"
 );
 match(
-  /transparent: true, opacity: opacity, depthWrite: false,[\s\S]*?flatShading: false/,
-  "cold cloud volumes must blend smoothly instead of writing faceted opaque rocks"
+  /NUKE_FX_ASH == null\) CBZ\.CONFIG\.NUKE_FX_ASH = false/,
+  "camera-local ash must default off so it cannot veil the mushroom"
 );
+const textureStart = source.indexOf("function makeMushroomTexture(stage)");
+const textureEnd = source.indexOf("function stemProfile(f)", textureStart);
+assert.ok(textureStart >= 0 && textureEnd > textureStart, "mushroom texture owner must exist");
+const textureSource = source.slice(textureStart, textureEnd);
+assert.match(textureSource, /const img = ctx\.createImageData\(IMP_W, IMP_H\)/,
+  "mushroom must be sampled as a continuous density field");
+assert.match(textureSource, /const structure = Math\.max\(capField, collarField, stemField, baseField\)/,
+  "cap, collar, stem and base must form one connected union");
+assert.doesNotMatch(textureSource, /ctx\.arc|createRadialGradient/,
+  "no circles may define post-flash nuclear smoke");
+match(/const nBills = oneCloud \? 0/, "coherent nuke must allocate zero detail planes");
+match(/live\.volume = !!P\.volume && !live\.coherentCloud/,
+  "coherent nuke must not animate the six solid-lobe fields");
+match(/const mix = L\.coherentCloud \? 1/,
+  "coherent density field must own the whole post-flash timeline");
+match(/noVisual: \(row\.id \|\| "nuke"\) === "nuke" && coherentCloud\(\)/,
+  "nuke must suppress the redundant generic airstrike picture");
+assert.match(crashfx, /if \(opts\.noVisual !== true\) \{[\s\S]*?const nSmoke =/,
+  "crashfx must retain gameplay while gating its generic smoke/fire picture");
+match(/coherentPostFlash:/, "audit must pin the one-draw post-flash contract");
 match(/mushEarly: null, mushForm: null, mush: null/, "three formation masks must exist");
 match(/uPhase: \{ value: 0 \}/, "far cloud must expose its formation phase");
 assert.match(
@@ -118,4 +138,7 @@ for (let i = 1; i < rows.length; i++) {
 }
 
 console.table(rows);
-console.log("nukefx phase contract: OK (0 scheduled generic nuclear puff events)");
+console.log(
+  "nukefx phase contract: OK " +
+  "(1 coherent post-flash draw, 0 lobe fields, 0 detail planes, 0 generic nuclear puff events)"
+);
