@@ -442,6 +442,7 @@
   let audioFailed = false;
   let nextMotif = 0, motifTock = 0, nextHeart = 0;
   let lastSting = -999, lastStingKind = "";
+  let dreadBedDebugged = false;
   // every stinger gets its OWN gain node in front of gSting, so predatorDrop
   // can silence a stinger that is still sounding without touching the ones it
   // is about to frame. See predatorDrop().
@@ -525,6 +526,7 @@
       const g2 = AC.createGain(); g2.gain.value = 0.35;
       o.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(gMotif);
       o.start(when); o2.start(when); o.stop(when + dur + 0.06); o2.stop(when + dur + 0.06);
+      if (CBZ.debugSoundPlayed) CBZ.debugSoundPlayed("predator_motif", "procedural dread motif", when);
     } catch (e) {}
   }
 
@@ -539,6 +541,7 @@
       g.gain.exponentialRampToValueAtTime(0.0001, when + 0.19);
       o.connect(g); g.connect(gHeart);
       o.start(when); o.stop(when + 0.24);
+      if (CBZ.debugSoundPlayed) CBZ.debugSoundPlayed("predator_heartbeat", "procedural heartbeat synth", when);
     } catch (e) {}
   }
 
@@ -554,6 +557,7 @@
     let sg = null;
     try { sg = AC.createGain(); sg.gain.value = 1; sg.connect(gSting); curSting = sg; }
     catch (e) { sg = gSting; curSting = null; }
+    let sounded = false;
     try {
       if (kind === "notice") {
         // a thin rising shimmer — "it knows". Quiet on purpose; the point is
@@ -568,6 +572,7 @@
         g.gain.exponentialRampToValueAtTime(0.16, when + 0.30);
         g.gain.exponentialRampToValueAtTime(0.0001, when + 0.55);
         s.connect(bp); bp.connect(g); g.connect(sg);
+        sounded = true;
       } else if (kind === "commit") {
         // three detuned saws sliding DOWN through a lowpass: the brass cluster.
         for (let i = 0; i < 3; i++) {
@@ -585,6 +590,7 @@
           o.connect(lp); lp.connect(g); g.connect(sg);
           o.start(when); o.stop(when + 0.95);
         }
+        sounded = true;
       } else {   // "impact"
         const o = AC.createOscillator(); o.type = "sine";
         o.frequency.setValueAtTime(150, when);
@@ -601,8 +607,12 @@
         ng.gain.setValueAtTime(0.28, when);
         ng.gain.exponentialRampToValueAtTime(0.0001, when + 0.18);
         s.connect(lp); lp.connect(ng); ng.connect(sg);
+        sounded = true;
       }
     } catch (e) {}
+    if (sounded && CBZ.debugSoundPlayed) {
+      CBZ.debugSoundPlayed("predator_stinger:" + kind, "procedural predator stinger", when);
+    }
   }
   CBZ.predatorStinger = predatorStinger;
 
@@ -646,6 +656,15 @@
     const t = AC.currentTime;
     const lvl = dread;
     const dropped = nowS() < dropUntil;
+    const reviewing = !!(CBZ.soundDebug && CBZ.soundDebug.enabled && CBZ.soundDebug.enabled());
+    if (lvl > 0.02 && reviewing && !dreadBedDebugged) {
+      dreadBedDebugged = true;
+      if (CBZ.debugSoundPlayed) CBZ.debugSoundPlayed("predator_dread_bed", "procedural infrasound bed", t);
+    } else if (lvl <= 0.02 || !reviewing) {
+      // Reset while silent or while the debugger is off. Turning F8 on during
+      // an already-live bed will therefore identify it on the next audio tick.
+      dreadBedDebugged = false;
+    }
     paramT -= dt;
     const writeParams = paramT <= 0;
     if (writeParams) paramT = 0.08;
@@ -1901,9 +1920,8 @@
         h.qteState = "open";
         h.qteOpenAt = nowS();   // real-time stamp: only a press AFTER this counts
         h.qteOpenT = h.t;       // phase clock: hit-stop must not shrink the window
-        // the audio tick that says NOW. Deliberately not a stinger — it must
-        // read as an instruction, not as another scare.
-        if (CBZ.sfx) { try { CBZ.sfx("clank", _sfxTick); } catch (e) {} }
+        // The visible tell owns this timing window. A generic metal hit here
+        // was an out-of-world UI instruction masquerading as physical sound.
       }
       return;
     }

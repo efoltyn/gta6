@@ -844,6 +844,23 @@
     if (ud.cabin) return { kind: "panel", cab: ud.cabin, t: ud.cabin.doorT || 0 };
     return null;
   }
+  function trackPhysicalDoorSound(owner, current, target, playerCause) {
+    if (!owner) return;
+    if (owner._physicalDoorAudioTarget == null) owner._physicalDoorAudioTarget = current > 0.5 ? 1 : 0;
+    if (owner._physicalDoorAudioTarget === target) return;
+    owner._physicalDoorAudioTarget = target;
+    let audible = false;
+    if (target === 1 && playerCause) {
+      owner._physicalDoorAudioCycle = true;
+      audible = true;
+    } else if (target === 0 && (playerCause || owner._physicalDoorAudioCycle)) {
+      owner._physicalDoorAudioCycle = false;
+      audible = true;
+    }
+    if (audible && CBZ.sfx) {
+      try { CBZ.sfx(target ? "door_open" : "door_close"); } catch (e) {}
+    }
+  }
   // THE ONE "is this aircraft's door open" answer. aircraft_doors.js never had
   // one — `rec._doorArcOpen` only says an arc is FORCING it, not what the
   // hardware is actually doing — so anything that needed to know guessed.
@@ -860,8 +877,21 @@
   CBZ.cityAircraftDoorSet = function (rec, open) {
     const d = aircraftDoor(rec);
     if (!d) return false;
-    d.cab.doorManual = (open == null) ? null : !!open;
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    const wasOpen = d.cab.doorManual == null ? d.t > 0.5 : !!d.cab.doorManual;
+    const next = (open == null) ? null : !!open;
+    d.cab.doorManual = next;
+    // This API is owned by the two at-the-door interaction verbs below. The
+    // boarding/deplaning and proximity writers use their own physical state
+    // paths, so a manual click cannot accidentally bless those with audio.
+    if (next != null && next !== wasOpen && CBZ.sfx) {
+      try { CBZ.sfx(next ? "door_open" : "door_close"); } catch (e) {}
+    }
+    if (next != null) {
+      // The manual interaction already spoke for this transition. Align the
+      // animation-side tracker so the next frame cannot echo it.
+      d.cab._physicalDoorAudioTarget = next ? 1 : 0;
+      d.cab._physicalDoorAudioCycle = false;
+    }
     return true;
   };
 
@@ -1109,7 +1139,6 @@
     cabinState.inside = true; cabinState.rec = rec;
     // A manually shut door cannot survive you walking through it.
     if (cab.doorManual === false) cab.doorManual = null;
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
     // YOU BOARDED, SO THEY GET OFF. This is the moment the owner was watching
     // when he reported passengers leaving without using the door: an airframe
     // at the gate with a full cabin and somebody walking up the airstairs is
@@ -1134,7 +1163,6 @@
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     }
     cabinForceClear(true);
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
   }
 
   // ---- REAL cockpit-door collider (CBZ.CONFIG.AIRLINER_COCKPIT_DOOR_SOLID) ---

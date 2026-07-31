@@ -330,7 +330,7 @@
     if (s.mod) { if (CBZ.gunModsOpenBench) CBZ.gunModsOpenBench(); return; }   // open the gunsmith menu
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {}, price = e.buyPrice("Ammo Box");
-      if (!CBZ.city.spend(price)) { CBZ.city.note("Ammo runs " + fmt$(price) + " a box.", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("Ammo runs " + fmt$(price) + " a box.", 1.6); return; }
       if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(meta.rounds || 60);
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.note("+" + (meta.rounds || 60) + " rounds over the counter.", 1.6);
@@ -340,9 +340,9 @@
     // (sets the player's armor bar + mesh). Never "sells out" — you can re-buy
     // to top your plate back up after it's been shot off. swatVest isn't here.
     if (s.armor) {
-      if (!CBZ.cityEquipArmor) { CBZ.city.note("Body armor's not stocked right now.", 1.8); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      if (!CBZ.cityEquipArmor) { CBZ.city.note("Body armor's not stocked right now.", 1.8); return; }
       const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); return; }
       CBZ.cityEquipArmor(s.kit);
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + " — you're plated up.", 2.2);
@@ -353,7 +353,7 @@
     // off-screen). Counts mirror to g.cityGrenades / g.cityC4 for HUD readers.
     if (s.boom) {
       const price = e.buyPrice(s.name);
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); return; }
       e.add(s.name, 1);
       const n = e.count ? e.count(s.name) : 0;
       if (s.name === "Grenade") g.cityGrenades = n;
@@ -371,7 +371,6 @@
     const price = e.buyPrice(s.name);   // the SAME price the counter menu reads
     if (!CBZ.city.spend(price)) {
       CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2);
-      if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
     e.add(s.name, 1);

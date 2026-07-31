@@ -218,7 +218,6 @@
     if (!(e.take && e.take(C4.item, 1))) { removeCharge(ch); return; }   // count raced to zero — eat the press
     planted.push(ch);
     syncHud();
-    if (CBZ.sfx) CBZ.sfx("clank");
     if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim(true); // reach-and-press pose, not a punch sound
     // kneeling on a bumper wiring a bomb is NOT subtle — witnesses report it
     const wp = chargeWorldPos(ch, _v);
@@ -232,7 +231,6 @@
     if (!planted.length) return false;
     let i = 0;
     for (const ch of planted) if (ch.det == null) ch.det = 0.05 + (i++) * 0.12;
-    if (CBZ.sfx) CBZ.sfx("clank");   // the receiver's send-click
     return true;
   }
 

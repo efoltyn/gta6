@@ -375,7 +375,6 @@
         dur: 2.2, cut: true, hideRig: true,
         cam() { const e = playerEyes(); return { pos: e, look: bossHead }; },
         enter() {
-          if (CBZ.sfx) CBZ.sfx("clank");
           if (CBZ.shake) CBZ.shake(0.55);
           say("SAL VETTI", "LOOK AT ME WHEN I'M TALKING.");
         },
@@ -456,7 +455,6 @@
       CBZ.playerChar.group.position.set(w.x, -0.62, w.z);
       CBZ.playerChar.group.rotation.y = car.heading;
     }
-    if (CBZ.sfx) CBZ.sfx("door");
     startScene(seat === "front" ? rideFrontSteps(car) : rideBackSteps(car), { car, playerSeat: chosen }, function (aborted) {
       if (seat === "back" && !aborted) finishRideSurvived(car);
     });
@@ -484,7 +482,6 @@
         dur: 2.2, hideRig: true,
         cam: () => carCamera(car, -0.42, 1.18, 0.42, -0.42, 1.1, 6),
         enter(ctx) {
-          if (CBZ.sfx) CBZ.sfx("door");
           // directly behind YOUR seat — the whole point of the front-seat rule
           const w = seatWorld(car, seatLocal.rearP);
           ctx.shadow = spawnActor("a stranger", w.x, w.z, { archetype: "professional", armed: true });
@@ -526,7 +523,6 @@
         dur: 3.0, hideRig: true,
         cam: () => carCamera(car, -0.42, 1.2, -0.78, -0.42, 1.05, 0.42),
         enter(ctx) {
-          if (CBZ.sfx) CBZ.sfx("door");
           const w = seatWorld(car, seatLocal.frontP);
           ctx.shadow = spawnActor("—", w.x, w.z, { archetype: "professional", armed: true });
           if (ctx.shadow) seatRig(ctx.shadow, car, seatLocal.frontP);

@@ -303,7 +303,6 @@
       msg = "Agent: \"Save a deposit and we'll talk financing — 20% down opens most doors. The listings are on the wall.\"";
     }
     note(msg, 3.4);
-    if (CBZ.sfx) CBZ.sfx("door");
   }
 
   // ==========================================================================
@@ -432,7 +431,6 @@
     note((rec.owned ? "Home — " : "Touring ") + shortName(rec.name)
       + (rec.owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.0);
     if (rec.flagship && CBZ.city && CBZ.city.big) CBZ.city.big("" + rec.name);
-    if (CBZ.sfx) CBZ.sfx("door");
   }
   function actBtn(act, idx, label, bg) {
     return "<button data-ract='" + act + "' data-ridx='" + idx + "' style='background:" + bg + ";border:0;border-radius:8px;"

@@ -85,9 +85,12 @@
   function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
   // FACADES_V2 build-time counters (deterministic per seed): how many windows the
   // massing chose LIT at night + how many got an AC unit, accumulated as the world
+  // `sideBoxes` is a structural zero: the old balconyWindow terminal glued a
+  // solid-looking black slab/rail onto arbitrary curtain-wall bays (the boxes
+  // filmed on Threads & Drip). The terminal and its emitter are deleted below.
   // builds. Exposed for the determinism gate (two boots of one seed must agree).
   let _facadeLit = 0, _facadeAC = 0, _facadeTrim = 0;
-  CBZ.cityFacadeStats = function () { return { lit: _facadeLit, ac: _facadeAC, trim: _facadeTrim }; };
+  CBZ.cityFacadeStats = function () { return { lit: _facadeLit, ac: _facadeAC, trim: _facadeTrim, sideBoxes: 0 }; };
 
   // FLOOR-TO-FLOOR — world units are metres and the converted character is
   // ~1.82m. 3.2m yields a plausible apartment/office floor with a 0.2m slab,
@@ -765,10 +768,26 @@
     // QUEUED, not inline (see winOpenQ above): eight carveHole monoliths in the
     // impact frame were the filmed rocket stall — they drain 1/frame instead.
     cand.sort(function (a, b) { return a.dd - b.dd; });
+  // Glass is audible only when the player personally strikes/shoots a pane.
+  // The physical shatter APIs are also called by NPC fire, crashes, tornadoes,
+  // aircraft and explosions, so those callers must opt in explicitly instead
+  // of making a global pane-state change sound like it happened beside you.
+  // A small local rolloff makes a far pane disappear beneath the player's gun
+  // report; beyond 55m it is intentionally inaudible.
+  const PLAYER_GLASS_HEAR_DIST = 55;
+  function playPlayerGlass(gp) {
+    if (!gp || !CBZ.sfx) return;
+    const p = CBZ.player && CBZ.player.pos;
+    let dist = null;
+    if (p) dist = Math.hypot(gp.x - p.x, gp.y - (p.y || 0), gp.z - p.z);
+    if (dist != null && dist >= PLAYER_GLASS_HEAR_DIST) return;
+    const volume = dist == null ? 1 : Math.max(0, 1 - Math.max(0, dist - 8) / (PLAYER_GLASS_HEAR_DIST - 8));
+    CBZ.sfx("glass", dist == null ? undefined : { dist: dist, volume: volume });
+  }
     const lim = Math.min(PER_BLAST_OPEN, cand.length);
     for (let i = 0; i < lim; i++) queueWindowOpening(cand[i].gp);
     if (!lim && near) queueWindowOpening(near);   // fallback: nearest pane (sub-window slivers only)
-    if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
+    if (n > 0 && opts.directPlayer && near) playPlayerGlass(near);
     // a hard impact (big radius shatter = a car ploughing a storefront) also
     // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
     if (r >= 7 && CBZ.cityChunk) CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.8, z, { count: 2 + ((Math.random() * 2) | 0), force: 3 });
@@ -837,8 +856,11 @@
       // fully out; otherwise spider-crack it (and chip a shard off the point).
       // The pane bursts NOW (the feedback); the room-reveal carve queues (1-
       // frame slip, same winOpenQ de-spike the blast path uses).
-      if (force || best.cracked || best.col) { burstPane(best); queueWindowOpening(best); if (CBZ.sfx) CBZ.sfx("glass"); }
-      else { crackPane(best, bestHX, bestHY, bestHZ); if (CBZ.sfx) CBZ.sfx("glass"); spawnGlassChip(bestHX, bestHY, bestHZ); }
+      if (force || best.cracked || best.col) {
+        burstPane(best); queueWindowOpening(best);
+        if (opts.directPlayer) playPlayerGlass(best);
+      }
+      else { crackPane(best, bestHX, bestHY, bestHZ); spawnGlassChip(bestHX, bestHY, bestHZ); }
     }
     return best;
   };
@@ -1288,7 +1310,6 @@
         const rx = g.horiz ? gc : g.fixed, rz = g.horiz ? g.fixed : gc;
         CBZ.cityChunk(rx, (g.v0 + g.v1) / 2, rz, { count: 4 + ((Math.random() * 3) | 0), force: 5, dirx: -nx, dirz: -nz });
         if (CBZ.shake) CBZ.shake(0.5);
-        if (CBZ.sfx) CBZ.sfx("glass");
       }
     }
   };
@@ -1955,7 +1976,6 @@
     CBZ.cityScorch(x, z, r * 0.9 + 1.4);
     CBZ.cityShatter(x, z, r * 2 + 4);
     if (CBZ.shake) CBZ.shake(0.6);
-    if (CBZ.sfx) CBZ.sfx("glass");
     return true;
   };
 
@@ -2159,6 +2179,44 @@
     const openSign = -hingeSign;
     const rec = {
       pivot, col, wx, wz, t: 0, open: false, hold: 0,
+  function doorWorldY(dr) {
+    if (dr.doorY != null) return dr.doorY;
+    const y = CBZ.floorAt ? +CBZ.floorAt(dr.wx, dr.wz) : 0;
+    return (isFinite(y) ? y : 0) + 1.5;
+  }
+  function playerAtDoor(dr) {
+    const player = CBZ.player;
+    const P = player && player.pos;
+    // Horizontal-only proximity made every storefront under a flying B-2 open:
+    // a person/car may operate a ground door; an aircraft never may, and the
+    // player's body must agree with the door's physical floor in Y.
+    return !!(P && !player._aircraft &&
+      Math.abs(P.y - doorWorldY(dr)) < (player.driving ? 5.5 : 3.5) &&
+      doorNearActor(dr, P.x, P.z, player.driving ? 4.6 : 1.7));
+  }
+  function playerInsideDoorBuilding(dr, P) {
+    const b = dr.building;
+    if (!b || !P) return false;
+    const by = b.group && b.group.position ? (b.group.position.y || 0) : 0;
+    return P.y >= by - 0.8 && P.y <= by + b.h + 3.2 &&
+      Math.abs(P.x - b.ox) <= b.w / 2 + 0.35 &&
+      Math.abs(P.z - b.oz) <= b.d / 2 + 0.35;
+  }
+  const DOOR_HEAR_DIST = 34;
+  function playPhysicalDoor(dr, open, playerCaused) {
+    const player = CBZ.player;
+    const P = player && player.pos;
+    if (!CBZ.sfx || !P || player._aircraft) return;
+    const dy = P.y - doorWorldY(dr);
+    const dist = Math.hypot(P.x - dr.wx, dy, P.z - dr.wz);
+    // A door is audible only when this player caused its current open/close
+    // cycle, or it belongs to the shell the player is physically inside. Even
+    // then it has a hard local cutoff: `sfx({dist})` deliberately retains a
+    // far-field floor for guns, which is wrong for quiet indoor hardware.
+    if ((!playerCaused && !playerInsideDoorBuilding(dr, P)) || dist >= DOOR_HEAR_DIST) return;
+    const volume = dist <= 5 ? 1 : Math.max(0.06, 1 - (dist - 5) / (DOOR_HEAR_DIST - 5));
+    CBZ.sfx(open ? "door_open" : "door_close", { dist: dist, volume: volume });
+  }
       maxAng: openSign * 1.66, colIn: true,
       inx: nx, inz: nz,                            // inward normal (for proximity test)
     };
@@ -2244,7 +2302,6 @@
       if (dr.colIn && dr.t > 0.30) {
         const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
         dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-        if (CBZ.sfx) CBZ.sfx("door");
       } else if (!dr.colIn && dr.t < 0.25) {
         // leaf is shut. If someone is still standing in the gap, hold it open a
         // beat longer rather than trapping them; otherwise re-solidify the wall.
@@ -2318,19 +2375,13 @@
   // still a real glass window. Whole windowless service floors are authored at
   // the building level rather than sprinkled randomly across a facade.
   const DISTRICT_KITS = {
-    core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0,
-                   terminals: { blankPanel: 0, balconyWindow: 0.02 } },
-    commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1,
-                   terminals: { blankPanel: 0, balconyWindow: 0.05 } },
-    residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0,
-                   terminals: { blankPanel: 0, balconyWindow: 0.24 } },
-    projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2,
-                   terminals: { blankPanel: 0, balconyWindow: 0.04 } },
-    industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2,
-                   terminals: { blankPanel: 0, balconyWindow: 0.02 } },
+    core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0 },
+    commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1 },
+    residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0 },
+    projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2 },
+    industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2 },
   };
-  const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0,
-                         terminals: { blankPanel: 0, balconyWindow: 0.06 } };
+  const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0 };
 
   // hue-locked wall jitter: keep the district's hue family but jitter sat/light
   // a touch per-building so a whole block isn't one flat colour. Position-hashed
@@ -2348,15 +2399,6 @@
     hsl.l = Math.max(0, Math.min(1, hsl.l * (kit.lightMul[0] + lj * (kit.lightMul[1] - kit.lightMul[0]))));
     c.setHSL(hsl.h, hsl.s, hsl.l);
     return c.getHex();
-  }
-
-  // Window-cell terminal. The only variation is an authored upper-floor
-  // balcony; every opening behind it remains glass.
-  function pickFacadeTerminal(kit, wx, wz, salt, floorK) {
-    const r = CBZ.hash01(wx, wz, salt);
-    const T = kit.terminals;
-    if (floorK >= 1 && r < (T.balconyWindow || 0)) return "balconyWindow";
-    return "window";
   }
 
   // cached graffiti texture (a coloured tag splat) so abandoned walls vary cheaply
@@ -3302,17 +3344,15 @@
               else { const fx = f.x + outSgn * (WT / 2 + 0.05); dbox(fx, winCy - winPh / 2 - 0.06, cz, 0.12, 0.1, winW + 0.2, TRIM); }
             }
           } else {
-            // ===== SPLIT-GRAMMAR FACADE (PROCGEN.md #7) ===========================
-            // floors → ~1.5m bays → one TERMINAL resolved per (floor,bay) cell:
-            //   window        — the default (plain curtain-wall pane, as before)
-            //   blankPanel    — solid wall-coloured infill, breaks the grid
-            //   balconyWindow — window + a thin projecting slab & rail (upper floors)
-            // Weighted per DISTRICT_KITS (opts.district) so core reads glassy/
-            // clean and residential gets balconies. Contiguous plain "window"
-            // bays are merged back into ONE glazeOpening call (same pooled-pane
-            // grid + interior glow as the old single curtain-wall band) so the
-            // common case is draw-call IDENTICAL; only the accent bays
-            // (balcony/blank) get individual treatment.
+            // ===== CLEAN CURTAIN-WALL FACADE (PROCGEN.md #7) ======================
+            // One continuous glazed opening per face, subdivided by the existing
+            // pane grid and hairline mullions below. The old split-terminal pass
+            // position-hashed occasional `balconyWindow` cells, then glued a
+            // 0.55m cantilever and a solid 0.85m rail onto the finished glass.
+            // From the street those read as the repeated black boxes filmed on
+            // Threads & Drip; they had no floor collider, door or usable balcony
+            // behind them. The terminal vocabulary and emitter are gone, so all
+            // districts keep their clean glazing with no side attachments.
             const sillH = modern ? 0.55 : 0.9;                  // sill top above floor
             const hdrH = modern ? 0.45 : 0.7;                   // header depth below ceiling
             const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
@@ -3337,51 +3377,8 @@
             // module (research: modern all-glass facades minimize framing, mullion
             // ~5-10mm) — the heavy mid-storey horizontal TRANSOM bar stays dropped.
             const faceOut = f.horiz ? f.z + outSgn * (WT / 2 + 0.04) : f.x + outSgn * (WT / 2 + 0.04);
-            // deterministic per-cell terminal draw: position-hashed off the bay's
-            // world centre + a floor/face salt (never city.rng — see seed.js).
-            const TERM_SALT = 0x5a17 + k * 131 + f.s * 7919;
-            const terms = new Array(nBays);
-            for (let i = 0; i < nBays; i++) {
-              const t = -span / 2 + (i + 0.5) * bayW;
-              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-              terms[i] = pickFacadeTerminal(DKIT, ox + cx, oz + cz, TERM_SALT, k);
-            }
-            let bi = 0;
-            while (bi < nBays) {
-              const term = terms[bi];
-              const t = -span / 2 + (bi + 0.5) * bayW;
-              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-              if (term === "blankPanel") {
-                if (f.horiz) lbox(t, winCy, f.z, bayW - 0.06, winPh, f.dd, color, wallOpt);
-                else lbox(f.x, winCy, t, f.w, winPh, bayW - 0.06, color, wallOpt);
-                bi++;
-              } else if (term === "window") {
-                // merge a run of contiguous plain-window bays into ONE glazeOpening
-                // call — degenerates to the old single wide band when the district
-                // kit rolls no accents (identical pane/glow count either way).
-                let bj = bi; while (bj < nBays && terms[bj] === "window") bj++;
-                const t0 = -span / 2 + bi * bayW, t1 = -span / 2 + bj * bayW;
-                const runW = t1 - t0, runT = (t0 + t1) / 2;
-                const rcx = f.horiz ? runT : f.x, rcz = f.horiz ? f.z : runT;
-                glazeOpening(rcx, winCy, rcz, runW - 0.04, winPh);
-                bi = bj;
-              } else {
-                // balconyWindow: an individually-glazed bay + slab/rail accessory.
-                // (The acUnit terminal is gone — owner-cut with FACADE_AC_UNITS.)
-                glazeOpening(cx, winCy, cz, bayW - 0.04, winPh);
-                if (term === "balconyWindow") {
-                  const bw = bayW - 0.2, projD = 0.55, railH = 0.85, slabY = winY0 - 0.35;
-                  if (f.horiz) {
-                    dbox(t, slabY, f.z + outSgn * (WT / 2 + projD / 2), bw, 0.08, projD, TRIM);       // balcony slab
-                    dbox(t, slabY + railH / 2, f.z + outSgn * (WT / 2 + projD - 0.03), bw, railH, 0.05, MULL);   // rail
-                  } else {
-                    dbox(f.x + outSgn * (WT / 2 + projD / 2), slabY, t, projD, 0.08, bw, TRIM);
-                    dbox(f.x + outSgn * (WT / 2 + projD - 0.03), slabY + railH / 2, t, 0.05, railH, bw, MULL);
-                  }
-                }
-                bi++;
-              }
-            }
+            const gcx = f.horiz ? 0 : f.x, gcz = f.horiz ? f.z : 0;
+            glazeOpening(gcx, winCy, gcz, span - 0.04, winPh);
             // hairline module ticks at every bay boundary — pure rhythm, cheap
             // merged deco (dbox), independent of which terminal sits either side.
             for (let i = 1; i < nBays; i++) {
@@ -7783,7 +7780,6 @@
         if (CBZ.cityCrime) CBZ.cityCrime(65, { type: "theft", x: sh.x, z: sh.z, instant: true });
         const v = lot.building.vendor;
         if (CBZ.cityPanic && v && v.pos) CBZ.cityPanic(v.pos.x, v.pos.z, 1.4, CBZ.city && CBZ.city.playerActor);
-        if (CBZ.sfx) CBZ.sfx("glass");
         return { took: false, caught: true };
       }
       // CLEAR: pocket one unit for seeded petty cash; deplete the shelf.

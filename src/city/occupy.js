@@ -556,7 +556,6 @@
       // interval, so the timer could never reach zero and the reinforcements
       // would never climb — the headline mechanic, silently dead.
       rec.alarmSpreadT = CFG.OCCUPY_ALARM_SPREAD;
-      if (CBZ.sfx && opts.silent !== true) { try { CBZ.sfx("alarm"); } catch (e) {} }
     }
     return n;
   };
@@ -1088,7 +1087,6 @@
       P.pos.set(x, y, z); P.vy = 0; P.grounded = true;
       if (P._phys) { P._phys.air = false; P._phys.vx = P._phys.vz = P._phys.vy = 0; }
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
-      if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
       if (opts.note && CBZ.city && CBZ.city.note) CBZ.city.note(opts.note, opts.noteSecs || 2.2);
       if (typeof opts.onArrive === "function") { try { opts.onArrive(); } catch (e) {} }
     };

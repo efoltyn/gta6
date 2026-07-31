@@ -108,7 +108,6 @@
   }
   function feed(msg, opts) { if (CBZ.cityFeed) CBZ.cityFeed(msg, "#cfd8e6", opts); }
   function coin() { if (CBZ.sfx) CBZ.sfx("coin"); }
-  function nope() { if (CBZ.sfx) CBZ.sfx("glass"); }
   function day() { return CBZ.worldDay ? CBZ.worldDay() : 0; }
   function stars() { return g.wanted | 0; }
   function armed() { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); }
@@ -252,17 +251,15 @@
     const s = stars();
     if (s <= 0) { note("“Nothing outstanding against you. Have a good day.”", 2); return; }
     if (s >= 4) {
-      nope();
       note("“That's a warrant, not a fine. I can't take your money for that — turn yourself in or run.”", 3);
       return;
     }
     if (copsClose() && s >= 1) {
-      nope();
       note("“There are officers in this building looking for you. Step away from my window.”", 3);
       return;
     }
     const cost = fineCost();
-    if (!CBZ.city.spend(cost)) { nope(); note("The docket comes to " + fmt$(cost) + ". You're short.", 2.4); return; }
+    if (!CBZ.city.spend(cost)) { note("The docket comes to " + fmt$(cost) + ". You're short.", 2.4); return; }
     coin();
     if (CBZ.city.clearWanted) CBZ.city.clearWanted();
     note("Fine paid — " + fmt$(cost) + ". The clerk stamps it and the record closes.", 2.6, { from: "Clerk of the Court", app: "messages" });
@@ -287,7 +284,7 @@
   function pullRecord() {
     const rec = recordTarget();
     if (!rec) { note("“No jurisdiction on file for this address.”", 2.2); return; }
-    if (!CBZ.city.spend(RECORD_FEE)) { nope(); note("Copies run " + fmt$(RECORD_FEE) + ".", 2); return; }
+    if (!CBZ.city.spend(RECORD_FEE)) { note("Copies run " + fmt$(RECORD_FEE) + ".", 2); return; }
     coin();
     st().recIdx = (st().recIdx + 1) % Math.max(1, chain().length);
     const id = holderId(rec), title = titleOf(rec);
@@ -316,7 +313,7 @@
     const at = lotAt(civicLots().courthouse);
     let r = null;
     try { r = G.pardon({ at: at }); } catch (e) { r = null; }
-    if (!r || !r.ok) { nope(); note(r && r.why ? r.why : "The pardon does not carry.", 2.6); return; }
+    if (!r || !r.ok) { note(r && r.why ? r.why : "The pardon does not carry.", 2.6); return; }
     note("Signed. The clerk enters it on the docket.", 2.4, { from: "Clerk of the Court", app: "messages" });
     repaint();
   }
@@ -341,7 +338,6 @@
     const ahead = Q_AHEAD_MIN + Math.floor(h01(lot.cx, lot.cz, 0x515 + day()) * 3);   // 2..4
     const base = 40 + Math.floor(h01(lot.cz, lot.cx, 0x516 + day()) * 55);
     st().q = { lot: lot, num: base + ahead, base: base, serving: base, t: 0, called: false, done: false, w0: stars() };
-    if (CBZ.sfx) CBZ.sfx("door");
     note("Ticket " + (base + ahead) + ". The board reads " + base + ". Take a seat.", 2.6,
       { from: "Records & Licensing", app: "messages" });
     repaint();
@@ -397,12 +393,11 @@
     if (car.dead || car._exploded) { note("“I can't title a wreck.”", 2); return; }
     // hot with cops ON it: the clerk runs the plate and it comes back flagged.
     if (stars() >= 1 || (car.npcWanted || 0) > 0 || (car.pullover || 0) > 0) {
-      nope();
       note("“The plate comes back flagged and there are units on it. Not today.”", 3);
       return;
     }
     const fee = titleFee(car);
-    if (!CBZ.city.spend(fee)) { nope(); note("Title and plates run " + fmt$(fee) + ".", 2.4); return; }
+    if (!CBZ.city.spend(fee)) { note("Title and plates run " + fmt$(fee) + ".", 2.4); return; }
     coin();
     const wasHot = !!car.stolen;
     car.stolen = false;
@@ -432,12 +427,11 @@
     let r = null;
     try { r = R.rig("rolls"); } catch (e) { r = null; }
     if (!r || !r.ok) {
-      nope();
       note(r && r.why ? r.why : "There's nothing on these rolls worth buying today.", 3,
         { from: "Records & Licensing", app: "messages" });
       return;
     }
-    if (!CBZ.city.spend(RIG_COST)) { nope(); note("She wants " + fmt$(RIG_COST) + " to lose a page.", 2.4); return; }
+    if (!CBZ.city.spend(RIG_COST)) { note("She wants " + fmt$(RIG_COST) + " to lose a page.", 2.4); return; }
     coin();
     st().q = null;
     const at = lotAt(civicLots().dmv);
@@ -681,7 +675,6 @@
     const lot = civicLots()[kind];
     if (!lot) return true;
     if (barred(lot)) {
-      nope();
       note("“You were carrying. Desk is closed to you — come back later.”", 2.6);
       return false;
     }
@@ -768,7 +761,7 @@
     const at = p && p.pos ? { x: p.pos.x, z: p.pos.z } : lotAt(civicLots().federal);
     let r = null;
     try { r = G.deploy("guard", at); } catch (e) { r = null; }
-    if (!r || !r.ok) { nope(); note(r && r.why ? r.why : "The request is refused.", 2.6); return; }
+    if (!r || !r.ok) { note(r && r.why ? r.why : "The request is refused.", 2.6); return; }
     note("Request logged. The Guard is moving.", 2.6, { from: "Federal Building", app: "messages" });
     repaint();
   }
@@ -806,8 +799,7 @@
     if (!x) { note("“Nothing is up for election right now.”", 2.4); return; }
     let r = null;
     try { r = R.file(x.id); } catch (e) { r = null; }
-    if (!r || !r.ok) { nope(); note(r && r.why ? r.why : "The filing is refused.", 3); return; }
-    if (CBZ.sfx) CBZ.sfx("door");
+    if (!r || !r.ok) { note(r && r.why ? r.why : "The filing is refused.", 3); return; }
     // NOT "you are on the ballot" — filing is not ballot access. certify()
     // needs `sigsNeeded` real signatures first, and elections.js's own
     // callElection() fires the ON THE BALLOT headline at the moment that is
@@ -881,7 +873,7 @@
     s.tax = TAX_STEPS[(stepIdx(TAX_STEPS, s.tax) + 1) % TAX_STEPS.length].v;
     const r = pledgeNow();
     if (!r) note("Noted — but there's no race to pledge it to yet.", 2.2);
-    else if (r.ok === false) { nope(); note(r.why || "That cannot be pledged yet.", 2.6); }
+    else if (r.ok === false) { note(r.why || "That cannot be pledged yet.", 2.6); }
     else note("Platform filed: " + TAX_STEPS[stepIdx(TAX_STEPS, s.tax)].s + ".", 2);
     repaint();
   }
@@ -890,7 +882,7 @@
     s.police = POL_STEPS[(stepIdx(POL_STEPS, s.police) + 1) % POL_STEPS.length].v;
     const r = pledgeNow();
     if (!r) note("Noted — but there's no race to pledge it to yet.", 2.2);
-    else if (r.ok === false) { nope(); note(r.why || "That cannot be pledged yet.", 2.6); }
+    else if (r.ok === false) { note(r.why || "That cannot be pledged yet.", 2.6); }
     else note("Platform filed: " + POL_STEPS[stepIdx(POL_STEPS, s.police)].s + ".", 2);
     repaint();
   }
@@ -1082,7 +1074,6 @@
           if (t.serving !== was) repaint();
           if (!t.called && t.serving >= t.num) {
             t.called = true;
-            if (CBZ.sfx) CBZ.sfx("door");
             note("NOW SERVING " + t.num + " — that's you. Step up to the window.", 3,
               { from: "Records & Licensing", app: "messages" });
             repaint();

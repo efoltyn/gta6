@@ -605,7 +605,6 @@
             if (angry) {
               c.reckless = true;
               honkAt(c);
-              if (CBZ.sfx) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 40 * 40) CBZ.sfx("clank"); }
               // (no toast — the horn + swerve ARE the road rage)
             }
           }

@@ -409,7 +409,7 @@
     // the layered blood event (spray/mist/gibs/pool/wall) — gibs-lite, the works
     if (CBZ.gore) { try { CBZ.gore(x, y != null ? y : 1.0, z, { dir: opts.dir || null, amount: player ? 1.7 : 1.3, player: player, explosion: false }); } catch (e) {} }
     // bone-crunch + wet impact (layered real foley), heavy shake + hitstop
-    if (CBZ.sfx) { CBZ.sfx("ko"); CBZ.sfx("clank"); }
+    if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.shake) CBZ.shake(Math.min(2.0, 0.9 + power * 0.4));
     if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.22, 0.1 + power * 0.05));
     if (player && CBZ.doSlowmo) CBZ.doSlowmo(0.4);
@@ -622,7 +622,6 @@
     pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 34 : (hard ? 22 : 8)) * fxq)), 0x8b8175, catastrophic ? 0.44 : 0.3, 1 + speed * 0.07, catastrophic ? 0.9 : 0.62, true);
     // shattered GLASS — pale blue-white shimmering shards (additive twinkle)
     if (hard) pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 30 : 16) * fxq)), 0xcfe6ff, 0.09, 3 + speed * 0.16, catastrophic ? 0.8 : 0.6, false);
-    if (hard && CBZ.sfx) CBZ.sfx("glass");
     if (hard) {
       ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.7 : 0.55 });
       // debris pool keeps its full cap; only the per-event spawn rides the tier

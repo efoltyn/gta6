@@ -312,7 +312,7 @@
     const give = base * mult;
     node.hp -= give;
     if (CBZ.cityEcon && CBZ.cityEcon.add) CBZ.cityEcon.add(RESOURCE_OF[node.kind], give);
-    if (CBZ.sfx) CBZ.sfx(node.kind === "rock" ? "clank" : "hit");
+    if (node.kind !== "rock" && CBZ.sfx) CBZ.sfx("hit");
     if (CBZ.flashHint) CBZ.flashHint("+" + give + " " + RESOURCE_OF[node.kind], 0.8);
     if (node.hp <= 0 && !node.depleted) {
       node.depleted = true;

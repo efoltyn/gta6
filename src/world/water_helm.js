@@ -368,7 +368,7 @@
           if (!car._hullBumpCD || car._hullBumpCD <= 0) {
             car._hullBumpCD = 0.35;
             if (CBZ.shake) CBZ.shake(Math.min(1.1, spd * 0.06));
-            if (CBZ.sfx) CBZ.sfx(hard ? "ko" : "clank");
+            if (hard && CBZ.sfx) CBZ.sfx("ko");
             if (hard && CBZ.doHitstop) CBZ.doHitstop(0.05);
             if (CBZ.waterHit) {
               CBZ.waterHit(car.pos.x + fx * half, rideY, car.pos.z + fz * half,

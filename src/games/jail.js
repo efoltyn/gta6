@@ -829,7 +829,6 @@
     setDoor(V.cells[1], true);
     holdPlayer(true);
     INM = null; panelMode = null; menuLock(false); if (C) C.hud.closePanel();
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
     // the pen reads these on its own reset (systems/state.js) — a handoff pair,
     // never a second sentence formula.
     g._jailSentenceIn = sec;

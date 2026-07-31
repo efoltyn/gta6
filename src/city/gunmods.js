@@ -309,11 +309,11 @@
     const m = MODS[modId];
     if (!m || !CBZ.city) return false;
     const id = equippedGunId();
-    if (!id) { CBZ.city.note("Draw a firearm first — mods bolt onto the gun in your hands.", 2.2); if (CBZ.sfx) CBZ.sfx("glass"); return false; }
-    if (!m.fits(id)) { CBZ.city.note("A " + m.name + " won't fit the " + gunLabel(id) + ".", 2.2); if (CBZ.sfx) CBZ.sfx("glass"); return false; }
+    if (!id) { CBZ.city.note("Draw a firearm first — mods bolt onto the gun in your hands.", 2.2); return false; }
+    if (!m.fits(id)) { CBZ.city.note("A " + m.name + " won't fit the " + gunLabel(id) + ".", 2.2); return false; }
     const r = recOf(id);
     if (r[m.slot] === modId) { CBZ.city.note("The " + gunLabel(id) + " already wears a " + m.name + ".", 1.8); return false; }
-    if (!CBZ.city.spend(m.price)) { CBZ.city.note("The " + m.name + " runs " + fmt$(m.price) + " — come back with the money.", 2.2); if (CBZ.sfx) CBZ.sfx("glass"); return false; }
+    if (!CBZ.city.spend(m.price)) { CBZ.city.note("The " + m.name + " runs " + fmt$(m.price) + " — come back with the money.", 2.2); return false; }
     const replaced = r[m.slot] ? (MODS[r[m.slot]] || {}).name : null;
     r[m.slot] = modId;
     dressWeaponId(id);

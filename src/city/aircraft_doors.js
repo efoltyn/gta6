@@ -188,6 +188,16 @@
   function setDoorFlag(rec, on) {
     if (rec) rec._doorArcOpen = !!on;
   }
+  function soundArcDoor(a, open) {
+    // A bare "hatch" has no moving mesh. Giving that fallback a door recording
+    // would be exactly the fourth-wall sound this pass is removing.
+    if (!a || !a.spec || a.spec.kind === "hatch") return;
+    if (open ? a._doorAudioOpen : !a._doorAudioOpen) return;
+    a._doorAudioOpen = !!open;
+    if (CBZ.sfx) {
+      try { CBZ.sfx(open ? "door_open" : "door_close"); } catch (e) {}
+    }
+  }
 
   function guide(P, tx, tz, dt, speed) {
     const dx = tx - P.pos.x, dz = tz - P.pos.z;
@@ -207,6 +217,9 @@
   function endArc(fail) {
     if (!arc) return;
     const a = arc;
+    // A cancelled walk/exit still returns its visible panel/canopy to closed.
+    // Close the audio cycle with that same physical transition, once.
+    soundArcDoor(a, false);
     arc = null;
     setDoorFlag(a.rec, false);
     if (a.spec && a.spec.kind === "canopy" && a.group && a.group.parent) poseCanopy(a.group, 0);
@@ -277,7 +290,6 @@
       // passes through them. _doorArcOpen is deliberately not set, which is
       // what stops island_airport.js force-opening the panel and the airstair.
       P._doorArc = true;
-      if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
       return true;
     }
     // a walk-in door gets a real flight of stairs; a fighter canopy and a
@@ -288,7 +300,7 @@
     }
     P._doorArc = true;
     setDoorFlag(arc.rec, true);                    // island_airport eases panel/stair open
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    soundArcDoor(arc, true);
     return true;
   }
 
@@ -311,7 +323,7 @@
     };
     P._doorArc = true;
     setDoorFlag(rec, true);
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    soundArcDoor(arc, true);
     return true;
   }
 
@@ -385,7 +397,7 @@
         try { ok = !!(a.handover && a.handover()); } catch (e) { ok = false; }
         if (!ok) { endArc(true); return; }
         setDoorFlag(a.rec, false);                 // island easing slides it shut behind you
-        if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+        soundArcDoor(a, false);
       }
       return;
     }
@@ -404,7 +416,6 @@
       if (a.t >= 0.5) {
         a.phase = "exitStep"; a.t = 0;
         try { a.realExit(); } catch (e) {}
-        if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
       }
       return;
     }
@@ -415,6 +426,7 @@
       if (a.t >= 0.7) {
         setDoorFlag(a.rec, false);
         if (spec.kind === "canopy" && a.group.parent) poseCanopy(a.group, 0);
+        soundArcDoor(a, false);
         endArc(false);
       }
       return;

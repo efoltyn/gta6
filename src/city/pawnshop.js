@@ -384,7 +384,7 @@
   function redeemTicket(t) {
     const e = econ(); if (!e || !CBZ.city || !t || t.forfeit) return false;
     if (now() >= t.expires) { forfeit(t); return false; }      // too late — the broker already pulled it
-    if (!CBZ.city.canAfford(t.redeem)) { note("Redeeming the " + t.name + " costs " + fmt$(t.redeem) + " — come back with it.", 2.2); if (CBZ.sfx) CBZ.sfx("glass"); return false; }
+    if (!CBZ.city.canAfford(t.redeem)) { note("Redeeming the " + t.name + " costs " + fmt$(t.redeem) + " — come back with it.", 2.2); return false; }
     if (!CBZ.city.spend(t.redeem)) return false;
     e.add(t.name, 1);                                          // your item, back in your pocket
     t.forfeit = true; t.redeemed = true;                       // close the ticket

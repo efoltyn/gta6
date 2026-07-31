@@ -349,14 +349,12 @@
     // already own it → just put it on (free re-wear).
     if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(visualId)) {
       if (CBZ.cityWear) CBZ.cityWear(visualId);
-      if (CBZ.sfx) CBZ.sfx("door");
       note("Pulled the " + (label || name) + " on.", 1.6);
       return;
     }
     const price = e_buy(name);
     if (!CBZ.city.spend(price)) {
       note("The " + (label || name) + " runs " + fmt$(price) + " — come back with the money.", 2);
-      if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
     if (CBZ.cityGrantItem) CBZ.cityGrantItem(visualId);

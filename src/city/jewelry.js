@@ -393,7 +393,6 @@
   function startAlarm(cs) {
     if (S.alarmT <= 0) {
       note("ALARM — " + S.jw.name + "! Every head on the block just turned.", 2.2);
-      if (CBZ.sfx) CBZ.sfx("alarm");
       S.beepT = 1.4;
     }
     S.alarmT = ALARM_TIME;
@@ -663,11 +662,7 @@
 
     // the alarm screams in bursts until it times out (cops come via wanted flow)
     if (S.alarmT > 0) {
-      S.alarmT -= dt; S.beepT -= dt;
-      // a shop alarm every 1.6s at full volume is the "really annoying bell"
-      // the owner called out. Slower, quieter, lower — a nuisance in the
-      // street rather than a klaxon in your head.
-      if (S.beepT <= 0) { if (CBZ.sfx) CBZ.sfx("alarm", { volume: 0.22, pitch: 0.78 }); S.beepT = 2.6; }
+      S.alarmT -= dt;
     }
 
     // distance VIS-GATE: the showroom draws only when you're near the shop
@@ -725,7 +720,7 @@
     if (buyTarget(cs) && clerkSees(cs.x, cs.z)) { actOn(cs); return; }
     // pop just THIS case's pane through the shared glass system (sfx + shards
     // + the alarm transition above all follow from the pane state change)
-    if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8);
+    if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8, { directPlayer: true });
   });
 
   // ---- public hooks (headless/harness handles, gunstore-style) ----------------

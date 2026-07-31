@@ -511,7 +511,7 @@
           label: function (t) { return t.open ? "Close" : "Open"; },
           onSelect: function (t) {
             if (!t.open && !canAccess(t, pid())) { CBZ.flashHint && CBZ.flashHint("Locked", 1.2); return; }
-            t.open = !t.open; syncDoorCollider(t); CBZ.sfx && CBZ.sfx("door");
+            t.open = !t.open; syncDoorCollider(t);
           },
         },
         {
@@ -586,7 +586,7 @@
         else CBZ.flashHint && CBZ.flashHint("Not authorized", 1.2);
       } else {
         if (!piece.open && !canAccess(piece, who)) { CBZ.flashHint && CBZ.flashHint("Locked", 1.2); return; }
-        piece.open = !piece.open; syncDoorCollider(piece); CBZ.sfx && CBZ.sfx("door");
+        piece.open = !piece.open; syncDoorCollider(piece);
       }
     }
   });

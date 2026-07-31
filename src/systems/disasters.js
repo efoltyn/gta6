@@ -175,7 +175,7 @@
     //      the mood. ----
     flashflood: {
       name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flood surge", tint: 0x59636b,
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("FLASH FLOOD — water rising, get HIGH!", 3); sound("alarm"); sound("water"); },
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("FLASH FLOOD — water rising, get HIGH!", 3); sound("water"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0x9fb4c4, count: 460, radius: ctx.R, top: 26, size: 0.13, opacity: 0.55, vMin: 34, vMax: 52, drift: 10 });
         ctx.st.rain.setActive(0.95);
@@ -233,7 +233,7 @@
     //      direction slowly veers, so high ground alone won't save you. ----
     hurricane: {
       name: "HURRICANE", emoji: "", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("HURRICANE inbound — brace and hold on!", 3); sound("alarm"); sound("wind"); },
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("HURRICANE inbound — brace and hold on!", 3); sound("wind"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0xb3c4d2, count: 520, radius: ctx.R, top: 24, size: 0.12, opacity: 0.5, vMin: 40, vMax: 60, drift: 22 });
         ctx.st.rain.setActive(0.95);
@@ -449,7 +449,6 @@
       warn(ctx) {
         CBZ.flashToast && CBZ.flashToast("INCOMING");
         banner("NUCLEAR STRIKE INCOMING", true);
-        if (CBZ.sfx) CBZ.sfx("alarm");
         sound("siren");
         ctx.st.gx = ctx.cx; ctx.st.gz = ctx.cz;
         ctx.st.warnMk = CBZ.fx.groundMarker(ctx.st.gx, ctx.st.gz, 8, 0xff3020); ctx.st.warnMk.set(1);
@@ -519,7 +518,7 @@
   // ============================================================
   const TSUNAMI_LEGACY = {
     name: "TSUNAMI", emoji: "", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
-    warn(ctx) { CBZ.flashHint && CBZ.flashHint("TSUNAMI — get to HIGH GROUND!", 3); sound("alarm"); sound("water"); },
+    warn(ctx) { CBZ.flashHint && CBZ.flashHint("TSUNAMI — get to HIGH GROUND!", 3); sound("water"); },
     start(ctx) {
       // the rising flood pool that ultimately drowns the low ground
       const m = new THREE.Mesh(new THREE.PlaneGeometry(ctx.R * 3, ctx.R * 3),
@@ -863,7 +862,7 @@
       st.oceanY0 = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
       st.warnT = 0; st.phase = "warn";
       CBZ.flashHint && CBZ.flashHint("TSUNAMI from the " + st.from + " — the sea is PULLING BACK. GET HIGH!", 3.6);
-      sound("alarm"); sound("siren");
+      sound("siren");
       if (CBZ.shake) CBZ.shake(0.3);
     },
     warnTick(dt, ctx) {

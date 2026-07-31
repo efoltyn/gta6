@@ -190,7 +190,6 @@
         const dx = gp.x - x, dz = gp.z - z;
         if (dx * dx + dz * dz <= r2) { burstPane(gp); if (++n > 60) break; }
       }
-      if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
       return n;
     };
 

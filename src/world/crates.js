@@ -272,7 +272,6 @@
     e.preventDefault();
     e.stopPropagation();
     cracking = { ct, t: 0 };
-    if (CBZ.sfx) CBZ.sfx("clank");
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
 

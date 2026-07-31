@@ -4,7 +4,7 @@
    When HEAT (game.detection) maxes out (~100) the whole block goes
    into a one-shot, debounced LOCKDOWN:
      • "LOCKDOWN" toast + a hard red flash + screen shake
-     • a looping siren (CBZ.sfx("alarm") re-fired every ~1.2s)
+     • a dedicated brief lockdown siren
      • a pulsing red full-screen vignette overlay (one fixed DIV,
        created once, only its opacity is animated — cheap on phones)
      • EVERY able guard is forced to hunt the player and gets a

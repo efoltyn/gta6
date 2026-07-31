@@ -666,6 +666,16 @@
   }
 
   function rigOf(el, end) { return end === "g" ? el.ground : el.roof; }
+  // The sound follows the same target transition that moves the two visible
+  // leafs. No panel state, teleport or elevator UI is allowed to impersonate a
+  // door; callers opt into audio only while the player is at/in this cab.
+  function setDoorTarget(r, open, audible) {
+    const target = open ? 1 : 0;
+    if (r.target === target) return false;
+    r.target = target;
+    if (audible && CBZ.sfx) CBZ.sfx(open ? "door_open" : "door_close");
+    return true;
+  }
   // is the player INSIDE the cab room at this end (xz volume + the floor's y band)?
   function insideCab(el, end, P) {
     if (!P) return false;
@@ -693,14 +703,13 @@
     m.st = "open"; m.end = end; m.t = 0; m.will = false; m.moved = false;
     rigOf(el, end).target = 1;
     setLit(el, true);
-    if (CBZ.sfx) { CBZ.sfx("switch"); CBZ.sfx("door"); }
+    if (CBZ.sfx) CBZ.sfx("switch");
   }
 
   function beginClose(el) {
     const m = el.m;
     m.st = "close"; m.t = 0; m.will = true;
-    rigOf(el, m.end).target = 0;
-    if (CBZ.sfx) CBZ.sfx("door");
+    setDoorTarget(rigOf(el, m.end), false, true);
   }
 
   function resetMachine(el, cool) {
@@ -876,7 +885,7 @@
         const r2 = rigOf(el, m.end);
         r2.target = 1; gateDoor(r2);
         // arrival DING then the doors (guarded — "blip" stands in for a chime)
-        if (CBZ.sfx) { CBZ.sfx("blip"); CBZ.sfx("door"); }
+        if (CBZ.sfx) CBZ.sfx("blip");
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
           CBZ.city.note(m.end === "r" ? ("" + ST + " floors up — the roof is yours.") : "Ground floor.", 2);

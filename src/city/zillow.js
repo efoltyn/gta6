@@ -544,7 +544,6 @@
         + (owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.2);
       if (rec.flagship && CBZ.city.big) CBZ.city.big("" + rec.name);
     }
-    if (CBZ.sfx) CBZ.sfx("door");
   }
 
   // `direct` = an explicit realtor/door purchase (realestate.js routes home buys

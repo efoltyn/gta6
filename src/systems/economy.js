@@ -415,7 +415,6 @@
       if (actor.corrupt && CBZ.addRacketStanding) CBZ.addRacketStanding(-8);
       noteRead("heat", 14, nm(actor), 16);
       actor.bribed = 0;
-      CBZ.sfx("alarm");
       return { ok: false, msg: "Caught red-handed! They're onto you!" };
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
@@ -476,7 +475,6 @@
       g.koLog[actor.data.name] = true;          // any "beat up X" quest can now complete
       g.kos = (g.kos || 0) + 1;
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(actor, "beat");
-      CBZ.sfx("door");
       CBZ.reportCrime(guardish ? 26 : 16, { type: "melee", actorRole: g.role });       // a brawl only heats up if witnessed
       noteRead(guardish ? "badge" : "fear", guardish ? 18 : 14, nm(actor), guardish ? 18 : 15);
       if (actor.gang >= 0) nudgeGang(actor, -10, 2);

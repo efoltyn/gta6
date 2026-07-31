@@ -2632,7 +2632,8 @@
         if (fps.active && CBZ.camera) gback = Math.min(6.5, origin.distanceTo(CBZ.camera.position));
         const gox = origin.x - shotDir.x * gback, goy = origin.y - shotDir.y * gback, goz = origin.z - shotDir.z * gback;
         const reach = (hit.dist != null ? hit.dist + 0.5 : w.range) + gback;
-        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach, true);
+        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach,
+          true, { directPlayer: true });
         const sd = CBZ.cityLastShatterDist;
         if (sd != null && sd >= 0 && hit.wall && hit.point) {
           // pane world impact along the (eye-anchored) glass ray

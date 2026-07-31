@@ -901,7 +901,6 @@
       c.wreckT = 1.4; c.spin = (Math.random() - 0.5) * 2.4;
     }
     if (CBZ.cityCrashFX) CBZ.cityCrashFX(c.pos.x, c.pos.z, { speed: 14, hard: true });
-    if (CBZ.sfx) CBZ.sfx("clank");
     if (CBZ.shake && CBZ.camera) {
       const cm = CBZ.camera.position, dx = c.pos.x - cm.x, dz = c.pos.z - cm.z;
       if (dx * dx + dz * dz < 70 * 70) CBZ.shake(0.4);
@@ -1211,11 +1210,9 @@
   function doMod(car, modId, tier, price) {
     if (price > 0 && !(CBZ.city && CBZ.city.spend && CBZ.city.spend(price))) {
       if (CBZ.city && CBZ.city.note) CBZ.city.note("That runs " + fmt$(price) + " — come back with the money.", 1.8);
-      if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
     cityApplyCarMod(car, modId, tier);
-    if (CBZ.sfx) CBZ.sfx("clank");
     if (CBZ.city && CBZ.city.note) CBZ.city.note("Installed — your ride's meaner now.", 1.6);
   }
   function doResupply(car) {
@@ -1223,7 +1220,7 @@
     if (m.ammo >= TUNE.launcherAmmoMax) { if (CBZ.city && CBZ.city.note) CBZ.city.note("Pods already full.", 1.2); return; }
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(PRICE.launcherAmmo))) {
       if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets run " + fmt$(PRICE.launcherAmmo) + " a load.", 1.6);
-      if (CBZ.sfx) CBZ.sfx("glass"); return;
+      return;
     }
     m.ammo = TUNE.launcherAmmoMax;
     if (CBZ.sfx) CBZ.sfx("reload");
@@ -1232,7 +1229,7 @@
   function doRespray(car) {
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(PRICE.respray))) {
       if (CBZ.city && CBZ.city.note) CBZ.city.note("A respray runs " + fmt$(PRICE.respray) + ".", 1.6);
-      if (CBZ.sfx) CBZ.sfx("glass"); return;
+      return;
     }
     // pick a fresh colour + cycle style; recolour the visual.
     const palette = [0x2b2f36, 0xb02a2a, 0x1f5fb0, 0x2f8f4f, 0xe0a52a, 0xe8e8ec, 0x6a2f9a, 0xff6a00];
