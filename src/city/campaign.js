@@ -187,9 +187,14 @@
   }
   function say(speaker, body, secs, actor) {
     const ui = UI();
-    if (ui && ui.say) ui.say(speaker, body, { actor: actor || null });
+    const campaignOwnsLine = !!(ui && ui.say);
+    if (campaignOwnsLine) ui.say(speaker, body, { actor: actor || null });
     R.dialogueT = secs || 3.2;
-    if (actor && CBZ.citySay) {
+    // #campaignDialogue is the canonical authored-speech surface. citySay is
+    // only a degradation fallback: sending the same body to both created two
+    // verbatim subtitle layers, which iPad's touch sizing exposed as offset,
+    // mixed-font duplicate text.
+    if (!campaignOwnsLine && actor && CBZ.citySay) {
       try { CBZ.citySay(actor, body, "#dfe7ff", secs || 3.2); } catch (e) {}
     }
   }

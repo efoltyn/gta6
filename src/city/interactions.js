@@ -645,9 +645,17 @@
       // data-i contract, so the existing click dispatch above fires them;
       // targeting/verb logic is untouched.
       const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
+      const dockedTouch = touchVerbs && CBZ.touchInteractionDocked && CBZ.touchInteractionDocked();
       if (optsEl) optsEl.innerHTML = touchVerbs
         ? rows.map((r, i) => {
             const yes = r.decision !== "no";
+            if (dockedTouch) {
+              const action = String(r.label || "DO").trim().toUpperCase();
+              const aria = verbText(r).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+              return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
+                `<span class="itouch-copy"><span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${verbText(r)}</span></span>` +
+                `<button type="button" class="itouch-act" aria-label="${aria}">${action}</button></div>`;
+            }
             return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
               `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${verbText(r)}</span></div>`;
           }).join("")

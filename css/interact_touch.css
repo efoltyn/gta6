@@ -3,20 +3,19 @@
    (systems/interact.js, flags PRISON_INTERACT_TOUCH /
    PRISON_INTERACT_SUBTITLE). Linked AFTER mobile.css.
 
-   OWNER, verbatim: "I'm on iPad, for interaction options with ai I
-   want directly on the left of the eye icon I want 4 buttons and on
-   the left of those buttons should be the interaction options and
-   instead of the current text options use from the gang city game
-   that exact look of dialogue... the look of dialogue." Plus the
+   OWNER correction: on iPad all interaction buttons form a VERTICAL
+   rail beginning beside Reload, with the full option text on the LEFT
+   of each button. The earlier horizontal row beside Eye remains only
+   as the compact phone fallback. Plus the
    standing complaint this belongs to: "many things on iPad where a
    pop will say press g or shift DUH i can't do that... like turning
    tips off is a key I can't press."
 
    Three surfaces, and nothing here re-implements a control the touch
    layer already owns:
-     #pverbs   four SQUARE verb buttons, seated against #tview
-     #poptions every remaining contextual verb, as compact pills that
-               pack right-to-left and wrap UPWARD
+     #pverbs / #poptions
+               one explained vertical rail on iPad; compact primary
+               buttons and overflow pills on phones
      #pinteractWho / .pi-subtitle
                the actor's name, read and one teaching line, and the
                spoken result — both in hud.css's .world-subtitle
@@ -313,6 +312,121 @@ body.tveh-on #pinteract{ display: none !important; }
   #poptions{ gap: 6px; }
   #poptions .po-pill{ min-height: 34px; padding: 5px 10px; }
   #poptions .po-pill .pi-lab{ font-size: 11.5px; }
+}
+
+/* ============================================================
+   7. iPAD CORRECTION — vertical choices beside Reload
+
+   touch.js writes --touch-interact-top/right from Reload's real live rect
+   after the control visibility pass. The first action therefore begins on
+   Reload's exact top edge; each following action stays in the same right rail.
+   The full option sentence is the left column, the only tappable element is
+   the explicit action button on the right. Phones never enter this query.
+============================================================ */
+@media (min-width: 700px) and (min-height: 550px){
+  #pinteract{
+    top: var(--touch-interact-top, 42%);
+    right: var(--touch-interact-right, calc(92px + env(safe-area-inset-right, 0px)));
+    bottom: auto;
+    width: min(440px, calc(100vw - 320px));
+    max-width: none;
+    display: block;
+    transform: translateX(8px) scale(.98);
+    transform-origin: right top;
+  }
+  #pinteract.show{ transform: translateX(0) scale(1); }
+  #pinteractWho{
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 7px);
+    width: 100%;
+    align-items: flex-end;
+  }
+  #pinteractWho .piw-tip{ display: none !important; }
+  #pinteract .pi-row{
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px;
+    width: 100%;
+    max-width: none;
+  }
+  #pverbs,
+  #poptions{
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 9px;
+    width: 100%;
+    min-width: 0;
+  }
+  .pi-choice{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    min-height: 52px;
+    pointer-events: none;
+  }
+  .pi-choice .pi-copy{
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: 10px;
+    background: linear-gradient(90deg, rgba(7,13,20,.45), rgba(7,13,20,.82));
+    color: #fff;
+    font-family: Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+    text-align: right;
+    text-shadow: 0 2px 4px #000;
+  }
+  .pi-choice-label{
+    display: block;
+    overflow: hidden;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.16;
+    letter-spacing: .25px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pi-choice-detail{
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    color: #cbd6e2;
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    opacity: .78;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pi-choice .pi-action{
+    min-width: 106px;
+    min-height: 52px;
+    padding: 8px 13px;
+    border: 2px solid rgba(125,231,255,.65);
+    border-radius: 13px;
+    color: #effaff;
+    background: linear-gradient(180deg, rgba(38,110,150,.96), rgba(20,60,90,.96));
+    box-shadow: 0 4px 0 rgba(0,0,0,.35);
+    font: 800 14px/1 Fredoka, system-ui, sans-serif;
+    letter-spacing: .7px;
+    pointer-events: auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pi-choice .pi-action:active{
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 rgba(0,0,0,.35);
+  }
+  .pi-choice .pi-tips-action{
+    border-color: rgba(255,255,255,.3);
+    color: #d2d9e1;
+    background: rgba(22,28,36,.92);
+    font-size: 12px;
+  }
+  .pi-choice .pi-tips-action.on{ border-color: rgba(125,231,255,.48); color: #7de7ff; }
 }
 
 /* ---- THE TOUCH SUBTITLE BAND ---------------------------------------------

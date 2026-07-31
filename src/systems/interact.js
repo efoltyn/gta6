@@ -12,9 +12,10 @@
    routes through systems/quests.js (favors, rep, and the "they let you
    walk out" win); Romance is its own way out.
 
-   ON TOUCH the whole card is REPLACED rather than restyled — four
-   square verb buttons beside the first-person eye, pills for every
-   remaining verb, and dialogue instead of a panel. See the
+   ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
+   every choice is a vertical row docked beside Reload with its full
+   explanation left and its action button right. Phones retain the compact
+   four-button/pill layout, and results use dialogue instead of a panel. See the
    PRISON_INTERACT_TOUCH block below and css/interact_touch.css.
 ============================================================ */
 (function () {
@@ -26,10 +27,8 @@
   // ---------------------------------------------------------------------------
   //  PRISON_INTERACT_TOUCH — the iPad answer to this card.
   //
-  //  OWNER, verbatim: "I'm on iPad, for interaction options with ai I want
-  //  directly on the left of the eye icon I want 4 buttons and on the left of
-  //  those buttons should be the interaction options and instead of the current
-  //  text options use from the gang city game that exact look of dialogue."
+  //  OWNER correction: on iPad every interaction action is a VERTICAL rail
+  //  starting beside Reload, with explanation text to the LEFT of each button.
   //  And the standing complaint behind it: "many things on iPad where a pop will
   //  say press g or shift DUH i can't do that... like turning tips off is a key
   //  I can't press."
@@ -38,10 +37,10 @@
   //  fifth verb silently DROPPED by cap4 because there were only four keys to
   //  reach it with, and an "[H] Tips: ON" footer whose only affordance was a key
   //  no tablet has. On touch it becomes:
-  //    • FOUR square verb buttons in a row, vertically centred on #tview (the
-  //      first-person EYE button) and seated just left of the #tbtns cluster;
-  //    • every REMAINING contextual verb as a compact pill to the left of those
-  //      four, wrapping UPWARD, so nothing the context offers is unreachable;
+  //    • iPad: every contextual verb in one vertical choice rail beside Reload,
+  //      full explanatory text left and a 52px+ action button right;
+  //    • phone: four compact primary buttons plus overflow pills, so nothing the
+  //      context offers is unreachable on the narrower surface;
   //    • the actor's name / read / ONE teaching line above the row in the
   //      gang-city dialogue treatment (white Fredoka 700, black stroke, no box)
   //      instead of a panel of prose beside the NPC;
@@ -492,8 +491,8 @@
     if (piRoot) return piRoot;
     piRoot = document.createElement("div");
     piRoot.id = "pinteract";
-    // #pverbs FIRST in source and the row is row-reverse, so the four squares
-    // sit at the RIGHT (against the eye button) and the pills flow leftward.
+    // The containers stay separate for the compact phone fallback; tablet CSS
+    // stacks both into one uninterrupted vertical rail.
     piRoot.innerHTML =
       '<div id="pinteractWho">' +
         '<span class="piw-name"></span>' +
@@ -529,6 +528,8 @@
   // sentence is cut at the first dash ("Take the deal — work as the warden's
   // spy" → "Take the deal") and the sentence itself lives on as the aria-label.
   function shortLabel(a, v) {
+    if (v === "campaign-spy") return "Accept";
+    if (v === "campaign-escape") return "Refuse";
     if (VERB[v] && VERB[v].label) return VERB[v].label;
     const raw = String(labelFor(a, v) || v);
     return shortText(raw.split(/\s+[—–-]\s+/)[0], 18);
@@ -542,15 +543,29 @@
       esc(labelFor(a, v)) + '"><span class="pi-lab">' + esc(shortLabel(a, v)) + "</span>" +
       (sub ? '<span class="pi-sub">' + esc(shortText(sub, subMax || 12)) + "</span>" : "") + "</button>";
   }
+  // Tablet row: the left side says what the option actually does; the right
+  // side is the thumb target. The index is still the canonical doAction index.
+  function optChoice(idx, a, v) {
+    const label = labelFor(a, v);
+    const sub = subFor(a, v);
+    const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
+    const detail = [sub, (helpOn && !learned[v]) ? desc : ""].filter(Boolean).join(" · ");
+    return '<div class="pi-choice">' +
+      '<span class="pi-copy"><span class="pi-choice-label">' + esc(label) + "</span>" +
+      (detail ? '<span class="pi-choice-detail">' + esc(detail) + "</span>" : "") + "</span>" +
+      '<button type="button" class="pi-action" data-pi="' + idx + '" aria-label="' +
+      esc(label) + '">' + esc(shortLabel(a, v).toUpperCase()) + "</button></div>";
+  }
 
   function renderTouch(a, core, rest, rawNote) {
     buildTouchUI();
     const name = cleanName(a).toUpperCase();
     const note = shortText(rawNote, 74);
+    const docked = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
     // ONE teaching line, never a wall: the first verb on offer this player has
     // never used. Tips off — or everything learned — leaves the row silent.
     let tip = "";
-    if (helpOn) {
+    if (helpOn && !docked) {
       const order = core.concat(rest);
       for (let i = 0; i < order.length; i++) {
         const v = order[i];
@@ -559,14 +574,24 @@
         if (d) { tip = shortLabel(a, v) + " — " + d; break; }
       }
     }
-    let btns = "";
-    for (let i = 0; i < core.length; i++) btns += optButton("pv-btn", i, a, core[i], 12);
-    let pills = "";
-    for (let i = 0; i < rest.length; i++) pills += optButton("po-pill", core.length + i, a, rest[i], 18);
-    // the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach
-    pills += '<button type="button" class="po-pill po-tips' + (helpOn ? " on" : "") +
-      '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
-      '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
+    let btns = "", pills = "";
+    if (docked) {
+      const order = core.concat(rest);
+      for (let i = 0; i < order.length; i++) btns += optChoice(i, a, order[i]);
+      pills = '<div class="pi-choice pi-tips-choice">' +
+        '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span>' +
+        '<span class="pi-choice-detail">Explain unfamiliar actions beside their buttons</span></span>' +
+        '<button type="button" class="pi-action pi-tips-action' + (helpOn ? " on" : "") +
+        '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") + '">' +
+        (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
+    } else {
+      for (let i = 0; i < core.length; i++) btns += optButton("pv-btn", i, a, core[i], 12);
+      for (let i = 0; i < rest.length; i++) pills += optButton("po-pill", core.length + i, a, rest[i], 18);
+      // the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach
+      pills += '<button type="button" class="po-pill po-tips' + (helpOn ? " on" : "") +
+        '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
+        '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
+    }
 
     // renderPanel runs EVERY frame while somebody is in range; only touch the
     // DOM when what it would say actually changed.
@@ -636,9 +661,9 @@
     el.interactNote.textContent = note;
 
     if (touchUI()) {
-      // TOUCH: the four priority verbs become the square row beside the eye
-      // button, and EVERYTHING ELSE this context offers becomes a pill rather
-      // than being thrown away. cap4 exists because there are only four keys —
+      // TOUCH: on iPad every verb becomes a vertical explained row beside
+      // Reload; phones use four compact primaries plus overflow pills. NOTHING
+      // this context offers is thrown away. cap4 exists because there are only four keys —
       // a thumb has no fifth key, so on touch its overflow would be UNREACHABLE
       // rather than merely unlisted, which is a different (and worse) thing.
       // _verbs keeps the four core verbs at indices 0-3, so I/J/K/L and every
@@ -654,16 +679,29 @@
     const verbs = cap4(verbsFor(a));
     a._verbs = verbs;
     const showTips = helpOn;
+    const dockedTouch = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
     let html = verbs.map((v, i) => {
-      const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
-        `<span class="ilab">${labelFor(a, v)}</span>` +
-        `<span class="isub">${subFor(a, v)}</span></div>`;
-      // teach this button until it's been used at least once
+      const label = labelFor(a, v);
+      const sub = subFor(a, v);
       const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
+      if (dockedTouch) {
+        const action = v === "campaign-spy" ? "ACCEPT"
+          : v === "campaign-escape" ? "REFUSE"
+          : String((VERB[v] && VERB[v].label) || v).toUpperCase();
+        const detail = (showTips && !learned[v] && desc) ? `<span class="idesc">${desc}</span>` : "";
+        return `<div class="iopt tverb tyes" data-i="${i}">` +
+          `<span class="itouch-copy"><span class="ilab">${label}</span>` +
+          `<span class="isub">${sub}</span>${detail}</span>` +
+          `<button type="button" class="itouch-act">${action}</button></div>`;
+      }
+      const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
+        `<span class="ilab">${label}</span>` +
+        `<span class="isub">${sub}</span></div>`;
+      // teach this button until it's been used at least once
       const tip = (showTips && !learned[v] && desc) ? `<div class="idesc">${desc}</div>` : "";
       return row + tip;
     }).join("");
-    html += `<div class="ihelp">[H] Tips: ${helpOn ? "ON" : "OFF"}</div>`;
+    if (!dockedTouch) html += `<div class="ihelp">[H] Tips: ${helpOn ? "ON" : "OFF"}</div>`;
     el.interactOpts.innerHTML = html;
   }
 
