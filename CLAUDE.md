@@ -1417,6 +1417,12 @@ runs each audit first writes the number in; do not pin a guess.
 
 ## FROM GPT TO CLAUDE — 2026-07-28 dogfood: world facts below, game rules above
 
+- **A SKY IMPOSTOR MAY MOVE IN DEPTH; ITS WORLD EVENT MAY NOT MOVE ON THE
+  GROUND.** The nuclear dome and mushroom share one detonation X/Z. A far-plane
+  impostor must project its ground-zero and top anchors independently; scaling
+  a quad about its centre from a moving camera makes its apparent base slide
+  across the city, especially during the held-C aircraft shot.
+
 The owner's “cinematic vs realistic vs fun/gamey” pull is not three competing
 modes. It is the three-part authoring contract:
 

@@ -2279,20 +2279,28 @@
     const f = camFar();
     return clamp((dFar - f * 0.55) / (f * 0.40), 0, 1);
   }
-  const _impDir = new THREE.Vector3();
+  const _impBase = new THREE.Vector3();
+  const _impTop = new THREE.Vector3();
+  const _impUp = new THREE.Vector3();
+  const _impRight = new THREE.Vector3();
+  const _impNormal = new THREE.Vector3();
+  const _impBasis = new THREE.Matrix4();
+  function impostorPointAtDepth(out, x, y, z, D, cam) {
+    out.set(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+    const depth = -out.z;
+    if (!(depth > 0.05) || !isFinite(depth)) return 0;
+    out.set(out.x * D / depth, out.y * D / depth, -D).applyMatrix4(cam.matrixWorld);
+    return depth;
+  }
   function stepImpostor(t, L, mix) {
     const imp = POOL.imp;
     if (!imp) return;
     if (mix <= 0.004 || !L.dims) { imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return; }
-    const c = camPos();
-    if (!c) { imp.visible = false; return; }
-    /* SIMILAR TRIANGLES. The cloud's bounding box is impW x impH centred at
-       (x, impH/2, z). We cannot draw it there — it is 10 km tall against a
-       1 km frustum — so we draw a SMALLER quad NEARER, chosen so it subtends
-       the identical angle:
-            size' = size * D / d
-       with D = 0.86 * far (inside the frustum, outside almost everything in
-       the world, so the depth test still lets buildings occlude it). */
+    const cam = CBZ.camera;
+    if (!cam || !cam.position) { imp.visible = false; return; }
+    /* The physical cloud is taller than the frustum. Draw its two projected
+       endpoints on one safe camera-depth plane: the apparent shape survives,
+       while its bottom remains the detonation instead of following the lens. */
     const rise = riseAt(t, L);
     /* The phased masks are authored in the mature cloud's metre coordinate
        system: an early bulb occupies only the lower/smaller part of that same
@@ -2312,35 +2320,36 @@
           capYAt(rise, L) - L.y +
           capNow * (L.capThick || 0.782) * 0.5 * 1.12)
       : L.impH * (phasedCloud() ? 1 : grow);
-    const cx = L.x, cz = L.z, cyc = L.y + h * 0.5;
-    const d = Math.max(1, Math.hypot(cx - c.x, cyc - c.y, cz - c.z));
     const D = camFar() * 0.86;
-    const k = D / d;
-    _impDir.set(cx - c.x, cyc - c.y, cz - c.z).multiplyScalar(1 / d);
-    imp.position.set(c.x + _impDir.x * D, c.y + _impDir.y * D, c.z + _impDir.z * D);
-    imp.scale.set(w * k, h * k, 1);
-    /* THE FAR TIER IS THE ONE BILLBOARD IN THIS FILE THAT IS *NOT* YAW-ONLY,
-       and the reason is arithmetic, not taste.
+    if (cam.updateMatrixWorld) cam.updateMatrixWorld(true);
+    const baseDepth = impostorPointAtDepth(_impBase, L.x, L.y, L.z, D, cam);
+    const topDepth = impostorPointAtDepth(_impTop, L.x, L.y + h, L.z, D, cam);
+    if (!baseDepth || !topDepth) {
+      imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return;
+    }
 
-       Every other quad here is cylindrically billboarded because copying the
-       camera's PITCH is the documented aircraft-view bug — a near cloud quad
-       tips flat under a bomber and exposes itself as a sheet of paper. But
-       this quad stands in for an object eight kilometres up, and yaw-only
-       has a DEGENERACY exactly where this event puts the player: near ground
-       zero the cloud centre is almost straight overhead, so the horizontal
-       vector faceCameraYaw takes its atan2 of collapses to noise (the quad
-       spins) and the quad goes edge-on (the cloud vanishes) at the one
-       moment it should fill the sky.
-
-       Object3D.lookAt with the default up of (0,1,0) is the correct
-       primitive: it faces the camera fully while keeping the quad's local up
-       as close to world-vertical as the geometry allows, so it degrades
-       gracefully straight overhead instead of degenerating. THE HONEST
-       LIMITATION, named: standing directly under a real cloud you would see
-       the UNDERSIDE of the cap, not its silhouette, and one quad cannot draw
-       that. Laying the silhouette over toward you is the better of the two
-       available wrongs. */
-    imp.lookAt(c.x, c.y, c.z);
+    /* Pin BOTH ends of the sky quad. The old centre-ray shortcut moved the
+       mesh's X/Z toward the moving aircraft by (1-D/d), so the mushroom could
+       stand hundreds of metres away from the dome during the held-C fly-away.
+       Projecting ground zero and cloud top independently keeps the one-draw
+       impostor inside the far plane without ever surrendering its impact. */
+    imp.position.copy(_impBase).add(_impTop).multiplyScalar(0.5);
+    const hh = _impUp.subVectors(_impTop, _impBase).length();
+    if (!(hh > 0.01)) {
+      imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return;
+    }
+    _impUp.multiplyScalar(1 / hh);
+    _impNormal.set(0, 0, 1).transformDirection(cam.matrixWorld);
+    _impRight.crossVectors(_impUp, _impNormal);
+    if (_impRight.lengthSq() < 0.000001) _impRight.set(1, 0, 0).transformDirection(cam.matrixWorld);
+    else _impRight.normalize();
+    _impUp.crossVectors(_impNormal, _impRight).normalize();
+    _impBasis.makeBasis(_impRight, _impUp, _impNormal);
+    imp.quaternion.setFromRotationMatrix(_impBasis);
+    imp.scale.set(w * D / Math.max(0.05, (baseDepth + topDepth) * 0.5), hh, 1);
+    /* Unlike the yaw-only near billboards, this quad lies in the camera plane.
+       Its local Y is the exact projected ground-to-top vector, so banking or
+       the held-C camera cannot rotate that vector away from ground zero. */
     const u = imp.material.uniforms;
     // the whole cloud cools along the shared LUT; uCool then spreads the
     // crown and the dust base further along it than the core (see BILL_FS).
