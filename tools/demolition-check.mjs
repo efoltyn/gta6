@@ -90,34 +90,37 @@ await shot("demo-e2e-0-intact.png");
 
 // ---- FLOATING-GEOMETRY INVARIANT --------------------------------------------
 // Every phase-prop box must be SUPPORTED: grounded (AABB bottom near y=0) or
-// resting on / pierced by another member below it, transitively down to the
-// ground. Catches "roof railing floating in the sky" numerically — screenshots
-// judge aesthetics, this judges connectivity (user-filmed defect class).
+// connected through another member to ground. The shared spatial-hash graph
+// replaces this tool's former O(n²) local propagation loop, so demolition,
+// venues and future world audits now use one definition of a load path.
 const floatCheck = async (label) => {
   const r = await evl(`(() => {
     const lot = window.__lot;
     const g = CBZ.cityDemolition.propGroup && CBZ.cityDemolition.propGroup(lot);
     if (!g) return JSON.stringify({ err: "no prop group found" });
     const boxes = [];
-    g.traverse((o) => { if (o.isMesh) { o.updateWorldMatrix(true, false); boxes.push(new THREE.Box3().setFromObject(o)); } });
-    const GROUND = 0.45, EPS = 0.15;
-    const supported = boxes.map((b) => b.min.y <= GROUND);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let i = 0; i < boxes.length; i++) {
-        if (supported[i]) continue;
-        const bi = boxes[i];
-        for (let j = 0; j < boxes.length; j++) {
-          if (i === j || !supported[j]) continue;
-          const bj = boxes[j];
-          const xz = bi.min.x < bj.max.x - 0.02 && bi.max.x > bj.min.x + 0.02 && bi.min.z < bj.max.z - 0.02 && bi.max.z > bj.min.z + 0.02;
-          if (xz && bj.max.y >= bi.min.y - EPS && bj.min.y <= bi.min.y + EPS + 0.35) { supported[i] = true; changed = true; break; }
-        }
-      }
+    let id = 0;
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      o.updateWorldMatrix(true, false);
+      const b = new THREE.Box3().setFromObject(o);
+      boxes.push({
+        id: ${JSON.stringify(label)} + ":" + id++, kind: "demolition-prop",
+        minX: b.min.x, minY: b.min.y, minZ: b.min.z,
+        maxX: b.max.x, maxY: b.max.y, maxZ: b.max.z
+      });
+    });
+    if (!CBZ.reality || !CBZ.reality.supportAudit) {
+      return JSON.stringify({ err: "shared reality audit unavailable" });
     }
-    const floating = supported.filter((v) => !v).length;
-    return JSON.stringify({ boxes: boxes.length, floating });
+    const a = CBZ.reality.supportAudit(boxes, {
+      groundY: 0, groundEps: 0.16, contactEps: 0.16, cell: 2
+    });
+    return JSON.stringify({
+      boxes: a.total, floating: a.unsupportedCount,
+      components: a.unsupportedComponents, candidates: a.candidatePairs, ms: a.ms,
+      samples: a.samples
+    });
   })()`);
   console.log("float-check[" + label + "]:", r);
   try { if (JSON.parse(r).floating > 0) failures.push(label + ": " + r); } catch (e) { failures.push(label + ": " + r); }
@@ -241,7 +244,10 @@ console.log("offSnap:", offSnap);
 try { const o = JSON.parse(offSnap); if (o.offActive || o.tweens) failures.push("interp: flag-off did not snap " + offSnap); } catch (e) { failures.push("interp: offSnap parse " + offSnap); }
 
 const uniq = [...new Set(errors)];
-if (failures.length) console.log("GATE FAILURES:", failures.join(" | "));
+if (failures.length) {
+  console.log("GATE FAILURES:", failures.join(" | "));
+  process.exitCode = 1;
+}
 console.log(uniq.length ? "PAGE ERRORS (" + uniq.length + "):\n" + uniq.slice(0, 10).join("\n") : "PAGE ERRORS: none");
 chrome.kill("SIGTERM"); server.kill("SIGTERM");
 await rm(profile, { recursive: true, force: true }).catch(() => {});

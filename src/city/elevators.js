@@ -1268,4 +1268,60 @@
 
   // PUBLIC: the built lifts (minimap markers / missions can target a roof)
   CBZ.cityElevators = function () { return elevators; };
+
+  // FIRST-PRINCIPLES CONTRACT: a lift is not merely a teleport marker. Its
+  // building must publish an ordered ground→roof stop list, reserve and carve
+  // one continuous shaft, build two sealed two-leaf cab rooms on the SAME x/z
+  // column, and publish the resulting machine back on the canonical building
+  // record. Math-gate reads this after world build so a future style/era recipe
+  // cannot silently strand a decorative elevator in an uncarved floor plate.
+  CBZ.cityElevatorAudit = function () {
+    const out = {
+      elevators: elevators.length, badStops: 0, missingShafts: 0,
+      uncarvedSlabs: 0, missingLift: 0, misalignedEnds: 0, badCabs: 0,
+      samples: []
+    };
+    function fail(kind, el, detail) {
+      out[kind]++;
+      if (out.samples.length < 10) out.samples.push({
+        kind, x: +el.b.ox.toFixed(2), z: +el.b.oz.toFixed(2), detail
+      });
+    }
+    for (const el of elevators) {
+      const b = el.b, tops = b.floorTops;
+      let stopsOk = Array.isArray(tops) && tops.length >= 2;
+      if (stopsOk) {
+        for (let i = 0; i < tops.length; i++) {
+          if (!Number.isFinite(tops[i]) || (i && tops[i] <= tops[i - 1])) { stopsOk = false; break; }
+        }
+        stopsOk = stopsOk
+          && Math.abs(tops[0] - 0.14) <= 0.001
+          && Math.abs(tops[tops.length - 1] - b.h) <= 0.001
+          && el.topFloor === tops.length;
+      }
+      if (!stopsOk) fail("badStops", el, "unordered or shell-height mismatch");
+      if (!b.shaftRects || !b.shaftRects.length)
+        fail("missingShafts", el, "no reserved shaft footprint");
+      if (b.floorSlabs) {
+        for (const slab of b.floorSlabs) if (!slab.carved)
+          fail("uncarvedSlabs", el, "intermediate floor crosses the lift column");
+      }
+      if (!b.lift || b.lift.floors !== el.topFloor
+        || !b.lift.ground || !b.lift.roof
+        || Math.abs(b.lift.roof.y - b.h) > 0.001)
+        fail("missingLift", el, "building registry does not match the machine");
+      if (!el.groundPad || !el.roofPad
+        || Math.hypot(el.groundPad.x - el.roofPad.x, el.groundPad.z - el.roofPad.z) > 0.001)
+        fail("misalignedEnds", el, "ground and roof cabs are not one vertical column");
+      if (!el.ground || !el.roof
+        || !el.ground.leaves || el.ground.leaves.length !== 2 || !el.ground.col
+        || !el.roof.leaves || el.roof.leaves.length !== 2 || !el.roof.col
+        || Math.abs(el.gFloor - 0.16) > 0.001
+        || Math.abs(el.rFloor - (b.h + 0.16)) > 0.001)
+        fail("badCabs", el, "an end is not a sealed, floor-aligned cab room");
+    }
+    out.failures = out.badStops + out.missingShafts + out.uncarvedSlabs
+      + out.missingLift + out.misalignedEnds + out.badCabs;
+    return out;
+  };
 })();

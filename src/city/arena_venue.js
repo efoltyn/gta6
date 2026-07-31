@@ -365,6 +365,9 @@ CBZ.arenaVenue = {
     var UNIT = new THREE.BoxGeometry(1, 1, 1);
     var TINT = tintUnitBox();
     var pools = {};
+    // Non-instanced meshes that still participate in the static support graph
+    // (currently the centre-hung scoreboard's four thin display faces).
+    var realityExtras = [];
     function pool(name, color, opts) { pools[name] = { items: [], color: color, opts: opts || {} }; }
     function put(name, it) { pools[name].items.push(it); }
     function flushPools() {
@@ -408,6 +411,7 @@ CBZ.arenaVenue = {
     pool("dark", 0x171a20);
     pool("rail", 0xc8a132);
     pool("seat", 0xffffff, { tint: true });
+    pool("seatframe", 0x20252a);
     pool("body", 0xffffff, { tint: true });
     pool("head", 0xffffff, { tint: true });
     pool("lap", 0x22252c);
@@ -457,15 +461,16 @@ CBZ.arenaVenue = {
       runStraight("zn", d, pitch, cb); runCorner(3, d, pitch, cb);
     }
     function isStraight(side) { return side.charAt(0) !== "c"; }
-    function aisleGap(s) {
+    function aisleGap(s, pad) {
+      pad = Math.max(0, +pad || 0);
       var i, list;
       if (s.side === "xp" || s.side === "xn") {
         list = AIS_X;
-        for (i = 0; i < list.length; i++) if (Math.abs(s.key - (CZ + list[i])) < AISLE_H) return true;
+        for (i = 0; i < list.length; i++) if (Math.abs(s.key - (CZ + list[i])) < AISLE_H + pad) return true;
       } else if (s.side === "zp" || s.side === "zn") {
         list = AIS_Z;
-        for (i = 0; i < list.length; i++) if (Math.abs(s.key - (CX + list[i])) < AISLE_H) return true;
-      } else if (Math.abs(s.key - Math.PI / 4) * s.d < AISLE_H) return true;
+        for (i = 0; i < list.length; i++) if (Math.abs(s.key - (CX + list[i])) < AISLE_H + pad) return true;
+      } else if (Math.abs(s.key - Math.PI / 4) * s.d < AISLE_H + pad) return true;
       return false;
     }
     function vomGap(s, half) {
@@ -743,11 +748,26 @@ CBZ.arenaVenue = {
         //     The pan is drawn only on the tiers you can walk up to and look at
         //     (a deliberate LOD — from tier 3 up all you ever see is seat backs,
         //     and every occupied seat is hidden by the body on it anyway).
+        //
+        //     THE SUPPORT NEVER LODS OUT. Every continuous run of up to three
+        //     seats shares a rail mounted on a pedestal down to the row deck.
+        //     This is how real beam-mounted arena seating carries load, and it
+        //     removes the old 0.36-0.45 m air gap under every pan/back without
+        //     spending one post per one of the 21k seats.
         var ds = df + dd - SEAT_D / 2 - 0.12;
         var panTier = tI < 3;
+        var frameRuns = [], frameRun = [], frameSide = null;
+        function closeFrameRun() {
+          if (frameRun.length) frameRuns.push(frameRun);
+          frameRun = []; frameSide = null;
+        }
         walkRing(ds, PITCH, function (s) {
-          if (aisleGap(s)) return;
-          if (cut && isStraight(s.side) && vomGap(s, VOM_HW + 0.4)) return;
+          if (aisleGap(s) || (cut && isStraight(s.side) && vomGap(s, VOM_HW + 0.4))) {
+            closeFrameRun(); return;
+          }
+          if (frameSide !== s.side) closeFrameRun();
+          frameSide = s.side;
+          frameRun.push(s);
           var col = seatColour(r, s.x, s.z);
           // backrest — the seat's silhouette, rear of the pan, leaning back a touch
           put("seat", {
@@ -762,6 +782,33 @@ CBZ.arenaVenue = {
           }
           seatRecords.push({ x: s.x, y: dy, z: s.z, yaw: s.yaw + Math.PI, row: r, tier: tI });
         });
+        closeFrameRun();
+        for (var fri = 0; fri < frameRuns.length; fri++) {
+          var run = frameRuns[fri];
+          for (var fj = 0; fj < run.length; fj += 3) {
+            var fend = Math.min(run.length, fj + 3);
+            var fx = 0, fz = 0, fnx = 0, fnz = 0, flen = 0;
+            for (var fk = fj; fk < fend; fk++) {
+              fx += run[fk].x; fz += run[fk].z;
+              fnx += run[fk].nx; fnz += run[fk].nz;
+              flen += run[fk].len;
+            }
+            var fcount = fend - fj, fn = Math.hypot(fnx, fnz) || 1;
+            fx = fx / fcount + fnx / fn * 0.19;
+            fz = fz / fcount + fnz / fn * 0.19;
+            var fyaw = yawOf(fnx / fn, fnz / fn);
+            var postH = Math.max(0.08, SEAT_CUSH - 0.10);
+            // rail top meets the backrest bottom; pedestal top meets rail bottom
+            put("seatframe", {
+              x: fx, y: dy + SEAT_CUSH - 0.05, z: fz,
+              sx: flen + 0.04, sy: 0.10, sz: 0.12, ry: fyaw
+            });
+            put("seatframe", {
+              x: fx, y: dy + postH * 0.5, z: fz,
+              sx: 0.12, sy: postH, sz: 0.12, ry: fyaw
+            });
+          }
+        }
         // WHY THE SEATS THEMSELVES ARE NOT COLLIDERS — this was tried and the
         // MATH REFUSED IT, which is worth recording so nobody tries again.
         // Making each row's seat bank solid (so you cannot cross the rows, as
@@ -812,7 +859,10 @@ CBZ.arenaVenue = {
       for (var r2 = 1; r2 < ROWS; r2++) {
         if (crossRow(r2)) railRing(deckFront(r2) - 0.12, rowY(r2), 0.98, true);
       }
-      railRing(D_TOP + 0.25, TOP_Y, 1.04, false);
+      // The guard stands ON the final deck. At D_TOP + 0.25 its feet were
+      // already beyond that deck's rear edge, leaving seven floating rail
+      // components around the bowl.
+      railRing(D_TOP - 0.08, TOP_Y, 1.04, false);
       // solid back wall behind the top row — you cannot step off the bowl
       ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.4, { pitch: 5.0, mesh: false });
     })();
@@ -930,8 +980,10 @@ CBZ.arenaVenue = {
           }
         }
         // a lit mouth so the notch reads from across the bowl
+        // End exactly on the two cheek walls (inner faces at +/- VOM_HW).
+        // The old 1.9 multiplier stopped 0.11 m short at each end.
         put("lamp", { x: pIn.x - pIn.nx * 0.4, y: CROSS_Y + 0.5, z: pIn.z - pIn.nz * 0.4,
-                      sx: VOM_HW * 1.9, sy: 0.12, sz: 0.12, ry: yaw });
+                      sx: VOM_HW * 2.0, sy: 0.12, sz: 0.12, ry: yaw });
       }
     })();
 
@@ -1065,7 +1117,9 @@ CBZ.arenaVenue = {
         put("dark", { x: s.x, y: ROOF_Y - 0.75, z: s.z, sx: s.len + 0.1, sy: 1.2, sz: 0.5, ry: s.yaw });
       });
       var BAN = [0xc22333, 0x2246c2, 0xd8a020, 0xe8e4da];
-      walkRing(CANOPY_IN + 0.4, 11.0, function (s) {
+      // +0.30 makes the banner's 0.12-deep top edge enter the 0.5-deep
+      // fascia by 0.01 m. +0.40 left a visible and structural 0.09 m air gap.
+      walkRing(CANOPY_IN + 0.30, 11.0, function (s) {
         put("banner", { x: s.x, y: ROOF_Y - 3.6, z: s.z, sx: 2.4, sy: 4.4, sz: 0.12, ry: s.yaw,
                         c: hpick(BAN, s.x, s.z, 0x71) });
       });
@@ -1093,6 +1147,10 @@ CBZ.arenaVenue = {
         for (var hgi = -1; hgi <= 1; hgi += 2) {
           put("truss", { x: CX + hgi * span, y: (GANTRY_Y + ROOF_Y) / 2, z: zz,
                          sx: 0.26, sy: Math.abs(ROOF_Y - GANTRY_Y), sz: 0.26 });
+          // The roof hanger lands between the twin z-chords. This end frame
+          // reaches both +/-0.9 chords and closes the load path to the canopy.
+          put("truss", { x: CX + hgi * span, y: GANTRY_Y, z: zz,
+                         sx: 0.30, sy: 0.30, sz: 2.1 });
         }
       }
     })();
@@ -1137,20 +1195,105 @@ CBZ.arenaVenue = {
     if (CFG.ARENA_JUMBOTRON) {
       boardTex = ctex(512, 256, function (c, w, h) { drawBoard(c, w, h, boardLines); });
       if (boardTex) {
-        var frame = new THREE.Mesh(new THREE.BoxGeometry(12.6, 6.4, 12.6), mat(0x14171d));
-        frame.position.set(CX, PY + 15.0, CZ);
+        // THIS IS FOUR DISPLAYS ON A HOLLOW CAGE, NOT A TEXTURED BLACK CUBE.
+        // The old board was literally two nested 12.6 x 6.4 x 12.6 solid boxes.
+        // It passed the load-path graph once thin trusses touched its top, but
+        // from ringside it read exactly as the owner described: one massive
+        // black square floating over the pit. A real centre-hung scoreboard has
+        // four thin outward-facing screens, an open underside, a perimeter
+        // frame and suspension you can follow with your eye all the way up.
+        var BOARD_Y = PY + 13.5;
+        var SCREEN_W = 8.6, SCREEN_H = 3.6, SCREEN_T = 0.14;
+        var FRAME_HALF = 4.5, FRAME_T = 0.24;
+        var BOARD_TOP = BOARD_Y + SCREEN_H / 2 + 0.06;
+        var BOARD_BOTTOM = BOARD_Y - SCREEN_H / 2 - 0.06;
+        var screenMat = new THREE.MeshBasicMaterial({ map: boardTex });
+        var frame = new THREE.Group();
+        frame.position.set(CX, BOARD_Y, CZ);
         frame.userData.arenaBoardFrame = true;
+        frame.userData.boardSize = {
+          width: FRAME_HALF * 2, height: BOARD_TOP - BOARD_BOTTOM,
+          depth: FRAME_HALF * 2, screens: 4
+        };
         V.add(frame);
-        var boardMesh = new THREE.Mesh(new THREE.BoxGeometry(12.2, 5.5, 12.2),
-          new THREE.MeshBasicMaterial({ map: boardTex }));
-        boardMesh.position.set(CX, PY + 15.0, CZ);
-        boardMesh.userData.arenaBoard = true;
-        V.add(boardMesh);
+
+        function boardScreen(x, z, ry, id) {
+          var t = {
+            x: x, y: BOARD_Y, z: z,
+            sx: SCREEN_W, sy: SCREEN_H, sz: SCREEN_T, ry: ry
+          };
+          var m = new THREE.Mesh(new THREE.BoxGeometry(t.sx, t.sy, t.sz), screenMat);
+          m.position.set(t.x, t.y, t.z);
+          m.rotation.y = ry;
+          m.userData.arenaBoard = true;
+          m.userData.arenaBoardFace = id;
+          V.add(m);
+          realityExtras.push({ kind: "board-screen-" + id, it: t });
+        }
+        boardScreen(CX, CZ - FRAME_HALF, 0, "north");
+        boardScreen(CX, CZ + FRAME_HALF, Math.PI, "south");
+        boardScreen(CX - FRAME_HALF, CZ, Math.PI / 2, "west");
+        boardScreen(CX + FRAME_HALF, CZ, -Math.PI / 2, "east");
+
+        // Top and bottom square rings carry every screen edge. Corner posts
+        // make the cage legible from below while leaving the centre completely
+        // open — no hidden black slab can return.
+        for (var by = -1; by <= 1; by += 2) {
+          var fy = by < 0 ? BOARD_BOTTOM : BOARD_TOP;
+          put("truss", { x: CX, y: fy, z: CZ - FRAME_HALF,
+                         sx: FRAME_HALF * 2 + FRAME_T, sy: FRAME_T, sz: FRAME_T });
+          put("truss", { x: CX, y: fy, z: CZ + FRAME_HALF,
+                         sx: FRAME_HALF * 2 + FRAME_T, sy: FRAME_T, sz: FRAME_T });
+          put("truss", { x: CX - FRAME_HALF, y: fy, z: CZ,
+                         sx: FRAME_T, sy: FRAME_T, sz: FRAME_HALF * 2 + FRAME_T });
+          put("truss", { x: CX + FRAME_HALF, y: fy, z: CZ,
+                         sx: FRAME_T, sy: FRAME_T, sz: FRAME_HALF * 2 + FRAME_T });
+        }
+        for (var fx = -1; fx <= 1; fx += 2) {
+          for (var fz = -1; fz <= 1; fz += 2) {
+            put("truss", {
+              x: CX + fx * FRAME_HALF, y: BOARD_Y, z: CZ + fz * FRAME_HALF,
+              sx: FRAME_T, sy: BOARD_TOP - BOARD_BOTTOM + FRAME_T, sz: FRAME_T
+            });
+          }
+        }
+
+        // A centre-hung board needs a VISIBLE LOAD PATH. Two bridge chords span
+        // the arena's existing north/south gantries, while four long rods land
+        // on crossbars in the scoreboard's top cage. The previous corrected
+        // graph used 0.38 m hanger stubs, technically connected but visually
+        // useless; lowering the lighter board exposes ~3 m of suspension.
+        var HANGER_X = 3.6, HANGER_Z = 3.6;
         for (var hb = -1; hb <= 1; hb += 2) {
-          put("truss", { x: CX + hb * 4.5, y: (PY + 18.2 + GANTRY_Y) / 2, z: CZ - 22,
-                         sx: 0.14, sy: Math.abs(GANTRY_Y - (PY + 18.2)), sz: 0.14 });
-          put("truss", { x: CX + hb * 4.5, y: (PY + 18.2 + GANTRY_Y) / 2, z: CZ + 22,
-                         sx: 0.14, sy: Math.abs(GANTRY_Y - (PY + 18.2)), sz: 0.14 });
+          put("truss", { x: CX + hb * HANGER_X, y: GANTRY_Y, z: CZ,
+                         sx: 0.30, sy: 0.30, sz: 44.3 });
+          put("truss", { x: CX + hb * HANGER_X, y: GANTRY_Y - 1.5, z: CZ,
+                         sx: 0.30, sy: 0.30, sz: 44.3 });
+          for (var hz = -1; hz <= 1; hz += 2) {
+            put("truss", {
+              x: CX + hb * HANGER_X, y: (BOARD_TOP + GANTRY_Y - 1.5) * 0.5,
+              z: CZ + hz * HANGER_Z,
+              sx: 0.22, sy: Math.max(0.22, GANTRY_Y - 1.5 - BOARD_TOP + 0.08), sz: 0.22
+            });
+          }
+        }
+        // The top crossbars receive the four rods and tie them into the square
+        // perimeter at both x edges.
+        for (var hzt = -1; hzt <= 1; hzt += 2) {
+          put("truss", { x: CX, y: BOARD_TOP, z: CZ + hzt * HANGER_Z,
+                         sx: FRAME_HALF * 2 + FRAME_T, sy: FRAME_T, sz: FRAME_T });
+        }
+        // Cross-members make the two long chords one bridge instead of two
+        // unrelated rails, with vertical web posts carrying upper to lower.
+        for (var bz = -16.5; bz <= 16.5; bz += 5.5) {
+          put("truss", { x: CX, y: GANTRY_Y, z: CZ + bz,
+                         sx: HANGER_X * 2 + 0.3, sy: 0.24, sz: 0.24 });
+          put("truss", { x: CX, y: GANTRY_Y - 1.5, z: CZ + bz,
+                         sx: HANGER_X * 2 + 0.3, sy: 0.24, sz: 0.24 });
+          for (var bx = -1; bx <= 1; bx += 2) {
+            put("truss", { x: CX + bx * HANGER_X, y: GANTRY_Y - 0.75, z: CZ + bz,
+                           sx: 0.20, sy: 1.8, sz: 0.20 });
+          }
         }
       }
     }
@@ -1180,6 +1323,12 @@ CBZ.arenaVenue = {
         sq.add(p.x, CROSS_Y + 1.9, p.z, 1.7, 1.7, yawOf(-p.nx, -p.nz),
                u + 0.005, v + 0.005, u + 0.25 - 0.005, v + 0.25 - 0.005);
         put("steel", { x: p.x, y: CROSS_Y + 0.6, z: p.z, sx: 0.13, sy: 1.2, sz: 0.13 });
+        // A low radial base plate reaches 0.20 m onto the authored cross-aisle
+        // platform; the former naked post began 0.55 m in front of its edge.
+        put("steel", {
+          x: p.x + p.nx * 0.375, y: CROSS_Y + 0.06, z: p.z + p.nz * 0.375,
+          sx: 0.24, sy: 0.12, sz: 0.75, ry: yawOf(p.nx, p.nz)
+        });
       };
       (function () {
         var i;
@@ -1292,6 +1441,18 @@ CBZ.arenaVenue = {
             put("chair", { x: px, y: PY + SEAT_CUSH - 0.04, z: pz, sx: 0.52, sy: 0.08, sz: 0.50, ry: yaw });
             put("chair", { x: px - Math.sin(yaw) * 0.22, y: PY + SEAT_CUSH + 0.22, z: pz - Math.cos(yaw) * 0.22,
                            sx: 0.52, sy: 0.44, sz: 0.07, ry: yaw });
+            // Two slim legs carry the pan to the floor. Previously both chair
+            // pieces began 0.37 m above PY, so all 121 chairs were disconnected
+            // floating components even though their seated poses were correct.
+            var legH = Math.max(0.08, SEAT_CUSH - 0.08);
+            for (var leg = -1; leg <= 1; leg += 2) {
+              put("chair", {
+                x: px + Math.cos(yaw) * leg * 0.18,
+                y: PY + legH * 0.5,
+                z: pz - Math.sin(yaw) * leg * 0.18,
+                sx: 0.08, sy: legH, sz: 0.10, ry: yaw
+              });
+            }
             floorSlots.push({ x: px, y: PY, z: pz, yaw: yaw, row: -1, tier: 0 });
           }
         }
@@ -1435,6 +1596,53 @@ CBZ.arenaVenue = {
     applyFill();                     // an unattended bowl starts EMPTY, not full
     var meshCount = 0;
     for (var mk in pools) if (pools[mk] && pools[mk].mesh) meshCount++;
+    var supportCache = null;
+    function supportAudit(force) {
+      if (!force && supportCache) return supportCache;
+      var reality = CBZ.reality;
+      if (!reality || typeof reality.boxFromTransform !== "function" ||
+          typeof reality.supportAudit !== "function") {
+        return { available: false, reason: "systems/reality.js unavailable" };
+      }
+      var boxes = [], skip = { body: 1, head: 1, lap: 1 };
+      for (var kind in pools) {
+        if (skip[kind]) continue;       // people move; this is STATIC structure
+        var items = pools[kind].items;
+        for (var pi = 0; pi < items.length; pi++) {
+          boxes.push(reality.boxFromTransform(items[pi], {
+            id: kind + ":" + pi,
+            kind: kind
+          }));
+        }
+      }
+      for (var ei = 0; ei < realityExtras.length; ei++) {
+        var ex = realityExtras[ei];
+        boxes.push(reality.boxFromTransform(ex.it, {
+          id: ex.kind + ":" + ei,
+          kind: ex.kind
+        }));
+      }
+      // Ramps have a varying top and cannot honestly be represented by their
+      // record's one summary `top`; the horizontal platforms are exact.
+      var surfaces = [];
+      for (var si = 0; si < platforms.length; si++) {
+        if (!platforms[si].ramp) surfaces.push(platforms[si]);
+      }
+      supportCache = reality.supportAudit(boxes, {
+        groundY: PY,
+        groundEps: 0.12,
+        surfaces: surfaces,
+        surfaceEps: 0.205,          // the visual deck slabs are 0.18 m thick
+        surfacePenetration: 0.205,
+        contactEps: 0.08,
+        cell: 3,
+        surfaceCell: 6,
+        sampleLimit: 20
+      });
+      supportCache.available = true;
+      supportCache.scope = "arena static box primitives; crowd proxies excluded";
+      return supportCache;
+    }
     return {
       root: V,
       seatSlots: seatSlots,
@@ -1444,6 +1652,7 @@ CBZ.arenaVenue = {
       colliders: colliders,
       platforms: platforms,
       lights: lights,
+      supportAudit: supportAudit,
       metrics: {
         tiers: TIERS, rowsPerTier: RPT, rows: ROWS,
         seats: seatRecords.length + floorSlots.length,

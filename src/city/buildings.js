@@ -114,6 +114,53 @@
   // you can drive straight THROUGH the hole — while a few glass shards rain
   // down. One shared translucent material + shard geometry keep it cheap.
   const cityGlass = [], cityShards = [];
+  // Ground-front glass is a measurable architectural promise, not a camera
+  // impression. `role` is stamped only by storefront/showroom/garage frontage
+  // recipes that intentionally meet the floor; upper windows and sill windows
+  // are outside this invariant.
+  CBZ.cityGlassRealityAudit = function () {
+    let frontagePanes = 0, groundPanes = 0, upperPanes = 0, colliderMissing = 0;
+    const byRole = {}, stacks = new Map();
+    for (let i = 0; i < cityGlass.length; i++) {
+      const gp = cityGlass[i];
+      if (!gp.frontageRole) continue;
+      frontagePanes++;
+      const bottom = gp.y - gp.hh;
+      if (Math.abs(bottom) <= 0.025) groundPanes++;
+      else if (bottom > 0.025) upperPanes++;
+      if (!gp.col) colliderMissing++;
+      byRole[gp.frontageRole] = (byRole[gp.frontageRole] || 0) + 1;
+      // A floor-to-header wall is a vertical GRID: only its lowest pane should
+      // touch grade. Group equal X/Z/span panes into one mullion column and test
+      // the bottom of the whole column, rather than falsely calling every upper
+      // pane a floating storefront.
+      const key = gp.frontageRole + "|" + gp.x.toFixed(3) + "|" + gp.z.toFixed(3)
+        + "|" + gp.hw.toFixed(3) + "|" + gp.hd.toFixed(3);
+      const st = stacks.get(key);
+      if (!st || bottom < st.bottom) stacks.set(key, {
+        role: gp.frontageRole, x: gp.x, z: gp.z, bottom
+      });
+    }
+    let groundColumns = 0, offGradeColumns = 0, maxGroundError = 0;
+    const samples = [];
+    stacks.forEach(function (st) {
+      const err = Math.abs(st.bottom);
+      if (err <= 0.025) groundColumns++;
+      else {
+        offGradeColumns++;
+        if (err > maxGroundError) maxGroundError = err;
+        if (samples.length < 8) samples.push({
+          role: st.role, x: +st.x.toFixed(2), z: +st.z.toFixed(2),
+          bottom: +st.bottom.toFixed(3)
+        });
+      }
+    });
+    return {
+      frontagePanes, frontageColumns: stacks.size, groundPanes, upperPanes,
+      groundColumns, offGradeColumns, colliderMissing,
+      maxGroundError: +maxGroundError.toFixed(3), byRole, samples
+    };
+  };
   let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
   // THE reference glass — now sourced from CBZ.glass() so the cockpit, the
@@ -625,6 +672,7 @@
     const rec = { mesh: null, pool: null, inst: -1, litPool: null, litId: -1, lit: false,
       tint: (o.tint || 0) % GLASS_TINTS,
       kind: (allowMirror && o.kind === "reflective") ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
+      frontageRole: o.role || "",
       x: ox + lx, y: ly, z: oz + lz, span: Math.max(pw, pd) * 0.5, hw: pw / 2, hh: ph / 2, hd: pd / 2,
       shattered: false, col: null };
     if (o.external) {
@@ -2680,26 +2728,30 @@
       const ly = FH / 2;
       const GW = Math.min(3.6, (f.horiz ? w : d) * 0.42);   // garage opening width
       const HDR = FH - 0.9;                                   // header bottom
+      const glassY = HDR / 2;                                 // bottom = 0, top = HDR
       if (f.horiz) {
         const zz = f.z, off = (f.s === 0 ? 0.06 : -0.06);
         lbox(-w / 2 + 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
         lbox(w / 2 - 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
-        lbox(0, HDR + (FH - HDR) / 2, zz, GW + 0.5, FH - HDR, WT, color, { solid: true, los: true });   // header (drive under)
+        // One continuous head beam carries the whole frontage: garage lintel
+        // plus both glass bays. The former garage-only header left the panes
+        // ending in open air at their top edge.
+        lbox(0, HDR + (FH - HDR) / 2, zz, w - 0.7, FH - HDR, WT, color, { solid: true, los: true });
         lbox(0, HDR - 0.5, zz + off, GW - 0.3, 0.9, 0.14, 0x8a93a0, { cast: false });                   // rolled-up door
         for (let s = 0; s < 4; s++) lbox(0, HDR - 0.2 - s * 0.2, zz + off * 1.2, GW - 0.4, 0.05, 0.18, 0x6b7480, { cast: false });
         const a = -w / 2 + 0.7, bb = -GW / 2 - 0.15, cxL = (a + bb) / 2, wL = bb - a;
-        gridGlass(cxL, ly, zz, wL, FH * 0.86, 0.07, true, { solid: true });
-        gridGlass(-cxL, ly, zz, wL, FH * 0.86, 0.07, true, { solid: true });
+        gridGlass(cxL, glassY, zz, wL, HDR, 0.07, true, { solid: true, kind: "clear", role: "showroom" });
+        gridGlass(-cxL, glassY, zz, wL, HDR, 0.07, true, { solid: true, kind: "clear", role: "showroom" });
       } else {
         const xx = f.x, off = (f.s === 2 ? 0.06 : -0.06);
         lbox(xx, ly, -d / 2 + 0.35, WT, FH, 0.7, color, wallOpt);
         lbox(xx, ly, d / 2 - 0.35, WT, FH, 0.7, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, GW + 0.5, color, { solid: true, los: true });
+        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - 0.7, color, { solid: true, los: true });
         lbox(xx + off, HDR - 0.5, 0, 0.14, 0.9, GW - 0.3, 0x8a93a0, { cast: false });
         for (let s = 0; s < 4; s++) lbox(xx + off * 1.2, HDR - 0.2 - s * 0.2, 0, 0.18, 0.05, GW - 0.4, 0x6b7480, { cast: false });
         const a = -d / 2 + 0.7, bb = -GW / 2 - 0.15, czL = (a + bb) / 2, dL = bb - a;
-        gridGlass(xx, ly, czL, dL, FH * 0.86, 0.07, false, { solid: true });
-        gridGlass(xx, ly, -czL, dL, FH * 0.86, 0.07, false, { solid: true });
+        gridGlass(xx, glassY, czL, dL, HDR, 0.07, false, { solid: true, kind: "clear", role: "showroom" });
+        gridGlass(xx, glassY, -czL, dL, HDR, 0.07, false, { solid: true, kind: "clear", role: "showroom" });
       }
     }
 
@@ -2735,7 +2787,7 @@
         if (side > 1.0) {
           const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
           for (const fc of [fcx, fcx2]) {
-            gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear" });
+            gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
           }
         } else {
           // too narrow to glaze cleanly: seal each flank with a solid wall span so
@@ -2757,7 +2809,7 @@
         if (side > 1.0) {
           const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
           for (const fc of [fcz, fcz2]) {
-            gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear" });
+            gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
           }
         } else {
           const flw = (d - DOORW) / 2 - 0.7;
@@ -2781,26 +2833,27 @@
       const span = f.horiz ? w : d;
       const GW = Math.min(5.0, span * 0.52);     // drive-in opening width
       const HDR = FH - 0.85;                       // header bottom (clearance)
+      const glassY = HDR / 2;                      // floor-to-head-beam glazing
       const post = 0.85;
       if (f.horiz) {
         const zz = f.z;
         lbox(-w / 2 + post / 2, ly, zz, post, FH, WT, color, wallOpt);
         lbox(w / 2 - post / 2, ly, zz, post, FH, WT, color, wallOpt);
-        lbox(0, HDR + (FH - HDR) / 2, zz, GW + 0.6, FH - HDR, WT, color, { solid: true, los: true });
+        lbox(0, HDR + (FH - HDR) / 2, zz, w - post, FH - HDR, WT, color, { solid: true, los: true });
         const a = -w / 2 + post, bb = -GW / 2 - 0.2, cxL = (a + bb) / 2, wL = bb - a;
         if (wL > 0.5) {
-          gridGlass(cxL, ly, zz, wL, FH * 0.84, 0.06, true, { solid: true });
-          gridGlass(-cxL, ly, zz, wL, FH * 0.84, 0.06, true, { solid: true });
+          gridGlass(cxL, glassY, zz, wL, HDR, 0.06, true, { solid: true, kind: "clear", role: "garage-front" });
+          gridGlass(-cxL, glassY, zz, wL, HDR, 0.06, true, { solid: true, kind: "clear", role: "garage-front" });
         }
       } else {
         const xx = f.x;
         lbox(xx, ly, -d / 2 + post / 2, WT, FH, post, color, wallOpt);
         lbox(xx, ly, d / 2 - post / 2, WT, FH, post, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, GW + 0.6, color, { solid: true, los: true });
+        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - post, color, { solid: true, los: true });
         const a = -d / 2 + post, bb = -GW / 2 - 0.2, czL = (a + bb) / 2, dL = bb - a;
         if (dL > 0.5) {
-          gridGlass(xx, ly, czL, dL, FH * 0.84, 0.06, false, { solid: true });
-          gridGlass(xx, ly, -czL, dL, FH * 0.84, 0.06, false, { solid: true });
+          gridGlass(xx, glassY, czL, dL, HDR, 0.06, false, { solid: true, kind: "clear", role: "garage-front" });
+          gridGlass(xx, glassY, -czL, dL, HDR, 0.06, false, { solid: true, kind: "clear", role: "garage-front" });
         }
       }
     }

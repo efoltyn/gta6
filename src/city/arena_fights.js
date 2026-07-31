@@ -218,6 +218,11 @@ var FACE_CLEAR=FIRE_STANDOFF;        // nothing stands closer to the wall than t
 var STALL_W=2.74, STALL_D=5.49, AISLE_W=7.32;
 
 var arenaRoot=null, venue=null;
+// The bowl owns its own structural graph in arena_venue.js. This file keeps a
+// second ledger for the visible fight surfaces it authors, then arenaSupportAudit
+// combines both owners. Without this ledger a green arena audit only proved the
+// stands — the ring, cage and pit were never inspected at all.
+var fightRealityData=null, fightSupportCache=null;
 var siteInfo=null;                   // {fencePanels, gates, bays, keepouts, park:[…]}
 var redCh=null, blueCh=null, refCh=null;
 
@@ -333,6 +338,7 @@ function eventNow(){
 
 // ================================================================ THE VENUE
 CBZ.addLandmass(function(city){
+  fightRealityData=null; fightSupportCache=null;
   if(!CFG.ARENA_FIGHTS)return null;
   var root=city.root; arenaRoot=root;
   var _s=771; function rng(){_s=(_s*1103515245+12345)&0x7fffffff;return _s/0x7fffffff;}
@@ -386,6 +392,26 @@ CBZ.addLandmass(function(city){
   root.add(island);
 
   var concrete=[],gold=[],white=[],redP=[],blueP=[],dark=[],rail=[],steel=[],sandBits=[];
+  var fightRealityExtras=[];
+  var realityPools={
+    concrete:concrete,gold:gold,white:white,red:redP,blue:blueP,
+    dark:dark,rail:rail,steel:steel,sandbits:sandBits
+  };
+  function realityMark(){
+    var out={};
+    for(var k in realityPools)out[k]=realityPools[k].length;
+    return out;
+  }
+  function realityTagSince(mark,scope){
+    for(var k in realityPools){
+      var items=realityPools[k],from=mark[k]||0;
+      for(var i=from;i<items.length;i++)items[i]._arenaRealityKind=scope+"-"+k;
+    }
+  }
+  function realityExtra(kind,it){
+    fightRealityExtras.push({kind:kind,it:it});
+    return it;
+  }
   concrete.push({x:CW_CX,y:CW_Y-0.6,z:CZ,sx:CW_X1-CW_X0,sy:1.2,sz:16});             // causeway deck
   concrete.push({x:CW_CX,y:CW_Y+0.35,z:CZ-7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});       // rails
   concrete.push({x:CW_CX,y:CW_Y+0.35,z:CZ+7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});
@@ -445,6 +471,7 @@ CBZ.addLandmass(function(city){
   // ======================================================== BOXING RING ====
   // Apron deck + skirt + branded canvas + 4 posts with turnbuckles + 3 sagging
   // rope rows + corner pads + stools + a walk-up stair that is a REAL ramp.
+  var ringRealityMark=realityMark();
   (function(){
     var deckTop=RY, deckBase=PY;
     concrete.push({x:RX,y:(deckBase+deckTop)/2,z:RZ,sx:RING_APRON*2,sy:deckTop-deckBase,sz:RING_APRON*2});
@@ -472,6 +499,10 @@ CBZ.addLandmass(function(city){
     canvasTop.receiveShadow=true;
     canvasTop.userData.arenaCanvas=true;
     root.add(canvasTop);
+    realityExtra("ring-canvas",{
+      x:RX,y:RY+0.03,z:RZ,
+      sx:RING_APRON*2-0.3,sy:0.09,sz:RING_APRON*2-0.3
+    });
     // solid apron (height-gated so you can climb the stair onto it) + deck
     solid(RX-RING_APRON,RZ-RING_APRON,RX+RING_APRON,RZ+RING_APRON,PY,RY-0.05);
     plat(RX-RING_APRON,RZ-RING_APRON,RX+RING_APRON,RZ+RING_APRON,RY);
@@ -525,15 +556,21 @@ CBZ.addLandmass(function(city){
     plat(RX-1.3,RZ+RING_APRON-0.1,RX+1.3,RZ+RING_APRON+2.3,RY,
          {z0:RZ+RING_APRON+2.3,z1:RZ+RING_APRON-0.1,y0:PY,y1:RY});
   })();
+  realityTagSince(ringRealityMark,"ring");
 
   // =========================================================== MMA CAGE ====
   // Octagon mat + branded floor disc + 8 posts + chain-link fence (ONE merged
   // alpha-tested quad batch, not solid boxes) + padded top rail + a real gate.
+  var cageRealityMark=realityMark();
   (function(){
     var cageBase=new THREE.Mesh(new THREE.CylinderGeometry(CAGE_MAT_R,CAGE_MAT_R+0.3,CGY-PY,8),mat(0x30343c));
     cageBase.rotation.y=Math.PI/8;
     cageBase.position.set(CGX,(PY+CGY)/2,CGZ);
     cageBase.userData.arenaCageBase=true; root.add(cageBase);
+    realityExtra("cage-base",{
+      x:CGX,y:(PY+CGY)/2,z:CGZ,
+      sx:(CAGE_MAT_R+0.3)*2,sy:CGY-PY,sz:(CAGE_MAT_R+0.3)*2
+    });
     if(ctex&&THREE.CircleGeometry){
       var mt=ctex(512,512,function(c,w,h){
         c.fillStyle="#2c3038"; c.fillRect(0,0,w,h);
@@ -550,6 +587,10 @@ CBZ.addLandmass(function(city){
           new THREE.MeshLambertMaterial({map:mt}));
         md.rotation.x=-Math.PI/2; md.position.set(CGX,CGY+0.02,CGZ);
         md.receiveShadow=true; md.userData.arenaCageMat=true; root.add(md);
+        realityExtra("cage-mat",{
+          x:CGX,y:CGY+0.02,z:CGZ,
+          sx:(CAGE_MAT_R-0.25)*2,sy:0.04,sz:(CAGE_MAT_R-0.25)*2
+        });
       }
     }
     // Mat edge is solid EXCEPT the doorway strip on the -x side, where the
@@ -585,9 +626,17 @@ CBZ.addLandmass(function(city){
         steel.push({x:mx-1.1,y:CGY+FENCE_H/2,z:mz,sx:pw*0.92,sy:0.1,sz:0.1,ry:yaw+0.85});
         steel.push({x:mx-1.1,y:CGY+FENCE_H,z:mz,sx:pw*0.92,sy:0.12,sz:0.12,ry:yaw+0.85});
         if(chainQ)chainQ.add(mx-1.1,CGY+FENCE_H/2,mz,pw*0.9,FENCE_H,yaw+0.85,0,0,pw*0.9/0.34,FENCE_H/0.34);
+        realityExtra("cage-gate-fence",{
+          x:mx-1.1,y:CGY+FENCE_H/2,z:mz,
+          sx:pw*0.9,sy:FENCE_H,sz:0.04,ry:yaw+0.85
+        });
         rail.push({x:mx-1.1,y:CGY+FENCE_H+0.06,z:mz,sx:pw*0.92,sy:0.16,sz:0.2,ry:yaw+0.85});
       }else{
         if(chainQ)chainQ.add(mx,CGY+FENCE_H/2,mz,pw,FENCE_H,yaw,0,0,pw/0.34,FENCE_H/0.34);
+        realityExtra("cage-fence",{
+          x:mx,y:CGY+FENCE_H/2,z:mz,
+          sx:pw,sy:FENCE_H,sz:0.04,ry:yaw
+        });
         rail.push({x:mx,y:CGY+FENCE_H+0.06,z:mz,sx:pw,sy:0.18,sz:0.22,ry:yaw});    // padded top rail
         steel.push({x:mx,y:CGY+0.06,z:mz,sx:pw,sy:0.12,sz:0.14,ry:yaw});           // kick plate
         solidYaw(mx,mz,pw,0.28,yaw,CGY,CGY+FENCE_H);                               // you cannot walk through it
@@ -612,13 +661,19 @@ CBZ.addLandmass(function(city){
       }
     }
   })();
+  realityTagSince(cageRealityMark,"cage");
 
   // ============================================================ BEAST PIT ==
   // A walled sand circle the crowd looks down into over a padded rail.
+  var pitRealityMark=realityMark();
   (function(){
     var sand=new THREE.Mesh(new THREE.CylinderGeometry(PIT_SAND_R,PIT_SAND_R,0.28,24),mat(0xd8c07a));
     sand.position.set(PX,PITY-0.12,PZ);
     sand.receiveShadow=true; sand.userData.arenaPitSand=true; root.add(sand);
+    realityExtra("pit-sand",{
+      x:PX,y:PITY-0.12,z:PZ,
+      sx:PIT_SAND_R*2,sy:0.28,sz:PIT_SAND_R*2
+    });
     // scattered stones / bones, deterministic
     for(var si=0;si<26;si++){
       var sa=si*2.399963, sr=1.4+((si*37)%60)/60*(PIT_SAND_R-2.2);
@@ -647,6 +702,7 @@ CBZ.addLandmass(function(city){
       solid(lx-0.25,lz-0.25,lx+0.25,lz+0.25,PY,PY+4.8);
     }
   })();
+  realityTagSince(pitRealityMark,"pit");
 
   // ============================================================== THE SITE ==
   // The arrival sequence, built OUTWARD from the building on ground that was
@@ -1236,6 +1292,23 @@ CBZ.addLandmass(function(city){
       }
     }
   })();
+
+  // Snapshot the authored transforms before the pools are flushed. Only items
+  // tagged by the three surface blocks above participate; arrival/site props
+  // have a separate ownership problem and cannot hide a disconnected ring part
+  // by touching it accidentally. The bowl's declared floor is the physical
+  // anchor all three surfaces stand on; read its dimensions from the building
+  // owner so a future resize cannot leave this audit checking the old room.
+  var realityFloorX=(venue&&venue.metrics&&venue.metrics.floorX)||52;
+  var realityFloorZ=(venue&&venue.metrics&&venue.metrics.floorZ)||70;
+  fightRealityData={
+    pools:realityPools,
+    extras:fightRealityExtras,
+    surfaces:[{
+      minX:CX-realityFloorX/2,maxX:CX+realityFloorX/2,
+      minZ:CZ-realityFloorZ/2,maxZ:CZ+realityFloorZ/2,top:PY
+    }]
+  };
 
   // ---- flush the shared instanced pools -----------------------------------
   instBoxes(concrete,mat(0x9aa0aa));
@@ -2054,9 +2127,108 @@ function tickPanic(dt,pp){
 //                "Spectator") or a shrug, rather than a trade / org / condition.
 //   spawnsInView — a spectator rig that became visible inside the camera's
 //                padded screen area. Never let the player watch a body appear.
+CBZ.arenaFightSupportAudit=function(force){
+  if(!force&&fightSupportCache)return fightSupportCache;
+  var reality=CBZ.reality;
+  if(!fightRealityData||!reality||typeof reality.boxFromTransform!=="function"||
+     typeof reality.supportAudit!=="function"){
+    return {available:false,reason:"arena fight geometry/support audit unavailable"};
+  }
+  var boxes=[],pools=fightRealityData.pools||{};
+  for(var poolName in pools){
+    var items=pools[poolName]||[];
+    for(var pi=0;pi<items.length;pi++){
+      var it=items[pi],kind=it&&it._arenaRealityKind;
+      if(!kind)continue;
+      boxes.push(reality.boxFromTransform(it,{
+        id:kind+":"+pi,
+        kind:kind
+      }));
+    }
+  }
+  var extras=fightRealityData.extras||[];
+  for(var ei=0;ei<extras.length;ei++){
+    var ex=extras[ei];
+    boxes.push(reality.boxFromTransform(ex.it,{
+      id:ex.kind+":"+ei,
+      kind:ex.kind
+    }));
+  }
+  fightSupportCache=reality.supportAudit(boxes,{
+    surfaces:fightRealityData.surfaces,
+    surfaceEps:0.12,
+    surfacePenetration:0.12,
+    contactEps:0.08,
+    cell:2,
+    surfaceCell:4,
+    sampleLimit:24,
+    componentSampleLimit:32
+  });
+  fightSupportCache.available=true;
+  fightSupportCache.scope="boxing ring, MMA cage and beast pit static geometry";
+  return fightSupportCache;
+};
+function combineSupportAudits(building,fights){
+  var list=[],i,k;
+  if(building&&building.available)list.push({name:"venue",audit:building});
+  if(fights&&fights.available)list.push({name:"fights",audit:fights});
+  if(!list.length){
+    return {available:false,reason:(building&&building.reason)||
+      (fights&&fights.reason)||"arena support audits unavailable"};
+  }
+  var out={
+    available:true,
+    scope:"arena building plus fight surfaces",
+    total:0,supportedCount:0,unsupportedCount:0,
+    components:0,unsupportedComponents:0,directAnchors:0,
+    contacts:0,candidatePairs:0,buckets:0,large:0,ms:0,
+    unsupportedByKind:{},samples:[],sampleByKind:{},componentSamples:[],
+    venue:building,fights:fights
+  };
+  for(i=0;i<list.length;i++){
+    var name=list[i].name,a=list[i].audit;
+    out.total+=a.total|0;
+    out.supportedCount+=a.supportedCount|0;
+    out.unsupportedCount+=a.unsupportedCount|0;
+    out.components+=a.components|0;
+    out.unsupportedComponents+=a.unsupportedComponents|0;
+    out.directAnchors+=a.directAnchors|0;
+    out.contacts+=a.contacts|0;
+    out.candidatePairs+=a.candidatePairs|0;
+    out.buckets+=a.buckets|0;
+    out.large+=a.large|0;
+    out.ms+=+a.ms||0;
+    for(k in a.unsupportedByKind)
+      out.unsupportedByKind[k]=(out.unsupportedByKind[k]||0)+a.unsupportedByKind[k];
+    var ss=a.samples||[];
+    for(var si=0;si<ss.length&&out.samples.length<32;si++){
+      var sample={scope:name};
+      for(k in ss[si])sample[k]=ss[si][k];
+      out.samples.push(sample);
+    }
+    for(k in a.sampleByKind)if(!out.sampleByKind[k])
+      out.sampleByKind[k]=a.sampleByKind[k];
+    var cs=a.componentSamples||[];
+    for(var ci=0;ci<cs.length&&out.componentSamples.length<40;ci++){
+      var component={scope:name};
+      for(k in cs[ci])component[k]=cs[ci][k];
+      out.componentSamples.push(component);
+    }
+  }
+  out.ms=+out.ms.toFixed(2);
+  return out;
+}
+CBZ.arenaSupportAudit=function(force){
+  var building=(venue&&typeof venue.supportAudit==="function")
+    ?venue.supportAudit(!!force)
+    :{available:false,reason:"arena venue/support audit unavailable"};
+  return combineSupportAudits(building,CBZ.arenaFightSupportAudit(!!force));
+};
 CBZ.arenaAudit=function(){
   var M=(venue&&venue.metrics)||{};
   var cs=(venue&&venue.crowdState)?venue.crowdState():{fill:0,shown:0,total:0};
+  var reality=CBZ.arenaSupportAudit(false);
+  var fightReality=reality.fights||{available:false};
   var peds=CBZ.cityPeds||[];
   var rigs=0,seated=0,misposed=0,shrugs=0,inView=0,attending=0;
   var ACT={"Fight Fan":1,"Race Fan":1,"Spectator":1,"Fan":1,"Audience":1,
@@ -2098,6 +2270,15 @@ CBZ.arenaAudit=function(){
     colliders:M.colliders|0, standColliders:M.standColliders|0,
     platforms:M.platforms|0, aisleRamps:M.aisleRamps|0,
     seatCushion:M.seatCushion||0,
+    realityBoxes:reality.available?(reality.total|0):0,
+    floatingGeometry:reality.available?(reality.unsupportedCount|0):-1,
+    floatingComponents:reality.available?(reality.unsupportedComponents|0):-1,
+    floatingKinds:reality.available?reality.unsupportedByKind:{},
+    realityMs:reality.available?(reality.ms||0):0,
+    fightRealityBoxes:fightReality.available?(fightReality.total|0):0,
+    fightFloatingGeometry:fightReality.available?(fightReality.unsupportedCount|0):-1,
+    fightFloatingComponents:fightReality.available?(fightReality.unsupportedComponents|0):-1,
+    fightFloatingKinds:fightReality.available?fightReality.unsupportedByKind:{},
     drawCallEst:(M.drawCallEst|0)+live
   };
 };

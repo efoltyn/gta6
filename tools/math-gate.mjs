@@ -527,11 +527,30 @@ const PASS = `(() => {
     }
     if (CBZ.arenaAudit) {
       const ar = CBZ.arenaAudit();
-      out.arena = ar.tiers + "t " + ar.seats + "seats fill=" + (ar.occupancyPct||0) + "% rigs=" + ar.rigs + " misposed=" + ar.misposed + " shrug=" + ar.shrugRoles + " inView=" + ar.spawnsInView;
+      out.arena = ar.tiers + "t " + ar.seats + "seats fill=" + (ar.occupancyPct||0) + "% rigs=" + ar.rigs + " misposed=" + ar.misposed + " shrug=" + ar.shrugRoles + " inView=" + ar.spawnsInView + " float=" + ar.floatingGeometry + "/" + ar.floatingComponents + " fight=" + ar.fightRealityBoxes + ":" + ar.fightFloatingGeometry;
       if (ar.misposed > 0) out.fails.push("SEATED BODIES MISPOSED: " + ar.misposed);
       if (ar.shrugRoles > 0) out.fails.push("SPECTATORS WITH AN ACTIVITY AS THEIR ROLE: " + ar.shrugRoles);
       if (ar.spawnsInView > 0) out.fails.push("SPAWNS INSIDE THE VIEW CONE: " + ar.spawnsInView);
       if (ar.minCValue != null && ar.minCValue < 0.06) out.fails.push("STADIUM SIGHTLINE FAILS: minCValue " + ar.minCValue);
+      // A zero can lie if the consumer silently stops submitting geometry.
+      // The dedicated fight ledger currently owns 264 visible primitives and
+      // may only grow without an intentional baseline review.
+      if (ar.fightRealityBoxes < 264) out.fails.push("FIGHT ARENA SUPPORT GRAPH LOST GEOMETRY: " + ar.fightRealityBoxes + "/264 primitives");
+      if (ar.fightFloatingGeometry !== 0) out.fails.push("FIGHT ARENA GEOMETRY HAS NO LOAD PATH: " + ar.fightFloatingGeometry + " pieces in " + ar.fightFloatingComponents + " components " + JSON.stringify(ar.fightFloatingKinds || {}));
+      if (ar.floatingGeometry !== 0) out.fails.push("ARENA GEOMETRY HAS NO LOAD PATH: " + ar.floatingGeometry + " pieces in " + ar.floatingComponents + " components " + JSON.stringify(ar.floatingKinds || {}));
+    }
+    if (CBZ.cityGlassRealityAudit) {
+      const fg = CBZ.cityGlassRealityAudit();
+      out.frontGlass = fg.groundColumns + "/" + fg.frontageColumns + " columns grounded panes=" + fg.frontagePanes + " noCollider=" + fg.colliderMissing;
+      if (!fg.frontagePanes) out.fails.push("NO FLOOR-TO-GROUND FRONTAGE GLASS WAS AUTHORED");
+      if (fg.offGradeColumns > 0) out.fails.push("SHOWROOM/STOREFRONT GLASS MISSES THE FLOOR: " + fg.offGradeColumns + " columns maxError=" + fg.maxGroundError + " " + JSON.stringify(fg.samples || []));
+      if (fg.colliderMissing > 0) out.fails.push("FLOOR-TO-GROUND FRONTAGE GLASS IS NOT PHYSICAL: " + fg.colliderMissing);
+    }
+    if (CBZ.cityElevatorAudit) {
+      const el = CBZ.cityElevatorAudit();
+      out.elevators = el.elevators + " lifts failures=" + el.failures + " shafts=" + el.missingShafts + " slabs=" + el.uncarvedSlabs;
+      if (!el.elevators) out.fails.push("NO FUNCTIONAL CITY ELEVATORS WERE BUILT");
+      if (el.failures) out.fails.push("ELEVATOR BUILDING CONTRACT FAILED: " + el.failures + " " + JSON.stringify(el.samples || []));
     }
     if (CBZ.cityCrowdSpawnAudit) { const cs = CBZ.cityCrowdSpawnAudit(); out.crowdSpawn = "inView=" + cs.spawnsInView + " deferred=" + cs.deferred;
       if (cs.spawnsInView > 0) out.fails.push("CROWD PROMOTED A RIG IN VIEW: " + cs.spawnsInView); }
@@ -747,7 +766,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
   tmark(`${label}: pools ${r.pools || "-"}`);
-  tmark(`${label}: arena ${r.arena || "-"}`);
+  tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   return r;
