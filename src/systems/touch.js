@@ -105,6 +105,11 @@
                                // exactly bridges the 12px gap to AIM/SCOPE so
                                // there is NO dead zone between the buttons
   const SLIDE_PAD_OUT = 26;    // …and this much before a slide LEAVES fire
+  // AIM's dedicated swipe-UP shot is intentionally shorter than a full
+  // control-to-control roll. At 18px it clears ordinary thumb jitter but fires
+  // before the drag can pitch the iPad camera very far; 10px release hysteresis
+  // keeps a held burst stable. SCOPE keeps the older, longer threshold.
+  const AIM_UP_TRIGGER = 18, AIM_UP_RELEASE = 10;
   const LOOK_STALE_MS = 3000;  // look watchdog: no move this long = ghost
   const WALK_MAX = 46;        // don't set off on a cross-map trek from one tap
   const WALK_TIMEOUT = 14;    // give up (moving target / stuck) after this many s
@@ -157,6 +162,12 @@
     if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_HUD_TIDY !== false) document.body.classList.add("touch-tidy");
     build();
   }
+  // The interaction renderers load on both phones and tablets. This one shared
+  // read decides when the iPad-only docked grammar is available, so they never
+  // each invent a different viewport cutoff.
+  CBZ.touchInteractionDocked = function () {
+    return !!(enabled && innerWidth >= 700 && innerHeight >= 550);
+  };
 
   function build() {
     if (built) return; built = true;
@@ -323,12 +334,17 @@
         const r = rec.rect, p = rec.fireIn ? SLIDE_PAD_OUT : SLIDE_PAD_IN;
         let inFire = t.clientX >= r.left - p && t.clientX <= r.right + p &&
                      t.clientY >= r.top - p && t.clientY <= r.bottom + p;
-        // TOUCH_SCOPE_UP — the owner's "from SCOPE, drag UP, not right, to shoot":
-        // the roll-onto-FIRE trigger mirrored to the vertical axis. An upward slide
-        // from the start anchor past the pad engages FIRE with the rect's own
-        // hysteresis (harder to enter than to hold). SCOPE only — AIM's reach is
-        // untouched, and it flows through the same fireIn/release/stale-sweep path.
-        if (((SCOPEUP && id === "tscope") || (AIMUP && id === "taim")) && rec.sy - t.clientY >= (rec.fireIn ? SLIDE_PAD_IN : SLIDE_PAD_OUT)) inFire = true;   // TOUCH_AIM_UP: same natural up-drag from AIM (owner: "much more natural feeling motion")
+        // The roll-onto-FIRE trigger mirrored to the vertical axis. AIM uses a
+        // short, explicit pull so shooting starts before its fine-aim drag has
+        // pitched the iPad camera far upward; SCOPE retains the older deliberate
+        // travel. Both share the same fire/refcount/release path.
+        const upRoute = (SCOPEUP && id === "tscope") || (AIMUP && id === "taim");
+        if (upRoute) {
+          const threshold = id === "taim"
+            ? (rec.fireIn ? AIM_UP_RELEASE : AIM_UP_TRIGGER)
+            : (rec.fireIn ? SLIDE_PAD_IN : SLIDE_PAD_OUT);
+          if (rec.sy - t.clientY >= threshold) inFire = true;
+        }
         if (inFire !== rec.fireIn) { rec.fireIn = inFire; fireHold(inFire);
           if (id === "taim") { const fp = document.getElementById("tfireup"); if (fp) fp.classList.toggle("fireon", inFire); } }
       }
@@ -449,6 +465,53 @@
   // deliberately return false here so their well-liked joystick stays intact.
   function carButtonsActive() {
     return !!(CBZ.touchVehicleMode && CBZ.touchVehicleMode() === "drive");
+  }
+  let interactDockSig = "";
+  function syncInteractionDock() {
+    const prisonPanel = document.querySelector("#pinteract.show");
+    const sharedPanel = document.querySelector("#interact.show:not(.pi-quiet)");
+    const panel = prisonPanel || sharedPanel;
+    if (!panel || !CBZ.touchInteractionDocked || !CBZ.touchInteractionDocked()) {
+      interactDockSig = "";
+      return;
+    }
+    const opts = prisonPanel ? prisonPanel.querySelector(".pi-row") : document.getElementById("interactOpts");
+    const choiceCount = prisonPanel
+      ? prisonPanel.querySelectorAll(".pi-choice").length
+      : (opts ? opts.children.length : 0);
+    if (!opts || !choiceCount) return;
+    // Reload is the requested first-row landmark. When the player is unarmed
+    // and that slot is absent, fall back through the neighbouring stable
+    // controls instead of leaving the choices floating in the old centre band.
+    const ids = ["treload", "tswap", "tview", "tjump"];
+    let anchor = null;
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el && el.getClientRects().length && getComputedStyle(el).visibility !== "hidden") {
+        anchor = el;
+        break;
+      }
+    }
+    if (!anchor) return;
+    const optsH = Math.max(52, opts.getBoundingClientRect().height);
+    const signature = innerWidth + "x" + innerHeight + "|" + panel.id + "|" + anchor.id + "|" +
+      choiceCount + "|" + Math.round(optsH);
+    if (signature === interactDockSig) return;
+    interactDockSig = signature;
+    const r = anchor.getBoundingClientRect();
+    const top = Math.max(72, Math.min(r.top, innerHeight - optsH - 18));
+    // Keep one straight vertical rail clear of the entire FLOW column. Reload
+    // supplies the top landmark; FIRE is wider, so its left edge supplies the
+    // safe horizontal boundary for lower rows.
+    let flowLeft = r.left;
+    for (const id of ["treload", "tswap", "tview", "tjump", "tfire"]) {
+      const el = document.getElementById(id);
+      if (!el || !el.getClientRects().length) continue;
+      flowLeft = Math.min(flowLeft, el.getBoundingClientRect().left);
+    }
+    const right = Math.max(88, innerWidth - flowLeft + 12);
+    panel.style.setProperty("--touch-interact-top", Math.round(top) + "px");
+    panel.style.setProperty("--touch-interact-right", Math.round(right) + "px");
   }
 
   // TOUCH_AIM_ASSIST: nearest lock-on candidate to the crosshair (screen centre)
@@ -1056,5 +1119,6 @@
       hm.style.display = (CBZ.lockonState && CBZ.lockonState().active) ? "" : "none";
       hm.style.opacity = (CBZ.lockonHomingOn && CBZ.lockonHomingOn()) ? "" : "0.38";
     }
+    syncInteractionDock();
   });
 })();

@@ -91,16 +91,17 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 #tbtns.tslide #taim, #tbtns.tslide #tscope { position: absolute; right: calc(100% + 12px); }
 #tbtns.tslide #taim { bottom: 16px; }     /* shoulder-to-shoulder with FIRE  */
 #tbtns.tslide #tscope { bottom: 80px; }   /* stacked just above AIM          */
-/* TOUCH_AIM_UP ghost pad: a drag-UP target that appears above AIM while the
-   aim finger is down (pointer-events none — the up-drag gesture is the input,
-   this just shows where it lands). .fireon lights it while fire is engaged. */
-#tfireup { display: none; position: absolute; right: calc(100% + 12px); bottom: 80px;
-  width: 48px; height: 48px; border-radius: 50%; align-items: center; justify-content: center;
+/* TOUCH_AIM_UP ghost pad: a short pull-tab overlapping AIM's upper rim. The
+   old target jumped above SCOPE (128px centre-to-centre), teaching an enormous
+   swipe that pitched the camera before firing. While AIM is held, SCOPE yields
+   upward and this target stays 36px from AIM's centre. */
+#tfireup { display: none; position: absolute; right: calc(100% + 18px); bottom: 58px;
+  width: 40px; height: 40px; border-radius: 50%; align-items: center; justify-content: center;
   background: rgba(30,34,44,.42); border: 1.5px dashed rgba(255,255,255,.35);
   pointer-events: none; opacity: .75; }
 #tfireup svg { width: 22px; height: 22px; stroke: rgba(255,255,255,.7); fill: none; stroke-width: 2; }
 #tbtns.aimup-live #tfireup { display: flex; }
-#tbtns.aimup-live.scope-shown #tfireup { bottom: 144px; }
+#tbtns.aimup-live.scope-shown #tscope { bottom: 110px; }
 #tbtns.aimup-live #tfireup.fireon { border-style: solid; border-color: #ff6a5e;
   background: rgba(255,80,60,.30); opacity: 1; }
 .tbtn.tjump { width: 72px; height: 72px; background: rgba(58,209,122,.42); border-color: rgba(58,209,122,.6); }
@@ -314,6 +315,137 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
   #fullMapClose { min-height: 44px; padding: 8px 14px; }
   /* keep the shared bottom panel clear of the home-indicator / rounded corner */
   #pkgPanel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
+}
+
+/* ---- iPad interaction dock ------------------------------------------------
+   The first action is aligned by touch.js with Reload (or the nearest visible
+   neighbour when unarmed). Options form one vertical rail: explanatory text
+   on the left, actual 52px+ tap buttons on the right. Phones retain the compact
+   centred card above; this geometry is deliberately tablet-only. */
+@media (min-width: 700px) and (min-height: 550px) {
+  body.touch #interact {
+    position: fixed;
+    top: var(--touch-interact-top, 42%);
+    right: var(--touch-interact-right, calc(92px + env(safe-area-inset-right, 0px)));
+    bottom: auto;
+    left: auto;
+    width: min(440px, calc(100vw - 320px));
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: translateX(8px) scale(.98);
+    transform-origin: right top;
+  }
+  body.touch #interact.show { transform: translateX(0) scale(1); }
+  body.touch #interactName {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 23px);
+    max-width: 100%;
+    overflow: hidden;
+    color: #fff;
+    font-size: 16px;
+    line-height: 20px;
+    text-align: right;
+    text-overflow: ellipsis;
+    text-shadow: 0 2px 5px #000;
+    white-space: nowrap;
+  }
+  body.touch #interactNote {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 5px);
+    width: 100%;
+    min-height: 0;
+    max-height: 14px;
+    margin: 0;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 14px;
+    text-align: right;
+    text-overflow: ellipsis;
+    text-shadow: 0 2px 4px #000;
+    white-space: nowrap;
+  }
+  body.touch #interactOpts {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  body.touch #interact .iopt.tverb {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+    min-height: 52px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    text-align: left;
+    transform: none;
+  }
+  body.touch #interact .iopt.tverb:active { transform: none; box-shadow: none; }
+  body.touch #interact .itouch-copy {
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: 10px;
+    background: linear-gradient(90deg, rgba(7,13,20,.45), rgba(7,13,20,.82));
+    text-align: right;
+    text-shadow: 0 2px 4px #000;
+  }
+  body.touch #interact .iopt.tverb .itouch-copy .ilab {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.16;
+    letter-spacing: .25px;
+  }
+  body.touch #interact .itouch-copy .isub,
+  body.touch #interact .itouch-copy .idesc {
+    display: block;
+    max-width: none;
+    margin: 3px 0 0;
+    overflow: hidden;
+    color: #cbd6e2;
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    opacity: .78;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body.touch #interact .itouch-act {
+    min-width: 106px;
+    min-height: 52px;
+    padding: 8px 13px;
+    border: 2px solid rgba(125,231,255,.65);
+    border-radius: 13px;
+    color: #effaff;
+    background: linear-gradient(180deg, rgba(38,110,150,.96), rgba(20,60,90,.96));
+    box-shadow: 0 4px 0 rgba(0,0,0,.35);
+    font: 800 14px/1 Fredoka, system-ui, sans-serif;
+    letter-spacing: .7px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body.touch #interact .itouch-act:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 rgba(0,0,0,.35);
+  }
+  body.touch #interact .iopt.tverb.tno .itouch-act {
+    border-color: rgba(255,255,255,.3);
+    color: #d2d9e1;
+    background: rgba(22,28,36,.92);
+  }
+  body.touch #interact .ihelp { display: none; }
 }
 
 /* ---- THE SPOKEN-WORD BAND ON TOUCH ---------------------------------------
