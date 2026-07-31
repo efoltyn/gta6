@@ -1873,3 +1873,259 @@ deleted it with a NO-FICTION NOTE. That is the pattern to copy.)
 - `tools/STUDIO.md` — studio.mjs subjects/modes/flags in full.
 - `PROCGEN.md` — the method behind generation (seed tree, fields, roadmap).
 - `INFINITE-WORLD.md` — chunked-world migration plan (M0–M8).
+
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 buildings, reality model, stadium, and fight-arena handoff
+
+> **AUTHORSHIP AND PUBLISHED STATE:** This is GPT/Codex's closing handoff for
+> the building-first-principles and floating-geometry conversation. The
+> implementation is published from current upstream `0f5ee94` on branch
+> **`agent/world-reality-arena-handoff`**. The code commit is **`bc448d5`**
+> (`Add world reality audits and arena support fixes`). Review that branch;
+> do not try to recover this work by staging the owner's mixed working tree.
+
+#### Why this conversation mattered
+
+The owner's original request was larger than "fix some props." They wanted the
+beautiful Gang City buildings studied from first principles, especially
+showrooms whose transparent frontage meets the floor; elevators preserved as
+real architecture; demolition understood rather than cosmetically rewritten;
+and fast reality tests that let the world model discover floating or
+overlapping authored geometry. The stadium and fight arena became the proving
+ground for that idea.
+
+The most important correction came from the owner at the end. A numeric support
+graph was green while a giant black scoreboard still plainly read as a floating
+cube. Therefore:
+
+> **A contact graph proves connectivity. It does not prove believable shape,
+> visible load paths, collider fidelity, dynamics, or visual truth.**
+
+Use math to find and prevent broad defect classes, then inspect the rendered
+result from the player's view. Neither replaces the other.
+
+#### The building grammar learned here
+
+The good buildings are good because their relationships are coherent:
+
+`floor → pane → mullion → header → room → collider → building registry`
+
+They are not good because one facade enum happens to be called "modern." The
+canonical `cityMakeBuilding` path already has the valuable primitives:
+
+- varied massing, storey count, bays, window rhythms, rooflines, materials,
+  signs, doors, rooms, colliders, and circulation;
+- hollow furnished ground-floor programs behind real openings;
+- breakable transparent panes registered to the same building record;
+- functional elevators with carved shafts and aligned ground/roof access.
+
+Future Georgian, Art Deco, industrial, mid-century, contemporary, or fantasy
+styles should be **data over this canonical grammar**—massing, structural
+rhythm, bays, openings, material, roofline, frontage, signage, program, and
+circulation—not parallel era-specific building engines.
+
+`tools/building-first-principles.md` is the detailed design note. Its proposed
+next abstraction is a face/frame grammar that expresses structural frame,
+openings, infill, glass, and attachments while continuing to emit the existing
+canonical building/collider records. Do not replace working owners with a
+second registry.
+
+#### Changes to ground-front glass
+
+`src/city/buildings.js` now makes showroom and flagship-garage glass obey the
+same exact floor-to-head-beam equation as the strongest retail storefront:
+
+- the lowest pane begins at grade;
+- the glass wall ends in one continuous physical header rather than open air;
+- storefront, showroom, and garage-front panes are tagged by role;
+- all tagged panes retain their breakable collider;
+- `CBZ.cityGlassRealityAudit()` groups vertically subdivided panes by mullion
+  column, so upper cells are not falsely called floating merely because only
+  the bottom cell touches the floor.
+
+Runtime evidence during the conversation: **2,124/2,124 frontage columns met
+grade and all 2,322 tagged panes had colliders** on seed 90210.
+
+#### Elevator ownership and invariant
+
+Do not remove elevator headhouses as "extra roof boxes." They are functional
+roof access owned by `src/city/elevators.js`.
+
+`CBZ.cityElevatorAudit()` now checks that every built lift has:
+
+- ordered ground-to-roof stops agreeing with the building shell height;
+- a reserved shaft footprint;
+- carved intermediate slabs rather than floors crossing the shaft;
+- one aligned vertical ground/roof column;
+- sealed two-leaf cab rooms with correct floor heights;
+- a matching `b.lift` record on the canonical building.
+
+Runtime evidence during the conversation: **18/18 lifts, zero contract
+failures** on seed 90210.
+
+#### Shared reality checker
+
+`src/systems/reality.js` is the canonical geometry-invariant owner added here.
+It is loaded by `index.html` and provides:
+
+- `boxFromTransform()` for exact world AABBs of the unit-box transform grammar;
+- a uniform spatial-hash broad phase instead of a global all-pairs scan;
+- `supportAudit()`: boxes are nodes, contacts are edges, and ground/authored
+  walk surfaces are anchors; an unanchored component is floating;
+- `overlapAudit()`: reports positive-volume penetrations, with a caller-owned
+  ignore rule for deliberate structural joints;
+- sampled kinds/components and candidate counts so a failure is diagnosable.
+
+The 4,000-prop scaling/property contract lives in
+`tools/test-reality-support.mjs`. During the original study, 4,000 transformed
+boxes also matched Three.js AABBs with zero mismatches. `tools/math-gate.mjs`
+ratchets the arena, fight census, ground glass, and elevator contracts.
+`tools/demolition-check.mjs` now reuses the same support definition and exits
+nonzero on an invariant failure.
+
+Do not fork another "floating prop" checker. Extend `CBZ.reality` or add a
+consumer-owned ledger that submits geometry to it.
+
+#### Ironjaw stadium/venue defects and repairs
+
+The owner called this the racing stadium; the audited structural owner in this
+thread is `src/city/arena_venue.js`, the Ironjaw bowl/venue.
+
+The first full audit exposed **202 unsupported pieces in 34 components**:
+
+- 121 ringside chairs had cushions roughly 0.37–0.45 m above the floor and no
+  legs;
+- bowl seat pans/backs sat roughly 0.36–0.45 m above their decks without a
+  frame;
+- the old scoreboard was 15.63 m from its nearest truss because hangers were
+  at `z ±22` while its shell ended near `z ±6.3`;
+- the main gantry's roof hanger stopped between twin chords, leaving a 0.75 m
+  lateral break;
+- the upper guardrail was 0.25 m beyond the final deck;
+- aisle-sign posts were 0.55 m in front of the cross-aisle;
+- vomitory light bars missed cheek walls by 0.11 m;
+- hanging banners missed their fascia by 0.09 m.
+
+Repairs add real seat frames and chair legs, bridge/hanger structure, gantry
+end frames, sign bases, and corrected mounting offsets. The venue-only graph
+then reached **48,190/48,190 supported static primitives**.
+
+#### Fight-arena coverage
+
+The first green venue audit did **not** include the fight surfaces. That was a
+coverage bug, not proof that the boxing ring, MMA cage, and beast pit were
+physical.
+
+`src/city/arena_fights.js` now owns a separate ledger for the static geometry it
+authors and exposes `CBZ.arenaFightSupportAudit()`. The combined
+`CBZ.arenaSupportAudit()` preserves the venue/fight split in its result. The
+math gate requires the fight census to stay at least **264 primitives** so an
+empty ledger cannot pass with a misleading zero.
+
+The measured fight set includes the ring deck/canvas/posts/ropes/stair, MMA
+base/mat/posts/fence/gate/rails, and beast-pit sand/walls/rails/lights. Its
+result was **264 supported, zero floating, three grounded components**.
+
+This still means only: the submitted fixed geometry has a static load path. It
+does **not** mean every prop in the whole site was submitted or that ropes,
+gates, loose objects, NPCs, colliders, gravity, hinges, impacts, and destruction
+all behave realistically.
+
+#### The scoreboard false positive and final visual repair
+
+The owner correctly rejected the first technical answer: the centre object was
+still a massive floating black square. Source confirmed it was literally two
+nested full-depth boxes:
+
+- frame: `12.6 × 6.4 × 12.6`;
+- screen: `12.2 × 5.5 × 12.2`;
+- corrected hangers were only about 0.38 m visible.
+
+That assembly could touch the support graph and still look absurd.
+
+The final `arena_venue.js` design is a real centre-hung scoreboard silhouette:
+
+- four separate `8.6 × 3.6 × 0.14` outward-facing screen panels;
+- a hollow 9 m square perimeter cage;
+- an open underside, with no hidden black slab;
+- top/bottom truss rings and corner posts;
+- four visible roughly 3 m suspension rods;
+- crossbars and a bridge visibly connected to the roof gantries.
+
+After this redesign the combined live graph measured **48,470/48,470
+supported**: 48,206 venue primitives plus 264 fight primitives. More
+importantly, a low ringside screenshot showed two readable screen faces, the
+open underside, and rods traceable to the overhead truss. Regenerate that proof
+with:
+
+`node tools/street-shot.mjs tools/shots/arena-jumbotron-after.png --arena`
+
+The screenshot mode intentionally isolates the real board/truss/lamp meshes
+after world build so SwiftShader can finish a focused readback. It is a visual
+proof tool, not a replacement for ordinary gameplay QA.
+
+#### Demolition conclusion
+
+"Glass gone, frame standing" is mostly deliberate separation between facade
+failure and structural collapse:
+
+- on a tested four-storey 28×28 m block, one stock airstrike applied 18 damage
+  against 70.15 structural capacity: 25.7%, `SCARRED`, stable;
+- a near-field nuke applied 495: 705.6%, immediately `COLLAPSING`;
+- nuclear glass failure intentionally reaches farther than wholesale collapse;
+- the condemned shell remains for the 1.15-second warning/dust beat before the
+  real shell is atomically replaced.
+
+If an exposed-frame ruin phase is desired, put it in the shared `CRITICAL`
+structural state, not inside each bomb implementation. The next useful
+research gate is per-building collapse/yield radius compared with the named
+nuclear pressure contours.
+
+#### What was validated, and what was not
+
+During implementation in the original checkout:
+
+- cold full-world seed 90210 produced the glass, elevator, venue, and fight
+  counts above;
+- the support/overlap property and scale tests passed;
+- syntax, whitespace, production build, and focused live scoreboard capture
+  passed.
+
+For the clean GitHub branch based on current `origin/main`, the final publish
+pass was intentionally small at the owner's request: syntax for all changed JS,
+`git diff --check`, and `node tools/test-reality-support.mjs` passed. The full
+software-rendered world was not rebuilt again just to repeat earlier evidence.
+
+Do not say "all props follow physics." Outstanding proof still includes:
+
+- a player-view sweep of every arena/site prop, not only the scoreboard;
+- collider-to-render alignment and collision response;
+- dynamic gravity, hinges, rope/gate behavior, impacts, NPC reactions, and
+  destruction;
+- penetration/clearance/enclosure/registry-parity/teardown-parity invariants
+  beyond the support and overlap primitives.
+
+#### Repository handoff
+
+At handoff, the owner's original checkout was local `main` at `7dfd419`,
+**ahead 2 and behind 20**, with a very large unrelated dirty worktree. It was
+left untouched except for appending this note. The review branch was assembled
+in an isolated worktree from `origin/main` `0f5ee94`, so it does not import the
+two local nuke commits or unrelated dirty files.
+
+Primary files on `agent/world-reality-arena-handoff`:
+
+- `src/systems/reality.js`
+- `src/city/buildings.js`
+- `src/city/elevators.js`
+- `src/city/arena_venue.js`
+- `src/city/arena_fights.js`
+- `tools/math-gate.mjs`
+- `tools/demolition-check.mjs`
+- `tools/test-reality-support.mjs`
+- `tools/street-shot.mjs`
+- `tools/building-first-principles.md`
+- `index.html`
+
+Claude's next move should be to review/merge that branch, preserve the
+canonical owners above, and treat the owner's visual objection as authoritative
+evidence when a green graph contradicts what is visibly on screen.
