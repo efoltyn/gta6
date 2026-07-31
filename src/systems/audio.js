@@ -995,7 +995,16 @@
     // FAR_DIST swap to the muffled far-field voice — distance IS information.
     if (opts.dist != null) {
       const d = opts.dist;
-      const att = d <= 16 ? 1 : Math.max(0.12, 1 - (d - 16) / 150);
+      // Sirens used to have a binary 70m gate: full-volume in your skull until
+      // the source crossed the boundary, then nothing. Give that long-carrying
+      // sound its own physical rolloff while leaving the praised gun curve
+      // byte-for-byte unchanged. The square makes separation obvious: about
+      // half volume at 70m, a quarter at 100m, and effectively gone by 194m.
+      const sirenK = Math.max(0, 1 - Math.max(0, d - 14) / 180);
+      const att = name === "siren"
+        ? sirenK * sirenK
+        : (d <= 16 ? 1 : Math.max(0.12, 1 - (d - 16) / 150));
+      if (name === "siren" && att <= 0.001) return null;
       opts.volume = (opts.volume == null ? 1 : opts.volume) * att;
       if (d > FAR_DIST) { ensureFarBus(); opts.far = true; }
     }
@@ -1149,6 +1158,18 @@
 
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
+  // A spatial sound request must name its emitter. This helper deliberately
+  // computes distance at the caller boundary rather than turning "wanted" or
+  // another abstract state into global audio.
+  CBZ.sfxAt = function (name, x, z, opts) {
+    const p = CBZ.player && CBZ.player.pos;
+    if (!p || !isFinite(x) || !isFinite(z)) return null;
+    const o = Object.assign({}, opts || {});
+    const y = o.y == null ? p.y : o.y;
+    delete o.y;
+    o.dist = Math.hypot(x - p.x, y - (p.y || 0), z - p.z);
+    return sfx(name, o);
+  };
   // your car's voice: start on enter, update every driven frame, stop on exit
   CBZ.carAudio = { start: engineStart, stop: engineStop, update: engineUpdate };
   CBZ.gunVoice = gunVoice;

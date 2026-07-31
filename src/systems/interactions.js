@@ -191,7 +191,6 @@
       CBZ.ceilingLamp.material.color.setHex(0x2b2b2b);
       CBZ.ceilingLamp.material.emissive.setHex(0x000000);
     }
-    CBZ.sfx("door"); // Clank sound
     CBZ.flashToast("POWER OUT!");
     CBZ.flashHint("Sabotaged power! All cameras and Cell Block lights are deactivated for 20s.", 3.2);
   }
@@ -204,7 +203,6 @@
       player.pos.set(vent.dest.x, vent.dest.y, vent.dest.z);
       if (CBZ.playerChar) CBZ.playerChar.group.position.copy(player.pos);
       player.crouch = true;
-      CBZ.sfx("door");
       setTimeout(() => {
         if (fadeEl) fadeEl.style.opacity = "0";
         CBZ.crawling = false;

@@ -46,6 +46,7 @@
   function floor(x, z) { return CBZ.surv.arena.groundHeightAt(x, z); }
   function scale(base, ctx) { return base * (0.85 + ctx.intensity); }
   function sound(name) { if (CBZ.sfx) CBZ.sfx(name); }
+  function soundAt(name, x, z, opts) { if (CBZ.sfxAt) CBZ.sfxAt(name, x, z, opts); }
   function banner(html, on) { if (CBZ.survHud && CBZ.survHud.banner) CBZ.survHud.banner(html, on); }
 
   function disc(x, z, color, opacity, y) {
@@ -449,11 +450,11 @@
       warn(ctx) {
         CBZ.flashToast && CBZ.flashToast("INCOMING");
         banner("NUCLEAR STRIKE INCOMING", true);
-        sound("siren");
         ctx.st.gx = ctx.cx; ctx.st.gz = ctx.cz;
+        soundAt("siren", ctx.st.gx, ctx.st.gz);
         ctx.st.warnMk = CBZ.fx.groundMarker(ctx.st.gx, ctx.st.gz, 8, 0xff3020); ctx.st.warnMk.set(1);
       },
-      warnTick(dt, ctx) { ctx.env.sunInt = 0.5; ctx.env.fog = 0x2a2a30; if (rnd() < dt) sound("siren"); },
+      warnTick(dt, ctx) { ctx.env.sunInt = 0.5; ctx.env.fog = 0x2a2a30; if (rnd() < dt) soundAt("siren", ctx.st.gx, ctx.st.gz); },
       start(ctx) {
         if (ctx.st.warnMk) ctx.st.warnMk.dispose();
         // blinding flash + huge blast + mushroom cloud
@@ -862,7 +863,7 @@
       st.oceanY0 = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
       st.warnT = 0; st.phase = "warn";
       CBZ.flashHint && CBZ.flashHint("TSUNAMI from the " + st.from + " — the sea is PULLING BACK. GET HIGH!", 3.6);
-      sound("siren");
+      soundAt("siren", ctx.cx, ctx.cz);
       if (CBZ.shake) CBZ.shake(0.3);
     },
     warnTick(dt, ctx) {
@@ -874,7 +875,7 @@
       if (o) o.position.y = st.oceanY0 + (TSU_RECEDE_Y - st.oceanY0) * (k * k * (3 - 2 * k));
       if (CBZ.shake) CBZ.shake(0.05);
       st.sirenCd = (st.sirenCd || 0) - dt;
-      if (st.sirenCd <= 0) { st.sirenCd = 2.6; sound("siren"); }
+      if (st.sirenCd <= 0) { st.sirenCd = 2.6; soundAt("siren", ctx.cx, ctx.cz); }
       if (rnd() < dt * 0.7) sound("water");
       if (!st.saidBed && k > 0.62) { st.saidBed = 1; CBZ.flashHint && CBZ.flashHint("The seabed is EXPOSED — IT'S COMING", 2.6); }
     },

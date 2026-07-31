@@ -278,7 +278,6 @@
     if (CBZ.cityCars) { const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1); }
     big("Stored your " + model);
     note(car.stolen ? "A hot ride, laundered — it's yours now." : "Safely stored.", 2.4);
-    sfx("door");
     persist();
     if (open_) render();
   }
@@ -315,7 +314,6 @@
       note("Your " + v.model + " is in the water at " + (berthed.label || berthed.id) + ".", 2.8);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(berthed.x, berthed.z, v.model); } catch (e) {} }
     } else note("Your " + (v.kind === "jet" ? "F-22" : v.model) + " is out front.", 2.4);
-    sfx("door");
     persist();
     close();
   }

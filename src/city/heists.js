@@ -597,7 +597,7 @@
     if (h.phase !== "idle") { note("Finish the job you're on first.", 1.6); return; }
     if (h.cooldown > 0) { note("Too hot — lay low for " + Math.ceil(h.cooldown) + "s.", 1.6); return; }
     const tier = tierById(tierId); if (!tier) return;
-    if (tier.gun && !hasGun()) { note("You need a gun for that score.", 1.8); sfx("glass"); return; }
+    if (tier.gun && !hasGun()) { note("You need a gun for that score.", 1.8); return; }
 
     // pin the target spot
     let target = null;
@@ -631,13 +631,12 @@
     }
     if (tillSrc && tillHave <= 0) {
       note("Cased it — " + target.name + " is empty right now. They've already dropped the takings.", 3.2);
-      sfx("glass");
       return;
     }
 
     // SETUP FEE (masks/tools/intel) — never refunded, GTA-style.
     if (tier.setup > 0) {
-      if (!CBZ.city.canAfford(tier.setup)) { note("Setup costs " + fmt$(tier.setup) + " (masks, tools, intel).", 2); sfx("glass"); cleanupTruck(); return; }
+      if (!CBZ.city.canAfford(tier.setup)) { note("Setup costs " + fmt$(tier.setup) + " (masks, tools, intel).", 2); cleanupTruck(); return; }
       CBZ.city.spend(tier.setup);
       note("Paid " + fmt$(tier.setup) + " to set it up.", 1.6);
     }
@@ -694,7 +693,6 @@
     }
     if (!(h.bagMax > 0)) {
       note("Cased it — there's nothing in there right now. Come back when they've traded.", 3);
-      sfx("glass");
       h.phase = "idle"; h.tierId = null; h.target = null; h.tillSrc = null;
       cleanupTruck();
       renderHud();
@@ -708,7 +706,6 @@
     scoreEnd("retire", "replanned");
     score = startScoreMission(tier, h);
 
-    sfx("door");
     big(tier.icon + " CASING: " + tier.name);
     note("In position? Press [H] to GO LOUD. Crew on hand: " + crew + ".", 2.6);
     renderHud();
@@ -910,7 +907,6 @@
     cleanupTruck();
     big("SCORE BLOWN — " + reason);
     note("Lost the bag (" + fmt$(h.bag) + "). Heal up and try again.", 2.8);
-    sfx("glass");
     finish(10);
   }
 
@@ -993,7 +989,7 @@
           if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0.15 + 0.85 * h.drilled); } catch (e) {}
           if (CBZ.shake && Math.random() < dt * 2.0) CBZ.shake(0.1);
           if (Math.random() < dt * 0.8) sfx("report");   // drill bite
-          if (h.drilled >= 1) { big("VAULT BREACHED — GRAB THE CASH!"); sfx("alarm"); }
+          if (h.drilled >= 1) big("VAULT BREACHED — GRAB THE CASH!");
         } else {
           // STAGE 2 — GRAB. Bag fills from the breached vault; crew speeds it.
           const dGrab = (dt / tier.grabTime) * crewSpeed;
@@ -1010,8 +1006,9 @@
         // heavier, faster waves than a corner store — SWAT once it's really hot
         if (Math.random() < dt * (0.45 + h.heat * 0.9) && CBZ.citySpawnCop) {
           const ang = Math.random() * Math.PI * 2, r = 26 + Math.random() * 16;
-          CBZ.citySpawnCop(tgt.x + Math.cos(ang) * r, tgt.z + Math.sin(ang) * r, h.heat > 0.55);
-          if (Math.random() < 0.5) sfx("siren");
+          const sx = tgt.x + Math.cos(ang) * r, sz = tgt.z + Math.sin(ang) * r;
+          CBZ.citySpawnCop(sx, sz, h.heat > 0.55);
+          if (Math.random() < 0.5 && CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
         }
         if (Math.random() < dt * (0.5 + h.heat)) { if (CBZ.cityPanic) CBZ.cityPanic(tgt.x, tgt.z, 1.2, CBZ.city.playerActor); }
         if (CBZ.shake && Math.random() < dt * 1.0) CBZ.shake(0.1);
@@ -1045,8 +1042,9 @@
         }
         if (Math.random() < dt * (0.25 + h.heat * 0.6) && CBZ.citySpawnCop) {
           const ang = Math.random() * Math.PI * 2, r = 28 + Math.random() * 14;
-          CBZ.citySpawnCop(tgt.x + Math.cos(ang) * r, tgt.z + Math.sin(ang) * r, h.heat > 0.7);
-          if (Math.random() < 0.4) sfx("siren");
+          const sx = tgt.x + Math.cos(ang) * r, sz = tgt.z + Math.sin(ang) * r;
+          CBZ.citySpawnCop(sx, sz, h.heat > 0.7);
+          if (Math.random() < 0.4 && CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
         }
         if (CBZ.shake && Math.random() < dt * 1.2) CBZ.shake(0.12);
         // bag full → auto-advance to escape
@@ -1077,7 +1075,7 @@
             h.dyed = true;
             big("DYE PACK! " + fmt$(burn) + " ruined red — " + fmt$(h.bag) + " left clean.");
             note("Stained money's worthless. Get the rest clear.", 2.6);
-            sfx("glass"); if (CBZ.shake) CBZ.shake(0.3);
+            if (CBZ.shake) CBZ.shake(0.3);
           }
         } else if (h.getaway < (h.getawayMax || tier.getaway)) {
           // you broke LOS in time — defuse it: out of sight = the pack's beaten.

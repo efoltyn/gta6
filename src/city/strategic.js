@@ -2043,7 +2043,7 @@
       });
     } catch (e) { run.active = false; return false; }
     note("STRIKE INBOUND — " + count + " x 2000 lb, " + Math.round(tot) + "s out. Clear the grid.", 3.4);
-    sfx("siren", { volume: 0.35 });
+    if (CBZ.sfxAt) CBZ.sfxAt("siren", tx, tz, { volume: 0.35 });
     return true;
   }
   CBZ.strategicCallStrike = calledStrike;
@@ -2248,7 +2248,6 @@
         });
       } catch (e) {}
     }
-    sfx("clank", { pitch: 0.6, volume: 0.8 });
     // the burrow beat — a GBU does not go off at the surface, and the pause is
     // what sells that it is still travelling
     pendingBusters.push({ x: x, z: z, surf: surf, t: 0.4, dx: vx || 0, dz: vz || 0, speed: speed || 0 });
@@ -2814,7 +2813,6 @@
           } else {
             note("DEVICE ARMED — " + nkTimer() + " seconds. Run.", 3.2);
           }
-          sfx("alarm");
           if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { x: t.x, z: t.z, type: "planting-explosives" }); } catch (e) {} }
         },
       }],
@@ -2851,7 +2849,6 @@
           invAdd("Nuclear Device");
           note(a.arm > 0 ? "Safed. The pin goes back in."
                          : "Countdown aborted. Your hands are still shaking.", 2.4);
-          sfx("clank");
         },
       }],
     });
@@ -2888,9 +2885,6 @@
         }
         if (a.arm <= 0) {
           a.arm = 0;
-          // GOING HOT is the loudest single cue this arc has, and it is the
-          // frame the clock actually starts.
-          sfx("alarm", { volume: 0.9 });
           note("DEVICE HOT — " + Math.ceil(a.t) + " seconds. Get a vehicle.", 3.6);
           if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("NUCLEAR DEVICE ARMED"); } catch (e) {} }
           if (CBZ.shake) { try { CBZ.shake(1.2); } catch (e) {} }

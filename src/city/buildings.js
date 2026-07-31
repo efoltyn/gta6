@@ -2179,6 +2179,28 @@
     const openSign = -hingeSign;
     const rec = {
       pivot, col, wx, wz, t: 0, open: false, hold: 0,
+      maxAng: openSign * 1.66, colIn: true,
+      inx: nx, inz: nz,                            // inward normal (for proximity test)
+    };
+    cityDoors.push(rec);
+    return rec;
+  }
+
+  function doorNearActor(dr, x, z, radius) {
+    const ax = x - dr.wx, az = z - dr.wz;
+    const across = ax * dr.inx + az * dr.inz;            // + = inside the building
+    const side = ax * -dr.inz + az * dr.inx;             // along the door width
+    const lat = Math.abs(side), r = radius || 1.0;
+    // widened the OUTSIDE reach (-3.4 vs -2.8) so a shop door begins easing open
+    // a stride earlier as the player walks up to it, instead of popping at the jamb.
+    if (lat < 1.65 + r * 0.45 && across > -3.4 - r && across < 4.6 + r) return true;
+    return ax * ax + az * az < r * r;
+  }
+  function carDoorRadius(car) {
+    const w = car && car.model && car.model.w ? car.model.w : 1.9;
+    const l = car && car.model && car.model.l ? car.model.l : 4.2;
+    return Math.max(3.6, Math.min(6.2, (w + l) * 0.58));
+  }
   function doorWorldY(dr) {
     if (dr.doorY != null) return dr.doorY;
     const y = CBZ.floorAt ? +CBZ.floorAt(dr.wx, dr.wz) : 0;
@@ -2217,34 +2239,8 @@
     const volume = dist <= 5 ? 1 : Math.max(0.06, 1 - (dist - 5) / (DOOR_HEAR_DIST - 5));
     CBZ.sfx(open ? "door_open" : "door_close", { dist: dist, volume: volume });
   }
-      maxAng: openSign * 1.66, colIn: true,
-      inx: nx, inz: nz,                            // inward normal (for proximity test)
-    };
-    cityDoors.push(rec);
-    return rec;
-  }
-
-  function doorNearActor(dr, x, z, radius) {
-    const ax = x - dr.wx, az = z - dr.wz;
-    const across = ax * dr.inx + az * dr.inz;            // + = inside the building
-    const side = ax * -dr.inz + az * dr.inx;             // along the door width
-    const lat = Math.abs(side), r = radius || 1.0;
-    // widened the OUTSIDE reach (-3.4 vs -2.8) so a shop door begins easing open
-    // a stride earlier as the player walks up to it, instead of popping at the jamb.
-    if (lat < 1.65 + r * 0.45 && across > -3.4 - r && across < 4.6 + r) return true;
-    return ax * ax + az * az < r * r;
-  }
-  function carDoorRadius(car) {
-    const w = car && car.model && car.model.w ? car.model.w : 1.9;
-    const l = car && car.model && car.model.l ? car.model.l : 4.2;
-    return Math.max(3.6, Math.min(6.2, (w + l) * 0.58));
-  }
   function doorOccupied(dr, includeCars) {
-    const P = CBZ.player && CBZ.player.pos;
-    // a door pinned to an upper floor (the penthouse) only responds when an actor
-    // is near in Y too — otherwise standing on the deck far below would flap it.
-    if (dr.doorY != null && P && Math.abs(P.y - dr.doorY) > 3.0) return false;
-    if (P && doorNearActor(dr, P.x, P.z, CBZ.player.driving ? 4.6 : 1.7)) return true;
+    if (playerAtDoor(dr)) return true;
     if (includeCars && CBZ.cityCars) {
       for (let k = 0; k < CBZ.cityCars.length; k++) {
         const c = CBZ.cityCars[k]; if (!c || c.dead || !c.pos) continue;
@@ -2277,9 +2273,16 @@
       const dxp = dr.wx - px, dzp = dr.wz - pz;
       const farFromPlayer = dxp * dxp + dzp * dzp > 1600;   // 40m: skip cold distant doors
       if (farFromPlayer && !dr.open && dr.t <= 0.001) continue;
+      const wasOpen = dr.open;
+      const playerNear = playerAtDoor(dr);
       const near = doorOccupied(dr, true);
       if (near) { dr.open = true; dr.hold = 1.8; }
       else if (dr.hold > 0) { dr.hold -= dt; if (dr.hold <= 0) dr.open = false; }
+      if (dr.open !== wasOpen) {
+        if (dr.open) dr.playerSoundCycle = playerNear;
+        playPhysicalDoor(dr, dr.open, playerNear || !!dr.playerSoundCycle);
+        if (!dr.open) dr.playerSoundCycle = false;
+      }
 
       // ease the swing toward target (open=1 / closed=0)
       const target = dr.open ? 1 : 0;
@@ -2318,7 +2321,7 @@
   // restore every door to CLOSED for a new game (collider back in place)
   CBZ.cityDoorsReset = function () {
     for (const dr of cityDoors) {
-      dr.open = false; dr.hold = 0; dr.t = 0; dr.pivot.rotation.y = 0;
+      dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false; dr.pivot.rotation.y = 0;
       if (dr.demolished) continue;                 // demolition owns this door's collider until rebuilt
       if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
     }
@@ -3832,6 +3835,10 @@
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
+    // A swinging entrance only speaks when this player caused its cycle or is
+    // physically inside THIS shell. Keep the ownership link on the mechanism,
+    // not on a global "indoors" flag that could bless a different building.
+    for (const dr of doorRecs) dr.building = built;
     // ---- THE SHELL REGISTRY (read by core/farcull.js's distance skyline) ----
     // WHAT BUILDINGS EXIST had only ever been answerable through `arena.lots`,
     // and a lot is an ECONOMY record — Zillow, shops, jobs, map POIs. Four
@@ -6049,7 +6056,7 @@
     }
     // build the standard clean leaf+frame, then lift the whole rig (jambs, header,
     // pivot, collider) up to the penthouse floor via makeDoorPanelAtY.
-    makeDoorPanelAtY(b.group, lot.cx, lot.cz, phDoorLocal, DOORW, topY);
+    makeDoorPanelAtY(b.group, lot.cx, lot.cz, phDoorLocal, DOORW, topY, b);
     const penthouseDoor = { x: lot.cx + phDoorLocal.x + 1.6, z: lot.cz + phDoorLocal.z, nx: 1, nz: 0, y: topY };
 
     // tag the lot's building + the penthouse HOME record (the apex tier)
@@ -6082,7 +6089,7 @@
   // (for the penthouse, which has no ground-floor wall to pierce). Reuses
   // makeDoorPanel, then lifts the pivot + frame/header meshes added during this
   // call up to baseY. Cheap: a handful of meshes, identical clean leaf/frame.
-  function makeDoorPanelAtY(bgroup, ox, oz, localDoor, panelW, baseY) {
+  function makeDoorPanelAtY(bgroup, ox, oz, localDoor, panelW, baseY, building) {
     const before = bgroup.children.length;
     const rec = makeDoorPanel(bgroup, ox, oz, localDoor, panelW);
     // lift every mesh/group makeDoorPanel just appended (jambs, header, pivot) up
@@ -6090,6 +6097,7 @@
     // lift the height-gated collider too so it blocks at the penthouse floor
     if (rec.col) { rec.col.y0 += baseY; rec.col.y1 += baseY; }
     rec.doorY = baseY;   // only auto-open when an actor is near this floor in Y
+    rec.building = building || null;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return rec;
   }

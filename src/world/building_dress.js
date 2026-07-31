@@ -650,14 +650,16 @@
     if (lampMesh && city._nightLamps) { try { city._nightLamps.push(lampMesh); } catch (e) { /* driver absent */ } }
 
     // hand the census to city/props.js's ratchet (CBZ.propPurgeAudit).
-    // acBoxes is the pinned one and it is STRUCTURALLY 0 under the flag;
-    // roofItems is printed beside it so a future pass cannot re-grow the
-    // skyline clutter without the number saying so.
+    // acBoxes and facadePlatforms are STRUCTURALLY 0 under the flag;
+    // roofItems is printed beside them so the separate roof discussion has
+    // an exact live count instead of being conflated with this facade purge.
     if (CBZ.propPurgeCensus) {
       CBZ.propPurgeCensus({
         acBoxes: nAc,
+        facadePlatforms: nEsc,
         roofItems: nHvac + nCond + nVent + nDuct + nTank + nDish + nAerial,
         acRemoved: cutN,
+        facadePlatformsRemoved: cutEsc,
       });
     }
   });

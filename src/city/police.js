@@ -2976,7 +2976,7 @@
     // (CUT: the 📻 "wall it off" subtitle — police-net traffic the suspect
     // can't hear. The wall sells itself: the siren below, then a row of
     // light-bars strobing across the lane ahead of you.)
-    if (CBZ.sfx) CBZ.sfx("siren");
+    if (CBZ.sfxAt) CBZ.sfxAt("siren", RB.x, RB.z);
     return true;
   }
   function rbAbort() {        // a half-staged wall is torn straight back down

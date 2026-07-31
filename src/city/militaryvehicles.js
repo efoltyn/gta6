@@ -401,9 +401,6 @@
     // fired AT you the instant a flag flips, at full volume, from nowhere in
     // particular. A base alarm is a real object on a real airfield — it should
     // sound like it is coming from the base you are stealing from, behind you,
-    // not like a UI notification. Halved and pitched down into a horn rather
-    // than a bell; the line of narration above already carries the message.
-    sfx("alarm", { volume: 0.26, pitch: 0.72 });
     return true;
   }
   CBZ.cityBoardMilitaryVehicle = boardVehicle;
@@ -460,7 +457,6 @@
     }
     // point the chase-cam down the hull's nose (cam frames behind cam.yaw)
     if (CBZ.cam) CBZ.cam.yaw = rec.heading + Math.PI;
-    sfx("door");
     if (CBZ.city && CBZ.city.note) {
       const ctrl = rec.kind === "tank"
         ? "W/S drive · A/D turn hull · mouse aims turret · L-click FIRE · [E] out"
@@ -503,7 +499,6 @@
       if (P) CBZ.playerChar.group.position.copy(P.pos);
     }
     _restoreChar = false;
-    sfx("door");
   }
   CBZ.cityExitArmor = exitArmor;
   // Read-only seat ownership probe for controllers/touch. Armor intentionally

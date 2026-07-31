@@ -1698,6 +1698,7 @@
       const rig = rec.group && rec.group.userData && rec.group.userData.doorRig;
       if (rig && rig.panel && rec.group.parent) {
         let rigOpen = false;
+        let rigPlayerCause = false;
         // the boarding arc marks the rec taken the moment the theft commits,
         // so the arc's open-flag must win over the taken gate
         if (rec._doorArcOpen) rigOpen = true;
@@ -1708,9 +1709,11 @@
           else if (P && !P.dead && !P.driving && !P._aircraft) {
             const dw = cabinWorld(rec, rig.doorX, rig.doorZ);
             rigOpen = Math.hypot(P.pos.x - dw.x, P.pos.z - dw.z) < 3.2;
+            rigPlayerCause = rigOpen;
           }
         }
         const rt = rigOpen ? 1 : 0;
+        trackPhysicalDoorSound(rig, rig.t, rt, rigPlayerCause);
         if (Math.abs(rig.t - rt) > 0.001) {
           rig.t += (rt - rig.t) * Math.min(1, dt * 2.8);
           rig.panel.rotation.x = rig.closedRot + (rig.openRot - rig.closedRot) * rig.t;
@@ -1718,24 +1721,35 @@
       }
       if (!cab || !cab.panel) continue;
       let wantOpen = false;
+      let cabinPlayerCause = false;
       // aircraft_doors.js boarding arc: holds the panel open even though the
       // rec is already marked taken (the theft commits at door-open)
       if (rec._doorArcOpen && rec.group.parent) wantOpen = true;
       else if (!rec.taken && rec.group.parent) {
-        if (cabinState.pending && cabinState.pending.rec === rec) wantOpen = true;
+        if (cabinState.pending && cabinState.pending.rec === rec) {
+          wantOpen = true; cabinPlayerCause = true;
+        }
         // MANUAL BEATS PROXIMITY, AND AN ARC BEATS MANUAL. Standing inside the
         // cabin used to force the door open for ever — which is precisely why
         // "close the door" had nowhere to live. The board/exit arcs and the
         // deplane still set _doorArcOpen/pending above, so nothing automated
         // can be locked out by a door you shut.
         else if (cab.doorManual != null && CBZ.CONFIG.AIRLINER_DOOR_MANUAL !== false) wantOpen = !!cab.doorManual;
-        else if (cabinState.inside && cabinState.rec === rec) wantOpen = true;
+        else if (cabinState.inside && cabinState.rec === rec) {
+          wantOpen = true; cabinPlayerCause = true;
+        }
         else if (P && !P.dead && !P.driving && !P._aircraft) {
           const d = cabinDoorWorld(rec);
           wantOpen = Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 3.4;
+          cabinPlayerCause = wantOpen;
         }
       }
+      // A passenger deplane may own the same arc flag. It is audible only when
+      // the player is actually inside this aircraft; an apron animation outside
+      // the player's space stays silent.
+      if (cabinState.inside && cabinState.rec === rec) cabinPlayerCause = true;
       const tgt = wantOpen ? 1 : 0;
+      trackPhysicalDoorSound(cab, cab.doorT, tgt, cabinPlayerCause);
       if (Math.abs(cab.doorT - tgt) > 0.001) {
         cab.doorT += (tgt - cab.doorT) * Math.min(1, dt * 3.2);
         cab.panel.position.x = cab.doorX - 1.18 * AL_SC * cab.doorT;   // slide aft along the hull
@@ -1752,6 +1766,7 @@
           wantCock = lp.x > 10.1 * AL_SC && lp.x < 14.5 * AL_SC && Math.abs(lp.z) < 1.6 * AL_SC;
         }
         const tc = wantCock ? 1 : 0;
+        trackPhysicalDoorSound(cab.cockpitLeaf, cab.cockpitT, tc, insideThis);
         if (Math.abs(cab.cockpitT - tc) > 0.001) {
           cab.cockpitT += (tc - cab.cockpitT) * Math.min(1, dt * 5.5);
           cab.cockpitLeaf.position.z = 0.98 * AL_SC * cab.cockpitT;   // pocket into the starboard bulkhead

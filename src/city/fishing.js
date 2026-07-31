@@ -406,7 +406,6 @@
         return;
       }
       line.phase = "bite"; line.t = BITE_T;
-      sfx("clank");
       return;
     }
     if (line.phase === "bite" && line.t <= 0) {
