@@ -1635,6 +1635,16 @@ floating marker as a substitute and do not claim this branch solves it.
 - A close control must receive `touchend` and be protected from movement/look
   gesture capture. Merely drawing the button is insufficient.
 
+#### Vehicle cook-off chain distance
+
+A burning car may still ignite or destroy a genuinely adjacent vehicle, but the
+old blast-bus coupling reused the visual fireball's legacy `radius * power`
+footprint. That let a normal saloon bill cars about 7.5 metres away and let a
+larger van reach farther. The review branch gives `carcook` a final five-metre
+vehicle-coupling radius. This changes only car-to-car blast billing: the visible
+fireball and the explosion's other physical effects retain their existing size.
+Do not widen the chain radius merely to make parking-lot cascades easier.
+
 #### Evidence boundary and next actions
 
 The focused sound-source contract and syntax checks passed before the final

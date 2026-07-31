@@ -169,6 +169,10 @@
        fire      ignition strength 0..1 fed to the structural ledger's fire
                  stage. Fuel-carrying ordnance (aircraft, incendiary) is high;
                  a shaped charge is ~0.
+       carRadius optional FINAL vehicle-to-vehicle reach in metres. This is
+                 deliberately not multiplied by `power`; use it when the
+                 visible fireball is wider than the physically credible chain
+                 reaction between vehicle fuel systems.
        wave      { speed, maxR } => the blast arrives as a PROPAGATING RING at
                  `speed` m/s out to `maxR` metres, instead of instantly. Only
                  the big stuff wants this; a grenade should not make you wait.
@@ -191,7 +195,7 @@
      only invented numbers in the file.
      ============================================================ */
   const DEFAULTS = {
-    power: 1, radius: 6, fx: "blast", struct: 1, pen: 0, fire: 0,
+    power: 1, radius: 6, carRadius: 0, fx: "blast", struct: 1, pen: 0, fire: 0,
     wave: null, shake: null, quake: 0, sfx: null, flashbang: false,
     // debris/dust multiplier — the one knob a quality tier scales.
     debris: 1,
@@ -281,7 +285,7 @@
      shipped "a parking-lot cascade can burn a block down" as a side effect of
      a migration. Raise it to 0.25 to turn that on deliberately, with the
      structural-fire arc in front of you. */
-  I.define("carcook",   { power: 1.15, radius: 6.5, struct: 6, fire: 0.24,
+  I.define("carcook",   { power: 1.15, radius: 6.5, carRadius: 5, struct: 6, fire: 0.24,
                           refE: 8.4e6, kmin: 0.6, kmax: 1.9 });
   // cosmetic only — the helicopter ember. struct 0 so it can never wound a
   // facade (this is the `noDamage` case the legacy code special-cased inline).
@@ -1555,10 +1559,18 @@
     // fan-out that can re-enter itself is a frame-killer and, on the
     // CAR_COOKOFF_V2-off path, an unbounded one.
     if (carSweepDepth > 0) return 0;
-    const power = (opts && opts.power) || 1;
-    const R = ((opts && opts.radius) || defRadius) * power;
-    if (!(R > 0.5)) return 0;
     const row = opts && opts.ordnance ? TABLE[opts.ordnance] : null;
+    const power = (opts && opts.power) || 1;
+    // A car fireball can remain broad and readable without pretending its fuel
+    // tank can detonate another vehicle across a lane or through a one-car gap.
+    // `carRadius` is a final centre-to-centre coupling limit, not the legacy
+    // radius*power blast footprint. Five metres still reaches a genuinely
+    // adjacent parked car; the old saloon footprint reached about 7.5 m and a
+    // large van reached farther still.
+    const R = row && row.carRadius > 0
+      ? row.carRadius
+      : ((opts && opts.radius) || defRadius) * power;
+    if (!(R > 0.5)) return 0;
     // A legacy blast declares no ordnance row; 0.10 is between the shaped
     // charge (0.05) and the fuel-carrying rows, i.e. the honest average of the
     // things that reach this path without a name.
