@@ -1493,27 +1493,37 @@ shared boundary.
   A campaign choice deliberately restores the speaker and dark choice panel,
   because a decision is interactive UI rather than passing speech.
 
-### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 closing handoff: bomb soot, Prison Escape, and GitHub
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 closing handoff: bomb soot, Prison Escape, moving-door marks, and GitHub
 
 > **AUTHORSHIP AND STATUS:** This subsection is GPT/Codex's closing handoff to
 > Claude after the owner said this chat window was about to close. It records
-> one implemented change, one source/deployment diagnosis, the facts that
+> two implemented changes, one source/deployment diagnosis, the facts that
 > changed after that diagnosis, and the exact remaining validation. It is not
 > owner-authored project law. Do not promote a diagnosis below into a current
 > fact without checking the named snapshot and live deployment.
 
 #### What this chat actually changed and published
 
-The only gameplay code authored in this conversation is the removal of the
-flat, generated black soot marks left by explosions. It is published for review
-on branch **`agent/scorch-prison-handoff`**. The code commit is **`d210c68`
-(`Remove printed building scorch marks`)**, based on current upstream
-`066aba8`.
+Two narrow gameplay fixes were authored in this conversation and are published
+for review on branch **`agent/scorch-prison-handoff`**, based on upstream
+`066aba8`:
+
+- **`d210c68` — `Remove printed building scorch marks`:** removes the generated
+  explosion-soot decal family while preserving physical building damage.
+- **`02a9e6e` — `Keep bullet marks attached to moving prison doors`:** makes a
+  persistent bullet pock struck into the Prison Escape keycard door move with
+  that door when it opens, with an actual-shot browser regression.
+
+As of this handoff neither fix is on `main`; both are on the review branch and
+draft PR **#4**. The branch was pushed before this closing note was extended so
+the gameplay work would survive even if the chat closed during documentation.
 
 The branch deliberately contains only:
 
 - `src/city/buildings.js`
+- `src/systems/fpsmode.js`
 - `tools/test-building-scorch-contract.mjs`
+- `tools/test-shared-weapons-browser.mjs`
 - this closing `CLAUDE.md` handoff in a later documentation commit
 
 The original checkout had a very large, mixed dirty tree. On 2026-07-31 its
@@ -1564,6 +1574,98 @@ facades and on open ground and film the result. There must be no black radial
 cutout on either surface, while chunks, broken panes, cracks, and eventual wall
 openings must still read. Do not call this visually closed until that runtime
 shot passes.
+
+#### Prison keycard door marks — symptom, root cause, invariant, and proof
+
+**The exact player path:** in direct Prison Escape, the owner shot the first
+locked red wall door, left visible bullet marks on it, collected the keycard,
+returned, and opened the checkpoint. The red door slid upward, but the marks
+stayed suspended across the now-empty doorway as though an invisible door were
+still closed.
+
+This was not the generated bomb-soot system above and not a GitHub deployment
+problem. It was a transform-ownership bug:
+
+1. `src/world/door.js` creates the checkpoint leaf as a real solid/LOS mesh at
+   `(0, 3.5, -8)` and tags it `userData.mover = true`.
+2. `src/systems/interactions.js` calls `CBZ.openDoor()` after the keycard
+   condition, removes the collider, then animates `door.mesh.position.y` from
+   `closedY` to `closedY + 8`.
+3. `src/systems/fpsmode.js::wallDistance()` returned the correct raycast hit,
+   including the struck door object, but the wall-impact branch discarded that
+   object identity when it called `CBZ.bulletHole(...)`.
+4. `src/systems/gunfx.js` therefore used its default `parent = scene`, stored
+   the pock in world coordinates, and did exactly what it was told: remember the
+   firefight at the old doorway position while the door moved away.
+
+The important architectural fact is that the correct shared capability already
+existed. `CBZ.bulletHole(pos, normal, { parent })` can refine a hit against the
+real target mesh, convert the world point and normal into that parent's local
+frame, and mount the decal so it follows a moving surface. Cars already use
+that path. The prison wall-shot caller simply failed to pass its moving owner.
+
+The fix is deliberately at the bullet-to-surface routing seam, not in
+`openDoor()`:
+
+- `wallWoundParent(hit)` walks from the actual `wallHit.object` toward
+  `CBZ.scene` and returns the first ancestor tagged `userData.mover`;
+- the ordinary wall-pock call passes that result as `opts.parent`;
+- a static wall returns `null` and keeps its existing world-space aftermath;
+- the keycard checkpoint and the armory gate both already carry the mover tag,
+  so the same rule fixes both without naming either door in gun code.
+
+Do **not** “fix” this later by clearing every bullet hole when a keycard is used
+or when `openDoor()` runs. That erases truthful physical evidence, couples a
+door state transition to a global decal pool, and misses future moving
+blockers. The durable invariant is:
+
+> **Persistent evidence lives in the coordinate space and lifecycle of the
+> surface that owns it.** Static architecture may own world-space marks. A
+> moving panel owns local-space marks. If the owning surface moves, hides,
+> breaks, or is recycled, its persistent evidence must follow that same state.
+
+The helper intentionally recognizes `userData.mover`, not every object called
+`dynamic`. Cars retain their dedicated panel-hit path; aircraft/transient
+objects have separate scar-suppression rules. Broadening the tag would silently
+mount wall decals on unrelated actors and effects.
+
+`tools/test-shared-weapons-browser.mjs` now exercises the real route rather than
+only searching source:
+
+1. enter mode `escape`, reset, equip the shared sidearm and enter FPS;
+2. close the door, force its world matrix current, and aim an actual shot at it;
+3. capture the live `CBZ.bulletHole` result and the parent passed by
+   `fpsmode.js`;
+4. open the door and move the real leaf through its full eight-metre travel;
+5. assert that the mark is parented to `CBZ.door.mesh` and its world Y rises by
+   exactly `8`.
+
+The focused Chrome result was:
+
+```text
+stamped=true
+mountedOnDoor=true
+beforeY=3.484869966827412
+afterY=11.484869966827413
+rise=8
+failures=[]
+```
+
+The explicit matrix refresh in step 2 belongs to the harness, not gameplay.
+This test deliberately replaces `requestAnimationFrame` before navigation to
+keep the enormous world from starving CDP; without a render tick, a transform
+written by `closeDoor()` is not guaranteed to have reached `matrixWorld` before
+the raycast. A first clean-branch run correctly exposed that stale test fixture
+as `stamped=false`; after `door.mesh.updateWorldMatrix(true, true)`, the same
+actual-shot path produced the passing result above.
+
+The same harness keeps its pre-existing city/jail weapon-state and muzzle
+contracts, so this is not a synthetic test of a new helper in isolation: a real
+prison shot must still pass through the shared gun resolver. The clean review
+branch passed both Node syntax checks, the building-soot source contract,
+`git diff --check`, this one Chrome contract, and the Vite production build.
+Validation was intentionally kept focused at the owner's request; do not turn
+this one transform regression into a full-world test wave.
 
 #### Why `main` appeared to update Gang City but not direct Prison Escape
 
@@ -1658,23 +1760,30 @@ this report.
 
 1. Review/merge `agent/scorch-prison-handoff` without importing the original
    mixed worktree.
-2. Run `node tools/test-building-scorch-contract.mjs`, syntax checks,
-   `git diff --check`, and the build, then perform the missing browser bomb shot.
-3. Test both prison entries on one deployed SHA:
+2. Run the two focused contracts
+   (`node tools/test-building-scorch-contract.mjs` and, with a local server,
+   `node tools/test-shared-weapons-browser.mjs`), syntax/diff checks, and one
+   build. Then perform the still-missing browser bomb shot.
+3. In direct Prison Escape, shoot the closed red keycard door, open it, and
+   visually confirm the doorway is empty while the marks ride upward with the
+   physical leaf. Also confirm a static wall's marks remain where it was hit.
+4. Test both prison entries on one deployed SHA:
    - direct title-screen Prison Escape must show the current cellblock, rooms,
      pickups, lockdown, inventory, HUD, and touch work;
    - a Gang City arrest must still play physical arrest/booking, then transport
      into that same prison revision with a sentence;
    - the only intended divergence after transport is custody/sentence context,
      not a second prison map or stale content fork.
-4. If the two entries need a new shared seam, add one canonical prison
+5. If the two entries need a new shared seam, add one canonical prison
    capability owner and an executable two-entry regression. Do not solve it
    with comments in `CLAUDE.md`, duplicated geometry, raw mode exceptions, or a
    deployment rewrite.
 
-No prison gameplay file was changed by GPT in this conversation. That part was
-diagnosis only. The published gameplay change is precisely the generated-soot
-removal and its regression gate.
+The earlier prison deployment investigation was diagnosis only: GPT did not
+replace prison geometry, keycard progression, jail booking, or the entry-mode
+boundary. The later door-mark report produced one shared-system gameplay change
+in `src/systems/fpsmode.js` plus its browser regression. The other published
+gameplay change is precisely the generated-soot removal and its source contract.
 
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
