@@ -1508,6 +1508,647 @@ shared boundary.
   world must finish the wave, drain to zero, use zero legacy crowd discs and
   never exceed eight structural hits in one simulated frame.
 
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 Prison Escape geometry, combat, and body-parity handoff
+
+> **AUTHORSHIP AND STATUS:** This subsection is GPT/Codex's closing handoff
+> after the owner asked why standalone Prison Escape has overlapping props,
+> open/see-through interiors, attackers who charge and freeze the player rather
+> than visibly fight, and bodies that feel less physical than Gang Life. Three
+> focused audits covered geometry, combat, and body parity, followed by source,
+> history, seeded live-CDP, and existing-test cross-checks.
+>
+> This conversation was **diagnosis and planning only**. It changed no gameplay
+> file. Do not read any item below as fixed. The only authored artifact from
+> this conversation is this handoff, published from current upstream
+> `0f5ee94` on branch **`agent/prison-parity-handoff`**. The original checkout
+> remained a large mixed dirty tree on local `main` (two commits ahead and
+> twenty behind `origin/main` at the closing check); it was not bulk-staged,
+> reset, switched, rebased, or merged. The temporary runtime probe was stopped.
+
+#### Executive conclusion
+
+This is not one transparency bug, one bad prop, or a lower-quality inmate mesh.
+Standalone Prison Escape still owns legacy parallel implementations for rooms,
+placement, melee, damage, KO/death, and body integration. Gang Life later gained
+constraint-checked interiors, a real combat-IQ beat structure, directional
+reactions, body ownership, grounding, and nearby articulated ragdolls. Those
+systems are loaded globally in several cases, but standalone prison actors and
+world producers were never enrolled in them—and some shared-looking systems
+explicitly return when `mode === "escape"`.
+
+The durable design decision is:
+
+- keep standalone Prison Escape as its own escape/social game;
+- keep Gang Life's County Jail package as city arrest/booking/transport context;
+- share actor schema, damage, body physics, melee competence, placement,
+  collision scope, and physical room rules underneath both;
+- do not replace prison inmates with city pedestrians or create a second
+  prison-only placement/combat/body stack.
+
+The dependency order is:
+
+```text
+executable reproduction
+  -> actor and mode ownership contracts
+  -> physically enclosed room hosts
+  -> one spatial reservation owner
+  -> one damage and body lifecycle
+  -> coordinated visible melee
+  -> cross-mode parity ratchets
+```
+
+#### Source-path naming trap
+
+There are two jail entry contexts:
+
+1. Root `index.html`'s title-screen **Prison Escape** selects
+   `data-mode="escape"` and runs `src/world/*`, `src/entities/npc.js`,
+   `src/entities/guards.js`, `src/entities/ai.js`, and shared systems.
+2. `src/games/jail.js` is **COUNTY JAIL, as a Gang Life game package**. It uses
+   city peds/brain/collision/death while the player is in city custody, then can
+   transport into the escape world with sentence/bail context.
+
+The County Jail code explicitly uses real city peds and `cityKillPed`; the
+standalone escape path deliberately retains its original population and loop.
+Do not try to gain parity by deleting the city-mode gate or making County Jail
+own a second prison map. Improvements that should exist in both entries belong
+in the shared prison/world/system capability consumed by both.
+
+#### Finding 1 — the “transparent roof” is absent geometry
+
+The renderer was exonerated:
+
+- all inspected prison structural collider materials were visible and opaque;
+- transparent batching is rejected;
+- prison colliders are not merged into transparent batches;
+- far culling is city-only;
+- camera occlusion pulls the camera inward rather than fading roofs;
+- static freezing changes transforms, not opacity;
+- PBR promotion preserves opacity and sidedness;
+- only deliberate windows, puddles, FX, signs, and vision volumes are
+  transparent.
+
+The source explicitly authors open-top dioramas:
+
+- `src/world/roombuild.js::roomShell()` promises a floor plus four **open-top**
+  walls and creates no ceiling slab.
+- Cafeteria, lounge, gunroom, workshop, chapel, infirmary, and laundry all call
+  that helper.
+- `src/world/cellblock.js` labels its own outer walls “open top.”
+- `src/world/escape_routes.js` calls sparse cross-beams and pipes a ceiling
+  structure, but they do not make a continuous roof.
+- the south-block guard hut is the sole room-shell consumer that manually adds
+  a real roof.
+
+Live vertical rays found open sky/floor-first results at workshop, chapel,
+infirmary, laundry, cafeteria, and lounge centers. The guard hut alone hit a
+real roof at roughly `y=3.6`; the cellblock hit only occasional thin trusses.
+This must be fixed with physical roof geometry, not alpha, double-sided
+materials, roof fading, fog, or camera trickery.
+
+#### Finding 2 — prison placement has multiple blind ledgers
+
+Relevant prison modules consume neither `CBZ.placement` nor `CBZ.roomPlan`.
+They combine:
+
+- unchecked fixed coordinates in room/prop files;
+- private `ZONES`, `OBSTACLES`, and `placed[]` arrays in
+  `src/world/clutter.js`;
+- direct `spawnPiece()` calls;
+- pickups with fixed vertical coordinates.
+
+Those producers cannot see one another. Concrete deterministic defects:
+
+1. `clutter.js`'s cone row starts at `(-22,32)` and adds cones at 1.6 m
+   intervals. `src/world/props.js` anchors the outdoor gym at `(-22,32)`.
+   Runtime bounds put the first cone through the weight bench and the third
+   through the dumbbell rack. The clutter obstacle list simply omits the gym.
+2. The picnic table centered at `(18,30)` intersects the lounge's north and
+   west walls. It is non-solid, so a collider-only audit cannot see the defect.
+3. The buddy trash-bag branch deliberately skips `nearPlaced`; seed `90210`
+   produced two visibly intersecting bags.
+4. `src/entities/coins.js::addPack()` always spawns at `y=1`. Packs were found
+   embedded in the workshop bench and prison bus; several other room packs
+   float over or cut through their intended support.
+
+Intentional compound geometry was separated from defects: wall corners,
+stacked crates, table benches under tabletops, and the authored barrel cluster
+are valid. The future audit must compare top-level owners/support relationships,
+not blindly reject every overlapping child mesh.
+
+Gang Life already has the missing foundations:
+
+- `src/city/placement.js` is the spatial-hash occupancy/anti-overlap owner;
+- `roomPlan` rejects out-of-host, door-keepout, host-conflict, and inter-piece
+  intersections;
+- city interior clamping/audits record and reject spills.
+
+The prison must adopt those owners. Do not make `prisonPlacement`.
+
+#### Finding 3 — piece migration also broke mode ownership
+
+Prison crate/prop calls to `CBZ.spawnPiece()` omit `parent`:
+
+- `src/world/crates.js` at the crate spawn;
+- `src/world/props.js` at picnic table, weight bench, and barrel spawns.
+
+`src/systems/pieces.js` therefore falls back to `chunk.root`, and chunk roots
+are attached directly to the global scene. `src/systems/state.js` toggles
+`prisonRoot`, not those global chunks.
+
+Live inspection found all ten migrated prison pieces—five crates, picnic
+table, weight bench, and three barrels—outside `prisonRoot`. After switching to
+city, all ten still had a visible scene chain and retained their colliders.
+This does not duplicate them during one Escape load, but it defeats mode
+isolation and lets prison geometry/physics leak into other modes.
+
+The shared collider resolver has a one-off `_city` exclusion but no symmetric
+general ownership contract. Root visibility also cannot by itself disable flat
+collider/platform/LOS arrays. Mode ownership must be explicit on every record.
+
+#### Finding 4 — inmate retaliation is authored as charge plus invisible stun
+
+`src/entities/ai.js`'s prison hunt path:
+
+- targets the player's exact center;
+- returns `baseSpeed * 1.5`;
+- inside about 1.9 m, every second sets `player.stun = 0.5`;
+- adds four heat and plays a cue;
+- never damages player HP;
+- never authors punch, guard, windup, swing, recovery, body-hit, or directional
+  reaction state.
+
+`provokeGang()` can turn every living same-gang inmate into a hunter.
+`src/entities/npc.js` continues homing until roughly 0.4 m. Shared human contact
+then resolves overlap by moving the player about 88% and the NPC only 12%,
+while capping player speed at 1.5. On the next physics frame, non-zero stun
+zeros WASD completely.
+
+The actual loop is:
+
+```text
+inmate targets player center
+  -> runs into body
+  -> proximity timer writes stun and heat
+  -> contact shoves/slows player
+  -> physics zeros input
+  -> inmate continues targeting the unreachable center
+```
+
+In a controlled eight-hunter probe with guard escalation suppressed, the player
+was stunned for `240/360` frames—**66.7%** of six seconds. With normal heat and
+guards active, frozen time reached `281/360` frames—**78.1%**—and maximum stun
+rose to about 1.85 seconds as the separate guard capture path joined.
+
+Every proximity pulse adds four detection heat. Five simultaneous arrivals can
+cross the guard-hunt threshold near 18 immediately. Guards then use their own
+`1.7x` charge and capture chain: taser stun, tackle stun, then cuffs/escort.
+Higher heat can trigger reinforcements and lockdown. The player experiences one
+continuous freeze, but it is compounded from two different legacy systems.
+
+Prison NPC-versus-NPC combat is equally numeric. `exchangeBlows()` directly
+subtracts HP from both actors on a timer, while fight steering continues at
+roughly `1.45x` speed even at contact. There is no visible exchange whose swing
+frame owns damage.
+
+#### Finding 5 — player punches have a separate hard freeze/regression
+
+`src/systems/combat.js::landPunch()` subtracts target HP, then calls
+`bodyWound()` using `actor.pos.x/y/z`. City actors expose `.pos`; prison inmate
+and guard constructors expose only `group.position`.
+
+Live escape census:
+
+- `102/102` inmates had `group.position`;
+- `12/12` guards had `group.position`;
+- `0/102` inmates and `0/12` guards had `.pos`;
+- `bodyWound`, `CBZ.body`, `reactPunch`, `cityRagdoll`, and `deathPose` were all
+  loaded, proving this is not a missing-script failure.
+
+The wound dereference throws **after HP subtraction** but **before**
+`pendingPunch = null`. The main loop catches updater exceptions, so rendering
+continues while the same pending hit retries and future input says “Finish the
+swing.”
+
+An isolated reproduction:
+
+- first punch returned “Swing...”;
+- target HP fell from `100` to `67` because the pending hit applied repeatedly;
+- the second punch was rejected with “Finish the swing.”
+
+Git blame places the regression at commit `889a8b90`, which added the wound call
+using the city actor schema without adapting prison actors. A fix must normalize
+the actor contract **and** make hit consumption atomic; a fallback position
+alone would leave future side-effect exceptions able to repeat damage.
+
+#### Finding 6 — the rig is shared; the physical lifecycle is not
+
+Live comparison showed prison and city adult male actors use the same
+articulated `makeCharacter` foundation:
+
+- adult profile;
+- elbow and knee joints;
+- `humanScale: 0.7`;
+- approximately 1.82 m metric.
+
+The lower-quality read begins after construction:
+
+- `src/systems/grapple.js`'s shared body integration immediately returns in
+  Escape mode.
+- Its update roster steps survival bots and city peds/cops, not inmates or
+  guards.
+- Its late articulated body write also skips Escape.
+- Prison receives only a small `_phys.kx/kz` fallback slide from reactions.
+
+Controlled knockdown evidence:
+
+| State | `_phys.down` | root X | Read |
+|---|---:|---:|---|
+| Immediately after `body.hit` | 1.3000 | 0 | request recorded |
+| After normal Escape tick | 1.3000 | 0 | solver never stepped |
+| After manual `body.step` | 1.2833 | -0.263 | real fall began |
+
+Prison KO/death owners instead damp the entire character root toward
+`rotation.z = PI/2`, independent of impact direction or force. Prison AI adds
+one-frame positional knockback/gore but does not hand ownership to body physics,
+generic articulated KO/death poses, or city ragdoll. Inmate/guard controllers
+also never consult `CBZ.body.busy()`, so enabling the solver without first
+yielding locomotion would create two transform owners.
+
+Dead/KO prison actors are excluded from standing collision entirely. The rigid
+foot-pivot side roll can therefore intersect floors, walls, furniture, and
+other corpses. City peds instead yield locomotion while the body solver owns
+them, route KO/death through force-aware handoff, ground bodies against
+surfaces/walls, and use a nearby articulated 13-point ragdoll when appropriate.
+
+The correct improvement is shared body ownership and lifecycle, not a new
+inmate mesh.
+
+#### Finding 7 — Gang Life's melee upgrade never adopted prison
+
+`src/systems/combat_iq.js::melee()` already implements:
+
+```text
+close -> circle -> guard -> windup -> swing -> recover -> backstep
+```
+
+City peds land damage only when that state machine returns `swing`, and city
+movement honors its spacing goal. City damage then applies wounds, reactions,
+body impulse, KO/death ownership, and attribution.
+
+The July 28 combat upgrade modified city combat/peds/gangs/police/squad AI and
+added the shared-looking competence system, but did not migrate prison
+retaliation or `exchangeBlows()`. `combatIQ.melee()` also rejects an actor
+without `.pos`, so current prison actors cannot adopt it directly.
+
+The combat-IQ audit lists city legacy sites and can report `legacy:0` while both
+prison fight paths survive. The richer directional reaction branch is similarly
+city-gated, and its introducing commit explicitly promised jail/survival would
+remain untouched. This is the core parity-ratchet failure: shared code exists,
+but the required consumer list excludes the mode the owner is comparing.
+
+#### Existing tests are insufficient or bless the defect
+
+- `tools/test-jail-contact.mjs` passes and explicitly ratifies ordinary contact
+  blocking plus the 1.5 player speed cap. It does not distinguish casual
+  contact from hostile melee positioning.
+- `tools/test-jail-sprint.mjs` currently fails later because its fixture omits
+  `CBZ.CONFIG`; that is a fixture error, not evidence for this combat defect.
+- No current gate measures prison actor schema, punch completion, updater
+  errors, hostile spacing, windup/swing ownership, stun duty cycle, heat
+  escalation, body stepping, room closure, cross-producer overlap, pickup
+  support, or mode-root ownership.
+
+Relevant combat/AI/body/room files were clean when audited; current dirty-tree
+changes were unrelated. Treat this as historical architectural drift, not as
+damage from the owner's present local edits.
+
+#### Required implementation program — exact order
+
+##### Phase 0 — executable parity reproduction
+
+Create `tools/test-prison-parity-browser.mjs` on deterministic seed `90210`.
+It must measure:
+
+- `.pos === group.position` for every combat-capable actor;
+- one swing -> at most one HP mutation;
+- pending punch clears and a second punch can start;
+- zero `[updater]` exceptions;
+- roof rays at every declared interior;
+- owner-level spatial intersections with intentional compound/support tags;
+- pickup support and geometry clearance;
+- prison object/collider/platform/LOS inactivity after Escape -> City;
+- knockdown timer progression, body movement, and locomotion yielding;
+- eight-attacker commit count, spacing, real hits, stun frames, heat changes,
+  and player-movable frames.
+
+Repair the missing `CBZ.CONFIG` sprint fixture. Split jail-contact assertions
+into ordinary social contact versus hostile combat contact. Develop each
+contract red against the original defect, but land phases green; do not add a
+permanently failing broad gate.
+
+##### Phase 1 — actor correctness and world isolation
+
+1. In `src/entities/npc.js` and `src/entities/guards.js`, standardize the
+   fight-capable actor contract: `pos: char.group.position`, `char`, `group`,
+   stable identity, `hp/maxHp`, `dead`, `ko`, and `kind`.
+2. In `src/systems/combat.js`, resolve/validate target position before HP
+   mutation, consume the pending strike before side effects or guarantee cleanup
+   in `finally`, and attach a stable hit ID so a swing is idempotent.
+3. Give colliders, platforms, pieces, and LOS blockers a general
+   `mode: "escape"|"city"|"survival"|null` scope. Replace the one-way `_city`
+   exception with a shared active-mode predicate while retaining compatibility
+   during migration.
+4. Stamp prison `addBox` output as Escape-owned. Pass
+   `parent: CBZ.prisonRoot` plus `mode:"escape"` at every prison
+   `spawnPiece()` call.
+
+Phase-1 exit:
+
+- two sequential prison punches complete;
+- every completed swing changes HP at most once;
+- no updater exception;
+- switching to city yields zero visible prison pieces and zero Escape-scoped
+  collider/platform/LOS query results.
+
+Do not tune damage or animation in this phase. Stabilize the facts later phases
+need to measure.
+
+##### Phase 2 — physically enclosed room hosts
+
+Upgrade `roomShell()` from “floor plus four open-top walls” to a building host:
+
+- roof defaults on for its current interior consumers;
+- an intentionally open structure must request `roof:false`;
+- add an opaque continuous slab with a readable underside;
+- stamp shadow, LOS, and height-banded camera/player collision correctly;
+- return `{id,bounds,doorKeepout,height,roofOpenings}` rather than only center
+  coordinates.
+
+Add a real cellblock slab, split only around functional ceiling hatches.
+Keep the beams/pipes below it. Remove the guard hut's duplicate manual roof.
+Add cheap ceiling fixtures/emissive panels so the new shadows do not make rooms
+unreadable. Let the existing camera sweep compress the boom beneath the roof;
+do not fade the roof away.
+
+Phase-2 exit:
+
+- every intended room-center upward ray hits an opaque roof;
+- declared hatches are the only openings;
+- third-person camera never renders above a slab while aiming at a player below;
+- outside views show a real roof;
+- interiors remain readable in first and third person.
+
+##### Phase 3 — one spatial truth for rooms, props, clutter, pieces, pickups
+
+Load `src/city/placement.js` early enough for prison world construction. The
+runtime API is already `CBZ.placement`; file location is not a reason to invent
+a second service.
+
+Extend it with:
+
+- atomic `claim(rect, metadata)`;
+- stable owner/source IDs;
+- `release(ownerId)` for lifecycle cleanup;
+- mode/room scope;
+- explicit compound/support/stackable relationships;
+- conflict diagnostics naming both owners and sources.
+
+Adoption rules:
+
+1. `roomShell()` registers its host footprint and doorway keepout globally.
+   Clutter sees the room as blocked.
+2. Authored furniture remains distinctive but is represented as validated
+   room-plan entries inside that host. It may ignore its own host reservation,
+   never the walls, door, or peer furniture.
+3. Fixed props claim their complete top-level footprint before building,
+   including non-solid picnic-table benches and the whole gym/rack compound.
+4. Pieces reserve on spawn and release on despawn.
+5. Move `clutter.js` after fixed rooms/props. Delete its private
+   `ZONES`/`OBSTACLES`/`placed[]` ownership and use deterministic
+   `CBZ.placement` candidates.
+6. A buddy bag must claim a second valid candidate. A cone row shifts or drops
+   a cone when blocked; it never clips through an owner.
+7. Replace `addPack(x,z,value)` and fixed `y=1` with an intent record:
+   ground loot searches a nearby unoccupied ground point; furniture loot uses a
+   registered tabletop/bench socket. Missing support is an audit failure, not an
+   embedded pickup.
+
+Phase-3 exit across several deterministic seeds:
+
+- zero unintended top-level intersections;
+- zero room spills;
+- zero unsupported/embedded pickups;
+- zero clutter inside room hosts or door keepouts;
+- intentional compounds/stacks remain valid;
+- placement cost remains load-time, not a new frame loop.
+
+##### Phase 4 — one damage event and one body owner
+
+The generic body solver currently lives inside survival-named `grapple.js`.
+Move, do not rewrite, generic `CBZ.body` integration into
+`src/systems/bodyphysics.js`; leave survival grab/throw verbs in `grapple.js`.
+First prove city/survival behavior unchanged, then enroll prison.
+
+Use an explicit registry:
+
+```text
+CBZ.body.register(actor)
+CBZ.body.unregister(actor)
+CBZ.body.busy(actor)
+```
+
+Step only active bodies so 114 idle inmates/guards do not become a full-roster
+per-frame cost. NPC/guard locomotion and animation must yield while
+`body.busy(actor)` is true. Standing actors remain in ordinary human contact;
+owned/down/dead bodies use the shared ground/wall/corpse path. Remove the fixed
+whole-root side rotation as the primary prison KO/death representation.
+
+`src/systems/childsafe.js` already describes a canonical
+`CBZ.damage(target, amount, opts)` bus, but `src/systems/damage.js` does not
+exist. Make that intended front door real rather than adding a melee-only
+helper. Minimum hit schema:
+
+```js
+CBZ.damage(target, amount, {
+  hitId,
+  attacker,
+  cause,
+  kind,
+  point,
+  impulse,
+  nonlethal
+});
+```
+
+The transaction must:
+
+1. validate target, hit ID, and world point;
+2. mutate HP once and return actual applied damage;
+3. apply one wound and directional reaction;
+4. transfer physical ownership when appropriate;
+5. route KO/death through the target's registered lifecycle;
+6. publish one structured event for witnesses, crime, UI, and attribution.
+
+Use dynamic registered hooks/events, not load-order wrappers that capture a
+function before it exists. Migrate prison player melee and city melee as the
+first two real consumers; migrate the remaining direct damage census
+incrementally.
+
+Phase-4 exit:
+
+- prison `_phys.down` decreases under normal update;
+- root/limbs react in the impact direction;
+- actor locomotion is zero while body-owned;
+- floor/wall clearance and settling work;
+- one hit yields one HP delta, wound, reaction, impulse, and attribution;
+- no fixed foot-pivot corpse roll is the primary result.
+
+##### Phase 5 — coordinated, visible melee instead of contact timers
+
+After actor, damage, and body ownership are stable, replace prison
+`huntPlayer`/`exchangeBlows` with `CBZ.combatIQ.melee()`.
+
+Extend the existing combat pack with melee coordination:
+
+- stable bearing slots around the target;
+- normally one committed striker, at most two in a large brawl;
+- token leases released on recovery, death, range, or target change;
+- non-token fighters circle, guard, feint, threaten, contain exits, or hold;
+- distant gang members become alerted/take positions instead of all targeting
+  the player's exact center.
+
+The only damaging sequence is:
+
+```text
+close to band
+  -> take bearing
+  -> guard/circle
+  -> visible windup
+  -> committed swing
+  -> one CBZ.damage event
+  -> recover/backstep
+```
+
+Remove ordinary inmate proximity writes to `player.stun` and repeating `+4`
+heat. Proximity alone changes neither HP, stun, nor heat. A landed strike may
+apply short physical hit reaction through the damage/body event. Player crime
+heat comes from the player's witnessed assault, not from enemies standing near
+the player.
+
+NPC-versus-NPC fighting uses the same state/damage path; delete simultaneous
+timer HP subtraction. Guards retain nonlethal capture semantics, but taser and
+tackle need readable ready/commit/recover phases rather than an instant contact
+write. Hostile contact should normally be prevented by the engagement band;
+its safety-net separation must not preserve the present 88%-player shove as the
+primary fight mechanic.
+
+Phase-5 exit for an eight-attacker, ten-second probe:
+
+- no more than two committed attackers;
+- every HP change has a prior visible windup;
+- proximity without a swing changes neither HP nor stun;
+- no center pile/interpenetrating attack stack;
+- player is movable at least 85% of frames not occupied by a landed hit or
+  explicit capture;
+- NPC-versus-NPC combat uses the same damage/body owner;
+- detection does not grow merely because hostile inmates are close.
+
+Tune damage only after this cadence is real. A slower, readable fighter may need
+a different per-hit number; do not preserve the old time-to-KO by reintroducing
+invisible cadence.
+
+##### Phase 6 — make parity an executable requirement
+
+Extend audits so city can no longer improve while prison silently remains a
+legacy exception:
+
+- `combatIQAudit()` must list prison retaliation and NPC exchanges as required
+  consumers;
+- actor-schema audit covers every combat-capable population;
+- body audit reports registered, active, busy, unsupported, and legacy-rotated
+  actors;
+- placement audit reports room spills, cross-owner intersections, unsupported
+  pickups, and inactive-mode leakage;
+- roof audit samples every declared interior host;
+- damage audit rejects new direct melee HP mutation;
+- source contracts remove stale “open top,” “jail untouched,” and “all
+  consumers adopted” claims once code changes.
+
+Final validation:
+
+1. focused source contracts and `node --check` for changed files;
+2. repaired sprint fixture and split jail-contact tests;
+3. seeded prison-parity browser contract;
+4. Escape -> City -> Escape ownership test;
+5. `git diff --check`;
+6. `npm run build`;
+7. live first-/third-person room QA;
+8. live group fighting beside walls, furniture, doorways, and corpses;
+9. profile the active-body set and placement build cost rather than assuming
+   shared code is free.
+
+#### Overall definition of done
+
+Geometry:
+
+- every intended indoor region has a continuous opaque roof;
+- no unintended owner-level prop overlap across tested seeds;
+- every pickup has an explicit valid support;
+- no Escape-scoped physical record participates in another mode.
+
+Combat:
+
+- zero updater exceptions;
+- exactly one damage transaction per swing;
+- one or two readable committed attackers rather than a gang center-pile;
+- proximity is not an attack;
+- visible windup precedes every melee HP loss;
+- guards visibly commit capture actions.
+
+Bodies:
+
+- the same rig receives the same body ownership rules in prison and city;
+- knockdown progresses, suspends locomotion, grounds, collides, settles, and
+  gets up or dies through one lifecycle;
+- direction/force, not a fixed root roll, determines the physical read.
+
+Architecture:
+
+- one actor position contract;
+- one mode-scope predicate;
+- one placement ledger;
+- one damage event;
+- one shared body owner;
+- one combat-IQ beat grammar with both city and prison consumers;
+- focused executable gates prevent each private legacy path from returning.
+
+#### Explicit non-solutions and holds
+
+Do not:
+
+- “fix” overlaps by moving only the currently visible cones/table;
+- add another manual prison obstacle list;
+- make roofs transparent, double-sided, or camera-faded instead of building
+  them;
+- improve the inmate mesh before fixing the lifecycle driving the shared rig;
+- paste city ragdoll calls into prison without actor registration and
+  locomotion ownership;
+- add punch animations on top of the existing proximity stun timer;
+- preserve heat pulses merely to keep the old difficulty;
+- call a city-only local damage helper from prison and declare parity;
+- replace standalone Prison Escape with city pedestrians;
+- merge or stage the owner's mixed dirty worktree to recover this handoff;
+- close any issue from source appearance alone without the named runtime gate.
+
+Final message from GPT to Claude: the owner is reporting one loss of physical
+trust expressed through several surfaces. The room has no roof because the
+shell contract permits absence. Props overlap because producers do not reserve
+space with one another. Fighters bulldoze and freeze because proximity owns
+combat instead of a swing. Bodies look fake because Escape is denied the body
+owner despite sharing the rig. Fix the contracts in dependency order, migrate
+real consumers, and make the comparison itself executable.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a
