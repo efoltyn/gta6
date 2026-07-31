@@ -132,15 +132,31 @@ this roadmap:
 - The cockpit prose says “at most 26 meshes,” but the actual enforced
   `MAX_MESHES` constant remains **40**. Issue 73 is open and also exposes a
   prose-versus-ratchet mismatch.
-- The nuclear patch now phases early/forming/mature far masks, smooths and
-  increases cold-lobe geometry, disables depth writes on the cold cloud, keeps
-  cold-lobe counts from collapsing at low quality, and defaults the ordinary
-  explosion/puff storm off. Its focused phase contract passes and reports zero
-  scheduled generic nuclear puff events. This is meaningful progress on
-  109–115 and 117–120, but it is not visual proof, it still uses a planar far
-  card, and its fixed full cold counts create a performance question.
-- Nuclear wave deaths still lose the ordnance identity in prose. Issues
-  105–107 remain open.
+- `origin/main` commits `97838b9` and `066aba8` supersede the earlier nuclear
+  worktree snapshot. The current focused contract reports one coherent
+  post-flash draw, zero solid-lobe fields, zero detail planes, and zero generic
+  nuclear puff events. This is meaningful progress on 109–115 and 117–120,
+  but it is static/arithmetic evidence rather than near/far/aerial/underside
+  visual and performance proof.
+- Nuclear wave deaths now carry “nuclear blast” rather than generic explosion
+  prose. Issues 105–107 are **partial**, not closed: identity is still
+  normalized from phrases and the owner-facing display is not the requested
+  canonical **NUKE**.
+
+### 1.5 Clean-branch revalidation on 2026-07-31
+
+The documentation branch based on `origin/main` at `066aba8` reran:
+
+```text
+node tools/math-gate.mjs --seeds 90210
+```
+
+It built the full title-screen world (318 lots, 180 shops, 202 roads, 648 named
+peds), completed 400 ticks, and reproduced the same seven failures listed in
+1.3 exactly. Because seed 90210 was red, the gate correctly stopped before the
+determinism comparison and seed 1337. This confirms that the five product
+failures and two calibration candidates were still current at handoff; it does
+not authorize raising any ratchet.
 
 ## 2. The normalized issue register
 
@@ -168,7 +184,7 @@ Status vocabulary:
 | F1 — facade side boxes | 84–86 | audits counted named AC paths, not symptom-shaped geometry | Candidate close | building facade grammar plus live visual/census proof |
 | V4 — drive-by locomotion | 87–94 | canonical car/ped identity sits on a private beeline driver | Open | `roadPick`, road graph/traffic driver, vehicle collision feedback |
 | P2 — indoor mobility and posts | 95–104 | outdoor goals and permanent pinned posts have no bidirectional doorway/post lifecycle | Open | `cityNav`, ped goal owner, `staffPost`, `cityScare` |
-| O1 — structured death cause | 105–107 | ordnance identity is reduced to a reason string before the kill feed | Open | `impactbus`, damage/kill bus, `killfeed` renderer |
+| O1 — structured death cause | 105–107 | ordnance identity is reduced to a reason string before the kill feed | Partial | `impactbus`, damage/kill bus, `killfeed` renderer |
 | O2 — one nuclear event | 108–121 | flash, cloud formation, generic explosions, smoke sources, LOD, and audit do not share one phase contract | Partial | `nukefx` as sole visual owner; `impactbus` and real burning receivers as inputs |
 
 ## 3. The overlaps that determine sequencing
@@ -740,7 +756,7 @@ fell out during normalization.
 | 93–94 | Phase 3C live occupant mapping and drive-by audit |
 | 95–100 | Phase 1B bidirectional indoor routing, steering reset, committed recovery |
 | 101–104 | Phase 1C post release/evacuation/return lifecycle and audit |
-| 105–107 | Phase 5A structured cause; fast-track directly after Phase 0 |
+| 105–107 | Partial: generic wave prose is corrected, but structured kind and exact `NUKE` display remain; Phase 5A fast-track |
 | 108 | Protected design constraint: keep white flash/dome |
 | 109–111 | Partial current patch; review and finish in Phase 5B |
 | 112 | Open planar far-card limitation; Phase 5C |
