@@ -77,10 +77,9 @@
     if (CBZ.CONFIG.FACADES_V2 == null) CBZ.CONFIG.FACADES_V2 = true;
     if (CBZ.CONFIG.FACADE_AC_UNITS == null) CBZ.CONFIG.FACADE_AC_UNITS = false;
   }
-  // Deterministic LCG (owner rule: no Math.random) for the runtime decal
-  // helpers below (cityBulletHole/cityScorch) -- everything else in this file
-  // is driven by a caller-supplied seeded rng, but these two fire at gameplay
-  // time from arbitrary call sites with no rng of their own.
+  // Deterministic LCG (owner rule: no Math.random) for cityBulletHole below.
+  // Everything else in this file is driven by a caller-supplied seeded rng, but
+  // bullet holes fire at gameplay time from arbitrary call sites.
   let _decalSeed = 61819;
   function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
   // FACADES_V2 build-time counters (deterministic per seed): how many windows the
@@ -1001,14 +1000,13 @@
     return (r << 16) | (g << 8) | b;
   }
 
-  // ---- BUILDING DAMAGE: bullet holes, scorch marks, knocked-off chunks ----
-  // A fixed POOL of dark decal quads. Each impact reuses the oldest slot once
-  // the cap is hit (FPS-style decal budget) so memory/draw cost stays flat. One
-  // shared dark material + one shared scorch material; chunks share box geo.
-  const BULLET_CAP = 110, SCORCH_CAP = 40;
-  const bulletPool = [], scorchPool = [];
-  let bulletIdx = 0, scorchIdx = 0;
-  let _holeGeo = null, _holeMat = null, _scorchTex = null, _scorchMat = null, _chunkGeo = null, _chunkMat = null;
+  // ---- BUILDING DAMAGE: bullet holes and knocked-off chunks ---------------
+  // A fixed POOL of bullet-hole quads reuses the oldest slot once the cap is
+  // hit (FPS-style decal budget); physical chunks share box geometry.
+  const BULLET_CAP = 110;
+  const bulletPool = [];
+  let bulletIdx = 0;
+  let _holeGeo = null, _holeMat = null, _chunkGeo = null, _chunkMat = null;
   const cityChunks = [];
   function holeGeo() { return _holeGeo || (_holeGeo = new THREE.PlaneGeometry(0.3, 0.3)); }
   // a soft dark bullet-pit texture (dark core + cracked ring) painted once
@@ -1025,21 +1023,6 @@
     const t = new THREE.CanvasTexture(c);
     _holeMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     return _holeMat;
-  }
-  function scorchMat() {
-    if (_scorchMat) return _scorchMat;
-    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
-    const x = c.getContext("2d");
-    const g = x.createRadialGradient(32, 32, 2, 32, 32, 31);
-    g.addColorStop(0, "rgba(6,6,7,0.92)"); g.addColorStop(0.5, "rgba(18,16,15,0.7)");
-    g.addColorStop(0.8, "rgba(35,28,24,0.3)"); g.addColorStop(1, "rgba(0,0,0,0)");
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    // a few soot licks
-    x.fillStyle = "rgba(10,9,8,0.55)";
-    for (let i = 0; i < 9; i++) { const a = i / 9 * 6.28 + i * 0.7, r = 18 + (i * 7 % 12); x.beginPath(); x.ellipse(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 5, 9, a, 0, 6.3); x.fill(); }
-    const t = new THREE.CanvasTexture(c);
-    _scorchMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    return _scorchMat;
   }
   function chunkGeo() { return _chunkGeo || (_chunkGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4)); }
   function chunkMat() { return _chunkMat || (_chunkMat = new THREE.MeshLambertMaterial({ color: 0x7c828b })); }
@@ -1099,36 +1082,11 @@
     return m;
   };
 
-  // PUBLIC: lay scorch marks from an explosion at (x,z) within radius r — a big
-  // soot disc on the ground + soot on any building walls the blast can reach.
-  CBZ.cityScorch = function (x, z, r) {
-    if (!CBZ.scene) return;
-    const place = (px, py, pz, nx, ny, nz, scale) => {
-      let m;
-      if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
-      else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-      m.position.set(px, py, pz); aimDecal(m, nx, ny, nz); m.rotateZ(decalRng() * Math.PI);
-      m.scale.set(scale, scale, scale);
-    };
-    // ground scorch (faces up)
-    const fy = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.03;
-    place(x, fy, z, 0, 1, 0, (r || 3) * 1.6 + 2);
-    // soot a few of the nearest wall colliders that face the blast
-    const r2 = (r || 3) * (r || 3) * 2.2; let n = 0;
-    for (let i = 0; i < CBZ.colliders.length && n < 4; i++) {
-      const c = CBZ.colliders[i]; if (c.y1 == null) continue;
-      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
-      const dx = cx - x, dz = cz - z, dd = dx * dx + dz * dz;
-      if (dd > r2 || dd < 0.5) continue;
-      const wx = c.maxX - c.minX, wz = c.maxZ - c.minZ;
-      // pick the broad face nearest the blast as the scorch plane
-      let nx = 0, nz = 0, sx = cx, sz = cz;
-      if (wx >= wz) { nz = dz < 0 ? -1 : 1; sz = nz < 0 ? c.minZ - 0.05 : c.maxZ + 0.05; sx = Math.max(c.minX, Math.min(c.maxX, x)); }
-      else { nx = dx < 0 ? -1 : 1; sx = nx < 0 ? c.minX - 0.05 : c.maxX + 0.05; sz = Math.max(c.minZ, Math.min(c.maxZ, z)); }
-      const sy = Math.max(c.y0 + 0.4, Math.min(c.y1 - 0.4, fy + 1.0));
-      place(sx, sy, sz, nx, 0, nz, (r || 3) * 0.7 + 1.4); n++;
-    }
-  };
+  // Compatibility seam for the many explosion/crash callers. The former
+  // implementation painted a generated soot texture onto the ground and nearby
+  // facades; that entire printed-mark effect is owner-cut. Physical chunks,
+  // shattered glass, cracks and carved openings carry building damage instead.
+  CBZ.cityScorch = function () { return null; };
 
   // PUBLIC: knock physical concrete CHUNKS off a surface on a big hit (blast /
   // ram). Cheap pooled debris boxes that tumble and settle, capped.
@@ -1152,17 +1110,16 @@
 
   // PUBLIC: CINEMATIC STRUCTURAL DAMAGE at an impact point (missiles, rockets,
   // big blasts). Called by the aircraft + explosion agents. At (x,y,z) it:
-  //   1) finds the nearest building WALL face so debris/scorch fling OUTWARD,
+  //   1) finds the nearest building WALL face so debris flings OUTWARD,
   //   2) knocks off concrete CHUNKS scaled by `power`,
-  //   3) stamps a scorch/impact decal on that wall face (or the ground),
-  //   4) BURSTS every window pane within blast radius (spider-cracks → out),
-  //   5) on a big hit, a couple of bullet-pit gouges around the impact.
+  //   3) BURSTS every window pane within blast radius (spider-cracks → out),
+  //   4) accumulates real structural damage toward a carved opening.
   // Pooled + capped throughout. `power` ~0.5 (light) … 3 (heavy ordnance).
   CBZ.cityDamageBuilding = function (x, y, z, power) {
     power = power || 1;
     if (y == null) y = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4;
     // locate the nearest tall wall collider to derive an outward normal + a
-    // surface point to scorch (so the decal sits ON the facade, not floating).
+    // surface point for debris and structural damage at the actual facade.
     let best = null, bestD = 1e9, bnx = 0, bnz = 1, bsx = x, bsz = z, bsy = y;
     const searchR2 = 36;   // 6m: a wall right at the impact
     for (let i = 0; i < CBZ.colliders.length; i++) {
@@ -1184,27 +1141,10 @@
       count: Math.round(3 + 3 * power), force: 4 + 2.5 * power,
       dirx: onWall ? bnx : null, dirz: onWall ? bnz : null,
     });
-    // (3) scorch/impact decal on the wall face (or a ground scorch if open air)
-    if (onWall && scorchPool != null) {
-      let m;
-      if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
-      else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-      m.position.set(bsx + bnx * 0.03, bsy, bsz + bnz * 0.03); aimDecal(m, bnx, 0, bnz); m.rotateZ(Math.random() * Math.PI);
-      const sc = 1.6 + power * 1.4; m.scale.set(sc, sc, sc);
-      // a few smaller bullet-pit gouges ringing the blast crater
-      const ng = Math.min(4, 1 + (power | 0));
-      for (let g = 0; g < ng; g++) {
-        const a = Math.random() * 6.28, rr = 0.5 + Math.random() * (0.8 + power * 0.5);
-        const gx = bsx + (bnx !== 0 ? 0 : Math.cos(a) * rr), gz = bsz + (bnz !== 0 ? 0 : Math.cos(a) * rr);
-        CBZ.cityBulletHole(gx, bsy + Math.sin(a) * rr, gz, bnx, 0, bnz);
-      }
-    } else {
-      CBZ.cityScorch(x, z, 1.4 + power);
-    }
-    // (4) shatter every pane within the blast radius (cracked → blown out)
+    // (3) shatter every pane within the blast radius (cracked → blown out)
     CBZ.cityShatter(x, z, 4.0 + power * 2.2);
-    // (4b) ACCUMULATE a persistent wound on the struck wall — repeated hits/blasts
-    // on the SAME wall escalate scorch → cracks → a real blown-open carve. We
+    // (4) ACCUMULATE a persistent wound on the struck wall — repeated hits/blasts
+    // on the SAME wall escalate cracks → a real blown-open carve. We
     // already located the wall + its surface point + outward normal above, so
     // hand them straight to cityWoundWall (zero extra search).
     if (onWall && best && CBZ._cityWoundWallRec) CBZ._cityWoundWallRec(best, bsx, bsy, bsz, power, bnx, bnz);
@@ -1216,15 +1156,15 @@
   // ---- ESCALATING WALL WOUNDS ----------------------------------------------
   // WHY: one rocket carves a wall open instantly, but a wall raked by rifle fire
   // or peppered with small blasts used to shrug it ALL off — nothing accumulated.
-  // Now every hit on a wall builds a damage record on THAT collider: it scorches,
-  // then cracks, then (once enough damage piles on) the wall genuinely BLOWS OPEN
-  // into the room behind it — the satisfying "keep hitting it and it gives" beat.
+  // Now every hit on a wall builds a damage record on THAT collider: it cracks,
+  // then (once enough damage piles on) the wall genuinely BLOWS OPEN into the
+  // room behind it — the satisfying "keep hitting it and it gives" beat.
   // The decals are pooled+capped and the auto-carve routes through the fracture
   // ledger so it counts against the 24-hole budget and boards over like any breach.
-  const wallDmg = new Map();   // wall collider -> { dmg, x,y,z (impact centroid), nx,nz, sc1, cracks:[] }
+  const wallDmg = new Map();   // wall collider -> { dmg, x,y,z (impact centroid), nx,nz }
   const WALLDMG_CAP = 40;
-  // a tiny dedicated CRACK-decal pool (kept apart from scorchPool so cracks don't
-  // thrash the explosion-scorch LRU). Small cap — only a handful of wounded walls
+  // a tiny dedicated CRACK-decal pool (kept apart from bulletPool so cracks don't
+  // thrash the bullet-hole LRU). Small cap — only a handful of wounded walls
   // ever show cracks at once before they auto-carve.
   const crackPool = []; let crackIdx = 0; const CRACK_CAP = 24;
   function placeCrack(px, py, pz, nx, nz, scale) {
@@ -1234,14 +1174,6 @@
     else { m = crackPool[crackIdx]; crackIdx = (crackIdx + 1) % CRACK_CAP; m.visible = true; }
     m.position.set(px + nx * 0.025, py, pz + nz * 0.025); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
     const s = scale || 1.3; m.scale.set(s, s, s);
-  }
-  function placeWoundScorch(px, py, pz, nx, nz, scale) {
-    if (!CBZ.scene) return;
-    let m;
-    if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
-    else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-    m.position.set(px + nx * 0.03, py, pz + nz * 0.03); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
-    const s = scale || 1.4; m.scale.set(s, s, s);
   }
   // INTERNAL: accumulate a wound on an ALREADY-LOCATED wall collider (cityDamage-
   // Building calls this — it found `best` for us). Tiers fire as the total climbs.
@@ -1256,7 +1188,7 @@
         let lo = null, loV = 1e9; for (const [k, v] of wallDmg) { if (v.dmg < loV) { loV = v.dmg; lo = k; } }
         if (lo) wallDmg.delete(lo);
       }
-      rec = { dmg: 0, x: sx, y: sy, z: sz, nx: nx, nz: nz, sc1: false, t2: 0, n: 0 };
+      rec = { dmg: 0, x: sx, y: sy, z: sz, nx: nx, nz: nz, t2: 0, n: 0 };
       wallDmg.set(col, rec);
     }
     // running impact centroid (so the auto-carve opens where the wall took the
@@ -1265,8 +1197,6 @@
     rec.x += (sx - rec.x) * k; rec.y += (sy - rec.y) * k; rec.z += (sz - rec.z) * k;
     rec.nx = nx; rec.nz = nz;
     const before = rec.dmg; rec.dmg += power;
-    // TIER 1 (>=0.6): a persistent scorch smudge appears (once).
-    if (rec.dmg >= 0.6 && !rec.sc1) { rec.sc1 = true; placeWoundScorch(sx, sy, sz, nx, nz, 1.5); }
     // TIER 2 (>=1.6): 1-2 crack decals + a knock of chunks (each threshold-cross
     // adds one crack, capped at 2, so a pummelled wall visibly spiderwebs).
     if (rec.dmg >= 1.6 && before < rec.dmg && rec.t2 < 2 && Math.floor((rec.dmg - 1.6) / 0.6) >= rec.t2) {
@@ -1332,10 +1262,9 @@
 
   CBZ.cityDamageReset = function () {
     for (const m of bulletPool) m.visible = false;
-    for (const m of scorchPool) m.visible = false;
     if (crackPool) { for (const m of crackPool) m.visible = false; crackIdx = 0; }
     if (wallDmg) wallDmg.clear();   // wipe the accumulated wall-wound records
-    bulletIdx = scorchIdx = 0;
+    bulletIdx = 0;
     for (const c of cityChunks) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); }
     cityChunks.length = 0;
     resetBreaches();
@@ -1940,10 +1869,10 @@
     const fr = CBZ.cityFracture;
     if (fr && fr.recent && fr.recent(x, z)) return true;    // this rocket already opened the wall
     const rec = carveHole(x, 1.2, z, r, { search: 5 });
-    // nothing to breach (open air, or the wall was already opened) → just scorch.
-    if (!rec) { CBZ.cityScorch(x, z, r * 0.9 + 1.2); return false; }
+    // Nothing to breach (open air, or the wall was already opened).
+    if (!rec) return false;
     if (fr && fr._adopt) fr._adopt(rec, r);
-    // rubble blown INWARD through the hole, scorch, burst nearby panes, feedback
+    // rubble blown INWARD through the hole, burst nearby panes, feedback
     const g = rec.gap;
     const off = g.horiz ? (z - g.fixed) : (x - g.fixed);
     const inN = off >= 0 ? 1 : -1;                          // push debris away from the side the rocket came from
@@ -1952,19 +1881,17 @@
     const rubX = g.horiz ? gapCen : g.fixed, rubZ = g.horiz ? g.fixed : gapCen;
     CBZ.cityChunk(rubX, (g.v0 + g.v1) / 2 - (g.v1 - g.v0) * 0.2, rubZ,
       { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr });
-    CBZ.cityScorch(x, z, r * 0.9 + 1.4);
     CBZ.cityShatter(x, z, r * 2 + 4);
     if (CBZ.shake) CBZ.shake(0.6);
     if (CBZ.sfx) CBZ.sfx("glass");
     return true;
   };
 
-  // DECORATE the explosion so blasts leave scorch marks on the ground + nearby
-  // walls and blow concrete chunks outward — without touching crashfx.js. We
-  // wrap once, lazily, the first time the city updates (after all modules load),
-  // preserving the original behaviour exactly. Idempotent.
-  // The STRUCTURAL pass shared by every blast: ground/facade scorch, outward
-  // concrete chunks, the facade-damage sweep, and — for a hard hit against a
+  // DECORATE the explosion with physical structural damage without touching
+  // crashfx.js. We wrap once, lazily, the first time the city updates (after all
+  // modules load), preserving the original behaviour exactly. Idempotent.
+  // The STRUCTURAL pass shared by every blast: outward concrete chunks, the
+  // facade-damage sweep, and — for a hard hit against a
   // wall — a real persistent carved HOLE at the impact height that opens onto
   // the LIT interior room (fracture.js owns ledger/caps/debris; carveHole's
   // deepRoom dress + the brightened reveal palette make it read as a room you
@@ -1972,14 +1899,12 @@
   // ~2.6-3.4, grenade/car-burst ~1.6, anything weaker just scars.
   function structuralBlast(x, z, opts) {
     try {
-      const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
+      const power = (opts && opts.power) || 1;
       const groundY = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
       const impactY = opts && opts.y != null ? +opts.y : groundY + 1.4;
       const elevated = impactY > groundY + 3;
-      // A rocket 30m up a tower must not paint the road or damage a phantom
-      // ground-floor wall. Debris and building damage stay at the actual seat;
-      // only a blast physically coupled to the surface receives ground scorch.
-      if (!elevated) CBZ.cityScorch(x, z, R * 0.5);
+      // A rocket 30m up a tower must not damage a phantom ground-floor wall.
+      // Debris and building damage stay at the actual impact seat.
       CBZ.cityChunk(x, elevated ? impactY : groundY + 0.6, z,
         { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
       CBZ.cityDamageBuilding(x, impactY, z, Math.min(3, power));
