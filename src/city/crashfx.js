@@ -833,7 +833,11 @@
     if (!opts.noDamage) {
       const drop = elevated ? cy - 1.2 : 0;   // height above a standing chest
       const gR = elevated ? Math.sqrt(Math.max(0, R * R - drop * drop)) : R;
-      if (gR > 0.4) applyBlastDamage(x, z, gR, power, byPlayer);
+      if (gR > 0.4) {
+        const cause = opts.cause ||
+          (opts.ordnance === "nuke" ? "nuclear blast" : "explosion");
+        applyBlastDamage(x, z, gR, power, byPlayer, null, null, cause);
+      }
     }
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
 
@@ -873,18 +877,19 @@
   // crowd circle-kill, peds, cops, and the player, scaled by distance/power.
   // Both cityExplosion and cityAirstrikeExplosion route through this so they hurt
   // people identically. (force/fling let an airstrike fling bodies harder.)
-  function applyBlastDamage(x, z, R, power, byPlayer, force, fling) {
+  function applyBlastDamage(x, z, R, power, byPlayer, force, fling, cause) {
     force = force == null ? 9 : force; fling = fling == null ? 6 : fling;
+    cause = cause || "explosion";
     // REALISTIC LETHALITY: a blast is fatal near ground zero, not across its whole
     // visual / ground-shock radius. Killing EVERYONE within R wiped out crowds of
     // bystanders most of a block away (filmed "kills a huge amount of people").
     // Lethal core ≈ 0.55R (≈0.3× the area, so ~3× fewer deaths); past it, spared.
     const LR = R * 0.55, LR2 = LR * LR;
-    if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: true, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer });
-    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, "explosion"); }
+    if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: false, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer, byPlayer: byPlayer, cause: cause });
+    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
     for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
     const PL = CBZ.player;
-    if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, "caught in an explosion", false, null, false); } }
+    if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, cause === "nuclear blast" ? "killed by a nuclear blast" : "caught in an explosion", false, null, false); } }
 
     // ---- B5: STRUCTURAL BLAST DAMAGE — every player-built piece (systems/
     // pieces.js) within the FULL blast sphere R (not the reduced ped lethal
@@ -1040,7 +1045,9 @@
     try { const fl = CBZ.el && CBZ.el.flash; if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
 
     // blast damage — SAME shared path as cityExplosion, just flings bodies harder
-    applyBlastDamage(x, z, R, power, byPlayer, 14, 10);
+    const cause = opts.cause ||
+      (opts.ordnance === "nuke" ? "nuclear blast" : "explosion");
+    applyBlastDamage(x, z, R, power, byPlayer, 14, 10, cause);
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power }, { silent: true, noWanted: true });
 
     // STRUCTURAL COUPLING (same contract as cityExplosion above): an airstrike

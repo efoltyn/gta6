@@ -1200,7 +1200,9 @@
       if (pk >= 0.5) {
         try {
           CBZ.cityCrowdCircleKill(w.x, w.z, r1, {
-            byCar: true, quiet: true, fromX: w.x, fromZ: w.z, noCrime: !w.byPlayer,
+            byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
+            noCrime: !w.byPlayer, byPlayer: w.byPlayer,
+            cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
           });
         } catch (e) {}
       } else if (pk > 0.004 && r1 > r0) {
@@ -1213,7 +1215,9 @@
           const rr = r0 + (r1 - r0) * hash01(w.z + k * 11.7, w.x + r1, (w.id | 0) + k + 91);
           try {
             CBZ.cityCrowdCircleKill(w.x + Math.cos(a) * rr, w.z + Math.sin(a) * rr, rp, {
-              byCar: true, quiet: true, fromX: w.x, fromZ: w.z, noCrime: !w.byPlayer,
+              byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
+              noCrime: !w.byPlayer, byPlayer: w.byPlayer,
+              cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
             });
           } catch (e) {}
         }
@@ -1228,7 +1232,7 @@
         if (d < r0 || d >= r1) continue;
         const pk = lethalFor(w, d);
         if (pk > 0 && hash01(p.pos.x, p.pos.z, (w.id | 0) + 7) < pk) {
-          try { CBZ.cityKillPed(p, { fromX: w.x, fromZ: w.z, force: 14 * frac, fling: 10 * frac, byPlayer: w.byPlayer }, w.kind === "nuke" ? "the blast wave" : "explosion"); } catch (e) {}
+          try { CBZ.cityKillPed(p, { fromX: w.x, fromZ: w.z, force: 14 * frac, fling: 10 * frac, byPlayer: w.byPlayer }, w.kind === "nuke" ? "nuclear blast" : "explosion"); } catch (e) {}
         }
       }
     }
@@ -1244,7 +1248,7 @@
       if (d >= r0 && d < r1) {
         const pk = lethalFor(w, d);
         const dmg = w.lethal ? Math.round(30 + 190 * pk) : Math.round(120 * frac);
-        if (dmg > 0) { try { CBZ.cityHurtPlayer(dmg, w.x, w.z, w.kind === "nuke" ? "caught in the blast wave" : "caught in an explosion", false, null, false); } catch (e) {} }
+        if (dmg > 0) { try { CBZ.cityHurtPlayer(dmg, w.x, w.z, w.kind === "nuke" ? "killed by a nuclear blast" : "caught in an explosion", false, null, false); } catch (e) {} }
       }
     }
 
