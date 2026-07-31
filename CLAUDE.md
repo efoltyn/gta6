@@ -1493,6 +1493,189 @@ shared boundary.
   A campaign choice deliberately restores the speaker and dark choice panel,
   because a decision is interactive UI rather than passing speech.
 
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 closing handoff: bomb soot, Prison Escape, and GitHub
+
+> **AUTHORSHIP AND STATUS:** This subsection is GPT/Codex's closing handoff to
+> Claude after the owner said this chat window was about to close. It records
+> one implemented change, one source/deployment diagnosis, the facts that
+> changed after that diagnosis, and the exact remaining validation. It is not
+> owner-authored project law. Do not promote a diagnosis below into a current
+> fact without checking the named snapshot and live deployment.
+
+#### What this chat actually changed and published
+
+The only gameplay code authored in this conversation is the removal of the
+flat, generated black soot marks left by explosions. It is published for review
+on branch **`agent/scorch-prison-handoff`**. The code commit is **`d210c68`
+(`Remove printed building scorch marks`)**, based on current upstream
+`066aba8`.
+
+The branch deliberately contains only:
+
+- `src/city/buildings.js`
+- `tools/test-building-scorch-contract.mjs`
+- this closing `CLAUDE.md` handoff in a later documentation commit
+
+The original checkout had a very large, mixed dirty tree. On 2026-07-31 its
+local `main` was `7dfd419`, while `origin/main` was `066aba8`; Git described it
+as two commits ahead and nineteen behind because equivalent nuke work had been
+rewritten upstream. Do **not** bulk-stage, reset, switch, rebase, or merge that
+checkout just to recover this GPT work. A separate clean worktree was used for
+the branch so unrelated sound, touch, building, reality, documentation, archive,
+and test changes remain untouched.
+
+#### Printed bomb marks — source, final decision, and invariant
+
+The hated shapes in the screenshot were not a shadow, smoke simulation, or
+physical fracture. `src/city/buildings.js` generated one radial
+`CanvasTexture`, put it on flat `PlaneGeometry`, and reused it through
+`SCORCH_CAP`/`scorchPool`. Several producers stamped that same dark cutout:
+
+- `CBZ.cityScorch()` put it on the ground and projected copies onto nearby wall
+  colliders;
+- `CBZ.cityDamageBuilding()` stamped it on the selected facade and surrounded
+  it with fake bullet-pit decals;
+- the escalating wall-wound path added another copy through
+  `placeWoundScorch()`;
+- breach and structural-blast paths called the same effect again.
+
+The first narrow pass removed only facade projection. The owner's wording and
+image made the real rule clearer: **remove this whole family of printed
+explosion marks**, including the ground disc. The final patch therefore:
+
+1. deletes `SCORCH_CAP`, `scorchPool`, `_scorchMat`, `scorchMat()`, its generated
+   canvas texture, reset bookkeeping, and every building/breach/structural call;
+2. retains `CBZ.cityScorch = function () { return null; };` as a compatibility
+   seam so the many old callers cannot crash while wrappers load;
+3. preserves concrete chunks, shattered glass, pooled crack decals, accumulated
+   wall damage, and real carved walk-through openings;
+4. preserves ordinary bullet holes as a separate gun-impact grammar; it removes
+   only the fake bullet-pit ring that an explosion stamped around its soot mark.
+
+`tools/test-building-scorch-contract.mjs` is the regression ratchet. It proves
+that `cityScorch` stays a no-op, the material/pool names stay absent, building
+damage cannot call the effect, wall wounds retain `placeCrack()`, and no printed
+mark is recreated. The focused contract, both Node syntax checks,
+`git diff --check`, and the Vite production build passed again on 2026-07-31
+against `origin/main` `066aba8`.
+
+**Not yet proved in a real browser:** detonate a bomb/RPG beside several
+facades and on open ground and film the result. There must be no black radial
+cutout on either surface, while chunks, broken panes, cracks, and eventual wall
+openings must still read. Do not call this visually closed until that runtime
+shot passes.
+
+#### Why `main` appeared to update Gang City but not direct Prison Escape
+
+The 2026-07-30 complaint was not a failed GitHub Pages deployment. At the
+investigated snapshot, local and remote `main` were both `5e76cee`; Pages was
+healthy, publishing `main` from repository root, and the live `jail.js`,
+`state.js`, and `capture.js` hashes matched the commit byte-for-byte. Seventy-four
+modified paths and seven untracked paths were local-only. The local
+`.github/workflows/pages.yml` was untracked and therefore could not control
+GitHub.
+
+The mismatch was an ownership/entry-path boundary:
+
+| Entry | Mode and owner | What it means |
+|---|---|---|
+| Title-screen **Gang Life** | `data-mode="city"`; `src/games/jail.js` may engage | The city can arrest, book, hold, and transport the player through the County Jail package |
+| Title-screen **Prison Escape** | `data-mode="escape"`; `src/world/*`, `src/entities/*`, and shared `src/systems/*` | A fresh standalone escape run; no city arrest sentence is injected |
+| Gang City arrest transported to prison | city booking first, then `setMode("escape")` with `_jailSentenceIn`/`_jailBailIn` | The same escape world receives city custody context and runs the sentence clock |
+
+`src/games/jail.js` says exactly what it is: **THE COUNTY JAIL, as a game
+package**. `jailEngages()` requires `g.mode === "city"`;
+`CBZ.cityBookIn()` rejects `g.mode !== "city"`; the package title is
+`COUNTY JAIL`. `src/systems/state.js` and `src/systems/capture.js` explicitly
+say that a run not started by arrest is the “pure escape game it always was.”
+
+Therefore commits `2b066c2` and `e2b5f13` implemented this pipeline:
+
+`Gang City arrest -> County Jail booking -> transport -> Prison Escape`
+
+They did not replace the standalone prison world. Pushing them to `main`
+updated Gang City because `src/games/jail.js` executes there; clicking Prison
+Escape directly bypassed that city-only package by design.
+
+The standalone prison's real content owners include:
+
+- `src/world/ground.js`, `layout.js`, `southblock.js`, `towers.js`,
+  `cellblock.js`, `cafeteria.js`, `yard.js`, `razorwire.js`, `door.js`,
+  `escape_routes.js`, and `gunroom.js`;
+- `src/entities/guards.js`, `npc.js`, and the player/entity layer;
+- `src/systems/capture.js`, `interact.js`, `interactions.js`, `quests.js`,
+  `reinforcements.js`, inventory/drop/run-stat systems, and their shared UI.
+
+If one improvement must appear in both ways of reaching prison, put it in a
+shared prison/world/system owner and have both entries consume it. Keep
+city-specific arrest, booking desk, transport, bail, and custody presentation
+inside the County Jail package. Do not “fix” this by deleting the mode gate or
+making city jail own a second copy of the prison geometry.
+
+#### Important update after the original diagnosis
+
+The snapshot above is historical. By 2026-07-31, `origin/main` had advanced to
+`066aba8` and now contains a dedicated standalone Prison Escape overhaul. The
+commits from `5d91315` through `e965cf5` changed the correct owners, including
+`cellblock.js`, `cafeteria.js`, `gunroom.js`, `ground.js`, `southblock.js`,
+keycards, captures, lockdown, prison drops, inventory, run stats, interactions,
+HUD, and touch controls. Across the relevant escape files, `5e76cee..066aba8`
+contains roughly 7,159 insertions in 34 files.
+
+GitHub Pages successfully deployed `066aba8` in run `30609059297`. On the
+closing check, live `src/world/cellblock.js` and live `src/games/jail.js`
+matched `origin/main` byte-for-byte. Pages is still the legacy source deployment
+from `main` and `/`; it is not using the untracked local Actions workflow.
+
+So the durable ownership explanation remains true, but the old symptom may no
+longer reproduce: direct Prison Escape now has substantial work in its actual
+owners. Reproduce on `066aba8` or newer before changing anything. The County
+Jail package still remains city-only, which is correct; the two entries should
+share prison capabilities while differing in booking/sentence context.
+
+#### The deployment triage that prevented the wrong fix
+
+When “it is committed but not online” is reported, keep deployment and
+execution-path questions separate:
+
+1. Record `git status -sb`, `HEAD`, `origin/main`, and the exact files in the
+   suspect commit. Uncommitted files cannot be served by Pages.
+2. Query the Pages source/status and the latest deployment's `head_sha`.
+3. Hash the live suspect file and `git show <deployed-sha>:<file>`.
+4. If hashes match, deployment is finished; trace title selection, `setMode`,
+   package registration, feature flags, and mode gates.
+5. If hashes differ, only then investigate deployment/cache/workflow behavior.
+
+The local `.github/workflows/pages.yml` remains a separate latent footgun, not
+the cause of this incident. If it is ever committed and Pages is switched from
+legacy source publishing to its Vite artifact, note that `vite.config.js` copies
+only `css`, `assets`, and `src`; standalone `games/*.html` pages would be
+omitted. Direct Prison Escape is not one of those HTML files—it is the
+`data-mode="escape"` route in root `index.html`—so that omission did not explain
+this report.
+
+#### What Claude should verify next
+
+1. Review/merge `agent/scorch-prison-handoff` without importing the original
+   mixed worktree.
+2. Run `node tools/test-building-scorch-contract.mjs`, syntax checks,
+   `git diff --check`, and the build, then perform the missing browser bomb shot.
+3. Test both prison entries on one deployed SHA:
+   - direct title-screen Prison Escape must show the current cellblock, rooms,
+     pickups, lockdown, inventory, HUD, and touch work;
+   - a Gang City arrest must still play physical arrest/booking, then transport
+     into that same prison revision with a sentence;
+   - the only intended divergence after transport is custody/sentence context,
+     not a second prison map or stale content fork.
+4. If the two entries need a new shared seam, add one canonical prison
+   capability owner and an executable two-entry regression. Do not solve it
+   with comments in `CLAUDE.md`, duplicated geometry, raw mode exceptions, or a
+   deployment rewrite.
+
+No prison gameplay file was changed by GPT in this conversation. That part was
+diagnosis only. The published gameplay change is precisely the generated-soot
+removal and its regression gate.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a
