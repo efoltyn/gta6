@@ -545,16 +545,22 @@
   }
   // Tablet row: the left side says what the option actually does; the right
   // side is the thumb target. The index is still the canonical doAction index.
+  // SAY IT ONCE (interactions.js's zip-tie law): a copy cell that would only
+  // repeat the button's own word — label === verb, no meter, no teaching line —
+  // is dropped entirely, and the button is the row.
   function optChoice(idx, a, v) {
     const label = labelFor(a, v);
     const sub = subFor(a, v);
     const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
     const detail = [sub, (helpOn && !learned[v]) ? desc : ""].filter(Boolean).join(" · ");
+    const word = shortLabel(a, v).toUpperCase();
+    const dup = !detail && String(label).trim().toUpperCase() === word;
     return '<div class="pi-choice">' +
-      '<span class="pi-copy"><span class="pi-choice-label">' + esc(label) + "</span>" +
-      (detail ? '<span class="pi-choice-detail">' + esc(detail) + "</span>" : "") + "</span>" +
+      (dup ? "" :
+        '<span class="pi-copy"><span class="pi-choice-label">' + esc(label) + "</span>" +
+        (detail ? '<span class="pi-choice-detail">' + esc(detail) + "</span>" : "") + "</span>") +
       '<button type="button" class="pi-action" data-pi="' + idx + '" aria-label="' +
-      esc(label) + '">' + esc(shortLabel(a, v).toUpperCase()) + "</button></div>";
+      esc(label) + '">' + esc(word) + "</button></div>";
   }
 
   function renderTouch(a, core, rest, rawNote) {

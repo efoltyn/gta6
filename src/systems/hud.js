@@ -57,8 +57,19 @@
     if (objEl && objEl.classList.contains("killfeed")) { objEl.classList.remove("killfeed"); if (objTag) objTag.textContent = "Objective"; }
     el.objText.textContent = t;
   }
+  // TOUCH_HINT_SUBTITLE — on touch the hint drops its .panel box and speaks in
+  // the world-subtitle grammar (css/hud.css #hint.hint-sub). The boxed centre
+  // cell is the last legacy mid-screen popup ("TASED — you hit the floor!"),
+  // and on iPad it landed inside the docked interaction rail's column. Same
+  // text, same timing, same element — only the skin and floor move, so every
+  // flashHint caller is covered without being touched. Toggled per show, not
+  // at boot, because CBZ.touchMode latches on the first touch, after this file
+  // has loaded. Flag false = the boxed panel, byte-identical.
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HINT_SUBTITLE == null) CBZ.CONFIG.TOUCH_HINT_SUBTITLE = true;
   function showHint(t) {
     if (routeCityText(t, "messages", "City Desk")) { hideHint(); return; }
+    el.hint.classList.toggle("hint-sub",
+      !!(CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_HINT_SUBTITLE !== false)));
     el.hint.textContent = t; el.hint.classList.add("show");
   }
   function hideHint() { el.hint.classList.remove("show"); }

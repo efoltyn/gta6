@@ -376,11 +376,18 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
     flex-direction: column;
     gap: 9px;
   }
+  /* the prison rail's touch contract, ported: only the explicit action button
+     eats a tap. The panel and rows are clear glass here, and with the copy bar
+     shrunk to its words the vacated 1fr track would otherwise be an INVISIBLE
+     tap zone over the world — a finger aiming the camera must fall through it.
+     The delegated click on #interactOpts still fires: a button tap bubbles up
+     through ancestors regardless of their own pointer-events. */
+  body.touch #interact { pointer-events: none; }
   body.touch #interact .iopt.tverb {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
-    align-items: start;
+    align-items: center;
     min-height: 52px;
     margin: 0;
     padding: 0;
@@ -390,10 +397,25 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
     box-shadow: none;
     text-align: left;
     transform: none;
+    pointer-events: none;
   }
+  /* the phone row skins carry one more class than the reset above, so without
+     this they win on specificity and keep painting their FULL-ROW slab under
+     the copy bar, the gap and the button — the doubled bar in the owner's
+     airliner screenshots. Same selector weight, declared later, ends it. */
+  body.touch #interact .iopt.tverb.tyes,
+  body.touch #interact .iopt.tverb.tno {
+    min-height: 52px;
+    opacity: 1;
+    background: transparent;
+  }
+  body.touch #interact .iopt.tverb.tno .ilab { color: #fff; font-size: 15px; font-weight: 700; }
   body.touch #interact .iopt.tverb:active { transform: none; box-shadow: none; }
   body.touch #interact .itouch-copy {
     min-width: 0;
+    justify-self: end;      /* the bar hugs its words — empty track stays clear glass,
+                               never a painted slab of left-over gradient */
+    max-width: 100%;
     padding: 7px 10px;
     border-radius: 10px;
     background: linear-gradient(90deg, rgba(7,13,20,.45), rgba(7,13,20,.82));
@@ -423,6 +445,10 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
     white-space: nowrap;
   }
   body.touch #interact .itouch-act {
+    grid-column: 2;         /* a deduped row has no copy cell; the button still
+                               holds the rail's right edge instead of drifting
+                               into the vacated 1fr column */
+    pointer-events: auto;
     min-width: 106px;
     min-height: 52px;
     padding: 8px 13px;
@@ -436,6 +462,9 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
+  /* a "bad idea" verb whose copy bar was deduped away still reads as one: the
+     warning tint moves onto the button itself (HIJACK, and every r.bad row) */
+  body.touch #interact .itouch-act.ibad { color: #ffc9c9; border-color: rgba(255,150,140,.6); }
   body.touch #interact .itouch-act:active {
     transform: translateY(3px);
     box-shadow: 0 1px 0 rgba(0,0,0,.35);
