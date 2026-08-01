@@ -695,9 +695,13 @@
           : v === "campaign-escape" ? "REFUSE"
           : String((VERB[v] && VERB[v].label) || v).toUpperCase();
         const detail = (showTips && !learned[v] && desc) ? `<span class="idesc">${desc}</span>` : "";
+        // SAY IT ONCE, here too: this is the PRISON_INTERACT_TOUCH=false
+        // fallback, and it must obey the same law as the live rail above.
+        const dup = !sub && !detail && String(label).trim().toUpperCase() === action;
         return `<div class="iopt tverb tyes" data-i="${i}">` +
-          `<span class="itouch-copy"><span class="ilab">${label}</span>` +
-          `<span class="isub">${sub}</span>${detail}</span>` +
+          (dup ? "" :
+            `<span class="itouch-copy"><span class="ilab">${label}</span>` +
+            `<span class="isub">${sub}</span>${detail}</span>`) +
           `<button type="button" class="itouch-act">${action}</button></div>`;
       }
       const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +

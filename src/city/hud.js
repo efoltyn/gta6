@@ -1515,13 +1515,28 @@
     // job
     const j = g.cityJob;
     if (j) {
+      const dest = j.dest ? j.dest
+        : ((j.type === "hit" || j.type === "hitman") && j.target && !j.target.dead) ? j.target.pos
+        : null;
       let dist = "";
-      if (j.dest) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.dest.x, CBZ.player.pos.z - j.dest.z)) + "m";
-      else if ((j.type === "hit" || j.type === "hitman") && j.target && !j.target.dead) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.target.pos.x, CBZ.player.pos.z - j.target.pos.z)) + "m";
+      if (dest) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - dest.x, CBZ.player.pos.z - dest.z)) + "m";
       // Full contract prose/pay lives in the phone. The live HUD only carries
-      // the one piece of navigation state that matters while moving.
+      // the one piece of navigation state that matters while moving — and it
+      // carries it ONCE (the speedometer's cluster stand-down rule, applied to
+      // navigation): mission.start pins the map waypoint on this same
+      // destination, and #waypointGuide already renders arrow + distance for
+      // it bottom-centre. While the guide covers this target, a second bare
+      // number in a top-centre pill is the same distance said twice — the
+      // owner's airliner screenshots, "1237m" at both ends of the screen. It
+      // stands down and returns the moment the waypoint is cleared (Space) or
+      // moved elsewhere. A hit whose LIVE target has walked away from the
+      // pinned last-seen mark keeps both readouts: those are two facts.
+      const wp = dist && CBZ.fullMap && CBZ.fullMap.waypoint ? CBZ.fullMap.waypoint() : null;
+      if (wp && Math.hypot(wp.x - dest.x, wp.z - dest.z) < 40) dist = "";
       jobEl.innerHTML = "" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : "");
-      jobEl.style.display = "block";
+      // an empty #cJob used to keep display:block — a bare grey pill with no
+      // words in it, floating top-centre. A box with no text does not render.
+      jobEl.style.display = dist ? "block" : "none";
       if (objEl) objEl.style.display = "none";   // a real job pre-empts the gang-join objective
     } else {
       jobEl.style.display = "none";
