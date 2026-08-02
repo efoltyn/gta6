@@ -378,6 +378,13 @@
     dealer: "Dealer", mobster: "Mobster", made: "Made Man", boss: "Mob Boss",
     tycoon: "Tycoon", billionaire: "Magnate", socialite: "Socialite", heiress: "Heiress",
     hustler: "Hustler",                 // OWNER: "hustler is a title"
+    // OWNER (2026-07-29, verbatim): "thugs and bums roles. thug is unemployed
+    // gangster and bum duh." These two rows no longer wait on a lucky archetype
+    // roll: peds.js's cityDealRole CASTS both (see its THUG AND BUM block),
+    // because a casting repair that deals EVERYBODY a trade quietly asserts a
+    // city with no unemployment. `vagrant` additionally resolves through
+    // condTitle below — that is the rung a DEALT bum takes, since he carries the
+    // condition and no job at all.
     vagrant: "Bum",                     // OWNER: "homeless person should just be title bum"
     tweaker: "Addict", thug: "Thug", gangster: "Gangster", hitman: "Hitman",
     official: "Official", exec: "Executive", merchant: "Vendor",
@@ -452,6 +459,8 @@
   // is what separates a condition from a shrug: vagrant -> the night hunt
   // (peds.js) + cop move-along, child -> childsafe.js's protection, tourist ->
   // the mark economy, addict -> aigoals' needs layer.
+  // `vagrant` now has THREE producers and one read: spawnVagrants (the seeded
+  // camp), aigoals' eviction, and cityDealRole's dealt bum. All three land here.
   function condTitle(a) {
     if (a.vagrant || a.archetype === "vagrant") return "Bum";
     if (a.child || a.band === "child" || a.band === "infant" || a.band === "teen" ||
@@ -516,6 +525,24 @@
       if (CBZ.cityRankName && a.rank) {
         const pip = CBZ.cityRankName(a.rank);
         if (pip) { _r.title = titleCase(pip); return _r; }  // "Lt." → "Lt.", "boss" → "Boss"
+      }
+      // A RUNG HE DOES NOT HOLD IS NOT HIS TITLE. OWNER (2026-07-29): "thug is
+      // unemployed gangster." The old tail read "Soldier" for ANY gang body with
+      // no rank — but Soldier is a real rung in gangs.js's declared ladder, and
+      // handing it to somebody who holds no rung is the stat-fiction ban applied
+      // backwards: the org census would show soldiers who were never promoted,
+      // never paid and can never be succeeded. An affiliated body with no rung
+      // is exactly what the owner named — a THUG.
+      //   * KIN ARE NOT CREW. gangs.js says it in its own words ("a man's kids
+      //     are not lieutenants", "family are residents of the HQ, never members
+      //     of the crew") and stamps isFamily/famRole/gangFamily; they keep the
+      //     pre-existing read rather than being called street toughs.
+      //   * A NON-CIVILIAN KIND is somebody else's cast (games/warband.js hands
+      //     its fighters a numeric gang id and no rank), so it is left alone.
+      if (!a.rank && (!CBZ.CONFIG || CBZ.CONFIG.CITY_THUG_BUM_ROLES !== false) &&
+          !a.isFamily && !a.famRole && !a.gangFamily &&
+          (!a.kind || a.kind === "gang" || a.kind === "civilian")) {
+        _r.title = "Thug"; return _r;
       }
       _r.title = RANK_TITLE[a.rank] || "Soldier";
       return _r;
@@ -842,6 +869,11 @@
   //     roled    — how many have a job, an allegiance or a real condition
   //     roleless — how many resolve to NOTHING (a casting bug). PIN AT 0.
   //     shrugs   — how many still land on the aggr/wealth last resort. PIN AT 0.
+  //     thugs    — holders of "Thug": affiliated, unranked, unemployed.
+  //     bums     — holders of "Bum": the three vagrant producers, summed.
+  //                NEITHER MAY BE 0 (a vocabulary nobody wears is a stat
+  //                fiction) AND NEITHER MAY FLOOD — if `bums` approaches
+  //                `roled`, peds.js's BUM_SHARE is wrong, not this audit.
   //     titles   — the full histogram, so a title nobody ever holds shows up as
   //                the stat fiction it is
   //     orgs     — "different levels in orgs" as a measurement: per org, the
@@ -956,7 +988,18 @@
         if (d) disguise = { readsAs: d.role, org: d.org, holding: !!d.trusted };
       } catch (e) {}
     }
+    // THE TWO JOBLESS ROLES, LIFTED OUT OF THE HISTOGRAM SO THEY CAN BE PINNED.
+    // OWNER (2026-07-29): "thugs and bums roles." They were already inside
+    // `titles`, but a role you have to go looking for is a role nobody measures
+    // — and both are subject to the stat-fiction ban from BOTH directions: zero
+    // holders means the vocabulary lies about the city, and a flood means the
+    // casting shares in peds.js are wrong. Read them together with `peds`:
+    // these are counts, not rates. Neither counts toward `shrugs` (they are
+    // real roles) and both count toward `roled`, so the ratchet can only move
+    // the right way.
+    const thugs = titles.Thug | 0, bums = titles.Bum | 0;
     return { peds: all.length, roled: roled, roleless: roleless, shrugs: shrugs,
+             thugs: thugs, bums: bums,
              attending: attending, activityTitles: activityTitles,
              kinds: kinds, titles: titles, orgs: orgs, emptyRanks: empty,
              covered: covered, coverOrgs: coverOrgs, unseeable: unseeable,

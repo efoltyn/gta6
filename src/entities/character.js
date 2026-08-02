@@ -600,6 +600,46 @@
     model.name = "character-model";
     model.userData.characterModel = true;
     g.userData.humanScale = humanScale;
+    /* ---- A BODY IS NOT SCENERY (owner, 2026-07-29) -------------------------
+       "there's some weird NPCs that have no outfit, and it's like invisible
+       where the outfit should be."
+
+       This one missing tag is how a person loses their clothes. TWO shared
+       build-time passes walk the city root and treat everything under it as
+       static: core/batch.js's `batchStaticUnder` (merges eligible meshes into
+       one buffer and REMOVES the originals from the graph) and
+       core/staticfreeze.js's `freezeStaticUnder` (flips matrixAutoUpdate off).
+       Both skip a subtree on exactly one condition — `userData.dynamic` —
+       and city/mode.js:518-522 runs the pair over `A.root`.
+
+       Its comment claims the pass happens "BEFORE spawnCityPeds/Traffic add
+       dynamic rigs to it", and for the ambient crowd that is true. It is NOT
+       true for the world builders: biome_forest / biome_farmland / biome_desert
+       / biome_snow / marina / bunkers / island_military / island_airport all
+       call cityMakePed DURING build(), and peds.js parents every one of them
+       to A.root. The ANIMALS already knew — wildlife.js:229 says in so many
+       words "BEFORE city/mode.js runs CBZ.batchStaticUnder + CBZ.freezeStaticUnder"
+       and tags itself; dogs.js:162 does the same and calls the alternative
+       "the statue bug". The file that builds every HUMAN never did.
+
+       What the batcher then takes is decided by userData, and that is why the
+       damage looks like clothes: batch.js:429 spares any mesh carrying userData,
+       and the limb segments carry clothDims/clothBand from tagCloth below — so
+       SLEEVES AND TROUSERS SURVIVE while the untagged chest (an adult male has
+       no waist box, so nothing tags his torso), the shoulder yoke and the pelvis
+       are merged away at their build-time transform and never draw on the body
+       again. A DRESSED mesh carries _cbzFlat and is spared too, so the exposure
+       is precisely the PLAIN civilian — the shipping default.
+
+       And it is invisible to the obvious check: a merged-away mesh is still in
+       skinSlots, still `visible === true`, still holding a valid material. The
+       only tell is that its `.parent` is gone, which is what
+       CBZ.cityClothMeshRenders (city/clothes.js) now tests.
+
+       A character animates every frame; there has never been a case where
+       baking or freezing one was correct. Revert: CHAR_RIG_DYNAMIC = false. */
+    if (CBZ.CONFIG && CBZ.CONFIG.CHAR_RIG_DYNAMIC == null) CBZ.CONFIG.CHAR_RIG_DYNAMIC = true;
+    if (!CBZ.CONFIG || CBZ.CONFIG.CHAR_RIG_DYNAMIC !== false) g.userData.dynamic = true;
     g.add(model);
 
     // ---- BODY PROFILE (c.build: "m" default | "f"; c.age: years | null) ----

@@ -706,6 +706,37 @@ const PASS = `(() => {
                   " orbitR=" + ha.orbitR + " belowRoofline=" + ha.belowRoofline +
                   " " + JSON.stringify(ha.byRole);
     }
+    // ARMOR SITS CLEAR OF THE CLOTH (CBZ.armorFitAudit, city/armor.js).
+    // coplanar = same-facing armor/garment face pairs sharing a plane — the
+    // z-fight stipple the owner reports as "armor flickers with the outfit".
+    // PINNED AT 0 and it is a hard invariant: the recolor wrap re-solves every
+    // mounted piece after any re-dress, so a pair can only appear if a dresser
+    // bypasses CBZ.cityRecolorRig. Measured before the wrap: every armored
+    // officer carried 2 (vest front+back on the uniform shell). Runs after the
+    // sim burst so the cop-dress sweep has painted the uniforms.
+    if (CBZ.armorFitAudit) {
+      const af = CBZ.armorFitAudit();
+      out.armorFit = af.armored + " armored coplanar=" + af.coplanar +
+                     (af.sample && af.sample.length ? " " + JSON.stringify(af.sample) : "");
+      if (af.coplanar > 0) out.fails.push("ARMOR COPLANAR WITH GARMENT (flicker): " + af.coplanar + " " + JSON.stringify(af.sample));
+    }
+    // NO BODY RENDERS WITH A HOLE IN ITS CLOTHES (CBZ.outfitIntegrityAudit,
+    // city/outfits.js). bare = rigs currently drawing with a missing cloth
+    // region (the owner's "invisible where the outfit should be" — root cause
+    // was the static batch/freeze passes eating untagged rig meshes built
+    // during world build); deadTex = dressed cloth materials whose atlas
+    // texture died. Both PINNED AT 0 as hard invariants: rigs are stamped
+    // userData.dynamic at build now, and the guarantee sweep repairs anything
+    // that still slips within one cursor pass. repaired/rigs are printed
+    // beside so a sweep that stops dressing anybody cannot pass.
+    if (CBZ.outfitIntegrityAudit) {
+      const oi = CBZ.outfitIntegrityAudit();
+      out.outfits = oi.rigs + " rigs bare=" + oi.bare + " deadTex=" + oi.deadTex +
+                    " repaired=" + oi.repaired + " pinned=" + oi.pinned +
+                    (oi.sample && oi.sample.length ? " " + JSON.stringify(oi.sample) : "");
+      if (oi.bare > 0) out.fails.push("BARE RIGS (invisible outfit regions): " + oi.bare + " " + JSON.stringify(oi.sample));
+      if (oi.deadTex > 0) out.fails.push("DEAD CLOTH TEXTURES: " + oi.deadTex);
+    }
     // ---- evidence only (adoption counters / world census) ------------------
     if (CBZ.predatorAudit) { const p = CBZ.predatorAudit(); out.predator = p.legacy + "/" + p.adopted; }
     if (CBZ.checkpointAudit) { const c = CBZ.checkpointAudit(); out.checkpoints = c.count + "/" + c.manned; }

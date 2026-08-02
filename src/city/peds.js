@@ -483,10 +483,235 @@
     return true;
   };
 
+  // ============================================================
+  //  THUG AND BUM — THE TWO ROLES THAT ARE NOT JOBS.
+  //
+  //  OWNER (2026-07-29, verbatim): "thugs and bums roles. thug is unemployed
+  //  gangster and bum duh."
+  //
+  //  He is finishing the sentence he started with "civilian isn't a role".
+  //  cityDealRole below repairs a roleless person by dealing them a TRADE, and
+  //  that repair quietly asserts something false about this city: that everyone
+  //  in it works. The man on the corner in his crew's colours with no rank, and
+  //  the woman asleep in the doorway, are not cashiers nobody has hired yet.
+  //  They are the two roles the street keeps for people with no wage, and
+  //  UNEMPLOYMENT MUST BE REPRESENTABLE, NOT REPAIRED AWAY.
+  //
+  //  NEITHER ROLE AUTHORS ANYTHING — no brain, no bark, no update loop, no new
+  //  field. Each is one stamp on a field that already drives shipped systems,
+  //  which is the entire reason they are cheap:
+  //
+  //    BUM  = `vagrant` — read by the night hunt (isHunterBum below), the cop
+  //           move-along, the beg/bark microBehaviour (`_role:"panhandler"` +
+  //           `_beg`), aigoals' "a vagrant carries no rent" branch and the rag
+  //           wardrobe. level.js's CONDITION ladder already titles it "Bum".
+  //    THUG = `archetype:"thug"` — already titled "Thug" by level.js's
+  //           ARCH_TITLE, and read by combat_iq.js's fighting tier. His
+  //           aggression is not a new number either: it is the band this file's
+  //           own header names — "< violent → brawler: attacks the weak, joins
+  //           fights, carjacks" (CBZ.CITY.aggro.crook 0.72 → violent 0.88) —
+  //           and it stops deliberately SHORT of `violent`, because that band
+  //           belongs to the one-per-city neighbourhood nightmare and the
+  //           volatile camp vagrant. Stacking thugs into it would triple the
+  //           psycho population, which is a different change.
+  //
+  //  WHAT IS DELIBERATELY NOT DONE: a dealt thug does NOT get `ped.gang`.
+  //  `gang.members` is gangs.js's roster and it is what commits a body to wars,
+  //  promotions, defections and drive-bys — a body carrying a gang id that is
+  //  not on that roster is exactly the parallel-bookkeeping trap CLAUDE.md
+  //  bans, and roleAudit would additionally bucket him under "prospect", so an
+  //  org census would start counting corner toughs as rung-holders (a stat
+  //  fiction about the ladder). He is affiliated by DISTRICT instead — see the
+  //  share tables below, and the note there on why a live turf read was refused.
+  //  The genuinely affiliated case is handled the other way round, as a READ:
+  //  level.js's roleOf now titles any rung-less gang body "Thug" instead of
+  //  quietly promoting him to Soldier.
+  //
+  //  DETERMINISM (law #12): every draw below is CBZ.hash01 off the body's spawn
+  //  point (roleHash), never Math.random and never a shared rng() stream — this
+  //  path runs in an order that depends on where the CAMERA is, so two clients
+  //  have to agree with no messaging.
+  //
+  //  Flag CITY_THUG_BUM_ROLES; off = deal everyone a trade, exactly as before.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_THUG_BUM_ROLES == null) CBZ.CONFIG.CITY_THUG_BUM_ROLES = true;
+  function THUG_BUM_ON() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_THUG_BUM_ROLES !== false; }
+
+  // HOW MANY BUMS. spawnVagrants seeds CBZ.CITY.vagrants (14) against
+  // CBZ.CITY.peds (100) named rigs and puts ALL of them in the projects pocket,
+  // with one in four on the industrial fringe. So `projects` below is set AT
+  // that seeded density — it is the read the owner already has for that pocket
+  // — and every other district is cut to about a fifth of it, because
+  // spawnVagrants puts NOBODY downtown and a 13% homeless read on the strip
+  // would be a different city, not a repair. The SHAPE matters more than any
+  // single number would: this path fires on a far larger, churning population
+  // than the seeded pass (every crowd promotion arrives here, because crowd.js's
+  // resetToPlain nulls `job` by design), so one flat share would flood the map.
+  const BUM_SHARE = { projects: 0.13, industrial: 0.07, commercial: 0.025, core: 0.02 };
+  // HOW MANY THUGS. castForDistrict already casts the street economy at 46% of
+  // the projects (dealer .20 / hustler .16 / tweaker .10) and 13% of the
+  // industrial fringe. The thug is the fourth member of that family — the one
+  // with nothing to sell — so his share is set INSIDE the density those three
+  // already establish rather than beside it. Downtown gets almost none: a tough
+  // on the strip is a MUGGER, and scenedirector.js already stages those with
+  // `archetype:"thug"` and a crime attached.
+  const THUG_SHARE = { projects: 0.16, industrial: 0.06, commercial: 0.015, core: 0.015 };
+  const STREET_ELSEWHERE = 0.02;    // towns, biome settlements, the wilds
+  // REFUSED, and worth writing down so nobody adds it back: weighting the thug
+  // share by CBZ.cityGangOf() (whose corner is this?) reads well and is wrong
+  // here. Turf CHANGES HANDS during play (turf.js), so a turf-derived share is
+  // not a stable answer about a PERSON — two clients that deal the same body on
+  // either side of a takeover would disagree, and the whole point of hashing
+  // off the spawn point is that they never have to talk. The district read
+  // below is fixed for the life of the world, which is what a cast needs.
+
+  // WHO IS NEVER DEALT ONE OF THESE. Two rules; the rest is bookkeeping.
+  //  (a) A CHILD IS NEVER A THUG OR A BUM. `band` is the field level.js's own
+  //      condition ladder tests, so this asks the ladder's question rather than
+  //      inventing a second age test — a kid with no role stays a kid.
+  //  (b) A PERSON IN A PAID SEAT IS NOT SLEEPING IN A DOORWAY. arena_fights.js
+  //      and island_speedway.js call cityDealRole on spectators; `_attending`
+  //      is the field level.js gave them, so it answers this for free.
+  function streetCastOk(ped) {
+    if (!THUG_BUM_ON() || !ped || ped.dead || ped.isPlayer || ped._parked) return false;
+    if (ped.child || ped.band === "child" || ped.band === "infant" || ped.band === "teen") return false;
+    if (ped.ageYears != null && ped.ageYears < 18) return false;
+    if (ped._attending || ped._npcAttached || ped.inCar) return false;
+    if (ped.staffPost || ped._occupyGarrison || ped._regionLife) return false;
+    if (ped.controlled || ped.companion || ped.recruited || ped.hostage) return false;
+    // anything the world gave a KIND to is somebody else's cast (cop, security,
+    // vendor, warband fighter, crew). Only the plain street mass is eligible.
+    if (ped.kind && ped.kind !== "civilian" && ped.kind !== "gang") return false;
+    return true;
+  }
+  function streetShare(tbl, d) {
+    return (d && tbl[d.kind] != null) ? tbl[d.kind] : STREET_ELSEWHERE;
+  }
+  // the cached LIFE, wiped so aigoals re-derives a routine for the person they
+  // now are — the same fields the trade deal below wipes, MINUS `_castFit`.
+  // That omission is deliberate: `_castFit` is outfits.js's record of what this
+  // body is VISIBLY wearing, and redressPed's strip-the-uniform branch is gated
+  // on it. Nulling it here and then having the off-camera gate refuse the
+  // redress would leave a bum standing in hospital scrubs with the game
+  // believing he was in plain clothes. Let redressPed own that field: it either
+  // repaints (and stamps the new fit) or the record stays TRUE to the rig.
+  function clearCastCache(ped) {
+    ped._role = null; ped._work = null; ped._snapAt = null; ped._stage = null;
+    ped._dripKey = null;
+  }
+  // NEVER RE-DRESS A BODY IN YOUR FACE — the identical gate the trade deal uses.
+  // Rags and streetwear are a real wardrobe change, so it waits for the shared
+  // transition gate to say the body is off-camera; the IDENTITY lands instantly
+  // either way, because a role is a LIFE first and a costume second.
+  function redressWhenUnseen(ped) {
+    if (!CBZ.cityRedressPed) return;
+    if (CBZ.npcTransitionSafe &&
+        !CBZ.npcTransitionSafe(ped.pos.x, ped.pos.z, { minDistance: 18, maxDistance: 400 })) return;
+    try { CBZ.cityRedressPed(ped); } catch (e) {}
+  }
+
+  // BECOME A BUM. This is aigoals.js's eviction recipe (tryEvict), which is
+  // itself spawnVagrants' recipe — ONE homeless identity, three doors, no
+  // fourth variant of the same person. The only substitution is the draw:
+  // hash01 where eviction uses rng(), for the determinism reason above.
+  function dealBum(ped, d) {
+    if (!streetCastOk(ped)) return false;
+    // A MAN WITH A LEASE IS NOT HOMELESS. `_unit` is housing.js's real leased
+    // unit and is cleared on every deal (schedule.js), so it is an honest claim.
+    // `_home`/`_digs` deliberately are NOT tested: they are lot pointers aigoals
+    // assigns lazily and crowd.js's resetToPlain does not clear, so on a
+    // RECYCLED pooled rig they belong to the previous occupant — testing them
+    // would bias the cast on stale data rather than on this person.
+    if (ped._unit) return false;
+    if (roleHash(ped, 0xB0DD) >= streetShare(BUM_SHARE, d)) return false;
+    clearCastCache(ped);
+    ped.vagrant = true;                          // cops/quests read it (move-along)
+    ped.archetype = "vagrant";
+    // `job` STAYS NULL, and this is the one place this cast diverges from the
+    // two older producers (both write job:"panhandling"). level.js's own law is
+    // that a GERUND is not a role — its JOB_TITLE row for "panhandling" is a
+    // rescue of those producers, not an endorsement — so a dealt bum resolves
+    // through the CONDITION ladder, which is where that file's doctrine puts
+    // "Bum". Same word over the head either way; only roleAudit's `kinds` can
+    // tell the two apart (condition here, job there).
+    ped.job = null;
+    ped._role = "panhandler";                    // the existing beg/bark loop
+    ped._beg = { x: ped.pos.x, z: ped.pos.z };   // post up where they are
+    // MEEK, AND THAT IS A DESIGN CALL RATHER THAN A DEFAULT. isHunterBum() draws
+    // the night predator from the volatile band (aggr >= violent) ∩ a 0.55 hash,
+    // and the block above it explains that the resulting 2-3 hunters in a whole
+    // city is chosen AGAINST the menace gauge — "a predator you meet three times
+    // a block is a tax". Dealt bums arrive CONTINUOUSLY, so letting any of them
+    // roll volatile would grow the hunter population without limit. The hunt
+    // stays pinned to the 14 seeded camp vagrants; these are the harmless
+    // majority that camouflage them.
+    ped.aggr = 0.08 + roleHash(ped, 0xB0DE) * 0.18;      // spawnVagrants' meek band
+    ped.reactivity = ped.aggr;
+    ped.armed = false; ped.weapon = null; ped.ammo = 0;
+    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(ped); } catch (e) {} }
+    ped.wealth = 0.02 + roleHash(ped, 0xB0DF) * 0.05;    // spawnVagrants' band
+    ped.cash = (roleHash(ped, 0xB0E0) * 9) | 0;          // begging money, not robbing money
+    ped.valuables = [];                                  // nobody sleeps rough in a watch
+    // the shuffle — a PERMANENT slow-down, so end any live joy boost first or it
+    // would restore the old speed later (tryEvict's guard, copied verbatim).
+    if (ped._joyT > 0 && ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; ped._joyT = 0; }
+    if (ped.baseSpeed) ped.baseSpeed = Math.max(0.45, ped.baseSpeed * 0.6);
+    ped._digs = null; ped._unit = null; ped._jobLot = null; ped._clockedIn = false;
+    if (ped._needs) { ped._needs.rent = 1; ped._needs.kRent = 0; }   // a vagrant carries no rent
+    redressWhenUnseen(ped);
+    return true;
+  }
+
+  // BECOME A THUG. No job, no workplace, no shift, no wage — that IS the role.
+  function dealThug(ped, d) {
+    if (!streetCastOk(ped)) return false;
+    if (roleHash(ped, 0x7406) >= streetShare(THUG_SHARE, d)) return false;
+    clearCastCache(ped);
+    ped.archetype = "thug";
+    ped.job = null;                              // CITY_JOBS owns workplace/shift/wage; he has none
+    // THE CROOK BAND — this file's own vocabulary, not a fresh number. Short of
+    // `violent` on purpose (see the header): that band is the rampager's.
+    const B = A0();
+    const lo = (B.crook || 0.72) + 0.01, hi = (B.violent || 0.88) - 0.02;
+    ped.aggr = Math.max(ped.aggr || 0, lo + roleHash(ped, 0x7407) * Math.max(0, hi - lo));
+    ped.reactivity = ped.aggr;
+    ped.snitch = Math.min(ped.snitch != null ? ped.snitch : 1, 0.12);   // the street doesn't call the law
+    redressWhenUnseen(ped);
+    return true;
+  }
+
+  // THE REPAIR HALF — a body the WORLD affiliated to a crew and never ranked.
+  // Rare by construction today (gangs.js ranks every crew body it posts, and
+  // its kin are excluded here because kin are not crew), so the PRIMARY read
+  // for this class lives in level.js's roleOf; the stamp is here so combat_iq
+  // and the wardrobe agree with the pill instead of only the pill being right.
+  // It runs BEFORE hasRole(), because hasRole answers TRUE for anybody carrying
+  // `gang` — correct for the 99% who hold a rung, and exactly what hid this
+  // class from the casting repair for its whole life.
+  function thugRepair(ped) {
+    if (!streetCastOk(ped)) return false;
+    if (!ped.gang || ped.rank) return false;                          // a rung IS the role
+    if (ped.isFamily || ped.famRole || ped.gangFamily) return false;  // kin are not crew
+    if (ped.archetype === "thug") return false;                       // already dealt
+    if (ped.job && CBZ.cityJobTitle && CBZ.cityJobTitle(ped.job)) return false;   // he works
+    const a = ped.archetype;
+    if (a && a !== "resident" && a !== "civilian" && a !== "worker" && a !== "gangster") return false;
+    clearCastCache(ped);
+    ped.archetype = "thug";
+    redressWhenUnseen(ped);
+    return true;
+  }
+
   CBZ.cityDealRole = function (ped) {
-    if (!ped || ped.dead || hasRole(ped)) return false;
+    if (!ped || ped.dead) return false;
+    if (thugRepair(ped)) return true;              // affiliated, unranked, unemployed
+    if (hasRole(ped)) return false;
     const A = CBZ.city && CBZ.city.arena;
     const d = (A && A.districtAt) ? A.districtAt(ped.pos.x, ped.pos.z) : null;
+    // UNEMPLOYMENT BEFORE EMPLOYMENT. Both are checked before the trade pool,
+    // because the trade deal is the thing that was erasing them.
+    if (dealBum(ped, d)) return true;
+    if (dealThug(ped, d)) return true;
     const pool = (d && DISTRICT_JOBS[d.kind]) || JOB_RECAST;
     const job = pool[(roleHash(ped, 0x51D) * pool.length) | 0] || pool[0];
     ped.job = job;
@@ -2029,7 +2254,12 @@
       if (p.group) p.group.traverse(function (o) {
         if (o.isSprite) return;     // sprites share an r128 geometry singleton — never dispose
         if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
-        if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+        // `_cbzClothKey` = city/clothes.js painted cloth. The SHARED atlas is
+        // `_shared` and already skipped — but the per-rig ISO CLONE deliberately
+        // is not, and a clone is a legal door into the one CanvasTexture EVERY
+        // wearer of that outfit key samples. Skip both by name (the clone is
+        // per-rig and about to be garbage anyway, so this costs nothing).
+        if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && !x._cbzClothKey && x.dispose && x.dispose()); else if (!m._shared && !m._cbzClothKey && m.dispose) m.dispose(); }
       });
     }
     CBZ.cityPeds.length = 0;
@@ -2095,7 +2325,8 @@
     if (ped.group) ped.group.traverse(function (o) {
       if (o.isSprite) return;   // sprites share an r128 geometry singleton — never dispose
       if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
-      if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+      // painted cloth (`_cbzClothKey`) is never disposed here — see clearCityPeds
+      if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && !x._cbzClothKey && x.dispose && x.dispose()); else if (!m._shared && !m._cbzClothKey && m.dispose) m.dispose(); }
     });
   }
   CBZ.onUpdate(35.4, function () {

@@ -561,6 +561,19 @@
     return true;
   }
   CBZ.cityRecolorRig = recolorRig;
+  // ---- EVERY RE-DRESS GOES THROUGH THE EXPORTED NAME ----------------------
+  // city/armor.js lazily WRAPS CBZ.cityRecolorRig so that mounted armour is
+  // re-solved against whatever the body is wearing NOW — its own comment names
+  // "spawn paint, the cop sweep, crowd promotion redress, the player's
+  // applyPlayer, corpse swaps" as the consumers that reach it. Three of those
+  // called the LOCAL closure instead of the exported name, so the wrap never
+  // fired for them and an armoured officer kept a vest fitted to a bare torso.
+  // One hop, no recursion (the wrap calls this same function and refitRig never
+  // dresses anything), and degrade-safe: no wrap loaded → the local function.
+  function dressRig(ch, colors, rec, opts) {
+    const f = CBZ.cityRecolorRig;
+    return (typeof f === "function" ? f : recolorRig)(ch, colors, rec, opts);
+  }
 
   // ============================================================
   //  CBZ.cityPaintSlot(meshes, color, visible) — THE ONLY SAFE WAY TO TINT
@@ -687,7 +700,7 @@
     // SWIPED fit (clothes taken off a body) carries real sampled colors — honor
     // them, don't revert to your own composite.
     if (PLAIN_BASE[w.id] && plainCivvies() && !w.swiped) w = fitRecord();
-    if (!ch || !ch.skinSlots || !recolorRig(ch, w.colors, w)) return;
+    if (!ch || !ch.skinSlots || !dressRig(ch, w.colors, w)) return;
     const s = ch.skinSlots;
     paint(s.stripes, null, false);                                   // no city fit has jail stripes
     paint(s.belt, w.colors.belt != null ? w.colors.belt : 0x17191f, true);
@@ -1357,6 +1370,19 @@
     }
     const a = spec.archetype || "";
     const seed = Math.abs((spec.seed | 0) || 0);
+    // ---- BUM RAGS: peds.js has THREE bum producers now (spawnVagrants' camp,
+    //      aigoals' evictions, and cityDealRole's dealt bums) and they share one
+    //      identity (vagrant) — so they share one wardrobe: the same drab
+    //      palette spawnVagrants already paints its camp with, dealt off the
+    //      body's own seed. No painted atlas — rags are the ABSENCE of a
+    //      garment, which is exactly what the PLAIN path renders. Without this
+    //      row a dealt bum kept whatever shirt he was wearing when the caster
+    //      reached him. ----
+    if (a === "vagrant") {
+      const RAGS = [0x4a4438, 0x5a5244, 0x3e3a33, 0x6b5d4a];
+      const rag = RAGS[h32(seed, 151) % RAGS.length];
+      return recolored(CAT.street, { torso: rag, arms: rag, collar: tone(rag, -0.18), legs: tone(rag, -0.3), shoes: 0x2b241c });
+    }
     // ---- THE SUITED CROWD: higher archetypes wear VARIED painted suits
     //      (suit|N) so the rich read as bespoke, each one different. The mapping:
     //        mobster/made          → pinstripe
@@ -1382,7 +1408,7 @@
     // ---- STREETWEAR: hustle archetypes cycle through the new painted street
     //      garments so corners aren't all the same tracksuit. Feature-detected —
     //      a missing painter falls back to the flat CAT colors. ----
-    if (a === "dealer" || a === "hustler" || a === "cornerkid" || a === "corner") {
+    if (a === "dealer" || a === "hustler" || a === "cornerkid" || a === "corner" || a === "thug") {
       const street = streetwearFor(seed);
       if (street) return street;
     }
@@ -1481,7 +1507,13 @@
   function redressPed(ped) {
     if (!ped || ped.isPlayer || ped.dead || !ped.char || !ped.char.skinSlots) return;
     const opts = ped._crowd ? { iso: true } : null;   // pooled rigs get isolated materials (setLook tints in place)
-    if (ped._wornOutfit) { recolorRig(ped.char, ped._wornOutfit.colors, ped._wornOutfit, opts); return; }
+    // A BODY WHOSE PAINTED LOOK CANNOT RENDER KEEPS THE DEFAULT LOOK. Set by
+    // the integrity sweep below, and only ever after a re-dress has already
+    // been TRIED and left a hole — without it a broken atlas and the repair
+    // would take turns every sweep and the person would strobe. The plain
+    // branch at the bottom is the guaranteed look, so fall straight to it.
+    if (ped._outfitPinned) { plainRedress(ped, opts, true); return; }
+    if (ped._wornOutfit) { dressRig(ped.char, ped._wornOutfit.colors, ped._wornOutfit, opts); return; }
     const fit = CBZ.cityOutfitFor({
       archetype: ped.archetype, job: ped.job, gang: ped.gang, vendor: ped.vendor,
       kind: ped.kind, cop: ped.kind === "cop", swat: ped.swat, seed: pedSeed(ped),
@@ -1489,25 +1521,38 @@
       // hour recast, a schedule deal-in) — the grey-tycoon bug's age twin.
       sex: pedSex(ped), age: pedAge(ped), band: pedBand(ped),
     });
-    if (fit && fit.colors) { recolorRig(ped.char, fit.colors, fit, opts); ped._castFit = fit.id; return; }
-    if (ped._castFit || ped._crowd) {
-      // back to an ordinary person: strip any cast paint, keep the shirt the
-      // body is visibly wearing (seamless against the instanced crowd swap).
-      const torso = liveTorsoHex(ped);
-      let legs = readColor(ped.char.skinSlots.legs);
-      if (legs == null) legs = 0x363b46;
-      // ARMS CONTINUITY: the instanced crowd renders bare (skin-tinted) arms, and
-      // crowd.js's setLook just painted this rig's arms to that same skin tone — so
-      // a plain promoted body must KEEP its live arm color, not slam it to the shirt
-      // color (which would pop skin sleeves → cloth sleeves the instant you walk up).
-      // Sample what the rig is wearing on the arms right now; only fall back to the
-      // torso color when it can't be read (no skinSlots / harness stub).
-      let arms = readColor(ped.char.skinSlots.arms);
-      if (arms == null) arms = torso;
-      const colors = { legs, torso, collar: torso, arms, shoes: 0x2b2b2b };
-      recolorRig(ped.char, colors, { id: "basics", colors }, opts);
-      ped._castFit = null;
-    }
+    if (fit && fit.colors) { dressRig(ped.char, fit.colors, fit, opts); ped._castFit = fit.id; return; }
+    if (ped._castFit || ped._crowd) plainRedress(ped, opts);
+  }
+  // ---- THE DEFAULT LOOK ----------------------------------------------------
+  // An ordinary person in an ordinary shirt over jean legs. This is the branch
+  // that was already here for "back to an ordinary person"; it is lifted into a
+  // function because it is ALSO the answer to the owner's actual ask — a look
+  // that needs no atlas, no painter and no cache entry, so it is the one
+  // dressing this game can always perform, whatever else is broken.
+  //   `force` fills legs/arms from the DEFAULT rather than from what the rig is
+  // currently showing. A body that has just been through cityClothesRepairRig
+  // is showing the REPAIR's colours, and sampling those back would make the
+  // rescue grey permanent.
+  function plainRedress(ped, opts, force) {
+    const s = ped.char.skinSlots;
+    // keep the shirt the body is visibly wearing (seamless against the
+    // instanced crowd swap); liveTorsoHex falls back to the ped's own outfit hex
+    const torso = liveTorsoHex(ped);
+    let legs = force ? JEAN : readColor(s.legs);
+    if (legs == null) legs = 0x363b46;
+    // ARMS CONTINUITY: the instanced crowd renders bare (skin-tinted) arms, and
+    // crowd.js's setLook just painted this rig's arms to that same skin tone — so
+    // a plain promoted body must KEEP its live arm color, not slam it to the shirt
+    // color (which would pop skin sleeves → cloth sleeves the instant you walk up).
+    // Sample what the rig is wearing on the arms right now; only fall back to the
+    // torso color when it can't be read (no skinSlots / harness stub).
+    let arms = force ? torso : readColor(s.arms);
+    if (arms == null) arms = torso;
+    const colors = { legs, torso, collar: torso, arms, shoes: 0x2b2b2b };
+    dressRig(ped.char, colors, { id: "basics", colors }, opts);
+    ped._castFit = null;
+    return colors;
   }
   CBZ.cityRedressPed = redressPed;
   function ensureCastWraps() {
@@ -1633,7 +1678,7 @@
       if (sw.body.char) {
         // the record rides along so the corpse inherits the PAINTED look too
         // (your old tux lands on them with its lapels, not a flat black tint)
-        recolorRig(sw.body.char, sw.mine.colors, sw.mine);
+        dressRig(sw.body.char, sw.mine.colors, sw.mine);
         sw.body.outfit = sw.mine.colors.torso;   // gore/cloth reads stay true
       }
       // re-mirror the corpse's attachments NOW: a magnate stripped of his tux
@@ -1809,6 +1854,168 @@
   // "resets to a white shirt after reload" symptom).
   CBZ.cityWardrobeHydrate = hydrateFitFromLedger;
   CBZ.cityOutfitApplyPlayer = applyPlayer;
+
+  // ============================================================
+  //  THE DEFAULT-LOOK GUARANTEE — nobody may RENDER with a hole in them.
+  //
+  //  OWNER (2026-07-29, verbatim): "there's some weird NPCs that have no
+  //  outfit, and it's like invisible where the outfit should be. It's dumb —
+  //  instead of just having a default look."
+  //
+  //  THE PRODUCER WE FOUND is named in entities/character.js: a human rig was
+  //  the one live thing in this engine that never tagged itself
+  //  `userData.dynamic`, so city/mode.js's build-time static passes were free to
+  //  merge its untagged chest / yoke / pelvis out of the scene graph and freeze
+  //  what was left. That is fixed there, at the tag.
+  //
+  //  THIS IS THE FLOOR UNDER IT, because a tag fixes bodies built from now on
+  //  and answers for exactly one producer. The garment seam has a second, worse
+  //  failure available to it: every painted outfit is ONE material + ONE
+  //  CanvasTexture shared by every wearer of the key, wearing alphaTest 0.5, so
+  //  anything that kills that texture empties every wearer at once. clothes.js
+  //  closes that class structurally (a self-healing cache, a clone bank that
+  //  re-clones off the live entry, a dress() that refuses a degenerate box, a
+  //  restore() that refuses to hand a dead flat original back to a body). What
+  //  neither half can do is cure a body ALREADY walking around broken. So this
+  //  is deliberately a REPAIR and not a diagnosis: whatever emptied the region,
+  //  the person has their clothes back within a sweep — and the ratchet below
+  //  COUNTS it, so the next producer cannot be invisible the way this one was.
+  //
+  //  IT ADDS NO UPDATE LOOP (CLAUDE.md: reuse an existing cadence). It is one
+  //  branch of the onUpdate(34.8) tick this file already runs, on its own
+  //  throttle, walking a rotating cursor — SWEEP_N bodies per sweep, so the
+  //  whole city is covered every few seconds however big it gets and the
+  //  per-frame cost is a constant, not a population multiple.
+  //
+  //  WHAT IT DELIBERATELY WILL NOT DO: it never un-hides a limb PIVOT, so
+  //  gore.js's dismemberment survives it untouched (clothes.js's test is on the
+  //  garment MESH, never on its ancestors — a severed leg is not a bare leg);
+  //  it skips parked, culled and dead bodies; and on a healthy person it is
+  //  seven property reads and no writes.
+  //
+  //  One-line revert: CBZ.CONFIG.CITY_OUTFIT_GUARANTEE = false.
+  // ============================================================
+  if (CBZ.CONFIG.CITY_OUTFIT_GUARANTEE == null) CBZ.CONFIG.CITY_OUTFIT_GUARANTEE = true;
+  const SWEEP_EVERY = 0.33;        // level.js's retag beat — "it self-heals during play"
+  const SWEEP_N = 24;              // bodies inspected per sweep
+  let _integT = 0, _integCur = 0, _integRepaired = 0, _integPinned = 0;
+  function guaranteeOn() { return CBZ.CONFIG.CITY_OUTFIT_GUARANTEE !== false; }
+  // a body that is being a person on screen right now
+  function integrityCandidate(p) {
+    if (!p || p.isPlayer || p.dead || p._parked || p.culled) return false;
+    if (!p.char || !p.char.skinSlots) return false;
+    return !!(p.group && p.group.visible !== false);
+  }
+  function repairOutfit(ped) {
+    const ch = ped.char;
+    if (!CBZ.cityClothesBare(ch)) return false;
+    const base = { torso: liveTorsoHex(ped), legs: JEAN };
+    // (1) give the body back a renderable set of garments. clothes.js owns this:
+    //     it strips through the ONE sanctioned strip path first, then installs
+    //     live flat materials on anything still drawing nothing.
+    if (CBZ.cityClothesRepairRig) CBZ.cityClothesRepairRig(ch, base);
+    // (2) put WHO THEY ARE back on top, through the ordinary dressing path — a
+    //     repaired officer must still come out looking like an officer.
+    redressPed(ped);
+    _integRepaired++;
+    // (3) if the identity's OWN look is the thing that cannot render, the body
+    //     keeps the default look and is never dressed in that look again. This
+    //     is the terminating condition: without it the broken look and this
+    //     sweep would take turns and the person would strobe.
+    if (CBZ.cityClothesBare(ch)) {
+      ped._outfitPinned = 1; _integPinned++;
+      if (CBZ.cityClothesRepairRig) CBZ.cityClothesRepairRig(ch, base);
+      plainRedress(ped, ped._crowd ? { iso: true } : null, true);
+    }
+    return true;
+  }
+  function integritySweep(dt) {
+    if (!guaranteeOn() || !CBZ.cityClothesBare) return;
+    _integT -= dt;
+    if (_integT > 0) return;
+    _integT = SWEEP_EVERY;
+    // THE PLAYER IS ALWAYS ON SCREEN and is exactly one rig, so he is checked
+    // every sweep rather than waiting his turn in the cursor. applyPlayer is
+    // idempotent (it re-applies the worn record), so this cannot fight it.
+    const pch = CBZ.playerChar;
+    if (pch && pch.skinSlots && CBZ.cityClothesBare(pch)) {
+      const w = worn();
+      if (CBZ.cityClothesRepairRig) CBZ.cityClothesRepairRig(pch, w && w.colors);
+      _integRepaired++;
+      try { applyPlayer(); } catch (e) {}
+    }
+    const peds = CBZ.cityPeds || [], cops = CBZ.cityCops || [];
+    const total = peds.length + cops.length;
+    if (!total) { _integCur = 0; return; }
+    const n = Math.min(SWEEP_N, total);
+    for (let k = 0; k < n; k++) {
+      if (_integCur >= total) _integCur = 0;
+      const i = _integCur++;
+      const p = i < peds.length ? peds[i] : cops[i - peds.length];
+      if (integrityCandidate(p)) { try { repairOutfit(p); } catch (e) {} }
+    }
+  }
+
+  /* ---- RATCHET (CLAUDE.md block law #5): CBZ.outfitIntegrityAudit() --------
+     Walks every live, visible, unparked rig in cityPeds + cityCops, plus the
+     player, and returns:
+       rigs      bodies inspected
+       bare      bodies currently RENDERING with a missing cloth region. THIS IS
+                 THE OWNER'S BUG, COUNTED. Steady state 0 — reachable within one
+                 full cursor pass (0.33 s x ceil(rigs / 24)) of any event.
+       deadTex   dressed cloth materials whose atlas texture is dead. Steady
+                 state 0; nonzero names a disposer that reached a shared clothes
+                 texture (clothes.js rebuilds the cache entry on the next dress
+                 of that key, so this decays on its own — but it should never be
+                 nonzero at all, and if it is, find the disposer).
+       repaired  cumulative repairs since load. 0 on a healthy build. A rising
+                 number is not the guarantee failing, it is the guarantee
+                 WORKING — and it means a producer is still out there.
+     Reported beside them, never pinned: `pinned` (bodies whose painted look
+     could not be made to render and now keep the default look — expected 0) and
+     `setsRebuilt` (clothes.js atlas entries rebuilt from a dead texture —
+     expected 0). Both are printed so a "fix" that just stops dressing anybody
+     cannot pass: rigs and repaired have to stay honest beside bare.
+     NOT YET PINNED — whoever runs it first writes the number in (do not repeat
+     the propUseAudit mistake of pinning a guess). */
+  CBZ.outfitIntegrityAudit = function () {
+    const BARE = CBZ.cityClothesBare, MATOK = CBZ.cityClothMatOk;
+    const out = {
+      rigs: 0, bare: 0, deadTex: 0, repaired: _integRepaired, pinned: _integPinned,
+      setsRebuilt: CBZ.cityClothesSetsRebuilt ? CBZ.cityClothesSetsRebuilt() : 0,
+      guarantee: guaranteeOn(), sample: [],
+    };
+    if (!BARE) return out;
+    const SLOTS = ["torso", "collar", "arms", "armsLower", "legs", "legsLower", "pelvis"];
+    const seen = [];
+    const pools = [CBZ.cityPeds, CBZ.cityCops];
+    for (let q = 0; q < pools.length; q++) {
+      const arr = pools[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) if (integrityCandidate(arr[i])) seen.push(arr[i]);
+    }
+    if (CBZ.playerChar && CBZ.playerChar.skinSlots) seen.push({ char: CBZ.playerChar, name: "player" });
+    for (let i = 0; i < seen.length; i++) {
+      const p = seen[i], ch = p.char, s = ch.skinSlots;
+      out.rigs++;
+      const holes = BARE(ch);
+      if (holes) {
+        out.bare++;
+        if (out.sample.length < 6) {
+          out.sample.push((p.name || p.job || p.kind || "?") + ":" + holes + (ch._clothesKey ? "@" + ch._clothesKey : ""));
+        }
+      }
+      if (!MATOK) continue;
+      for (let k = 0; k < SLOTS.length; k++) {
+        const list = s[SLOTS[k]];
+        if (!list) continue;
+        for (let j = 0; j < list.length; j++) {
+          const m = list[j] && list[j].material;
+          if (m && m.map && !MATOK(m)) out.deadTex++;
+        }
+      }
+    }
+    return out;
+  };
   CBZ.onUpdate(34.8, function (dt) {
     if (g.mode !== "city") {
       if (_appliedId !== null) {
@@ -1850,6 +2057,9 @@
         }
       }
     }
+    // …and NOBODY renders with a hole in them (see THE DEFAULT-LOOK GUARANTEE).
+    // Its own throttle, this tick — no second update loop.
+    integritySweep(dt);
     // the change beat: count it down, then the swap lands
     if ((g.cityOutfitChanging || 0) > 0) {
       if (CBZ.player && CBZ.player.dead) { cancelSwap(); return; }

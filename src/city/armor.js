@@ -193,9 +193,38 @@
     const vestW = Math.max(1.02, (halfW + c) * 2);
     const vestD = Math.max(0.62, (halfD + c) * 2);
     const VEST_Y = 1.40, VEST_H = 0.86;
-    const vestTop = VEST_Y + VEST_H / 2;
+    /* THE VEST'S TOP FACE IS A PLANE TOO (probe, 2026-07-29): the width/depth
+       clamps above solved the vertical faces and left the horizontal ones
+       authored — and on any profile whose chest top lands at 1.830, the vest's
+       up-facing lid and the chest's share a plane (measured live on a staffed
+       guard: vest.yp == chest.yp @ 1.830). Same law as everything else here:
+       bury the face strictly PAST any same-facing garment plane by c. Only
+       same-facing pairs are solved — an up-facing lid meeting a down-facing
+       underside culls one of the two and cannot stipple. The adult male is
+       byte-identical (his chest top is 1.895, 0.065 clear). */
+    let vestY = VEST_Y;
+    const chestM = s && s.torso && s.torso[0], waistM = s && s.torso && s.torso[1];
+    const wbD = boxDims(waistM);
+    const ups = [], downs = [];
+    if (cb && chestM && chestM.position) { ups.push(chestM.position.y + cb.height / 2); downs.push(chestM.position.y - cb.height / 2); }
+    if (wbD && waistM.position) { ups.push(waistM.position.y + wbD.height / 2); downs.push(waistM.position.y - wbD.height / 2); }
+    if (jm && jm.visible && cb && chestM && chestM.position) {
+      const jb2 = boxDims(jm);
+      if (jb2) { ups.push(chestM.position.y + jm.position.y + jb2.height / 2); downs.push(chestM.position.y + jm.position.y - jb2.height / 2); }
+    }
+    if (c > 0) for (let pass = 0; pass < 3; pass++) {
+      const top = vestY + VEST_H / 2, bot = vestY - VEST_H / 2;
+      let shift = 0;
+      for (let i = 0; i < ups.length; i++) if (Math.abs(top - ups[i]) < c) shift = Math.min(shift, ups[i] - c - top);
+      for (let i = 0; i < downs.length; i++) if (Math.abs(bot - downs[i]) < c) shift = Math.min(shift, downs[i] - c - bot);
+      if (!shift) break;
+      vestY += shift;                                // always downward — converges
+    }
+    const vestTop = vestY + VEST_H / 2;
     return {
       vest: [vestW, 0.86, vestD],
+      vestY: vestY,
+      bandY: 1.58 + (vestY - VEST_Y),                // the band rides the vest's shift
       // THE BAND IS DERIVED FROM THE VEST, not from the body. Its authored
       // 0.64-at-z+0.02 was correct RELATIVE to the vest (0.03 proud, 0.01
       // buried) and still landed on the shell, because the shell is a third
@@ -225,6 +254,106 @@
   CBZ.cityArmorFit = armorFit;                        // charpanel.js's portrait mirrors it
   function dimGeo(d) { return (CBZ.boxGeom && d) ? CBZ.boxGeom(d[0], d[1], d[2]) : null; }
 
+  /* ---- THE FIT IS ONLY TRUE UNTIL THE NEXT OUTFIT (probe, 2026-07-29) ------
+     OWNER: "armor flickers with the outfit." armorFit measures what the rig is
+     wearing AT MOUNT TIME — and every cop mounts armor in makeCop, 0-0.8 s
+     BEFORE outfits.js's throttled sweep paints the uniform and creates the
+     0.62-deep jacket shell. So the vest was fitted against a bare 0.50 torso,
+     took its 0.62 floor, and the shell then arrived at exactly 0.62: measured
+     live, EVERY armored officer had vest.zp==jacketShell.zp@0.310 and
+     .zn==.zn@-0.310 — the vest's entire front and back coplanar with the
+     uniform, which is the full-chest stipple the owner calls flicker.
+     Ordering, not arithmetic — so the cure is structural: wrap the ONE
+     chokepoint every dresser goes through (CBZ.cityRecolorRig — spawn paint,
+     the cop sweep, crowd promotion redress, the player's applyPlayer, corpse
+     swaps all end there) and re-solve the mounted pieces against what the rig
+     is wearing NOW. Pool-cheap: geometry comes from the boxGeom cache and only
+     rigs actually carrying armor pay anything. Revert: CITY_ARMOR_REFIT=false. */
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_ARMOR_REFIT == null) CBZ.CONFIG.CITY_ARMOR_REFIT = true;
+  const CHEST_KINDS = { vest: 1, vestHi: 1, shPad: 1, sidePlate: 1, groin: 1 };
+  function refitRig(ch) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CITY_ARMOR_REFIT === false) return false;
+    if (!ch || !ch.body || !ch.body.children || !ch.body.children.length) return false;
+    let fit = null;
+    const kids = ch.body.children;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i], kind = m && m.userData && m.userData.armorKind;
+      if (!kind || !CHEST_KINDS[kind]) continue;
+      if (!fit) fit = armorFit(ch);
+      if (kind === "vest") { const gm = dimGeo(fit.vest); if (gm) m.geometry = gm; m.position.y = fit.vestY; }
+      else if (kind === "vestHi") { const gb = dimGeo(fit.band); if (gb) m.geometry = gb; m.position.set(0, fit.bandY, fit.bandZ); }
+      else if (kind === "shPad") m.position.y = fit.padY;
+      else if (kind === "sidePlate") m.position.x = (m.position.x < 0 ? -1 : 1) * fit.sideX;
+      else if (kind === "groin") { const gg = dimGeo(fit.groin); if (gg) m.geometry = gg; m.position.z = fit.groinZ; }
+    }
+    return !!fit;
+  }
+  CBZ.cityArmorRefit = refitRig;
+  // lazy idempotent wrap (bling.js pattern — outfits.js may load either side of us)
+  function wrapRecolor() {
+    const orig = CBZ.cityRecolorRig;
+    if (typeof orig !== "function" || orig._armorWrapped) return !!(orig && orig._armorWrapped);
+    const w = function (ch) { const r = orig.apply(this, arguments); try { refitRig(ch); } catch (e) {} return r; };
+    w._armorWrapped = true; w._armorOrig = orig;
+    CBZ.cityRecolorRig = w;
+    return true;
+  }
+  let _wRecolor = wrapRecolor();
+
+  /* ---- RATCHET (CLAUDE.md law #5): CBZ.armorFitAudit() ---------------------
+     Counts SAME-FACING coplanar face pairs between every mounted chest-armor
+     piece and the garment surfaces it is worn over (chest / waist / pelvis /
+     jacket shell), across every live armored body including the player. A
+     coplanar same-facing pair IS the z-fight stipple the owner reports as
+     flicker, so with the recolor wrap above this is structurally 0 — pinned in
+     tools/math-gate.mjs. EPS 0.004 sits under the 0.01 clearance law and far
+     above float noise. */
+  const AUDIT_EPS = 0.004;
+  function facePlanes(dims, x, y, z) {
+    return { xp: x + dims.width / 2, xn: x - dims.width / 2,
+             yp: y + dims.height / 2, yn: y - dims.height / 2,
+             zp: z + dims.depth / 2, zn: z - dims.depth / 2 };
+  }
+  function garmentPlanes(ch) {
+    const out = [];
+    const s = ch && ch.skinSlots; if (!s) return out;
+    function push(mesh, label, extraY, extraZ) {
+      if (!mesh || !mesh.position) return;
+      const d = boxDims(mesh); if (!d) return;
+      out.push({ label, p: facePlanes(d, mesh.position.x, (extraY || 0) + mesh.position.y, (extraZ || 0) + mesh.position.z) });
+    }
+    push(s.torso && s.torso[0], "chest");
+    push(s.torso && s.torso[1], "waist");
+    push(s.pelvis && s.pelvis[0], "pelvis");
+    const jm = ch._jacketMesh, chest = s.torso && s.torso[0];
+    if (jm && jm.visible && chest && chest.position) push(jm, "shell", chest.position.y, chest.position.z);
+    return out;
+  }
+  function auditRig(ch, res) {
+    if (!ch || !ch.body || !ch.body.children) return;
+    let garments = null;
+    for (const m of ch.body.children) {
+      const kind = m && m.userData && m.userData.armorKind;
+      if (!kind || !CHEST_KINDS[kind]) continue;
+      if (!garments) { garments = garmentPlanes(ch); res.armored++; }
+      const d = boxDims(m); if (!d) continue;
+      const ap = facePlanes(d, m.position.x, m.position.y, m.position.z);
+      for (const gp of garments) for (const f in ap) {
+        if (Math.abs(ap[f] - gp.p[f]) < AUDIT_EPS) {
+          res.coplanar++;
+          if (res.sample.length < 6) res.sample.push(kind + "." + f + "==" + gp.label + "." + f + "@" + ap[f].toFixed(3));
+        }
+      }
+    }
+  }
+  CBZ.armorFitAudit = function () {
+    const res = { armored: 0, coplanar: 0, sample: [] };
+    const pools = [CBZ.cityCops, CBZ.cityPeds];
+    for (const pool of pools) if (pool) for (const p of pool) { if (p && p.char) auditRig(p.char, res); }
+    if (CBZ.playerChar) auditRig(CBZ.playerChar, res);
+    return res;
+  };
+
   // build the pooled meshes for ONE chest kit + helmet onto a rig, push into out[].
   function mountKitMeshes(an, kitId, out) {
     const k = kit(kitId);
@@ -243,14 +372,14 @@
       const vest = acquire("vest");
       if (vest) {
         const gm = dimGeo(fit.vest); if (gm) vest.geometry = gm;   // fitted to what it is worn OVER
-        vest.material = mat; vest.position.set(0, 1.40, 0); an.body.add(vest); out.push(vest);
+        vest.material = mat; vest.position.set(0, fit.vestY != null ? fit.vestY : 1.40, 0); an.body.add(vest); out.push(vest);
       }
       // the harder kits get a raised plate band so a SWAT reads heavier than a beat-cop vest
       if (k.id !== "softVest") {
         const band = acquire("vestHi");
         if (band) {
           const gb = dimGeo(fit.band); if (gb) band.geometry = gb;
-          band.material = mat; band.position.set(0, 1.58, fit.bandZ); an.body.add(band); out.push(band);
+          band.material = mat; band.position.set(0, fit.bandY != null ? fit.bandY : 1.58, fit.bandZ); an.body.add(band); out.push(band);
         }
       }
       // SWAT plate → a full CARRIER (city-swat-redesign): shoulder pad blocks,
@@ -470,6 +599,7 @@
   }
   CBZ.onUpdate(38.6, function () {
     if (!_wLoot) _wLoot = wrapLoot();
+    if (!_wRecolor) _wRecolor = wrapRecolor();   // outfits.js can load after us
     // drop the player's mesh when we leave city mode (mirror bling.js) so the
     // jail jumpsuit / survival rig never wears a city vest.
     if (g && g.mode !== "city" && _pMeshes) unmountPlayer();

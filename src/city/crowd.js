@@ -1443,6 +1443,18 @@
     // off-screen margins pass (VIS_D2-gated), so nobody ever changes clothes as you
     // approach. cityRecastForHour still runs there for the behavioural turnover.
     if (CBZ.cityPedDeal) CBZ.cityPedDeal(ped);
+    // "FULLY DRESSED" IS A CLAIM, SO CHECK IT. This is the exact frame a pooled
+    // rig stops being off-map furniture and becomes a person in front of you —
+    // the cheapest possible place to catch a body that lost a garment while it
+    // was parked (a mesh merged out of the graph by the build-time static pass,
+    // a dead atlas, a flat original that a teardown sweep disposed). One call,
+    // ONCE PER PROMOTION, and a no-op on a healthy body: seven property reads.
+    // Degrade-safe — no clothes.js and this line vanishes. See THE DEFAULT-LOOK
+    // GUARANTEE in city/outfits.js and city/clothes.js.
+    if (CBZ.cityClothesBare && CBZ.cityClothesBare(ped.char)) {
+      if (CBZ.cityClothesRepairRig) CBZ.cityClothesRepairRig(ped.char, { torso: shirtHex, legs: 0x39414f });
+      if (CBZ.cityRedressPed) { try { CBZ.cityRedressPed(ped); } catch (e) {} }
+    }
     ped.group.visible = true;    // fully dressed — NOW it may render
   }
   function releaseAll() {
