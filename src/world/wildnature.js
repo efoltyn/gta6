@@ -13,13 +13,18 @@
    DRAW-CALL DISCIPLINE (owner rule #4 — the game is ~1000-NPC draw-call
    bound): EVERYTHING here is THREE.InstancedMesh. Thousands of trees cost
    ~6-7 draw calls total, not thousands of meshes:
-     • conifer   = 1 trunk IM + 1 stacked-cone crown IM
-     • broadleaf = 1 trunk IM + 1 squashed-icosahedron crown IM
-     • birch     = 1 thin-trunk IM + 1 small round crown IM  (shares broadleaf crown geo)
-     • snag      = 1 bare-trunk IM (NO crown — a dead/burned tree silhouette,
-                   the 4th species; cheaper than the others, not more)
-     • rocks     = 1 icosahedron IM
+     • conifer   = 1 rooted-trunk IM + 1 three-whorl cone crown IM
+     • broadleaf = 1 rooted-trunk IM + 1 wide two-whorl cone crown IM
+     • birch     = 1 rooted-trunk IM + 1 narrow two-whorl cone crown IM
+     • snag      = 1 rooted bare-trunk IM (NO crown — a dead/burned tree
+                   silhouette, the 4th species; cheaper than the others)
+     • rocks     = REMOVED (WILD_ROCK_SCATTER, default false — see the block
+                   above the geometry; the rng draws are kept)
      • grass     = 1 cross-billboard IM   (capped count)
+   Every crown and every trunk comes out of world/treeaudit.js §2's ONE tree
+   grammar, so a species here differs from a species anywhere else in the
+   game by taper / tier count / colour — never by belonging to a different
+   family of solid.
    Per-instance scale + colour variation via instanceColor on a white-based
    MeshLambertMaterial (one material per mesh — colour never costs a draw
    call). frustumCulled=false on every InstancedMesh (r128's per-object
@@ -159,12 +164,46 @@
     //  GEOMETRY — unit-sized, base at y=0 so per-instance Y-scale grows
     //  upward (exactly the biome_forest pattern). Low radial segment counts
     //  keep the instanced geo cheap.
+    //
+    //  ONE TREE GRAMMAR (world/treeaudit.js §2). OWNER: "there's a type of
+    //  tree that's this weird geometric shit with a very thin trunk... that
+    //  type sucks. Then we have the type that has two cones... that needs to
+    //  replace the other trees in the game."
+    //
+    //  THIS FILE SHIPPED BOTH TYPES AT ONCE, which is why the wilderness read
+    //  as two unrelated forests overlaid. The conifer was already a layered
+    //  cone stack (the good one); the BROADLEAF and the BIRCH shared a single
+    //  squashed IcosahedronGeometry — 20 flat facets on a stick, and in the
+    //  birch's case a stick tapering 0.16 -> 0.11 which, under a per-instance
+    //  trunk scale of 0.6-1.1, is a 19-35 cm bole holding up a 13 m tree:
+    //  the "very thin trunk" verbatim. Both crowns are now cone stacks out of
+    //  the shared factory, distinguished by TAPER and TIER COUNT rather than
+    //  by belonging to a different geometry family, and the birch bole goes
+    //  to 0.26/0.17 (31-57 cm) — still the slender species, no longer a wire.
+    //  The crowns are authored INSIDE THE OLD UNIT
+    //  ENVELOPE (y[0.13,0.97], radius 0.51) so not one line of the placement
+    //  loop moves and CBZ.treeAudit()'s chain sees the same overlaps.
     // ============================================================
+    const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
+    function trunkOf(rTop, rBase, roots, spread) {
+      if (CBZ.treeTrunkGeo) {
+        return CBZ.treeTrunkGeo({ rTop: rTop, rBase: rBase, h: 1, seg: 5,
+          roots: roots, rootSeg: 3, spread: spread, site: "wildnature" });
+      }
+      const g = new THREE.CylinderGeometry(rTop, rBase, 1, 5);
+      g.translate(0, 0.5, 0);
+      return g;
+    }
+
     // conifer: tapered trunk + a STACK of 3 cones baked into one crown geo
     // (so a layered fir is still a single instanced draw call).
-    const trunkConGeo = new THREE.CylinderGeometry(0.16, 0.34, 1, 5);
-    trunkConGeo.translate(0, 0.5, 0);
+    const trunkConGeo = trunkOf(0.16, 0.34, 3, 2.3);
     const coniferCrownGeo = (function () {
+      // The factory's tier ladder reproduces the hand-authored stack that used
+      // to live here (0.62/0.48/0.30 radii over 0.55/0.48/0.40 heights) to
+      // within a rounding step at taper 0.73 — same envelope, same 3 whorls,
+      // one fewer copy of the layer table in the codebase.
+      if (GRAM) return CBZ.treeCrownGeo({ tiers: 3, r: 0.62, h: 1.18, seg: 6, taper: 0.73, site: "wildnature" });
       const parts = [];
       // three stacked cones, widest at the bottom — a fir silhouette in unit space
       const layers = [
@@ -184,27 +223,39 @@
       const f = new THREE.ConeGeometry(0.6, 1.2, 6); f.translate(0, 0.6, 0); return f;
     })();
 
-    // broadleaf: tapered trunk + a squashed icosahedron crown (a soft round
-    // canopy). Birch reuses this crown geo (smaller per-instance scale).
-    const trunkBroadGeo = new THREE.CylinderGeometry(0.22, 0.40, 1, 5);
-    trunkBroadGeo.translate(0, 0.5, 0);
-    const broadCrownGeo = new THREE.IcosahedronGeometry(0.6, 0);
-    broadCrownGeo.scale(1, 0.82, 1);
-    broadCrownGeo.translate(0, 0.55, 0);
-
-    // birch: a thin near-cylindrical trunk (pale), small round crown reuses
-    // broadCrownGeo via its own instanced mesh.
-    const trunkBirchGeo = new THREE.CylinderGeometry(0.11, 0.16, 1, 5);
-    trunkBirchGeo.translate(0, 0.5, 0);
+    // broadleaf: tapered trunk + a FULL two-whorl crown (fat taper 0.72 — a
+    // broad warm canopy, the widest thing on the hillside).
+    const trunkBroadGeo = trunkOf(0.22, 0.40, 4, 2.4);
+    // birch: a pale bole (no longer spaghetti) under a NARROW, airy two-whorl
+    // crown (taper 0.58, a smaller radius) — the accent tree stays the accent
+    // tree, it just stops being a different species of geometry.
+    const trunkBirchGeo = trunkOf(0.17, 0.26, 3, 2.2);
+    const LEGACY_CROWN = (function () {
+      const g = new THREE.IcosahedronGeometry(0.6, 0);
+      g.scale(1, 0.82, 1);
+      g.translate(0, 0.55, 0);
+      if (CBZ.treeGrammarLegacy) { CBZ.treeGrammarLegacy("wildnature"); CBZ.treeGrammarLegacy("wildnature"); }
+      return g;
+    });
+    // authored in the blob's exact unit envelope: y0 0.13, height 0.84, max
+    // radius 0.51 == IcosahedronGeometry(0.6).scale(1,0.82,1)+0.55
+    const broadCrownGeo = GRAM
+      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.51, h: 0.84, y0: 0.13, seg: 7, taper: 0.72, site: "wildnature" })
+      : LEGACY_CROWN();
+    const birchCrownGeo = GRAM
+      ? CBZ.treeCrownGeo({ tiers: 2, r: 0.44, h: 0.86, y0: 0.13, seg: 6, taper: 0.58, site: "wildnature" })
+      : broadCrownGeo;
 
     // SNAG (4th species) — a bare, gnarled dead/burned trunk with a couple of
     // stub branches baked into ONE geo (still a single instanced draw call,
     // no crown mesh at all — genuinely distinct silhouette: gaunt and leafless
     // instead of another conical/round canopy). Adds visual variety to the
     // backdrop without adding cost (it's cheaper than every other species).
+    // A snag keeps its ROOTS: a dead tree is the one that most obviously has
+    // to still be gripping the hillside, and it is the silhouette you read
+    // against the sky.
     const snagGeo = (function () {
-      const trunk = new THREE.CylinderGeometry(0.07, 0.20, 1, 5);
-      trunk.translate(0, 0.5, 0);
+      const trunk = trunkOf(0.07, 0.20, 3, 2.4);
       const parts = [trunk];
       // two stub branches jutting off at fixed angles (unit space; baked in)
       const stubs = [{ y: 0.55, len: 0.30, tilt: 0.9, rotY: 0.6 }, { y: 0.78, len: 0.22, tilt: -0.8, rotY: 2.6 }];
@@ -221,8 +272,25 @@
       return trunk;   // fallback (BufferGeometryUtils absent): plain bare trunk
     })();
 
-    // rocks: a single low icosahedron, jittered per-instance.
-    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+    // ---- WILDERNESS BOULDERS: GONE (WILD_ROCK_SCATTER, default false) -----
+    // OWNER: "in the wilderness, there are little green and little gray rocks
+    // — these little geometric things. Get rid of those. Those are stupid
+    // too. You can have small rocks, but not these, like, boulders."
+    // This was 2100 unit icosahedra scaled 0.5-2.9 m and tinted grey — the
+    // exact object described, and the same class of clutter DESERT_ROCK_SCATTER
+    // already deleted from the basin. THE RNG DRAWS STAY (the dead-draw
+    // pattern): every candidate is still drawn and every accepted rock still
+    // consumes its four transform draws, because this is a SHARED seeded
+    // stream — dropping the loop would re-deal every tree, grass tuft and
+    // bird home in the whole backdrop for a reason unrelated to the ask.
+    // What goes is the geometry. Flip the flag true and the field returns.
+    // NO SMALL-ROCK REPLACEMENT HERE ON PURPOSE: this scatter only ever lands
+    // on the un-walkable backdrop relief (groundY > 0.5), so a boot-sized
+    // stone out there is a triangle nobody can ever stand next to. The small
+    // stones go where the player actually walks — city/biome_forest.js and
+    // the backcountry in city/continent.js.
+    const ROCKS = !!(CBZ.CONFIG && CBZ.CONFIG.WILD_ROCK_SCATTER === true);
+    const rockGeo = ROCKS ? new THREE.IcosahedronGeometry(1, 0) : null;
 
     // grass/shrub tuft: a 3-quad cross-billboard (cheap, reads as a tuft from
     // any angle). Built by hand so it is one small merged geometry; each quad
@@ -341,10 +409,17 @@
         // altitude stunting: trees shrink toward the treeline (krummholz)
         const shrink = V3 ? (1 - 0.42 * hit.stunt) : 1;
         if (pick < cP) {
-          // CONIFER — taller, narrower; dominant on the high ground
+          // CONIFER — taller, narrower; dominant on the high ground.
+          // CROWN WIDTH IS A FRACTION OF HEIGHT, NOT A CONSTANT. It used to
+          // be a flat 0.7-1.2 regardless of the tree, so a 20 m fir wore a
+          // crown 1.5 m across — a green needle, which is a large part of why
+          // the backdrop forest read as spikes rather than trees. A real fir
+          // is 20-25% as wide as it is tall; this lands at 16-25% (the crown
+          // geo's own radius is 0.62, so world radius = 0.62*cR). SAME SINGLE
+          // rng() DRAW in the same position — the stream is untouched.
           const h = (7 + rng() * 13) * shrink;
           conifers.push({ x, z, y, h, tr: 0.55 + rng() * 0.5, rot, lean,
-            cR: (0.7 + rng() * 0.5) * shrink, cH: h * (0.9 + rng() * 0.25) });
+            cR: h * (0.13 + rng() * 0.075), cH: h * (0.9 + rng() * 0.25) });
         } else if (pick < bP) {
           // BROADLEAF — squat, round canopy
           const h = (5 + rng() * 8) * shrink;
@@ -386,7 +461,7 @@
         if (pick < 0.62) {
           const h = 7 + rng() * 11;
           conifers.push({ x, z, y: 0, h, tr: 0.55 + rng() * 0.5, rot, lean,
-            cR: 0.7 + rng() * 0.5, cH: h * (0.9 + rng() * 0.25) });
+            cR: h * (0.13 + rng() * 0.075), cH: h * (0.9 + rng() * 0.25) });   // crown width follows height (see the main scatter)
         } else if (pick < 0.88) {
           const h = 5 + rng() * 7;
           broadleaves.push({ x, z, y: 0, h, tr: 0.7 + rng() * 0.6, rot, lean,
@@ -509,8 +584,12 @@
       tint: function (c, r) { c.setRGB(0.26 + r() * 0.18, 0.44 + r() * 0.18, 0.16 + r() * 0.10); },
       bark: function (c, r) { const s = 0.34 + r() * 0.16; c.setRGB(s, s * 0.62, s * 0.36); },
     });
-    // BIRCH — pale yellow-green crown, near-white bark (the airy accent tree)
-    buildSpecies(birches, trunkBirchGeo, broadCrownGeo, {
+    // BIRCH — pale yellow-green crown, near-white bark (the airy accent tree).
+    // Its OWN narrow two-whorl crown now (it used to share the broadleaf's
+    // blob, which is how two "different species" ended up the same object at
+    // two scales). Separate geometry costs nothing: they were already two
+    // InstancedMeshes, so sharing the geo never saved a draw call.
+    buildSpecies(birches, trunkBirchGeo, birchCrownGeo, {
       kind: "broad",
       tint: function (c, r) { c.setRGB(0.42 + r() * 0.16, 0.56 + r() * 0.14, 0.22 + r() * 0.10); },
       bark: function (c, r) { const s = 0.78 + r() * 0.14; c.setRGB(s, s, s * 0.94); },
@@ -562,30 +641,39 @@
 
     // ============================================================
     //  ROCKS — one instanced icosahedron, grey/brown per-instance, flatShaded.
+    //  DEAD-DRAWN when WILD_ROCK_SCATTER is false (the default): the loop
+    //  still runs and still burns its two colour draws per rock, because the
+    //  GRASS block below reads the very same seeded stream and would
+    //  otherwise be re-tinted by a flag that has nothing to do with grass.
+    //  Only the InstancedMesh is withheld. This is the DESERT_ROCK_SCATTER
+    //  pattern, verbatim.
     // ============================================================
     if (rockList.length) {
-      const rockMat = whiteMat(true);                  // flatShading on for crisp facets
       const NR = rockList.length;
-      const rockIM = new THREE.InstancedMesh(rockGeo, rockMat, NR);
-      rockIM.castShadow = rockIM.receiveShadow = true;
-      rockIM.frustumCulled = false;
+      const rockMat = ROCKS ? whiteMat(true) : null;   // flatShading on for crisp facets
+      const rockIM = ROCKS ? new THREE.InstancedMesh(rockGeo, rockMat, NR) : null;
+      if (rockIM) { rockIM.castShadow = rockIM.receiveShadow = true; rockIM.frustumCulled = false; }
       const rCol = new Float32Array(NR * 3);
       for (let i = 0; i < NR; i++) {
         const k = rockList[i];
-        dummy.position.set(k.x, k.y + k.s * 0.35, k.z);
-        dummy.rotation.set(k.tilt, k.rot, k.tilt * 0.7);
-        dummy.scale.set(k.s, k.s * (0.7 + ((k.s * 13) % 1) * 0.4), k.s);
-        dummy.updateMatrix();
-        rockIM.setMatrixAt(i, dummy.matrix);
+        if (rockIM) {
+          dummy.position.set(k.x, k.y + k.s * 0.35, k.z);
+          dummy.rotation.set(k.tilt, k.rot, k.tilt * 0.7);
+          dummy.scale.set(k.s, k.s * (0.7 + ((k.s * 13) % 1) * 0.4), k.s);
+          dummy.updateMatrix();
+          rockIM.setMatrixAt(i, dummy.matrix);
+        }
         // grey with a hint of warm brown variance
         const g = 0.38 + rng() * 0.22;
         col.setRGB(g, g * (0.93 + rng() * 0.1), g * 0.9);
         rCol[i * 3] = col.r; rCol[i * 3 + 1] = col.g; rCol[i * 3 + 2] = col.b;
       }
-      rockIM.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
-      rockIM.instanceMatrix.needsUpdate = true;
-      root.add(rockIM);
-      lodIMs.push({ im: rockIM, full: NR });
+      if (rockIM) {
+        rockIM.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
+        rockIM.instanceMatrix.needsUpdate = true;
+        root.add(rockIM);
+        lodIMs.push({ im: rockIM, full: NR });
+      }
     }
 
     // ============================================================

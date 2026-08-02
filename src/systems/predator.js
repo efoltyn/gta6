@@ -123,6 +123,15 @@
   // you. This is the ONE change in this wave that alters an existing shark
   // seize, so it gets its own revert.
   if (CFG.PREDATOR_PANIC == null) CFG.PREDATOR_PANIC = true;
+  // ---- 2026-07-28, THE ATTACK-QUALITY WAVE. OWNER: "animals aren't very good
+  //      at attacking right now." Three separate arithmetic faults, three
+  //      separate one-line reverts, because each is independently arguable:
+  if (CFG.PREDATOR_CLOSE_SPEED == null) CFG.PREDATOR_CLOSE_SPEED = true;  // a commit must be able to CATCH you
+  // A COMMIT IS A COMMIT: it is not vetoed in flight by the menace gauge, it is
+  // not shrugged off by a fresh bullet, and connecting once spends a PASS
+  // rather than ending the encounter. All three are the same idea.
+  if (CFG.PREDATOR_WHEEL == null) CFG.PREDATOR_WHEEL = true;
+  if (CFG.PREDATOR_FOLLOW_THROUGH == null) CFG.PREDATOR_FOLLOW_THROUGH = true; // never abandon a swing mid-animation
 
   function on() { return CFG.PREDATOR_HORROR !== false; }
 
@@ -166,6 +175,55 @@
   // still until you are inside this fraction of its sense radius, and the
   // longer it has been still the more likely the circle ends in a commit.
   const AMBUSH_WAKE = 0.5, AMBUSH_BIAS = 0.030, AMBUSH_BIAS_MAX = 0.28;
+
+  // --- §L. THE WHEEL (2026-07-28). A charging animal that connects ONCE and
+  //     then leaves for twelve seconds is not an attack, it is a cutscene — and
+  //     that is exactly what the rush state did to every non-grabbing archetype
+  //     (`h.struck` -> disengage on the strike frame). A real boar gores, WHEELS
+  //     and comes straight back; the rhythm of the wheel is what makes the
+  //     encounter a fight instead of an event. So a connect spends ONE PASS, and
+  //     only when the passes are spent does §B's mandatory withdrawal fire.
+  //     It is bounded three ways and therefore cannot become camping: the pass
+  //     count is small and per-archetype, each wheel still ticks the menace
+  //     gauge (which can veto the NEXT circle), and every pass hits softer than
+  //     the one before it (WHEEL_FALL) because an animal turning inside its own
+  //     length cannot build charging speed again.
+  const WHEEL_T = 0.65, WHEEL_T_RAND = 0.7;  // s of tight wheel between passes
+  const WHEEL_R = 0.42;                      // fraction of the orbit it wheels at
+  const WHEEL_FALL = 0.82;                   // damage multiplier per extra pass
+  // --- §M. THE PROVOKE GRACE. predatorProvoke deliberately does NOT reset
+  //     menace or commits (those two ARE the anti-habituation rule and a rifle
+  //     must not clear them). But a hunter whose gauge happens to be near peak
+  //     when you shoot it force-disengages on the very next frame — i.e. it
+  //     shrugs off the bullet, which is the one failure that reads as broken
+  //     rather than tense. The grace does not touch either number: for a few
+  //     seconds after being hurt, the PEAK VETO simply may not fire. The gauge
+  //     keeps rising truthfully and collects its withdrawal the moment the
+  //     grace lapses.
+  const PROVOKE_GRACE = 3.5;
+  // --- §N. WHAT A COMMITTED PREDATOR MUST BE ABLE TO DO: CATCH YOU.
+  //     The player sprints at TUNE.walkSpeed * SURV.sprintMul = 2.0 * 3.2 =
+  //     6.4 u/s. (physics.js's "~7*1.7=11.9" comment is stale by two tunes;
+  //     read the constants, never the comment.) Against 6.4 the derived rush
+  //     speeds split cleanly in two:
+  //       CAN catch you   wolf 10.2 · tiger 10.8 · cheetah 13.7 · boar 8.7
+  //       CANNOT catch you  brown bear 7.3 · black bear 7.0 · moose 6.9 ·
+  //                         rhino 7.0 · elephant 4.6 · mountain goat 7.1 · elk 6.8
+  //     "Cannot" is not hyperbole — a moose closes at 0.54 u/s, so from its own
+  //     orbit radius it needs FORTY SECONDS and RUSH_TIMEOUT ends the commit at
+  //     4.5. An elephant is slower than a jog and can never touch you at all.
+  //     Every one of those is an animal the owner watched charge and miss.
+  //     So a committed rush gets a FLOOR, expressed against the quarry's own
+  //     speed (read live from the movement constants, never a typed number) so
+  //     a movement tune can never leave the bestiary behind. The floors are the
+  //     real animals' top speeds scaled by this game's own human ratio
+  //     (6.4 / 10.4 m/s = 0.615): bear 8.55, wolf 8.55, bison 9.6, rhino 8.55,
+  //     moose 9.8, boar 6.8, big cat 10.3-17.8.
+  //     RESCUE_MAX is what stops the floor turning a genuinely slow giant into a
+  //     rocket — it may raise a species by at most a third of its own derived
+  //     speed, which is why an elephant still charges at ~6.2 u/s and can be
+  //     escaped in a straight line by a player who never stops sprinting.
+  const QUARRY_FALLBACK = 6.4, RESCUE_MAX = 1.35;
 
   // --- seize
   const S_WIND = 0.30, S_STRIKE = 0.10;
@@ -226,53 +284,81 @@
   //
   //  Columns: sense chum circle orbit circleT  cruiseK rushK  reachB reachK
   //           rate  hold  escape  ambush  seize(style|""|false)
+  //           closeK passes
   //  ("" = derive by mass; false = this archetype does not grab at all, its
   //   commit is a contact hit — a rhino does not carry you off.)
+  //
+  //  TWO COLUMNS ADDED 2026-07-28, both answering "animals aren't very good at
+  //  attacking" and both COLUMNS, never rows — adding a species still costs
+  //  nothing here:
+  //    closeK  the multiple of the QUARRY'S sprint a committed rush must be
+  //            able to reach (§N). 0 = "this archetype does not run you down"
+  //            (a shark already outswims you by 3x; a snake never chases).
+  //            Each is the real animal's top speed over a real human's, so the
+  //            floor only ever RESCUES the species whose authored wander `spd`
+  //            under-sells it: it binds on bears, rhino, moose, elk and the
+  //            elephant, and never binds on a wolf, a boar or any big cat —
+  //            those already outrun you off their own numbers.
+  //    passes  consecutive connect->wheel->recommit passes before §B's
+  //            mandatory withdrawal (§L). A grabber gets few (the grab IS the
+  //            payoff); a charger that cannot hold you gets the most, because
+  //            repetition is the only weapon it has.
   // ============================================================
   const ARCH = {
     // open-water hunters: enormous sense radius, long patient circle, the
     // committed rush is the fastest thing in the game. Shark-authored.
     lunge:  { sense: 100, chum: 201, circle: 23.7, orbit: 16.4, circleT: 5.73,
               cruiseK: 2.4, rushK: 8.7, reachB: 2.2, reachK: 1.6,
-              rate: 1.37, hold: 2.23, escape: 0.41, ambush: false, seize: "shake" },
+              rate: 1.37, hold: 2.23, escape: 0.41, ambush: false, seize: "shake",
+              closeK: 0, passes: 1 },
     // big cats: they see you from a long way off and then STOP. Tight orbit,
     // almost no circling (a cat that circles you for six seconds is a shark),
     // ambush by default, and the grab is the throat-hold you rarely survive.
     // The fairness lives entirely in the silent stalk before it (RDR2 cougar).
     pounce: { sense: 88, chum: 55, circle: 13.5, orbit: 8.5, circleT: 2.4,
               cruiseK: 1.7, rushK: 3.4, reachB: 1.3, reachK: 1.4,
-              rate: 1.05, hold: 1.55, escape: 0.24, ambush: true, seize: "pin" },
+              rate: 1.05, hold: 1.55, escape: 0.24, ambush: true, seize: "pin",
+              closeK: 1.55, passes: 1 },
     // bears, wolves, dogs, crocodilians. The middle of everything, and the one
     // row whose seize style is chosen by MASS rather than named: a heavy
     // quadruped rears and slams (maul), a light one shakes the prey (worry).
     maul:   { sense: 70, chum: 92, circle: 20, orbit: 13, circleT: 4.2,
               cruiseK: 1.8, rushK: 3.6, reachB: 1.5, reachK: 1.5,
-              rate: 0.95, hold: 2.35, escape: 0.40, ambush: false, seize: "" },
+              rate: 0.95, hold: 2.35, escape: 0.40, ambush: false, seize: "",
+              closeK: 1.34, passes: 2 },
     // snakes: they do not stalk, they WAIT. Everything is tiny and the strike
     // is over before you read it. Constrictors get the long squeeze; vipers get
     // no hold at all (their threat is the venom afterwards, handled by the
     // caller) — predatorKit picks between them off sp.constrictor/sp.venom.
     strike: { sense: 22, chum: 14, circle: 6, orbit: 3.4, circleT: 0.3,
               cruiseK: 1.2, rushK: 3.2, reachB: 1.0, reachK: 0.9,
-              rate: 1.4, hold: 1.1, escape: 0.62, ambush: true, seize: "" },
+              rate: 1.4, hold: 1.1, escape: 0.62, ambush: true, seize: "",
+              closeK: 0, passes: 1 },
     // rhino / bison / buffalo. Wide, committed, no grab: the horror is the
-    // approach and the impact, and then it is past you and turning.
+    // approach and the impact, and then it is past you and TURNING — which is
+    // the whole reason this row now gets passes.
     ram:    { sense: 62, chum: 20, circle: 30, orbit: 22, circleT: 5.0,
               cruiseK: 1.5, rushK: 3.9, reachB: 2.0, reachK: 1.6,
-              rate: 1.3, hold: 1, escape: 1, ambush: false, seize: false },
-    // boar / moose / elephant — same shape as ram, shorter and angrier.
+              rate: 1.3, hold: 1, escape: 1, ambush: false, seize: false,
+              closeK: 1.42, passes: 2 },
+    // boar / moose / elephant — same shape as ram, shorter and angrier. THE
+    // POSTER ROW: three passes, because a boar's entire method is to keep
+    // coming back until you leave or it is dead.
     gore:   { sense: 55, chum: 20, circle: 26, orbit: 18, circleT: 4.0,
               cruiseK: 1.5, rushK: 3.3, reachB: 1.6, reachK: 1.4,
-              rate: 1.15, hold: 1, escape: 1, ambush: false, seize: false },
+              rate: 1.15, hold: 1, escape: 1, ambush: false, seize: false,
+              closeK: 1.28, passes: 3 },
     // horse / elk / bighorn — they warn, they kick, they leave.
     stomp:  { sense: 42, chum: 12, circle: 24, orbit: 17, circleT: 3.6,
               cruiseK: 1.4, rushK: 2.9, reachB: 1.4, reachK: 1.2,
-              rate: 1.2, hold: 1, escape: 1, ambush: false, seize: false },
+              rate: 1.2, hold: 1, escape: 1, ambush: false, seize: false,
+              closeK: 1.15, passes: 2 },
     // birds. Present for completeness; predatorIs() screens them out of the
     // hunt entirely, so this row is a safety net, not a behaviour.
     peck:   { sense: 26, chum: 10, circle: 8, orbit: 5, circleT: 1.2,
               cruiseK: 1.6, rushK: 2.6, reachB: 0.9, reachK: 0.8,
-              rate: 1.6, hold: 1, escape: 1, ambush: false, seize: false },
+              rate: 1.6, hold: 1, escape: 1, ambush: false, seize: false,
+              closeK: 0, passes: 1 },
   };
   // a plain bite (the fallback style) behaves like a small mauler.
   ARCH.bite = ARCH.maul;
@@ -287,6 +373,29 @@
   // each re-deriving "is this thing after me".
   const PRED_STYLES = { lunge: 1, maul: 1, pounce: 1, strike: 1, ram: 1, gore: 1, stomp: 1, bite: 1 };
   const PRED_DANGER = 0.5;
+  // §O. HUNTING IS NOT EATING, AND BEING DANGEROUS IS NOT EITHER.
+  //
+  // PRED_STYLES answers one question — "does this thing come after the player"
+  // — and a rhino, a bison and a wild boar all genuinely do. wildlife.js's food
+  // chain then reused that same answer for a COMPLETELY different question,
+  // "what will this thing hunt down and eat", and a bison duly began stalking
+  // whitetail deer, killing them and standing over the carcass feeding for
+  // forty seconds. Three questions, three answers, all derived from the same
+  // continuous facts and none of them naming a species:
+  //   EAT_STYLES     it has a mouth that takes meat        -> predatorEats
+  //   CHARGE_STYLES  it has horns/tusks/hooves instead     -> the bruiser band
+  //   ARMED_STYLES   either of those, i.e. it can hurt you -> predatorDefends
+  const EAT_STYLES = { lunge: 1, maul: 1, pounce: 1, strike: 1, bite: 1 };
+  const CHARGE_STYLES = { ram: 1, gore: 1, stomp: 1 };
+  const ARMED_STYLES = { lunge: 1, maul: 1, pounce: 1, strike: 1, bite: 1, ram: 1, gore: 1, stomp: 1 };
+  // A WOUND IS A PROVOCATION — but only to something that can answer it.
+  // DEFEND_DANGER is the bestiary's own "this one is not harmless" line (the
+  // same 0.15 wildlife.js has always used to decide whether a wound makes an
+  // animal turn), and DEFEND_MASS is the weight below which a charge cannot
+  // reach a standing person at all. A species that declares a `bite` AND has
+  // the mass to land it fights back; so does anything the bestiary already
+  // marked dangerous. Nothing else does — a rabbit with a bullet in it runs.
+  const DEFEND_DANGER = 0.15, DEFEND_MASS = 0.7;
 
   // ============================================================
   //  small helpers — zero allocation, all guarded
@@ -2053,6 +2162,14 @@
       // stomp) actually connects, so its rush can end on the impact instead of
       // grinding on for RUSH_TIMEOUT.
       struck: false,
+      // §L the wheel: how many passes this bout has already spent, and whether
+      // the circle currently running is a tight WHEEL (a turn inside its own
+      // length) rather than a patient orbit. `recommit` forces the next circle
+      // roll to come up rush — a wheel is not a fresh decision, it is the second
+      // half of one already made.
+      gores: 0, wheel: false, recommit: false,
+      // §M how long the peak-veto is suspended because something just hurt it.
+      provokeT: 0,
       // §D pack: which bearing slot around the target this hunter owns.
       packSlot: -1, packT: -999, packRole: "commit",
     };
@@ -2062,6 +2179,13 @@
   function setState(hunter, h, st, opts) {
     if (h.st === st) return;
     h.prev = h.st; h.st = st; h.t = 0;
+    // §L: A BOUT ENDS WHEN THE HUNTER STOPS BEING ON YOU. Every route out of an
+    // engagement lands on one of these two states — the peak veto, a caller's
+    // disengage, a resolved seize, a spent pass ration — so resetting the wheel
+    // here is the one place that cannot be forgotten. Without it a bout cut
+    // short by the menace gauge would leave `gores` loaded and the NEXT charge
+    // would arrive already softened and already half out of passes.
+    if (st === "cruise" || st === "disengage") { h.gores = 0; h.wheel = false; h.recommit = false; }
     // markers.js's cityTargetsPlayer() reads exactly these two strings — the
     // HUD chevron, minimap blip and full map light up with no new code.
     if (st === "scent" || st === "circle" || st === "vanish") hunter.state = "stalk";
@@ -2121,6 +2245,83 @@
     return base + Math.random() * D_CIRCLE_T_RAND;
   }
 
+  // §L. THE COMMIT, IN ONE PLACE. This was inline in the circle case and is now
+  // called from three: the circle roll, the wheel, and predatorCommit(). Every
+  // line of it is the original, including the comment that matters most —
+  //
+  // ARM THE BITE. creature_combat seeds a fresh attacker with
+  // _atkT = rate * (0.3..0.8) — 0.45-1.20s for a shark — and that clock only
+  // ticks while creatureFight is actually being called, which during a rush is
+  // the ~0.23s the hunter spends inside reach at 22 u/s. So a committed rush
+  // kept arriving with a cooldown still running and the shark went whole minutes
+  // without ever biting. A COMMITTED RUSH STRIKES ON ITS FIRST PASS. The
+  // ordinary land-attack pacing (the 0.9-1.15x rate re-arm after a swing) is
+  // owner-tuned and deliberately untouched.
+  function enterCommit(hunter, h, opts, stinger) {
+    h.dropped = false;
+    h.commits++;
+    h.stillT = 0; h.passes = 0; h.struck = false;
+    h.wheel = false; h.recommit = false;
+    hunter._atkT = 0;
+    setState(hunter, h, "rush", opts);
+    if (stinger) stinger("commit");   // the brass cluster IS the commitment
+  }
+
+  // §L. HOW A COMMIT ENDS — the other half of enterCommit, and the whole of the
+  // owner's "animals aren't very good at attacking".
+  //
+  // Before: every route out of `rush` went straight to `disengage`, so a wild
+  // boar's entire attack was ONE tusk hit followed by 4-10 s of mandated
+  // cooldown plus up to 8 s of walking away — twelve to eighteen seconds of
+  // nothing, per hit. A real charger does not do that; it gores, WHEELS inside
+  // its own length, and comes straight back. The pass count is the ration
+  // (ARCH.passes: a grabber 1, a bear 2, a boar 3), and only when it is spent
+  // does §B's mandatory withdrawal fire — so anti-habituation is unchanged in
+  // kind, just measured per BOUT instead of per contact.
+  //
+  // A MISS DOES NOT BUY A PASS. `connected` is false for a timeout, a refused
+  // seize or an unreachable target: those spend the whole bout, because a
+  // charger that keeps wheeling at something it cannot touch is a treadmill.
+  function endCommit(hunter, h, opts, connected) {
+    const wheelOn = CFG.PREDATOR_WHEEL !== false;
+    const maxP = (opts && opts.passes != null && isFinite(opts.passes)) ? (opts.passes | 0) : 1;
+    if (connected) h.gores++;
+    if (wheelOn && connected && h.gores < maxP) {
+      // THE WHEEL: a short, tight turn that ends in a certainty.
+      h.wheel = true; h.recommit = true;
+      h.circleDur = WHEEL_T + Math.random() * WHEEL_T_RAND;
+      h.orbitDir = -h.orbitDir;          // it comes back from the other side
+      setState(hunter, h, "circle", opts);
+      return;
+    }
+    h.gores = 0; h.wheel = false; h.recommit = false;
+    setState(hunter, h, "disengage", opts);
+  }
+
+  // PUBLIC: "skip the tease — go NOW."
+  //
+  // predatorProvoke wakes a hunter; this one makes it strike. They are two
+  // different verbs and a caller almost always wants only the first: a bear you
+  // shot from 40 m SHOULD come at you through the whole grammar. The exception
+  // is an animal that is already on top of the thing that hurt it — a cornered
+  // deer, a boar you walked into — where circling for four seconds is not a
+  // tease, it is the animal declining to defend itself. So this exists, it is
+  // the same block the circle roll runs, and it is deliberately not something a
+  // stalking predator ever calls on itself.
+  function predatorCommit(hunter, target) {
+    if (!on() || !hunter || !hunter.group || hunter.dead) return false;
+    const h = huntScratch(hunter);
+    if (!h || h.st === "seize") return false;
+    h.cool = 0; h.scentFake = false;
+    if (h.st === "rush") return true;
+    // the brass cluster is the PLAYER's tension mix (the §SCORE rule) — a
+    // cornered deer kicking a wolf across the valley must not sound it.
+    const score = isPlayerActor(target) || scoring(hunter, false);
+    enterCommit(hunter, h, null, score ? predatorStinger : null);
+    return true;
+  }
+  CBZ.predatorCommit = predatorCommit;
+
   // PUBLIC: "let go of the target, and stay off it for `secs`."
   //
   // The one sanctioned way for a caller to break its own hunt off — a shark
@@ -2139,6 +2340,7 @@
     if (cool > h.cool) h.cool = cool;
     h.prev = h.st;
     h.st = "disengage"; h.t = 0; h.dropped = false; h.seizeWait = false;
+    h.gores = 0; h.wheel = false; h.recommit = false;   // §L: the bout is over
     hunter.state = "flee";
     // menace / commits deliberately left alone.
   }
@@ -2163,6 +2365,49 @@
     return !!(hunter && hunter._hunt && hunter._hunt.still);
   }
   CBZ.predatorStill = predatorStill;
+
+  // PUBLIC: "let go NOW and give the body back."
+  //
+  // The sibling of predatorDisengage, and the difference is who owns the actor
+  // afterwards. `disengage` is an IN-CHARACTER withdrawal — the FSM keeps the
+  // body and walks it away at cruise speed for up to eight seconds. That is
+  // correct after a commit and completely wrong for a ROUT: an animal that has
+  // taken enough and is running for its life must be handed straight back to its
+  // caller's flee, which knows about herd headings, panic speed multipliers and
+  // the biome fence. So this drops to `cruise` (the state every caller reads as
+  // "not mine") with the cooldown already loaded. menace/commits survive, same
+  // as disengage — a rout is not an amnesty.
+  function predatorBreakOff(hunter, secs) {
+    if (!hunter || !hunter._hunt) return;      // never spin up a hunt just to end it
+    const h = hunter._hunt;
+    const cool = (secs != null && isFinite(secs) && secs > 0) ? secs
+      : (MEN_COOL_MIN + Math.random() * MEN_COOL_RAND);
+    if (cool > h.cool) h.cool = cool;
+    h.prev = h.st; h.st = "cruise"; h.t = 0;
+    h.dropped = false; h.seizeWait = false; h.struck = false;
+    h.wheel = false; h.recommit = false; h.gores = 0; h.provokeT = 0;
+    hunter.state = h.state0 || "wander";
+    // a swing still in flight would otherwise be stranded (see §P) — the fight
+    // driver is the only thing that can hand its own pose back.
+    if (hunter._atkAnim >= 0 && CBZ.creatureEndAttack) {
+      try { CBZ.creatureEndAttack(hunter); } catch (e) {}
+    }
+  }
+  CBZ.predatorBreakOff = predatorBreakOff;
+
+  // §N. HOW FAST THE THING BEING HUNTED CAN RUN. Read live from the player's own
+  // movement constants so a movement tune can never leave the bestiary behind;
+  // the literal is a fallback for a build where physics.js has not published
+  // them yet, not a second opinion.
+  function predatorQuarrySpeed() {
+    const S = CBZ.SURV;
+    const T = CBZ.TUNE;
+    const w = T && typeof T.walkSpeed === "number" && T.walkSpeed > 0 ? T.walkSpeed : 0;
+    const m = S && typeof S.sprintMul === "number" && S.sprintMul > 0 ? S.sprintMul : 3.2;
+    const v = w * m;
+    return (v > 1 && isFinite(v)) ? v : QUARRY_FALLBACK;
+  }
+  CBZ.predatorQuarrySpeed = predatorQuarrySpeed;
 
   function chumNear(h, hp, chumR, dt) {
     h.chumT -= dt;
@@ -2286,7 +2531,33 @@
     // still bleeds for a non-player hunt (predatorMenace stays truthful); it
     // simply does not get to veto the commit. `isP` short-circuits first, so
     // every player-facing behaviour is byte-identical.
-    if (engaged && isP && h.st !== "seize" && h.menace >= MEN_PEAK) {
+    //
+    // THE EXEMPTIONS, AND WHY NONE OF THEM WEAKENS THE LAW. `seize` always was
+    // exempt. The other three are the same idea said three ways: THE GAUGE
+    // RATIONS BOUTS, NOT FRAMES.
+    //   * `rush` — a rush IS the commit the gauge exists to ration, and
+    //     vetoing one in flight is a charge that turns away three metres from
+    //     you for no reason the player can see. It costs nothing: the rush ends
+    //     in a mandatory disengage anyway, RUSH_TIMEOUT bounds it at 4.5 s, and
+    //     the gauge is still at peak when it lands, so the withdrawal is
+    //     collected one beat later instead of never happening.
+    //   * `h.wheel` — measured, not assumed: with only `rush` exempt a boar
+    //     landed its first tusk and then had the gauge cut the WHEEL before the
+    //     second pass could commit, so the three-pass ration was aspirational
+    //     and the encounter was the same one-hit cutscene it had always been.
+    //     A wheel is the second half of a commit already made; the pass count
+    //     is what bounds the bout, and it is small.
+    //   * the provoke grace (§M) — the same argument applied to a bullet: for a
+    //     few seconds after something hurts it, a hunter may not use the veto to
+    //     shrug it off.
+    // The total time a hunter may spend ON you is unchanged in kind — it is
+    // simply delivered as a burst followed by a real gap, which is both what a
+    // real charger does and what makes the gap frightening.
+    if (h.provokeT > 0) h.provokeT -= dt;
+    const vetoOk = (CFG.PREDATOR_WHEEL === false)
+      ? (h.st !== "seize")
+      : (h.st !== "seize" && h.st !== "rush" && !h.wheel && !(h.provokeT > 0));
+    if (engaged && isP && vetoOk && h.menace >= MEN_PEAK) {
       setState(hunter, h, "disengage", opts);
       h.cool = MEN_COOL_MIN + Math.random() * MEN_COOL_RAND;
     }
@@ -2342,13 +2613,20 @@
         // important state in the file and shortening it is the one change that
         // would flatten the whole system.
         dreadFor(hunter, 0.55, dreadOptsFor(hunter, dist, sub));
-        if (!reachable || dist > circleR * 2.4) { setState(hunter, h, "scent", opts); break; }
+        if (!reachable || dist > circleR * 2.4) {
+          h.wheel = false; h.recommit = false;   // an interrupted wheel is not a promise
+          setState(hunter, h, "scent", opts); break;
+        }
         // §J. THE PASS SHRINKS. Every circle that ends in nothing comes back
         // tighter than the last, so a long stalk has a shape — it is closing in
         // on you, not looping a fixed rail. Alien: Isolation's investigate
         // passes, and the same two lines also fix the thing that made a long
         // stalk read as a treadmill.
-        const oR = orbitR * (1 - PASS_TIGHTEN * Math.min(h.passes, PASS_MAX - 1));
+        // §L: a WHEEL is a different animal from an orbit — it is the turn a
+        // boar makes inside its own length after a gore, so it happens at a
+        // fraction of the radius and ends in a certainty, not a roll.
+        const oR = orbitR * (h.wheel ? WHEEL_R : 1)
+          * (1 - PASS_TIGHTEN * Math.min(h.passes, PASS_MAX - 1));
         // tangent + a radial correction toward the (shrinking) orbit radius
         const err = clamp((dist - oR) / Math.max(1, oR), -1, 1);
         const wantH = toT + h.orbitDir * (Math.PI * 0.5) * (1 - err * 0.75);
@@ -2358,28 +2636,19 @@
           // wait, the likelier this pass is the real one. Everything else keeps
           // the flat 45/30/25 split exactly.
           const bias = ambush ? clamp(h.stillT * AMBUSH_BIAS, 0, AMBUSH_BIAS_MAX) : 0;
-          const r = Math.max(0, Math.random() - bias);
+          // §L: a WHEEL is not a fresh decision. The fake-out roll exists so a
+          // dread cue cannot reliably predict an attack — but the attack has
+          // ALREADY happened, so there is nothing left to telegraph and rolling
+          // again would just turn a wounded animal's second pass into a coin
+          // flip. The recommit is certain; the number of them is the ration.
+          const r = h.recommit ? 1 : Math.max(0, Math.random() - bias);
           if (r < P_CIRCLE_VANISH) {
             h.vanishDur = VANISH_MIN + Math.random() * VANISH_RAND;
             setState(hunter, h, "vanish", opts);
           } else if (r < P_CIRCLE_VANISH + P_CIRCLE_BUMP) {
             setState(hunter, h, "bump", opts);
           } else {
-            h.dropped = false;
-            h.commits++;
-            h.stillT = 0; h.passes = 0; h.struck = false;
-            // ARM THE BITE. creature_combat seeds a fresh attacker with
-            // _atkT = rate * (0.3..0.8) — 0.45-1.20s for a shark — and that
-            // clock only ticks while creatureFight is actually being called,
-            // which during a rush is the ~0.23s the hunter spends inside
-            // reach*1.25 at 22 u/s. So a committed rush kept arriving with a
-            // cooldown still running and the shark went whole minutes without
-            // ever biting. A COMMITTED RUSH STRIKES ON ITS FIRST PASS. The
-            // ordinary land-attack pacing (the 0.9-1.15x rate re-arm after a
-            // swing) is owner-tuned and deliberately untouched.
-            hunter._atkT = 0;
-            setState(hunter, h, "rush", opts);
-            stinger("commit");   // the brass cluster IS the commitment
+            enterCommit(hunter, h, opts, stinger);
           }
         }
         break;
@@ -2462,7 +2731,34 @@
         // badly, and it is the rarest outcome of circling.
         dreadFor(hunter, 0.9 + clamp(1 - dist / Math.max(1, circleR), 0, 1) * 0.1,
           dreadOptsFor(hunter, dist, sub));
-        if (!reachable) { setState(hunter, h, "disengage", opts); break; }
+        if (!reachable) { endCommit(hunter, h, opts, false); break; }
+        // §P. THE FOLLOW-THROUGH, and it is a bug fix before it is a feature.
+        // `h.struck` is set from INSIDE creature_combat's strike callback — i.e.
+        // at p ~= 0.45 of a 0.4 s animation — and the old code left the rush on
+        // that very frame. Nothing ever called creatureFight for this actor
+        // again, so endAttack() never ran: `_atkAnim` stayed pinned at 0.45
+        // forever, which froze the gore pitch on the group (a boar that keeps
+        // its nose in the dirt for the rest of the session), never handed the
+        // predator_anim pose back, and left `_lungeAmt` non-zero so the NEXT
+        // swing yanked the body backwards by the stale offset on its first
+        // frame. So a struck commit now STOPS DRIVING (the strike animation's
+        // own lunge is the follow-through — driving as well is the lawnmower)
+        // and waits out its own swing before the wheel or the withdrawal.
+        //
+        // NOTE THE CREATUREFIGHT CALL INSIDE THE BRANCH, AND DO NOT REMOVE IT.
+        // creature_combat advances `_atkAnim` from nowhere else — a
+        // follow-through that merely stops driving and waits would wait for
+        // ever, because the only thing that ticks the animation is the driver
+        // we would have stopped calling. It advances the swing and NOTHING
+        // else: no move(), so the body coasts on the animation's own lunge.
+        if (h.struck && CFG.PREDATOR_FOLLOW_THROUGH !== false) {
+          if (hunter._atkAnim >= 0 && CBZ.creatureFight) {
+            const soF = seizeOptsFor(hunter, h, opts, medium);
+            try { CBZ.creatureFight(hunter, target, dt, fightOptsFor(hunter, h, opts, soF, medium)); } catch (e) {}
+          }
+          if (!(hunter._atkAnim >= 0)) { h.struck = false; endCommit(hunter, h, opts, true); }
+          break;
+        }
         move(hunter, toT, rushSpd, dt);
         // THE DROP-OUT, timed off closing speed rather than a fixed radius.
         if (!h.dropped && dist <= rushSpd * DROP_LEAD + reach) {
@@ -2490,15 +2786,19 @@
             const fo = fightOptsFor(hunter, h, opts, so, medium);
             try { CBZ.creatureFight(hunter, target, dt, fo); } catch (e) {}
             if (hunter._seizing) { h.seizeWait = true; setState(hunter, h, "seize", opts); }
-            // a non-grabbing archetype has spent its commit the moment it
-            // connects. Without this it kept grinding through the target for
-            // the full RUSH_TIMEOUT, which is how a charging rhino turns into a
-            // lawnmower.
-            else if (h.struck) { h.struck = false; setState(hunter, h, "disengage", opts); }
+            // a non-grabbing archetype has spent A PASS the moment it connects.
+            // Without this it kept grinding through the target for the full
+            // RUSH_TIMEOUT, which is how a charging rhino turns into a
+            // lawnmower. (§P now holds the state one swing longer so the
+            // animation can finish; with FOLLOW_THROUGH off this is the old
+            // same-frame exit, byte for byte.)
+            else if (h.struck && CFG.PREDATOR_FOLLOW_THROUGH === false) {
+              h.struck = false; endCommit(hunter, h, opts, true);
+            }
           } else if (so) {
             const handle = CBZ.predatorSeize ? CBZ.predatorSeize(hunter, target, so) : null;
             if (handle) { h.seizeWait = true; setState(hunter, h, "seize", opts); }
-            else { setState(hunter, h, "disengage", opts); }
+            else { endCommit(hunter, h, opts, false); }
           } else {
             // no combat driver AND no grab: the bare contact hit, so a charger
             // still hurts on a build where creature_combat.js is absent.
@@ -2508,10 +2808,10 @@
               try { CBZ.cityHurtPlayer(bd * 2, hp.x, hp.z, "struck by a " + actorName(hunter), false, hunter, true); } catch (e) {}
             } else if (!isP && target.hp != null) target.hp -= bd * 2;
             stinger("impact"); trauma(0.7);
-            setState(hunter, h, "disengage", opts);
+            endCommit(hunter, h, opts, true);
           }
         } else if (h.t > RUSH_TIMEOUT) {
-          setState(hunter, h, "disengage", opts);   // a miss is still a commit
+          endCommit(hunter, h, opts, false);   // a miss is still a commit
         }
         break;
       }
@@ -2519,7 +2819,9 @@
       case "seize": {
         dreadFor(hunter, 1, dreadOptsFor(hunter, 0, sub));
         if (!hunter._seizing) {
-          // whatever the outcome, the commit is spent. §B is absolute.
+          // whatever the outcome, the commit is spent. §B is absolute — a grab
+          // never wheels, because the grab WAS the whole attack.
+          h.gores = 0; h.wheel = false; h.recommit = false;
           setState(hunter, h, "disengage", opts);
           h.cool = MEN_COOL_MIN + Math.random() * MEN_COOL_RAND;
           h.menace = clamp(h.menace + 0.3, 0, 1);
@@ -2626,6 +2928,13 @@
     fo.reach = opts.reach != null ? opts.reach : (1.6 + actorScale(hunter) + 1);
     fo.rate = opts.rate != null ? opts.rate : 1.1;
     fo.dmg = opts.dmg != null ? opts.dmg : ((sp && sp.bite) || 18);
+    // §L. EVERY PASS AFTER THE FIRST HITS SOFTER, and that is physics rather
+    // than balance: the first gore arrives at the end of a full charge and each
+    // wheel after it is a turn inside the animal's own length, from which no
+    // charging speed can be rebuilt. It is also what keeps the boar's whole
+    // three-pass bout (14 + 11.5 + 9.4 = 35) firmly under "hurts a lot" and
+    // nowhere near "one-shots you".
+    if (h.gores > 0 && CFG.PREDATOR_WHEEL !== false) fo.dmg *= Math.pow(WHEEL_FALL, h.gores);
     fo.speed = opts.rushSpeed != null ? opts.rushSpeed : D_RUSH_SPD;
     fo.style = opts.style || (CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : "bite");
     // PROPAGATE THE INTENT, NOT JUST ITS ABSENCE. A null here would be
@@ -2728,7 +3037,19 @@
       style: style,
       ambush: !!A.ambush,
       seize: false,
+      passes: A.passes || 1,
     };
+    // §N. THE CLOSE-SPEED FLOOR. A commit that cannot close is theatre, so a
+    // land archetype's rush is raised to `closeK` x the quarry's own sprint —
+    // but never by more than RESCUE_MAX of the species' own derived speed, so
+    // an elephant stays an elephant. Water archetypes declare closeK 0 and are
+    // untouched (the shark already swims at 3x a swimmer).
+    if (CFG.PREDATOR_CLOSE_SPEED !== false && A.closeK > 0) {
+      const want = A.closeK * predatorQuarrySpeed();
+      const ceiling = kit.rushSpeed * RESCUE_MAX;
+      const floor = want < ceiling ? want : ceiling;
+      if (floor > kit.rushSpeed) kit.rushSpeed = clamp(floor, 2.5, 24);
+    }
     if (sp.aquatic) { kit.medium = "water"; kit.canReach = inWaterOnly; }
 
     // ---- WHICH GRAB. Three inputs, none of them a name.
@@ -2848,6 +3169,11 @@
     h.scentFake = false;
     h.passes = 0;
     h.stillT = 0;
+    // §M: the peak-veto may not fire for a few seconds. This is NOT the reset
+    // the paragraph above forbids — menace and commits are untouched and keep
+    // accumulating; the gauge simply does not get to answer a bullet with a
+    // shrug. The withdrawal it is owed is collected the moment the grace lapses.
+    if (CFG.PREDATOR_WHEEL !== false) h.provokeT = PROVOKE_GRACE;
     if (h.st === "seize") return true;      // already has you; nothing to escalate
     if (h.st !== "scent" && h.st !== "circle" && h.st !== "rush" && h.st !== "bump") {
       setState(hunter, h, "scent", null);
@@ -2856,6 +3182,53 @@
     return true;
   }
   CBZ.predatorProvoke = predatorProvoke;
+
+  // ============================================================
+  //  §O. THE THREE QUESTIONS — hunt / eat / defend.
+  //
+  //  OWNER (2026-07-28): "Predators like wild boars SHOULD be attacking... I
+  //  think animals aren't very good at attacking right now." Everything the
+  //  bestiary needs to answer that is already authored on the species — style,
+  //  scale, bite, danger — and the whole of the answer is arithmetic on those
+  //  four. No species name appears below this line either.
+  // ============================================================
+
+  // "Would this thing hunt something down and EAT it?" — the food chain's
+  // question, and NOT predatorIs's. A rhino, a bison and a wild boar all come
+  // after the player (predatorIs, correctly, says yes), and wildlife.js's food
+  // chain reused that same answer to pick prey — so a bison stalked whitetail
+  // deer, killed them, and stood over the carcass feeding. Two questions, two
+  // functions. Horns are not a diet.
+  function predatorEats(actor) {
+    const sp = (actor && actor.species) || actor;
+    if (!sp) return false;
+    if (sp.venom || sp.constrictor) return true;
+    if (!((sp.danger || 0) >= PRED_DANGER)) return false;
+    return !!EAT_STYLES[styleOf(sp)];
+  }
+  CBZ.predatorEats = predatorEats;
+
+  // "If something HURTS this animal, does it answer?" — the one that makes the
+  // owner's boar work, and the one nothing in the game could ask before.
+  // Three ways to qualify, all continuous:
+  //   * it already hunts you (a predator always fights back);
+  //   * it carries a weapon the bestiary declared (`bite`) on a body heavy
+  //     enough to land it — which catches the moose, the bighorn and the coyote
+  //     without naming one of them;
+  //   * it is a CHARGER the bestiary already marked dangerous at all.
+  // Everything else — deer, elk, horses, cattle, rabbits, foxes — runs, which
+  // is correct, and gets exactly one desperate answer when it is cornered
+  // (wildlife.js owns that trigger; this is only the taxonomy).
+  function predatorDefends(actor) {
+    const sp = (actor && actor.species) || actor;
+    if (!sp) return false;
+    if (predatorIs({ species: sp })) return true;
+    const style = styleOf(sp);
+    if (!ARMED_STYLES[style]) return false;
+    if ((sp.bite || 0) > 0 && (sp.scale || 1) >= DEFEND_MASS) return true;
+    return !!CHARGE_STYLES[style] && (sp.danger || 0) >= DEFEND_DANGER;
+  }
+  CBZ.predatorDefends = predatorDefends;
 
   // ============================================================
   //  §D. predatorPack — WHY A WOLF PACK IS NOT FOUR WOLVES.
@@ -3060,6 +3433,21 @@
     // hauled off your own boat feels different from being tackled on a
     // pavement. MIGRATED in the change that added the id; nothing hand-rolled.
     "piracy:boarding-seize",
+    // wildlife.js: A WOUND IS A PROVOCATION. Every damage class that reaches an
+    // animal (gunshot, melee, blast, car, another animal's bite, a companion)
+    // funnels through cityWildlifeHit, and the bruiser band — the moose, the
+    // bighorn, the coyote, and every charger the bestiary already called
+    // dangerous — now answers it by running the shared hunt on a licence rather
+    // than by poking a legacy `state = "charge"`. Declared by the change that
+    // migrated it.
+    "wildlife:defend-when-hurt",
+    // wildlife.js: the cornered animal's one desperate kick. It is a genuine
+    // "an animal lands a hit on the player" path and it would have been
+    // invisible to this audit if nobody had listed it — an audit that only
+    // counts the paths somebody remembered to add is not a measurement. It runs
+    // the same licence, the same predatorHunt and the same predatorCommit as the
+    // bruiser above; nothing about it is hand-rolled.
+    "wildlife:cornered-defense",
   ];
 
   CBZ.predatorAudit = function () {

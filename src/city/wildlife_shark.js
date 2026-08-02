@@ -551,6 +551,15 @@
   } else {
     try { (CBZ._predatorAdopted = CBZ._predatorAdopted || []).push('wildlife_shark:hunt'); } catch (e) {}
   }
+  // ..and the OTHER half of the debt, which the id above never covered: this
+  // file ticked the shared FSM while still hand-writing the opts bundle the
+  // shared table was solved from. `sharkKitAdopted` is what
+  // CBZ.wildlifeDefenseAudit reads; it is a live answer rather than a constant
+  // so flipping SHARK_KIT off reports the truth instead of a claim.
+  Object.defineProperty(CBZ, "sharkKitAdopted", {
+    configurable: true,
+    get: function () { return KIT(); },
+  });
 
   CBZ.sharkBrain = sharkBrain;
   CBZ.sharkFinDrop = dropProxy;

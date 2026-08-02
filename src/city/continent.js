@@ -1889,13 +1889,39 @@
         if (s.cover && s.cover.biome === "desert") return false;
         return s.h < (s.cover && s.cover.biome === "farmland" ? 0.14 : 0.24);
       }
-      // Blob canopy: a low-poly squashed icosahedron (20 faces, non-indexed ->
-      // flat-shaded chunky facets = voxel look) tapered into a teardrop with a
-      // small baked lump, base at y=0. A dark-underside -> bright-crown AO ramp
-      // is baked into the vertex `color` attribute; per-instance green rides
-      // `instanceColor` (r128: vColor = color(AO) *= instanceColor). One draw
-      // call carries the whole forest with depth + per-tree hue.
+      // ONE TREE GRAMMAR (world/treeaudit.js §2). OWNER: "there's a type of
+      // tree that's this weird geometric shit with a very thin trunk... and
+      // that's the same type of tree that we have on MOST TERRAIN. That type
+      // sucks... the type that has two cones looks nice, and that needs to
+      // replace the other trees in the game."
+      //
+      // "Most terrain" IS THIS FILE. The Backcountry underlay is the biggest
+      // vegetated region in the world and every tree on it was a squashed
+      // icosahedron teardrop on a BOX. The blob is retired; the canopy is now
+      // the shared two-whorl cone stack, authored in the blob's own unit
+      // envelope (base y=0, tip y=1, max radius 1) so every placement number
+      // below — and therefore CBZ.treeAudit()'s trunk/canopy overlap — is
+      // untouched. The AO ramp the blob baked into its `color` attribute is
+      // carried over by the factory (`ao:true`), so canopyMat keeps
+      // vertexColors and the one-draw-call depth read survives the swap.
+      // The BOX TRUNK is likewise replaced by the shared tapered bole, which
+      // brings the roots with it: 0.34-0.86 m of timber standing out of the
+      // ground with nothing holding it there was the "not connected to the
+      // ground" half of the same complaint.
+      // Deliberately ANDed with V2: CONTINENT_FOREST_V2=false is this file's
+      // documented one-line revert to the pre-blob backcountry (a plain cone
+      // on a centred box), and a half-applied grammar would leave that path
+      // with a base-at-0 bole positioned as if it were still centred — i.e.
+      // every trunk half-buried. One flag reverts one world.
+      const GRAM = !!(V2 && CFG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
+      // Blob canopy (LEGACY, flag-off path): a low-poly squashed icosahedron
+      // (20 faces, non-indexed -> flat-shaded chunky facets = voxel look)
+      // tapered into a teardrop with a small baked lump, base at y=0. A
+      // dark-underside -> bright-crown AO ramp is baked into the vertex
+      // `color` attribute; per-instance green rides `instanceColor` (r128:
+      // vColor = color(AO) *= instanceColor).
       function blobCanopyGeo() {
+        if (CBZ.treeGrammarLegacy) CBZ.treeGrammarLegacy("continent");
         const g = new THREE.IcosahedronGeometry(1, 0);
         const pos = g.attributes.position, N = pos.count;
         const colors = new Float32Array(N * 3);
@@ -1920,10 +1946,38 @@
       // Backcountry is the kit's landscape consumer: same metre-authored scale
       // and irregular mass as Redhollow, but the lighter landscape archetypes
       // avoid multiplying close-detail roots/limbs across ~10k far cells.
-      const trunkG = SCENERY ? VKIT.geometry("landscape-wood") : new THREE.BoxGeometry(0.5, 2.6, 0.5);
-      const canopyG = SCENERY ? VKIT.geometry("landscape-crown") : (V2 ? blobCanopyGeo() : new THREE.ConeGeometry(2.0, 4.4, 6));
-      const rockG = new THREE.BoxGeometry(1.6, 1.1, 1.4);
-      const trunkMat = SCENERY ? VKIT.material("landscape-wood") : new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff } : { color: 0x6b4a2a });
+      const TRUNK_BASED = !!(SCENERY || (GRAM && CBZ.treeTrunkGeo));
+      const trunkG = SCENERY ? VKIT.geometry("landscape-wood")
+        : (TRUNK_BASED
+          ? CBZ.treeTrunkGeo({ rTop: 0.19, rBase: 0.30, h: 1, seg: 5, roots: 4, spread: 2.4, flare: 1.5, site: "continent" })
+          : new THREE.BoxGeometry(0.5, 2.6, 0.5));
+      const canopyG = SCENERY ? VKIT.geometry("landscape-crown")
+        : (GRAM
+          ? CBZ.treeCrownGeo({ tiers: 2, r: 1, h: 1, seg: 6, taper: 0.71, ao: true, aoLow: 0.55, site: "continent" })
+          : (V2 ? blobCanopyGeo() : new THREE.ConeGeometry(2.0, 4.4, 6)));
+      // ---- BACKCOUNTRY BOULDERS: GONE (WILD_ROCK_SCATTER, default false) ---
+      // OWNER: "in the wilderness there are little green and little gray rocks
+      // — these little geometric things. Get rid of those... You can have
+      // small rocks, but not these, like, boulders." A BoxGeometry(1.6,1.1,
+      // 1.4) under a scale of 0.8-1.5 is a 1.3-2.4 m grey CUBE, one per
+      // non-tree cell across the entire Backcountry — the literal object in
+      // the complaint, and the most geometric thing in the wilderness.
+      // It becomes a genuinely SMALL fractured stone through
+      // world/rockscliffs.js — the ONE rock factory in this game, whose
+      // scrape algorithm chips real planar fracture facets instead of
+      // presenting six flat sides. SMALL_ROCK is the linear shrink; at 0.30
+      // the boulder becomes a 0.4-0.7 m stone standing ~0.35 m proud, which
+      // is UNDER physics.js's 0.45 STEP_UP — so it also stops being a thing
+      // you have to steer around, and its collider goes with it (see below).
+      // Placement is 100% hash01-driven here, so removing/keeping instances
+      // cannot re-deal anything: there is no sequential stream to disturb.
+      const BIG_ROCKS = CFG.WILD_ROCK_SCATTER === true;
+      const SMALL_ROCK = BIG_ROCKS ? 1 : (CFG.WILD_SMALL_ROCKS !== false ? 0.30 : 0);
+      const rockG = (SMALL_ROCK && SMALL_ROCK !== 1 && CBZ.makeRock)
+        ? CBZ.makeRock(0.8, 0x8CA117, 1, { scrapes: 9, depthMin: 0.06, depthMax: 0.34 })
+        : new THREE.BoxGeometry(1.6, 1.1, 1.4);
+      const trunkMat = SCENERY ? VKIT.material("landscape-wood")
+        : new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff } : { color: 0x6b4a2a });
       const canopyMat = SCENERY ? VKIT.material("landscape-crown") : new THREE.MeshLambertMaterial(V2
         ? { color: 0xffffff, vertexColors: true, flatShading: true }
         : { color: 0x3f7a3f });
@@ -1992,19 +2046,24 @@
               seatRef = Math.min(gy, gu.min);
               const seatY = seatRef - 0.25;
               const span = trunkTop - seatY;
-              dummy.position.set(s.x, SCENERY ? seatY : (seatY + trunkTop) / 2, s.z);
+              // BASE-AT-0 bole vs CENTRED box — see TRUNK_BASED above. Both
+              // land the top at trunkTop, which is what the canopy and the
+              // audit chain are keyed to.
+              dummy.position.set(s.x, TRUNK_BASED ? seatY : (seatY + trunkTop) / 2, s.z);
               dummy.rotation.set(0, rot, 0);
               if (SCENERY) dummy.scale.setScalar(sc);
-              else dummy.scale.set(sc * 0.9, span / 2.6, sc * 0.9);
+              else dummy.scale.set(sc * 0.9, TRUNK_BASED ? span : span / 2.6, sc * 0.9);
             } else {
-              dummy.position.set(s.x, gy + trunkH * 0.5 - 0.06, s.z);
+              dummy.position.set(s.x, TRUNK_BASED ? gy - 0.06 : gy + trunkH * 0.5 - 0.06, s.z);
               dummy.rotation.set(0, rot, 0);
-              dummy.scale.set(sc * 0.9, sc, sc * 0.9);
+              if (SCENERY) dummy.scale.setScalar(sc);
+              else dummy.scale.set(sc * 0.9, TRUNK_BASED ? trunkH : sc, sc * 0.9);
             }
             dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
             // Height-gated timber, not the former infinite vertical column.
-            const trunkR = SCENERY ? 0.82 * sc : 0.25 * sc * 0.9;
-            solidAt(s.x, s.z, trunkR, trunkR, rot, trunks, seatRef - 0.25, trunkTop);
+            const trunkR = SCENERY ? 0.76 * sc : (TRUNK_BASED ? 0.30 * sc * 0.9 : 0.25 * sc * 0.9);
+            solidAt(s.x, s.z, trunkR, trunkR, TRUNK_BASED ? 0 : rot, trunks,
+              TREES2 ? seatRef - 0.25 : gy - 0.06, trunkTop);
             solids++;
             if (TREES2 && tbb) {
               parts = [];
@@ -2043,14 +2102,31 @@
           }
           ti++;
         } else {
-          dummy.position.set(s.x, reliefAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
-          dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
-          // the whole rock: a 1.6 x 1.4 box under `scale` (0.8-1.5), so 1.3-2.4 m
-          // of boulder standing 1.2-1.65 m proud — well over physics.js's 0.45
-          // STEP_UP, i.e. a thing you go around, not over.
-          const rockY = reliefAt(s.x, s.z) - 0.06;
-          solidAt(s.x, s.z, 0.8 * scale, 0.7 * scale, rot, rocks, rockY, rockY + 1.1 * scale);
-          solids++;
+          if (SMALL_ROCK && SMALL_ROCK !== 1) {
+            // SMALL FRACTURED FIELD STONE — 0.4-0.7 m across, squashed,
+            // sitting partly IN the soil, standing at most ~0.35 m proud.
+            // That ceiling is not taste: physics.js's STEP_UP is 0.45, so a
+            // stone under it is something you walk over. NO COLLIDER for
+            // exactly that reason — an AABB on a thing you step over is a
+            // snag, not a landmark. (`solids` therefore falls by one per
+            // stone; CBZ.solidityAudit() reports it and the drop is the
+            // boulders leaving, not the world going soft.)
+            const rs = scale * SMALL_ROCK;               // geo radius 0.8 -> 0.19..0.36 m
+            const halfY = 0.8 * rs * 0.62;
+            dummy.position.set(s.x, reliefAt(s.x, s.z) + halfY * 0.55, s.z);
+            dummy.rotation.set((CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8821) : 0.5) * 0.7 - 0.35, rot, 0);
+            dummy.scale.set(rs, rs * 0.62, rs);
+            dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
+          } else {
+            dummy.position.set(s.x, reliefAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
+            dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
+            // the whole rock: a 1.6 x 1.4 box under `scale` (0.8-1.5), so 1.3-2.4 m
+            // of boulder standing 1.2-1.65 m proud — well over physics.js's 0.45
+            // STEP_UP, i.e. a thing you go around, not over.
+            const rockY = reliefAt(s.x, s.z) - 0.06;
+            solidAt(s.x, s.z, 0.8 * scale, 0.7 * scale, rot, rocks, rockY, rockY + 1.1 * scale);
+            solids++;
+          }
           if (V2) {
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8819) : 0.5;
             const g = 0.42 + hs * 0.22;                      // grey with a warm-brown hint

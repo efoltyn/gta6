@@ -797,18 +797,30 @@
       if (!N) return;
 
       // unit geometries (base at y=0 so per-instance Y-scale grows upward)
-      const trunkGeo = new THREE.CylinderGeometry(0.18, 0.36, 1, 5);
-      trunkGeo.translate(0, 0.5, 0);
-      // broadleaf crown = squashed icosahedron; conifer crown = a 2-cone stack
-      // merged into one geo. Both crowns ride their own InstancedMesh, but we
-      // only need ONE crown IM if we pick a single crown geo — to keep it to 2
-      // draw calls total we use the round icosahedron for broadleaf and a tall
-      // cone for conifers, selected per-instance by SCALING a shared crown geo
-      // would distort; instead bake BOTH into one merged crown atlas is overkill
-      // here, so we render conifers' crowns by reusing the icosahedron stretched
-      // tall+narrow (reads as a rounded evergreen) — keeps it at 2 draw calls.
-      const crownGeo = new THREE.IcosahedronGeometry(0.6, 0);
-      crownGeo.translate(0, 0.6, 0);
+      // ONE TREE GRAMMAR (world/treeaudit.js §2) + roots baked into the bole.
+      const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo);
+      const trunkGeo = (CBZ.treeTrunkGeo
+        ? CBZ.treeTrunkGeo({ rTop: 0.18, rBase: 0.36, h: 1, seg: 5, roots: 3, spread: 2.3, site: "island" })
+        : (function () { const g = new THREE.CylinderGeometry(0.18, 0.36, 1, 5); g.translate(0, 0.5, 0); return g; })());
+      // THE OLD COMMENT HERE WAS AN APOLOGY, AND IT IS WORTH KEEPING AS A
+      // RECORD: "we render conifers' crowns by reusing the icosahedron
+      // stretched tall+narrow (reads as a rounded evergreen) — keeps it at 2
+      // draw calls." It did not read as an evergreen; it read as an egg. The
+      // real constraint was never the geo, it was the SHARED InstancedMesh —
+      // both species ride one crown IM, so they must share one geometry.
+      // A two-whorl cone stack solves that honestly: stretched tall and
+      // narrow it IS a fir, squashed wide it IS a broadleaf, because a cone
+      // stack survives anisotropic scaling and a ball does not. Same 2 draw
+      // calls, same unit envelope (y[0,1.2], radius 0.6) so every placement
+      // number below and the whole treeaudit chain are untouched.
+      const crownGeo = GRAM
+        ? CBZ.treeCrownGeo({ tiers: 2, r: 0.6, h: 1.2, seg: 6, taper: 0.68, site: "island" })
+        : (function () {
+            const g = new THREE.IcosahedronGeometry(0.6, 0);
+            g.translate(0, 0.6, 0);
+            if (CBZ.treeGrammarLegacy) CBZ.treeGrammarLegacy("island");
+            return g;
+          })();
 
       const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); trunkMat._shared = true;
       const crownMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); crownMat._shared = true;

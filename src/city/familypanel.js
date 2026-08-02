@@ -263,12 +263,57 @@
       for (var i = 0; i < fam.members.length; i++) {
         var m = fam.members[i];
         if (!m) continue;
-        c2.appendChild(row((m._role === "kid" ? "" : "") + (m.name || "Someone") + " — " + (m.famRole || m._role || "") + (m.dead ? " (deceased)" : "")));
+        c2.appendChild(row((m.name || "Someone") + " — " + (m.famRole || m._role || "") + (m.dead ? " (deceased)" : "")));
+        // WHAT THEY ARE DOING, not just that they exist. city/kinship.js drives
+        // the visible beats (a walk together, a greeting, a mourning kneel) and
+        // answers for them in one line; this panel was the only window onto the
+        // family and it could only ever say who was on the roster.
+        var doing = liveStatus(m);
+        if (doing) c2.appendChild(row("   " + doing, "color:#9fd6a0;font:12px system-ui;padding:0 0 3px;"));
       }
     } else {
       c2.appendChild(row("No household record yet.", "color:#8a93a8;"));
     }
     out.push(c2);
+    return out;
+  }
+
+  // one live line per person — derived, never stored. Order matters: the most
+  // urgent thing they are doing wins.
+  function liveStatus(m) {
+    if (!m || m.dead) return null;
+    if (m.kidnapped) return "taken — being held";
+    if (m._kinGrief) return "kneeling beside somebody they lost";
+    if (m._propSeat) return "at the table";
+    if (m._kinBeat) return "talking with " + ((m._kinBeat.other && m._kinBeat.other.name) || "someone");
+    if (CBZ.kinshipWithLine) { var w = CBZ.kinshipWithLine(m); if (w) return w.toLowerCase(); }
+    if (m.state === "flee" || (m.alarmed || 0) > 0) return "frightened";
+    if (m._kidInside || (m.enterT || 0) > 0) return "indoors";
+    return null;
+  }
+
+  // ---- AROUND TOWN: the street life the family stack finally has ------------
+  // Marriages, cliques and kin edges used to be readable ONLY as a roster. The
+  // city walks them now, so the panel says who is out with whom right this
+  // second — the same query the dossier's "With" row asks, over the crowd.
+  function renderStreet() {
+    var out = [], peds = CBZ.cityPeds || [], seen = [], n = 0;
+    for (var i = 0; i < peds.length && n < 5; i++) {
+      var p = peds[i];
+      if (!p || p.dead || !p._kinUnit || seen.indexOf(p._kinUnit) >= 0) continue;
+      seen.push(p._kinUnit);
+      var names = [];
+      for (var k = 0; k < p._kinUnit.members.length; k++) {
+        var q = p._kinUnit.members[k];
+        if (q && q.name) names.push(q.name);
+      }
+      if (names.length < 2) continue;
+      var kindWord = p._kinUnit.kind === "couple" ? "together"
+        : p._kinUnit.kind === "family" ? "family, out walking" : "out with friends";
+      out.push(row(names.join(" & ") + " — " + kindWord));
+      n++;
+    }
+    if (!out.length) out.push(row("Nobody's out together nearby.", "color:#8a93a8;"));
     return out;
   }
 
@@ -312,6 +357,10 @@
     panelBody.appendChild(sectionTitle("Your family", "#9fd6a0"));
     var yf = renderYourFamily(deadSet);
     for (var i = 0; i < yf.length; i++) panelBody.appendChild(yf[i]);
+
+    panelBody.appendChild(sectionTitle("Out on the street", "#8fc1ff"));
+    var st = renderStreet();
+    for (var s = 0; s < st.length; s++) panelBody.appendChild(st[s]);
 
     panelBody.appendChild(sectionTitle("Dynasties", "#e8c84a"));
     var dynasties = computeDynasties(edges, deadSet);

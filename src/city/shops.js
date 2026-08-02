@@ -315,7 +315,9 @@
         // a WEARABLE shows its slot + drip value so its status contribution is
         // legible at a glance.
         const slot = wear ? slotOf(it) : null;
-        const tagN = kind === "food" ? "+" + (meta.heal || 0) + "hp"
+        // a food row reads its FILL, and it is food not hp — the old "+42hp"
+        // label named the wrong meter entirely (heal goes into g.hunger).
+        const tagN = kind === "food" ? "+" + (meta.heal || 0) + " food"
           : (meta.gun ? "gun" + ((meta.dmg || 0) > 1 ? " · " + meta.dmg + " dmg" : "") : (wear ? (slot ? slot + " · " : "") + "+" + (meta.drip || 0) + " drip" : meta.tag));
         const worn = wear && isWorn(it);
         const line = qty > 1 ? (fmt$(each) + " ea · " + fmt$(each * qty) + "/×" + qty) : fmt$(each);
@@ -505,9 +507,15 @@
       const it = econ.ITEMS[k]; if (!it) continue;
       // don't offer to sell something you're currently WEARING (flex stays on)
       if ((kind === "jewelry" || kind === "pawn") && isWorn(k) && inv[k] <= 1) continue;
-      // pawn buys anything; jewelry buys wearables; others buy their own tags
+      // pawn buys anything; jewelry buys wearables; others buy their own tags.
+      // A GROCER/DINER BUYS YOUR GAME: wild meat and a fresh catch are tag
+      // "food" now (city/wildlife.js — they are things you EAT), so without
+      // this row a hunter could only fence a boar's meat at a pawn shop, which
+      // is nobody's idea of where venison goes. `wild` keeps it to what you
+      // harvested — the counter does not buy back your half-eaten burger.
       const ok = kind === "pawn" || (kind === "jewelry" && it.tag === "wearable") ||
-        (kind === "electronics" && it.tag === "valuable") || it.tag === "valuable";
+        (kind === "electronics" && it.tag === "valuable") || it.tag === "valuable" ||
+        (kind === "food" && it.tag === "food" && it.wild);
       if (ok) out.push({ name: k, n: inv[k] });
     }
     return out;
@@ -561,9 +569,17 @@
     if (openLot.kind === "guns" && CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("ironclad", total * 0.5);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (openLot.kind === "food" && meta.heal) {
-      for (let k = 0; k < n; k++) { g.hunger = Math.min(100, (g.hunger || 0) + meta.heal); if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + Math.round(meta.heal * 0.4)); }
-      if (meta.boost) CBZ.player._boost = 12;
-      CBZ.city.note((n > 1 ? n + "× " : "Ate ") + it + " (+" + (meta.heal * n) + " food)", 1.6);
+      // YOU BUY FOOD, THEN YOU EAT IT. This used to write g.hunger directly —
+      // a second hunger writer beside city/hunger.js — and swallow the whole
+      // order in one frame, so buying 3 burgers left you with 0 burgers. Now
+      // the counter hands you the goods and you eat ONE at the counter through
+      // the ONE eat path (chew beat, sfx, note and all); the rest ride in your
+      // bag with a real icon and a number key, which is the whole point of
+      // carrying food at all.
+      econ.add(it, n);
+      const ate = CBZ.cityEat ? CBZ.cityEat(it) : false;
+      if (n > 1) CBZ.city.note((n - (ate ? 1 : 0)) + "× " + it + " in the bag", 1.4);
+      else if (!ate) CBZ.city.note("Bought " + it, 1.4);
     }
     else if (meta.gun || meta.melee) { econ.add(it, 1); CBZ.cityGiveWeapon(it); }
     else if (meta.rounds) { CBZ.cityAddAmmo(meta.rounds * n); CBZ.city.note("+" + (meta.rounds * n) + " ammo", 1.4); }

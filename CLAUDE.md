@@ -5046,6 +5046,187 @@ the "no testing just building" waves: the gate was red and nobody looked. **Do
 not re-pin a ratchet upward to make it green.** The two GOLDEN rows are stale
 CALIBRATION and should be recalibrated deliberately (`--calibrate`); the other
 two are real drift and want a fix.
+## THE 2026-07-28 WILDERNESS WAVE — eight builders, one merge
+
+Seven Opus + one Fable builder in parallel, disjoint file territories,
+orchestrator merged the seams (index.html tags, worldstate ledger lines,
+cross-territory one-liners) and syntax-gated per landing. Shipped without a
+gate run (owner's call, again: "no testing just building") — so EVERY ratchet
+below is NOT YET PINNED: whoever runs each audit first writes the number in
+(do not repeat the `propUseAudit` mistake of pinning a guess).
+
+- **THE ONE TREE GRAMMAR** — `CBZ.treeCrownGeo/treeTrunkGeo` (§2 of
+  `world/treeaudit.js`). OWNER: the icosahedron-crown thin-trunk tree "sucks";
+  the two-cone tree "looks nice" but "needs more roots... and needs to replace
+  the other trees in the game." biome_forest's beloved two-cone was SOLVED
+  back into ratios (taper 0.70 / hRatio 0.887 / bite 0.274 — `{tiers:2}`
+  reproduces it, `{tiers:3}` the wildnature/snow conifer), and every planter
+  (wildnature, biome_forest, biome_snow, continent backcountry, expansion
+  islands, props street planters, resources harvest nodes) now draws it, with
+  a rooted bole — butt swell + 3-5 root spurs dipping below y=0 — MERGED into
+  the trunk geo: zero extra draw calls, and the connection law's seat check
+  gets EASIER, never harder. Species variety is tier count/taper/palette now,
+  never an icosahedron. Wilderness geometric boulders (2100 icosahedra) are
+  dead-drawn off (`WILD_ROCK_SCATTER` false — colour draws preserved so grass
+  never re-tints; the DESERT_ROCK_SCATTER precedent); backcountry box-boulders
+  and forest dodecahedron rocks became sub-STEP_UP fractured stones via
+  `CBZ.makeRock`, colliders removed with them. Flags `TREES_ONE_GRAMMAR` ·
+  `TREES_ROOTS` · `WILD_SMALL_ROCKS`. Ratchet: `CBZ.treeGrammarAudit()`.
+  THROWABLE ROCKS — deliberately skipped, seam recorded: `combat.js:1294`
+  hard-routes EVERY `tag:"throwable"` through `throwGrenade` → `detonate()`,
+  so an honest Rock needs a noBoom lob variant + a blunt-impact path first.
+- **EVERY KEYBOARD VERB HAS A THUMB** — `CBZ.touchAudit()` (`systems/touch.js`
+  / `touch_vehicle.js` / `camera.js`). The B-2 shipped four seams *labelled*
+  "the touch layer wires these to pills" with ZERO callers — the bay could not
+  open on an iPad and no counter said so. Tanks matched neither touch context
+  (`P.driving` set, `P._vehicle` not) — you could board one and never get out.
+  New `armor` + `mount` contexts, aux rail, heli lateral-cyclic / wing-rudder
+  hold pairs. Third person: pinch-zoom was a NO-OP city-wide (the CAM_TP_V2
+  boom never read `zoomTarget`) — touch-only `tpTrim` scales boom+height
+  together and stands down during ADS; flick-accel drag (identity while
+  scoped), release glide, recenter pills. `militaryvehicles.js` was the LAST
+  `camRecenterSuspended` holdout. Ratchet: `touchAudit().uncovered` may only
+  go DOWN; `noHook` names dropped seams so a lost diff can't launder as
+  covered. Flags `TOUCH_AIRCRAFT_V2` · `TOUCH_TP_CAMERA_V2` and seven more.
+- **KINSHIP HAS BODIES** — `city/kinship.js` + spatial pairing in `social.js`.
+  OWNER: "family and friends... coded mathematically and not in reality and
+  not artistically." The sharpest find: social.js married ped `i` to ped
+  `i+1` BY ARRAY SLOT — half the city's couples were strangers hundreds of
+  metres apart; pairing/cliques are now nearest-within-55/42 m with the rng
+  sequence preserved in draw order AND count. kinship.js steers bodies the
+  crowd already runs (companions.js pattern): bonded walkers (leader routes,
+  slowest sets pace, adult+child hand-in-hand), greetings between people who
+  know each other (`kinshipKnows` = the ONE relation answer — familytree >
+  household > social kin > friends > cliqueId, its FIRST reader > same-trade
+  hash), grief (kin within 30 m RUN to the body, kneel, then cityScare takes
+  them — the hold releases BEFORE scare because scare refuses controlled
+  actors), and family.js homecomings (kids orbit, spouse holds conversation
+  distance, dinners through `propSeatNpc` — which no family had ever called).
+  Yield is absolute: `claimed()` re-tests ~25 conditions every tick. Flags
+  `KINSHIP_LIFE/_WALK/_GREET/_GRIEF`. Ratchet: `CBZ.kinshipAudit()` —
+  `strandedSpeed` and `strayHolds` are hard zeros.
+- **DIALOGUE IS TWO CHOICES** — `city/dialogue.js`. OWNER: "dialogue with two
+  choices... there's a third and a fourth choice which are unsaid — punch,
+  and walk away. The two-choice thing already exists perfectly with hijacking
+  or boarding a plane." Every talkable ped: their LINE + exactly two answers
+  in the BOARD/HIJACK card grammar; punch = combat claims them instantly
+  (remembered); walking away = they shrug at your back. THE POOL-REUSE RULE:
+  wherever the card's gated pool already holds a real option (medic patch-up,
+  dealer Score, street tribute), choice A fires THAT option's own onSelect —
+  handshakes get re-skinned, economies never re-authored. Missions come from
+  people: crew/garrison peds pitch the exact `cityOrders` contract; accepting
+  makes a CONTACT who may text/call later (hard caps; strangers never ring;
+  persisted via worldstate's add-only `w.cityContacts`). interactions.js
+  gains `registerVerbCard`/`hasOption`/`rows.note` — the dualRideRows
+  contract opened as a registry. Opener prio map: 72 street-offer / 74 power
+  intercept / 80 dialogue / 85+ restrained. `kinshipBefriend` was deliberately
+  NOT stubbed — kinship's graph never reads player pairs, and a hook with no
+  consumer is a stat fiction; the fallback (`friendOfPlayer` + relShift
+  warmth) is the honest integration. Cop-challenge adoption is SKETCHED in
+  dialogue.js (ARREST_ARC territory) — one registration when its wave comes.
+  Flags `DIALOGUE_TWO_CHOICE/_GIVER_ROUTE/_CONTACTS`. Ratchet:
+  `CBZ.dialogueAudit()` — `legacyTalkPaths` (5) may only go DOWN.
+- **THE HUNT PAYS IN MEALS** — `wildlife.js` meat rows are `tag:"food"` with
+  `heal` SOLVED, not typed: `26·(meatValue/12)^0.5·scale^0.45` clamped 10-55,
+  so a future species is edible for free (boar = Pork 27 × yield). The root
+  bug was ONE WORD: meat registered `tag:"valuable"`, locking it out of
+  cityEat, the hotbar's USABLE_TAGS and the pocket card at once. Eating is a
+  1.1-2 s chew with PROGRESSIVE fill so hud's existing shank row IS the
+  progress bar — no new HUD (`FOOD_EAT_V2`, `city/hunger.js`). shops.js's
+  food branch was a SECOND HUNGER WRITER that swallowed the whole order in
+  one frame (buy 3 burgers, carry 0) — now buys stock, eats one at the
+  counter through the one path. Grocers sell groceries (exactly 9 food rows —
+  the menu slices at 9; a 10th would be a priced row nobody could buy).
+  Medkit/Body Armor/Ammo Box were INERT once carried (effects only fired at
+  the counter) — `cityUseItem` gives them their verb. Hotbar item tail capped
+  at 6 so six meats never push the rifle off the keys. Ratchets:
+  `CBZ.foodAudit()` · `CBZ.itemVerbAudit()` (`inert` 0, `sellOnly` only
+  DOWN; Lockpick/Crowbar/Burner Phone named there as stat-fiction
+  candidates, not silently deleted).
+- **EVERY ITEM IS A PHOTOGRAPH OF ITS ASSET** — `city/itemassets.js` +
+  `city/itemicons.js`. OWNER: "guns are a tiny actual gun in the icon but all
+  other things are retarded... we have so many assets that can be shrunk, and
+  if it isn't an asset that can be shrunk why is it a thing that can be an
+  icon — make the asset then." A gun icon was NEVER a drawing:
+  `weapon_thumbnails.js` photographs `buildActorWeapon` offscreen; everything
+  else wore a 12×12 sprite (and gun chips were 42×28 beside square 30×30 —
+  two systems even when both are good). `CBZ.itemAsset(name)`: 51 builders —
+  guns REUSE buildActorWeapon, chest/briefcase/backpack/melee MOVED out of
+  inventory.js byte-identically, 47 authored (rolled tied hides with species
+  tint, bone-in cuts, fish/fillet, produce, jewelry, clothing...) — real
+  metres, base y=0, long axis along Z (the diagonal is what keeps a rifle
+  readable in a square). itemicons.js bakes them under weapon_thumbnails'
+  EXACT light rig (copied value for value — that rig is what the owner
+  already approved), ortho-framed off projected AABB corners at 1/1.10 fill.
+  `makePhysicalDrop` uses the same registry — every non-gun drop in the game
+  was a rucksack; a dropped hide is a hide now. Sprites remain ONLY as the
+  no-GL/flag-off degrade. Kind classification (`itemKind`) and tint
+  (`itemTone`) each live in ONE place; a species added tomorrow is drawn for
+  free. Flags `ITEM_ICONS_V2` · `ITEM_ICONS_RENDERED`. Ratchets:
+  `CBZ.itemIconAudit()` (`generic` and `assetless` structurally 0;
+  `spriteFallback` REPORTED, correct-nonzero where GL is absent) ·
+  `CBZ.itemAssetAudit()`.
+- **A TAMED ANIMAL IS A COMPANION** — `CBZ.petFollow` in `wildlife_tame.js`.
+  OWNER: "they should stick with you... sit in front of you and look at you
+  and follow you. I think I already built that logic [for dogs]." He had —
+  TWICE, in parallel: this file and dogs.js each ran a private heel. ONE
+  brain now (locomotion seam per the predatorHunt pattern; `stayKey` names
+  the field each world already writes, so nothing mirrors state). Stand
+  still ~2 s → the companion ARCS to your front (tangent-refused no-go ring —
+  it can never clip through you), folds into a sit SOLVED from the rig (pitch
+  is the inequality `θ ≤ atan(legH·0.85/(span·0.95))`; front feet planted,
+  hind pressed 0.4-5.4 cm INTO the ground across dog/boar/horse/elephant/
+  rabbit — no species table), and WATCHES you — head pitch is the real
+  arctangent (a terrier looks steeply up, a giraffe down), and a seated
+  companion turns to watch what you AIM at. Heel is continuous pace matching
+  (measured 0 state flips vs the old band-stop's every-few-frames stutter);
+  catch-up past 70 m only through `npcTransitionSafe`. dogs.js ADOPTS via a
+  `dogMove` seam (its aggro/bite/death untouched). companions.js carried the
+  wave's best bug: `disposition()` tested `id === "dog"` but dogs register
+  `stray_dog` — the row NEVER matched, every tamed dog was skittish, and
+  companions.js drove it AWAY from the exact fight dogs.js drove it INTO.
+  The death seam: `wildlifeDeathPhysics` hands a seated pet's bones back via
+  `petRelease` BEFORE the ragdoll solver reads the body. Flag
+  `PET_AFFECTION`. Ratchet: `CBZ.companionAudit()` — `legacyFollowPaths` 0,
+  `adopted` (2) may only go UP.
+
+- **A WOUND IS A LICENCE, AND A CHARGER WHEELS** — `wildlife.js` +
+  `systems/predator.js`. OWNER: "wild boars and predators SHOULD be attacking
+  ... animals aren't very good at attacking right now." Three measured
+  arithmetic faults, not taste: (1) **the follow-through** — `h.struck` fired
+  from inside the strike callback and left `rush` that same frame, so
+  `creatureFight` never ran again for that actor: `_atkAnim` pinned mid-swing
+  forever and EVERY SUBSEQUENT CHARGE DEALT ZERO DAMAGE (boar: 42,255
+  stranded swing-frames over 30 harness trials → 0); (2) **six species could
+  never catch a sprinting player** (physics.js's speed comment is stale by
+  two tunes — READ CONSTANTS, NOT COMMENTS; a moose closed at 0.54 u/s
+  against a 4.5 s rush timeout) — the `closeK` ARCH column floors commit
+  speed off `predatorQuarrySpeed()`, capped at 1.35× the species' own, and
+  `lunge` declares 0 so the shark is byte-identical; (3) **the wheel** —
+  every rush exit went to `disengage`, one hit then 12-18 s of nothing; a
+  connect now spends a PASS (a miss never buys one), each pass falls ×0.82
+  because a turn inside your own length cannot rebuild charging speed, and
+  the menace gauge exempts mid-bout wheels while staying player-scoped.
+  Defence is a LICENCE on the shared brain, never a parallel aggro flag:
+  a wound buys `_defendT` seconds of the identical predatorHunt grammar —
+  `cityWildlifeHit` is the ONE grant point (every damage class already
+  funnels there); rout below 0.32 hp is an honest bolt; a mother with a calf
+  inside 26 u has no threshold and no patience; cornered prey gets one
+  nerve-hashed kick — `landWalk` had always returned "did I move" and
+  NOBODY HAD EVER READ IT: that boolean is the no-escape-bearing test.
+  `predatorEats` splits diet from danger (a bison was stalking whitetail,
+  killing and FEEDING at the carcass — horns are not a diet). Hoofed species
+  (bighorn/caribou/zebra/giraffe/white stag) all fell through to style
+  `'bite'` — a hoof animated as a mouth; gore/ram now leave `bodyBite` tusk
+  crescents and the gore anim hooks SIDEWAYS on alternating passes.
+  `wildlife_shark.js` PAYS THE predatorKit DEBT this file named (the `meg`
+  branch is DELETED — "circles twice as long, holds twice as long" IS the
+  kit's power laws; worst divergence the two documented deliberate ones).
+  Tamed exemption holds at three levels; bones never written (petFollow owns
+  them). Flags `WILDLIFE_FIGHT_BACK` · `WILDLIFE_ATTACK_V2` ·
+  `PREDATOR_CLOSE_SPEED` · `PREDATOR_WHEEL` · `PREDATOR_FOLLOW_THROUGH` ·
+  `SHARK_KIT`. Ratchets: `predatorAudit` 0 legacy / **11** adopted;
+  `CBZ.wildlifeDefenseAudit()` — `legacyAggroPaths` structurally 0.
 
 ## Hard rules that keep the game correct
 

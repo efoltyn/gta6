@@ -2902,7 +2902,9 @@
     for (const name in inv) {
       if ((inv[name] || 0) > 0 && !ITEMS[name] && out.indexOf(name) < 0) out.push(name);
     }
-    return out;
+    // the bar's keys are 1-9 and the guns come first; a hunter with six kinds
+    // of meat must not push his rifle off the keyboard.
+    return out.slice(0, 6);
   }
   function cityHotbar() {
     if (CBZ.game.mode !== "city") return [];

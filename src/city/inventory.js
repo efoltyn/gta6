@@ -83,7 +83,10 @@
   // no shop/economy file needs an edit (ITEMS is exported by reference).
   function registerChestItem() {
     const IT = items();
-    if (IT && !IT.Chest) IT.Chest = { value: CHEST_COST, tag: "tool" };
+    // `place:true` is what stops a carried chest being an inert box in the bag
+    // — it is the field city/itemicons.js reads to give it the PLACE verb.
+    if (IT && !IT.Chest) IT.Chest = { value: CHEST_COST, tag: "tool", place: true };
+    else if (IT && IT.Chest && !IT.Chest.place) IT.Chest.place = true;
   }
 
   // engine weapon id -> city item name (economy.js ITEMS `gun` uses a couple of
@@ -96,37 +99,34 @@
     return id;
   }
 
-  const ICON = {
-    // weapons / tools
-    Pistol: "", Revolver: "", "Desert Eagle": "", SMG: "", Uzi: "",
-    Shotgun: "", Rifle: "", "AK-47": "", LMG: "", Sniper: "",
-    Bazooka: "", "Rocket Launcher": "", "Grenade Launcher": "", Taser: "", Bat: "", Knife: "",
-    Grenade: "", "Ammo Box": "", Medkit: "", "Body Armor": "",
-    Lockpick: "", Crowbar: "", "Burner Phone": "", Chest: "",
-    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
-    // food / drugs
-    Burger: "", Hotdog: "", "Pizza Slice": "", Soda: "", Fries: "",
-    "Energy Drink": "", Weed: "", Coke: "", Meth: "", Pills: "",
-    // valuables
-    Wallet: "", Phone: "", Laptop: "", "Cash Stack": "", "Gold Bar": "",
-    "Briefcase of Cash": "",
-  };
-  const TAG_ICON = { weapon: "", food: "", drug: "", wearable: "", valuable: "", throwable: "", tool: "", ammo: "", resource: "" };
-  // GENERIC is the "nobody ever drew this one" square. Note that EVERY glyph in
-  // both tables above is an empty string today — commit ea61ace ("Remove every
-  // emoji from the game") stripped the pictograms and left the tables as husks
-  // — so iconFor() currently answers GENERIC for literally every non-gun item
-  // in the catalog. Guns are the exception and the model to copy: they go
-  // through weaponFace() -> CBZ.weaponThumbnail, a real render of the same
-  // mesh that is already in the player's hands. See CBZ.itemIconAudit().
-  const GENERIC = "▪";
-  function iconGlyph(name) { return ICON[name] || TAG_ICON[itemTag(name)] || ""; }
-  function iconFor(name) { return iconGlyph(name) || GENERIC; }
+  // ---- ITEM FACES ---------------------------------------------------------
+  // This module used to carry its OWN name->glyph table (one of four in the
+  // game), and every entry in it had been emptied to "" by the repo-wide emoji
+  // strip — so `ICON[name] || TAG_ICON[tag] || "▪"` resolved to "▪" for EVERY
+  // item you have ever carried. That is the owner's "super unclear icons".
+  // city/itemicons.js draws the real thing from the item's KIND (so a pelt
+  // registered at runtime by a species added tomorrow is drawn too, in that
+  // animal's own colour). The "▪" stays only as the flag-off fallback.
+  function iconFor(name) { return "▪"; }
+  function itemFace(name, cls) {
+    if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, items()[name], cls); if (h) return h; }
+    return "<span class='ic'>" + iconFor(name) + "</span>";
+  }
+  function itemTitle(name, count) {
+    if (CBZ.itemTip) { try { return CBZ.itemTip(name, items()[name], count); } catch (e) {} }
+    return String(name);
+  }
+  // A GUN IN A WEAPON SLOT AND A GUN IN AN ITEM SLOT MUST BE THE SAME PICTURE.
+  // This used to call weapon_thumbnails.js directly — a second offscreen
+  // renderer with its own 180x100 frame — so the grid could show the same
+  // pistol two ways depending on which store held it. itemicons.js photographs
+  // everything now, guns included; weaponThumbnail stays as the degrade.
   function weaponFace(id, name, className) {
     let src = "";
-    try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {}
+    try { if (CBZ.itemIconGun) src = CBZ.itemIconGun(id || name); } catch (e) {}
+    if (!src) { try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {} }
     return src ? "<img class='" + (className || "gunThumb") + "' src='" + src + "' alt=''>"
-      : "<span class='ic'>" + iconFor(name) + "</span>";
+      : itemFace(name, "");
   }
 
   // ============================================================
@@ -304,62 +304,75 @@
     if (!geo) { geo = new THREE.BoxGeometry(sx, sy, sz); geo._shared = true; DROP_GEO.set(key, geo); }
     return geo;
   }
-  function cylGeo(r, len) {
-    const key = "c|" + r + "|" + len;
-    let geo = DROP_GEO.get(key);
-    if (!geo) { geo = new THREE.CylinderGeometry(r, r, len, 10); geo._shared = true; DROP_GEO.set(key, geo); }
-    return geo;
-  }
+  // (the cylinder helper this block used to carry went with the four models it
+  // served — city/itemassets.js has its own, and it caches more shapes than a
+  // drop path ever needed.)
   function propBox(parent, sx, sy, sz, mat, x, y, z, rx, ry, rz) {
     const m = new THREE.Mesh(boxGeo(sx, sy, sz), mat);
     m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
     m.castShadow = true; parent.add(m); return m;
   }
-  function propCyl(parent, r, len, mat, x, y, z, rx, ry, rz) {
-    const m = new THREE.Mesh(cylGeo(r, len), mat);
-    m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
-    m.castShadow = true; parent.add(m); return m;
-  }
+  // what the degrade crate is painted with. The rest of this palette went to
+  // city/itemassets.js with the models that used it.
   const PM = {
     case: sharedMat("case", 0x3a2719), trim: sharedMat("trim", 0x17191d),
-    metal: sharedMat("metal", 0xb5a56a), cloth: sharedMat("cloth", 0x354553),
-    cloth2: sharedMat("cloth2", 0x1f2b35), leather: sharedMat("leather", 0x241a14),
-    steel: sharedMat("steel", 0x929ba5), wood: sharedMat("wood", 0x7a4d2a),
-    paper: sharedMat("paper", 0xd8d0ad),
+    cloth: sharedMat("cloth", 0x354553), steel: sharedMat("steel", 0x929ba5),
   };
 
-  function makeBriefcase(small) {
-    const g0 = new THREE.Group(), k = small ? 0.72 : 1;
-    propBox(g0, 0.82 * k, 0.38 * k, 0.22 * k, PM.case, 0, 0.22 * k, 0);
-    propBox(g0, 0.84 * k, 0.045 * k, 0.24 * k, PM.trim, 0, 0.22 * k, 0);
-    propBox(g0, 0.24 * k, 0.05 * k, 0.07 * k, PM.trim, 0, 0.46 * k, 0);
-    propBox(g0, 0.05 * k, 0.16 * k, 0.06 * k, PM.trim, -0.12 * k, 0.42 * k, 0);
-    propBox(g0, 0.05 * k, 0.16 * k, 0.06 * k, PM.trim, 0.12 * k, 0.42 * k, 0);
-    propBox(g0, 0.07 * k, 0.08 * k, 0.025 * k, PM.metal, -0.18 * k, 0.23 * k, -0.125 * k);
-    propBox(g0, 0.07 * k, 0.08 * k, 0.025 * k, PM.metal, 0.18 * k, 0.23 * k, -0.125 * k);
+  // ---- THE THING ON THE PAVEMENT IS THE THING ------------------------------
+  // OWNER (2026-07-28): "if it isn't an asset that can be shrunk, why is it a
+  // thing that can be an icon? Make the asset then." Those assets live in
+  // city/itemassets.js now, and it is the SAME registry city/itemicons.js
+  // photographs for the slot — so a Boar Hide in your bag and a Boar Hide you
+  // just threw on the ground are one model instead of two guesses.
+  //
+  // What that fixed here: every non-gun, non-cash drop in this game was a
+  // BACKPACK. You dropped a hide, a fillet, a gold bar, a bottle of pills, and
+  // a rucksack appeared on the kerb. The four models below MOVED into the
+  // registry (byte-identical dimensions and palettes, so a saved chest is the
+  // chest it always was); what is left here is the degrade, and it is
+  // deliberately a plain crate — a fallback that looks like a real asset is how
+  // you stop noticing the registry never loaded.
+  function assetProp(name, row, kind, opts) {
+    if (!CBZ.itemAssetPickup) return null;
+    let o = null;
+    if (kind || opts) { o = opts ? Object.assign({}, opts) : {}; if (kind) o.kind = kind; }
+    let m = null;
+    try { m = CBZ.itemAssetPickup(name || null, row || null, o); } catch (e) { m = null; }
+    // itemAssetPickup seats its asset ON y=0, so the drop sites below must not
+    // ALSO apply their old "lift a gun 18 cm off the deck" fudge — that fudge
+    // existed because buildActorWeapon's origin is a hand, not a floor.
+    if (m) m.userData._assetSeated = true;
+    return m;
+  }
+  function crateDegrade(w, h, d, mat) {
+    const g0 = new THREE.Group();
+    propBox(g0, w, h, d, mat || PM.case, 0, h * 0.5, 0);
+    propBox(g0, w * 1.02, h * 0.12, d * 1.02, PM.trim, 0, h * 0.5, 0);
     return g0;
+  }
+  function makeBriefcase(small) {
+    return assetProp("Briefcase of Cash", null, "briefcase", { small: !!small }) ||
+      crateDegrade(small ? 0.59 : 0.82, small ? 0.27 : 0.38, small ? 0.16 : 0.22, PM.case);
   }
   function makeBackpack() {
-    const g0 = new THREE.Group();
-    propBox(g0, 0.56, 0.66, 0.28, PM.cloth, 0, 0.36, 0);
-    propBox(g0, 0.50, 0.23, 0.06, PM.cloth2, 0, 0.58, -0.17, -0.18, 0, 0);
-    propBox(g0, 0.38, 0.22, 0.09, PM.cloth2, 0, 0.22, -0.19);
-    propBox(g0, 0.07, 0.54, 0.05, PM.leather, -0.20, 0.37, 0.17, 0, 0, -0.10);
-    propBox(g0, 0.07, 0.54, 0.05, PM.leather, 0.20, 0.37, 0.17, 0, 0, 0.10);
-    return g0;
+    return assetProp(null, null, "backpack", null) || crateDegrade(0.56, 0.66, 0.28, PM.cloth);
   }
   function makeMelee(name) {
-    const g0 = new THREE.Group(), n = String(name || "").toLowerCase();
-    if (/knife|blade/.test(n)) {
-      propBox(g0, 0.14, 0.06, 0.58, PM.steel, 0, 0.08, -0.20, 0, 0, 0.04);
-      propBox(g0, 0.18, 0.10, 0.34, PM.leather, 0, 0.08, 0.25);
-    } else {
-      propCyl(g0, 0.07, 1.15, /bat/.test(n) ? PM.wood : PM.steel, 0, 0.10, 0, 0, 0, Math.PI / 2);
-      propCyl(g0, 0.095, 0.34, PM.leather, -0.42, 0.10, 0, 0, 0, Math.PI / 2);
-    }
-    return g0;
+    return assetProp(name, null, "melee", null) || crateDegrade(0.16, 0.10, 0.90, PM.steel);
   }
   function makeWeapon(nameOrId) {
+    // The registry's `gun` builder IS this function's old body — buildActorWeapon
+    // unmounted from the hand and given the pistol's ground-visibility nudge —
+    // so the drop and the icon photograph the same object by construction.
+    const a = assetProp(nameOrId, { gun: nameOrId }, "gun", null);
+    if (a) {
+      // Keep the newer ground-weapon contract on the registry wrapper itself.
+      // Physics, pickup QA and NPC-drop replacement inspect the drop root; the
+      // authored child mesh carrying this id is not an equivalent public seam.
+      a.userData.weaponId = String(nameOrId || "sidearm");
+      return a;
+    }
     let model = null;
     try { if (CBZ.buildActorWeapon) model = CBZ.buildActorWeapon(nameOrId); } catch (e) {}
     if (!model) {
@@ -377,13 +390,21 @@
     return model;
   }
   function makePhysicalDrop(payload) {
-    let prop;
+    let prop = null;
     if (payload.weaponId) prop = makeWeapon(payload.weaponId);
     else if (payload.melee) prop = makeMelee(payload.melee);
     else if (payload.cash != null) prop = makeBriefcase((payload.cash | 0) < 250);
-    else if (/^(?:briefcase of cash|cash stack)$/i.test(payload.name || "")) prop = makeBriefcase(false);
-    else if (/^wallet$/i.test(payload.name || "")) prop = makeBriefcase(true);
-    else prop = makeBackpack();
+    else if (payload.name) {
+      // the item ITSELF, from the registry — the line that ends the backpacks.
+      prop = assetProp(payload.name, items()[payload.name] || null, null, null);
+    }
+    if (!prop) {
+      // the two names that always had a hand-picked container keep it, and a
+      // catalog row the registry somehow could not build still gets a bag.
+      if (/^(?:briefcase of cash|cash stack)$/i.test(payload.name || "")) prop = makeBriefcase(false);
+      else if (/^wallet$/i.test(payload.name || "")) prop = makeBriefcase(true);
+      else prop = makeBackpack();
+    }
     prop.userData.transient = true;
     prop.userData._invPhysicalDrop = true;
     return prop;
@@ -400,7 +421,9 @@
       mesh = makePhysicalDrop(payload);
       // A physical gun leaves hand/hip height and falls. Non-gun items retain
       // their old static placement until they gain an honest body contract.
-      mesh.position.set(x, y0 + (physicalGun ? 0.78 : (payload.weaponId || payload.melee ? 0.18 : 0.03)), z);
+      const lift = physicalGun ? 0.78 :
+        (mesh.userData._assetSeated ? 0.02 : (payload.weaponId || payload.melee ? 0.18 : 0.03));
+      mesh.position.set(x, y0 + lift, z);
       mesh.rotation.y = (x * 7 + z * 13) % 6.28;
       root.add(mesh);
     }
@@ -434,7 +457,8 @@
     prop.userData.transient = true; prop.userData._invPhysicalDrop = true;
     const physicalGun = !!(CBZ.weaponPhysics && CBZ.weaponPhysics.drop &&
       (!CBZ.CONFIG || CBZ.CONFIG.WEAPON_GROUND_PHYSICS !== false));
-    prop.position.set(d.x, y + (physicalGun ? 0.72 : 0.18), d.z);
+    const lift = physicalGun ? 0.72 : (prop.userData._assetSeated ? 0.02 : 0.18);
+    prop.position.set(d.x, y + lift, d.z);
     prop.rotation.y = (d.x * 7 + d.z * 13) % 6.28;
     parent.add(prop);
     d.mesh = prop; d._inv2Physical = true;
@@ -695,17 +719,27 @@
   let _chestRoot = null;
   let openChestRef = null;
 
+  // THE CHEST IN YOUR BAG IS THE CHEST ON THE GROUND. Its three boxes moved to
+  // city/itemassets.js's `chest` builder — same dimensions, same palette, same
+  // emissive lift — so the item icon is a photograph of the object you are
+  // about to place, not a drawing of one. `itemAsset` (not `itemAssetPickup`)
+  // because a chest is world-sized already and must not be normalised.
   function buildChestMesh(x, z) {
     const root = arenaRoot(); if (!root) return null;
     const grp = new THREE.Group();
     const y = floorY(x, z);
     grp.position.set(x, y, z);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.8), cmat(0x6b4a2a, { emissive: 0x241505, ei: 0.15 }));
-    body.position.y = 0.3; grp.add(body);
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.2, 0.84), cmat(0x4a3320, { emissive: 0x1a0f04, ei: 0.15 }));
-    lid.position.y = 0.7; grp.add(lid);
-    const latch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.06), cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }));
-    latch.position.set(0, 0.58, 0.44); grp.add(latch);
+    let body = null;
+    if (CBZ.itemAsset) { try { body = CBZ.itemAsset("Chest", null, { kind: "chest" }); } catch (e) { body = null; } }
+    if (body) grp.add(body);
+    else {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.8), cmat(0x6b4a2a, { emissive: 0x241505, ei: 0.15 }));
+      b.position.y = 0.3; grp.add(b);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.2, 0.84), cmat(0x4a3320, { emissive: 0x1a0f04, ei: 0.15 }));
+      lid.position.y = 0.7; grp.add(lid);
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.06), cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }));
+      latch.position.set(0, 0.58, 0.44); grp.add(latch);
+    }
     grp.userData.transient = true;
     root.add(grp);
     return grp;
@@ -799,6 +833,7 @@
   //  CSS (self-mounted once) — matches the charpanel / hud.mc look
   // ============================================================
   function ensureCss() {
+    if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }   // shared item-icon sizing
     if (typeof document === "undefined" || !document.head || document.getElementById("ci2Css")) return;
     const st = document.createElement("style");
     st.id = "ci2Css";
@@ -847,15 +882,24 @@
   let cursorEl = null;
   let chestPanel = null, chestGridEl = null, chestPlayerGridEl = null;
 
+  function attr(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;"); }
   function cellHtml(e, gridKey, i) {
     let inner = "";
     if (e) {
       const equipped = isGun(e) ? (CBZ.currentWeaponId === e.id && !g.cityHolstered) : (isMelee(e) && g.cityMeleeWeapon === e.name);
-      inner = (isGun(e) ? weaponFace(e.id, e.name) : "<span class='ic'>" + iconFor(e.name) + "</span>") +
+      inner = (isGun(e) ? weaponFace(e.id, e.name) : itemFace(e.name)) +
         (e.kind === "item" && e.count > 1 ? "<span class='ct'>" + e.count + "</span>" : "") +
         (equipped ? "<span class='eq'>EQ</span>" : "");
-      return "<div class='ci2Slot" + (equipped ? " equipped" : "") + "' data-g='" + gridKey + "' data-i='" + i + "' title='" +
-        String(e.name).replace(/'/g, "&#39;") + (e.kind === "weapon" ? " — right-click to equip" : "") + "'>" + inner + "</div>";
+      // the tooltip says what it IS and what it is FOR — a pelt names its fence
+      // price, a steak names its fill. "You can't even hold it" was half an icon
+      // problem and half nobody ever telling you what the thing was worth.
+      let tip = e.kind === "weapon"
+        ? String(e.name) + "\nweapon  ·  right-click to equip"
+        : itemTitle(e.name, e.count);
+      const v = e.kind === "item" && CBZ.itemVerb ? CBZ.itemVerb(e.name, items()[e.name]) : null;
+      if (v && v.id !== "sell") tip += "\nshift + right-click: " + v.label;
+      return "<div class='ci2Slot" + (equipped ? " equipped" : "") + "' data-g='" + gridKey + "' data-i='" + i +
+        "' title='" + attr(tip) + "'>" + inner + "</div>";
     }
     return "<div class='ci2Slot' data-g='" + gridKey + "' data-i='" + i + "'></div>";
   }
@@ -872,7 +916,8 @@
     let html = "";
     for (let i = 0; i < grid.length; i++) html += cellHtml(grid[i], gridKey, i);
     if (withFooter) {
-      html += "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
+      html += "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · " +
+        "<b style='color:#9fd8a0'>Shift + right-click: eat / use</b> · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
     }
     el.innerHTML = html;
   }
@@ -898,7 +943,7 @@
     }
     if (cursor) {
       cursorEl.style.display = "block";
-      cursorEl.innerHTML = (isGun(cursor) ? weaponFace(cursor.id, cursor.name) : iconFor(cursor.name)) +
+      cursorEl.innerHTML = (isGun(cursor) ? weaponFace(cursor.id, cursor.name) : itemFace(cursor.name, "lg")) +
         (cursor.kind === "item" && cursor.count > 1 ? "<span class='ct'>" + cursor.count + "</span>" : "");
       cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px";
     } else cursorEl.style.display = "none";
@@ -919,6 +964,20 @@
   function slotClick(gridKey, i, right, shift) {
     const grid = gridByKey(gridKey); if (!grid) return;
     const s = grid[i];
+
+    // SHIFT + RIGHT-CLICK: USE the thing. The hotbar is still the primary way
+    // to eat (a number key, and a tap on touch — see hud.js's #cSlots), but a
+    // bag you can only rearrange is the "you can't even hold it" complaint, so
+    // the grid gets the verb too. Deliberately NOT plain right-click: that is
+    // the Minecraft stack split and it has to stay. Chest grids are excluded —
+    // nothing in a box is in your hands.
+    if (shift && right && s && s.kind === "item" && gridKey === "p" && CBZ.cityUseItem) {
+      const before = econ() ? econ().count(s.name) : 0;
+      CBZ.cityUseItem(s.name);
+      if (!econ() || econ().count(s.name) !== before) resync();
+      renderAllGrids();
+      return;
+    }
 
     // SHIFT-CLICK: quick-move a whole stack to the other container (chest open)
     if (shift && s && openChestRef) {
@@ -1218,7 +1277,7 @@
     let html = "";
     for (let i = 0; i < bar.length && i < 9; i++) {
       const b = bar[i];
-      const face = b.kind === "item" ? "<span class='ic'>" + iconFor(b.item || b.label) + "</span>"
+      const face = b.kind === "item" ? itemFace(b.item || b.label, "md")
         : b.kind === "gun" ? weaponFace(b.id, b.label)
         : "<span class='s'>" + String(b.short || b.label || "?").slice(0, 6) + "</span>";
       html += "<div class='ci2Slot" + (b.active ? " sel" : "") + "' data-i='" + i + "'>" + face +

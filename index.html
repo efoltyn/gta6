@@ -338,10 +338,10 @@
 <script src="src/core/seed.js"></script>
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
-<script src="src/world/treeaudit.js?v=law1"></script>
+<script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=scenery1"></script>
+<script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -472,7 +472,7 @@
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=b2bombcam1"></script>
+<script src="src/systems/camera.js?v=allmain1"></script>
 <script src="src/systems/physics.js?v=traversal2"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -517,17 +517,29 @@
 <script src="src/systems/killstreaks.js"></script>
 <script src="src/systems/interact.js?v=ipadchoices1"></script>
 <script src="src/systems/interactions.js?v=mapflow2"></script>
-<script src="src/systems/inventory.js?v=loot1"></script>
+<!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
+     which city/itemicons.js photographs for the slot and city/inventory.js
+     drops on the pavement. Needs THREE + actorweapons + materials, all
+     above; resolves itemicons' seams lazily so order between the two does
+     not matter. -->
+<script src="src/city/itemassets.js?v=allmain1"></script>
+<!-- WHAT A THING IN YOUR BAG IS: one drawn pictogram per item KIND (so
+     runtime registrations — species pelts/meat, the fishing catch, produce,
+     C4 — are covered structurally), plus its verb and its worth. Loads
+     before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
+     city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
+<script src="src/city/itemicons.js?v=allmain1"></script>
+<script src="src/systems/inventory.js?v=allmain1"></script>
 <script src="src/systems/state.js?v=arrest4w10"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
-<script src="src/systems/touch.js?v=ipadcontrols1"></script>
-<script src="src/systems/touch_vehicle.js?v=carbuttons1"></script>
+<script src="src/systems/touch.js?v=allmain1"></script>
+<script src="src/systems/touch_vehicle.js?v=allmain1"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=rideexit2"></script>
-<script src="src/systems/fpsmode.js?v=weaponphysics1"></script>
+<script src="src/systems/fpsmode.js?v=allmain1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -573,7 +585,7 @@
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
 <script src="src/city/beach.js?v=beach1s"></script>
-<script src="src/city/expansion.js?v=waterunify4z"></script>
+<script src="src/city/expansion.js?v=allmain1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=organicbiomes3"></script>
@@ -651,9 +663,9 @@
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
 <script src="src/city/island_military.js?v=seawave1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
-<script src="src/city/biome_forest.js?v=scenery1"></script>
+<script src="src/city/biome_forest.js?v=allmain1"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
-<script src="src/city/biome_snow.js?v=organicmountain18w9ys"></script>
+<script src="src/city/biome_snow.js?v=allmain1"></script>
 <script src="src/city/snowboard.js?v=terrain2"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -662,7 +674,7 @@
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=lod1"></script>
+<script src="src/world/wildnature.js?v=allmain1"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -677,38 +689,38 @@
 <script src="src/city/wildlife/small_game.js?v=wild1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
 <script src="src/city/wildlife/aquatic.js?v=seawave1"></script>
-<script src="src/city/wildlife.js?v=seawave1"></script>
-<script src="src/city/wildlife_tame.js?v=mounttap2"></script>
-<script src="src/city/dogs.js?v=physics3"></script>
+<script src="src/city/wildlife.js?v=allmain1"></script>
+<script src="src/city/wildlife_tame.js?v=allmain1"></script>
+<script src="src/city/dogs.js?v=allmain1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
-<script src="src/city/creature_combat.js?v=fight1"></script>
-<script src="src/city/companions.js?v=fight1"></script>
+<script src="src/city/creature_combat.js?v=allmain1"></script>
+<script src="src/city/companions.js?v=allmain1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
 <script src="src/city/arena_venue.js?v=ironjaw1yz"></script>
 <script src="src/city/arena_fights.js?v=ironjaw1y"></script>
-<script src="src/city/props.js?v=diegetictext1xt"></script>
+<script src="src/city/props.js?v=allmain1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=purpose1w9"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=seawave1"></script>
-<script src="src/city/economy.js?v=grenade1"></script>
+<script src="src/city/economy.js?v=allmain1"></script>
 <script src="src/city/clothes.js?v=fit5"></script>
 <script src="src/city/outfits.js?v=fits2y"></script>
-<script src="src/city/hunger.js?v=roof1"></script>
+<script src="src/city/hunger.js?v=allmain1"></script>
 <script src="src/city/wanted.js?v=arrest4"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=hub4"></script>
+<script src="src/city/worldstate.js?v=allmain1"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=faction2r"></script>
 <script src="src/city/gangs.js?v=fortress1r"></script>
-<script src="src/city/social.js?v=sasubtitle1"></script>
+<script src="src/city/social.js?v=allmain1"></script>
 <script src="src/city/realestate.js?v=fortress1"></script>
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
@@ -795,7 +807,7 @@
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=tornado1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
-<script src="src/city/shops.js?v=seawave1"></script>
+<script src="src/city/shops.js?v=allmain1"></script>
 <script src="src/city/gunstore.js?v=mods1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
@@ -811,7 +823,7 @@
 <script src="src/city/careers.js?v=citysec3r"></script>
 <script src="src/city/activities.js?v=hub4"></script>
 <script src="src/city/heists.js?v=night6"></script>
-<script src="src/city/interactions.js?v=ipadchoices1"></script>
+<script src="src/city/interactions.js?v=allmain1"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -866,7 +878,7 @@
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=cluster1"></script>
-<script src="src/city/interact.js?v=registry1"></script>
+<script src="src/city/interact.js?v=allmain1"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -884,7 +896,7 @@
      CBZ.cityGiveWeapon, just above, to auto-equip a freshly-crafted tool).
      Loads right after city/combat.js, whose lightAttack/heavyAttack call
      CBZ.resourceHarvestSwing when a swing finds no ped in the cone. -->
-<script src="src/systems/resources.js?v=bld1"></script>
+<script src="src/systems/resources.js?v=allmain1"></script>
 <script src="src/systems/craft.js?v=bld1"></script>
 <script src="src/city/explosives.js?v=c4-2"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
@@ -898,7 +910,7 @@
 <script src="src/city/pawnshop.js?v=pawn2"></script>
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
-<script src="src/city/family.js?v=fam2"></script>
+<script src="src/city/family.js?v=allmain1"></script>
 <script src="src/city/swim.js?v=seawave1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
@@ -923,7 +935,7 @@
 <script src="src/city/turf.js?v=hudmin2"></script>
 <script src="src/city/gangops.js?v=seawave1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
-<script src="src/city/militaryvehicles.js?v=meshboard2"></script>
+<script src="src/city/militaryvehicles.js?v=allmain1"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Every blast routes through
      the WRAPPED cityExplosion chain; deaths route through the kill bus. -->
@@ -947,7 +959,12 @@
 <script src="src/city/street_talk.js?v=binary3"></script>
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
 <script src="src/city/interactions_rich.js?v=arch1"></script>
-<script src="src/city/aim_dossier.js?v=streetread3"></script>
+<!-- DIALOGUE IS TWO CHOICES — every talkable person answers with a line and
+     exactly two shown answers (BOARD/HIJACK card grammar); punch and walking
+     away are the two unshown exits. Loads after interactions/interact/
+     street_talk/interactions_rich; contracts.js + phone.js read lazily. -->
+<script src="src/city/dialogue.js?v=allmain1"></script>
+<script src="src/city/aim_dossier.js?v=allmain1"></script>
 <script src="src/city/captives.js?v=diegetic4"></script>
 <script src="src/city/millionaires.js?v=arch1"></script>
 <script src="src/city/regionlife.js?v=arch2"></script>
@@ -974,7 +991,7 @@
      species to aquatic.js makes it catchable with no edit here. After
      marina/boatyard (it registers spots on their quays) and after wildlife.
      Revert with ?cfg_FISHING=0. -->
-<script src="src/city/fishing.js?v=seawave1"></script>
+<script src="src/city/fishing.js?v=allmain1"></script>
 <!-- YACHTS + SEA CREW. yachts.js owns the superyacht class (helideck, tender
      garage, car deck) and the small-craft fleet; every hull goes through
      CBZ.cityRegisterVehicle and CBZ.marineHulls so it is drivable, damageable
@@ -990,18 +1007,18 @@
 <script src="src/city/gigs.js?v=gig5"></script>
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=gunthumb3yr"></script>
+<script src="src/city/hud.js?v=allmain1"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
-<script src="src/city/charpanel.js?v=cp6"></script>
+<script src="src/city/charpanel.js?v=allmain1"></script>
 <!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
      renders the interactive [I] slot grid into charpanel's overlay, owns world
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=weaponphysics1"></script>
-<script src="src/city/phone.js?v=story3"></script>
+<script src="src/city/inventory.js?v=allmain1"></script>
+<script src="src/city/phone.js?v=allmain1"></script>
 <script src="src/city/killfeed.js?v=deathphone1"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
@@ -1036,12 +1053,12 @@
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=sounddebug1"></script>
+<script src="src/systems/predator.js?v=allmain1"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
      MUST follow predator.js; without this tag the whole animation lane is dead. -->
-<script src="src/systems/predator_anim.js?v=predanim1"></script>
+<script src="src/systems/predator_anim.js?v=allmain1"></script>
 <!-- VERLET CORPSE PHYSICS FOR ANIMALS — the sibling of city/ragdoll.js, which
      is hard-wired to the humanoid skeleton, so every one of the 45 species used
      to die by easing group.rotation.z to a constant ("head pointed to sky").
@@ -1052,7 +1069,7 @@
 <script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=seawave1"></script>
+<script src="src/city/wildlife_shark.js?v=allmain1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact
@@ -1075,7 +1092,11 @@
 <script src="src/city/inheritance.js?v=famtree1"></script>
 <script src="src/city/births.js?v=famtree1"></script>
 <script src="src/city/marriage.js?v=famtree1"></script>
-<script src="src/city/familypanel.js?v=famtree1"></script>
+<script src="src/city/familypanel.js?v=allmain1"></script>
+<!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
+     greetings, grief, homecoming. Loads after familypanel (reads the whole
+     family cluster lazily; only hard dep is entities/poses.js far above). -->
+<script src="src/city/kinship.js?v=allmain1"></script>
 
 <!-- B8: single-player persistence bridge for player building's piece
      geometry (localStorage ledger, arena-gated deferred apply) — see that
@@ -1194,7 +1215,7 @@
 <script src="src/city/casino.js?v=casino1s"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=scenery1"></script>
+<script src="src/city/continent.js?v=allmain1"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

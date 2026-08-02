@@ -46,6 +46,34 @@
   if (CBZ.CONFIG.CAM_FACING_BLEND == null) CBZ.CONFIG.CAM_FACING_BLEND = true;       // draw/holster: body-facing ease ramps in over 0.25s instead of whipping to the new target
   if (CBZ.CONFIG.CAM_TP_BREATHE == null) CBZ.CONFIG.CAM_TP_BREATHE = false;          // taste flag: 0.07s TP position smoothing (rigid 0.02s stays default)
 
+  // ---- TOUCH_TP_CAMERA_V2 (owner, 2026-07-28: "iPad needs third person
+  // improved"). THE ROOT FINDING, and it is arithmetic rather than taste:
+  // CBZ.camZoom has exactly ONE non-desktop caller in the whole repo —
+  // touch.js's pinch — and under CAM_TP_V2 (default ON since the Fortnite pass)
+  // the city on-foot boom is a CONSTANT (`shoulder ? TP.DIST_AIM : TP.DIST`)
+  // that never reads zoomTarget, while the city driving/flying branch returns
+  // early on its own fixed `cameraBack`. So **pinch-to-zoom has been a dead
+  // gesture in the entire city — on foot AND in every vehicle — since the day
+  // the boom was locked.** It still works in survival/jail because those tiers
+  // are the only ones that still read zoomTarget.
+  //
+  // The fix does NOT re-open the wheel-zoom the owner asked to have killed: the
+  // constant boom stays the constant boom, and touch gets a separate multiplier
+  // (`tpTrim`) that ONLY a real pinch can move, clamped, reset with the zoom,
+  // and never applied while ADS (the ADS punch-in is a fixed target by design —
+  // a trimmed one would be a different bug of the same family).
+  //   CAM_TP_TOUCH_ZOOM    — the pinch trim itself
+  //   CAM_TOUCH_RECENTER   — CBZ.camRecenter(): level the view / hand the yaw
+  //                          back to the vehicle's own auto-recenter
+  //   CAM_TOUCH_PITCH_FULL — the touch TP pitch envelope opens to the desktop
+  //                          range now that touch HAS an escape hatch (see
+  //                          camTouchPitchRange for the whole argument)
+  if (CBZ.CONFIG.TOUCH_TP_CAMERA_V2 == null) CBZ.CONFIG.TOUCH_TP_CAMERA_V2 = true;
+  if (CBZ.CONFIG.CAM_TP_TOUCH_ZOOM == null) CBZ.CONFIG.CAM_TP_TOUCH_ZOOM = true;
+  if (CBZ.CONFIG.CAM_TOUCH_RECENTER == null) CBZ.CONFIG.CAM_TOUCH_RECENTER = true;
+  if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL == null) CBZ.CONFIG.CAM_TOUCH_PITCH_FULL = true;
+  const tpTouch = () => CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false && !!CBZ.touchMode;
+
   // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — guarded FALLBACK ----
   // src/city/camera.js IS loaded by index.html (later than this file) and is the
   // AUTHORITATIVE tuning surface: it re-assigns CBZ.CITY_TP unconditionally, so
@@ -82,8 +110,36 @@
   let camDist = DEF;        // smoothed actual distance
   let zoomTarget = DEF;     // where zoom wants to be
   function clampZoom(v) { return Math.max(ZMIN, Math.min(ZMAX, v)); }
-  CBZ.camZoom = function (d) { zoomTarget = clampZoom(zoomTarget + d); };
-  CBZ.resetZoom = function () { zoomTarget = DEF; camDist = DEF; };
+  // TOUCH BOOM TRIM (CAM_TP_TOUCH_ZOOM) — a MULTIPLIER on the fixed V2 boom,
+  // not a second zoom target. The locked-distance personality is preserved
+  // exactly: nothing moves it but a pinch, and with no pinch it is 1.0, so
+  // every frame is byte-identical to today. Range is deliberately modest —
+  // 4.35 m on foot becomes 2.70…8.70 m, 9.5 m behind a car becomes 5.9…19 m —
+  // because the point is "let me see past the fuselage / read the street", not
+  // "hand the wheel-zoom back".
+  const TRIM_MIN = 0.62, TRIM_MAX = 2.0;
+  let tpTrim = 1;
+  CBZ.camTouchTrim = function () {
+    return (CBZ.CONFIG.CAM_TP_TOUCH_ZOOM === false || !tpTouch()) ? 1 : tpTrim;
+  };
+  // The trim is multiplicative because a pinch is: the same finger travel must
+  // pull the same FRACTION of the boom whether you are on foot at 4.35 m or
+  // behind an airliner at 30 m. `d` keeps its existing sign convention from the
+  // one live caller (touch.js: spread → negative → closer).
+  CBZ.camTouchZoom = function (d) {
+    if (CBZ.CONFIG.CAM_TP_TOUCH_ZOOM === false) return tpTrim;
+    tpTrim = Math.max(TRIM_MIN, Math.min(TRIM_MAX, tpTrim * Math.exp((+d || 0) * 0.06)));
+    return tpTrim;
+  };
+  // ONE entry point, unchanged for desktop. On touch the pinch drives the trim
+  // (which is the only thing the city tiers actually read) AND the legacy
+  // zoomTarget, so survival / jail — which still run the old wheel-zoom boom —
+  // keep pinching exactly as they always did.
+  CBZ.camZoom = function (d) {
+    zoomTarget = clampZoom(zoomTarget + d);
+    if (tpTouch()) CBZ.camTouchZoom(d);
+  };
+  CBZ.resetZoom = function () { zoomTarget = DEF; camDist = DEF; tpTrim = 1; };
 
   // Looking UP is the NEGATIVE-pitch direction (boom uses oy = sin(pitch)*camDist,
   // and the look target adds sin(pitch)*aimLead). The old MIN_PITCH = -0.18 capped
@@ -102,20 +158,72 @@
   //  touch.js / touch_vehicle.js consume these by feature-detection.
   // ============================================================
   // Touch third-person pitch range: iPad could barely look up (touch.js's old
-  // hard [-0.18, 0.60]); widen toward desktop's [-1.0, 0.9] but stop short —
-  // the touch boom at extreme up-pitch near walls is less recoverable without
-  // a scroll-wheel escape hatch.
+  // hard [-0.18, 0.60]). It has widened twice — first toward desktop but
+  // stopping short, and now (CAM_TOUCH_PITCH_FULL) all the way, because the
+  // reason for stopping short was spent; the argument is at the branch itself.
   CBZ.camTouchPitchRange = function () {
     if (CBZ.CONFIG.CAM_TOUCH_PITCH === false) return [-0.18, 0.60];
     // CAM_ADS_PITCH_WIDE: while AIMING on touch, open the envelope toward the
     // desktop range so an iPad can raise/drop the reticle onto high or low
     // targets. Touch-only (this clamp is consumed only by touch.js applyLookDelta).
     if (CBZ.CONFIG.CAM_ADS_PITCH_WIDE !== false && CBZ.isADS && CBZ.isADS()) return [-1.0, 0.9];
+    // CAM_TOUCH_PITCH_FULL: the remaining gap to desktop existed for ONE stated
+    // reason — this file's own comment: "the touch boom at extreme up-pitch near
+    // walls is less recoverable WITHOUT A SCROLL-WHEEL ESCAPE HATCH". Touch now
+    // has two (the pinch trim above actually reaches the city boom, and
+    // CBZ.camRecenter levels the view in one tap), so the reason is spent and
+    // an iPad gets the same envelope a mouse does. Flag off = the old stop-short.
+    if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL !== false && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false) return [MIN_PITCH, MAX_PITCH];
     return [-0.85, 0.75];
+  };
+  // ---- RECENTER (CAM_TOUCH_RECENTER) — the one control a thumb-driven third
+  // person needs that a mouse never does: a mouse levels the view in a flick,
+  // a thumb has to drag back across the whole screen. Two jobs, and neither is
+  // a teleport: the orbit PITCH eases to the context's own resting angle
+  // (CITY_TP.PITCH on foot, a mild down-gaze behind a vehicle), and any live
+  // free-look suspension is DROPPED so the vehicle's own auto-recenter — which
+  // has always honoured camRecenterSuspended — takes the yaw back itself. It
+  // therefore adds no second yaw writer: the car/plane/boat still owns its yaw.
+  let recT = 0, recFrom = 0, recTo = 0;
+  const REC_T = 0.32;
+  function recenterPitchTarget() {
+    const P = CBZ.player;
+    if (P && (P.driving || P._aircraft)) return 0.16;
+    if (CBZ.game && CBZ.game.mode === "city" && CBZ.CITY_TP && CBZ.CITY_TP.PITCH != null) return CBZ.CITY_TP.PITCH;
+    return DEFAULT_PITCH;
+  }
+  CBZ.camRecenter = function () {
+    if (CBZ.CONFIG.CAM_TOUCH_RECENTER === false) return false;
+    recFrom = cam.pitch; recTo = recenterPitchTarget(); recT = REC_T;
+    // Drop the LATCHED free-look and its decay so the vehicle's own recenter
+    // takes the yaw back. lookBackHeld is deliberately NOT cleared: that is a
+    // live button somebody's other thumb is still holding, and a recenter must
+    // not steal a control that is currently pressed.
+    flHold = false; flT = 0;
+    return true;
+  };
+  // ANY deliberate look input outranks a running recenter — otherwise the ease
+  // would fight the finger for a third of a second after you touched the screen.
+  CBZ.camRecenterCancel = function () { recT = 0; };
+  // Would a recenter DO anything right now? The touch layer shows its button
+  // only when the answer is yes, with hysteresis in the caller, so the control
+  // appears exactly when it is worth a thumb and the screen stays calm.
+  CBZ.camRecenterOff = function () {
+    return Math.abs(cam.pitch - recenterPitchTarget());
   };
   // Vehicle free-look (suspends the behind-the-car auto-recenter) + look-back.
   let flHold = false, flT = 0, lookBackHeld = false, lookBackK = 0, bankK = 0;
   CBZ.camFreeLook = function (on) { flHold = !!on; if (on) flT = 0.8; };
+  // A DELIBERATE GLANCE with no hold to release. camFreeLook LATCHES (flHold
+  // stays true until somebody passes false), which is correct for a finger that
+  // owns the look slot and fatal for a gesture that does not — a pinch, a
+  // two-finger adjust, a gamepad nudge — because an unmatched true would
+  // suspend every vehicle's auto-recenter FOREVER. This is the decay-only half:
+  // exactly what the desktop mousemove handler already does inline (flT = 0.8).
+  CBZ.camGlance = function () {
+    if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK === false) return false;
+    flT = 0.8; return true;
+  };
   CBZ.camLookBack = function (down) { lookBackHeld = !!down; };
   CBZ.camRecenterSuspended = function () {
     if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK === false) return false;
@@ -211,6 +319,7 @@
   });
   document.addEventListener("mousemove", (e) => {
     if (!cam.locked) return;
+    if (recT > 0 && (e.movementX || e.movementY)) recT = 0;   // the hand outranks the ease
     // scoped look is proportionally finer (systems/lockon.js real sniper scope)
     const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     cam.yaw -= e.movementX * SENS * sensMul;
@@ -400,6 +509,14 @@
     const fdt = (CBZ.feelCam && CBZ.feelDt != null) ? CBZ.feelDt : dt;
     // ---- CAMERA POLISH per-frame state (cheap, runs in every branch) ----
     if (flT > 0 && !flHold) flT = Math.max(0, flT - fdt);          // free-look decay after the glance
+    // RECENTER ease (CAM_TOUCH_RECENTER). Runs on the wall-clock feel-dt like
+    // every other polish term, writes ONLY cam.pitch, and is cancelled outright
+    // by any look input — so it can never wrestle a finger or a mouse.
+    if (recT > 0) {
+      recT = Math.max(0, recT - fdt);
+      const p = 1 - recT / REC_T, k = p * p * (3 - 2 * p);
+      cam.pitch = recFrom + (recTo - recFrom) * k;
+    }
     lookBackK += ((lookBackHeld ? 1 : 0) - lookBackK) * (1 - Math.exp(-11 * fdt));
     if (lookBackK < 0.001) lookBackK = 0;
     shoulderK += ((CBZ.CONFIG.CAM_SHOULDER_SWAP === false ? 1 : shoulderSign) - shoulderK) * (1 - Math.exp(-9 * fdt));
@@ -540,8 +657,14 @@
       // inside a 30m commercial airliner, so the "third-person" hijack view was
       // mostly tail/fuselage. Cars and older craft keep the exact defaults.
       const craft = player._aircraft;
-      const back = craft && craft.cameraBack != null ? craft.cameraBack : 9.5;
-      const up = craft && craft.cameraUp != null ? craft.cameraUp : 10.0;
+      // CAM_TP_TOUCH_ZOOM: a pinch dollies the whole boom IN OR OUT ALONG
+      // ITSELF — back and up take the same factor, so the depression angle is
+      // untouched and the shot stays the shot the owner framed; only its reach
+      // changes. `ahead` is a look-lead, not a boom, so it is deliberately not
+      // scaled (trimming it would swing the aim point, not the camera).
+      const tzk = CBZ.camTouchTrim();
+      const back = (craft && craft.cameraBack != null ? craft.cameraBack : 9.5) * tzk;
+      const up = (craft && craft.cameraUp != null ? craft.cameraUp : 10.0) * tzk;
       const ahead = craft && craft.cameraAhead != null ? craft.cameraAhead : 6.0;
       const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
       // AIRCRAFT FOLLOW AT SPEED (FLIGHT_SPEED_V2): a fixed 0.12s boom lags
@@ -696,12 +819,18 @@
     // ease the zoom distance toward its target. Normal third person is
     // a wider chase camera; armed third person becomes readable over-shoulder.
     // City scales the wheel-zoom around its own (much closer) default.
+    // CAM_TP_TOUCH_ZOOM — the trim rides the LOCKED boom on touch and is 1 on
+    // desktop and 1 until somebody actually pinches. It stands down entirely
+    // while ADS: the punch-in is a FIXED target on purpose, and a trimmed
+    // punch-in would re-create the very "the camera zooms on its own" complaint
+    // the constant boom was written to answer.
+    const tpZoomK = (CBZ.isADS && CBZ.isADS()) ? 1 : CBZ.camTouchTrim();
     const desiredZoom = TP
       ? (CBZ.CONFIG.CAM_TP_V2
           // FORTNITE LOCK: the boom is a constant — DIST at rest and merely-
           // armed, DIST_AIM_ADS only while scoping (fixed targets; the fast
           // ease below is the whole ADS punch-in). Wheel + melee zoom are out.
-          ? (shoulder ? TP.DIST_AIM : TP.DIST)
+          ? (shoulder ? TP.DIST_AIM : TP.DIST) * tpZoomK
           : (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF))))
       : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
     camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, fdt));

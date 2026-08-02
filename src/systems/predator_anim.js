@@ -638,8 +638,25 @@
       case 'ram':
         dip = Math.max(windup(p), env(p)) * 0.8; crouch = 0.2 * env(p);
         break;
+      // GORE is the one attack in the vocabulary that is not a straight line.
+      // A boar does not stab: it drives in with the head LOW and then throws it
+      // UP AND ACROSS, and that upward-lateral hook is the whole read — a tusk
+      // works sideways because that is the axis it is mounted on. `dip` alone
+      // (which is all this row used to be) is a hammer, and a hammer is what
+      // `ram` already is. So the windup keeps the dip and the strike TRADES it
+      // for a cant: the head comes off the floor and swings, and because
+      // applyHead composes yaw and roll from the same cantK the tusk arcs
+      // rather than sweeping flat. `side` alternates on every phase wrap, so
+      // repeated passes hook from alternating sides for free.
       case 'gore':
-        dip = env(p);
+        t = windup(p);
+        if (p < STRIKE_AT) { dip = t * 0.95; }
+        else {
+          var gk = (p - STRIKE_AT) / (1 - STRIKE_AT);
+          var hook = Math.sin(Math.min(1, gk * 1.75) * Math.PI);
+          dip = env(p) * 0.55 * (1 - hook);   // the head is released as it hooks
+          cant = hook * 0.85;
+        }
         break;
 
       // ---- ATTACK: stomp — rear onto the hind legs, then bring BOTH forefeet

@@ -64,6 +64,10 @@
   // world/treeaudit.js through an alive() gate so a chopped tree never
   // reads as "missing parts".
   const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+  // ONE TREE GRAMMAR / ROOTS (world/treeaudit.js §2)
+  const GRAM = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ONE_GRAMMAR !== false);
+  const ROOTS = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_ROOTS !== false);
+  const HARVEST_Y0 = (ROOTS && CBZ.treeTrunkGeo) ? -0.12 : -0.05;   // the geo's real floor, roots included
   if (A && !A.has("harvest-tree")) {
     A.define("harvest-tree", {
       footprint: { hx: 0.6, hz: 0.6 }, clearance: 0.6, y1: 6, zone: "nature",
@@ -71,7 +75,22 @@
       geom: function () {
         const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
         if (TREES2) {
-          const trunk = new THREE.CylinderGeometry(0.18, 0.26, 1.65, 6); trunk.translate(0, 0.775, 0);   // [-0.05 .. 1.6]
+          // ONE TREE GRAMMAR + ROOTS (world/treeaudit.js §2). A harvest node
+          // is UNIFORMLY scaled, so the flare is authored in metres. Roots
+          // matter more here than anywhere else in the game: this is a tree
+          // the player walks up to and swings an axe at, i.e. the one you
+          // actually look at the bottom of.
+          const trunk = (ROOTS && CBZ.treeTrunkGeo)
+            ? CBZ.treeTrunkGeo({ rTop: 0.18, rBase: 0.26, h: 1.65, y0: -0.05, seg: 6,
+                roots: 4, rise: 0.24, dip: 0.07, spread: 2.2, flare: 1.5, site: "harvest" })
+            : (function () { const t = new THREE.CylinderGeometry(0.18, 0.26, 1.65, 6); t.translate(0, 0.775, 0); return t; })();
+          if (GRAM && CBZ.treeCrownGeo) {
+            // same envelope as the authored pair below: [1.35 .. 4.00],
+            // widest radius 1.0, tip radius 0.62 — solved, not re-typed.
+            const crown = CBZ.treeCrownGeo({ tiers: 2, r: 1.0, h: 2.65, y0: 1.35, seg: 7, taper: 0.62, site: "harvest" });
+            if (merge) { const m = merge([trunk, crown], false); if (m) return m; }
+            return crown;
+          }
           const canopy = new THREE.ConeGeometry(1.0, 2.2, 7); canopy.translate(0, 2.45, 0);              // [1.35 .. 3.55] — trunk top buried 0.25
           const tip = new THREE.ConeGeometry(0.62, 1.3, 7); tip.translate(0, 3.35, 0);                   // [2.70 .. 4.00] — second tier, overlaps 0.85
           if (merge) { const m = merge([trunk, canopy, tip], false); if (m) return m; }
@@ -97,11 +116,24 @@
     A.define("harvest-rock", {
       footprint: { hx: 0.7, hz: 0.7 }, clearance: 0.4, y1: 1.2, zone: "nature",
       instanceable: true,
-      geom: function () { return new THREE.IcosahedronGeometry(0.7, 0); },
-      material: function () { return cmat(0x7c7a73); },
+      // A HARVEST ROCK IS STILL A ROCK, IT JUST STOPS BEING A SOLID. This was
+      // a bare IcosahedronGeometry — the smooth 20-faced potato that
+      // world/rockscliffs.js exists to replace, and the same "little gray
+      // geometric thing" the owner asked us to stop scattering. Same radius,
+      // same footprint, same y1, same one instanced draw call: only the
+      // vertices change, through the ONE rock factory (its scrape algorithm
+      // chips real planar fracture facets). Size is deliberately NOT touched
+      // — this one you walk up to and swing a pickaxe at.
+      geom: function () {
+        return CBZ.makeRock ? CBZ.makeRock(0.7, 0x2E5716, 1, { scrapes: 9, depthMin: 0.06, depthMax: 0.34 })
+          : new THREE.IcosahedronGeometry(0.7, 0);
+      },
+      material: function () { const m = cmat(0x7c7a73); m.flatShading = true; return m; },
       build: function (ctx) {
         const s = ctx.scale || 1;
-        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7 * s, 0), cmat(0x7c7a73));
+        const rg = CBZ.makeRock ? CBZ.makeRock(0.7 * s, 0x2E5716, 1, { scrapes: 9, depthMin: 0.06, depthMax: 0.34 })
+          : new THREE.IcosahedronGeometry(0.7 * s, 0);
+        const m = new THREE.Mesh(rg, cmat(0x7c7a73));
         m.position.y = 0.35 * s; ctx.group.add(m);
       },
     });
@@ -227,7 +259,11 @@
             // above: trunk [-0.05..1.6], canopy [1.35..3.55], tip [2.7..4.0]),
             // so the audit applies the seat law; alive() skips chopped trees.
             const parts = [];
-            CBZ.treeAabbPush(parts, _m4, -1.0, -0.05, -1.0, 1.0, 4.0, 1.0);   // _m4 still holds this node's matrix
+            // HARVEST_Y0 tracks the geo's REAL floor: the root spurs sink to
+            // -0.12, and a registered box that stopped at -0.05 would be
+            // claiming less tree than is drawn. An audit bound is only worth
+            // anything while it matches the vertices.
+            CBZ.treeAabbPush(parts, _m4, -1.0, HARVEST_Y0, -1.0, 1.0, 4.0, 1.0);   // _m4 still holds this node's matrix
             CBZ.treeRegisterTree("harvest", 0, parts, (function (nd) {
               return function () { return !nd.depleted && nd.slot >= 0; };
             })(node));

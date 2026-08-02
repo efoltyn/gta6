@@ -123,33 +123,89 @@
   //  PELT ECONOMY — register every species' hide into cityEcon.ITEMS so the
   //  pawn shop / fence already buys it. A PRISTINE variant (clean kill) is
   //  worth ~2.1x; legendary pelts are flagged luxe (thinner fence haircut).
+  //
+  //  THE HUNT PAYS IN MEALS (2026-07-28). OWNER: "I killed a wild boar, and I
+  //  skinned it. I should get the pelt, and I should get the food. And I should
+  //  eat that food." He got both — and could eat NEITHER, because every meat
+  //  this loop registered was written `tag:"valuable"` with no `heal`. That one
+  //  word is the whole bug: `city/hunger.js`'s cityEat refuses anything without
+  //  a heal, fpsmode's hotbar only carries tag food/drug/throwable, and
+  //  interact.js's "Eat the X" pocket card matches on `.heal`. So a boar fed
+  //  nobody. Meat is FOOD now, and `meat:true` stays exactly where it was so
+  //  wildlife_tame.js's predator feeding still finds it.
+  //
+  //  THE FILL IS DERIVED, NOT TYPED. A portion's nourishment scales with how
+  //  RICH the meat is (the bestiary's own meatValue: rabbit 5 -> whale 50) and
+  //  how BIG the animal is (its own `scale`, because a big beast yields a big
+  //  cut). No species is named and no row is authored, so the next species in
+  //  the bestiary is edible for free:
+  //      fill = 26 * (meatValue/12)^0.5 * scale^0.45,  clamped 10..55
+  //  Anchored against the shop catalog it must live beside (Soda 12, Fries 20,
+  //  Hotdog 28, Pizza 34, Burger 42): a rabbit is a snack (10), venison a
+  //  proper meal (26), boar pork 27 at meatYield 2 (so ONE boar is 27-81 food),
+  //  moose 40, and a whale caps out at the 55 nothing may exceed.
   // ============================================================
+  function mealFill(meatValue, scale) {
+    const mv = Math.max(1, meatValue || 8);
+    const sc = Math.max(0.15, scale || 1);
+    const v = 26 * Math.pow(mv / 12, 0.5) * Math.pow(sc, 0.45);
+    return Math.max(10, Math.min(55, Math.round(v)));
+  }
+  CBZ.wildlifeMealFill = mealFill;
+
+  // A `fur` is a HIDE — except when the species is aquatic and the yield is the
+  // whole animal ("Fresh Fish"). A fin, a tooth and blubber are trade goods; a
+  // fish is dinner. Derived from the name, so a new fish species named "Fresh
+  // Trout" is edible with no edit here and no species table anywhere.
+  function furIsFood(sp) {
+    if (!sp || !sp.aquatic || !sp.fur) return false;
+    return /^fresh\b|\bfish$|\bfillet\b|\broe\b/i.test(sp.fur);
+  }
+
   function registerPelts() {
     const econ = CBZ.cityEcon; if (!econ || !econ.ITEMS) return;
     const S = CBZ.WILDLIFE_SPECIES || {};
     for (const id in S) {
       const sp = S[id];
       if (!sp.fur) continue;
+      const edibleFur = furIsFood(sp);
       if (!econ.ITEMS[sp.fur]) {
-        econ.ITEMS[sp.fur] = {
-          value: sp.furValue || 20, tag: "valuable",
-          luxe: sp.rarity === "legendary" || undefined,
-          pelt: true, species: id,
-        };
+        econ.ITEMS[sp.fur] = edibleFur
+          // the whole catch: food you can eat AND still sell (a fish is both)
+          ? {
+              value: sp.furValue || 8, tag: "food",
+              heal: mealFill(sp.furValue || 8, sp.scale),
+              fish: true, wild: true, species: id,
+            }
+          : {
+              value: sp.furValue || 20, tag: "valuable",
+              luxe: sp.rarity === "legendary" || undefined,
+              pelt: true, species: id,
+            };
       }
       const pri = "Pristine " + sp.fur;
-      if (sp.rarity !== "legendary" && !econ.ITEMS[pri]) {
+      if (!edibleFur && sp.rarity !== "legendary" && !econ.ITEMS[pri]) {
         econ.ITEMS[pri] = {
           value: Math.round((sp.furValue || 20) * 2.1), tag: "valuable",
           pelt: true, pristine: true, species: id,
         };
       }
-      // wild meat — a light valuable that also FEEDS your dog (see dogs.js).
+      // WILD MEAT — real food (eat it, sell it at a butcher/pawn) that also
+      // FEEDS your dog and any tamed predator (dogs.js / wildlife_tame.js read
+      // `meat`, which is why that field must stay).
       if (sp.meat && !econ.ITEMS[sp.meat]) {
-        econ.ITEMS[sp.meat] = { value: sp.meatValue || 8, tag: "valuable", meat: true, species: id };
+        econ.ITEMS[sp.meat] = {
+          value: sp.meatValue || 8, tag: "food",
+          heal: mealFill(sp.meatValue, sp.scale),
+          meat: true, wild: true, species: id,
+        };
       }
     }
   }
+  // Exported so any grant path can make sure the catalog exists before it adds
+  // (fishing.js can land a catch on a map where no wildlife build ever ran).
+  // Idempotent by construction — every write is behind an existence check.
+  CBZ.wildlifeRegisterItems = registerPelts;
 
   // ============================================================
   //  SPAWNING — stock each biome region with the species that call it home,
@@ -1044,17 +1100,46 @@
       // anti-habituation rule and a rifle must not reset them). Without it a
       // shot bear could shrug for the 3-7s of a post-commit cooldown, which
       // reads as broken rather than tense.
-      if (a.species.danger > 0.15 && P) {
-        if (!huntsShared(a)) { a.state = "charge"; a._burstT = null; }
+      // A WOUND IS A PROVOCATION — for every damage class, because every damage
+      // class arrives HERE. Gunfire (fpsmode), melee (combat.js), blasts
+      // (blastWildlife), cars (cityWildlifeCarHit), another predator's bite
+      // (preyOpts.onHit), a dog and a companion all call cityWildlifeHit, so
+      // this one branch is the whole rule and there is nowhere else to put it.
+      //
+      // canDefend() replaces the old bare `danger > 0.15`, which was a threshold
+      // that happened to be true for a moose and false for an elk while both
+      // carry the same antlers. It also refuses a TAMED animal (shooting your
+      // own pet is on you — see the early return above), a RECENTLY ROUTED one
+      // (it already decided), and anything without the mass or the weapon to
+      // answer at all.
+      const fights = FIGHT() ? canDefend(a) : (a.species.danger > 0.15);
+      if (fights && P) {
+        // IT FIGHTS BACK AT WHAT ACTUALLY BIT IT. `by` is null for a player
+        // shot, which is the old behaviour byte for byte; when another ANIMAL
+        // drew the blood, the wound re-targets the hunt onto it instead of
+        // onto whoever happens to be standing across the meadow. Satiation and
+        // any half-finished meal are cleared: being eaten outranks being full.
+        const foe = (by && by.animal && by.pos && !by.dead) ? by : (CBZ.player || null);
+        a._feedT = 0; a._feedOn = null; a._satT = 0;
+        // ..but only a MEAT EATER converts "it bit me" into "it is now my prey".
+        // A moose that turns on a wolf is defending, not shopping, and its
+        // target lives on `_defendOn`; writing `_prey` for it would put a wolf
+        // on a herbivore's menu and hand it a carcass to feed at.
+        a._prey = (foe && foe.animal && predSpecies(a.species)) ? foe : null;
+        // ..UNTIL IT HAS TAKEN ENOUGH. A defender under a third of its health
+        // stops defending and RUNS, which is the honest break-off the whole
+        // mechanic needs to avoid being a fight to the death every time.
+        const maxHp = a.maxHp || a.species.hp || 40;
+        if (FIGHT() && a.hp <= maxHp * ROUT_HP) {
+          routAnimal(a, P.x, P.z);
+        } else if (FIGHT() && licenceDefend(a, "hurt", foe, DEF_RAGE + Math.random() * DEF_RAGE_RAND)) {
+          // licenceDefend has already run predatorProvoke: the cooldown is
+          // cleared, the fake-out is off, the peak-veto is suspended for a beat
+          // (so a bullet can never be shrugged off) and the FSM is on `scent`.
+          // Deliberately NOT reset: menace and commits, which ARE the
+          // anti-habituation rule. A rifle does not buy a fresh animal.
+        } else if (!huntsShared(a)) { a.state = "charge"; a._burstT = null; }
         else if (CBZ.predatorProvoke) {
-          // IT FIGHTS BACK AT WHAT ACTUALLY BIT IT. `by` is null for a player
-          // shot, which is the old behaviour byte for byte; when another ANIMAL
-          // drew the blood, the wound re-targets the hunt onto it instead of
-          // onto whoever happens to be standing across the meadow. Satiation and
-          // any half-finished meal are cleared: being eaten outranks being full.
-          const foe = (by && by.animal && by.pos && !by.dead) ? by : (CBZ.player || null);
-          a._feedT = 0; a._feedOn = null; a._satT = 0;
-          a._prey = (foe && foe.animal) ? foe : null;
           try { CBZ.predatorProvoke(a, foe); } catch (e) {}
         }
       }
@@ -1197,6 +1282,10 @@
   // it is what produced two independent `rotation.z = ±1.3` snaps.
   function wildlifeDeathPhysics(a, dir, impulse, point) {
     if (!a || !a.group) return "none";
+    // A TAMED ANIMAL MAY BE HOLDING A POSE. wildlife_tame.js's affection layer
+    // owns leg/head/group offsets on a seated companion; hand every bone back
+    // BEFORE the solver reads the body, or the corpse ragdolls out of a sit.
+    if (a.tamed && CBZ.petRelease) { try { CBZ.petRelease(a); } catch (e) {} }
     let rag = false;
     if (CBZ.quadRagdoll) {
       try {
@@ -1291,35 +1380,50 @@
   // launch the player through the shared player physics state, so gravity,
   // collisions and landing/knockdown are handled by systems/physics.js instead
   // of a canned camera shove.
+  // A SOLID CONNECT PUTS YOU ON THE GROUND. Before, exactly ONE style launched
+  // the player — `ram` — so a bison flattened you and a wild boar's tusk hit,
+  // a moose's antler toss and a bighorn's charge were a number on the health
+  // bar and nothing else. Three animals whose entire body plan is a battering
+  // ram, landing like a slap. The launch is now graded by WHAT HIT YOU rather
+  // than gated on one name: a shoulder charge throws you outright, a tusk hook
+  // lifts and dumps you, a butt/kick shoves you off your feet. Everything below
+  // is the ram's own arithmetic scaled by that one factor, so nothing is
+  // re-authored and `ram` is byte-identical (KNOCK.ram === 1).
+  const KNOCK = { ram: 1, gore: 0.84, stomp: 0.66 };
   function animalStrikePlayer(a, dmg, style) {
     const P = CBZ.player;
     if (!a || !P || !P.pos || P.dead) return;
     const sp = a.species || {};
+    DEF.connects++;
     if (CBZ.cityHurtPlayer) {
       try {
         const label = (sp.name || sp.id || "animal").toLowerCase();
         CBZ.cityHurtPlayer(dmg, a.pos.x, a.pos.z,
-          style === "ram" ? "rammed by a " + label : "attacked by a " + label,
+          style === "ram" ? "rammed by a " + label
+            : style === "gore" ? "gored by a " + label
+            : style === "stomp" ? "trampled by a " + label
+            : "attacked by a " + label,
           false, a, false);
       } catch (e) {}
     }
-    if (style !== "ram" || P.dead) return;
+    const kf = ATK2() ? (KNOCK[style] || 0) : (style === "ram" ? 1 : 0);
+    if (!kf || P.dead) return;
     let dx = P.pos.x - a.pos.x, dz = P.pos.z - a.pos.z;
     let dl = Math.hypot(dx, dz);
     if (dl < 0.01) { dx = Math.cos(a.heading || 0); dz = Math.sin(a.heading || 0); dl = 1; }
     dx /= dl; dz /= dl;
     const scale = Math.max(1, sp.scale || 1);
     const charge = Math.max(1, sp.spd || 2.2);
-    const horiz = Math.min(14.5, 7.2 + scale * 2.5 + charge * 0.8);
+    const horiz = Math.min(14.5, 7.2 + scale * 2.5 + charge * 0.8) * kf;
     const ph = P._phys = P._phys || {};
     ph.air = true; ph.down = 0; ph.kx = ph.kz = 0;
     ph.vx = dx * horiz; ph.vz = dz * horiz;
-    ph.vy = Math.min(10.5, 6.6 + scale * 2.0);
-    ph.spin = (Math.random() < 0.5 ? -1 : 1) * (4.6 + scale * 1.2);
+    ph.vy = Math.min(10.5, 6.6 + scale * 2.0) * kf;
+    ph.spin = (Math.random() < 0.5 ? -1 : 1) * (4.6 + scale * 1.2) * kf;
     ph.spin2 = (Math.random() - 0.5) * 4;
     P.grounded = false; P.vy = 0;
-    if (CBZ.shake) CBZ.shake(0.85 + scale * 0.18);
-    if (CBZ.doHitstop) CBZ.doHitstop(0.045);
+    if (CBZ.shake) CBZ.shake((0.85 + scale * 0.18) * kf);
+    if (CBZ.doHitstop) CBZ.doHitstop(0.045 * kf);
     if (CBZ.sfx) CBZ.sfx("ko");
   }
   // Shared contact contract for authored animals/companions and diagnostics.
@@ -1332,20 +1436,28 @@
     if (!a || !a.skinnable) return;
     a.skinnable = false;
     const sp = a.species, econ = CBZ.cityEcon;
+    registerPelts();                     // idempotent; the catalog must exist to grant into
     let peltName = sp.fur, pristine = false;
-    if (sp.rarity !== "legendary" && a.cleanKill && Math.random() < 0.85) { peltName = "Pristine " + sp.fur; pristine = true; }
+    const edibleFur = furIsFood(sp);
+    if (!edibleFur && sp.rarity !== "legendary" && a.cleanKill && Math.random() < 0.85) { peltName = "Pristine " + sp.fur; pristine = true; }
+    let meatGot = 0;
     if (econ && econ.add) {
       econ.add(peltName, 1);
-      if (sp.meat) econ.add(sp.meat, 1 + ((Math.random() * (sp.meatYield || 1)) | 0));
+      if (sp.meat) { meatGot = 1 + ((Math.random() * (sp.meatYield || 1)) | 0); econ.add(sp.meat, meatGot); }
     }
     // a small on-the-spot field bounty on top of the sellable pelt.
     const bounty = Math.round((sp.furValue || 20) * (pristine ? 0.35 : 0.2) * (sp.rarity === "legendary" ? 3 : 1));
     if (CBZ.city && CBZ.city.addCash && bounty > 0) CBZ.city.addCash(bounty);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(sp.rarity === "legendary" ? 8 : 1);
-    // toast the haul.
+    // toast the haul — the HIDE is what it sells for, the MEAT is what it feeds
+    // you, and the line says both because they are two different payoffs.
     const worth = (econ && econ.ITEMS[peltName] && econ.ITEMS[peltName].value) || sp.furValue || 20;
+    const meatRow = meatGot && econ && econ.ITEMS[sp.meat];
+    const meatLine = meatGot
+      ? " · " + meatGot + "x " + sp.meat + (meatRow && meatRow.heal ? " (+" + meatRow.heal + " food each)" : "")
+      : "";
     if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note("Skinned " + sp.name + " → " + peltName + " (~$" + worth + ")" + (bounty ? " +$" + bounty : ""),
+      CBZ.city.note("Skinned " + sp.name + " → " + peltName + " (~$" + worth + ")" + meatLine + (bounty ? " +$" + bounty : ""),
         3.2, sp.rarity === "legendary" ? { urgent: true } : undefined);
     }
     // leave a "skinned" husk that fades shortly.
@@ -1461,10 +1573,300 @@
   // now makes that test itself, ahead of its danger check, so the opinion
   // lives in exactly one place. The `danger >= 0.5` line below is only the
   // pre-predator.js fallback, never a second opinion in a loaded game.
+  // ============================================================
+  //  A WOUND IS A PROVOCATION (CBZ.CONFIG.WILDLIFE_FIGHT_BACK)
+  //
+  //  OWNER (2026-07-28): "Predators like wild boars SHOULD be attacking... I
+  //  think animals aren't very good at attacking right now."
+  //
+  //  WHAT WAS ACTUALLY WRONG, and it was one line in cityWildlifeHit:
+  //  `if (a.species.danger > 0.15) { if (!huntsShared(a)) a.state = "charge"; }`
+  //  — so a wounded animal that was not already a full predator answered a
+  //  bullet by poking the LEGACY charge FSM, a brain with no menace gauge, no
+  //  pack, no commit ration and no wheel; and everything under 0.15 danger —
+  //  which is every deer, elk, horse, zebra and cow in the game — simply ran,
+  //  for ever, with a rifle round in it. The bruisers landed in the worst spot
+  //  of all: a moose (danger 0.4) and a bighorn (0.2) fought back through the
+  //  crude path, so they LOOKED angry and were trivially outmanoeuvred.
+  //
+  //  THE FIX IS A LICENCE, NOT A SECOND AGGRO SYSTEM. There is exactly one
+  //  aggressive brain in this game and it is CBZ.predatorHunt. What a wound
+  //  buys is TIME ON THAT BRAIN: `a._defendT` seconds during which huntsShared
+  //  says yes and the animal runs the identical grammar a bear runs — provoke,
+  //  square up, commit, wheel, withdraw. Nothing here decides where to walk,
+  //  when to strike, how hard, or when to stop; it decides only WHO IS ALLOWED
+  //  TO BE ANGRY AND FOR HOW LONG. When the clock runs out the body goes back
+  //  to the ordinary prey life through CBZ.predatorBreakOff — the one primitive
+  //  that hands an actor back — and the menace gauge it accumulated survives,
+  //  because being shot twice in a minute should NOT reset the encounter.
+  //
+  //  WHO QUALIFIES is CBZ.predatorDefends, and it is arithmetic on the four
+  //  numbers the bestiary already authored (style/scale/bite/danger), so a
+  //  species added tomorrow defends itself with no edit here. Measured over the
+  //  shipped bestiary it catches exactly the animals the owner named — wild
+  //  boar, moose, bison, rhino, elephant, bighorn — plus the coyote, and
+  //  refuses every deer, elk, horse, goat, rabbit and cow, which is correct:
+  //  those get ONE desperate answer when they are cornered and nothing else.
+  //
+  //  IT BREAKS OFF HONESTLY. A defender that drops below ROUT_HP of its health
+  //  ROUTS — the licence is torn up, the hunt is broken off and the animal
+  //  bolts at full flee speed with a real head start, which is what makes the
+  //  fight a decision instead of a fight to the death every time.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_FIGHT_BACK == null) CBZ.CONFIG.WILDLIFE_FIGHT_BACK = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_ATTACK_V2 == null) CBZ.CONFIG.WILDLIFE_ATTACK_V2 = true;
+  function FIGHT() { return !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_FIGHT_BACK === false); }
+  function ATK2() { return !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_ATTACK_V2 === false); }
+
+  const DEF_RAGE = 9, DEF_RAGE_RAND = 6;    // s of licence one wound buys
+  // ..and ONE desperate kick, deliberately too short to buy a second. The
+  // licence has to outlast a rush plus its strike animation (~0.6 s) and expire
+  // inside the wheel that would otherwise re-commit (WHEEL_T 0.65-1.35 s), so a
+  // cornered deer answers once and is running before the second pass exists.
+  const CORNER_RAGE = 1.15, CORNER_RAGE_RAND = 0.45;
+  const ROUT_HP = 0.32;                     // hp fraction under which a defender routs
+  const ROUT_COOL = 22;                     // s a routed animal may not re-licence
+  const CORNER_COOL = 26;                   // s between one animal's cornered kicks
+  const CORNER_P = 0.30;                    // fraction of individuals with the nerve
+  const CORNER_PIN = 0.4;                   // s of failing to flee that counts as trapped
+  const CROWD_T = 1.1;                      // s inside personal space before a bruiser squares up
+  const CROWD_COOL = 12;                    // ..and s before crowding can provoke the same one again
+  const YOUNG_R2 = 26 * 26;                 // u² — a threatened calf licences its herd
+  const DEFEND_CIRCLE_T = 1.15;             // s: a defender SQUARES UP, it never stalks
+  const DEFEND_SALT = 0x0DEFE4;             // the nerve hash's salt
+
+  // the raw material for CBZ.wildlifeDefenseAudit()
+  const DEF = { provoked: 0, charges: 0, connects: 0, corner: 0, routs: 0, crowd: 0, young: 0 };
+
+  // Cached per SPECIES (world-lifetime objects, and both answers re-derive a
+  // style string), exactly the way classify() caches sp._bclass.
+  function huntsSpecies(sp) {
+    if (sp._isHunter == null) {
+      sp._isHunter = CBZ.predatorIs
+        ? !!CBZ.predatorIs({ species: sp })
+        : ((sp.danger || 0) >= 0.5 || !!sp.venom || !!sp.constrictor);
+    }
+    return sp._isHunter;
+  }
+  function defendsSpecies(sp) {
+    if (sp._isDefender == null) {
+      sp._isDefender = CBZ.predatorDefends
+        ? !!CBZ.predatorDefends({ species: sp })
+        : ((sp.danger || 0) > 0.15);          // the pre-predator.js fallback, verbatim
+    }
+    return sp._isDefender;
+  }
+  // "may this INDIVIDUAL fight at all right now" — nothing to do with species.
+  // A tamed pet never turns on its owner (that rule is absolute and is enforced
+  // here as well as at the wound site), a ridden or externally-driven actor
+  // belongs to another file, and an animal that has already ROUTED has made its
+  // decision and does not get to change its mind for ROUT_COOL seconds.
+  function defendEligible(a) {
+    if (!FIGHT() || !a || a.dead || a.tamed || a.ridden || a.external) return false;
+    if ((a._routT || 0) > 0) return false;
+    return !!a.species;
+  }
+  // ..and "does this individual answer a WOUND", which additionally needs the
+  // species to be capable of answering one at all.
+  function canDefend(a) { return defendEligible(a) && defendsSpecies(a.species); }
+
+  // TEMPER IS AN INDIVIDUAL FACT, NOT A DIE ROLLED EVERY SECOND. Whether a
+  // particular boar squares up when you crowd it, and whether a particular deer
+  // has the nerve to kick, is hashed off its own spawn anchor — so the same
+  // animal is always the bold one, two players in a multiplayer world see the
+  // same animal do the same thing, and a player who backs off and comes back
+  // does not get a re-roll. One number per animal covers both, deliberately: a
+  // bold animal is bold about everything.
+  function nerve(a) {
+    if (a._nerve == null) {
+      a._nerve = (CBZ.hash01 && a.home) ? CBZ.hash01(a.home.x, a.home.z, DEFEND_SALT) : Math.random();
+    }
+    return a._nerve;
+  }
+
+  // GRANT THE LICENCE. Every trigger — a wound, a crowded personal space, a
+  // threatened calf, a cornered flight — funnels through this one call, so
+  // there is one place that decides an animal is fighting and one place that
+  // hands it to the shared brain. `force` is the cornered animal's exemption:
+  // it is the one trigger that does NOT ask whether the species can fight,
+  // because "cornered prey" is precisely the case of something that cannot.
+  function licenceDefend(a, kind, threat, secs, force) {
+    if (!defendEligible(a)) return false;
+    if (!force && !defendsSpecies(a.species)) return false;
+    // A REAL PREDATOR NEEDS NO LICENCE — it owns the shared brain permanently,
+    // and handing it a timer would mean that timer's expiry could break off an
+    // ordinary bear's ordinary hunt. It gets the provocation and nothing else,
+    // and it must not be left holding a `_defendOn` reference either (huntTick
+    // picks a hunter's target for itself, and a stale pointer to a dead deer is
+    // just something for the GC to trip over).
+    if (!huntsSpecies(a.species)) {
+      // WHO IT IS FIGHTING, sanitised to something the hunt can actually
+      // target. A car, a blast or an unknown `by` resolves to the player;
+      // another ANIMAL is kept, which is what lets a cornered deer kick the
+      // wolf that has it instead of the man watching from the ridge (huntTick's
+      // ordinary target rule prefers the player inside sense range, and for a
+      // defender that rule is exactly backwards).
+      a._defendOn = (threat && threat.animal && threat.pos && !threat.dead) ? threat : (CBZ.player || null);
+      a._defendT = Math.max(a._defendT || 0, secs);
+      a._defendKind = kind;
+    }
+    // A DEFENDER IS NOT A PREDATOR AND MUST NOT PICK LUNCH MID-FIGHT.
+    a._feedT = 0; a._feedOn = null;
+    if (CBZ.predatorProvoke) { try { CBZ.predatorProvoke(a, threat); } catch (e) {} }
+    DEF.provoked++;
+    return true;
+  }
+
+  // HAND THE BODY BACK. The licence has run out (or the animal has had enough)
+  // — predatorBreakOff drops the hunt to cruise WITHOUT wiping menace/commits,
+  // and everything below is the ordinary prey life resuming.
+  function endDefence(a) {
+    const kind = a._defendKind, on = a._defendOn;
+    const ox = (on && on.pos) ? on.pos.x : null, oz = (on && on.pos) ? on.pos.z : null;
+    a._defendT = 0; a._defendKind = null; a._defendOn = null;
+    if (CBZ.predatorBreakOff) { try { CBZ.predatorBreakOff(a, 5 + Math.random() * 6); } catch (e) {} }
+    a._huntSt = "cruise";
+    if (a.state === "charge" || a.state === "stalk") { a.state = "wander"; a.stateT = 0; }
+    a._burstT = null;
+    // A CORNERED ANIMAL DOES NOT LINGER. The kick was never an attack, it was
+    // the price of a gap — so the gap is spent immediately, at full flee speed,
+    // straight away from whatever it just hit. Drifting back into the wander
+    // here would make the whole beat read as bravado.
+    if (kind === "corner") {
+      const sp = a.species, cls = classify(sp);
+      a.state = "flee";
+      a.stateT = (cls.fleeT || 4) * 1.5;
+      a.alarm = Math.max(a.alarm || 0, 7);
+      a.spd = (sp.spd || 1.4) * (cls.fleeM || 2.2) * 1.1;
+      if (ox != null) a.heading = Math.atan2(a.pos.z - oz, a.pos.x - ox);
+      a._pinT = 0;
+    }
+  }
+
+  // THE ROUT — "flee is then a real escape, not a stroll." It is deliberately
+  // NOT predatorDisengage: that walks away in character at cruise speed and
+  // keeps the body, which is exactly wrong for an animal that has decided it is
+  // going to die here. Break off, hand back, and hit the flee state with a real
+  // head start (full class flee multiplier, a long committed timer, the alarm
+  // that carries the whole herd with it).
+  function routAnimal(a, fx, fz) {
+    const sp = a.species, cls = classify(sp);
+    endDefence(a);
+    a._routT = ROUT_COOL;
+    a.state = "flee";
+    a.stateT = (cls.fleeT || 4) * 1.8;
+    a.alarm = Math.max(a.alarm || 0, 9);
+    a.spd = (sp.spd || 1.4) * (cls.fleeM || 2.2) * 1.15;
+    if (fx != null && fz != null) a.heading = Math.atan2(a.pos.z - fz, a.pos.x - fx);
+    DEF.routs++;
+  }
+
+  // ---- TRIGGER 2: YOU CROWDED IT ----------------------------------------
+  // A wild boar does not wait to be shot. Standing inside its personal space is
+  // itself the provocation, and the animal that will not move is the one you
+  // have to walk around — which is the entire difference between wildlife you
+  // ignore and wildlife you respect. Only BOLD individuals do it (the top third
+  // of the temper distribution) and only after a sustained second inside the
+  // radius, so brushing past a herd at a run costs nothing.
+  //
+  // ..UNLESS THERE IS A CALF. A mother has no temper threshold and no patience:
+  // if any juvenile of her own herd is inside YOUNG_R of the threat she squares
+  // up immediately. `grow` is the field breed() already stamps on a newborn and
+  // clears at full size, so "is this a calf" needed no new state anywhere.
+  const CROWD_NERVE = 0.65;
+  function youngThreatened(a, tx, tz) {
+    const hr = a.herd;
+    if (!hr || !hr.members) return false;
+    for (let i = 0; i < hr.members.length; i++) {
+      const m = hr.members[i];
+      if (!m || m === a || m.dead || !m.pos) continue;
+      if (m.grow == null || m.grow >= 1) continue;         // only the young
+      const dx = m.pos.x - tx, dz = m.pos.z - tz;
+      if (dx * dx + dz * dz < YOUNG_R2) return true;
+    }
+    return false;
+  }
+  function crowdCheck(a, dt, P, nearP) {
+    if (!ATK2() || !P || !canDefend(a)) return false;
+    // NEVER RE-PROVOKE SOMETHING THAT IS ALREADY COMING. Without this, standing
+    // in a boar's face refreshed predatorProvoke's veto grace every second, so
+    // the menace gauge could never collect its withdrawal and the encounter
+    // became exactly the camping the gauge exists to forbid. A live hunt owns
+    // the animal; the cooldown covers the beat after it breaks off.
+    if (a._huntSt && a._huntSt !== "cruise") { a._crowdT = 0; return false; }
+    if ((a._crowdCd || 0) > 0) { a._crowdCd -= dt; a._crowdT = 0; return false; }
+    const sp = a.species;
+    const personal = 4 + (sp.scale || 1) * 3.2;
+    if (nearP > personal * personal) { a._crowdT = 0; return false; }
+    // the calf sweep is O(herd) so it runs on the crowd clock, not per frame
+    a._crowdT = (a._crowdT || 0) + dt;
+    if (a._crowdT < CROWD_T) return false;
+    a._crowdT = 0;
+    if (youngThreatened(a, P.x, P.z)) {
+      if (licenceDefend(a, "young", CBZ.player, DEF_RAGE + Math.random() * DEF_RAGE_RAND)) {
+        a._crowdCd = CROWD_COOL; DEF.young++; return true;
+      }
+      return false;
+    }
+    if (nerve(a) < CROWD_NERVE) return false;
+    if (licenceDefend(a, "crowd", CBZ.player, DEF_RAGE * 0.7 + Math.random() * DEF_RAGE_RAND)) {
+      a._crowdCd = CROWD_COOL; DEF.crowd++; return true;
+    }
+    return false;
+  }
+
+  // ---- TRIGGER 3: IT HAS NOWHERE LEFT TO GO -----------------------------
+  // PREY DIES FIGHTING WHEN CORNERED. A deer flees first, always — that is
+  // honest and it stays. But a deer with a threat inside one body length and no
+  // escape gets ONE answer: an antler toss or a hind-leg kick with real damage,
+  // and then a hard bolt. It is rare by construction and cannot become a loop:
+  //   * only the top CORNER_P of the temper distribution ever does it;
+  //   * only when actually TRAPPED (landWalk kept refusing to move it — the
+  //     one honest "no escape bearing" test available, and it costs nothing
+  //     because landWalk already returned that boolean and nobody read it) or
+  //     already badly wounded at point-blank range;
+  //   * CORNER_COOL seconds before the same animal can do it again;
+  //   * the licence is barely longer than one strike, so predatorHunt's own
+  //     pass ration can never spend a second one.
+  // It targets whatever actually has it — the wolf, not the man on the ridge.
+  function corneredCheck(a, dt, P, nearP) {
+    if (!ATK2() || !defendEligible(a)) return false;
+    if ((a._cornerCd || 0) > 0) return false;
+    const sp = a.species;
+    const body = 1.6 + (sp.scale || 1) * 1.8;
+    const b2 = body * body;
+    let threat = null;
+    const hb = a._huntedBy;
+    if (hb && !hb.dead && hb.pos) {
+      const hx = hb.pos.x - a.pos.x, hz = hb.pos.z - a.pos.z;
+      if (hx * hx + hz * hz < b2) threat = hb;
+    }
+    if (!threat && P && nearP < b2) threat = CBZ.player;
+    if (!threat) return false;
+    const wounded = a.hp < (a.maxHp || sp.hp || 40) * 0.6;
+    if (!wounded && (a._pinT || 0) < CORNER_PIN) return false;
+    if (nerve(a) < 1 - CORNER_P) return false;
+    a._cornerCd = CORNER_COOL;
+    if (!licenceDefend(a, "corner", threat, CORNER_RAGE + Math.random() * CORNER_RAGE_RAND, true)) return false;
+    // IT IS ALREADY ON TOP OF THE THING. predatorProvoke (inside licenceDefend)
+    // woke the hunt; circling for a second and a half at contact range would be
+    // the animal declining to defend itself, so the commit is taken now through
+    // the block's own entry point rather than by hand.
+    if (CBZ.predatorCommit) { try { CBZ.predatorCommit(a, threat); } catch (e) {} }
+    a._pinT = 0;
+    DEF.corner++;
+    return true;
+  }
+
   function huntsShared(a) {
     if (!HUNT() || !a || a.dead || a.tamed || a.ridden || a.external) return false;
     if (typeof CBZ.predatorHunt !== "function" || typeof CBZ.predatorKit !== "function") return false;
     const sp = a.species; if (!sp) return false;
+    // THE LICENCE IS THE ONLY WIDENING, and it is a TIMER on a defender, never
+    // a second definition of "predator": predatorIs stays the one answer to
+    // "does this thing hunt you", and an animal on licence is simply borrowing
+    // the same brain for as long as it is angry.
+    if (FIGHT() && (a._defendT || 0) > 0) return true;
     if (CBZ.predatorIs) { try { return !!CBZ.predatorIs(a); } catch (e) { return false; } }
     return (sp.danger || 0) >= 0.5 || !!sp.venom || !!sp.constrictor;
   }
@@ -1555,6 +1957,15 @@
       const sp = a.species || {};
       const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : "bite";
       const legless = !!a.snake;
+      // A DEFENDER SQUARES UP; IT DOES NOT STALK. The circle state is the tease
+      // that makes a predator frightening — four to nine seconds of a thing
+      // deciding whether to take you — and it is completely wrong for an animal
+      // whose entire intent is "get away from me". A boar or a bear keeps the
+      // full patient orbit (they hunt, so predatorIs is true for them); a moose
+      // or a bighorn on a wound licence gets ONE short square-up and then it
+      // comes. That is the only number a defender disagrees with, and the
+      // species' role is fixed at build so this is decided once per actor.
+      const defender = !huntsSpecies(sp);
       over = a._landHuntOver = {
         move: legless
           ? function (h, wantH, speed, dt) { return slither(h, wantH, speed, dt); }
@@ -1578,6 +1989,11 @@
         // and circle->scent, which is precisely "back off and take your slot".
         canReach: function () { return a._packGate !== false; },
       };
+      // set, never assigned-undefined: predatorKit shallow-copies every KEY it
+      // finds, so writing `circleT: undefined` for a hunter would erase the
+      // kit's own derived value and silently drop every predator in the game
+      // back to the shared 4-9 s default.
+      if (defender) over.circleT = DEFEND_CIRCLE_T;
     }
     // NOTE the units contract: predatorKit multiplies sp.spd by an archetype
     // constant, which is correct for AUTHORED wildlife species (spd 1.2-4.0,
@@ -1640,10 +2056,20 @@
   // every animal in the world every frame and predatorIs() re-derives a style
   // string on each call. Species objects are world-lifetime, so this is computed
   // once per species per session, not once per animal.
+  //
+  //  AND IT ASKS THE RIGHT QUESTION NOW. This used to be predatorIs — "does
+  //  this thing come after the player" — which is a completely different
+  //  question from "would this thing hunt something down and EAT it", and
+  //  answering the second with the first put HORNS ON THE MENU: a bison
+  //  (danger 0.5, style `ram`) qualified, so it stalked whitetail deer across
+  //  the meadow, killed one and stood over the carcass feeding for forty
+  //  seconds. So did the rhino, the elephant and the wild boar. predatorEats
+  //  keeps the identical continuous test and drops the three CHARGE archetypes
+  //  from it; nothing about who charges the player changes.
   function predSpecies(sp) {
     if (sp._isPred == null) {
-      sp._isPred = CBZ.predatorIs
-        ? !!CBZ.predatorIs({ species: sp })
+      sp._isPred = CBZ.predatorEats
+        ? !!CBZ.predatorEats(sp)
         : ((sp.danger || 0) >= 0.5 || !!sp.venom || !!sp.constrictor);
     }
     return sp._isPred;
@@ -1751,7 +2177,10 @@
           ? function (h, wantH, speed, dt) { return slither(h, wantH, speed, dt); }
           : function (h, wantH, speed, dt) { return landWalk(h, wantH, speed, dt); },
         onHit: function (d) {
-          const v = a._prey;
+          // the DEFENCE target wins when one is live: this same bundle serves a
+          // wolf hunting a deer and a deer kicking that wolf, and the two must
+          // never write each other's damage.
+          const v = (((a._defendT || 0) > 0 && a._defendOn && a._defendOn.animal) ? a._defendOn : null) || a._prey;
           if (!v || v.dead) return;
           if (v.animal) {
             // EVERY animal wound goes through the ONE bus, so a predator's bite
@@ -1912,6 +2341,15 @@
     const player = CBZ.player;
     const grp = a.group;
 
+    // THE LICENCE CLOCK. Only a DEFENDER carries one (a predator's aggression
+    // has no expiry), and when it runs out the body is handed back through the
+    // one break-off primitive rather than being left in a hot hunt state that
+    // the wander FSM would then fight over.
+    if ((a._defendT || 0) > 0) {
+      a._defendT -= dt;
+      if (a._defendT <= 0) { endDefence(a); return false; }
+    }
+
     // FEEDING OWNS THE BODY OUTRIGHT — it is not a hunt state, it is what
     // happens after one, and running the driver underneath it would have the
     // hunter walk away from the meal it just killed.
@@ -1925,10 +2363,12 @@
     // it the hunter walked away from every animal it had just killed (measured:
     // 213 frames of seize, one dead deer, zero frames of feeding).
     if (a._prey && a._prey.dead) {
-      if (CHAIN() && a._prey.animal && (a._satT || 0) <= 0) {
+      // ..and only something that EATS meat feeds. A person is not carrion, and
+      // neither is anything a charger happened to kill on its way past.
+      if (CHAIN() && a._prey.animal && predSpecies(a.species) && (a._satT || 0) <= 0) {
         startFeed(a, a._prey);
         if (feedTick(a, dt)) return true;
-      } else releasePrey(a);                       // a person is not carrion
+      } else releasePrey(a);
     }
 
     // ---- WHOM IS THIS HUNT FOR? -------------------------------------------
@@ -1947,7 +2387,21 @@
     const senseR = (o0 && o0.senseR) || 40;
     let dpl = Infinity;
     if (P && player && !player.dead) dpl = Math.hypot(grp.position.x - P.x, grp.position.z - P.z);
-    if (!(dpl < senseR * 1.6)) {
+    // A DEFENDER FIGHTS WHAT HURT IT. The player-outranks-everything rule below
+    // is right for a hunter choosing a meal and exactly wrong for an animal
+    // answering an injury: a deer being eaten by a wolf, with the player fifty
+    // metres away on a ridge, would otherwise turn round and kick at the man.
+    const dv = ((a._defendT || 0) > 0 && a._defendOn && !a._defendOn.dead &&
+                a._defendOn !== player && a._defendOn.animal) ? a._defendOn : null;
+    if (dv) {
+      // NO `|| o0` FALLBACK HERE, and that is deliberate. o0's onHit is
+      // animalStrikePlayer — hand it an animal target and a deer kicking a wolf
+      // would land on the PLAYER's health bar from across the meadow. If the
+      // prey bundle is unavailable the guard below refuses the whole hunt,
+      // which is the only safe answer. (Both bundles come from the same
+      // predatorKit call, so in practice they are null together.)
+      target = dv; preyMode = true; o = preyOpts(a);
+    } else if (!(dpl < senseR * 1.6)) {
       // a claim on prey is not forever. Drop it the moment the quarry is gone,
       // protected, or simply too far to be worth walking to — otherwise the
       // FIRST animal a predator ever noticed becomes the only one it will ever
@@ -1960,8 +2414,11 @@
             (pdx * pdx + pdz * pdz) > (senseR * 2.2) * (senseR * 2.2)) releasePrey(a);
       }
       const st0 = a._huntSt;
-      // never re-pick mid-grab: the seize already owns this animal's mouth.
-      if (CHAIN() && !a._seizing && (!st0 || st0 === "cruise" || st0 === "disengage")) pickPrey(a, senseR, dt);
+      // never re-pick mid-grab: the seize already owns this animal's mouth, and
+      // never at all for something that does not EAT meat (a charging bison is
+      // not shopping) or for a defender working off a wound licence.
+      if (CHAIN() && !a._seizing && predSpecies(a.species) && !(a._defendT > 0) &&
+          (!st0 || st0 === "cruise" || st0 === "disengage")) pickPrey(a, senseR, dt);
       if (a._prey && !a._prey.dead) { target = a._prey; preyMode = true; o = preyOpts(a); }
       else if (dpl === Infinity) { releasePrey(a); a._huntSt = "cruise"; return false; }
     } else if (a._prey && !a._seizing) releasePrey(a);   // you walked in: the deer can wait
@@ -2020,6 +2477,9 @@
     let st = "cruise";
     try { st = CBZ.predatorHunt(a, target, dt, o) || "cruise"; } catch (e) { st = "cruise"; }
     a._huntSt = st;
+    // every entry into `rush` is one committed charge — the raw material for
+    // wildlifeDefenseAudit's proof that provocation reaches an actual attack.
+    if (st === "rush" && prev !== "rush") DEF.charges++;
     if (preyMode) {
       // THE HERD SEES IT COMING. Only while the hunter is actually working the
       // target — a cruising wolf is part of the scenery and must not stampede
@@ -2266,9 +2726,19 @@
     // function, and the "hunters < HUNTER_CAP" throttle that used to gate this
     // branch is predatorPack's job now. The predator branch below is the
     // degrade path only (no predator.js, or the flag off).
+    // TRIGGER 2 (see crowdCheck): crowding a bruiser IS the provocation. Tested
+    // before the flee sense below, because for these animals "you are too close"
+    // resolves to squaring up, not to bolting — and it is skipped outright for
+    // anything the shared brain already owns.
+    if (!playerGone && !shared && crowdCheck(a, dt, P, nearP)) return;
+
     if (!playerGone && (a.state === "wander" || a.state === "graze" || a.state === "idle")) {
       const spookR = sp.spook || 26;
-      if (danger < 0.5 && nearP < spookR * spookR) {
+      // `!shared` is new and it matters: an animal on a wound licence sits in a
+      // post-commit cooldown for several seconds at a time, during which
+      // predatorHunt returns cruise and this branch would flip it to flee — a
+      // moose that gores you and then trots off mid-fight, twice.
+      if (danger < 0.5 && !shared && nearP < spookR * spookR) {
         a.state = "flee"; a.stateT = cls.fleeT; a.alarm = Math.max(a.alarm, 4);
         a.heading = Math.atan2(dpz, dpx);                       // away from you
       } else if (danger >= 0.5 && !shared) {
@@ -2292,6 +2762,9 @@
       if (a.stateT <= 0) { a._idleTurned = false; a.state = "wander"; a.stateT = 1.5 + Math.random() * 2.5; }
     } else if (a.state === "flee") {
       spd = (sp.spd || 1.4) * cls.fleeM;
+      // TRIGGER 3 (see corneredCheck): nowhere left to run. The one frame where
+      // prey stops being prey.
+      if (corneredCheck(a, dt, P, nearP)) return;
       if (!playerGone && nearP < sq((sp.spook || 26) * 1.2)) {   // still on your heels — keep running
         a.heading = Math.atan2(dpz, dpx);
         a.stateT = Math.max(a.stateT, 1.5);
@@ -2413,7 +2886,16 @@
     //      through opts.move. A grazing bear and a hunting bear must move by
     //      the same rules, or the pivot-slide bugs come back in exactly the
     //      state nobody reviews.
-    landWalk(a, a.heading, spd, dt);
+    const fled = landWalk(a, a.heading, spd, dt);
+    // "NO ESCAPE BEARING", measured rather than guessed. landWalk has always
+    // returned whether it actually MOVED the body (false = the home fence or a
+    // refused step turned it back instead) and nothing has ever read that
+    // boolean. An animal that is trying to flee at speed and is not getting
+    // anywhere is, by the only definition available to this file, trapped —
+    // and that is what arms corneredCheck. It bleeds off at twice the rate it
+    // fills, so one blocked frame at a fence never counts as being cornered.
+    if (a.state === "flee" && spd > 0.1 && !fled) a._pinT = (a._pinT || 0) + dt;
+    else if (a._pinT > 0) a._pinT = Math.max(0, a._pinT - dt * 2);
     // settle any leftover attack pitch back to rest while roaming
     if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
     // ONE gait call per actor per frame: huntTick may already have run it
@@ -2447,20 +2929,25 @@
         if (a.state === "flee") a.stateT = Math.max(a.stateT || 0, cls.fleeT + extra);
         continue;
       }
-      if (danger >= 0.5) {
-        if (huntsShared(a)) {
-          // A migrated hunter's aggression belongs to predatorHunt — writing
-          // a.state = "charge" from out here would fight its FSM and skip
-          // every beat that makes the encounter (the circle, the fake-out, the
-          // menace gauge). The shot still lands: the alarm keeps it awake past
-          // the LOD freeze and turns it toward the muzzle, its own sense radius
-          // finds you from there, and any blood you spilled pulls it in through
-          // predatorHunt's chum sense for free.
-          a.alarm = Math.max(a.alarm, 5 + extra);
-          a.heading = Math.atan2(z - a.pos.z, x - a.pos.x);
-        }
+      // huntsShared FIRST, danger second. The old order asked `danger >= 0.5`
+      // before it asked who owns the animal's aggression, so an animal running
+      // the shared brain on a wound licence (a moose at danger 0.4, a bighorn
+      // at 0.2) fell into the prey branch and had `a.state = "flee"` written
+      // behind the driver's back mid-fight. Ownership is the question; danger is
+      // only the legacy path's own test.
+      if (huntsShared(a)) {
+        // A migrated hunter's aggression belongs to predatorHunt — writing
+        // a.state = "charge" from out here would fight its FSM and skip
+        // every beat that makes the encounter (the circle, the fake-out, the
+        // menace gauge). The shot still lands: the alarm keeps it awake past
+        // the LOD freeze and turns it toward the muzzle, its own sense radius
+        // finds you from there, and any blood you spilled pulls it in through
+        // predatorHunt's chum sense for free.
+        a.alarm = Math.max(a.alarm, 5 + extra);
+        a.heading = Math.atan2(z - a.pos.z, x - a.pos.x);
+      } else if (danger >= 0.5) {
         // predators: a shot close by provokes; further out they orient/creep.
-        else if (d2 < sq((cls.aggro || 16) * 1.4)) { a.state = "charge"; a.alarm = 6; }
+        if (d2 < sq((cls.aggro || 16) * 1.4)) { a.state = "charge"; a.alarm = 6; }
         else if (cls.stalk && a.group.visible !== false) { a.state = "stalk"; }
         else { a.alarm = Math.max(a.alarm, 4); a.heading = Math.atan2(z - a.pos.z, x - a.pos.x); }
       } else {
@@ -2552,6 +3039,12 @@
       // ticking its cooldown in the hunt would mean the world's only way to get
       // hungry again was for you to stand next to it.
       if (a._satT > 0) a._satT -= dt;
+      // ..and so do the two defence cooldowns, for the same reason: an animal
+      // that routed or spent its one cornered kick must be able to recover while
+      // the player is nowhere near it. Both are pure decrements on a frozen
+      // actor, which is the cheapest thing in this loop.
+      if (a._routT > 0) a._routT -= dt;
+      if (a._cornerCd > 0) a._cornerCd -= dt;
       if (a._prey && !a._prey.animal) npcHunts++;   // the global predator-vs-person cap
       let pd2 = 0;
       if (P) {
@@ -2721,8 +3214,11 @@
       //          load is bounded by the predator ceiling, halved again by the
       //          far-distance AI throttle below.
       const hungryHunter = CHAIN() && (a._satT || 0) <= 0 && predSpecies(sp) && pd2 < HUNT_SIM_R2;
+      //      (c) A DEFENDER ON A LICENCE — its rage clock only ticks inside
+      //          huntTick, so freezing it would strand an animal permanently
+      //          angry the moment you walked out of its LOD radius.
       if (grp.visible === false && (a.state === "wander" || a.state === "graze" || a.state === "idle") &&
-          (a.alarm || 0) <= 0 && (a._feedT || 0) <= 0 && !hungryHunter &&
+          (a.alarm || 0) <= 0 && (a._feedT || 0) <= 0 && !hungryHunter && (a._defendT || 0) <= 0 &&
           (!a.herd || a.herd.panic <= 0.3)) { a.turnT -= dt; continue; }
       // ---- WILDLIFE_LIVE: the living state machine ------------------------
       if (LIVE()) {
@@ -2964,6 +3460,49 @@
     };
   };
 
+  // ============================================================
+  //  THE RATCHET (BLOCK LAW #5) — DOES THE WORLD ACTUALLY FIGHT BACK?
+  //
+  //  `legacyAggroPaths` is the one that may only go DOWN and is structurally 0
+  //  while WILDLIFE_FIGHT_BACK is on: it counts living animals sitting in the
+  //  legacy `charge`/`stalk` states while the shared brain is NOT what put them
+  //  there — i.e. every remaining place a wound or a fright pokes an animal's
+  //  aggression by writing a string instead of licensing predatorHunt.
+  //
+  //  `defenders` / `defending` are printed beside it so a "fix" that simply
+  //  stops anything from ever being angry cannot pass, and `charges`,
+  //  `connects` and `corneredKicks` are cumulative counters that prove the
+  //  behaviour is REAL rather than declared — a boar that provokes and never
+  //  lands a tusk is the exact stat fiction this file's own doctrine bans.
+  //
+  //  `sharkKitAdopted` reports whether the last hand-written predator opts
+  //  bundle in the game (wildlife_shark.js's) is on predatorKit. It is the one
+  //  debt CLAUDE.md named by file.
+  // ============================================================
+  CBZ.wildlifeDefenseAudit = function () {
+    let defenders = 0, defending = 0, legacy = 0, live = 0, eaters = 0, hunting = 0;
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (!a || a.dead || a.external) continue;
+      live++;
+      const sp = a.species; if (!sp) continue;
+      if (defendsSpecies(sp)) defenders++;
+      if (predSpecies(sp)) eaters++;
+      if ((a._defendT || 0) > 0) defending++;
+      if (a._huntSt && a._huntSt !== "cruise") hunting++;
+      // the legacy count: hot without the shared brain owning it.
+      if ((a.state === "charge" || a.state === "stalk") && !huntsShared(a)) legacy++;
+    }
+    return {
+      defenders: defenders, defending: defending, eaters: eaters, hunting: hunting,
+      provoked: DEF.provoked, charges: DEF.charges, connects: DEF.connects,
+      corneredKicks: DEF.corner, routs: DEF.routs, crowded: DEF.crowd, calfGuards: DEF.young,
+      sharkKitAdopted: !!CBZ.sharkKitAdopted,
+      legacyAggroPaths: legacy, live: live,
+      predator: CBZ.predatorAudit ? CBZ.predatorAudit() : null,
+    };
+  };
+
   // public: let other systems (dogs.js) read/kill wildlife.
   CBZ.cityWildlifeList = function () { return animals; };
   CBZ.cityWildlifeSkin = skin;
@@ -3009,8 +3548,17 @@
   //  (Each survives as the flag-off / no-predator.js degrade path only.)
   // ============================================================
   (function declareAdoption() {
+    //   · defend-when-hurt  — A WOUND IS A PROVOCATION. Every damage class
+    //     reaches an animal through cityWildlifeHit, and the bruiser band
+    //     answers it by LICENSING predatorHunt (provoke, square up, commit,
+    //     wheel, withdraw) instead of poking a legacy `state = "charge"`.
+    //   · cornered-defense  — prey with nowhere to run takes ONE desperate
+    //     kick, through the same licence and the same predatorCommit. Listed
+    //     because it is a real "an animal hits you" path and an unlisted path
+    //     is an unmeasured one.
     const ids = ["wildlife:predator-charge", "wildlife:herd-charge",
-                 "wildlife:snake-constrict", "wildlife:snake-strike"];
+                 "wildlife:snake-constrict", "wildlife:snake-strike",
+                 "wildlife:defend-when-hurt", "wildlife:cornered-defense"];
     for (let i = 0; i < ids.length; i++) {
       if (typeof CBZ.predatorAdopt === 'function') {
         try { CBZ.predatorAdopt(ids[i]); } catch (e) {}

@@ -146,6 +146,7 @@
   const sources = [];                    // candidate finders (peds, cars, zones…)
   const zones = [];                      // point+radius interaction spots
   const descs = Object.create(null);     // kind -> fn(t,ctx) -> {label, note}
+  const verbCards = [];                  // multi-verb card providers (see below)
   let seq = 0;
   let dirty = false;                     // force a panel rebuild next pass
 
@@ -189,6 +190,20 @@
     i = sources.findIndex((s) => s.id === id); if (i >= 0) { sources.splice(i, 1); dirty = true; return true; }
     return false;
   }
+  // is an option with this id registered on any layer? An AUDIT probe (the
+  // dialogue ratchet's legacy-talk census reads this instead of guessing at
+  // registrations from file contents) — never a gameplay gate.
+  function hasOption(id) {
+    for (const k in layers) { const a = layers[k]; for (let i = 0; i < a.length; i++) if (a[i].id === id) return true; }
+    return false;
+  }
+  // A VERB-CARD PROVIDER generalises dualRideRows (the airliner BOARD/HIJACK
+  // card) to other systems: fn(pick, rows, ctx) may return a REPLACEMENT rows
+  // array built from the same gated pool (rows._pass) — labelled decision rows
+  // instead of the single YES. Rows may carry `rows.note`, a spoken line the
+  // card shows in place of the proposal (dialogue's "what they just said").
+  // First provider to return rows wins; returning null passes through.
+  function registerVerbCard(fn) { if (typeof fn === "function") verbCards.push(fn); return verbCards.length; }
 
   // ---- ctx: the ACTING player, packaged. Gates read THIS, never globals -----
   // (multiplayer-shaped: a net layer can hand a remote player's ctx in later)
@@ -554,6 +569,16 @@
     }
     if (!pick) { if (current) hidePanel(); return; }
 
+    // EXTENDED VERB CARDS — the airliner two-verb grammar, opened to other
+    // systems through registerVerbCard (city/dialogue.js's two-answer card is
+    // the second consumer). Runs BEFORE the silent-ride fold so a provider
+    // sees every candidate; providers self-gate on pick.t/kind.
+    for (let vi = 0; vi < verbCards.length; vi++) {
+      let vr = null;
+      try { vr = verbCards[vi](pick, rows, ctx); } catch (e) {}
+      if (vr && vr.length) { rows = vr; break; }
+    }
+
     // RIDES: no card. You just press E / tap to take it (cityTryNearestRide and
     // touch-tap both fire the board verb without this panel). Keeps the HUD from
     // announcing "you may now board" like a tutorial. Sole exception: the civil
@@ -613,6 +638,7 @@
     let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "|" +
       (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
     for (const r of rows) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
+    if (rows.note != null) fp += "N:" + rows.note + ";";   // a new spoken line is a new card
     current = pick; currentRows = rows; currentScore = pick.score;
     dom();
     if (noteEl) {
@@ -627,8 +653,16 @@
       // the bare verb phrase, not a "…?" question (the YES/NO rows already
       // carry the decision; a button is a thing to do, not a sentence).
       const touchVerbsNote = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
-      noteEl.textContent = (rows.dualRide || touchVerbsNote) ? "" : (rows[0].proposal || "Continue");
-      noteEl.style.display = (rows.dualRide || touchVerbsNote) ? "none" : "";
+      // A verb-card provider may pin a SPOKEN LINE to the card (rows.note —
+      // dialogue's "what they just said to you"). The line IS the content, so
+      // it outranks both hides and shows on desktop and touch alike.
+      if (rows.note != null) {
+        noteEl.textContent = rows.note;
+        noteEl.style.display = rows.note ? "" : "none";
+      } else {
+        noteEl.textContent = (rows.dualRide || touchVerbsNote) ? "" : (rows[0].proposal || "Continue");
+        noteEl.style.display = (rows.dualRide || touchVerbsNote) ? "none" : "";
+      }
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;
@@ -747,6 +781,7 @@
   CBZ.interactions = {
     REACH,
     register, registerFor, registerZone, registerSource, describe, unregister,
+    registerVerbCard, hasOption,
     ctx: buildCtx,
     current: function () { return current ? { target: current.t, kind: current.kind, gunpoint: !!current.gunpoint, proposal: currentRows[0] && currentRows[0].proposal } : null; },
     hasSlot: hasSlot,

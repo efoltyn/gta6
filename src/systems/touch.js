@@ -66,6 +66,26 @@
                           a claimed finger (stick / slide-hold / UI) is
                           never half a pinch. false = legacy gate (any
                           two touches pinched, killing move+look).
+     TOUCH_TP_CAMERA_V2 — the third-person-on-iPad pass (owner 2026-07-28,
+                          "iPad needs third person improved"). Master flag
+                          for the three below plus systems/camera.js's
+                          CAM_TP_TOUCH_ZOOM / CAM_TOUCH_RECENTER /
+                          CAM_TOUCH_PITCH_FULL.
+     TOUCH_LOOK_ACCEL   — pointer acceleration on the LOOK drag only. A
+                          thumb has ~1/3 of a mouse's usable travel, so a
+                          flat px→radians ramp has to choose between fine
+                          aim and being able to turn round; the curve
+                          gives both (identity below ACC_LO, ×ACC_MAX at
+                          a flick). NEVER while ADS/scoped — precision
+                          there is the whole point — and never on the
+                          aim/scope finger's fine-aim drag.
+     TOUCH_LOOK_GLIDE   — a flick keeps turning for ~0.35 s and decays.
+                          Third person only, never while aiming, and any
+                          new touch kills it dead.
+     TOUCH_RECENTER     — the level-the-view button (on foot in the icon
+                          cluster; a RECENTER pill in the vehicle layer).
+                          On foot it SHOWS ITSELF only when the view is
+                          actually off-level, so the cluster stays calm.
 ============================================================ */
 (function () {
   "use strict";
@@ -83,7 +103,12 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_UP == null) CBZ.CONFIG.TOUCH_AIM_UP = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_DRAG == null) CBZ.CONFIG.TOUCH_AIM_DRAG = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE == null) CBZ.CONFIG.TOUCH_LOOK_WHILE_MOVE = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 == null) CBZ.CONFIG.TOUCH_TP_CAMERA_V2 = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_ACCEL == null) CBZ.CONFIG.TOUCH_LOOK_ACCEL = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_GLIDE == null) CBZ.CONFIG.TOUCH_LOOK_GLIDE = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER == null) CBZ.CONFIG.TOUCH_RECENTER = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
+  const TPV2 = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
   const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
   const SCOPEUP = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_SCOPE_UP !== false;
@@ -113,6 +138,27 @@
   const LOOK_STALE_MS = 3000;  // look watchdog: no move this long = ghost
   const WALK_MAX = 46;        // don't set off on a cross-map trek from one tap
   const WALK_TIMEOUT = 14;    // give up (moving target / stuck) after this many s
+  // TOUCH_LOOK_ACCEL — the curve, in PIXELS PER MILLISECOND of finger travel.
+  // Below ACC_LO the gain is exactly 1, so every slow, deliberate drag is the
+  // old sensitivity to the last bit; between ACC_LO and ACC_HI it smoothsteps
+  // to ACC_MAX. Calibration: a careful thumb tracks ~250 px/s (0.25) and stays
+  // at 1.00; an ordinary turn runs ~1200 px/s (1.2) → ~1.55; a hard flick
+  // ~3000 px/s (3.0) → the 2.10 ceiling. So "turn round to see who shot me" is
+  // one flick instead of three drags, and nothing about aiming changed.
+  const ACC_LO = 0.40, ACC_HI = 2.60, ACC_MAX = 2.10;
+  // TOUCH_LOOK_GLIDE — release momentum. GLIDE_MIN is the release speed below
+  // which nothing glides (so an ordinary settle-and-lift never drifts), CAP the
+  // ceiling, and GLIDE_K the exponential decay rate: e^-8 ≈ 0.0003, so the
+  // whole coast is spent inside ~0.35 s. Deliberately short — this is follow-
+  // through, not a spinning chair.
+  const GLIDE_MIN = 900, GLIDE_CAP = 2800, GLIDE_K = 8.0;
+  // TOUCH_RECENTER — the on-foot button appears past OFF_SHOW radians away from
+  // the resting pitch and hides again under OFF_HIDE. Hysteresis, so a thumb
+  // resting near the boundary can never make it blink. 0.34 rad is ~19.5°:
+  // wide enough that ordinary "look a bit down the street" browsing never
+  // summons it, tight enough that a view genuinely stuck at the sky or the
+  // pavement always offers the way back.
+  const REC_OFF_SHOW = 0.34, REC_OFF_HIDE = 0.14;
 
   let built = false, enabled = false;
   // GAIT/STANCE state: sprint lives in the stick (rim deflection = shift) and
@@ -120,6 +166,7 @@
   // hysteresis so nothing flaps at a boundary. Desktop never runs any of this.
   let stamOk = true, shiftOwned = false, sprintBand = false, stickMag = 0;
   let crouchLatch = false, crouchOwned = false;
+  let recenShown = false;      // TOUCH_RECENTER visibility latch (hysteresis)
   const stick = { id: null, cx: 0, cy: 0, sx: 0, sy: 0, t0: 0, moved: 0 };
   const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0, t0: 0, moved: 0, free: false, seen: 0 };
   const walk = { on: false, kind: null, rec: null, t: 0 };
@@ -147,6 +194,10 @@
     scope: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v6M12 16.5v6M1.5 12h6M16.5 12h6"/></svg>',
     aim: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8"/><path d="M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8"/><path d="M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
     homing: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M12 4v-2.5M12 22.5V20M4 12H1.5M22.5 12H20"/></svg>',
+    // RECENTER — two chevrons collapsing onto a horizon line: "bring the view
+    // back to level". Deliberately unlike every other glyph in this cluster
+    // (reticle / arc / eye / brackets / rings) so it reads at a glance.
+    level: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12h19"/><path d="M8 6.6 12 10.4 16 6.6"/><path d="M8 17.4 12 13.6 16 17.4"/></svg>',
   };
   function btn(id, cls, glyph, label) {
     return '<button class="' + cls + '" id="' + id + '" type="button" aria-label="' + label + '">' + glyph + "</button>";
@@ -185,6 +236,7 @@
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
       btn("thoming", "tbtn tsm", SVG.homing, "Homing on/off") +
+      btn("trecen", "tbtn tsm", SVG.level, "Recenter the view") +
       '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" +
       "</div>";
     document.body.appendChild(wrap);
@@ -205,6 +257,15 @@
       if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn && CBZ.lockonHomingOn() ? 1.25 : 0.8 });
     });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
+    // RECENTER (TOUCH_RECENTER) — a mouse levels the view in one flick; a thumb
+    // has to drag back across the whole screen, which is why every console
+    // third-person game binds this to a stick click. Camera-owned verb, so it
+    // calls the camera agent's hook and this file writes no pitch of its own.
+    tapBtn(document.getElementById("trecen"), () => {
+      if (CBZ.camRecenter) CBZ.camRecenter();
+      glide.vx = glide.vy = 0;
+      if (CBZ.sfx) CBZ.sfx("key", { volume: 0.22, pitch: 1.1 });
+    });
     // AIM (ADS) — the missing iPad right-mouse: hold pulls the camera in /
     // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
     // gamepad triggers use. Hold = aim, release = unaim.
@@ -226,22 +287,55 @@
     else { holdBtn("taim", aimFn); holdBtn("tscope", scopeFn); }
     if (SLIDE) document.getElementById("tbtns").classList.add("tslide");
     if (FIXED) baseEl.classList.add("tfixed");
+    // RECENTER starts hidden: it is a self-summoning control (see the visibility
+    // rule in the onAlways below) and a one-frame flash of a button that then
+    // vanishes is worse than never showing it.
+    const rc0 = document.getElementById("trecen"); if (rc0) rc0.style.display = "none";
   }
 
-  // press-and-hold button (jump/fire)
+  // press-and-hold button (jump/fire). It now tracks WHICH fingers are on it
+  // rather than counting bare events, for the reason the rest of this file
+  // already documents at length: a swallowed touchend (system edge swipe,
+  // notification shade, screenshot chord) is a real and routine event on iPad,
+  // and the slide-holds got a stale sweep for exactly that while the two
+  // MOST-pressed buttons in the game — FIRE and JUMP — never did. A lost
+  // touchend on JUMP left CBZ.keys[" "] held down until the next blur, which
+  // in a helicopter is the collective pinned up.
+  const holdBtns = [];
   function holdBtn(id, fn) {
     const b = document.getElementById(id);
-    const on = (e) => { e.preventDefault(); b.classList.add("on"); fn(true); };
-    const off = (e) => { e.preventDefault(); b.classList.remove("on"); fn(false); };
-    b.addEventListener("touchstart", on, { passive: false });
-    b.addEventListener("touchend", off, { passive: false });
-    b.addEventListener("touchcancel", off, { passive: false });
-    b.addEventListener("mousedown", on); b.addEventListener("mouseup", off);
+    const rec = { el: b, ids: new Set(), born: 0 };
+    const down = (t) => {
+      if (rec.ids.has(t)) return;
+      rec.ids.add(t); rec.born = performance.now();
+      if (rec.ids.size === 1) { b.classList.add("on"); fn(true); }
+    };
+    const up = (t) => {
+      if (!rec.ids.delete(t)) return;
+      if (rec.ids.size === 0) { b.classList.remove("on"); fn(false); }
+    };
+    rec.release = function () {
+      if (!rec.ids.size) return;
+      rec.ids.clear(); b.classList.remove("on");
+      try { fn(false); } catch (e) {}
+    };
+    holdBtns.push(rec);
+    b.addEventListener("touchstart", (e) => { e.preventDefault(); for (const t of e.changedTouches) down(t.identifier); }, { passive: false });
+    const endF = (e) => { e.preventDefault(); for (const t of e.changedTouches) up(t.identifier); };
+    b.addEventListener("touchend", endF, { passive: false });
+    b.addEventListener("touchcancel", endF, { passive: false });
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); down("m"); });
+    b.addEventListener("mouseup", () => up("m"));
   }
-  // tap button (toggle/one-shot)
+  // tap button (toggle/one-shot). The .on flash is not decoration: these fire on
+  // touchSTART with no hold state, so without it a tap that DID work is
+  // indistinguishable from a tap that missed the 52 px circle — and on a
+  // stateless verb (swap / reload / recenter) there is no other confirmation.
+  // The vehicle layer's tapBtn has always flashed; this is the cluster catching up.
   function tapBtn(b, fn) {
-    b.addEventListener("touchstart", (e) => { e.preventDefault(); fn(); }, { passive: false });
-    b.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
+    const flash = () => { b.classList.add("on"); setTimeout(() => b.classList.remove("on"), 110); };
+    b.addEventListener("touchstart", (e) => { e.preventDefault(); flash(); fn(); }, { passive: false });
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); flash(); fn(); });
   }
 
   // The trigger itself: in first-person it shoots/punches via the FPS module;
@@ -327,7 +421,10 @@
         // This finger is a slide-touch, never the look slot: the look
         // claim/adopt paths and the stale-watchdog all exclude slideTouches.
         if (AIMDRAG()) {
-          applyLookDelta(t.clientX - rec.lx, t.clientY - rec.ly);
+          // accel=false: this IS the fine-aim finger. TOUCH_LOOK_ACCEL exists
+          // so a thumb can turn round in one flick; applying it here would
+          // curve the one drag whose entire job is to be linear.
+          applyLookDelta(t.clientX - rec.lx, t.clientY - rec.ly, false);
           rec.lx = t.clientX; rec.ly = t.clientY;
         }
         if (!rec.rect) continue;
@@ -533,13 +630,58 @@
     return _ncHolder;
   }
 
+  // TOUCH_LOOK_ACCEL / TOUCH_LOOK_GLIDE state. `glide` carries the release
+  // velocity in PIXELS PER SECOND — the same unit applyLookDelta already eats —
+  // so the coast runs through the identical clamp/friction/scoped-scaling path
+  // a finger does and can never drift out of agreement with it.
+  const glide = { vx: 0, vy: 0 };
+  let _accT = 0, _flkX = 0, _flkY = 0, _flkT = 0;
+  const lookAccelOn = () => TPV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_LOOK_ACCEL !== false);
+  const lookGlideOn = () => TPV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_LOOK_GLIDE !== false);
+  // Pointer acceleration, in px/ms of finger travel. Identity below ACC_LO, and
+  // identity outright while ADS/scoped — a magnified reticle is the one place a
+  // non-linear ramp would be a bug rather than a feature.
+  function accelGain(dx, dy) {
+    if (!lookAccelOn()) return 1;
+    if (CBZ.isADS && CBZ.isADS()) return 1;
+    if (CBZ.fpsScoped && CBZ.fpsScoped()) return 1;
+    const now = performance.now();
+    const ms = Math.max(4, Math.min(60, now - _accT));   // clamp: a dropped frame is not a flick
+    _accT = now;
+    const v = Math.hypot(dx, dy) / ms;
+    if (v <= ACC_LO) return 1;
+    const u = Math.min(1, (v - ACC_LO) / (ACC_HI - ACC_LO));
+    return 1 + (ACC_MAX - 1) * u * u * (3 - 2 * u);
+  }
+  // GLIDE, ticked before the camera agent (onAlways 50) so the coast is
+  // consumed the same frame it is produced. It is third-person follow-through:
+  // it stands down in first person, while aiming, while the walk-to steer owns
+  // the yaw, and the instant any finger touches the glass.
+  CBZ.onAlways(49.5, function (dt) {
+    if (!glide.vx && !glide.vy) return;
+    if (!enabled || !lookGlideOn() || !CBZ.game || CBZ.game.state !== "playing" ||
+        CBZ.cityMenuOpen || walk.on || look.id !== null || slideTouches.size ||
+        (CBZ.fps && CBZ.fps.active) || (CBZ.isADS && CBZ.isADS())) { glide.vx = glide.vy = 0; return; }
+    const d = Math.max(0.001, Math.min(0.05, dt || 0.016));
+    applyLookDelta(glide.vx * d, glide.vy * d, false);
+    const k = Math.exp(-GLIDE_K * d);
+    glide.vx *= k; glide.vy *= k;
+    if (Math.hypot(glide.vx, glide.vy) < 40) glide.vx = glide.vy = 0;
+  });
+
   // THE camera-turn math, shared by the look-drag slot and the aim/scope
   // finger's fine-aim drag (TOUCH_AIM_DRAG) so the two can never diverge:
   // same SENS, same fpsLookSensMul scoped/ADS scaling (without it, scoped
   // touch look moved ~4.7x the world angle per pixel vs desktop — the old
   // weapons-agent finding), same camera-agent pitch envelope, same wider
-  // first-person aim-pitch ride.
-  function applyLookDelta(dx, dy) {
+  // first-person aim-pitch ride — and now the same acceleration curve, applied
+  // in exactly ONE place so no consumer can grow a second one.
+  // accel=false is the FINE-AIM path: the aim/scope finger's drag and the glide
+  // coast both pass false, because a curve applied to a curve compounds and
+  // fine aim must stay linear by definition.
+  function applyLookDelta(dx, dy, accel) {
+    if (CBZ.camRecenterCancel) CBZ.camRecenterCancel();   // the hand outranks the ease
+    if (accel !== false) { const gAcc = accelGain(dx, dy); dx *= gAcc; dy *= gAcc; }
     const sMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     // TOUCH_AIM_ASSIST — reticle FRICTION: ease look sensitivity down while the
     // crosshair sits over/near a lock-on candidate so the reticle sticks a touch
@@ -876,6 +1018,7 @@
   window.addEventListener("touchstart", (e) => {
     enable();
     sweepStale(e);
+    glide.vx = glide.vy = 0;   // ANY new finger stops the coast dead (incl. UI taps)
     for (const t of e.changedTouches) {
       if (inUI(t.target)) continue;
       cancelWalk();   // any deliberate touch takes back manual control
@@ -945,8 +1088,19 @@
     }
     if (pa && pb) {
       const d = Math.hypot(pa.clientX - pb.clientX, pa.clientY - pb.clientY);
+      // ONE call, and it now actually reaches the city boom: camera.js's camZoom
+      // routes a touch pinch into the CAM_TP_TOUCH_ZOOM trim as well as the
+      // legacy zoomTarget, so this line is unchanged and the gesture stopped
+      // being a no-op on foot and in every vehicle. (It was dead the whole time
+      // CAM_TP_V2 has shipped — the locked boom never read zoomTarget.)
       if (pinchPrev && CBZ.camZoom) CBZ.camZoom((pinchPrev - d) * 0.03);
       pinchPrev = d;
+      // A pinch is a deliberate camera input: keep the vehicle's auto-recenter
+      // suspended for it exactly as a look-drag does, or the car whips the yaw
+      // back 0.8 s into a two-finger adjustment. camGlance, NOT camFreeLook —
+      // this gesture has no release edge to pair with a latching hold.
+      const Pp = CBZ.player;
+      if (CBZ.camGlance && Pp && (Pp.driving || Pp._aircraft)) CBZ.camGlance();
       if (!strict) { clearMove(); return; }
       // strict pinch: both pinch fingers are free/world fingers, so the stick
       // (if a third finger holds it) KEEPS driving movement. The look slot may
@@ -970,7 +1124,17 @@
         stick.moved = Math.max(stick.moved, Math.hypot(t.clientX - stick.sx, t.clientY - stick.sy));
         stickDeflect(t.clientX, t.clientY);
       } else if (t.identifier === look.id) {
-        look.seen = performance.now();
+        const nowL = performance.now();
+        // FLICK VELOCITY for the release glide: an exponentially-weighted px/s
+        // estimate rather than the last raw delta, because the final touchmove
+        // before a lift is routinely a near-zero jitter sample and reading THAT
+        // as the throw speed is why naive momentum implementations feel dead.
+        const dtL = Math.max(1, Math.min(80, nowL - (look.seen || nowL)));
+        const wV = Math.min(1, dtL / 45);
+        _flkX += ((t.clientX - look.lx) * 1000 / dtL - _flkX) * wV;
+        _flkY += ((t.clientY - look.ly) * 1000 / dtL - _flkY) * wV;
+        _flkT = nowL;
+        look.seen = nowL;
         look.moved = Math.max(look.moved, Math.hypot(t.clientX - look.sx, t.clientY - look.sy));
         applyLookDelta(t.clientX - look.lx, t.clientY - look.ly);   // shared with the aim-drag (one math)
         look.lx = t.clientX; look.ly = t.clientY;
@@ -1006,6 +1170,16 @@
         } else if (wasTap) { try { tapWorld(t.clientX, t.clientY); } catch (err) {} }
       } else if (t.identifier === look.id) {
         const wasTap = look.moved < 12 && performance.now() - look.t0 < 330;
+        // THROW THE VIEW (TOUCH_LOOK_GLIDE). Only a genuine flick qualifies —
+        // fast enough (GLIDE_MIN), still moving at the moment of the lift
+        // (a sample older than 90 ms means the finger had already stopped and
+        // a coast would be a lie), and never out of a tap.
+        const gv = Math.hypot(_flkX, _flkY);
+        if (!wasTap && lookGlideOn() && gv > GLIDE_MIN && performance.now() - _flkT < 90) {
+          const s = Math.min(1, GLIDE_CAP / gv);
+          glide.vx = _flkX * s; glide.vy = _flkY * s;
+        }
+        _flkX = _flkY = 0;
         releaseLook();
         if (wasTap) { try { tapWorld(t.clientX, t.clientY); } catch (err) {} }
       }
@@ -1032,6 +1206,7 @@
   //      for many seconds is NORMAL (running in a straight line).
   //  (c) blur / hidden tab / pagehide drops every claim, latch and held key.
   function sweepStale(e) {
+    sweepHoldBtns(e);
     if (stick.id === null && look.id === null && slideTouches.size === 0) return;
     const born = e.type === "touchstart" ? e.changedTouches : null;
     const alive = (id) => {
@@ -1053,17 +1228,42 @@
       for (const [id, rec] of slideTouches) if (!alive(id) && now - (rec.born || 0) > 60) rec.release();
     }
     if (look.id !== null && performance.now() - look.seen > LOOK_STALE_MS) {
+      // (see sweepHoldBtns below for the hold-button half of this sweep)
       let own = false;
       const C = e.changedTouches;
       for (let i = 0; i < C.length; i++) if (C[i].identifier === look.id) { own = true; break; }
       if (!own) releaseLook();
     }
   }
+  // The hold-button half of the sweep. A rec whose fingers are ALL gone from
+  // the live e.touches list is a ghost and is released. Same 60 ms newborn
+  // grace the slide claims need and for the identical reason: the button's own
+  // touchstart runs at the target phase, BEFORE this window-level listener sees
+  // the very same event, so a freshly-pressed finger would otherwise look like
+  // a recycled ghost id and be released the instant it was claimed. Mouse
+  // holds ("m") are never swept — a mouse has no lost-touchend failure mode.
+  function sweepHoldBtns(e) {
+    if (!holdBtns.length) return;
+    const now = performance.now();
+    for (let i = 0; i < holdBtns.length; i++) {
+      const r = holdBtns[i];
+      if (!r.ids.size || now - r.born < 60) continue;
+      let live = false;
+      r.ids.forEach(function (id) {
+        if (id === "m") { live = true; return; }
+        const L = e.touches;
+        for (let j = 0; j < L.length; j++) if (L[j].identifier === id) { live = true; return; }
+      });
+      if (!live) r.release();
+    }
+  }
   // Losing the page mid-touch (app switch, tab change, phone lock) drops
   // every claim and held control — nothing may survive a refocus.
   function clearAllTouchState() {
     if (!enabled) return;   // layer never armed → desktop stays byte-identical
+    for (let i = 0; i < holdBtns.length; i++) { try { holdBtns[i].release(); } catch (e) {} }
     releaseStick(); releaseLook(); pinchPrev = 0;
+    glide.vx = glide.vy = 0; _flkX = _flkY = 0;   // no coast survives a refocus
     for (const rec of Array.from(slideTouches.values())) rec.release();
     fireHolds = 0;
     if (fireOn) {
@@ -1072,7 +1272,10 @@
       if (fb) fb.classList.remove("on");
       try { fireAction(false); } catch (err) {}
     }
-    if (CBZ.keys) CBZ.keys[" "] = false;   // tjump's element-level hold too
+    // Backstop: the holdBtns release loop above already covers JUMP, but these
+    // two lines predate it and cost nothing, so they stay as the belt to its
+    // braces — a stuck Space is the single worst thing to leave behind.
+    if (CBZ.keys) CBZ.keys[" "] = false;
     const jb = document.getElementById("tjump");
     if (jb) jb.classList.remove("on");
   }
@@ -1120,5 +1323,115 @@
       hm.style.opacity = (CBZ.lockonHomingOn && CBZ.lockonHomingOn()) ? "" : "0.38";
     }
     syncInteractionDock();
+    // RECENTER: THIRD PERSON ONLY, and only while it would actually do
+    // something. In first person cam.pitch IS your aim, so levelling it is a
+    // hostile act, not a convenience; and a button that is always lit but
+    // usually a no-op is exactly the HUD clutter this file exists to avoid.
+    // Hysteresis (SHOW 0.20 rad ≈ 11.5°, HIDE 0.075) so a thumb parked near the
+    // boundary can never make it blink.
+    const rc = document.getElementById("trecen");
+    if (rc) {
+      const tpNow = !(CBZ.fps && CBZ.fps.active) && !(CBZ.cityArmorActive && CBZ.cityArmorActive());
+      const off = (TPV2() && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) &&
+        tpNow && CBZ.camRecenter && CBZ.camRecenterOff) ? CBZ.camRecenterOff() : 0;
+      recenShown = recenShown ? off > REC_OFF_HIDE : off > REC_OFF_SHOW;
+      const want = recenShown ? "" : "none";
+      if (rc.style.display !== want) rc.style.display = want;
+    }
   });
+
+  /* ==========================================================================
+     THE VERB LEDGER — CBZ.touchAudit()
+
+     WHY this exists at all, in one sentence: city/strategic.js shipped
+     CBZ.strategicBombDrop / strategicPayloadCycle / strategicBombHold /
+     strategicBombCameraHold with the comment "the touch layer wires these to
+     pills", and for the B-2's whole life NOTHING CALLED ANY OF THEM — the
+     seams were built, published, documented and never consumed, and no counter
+     anywhere could say so. A keyboard verb with no thumb is invisible until
+     somebody plays on an iPad and finds a control that does not exist.
+
+     So the sweep IS the ledger. Every row below is a keyboard/mouse verb this
+     wave audited; `wired` is stamped by whichever touch file actually draws a
+     control for it (never by declaring the row), and `hook` is the game-side
+     function the control calls — a row whose hook is missing reports as
+     `noHook` rather than covered, which is what keeps a degrade-safe
+     feature-detect from reading as a lie.
+
+     `uncovered` is the number that matters and it may only ever go DOWN.
+     `skipped` is separate ON PURPOSE: a verb deliberately left off the glass
+     (with its reason) must not be able to hide inside the covered count.
+  ========================================================================== */
+  const _verbs = new Map();
+  // Declare an audited keyboard verb. ctx = where it lives, key = the desktop
+  // input it mirrors, hook = the CBZ seam a touch control must call (null when
+  // the control writes CBZ.keys directly, which needs no seam).
+  CBZ.touchVerb = function (id, spec) {
+    spec = spec || {};
+    const row = _verbs.get(id) || { id: id, wired: null };
+    row.ctx = spec.ctx || row.ctx || "";
+    row.key = spec.key || row.key || "";
+    row.hook = spec.hook !== undefined ? spec.hook : row.hook;
+    if (spec.skip) row.skip = spec.skip;
+    _verbs.set(id, row);
+    return row;
+  };
+  // Stamped by the file that draws the control, at LOAD — so the audit reports
+  // what the layer is WIRED with, not what a session happened to render.
+  CBZ.touchVerbWired = function (id, control) {
+    const row = _verbs.get(id) || CBZ.touchVerb(id, {});
+    row.wired = control || true;
+    return row;
+  };
+  CBZ.touchAudit = function () {
+    const out = { verbs: 0, covered: 0, uncovered: [], skipped: [], noHook: [], controls: 0 };
+    _verbs.forEach(function (r) {
+      if (r.skip) { out.skipped.push(r.id + " (" + r.skip + ")"); return; }
+      out.verbs++;
+      if (r.wired) out.controls++;
+      const hookOk = !r.hook || typeof CBZ[r.hook] === "function";
+      if (r.wired && hookOk) out.covered++;
+      else if (r.wired) out.noHook.push(r.id + " → CBZ." + r.hook);
+      else out.uncovered.push(r.id);
+    });
+    out.touch = !!enabled;
+    return out;
+  };
+
+  // ---- the sweep (on-foot cluster + look layer; the vehicle/aircraft rows are
+  // declared and stamped by systems/touch_vehicle.js, which owns those controls)
+  CBZ.touchVerb("move", { ctx: "foot", key: "WASD", hook: null });
+  CBZ.touchVerb("sprint", { ctx: "foot", key: "Shift", hook: null });
+  CBZ.touchVerb("crouch", { ctx: "foot", key: "C", hook: null });
+  CBZ.touchVerb("jump", { ctx: "foot", key: "Space", hook: null });
+  CBZ.touchVerb("look", { ctx: "any", key: "mouse", hook: null });
+  CBZ.touchVerb("fire", { ctx: "foot", key: "LMB", hook: null });
+  CBZ.touchVerb("aim", { ctx: "foot", key: "RMB", hook: "fpsSetAim" });
+  CBZ.touchVerb("scope", { ctx: "foot", key: "RMB/scope", hook: "fpsCanScope" });
+  CBZ.touchVerb("reload", { ctx: "foot", key: "R", hook: "fpsReload" });
+  CBZ.touchVerb("weapon-next", { ctx: "foot", key: "Q/wheel", hook: "fpsNextWeapon" });
+  CBZ.touchVerb("view-toggle", { ctx: "foot", key: "V", hook: "toggleFPS" });
+  CBZ.touchVerb("homing", { ctx: "foot", key: "H", hook: "lockonHomingSet" });
+  CBZ.touchVerb("interact", { ctx: "foot", key: "E", hook: null });
+  CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", hook: "camRecenter" });
+  CBZ.touchVerb("cam-zoom", { ctx: "any", key: "wheel", hook: "camZoom" });
+  // Declared and NOT drawn, each with the reason, so the count cannot launder them:
+  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check — the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
+  CBZ.touchVerb("shoulder-swap", { ctx: "foot", key: "MMB", skip: "CBZ.camSetShoulder is one call away, but a 6th icon for a mirrored 0.68 m offset is not worth the corner" });
+
+  CBZ.touchVerbWired("move", "#tstick");
+  CBZ.touchVerbWired("sprint", "#tstick rim");
+  CBZ.touchVerbWired("crouch", "#tstick press");
+  CBZ.touchVerbWired("jump", "#tjump");
+  CBZ.touchVerbWired("look", "look drag");
+  CBZ.touchVerbWired("fire", "#tfire");
+  CBZ.touchVerbWired("aim", "#taim");
+  CBZ.touchVerbWired("scope", "#tscope");
+  CBZ.touchVerbWired("reload", "#treload");
+  CBZ.touchVerbWired("weapon-next", "#tswap");
+  CBZ.touchVerbWired("view-toggle", "#tview");
+  CBZ.touchVerbWired("homing", "#thoming");
+  CBZ.touchVerbWired("interact", "world tap / .tpill");
+  CBZ.touchVerbWired("cam-recenter", "#trecen");
+  CBZ.touchVerbWired("cam-zoom", "pinch");
 })();

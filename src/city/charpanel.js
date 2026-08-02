@@ -659,6 +659,7 @@
   //  STYLES (self-mounted once)
   // ============================================================
   function ensureCss() {
+    if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }   // shared item-icon sizing
     if (document.getElementById("cpCss")) return;
     const st = document.createElement("style");
     st.id = "cpCss";
@@ -701,6 +702,7 @@
       "#cpInv .cpGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:7px}" +
       "#cpInv .cpItem{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;height:58px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid rgba(232,236,242,.1);padding:4px}" +
       "#cpInv .cpItem .ic{font-size:20px;line-height:1.05}" +
+      "#cpInv .cpItem .itemIcn{width:28px;height:28px}" +
       "#cpInv .cpItem .nm{font-size:8px;color:#9fb0c6;text-align:center;line-height:1.05;margin-top:2px;max-width:54px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       "#cpInv .cpItem .ct{position:absolute;right:3px;top:2px;font-size:9px;font-weight:800;color:#fff;background:rgba(8,11,17,.85);border-radius:6px;padding:0 4px}" +
       "#cpInv .cpEmpty{font-size:12px;color:#7f8ba0;padding:8px 2px}" +
@@ -816,15 +818,16 @@
   let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invHot = null, invBuild = null;
   let invOpen = false, invBigSig = "";
 
-  const LOOT_ICON = { drug: "", wearable: "", valuable: "", throwable: "", tool: "", food: "", weapon: "", ammo: "", resource: "" };
-  const ITEM_ICON = {
-    Grenade: "", "C4 Charge": "", Rolex: "", Omega: "", "Audemars Piguet": "", "Patek Philippe": "",
-    "Richard Mille": "", "Gold Bar": "", "Gold Chain": "", "Diamond Ring": "", "Engagement Ring": "",
-    Medkit: "", "Body Armor": "", Weed: "", Coke: "", "Cash Stack": "", "Briefcase of Cash": "",
-    Phone: "", Laptop: "", Wallet: "", Burger: "", Soda: "",
-    // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
-    Wood: "", Stone: "", Scrap: "", Hatchet: "", Pickaxe: "",
-  };
+  // The LOOT_ICON / ITEM_ICON glyph tables that used to sit here were the THIRD
+  // copy of the same idea, and (like the other three) the repo-wide emoji strip
+  // had emptied every entry to "" — so this grid drew a blank box for every item
+  // you owned. Faces come from city/itemicons.js now, drawn from the item's KIND
+  // so runtime registrations (species meat, pelts, the fishing catch) are covered
+  // too. Degrade-safe: no module -> the old blank, exactly as before.
+  function itemFace(name, row) {
+    if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, row, "md"); if (h) return h; }
+    return "<div class='ic'></div>";
+  }
 
   function buildInv() {
     if (inv) return;
@@ -921,18 +924,18 @@
       const n = invMap[name] | 0;
       if (n <= 0) continue;
       const it = items && items[name];
-      const tag = it && it.tag;
-      const icon = ITEM_ICON[name] || (tag && LOOT_ICON[tag]) || "";
-      rows.push({ name, n, icon, val: (it && it.value) || 0 });
+      rows.push({ name, n, it, face: itemFace(name, it), val: (it && it.value) || 0 });
     }
     if (!rows.length) { invGrid.innerHTML = "<div class='cpEmpty'>Empty — nothing carried.</div>"; return; }
     rows.sort((a, b) => (b.val - a.val) || (b.n - a.n));
     let html = "";
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      html += "<div class='cpItem' title='" + esc(r.name) + "'>" +
+      let tip = r.name;
+      if (CBZ.itemTip) { try { tip = CBZ.itemTip(r.name, r.it, r.n); } catch (e) {} }
+      html += "<div class='cpItem' title='" + esc(tip) + "'>" +
         (r.n > 1 ? "<div class='ct'>" + r.n + "</div>" : "") +
-        "<div class='ic'>" + r.icon + "</div>" +
+        r.face +
         "<div class='nm'>" + esc(r.name) + "</div></div>";
     }
     invGrid.innerHTML = html;

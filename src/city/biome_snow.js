@@ -1720,11 +1720,29 @@
       }
       const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
       if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("snow");
-      const trunkG = new THREE.CylinderGeometry(0.22, 0.32, 1.6, 5);
+      // ROOTS (world/treeaudit.js §2). OWNER: "each tree needs to have more
+      // roots. It needs to be more connected to the ground." The canopy here
+      // was ALREADY the good tree (a three-whorl cone stack), so the pines
+      // needed nothing from the crown half of the grammar — only the bole,
+      // which met the snow at a bare circle. TRUNK_BASED flips the geo from
+      // CENTRED-1.6 to BASE-AT-0/unit-height, and the two compose() sites
+      // below carry the matching origin; the trunk TOP lands at the same
+      // trunkTop either way, which is what the canopy, the snow cap and the
+      // audit chain are keyed to.
+      const ROOTED = !!(CFGS.TREES_ROOTS !== false && CBZ.treeTrunkGeo);
+      const trunkG = ROOTED
+        ? CBZ.treeTrunkGeo({ rTop: 0.22, rBase: 0.32, h: 1, seg: 5, roots: 4, spread: 2.35, flare: 1.5, site: "snow" })
+        : new THREE.CylinderGeometry(0.22, 0.32, 1.6, 5);
       const canopyG = (function () {
         if (!TREES2) return new THREE.ConeGeometry(1.5, 4.2, 6);
         // 3 stacked cones, base at y=0, total height 4.2 — each tier's base
         // sinks into the tier below (support-connected by construction).
+        if (CFGS.TREES_ONE_GRAMMAR !== false && CBZ.treeCrownGeo) {
+          // taper 0.745 reproduces the authored ladder (1.55/1.18/0.80 over
+          // 2.0/1.7/1.45) to within a few centimetres — same tree, one fewer
+          // hand-typed layer table in the codebase.
+          return CBZ.treeCrownGeo({ tiers: 3, r: 1.55, h: 4.2, seg: 6, taper: 0.745, site: "snow" });
+        }
         const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
         const layers = [
           { r: 1.55, h: 2.0, y: 0 },
@@ -1780,8 +1798,11 @@
           const seatRef = Math.min(gy, gu.min);
           const seatY = seatRef - 0.3;                 // SEATED below the downhill surface
           const span = trunkTop - seatY;
-          // trunk (centred unit-1.6 geo): scale y so it spans [seatY, trunkTop]
-          s.set(sc, span / 1.6, sc); v.set(p.x, (seatY + trunkTop) / 2, p.z);
+          // trunk: scale y so it spans [seatY, trunkTop]. ROOTED geo is
+          // base-at-0/unit-height (origin at the seat); the legacy geo is
+          // centred and 1.6 tall (origin at the midpoint).
+          if (ROOTED) { s.set(sc, span, sc); v.set(p.x, seatY, p.z); }
+          else { s.set(sc, span / 1.6, sc); v.set(p.x, (seatY + trunkTop) / 2, p.z); }
           m4.compose(v, q, s); trunkIM.setMatrixAt(n, m4);
           const parts = [];
           if (tbb) CBZ.treeAabbPush(parts, m4, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
@@ -1800,10 +1821,13 @@
           n++;
           continue;
         }
-        // trunk
-        s.set(sc, sc, sc); v.set(p.x, gy + 0.8 * sc, p.z);
+        // trunk (ROOTED geo is base-at-0/unit-height, legacy is centred-1.6 —
+        // both span [gy, gy + 1.6*sc]; `s` is restored for the canopy after)
+        if (ROOTED) { s.set(sc, 1.6 * sc, sc); v.set(p.x, gy, p.z); }
+        else { s.set(sc, sc, sc); v.set(p.x, gy + 0.8 * sc, p.z); }
         m4.compose(v, q, s); trunkIM.setMatrixAt(n, m4);
         // canopy
+        s.set(sc, sc, sc);
         v.set(p.x, gy + (1.6 + 2.1) * sc, p.z); m4.compose(v, q, s); canopyIM.setMatrixAt(n, m4);
         // snow cap — hugs the top ~44% of the canopy, flush with its slope (same q so facets align)
         v.set(p.x, gy + 4.9 * sc, p.z); m4.compose(v, q, s); capIM.setMatrixAt(n, m4);
