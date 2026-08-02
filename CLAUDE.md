@@ -3442,6 +3442,802 @@ The remaining owner decisions are:
 Do not reopen alarm/clank/global-door/global-glass, SWAT shields, facade side
 boxes, car touch controls, or touch-modal close behavior as unresolved design.
 
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-29 diagnostic issue addendum
+
+> **AUTHORSHIP AND STATUS:** Everything in this subsection — the staffing
+> policy, the diagnosis and every numbered item 28–121 — is a message **from GPT
+> (Codex) to Claude**. Items 28–107 came from GPT's read-only investigation of
+> snapshot `5e76cee`; items 108–121 came from GPT's read-only inspection of the
+> current `nukefx.js`/`crashfx.js` working tree on 2026-07-30. It is not
+> Claude's prior conclusion, not owner-authored project law, and not a claim
+> that any item has been fixed. Claude should retain these as open problems
+> until runtime evidence closes them.
+
+GPT to Claude: these are structural ownership problems, not isolated bad NPC
+spawns. The prior issue list ended at 27; append the following through 121.
+
+**POLICE VERSUS SECURITY — THE CLASSIFICATION CLAUDE SHOULD PRESERVE**
+
+| Location | Correct staffing |
+|---|---|
+| Streets, police stations, County Jail | Police, sheriff's deputies, corrections officers |
+| Capitol, executive residence, federal bureau | Agency-specific protective police/agents |
+| Military bases and Defence Headquarters | Soldiers and military police |
+| Airports | Airport police, customs/border officers and civilian screeners; private guards only for private cargo/airline property |
+| Ports | Port police/customs at public controls; private guards at private yards |
+| Banks, jewelry/gun shops, casinos, corporate towers, arenas and private estates | Private security or bouncers; police respond when called |
+
+The game already declares this distinction correctly at the top of
+`city/security.js`: private guards protect high-value businesses while police
+remain the city-wide response. Other systems fail to preserve it.
+
+28. **There is no authoritative venue-to-security classifier.** Builders
+    independently choose `security`, `cop`, `agent` or `soldier`, so visual
+    uniform, arrest authority, faction and combat behaviour drift apart.
+29. **The County Jail is directly miscast.** Its `govcomplex.js` definition
+    calls for a sheriff and real deputies, then its work row literally requests
+    `{ kind:"security", role:"security guard" }`.
+30. **The shared occupancy grammar cannot express police, deputies or
+    corrections officers.** `occupy.js` offers private security, soldiers and
+    Secret Service agents; its generic government preset fills ministries with
+    Secret Service agents.
+31. **City Hall uses that generic agent preset.** Its lobby receives two
+    Secret Service-style agents rather than an appropriate municipal
+    law/civic-security assignment.
+32. **Restricted government compounds default to generic security guards.**
+    Bureau Headquarters and Defence Headquarters are not cleanly differentiated
+    into federal agents versus soldiers/military police.
+33. **Every lawful principal's protective detail collapses into the ordinary
+    city cop spawner.** A mayor, sheriff, governor, president or federal
+    director can consequently receive the same municipal police type.
+34. **Ambient guards are generated as civilian residents across entire
+    districts.** Cape Harbor's supposed customs staff, Foundry “foremen,”
+    financial-district guards and several national-capital guards are detached
+    from actual protected posts (`regionlife.js`).
+35. **Airports and ports lack a complete authority taxonomy.** There is no
+    deliberate split between police, customs, screening staff, harbour
+    operations and private-property guards.
+36. **Existing staffing audits measure adoption and headcount, not
+    correctness.** `occupyAudit()` and `powerAudit()` can report “guarded”
+    while the body belongs to the wrong organization.
+37. **Yachts exist physically but never enter the map's POI registry.**
+    `yachts.js` defines three superyachts and thirteen working boats.
+38. **The map only extends 90 metres beyond surveyed land.** The yacht
+    roadstead searches at least four kilometres offshore, putting vessels
+    outside the chart projection (`fullmap.js` versus `yachts.js`).
+39. **There is no yacht, boat, marina or anchorage map symbol.** The POI funnel
+    only understands recognized land lots and shops.
+40. **At deep zoom, yachts degrade into anonymous white car dots.** At normal
+    world-map zoom, vehicle dots are not drawn at all.
+41. **Yacht and map audits are disconnected.** `yachtAudit()` can prove
+    vessels are afloat while `mapAudit()` cannot detect that none are charted.
+42. **The visible ocean is only a camera-centred 4.5 km-radius disc.** The
+    airborne camera now sees at least 7 km; `water_spec.js` still documents the
+    old approximately 2.8 km flight view.
+43. **The horizon fade completes beyond the geometry.** `world.js` fuses from
+    3.6–6.4 km, but the mesh ends at 4.5 km — only about 24% fused into the sky
+    when the triangles stop.
+44. **The ocean's bounding box falsely claims 16 km coverage.** Its vertices
+    still stop at 4.5 km, but `water_spec.js::stampBounds` manually enlarges the
+    bounds, so `test-terrain-water-browser.mjs` can pass without measuring the
+    real rim.
+45. **Shader and reflective ocean modes do not share the same explicit horizon
+    fuse.** Quality changes can therefore alter how visible the seam is.
+46. **The ocean has no geometric horizon solution.** It is a finite flat disc
+    with fog — no curvature, horizon skirt or distant continuation.
+47. **The codebase has several incompatible “ocean bottoms.”** The rendered
+    `terrain_overhaul.js` shelf ranges roughly from -1.8 to -26 m, gameplay
+    bathymetry ranges from 1.1–62 m, and `water_spec.js` documentation claims
+    open water is 400+ m deep.
+48. **The rendered shelf is decorative and fixed in world space while the
+    ocean follows the camera.** Offshore portions of the moving sea disc can
+    therefore extend beyond the visual floor. Physics cannot query the rendered
+    shelf.
+49. **Swimming clamps the player to an invisible numerical bed while ordinary
+    physics still sees a phantom flat floor at `y=0`.** `water_underwater.js`
+    explicitly assumes there is no seabed and never projects its caustics onto
+    the shelf that does exist.
+
+**LIVE ANIMAL CONTACT — DEATH PHYSICS IS NOT BODY PHYSICS**
+
+50. **Dogs explicitly declare that they have “no physics or colliders.”**
+    `dogs.js` uses one light direct-transform update loop; registering a dog in
+    `CBZ.cityWildlife` only makes it shootable and routes damage back to the dog
+    owner.
+51. **The wildlife registry is being mistaken for a physical-actor registry.**
+    Dogs enter it as `external:true`, so `wildlife.js` deliberately does not
+    drive them, and neither registry membership nor a hit handler grants body
+    contact.
+52. **Dog locomotion bypasses the shared wall resolver.** `dogMove()` writes the
+    group's X/Z position and floor-snaps Y without calling `CBZ.collide()` or
+    `CBZ.collideSlide()`. A live dog can consequently cross the player and
+    static architecture even though its corpse later has excellent quadruped
+    physics.
+53. **Ordinary land wildlife has the same omission.** `landWalk()` directly
+    integrates the animal transform and clamps it to home and terrain; it does
+    not ask the collider grid. This is an animal-wide live-locomotion problem,
+    not a dog model problem.
+54. **The satisfying human bump and knock-over behaviour is a private crowd
+    pass, not a shared actor capability.** `crowd.js::bumpPass()` considers the
+    player, named peds and instanced crowd agents, promotes victims to real rigs
+    and calls `CBZ.body.knockdown`; it never considers `cityWildlife`.
+55. **Wildlife “separation” is steering, not collision.** Herd spacing changes
+    desired headings before direct integration. It cannot resolve a player
+    overlap, decide which body yields by mass/speed, or turn a hard impact into
+    a knockdown.
+56. **Animal physics exists only at dramatic events.** Attacks can apply body
+    impulses, cars can hit animals, and death can promote them to ragdolls, but
+    there is no continuous live-body contact in between. That fragmentation is
+    why the spectacular cases work while walking through a dog does not.
+57. **No actor-body audit can expose this exclusion.** The code measures
+    wildlife motion, deaths and car impacts, but nothing enumerates player,
+    human, dog and wildlife movers and proves that each participates in static
+    collision, mutual contact, mass yielding and knockdown.
+
+**INTERIOR COLLISION AND RPG RESPONSE — EXTENDING ISSUES 17–27**
+
+58. **The shared explosion's receiver list excludes ordinary room geometry.**
+    `crashfx.js::applyBlastDamage()` visits people, the player and explicitly
+    registered structural pieces; generated partitions, desks, chairs, shelves
+    and loose decorative props are not blast receivers, so they cannot fly or
+    break when an RPG detonates beside them.
+59. **Building damage resolves to an exterior building ledger, not the object
+    that was hit inside the room.** The fracture path can carve a facade,
+    shatter registered building panes and lower a building's health, but it
+    does not identify a particular interior wall or furnishing.
+60. **Generic concrete chunks disguise the missing object transition.**
+    `cityDamageBuilding()` can emit rubble cubes, yet the original interior
+    mesh remains static and unowned. Debris that was never the desk, wall or
+    shelf is an effect, not destruction physics.
+61. **Even furniture that opts into solidity receives only a static collider.**
+    `CBZ.furnish` defaults building-host furniture to non-solid unless the
+    caller explicitly passes `solid:true`, and the solid path still supplies no
+    mass, break threshold, impulse response or destroyed state.
+62. **The missing foundation is one physical-prop contract.** A meaningful
+    room object needs one record joining visual mesh, collision/LOS footprint,
+    mass, break threshold, blast impulse, debris or hidden-state transition,
+    restoration and persistence. Today those concerns belong to unrelated
+    ledgers or do not exist.
+63. **The current audits can be green while every room fails.** `blastAudit()`
+    measures which payload uses the explosion bus, and `solidityAudit()` is a
+    hand-maintained census dominated by exterior prop classes. Neither measures
+    blast-receiver coverage or generated interior collider coverage.
+
+**MISSING HEAVY ROAD VEHICLES**
+
+64. **The main vehicle catalogue contains no bus, fuel tanker or refuse
+    truck.** It offers ordinary cars, vans, pickups and SUVs; none of the three
+    requested heavy classes can spawn as traffic, be stolen or enter the common
+    damage/cook-off lifecycle.
+65. **The game's “bus” is split between a static prop and an abstraction.**
+    `southblock.js` draws one parked transport bus from boxes behind one AABB,
+    while `activities.js` sells bus travel as fare/event logic. Neither is a
+    `cityCars` vehicle, route actor or drivable passenger space.
+66. **A fuel truck exists only as an airport-minigame prop.** The separate
+    `games/airport.js` scene knows the noun, but Gang City has no tanker, no
+    volatile cargo record and no energy-based cargo blast to connect it to the
+    otherwise strong vehicle cook-off and ordnance systems.
+67. **Sanitation has people and trash but no service vehicle or route.**
+    Garbage-related jobs and world props exist without a garbage truck that can
+    drive a shift, collect a stop, carry workers or become a stealable object.
+68. **Ambulances and fire engines prove the correct adoption seam.** They are
+    authored geometry, then passed through `CBZ.cityRegisterVehicle()` to
+    become ordinary solid, damageable, enterable city vehicles. New heavy
+    classes should use that seam rather than inventing another controller.
+69. **There is no reusable heavy-chassis grammar.** Wheelbase, multiple axles,
+    cab, box/tank/body module, passenger or cargo sockets, service route and
+    cargo hazard are still bespoke concepts. Without that block, each requested
+    truck becomes another large one-off file.
+
+**FIRST-PERSON VEHICLES AND COCKPIT OWNERSHIP**
+
+70. **Cars are structurally forbidden from first person.** `city/view.js`
+    rejects `[V]` while `player.driving`, and `camera.js` forces all road
+    driving through the chase camera. This is not a missing dashboard texture;
+    the view state cannot be entered.
+71. **Boats inherit the same prohibition.** Marine craft use the same
+    `driving/_vehicle` state as cars, so the camera never offers a first-person
+    helm even when the boat model contains a visible wheel or console.
+72. **Aircraft have one substantial cockpit-overlay system and a second set of
+    cockpits embedded in airframes.** `cockpit_shapes.js` builds the active
+    first-person costume while player-aircraft, strategic bomber, military and
+    airport builders separately add tubs, seats, pilots, panels, MFDs and
+    consoles behind their exterior glass. The two views double-author the same
+    cabin without one shared seat/socket description.
+73. **The current 40-mesh cockpit budget encourages the interior slop the owner
+    wants removed.** The owner's target is a simple readable shell: genuinely
+    transparent panes, a few derived geometric surfaces, painted instruments
+    and the crew's outfit. More boxes are not more cockpit.
+74. **Road-car cabins are exterior set dressing, not a usable cockpit.**
+    `vehicles.js` adds seat backs, a rear bench, a dash slab and wheel so
+    see-through windows are not empty, but those parts do not define an eye
+    position, sightline, controls or first-person clipping envelope.
+75. **The shared capability should be a vehicle seat view, not separate car,
+    boat and aircraft cameras.** It must derive eye position, forward axis,
+    near-plane/sightline, window bounds and minimal cabin recipe from a seat
+    socket so every registered vehicle can adopt the same view contract.
+
+**IPAD/TOUCH CONTROLS, BOARDING AND PLAYER INTERACTIONS**
+
+76. **The touch layer exists but is classified by a hard-coded vehicle enum.**
+    `touch_vehicle.js` knows `drive`, `heli`, `wing`, `chute` and `swim`;
+    boats collapse into `drive`, and a new bus or tanker gains no specialized
+    controls by describing what it can actually do.
+77. **Important vehicle verbs have no iPad surface.** The B-2's bomb
+    tap/hold, payload cycle and bomb camera are keyboard-only; tanks use a
+    separate lifecycle; road/boat layouts lack a view button; and door,
+    secondary-fire, horn and utility actions are not represented by a common
+    capability matrix. Touch `FIRE` only calls the aircraft missile action.
+78. **Boarding looks unified at the key prompt but remains three state
+    machines underneath.** `cityTryNearestRide()` routes aircraft, ordinary
+    road/marine `_vehicle` objects and armour/tanks into different enter/exit
+    ownership. New vehicles can be stealable through `cityRegisterVehicle()`,
+    but controls, cameras and lifecycle still drift after entry.
+79. **The interaction UI intentionally hides most single-action ride cards.**
+    That keeps streets uncluttered, but it also means a player cannot discover
+    doors, seats, cargo, passenger capacity, payloads or alternate vehicle verbs
+    from a consistent interaction surface.
+80. **Remote players are not interaction candidates at all.** Net actors exist,
+    display names, occupy vehicles and participate in combat, while
+    `interactions.js` has a multiplayer-shaped context but no source over
+    `CBZ.netRemoteList`. Trade, invite/recruit, inspect, revive, restrain,
+    surrender and other player-to-player choices therefore have no UI or
+    authoritative network verb path.
+
+**SEE-THROUGH AND BREAKABLE VEHICLE GLASS**
+
+81. **One glass material is not one glass system.** Vehicle panes now use the
+    same transparent material recipe as buildings, which fixes appearance, but
+    they do not enter the building pane registry that owns bullet holes,
+    shattering, openings, shards and reset.
+82. **The building glass registry cannot simply be reused unchanged.**
+    `cityGlass` stores static world-coordinate pane records; a window parented
+    to a moving car, bus, boat or aircraft needs local coordinates or a live
+    transform callback before ray hits and blast bounds can remain correct.
+83. **`glassAudit()` measures tint and crash-frost compatibility, not breakable
+    adoption.** Vehicle crash deformation swaps glass to a crazed/frosted
+    material but does not remove the pane or create a traversable opening.
+    Every visible pane can therefore look shared while none behaves like
+    building glass.
+
+**THE AC-LOOKING BOXES STILL OUTSIDE WINDOWS**
+
+84. **Under the checked-in defaults, the old facade AC producers are genuinely
+    disabled.** Both punched-window and residential-tower units require
+    `FACADE_AC_UNITS === true`, whose default is false; the older
+    `building_dress.js` boxes were also removed by the prop-purge pass. A current
+    screenshot of repeated boxes is therefore not explained by those emitters
+    unless runtime config or stale cached code re-enables them.
+85. **The strongest live code match is the `balconyWindow` facade terminal.**
+    On residential buildings it is selected for up to 24% of upper-floor bays
+    and emits a shallow grey `TRIM` slab 0.55 m outside the glass plus a narrow
+    rail. From street distance or an oblique angle, that little projecting
+    rectangle can read exactly like an AC condenser. This is the likely owner,
+    not a runtime-proven identification; label the visible mesh before cutting
+    it.
+86. **The AC audits are blind to AC-looking non-AC geometry.**
+    `cityFacadeStats().ac` and `propPurgeAudit().acBoxes` count the retired AC
+    paths, not `balconyWindow` terminals, balcony slabs, sill/header reveals or
+    misplaced glow panels. They can correctly report zero while many facades
+    still exhibit the owner's symptom.
+
+**THE DRIVE-BY IS A REAL RECORD WITH A SCRIPTED GHOST DRIVER**
+
+87. **The existing “THE DRIVE-BY IS A REAL CAR” doctrine overclaims what was
+    completed.** `gangs.js` now creates a genuine `cityCars` record and genuine
+    `cityPeds` occupants, so damage, theft, suspension and seated-hit plumbing
+    can see them. Its locomotion is still a private scripted controller. Real
+    identity is not real driving physics or navigation.
+88. **`roadPointOpen()` does not answer whether a point is on a road.** It only
+    rejects keep-outs and water. `spawnRealDriveby()` treats that result as a
+    legal “road edge,” so a car may be staged on grass, a lot, behind a building
+    or on any other dry non-reserved point.
+89. **The drive-by explicitly opts out of ordinary traffic routing.** It sets
+    `car.road = null`; the ordinary road brain consequently skips it.
+    `car.ai = true` preserves some vehicle/occupant lifecycle behaviour but
+    does not give the driver a lane, route, intersection choice or road graph.
+90. **The private driver continuously beelines toward a raw target point.**
+    `dbSteer()` aims directly at the player or lot centre and integrates X/Z.
+    It never asks for a road segment or a route around a building. A wall
+    between car and target therefore remains the commanded direction forever.
+91. **Collision correction is discarded as information.** `dbAdvance()` calls
+    `cityCollideVehicle(car)` after integrating but ignores its returned
+    displacement. It does not brake, reverse, choose a persistent side or
+    replan. On the next frame `dbSteer()` turns back into the same obstruction,
+    producing grinding, corner slipping and the visual impression that the
+    event car drives through buildings.
+92. **The shared vehicle-wall resolver is not the oriented chassis solver its
+    comments call it.** `vehicles.js::collideVehicle()` resolves a width-derived
+    circle plus one forward circle probe. Its anti-tunnel segment is capped at
+    eight samples. That is useful depenetration, but it does not prove that a
+    long rotated body cannot cut a corner or pass a thin wall between samples.
+93. **The source says the occupants are real; the owner's observed result says
+    that claim still needs runtime proof.** The normal path uses `gangPost()`,
+    stores crew in `cityPeds`, attaches them through `npcLife`, and makes a dead
+    shooter stop firing. A legacy mesh with numeric “crew flavour” still exists
+    when `DRIVEBY_REAL` is false or a required factory is absent. Do not resolve
+    the disagreement by trusting comments: identify the live drive-by record and
+    prove that each visible occupant is a hittable ped in the canonical ledger.
+94. **No drive-by audit measures the properties the player is reporting.**
+    Keep-out/trespass counts cannot prove road placement, route ownership,
+    obstacle replanning, collision response, or that every rendered occupant
+    maps one-to-one to a living ped. The current doctrine can therefore report a
+    “real car” while its movement still reads as a ghost event.
+
+**CASINO SQUIRM AND INDOOR NPC MOBILITY**
+
+95. **“Casino people” are two structurally different actor classes with two
+    different failures.** The Golden Ace creates three `post:"ambient"` patrons
+    with the ordinary resident brain, while its dealers, cashier, guard, pit
+    boss and shark are `post:"pinned"`. Generic city casinos likewise declare
+    hard posts through `cityStaffPost()`. One group is told to wander out of
+    the room; the other is forbidden to move even when movement is necessary.
+96. **An ambient casino patron inherits an outdoor, whole-city routine
+    generator.** `pickRoutineGoal()` can choose a shop door, an arbitrary lot or
+    `randomSidewalkPoint()`, then makes at most a coarse two-hop intersection
+    path. It neither confines the goal to the venue nor proves it reachable
+    from the current room, so a patron standing inside can be ordered toward a
+    target straight through a casino wall.
+97. **The shared route helper handles only one direction of a doorway.**
+    `cityNav.routeTo()` detects a goal inside a building and threads an
+    outside actor through that building's door. It does not detect an actor
+    starting inside whose goal is outside. That asymmetric contract cannot
+    carry the casino's ambient patrons from the gaming floor to the street.
+98. **The reported rapid right-left flip matches a weakness in local context
+    steering.** The active-ped kernel chooses among eight direction slots,
+    admits only directions within `0.001` of the current minimum danger, and
+    blends just 30% of the previous direction. In a tight, roughly symmetric
+    aisle, tiny changes in wall or neighbour distance can alternate which side
+    is the minimum while the impossible through-wall goal keeps pulling
+    forward. This is a code-supported diagnosis, not yet a runtime trace; log
+    chosen slot, danger map and heading reversals on one filmed patron to close
+    it.
+99. **The stuck detector changes the instruction without solving indoor
+    reachability.** After 0.45 seconds of failed progress, a calm ped discards
+    its path and draws another global routine goal; a fighter or fleeing ped
+    draws a random left/right six-metre sidestep. Neither recovery asks which
+    door connects the room to the destination or commits to one side until an
+    obstacle is cleared. It can therefore restart the same failure indefinitely.
+100. **Steering memory survives goal changes.** `_prevSteerX/Z` are initialized
+     once and thereafter only overwritten by context steering; routine
+     repicks, path shifts and stuck recovery do not clear or rebase them. The
+     first frames of a new instruction can consequently be blended toward the
+     direction chosen for the discarded instruction.
+101. **Pinned casino staff are structurally unable to flee through the normal
+     brain.** `think()` returns to `staffThink()` before ordinary threat logic;
+     `staffThink()` clears `rage`, `finalGoal` and `path`, forces `idle`, and
+     restores the post target. A package staff member can surrender at gunpoint,
+     but cannot autonomously run from gunfire, an RPG, a fire or an attacker
+     while `staffPost` remains set.
+102. **Pinned staff also skip physical depenetration.** `move()` returns from
+     the `staffPost` branch before `CBZ.collide()` and before the three-pass
+     corner resolver. This contradicts the nearby comment that posted staff
+     “still collide.” A poorly placed post or an object moved into the station
+     can leave the body embedded with no locomotion pass capable of freeing it.
+103. **Calling the shared fear decision does not reliably release a posted
+     worker.** `cityScare()` may set a fleeing path, but it does not clear
+     `staffPost`; the next staff think erases that path and the movement branch
+     remains rooted. The few systems that can release staff do so with private
+     `staffPost = null` writes, so casino evacuation is not an owned capability.
+104. **There is no indoor-mobility audit or post lifecycle.** The missing
+     contract is: hold an authored station while calm; on qualifying danger,
+     release the station, choose the building's real exit, navigate with a
+     committed obstacle side, remain mobile while threatened, then return or
+     re-staff after an all-clear. Measure unreachable indoor goals, heading
+     reversals without progress, time stuck, doorway use and pinned actors that
+     fail to evacuate. A headcount audit cannot see the casino squirm.
+
+**NUKE DEATH ATTRIBUTION LOSES THE WEAPON**
+
+105. **A nuke kill is labelled correctly only in the innermost path.**
+     `strategic.js` directly kills an unsheltered player inside the fireball
+     with reason `"caught in a nuclear blast"`. `killfeed.js` recognizes
+     `nuclear|nuke|atomic` before generic blast wording, so that path becomes
+     `nuclear blast` rather than `explosion`.
+106. **The expanding nuke wave throws away the identity it still has.**
+     `impactbus.js::sweepRing()` branches on `w.kind === "nuke"` but sends the
+     player reason `"caught in the blast wave"` and sends named-ped deaths as
+     `"the blast wave"`. Neither string contains `nuke`, `nuclear` or `atomic`;
+     `killfeed.js` consequently normalizes both to generic `explosion`. The
+     WASTED subtitle likewise uses the raw generic wave phrase. Distance from
+     ground zero, rather than weapon identity, currently decides what the same
+     nuke is called.
+107. **Death attribution needs the ordnance identity as data, not prose
+     inference.** The nuke row, queued wave and detonation options already know
+     `kind:"nuke"`, `byPlayer` and `by`, but `cityHurtPlayer()` receives only a
+     reason string and `attacker:null` from the wave. Carry a canonical
+     cause/weapon kind through the kill bus and render this exact owner-facing
+     label as **NUKE** for player, named-ped and crowd deaths. Do not repair this
+     by adding another regex for `"blast wave"`; that phrase is shared by
+     non-nuclear ordnance.
+
+**THE NUKE FLASH IS A GOOD BEAT; THE CLOUD HANDOFF IS NOT**
+
+108. **Do not “fix the smoke” by deleting the white flash dome.** The dome is a
+     separate, coherent first beat: one 450-triangle hemisphere, normal-blended
+     rather than additive so it silhouettes the skyline, seated on the ground,
+     and retired after roughly 1.5 seconds. The blocky smoke begins in the
+     handoff behind it, not in this mesh.
+109. **Three unrelated smoke grammars own the same seconds.** `nukefx.js` draws
+     kilometre-scale instanced icosahedron lobes, five procedural detail planes
+     and one far mushroom impostor; it simultaneously calls `crashfx.js` for
+     ordinary RPG-style explosions, wreck smoke and dust sprites. They have
+     different shapes, opacity laws, scales and lifetimes, so the image cannot
+     read as one evolving physical cloud.
+110. **The timeline combines dimensions from different ages of a nuclear cloud.**
+     `nukeDims()` uses a stabilised 20 kt cap (about 5.1 km wide, 4.0 km thick
+     and 10 km tall), the stem ratio is explicitly taken from a “tens of
+     seconds” tower photograph, and the base-surge note cites a one-minute
+     measurement. All are compressed into a 34-second sequence whose cap begins
+     appearing at 0.55 seconds. The numbers may each have a source, but they do
+     not describe the same moment.
+111. **The far tier skips the mushroom's formation.** Its single baked texture
+     already contains the final dust base, twisted stem, collar, crown and
+     mature cap. `stepImpostor()` starts that complete silhouette at
+     `0.30 * 10 km` even when rise is zero, then merely scales it. By the white
+     dome's 1.47-second exit it is about 3.46 km tall and almost fully faded in;
+     by 1.7 seconds it is about 3.87 km tall and fully owns the cap. The player
+     sees a mature mushroom switched on after the flash, not a buoyant fireball
+     becoming one.
+112. **The far mushroom is literally a magnified card of circles.**
+     `makeMushroomTexture()` bakes every base, stem, skirt and cap lobe as a
+     radial-gradient canvas circle into one 256x512 texture. One fogless plane
+     at 86% of the camera far distance is then made to face the camera from
+     every view. Scrolling noise changes surface grain, but not the macro
+     silhouette, depth, underside or phase. From a B-2 or from underneath, the
+     code itself admits that the card shows the wrong side.
+113. **The near cloud's “volume” is hard low-poly geometry.** Every cold cap,
+     crown, collar, stem and ground-surge lobe is the same
+     `IcosahedronGeometry(1,1)` — only 80 triangles — with
+     `flatShading:true`. At full nuclear scale a central cap lobe can be roughly
+     0.7–1.0 km in radius, so individual facets are city-block sized. Lambert
+     lighting makes those facets more visible; it does not make them smoke.
+114. **Those lobes render as overlapping opaque rocks, not participating
+     density.** The cold materials use opacity 0.88–0.97 with
+     `depthWrite:true`, and all instances in a field share one material and one
+     draw. Their intersections therefore hard-occlude in draw/depth order;
+     there is no per-instance transparency sort, internal extinction, soft
+     depth, or volume noise. A few billboard textures laid over them cannot
+     hide the solid polygon silhouette from every camera angle.
+115. **Lower quality makes the geometric failure louder.** Physical dimensions
+     never shrink, while cap/stem/surge/crown counts fall from 28/16/34/26 to
+     12/8/10/10. The surviving low-poly lobes must span the same kilometres, so
+     the cloud becomes fewer, larger, more isolated solids. This is a valid
+     performance rule for many effects, but the wrong LOD rule for smoke.
+116. **Every detonation reuses the same cloud body.** `VOL_SEED` is generated
+     once and reused forever, and the far mushroom texture is baked once from
+     the same module-level deterministic stream. Lobes move and circulate, but
+     the macro crown, stem, skirt and cap distribution recur in the same places
+     at the same age. A second nuke is the first nuke's sculpture replayed.
+117. **The handoff is flooded with nineteen ordinary explosions at full
+     quality.** Six power-2.4 satellites fire from 0.22–0.67 seconds, four
+     power-1.9 satellites fire from 0.95–1.31 seconds, and nine power-1.1
+     “thermal receipts” fire from 0.9–2.02 seconds. `cityExplosion()` asks for
+     97, 85 and 50 individual puff sprites respectively at those powers; the
+     thermal receipts add 36 wreck-smoke sprites. That is about **1,408 puff
+     spawns** exactly while the dome is yielding to the mushroom. Reusing the
+     RPG look here does not enlarge one nuclear event; it superimposes nineteen
+     conventional events.
+118. **The walking shock-front dust adds roughly another five hundred smoke
+     sprites.** For up to 7.5 seconds, full quality calls as many as three
+     `cityDustKick()` bursts every 0.3 seconds; each call creates about seven
+     smoke sprites at the nuke's requested power. Across the scheduled
+     explosions and this walker, the first nuke can request roughly **1,900
+     sprite puffs**. `crashfx.js` prewarms only 64 and has no puff cap:
+     `getPuff()` allocates a new `Sprite` and material whenever the pool is
+     empty. “Pooled and capped” is true of the point-burst ring, not of this
+     sprite cloud.
+119. **Thermal smoke is not attached to anything that is actually burning.**
+     The comments promise visible receipts “wherever combustible things exist,”
+     but the receipt positions are area samples with no structure, vehicle,
+     vegetation or fuel query. Each sample unconditionally launches a complete
+     ground explosion and four crash-smoke puffs. Smoke can therefore bloom
+     from empty pavement or water as a decorative token instead of being an
+     aftermath of world damage.
+120. **The existing nuke audit cannot see any of these visual failures.**
+     `nukeFxAudit()` asserts radii, ratios, layer presence and headline timing;
+     `nukeFxDebug()` prints counts and the current tier. Neither measures
+     phase-appropriate silhouette, angular lobe/facet size, peak live puffs,
+     allocation beyond the prewarm pool, duplicate smoke owners, smoke without
+     a burning source, or whether the impostor depicts the same age as the 3D
+     cloud it replaces.
+121. **The eventual contract is one evolving event, not more smoke layers.**
+     Preserve the flash and white dome. After them, one nuke-FX owner must carry
+     a phase-specific chain — rising fireball, entraining stem, forming cap,
+     cooling cloud, then aftermath — without calling the full generic
+     `cityExplosion()` visual recipe inside itself. Smoke away from ground zero
+     must come from actual burning world objects. Prove the handoff by recording
+     the active owner, phase, apparent cloud bounds, largest lobe/facet, live
+     sprite peak and unsourced-smoke count at each beat.
+
+GPT's conclusion to Claude: the owner's observations are correct. Guards lack
+institutional meaning, yachts are built but effectively uncharted, and the
+ocean surface, horizon, rendered floor and gameplay depth are four systems
+pretending to be one. Animal contact is event-only rather than body-wide;
+interiors are drawn without a physical-prop receiver contract; heavy vehicles,
+seat views, touch capabilities, boarding state and breakable glass stop being
+shared immediately below their surface APIs; and the facade audit does not
+measure the AC-looking geometry the owner still sees. The drive-by has canonical
+identity but private beeline locomotion, while indoor actors alternate between a
+whole-city outdoor brain and a hard post that danger cannot release. The nuke
+bus also knows its weapon identity but reduces some deaths to generic explosion
+prose at the final handoff; its otherwise strong flash then hands the image to a
+premature mature-cloud card, hard low-poly lobes and nearly two thousand generic
+puff requests. Do not close this message by improving only a visible symptom.
+Each eventual change must restore one authoritative owner and add a cross-system
+measurement capable of proving the classification, contact, navigation,
+attribution, phase or geometry is actually shared.
+
+#### FINAL GPT-TO-CLAUDE CONVERGENCE HANDOFF — 2026-07-31
+
+This is GPT's final integration judgment before the conversation closes. It is
+not issue 122, not another feature pitch, and not permission to execute items
+28–121 from top to bottom. The durable decision record is
+`docs/plan/claude-issue-convergence.md`; read that file before selecting work.
+It contains the provenance audit, current gate evidence, fourteen normalized
+workstreams, dependency overlaps, six phases, explicit holds, and a coverage
+row for every available issue number. It was first published as documentation
+only in commit `03d7e91` on branch `agent/claude-issue-convergence`.
+
+##### GPT's actual read of the project
+
+This is a powerful game engine with integration debt, not a weak game that
+needs 121 more features. A surprising amount is already real: registered
+vehicles, staffed interiors, wildlife, damage buses, door routing, factions,
+posts, maps, water queries, glass recipes, nuclear phases, and broad live
+audits. The recurring defect is that a feature adopts the shared surface while
+keeping one decisive behavior private.
+
+That pattern is **superficial sharing**:
+
+- the drive-by is now a real registered car, but its driver still owns a
+  private beeline;
+- a dog is registered wildlife and has dramatic hit/death physics, but live
+  locomotion never joins continuous body contact;
+- glass shares a material recipe, but a moving pane lacks one transform-aware
+  break lifecycle;
+- a venue is staffed, but the body can belong to the wrong institution and a
+  pinned post can suppress fear, routing, and depenetration;
+- an interior is furnished and may be solid, but the struck desk or wall is
+  not one damageable physical object;
+- the nuke bus knows `kind:"nuke"`, but downstream death presentation still
+  relies on phrases;
+- the ocean is visible, queryable, swimmable, and chart-adjacent, but those
+  truths do not describe the same surface, horizon, floor, or bounds.
+
+These are **trust seams**. The player notices them as “that guard is wrong,”
+“I walked through the dog,” “the dealer just wiggles,” “the RPG did not hit
+the desk,” “the car drove through the world,” or “the nuke became smoke
+effects.” Fixing those visible betrayals is worth more than adding another
+district, vehicle noun, or UI surface.
+
+The answer is not a universal ECS, physics rewrite, or new framework layer.
+Most canonical owners already exist. Extend the narrow owner that is closest
+to the truth, make adoption replace code a caller already writes, migrate real
+consumers immediately, and measure the private paths that remain. An
+abstraction with no migrated consumer is not architecture; it is another
+parallel ledger.
+
+The owner's broader quality bar remains binding:
+
+- grounded, diegetic, and physically readable beats floating UI and fake
+  reaction;
+- shared capability work must make that capability better everywhere;
+- NPCs should mostly be combinations of behavior, outfit, organization, post,
+  and interaction—not bespoke species of controller;
+- casual interaction choices stay binary unless there is a real third verb;
+- on touch, visible controls must express available verbs, every modal needs a
+  tappable close, and UI touches must not leak into look/joystick gestures;
+- on-foot first-person feel is protected;
+- “more meshes,” “more smoke,” and “more systems” are not quality metrics.
+
+##### What is current and what is historical
+
+Do not treat every confident sentence in this file as current evidence.
+`CLAUDE.md` mixes constitution, owner contracts, dated session reports, and an
+issue register. Those have different expiration rules.
+
+- Items 28–107 were diagnosed at clean snapshot `5e76cee`.
+- Items 108–121 were diagnosed against the then-current nuclear-FX worktree.
+- The referenced items 1–27 were not found in this file or the searched git
+  history. Do not reconstruct them from imagination.
+- The detailed roadmap was written against `5e76cee` plus the later worktree.
+  Its statuses are a dated baseline, not automatic truth after a new commit.
+- `origin/main` at this handoff is `066aba8`. Commits `97838b9` and `066aba8`
+  contain the nuclear formation/puff/attribution and coherent-cloud work.
+  Preserve those changes as candidate solutions; do not restart the nuke from
+  the older diagnosis.
+- The current nuclear phase contract reports one coherent post-flash draw,
+  zero solid-lobe fields, zero detail planes, and zero generic nuclear puff
+  events. That is strong static/arithmetic evidence, not near/far/aerial/
+  underside visual sign-off.
+- Nuclear wave paths now pass “nuclear blast” rather than generic explosion
+  prose. This is progress on 105–107, but the owner asked for the canonical
+  display **NUKE**, and identity is still normalized from text. Treat the
+  cluster as partial until structured ordnance identity survives the complete
+  death bus and the rendered label is proven for player, named-ped, and crowd
+  deaths.
+- The facade side-box producer appears removed and the structural census can
+  report zero. That is a candidate close only until the reported street view
+  is filmed and any remaining symptom is traced to its actual mesh producer.
+- Touch driving now distinguishes boats and road cars better, but a hard-coded
+  mode enum is not the final capability contract and road/boat view verbs
+  remain incomplete.
+- The cockpit prose target and the enforced mesh cap disagree (`26` versus
+  `40`). Source plus executed ratchet wins over prose until deliberately
+  reconciled.
+- The loyalty-and-weapons spine already exists in `city/loyalty.js` and has
+  live adoption. Protect and extend it; do not schedule a second ledger.
+
+The canonical gate was rerun on 2026-07-31 in the isolated documentation branch
+based on `origin/main` at `066aba8`. It built the complete title-screen world
+(318 lots, 180 shops, 202 roads, 648 named peds), completed 400 ticks, and
+failed the same seven checks recorded by the roadmap. Five are product
+failures: venue staffing, dry fishing spots, ground-query disagreement,
+invalid FX materials, and one road prop beyond an already non-zero debt. Two
+are likely stale calibration: 202 roads versus 178 and the
+intentional-looking `annex` biome absent from the golden set. The red first
+seed correctly prevented determinism and seed 1337 from running. Reproduce
+again before changing code, fix the five real failures, verify the two world
+changes, and only then recalibrate. Never make a real failure green by raising
+its tolerance.
+
+##### Collapse the issue list into owners, not tickets
+
+The numbered symptoms collapse into this dependency spine:
+
+| Foundation | Available issues | Authoritative question |
+|---|---:|---|
+| Truth and evidence | provenance, gate, stale census | What is failing now, under which exact source and seed? |
+| People, place, authority, post | 28–36, 95–104 | Who works here, for whom, with what authority, and how do they leave/return through a real door? |
+| Continuous physical presence | 50–63, 81–83, 92 | Which live body or object owns motion, contact, damage, break state, reset, and persistence? |
+| Registered vehicle spine | 64–94 | Which capabilities, seats, views, panes, cargo, driver, and route derive from the vehicle record? |
+| Maritime spatial truth | 37–49 | Do chart, rendered surface, horizon, water query, seabed, swimming, and caustics describe one place? |
+| Structured ordnance event | 105–121 | Does weapon identity and one phase owner survive from detonation through death and aftermath? |
+| Long-tail duplication | existing censuses | Which private implementation can be retired while a current capability batch is already touching it? |
+
+Some clusters share foundations but should still use narrow adapters. Live
+actors need contact during motion; physical props need an owned lifecycle;
+moving panes need that lifecycle in local transforms; vehicle chassis need an
+oriented footprint and collision feedback. This does **not** require one global
+physics object type. Likewise, authority and post lifecycle belong in one
+people/place chain without creating a second venue registry.
+
+##### Order of work
+
+1. **Restore truth.** Classify the dirty worktree into conceptual bundles;
+   reproduce and make the canonical gate green on seeds 90210 and 1337; resolve
+   stale claims; and close candidate fixes with runtime evidence.
+2. **Fix people/place/post ownership.** Derive institutional staffing from the
+   protected site, prove County Jail/City Hall/federal-or-military/private
+   consumers, make doorway navigation bidirectional, and give calm posted
+   actors a danger → exit → all-clear → return lifecycle.
+3. **Add continuous physical presence through narrow owners.** Prove static
+   collision and mutual contact for humans, dogs, and ordinary land wildlife;
+   then prove that the specific desk, wall, shelf, or pane struck owns its
+   visual/collider/damage/break/reset state.
+4. **Converge registered vehicles.** Derive capabilities and seat sockets,
+   then views/touch/boarding, common road-driver ownership, moving panes, and
+   only afterward the bus/tanker/refuse consumers. Remote-player interaction
+   remains a separate network-authority batch.
+5. **Reassess before large maritime or nuclear work.** Charting existing
+   vessels is a cheap honest improvement; full ocean spatial truth is not.
+   Preserve the current coherent nuclear patch, fast-track the small structured
+   cause/display gap, and require live visual/performance evidence before
+   spending a large wave on the cloud.
+6. **Resume expansion only after the foundations it would multiply are
+   shared.** Use the duplication census as a ratchet queue, not as one
+   repository-wide abstraction project.
+
+There are two intentionally cheap fast tracks after the gate is trustworthy:
+
+- carry the nuke's structured kind to the exact `NUKE` presentation and test
+  direct fireball plus expanding-wave deaths;
+- register existing yachts/berths/anchorages in the map's real POI/bounds
+  funnel without pretending that this completes the ocean.
+
+Do not allow those fast tracks to become a nuke rewrite or an ocean rewrite.
+
+##### The player-trust acceptance stories
+
+Use these as the clearest “is the architecture real?” reads. They are end-to-end
+stories, not a demand to mix unrelated changes into one commit:
+
+1. County Jail visibly fields deputies/corrections staff with the right
+   organization and authority, not generic private security.
+2. The player and a live dog cannot occupy the same body; a hard contact yields
+   or knocks down according to the shared motion rule.
+3. A Golden Ace dealer or guard holds a real post while calm, exits through the
+   real door under qualifying danger, remains collidable/mobile, and returns or
+   is re-staffed after all-clear.
+4. An RPG beside a named room object changes that object's collider, LOS,
+   visual, damage, debris/hidden state, reset, and persistence together; loose
+   generic rubble is not accepted as proof.
+5. The drive-by uses the common road/driver owner, replans, collides through the
+   registered chassis contract, and keeps driver/shooter/body/vehicle identity
+   correct when an occupant dies.
+
+If these stories work only in their showcase file, the owner is still private.
+
+##### Proof and closure protocol
+
+An issue is not closed because the code looks right, an audit function exists,
+or a build succeeds. Closure requires:
+
+1. name the canonical owner and the old private path being removed;
+2. migrate at least three real consumers in the same capability change, unless
+   the change is deliberately a narrow data-integrity fast track;
+3. preserve a degrade-safe one-line fallback or feature revert;
+4. execute a focused contract that fails on the original defect;
+5. run `node tools/math-gate.mjs --seeds 90210,1337` through determinism;
+6. perform live browser QA proportionate to the claim, including the actual
+   player path and touch where relevant;
+7. record issue status, evidence, closing commit, and any remaining legacy
+   count in the issue register.
+
+For visual claims, source inspection and arithmetic are necessary but not
+sufficient. Film or capture the camera/viewpoint that exposed the problem. For
+behavior claims, count semantic correctness and lifecycle transitions, not just
+headcount. For performance, measure live peak draws/allocations/simulation cost
+at each quality tier; a census or disabled-by-default flag is not an
+optimization.
+
+Keep batches vertical and reviewable. Do not spend a wave designing a beautiful
+taxonomy with no visible consumer. The useful loop is:
+
+```text
+player-visible betrayal
+  → trace the original owner and private bypass
+  → extend the narrow shared capability
+  → migrate real consumers
+  → execute ratchet + focused probe + live path
+  → lower or close the measured debt
+```
+
+##### Explicit holds
+
+Until their prerequisites are proven, do not:
+
+- expand the old `GAMEPLAN.md` world/content waves;
+- build bus, tanker, and refuse truck as three bespoke controllers;
+- add another car/boat/aircraft camera or lengthen the touch mode enum;
+- give drive-bys another private pathfinder;
+- create a second loyalty, faction, site, vehicle, glass, body, or physics
+  registry;
+- repair nuke attribution with a broader `"blast wave"` regex;
+- restore generic nuclear explosions/puffs or add smoke layers for density;
+- use generic debris as evidence that a room object was destroyed;
+- let remote multiplayer verbs expand a local boarding change;
+- repin a failure upward, replace on-foot first-person feel, or begin a global
+  ECS/physics/framework rewrite.
+
+The ocean and nuclear spectacle are seductive because they are visually large.
+They should not dominate while guards, doors, bodies, props, and road drivers
+still break immediate player trust. Finish a foundation, prove it in multiple
+places, then reassess the next phase against what the game actually feels like.
+The roadmap is a convergence guide, not bureaucracy and not a promise that all
+121 symptoms deserve equal effort.
+
+##### Document discipline for whoever continues
+
+Keep four kinds of truth visibly separate:
+
+- constitution/design law;
+- current canonical owner and invariant;
+- issue status with dated evidence;
+- historical session narrative.
+
+Constitutions persist. Owners change deliberately. Issues close only with
+evidence. Session reports stay dated. Update statuses when source changes
+instead of leaving a newer fix buried beneath an older diagnosis. The missing
+1–27 provenance should remain marked missing unless an external record is
+actually recovered.
+
+Final message from GPT to Claude: there is no shortage of ambition here. The
+highest-leverage work is to make the strong systems already present tell one
+truth all the way down. Follow the owner, remove the private bypass, and prove
+the result where the player can feel it.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a
