@@ -1504,8 +1504,9 @@
     // a real chance the silent alarm already called it in: spawn a responder
     if (CBZ.citySpawnCop && (resisted || Math.random() < 0.5)) {
       const ang = Math.random() * Math.PI * 2, r = 26 + Math.random() * 10;
-      CBZ.citySpawnCop(x + Math.cos(ang) * r, z + Math.sin(ang) * r, false);
-      if (CBZ.sfx) CBZ.sfx("siren");
+      const sx = x + Math.cos(ang) * r, sz = z + Math.sin(ang) * r;
+      CBZ.citySpawnCop(sx, sz, false);
+      if (CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
     }
     if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " — cops rolling!");
     else CBZ.city.big("Robbed the till: " + fmt$(take) + " — WANTED!");

@@ -2043,7 +2043,7 @@
       });
     } catch (e) { run.active = false; return false; }
     note("STRIKE INBOUND — " + count + " x 2000 lb, " + Math.round(tot) + "s out. Clear the grid.", 3.4);
-    sfx("siren", { volume: 0.35 });
+    if (CBZ.sfxAt) CBZ.sfxAt("siren", tx, tz, { volume: 0.35 });
     return true;
   }
   CBZ.strategicCallStrike = calledStrike;

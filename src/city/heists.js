@@ -1006,8 +1006,9 @@
         // heavier, faster waves than a corner store — SWAT once it's really hot
         if (Math.random() < dt * (0.45 + h.heat * 0.9) && CBZ.citySpawnCop) {
           const ang = Math.random() * Math.PI * 2, r = 26 + Math.random() * 16;
-          CBZ.citySpawnCop(tgt.x + Math.cos(ang) * r, tgt.z + Math.sin(ang) * r, h.heat > 0.55);
-          if (Math.random() < 0.5) sfx("siren");
+          const sx = tgt.x + Math.cos(ang) * r, sz = tgt.z + Math.sin(ang) * r;
+          CBZ.citySpawnCop(sx, sz, h.heat > 0.55);
+          if (Math.random() < 0.5 && CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
         }
         if (Math.random() < dt * (0.5 + h.heat)) { if (CBZ.cityPanic) CBZ.cityPanic(tgt.x, tgt.z, 1.2, CBZ.city.playerActor); }
         if (CBZ.shake && Math.random() < dt * 1.0) CBZ.shake(0.1);
@@ -1041,8 +1042,9 @@
         }
         if (Math.random() < dt * (0.25 + h.heat * 0.6) && CBZ.citySpawnCop) {
           const ang = Math.random() * Math.PI * 2, r = 28 + Math.random() * 14;
-          CBZ.citySpawnCop(tgt.x + Math.cos(ang) * r, tgt.z + Math.sin(ang) * r, h.heat > 0.7);
-          if (Math.random() < 0.4) sfx("siren");
+          const sx = tgt.x + Math.cos(ang) * r, sz = tgt.z + Math.sin(ang) * r;
+          CBZ.citySpawnCop(sx, sz, h.heat > 0.7);
+          if (Math.random() < 0.4 && CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
         }
         if (CBZ.shake && Math.random() < dt * 1.2) CBZ.shake(0.12);
         // bag full → auto-advance to escape

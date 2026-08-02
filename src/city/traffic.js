@@ -1266,9 +1266,7 @@
       e.siren -= dt;
       if (e.state === "drive" && e.siren <= 0) {
         e.siren = 2.6;
-        const cam = CBZ.camera.position;
-        const dd = (e.pos.x - cam.x) * (e.pos.x - cam.x) + (e.pos.z - cam.z) * (e.pos.z - cam.z);
-        if (dd < 70 * 70 && CBZ.sfx) CBZ.sfx("siren");
+        if (CBZ.sfxAt) CBZ.sfxAt("siren", e.pos.x, e.pos.z);
       }
 
       if (e.state === "drive") {

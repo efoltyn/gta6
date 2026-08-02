@@ -1122,7 +1122,6 @@
     refreshBeacons();
     note("RACE ON — hit the gold checkpoints! " + course.length + " to go." + (rivalDrivers ? " " + rivalDrivers.length + " rivals on the road." : ""), 2.6);
     big("3.. 2.. 1.. GO!");
-    if (CBZ.sfx) CBZ.sfx("siren");
   }
   function refreshBeacons() {
     clearRaceBeacons();

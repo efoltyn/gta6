@@ -4669,6 +4669,175 @@ boundary. The later door-mark report produced one shared-system gameplay change
 in `src/systems/fpsmode.js` plus its browser regression. The other published
 gameplay change is precisely the generated-soot removal and its source contract.
 
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 causal sound, facade, SWAT, yacht and iPad handoff
+
+This is the authoritative handoff from the owner's sound/visual/iPad review. The
+owner is closing the originating conversation, so preserve the decisions below
+instead of reopening settled questions. Conversation-scoped work that was not
+already on `main` is published on `agent/conversation-audio-handoff`.
+
+#### Shipping map
+
+- `998ef0e` is already on `main`: road cars use gas, brake, left and right touch
+  buttons; optional tilt steering is deliberately gentle; boats, planes and
+  helicopters retain the joystick; Racer cars take more crash damage before
+  exploding.
+- `86dbc1b` is already on `main`: touch race results and related shared overlays
+  have a visible tappable `CLOSE`, remove the keyboard-only `Esc` instruction on
+  touch devices, accept `touchend`, and exclude the control from joystick/look
+  gesture capture.
+- `4851168` and `7e001ab` are on
+  `agent/conversation-audio-handoff`: the sound observer, causal sound-source
+  purge, physical door/glass policy, facade-terminal purge, SWAT-shield removal,
+  and spatial siren correction described below.
+- The giant-yacht visibility problem is diagnosed but intentionally unresolved.
+  Do not describe it as shipped.
+- `KO` and `rack` remain review candidates. Punch loudness remains a mix problem.
+  They were not approved for deletion and must not be reported as deleted.
+
+#### The owner's audio law: sounds must have a physical why
+
+The B-2 flyover exposed the governing failure: the player heard alarms, doors,
+clanks and glass while thousands of metres above a city, even though no nearby
+physical event justified any of them. The owner called these fake sounds and
+explicitly rejected silently swallowing requests in the central sound engine as
+a band-aid. A sound request should not exist unless a real world event emitted
+it.
+
+Therefore:
+
+- Remove bogus call sites and synthetic ambience at their owners. Do not build a
+  denylist in `sfx`, mute broad categories, or turn valid requests silent.
+- Every environmental sound needs an emitter position and must attenuate from the
+  actual listener. Global UI/state changes are not permission to play world
+  foley.
+- Player causality matters. A directly operated mechanism may make a sound; an
+  unrelated timer, random ambience tick, remote NPC, weather event or UI state
+  may not impersonate that mechanism.
+- Being inside the same owned building/aircraft is a legitimate local acoustic
+  relationship. Merely flying over it is not.
+- Preserve the gun distance mix. The owner specifically praised how guns become
+  quiet with distance; do not route guns through a new generic curve while
+  repairing other sounds.
+
+Settled cue decisions:
+
+- `alarm`: purged from the generic bank and fake source call sites. It was hot,
+  global and reused without a believable emitter.
+- `clank`: purged from the generic bank and fake source call sites.
+- Generic `door`: purged. Keep directional `door_open` / `door_close` only when
+  the player operates the mechanism or the door belongs to the building or
+  aircraft currently occupied by the player. The B-2 altitude/ownership guard is
+  intentional.
+- `glass`: remote/random glass is purged. Keep the local sound only for a direct
+  player gunshot, melee strike or player-broken jewellery case, with the local
+  distance cap. NPCs, explosions, aircraft, weather, UI and background activity
+  must not synthesize it.
+- Gun sounds and their existing near/distant assets are kept.
+- Sirens must fade continuously with listener distance. They may not remain
+  full-volume inside a binary radius and suddenly disappear at its edge.
+- Race-start and gang-turf state changes no longer play a fake global siren.
+  Emergency vehicles, police responders, strategic strikes, nuclear warnings
+  and tsunami warnings supply their real world position through `CBZ.sfxAt`.
+  Sirens use their own squared falloff and reach silence at long range; the gun
+  attenuation branch is unchanged.
+
+The remaining review list is deliberately not a kill list:
+
+- `KO`: listen and decide with the owner.
+- `rack`: listen and decide with the owner.
+- `punch`: the owner says it is stupidly loud relative to guns. Rebalance it only
+  after comparing its layered `punch_real + thud_real` path against the gun mix;
+  do not casually delete or globally compress gun audio to make the ratio look
+  better.
+
+#### Sound observer contract
+
+The review overlay is diagnostic only. Enable it with
+`http://127.0.0.1:8000/?soundDebug=1`; `F8` toggles it. Each row reports:
+
+- the logical cue;
+- the actual asset or procedural/layered source that played;
+- near/far selection where relevant;
+- duplicate count for rapidly repeated cues; and
+- the originating source file/caller when available.
+
+It reports sounds that actually schedule playback and deduplicates loops. It
+must never change volume, timing, routing or whether the sound plays. The owner
+already used this observer successfully. Do not keep adding audit UI or rerun
+broad browser/world suites merely to reconfirm that settled workflow.
+
+#### Facade and rooftop decision
+
+The dark boxes repeated on the sides of Threads, Drip and many similar buildings
+were not useful architectural detail. Their active owner was the repeated
+`balconyWindow` facade terminal, with a second dormant fake-fire-escape platform
+path in building dressing. Both repeated side attachments are purged globally;
+do not reintroduce them under a new decoration name.
+
+The hollow-looking rooftop attachment is different: it is the functional
+elevator/headhouse access volume. Keep it. The instruction was to remove the
+repeated side boxes, not blindly strip useful rooftop access geometry.
+
+#### SWAT decision
+
+Remove the handheld SWAT riot shield. The mesh, catalog entry, mount and loadout
+assignment were all part of the same bad presentation, and the actors held it
+incorrectly. SWAT should retain helmet, vest, full armour behaviour and an SMG;
+do not replace the shield with another decorative slab.
+
+#### Giant-yacht diagnosis
+
+The large yachts physically exist. The visibility failure is placement and
+presentation: they sit roughly four kilometres offshore in the roadstead,
+outside the useful chart/minimap read and beyond the normal visible-ocean/far
+horizon experience. This is why the owner could not see them; it was not proof
+that the yacht models were deleted.
+
+The next design pass must choose a grounded remedy—bring a meaningful yacht
+route/anchorage into readable range, expose it through a real travel reason, or
+extend the ocean/horizon/navigation presentation coherently. Do not add a
+floating marker as a substitute and do not claim this branch solves it.
+
+#### iPad interaction rules that came out of this review
+
+- Road cars need explicit gas, brake, left and right controls. A movement
+  joystick remains correct for boats and aircraft, but not for road-car driving.
+- Tilt steering is optional, low-sensitivity and never the only steering method.
+- Racer vehicles should survive ordinary race contact; they were exploding too
+  easily before the durability adjustment on `main`.
+- Every modal shown on iPad must contain a visible tappable close control.
+  Keyboard-only copy such as `Esc closes` is a bug on touch hardware.
+- A close control must receive `touchend` and be protected from movement/look
+  gesture capture. Merely drawing the button is insufficient.
+
+#### Vehicle cook-off chain distance
+
+A burning car may still ignite or destroy a genuinely adjacent vehicle, but the
+old blast-bus coupling reused the visual fireball's legacy `radius * power`
+footprint. That let a normal saloon bill cars about 7.5 metres away and let a
+larger van reach farther. The review branch gives `carcook` a final five-metre
+vehicle-coupling radius. This changes only car-to-car blast billing: the visible
+fireball and the explosion's other physical effects retain their existing size.
+Do not widen the chain radius merely to make parking-lot cascades easier.
+
+#### Evidence boundary and next actions
+
+The focused sound-source contract and syntax checks passed before the final
+siren-distance patch. At the owner's explicit direction, no browser suite, world
+gate, build, or redundant audit was rerun afterward. Do not misstate the siren
+patch as runtime-tested, but also do not restart a broad testing campaign: inspect
+or exercise only the exact new behavior if the owner later asks.
+
+The remaining owner decisions are:
+
+1. audition `KO` and `rack`;
+2. choose a new punch-to-gun level after a direct comparison; and
+3. choose how the giant yachts enter the readable world.
+
+Do not reopen alarm/clank/global-door/global-glass, SWAT shields, facade side
+boxes, car touch controls, or touch-modal close behavior as unresolved design.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a

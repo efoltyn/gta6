@@ -947,7 +947,6 @@
       if (b.isPlayer && CBZ.cityPlayerGangDefendTurf) {
         CBZ.cityPlayerGangDefendTurf(targetLot.cx, targetLot.cz);
         CBZ.city && CBZ.city.big("" + a.name + " RAIDING YOUR TURF");
-        if (CBZ.sfx) CBZ.sfx("siren");
       }
     } else {
       a.treasury += cost;   // refund — nobody was free to go

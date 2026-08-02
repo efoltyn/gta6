@@ -558,7 +558,10 @@
       if (inner.lamp) { inner.lamp.material.color.setHex(0xffb347); inner.lamp.material.emissive.setHex(0xff7a1a); }
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (!quiet && v) CBZ.sfx("key");
+    if (!quiet) {
+      if (v) CBZ.sfx("key");
+      CBZ.sfx(v ? "door_open" : "door_close");
+    }
     return v;
   };
 
