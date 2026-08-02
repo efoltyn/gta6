@@ -1,0 +1,211 @@
+{
+  "visibleDrawMeshes": 14730,
+  "instancedMeshesInView": 54,
+  "uniquePairs": 4045,
+  "singletonPairs": 3306,
+  "repeatedPairs": 465,
+  "meshesInRepeatedPairs": 10802,
+  "instanceableMeshes_total": 10802,
+  "instanceableMeshes_spared_collider_or_userdata": 1436,
+  "instanceableMeshes_FREE": 9366,
+  "freePairCount": 374,
+  "top15_free": [
+    {
+      "n": 275,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 241,
+      "tris": 24,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 241,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 241,
+      "tris": 2,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 220,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 196,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 194,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 165,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 110,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 110,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 110,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 110,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 110,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 110,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    },
+    {
+      "n": 104,
+      "tris": 12,
+      "matType": "MeshLambertMaterial",
+      "name": ""
+    }
+  ],
+  "top15_spared": [
+    {
+      "n": 292,
+      "tris": 24,
+      "collider": true,
+      "userData": false,
+      "name": ""
+    },
+    {
+      "n": 125,
+      "tris": 12,
+      "collider": false,
+      "userData": true,
+      "name": "diegetic-sign-board"
+    },
+    {
+      "n": 71,
+      "tris": 32,
+      "collider": true,
+      "userData": false,
+      "name": ""
+    },
+    {
+      "n": 51,
+      "tris": 40,
+      "collider": true,
+      "userData": false,
+      "name": ""
+    },
+    {
+      "n": 44,
+      "tris": 112,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 36,
+      "tris": 112,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 36,
+      "tris": 32,
+      "collider": true,
+      "userData": false,
+      "name": ""
+    },
+    {
+      "n": 32,
+      "tris": 112,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 32,
+      "tris": 112,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 28,
+      "tris": 12,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 28,
+      "tris": 12,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 20,
+      "tris": 112,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 20,
+      "tris": 112,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 18,
+      "tris": 12,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    },
+    {
+      "n": 18,
+      "tris": 12,
+      "collider": false,
+      "userData": true,
+      "name": ""
+    }
+  ]
+}

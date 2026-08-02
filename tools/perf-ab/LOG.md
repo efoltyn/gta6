@@ -145,3 +145,126 @@ city-atlas seed 1 structurally intact ✓ · zero console errors in every run �
   car paint = per-car MeshStandardMaterial (heaviest shader) — palette-cache for parked/traffic.
 - Per-tile instanced pools for wildnature/biome scatter (farcull can only cull whole pools).
 - Emissive statics beyond lamps/signals (beacons/neon) still individual draws.
+
+## ROUND 3 — 2026-07-21 (fresh owner-requested teardown: "what's the pie chart")
+Owner asked for a data-driven attribution + owner-flippable feel toggles, framed around an
+observability-first north star ("reality is only what's observable — prioritize the view frustum").
+New tooling (kept, committed): `tools/perf-ab/attribute.mjs` (one-boot full pie chart: shadow tax,
+category hides, top-level subtree attribution, quality-tier sweep, per-updater sim ranking) and
+`tools/perf-ab/abmatrix.mjs` (rAF-FROZEN clean A/B of every RUNTIME lever — shadows, shadow-res,
+pixel-ratio, draw-distance, category hides). Results JSON in this dir (attr-calm-q4, abmatrix-{calm,
+chaos,seed1337}). Ran calm/90210 + 5★-chaos/90210 + calm/1337; 3 web-research agents (render cost,
+procgen CPU, headless attribution) captured in the session.
+
+### BOOT/METHOD GOTCHAS (save the next run time)
+- `setMode("city")+resetGame()` alone builds a STUB world (25 draws, 121 colliders). The full
+  continent only builds via the title `playBtn` click path (math-gate's route). Use that.
+- World streams in over ~150s headless (SwiftShader). Poll `CBZ.colliders.length` to stability before
+  measuring — a fixed sleep under-measures.
+- The game's own rAF loop mutates the scene between measurement renders → pollutes category/shadow
+  deltas (negative dCalls, drifting visibleMeshes). abmatrix FIXES this by swallowing
+  `requestAnimationFrame` during measurement. attribute.mjs does NOT freeze → trust only its huge
+  signals. Also: abmatrix's draw-distance test runs BEFORE the category hides and farcull doesn't
+  fully re-expand in time, so its per-category dCalls are unreliable — only `hide_staticCity` (a 99%
+  signal) survives the drift. Fix next time: freeze farcull or reorder.
+- r128 does NOT count shadow-map draws in `renderer.info.render.calls` (passCalls came back 0 on every
+  run). Shadow magnitude must come from map size/type + relative refresh ms + design intent, not info.
+
+### FINDINGS (consistent across calm / chaos / both seeds)
+| metric | calm 90210 | chaos 90210 | calm 1337 |
+|---|---|---|---|
+| draw calls / frame (q4) | 5,622 | 6,061 | 7,212 |
+| hide static city → calls | **22** | **22** | **23** |
+| ⇒ static world = share of draws | **99.6%** | **99.6%** | **99.7%** |
+| triangles / frame | 2.16M | 2.52M | 2.18M |
+| visible meshes walked | 54k | 47k | 55k |
+| JS heap | 1.05 GB | 1.10 GB | 1.02 GB |
+| unique materials / programs | 39k / 259 | — | — / 262 |
+| peds (calm ambient / chaos) | 507 | 477+6 | 509 |
+
+- **Draw-call submission of the STATIC procedural world = the bottleneck (~99%), unchanged even in a
+  5★ riot.** Dynamic actors are a tiny share of *draws* (big share of *triangles* + the #1 *CPU* cost).
+  Ambient instanced crowd ≈ free (prior rounds confirmed ~11 draws). Cutting draw distance ×0.5 moved
+  draws <2% — the calls are LOCAL block density, not the skyline. Fill-rate is NOT it (¼-res ratio 1.07
+  → CPU/draw-call bound, classic weak-GPU profile).
+- **Shadows = #2 GPU cost, cheapest big win.** Sun = 2048 PCFSoft, re-renders casters 10-18Hz; a
+  refresh added ~200ms relative render (~⅓ of a shadowed frame). quality.js already calls the tier-0
+  shadow-off "the single biggest GPU cost in the scene."
+- **Sim: ped AI (`peds.js:4233`, onUpdate 34) = 15.8ms/tick, 3× the next system**, scales with ~500
+  peds on/off screen. stepSim ~51ms/tick total (SwiftShader-relative). #2 vehicle sim ~5.7, aigoals ~4.8.
+- **Memory: ~1GB heap / 44k geoms / 39k materials** → GC-hitch + crash risk on weak machines; 39k
+  materials also defeats the renderer's draw-call sort.
+
+### PLAN (delivered to owner as an artifact; NOT yet built — awaiting go-ahead)
+Observability-first: spend draws/tris/shadows/AI-ticks only on the view-frustum slice.
+1. Per-chunk InstancedMesh pools + merge + frustum/occlusion gating for the LOCAL static world
+   (target 5,600→<1,500 draws). The big one.
+2. Independent Shadows setting (Off/Low/High) + near-only casters + `?cfg_SHADOWS=off` feel flag.
+3. Ped-AI LOD: full brain only for near+on-screen peds; puppet/freeze the rest (16→<5ms).
+4. Material/geometry dedup cache (heap→<600MB, fewer state changes).
+5. Prioritized frustum-first streaming (no observable pop-in).
+6. Owner toggle panel + URL flags for every lever (feel > numbers).
+Feel-it-today (already shipped): Quality slider Fastest, `?qforce=N`, `?cfg_CITY_FAR_CULL=0`.
+
+### SHIPPED this round (levers 2 + 3; each flag-gated, default off = byte-identical)
+- **CITY_SHADOW_MODE** (auto|off|low|high) — quality.js:applyQuality override + `CBZ.setShadowMode()`
+  live setter. URL `?cfg_CITY_SHADOW_MODE=off`. Verified live: URL-off → sun.castShadow false at boot;
+  high/low/off/auto → castShadow+mapSize 2048/1024/off/2048. math-gate green.
+- **CITY_PED_AI_LOD** — peds.js onUpdate 34: extends the invisible-mass move() stride (was q0-q2) to
+  q3/q4 (2x). On/off-screen/important peds untouched. URL `?cfg_CITY_PED_AI_LOD=1`. math-gate green.
+
+### LOCAL_INSTANCING — CENSUS DONE (tools/perf-ab/census.mjs → census-90210.json), NOT yet built
+Census of frustum-visible STATIC meshes under arena.root (dynamic actors excluded), rAF frozen:
+- 14,730 visible draw-meshes; **9,366 are FREE repeated instanceable** (≥4 copies, no collider/userData/
+  LOS ref on the prop) across just **374 geom+material pairs** — tiny 2-40 tri MeshLambert props
+  (trim/sills/fixtures). Naive instancing would collapse ~9,366 draws → ~374. This CONTRADICTS the
+  round-2 "static headroom is low" note (that was the smaller pre-continent world).
+- **WHY NOT SHIPPED YET:** most of those 9,366 are CHILDREN of demolishable, collider-bearing building
+  groups. A naive InstancedMesh pass breaks `CBZ.batchHideGroup`/demolition (a destroyed building's trim
+  would float in a shared instance mesh — the exact class of bug ITER3 hit, +428%). It also must respect
+  farcull (round-2 fixed it to aggregate instance bounds — good), matrix-freeze, and MP determinism.
+- **SAFE BUILD PLAN (next):** (1) filter to prop meshes with NO collider-bearing ANCESTOR (standalone
+  street props), OR make demolition instance-aware (per-instance zero-scale on hide, like buildings.js
+  glass shatter); (2) group by geom+material, one InstancedMesh per pair, per-chunk so farcull culls
+  pools; (3) hook after `batchStaticUnder(A.root)` in city/mode.js:488, flag-gated; (4) A/B draw calls
+  ON vs OFF + demolition-check.mjs (float invariants) + smoke + math-gate before default-on. chunks.js
+  rebuildChunkBatch is still a documented STUB — the per-chunk instancer is its real implementation.
+
+## ROUND 3b — 2026-07-21 (LOCAL_INSTANCING BUILT, A/B'd, tuned, SHIPPED default-off)
+Built src/city/localinst.js (CBZ.instanceStaticUnder, hooked in city/mode.js after batchStaticUnder,
+before freezeStaticUnder). Collapses repeated static props batch left (emissive/transparent/textured
+trim) into per-CELL InstancedMesh pools. Demolition-safe: each instance mapped to its top group; wraps
+batchHideGroup/batchShowGroup to zero-scale a collapsing building's instanced trim. Tools: abinst.mjs
+(paired draw-call A/B), demo-inst-safety.mjs (exact zero-on-demolish invariant via CBZ.localInstGroupLive).
+
+### A/B (calm q4, seed 90210; draw calls EXACT, device-independent)
+| config | draw calls | tris | pools/collapsed | verdict |
+|---|---|---|---|---|
+| OFF (2 runs) | 5,441 / 6,407 | 2.02M/2.56M | — | baseline (OFF varies +-~1k run-to-run) |
+| ON 112u cell | 5,358 | 2.55M | 354 / 4,205 | WASH — in-view props scatter thin per 112u tile |
+| ON 336u cell | 5,730 | 1.96M | 567 / 5,995 | ~noise |
+| ON 672u cell | 3,826 / 3,851 | 2.32M/2.13M | 542 / 6,097 | -30%, STABLE across repeats |
+| ON 672u seed 1337 | 5,120 | 2.15M | 586 / 6,112 | -29% vs ~7.2k baseline — generalises |
+
+- KEY BUG FOUND + FIXED BY A/B: v1 set frustumCulled=false on pools + relied on farcull (distance, 360deg)
+  -> drew all within-radius pools instead of a view cone -> +26% WORSE. Fix: pools live under one container
+  (farcull sees it as one node) + a manual onAlways(3.7) frustum sweep culls each pool by its real world
+  sphere. That flipped it from regression to win.
+- Cell size matters non-obviously: 112u (=batch tile) is a wash (few copies of a prop type per small tile);
+  672u collapses in-view props ~1:many. Default 672/min-4. Tunable via ?cfg_LOCAL_INST_TILE / _MIN.
+- Bonus: ON draw calls are far MORE STABLE (3,826 vs 3,851) than OFF (5,441 vs 6,407) — instancing removes
+  the per-frame in-view-prop-count variance too.
+
+### GATES (all green)
+- math-gate seed 90210: ok (flag OFF default path byte-identical; determinism ok).
+- demo-inst-safety (EXACT, via localInstGroupLive): target building owned 654 instances, liveBefore 654,
+  liveAfter 0 -> the batchHideGroup wrap zero-scales exactly the demolished building's trim. PASS.
+  (An earlier geometric-box test FALSE-FAILED: setFromObject(b.group) inflated the footprint to 1,329u wide
+  and counted NEIGHBOURS' standing trim — switched to the exact instance-map test.)
+- 0 console errors across every ON run.
+
+### DECISION — SHIP default-OFF (owner opt-in)
+Real ~30% draw-call win on the #1 GPU bottleneck, demolition-safe, MP-deterministic, reversible. Kept
+default OFF because enabling it changes what renders and visual parity is the OWNER's call (doctrine: looks
+are judged by playing). Owner flips ?cfg_LOCAL_INSTANCING=1, plays, eyeballs; if identical, flip the config
+default to true. All three round-3 levers now shipped + flag-gated + verified.

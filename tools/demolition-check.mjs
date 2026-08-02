@@ -27,7 +27,8 @@ const chrome = spawn(chromePath, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=1280,800",
-  `--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`, base,
+  `--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`,
+  base + (process.env.CBZ_DEMO_CFG ? "?" + process.env.CBZ_DEMO_CFG : ""),
 ], { stdio: "ignore" });
 let page = null;
 for (let i = 0; i < 80 && !page; i++) {

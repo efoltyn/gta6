@@ -1,0 +1,360 @@
+{
+  "tag": "calm-q4",
+  "seed": 90210,
+  "scenario": "calm",
+  "qforce": "4",
+  "cfg": "",
+  "scene": {
+    "objects": 169144,
+    "meshes": 154707,
+    "visibleMeshes": 54684,
+    "instancedMeshes": 288,
+    "lights": 58,
+    "sprites": 1451,
+    "uniqueGeometries": 44023,
+    "uniqueMaterials": 39357,
+    "texturedMeshes": 1705,
+    "transparentMeshes": 69438,
+    "emissiveMeshes": 78699,
+    "matrixAutoUpdateObjects": 33030
+  },
+  "info": {
+    "geometries": 8281,
+    "textures": 245,
+    "programs": 188
+  },
+  "heapMB": 1020.9,
+  "counts": {
+    "peds": 420,
+    "cops": 2,
+    "cars": 90,
+    "crowd": 48,
+    "colliders": 98384,
+    "losBlockers": 31407
+  },
+  "baseline": {
+    "mainCalls": 7227,
+    "mainTris": 2238085,
+    "shadowUpdateCalls": 6472,
+    "shadowUpdateTris": 2568052,
+    "shadowPassCalls": -755,
+    "shadowPassTris": 329967
+  },
+  "ms": {
+    "mainMedian": 323.9,
+    "shadowUpdateMedian": 338.9,
+    "shadowTaxMedian": 15
+  },
+  "fillRate": {
+    "fullResMs": 309.7,
+    "quarterResMs": 331.6,
+    "ratio": 1.071,
+    "note": "ratio~1 => CPU/draw-call bound; <<1 => fill/fragment bound (SwiftShader-indicative)"
+  },
+  "base": {
+    "calls": 7195,
+    "tris": 2237317
+  },
+  "categories": {
+    "pedsAndCops": {
+      "hidden": 432,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    "cars": {
+      "hidden": 90,
+      "dCalls": 434,
+      "dTris": 249814
+    },
+    "ambientCrowd": {
+      "hidden": 0,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    "staticCityRoot": {
+      "hidden": 1,
+      "dCalls": 7173,
+      "dTris": 2226294
+    },
+    "prisonRoot": {
+      "hidden": 1,
+      "dCalls": 0,
+      "dTris": 0
+    }
+  },
+  "topLevel": [
+    {
+      "key": "Group",
+      "n": 8,
+      "dCalls": 7174,
+      "dTris": 2227510
+    },
+    {
+      "key": "PerspectiveCamera",
+      "n": 1,
+      "dCalls": 803,
+      "dTris": -329377
+    },
+    {
+      "key": "cctv-cams",
+      "n": 1,
+      "dCalls": 792,
+      "dTris": -319491
+    },
+    {
+      "key": "city-blob-shadows",
+      "n": 1,
+      "dCalls": 790,
+      "dTris": -329091
+    },
+    {
+      "key": "HemisphereLight",
+      "n": 1,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "Object3D",
+      "n": 1,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "Sprite",
+      "n": 145,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "Line",
+      "n": 2,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "chunk_0_1",
+      "n": 1,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "chunk_0_0",
+      "n": 1,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "chunk_-2_2",
+      "n": 1,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "batch-inert",
+      "n": 1,
+      "dCalls": 788,
+      "dTris": -329571
+    },
+    {
+      "key": "Mesh",
+      "n": 121,
+      "dCalls": 4,
+      "dTris": 4334
+    }
+  ],
+  "tiers": {
+    "q0": {
+      "pixelRatio": 0.72,
+      "shadowMap": 512,
+      "sunShadow": false,
+      "mainCalls": 6410,
+      "mainTris": 2557002,
+      "shadowPassCalls": 793,
+      "shadowPassTris": -329511,
+      "fullFrameMs": 536.8
+    },
+    "q4": {
+      "pixelRatio": 1,
+      "shadowMap": 2048,
+      "sunShadow": true,
+      "mainCalls": 6410,
+      "mainTris": 2566924,
+      "shadowPassCalls": 793,
+      "shadowPassTris": -329511,
+      "fullFrameMs": 330.3
+    }
+  },
+  "sim": {
+    "ticks": 120,
+    "totalMs": 6120,
+    "msPerTick": 50.999,
+    "top": [
+      {
+        "kind": "update",
+        "order": 34,
+        "source": "",
+        "totalMs": 1891.5,
+        "avgMsPerTick": 15.763,
+        "peakMs": 35.2
+      },
+      {
+        "kind": "update",
+        "order": 47.1,
+        "source": "",
+        "totalMs": 684.3,
+        "avgMsPerTick": 5.702,
+        "peakMs": 13.5
+      },
+      {
+        "kind": "update",
+        "order": 33.8,
+        "source": "",
+        "totalMs": 581.4,
+        "avgMsPerTick": 4.845,
+        "peakMs": 7.7
+      },
+      {
+        "kind": "update",
+        "order": 37,
+        "source": "",
+        "totalMs": 446,
+        "avgMsPerTick": 3.717,
+        "peakMs": 9
+      },
+      {
+        "kind": "update",
+        "order": 38,
+        "source": "",
+        "totalMs": 308,
+        "avgMsPerTick": 2.567,
+        "peakMs": 9.8
+      },
+      {
+        "kind": "always",
+        "order": 46,
+        "source": "",
+        "totalMs": 224.5,
+        "avgMsPerTick": 1.871,
+        "peakMs": 9.1
+      },
+      {
+        "kind": "always",
+        "order": 52,
+        "source": "",
+        "totalMs": 222.8,
+        "avgMsPerTick": 1.857,
+        "peakMs": 5
+      },
+      {
+        "kind": "update",
+        "order": 89,
+        "source": "",
+        "totalMs": 190.9,
+        "avgMsPerTick": 1.591,
+        "peakMs": 6
+      },
+      {
+        "kind": "always",
+        "order": 60,
+        "source": "",
+        "totalMs": 156.3,
+        "avgMsPerTick": 1.302,
+        "peakMs": 2.6
+      },
+      {
+        "kind": "update",
+        "order": 36,
+        "source": "",
+        "totalMs": 106.7,
+        "avgMsPerTick": 0.889,
+        "peakMs": 1.8
+      },
+      {
+        "kind": "update",
+        "order": 14.7,
+        "source": "",
+        "totalMs": 104.9,
+        "avgMsPerTick": 0.874,
+        "peakMs": 8.3
+      },
+      {
+        "kind": "update",
+        "order": 15,
+        "source": "",
+        "totalMs": 72,
+        "avgMsPerTick": 0.6,
+        "peakMs": 1.1
+      },
+      {
+        "kind": "update",
+        "order": 34.3,
+        "source": "",
+        "totalMs": 60.8,
+        "avgMsPerTick": 0.507,
+        "peakMs": 1.6
+      },
+      {
+        "kind": "always",
+        "order": 88,
+        "source": "",
+        "totalMs": 59.9,
+        "avgMsPerTick": 0.499,
+        "peakMs": 3.3
+      },
+      {
+        "kind": "always",
+        "order": 61.2,
+        "source": "",
+        "totalMs": 58.5,
+        "avgMsPerTick": 0.488,
+        "peakMs": 0.7
+      },
+      {
+        "kind": "always",
+        "order": 3.6,
+        "source": "",
+        "totalMs": 54.5,
+        "avgMsPerTick": 0.454,
+        "peakMs": 11.8
+      },
+      {
+        "kind": "update",
+        "order": 23.7,
+        "source": "",
+        "totalMs": 53.7,
+        "avgMsPerTick": 0.448,
+        "peakMs": 0.7
+      },
+      {
+        "kind": "update",
+        "order": 90.5,
+        "source": "",
+        "totalMs": 48.4,
+        "avgMsPerTick": 0.403,
+        "peakMs": 0.6
+      }
+    ]
+  },
+  "consoleErrors": [
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent",
+    "http://127.0.0.1:9529/?seed=90210&qforce=4:0 ProgressEvent"
+  ]
+}
