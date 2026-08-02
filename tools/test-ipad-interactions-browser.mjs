@@ -351,7 +351,7 @@ try {
     out.selected = !!window.__ipadCityAction;
     return out;
   })()`);
-  check(cityLayout.shown && cityLayout.label === "ASK FOR DIRECTIONS" && cityLayout.action === "YES",
+  check(cityLayout.shown && cityLayout.label === "Ask for directions" && cityLayout.action === "YES",
     "city interaction renderer did not produce left explanation/right action", JSON.stringify(cityLayout));
   check(cityLayout.copy && cityLayout.button && cityLayout.copy.r <= cityLayout.button.l &&
       cityLayout.button.t === cityLayout.reload.t && cityLayout.reload.l - cityLayout.button.r >= 8,

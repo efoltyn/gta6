@@ -364,13 +364,16 @@ body.tveh-on #pinteract{ display: none !important; }
   .pi-choice{
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
+    align-items: center;
     gap: 12px;
     min-height: 52px;
     pointer-events: none;
   }
   .pi-choice .pi-copy{
     min-width: 0;
+    justify-self: end;      /* the bar hugs its words — a short label leaves clear
+                               glass to its left, never a painted slab of gradient */
+    max-width: 100%;
     padding: 7px 10px;
     border-radius: 10px;
     background: linear-gradient(90deg, rgba(7,13,20,.45), rgba(7,13,20,.82));
@@ -402,6 +405,8 @@ body.tveh-on #pinteract{ display: none !important; }
     white-space: nowrap;
   }
   .pi-choice .pi-action{
+    grid-column: 2;         /* a deduped row (interact.js's say-it-once guard)
+                               has no copy cell; the button keeps the rail edge */
     min-width: 106px;
     min-height: 52px;
     padding: 8px 13px;

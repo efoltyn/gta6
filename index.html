@@ -11,14 +11,14 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=sasubtitle1">
+<link rel="stylesheet" href="css/hud.css?v=allmain3">
 <link rel="stylesheet" href="css/screens.css?v=intro2">
-<link rel="stylesheet" href="css/mobile.css?v=ipadcontrols1">
+<link rel="stylesheet" href="css/mobile.css?v=allmain3">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
 <link rel="stylesheet" href="css/inventory.css?v=ctrl1">
 <link rel="stylesheet" href="css/city.css?v=city2w10">
 <link rel="stylesheet" href="css/campaign.css?v=sasubtitle1">
-<link rel="stylesheet" href="css/interact_touch.css?v=pinteract2">
+<link rel="stylesheet" href="css/interact_touch.css?v=allmain3">
 </head>
 <body class="campaign-build">
 <div id="game"></div>
@@ -406,7 +406,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=traversal2"></script>
+  <script src="src/entities/character.js?v=allmain3"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=scale1y"></script>
 <script src="src/entities/coins.js"></script>
@@ -420,7 +420,7 @@
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=soundspace2"></script>
-<script src="src/systems/hud.js?v=hudmin1"></script>
+<script src="src/systems/hud.js?v=allmain3"></script>
 <script src="src/systems/economy.js?v=pick1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -462,7 +462,7 @@
 <script src="src/entities/keycard.js"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
-<script src="src/entities/npclife.js?v=life3w9y"></script>
+<script src="src/entities/npclife.js?v=allmain3"></script>
 <script src="src/entities/npc.js?v=notags1"></script>
 <script src="src/entities/ai.js?v=gore1"></script>
 
@@ -515,7 +515,7 @@
 <script src="src/systems/dashboard.js?v=ranks1"></script>
 <script src="src/systems/combat.js?v=phys1"></script>
 <script src="src/systems/killstreaks.js"></script>
-<script src="src/systems/interact.js?v=ipadchoices1"></script>
+<script src="src/systems/interact.js?v=allmain3"></script>
 <script src="src/systems/interactions.js?v=mapflow2"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
@@ -709,8 +709,8 @@
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=seawave1"></script>
 <script src="src/city/economy.js?v=allmain1"></script>
-<script src="src/city/clothes.js?v=fit5"></script>
-<script src="src/city/outfits.js?v=fits2y"></script>
+<script src="src/city/clothes.js?v=allmain3"></script>
+<script src="src/city/outfits.js?v=allmain3"></script>
 <script src="src/city/hunger.js?v=allmain1"></script>
 <script src="src/city/wanted.js?v=arrest4"></script>
 <script src="src/city/identity.js?v=perm1"></script>
@@ -725,7 +725,7 @@
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=traversal2"></script>
+<script src="src/city/peds.js?v=allmain3"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -734,11 +734,11 @@
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
 <script src="src/city/childhood.js?v=child1"></script>
-<script src="src/city/level.js?v=lvl2w9yr"></script>
+<script src="src/city/level.js?v=allmain3"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=fortress1"></script>
-<script src="src/city/crowd.js?v=real1y"></script>
+<script src="src/city/crowd.js?v=allmain3"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=seawave1"></script>
@@ -823,7 +823,7 @@
 <script src="src/city/careers.js?v=citysec3r"></script>
 <script src="src/city/activities.js?v=hub4"></script>
 <script src="src/city/heists.js?v=night6"></script>
-<script src="src/city/interactions.js?v=allmain1"></script>
+<script src="src/city/interactions.js?v=allmain3"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1002,12 +1002,12 @@
      (registration), citystaff (posts) and wildlife (the sea it sails on). -->
 <script src="src/city/yachts.js?v=yacht1"></script>
 <script src="src/city/seacrew.js?v=yacht1"></script>
-<script src="src/city/armor.js?v=armor1"></script>
+<script src="src/city/armor.js?v=allmain3"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
 <script src="src/city/gigs.js?v=gig5"></script>
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=allmain1"></script>
+<script src="src/city/hud.js?v=allmain3"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>

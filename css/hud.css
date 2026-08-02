@@ -148,6 +148,28 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #hint.show{opacity:1; transform:translateX(-50%) translateY(0);}
 @media (max-width:900px),(max-height:560px){ #hint{font-size:13px; padding:7px 12px; bottom:188px} }
 
+/* ON TOUCH the hint is SPEECH, not a cell (systems/hud.js stamps .hint-sub;
+   flag TOUCH_HINT_SUBTITLE). The boxed panel above is a keyboard-era popup —
+   the owner's screenshot had it wedged half under the iPad interaction rail —
+   so on touch it adopts the one observed-world dialogue grammar this game has
+   (.world-subtitle / .pi-subtitle: heavy white Fredoka, black stroke, NO box)
+   and sits one step above the .pi-subtitle band (touch floor 120px) so the two
+   read as stacked lines of the same language, never as competing cards. */
+#hint.hint-sub{
+  bottom:calc(166px + env(safe-area-inset-bottom, 0px));
+  max-width:min(74vw, 680px);
+  padding:0; background:none; border:0; border-radius:0; box-shadow:none;
+  backdrop-filter:none; -webkit-backdrop-filter:none;
+  font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  font-size:var(--pi-sub-line, 19px); font-weight:700; color:#fff;
+  text-align:center; letter-spacing:.005em;
+  -webkit-text-stroke:1.4px #090909; paint-order:stroke fill;
+  text-shadow:
+    -2px -2px 0 #090909, 2px -2px 0 #090909,
+    -2px 2px 0 #090909, 2px 2px 0 #090909,
+    0 3px 1px rgba(0,0,0,.9);
+}
+
 /* THE CENTRE TOAST — the legacy skin. 64px of white type over a four-layer
    RED shadow ladder, slammed in at 38% of the screen with a rotate-pop. It is
    kept EXACTLY as it was so `?cfg_PRISON_QUIET_TOASTS=0` is a true revert: the

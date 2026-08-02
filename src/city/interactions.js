@@ -445,6 +445,20 @@
     }
     return v.toUpperCase();
   }
+  // The docked iPad row's left column is PROSE, so it keeps the author's own
+  // casing — sentence case reads as language where the button's ALL-CAPS reads
+  // as a control (and it is what the prison rail already speaks). Same
+  // 40-char word-boundary cut as verbText.
+  function copyText(r) {
+    let v = String(r.proposal || r.label || "").trim();
+    if (v.length > 40) {
+      v = v.slice(0, 39);
+      const sp = v.lastIndexOf(" ");
+      if (sp > 18) v = v.slice(0, sp);
+      v += "…";
+    }
+    return v;
+  }
 
   // NOTE: #interact's base style is opacity:0; only `.show` lifts it to 1.
   function hidePanel() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentRows = []; fingerprint = ""; currentScore = -1; }
@@ -686,9 +700,17 @@
             if (dockedTouch) {
               const action = String(r.label || "DO").trim().toUpperCase();
               const aria = verbText(r).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+              // SAY IT ONCE (the zip-tie law above, applied to this layout):
+              // the copy column exists to say what the button cannot. A row
+              // whose proposal is nothing but its own verb — the airliner's
+              // BOARD / HIJACK card — would print the button's word in a bar
+              // beside the button, so the bar is dropped and the button
+              // carries the row alone (aria keeps the full line either way).
+              const prose = copyText(r);
+              const dup = !prose || prose.toUpperCase() === action;
               return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-                `<span class="itouch-copy"><span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${verbText(r)}</span></span>` +
-                `<button type="button" class="itouch-act" aria-label="${aria}">${action}</button></div>`;
+                (dup ? "" : `<span class="itouch-copy"><span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${prose}</span></span>`) +
+                `<button type="button" class="itouch-act${r.bad ? " ibad" : ""}" aria-label="${aria}">${action}</button></div>`;
             }
             return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
               `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${verbText(r)}</span></div>`;

@@ -5005,6 +5005,45 @@ a law so the class cannot return. Short list, with the number that proves it:
   fence nobody measured; E ejected you from planes because every E press ran the ride
   router first; Space never cleared the map waypoint because it was never bound.
 
+## THE 2026-08-01 SESSION — a text box is as wide as its words
+
+OWNER (iPad screenshots, verbatim): "never ever in my game again have a wasted
+text box" · "see the fucking redundancy". Standing law for every HUD surface,
+current and future — a box may be exactly as wide as its words, and a verb is
+said ONCE:
+
+- **THE STRETCHED COPY CELL** — both docked (≥700×550) interaction rails drew
+  the copy cell as a stretched 1fr grid track with its gradient painted edge to
+  edge, so "Slip 10 to look away" dragged ~170px of empty tint across the
+  world. The law is `justify-self: end` (css/interact_touch.css §7 +
+  css/mobile.css's docked block): the bar shrink-wraps its words, the vacated
+  track is clear glass, and in the city card it is also pointer-transparent
+  (the prison rail's button-only tap contract, ported) so a finger aiming the
+  camera falls through instead of hitting an invisible verb zone.
+- **THE VERB SAID TWICE** — the airliner card printed "BOARD" in a bar beside a
+  button reading "BOARD". Both docked renderers (city/interactions.js,
+  systems/interact.js incl. its flag-off fallback) drop the copy cell whenever
+  it would only repeat the button's own word; `r.bad` rows keep their warning
+  tint via `.ibad` on the button itself. THREE layers were stacked on that
+  card: bar text + button text + a full-row `.tyes/.tno` gradient slab that
+  outweighed the docked transparency reset by one class of specificity —
+  same-weight overrides declared later end the slab.
+- **THE DISTANCE SAID TWICE** — `#cJob` (top-centre pill) and `#waypointGuide`
+  (bottom-centre arrow + distance) both read "1237m" for the SAME destination,
+  because mission.start pins the waypoint on the job target. The job line now
+  stands down while the guide covers its destination (<40u), exactly the
+  speedometer→cluster stand-down rule ("exactly ONE number on screen"), and
+  returns when the waypoint is cleared or moved. An EMPTY #cJob also no longer
+  renders as a bare pill — a box with no text does not render.
+- **THE BOXED NARRATOR** — `TOUCH_HINT_SUBTITLE` (hud.js): on touch, #hint
+  ("TASED — you hit the floor!") drops its .panel box and speaks the
+  world-subtitle grammar one step above the .pi-subtitle band, instead of a
+  boxed cell wedged half under the iPad rail. Desktop keeps the panel.
+
+NOT YET VISUALLY CONFIRMED on a real iPad — the owner judges by playing; the
+docked layouts cannot render headless. If a shrunken bar or deduped row looks
+wrong in his next screenshot, the geometry above is where it lives.
+
 ## THE GATE WAS NOT RUNNING SEVEN OF ITS OWN RATCHETS (measured 2026-07-29)
 
 Run `node tools/math-gate.mjs --seeds 90210` against a CLEAN `HEAD` worktree and
