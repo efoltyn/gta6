@@ -131,6 +131,7 @@ try {
 
   const doorMark = JSON.parse(await evaluate(`JSON.stringify((function () {
     CBZ.closeDoor();
+    CBZ.door.mesh.updateWorldMatrix(true, true);
     if (CBZ.bulletHolesReset) CBZ.bulletHolesReset();
     CBZ.player.dead = false; CBZ.player.stun = 0; CBZ.player.driving = false; CBZ.player._swim = false;
     CBZ.player.pos.set(0, 0, -14);
