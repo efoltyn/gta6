@@ -3,7 +3,8 @@
 // the actual update loop instead of merely searching source: binary interaction
 // UI, gunpoint reads, bison launch physics, procedural weapon UI/models,
 // controller Y enter/exit, precinct-driven SWAT, Fort Brandt crews physically
-// claiming parked aircraft, threat markers, and the visible cuffing phase.
+// claiming parked aircraft, shared threat classification with no hostile
+// overhead markers, and the visible cuffing phase.
 
 import { spawn } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -121,6 +122,9 @@ try {
     const standing=high&&CBZ.cityInteractionStanding?CBZ.cityInteractionStanding(high):null;
     const pa=CBZ.city&&CBZ.city.playerActor;
     const threatPed=peds[0]||null,animal=(CBZ.cityWildlife||[]).find(function(a){return a&&!a.dead;})||null;
+    const hostileOverheadMarkers=peds.filter(function(p){return !!p._marker;}).length+
+      (CBZ.cityCops||[]).filter(function(c){return c&&!!c._marker;}).length+
+      (CBZ.cityWildlife||[]).filter(function(a){return a&&!!a._marker;}).length;
     let pedThreat=false,animalThreat=false;
     if(threatPed){const old=threatPed.rage;threatPed.rage=pa;pedThreat=CBZ.cityTargetsPlayer(threatPed);threatPed.rage=old;}
     if(animal){const old=animal.state;animal.state="charge";animalThreat=CBZ.cityTargetsPlayer(animal);animal.state=old;}
@@ -143,6 +147,7 @@ try {
     const thumb=CBZ.weaponThumbnail&&CBZ.weaponThumbnail("lmg");
     return {binaryLabels:labels,proposal:(document.getElementById("interactNote")||{}).textContent||"",lockEmoji:body.indexOf("🔒")>=0,
       fourthWall:/PERSON DOSSIER/i.test(body),standing:standing,pedThreat:pedThreat,animalThreat:animalThreat,
+      hostileOverheadMarkers:hostileOverheadMarkers,
       ram:ram,bipodActive:CBZ.fpsBipodActive&&CBZ.fpsBipodActive(),bipodMeta:bipodMeta?{attached:bipodMeta.attached,functional:bipodMeta.functional,hinges:bipodMeta.hinges.length,feet:bipodMeta.feet.length}:null,
       sniperOptic:optic,thumbnail:typeof thumb==="string"&&thumb.indexOf("data:image/png")===0};
   })()`);
@@ -267,6 +272,7 @@ try {
   if (baseline.fourthWall) failures.push("PERSON DOSSIER fourth-wall label remained in live UI");
   if (!baseline.standing || baseline.standing.playerLevel == null || baseline.standing.targetLevel == null) failures.push("player/target level standing was unavailable");
   if (!baseline.pedThreat || !baseline.animalThreat) failures.push("human/animal targeting did not share the threat contract");
+  if (baseline.hostileOverheadMarkers !== 0) failures.push(`${baseline.hostileOverheadMarkers} hostile overhead markers remained attached`);
   if (!baseline.ram || !baseline.ram.air || baseline.ram.vy < 6.5 || baseline.ram.horizontal < 7) failures.push("bison ram did not launch through player physics");
   if (!baseline.bipodActive || !baseline.bipodMeta || !baseline.bipodMeta.attached || !baseline.bipodMeta.functional) failures.push("LMG bipod was not attached and mechanically active");
   if (!baseline.sniperOptic || baseline.sniperOptic.children < 12) failures.push("sniper did not use the complete physical optic");

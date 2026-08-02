@@ -1,22 +1,13 @@
 /* ============================================================
-   systems/markers.js — a floating red chevron over the head of ANY
-   actor currently hunting the player: hunting guards AND provoked
-   gang members alike. Bobbing, billboarded, impossible to miss.
+   systems/markers.js — contextual actor markers plus the shared
+   cityTargetsPlayer() hostility predicate used by map surfaces.
+
+   Hostility is communicated by actor behavior, sound, and the map — never
+   by a floating marker over an enemy or predator's head.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-
-  // red downward chevron texture
-  const c = document.createElement("canvas");
-  c.width = c.height = 64;
-  const x = c.getContext("2d");
-  x.fillStyle = "#ff2a3a";
-  x.strokeStyle = "rgba(0,0,0,.6)"; x.lineWidth = 5;
-  x.beginPath();
-  x.moveTo(10, 14); x.lineTo(54, 14); x.lineTo(32, 50); x.closePath();
-  x.fill(); x.stroke();
-  const tex = new THREE.CanvasTexture(c);
 
   const tc = document.createElement("canvas");
   tc.width = tc.height = 64;
@@ -83,14 +74,6 @@
     return offerTex[key];
   }
 
-  function makeMarker() {
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-    spr.scale.set(0.8, 0.8, 1);
-    spr.position.y = 3.7;
-    spr.visible = false;
-    return spr;
-  }
-
   function makeTipMarker() {
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tipTex, depthTest: false, transparent: true }));
     spr.scale.set(0.72, 0.72, 1);
@@ -132,9 +115,9 @@
   }
 
   // One binary fact for every tactical surface: is this LIVE actor currently
-  // committed to harming/capturing the player?  Cops, gangs, terrorists,
-  // soldiers and predators all publish through their real brain state; map and
-  // overhead UI no longer guess from costume ("all cops red") or weapon alone.
+  // committed to harming/capturing the player? Cops, gangs, terrorists,
+  // soldiers and predators all publish through their real brain state; map UI
+  // no longer guesses from costume ("all cops red") or weapon alone.
   function cityTargetsPlayer(a) {
     if (!a || a.dead || (a.ko || 0) > 0 || a.escaped) return false;
     const pa = CBZ.city && CBZ.city.playerActor;
@@ -173,54 +156,32 @@
   const headY = (a) => (CBZ.charHeadY ? CBZ.charHeadY(a) : 1.97);
 
   function tick() {
-    // hunt/snitch/approach chevrons ride the PRISON rosters (CBZ.guards/npcs);
-    // the city has its own actors. Skip in city — the concat below allocated a
-    // fresh array every frame in every mode for nothing.
-    if (CBZ.game && CBZ.game.mode === "city") {
-      const bob = 0.10 * Math.sin(CBZ.now * 0.006);
-      function markCity(a) {
-        if (!a || !a.group) return;
-        if (!a._marker) { a._marker = makeMarker(); a.group.add(a._marker); }
-        const on = cityTargetsPlayer(a);
-        a._marker.visible = on;
-        if (on) {
-          const ay = a.animal ? Math.max(1.1, ((a.species && a.species.scale) || 1) * 2.1) : headY(a);
-          a._marker.position.y = ay + bob;
-          a._marker.scale.setScalar(a.animal ? 0.62 : 0.72);
-        }
-      }
-      const peds = CBZ.cityPeds || [], cops = CBZ.cityCops || [], wild = CBZ.cityWildlife || [];
-      for (let i = 0; i < peds.length; i++) markCity(peds[i]);
-      for (let i = 0; i < cops.length; i++) markCity(cops[i]);
-      for (let i = 0; i < wild.length; i++) markCity(wild[i]);
-      return;
-    }
+    // Context markers below belong to the prison rosters. City hostility stays
+    // physical and diegetic; cityTargetsPlayer() remains available to maps.
+    if (CBZ.game && CBZ.game.mode === "city") return;
     const bob = 0.12 * Math.sin(CBZ.now * 0.006);
     const all = CBZ.guards.concat(CBZ.npcs);
     for (const a of all) {
-      if (!a._marker) { a._marker = makeMarker(); a.group.add(a._marker); }
       if (!a._tipMarker) { a._tipMarker = makeTipMarker(); a.group.add(a._tipMarker); }
       if (!a._snitchMarker) { a._snitchMarker = makeSnitchMarker(); a.group.add(a._snitchMarker); }
       if (!a._alertMarker) { a._alertMarker = makeAlertMarker(); a.group.add(a._alertMarker); }
       if (!a._approachMarker) { a._approachMarker = makeApproachMarker(); a.group.add(a._approachMarker); }
       if (guardish(a) && a.wedge) a.wedge.visible = !!a.flashlightOn;
-      const on = hunting(a) && (!guardish(a) || !!a.flashlightOn);
-      a._marker.visible = on;
-      if (on) a._marker.position.y = headY(a) + bob;
-      const softAlert = !on && guardish(a) && (a.alert || 0) > 0.15 && !a.flashlightOn && !a.dead && !(a.ko > 0);
+      const hostile = hunting(a) && (!guardish(a) || !!a.flashlightOn);
+      const softAlert = !hostile && guardish(a) && (a.alert || 0) > 0.15 && !a.flashlightOn && !a.dead && !(a.ko > 0);
       a._alertMarker.visible = !!softAlert;
       if (softAlert) a._alertMarker.position.y = headY(a) + bob * 0.55;
-      const tip = !on && CBZ.game && CBZ.game.role === "cop" && a.copMarked > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
+      const tip = !hostile && CBZ.game && CBZ.game.role === "cop" && a.copMarked > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
       a._tipMarker.visible = !!tip;
       if (tip) a._tipMarker.position.y = headY(a) + bob;
       const knownReport = (a.reportedPlayerT || 0) > 0;
-      const snitch = !on && !tip && (a.aiState === "snitch" || knownReport) && !a.dead && !(a.ko > 0) && !a.escaped;
+      const snitch = !hostile && !tip && (a.aiState === "snitch" || knownReport) && !a.dead && !(a.ko > 0) && !a.escaped;
       a._snitchMarker.visible = !!snitch;
       if (snitch) {
         a._snitchMarker.position.y = headY(a) + bob;
         a._snitchMarker.scale.setScalar(knownReport ? 0.56 : 0.66);
       }
-      const offer = !on && !tip && !snitch && a.approach && a.approach.t > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
+      const offer = !hostile && !tip && !snitch && a.approach && a.approach.t > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
       a._approachMarker.visible = !!offer;
       if (offer) {
         const s = approachStyle(a.approach.kind);

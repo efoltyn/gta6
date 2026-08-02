@@ -17,10 +17,9 @@
    never disturbed.
 
    We load AFTER entities/guards.js (need CBZ.spawnGuard), AFTER
-   detection.js (heat math) and capture.js (the chase/grab), and
-   AFTER markers.js so the red HUNT chevron auto-attaches to our
-   spawns just like any other guard. Everything is torn down the
-   instant a new run starts (we watch CBZ.game.elapsed fall).
+   detection.js (heat math) and capture.js (the chase/grab).
+   Everything is torn down the instant a new run starts (we watch
+   CBZ.game.elapsed fall).
 ============================================================ */
 (function () {
   "use strict";
@@ -100,7 +99,6 @@
       }
     }
     if (gd.wedge) disposeMesh(gd.wedge);
-    if (gd._marker) disposeMesh(gd._marker); // markers.js attaches one lazily
     // splice out of the global roster (search by identity, never by index)
     if (CBZ.guards) {
       const i = CBZ.guards.indexOf(gd);
