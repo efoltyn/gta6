@@ -391,8 +391,9 @@
   // ---- NEW: the nuke -----------------------------------------------------
   // The biggest spectacle in the game. Its FX composer is city/nukefx.js,
   // registered by name; if that file is absent the row degrades to the heavy
-  // composer and still works (rule 2). Everything about it that is EXPENSIVE
-  // is in the wave, which is tick-bounded, not in a particle count.
+  // composer and still works (rule 2). Gameplay consequences are compiled
+  // once into the analytic field below, rather than discovered by a polling
+  // ring or multiplied by the visual particle count.
   // `struct` is CALIBRATED AGAINST LEDGER CAPACITY, not picked for drama.
   // city/structural.js sizes a building at `12 + storeys*7 + (w*d)/26` — about
   // 23 for a corner shop, 55 for a fat 4-storey block, ~110 for an 11-storey.
@@ -403,10 +404,10 @@
   // dies" radius. A struct in the hundreds would flatten the entire map out to
   // maxR and leave nothing to look at.
   // radius*power = 126m maximum visible fireball radius, matching the published
-  // 50*W^(1/3) m relation at roughly a 15 kt event. The pressure front rolls
-  // from there out to 900m over ~4.7s at 190 m/s. If city/nukefx.js is absent
-  // this degrades to the "heavy" composer at that same 126m — a very large
-  // airstrike plus a white flash, which is the right shape of wrong.
+  // 50*W^(1/3) m relation at roughly a 16 kt event. The pressure front reaches
+  // the researched 1 psi contour at 3,276 m on the analytic arrival curve. If
+  // city/nukefx.js is absent this degrades to the "heavy" composer at that same
+  // 126m — a very large airstrike plus a white flash, the right shape of wrong.
   I.define("nuke", {
     power: 9, radius: 14, struct: 55, pen: 0, fire: 1, fx: "nuke",
     quake: 14, flashbang: true, sfx: "explosion",
@@ -447,24 +448,27 @@
        radius, let alone the reach. 3,276 m is where a 16 kt burst genuinely
        stops breaking things.
 
-       THE SPEED IS UNCHANGED AND THAT IS DELIBERATE. A real front is much
-       faster (roughly 500 m/s over the first kilometre, decaying toward
-       sonic); 190 m/s is the same named readability compression the double
-       flash takes, and it is what makes the front something you WATCH
-       arrive. 3,276 / 190 = 17.2 s, comfortably inside nukefx's 34 s arc.
+       ARRIVAL IS ANALYTIC, NOT AN ANIMATED 190 m/s GAMEPLAY RING. The nuclear
+       field below uses the measured 20 kt timing shape (about 3 s at one mile,
+       7.5 s at two) and cube-root scales it with yield. The same arrival owns
+       pressure, people, vehicles, structures, glass and the audible shock.
 
-       THE TOTAL COST *DOES* GROW WITH maxR because a wider wave runs for more
-       ticks. At the universal 0.05 s cadence this row paid ~344 whole-world
-       evaluations after the flash. `tick:0.20` keeps the same 190 m/s arrival
-       law with at most 0.2 s / 38 m temporal granularity, cuts roster/lot
-       scans by 4x, and structural.js amortizes admitted lots separately. */
+       More importantly, every affected roster is compiled ONCE. The former
+       190 m/s / 0.20 s loop re-scanned the entire city about 86 times per nuke;
+       multiple detonations multiplied that work and then silently evicted the
+       oldest wave at WAVE_MAX. The field stores finite target queues and drains
+       them on arrival, so nothing is dropped and no world roster is polled. */
     // Structural work stops at the 2 psi wall/roof contour. maxR remains the
     // 1 psi glass-and-casualty contour, so the front still reaches the whole
     // district without manufacturing rubble from window-breaking pressure.
     // structK puts an ordinary ~55-cap block on the 5 psi collapse contour:
     // 55*9*(1-1109/2016)^2*0.55 ~= 55.
-    wave: { speed: 190, maxR: 3276, thermal: 0.615, structR: 2016,
-            structK: 0.55, lethal: "nuclear", tick: 0.20 },
+    wave: { model: "nuclear", speed: 343, maxR: 3276, thermal: 0.615,
+            structR: 2016, structK: 0.55, lethal: "nuclear",
+            // Four cumulative pressure receipts. The last reaches just beyond
+            // the nominal 1 psi contour; cityShatter is capped internally and
+            // skips panes already broken by an earlier receipt.
+            glassK: [0.339, 0.615, 1.000, 1.250] },
   });
 
   // ---- environmental (city/disasters wiring) ------------------------------
@@ -722,6 +726,10 @@
     // the hand-off and is only ever read synchronously inside the composer —
     // the same discipline `busDepth` right below it relies on.
     opts._carBlastId = pendingCarId = ++carBlastSeq;
+    // fxOpts can be a kinetics-scaled copy made above. Carry the identity onto
+    // that copy too so the visual front can bind to this exact physical field
+    // when several detonations coexist.
+    fxOpts._carBlastId = opts._carBlastId;
     busDepth++;
     try { composer(x, y, z, row, fxOpts); } catch (e) {}
     finally { busDepth--; if (busDepth < 0) busDepth = 0; pendingCarId = 0; }
@@ -733,7 +741,9 @@
     if (!opts.quiet) {
       const att = camAtten(x, y, z);
       if (row.shake != null && CBZ.shake) { try { CBZ.shake(row.shake * fxScale * att); } catch (e) {} }
-      if (row.quake > 0) addRumble(x, z, row.quake, row.power * fxScale, att);
+      // A nuclear shock is not an immediate earthquake bed. Its one pressure
+      // report is emitted by the field when the front reaches the listener.
+      if (row.quake > 0 && row.id !== "nuke") addRumble(x, z, row.quake, row.power * fxScale, att);
       if (row.flashbang && CBZ.el && CBZ.el.flash) {
         try {
           const fl = CBZ.el.flash;
@@ -750,7 +760,7 @@
       // reuse, not a new system. Capped so a bug can never schedule a cue
       // minutes out, and skipped entirely under ~40 m where it would just
       // read as a mistimed sound.
-      if (row.sfx && CBZ.sfx) {
+      if (row.sfx && row.id !== "nuke" && CBZ.sfx) {
         try {
           const d = camDist(x, y, z);
           const vol = blastVolume(row.power * fxScale);
@@ -778,7 +788,7 @@
     //         a facade is 2.6). Every row that shattered before still does;
     //         "missile" and "airstrike" — the two 3.0-power rows — are new.
     const heavy = row.power >= 2.4 || row.struct >= 8;
-    if (!opts.noDamage && heavy && CBZ.cityShatter) {
+    if (!opts.noDamage && heavy && row.id !== "nuke" && CBZ.cityShatter) {
       try { CBZ.cityShatter(x, z, row.radius * row.power * fxScale * 0.8); } catch (e) {}
     }
 
@@ -786,7 +796,8 @@
     //        stage machine, the fire and the collapse choreography; this file
     //        only tells it what hit and how hard. Absent => no-op (rule 2).
     let structResult = 0;
-    if (CBZ.CONFIG.IMPACT_STRUCTURAL && !opts.noDamage && row.struct > 0 && CBZ.structure) {
+    if (CBZ.CONFIG.IMPACT_STRUCTURAL && !opts.noDamage && row.struct > 0 &&
+        row.id !== "nuke" && CBZ.structure) {
       try {
         structResult = CBZ.structure.hit(x, y, z, row.struct * row.power * strScale, {
           kind: kind, fire: row.fire,
@@ -832,7 +843,8 @@
     //          "open air", we skip — a scar hanging four metres off a building
     //          is exactly the floating-decal failure this repo keeps catching.
     //          HEAVY ONLY, so a grenade never pays for the scan.
-    if (!opts.noDamage && heavy && CBZ.cityBlastWall && CBZ.CONFIG.IMPACT_STRUCTURAL) {
+    if (!opts.noDamage && heavy && row.id !== "nuke" && CBZ.cityBlastWall &&
+        CBZ.CONFIG.IMPACT_STRUCTURAL) {
       const face = facadeAt(x, y, z, 1.6);
       if (face) {
         try { CBZ.cityBlastWall(face, face.n, { power: row.power * fxScale }); } catch (e) {}
@@ -1009,27 +1021,17 @@
   I.rumbling = function () { return rumble ? +(1 - rumble.t / rumble.dur).toFixed(3) : 0; };
 
   /* ============================================================
-     THE PROPAGATING BLAST WAVE
-     Research (Glasstone/Dolan beat table; Half-Life's explosion model): games
-     universally LINEARISE blast falloff rather than using inverse-square,
-     because inverse-square goes to infinity at d=0 and generates physics bugs.
-     We do the same: linear 1->0 across the ring's reach.
+     PROPAGATING BLASTS
 
-     The wave is a RING QUERY, not a sphere query: each tick we damage only
-     what newly fell inside r(t), so a nuke visibly rolls outward and you can
-     watch it come. r(t) = speed * t, capped at maxR.
-
-     COST: one pass over lots + one crowd/ped sweep per TICK (not per frame),
-     bounded by maxR and by a hard cap of 2 live waves. Each row may request a
-     coarser cadence. That matters for the nuke: its researched 3,276 m reach
-     lasts 17.2 s, so the old universal 20 Hz cadence paid for ~344 complete
-     world scans after the flash. A 5 Hz nuclear front is still temporally
-     accurate to 0.2 s / 38 m while cutting that repeated work by 4x. Structural
-     hits from that row are additionally handed to structural.js's bounded
-     queue; the ring may discover a district at once, but it may never execute
-     a district at once.
+     Conventional large impacts retain the small legacy ring below. A nuclear
+     event uses a different representation: a detonation field compiled once
+     into finite arrival queues. Heat is admitted immediately; the pressure
+     shock, body drag, cars, structures and listener sound all use one analytic
+     arrival function. This removes both physical disagreement and the former
+     `nukes * ticks * every entity in the city` cost.
      ============================================================ */
   const waves = [];
+  const nuclearFields = [];
   // hoisted billCar bag for the ring's vehicle pass — a wave ticks 20 Hz for
   // seconds, so this is the one place a per-car literal would actually add up.
   // `ignite: 0` is deliberate and permanent: the RING does not light cars, the
@@ -1040,7 +1042,346 @@
   const WAVE_MAX = 2;
   const WAVE_TICK = 0.05;               // default seconds between ring evaluations
 
+  /* ---- NUCLEAR ARRIVAL + PRESSURE -----------------------------------------
+     The 20 kt timing examples are about 3 s at one mile and 7.5 s at two.
+     t = k*r^1.322 passes through both; distance and time then cube-root scale
+     with the row's fireball radius (126 m is this game's 16 kt reference).
+     Unlike a fixed 190 m/s animation, this is initially supersonic and tends
+     toward an acoustic front as distance grows. */
+  const NUCLEAR_FIRE_REF = 126;
+  const NUCLEAR_TIME_EXP = 1.322;
+  const NUCLEAR_TIME_DEN = 536 * Math.pow(1609, NUCLEAR_TIME_EXP - 1);
+
+  function nuclearShockArrival(distance, fireR) {
+    const d = Math.max(0, +distance || 0);
+    const scale = Math.max(0.05, (+fireR || NUCLEAR_FIRE_REF) / NUCLEAR_FIRE_REF);
+    const scaledD = d / scale;
+    return scale * Math.pow(scaledD, NUCLEAR_TIME_EXP) / NUCLEAR_TIME_DEN;
+  }
+  function nuclearShockDistance(seconds, fireR) {
+    const scale = Math.max(0.05, (+fireR || NUCLEAR_FIRE_REF) / NUCLEAR_FIRE_REF);
+    const scaledT = Math.max(0, +seconds || 0) / scale;
+    return scale * Math.pow(scaledT * NUCLEAR_TIME_DEN, 1 / NUCLEAR_TIME_EXP);
+  }
+  function ringsForNuclear(fireR) {
+    if (CBZ.nukeRings) {
+      try { return CBZ.nukeRings(fireR); } catch (e) {}
+    }
+    const k = Math.max(0.05, fireR / NUCLEAR_FIRE_REF);
+    return { fireball: fireR, psi20: 504 * k, psi10: 756 * k,
+      psi5: 1109 * k, psi2: 2016 * k, psi1: 3276 * k };
+  }
+  function nuclearPressureAt(distance, fireR) {
+    const d = Math.max(0, +distance || 0), T = ringsForNuclear(fireR || NUCLEAR_FIRE_REF);
+    const P = [
+      [Math.max(1, T.fireball), 50], [T.psi20, 20], [T.psi10, 10],
+      [T.psi5, 5], [T.psi2, 2], [T.psi1, 1],
+    ];
+    if (d <= P[0][0]) return P[0][1];
+    for (let i = 1; i < P.length; i++) {
+      if (d > P[i][0]) continue;
+      const u = (d - P[i - 1][0]) / Math.max(1, P[i][0] - P[i - 1][0]);
+      return Math.exp(Math.log(P[i - 1][1]) +
+        (Math.log(P[i][1]) - Math.log(P[i - 1][1])) * u);
+    }
+    return Math.max(0, 1 - (d - T.psi1) / Math.max(1, T.psi1 * 0.8));
+  }
+  function nuclearDragAt(distance, fireR) {
+    const psi = nuclearPressureAt(distance, fireR);
+    if (psi < 0.65) return 0;
+    // A standing 165 lb test dummy reached about 6.4 m/s at 5.3 psi. This is
+    // horizontal blast-wind drag, not a vertical grenade launch.
+    return Math.min(18, 6.4 * Math.pow(psi / 5.3, 0.72));
+  }
+  I.shockArrival = nuclearShockArrival;
+  I.shockDistance = nuclearShockDistance;
+  I.nuclearPressureAt = nuclearPressureAt;
+  I.nuclearDragAt = nuclearDragAt;
+
+  function distance2D(a, x, z) {
+    return a && a.x != null ? Math.hypot(a.x - x, a.z - z) : Infinity;
+  }
+  function shelteredAt(pos) {
+    if (!pos || !CBZ.strategicBunkerShelterAt) return false;
+    try { return !!CBZ.strategicBunkerShelterAt(pos.x, pos.y || 0, pos.z); }
+    catch (e) { return false; }
+  }
+  function nuclearDir(w, pos) {
+    let dx = pos.x - w.x, dz = pos.z - w.z;
+    const n = Math.hypot(dx, dz) || 1;
+    dx /= n; dz /= n;
+    return { x: dx, y: 0, z: dz };
+  }
+  function pedExposure(p) {
+    if (!p) return 1;
+    if (p.inCar) return 0.18;
+    if (p._npcAttached) return 0.25;
+    if (p.state === "sit" || (p.char && p.char.sitting)) return 0.55;
+    return 1;
+  }
+
+  function compileNuclearField(x, y, z, row, opts, fxScale, strScale) {
+    if (!(fxScale > 0)) fxScale = 1;
+    if (!(strScale > 0)) strScale = 1;
+    const fireR = Math.max(1, row.radius * row.power * fxScale);
+    const maxR = row.wave.maxR * fxScale;
+    const w = {
+      x: x, y: y, z: z, kind: row.id, id: ++waveSeq,
+      detonationId: opts._carBlastId || 0,
+      fireR: fireR, maxR: maxR,
+      thermal: row.wave.thermal ? maxR * row.wave.thermal : 0,
+      structR: (row.wave.structR || row.wave.maxR) * fxScale,
+      structK: row.wave.structK > 0 ? +row.wave.structK : 1,
+      lethal: row.wave.lethal || "nuclear",
+      power: row.power * fxScale,
+      struct: row.struct * (strScale / fxScale), fire: row.fire,
+      by: opts.by, byPlayer: !!opts.byPlayer, carBlastId: opts._carBlastId || 0,
+      t: 0, r: 0,
+      peds: [], pedHead: 0, crowd: [], crowdHead: 0,
+      cars: [], carHead: 0, structures: [], structHead: 0, thermalHead: 0,
+      glass: [], glassHead: 0,
+      playerAt: -1, playerHit: false, listenerAt: -1, listenerHit: false,
+    };
+
+    // Rich peds and cars are finite object rosters. Snapshot them once; later
+    // frames only advance cursors through jobs whose shock time has arrived.
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || !p.pos) continue;
+      const d = distance2D(p.pos, x, z);
+      if (d <= maxR) w.peds.push({ ref: p, d: d, at: nuclearShockArrival(d, fireR) });
+    }
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const cv = cars[i];
+      if (!cv || cv.dead || !cv.pos) continue;
+      const d = distance2D(cv.pos, x, z);
+      if (d <= maxR) w.cars.push({ ref: cv, d: d, at: nuclearShockArrival(d, fireR) });
+    }
+
+    // The ambient crowd and city lots own flat/internal storage, so their
+    // owners expose one-shot target planners rather than making this file peek
+    // through their representation or rescan them every band.
+    if (CBZ.cityCrowdBlastTargets) {
+      try { w.crowd = CBZ.cityCrowdBlastTargets(x, z, maxR) || []; } catch (e) { w.crowd = []; }
+      for (let i = 0; i < w.crowd.length; i++) w.crowd[i].at = nuclearShockArrival(w.crowd[i].d, fireR);
+    }
+    if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.radialTargets) {
+      try { w.structures = CBZ.structure.radialTargets(x, y, z,
+        Math.max(w.structR, w.thermal)) || []; } catch (e) { w.structures = []; }
+      for (let i = 0; i < w.structures.length; i++) {
+        w.structures[i].at = nuclearShockArrival(w.structures[i].d, fireR);
+      }
+    }
+    const glassK = row.wave.glassK || [];
+    for (let i = 0; i < glassK.length; i++) {
+      const d = maxR * glassK[i];
+      w.glass.push({ d: d, at: nuclearShockArrival(d, fireR) });
+    }
+
+    const byTime = function (a, b) { return a.at - b.at; };
+    w.peds.sort(byTime); w.crowd.sort(byTime); w.cars.sort(byTime); w.structures.sort(byTime);
+    while (w.thermalHead < w.structures.length && w.structures[w.thermalHead].d <= w.thermal) w.thermalHead++;
+    w.thermalEnd = w.thermalHead;
+    w.thermalHead = 0;
+
+    const P = CBZ.player;
+    if (P && P.pos) {
+      const pd = distance2D(P.pos, x, z);
+      if (pd <= maxR) w.playerAt = nuclearShockArrival(pd, fireR);
+      else w.playerHit = true;
+    } else w.playerHit = true;
+    const cam = CBZ.camera;
+    if (cam && cam.position) {
+      w.listenerDist = distance2D(cam.position, x, z);
+      w.listenerAt = nuclearShockArrival(w.listenerDist, fireR);
+    } else w.listenerHit = true;
+
+    w.maxAt = nuclearShockArrival(maxR, fireR);
+    const glassAt = w.glass.length ? w.glass[w.glass.length - 1].at : 0;
+    w.endAt = Math.max(w.maxAt, glassAt, w.listenerAt > 0 ? w.listenerAt : 0);
+    nuclearFields.push(w);
+  }
+
+  function applyNuclearPed(w, job) {
+    const p = job.ref;
+    if (!p || p.dead || !p.pos || shelteredAt(p.pos)) return;
+    const exposure = pedExposure(p), psi = nuclearPressureAt(job.d, w.fireR);
+    const drag = nuclearDragAt(job.d, w.fireR) * exposure;
+    const dir = nuclearDir(w, p.pos);
+    const pk = lethalFor(w, job.d);
+    if (pk > 0 && hash01(p.pos.x, p.pos.z, (w.id | 0) + 7) < pk) {
+      if (CBZ.cityKillPed) {
+        // cityRagdoll treats force >=14 as a shotgun-style loft even when
+        // fling is zero. Nuclear wind is a broad horizontal load, so keep the
+        // death impulse on its topple branch instead of reintroducing lift.
+        const corpseDrag = Math.min(13.5, drag);
+        try { CBZ.cityKillPed(p, { fromX: w.x, fromZ: w.z, dir: dir,
+          force: corpseDrag, fling: 0, pressurePsi: psi, kind: "nuke",
+          by: w.by, byPlayer: w.byPlayer }, "nuclear blast"); } catch (e) {}
+      }
+      return;
+    }
+    // Survivors still experience the mechanism: horizontal drag and, above
+    // roughly 2 psi while exposed, a knockdown. There is deliberately no fling.
+    if (!p.inCar && drag > 0.45 && CBZ.body && CBZ.body.hit) {
+      try { CBZ.body.hit(p, { dir: dir, force: drag,
+        knockdown: psi * exposure >= 2 ? 1.2 + Math.min(1.2, psi * 0.04) : 0 }); } catch (e) {}
+    }
+  }
+
+  function applyNuclearCrowd(w, job) {
+    const psi = nuclearPressureAt(job.d, w.fireR);
+    const pk = lethalFor(w, job.d);
+    if (pk > 0 && hash01(job.x, job.z, (w.id | 0) + 0x6e75) < pk) {
+      if (CBZ.cityCrowdKill) {
+        try { CBZ.cityCrowdKill(job.i, { quiet: true, fromX: w.x, fromZ: w.z,
+          noCrime: !w.byPlayer, byPlayer: w.byPlayer, cause: "nuclear blast" }); } catch (e) {}
+      }
+    } else if (CBZ.cityCrowdBlastHit) {
+      const n = Math.hypot(job.x - w.x, job.z - w.z) || 1;
+      try { CBZ.cityCrowdBlastHit(job.i, {
+        x: (job.x - w.x) / n, z: (job.z - w.z) / n,
+        speed: nuclearDragAt(job.d, w.fireR), knockdown: psi >= 2,
+      }); } catch (e) {}
+    }
+  }
+
+  function applyNuclearCar(w, job) {
+    const cv = job.ref;
+    if (!cv || cv.dead || !cv.pos) return;
+    const psi = nuclearPressureAt(job.d, w.fireR);
+    const sev = Math.max(0, Math.min(1, (psi - 0.65) / 7));
+    if (sev <= 0.01) return;
+    _ringBill.x = w.x; _ringBill.y = w.y; _ringBill.z = w.z;
+    _ringBill.byPlayer = w.byPlayer; _ringBill.sev = sev;
+    _ringBill.cause = "nuclear blast";
+    billCar(cv, w.carBlastId, 240 * sev, _ringBill);
+  }
+
+  function applyNuclearThermal(w, job) {
+    if (!CBZ.structure || !CBZ.structure.hit || !(w.thermal > 0)) return;
+    const k = Math.max(0, 1 - job.d / w.thermal);
+    if (k <= 0) return;
+    try { CBZ.structure.hit(job.x, job.y, job.z, 0.001, {
+      kind: "nuke", fire: w.fire * k, sudden: false,
+      by: w.by, byPlayer: w.byPlayer, lot: job.lot,
+    }); } catch (e) {}
+  }
+
+  function applyNuclearStructure(w, job) {
+    if (!CBZ.structure || !CBZ.structure.hit || job.d > w.structR) return;
+    const k = Math.max(0, 1 - job.d / (w.structR + 0.01));
+    const amount = w.struct * w.power * k * k * w.structK;
+    if (!(amount > 0.001)) return;
+    const n = Math.hypot(job.x - w.x, job.z - w.z) || 1;
+    try { CBZ.structure.hit(job.x, job.y, job.z, amount, {
+      kind: "nuke", fire: 0, sudden: true,
+      dirx: (job.x - w.x) / n, dirz: (job.z - w.z) / n,
+      by: w.by, byPlayer: w.byPlayer, lot: job.lot,
+    }); } catch (e) {}
+  }
+
+  function applyNuclearGlass(w, job) {
+    if (!CBZ.cityShatter) return;
+    try { CBZ.cityShatter(w.x, w.z, job.d); } catch (e) {}
+  }
+
+  function applyNuclearPlayer(w) {
+    const P = CBZ.player;
+    if (!P || P.dead || !P.pos || shelteredAt(P.pos)) return;
+    const d = distance2D(P.pos, w.x, w.z);
+    if (d > w.maxR) return;
+    const psi = nuclearPressureAt(d, w.fireR), pk = lethalFor(w, d);
+    const drag = nuclearDragAt(d, w.fireR), actor = CBZ.city && CBZ.city.playerActor;
+    if (actor && CBZ.body && CBZ.body.hit && drag > 0.45) {
+      try { CBZ.body.hit(actor, { dir: nuclearDir(w, P.pos), force: drag,
+        knockdown: psi >= 2 ? 1.4 : 0 }); } catch (e) {}
+    }
+    if (CBZ.cityHurtPlayer) {
+      const dmg = Math.max(1, Math.round(12 + 188 * pk + Math.max(0, psi - 1) * 1.5));
+      try { CBZ.cityHurtPlayer(dmg, w.x, w.z, "killed by a nuclear blast",
+        false, null, false); } catch (e) {}
+    }
+  }
+
+  function drainNuclearJobs(key, headKey, budget, apply) {
+    let advanced = true;
+    while (budget > 0 && advanced) {
+      advanced = false;
+      for (let i = 0; i < nuclearFields.length && budget > 0; i++) {
+        const w = nuclearFields[i], a = w[key], h = w[headKey] | 0;
+        if (!a || h >= a.length || a[h].at > w.t) continue;
+        w[headKey] = h + 1;
+        try { apply(w, a[h]); } catch (e) {}
+        budget--; advanced = true;
+      }
+    }
+  }
+
+  function drainNuclearThermal(budget) {
+    let advanced = true;
+    while (budget > 0 && advanced) {
+      advanced = false;
+      for (let i = 0; i < nuclearFields.length && budget > 0; i++) {
+        const w = nuclearFields[i];
+        if (w.thermalHead >= w.thermalEnd) continue;
+        const job = w.structures[w.thermalHead++];
+        try { applyNuclearThermal(w, job); } catch (e) {}
+        budget--; advanced = true;
+      }
+    }
+  }
+
+  function stepNuclearFields(dt) {
+    if (!nuclearFields.length) return;
+    for (let i = 0; i < nuclearFields.length; i++) {
+      const w = nuclearFields[i];
+      w.t += dt;
+      w.r = Math.min(w.maxR, nuclearShockDistance(w.t, w.fireR));
+      if (!w.playerHit && w.playerAt >= 0 && w.t >= w.playerAt) {
+        w.playerHit = true; applyNuclearPlayer(w);
+      }
+      if (!w.listenerHit && w.listenerAt >= 0 && w.t >= w.listenerAt) {
+        w.listenerHit = true;
+        const psi = nuclearPressureAt(w.listenerDist, w.fireR);
+        if (CBZ.nuclearShock) {
+          try { CBZ.nuclearShock({ dist: w.listenerDist, psi: psi,
+            volume: blastVolume(w.power), kind: "nuke" }); } catch (e) {}
+        } else if (CBZ.sfx) {
+          try { CBZ.sfx("thunder", { dist: w.listenerDist, volume: 0.9 }); } catch (e) {}
+        }
+        if (CBZ.shake && psi > 0.25) {
+          try { CBZ.shake(Math.min(8, 0.7 + psi * 0.26)); } catch (e) {}
+        }
+      }
+    }
+
+    // Global budgets, shared by every simultaneous detonation. More bombs add
+    // finite queued truth, not a larger per-frame spike and not discarded waves.
+    drainNuclearThermal(16);
+    drainNuclearJobs("peds", "pedHead", 32, applyNuclearPed);
+    drainNuclearJobs("crowd", "crowdHead", 96, applyNuclearCrowd);
+    drainNuclearJobs("cars", "carHead", 24, applyNuclearCar);
+    drainNuclearJobs("structures", "structHead", 16, applyNuclearStructure);
+    drainNuclearJobs("glass", "glassHead", 2, applyNuclearGlass);
+
+    for (let i = nuclearFields.length - 1; i >= 0; i--) {
+      const w = nuclearFields[i];
+      if (w.t < w.endAt || w.pedHead < w.peds.length ||
+          w.crowdHead < w.crowd.length || w.carHead < w.cars.length ||
+          w.structHead < w.structures.length || w.thermalHead < w.thermalEnd ||
+          w.glassHead < w.glass.length) continue;
+      nuclearFields.splice(i, 1);
+    }
+  }
+
   function queueWave(x, y, z, row, opts, fxScale, strScale) {
+    if (row.wave && row.wave.model === "nuclear") {
+      compileNuclearField(x, y, z, row, opts, fxScale, strScale);
+      return;
+    }
     if (waves.length >= WAVE_MAX) waves.shift();      // oldest wave gives way
     const q = CBZ.qScale ? CBZ.qScale(0.45, 1) : 1;
     if (!(fxScale > 0)) fxScale = 1;
@@ -1414,14 +1755,23 @@
     }
   }
 
-  I.waveCount = function () { return waves.length; };
+  I.waveCount = function () { return waves.length + nuclearFields.length; };
   I.waveState = function () {
-    return waves.map(function (w) {
+    const out = waves.map(function (w) {
       return { kind: w.kind, r: +w.r.toFixed(1), maxR: +w.maxR.toFixed(1),
-               structR: +(w.structR || w.maxR).toFixed(1), tick: w.tick };
+               structR: +(w.structR || w.maxR).toFixed(1), tick: w.tick,
+               detonationId: w.carBlastId || 0, model: "ring" };
     });
+    for (let i = 0; i < nuclearFields.length; i++) {
+      const w = nuclearFields[i];
+      out.push({ kind: w.kind, r: +w.r.toFixed(1), maxR: +w.maxR.toFixed(1),
+        structR: +w.structR.toFixed(1), tick: 0,
+        detonationId: w.detonationId || 0, model: "nuclear",
+        t: +w.t.toFixed(3), arrival: +w.maxAt.toFixed(3) });
+    }
+    return out;
   };
-  I.clearWaves = function () { waves.length = 0; rumble = null; };
+  I.clearWaves = function () { waves.length = 0; nuclearFields.length = 0; rumble = null; };
 
   /* ============================================================
      LEGACY BRIDGE — migrate eight call sites without editing their files.
@@ -1719,9 +2069,10 @@
     // fireball itself used.
     wrapCarBlast("cityExplosion", 6);
     wrapCarBlast("cityAirstrikeExplosion", 12);
-    if (!waves.length && !rumble) return;
+    if (!waves.length && !nuclearFields.length && !rumble) return;
     const d = dt > 0.25 ? 0.25 : dt;      // spike-cap: a stalled frame must not teleport the front
     stepWaves(d);
+    stepNuclearFields(d);
     stepRumble(d);
   });
 

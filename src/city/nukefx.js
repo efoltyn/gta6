@@ -78,25 +78,24 @@
                               roughly 15 kt scale, cooling blue-white
                               -> white -> yellow -> orange -> deep red along the
                               shared RAMP as it rises and mixes.
-     0.50-6.30  PRESSURE      NO drawn ring. The invisible gameplay wave still
-                              rolls outward, while an irregular filled dust
+     0.08-7.70  PRESSURE      NO drawn ring. The analytic gameplay field still
+                              propagates outward, while an irregular filled dust
                               surge, scattered world fires and a brief 3D
                               condensation shell reveal its passage. A pressure
                               front is compressed air, not neon painted on the
                               terrain.
-     1.37-6.85  GLASS LADDER  four cityShatter passes at 0.42 / 0.85 / 1.35 /
-                              2.10 x the blast reach (260 / 527 / 837 / 1302 m),
-                              each timed to r/speed so the panes go out AS THE
-                              FRONT PASSES rather than on a clock of their own.
+     1.84-10.3  GLASS LADDER  four cityShatter receipts at 0.339 / 0.615 / 1.0 /
+                              1.25 x the 3,276 m 1 psi reach, each timed by the
+                              same shock-arrival function so panes go out AS THE
+                              FRONT PASSES rather than on a second visual clock.
                               Glass is the ~1 psi zone: the widest of the three
                               and the biggest single injury source a city
                               detonation produces, so it must outrange both the
                               flattening and the burning. It used to outrange
                               neither.
-     1.00-27.0  RISE + STEM   the fireball climbs and cools; the stem billboard
-                              (cylindrically billboarded, so it stays vertical
-                              when you crane your neck at it) is drawn UP off
-                              the deck into it. The rise is FAST THEN
+     1.00-27.0  RISE + STEM   the fireball climbs and cools; overlapping rough
+                              3D lobes draw the stem UP off the deck into it.
+                              The rise is FAST THEN
                               DECELERATING and then flat (riseAt) — an
                               compact bulb -> forming tower -> stabilised cloud,
                               rather than revealing the mature cloud at once. ONE curve,
@@ -105,9 +104,8 @@
                               cloud is.
      0.70-25.0  MUSHROOM      six pooled InstancedMeshes form a genuinely 3D
                               hot core, thin rising stem, broad lobed cap and
-                              filled ground cloud. Procedural billboards add
-                              roiling surface detail but no longer have to carry
-                              the silhouette alone.
+                              filled ground cloud. Depth-writing surfaces and
+                              real parallax carry the silhouette from every view.
      0.60-10.0  CAP GLOW      (NUKE_FX_V2) the cap is INCANDESCENT INSIDE while
                               its surface has already gone to soot — that is
                               the whole reason a mushroom photograph reads as
@@ -228,15 +226,18 @@
    the bus's and ledger's. This file renders consequences—cloud, dust, world
    fires and broken windows—without outlining any zone on the ground.
 
-   MUSHROOM CLOUDS, CHEAPLY: six InstancedMeshes place RPG-textured soft puffs
-   through a 3D cap/stem/surge field. Every texture is baked at load; nothing
+   MUSHROOM CLOUDS, CHEAPLY: six InstancedMeshes place rough, light-reactive 3D
+   lobes through a cap/stem/surge field. They write depth and self-occlude, so
+   the cloud reads as one turbulent volume instead of stacked transparent
+   camera-facing cards. Geometry and materials are baked once at load; nothing
    is fetched (CDN is blocked and must stay that way).
 
    ------------------------------------------------------------------
    COST DISCIPLINE (fill rate is the enemy — a full-screen additive layer is
    about a frame of opaque geometry on SwiftShader / a phone):
-     • ONE live sequence at a time, hard. A second detonation while one runs
-       degrades to whiteout + shake, it does not queue.
+     • ONE photographed cloud sequence at a time. A concurrent detonation adds
+       its flash while the shared analytic bus still preserves every physical
+       field; GPU spectacle is bounded without evicting gameplay truth.
      • Every mesh is built ONCE at load and PARKED invisible (also gives
        core/fxwarm.js something to compile, so the first nuke of a session
        does not pay a shader-link hitch at the worst possible moment).
@@ -244,9 +245,9 @@
        eight seconds after the bang.
      • Big layers are SEQUENCED, not stacked: the whiteout has faded before
        the cap blooms; the fireball shell is retired before the cloud is big.
-     • Everything expensive rides CBZ.qScale. The cold silhouette keeps its
-       fixed 104 instances because instancing makes that resolution cheap and
-       decimating it produced isolated geometric boulders on low tiers.
+     • The coherent cold silhouette is
+       a fixed 72 depth-writing lobes; eight additive hot lobes sit inside it.
+       Their transforms upload at 12 Hz while opacity and colour remain smooth.
      • Not one new runtime particle pool. Nuclear cloud/dust is six bounded
        InstancedMeshes; the ordinary explosion-puff storm is legacy-opt-in.
 
@@ -967,8 +968,12 @@
      of one instanced field: [0, CROWN_N) boil over the cap's top, [CROWN_N,
      crown) hang under its rim as the skirt. One buffer, one upload, one
      draw, and a budget cut decimates both together. */
-  const VOL_MAX = { cap: 28, stem: 16, surge: 34, hot: 16, crown: 26, glow: 14 };
-  const CROWN_N = 16;                       // of VOL_MAX.crown; the rest is collar
+  // A few real 3D lobes establish macro-volume; procedural roughness supplies
+  // the small scale. The former 134 giant transparent cards spent fill-rate on
+  // repeated flat detail. These 80 depth-writing instances spend geometry once
+  // and then let the depth buffer reject hidden cloud surfaces.
+  const VOL_MAX = { cap: 18, stem: 10, surge: 20, hot: 10, crown: 14, glow: 8 };
+  const CROWN_N = 8;                        // of VOL_MAX.crown; the rest is collar
   const VOL_SEED = { cap: [], stem: [], surge: [], hot: [], crown: [], glow: [] };
 
   // One deterministic layout, reused by every detonation. The instances move
@@ -1098,10 +1103,20 @@
 
     const sphereGeo = new THREE.IcosahedronGeometry(1, 2);   // 320 tris — a rim needs no more
     sphereGeo._shared = true;
-    // The RPG does not draw smoke as solid rocks: it overlaps soft camera-facing
-    // masks. Use that same language here, but keep it inside six InstancedMeshes
-    // so a nuclear cloud remains six draws rather than 134 Sprite draws.
-    const billowGeo = new THREE.PlaneGeometry(2, 2);
+    // Macrostructure must have real parallax and self-occlusion at nuclear
+    // scale. Start from a modest icosphere and bake deterministic multi-frequency
+    // displacement into its surface; rotation/anisotropic instance scale then
+    // keep the shared mesh from reading as repeated balls.
+    const billowGeo = new THREE.IcosahedronGeometry(1, 2);
+    const bp = billowGeo.attributes.position;
+    for (let bi = 0; bi < bp.count; bi++) {
+      const bx = bp.getX(bi), by = bp.getY(bi), bz = bp.getZ(bi);
+      const rough = 1 + 0.10 * Math.sin(bx * 7.1 + by * 3.7) * Math.sin(bz * 8.3 - by * 4.1)
+        + 0.055 * Math.sin((bx + bz) * 13.7 + by * 9.2);
+      bp.setXYZ(bi, bx * rough, by * rough, bz * rough);
+    }
+    bp.needsUpdate = true;
+    billowGeo.computeVertexNormals();
     billowGeo._shared = true;
     const quadGeo = new THREE.PlaneGeometry(1, 1);
     quadGeo._shared = true;
@@ -1129,11 +1144,11 @@
     POOL.dome = park(new THREE.Mesh(sphereGeo, domeMat), 9);
 
     seedVolumes();
-    function volumeMat(color, opacity) {
-      const m = new THREE.MeshBasicMaterial({
-        map: TEX.blastSmoke, color: color,
-        transparent: true, opacity: opacity, depthWrite: false,
-        depthTest: true, fog: true, side: THREE.DoubleSide, alphaTest: 0.01,
+    function volumeMat(color, emissive, opacity) {
+      const m = new THREE.MeshLambertMaterial({
+        color: color, emissive: emissive, emissiveIntensity: 1,
+        transparent: true, opacity: opacity, depthWrite: true,
+        depthTest: true, fog: true, side: THREE.FrontSide, flatShading: false,
       });
       m._shared = true;
       return m;
@@ -1146,15 +1161,15 @@
       return park(mesh, order);
     }
     POOL.surgeVol = volumeMesh("ground-cloud", VOL_MAX.surge,
-      volumeMat(0x746154, 0.52), 4);
+      volumeMat(0x746154, 0x1b0d07, 0.82), 4);
     POOL.stemVol = volumeMesh("stem", VOL_MAX.stem,
-      volumeMat(0x4b3a31, 0.58), 5.1);
+      volumeMat(0x4b3a31, 0x24110a, 0.90), 5.1);
     POOL.capVol = volumeMesh("cap", VOL_MAX.cap,
-      volumeMat(0x5b4030, 0.60), 5.2);
+      volumeMat(0x5b4030, 0x301208, 0.88), 5.2);
     const hotMat = new THREE.MeshBasicMaterial({
-      map: TEX.blastFlame, color: 0xff8a20, transparent: true, opacity: 0,
+      color: 0xff8a20, transparent: true, opacity: 0,
       depthWrite: false, depthTest: true, fog: true,
-      side: THREE.DoubleSide, alphaTest: 0.01, blending: THREE.AdditiveBlending,
+      side: THREE.FrontSide, blending: THREE.AdditiveBlending,
     });
     hotMat._shared = true;
     POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat, 7);
@@ -1168,7 +1183,7 @@
        that it is the part of the cloud that has already gone COLD, and it is
        what the incandescent glow underneath is contrasted against. */
     POOL.crownVol = volumeMesh("cap-crown", VOL_MAX.crown,
-      volumeMat(0x3b3129, 0.56), 5.3);
+      volumeMat(0x3b3129, 0x150803, 0.92), 5.3);
     /* ---- THE CAP GLOW: incandescent, additive, inside the cap ------------
        MeshBasic (never lit — it IS the light), additive so it brightens the
        cap lobes it shines through rather than replacing them, and depthTest
@@ -1176,9 +1191,9 @@
        what reads as "glowing from within" instead of "a hot ball parked in
        front of a cloud". Retired by ~11 s, long before the cloud is. */
     const glowMat = new THREE.MeshBasicMaterial({
-      map: TEX.blastFlame, color: 0xffd27a, transparent: true, opacity: 0,
+      color: 0xffd27a, transparent: true, opacity: 0,
       depthWrite: false, depthTest: true, fog: true,
-      side: THREE.DoubleSide, alphaTest: 0.01, blending: THREE.AdditiveBlending,
+      side: THREE.FrontSide, blending: THREE.AdditiveBlending,
     });
     glowMat._shared = true;
     POOL.glowVol = volumeMesh("cap-glow", VOL_MAX.glow, glowMat, 5.25);
@@ -1679,8 +1694,9 @@
 
   /* THE GLASS LADDER, as multiples of the BLAST reach (wave.maxR).
 
-     One table, read by beginSequence (which schedules the cityShatter passes)
-     and by CBZ.nukeFxAudit (which publishes the resulting radii). By
+     The physical nuke table lives on impactbus's row, beside its pressure
+     reach; this file reads it for audit/reporting and keeps only a fallback
+     copy for direct FX use without the bus. By
      overpressure: ~5 psi collapses most buildings and IS maxR; ~2 psi takes
      roofs and walls; ~1 psi shatters windows several times further out again.
      For a real 100 kt airburst those land at roughly 1x / 1.5x / 2.6x maxR, and
@@ -1713,7 +1729,18 @@
      narrowed its glass reach from 2.10x to 1.25x its own maxR on the
      strength of research about a completely different weapon. A chemical
      bomb keeps its own ladder. */
-  function glassLadder(kind) { return (kind === "nuke" && real()) ? GLASS_K_REAL : GLASS_K; }
+  function glassLadder(kind) {
+    if (kind === "nuke" && real()) {
+      if (CBZ.impact && CBZ.impact.row) {
+        try {
+          const row = CBZ.impact.row("nuke");
+          if (row && row.wave && row.wave.glassK && row.wave.glassK.length) return row.wave.glassK;
+        } catch (e) {}
+      }
+      return GLASS_K_REAL;
+    }
+    return GLASS_K;
+  }
 
   /* ============================================================
      THE RISE — ONE curve, four readers.
@@ -1881,11 +1908,13 @@
     const radius = fireR(row, opts);
     const R = Math.max(5, radius * P.rFrac);
     const wave = row.wave || null;
-    // Match systems/impactbus.js's queueWave EXACTLY — same quality clamp AND
-    // the same fxScale so rendered consequences reach the gameplay footprint.
+    // Nuclear physics never shrinks with the graphics slider. Performance now
+    // comes from the field's finite arrival queues and the cloud's depth/LOD,
+    // not by making low-tier players survive a smaller weapon.
     const sc = (opts.scale > 0 ? +opts.scale : 1);
+    const reachQ = styleName === "nuke" ? 1 : (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1);
     const maxR = (wave && wave.maxR ? wave.maxR : radius * 4) *
-                 (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1) * sc;
+                 reachQ * sc;
     const spd = wave && wave.speed ? wave.speed : 150;
     /* BURST HEIGHT. The bus hands the composer the real detonation `y`, and a
        B-2 releasing over a district is the whole reason this file exists — an
@@ -1917,6 +1946,7 @@
 
     live = {
       kind: row.id || styleName, style: P, styleName: styleName,
+      detonationId: opts._carBlastId || 0,
       x: x, y: gy, by: burstY, z: z, R: R, maxR: maxR, spd: spd, eff: radius,
       // THE IGNITION RADIUS. Y^0.41 vs Y^0.33 (see STYLE.thermK) — the burn zone
       // is genuinely wider than the flattened zone, and this is the number that
@@ -1934,10 +1964,13 @@
       t: 0, r: Math.max(1, row.radius || radius * 0.1), dur: P.dur, q: q,
       // The front still drives damage, dust and condensation, but it is never
       // painted as geometry on the terrain.
-      frontLife: Math.min(P.frontLife, maxR / Math.max(1, spd) + 1.6),
+      frontLife: Math.min(P.frontLife,
+        styleName === "nuke" && CBZ.impact && CBZ.impact.shockArrival
+          ? CBZ.impact.shockArrival(maxR, radius) + 1.6
+          : maxR / Math.max(1, spd) + 1.6),
       bills: bills, dustAcc: 0, pending: [], ash: null, ashT: 0,
-      boomAt: dist > 60 ? Math.min(9, dist / 343) : -1,
-      frontAt: dist > 45 && dist < maxR ? dist / Math.max(1, spd) : -1,
+      // Listener sound/pressure is owned by impactbus's same physical field.
+      boomAt: -1, frontAt: -1,
       frontHit: false, fogK: 0, mix: 0,
       mode: (CBZ.game && CBZ.game.mode) || null,
       quiet: !!opts.quiet, noDamage: !!opts.noDamage, byPlayer: !!opts.byPlayer,
@@ -1986,9 +2019,8 @@
     }
     // ---- VOLUMETRIC FIREBALL + MUSHROOM ------------------------------------
     // Four base InstancedMeshes plus nuclear crown/glow. The coherent nuke uses
-    // these as soft RPG-textured puff fields and merely suppresses the five
-    // redundant legacy detail planes; it no longer suppresses the volume in
-    // favour of one silhouette card.
+    // rough depth-writing 3D lobes and suppresses the five redundant legacy
+    // detail planes; it never substitutes a camera-facing silhouette card.
     live.volume = !!P.volume;
     if (live.volume) {
       const nuke = styleName === "nuke";
@@ -2135,54 +2167,43 @@
        Glass is the cheapest "the whole district felt that" cue there is,
        cityShatter skips already-broken panes and caps itself at 50 per call, so
        it must never floor to zero. */
-    const nShatter = Math.max(1, Math.round((CBZ.qScale ? CBZ.qScale(1, P.shatter) : P.shatter)));
-    if (CBZ.CONFIG.NUKE_FX_GLASS) {
-      const GK = glassLadder(styleName);
-      const step = GK.length / nShatter;
-      for (let i = 0; i < nShatter; i++) {
-        const k = GK[Math.min(GK.length - 1, Math.max(0, Math.round((i + 0.5) * step - 0.5)))];
-        const rr = maxR * k;
-        live.pending.push({ t: Math.max(0.3, rr / Math.max(1, spd)), shatter: rr });
-      }
-    } else {
-      for (let i = 0; i < nShatter; i++) {
-        live.pending.push({ t: 0.3 + i * 0.55, shatter: radius * (0.9 + i * 0.75) });
+    /* A bus-fired nuke carries its glass receipts in the physical detonation
+       field. This visual state machine is intentionally single-cloud, while
+       fields may coexist; keeping panes here caused every concurrent nuke but
+       the photographed one to lose its window damage. Direct FX/MOAB calls
+       retain the legacy visual schedule as their degrade path. */
+    const fieldOwnsGlass = styleName === "nuke" && !!opts._carBlastId &&
+      CBZ.CONFIG.IMPACT_SHOCKWAVE !== false && !opts.noDamage;
+    if (!fieldOwnsGlass) {
+      const nShatter = Math.max(1, Math.round((CBZ.qScale ? CBZ.qScale(1, P.shatter) : P.shatter)));
+      if (CBZ.CONFIG.NUKE_FX_GLASS) {
+        const GK = glassLadder(styleName);
+        const step = GK.length / nShatter;
+        for (let i = 0; i < nShatter; i++) {
+          const k = GK[Math.min(GK.length - 1, Math.max(0, Math.round((i + 0.5) * step - 0.5)))];
+          const rr = maxR * k;
+          const arrive = styleName === "nuke" && CBZ.impact && CBZ.impact.shockArrival
+            ? CBZ.impact.shockArrival(rr, radius) : rr / Math.max(1, spd);
+          live.pending.push({ t: Math.max(0.08, arrive), shatter: rr });
+        }
+      } else {
+        for (let i = 0; i < nShatter; i++) {
+          live.pending.push({ t: 0.3 + i * 0.55, shatter: radius * (0.9 + i * 0.75) });
+        }
       }
     }
     /* ---- t=0 FEEL -----------------------------------------------------------
-       DELIBERATELY THIN. nearField() has already run by the time we get here,
-       and crashfx's cityAirstrikeExplosion fires sfx("explosion"),
-       shake(5.5*min(2.4,power)) = 13.2, doSlowmo(0.5) and doHitstop(0.26) of
-       its own. Repeating any of those is not "more" — CBZ.shake is a MAX
-       accumulator so a second, smaller shake is literally a no-op, and a second
-       "explosion" inside the 0.18s bank cooldown is a no-op too. What is NOT
-       already covered is the light, the distance and the long tail, so that is
-       all we add. */
+       Light is the only instantaneous listener cue for a coherent nuke. Sound,
+       shake and body pressure arrive together from impactbus. A conventional
+       MOAB retains its immediate composer shake/degrade behaviour. */
     if (!live.quiet) {
       whiteout(P.white, P.whitePeak, P.dbl);
-      // Attenuate by distance the way systems/impactbus.js's camAtten does
-      // (gentler than the blast's /130 — a nuke is felt a long way out), then
-      // only bother CBZ.shake if we actually beat what the blast already asked
-      // for; the MAX accumulator makes anything less a wasted call.
-      const att = Math.max(0.1, Math.min(1, 1.25 - dist / 420));
-      if (CBZ.shake) { try { CBZ.shake(P.shake * att); } catch (e) {} }
-      if (CBZ.sfx) {
-        // NO `force` on the shared cues: the near-field blast (and, for the
-        // nuke, city/strategic.js) fire "explosion"/"rumble"/"collapse" in
-        // this same frame, and the audio layer's per-name cooldown is exactly
-        // the dedupe. Forcing would play every cue twice, 30 ms apart, which
-        // reads as a doubled sample rather than a bigger bang.
-        // SOUND LAGS LIGHT: the real boom arrives at distance/343 seconds. The
-        // audio layer schedules it for us — no timer of ours involved. Nothing
-        // else plays thunder at a detonation, so this one is forced. This beat
-        // is the whole reason a far-off nuke reads as ENORMOUS rather than as a
-        // small explosion: you watch it for two seconds before you hear it.
-        if (live.boomAt > 0.08) {
-          try { CBZ.sfx("thunder", { delay: live.boomAt, force: true, volume: 0.9 }); } catch (e) {}
-        }
-        try { CBZ.sfx("rumble", { delay: Math.max(0.35, live.boomAt), volume: 0.85 }); } catch (e) {}
-        if (styleName === "nuke") { try { CBZ.sfx("collapse", { delay: 2.4, volume: 0.8 }); } catch (e) {} }
+      if (styleName !== "nuke") {
+        const att = Math.max(0.1, Math.min(1, 1.25 - dist / 420));
+        if (CBZ.shake) { try { CBZ.shake(P.shake * att); } catch (e) {} }
       }
+      // No audio here. The pressure front itself is the report, and impactbus
+      // emits the one layered nuclear cue when that same field reaches the ear.
     }
     return live;
   }
@@ -2224,11 +2245,16 @@
       try {
         const ws = CBZ.impact.waveState();
         for (let i = 0; i < ws.length; i++) {
-          if (ws[i].kind === live.kind) { live.r = ws[i].r; return live.r; }
+          if (ws[i].kind !== live.kind) continue;
+          if (live.detonationId && ws[i].detonationId &&
+              ws[i].detonationId !== live.detonationId) continue;
+          live.r = ws[i].r; return live.r;
         }
       } catch (e) {}
     }
-    live.r = Math.min(live.maxR, live.r + live.spd * dt);
+    if (live.styleName === "nuke" && CBZ.impact && CBZ.impact.shockDistance) {
+      live.r = Math.min(live.maxR, CBZ.impact.shockDistance(live.t, live.R));
+    } else live.r = Math.min(live.maxR, live.r + live.spd * dt);
     return live.r;
   }
 
@@ -2367,14 +2393,13 @@
                                     cam.position.z - mesh.position.z), 0);
   }
 
-  /* ---- 3D SOFT-PUFF MUSHROOM FIELD ---------------------------------------
-     Every puff faces the lens like the RPG sprites, but its centre occupies a
-     different world-space point and moves through the cap/stem/surge field.
-     That preserves depth and parallax without either solid smoke rocks or one
-     all-enclosing mushroom card, while instancing keeps the six-draw budget. */
+  /* ---- DEPTH-WRITING 3D MUSHROOM FIELD ------------------------------------
+     Rough, anisotropic lobes establish a real cap/stem/surge volume. Their
+     surfaces light, parallax and occlude in world space; no cloud primitive
+     rotates to follow the lens. Slow buoyant motion is uploaded at 12 Hz while
+     colour/light envelopes remain frame-smooth. */
   const _volDummy = new THREE.Object3D();
-  const _volCamQ = new THREE.Quaternion();
-  let _volHasCamQ = false;
+  let _volWrite = true;
   const VOL_HOT = new THREE.Color(0xff7a18);
   const VOL_ASH = new THREE.Color(0x332f2c);
   /* THE STEM IS ORANGE-RED, NOT BROWN, and THE BASE SURGE IS RED-BROWN.
@@ -2404,13 +2429,10 @@
   const VOL_CROWN_EMBER = new THREE.Color(0x2c0d03);
 
   function putVolume(mesh, i, x, y, z, sx, sy, sz, ry) {
+    if (!_volWrite) return;
     _volDummy.position.set(x, y, z);
-    if (_volHasCamQ) {
-      _volDummy.quaternion.copy(_volCamQ);
-      if (ry) _volDummy.rotateZ(ry);
-    } else {
-      _volDummy.rotation.set(0, 0, ry || 0);
-    }
+    const r = ry || 0;
+    _volDummy.rotation.set(r * 0.37, r, r * 0.19);
     _volDummy.scale.set(Math.max(0.01, sx), Math.max(0.01, sy), Math.max(0.01, sz));
     _volDummy.updateMatrix();
     mesh.setMatrixAt(i, _volDummy.matrix);
@@ -2425,10 +2447,9 @@
 
   function stepVolumes(t, L, mix) {
     if (!L.volume || !L.volN) return;
-    const cam = CBZ.camera;
-    _volHasCamQ = !!(cam && cam.getWorldQuaternion);
-    if (_volHasCamQ) cam.getWorldQuaternion(_volCamQ);
-    // 1 while the legacy far tier owns the picture, 0 while soft volumes do.
+    _volWrite = L.volNext == null || t + 1e-6 >= L.volNext;
+    if (_volWrite) L.volNext = t + 1 / 12;
+    // 1 while the legacy far tier owns the picture, 0 while 3D lobes do.
     const mixC = clamp(mix || 0, 0, 1);
     const near = 1 - mixC;
     const rise = riseAt(t, L);
@@ -2480,10 +2501,10 @@
         lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
         a * 0.35);
     }
-    cap.material.opacity = 0.60 * capIn * endFade * near;
+    cap.material.opacity = 0.86 * capIn * endFade * near;
     cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
     cap.visible = cap.material.opacity > 0.004;
-    cap.instanceMatrix.needsUpdate = true;
+    if (_volWrite) cap.instanceMatrix.needsUpdate = true;
 
     /* ---- THE CAP GLOWS FROM WITHIN --------------------------------------
        This is the layer that makes the reference plate read as a LIGHT
@@ -2520,7 +2541,7 @@
       glow.material.color.setHex(t < 1.6 ? 0xfff2c8 : t < 4.5 ? 0xffc45a : 0xd96a1e);
       glow.material.opacity = 0.54 * glowIn * glowOut * endFade * near;
       glow.visible = glow.material.opacity > 0.004;
-      glow.instanceMatrix.needsUpdate = true;
+      if (_volWrite) glow.instanceMatrix.needsUpdate = true;
     }
 
     /* ---- THE COLLAR AND THE CROWN, one mesh, two slices -----------------
@@ -2566,10 +2587,10 @@
           lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
           lobe * (isCrown ? 1.05 : 1.42), a * 0.5);
       }
-      crown.material.opacity = 0.56 * Math.max(collarIn, crownIn) * endFade * near;
+      crown.material.opacity = 0.88 * Math.max(collarIn, crownIn) * endFade * near;
       cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH, cloudCool, VOL_CROWN_EMBER);
       crown.visible = crown.material.opacity > 0.004;
-      crown.instanceMatrix.needsUpdate = true;
+      if (_volWrite) crown.instanceMatrix.needsUpdate = true;
     }
 
     // STEM — overlapping vertical billows leave no chair-leg-thin cylinder and
@@ -2631,10 +2652,10 @@
     // loses 55% of its opacity, not all of it): the reference plate's whole
     // foreground is that thick roiling column, and it is the one part of the
     // cloud that genuinely is inside the frustum.
-    stem.material.opacity = 0.58 * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
+    stem.material.opacity = 0.84 * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
     cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH, cloudCool);
     stem.visible = stem.material.opacity > 0.004;
-    stem.instanceMatrix.needsUpdate = true;
+    if (_volWrite) stem.instanceMatrix.needsUpdate = true;
 
     // BASE SURGE — a FILLED, irregular dust cloud. It occupies area; it never
     // traces the pressure radius as a line.
@@ -2674,14 +2695,14 @@
         lobe * 1.25, lobe * 0.38 * tall, lobe,
         a + spin);
     }
-    surge.material.opacity = (deep ? 0.52 : 0.68) * surgeIn * surgeFade;
+    surge.material.opacity = (deep ? 0.76 : 0.82) * surgeIn * surgeFade;
     cloudColor(surge.material, VOL_DUST_HOT_V[deep ? 1 : 0], VOL_DUST_ASH_V[deep ? 1 : 0],
       cloudCool * 0.85);
     surge.visible = surge.material.opacity > 0.004;
-    surge.instanceMatrix.needsUpdate = true;
+    if (_volWrite) surge.instanceMatrix.needsUpdate = true;
 
-    // HOT BILLOWS — the RPG puff language the owner likes, enlarged around the
-    // smooth core so the nuclear fireball roils instead of reading as one orb.
+    // HOT BILLOWS — the RPG's layered, short-lived fireball logic translated
+    // into real 3D lobes around the core, so it roils instead of reading as one orb.
     const hot = POOL.hotVol;
     const hotIn = ease(t / 0.16);
     const hotFade = Math.max(0, 1 - ease((t - 2.8) / 3.2));
@@ -2705,7 +2726,8 @@
     hot.material.color.setHex(t < 0.45 ? 0xfff4cf : t < 1.8 ? 0xffa02e : 0xd94312);
     hot.material.opacity = 0.82 * hotIn * hotFade * (0.18 + 0.82 * pulse);
     hot.visible = hot.material.opacity > 0.004;
-    hot.instanceMatrix.needsUpdate = true;
+    if (_volWrite) hot.instanceMatrix.needsUpdate = true;
+    _volWrite = true;
   }
 
   function stepBill(b, t, L) {
@@ -3012,10 +3034,10 @@
       }
     }
 
-    /* The coherent nuclear path is the bounded soft-puff field from handoff to
-       fade-out. The baked mushroom remains only as a flag-off legacy/fallback
-       tier; making it the default is what exposed the entire cloud as one
-       camera-facing picture. */
+    /* The coherent nuclear path is the bounded depth-writing lobe field from
+       handoff to fade-out. The baked mushroom remains only as a flag-off
+       legacy/fallback tier; making it the default is what exposed the entire
+       cloud as one camera-facing picture. */
     const mix = L.coherentCloud ? 0 : (real() ? impostorMix(L) : 0);
     L.mix = mix;
     stepImpostor(t, L, mix);
@@ -3036,15 +3058,8 @@
       stepBill(b, t, L);
     }
 
-    // ---- the front reaching the LENS: the second slap ---------------------
-    if (!L.frontHit && L.frontAt > 0 && t >= L.frontAt) {
-      L.frontHit = true;
-      if (!L.quiet) {
-        if (CBZ.shake) { try { CBZ.shake(3.4); } catch (e) {} }
-        whiteout(0.5, 0.28, false);
-        if (CBZ.sfx) { try { CBZ.sfx("rumble", { force: true, volume: 0.9 }); } catch (e) {} }
-      }
-    }
+    // Listener pressure, shake and sound are emitted by the same impact field
+    // that advances `r`; the visual sequence never invents a second lens clock.
 
     // ---- ASH FALL — the only per-sequence allocation, eight seconds late --
     // NOTE the count is NOT qScaled here: systems/fx.js's particleCloud already
@@ -3103,31 +3118,26 @@
   CBZ.cityNukeFxAbort = endSequence;
 
   /* ============================================================
-     THE NEAR FIELD — reused wholesale, never re-implemented.
+     THE NEAR FIELD
 
-     crashfx.js's cityAirstrikeExplosion already owns the pooled fireball,
-     debris, sparks, scorch, shake, slow-mo AND the ped/cop/crowd/player
-     lethality curve the owner tuned. The composer's job is to call it with
-     the right numbers and then draw the things it cannot: the sky.
+     A coherent nuke is now visual-only here: its dome/fireball/cloud are this
+     composer's job, while impactbus's analytic detonation field owns people,
+     cars, buildings, glass, shake and the pressure report. Calling crashfx's
+     RPG/airstrike prefab underneath that path was the hidden second explosion:
+     hundreds of puffs, an immediate cannon sound and grenade-style body launch.
 
-     RADIUS MATH — and the bug that used to live here. crashfx computes
-     R = radius * power INTERNALLY. This function used to "correct" for that by
-     handing it `radius / power`, cancelling the multiply and producing R =
-     row.radius = 14 m for the nuke. systems/impactbus.js's own fxHeavy — the
-     composer this file REPLACES — passes `radius: row.radius` with `power:
-     row.power` and gets R = 126 m. So registering the nuke spectacle made the
-     nuke's near field NINE TIMES SMALLER than not registering it: the fancy
-     path was a strict regression on the degrade path.
-
-     We now pass exactly what fxHeavy passes. R = 126 m, lethal core 0.55R =
-     69 m, and systems/impactbus.js's wave takes over from row.radius outward
-     to 900 m — there is no gap between them, which is why the second
-     "gap-closer" blast that used to be here (an undamped 254 m instant-kill
-     sphere at t=0) is gone. It was closing a hole that only existed because of
-     the radius bug, and it was quietly defeating the entire point of the
-     propagating wave: that you SEE it coming.
+     MOABs and an explicit master-revert still reuse that mature conventional
+     primitive. Its internal radius*power convention is preserved so the
+     fallback nuke remains a 126 m fireball rather than the historical 14 m bug.
      ============================================================ */
   function nearField(x, y, z, row, opts) {
+    // The default nuclear composer already draws the flash, dome, fireball and
+    // cloud; the analytic field owns every consequence and the eventual sound.
+    // Calling the generic airstrike here used to add a hidden RPG damage pass,
+    // immediate cannon report, shake/hitstop and vehicle cascade underneath it.
+    // Keep that primitive only for MOABs and the explicit master-revert path.
+    if ((row.id || "nuke") === "nuke" && CBZ.CONFIG.NUKE_FX_V1 !== false &&
+        coherentCloud() && POOL.shell && POOL.capVol) return;
     const fn = CBZ.cityAirstrikeExplosion || CBZ.cityExplosion;
     if (!fn) return;
     try {
@@ -3160,9 +3170,10 @@
       }
       nearField(x, y, z, row, opts);
       if (live) {
-        // CONCURRENCY CAP = 1. A second warhead during a live sequence gets
-        // the cheap path (the near field above already fired) plus a flash —
-        // it never queues, never doubles the fill cost.
+        // The photographed cloud pool is one shared GPU spectacle. A second
+        // flash does not double its fill cost; impactbus still compiles that
+        // detonation's complete people/car/building/glass/audio field after
+        // this composer returns, so no physical consequence is discarded.
         if (!opts.quiet) whiteout(STYLE[styleName].white * 0.4, 0.6, false);
         return;
       }
@@ -3187,7 +3198,8 @@
     // is the row field, NOT the effective reach — fireR() does that multiply.
     row = Object.assign(
       { id: kind, power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 26 : 14,
-        wave: kind === "moab" ? { speed: 140, maxR: 320 } : { speed: 190, maxR: 900 } },
+        wave: kind === "moab" ? { speed: 140, maxR: 320 }
+          : { model: "nuclear", speed: 343, maxR: 3276 } },
       row || {},
       opts.row || {}
     );
@@ -3566,7 +3578,8 @@
      bug this file shipped with. `nearField` is the row's radius*power (126 m
      nuke, 119.6 m MOAB pressure footprint); `fireball` is the actually drawn
      luminous radius (the same 126 m for the nuke, ~42 m for the chemical
-     MOAB). `reach` is the bus's wave maxR after the same quality clamp. */
+     MOAB). `reach` is the bus's physical wave maxR; graphics quality never
+     changes the nuclear consequence radius. */
   CBZ.nukeFxSize = function (kind, opts) {
     opts = opts || {};
     kind = kind === "moab" ? "moab" : "nuke";
@@ -3574,11 +3587,13 @@
     let row = null;
     if (CBZ.impact && CBZ.impact.row) { try { row = CBZ.impact.row(kind); } catch (e) {} }
     row = row || { power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 26 : 14,
-                   wave: kind === "moab" ? { speed: 140, maxR: 320 } : { speed: 190, maxR: 900 } };
+                   wave: kind === "moab" ? { speed: 140, maxR: 320 }
+                     : { model: "nuclear", speed: 343, maxR: 3276 } };
     const eff = fireR(row, opts);
     const R = Math.max(5, eff * P.rFrac);
     const sc = (opts.scale > 0 ? +opts.scale : 1);
-    const reach = (row.wave ? row.wave.maxR : eff * 4) * (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1) * sc;
+    const reachQ = kind === "nuke" ? 1 : (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1);
+    const reach = (row.wave ? row.wave.maxR : eff * 4) * reachQ * sc;
     /* THE DRAW-CALL BUDGET, published. The four original instanced volumes
        (surge / stem / cap / hot) plus, for the nuclear style under V2, the
        incandescent cap glow and the ONE mesh that carries both the crown and
@@ -3662,7 +3677,7 @@
     kind = kind === "moab" ? "moab" : "nuke";
     const P = STYLE[kind];
     const S = CBZ.nukeFxSize(kind, opts);
-    const spd = (kind === "moab" ? 140 : 190);
+    const spd = (kind === "moab" ? 140 : 343); // conventional/direct-FX fallback only
 
     /* THE PULSE, resolved to absolute seconds on this style's fade.
        The minimum is the FIRST LOCAL minimum — the run of decreasing keys from
@@ -3737,7 +3752,9 @@
       veilOut: 1.9,
       volumeIn: 0.55,
       stemIn: 0.65, capIn: 0.55, surgeIn: 0.75, cap2In: 1.9, collarIn: 2.2,
-      thermalIgnitionIn: 0.9,
+      // Thermal radiation arrives effectively with the flash; the mechanical
+      // pressure front follows on the distance-dependent arrival curve.
+      thermalIgnitionIn: kind === "nuke" ? 0 : 0.9,
       shellOut: 3.9,
       // ---- NUKE_FX_V2 beats. -1 means "this style does not have one".
       whiteDomeIn: S.whiteDome ? 0 : -1,
@@ -3751,7 +3768,13 @@
         ? +(1.4 + riseWindow({ style: P }) * 0.9).toFixed(2) : -1,
       riseStart: 0.9,
       riseEnd: +(0.9 + riseWindow({ style: P })).toFixed(2),
-      glassAt: glassK.map(function (k) { return +Math.max(0.3, S.reach * k / spd).toFixed(2); }),
+      glassAt: glassK.map(function (k) {
+        const radius = S.reach * k;
+        const arrival = kind === "nuke" && CBZ.impact && CBZ.impact.shockArrival
+          ? CBZ.impact.shockArrival(radius, S.fireball)
+          : radius / spd;
+        return +Math.max(kind === "nuke" ? 0.08 : 0.3, arrival).toFixed(2);
+      }),
       ashIn: P.ash ? 8 : -1,
       end: P.dur,
     };
@@ -3877,7 +3900,7 @@
         fullNuclearFireball: kind !== "nuke" ||
           (S.fireball === S.nearField && S.R === S.fireball),
         // Compatibility key retained. The coherent contract is six bounded
-        // soft-puff fields, no redundant detail planes, and no mushroom card.
+        // depth-writing lobe fields, no redundant detail planes or mushroom card.
         volumetricCloud: !P.volume ||
           (kind === "nuke" && coherentCloud()
             ? (S.impostorDraws === 0 && S.volumeDraws === 6 && S.bills === 0)

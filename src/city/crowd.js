@@ -2251,6 +2251,38 @@
     return n;
   };
 
+  /* Nuclear fields compile the ambient roster once, then advance a cursor as
+     the pressure front reaches each body. Keeping this query here preserves the
+     typed-array ownership boundary and removes the old full-crowd scan on every
+     annulus tick. Promoted rows are intentionally omitted: their real ped is in
+     CBZ.cityPeds and is planned by the rich-ped path. */
+  CBZ.cityCrowdBlastTargets = function (x, z, radius) {
+    const out = [], r2 = radius * radius;
+    for (let i = 0; i < count; i++) {
+      if (!shootable(i)) continue;
+      const dx = px[i] - x, dz = pz[i] - z, d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      out.push({ i: i, x: px[i], z: pz[i], d: Math.sqrt(d2), at: 0 });
+    }
+    return out;
+  };
+
+  // Nonfatal blast wind for analytical crowd bodies. This is a horizontal
+  // skid/knockdown using the same physical state as a hard body collision; it
+  // never injects the grenade-style vertical fling used by a generic explosion.
+  CBZ.cityCrowdBlastHit = function (i, opts) {
+    if (i < 0 || i >= count || !shootable(i)) return false;
+    opts = opts || {};
+    let dx = +opts.x || 0, dz = +opts.z || 0;
+    const n = Math.hypot(dx, dz) || 1; dx /= n; dz /= n;
+    const speed = Math.max(0, Math.min(12, +opts.speed || 0));
+    if (speed < 0.35) return false;
+    stagT[i] = opts.knockdown ? 1.35 : 0.58;
+    stagX[i] = dx * speed; stagZ[i] = dz * speed;
+    pauseT[i] = 0;
+    return true;
+  };
+
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {
     const _clear = CBZ.clearCityPeds;

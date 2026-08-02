@@ -419,7 +419,7 @@
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=soundspace2"></script>
+<script src="src/systems/audio.js?v=nukefield1"></script>
 <script src="src/systems/hud.js?v=allmain3"></script>
 <script src="src/systems/economy.js?v=pick1"></script>
 
@@ -725,7 +725,7 @@
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=allmain3"></script>
+<script src="src/city/peds.js?v=nukefield1"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -738,12 +738,12 @@
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=fortress1"></script>
-<script src="src/city/crowd.js?v=allmain3"></script>
+<script src="src/city/crowd.js?v=nukefield1"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=weaponphysics1"></script>
+<script src="src/city/police.js?v=nukefield1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=localheli2w11"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
@@ -797,9 +797,9 @@
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=nukefix1"></script>
-<script src="src/city/structural.js?v=nukefix1"></script>
-<script src="src/city/nukefx.js?v=nukefix1"></script>
+<script src="src/systems/impactbus.js?v=nukefield1"></script>
+<script src="src/city/structural.js?v=nukefield1"></script>
+<script src="src/city/nukefx.js?v=nukefield1"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -937,9 +937,9 @@
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=allmain1"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
-     seam above), the bunker-buster and the nuke. Every blast routes through
-     the WRAPPED cityExplosion chain; deaths route through the kill bus. -->
-<script src="src/city/strategic.js?v=nukev2"></script>
+     seam above), the bunker-buster and the nuke. Conventional blasts use the
+     wrapped explosion chain; the nuke uses impactbus's analytic field. -->
+<script src="src/city/strategic.js?v=nukefield1"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=seawave1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->

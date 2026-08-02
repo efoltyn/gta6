@@ -638,6 +638,30 @@
     return true;
   }
 
+  /* One-shot target compilation for an analytic blast field. The old annulus
+     API below must inspect every lot every time the animated ring advances.
+     A nuclear event instead asks once which footprints intersect its maximum
+     heat/pressure reach and stores their distance/seat in a finite arrival
+     queue. impactbus still calls S.hit for the actual state transition, so this
+     function exposes admission only and does not become a second ledger. */
+  S.radialTargets = function (x, y, z, radius) {
+    if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || !(radius > 0)) return [];
+    const A = arena(), out = [];
+    if (!A || !A.lots) return out;
+    for (let i = 0; i < A.lots.length; i++) {
+      const lot = A.lots[i], b = lot && lot.building;
+      if (!b || lot.demolished) continue;
+      if (y != null && y > b.h + 4) continue;
+      const d = Math.hypot(b.ox - x, b.oz - z);
+      const half = Math.max(b.w, b.d) * 0.5;
+      if (d - half > radius) continue;
+      out.push({ lot: lot, x: b.ox, z: b.oz, d: d,
+        y: y == null ? Math.min(b.h * 0.5, 8) : Math.max(0.5, Math.min(b.h - 0.5, y)),
+        at: 0 });
+    }
+    return out;
+  };
+
   S.sweep = function (x, z, r0, r1, amount, opts) {
     opts = opts || {};
     if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || !(amount > 0)) return 0;

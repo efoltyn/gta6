@@ -2233,10 +2233,18 @@
         else if (imp.fromX != null) { rx = cop.pos.x - imp.fromX; ry = 0; rz = cop.pos.z - imp.fromZ; }
         else { const ra = rng() * 6.28; rx = Math.cos(ra); ry = 0; rz = Math.sin(ra); }
         const rl = Math.hypot(rx, ry, rz) || 1;
-        const mag = Math.max(4.5, Math.min(18, (imp.force || 7) * (imp.headshot ? 1.18 : 1)));
+        const rawForce = imp.force != null ? imp.force : 7;
+        const mag = Math.max(4.5, Math.min(18, rawForce * (imp.headshot ? 1.18 : 1)));
         copRagged = CBZ.cityRagdoll(cop, imp.point || null, { x: rx / rl, y: ry / rl, z: rz / rl }, mag);
       }
-      if (CBZ.body && !copRagged) { if (imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 7, fling: imp.fling || 4 }); else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 }); }
+      if (CBZ.body && !copRagged) {
+        if (imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ,
+          dir: imp.dir, force: imp.force != null ? imp.force : 7,
+          // An explicit zero is nuclear horizontal drag, not a request for the
+          // generic explosion's four-unit vertical launch.
+          fling: imp.fling != null ? imp.fling : 4 });
+        else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 });
+      }
       // who killed the officer? player → automatic 5 stars; another NPC → that
       // NPC's offense; a cop / driverless car → nobody is charged.
       const att = imp && imp.attacker && imp.attacker.pos ? imp.attacker : null;

@@ -370,6 +370,21 @@
       part([R + "cannon1.mp3"], 0.98, 0.82, 0.94),
       part([O + "sfx100v2_stones_03.m4a"], 0.5, 0.72, 0.86, 0.08),
     ], 0.18),
+    /* One nuclear pressure arrival, not an immediate RPG report plus unrelated
+       thunder/rumble clocks. Existing recordings are re-voiced into a short
+       broadband crack, the long low positive-phase roar, then local debris.
+       Conservative gains plus the master limiter create scale by envelope and
+       spectrum, never by hazardous playback level. */
+    nuclear_shock: layers([
+      part([R + "cannon1.mp3"], 0.52, 0.56, 0.66, 0,
+        { hp: 80, lp: 2600, bass: 4, decay: 0.34 }),
+      part([O + "sfx100v2_thunder_01.m4a"], 0.78, 0.58, 0.68, 0.035,
+        { lp: 1500, bass: 7 }),
+      part([O + "sfx100v2_loop_machine_02.m4a"], 0.40, 0.42, 0.52, 0.14,
+        { lp: 520, bass: 9 }),
+      part([O + "sfx100v2_stones_01.m4a", O + "sfx100v2_stones_02.m4a"],
+        0.30, 0.62, 0.76, 0.72, { lp: 950, bass: 4 }),
+    ], 0.65),
     water: fx([O + "sfx100v2_loop_water_02.m4a", O + "sfx100v2_loop_water_03.m4a", R + "splash1.mp3"], 0.52, 0.36),
     wind: fx([O + "sfx100v2_air_01.m4a", O + "sfx100v2_air_02.m4a", O + "sfx100v2_air_03.m4a"], 0.42, 0.26),
     fire: fx([O + "sfx100v2_misc_37.m4a", O + "sfx100v2_loop_ambient_03.m4a"], 0.38, 0.28),
@@ -385,6 +400,8 @@
   let master = null;
   let sfxBus = null;
   let loopBus = null;
+  let pressureFilter = null;
+  let pressureGain = null;
   const buffers = new Map();
   const loading = new Map();
   const failed = new Set();
@@ -470,8 +487,16 @@
     master.attack.value = 0.003;
     master.release.value = 0.28;
     master.connect(ctx.destination);
-    sfxBus = ctx.createGain(); sfxBus.gain.value = 0.84; sfxBus.connect(master);
-    loopBus = ctx.createGain(); loopBus.gain.value = 0.72; loopBus.connect(master);
+    // Shared hearing/pressure stage. Normally transparent; a nearby nuclear
+    // shock briefly ducks and low-passes the whole world, which communicates
+    // overload without asking the speakers to reproduce dangerous SPL.
+    pressureFilter = ctx.createBiquadFilter();
+    pressureFilter.type = "lowpass"; pressureFilter.frequency.value = 22000;
+    pressureFilter.Q.value = 0.3;
+    pressureGain = ctx.createGain(); pressureGain.gain.value = 1;
+    pressureFilter.connect(pressureGain); pressureGain.connect(master);
+    sfxBus = ctx.createGain(); sfxBus.gain.value = 0.84; sfxBus.connect(pressureFilter);
+    loopBus = ctx.createGain(); loopBus.gain.value = 0.72; loopBus.connect(pressureFilter);
     preloadAll();
     loadSamples();
     updateWorldLoops();
@@ -1048,6 +1073,54 @@
     return first;
   }
 
+  /* Called at the instant the pressure front reaches the listener. The field
+     has already solved distance and peak overpressure, so audio does not invent
+     another propagation clock. Multiple simultaneous arrivals share the bank
+     cooldown and pressure stage: their physical effects still resolve, while
+     the mixer produces one bounded compound report instead of clipping. */
+  function nuclearShock(opts) {
+    opts = opts || {};
+    if (!ctx || !sfxBus) return null;
+    const psi = Math.max(0, +opts.psi || 0);
+    const src = sfx("nuclear_shock", {
+      dist: opts.dist, volume: opts.volume == null ? 1 : opts.volume,
+    });
+    if (!pressureFilter || !pressureGain || psi < 0.45) return src;
+
+    const strength = Math.max(0, Math.min(1, (psi - 0.45) / 7.5));
+    const t = ctx.currentTime;
+    const cutoff = 6200 - strength * 5450;
+    const dip = 0.82 - strength * 0.48;
+    const recover = 1.4 + strength * 5.2;
+    try {
+      pressureFilter.frequency.cancelScheduledValues(t);
+      pressureFilter.frequency.setValueAtTime(Math.max(80, pressureFilter.frequency.value), t);
+      pressureFilter.frequency.exponentialRampToValueAtTime(Math.max(700, cutoff), t + 0.025);
+      pressureFilter.frequency.exponentialRampToValueAtTime(22000, t + recover);
+      pressureGain.gain.cancelScheduledValues(t);
+      pressureGain.gain.setValueAtTime(Math.max(0.05, pressureGain.gain.value), t);
+      pressureGain.gain.exponentialRampToValueAtTime(Math.max(0.22, dip), t + 0.018);
+      pressureGain.gain.exponentialRampToValueAtTime(1, t + recover);
+    } catch (e) {}
+
+    // Severe local pressure gets a restrained, decaying ear-ring. Its gain is
+    // deliberately tiny and it runs through the limiter; perceived injury is
+    // produced by the world ducking around it, not by a loud sine wave.
+    if (psi >= 5) {
+      try {
+        const ring = ctx.createOscillator(), gain = ctx.createGain();
+        ring.type = "sine"; ring.frequency.value = 3150 + Math.min(900, psi * 22);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(0.008 + strength * 0.006, t + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + recover);
+        ring.connect(gain); gain.connect(master);
+        ring.start(t); ring.stop(t + recover + 0.05);
+        debugSoundPlayed("nuclear_hearing", "procedural pressure duck + ear ring", t);
+      } catch (e) {}
+    }
+    return src;
+  }
+
   // ---- per-weapon voice for NPC/remote gunfire ------------------------------
   // CBZ.gunVoice(weaponName, dist): plays the right gun voice for whatever the
   // shooter is actually holding (names are the loose actor strings — "Pistol",
@@ -1158,6 +1231,7 @@
 
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
+  CBZ.nuclearShock = nuclearShock;
   // A spatial sound request must name its emitter. This helper deliberately
   // computes distance at the caller boundary rather than turning "wanted" or
   // another abstract state into global audio.

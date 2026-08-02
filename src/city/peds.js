@@ -2667,7 +2667,15 @@
     // off-chance a fling can't resolve (e.g. body already at floor), so we never
     // depend on the airborne path alone.
     if (CBZ.body && !ragged && !seatedCorpse) {
-      if (imp && (imp.fromX != null || imp.dir)) CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 7, fling: imp.fling || 4 });
+      if (imp && (imp.fromX != null || imp.dir)) {
+        // Zero is meaningful for a nuclear pressure impulse: horizontal blast
+        // wind may topple/slide a body without the generic explosion's upward
+        // launch. `|| 4` converted that explicit zero back into grenade fling.
+        const hitForce = imp.force != null ? imp.force : 7;
+        const hitFling = imp.fling != null ? imp.fling : 4;
+        CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir,
+          force: hitForce, fling: hitFling });
+      }
       else { const a = rng() * 6.28; CBZ.body.hit(ped, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 3, fling: 5 }); }
       // belt-and-braces: force a hard knockdown too. hit(knockdown) sets _phys.down,
       // so even if the fling lands the same frame the body is already flagged DOWN
