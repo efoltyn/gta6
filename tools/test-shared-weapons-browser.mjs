@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Real-Chrome regression test for the shared jail/city gun state and barrel
-// origin. Requires a local server, by default:
+// Real-Chrome regression test for the shared jail/city gun state, barrel
+// origin, and moving-door bullet marks. Requires a local server, by default:
 //   python3 -m http.server 8765 --bind 127.0.0.1
 
 import { spawn } from "node:child_process";
@@ -129,6 +129,42 @@ try {
     };
   })())`));
 
+  const doorMark = JSON.parse(await evaluate(`JSON.stringify((function () {
+    CBZ.closeDoor();
+    if (CBZ.bulletHolesReset) CBZ.bulletHolesReset();
+    CBZ.player.dead = false; CBZ.player.stun = 0; CBZ.player.driving = false; CBZ.player._swim = false;
+    CBZ.player.pos.set(0, 0, -14);
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(CBZ.player.pos);
+    (CBZ.npcs || []).forEach(function (n) { if (n && n.group) n.group.visible = false; });
+    CBZ.camera.position.set(0, 3.2, -14);
+    CBZ.camera.rotation.set(0, Math.PI, 0);
+    CBZ.cam.yaw = Math.PI; CBZ.fps.fp = 0.05;
+    CBZ.camera.updateMatrixWorld(true);
+
+    const originalHole = CBZ.bulletHole;
+    let stamped = null;
+    CBZ.bulletHole = function (pos, normal, opts) {
+      const mark = originalHole(pos, normal, opts);
+      stamped = { mark: mark, parentArg: opts && opts.parent };
+      return mark;
+    };
+    CBZ.fpsFire(true); CBZ.fpsFire(false);
+    CBZ.bulletHole = originalHole;
+
+    if (!stamped || !stamped.mark) return { stamped: false };
+    const before = new THREE.Vector3(), after = new THREE.Vector3();
+    stamped.mark.getWorldPosition(before);
+    CBZ.openDoor();
+    CBZ.door.mesh.position.y = CBZ.door.closedY + 8;
+    CBZ.door.mesh.updateWorldMatrix(true, true);
+    stamped.mark.getWorldPosition(after);
+    return {
+      stamped: true,
+      mountedOnDoor: stamped.parentArg === CBZ.door.mesh && stamped.mark.parent === CBZ.door.mesh,
+      beforeY: before.y, afterY: after.y, rise: after.y - before.y,
+    };
+  })())`));
+
   const failures = [];
   if (city.inventory.join(",") !== "sidearm,shotgun") failures.push("city did not use shared engine inventory");
   if (city.sidearmName !== "Pistol" || city.shotgunName !== "Shotgun") failures.push("city did not follow shared selection");
@@ -137,7 +173,9 @@ try {
   if (city.afterMelee.name !== "Shotgun" || !city.afterMelee.cityHasGun || !city.afterMelee.engineArmed) failures.push("Q did not draw shared gun after melee");
   if (!city.legacyCityWeapon) failures.push("legacy city gun source of truth still populated");
   if (!(jail.muzzleDistanceFromCamera > 0.7)) failures.push("jail FPS muzzle remains at camera/face");
-  console.log(JSON.stringify({ city, jail, failures }, null, 2));
+  if (!doorMark.stamped || !doorMark.mountedOnDoor || Math.abs(doorMark.rise - 8) > 0.01)
+    failures.push("Prison Escape keycard-door bullet mark did not move with the opened door");
+  console.log(JSON.stringify({ city, jail, doorMark, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } finally {
   try { if (ws && ws.readyState === WebSocket.OPEN) await send("Browser.close"); } catch (_) {}

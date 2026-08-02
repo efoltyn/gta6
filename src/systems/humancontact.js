@@ -249,7 +249,7 @@
   // Compact equivalent for the typed-array prison crowd. This performs the
   // player contact only; crowd-to-crowd separation remains in crowd.js.
   function resolveAmbientPlayer(S, id, dt) {
-    if (!S || S.dead[id] || S.downT[id] > 0 || CBZ.player.dead) return;
+    if (!S || S.dead[id] || S.downT[id] > 0 || CBZ.player.dead || CBZ.player._traversal) return;
     const P = CBZ.player, dx = S.posX[id] - P.pos.x, dz = S.posZ[id] - P.pos.z;
     const min = (P.radius || 0.55) + PERSON_R, d2 = dx * dx + dz * dz;
     if (d2 >= min * min) return;
@@ -274,6 +274,10 @@
   }
 
   function clampCity(a) {
+    // A vault/mantle owns the transform for under a second. Re-running the
+    // ordinary wall depenetration here (after physics/peds) would shove that
+    // body straight back to the take-off side during the airborne frames.
+    if (a && (a._traversal || (a._p && CBZ.player._traversal))) return;
     const p = posOf(a); if (!p) return;
     if (CBZ.collide) CBZ.collide(p, radiusOf(a), p.y, (p.y || 0) + 1.7);
     // the PLAYER over open water is SWIMMING (city/swim.js owns them) — the
@@ -300,13 +304,16 @@
     cityList.length = 0;
     for (let i = 0; i < CBZ.cityPeds.length; i++) {
       const p = CBZ.cityPeds[i];
-      if (!p.dead && !p.culled && !p.inCar && !(CBZ.body && CBZ.body.busy(p))) cityList.push(p);
+      if (!p.dead && !p.culled && !p.inCar && !p._traversal &&
+          !(CBZ.body && CBZ.body.busy(p))) cityList.push(p);
     }
     for (let i = 0; i < CBZ.cityCops.length; i++) {
       const c = CBZ.cityCops[i];
-      if (!c.dead && !(CBZ.body && CBZ.body.busy(c))) cityList.push(c);
+      if (!c.dead && !c._traversal && !(CBZ.body && CBZ.body.busy(c))) cityList.push(c);
     }
-    if (!CBZ.player.dead) { cityPlayer.pos = CBZ.player.pos; cityPlayer.r = CBZ.player.radius || 0.55; cityList.push(cityPlayer); }
+    if (!CBZ.player.dead && !CBZ.player._traversal) {
+      cityPlayer.pos = CBZ.player.pos; cityPlayer.r = CBZ.player.radius || 0.55; cityList.push(cityPlayer);
+    }
     resolve(cityList, step, { mode: "city", clamp: clampCity });
   });
 

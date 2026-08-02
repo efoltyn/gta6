@@ -227,7 +227,6 @@
     const before = playerDrip();
     if (equipItem(nm)) {
       const after = playerDrip();
-      if (CBZ.sfx) CBZ.sfx("door");
       CBZ.city.note("Put on " + nm + " — sharper already.", 1.6);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
@@ -554,7 +553,6 @@
     const total = each * n;
     if (!CBZ.city.spend(total)) {
       CBZ.city.note("Can't afford " + (n > 1 ? n + "× " : "") + it + " (" + fmt$(total) + ")", 1.6);
-      if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
     // E7: Ironclad Arms books half of every player gun-store purchase as
@@ -1493,7 +1491,6 @@
     const take = r.taken;
     if (!(take > 0)) {
       CBZ.city.note(r.why === "empty" ? "Drawer's empty — they've already dropped it." : ("Nothing in " + (r.name || "the register") + " — " + (r.why || "empty") + "."), 2.2);
-      if (CBZ.sfx) CBZ.sfx("glass");
       // it is still an armed robbery even when the score is nothing, and the
       // clerk still screams: fall through to the crime/alarm/panic beats.
     } else CBZ.city.addCash(take);
@@ -1525,7 +1522,7 @@
     if (s.id && CBZ.cityBuyOutfit) { CBZ.cityBuyOutfit(s.id); render(); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return; }
     const cur = kind === "barber" ? look().hair : look().outfit;
     if (cur === s.name) { CBZ.city.note("You're already rocking that.", 1.4); return; }
-    if (!CBZ.city.spend(s.cost)) { CBZ.city.note("Need " + fmt$(s.cost) + " for that.", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+    if (!CBZ.city.spend(s.cost)) { CBZ.city.note("Need " + fmt$(s.cost) + " for that.", 1.6); return; }
     // swagger replaces the prior style's swagger contribution (no stacking)
     const prevSwag = stylePrevSwag(kind, cur);
     look().swagger = Math.max(0, (look().swagger || 0) - prevSwag + s.swag);
@@ -1558,7 +1555,7 @@
     if (!notWorn.length) { CBZ.city.note("You're already fully iced out.", 1.8); return; }
     let raw = 0; for (const m of toBuy) raw += econ.buyPrice(m);
     const price = Math.round(raw * 0.82);   // 18% bundle deal (may be $0 if you already own them)
-    if (price > 0 && !CBZ.city.spend(price)) { CBZ.city.note("The full set runs " + fmt$(price) + " right now.", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+    if (price > 0 && !CBZ.city.spend(price)) { CBZ.city.note("The full set runs " + fmt$(price) + " right now.", 2); return; }
     if (CBZ.sfx) CBZ.sfx("coin");
     for (const m of toBuy) econ.add(m, 1);
     for (const m of set) if (!isWorn(m)) equip(m);          // wear the whole set
@@ -1630,7 +1627,6 @@
     openLot = lot; CBZ.cityMenuOpen = true;
     qty = 1; haggle = 0; haggleTried = false; closetOpen = false;   // reset per visit
     el().style.display = "block";
-    if (CBZ.sfx) CBZ.sfx("door");
     render();
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
   }
@@ -1835,7 +1831,6 @@
     p.cash = (p.cash | 0) + fare;
     P.pos.x = it.x + 2; P.pos.z = it.z + 2;
     if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
-    if (CBZ.sfx) CBZ.sfx("door");
     CBZ.city.note("Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
   }
   // A CAB IS A FARE, AND A FARE IS NOT A CAB DRIVER. The crosstown drop above

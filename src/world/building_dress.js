@@ -265,6 +265,13 @@
            asks it where a window is). A box bolted to blank concrete is
            the owner's screenshot. The DRIP STAIN that went with each one
            goes too — a stain under nothing is worse than the unit.
+         • DECORATIVE FIRE-ESCAPE PLATFORMS — the 2.6m black boxes filmed
+           down the sides of Threads & Drip and other glass buildings. This
+           pass called an elevation "blind" from a position hash; it never
+           inspected the actual windows, then repeated the platform once per
+           floor. Worse, they were fake: no collider and no climbable surface.
+           elevators.js owns the deliberately selected, full-height, climbable
+           fire escapes, so deleting this duplicate prop loses no roof access.
          • SATELLITE DISHES + AERIAL MASTS — laid on the same lattice at a
            hashed yaw, so a dish pointed at a different sky on every roof
            and an aerial stood in the middle of nowhere guyed to nothing.
@@ -280,12 +287,12 @@
            reads generated; four related ones on one deck reads built.
          • THE WATER TANK keeps its rule unchanged (low/mid-rise, one
            corner) — it was already the most legible thing on the skyline.
-         • Downpipes, fire escapes, awnings, shutters, wall lamps, house
-           numbers and the roofline/sill weathering all stay: every one of
-           them is anchored to something the building actually has.
+         • Downpipes, awnings, shutters, wall lamps, house numbers and the
+           roofline/sill weathering all stay: every one of them is anchored
+           to something the building actually has.
        ================================================================== */
     const PURGED = !CBZ.CONFIG || CBZ.CONFIG.PROPS_PURGE_V1 !== false;
-    let cutN = 0;
+    let cutN = 0, cutEsc = 0;
 
     const hvac = DK.batch("roof-hvac", hvacProto(), { cls: "decor", cast: true });
     const cond = DK.batch("roof-condenser", condenserProto(), { cls: "decor", cast: true });
@@ -532,12 +539,16 @@
           }
         }
 
-        // ---- fire escape on a blind elevation of a mid-rise ------------
-        if (!isDoor && nEsc < MAX.esc && bi.storeys >= 3 && bi.storeys <= 12
+        // ---- fake facade platforms: purged; real escapes live elsewhere -
+        // Keep evaluating the old deterministic placement rule for the audit
+        // and flag-off rollback, but never emit a decorative platform under
+        // the purge. This hash does NOT know whether the elevation is blind.
+        if (!isDoor && nEsc + cutEsc < MAX.esc && bi.storeys >= 3 && bi.storeys <= 12
           && fc.span > 6 && fh < 0.34) {
           const ex = wallX + tx * (fc.span * 0.18), ez = wallZ + tz * (fc.span * 0.18);
           const top = Math.min(bi.storeys, 8);
-          for (let s = 1; s < top && nEsc < MAX.esc && escHere < ESC_PER; s++) {
+          for (let s = 1; s < top && nEsc + cutEsc < MAX.esc && escHere < ESC_PER; s++) {
+            if (PURGED) { cutEsc++; escHere++; continue; }
             escapes.add(ex, bi.y0 + s * 3.2 + 0.15, ez, { ry: yaw });
             nEsc++; escHere++;
           }
@@ -639,14 +650,16 @@
     if (lampMesh && city._nightLamps) { try { city._nightLamps.push(lampMesh); } catch (e) { /* driver absent */ } }
 
     // hand the census to city/props.js's ratchet (CBZ.propPurgeAudit).
-    // acBoxes is the pinned one and it is STRUCTURALLY 0 under the flag;
-    // roofItems is printed beside it so a future pass cannot re-grow the
-    // skyline clutter without the number saying so.
+    // acBoxes and facadePlatforms are STRUCTURALLY 0 under the flag;
+    // roofItems is printed beside them so the separate roof discussion has
+    // an exact live count instead of being conflated with this facade purge.
     if (CBZ.propPurgeCensus) {
       CBZ.propPurgeCensus({
         acBoxes: nAc,
+        facadePlatforms: nEsc,
         roofItems: nHvac + nCond + nVent + nDuct + nTank + nDish + nAerial,
         acRemoved: cutN,
+        facadePlatformsRemoved: cutEsc,
       });
     }
   });

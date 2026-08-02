@@ -807,7 +807,6 @@
     if (!owned[id]) {
       if (!CBZ.city || !CBZ.city.spend || !CBZ.city.spend(rec.price)) {
         CBZ.city && CBZ.city.note("The " + rec.name + " runs $" + rec.price + ".", 1.8);
-        if (CBZ.sfx) CBZ.sfx("glass");
         return false;
       }
       owned[id] = true;
@@ -1620,7 +1619,6 @@
     _pendingSwap = { body, theirs, mine: worn(), witness: strippingWitness(body) };
     g.cityOutfitChanging = 2.4;
     if (!CBZ.cityMenuOpen) { CBZ.cityMenuOpen = true; _heldMenu = true; }   // hands full — can't shoot
-    if (CBZ.sfx) CBZ.sfx("door");
     CBZ.city && CBZ.city.note("Stripping the " + theirs.name + " off the body — you're exposed…", 2.2);
     return true;
   };

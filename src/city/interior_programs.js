@@ -205,6 +205,217 @@
     try { return fn(); } finally { b.lbox = raw; b._interiorBound = false; }
   };
 
+  // LATE FIXTURES ARE INTERIORS TOO. The clamp above can only see boxes drawn
+  // through b.lbox. Walk-in modules such as bank.js, gunstore.js and forex.js
+  // build raw THREE meshes after the shell is finished, often on the city root
+  // in world coordinates. Register those groups here and the audit below tests
+  // every physical mesh AABB against the same inner wall faces as b.lbox.
+  //
+  // Sprites are deliberately ignored: their camera-facing screen scale is not a
+  // physical footprint. InstancedMesh is expanded instance-by-instance so an
+  // airport bench at x=100 cannot hide behind its prototype geometry at x=0.
+  const FIXTURE = { records: [], serial: 0 };
+
+  function fixtureWorldShell(b) {
+    const R = CBZ.interiorShellRect(b);
+    if (!R) return null;
+    const ox = b.ox != null ? +b.ox
+      : (b.group && b.group.position ? +(b.group.position.x || 0) : 0);
+    const oz = b.oz != null ? +b.oz
+      : (b.group && b.group.position ? +(b.group.position.z || 0) : 0);
+    const oy = b.group && b.group.position ? +(b.group.position.y || 0) : 0;
+    const top = b.h != null ? oy + Math.max(0, +b.h) : Infinity;
+    return {
+      minX: ox + R.x0, maxX: ox + R.x1,
+      minZ: oz + R.z0, maxZ: oz + R.z1,
+      minY: oy, maxY: top,
+    };
+  }
+  CBZ.interiorWorldShell = fixtureWorldShell;
+
+  function boxContainment(b, box, eps) {
+    const shell = fixtureWorldShell(b);
+    eps = eps == null ? 0.02 : Math.max(0, +eps || 0);
+    if (!shell || !box) return { inside: false, unbounded: true, shell: shell };
+    const over = {
+      left: Math.max(0, shell.minX - box.minX),
+      right: Math.max(0, box.maxX - shell.maxX),
+      front: Math.max(0, shell.minZ - box.minZ),
+      back: Math.max(0, box.maxZ - shell.maxZ),
+      below: Math.max(0, shell.minY - box.minY),
+      above: isFinite(shell.maxY) ? Math.max(0, box.maxY - shell.maxY) : 0,
+    };
+    const outside = over.left > eps || over.right > eps || over.front > eps ||
+      over.back > eps || over.below > eps || over.above > eps;
+    return { inside: !outside, unbounded: false, shell: shell, overBy: over };
+  }
+  CBZ.interiorContainsWorldBox = boxContainment;
+
+  CBZ.interiorTrackFixture = function (site, b, root, opts) {
+    if (!b || !root) return null;
+    const key = String(site || "late-fixture");
+    // Re-registering a lazy module after an arena rebuild replaces its dead
+    // record instead of growing an audit history across worlds.
+    for (let i = FIXTURE.records.length - 1; i >= 0; i--) {
+      const old = FIXTURE.records[i];
+      if (old.root === root || (old.site === key && (!old.root || !old.root.parent)))
+        FIXTURE.records.splice(i, 1);
+    }
+    const rec = { id: ++FIXTURE.serial, site: key, b: b, root: root, opts: opts || {} };
+    FIXTURE.records.push(rec);
+    return rec;
+  };
+  CBZ.interiorFixtureRegistry = function () {
+    return FIXTURE.records.map(function (rec) {
+      return {
+        id: rec.id, site: rec.site,
+        rootType: rec.root && rec.root.type || null,
+        children: rec.root && rec.root.children ? rec.root.children.length : 0,
+        parentType: rec.root && rec.root.parent && rec.root.parent.type || null,
+        attached: fixtureAttached(rec.root, CBZ.city && CBZ.city.arena && CBZ.city.arena.root),
+      };
+    });
+  };
+
+  function fixtureAttached(root, arenaRoot) {
+    if (!root || !root.parent) return false;
+    if (!arenaRoot) return true;
+    const seen = new Set();
+    for (let p = root, depth = 0; p && depth < 128; p = p.parent, depth++) {
+      if (p === arenaRoot) return true;
+      if (seen.has(p)) return false;
+      seen.add(p);
+    }
+    return false;
+  }
+  function finiteBox(b) {
+    return b && isFinite(b.min.x) && isFinite(b.min.y) && isFinite(b.min.z) &&
+      isFinite(b.max.x) && isFinite(b.max.y) && isFinite(b.max.z);
+  }
+  function plainBox(b) {
+    return {
+      minX: +b.min.x.toFixed(4), maxX: +b.max.x.toFixed(4),
+      minY: +b.min.y.toFixed(4), maxY: +b.max.y.toFixed(4),
+      minZ: +b.min.z.toFixed(4), maxZ: +b.max.z.toFixed(4),
+    };
+  }
+
+  CBZ.interiorFixtureAudit = function (siteOnly) {
+    const THREE = window.THREE;
+    const arenaRoot = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    const out = {
+      fixtures: 0, pieces: 0, outsideFixtures: 0, escapedPieces: 0,
+      unbounded: 0, invalid: 0, sites: {}, escapes: [],
+    };
+    if (!THREE) return out;
+    const im = new THREE.Matrix4();
+    const wm = new THREE.Matrix4();
+
+    for (let ri = 0; ri < FIXTURE.records.length; ri++) {
+      const rec = FIXTURE.records[ri];
+      if (siteOnly && rec.site !== siteOnly) continue;
+      if (!fixtureAttached(rec.root, arenaRoot)) continue;
+      const shell = fixtureWorldShell(rec.b);
+      const stat = out.sites[rec.site] || (out.sites[rec.site] = {
+        fixtures: 0, pieces: 0, escaped: 0, unbounded: 0,
+        shell: shell, bounds: null,
+      });
+      out.fixtures++; stat.fixtures++;
+      if (!shell) { out.unbounded++; stat.unbounded++; continue; }
+      let fixtureEscaped = false;
+      const targets = typeof rec.opts.objects === "function"
+        ? rec.opts.objects() : rec.opts.objects;
+      const roots = targets && targets.length ? targets : [rec.root];
+
+      function recordBox(raw, object, instance) {
+        const keys = ["minX", "maxX", "minY", "maxY", "minZ", "maxZ"];
+        for (let k = 0; k < keys.length; k++) {
+          if (!isFinite(+raw[keys[k]])) { out.invalid++; return; }
+        }
+        if (+raw.minX > +raw.maxX || +raw.minY > +raw.maxY || +raw.minZ > +raw.maxZ) {
+          out.invalid++; return;
+        }
+        const pb = {};
+        for (let k = 0; k < keys.length; k++) pb[keys[k]] = +(+raw[keys[k]]).toFixed(4);
+        out.pieces++; stat.pieces++;
+        if (!stat.bounds) stat.bounds = Object.assign({}, pb);
+        else {
+          stat.bounds.minX = Math.min(stat.bounds.minX, pb.minX);
+          stat.bounds.maxX = Math.max(stat.bounds.maxX, pb.maxX);
+          stat.bounds.minY = Math.min(stat.bounds.minY, pb.minY);
+          stat.bounds.maxY = Math.max(stat.bounds.maxY, pb.maxY);
+          stat.bounds.minZ = Math.min(stat.bounds.minZ, pb.minZ);
+          stat.bounds.maxZ = Math.max(stat.bounds.maxZ, pb.maxZ);
+        }
+        const hit = boxContainment(rec.b, pb, rec.opts.eps);
+        if (hit.inside) return;
+        fixtureEscaped = true;
+        out.escapedPieces++; stat.escaped++;
+        if (out.escapes.length < 80) out.escapes.push({
+          site: rec.site,
+          object: object || "declared-box",
+          instance: instance == null ? null : instance,
+          box: pb,
+          shell: hit.shell,
+          overBy: hit.overBy,
+        });
+      }
+
+      function inspect(node) {
+        if (!node || !node.isMesh || !node.geometry ||
+            (node.userData && node.userData.interiorAuditIgnore)) return;
+        const geo = node.geometry;
+        if (!geo.boundingBox && geo.computeBoundingBox) geo.computeBoundingBox();
+        if (!geo.boundingBox) { out.invalid++; return; }
+        const count = node.isInstancedMesh ? Math.max(0, node.count | 0) : 1;
+        for (let ii = 0; ii < count; ii++) {
+          const bb = geo.boundingBox.clone();
+          if (node.isInstancedMesh) {
+            node.getMatrixAt(ii, im);
+            wm.multiplyMatrices(node.matrixWorld, im);
+            bb.applyMatrix4(wm);
+          } else bb.applyMatrix4(node.matrixWorld);
+          if (!finiteBox(bb)) { out.invalid++; continue; }
+          recordBox(plainBox(bb), node.name || node.type || "Mesh",
+            node.isInstancedMesh ? ii : null);
+        }
+      }
+      for (let oi = 0; oi < roots.length; oi++) {
+        const obj = roots[oi];
+        if (!obj) continue;
+        // Never let a malformed scene graph turn a QA query into an infinite
+        // recursive traverse. The cap is orders above these small fixture
+        // groups; hitting it is itself invalid audit data and therefore fails
+        // the browser gate.
+        const stack = [obj], seen = new Set();
+        let walked = 0;
+        while (stack.length) {
+          const node = stack.pop();
+          if (!node || seen.has(node)) { if (node) out.invalid++; continue; }
+          seen.add(node);
+          if (++walked > 20000) { out.invalid++; break; }
+          if (node.updateWorldMatrix) node.updateWorldMatrix(true, false);
+          else if (node.updateMatrixWorld) node.updateMatrixWorld(false);
+          inspect(node);
+          const kids = node.children || [];
+          for (let ci = kids.length - 1; ci >= 0; ci--) stack.push(kids[ci]);
+        }
+      }
+      // Static batching is allowed to move/remove source meshes after the
+      // fixture builder runs. Owners can declare analytical world AABBs for
+      // those pieces so optimization never erases them from the audit.
+      const declared = typeof rec.opts.boxes === "function"
+        ? rec.opts.boxes() : rec.opts.boxes;
+      if (declared && declared.length) for (let bi = 0; bi < declared.length; bi++) {
+        const dbox = declared[bi];
+        if (!dbox) { out.invalid++; continue; }
+        recordBox(dbox, dbox.name || "declared-box", bi);
+      }
+      if (fixtureEscaped) out.outsideFixtures++;
+    }
+    return out;
+  };
+
   // host accessors — a buildings.js `b` satisfies this natively; other
   // builders pass any object with the same three-to-six fields.
   function host(ctx) {
@@ -1757,8 +1968,9 @@
                                furnished room is SITTABLE and not scenery.
        spill                   interior geometry that LEFT its own building —
                                the owner's Meridian Trust complaint, as a number.
-                               STRUCTURALLY 0: every furnish pass runs inside
-                               CBZ.interiorBounded, which cannot let one out.
+                               b.lbox furnish passes are clamped structurally;
+                               late raw-mesh fixtures are measured from their
+                               live world AABBs against the same shell.
                                `spillCaught` (refused + clamped) sits beside it
                                with `spillSites` naming WHICH dresser still types
                                out-of-shell coordinates, so a "fix" that just
@@ -1784,16 +1996,30 @@
     for (const k in EMPTY_TALLY) ev[k] = EMPTY_TALLY[k];
     const sites = {};
     for (const k in SPILL.sites) sites[k] = SPILL.sites[k];
+    const fx = (typeof CBZ.interiorFixtureAudit === "function")
+      ? CBZ.interiorFixtureAudit()
+      : { fixtures: 0, pieces: 0, outsideFixtures: 0, escapedPieces: 0,
+          unbounded: 0, invalid: 0, sites: {}, escapes: [] };
+    for (const k in fx.sites) {
+      if (fx.sites[k].escaped) sites[k] = (sites[k] | 0) + fx.sites[k].escaped;
+    }
     const progs = {};
     for (const k in PROG_TALLY) progs[k] = PROG_TALLY[k];
     return {
-      spill: SPILL.escaped,                      // <- PIN 0. Structural.
+      spill: SPILL.escaped + fx.escapedPieces,   // <- PIN 0.
       spillCaught: SPILL.clamped + SPILL.refused, // <- only ever DOWN
       spillClamped: SPILL.clamped,
       spillRefused: SPILL.refused,
-      spillChecked: SPILL.checked,
-      spillUnbounded: SPILL.unbounded,
+      spillChecked: SPILL.checked + fx.pieces,
+      spillUnbounded: SPILL.unbounded + fx.unbounded,
       spillSites: sites,
+      fixtureGroups: fx.fixtures,
+      fixturePieces: fx.pieces,
+      fixtureOutside: fx.outsideFixtures,
+      fixtureUnbounded: fx.unbounded,
+      fixtureInvalid: fx.invalid,
+      fixtureSites: fx.sites,
+      fixtureEscapes: fx.escapes,
       programs: progs,                           // program name -> floors dressed
       homeFloors: RES_TALLY.floors,
       units: RES_TALLY.units,                    // <- only ever UP
@@ -1823,6 +2049,7 @@
     for (const k in PROG_TALLY) delete PROG_TALLY[k];
     SPILL.checked = SPILL.clamped = SPILL.refused = SPILL.escaped = SPILL.unbounded = 0;
     for (const k in SPILL.sites) delete SPILL.sites[k];
+    FIXTURE.records.length = 0;
     RES_TALLY.floors = RES_TALLY.units = RES_TALLY.beds = 0;
     // the interior job rows go with the arena they described — re-opening the
     // venue on the next declaration CLEARS citystaff's own list for us, so a

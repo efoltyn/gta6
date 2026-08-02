@@ -146,7 +146,6 @@
     if (CBZ.player._vehicle === car && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
-    if (CBZ.sfx) CBZ.sfx("door");
     const stocked = b.cars[b.cars.length - 1];
     CBZ.city.note("Stocked " + model.name + " (" + condWord(cond) + ") — resale " + money(resaleOf(stocked)) +
       (hot ? " · hot" : "") + (isHot(model.name) ? " · in demand" : ""), 2.4);
@@ -166,7 +165,6 @@
     const before = resaleOf(car);
     CBZ.city.spend(cost); car.cond = 1;
     const after = resaleOf(car);
-    if (CBZ.sfx) CBZ.sfx("door");
     CBZ.city.note("Reconditioned " + car.name + " (−" + money(cost) + ") · resale " + money(before) + " → " + money(after), 2.6);
     renderMenu();
   }
@@ -260,7 +258,6 @@
     b.raid = { t: RAID_DURATION, cops: cops };
     CBZ.city.big("POLICE RAID on your yard!");
     CBZ.city.note("Hold them off or they'll seize your stock — defend the yard!", 3.2);
-    if (CBZ.sfx) CBZ.sfx("alarm");
   }
   function crewDefend(dt) {
     for (const m of CBZ.cityPeds) {

@@ -612,6 +612,10 @@
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) continue;
+      // character.js owns every limb during a vault/mantle. A late gun-ready
+      // overwrite would pin one arm forward and erase the hand plant/grab that
+      // makes the obstacle contact physically readable.
+      if (a._traversal || (a.char && a.char.traversePose)) continue;
       if (a.surrender || (a.surrenderT || 0) > 0 || (a.char && (a.char.surrender || a.char.handsUp))) continue;
       // INTENT FLAGS BEAT THE SELF-HEAL: _holstered (canonical, CBZ.actorHolster),
       // _gunLowered (police gun-stop challenge / combat.js walled-off stow) and

@@ -27,6 +27,8 @@
 
      node tools/probe.mjs --file probe.js       # evaluate a file instead
      node tools/probe.mjs --step 600            # advance the sim N ticks first
+     node tools/probe.mjs --isolated '<expr>'    # never attach to a shared run
+     node tools/probe.mjs --live-raf '<expr>'    # keep full rendering active
      node tools/probe.mjs --reset               # rebuild the world in place
      node tools/probe.mjs --stop
 
@@ -104,26 +106,51 @@ async function boot(seed, quiet) {
   const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin"
     ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     : "/opt/pw-browsers/chromium");
+  const target = `${origin}?seed=${seed}`;
   const chrome = spawn(CHROME, ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
     "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl",
     "--mute-audio", "--window-size=480,300", `--remote-debugging-port=${dbg}`,
-    `--user-data-dir=${profile}`, `${origin}?seed=${seed}`], { stdio: "ignore", detached: true });
+    `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
 
   let page = null;
   for (let i = 0; i < 300 && !page; i++) {
-    try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); page = ps.find((p) => p.type === "page" && p.url.startsWith(origin)); } catch (_) {}
+    try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); page = ps.find((p) => p.type === "page"); } catch (_) {}
     if (!page) await sleep(100);
   }
   if (!page) throw new Error("chromium never opened the page");
   const c = client(page.webSocketDebuggerUrl);
   await c.ready;
   await c.send("Runtime.enable"); await c.send("Page.enable");
+  // Install the headless frame budget BEFORE any game script can capture rAF.
+  // Six hundred title/world frames leave ample room for startup and one
+  // settled view, but prevent SwiftShader from spending minutes redrawing the
+  // city while the test waits to issue its first state query.
+  if (!has("--live-raf")) await c.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const nativeRAF = window.requestAnimationFrame.bind(window);
+      let left = 600;
+      window.requestAnimationFrame = function (cb) {
+        return left-- > 0 ? nativeRAF(cb) : 0;
+      };
+      window.__probeStopRaf = function () { left = 0; window.__probeRafFrozen = true; };
+    })();`,
+  });
+  await c.send("Page.navigate", { url: target });
   log("booted, starting the run…");
   for (let i = 0, r = false; i < 500 && !r; i++) { try { r = !!(await c.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&document.getElementById('playBtn'))")); } catch (_) {} if (!r) await sleep(150); }
   for (let i = 0, p = false; i < 400 && !p; i++) { p = await c.evl("(()=>{if(CBZ.game&&CBZ.game.state==='playing')return true;const b=document.getElementById('playBtn');if(b)b.click();return CBZ.game&&CBZ.game.state==='playing';})()"); if (!p) await sleep(200); }
   for (let i = 0; i < 300; i++) { if (await c.evl("!!(CBZ.city&&CBZ.city.arena&&CBZ.city.arena.roads&&CBZ.city.arena.roads.length)")) break; await sleep(200); }
+  // A full-city SwiftShader frame can consume every renderer core and starve
+  // the CDP query that this tool exists to run. Once the real title-screen
+  // world has finished building, allow one final frame and freeze rAF; callers
+  // advance gameplay explicitly through --step. Visual/profile callers can
+  // opt back into continuous rendering with --live-raf.
+  if (!has("--live-raf")) {
+    await c.evl("(()=>{if(window.__probeStopRaf)window.__probeStopRaf();window.__probeRafFrozen=true;return true;})()");
+    await sleep(250);
+  }
   log("world built.");
-  return { c, page, port, dbg, seed, chrome, server, origin };
+  return { c, page, port, dbg, seed, chrome, server, origin, profile };
 }
 
 // ------------------------------------------------------------------- modes
@@ -155,12 +182,12 @@ const expr = has("--file")
   ? await readFile(argS("--file", ""), "utf8")
   : argv.filter((a) => !a.startsWith("--") && argv[argv.indexOf(a) - 1] !== "--seed" && argv[argv.indexOf(a) - 1] !== "--step" && argv[argv.indexOf(a) - 1] !== "--file").join(" ");
 if (!expr && !has("--reset") && !has("--step")) {
-  console.error("usage: probe.mjs '<expression>' | --file f.js | --serve | --stop | --step N | --reset");
+  console.error("usage: probe.mjs '<expression>' | --file f.js | --serve | --stop | --step N | --reset | --isolated");
   process.exit(2);
 }
 
 let attached = null, own = null;
-if (existsSync(LOCK)) {
+if (!has("--isolated") && existsSync(LOCK)) {
   try {
     const L = JSON.parse(readFileSync(LOCK, "utf8"));
     const c = client(L.ws);
@@ -188,11 +215,28 @@ if (steps > 0) {
 
 if (expr) {
   let out;
-  try { out = await attached.evl(`(() => { const __r = (${expr}); return (typeof __r === 'undefined') ? null : __r; })()`, true); }
+  const evalMs = Math.max(1000, +argS("--eval-timeout", 30000) || 30000);
+  let timer = null;
+  try {
+    out = await Promise.race([
+      attached.evl(`(() => { const __r = (${expr}); return (typeof __r === 'undefined') ? null : __r; })()`, true),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("evaluation timed out after " + evalMs + "ms")), evalMs);
+      }),
+    ]);
+  }
   catch (e) { console.error("EVAL THREW: " + e.message); process.exitCode = 1; }
+  finally { if (timer) clearTimeout(timer); }
   console.log(typeof out === "object" ? JSON.stringify(out, null, 1) : String(out));
 }
 if (attached.errors.length) console.error("[probe] console errors: " + attached.errors.slice(0, 6).join(" | "));
 
-if (own) { try { process.kill(-own.chrome.pid); } catch (_) {} try { process.kill(-own.server.pid); } catch (_) {} }
+if (own) {
+  try { process.kill(-own.chrome.pid); } catch (_) {}
+  try { process.kill(-own.server.pid); } catch (_) {}
+  await sleep(150);
+  // Only the exact profile this boot minted is eligible for recursive cleanup.
+  if (own.profile && own.profile.startsWith("/tmp/cbz-probe-"))
+    await rm(own.profile, { recursive: true, force: true });
+}
 process.exit(process.exitCode || 0);

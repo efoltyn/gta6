@@ -1989,7 +1989,6 @@
     car._flats |= bit;
     // the POP: a burst of shredded-rubber smoke + a bang you hear over the gun
     emitTireSmoke(car, side); emitTireSmoke(car, side);
-    if (CBZ.sfx && nearCam(car, 70)) CBZ.sfx("clank");
     applyFlatVisual(car);
     const L = flatLean(car);
     if (L && !car.player) {                        // AI loop only writes rotation.y — set the sag once
@@ -2106,7 +2105,6 @@
     car.v = 0;
     CBZ.playerChar.group.visible = false;
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
-    if (CBZ.sfx) CBZ.sfx("door");
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
     CBZ.city && CBZ.city.note("Driving" + worth + " — [E] out  [C] car style", 1.8);
@@ -2131,7 +2129,6 @@
       P.grounded = true; P.vy = 0;
       CBZ.playerChar.group.position.copy(P.pos);
     }
-    if (CBZ.sfx) CBZ.sfx("door");
   };
 
   function anyWitness(x, z, r) {
@@ -2832,7 +2829,7 @@
         if (impactV > 10) {
           damageEngine(car, Math.max(0, (impactV - 9) * 1.8), false);
           if (CBZ.shake) CBZ.shake(Math.min(1.4, impactV * 0.07));
-          if (CBZ.sfx) CBZ.sfx(impactV > 15 ? "ko" : "clank");
+          if (impactV > 15 && CBZ.sfx) CBZ.sfx("ko");
         }
       }
     }
@@ -2900,7 +2897,7 @@
       if (CBZ.shake) CBZ.shake(catastrophic ? 2.4 : (hard ? 1.3 : 0.34));
       if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.16 : (hard ? 0.085 : 0.028));
       if (catastrophic && CBZ.doSlowmo) CBZ.doSlowmo(0.34);
-      if (CBZ.sfx) { CBZ.sfx(hard ? "ko" : "clank"); if (hard) CBZ.sfx("punch"); }
+      if (hard && CBZ.sfx) { CBZ.sfx("ko"); CBZ.sfx("punch"); }
       const ix = car.pos.x + Math.sin(car.heading) * 2.2, iz = car.pos.z + Math.cos(car.heading) * 2.2;
       crashBurst(ix, iz, vmag, hard, catastrophic, { x: -nwx, z: -nwz });   // debris sprays into the wall
       if (hard && CBZ.cityShatter) CBZ.cityShatter(ix, iz, catastrophic ? 10 : 6);
@@ -3293,8 +3290,7 @@
           if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009));
           // BASS-HEAVY impact voice, speed-scaled, camera-distance attenuated so
           // a far kill is quieter (dist convention used elsewhere in this file).
-          // `ko` is the layered heavy-punch + low-pitched thud_real (the bass);
-          // a faster impact layers `clank` (metal-crunch) on top for the crunch.
+          // `ko` is the layered heavy-punch + low-pitched thud_real (the bass).
           if (CBZ.sfx) {
             const cm = CBZ.camera && CBZ.camera.position;
             const dist = cm ? Math.hypot(car.pos.x - cm.x, car.pos.z - cm.z) : 0;
@@ -3303,7 +3299,6 @@
             // pitch DOWN slightly with speed → more bass/body on a heavy impact
             const pitch = Math.max(0.84, 1.02 - vmag * 0.006);
             CBZ.sfx("ko", { dist: dist, volume: vol, pitch: pitch });
-            if (hard) CBZ.sfx("clank", { dist: dist, volume: Math.min(0.9, vol * 0.8), pitch: pitch * 1.04 });
           }
         }
         // one-frame car "catch": a lethal kill bleeds a touch more speed when

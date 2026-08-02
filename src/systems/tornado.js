@@ -835,7 +835,6 @@
       age: 0, mass: c.mass || 1450,
     });
     try {
-      if (CBZ.sfx && camDist(c.pos.x, c.pos.z) < 90) CBZ.sfx("clank");
       if (CBZ.cityDustKick) CBZ.cityDustKick(c.pos.x, 0.4, c.pos.z, 1.6);
     } catch (e) {}
   }

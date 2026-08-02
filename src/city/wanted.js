@@ -1152,7 +1152,6 @@
 
     // ---------- 4. THE DOOR: it opens, you go in, it shuts ----------
     if (sc.phase === "door") {
-      if (!sc._doorSfx) { sc._doorSfx = true; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } }
       if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
       const car = sc.car;
       if (car && !car.dead && sc.t >= DOOR_T * 0.5 && P) {
@@ -1162,7 +1161,6 @@
       }
       if (cop && !cop.dead && car) sitRig(cop, car, seatOf("driver"));
       if (sc.t >= DOOR_T) {
-        if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }        // it shuts behind you
         sc.phase = "ride"; sc.t = 0; sc.legB = false;
         sc.gate = jailGate();
         startRideCamera(sc);
@@ -1176,7 +1174,6 @@
     // ---------- 6. ARRIVAL: out of the car at the jail gate ----------
     if (sc.phase === "arrive") {
       const car = sc.car;
-      if (!sc._outSfx) { sc._outSfx = true; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } }
       if (sc.t >= ARRIVE_T * 0.45 && car && P && !sc._out) {
         sc._out = true;
         const w = seatAt(car, { x: seatOf("rear").x - 1.5, z: seatOf("rear").z });

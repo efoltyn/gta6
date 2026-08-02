@@ -792,7 +792,6 @@
         m.rotation.z = (Math.random() - 0.5) * 0.6;
         try {
           if (CBZ.cityDustKick) CBZ.cityDustKick(h.x, h.gy + 0.4, h.z, 1.4);
-          if (CBZ.sfx && camDist(h.x, h.z) < 90) CBZ.sfx("clank", { dist: camDist(h.x, h.z) });
         } catch (e) {}
         hazardSweep(h, 1);                                // the landing itself
       }

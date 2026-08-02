@@ -844,6 +844,23 @@
     if (ud.cabin) return { kind: "panel", cab: ud.cabin, t: ud.cabin.doorT || 0 };
     return null;
   }
+  function trackPhysicalDoorSound(owner, current, target, playerCause) {
+    if (!owner) return;
+    if (owner._physicalDoorAudioTarget == null) owner._physicalDoorAudioTarget = current > 0.5 ? 1 : 0;
+    if (owner._physicalDoorAudioTarget === target) return;
+    owner._physicalDoorAudioTarget = target;
+    let audible = false;
+    if (target === 1 && playerCause) {
+      owner._physicalDoorAudioCycle = true;
+      audible = true;
+    } else if (target === 0 && (playerCause || owner._physicalDoorAudioCycle)) {
+      owner._physicalDoorAudioCycle = false;
+      audible = true;
+    }
+    if (audible && CBZ.sfx) {
+      try { CBZ.sfx(target ? "door_open" : "door_close"); } catch (e) {}
+    }
+  }
   // THE ONE "is this aircraft's door open" answer. aircraft_doors.js never had
   // one — `rec._doorArcOpen` only says an arc is FORCING it, not what the
   // hardware is actually doing — so anything that needed to know guessed.
@@ -860,8 +877,21 @@
   CBZ.cityAircraftDoorSet = function (rec, open) {
     const d = aircraftDoor(rec);
     if (!d) return false;
-    d.cab.doorManual = (open == null) ? null : !!open;
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    const wasOpen = d.cab.doorManual == null ? d.t > 0.5 : !!d.cab.doorManual;
+    const next = (open == null) ? null : !!open;
+    d.cab.doorManual = next;
+    // This API is owned by the two at-the-door interaction verbs below. The
+    // boarding/deplaning and proximity writers use their own physical state
+    // paths, so a manual click cannot accidentally bless those with audio.
+    if (next != null && next !== wasOpen && CBZ.sfx) {
+      try { CBZ.sfx(next ? "door_open" : "door_close"); } catch (e) {}
+    }
+    if (next != null) {
+      // The manual interaction already spoke for this transition. Align the
+      // animation-side tracker so the next frame cannot echo it.
+      d.cab._physicalDoorAudioTarget = next ? 1 : 0;
+      d.cab._physicalDoorAudioCycle = false;
+    }
     return true;
   };
 
@@ -1109,7 +1139,6 @@
     cabinState.inside = true; cabinState.rec = rec;
     // A manually shut door cannot survive you walking through it.
     if (cab.doorManual === false) cab.doorManual = null;
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
     // YOU BOARDED, SO THEY GET OFF. This is the moment the owner was watching
     // when he reported passengers leaving without using the door: an airframe
     // at the gate with a full cabin and somebody walking up the airstairs is
@@ -1134,7 +1163,6 @@
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     }
     cabinForceClear(true);
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
   }
 
   // ---- REAL cockpit-door collider (CBZ.CONFIG.AIRLINER_COCKPIT_DOOR_SOLID) ---
@@ -1670,6 +1698,7 @@
       const rig = rec.group && rec.group.userData && rec.group.userData.doorRig;
       if (rig && rig.panel && rec.group.parent) {
         let rigOpen = false;
+        let rigPlayerCause = false;
         // the boarding arc marks the rec taken the moment the theft commits,
         // so the arc's open-flag must win over the taken gate
         if (rec._doorArcOpen) rigOpen = true;
@@ -1680,9 +1709,11 @@
           else if (P && !P.dead && !P.driving && !P._aircraft) {
             const dw = cabinWorld(rec, rig.doorX, rig.doorZ);
             rigOpen = Math.hypot(P.pos.x - dw.x, P.pos.z - dw.z) < 3.2;
+            rigPlayerCause = rigOpen;
           }
         }
         const rt = rigOpen ? 1 : 0;
+        trackPhysicalDoorSound(rig, rig.t, rt, rigPlayerCause);
         if (Math.abs(rig.t - rt) > 0.001) {
           rig.t += (rt - rig.t) * Math.min(1, dt * 2.8);
           rig.panel.rotation.x = rig.closedRot + (rig.openRot - rig.closedRot) * rig.t;
@@ -1690,24 +1721,35 @@
       }
       if (!cab || !cab.panel) continue;
       let wantOpen = false;
+      let cabinPlayerCause = false;
       // aircraft_doors.js boarding arc: holds the panel open even though the
       // rec is already marked taken (the theft commits at door-open)
       if (rec._doorArcOpen && rec.group.parent) wantOpen = true;
       else if (!rec.taken && rec.group.parent) {
-        if (cabinState.pending && cabinState.pending.rec === rec) wantOpen = true;
+        if (cabinState.pending && cabinState.pending.rec === rec) {
+          wantOpen = true; cabinPlayerCause = true;
+        }
         // MANUAL BEATS PROXIMITY, AND AN ARC BEATS MANUAL. Standing inside the
         // cabin used to force the door open for ever — which is precisely why
         // "close the door" had nowhere to live. The board/exit arcs and the
         // deplane still set _doorArcOpen/pending above, so nothing automated
         // can be locked out by a door you shut.
         else if (cab.doorManual != null && CBZ.CONFIG.AIRLINER_DOOR_MANUAL !== false) wantOpen = !!cab.doorManual;
-        else if (cabinState.inside && cabinState.rec === rec) wantOpen = true;
+        else if (cabinState.inside && cabinState.rec === rec) {
+          wantOpen = true; cabinPlayerCause = true;
+        }
         else if (P && !P.dead && !P.driving && !P._aircraft) {
           const d = cabinDoorWorld(rec);
           wantOpen = Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 3.4;
+          cabinPlayerCause = wantOpen;
         }
       }
+      // A passenger deplane may own the same arc flag. It is audible only when
+      // the player is actually inside this aircraft; an apron animation outside
+      // the player's space stays silent.
+      if (cabinState.inside && cabinState.rec === rec) cabinPlayerCause = true;
       const tgt = wantOpen ? 1 : 0;
+      trackPhysicalDoorSound(cab, cab.doorT, tgt, cabinPlayerCause);
       if (Math.abs(cab.doorT - tgt) > 0.001) {
         cab.doorT += (tgt - cab.doorT) * Math.min(1, dt * 3.2);
         cab.panel.position.x = cab.doorX - 1.18 * AL_SC * cab.doorT;   // slide aft along the hull
@@ -1724,6 +1766,7 @@
           wantCock = lp.x > 10.1 * AL_SC && lp.x < 14.5 * AL_SC && Math.abs(lp.z) < 1.6 * AL_SC;
         }
         const tc = wantCock ? 1 : 0;
+        trackPhysicalDoorSound(cab.cockpitLeaf, cab.cockpitT, tc, insideThis);
         if (Math.abs(cab.cockpitT - tc) > 0.001) {
           cab.cockpitT += (tc - cab.cockpitT) * Math.min(1, dt * 5.5);
           cab.cockpitLeaf.position.z = 0.98 * AL_SC * cab.cockpitT;   // pocket into the starboard bulkhead
@@ -2049,16 +2092,33 @@
       // doorSide 1 = +z (faces causeway/landside). retail glass = clear.
       terminal = CBZ.cityMakeBuilding(root, tx, tz, tw, td, 1, 0x6f8ba0, 1,
         { retail: true, glassKind: "clear", stairs: false });
+      city.airportTerminal = terminal;
       if (terminal && terminal.group) {
-        const grp = root; // furniture lives in world space for simplicity
+        // One identity group keeps the terminal's world-authored coordinates
+        // unchanged while giving the interior audit an exact fixture owner.
+        const grp = new THREE.Group();
+        const terminalAuditBoxes = [];
+        root.add(grp);
+        function terminalBox(x, y, z, w, h, d, color, opts) {
+          const m = box(x, y, z, w, h, d, color, opts);
+          m.userData.interiorAuditIgnore = true;
+          grp.add(m); // grp is identity, so the box keeps its world transform
+          terminalAuditBoxes.push({
+            name: "terminal-check-in",
+            minX: x - w / 2, maxX: x + w / 2,
+            minY: y - h / 2, maxY: y + h / 2,
+            minZ: z - d / 2, maxZ: z + d / 2,
+          });
+          return m;
+        }
         const ix0 = tx - tw / 2 + 4, ix1 = tx + tw / 2 - 4;
         const fz = tz;    // concourse centre z
 
         // check-in desks along the landside wall (4 desks)
         for (let k = 0; k < 4; k++) {
           const dx = tx - tw / 2 + 20 + k * 30;
-          box(dx, 0.55, tz + td / 2 - 3, 8, 1.1, 2.2, 0xc9cfd6, { cast: true });
-          box(dx, 1.15, tz + td / 2 - 3, 8, 0.1, 2.4, 0x2b2f34);   // counter top
+          terminalBox(dx, 0.55, tz + td / 2 - 3, 8, 1.1, 2.2, 0xc9cfd6, { cast: true });
+          terminalBox(dx, 1.15, tz + td / 2 - 3, 8, 0.1, 2.4, 0x2b2f34);   // counter top
           solid(dx, tz + td / 2 - 3, 8, 2.4, 0, 1.2);
         }
 
@@ -2121,6 +2181,8 @@
         inst(back, new THREE.BoxGeometry(GATE_W - 0.03, GATE_BACK, 0.08), mat(0x2a4360), GATE_CUSH + GATE_BACK / 2, GATE_D / 2 - 0.02, true);
         inst(arms, new THREE.BoxGeometry(0.06, 0.05, 0.42), mat(0x8d959d), GATE_CUSH + GATE_ARM, -0.02, false);
         inst(beams, new THREE.BoxGeometry(PER_BENCH * GATE_W + 0.12, 0.30, 0.14), mat(0x6b7178), 0.16, 0, false);
+        if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture(
+          "airport-terminal", terminal, grp, { boxes: terminalAuditBoxes });
 
         if (CBZ.makeLabelSprite) {
           const s = CBZ.makeLabelSprite("INTERNATIONAL TERMINAL", { color: "#dfeaff" });

@@ -1437,6 +1437,20 @@
     return !!hit;
   }
 
+  // Persistent wall pocks normally live in world space. A moving LOS blocker
+  // (the Prison Escape keycard door / armory gate) is different: leaving its
+  // pocks in the scene makes them hang across the empty doorway after the leaf
+  // slides up. Mount only those marks on the mover that the ray actually hit;
+  // gunfx.js converts the world hit into this parent's local frame.
+  function wallWoundParent(hit) {
+    let o = hit && hit.object;
+    while (o && o !== CBZ.scene) {
+      if (o.userData && o.userData.mover) return o;
+      o = o.parent;
+    }
+    return null;
+  }
+
   // ---- ray vs the CAR fleet (cars were invisible to bullets before this) ----
   // WHY: cars are the street furniture of every firefight — they must take the
   // round (panel hole, paint chips, engine damage) AND act as real cover so a
@@ -2632,7 +2646,8 @@
         if (fps.active && CBZ.camera) gback = Math.min(6.5, origin.distanceTo(CBZ.camera.position));
         const gox = origin.x - shotDir.x * gback, goy = origin.y - shotDir.y * gback, goz = origin.z - shotDir.z * gback;
         const reach = (hit.dist != null ? hit.dist + 0.5 : w.range) + gback;
-        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach, true);
+        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach,
+          true, { directPlayer: true });
         const sd = CBZ.cityLastShatterDist;
         if (sd != null && sd >= 0 && hit.wall && hit.point) {
           // pane world impact along the (eye-anchored) glass ray
@@ -2764,8 +2779,12 @@
             if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
           }
         }
-        // persistent pock — the wall you magdumped STAYS pocked, 7.62 > 9mm
-        if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, { size: 0.15 + cal * 0.13, dist: hit.dist });
+        // persistent pock — static walls remember the hit in world space;
+        // moving doors carry the same mark with the panel when they open.
+        if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, {
+          size: 0.15 + cal * 0.13, dist: hit.dist,
+          parent: wallWoundParent(hit.wallHit),
+        });
         else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
         // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
         // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
@@ -2777,11 +2796,9 @@
         tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz);
       }
     }
-    // impact THUD by caliber — a 7.62 lands a deeper, louder smack on whatever
-    // it chewed (concrete thud / car-panel clank). Once per trigger pull, and
-    // never over the flesh-hit foley below.
-    if (carThudDist >= 0) surfaceThud("clank", cal, carThudDist);
-    else if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
+    // Impact thud by caliber: a 7.62 lands a deeper, louder concrete smack.
+    // Once per trigger pull, and never over the flesh-hit foley below.
+    if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
     // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
     // (b) sniper travel-time: the marker/sfx wait for feedbackDelay too (same
     // "round's still in the air" feel as the deferred tracer above) — game

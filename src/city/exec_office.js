@@ -373,7 +373,6 @@
       P.pos.set(x, y, z); P.vy = 0; P.grounded = true;
       if (P._phys) { P._phys.air = false; P._phys.vx = P._phys.vz = P._phys.vy = 0; }
       if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P.pos);
-      if (CBZ.sfx) try { CBZ.sfx("door"); } catch (e) {}
       if (CBZ.city && note) CBZ.city.note(note, 2.2);
     });
   }

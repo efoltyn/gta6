@@ -120,7 +120,12 @@
     hs.position.set(wallP.x + inx * 0.04, 2.86, wallP.z + inz * 0.04);
     group.add(hs);
     const head = tagSprite("KEYSTONE REALTY", "#7df0c4", 2.6, 0.5);
-    if (head) { head.position.set(wallP.x + inx * 0.06, 3.02, wallP.z + inz * 0.06); group.add(head); }
+    if (head) {
+      // makeLabelSprite is now a physical backed sign, not a zero-depth
+      // billboard. Seat it toward the room and below the one-storey ceiling.
+      head.position.set(wallP.x - inx * 0.06, 2.9, wallP.z - inz * 0.06);
+      group.add(head);
+    }
 
     // framed listing cards laid out in a grid on the board. We hang up to
     // MAX_CARDS of the LIVE inventory (the rest browse in the [E] panel); the
@@ -139,7 +144,12 @@
       frame.position.set(cp.x, y, cp.z);
       group.add(frame);
       const lab = tagSprite("", "#cfe0f5", cardW - 0.16, 0.5);
-      if (lab) { lab.position.set(cp.x + inx * 0.05, y, cp.z + inz * 0.05); lab.visible = false; group.add(lab); }
+      if (lab) {
+        // The sign has a 5.5cm backing board. The old +IN offset pressed that
+        // board through the far facade; -IN faces it into the room.
+        lab.position.set(cp.x - inx * 0.05, y, cp.z - inz * 0.05);
+        lab.visible = false; group.add(lab);
+      }
       cardSlots.push({ frame, lab, x: cp.x, z: cp.z, y });
     }
     S.wall = { x: wallP.x, z: wallP.z, y: 1.6, cards: cardSlots, labelT: 0 };
@@ -178,6 +188,7 @@
       group.add(mon);
       S.desks.push({ x: dp.x, z: dp.z, y: 1.0 });
     }
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("realty-office", b, group);
   }
 
   // refresh the framed-card labels from the live Zillow inventory (slow tick —
@@ -303,7 +314,6 @@
       msg = "Agent: \"Save a deposit and we'll talk financing — 20% down opens most doors. The listings are on the wall.\"";
     }
     note(msg, 3.4);
-    if (CBZ.sfx) CBZ.sfx("door");
   }
 
   // ==========================================================================
@@ -432,7 +442,6 @@
     note((rec.owned ? "Home — " : "Touring ") + shortName(rec.name)
       + (rec.owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.0);
     if (rec.flagship && CBZ.city && CBZ.city.big) CBZ.city.big("" + rec.name);
-    if (CBZ.sfx) CBZ.sfx("door");
   }
   function actBtn(act, idx, label, bg) {
     return "<button data-ract='" + act + "' data-ridx='" + idx + "' style='background:" + bg + ";border:0;border-radius:8px;"

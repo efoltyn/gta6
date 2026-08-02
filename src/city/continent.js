@@ -1869,6 +1869,8 @@
     }
     if (spots.length) {
       const V2 = CFG.CONTINENT_FOREST_V2 !== false;
+      const VKIT = CBZ.vegetationKit;
+      const SCENERY = !!(V2 && VKIT && CFG.SCENERY_VEGETATION !== false);
       // TREES_V2 (config.js): the blob-canopy tree was physically impossible
       // at the margins — the trunk sank only 0.06 into relief that allows
       // ~40° slopes (the downhill edge floated), and the blob's base pole
@@ -1915,11 +1917,14 @@
       }
       const nTree = spots.filter(isTreeSpot).length;
       const nRock = Math.max(1, spots.length - nTree);
-      const trunkG = new THREE.BoxGeometry(0.5, 2.6, 0.5);
-      const canopyG = V2 ? blobCanopyGeo() : new THREE.ConeGeometry(2.0, 4.4, 6);
+      // Backcountry is the kit's landscape consumer: same metre-authored scale
+      // and irregular mass as Redhollow, but the lighter landscape archetypes
+      // avoid multiplying close-detail roots/limbs across ~10k far cells.
+      const trunkG = SCENERY ? VKIT.geometry("landscape-wood") : new THREE.BoxGeometry(0.5, 2.6, 0.5);
+      const canopyG = SCENERY ? VKIT.geometry("landscape-crown") : (V2 ? blobCanopyGeo() : new THREE.ConeGeometry(2.0, 4.4, 6));
       const rockG = new THREE.BoxGeometry(1.6, 1.1, 1.4);
-      const trunkMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff } : { color: 0x6b4a2a });
-      const canopyMat = new THREE.MeshLambertMaterial(V2
+      const trunkMat = SCENERY ? VKIT.material("landscape-wood") : new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff } : { color: 0x6b4a2a });
+      const canopyMat = SCENERY ? VKIT.material("landscape-crown") : new THREE.MeshLambertMaterial(V2
         ? { color: 0xffffff, vertexColors: true, flatShading: true }
         : { color: 0x3f7a3f });
       const rockMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff, flatShading: true } : { color: 0x8b8f96 });
@@ -1961,10 +1966,13 @@
         const c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot));
         return axis === 0 ? hx * c + hz * s : hx * s + hz * c;
       }
-      function solidAt(x, z, hx, hz, rot, ref) {
+      function solidAt(x, z, hx, hz, rot, ref, y0, y1) {
         if (!SOLID_BC || !COLS) return;
         const ex = yawExt(hx, hz, rot, 0), ez = yawExt(hx, hz, rot, 1);
-        COLS.push({ minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, ref: ref || null, noCam: true });
+        const rec = { minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, ref: ref || null, noCam: true };
+        if (Number.isFinite(y0)) rec.y0 = y0;
+        if (Number.isFinite(y1)) rec.y1 = y1;
+        COLS.push(rec);
       }
       let ti = 0, ri = 0, solids = 0;
       for (const s of spots) {
@@ -1974,38 +1982,40 @@
           const gy = reliefAt(s.x, s.z);
           if (V2) {
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8808) : 0.5;
-            const sc = 0.75 + hs * hs * 1.15;                // squared-bias scale (biases small)
-            const trunkH = 2.6 * sc;
+            const sc = SCENERY ? 0.75 + hs * hs * 0.78 : 0.75 + hs * hs * 1.15;
+            const trunkH = SCENERY ? VKIT.nominal.matureWoodHeight * sc : 2.6 * sc;
             const trunkTop = gy + trunkH - 0.06;
             let seatRef = gy - 0.06, parts = null;
             if (TREES2) {
               // SEATED: base below the lowest footprint sample on the slope
-              const gu = CBZ.treeGroundUnder(reliefAt, s.x, s.z, Math.max(0.32 * sc, 0.6));
+              const gu = CBZ.treeGroundUnder(reliefAt, s.x, s.z, Math.max((SCENERY ? 0.82 : 0.32) * sc, 0.6));
               seatRef = Math.min(gy, gu.min);
               const seatY = seatRef - 0.25;
               const span = trunkTop - seatY;
-              dummy.position.set(s.x, (seatY + trunkTop) / 2, s.z);
+              dummy.position.set(s.x, SCENERY ? seatY : (seatY + trunkTop) / 2, s.z);
               dummy.rotation.set(0, rot, 0);
-              dummy.scale.set(sc * 0.9, span / 2.6, sc * 0.9);
+              if (SCENERY) dummy.scale.setScalar(sc);
+              else dummy.scale.set(sc * 0.9, span / 2.6, sc * 0.9);
             } else {
               dummy.position.set(s.x, gy + trunkH * 0.5 - 0.06, s.z);
               dummy.rotation.set(0, rot, 0);
               dummy.scale.set(sc * 0.9, sc, sc * 0.9);
             }
             dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
-            // trunk footprint = the 0.5 m base box under the instance's own
-            // xz scale (sc*0.9), taken through the instance's own yaw.
-            solidAt(s.x, s.z, 0.25 * sc * 0.9, 0.25 * sc * 0.9, rot, trunks);
+            // Height-gated timber, not the former infinite vertical column.
+            const trunkR = SCENERY ? 0.82 * sc : 0.25 * sc * 0.9;
+            solidAt(s.x, s.z, trunkR, trunkR, rot, trunks, seatRef - 0.25, trunkTop);
             solids++;
             if (TREES2 && tbb) {
               parts = [];
               CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
             }
-            const cr = (1.9 + hs * 1.1) * (0.85 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8809) : 0.5) * 0.3);
-            const ch = 3.6 + hs * 2.0;
+            const crownJ = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8809) : 0.5;
+            const cr = SCENERY ? sc * (0.88 + crownJ * 0.22) : (1.9 + hs * 1.1) * (0.85 + crownJ * 0.3);
+            const ch = SCENERY ? sc * (0.90 + hs * 0.16) : 3.6 + hs * 2.0;
             // blob base: V2-legacy sat ON the trunk top (a one-point touch);
             // the law sinks it 0.55·sc INTO the trunk so the top is embedded.
-            dummy.position.set(s.x, TREES2 ? trunkTop - 0.55 * sc : gy + trunkH - 0.06, s.z);
+            dummy.position.set(s.x, SCENERY ? gy + VKIT.nominal.matureCrownBase * sc : (TREES2 ? trunkTop - 0.55 * sc : gy + trunkH - 0.06), s.z);
             dummy.rotation.set(0, rot, 0);
             dummy.scale.set(cr, ch, cr);
             dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
@@ -2026,7 +2036,7 @@
           } else {
             dummy.position.set(s.x, gy + 1.3 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
             dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
-            solidAt(s.x, s.z, 0.25 * scale, 0.25 * scale, rot, trunks);
+            solidAt(s.x, s.z, 0.25 * scale, 0.25 * scale, rot, trunks, gy - 0.06, gy + 2.6 * scale - 0.06);
             solids++;
             dummy.position.y = (2.6 + 2.15) * scale - 0.06;
             dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
@@ -2038,7 +2048,8 @@
           // the whole rock: a 1.6 x 1.4 box under `scale` (0.8-1.5), so 1.3-2.4 m
           // of boulder standing 1.2-1.65 m proud — well over physics.js's 0.45
           // STEP_UP, i.e. a thing you go around, not over.
-          solidAt(s.x, s.z, 0.8 * scale, 0.7 * scale, rot, rocks);
+          const rockY = reliefAt(s.x, s.z) - 0.06;
+          solidAt(s.x, s.z, 0.8 * scale, 0.7 * scale, rot, rocks, rockY, rockY + 1.1 * scale);
           solids++;
           if (V2) {
             const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8819) : 0.5;
@@ -2058,10 +2069,13 @@
       trunks.instanceMatrix.needsUpdate = canopies.instanceMatrix.needsUpdate = rocks.instanceMatrix.needsUpdate = true;
       trunks.frustumCulled = canopies.frustumCulled = rocks.frustumCulled = false;
       trunks.userData.terrain = canopies.userData.terrain = rocks.userData.terrain = true;
+      trunks.userData.vegetationLayer = SCENERY ? "landscape-wood" : "backcountry-trunk";
+      canopies.userData.vegetationLayer = SCENERY ? "landscape-crown" : "backcountry-crown";
+      trunks.userData.sceneryScale = canopies.userData.sceneryScale = SCENERY;
       city.root.add(trunks, canopies, rocks);
       // published for CBZ.solidityAudit() (city/props.js) — the ONE number that
       // says the backcountry is timber and stone rather than a painted backdrop.
-      CBZ.backcountrySolids = { trees: ti, rocks: ri, solids: solids, on: SOLID_BC };
+      CBZ.backcountrySolids = { trees: ti, rocks: ri, solids: solids, on: SOLID_BC, sceneryScale: SCENERY };
     }
 
     // ---- the walkable underlay region(s) (registered LAST on purpose:

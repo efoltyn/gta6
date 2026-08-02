@@ -236,6 +236,537 @@
   }
   CBZ.npcStepLedge = npcStepLedge;
 
+  // ============================================================
+  //  SHARED CHARACTER TRAVERSAL — jump, vault, mantle
+  //
+  //  Space used to be a vertical impulse even when a solid waist-high box was
+  //  directly in the run line. The body rose, CBZ.collide pushed its XZ back to
+  //  the near face, and it landed exactly where it started. NPCs had it worse:
+  //  peds.js has no jump state at all, so its steering either went around or
+  //  ground against the same face forever.
+  //
+  //  This is the geometry/trajectory owner for BOTH the player and full-rig
+  //  NPCs. It only considers things that are already physically registered:
+  //    • a CBZ.collider with y0/y1 or a registered solid-mesh ref, or
+  //    • a real, nearly-stationary CBZ.cityCars record.
+  //  A decorative prop with no collider is deliberately invisible here; prop
+  //  solidity remains the prop-physics owner's job.
+  //
+  //  Public capability:
+  //    CBZ.characterTraversal.probe(actor, rig, dx, dz, opts)
+  //    CBZ.characterTraversal.start(actor, rig, dx, dz, opts)
+  //    CBZ.characterTraversal.step(actor, rig, dt, animate)
+  //    CBZ.characterTraversal.cancel(actor, rig)
+  //
+  //  Callers keep ownership of WHEN to try it. updatePlayer uses a Space edge;
+  //  city/peds.js uses it only for a genuinely running chase/flee body. Once
+  //  started, this state owns that actor's transform for less than ~1.2 s.
+  // ============================================================
+  const TRAV_MIN_RISE = 0.36;       // curbs/normal stair risers stay ordinary step-up
+  const TRAV_VAULT_RISE = 1.34;     // waist/chest-high: clear in one flowing vault
+  const TRAV_VAULT_SPAN = 3.25;     // enough to cross a car SIDE, not its full length
+  const TRAV_MANTLE_SPAN = 2.45;    // a thin wall/van side can be hauled over
+  const TRAV_REACH_BASE = 1.15;     // probe from the body's collision shell
+  const TRAV_REACH_SPEED = 0.105;   // faster run sees the face a little earlier
+  const TRAV_CAR_SPEED = 1.15;      // moving traffic is danger, never a parkour prop
+  const TRAV_LAND_PAD = 0.20;       // actor centre clears the far face before collision resumes
+  const TRAV_TOP_INSET = 0.34;      // chest/hips arrive just inside a climbable top
+  const TRAV_EPS = 0.015;
+  const travQuery = [], travClearQuery = [];
+  const travPoint = { x: 0, y: 0, z: 0 };
+  const travBounds = window.THREE && window.THREE.Box3 ? new window.THREE.Box3() : null;
+  const travDerivedBand = { y0: 0, y1: 0, authored: false, ref: null };
+  const travAudit = {
+    probes: 0, starts: 0, vaults: 0, mantles: 0, cars: 0,
+    completed: 0, cancelled: 0, lastCancel: "",
+  };
+
+  function smooth01(t) {
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    return t * t * (3 - 2 * t);
+  }
+
+  // Ray vs XZ AABB. Direction is normalized, so returned t values are metres.
+  function rayRect(ox, oz, dx, dz, minX, maxX, minZ, maxZ, maxT) {
+    let lo = 0, hi = maxT;
+    if (Math.abs(dx) < 1e-7) {
+      if (ox < minX || ox > maxX) return null;
+    } else {
+      let a = (minX - ox) / dx, b = (maxX - ox) / dx;
+      if (a > b) { const q = a; a = b; b = q; }
+      if (a > lo) lo = a; if (b < hi) hi = b;
+      if (hi < lo) return null;
+    }
+    if (Math.abs(dz) < 1e-7) {
+      if (oz < minZ || oz > maxZ) return null;
+    } else {
+      let a = (minZ - oz) / dz, b = (maxZ - oz) / dz;
+      if (a > b) { const q = a; a = b; b = q; }
+      if (a > lo) lo = a; if (b < hi) hi = b;
+      if (hi < lo) return null;
+    }
+    if (hi < 0 || lo > maxT) return null;
+    return { enter: Math.max(0, lo), exit: hi };
+  }
+
+  function circleTouchesRect(x, z, radius, minX, maxX, minZ, maxZ) {
+    const cx = Math.max(minX, Math.min(x, maxX));
+    const cz = Math.max(minZ, Math.min(z, maxZ));
+    const dx = x - cx, dz = z - cz;
+    return dx * dx + dz * dz < radius * radius - 1e-7;
+  }
+
+  function rigHeight(rig, opts) {
+    if (opts && opts.height > 0) return opts.height;
+    if (rig && rig.metric && rig.metric.height > 0) return rig.metric.height;
+    return BODY_H;
+  }
+
+  function carLocal(car, x, z, out) {
+    const h = car.heading || (car.group && car.group.rotation.y) || 0;
+    const s = Math.sin(h), c = Math.cos(h);
+    const wx = x - car.pos.x, wz = z - car.pos.z;
+    out.x = wx * c - wz * s;
+    out.z = wx * s + wz * c;
+    out.s = s; out.c = c;
+    return out;
+  }
+
+  const carFrame = { x: 0, z: 0, s: 0, c: 1 };
+  const carDir = { x: 0, z: 0 };
+
+  function colliderVerticalBand(c) {
+    if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) {
+      return c;                         // zero-allocation hot path
+    }
+    // Legacy solid props often predate the y0/y1 collider contract but still
+    // carry the actual Mesh/Group they block with. Reading that registered
+    // solid's visual height is character physics, not prop-physics invention:
+    // no ref (a decorative/anonymous blocker) remains non-traversable.
+    const ref = c.ref;
+    if (!ref || ref.visible === false || !travBounds || typeof travBounds.setFromObject !== "function") return null;
+    try {
+      travBounds.setFromObject(ref);
+      if ((travBounds.isEmpty && travBounds.isEmpty()) ||
+          !isFinite(travBounds.min.y) || !isFinite(travBounds.max.y) ||
+          travBounds.max.y - travBounds.min.y < 0.05) return null;
+      // Deliberately recompute instead of caching world Y: the prop-physics
+      // owner may later move/tilt this same registered mesh. The probe is an
+      // explicit jump/run event over a tiny local collider bucket, so this
+      // shared Box3 costs nothing in the normal walking frame.
+      travDerivedBand.y0 = travBounds.min.y;
+      travDerivedBand.y1 = travBounds.max.y;
+      travDerivedBand.ref = ref;
+      return travDerivedBand;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function isTraversalRoadCar(car) {
+    if (!car) return false;
+    const model = car.model || {};
+    const ud = car.group && car.group.userData;
+    const body = String(car._bk || model.body || (ud && ud.bodyKind) || "").toLowerCase();
+    const name = String(model.name || car.displayName || car.kind || "").toLowerCase();
+    // cityCars is the general drivable-vehicle bus: boats and some specialist
+    // aircraft share the same record shape. They are not the parked road-car
+    // silhouette this move is authored for (and a boat belongs to water/deck
+    // traversal, not a roof spin from the quay).
+    if (car._boatKey || car._boatRec || body === "boat" ||
+        /\b(boat|yacht|dinghy|skiff|trawler|catamaran)\b/.test(name)) return false;
+    if (car.airClass || car.flightKind || car._aircraft ||
+        /\b(plane|aircraft|helicopter|chopper)\b/.test(body)) return false;
+    return true;
+  }
+
+  function colliderCandidate(actor, rig, dirX, dirZ, opts, c, radius, height, reach) {
+    if (!c) return null;
+    if (c.noVault || c.noClimb || c._noTraversal) return null;
+    const band = colliderVerticalBand(c);
+    if (!band) return null;
+    const feet = actor.pos.y || 0;
+    // A suspended rail/awning is not a ledge. The solid face has to begin at
+    // (or just below) this body's feet so there is something to plant against.
+    if (band.y0 > feet + 0.38 || band.y1 <= feet + TRAV_MIN_RISE) return null;
+    const rise = band.y1 - feet;
+    const maxRise = height + Math.max(0.48, Math.min(0.72, height * 0.34));
+    if (rise > maxRise) return null;                         // hands cannot reach the top
+
+    const expanded = rayRect(
+      actor.pos.x, actor.pos.z, dirX, dirZ,
+      c.minX - radius, c.maxX + radius, c.minZ - radius, c.maxZ + radius, 64);
+    if (!expanded || expanded.enter > reach) return null;
+    const raw = rayRect(actor.pos.x, actor.pos.z, dirX, dirZ,
+      c.minX, c.maxX, c.minZ, c.maxZ, 64);
+    if (!raw || raw.exit <= TRAV_EPS) return null;
+    const span = Math.max(0.04, raw.exit - raw.enter);
+    // NPC base speeds are deliberately human-scale and much lower than the
+    // player tune, so callers may declare that this mover is already in its run
+    // gait. Without that bit, a fleeing pedestrian would turn every waist-high
+    // box into a slow two-handed climb instead of the flowing vault it deserves.
+    const fast = opts.running === true ||
+      (opts.speed || 0) > (((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 2) * 0.82);
+    let kind = rise <= TRAV_VAULT_RISE && span <= TRAV_VAULT_SPAN && fast ? "vault" : "mantle";
+    let landOnTop = false;
+    const overLimit = kind === "vault" ? TRAV_VAULT_SPAN : TRAV_MANTLE_SPAN;
+    if (span > overLimit) {
+      // Landing on top needs the ordinary collider resolver to understand that
+      // vertical band on the next frame. A legacy heightless collider does not,
+      // so it may be crossed when thin but never used as a sticky top surface.
+      if (!opts.allowTop || band.authored === false) return null;
+      landOnTop = true;
+      kind = "mantle";
+    }
+
+    let contactT = Math.max(0, expanded.enter + 0.03);
+    if (kind === "mantle") {
+      // A collision radius is a hip/torso clearance, not an arm length. Stop a
+      // climbing body's centre far enough outside the face for its bent arms to
+      // carry the hang; using radius alone put the shoulders almost over the
+      // lip and forced the elbows into an implausible 150° fold.
+      contactT = Math.max(0, raw.enter - Math.min(0.58, height * 0.30));
+    }
+    let endT, endY;
+    if (landOnTop) {
+      // Expanded entry is one radius before the face. Move one radius plus a
+      // small inset so the hips finish over the top rather than hanging outside.
+      endT = Math.min(raw.exit - 0.10, expanded.enter + radius + TRAV_TOP_INSET);
+      if (endT <= raw.enter + 0.05) return null;             // top is too narrow to receive a body
+      endY = band.y1;
+    } else {
+      endT = expanded.exit + TRAV_LAND_PAD;
+      const ex = actor.pos.x + dirX * endT, ez = actor.pos.z + dirZ * endT;
+      endY = groundAt(ex, ez, feet);
+    }
+    return {
+      kind, car: null, collider: c, rise, top: band.y1, span, landOnTop,
+      enter: expanded.enter, exit: expanded.exit, faceT: raw.enter,
+      contactT, endT, endY,
+      minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ,
+    };
+  }
+
+  function carCandidate(actor, rig, dirX, dirZ, opts, car, radius, height, reach) {
+    if (!isTraversalRoadCar(car) || !car.pos || car.player || (car.dead && !car._husk)) return null;
+    const speed = Math.max(Math.abs(car.v || 0), Math.hypot(car.vx || 0, car.vz || 0));
+    if (speed > TRAV_CAR_SPEED) return null;
+    const dims = car.dims || (car.group && car.group.userData && car.group.userData.vehicleDims);
+    if (!dims || !(dims.width > 0) || !(dims.length > 0) || !(dims.height > 0)) return null;
+    const feet = actor.pos.y || 0;
+    const top = (car.group ? car.group.position.y : car.pos.y || 0) + dims.height;
+    const rise = top - feet;
+    const maxRise = height + Math.max(0.48, Math.min(0.72, height * 0.34));
+    if (rise <= TRAV_MIN_RISE || rise > maxRise) return null;
+
+    carLocal(car, actor.pos.x, actor.pos.z, carFrame);
+    // Transform the world heading into the car's local frame.
+    carDir.x = dirX * carFrame.c - dirZ * carFrame.s;
+    carDir.z = dirX * carFrame.s + dirZ * carFrame.c;
+    const hw = dims.width * 0.5, hl = dims.length * 0.5;
+    const expanded = rayRect(carFrame.x, carFrame.z, carDir.x, carDir.z,
+      -hw - radius, hw + radius, -hl - radius, hl + radius, 64);
+    if (!expanded || expanded.enter > reach) return null;
+    const raw = rayRect(carFrame.x, carFrame.z, carDir.x, carDir.z,
+      -hw, hw, -hl, hl, 64);
+    if (!raw || raw.exit <= TRAV_EPS) return null;
+    const span = Math.max(0.04, raw.exit - raw.enter);
+    // A car is vaultable across its width. Approaching the long axis means go
+    // around it: a five-metre superhero glide is not a character jump.
+    if (span > TRAV_VAULT_SPAN + 0.35) return null;
+    const kind = rise <= height + 0.16 ? "vault" : "mantle";
+    const contactT = kind === "mantle"
+      ? Math.max(0, raw.enter - Math.min(0.58, height * 0.30))
+      : Math.max(0, expanded.enter + 0.03);
+    const endT = expanded.exit + TRAV_LAND_PAD;
+    const ex = actor.pos.x + dirX * endT, ez = actor.pos.z + dirZ * endT;
+    return {
+      kind, car, collider: null, rise, top, span, landOnTop: false,
+      enter: expanded.enter, exit: expanded.exit, faceT: raw.enter,
+      contactT, endT,
+      endY: groundAt(ex, ez, feet),
+    };
+  }
+
+  function landingClear(cand, x, z, feet, height, radius) {
+    if (CBZ.cityWaterAt) {
+      try { if (CBZ.cityWaterAt(x, z)) return false; } catch (e) {}
+    }
+    CBZ.queryCollidersNear(x, z, radius + 0.2, travClearQuery);
+    const head = feet + height;
+    for (let i = 0; i < travClearQuery.length; i++) {
+      const c = travClearQuery[i];
+      if (c === cand.collider) continue;
+      if (c.y0 != null && (head <= c.y0 || feet >= c.y1)) continue;
+      if (circleTouchesRect(x, z, radius, c.minX, c.maxX, c.minZ, c.maxZ)) return false;
+    }
+    const cars = CBZ.cityCars;
+    if (cars && cars.length) {
+      for (let i = 0; i < cars.length; i++) {
+        const car = cars[i];
+        if (!car || car === cand.car || !car.pos || (car.dead && !car._husk)) continue;
+        const dims = car.dims || (car.group && car.group.userData && car.group.userData.vehicleDims);
+        if (!dims) continue;
+        carLocal(car, x, z, carFrame);
+        if (circleTouchesRect(carFrame.x, carFrame.z, radius,
+          -dims.width * 0.5, dims.width * 0.5, -dims.length * 0.5, dims.length * 0.5)) return false;
+      }
+    }
+    return true;
+  }
+
+  function sampleTraversal(s, u, out) {
+    const ease = smooth01(u);
+    if (s.kind === "vault") {
+      out.x = s.startX + (s.endX - s.startX) * ease;
+      out.z = s.startZ + (s.endZ - s.startZ) * ease;
+      const base = s.startY + (s.endY - s.startY) * ease;
+      const middle = (s.startY + s.endY) * 0.5;
+      const lift = Math.max(0.52, s.top + 0.24 - middle);
+      out.y = base + Math.sin(Math.PI * u) * lift;
+      return out;
+    }
+    if (u < 0.28) {
+      const q = smooth01(u / 0.28);
+      out.x = s.startX + (s.contactX - s.startX) * q;
+      out.z = s.startZ + (s.contactZ - s.startZ) * q;
+      out.y = s.startY + (s.hangY - s.startY) * q;
+    } else if (u < 0.68) {
+      const phase = (u - 0.28) / 0.40;
+      const q = smooth01(phase);
+      // Rise against the face first, then bring the hips across. Advancing XZ
+      // at the same rate as Y cramped the shoulder directly over the ledge and
+      // forced even a correct IK chain into a folded chicken-wing silhouette.
+      const cross = smooth01((phase - 0.12) / 0.88);
+      out.x = s.contactX + (s.crestX - s.contactX) * cross;
+      out.z = s.contactZ + (s.crestZ - s.contactZ) * cross;
+      out.y = s.hangY + (s.crestY - s.hangY) * q;
+    } else {
+      const q = smooth01((u - 0.68) / 0.32);
+      out.x = s.crestX + (s.endX - s.crestX) * q;
+      out.z = s.crestZ + (s.endZ - s.crestZ) * q;
+      out.y = s.crestY + (s.endY - s.crestY) * q;
+    }
+    return out;
+  }
+
+  function buildTraversal(actor, rig, dirX, dirZ, opts, hit) {
+    const p = actor.pos, height = rigHeight(rig, opts), radius = opts.radius || actor.radius || 0.5;
+    const endX = p.x + dirX * hit.endT, endZ = p.z + dirZ * hit.endT;
+    const contactX = p.x + dirX * hit.contactT, contactZ = p.z + dirZ * hit.contactT;
+    // The animator targets this actual near/top edge with both wrists. Keeping
+    // the ledge point in world space lets a short/young rig solve its own arm
+    // chain instead of inheriting one adult "arms up" angle.
+    const faceT = hit.faceT != null ? hit.faceT : hit.enter + radius;
+    const ledgeX = p.x + dirX * faceT, ledgeZ = p.z + dirZ * faceT;
+    const crestT = hit.landOnTop
+      ? hit.endT
+      : Math.max(hit.contactT, Math.min(hit.endT, (hit.enter + hit.exit) * 0.5));
+    let style = "climb";
+    let styleIndex = -1;
+    if (hit.kind === "vault") {
+      // Jump is always the traversal input. Sprint is an expressive modifier:
+      // without it the actor still gets across using a controlled speed/kong
+      // vault; with committed momentum the flashier spy spin enters the pool,
+      // and a sprinting side-on car vault deliberately chooses it.
+      const sprinting = opts.sprinting === true;
+      const styles = sprinting ? ["speed", "kong", "spin"] : ["speed", "kong"];
+      const previous = actor._traverseStyle == null ? -1 : actor._traverseStyle;
+      const n = (previous + 1) % styles.length;
+      style = hit.car && sprinting ? "spin" : styles[n];
+      styleIndex = style === "speed" ? 0 : (style === "kong" ? 1 : 2);
+    }
+    // A 360° roll in the old 0.6-0.8s vault window read as a dropped/glitched
+    // frame. Give it an anticipation, one readable revolution, and recovery.
+    const duration = hit.kind === "vault"
+      ? (style === "spin"
+          ? Math.min(1.30, 1.10 + hit.span * 0.08)
+          : Math.min(0.92, 0.68 + hit.span * 0.07))
+      : Math.min(1.36, 0.96 + hit.rise * 0.15);
+    const s = {
+      kind: hit.kind, style, car: hit.car, collider: hit.collider,
+      styleIndex,
+      landOnTop: hit.landOnTop, top: hit.top, rise: hit.rise, span: hit.span,
+      minX: hit.minX, maxX: hit.maxX, minZ: hit.minZ, maxZ: hit.maxZ,
+      startX: p.x, startY: p.y || 0, startZ: p.z,
+      endX, endY: hit.endY, endZ,
+      contactX, contactZ, ledgeX, ledgeZ,
+      crestX: p.x + dirX * crestT, crestZ: p.z + dirZ * crestT,
+      hangY: Math.max(p.y + 0.12, hit.top - height * 0.70),
+      crestY: hit.top + (hit.landOnTop ? 0.04 : 0.20),
+      dirX, dirZ, yaw: Math.atan2(dirX, dirZ),
+      radius, height, speed: opts.speed || 0, sprinting: opts.sprinting === true,
+      duration, elapsed: 0, t: 0,
+      wallStart: (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0)),
+      sounded: false,
+    };
+    // Validate the destination and two body-sized samples over the obstacle.
+    if (!landingClear(hit, endX, endZ, hit.endY, height, radius)) return null;
+    const samples = [0.42, 0.66];
+    for (let i = 0; i < samples.length; i++) {
+      sampleTraversal(s, samples[i], travPoint);
+      CBZ.queryCollidersNear(travPoint.x, travPoint.z, radius + 0.05, travClearQuery);
+      for (let j = 0; j < travClearQuery.length; j++) {
+        const c = travClearQuery[j];
+        if (c === hit.collider) continue;
+        const head = travPoint.y + height;
+        if (c.y0 != null && (head <= c.y0 || travPoint.y >= c.y1)) continue;
+        if (circleTouchesRect(travPoint.x, travPoint.z, radius * 0.82,
+          c.minX, c.maxX, c.minZ, c.maxZ)) return null;    // low ceiling / second wall
+      }
+    }
+    return s;
+  }
+
+  function probeTraversal(actor, rig, dirX, dirZ, opts) {
+    opts = opts || {};
+    travAudit.probes++;
+    if (!actor || !actor.pos || !rig || CBZ.game.mode !== "city") return null;
+    if (actor._traversal || actor.dead || actor.driving || actor.inCar) return null;
+    let dl = Math.hypot(dirX, dirZ);
+    if (dl < 0.5) return null;
+    dirX /= dl; dirZ /= dl;
+    const radius = opts.radius || actor.radius || 0.5;
+    const height = rigHeight(rig, opts);
+    const reach = opts.reach || Math.min(2.25, TRAV_REACH_BASE + Math.max(0, opts.speed || 0) * TRAV_REACH_SPEED);
+    let best = null;
+    CBZ.queryCollidersNear(actor.pos.x + dirX * reach * 0.5,
+      actor.pos.z + dirZ * reach * 0.5, reach + 1.2, travQuery);
+    for (let i = 0; i < travQuery.length; i++) {
+      const hit = colliderCandidate(actor, rig, dirX, dirZ, opts, travQuery[i], radius, height, reach);
+      if (hit && (!best || hit.enter < best.enter)) best = hit;
+    }
+    if (opts.cars !== false && CBZ.cityCars && CBZ.cityCars.length) {
+      for (let i = 0; i < CBZ.cityCars.length; i++) {
+        const hit = carCandidate(actor, rig, dirX, dirZ, opts, CBZ.cityCars[i], radius, height, reach);
+        if (hit && (!best || hit.enter < best.enter)) best = hit;
+      }
+    }
+    return best ? buildTraversal(actor, rig, dirX, dirZ, opts, best) : null;
+  }
+
+  function startTraversal(actor, rig, dirX, dirZ, opts) {
+    opts = opts || {};
+    const s = probeTraversal(actor, rig, dirX, dirZ, opts);
+    if (!s) return null;
+    actor._traversal = s;
+    if (s.styleIndex >= 0) actor._traverseStyle = s.styleIndex;
+    actor._traverseSurface = null;
+    actor.vy = 0;
+    if (actor.grounded != null) actor.grounded = false;
+    if (rig) {
+      rig.slidePose = false; rig.pronePose = false; rig.crouch = false;
+      rig.traversePose = s;
+    }
+    travAudit.starts++;
+    if (s.kind === "vault") travAudit.vaults++; else travAudit.mantles++;
+    if (s.car) travAudit.cars++;
+    if (actor === player && CBZ.sfx) CBZ.sfx("jump");
+    return s;
+  }
+
+  function clearTraversalPose(rig) {
+    if (!rig) return;
+    rig.traversePose = null;
+    rig._traverseRecover = 1;
+    // A full spin ends at ±2π, which is visually zero. Store zero so the next
+    // animator frame does not numerically unwind a completed barrel roll.
+    if (rig.model) rig.model.rotation.set(0, 0, 0);
+  }
+
+  function cancelTraversal(actor, rig, keepSurface, reason) {
+    if (!actor) return false;
+    const had = !!actor._traversal;
+    actor._traversal = null;
+    if (!keepSurface) actor._traverseSurface = null;
+    clearTraversalPose(rig);
+    if (had) {
+      travAudit.cancelled++;
+      travAudit.lastCancel = reason || "external";
+    }
+    return had;
+  }
+
+  function stepTraversal(actor, rig, dt, animate) {
+    const s = actor && actor._traversal;
+    if (!s || !rig) return false;
+    const now = (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0));
+    let cancelReason = "";
+    if (actor.dead) cancelReason = "dead";
+    else if (actor.driving || actor.inCar) cancelReason = "vehicle-owner";
+    else if ((actor.ko || 0) > 0) cancelReason = "knockdown";
+    else if ((now - s.wallStart) > (s.duration + 0.9) * 1000) cancelReason = "stalled";
+    else if (s.car && Math.max(Math.abs(s.car.v || 0),
+      Math.hypot(s.car.vx || 0, s.car.vz || 0)) > TRAV_CAR_SPEED * 2.2) cancelReason = "car-moved";
+    if (cancelReason) {
+      cancelTraversal(actor, rig, false, cancelReason);
+      return false;
+    }
+    s.elapsed += Math.max(0, dt || 0);
+    s.t = Math.min(1, s.elapsed / s.duration);
+    sampleTraversal(s, s.t, travPoint);
+    actor.pos.x = travPoint.x; actor.pos.y = travPoint.y; actor.pos.z = travPoint.z;
+    // Animation uses the current root and the fixed ledge point to keep the
+    // palms planted while the shoulder rises through the pull.
+    s.rootX = travPoint.x; s.rootY = travPoint.y; s.rootZ = travPoint.z;
+    actor.speed = s.speed;
+    if (actor.grounded != null) actor.grounded = false;
+    if (rig.group.position !== actor.pos) rig.group.position.copy(actor.pos);
+    rig.group.rotation.y = s.yaw;
+    rig.traversePose = s;
+    if (!s.sounded && s.t >= 0.30) {
+      s.sounded = true;
+      if (actor === player && CBZ.sfx) CBZ.sfx("whoosh");
+    }
+    if (animate !== false) animChar(rig, s.speed, dt);
+    if (s.t < 1) return true;
+
+    actor.pos.x = s.endX; actor.pos.y = s.endY; actor.pos.z = s.endZ;
+    if (rig.group.position !== actor.pos) rig.group.position.copy(actor.pos);
+    actor.vy = 0;
+    if (actor.grounded != null) actor.grounded = true;
+    if (s.landOnTop && s.collider) {
+      actor._traverseSurface = {
+        collider: s.collider, top: s.top,
+        minX: s.minX, maxX: s.maxX, minZ: s.minZ, maxZ: s.maxZ,
+        radius: s.radius,
+      };
+    }
+    actor._traversal = null;
+    clearTraversalPose(rig);
+    travAudit.completed++;
+    return true;                                            // traversal owned this whole frame
+  }
+
+  function traversalSurfaceY(actor, x, z, baseY) {
+    const s = actor && actor._traverseSurface;
+    if (!s) return baseY;
+    const inset = Math.min(0.12, (s.radius || 0.5) * 0.2);
+    if (x < s.minX - inset || x > s.maxX + inset || z < s.minZ - inset || z > s.maxZ + inset ||
+        (s.collider && s.collider.ref && s.collider.ref.visible === false)) {
+      actor._traverseSurface = null;
+      return baseY;
+    }
+    return Math.max(baseY, s.top);
+  }
+
+  CBZ.characterTraversal = {
+    probe: probeTraversal,
+    start: startTraversal,
+    step: stepTraversal,
+    cancel: cancelTraversal,
+    surfaceY: traversalSurfaceY,
+    active: function (actor) { return !!(actor && actor._traversal); },
+    stats: function () {
+      return {
+        probes: travAudit.probes, starts: travAudit.starts,
+        vaults: travAudit.vaults, mantles: travAudit.mantles,
+        cars: travAudit.cars, completed: travAudit.completed, cancelled: travAudit.cancelled,
+        lastCancel: travAudit.lastCancel,
+      };
+    },
+  };
+
   // Highest walkable surface under (x,z): the terrain height field, raised by
   // any building floor/stair/roof platform whose top is within reach. `fromY`
   // is the feet height we're testing from — a platform only counts as support
@@ -629,13 +1160,21 @@
     // ---- driving: a city vehicle owns the player's transform this frame.
     //      The city vehicle controller (city/vehicles.js) moves player.pos and
     //      the (hidden) character rig, so we bail out of on-foot physics. ----
-    if (player.driving) { if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset(); return; }
+    if (player.driving) {
+      if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
+      if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
+      return;
+    }
 
     // A live aircraft boarding-door arc (city/aircraft_doors.js) guides the
     // player through the opening exactly like a vehicle controller — on-foot
     // input must not fight the guided walk for the ~1-2s beat. A live slide is
     // surrendered to the guided walk (a held crouch/prone stance survives it).
-    if (player._doorArc) { if (st.slideT >= 0) { st.slideT = -1; st.cd = SLIDE_CD; } return; }
+    if (player._doorArc) {
+      if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
+      if (st.slideT >= 0) { st.slideT = -1; st.cd = SLIDE_CD; }
+      return;
+    }
 
     // A strapped-in snowboard owns the player transform just like a vehicle.
     // The controller is installed by city/snowboard.js after this module.
@@ -647,6 +1186,7 @@
     if (ph && !player.dead) {
       if (ph.fl > 0) ph.fl = Math.max(0, ph.fl - dt);
       if (ph.air) {
+        if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
         ph.vy -= T.gravity * dt;
         player.pos.x += ph.vx * dt; player.pos.z += ph.vz * dt; player.pos.y += ph.vy * dt;
         const fl = groundAt(player.pos.x, player.pos.z, player.pos.y);
@@ -659,6 +1199,7 @@
         return;
       }
       if (ph.down > 0) {
+        if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
         ph.down -= dt;
         player.speed = 0; player.crouch = false; stanceReset();
         player.vy -= T.gravity * dt; player.pos.y += player.vy * dt;
@@ -676,6 +1217,7 @@
     // ---- SURVIVAL death: a dramatic spinning ragdoll launch, then sprawl ----
     const D = player._death;
     if (D && CBZ.game.mode !== "escape") {
+      if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
       player.speed = 0; player.crouch = false; stanceReset();
       const floorY = groundAt(player.pos.x, player.pos.z, player.pos.y);
       if (!D.landed) {
@@ -700,6 +1242,7 @@
     }
 
     if (player.dead || player.ko > 0) {
+      if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
       if (!player.dead) player.ko = Math.max(0, (player.ko || 0) - dt);
       player.speed = 0;
       player.crouch = false; stanceReset();
@@ -712,6 +1255,15 @@
       playerChar.group.scale.y += (1 - playerChar.group.scale.y) * (1 - Math.pow(0.001, dt));
       animChar(playerChar, 0, dt);
       return;
+    }
+
+    // A vault/mantle is a short authored trajectory, not another velocity added
+    // to ordinary walking. While active it is the sole player-transform writer;
+    // camera/animation still consume the same wall-clock feel dt as normal play.
+    if (player._traversal) {
+      const tdt = (CBZ.feelDt != null ? CBZ.feelDt : dt);
+      player.crouch = false; player.prone = false;
+      if (stepTraversal(player, playerChar, tdt, true)) return;
     }
 
     const cam = CBZ.cam;
@@ -799,9 +1351,32 @@
       if (stanceOn && player.prone) {
         if (!st.spaceLatch) { st.spaceLatch = true; st.mode = "stand"; player.prone = false; player.crouch = false; }
       } else if (!stanceOn || !st.spaceLatch) {
+        const jumpWasSliding = sliding;
+        const jumpDirX = sliding ? st.dirX : mx;
+        const jumpDirZ = sliding ? st.dirZ : mz;
         if (stanceOn) {
           if (st.slideT >= 0) { st.slideT = -1; st.cd = SLIDE_CD; sliding = false; }
           st.mode = "stand"; player.crouch = false;
+        }
+        // Running into registered solid geometry turns the SAME jump press into
+        // traversal. A clear run line keeps the original ballistic jump exactly.
+        const traverse = (jumpWasSliding || len > 0.15) && CBZ.game.mode === "city"
+          ? startTraversal(player, playerChar, jumpDirX, jumpDirZ, {
+              speed: Math.max(player.speed, moveSpeed),
+              radius: player.radius,
+              height: (playerChar.metric && playerChar.metric.height) || BODY_H,
+              allowTop: true,
+              cars: true,
+              // Shift never gates traversal itself. It only authorizes the
+              // acrobatic style; ordinary forward+Jump still clears the prop.
+              sprinting: !!(player.sprint || jumpWasSliding),
+            })
+          : null;
+        if (traverse) {
+          st.spaceLatch = true;
+          player.crouch = false; player.prone = false;
+          stepTraversal(player, playerChar, (CBZ.feelDt != null ? CBZ.feelDt : dt), true);
+          return;
         }
         player.vy = T.jumpVel; player.grounded = false; CBZ.sfx("jump");
       }
@@ -822,7 +1397,9 @@
       player.pos.z += desZ * subDt;
 
       // gravity + ground following (terrain, stairs, floors, roofs)
-      let support = groundAt(player.pos.x, player.pos.z, player.pos.y);
+      let support = traversalSurfaceY(
+        player, player.pos.x, player.pos.z,
+        groundAt(player.pos.x, player.pos.z, player.pos.y));
       // ANTI-FALL-THROUGH (belt-and-braces): with the CONTINUOUS ramp collider
       // (buildings.js) groundAt can no longer hit a seam, so the seam-bridge is
       // now redundant — but we keep a GUARDED version so nothing regresses if a

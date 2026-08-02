@@ -77,17 +77,19 @@
     if (CBZ.CONFIG.FACADES_V2 == null) CBZ.CONFIG.FACADES_V2 = true;
     if (CBZ.CONFIG.FACADE_AC_UNITS == null) CBZ.CONFIG.FACADE_AC_UNITS = false;
   }
-  // Deterministic LCG (owner rule: no Math.random) for the runtime decal
-  // helpers below (cityBulletHole/cityScorch) -- everything else in this file
-  // is driven by a caller-supplied seeded rng, but these two fire at gameplay
-  // time from arbitrary call sites with no rng of their own.
+  // Deterministic LCG (owner rule: no Math.random) for cityBulletHole below.
+  // Everything else in this file is driven by a caller-supplied seeded rng, but
+  // bullet holes fire at gameplay time from arbitrary call sites.
   let _decalSeed = 61819;
   function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
   // FACADES_V2 build-time counters (deterministic per seed): how many windows the
   // massing chose LIT at night + how many got an AC unit, accumulated as the world
   // builds. Exposed for the determinism gate (two boots of one seed must agree).
+  // `sideBoxes` is a structural zero: the old balconyWindow terminal glued a
+  // solid-looking black slab/rail onto arbitrary curtain-wall bays (the boxes
+  // filmed on Threads & Drip). The terminal and its emitter are deleted below.
   let _facadeLit = 0, _facadeAC = 0, _facadeTrim = 0;
-  CBZ.cityFacadeStats = function () { return { lit: _facadeLit, ac: _facadeAC, trim: _facadeTrim }; };
+  CBZ.cityFacadeStats = function () { return { lit: _facadeLit, ac: _facadeAC, trim: _facadeTrim, sideBoxes: 0 }; };
 
   // FLOOR-TO-FLOOR — world units are metres and the converted character is
   // ~1.82m. 3.2m yields a plausible apartment/office floor with a 0.2m slab,
@@ -114,6 +116,53 @@
   // you can drive straight THROUGH the hole — while a few glass shards rain
   // down. One shared translucent material + shard geometry keep it cheap.
   const cityGlass = [], cityShards = [];
+  // Ground-front glass is a measurable architectural promise, not a camera
+  // impression. `role` is stamped only by storefront/showroom/garage frontage
+  // recipes that intentionally meet the floor; upper windows and sill windows
+  // are outside this invariant.
+  CBZ.cityGlassRealityAudit = function () {
+    let frontagePanes = 0, groundPanes = 0, upperPanes = 0, colliderMissing = 0;
+    const byRole = {}, stacks = new Map();
+    for (let i = 0; i < cityGlass.length; i++) {
+      const gp = cityGlass[i];
+      if (!gp.frontageRole) continue;
+      frontagePanes++;
+      const bottom = gp.y - gp.hh;
+      if (Math.abs(bottom) <= 0.025) groundPanes++;
+      else if (bottom > 0.025) upperPanes++;
+      if (!gp.col) colliderMissing++;
+      byRole[gp.frontageRole] = (byRole[gp.frontageRole] || 0) + 1;
+      // A floor-to-header wall is a vertical GRID: only its lowest pane should
+      // touch grade. Group equal X/Z/span panes into one mullion column and test
+      // the bottom of the whole column, rather than falsely calling every upper
+      // pane a floating storefront.
+      const key = gp.frontageRole + "|" + gp.x.toFixed(3) + "|" + gp.z.toFixed(3)
+        + "|" + gp.hw.toFixed(3) + "|" + gp.hd.toFixed(3);
+      const st = stacks.get(key);
+      if (!st || bottom < st.bottom) stacks.set(key, {
+        role: gp.frontageRole, x: gp.x, z: gp.z, bottom
+      });
+    }
+    let groundColumns = 0, offGradeColumns = 0, maxGroundError = 0;
+    const samples = [];
+    stacks.forEach(function (st) {
+      const err = Math.abs(st.bottom);
+      if (err <= 0.025) groundColumns++;
+      else {
+        offGradeColumns++;
+        if (err > maxGroundError) maxGroundError = err;
+        if (samples.length < 8) samples.push({
+          role: st.role, x: +st.x.toFixed(2), z: +st.z.toFixed(2),
+          bottom: +st.bottom.toFixed(3)
+        });
+      }
+    });
+    return {
+      frontagePanes, frontageColumns: stacks.size, groundPanes, upperPanes,
+      groundColumns, offGradeColumns, colliderMissing,
+      maxGroundError: +maxGroundError.toFixed(3), byRole, samples
+    };
+  };
   let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
   // THE reference glass — now sourced from CBZ.glass() so the cockpit, the
@@ -625,6 +674,7 @@
     const rec = { mesh: null, pool: null, inst: -1, litPool: null, litId: -1, lit: false,
       tint: (o.tint || 0) % GLASS_TINTS,
       kind: (allowMirror && o.kind === "reflective") ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
+      frontageRole: o.role || "",
       x: ox + lx, y: ly, z: oz + lz, span: Math.max(pw, pd) * 0.5, hw: pw / 2, hh: ph / 2, hd: pd / 2,
       shattered: false, col: null };
     if (o.external) {
@@ -715,6 +765,22 @@
       });
     }
   }
+  // Glass is audible only when the player personally strikes/shoots a pane.
+  // The physical shatter APIs are also called by NPC fire, crashes, tornadoes,
+  // aircraft and explosions, so those callers must opt in explicitly instead
+  // of making a global pane-state change sound like it happened beside you.
+  // A small local rolloff makes a far pane disappear beneath the player's gun
+  // report; beyond 55m it is intentionally inaudible.
+  const PLAYER_GLASS_HEAR_DIST = 55;
+  function playPlayerGlass(gp) {
+    if (!gp || !CBZ.sfx) return;
+    const p = CBZ.player && CBZ.player.pos;
+    let dist = null;
+    if (p) dist = Math.hypot(gp.x - p.x, gp.y - (p.y || 0), gp.z - p.z);
+    if (dist != null && dist >= PLAYER_GLASS_HEAR_DIST) return;
+    const volume = dist == null ? 1 : Math.max(0, 1 - Math.max(0, dist - 8) / (PLAYER_GLASS_HEAR_DIST - 8));
+    CBZ.sfx("glass", dist == null ? undefined : { dist: dist, volume: volume });
+  }
   // burst every intact pane within r of (x,z) — called on car crashes etc.
   // SWISS CHEESE: a blast doesn't just clear glass — up to PER_BLAST_OPEN of the
   // nearest WINDOW-SIZED panes carve into real see-through holes/rooms, so a
@@ -746,7 +812,8 @@
     if (winOpenQ.length >= WINOPENQ_CAP || winOpenQ.indexOf(gp) !== -1) return;
     winOpenQ.push(gp);
   }
-  CBZ.cityShatter = function (x, z, r) {
+  CBZ.cityShatter = function (x, z, r, opts) {
+    opts = opts || {};
     const r2 = r * r; let n = 0, near = null, nearD = 1e9;
     const cand = [];   // window-sized in-radius panes eligible to carve an opening
     for (let i = 0; i < cityGlass.length; i++) {
@@ -768,7 +835,7 @@
     const lim = Math.min(PER_BLAST_OPEN, cand.length);
     for (let i = 0; i < lim; i++) queueWindowOpening(cand[i].gp);
     if (!lim && near) queueWindowOpening(near);   // fallback: nearest pane (sub-window slivers only)
-    if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
+    if (n > 0 && opts.directPlayer && near) playPlayerGlass(near);
     // a hard impact (big radius shatter = a car ploughing a storefront) also
     // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
     if (r >= 7 && CBZ.cityChunk) CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.8, z, { count: 2 + ((Math.random() * 2) | 0), force: 3 });
@@ -801,7 +868,8 @@
   // ahead of the muzzle within range), select by true forward entry distance, and
   // take the impact point at the MIDPOINT of the segment inside the pane so the
   // decal/chip always lands in the glass — stable from touching distance to range.
-  CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist, force) {
+  CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist, force, opts) {
+    opts = opts || {};
     const nl = Math.hypot(dx, dy, dz) || 1; dx /= nl; dy /= nl; dz /= nl;
     const lim = maxDist != null ? maxDist : 1e9;
     CBZ.cityLastShatterDist = -1;
@@ -837,8 +905,11 @@
       // fully out; otherwise spider-crack it (and chip a shard off the point).
       // The pane bursts NOW (the feedback); the room-reveal carve queues (1-
       // frame slip, same winOpenQ de-spike the blast path uses).
-      if (force || best.cracked || best.col) { burstPane(best); queueWindowOpening(best); if (CBZ.sfx) CBZ.sfx("glass"); }
-      else { crackPane(best, bestHX, bestHY, bestHZ); if (CBZ.sfx) CBZ.sfx("glass"); spawnGlassChip(bestHX, bestHY, bestHZ); }
+      if (force || best.cracked || best.col) {
+        burstPane(best); queueWindowOpening(best);
+        if (opts.directPlayer) playPlayerGlass(best);
+      }
+      else { crackPane(best, bestHX, bestHY, bestHZ); spawnGlassChip(bestHX, bestHY, bestHZ); }
     }
     return best;
   };
@@ -1001,14 +1072,13 @@
     return (r << 16) | (g << 8) | b;
   }
 
-  // ---- BUILDING DAMAGE: bullet holes, scorch marks, knocked-off chunks ----
-  // A fixed POOL of dark decal quads. Each impact reuses the oldest slot once
-  // the cap is hit (FPS-style decal budget) so memory/draw cost stays flat. One
-  // shared dark material + one shared scorch material; chunks share box geo.
-  const BULLET_CAP = 110, SCORCH_CAP = 40;
-  const bulletPool = [], scorchPool = [];
-  let bulletIdx = 0, scorchIdx = 0;
-  let _holeGeo = null, _holeMat = null, _scorchTex = null, _scorchMat = null, _chunkGeo = null, _chunkMat = null;
+  // ---- BUILDING DAMAGE: bullet holes and knocked-off chunks ---------------
+  // A fixed POOL of bullet-hole quads reuses the oldest slot once the cap is
+  // hit (FPS-style decal budget); physical chunks share box geometry.
+  const BULLET_CAP = 110;
+  const bulletPool = [];
+  let bulletIdx = 0;
+  let _holeGeo = null, _holeMat = null, _chunkGeo = null, _chunkMat = null;
   const cityChunks = [];
   function holeGeo() { return _holeGeo || (_holeGeo = new THREE.PlaneGeometry(0.3, 0.3)); }
   // a soft dark bullet-pit texture (dark core + cracked ring) painted once
@@ -1025,21 +1095,6 @@
     const t = new THREE.CanvasTexture(c);
     _holeMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     return _holeMat;
-  }
-  function scorchMat() {
-    if (_scorchMat) return _scorchMat;
-    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
-    const x = c.getContext("2d");
-    const g = x.createRadialGradient(32, 32, 2, 32, 32, 31);
-    g.addColorStop(0, "rgba(6,6,7,0.92)"); g.addColorStop(0.5, "rgba(18,16,15,0.7)");
-    g.addColorStop(0.8, "rgba(35,28,24,0.3)"); g.addColorStop(1, "rgba(0,0,0,0)");
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    // a few soot licks
-    x.fillStyle = "rgba(10,9,8,0.55)";
-    for (let i = 0; i < 9; i++) { const a = i / 9 * 6.28 + i * 0.7, r = 18 + (i * 7 % 12); x.beginPath(); x.ellipse(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 5, 9, a, 0, 6.3); x.fill(); }
-    const t = new THREE.CanvasTexture(c);
-    _scorchMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    return _scorchMat;
   }
   function chunkGeo() { return _chunkGeo || (_chunkGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4)); }
   function chunkMat() { return _chunkMat || (_chunkMat = new THREE.MeshLambertMaterial({ color: 0x7c828b })); }
@@ -1099,36 +1154,11 @@
     return m;
   };
 
-  // PUBLIC: lay scorch marks from an explosion at (x,z) within radius r — a big
-  // soot disc on the ground + soot on any building walls the blast can reach.
-  CBZ.cityScorch = function (x, z, r) {
-    if (!CBZ.scene) return;
-    const place = (px, py, pz, nx, ny, nz, scale) => {
-      let m;
-      if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
-      else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-      m.position.set(px, py, pz); aimDecal(m, nx, ny, nz); m.rotateZ(decalRng() * Math.PI);
-      m.scale.set(scale, scale, scale);
-    };
-    // ground scorch (faces up)
-    const fy = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.03;
-    place(x, fy, z, 0, 1, 0, (r || 3) * 1.6 + 2);
-    // soot a few of the nearest wall colliders that face the blast
-    const r2 = (r || 3) * (r || 3) * 2.2; let n = 0;
-    for (let i = 0; i < CBZ.colliders.length && n < 4; i++) {
-      const c = CBZ.colliders[i]; if (c.y1 == null) continue;
-      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
-      const dx = cx - x, dz = cz - z, dd = dx * dx + dz * dz;
-      if (dd > r2 || dd < 0.5) continue;
-      const wx = c.maxX - c.minX, wz = c.maxZ - c.minZ;
-      // pick the broad face nearest the blast as the scorch plane
-      let nx = 0, nz = 0, sx = cx, sz = cz;
-      if (wx >= wz) { nz = dz < 0 ? -1 : 1; sz = nz < 0 ? c.minZ - 0.05 : c.maxZ + 0.05; sx = Math.max(c.minX, Math.min(c.maxX, x)); }
-      else { nx = dx < 0 ? -1 : 1; sx = nx < 0 ? c.minX - 0.05 : c.maxX + 0.05; sz = Math.max(c.minZ, Math.min(c.maxZ, z)); }
-      const sy = Math.max(c.y0 + 0.4, Math.min(c.y1 - 0.4, fy + 1.0));
-      place(sx, sy, sz, nx, 0, nz, (r || 3) * 0.7 + 1.4); n++;
-    }
-  };
+  // Compatibility seam for the many explosion/crash callers. The former
+  // implementation painted a generated soot texture onto the ground and nearby
+  // facades; that entire printed-mark effect is owner-cut. Physical chunks,
+  // shattered glass, cracks and carved openings carry building damage instead.
+  CBZ.cityScorch = function () { return null; };
 
   // PUBLIC: knock physical concrete CHUNKS off a surface on a big hit (blast /
   // ram). Cheap pooled debris boxes that tumble and settle, capped.
@@ -1152,17 +1182,16 @@
 
   // PUBLIC: CINEMATIC STRUCTURAL DAMAGE at an impact point (missiles, rockets,
   // big blasts). Called by the aircraft + explosion agents. At (x,y,z) it:
-  //   1) finds the nearest building WALL face so debris/scorch fling OUTWARD,
+  //   1) finds the nearest building WALL face so debris flings OUTWARD,
   //   2) knocks off concrete CHUNKS scaled by `power`,
-  //   3) stamps a scorch/impact decal on that wall face (or the ground),
-  //   4) BURSTS every window pane within blast radius (spider-cracks → out),
-  //   5) on a big hit, a couple of bullet-pit gouges around the impact.
+  //   3) BURSTS every window pane within blast radius (spider-cracks → out),
+  //   4) accumulates real structural damage toward a carved opening.
   // Pooled + capped throughout. `power` ~0.5 (light) … 3 (heavy ordnance).
   CBZ.cityDamageBuilding = function (x, y, z, power) {
     power = power || 1;
     if (y == null) y = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4;
     // locate the nearest tall wall collider to derive an outward normal + a
-    // surface point to scorch (so the decal sits ON the facade, not floating).
+    // surface point for debris and structural damage at the actual facade.
     let best = null, bestD = 1e9, bnx = 0, bnz = 1, bsx = x, bsz = z, bsy = y;
     const searchR2 = 36;   // 6m: a wall right at the impact
     for (let i = 0; i < CBZ.colliders.length; i++) {
@@ -1184,27 +1213,10 @@
       count: Math.round(3 + 3 * power), force: 4 + 2.5 * power,
       dirx: onWall ? bnx : null, dirz: onWall ? bnz : null,
     });
-    // (3) scorch/impact decal on the wall face (or a ground scorch if open air)
-    if (onWall && scorchPool != null) {
-      let m;
-      if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
-      else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-      m.position.set(bsx + bnx * 0.03, bsy, bsz + bnz * 0.03); aimDecal(m, bnx, 0, bnz); m.rotateZ(Math.random() * Math.PI);
-      const sc = 1.6 + power * 1.4; m.scale.set(sc, sc, sc);
-      // a few smaller bullet-pit gouges ringing the blast crater
-      const ng = Math.min(4, 1 + (power | 0));
-      for (let g = 0; g < ng; g++) {
-        const a = Math.random() * 6.28, rr = 0.5 + Math.random() * (0.8 + power * 0.5);
-        const gx = bsx + (bnx !== 0 ? 0 : Math.cos(a) * rr), gz = bsz + (bnz !== 0 ? 0 : Math.cos(a) * rr);
-        CBZ.cityBulletHole(gx, bsy + Math.sin(a) * rr, gz, bnx, 0, bnz);
-      }
-    } else {
-      CBZ.cityScorch(x, z, 1.4 + power);
-    }
-    // (4) shatter every pane within the blast radius (cracked → blown out)
+    // (3) shatter every pane within the blast radius (cracked → blown out)
     CBZ.cityShatter(x, z, 4.0 + power * 2.2);
-    // (4b) ACCUMULATE a persistent wound on the struck wall — repeated hits/blasts
-    // on the SAME wall escalate scorch → cracks → a real blown-open carve. We
+    // (4) ACCUMULATE a persistent wound on the struck wall — repeated hits/blasts
+    // on the SAME wall escalate cracks → a real blown-open carve. We
     // already located the wall + its surface point + outward normal above, so
     // hand them straight to cityWoundWall (zero extra search).
     if (onWall && best && CBZ._cityWoundWallRec) CBZ._cityWoundWallRec(best, bsx, bsy, bsz, power, bnx, bnz);
@@ -1216,15 +1228,15 @@
   // ---- ESCALATING WALL WOUNDS ----------------------------------------------
   // WHY: one rocket carves a wall open instantly, but a wall raked by rifle fire
   // or peppered with small blasts used to shrug it ALL off — nothing accumulated.
-  // Now every hit on a wall builds a damage record on THAT collider: it scorches,
-  // then cracks, then (once enough damage piles on) the wall genuinely BLOWS OPEN
-  // into the room behind it — the satisfying "keep hitting it and it gives" beat.
+  // Now every hit on a wall builds a damage record on THAT collider: it cracks,
+  // then (once enough damage piles on) the wall genuinely BLOWS OPEN into the
+  // room behind it — the satisfying "keep hitting it and it gives" beat.
   // The decals are pooled+capped and the auto-carve routes through the fracture
   // ledger so it counts against the 24-hole budget and boards over like any breach.
-  const wallDmg = new Map();   // wall collider -> { dmg, x,y,z (impact centroid), nx,nz, sc1, cracks:[] }
+  const wallDmg = new Map();   // wall collider -> { dmg, x,y,z (impact centroid), nx,nz }
   const WALLDMG_CAP = 40;
-  // a tiny dedicated CRACK-decal pool (kept apart from scorchPool so cracks don't
-  // thrash the explosion-scorch LRU). Small cap — only a handful of wounded walls
+  // a tiny dedicated CRACK-decal pool (kept apart from bulletPool so cracks don't
+  // thrash the bullet-hole LRU). Small cap — only a handful of wounded walls
   // ever show cracks at once before they auto-carve.
   const crackPool = []; let crackIdx = 0; const CRACK_CAP = 24;
   function placeCrack(px, py, pz, nx, nz, scale) {
@@ -1234,14 +1246,6 @@
     else { m = crackPool[crackIdx]; crackIdx = (crackIdx + 1) % CRACK_CAP; m.visible = true; }
     m.position.set(px + nx * 0.025, py, pz + nz * 0.025); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
     const s = scale || 1.3; m.scale.set(s, s, s);
-  }
-  function placeWoundScorch(px, py, pz, nx, nz, scale) {
-    if (!CBZ.scene) return;
-    let m;
-    if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
-    else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-    m.position.set(px + nx * 0.03, py, pz + nz * 0.03); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
-    const s = scale || 1.4; m.scale.set(s, s, s);
   }
   // INTERNAL: accumulate a wound on an ALREADY-LOCATED wall collider (cityDamage-
   // Building calls this — it found `best` for us). Tiers fire as the total climbs.
@@ -1256,7 +1260,7 @@
         let lo = null, loV = 1e9; for (const [k, v] of wallDmg) { if (v.dmg < loV) { loV = v.dmg; lo = k; } }
         if (lo) wallDmg.delete(lo);
       }
-      rec = { dmg: 0, x: sx, y: sy, z: sz, nx: nx, nz: nz, sc1: false, t2: 0, n: 0 };
+      rec = { dmg: 0, x: sx, y: sy, z: sz, nx: nx, nz: nz, t2: 0, n: 0 };
       wallDmg.set(col, rec);
     }
     // running impact centroid (so the auto-carve opens where the wall took the
@@ -1265,8 +1269,6 @@
     rec.x += (sx - rec.x) * k; rec.y += (sy - rec.y) * k; rec.z += (sz - rec.z) * k;
     rec.nx = nx; rec.nz = nz;
     const before = rec.dmg; rec.dmg += power;
-    // TIER 1 (>=0.6): a persistent scorch smudge appears (once).
-    if (rec.dmg >= 0.6 && !rec.sc1) { rec.sc1 = true; placeWoundScorch(sx, sy, sz, nx, nz, 1.5); }
     // TIER 2 (>=1.6): 1-2 crack decals + a knock of chunks (each threshold-cross
     // adds one crack, capped at 2, so a pummelled wall visibly spiderwebs).
     if (rec.dmg >= 1.6 && before < rec.dmg && rec.t2 < 2 && Math.floor((rec.dmg - 1.6) / 0.6) >= rec.t2) {
@@ -1288,7 +1290,6 @@
         const rx = g.horiz ? gc : g.fixed, rz = g.horiz ? g.fixed : gc;
         CBZ.cityChunk(rx, (g.v0 + g.v1) / 2, rz, { count: 4 + ((Math.random() * 3) | 0), force: 5, dirx: -nx, dirz: -nz });
         if (CBZ.shake) CBZ.shake(0.5);
-        if (CBZ.sfx) CBZ.sfx("glass");
       }
     }
   };
@@ -1332,10 +1333,9 @@
 
   CBZ.cityDamageReset = function () {
     for (const m of bulletPool) m.visible = false;
-    for (const m of scorchPool) m.visible = false;
     if (crackPool) { for (const m of crackPool) m.visible = false; crackIdx = 0; }
     if (wallDmg) wallDmg.clear();   // wipe the accumulated wall-wound records
-    bulletIdx = scorchIdx = 0;
+    bulletIdx = 0;
     for (const c of cityChunks) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); }
     cityChunks.length = 0;
     resetBreaches();
@@ -1940,10 +1940,10 @@
     const fr = CBZ.cityFracture;
     if (fr && fr.recent && fr.recent(x, z)) return true;    // this rocket already opened the wall
     const rec = carveHole(x, 1.2, z, r, { search: 5 });
-    // nothing to breach (open air, or the wall was already opened) → just scorch.
-    if (!rec) { CBZ.cityScorch(x, z, r * 0.9 + 1.2); return false; }
+    // Nothing to breach (open air, or the wall was already opened).
+    if (!rec) return false;
     if (fr && fr._adopt) fr._adopt(rec, r);
-    // rubble blown INWARD through the hole, scorch, burst nearby panes, feedback
+    // rubble blown INWARD through the hole, burst nearby panes, feedback
     const g = rec.gap;
     const off = g.horiz ? (z - g.fixed) : (x - g.fixed);
     const inN = off >= 0 ? 1 : -1;                          // push debris away from the side the rocket came from
@@ -1952,19 +1952,16 @@
     const rubX = g.horiz ? gapCen : g.fixed, rubZ = g.horiz ? g.fixed : gapCen;
     CBZ.cityChunk(rubX, (g.v0 + g.v1) / 2 - (g.v1 - g.v0) * 0.2, rubZ,
       { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr });
-    CBZ.cityScorch(x, z, r * 0.9 + 1.4);
     CBZ.cityShatter(x, z, r * 2 + 4);
     if (CBZ.shake) CBZ.shake(0.6);
-    if (CBZ.sfx) CBZ.sfx("glass");
     return true;
   };
 
-  // DECORATE the explosion so blasts leave scorch marks on the ground + nearby
-  // walls and blow concrete chunks outward — without touching crashfx.js. We
-  // wrap once, lazily, the first time the city updates (after all modules load),
-  // preserving the original behaviour exactly. Idempotent.
-  // The STRUCTURAL pass shared by every blast: ground/facade scorch, outward
-  // concrete chunks, the facade-damage sweep, and — for a hard hit against a
+  // DECORATE the explosion with physical structural damage without touching
+  // crashfx.js. We wrap once, lazily, the first time the city updates (after all
+  // modules load), preserving the original behaviour exactly. Idempotent.
+  // The STRUCTURAL pass shared by every blast: outward concrete chunks, the
+  // facade-damage sweep, and — for a hard hit against a
   // wall — a real persistent carved HOLE at the impact height that opens onto
   // the LIT interior room (fracture.js owns ledger/caps/debris; carveHole's
   // deepRoom dress + the brightened reveal palette make it read as a room you
@@ -1972,14 +1969,12 @@
   // ~2.6-3.4, grenade/car-burst ~1.6, anything weaker just scars.
   function structuralBlast(x, z, opts) {
     try {
-      const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
+      const power = (opts && opts.power) || 1;
       const groundY = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
       const impactY = opts && opts.y != null ? +opts.y : groundY + 1.4;
       const elevated = impactY > groundY + 3;
-      // A rocket 30m up a tower must not paint the road or damage a phantom
-      // ground-floor wall. Debris and building damage stay at the actual seat;
-      // only a blast physically coupled to the surface receives ground scorch.
-      if (!elevated) CBZ.cityScorch(x, z, R * 0.5);
+      // A rocket 30m up a tower must not damage a phantom ground-floor wall.
+      // Debris and building damage stay at the actual impact seat.
       CBZ.cityChunk(x, elevated ? impactY : groundY + 0.6, z,
         { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
       CBZ.cityDamageBuilding(x, impactY, z, Math.min(3, power));
@@ -2181,12 +2176,46 @@
     const l = car && car.model && car.model.l ? car.model.l : 4.2;
     return Math.max(3.6, Math.min(6.2, (w + l) * 0.58));
   }
+  function doorWorldY(dr) {
+    if (dr.doorY != null) return dr.doorY;
+    const y = CBZ.floorAt ? +CBZ.floorAt(dr.wx, dr.wz) : 0;
+    return (isFinite(y) ? y : 0) + 1.5;
+  }
+  function playerAtDoor(dr) {
+    const player = CBZ.player;
+    const P = player && player.pos;
+    // Horizontal-only proximity made every storefront under a flying B-2 open:
+    // a person/car may operate a ground door; an aircraft never may, and the
+    // player's body must agree with the door's physical floor in Y.
+    return !!(P && !player._aircraft &&
+      Math.abs(P.y - doorWorldY(dr)) < (player.driving ? 5.5 : 3.5) &&
+      doorNearActor(dr, P.x, P.z, player.driving ? 4.6 : 1.7));
+  }
+  function playerInsideDoorBuilding(dr, P) {
+    const b = dr.building;
+    if (!b || !P) return false;
+    const by = b.group && b.group.position ? (b.group.position.y || 0) : 0;
+    return P.y >= by - 0.8 && P.y <= by + b.h + 3.2 &&
+      Math.abs(P.x - b.ox) <= b.w / 2 + 0.35 &&
+      Math.abs(P.z - b.oz) <= b.d / 2 + 0.35;
+  }
+  const DOOR_HEAR_DIST = 34;
+  function playPhysicalDoor(dr, open, playerCaused) {
+    const player = CBZ.player;
+    const P = player && player.pos;
+    if (!CBZ.sfx || !P || player._aircraft) return;
+    const dy = P.y - doorWorldY(dr);
+    const dist = Math.hypot(P.x - dr.wx, dy, P.z - dr.wz);
+    // A door is audible only when this player caused its current open/close
+    // cycle, or it belongs to the shell the player is physically inside. Even
+    // then it has a hard local cutoff: `sfx({dist})` deliberately retains a
+    // far-field floor for guns, which is wrong for quiet indoor hardware.
+    if ((!playerCaused && !playerInsideDoorBuilding(dr, P)) || dist >= DOOR_HEAR_DIST) return;
+    const volume = dist <= 5 ? 1 : Math.max(0.06, 1 - (dist - 5) / (DOOR_HEAR_DIST - 5));
+    CBZ.sfx(open ? "door_open" : "door_close", { dist: dist, volume: volume });
+  }
   function doorOccupied(dr, includeCars) {
-    const P = CBZ.player && CBZ.player.pos;
-    // a door pinned to an upper floor (the penthouse) only responds when an actor
-    // is near in Y too — otherwise standing on the deck far below would flap it.
-    if (dr.doorY != null && P && Math.abs(P.y - dr.doorY) > 3.0) return false;
-    if (P && doorNearActor(dr, P.x, P.z, CBZ.player.driving ? 4.6 : 1.7)) return true;
+    if (playerAtDoor(dr)) return true;
     if (includeCars && CBZ.cityCars) {
       for (let k = 0; k < CBZ.cityCars.length; k++) {
         const c = CBZ.cityCars[k]; if (!c || c.dead || !c.pos) continue;
@@ -2219,9 +2248,16 @@
       const dxp = dr.wx - px, dzp = dr.wz - pz;
       const farFromPlayer = dxp * dxp + dzp * dzp > 1600;   // 40m: skip cold distant doors
       if (farFromPlayer && !dr.open && dr.t <= 0.001) continue;
+      const wasOpen = dr.open;
+      const playerNear = playerAtDoor(dr);
       const near = doorOccupied(dr, true);
       if (near) { dr.open = true; dr.hold = 1.8; }
       else if (dr.hold > 0) { dr.hold -= dt; if (dr.hold <= 0) dr.open = false; }
+      if (dr.open !== wasOpen) {
+        if (dr.open) dr.playerSoundCycle = playerNear;
+        playPhysicalDoor(dr, dr.open, playerNear || !!dr.playerSoundCycle);
+        if (!dr.open) dr.playerSoundCycle = false;
+      }
 
       // ease the swing toward target (open=1 / closed=0)
       const target = dr.open ? 1 : 0;
@@ -2244,7 +2280,6 @@
       if (dr.colIn && dr.t > 0.30) {
         const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
         dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-        if (CBZ.sfx) CBZ.sfx("door");
       } else if (!dr.colIn && dr.t < 0.25) {
         // leaf is shut. If someone is still standing in the gap, hold it open a
         // beat longer rather than trapping them; otherwise re-solidify the wall.
@@ -2261,7 +2296,7 @@
   // restore every door to CLOSED for a new game (collider back in place)
   CBZ.cityDoorsReset = function () {
     for (const dr of cityDoors) {
-      dr.open = false; dr.hold = 0; dr.t = 0; dr.pivot.rotation.y = 0;
+      dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false; dr.pivot.rotation.y = 0;
       if (dr.demolished) continue;                 // demolition owns this door's collider until rebuilt
       if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
     }
@@ -2309,28 +2344,22 @@
   const BOARD = 0x6b4a2a;
 
   // ---- DISTRICT MATERIAL / FACADE KITS (PROCGEN.md roadmap #7) -----------
-  // Wall palette + glass-tint bias + split-grammar terminal weights, keyed by
+  // Wall palette + glass-tint bias, keyed by
   // district kind (city/config.js CITY.districts[].kind, read via the city's
   // districtKind(lot) and threaded into makeBuilding as opts.district). Same
   // shell code, different NEIGHBOURHOOD READ per district. Window cells are
   // always intentional glazing: no random grey blank panels and no facade AC
-  // boxes. Residential balconies remain possible because their opening is
-  // still a real glass window. Whole windowless service floors are authored at
-  // the building level rather than sprinkled randomly across a facade.
+  // boxes or arbitrary projecting "balcony" boxes. Whole windowless service
+  // floors are authored at the building level rather than sprinkled randomly
+  // across a facade.
   const DISTRICT_KITS = {
-    core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0,
-                   terminals: { blankPanel: 0, balconyWindow: 0.02 } },
-    commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1,
-                   terminals: { blankPanel: 0, balconyWindow: 0.05 } },
-    residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0,
-                   terminals: { blankPanel: 0, balconyWindow: 0.24 } },
-    projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2,
-                   terminals: { blankPanel: 0, balconyWindow: 0.04 } },
-    industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2,
-                   terminals: { blankPanel: 0, balconyWindow: 0.02 } },
+    core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0 },
+    commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1 },
+    residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0 },
+    projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2 },
+    industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2 },
   };
-  const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0,
-                         terminals: { blankPanel: 0, balconyWindow: 0.06 } };
+  const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0 };
 
   // hue-locked wall jitter: keep the district's hue family but jitter sat/light
   // a touch per-building so a whole block isn't one flat colour. Position-hashed
@@ -2348,15 +2377,6 @@
     hsl.l = Math.max(0, Math.min(1, hsl.l * (kit.lightMul[0] + lj * (kit.lightMul[1] - kit.lightMul[0]))));
     c.setHSL(hsl.h, hsl.s, hsl.l);
     return c.getHex();
-  }
-
-  // Window-cell terminal. The only variation is an authored upper-floor
-  // balcony; every opening behind it remains glass.
-  function pickFacadeTerminal(kit, wx, wz, salt, floorK) {
-    const r = CBZ.hash01(wx, wz, salt);
-    const T = kit.terminals;
-    if (floorK >= 1 && r < (T.balconyWindow || 0)) return "balconyWindow";
-    return "window";
   }
 
   // cached graffiti texture (a coloured tag splat) so abandoned walls vary cheaply
@@ -2680,26 +2700,30 @@
       const ly = FH / 2;
       const GW = Math.min(3.6, (f.horiz ? w : d) * 0.42);   // garage opening width
       const HDR = FH - 0.9;                                   // header bottom
+      const glassY = HDR / 2;                                 // bottom = 0, top = HDR
       if (f.horiz) {
         const zz = f.z, off = (f.s === 0 ? 0.06 : -0.06);
         lbox(-w / 2 + 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
         lbox(w / 2 - 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
-        lbox(0, HDR + (FH - HDR) / 2, zz, GW + 0.5, FH - HDR, WT, color, { solid: true, los: true });   // header (drive under)
+        // One continuous head beam carries the whole frontage: garage lintel
+        // plus both glass bays. The former garage-only header left the panes
+        // ending in open air at their top edge.
+        lbox(0, HDR + (FH - HDR) / 2, zz, w - 0.7, FH - HDR, WT, color, { solid: true, los: true });
         lbox(0, HDR - 0.5, zz + off, GW - 0.3, 0.9, 0.14, 0x8a93a0, { cast: false });                   // rolled-up door
         for (let s = 0; s < 4; s++) lbox(0, HDR - 0.2 - s * 0.2, zz + off * 1.2, GW - 0.4, 0.05, 0.18, 0x6b7480, { cast: false });
         const a = -w / 2 + 0.7, bb = -GW / 2 - 0.15, cxL = (a + bb) / 2, wL = bb - a;
-        gridGlass(cxL, ly, zz, wL, FH * 0.86, 0.07, true, { solid: true });
-        gridGlass(-cxL, ly, zz, wL, FH * 0.86, 0.07, true, { solid: true });
+        gridGlass(cxL, glassY, zz, wL, HDR, 0.07, true, { solid: true, kind: "clear", role: "showroom" });
+        gridGlass(-cxL, glassY, zz, wL, HDR, 0.07, true, { solid: true, kind: "clear", role: "showroom" });
       } else {
         const xx = f.x, off = (f.s === 2 ? 0.06 : -0.06);
         lbox(xx, ly, -d / 2 + 0.35, WT, FH, 0.7, color, wallOpt);
         lbox(xx, ly, d / 2 - 0.35, WT, FH, 0.7, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, GW + 0.5, color, { solid: true, los: true });
+        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - 0.7, color, { solid: true, los: true });
         lbox(xx + off, HDR - 0.5, 0, 0.14, 0.9, GW - 0.3, 0x8a93a0, { cast: false });
         for (let s = 0; s < 4; s++) lbox(xx + off * 1.2, HDR - 0.2 - s * 0.2, 0, 0.18, 0.05, GW - 0.4, 0x6b7480, { cast: false });
         const a = -d / 2 + 0.7, bb = -GW / 2 - 0.15, czL = (a + bb) / 2, dL = bb - a;
-        gridGlass(xx, ly, czL, dL, FH * 0.86, 0.07, false, { solid: true });
-        gridGlass(xx, ly, -czL, dL, FH * 0.86, 0.07, false, { solid: true });
+        gridGlass(xx, glassY, czL, dL, HDR, 0.07, false, { solid: true, kind: "clear", role: "showroom" });
+        gridGlass(xx, glassY, -czL, dL, HDR, 0.07, false, { solid: true, kind: "clear", role: "showroom" });
       }
     }
 
@@ -2735,7 +2759,7 @@
         if (side > 1.0) {
           const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
           for (const fc of [fcx, fcx2]) {
-            gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear" });
+            gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
           }
         } else {
           // too narrow to glaze cleanly: seal each flank with a solid wall span so
@@ -2757,7 +2781,7 @@
         if (side > 1.0) {
           const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
           for (const fc of [fcz, fcz2]) {
-            gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear" });
+            gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
           }
         } else {
           const flw = (d - DOORW) / 2 - 0.7;
@@ -2781,26 +2805,27 @@
       const span = f.horiz ? w : d;
       const GW = Math.min(5.0, span * 0.52);     // drive-in opening width
       const HDR = FH - 0.85;                       // header bottom (clearance)
+      const glassY = HDR / 2;                      // floor-to-head-beam glazing
       const post = 0.85;
       if (f.horiz) {
         const zz = f.z;
         lbox(-w / 2 + post / 2, ly, zz, post, FH, WT, color, wallOpt);
         lbox(w / 2 - post / 2, ly, zz, post, FH, WT, color, wallOpt);
-        lbox(0, HDR + (FH - HDR) / 2, zz, GW + 0.6, FH - HDR, WT, color, { solid: true, los: true });
+        lbox(0, HDR + (FH - HDR) / 2, zz, w - post, FH - HDR, WT, color, { solid: true, los: true });
         const a = -w / 2 + post, bb = -GW / 2 - 0.2, cxL = (a + bb) / 2, wL = bb - a;
         if (wL > 0.5) {
-          gridGlass(cxL, ly, zz, wL, FH * 0.84, 0.06, true, { solid: true });
-          gridGlass(-cxL, ly, zz, wL, FH * 0.84, 0.06, true, { solid: true });
+          gridGlass(cxL, glassY, zz, wL, HDR, 0.06, true, { solid: true, kind: "clear", role: "garage-front" });
+          gridGlass(-cxL, glassY, zz, wL, HDR, 0.06, true, { solid: true, kind: "clear", role: "garage-front" });
         }
       } else {
         const xx = f.x;
         lbox(xx, ly, -d / 2 + post / 2, WT, FH, post, color, wallOpt);
         lbox(xx, ly, d / 2 - post / 2, WT, FH, post, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, GW + 0.6, color, { solid: true, los: true });
+        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - post, color, { solid: true, los: true });
         const a = -d / 2 + post, bb = -GW / 2 - 0.2, czL = (a + bb) / 2, dL = bb - a;
         if (dL > 0.5) {
-          gridGlass(xx, ly, czL, dL, FH * 0.84, 0.06, false, { solid: true });
-          gridGlass(xx, ly, -czL, dL, FH * 0.84, 0.06, false, { solid: true });
+          gridGlass(xx, glassY, czL, dL, HDR, 0.06, false, { solid: true, kind: "clear", role: "garage-front" });
+          gridGlass(xx, glassY, -czL, dL, HDR, 0.06, false, { solid: true, kind: "clear", role: "garage-front" });
         }
       }
     }
@@ -3302,17 +3327,15 @@
               else { const fx = f.x + outSgn * (WT / 2 + 0.05); dbox(fx, winCy - winPh / 2 - 0.06, cz, 0.12, 0.1, winW + 0.2, TRIM); }
             }
           } else {
-            // ===== SPLIT-GRAMMAR FACADE (PROCGEN.md #7) ===========================
-            // floors → ~1.5m bays → one TERMINAL resolved per (floor,bay) cell:
-            //   window        — the default (plain curtain-wall pane, as before)
-            //   blankPanel    — solid wall-coloured infill, breaks the grid
-            //   balconyWindow — window + a thin projecting slab & rail (upper floors)
-            // Weighted per DISTRICT_KITS (opts.district) so core reads glassy/
-            // clean and residential gets balconies. Contiguous plain "window"
-            // bays are merged back into ONE glazeOpening call (same pooled-pane
-            // grid + interior glow as the old single curtain-wall band) so the
-            // common case is draw-call IDENTICAL; only the accent bays
-            // (balcony/blank) get individual treatment.
+            // ===== CLEAN CURTAIN-WALL FACADE (PROCGEN.md #7) ======================
+            // One continuous glazed opening per face, subdivided by the existing
+            // pane grid and hairline mullions below. The old split-terminal pass
+            // position-hashed occasional `balconyWindow` cells, then glued a
+            // 0.55m cantilever and a solid 0.85m rail onto the finished glass.
+            // From the street those read as the repeated black boxes filmed on
+            // Threads & Drip; they had no floor collider, door or usable balcony
+            // behind them. The terminal vocabulary and emitter are gone, so all
+            // districts keep their clean glazing with no side attachments.
             const sillH = modern ? 0.55 : 0.9;                  // sill top above floor
             const hdrH = modern ? 0.45 : 0.7;                   // header depth below ceiling
             const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
@@ -3337,53 +3360,10 @@
             // module (research: modern all-glass facades minimize framing, mullion
             // ~5-10mm) — the heavy mid-storey horizontal TRANSOM bar stays dropped.
             const faceOut = f.horiz ? f.z + outSgn * (WT / 2 + 0.04) : f.x + outSgn * (WT / 2 + 0.04);
-            // deterministic per-cell terminal draw: position-hashed off the bay's
-            // world centre + a floor/face salt (never city.rng — see seed.js).
-            const TERM_SALT = 0x5a17 + k * 131 + f.s * 7919;
-            const terms = new Array(nBays);
-            for (let i = 0; i < nBays; i++) {
-              const t = -span / 2 + (i + 0.5) * bayW;
-              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-              terms[i] = pickFacadeTerminal(DKIT, ox + cx, oz + cz, TERM_SALT, k);
-            }
-            let bi = 0;
-            while (bi < nBays) {
-              const term = terms[bi];
-              const t = -span / 2 + (bi + 0.5) * bayW;
-              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-              if (term === "blankPanel") {
-                if (f.horiz) lbox(t, winCy, f.z, bayW - 0.06, winPh, f.dd, color, wallOpt);
-                else lbox(f.x, winCy, t, f.w, winPh, bayW - 0.06, color, wallOpt);
-                bi++;
-              } else if (term === "window") {
-                // merge a run of contiguous plain-window bays into ONE glazeOpening
-                // call — degenerates to the old single wide band when the district
-                // kit rolls no accents (identical pane/glow count either way).
-                let bj = bi; while (bj < nBays && terms[bj] === "window") bj++;
-                const t0 = -span / 2 + bi * bayW, t1 = -span / 2 + bj * bayW;
-                const runW = t1 - t0, runT = (t0 + t1) / 2;
-                const rcx = f.horiz ? runT : f.x, rcz = f.horiz ? f.z : runT;
-                glazeOpening(rcx, winCy, rcz, runW - 0.04, winPh);
-                bi = bj;
-              } else {
-                // balconyWindow: an individually-glazed bay + slab/rail accessory.
-                // (The acUnit terminal is gone — owner-cut with FACADE_AC_UNITS.)
-                glazeOpening(cx, winCy, cz, bayW - 0.04, winPh);
-                if (term === "balconyWindow") {
-                  const bw = bayW - 0.2, projD = 0.55, railH = 0.85, slabY = winY0 - 0.35;
-                  if (f.horiz) {
-                    dbox(t, slabY, f.z + outSgn * (WT / 2 + projD / 2), bw, 0.08, projD, TRIM);       // balcony slab
-                    dbox(t, slabY + railH / 2, f.z + outSgn * (WT / 2 + projD - 0.03), bw, railH, 0.05, MULL);   // rail
-                  } else {
-                    dbox(f.x + outSgn * (WT / 2 + projD / 2), slabY, t, projD, 0.08, bw, TRIM);
-                    dbox(f.x + outSgn * (WT / 2 + projD - 0.03), slabY + railH / 2, t, 0.05, railH, bw, MULL);
-                  }
-                }
-                bi++;
-              }
-            }
+            const gcx = f.horiz ? 0 : f.x, gcz = f.horiz ? f.z : 0;
+            glazeOpening(gcx, winCy, gcz, span - 0.04, winPh);
             // hairline module ticks at every bay boundary — pure rhythm, cheap
-            // merged deco (dbox), independent of which terminal sits either side.
+            // merged deco (dbox), with no geometry projecting off the wall.
             for (let i = 1; i < nBays; i++) {
               const tb = -span / 2 + i * bayW;
               if (f.horiz) dbox(tb, winCy, faceOut, 0.035, winPh, 0.04, MULL);
@@ -3835,6 +3815,10 @@
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
+    // A swinging entrance only speaks when this player caused its cycle or is
+    // physically inside THIS shell. Keep the ownership link on the mechanism,
+    // not on a global "indoors" flag that could bless a different building.
+    for (const dr of doorRecs) dr.building = built;
     // ---- THE SHELL REGISTRY (read by core/farcull.js's distance skyline) ----
     // WHAT BUILDINGS EXIST had only ever been answerable through `arena.lots`,
     // and a lot is an ECONOMY record — Zillow, shops, jobs, map POIs. Four
@@ -6033,7 +6017,9 @@
       // acres of floor. It stamps b.execOffice = { floorY, spawn, … } which the
       // Executive origin + the express lift + the rent-unit skips all read.
       // Fallback: the generic office dresser, so the floor is never bare.
-      if (CBZ.cityFurnishExecOffice) CBZ.cityFurnishExecOffice(b, execY, lot);
+      if (CBZ.cityFurnishExecOffice) bounded(b, "exec-office", function () {
+        return CBZ.cityFurnishExecOffice(b, execY, lot);
+      });
       else { furnishOfficeFloor(b, execY, 0); b.execOffice = { floorY: execY }; }
     }
 
@@ -6052,7 +6038,7 @@
     }
     // build the standard clean leaf+frame, then lift the whole rig (jambs, header,
     // pivot, collider) up to the penthouse floor via makeDoorPanelAtY.
-    makeDoorPanelAtY(b.group, lot.cx, lot.cz, phDoorLocal, DOORW, topY);
+    makeDoorPanelAtY(b.group, lot.cx, lot.cz, phDoorLocal, DOORW, topY, b);
     const penthouseDoor = { x: lot.cx + phDoorLocal.x + 1.6, z: lot.cz + phDoorLocal.z, nx: 1, nz: 0, y: topY };
 
     // tag the lot's building + the penthouse HOME record (the apex tier)
@@ -6085,7 +6071,7 @@
   // (for the penthouse, which has no ground-floor wall to pierce). Reuses
   // makeDoorPanel, then lifts the pivot + frame/header meshes added during this
   // call up to baseY. Cheap: a handful of meshes, identical clean leaf/frame.
-  function makeDoorPanelAtY(bgroup, ox, oz, localDoor, panelW, baseY) {
+  function makeDoorPanelAtY(bgroup, ox, oz, localDoor, panelW, baseY, building) {
     const before = bgroup.children.length;
     const rec = makeDoorPanel(bgroup, ox, oz, localDoor, panelW);
     // lift every mesh/group makeDoorPanel just appended (jambs, header, pivot) up
@@ -6093,6 +6079,7 @@
     // lift the height-gated collider too so it blocks at the penthouse floor
     if (rec.col) { rec.col.y0 += baseY; rec.col.y1 += baseY; }
     rec.doorY = baseY;   // only auto-open when an actor is near this floor in Y
+    rec.building = building || null;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return rec;
   }
@@ -7783,7 +7770,6 @@
         if (CBZ.cityCrime) CBZ.cityCrime(65, { type: "theft", x: sh.x, z: sh.z, instant: true });
         const v = lot.building.vendor;
         if (CBZ.cityPanic && v && v.pos) CBZ.cityPanic(v.pos.x, v.pos.z, 1.4, CBZ.city && CBZ.city.playerActor);
-        if (CBZ.sfx) CBZ.sfx("glass");
         return { took: false, caught: true };
       }
       // CLEAR: pocket one unit for seeded petty cash; deplete the shelf.

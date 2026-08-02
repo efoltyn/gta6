@@ -73,8 +73,8 @@
   // lethal force needs a reason (4★+, being fired upon, or SWAT out of
   // patience at 3★+). false = the legacy shoot-from-2★ logic, kept intact.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST == null) CBZ.CONFIG.CITY_ARREST_FIRST = true;
-  // SWAT REDESIGN (city-swat-redesign): olive/graphite silhouette + the riot
-  // shield issued to ~1 in 3 SWAT (armor.js carries the helmet/carrier flag).
+  // SWAT REDESIGN (city-swat-redesign): olive/graphite silhouette with the
+  // helmet/carrier kit owned by armor.js.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_REDESIGN == null) CBZ.CONFIG.CITY_SWAT_REDESIGN = true;
   // SWAT VAN (city-swat-van): at 4★+ the heavy units arrive AS a unit — a dark
   // liveried van parks a block out and an entry team deploys around its doors.
@@ -731,7 +731,6 @@
     const c = STOP.cop;
     stowGuns();
     if (CBZ.city) CBZ.city.note("You put the piece away. “Good. Stay out of trouble.” · Q re-draw", 2.6);
-    if (CBZ.sfx) CBZ.sfx("door");
     if (c) { c._gunLowered = true; }
     endStop(true);
   }
@@ -802,7 +801,6 @@
     if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
       e.preventDefault();
       if (CBZ.city) CBZ.city.note("Holstered. · Q draw", 1.6);
-      if (CBZ.sfx) CBZ.sfx("door");
     }
   });
 
@@ -964,10 +962,9 @@
     // The clothes.js PAINT.swat painted plate-vest stays underneath; this is the
     // real 3D armor layer on top.
     if (CBZ.cityArmorDressPed) {
-      // ~1 in 3 SWAT carries the riot SHIELD (armor.js "shield" kit, slot
-      // "hand" → mounts on the LEFT forearm, so the gun hand stays free and
-      // the aim pose is untouched). Visual/loot only — 0 pts.
-      if (swat) CBZ.cityArmorDressPed(cop, (swatRedesign() && rng() < 0.34) ? ["swatVest", "helmet", "shield"] : ["swatVest", "helmet"]);
+      // SWAT carry visible plate + helmet only. The old cosmetic riot shield
+      // was retired: its forearm mount fought every firearm pose.
+      if (swat) CBZ.cityArmorDressPed(cop, ["swatVest", "helmet"]);
       else if (rng() < 0.5) CBZ.cityArmorDressPed(cop, ["softVest"]);
     }
     // cops ride blob shadows (city/blobshadows.js) — swept AFTER the weapon

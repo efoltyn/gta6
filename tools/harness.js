@@ -483,6 +483,96 @@ function testBuildings(city) {
   }
 }
 
+function testDoorAudioCausality() {
+  console.log("== physical-door audio causality test ==");
+  const doors = CBZ.cityDoorsGet && CBZ.cityDoorsGet();
+  const updater = (CBZ.updaters || []).find((u) => Math.abs(u.order - 34.3) < 0.0001);
+  const dr = doors && doors.find((d) => {
+    const b = d && d.building;
+    const span = b ? (Math.abs(d.inx) > 0.5 ? b.w : b.d) : 0;
+    return b && span >= 16;
+  });
+  if (!dr || !updater) throw new Error("building door/audio owner unavailable");
+
+  const P = CBZ.player;
+  const saved = {
+    pos: P.pos.clone(), dead: P.dead, driving: P.driving, aircraft: P._aircraft,
+    peds: CBZ.cityPeds, cars: CBZ.cityCars, sfx: CBZ.sfx,
+    open: dr.open, hold: dr.hold, t: dr.t, rot: dr.pivot.rotation.y,
+    cycle: dr.playerSoundCycle,
+  };
+  const sounds = [];
+  CBZ.sfx = function (name, opts) { sounds.push({ name, opts }); };
+  CBZ.cityPeds = []; CBZ.cityCars = [];
+  P.dead = false; P.driving = false; P._aircraft = null;
+
+  function resetDoor() {
+    dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false;
+    dr.pivot.rotation.y = 0; sounds.length = 0;
+  }
+  try {
+    // The player standing at the actual leaf owns this open cycle.
+    resetDoor();
+    P.pos.set(dr.wx, 1.5, dr.wz);
+    updater.fn(0.01);
+    if (!dr.open || sounds.filter((s) => s.name === "door_open").length !== 1) {
+      throw new Error("on-foot player did not get exactly one physical door-open cue");
+    }
+    if (!sounds[0].opts || sounds[0].opts.dist > 2) {
+      throw new Error("building door cue did not carry local world distance");
+    }
+    console.log("  ✓ on-foot proximity opens the leaf with one local door_open cue");
+
+    // Once that player walks inside, the same physical cycle may close audibly.
+    const b = dr.building;
+    const depth = Math.min(10, (Math.abs(dr.inx) > 0.5 ? b.w : b.d) - 1);
+    P.pos.set(dr.wx + dr.inx * depth, 1.5, dr.wz + dr.inz * depth);
+    sounds.length = 0; dr.open = true; dr.hold = 0.001; dr.t = 0; dr.playerSoundCycle = true;
+    updater.fn(0.02);
+    if (dr.open || sounds.filter((s) => s.name === "door_close").length !== 1) {
+      throw new Error("player-owned/same-building cycle did not close audibly");
+    }
+    console.log("  ✓ the same door closes audibly while the player is inside its building");
+
+    // An NPC at a different building's threshold may animate it, but it may not
+    // inject a fake door into the player's mix merely because it is within cull range.
+    resetDoor();
+    P.pos.set(dr.wx - dr.inx * 20, 1.5, dr.wz - dr.inz * 20);
+    CBZ.cityPeds = [{ dead: false, enterT: 0, pos: new V3(dr.wx, 1.5, dr.wz) }];
+    updater.fn(0.01);
+    if (!dr.open || sounds.some((s) => /^door_/.test(s.name))) {
+      throw new Error("unowned NPC door movement leaked into an outside player's mix");
+    }
+    console.log("  ✓ an NPC-operated door outside the player's building stays silent");
+
+    // Re-run that same NPC transition with the player physically inside THIS
+    // shell: now it is local building hardware and should be heard.
+    resetDoor();
+    P.pos.set(dr.wx + dr.inx * depth, 1.5, dr.wz + dr.inz * depth);
+    updater.fn(0.01);
+    if (!dr.open || sounds.filter((s) => s.name === "door_open").length !== 1) {
+      throw new Error("same-building NPC door movement did not emit its physical cue");
+    }
+    console.log("  ✓ a door operated inside the player's building is audible");
+
+    // The reported B-2 regression: exact X/Z overlap at altitude is neither a
+    // door operation nor same-building presence.
+    resetDoor(); CBZ.cityPeds = [];
+    P.pos.set(dr.wx, 500, dr.wz); P.driving = true; P._aircraft = { displayName: "B-2 SPIRIT" };
+    updater.fn(0.01);
+    if (dr.open || sounds.some((s) => /^door_/.test(s.name))) {
+      throw new Error("airborne B-2 opened or sounded a ground-level door");
+    }
+    console.log("  ✓ airborne B-2 overlap neither opens nor sounds the ground door");
+  } finally {
+    P.pos.copy(saved.pos); P.dead = saved.dead; P.driving = saved.driving; P._aircraft = saved.aircraft;
+    CBZ.cityPeds = saved.peds; CBZ.cityCars = saved.cars; CBZ.sfx = saved.sfx;
+    dr.open = saved.open; dr.hold = saved.hold; dr.t = saved.t;
+    dr.playerSoundCycle = saved.cycle; dr.pivot.rotation.y = saved.rot;
+  }
+  console.log("  physical-door causality OK");
+}
+
 function testNoWindowlessClutter(city) {
   console.log("== windowless-clutter tests ==");
   const lots = city.lots.concat(city.annex && city.annex.lots || []);
@@ -532,9 +622,11 @@ function run() {
   console.log(`chopShop=${!!city.chopShop} realtor=${!!city.realtor} luxury=${!!city.luxuryLot}`);
   console.log(`island=${!!city.annex} islandLots=${city.annex ? city.annex.lots.length : 0} islandTowers=${city.annex ? city.annex.towers.length : 0} bridge=${!!city.bridge}`);
 
-  testIsland(city);
-  testBuildings(city);
-  testNoWindowlessClutter(city);
+  if (process.env.CBZ_GLASS_ONLY !== "1" && process.env.CBZ_DOOR_ONLY !== "1") {
+    testIsland(city);
+    testBuildings(city);
+    testNoWindowlessClutter(city);
+  }
 
 
   console.log("== entering city mode ==");
@@ -580,9 +672,20 @@ function run() {
     console.log("RESULT: OK");
     return;
   }
+  if (process.env.CBZ_GLASS_ONLY === "1") {
+    testGlassRay();
+    console.log("RESULT: OK");
+    return;
+  }
+  if (process.env.CBZ_DOOR_ONLY === "1") {
+    testDoorAudioCausality();
+    console.log("RESULT: OK");
+    return;
+  }
 
   testZillow();
   testEmpire();
+  testDoorAudioCausality();
   testGlassRay();
   testVehicleModels();
 
@@ -909,6 +1012,8 @@ function testGlassRay() {
   if (!lot) { console.log("  (no building windows found — skipped)"); return; }
   const pane = lot.building.windows.find((p) => !p.shattered);
   if (!pane) { console.log("  (all panes already shattered — skipped)"); return; }
+  const realSfx = CBZ.sfx, sounds = [];
+  CBZ.sfx = function (name, opts) { sounds.push({ name, opts }); };
   // fire from just outside the pane's -x face, straight through its center: this
   // pane is guaranteed the nearest glass along +x, so it must be the one that breaks
   const ox = pane.x - pane.hw - 1.0;
@@ -921,6 +1026,8 @@ function testGlassRay() {
   }
   if (!pane.shattered) throw new Error("targeted pane did not shatter after repeated hit");
   console.log("  ✓ ray through a window shattered exactly that pane @ " + pane.x.toFixed(1) + "," + pane.z.toFixed(1));
+  if (sounds.some((s) => s.name === "glass")) throw new Error("untagged/NPC-style ray emitted player glass audio");
+  console.log("  ✓ untagged/NPC-style window damage stays silent");
   // Re-firing the same ray must never target the same shattered pane. Dense
   // window bands may legitimately let the ray continue into the next intact pane.
   const again = CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2);
@@ -929,6 +1036,34 @@ function testGlassRay() {
   const away = CBZ.cityShatterRay(ox, pane.y, pane.z, -1, 0, 0, 2);
   if (away) throw new Error("ray fired away from glass still hit it");
   console.log("  ✓ shattered pane is inert to a second shot; away-ray misses" + (again ? " (follow-through hit another pane)" : ""));
+
+  // Only an explicitly player-owned, nearby ray gets the break cue.
+  CBZ.cityGlassReset();
+  sounds.length = 0;
+  const playerPos = CBZ.player.pos.clone();
+  CBZ.player.pos.set(ox, pane.y - 1.5, pane.z);
+  const owned = CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2,
+    true, { directPlayer: true });
+  const ownedGlass = sounds.filter((s) => s.name === "glass");
+  if (owned !== pane || !pane.shattered || ownedGlass.length !== 1) {
+    throw new Error("near direct-player pane break did not emit exactly one glass cue");
+  }
+  if (!ownedGlass[0].opts || ownedGlass[0].opts.dist > 3) {
+    throw new Error("direct-player glass cue did not carry its local world distance");
+  }
+  console.log("  ✓ nearby direct-player break emits one distance-aware glass cue");
+
+  // Even an owned break is inaudible at B-2/sniper distance.
+  CBZ.cityGlassReset();
+  sounds.length = 0;
+  CBZ.player.pos.set(ox + 100, pane.y - 1.5, pane.z);
+  CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2,
+    true, { directPlayer: true });
+  if (sounds.some((s) => s.name === "glass")) throw new Error("distant direct-player pane break emitted glass audio");
+  console.log("  ✓ distant direct-player break stays silent");
+  CBZ.player.pos.copy(playerPos);
+  CBZ.cityGlassReset();
+  CBZ.sfx = realSfx;
   console.log("  gunfire-glass OK");
 }
 

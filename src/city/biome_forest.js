@@ -17,11 +17,10 @@
      • DEER — life; the forest feels alive, and hunters have prey.
 
    DRAW-CALL DISCIPLINE (owner rule #4): there are THOUSANDS of trees, so
-   trunks and foliage are each ONE THREE.InstancedMesh (single draw call,
-   shared geometry + material). Ground detail (ferns/rocks/logs) is also
-   instanced. We do NOT add a collider per tree — only the cabin, the
-   tower and a HANDFUL of big landmark trunks get colliders; the rest is
-   visual density the player walks through (a real forest lets you weave).
+   each ecological storey is instanced with shared geometry + material.
+   Detached canopy and thicket close the scene without adding collision;
+   actual trunks use tight height-gated solids, so a player can weave between
+   trees while cars cannot drive through the timber.
 
    Everything is parented to city.root and the region is registered so
    clampToCity / swim / fullmap treat it as walkable land.
@@ -300,13 +299,12 @@
     }
 
     // ================================================================
-    //  THE FOREST — INSTANCED. Two InstancedMesh objects carry the conifer +
-    //  broadleaf species (shared cone foliage geo, distinguished by scale +
-    //  instanceColor): 1) trunks (tapered cylinder) 2) foliage (cone).
-    //  A THIRD species — ROUND-CANOPY birch-like trees — gets its own
-    //  icosahedron crown InstancedMesh (a genuinely distinct silhouette, not
-    //  just a recolor) so the canopy reads varied from a distance, not just
-    //  three shades of the same cone. Still only +1 draw call total.
+    //  THE FOREST — INSTANCED, BUT LAYERED. Real trunks are only one storey.
+    //  world/vegetation.js supplies metre-authored mature wood and irregular
+    //  crowns; independent lower/upper roof patches close the sky BETWEEN
+    //  those trees, and a coarse thicket storey closes eye-level horizon.
+    //  That separation is what makes the woods read as scenery instead of a
+    //  crowd of complete cone-on-stick characters.
     //
     //  Density rises toward the interior (a denser core, thinner at edges),
     //  trees are skipped in clearings / on trails / in the lake.
@@ -317,18 +315,16 @@
     //  once the player is far from this biome's whole footprint, and back on
     //  when they approach. O(1) per check (one distance test), not per-tree.
     // ================================================================
-    // shared low-poly geometries (small radial segment counts = cheap).
-    // TREES_V2 (config.js): the shared cone canopy becomes a TWO-TIER stack
-    // baked into one unit geo (same InstancedMesh, same draw call) — a tall
-    // narrow per-instance scale reads as a stepped fir, a squat wide scale as
-    // a two-lobe broadleaf, so one geometry stops reading as a flat traffic
-    // cone in both roles. Trunk bases also sink 0.2 below the forest floor
-    // (they sat exactly ON y=0 under a floor plane at 0.02) and every tree
-    // registers with world/treeaudit.js. Off = the old single cone.
+    // SCENERY_VEGETATION is the new shared visual grammar. TREES_V2 still owns
+    // its original physical guarantees: every wood/crown chain is registered,
+    // bases are seated and only timber collides. If the shared kit is missing,
+    // the former V2 stacked-cone path remains a safe load-order fallback.
     const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    const KIT = CBZ.vegetationKit;
+    const SCENERY = !!(TREES2 && KIT && CBZ.CONFIG.SCENERY_VEGETATION !== false);
     if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("forest");
-    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.42, 1, 5); // unit height; scaled per-instance
-    const conGeo = (function () {
+    const trunkGeo = SCENERY ? KIT.geometry("mature-wood") : new THREE.CylinderGeometry(0.22, 0.42, 1, 5);
+    const conGeo = SCENERY ? KIT.geometry("mature-crown") : (function () {
       if (!TREES2) return new THREE.ConeGeometry(1, 1, 6);         // unit cone; scaled per-instance
       const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
       if (merge) {
@@ -341,30 +337,26 @@
       }
       return new THREE.ConeGeometry(1, 1, 6);
     })();
-    const roundGeo = new THREE.IcosahedronGeometry(1, 0);          // unit round canopy; scaled per-instance
-    trunkGeo.translate(0, 0.5, 0);  // base at y=0 so scaling grows upward
-    if (!TREES2) conGeo.translate(0, 0.5, 0);                      // V2 geo is already base-at-0
-    roundGeo.translate(0, 0.5, 0);
+    const roundGeo = SCENERY ? KIT.geometry("subcanopy") : new THREE.IcosahedronGeometry(1, 0);
+    if (!SCENERY) trunkGeo.translate(0, 0.5, 0);  // legacy unit geo: base y=0
+    if (!TREES2) conGeo.translate(0, 0.5, 0);
+    if (!SCENERY) roundGeo.translate(0, 0.5, 0);
     const V2SINK = 0.2;             // trunk base below the floor plane (seated, not flush)
 
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // tinted via instanceColor
-    const foliMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    const roundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }); // crisp facets read as a distinct species silhouette
+    const trunkMat = SCENERY ? KIT.material("mature-wood") : new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const foliMat = SCENERY ? KIT.material("mature-crown") : new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const roundMat = SCENERY ? KIT.material("subcanopy") : new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     trunkMat._shared = true; foliMat._shared = true; roundMat._shared = true;
 
     // first pass: decide every tree's transform (so we know the exact count
     // before allocating the InstancedMesh buffers — InstancedMesh needs a
     // fixed capacity at construction).
     const trees = [], roundTrees = [];
-    // GRID PITCH, RE-RATED WITH THE FOOTPRINT. 11 m is a real density and it
-    // stays a real density — but the loop below is a GRID, so tree count goes
-    // as AREA: a 1.45x wider Redhollow at a fixed pitch is 2.1x the trees, 2.1x
-    // the claimNature calls and 2.1x the build. Scaling the pitch by
-    // sqrt(scale) makes the count grow LINEARLY with the footprint instead
-    // (1.45x the trees at 1.20x the spacing), which is still unmistakably
-    // closed canopy — the density falloff and the 12%/10% species split are
-    // untouched. sqrt(1) = 1, so the authored forest is byte-identical.
-    const STEP = 11 * Math.sqrt(FSC);                 // grid pitch (jittered)
+    // The old sqrt(FSC) pitch quietly made every tree 20% farther apart when
+    // the biome grew, causing a 31% local-density regression. Scene-scale trees
+    // keep a fixed physical spacing. 12.5m is the upper end of a mature stand;
+    // detached roof patches below fill coverage without a collider per patch.
+    const STEP = SCENERY ? 12.5 : 11 * Math.sqrt(FSC);
     const dummy = new THREE.Object3D();
     const colTrunk = new THREE.Color(), colFoli = new THREE.Color();
     const trunkColors = [], foliColors = [];
@@ -387,44 +379,48 @@
         if (rng() > keepP) continue;
         if (!claimNature(x, z, 2.4)) continue;
 
-        // species pick: ~12% squat broadleaf (cone), ~10% round-canopy
-        // (icosahedron — a distinct silhouette), rest conifer.
+        // The small share is a real subcanopy storey. The rest are mature wood
+        // with a heavy-tailed scale: most 21-33m, rare emergents near 42m.
         const speciesRoll = rng();
-        const broad = speciesRoll < 0.12;
-        const round = !broad && speciesRoll < 0.22;
+        const broad = !SCENERY && speciesRoll < 0.12;
+        const round = SCENERY ? speciesRoll < 0.18 : (!broad && speciesRoll < 0.22);
         const tShade = 0.34 + rng() * 0.18;
         colTrunk.setRGB(tShade, tShade * 0.66, tShade * 0.38);
 
         if (round) {
-          // ROUND CANOPY — pale airy crown (birch-like), thin trunk.
-          const h = 6 + rng() * 6;
-          const tr = 0.32 + rng() * 0.22;
+          // Sapling / subcanopy — still larger than a person, but clearly below
+          // the roof. Its complete silhouette is hidden inside the forest mass.
+          const h = SCENERY ? 5.5 + rng() * 4.5 : 6 + rng() * 6;
+          const tr = SCENERY ? 0.8 + rng() * 0.5 : 0.32 + rng() * 0.22;
           const rot = rng() * Math.PI * 2;
           const lean = (rng() - 0.5) * 0.08;
-          const folR = h * (0.30 + rng() * 0.12);
-          const folY = h * (0.66 + rng() * 0.1);
-          colFoli.setRGB(0.40 + rng() * 0.16, 0.54 + rng() * 0.14, 0.22 + rng() * 0.10);
-          roundTrees.push({ x, z, h, tr, rot, lean, folR, folY });
+          const folR = SCENERY ? 0.62 + rng() * 0.42 : h * (0.30 + rng() * 0.12);
+          const folH = SCENERY ? 0.72 + rng() * 0.36 : folR;
+          const folY = SCENERY ? h - 0.65 : h * (0.66 + rng() * 0.1);
+          colFoli.setRGB(0.28 + rng() * 0.12, 0.44 + rng() * 0.16, 0.16 + rng() * 0.08);
+          roundTrees.push({ x, z, h, tr, rot, lean, folR, folH, folY });
           roundTrunkColors.push(colTrunk.r, colTrunk.g, colTrunk.b);
           roundColors.push(colFoli.r, colFoli.g, colFoli.b);
           continue;
         }
 
-        const h = broad ? 6 + rng() * 5 : 9 + rng() * 12;
-        const tr = (broad ? 0.5 : 0.5) + rng() * 0.4; // trunk radius scale
+        const giant = SCENERY && rng() < 0.075;
+        const sc = SCENERY ? (giant ? 1.28 + rng() * 0.30 : 0.80 + rng() * 0.42) : 1;
+        const h = SCENERY ? KIT.nominal.matureWoodHeight * sc : (broad ? 6 + rng() * 5 : 9 + rng() * 12);
+        const tr = SCENERY ? sc : 0.5 + rng() * 0.4;
         const rot = rng() * Math.PI * 2;
         const lean = (rng() - 0.5) * 0.08;            // slight tilt
 
-        // foliage shape: conifer = tall narrow cone; broadleaf = wide squat.
-        const folH = broad ? h * 0.7 : h * 0.95;
-        const folR = broad ? h * 0.42 : h * 0.30;
-        const folY = broad ? h * 0.55 : h * 0.35;
+        const folH = SCENERY ? sc * (0.90 + rng() * 0.16) : (broad ? h * 0.7 : h * 0.95);
+        const folR = SCENERY ? sc * (0.88 + rng() * 0.20) : (broad ? h * 0.42 : h * 0.30);
+        const folY = SCENERY ? KIT.nominal.matureCrownBase * sc : (broad ? h * 0.55 : h * 0.35);
 
         // colour variety via instanceColor (still ONE material / draw call).
-        if (broad) colFoli.setRGB(0.30 + rng() * 0.18, 0.46 + rng() * 0.16, 0.16 + rng() * 0.10);
+        if (SCENERY) colFoli.setRGB(0.14 + rng() * 0.10, 0.32 + rng() * 0.15, 0.10 + rng() * 0.07);
+        else if (broad) colFoli.setRGB(0.30 + rng() * 0.18, 0.46 + rng() * 0.16, 0.16 + rng() * 0.10);
         else colFoli.setRGB(0.10 + rng() * 0.08, 0.30 + rng() * 0.14, 0.13 + rng() * 0.08);
 
-        trees.push({ x, z, h, tr, rot, lean, folH, folR, folY });
+        trees.push({ x, z, h, tr, sc, rot, lean, folH, folR, folY, giant });
         trunkColors.push(colTrunk.r, colTrunk.g, colTrunk.b);
         foliColors.push(colFoli.r, colFoli.g, colFoli.b);
       }
@@ -433,8 +429,15 @@
     const N = trees.length;
     const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
     const foliInst = new THREE.InstancedMesh(conGeo, foliMat, N);
-    trunkInst.castShadow = true; foliInst.castShadow = true;
+    const treeShadows = !SCENERY || (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) >= 2;
+    trunkInst.castShadow = treeShadows; foliInst.castShadow = treeShadows;
     trunkInst.receiveShadow = true; foliInst.receiveShadow = true;
+    trunkInst.name = SCENERY ? "redhollow-mature-wood" : "redhollow-tree-trunks";
+    foliInst.name = SCENERY ? "redhollow-mature-crowns" : "redhollow-tree-foliage";
+    trunkInst.frustumCulled = foliInst.frustumCulled = false;
+    trunkInst.userData.vegetationLayer = "mature-wood";
+    foliInst.userData.vegetationLayer = "mature-crown";
+    trunkInst.userData.sceneryScale = foliInst.userData.sceneryScale = SCENERY;
     trunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(trunkColors), 3);
     foliInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(foliColors), 3);
 
@@ -445,7 +448,8 @@
       // trunk (V2: base sunk V2SINK below the floor, top unchanged at t.h)
       dummy.position.set(t.x, TREES2 ? -V2SINK : 0, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-      dummy.scale.set(t.tr, TREES2 ? t.h + V2SINK : t.h, t.tr);
+      if (SCENERY) dummy.scale.setScalar(t.sc);
+      else dummy.scale.set(t.tr, TREES2 ? t.h + V2SINK : t.h, t.tr);
       dummy.updateMatrix();
       trunkInst.setMatrixAt(i, dummy.matrix);
       let parts = null;
@@ -469,19 +473,22 @@
     root.add(trunkInst);
     root.add(foliInst);
 
-    // ---- 4TH SPECIES: ROUND-CANOPY trees (its own trunk + crown InstancedMesh
-    // pair — +2 draw calls total for the whole biome, still well inside the
-    // "thousands of trees, ~6 draw calls" budget). Distinct silhouette from
-    // both the narrow conifer cone and the squat broadleaf cone.
+    // ---- SUBCANOPY trees: a separate, lower storey beneath the detached roof.
     const RN = roundTrees.length;
-    const roundTrunkGeo = new THREE.CylinderGeometry(0.13, 0.2, 1, 5);
+    const roundTrunkGeo = new THREE.CylinderGeometry(SCENERY ? 0.24 : 0.13, SCENERY ? 0.38 : 0.2, 1, 5);
     roundTrunkGeo.translate(0, 0.5, 0);
     const roundTrunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     roundTrunkMat._shared = true;
     const roundTrunkInst = new THREE.InstancedMesh(roundTrunkGeo, roundTrunkMat, RN);
     const roundCrownInst = new THREE.InstancedMesh(roundGeo, roundMat, RN);
-    roundTrunkInst.castShadow = true; roundCrownInst.castShadow = true;
+    roundTrunkInst.castShadow = treeShadows; roundCrownInst.castShadow = treeShadows;
     roundTrunkInst.receiveShadow = true; roundCrownInst.receiveShadow = true;
+    roundTrunkInst.name = SCENERY ? "redhollow-subcanopy-wood" : "redhollow-round-trunks";
+    roundCrownInst.name = SCENERY ? "redhollow-subcanopy-crowns" : "redhollow-round-crowns";
+    roundTrunkInst.frustumCulled = roundCrownInst.frustumCulled = false;
+    roundTrunkInst.userData.vegetationLayer = "subcanopy-wood";
+    roundCrownInst.userData.vegetationLayer = "subcanopy";
+    roundTrunkInst.userData.sceneryScale = roundCrownInst.userData.sceneryScale = SCENERY;
     roundTrunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundTrunkColors), 3);
     roundCrownInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundColors), 3);
     const rtbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(roundTrunkGeo) : null;
@@ -500,7 +507,7 @@
       }
       dummy.position.set(t.x, t.folY, t.z);
       dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-      dummy.scale.set(t.folR, t.folR, t.folR);
+      dummy.scale.set(t.folR, t.folH || t.folR, t.folR);
       dummy.updateMatrix();
       roundCrownInst.setMatrixAt(i, dummy.matrix);
       if (parts && rcbb) {
@@ -512,6 +519,83 @@
     roundCrownInst.instanceMatrix.needsUpdate = true;
     root.add(roundTrunkInst);
     root.add(roundCrownInst);
+
+    // ---- DETACHED CANOPY ROOF --------------------------------------------
+    // Trees alone preserve one complete silhouette per trunk. These two
+    // non-colliding layers deliberately break that identity: a lower roof fills
+    // the 12-22m band and a looser upper phase fills 21-32m. The two grids are
+    // independent, so their seams never line up. No new rng draws — position
+    // hashes keep every later cabin/animal placement stream unchanged.
+    function vh(x, z, cell, salt) {
+      const ix = Math.floor(x / cell), iz = Math.floor(z / cell);
+      const fx0 = x / cell - ix, fz0 = z / cell - iz;
+      const sx = fx0 * fx0 * (3 - 2 * fx0), sz = fz0 * fz0 * (3 - 2 * fz0);
+      function H(a, b) {
+        if (CBZ.hash01) return CBZ.hash01(a * cell, b * cell, salt);
+        const q = Math.sin(a * 127.1 + b * 311.7 + salt * 0.017) * 43758.5453;
+        return q - Math.floor(q);
+      }
+      const a = H(ix, iz), b = H(ix + 1, iz), c = H(ix, iz + 1), d = H(ix + 1, iz + 1);
+      return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sz;
+    }
+    function forestClump(x, z) {
+      // Heavy tail from three physical scales (broad stand / grove / knot).
+      // Multiplication produces saturated masses and real pockets rather than
+      // the old low-variance "even spacing by construction" peppering.
+      const a = 0.30 + 0.70 * vh(x, z, 84, 0x4f21);
+      const b = 0.34 + 0.66 * vh(x, z, 28, 0x4f22);
+      const c = 0.42 + 0.58 * vh(x, z, 10.4, 0x4f23);
+      return a * b * c;
+    }
+    function roofAllowed(x, z, upper) {
+      if (x < MINX + 5 || x > MAXX - 5 || z < MINZ + 5 || z > MAXZ - 5) return false;
+      // The lake stays a genuine hole in the roof. Human clearings retain a
+      // controlled sky window, but upper crowns can lean over their margins.
+      for (let i = 0; i < clearings.length; i++) {
+        const c = clearings[i], keep = i === 0 ? c.r + 7 : c.r * (upper ? 0.48 : 0.70);
+        if (d2(x, z, c.x, c.z) < keep * keep) return false;
+      }
+      if (x > CW_MINX - 9 && x < CW_MAXX + 9 && z > CW_MINZ - 4 && z < MAXZ) return false;
+      return true;
+    }
+    function roofLayer(step, upper, salt) {
+      const out = [];
+      for (let gx = MINX + step * 0.5; gx < MAXX; gx += step) {
+        for (let gz = MINZ + step * 0.5; gz < MAXZ; gz += step) {
+          const jx = (CBZ.hash01 ? CBZ.hash01(gx, gz, salt) : 0.5) - 0.5;
+          const jz = (CBZ.hash01 ? CBZ.hash01(gx, gz, salt + 1) : 0.5) - 0.5;
+          const x = gx + jx * step * 0.82, z = gz + jz * step * 0.82;
+          if (!roofAllowed(x, z, upper)) continue;
+          const cl = forestClump(x, z);
+          const die = CBZ.hash01 ? CBZ.hash01(x, z, salt + 2) : 0.5;
+          if (die > (upper ? 0.24 + cl * 0.52 : 0.43 + cl * 0.56)) continue;
+          const hv = CBZ.hash01 ? CBZ.hash01(x, z, salt + 3) : 0.5;
+          const cv = CBZ.hash01 ? CBZ.hash01(x, z, salt + 4) : 0.5;
+          const s = (upper ? 0.72 : 0.68) + hv * (upper ? 0.46 : 0.42);
+          out.push({
+            x: x, z: z, y: (upper ? 20.0 : 11.8) + cv * (upper ? 5.0 : 5.6),
+            sx: s * (0.92 + jx * 0.16), sy: s * (upper ? 0.86 : 0.98), sz: s * (0.94 + jz * 0.15),
+            ry: hv * Math.PI * 2, rx: jx * 0.045, rz: jz * 0.045,
+            r: upper ? 0.13 + cv * 0.08 : 0.10 + cv * 0.07,
+            g: upper ? 0.31 + hv * 0.13 : 0.27 + hv * 0.12,
+            b: upper ? 0.10 + cv * 0.055 : 0.075 + cv * 0.045,
+          });
+        }
+      }
+      return out;
+    }
+    const lowerRoof = SCENERY ? roofLayer(10.5, false, 0x4f30) : [];
+    const upperRoof = SCENERY ? roofLayer(13.5, true, 0x4f40) : [];
+    function roofMesh(name, items, upper) {
+      if (!SCENERY || !items.length) return null;
+      return KIT.instanceLayer(root, {
+        kind: "canopy-patch", name: name, owner: "forest",
+        castShadow: false, receiveShadow: true,
+        color: function (c, p) { c.setRGB(p.r, p.g, p.b); },
+      }, items);
+    }
+    const lowerRoofMesh = roofMesh("redhollow-canopy-lower", lowerRoof, false);
+    const upperRoofMesh = roofMesh("redhollow-canopy-upper", upperRoof, true);
 
     // EVERY TRUNK IS SOLID. This used to be 24 hand-picked "landmark" trunks
     // near the trail, on the reasoning "NOT thousands of them (perf)" — which
@@ -534,13 +618,13 @@
     if (SOLID_TRUNKS) {
       for (let i = 0; i < N; i++) {
         const t = trees[i];
-        const r = t.tr * 0.42 + 0.06;          // trunkGeo base radius 0.42 x per-instance scale
+        const r = SCENERY ? 0.82 * t.sc : t.tr * 0.42 + 0.06;
         CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
         placed++;
       }
       for (let i = 0; i < RN; i++) {
         const t = roundTrees[i];
-        const r = t.tr * 0.20 + 0.05;          // roundTrunkGeo base radius 0.20
+        const r = t.tr * (SCENERY ? 0.38 : 0.20) + 0.05;
         CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
         placed++;
       }
@@ -567,9 +651,11 @@
     //  Two instanced meshes: a green bush blob (icosahedron) and a grey
     //  rock (low-poly dodeca). Logs are a SMALL count so plain meshes ok.
     // ================================================================
-    // bushes / ferns
-    const bushGeo = new THREE.IcosahedronGeometry(1, 0);
-    const bushMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); bushMat._shared = true;
+    // Near understory plus a separate hash-clumped thicket wall. The former
+    // keeps the historical 900-item rng budget; the latter is additive and
+    // position-hashed, so later logs/landmarks keep their seeded placement.
+    const bushGeo = SCENERY ? KIT.geometry("thicket") : new THREE.IcosahedronGeometry(1, 0);
+    const bushMat = SCENERY ? KIT.material("thicket") : new THREE.MeshLambertMaterial({ color: 0xffffff }); bushMat._shared = true;
     const rockGeo = new THREE.DodecahedronGeometry(1, 0);
     const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); rockMat._shared = true;
 
@@ -602,9 +688,9 @@
     const bushCol = [], rockCol = [], bc = new THREE.Color(), rc = new THREE.Color();
     for (let i = 0; i < bushes.length; i++) {
       const b = bushes[i];
-      dummy.position.set(b.x, b.s * 0.5, b.z);
+      dummy.position.set(b.x, SCENERY ? 0.02 : b.s * 0.5, b.z);
       dummy.rotation.set(0, b.rot, 0);
-      dummy.scale.set(b.s, b.s * 0.7, b.s);
+      dummy.scale.set(SCENERY ? b.s * 0.72 : b.s, SCENERY ? b.s * 0.58 : b.s * 0.7, SCENERY ? b.s * 0.72 : b.s);
       dummy.updateMatrix(); bushInst.setMatrixAt(i, dummy.matrix);
       bc.setRGB(0.16 + rng() * 0.12, 0.34 + rng() * 0.16, 0.14 + rng() * 0.08);
       bushCol.push(bc.r, bc.g, bc.b);
@@ -622,7 +708,70 @@
     rockInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(rockCol), 3);
     bushInst.instanceMatrix.needsUpdate = true;
     rockInst.instanceMatrix.needsUpdate = true;
+    bushInst.name = SCENERY ? "redhollow-near-thicket" : "redhollow-bushes";
+    rockInst.name = "redhollow-rocks";
+    bushInst.frustumCulled = rockInst.frustumCulled = false;
+    bushInst.userData.vegetationLayer = SCENERY ? "near-thicket" : "bush";
+    bushInst.userData.sceneryScale = SCENERY;
     root.add(bushInst); root.add(rockInst);
+
+    const farThickets = [];
+    if (SCENERY) {
+      const step = 11.5;
+      for (let gx = MINX + step * 0.5; gx < MAXX; gx += step) {
+        for (let gz = MINZ + step * 0.5; gz < MAXZ; gz += step) {
+          const jx = (CBZ.hash01 ? CBZ.hash01(gx, gz, 0x4f51) : 0.5) - 0.5;
+          const jz = (CBZ.hash01 ? CBZ.hash01(gx, gz, 0x4f52) : 0.5) - 0.5;
+          const x = gx + jx * step * 0.82, z = gz + jz * step * 0.82;
+          if (inClearing(x, z) || nearTrail(x, z)) continue;
+          const cl = forestClump(x, z);
+          const die = CBZ.hash01 ? CBZ.hash01(x, z, 0x4f53) : 0.5;
+          if (die > Math.min(0.91, 0.16 + cl * 1.16)) continue;
+          const h = CBZ.hash01 ? CBZ.hash01(x, z, 0x4f54) : 0.5;
+          const c = CBZ.hash01 ? CBZ.hash01(x, z, 0x4f55) : 0.5;
+          farThickets.push({
+            x: x, y: 0.02, z: z,
+            sx: 0.58 + h * 0.52, sy: 0.62 + c * 0.58, sz: 0.58 + (1 - h) * 0.52,
+            ry: h * Math.PI * 2,
+            r: 0.09 + c * 0.055, g: 0.25 + h * 0.12, b: 0.07 + c * 0.045,
+          });
+        }
+      }
+    }
+    const farThicketMesh = SCENERY && farThickets.length ? KIT.instanceLayer(root, {
+      kind: "thicket", name: "redhollow-far-thicket", owner: "forest",
+      castShadow: false, receiveShadow: true,
+      color: function (c, p) { c.setRGB(p.r, p.g, p.b); },
+    }, farThickets) : null;
+
+    // Executable visual-scale facts for the browser regression. These are
+    // authored-source metrics, not a screenshot heuristic: they directly state
+    // whether the live build has mature height and independent forest storeys.
+    const matureTops = SCENERY ? trees.map(function (t) {
+      return t.folY + KIT.nominal.matureCrownHeight * t.folH;
+    }).sort(function (a, b) { return a - b; }) : [];
+    const patchArea = SCENERY ? lowerRoof.concat(upperRoof).reduce(function (sum, p) {
+      const rr = KIT.nominal.canopyPatchRadius * Math.max(p.sx, p.sz);
+      return sum + Math.PI * rr * rr;
+    }, 0) : 0;
+    const usableArea = HX * 2 * HZ * 2 - Math.PI * LAKE_R * LAKE_R;
+    CBZ.forestSceneryAudit = function () {
+      const mid = matureTops.length ? matureTops[(matureTops.length / 2) | 0] : 0;
+      return {
+        owner: "forest", enabled: SCENERY,
+        matureTrees: N, subcanopyTrees: RN,
+        lowerRoof: lowerRoof.length, upperRoof: upperRoof.length,
+        nearThicket: bushes.length, farThicket: farThickets.length,
+        matureMedianHeight: +mid.toFixed(2),
+        matureMedianPlayerHeights: +(mid / 1.8).toFixed(2),
+        emergentHeight: matureTops.length ? +matureTops[matureTops.length - 1].toFixed(2) : 0,
+        roofCoveragePotential: usableArea > 0 ? +(patchArea / usableArea).toFixed(3) : 0,
+        physicalTreeSpacing: STEP,
+        completeConeCrowns: SCENERY ? 0 : N,
+        layers: [trunkInst, foliInst, roundTrunkInst, roundCrownInst, lowerRoofMesh, upperRoofMesh, bushInst, farThicketMesh]
+          .filter(Boolean).map(function (m) { return { name: m.name, count: m.count, visible: m.visible !== false }; }),
+      };
+    };
 
     // ================================================================
     //  SIMPLE DISTANCE LOD — fine ground clutter (bushes/ferns/rocks) reads
@@ -646,8 +795,10 @@
         const d = Math.hypot(P.pos.x - CX, P.pos.z - CZ);
         if (detailOn && d > LOD_FAR) {
           detailOn = false; bushInst.visible = false; rockInst.visible = false;
+          if (farThicketMesh) farThicketMesh.visible = false;
         } else if (!detailOn && d < LOD_NEAR) {
           detailOn = true; bushInst.visible = true; rockInst.visible = true;
+          if (farThicketMesh) farThicketMesh.visible = true;
         }
       });
     })();

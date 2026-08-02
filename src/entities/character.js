@@ -952,6 +952,66 @@
     return cur + (target - cur) * (1 - Math.exp(-rate * dt));
   }
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const smooth01 = (v) => {
+    v = clamp01(v);
+    return v * v * (3 - 2 * v);
+  };
+  const smoother01 = (v) => {
+    v = clamp01(v);
+    return v * v * v * (v * (v * 6 - 15) + 10);
+  };
+  const _mantleGrip = new THREE.Vector3();
+
+  // Aim one shoulder/elbow chain at a fixed world-space ledge point. Limbs are
+  // authored down -Y; negative shoulder X swings forward and a negative elbow
+  // folds the forearm farther forward. Solving in the body's current local
+  // frame keeps the wrists on the lip even while the torso leans and rises.
+  function mantleArmSolve(ch, tp, side) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (side > 0 ? ch.parts.la : ch.parts.ra);
+    if (!P || !part || tp.ledgeX == null || tp.rootY == null ||
+        !ch.body || !ch.group || typeof ch.body.worldToLocal !== "function") return null;
+    // Hands land roughly under their own shoulders. A narrow centre grip made
+    // the elbows flare sideways even when the Y/Z solve was correct.
+    const gripHalf = Math.min(0.43, ((ch.metric && ch.metric.width) || 0.9) * 0.40);
+    // local +X in world space for a root facing (dirX,dirZ) is (dirZ,-dirX).
+    _mantleGrip.set(
+      tp.ledgeX + tp.dirZ * gripHalf * side,
+      tp.top + 0.018,
+      tp.ledgeZ - tp.dirX * gripHalf * side
+    );
+    ch.group.updateMatrixWorld(true);
+    ch.body.worldToLocal(_mantleGrip);
+
+    const dx = _mantleGrip.x - part.position.x;
+    let dy = _mantleGrip.y - part.position.y;
+    let dz = _mantleGrip.z - part.position.z;
+    const l1 = Math.max(0.12, P.armUp - 0.02);
+    const l2 = Math.max(0.12, P.armLo + 0.01);
+    // Rotation.z handles the modest inward hand spacing. Solve the remaining
+    // sagittal reach in Y/Z, clamped just inside full extension so the elbow
+    // always retains a visible, load-bearing bend.
+    let reach = Math.hypot(dy, dz);
+    const maxReach = (l1 + l2) * 0.965;
+    const minReach = Math.abs(l1 - l2) + 0.035;
+    if (reach > maxReach) {
+      const k = maxReach / reach;
+      dy *= k; dz *= k; reach = maxReach;
+    } else if (reach < minReach) {
+      const k = minReach / Math.max(0.001, reach);
+      dy *= k; dz *= k; reach = minReach;
+    }
+    const elbow = Math.acos(Math.max(-1, Math.min(1,
+      (reach * reach - l1 * l1 - l2 * l2) / (2 * l1 * l2))));
+    const fromDown = Math.atan2(dz, -dy);
+    const shoulder = fromDown - Math.atan2(l2 * Math.sin(elbow), l1 + l2 * Math.cos(elbow));
+    const inward = Math.atan2(dx, Math.max(0.16, reach));
+    return {
+      shoulder: -shoulder,
+      elbow: -elbow,
+      roll: Math.max(-0.48, Math.min(0.48, inward)),
+    };
+  }
 
   // The torso and legs are siblings authored from the feet, but anatomically
   // meet at this socket. Every pose writer may rotate the torso; these two
@@ -1156,6 +1216,170 @@
       }
     }
     if (ch.typing) ch.typing = false;   // typing exists only while seated (stale-flag guard)
+
+    // ---- OBSTACLE TRAVERSAL (systems/physics.js) -------------------------
+    // The physics owner supplies only {kind, style, t}: this canonical animator
+    // turns that one shared state into the pose for the player AND every full-rig
+    // NPC. The world trajectory already puts the root over the obstacle; these
+    // writes make the body explain HOW it got there — hands find the top, elbows
+    // load, hips follow, and the legs either scissor over or tuck through.
+    //
+    // Every target is absolute and this branch owns the full rig, like seated /
+    // slide / prone. That makes interruption safe and prevents a vault pose from
+    // accumulating onto the next walk cycle.
+    if (ch.traversePose) {
+      const tp = ch.traversePose;
+      const u = clamp01(tp.t || 0);
+      const air = Math.sin(Math.PI * u);
+      const sr = 18;
+      const limb = (part, x, y, z, pz) => {
+        if (!part) return;
+        part.rotation.x = damp(part.rotation.x, x, sr, dt);
+        part.rotation.y = damp(part.rotation.y, y || 0, sr, dt);
+        part.rotation.z = damp(part.rotation.z, z || 0, sr, dt);
+        part.position.z = damp(part.position.z, pz || 0, sr, dt);
+        part.scale.y = damp(part.scale.y, 1, sr, dt);
+      };
+      ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+
+      if (tp.kind === "mantle") {
+        // Reach → hang → pull → press-out. The old fixed -2.4rad shoulder target
+        // pointed both arms almost vertically above the head. Here `hold`
+        // blends into a real two-link solve against physics.js's near ledge.
+        const reach = smoother01(u / 0.24);
+        const release = 1 - smoother01((u - 0.48) / 0.18);
+        const hold = Math.max(0, reach * release);
+        const pull = Math.sin(Math.PI * smoother01((u - 0.18) / 0.70));
+        ch.body.position.y = damp(ch.body.position.y, -0.11 * hold + 0.05 * pull, sr, dt);
+        // Positive pitch is toward +Z/the ledge: chest follows the planted
+        // hands instead of hanging back while the arms point skyward.
+        ch.body.rotation.x = damp(ch.body.rotation.x, 0.10 * hold + 0.12 * pull, sr, dt);
+        ch.body.rotation.z = damp(ch.body.rotation.z, 0.06 * Math.sin(u * Math.PI * 2) * pull, sr, dt);
+        // lockCharacterHips changes the body's translation after a pitch. Apply
+        // it before the world→body conversion so the wrist target includes the
+        // exact compensated shoulder position used for rendering.
+        lockCharacterHips(ch);
+        const leftGrip = mantleArmSolve(ch, tp, 1);
+        const rightGrip = mantleArmSolve(ch, tp, -1);
+        const press = smoother01((u - 0.48) / 0.28) *
+          (1 - smoother01((u - 0.80) / 0.18));
+        const armRest = -0.20 - 0.32 * press;
+        const leftX = leftGrip ? armRest + (leftGrip.shoulder - armRest) * hold : -0.20 - 1.18 * hold;
+        const rightX = rightGrip ? armRest + (rightGrip.shoulder - armRest) * hold : -0.20 - 1.18 * hold;
+        const leftZ = leftGrip ? -0.10 + (leftGrip.roll + 0.10) * hold : -0.18 * hold;
+        const rightZ = rightGrip ? 0.10 + (rightGrip.roll - 0.10) * hold : 0.18 * hold;
+        limb(ch.parts.la, leftX, 0.05, leftZ, 0.04 * hold);
+        limb(ch.parts.ra, rightX, -0.05, rightZ, 0.04 * hold);
+        setElbow(J.la, leftGrip ? -0.18 + (leftGrip.elbow + 0.18) * hold : -0.20 - hold * 0.82, sr);
+        setElbow(J.ra, rightGrip ? -0.18 + (rightGrip.elbow + 0.18) * hold : -0.20 - hold * 0.82, sr);
+        // One knee drives high first, the other leg trails and then switches —
+        // the asymmetry is the difference between hauling a body up and levitating.
+        const switchLeg = smooth01((u - 0.52) / 0.34);
+        limb(ch.parts.ll, -0.10 - pull * (1.18 - switchLeg * 0.48), 0, 0.08, 0);
+        limb(ch.parts.rl, -0.08 - pull * (0.58 + switchLeg * 0.54), 0, -0.08, 0);
+        setKnee(J.ll, 0.08 + pull * (1.18 - switchLeg * 0.52), sr);
+        setKnee(J.rl, 0.08 + pull * (0.62 + switchLeg * 0.56), sr);
+        if (ch.model) {
+          ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+          ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+          ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+        }
+        if (ch.neck) {
+          ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.18 * hold, sr, dt);
+          ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+        }
+      } else {
+        // Low/medium obstacles use a small style vocabulary. Physics alternates
+        // controlled styles for ordinary Jump and lets sprint momentum unlock
+        // the spy spin. All three plant at least one hand, but the hips/legs
+        // carry a different silhouette.
+        const plant = Math.sin(Math.PI * clamp01((u - 0.03) / 0.88));
+        const tuck = Math.sin(Math.PI * clamp01((u - 0.12) / 0.82));
+        if (tp.style === "kong") {
+          ch.body.position.y = damp(ch.body.position.y, -0.16 * plant, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, -0.50 * plant, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
+          limb(ch.parts.la, -0.18 - 1.62 * plant, 0.08, -0.16, 0.16 * plant);
+          limb(ch.parts.ra, -0.18 - 1.62 * plant, -0.08, 0.16, 0.16 * plant);
+          setElbow(J.la, -0.18 - plant * 0.34, sr);
+          setElbow(J.ra, -0.18 - plant * 0.34, sr);
+          limb(ch.parts.ll, -0.12 - tuck * 1.18, 0, 0.11, 0);
+          limb(ch.parts.rl, -0.12 - tuck * 1.18, 0, -0.11, 0);
+          setKnee(J.ll, 0.08 + tuck * 1.48, sr);
+          setKnee(J.rl, 0.08 + tuck * 1.48, sr);
+        } else if (tp.style === "spin") {
+          // Sprint-only spy vault: spend the opening beat reaching/planting,
+          // ease through one full revolution, then leave a recovery beat before
+          // landing. Quintic easing has zero angular acceleration at each end,
+          // so the roll reads as a deliberate body move rather than a transform
+          // snapping through 360 degrees.
+          const spinPhase = smoother01((u - 0.08) / 0.80);
+          const handPlant = Math.sin(Math.PI * clamp01((u - 0.01) / 0.40)) *
+            (u < 0.41 ? 1 : 0);
+          const commit = smoother01(u / 0.20);
+          ch.body.position.y = damp(ch.body.position.y, -0.13 * air, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, -0.16 * air, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, -0.12 * air, sr, dt);
+          limb(ch.parts.la, -0.22 - 1.38 * handPlant, 0.18, -0.34 - 0.46 * air, 0.12 * handPlant);
+          limb(ch.parts.ra, -0.24 - 0.56 * air, -0.18, 0.66 + 0.24 * air, 0.04);
+          setElbow(J.la, -0.24 - handPlant * 0.48, sr);
+          setElbow(J.ra, -0.32 - air * 0.42, sr);
+          limb(ch.parts.ll, -0.16 - tuck * 0.82, 0, 0.18, 0);
+          limb(ch.parts.rl, -0.12 - tuck * 1.02, 0, -0.18, 0);
+          setKnee(J.ll, 0.10 + tuck * 1.02, sr);
+          setKnee(J.rl, 0.10 + tuck * 1.28, sr);
+          if (ch.model) {
+            ch.model.rotation.x = -0.08 * air * commit;
+            ch.model.rotation.y = 0.08 * air * commit;
+            ch.model.rotation.z = -Math.PI * 2 * spinPhase;
+          }
+        } else {
+          // One-hand speed vault: plant left, throw the opposite arm back, split
+          // the legs sideways and let the hips skim the obstacle.
+          ch.body.position.y = damp(ch.body.position.y, -0.12 * plant, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, -0.34 * plant, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, -0.34 * air, sr, dt);
+          limb(ch.parts.la, -0.18 - 1.66 * plant, 0.10, -0.42, 0.16 * plant);
+          limb(ch.parts.ra, 0.36 * air, -0.16, 0.72 * air, 0);
+          setElbow(J.la, -0.16 - plant * 0.26, sr);
+          setElbow(J.ra, -0.38 - air * 0.18, sr);
+          limb(ch.parts.ll, -0.18 - tuck * 0.48, 0.18, 0.58 * air, 0);
+          limb(ch.parts.rl, -0.14 - tuck * 0.92, -0.12, -0.24 * air, 0);
+          setKnee(J.ll, 0.08 + tuck * 0.62, sr);
+          setKnee(J.rl, 0.08 + tuck * 1.18, sr);
+        }
+        if (tp.style !== "spin" && ch.model) {
+          ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+          ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+          ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+        }
+        if (ch.neck) {
+          ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.16 * air, sr, dt);
+          ch.neck.rotation.z = damp(ch.neck.rotation.z, tp.style === "spin" ? 0.12 * air : 0, sr, dt);
+        }
+      }
+      ch.bob = ch.body.position.y;
+      ch.lean = ch.body.rotation.x;
+      ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;                 // reuse the proven full-pose neck recovery
+      ch._traverseRecover = 1;
+      lockCharacterHips(ch);
+      return;
+    }
+    // The model node is normally scale-only. A spy vault temporarily rolls it;
+    // settle all three axes after any natural finish/interruption before gait
+    // takes over. Most frames pay one falsy branch.
+    if (ch._traverseRecover && ch.model) {
+      ch.model.rotation.x = damp(ch.model.rotation.x, 0, 16, dt);
+      ch.model.rotation.y = damp(ch.model.rotation.y, 0, 16, dt);
+      ch.model.rotation.z = damp(ch.model.rotation.z, 0, 16, dt);
+      if (Math.abs(ch.model.rotation.x) + Math.abs(ch.model.rotation.y) +
+          Math.abs(ch.model.rotation.z) < 0.01) {
+        ch.model.rotation.set(0, 0, 0);
+        ch._traverseRecover = 0;
+      }
+    }
 
     // ---- STANCE POSES (physics.js stance machine sets slidePose/pronePose
     //      on the player rig only). Both OWN the whole rig like the seated

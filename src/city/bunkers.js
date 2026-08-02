@@ -138,11 +138,33 @@
     doors.push(rec);
     return rec;
   }
-  function setDoor(rec, open) {
+  function soundDoor(rec, open) {
+    const P = CBZ.player && CBZ.player.pos;
+    if (!CBZ.sfx || !P || !rec) return;
+    const dist = Math.hypot(P.x - rec.cx, P.y - ((rec.y0 + rec.y1) / 2), P.z - rec.cz);
+    if (dist >= 34) return;
+    const volume = dist <= 5 ? 1 : Math.max(0.06, 1 - (dist - 5) / 29);
+    CBZ.sfx(open ? "door_open" : "door_close", { dist: dist, volume: volume });
+  }
+  function playerInsideDoorBunker(rec) {
+    const P = CBZ.player && CBZ.player.pos;
+    const b = rec && rec.bunker;
+    const q = b && b.interior;
+    return !!(P && q &&
+      P.x >= q.minX && P.x <= q.maxX && P.z >= q.minZ && P.z <= q.maxZ &&
+      P.y >= q.floorY - 0.8 && P.y <= q.ceilY + 0.8);
+  }
+  function setDoor(rec, open, audible) {
     if (!rec || rec.disabled) return;
-    rec.target = open ? 1 : 0;
+    const target = open ? 1 : 0;
+    if (rec.target === target) return;
+    rec.target = target;
+    rec._physicalAudioTarget = target;
     if (open) rec.holdT = 14;                     // generous auto-seal window
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    if (audible) {
+      soundDoor(rec, open);
+      rec.playerSoundCycle = !!open;
+    }
   }
   // the one door updater: ease leaves, keep the collider honest. Early-outs
   // when nothing is moving so headless sim ticks pay ~nothing.
@@ -151,6 +173,13 @@
     const P = CBZ.player;
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
+      if (d._physicalAudioTarget == null) d._physicalAudioTarget = d.open > 0.5 ? 1 : 0;
+      if (d._physicalAudioTarget !== d.target) {
+        // Structural breaches/NPC systems may move the same real leaf. They are
+        // audible only to somebody physically inside this bunker.
+        if (playerInsideDoorBunker(d)) soundDoor(d, d.target === 1);
+        d._physicalAudioTarget = d.target;
+      }
       // a blast-jammed door finishes its travel on GAME time, then locks in
       // that pose forever (the setTimeout this replaces ran on wall-clock and
       // could freeze a leaf halfway through its ease under a headless burst)
@@ -167,7 +196,12 @@
           const dx = P.pos.x - d.cx, dz = P.pos.z - d.cz;
           occupied = dx * dx + dz * dz < 2.4 * 2.4;
         }
-        if (d.holdT <= 0 && !occupied) d.target = 0;
+        if (d.holdT <= 0 && !occupied) {
+          d.target = 0;
+          d._physicalAudioTarget = 0;
+          if (d.playerSoundCycle) soundDoor(d, false);
+          d.playerSoundCycle = false;
+        }
       }
       if (d.open === d.target) continue;
       d.open += Math.sign(d.target - d.open) * dt / 0.9;      // ~0.9s travel: HEAVY
@@ -346,14 +380,13 @@
         },
         onSelect: function (t) {
           if (t.door.disabled) return;
-          if (t.door.target === 1) { t.door.target = 0; if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} } return; }
+          if (t.door.target === 1) { setDoor(t.door, false, true); return; }
           const L = doorLock(t);
           if (!L.open) {
             if (CBZ.city && CBZ.city.note) CBZ.city.note(L.line, 3.4);
-            if (CBZ.sfx) { try { CBZ.sfx("clank"); } catch (e) {} }
             return;
           }
-          setDoor(t.door, true);
+          setDoor(t.door, true, true);
         },
       }],
     });
@@ -392,7 +425,6 @@
             t.nextRestock = day + 1;
             if (e && e.add) e.add("Bunker Buster", 2);
             if (CBZ.city && CBZ.city.note) CBZ.city.note("2× GBU-57 bunker busters loaded — the B-2's bay carries them.", 2.6);
-            if (CBZ.sfx) { try { CBZ.sfx("clank"); } catch (er) {} }
           } else {
             if (t.taken) return;
             t.taken = true;
@@ -434,7 +466,6 @@
             const sec = (CBZ.strategicState && CBZ.strategicState().plantTimer) || 90;
             CBZ.city.note("Deploy: plant it on foot (" + sec + "s on the clock), or load the B-2's bay.", 4.2);
           }
-          if (CBZ.sfx) { try { CBZ.sfx("alarm"); } catch (er) {} }
           // walking out with the country's deterrent is the loudest theft there is
           if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { x: t.x, z: t.z, type: "grand-theft-military", instant: true }); } catch (er) {} }
         },
@@ -489,7 +520,6 @@
             byPlayer: true,
           });
           if (!ok) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No sortie available.", 1.8); return; }
-          if (CBZ.sfx) { try { CBZ.sfx("clank"); } catch (e) {} }
           // ordering a bombing run is not a misdemeanour
           if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: wp.x, z: wp.z, type: "terrorism", instant: true }); } catch (e) {} }
           if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Airstrike called on a civilian grid"); } catch (e) {} }
@@ -655,6 +685,7 @@
       interior: { minX: ix0, maxX: ix1, minZ: iz0, maxZ: iz1, floorY: FY, ceilY: CEIL, cx, cz },
       troopSpecs: [],
     };
+    door.bunker = rec;
     if (site.tier === "command") furnishCommand(g, rec, ix0, ix1, iz0, iz1, cx, cz, FY, CEIL);
     else furnishOutpost(g, rec, ix0, ix1, iz0, iz1, cx, cz, FY, site);
     bunkers.push(rec);
@@ -739,6 +770,7 @@
     const vdoor = makeDoor(g, vx1 + 0.25, vz1 - 0.9, "z", 1.8, 2.5, M.steelD, 0.55);
     vdoor.y0 = FY; vdoor.y1 = FY + 2.5;
     vdoor.colRec.y0 = FY; vdoor.colRec.y1 = FY + 2.5;
+    vdoor.bunker = rec;
     rec.doors.push(vdoor);
     /* THE ONE LOCKED DOOR THAT MATTERS. Three routes, and every one is a thing
        the world already models: a Colonel's card you looted, the army itself

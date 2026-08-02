@@ -20,6 +20,9 @@ const chromeBin = process.env.CBZ_CHROME || (process.platform === "darwin"
 const base = `http://127.0.0.1:${webPort}/?seed=90210`;
 const only = new Set(String(process.env.CBZ_VISUAL_ONLY || "").split(",").map((s) => s.trim()).filter(Boolean));
 const focusedViewport = only.size ? { width: 1200, height: 750 } : { width: 1600, height: 1000 };
+const visualGlArgs = process.env.CBZ_VISUAL_HARDWARE === "1"
+  ? ["--use-gl=angle", "--use-angle=metal", "--enable-webgl"]
+  : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl"];
 
 await mkdir(OUT, { recursive: true });
 await rm(profile, { recursive: true, force: true });
@@ -28,8 +31,7 @@ const server = spawn("python3", [path.join(ROOT, "tools", "devserver.py")], {
 });
 const chrome = spawn(chromeBin, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
-  "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-  "--enable-webgl", "--disable-background-timer-throttling",
+  ...visualGlArgs, "--disable-background-timer-throttling",
   "--disable-renderer-backgrounding", "--mute-audio", `--window-size=${focusedViewport.width},${focusedViewport.height}`,
   `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, base,
 ], { cwd: ROOT, stdio: "ignore" });
@@ -320,12 +322,26 @@ try {
   await pose("forest-lake", `
     const o=CBZ.worldOff&&CBZ.worldOff("forest")||{dx:0,dz:0},x=-710+(o.dx||0),z=-1260+(o.dz||0),wf=CBZ.waterField;
     window.__visualQaPose=[x+128,42,z+145,x,-.45,z];CBZ.player.pos.set(x+104,CBZ.floorAt(x+104,z)||0,z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
-    return {sharedWater:!!(wf&&wf.isSurfaceWater(x,z,0)),bankLand:!!(wf&&!wf.isSurfaceWater(x+112,z,0)),shore:wf&&wf.shoreAt(x,z),localSlab:CBZ.scene.children.some(o=>o&&o.name==="redhollow-lake-water")};`);
+    return {sharedWater:!!(wf&&wf.isSurfaceWater(x,z,0)),bankLand:!!(wf&&!wf.isSurfaceWater(x+112,z,0)),shore:wf&&wf.shoreAt(x,z),localSlab:CBZ.scene.children.some(o=>o&&o.name==="redhollow-lake-water"),scenery:CBZ.forestSceneryAudit&&CBZ.forestSceneryAudit()};`);
+
+  await pose("forest-trail", `
+    const r=CBZ.city.arena.regions.find(x=>x.name==="Redhollow Woods"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
+    const x=cx-245,z=cz-142,y=(CBZ.floorAt(x,z)||0)+1.8;
+    window.__visualQaFogFar=760;window.__visualQaPose=[x,y,z,cx+15,y+2.8,cz-15,63];
+    CBZ.player.pos.set(x,y-1.8,z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
+    return {region:r.name,view:"player eye on trail",scenery:CBZ.forestSceneryAudit&&CBZ.forestSceneryAudit(),treeAudit:CBZ.treeAudit&&CBZ.treeAudit()};`);
+
+  await pose("forest-interior", `
+    const r=CBZ.city.arena.regions.find(x=>x.name==="Redhollow Woods"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
+    const x=cx+155,z=cz-105,y=(CBZ.floorAt(x,z)||0)+1.8;
+    window.__visualQaFogFar=620;window.__visualQaPose=[x,y,z,cx+24,y+5.5,cz+72,67];
+    CBZ.player.pos.set(x,y-1.8,z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
+    return {region:r.name,view:"player eye beneath canopy",scenery:CBZ.forestSceneryAudit&&CBZ.forestSceneryAudit(),treeAudit:CBZ.treeAudit&&CBZ.treeAudit()};`);
 
   await pose("forest-top", `
     const r=CBZ.city.arena.regions.find(x=>x.name==="Redhollow Woods"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;
     window.__visualQaFogFar=3600;window.__visualQaPose=[cx+.5,650,cz+.5,cx,0,cz,46];
-    return {region:r.name,bounds:[r.minX,r.maxX,r.minZ,r.maxZ]};`);
+    return {region:r.name,bounds:[r.minX,r.maxX,r.minZ,r.maxZ],scenery:CBZ.forestSceneryAudit&&CBZ.forestSceneryAudit()};`);
 
   await pose("forest-horizon", `
     const r=CBZ.city.arena.regions.find(x=>x.name==="Redhollow Woods"),cx=(r.minX+r.maxX)/2,cz=(r.minZ+r.maxZ)/2;

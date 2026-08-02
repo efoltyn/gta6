@@ -61,7 +61,6 @@
     plateCarrier: { id: "plateCarrier", name: "Plate Carrier", slot: "chest", pts: 100, absorb: 0.72, color: 0x3a3d33 },
     swatVest:     { id: "swatVest",     name: "SWAT Plate",    slot: "chest", pts: 150, absorb: 0.82, color: 0x14161a, lootOnly: true },
     helmet:       { id: "helmet",       name: "Ballistic Helmet", slot: "head", pts: 25, headFrac: 0.25, color: 0x1b1d22 },
-    shield:       { id: "shield",       name: "Riot Shield",   slot: "hand",  pts: 0 },
   };
   CBZ.ARMOR_KITS = ARMOR_KITS;
   function kit(id) { return id && ARMOR_KITS[id] ? ARMOR_KITS[id] : null; }
@@ -76,12 +75,11 @@
     let gm = geos[kind];
     if (gm) return gm;
     if (!THREE || !CBZ.boxGeom) return null;
-    // vest = inflated shell over the 0.92×0.95×0.5 torso; helmet = shell over the
-    // 0.6 head cube; shield = a flat slab carried at the forearm.
+    // vest = inflated shell over the 0.92×0.95×0.5 torso; helmet = shell over
+    // the 0.6 head cube.
     if (kind === "vest")        gm = CBZ.boxGeom(1.02, 0.86, 0.62);
     else if (kind === "vestHi") gm = CBZ.boxGeom(1.04, 0.30, 0.64);   // plate band across the chest
     else if (kind === "helmet") gm = CBZ.boxGeom(0.70, 0.46, 0.70);   // dome over the upper head
-    else if (kind === "shield") gm = CBZ.boxGeom(0.04, 0.95, 0.62);
     // tactical-helmet furniture (city-swat-redesign) — all chunky voxel blocks
     else if (kind === "helmBrim")  gm = CBZ.boxGeom(0.74, 0.09, 0.30);   // brim lip over the eyes
     else if (kind === "helmRail")  gm = CBZ.boxGeom(0.07, 0.14, 0.46);   // side accessory rails
@@ -282,10 +280,6 @@
         put(an.neck, "helmMount", mat, 0, 0.55, 0.32);
         put(an.neck, "visor", visorMat(), 0, 0.30, 0.36);
       }
-    } else if (k.slot === "hand" && an.la && an.la.add) {
-      const mat = matFor("shield", 0x3a3f47);
-      const sh = acquire("shield");
-      if (sh) { sh.material = mat; sh.position.set(0.32, -0.2, 0.18); an.la.add(sh); out.push(sh); }
     }
   }
 
@@ -317,7 +311,7 @@
     if (!ch) return null;
     // `ch` rides along so mountKitMeshes can MEASURE the body it is armouring
     // (armorFit) instead of assuming the adult male it was authored against.
-    return { ch: ch, body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra };
+    return { ch: ch, body: ch.body, neck: ch.neck };
   }
   function unmountPlayer() {
     if (!_pMeshes) return;
@@ -347,7 +341,6 @@
     if (!P._armorKit) P._armorKit = { chest: null, head: null };
     if (k.slot === "chest") P._armorKit.chest = k.id;
     else if (k.slot === "head") P._armorKit.head = k.id;
-    else if (k.slot === "hand") P._armorKit.hand = k.id;   // shield: cosmetic, 0 pts
     const max = kitPts(P._armorKit);
     P._armorMax = max;
     P._armor = Math.max(P._armor || 0, max);               // a fresh kit tops you up
@@ -382,13 +375,12 @@
     // strip any previous armor meshes first (recast / re-dress)
     if (ped._armorMeshes) { for (let i = 0; i < ped._armorMeshes.length; i++) releaseMesh(ped._armorMeshes[i]); ped._armorMeshes = null; }
     const ids = Array.isArray(kitIds) ? kitIds : (kitIds ? [kitIds] : []);
-    const map = { chest: null, head: null, hand: null };
+    const map = { chest: null, head: null };
     let pts = 0;
     for (let i = 0; i < ids.length; i++) {
       const k = kit(ids[i]); if (!k) continue;
       if (k.slot === "chest") map.chest = k.id;
       else if (k.slot === "head") map.head = k.id;
-      else if (k.slot === "hand") map.hand = k.id;
       pts += k.pts | 0;
     }
     ped._armorKit = ids.slice();          // flat id list — police.js copies this to _armorLoot on death
@@ -397,12 +389,11 @@
     ped._armor = pts;                      // the soak pool
     // mount meshes (guarded: harness rigs have no body/neck)
     const ch = ped.char;
-    const an = ch ? { ch: ch, body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra } : null;
+    const an = ch ? { ch: ch, body: ch.body, neck: ch.neck } : null;
     if (an) {
       const out = [];
       if (map.chest) mountKitMeshes(an, map.chest, out);
       if (map.head)  mountKitMeshes(an, map.head, out);
-      if (map.hand)  mountKitMeshes(an, map.hand, out);
       if (out.length) ped._armorMeshes = out;
     }
     return true;

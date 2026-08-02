@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.argv[2] || path.join(ROOT, "tools/shots/street.png");
 const BUILDING_FOCUS = process.argv.includes("--building");
+const THREADS_FOCUS = process.argv.includes("--threads");
 const SPAWN_FOCUS = process.argv.includes("--spawn");
 const AERIAL_FOCUS = process.argv.includes("--aerial");
 const MOUNTAIN_FOCUS = process.argv.includes("--mountain");
@@ -21,6 +22,8 @@ const WATERFRONT_FOCUS = process.argv.includes("--waterfront");
 const WILDLIFE_FOCUS = process.argv.includes("--wildlife");
 const AIRLINER_FOCUS = process.argv.includes("--airliner");
 const DESERT_FOCUS = process.argv.includes("--desert");
+const ARENA_FOCUS = process.argv.includes("--arena");
+const VIEWPORT = ARENA_FOCUS ? "960,720" : "1600,1000";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const port = 8930 + Math.floor(Math.random() * 40);
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
@@ -28,7 +31,7 @@ const base = `http://127.0.0.1:${port}/`;
 const dbg = 9930 + Math.floor(Math.random() * 40);
 await rm(`/tmp/cbz-street-${dbg}`, { recursive: true, force: true });
 await sleep(700);
-const chrome = spawn(process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium"), ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", "--window-size=1600,1000", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-street-${dbg}`, base], { stdio: "ignore" });
+const chrome = spawn(process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium"), ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", `--window-size=${VIEWPORT}`, `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-street-${dbg}`, base], { stdio: "ignore" });
 let page = null;
 for (let i = 0; i < 80 && !page; i++) { try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); page = ps.find((p) => p.type === "page" && p.url.startsWith(base)); } catch (_) {} if (!page) await sleep(250); }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -44,6 +47,10 @@ for (let i = 0; i < 60; i++) { if (await evl("!!(window.CBZ && CBZ.game && docum
 if (!DEFAULT_START) {
   await evl("(() => { if (window.CBZ && CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false; return true; })()");
 }
+// The arena proof targets authored silhouette and suspension, which are
+// quality-invariant. Build the rest of the city at the cheapest tier so the
+// software renderer does not spend minutes on unrelated grass/crowd detail.
+if (ARENA_FOCUS) await evl("CBZ.setQualityLevel ? CBZ.setQualityLevel(0) : 0");
 let playing = false;
 for (let i = 0; i < 120 && !playing; i++) { await evl("(() => { const b = document.getElementById('playBtn'); if (b) b.click(); return true; })()"); await sleep(600); playing = await evl("!!(CBZ.game && CBZ.game.state === 'playing')"); }
 await sleep(6000);   // let traffic/peds populate
@@ -117,6 +124,40 @@ const info = await evl(`(() => {
       occupants: occupants.length,
       realActors: occupants.filter((a) => (CBZ.cityPeds || []).indexOf(a) >= 0 && a.group && a.char).length,
       attached: occupants.filter((a) => a._npcAttached && a.group.parent === g).length,
+    };
+  }
+  if (${ARENA_FOCUS ? "true" : "false"}) {
+    if (CBZ.setFPS) CBZ.setFPS(false);
+    let frame = null, screen = null;
+    CBZ.scene.traverse((o) => {
+      if (o.userData && o.userData.arenaBoardFrame) frame = o;
+      if (o.userData && o.userData.arenaBoard) screen = o;
+    });
+    if (!frame) return { view: "arena-jumbotron", error: "board frame not found" };
+    frame.updateMatrixWorld(true);
+    const p = frame.getWorldPosition(new THREE.Vector3());
+    // Low diagonal ringside view: it shows the bottom, two screen faces, all
+    // visible hangers, and the roof connection in one honest frame.
+    window.__cam = [p.x + 23, p.y - 10.5, p.z - 20, p.x, p.y + 2.0, p.z];
+    CBZ.camera.position.set(window.__cam[0],window.__cam[1],window.__cam[2]);
+    CBZ.camera.lookAt(window.__cam[3],window.__cam[4],window.__cam[5]);
+    CBZ.camera.updateMatrixWorld(true);
+    if (CBZ.player && CBZ.player.pos) CBZ.player.pos.set(p.x + 17, 1.2, p.z - 15);
+    // Narrow immediately, before yielding to another full-world rAF. The board
+    // and its complete truss/lamp suspension remain the real live objects.
+    const keepNames={"arena-truss":1,"arena-lampbox":1,"arena-lamp":1};
+    CBZ.scene.traverse((o) => {
+      if(!(o.isMesh||o.isLine||o.isPoints||o.isSprite))return;
+      const board=!!(o.userData&&(o.userData.arenaBoard||o.userData.arenaBoardFrame));
+      if(!board&&!keepNames[o.name])o.visible=false;
+    });
+    CBZ.scene.background=new THREE.Color(0x10141c);
+    return {
+      view: "arena-jumbotron",
+      frame: frame.userData.boardSize || (frame.geometry && frame.geometry.parameters),
+      screen: screen && screen.geometry && screen.geometry.parameters,
+      at: p.toArray().map((v) => +v.toFixed(2)),
+      support: CBZ.arenaSupportAudit && CBZ.arenaSupportAudit(false),
     };
   }
   if (${SWIM_FOCUS ? "true" : "false"}) {
@@ -431,6 +472,27 @@ const info = await evl(`(() => {
       } : null,
     };
   }
+  if (${THREADS_FOCUS ? "true" : "false"}) {
+    if (CBZ.setFPS) CBZ.setFPS(false);
+    const lot = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots || []).find((l) =>
+      l && l.building && l.building.group && l.building.shop &&
+      l.building.shop.name === "Threads & Drip");
+    if (lot) {
+      const b = lot.building;
+      const back = Math.max(b.w, b.d) * 1.25 + 18;
+      window.__cam = [lot.cx + back, Math.max(8, b.h * 0.68), lot.cz + back,
+        lot.cx, Math.min(b.h * 0.48, 8), lot.cz];
+      CBZ.player.pos.x = lot.cx + back * 0.62;
+      CBZ.player.pos.z = lot.cz + back * 0.62;
+      CBZ.player.pos.y = 2;
+      return {
+        building: b.shop.name, storeys: b.storeys, facade: b.facade,
+        at: [lot.cx | 0, lot.cz | 0], lift: !!b.lift,
+        facadeStats: CBZ.cityFacadeStats && CBZ.cityFacadeStats(),
+      };
+    }
+    return { building: "Threads & Drip", error: "lot not found" };
+  }
   if (${BUILDING_FOCUS ? "true" : "false"}) {
     if (CBZ.setFPS) CBZ.setFPS(false);
     const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots || []).filter((l) =>
@@ -486,6 +548,12 @@ const info = await evl(`(() => {
   return { peds: bestN, carDist: Math.sqrt(cd) | 0, at: [mx | 0, mz | 0] };
 })()`);
 console.log("scene:", JSON.stringify(info));
+if (ARENA_FOCUS) {
+  // Let the overridden camera reach the compositor, then stop the full-city
+  // render loop. SwiftShader otherwise spends minutes redrawing the entire
+  // world while Page.captureScreenshot waits for a quiet surface.
+  await evl("(() => { const raf=window.requestAnimationFrame.bind(window); let left=2; window.requestAnimationFrame=function(cb){ return left-->0 ? raf(cb) : 0; }; return true; })()");
+}
 await sleep(2500);
 if (MOUNTAIN_FOCUS) {
   const rayInfo = await evl("(() => { const r=new THREE.Raycaster();r.setFromCamera(new THREE.Vector2(0,0),CBZ.camera);return r.intersectObjects(CBZ.scene.children,true).slice(0,12).map(h=>({name:h.object.name||'(unnamed)',parent:h.object.parent&&(h.object.parent.name||h.object.parent.type),at:h.point.toArray().map(v=>+v.toFixed(2)),material:h.object.material&&h.object.material.type,color:h.object.material&&h.object.material.color&&h.object.material.color.getHexString()})); })()");
@@ -499,8 +567,30 @@ if (WILDLIFE_FOCUS) {
   const wildlifeInfo = await evl("(() => { const q=window.__wildlifeAudit,a=q&&q.actor;if(!a||!a.group)return null;const dx=a.group.position.x-q.x,dz=a.group.position.z-q.z,d=Math.hypot(dx,dz),h=a.faceH==null?a.heading:a.faceH;return {moved:+d.toFixed(3),alignment:d>0.001?+(((dx/d)*Math.cos(h)+(dz/d)*Math.sin(h)).toFixed(3)):1,gaitMoved:+(a._motionMoved||0).toFixed(4),gaitAlignment:+(a._motionAlignment==null?1:a._motionAlignment).toFixed(3),state:a.state,visible:a.group.visible!==false}; })()");
   console.log("wildlife:", JSON.stringify(wildlifeInfo));
 }
-const shot = await send("Page.captureScreenshot", { format: "png" });
-await writeFile(OUT, Buffer.from(shot.result.data, "base64"));
+if (ARENA_FOCUS) {
+  // Keep the real screen meshes and the real truss/lamp instance batches before
+  // the proof frame. Seats, decks, walls and the rest of the city are irrelevant
+  // to this silhouette and make a one-frame SwiftShader readback prohibitively
+  // expensive.
+  await evl(`(() => {
+    const keepNames={"arena-truss":1,"arena-lampbox":1,"arena-lamp":1};
+    CBZ.scene.traverse((o) => {
+      if(!(o.isMesh||o.isLine||o.isPoints||o.isSprite))return;
+      const board=!!(o.userData&&(o.userData.arenaBoard||o.userData.arenaBoardFrame));
+      if(!board&&!keepNames[o.name])o.visible=false;
+    });
+    CBZ.scene.background=new THREE.Color(0x10141c);
+    CBZ.renderer.render(CBZ.scene,CBZ.camera);
+    return true;
+  })()`);
+  const shot = await send("Page.captureScreenshot", {
+    format: "png", captureBeyondViewport: false, fromSurface: true
+  });
+  await writeFile(OUT, Buffer.from(shot.result.data, "base64"));
+} else {
+  const shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(OUT, Buffer.from(shot.result.data, "base64"));
+}
 console.log(OUT);
 chrome.kill("SIGTERM"); server.kill("SIGTERM");
 await rm(`/tmp/cbz-street-${dbg}`, { recursive: true, force: true }).catch(() => {});

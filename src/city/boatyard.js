@@ -533,7 +533,7 @@
     if (car._anchor) {
       car._anchor = null;
       if (car._anchorLight) { if (car._anchorLight.parent) car._anchorLight.parent.remove(car._anchorLight); car._anchorLight = null; }
-      note("Anchor up — you have way on.", 1.8); sfx("clank");
+      note("Anchor up — you have way on.", 1.8);
       return true;
     }
     const x = car.pos.x, z = car.pos.z;
@@ -564,7 +564,6 @@
       car.group.add(L); car._anchorLight = L;
     }
     note("Anchor down — " + Math.round(depth) + "m, " + scope + ":1 scope, " + Math.round(car._anchor.radius) + "m swing.", 3);
-    sfx("clank");
     return true;
   }
 

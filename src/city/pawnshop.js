@@ -176,7 +176,12 @@
       const sh = box(m.wood, Math.abs(tx) * (shelfW - 0.2) + Math.abs(inx) * 0.34, 0.05, Math.abs(tz) * (shelfW - 0.2) + Math.abs(inz) * 0.34, wx + inx * 0.04, sy, wz + inz * 0.04);
       group.add(sh);
     }
-    const place = (lat, y, fn) => { const px = wx + inx * 0.1 + tx * lat, pz = wz + inz * 0.1 + tz * lat; fn(px, pz, y); };
+    // Far-wall goods face back toward the customer. The old +IN offset moved
+    // the guitar body's 20cm radius through the plaster by 5cm.
+    const place = (lat, y, fn) => {
+      const px = wx - inx * 0.1 + tx * lat, pz = wz - inz * 0.1 + tz * lat;
+      fn(px, pz, y);
+    };
     // a hung GUITAR (red body + neck) — the classic "nobody came back for it"
     place(-shelfW * 0.32, 1.62, (px, pz, y) => {
       const body = mesh(GG.body, m.red, 1, 1.2, 1); body.position.set(px, y, pz); group.add(body);
@@ -231,6 +236,7 @@
       CBZ.colliders.push({ minX: wx - cabw / 2, maxX: wx + cabw / 2, minZ: wz - cabd / 2, maxZ: wz + cabd / 2, y0: 0, y1: 2.2 });
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("pawn-shop", b, group);
   }
 
   // ============================================================
@@ -384,7 +390,7 @@
   function redeemTicket(t) {
     const e = econ(); if (!e || !CBZ.city || !t || t.forfeit) return false;
     if (now() >= t.expires) { forfeit(t); return false; }      // too late — the broker already pulled it
-    if (!CBZ.city.canAfford(t.redeem)) { note("Redeeming the " + t.name + " costs " + fmt$(t.redeem) + " — come back with it.", 2.2); if (CBZ.sfx) CBZ.sfx("glass"); return false; }
+    if (!CBZ.city.canAfford(t.redeem)) { note("Redeeming the " + t.name + " costs " + fmt$(t.redeem) + " — come back with it.", 2.2); return false; }
     if (!CBZ.city.spend(t.redeem)) return false;
     e.add(t.name, 1);                                          // your item, back in your pocket
     t.forfeit = true; t.redeemed = true;                       // close the ticket

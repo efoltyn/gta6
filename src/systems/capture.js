@@ -152,7 +152,6 @@
     const i = cellIndex(cell);
     if (i < 0 || !doorSet(i, true)) return false;
     heldDoor = i;
-    if (CBZ.sfx) try { CBZ.sfx("door"); } catch (e) {}
     return true;
   }
   // open only what we closed. Safe to call from anywhere, any number of times.
@@ -217,7 +216,6 @@
     if (confineT > 0) sealPlayerCell();          // the door shuts behind you
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
     CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go");
-    CBZ.sfx("alarm");
   }
   CBZ.haulToCell = haulToCell;
 
@@ -312,7 +310,6 @@
     setCaptureState("cuffed", 1.9);
     CBZ.flashToast("CUFFED — BACK TO YOUR CELL");
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
-    CBZ.sfx("alarm");
   }
 
   // orange pepper-spray sting overlay
@@ -353,7 +350,6 @@
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = gd; }
     }
-    CBZ.sfx("alarm");
     if (best) {
       if (CBZ.aiKill) CBZ.aiKill(best, { group: CBZ.playerChar.group }, { noKnock: true });
       else { best.dead = true; best.ko = 0; best.hp = 0; best.hunt = 0; best.alert = 0; }
@@ -520,7 +516,6 @@
       CBZ.flashHint("Intake. The door stays shut for the count — " +
         Math.ceil(+g.jailSentence) + "s to serve.", 3.0);
     }
-    if (CBZ.sfx) try { CBZ.sfx("alarm"); } catch (e) {}
   }
 
   // per-frame bookkeeping
@@ -674,7 +669,6 @@
         CBZ.shake && CBZ.shake(0.5);
         if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
         CBZ.flashHint && CBZ.flashHint("LAST WARNING — GET OUT OF THE OPEN!", 1.6);
-        CBZ.sfx && CBZ.sfx("alarm");
         towerShotCD = 1.3;
         if (towerT > 3.2) towerSeq = 3;
       } else if (towerSeq === 3 && towerShotCD <= 0) {

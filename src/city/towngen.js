@@ -631,7 +631,11 @@
               }
               ccx = Math.max(ccx, stairRight + 0.4 - inx * 1.2);
             }
-            b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp, 0x6b4a2a, { solid: true });
+            const drawCounter = function () {
+              return b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp, 0x6b4a2a, { solid: true });
+            };
+            if (CBZ.interiorBounded) CBZ.interiorBounded(b, drawCounter, "town-counter");
+            else drawCounter();
             // vendor stands BEHIND the real counter (replaces the estimate above)
             bb.vendorSpot = { x: lt.cx + ccx + inx * 1.2, z: lt.cz + ccz + inz * 1.2, face: Math.atan2(lt.door.nx, lt.door.nz) };
             if (CBZ.cityFurnishInterior) { try { CBZ.cityFurnishInterior(b, sk, { nx: inx, nz: inz }); } catch (e) {} }

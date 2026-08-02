@@ -1394,5 +1394,193 @@
     return L.join("\n");
   };
 
+  // ============================================================
+  //  9. MODE-SCOPED DISASTER WATER
+  // ============================================================
+  // Survival used to own an unsegmented Lambert ocean and a second flat flood
+  // sheet. This is the reusable bridge: it keeps the canonical SWELLS table,
+  // clock, analytic slope, ripple texture and daylight uniforms, but omits the
+  // city coastline mask (the circular Survival island has its own event field).
+  // Macro displacement and the CPU sample below are the SAME five rows. Fine
+  // detail changes the shading normal only, never the gameplay waterline.
+
+  CBZ.waterBuildDisasterGeometry = function (span, segments) {
+    const tier = Math.max(0, Math.min(4, (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) | 0));
+    const byTier = [64, 88, 120, 144, 168];
+    const seg = Math.max(16, (segments | 0) || byTier[tier]);
+    const geo = new THREE.PlaneGeometry(span, span, seg, seg);
+    geo.rotateX(-Math.PI / 2);
+    geo.userData.waterDisasterGrid = { span: span, segments: seg };
+    return geo;
+  };
+
+  CBZ.waterDisasterSurfaceY = function (x, z, meanY, amp, chop, t) {
+    const base = CBZ.waterSeaY();
+    return meanY + (CBZ.waterWaveHeight(x, z, t, amp, chop) - base);
+  };
+
+  CBZ.makeDisasterWaterMaterial = function (opts) {
+    opts = opts || {};
+    const U = CBZ.waterCommonUniforms();
+    U.uDisasterAmp = { value: Number.isFinite(opts.amp) ? +opts.amp : 1.0 };
+    U.uDisasterChop = { value: Number.isFinite(opts.chop) ? +opts.chop : 1.0 };
+    U.uDisasterOpacity = { value: Number.isFinite(opts.opacity) ? +opts.opacity : 1.0 };
+    U.uDisasterFoam = { value: Number.isFinite(opts.foam) ? +opts.foam : 0.45 };
+    U.uDisasterNormalGain = { value: Number.isFinite(opts.normalGain) ? +opts.normalGain : 9.0 };
+    U.uDisasterTint = { value: new THREE.Color(opts.color == null ? 0x155878 : opts.color) };
+    U.uDisasterShallow = { value: new THREE.Color(opts.shallowColor == null ? 0x3198a9 : opts.shallowColor) };
+
+    const vs = [
+      "uniform float uSeaTime;",
+      "uniform float uDisasterAmp;",
+      "uniform float uDisasterChop;",
+      "uniform float uDisasterNormalGain;",
+      "varying vec3 vDwWorld;",
+      "varying vec3 vDwNormal;",
+      "varying float vDwHeight;",
+      "varying float vDwDist;",
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      "  vec4 dwBase = modelMatrix * vec4(position, 1.0);",
+      CBZ.waterWaveGLSL("dwBase.xz", "uSeaTime", "uDisasterAmp", "dwH", "dwDx", "dwDz", "uDisasterChop"),
+      "  vec3 dwWorld = vec3(dwBase.x, dwBase.y + dwH, dwBase.z);",
+      "  vec3 dwNormal = normalize(vec3(-dwDx * uDisasterNormalGain, 1.0, -dwDz * uDisasterNormalGain));",
+      "  vDwWorld = dwWorld;",
+      "  vDwNormal = dwNormal;",
+      "  vDwHeight = dwH / max(0.0001, " + gnum(TOTAL_AMP) + " * max(uDisasterAmp, uDisasterChop));",
+      "  vDwDist = distance(cameraPosition.xz, dwWorld.xz);",
+      "  vec4 mvPosition = viewMatrix * vec4(dwWorld, 1.0);",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      "  #include <fog_vertex>",
+      "}",
+    ].join("\n");
+
+    const fs = [
+      "uniform float uSeaTime;",
+      "uniform sampler2D uSeaNormal;",
+      "uniform vec3 uSunDir;",
+      "uniform vec3 uSunColor;",
+      "uniform vec3 uFoamColor;",
+      "uniform vec3 uDisasterTint;",
+      "uniform vec3 uDisasterShallow;",
+      "uniform float uDisasterOpacity;",
+      "uniform float uDisasterFoam;",
+      "varying vec3 vDwWorld;",
+      "varying vec3 vDwNormal;",
+      "varying float vDwHeight;",
+      "varying float vDwDist;",
+      "#include <fog_pars_fragment>",
+      "void main() {",
+      // Two octave normal flow: the useful part of the reference's FBM, but
+      // sampled from the one shared tile and distance-damped to avoid sparkle.
+      "  vec2 q0 = vDwWorld.xz * 0.042 + vec2(uSeaTime * 0.030, -uSeaTime * 0.021);",
+      "  vec2 q1 = vec2(vDwWorld.z, -vDwWorld.x) * 0.079 + vec2(-uSeaTime * 0.022, uSeaTime * 0.027);",
+      "  vec3 a = texture2D(uSeaNormal, q0).rgb * 2.0 - 1.0;",
+      "  vec3 b = texture2D(uSeaNormal, q1).rgb * 2.0 - 1.0;",
+      "  float detail = mix(0.46, 0.12, smoothstep(45.0, 520.0, vDwDist));",
+      "  vec3 micro = normalize(vec3((a.r + b.r) * 0.33, 1.0, (a.g + b.g) * 0.33));",
+      "  vec3 N = normalize(vDwNormal + micro * detail - vec3(0.0, detail, 0.0));",
+      "  if (!gl_FrontFacing) N = -N;",
+      "  vec3 V = normalize(cameraPosition - vDwWorld);",
+      "  vec3 L = normalize(uSunDir);",
+      "  float ndl = max(dot(N, L), 0.0);",
+      "  float fres = 0.025 + 0.975 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 4.8);",
+      // Crest translucency/subsurface tint: bright turquoise only on the thin
+      // sun-facing crest, not a global neon water colour.
+      "  float crest = smoothstep(0.18, 0.88, vDwHeight);",
+      "  float back = pow(max(dot(-L, N), 0.0), 2.0) * crest;",
+      "  vec3 body = mix(uDisasterTint * 0.62, uDisasterShallow, crest * 0.42);",
+      "  body *= 0.58 + ndl * 0.42;",
+      "  body += uDisasterShallow * back * 0.18;",
+      // Coherent analytic sky gradient in the reflected direction. High-tier
+      // city water still mirrors the real scene; this cheap arena surface gets
+      // a stable horizon rather than a flat Lambert card.
+      "  vec3 R = reflect(-V, N);",
+      "  float skyT = smoothstep(-0.12, 0.72, R.y);",
+      "  vec3 sky = mix(vec3(0.48, 0.65, 0.72), vec3(0.16, 0.36, 0.58), skyT);",
+      "  vec3 outColor = mix(body, sky, fres * 0.72);",
+      "  vec3 H = normalize(L + V);",
+      "  float glitter = pow(max(dot(N, H), 0.0), 34.0) * (0.18 + fres * 1.35);",
+      "  outColor += uSunColor * glitter * 0.72;",
+      // Restrained crest foam. Detail noise breaks it into patches; height and
+      // analytic tilt keep it at the tipping apex instead of painting flanks.
+      "  float n = (a.b + b.b) * 0.5;",
+      "  float tip = pow(clamp(vDwNormal.y, 0.0, 1.0), 18.0);",
+      "  float foam = smoothstep(0.48, 0.90, vDwHeight + (n - 0.5) * 0.38) * tip * uDisasterFoam;",
+      "  outColor = mix(outColor, uFoamColor, clamp(foam, 0.0, 0.88));",
+      "  gl_FragColor = vec4(outColor, uDisasterOpacity);",
+      "  #include <tonemapping_fragment>",
+      "  #include <encodings_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+
+    const transparent = opts.transparent === true || U.uDisasterOpacity.value < 0.999;
+    const mat = new THREE.ShaderMaterial({
+      name: opts.name || "CBZ Disaster Water",
+      uniforms: U, vertexShader: vs, fragmentShader: fs,
+      fog: true, transparent: transparent,
+      opacity: U.uDisasterOpacity.value,
+      depthWrite: opts.depthWrite == null ? !transparent : !!opts.depthWrite,
+      depthTest: true, side: THREE.DoubleSide,
+    });
+    mat.userData.waterMode = "shared-disaster-fresnel";
+    mat.userData.waterUniforms = U;
+    return mat;
+  };
+
+  CBZ.waterDriveDisasterSurface = function (target, state) {
+    const mat = target && target.material ? target.material : target;
+    const u = mat && mat.userData && mat.userData.waterUniforms;
+    if (!u) return false;
+    CBZ.waterDriveCommonUniforms(u);
+    state = state || {};
+    if (Number.isFinite(state.amp)) u.uDisasterAmp.value = +state.amp;
+    if (Number.isFinite(state.chop)) u.uDisasterChop.value = +state.chop;
+    if (Number.isFinite(state.foam)) u.uDisasterFoam.value = +state.foam;
+    if (Number.isFinite(state.opacity)) {
+      u.uDisasterOpacity.value = +state.opacity;
+      mat.opacity = +state.opacity;
+    }
+    return true;
+  };
+
+  // One arena-scoped physical descriptor. Directors publish phase/front/level;
+  // swimmers, debris and tests sample it. A curling bore may still have a
+  // presentation mesh because it is not a single-valued height field, but it
+  // owns no second collision or wetness truth.
+  let waterEvent = null;
+  CBZ.waterEventSet = function (spec) {
+    if (!spec) { waterEvent = null; return null; }
+    if (!waterEvent || (spec.owner && waterEvent.owner !== spec.owner)) waterEvent = {};
+    for (const k in spec) if (Object.prototype.hasOwnProperty.call(spec, k)) waterEvent[k] = spec[k];
+    return waterEvent;
+  };
+  CBZ.waterEventGet = function () { return waterEvent; };
+  CBZ.waterEventClear = function (owner) {
+    if (!waterEvent || (owner && waterEvent.owner !== owner)) return false;
+    waterEvent = null; return true;
+  };
+  CBZ.waterEventSample = function (x, z, t, out) {
+    out = out || {};
+    const e = waterEvent;
+    if (!e) { out.active = false; out.wet = false; return out; }
+    const dx = Number.isFinite(e.dx) ? e.dx : 0, dz = Number.isFinite(e.dz) ? e.dz : 0;
+    const s = (x - (+e.cx || 0)) * dx + (z - (+e.cz || 0)) * dz;
+    const fd = s - (Number.isFinite(e.frontS) ? e.frontS : 1e9);
+    const phase = e.phase || "";
+    const wet = phase === "flooded" || phase === "drain" || (phase === "sweep" && fd <= (Number.isFinite(e.frontWet) ? e.frontWet : -2));
+    const mean = Number.isFinite(e.level) ? e.level : 0;
+    const amp = Number.isFinite(e.waveAmp) ? e.waveAmp : 1;
+    const chop = Number.isFinite(e.chopAmp) ? e.chopAmp : amp;
+    out.active = true; out.owner = e.owner || ""; out.kind = e.kind || ""; out.phase = phase;
+    out.wet = wet; out.frontDistance = fd; out.mean = mean;
+    out.height = CBZ.waterDisasterSurfaceY(x, z, mean, amp, chop, t);
+    const flow = wet && Number.isFinite(e.flow) ? e.flow : 0;
+    out.currentX = dx * flow; out.currentZ = dz * flow;
+    out.foam = phase === "sweep" ? Math.max(0, 1 - Math.abs(fd) / Math.max(1, +e.frontWidth || 18)) : 0;
+    return out;
+  };
+
   CBZ.waterSpecReady = true;
 })();

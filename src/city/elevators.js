@@ -315,7 +315,7 @@
     // instead of a black void backing that occluded it (the filmed bug).
     // the two sliding leafs + the door COLLIDER (one persistent y-gated box —
     // toggled by mutating y0/y1, which the xz broadphase never re-indexes)
-    const ground = { leaves: [], open: 0, target: 0, autoClose: null, trav: LEAFTRAV };
+    const ground = { leaves: [], open: 0, target: 0, autoClose: null, autoCloseAudible: false, trav: LEAFTRAV };
     for (const s of [-1, 1]) {
       const p = P(s * LEAFOFF, GDOOR), sz = tn(LEAFHW, 0.1);
       const m = box(grp, p.x, 1.27, p.z, sz.w, 2.45, sz.d, LEAF);
@@ -376,7 +376,7 @@
       const m = box(grp, p.x, RBASE + 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
       solid(RBASE + 2.4, RBASE + 3.24, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
-    const roof = { leaves: [], open: 0, target: 0, autoClose: null, trav: LEAFTRAV };
+    const roof = { leaves: [], open: 0, target: 0, autoClose: null, autoCloseAudible: false, trav: LEAFTRAV };
     for (const s of [-1, 1]) {
       const p = P(s * LEAFOFF, RDOOR), sz = tn(LEAFHW, 0.1);
       const m = box(grp, p.x, RBASE + 1.27, p.z, sz.w, 2.45, sz.d, LEAF);
@@ -666,6 +666,16 @@
   }
 
   function rigOf(el, end) { return end === "g" ? el.ground : el.roof; }
+  // The sound follows the same target transition that moves the two visible
+  // leafs. No panel state, teleport or elevator UI is allowed to impersonate a
+  // door; callers opt into audio only while the player is at/in this cab.
+  function setDoorTarget(r, open, audible) {
+    const target = open ? 1 : 0;
+    if (r.target === target) return false;
+    r.target = target;
+    if (audible && CBZ.sfx) CBZ.sfx(open ? "door_open" : "door_close");
+    return true;
+  }
   // is the player INSIDE the cab room at this end (xz volume + the floor's y band)?
   function insideCab(el, end, P) {
     if (!P) return false;
@@ -691,16 +701,15 @@
   function callLift(el, end) {
     const m = el.m;
     m.st = "open"; m.end = end; m.t = 0; m.will = false; m.moved = false;
-    rigOf(el, end).target = 1;
+    setDoorTarget(rigOf(el, end), true, true);
     setLit(el, true);
-    if (CBZ.sfx) { CBZ.sfx("switch"); CBZ.sfx("door"); }
+    if (CBZ.sfx) CBZ.sfx("switch");
   }
 
   function beginClose(el) {
     const m = el.m;
     m.st = "close"; m.t = 0; m.will = true;
-    rigOf(el, m.end).target = 0;
-    if (CBZ.sfx) CBZ.sfx("door");
+    setDoorTarget(rigOf(el, m.end), false, true);
   }
 
   function resetMachine(el, cool) {
@@ -712,7 +721,7 @@
 
   // hard snap a rig shut (mode exit / mid-ride abort): leaves home, collider solid
   function closeNow(r) {
-    r.open = 0; r.target = 0; r.autoClose = null;
+    r.open = 0; r.target = 0; r.autoClose = null; r.autoCloseAudible = false;
     for (const L of r.leaves) { L.m.position.x = L.baseX; L.m.position.z = L.baseZ; }
     gateDoor(r);
   }
@@ -754,7 +763,14 @@
   }
 
   function animRig(r, dt) {
-    if (r.autoClose != null) { r.autoClose -= dt; if (r.autoClose <= 0) { r.autoClose = null; r.target = 0; } }
+    if (r.autoClose != null) {
+      r.autoClose -= dt;
+      if (r.autoClose <= 0) {
+        r.autoClose = null;
+        setDoorTarget(r, false, !!r.autoCloseAudible);
+        r.autoCloseAudible = false;
+      }
+    }
     // PERF: doors at rest = leaves already sit at the pose — skip the per-leaf
     // position writes (this runs per rig per frame, almost always idle).
     if (r.open === r.target) return;
@@ -802,7 +818,7 @@
     // doors open with an auto-close so nobody's corpse is sealed in a box.
     if (!P || P.dead || P.driving) {
       const r = rigOf(el, m.end);
-      r.target = 1; r.autoClose = 2.0;
+      setDoorTarget(r, true, false); r.autoClose = 2.0; r.autoCloseAudible = false;
       resetMachine(el, CALL_COOL);
       return null;
     }
@@ -814,7 +830,7 @@
       if (r.open > 0.7 && insideCab(el, m.end, P)) { beginClose(el); return "Doors closing…"; }
       if (m.t >= WAIT_OPEN) {
         if (inDoorway(el, m.end, P)) { m.t = WAIT_OPEN - 0.6; return "Elevator — step in"; }  // doors WAIT, no crush
-        r.target = 0; m.st = "close"; m.will = false;        // nobody came: close back to idle
+        setDoorTarget(r, false, true); m.st = "close"; m.will = false; // nobody came: close back to idle
         setLit(el, false);
       }
       return insideCab(el, m.end, P) ? "Doors closing…" : "Elevator — step in ([E] closes the doors)";
@@ -822,7 +838,7 @@
 
     if (m.st === "close") {
       if (inDoorway(el, m.end, P)) {                          // someone in the leaf line: reopen
-        r.target = 1; m.st = "open"; m.t = WAIT_OPEN - 1.4;
+        setDoorTarget(r, true, true); m.st = "open"; m.t = WAIT_OPEN - 1.4;
         if (m.will) m.will = false;
         setLit(el, true);
         return "Elevator — step in";
@@ -874,9 +890,9 @@
         // they WALK out. Whoever was chasing is still at the other end.
         m.st = "out"; m.t = 0;
         const r2 = rigOf(el, m.end);
-        r2.target = 1; gateDoor(r2);
+        setDoorTarget(r2, true, true); gateDoor(r2);
         // arrival DING then the doors (guarded — "blip" stands in for a chime)
-        if (CBZ.sfx) { CBZ.sfx("blip"); CBZ.sfx("door"); }
+        if (CBZ.sfx) CBZ.sfx("blip");
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
           CBZ.city.note(m.end === "r" ? ("" + ST + " floors up — the roof is yours.") : "Ground floor.", 2);
@@ -899,7 +915,7 @@
       r.target = 1; r.autoClose = null;
       const armed = m.t > 1.2 && r.open > 0.5;
       if ((armed && !insideCab(el, m.end, P) && !inDoorway(el, m.end, P)) || m.t >= EXIT_WAIT) {
-        r.target = 0;
+        setDoorTarget(r, false, true);
         resetMachine(el, CALL_COOL);
         return null;
       }
@@ -949,7 +965,9 @@
         if (el.m.st !== "idle") continue;
         for (const end of ["g", "r"]) {
           const rr = rigOf(el, end);
-          if (rr.open < 0.1 && insideCab(el, end, P)) { rr.target = 1; rr.autoClose = 4.0; }
+          if (rr.open < 0.1 && insideCab(el, end, P)) {
+            setDoorTarget(rr, true, true); rr.autoClose = 4.0; rr.autoCloseAudible = true;
+          }
         }
       }
     }
@@ -1268,4 +1286,60 @@
 
   // PUBLIC: the built lifts (minimap markers / missions can target a roof)
   CBZ.cityElevators = function () { return elevators; };
+
+  // FIRST-PRINCIPLES CONTRACT: a lift is not merely a teleport marker. Its
+  // building must publish an ordered ground→roof stop list, reserve and carve
+  // one continuous shaft, build two sealed two-leaf cab rooms on the SAME x/z
+  // column, and publish the resulting machine back on the canonical building
+  // record. Math-gate reads this after world build so a future style/era recipe
+  // cannot silently strand a decorative elevator in an uncarved floor plate.
+  CBZ.cityElevatorAudit = function () {
+    const out = {
+      elevators: elevators.length, badStops: 0, missingShafts: 0,
+      uncarvedSlabs: 0, missingLift: 0, misalignedEnds: 0, badCabs: 0,
+      samples: []
+    };
+    function fail(kind, el, detail) {
+      out[kind]++;
+      if (out.samples.length < 10) out.samples.push({
+        kind, x: +el.b.ox.toFixed(2), z: +el.b.oz.toFixed(2), detail
+      });
+    }
+    for (const el of elevators) {
+      const b = el.b, tops = b.floorTops;
+      let stopsOk = Array.isArray(tops) && tops.length >= 2;
+      if (stopsOk) {
+        for (let i = 0; i < tops.length; i++) {
+          if (!Number.isFinite(tops[i]) || (i && tops[i] <= tops[i - 1])) { stopsOk = false; break; }
+        }
+        stopsOk = stopsOk
+          && Math.abs(tops[0] - 0.14) <= 0.001
+          && Math.abs(tops[tops.length - 1] - b.h) <= 0.001
+          && el.topFloor === tops.length;
+      }
+      if (!stopsOk) fail("badStops", el, "unordered or shell-height mismatch");
+      if (!b.shaftRects || !b.shaftRects.length)
+        fail("missingShafts", el, "no reserved shaft footprint");
+      if (b.floorSlabs) {
+        for (const slab of b.floorSlabs) if (!slab.carved)
+          fail("uncarvedSlabs", el, "intermediate floor crosses the lift column");
+      }
+      if (!b.lift || b.lift.floors !== el.topFloor
+        || !b.lift.ground || !b.lift.roof
+        || Math.abs(b.lift.roof.y - b.h) > 0.001)
+        fail("missingLift", el, "building registry does not match the machine");
+      if (!el.groundPad || !el.roofPad
+        || Math.hypot(el.groundPad.x - el.roofPad.x, el.groundPad.z - el.roofPad.z) > 0.001)
+        fail("misalignedEnds", el, "ground and roof cabs are not one vertical column");
+      if (!el.ground || !el.roof
+        || !el.ground.leaves || el.ground.leaves.length !== 2 || !el.ground.col
+        || !el.roof.leaves || el.roof.leaves.length !== 2 || !el.roof.col
+        || Math.abs(el.gFloor - 0.16) > 0.001
+        || Math.abs(el.rFloor - (b.h + 0.16)) > 0.001)
+        fail("badCabs", el, "an end is not a sealed, floor-aligned cab room");
+    }
+    out.failures = out.badStops + out.missingShafts + out.uncarvedSlabs
+      + out.missingLift + out.misalignedEnds + out.badCabs;
+    return out;
+  };
 })();

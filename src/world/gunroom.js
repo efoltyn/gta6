@@ -558,7 +558,7 @@
       if (inner.lamp) { inner.lamp.material.color.setHex(0xffb347); inner.lamp.material.emissive.setHex(0xff7a1a); }
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (!quiet && v) { CBZ.sfx("key"); CBZ.sfx("door"); }
+    if (!quiet && v) CBZ.sfx("key");
     return v;
   };
 
@@ -626,7 +626,7 @@
           if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
           armory.lamp.material.color.setHex(0x39ff88);
           armory.lamp.material.emissive.setHex(0x14c258);
-          CBZ.sfx("door");
+          if (CBZ.sfx) CBZ.sfx("door_open");
           CBZ.flashHint("The armory rack's open — take what you need.", 2.6);
         } else {
           CBZ.flashHint(L.line || "The armory door won't budge — it wants a keycard.", 1.4);
@@ -676,7 +676,6 @@
                 if (inner.saw >= 6) {
                   if (econ && econ.takeItem) econ.takeItem("Hacksaw Blade");   // the blade snaps
                   inner.setOpen(true);
-                  CBZ.sfx("clank");
                   CBZ.flashHint("The padlock drops. The blade's finished — worth it.", 2.6);
                 }
               } else {

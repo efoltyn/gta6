@@ -308,7 +308,6 @@
     ped.inCar = true;                                // peds.js fully skips them (the seat IS the freeze)
     ped.group.visible = false;
     ped.pos.set(car.pos.x, 0, car.pos.z);
-    if (CBZ.sfx) CBZ.sfx("door");
     I.refresh();
     return true;
   }
@@ -329,7 +328,6 @@
     unseatBody(ped, car);
     ped.restraint.state = "cuffed";
     ped.restraint.vehicle = null;
-    if (CBZ.sfx) CBZ.sfx("door");
     I.refresh();
     return true;
   }

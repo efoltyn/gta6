@@ -1388,7 +1388,7 @@
         // land BEHIND the sea. Rejecting sea fragments over dry land outright
         // means water and ground never fight for depth ownership, so there is
         // no green flicker and no apparent ocean growing around trees.
-        "  if (uSeaHasLandMask > 0.5 && field.r > 0.5) discard;",
+        "  if (uSeaHasLandMask > 0.5 && field.r > uShoreCut) discard;",
         "  float inland = max(vSeaInland, field.a);",
         // Two scrolling ripple fields supply the metre-scale detail that even
         // the radial mesh cannot tessellate. Detail is faded with distance so

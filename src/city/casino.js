@@ -227,7 +227,12 @@
     // a game package (core/packages.js, order-88 claim) owns this interior —
     // exterior marquee still ours, interior furniture is the package's.
     if (lot._gamePkg) return;
-    try { dressInterior(lot); } catch (e) {}
+    try {
+      if (CBZ.interiorBounded) CBZ.interiorBounded(lot.building, function () {
+        return dressInterior(lot);
+      }, "casino-floor");
+      else dressInterior(lot);
+    } catch (e) {}
   }
 
   // ---- the single global casino-table interaction zone ----------------------

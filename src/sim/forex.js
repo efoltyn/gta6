@@ -136,23 +136,19 @@
    ============================================================
    PLAYER VENUES — two stations, one shared panel (SPREAD is the only thing
    that differs between them):
-     - AIRPORT FX COUNTER: a small kiosk prop dropped just past the four
-       check-in desks in city/island_airport.js's terminal (tx=-40, tz=24,
-       tw=150, td=26 — copied verbatim from that file's buildTerminal(),
-       same "copy the coordinates, note the source" precedent city/polity.js
-       already used for GOLDSPIRE_RECT/CAPEHARBOR_RECT/etc. — island_airport.js
-       itself is NOT edited).
+     - AIRPORT FX COUNTER: a small kiosk just past the four check-in desks in
+       city/island_airport.js's terminal. Its position derives from the live
+       terminal shell published on the arena; there is no copied footprint.
      - EXCHANGE DESK: MASTER-PLAN VI.6 wanted this inside "the existing
        GOLDSPIRE TRUST bank prefab retagged shopKind:exchange" — since that
        retag never shipped (see FEE BOOKING above), there is no distinct
        "exchange" building to anchor to yet. Adaptation: the desk piggybacks
        on the ONE real, physically-built bank branch that exists today —
-       city/bank.js's Meridian Trust lobby (queried read-only via the public
-       CBZ.cityBankLot() getter that file already exports for exactly this
-       kind of external anchor; bank.js itself is NOT edited) — a small desk
-       prop dropped just outside its footprint. When a later wave finally
-       ships a real per-country exchange building, this desk is a ~10-line
-       relocation, not a redesign.
+       city/bank.js's Meridian Trust lobby (queried via the public
+       CBZ.cityBankLot() getter that file exports for external anchors). The
+       desk is laid out in the bank's door-relative frame and stays inside the
+       live wall shell. When a later wave ships a per-country exchange
+       building, this desk remains a small relocation rather than a redesign.
    Both stations follow the established interact-prompt idiom (city/bank.js's
    ATM/teller/loan-desk stations: a `stations` array of {x,z,reach}, a
    per-frame nearest-in-reach picker, a floating "[E] ..." prompt, keydown
@@ -713,58 +709,77 @@
     return m;
   }
 
-  // AIRPORT terminal footprint — copied verbatim from city/island_airport.js's
-  // own buildTerminal() constants (tx=-40, tz=24, tw=150, td=26, so the
-  // building spans x∈[-115,35] z∈[11,37]; see that file's header for the
-  // FOOTPRINT numbers) — same "copy the coordinates, note the source"
-  // precedent city/polity.js's GOLDSPIRE_RECT/etc. already used;
-  // island_airport.js itself is NOT edited. The 4 check-in desks run at
-  // dx = tx-tw/2+20+k*30 = -95,-65,-35,-5 (z=34) — this kiosk continues that
-  // exact line as a "5th desk" (k=4 -> dx=25), still inside the terminal's
-  // own interior margin (ix1 = tx+tw/2-4 = 31). The whole terminal rides the
-  // airport's world-layout dial (world/layout.js), so the copied constants
-  // ride the SAME dial — a fixed 25 would leave the kiosk floating over sea
-  // 220u east of the moved desk row after a stage-2 slide.
-  const _AWOFF = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
-  const AIRPORT_KIOSK = { x: 25 + _AWOFF.dx, z: 34 + _AWOFF.dz };
-
-  function buildAirportKiosk(root) {
-    const m = vmats(), p = AIRPORT_KIOSK;
+  // The airport publishes the cityMakeBuilding terminal shell. Derive the
+  // fifth check-in position from that live host so world-layout changes move
+  // shell and kiosk as one object.
+  function buildAirportKiosk(root, terminal) {
+    const m = vmats();
+    const p = {
+      x: (+terminal.ox || 0) + (+terminal.w || 20) / 2 - 10,
+      z: (+terminal.oz || 0) + (+terminal.d || 10) / 2 - 3,
+    };
+    const group = new THREE.Group();
+    root.add(group);
     const body = vbox(3.2, 1.15, 0.9, m.kiosk);
     body.position.set(p.x, 0.58, p.z);
-    root.add(body);
+    group.add(body);
     const face = vbox(2.6, 0.5, 0.06, m.kioskFace);
     face.position.set(p.x, 1.25, p.z - 0.42);
-    root.add(face);
+    group.add(face);
     const scr = vbox(0.4, 0.26, 0.04, m.screen);
     scr.position.set(p.x, 1.28, p.z - 0.46);
-    root.add(scr);
+    group.add(scr);
     if (CBZ.colliders) CBZ.colliders.push({ minX: p.x - 1.7, maxX: p.x + 1.7, minZ: p.z - 0.55, maxZ: p.z + 0.55, y0: 0, y1: 1.3 });
     const lab = vtag("CURRENCY EXCHANGE", "#9fffce", 2.8, 0.44);
-    if (lab) { lab.position.set(p.x, 2.0, p.z); root.add(lab); }
-    return { x: p.x, z: p.z };
+    if (lab) { lab.position.set(p.x, 2.0, p.z); group.add(lab); }
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("forex-airport", terminal, group);
+    return { x: p.x, z: p.z, group: group };
   }
-  // exchange desk: piggybacks on the mainland bank lot's public position
-  // getter (city/bank.js's CBZ.cityBankLot(), read-only, bank.js not edited)
-  // — see header for why there's no distinct "exchange" building to anchor
-  // to yet. Sits just outside the branch's east wall.
+  // Exchange desk: piggybacks on the mainland bank lot's public position
+  // getter, but uses the building's inward/tangent frame. Depth is measured
+  // from the door wall, exactly as the bank's own teller/ATM layout measures
+  // it, so no facade orientation can put this fixture on the pavement.
   function buildExchangeDesk(root, lot) {
     const m = vmats();
-    const w = (lot.building && lot.building.w) || 10;
-    const x = lot.cx + w / 2 + 3, z = lot.cz;
-    const desk = vbox(1.6, 0.78, 0.9, m.desk);
+    const b = lot.building;
+    const door = b.door || b.localDoor || { nx: 0, nz: 1 };
+    const inx = +door.nx || 0, inz = +door.nz || 0;
+    const tx = -inz, tz = inx;
+    const w = +b.w || 10, d = +b.d || 10;
+    const wt = b.wt != null ? +b.wt : 0.4;
+    const halfIn = (Math.abs(inx) > Math.abs(inz) ? w : d) / 2;
+    const halfTan = (Math.abs(inx) > Math.abs(inz) ? d : w) / 2;
+    const depth = Math.min(2 * halfIn - wt - 0.6, Math.max(2.6, halfIn * 0.45));
+    const lat = Math.min(4.0, Math.max(0, halfTan - wt - 1.2));
+    const cx = b.ox != null ? +b.ox : +lot.cx;
+    const cz = b.oz != null ? +b.oz : +lot.cz;
+    const x = cx + inx * (depth - halfIn) + tx * lat;
+    const z = cz + inz * (depth - halfIn) + tz * lat;
+    const group = new THREE.Group();
+    root.add(group);
+    const deskW = Math.abs(tx) * 1.6 + Math.abs(inx) * 0.9;
+    const deskD = Math.abs(tz) * 1.6 + Math.abs(inz) * 0.9;
+    const desk = vbox(deskW, 0.78, deskD, m.desk);
     desk.position.set(x, 0.39, z);
-    root.add(desk);
-    const top = vbox(1.68, 0.06, 0.98, m.deskTop);
+    group.add(desk);
+    const topW = Math.abs(tx) * 1.68 + Math.abs(inx) * 0.98;
+    const topD = Math.abs(tz) * 1.68 + Math.abs(inz) * 0.98;
+    const top = vbox(topW, 0.06, topD, m.deskTop);
     top.position.set(x, 0.79, z);
-    root.add(top);
-    const scr = vbox(0.4, 0.3, 0.05, m.screen);
+    group.add(top);
+    const scrW = Math.abs(tx) * 0.4 + Math.abs(inx) * 0.05;
+    const scrD = Math.abs(tz) * 0.4 + Math.abs(inz) * 0.05;
+    const scr = vbox(scrW, 0.3, scrD, m.screen);
     scr.position.set(x, 0.98, z);
-    root.add(scr);
-    if (CBZ.colliders) CBZ.colliders.push({ minX: x - 0.9, maxX: x + 0.9, minZ: z - 0.55, maxZ: z + 0.55, y0: 0, y1: 0.85 });
+    group.add(scr);
+    if (CBZ.colliders) CBZ.colliders.push({
+      minX: x - topW / 2, maxX: x + topW / 2,
+      minZ: z - topD / 2, maxZ: z + topD / 2, y0: 0, y1: 0.85,
+    });
     const lab = vtag("EXCHANGE DESK", "#bcd0ff", 2.3, 0.42);
-    if (lab) { lab.position.set(x, 1.55, z); root.add(lab); }
-    return { x: x, z: z };
+    if (lab) { lab.position.set(x, 1.55, z); group.add(lab); }
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("forex-bank", b, group);
+    return { x: x, z: z, group: group };
   }
 
   // self-healing ensure() (gunstore/bank.js precedent): airport kiosk is
@@ -780,9 +795,12 @@
     const root = arena.root || CBZ.scene;
     if (!V.group) { V.group = new THREE.Group(); root.add(V.group); }
     if (!V.built) {
-      const kp = buildAirportKiosk(V.group);
-      V.stations.push({ kind: "airport", venue: "airport", x: kp.x, z: kp.z, reach: REACH, label: "Airport FX Counter" });
-      V.built = true;
+      const terminal = arena.airportTerminal;
+      if (terminal) {
+        const kp = buildAirportKiosk(V.group, terminal);
+        V.stations.push({ kind: "airport", venue: "airport", x: kp.x, z: kp.z, reach: REACH, label: "Airport FX Counter" });
+        V.built = true;
+      }
     }
     if (!V.deskBuilt) {
       const bankLot = CBZ.cityBankLot ? CBZ.cityBankLot() : null;

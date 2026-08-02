@@ -208,7 +208,7 @@
     //      shirts/ties/trousers hung along each. Linear wall layout = the
     //      narrow-boutique standard (frees the floor for the mannequins).
     const railY = 1.55;                                   // rod height
-    const railLen = Math.max(2.4, 2 * halfTan - 1.8);
+    const railLen = Math.max(2.4, 2 * halfIn - 1.8);
     const half = Math.ceil(wall.length / 2) || 1;
     const sides = [-1, 1];
     sides.forEach((sgn) => {
@@ -220,7 +220,7 @@
         Math.abs(inx) * railLen + Math.abs(tx) * 0.05,
         0.05,
         Math.abs(inz) * railLen + Math.abs(tz) * 0.05), m.rail);
-      rod.position.set(wallX + inx * (halfIn * 0.05), railY + 0.55, wallZ + inz * (halfIn * 0.05));
+      rod.position.set(wallX, railY + 0.55, wallZ);
       rod.castShadow = false; group.add(rod);
       const lilac = new THREE.Mesh(new THREE.BoxGeometry(
         Math.abs(inx) * (railLen + 0.1) + Math.abs(tx) * 0.08, 0.06,
@@ -241,7 +241,11 @@
       // spread along the depth axis between the door end and the back
       const t = inRow > 1 ? (idxInRow / (inRow - 1)) : 0.5;
       const depth = 0.9 + t * Math.max(0.2, railLen - 0.6);
-      const x = wallX + inx * depth, z = wallZ + inz * depth;
+      // depth is measured FROM THE DOOR WALL. wallX/wallZ are on the room
+      // centreline along IN, so subtract halfIn before converting to world.
+      // The old centre+depth mix sent the back half of each rail through the
+      // far facade (about 13m outside on the standard Threads & Drip lot).
+      const x = wallX + inx * (depth - halfIn), z = wallZ + inz * (depth - halfIn);
       const sp = CBZ.cityComposableSpec(it.visualId);
       const slot = (sp && sp.slot) || it._slot || "shirt";
       const faceY = Math.atan2(-tx * sgn, -tz * sgn);        // off the wall, into the room
@@ -320,6 +324,7 @@
     S.slots.push({ kind: "mirror", x: mx - inx * 0.6, y: 1.2, z: mz - inz * 0.6,
                    reach: RACK_REACH + 0.4, dot: 0.45, tux: tux });
     S.tux = tux;
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("clothing-store", S.lot.building, group);
   }
 
   // a simple torso bust-form on a stand (shared geometry-free; small boxes)
@@ -349,14 +354,12 @@
     // already own it → just put it on (free re-wear).
     if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(visualId)) {
       if (CBZ.cityWear) CBZ.cityWear(visualId);
-      if (CBZ.sfx) CBZ.sfx("door");
       note("Pulled the " + (label || name) + " on.", 1.6);
       return;
     }
     const price = e_buy(name);
     if (!CBZ.city.spend(price)) {
       note("The " + (label || name) + " runs " + fmt$(price) + " — come back with the money.", 2);
-      if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
     if (CBZ.cityGrantItem) CBZ.cityGrantItem(visualId);

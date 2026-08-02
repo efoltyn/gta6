@@ -712,6 +712,7 @@
     // the real vault to drill and glow it red while it's being cracked (the
     // heist owns the score arc; the branch owns the prop — one hook bridges them).
     S.vault = { x: vaultPos.x, z: vaultPos.z, door: vdoor, doorMat: vdoorMat, hub: hub };
+    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("bank-lobby", lot.building, group);
   }
 
   // ---- the look-pick (which station are you facing within reach) -------------
@@ -841,7 +842,6 @@
     S.pTerm = TERMS.personal;
     renderPanel();
     el.style.display = "block";
-    if (CBZ.sfx) CBZ.sfx("door");
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
   }
   function closePanel() {
@@ -910,7 +910,7 @@
   function takePersonal() {
     const amt = clampPersonalAmt(S.pAmt);
     const o = offer("personal", amt, {});
-    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined — " + (o.reason || "not approved") + ".", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined — " + (o.reason || "not approved") + ".", 2); return; }
     o.purpose = "personal"; o.termTicks = S.pTerm; o.payment = paymentFor(o.principal, o.rate, S.pTerm);
     const id = take(o);
     if (id) {

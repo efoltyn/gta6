@@ -4979,6 +4979,22 @@
 
   // ---- movement / engagement ----
   function move(ped, dt, animate) {
+    // physics.js owns the short vault/mantle trajectory once this pedestrian
+    // commits. Keep it ahead of face/chat/wander steering so those ordinary
+    // behaviours cannot pull the body back to the near side halfway through.
+    const traversal = CBZ.characterTraversal;
+    if (ped._traversal) {
+      const ph = ped._phys;
+      const interrupted = ped.dead || ped.inCar || ped.controlled || ped.ko > 0 ||
+        (ph && (ph.air || ph.down > 0 || ph.heldBy));
+      if (!traversal || !ped.char || interrupted) {
+        if (traversal) traversal.cancel(ped, ped.char, false);
+        else ped._traversal = null;
+      } else if (traversal.step(ped, ped.char, dt, animate)) {
+        return;
+      }
+    }
+
     // walked up to interact? they at least turn and LOOK at you (flag refreshed
     // by city/interact.js each frame the panel targets them). Calm people stop
     // and face you; someone fleeing / fighting / surrendering is too busy.
@@ -5124,6 +5140,7 @@
     if (ped._screamT > 0) ped._screamT -= dt;
     if (ped.posePoint > 0) ped.posePoint -= dt;   // the snitch point-out gesture window
     if (ped._probeT > 0) ped._probeT -= dt;   // far-walker wall-probe rate gate
+    if (ped._traverseProbeT > 0) ped._traverseProbeT -= dt; // running obstacle probe
     if (ped._rampT > 0) ped._rampT -= dt;      // rampager re-target / re-arm cadence
     if (ped._sfCD > 0) ped._sfCD -= dt;        // shoot-first re-check cadence (combat_iq)
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
@@ -5187,6 +5204,32 @@
       if (animate) animChar(ped.char, 0, dt);
       return;
     }
+    // A running NPC gets the same character-controller capability as the
+    // player. Probe along the UNSTEERED goal heading first: steering sees the
+    // obstacle as a wall and would otherwise turn away before the body ever
+    // has a chance to vault it. Walkers still route around normally.
+    const running = spd > 0 && dist > 0.65 &&
+      spd >= Math.max(1.7, ped.baseSpeed * 1.42) && !ped.controlled && !surrendering;
+    // Fleeing/reporting bodies are genuinely sprinting; ordinary joggers and
+    // combat footwork can still vault, but do not throw gratuitous 360s.
+    const sprinting = st === "flee" || ped.reportState === "run" ||
+      spd >= ped.baseSpeed * 1.95;
+    if (running && traversal && ped.char && (ped._traverseProbeT || 0) <= 0) {
+      ped._traverseProbeT = 0.10 + (ped.slice & 3) * 0.015;
+      const tx = dx / dist, tz = dz / dist;
+      const started = traversal.start(ped, ped.char, tx, tz, {
+        speed: spd,
+        radius: ped.radius || PED_R,
+        height: (ped.char.metric && ped.char.metric.height) || 1.7,
+        allowTop: false,              // NPC navigation has no rooftop goal graph
+        cars: true,
+        npc: true,
+        running: true,
+        sprinting,
+      });
+      if (started && traversal.step(ped, ped.char, dt, animate)) return;
+    }
+
     const _px0 = ped.pos.x, _pz0 = ped.pos.z, _trying = spd > 0 && dist > 0.5;
     if (spd > 0 && dist > 0.5) {
       // blend the desired heading with local steering (look-ahead + separation)
@@ -5440,7 +5483,8 @@
       //      (owner's rule: you SEE someone see you — no popup tells you). ----
       // (guard ra/la individually — gore can strip a whole arm off the rig,
       //  and a one-armed witness must not crash the frame loop)
-      if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && p.char && p.char.parts && p.char.parts.ra) {
+      if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && !p._traversal &&
+          p.char && !p.char.traversePose && p.char.parts && p.char.parts.ra) {
         const ch = p.char, J = ch.low || {};
         if (!ch.surrender && !ch.handsUp && !ch.aimingPose && !p.armed) {
           // (armed peds skip these — their weapon-ready pose owns the arms,

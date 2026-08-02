@@ -362,7 +362,6 @@
       P.pos.set(tx, ty, tz);
       P.vy = 0; P.grounded = true;
       CBZ.playerChar.group.position.copy(P.pos);
-      if (CBZ.sfx) CBZ.sfx("door");
       CBZ.city.note(note, 2);
     }
     close();

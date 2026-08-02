@@ -1143,10 +1143,9 @@
     P.pos.set(craft.pos.x, craft.pos.y, craft.pos.z);
     // point the chase-cam down the craft's nose
     if (CBZ.cam) CBZ.cam.yaw = craft.heading + Math.PI;
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
-    // Controls belong in pause/settings, not in a floating toast and definitely
-    // not as a fake in-world phone message. Entry is self-evident from the live
-    // instrument strip; the door cue confirms the action without prose.
+    // Controls belong in pause/settings, not in a floating toast or a generic
+    // house-door sample. Entry is self-evident from the moving hatch/canopy and
+    // the live instrument strip.
     return true;
   }
 
@@ -1204,7 +1203,6 @@
       P.vy = 0; P.grounded = true;
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
       despawnHotJet(craft);
-      if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
       return;
     }
     if (craft) {
@@ -1223,7 +1221,6 @@
       P.vy = 0; P.grounded = true;
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     }
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
   }
   // PUBLIC EXIT — same call, same end state; when the craft is settled on the
   // ground the door/canopy visibly opens FIRST (you see out through the

@@ -249,8 +249,10 @@
                       failure — one dumpster in an alley is the point. It is
                       printed BESIDE alleysBlocked so a "fix" that empties
                       every alley cannot pass as an improvement.
-       acBoxes        window air-conditioners hung off facades. Pinned 0.
-       roofItems      rooftop plant instances still standing.
+       acBoxes          window air-conditioners hung off facades. Pinned 0.
+       facadePlatforms  fake floor-by-floor side boxes. Pinned 0; the real,
+                        climbable fire escapes from elevators.js are excluded.
+       roofItems        rooftop plant instances still standing.
        propsRemoved   placements this purge refused, across every pass.
      ====================================================================== */
   CBZ.propPurgeAudit = function () {
@@ -258,8 +260,10 @@
       enabled: CBZ.CONFIG.PROPS_PURGE_V1 !== false,
       alleysBlocked: 0, solidInAlley: 0,
       acBoxes: PURGE.cut.acBoxes | 0,
+      facadePlatforms: PURGE.cut.facadePlatforms | 0,
       roofItems: PURGE.cut.roofItems | 0,
-      propsRemoved: (PURGE.refused | 0) + (PURGE.cut.alleyRemoved | 0) + (PURGE.cut.acRemoved | 0),
+      propsRemoved: (PURGE.refused | 0) + (PURGE.cut.alleyRemoved | 0) +
+        (PURGE.cut.acRemoved | 0) + (PURGE.cut.facadePlatformsRemoved | 0),
       alleyCells: 0, alleyKept: PURGE.kept | 0, indexed: AIDX ? AIDX.rects.length : 0,
       worst: null, cut: PURGE.cut,
     };
@@ -852,7 +856,6 @@
         if (s.glow) s.glow.visible = false;            // and so does its pool on the street
         setGlowOn(s.glowSpot, false);                  // and its Fresnel glow-shell instance dims too
         if (imp) imp(p, { x: n.x, y: -0.6, z: n.z }, { kind: "chip", power: 1.2, color: 0xdfe9f2 });   // glass rains down
-        if (CBZ.sfx) CBZ.sfx("clank");
       }
     } else if (s.type === "hydrant") {
       if (imp) imp(p, n, { kind: "spark", power: 1 });
@@ -860,7 +863,6 @@
       if (!s.gy || s.gy.t <= 0) {                      // POP — the street fountain
         s.gy = { x: s.x, z: s.z, t: 20, acc: 0 };
         geysers.push(s.gy);
-        if (CBZ.sfx) CBZ.sfx("clank");
       } else s.gy.t = Math.max(s.gy.t, 12);            // re-shot: keep it gushing
     } else if (s.type === "bin") {
       if (imp) imp(p, n, { kind: "chip", power: 0.9, color: 0x356b3e });
@@ -887,7 +889,6 @@
       if (!s.exploded) {
         s.hp = (s.hp || 1) - 1;
         if (s.hp > 0) {
-          if (CBZ.sfx) CBZ.sfx("clank");               // rings + leaks — not popped yet
         } else {
           s.exploded = true;
           if (s.group) s.group.visible = false;        // the cage is gone in the fireball
@@ -1032,7 +1033,6 @@
         // convention to get wrong (the sign-error trap CLAUDE.md warns about).
         const light = s.type === "cone";
         tipProp(s, d2 > 1e-4 ? dx : 1, d2 > 1e-4 ? dz : 0, light ? 0.24 : 0.06, light ? 1.1 : 0.4);
-        if (CBZ.sfx) CBZ.sfx("clank");
       }
     }
     if (!cars) return;
@@ -1058,7 +1058,6 @@
         const light = s.type === "cone" || s.type === "meter";
         tipProp(s, fx, fz, light ? 0.3 : 0.1, light ? 1.4 : 0.55);
         car.v *= 0.94;                              // barely felt — it's a can, not a curb
-        if (CBZ.sfx) CBZ.sfx("clank");
         // PROPS_WIRED_V1: ram a PARKING METER and its coin box spills — but only
         // when it's YOU behind the wheel (car.player), never NPC traffic clipping
         // meters all over the city. The outer `if (s.over) continue` above means

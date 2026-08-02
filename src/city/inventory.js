@@ -598,7 +598,6 @@
     if (entry.kind === "item") CBZ.cityDropItem(x, z, { name: entry.name, count: entry.count, y: P.pos.y });
     else if (entry.melee) CBZ.cityDropItem(x, z, { melee: entry.name, y: P.pos.y });
     else CBZ.cityDropItem(x, z, { weaponId: entry.id, ammo: 0, y: P.pos.y });
-    sfx("clank");
     return true;
   }
 
@@ -781,7 +780,6 @@
     const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, slots: new Array(CHEST_N).fill(null), mesh: buildChestMesh(x, z) };
     chests.push(c);
     note("Chest placed — walk up and press [E] to open it.", 2.4);
-    sfx("door");
     persistChests(); commit();
     return true;
   }
@@ -793,7 +791,6 @@
     registerChestItem();
     if (econ()) econ().add("Chest", 1);
     note("Chest packed up.", 1.6);
-    sfx("clank");
     persistChests(); commit();
     return true;
   }

@@ -43,6 +43,6 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     door.readerLight.material.color.setHex(0x39ff88);     // reader turns green
     door.readerLight.material.emissive.setHex(0x14c258);
-    CBZ.sfx("door");
+    if (CBZ.sfx) CBZ.sfx("door_open");
   };
 })();

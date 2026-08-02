@@ -464,6 +464,13 @@
           r.atkCd = cd;
         }
 
+        // A city vault/mantle is a full-rig pose. We intentionally reach this
+        // point AFTER backing out last frame's additive offsets and updating
+        // hit edges, then stop before hands-up/cower/stagger layers can replace
+        // the planted hands and tucked legs. Any hit timers remain live and may
+        // read immediately after landing; only this frame's pose is exclusive.
+        if (isCity && (a._traversal || ch.traversePose)) continue;
+
         // downed / dead actors: they lie flat (group.rotation.z ~ PI/2);
         // skip the live pose reactions but keep the flash fading out so a
         // KO'ing blow still pops, and keep timers bleeding down.

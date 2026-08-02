@@ -101,6 +101,40 @@ try {
   await sleep(6500);
   const result = JSON.parse(await evaluate(`JSON.stringify((function () {
     const failures = [];
+    const airborneDoor = (function () {
+      const doors = CBZ.cityDoorsGet && CBZ.cityDoorsGet();
+      const updater = (CBZ.updaters || []).find(function (u) { return Math.abs(u.order - 34.3) < 0.0001; });
+      const P = CBZ.player, dr = doors && doors[0];
+      if (!P || !dr || !updater) return { available: false, stayedClosed: false };
+      const saved = {
+        pos: P.pos.clone(), driving: P.driving, aircraft: P._aircraft,
+        peds: CBZ.cityPeds, cars: CBZ.cityCars,
+        open: dr.open, hold: dr.hold, t: dr.t, rot: dr.pivot.rotation.y,
+        soundCycle: dr.playerSoundCycle, sfx: CBZ.sfx,
+      };
+      let opened = false, doorSounds = [];
+      try {
+        // Isolate the exact building-door updater. Before the fix, horizontal
+        // overlap plus the driving flag made this B-2 at 500m open the ground door.
+        CBZ.cityPeds = []; CBZ.cityCars = [];
+        CBZ.sfx = function (name) { if (/^door_/.test(name)) doorSounds.push(name); };
+        P.pos.set(dr.wx, 500, dr.wz); P.driving = true;
+        P._aircraft = { displayName: "B-2 SPIRIT" };
+        dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false; dr.pivot.rotation.y = 0;
+        updater.fn(0.01);
+        opened = !!dr.open || dr.t > 0.0001;
+      } finally {
+        P.pos.copy(saved.pos); P.driving = saved.driving; P._aircraft = saved.aircraft;
+        CBZ.cityPeds = saved.peds; CBZ.cityCars = saved.cars;
+        CBZ.sfx = saved.sfx;
+        dr.open = saved.open; dr.hold = saved.hold; dr.t = saved.t;
+        dr.playerSoundCycle = saved.soundCycle; dr.pivot.rotation.y = saved.rot;
+      }
+      return { available: true, stayedClosed: !opened, stayedSilent: doorSounds.length === 0, sounds: doorSounds };
+    })();
+    if (!airborneDoor.available || !airborneDoor.stayedClosed || !airborneDoor.stayedSilent) {
+      failures.push("aircraft altitude still triggered movement or sound from a ground-level city door");
+    }
     const windowAudit = CBZ.debugWindowOpeningProbe
       ? CBZ.debugWindowOpeningProbe(CBZ.player.pos.x, CBZ.player.pos.z)
       : { ok: false, error: "window probe unavailable" };
@@ -264,7 +298,7 @@ try {
       if (!emergencyDispatch.fire || !emergencyDispatch.ambulance) failures.push("aircraft incident did not dispatch both fire and medical units");
     }
 
-    return { windowAudit, water, aircraft, boarding, collision, destruction, homing,
+    return { airborneDoor, windowAudit, water, aircraft, boarding, collision, destruction, homing,
       reticleApi: typeof CBZ.fpsReticleState === "function", emergencyDispatch,
       emergencyApi: typeof CBZ.cityReportMajorIncident === "function", failures };
   })())`));

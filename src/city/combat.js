@@ -468,7 +468,8 @@
       // a swing that hits no one can hit a WINDOW: first punch spider-cracks
       // it, the next blows it out (cityShatterRay's two-stage default)
       const L2 = lookDir();
-      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z, finisher ? 3.1 : 2.7);
+      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z,
+        finisher ? 3.1 : 2.7, false, { directPlayer: true });
     }
     fireCD = finisher ? 0.34 : 0.22;
   }
@@ -496,7 +497,8 @@
     } else if (CBZ.cityShatterRay) {
       // a heavy (bat/pipe-class swing) puts a window straight through
       const L2 = lookDir();
-      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z, 3.0, true);
+      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z,
+        3.0, true, { directPlayer: true });
     }
     heavyCD = 0.6;
     fireCD = 0.5;

@@ -77,10 +77,25 @@
     // so the tsunami can pull the whole sea OUT during its warning and surge
     // it back in as the flood — reset() always parks it back at OCEAN_Y.
     const OCEAN_Y = -0.8;
-    const ocean = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400),
-      new THREE.MeshLambertMaterial({ color: 0x2f6f9e }));
-    ocean.rotation.x = -Math.PI / 2; ocean.position.set(cx, OCEAN_Y, cz);
+    const sharedWater = !!(CBZ.waterBuildDisasterGeometry && CBZ.makeDisasterWaterMaterial);
+    const oceanGeo = sharedWater ? CBZ.waterBuildDisasterGeometry(1400) : new THREE.PlaneGeometry(1400, 1400);
+    const oceanMat = sharedWater ? CBZ.makeDisasterWaterMaterial({
+      name: "Survival Ocean Water", color: 0x155878, shallowColor: 0x3195a7,
+      amp: 0.86, chop: 0.72, foam: 0.34,
+    }) : new THREE.MeshLambertMaterial({ color: 0x2f6f9e });
+    const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+    if (!sharedWater) ocean.rotation.x = -Math.PI / 2;
+    ocean.position.set(cx, OCEAN_Y, cz);
     ocean.receiveShadow = false; root.add(ocean);
+    ocean.name = "survival-ocean";
+    ocean.frustumCulled = false;
+    ocean.userData.waterSurface = true;
+    ocean.userData.surfaceOwner = "survival-water";
+    ocean.userData.waterMode = sharedWater ? "shared-disaster-fresnel" : "lambert-fallback";
+    if (sharedWater && CBZ.onUpdate) CBZ.onUpdate(27.85, function () {
+      if (!arena || !ocean.visible || !CBZ.game || CBZ.game.mode !== "survival") return;
+      CBZ.waterDriveDisasterSurface(ocean);
+    });
 
     // the SEABED shelf under the sea: invisible in normal play (the opaque
     // ocean covers it), revealed as a shocking ring of wet sand when the
@@ -190,7 +205,6 @@
         const dx = gp.x - x, dz = gp.z - z;
         if (dx * dx + dz * dz <= r2) { burstPane(gp); if (++n > 60) break; }
       }
-      if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
       return n;
     };
 
@@ -772,6 +786,8 @@
       // group, re-register its walls/floors/roof), regrow trees, clear craters.
       reset() {
         ocean.position.y = OCEAN_Y;   // a match can end mid-tsunami-warning with the sea pulled out
+        if (CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(ocean, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 });
+        if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
         for (const b of fragile) {
           if (b.fallen) {
             b.group.visible = true;

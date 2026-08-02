@@ -526,7 +526,6 @@
     return "Keeping the peace";
   }
   function copSurrender(c) {
-    if (CBZ.sfx) CBZ.sfx("door");
     CBZ.city && CBZ.city.note("You raise your hands and give yourself up…", 1.4);
     if (c) { c.curTarget = CBZ.city.playerActor; c.sees = true; }
     CBZ.cityBust && CBZ.cityBust({ peaceful: true });   // cooperative → lighter than a violent bust

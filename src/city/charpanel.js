@@ -308,7 +308,7 @@
   function armorSig() {
     const P = CBZ.player, k = P && P._armorKit;
     if (!k) return "";
-    return (k.chest || "") + "|" + (k.head || "");   // hand=shield is cosmetic, skip
+    return (k.chest || "") + "|" + (k.head || "");
   }
   function mountArmorMesh(kind, anchor, color, x, y, z, out, dims) {
     if (!anchor || !anchor.add || !THREE) return;

@@ -339,6 +339,9 @@
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
 <script src="src/world/treeaudit.js?v=law1"></script>
+<!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
+     this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
+<script src="src/world/vegetation.js?v=scenery1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -403,7 +406,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=riglock6w13"></script>
+  <script src="src/entities/character.js?v=traversal2"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=scale1y"></script>
 <script src="src/entities/coins.js"></script>
@@ -416,7 +419,7 @@
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=punch2"></script>
+<script src="src/systems/audio.js?v=sounddebug1"></script>
 <script src="src/systems/hud.js?v=hudmin1"></script>
 <script src="src/systems/economy.js?v=pick1"></script>
 
@@ -437,7 +440,7 @@
 <script src="src/weapons/appearances/uzi.js"></script>
 <script src="src/weapons/appearances/sniper.js?v=optic2"></script>
 <script src="src/weapons/appearances/lmg.js?v=bipod3"></script>
-<script src="src/systems/actorweapons.js?v=weaponphysics1"></script>
+<script src="src/systems/actorweapons.js?v=traversal1"></script>
 <script src="src/city/weapon_thumbnails.js?v=gunthumb1"></script>
 <script src="src/systems/holsterprops.js?v=weaponphysics1"></script>
 <script src="src/systems/prisondrops.js?v=drops1"></script>
@@ -467,9 +470,10 @@
 <script src="src/systems/quests.js"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
+<script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=b2bombcam1"></script>
-<script src="src/systems/physics.js?v=impact4u"></script>
+<script src="src/systems/physics.js?v=traversal2"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -502,7 +506,7 @@
 <script src="src/systems/reinforcements.js"></script>
 <script src="src/systems/lockdown.js"></script>
 <script src="src/systems/difficulty.js"></script>
-<script src="src/systems/reactions.js?v=hiplock1"></script>
+<script src="src/systems/reactions.js?v=traversal1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=samples1"></script>
@@ -532,11 +536,11 @@
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=glass1"></script>
-<script src="src/world/disaster_arena.js?v=layers1"></script>
+<script src="src/world/disaster_arena.js?v=tsuwater1"></script>
 <script src="src/systems/grapple.js?v=intact1"></script>
 <script src="src/entities/survivorbot.js?v=nozone1"></script>
 <script src="src/modes/survival.js?v=nozone1"></script>
-<script src="src/systems/disasters.js?v=nozone1"></script>
+<script src="src/systems/disasters.js?v=tsuwater1"></script>
 <script src="src/systems/survival_interact.js?v=ctrl1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
 
@@ -550,8 +554,8 @@
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=waterv2"></script>
-<script src="src/city/world.js?v=waterv2t"></script>
+<script src="src/world/water_spec.js?v=tsuwater1"></script>
+<script src="src/city/world.js?v=shorecut1"></script>
 <script src="src/city/interior_programs.js?v=fortress3"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
@@ -647,7 +651,7 @@
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
 <script src="src/city/island_military.js?v=seawave1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
-<script src="src/city/biome_forest.js?v=organicforest5"></script>
+<script src="src/city/biome_forest.js?v=scenery1"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
 <script src="src/city/biome_snow.js?v=organicmountain18w9ys"></script>
 <script src="src/city/snowboard.js?v=terrain2"></script>
@@ -709,7 +713,7 @@
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=weaponphysics1"></script>
+<script src="src/city/peds.js?v=traversal2"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1020,7 +1024,7 @@
 <script src="src/city/campaign_ui.js?v=sasubtitle1"></script>
 <script src="src/city/campaign.js?v=story9"></script>
 <script src="src/city/cinematics.js?v=1"></script>
-<script src="src/systems/humancontact.js?v=contact2"></script>
+<script src="src/systems/humancontact.js?v=traversal1"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
 <script src="src/systems/fullmap.js?v=organicmap4y"></script>
 
@@ -1032,7 +1036,7 @@
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=seawave1"></script>
+<script src="src/systems/predator.js?v=sounddebug1"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
@@ -1190,7 +1194,7 @@
 <script src="src/city/casino.js?v=casino1s"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=ecotones17w9yz"></script>
+<script src="src/city/continent.js?v=scenery1"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

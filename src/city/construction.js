@@ -575,7 +575,6 @@
     }
     st.pieces.push(rec);
     st.count++;
-    if (CBZ.sfx) CBZ.sfx('door');
   }
 
   // ---- remove: free the nearest player-placed piece under the cursor ----
@@ -630,7 +629,6 @@
     }
     st.pieces.splice(idx, 1);
     st.count = Math.max(0, st.count - 1);
-    if (CBZ.sfx) CBZ.sfx('door');
   }
 
   // ---- enter/exit build mode --------------------------------------------

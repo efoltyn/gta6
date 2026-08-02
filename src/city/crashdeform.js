@@ -360,7 +360,6 @@
       if (fm !== gl.mat && fm.transparent && fm.opacity < 0.8) { fm.opacity = 0.85; fm.depthWrite = true; }
       gl.mesh.material = fm;
     }
-    if (CBZ.sfx) CBZ.sfx("glass");
   }
 
   /* ============================================================
@@ -538,7 +537,6 @@
       if (CBZ.cityDebrisAdopt) {
         // the hood tumbles off like any other piece of wreckage (crashfx pool)
         CBZ.cityDebrisAdopt(f.mesh, (car.vx || 0) * 0.7 + dx * 2.5, 4 + energy * 0.08, (car.vz || 0) * 0.7 + dz * 2.5);
-        if (CBZ.sfx) CBZ.sfx("clank");
       }
     } catch (err) { removeFlap(f); }
   }
@@ -912,7 +910,6 @@
       } else if (CBZ.cityDebrisAdopt) {
         CBZ.cityDebrisAdopt(mesh, vx, vy, vz);
       }
-      if (CBZ.sfx) CBZ.sfx("clank");
       return true;
     } catch (err) { return false; }
   }

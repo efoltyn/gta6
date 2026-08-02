@@ -54,6 +54,197 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
+  // ---- SOUND REVIEW DEBUGGER ----------------------------------------------
+  // F8 (or ?soundDebug=1) shows only sounds that make it past mapping,
+  // cooldown and loading and are actually scheduled to play. Each row carries
+  // the logical cue, the selected recording/procedural voice, and its caller,
+  // so a bad sound can be traced without guessing which of the many CBZ.sfx()
+  // call sites produced it. Multiplayer voice chat intentionally lives outside
+  // this debugger: it is another player's microphone, not a game sound.
+  const SOUND_DEBUG_STORAGE = "cbz.soundDebug";
+  const SOUND_DEBUG_MAX_ROWS = 8;
+  const SOUND_DEBUG_ROW_LIFE = 9000;
+  let soundDebugEnabled = false;
+  let soundDebugRoot = null;
+  let soundDebugList = null;
+  const soundDebugRows = [];
+  const soundDebugHistory = [];
+
+  try {
+    const q = new URLSearchParams(location.search).get("soundDebug");
+    if (/^(?:1|true|on)$/i.test(q || "")) soundDebugEnabled = true;
+    else if (/^(?:0|false|off)$/i.test(q || "")) soundDebugEnabled = false;
+    else soundDebugEnabled = sessionStorage.getItem(SOUND_DEBUG_STORAGE) === "1";
+  } catch (e) {}
+
+  function soundDebugNow() {
+    return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+  }
+  function soundDebugFile(file) {
+    return String(file || "procedural synth").replace(/assets\/audio\//g, "");
+  }
+  function soundDebugCaller() {
+    try {
+      const lines = String(new Error().stack || "").split("\n");
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (/systems\/audio\.js|world\/water_underwater\.js/.test(line)) continue;
+        const hit = line.match(/((?:src|tools)\/[^)\s]+:\d+):\d+/);
+        if (hit) return hit[1].replace(/\?[^:]+(?=:\d+$)/, "");
+      }
+    } catch (e) {}
+    return "";
+  }
+  function ensureSoundDebug() {
+    if (soundDebugRoot || typeof document === "undefined" || !document.body) return soundDebugRoot;
+    const root = document.createElement("div");
+    root.id = "soundDebug";
+    root.setAttribute("aria-hidden", "true");
+    root.style.cssText =
+      "position:fixed;right:max(12px,env(safe-area-inset-right,0px));" +
+      "top:max(12px,env(safe-area-inset-top,0px));z-index:100000;" +
+      "width:min(420px,calc(100vw - 24px));pointer-events:none;" +
+      "font:12px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+      "color:#f5f7fa;text-shadow:0 1px 2px #000;display:none";
+
+    const head = document.createElement("div");
+    head.style.cssText =
+      "display:flex;justify-content:space-between;gap:12px;margin-bottom:5px;" +
+      "padding:7px 9px;border:1px solid rgba(255,208,64,.72);border-radius:7px;" +
+      "background:rgba(8,10,14,.9);box-shadow:0 5px 18px rgba(0,0,0,.35)";
+    const title = document.createElement("b");
+    title.style.color = "#ffd650";
+    title.textContent = "SOUND DEBUG";
+    const key = document.createElement("span");
+    key.style.color = "#b8c0cc";
+    key.textContent = "F8 hide";
+    head.appendChild(title);
+    head.appendChild(key);
+
+    soundDebugList = document.createElement("div");
+    soundDebugList.style.cssText = "display:flex;flex-direction:column;gap:4px";
+    root.appendChild(head);
+    root.appendChild(soundDebugList);
+    document.body.appendChild(root);
+    soundDebugRoot = root;
+    return root;
+  }
+  function removeSoundDebugRow(row) {
+    const i = soundDebugRows.indexOf(row);
+    if (i >= 0) soundDebugRows.splice(i, 1);
+    clearTimeout(row.fadeTimer);
+    clearTimeout(row.removeTimer);
+    if (row.el && row.el.parentNode) row.el.parentNode.removeChild(row.el);
+  }
+  function armSoundDebugRow(row) {
+    clearTimeout(row.fadeTimer);
+    clearTimeout(row.removeTimer);
+    row.el.style.opacity = "1";
+    row.fadeTimer = setTimeout(function () {
+      if (row.el) row.el.style.opacity = "0.28";
+    }, SOUND_DEBUG_ROW_LIFE - 2500);
+    row.removeTimer = setTimeout(function () { removeSoundDebugRow(row); }, SOUND_DEBUG_ROW_LIFE);
+  }
+  function renderSoundDebugRow(row) {
+    row.nameEl.textContent = row.name + (row.count > 1 ? "  ×" + row.count : "");
+    row.detailEl.textContent = row.detail;
+    row.callerEl.textContent = row.caller ? "from " + row.caller : "";
+  }
+  function pushSoundDebug(name, detail, caller) {
+    if (!soundDebugEnabled || !ensureSoundDebug()) return;
+    const now = soundDebugNow();
+    name = String(name || "unnamed");
+    detail = soundDebugFile(detail);
+    caller = String(caller || "");
+
+    soundDebugHistory.push({ at: now, name: name, detail: detail, caller: caller });
+    if (soundDebugHistory.length > 200) soundDebugHistory.shift();
+    if (typeof console !== "undefined" && console.info) {
+      console.info("[sound]", name, "—", detail, caller ? "— " + caller : "");
+    }
+
+    // Layered effects and automatic fire often schedule near-identical events
+    // within a few milliseconds. Collapse those into a readable counter while
+    // preserving different assets/callers as separate rows.
+    const newest = soundDebugRows[0];
+    if (newest && newest.name === name && newest.detail === detail &&
+        newest.caller === caller && now - newest.at < 350) {
+      newest.at = now;
+      newest.count++;
+      renderSoundDebugRow(newest);
+      armSoundDebugRow(newest);
+      return;
+    }
+
+    const el = document.createElement("div");
+    el.style.cssText =
+      "padding:7px 9px;border-left:3px solid #ffd650;border-radius:5px;" +
+      "background:rgba(8,10,14,.86);box-shadow:0 4px 14px rgba(0,0,0,.3);" +
+      "transition:opacity .28s linear;overflow-wrap:anywhere";
+    const nameEl = document.createElement("div");
+    nameEl.style.cssText = "font-size:14px;font-weight:800;color:#fff";
+    const detailEl = document.createElement("div");
+    detailEl.style.cssText = "margin-top:2px;color:#ffd650";
+    const callerEl = document.createElement("div");
+    callerEl.style.cssText = "margin-top:2px;color:#9aa6b5;font-size:10px";
+    el.appendChild(nameEl);
+    el.appendChild(detailEl);
+    el.appendChild(callerEl);
+    soundDebugList.insertBefore(el, soundDebugList.firstChild);
+
+    const row = { el: el, nameEl: nameEl, detailEl: detailEl, callerEl: callerEl,
+      name: name, detail: detail, caller: caller, count: 1, at: now,
+      fadeTimer: 0, removeTimer: 0 };
+    soundDebugRows.unshift(row);
+    renderSoundDebugRow(row);
+    armSoundDebugRow(row);
+    while (soundDebugRows.length > SOUND_DEBUG_MAX_ROWS) {
+      removeSoundDebugRow(soundDebugRows[soundDebugRows.length - 1]);
+    }
+  }
+  function debugSoundPlayed(name, detail, when, caller) {
+    if (!soundDebugEnabled) return;
+    caller = caller || soundDebugCaller();
+    let wait = 0;
+    if (ctx && typeof when === "number") wait = Math.max(0, (when - ctx.currentTime) * 1000);
+    if (wait > 8) {
+      setTimeout(function () { pushSoundDebug(name, detail, caller); }, wait);
+    } else {
+      pushSoundDebug(name, detail, caller);
+    }
+  }
+  function setSoundDebugEnabled(enabled, persist) {
+    soundDebugEnabled = !!enabled;
+    const root = soundDebugEnabled ? ensureSoundDebug() : soundDebugRoot;
+    if (root) root.style.display = soundDebugEnabled ? "block" : "none";
+    if (persist !== false) {
+      try { sessionStorage.setItem(SOUND_DEBUG_STORAGE, soundDebugEnabled ? "1" : "0"); } catch (e) {}
+    }
+    return soundDebugEnabled;
+  }
+  function clearSoundDebug() {
+    while (soundDebugRows.length) removeSoundDebugRow(soundDebugRows[0]);
+    soundDebugHistory.length = 0;
+  }
+
+  CBZ.debugSoundPlayed = debugSoundPlayed;
+  CBZ.soundDebug = {
+    enable: function (enabled) { return setSoundDebugEnabled(enabled !== false); },
+    toggle: function () { return setSoundDebugEnabled(!soundDebugEnabled); },
+    clear: clearSoundDebug,
+    enabled: function () { return soundDebugEnabled; },
+    history: function () { return soundDebugHistory.slice(); },
+  };
+  if (typeof addEventListener === "function") {
+    addEventListener("keydown", function (e) {
+      if (e.code !== "F8" && e.key !== "F8") return;
+      if (e.repeat) return;
+      e.preventDefault();
+      setSoundDebugEnabled(!soundDebugEnabled);
+    }, true);
+  }
+  if (soundDebugEnabled) setSoundDebugEnabled(true, false);
+
   const A = "assets/audio/";
   const K = A + "kenney/";
   const O = A + "oga/";
@@ -93,10 +284,20 @@
     pickup: fx([K + "cloth1.m4a", K + "cloth2.m4a", K + "beltHandle1.m4a"], 0.42, 0.06),
     equip: fx([K + "clothBelt.m4a", K + "beltHandle2.m4a"], 0.45, 0.08),
 
-    door: fx([O + "sfx100v2_door_01.m4a", O + "sfx100v2_door_03.m4a", K + "doorClose_1.m4a", K + "doorOpen_1.m4a"], 0.64, 0.1),
-    clank: fx([O + "sfx100v2_metal_hit_01.m4a", K + "impactMetal_heavy_000.m4a", K + "impactMetal_heavy_001.m4a"], 0.54, 0.14),
+    // PHYSICAL DOORS ONLY. The old generic `door` cue randomized unrelated
+    // open/close recordings and was requested by UI/state changes all over the
+    // game. Direction-specific cues let the moving mechanism say exactly what
+    // it is doing; source contracts below the bank keep fake callers out.
+    // doorClose_1 is mastered ~4 LU louder than doorOpen_1, hence the lower
+    // gain here — a closing leaf should not jump above nearby gunfire.
+    door_open: fx([K + "doorOpen_1.m4a"], 0.36, 0.12),
+    door_close: fx([K + "doorClose_1.m4a"], 0.22, 0.12),
+
+    // This cue is source-gated in city/buildings.js: only a pane directly
+    // broken by the player may request it. Ambient damage, NPC fire, crashes,
+    // explosions and UI/state changes remain silent.
     glass: fx([O + "sfx100v2_glass_03.m4a", O + "sfx100v2_glass_05.m4a", K + "impactGlass_heavy_000.m4a", K + "impactGlass_heavy_001.m4a"], 0.66, 0.08),
-    alarm: fx([R + "alarm1.mp3", R + "alarm4.mp3"], 0.58, 0.48),
+
     // POLICE SIREN, not an air-raid alarm (owner: "I hate the wanted sound —
     // there is no sound for being wanted in real life, only the siren of a real
     // cop"). "siren" is fired by seven call sites that all mean A POLICE UNIT IS
@@ -464,7 +665,7 @@
     }
     return first;
   }
-  function playGun(name, g, opts) {
+  function playGun(name, g, opts, debugCaller) {
     ensureGunBus();
     const t0 = ctx.currentTime + (opts.delay || 0);
     const vol = g.vol * (opts.volume == null ? 1 : opts.volume);
@@ -476,12 +677,22 @@
       // far fire prefers the dedicated distant-gunfire recording through the
       // muffle+echo bus; missing file = the synth voice takes the same path
       const db = S("gun.distant");
-      if (db) return playSample(db, out, vol, j * (0.92 + Math.random() * 0.16), t0);
+      if (db) {
+        const src = playSample(db, out, vol, j * (0.92 + Math.random() * 0.16), t0);
+        debugSoundPlayed(name, SAMPLES["gun.distant"] + " (far)", t0, debugCaller);
+        return src;
+      }
     } else {
       const sb = S("gun." + g.sample);
-      if (sb) return playSample(sb, out, vol, j, t0);
+      if (sb) {
+        const src = playSample(sb, out, vol, j, t0);
+        debugSoundPlayed(name, SAMPLES["gun." + g.sample], t0, debugCaller);
+        return src;
+      }
     }
-    return synthShot(g, t0, out, vol, j, far);
+    const src = synthShot(g, t0, out, vol, j, far);
+    debugSoundPlayed(name, "procedural gun synth" + (far ? " (far)" : ""), t0, debugCaller);
+    return src;
   }
 
   // ============================================================
@@ -521,7 +732,11 @@
   let eng = null, engFed = 0, engFlavorKey = "";
   function ignition(t) {
     const sb = S("car.start");
-    if (sb) { playSample(sb, loopBus, 0.5, 0.96 + Math.random() * 0.08, t); return; }
+    if (sb) {
+      playSample(sb, loopBus, 0.5, 0.96 + Math.random() * 0.08, t);
+      debugSoundPlayed("car_start", SAMPLES["car.start"], t);
+      return;
+    }
     // fallback: a brief starter-motor whirr — a fluttering saw cranking up
     const o = ctx.createOscillator(); o.type = "sawtooth";
     o.frequency.setValueAtTime(55, t);
@@ -536,6 +751,7 @@
     lfo.connect(lg); lg.connect(g.gain);
     o.connect(lp); lp.connect(g); g.connect(loopBus);
     o.start(t); lfo.start(t); o.stop(t + 0.5); lfo.stop(t + 0.5);
+    debugSoundPlayed("car_start", "procedural starter synth", t);
   }
   function engineStart() {
     if (eng || !ctx || !loopBus || !sfxBus) return;
@@ -599,6 +815,7 @@
       e.stops.push(e.skOsc, e.skLfo);
     }
     e.skPrev = 0; e.skChirpAt = 0; e.skidStopAt = 0;
+    e.engineDebugged = false; e.skidDebugged = false;
     ignition(ctx.currentTime);
     engFed = performance.now() * 0.001;
     engFlavorKey = "";
@@ -624,6 +841,15 @@
     engFed = performance.now() * 0.001;
     const F = ENGINES[flavor] || ENGINES.sedan;
     const e = eng, t = ctx.currentTime;
+    if (!soundDebugEnabled) e.engineDebugged = false;
+    if (soundDebugEnabled && !e.engineDebugged) {
+      e.engineDebugged = true;
+      debugSoundPlayed("car_engine",
+        e.kind === "sample"
+          ? SAMPLES["car.idle"] + " + " + SAMPLES["car.rev"] + " (" + (flavor || "sedan") + ")"
+          : "procedural engine synth (" + (flavor || "sedan") + ")",
+        t);
+    }
     if (flavor !== engFlavorKey) {                            // retune static voicing once per car class
       engFlavorKey = flavor;
       if (e.kind === "synth") { e.f1.Q.value = F.q1; e.f2.Q.value = F.q2; }
@@ -654,15 +880,21 @@
     } else e.gain.gain.setTargetAtTime(vol, t, 0.07);
     // ---- tyre screech ----
     skid = Math.max(0, Math.min(1, skid || 0));
+    const skidOnset = skid >= 0.14 && e.skPrev < 0.14;
+    if (!soundDebugEnabled || skid < 0.08) e.skidDebugged = false;
+    if (soundDebugEnabled && skid >= 0.14 && !e.skidDebugged) {
+      e.skidDebugged = true;
+      debugSoundPlayed("car_screech",
+        e.skKind === "sample" ? SAMPLES["car.screech"] : "procedural tyre synth", t);
+    }
     if (e.skKind === "sample") {
       e.skGain.gain.setTargetAtTime(skid * skid * 0.55, t, skid > 0.05 ? 0.03 : 0.09);
       e.skSrc.playbackRate.setTargetAtTime(0.9 + skid * 0.35, t, 0.06);
     } else {
       // CHIRP, don't drone: a burst at slip onset, occasional re-chirps under
       // a sustained slide, and only a faint bed in between
-      const onset = skid >= 0.14 && e.skPrev < 0.14;
       const rechirp = skid > 0.3 && engFed > e.skChirpAt + 0.42 && Math.random() < 0.25;
-      if (onset || rechirp) {
+      if (skidOnset || rechirp) {
         e.skChirpAt = engFed;
         e.skBp.frequency.setValueAtTime(1400 + Math.random() * 500 + skid * 300, t);
         e.skGain.gain.cancelScheduledValues(t);
@@ -678,18 +910,25 @@
     if (e.skPrev > 0.45 && skid < 0.1 && engFed > e.skidStopAt + 1.2) {
       e.skidStopAt = engFed;
       const b = S("car.skid_stop");
-      if (b) playSample(b, sfxBus, 0.4, 0.96 + Math.random() * 0.08, t);
+      if (b) {
+        playSample(b, sfxBus, 0.4, 0.96 + Math.random() * 0.08, t);
+        debugSoundPlayed("car_skid_stop", SAMPLES["car.skid_stop"], t);
+      }
     }
     e.skPrev = skid;
   }
 
   // ---- HORN: car/horn.m4a, else the two-note synth (real horns are 2 notes)
-  function playHorn(opts) {
+  function playHorn(opts, debugCaller) {
     const t0 = ctx.currentTime + (opts.delay || 0);
     const vol = opts.volume == null ? 1 : opts.volume; // dist attenuation already applied by sfx()
     const out = opts.far && farIn ? farIn : sfxBus;
     const hb = S("car.horn");
-    if (hb) return playSample(hb, out, 0.55 * vol, 0.94 + Math.random() * 0.12, t0);
+    if (hb) {
+      const src = playSample(hb, out, 0.55 * vol, 0.94 + Math.random() * 0.12, t0);
+      debugSoundPlayed("horn", SAMPLES["car.horn"] + (opts.far ? " (far)" : ""), t0, debugCaller);
+      return src;
+    }
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.linearRampToValueAtTime(0.2 * vol, t0 + 0.02);
@@ -702,10 +941,11 @@
     const o2 = ctx.createOscillator(); o2.type = "square"; o2.frequency.value = 554 * det;
     o1.connect(lp); o2.connect(lp);
     o1.start(t0); o2.start(t0); o1.stop(t0 + 0.5); o2.stop(t0 + 0.5);
+    debugSoundPlayed("horn", "procedural two-tone horn" + (opts.far ? " (far)" : ""), t0, debugCaller);
     return o1;
   }
 
-  function playLoaded(file, buffer, p, opts) {
+  function playLoaded(file, buffer, p, opts, onStart) {
     const src = ctx.createBufferSource();
     const gain = ctx.createGain();
     src.buffer = buffer;
@@ -729,16 +969,16 @@
       gain.gain.exponentialRampToValueAtTime(0.0001, t0 + tone.decay);
       src.start(t0); src.stop(t0 + tone.decay + 0.05);
     } else src.start(t0);
+    if (onStart) onStart(t0);
     return src;
   }
-  function playPart(p, opts) {
-    const file = choose(p.files);
+  function playPart(p, opts, file, onStart) {
     const buffer = buffers.get(file);
     if (!buffer) {
-      load(file).then(function (ready) { if (ready && ctx) playLoaded(file, ready, p, opts); });
+      load(file).then(function (ready) { if (ready && ctx) playLoaded(file, ready, p, opts, onStart); });
       return null;
     }
-    return playLoaded(file, buffer, p, opts);
+    return playLoaded(file, buffer, p, opts, onStart);
   }
 
   const FAR_DIST = 60; // beyond this, gunfire goes through the muffle+echo bus
@@ -766,10 +1006,36 @@
     // opts.ghost: play without stamping the cooldown — NPC fire must never
     // starve the player's own muzzle report out of the channel.
     if (!opts.ghost) last.set(name, now);
-    if (gun) return playGun(name, gun, opts);
-    if (horn) return playHorn(opts);
+    const caller = soundDebugEnabled ? soundDebugCaller() : "";
+    if (gun) return playGun(name, gun, opts, caller);
+    if (horn) return playHorn(opts, caller);
+
+    // Keep the ordinary (debugger-off) hot path allocation-equivalent to the
+    // old playback path: pick and launch each part directly. The extra asset list and
+    // callback only exist during an explicit sound-review session.
+    if (!soundDebugEnabled) {
+      let first = null;
+      entry.parts.forEach(function (p) {
+        const src = playPart(p, opts, choose(p.files), null);
+        if (!first) first = src;
+      });
+      return first;
+    }
+
+    const picked = entry.parts.map(function (p) { return { part: p, file: choose(p.files) }; });
+    const debugDetail = picked.map(function (x) { return soundDebugFile(x.file); }).join(" + ") +
+      (opts.far ? " (far)" : "");
+    let debugReported = false;
+    function reportStarted(t0) {
+      if (debugReported) return;
+      debugReported = true;
+      debugSoundPlayed(name, debugDetail, t0, caller);
+    }
     let first = null;
-    entry.parts.forEach(function (p) { const src = playPart(p, opts); if (!first) first = src; });
+    picked.forEach(function (x) {
+      const src = playPart(x.part, opts, x.file, reportStarted);
+      if (!first) first = src;
+    });
     return first;
   }
 
@@ -814,15 +1080,18 @@
 
   function slot(name) {
     let s = loopSlots.get(name);
-    if (!s) { s = { desired: null, key: null, source: null, gain: null }; loopSlots.set(name, s); }
+    if (!s) {
+      s = { desired: null, key: null, source: null, gain: null, debugged: false };
+      loopSlots.set(name, s);
+    }
     return s;
   }
   function stopAudioLoop(name, fade, keepDesired) {
     const s = slot(name);
     if (!keepDesired) s.desired = null;
-    if (!s.source) { s.key = null; return; }
+    if (!s.source) { s.key = null; s.debugged = false; return; }
     const source = s.source, gain = s.gain;
-    s.source = null; s.gain = null; s.key = null;
+    s.source = null; s.gain = null; s.key = null; s.debugged = false;
     const t = ctx ? ctx.currentTime : 0;
     const f = fade == null ? 0.35 : fade;
     try {
@@ -835,11 +1104,17 @@
   function setAudioLoop(name, key, volume, rate) {
     if (!ctx || !loopBus || !LOOPS[key]) return;
     const s = slot(name), cfg = LOOPS[key];
+    const caller = soundDebugEnabled ? soundDebugCaller() : "";
     s.desired = key;
     if (s.source && s.key === key) {
       const t = ctx.currentTime;
       s.gain.gain.setTargetAtTime(volume == null ? cfg.volume : volume, t, 0.18);
       s.source.playbackRate.setTargetAtTime(rate || 1, t, 0.12);
+      if (!soundDebugEnabled) s.debugged = false;
+      else if (!s.debugged) {
+        s.debugged = true;
+        debugSoundPlayed("loop:" + key, cfg.file, t, caller);
+      }
       return;
     }
     stopAudioLoop(name, 0.3, true);
@@ -851,6 +1126,8 @@
       src.connect(gain); gain.connect(loopBus); src.start();
       gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume == null ? cfg.volume : volume), ctx.currentTime + 0.45);
       s.key = key; s.source = src; s.gain = gain;
+      s.debugged = soundDebugEnabled;
+      debugSoundPlayed("loop:" + key, cfg.file, ctx.currentTime, caller);
     });
   }
 

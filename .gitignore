@@ -13,3 +13,11 @@ dist/
 # generated world-audit artifacts
 tools/audit/
 aircraft-current-orbit.png
+
+# Local third-party/reference inputs. These are inspected as design sources,
+# never loaded by the game and should not be published by GitHub Pages.
+FluffyGrass-main.zip
+JUNGLEEXAMPLECODE.zip
+KIMIWATEREXAMPLE.zip
+The-Mountains-of-Madness-main.zip
+treesMODELCODE.js

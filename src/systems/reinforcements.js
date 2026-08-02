@@ -150,7 +150,6 @@
     mine.push(gd);
 
     // ---- arrival juice ----
-    if (CBZ.sfx) { try { CBZ.sfx("alarm"); } catch (e) {} }
     if (CBZ.shake) { try { CBZ.shake(0.35); } catch (e) {} }
     return true;
   }

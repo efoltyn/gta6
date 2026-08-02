@@ -98,7 +98,7 @@
     points.textContent = "+50";
     killed.textContent = r.n === 25 ? "TACTICAL NUKE READY" : r.sub;
     pop(r.n === 25 ? "nuke" : "");
-    CBZ.sfx && CBZ.sfx(r.n === 25 ? "alarm" : "key");
+    if (r.n !== 25 && CBZ.sfx) CBZ.sfx("key");
 
     if (r.n === 5 && CBZ.addHeat) CBZ.addHeat(-18);
     if (r.n === 15) {
@@ -163,7 +163,6 @@
     setMeter();
 
     CBZ.flashToast && CBZ.flashToast("TACTICAL NUKE");
-    CBZ.sfx && CBZ.sfx("alarm");
     CBZ.shake && CBZ.shake(2.4);
     CBZ.doSlowmo && CBZ.doSlowmo(1.2);
     if (CBZ.el && CBZ.el.flash) {
