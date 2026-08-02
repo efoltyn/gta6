@@ -1338,6 +1338,14 @@
     }
     if (row.dogfeed) return { id: "feed", label: "Feed", hint: "to an animal" };
     if (row.tag === "drug") return { id: "deal", label: "Deal", hint: "sell to a dealer" };
+    // a HIDE is wearable (city/pelts.js — hood + mantle) and STILL sells; the
+    // verb toggles, the hint keeps the fence price visible so the hunt economy
+    // read is never lost.
+    if (row.pelt && CBZ.peltWearable && CBZ.peltWearable(name)) {
+      return (CBZ.peltWorn && CBZ.peltWorn() === name)
+        ? { id: "wear", label: "Take off", hint: "unhood — sells " + fmt$(pawnPrice(name)) + " at a fence" }
+        : { id: "wear", label: "Wear", hint: "hood + mantle · sells " + fmt$(pawnPrice(name)) + " at a fence" };
+    }
     if (row.value > 0) {
       const where = row.pelt ? "pawn / fence" : row.tag === "resource" ? "any counter" : "pawn shop";
       return { id: "sell", label: "Sell", hint: fmt$(pawnPrice(name)) + " at a " + where };
@@ -1414,6 +1422,10 @@
         return false;
       }
       case "wear":
+        // hides route to the pelt hood/mantle (toggle) BEFORE the clothing
+        // wardrobe — peltWearItem answers true only for hide rows, so shirts
+        // and chains fall through to outfits.js untouched.
+        if (CBZ.peltWearItem && CBZ.peltWearItem(name)) return true;
         if (CBZ.cityWear) { try { CBZ.cityWear(name); return true; } catch (e) {} }
         if (E.equip && E.equip(name)) { note("Wearing " + name + "."); return true; }
         return false;

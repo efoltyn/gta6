@@ -1460,6 +1460,9 @@
       CBZ.city.note("Skinned " + sp.name + " → " + peltName + " (~$" + worth + ")" + meatLine + (bounty ? " +$" + bounty : ""),
         3.2, sp.rarity === "legendary" ? { urgent: true } : undefined);
     }
+    // the fresh pelt goes straight ON you — hood and mantle (city/pelts.js;
+    // degrade-safe: no pelts module, no change).
+    if (CBZ.peltOnSkin) { try { CBZ.peltOnSkin(sp, peltName); } catch (e) {} }
     // leave a "skinned" husk that fades shortly.
     a.skinT = Math.min(a.skinT, 14);
     a.skinned = true;
