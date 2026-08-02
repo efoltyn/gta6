@@ -419,6 +419,11 @@
   // One shared 64px radial-gradient texture (white core → transparent rim) used
   // by every pooled sprite; additive blending sums overlaps toward white-hot.
   const puffs = [], _ecol = new THREE.Color();
+  // A district fire used to be able to expand this pool forever. A normal RPG
+  // peaks well below this ceiling; the cap only engages when many persistent
+  // emitters overlap, where allocating another SpriteMaterial is less useful
+  // than keeping the renderer alive.
+  const PUFF_CAP = 384;
   let puffPool = [], puffTex = null, smokeTex = null;
   function makePuffTexture() {
     const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -444,11 +449,20 @@
     }
     const t = new THREE.Texture(c); t.needsUpdate = true; return t;
   }
+  // The RPG's soft fire/smoke masks are the shared blast visual language.
+  // Large composers can reuse the textures in bounded instanced fields rather
+  // than approximating smoke with solid geometry or baking a silhouette card.
+  CBZ.cityBlastPuffAssets = function () {
+    if (!puffTex) puffTex = makePuffTexture();
+    if (!smokeTex) smokeTex = makeSmokeTexture();
+    return { flame: puffTex, smoke: smokeTex };
+  };
   function getPuff(additive, smoke) {
     if (!puffTex) puffTex = makePuffTexture();
     if (smoke && !smokeTex) smokeTex = makeSmokeTexture();
     let p = puffPool.pop();
     if (!p) {
+      if (puffs.length >= PUFF_CAP) return null;
       const m = new THREE.SpriteMaterial({ map: puffTex, depthWrite: false, depthTest: true, transparent: true, opacity: 0 });
       p = new THREE.Sprite(m); p.renderOrder = 9; scene.add(p);
     }
@@ -506,6 +520,7 @@
   }
   function spawnPuff(x, y, z, o) {
     const p = getPuff(o.additive !== false, o.smoke);
+    if (!p) return false;
     p.position.set(x, y, z); p.material.rotation = rng() * 6.2832;
     p.scale.set(o.base, o.base, 1); p.material.opacity = 0; p.visible = (o.delay || 0) <= 0;
     // FIRST-FRAME TRUTH — see the flag block above. Delayed puffs (the
@@ -528,6 +543,7 @@
       // smoke fades from charred-orange to dark grey as it cools
       shade: o.shade == null ? 0.16 : o.shade,
     });
+    return true;
   }
   function updatePuffs(dt) {
     for (let i = puffs.length - 1; i >= 0; i--) {
@@ -1676,6 +1692,7 @@
       wallScars: scars.length, wallWounds: wounds.length,
       groundScorches: scorches.length, groundSmolders: smolders.length,
       livePuffs: puffs.length,
+      puffAllocated: puffs.length + puffPool.length, puffCap: PUFF_CAP,
       flag: CBZ.CONFIG.FX_WALL_WOUNDS === true,
     };
   };

@@ -63,19 +63,11 @@
                               rendered ABOVE the fireball (renderOrder 9 vs 8)
                               so it genuinely hides it, then thinning as the
                               second pulse burns through.
-     0.90+      FAR TIER      (NUKE_REAL_SCALE) the cloud is 5,106 m across
-                              and 10,000 m tall — TEN TIMES the camera's own
-                              far plane — so past the point where the 3D cap
-                              can no longer fit inside the frustum it is
-                              drawn as ONE sky-locked impostor quad at true
-                              ANGULAR size. Not an extra layer: it fades the
-                              3D cap/crown/glow out as it fades in, on a
-                              geometric handoff (impostorMix), so the peak
-                              draw count is unchanged and nothing is ever
-                              clipped mid-swap. The near stem and the base
-                              surge stay 3D under it — they are the only
-                              parts genuinely inside the frustum, and they
-                              are the reference photograph's foreground.
+     0.90+      CLOUD         six bounded instanced fields reuse the RPG's soft
+                              fire/smoke masks for cap, crown, stem and dust.
+                              Their centres move in world space, so the cloud
+                              has depth and parallax from the street or B-2;
+                              no all-enclosing mushroom card owns the default.
      0.62-1.90  CONDENSATION  the same shell, continued: the Wilson cloud, the
                               transient near-white SHELL (never a ball — that is
                               what uCore 0.06 + uRimPow 2.6 buys) thrown by the
@@ -183,10 +175,8 @@
    OWNER: "make them REAL TO SIZE, and also make the mushroom cloud LOOK LIKE
    AN ACTUAL MUSHROOM CLOUD."
 
-   Nothing here is chosen for framing any more. The YIELD is INVERTED out of
-   the bus row (W = (radius*power/50)^3 = 16.0 kt, Hiroshima-class) and every
-   dimension is solved from it — see the physical-model block for the
-   arithmetic. What the stock nuke row now draws:
+   The YIELD is inverted out of the bus row (W = (radius*power/50)^3 = 16.0 kt,
+   Hiroshima-class). nukeDims publishes the mature, minutes-old reference:
 
        fireball radius         126 m      50*W^(1/3)
        cap DIAMETER          5,106 m      Glasstone 20 kt cap, W^(1/3)-scaled
@@ -224,14 +214,11 @@
    to sit inside 0.36 of the declared radius — a thin core inside a wide
    claim, smooth from every angle.
 
-   AND A 10 KM CLOUD DOES NOT FIT IN A 1 KM FRUSTUM. core/scene.js's camera
-   is PerspectiveCamera(62, aspect, 0.1, 1000). Rather than shrink the
-   physics to fit the renderer, the far tier is a single sky-locked IMPOSTOR
-   quad drawn at TRUE ANGULAR SIZE (size' = size * D/d, D = 0.86*far) — see
-   makeMushroomTexture. The two tiers cross-fade on a GEOMETRIC FACT (how
-   close the 3D cap's far edge is to the far plane), so the swap always
-   completes before anything can be clipped, and the impostor REPLACES the
-   3D cap rather than stacking on it: peak draw count does not move.
+   A mature 10 km cloud cannot form during this 34-second shot and cannot fit
+   the 1 km frustum. formationDims therefore draws the young 454 m-wide,
+   roughly 765 m-tall stage that can honestly exist in the sequence, while
+   nukeDims remains the mature physics/zone reference. This removes both the
+   time mismatch and the need to flatten the visible event onto one sky quad.
 
    All of it is reported by CBZ.nukeFxAudit() — .yieldKt, .dims, .zones,
    .casualty, .proportions, .impostor — so nothing here can drift back
@@ -241,9 +228,9 @@
    the bus's and ledger's. This file renders consequences—cloud, dust, world
    fires and broken windows—without outlining any zone on the ground.
 
-   MUSHROOM CLOUDS, CHEAPLY: four InstancedMeshes form the 3D silhouette and
-   3-5 procedural billboards add noisy surface detail. Every texture is baked
-   at load; nothing is fetched (CDN is blocked and must stay that way).
+   MUSHROOM CLOUDS, CHEAPLY: six InstancedMeshes place RPG-textured soft puffs
+   through a 3D cap/stem/surge field. Every texture is baked at load; nothing
+   is fetched (CDN is blocked and must stay that way).
 
    ------------------------------------------------------------------
    COST DISCIPLINE (fill rate is the enemy — a full-screen additive layer is
@@ -357,13 +344,10 @@
 
   /* NUKE_REAL_SCALE (2026-07-28) — DIMENSIONAL HONESTY.
      OWNER: "make them REAL TO SIZE."
-     The cloud stops being sized for framing and takes the dimensions the
-     modelled yield actually produces (nukeDims): a 5,106 m cap 3,992 m thick
-     centred at 8,004 m, on a 1,702 m stem, over a 2,016 m dust base, topping
-     out at 10 km. Since that is ten times the camera's own far plane, the
-     flag also switches on the far-tier impostor that draws it at true
-     ANGULAR size. false => the old framing-scale cloud (a 489 m cap at
-     907 m), which is what every ratio in this file used to be tuned for. */
+     nukeDims keeps the mature modelled dimensions and all physical effect
+     contours. formationDims is the separate visible 34-second stage; it is
+     deliberately younger and stays volumetric inside the camera frustum.
+     false => the old framing-scale/legacy cloud path. */
   if (CBZ.CONFIG.NUKE_REAL_SCALE == null) CBZ.CONFIG.NUKE_REAL_SCALE = true;
   function real() { return v2() && CBZ.CONFIG.NUKE_REAL_SCALE !== false; }
 
@@ -377,18 +361,12 @@
     return real() && CBZ.CONFIG.NUKE_FX_PHASED_CLOUD !== false;
   }
 
-  /* THE POST-FLASH CLOUD HAS ONE OWNER. The old near tier drew six fields of
-     smooth icosahedra (cap/stem/surge/hot/crown/glow), then five detail planes,
-     then cross-faded all of that into the far mushroom. Smooth shading did not
-     change the underlying fact: the smoke was a pile of giant solid balls, the
-     translucent overdraw hid the silhouette behind it, and the post-flash frame
-     paid for up to 134 moving instances plus five redundant planes.
-
-     The coherent path makes the phased mushroom mask the sole nuclear cloud
-     from the instant the white dome hands over. Its alpha is one continuous
-     density field (cap + collar + stem + base), with turbulence changing
-     density INSIDE that volume instead of defining it as separate circles.
-     MOABs keep their compact 3D billows; false restores the old nuclear stack. */
+  /* THE POST-FLASH CLOUD HAS ONE OWNER. The coherent path suppresses the five
+     legacy detail planes and the ordinary explosion storm, but it now keeps
+     the six bounded instanced fields. Each field uses crashfx's exact soft RPG
+     fire/smoke masks, so the cloud is many overlapping moving volumes in world
+     space rather than one camera-facing mushroom silhouette. false restores
+     the old nuclear stack and its geometric far-tier handoff. */
   if (CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD == null) CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD = true;
   function coherentCloud() {
     return phasedCloud() && CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD !== false;
@@ -499,7 +477,7 @@
   }
 
   /* ============================================================
-     THE MUSHROOM DENSITY TEXTURE — the post-flash cloud, baked once at load.
+     LEGACY MUSHROOM DENSITY TEXTURE — baked once for the flag-off fallback.
 
      WHY THIS EXISTS. The honest cloud for this device is 5,106 m across and
      10,000 m tall (see nukeDims). core/scene.js's camera is
@@ -511,12 +489,9 @@
      is a depth-precision disaster across the whole city for one 34-second
      event.
 
-     The owner's instruction was explicit: do not shrink the physics to fit
-     the renderer. So the cloud stays 10 km tall in every number this file
-     publishes, and the FAR TIER is drawn as a sky-locked impostor at TRUE
-     ANGULAR SIZE — the same trick core/sky.js's dome and
-     world/terrain_overhaul.js's unlit backdrop range already use, which is
-     this repo's own precedent for "further away than the frustum goes".
+     This was the former default. The coherent path now draws the honest young
+     formation stage as soft world-space volumes; this mature sky card remains
+     only so the explicit fallback still has a complete implementation.
 
      THE SIMILAR-TRIANGLES SOLVE (stepImpostor does it every frame):
          d      = |cloudCentre - camera|          the TRUE distance
@@ -776,6 +751,7 @@
   const TEX = {
     cloud: null, noise: null, lut: null,
     mushEarly: null, mushForm: null, mush: null,
+    blastFlame: null, blastSmoke: null,
   };
 
   /* ============================================================
@@ -1113,16 +1089,19 @@
     TEX.cloud = makeCloudTexture();
     TEX.noise = makeNoiseTexture();
     TEX.lut = makeLutTexture();
+    const blastAssets = CBZ.cityBlastPuffAssets ? CBZ.cityBlastPuffAssets() : null;
+    TEX.blastFlame = blastAssets ? blastAssets.flame : TEX.cloud;
+    TEX.blastSmoke = blastAssets ? blastAssets.smoke : TEX.cloud;
     TEX.mushEarly = makeMushroomTexture(0);
     TEX.mushForm = makeMushroomTexture(1);
     TEX.mush = makeMushroomTexture(2);
 
     const sphereGeo = new THREE.IcosahedronGeometry(1, 2);   // 320 tris — a rim needs no more
     sphereGeo._shared = true;
-    // 320 smooth triangles per lobe. At full nuclear count this is still only
-    // ~43k triangles across six instanced draws, while removing the unmistakable
-    // twenty-faced smoke rocks the 80-triangle/flat-shaded path produced.
-    const billowGeo = new THREE.IcosahedronGeometry(1, 2);
+    // The RPG does not draw smoke as solid rocks: it overlaps soft camera-facing
+    // masks. Use that same language here, but keep it inside six InstancedMeshes
+    // so a nuclear cloud remains six draws rather than 134 Sprite draws.
+    const billowGeo = new THREE.PlaneGeometry(2, 2);
     billowGeo._shared = true;
     const quadGeo = new THREE.PlaneGeometry(1, 1);
     quadGeo._shared = true;
@@ -1150,11 +1129,11 @@
     POOL.dome = park(new THREE.Mesh(sphereGeo, domeMat), 9);
 
     seedVolumes();
-    function volumeMat(color, emissive, opacity) {
-      const m = new THREE.MeshLambertMaterial({
-        color: color, emissive: emissive, emissiveIntensity: 1,
+    function volumeMat(color, opacity) {
+      const m = new THREE.MeshBasicMaterial({
+        map: TEX.blastSmoke, color: color,
         transparent: true, opacity: opacity, depthWrite: false,
-        depthTest: true, fog: true, flatShading: false,
+        depthTest: true, fog: true, side: THREE.DoubleSide, alphaTest: 0.01,
       });
       m._shared = true;
       return m;
@@ -1167,21 +1146,21 @@
       return park(mesh, order);
     }
     POOL.surgeVol = volumeMesh("ground-cloud", VOL_MAX.surge,
-      volumeMat(0x746154, 0x1b0d07, 0.52), 4);
+      volumeMat(0x746154, 0.52), 4);
     POOL.stemVol = volumeMesh("stem", VOL_MAX.stem,
-      volumeMat(0x4b3a31, 0x24110a, 0.58), 5.1);
+      volumeMat(0x4b3a31, 0.58), 5.1);
     POOL.capVol = volumeMesh("cap", VOL_MAX.cap,
-      volumeMat(0x5b4030, 0x301208, 0.60), 5.2);
+      volumeMat(0x5b4030, 0.60), 5.2);
     const hotMat = new THREE.MeshBasicMaterial({
-      color: 0xff8a20, transparent: true, opacity: 0,
+      map: TEX.blastFlame, color: 0xff8a20, transparent: true, opacity: 0,
       depthWrite: false, depthTest: true, fog: true,
-      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide, alphaTest: 0.01, blending: THREE.AdditiveBlending,
     });
     hotMat._shared = true;
     POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat, 7);
 
-    /* ---- THE CROWN + COLLAR: cold, dark, smooth cauliflower ---------------
-       Smooth Lambert lobes, drawn at renderOrder 5.3 — i.e. immediately
+    /* ---- THE CROWN + COLLAR: cold, dark, soft cauliflower -----------------
+       Soft smoke masks, drawn at renderOrder 5.3 — i.e. immediately
        AFTER the cap (5.2) so a crown lobe sitting on the cap's shoulder wins
        the depth tie, and BEFORE the surface billboards (5) can... no: 5.3 is
        after 5.2 and after 5, which is the order the silhouette needs. There
@@ -1189,7 +1168,7 @@
        that it is the part of the cloud that has already gone COLD, and it is
        what the incandescent glow underneath is contrasted against. */
     POOL.crownVol = volumeMesh("cap-crown", VOL_MAX.crown,
-      volumeMat(0x3b3129, 0x150803, 0.56), 5.3);
+      volumeMat(0x3b3129, 0.56), 5.3);
     /* ---- THE CAP GLOW: incandescent, additive, inside the cap ------------
        MeshBasic (never lit — it IS the light), additive so it brightens the
        cap lobes it shines through rather than replacing them, and depthTest
@@ -1197,9 +1176,9 @@
        what reads as "glowing from within" instead of "a hot ball parked in
        front of a cloud". Retired by ~11 s, long before the cloud is. */
     const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xffd27a, transparent: true, opacity: 0,
+      map: TEX.blastFlame, color: 0xffd27a, transparent: true, opacity: 0,
       depthWrite: false, depthTest: true, fog: true,
-      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide, alphaTest: 0.01, blending: THREE.AdditiveBlending,
     });
     glowMat._shared = true;
     POOL.glowVol = volumeMesh("cap-glow", VOL_MAX.glow, glowMat, 5.25);
@@ -1256,8 +1235,9 @@
       POOL.bills.push(park(new THREE.Mesh(quadGeo, mat), 5));
     }
 
-    /* ---- THE FAR-TIER IMPOSTOR. One quad, one baked mushroom, one draw
-       call for a ten-kilometre cloud. It is NOT an extra layer on top of the
+    /* ---- LEGACY FAR-TIER IMPOSTOR. One quad, one baked mushroom, one draw
+       call for a ten-kilometre cloud. It is NOT part of the coherent default;
+       on the explicit fallback path it is not an extra layer on top of the
        3D cloud — it REPLACES it (they cross-fade on whether the 3D cap still
        fits inside the frustum, see impostorMix), so the peak draw count does
        not move.
@@ -1525,6 +1505,25 @@
       top: top,
       stemW: capW * STEM_OF_CAP,                // 16 kt -> 1,701 m
       base: RING_1KT.p2 * cubeRt(W),            // dust base radius = the 2 psi contour
+    };
+  }
+
+  /* WHAT CAN FORM DURING THIS 34-SECOND SEQUENCE. nukeDims is the researched
+     mature cloud (minutes old, kilometres tall) and remains the public physics
+     model. Drawing that mature object one second after the dome forced the old
+     path to flatten it onto a sky card. This is the visible young cloud: still
+     enormous beside the city, inside the 1 km frustum, and in the same 3:1
+     cap/stem proportion. It grows toward the mature dimensions after this
+     sequence ends; it does not pretend to have reached them already. */
+  function formationDims(R) {
+    const capW = R * 3.6;
+    const capH = capW * 0.78;
+    const capY = R * 5.2;
+    return {
+      capW: capW, capH: capH, capY: capY,
+      top: capY + capH * 0.5 * CAP_FLAT,
+      stemW: capW * STEM_OF_CAP,
+      base: R * 4.0,
     };
   }
 
@@ -1930,7 +1929,8 @@
       burnR: (styleName === "nuke" && real()) ? nukeRings(radius).psi2
            : (P.thermK > 0 ? maxR * P.thermK : 0),
       riseH: R * P.riseK, capW: R * P.capK, stemW: R * P.stemK, surgeW: R * P.surgeK,
-      capH: R * P.capK * 0.66, capThick: 0, dims: null, impW: 0, impH: 0, surgeDraw: 0,
+      capH: R * P.capK * 0.66, capThick: 0, dims: null, drawDims: null,
+      impW: 0, impH: 0, surgeDraw: 0,
       t: 0, r: Math.max(1, row.radius || radius * 0.1), dur: P.dur, q: q,
       // The front still drives damage, dust and condensation, but it is never
       // painted as geometry on the terrain.
@@ -1945,40 +1945,24 @@
       coherentCloud: oneCloud,
     };
 
-    /* ---- REAL TO SIZE. Every drawn dimension is now the researched one,
-       divided by whatever multiplier the downstream animator applies to it,
-       so the value that finally reaches the screen IS the number nukeDims
-       published. Getting that division wrong is the whole risk here, so each
-       one names its divisor:
-         cap   stepVolumes/stepBill multiply L.capW by bloomAt(), whose
-               ceiling is 0.35 + 0.9 + 0.16 = 1.41
-         rise  capYAt() drives L.riseH to exactly L.by + riseH at full rise,
-               so no divisor — riseH IS the cap-centre altitude
-         stem  the stem block uses L.stemW as the column's true RADIUS at
-               full rise and applies stemProfile() per lobe, so no divisor
-         surge see the clamp below — the drawn skirt is deliberately NOT the
-               true one, and that is the one honest exception
-       The MOAB and the flag-off path keep the framing-scale ks untouched. */
+    /* ---- MATURE PHYSICS, YOUNG VISIBLE CLOUD. nukeDims remains the researched
+       minutes-old object used by the zone/audit model. The live 34-second shot
+       uses formationDims instead: forcing a 10 km mature cloud into a 1 km
+       camera is exactly what created the fake single-card mushroom. */
     if (styleName === "nuke" && real()) {
       const D = nukeDims(R);
+      const F = formationDims(R);
       live.dims = D;
-      live.capW = D.capW / BLOOM_MAX;         // -> D.capW at full bloom
-      live.capH = D.capH;
-      live.capThick = D.capH / D.capW;        // 0.782 — a RATIO, so it rides bloom
-      live.riseH = D.capY;                    // cap CENTRE altitude, 8,004 m
-      live.stemW = D.stemW * 0.5;             // the block below wants a RADIUS
-      live.surgeW = D.base;
-      /* THE ONE PLACE THE DRAWN SIZE IS NOT THE TRUE SIZE, and it is named.
-         The dust base is 2,016 m across the deck. scene.fog ends at 360 m
-         and the far plane at 1,000 m, so every metre of it past ~600 m is
-         either fully hazed or clipped — drawing 34 instanced lobes out there
-         buys nothing and costs fill. The 3D skirt is therefore clamped to
-         what the atmosphere can actually show, and the IMPOSTOR's baked dust
-         base carries the true 2,016 m at true angular size. The published
-         number stays 2,016 either way; only the near geometry is clamped. */
-      live.surgeDraw = Math.min(D.base, camFar() * 0.62);
-      live.impW = D.capW;
-      live.impH = D.top;
+      live.drawDims = F;
+      live.capW = F.capW / BLOOM_MAX;          // -> F.capW at full bloom
+      live.capH = F.capH;
+      live.capThick = F.capH / F.capW;
+      live.riseH = F.capY;
+      live.stemW = F.stemW * 0.5;              // stepVolumes wants a radius
+      live.surgeW = F.base;
+      live.surgeDraw = F.base;
+      live.impW = F.capW;                      // legacy/fallback tier only
+      live.impH = F.top;
     }
 
     // ---- shells -----------------------------------------------------------
@@ -2001,12 +1985,11 @@
       live.dome.visible = false;
     }
     // ---- VOLUMETRIC FIREBALL + MUSHROOM ------------------------------------
-    // Four base InstancedMeshes. Hot/glow detail counts ride quality; the
-    // phased nuke's cold silhouette stays dense because its whole full-count
-    // field is ~43k triangles and six bounded draws—far cheaper than puff spam.
-    // A nuclear cloud is now the one continuous phased density field. The
-    // instanced lobe volumes remain available to the MOAB and the flag-off A/B.
-    live.volume = !!P.volume && !live.coherentCloud;
+    // Four base InstancedMeshes plus nuclear crown/glow. The coherent nuke uses
+    // these as soft RPG-textured puff fields and merely suppresses the five
+    // redundant legacy detail planes; it no longer suppresses the volume in
+    // favour of one silhouette card.
+    live.volume = !!P.volume;
     if (live.volume) {
       const nuke = styleName === "nuke";
       const count = function (lo, hi) {
@@ -2250,7 +2233,7 @@
   }
 
   /* ============================================================
-     THE FAR TIER — one quad, true angular size, and a handoff that is a
+     THE LEGACY FAR TIER — one quad, true angular size, and a handoff that is a
      GEOMETRIC FACT rather than a distance somebody picked.
 
      impostorMix(L) returns 0 (all 3D) .. 1 (all impostor). The rule is:
@@ -2384,13 +2367,14 @@
                                     cam.position.z - mesh.position.z), 0);
   }
 
-  /* ---- TRUE 3D MUSHROOM VOLUME -------------------------------------------
-     The old silhouette depended on one cap quad and a horizontal torus. From
-     the B-2's steep view those become a disc and a ring. These four instanced
-     lobe fields have real depth from every camera angle while remaining four
-     draw calls total. The cap's instances circulate slowly around the stem;
-     no geometry is a ring and no fragment is painted on the terrain. */
+  /* ---- 3D SOFT-PUFF MUSHROOM FIELD ---------------------------------------
+     Every puff faces the lens like the RPG sprites, but its centre occupies a
+     different world-space point and moves through the cap/stem/surge field.
+     That preserves depth and parallax without either solid smoke rocks or one
+     all-enclosing mushroom card, while instancing keeps the six-draw budget. */
   const _volDummy = new THREE.Object3D();
+  const _volCamQ = new THREE.Quaternion();
+  let _volHasCamQ = false;
   const VOL_HOT = new THREE.Color(0xff7a18);
   const VOL_ASH = new THREE.Color(0x332f2c);
   /* THE STEM IS ORANGE-RED, NOT BROWN, and THE BASE SURGE IS RED-BROWN.
@@ -2421,7 +2405,12 @@
 
   function putVolume(mesh, i, x, y, z, sx, sy, sz, ry) {
     _volDummy.position.set(x, y, z);
-    _volDummy.rotation.set(0, ry || 0, 0);
+    if (_volHasCamQ) {
+      _volDummy.quaternion.copy(_volCamQ);
+      if (ry) _volDummy.rotateZ(ry);
+    } else {
+      _volDummy.rotation.set(0, 0, ry || 0);
+    }
     _volDummy.scale.set(Math.max(0.01, sx), Math.max(0.01, sy), Math.max(0.01, sz));
     _volDummy.updateMatrix();
     mesh.setMatrixAt(i, _volDummy.matrix);
@@ -2436,7 +2425,10 @@
 
   function stepVolumes(t, L, mix) {
     if (!L.volume || !L.volN) return;
-    // 1 while the 3D cloud owns the picture, 0 once the impostor has it.
+    const cam = CBZ.camera;
+    _volHasCamQ = !!(cam && cam.getWorldQuaternion);
+    if (_volHasCamQ) cam.getWorldQuaternion(_volCamQ);
+    // 1 while the legacy far tier owns the picture, 0 while soft volumes do.
     const mixC = clamp(mix || 0, 0, 1);
     const near = 1 - mixC;
     const rise = riseAt(t, L);
@@ -2653,24 +2645,15 @@
        time. The land-burst equivalent is the ground-shock dust skirt driven
        by the afterwinds — same picture, same law: fast then slowing, which
        is what the ease() below is and why it is not linear.
-       WHAT V2 ADDS is the LOBES. Each one now also YAWS at a rate set by
-       how far out it is (slower further out, exactly as it decelerates) —
-       putVolume only carries a Y rotation, and that is enough here because
-       these lobes are deliberately NOT axisymmetric (1.25 across the roll
-       axis against 1.0 along it), so a yaw churns the curtain instead of
-       sliding it. And the lobe heights ALTERNATE HARD, so a Lambert light
-       from above leaves every other one in its neighbour's shadow and
-       nearly black. Those black shadowed lobes are what carry the scale of
-       the reference plate — a uniform apron reads as fog. */
+       WHAT V2 ADDS is the LOBES. Their radius and height alternate hard and
+       their soft masks overlap at different depths, so the apron has broken
+       density and motion instead of reading as a uniform fog sheet. */
     const surge = POOL.surgeVol;
     const surgeIn = ease((t - 0.75) / 2.0);
     const surgeFade = Math.max(0, 1 - ease((t - Math.min(15, L.dur - 5)) / 7));
-    /* THE DRAWN SKIRT IS THE CLAMPED ONE (L.surgeDraw — see beginSequence).
-       The researched dust base is 2,016 m across the deck; the fog ends at
-       360 m and the frustum at 1,000 m, so the 3D lobes are clamped to what
-       the atmosphere can actually show and the impostor's baked dust base
-       carries the true reach at true angular size. `surgeW` keeps the honest
-       number for the audit — only the geometry is clamped, never the claim. */
+    /* L.surgeDraw is the young cloud's visible base. The researched 2,016 m
+       contour remains in nukeDims/nukeRings; it is a gameplay boundary, not a
+       claim that 34 seconds of dust have already filled that whole radius. */
     const surgeMax = photo ? L.surgeDraw : Math.min(L.maxR * 0.72, L.R * 3.6);
     const surgeR = surgeMax * (0.12 + 0.88 * ease((t - 0.55) / 6.2));
     const deep = v2();
@@ -3029,14 +3012,11 @@
       }
     }
 
-    /* THE TWO TIERS. impostorMix is a geometric fact — how close the 3D
-       cap's far edge is to the far plane — so the handoff happens exactly
-       when the near geometry stops being renderable and never on a clock.
-       Both are stepped every frame; each fades the other out. */
-    // The coherent nuclear cloud never cross-fades through the solid-lobe
-    // tier: the phased density mask owns the whole post-flash silhouette.
-    // Legacy/chemical styles retain the geometric frustum handoff.
-    const mix = L.coherentCloud ? 1 : (real() ? impostorMix(L) : 0);
+    /* The coherent nuclear path is the bounded soft-puff field from handoff to
+       fade-out. The baked mushroom remains only as a flag-off legacy/fallback
+       tier; making it the default is what exposed the entire cloud as one
+       camera-facing picture. */
+    const mix = L.coherentCloud ? 0 : (real() ? impostorMix(L) : 0);
     L.mix = mix;
     stepImpostor(t, L, mix);
     // The 3D volumes carry the actual mushroom silhouette from every angle.
@@ -3609,12 +3589,13 @@
        it would be a fiction rather than a saving. */
     const v2n = kind === "nuke" && v2();
     const oneCloud = kind === "nuke" && coherentCloud();
-    const volumeDraws = P.volume ? (oneCloud ? 0 : (v2n ? 6 : 4)) : 0;
+    const volumeDraws = P.volume ? (v2n ? 6 : 4) : 0;
     /* THE CLOUD'S OWN DIMENSIONS. Under NUKE_REAL_SCALE these are the
        researched ones (nukeDims), NOT the framing-scale k-multiples — the
        whole point of the flag is that the published size is the physical
        one. capY is the cap CENTRE altitude in both paths. */
     const RD = (kind === "nuke" && real()) ? nukeDims(R) : null;
+    const FD = RD ? formationDims(R) : null;
     return {
       kind: kind, nearField: +eff.toFixed(1), fireball: +R.toFixed(1), R: +R.toFixed(1),
       capW: +(RD ? RD.capW : R * P.capK).toFixed(1),
@@ -3624,11 +3605,16 @@
       cloudTop: +(RD ? RD.top : R * P.riseK * 1.16).toFixed(1),
       yieldKt: RD ? +RD.W.toFixed(2) : null,
       realScale: !!RD,
-      // the far tier is ONE quad and it REPLACES the 3D cap/crown/glow it
-      // cross-fades with, so the peak draw count does not move.
-      impostorDraws: RD ? 1 : 0,
+      drawDims: FD ? {
+        capW: +FD.capW.toFixed(1), capH: +FD.capH.toFixed(1),
+        capY: +FD.capY.toFixed(1), top: +FD.top.toFixed(1),
+        stemW: +FD.stemW.toFixed(1), base: +FD.base.toFixed(1),
+      } : null,
+      // The coherent default has no all-enclosing card. It remains allocated
+      // only for the explicit legacy path.
+      impostorDraws: RD && !oneCloud ? 1 : 0,
       reach: +reach.toFixed(1),
-      burnR: +(P.thermK > 0 ? reach * P.thermK : 0).toFixed(1),
+      burnR: +(RD ? nukeRings(R).psi2 : (P.thermK > 0 ? reach * P.thermK : 0)).toFixed(1),
       bills: oneCloud ? 0
         : Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
       shell: !!(CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28),
@@ -3636,7 +3622,7 @@
       whiteDome: v2n && !!P.dbl,
       groundRings: 0,
       addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + volumeDraws +
-                 (v2n && P.dbl ? 1 : 0) + (oneCloud ? 1 : 0),
+                 (v2n && P.dbl ? 1 : 0),
     };
   };
 
@@ -3697,6 +3683,7 @@
     // describing a silhouette the file stopped drawing.
     const bloomMax = BLOOM_MAX;
     const RD = (kind === "nuke" && real()) ? nukeDims(S.fireball) : null;
+    const FD = RD ? formationDims(S.fireball) : null;
     const capWide = RD ? RD.capW : S.capW * bloomMax;
     const flatK = (kind === "nuke" && v2()) ? CAP_FLAT : 1;
     const capTall = RD ? RD.capH : capWide * 0.66 * flatK;
@@ -3810,8 +3797,8 @@
     const handoffT = WDOME_T + WDOME_OUT;
     const curveL = {
       style: P, R: S.R, by: 0, y: 0,
-      riseH: RD ? RD.capY : S.capY,
-      capW: RD ? RD.capW / BLOOM_MAX : S.capW,
+      riseH: FD ? FD.capY : S.capY,
+      capW: FD ? FD.capW / BLOOM_MAX : S.capW,
       dims: RD,
     };
     const handoffRise = riseAt(handoffT, curveL);
@@ -3841,15 +3828,18 @@
          measured USSBS curve at the same stations the ring table quotes. */
       yieldKt: T ? T.W : null,
       dims: RD,
+      drawDims: FD,
       casualty: T ? [126, 504, 756, 1109, 1533, 2016, 2554, 3276].map(function (r) {
         return { r: r, killed: +nukeLethalAt(r, S.fireball).toFixed(3) };
       }) : null,
       impostor: (kind === "nuke" && real()) ? {
-        // true angular size is reproduced by size' = size * D / d
+        // Allocated for the explicit legacy fallback; zero draws on the
+        // coherent default.
         at: +(camFar() * 0.86).toFixed(1), far: camFar(),
         band: [+(camFar() * 0.55).toFixed(0), +(camFar() * 0.95).toFixed(0)],
-        w: RD ? +RD.capW.toFixed(0) : 0, h: RD ? +RD.top.toFixed(0) : 0,
-        draws: 1,
+        w: S.impostorDraws && FD ? +FD.capW.toFixed(0) : 0,
+        h: S.impostorDraws && FD ? +FD.top.toFixed(0) : 0,
+        draws: S.impostorDraws,
       } : null,
       dome: S.whiteDome
         ? { r: +S.fireball.toFixed(1), t: WDOME_T, out: WDOME_OUT, p: WDOME_P, curve: domeCurve }
@@ -3886,14 +3876,14 @@
            formation.handoffPhase < 0.10),
         fullNuclearFireball: kind !== "nuke" ||
           (S.fireball === S.nearField && S.R === S.fireball),
-        // Compatibility key retained. On the coherent path the stronger
-        // contract is exactly one cloud draw and zero lobe/detail draws.
+        // Compatibility key retained. The coherent contract is six bounded
+        // soft-puff fields, no redundant detail planes, and no mushroom card.
         volumetricCloud: !P.volume ||
           (kind === "nuke" && coherentCloud()
-            ? (S.impostorDraws === 1 && S.volumeDraws === 0 && S.bills === 0)
+            ? (S.impostorDraws === 0 && S.volumeDraws === 6 && S.bills === 0)
             : S.volumeDraws >= 4),
         coherentPostFlash: kind !== "nuke" || !coherentCloud() ||
-          (S.impostorDraws === 1 && S.volumeDraws === 0 && S.bills === 0 &&
+          (S.impostorDraws === 0 && S.volumeDraws === 6 && S.bills === 0 &&
            CBZ.CONFIG.NUKE_FX_ASH === false),
         /* ---- NUKE_FX_V2 GATES. Each one pins a claim the header makes.
            They are structurally true when the flag is off, so a revert never

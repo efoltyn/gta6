@@ -458,7 +458,13 @@
        evaluations after the flash. `tick:0.20` keeps the same 190 m/s arrival
        law with at most 0.2 s / 38 m temporal granularity, cuts roster/lot
        scans by 4x, and structural.js amortizes admitted lots separately. */
-    wave: { speed: 190, maxR: 3276, thermal: 0.615, lethal: "nuclear", tick: 0.20 },
+    // Structural work stops at the 2 psi wall/roof contour. maxR remains the
+    // 1 psi glass-and-casualty contour, so the front still reaches the whole
+    // district without manufacturing rubble from window-breaking pressure.
+    // structK puts an ordinary ~55-cap block on the 5 psi collapse contour:
+    // 55*9*(1-1109/2016)^2*0.55 ~= 55.
+    wave: { speed: 190, maxR: 3276, thermal: 0.615, structR: 2016,
+            structK: 0.55, lethal: "nuclear", tick: 0.20 },
   });
 
   // ---- environmental (city/disasters wiring) ------------------------------
@@ -1048,10 +1054,15 @@
       // stay in proportion however hard the thing that made them arrived.
       maxR: row.wave.maxR * q * fxScale,
       // THERMAL REACH. A row may declare `wave.thermal` as a MULTIPLE of maxR
-      // (1.25 for the nuke — the Y^0.41 / Y^0.33 divergence). Absent, it is 0
+      // (0.615 for this nuke's 2 psi ignition edge inside its 1 psi reach).
+      // Absent, it is 0
       // and the extra sweep in stepWaves never fires, so every existing row is
       // byte-for-byte unchanged.
       thermal: row.wave.thermal ? row.wave.maxR * q * fxScale * row.wave.thermal : 0,
+      // A row may carry people/glass farther than meaningful structural
+      // pressure. Absent fields preserve the legacy full-wave sweep exactly.
+      structR: (row.wave.structR || row.wave.maxR) * q * fxScale,
+      structK: row.wave.structK > 0 ? +row.wave.structK : 1,
       speed: row.wave.speed,
       // Radius still advances by speed*elapsed. This changes query cadence,
       // never propagation speed or the final footprint.
@@ -1359,7 +1370,8 @@
     //     flattened core, burning middle, scorched-but-standing edge — while
     //     people keep the gentler linear curve so the far rim still knocks
     //     them down rather than sparing them outright.
-    if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
+    const structR = Math.min(w.maxR, w.structR || w.maxR);
+    if (r0 < structR && CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
       try {
         /* THE IGNITION BOUNDARY IS A CEILING NOW, NOT ONLY A FLOOR — and
            this is a real fault the maxR retune exposed rather than caused.
@@ -1374,9 +1386,15 @@
            One expression fixes both readings: a row's `thermal` is now the
            edge of its ignition zone in EITHER direction. Rows that declare
            no thermal, or declare one outside their reach, are untouched. */
-        CBZ.structure.sweep(w.x, w.z, r0, r1, w.struct * bite * frac, {
+        // Structural falloff is measured against its own pressure contour,
+        // not the wider glass/casualty reach. That keeps the researched 1 psi
+        // outer wave without treating every broken window as a condemned lot.
+        const sr1 = Math.min(r1, structR);
+        const sfrac = 1 - sr1 / (structR + 0.01);
+        CBZ.structure.sweep(w.x, w.z, r0, sr1,
+          w.struct * w.power * sfrac * sfrac * (w.structK || 1), {
           kind: w.kind,
-          fire: (w.thermal > 0 && w.thermal < w.maxR && r1 > w.thermal) ? 0 : w.fire * frac,
+          fire: (w.thermal > 0 && sr1 > w.thermal) ? 0 : w.fire * sfrac,
           by: w.by, byPlayer: w.byPlayer,
           sudden: true,                     // a shock front is THE sudden load
           waveId: w.id,                     // one bite per building per wave
@@ -1399,7 +1417,8 @@
   I.waveCount = function () { return waves.length; };
   I.waveState = function () {
     return waves.map(function (w) {
-      return { kind: w.kind, r: +w.r.toFixed(1), maxR: +w.maxR.toFixed(1), tick: w.tick };
+      return { kind: w.kind, r: +w.r.toFixed(1), maxR: +w.maxR.toFixed(1),
+               structR: +(w.structR || w.maxR).toFixed(1), tick: w.tick };
     });
   };
   I.clearWaves = function () { waves.length = 0; rumble = null; };

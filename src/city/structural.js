@@ -884,18 +884,40 @@
   S.ignite = function (lot, floor) { const r = lot && ledger.get(lot); if (r) ignite(r, floor | 0); };
 
   let fireAcc = 0;
+  function emitFirePlume(b, FH, f) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const horiz = Math.random() < 0.5;
+    // Start strictly outside the facade. cityCrashSmoke jitters each puff by
+    // up to 0.75 u, so a smaller standoff paints half the plume inside glass.
+    const PLUME_OUT = 1.1;
+    const fnx = horiz ? 0 : side, fnz = horiz ? side : 0;
+    const fx = b.ox + (horiz ? (Math.random() - 0.5) * b.w * 0.8 : side * b.w * 0.5) + fnx * PLUME_OUT;
+    const fz = b.oz + (horiz ? side * b.d * 0.5 : (Math.random() - 0.5) * b.d * 0.8) + fnz * PLUME_OUT;
+    try {
+      // Two smoke puffs plus the existing two flame licks: four pooled sprites
+      // per visible receipt, instead of the old seven.
+      CBZ.cityCrashSmoke(fx, f.f * FH + FH * 0.6, fz, { flame: true, count: 2 });
+    } catch (e) {}
+  }
   function stepFires(dt) {
     if (!burningRecs.size) return;
     fireAcc += dt;
     if (fireAcc < FIRE_TICK) return;
     const step = fireAcc; fireAcc = 0;
+    const plumeCandidates = [];
     burningRecs.forEach(function (rec) {
       if (!rec.fires.length || rec.stage >= STAGE.COLLAPSING) {
         burningRecs.delete(rec);
         return;
       }
       const b = rec.b, FH = b.FH || 3.2;
-      let structural = 0;
+      let structural = 0, plumeFloor = null;
+      const cam = CBZ.camera;
+      const dx = cam && cam.position ? b.ox - cam.position.x : 0;
+      const dz = cam && cam.position ? b.oz - cam.position.z : 0;
+      const d2 = dx * dx + dz * dz;
+      const cull = CBZ.cityCullRadius || 320;
+      const near = !cam || !cam.position || d2 < cull * cull;
       for (let i = rec.fires.length - 1; i >= 0; i--) {
         const f = rec.fires[i];
         f.t += step; f.spread += step;
@@ -922,43 +944,13 @@
           const roll = CBZ.hash01 ? CBZ.hash01(b.ox + f.f, b.oz + f.gen, 0x1f12e) : 0.5;
           if (roll < 0.4) ignite(rec, f.f - 1);
         }
-        // the visible flame + smoke column, on the pooled puff system, at a
-        // rate the quality tier scales. Only for fires the camera can see.
-        // Flame/smoke cadence rides the quality slider like every other FX
-        // budget in the repo: 8 burning floors at 2 Hz is 16 puffs/second per
-        // building, and a burning district would put that on every tier.
-        // tier 0 emits at ~0.6 Hz, tier 4 at 2 Hz.
+        // Logical fire is never budgeted; only its repeated visual receipt is.
+        // Admit at most one due floor per building, then the nearest visible
+        // buildings compete for a small global budget after this simulation
+        // pass. This is the difference between eight fires and eight emitters.
         f.puff += step;
         const puffEvery = CBZ.qScale ? CBZ.qScale(1.6, 0.5) : 0.5;
-        if (f.puff >= puffEvery && CBZ.cityCrashSmoke) {
-          f.puff = 0;
-          const cam = CBZ.camera;
-          const near = !cam || !cam.position || Math.hypot(b.ox - cam.position.x, b.oz - cam.position.z) < (CBZ.cityCullRadius || 320);
-          if (near) {
-            const side = Math.random() < 0.5 ? -1 : 1;
-            const horiz = Math.random() < 0.5;
-            // PLUME STANDOFF + a hot root. This emitted AT the wall plane
-            // (`side * b.w * 0.5` IS the face), and cityCrashSmoke jitters every
-            // puff +/-0.75 u laterally at scale 1 — so HALF the column was born
-            // INSIDE the building and the rest lay flat on the facade. Sprites
-            // are camera-facing, so at zero standoff a burning floor read as
-            // dark blobs PAINTED on the glass: the same defect the owner just
-            // purged from the blast wounds (crashfx.js FX_WALL_WOUNDS).
-            // PLUME_OUT is 1.1 because it must strictly EXCEED that 0.75 jitter
-            // — 0.6 would still birth a third of the plume inside the wall — so
-            // every puff now starts in open air and the column reads as smoke
-            // pouring OUT of a burning floor. `flame` adds the warm additive
-            // lick under the smoke, because a fire that emits nothing but
-            // near-black smoke IS a blob cluster, which is the other half of
-            // why this read as a stain instead of as burning. The emitter's
-            // rate, lifetime and self-termination are deliberately untouched.
-            const PLUME_OUT = 1.1;
-            const fnx = horiz ? 0 : side, fnz = horiz ? side : 0;
-            const fx = b.ox + (horiz ? (Math.random() - 0.5) * b.w * 0.8 : side * b.w * 0.5) + fnx * PLUME_OUT;
-            const fz = b.oz + (horiz ? side * b.d * 0.5 : (Math.random() - 0.5) * b.d * 0.8) + fnz * PLUME_OUT;
-            try { CBZ.cityCrashSmoke(fx, f.f * FH + FH * 0.6, fz, { flame: true }); } catch (e) {}
-          }
-        }
+        if (!plumeFloor && near && f.puff >= puffEvery && CBZ.cityCrashSmoke) plumeFloor = f;
       }
       if (structural > 0 && rec.fireDmg < rec.cap * FIRE_MAX_FRACTION) {
         rec.fireDmg += structural;
@@ -966,7 +958,18 @@
         advance(rec, {});
       }
       if (!rec.fires.length) burningRecs.delete(rec);
+      else if (plumeFloor) plumeCandidates.push({ b: b, FH: FH, f: plumeFloor, d2: d2 });
     });
+    // At Best this is three receipts per 0.25 s tick: 48 sprite requests/sec,
+    // globally, rather than 112/sec for EACH fully burning building. Nearest
+    // first keeps the detail where the player can read it.
+    plumeCandidates.sort(function (a, b) { return a.d2 - b.d2; });
+    const plumeBudget = Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(1, 3) : 3));
+    for (let i = 0; i < plumeCandidates.length && i < plumeBudget; i++) {
+      const p = plumeCandidates[i];
+      p.f.puff = 0;
+      emitFirePlume(p.b, p.FH, p.f);
+    }
   }
 
   /* ============================================================

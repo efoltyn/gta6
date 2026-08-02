@@ -141,6 +141,12 @@
     };
   }
   const mat = (col) => (CBZ.cmat ? CBZ.cmat(col) : new THREE.MeshLambertMaterial({ color: col }));
+  // Detailed rubble is deliberately scarce. A nuclear collapse can put every
+  // lot in the city on this ledger; 16-24 unique meshes for every one of them
+  // turns a gameplay consequence into thousands of permanent draw calls.
+  // The first entries (structural.js drains nearest-first) keep the full pile;
+  // the rest retain a grounded, collidable three-piece silhouette.
+  const RUBBLE_DETAIL_CAP = 32;
   function box(g, x, y, z, w, h, d, col, ry) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(col));
     m.position.set(x, y, z);
@@ -155,9 +161,11 @@
     const rng = lotRng(lot, 0xdead);
     const W = b.w - 1.2, Dp = b.d - 1.2;
     const peak = Math.min(3.6, 1.0 + b.storeys * 0.35);
+    const detailed = ledger.size <= RUBBLE_DETAIL_CAP;
+    rec.rubbleDetailed = detailed;
     // concrete greys + a memory of the building's own wall colour
     const cols = [0x565a5e, 0x4a4e52, 0x63676b, 0x585349];
-    const n = 14 + ((rng() * 8) | 0);
+    const n = detailed ? 14 + ((rng() * 8) | 0) : 2;
     for (let i = 0; i < n; i++) {
       // mound profile: big tilted slabs near the centre, crumbs at the rim
       const ang = rng() * Math.PI * 2, rr = Math.sqrt(rng());
@@ -168,7 +176,7 @@
       box(g, b.ox + x, h / 2 - 0.05, b.oz + z, w, h, d, cols[(rng() * cols.length) | 0], rng() * Math.PI);
     }
     // a couple of leaning wall shards — reads as "was a building", not a quarry
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < (detailed ? 2 : 1); i++) {
       const sx = rng() < 0.5 ? -1 : 1;
       const m = box(g, b.ox + sx * W * 0.3, peak * 0.55, b.oz + (rng() - 0.5) * Dp * 0.5,
         0.35, peak * 1.5, 2.2 + rng() * 2.5, 0x585349, rng() * 0.4);
@@ -441,7 +449,7 @@
 
     const rec = {
       k: keyOf(lot), lot, at: opts.at != null ? opts.at : (CBZ.dayTime ? CBZ.dayTime() : 0),
-      phase: 0, propGroup: null, propCols: [],
+      phase: 0, propGroup: null, propCols: [], rubbleDetailed: false,
     };
     ledger.set(rec.k, rec);
     setPhase(rec, phaseFor(rec));
@@ -650,6 +658,14 @@
   D.destroy = function (lot, opts) { return destroy(lot, opts); };
   D.has = function (lot) { return ledger.has(keyOf(lot)); };
   D.count = function () { return ledger.size; };
+  D.rubbleBudget = function () {
+    let detailed = 0, light = 0;
+    ledger.forEach(function (r) {
+      if (r.phase !== 1) return;
+      if (r.rubbleDetailed) detailed++; else light++;
+    });
+    return { detailed: detailed, light: light, detailCap: RUBBLE_DETAIL_CAP };
+  };
   D.hp = function (lot) { const b = lot && lot.building; return b ? { cur: hp.get(lot) || 0, max: hpMax(b) } : null; };
   D.list = function () { return Array.from(ledger.values()).map((r) => ({ k: r.k, at: r.at, phase: r.phase })); };
   // tooling accessor (tools/demolition-check.mjs floating-geometry invariant)
