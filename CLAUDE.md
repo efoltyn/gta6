@@ -4238,6 +4238,145 @@ highest-leverage work is to make the strong systems already present tell one
 truth all the way down. Follow the owner, remove the private bypass, and prove
 the result where the player can feel it.
 
+### MESSAGE FROM GPT TO CLAUDE — 2026-07-31 iPad Prison Escape interaction handoff
+
+> **STATUS — SHIPPED AND REVERIFIED, NOT A PROPOSAL.** The gameplay change is
+> commit `bbef3c4` (`Fix iPad interactions and aim swipe`), published on
+> `origin/agent/ipad-interactions-aim-swipe`, merged by PR #2 as `6af1195`, and
+> verified on 2026-07-31 to be an ancestor of current `origin/main` at
+> `066aba8`. The focused real-Chrome iPad contract was rerun on that current
+> main and returned `failures: []` and `relevantErrors: []`.
+
+**THE OWNER'S IPAD CONTRACT**
+
+1. This layout correction is for iPad/tablet touch, not desktop and not the
+   compact phone layout.
+2. Every interaction option is a vertical row. The first action starts on
+   Reload's top edge and the remaining actions continue downward in one rail.
+3. The complete meaning of each option is readable on the left; the actual
+   tappable action button is on the right. Do not turn the options back into a
+   horizontal strip beside Eye or hide overflow actions.
+4. Holding Aim and pulling upward to Fire must require only a short thumb
+   movement. The player should not need a long upward swipe that pitches the
+   camera before the gun fires, and Scope must move clear of the taught target.
+5. One spoken line gets one subtitle. Identical words rendered twice with a
+   tiny offset or a second font are a duplicated owner, not an iPad font tweak.
+
+**WHAT THE ROOT-CAUSE TRACE FOUND**
+
+- Prison Escape does not use only the legacy `#interact` panel. The live touch
+  path has its own canonical `#pinteract` / `#pverbs` / `#poptions` renderer in
+  `src/systems/interact.js` and its own geometry in
+  `css/interact_touch.css`. That owner had deliberately placed four primary
+  verbs horizontally beside Eye, so changing only the shared city panel could
+  never fix the live Prison Escape screen.
+- Gang City still uses the shared `#interact` path from
+  `src/city/interactions.js` and `css/mobile.css`. The tablet grammar therefore
+  had to be adopted by both renderers while retaining their existing dispatch
+  contracts.
+- `src/city/campaign.js::say()` sent the same authored body through both
+  `campaignUI.say()` and `CBZ.citySay()`. On iPad the two subtitle surfaces had
+  different touch typography/placement, exposing the verbatim double render as
+  offset mixed-font text.
+- Aim's upward Fire route inherited the longer `SLIDE_PAD_OUT = 26` travel, and
+  the old visual Fire target jumped above Scope, approximately 128 px
+  centre-to-centre from Aim. The held finger kept applying look deltas during
+  that travel, so the camera climbed before Fire engaged.
+
+**THE SHARED IMPLEMENTATION THAT NOW OWNS IT**
+
+- `CBZ.touchInteractionDocked()` in `src/systems/touch.js` is the single tablet
+  capability check: touch must be enabled and the viewport must be at least
+  `700x550`. Reuse it; do not add iPad user-agent sniffing or a second cutoff.
+- `syncInteractionDock()` measures the live `#pinteract.show` first, otherwise
+  `#interact.show:not(.pi-quiet)`. It anchors to visible Reload, then falls back
+  through Swap, View and Jump if Reload is unavailable. Reload supplies the
+  first-row Y position; the leftmost edge of Reload/Swap/View/Jump/Fire supplies
+  the safe right-control boundary so lower rows cannot overlap wider Fire or
+  Jump buttons. It publishes `--touch-interact-top/right` only when its geometry
+  signature changes.
+- Prison Escape's docked `renderTouch()` concatenates `core + rest` and renders
+  every entry through `.pi-choice`: full `labelFor()` plus price/status/help on
+  the left, compact uppercase verb on the right. Campaign decisions use
+  `ACCEPT` and `REFUSE`; Teaching Tips is also an explained row. The existing
+  delegated `data-pi -> doAction(index)` click path remains authoritative.
+- Gang City's `src/city/interactions.js` emits the equivalent
+  `.itouch-copy + .itouch-act` row while retaining `data-i` and the canonical
+  interaction dispatcher. The legacy Prison fallback in
+  `src/systems/interact.js` adopts the same row shape.
+- The tablet-only CSS in `css/interact_touch.css` and `css/mobile.css` uses a
+  vertical `440px` rail, `9px` row gaps and action targets at least
+  `106x52px`. Explanatory copy stays to the left. The existing compact
+  horizontal phone UI remains outside the `min-width:700px` /
+  `min-height:550px` query; desktop keeps its keyboard UI.
+- Aim now has its own `AIM_UP_TRIGGER = 18` and `AIM_UP_RELEASE = 10`
+  hysteresis. Scope retains its older deliberate threshold. `#tfireup` is a
+  `40x40px` ghost target only `36px` centre-to-centre from Aim; while Aim is
+  held, visible Scope moves upward to leave a `12px` gap. Aim remains held
+  across Fire press/release through the existing ref-counted slide-touch path.
+- Campaign authored speech now gives `campaignUI.say()` ownership. `citySay()`
+  runs only as a degradation fallback when campaign UI is absent. Do not call
+  both for the same body.
+- `index.html` cache keys were bumped for all changed browser assets:
+  `mobile.css?v=ipadcontrols1`, `interact_touch.css?v=pinteract2`,
+  `systems/interact.js?v=ipadchoices1`, `systems/touch.js?v=ipadcontrols1`,
+  `city/interactions.js?v=ipadchoices1`, and `campaign.js?v=story9`.
+
+**THE EXECUTABLE ACCEPTANCE CONTRACT**
+
+Run:
+
+```sh
+node tools/test-ipad-interactions-browser.mjs
+```
+
+The harness opens real Chrome with touch emulation at `1180x820`, enters direct
+Prison Escape, exercises Aim with synthetic touch events, forces the Warden
+campaign choice, switches to Gang City, registers a deterministic interaction,
+clicks its live action, and captures
+`tools/shots/ipad-interactions-aim.png`.
+
+The 2026-07-31 current-main pass proved:
+
+- six Prison rows (five verbs plus Teaching Tips), all `106x52`, all in bounds;
+- first action top `438`, exactly Reload top `438`; rail-to-Reload gap `28px`;
+- text bounds ended at x=`950`, action buttons began at x=`962`;
+- no Fire at `17px`, Fire at `19px`, stable through `11px`, release at `9px`;
+- taught target travel `36px`, target-to-Scope gap `12px`, pitch delta
+  `0.114rad` and within the test's `0.13rad` ceiling;
+- Warden line appeared in `#campaignDialogue`, `citySayCalls` stayed `0`, and
+  no duplicate subtitle was visible;
+- the city row read `ASK FOR DIRECTIONS | YES`, aligned with Reload, and the
+  click reached its registered canonical action;
+- `relevantErrors: []` and `failures: []`.
+
+The original publish also passed `npm run test:pages`, `node --check` on every
+changed JavaScript file and the browser test, and `git diff --check`.
+
+**DO NOT REGRESS THESE DETAILS**
+
+- Do not cap iPad to four visible verbs; the removed overflow is still a real
+  action and must remain reachable.
+- Do not move the choice rail back beside Eye. “Vertical starting next to
+  Reload, explanation left, button right” is the explicit correction.
+- Do not broaden the tablet media query onto phones or desktop.
+- Do not make the Aim target visually close while leaving a longer hidden
+  threshold, or shorten the threshold while leaving Scope on top of the target.
+- Do not solve duplicated speech with font, z-index or transform offsets. Trace
+  which renderer owns the authored line and keep the other as fallback only.
+- If touch-control sizes or order change, re-run the live geometry test:
+  Reload is the vertical landmark, but the whole FLOW column is the horizontal
+  collision boundary.
+
+**WORKTREE HANDOFF.** The checkout in which this note was requested was
+intentionally left dirty (`main` had many unrelated modified/untracked files and
+was ahead/behind remote). Never `git add -A`, reset or clean it as part of this
+iPad work. The gameplay fix was published from an isolated clean worktree. That
+dirty checkout also already contained a separate 526-line GPT diagnostic
+addendum (items 28–121) which is not on current remote main and may be stale,
+especially after nuke commits `97838b9` and `066aba8`; preserve it, but verify
+those diagnoses against current code before treating them as open.
+
 ## THE WHY CONSTITUTION (owner, 2026-07-28) — read this before designing anything
 
 The owner's own words, and they outrank every system doctrine below. **A game is a
