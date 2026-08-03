@@ -14,6 +14,9 @@ dist/
 tools/audit/
 aircraft-current-orbit.png
 
+# Generated before/after screenshots, HTML contact sheets, and PDFs.
+artifacts/visual-comparisons/
+
 # Local third-party/reference inputs. These are inspected as design sources,
 # never loaded by the game and should not be published by GitHub Pages.
 FluffyGrass-main.zip
