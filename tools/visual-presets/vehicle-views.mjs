@@ -869,10 +869,11 @@ async function stageVehicleViews(input) {
     fleet.traverse(function (o) { if (o.isMesh && o.userData && o.userData.occupant) o.visible = true; });
     scene.updateMatrixWorld(true);
 
-    // framed low and back on the near car's REAR side glass — the back seat is
-    // the thing on trial, so it gets the frame.
-    const aim = { x: 0.15, y: 1.16, z: -0.85 };
-    const want = tripod(aim, 58, 1.72, 4.4, 36);
+    // framed from the rear three-quarter, above the beltline, looking FORWARD
+    // through the rear side glass — the back seat is the thing on trial, so it
+    // gets the frame, and the front row stays in shot behind it for scale.
+    const aim = { x: 0.10, y: 1.10, z: -1.15 };
+    const want = tripod(aim, 122, 2.55, 7.2, 34);
     const cam = applyCamera(scene, want, { near: 0.05, far: 3000 });
 
     const rearRate = latticeCars ? latticeRear / latticeCars : 0;
@@ -971,15 +972,39 @@ async function stageVehicleViews(input) {
     const P = CBZ.player;
     const px = (P && P.pos) ? P.pos.x : 0, pz = (P && P.pos) ? P.pos.z : 0;
 
+    // KILL THE TUTORIAL CARD. cityEnterVehicle raises the one-time "Driving"
+    // help modal, which sits dead centre over the subject. It is a DOM overlay,
+    // so it is dismissed the way a player dismisses it.
+    const dismissHelp = function () {
+      try {
+        for (const k of ["Escape", " ", "Space"]) {
+          document.body.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: k === " " ? "Space" : "Escape", bubbles: true, cancelable: true }));
+        }
+      } catch (e) {}
+      try {
+        const all = document.querySelectorAll("div");
+        for (let i = 0; i < all.length; i++) {
+          const t = all[i].textContent || "";
+          if (t.indexOf("Accelerate / brake") >= 0 && t.length < 400) { all[i].style.display = "none"; }
+        }
+      } catch (e) {}
+    };
+
     // the nearest ambient car that is genuinely IN traffic (a road, an AI, not
-    // ours) — the same rule on both builds, so the plate compares like for like
-    let car = null, bd = 1e9;
+    // ours), PREFERRING one with a back seat — the subject of the plate is what
+    // comes out of a car, so a car with more than one person in it is the
+    // honest sample. The rule is identical on both builds (the deployed one has
+    // no occupancy record, so it simply takes the nearest).
+    let car = null, bd = 1e9, bs = -1;
     const cars = CBZ.cityCars || [];
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
       if (!c || !c.ai || c.player || c.owned || c.dead || !c.road) continue;
       const dx = c.pos.x - px, dz = c.pos.z - pz, d2 = dx * dx + dz * dz;
-      if (d2 < bd) { bd = d2; car = c; }
+      if (d2 > 500 * 500) continue;
+      let score = 0;
+      if (c.occ && c.occ.seats) for (let k = 0; k < c.occ.seats.length; k++) score += c.occ.seats[k].row ? 3 : 1;
+      if (score > bs || (score === bs && d2 < bd)) { bs = score; bd = d2; car = c; }
     }
     if (!car) {
       bigText = "NO AMBIENT CAR IN TRAFFIC";
@@ -1008,7 +1033,9 @@ async function stageVehicleViews(input) {
       if (P && P.pos) P.pos.set(car.pos.x - 1.6, P.pos.y, car.pos.z);
       if (typeof CBZ.cityEnterVehicle === "function") CBZ.cityEnterVehicle(car);
     } catch (e) { notes.push("enter " + msg(e)); }
-    liveTick(L, 110);          // ~1.8 s: long enough for a decision to read
+    dismissHelp();
+    liveTick(L, 100);          // ~1.6 s: long enough for a decision to read
+    dismissHelp();
 
     // MEASURE WHAT CAME OUT, and on which side.
     const out = [];
@@ -1025,8 +1052,9 @@ async function stageVehicleViews(input) {
       const running = !!(p.state === "flee" || (p.fear || 0) >= 8);
       out.push({
         side: side, d: round(Math.sqrt(dx * dx + dz * dz), 2),
+        wx: p.pos.x, wz: p.pos.z,
         act: drew ? "drew" : handsUp ? "handsUp" : running ? "ran" : "stood",
-        react: (p._occSeat && p._occSeat.react) || null,
+        react: p._occLastReact || (p._occSeat && p._occSeat.react) || null,
       });
     }
     let seated = 0, frozen = 0;
@@ -1037,9 +1065,16 @@ async function stageVehicleViews(input) {
     const audit = (typeof CBZ.carOccupancyAudit === "function") ? CBZ.carOccupancyAudit() : null;
 
     // frame it: high three-quarter over the car so BOTH flanks are in shot —
-    // the whole point is which door each body used.
-    const aim = { x: car.pos.x, y: 1.05, z: car.pos.z };
-    const cam = applyLiveCamera(tripod(aim, 52, 4.6, 10.5, 42));
+    // the whole point is which door each body used. Centred on the midpoint of
+    // the car and whoever got out, so a body that ran does not leave frame.
+    let cx = car.pos.x, cz = car.pos.z;
+    if (out.length) {
+      let sx = 0, sz = 0;
+      for (const b of out) { sx += b.wx; sz += b.wz; }
+      cx = (car.pos.x + sx / out.length) * 0.5; cz = (car.pos.z + sz / out.length) * 0.5;
+    }
+    const aim = { x: cx, y: 1.0, z: cz };
+    const cam = applyLiveCamera(tripod(aim, 46, 6.2, 13.5, 40));
     ST.render();
 
     stateText = out.length + " BODIES OUT (" + out.map(function (o) { return o.side + ":" + o.act; }).join(" ") + ")" +

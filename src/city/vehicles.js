@@ -1133,20 +1133,26 @@
   function occDemote(c) {
     if (!c.occ || !c._occRigged) return false;
     if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(c.pos.x, c.pos.z, { minDistance: 24, maxDistance: 400 })) return false;
+    // A BODY WITH A STORY STAYS, and the ones around it still go home. An
+    // early `return` here used to abandon the sweep half-done, leaving the rig
+    // count describing a car that no longer matched it.
+    let left = 0;
     for (let i = 0; i < c.occ.seats.length; i++) {
       const st = c.occ.seats[i];
       const p = st.ped; if (!p) continue;
-      if (p.dead || p.hostage || p._dbRole) return false;    // a body with a story stays
+      if (p.dead || p.hostage || p._dbRole || st.frozen) { left++; continue; }
       try {
         if (st.spawned && CBZ.npcLife.destroyCity) CBZ.npcLife.destroyCity(p);
         else if (CBZ.npcLife.release) CBZ.npcLife.release(p, { state: "walk" });
-      } catch (e) { return false; }
+      } catch (e) { left++; continue; }
       p.inCar = null; p.controlled = false; p._occCar = null; p._occSeat = null;
       st.ped = null; st.spawned = false;
-      if (st.blob) st.blob.visible = true;
+      if (st.blob && !st.gone) st.blob.visible = true;
       if (c.npcDriver === p && c._occOwnsDriver) { c.npcDriver = null; c._occOwnsDriver = false; }
     }
-    c.occ.rigs = 0; c._occRigged = false; occRigCars = Math.max(0, occRigCars - 1);
+    c.occ.rigs = left;
+    if (left) return false;
+    c._occRigged = false; occRigCars = Math.max(0, occRigCars - 1);
     return true;
   }
   function syncOccupants(c) {
@@ -2086,6 +2092,9 @@
   function occApply(c, seat, kind, by) {
     const p = seat.ped; if (!p) return;
     const isDriver = seat.slot === "driver";
+    // the decision travels WITH the person, not just with the seat he left —
+    // a body on the pavement can still say what it decided.
+    p._occLastReact = kind;
     if (kind === "fight") {
       occStepOut(c, seat, { state: "walk", stumble: false });
       occDraw(p);

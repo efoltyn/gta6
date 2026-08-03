@@ -1395,20 +1395,34 @@
   // out of sight, with nobody real aboard yet.
   function dbClaimTrafficCar(ax, az) {
     const cars = CBZ.cityCars; if (!cars) return null;
-    let best = null, bd = 1e9;
-    for (let i = 0; i < cars.length; i++) {
-      const c = cars[i];
-      if (!c || !c.ai || !c.road || c.player || c.owned || c.dead || c.npcDriver) continue;
-      if (c.abandoned || c.wreckT > 0 || c.turning || c._driveby || c._patrolCar || c._emergency) continue;
-      if (c._occRigged || (c.occ && c.occ.jacked)) continue;     // real people already in it
-      if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;
-      const dx = ax - c.pos.x, dz = az - c.pos.z, d2 = dx * dx + dz * dz;
-      if (d2 < 45 * 45 || d2 > 155 * 155) continue;
-      if (headingAt(c.pos.x, c.pos.z, c.heading || 0, ax, az) < 0.3) continue;
-      if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(c.pos.x, c.pos.z, { minDistance: 18, maxDistance: 400 })) continue;
-      if (d2 < bd) { bd = d2; best = c; }
+    // TWO PASSES, and the second one is not a loophole. Pass 1 wants a car
+    // nobody could be watching. But the aim point is often the PLAYER, and a
+    // car driving TOWARD the player is by definition a car in front of him —
+    // measured live, that pair of conditions is unsatisfiable often enough
+    // that every drive-by fell through to the off-road stager. Pass 2 keeps
+    // the honesty where it matters (far enough away that a crew appearing in
+    // the seats cannot be read at that range) and drops only the view cone,
+    // which is exactly the trade `spawnRealDriveby` already makes below with
+    // its `unseen || open`.
+    for (let pass = 0; pass < 2; pass++) {
+      let best = null, bd = 1e9;
+      for (let i = 0; i < cars.length; i++) {
+        const c = cars[i];
+        if (!c || !c.ai || !c.road || c.player || c.owned || c.dead || c.npcDriver) continue;
+        if (c.abandoned || c.wreckT > 0 || c.turning || c._driveby || c._patrolCar || c._emergency) continue;
+        if (c._occRigged || (c.occ && c.occ.jacked)) continue;   // real people already in it
+        if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;
+        const dx = ax - c.pos.x, dz = az - c.pos.z, d2 = dx * dx + dz * dz;
+        if (d2 < 45 * 45 || d2 > 175 * 175) continue;
+        if (headingAt(c.pos.x, c.pos.z, c.heading || 0, ax, az) < 0.25) continue;
+        if (pass === 0) {
+          if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(c.pos.x, c.pos.z, { minDistance: 18, maxDistance: 400 })) continue;
+        } else if (d2 < 85 * 85) continue;                       // far enough that a seat swap cannot read
+        if (d2 < bd) { bd = d2; best = c; }
+      }
+      if (best) return best;
     }
-    return best;
+    return null;
   }
   // ...or put one INTO traffic, on a segment that actually runs past the target,
   // in the lane pointing at it. roadPick is the only sanctioned placement query
@@ -1416,20 +1430,48 @@
   function dbSpawnIntoTraffic(gang, ax, az) {
     if (CBZ.roadPickUsed) CBZ.roadPickUsed("gangs:driveby");
     const econ = CBZ.cityEcon;
-    for (let k = 0; k < 8; k++) {
-      const spot = CBZ.roadPick({
-        rng: rng, tries: 10, spread: 120, unseen: true, camMin: 55,
-        near: { x: ax, z: az }, minDist: 50, maxDist: 150,
-        filter: function (r) { return segNearAim(r, ax, az, 34); },
-      });
-      if (!spot) continue;
-      if (headingAt(spot.x, spot.z, spot.heading, ax, az) < 0.3) continue;
-      let model = econ && econ.pickCar ? econ.pickCar(rng() < 0.12) : null;
-      model = Object.assign({}, model || {}, { color: gang.color || 0xb079ea });
-      const car = CBZ.cityMakeCar(spot.x, spot.z, spot.heading, !!spot.vertical, model, 0.9);
-      if (!car) return null;
-      CBZ.roadPlace(car, spot);          // road/lane/dirSign/heading — order 37 reads these
-      return car;
+    const A = CBZ.city && CBZ.city.arena;
+    const R = (A && A.roads) || [];
+    // CHOOSE THE SEGMENT FIRST, THEN ASK roadPick FOR A SLOT ON IT. Handing
+    // roadPick a `filter` that only a handful of the ~200 segments pass makes
+    // it a rejection sampler against its own district-weighted draw — measured
+    // live, that is why the traffic path kept losing to the off-road stager and
+    // the drive-by car still had `road=null`. traffic.js's `placeOnRoad` had
+    // already solved this: it decides WHICH road deserves the car and pins the
+    // pick to that one segment. Same shape here.
+    const cands = [];
+    for (let i = 0; i < R.length; i++) {
+      const r = R[i];
+      if (!r || !segNearAim(r, ax, az, 48)) continue;
+      if (CBZ.roadOpen && !CBZ.roadOpen(r)) continue;
+      cands.push(r);
+    }
+    if (!cands.length) return null;
+    // deterministic shuffle off our own seeded stream — a build path never
+    // touches Math.random, and the order must not depend on array identity.
+    for (let i = cands.length - 1; i > 0; i--) {
+      const j = (rng() * (i + 1)) | 0;
+      const t = cands[i]; cands[i] = cands[j]; cands[j] = t;
+    }
+    // pass 0 wants a lane out of the view cone; pass 1 asks only that it be
+    // far enough away that a crew arriving in the seats cannot be read.
+    for (let pass = 0; pass < 2; pass++) {
+      for (let k = 0; k < cands.length && k < 14; k++) {
+        const seg = cands[k];
+        const spot = CBZ.roadPick({
+          rng: rng, tries: 8, spread: 140, unseen: pass === 0, camMin: pass === 0 ? 55 : 95,
+          near: { x: ax, z: az }, minDist: pass === 0 ? 45 : 80, maxDist: pass === 0 ? 160 : 210,
+          filter: function (r) { return r === seg; },
+        });
+        if (!spot) continue;
+        if (headingAt(spot.x, spot.z, spot.heading, ax, az) < 0.2) continue;
+        let model = econ && econ.pickCar ? econ.pickCar(rng() < 0.12) : null;
+        model = Object.assign({}, model || {}, { color: gang.color || 0xb079ea });
+        const car = CBZ.cityMakeCar(spot.x, spot.z, spot.heading, !!spot.vertical, model, 0.9);
+        if (!car) return null;
+        CBZ.roadPlace(car, spot);        // road/lane/dirSign/heading — order 37 reads these
+        return car;
+      }
     }
     return null;
   }

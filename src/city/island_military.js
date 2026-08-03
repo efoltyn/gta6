@@ -978,6 +978,8 @@
   // HOLD RIG instead (LOCAL walls on systems/platforms_moving.js), which is the
   // strictly better answer anyway — a static AABB is a lie the moment the
   // aeroplane turns, and this one is meant to fly with people inside it.
+  // (The one case that DOES get a world AABB is the flag-off path at the
+  // bottom of this function, where there is no rig to be solid with.)
   function placeCargoPlane(root, wx, wz, rotY, name) {
     const made = makeCargoPlane();
     made.group.position.set(wx, 0, wz);
@@ -1035,6 +1037,18 @@
           closedRx: CARGO.rampClosedRx, openRx: CARGO.rampOpenRx, seconds: 3.0,
         },
       });
+    }
+    // FLAG OFF (or the hold block absent) = NO RIG, and therefore no walls at
+    // all — a 37-metre aeroplane you can walk straight through, which is a
+    // worse revert than the feature is a risk. So the degraded path buys back
+    // a conventional world AABB: the FUSELAGE box only, never the 42 m span,
+    // so it is solid where the aeroplane is and you can still walk under the
+    // wings. It carries on `rec.collider`, the field the theft path already
+    // detaches, exactly as placeModel's does.
+    if (!rec.hold || rec.hold.inert) {
+      const sideways = Math.abs(Math.sin(rotY || 0)) > 0.5;
+      rec.collider = col(wx, wz, sideways ? made.footL : 5.4, sideways ? 5.4 : made.footL,
+                         0, made.height != null ? made.height : 13.4, made.group);
     }
     return rec;
   }

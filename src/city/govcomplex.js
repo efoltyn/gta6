@@ -2477,7 +2477,14 @@
     // a rebuild re-runs this builder; start from an empty ledger so stale
     // records can never be counted by the audit or re-staffed by the tick.
     SITES.length = 0; _bays.length = 0; _shells.length = 0;
-    AUDIT.complexes = COMPLEXES.length;
+    // rows this build will actually TRY to place — a flag-reverted row is not
+    // one of them, so `placed === complexes` stays the honest pass condition
+    // however many rows carry their own flag.
+    AUDIT.complexes = 0;
+    for (let i = 0; i < COMPLEXES.length; i++) {
+      const d = COMPLEXES[i];
+      if (!(d.flag && CFG[d.flag] === false)) AUDIT.complexes++;
+    }
     AUDIT.placed = 0; AUDIT.rejected = 0;
     AUDIT.overlaps = 0; AUDIT.urbanAdjacent = 0; AUDIT.staffed = 0; AUDIT.roadless = 0;
     AUDIT.govBuildings = 0; AUDIT.govFloors = 0; AUDIT.govBare = 0;

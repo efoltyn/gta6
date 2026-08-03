@@ -622,8 +622,17 @@
       closeRamp() { return setRamp(H, false); },
       toggleRamp() { return setRamp(H, H.rampWant < 0.5); },
       contains(x, y, z) { return !!containsLocal(H, x, y, z, 0); },
-      localOf(x, y, z, out) { return H.rig.localOf(x, y, z, out); },
-      worldOf(lx, ly, lz, out) { return H.rig.worldOf(lx * H.scale, ly * H.scale, lz * H.scale, out); },
+      // Guarded, not assumed: without systems/platforms_moving.js there is no
+      // rig and these must degrade to identity rather than throw — the same
+      // contract the INERT handle below honours.
+      localOf(x, y, z, out) {
+        if (!H.rig) { out = out || {}; out.x = x; out.y = y; out.z = z; return out; }
+        return H.rig.localOf(x, y, z, out);
+      },
+      worldOf(lx, ly, lz, out) {
+        if (!H.rig) { out = out || {}; out.x = lx; out.y = ly; out.z = lz; return out; }
+        return H.rig.worldOf(lx * H.scale, ly * H.scale, lz * H.scale, out);
+      },
       deckTop() { return H.floor.top; },
       latchVehicle(rec) { return !!latchVehicle(H, rec); },
       latchCargo(obj) { return !!latchCargo(H, obj); },
@@ -735,7 +744,7 @@
         let best = null, bd = Infinity;
         for (let i = 0; i < holds.length; i++) {
           const H = holds[i];
-          if (!H.ramp || !H.grp || !H.grp.parent) continue;
+          if (!H.ramp || !H.rig || !H.grp || !H.grp.parent) continue;
           // the control point is the ramp sill — where a loadmaster stands
           const w = H.rig.worldOf(H.ramp.x, H.floor.top, H.ramp.sillZ, _lo);
           const dx = w.x - px, dz = w.z - pz;
