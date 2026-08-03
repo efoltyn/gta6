@@ -590,13 +590,45 @@
   //      outer country coasts ~10-20% (solid presence); airborne (fog.far
   //      4200) ~12% (crisp panorama).
   const FOG_SCALE = 0.12;
+  /* ---- ATMOSPHERIC PERSPECTIVE IS AN ABOVE-WATER IDEA -------------------
+     uFogScale exists so a range 3 km out recedes toward the sky instead of
+     popping forward like a sticker, and 0.12 is right for that. Underwater it
+     is a disaster, and it is what made the shallow bottom read as a
+     featureless pale sheet: `fogDepth *= 0.12` means the seabed 9 m in front
+     of a diver is shaded as though it were ONE metre away, so it never takes
+     the water's colour at all. No amount of albedo work can fix that — the
+     medium was simply never being applied to the ground.
+
+     MEASURED: shot 01 of the shallow set came back with fog #3a9dae (correct
+     turquoise) and a bottom that was still near-white and completely ungraded
+     across nine metres of depth change.
+
+     So the uniform becomes SHARED and drivable — the same idiom this file
+     already uses for the shelf land mask below — and world/water_underwater.js
+     eases it to 1.0 while the eye is under, on the same ~0.22 s ramp as the
+     tint. Surfacing restores every consumer's authored scale exactly. One
+     value per distinct scale, so world.js / worldmap.js / biome_snow.js /
+     continent.js keep their own dials. */
+  const _fogScaleU = new Map();
+  function fogScaleUniform(scale) {
+    const k = scale == null ? FOG_SCALE : scale;
+    let u = _fogScaleU.get(k);
+    if (!u) { u = { value: k, base: k }; _fogScaleU.set(k, u); }
+    return u;
+  }
+  // 0 = the authored above-water scale, 1 = fully submerged (no scaling).
+  CBZ.terrainFogScaleSubmerged = function (k01) {
+    const t = k01 > 1 ? 1 : (k01 > 0 ? k01 : 0);
+    _fogScaleU.forEach(function (u) { u.value = u.base + (1 - u.base) * t; });
+    return t;
+  };
   CBZ.terrainFogScale = function (mat, scale) {
     // tagged so the worldSurface fog sweep (worldmap.js) never double-wraps a
     // material a builder already dialled by hand
     mat.userData = mat.userData || {};
     mat.userData._cbzFogScaled = true;
     mat.onBeforeCompile = function (sh) {
-      sh.uniforms.uFogScale = { value: scale == null ? FOG_SCALE : scale };
+      sh.uniforms.uFogScale = fogScaleUniform(scale);
       sh.vertexShader = "uniform float uFogScale;\n" + sh.vertexShader
         .replace("#include <fog_vertex>",
           "#include <fog_vertex>\n#ifdef USE_FOG\n\tfogDepth *= uFogScale;\n#endif");
@@ -1045,8 +1077,19 @@
        So the bed ramps sand → silt → shelf grey-teal → deep sediment BY
        WATER COLUMN, and the underwater fog in world/water_underwater.js does
        the rest. */
-    bedSand: new THREE.Color(0xb9b298),    // ref 3 — bright shell sand
-    bedSilt: new THREE.Color(0x7c8168),    // ref 3 middle distance
+    // WARMER AND BRIGHTER (2026-08-03, second pass). 0xb9b298/0x7c8168 were
+    // grey-OLIVE, and olive under a cyan medium is grey — the shallow bottom
+    // composed into a featureless pale sheet with no sand in it at all. Ref 3's
+    // foreground sand is unmistakably warm (R > G > B by a wide margin) and it
+    // only cools with DISTANCE, which the fog already does. So the near stop
+    // goes cream and the far stop stays warm rather than turning olive.
+    // Second correction: the tiles are lit ~1.2x harder than the albedo reads,
+    // so a cream value CLIPPED to white on screen. Warmer (R-B 0.27 rather
+    // than 0.13 — a neutral albedo under a teal medium is grey by
+    // construction, however bright it is) and a little darker so the highlight
+    // has somewhere to go.
+    bedSand: new THREE.Color(0xc9b184),    // ref 3 — warm foreground shell sand
+    bedSilt: new THREE.Color(0x928363),    // ref 3 middle distance
     bedShelf: new THREE.Color(0x3d5c67),   // ref 4 — the shelf going over
     bedDeep: new THREE.Color(0x101d2c),    // ref 5 — abyssal sediment
     dry: new THREE.Color(0x707252), moistV: new THREE.Color(0x4b6a49),
@@ -1073,8 +1116,19 @@
       // metres of water standing over this vertex — the one thing the bed's
       // colour should depend on (refs 3 and 5).
       const col = (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48) - y;
-      out.copy(C3.bedSand).lerp(C3.bedSilt, smooth(1.8, 10, col));
-      out.lerp(C3.bedShelf, smooth(8, 26, col));
+      // THE WINDOWS WERE FAR TOO TIGHT. smooth(1.8, 10) meant 8 m of water had
+      // already spent 89% of the sand ramp, so the whole visible bottom of a
+      // shallow bay sat on one flat value of the curve: no sand colour left,
+      // and no tonal variation across a sloping bed either. Ref 3's bottom is
+      // still cream at the diver's depth and only turns teal tens of metres
+      // out, so the sand holds much longer and the shelf starts much later.
+      out.copy(C3.bedSand).lerp(C3.bedSilt, smooth(5, 24, col));
+      // A sloping bed should also read as a slope. One multiplicative tone
+      // fall-off with the column gives the plane continuous shading that the
+      // hue ramp alone cannot — colour only, no geometry, no texture. Applied
+      // BEFORE the shelf/deep lerps so both deep endpoints stay exact.
+      out.multiplyScalar(1 - smooth(1, 22, col) * 0.26);
+      out.lerp(C3.bedShelf, smooth(18, 38, col));
       out.lerp(C3.bedDeep, smooth(22, 56, col));
       return;
     }

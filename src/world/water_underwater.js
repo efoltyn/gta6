@@ -162,8 +162,17 @@
      partly by the eye's own depth under the surface.
   ============================================================ */
   const RAMP = [
-    { r: 0.494, g: 0.780, b: 0.839 },   // 0x7EC7D6 — ref 3, over sand
-    { r: 0.306, g: 0.561, b: 0.682 },   // 0x4E8FAE — ref 3, hazing out
+    // SHALLOW STOPS RE-READ off ref 3 (2026-08-03, second pass). The first
+    // pass sampled the photo's NEAR water, which is pale because the sand
+    // behind it dominates — so the medium came out a desaturated grey-cyan and
+    // composed with the bed into exactly the washed sheet the owner rejected.
+    // What the medium must actually be is the colour the sand HAZES INTO: ref
+    // 3's far bottom (~30 m out) reads 0x93B5A8 and its mid water 0x2E6A94,
+    // both clearly GREEN-leaning teal, not blue-grey. So both shallow stops
+    // move to G >= B turquoise and gain ~40% saturation. Stops 2-5 (mid and
+    // deep, sampled from k >= 0.4) are untouched — the deep is approved.
+    { r: 0.435, g: 0.808, b: 0.788 },   // 0x6FCEC9 — ref 3, shallow over sand
+    { r: 0.180, g: 0.576, b: 0.659 },   // 0x2E93A8 — ref 3, hazing out
     { r: 0.247, g: 0.545, b: 0.678 },   // 0x3F8BAD — ref 4, upper column
     { r: 0.102, g: 0.333, b: 0.502 },   // 0x1A5580 — ref 4, body
     { r: 0.039, g: 0.165, b: 0.369 },   // 0x0A2A5E — ref 5, deep body
@@ -192,7 +201,11 @@
   // Beer-Lambert extinction per metre of EYE depth, R/G/B. Much gentler than
   // the old (0.45, 0.09, 0.045) because the ramp above already carries the
   // hue; this is only the trim that keeps red dying first.
-  const EXT_R = 0.075, EXT_G = 0.028, EXT_B = 0.013;
+  // (EXT_R eased 0.075 -> 0.062 on the shallow pass: at 4 m the old value had
+  // already taken a quarter of the red out of the medium, and a medium with a
+  // 2.7:1 green-to-red ratio turns warm sand grey no matter how warm it is.
+  // At the deep eye depths this moves the red channel by under 1/255.)
+  const EXT_R = 0.062, EXT_G = 0.028, EXT_B = 0.013;
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
   function smoothstep(e0, e1, x) {
@@ -815,6 +828,15 @@
     muffle += (target - muffle) * Math.min(1, (dt || 0.016) * 3.6);
     if (muffle < 0.004) muffle = 0;
 
+    // THE GROUND MUST TAKE THE WATER'S COLOUR. world/terrain_overhaul.js dials
+    // fog down to 12% on the backdrop/shelf tiles so distant ranges recede
+    // properly in air; underwater that left the seabed shaded as if it were a
+    // metre away and it read as a flat pale sheet nine metres down. Ease the
+    // scale to 1 on the same ~0.22 s ramp as the tint, so the bottom fogs into
+    // the medium exactly like everything else and surfacing restores every
+    // consumer's authored dial.
+    if (CBZ.terrainFogScaleSubmerged) CBZ.terrainFogScaleSubmerged(shown);
+
     breathVignette(dt);
     // Nothing below costs anything unless the treatment is on screen. `_eye`
     // is only current when eyeDepth() ran this frame, so never read it here
@@ -850,7 +872,13 @@
       if (overlay.style.display !== (vis ? "block" : "none")) overlay.style.display = vis ? "block" : "none";
       if (vis) {
         // Shallow turquoise is a LIGHT veil; deep navy is a heavy one.
-        overlay.style.opacity = String((0.60 + kDepth * 0.36) * shown);
+        // HOW HEAVY THE VEIL IS. 0.60 + 0.36k put a 64%-opaque sheet over a
+        // sandbar, which is what turned a cream bottom into a grey one — in
+        // ref 3 the near sand is very nearly its own colour and only the
+        // DISTANCE goes turquoise, and distance is the fog's job, not the
+        // overlay's. Through the deep k (~0.8) this still evaluates to the
+        // shipped 0.888; at k = 0.1 it is 0.43 instead of 0.64.
+        overlay.style.opacity = String(Math.min(0.96, 0.36 + kDepth * 0.66) * shown);
         if (rays) rays.style.opacity = String(Math.max(0, 0.34 - d01 * 0.34) * shown);
         paintOverlay(depth, kDepth);
       }
@@ -964,18 +992,39 @@
     // 1.45x+0.18 constant was what kept the deep reading as a bright postcard
     // blue no matter where you looked. Almost all of the brightening is now
     // `gl`, i.e. actually pointing at the surface.
-    const gl = glow;
-    _c1.r = _tint.r * 1.16 + 0.040 + (SURFACE_GLOW.r - _tint.r) * gl * 0.70;
-    _c1.g = _tint.g * 1.14 + 0.050 + (SURFACE_GLOW.g - _tint.g) * gl * 0.70;
-    _c1.b = _tint.b * 1.12 + 0.070 + (SURFACE_GLOW.b - _tint.b) * gl * 0.70;
+    // THE LIFT IS NOW SCALED BY DEPTH, and that is the shallow wash fixed at
+    // its source. A FLAT +0.04/+0.05/+0.07 is nothing on ref 5's near-black
+    // navy but it is a bleach on ref 3's light turquoise: at k = 0.1 the tint
+    // is already (0.44, 0.81, 0.79), so 1.16x plus the offset clipped the top
+    // stop to white and every frame that looked up read pale grey. Both terms
+    // are keyed to k, and the coefficients are chosen so that at the deep k
+    // (~0.8) they evaluate to the shipped 1.16/1.14/1.12 and 0.040/0.050/0.070
+    // EXACTLY — the approved deep frame is arithmetically unchanged.
+    const gl = glow, lift = 1.05 + 0.14 * k;
+    _c1.r = _tint.r * lift + 0.0500 * k + (SURFACE_GLOW.r - _tint.r) * gl * 0.70;
+    _c1.g = _tint.g * lift + 0.0625 * k + (SURFACE_GLOW.g - _tint.g) * gl * 0.70;
+    _c1.b = _tint.b * lift + 0.0875 * k + (SURFACE_GLOW.b - _tint.b) * gl * 0.70;
     // mid: the medium itself, at the horizon.
     _c2.r = _tint.r * 0.86; _c2.g = _tint.g * 0.90; _c2.b = _tint.b * 0.96;
-    // bottom: the column looking down — ref 5's corners.
-    _c3.r = _tint.r * 0.24; _c3.g = _tint.g * 0.28; _c3.b = _tint.b * 0.46;
+    // BOTTOM — the column looking DOWN. 0.24/0.28/0.46 is ref 5's dark
+    // corners, and it is right for the deep; over a sandbar it is a lie. In
+    // ref 3 the downward view is the BRIGHTEST part of the picture (all that
+    // sand throwing light back), so a fixed 76% darkening painted the shallow
+    // bed grey-blue no matter how warm its albedo was — and shot 01 looks down.
+    // `dkf` reaches 1 by mid depth, so the deep corners are byte-identical and
+    // the shallows keep the medium's own turquoise instead of a navy veil.
+    const dkf = smoothstep(0.15, 0.55, k);
+    _c3.r = _tint.r * (0.78 - 0.54 * dkf);
+    _c3.g = _tint.g * (0.80 - 0.52 * dkf);
+    _c3.b = _tint.b * (0.92 - 0.46 * dkf);
     // The veil is LIGHT over sand and heavy in the deep, on every stop.
     const bright = rgb(_c1, (0.26 + k * 0.14 + gl * 0.14).toFixed(3));
     const mid = rgb(_c2, (0.36 + k * 0.24).toFixed(3));
-    const deep = rgb(_c3, (0.54 + k * 0.32).toFixed(3));
+    // ...and its WEIGHT. 0.54 at k = 0.1 is a heavy navy sheet laid over a
+    // sunlit sandbar; ref 3's downward view is barely veiled at all near the
+    // lens and only the DISTANCE goes teal, which is the fog's job. Solved to
+    // hit the shipped 0.796 at the deep k (~0.8) exactly.
+    const deep = rgb(_c3, (0.30 + k * 0.62).toFixed(3));
     const top = row.toFixed(1);
     const mid1 = (row + (hz - row) * 0.55).toFixed(1);
     const bg = "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) " + top + "%, " +

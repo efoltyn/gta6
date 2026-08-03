@@ -309,7 +309,7 @@
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=seabed1"></script>
+<script src="src/world/terrain_overhaul.js?v=seabed2"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -565,6 +565,10 @@
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. -->
 <script src="src/world/volcanofx.js?v=strato1"></script>
+<!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
+     gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
+     Must precede systems/disasters.js so the roster finds CBZ.quake. -->
+<script src="src/systems/quake.js?v=quake1"></script>
 <script src="src/systems/disasters.js?v=strato1"></script>
 <script src="src/systems/survival_interact.js?v=ctrl1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
@@ -1451,7 +1455,7 @@
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=uwlook1"></script>
+<script src="src/world/water_underwater.js?v=uwlook2"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <script src="src/world/water_wake.js?v=waterv2"></script>
 <!-- The float block (CBZ.waterFloat / waterSubmergenceAt / waterRideAt — cars

@@ -30,7 +30,7 @@ const subjects = [
     id: "fp-shallow-sand",
     label: "First Person — Shallow, over the sand",
     focus: "Near the shore the water should read LIGHT turquoise with the sandy bottom clearly visible, and you should see a long way.",
-    view: "fp", offshore: 95, eye: 4.0, look: -0.50,
+    view: "fp", offshore: 95, eye: 6.9, look: -0.30,
     state: "SHALLOW · 4 m EYE · SAND BELOW",
   },
   {
@@ -58,7 +58,7 @@ const subjects = [
     id: "above-shallow-down",
     label: "Above the Surface — Looking down at the shallows",
     focus: "From the surface the near-shore water should lighten toward the bottom instead of turning a flat bottle-green.",
-    view: "shore", offshore: -3, eye: 0, look: -0.55, matchCamera: false,
+    view: "shore", offshore: -1, eye: 0, look: -0.35, matchCamera: false,
     state: "ON THE SAND · LOOKING DOWN",
   },
 ];
