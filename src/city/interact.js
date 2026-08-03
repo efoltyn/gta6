@@ -792,6 +792,47 @@
     options: [{ id: "mailbox-check", slot: "e", label: "Check the mail", onSelect: function (sp) { checkMailbox(sp); } }],
   });
 
+  /* INTERIOR_LOOT_V1 — THE INDOOR VERB, and until now there wasn't one.
+     Audit finding that produced this zone: every interior program in
+     city/interior_programs.js (up to 96 desk stations a floor, rack rows,
+     footlockers, weapons lockers, a boss's drinks cabinet and floor safe)
+     had ZERO entries in this registry. The complete indoor vocabulary of the
+     game was sit / sleep / read a poster — you could not open a single drawer
+     inside any building in the city. That, not the furnishing, is why
+     interiors read as pointless.
+
+     ONE zone covers every container city-wide, exactly like zone-streetprop
+     covers every bin and news box: interior_programs.js owns the registry, the
+     payouts, the witnesses and the safe's timed hold; this file owns only the
+     VERB. The label is per-container ("Search the desk" / "Force the weapons
+     locker" / "Crack the floor safe") so the card tells you which rung of the
+     ladder you are standing on before you press anything.
+
+     COST: interiorLootAt is coordinate-bucketed, so out on the street this is
+     four failed Map lookups at the panel's 12 Hz — it can never turn the
+     39-order detection pass into a hotspot no matter how many towers exist.
+     It also takes ctx.pos.y, because a desk on the floor above you is at zero
+     plan distance and must never be offered.
+
+     Slot "e": it is the primary (and only) verb on the thing you are standing
+     at. `bad: true` is honest — this is theft, and the panel's own colouring
+     should say so before you take a boss's safe apart. */
+  I.registerZone({
+    id: "zone-interior-loot", kind: "interiorloot", prio: 7, driving: false,
+    find: function (px, pz, ctx) {
+      if (!CBZ.interiorLootAt) return null;
+      // while the safe's timed hold owns you there is no verb — you are
+      // already committed (the same rule zone-seat applies during a body arc).
+      if (CBZ.interiorLootBusy && CBZ.interiorLootBusy()) return null;
+      return CBZ.interiorLootAt(px, pz, REACH, ctx.pos.y);
+    },
+    options: [{
+      id: "interior-loot-search", slot: "e", bad: true,
+      label: function (rec) { return (CBZ.interiorLootLabel && CBZ.interiorLootLabel(rec)) || "Search it"; },
+      onSelect: function (rec) { if (CBZ.interiorLootTake) CBZ.interiorLootTake(rec); },
+    }],
+  });
+
   // ---- PROPS WITH PURPOSE (city/propuse.js): every chair/bench/couch is a
   // SEAT, every bed SLEEPS, wanted posters READ. All feature-detected — when
   // propuse.js is absent or CBZ.CONFIG.PROPS_PURPOSE=false the registries stay
@@ -906,6 +947,20 @@
   I.describe("seat", function (s) { return { label: "" + (SEAT_NAMES[s.kind] || "Chair"), note: "Take a seat" }; });
   I.describe("bed", function (b) { return { label: "" + (b.kind === "bedroll" ? "Bedroll" : "Bed"), note: b.kind === "bedroll" ? "A rough sleep — til morning" : "Sleep until morning" }; });
   I.describe("wantedposter", function (p) { return { label: "Wanted poster", note: "Bounty $" + ((p && p.bounty) || 0).toLocaleString() }; });
+  // INTERIOR_LOOT_V1 card header. The NOTE is the reward LADDER in one line —
+  // it reads off rec.tier, so a drawer says "pocket change, if that" and the
+  // boss's safe says "the reason you came up here" before you commit to seven
+  // loud seconds. Nothing new on screen: this is the existing card's subtitle.
+  const LOOT_NAMES = {
+    desk: "Desk", reception: "Front desk", kitchen: "Kitchenette", rack: "Storage rack",
+    crate: "Supply crate", footlocker: "Footlocker", weapons: "Weapons locker",
+    cabinet: "Drinks cabinet", safe: "Floor safe",
+  };
+  const LOOT_NOTES = ["pocket change, if that", "worth a look", "somebody's kit", "the good stuff", "the reason you came up here"];
+  I.describe("interiorloot", function (rec) {
+    const tier = Math.max(0, Math.min(LOOT_NOTES.length - 1, (rec && rec.tier) | 0));
+    return { label: (rec && LOOT_NAMES[rec.kind]) || "Container", note: LOOT_NOTES[tier] };
+  });
   I.describe("propself", function () { return { label: CBZ.player._propBed ? "Lying down" : "Seated", note: "take a load off" }; });
 
   // ================== OPTIONS ==================

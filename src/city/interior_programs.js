@@ -732,6 +732,9 @@
         x: h.ox + dx, y: y, z: h.oz + seatZ, face: Math.PI, lx: dx, lz: seatZ,
         cushionH: 0.48, floorBelow: 0,
       });
+      // INTERIOR_LOOT_V1: the desk BODY (not the chair) is the container. Hash-
+      // thinned inside lootReg — most of a desk farm is just desks.
+      lootReg(h.ox + dx, y, h.oz + dz, "desk");
       // CCTV: a bounded few of these terminals show a live camera feed. The lit
       // visible face sits at screenZ+0.01 looking +z at the seat. Register the
       // actual outer glass, not the box centre, for the live overlay.
@@ -783,6 +786,9 @@
     };
     tb(TL, 0.1, 1.3, 0.48, P.table);                              // top
     tb(Math.max(0.6, TL - 1.4), 0.42, 0.5, 0.24, P.table);        // spine base
+    // INTERIOR_LOOT_V1: what somebody left on the boardroom table after the
+    // meeting — one container per meeting room, hash-thinned like every desk.
+    lootReg(h.ox + mx2, y, h.oz + mz2, "desk");
     // chairs: three a side + one at each end, every one facing the table
     for (let i = -1; i <= 1; i++) for (let s = -1; s <= 1; s += 2) {
       const lat = i * (TL / 2 - 0.7), off = s * 1.05;
@@ -843,6 +849,9 @@
         h.b.lbox(x, y + 0.8, zc2, 0.66, 0.06, RACK_SEG + 0.06, P.shelf, { cast: false });   // shelf line
         h.b.lbox(x, y + 1.5, zc2, 0.66, 0.06, RACK_SEG + 0.06, P.shelf, { cast: false });   // shelf line
         h.b.lbox(x, y + RACK_H + 0.03, zc2, 0.66, 0.06, RACK_SEG + 0.06, P.shelf, { cast: false }); // cap
+        // INTERIOR_LOOT_V1: an archive bay you can actually go through. Thinned
+        // hard — a rack floor is 80 bays and every one of them paying is a chore.
+        lootReg(h.ox + x, y, h.oz + zc2, "rack");
       }
     }
     return { anchors: [] };
@@ -872,6 +881,10 @@
     if (inRect(r, pd.x, pd.z, 1.2) && h.clear(pd.x, pd.z, 0.9)) {
       obox(pd, 0.5, 2.6, 0.92, 0.9, P.desk);
       obox(pd, 0.99, 2.8, 0.07, 1.05, P.worktop);
+      // INTERIOR_LOOT_V1: the one desk on the arrival floor, and the only
+      // container in this kit that is never thinned — there is exactly one
+      // reception desk per lobby and skipping it would be skipping the lobby.
+      lootReg(h.ox + pd.x, y, h.oz + pd.z, "reception");
       // the receptionist chair behind the desk, facing the door
       const pc = at(dIn + 0.95, 0);
       obox(pc, 0.42, 0.56, 0.14, 0.56, P.chair);
@@ -1016,8 +1029,13 @@
       A.obox(p, 1.1, 0.12, 2.2, 0.12, P.steel, { pad: 0.4 });
       A.obox(p, 2.3, 0.5, 0.26, 0.34, P.flood, { emissive: P.flood, ei: 0.85, pad: 0.4 }); }
     // ---- WEAPONS LOCKERS against one side wall ----------------------------
+    // INTERIOR_LOOT_V1: these were the most obviously interactable object in
+    // the whole kit and were pure decoration. They are now the one container
+    // that can pay in a REAL gun (LOOT_KIND.weapons.gun, a deliberately small
+    // band) — which is what makes fighting up to a checkpoint floor worth it.
     for (let i = 0; i < 2; i++) {
-      A.obox(A.at(dep * 0.62 + i * 0.95, half - 0.35), 0.95, 0.9, 1.9, 0.55, P.steel, { pad: 0.45 });
+      if (A.obox(A.at(dep * 0.62 + i * 0.95, half - 0.35), 0.95, 0.9, 1.9, 0.55, P.steel, { pad: 0.45 }))
+        lootAtA(A, dep * 0.62 + i * 0.95, half - 0.35, "weapons");
     }
     // ---- DUTY TABLE + radio + two stools on the opposite side -------------
     { const p = A.at(dep * 0.68, -half + 0.9);
@@ -1028,7 +1046,8 @@
         A.obox(A.at(dep * 0.68 - 1.0, -half + 0.9), 0.22, 0.4, 0.44, 0.4, P.chair, { pad: 0.4 });
       } }
     // ---- CRATES stacked in the dead corner (two down, one on top) ---------
-    A.obox(A.at(dep - 1.2, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 });
+    if (A.obox(A.at(dep - 1.2, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 }))
+      lootAtA(A, dep - 1.2, -half + 0.7, "crate");
     A.obox(A.at(dep - 2.1, -half + 0.7), 0.42, 0.85, 0.82, 0.85, P.crate, { pad: 0.45 });
     A.obox(A.at(dep - 1.2, -half + 0.7), 1.28, 0.8, 0.78, 0.8, P.crate, { pad: 0.45 });
     // ---- THE POSTS --------------------------------------------------------
@@ -1069,7 +1088,11 @@
         A.obox(p, 1.42, 0.95, 0.16, 1.9, P.sofa, { pad: 0.45 });       // upper mattress
         A.obox(p, 1.30, 0.9, 0.28, 1.85, P.steel, { pad: 0.45 });
         A.obox(A.at(inD, s * (half - 1.05)), 0.79, 0.1, 1.58, 0.1, P.steel, { pad: 0.4 });  // ladder post (foot on the deck, head at the top bunk)
-        A.obox(A.at(inD + 1.0, s * (half - 0.2)), 0.2, 0.5, 0.4, 0.7, P.crate, { pad: 0.4 });  // footlocker
+        // INTERIOR_LOOT_V1: the footlocker at the foot of every bunk. Somebody
+        // LIVES on this floor — the box beside his bed is the whole reason to
+        // walk down the row instead of past it.
+        if (A.obox(A.at(inD + 1.0, s * (half - 0.2)), 0.2, 0.5, 0.4, 0.7, P.crate, { pad: 0.4 }))  // footlocker
+          lootAtA(A, inD + 1.0, s * (half - 0.2), "footlocker");
       }
     }
     // mess table down the centre + benches
@@ -1202,9 +1225,17 @@
         A.obox(ap, 1.86, 2.1, 0.08, 0.55, P.steel, { pad: 0.5 });
       } }
     // drinks cabinet + a floor safe + framed pictures on the far wall
-    A.obox(A.at(dep - 0.8, -half + 1.3), 0.5, 1.6, 1.0, 0.5, P.wood, { pad: 0.5 });
+    // INTERIOR_LOOT_V1: THE TOP OF THE LADDER. The cabinet is a good haul; the
+    // SAFE is the crafted, guarded prize — quiet if the men in this room are
+    // already dead, seven loud seconds and a filed burglary if they are not
+    // (CBZ.interiorLootTake). Its cash scales with the tower's wealth tier,
+    // which is the only "difficulty" here that pays differently.
+    const suiteW = suiteWealth(h);
+    if (A.obox(A.at(dep - 0.8, -half + 1.3), 0.5, 1.6, 1.0, 0.5, P.wood, { pad: 0.5 }))
+      lootAtA(A, dep - 0.8, -half + 1.3, "cabinet", { wealth: suiteW });
     A.obox(A.at(dep - 0.8, -half + 1.3), 1.08, 1.4, 0.16, 0.4, P.gold, { emissive: P.gold, ei: 0.25, pad: 0.5 });
-    A.obox(A.at(dep - 0.7, -half + 2.7), 0.35, 0.8, 0.7, 0.6, P.steel, { pad: 0.45 });     // the safe
+    if (A.obox(A.at(dep - 0.7, -half + 2.7), 0.35, 0.8, 0.7, 0.6, P.steel, { pad: 0.45 }))   // the safe
+      lootAtA(A, dep - 0.7, -half + 2.7, "safe", { wealth: suiteW });
     for (let i = -1; i <= 1; i++)
       A.obox(A.at(dep - 0.34, i * 1.5), 2.0, 0.62, 0.46, 0.05, P.gold, { pad: 0.35 });
     // one warm lamp over the desk, one over the aquarium
@@ -1385,6 +1416,10 @@
         if (kLen >= 0.7 && inRect(r, kp.x, kp.z, 0.3) && h.clear(kp.x, kp.z, 0.5)) {
           h.b.lbox(kp.x, y + 0.45, kp.z, alongX ? kLen : 0.62, 0.9, alongX ? 0.62 : kLen, P_KIT.body, { cast: false });
           h.b.lbox(kp.x, y + 0.93, kp.z, alongX ? kLen + 0.06 : 0.68, 0.06, alongX ? 0.68 : kLen + 0.06, P_KIT.top, { cast: false });
+          // INTERIOR_LOOT_V1: somebody's kitchen drawer. The lowest rung of the
+          // ladder on purpose — a corridor of flats is a burglary run of small
+          // takes, not a vault, and the flats are where a player actually is.
+          lootReg(h.ox + kp.x, y, h.oz + kp.z, "kitchen");
         }
         replay(plans[key], (u * UW));
       }
@@ -1492,6 +1527,487 @@
     const tops = Array.isArray(b.floorTops) && b.floorTops.length >= 2 ? b.floorTops : null;
     return tops ? (tops.length - 1) : Math.max(0, (b.storeys | 0));
   };
+
+  /* ========================================================================
+     INTERIOR_LOOT_V1 — THE INTERACTION VACUUM, CLOSED.
+
+     OWNER: "interiors of buildings feel dumb and pointless right now."
+
+     The diagnosis that matters is NOT furnishing — this file has had four
+     furnishing passes and the rooms above are dense. The diagnosis is that
+     until this block, every single piece of furniture drawn by every program
+     in this kit had ZERO entries in the interaction registry. The whole
+     indoor vocabulary of the game was: sit on a chair, sleep in a bed, read a
+     wanted poster. You could not open a drawer, a locker, a crate or a safe
+     anywhere inside any building in the city. A room you cannot touch is
+     scenery no matter how well it is dressed, which is exactly the sentence
+     the owner wrote.
+
+     THE GRADIENT IS THE DESIGN (doctrine LAW 1, the gun-room grammar). A
+     desk drawer is pocket change you can take in an empty afterhours office
+     and nobody cares. The boss's floor safe is the crafted, GUARDED prize:
+     it is quiet only if you have already killed the men in the room, and
+     otherwise it costs you seven loud seconds that wake the building and file
+     a burglary. Between those two ends sit the racks, the footlockers, the
+     crates, the drinks cabinet and the weapons locker (the one container in
+     the kit that can pay in a REAL gun, on a deliberately low hash gate).
+     The reward ladder is the reason to climb the building.
+
+     WITNESSES ARE THE OTHER HALF, and they are what makes the same desk two
+     different verbs. Robbing it on an empty floor at night is free. Robbing
+     it at noon with a clerk two desks away runs the EXACT decision the shop
+     robbery already runs — CBZ.cityScare's freeze-or-bolt, cityPanicRaise's
+     contagion field, and a heat charge through cityCrime. An armed staffer
+     does not flinch: the building's own alarm (occupy.js's cityOccupyAlarm,
+     the ped.guard + rage + state:"fight" trio) comes down on you instead.
+
+     IT ADDS NO SYSTEM AND NO HUD. Money goes through CBZ.city.addCash and
+     items through CBZ.cityEcon.add — the same two seams the street rummage
+     and every shop use. Feedback is the existing city feed line (and the
+     killfeed if it turns into a shooting). There is no toast, no meter, no
+     objective. The safe's channel is a note at the start and a note at the
+     end; the tension in between is the panic the noise is making.
+
+     COST DISCIPLINE. A desk-farm floor is up to 96 stations and a tower has
+     dozens of floors, so a citywide registry could be six figures of records
+     and the 12 Hz interaction scan (interactions.js:539) must not walk it.
+     Two bounds: registration is HASH-THINNED per kind (most desks are just
+     desks), hard-capped at LOOT_CAP; and the query is a coordinate-bucketed
+     grid, so `interiorLootAt` far from any interior costs four failed Map
+     lookups and returns null. No record ever touches a mesh's userData —
+     core/batch.js's merge is untouched, exactly like the seat registry.
+
+     DETERMINISM. What is IN a container is a fact about the world: the class
+     (dud / cash / item / gun) and the thinning are CBZ.hash01 of the world
+     position, so the same city always has the same desks worth opening. The
+     AMOUNT is a runtime roll (Math.random), which is the sanctioned split.
+     ======================================================================== */
+  // Off → nothing registers, every query returns null, and interact.js's zone
+  // never surfaces a card. One-line revert of the whole layer.
+  if (CFG.INTERIOR_LOOT_V1 == null) CFG.INTERIOR_LOOT_V1 = true;
+
+  // WHAT EACH CONTAINER IS. `rate` is the deterministic share of drawn pieces
+  // that are worth opening at all (a desk farm where all 96 drawers pay is a
+  // faucet and a chore; one in three is a search). `dud`/`item` carve the class
+  // band — everything above them is cash. `gun` is the weapons-locker-only
+  // band and is deliberately tiny: a free rifle is the single most inflationary
+  // thing this layer could hand out.
+  const LOOT_KIND = {
+    desk:       { rate: 0.18, tier: 0, dud: 0.42, item: 0.20, cash: [4, 44],    label: "Search the desk",           empty: "Paperwork, dead pens, somebody's charger. Nothing." },
+    reception:  { rate: 1.00, tier: 0, dud: 0.34, item: 0.26, cash: [10, 80],   label: "Go through the front desk", empty: "Visitor badges and a sign-in book. Nothing worth taking." },
+    kitchen:    { rate: 0.45, tier: 0, dud: 0.40, item: 0.34, cash: [3, 26],    label: "Search the kitchen drawers",empty: "Cutlery, takeaway menus, a dead kettle." },
+    rack:       { rate: 0.22, tier: 1, dud: 0.38, item: 0.30, cash: [10, 74],   label: "Search the shelves",        empty: "Archive boxes. Somebody's tax returns from nine years ago." },
+    crate:      { rate: 0.55, tier: 1, dud: 0.30, item: 0.36, cash: [15, 92],   label: "Pry open the crate",        empty: "Packing foam and an empty inventory sheet." },
+    footlocker: { rate: 0.60, tier: 1, dud: 0.32, item: 0.36, cash: [12, 84],   label: "Open the footlocker",       empty: "Spare boots, a bar of soap, a letter he never sent." },
+    weapons:    { rate: 1.00, tier: 2, dud: 0.24, item: 0.44, cash: [20, 120],  gun: 0.10, label: "Force the weapons locker", empty: "Empty racks. Whatever was in here walked out already." },
+    cabinet:    { rate: 1.00, tier: 3, dud: 0.16, item: 0.46, cash: [140, 620], label: "Go through the drinks cabinet", empty: "Good bottles, all of them empty. He drinks alone." },
+    safe:       { rate: 1.00, tier: 4, dud: 0.00, item: 0.34, cash: [0, 0],     label: "Crack the floor safe",      empty: "Deeds, a passport in another name — and no cash. He moved it." },
+  };
+  // WHAT COMES OUT, by container. Every name is checked against the live econ
+  // catalog before it is offered, so a catalog edit can only ever shrink these.
+  const LOOT_ITEMS = {
+    desk:       ["Wallet", "Phone", "Burner Phone", "Laptop"],
+    reception:  ["Wallet", "Phone", "Laptop", "Cash Stack"],
+    kitchen:    ["Hotdog", "Soda", "Coffee", "Wallet"],
+    rack:       ["Crowbar", "Lockpick", "Laptop", "Ammo Box"],
+    crate:      ["Ammo Box", "Crowbar", "Body Armor"],
+    footlocker: ["Wallet", "Ammo Box", "Knife", "Body Armor"],
+    weapons:    ["Ammo Box", "Body Armor", "Knife"],
+    cabinet:    ["Rolex", "Diamond Ring", "Cash Stack", "Gold Bar"],
+    safe:       ["Gold Bar", "Cash Stack", "Iced Watch", "Briefcase of Cash"],
+  };
+  const LOOT_GUNS = ["Pistol", "Shotgun", "SMG"];
+  // the heat a container costs you WHEN SOMEBODY SEES IT (the safe pays it
+  // regardless — a drill is loud whether or not anyone is looking).
+  const LOOT_CRIME = [
+    { sev: 40,  type: "theft" },        // tier 0 — a drawer
+    { sev: 70,  type: "theft" },        // tier 1 — a rack, a locker
+    { sev: 130, type: "burglary" },     // tier 2 — the weapons locker
+    { sev: 110, type: "burglary" },     // tier 3 — the drinks cabinet
+    { sev: 260, type: "burglary" },     // tier 4 — the safe
+  ];
+
+  const LOOT = [];                       // every registered container, flat
+  const LOOT_CELL = 9;                   // metres per spatial bucket (> REACH 5.2)
+  const LOOT_BUCKETS = new Map();        // "gx,gz" -> [rec, ...]
+  const LOOT_KEYS = new Set();           // coordinate dedupe (a re-run furnisher)
+  const LOOT_CAP = 6000;                 // citywide ceiling on records
+  /* …AND A RESERVATION, which is the part a flat cap gets wrong. Registration
+     order is world-build order: buildings.js furnishes every office tower long
+     before occupy.js dresses a gang HQ's boss suite. With one first-come cap,
+     a big city's desk drawers would spend the whole budget and the floor safes
+     — the top of the ladder and the entire point of the layer — would silently
+     fail to register. So the tier-0 pocket-change kinds get a SUB-cap and the
+     rest of the budget belongs to the containers that are worth climbing for. */
+  const LOOT_CAP_LOW = 3800;
+  let LOOT_LOW = 0;
+  const LOOT_TALLY = { looted: 0, witnessed: 0, safes: 0, guns: 0, cash: 0, cracks: 0, refusedCap: 0, refusedLow: 0 };
+  const CRACK_T = 7.0;                   // seconds of loud work on a guarded safe
+  // Walk this far off the safe and you have abandoned it. Deliberately a shade
+  // WIDER than the interaction reach (interactions.js REACH is 5.2) — the verb
+  // can legitimately be pressed from the far edge of reach, and a leash tighter
+  // than that would cancel the hold on the very frame it started.
+  const CRACK_LEASH = 6.0;
+  const WITNESS_R = 15;                  // how far a staffer can be and still see you
+
+  function lootCellKey(x, z) { return Math.floor(x / LOOT_CELL) + "," + Math.floor(z / LOOT_CELL); }
+  // REGISTER one container. World coords in; null out when the flag is off, the
+  // cap is spent, the coordinate is already claimed, or the deterministic
+  // thinning says this particular piece is just furniture.
+  function lootReg(x, y, z, kind, opts) {
+    if (CFG.INTERIOR_LOOT_V1 === false) return null;
+    const K = LOOT_KIND[kind];
+    if (!K || x == null || z == null) return null;
+    if (LOOT.length >= LOOT_CAP) { LOOT_TALLY.refusedCap++; return null; }
+    if (K.tier === 0 && LOOT_LOW >= LOOT_CAP_LOW) { LOOT_TALLY.refusedLow++; return null; }
+    const h1 = CBZ.hash01 ? CBZ.hash01(x, z, 0x10C1) : 0.5;
+    if (h1 >= K.rate) return null;
+    const key = Math.round(x * 10) + "," + Math.round((y || 0) * 10) + "," + Math.round(z * 10);
+    if (LOOT_KEYS.has(key)) return null;
+    LOOT_KEYS.add(key);
+    // THE CLASS IS A WORLD FACT (hash, not a roll): which drawer has the laptop
+    // in it is the same in every session of the same city.
+    const h2 = CBZ.hash01 ? CBZ.hash01(x + 0.5, z - 0.5, 0x10C2) : 0.5;
+    let klass = "cash";
+    if (K.gun && h2 < K.gun) klass = "gun";
+    else if (h2 < K.dud) klass = "dud";
+    else if (h2 < K.dud + K.item) klass = "item";
+    const rec = {
+      x: x, y: y || 0, z: z, kind: kind, tier: K.tier, klass: klass,
+      wealth: (opts && opts.wealth) || 1,
+      taken: 0, lot: null, _lotR: false,
+    };
+    LOOT.push(rec);
+    if (K.tier === 0) LOOT_LOW++;
+    const ck = lootCellKey(x, z);
+    const cell = LOOT_BUCKETS.get(ck);
+    if (cell) cell.push(rec); else LOOT_BUCKETS.set(ck, [rec]);
+    if (kind === "safe") LOOT_TALLY.safes++;
+    return rec;
+  }
+  // the approach-frame form every door-relative program wants: same arguments
+  // as anchorAt's placement pair, so a program never converts coordinates.
+  function lootAtA(A, inD, lat, kind, opts) {
+    const p = A.at(inD, lat);
+    return lootReg(A.h.ox + p.x, A.y, A.h.oz + p.z, kind, opts);
+  }
+  // a boss suite's wealth tier, read off the thing that already encodes it: how
+  // tall the tower he owns the top of is. No new field, no new roll.
+  function suiteWealth(h) {
+    const st = Math.max(1, (h.b.storeys | 0) || 1);
+    return Math.max(1, Math.min(5, 1 + Math.floor(st / 8)));
+  }
+
+  // lazily resolve the lot a record sits in — a demolished building stops
+  // offering its drawers. Exactly propuse.js's lotOf idiom (one scan per
+  // record, cached, retried while the city is still coming up).
+  function lootLots() {
+    const c = CBZ.city;
+    if (!c) return null;
+    if (c.arena && c.arena.lots) return c.arena.lots;
+    return c.lots || null;
+  }
+  function lootLotOf(rec) {
+    if (rec.lot !== null || rec._lotR) return rec.lot;
+    const lots = lootLots();
+    if (!lots) return null;
+    rec._lotR = true;
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      const hw = l.w / 2 + 0.5, hd = (l.d != null ? l.d : l.w) / 2 + 0.5;
+      if (Math.abs(rec.x - l.cx) <= hw && Math.abs(rec.z - l.cz) <= hd) { rec.lot = l; break; }
+    }
+    return rec.lot;
+  }
+  function lootFloorK(rec) { return Math.max(0, Math.round((rec.y || 0) / 3.2)); }
+
+  /* THE QUERY the interaction registry calls at 12 Hz, from anywhere in the
+     city. Bucketed: at most a 2x2 neighbourhood of cells is touched, and a
+     player who is nowhere near an interior pays four failed Map lookups. */
+  CBZ.interiorLootAt = function (px, pz, reach, py) {
+    if (CFG.INTERIOR_LOOT_V1 === false || !LOOT.length) return null;
+    const r = reach || 3.8, r2 = r * r;
+    const gx0 = Math.floor((px - r) / LOOT_CELL), gx1 = Math.floor((px + r) / LOOT_CELL);
+    const gz0 = Math.floor((pz - r) / LOOT_CELL), gz1 = Math.floor((pz + r) / LOOT_CELL);
+    let best = null, bd = r2;
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+      const cell = LOOT_BUCKETS.get(gx + "," + gz);
+      if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        const rec = cell[i];
+        if (rec.taken) continue;
+        // WRONG FLOOR is the whole reason this needs y: a tower stacks a desk
+        // every 3.2 m and the plan distance to the one above you is zero.
+        if (py != null && Math.abs(rec.y - py) > 2.0) continue;
+        const dx = rec.x - px, dz = rec.z - pz, d = dx * dx + dz * dz;
+        if (d >= bd) continue;
+        const l = lootLotOf(rec);
+        if (l && l.demolished) continue;
+        bd = d; best = rec;
+      }
+    }
+    return best;
+  };
+  CBZ.interiorLootLabel = function (rec) {
+    const K = rec && LOOT_KIND[rec.kind];
+    return K ? K.label : "Search it";
+  };
+
+  /* ---- WITNESSES -------------------------------------------------------
+     Who counts: a body that BELONGS in this room — a vendor behind a counter,
+     a citystaff post, an occupy.js guard, a seated worker. A pedestrian who
+     wandered in is not a witness to a drawer. The decision itself is not ours:
+     an unarmed staffer goes through cityScare (freeze or bolt, the identical
+     call interiorRobbery makes on the clerk), and anyone armed brings the
+     building's own alarm down instead of flinching. */
+  function lootWitness(rec) {
+    const list = CBZ.cityPeds;
+    if (!list) return null;
+    let best = null, bd = WITNESS_R * WITNESS_R;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p || p.dead || p.isPlayer || p.controlled || !p.pos) continue;
+      if (Math.abs(p.pos.y - rec.y) > 2.6) continue;              // through a slab is not seeing
+      const belongs = !!(p.vendor || p.staffPost || p._occupyPost || p._occupyFloor != null
+        || p.guard || p._npcAttached || p._deskAnchor);
+      if (!belongs) continue;
+      const dx = p.pos.x - rec.x, dz = p.pos.z - rec.z, d = dx * dx + dz * dz;
+      if (d >= bd) continue;
+      bd = d; best = p;
+    }
+    return best;
+  }
+  // fire the consequence for opening `rec`. `loud` forces the heat charge even
+  // with nobody watching (a drill on a safe is heard through a floor).
+  function lootConsequence(rec, loud) {
+    const P = CBZ.player;
+    const w = lootWitness(rec);
+    const C = LOOT_CRIME[Math.max(0, Math.min(LOOT_CRIME.length - 1, rec.tier))];
+    if (!w && !loud) return null;
+    if (w) {
+      LOOT_TALLY.witnessed++;
+      const armed = !!(w.armed || w.kind === "cop" || w.kind === "security" || w.rage);
+      const lot = lootLotOf(rec);
+      if (armed && lot && lot._occupancy && CBZ.cityOccupyAlarm) {
+        // the building learns you are in it — occupy.js's own alarm front,
+        // not a second copy of the guard fields.
+        try { CBZ.cityOccupyAlarm(lot, P, lootFloorK(rec)); } catch (e) {}
+      } else if (armed) {
+        // the same field trio occupy.js's wake() writes, for a posted body no
+        // occupancy record owns (a shop's security, a declared interior job).
+        if (w.staffPost) { w._occupyPost = w._occupyPost || { x: w.staffPost.x, z: w.staffPost.z }; w.staffPost = null; }
+        if (w._occupyPost) { w.guard = { x: w._occupyPost.x, z: w._occupyPost.z }; w.homeGuard = w.guard; }
+        w.mem = P; w.alarmed = Math.max(w.alarmed || 0, 4);
+        w.rage = P; w.state = "fight";
+      } else if (CBZ.cityScare) {
+        try { CBZ.cityScare(w, P, { bias: 0.2 }); } catch (e) {}
+      }
+    }
+    if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(rec.x, rec.z, loud ? 1.4 : 0.8);
+    if (CBZ.cityCrime) {
+      try { CBZ.cityCrime(C.sev, { x: rec.x, z: rec.z, type: C.type }); } catch (e) {}
+    }
+    return w;
+  }
+
+  /* ---- PAYOUT — through the seams that already exist ------------------- */
+  function lootEcon() { return CBZ.cityEcon || null; }
+  function lootHasItem(n) { const e = lootEcon(); return !!(e && e.ITEMS && e.ITEMS[n]); }
+  function lootPickItem(kind) {
+    const pool = LOOT_ITEMS[kind] || [];
+    const live = [];
+    for (let i = 0; i < pool.length; i++) if (lootHasItem(pool[i])) live.push(pool[i]);
+    if (!live.length) return null;
+    return live[(Math.random() * live.length) | 0];
+  }
+  function lootNote(s, t) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, t || 1.9); }
+  function lootCash(n) {
+    if (n <= 0) return;
+    LOOT_TALLY.cash += n;
+    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(n);
+    if (CBZ.sfx) CBZ.sfx("coin");
+  }
+  // The SAFE is the one payout that scales — off the wealth tier stamped at
+  // build time, which is the height of the tower the suite sits on top of.
+  function safeCash(rec) {
+    const t = Math.max(1, rec.wealth | 0);
+    return 1600 + t * 2100 + ((Math.random() * (900 * t)) | 0);
+  }
+  function lootPay(rec) {
+    const K = LOOT_KIND[rec.kind];
+    rec.taken = 1;
+    LOOT_TALLY.looted++;
+    if (rec.kind === "safe") {
+      if (rec.klass === "item") {
+        const n = lootPickItem("safe");
+        if (n && CBZ.cityEcon && CBZ.cityEcon.add) {
+          CBZ.cityEcon.add(n, 1);
+          const half = Math.round(safeCash(rec) * 0.4);
+          lootCash(half);
+          if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE — " + n + " + $" + half);
+          if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(5);
+          return true;
+        }
+      }
+      const cash = safeCash(rec);
+      lootCash(cash);
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE — $" + cash);
+      if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(4);
+      return true;
+    }
+    if (rec.klass === "gun") {
+      const live = [];
+      for (let i = 0; i < LOOT_GUNS.length; i++) if (lootHasItem(LOOT_GUNS[i])) live.push(LOOT_GUNS[i]);
+      const n = live.length ? live[(Math.random() * live.length) | 0] : null;
+      if (n) {
+        LOOT_TALLY.guns++;
+        // the EXACT seam careers.js's Senior Guard sidearm uses — inventory
+        // row plus the real equipped weapon, never a stat fiction.
+        if (CBZ.cityEcon && CBZ.cityEcon.add) CBZ.cityEcon.add(n, 1);
+        if (CBZ.cityGiveWeapon) { try { CBZ.cityGiveWeapon(n); } catch (e) {} }
+        if (CBZ.cityAddAmmo) { try { CBZ.cityAddAmmo(30); } catch (e) {} }
+        lootNote("Rack held one " + n + ". It's yours.", 2.2);
+        return true;
+      }
+    }
+    if (rec.klass === "item") {
+      const n = lootPickItem(rec.kind);
+      if (n && CBZ.cityEcon && CBZ.cityEcon.add) {
+        CBZ.cityEcon.add(n, 1);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        lootNote("Took a " + n + ".", 1.9);
+        return true;
+      }
+    }
+    if (rec.klass === "dud") { lootNote(K.empty, 1.7); return true; }
+    const lo = K.cash[0], hi = K.cash[1];
+    const cash = lo + ((Math.random() * Math.max(1, hi - lo)) | 0);
+    if (cash <= 0) { lootNote(K.empty, 1.7); return true; }
+    lootCash(cash);
+    lootNote("Found $" + cash + ".", 1.8);
+    return true;
+  }
+
+  /* ---- THE SAFE'S SEVEN SECONDS ----------------------------------------
+     The gradient's top rung. If the men in the room are dead the safe opens
+     quietly — you already paid for it. If they are not, it is a HOLD: seven
+     seconds of noise that raise panic the whole time and file the burglary the
+     moment you start, so the room has time to come for you before it pays.
+     One channel citywide; walking away abandons it (and the heat is already
+     spent, which is the point). No HUD: the feed line at the start and the
+     panic wave are the feedback. */
+  const CRACK = { rec: null, t: 0, pulse: 0 };
+  CBZ.interiorLootBusy = function () { return !!CRACK.rec; };
+  function suiteGuarded(rec) {
+    const list = CBZ.cityPeds;
+    if (!list) return false;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p || p.dead || p.isPlayer || p.controlled || !p.pos) continue;
+      if (Math.abs(p.pos.y - rec.y) > 2.6) continue;
+      if (!(p.guard || p.staffPost || p._occupyPost || p._occupyFloor != null)) continue;
+      const dx = p.pos.x - rec.x, dz = p.pos.z - rec.z;
+      if (dx * dx + dz * dz < 20 * 20) return true;
+    }
+    return false;
+  }
+  function crackAbort(msg) {
+    CRACK.rec = null; CRACK.t = 0; CRACK.pulse = 0;
+    if (msg) lootNote(msg, 1.7);
+  }
+  function crackTick(dt) {
+    const rec = CRACK.rec;
+    if (!rec) return;
+    const P = CBZ.player;
+    // dying on the drill needs no feed line — the death screen is the message.
+    if (!P || !P.pos || P.dead || rec.taken) { crackAbort(null); return; }
+    const dx = P.pos.x - rec.x, dz = P.pos.z - rec.z;
+    if (dx * dx + dz * dz > CRACK_LEASH * CRACK_LEASH) { crackAbort("You walked off the safe. It's still shut."); return; }
+    CRACK.t += dt;
+    CRACK.pulse += dt;
+    if (CRACK.pulse >= 2.0) {
+      // the noise keeps travelling — and anyone who walks in ON it makes the
+      // same decision the clerk made. The HEAT is not re-charged: one burglary
+      // was filed when the drill went on, and a crime you are still committing
+      // is not a second crime.
+      CRACK.pulse = 0;
+      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(rec.x, rec.z, 0.7);
+      const w = lootWitness(rec);
+      if (w && !w.rage && CBZ.cityScare) { try { CBZ.cityScare(w, CBZ.player, { bias: 0.25 }); } catch (e) {} }
+    }
+    if (CRACK.t < CRACK_T) return;
+    CRACK.rec = null; CRACK.t = 0; CRACK.pulse = 0;
+    LOOT_TALLY.cracks++;
+    lootPay(rec);
+  }
+
+  /* THE VERB. One entry point for every container; the caller (interact.js's
+     zone) types no policy. Returns true when something actually happened. */
+  CBZ.interiorLootTake = function (rec) {
+    if (CFG.INTERIOR_LOOT_V1 === false || !rec) return false;
+    if (rec.taken) { lootNote("Already cleaned out.", 1.4); return false; }
+    if (CRACK.rec) return false;                     // one channel at a time
+    if (rec.kind === "safe" && suiteGuarded(rec)) {
+      // LOUD. The heat is spent up front — you cannot start this, hear the
+      // room wake up, and walk away clean.
+      CRACK.rec = rec; CRACK.t = 0; CRACK.pulse = 0;
+      lootConsequence(rec, true);
+      lootNote("You put the drill on the safe. This is going to be loud.", 2.4);
+      return true;
+    }
+    lootConsequence(rec, false);
+    return lootPay(rec);
+  };
+
+  /* THE RATCHET — export only. The orchestrator measures; nothing in this file
+     calls it. `anchors` is every registered container, `lootable` the ones
+     still shut, `witnessed` how many searches a body actually saw. */
+  CBZ.interiorLootAudit = function () {
+    let lootable = 0, safes = 0;
+    const byKind = {}, byClass = {};
+    for (let i = 0; i < LOOT.length; i++) {
+      const rec = LOOT[i];
+      byKind[rec.kind] = (byKind[rec.kind] | 0) + 1;
+      byClass[rec.klass] = (byClass[rec.klass] | 0) + 1;
+      if (!rec.taken) lootable++;
+      if (rec.kind === "safe") safes++;
+    }
+    return {
+      anchors: LOOT.length,
+      lootable: lootable,
+      looted: LOOT_TALLY.looted,
+      witnessed: LOOT_TALLY.witnessed,
+      safes: safes,
+      byKind: byKind,
+      byClass: byClass,
+      cells: LOOT_BUCKETS.size,
+      guns: LOOT_TALLY.guns,
+      cashPaid: LOOT_TALLY.cash,
+      cracks: LOOT_TALLY.cracks,
+      lowUsed: LOOT_LOW,                       // tier-0 slots spent of LOOT_CAP_LOW
+      refusedCap: LOOT_TALLY.refusedCap,       // hit the citywide ceiling
+      refusedLow: LOOT_TALLY.refusedLow,       // hit the pocket-change sub-cap
+      cracking: CRACK.rec ? 1 : 0,
+    };
+  };
+  function lootReset() {
+    LOOT.length = 0;
+    LOOT_BUCKETS.clear();
+    LOOT_KEYS.clear();
+    LOOT_LOW = 0;
+    LOOT_TALLY.looted = LOOT_TALLY.witnessed = LOOT_TALLY.safes = 0;
+    LOOT_TALLY.guns = LOOT_TALLY.cash = LOOT_TALLY.cracks = 0;
+    LOOT_TALLY.refusedCap = LOOT_TALLY.refusedLow = 0;
+    CRACK.rec = null; CRACK.t = 0; CRACK.pulse = 0;
+  }
+  // its own tick, at its own order key, gated on its own flag — so the safe
+  // channel survives INTERIOR_LIFE_V1 being turned off and vice versa.
+  if (CBZ.onUpdate) CBZ.onUpdate(41.88, function (dt) {
+    if (CFG.INTERIOR_LOOT_V1 === false) return;
+    if (!CRACK.rec) return;
+    if (!CBZ.game || CBZ.game.mode !== "city") { crackAbort(null); return; }
+    crackTick(dt || 0);
+  });
 
   // ---- dispatch -----------------------------------------------------------
   const PROGRAMS = {
@@ -1732,14 +2248,48 @@
      want a giver in contracts.js. This is the ambient half.
      ======================================================================== */
   const ROBS = [];                     // live scenes: {lot, peds[], t, life}
-  const ROB_CAP = 1;                   // one in the whole city at a time
+  /* HOW MANY AT ONCE — derived, not typed. A flat cap of 1 was right for a
+     village and wrong for a metropolis: on a 400-lot city with ~120 shop lots,
+     ONE robbery citywide means you will never walk into a second one, and the
+     ambient half of this file reads as a scripted one-off. Scale it with the
+     city and clamp hard at 3 — the point is that the world is busy, not that
+     it is a crime wave, and each scene still costs two posted bodies. */
+  const ROB_CAP_MAX = 3;
+  function robCap() {
+    const A = CBZ.city && CBZ.city.arena;
+    const shops = A && A.shopLots;
+    const n = shops ? shops.length : 0;
+    return Math.max(1, Math.min(ROB_CAP_MAX, Math.ceil(n / 40)));
+  }
+  /* …AND WHERE. Shops were the only lots ever rolled, which is why the office
+     towers this file spent four passes furnishing never had anything happen in
+     them. Offices roll too, at a LOWER weight (a lobby stick-up is rarer than a
+     corner-store one) and off the same rate-limited cursor — the scan cost
+     profile is unchanged: one pool, at most SCAN lots inspected per tick. */
+  let OFFICE_LOTS = null;
+  function officeLots() {
+    if (OFFICE_LOTS) return OFFICE_LOTS;
+    const A = CBZ.city && CBZ.city.arena;
+    const lots = A && A.lots;
+    if (!lots || !lots.length) return null;          // city not up yet — retry next tick
+    const out = [];
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      const b = l && l.building;
+      if (!b || !b.door || !b.localDoor) continue;
+      if (b.shop || b.vendor) continue;              // that is a shop lot already
+      out.push(l);
+    }
+    OFFICE_LOTS = out;
+    return OFFICE_LOTS;
+  }
   function robberSpot(b, inD, lat) {
     const p = CBZ.interiorDoorPost(b, inD, lat);
     return p;
   }
   CBZ.interiorRobbery = function (lot, opts) {
     if (CFG.INTERIOR_LIFE_V1 === false || !CBZ.cityPostNpc) return null;
-    if (ROBS.length >= ROB_CAP) return null;
+    if (ROBS.length >= robCap()) return null;
     const b = lot && lot.building;
     if (!b || !b.localDoor || lot.demolished) return null;
     for (let i = 0; i < ROBS.length; i++) if (ROBS[i].lot === lot) return null;
@@ -1846,7 +2396,18 @@
     if (!P || !P.pos || P.dead) return;
     const night = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
     // (a) somebody goes to bed
-    if (night > 0.5 && CBZ.propSeatNpc && CBZ.cityPeds) {
+    //
+    // THE BUG THIS LINE CARRIED FOR ITS WHOLE LIFE: it called
+    // CBZ.propSeatNpc(a, 6.5, "bed"). propSeatNpc scans the SEATS registry and
+    // filters by a kind substring — but real beds are registered into propuse's
+    // separate BEDS registry (CBZ.propRegisterBed), which that scan never
+    // touches. So the one sweep whose entire purpose was "after dark somebody
+    // is home" could only ever have matched a chair that happened to be named
+    // like a bed, and the corridors of flats this file builds stayed empty all
+    // night. CBZ.propBedNpc is the real verb (nearest FREE bed + propSleep,
+    // same willSeat-class checks); propSeatNpc stays as the degrade path so
+    // this is safe whichever file ships first.
+    if (night > 0.5 && (CBZ.propBedNpc || CBZ.propSeatNpc) && CBZ.cityPeds) {
       const list = CBZ.cityPeds;
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
@@ -1856,27 +2417,33 @@
         if (!a.pos || a.pos.y < 1.5) continue;                 // upper storeys only
         const dx = a.pos.x - P.pos.x, dz = a.pos.z - P.pos.z;
         if (dx * dx + dz * dz > 90 * 90) continue;
-        if (CBZ.propSeatNpc(a, 6.5, "bed")) break;             // one a sweep
+        const slept = CBZ.propBedNpc ? CBZ.propBedNpc(a, 6.5) : CBZ.propSeatNpc(a, 6.5, "bed");
+        if (slept) break;                                      // one a sweep
       }
     }
-    // (b) very occasionally, a shop is being robbed when you get there
-    const A = CBZ.city && CBZ.city.arena;
-    const shops = A && A.shopLots;
-    if (!shops || !shops.length || ROBS.length >= ROB_CAP) return;
+    // (b) very occasionally, a shop — or, more rarely, an office lobby — is
+    // being robbed when you get there. ONE pool is chosen per tick and then
+    // walked exactly as before, so the scan cost profile is untouched.
+    if (ROBS.length >= robCap()) return;
     if (Math.random() > 0.06) return;                          // ~1 chance / 42 s
-    const SCAN = Math.min(shops.length, 24);
+    const offices = officeLots();
+    const useOffice = !!(offices && offices.length) && Math.random() < 0.22;
+    const A = CBZ.city && CBZ.city.arena;
+    const pool = useOffice ? offices : (A && A.shopLots);
+    if (!pool || !pool.length) return;
+    const SCAN = Math.min(pool.length, 24);
     for (let k = 0; k < SCAN; k++) {
-      const lot = shops[(robScan + k) % shops.length];
+      const lot = pool[(robScan + k) % pool.length];
       const b = lot && lot.building;
       if (!b || !b.door || lot.demolished || !b.localDoor) continue;
       const dx = b.door.x - P.pos.x, dz = b.door.z - P.pos.z, d2 = dx * dx + dz * dz;
       // near enough to walk into, far enough that nobody watches them arrive
       if (d2 < 55 * 55 || d2 > 150 * 150) continue;
       if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(b.door.x, b.door.z)) continue;
-      robScan = (robScan + k + 1) % shops.length;
+      robScan = (robScan + k + 1) % pool.length;
       if (CBZ.interiorRobbery(lot)) return;
     }
-    robScan = (robScan + SCAN) % shops.length;
+    robScan = (robScan + SCAN) % pool.length;
   });
 
   // ========================================================================
@@ -2039,6 +2606,12 @@
       lightStrips: STRIPS.length,                // ceiling strips on the day/night ramp
       anchorsRegistered: fa ? (fa.seats + fa.beds) : 0,
       anchorsMismatched: fa ? fa.mismatched : 0, // furnitureAudit's own pin: 0
+      // INTERIOR_LOOT_V1 headline (the full breakdown is interiorLootAudit()):
+      // containers a player can actually open, and how many are safes. It was
+      // ZERO for the whole life of this kit, so it may only ever go UP.
+      loot: LOOT.length,
+      lootSafes: LOOT_TALLY.safes,
+      robCap: robCap(),
     };
   };
   // a world rebuild re-runs every furnisher, so the tallies restart in lockstep
@@ -2057,6 +2630,11 @@
     PEOPLE.posts = 0; PEOPLE.opened = false; PEOPLE.robberies = 0;
     for (const k in PEOPLE.ids) delete PEOPLE.ids[k];
     for (let i = ROBS.length - 1; i >= 0; i--) ROBS.splice(i, 1);
+    // the loot registry describes the arena that just died — every record in it
+    // names coordinates in a world that no longer exists. It rebuilds in
+    // lockstep with the geometry on the next furnish pass.
+    lootReset();
+    OFFICE_LOTS = null;
     if (CBZ.roomPlanAuditReset) CBZ.roomPlanAuditReset();
   };
   // LAZY RETRY — this file is index.html:530 and city/propuse.js is :667, so
