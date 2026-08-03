@@ -1169,7 +1169,7 @@
     POOL.dome = park(new THREE.Mesh(sphereGeo, domeMat), 9);
 
     seedVolumes();
-    function volumeMat(color, emissive, opacity) {
+    function volumeMat(color, emissive, opacity, rimFloor) {
       const m = new THREE.MeshLambertMaterial({
         color: color, emissive: emissive, emissiveIntensity: 1,
         transparent: true, opacity: opacity, depthWrite: true,
@@ -1184,6 +1184,17 @@
       // instead of a lit rock. The 0.16 floor keeps the depth-written rim
       // from punching fully transparent holes in lobes behind it.
       if (CBZ.CONFIG.NUKE_FX_SOFT_LOBES) {
+        // Per-role rim floor: the cap/crown can dissolve hard at their rims
+        // (broad overlapping mass), but the stem/surge stack single-file —
+        // a deep rim fade turns a column into beads, so they keep a denser
+        // silhouette. Baked into the program string, so each floor compiles
+        // its own shader variant (r128 keys the cache on this string).
+        const floor = rimFloor == null ? 0.22 : rimFloor;
+        // r128 keys the program cache on onBeforeCompile.toString(); both
+        // floor variants share identical SOURCE (floor is a closure), so
+        // without an explicit key the stem would silently reuse the cap's
+        // compiled program. The key must carry the number itself.
+        m.customProgramCacheKey = function () { return "cbzSoftLobes" + floor.toFixed(2); };
         m.onBeforeCompile = function (shader) {
           shader.vertexShader = shader.vertexShader
             .replace("#include <common>",
@@ -1203,13 +1214,14 @@
               "float softRim = abs(dot(normalize(vSoftN), normalize(vSoftV)));\n" +
               // Interior: two octaves of world-space value noise. A uniformly
               // lit ball reads as a pebble whatever its edge does; smoke has
-              // internal density structure. Frequencies give ~120-500 m
-              // billow mottling at nuke scale and animate slowly upward.
-              "float softN1 = sin(vSoftW.x * 0.0093 + vSoftW.y * 0.0141) * sin(vSoftW.z * 0.0117 - vSoftW.y * 0.0089);\n" +
-              "float softN2 = sin(vSoftW.x * 0.0261 - vSoftW.y * 0.0198) * sin(vSoftW.z * 0.0233 + vSoftW.x * 0.0172);\n" +
+              // internal density structure. Wavelengths ~450 m and ~1.5 km:
+              // broad billow mottling that holds up on the 5 km mature cap
+              // (the first draft's 240 m octave read as burlap moire there).
+              "float softN1 = sin(vSoftW.x * 0.0041 + vSoftW.y * 0.0062) * sin(vSoftW.z * 0.0051 - vSoftW.y * 0.0039);\n" +
+              "float softN2 = sin(vSoftW.x * 0.0118 - vSoftW.y * 0.0089) * sin(vSoftW.z * 0.0104 + vSoftW.x * 0.0077);\n" +
               "float softNoise = 0.5 + 0.32 * softN1 + 0.18 * softN2;\n" +
               "gl_FragColor.rgb *= 0.78 + 0.44 * softNoise;\n" +
-              "gl_FragColor.a *= (0.22 + 0.78 * smoothstep(0.05, 0.85, softRim)) * (0.66 + 0.50 * softNoise);\n" +
+              `gl_FragColor.a *= (${floor.toFixed(2)} + ${(1 - floor).toFixed(2)} * smoothstep(0.05, 0.85, softRim)) * (0.70 + 0.44 * softNoise);\n` +
               "#include <dithering_fragment>");
         };
       }
@@ -1224,9 +1236,9 @@
       return park(mesh, order);
     }
     POOL.surgeVol = volumeMesh("ground-cloud", VOL_MAX.surge,
-      volumeMat(0x746154, 0x1b0d07, 0.82), 4);
+      volumeMat(0x746154, 0x1b0d07, 0.82, 0.45), 4);
     POOL.stemVol = volumeMesh("stem", VOL_MAX.stem,
-      volumeMat(0x4b3a31, 0x24110a, 0.90), 5.1);
+      volumeMat(0x4b3a31, 0x24110a, 0.90, 0.60), 5.1);
     POOL.capVol = volumeMesh("cap", VOL_MAX.cap,
       volumeMat(0x5b4030, 0x301208, 0.88), 5.2);
     const hotMat = new THREE.MeshBasicMaterial({
@@ -2720,7 +2732,13 @@
     const STEM_TURNS = 0.85;
     const capBase = capY - (photo ? capRadius * (L.capThick || 0.782) : capRadius * 0.4);
     const hTrue = Math.max(L.R * 0.55, capBase);
-    const h = photo ? Math.min(hTrue, camFar() * 0.82) : Math.max(L.R * 0.55, capY);
+    // The far clamp existed for the LEGACY impostor tier ("the impostor
+    // carries everything above"); the coherent cloud has no impostor, so
+    // clamping left a void between the stem top and the mature 8 km cap —
+    // the column must reach its own head and let the frustum cull naturally.
+    const h = photo
+      ? (L.coherentCloud ? hTrue : Math.min(hTrue, camFar() * 0.82))
+      : Math.max(L.R * 0.55, capY);
     const stemR = photo ? L.stemW * (0.55 + rise * 0.45) : L.stemW * (0.72 + rise * 0.88);
     const stemY = Math.max(L.R * 0.10, h / Math.max(5, L.volN.stem * 0.72));
     for (let i = 0; i < L.volN.stem; i++) {
@@ -2755,11 +2773,15 @@
       // 2026-08-02). Each lobe's VERTICAL radius is floored at 0.8x its
       // share of the drawn column, so neighbours overlap at any height —
       // width stays stem-scaled to hold the 3:1 cap/stem proportion.
+      // 1.35, not 0.8: geometric overlap alone still PINCHES, because the
+      // soft-lobe rim fade makes the overlap zone faint-on-faint (probed
+      // live at t=90: 327 m spacing, 480 m spans, still read as beads).
+      // Spanning ~2.7 stations keeps a dense core through every joint.
       const seg = h / Math.max(4, L.volN.stem);
       putVolume(stem, i,
         Math.cos(a) * rr, Math.max(stemY * 0.35, h * fS), Math.sin(a) * rr,
         lobe * 1.06,
-        Math.max(lobe * 0.92, seg * 0.8 * Math.max(0.02, taper)),
+        Math.max(lobe * 0.92, seg * 1.35 * Math.max(0.02, taper)),
         lobe * 1.06, a);
     }
     // The near column is deliberately kept ALIVE under the impostor (it only
