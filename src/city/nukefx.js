@@ -2701,9 +2701,18 @@
       // clamp is a fade, not a guillotine.
       const taper = 1 - ease((s.f - 0.82) / 0.18);
       const lobe = stemR * prof * s.s2 * Math.max(0.02, taper);
+      // OVERLAP FLOOR. The aftermath stretches the column toward 8 km while
+      // the stem only widens ~1.2x, so fixed-size lobes separate into a
+      // dotted line of balls (caught by the nuke-sequence storyboard,
+      // 2026-08-02). Each lobe's VERTICAL radius is floored at 0.8x its
+      // share of the drawn column, so neighbours overlap at any height —
+      // width stays stem-scaled to hold the 3:1 cap/stem proportion.
+      const seg = h / Math.max(4, L.volN.stem);
       putVolume(stem, i,
         Math.cos(a) * rr, Math.max(stemY * 0.35, h * s.f), Math.sin(a) * rr,
-        lobe * 1.06, lobe * 0.92, lobe * 1.06, a);
+        lobe * 1.06,
+        Math.max(lobe * 0.92, seg * 0.8 * Math.max(0.02, taper)),
+        lobe * 1.06, a);
     }
     // The near column is deliberately kept ALIVE under the impostor (it only
     // loses 55% of its opacity, not all of it): the reference plate's whole

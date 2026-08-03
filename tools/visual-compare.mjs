@@ -459,6 +459,8 @@ try {
     if (await evaluate("document.readyState === 'complete' && Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)")) break;
     await sleep(100);
   }
+  // 300s: sixteen-plus full-viewport PNGs can outlast the old 120s budget on
+  // a machine that is also simulating two cities.
   const pdf = await send("Page.printToPDF", {
     printBackground: true,
     landscape: true,
@@ -469,7 +471,7 @@ try {
     marginBottom: 0,
     marginLeft: 0,
     marginRight: 0,
-  }, 120000);
+  }, 300000);
   await writeFile(pdfPath, Buffer.from(pdf.data, "base64"));
 
   process.stdout.write(`\nVisual report complete\nPDF: ${pdfPath}\nHTML: ${htmlPath}\nShots: ${shotDir}\n`);

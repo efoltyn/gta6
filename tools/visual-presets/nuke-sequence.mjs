@@ -49,9 +49,15 @@ const beats = [
   { id: "mature",   t: 26.0, label: "t=26.0s — Mature cloud",
     focus: "Near max rise. One coherent cloud body — no detached lobes, no billboard seams.",
     dist: 12500, alt: 650, aim: 4500 },
-  { id: "after",    t: 33.0, label: "t=33.0s — Fade and aftermath",
-    focus: "Ash-grey fade over the burning city. Same camera as the mature beat for a direct read.",
+  { id: "after",    t: 33.0, label: "t=33.0s — Formation complete",
+    focus: "End of the 34s formation window. The old build deletes the whole cloud right after this frame.",
     dist: 12500, alt: 650, aim: 4500 },
+  { id: "landmark", t: 90.0, label: "t=1:30 — Maturing landmark",
+    focus: "NUKE_FX_AFTERMATH: the cloud keeps growing toward the researched mature object instead of vanishing. Before-side should be empty sky.",
+    dist: 16000, alt: 650, aim: 5200 },
+  { id: "icon",     t: 210.0, label: "t=3:30 — The icon",
+    focus: "Fully matured: ~5.1km cap, centre at 8km, standing over the burning city. This is what a 16kt cloud looks like from across the map.",
+    dist: 20000, alt: 650, aim: 6200 },
 ];
 
 const subjects = beats.map((beat) => ({
@@ -162,10 +168,13 @@ async function stageNuke(input) {
   let ticks = 0, totalMs = 0, maxMs = 0, over33 = 0, over100 = 0;
   while (S.t < target - 1e-6) {
     CBZ.hitstop = 0; CBZ.slowmo = 0;
+    // Past the formation window the beats are minutes apart; a coarser dt
+    // keeps the run tractable and nukefx is pure-dt so the cloud is identical.
+    const dt = S.t > 40 ? 1 / 20 : 1 / 60;
     const t0 = performance.now();
-    CBZ.stepSim(1 / 60);
+    CBZ.stepSim(dt);
     const ms = performance.now() - t0;
-    S.t += 1 / 60;
+    S.t += dt;
     ticks++; totalMs += ms;
     if (ms > maxMs) maxMs = ms;
     if (ms > 33) over33++;
