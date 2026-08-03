@@ -110,6 +110,10 @@ async function stageNuke(input) {
     }, 120000, 300);
     if (!playing) return { ok: false, err: "never reached playing" };
     if (CBZ.game.cityCampaign) CBZ.game.cityCampaign.phase = "endless_contracts";
+    // Headless SwiftShader settles into the LOW quality tier, which halves
+    // the cloud's lobe counts — the owner plays at high tier, so shots must
+    // match what he sees. Pin quality BEFORE the detonation composes.
+    try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
 
     // Freeze the rAF loop: from here CBZ.stepSim is the only clock, so both
     // sides sample identical simulated seconds regardless of machine speed.

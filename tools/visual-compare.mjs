@@ -49,7 +49,8 @@ if (args.help) {
     `  --subjects a,b,c     capture only these subject ids\n` +
     `  --limit N            capture only the first N subjects\n` +
     `  --no-open            do not open the generated PDF\n` +
-    `  --width N --height N capture viewport (defaults: preset or 960x600)\n`);
+    `  --width N --height N capture viewport (defaults: preset or 960x600)\n` +
+    `  --only before|after  capture one side only, skip the report (fast look iteration)\n`);
   process.exit(0);
 }
 
@@ -432,6 +433,17 @@ try {
   await send("Page.enable");
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 
+  const onlySide = args.only ? String(args.only) : null;
+  if (onlySide === "after") {
+    afterResult = await captureSide("after", afterUrl);
+    process.stdout.write(`\nAfter-side shots only (no report): ${path.join(shotDir, "after")}\n`);
+    throw { _earlyExit: true };
+  }
+  if (onlySide === "before") {
+    beforeResult = await captureSide("before", beforeUrl);
+    process.stdout.write(`\nBefore-side shots only (no report): ${path.join(shotDir, "before")}\n`);
+    throw { _earlyExit: true };
+  }
   beforeResult = await captureSide("before", beforeUrl);
   afterResult = await captureSide("after", afterUrl, beforeResult);
 
@@ -475,6 +487,8 @@ try {
   await writeFile(pdfPath, Buffer.from(pdf.data, "base64"));
 
   process.stdout.write(`\nVisual report complete\nPDF: ${pdfPath}\nHTML: ${htmlPath}\nShots: ${shotDir}\n`);
+} catch (err) {
+  if (!err || err._earlyExit !== true) throw err;
 } finally {
   if (ws && ws.readyState <= 1) ws.close();
   for (const child of children.reverse()) {

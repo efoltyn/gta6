@@ -293,6 +293,14 @@
   // thins, and only then fades — instead of vanishing mid-formation at 34 s.
   // false => the sequence ends and hides at STYLE.nuke.dur exactly as before.
   if (CBZ.CONFIG.NUKE_FX_AFTERMATH == null) CBZ.CONFIG.NUKE_FX_AFTERMATH = true;
+  // OWNER (2026-08-02): "it looks too much like rocks... when an RPG blows up
+  // it actually looks real as fuck, but your shit looks geometric." The RPG's
+  // realism is soft-EDGED sprites — nothing in that picture has a polygon
+  // silhouette. The lobes were bare lit geometry with hard rims. This injects
+  // a fresnel edge-fade into the shared Lambert lobe material so every billow
+  // dissolves at its silhouette exactly like a gradient puff, while the core
+  // stays dense and depth-writing. false => the hard-rimmed read.
+  if (CBZ.CONFIG.NUKE_FX_SOFT_LOBES == null) CBZ.CONFIG.NUKE_FX_SOFT_LOBES = true;
   // THE ATMOSPHERE DRIVE — the single cheapest "this is nuclear" cue there is.
   // Lerps scene.fog.color along the timeline (white-out -> orange -> ash grey);
   // core/sky.js@99 paints its horizon band from scene.fog.color, so the whole
@@ -1171,6 +1179,40 @@
         fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
         side: THREE.FrontSide, flatShading: false,
       });
+      // NUKE_FX_SOFT_LOBES: alpha falls off toward each lobe's silhouette
+      // (view-space fresnel), so the billow reads as participating smoke
+      // instead of a lit rock. The 0.16 floor keeps the depth-written rim
+      // from punching fully transparent holes in lobes behind it.
+      if (CBZ.CONFIG.NUKE_FX_SOFT_LOBES) {
+        m.onBeforeCompile = function (shader) {
+          shader.vertexShader = shader.vertexShader
+            .replace("#include <common>",
+              "#include <common>\nvarying vec3 vSoftN;\nvarying vec3 vSoftV;\nvarying vec3 vSoftW;")
+            .replace("#include <defaultnormal_vertex>",
+              "#include <defaultnormal_vertex>\nvSoftN = transformedNormal;")
+            .replace("#include <project_vertex>",
+              "#include <project_vertex>\nvSoftV = -mvPosition.xyz;\n" +
+              "vSoftW = (modelMatrix * (\n" +
+              "#ifdef USE_INSTANCING\n instanceMatrix *\n#endif\n" +
+              " vec4(transformed, 1.0))).xyz;");
+          shader.fragmentShader = shader.fragmentShader
+            .replace("#include <common>",
+              "#include <common>\nvarying vec3 vSoftN;\nvarying vec3 vSoftV;\nvarying vec3 vSoftW;")
+            .replace("#include <dithering_fragment>",
+              // Rim: dissolve at each lobe's silhouette like a gradient puff.
+              "float softRim = abs(dot(normalize(vSoftN), normalize(vSoftV)));\n" +
+              // Interior: two octaves of world-space value noise. A uniformly
+              // lit ball reads as a pebble whatever its edge does; smoke has
+              // internal density structure. Frequencies give ~120-500 m
+              // billow mottling at nuke scale and animate slowly upward.
+              "float softN1 = sin(vSoftW.x * 0.0093 + vSoftW.y * 0.0141) * sin(vSoftW.z * 0.0117 - vSoftW.y * 0.0089);\n" +
+              "float softN2 = sin(vSoftW.x * 0.0261 - vSoftW.y * 0.0198) * sin(vSoftW.z * 0.0233 + vSoftW.x * 0.0172);\n" +
+              "float softNoise = 0.5 + 0.32 * softN1 + 0.18 * softN2;\n" +
+              "gl_FragColor.rgb *= 0.78 + 0.44 * softNoise;\n" +
+              "gl_FragColor.a *= (0.22 + 0.78 * smoothstep(0.05, 0.85, softRim)) * (0.66 + 0.50 * softNoise);\n" +
+              "#include <dithering_fragment>");
+        };
+      }
       m._shared = true;
       return m;
     }
@@ -2693,13 +2735,19 @@
       }
       // f is the station on the TRUE column, so the flare profile is honest
       // even though only the bottom 0.82*far of it is drawn.
-      const fTrue = s.f * (h / Math.max(1, hTrue));
+      // STRATIFIED STATIONS. Raw-random s.f clusters — at the low quality
+      // tier's 8 lobes a cluster leaves half the column empty (the dotted
+      // stem the storyboard caught). Each lobe owns a band of the column
+      // with +/-45% jitter inside it, so coverage is guaranteed at any tier
+      // and the organic stagger survives.
+      const fS = (i + 0.5 + (s.f - 0.5) * 0.9) / Math.max(1, L.volN.stem);
+      const fTrue = fS * (h / Math.max(1, hTrue));
       const prof = stemProfile(fTrue);
-      const a = s.a + s.tw + roll * (0.28 + s.f * 0.35) + fTrue * STEM_TURNS * 6.2832;
+      const a = s.a + s.tw + roll * (0.28 + fS * 0.35) + fTrue * STEM_TURNS * 6.2832;
       const rr = stemR * prof * s.r2;
       // taper the last 18% of the drawn column to nothing so the frustum
       // clamp is a fade, not a guillotine.
-      const taper = 1 - ease((s.f - 0.82) / 0.18);
+      const taper = 1 - ease((fS - 0.82) / 0.18);
       const lobe = stemR * prof * s.s2 * Math.max(0.02, taper);
       // OVERLAP FLOOR. The aftermath stretches the column toward 8 km while
       // the stem only widens ~1.2x, so fixed-size lobes separate into a
@@ -2709,7 +2757,7 @@
       // width stays stem-scaled to hold the 3:1 cap/stem proportion.
       const seg = h / Math.max(4, L.volN.stem);
       putVolume(stem, i,
-        Math.cos(a) * rr, Math.max(stemY * 0.35, h * s.f), Math.sin(a) * rr,
+        Math.cos(a) * rr, Math.max(stemY * 0.35, h * fS), Math.sin(a) * rr,
         lobe * 1.06,
         Math.max(lobe * 0.92, seg * 0.8 * Math.max(0.02, taper)),
         lobe * 1.06, a);
