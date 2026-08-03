@@ -873,6 +873,208 @@
       onSelect: function (poster) { if (CBZ.bountyFromPoster) CBZ.bountyFromPoster(poster); },
     }],
   });
+  /* BANK_VAULT_V1 / CASH_BAGS_V1 — THE THREE VERBS PHYSICAL MONEY NEEDS.
+
+     OWNER (2026-08-02): "bags that the player can pick up and throw
+     (interaction options)… only npcs or physical bombs can open them… this is
+     interaction/animation options and physical assets."
+
+     city/bank.js owns the strongroom, its door and its consequences;
+     city/inventory.js owns the bag registry and the carry. This file owns only
+     the VERBS, exactly as zone-interior-loot owns the search verb and
+     interior_programs.js owns everything behind it.
+
+     THE VAULT CARD IS DELIBERATELY HONEST WHEN IT REFUSES. `cityVaultLabel`
+     returns the LOCK's own sentence ("The vault needs …") rather than hiding
+     the card, because a door that silently offers nothing is a wall and a door
+     that tells you what it wants is a gradient — doctrine LAW 1's whole point.
+     The bomb route needs no verb at all: you plant C4 on it like any wall. */
+  I.registerZone({
+    id: "zone-vault-door", kind: "vaultdoor", prio: 9, driving: false,
+    find: function (px, pz, ctx) {
+      if (!CBZ.cityVaultAt) return null;
+      return CBZ.cityVaultAt(px, pz, REACH, ctx.pos.y);
+    },
+    options: [{
+      id: "vault-open", slot: "e", bad: true,
+      label: function (v) { return (CBZ.cityVaultLabel && CBZ.cityVaultLabel(v)) || "The vault"; },
+      onSelect: function (v) { if (CBZ.cityVaultTry) CBZ.cityVaultTry(v); },
+    }],
+  });
+  I.describe("vaultdoor", function (v) {
+    const st = (CBZ.cityVaultState && v.lot) ? CBZ.cityVaultState(v.lot) : null;
+    const nm = v.tier === "reserve" ? "The cash centre" : v.tier === "count" ? "The count room" : "The vault";
+    // WHAT IS BEHIND IT IS THE WHOLE MOTIVATION, so the card says the number.
+    const holds = st ? st.holds : 0;
+    return { label: nm, note: (holds > 0 ? "$" + Math.round(holds).toLocaleString() + " behind it · " : "") +
+      (st ? "steel at " + Math.round(st.hp / st.hp0 * 100) + "%" : "sealed steel") };
+  });
+
+  // the teller window itself — the bottom rung of the bank's ladder, and the
+  // one you can reach without a single charge of C4.
+  I.registerZone({
+    id: "zone-bank-drawer", kind: "bankdrawer", prio: 7, driving: false,
+    find: function (px, pz, ctx) {
+      if (!CBZ.cityBankDrawerAt) return null;
+      return CBZ.cityBankDrawerAt(px, pz, REACH, ctx.pos.y);
+    },
+    options: [{
+      id: "bank-drawer-take", slot: "i", bad: true,
+      label: function (dr) { return CBZ.cityBankDrawerLabel(dr); },
+      onSelect: function (dr) { if (CBZ.cityBankDrawerTake) CBZ.cityBankDrawerTake(dr); },
+    }],
+  });
+  I.describe("bankdrawer", function () { return { label: "Teller window", note: "the working float — the vault is behind them" }; });
+
+  I.registerZone({
+    id: "zone-cashbag", kind: "cashbag", prio: 8, driving: false,
+    find: function (px, pz, ctx) {
+      if (!CBZ.cashBags || !CBZ.cashBags.nearest) return null;
+      if (CBZ.cashBags.carried()) return null;      // both hands are full
+      return CBZ.cashBags.nearest(px, pz, REACH, ctx.pos.y);
+    },
+    options: [{
+      id: "cashbag-lift", slot: "e",
+      label: function (b) { return "Pick up the bag ($" + (b.amount | 0).toLocaleString() + ")"; },
+      onSelect: function (b) { CBZ.cashBags.pickup(b); },
+    }],
+  });
+  I.describe("cashbag", function (b) {
+    return { label: b.dyed ? "A stained money bag" : "A money bag",
+             note: "$" + (b.amount | 0).toLocaleString() + (b.dyed ? " · dye-stained, worth less" : " · heavy") };
+  });
+
+  // THE BAG ON YOUR SHOULDER rides a zero-distance source, the same shape the
+  // "stand up" verb uses, so it always owns the panel while you are hauling.
+  I.registerSource({
+    id: "src-cashbagheld", kind: "cashbagheld", layers: ["cashbagheld"], prio: 41, driving: false,
+    find: function (px, pz, ctx, push) {
+      const b = CBZ.cashBags && CBZ.cashBags.carried();
+      if (b) push(b, 0);
+    },
+  });
+  I.register("cashbagheld", {
+    id: "cashbag-down", slot: "e", prio: 100,
+    label: "Put the bag down", onSelect: function () { CBZ.cashBags.drop(); },
+  });
+  I.register("cashbagheld", {
+    id: "cashbag-throw", slot: "i", prio: 100,
+    // a two-handed heave — over a fence, into a boot, down to somebody below.
+    label: "Throw the bag", onSelect: function () { CBZ.cashBags.throw(); },
+  });
+  I.describe("cashbagheld", function (b) {
+    return { label: "On your shoulder", note: "$" + (b.amount | 0).toLocaleString() + " · no sprint, no gun" };
+  });
+
+  /* ==================================================================
+     THE MONEY YOU OWN A PLACE FOR — city/cashstore.js's verbs.
+
+     Three registrations, and between them they are the whole back half of
+     the cash-bag loop: put the duffel on your shoulder somewhere that is
+     YOURS, unload a whole load at the dock, and take it back out again.
+     Every gate is feature-detected on CBZ.cashStore, so a build without
+     that file (or with CASH_STORE_V1 off) shows none of them and the
+     existing bag verbs are byte-identical.
+
+     The first one rides the SHOULDER layer that already exists rather
+     than a new source: the panel is already yours while you are hauling,
+     and "where can this go" is a property of the place you are standing
+     in, which is exactly what a canShow gate is for.
+     ================================================================== */
+  I.register("cashbagheld", {
+    id: "cashbag-stow", slot: "j", prio: 100,
+    canShow: function () { return !!(CBZ.cashStore && CBZ.cashStore.stowLabel && CBZ.cashStore.stowLabel()); },
+    label: function () { return CBZ.cashStore.stowLabel(); },
+    onSelect: function () { CBZ.cashStore.stow(); },
+  });
+
+  // THE STASH ITSELF — a zone at the racks (or at a floor safe in a house
+  // you bought), so the pile you built is a thing you walk up to.
+  I.registerZone({
+    id: "zone-cashstash", kind: "cashstash", prio: 9, driving: false,
+    find: function (px, pz) {
+      const CS = CBZ.cashStore;
+      if (!CS) return null;
+      if (CS.owned() && CS.inside(px, pz)) {
+        const W = CS.warehouse();
+        return { rack: true, x: W ? W.origin.x : px, z: W ? W.origin.z : pz };
+      }
+      const h = CS.homeAt(px, pz);
+      if (h) return { home: h, x: h.x, z: h.z };
+      return null;
+    },
+    options: [
+      { id: "cashstash-pull", slot: "e",
+        label: function (t) {
+          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
+          return s.bags ? "Take a bag off the shelf" : "Nothing stored here";
+        },
+        canShow: function (t) {
+          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
+          return s.bags > 0;
+        },
+        onSelect: function (t) { if (t.home) CBZ.cashStore.homePull(t.home); else CBZ.cashStore.pullBag(); },
+      },
+      { id: "cashstash-wire", slot: "i",
+        label: function (t) {
+          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
+          const net = s.value - Math.round(s.stained * CBZ.cashStore.STAINED_FEE);
+          return "Wire it to your account — $" + net.toLocaleString("en-US") + (s.stained ? " after the fence" : "");
+        },
+        canShow: function (t) {
+          const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
+          return s.value > 0;
+        },
+        onSelect: function (t) { if (t.home) CBZ.cashStore.homeBank(t.home); else CBZ.cashStore.bankIt(); },
+      },
+    ],
+  });
+  I.describe("cashstash", function (t) {
+    const CS = CBZ.cashStore;
+    const s = t.home ? CS.homeStored(t.home.id) : CS.stored();
+    const owed = CS.crewDebt();
+    return {
+      label: t.home ? (t.home.name + " — floor safe") : "The Freeport racks",
+      note: s.bags + "/" + s.cap + " bags · $" + s.value.toLocaleString("en-US")
+        + (s.stained ? " · $" + s.stained.toLocaleString("en-US") + " stained" : "")
+        + (owed && !t.home ? " · crew owed $" + owed.toLocaleString("en-US") : ""),
+    };
+  });
+
+  // THE DOCK — the bulk verb, and the sale board when the place is not yours.
+  I.registerZone({
+    id: "zone-freeport", kind: "freeport", prio: 8, driving: false,
+    find: function (px, pz) {
+      const CS = CBZ.cashStore;
+      if (!CS || !CS.warehouse()) return null;
+      const W = CS.warehouse();
+      if (!CS.owned() && CS.atSale(px, pz)) return { sale: true, x: W.board.x, z: W.board.z };
+      if (CS.owned() && CS.atDock(px, pz)) return { dock: true, x: W.dock.x, z: W.dock.z };
+      return null;
+    },
+    options: [
+      { id: "freeport-unload", slot: "e",
+        canShow: function (t) { return !!t.dock; },
+        label: "Unload every bag here onto the racks",
+        onSelect: function () { CBZ.cashStore.unloadHere(); },
+      },
+      { id: "freeport-close", slot: "e",
+        canShow: function (t) { return !!t.sale; },
+        label: function () { return "Close the sale — $" + CBZ.cashStore.remaining().toLocaleString("en-US") + " from cash + bank"; },
+        onSelect: function () { CBZ.cashStore.buy(); },
+      },
+    ],
+  });
+  I.describe("freeport", function (t) {
+    const CS = CBZ.cashStore;
+    if (t.sale) {
+      return { label: "FOR SALE — Freeport Compound",
+               note: "$" + CS.remaining().toLocaleString("en-US") + " outstanding · duffels accepted at the board" };
+    }
+    const s = CS.stored();
+    return { label: "Freeport loading dock", note: "Racks " + s.bags + "/" + s.cap + " · back a load up and unload it" };
+  });
+
   // seated/asleep: the "get up" verb rides its own zero-distance source so it
   // always wins the panel while the pose holds (physics stun hides nothing here).
   I.registerSource({
@@ -1194,20 +1396,46 @@
   // ---- CARS (the old F key, surfaced): tap E gets in, HOLD E jacks a driver ----
   // _cineLocked: an authored scene car (city/cinematics.js) — its seats are the
   // scene's own labeled choices, never a boost/get-in target.
+  // IS ANYBODY IN IT? `car.npcDriver` used to be the whole answer, and it was
+  // only ever set by a carjacking NPC — so ordinary traffic, which has always
+  // had a visible driver behind the glass, offered "Boost it" as though the
+  // car were parked and empty. vehicles.js's CAR_OCCUPANCY_REAL publishes the
+  // real answer over the whole crew; degrade-safe to the old field.
+  const occupied = (car) => (CBZ.carOccupied ? CBZ.carOccupied(car) : !!car.npcDriver);
+  const aboard = (car) => (CBZ.carOccupantCount ? CBZ.carOccupantCount(car) : (car.npcDriver ? 1 : 0));
   I.register("vehicle", {
-    id: "car-get-in", slot: "e", canShow: (car) => !car.npcDriver && !car._cineLocked && (car.owned || car.stolen),
+    id: "car-get-in", slot: "e", canShow: (car) => !occupied(car) && !car._cineLocked && (car.owned || car.stolen),
     label: (car) => "Get in" + (car.owned ? " your ride" : ""), onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   I.register("vehicle", {
-    id: "car-boost", slot: "e", bad: true, canShow: (car) => !car.npcDriver && !car._cineLocked && !car.owned && !car.stolen,
+    id: "car-boost", slot: "e", bad: true, canShow: (car) => !occupied(car) && !car._cineLocked && !car.owned && !car.stolen,
     label: "Boost it", onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   // someone's behind the wheel: a HOLD — you rip the door open and drag them out
   I.register("vehicle", {
-    id: "car-jack", slot: "e", hold: true, bad: true, canShow: (car) => !!car.npcDriver,
-    label: "Drag the driver out", onSelect: (car) => CBZ.cityEnterVehicle(car),
+    id: "car-jack", slot: "e", hold: true, bad: true, canShow: (car) => occupied(car) && !car._cineLocked,
+    // the label says how many people you are about to be outnumbered by — the
+    // crew is a FACT before you pull the door, not a surprise after it.
+    label: (car) => aboard(car) > 1 ? "Drag them out (" + aboard(car) + " aboard)" : "Drag the driver out",
+    onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   I.register("vehicle:inside", { id: "car-out", slot: "e", canShow: (car, ctx) => ctx.driving && ctx.vehicle === car, label: "Step out", onSelect: () => CBZ.cityExitVehicle() });
+  // SOMEBODY IS STILL IN THE BACK. A passenger who froze when you took the car
+  // is riding with you, and once you have driven off he is a hostage on the
+  // record (vehicles.js files it through social.js's own hostage entry). The
+  // counterpart verb has to exist or the only way to end it is to kill him.
+  I.register("vehicle:inside", {
+    id: "car-let-them-out", slot: "j",
+    canShow: (car) => !!(CBZ.carOccupancyHeld && CBZ.carOccupancyHeld(car)),
+    label: (car) => {
+      const p = CBZ.carOccupancyHeld && CBZ.carOccupancyHeld(car);
+      return p && p.hostage ? "Let the hostage go" : "Let them out";
+    },
+    onSelect: (car) => {
+      const n = CBZ.carOccupancyRelease ? CBZ.carOccupancyRelease(car) : 0;
+      if (n && CBZ.city && CBZ.city.note) CBZ.city.note(n > 1 ? "They scramble out." : "They scramble out and run.", 1.6);
+    },
+  });
   // HAIL-A-CAB: behind the wheel, a waiting fare in reach → pick them up. The WHY:
   // rideshare is a driving job — you pull over for a rider, not press a menu. Only
   // shows when a gig system is live AND a flagged fare is actually waiting nearby.

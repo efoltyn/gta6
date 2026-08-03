@@ -175,7 +175,34 @@
     if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(m); } catch (e) {} }
   }
   function sfx(n) { if (CBZ.sfx) { try { CBZ.sfx(n); } catch (e) {} } }
-  function floorY(x, z) { if (CBZ.floorAt) { try { return CBZ.floorAt(x, z) || 0; } catch (e) {} } return 0; }
+  /* ---- THE SURFACE UNDER A TRACK ------------------------------------------
+     OWNER: "even a tank can drive into the back."
+
+     One line of that is a modelling problem and the rest is this function. A
+     ramp is not a trigger volume and driving into a hold is not a cutscene:
+     the tank climbs because the ground query it already makes returns a higher
+     number when there is steel under the tracks. CBZ.mpGroundAt is EXACTLY the
+     query the player's feet make (systems/physics.js groundAt calls it on the
+     line after its static-platform loop), so a tank and a body now agree about
+     what the floor is — on a cargo ramp, on a boat deck, on a lift, on
+     anything any future rig declares. Feature-detected and flag-gated at the
+     source; absent or off, this is the old one-liner exactly.
+
+     `fromY` is the hull's CURRENT height, and passing it matters: mpGroundAt
+     gates support at fromY + STEP_UP the same way the static loop does, so a
+     tank cannot levitate onto a deck it was never touching — it has to come at
+     the ramp from the bottom, like a tank. */
+  function floorY(x, z, fromY) {
+    let b = 0;
+    if (CBZ.floorAt) { try { b = +CBZ.floorAt(x, z) || 0; } catch (e) { b = 0; } }
+    if (CBZ.mpGroundAt) {
+      try {
+        const t = CBZ.mpGroundAt(x, z, fromY != null ? fromY : b, b);
+        if (t > b && isFinite(t)) b = t;
+      } catch (e) {}
+    }
+    return b;
+  }
   function clampToCity(pos, r) {
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.clampToCity) { try { A.clampToCity(pos, r); } catch (e) {} }
@@ -210,6 +237,12 @@
   function restoreParkedCollider(rec) {
     const col = rec && rec.collider;
     if (!col || !rec.group) return;
+    // A hull STRAPPED INSIDE A HOLD must not re-park a world-space AABB: the
+    // box would be computed for wherever the carrier happened to be standing
+    // and would then haunt that patch of apron for the rest of the run while
+    // the tank itself flew away. The same lie the airliner cabin's static deck
+    // tells — and the reason vehicle_hold.js re-asserts poses instead.
+    if (rec._heldBy) return;
     const a = rec.group.rotation.y || 0;
     const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
     const hw = Math.max(0.5, rec.colliderW || rec.footW || 3) * 0.5;
@@ -348,6 +381,10 @@
 
     const name = vehName(rec);
     const air = rec.kind === "heli" || rec.kind === "plane";
+    // Captured BEFORE dispatch, because driveArmor unstraps it: taking the
+    // controls of a machine already lashed inside your own hold is unloading
+    // your cargo, not a second grand theft, and it must not re-fire the crime.
+    const wasFreight = !!rec._heldBy;
 
     // dispatch FIRST — only commit the theft/heat if a controller actually took it
     let took = false;
@@ -390,6 +427,7 @@
     // the parked solid leaves with the machine (idempotent — the air path may
     // have already detached it inside citySpawnFlyableFromProp).
     detachParkedCollider(rec);
+    if (wasFreight) return true;                    // unloading, not stealing
     // THEFT + HEAT (mirror storage.js stealBaseJet): grand theft of military
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
@@ -439,6 +477,12 @@
     // 2×4.4 default otherwise) so the heavy machine shoulders walls/props at its
     // true size — a tank shouldn't slide through a fence post.
     if (!rec.dims) rec.dims = { width: rec.footW || 3, length: rec.footL || 5, wheelbase: (rec.footL || 5) * 0.5 };
+    // TAKING THE CONTROLS UNSTRAPS IT. A latched load has its pose written by
+    // its carrier every frame; the moment somebody is driving, the drive sim
+    // owns the hull and the two must not both write it. No flag, no handshake —
+    // the latch is released here and re-taken when the machine next comes to
+    // rest inside a hold, which is also how you drive a tank back OUT.
+    if (rec._heldBy && CBZ.vehicleHoldRelease) { try { CBZ.vehicleHoldRelease(rec); } catch (e) {} }
     // its own parked wall must go BEFORE the first sim tick or the hull gets
     // depenetrated out of itself (also covers direct CBZ.cityDriveArmor calls).
     detachParkedCollider(rec);
@@ -446,7 +490,7 @@
     P._aircraft = null;                             // belt-and-braces: never both
     P.vy = 0; P.grounded = false;
     // snap the player marker onto the hull so the chase-cam frames it
-    const gy = floorY(rec.pos.x, rec.pos.z);
+    const gy = floorY(rec.pos.x, rec.pos.z, rec.pos.y);
     P.pos.set(rec.pos.x, gy, rec.pos.z);
     _restoreChar = false;
     if (CBZ.playerChar && CBZ.playerChar.group && CBZ.playerChar.group.visible) {
@@ -474,23 +518,38 @@
     if (rec) {
       rec.v = 0;
       rec.group.rotation.set(0, rec.heading, 0);
-      const gy = floorY(rec.pos.x, rec.pos.z);
+      const gy = floorY(rec.pos.x, rec.pos.z, rec.pos.y);
       rec.pos.y = gy;
       rec.group.position.set(rec.pos.x, gy, rec.pos.z);
     }
+    // PARKED INSIDE SOMEBODY'S HOLD? Then it is freight now. Asked before the
+    // player is placed and before the collider is re-parked, because both of
+    // those answers change if the hull is about to be strapped down.
+    let held = null;
+    if (rec && CBZ.vehicleHoldLatch) { try { held = CBZ.vehicleHoldLatch(rec); } catch (e) { held = null; } }
     if (P && rec) {
       // step out the SIDE (the driver's door), clear of the hull footprint —
       // the old forward drop landed inside longer hulls (and now inside the
-      // re-parked collider). Right vector of heading = (cos, -sin).
-      const side = rec.footW * 0.5 + 1.1;
+      // re-parked collider). Right vector of heading = (cos, -sin). Inside a
+      // hold the side clearance is deliberately tighter: 1.1 m off a 3.5 m tank
+      // in a 4.4 m bay would put you through the wall, and the hold's own rig
+      // walls would then shove you somewhere you did not ask to be.
+      const side = rec.footW * 0.5 + (held ? 0.25 : 1.1);
       const ox = Math.cos(rec.heading) * side;
       const oz = -Math.sin(rec.heading) * side;
-      const gy = floorY(rec.pos.x + ox, rec.pos.z + oz);
+      const gy = floorY(rec.pos.x + ox, rec.pos.z + oz, rec.pos.y + 0.5);
       P.pos.set(rec.pos.x + ox, gy, rec.pos.z + oz);
       P.vy = 0; P.grounded = true;
     }
     // the abandoned hull becomes a solid obstacle again wherever it now rests
+    // (a no-op for a strapped one — see restoreParkedCollider)
     if (rec) restoreParkedCollider(rec);
+    // ...AND EVERYTHING COMES BACK OUT. `taken` normally stays true forever so
+    // an abandoned hull cannot be re-boarded as free scenery, which is right on
+    // an apron and catastrophic in a hold: it would mean the tank you flew
+    // across the map can never be driven off the aeroplane again. A load you
+    // strapped down yourself is not scenery, so it stays yours to take back.
+    if (held && rec) rec.taken = false;
     if (_restoreChar && CBZ.playerChar && CBZ.playerChar.group && P) {
       CBZ.playerChar.group.visible = !P.dead;
       if (P) CBZ.playerChar.group.position.copy(P.pos);
@@ -665,7 +724,7 @@
     rec.pos.z += fz * rec.v * dt;
     if (CBZ.cityCollideVehicle) { try { CBZ.cityCollideVehicle(rec); } catch (e) {} }
     clampToCity(rec.pos, rec.footW * 0.5);
-    const gy = floorY(rec.pos.x, rec.pos.z);
+    const gy = floorY(rec.pos.x, rec.pos.z, rec.pos.y);
     rec.pos.y = gy;
     rec.group.position.set(rec.pos.x, gy, rec.pos.z);
     rec.group.rotation.set(0, rec.heading, 0);
@@ -767,4 +826,11 @@
 
   // ordnance-bus adoption, declared at LOAD (CBZ.blastAudit()).
   (CBZ.ordnanceBusSites = CBZ.ordnanceBusSites || []).push("armor:tank-fallback");
+
+  // WALK-IN HOLD adoption (city/vehicle_hold.js), the CBZ.heliFleet pattern: a
+  // fleet owner pushes ONE census function and every hold in the world — this
+  // cargo plane's, the semi's trailer when that wave lands — can strap any of
+  // its machines down. No per-vehicle registration, no trigger volumes, no
+  // state of our own. Feature-detected; without the file this line is inert.
+  if (CBZ.vehicleHoldWatch) CBZ.vehicleHoldWatch(function () { return props; });
 })();

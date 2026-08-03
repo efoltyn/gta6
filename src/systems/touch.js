@@ -738,7 +738,9 @@
     sp = Math.max(-cap, Math.min(cap, sp));
     CBZ.cam.yaw += sh;
     if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + sp));
-    else CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch + sp));
+    // CBZ.camPitchRange (systems/camera.js) is the single owner of the third-person
+    // envelope, so the assist can settle onto a target as high as the view can look.
+    else { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + sp)); }
   });
 
   function note(s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, 1.5); }
@@ -824,6 +826,18 @@
     const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
     tapNdc.set(((x - rect.left) / Math.max(1, rect.width)) * 2 - 1, -((y - rect.top) / Math.max(1, rect.height)) * 2 + 1);
     tapRay.setFromCamera(tapNdc, CBZ.camera);
+    /* TAP A PERSON WHOSE BODY IS INSTANCED. This is the ONE raycaster in the
+       whole game that intersects ped/cop rig MESHES — every other human hit
+       test (fpsmode findActorHit, melee cones, lock-on) is analytic sphere
+       math off group.position, and LOS rays only ever hit CBZ.losBlockers.
+       entities/pedinstance.js draws the shared body parts from InstancedMesh
+       pools and parks the source meshes on a private LAYER (no camera enables
+       it). r128's Raycaster ignores `visible` but DOES test layers, so without
+       this the finger falls straight through an instanced body. Set here
+       rather than at construction because pedinstance.js loads after this
+       file; `enable` is idempotent and free when the system is off (nothing
+       is ever on that layer). */
+    if (CBZ.PED_INST_LAYER != null && tapRay.layers) tapRay.layers.enable(CBZ.PED_INST_LAYER);
 
     const roots = new Map(), objects = [];
     function add(group, kind, rec) {

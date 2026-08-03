@@ -46,6 +46,9 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.CASINOS_V1 == null) CBZ.CONFIG.CASINOS_V1 = true;
+  // the count room behind the cage (city/bank.js's CBZ.cityVaultRoom). Off →
+  // a casino is exactly the felt-and-cage floor that shipped.
+  if (CBZ.CONFIG.CASINO_VAULT_V1 == null) CBZ.CONFIG.CASINO_VAULT_V1 = true;
 
   const GOLD = 0xc9a227;     // the house chase-light / marquee tone
   const FELT = 0x1f6d43;     // gaming-felt green
@@ -161,7 +164,16 @@
     // SLOT BANK — a back-to-back row of lit cabinets along a side wall (the
     // floor's dominant feature). Solid obstacles.
     const slotN = Math.min(8, Math.max(4, Math.round(hx)));
-    const sideSign = inz ? 1 : -1;      // opposite wall from where tables lean
+    // WHICH WALL THE SLOTS TAKE, and it matters now that the back of the room
+    // is a COUNT ROOM. The old `inz ? 1 : -1` lands the bank on the inward
+    // (back) wall for a +Z-facing door and on the -X wall for a -X-facing one
+    // — in both cases exactly where cityVaultRoom cuts its partition, so eight
+    // slot cabinets would stand inside the strongroom. Keying the sign to the
+    // NEGATIVE of the inward axis puts them on the wall nearest the entrance
+    // in every orientation, which is also where a real floor puts them.
+    const sideSign = (CBZ.CONFIG.CASINO_VAULT_V1 === false)
+      ? (inz ? 1 : -1)
+      : (inx ? -inx : -inz);
     for (let i = 0; i < slotN; i++) {
       const t = (i / Math.max(1, slotN - 1) - 0.5) * (hx * 1.6);
       const sx = inx ? sideSign * (hx * 0.85) : t;
@@ -210,10 +222,55 @@
           archetype: p.job === "pit boss" ? "professional" : "merchant",
           x: p.x, z: p.z, face: p.face, pose: p.pose,
           opts: { wealth: p.wealth, outfit: p.outfit, aggr: p.job === "pit boss" ? 0.3 : 0.1 },
+          // a body who works the count room is an INSIDER for that room's door
+          // — the "only NPCs can open them" route in city/bank.js reads this.
+          after: p.vault ? (function (id) { return function (ped) { ped._vaultStaff = id; }; })(p.vault) : null,
         });
       }
       _casinoStations += staff.length;
       if (CBZ.cityStaffStations) CBZ.cityStaffStations("casino", _casinoStations);
+    }
+
+    /* ---- THE COUNT ROOM -----------------------------------------------------
+       OWNER (2026-08-02): "these real full vaults should be in casinos too."
+
+       The cage counter above is where a punter cashes a chip. It is NOT where
+       the house's money is — that is the COUNT ROOM behind it, the single most
+       controlled space in a real casino, and until now this file drew the cage
+       and stopped. `CBZ.cityVaultRoom` (city/bank.js) is the ONE builder for a
+       room-behind-a-vault-door, so a count room costs a spec object and no
+       geometry of its own: same partition, same swinging leaf, same "only NPCs
+       or physical bombs" rule, same duffels on the floor when it comes off.
+
+       The MONEY is unchanged and stays honest: shops.js's vaultAmount() already
+       reads this house's share of sim/npcecon.js's entPool — the entertainment
+       money the city's cohorts actually lost — and drains that same pool when
+       it is taken. We author no balance here, we just give it a room and a door.
+
+       `lat` puts the room on the cage's side of the floor, so the door you blow
+       is behind the counter you were just standing at. */
+    if (CBZ.cityVaultRoom && CBZ.CONFIG.CASINO_VAULT_V1 !== false) {
+      // which way the cage sits off the room's centreline, in the same frame
+      // cityVaultRoom lays its partition out in.
+      const ctx2 = -inz, ctz2 = inx;
+      const cageLat = (hx * 0.8) * ctx2 + (-hz * 0.8) * ctz2;
+      try {
+        CBZ.cityVaultRoom(lot, {
+          tier: "count", kind: "casino",
+          name: (b.name || "the house") + " count room",
+          till: { src: lot, point: "vault" },
+          lat: Math.max(-2.2, Math.min(2.2, cageLat * 0.35)),
+        });
+      } catch (e) { /* no room for one in this shell — the cage still works */ }
+      const V = lot._vaultRoom;
+      if (V) {
+        // THE PERSON THE ROOM IS FOR. A count room with nobody counting is the
+        // same empty-cashier-cage fault this file was written to fix.
+        // (this list is in WORLD coordinates — see the croupier/cage pushes above)
+        staff.push({ x: V.rx, z: V.rz, face: Math.atan2(-V.inx, -V.inz),
+                     job: "count clerk", pose: "table", id: "count", wealth: 0.44,
+                     outfit: 0x2a2620, vault: V.id });
+      }
     }
 
     lot._casinoTables = tables;

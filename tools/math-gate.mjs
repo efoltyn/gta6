@@ -741,6 +741,28 @@ const PASS = `(() => {
                   " orbitR=" + ha.orbitR + " belowRoofline=" + ha.belowRoofline +
                   " " + JSON.stringify(ha.byRole);
     }
+    // THE WALK-IN HOLD (CBZ.holdAudit, city/vehicle_hold.js). A hold is a ROOM
+    // inside a vehicle — a cargo plane's bay today, a semi's trailer next — and
+    // two of its numbers are hard invariants rather than trends:
+    //   orphaned  — a hold whose host left the scene while freight was still
+    //               strapped to it. Structurally impossible (the 9.4 tick
+    //               releases every load BEFORE it drops the rig), so it is
+    //               PINNED AT 0: a non-zero reading means a vehicle is being
+    //               posed off a dead matrix.
+    //   holds - rigBacked — a declared hold that got no moving-platform rig.
+    //               That hold has no floor, no walls and no ramp surface: it is
+    //               a room you fall through. PINNED AT 0.
+    // holds/ramps/vehiclesLatched/cargoLatched/actorsAboard print beside them
+    // so a "fix" that simply stops declaring holds cannot pass the gate.
+    if (CBZ.holdAudit) {
+      const hd = CBZ.holdAudit();
+      out.holds = hd.holds + " holds ramps=" + hd.ramps + " rigBacked=" + hd.rigBacked +
+                  " veh=" + hd.vehiclesLatched + " cargo=" + hd.cargoLatched +
+                  " aboard=" + hd.actorsAboard + " watchers=" + hd.watchers +
+                  " arcs=" + hd.rampArcs + " orphaned=" + hd.orphaned;
+      if (hd.orphaned > 0) out.fails.push("HOLD ORPHANED WITH FREIGHT ABOARD: " + hd.orphaned);
+      if (hd.holds !== hd.rigBacked) out.fails.push("HOLD WITH NO MOVING-PLATFORM RIG (a room you fall through): " + (hd.holds - hd.rigBacked));
+    }
     // ARMOR SITS CLEAR OF THE CLOTH (CBZ.armorFitAudit, city/armor.js).
     // coplanar = same-facing armor/garment face pairs sharing a plane — the
     // z-fight stipple the owner reports as "armor flickers with the outfit".
@@ -826,6 +848,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: till ${r.till || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
   tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
+  tmark(`${label}: holds ${r.holds || "-"}`);
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
   if (r.ranksEmpty) tmark(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
   if (r.ranksVerbless) tmark(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);

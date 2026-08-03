@@ -46,6 +46,39 @@
   if (CBZ.CONFIG.CAM_FACING_BLEND == null) CBZ.CONFIG.CAM_FACING_BLEND = true;       // draw/holster: body-facing ease ramps in over 0.25s instead of whipping to the new target
   if (CBZ.CONFIG.CAM_TP_BREATHE == null) CBZ.CONFIG.CAM_TP_BREATHE = false;          // taste flag: 0.07s TP position smoothing (rigid 0.02s stays default)
 
+  // ---- RDR2 ORBIT PASS (2026-08-03) — three owner complaints, one root ----
+  // OWNER: (1) "I can't look all the way to the sky — a helicopter overhead is
+  // unfindable"; (2) "looking up also changes the angle" — pitching should be a
+  // clean orbit, not a reframing; (3) in a small room the camera should come IN
+  // over the shoulder, smoothly, the way RDR2 does when you cross a doorway.
+  //
+  // (1) and (2) are the SAME arithmetic fault and it is measurable. The look
+  // target used to be `LOOK_Y + sin(pitch)*LEAD` while the camera orbits to
+  // `HEIGHT + sin(pitch)*DIST` — both move the SAME way, so the view direction
+  // barely tilts at all. With the shipped city numbers (HEIGHT 1.7 / DIST 4.35 /
+  // LOOK_Y 1.52 / LEAD 4.6) a full -1.0 rad (57°) mouse-up produced a view
+  // pitched **4.6° up**: a 12:1 loss. The file's own comment predicted this
+  // ("below aimLead·pf = camDist the vertical response INVERTS") and then landed
+  // the tier 0.25 m above the inversion point. Meanwhile the camera really DID
+  // swing under the pavement, where `dy = max(dy, ground+0.35)` pinned it — so
+  // looking up put the lens at your heels, level, staring at your shins. There
+  // was no sky in the frame because the frame never pointed at any.
+  //
+  // The answer is the textbook one and it deletes tuning rather than adding it:
+  // a PURE ORBIT. The look target is anchored to the SAME pivot the camera
+  // orbits and pushed along the mouse's own direction, so the view direction IS
+  // the mouse direction (1:1, no gain, no inversion) and the character's place
+  // in frame is INVARIANT to pitch — which is complaint (2) answered exactly.
+  // The framing that offset is worth is preserved, not re-tasted: the constant
+  // screen tilt is DERIVED each frame from the tier's own resting constants, so
+  // at its resting pitch every tier frames identically to today.
+  //   CAM_RDR2_ORBIT — the orbit + the widened up-pitch + the floor-aware boom
+  //   CAM_ROOM_BOOM  — the interior pull-in (probes + damped boom/pivot)
+  // FIRST PERSON IS SACRED: the FP branch returns long before any of this, and
+  // pitchLimits() hands FP the untouched legacy envelope.
+  if (CBZ.CONFIG.CAM_RDR2_ORBIT == null) CBZ.CONFIG.CAM_RDR2_ORBIT = true;
+  if (CBZ.CONFIG.CAM_ROOM_BOOM == null) CBZ.CONFIG.CAM_ROOM_BOOM = true;
+
   // ---- TOUCH_TP_CAMERA_V2 (owner, 2026-07-28: "iPad needs third person
   // improved"). THE ROOT FINDING, and it is arithmetic rather than taste:
   // CBZ.camZoom has exactly ONE non-desktop caller in the whole repo —
@@ -148,6 +181,47 @@
   // keeps |pitch| away from π/2 (gimbal / camera-through-floor).
   const MIN_PITCH = -1.0, MAX_PITCH = 0.9;
   const PITCH_SAFETY = 1.45;
+  // CAM_RDR2_ORBIT: third person opens the whole way up. The -1.0 soft clamp
+  // was a THIRD of the envelope the hard safety already allowed, and it is what
+  // makes a helicopter overhead unfindable. The new ceiling is not a taste
+  // number — it is the gimbal safety minus one hair, so the soft clamp is what
+  // you feel and the π/2 guard is still the thing that can never be reached.
+  // 1.45 - 0.09 = 1.36 rad = 78° above horizontal. Looking DOWN is unchanged:
+  // nothing was wrong with it and the floor is in the way at 51° anyway.
+  // VIEW_UP_MAX is the cap on the VIEW, which under the pure orbit is no longer
+  // the same number as cam.pitch: the view runs at pitch + the frame tilt, and
+  // survival's resting tilt alone is 0.46 rad. Capping only the orbit pitch
+  // would therefore let the survival view go PAST vertical and roll the world
+  // over. The tilt is tapered against this same number where it is solved.
+  const PITCH_UP_MARGIN = 0.09;
+  const VIEW_UP_MAX = PITCH_SAFETY - PITCH_UP_MARGIN;   // 1.36 rad = 78°
+  const MIN_PITCH_TP = -VIEW_UP_MAX;
+  // The tilt the pure orbit last solved (see FRAME_TILT below). The up-limit is
+  // spent on the VIEW, so a tier that frames its character 7° below the axis
+  // must stop its ORBIT 7° earlier — otherwise the very last degrees of travel
+  // would have to be paid for by re-centring the character, which is the
+  // reframing this whole pass exists to delete. One frame stale by construction
+  // and that is harmless: the tilt is a slow function of authored constants.
+  // (Present-path only, like everything in this file — no sim state reads it.)
+  let _frameTilt = 0;
+  function pitchLimits() {
+    if (CBZ.CONFIG.CAM_RDR2_ORBIT === false) return [MIN_PITCH, MAX_PITCH];
+    // FIRST PERSON IS SACRED (owner mandate) — the eye keeps its shipped
+    // envelope exactly; only the third-person boom opens up.
+    if (CBZ.fps && CBZ.fps.active) return [MIN_PITCH, MAX_PITCH];
+    const up = Math.max(0.6, VIEW_UP_MAX - Math.max(0, _frameTilt));
+    return [Math.max(MIN_PITCH_TP, -up), MAX_PITCH];
+  }
+  // PUBLIC, because this file is not the only writer of cam.pitch and every
+  // other one carries its own hand-typed copy of the old [-1.0, 0.9] envelope —
+  // systems/gamepad.js, systems/touch.js (aim magnetism) and three sites in
+  // systems/fpsmode.js. A controller that still stops at -1.0 cannot see the
+  // helicopter a mouse can. Adoption is one degrade-safe line and nothing has
+  // to be declared:
+  //   const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9];
+  // All five of those sites now call through; keep it that way — a new writer
+  // that re-types the literal silently re-shrinks the envelope for one input.
+  CBZ.camPitchRange = pitchLimits;
   const DEFAULT_PITCH = 0.46;   // lower angle — less of a top-down "high" view
   CBZ.CAM_DEFAULT_PITCH = DEFAULT_PITCH;
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
@@ -166,14 +240,14 @@
     // CAM_ADS_PITCH_WIDE: while AIMING on touch, open the envelope toward the
     // desktop range so an iPad can raise/drop the reticle onto high or low
     // targets. Touch-only (this clamp is consumed only by touch.js applyLookDelta).
-    if (CBZ.CONFIG.CAM_ADS_PITCH_WIDE !== false && CBZ.isADS && CBZ.isADS()) return [-1.0, 0.9];
+    if (CBZ.CONFIG.CAM_ADS_PITCH_WIDE !== false && CBZ.isADS && CBZ.isADS()) return pitchLimits();
     // CAM_TOUCH_PITCH_FULL: the remaining gap to desktop existed for ONE stated
     // reason — this file's own comment: "the touch boom at extreme up-pitch near
     // walls is less recoverable WITHOUT A SCROLL-WHEEL ESCAPE HATCH". Touch now
     // has two (the pinch trim above actually reaches the city boom, and
     // CBZ.camRecenter levels the view in one tap), so the reason is spent and
     // an iPad gets the same envelope a mouse does. Flag off = the old stop-short.
-    if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL !== false && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false) return [MIN_PITCH, MAX_PITCH];
+    if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL !== false && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false) return pitchLimits();
     return [-0.85, 0.75];
   };
   // ---- RECENTER (CAM_TOUCH_RECENTER) — the one control a thumb-driven third
@@ -330,7 +404,8 @@
     if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK !== false && CBZ.player && (CBZ.player.driving || CBZ.player._aircraft) &&
         (Math.abs(e.movementX) + Math.abs(e.movementY)) > 1) flT = 0.8;
     // soft tier clamp, then a hard safety so |pitch| can never reach π/2
-    cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
+    const _pl = pitchLimits();
+    cam.pitch = Math.max(_pl[0], Math.min(_pl[1], cam.pitch));
     cam.pitch = Math.max(-PITCH_SAFETY, Math.min(PITCH_SAFETY, cam.pitch));
   });
   // ---- FRONT VIEW (hold [B]): swing the orbit 180° to face your character —
@@ -479,6 +554,138 @@
       if (t0 > 0.001 && t0 < best) best = t0;   // t0<=0 → pivot already inside; ignore
     }
     return best;
+  }
+
+  // The floor-aware boom (CAM_RDR2_ORBIT): CAM_FLOOR_CLEAR is the SAME 0.35 m
+  // the last-resort dy clamp has always used, so the radial clamp lands exactly
+  // where the old vertical one did instead of introducing a second floor.
+  const CAM_FLOOR_CLEAR = 0.35;
+  const CAM_ARM_MIN = 0.45;                    // the arm shortens, it never collapses
+  let _armDist = 0;                            // last frame's solved arm (audit)
+
+  /* ---- CAM_WATER_FLOOR — THE THIRD-PERSON CAMERA COULD NEVER GO UNDER ----
+     MEASURED (tools/visual-compare.mjs, preset underwater-look, seed 90210):
+     with the swimmer teleported 420 m offshore over a 32 m water column and
+     driven down repeatedly, the third-person camera's depth below the surface
+     came back **-1.10 m every single time** — i.e. pinned 1.1 m ABOVE the
+     water — and CBZ.cityCameraSubmerged() stayed false. The cause is the
+     `absolute 0.6` in camFloorY below: it is a world-Y constant standing in
+     for "the pavement", and over the sea the pavement is a fiction (city/
+     swim.js's own note: CBZ.floorAt is flat 0 across the whole ocean, which is
+     exactly the phantom floor that module exists to stop you standing on).
+
+     The consequence was not subtle: in third person you could dive thirty
+     metres and the CAMERA stayed in the air, so every underwater treatment in
+     the game — the fog, the tint, the caustics, the muffle — was first-person
+     only. Half the owner's brief was unreachable.
+
+     The fix is to ask the ONE bathymetry oracle instead of a constant. Over
+     water the camera's floor is the SEA BED (CBZ.citySeaBedYAt, the same
+     surface world/terrain_overhaul.js draws and city/swim.js clamps the
+     swimmer to), so the boom follows you down and stops on the bottom exactly
+     as it stops on a pavement. On land nothing changes: the helper returns
+     null and the absolute 0.6 stands, byte for byte.
+
+     `?cfg_CAM_WATER_FLOOR=0` restores the pinned-above-the-water camera. */
+  if (CBZ.CONFIG.CAM_WATER_FLOOR == null) CBZ.CONFIG.CAM_WATER_FLOOR = true;
+  function waterCamFloor(x, z, py) {
+    if (CBZ.CONFIG.CAM_WATER_FLOOR === false) return null;
+    if (!CBZ.cityWaterAt || !CBZ.citySeaBedYAt || !CBZ.citySeaHeightAt) return null;
+    let wet = false;
+    try { wet = !!CBZ.cityWaterAt(x, z); } catch (e) { return null; }
+    if (!wet) return null;
+    // DELIBERATELY NARROW: only while the BODY is genuinely under the surface.
+    // cityWaterAt is also true over a rain-flooded street (city/waterfield.js's
+    // ground-water term), and there the bed is the street — relaxing the
+    // pavement floor for a puddle would let the boom dip through the road.
+    // A swimmer's origin is below the waterline; a wader's is not.
+    const surfY = +CBZ.citySeaHeightAt(x, z);
+    if (!Number.isFinite(surfY) || !(py < surfY - 0.2)) return null;
+    const bedY = +CBZ.citySeaBedYAt(x, z);
+    if (!Number.isFinite(bedY)) return null;
+    // Same 0.35 m stand-off the pavement gets: the lens rests just above the
+    // bottom rather than inside it.
+    return bedY + CAM_FLOOR_CLEAR;
+  }
+
+  // ---- ROOM SENSE (CAM_ROOM_BOOM) -----------------------------------------
+  // RDR2's interior camera is not a collision snap: crossing a doorway the boom
+  // DAMPS in to a close over-the-shoulder and the pivot settles toward shoulder
+  // height, and it damps back out on the way through. The signal is geometric
+  // and needs two probes, because either one alone lies: an awning has a
+  // ceiling and no walls, a street canyon has walls and no ceiling, and only a
+  // ROOM has both. (There is a third copy of "am I under a roof" in this repo —
+  // city/death.js's isIndoors and systems/weather.js's testIndoors, which are
+  // already each other's copy. Both are event/throttled one-shots keyed to the
+  // PLAYER; this one is keyed to the camera PIVOT and needs a free DISTANCE,
+  // not a boolean. Promoting the trio into one shared query is the migration
+  // this file owes — it is named in the report, not smuggled in here, because a
+  // block with no migrated consumers is prose.)
+  //
+  // The probes are AXIS-ALIGNED, never camera-relative, so spinning on the spot
+  // can never make the boom breathe; and the whole set re-measures at ROOM_HZ
+  // rather than per frame, because it feeds a damp that could not resolve a
+  // faster signal anyway. Cost: five swept-AABB queries 12x/s against the same
+  // collider grid the boom already queries every frame.
+  const ROOM_HZ = 12;
+  const CEIL_PROBE = 6.0;                      // how far up we bother to look
+  const ROOM_PROBE = 9.0;                      // how far out we bother to look
+  const CEIL_TIGHT = 1.25, CEIL_OPEN = 3.6;    // free air above the pivot
+  // SPAN, not clearance. Measuring the nearest wall would call a big hall tight
+  // the moment you stood against its side; a room's size is wall-to-wall, and
+  // wall-to-wall is also what decides whether a boom fits. SPAN_TIGHT is a
+  // small room; SPAN_OPEN is derived — twice the exterior boom plus its
+  // standoff (2·4.35 + 2·0.55 ≈ 9.8, rounded up), i.e. the span at which the
+  // full follow distance simply fits and there is nothing to pull in from.
+  const SPAN_TIGHT = 3.5, SPAN_OPEN = 10.0;
+  const ROOM_CLEAR = 0.55;                     // camera radius (0.34) + standoff
+  const INT_DIST_MIN = 1.5, INT_DIST_MAX = 2.2;// the RDR2 interior boom band
+  const INT_MIN_CAM = 0.75;                    // indoor collision floor (see minCam)
+  const INT_HEIGHT_DROP = 0.18;                // over-the-head pivot eases to over-the-shoulder
+  const ROOM_TAU = 0.30;                       // damp time constant (both directions)
+  let roomT = 0, roomCeil = CEIL_PROBE, roomSpan = ROOM_PROBE * 2, encK = 0;
+  const _upRay = new THREE.Raycaster();
+  const _upOrg = new THREE.Vector3(), _upDir = new THREE.Vector3(0, 1, 0);
+  function sstep(a, b, x) {
+    const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+  function senseRoom(px, py, pz, fdt) {
+    roomT -= fdt;
+    if (roomT <= 0) {
+      roomT = 1 / ROOM_HZ;
+      // CEILING: colliders first (walls and slabs the world registers as
+      // boxes), then the LOS meshes as the backstop — a roof that exists only
+      // as geometry is exactly what death.js's isIndoors needed its up-ray for.
+      let up = sweepColliders(px, py, pz, 0, 1, 0, CEIL_PROBE, 0.30);
+      if (up >= CEIL_PROBE && CBZ.losBlockers && CBZ.losBlockers.length) {
+        _upOrg.set(px, py, pz);
+        _upRay.set(_upOrg, _upDir); _upRay.far = CEIL_PROBE;
+        const h = CBZ.losRaycast ? CBZ.losRaycast(_upRay, CBZ.losBlockers)
+                                 : _upRay.intersectObjects(CBZ.losBlockers, false);
+        if (h.length && h[0].distance < up) up = h[0].distance;
+      }
+      roomCeil = up;
+      // FLOOR PLAN: wall to wall on each world axis, and the NARROWER axis
+      // wins — a corridor is as tight as its narrow side, and it is the narrow
+      // side the boom has to live inside.
+      const xp = sweepColliders(px, py, pz, 1, 0, 0, ROOM_PROBE, 0.30);
+      const xm = sweepColliders(px, py, pz, -1, 0, 0, ROOM_PROBE, 0.30);
+      const zp = sweepColliders(px, py, pz, 0, 0, 1, ROOM_PROBE, 0.30);
+      const zm = sweepColliders(px, py, pz, 0, 0, -1, ROOM_PROBE, 0.30);
+      roomSpan = Math.min(xp + xm, zp + zm);
+    }
+    const want = Math.min(1 - sstep(CEIL_TIGHT, CEIL_OPEN, roomCeil),
+                          1 - sstep(SPAN_TIGHT, SPAN_OPEN, roomSpan));
+    encK += (want - encK) * (1 - Math.exp(-fdt / ROOM_TAU));
+    if (encK < 0.002) encK = 0;
+    return encK;
+  }
+  // The interior boom is DERIVED from the room the probes actually found, never
+  // typed: a wide lobby keeps more arm than a stairwell does, and the band is
+  // the RDR2 reference range.
+  function roomBoom() {
+    return Math.max(INT_DIST_MIN, Math.min(INT_DIST_MAX, roomSpan * 0.5 - ROOM_CLEAR));
   }
 
   // FP<->TP TOGGLE BLEND (CAM_TOGGLE_BLEND): the eye and the 4m boom used to
@@ -648,6 +855,39 @@
     // (Yaw is auto-steered behind the car by city/vehicles.js.)
     if (CBZ.game.mode === "city" && player.driving && !player.dead) {
       introT = 0; prev.copy(player.pos);
+      // THE DRIVER'S SEAT (CAR_FP_VIEW, city/view.js). A car's first-person
+      // view is a POSITION INSIDE THIS BRANCH, not a competing writer: view.js
+      // solves the eye and hands back plain numbers, and this function — still
+      // the one and only camera transform writer — applies them. It cannot
+      // race the chase below because it RETURNS instead of it, and it cannot
+      // race fpsmode/scopeview because those bow out while player.driving
+      // (fpsmode's own guard, three branches up). A fitted optic still wins
+      // the lens: view.js resolves fpsScopeFov before it hands the FOV over.
+      if (CBZ.carFpPose) {
+        const seat = CBZ.carFpPose(fdt);
+        if (seat) {
+          camera.position.set(seat.px, seat.py, seat.pz);
+          camera.quaternion.set(seat.qx, seat.qy, seat.qz, seat.qw);
+          if (Math.abs(camera.fov - seat.fov) > 0.01) { camera.fov = seat.fov; camera.updateProjectionMatrix(); }
+          fov = seat.fov;                 // so the chase eases OUT of this lens, not into a stale one
+          // keep the chase's smoothing state parked on the car so stepping
+          // back out dollies from here instead of snapping from a stale target
+          look.set(player.pos.x, player.pos.y + 0.6, player.pos.z);
+          bankK = 0;
+          // a blast still shakes you — harder from inside, if anything. Same
+          // decay the chase uses, applied after the seat write so it reads as
+          // the car being hit rather than the lens wobbling.
+          if (shakeAmt > 0.001) {
+            const s = shakeAmt * 0.6;
+            camera.position.x += (Math.random() - 0.5) * s;
+            camera.position.y += (Math.random() - 0.5) * s;
+            camera.position.z += (Math.random() - 0.5) * s;
+            shakeAmt *= Math.pow(0.0006, fdt);
+            if (shakeAmt < 0.01) shakeAmt = 0;
+          }
+          return;
+        }
+      }
       // LOOK-BACK (CAM_VEHICLE_FREELOOK): lookBackK eases 0↔1 and swings the
       // whole chase 180° — hold MMB (or the touch LOOK BACK pill) to check your
       // six, release to whip forward again.
@@ -778,7 +1018,10 @@
       cam.pitch += (0.52 - cam.pitch) * Math.min(1, fdt * 1.5);
       zoomTarget = clampZoom(zoomTarget + (12.5 - zoomTarget) * Math.min(1, fdt * 1.2));
     }
-    cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
+    {  // same soft envelope the mouse handler applies (FP has already returned)
+      const pl = pitchLimits();
+      cam.pitch = Math.max(pl[0], Math.min(pl[1], cam.pitch));
+    }
 
     // player velocity (planar) for look-ahead + FOV kick
     vel.set((player.pos.x - prev.x) / Math.max(dt, 1e-4), 0, (player.pos.z - prev.z) / Math.max(dt, 1e-4));
@@ -838,7 +1081,19 @@
           ? (shoulder ? TP.DIST_AIM : TP.DIST) * tpZoomK
           : (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF))))
       : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
-    camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, fdt));
+    // ---- ROOM-AWARE BOOM (CAM_ROOM_BOOM). `encK` is the damped enclosure, so
+    // the doorway is a ~0.3s blend rather than a step, and the existing collision
+    // clamp below stays exactly what it was: the LAST resort, not the mechanism.
+    // It may only ever pull the boom IN — a room must never push the camera OUT,
+    // which is what a bare lerp would do the moment the ADS punch-in (2.65 m) is
+    // already tighter than the room's own derived boom.
+    const roomK = (TP && !player.driving && CBZ.CONFIG.CAM_ROOM_BOOM !== false)
+      ? senseRoom(player.pos.x, player.pos.y + height, player.pos.z, fdt)
+      : (encK = 0);
+    const wantDist = roomK > 0
+      ? Math.min(desiredZoom, desiredZoom + (roomBoom() - desiredZoom) * roomK)
+      : desiredZoom;
+    camDist += (wantDist - camDist) * (1 - Math.pow(0.0015, fdt));
 
     // smoothed rig height (crouch dips the whole rig). Survival frames the
     // player higher — disasters need you to read the ground around you — and
@@ -847,7 +1102,13 @@
     const sprinting = surv && !!player.sprint;
     const baseHeight = chuteState ? (chuteCanopy ? 4.15 : 1.55)
       : player.prone ? 0.74 : (player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))))));
-    height = smoothDamp(height, baseHeight, heightV, 0.18, fdt);
+    // CAM_ROOM_BOOM: indoors the pivot eases from over-the-HEAD (1.7 — right for
+    // a 4.35 m boom reading the street ahead) to over-the-SHOULDER, which is
+    // where the reference plates put it and what stops a 1.7 m boom from
+    // photographing the top of your hat. Crouch/prone already own the pivot.
+    const roomHeight = (roomK > 0 && !player.crouch && !player.prone && !chuteState)
+      ? baseHeight - INT_HEIGHT_DROP * roomK : baseHeight;
+    height = smoothDamp(height, roomHeight, heightV, 0.18, fdt);
     const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
     // city: the rig yaw lazily chases the input yaw (frame-rate independent),
     // so quick mouse flicks read as a smoothed pan instead of a rigid lock.
@@ -891,23 +1152,68 @@
     if (frontK > 0) { yaw += Math.PI * frontK; yawView += Math.PI * frontK; }
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
-    // SHOULDER SWAP (CAM_SHOULDER_SWAP): shoulderK eases -1↔1 through centre,
-    // flipping the whole side-offset family (framing AND aim offsets together
-    // so the ADS punch-in lands over whichever shoulder is active).
-    const sK = TP ? shoulderK : 1;
-    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0)))) * sK;
-    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0)))) * sK;
-    const baseX = tx + rightX * targetSide;
+    const sK = TP ? shoulderK : 1;   // shoulder-swap ease; spent on the offsets below
     const baseY = ty + (!TP && shoulder ? 0.08 : 0);
-    const baseZ = tz + rightZ * targetSide;
 
     // orbit offset from yaw/pitch
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-    const ox = Math.sin(yaw) * cp * camDist;
-    const oy = sp * camDist;
-    const oz = Math.cos(yaw) * cp * camDist;
+    // ---- FLOOR-AWARE BOOM (CAM_RDR2_ORBIT) ----
+    // Looking up swings the arm DOWN (oy = sin(pitch)·dist and up is negative
+    // pitch), so a real sky look wants the camera metres UNDER the pavement.
+    // The old answer clamped dy, which keeps the arm's LENGTH and therefore
+    // breaks the orbit: the lens ends up level with your shins with the boom
+    // still 4.35 m long, and the view never points anywhere near the sky. Clamp
+    // the ARM instead, radially — the longest boom whose far end still clears
+    // the floor. That is what a spring arm does when it drags on the ground, and
+    // it is exactly why looking straight up in RDR2 drops the camera to your
+    // heels and fills the frame with sky. The dy floor below survives as the
+    // last-resort guard it was always meant to be.
+    // camFloorY is the SAME floor the last-resort dy clamp uses, absolute 0.6
+    // included — solving the arm against `player.pos.y + 0.35` while the clamp
+    // then lifted the lens to 0.6 broke the orbit by 0.25 m, which at a 1.4 m
+    // arm is 20° of framing error. One floor, both users.
+    // CAM_WATER_FLOOR: over the sea the "absolute 0.6" pavement is a fiction
+    // and was pinning the third-person lens above the waterline no matter how
+    // deep the swimmer went (see the note beside waterCamFloor). Ask the
+    // bathymetry there instead; on land this is the same expression it was.
+    const _wFloor = waterCamFloor(player.pos.x, player.pos.z, player.pos.y);
+    const camFloorY = _wFloor != null
+      ? Math.max(player.pos.y + CAM_FLOOR_CLEAR, _wFloor)
+      : Math.max(player.pos.y + CAM_FLOOR_CLEAR, 0.6);
+    const orbitDist = (CBZ.CONFIG.CAM_RDR2_ORBIT !== false && sp < -1e-4)
+      ? Math.min(camDist, Math.max(CAM_ARM_MIN, (baseY - camFloorY) / -sp))
+      : camDist;
+    _armDist = orbitDist;
+    // ---- THE SHOULDER OFFSET IS A SCREEN ANGLE TOO ----
+    // SIDE is authored in METRES against the full boom: 0.68 m at 4.35 m is 9°
+    // of frame. Leave it alone while the floor clamp drags the arm in to 1.5 m
+    // and the same 0.68 m becomes 24° — the character slides out of the frame
+    // sideways as you pitch up, which is the horizontal half of exactly the
+    // reframing complaint the pure orbit fixes vertically. Scaling by how much
+    // of the arm survived holds the over-shoulder ANGLE constant instead.
+    // Deliberately keyed to the FLOOR clamp only (orbitDist vs camDist): the
+    // interior pull-in moves camDist itself, so armK stays 1 in a room and the
+    // authored offset lands — which is what puts the character out on the left
+    // in the RDR2 interior reference.
+    const armK = (CBZ.CONFIG.CAM_RDR2_ORBIT !== false && camDist > 0.01)
+      ? Math.min(1, orbitDist / camDist) : 1;
+    // SHOULDER SWAP (CAM_SHOULDER_SWAP): shoulderK eases -1↔1 through centre,
+    // flipping the whole side-offset family (framing AND aim offsets together
+    // so the ADS punch-in lands over whichever shoulder is active).
+    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0)))) * sK * armK;
+    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0)))) * sK * armK;
+    const baseX = tx + rightX * targetSide;
+    const baseZ = tz + rightZ * targetSide;
+    const ox = Math.sin(yaw) * cp * orbitDist;
+    const oy = sp * orbitDist;
+    const oz = Math.cos(yaw) * cp * orbitDist;
+    // the non-TP tiers nudge the lens off the pivot; it is part of the PIVOT for
+    // orbit purposes, or the pure orbit below would frame against a point the
+    // camera is not actually swinging around.
+    const dyExtra = TP ? 0 : (shoulder ? -0.05 : (meleeFocus ? 0.02 : (surv ? 0.34 : 0.14)));
+    const pivotY = baseY + dyExtra;
     let dx = baseX + ox + rightX * camSide;
-    let dy = baseY + oy + (TP ? 0 : (shoulder ? -0.05 : (meleeFocus ? 0.02 : (surv ? 0.34 : 0.14))));
+    let dy = pivotY + oy;
     let dz = baseZ + oz + rightZ * camSide;
 
     // ---- camera collision (spring-arm): pull the camera in to just before
@@ -951,14 +1257,25 @@
       // balloon pop. (A true occluder fade is deferred: per-group opacity isn't
       // affordable on merged batch materials; follow-the-wall is the honest v1.)
       const noBalloon = CBZ.CONFIG.CAM_OCCLUDE_FADE !== false && TP;
-      const minCam = (CBZ.game.mode === "city" && !player.driving)
+      let minCam = (CBZ.game.mode === "city" && !player.driving)
         ? (tpPresent ? ((CBZ.isADS && CBZ.isADS()) ? (noBalloon ? 1.5 : 1.8) : (noBalloon ? 1.5 : 2.6)) : (noBalloon ? 1.6 : 3.0))
         : 0.28;
+      // CAM_ROOM_BOOM: the 1.6 m city floor is a STREET number — it exists so a
+      // wall behind you in the dense grid can't slam the boom to your back. In a
+      // 4 m room it is the opposite bug: the floor holds the lens INSIDE the
+      // wall, which is exactly the "no clipping" half of the owner's interior
+      // note. Where the room probes say we are in a room, the floor rides down
+      // with the enclosure to the spring-arm minimum, because in a room the
+      // boom is short BY DESIGN and has nothing to protect.
+      if (roomK > 0) minCam = minCam + (INT_MIN_CAM - minCam) * roomK;
       const d = Math.max(minCam, occ - 0.25);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
     }
-    // never drop below the surface you're standing on (no looking up through floors)
-    dy = Math.max(dy, player.pos.y + 0.35, 0.6);
+    // never drop below the surface you're standing on (no looking up through
+    // floors). Under CAM_RDR2_ORBIT the radial arm clamp above has already
+    // solved for this, so this is the guard for the cases it can't see (a ledge
+    // behind you, a boom the collision clamp pushed somewhere odd).
+    dy = Math.max(dy, camFloorY);
 
     // look target leads the player in the direction of travel. In survival we
     // ease the forward lead (a long lead drops the player low in frame when
@@ -999,21 +1316,85 @@
     // stay pitch-blind like unarmed; presenting restores the pitch-true aim.)
     // CAM_TP_V2: the RELAXED tier gets the SAME pitch-true look target — the
     // pitch-blind relaxed math was the "weird" TP feel (mouse-up ballooned the
-    // camera into a top-down stare instead of pitching the view). With
-    // aimLead(4.6) ≈ camDist(4.0) the look target and the orbit rise together,
-    // so the view pitches ~1:1 with the mouse and the character stays framed —
-    // exactly the presenting-tier math the owner already liked. A partial
-    // factor would be WORSE, not safer: below aimLead·pf = camDist (pf≈0.87)
-    // the vertical response INVERTS (look-up pitches the view down).
+    // camera into a top-down stare instead of pitching the view).
+    // CORRECTED 2026-08-03, and leaving the old text would be exactly the
+    // stale-claim problem this repo keeps catching itself in. What stood here
+    // was: "with aimLead(4.6) ≈ camDist(4.0) the look target and the orbit rise
+    // together, so the view pitches ~1:1". Two errors, and the second is fatal.
+    // (a) camDist is 4.35, not 4.0. (b) 1:1 is not what "rising together" gives
+    // — it is what CANCELLING gives. Solve it: the view angle is
+    //   atan2((LOOK_Y − HEIGHT) + (LEAD − DIST)·sin p, (LEAD + DIST)·cos p),
+    // so the numerator's pitch term carries (4.6 − 4.35) = 0.25 against a
+    // denominator of 8.95 — a gain of about 0.028, not 1. Measured over the
+    // shipped constants, a full 1.0 rad of mouse-up bought 0.08 rad of view,
+    // and the constant −0.18 offset flips even that the wrong way at small
+    // angles. The comment's own next sentence had the diagnosis right and drew
+    // the wrong conclusion from it: aimLead·pf ≈ camDist is not the SAFE point,
+    // it is the DEAD point — the inversion boundary the tier was parked on.
+    // The pure orbit below removes the whole quantity from the answer; this
+    // pitchFollow term now only feeds the tilt solve's resting evaluation.
     const pitchFollow = (!chuteState && TP && (tpPresent || CBZ.CONFIG.CAM_TP_V2))
       ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) * (1 - frontK)
       : 0;
-    const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
-    const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
-    const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
-    const lty = player.pos.y + (chuteState ? (chuteCanopy ? 3.45 : 0.92)
-      : (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))))
-      + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
+    // the tier's pitch-BLIND look height — still the authored framing number,
+    // now used as the input to the tilt solve rather than as the answer.
+    const lookYFlat = player.pos.y + (chuteState ? (chuteCanopy ? 3.45 : 0.92)
+      : (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))));
+    let ltx, lty, ltz;
+    if (CBZ.CONFIG.CAM_RDR2_ORBIT !== false && !chuteState) {
+      // ================= PURE ORBIT (the RDR2 answer) =====================
+      // Anchor the look target to the SAME pivot the camera orbits and push it
+      // along the mouse's own direction. Then camera→look is V by construction:
+      // the view pitch IS cam.pitch (gain exactly 1, no inversion band), and the
+      // character's place in the frame cannot move when you pitch — which is the
+      // owner's "looking up also changes the angle", deleted rather than tuned.
+      //
+      // FRAME_TILT is the one thing worth preserving from the old rig: the angle
+      // it framed the pivot BELOW the view axis. It is DERIVED, per frame, from
+      // whatever constants this tier is actually running, evaluated at that
+      // tier's own RESTING pitch — so at rest every tier (relaxed city, ADS,
+      // melee, survival, jail) frames EXACTLY as it does today, and only the
+      // pitch RESPONSE changes. Tune CITY_TP in city/camera.js and the resting
+      // frame still follows; nothing here has to be re-tasted.
+      const p0 = (TP && TP.PITCH != null) ? TP.PITCH : DEFAULT_PITCH;
+      const s0 = Math.sin(p0), c0 = Math.cos(p0);
+      // Solved against camDist, NOT the floor-clamped arm: the arm shortening
+      // as you pitch up is the price of not going through the pavement, and it
+      // must not also become a framing change — that would smuggle the reframe
+      // back in through the vertical. camDist still carries the interior
+      // pull-in, so a room DOES get its own tilt; only the sky look is held.
+      const dY0 = (lookYFlat + (pitchFollow ? s0 * aimLead * pitchFollow : 0)) - (pivotY + s0 * camDist);
+      const dH0 = (pitchFollow ? aimLead * c0 : aimLead) + camDist * c0;
+      const tiltRaw = p0 + Math.atan2(dY0, Math.max(0.05, dH0));
+      _frameTilt = tiltRaw;             // pitchLimits() spends the rest on the orbit
+      // The taper is now a SAFETY NET, not the mechanism: pitchLimits() has
+      // already stopped the orbit `tiltRaw` short of the ceiling, so this only
+      // catches a frame where the tilt grew under a moving arm. Without either,
+      // survival's 0.46 rad resting tilt would carry a full up-pitch past
+      // vertical and roll the world over.
+      const tilt = cam.pitch < 0
+        ? Math.min(tiltRaw, Math.max(0, VIEW_UP_MAX + cam.pitch))
+        : tiltRaw;
+      // view basis: V = the mouse direction; U = the view-plane up, = R × V.
+      // (R is the horizontal right vector the side offsets already ride on, so
+      // the over-shoulder offset stays pitch-independent for free.)
+      const vX = fwdVX * cp, vY = -sp, vZ = fwdVZ * cp;
+      const uX = fwdVX * sp, uY = cp, uZ = fwdVZ * sp;
+      // rise scales with the camera→look span, so the tilt is a SCREEN angle:
+      // it survives the interior pull-in and the sky-look arm clamp unchanged.
+      const rise = Math.tan(tilt) * (aimLead + orbitDist);
+      ltx = tx + vel.x * lead + rightVX * targetSide + vX * aimLead + uX * rise;
+      lty = pivotY + vY * aimLead + uY * rise;
+      ltz = tz + vel.z * lead + rightVZ * targetSide + vZ * aimLead + uZ * rise;
+    } else {
+      // legacy look target (flag off, or under canopy): no tilt is being spent,
+      // so hand the whole up-envelope back rather than leaving a stale one.
+      _frameTilt = 0;
+      const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
+      ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
+      ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
+      lty = lookYFlat + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
+    }
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
     if (introT > 0) {
@@ -1176,6 +1557,42 @@
     fov = smoothDamp(fov, targetFov, fovV, TP && CBZ.CONFIG.CAM_TP_V2 ? 0.12 : 0.18, fdt);
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   }
+
+  // ---- CBZ.camAudit() — the numbers a gate can pin instead of a screenshot.
+  // The three claims this pass makes are all arithmetic, so all three are
+  // measurable from live state after any tick:
+  //   d(viewPitch)/d(pitch) == 1  — the orbit is PURE. Sweep cam.pitch and the
+  //                                 view must track 1:1 (until the last few
+  //                                 degrees, where the tilt taper is deliberate).
+  //                                 The shipped rig moved the view 0.08 rad for
+  //                                 1.0 rad of mouse — and in the wrong sign.
+  //   frameTilt                    — the pivot's angle below the view axis. Must
+  //                                 be CONSTANT over that same sweep (that IS
+  //                                 "pitching no longer reframes") and must equal
+  //                                 the legacy value at the tier's resting pitch.
+  //   clear >= 0.35                — the boom never goes through the floor, and
+  //                                 `arm` (not a clamped dy) is what gave way.
+  //   |viewPitch| < 1.45           — the view never reaches π/2 (world roll).
+  // Plus the room sense, so "did the doorway actually register" is a number.
+  CBZ.camAudit = function () {
+    const P = CBZ.player, C = camera.position;
+    const lim = pitchLimits();
+    const dY = look.y - C.y, dH = Math.hypot(look.x - C.x, look.z - C.z);
+    const viewPitch = -Math.atan2(dY, dH);                 // same sign as cam.pitch (down = +)
+    const pY = (P ? P.pos.y + height : 0) - C.y;
+    const pH = P ? Math.hypot(P.pos.x - C.x, P.pos.z - C.z) : 0;
+    const pivotPitch = -Math.atan2(pY, pH);
+    return {
+      pitch: cam.pitch, pitchMin: lim[0], pitchMax: lim[1], pitchSafety: PITCH_SAFETY,
+      viewUpMax: VIEW_UP_MAX, viewPitch: viewPitch, solvedTilt: _frameTilt,
+      frameTilt: pivotPitch - viewPitch,
+      dist: camDist, arm: _armDist,
+      camY: C.y, groundY: P ? P.pos.y : 0, clear: P ? C.y - P.pos.y : 0,
+      enclosure: encK, roomCeil: roomCeil, roomSpan: roomSpan, roomBoom: roomBoom(),
+      orbit: CBZ.CONFIG.CAM_RDR2_ORBIT !== false,
+      roomCam: CBZ.CONFIG.CAM_ROOM_BOOM !== false,
+    };
+  };
 
   CBZ.updateCamera = updateCamera;
   CBZ.onAlways(50, updateCamera);

@@ -88,6 +88,17 @@
    hands the character over at ONE scripted beat). Do not invent a
    continuous frame blend.
 
+   ...AND THAT WALKABLE INTERIOR NOW EXISTS, BUILT ON TOP OF THIS FILE
+   RATHER THAN BESIDE IT: `city/vehicle_hold.js` (`CBZ.vehicleHold`) is a
+   ROOM inside a vehicle — a cargo plane's hold, later a semi's trailer.
+   It owns the room's furniture, its ramp door arc, and the latching of
+   VEHICLES and CARGO; it owns no surface maths of its own. Its floor,
+   its ramp and its hull walls are ONE rig declared here, which is why
+   the two additions this file grew for it are both generalisations and
+   not special cases: LOCAL RAMPS on a deck (the same record shape
+   physics.js already reads off a static platform) and LIVE DECK
+   RECORDS via `handle.decks()` (a deck that animates is still a deck).
+
    THE TWO PHYSICS SEAMS (systems/physics.js, both feature-detected AND
    flag-gated, so absent or off the engine is byte-identical to before):
      • groundAt()  → `if (CBZ.mpGroundAt) { const t = CBZ.mpGroundAt(...) }`
@@ -137,6 +148,7 @@
 
   const rigs = [];
   let nDeck = 0, nWall = 0;      // active rigs carrying decks / walls (early-out counters)
+  let nLate = 0;                 // ...of which run on the LATE pass (12.8)
   let riding = null;             // the rig the player is standing on right now
   let lastVx = 0, lastVz = 0, lastVy = 0;   // rider-point platform velocity, last ridden frame
   const launch = { vx: 0, vz: 0, t: 0 };
@@ -227,8 +239,42 @@
   }
 
   // World Y of a deck at a point already expressed in the rig's local frame.
-  function deckTopLocal(p, d, lx, lz) {
-    return p.y + p.mx * lx + p.my * d.top + p.mz * lz;
+  //
+  // A deck may declare a LOCAL `ramp` — the SAME data shape physics.js reads off
+  // a static CBZ.platforms record ({axis?, x0,x1 | z0,z1, y0,y1}), only expressed
+  // in the parent's frame instead of the world's. That is deliberate: a sloped
+  // walk surface on a thing that MOVES (a cargo ramp, a boat's boarding brow, a
+  // tailgate) is the same geometry the static loop already understands, and
+  // re-typing it as a staircase of flat boxes is how you get a body that hops.
+  // `usePrev` reads the shape SNAPSHOT taken at the end of the previous tick, so
+  // a rider standing on a ramp that is itself lowering is carried DOWN by it.
+  function deckTopLocal(p, d, lx, lz, usePrev) {
+    let top = usePrev ? d.ptop : d.top;
+    const r = usePrev ? d.pramp : d.ramp;
+    if (r) {
+      let t = (r.axis === "x") ? (lx - r.x0) / (r.x1 - r.x0) : (lz - r.z0) / (r.z1 - r.z0);
+      if (!(t >= 0)) t = 0; else if (t > 1) t = 1;
+      top = r.y0 + t * (r.y1 - r.y0);
+    }
+    return p.y + p.mx * lx + p.my * top + p.mz * lz;
+  }
+  // Freeze this frame's deck SHAPE so next frame can measure the difference.
+  // Poses get the same treatment via copyPose; a deck whose top or ramp is
+  // animated by its owner is no different in kind from a deck that moved.
+  function snapDecks(rig) {
+    const decks = rig.decks;
+    if (!decks) return;
+    for (let i = 0; i < decks.length; i++) {
+      const d = decks[i];
+      d.ptop = d.top;
+      d.px = d.x; d.pz = d.z; d.phw = d.hw; d.phd = d.hd; d.poff = d.off;
+      if (d.ramp) {
+        const s = d.pramp || (d.pramp = { axis: d.ramp.axis, x0: 0, x1: 1, z0: 0, z1: 1, y0: 0, y1: 0 });
+        s.axis = d.ramp.axis;
+        s.x0 = d.ramp.x0; s.x1 = d.ramp.x1; s.z0 = d.ramp.z0; s.z1 = d.ramp.z1;
+        s.y0 = d.ramp.y0; s.y1 = d.ramp.y1;
+      } else d.pramp = null;
+    }
   }
 
   // Highest deck of THIS rig under (x,z) at pose `p`, or -Infinity. `reach` is
@@ -244,8 +290,9 @@
     let best = -Infinity;
     for (let i = 0; i < decks.length; i++) {
       const d = decks[i];
+      if (d.off) continue;                                     // a stowed ramp is not a floor
       if (lx < d.x - d.hw || lx > d.x + d.hw || lz < d.z - d.hd || lz > d.z + d.hd) continue;
-      const t = deckTopLocal(p, d, lx, lz);
+      const t = deckTopLocal(p, d, lx, lz, false);
       if (t <= reach && t > best) best = t;
     }
     return best;
@@ -326,8 +373,111 @@
 
   // ============================================================
   //  THE TICK — priority 9.5, immediately before updatePlayer (10)
+  //
+  //  ...AND A SECOND ONE AT 12.8, FOR RIGS WHOSE PARENT MOVES AFTER 9.5.
+  //  Every rig this file was written for is moved by an owner that ticks
+  //  BEFORE it — the yacht sim at 9.45, the water hulls at 9.4, the marina at
+  //  9.3 — which is why one pass was always enough. A rig bolted to a VEHICLE
+  //  breaks that assumption and it is not a near miss: the car sim runs at 11,
+  //  the armour sim at 11.6 and the flight sim at 12, so a deck latched at 9.5
+  //  is the pose the aeroplane had at the END OF LAST FRAME. Measured on a
+  //  cargo lifter at 95 m/s, that is 1.58 m of floor slid out from under the
+  //  rider EVERY FRAME — the same class of fault city/vehicle_hold.js already
+  //  fixed for strapped freight by moving its re-assert to 12.7, and this is
+  //  its other half.
+  //
+  //  `late: true` moves ONLY that rig's pose latch and its rider carry to
+  //  12.8 — after the three vehicle sims and after the hold's freight pass, so
+  //  the deck, the load and the body aboard all move on the same frame the
+  //  aeroplane does. Ridership, the leave/launch beat and every existing rig
+  //  are untouched: absent the flag the two passes are byte-identical to the
+  //  single one that came before.
   // ============================================================
+  let pendingLate = null;          // the ridden rig, when it is a late one
+
+  // The rider carry, lifted verbatim out of the tick so BOTH passes can run
+  // it. Returns the rig it carried, or null when the motion was a teleport.
+  function carryRider(cur, dt) {
+    const P = CBZ.player;
+    if (!P || !P.pos) return null;
+    const p0 = cur.prev, p1 = cur.pose;
+    toLocalXZ(p0, P.pos.x, P.pos.z, _l);
+    const lx = _l.x, lz = _l.z;
+    const nx = p1.x + lx * p1.c + lz * p1.s;
+    const nz = p1.z - lx * p1.s + lz * p1.c;
+    // The vertical carry is the SUPPORT delta at the rider's own local point,
+    // which folds translation, the pivot arc and pitch/roll into one term —
+    // and it is exactly what the player feels underfoot.
+    // A deck whose own SHAPE animated (a ramp lowering under your feet) is
+    // measured with last frame's snapshot at p0 and this frame's live record
+    // at p1, so the two sources of motion — the vehicle and the ramp — sum
+    // into the one support delta the rider feels.
+    let dTop = 0;
+    const decks = cur.decks;
+    let d0 = -Infinity, d1 = -Infinity;
+    for (let i = 0; i < decks.length; i++) {
+      const d = decks[i];
+      if (d.poff || d.off) continue;                        // valid BOTH frames, or no carry
+      const px = d.px != null ? d.px : d.x, pz = d.pz != null ? d.pz : d.z;
+      const phw = d.phw != null ? d.phw : d.hw, phd = d.phd != null ? d.phd : d.hd;
+      if (lx < px - phw || lx > px + phw || lz < pz - phd || lz > pz + phd) continue;
+      const a = deckTopLocal(p0, d, lx, lz, true);
+      if (a > d0) { d0 = a; d1 = d.off ? a : deckTopLocal(p1, d, lx, lz, false); }
+    }
+    if (d0 > -Infinity) dTop = d1 - d0;
+    const dx = nx - P.pos.x, dz = nz - P.pos.z;
+    const dyaw = angDelta(p0.yaw, p1.yaw);
+
+    if (Math.abs(dx) > MAX_STEP || Math.abs(dz) > MAX_STEP ||
+        Math.abs(dTop) > MAX_STEP || Math.abs(dyaw) > MAX_YAW_STEP) {
+      // TELEPORT, not motion. Carry nobody; drop the ride so nothing
+      // inherits a nonsense velocity next frame.
+      lastVx = lastVz = lastVy = 0;
+      return null;
+    }
+    P.pos.x += dx; P.pos.z += dz; P.pos.y += dTop;
+    lastVx = dx / dt; lastVz = dz / dt; lastVy = dTop / dt;
+    if (dyaw) {
+      // BODY facing follows the deck (physically right, invisible to the
+      // player). CAMERA yaw only on explicit opt-in — see header note 3.
+      if (cur.bodyYaw && CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.rotation.y += dyaw;
+      if (cur.camYaw && CBZ.cam) CBZ.cam.yaw += dyaw;
+    }
+    return cur;
+  }
+
+  // prev <- pose, pose <- parent, for one half of the rig list.
+  function latchPoses(wantLate) {
+    for (let i = 0; i < rigs.length; i++) {
+      const rig = rigs[i];
+      if (!!rig.late !== wantLate) continue;
+      copyPose(rig.pose, rig.prev);
+      if (!rig.active) continue;
+      // An Object3D lifted out of the scene graph (a demolished building, a
+      // disposed prop) freezes rather than dies — re-adding it resumes it.
+      rig.detached = rig.obj3d && !rig.src.parent;
+      if (rig.detached) continue;
+      if (!readPose(rig, rig.pose)) copyPose(rig.prev, rig.pose);                     // bad parent: hold still
+    }
+  }
+
+  // THE LATE PASS — 12.8. After vehicles (11), armour (11.6), flight (12) and
+  // city/vehicle_hold.js's strapped-freight re-assert (12.7); before npclife's
+  // syncAttached (33.8) re-seats the bodies riding the same room.
+  function lateTick(dt) {
+    if (!CF.MOVING_PLATFORMS || !nLate) { pendingLate = null; return; }
+    if (!(dt > 0)) dt = 1 / 60;
+    latchPoses(true);
+    if (pendingLate) {
+      if (!carryRider(pendingLate, dt)) riding = null;
+      pendingLate = null;
+    }
+    for (let i = 0; i < rigs.length; i++) if (rigs[i].late) snapDecks(rigs[i]);
+  }
+  CBZ.onUpdate(12.8, lateTick);
+
   function tick(dt) {
+    pendingLate = null;
     if (!CF.MOVING_PLATFORMS || !rigs.length) { riding = null; return; }
     if (!(dt > 0)) dt = 1 / 60;
     const P = CBZ.player;
@@ -351,56 +501,14 @@
     }
 
     // ---- 2) LATCH EVERY RIG'S NEW POSE (prev <- pose, pose <- parent) ----
-    for (let i = 0; i < rigs.length; i++) {
-      const rig = rigs[i];
-      copyPose(rig.pose, rig.prev);
-      if (!rig.active) continue;
-      // An Object3D lifted out of the scene graph (a demolished building, a
-      // disposed prop) freezes rather than dies — re-adding it resumes it.
-      rig.detached = rig.obj3d && !rig.src.parent;
-      if (rig.detached) continue;
-      if (!readPose(rig, rig.pose)) copyPose(rig.prev, rig.pose);                     // bad parent: hold still
-    }
+    latchPoses(false);
 
     // ---- 3) CARRY THE RIDER ------------------------------------------------
-    if (cur) {
-      const p0 = cur.prev, p1 = cur.pose;
-      toLocalXZ(p0, P.pos.x, P.pos.z, _l);
-      const lx = _l.x, lz = _l.z;
-      const nx = p1.x + lx * p1.c + lz * p1.s;
-      const nz = p1.z - lx * p1.s + lz * p1.c;
-      // The vertical carry is the SUPPORT delta at the rider's own local point,
-      // which folds translation, the pivot arc and pitch/roll into one term —
-      // and it is exactly what the player feels underfoot.
-      let dTop = 0;
-      const decks = cur.decks;
-      let d0 = -Infinity, d1 = -Infinity;
-      for (let i = 0; i < decks.length; i++) {
-        const d = decks[i];
-        if (lx < d.x - d.hw || lx > d.x + d.hw || lz < d.z - d.hd || lz > d.z + d.hd) continue;
-        const a = deckTopLocal(p0, d, lx, lz);
-        if (a > d0) { d0 = a; d1 = deckTopLocal(p1, d, lx, lz); }
-      }
-      if (d0 > -Infinity) dTop = d1 - d0;
-      const dx = nx - P.pos.x, dz = nz - P.pos.z;
-      const dyaw = angDelta(p0.yaw, p1.yaw);
-
-      if (Math.abs(dx) > MAX_STEP || Math.abs(dz) > MAX_STEP ||
-          Math.abs(dTop) > MAX_STEP || Math.abs(dyaw) > MAX_YAW_STEP) {
-        // TELEPORT, not motion. Carry nobody; drop the ride so nothing
-        // inherits a nonsense velocity next frame.
-        cur = null; lastVx = lastVz = lastVy = 0;
-      } else {
-        P.pos.x += dx; P.pos.z += dz; P.pos.y += dTop;
-        lastVx = dx / dt; lastVz = dz / dt; lastVy = dTop / dt;
-        if (dyaw) {
-          // BODY facing follows the deck (physically right, invisible to the
-          // player). CAMERA yaw only on explicit opt-in — see header note 3.
-          if (cur.bodyYaw && CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.rotation.y += dyaw;
-          if (cur.camYaw && CBZ.cam) CBZ.cam.yaw += dyaw;
-        }
-      }
-    }
+    // A LATE rig has not moved yet this frame (its owner ticks at 11 / 11.6 /
+    // 12), so carrying it here would carry last frame's motion. It is handed
+    // to lateTick instead, which runs once the aeroplane has actually flown.
+    if (cur && cur.late) pendingLate = cur;
+    else if (cur) cur = carryRider(cur, dt);
 
     // ---- 4) LEAVING: inherit the platform velocity ------------------------
     if (riding && riding !== cur) {
@@ -430,16 +538,25 @@
         if (launch.t <= 0) { launch.vx = launch.vz = 0; }
       }
     }
+
+    // ---- 5) FREEZE THIS FRAME'S DECK SHAPES -------------------------------
+    // Poses are latched at the TOP of the tick (prev <- pose) because the
+    // parent moves outside this file. Deck shapes are latched at the BOTTOM,
+    // because their owner animates them BEFORE we run (a hold lowering its ramp
+    // ticks at 9.4) — snapshotting at the top would already have lost the value
+    // we need to difference against.
+    for (let i = 0; i < rigs.length; i++) if (!rigs[i].late) snapDecks(rigs[i]);
   }
   CBZ.onUpdate(9.5, tick);
 
   function recount() {
-    nDeck = 0; nWall = 0;
+    nDeck = 0; nWall = 0; nLate = 0;
     for (let i = 0; i < rigs.length; i++) {
       const r = rigs[i];
       if (!r.active) continue;
       if (r.decks) nDeck++;
       if (r.walls) nWall++;
+      if (r.late) nLate++;
     }
   }
 
@@ -450,7 +567,11 @@
   //            {heading | rotation.y}, OR a function(out) returning
   //            {x, y, z, yaw [, pitch, roll]} for callers with no object.
   //   spec   :
-  //     decks  [{x, z, w, d, top}]        LOCAL-space walk surfaces
+  //     decks  [{x, z, w, d, top, id?, off?, ramp?}]
+  //                                       LOCAL-space walk surfaces.
+  //         ramp {axis?"x"|"z", x0,x1|z0,z1, y0,y1}  a LOCAL slope, exactly the
+  //              record shape physics.js already reads off a static platform.
+  //         off  true = stowed (not a floor yet); flip it live via handle.deck()
   //     walls  [{x, z, w, d, y0, y1}]     LOCAL-space solid boxes (optional)
   //     riders  true    carry standing bodies                (default true)
   //     yaw     true    revolve riders about the pivot       (default true)
@@ -458,9 +579,12 @@
   //     bodyYaw true    rotate the rider's body facing       (default true)
   //     tilt    true    apply parent pitch/roll to deck height (default true)
   //     onLeave "upward"|"full"|"none"    velocity inheritance (default "upward")
+  //     late    true    parent moves AFTER 9.5 (a vehicle: 11 / 11.6 / 12) —
+  //             latch + carry on the 12.8 pass instead      (default false)
   //     id      "yacht-main-deck"         debug label
   //   returns { release(), setActive(bool), contains(x,y,z), localOf(x,y,z,out),
-  //             worldOf(lx,ly,lz,out), pose(), id, active }
+  //             worldOf(lx,ly,lz,out), pose(), decks(), deck(idOrIndex),
+  //             id, active }
   //
   // DEGRADE-SAFE by construction — the consumer writes:
   //   CBZ.movingPlatform ? CBZ.movingPlatform(obj, spec) : CBZ.platforms.push({...})
@@ -468,7 +592,8 @@
     release() {}, setActive() {}, contains() { return false; },
     localOf(x, y, z, out) { out = out || {}; out.x = x; out.y = y; out.z = z; return out; },
     worldOf(x, y, z, out) { out = out || {}; out.x = x; out.y = y; out.z = z; return out; },
-    pose() { return null; }, id: "inert", active: false, inert: true,
+    pose() { return null; }, decks() { return []; }, deck() { return null; },
+    id: "inert", active: false, inert: true,
   };
 
   CBZ.movingPlatform = function (parent, spec) {
@@ -489,12 +614,31 @@
         const s = list[i];
         if (!s) continue;
         const e = {
+          id: s.id || null,
           x: +s.x || 0, z: +s.z || 0,
           hw: Math.abs(+s.w || 0) / 2, hd: Math.abs(+s.d || 0) / 2,
           top: +s.top || 0,
         };
         if (e.hw <= 0 || e.hd <= 0) continue;
         if (isWall) { e.y0 = s.y0 != null ? +s.y0 : null; e.y1 = s.y1 != null ? +s.y1 : 0; }
+        else {
+          // LOCAL slope, physics.js's own ramp record shape. `off` starts a deck
+          // stowed (a raised tailgate is not a floor); the owner flips it live.
+          e.off = s.off === true;
+          const r = s.ramp;
+          if (r) {
+            e.ramp = {
+              axis: r.axis === "x" ? "x" : "z",
+              x0: +r.x0 || 0, x1: r.x1 != null ? +r.x1 : 1,
+              z0: +r.z0 || 0, z1: r.z1 != null ? +r.z1 : 1,
+              y0: +r.y0 || 0, y1: +r.y1 || 0,
+            };
+            // a zero-length ramp would divide by zero every query
+            if (e.ramp.axis === "x" ? e.ramp.x0 === e.ramp.x1 : e.ramp.z0 === e.ramp.z1) e.ramp = null;
+          }
+          e.ptop = e.top; e.px = e.x; e.pz = e.z; e.phw = e.hw; e.phd = e.hd; e.poff = e.off;
+          e.pramp = null;
+        }
         out.push(e);
       }
       return out.length ? out : null;
@@ -527,6 +671,12 @@
       bodyYaw: spec.bodyYaw !== false,
       tilt: spec.tilt !== false,
       onLeave: spec.onLeave === "full" || spec.onLeave === "none" ? spec.onLeave : "upward",
+      // LATE: this rig's parent is moved by a sim that ticks AFTER 9.5 (a car
+      // at 11, armour at 11.6, an aeroplane at 12). Its pose latch and rider
+      // carry move to 12.8 so the floor and the body on it arrive on the same
+      // frame the vehicle does. Every vehicle-mounted room wants this; nothing
+      // that is moved before 9.5 should ever set it.
+      late: spec.late === true,
       r: r + 0.001, r2: (r + 0.001) * (r + 0.001),
       active: true, detached: false,
       pose: newPose(), prev: newPose(),
@@ -581,6 +731,20 @@
         return out;
       },
       pose() { return rig.pose; },
+      // THE LIVE DECK RECORDS. A deck that ANIMATES (a tailgate dropping, a
+      // ramp lowering, a scissor table rising) is still one deck — mutate
+      // `top` / `off` / `ramp.*` / `x,z,hw,hd` on the record you get back and
+      // the next query sees it, with the carry differencing it correctly
+      // against last frame's snapshot. Deliberately NOT a setter API: the
+      // caller already owns the numbers, and a second bookkeeping layer over
+      // six floats is exactly the parallel-state trap CLAUDE.md names.
+      decks() { return rig.decks || []; },
+      deck(id) {
+        const L = rig.decks; if (!L) return null;
+        if (typeof id === "number") return L[id] || null;
+        for (let i = 0; i < L.length; i++) if (L[i].id === id) return L[i];
+        return null;
+      },
     };
     rig.handle = handle;
     return handle;

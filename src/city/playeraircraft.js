@@ -459,6 +459,10 @@
     // nose muzzle (unchanged firing point + marker)
     addMuzzle(grp, 0, -0.1, 3.4);
     grp.userData.belly = 1.2;                // how far the skids hang below the origin
+    // ...and a REAL BODY in that seat, hidden until somebody boards. It
+    // supersedes the three-box silhouette above (which stays as the OFF path
+    // and as the cockpit generator's eye reference). See AIR_PILOT_VISIBLE.
+    seatCosmeticPilot(grp, "heli", "Missile Helicopter");
     return grp;
   }
 
@@ -586,6 +590,7 @@
     // nose muzzle (unchanged firing point + marker)
     addMuzzle(grp, 0, 0, 5.6);
     grp.userData.belly = 0.6;
+    seatCosmeticPilot(grp, "jet", "F-22 Raptor");   // see buildHeli
     return grp;
   }
 
@@ -701,8 +706,13 @@
       // airClass picks the per-class WING_V2 tuning row: hijacked airliners fly
       // heavy and stately, a hijacked private jet flies the light GA profile,
       // military fast movers fly "jet". Helis dispatch to flyHeliV2 instead.
-      airClass: kind === "heli" ? "heli"
-        : (opts.civilian ? (opts.flightKind === "airliner" ? "airliner" : "prop") : "jet"),
+      // An explicit opts.airClass wins, because "military" is not a flight
+      // model: the base's fighters and its 37-metre cargo lifter share a
+      // registry and share nothing else in the air. A heavy that rolls like a
+      // Raptor is the same class of lie as a helicopter with no crew.
+      airClass: WING_V2[opts.airClass] ? opts.airClass
+        : (kind === "heli" ? "heli"
+        : (opts.civilian ? (opts.flightKind === "airliner" ? "airliner" : "prop") : "jet")),
       airspeed: 0,             // V2: every craft starts from a genuine standstill
       thr: null,               // V2 throttle 0..1 (lazily seeded on first V2 frame)
       sag: 0,                  // accumulated stall/gravity sink (m/s)
@@ -995,7 +1005,8 @@
     } : milGroup ? {
       group: milGroup,
       sourceRec: rec,
-      armed: true,                    // military hardware keeps its missiles
+      armed: rec.armed !== false,     // military hardware keeps its missiles...
+      airClass: rec.airClass || null, // ...but a freighter is not a fast mover
       name: (rec.model && rec.model.name) || (kind === "heli" ? "Military Gunship" : "Military Jet"),
       // military island models are built +Z-forward at heading 0 (rec supplies
       // an offset if a model deviates — same channel the airport recs use)
@@ -1122,12 +1133,390 @@
     }];
   });
 
+  // ============================================================
+  //  THE PILOT YOU CAN SEE  —  AIR_PILOT_VISIBLE
+  //
+  //  OWNER, on the chase camera: "looks good but you arent in the cockpit."
+  //  He is right twice over. The two purpose-built airframes carried a PILOT
+  //  SILHOUETTE that was a torso box, a head box and a stick — the pilot of a
+  //  1998 game — and every other flyable machine in the world (the base jets,
+  //  the bomber, a hijacked airliner, a stolen light single) carried nothing
+  //  at all, so taking off in one left an empty canopy sliding across the sky.
+  //
+  //  NO NEW BODY SYSTEM IS WRITTEN HERE. The rig is `CBZ.makeCharacter` — the
+  //  same rig as every pedestrian, cop and passenger in the game (the Rome
+  //  test: the asset is the person, the flight suit is a costume) — and the
+  //  pose is `CBZ.animChar` with `ch.sitting` and a declared `seatRef`, which
+  //  is the shared chair solve that puts feet on the deck instead of on the
+  //  cushion. The seat KIND is "helm", so the body gets character.js's
+  //  existing DRIVE posture: hands out to the controls, shins reaching for the
+  //  pedals, head up. That posture already existed and had exactly one
+  //  consumer; a pilot is what it was describing all along.
+  //
+  //  WHERE THE BODY SITS IS NOT AUTHORED EITHER. `CBZ.cockpitSpec(craft)`
+  //  already solves an eye point, a floor and a cushion for ANY airframe
+  //  (city/cockpit.js derives them from the model), so the seat comes out of
+  //  the cockpit generator and a new aeroplane costs zero lines — the same
+  //  bargain the cockpit itself makes.
+  //
+  //  IT IS COSMETIC, AND THAT IS DELIBERATE. A body that represents the
+  //  PLAYER must not be a shootable NPC sitting in the player's own seat.
+  //  Crewed NPC aircraft keep going through `CBZ.npcLife.attach` (the real
+  //  roster bodies, with consequences — city/aircraft.js); this is the mirror
+  //  in the glass, and it wears the player's own outfit through
+  //  `CBZ.cityRecolorRig` so the man in the canopy is recognisably you.
+  //
+  //  OFF → the old box silhouette (still built, still toggled) and nothing
+  //  else. Degrade-safe at every step: no makeCharacter, no recolor, no
+  //  animChar, no cockpitSpec — each one falls back rather than throwing.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.AIR_PILOT_VISIBLE == null) CBZ.CONFIG.AIR_PILOT_VISIBLE = true;
+  function pilotOn() { return !CBZ.CONFIG || CBZ.CONFIG.AIR_PILOT_VISIBLE !== false; }
+  const pilotRigs = [];                 // every live cosmetic pilot, ticked below
+
+  // WHERE A BODY SITS IN THIS AIRFRAME, in the canonical cockpit frame
+  // (+Z nose). Everything is read off the cockpit spec; the fallbacks are the
+  // costume defaults, so a craft the generator cannot measure still seats a
+  // pilot roughly right rather than at the origin.
+  function pilotSeat(craft) {
+    let spec = null;
+    try { spec = CBZ.cockpitSpec ? CBZ.cockpitSpec(craft) : null; } catch (e) { spec = null; }
+    if (!spec || !spec.eye) return null;
+    const sc = +spec.scale > 0 ? +spec.scale : 1;
+    const eye = spec.eye;
+    // floorDrop and backDrop are eye-relative by construction, so the floor
+    // plane and the cushion above it come straight out of the costume.
+    const floorDrop = (spec.tub && +spec.tub.floorDrop > 0) ? +spec.tub.floorDrop : 1.10 * sc;
+    const backDrop = (spec.seat && +spec.seat.backDrop > 0) ? +spec.seat.backDrop : 0.60 * sc;
+    return {
+      x: eye.x, y: eye.y - floorDrop, z: eye.z + 0.04,
+      eyeY: eye.y,
+      cushion: Math.max(0.18, floorDrop - backDrop),
+      cls: spec.id,
+      // POSTURE FOLLOWS THE CONTROLS. character.js's "drive" posture reaches
+      // the hands OUT to a rim — correct for a yoke, and on a fighter it puts
+      // the pilot's forearm through the nose skin (measured, third plate).
+      // A stick aircraft is flown with the hands down, which is the ordinary
+      // upright chair pose. The spec already knows which this airframe is.
+      yoke: !!(spec.stick && spec.stick.type === "yoke"),
+    };
+  }
+  CBZ.airPilotSeat = pilotSeat;
+
+  // ONE node per airframe that converts the canonical cockpit frame into the
+  // model's own: undoes the model yaw offset (exactly as city/cockpit.js's
+  // anchor does) and cancels the group's authored scale, so seats are written
+  // in real metres whatever the model was drawn at. Same shape as
+  // city/aircraft.js's crewNode, for the same reason.
+  function pilotNode(craft) {
+    const grp = craft && craft.group;
+    if (!grp) return null;
+    const ud = grp.userData || (grp.userData = {});
+    if (ud._airSeatNode && ud._airSeatNode.parent === grp) return ud._airSeatNode;
+    const n = new THREE.Group();
+    n.name = "aircrew";
+    n.rotation.y = -(craft.modelYawOffset || 0);
+    const s = (grp.scale && grp.scale.x) || 1;
+    n.scale.setScalar(s > 0.001 ? 1 / s : 1);
+    n.userData.dynamic = true;            // never batch/freeze a node carrying rigs
+    n.userData.pilot = true;              // cockpitSightAudit skips crew, like the silhouette
+    grp.add(n);
+    ud._airSeatNode = n;
+    return n;
+  }
+  CBZ.airPilotNode = pilotNode;
+
+  // A FLIGHT SUIT IS A COSTUME (Rome test). Colours only — the rig underneath
+  // is the game's one human.
+  const SUIT = {
+    fighter:  { legs: 0x3c4436, torso: 0x46503c, collar: 0x323a2c, arms: 0x46503c, skin: 0xe8c39a, hair: 0x2a2018, shoes: 0x22242a, cap: 0x1b2028 },
+    heli:     { legs: 0x33383f, torso: 0x3c434c, collar: 0x2a2f36, arms: 0x3c434c, skin: 0xd9a877, hair: 0x1d1a16, shoes: 0x22242a, cap: 0x1b2028 },
+    airliner: { legs: 0x1b2130, torso: 0xe9edf2, collar: 0x1b2130, arms: 0xe9edf2, skin: 0xe8c39a, hair: 0x33291f, shoes: 0x14161a, cap: 0x151c2e },
+    bomber:   { legs: 0x2c3128, torso: 0x343a2e, collar: 0x22261e, arms: 0x343a2e, skin: 0xc99a6d, hair: 0x201a14, shoes: 0x22242a, cap: 0x1b2028 },
+    prop:     { legs: 0x3a4152, torso: 0xd8d3c4, collar: 0x3a4152, arms: 0xd8d3c4, skin: 0xe8c39a, hair: 0x54402a, shoes: 0x2b2b2b, cap: 0 },
+  };
+
+  // SETTLE THE POSE NOW, NOT OVER THE NEXT THIRD OF A SECOND. character.js's
+  // chair solve is written in damp(current, target, rate, dt) — it CONVERGES
+  // rather than snapping, which is right for a body that sits down in front of
+  // you and wrong for one that must already be sitting the first time it is
+  // drawn. One step with a large dt drives every damp onto its target
+  // (exp(-12) ≈ 6e-6), so the body is seated on frame one whether that frame
+  // is a boarding, a chase camera or a standalone studio render of the model.
+  function settlePose(ch) {
+    if (!CBZ.animChar) return false;
+    try { CBZ.animChar(ch, 0, 1.0); } catch (e) { return false; }
+    return true;
+  }
+  // How far above its own root plane does this rig's EYE sit, in the pose it
+  // is currently in? Measured off the rig, never assumed: the crown of the
+  // head is the top of its bounding box (the drive posture puts the hands out
+  // in front at chest height, never above the head), and a human's eyes sit
+  // just under a head-radius below the crown.
+  const _pb = new THREE.Box3();
+  function rigEyeHeight(ch) {
+    if (!ch || !ch.group) return null;
+    const g = ch.group;
+    const keptY = g.position.y;
+    g.position.y = 0;                       // measure from the root plane
+    g.updateMatrixWorld(true);
+    let out = null;
+    try {
+      _pb.setFromObject(g);
+      if (Number.isFinite(_pb.max.y) && _pb.max.y > 0.2) {
+        const hs = (g.userData && +g.userData.humanScale > 0) ? +g.userData.humanScale : 0.7;
+        out = _pb.max.y - 0.19 * hs;        // crown → eye
+      }
+    } catch (e) { out = null; }
+    g.position.y = keptY;
+    g.updateMatrixWorld(true);
+    return out;
+  }
+
+  // HOW DEEP IS THE AIRFRAME UNDER THIS SEAT?
+  //
+  // The cockpit spec's floor is a VIRTUAL tub — where the costume says a floor
+  // belongs, which is the right answer for the first-person view and the wrong
+  // one for a body somebody can see from outside. On a fighter the two
+  // disagree by ~0.2 m and the difference is a shin hanging out through the
+  // belly (measured, on the second plate of this feature).
+  //
+  // So the airframe is asked directly, and asked at the VERTEX level: a
+  // sculpted fuselage's bounding box is its widest mid-section, which on a
+  // taperBox nose is a fifth of a metre deeper than the skin actually is at
+  // the cockpit station. Runs once per airframe, at build.
+  const _fv = new THREE.Vector3(), _fm = new THREE.Matrix4(), _fi = new THREE.Matrix4();
+  function bellyUnderSeat(craft, node, seat) {
+    const grp = craft && craft.group;
+    if (!grp || !node) return null;
+    grp.updateWorldMatrix(true, true);
+    node.updateWorldMatrix(true, false);
+    _fi.copy(node.matrixWorld).invert();
+    const z0 = seat.z - 0.10, z1 = seat.z + 0.55;      // hips to toes
+    const xr = 0.34;                                   // the width of a seated man
+    let lo = null;
+    grp.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || !o.geometry.attributes) return;
+      const ud = o.userData || {};
+      if (ud.pilot || ud.cockpit || ud.gear) return;
+      const pos = o.geometry.attributes.position;
+      if (!pos || pos.count > 4000) return;            // a pathological mesh is not worth it
+      _fm.copy(_fi).multiply(o.matrixWorld);
+      for (let i = 0; i < pos.count; i++) {
+        _fv.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(_fm);
+        if (_fv.z < z0 || _fv.z > z1) continue;
+        if (_fv.x < seat.x - xr || _fv.x > seat.x + xr) continue;
+        if (_fv.y > seat.eyeY) continue;               // above the eye is not a floor
+        if (lo == null || _fv.y < lo) lo = _fv.y;
+      }
+    });
+    return lo;
+  }
+
+  // Build (once) the cosmetic body for a craft and park it in the seat. The
+  // craft keeps it on `userData.pilot`, which is the handle the whole engine
+  // already knows: enterAircraft shows it, exitAircraft hides it,
+  // cockpit_view.js hides it while you are inside the head, cockpit.js reads
+  // it for the eye point and cockpitSightAudit skips it. Nothing downstream
+  // learns a new name.
+  function buildPilotRig(craft, opts) {
+    opts = opts || {};
+    if (!pilotOn() || !craft || !craft.group || !CBZ.makeCharacter) return null;
+    const seat = pilotSeat(craft);
+    if (!seat) return null;
+    const node = pilotNode(craft);
+    if (!node) return null;
+    let ch = null;
+    try { ch = CBZ.makeCharacter(Object.assign({}, SUIT[seat.cls] || SUIT.fighter)); } catch (e) { ch = null; }
+    if (!ch || !ch.group) return null;
+    ch.sitting = true;
+    // the shared chair solve: sink the model until the hips are ON the cushion
+    // and the soles are ON the deck. "helm" selects the DRIVE posture.
+    ch.seatRef = { cushion: seat.cushion, floorBelow: 0, kind: seat.yoke ? "helm" : "cockpit" };
+    ch.group.position.set(seat.x, seat.y, seat.z);
+    ch.group.rotation.y = 0;              // canonical +Z is the nose
+    settlePose(ch);
+    // PUT HIS EYES WHERE THE COCKPIT SAYS THE EYES ARE. Deriving the seat from
+    // the cockpit FLOOR and trusting the chair solve to land the head at the
+    // design eye assumes the rig's proportions — and it does not: the first
+    // plate of this feature had the pilot's head and shoulders standing
+    // proud of his own canopy. The rig knows its own height, so measure it
+    // (once, after the pose has settled) and drop it until the eyes are on the
+    // eye point. Self-correcting for a child rig, a big build, or any future
+    // change to HUMAN_SCALE.
+    let eyeAbove = rigEyeHeight(ch);
+    if (eyeAbove != null && Number.isFinite(seat.eyeY)) {
+      // ...AND HE HAS TO FIT INSIDE THE AEROPLANE. If the seated body is
+      // taller than the space between the design eye and the skin under the
+      // seat, shrink him until he is not. This game's people are deliberately
+      // large (a 2.05 m eye height) and a real fighter's cockpit is shallow,
+      // so a few per cent is normal and invisible through tinted glass —
+      // a boot sticking out of the keel is not. Floor of 0.62 so a
+      // pathological measurement can never produce a doll.
+      const belly = bellyUnderSeat(craft, node, seat);
+      if (belly != null && eyeAbove > 0.2) {
+        const room = seat.eyeY - belly - 0.05;
+        const fit = Math.max(0.62, Math.min(1, room / eyeAbove));
+        if (fit < 0.999) {
+          ch.group.scale.setScalar(fit);
+          eyeAbove *= fit;
+        }
+      }
+      ch.group.position.y = seat.eyeY - eyeAbove;
+    }
+    ch.group.visible = false;             // shown when somebody takes the controls
+    ch.group.userData.pilot = true;
+    ch.group.userData.dynamic = true;
+    // cockpit.js must never derive the eye point from the body it seated
+    // (see eyeFromPilot) — this tag is that refusal.
+    ch.group.userData.charRig = true;
+    node.add(ch.group);
+    const rig = { ch: ch, craft: craft, group: ch.group };
+    pilotRigs.push(rig);
+    craft.group.userData.pilotRig = rig;
+    return rig;
+  }
+
+  // THE PLAYER'S OWN CLOTHES. cityRecolorRig is the same paint path the
+  // wardrobe, the portrait and the live player body all run through, so the
+  // man in the canopy is wearing what you are wearing. Deferred to boarding
+  // rather than done at build: the airframe is built long before anyone gets
+  // in it, and the player changes clothes.
+  function dressAsPlayer(rig) {
+    if (!rig || rig.playerDressed || !CBZ.cityRecolorRig) return false;
+    const w = (CBZ.cityOutfitGetEffective && CBZ.cityOutfitGetEffective()) ||
+              (CBZ.cityOutfitGet && CBZ.cityOutfitGet()) || null;
+    if (!w || !w.colors) return false;
+    try { CBZ.cityRecolorRig(rig.ch, w.colors, w); } catch (e) { return false; }
+    rig.playerDressed = true;
+    return true;
+  }
+
+  // The ONE call every boarding path makes. Idempotent, and it never replaces
+  // a body that is already there: an airframe that shipped its own crew (the
+  // airliner's captain, a gunship's roster pilot) keeps it.
+  function ensurePilot(craft, opts) {
+    opts = opts || {};
+    if (!pilotOn() || !craft || !craft.group) return null;
+    const ud = craft.group.userData || {};
+    if (ud.pilotRig) {
+      // the body was built with the airframe; boarding is what puts YOUR
+      // clothes on it
+      if (opts.player) dressAsPlayer(ud.pilotRig);
+      return ud.pilotRig;
+    }
+    const rig = buildPilotRig(craft, opts);
+    if (!rig) return null;
+    if (opts.player) dressAsPlayer(rig);
+    // Replace the old box silhouette rather than stacking a real body on top
+    // of it — two pilots in one seat is worse than none.
+    if (ud.pilot && ud.pilot !== rig.group) {
+      ud.pilotBox = ud.pilot;
+      ud.pilotBox.visible = false;
+    }
+    ud.pilot = rig.group;
+    return rig;
+  }
+  CBZ.airEnsurePilot = ensurePilot;
+
+  // Seat a body in a bare GROUP (a builder's output, before any craft record
+  // exists). The purpose-built airframes call this at the end of their build
+  // for exactly the reason they build a seat and a headrest there: an
+  // aeroplane comes with a pilot's place in it, and boarding is what makes him
+  // VISIBLE, not what makes him exist. It is also what lets a standalone
+  // studio shot of the model show a crew.
+  function seatCosmeticPilot(grp, airClass, name) {
+    if (!pilotOn() || !grp) return null;
+    try { return ensurePilot({ group: grp, airClass: airClass, displayName: name || "", modelYawOffset: 0 }); }
+    catch (e) { return null; }
+  }
+  CBZ.airSeatCosmeticPilot = seatCosmeticPilot;
+
+  // SEAT A REAL NPC IN THE SAME PLACE. city/aircraft.js scrambles roster
+  // soldiers into base fighters and bombers; those are npclife bodies with
+  // consequences (shootable through the glass, kill the pilot and the aircraft
+  // falls), so they go in through CBZ.npcLife.attach and NOT through the
+  // cosmetic path above. What they must NOT have is a second opinion about
+  // where a seat is — a head through the canopy is the same defect whoever is
+  // wearing it. So the anchor is solved HERE, by the same code, including the
+  // eye correction: attach with the rig's own seated eye on the design eye
+  // point rather than with its boots on a virtual floor.
+  //   craftLike — { group, airClass, displayName, modelYawOffset }
+  //   actor     — a cityPeds actor with .char and .group
+  CBZ.airSeatActor = function (craftLike, actor) {
+    if (!pilotOn() || !craftLike || !actor || !actor.group) return false;
+    if (!CBZ.npcLife || !CBZ.npcLife.attach) return false;
+    const seat = pilotSeat(craftLike);
+    const node = seat ? pilotNode(craftLike) : null;
+    if (!seat || !node) return false;
+    const ch = actor.char;
+    let y = seat.y;
+    if (ch) {
+      // pose it the way the anchor is about to, then ask how tall it is
+      ch.sitting = true;
+      ch.seatRef = { cushion: seat.cushion, floorBelow: 0, kind: seat.yoke ? "helm" : "cockpit" };
+      settlePose(ch);
+      const eyeAbove = rigEyeHeight(ch);
+      if (eyeAbove != null && Number.isFinite(seat.eyeY)) y = seat.eyeY - eyeAbove;
+    }
+    actor.group.visible = true;
+    actor._seatHold = true;                 // syncAttached defends the facing
+    let ok = false;
+    try {
+      ok = CBZ.npcLife.attach(actor, node, {
+        x: seat.x, y: y, z: seat.z, yaw: 0, pose: "sit", state: "sit",
+        cushionH: seat.cushion, floorBelow: 0,
+      });
+    } catch (e) { ok = false; }
+    // attach rebuilds seatRef from the anchor and has no `kind` channel, so
+    // the posture is re-declared here rather than by widening its API.
+    if (ok && actor.char && actor.char.seatRef) actor.char.seatRef.kind = seat.yoke ? "helm" : "cockpit";
+    if (ok) actor.inCar = false;
+    return ok;
+  };
+
+  // Tick: one shared rig animation per VISIBLE cosmetic pilot. A parked
+  // aeroplane's pilot is hidden and costs nothing; the damped chair solve
+  // needs frames to settle, so it runs while you can see him and not
+  // otherwise.
+  CBZ.onUpdate(12.5, function (dt) {
+    if (!pilotRigs.length || !CBZ.animChar) return;
+    for (let i = pilotRigs.length - 1; i >= 0; i--) {
+      const r = pilotRigs[i];
+      const grp = r.craft && r.craft.group;
+      // A craft that left the scene (disposed, or an external airframe handed
+      // back to the airport) drops its rig AND its handle, so a later boarding
+      // builds a fresh body instead of animating one nothing can see.
+      // `wasParented` is the difference between "orphaned" and "not spawned
+      // yet": a builder seats its pilot BEFORE the group is added to the world.
+      if (grp && grp.parent) r.wasParented = true;
+      if (!grp || (r.wasParented && !grp.parent) || r.craft.destroyed) {
+        pilotRigs.splice(i, 1);
+        if (grp && grp.userData && grp.userData.pilotRig === r) {
+          grp.userData.pilotRig = null;
+          if (grp.userData.pilot === r.group) grp.userData.pilot = grp.userData.pilotBox || null;
+        }
+        if (r.group.parent) r.group.parent.remove(r.group);
+        continue;
+      }
+      // hidden pilot, or an airframe the ring cull has switched off — either
+      // way nobody can see this body and the chair solve can wait
+      if (!r.group.visible || grp.visible === false) continue;
+      try { CBZ.animChar(r.ch, 0, dt); } catch (e) {}
+    }
+  });
+
   function enterAircraft(craft) {
     if (!craft || !craft.group) return false;
     const P = CBZ.player; if (!P) return false;
     if (P._vehicle && CBZ.cityExitVehicle) CBZ.cityExitVehicle();   // can't fly from a car
     P.driving = true;                       // physics.js yields the transform
     P._aircraft = craft;
+    // A REAL BODY IN THE SEAT. Every route to the controls comes through here,
+    // so every flyable airframe — the two purpose-built ones, a commandeered
+    // base jet, the bomber, a hijacked airliner — gets a pilot the moment it
+    // is occupied, wearing what the player is wearing.
+    ensurePilot(craft, { player: true });
     // someone's at the controls now — show the cockpit pilot through the glass
     if (craft.group.userData && craft.group.userData.pilot) craft.group.userData.pilot.visible = true;
     P.vy = 0; P.grounded = false;
@@ -1176,6 +1565,13 @@
     // is actually flying, bailout.js takes ownership of BOTH halves instead:
     // the falling body and the pilotless machine. It returns true when it has
     // done so, and this function must then do nothing at all.
+    // THE SEAT EMPTIES ON EVERY EXIT, INCLUDING THIS ONE. The bailout branch
+    // returns before the hide below, so a pilotless machine used to fall out
+    // of the sky with its pilot still sitting in it — invisible enough as a
+    // torso box, unmissable now that it is a body.
+    if (craft && craft.group && craft.group.userData && craft.group.userData.pilot) {
+      craft.group.userData.pilot.visible = false;
+    }
     if (craft && CBZ.cityBailOut && CBZ.cityBailOut(craft)) { P.driving = false; P._aircraft = null; return; }
     P.driving = false; P._aircraft = null;
     if (craft && craft.group && craft.group.userData && craft.group.userData.pilot) craft.group.userData.pilot.visible = false;

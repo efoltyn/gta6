@@ -114,6 +114,9 @@
       // registry has minted at least one identity; commit()/applyToGame()
       // round-trip it the same way netpersist.js's worldBlob/applyWorld do.
       identities: null,
+      // city/cashstore.js's slice: {owned, escrow, bags:[{a,dyed}], homes,
+      // crewDebt, crewPaid, banked, deposits}. null until the first deposit.
+      cashStore: null,
       lastSaved: now(),
     };
   }
@@ -204,6 +207,16 @@
     // used to sit empty forever — nothing wrote to it).
     w.assets = w.assets || { properties: [], businesses: [], vehicles: [], weapons: [] };
     w.assets.vehicles = w.cityGarage.slice();
+    /* PHYSICAL CASH AT THE PLACES YOU OWN (city/cashstore.js): the duffels on
+       the Freeport racks and in house floor safes. This one MUST ride the
+       ledger or the whole point of the feature dies on reload — the bags are
+       real objects with real value and the shelf they sit on is the only
+       record of them. cashstore.js stamps this itself on every deposit; doing
+       it here as well is what puts it in the 5 s autosave and in the
+       multiplayer collector's blob (cityWorldCollect calls this function). */
+    if (CBZ.cashStore && CBZ.cashStore.snapshot) {
+      try { w.cashStore = CBZ.cashStore.snapshot(); } catch (e) {}
+    }
     // ---- gang state. g.playerGang carries LIVE ped refs (members/boss/turf)
     // that are NOT JSON-safe (circular THREE refs would throw inside copy()
     // and abort the whole save) — snapshot only the safe identity subset.

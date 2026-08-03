@@ -490,7 +490,61 @@
       });
     }
     w.assets.properties = list;
+    /* THE PORTFOLIO ABOVE IS A REPORT, NOT A SAVE — every field in it is a
+       formatted display string and nothing ever read one back, so a reload
+       handed the deeds back to the corporations. That was survivable while a
+       house was only a spawn point; it is not survivable now that a house is
+       somewhere you can leave money (city/cashstore.js's floor safe keys its
+       bags on rec.id), because the safe would outlive the ownership of the
+       building it is in. The ids are what the game actually needs, they are
+       deterministic per seed (`p<lotIndex>`), and they are two lines. */
+    const own = [];
+    for (const id in ownedSet()) if (ownedSet()[id]) own.push(id);
+    w.assets.realtyOwned = own;
   }
+  /* …and the other half. Hydration is idempotent and self-validating: an id
+     that no longer matches a listing in THIS world is dropped rather than
+     resurrected, so a save carried to a different seed cannot hand you a deed
+     to a lot that does not exist. */
+  let _hydrated = false;
+  function hydrateOwned() {
+    if (_hydrated) return;
+    const r = reg(); if (!r) return;          // no arena yet — try again later
+    _hydrated = true;
+    if (!CBZ.cityWorldEnsure) return;
+    let w = null;
+    try { w = CBZ.cityWorldEnsure(); } catch (e) { w = null; }
+    const list = w && w.assets && w.assets.realtyOwned;
+    if (!Array.isArray(list)) return;
+    const set = ownedSet();
+    for (let i = 0; i < list.length; i++) {
+      const rec = r.byId[list[i]];
+      if (!rec) continue;
+      set[rec.id] = true; rec.ownerId = "player";
+      takeResidence(rec);
+    }
+  }
+
+  /* WHICH HOUSES ARE YOURS, as PLACES — the seam city/cashstore.js consumes
+     to put a floor safe inside a home you bought on [Z] without re-deriving
+     one word of this file's ownership rules. Doors first (a safe belongs
+     inside the threshold), lot centre as the fallback for a lot with no
+     stamped door. */
+  CBZ.cityRealtyOwnedHomes = function () {
+    const r = reg(); if (!r) return [];
+    const out = [];
+    for (const rec of r.listings) {
+      if (rec.category !== "residence" || !isOwned(rec)) continue;
+      const b = rec.lot.building, d = (b && b.door) || null;
+      out.push({
+        id: rec.id, name: nameOf(rec), value: mval(rec),
+        tier: rec.homeTier || 0, isHome: isHome(rec),
+        x: d ? d.x : rec.lot.cx, z: d ? d.z : rec.lot.cz,
+        cx: rec.lot.cx, cz: rec.lot.cz, lot: rec.lot,
+      });
+    }
+    return out;
+  };
 
   function charge(amt) {
     amt = Math.max(0, Math.round(+amt) || 0);
@@ -815,6 +869,7 @@
     // controls + list order untouched, so the chosen sort sticks and the dropdown
     // actually works. Structure only rebuilds on a user action (render()).
     if (isOpen()) { refreshAllValues(); liveUpdate(); }
+    hydrateOwned();          // one shot, the first tick the arena exists
     incomeT -= dt; if (incomeT > 0) return;
     incomeT = INCOME_TICK;
     const r = reg(); if (!r) return;
@@ -891,6 +946,8 @@
   // ---- reset per life --------------------------------------------------------
   CBZ.cityZillowReset = function () {
     g.cityRealtyOwned = {};
+    _hydrated = false;       // a fresh arena re-reads the ledger
+
     g.cityRentals = {}; g.cityMortgages = {}; g.cityTenants = {}; g.cityRentedHome = null;
     // apex-home airpower (penthouse → helicopter; bought hangar → jet) is per-run
     g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false;

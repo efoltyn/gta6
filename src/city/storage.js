@@ -68,6 +68,26 @@
     { id: "garage2",   name: "Ten-Car Block",    emoji: "", kind: "garage",    cost: 140000,  vehCap: 10, anchor: "carlot",  off: { dx: 7, dz: 0 },  blurb: "A whole storage block. Ten bays for the collection." },
     { id: "warehouse", name: "Dockside Warehouse", emoji: "", kind: "warehouse", cost: 450000,  vehCap: 6, ammoCap: 600, anchor: "beach", blurb: "A waterfront unit — six vehicle bays AND a steel AMMO LOCKER. Your armory." },
     { id: "hangar",    name: "Private Hangar",   emoji: "", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-22 needs — land it inside to keep it." },
+    /* THE FREEPORT — the top of this ladder, and the first property in the
+       game that is a PLACE ON ITS OWN LAND rather than a spot on somebody
+       else's. It is city/govcomplex.js's `freeport` COMPLEXES row: a bonded
+       yard outside the city with a fence, a gate, a shed, a loading dock,
+       container stacks and a lit cargo strip.
+
+       WHY IT IS A ROW HERE AND NOT A SECOND PROPERTY SYSTEM: this file
+       already owns "which places does the player own", the [G] menu, the
+       vehicle bays, the ammo locker and the save slot. The Freeport needs
+       all five, so it takes them — and city/cashstore.js adds the ONE thing
+       this file has never had a word for, which is money you can stack on a
+       shelf. Ownership is read from here by that file; there is no second
+       boolean anywhere.
+
+       PRICE: $1.75M, between wealth.js's casino floor ($1.2M) and its REIT
+       tower ($3.5M) — more than any single building you can buy, less than
+       owning a skyline. And it is the only property in the game you can pay
+       for in DUFFELS at the gate (cashstore.js's escrow), which is what
+       stops the first unbankable vault haul from being worthless. */
+    { id: "freeport",  name: "Freeport Compound", emoji: "", kind: "compound", cost: 1750000, vehCap: 8, ammoCap: 900, anchor: "freeport", blurb: "A bonded freight yard on its own land — dock, racks, container yard and a cargo strip. The only place in the world you can bank a duffel." },
   ];
   const PROP_BY_ID = {}; for (const p of PROPERTIES) PROP_BY_ID[p.id] = p;
 
@@ -100,7 +120,17 @@
   }
   function owns(id) { return !!state().owned[id]; }
   function ownsKind(kind) { for (const p of PROPERTIES) if (p.kind === kind && owns(p.id)) return true; return false; }
-  function ownedWarehouse() { return owns("warehouse") ? PROP_BY_ID.warehouse : null; }
+  // the AMMO LOCKER lives at the dockside warehouse OR the Freeport shed —
+  // both are "a place with steel shelves you own", and the locker cap is the
+  // best one you hold rather than the sum (one armory, not two).
+  function ownedWarehouse() {
+    let best = null;
+    for (const p of PROPERTIES) {
+      if (!p.ammoCap || !owns(p.id)) continue;
+      if (!best || p.ammoCap > best.ammoCap) best = p;
+    }
+    return best;
+  }
   // total ground-vehicle storage capacity across owned garages + warehouse
   function vehCapTotal() { let c = 0; for (const p of PROPERTIES) if (owns(p.id)) c += (p.vehCap || 0); return c; }
   function storedVehicleCount() { return state().vehicles.length; }
@@ -179,12 +209,30 @@
     if (CBZ.cityMegaTower) { try { const t = CBZ.cityMegaTower(); if (t && t.hangar) return { x: t.hangar.x, z: t.hangar.z }; } catch (e) {} }
     return null;
   }
+  // THE FREEPORT'S OWN LAND. city/govcomplex.js placed the plot and published
+  // the gate it pushed a road to; asking that record is the only honest answer
+  // (a guessed offset is how you end up with a beacon inside a fence). Absent
+  // the complex — flag off, or a world where the placer found no clear ground
+  // — this returns null and the row falls back like every other anchor, so the
+  // property is never unreachable.
+  function freeportSpot() {
+    const L = CBZ.govComplexes;
+    if (!L) return null;
+    for (let i = 0; i < L.length; i++) {
+      const s = L[i];
+      if (!s || s.id !== "freeport" || !s.rect) continue;
+      const gt = s.gate || { x: s.cx, z: s.rect.maxZ };
+      return { x: gt.x + 7.5, z: gt.z - 11 };     // just inside the gate, off the lane
+    }
+    return null;
+  }
   function anchorPos(prop) {
     const A = arena(); const fallback = A ? { x: A.center.x, z: A.center.z } : { x: 0, z: 0 };
     let base = null;
     if (prop.anchor === "carlot") base = carlotSpot();
     else if (prop.anchor === "beach") base = beachSpot();
     else if (prop.anchor === "airport") base = airportSpot();
+    else if (prop.anchor === "freeport") base = freeportSpot();
     base = base || fallback;
     return { x: base.x + ((prop.off && prop.off.dx) || 0), z: base.z + ((prop.off && prop.off.dz) || 0) };
   }
@@ -210,7 +258,7 @@
     _spots = [];
     for (const prop of PROPERTIES) {
       const p = anchorPos(prop);
-      const col = prop.kind === "hangar" ? 0x6a7a4a : prop.kind === "warehouse" ? 0x9a6a3a : 0x3a78c9;
+      const col = prop.kind === "hangar" ? 0x6a7a4a : prop.kind === "compound" ? 0xb0761f : prop.kind === "warehouse" ? 0x9a6a3a : 0x3a78c9;
       const b = beacon(p.x, p.z, col);
       _spots.push({ prop, x: p.x, z: p.z, beacon: b });
     }
@@ -240,6 +288,16 @@
   // ============================================================
   function buy(prop) {
     if (owns(prop.id)) { note("You already own the " + prop.name + ".", 1.6); return; }
+    /* THE FREEPORT CLOSES THROUGH cashstore.js, and that is not indirection
+       for its own sake: money already handed over IN BAGS at the gate sits in
+       an escrow that file owns, so the price left to pay is not `prop.cost`.
+       Charging the full figure here would bill the player twice for the same
+       duffels. It grants ownership back through grant() below. */
+    if (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.buy) {
+      CBZ.cashStore.buy();
+      if (open_) render();
+      return;
+    }
     if (!canAfford(prop.cost)) { note("Need " + money(prop.cost) + " (cash + bank) for the " + prop.name + ".", 2.4); sfx("hit"); return; }
     charge(prop.cost);
     state().owned[prop.id] = true;
@@ -253,6 +311,20 @@
     if (open_) render();
   }
 
+  /* GRANT — mark a property owned WITHOUT charging for it, for a caller that
+     has already collected the money its own way (cashstore.js's bag escrow is
+     the first and only one). It is deliberately not a general back door: the
+     id must be a real row, and the ledger write + save is identical to buy()'s
+     so nothing downstream can tell the two apart. */
+  function grant(id) {
+    const prop = PROP_BY_ID[id];
+    if (!prop || owns(id)) return false;
+    state().owned[id] = true;
+    persist();
+    if (open_) render();
+    return true;
+  }
+
   // ============================================================
   //  VEHICLE STORE / RETRIEVE
   // ------------------------------------------------------------
@@ -263,7 +335,7 @@
   //  RETRIEVE: spawn it back as an owned car (CBZ.citySpawnOwnedCar). The jet, if
   //  ever stored, respawns via CBZ.citySpawnStolenJet({owned:true}). ~2-min CD.
   // ============================================================
-  function canStoreVehicleHere(prop) { return prop.kind === "garage" || prop.kind === "warehouse"; }
+  function canStoreVehicleHere(prop) { return prop.kind === "garage" || prop.kind === "warehouse" || prop.kind === "compound"; }
 
   function storeCurrentVehicle() {
     const P = CBZ.player; if (!P) return;
@@ -327,7 +399,7 @@
   // ============================================================
   function stashCount(id) { return state().ammo[id] | 0; }
   function buyAmmo(crate) {
-    if (!owns("warehouse")) { note("You need the warehouse (ammo locker) for that.", 1.8); return; }
+    if (!ownedWarehouse()) { note("You need a warehouse or the Freeport (an ammo locker) for that.", 1.8); return; }
     const cap = ammoCapTotal();
     const have = stashCount(crate.id);
     if (have >= cap) { note(crate.label + " locker is full (" + cap + ").", 1.6); return; }
@@ -340,7 +412,7 @@
     if (open_) render();
   }
   function loadOut() {
-    if (!owns("warehouse")) { note("No ammo locker — buy the warehouse.", 1.8); return; }
+    if (!ownedWarehouse()) { note("No ammo locker — buy the warehouse or the Freeport.", 1.8); return; }
     const s = state(); let moved = 0;
     for (const id in s.ammo) {
       const n = s.ammo[id] | 0;
@@ -383,7 +455,16 @@
 
     if (!owns(prop.id)) {
       html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:8px'>" + prop.blurb + "</div>";
-      actions.push({ label: "Buy — " + money(prop.cost), fn: () => buy(prop) });
+      // THE ONE PROPERTY YOU CAN PART-PAY IN CASH BAGS. cashstore.js holds the
+      // escrow; the desk quotes what is LEFT, so the two figures can never
+      // disagree with each other.
+      const CS = prop.id === "freeport" ? CBZ.cashStore : null;
+      const owe = CS && CS.remaining ? CS.remaining() : prop.cost;
+      if (CS && owe < prop.cost) {
+        html += "<div style='font-size:12px;color:#ffd166;margin-bottom:6px'>Paid down " + money(prop.cost - owe) + " in bags · " + money(owe) + " to go</div>";
+      }
+      if (CS) html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:8px'>Carry duffels to the sale board by the gate to pay in cash.</div>";
+      actions.push({ label: "Buy — " + money(owe), fn: () => buy(prop) });
     } else {
       html += "<div style='font-size:12px;color:#7ed957;margin-bottom:6px'>OWNED ✓</div>";
       if (canStoreVehicleHere(prop)) {
@@ -397,7 +478,20 @@
       if (prop.kind === "hangar") {
         html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:6px'>" + (g.cityOwnsJet ? "Your F-22 lives here." : "Land a STOLEN F-22 inside to keep it.") + "</div>";
       }
-      if (prop.kind === "warehouse") {
+      /* THE STASH. The Freeport is the only property whose contents are
+         MONEY, and the desk reports it the way it reports vehicles: what is
+         physically in the building right now. The verbs that MOVE it live at
+         the racks themselves (you walk to the shelf) — the only one offered
+         here is the wire, because a wire is a thing you do at a desk. */
+      if (prop.kind === "compound" && CBZ.cashStore) {
+        const st = CBZ.cashStore.stored();
+        const owedCrew = CBZ.cashStore.crewDebt ? CBZ.cashStore.crewDebt() : 0;
+        html += "<div style='font-size:12px;color:#ffd166;margin-top:8px'>RACKS · " + st.bags + "/" + st.cap + " bags · " + money(st.value) + "</div>";
+        if (st.stained) html += "<div style='font-size:11px;color:#d98a84'>" + money(st.stained) + " of it is dye-stained (30% fence cut to wire out)</div>";
+        if (owedCrew) html += "<div style='font-size:11px;color:#d98a84'>Crew owed " + money(owedCrew) + " — they take it off the rack as you stock it.</div>";
+        if (st.value > 0) actions.push({ label: "Wire the racks to your account", fn: function () { CBZ.cashStore.bankIt(); render(); } });
+      }
+      if (prop.kind === "warehouse" || prop.kind === "compound") {
         html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";
         for (const c of AMMO_CRATES) {
           actions.push({ label: "Buy " + c.label + " (+" + c.qty + ") — " + money(c.cost) + "  [have " + stashCount(c.id) + "]", fn: () => buyAmmo(c) });
@@ -490,7 +584,10 @@
       const prop = s.prop;
       // CBZ.touchActionPrompt: desktop keeps the exact "[G] …" string; touch
       // renders a tappable verb pill that synthesizes the same G press.
-      if (!owns(prop.id)) showPrompt(CBZ.touchActionPrompt("g", "Buy " + money(prop.cost)));
+      if (!owns(prop.id)) {
+        const owe = (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.remaining) ? CBZ.cashStore.remaining() : prop.cost;
+        showPrompt(CBZ.touchActionPrompt("g", "Buy " + money(owe)));
+      }
       else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", g.cityOwnsJet ? "Hangar" : "Hangar — needs a jet"));
       else showPrompt(CBZ.touchActionPrompt("g", "Storage"));
       return;
@@ -536,7 +633,7 @@
   // ============================================================
   CBZ.cityStorage = {
     PROPERTIES, AMMO_CRATES,
-    owns, buy, state,
+    owns, buy, grant, state,
     storeVehicle: storeCurrentVehicle, retrieveVehicle, vehCapTotal, storedVehicleCount,
     buyAmmo, loadOut, stashCount, ammoCapTotal,
     open: CBZ.cityOpenStorage, close,

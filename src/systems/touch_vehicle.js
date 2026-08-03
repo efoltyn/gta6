@@ -315,6 +315,10 @@
     const LOOK_BTN = pill("tvLook", "LOOK BACK", "tv-sm");   // camera-agent hook; hidden unless CBZ.camLookBack exists
     // VIEW swaps the cockpit/chase camera. Feature-detected the same way LOOK
     // BACK is, so a build without the cockpit files simply never shows it.
+    // VIEW swaps the seated/chase camera. It is the SAME pill for a cockpit
+    // and for a car's driver's seat — one verb, one button, the context picks
+    // the hook (see the tvView handler) — because a thumb should not have to
+    // learn that an aeroplane's inside view is a different button from a car's.
     const VIEW_BTN = pill("tvView", "VIEW", "tv-sm");
     let html = "";
     if (next === "drive") {
@@ -326,7 +330,7 @@
           pill("tvCarBrake", "BRAKE", "tv-big tv-warn") + pill("tvGas", "GAS", "tv-big tv-go") +
         "</div>" +
         '<div class="tv-car-utils">' +
-          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm") +
+          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm") +
         "</div>";
       resetTiltCenter();
     } else if (next === "boat") {
@@ -383,7 +387,14 @@
     // LOOK BACK: hold pins the chase cam over the shoulder (camera agent's
     // feature-detected API — the button only shows once that API exists).
     if (q("tvLook")) holdFn(q("tvLook"), (down) => { if (CBZ.camLookBack) CBZ.camLookBack(down); });
-    if (q("tvView")) tapBtn(q("tvView"), () => { if (CBZ.cockpitToggleView) CBZ.cockpitToggleView(); });
+    // ONE VERB, TWO SEATS. An aircraft's inside view is cockpit_view.js's; a
+    // car's is city/view.js's. The pill asks the aircraft owner first (it is
+    // the one that refuses unless P._aircraft is set, exactly as the [V] key
+    // listeners divide the same job) and falls through to the car.
+    if (q("tvView")) tapBtn(q("tvView"), () => {
+      if (CBZ.player && CBZ.player._aircraft) { if (CBZ.cockpitToggleView) CBZ.cockpitToggleView(); return; }
+      if (CBZ.carFpToggle) CBZ.carFpToggle();
+    });
     if (q("tvChute")) tapBtn(q("tvChute"), () => {
       const st = CBZ.cityChuteState ? CBZ.cityChuteState() : null;
       if (st && st.phase === "canopy") { if (CBZ.cityChuteCut) CBZ.cityChuteCut(); }
@@ -718,12 +729,21 @@
       if (lb.style.display !== want) lb.style.display = want;
     }
     refreshAux();
-    // VIEW appears only once the cockpit files are present (same merge-order
-    // safety as LOOK BACK — neither button may assume its API exists)
+    // VIEW appears only once the file that owns THIS context's inside view is
+    // present (same merge-order safety as LOOK BACK — neither button may
+    // assume its API exists). In a car the pill also stands down when the car
+    // has no cabin to sit in: a bike or a boat gets no button rather than a
+    // button that refuses.
     const vb = btnWrap.querySelector("#tvView");
     if (vb) {
-      const want = CBZ.cockpitToggleView ? "" : "none";
+      const car = mode === "drive";
+      const ok = car
+        ? !!(CBZ.carFpToggle && CBZ.carCabinInfo && CBZ.player && CBZ.player._vehicle &&
+             CBZ.carCabinInfo(CBZ.player._vehicle))
+        : !!CBZ.cockpitToggleView;
+      const want = ok ? "" : "none";
       if (vb.style.display !== want) vb.style.display = want;
+      if (ok && car) vb.classList.toggle("on", !!(CBZ.carFpActive && CBZ.carFpActive()));
     }
     // Once the canopy is out the pull becomes the cut-away — same button, the
     // verb the phase actually offers. (It used to just hide, which on touch
@@ -850,6 +870,7 @@
     V("vehicle-exit", { ctx: "drive/air", key: "F/E", hook: null }); W("vehicle-exit", "#tvExit");
     V("look-back", { ctx: "drive/air", key: "MMB", hook: "camLookBack" }); W("look-back", "#tvLook");
     V("cockpit-view", { ctx: "air", key: "V", hook: "cockpitToggleView" }); W("cockpit-view", "#tvView");
+    V("driver-seat", { ctx: "drive", key: "V", hook: "carFpToggle" }); W("driver-seat", "#tvView");
     V("heli-collective", { ctx: "heli", key: "Space/Ctrl", hook: null }); W("heli-collective", "#tvUp/#tvDown");
     V("wing-throttle", { ctx: "wing", key: "Space/Ctrl", hook: null }); W("wing-throttle", "#tvThrUp/#tvThrDn");
     V("air-missile", { ctx: "air", key: "LMB", hook: "cityAircraftFireMissile" }); W("air-missile", "#tvFire");

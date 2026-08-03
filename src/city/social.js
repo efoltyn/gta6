@@ -83,6 +83,79 @@
   }
   CBZ.cityBond = bondOf;
 
+  /* ===========================================================================
+     WHO THIS PERSON IS WHEN SOMETHING HAPPENS TO THEM — CBZ.cityTraits(ped)
+
+     `relPlayer` above answers "how do they feel about YOU". It cannot answer
+     "what kind of person are they", and every system that needed that has been
+     rolling its own: the prison brain (`games/ai.js`) carries a real
+     {greed, nerve, loyalty, snitch} block that has never run city-side, and
+     the street has been reading `aggr` as a stand-in for courage.
+
+     THIS IS NOT A NEW LEDGER. Three of the four fields are DERIVED from data
+     the ped already carries (aggr · wealth · gang/family · the snitch baseline
+     peds.js already keeps), and the fourth axis of every trait is the person's
+     own POSITION HASH — the same stable per-person channel `cityScare` draws
+     its bolt/freeze decision from. So a trait is not stored state to keep in
+     sync, it is a READING, and the same person always reads the same.
+
+     WHAT MAKES IT NOT A STAT FICTION: every field has a verb in the jack
+     reaction table (vehicles.js) — nerve decides fight-vs-fold, greed decides
+     whether a cornered driver bargains, loyalty decides whether a passenger
+     stays for the driver, snitch decides who calls it in — and `drift` is what
+     makes the trait MOVE: a man dragged out of his car at gunpoint is a little
+     less brave the next time, permanently, on his own record.
+  =========================================================================== */
+  const TRAIT_KEYS = ["greed", "nerve", "loyalty", "snitch"];
+  function traitHash(ped, salt) {
+    // peds.js latches _roleSeedX/_roleSeedZ on first position — the stable
+    // per-person channel. Anything without one (a scripted actor, a headless
+    // harness ped) latches its own once, from wherever it first stood.
+    let x = ped._roleSeedX, z = ped._roleSeedZ;
+    if (x == null || z == null) {
+      if (ped._traitSeedX == null) {
+        ped._traitSeedX = (ped.pos && ped.pos.x) || 0;
+        ped._traitSeedZ = (ped.pos && ped.pos.z) || 0;
+      }
+      x = ped._traitSeedX; z = ped._traitSeedZ;
+    }
+    if (CBZ.hash01) return CBZ.hash01(x, z, salt);
+    const s = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453;
+    return s - Math.floor(s);
+  }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  CBZ.cityTraits = function (ped) {
+    if (!ped) return null;
+    let t = ped._traits;
+    if (!t) {
+      t = ped._traits = { greed: 0, nerve: 0, loyalty: 0, snitch: 0, drift: null };
+      t.drift = { greed: 0, nerve: 0, loyalty: 0, snitch: 0 };
+    }
+    // recomputed from live inputs every read (aggr and wealth genuinely change
+    // during play), then bent by the accumulated drift. No sync problem exists
+    // because nothing is mirrored.
+    const aggr = ped.aggr == null ? 0.4 : ped.aggr;
+    const wealth = ped.wealth == null ? 0.35 : ped.wealth;
+    const armed = ped.armed ? 0.14 : 0;
+    const org = ped.gang || ped.isFamily || ped.recruited || ped.companion ? 0.22 : 0;
+    t.nerve = clamp01(0.15 + aggr * 0.62 + armed + traitHash(ped, 0x7E11) * 0.34 + t.drift.nerve);
+    t.greed = clamp01(0.20 + (1 - wealth) * 0.34 + traitHash(ped, 0x7E12) * 0.40 + t.drift.greed);
+    t.loyalty = clamp01(0.10 + org + traitHash(ped, 0x7E13) * 0.52 + t.drift.loyalty);
+    // snitch: peds.js's own baseline is the truth; relPlayer's driveFlags has
+    // already bent it for how they feel about you. We only read it back.
+    const base = ped.snitch != null ? ped.snitch : (ped._snitch0 != null ? ped._snitch0 : 0.3);
+    t.snitch = clamp01(base + t.drift.snitch);
+    return t;
+  };
+  // PERMANENT bend on one trait — what an experience LEAVES on a person.
+  // Bounded to ±0.45 so a person can be changed but never rewritten.
+  CBZ.cityTraitShift = function (ped, key, amt) {
+    if (!ped || !amt || TRAIT_KEYS.indexOf(key) < 0) return 0;
+    const t = CBZ.cityTraits(ped); if (!t) return 0;
+    t.drift[key] = Math.max(-0.45, Math.min(0.45, (t.drift[key] || 0) + amt));
+    return CBZ.cityTraits(ped)[key];
+  };
+
   // EVENT → axis deltas. The heart of the sim: an action means different things
   // on different axes at once (paying someone buys loyalty AND respect AND a
   // little affection; killing their friend is pure fear+grudge, zero loyalty).
@@ -122,6 +195,25 @@
     defendedGang:{ loyalty: +14, respect: +12, affection: +4 },
     killedRival: { respect: +10, loyalty: +6 },
     broughtTribute:{ loyalty: +9, respect: +7 },
+
+    /* ---- VEHICLE EVENTS (city/vehicles.js's jack path) --------------------
+       OWNER: "i really want the player to have real npcs with stats that are
+       affected by interaction with the world and the player." Being dragged
+       out of your own car at a junction is one of the most common things the
+       player does to a stranger in this game and, until now, it moved NOTHING
+       — the driver was a five-line teleport with no memory of it.
+       It sits between `robbed` (you took a thing) and `beaten` (you put hands
+       on them): a carjacking is a robbery of the biggest thing most people
+       own, done by force, in public. Slightly MORE respect than a mugging
+       (you took a car off them and drove away with it) and slightly less
+       grudge than a beating (they walked away whole). */
+    carjacked:  { fear: +20, grudge: +22, respect: +6, loyalty: -12, affection: -8 },
+    // a passenger who froze in the seat and got driven off with. Terror first:
+    // they were not robbed, they were TAKEN. Ripples hardest of the three.
+    passengerTaken: { fear: +30, grudge: +26, respect: +4, loyalty: -14, affection: -10 },
+    // you drove at them and swerved / braked late. Nobody was hurt, and they
+    // remember you anyway — which is what makes a street feel watched.
+    nearMiss:   { fear: +7, grudge: +4 },
   };
 
   // apply a raw delta map to ONE ped's record (the atomic mutation). Cross-axis
@@ -164,6 +256,9 @@
     // relationship with the FACTION, not just the individual (rippleToCircle
     // pulls up to 4 same-gang within 30u and remaps the goodwill to them).
     ranWork: 0.5, defendedGang: 0.5, killedRival: 0.4, broughtTribute: 0.4,
+    // a carjacking happens in the street in front of people; a kidnapping out
+    // of a back seat is the loudest thing on the block.
+    carjacked: 0.35, passengerTaken: 0.55,
   };
   // turn a direct event into the circle's POV (a witnessed harm becomes
   // "friendHurt"/"friendKilled"; a witnessed kindness becomes mild respect).

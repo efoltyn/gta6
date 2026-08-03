@@ -149,6 +149,12 @@
     // windshield + side glass wrapping the cabin front
     const glass = new THREE.Mesh(taperBox(1.25, 0.62, 1.5, { nz: 0.7, top: 0.62 }), a.glass);
     glass.position.set(0, 0.62, 1.35); grp.add(glass);
+    // TAG THE CANOPY. city/cockpit.js's eye solver looks for exactly this
+    // handle and falls back to a bounding-box guess without it — which, on a
+    // high-wing single, puts the pilot's head in the engine. One line, and it
+    // is what seats the body below (and what would seat a cockpit if anybody
+    // ever flies one of these).
+    grp.userData.canopy = glass;
     // HIGH WING sitting ON the cabin roof — a C172 wing is near-straight, so a
     // plain slab reads right; span 10.6 (~1.33x the 7.9 length), chord 1.55
     const wing = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.24, 1.55, 6, 1, 1), a.white);
@@ -220,6 +226,7 @@
     // bug-eye canopy wrapping the pod nose
     const canopy = new THREE.Mesh(taperBox(1.35, 0.95, 1.9, { nz: 0.5, tz: 0.9, top: 0.45 }), a.glass);
     canopy.position.set(0, 0.42, 1.35); grp.add(canopy);
+    grp.userData.canopy = canopy;        // the eye handle (see buildGAPlane)
     // whip-thin tail boom + small fin + tailplane stubs
     const boom = new THREE.Mesh(taperBox(0.44, 0.44, 4.4, { tz: 0.5, top: 0.85, bot: 0.85 }), a.white);
     boom.position.set(0, 0.32, -3.3); grp.add(boom);
@@ -606,6 +613,24 @@
       // byte-identical per seed.
       refreshClear(t, true);
       root.add(grp);
+      // SOMEBODY IS FLYING IT. The heliAudit census below has always reported
+      // these craft as `crew: 1` on the argument that "a light single flown by
+      // its owner IS a crewed aircraft" — which was true of the bookkeeping and
+      // false of the world: the canopy was empty. One shared call
+      // (playeraircraft.js AIR_PILOT_VISIBLE) seats the game's ordinary
+      // character rig on the derived cockpit seat, so the claim and the
+      // aeroplane now agree. Four craft, one body each, animated only while
+      // the airframe is inside the visibility ring.
+      if (CBZ.airEnsurePilot) {
+        const like = {
+          group: grp, airClass: isHeli ? "heli" : "prop",
+          displayName: isHeli ? "Light Heli" : "Light Single", modelYawOffset: 0,
+        };
+        try {
+          const rig = CBZ.airEnsurePilot(like);
+          if (rig) { rig.group.visible = true; t.pilotRig = rig; }
+        } catch (e) { /* a fleet must never fail to build over a passenger */ }
+      }
       list.push(t);
     }
     return list;

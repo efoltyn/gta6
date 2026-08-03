@@ -218,7 +218,25 @@
     const shallow = dep < (a.swimDepth || 2) * 1.4;
     const hidden = s.state === "vanish" || s.state === "disengage";
     const finR = ((s.opts && s.opts.senseR) || SENSE_R) * FIN_F;
-    const want = (!a.dead && ON() && shallow && !hidden && dist < finR) ? 1 : 0;
+    // THE PROXY DORSAL IS A STAND-IN FOR A BODY YOU CANNOT SEE. It exists
+    // because the body is hidden past SHOW_F * senseR and the fin has to keep
+    // cutting the surface anyway (see the header). The moment the real animal
+    // is drawn CRISP, its own authored dorsal is doing that job, and a second
+    // cone at the waterline is the "another fin above the fin" half of the
+    // owner's report — literally two dorsals on one shark. So the proxy fin
+    // yields to the body, on the same eased fade, and no species is named.
+    //
+    // THE TEST IS THIS FILE'S OWN showR, NOT `grp.visible`. wildlife.js's LOD
+    // keeps an animal's group visible out to 360 u at high quality, so a bare
+    // visibility check would suppress the fin across the whole 68-137 u band
+    // where the fin IS the encounter — that would delete the dread cue in the
+    // name of fixing a duplicate. This mirrors sharkBrain's own crispness
+    // expression exactly, so the two can never disagree about which of the
+    // two dorsals the player is looking at.
+    const showR = ((s.opts && s.opts.senseR) || SENSE_R) * SHOW_F;
+    const crisp = dist < showR || s.state === "rush" || s.state === "seize";
+    const bodyDrawn = grp.visible !== false && crisp;
+    const want = (!a.dead && ON() && shallow && !hidden && !bodyDrawn && dist < finR) ? 1 : 0;
     // The SHADOW has a wider envelope than the fin: any body within
     // SHADOW_DEPTH of the surface casts one, fin up or not — but it honours
     // `hidden` exactly like the fin, because predator.js's vanish beat only
@@ -452,17 +470,35 @@
   // white ~0.7m INSIDE the sand. When the two cannot both be satisfied (water
   // shallower than the body) the bed wins and the dorsal breaks the surface,
   // which is both correct and the scarier read anyway.
+  //
+  // THE FLYING SHARK (owner, 2026-08-03: "you see their fin poking out of the
+  // water correctly, but then you see the full shark and another fin above the
+  // fin, floating"). That bed clamp asked CBZ.floorAt, and CBZ.floorAt IS NOT A
+  // SEABED: city/world.js clamps every ground provider through Math.max(0,real),
+  // so over the whole ocean it answers exactly 0 — roughly half a metre ABOVE
+  // mean sea level. So `lo` was `0 + scale*0.9` EVERYWHERE, and the "never in
+  // the bed" clamp fired in 1.9 km of open water, lifting a 1.2-scale great
+  // white to y=+1.08 with the live surface at -0.41. Measured, not guessed:
+  // 1.5 m of daylight under the body, while proxy() went on drawing its dorsal
+  // correctly at surf+0.04 — the second fin, below the flying shark, in the
+  // owner's screenshot. The bed now comes from the one place that knows it
+  // (city/waterfield.js's bathymetry, via wildlife.js's shared marine law), and
+  // that law also caps how far a bed may ever lift a body: a stranded shark
+  // shows its back, it does not take off.
   function depth(a, s, dt, t) {
     const grp = a.group;
     const surf = surfaceAt(grp.position.x, grp.position.z, t);
     s.dive += (s.diveWant - s.dive) * Math.min(1, dt * (s.meg ? 0.85 : 1.3));
     let y = surf - s.dive;
-    const sub = (a.swimDepth || 2) * 0.92;
+    const draft = a.swimDepth || 2;
+    const sub = draft * 0.92;
     if (y > surf - sub) y = surf - sub;               // 1. keep the torso under
-    const bed = CBZ.floorAt ? CBZ.floorAt(grp.position.x, grp.position.z) : null;
-    if (typeof bed === "number" && isFinite(bed)) {
-      const lo = bed + ((a.species && a.species.scale) || 1) * 0.9;
-      if (y < lo) y = lo;                             // 2. ...but never in the bed
+    if (CBZ.cityAquaticBedRestY) {                    // 2. ...but never in the bed
+      const lift = CBZ.cityAquaticBedLift
+        ? CBZ.cityAquaticBedLift(a.species)
+        : ((a.species && a.species.scale) || 1) * 0.9;
+      const lo = CBZ.cityAquaticBedRestY(grp.position.x, grp.position.z, draft, lift, t, surf);
+      if (y < lo) y = lo;
     }
     grp.position.y += (y - grp.position.y) * Math.min(1, dt * 3.5);
   }

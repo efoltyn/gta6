@@ -196,6 +196,12 @@
   if (CFG.GOV_COMPLEX_SEAT_NEAR == null) CFG.GOV_COMPLEX_SEAT_NEAR = 260;
 
   function on() { return CFG.GOV_COMPLEX !== false; }
+  // A ROW MAY CARRY ITS OWN FLAG (`flag:` on the registry entry) so a feature
+  // that happens to need a plot can be reverted without taking the other ten
+  // seats of power down with it. Defaulted here AND in the file that owns the
+  // feature — idempotent, whichever parses first wins (interact.js's
+  // PROPS_WIRED_V1 precedent).
+  if (CFG.WAREHOUSE_COMPLEX_V1 == null) CFG.WAREHOUSE_COMPLEX_V1 = true;
 
   /* ====================================================================
      §0  SMALL SHARED HELPERS — materials, boxes, colliders, platforms.
@@ -212,6 +218,9 @@
     brick: 0x8d5b46, adobe: 0xd8c39c, tileRoof: 0x9c4f3a, timber: 0x6b4a2a,
     flagRed: 0xc0392b, flagWhite: 0xecf0f1, flagBlue: 0x2c3e6b,
     lampHead: 0xffe9b0, blank: 0xb9bcc0, blankD: 0x9aa0a4,
+    // freight colours — shipping containers and the racking inside a shed
+    boxRust: 0x8a4b32, boxTeal: 0x2c6f6a, boxOchre: 0xb08a3a, boxBlue: 0x2f5b8c,
+    rackSteel: 0xd08a2a,
   };
   /* THE HEIGHT LADDER for flat ground layers, and it is not decoration: two
      coplanar slabs 5 mm apart Z-FIGHT the moment the camera is 200 m away and
@@ -654,11 +663,21 @@
   // the INSIDE of it. Filed exactly like parkingSea's `_bays`: the builder
   // functions declare nothing, the collector is the one that knows the site.
   const _shells = [];
-  function civic(root, x, z, w, d, storeys, hex, side, spec, name) {
+  /* `bopts` — an optional buildings.js override for the ONE case where a seat
+     of power is not an office block. Every existing caller passes nothing and
+     is byte-identical; the Freeport's shed passes the INDUSTRIAL district kit,
+     which is buildings.js's own desaturated/grimier wall palette, so a bonded
+     warehouse does not photograph as a corporate HQ with a dock stuck to it.
+     It deliberately does NOT ask for `facade:"brick"`: config.js pins
+     BLD_MASONRY_V1 = false on the owner's instruction ("what goes is the
+     MASONRY/BRICK residential facade"), so a brick request silently collapses
+     to office and asking for it would only look like it worked. */
+  function civic(root, x, z, w, d, storeys, hex, side, spec, name, bopts) {
     let b = null;
     try {
+      const base = spec ? { facade: "civic", civic: spec, district: "core" } : { facade: "office", district: "core" };
       b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side,
-        spec ? { facade: "civic", civic: spec, district: "core" } : { facade: "office", district: "core" });
+        bopts ? Object.assign(base, bopts) : base);
     } catch (e) { b = null; }
     if (!b) return null;
     if (_curSite) _shells.push({ site: _curSite, b: b, name: name || null });
@@ -1324,6 +1343,273 @@
           weak: { x: cx + YX, z: WEAK_Z, ox: 1, oz: 0, w: WEAK_W },
         };
         return { gate: { x: cx, z: R.maxZ }, seat: main };
+      },
+    },
+    /* ================================================================
+       11. THE FREEPORT — THE ONE COMPLEX THAT IS *YOURS*.
+
+       OWNER (2026-08-02, verbatim): "drive [the stolen money] to a plot
+       like the plot we put the fake pentagon on. they can buy a warehouse
+       on a plot like this and then can store their money like gta — but
+       gta is fake, you do choreographed mini-missions. this is
+       interaction/animation options and physical assets… only driving to
+       your own place can store the cash, not just rob… maybe you have a
+       cargo plane there and then can load it up and fly somewhere else to
+       a house you can buy with the z key."
+
+       So this row is the OTHER END of city/inventory.js's cash bags. A
+       vault pays in canvas duffels; nothing anywhere converts one back
+       into money; and the place that finally does has to be a PLACE — on
+       its own land, with a road you drive up, a dock you back a truck
+       into and an apron a freighter can sit on. That is this file's whole
+       job description, which is why this is a `COMPLEXES` ROW AND NOT A
+       SECOND PLACER (the law in docs/claude/engine-systems.md).
+
+       WHAT IS DIFFERENT ABOUT IT, and it is only two things:
+         • `principal: null` — nobody sits here. Every other row is a seat
+           of power with a body on the threshold; a freight yard you have
+           not bought yet is EMPTY, and staffSite()/the tick/the audit all
+           read the null and skip. That is the honest expression of "this
+           is for sale", and it costs the file three guards.
+         • `keepOut: null` — a bonded yard on a public road is not a
+           restricted federal campus. Traffic drives past it; you can walk
+           onto the forecourt before you own it, which is how you find the
+           for-sale board in the first place.
+
+       WHAT THIS ROW AUTHORS: the plot, the fence, the gate, the shed, the
+       loading dock, the racking, the container yard and the cargo strip —
+       geometry, and the coordinates of every rack slot, published on
+       `site.warehouse`. WHAT IT DOES NOT AUTHOR: ownership, money, bags,
+       persistence or a single verb. Those are city/cashstore.js's, exactly
+       the way the county jail's cells belong to games/jail.js. One author
+       per object.
+       ================================================================ */
+    {
+      id: "freeport", name: "Freeport Compound", subtitle: "Bonded Freight & Storage",
+      hx: 96, hz: 82, bearing: 172, keepOut: null, gateSide: 1,
+      flag: "WAREHOUSE_COMPLEX_V1",
+      // NOBODY LIVES HERE. See the header: the null is load-bearing.
+      principal: null,
+      // …but a bonded yard has a gate guard, and `work` is how a row names
+      // its own trade (the county jail's line, for the same reason).
+      work: { kind: "security", role: "security guard", patrol: true },
+      // Floor 0 of the shed is the STRONGROOM and this row dresses it (the
+      // racking below) — "none" is what stops interior_programs from
+      // furnishing the same plate twice, the county jail's exact handshake.
+      // Floor 1 and the office annex take the shipped `storage` archetype,
+      // so the rest of the inside is a warehouse for free.
+      interiors: { main: ["none", "storage"], aux: ["storage"] },
+      build: function (c) {
+        const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
+
+        /* ---- WHICH WAY DOES THE YARD FACE? DERIVED, NEVER TYPED. -----------
+           The first draft typed the gate onto the +Z edge and the placer put
+           this plot SOUTH of the city, so §6's linkRoad — which always routes
+           from the nearest junction to `site.gate` — drove an 18 m arterial
+           the full 164 m THROUGH the compound and out the far side to reach
+           it. Measured: every other complex read 9 m of road inside its own
+           rect (the gate pad, correct) and this one read the whole plot.
+
+           The rest of the file never had this bug because every other row's
+           `bearing` happens to leave its gate on the city side. That is luck,
+           not a rule, so this row states the rule: the gate goes on the edge
+           FACING THE CITY, and the whole yard is laid out relative to it.
+           `GZ` is that direction (+1 = gate on +Z, -1 = gate on -Z) and `Z(d)`
+           reads "d metres INTO the yard from the gate side", so one sign flip
+           mirrors the gatehouse, the dock, the racks, the container stacks and
+           the cargo strip together and none of them can drift apart.
+
+           GZ IS ASKED OF THE ROAD NETWORK, NOT OF THE COMPASS, and it is asked
+           through `roadJunctions` — the exact function linkRoad uses to choose
+           its start point — so the gate edge and the approach can never
+           disagree. Degrade order: nearest junction · arena centre · +1 (the
+           shipped layout). */
+        const NJ = c.city ? roadJunctions(c.city, cx, cz, 1)[0] : null;
+        const AC = (c.city && c.city.center) || (CBZ.city && CBZ.city.arena && CBZ.city.arena.center) || null;
+        const GZ = NJ ? (NJ.z > cz ? 1 : -1) : ((AC && AC.z > cz) ? 1 : -1);
+        const Z = function (d) { return cz + GZ * d; };
+
+        // ---- the numbers, declared ONCE and published to cashstore.js ----
+        const BW = 64, BD = 36, BCX = cx - 6, BCZ = Z(-26);    // the shed
+        const BFZ = BCZ + GZ * BD / 2;                         // its GATE-facing face
+        const DOCK_X = cx + 14, DOCK_W = 28, DOCK_D = 10, DOCK_H = 1.2;
+        // back run first, front (door-side) run last — the shelf ledger below
+        // reads this array backwards so bag #1 lands nearest the door.
+        const RACK_Z = [BCZ - GZ * 8, BCZ, BCZ + GZ * 8];      // three rack runs
+        const RACK_Y = [0.96, 2.30];                           // two shelf levels
+        /* THE RACKING MUST FIT INSIDE THE SHED IT IS IN, and the arithmetic is
+           the only thing that guarantees it: eight slots at PITCH, with an
+           upright half a pitch outside each end, is 8×PITCH of steel. The
+           shed's clear inside span is BW - 2×1.2 = 61.6 m centred on BCX, i.e.
+           x ∈ [BCX-30.8, BCX+30.8]. (The first draft ran 64.8 m of beam from
+           cx-39 and put eight metres of racking — and the first column of
+           duffels — THROUGH the west wall.)
+
+           PITCH WAS 7.2 AND THE STORYBOARD SHOWED WHY THAT WAS WRONG: one
+           0.78 m duffel alone in a 7.2 m bay makes a FULL rack photograph as an
+           empty one. A real pallet bay is 2.7-3.6 m; 4.8 keeps a forklift aisle
+           honest and lets sixteen bags read as a pile. The run is then 38.4 m
+           in a 61.6 m shed, centred, with a walkable end aisle either side. */
+        const SLOTS = 8, PITCH = 4.8, SLOT_X0 = BCX - (SLOTS - 1) * 4.8 / 2;
+        const STRIP_Z = Z(-66), STRIP_L = 172, STRIP_W = 26;
+        const APRON_Z = Z(-44);
+
+        pad(root, R, M.gravel, "freeport");
+        // the yard is hardstanding, not lawn: one big asphalt apron inside
+        // the fence, with the gravel pad showing at the margins.
+        slab(root, cx, Z(6), 178, 96, M.asphalt, YG);
+
+        // ---- THE SHED. One call to the same shell factory the Capitol is
+        // made of: real walls, a real roof, real colliders, floor plates and
+        // the batch merge. Its door is on the GATE side, so you drive in and
+        // the roller shutters are facing you.
+        const main = civic(root, BCX, BCZ, BW, BD, 2, M.steel, GZ > 0 ? 1 : 0, null, "Freeport Warehouse",
+          { district: "industrial" });
+        // a shallow monitor roof so the box does not read as a shoebox
+        box(root, BCX, 9.5, BCZ, BW * 0.42, 1.4, BD + 0.6, M.steelD, { cast: false });
+
+        // ---- THE LOADING DOCK. A truck-height deck against the shed's own
+        // front face, with three roller doors, rubber bumpers and a stair
+        // down to the yard at its east end. You back a bed up to it.
+        const DOCK_Z = BFZ + GZ * (DOCK_D / 2 - 0.2);
+        box(root, DOCK_X, DOCK_H / 2, DOCK_Z, DOCK_W, DOCK_H, DOCK_D, M.concreteD);
+        plat(DOCK_X, DOCK_Z, DOCK_W, DOCK_D, DOCK_H);
+        col(DOCK_X, DOCK_Z, DOCK_W, DOCK_D, 0, DOCK_H);
+        for (let i = 0; i < 3; i++) {
+          const dx = DOCK_X - DOCK_W / 2 + 4.6 + i * 9.4;
+          // the roller shutter, recessed into the facade
+          box(root, dx, 2.4, BFZ + GZ * 0.12, 4.2, 4.4, 0.22, M.blankD, { cast: false });
+          box(root, dx, 4.72, BFZ + GZ * 0.18, 4.6, 0.3, 0.3, M.warn, { cast: false });
+          // bumpers either side of the opening
+          box(root, dx - 2.5, DOCK_H + 0.5, BFZ + GZ * 0.3, 0.4, 0.7, 0.3, M.dark, { cast: false });
+          box(root, dx + 2.5, DOCK_H + 0.5, BFZ + GZ * 0.3, 0.4, 0.7, 0.3, M.dark, { cast: false });
+        }
+        steps(root, DOCK_X + DOCK_W / 2 + 3.0, DOCK_Z, DOCK_D - 2, 6.0, 0.3, 4, M.concreteD, 1, "x");
+        // the yellow safety line along the dock lip
+        slab(root, DOCK_X, BFZ + GZ * (DOCK_D - 0.6), DOCK_W, 0.5, M.warn, DOCK_H + 0.02);
+
+        /* ---- THE RACKING — and this is the point of the whole complex.
+           OWNER: the pile IS the bank statement. Every slot below is a real
+           coordinate published to cashstore.js, which drops ONE duffel mesh
+           on it per deposit, so a room you have filled looks filled.
+           Uprights are ONE InstancedMesh for all three runs (54 posts, one
+           draw call); the beams and decks are ordinary batched boxes. The
+           runs sit in the SOUTH half of the plate, clear of the far corner
+           elevators.js's stair core takes on floor 0. */
+        const posts = [];
+        for (let r = 0; r < RACK_Z.length; r++) {
+          const z = RACK_Z[r];
+          for (let i = 0; i <= SLOTS; i++) {
+            const x = SLOT_X0 + (i - 0.5) * PITCH;
+            posts.push({ x: x, z: z - 0.62 }, { x: x, z: z + 0.62 });
+          }
+          // beam length = upright span, so a beam ENDS on its end upright
+          // instead of cantilevering half a bay into the air.
+          const len = SLOTS * PITCH;
+          const midX = SLOT_X0 + (SLOTS / 2 - 0.5) * PITCH;
+          for (let L = 0; L < RACK_Y.length; L++) {
+            const y = RACK_Y[L] - 0.06;
+            box(root, midX, y, z - 0.62, len, 0.14, 0.12, M.rackSteel, { cast: false });
+            box(root, midX, y, z + 0.62, len, 0.14, 0.12, M.rackSteel, { cast: false });
+            // THE DECK'S TOP FACE IS THE PUBLISHED SHELF HEIGHT. A duffel model
+            // sits on its own origin, so anything else floats it — 8.5 cm in
+            // the first draft, which at rack scale reads as a hovering bag.
+            box(root, midX, RACK_Y[L] - 0.025, z, len, 0.05, 1.2, M.steelD, { cast: false });
+          }
+          box(root, midX, 3.34, z, len, 0.12, 1.3, M.rackSteel, { cast: false });
+          col(midX, z, len, 1.3, 0, 3.4);
+        }
+        repeat(root, bg(0.14, 3.4, 0.14), M.rackSteel, posts, function () { return 1.7; });
+
+        // ---- THE OFFICE ANNEX — the only other enterable shell, and the
+        // reason the aux interior list exists. Two storeys of desk-and-rack.
+        block(root, cx + 38, Z(-8), 20, 16, 2, M.blank, GZ > 0 ? 1 : 0, { facade: "office" });
+
+        // ---- THE CONTAINER YARD. What makes a fenced rectangle read as a
+        // freight terminal on sight. Colours are hash-picked per stack, so a
+        // seed's yard is its own and no draw touches Math.random.
+        const TONE = [M.boxRust, M.boxTeal, M.boxOchre, M.boxBlue, M.steelD];
+        for (let s = 0; s < 7; s++) {
+          const bx = R.minX + 22 + (s % 4) * 14.5;
+          const bz = Z(14 + ((s / 4) | 0) * 8.0);
+          const stack = 1 + Math.floor(h01(bx, bz, 0x0F17) * 2.4);
+          for (let k = 0; k < stack; k++) {
+            const t = TONE[Math.floor(h01(bx + k * 3.1, bz - k * 1.7, 0x0F18) * TONE.length) % TONE.length];
+            box(root, bx, 1.3 + k * 2.62, bz, 12.2, 2.6, 2.5, t);
+            box(root, bx, 1.3 + k * 2.62, bz, 12.3, 0.1, 2.6, M.dark, { cast: false });
+          }
+          col(bx, bz, 12.2, 2.5, 0, 1.3 + stack * 2.62);
+        }
+
+        /* ---- THE CARGO STRIP. La Finca proved a dirt strip is what turns a
+           rich man's ranch into a trafficking operation; a freeport's version
+           is paved, lit and 172 m long, with a hardstand apron off the middle
+           of it. The sibling cargo-hold wave puts a freighter on that apron;
+           until it does, the apron is still a real place to land one. */
+        slab(root, cx, STRIP_Z, STRIP_L, STRIP_W, M.asphalt, YG);
+        const dash = [];
+        for (let i = 0; i < 11; i++) dash.push({ x: cx - 72 + i * 14.4, z: STRIP_Z });
+        repeat(root, bg(9.0, 0.02, 0.7), M.paint, dash, function () { return YM; });
+        slab(root, cx + 34, APRON_Z, 62, 30, M.asphalt, YG);               // the apron
+        disc(root, cx + 34, APRON_Z, 11, M.paint, YM, 20);
+        disc(root, cx + 34, APRON_Z, 9.4, M.asphalt, YM + 0.02, 20);
+        // windsock at the west threshold — the tell that this is live
+        cyl(root, cx - 82, 4.0, Z(-82), 0.12, 0.16, 8.0, M.steel, 8);
+        box(root, cx - 79, 7.4, Z(-82), 4.4, 1.1, 0.06, M.warn, { cast: false });
+
+        // ---- SECURITY + LIGHT. A fence, not a wall: this is a business.
+        // The fence's gap, the gatehouse and the road §6 pushes all land on
+        // the same edge because all three read GZ.
+        perimeter(root, R, { style: "fence", h: 3.4, hex: M.fence, gate: GZ > 0 ? 1 : 0, gateW: 18 });
+        gatehouse(root, cx, Z(74), true, M.concreteD);
+        watchtower(root, R.minX + 16, Z(36), M.steelD);
+        for (const p of [[R.minX + 14, R.minZ + 14], [R.maxX - 14, R.minZ + 14], [R.minX + 14, R.maxZ - 14], [R.maxX - 14, R.maxZ - 14]]) {
+          floodMast(root, p[0], p[1], 11.0);
+        }
+        const lamps = [];
+        for (let i = 0; i < 4; i++) { lamps.push({ x: cx - 16, z: Z(42 - i * 11) }); lamps.push({ x: cx + 16, z: Z(42 - i * 11) }); }
+        lampRow(root, lamps);
+        parkingSea(root, R.maxX - 26, Z(34), 22, 30);
+
+        /* ---- WHAT city/cashstore.js IS HANDED. Every number here is one
+           this builder already committed to; cashstore.js re-derives none of
+           them, which is what keeps a deposited duffel ON a shelf that
+           exists and the dock verb AT the dock. */
+        /* SLOT ORDER IS FILL ORDER, and it is a design decision, not an
+           iteration accident: cashstore.js drops bag N on slot N, so the room
+           has to fill the way a room fills. Bottom level first (you do not
+           lift a duffel over your head while the floor bay is empty), and the
+           run NEAREST THE DOOR first (you do not walk the length of the shed
+           with a bag on your shoulder). RACK_Z is ordered back-to-front, so
+           the run loop reads it backwards. */
+        const shelves = [];
+        for (let L = 0; L < RACK_Y.length; L++) {
+          for (let r = RACK_Z.length - 1; r >= 0; r--) {
+            for (let i = 0; i < SLOTS; i++) {
+              shelves.push({ x: SLOT_X0 + i * PITCH, y: RACK_Y[L], z: RACK_Z[r], rot: 0 });
+            }
+          }
+        }
+        c.site.warehouse = {
+          origin: { x: cx, z: cz },
+          building: main ? main.b : null,
+          lot: main ? main.lot : null,
+          door: main ? main.door : null,
+          inside: { minX: BCX - BW / 2 + 1.2, maxX: BCX + BW / 2 - 1.2,
+                    minZ: Math.min(BCZ - BD / 2, BCZ + BD / 2) + 1.2,
+                    maxZ: Math.max(BCZ - BD / 2, BCZ + BD / 2) - 1.2 },
+          dock: { x: DOCK_X, z: BFZ + GZ * (DOCK_D + 2.0), top: DOCK_H },
+          apron: { x: cx + 34, z: APRON_Z, r: 26 },
+          strip: { x: cx, z: STRIP_Z, len: STRIP_L, w: STRIP_W },
+          office: { x: cx + 38, z: Z(-8) },
+          board: { x: cx + 5.5, z: Z(69) },           // the for-sale board by the gate
+          // WHICH WAY IS OUT. The unit vector from the yard toward the gate:
+          // anything that wants to stand outside and look in (a camera, a
+          // parked truck, a spawn) reads this instead of assuming a compass.
+          out: { x: 0, z: GZ },
+          shelves: shelves,
+        };
+        return { gate: { x: cx, z: GZ > 0 ? R.maxZ : R.minZ }, seat: main };
       },
     },
   ];
@@ -2116,6 +2402,12 @@
     if (CFG.GOV_COMPLEX_STAFF === false) return;
     if (!CBZ.cityPostNpc && !CBZ.cityMakePed) return;
     const spec = site.def.principal;
+    // A ROW MAY DECLARE NOBODY. The Freeport is a business for sale, not a
+    // seat: with no principal there is no body to post, no detail to raise
+    // and nothing for the tick to rebuild. Every other consumer of `spec`
+    // below would throw on the null, so the row states it once and this is
+    // where it is honoured.
+    if (!spec) return;
     const seat = site.seatPoint;
     const rng = streamFor(site.id + ":ped");
     let p = null;
@@ -2197,8 +2489,9 @@
     // last arena" contract the SITES ledger above starts from.
     if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("govcomplex", { stations: 0, note: "household staff at the five residences" });
     for (let i = 0; i < COMPLEXES.length; i++) {
-      const hh = COMPLEXES[i].household;
-      if (hh) AUDIT.householdWanted += hh.length;
+      const d = COMPLEXES[i];
+      if (d.flag && CFG[d.flag] === false) continue;
+      if (d.household) AUDIT.householdWanted += d.household.length;
     }
 
     const U = settledUnion(city);
@@ -2207,6 +2500,7 @@
 
     for (let i = 0; i < COMPLEXES.length; i++) {
       const def = COMPLEXES[i];
+      if (def.flag && CFG[def.flag] === false) continue;     // this row, reverted
       const site = { id: def.id, def: def, rect: null, cx: 0, cz: 0, roads: [], rejected: 0, regions: [], seated: false };
       SITES.push(site);
 
@@ -2241,7 +2535,10 @@
       let out = null;
       _curSite = def.id;                 // parkingSea() files its bays under this
       try {
-        out = def.build({ root: root, rect: site.rect, cx: site.cx, cz: site.cz, site: site });
+        // `city` rides along so a row can ask the SAME questions §6 asks (the
+        // Freeport asks which way the nearest road junction is, because that
+        // is what decides which edge its gate has to be on).
+        out = def.build({ root: root, rect: site.rect, cx: site.cx, cz: site.cz, site: site, city: city });
       } catch (e) { console.error("[govcomplex] build " + def.id, e); }
       _curSite = null;
       site.gate = (out && out.gate) || { x: site.cx, z: site.rect.maxZ };
@@ -2360,6 +2657,7 @@
       for (let i = 0; i < SITES.length; i++) {
         const s = SITES[i];
         if (!s.rect) continue;
+        if (!s.def.principal) continue;      // an unstaffed row (the Freeport)
         // (a) the body left the world (clearCityPeds on a mode change, or he
         //     was killed). A dead officeholder is REAL — officials.js's
         //     succession machinery owns that outcome — so we only rebuild a
@@ -2515,6 +2813,9 @@
       govBare: AUDIT.govBare,
       // the per-site working, so a probe can say WHICH one moved and why
       sites: SITES.map(function (s) {
+        // an unstaffed row (the Freeport) declares no principal at all — read
+        // through a blank rather than making every row carry a fake one.
+        const pr = s.def.principal || {};
         return {
           id: s.id, name: s.def.name,
           placed: !!s.rect,
@@ -2523,9 +2824,9 @@
           rejected: s.rejected,
           roads: (s.roads || []).length,
           keepOut: s.def.keepOut || null,
-          tier: s.def.principal.tier,
-          org: s.def.principal.org,
-          role: s.def.principal.role,
+          tier: pr.tier == null ? null : pr.tier,
+          org: pr.org || null,
+          role: pr.role || null,
           sid: (s.actor && s.actor._sid) || null,
           seated: !!s.seated,
         };

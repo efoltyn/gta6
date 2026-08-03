@@ -309,7 +309,7 @@
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=4y"></script>
+<script src="src/world/terrain_overhaul.js?v=seabed1"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -345,6 +345,7 @@
 <script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/lightpin.js?v=pin1"></script>
+<script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
      CBZ.INTERFACES list of 16 strings that, measured across src/, index.html,
@@ -474,7 +475,7 @@
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=allmain1chute1"></script>
+<script src="src/systems/camera.js?v=camwater1"></script>
 <script src="src/systems/physics.js?v=seamount1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -487,7 +488,7 @@
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/platforms_moving.js?v=mp1"></script>
+<script src="src/systems/platforms_moving.js?v=mp2late"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
@@ -554,7 +555,17 @@
 <script src="src/systems/grapple.js?v=intact1"></script>
 <script src="src/entities/survivorbot.js?v=nozone1"></script>
 <script src="src/modes/survival.js?v=nozone1"></script>
-<script src="src/systems/disasters.js?v=tsuwater1"></script>
+<!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
+     (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
+     systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
+<script src="src/world/groundshaft.js?v=shaft1"></script>
+<!-- THE VOLCANO IS SHARED: world/volcanofx.js owns the opaque crusted lava,
+     the pyroclastic density current, the lahar and the ash LOAD, all keyed on
+     a position + a height field so a city-side eruption calls the same four
+     builders. Must precede systems/disasters.js so the roster finds
+     CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. -->
+<script src="src/world/volcanofx.js?v=strato1"></script>
+<script src="src/systems/disasters.js?v=strato1"></script>
 <script src="src/systems/survival_interact.js?v=ctrl1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
 
@@ -568,7 +579,7 @@
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=tsuwater1"></script>
+<script src="src/world/water_spec.js?v=shallow1"></script>
 <script src="src/city/world.js?v=shorecut1"></script>
 <script src="src/city/interior_programs.js?v=fortress3"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
@@ -594,7 +605,7 @@
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=waterv2"></script>
+<script src="src/city/waterfield.js?v=marinefix1"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -663,7 +674,7 @@
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
 <script src="src/city/island_speedway.js?v=touchclose1"></script>
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
-<script src="src/city/island_military.js?v=seawave1"></script>
+<script src="src/city/island_military.js?v=cargolift1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=allmain1"></script>
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
@@ -691,7 +702,7 @@
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
 <script src="src/city/wildlife/aquatic.js?v=sharkface1"></script>
-<script src="src/city/wildlife.js?v=sharkmouth2"></script>
+<script src="src/city/wildlife.js?v=marinefix1"></script>
 <script src="src/city/wildlife_tame.js?v=sharkmouth2"></script>
 <script src="src/city/dogs.js?v=allmain1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
@@ -728,6 +739,7 @@
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
 <script src="src/city/peds.js?v=nukefield1"></script>
+<script src="src/entities/pedinstance.js?v=pedinst1"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -789,7 +801,15 @@
      control hands over (and the reverse on exit). Wired behind the existing
      board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
      island_airport.js panel/airstair easing honours its open flag. -->
-<script src="src/city/aircraft_doors.js?v=doorarc1w11"></script>
+<script src="src/city/aircraft_doors.js?v=doorarc2ramp"></script>
+<!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
+     moving vehicle (cargo plane today, semi trailer / van next), built on
+     systems/platforms_moving.js for the floor+ramp+walls and npclife for the
+     bodies. Owns the rear-ramp arc and the LATCH that carries vehicles and
+     cargo. After platforms_moving.js, interactions.js and aircraft_doors.js
+     (which grew a "ramp" door kind for it); before militaryvehicles.js and
+     the island builders that declare holds. Revert: ?cfg_VEHICLE_HOLD_V1=0. -->
+<script src="src/city/vehicle_hold.js?v=hold1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -913,7 +933,7 @@
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
 <script src="src/city/family.js?v=allmain1"></script>
-<script src="src/city/swim.js?v=seamount1"></script>
+<script src="src/city/swim.js?v=seabed1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -937,7 +957,7 @@
 <script src="src/city/turf.js?v=hudmin2"></script>
 <script src="src/city/gangops.js?v=seawave1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
-<script src="src/city/militaryvehicles.js?v=allmain1"></script>
+<script src="src/city/militaryvehicles.js?v=holdlatch1"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
@@ -1076,7 +1096,7 @@
 <script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=allmain1"></script>
+<script src="src/city/wildlife_shark.js?v=marinefix1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact
@@ -1362,6 +1382,17 @@
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
 <script src="src/city/govcomplex.js?v=gov2xt"></script>
 
+<!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
+     your own place can store the cash, not just rob"). Turns govcomplex's
+     `freeport` plot into a property you buy (in DUFFELS, at the gate) and
+     whose racks physically hold the money you carried in: one visible bag per
+     deposit, persisted, declared as a real till balance, and the place the
+     crew finally take their cut from a physical bank job. AFTER govcomplex.js
+     (it reads that file's published site record), storage.js (the property
+     ledger it writes through) and inventory.js (CBZ.cashBags). Revert with
+     ?cfg_CASH_STORE_V1=0. -->
+<script src="src/city/cashstore.js?v=cash1"></script>
+
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
      spin-up at parse time); CBZ.sqlitedb.js kicks off its OWN async init
@@ -1420,7 +1451,7 @@
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=waterv2"></script>
+<script src="src/world/water_underwater.js?v=uwlook1"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <script src="src/world/water_wake.js?v=waterv2"></script>
 <!-- The float block (CBZ.waterFloat / waterSubmergenceAt / waterRideAt — cars

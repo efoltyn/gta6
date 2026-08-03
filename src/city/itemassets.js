@@ -490,6 +490,64 @@
       bx(g, metal, 0.07 * k, 0.08 * k, 0.025 * k, -0.18 * k, 0.23 * k, -0.125 * k);
       bx(g, metal, 0.07 * k, 0.08 * k, 0.025 * k, 0.18 * k, 0.23 * k, -0.125 * k);
     },
+    // THE MONEY BAG. Not a catalog row — it is a WORLD OBJECT (city/inventory.js's
+    // CBZ.cashBags) and it is reached by kind, not by name: a vault's haul, a
+    // cracked armoured truck's load and a casino count room's drop all draw THIS.
+    //
+    // It has to read as "that is a bag of money" from ten metres in a dark
+    // strongroom, so the three cues are drawn PROUD and nothing else is: the
+    // canvas barrel, TWO webbing handles standing up off the top (the silhouette
+    // that says "pick me up"), and banded bricks visible through an unzipped
+    // mouth. Real duffel: ~0.78 m long, 0.36 tall. Long axis down Z per the
+    // file's convention. `opts.tone` tints the canvas so a stained (dye-packed)
+    // bag is the same model in the colour that says it is ruined.
+    moneybag: function (g, C, name, row, opts) {
+      const o = opts || {};
+      const base = o.canvas != null ? o.canvas : 0x4a5a3f;        // olive crew duffel
+      const canvas = M(base);
+      const light = M(lt(base, 0.16));
+      const dark = M(dk(base, 0.58));
+      const strap = M(dk(base, 0.34));
+      const brass = M(0xb59a4a);
+      const note = M(o.note != null ? o.note : 0x6fae5a);         // banded notes
+      const band = M(0xd8d2c0);
+      /* THE SILHOUETTE IS A BARREL, NOT A BOX. The first draft led with a
+         0.34x0.26x0.60 slab and read as a toolbox; the fix is to let the
+         SPHERES carry the volume and use one shallow box only to give the
+         thing a flat bottom to sit on. Three overlapping ellipsoids down Z is
+         also how a loaded holdall actually slumps — fat in the middle,
+         tapering to the zip ends. */
+      sh(g, canvas, 0.175, 0, 0.180, 0, 1.00, 0.98, 1.35);        // the belly
+      sh(g, canvas, 0.150, 0, 0.170, -0.200, 1.00, 0.95, 1.05);   // and the two ends
+      sh(g, canvas, 0.150, 0, 0.170, 0.200, 1.00, 0.95, 1.05);
+      bx(g, dark, 0.180, 0.044, 0.380, 0, 0.014, 0);              // flat load-bearing base
+      /* THE MOUTH IS A RECESS, NOT A TRAY. The first draft floated the dark
+         plate and the bricks ABOVE the canvas line, so the notes read as
+         cargo strapped to the roof of a bag. Dropping both below the belly's
+         crown (0.30 against the ellipsoid's ~0.35) is what turns them into
+         something you are looking DOWN INTO. */
+      bx(g, dark, 0.155, 0.040, 0.440, 0, 0.286, 0);
+      for (let i = -1; i <= 1; i++) {
+        bx(g, note, 0.122, 0.048, 0.090, i * 0.006, 0.296, i * 0.140, 0, i * 0.20, 0);
+        bx(g, band, 0.032, 0.051, 0.093, i * 0.006, 0.296, i * 0.140, 0, i * 0.20, 0);
+      }
+      // TWO webbing handles arching off the top — the whole reason the
+      // silhouette reads as a bag and not a crate. Deliberately SLIM (0.022):
+      // at 0.035 they read as a suitcase grip instead of nylon tape.
+      for (const sx of [-0.090, 0.090]) {
+        bx(g, strap, 0.022, 0.140, 0.024, sx, 0.352, -0.078, 0.12, 0, 0);
+        bx(g, strap, 0.022, 0.140, 0.024, sx, 0.352, 0.078, -0.12, 0, 0);
+        bx(g, strap, 0.022, 0.022, 0.180, sx, 0.420, 0);
+      }
+      // shoulder strap running the flank, and the end-cap zip pulls
+      bx(g, strap, 0.020, 0.048, 0.44, 0.166, 0.230, 0, 0, 0, 0.10);
+      bx(g, brass, 0.026, 0.026, 0.020, 0, 0.286, 0.232);
+      bx(g, brass, 0.026, 0.026, 0.020, 0, 0.286, -0.232);
+      // the lit lip of the open mouth, so the recess reads as an opening
+      bx(g, light, 0.190, 0.022, 0.470, 0, 0.276, 0);
+      // stencilled bank/house flash on the flank (a colour block, never text)
+      bx(g, M(o.flash != null ? o.flash : 0xc9a227), 0.012, 0.070, 0.210, -0.168, 0.190, 0.04);
+    },
     // MOVED here out of city/inventory.js's makeBackpack — the container a
     // corpse's belongings still spill into.
     backpack: function (g) {
@@ -677,7 +735,10 @@
   // already. Normalising those would make a dropped pistol 68% longer than the
   // one on the corpse beside it.
   const PICK_REF = 0.34, PICK_MAX = 1.05, PICK_POW = 0.62;
-  const NO_SCALE = { gun: 1, chest: 1, briefcase: 1, backpack: 1 };
+  // `moneybag` joins them for the same reason a briefcase does: it is world
+  // furniture at honest scale, and normalising it would make a duffel on a
+  // vault shelf a different size from the one on the pavement beside it.
+  const NO_SCALE = { gun: 1, chest: 1, briefcase: 1, backpack: 1, moneybag: 1 };
   CBZ.itemAssetPickup = function (name, row, opts) {
     const o = CBZ.itemAsset(name, row, opts);
     if (!o) return null;

@@ -326,7 +326,41 @@
     DUFFEL_MAT = new THREE.MeshLambertMaterial({ color: 0x2b2f36 }); // crew duffel
     CASH_GEO._shared = DUFFEL_GEO._shared = CASH_MAT._shared = DUFFEL_MAT._shared = true;
   }
+  /* CASH_BAGS_V1 — THE LOAD IS PHYSICAL NOW, AND IT WAS ALREADY HALF-WAY THERE.
+     This file has always spilled real duffel meshes on the tarmac; the lie was
+     `grabLoot`, which walked over them and converted them to wallet cash on
+     CONTACT. That is the same abstraction wearing a mesh, and the owner's ask
+     ("bags that the player can pick up and throw… and put into the back of a
+     truck") is precisely the thing the contact-grab prevented.
+     So the spill now goes through city/inventory.js's ONE physicalisation call
+     and the piles become carryable duffels. ARMORED_INSTANT_CASH is the
+     one-line way back to the shipped walk-over-it-and-it's-yours behaviour.  */
+  if (CBZ.CONFIG.ARMORED_INSTANT_CASH == null) CBZ.CONFIG.ARMORED_INSTANT_CASH = false;
+  function bagsLive() {
+    return CBZ.CONFIG.ARMORED_INSTANT_CASH !== true && !!(CBZ.cashBags && CBZ.cashBags.payout);
+  }
+  function bagsOnGround() {
+    if (!CBZ.cashBags || !CBZ.cashBags.list) return false;
+    const L = CBZ.cashBags.list();
+    for (let i = 0; i < L.length; i++) if (L[i].src === "armored") return true;
+    return false;
+  }
+  function bagsValue() {
+    if (!CBZ.cashBags || !CBZ.cashBags.list) return 0;
+    const L = CBZ.cashBags.list();
+    let s = 0;
+    for (let i = 0; i < L.length; i++) if (L[i].src === "armored") s += L[i].amount;
+    return s;
+  }
   function spillCash(x, z, total) {
+    if (bagsLive()) {
+      const fy = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0;
+      CBZ.cashBags.payout(x, fy, z, total, {
+        src: "armored", srcName: "Agent Brinks", spread: 2.6, cap: 6,
+        canvas: 0x2b2f36, flash: 0xd9a520,
+      });
+      return;
+    }
     lootAssets();
     const piles = 3 + (rng() * 2 | 0);          // 3–4 grabbable piles
     const per = Math.round(total / piles);
@@ -503,7 +537,10 @@
 
     // ---- spawn cadence: only when there's no truck and the timer's up --------
     if (!truck) {
-      if (loot.length === 0) {            // don't roll a new truck while a haul's still on the ground
+      // don't roll a new truck while a haul's still on the ground — and with
+      // CASH_BAGS_V1 the haul IS bags, so the same rule has to see them or a
+      // second truck rolls while the first one's money is still in the road.
+      if (loot.length === 0 && !bagsOnGround()) {
         nextSpawnT -= dt;
         if (nextSpawnT <= 0) {
           spawnTruck();
@@ -556,7 +593,8 @@
     truck: function () { return truck; },
     spawn: spawnTruck,
     crack: crackTruck,
-    haulOnGround: function () { let s = 0; for (const l of loot) s += l.amount; return s; },
+    haulOnGround: function () { let s = bagsValue(); for (const l of loot) s += l.amount; return s; },
+    bagged: bagsLive,
     active: function () { return !!truck; },
     _tune: TUNE,
   };

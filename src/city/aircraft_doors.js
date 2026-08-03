@@ -57,10 +57,33 @@
   // Returns {kind, open(t), doorLocal:{x,z}, outLocal, inLocal, inY} for a
   // group. kind: "panel" (airliner slide — island_airport eases it off
   // rec._doorArcOpen), "stair" (private-jet airstair rig — same flag),
-  // "canopy" (we animate the tagged canopy mesh), "hatch" (no mesh — a
-  // walk-up beat only).
+  // "canopy" (we animate the tagged canopy mesh), "ramp" (a walk-in cargo hold
+  // — city/vehicle_hold.js owns the hardware and we drive its arc), "hatch"
+  // (no mesh — a walk-up beat only).
   function doorSpec(rec, grp) {
     const ud = grp && grp.userData;
+    // ---- RAMP: THE BACK OF THE AEROPLANE IS A DOOR -----------------------
+    // The fifth kind, and the only one whose door is also a FLOOR. Everything
+    // physical about it — the hinge, the easing, the walkable slope, the audio
+    // — belongs to vehicle_hold.js; this file contributes only what it has
+    // always contributed, which is the ORDER OF THE BEATS. That division is
+    // the point: a semi-truck's tailgate will arrive with a hold and no code
+    // of its own, and this branch will already know how to walk somebody
+    // through it.
+    const hold = (ud && ud.cargoHold) || (rec && rec.hold) || null;
+    if (hold && hold._hold && hold._hold.ramp) {
+      const H = hold._hold, R = H.ramp;
+      const toeZ = R.sillZ + R.dir * R.len;
+      return {
+        kind: "ramp",
+        hold: hold,
+        noStair: true,                                // the ramp IS the stair
+        doorLocal: { x: R.x, z: toeZ },
+        outLocal: { x: R.x, z: toeZ + R.dir * 1.8 },  // stand off the toe, on the ground
+        inLocal: { x: R.x, z: R.sillZ - R.dir * 1.4 },// one pace inside the aperture
+        inY: (grp.position.y || 0) + H.floor.top,
+      };
+    }
     if (ud && ud.cabin && ud.cabin.panel) {
       const cab = ud.cabin;
       // the airliner walk-in offsets track the up-scaled cabin (cab.scale,
@@ -188,6 +211,17 @@
   function setDoorFlag(rec, on) {
     if (rec) rec._doorArcOpen = !!on;
   }
+  // A hold's ramp is not eased by this file — vehicle_hold.js runs its own
+  // phased arc at 9.4 (it has to: the walk surface is solved from the live
+  // hinge angle, and platforms_moving must see it before the player resolves).
+  // We ASK, it moves, and both files keep owning exactly what they own.
+  function setRampDoor(a, open) {
+    if (!a || !a.spec || a.spec.kind !== "ramp" || !a.spec.hold) return;
+    if (open) a.spec.hold.openRamp(); else a.spec.hold.closeRamp();
+  }
+  function rampReady(a) {
+    return !!(a && a.spec && a.spec.hold && a.spec.hold.open);
+  }
   function soundArcDoor(a, open) {
     // A bare "hatch" has no moving mesh. Giving that fallback a door recording
     // would be exactly the fourth-wall sound this pass is removing.
@@ -222,6 +256,13 @@
     soundArcDoor(a, false);
     arc = null;
     setDoorFlag(a.rec, false);
+    // A ramp that was lowered FOR this arc goes back up when the arc ends —
+    // unless somebody is standing in the hold, in which case shutting the only
+    // way out on top of them would be the exact opposite of the elevator law.
+    if (a.spec && a.spec.kind === "ramp" && a.spec.hold) {
+      const occ = a.spec.hold.occupants();
+      if (!occ.player && !occ.vehicles && !occ.cargo) a.spec.hold.closeRamp();
+    }
     if (a.spec && a.spec.kind === "canopy" && a.group && a.group.parent) poseCanopy(a.group, 0);
     if (a.P) a.P._doorArc = false;
     if (fail && a.onFail) { try { a.onFail(); } catch (e) {} }
@@ -293,13 +334,15 @@
       return true;
     }
     // a walk-in door gets a real flight of stairs; a fighter canopy and a
-    // bare hatch do not (nothing to climb to — spec.inY is null).
-    if (arc && arc.spec && arc.spec.inY != null) {
+    // bare hatch do not (nothing to climb to — spec.inY is null), and a CARGO
+    // RAMP already is one.
+    if (arc && arc.spec && arc.spec.inY != null && !arc.spec.noStair) {
       try { arc.stair = grp.userData._cbzStair || (grp.userData._cbzStair = buildStair(grp, arc.spec)); } catch (e) { arc.stair = null; }
       poseStair(arc.stair, 0);
     }
     P._doorArc = true;
     setDoorFlag(arc.rec, true);                    // island_airport eases panel/stair open
+    setRampDoor(arc, true);                        // ...and a hold lowers its ramp
     soundArcDoor(arc, true);
     return true;
   }
@@ -323,6 +366,7 @@
     };
     P._doorArc = true;
     setDoorFlag(rec, true);
+    setRampDoor(arc, true);
     soundArcDoor(arc, true);
     return true;
   }
@@ -370,6 +414,10 @@
     if (a.phase === "open") {
       // hold a beat with the opening visible (interior lit, passengers seated)
       if (spec.kind === "canopy") poseCanopy(a.group, 1);
+      // A CARGO RAMP is three metres of steel and takes three seconds; you wait
+      // for it, and you watch it, because that is the whole read the owner
+      // asked for. Bounded so a wedged hold can never wedge the arc.
+      if (spec.kind === "ramp") { if (rampReady(a) || a.t >= 4.2) { a.phase = "step"; a.t = 0; } return; }
       if (a.t >= (spec.kind === "hatch" ? 0.3 : 0.55)) { a.phase = "step"; a.t = 0; }
       return;
     }
@@ -391,12 +439,15 @@
         P.pos.y = baseY + (spec.inY - baseY) * (up * up * (3 - 2 * up));
         if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.y = P.pos.y;
       }
-      if (done || a.t > 1.2) {
+      // The ramp leg is genuinely long — off the apron, up four metres of slope
+      // and one pace inside — so it gets the time that walk actually takes.
+      if (done || a.t > (spec.kind === "ramp" ? 3.4 : 1.2)) {
         a.phase = "close"; a.t = 0;
         let ok = false;
         try { ok = !!(a.handover && a.handover()); } catch (e) { ok = false; }
         if (!ok) { endArc(true); return; }
         setDoorFlag(a.rec, false);                 // island easing slides it shut behind you
+        setRampDoor(a, false);                     // ...and the ramp comes back up
         soundArcDoor(a, false);
       }
       return;
@@ -413,6 +464,7 @@
       if (spec.kind === "canopy") poseCanopy(a.group, Math.min(1, a.t / 0.45));
       // abort (stay flying, door shut) if the craft lifts off mid-beat
       if (a.craft && a.craft.pos && a.craft.pos.y > a.baseY + 1.2) { endArc(false); return; }
+      if (spec.kind === "ramp" && !rampReady(a) && a.t < 4.2) return;   // wait for the steel
       if (a.t >= 0.5) {
         a.phase = "exitStep"; a.t = 0;
         try { a.realExit(); } catch (e) {}

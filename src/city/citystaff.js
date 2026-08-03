@@ -531,6 +531,20 @@
     "croupier":            { class: "service", lots: ["casino"], hours: [16, 4], pay: 17 },
     "cage cashier":        { class: "service", lots: ["casino"], hours: [12, 4], pay: 15 },
     "pit boss":            { class: "law",     lots: ["casino"], hours: [16, 4], pay: 24 },
+    // the count room behind the cage (city/bank.js's CBZ.cityVaultRoom). The
+    // drop is counted round the clock in a real house, which is also why he is
+    // the one body who is always standing next to that door.
+    "count clerk":         { class: "service", lots: ["casino"], hours: [0, 24], pay: 16 },
+    // --- the banking hall (2026-08-02 vault wave). aigoals.js already casts
+    // "office worker"/"accountant"/"security guard" INTO bank lots, but nobody
+    // in this game had ever worked a teller window, and the officer who can
+    // legally open a vault did not exist as a role at all — which is exactly
+    // the "~120 jobs the world casts that CITY_JOBS has never heard of" the
+    // Block Law census counts. Three rows, three real posts, three real verbs.
+    "bank teller":         { class: "service", lots: ["bank"], hours: [9, 17], pay: 15 },
+    "bank manager":        { class: "service", lots: ["bank"], hours: [8, 18], pay: 27 },
+    // a vault guard is posted, not patrolling, and the door is never unwatched.
+    "vault guard":         { class: "law",     lots: ["bank"], hours: [0, 24], pay: 17 },
     // --- the beach
     "lifeguard":           { class: "law",     anchor: "beach", hours: [8, 19], pay: 14 },
     // --- the mountain (biome_snow.js already registers the "slope" anchor)

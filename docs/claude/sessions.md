@@ -983,3 +983,71 @@ much — add and make it smarter and realer, not fake."
   was 0 on all four tells beats for the same class of reason (staged peds
   hash-gated or cadence-missed; the preset's sanctioned fallback took the
   picture). Watch fired.swagger in real play before believing it dead.
+
+## THE 2026-08-03 WALK-IN HOLD WAVE — a room inside a vehicle (resumed after a builder died mid-fix)
+
+OWNER, verbatim: *"a cargo plane where you can open and close the back and even
+a tank can drive into the back — but like elevators it must actually have a
+back of plane that exists, so other players can be inside the plane like a
+room. this opens the door to rocketship logic."*
+
+- **THE BLOCK**: `src/city/vehicle_hold.js` — `CBZ.vehicleHold(rec, spec)`, one
+  call, nothing in it says "aircraft". Owns the ROOM (declaration, ramp arc,
+  latch) and no surface maths of its own: the floor, the hull walls and the
+  walkable ramp slope are ONE `movingPlatform` rig, the bodies go in through
+  `npcLife.attach`, the door beats are `aircraft_doors.js`'s (which grew a
+  fifth door kind, `"ramp"`, whose door is also a floor). Full adoption
+  contract for the semi/van wave in `docs/claude/engine-systems.md`; a fleet
+  joins with one `CBZ.vehicleHoldWatch(fn)` line (the `heliFleet` pattern —
+  `militaryvehicles.js` is the first, and it registers nothing per vehicle).
+- **THE TICK BUG THE DEAD BUILDER WAS MID-FIX ON, FINISHED.** Its note was
+  "the load re-assert is running a frame ahead of the flight sim". Half had
+  landed (freight re-asserts at **12.7**, after cars 11 / armour 11.6 / flight
+  12). The live half was in `platforms_moving.js`: that file latches every
+  rig's pose at **9.5** because everything it was ever written for moves before
+  it (yachts 9.45, water hulls 9.4, marina 9.3) — and a HOST VEHICLE does not.
+  Measured at 95 m/s: **1.58 m of deck slid out from under a standing rider
+  every frame.** Fixed where the ordering lives, not with a correction term: a
+  new `late: true` rig option moves that rig's pose latch and rider carry to a
+  second pass at **12.8**. Absent the flag both passes are byte-identical to
+  the single one before it. Three beats now: **9.4** door · **12.7** freight ·
+  **12.8** floor + rider.
+- **A SOLID BOX BEHIND A CARGO DOOR IS A PLUGGED CARGO DOOR.** The airframe's
+  aft upsweep was one solid tapered box whose front face stood across the whole
+  3 m aperture — the first plate photographed the "open back" as a grey wall
+  two metres away. It is now the same silhouette as a crown + two flanks around
+  an open tunnel (the fuselage's own four-slabs-around-a-room grammar), the
+  flanks HINGED at the aperture and rotated inboard because a taperBox tapers
+  about its own centre. The stowed ramp lives in that tunnel, which is why the
+  ramp shortened 4.2 → 3.7 m (slope 18.3° → **20.9°**, still half a tank's
+  gradeability): at 4.2 m the stowed toe came out through the crown.
+- **THE COCKPIT EYE**: the lifter had neither a pilot silhouette nor a tagged
+  canopy, so `cockpit.js` fell to its bounding-box guess and put the design eye
+  **~10 m above** a 13 m-tall T-tail — a fresh `cockpitSightAudit().eyeGuessed`,
+  which may only go DOWN. Fixed the way that audit's own header says: two real
+  crew seats modelled and published on `userData.cabin.seats`, and the window
+  band opened 0.70 → 1.40 m so the eye that falls out of them is behind glass.
+- **MEASURED, in-game, seed 90210** (`CBZ.holdAudit()` on the live world):
+  holds 1 · rigBacked 1 · **orphaned 0** · ramp arcs real (3.0 s) · ramp slope
+  sampled through `CBZ.mpGroundAt` = **20.9°** · deck 1.35 m · tank driven up
+  by the ordinary ground sim and chained: **vehiclesLatched 1** · duffels
+  dropped in the bay (they fall to the apron, because `inventory.js` rests a
+  bag with `CBZ.floorAt` = terrain, and the hold's sweep lifts them back onto
+  the steel): **cargoLatched 2** · **actorsAboard 3** · airborne at **888 m**
+  with all of it still strapped, `carriedFrames` 1186 and **orphaned still 0**.
+  Ratchet gated in `tools/math-gate.mjs`: `orphaned` PINNED AT 0 and
+  `holds - rigBacked` PINNED AT 0 (a declared hold with no rig is a room you
+  fall through); the rest print beside them so a "fix" that stops declaring
+  holds cannot pass.
+- **NEW EYES**: `tools/visual-presets/cargo-holds.mjs` — 7 plates from ONE live
+  world per side (ramp shut · ramp down · standing inside · tank driven aboard
+  · duffels chained · crew aboard · airborne with the lot). The deployed side
+  has no cargo airframe at all, so it photographs the same patch of apron
+  framed off the heavy bomber both builds share and says so. Two art-direction
+  faults it caught that no probe would have: the plugged aperture above, and
+  the fact that **the first-person viewmodel is parented to the camera** — a
+  hand-posed camera puts the player's own forearm and a `depthTest:false`
+  muzzle sprite across the corner of every interior plate.
+- **FLAGS**: `VEHICLE_HOLD_V1` (all of it — every hold goes inert and the
+  aeroplanes fly with an empty back) · `VEHICLE_HOLD_AUTOLATCH` (the sweep
+  only). Both defaulted in-file.

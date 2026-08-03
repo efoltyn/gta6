@@ -485,15 +485,36 @@
   // shoulder the gun, and stop on a solid surface to load the receiver into the
   // bipod: recoil, yaw and cone tighten hard.  Moving/airborne/swimming breaks
   // the support immediately; no hidden toggle or fourth-wall prompt.
+  //
+  // TWO CORRECTIONS (2026-08-03, owner: "guns like the light machine gun that
+  // have a bipod"):
+  // (a) THE TEST IS THE HARDWARE, NOT THE NAME. `w.key === "lmg"` meant the
+  //     day a second belt-fed gun or a bipod'd sniper ships, this branch — and
+  //     every consumer of it (recoil, cone, reticle, and now the third-person
+  //     rest pose) — silently excludes it. weapon-data.js declares `bipod:true`
+  //     and appearances/lmg.js draws the legs; both read the same fact.
+  // (b) PRONE IS THE BIPOD'S OWN STANCE. A crouched shooter has to WORK for
+  //     the brace (shoulder it, hold still); a prone one has already put the
+  //     legs on the deck — the gun is physically resting on them, which is
+  //     exactly what entities/character.js now draws. Requiring ADS on top of
+  //     that would mean the body shows a deployed gun the ballistics refuse to
+  //     believe in. Flag WEAPON_BIPOD_PRONE reverts just that half.
+  if (CBZ.CONFIG.WEAPON_BIPOD_PRONE == null) CBZ.CONFIG.WEAPON_BIPOD_PRONE = true;
+  function hasBipod(w) { return !!(w && (w.bipod || w.key === "lmg")); }
   function bipodActive(w) {
     const p = CBZ.player;
-    return !!(w && w.key === "lmg" && aimHeld && p && p.crouch && p.grounded !== false &&
-      !p._swim && Math.abs(p.speed || 0) < 0.8);
+    if (!hasBipod(w) || !p || p.grounded === false || p._swim) return false;
+    if (Math.abs(p.speed || 0) >= 0.8) return false;
+    if (p.prone) return CBZ.CONFIG.WEAPON_BIPOD_PRONE !== false;
+    return !!(aimHeld && p.crouch);
   }
+  CBZ.fpsWeaponHasBipod = function (w) { return hasBipod(w || weapon()); };
   CBZ.fpsBipodActive = function () { return bipodActive(weapon()); };
   function kickView(pitchKick, yawKick) {
     if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + pitchKick));
-    else if (CBZ.cam) CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch - pitchKick));
+    // systems/camera.js owns the third-person envelope (CBZ.camPitchRange); a
+    // copy here would cap recoil climb below where the view can actually go.
+    else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - pitchKick)); }
     if (CBZ.cam) CBZ.cam.yaw += yawKick;
     // Return about 72%; the remaining displacement is player-controllable
     // muzzle climb instead of a rubber-band that erases every burst.
@@ -3370,7 +3391,9 @@
     const k = 1 - Math.pow(0.02, dt);                     // smooth ~fast settle onto target
     if (CBZ.cam) CBZ.cam.yaw += dHead * k;
     if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + dPitch * k));
-    else if (CBZ.cam) CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch + dPitch * k));
+    // CBZ.camPitchRange is the single owner of the third-person envelope, so the
+    // lock can settle onto a target as high as the view is allowed to look.
+    else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + dPitch * k)); }
   }
   CBZ.aimLockTarget = function () { return lockTarget; };
 
@@ -3613,7 +3636,9 @@
       const rp = recoilPitch * settle;
       const ry = recoilYaw * settle;
       if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - rp));
-      else if (CBZ.cam) CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch + rp));
+      // Recovery must clamp against the same envelope the kick did (owned by
+      // CBZ.camPitchRange), or a shot fired near the top would not fully return.
+      else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + rp)); }
       if (CBZ.cam) CBZ.cam.yaw -= ry;
       recoilPitch -= rp;
       recoilYaw -= ry;
@@ -3771,6 +3796,16 @@
         CBZ.playerChar.aimLong = longGun;
         CBZ.playerChar.aimRecoil = recoil;
         CBZ.playerChar.aimRecoilSide = recoilSide;
+        // HOW HEAVY IS THIS THING (weapon-data.js `hold`) — the pose is the
+        // rig's, the WEIGHT is the weapon's. Same hand-off contract as
+        // aimLong: fpsmode raises no arm, it just publishes the data. Absent
+        // `hold` reads 0 and every existing weapon poses exactly as before.
+        const hold = w && w.hold;
+        CBZ.playerChar.aimHeavy = hold ? (hold.heavy || 0) : 0;
+        CBZ.playerChar.aimSupport = hold ? (hold.support || 0) : 0;
+        // The body draws a deployed bipod off the same signal the ballistics
+        // brace off — one notion of "supported", never two.
+        CBZ.playerChar.aimBipod = bipodActive(w);
       }
     }
 

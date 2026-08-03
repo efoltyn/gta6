@@ -49,6 +49,15 @@
      Off → every seat gets today's single pose, byte-identical. */
   if (CBZ.CONFIG.CHAR_SLEEP_POSE == null) CBZ.CONFIG.CHAR_SLEEP_POSE = true;
   if (CBZ.CONFIG.CHAR_SEAT_POSTURE == null) CBZ.CONFIG.CHAR_SEAT_POSTURE = true;
+  /* CHAR_PRONE_GUN_POSE — the prone arms. Off → the shipped -1.32/-1.40
+     shoulders, which drive both arms (and the weapon) through the floor.
+     CHAR_GUN_GROUND_REST — the held weapon's ground contact solve (below).
+     Off → the weapon socket never moves and a gun may sit in the dirt.
+     CHAR_HEAVY_CARRY — weapon-data.js `hold.heavy` blending in the low-ready
+     and present poses. Off → every gun is carried identically, as before. */
+  if (CBZ.CONFIG.CHAR_PRONE_GUN_POSE == null) CBZ.CONFIG.CHAR_PRONE_GUN_POSE = true;
+  if (CBZ.CONFIG.CHAR_GUN_GROUND_REST == null) CBZ.CONFIG.CHAR_GUN_GROUND_REST = true;
+  if (CBZ.CONFIG.CHAR_HEAVY_CARRY == null) CBZ.CONFIG.CHAR_HEAVY_CARRY = true;
 
   /* Two-segment limb. Pivot group at the hip/shoulder; upper box hangs to the
      joint; a `low` pivot group sits AT the joint with the lower box + cap
@@ -154,6 +163,62 @@
   // player [goes] a tiny bit [under ground]"). One place, both consumers.
   const PRONE_PITCH = 1.42;       // torso hinge at the hips: chest to the deck
   const PRONE_LEG_PITCH = 1.49;   // legs sweep back level (±0.03 alternation)
+
+  /* ---- THE PRONE ARMS, SOLVED AGAINST THE FLOOR --------------------------
+     OWNER, 2026-08-03: "when player lies down, right now the gun goes
+     UNDERGROUND. It's dumb physics. The gun should respect the ground too."
+
+     The gun was the SYMPTOM; the arms were the bug, and it is arithmetic, not
+     taste. A limb hangs along its own -Y, so after the shoulder's own pitch
+     `a` and the torso's PRONE_PITCH the segment points, in world,
+         (0, -cos(a + PRONE_PITCH), -sin(a + PRONE_PITCH)).
+     The shipped pose used a = -1.32 / -1.40, i.e. a + PRONE_PITCH ≈ +0.1 rad,
+     which is (0, -0.995, -0.10): BOTH ARMS DRIVEN VERTICALLY DOWNWARD through
+     the deck. Measured on the shipped adult male, the weapon socket sat
+     **0.446 m BELOW the floor** — no direction-only muzzle solve can rescue
+     that, and holsterprops.js's one honestly rotated the barrel 80° at the sky
+     trying to (measured: gun 0.83 m under the surface).
+
+     So the angles are now read off the posture a prone shooter actually
+     holds, and both are solved from ONE equation instead of typed:
+     let φ = a + PRONE_PITCH be the segment's world pitch, so
+         a = φ − PRONE_PITCH,   world dir = (0, −cos φ, −sin φ).
+       · UPPER ARM: shoulder → elbow, 30° BELOW horizontal and forward, which
+         is what puts the elbow ON the deck (φ = −60°, elbow lands 0.065 m over
+         the floor on the shipped body — the plant you can see).
+       · FOREARM, ARMED: elbow → hand, 48° ABOVE horizontal, which carries the
+         weapon socket to ≈ 0.35 m over the floor. That number is not a taste
+         either: the M249's belly (ammo box under the receiver, bipod feet) is
+         0.267 m below its own barrel axis at the drawn scale, so anything less
+         buries the box. Every other long gun's belly is shallower, so one
+         posture covers the class.
+       · FOREARM, UNARMED: flat forward on the deck (φ = −90°), because empty
+         hands held up at gun height read as a mime.
+     The elbow value is the same subtraction one level down: e = φ2 − a − PITCH.
+     Nothing here is per-weapon; the last centimetres — this gun's belly, this
+     slope — are the ground-rest solve's job (CBZ.charGunRestAudit). */
+  const PRONE_ARM_PITCH = -2.467;      // φ = −60°: shoulder → elbow, elbow on the deck
+  const PRONE_FORE_ARMED = -1.362;     // φ2 = −138°: elbow → hand, up to the gun
+  const PRONE_FORE_EMPTY = -0.524;     // φ2 = −90°: forearm flat on the ground
+  const PRONE_NECK_ARMED = -1.38;      // chin off the chest, eyes over the sights
+  const PRONE_NECK_EMPTY = -1.05;      // the shipped head-down crawl
+
+  /* HOW HEAVY THE THING IN THE HANDS IS. The number is the WEAPON's
+     (weapon-data.js `hold`), published onto the rig by systems/fpsmode.js
+     exactly like `aimLong`; the POSE built from it is this file's. Both read 0
+     for anything that declares no `hold`, so every weapon shipped before this
+     is posed byte-for-byte as it was. Kept as two one-line readers so the
+     three pose branches that consume them cannot drift apart. */
+  function heavyHold(ch) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CHAR_HEAVY_CARRY === false) return 0;
+    const h = ch && ch.aimHeavy;
+    return h > 0 ? (h > 1 ? 1 : h) : 0;
+  }
+  function heavySupport(ch) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CHAR_HEAVY_CARRY === false) return 0;
+    const s = ch && ch.aimSupport;
+    return s > 0 ? (s > 0.5 ? 0.5 : s) : 0;
+  }
 
   // A gait style is a set of MULTIPLIERS on animChar's existing literals.
   // All 1 = the motion this game has always had; nothing here adds a new
@@ -1124,6 +1189,12 @@
     stool: "stool", counter: "stool", bar: "stool",
     // a plank you lean forward off, elbows toward the knees
     bench: "bench", pew: "bench", park: "bench",
+    // BEHIND A WHEEL. A driver is not a passenger who happens to be at the
+    // front: the hands leave the lap and go OUT to a rim, the shins reach
+    // forward for pedals instead of hanging, and the head stays up on the
+    // road. Nothing else in the game sits like that, which is exactly why
+    // the car cabin reads as empty even when a body is in it.
+    car: "drive", driver: "drive", wheel: "drive", helm: "drive",
     // DELIBERATELY UPRIGHT (see above) — these are not omissions.
     chair: null, seat: null, dining: null, table: null, kitchen: null,
     desk: null, office: null, work: null, terminal: null,
@@ -1357,6 +1428,23 @@
        Arms counter-swing the legs; elbows carry a base bend that deepens
        with speed (jogger's ~90° pump at sprint) and on the forward swing. */
   function animChar(ch, speed, dt) {
+    /* THE HELD GUN'S GROUND CONTACT — the FIRST thing this function does, and
+       the position is load-bearing in both directions.
+       ABOVE beginCharacterHipFrame: that call strips the hip-pivot
+       compensation off ch.body, so between it and lockCharacterHips the rig is
+       0.57 m out of place on a prone body. A solve run in that window measures
+       a body that is never rendered — it reported the gun 0.59 m lower than it
+       is and lifted it into the air by exactly that. Here the rig is the fully
+       composed one the last frame actually DREW.
+       ABOVE every early return: the socket offset written below has to keep
+       decaying whatever pose the rig falls into next, or a gun lifted while
+       prone stays lifted through the stand-up.
+       Player rig only: it is the one body that goes prone, the one
+       holsterprops.js drives, and the one whose gun the camera ever gets close
+       enough to judge. Both ends of the loop are damped, so reading last
+       frame's barrel orientation (holsterprops writes it at onAlways 54) costs
+       nothing. */
+    if (ch === CBZ.playerChar && ch.sockets) gunGroundRest(ch, dt);
     beginCharacterHipFrame(ch);
     const moving = speed > 0.2;
     const walkRef = (CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4;
@@ -1700,6 +1788,19 @@
           leanX = 0.22 + sv * 0.05;
           armX = -0.52; armZ = 0.16; elb = -1.15;
           neckX = 0.10;
+        } else if (post === "drive") {
+          // BEHIND A WHEEL. A car seat's backrest is close to vertical, so the
+          // spine barely leans; what makes a driver a driver is above the
+          // shoulders and in front of the chest — the head stays UP on the
+          // road (negative neck pitch, unlike every other seat here, which
+          // looks down at a table) and both forearms leave the lap and go OUT
+          // and FORWARD to a rim about a shoulder-width ahead. `sv` is
+          // deliberately unspent on the torso: a driver with per-seat yaw
+          // variance reads as distracted, not as variety.
+          leanX = 0.08;
+          sitY = -0.05;
+          armX = -0.66; armZ = 0.20; elb = -0.80;
+          neckX = -0.03;
         }
         if (post) yawY = sv * 0.10;            // a hair of torso yaw, per seat
         ch.model.position.z = damp(ch.model.position.z, slideZ, sr, dt);
@@ -1716,7 +1817,19 @@
         // scale, while a real 0.45-0.50 m chair needs a longer seated drop.
         const chairTh = 1.38;                            // 79° from vertical
         const chairShin = (drop - THIGH * Math.cos(chairTh)) / SHIN;
-        if (chairShin >= 0.82) {
+        if (post === "drive") {
+          // A DRIVER'S LEGS GO FORWARD, NOT DOWN. A car's floor pan sits a
+          // hand's width below the cushion, so the floor-reaching solve below
+          // has nothing to reach: it would either drive the knee down through
+          // the seat (the chair branch) or fold the body into a lounger (the
+          // low branch). Neither is a car. The thigh runs level along the
+          // cushion and the shin reaches out to a pedal box ahead of the
+          // firewall — one authored pair of angles, no solve, because the
+          // geometry it would solve against is the same in every car.
+          th = 1.46;                                     // ~84°: level thigh
+          fold = 0.62;                                   // shin forward-down to the pedals
+          shinScale = 1;
+        } else if (chairShin >= 0.82) {
           th = chairTh;
           fold = th;                                     // lower leg hangs vertically
           // Standard chairs reach the floor; tall benches/stools dangle rather
@@ -1743,9 +1856,18 @@
         // armX/armZ/elb are the untouched literals unless a posture claimed
         // this seat — an armrest pushes them out and straightens the elbow,
         // a bench pulls them in over the knees).
-        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
-        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
-        setElbow(J.la, elb, sr); setElbow(J.ra, elb, sr);
+        // STEERING. `ch.driveSteer` (-1 hard left .. +1 hard right) is written
+        // by whoever owns the wheel; it modulates the two ABSOLUTE arm targets
+        // in opposite directions — one hand climbs the rim while the other
+        // drops — exactly the way ch.typing modulates the desk pose. Because
+        // every write below is still a damp toward an absolute value, entering
+        // or leaving the seat mid-turn can never accumulate. Zero for every
+        // posture that is not "drive", so those are byte-identical.
+        const stw = (post === "drive" && ch.driveSteer)
+          ? Math.max(-1, Math.min(1, +ch.driveSteer || 0)) : 0;
+        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX - stw * 0.18, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ + stw * 0.10, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX + stw * 0.18, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ + stw * 0.10, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+        setElbow(J.la, elb - stw * 0.10, sr); setElbow(J.ra, elb + stw * 0.10, sr);
         if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, neckX, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
         lockCharacterHips(ch);
         return;   // seated pose owns the whole rig
@@ -1996,13 +2118,28 @@
       if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, PRONE_LEG_PITCH + 0.03 + pad * 0.14, pr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.10, pr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, pr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, pr, dt); }
       if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, PRONE_LEG_PITCH - 0.03 - pad * 0.14, pr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.10, pr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, pr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, pr, dt); }
       setKnee(J.ll, 0.06, pr); setKnee(J.rl, 0.12, pr);                // legs lie flat, not folded
-      // weapon forward: gun arm out along the aim, support elbow planted wide
+      // ELBOWS ON THE DECK, HANDS UP AT THE GUN. See the derivation by
+      // PRONE_ARM_PITCH: the shipped -1.32/-1.40 shoulders drove both arms
+      // straight DOWN through the floor and took the weapon with them. `gunK`
+      // eases between the empty-handed crawl (forearms flat on the ground) and
+      // the firing position (forearms up to the weapon); it is published by the
+      // ground-rest pass below off the actual socketed prop, so an unarmed body
+      // never holds an invisible rifle.
       const rec = ch.aimRecoil || 0;
-      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.32 - rec * 0.12 - pad * 0.05, pr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.10, pr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.18, pr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.10, pr, dt); }
-      setElbow(J.ra, -0.35, pr);
-      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -1.40 + pad * 0.05, pr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.15, pr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.30, pr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.14, pr, dt); }
-      setElbow(J.la, -0.75, pr);                                       // support elbow dug in
-      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, -1.05, pr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, pr, dt); }
+      const legacyArms = CBZ.CONFIG && CBZ.CONFIG.CHAR_PRONE_GUN_POSE === false;
+      const gunK = legacyArms ? 0 : (ch._gunPoseK || 0);
+      const upperA = legacyArms ? -1.32 : PRONE_ARM_PITCH;
+      const foreA = legacyArms ? -0.35 : PRONE_FORE_EMPTY + (PRONE_FORE_ARMED - PRONE_FORE_EMPTY) * gunK;
+      // The support side plants a touch deeper and reaches a touch further
+      // under the handguard; recoil rocks the gun shoulder back, never down.
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, upperA + rec * 0.10 - pad * 0.05, pr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.10, pr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.18, pr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, legacyArms ? 0.10 : 0, pr, dt); }
+      setElbow(J.ra, foreA + rec * 0.10, pr);
+      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (legacyArms ? -1.40 : upperA - 0.08) + pad * 0.05, pr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.15, pr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.30, pr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, legacyArms ? 0.14 : 0, pr, dt); }
+      setElbow(J.la, legacyArms ? -0.75 : foreA + 0.06, pr);           // support elbow dug in
+      // head comes UP behind the gun once there is a gun to look over
+      const neckT = legacyArms ? PRONE_NECK_EMPTY
+        : PRONE_NECK_EMPTY + (PRONE_NECK_ARMED - PRONE_NECK_EMPTY) * gunK;
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, neckT, pr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, pr, dt); }
       ch.bob = ch.body.position.y; ch.lean = ch.body.rotation.x; ch.sway = ch.body.rotation.z;
       ch._stanceNk = 1;
       lockCharacterHips(ch);
@@ -2106,18 +2243,26 @@
       const recoilSide = ch.aimRecoilSide || 0;
       const pitch = (CBZ.cam && typeof CBZ.cam.pitch === "number") ? CBZ.cam.pitch : 0;
       const ar = 16;
-      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 - pitch * 0.8 - recoil * 0.16, ar, dt);
+      // WEIGHT IS THE WEAPON'S, THE POSE IS THE BODY'S (weapon-data.js `hold`,
+      // published by fpsmode as aimHeavy/aimSupport). A 7.5 kg belt-fed gun is
+      // not shouldered like a 9 mm: the support hand runs FORWARD onto the
+      // handguard, its elbow closes under the receiver to carry the mass, and
+      // the firing shoulder rides a touch lower instead of squared up at the
+      // horizon. hv is 0 for every weapon that declares no `hold`, and every
+      // term below is + 0 at hv = 0 — so nothing that ships today moves.
+      const hv = heavyHold(ch), hsup = heavySupport(ch);
+      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 + 0.12 * hv - pitch * 0.8 - recoil * 0.16, ar, dt);
       ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.18 - recoilSide * 0.22, ar, dt);
       ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.34, ar, dt);
       ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.14, ar, dt);
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.45) - pitch * 0.8, ar - 1, dt);
-      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, longGun ? -0.34 : -0.22, ar - 1, dt);
+      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.45) - 0.14 * hv - pitch * 0.8, ar - 1, dt);
+      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, (longGun ? -0.34 : -0.22) - 0.10 * hv, ar - 1, dt);
       ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.30, ar - 1, dt);
-      ch.parts.la.position.z = damp(ch.parts.la.position.z, longGun ? 0.24 : 0.14, ar - 1, dt);
+      ch.parts.la.position.z = damp(ch.parts.la.position.z, (longGun ? 0.24 : 0.14) + hsup * 0.5, ar - 1, dt);
       // gun arm nearly locked; the support elbow closes onto the handguard.
       // recoil folds the elbow a touch — the arm absorbs the kick.
       setElbow(J.ra, -0.10 - recoil * 0.25, ar);
-      setElbow(J.la, longGun ? -0.72 : -0.48, ar - 1);
+      setElbow(J.la, (longGun ? -0.72 : -0.48) - 0.26 * hv, ar - 1);
     } else if (ch.cuffed) {
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.5, 10, dt);
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.5, 10, dt);
@@ -2141,6 +2286,7 @@
       // (rotation.y / position.z stay owned by the !aimingPose reset below.)
       const cr = 12;
       const carryBob = moving ? swing * 0.10 : Math.sin(ch.breath * 2.2) * 0.02;
+      const hvC = heavyHold(ch), hsupC = heavySupport(ch);
       if (ch.aimLong === false) {
         // PISTOL carry (screenshot-diagnosed): the tucked across-the-hip arm
         // hid a holstered-size gun completely behind the torso from the chase
@@ -2158,18 +2304,29 @@
         // Push the gun-hand OUT beside the right thigh — same fix that made the
         // pistol carry read — so the rifle's mass clears the torso silhouette;
         // holsterprops.js then hangs the barrel down-forward-right past the leg.
-        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.30 + carryBob * 0.7, cr, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.20, cr, dt);   // OUT from the actual right thigh
-        setElbow(J.ra, -0.34, cr);                       // forearm angles the gun down-forward
+        // HEAVY (weapon-data.js hold.heavy): the mass hangs, so the firing arm
+        // straightens toward the vertical and the gun rides LOWER beside the
+        // thigh instead of being held out in front of the hip like a carbine.
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.30 + 0.15 * hvC + carryBob * 0.7, cr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.20 - 0.05 * hvC, cr, dt);   // OUT from the actual right thigh
+        setElbow(J.ra, -0.34 + 0.16 * hvC, cr);          // forearm angles the gun down-forward
       }
       if (ch.aimLong === true) {
         // Rifles and shotguns remain two-hand objects even at low ready: the
         // support forearm stays under the handguard instead of swinging loose.
-        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.72 + carryBob * 0.35, cr, dt);
-        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.30, cr, dt);
-        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.38, cr, dt);
-        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.18, cr, dt);
-        setElbow(J.la, -0.82, cr);
+        // …and the heavier it is, the LOWER that hand has to go: a carbine's
+        // handguard rides at chest height, a belt-fed gun's hangs beside the
+        // thigh because the gun does. The shipped -0.72/-0.82 pair puts the
+        // support forearm across the CHEST, which on an LMG left the left hand
+        // half a metre above a gun it was supposedly holding (screenshot-
+        // diagnosed, this wave). Straighten the arm down and bring it further
+        // ACROSS (rotation.z is negative toward the gun side) so it meets the
+        // handguard where the handguard actually is.
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.72 + 0.58 * hvC + carryBob * 0.35, cr, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.30 - 0.08 * hvC, cr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.38 - 0.22 * hvC, cr, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.18 + hsupC * 0.5, cr, dt);
+        setElbow(J.la, -0.82 + 0.52 * hvC, cr);
       } else {
         const armAmp = hipAmp * (0.95 + 0.25 * run2);
         const laTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
@@ -2741,6 +2898,237 @@
     return rig._mounts;
   }
 
+  /* ---- A HELD GUN RESTS ON THE GROUND, IT DOES NOT SINK INTO IT ----------
+     OWNER: "the gun should respect the ground too."
+
+     There was already a solve for this and it could not win, because it only
+     ever rotated the barrel's DIRECTION (systems/holsterprops.js →
+     CBZ.weaponPhysics.clearDirection). Two things a direction cannot fix:
+       (a) A GUN IS NOT A RAY. The M249 hangs an ammo box and a pair of bipod
+           legs 0.267 m BELOW its own barrel axis at the drawn scale; a sniper
+           hangs a magazine and a pistol grip. Hold the axis a token 0.05 m off
+           the deck and the box is still a quarter-metre in the dirt. The one
+           honest question is where the model's LOWEST VERTEX is, and that is
+           measured here — from the prop's own geometry, so a weapon added
+           tomorrow is covered by construction and no table lists a gun.
+       (b) A HAND CAN BE UNDER THE FLOOR. Prone put the socket 0.446 m below
+           the surface (see PRONE_ARM_PITCH). From there the direction solve
+           can only pitch the barrel at the sky — measured 80° — which is how
+           a rifle ended up planted in the ground like a fence post. Position
+           is the missing degree of freedom, so this pass moves the SOCKET.
+
+     The solve, once per frame for the player's rig only:
+       bottom = propWorldY + (centre·q).y − Σ|R[1][j]|·half[j]      (its real
+                lowest point at this orientation — the wpMeasureSpan identity
+                systems/actorweapons.js already uses on a dropped gun)
+       lift   = groundUnderItsOwnFOOTPRINT + CLEAR − bottom
+     Sampled at five points across the weapon's world AABB, NOT under the
+     hand: a 1.4 m gun lying across a kerb or down a slope is judged at both
+     ends, which is the slope case the owner asked for.
+
+     A DEPLOYED BIPOD IS THE ONE CASE THAT ALSO PULLS DOWN. Everything else
+     may only ever be LIFTED (a gun floating because its owner is on a step is
+     a lesser sin than a gun in the dirt, and a two-way solve on a walking
+     body would bob the weapon). When fpsmode says the legs are loaded and the
+     model actually has legs, the gun is driven ONTO the surface instead — that
+     is what makes a prone M249 read as deployed rather than as a rifle held
+     near the floor. One notion of "supported", owned by fpsmode; this file
+     only asks.
+
+     Cost: the local bounds are measured ONCE per prop and cached on it; the
+     per-frame work is one quaternion, nine multiplies and five floor samples
+     (CBZ.floorAt is ~0.14 µs since the terrain match landed), for ONE rig. */
+  const GUN_REST_CLEAR = 0.025;    // m of air under the lowest vertex
+  const GUN_REST_MAX_UP = 0.60;    // never levitate a gun further than this
+  // …nor bury the hand chasing a bipod. Measured: a 34% grade drops the ground
+  // 0.28 m across a prone shooter's forward reach, so the cap has to clear that
+  // or the steepest playable hillside clips a muzzle.
+  const GUN_REST_MAX_DOWN = 0.32;
+  const _grPos = new THREE.Vector3();
+  const _grScale = new THREE.Vector3();
+  const _grQ = new THREE.Quaternion();
+  const _grHandQ = new THREE.Quaternion();
+  const _grCentre = new THREE.Vector3();
+  const _grHalf = new THREE.Vector3();
+  const _grAxis = new THREE.Vector3();
+  const _grDelta = new THREE.Vector3();
+  const _grInv = new THREE.Matrix4();
+  const _grRel = new THREE.Matrix4();
+  const _grCorner = new THREE.Vector3();
+  const _grBox = new THREE.Box3();
+  const _grStats = { solves: 0, lifted: 0, rested: 0, maxLift: 0, maxDrop: 0, sunk: 0, residual: 0,
+                     last: { floor: 0, bottom: 0, need: 0, deployed: false, eY: 0, prop: null, kids: 0 } };
+
+  function gunFloorAt(x, z, fromY) {
+    if (CBZ.groundAt) {
+      try { const y = CBZ.groundAt(x, z, fromY); if (isFinite(y)) return y; } catch (e) {}
+    }
+    if (CBZ.floorAt) {
+      try { const y = CBZ.floorAt(x, z); if (isFinite(y)) return y; } catch (e) {}
+    }
+    return 0;
+  }
+  // Geometry bounds in the prop's OWN unscaled local frame, measured once.
+  // (Its world scale is folded in per frame, so a rig that rescales — a child
+  // body, a studio turntable — never needs a re-measure.)
+  function gunLocalBounds(prop) {
+    let c = prop.userData && prop.userData._restBounds;
+    if (c) return c;
+    if (prop.userData && prop.userData._restNone) return null;
+    prop.updateWorldMatrix(true, true);
+    _grInv.copy(prop.matrixWorld).invert();
+    _grBox.makeEmpty();
+    prop.traverse(function (o) {
+      const geo = o.geometry;
+      if (!geo) return;
+      if (!geo.boundingBox && geo.computeBoundingBox) geo.computeBoundingBox();
+      const b = geo.boundingBox;
+      if (!b || b.isEmpty()) return;
+      _grRel.multiplyMatrices(_grInv, o.matrixWorld);
+      for (let i = 0; i < 8; i++) {
+        _grCorner.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
+        _grBox.expandByPoint(_grCorner.applyMatrix4(_grRel));
+      }
+    });
+    if (_grBox.isEmpty()) {
+      prop.userData = prop.userData || {};
+      prop.userData._restNone = true;      // a prop with no geometry is not a gun
+      return null;
+    }
+    _grBox.getCenter(_grCentre);
+    _grBox.getSize(_grHalf);
+    c = { cx: _grCentre.x, cy: _grCentre.y, cz: _grCentre.z,
+          hx: _grHalf.x / 2, hy: _grHalf.y / 2, hz: _grHalf.z / 2 };
+    prop.userData = prop.userData || {};
+    prop.userData._restBounds = c;
+    return c;
+  }
+  /* The drawn weapon on this rig's hand socket, or null.
+     THE TEST IS `weaponId`, NOT `visible`, and that is not fussiness: the
+     socket carries TWO children in city play — the prop CBZ.buildActorWeapon
+     stamped with a weaponId (what holsterprops.js orients and what you SEE)
+     and systems/fpsmode.js's legacy `carriedGun`, a plain Group that
+     holsterprops hides at onAlways(54), i.e. AFTER this pass has already run
+     for the frame. Measuring on `visible` therefore sampled the LEGACY group,
+     whose 1.70 m unoriented span put its "lowest vertex" 0.7 m under the hand
+     and levitated every prone gun by 0.48 m. Measured, not guessed — the
+     preset dumped `[Group:hid:dy1.70 | lmg:vis:dy0.46]` and the fault fell out. */
+  function heldGunProp(socket) {
+    if (!socket) return null;
+    const kids = socket.children;
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (k.visible && k.userData && k.userData.weaponId && k.children && k.children.length) return k;
+    }
+    return null;
+  }
+  function gunGroundRest(ch, dt) {
+    const socket = ch.sockets && (ch.sockets.thirdPersonWeapon || ch.sockets.weapon);
+    if (!socket) return;
+    if (!socket.userData._restBase) socket.userData._restBase = socket.position.clone();
+    const base = socket.userData._restBase;
+    const drawn = heldGunProp(socket);
+    // Publish what the prone pose branch keys its arms off (a body with empty
+    // hands must not hold them at gun height). Deliberately read BEFORE the
+    // solve's own flag: whether there is a gun in the hand is a fact about the
+    // rig, not a feature of the ground solve, so CHAR_GUN_GROUND_REST=false
+    // must not silently flatten the prone firing posture too.
+    ch._gunPoseK = damp(ch._gunPoseK || 0, drawn ? 1 : 0, 10, dt);
+    const prop = (CBZ.CONFIG && CBZ.CONFIG.CHAR_GUN_GROUND_REST === false) ? null : drawn;
+    // `need` below is measured off the gun WHERE IT IS, i.e. with last frame's
+    // offset already applied, so the new target is prev + need. Solving for
+    // `need` alone is a feedback loop that converges on HALF the correction —
+    // which reads as "the fix almost worked", the worst kind of bug to chase.
+    const prevLift = ch._gunRestY || 0;
+    let want = 0;
+    if (prop) {
+      const b = gunLocalBounds(prop);
+      if (b) {
+        _grStats.solves++;
+        prop.updateWorldMatrix(true, false);
+        prop.matrixWorld.decompose(_grPos, _grQ, _grScale);
+        _grCentre.set(b.cx * _grScale.x, b.cy * _grScale.y, b.cz * _grScale.z).applyQuaternion(_grQ);
+        const hx = Math.abs(b.hx * _grScale.x), hy = Math.abs(b.hy * _grScale.y), hz = Math.abs(b.hz * _grScale.z);
+        // vertical / horizontal half-extents of the ORIENTED box, in world
+        const eY = Math.abs(_grAxis.set(1, 0, 0).applyQuaternion(_grQ).y) * hx +
+                   Math.abs(_grAxis.set(0, 1, 0).applyQuaternion(_grQ).y) * hy +
+                   Math.abs(_grAxis.set(0, 0, 1).applyQuaternion(_grQ).y) * hz;
+        const eX = Math.abs(_grAxis.set(1, 0, 0).applyQuaternion(_grQ).x) * hx +
+                   Math.abs(_grAxis.set(0, 1, 0).applyQuaternion(_grQ).x) * hy +
+                   Math.abs(_grAxis.set(0, 0, 1).applyQuaternion(_grQ).x) * hz;
+        const eZ = Math.abs(_grAxis.set(1, 0, 0).applyQuaternion(_grQ).z) * hx +
+                   Math.abs(_grAxis.set(0, 1, 0).applyQuaternion(_grQ).z) * hy +
+                   Math.abs(_grAxis.set(0, 0, 1).applyQuaternion(_grQ).z) * hz;
+        const cxW = _grPos.x + _grCentre.x, czW = _grPos.z + _grCentre.z;
+        const bottom = _grPos.y + _grCentre.y - eY;
+        const from = _grPos.y + _grCentre.y + eY + 0.4;
+        let floor = gunFloorAt(cxW, czW, from);
+        floor = Math.max(floor, gunFloorAt(cxW + eX, czW + eZ, from));
+        floor = Math.max(floor, gunFloorAt(cxW - eX, czW - eZ, from));
+        floor = Math.max(floor, gunFloorAt(cxW + eX, czW - eZ, from));
+        floor = Math.max(floor, gunFloorAt(cxW - eX, czW + eZ, from));
+        const need = floor + GUN_REST_CLEAR - bottom;
+        // a DEPLOYED bipod is the only case that also settles DOWN onto the
+        // surface; everything else may only ever be lifted out of it
+        const deployed = !!(ch.aimBipod && prop.userData && prop.userData.bipod);
+        want = deployed ? prevLift + need : Math.max(0, prevLift + need);
+        if (need > 0.02) _grStats.sunk++;
+        // THE PINNABLE NUMBER. `sunk` is the raw fault rate BEFORE correction
+        // and it will always be non-zero (a pose transition is allowed one
+        // frame in the dirt); this is how deep the gun was still buried once
+        // the offset had settled, and it is the thing that must stay at zero.
+        if (Math.abs(prevLift - want) < 0.01 && need > _grStats.residual) _grStats.residual = need;
+        if (want > _grStats.maxLift) _grStats.maxLift = want;
+        if (-want > _grStats.maxDrop) _grStats.maxDrop = -want;
+        if (deployed) _grStats.rested++; else if (want > 0) _grStats.lifted++;
+        const L = _grStats.last;   // reused, never reallocated — this runs every frame
+        L.floor = floor; L.bottom = bottom; L.need = need; L.deployed = deployed;
+        L.eY = eY; L.prop = prop.userData.weaponId || "?"; L.kids = socket.children.length;
+      }
+    }
+    want = Math.max(-GUN_REST_MAX_DOWN, Math.min(GUN_REST_MAX_UP, want));
+    // rise fast (a gun in the dirt is a bug the eye catches), settle slower
+    ch._gunRestY = damp(prevLift, want, want > prevLift ? 18 : 9, dt);
+    if (Math.abs(ch._gunRestY) < 1e-4) {
+      ch._gunRestY = 0;
+      if (socket.position.x !== base.x || socket.position.y !== base.y || socket.position.z !== base.z) {
+        socket.position.copy(base);
+      }
+      return;
+    }
+    // The lift is a WORLD +Y translation; the socket lives in the rotated,
+    // rig-scaled hand frame, so take it back through both.
+    const parent = socket.parent || socket;
+    parent.updateWorldMatrix(true, false);
+    parent.matrixWorld.decompose(_grPos, _grHandQ, _grScale);
+    const s = Math.abs(_grScale.y) > 1e-5 ? _grScale.y : 1;
+    _grDelta.set(0, ch._gunRestY / s, 0).applyQuaternion(_grHandQ.invert());
+    socket.position.set(base.x + _grDelta.x, base.y + _grDelta.y, base.z + _grDelta.z);
+  }
+  /* Ratchet: `sunk` counts frames the drawn weapon's lowest vertex was still
+     below the ground BEFORE this pass corrected it — it is the raw fault rate
+     and may only ever be read alongside `lifted`/`rested`, which are the
+     corrections. `maxLift` is the deepest hole this solve had to climb out of
+     (metres); anything approaching GUN_REST_MAX_UP means a POSE is wrong and
+     this pass is papering over it, which is exactly what the prone arms were
+     doing before PRONE_ARM_PITCH was solved. */
+  CBZ.charGunRestAudit = function () {
+    return {
+      solves: _grStats.solves, sunk: _grStats.sunk,
+      lifted: _grStats.lifted, rested: _grStats.rested,
+      // metres the SETTLED gun was still below ground — pin this at 0
+      residual: Math.round(_grStats.residual * 1000) / 1000,
+      maxLift: Math.round(_grStats.maxLift * 1000) / 1000,
+      maxDrop: Math.round(_grStats.maxDrop * 1000) / 1000,
+      clear: GUN_REST_CLEAR, capUp: GUN_REST_MAX_UP, capDown: GUN_REST_MAX_DOWN,
+      live: !!(CBZ.playerChar && CBZ.playerChar._gunRestY != null),
+      restY: CBZ.playerChar ? (CBZ.playerChar._gunRestY || 0) : null,
+      // the last solve's raw terms, so a tool can see WHICH prop was measured,
+      // where its lowest vertex was and what surface it was answering to
+      last: _grStats.solves ? _grStats.last : null,
+    };
+  };
+
   /* THE RATCHET for "a character is a BODY, never a resized adult" lives in
      city/childhood.js as CBZ.childBodyAudit() — `faked` counts live peds whose
      group.scale still deviates from 1, and it is pinned at zero in the math
@@ -2831,6 +3219,42 @@
     const legLow = hipY - (P.legUp / 2) * Math.cos(PRONE_LEG_PITCH) + bob
                  - (P.legUp / 2 * cL + P.legW / 2 * sL);
     return Math.min(chestLow, legLow) * hs;               // drop by this → lowest surface ON the floor
+  };
+  /* ---- HOW BIG IS THIS BODY, SEATED? ------------------------------------
+     Anything that has to fit a rig into an authored HOLE — a car cabin is the
+     first, a cockpit will be the second — needs three numbers this file has
+     and nobody else does: where the seat solve puts the hips, and how far the
+     eye and the crown sit above them once the body is folded. Every one of
+     them is read off the rig's OWN profile (so a woman, a teenager and the
+     shipped adult male each get their own answer) and returned in metres with
+     humanScale already applied, which is the same contract charProneSink
+     above already established.
+
+     The three consumers of the seat solve's own arithmetic, mirrored exactly:
+       hipFloor  the `SHIN * 0.55` low clamp on hip height
+       hipPad    the `0.10 * hs` thigh-into-cushion pad
+       hip       = max(cushion + hipPad, hipFloor)     [the solve, verbatim]
+     …so a caller can invert it for the scale that lands the eye where the
+     cabin wants it. Returns null if it cannot measure, so no caller is ever
+     forced to guess from a null. */
+  CBZ.charSeatMetrics = function (ch) {
+    const P = ch && ch.profile;
+    if (!P) return null;
+    const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70;
+    // neck socket above the hip pivot: makeCharacter stacks
+    // neckY = (hipY - 0.005) + torsoH - 0.015, then sinks the head by neckDrop.
+    const neckOverHip = P.torsoH - 0.020 - (P.neckDrop || 0);
+    // the eye boxes live in a face group scaled headSize/0.60, at local y 0.34
+    const eyeOverNeck = 0.34 * (P.headSize / 0.60);
+    const shin = (P.legLo + 0.03) * hs;
+    return {
+      hs: hs,
+      hipY: (P.legUp + P.legLo) * hs,          // standing hip pivot
+      hipFloor: shin * 0.55,                   // seat solve's low clamp
+      hipPad: 0.10 * hs,                       // cushion -> hip pad
+      eyeOverHip: (neckOverHip + eyeOverNeck) * hs,
+      topOverHip: (neckOverHip + P.headSize) * hs,
+    };
   };
   CBZ.charBands = { CHILD_ADULT_AGE, bandOf };
   // One cheap question every other system asks: "is this a child?" Answers for

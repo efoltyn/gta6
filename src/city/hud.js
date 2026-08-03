@@ -1276,7 +1276,7 @@
               "<span class='key'>" + (bi + 1) + "</span>" + face + cnt + "</div>";
           }
         }
-        slotsEl.innerHTML = html;
+        wHTML(slotsEl, html);
         // the prominent equipped-weapon ammo line (jail-style big mag / reserve) for
         // whichever gun is the active entry; holster/items show no ammo here.
         for (let bi = 0; bi < bar.length; bi++) {
@@ -1297,13 +1297,13 @@
         }
         const armorU = (CBZ.player && CBZ.player._armor) || 0;
         if (armorU > 0) line += (line ? " " : "") + "<span class='arm'>" + Math.round(armorU) + "</span>";
-        if (ammoLineEl) ammoLineEl.innerHTML = line;
+        wHTML(ammoLineEl, line);
         return;
       }
     }
     // ---- LEGACY path (non-city, or the API not yet loaded) — now the SHARED
     //      renderer, which the prison also draws through. See CBZ.weaponSlotsHTML.
-    slotsEl.innerHTML = CBZ.weaponSlotsHTML({ icons: g.mode === "city" });
+    wHTML(slotsEl, CBZ.weaponSlotsHTML({ icons: g.mode === "city" }));
     const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
     const melee = g.cityMeleeWeapon || null;        // Bat/Knife — a held melee, not a gun
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
@@ -1325,7 +1325,7 @@
     // aloud (F6).
     const armor = (CBZ.player && CBZ.player._armor) || 0;
     if (armor > 0) line += (line ? " " : "") + "<span class='arm'>" + Math.round(armor) + "</span>";
-    if (ammoLineEl) ammoLineEl.innerHTML = line;
+    wHTML(ammoLineEl, line);
   }
 
   // ---- carried LOOT readout — the valuables / consumables you're holding from
@@ -1552,6 +1552,17 @@
     lastCash = c;
   }
 
+  // Per-frame DOM writes are signature-guarded (refreshAmmoLive's pattern,
+  // extended to everything the onAlways(46) tick reaches): innerHTML
+  // assignment re-parses and style writes dirty layout even when the value is
+  // unchanged, and this tick measured 9.1ms/frame avg (2026-08-03 perfReport)
+  // — nearly all of it identical-string re-parses. Write only on change.
+  function wHTML(el, h) { if (el && el._cbzH !== h) { el._cbzH = h; el.innerHTML = h; } }
+  function wWidth(el, pct) {
+    const w = Math.max(0, Math.min(100, pct)).toFixed(1);
+    if (el && el._cbzW !== w) { el._cbzW = w; el.style.width = w + "%"; }
+  }
+
   function renderText() {
     build();
     showMoney();
@@ -1562,7 +1573,7 @@
       starsWrap.style.display = "inline-block";
       let s = "";
       for (let i = 1; i <= 5; i++) s += i <= w ? "<span style='color:var(--gold,#ffd166);text-shadow:0 0 8px rgba(255,209,102,.6)'>★</span>" : "<span style='color:#4a4f57'>★</span>";
-      starsEl.innerHTML = s;
+      wHTML(starsEl, s);
       const hot = (g.heat || 0) > 0 && w >= (g._wantedPeak || 0);
       starsWrap.style.animation = hot ? "cStarFlash .7s steps(1,end) infinite" : "none";
     } else { starsWrap.style.display = "none"; starsWrap.style.animation = "none"; }
@@ -1600,7 +1611,7 @@
       // pinned last-seen mark keeps both readouts: those are two facts.
       const wp = dist && CBZ.fullMap && CBZ.fullMap.waypoint ? CBZ.fullMap.waypoint() : null;
       if (wp && Math.hypot(wp.x - dest.x, wp.z - dest.z) < 40) dist = "";
-      jobEl.innerHTML = "" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : "");
+      wHTML(jobEl, "" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : ""));
       // an empty #cJob used to keep display:block — a bare grey pill with no
       // words in it, floating top-centre. A box with no text does not render.
       jobEl.style.display = dist ? "block" : "none";
@@ -1617,8 +1628,9 @@
     const show = g.mode === "city";
     // respect the [H] hide-HUD toggle (charpanel.js) — don't clobber it every frame
     const hudHidden = show && CBZ.cityCharPanel && CBZ.cityCharPanel.hudHidden && CBZ.cityCharPanel.hudHidden();
-    root.style.display = (show && !hudHidden) ? "block" : "none";
-    document.body.classList.toggle("mode-city", show);
+    const rDisp = (show && !hudHidden) ? "block" : "none";
+    if (root._cbzDisp !== rDisp) { root._cbzDisp = rDisp; root.style.display = rDisp; }
+    if (document.body._cbzModeCity !== show) { document.body._cbzModeCity = show; document.body.classList.toggle("mode-city", show); }
     if (!show) return;
     // track the wanted peak so the flashing only fires while it's RISING/held
     const w = g.wanted | 0;
@@ -1635,9 +1647,9 @@
     if (mcOn) {
       renderMcVitals(P, maxHp);
     } else {
-      hpBar.style.width = Math.max(0, Math.min(100, (P.hp / maxHp) * 100)) + "%";
-      hungerBar.style.width = Math.max(0, Math.min(100, g.hunger || 0)) + "%";
-      stamBar.style.width = Math.max(0, Math.min(100, (P.stamina == null ? 100 : P.stamina))) + "%";
+      wWidth(hpBar, (P.hp / maxHp) * 100);
+      wWidth(hungerBar, g.hunger || 0);
+      wWidth(stamBar, P.stamina == null ? 100 : P.stamina);
       // ARMOR — the outer-layer plate gauge. Shown only when the armor system has
       // given the player a kit (_armorMax > 0); guarded against div-by-zero and a
       // missing armor module (fields simply absent → row stays hidden). The label
@@ -1646,8 +1658,8 @@
         const aMax = +(P._armorMax) || 0;
         if (aMax > 0) {
           const aCur = Math.max(0, +(P._armor) || 0);
-          armBar.style.width = Math.max(0, Math.min(100, (aCur / aMax) * 100)) + "%";
-          if (armLabEl) armLabEl.innerHTML = armorLabel(P);
+          wWidth(armBar, (aCur / aMax) * 100);
+          wHTML(armLabEl, armorLabel(P));
           armRowEl.style.display = "";
         } else armRowEl.style.display = "none";
       }

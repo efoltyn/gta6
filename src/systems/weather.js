@@ -126,7 +126,7 @@
      so a disaster ending does not snap the sky. Nothing accumulates, so a
      driver that dies mid-event simply stops being re-asserted. */
   const RELEASE = 3.5;          // seconds to bleed a lapsed drive back to ambient
-  const drv = { rain: 0, snow: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0 };
+  const drv = { rain: 0, snow: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0, pool: 0, cover: -1 };
   let drvHold = 0;              // seconds of assertion left
   let snowMix = 0;              // 0 = rain look, 1 = snow look (eased)
 
@@ -134,6 +134,16 @@
     if (CFG.WEATHER_DRIVE === false || !spec) return false;
     if (Number.isFinite(spec.rain)) drv.rain = Math.max(0, Math.min(1, +spec.rain));
     if (Number.isFinite(spec.snow)) drv.snow = Math.max(0, Math.min(1, +spec.snow));
+    // `pool`: metres of STANDING WATER the driver is asserting on the ground.
+    // The one-word adoption for a flood — a caller that already darkens the
+    // sky through this function floods the streets by adding one field, and
+    // the swimmer, the drowning, the buoyancy and the gore medium follow
+    // because they all read city/waterfield.js's mask. See groundTick().
+    if (Number.isFinite(spec.pool)) drv.pool = Math.max(0, +spec.pool);
+    // `cover`: 0..1 snow lying on the ground, asserted rather than accumulated
+    // (a blizzard that has to whiten an island in 17 s cannot wait for the
+    // ambient snowfall integrator). -1 means "don't override".
+    if (Number.isFinite(spec.cover)) drv.cover = Math.max(0, Math.min(1, +spec.cover));
     if (Number.isFinite(spec.wind)) drv.wind = Math.max(0, +spec.wind);
     if (spec.windDir) {
       const m = Math.hypot(+spec.windDir.x || 0, +spec.windDir.z || 0);
@@ -346,17 +356,539 @@
     }
   }
 
+  /* ============================================================
+     WEATHER LEAVES STATE ON THE GROUND (2026-08-03)
+
+     OWNER, verbatim: "rain makes flash flood which is gang city water slowly
+     filling the ground" and "blizzard should fill ground with white slowly
+     just like how the top of the mountain tip in nat disaster has white".
+
+     Weather used to be a thing that happened in the AIR and stopped existing
+     the moment it stopped. Rain fell through the world and landed on nothing;
+     a blizzard was a white fog with particles in it. Both are now integrators
+     with memory:
+
+       · rain fills CITY/waterfield.js's ground-water field — puddles in the
+         low spots first, then kerb-deep, then a street that swims — and drains
+         back over minutes when it stops. It never authors a water plane: the
+         level is one number handed to CBZ.groundWaterSet, and swimming,
+         drowning, buoyancy, boats, corpses and the gore medium all follow
+         because they were already asking the water field.
+       · snow lies. `cover` is a 0..1 scalar that whitens every large surface
+         in the world through ONE shared uniform — the same trick as the
+         island's snow-capped peak, except it is a live coverage blend instead
+         of a second cone of white geometry, so it can arrive and melt.
+
+     And it costs something. Six inches of moving water takes a person off
+     their feet, two feet floats a car, and the water is COLD — the hazard
+     tick below prices all three, plus the electrocution a submerged street
+     light is, and every death lands in the killfeed with its own cause.
+
+     Flags (each a one-line revert):
+       WEATHER_GROUND_WATER  the field itself (declared in waterfield.js)
+       CITY_RAIN_POOLS       ambient rain accumulating in the gang city
+       WEATHER_SNOW_COVER    snow lying on the ground
+       WEATHER_SURFACE_COAT  the shared wet/snow/waterline material blend
+       WEATHER_FLOOD_HAZARD  knockdowns, sweeping, hypothermia, electrocution
+     ============================================================ */
+  if (CFG.WEATHER_GROUND_WATER == null) CFG.WEATHER_GROUND_WATER = true;
+  if (CFG.CITY_RAIN_POOLS == null) CFG.CITY_RAIN_POOLS = true;
+  if (CFG.WEATHER_SNOW_COVER == null) CFG.WEATHER_SNOW_COVER = true;
+  if (CFG.WEATHER_SURFACE_COAT == null) CFG.WEATHER_SURFACE_COAT = true;
+  if (CFG.WEATHER_FLOOD_HAZARD == null) CFG.WEATHER_FLOOD_HAZARD = true;
+
+  // ---- the two integrators ---------------------------------------------
+  // Numbers chosen so the owner's own storyboard reads: five sim-minutes of
+  // hard rain leaves a sheen and gutter puddles (~0.13 m), not a flood; a
+  // flood is something a DISASTER asserts, and it drains back over minutes.
+  const RAIN_FILL = 0.00042;   // metres/sec of standing water at rain 1.0
+  const POOL_DRAIN = 0.00075;  // metres/sec it soaks away when the rain stops
+  const POOL_CAP_AMB = 0.55;   // rain alone can never make a two-metre flood
+  const POOL_RISE = 1.60;      // metres/sec a driver may raise the level
+  const POOL_FALL = 0.35;      // ...and how fast it is allowed to fall back
+  const SNOW_FILL = 0.0060;    // coverage/sec at snowfall 1.0 (≈3 min to white)
+  const SNOW_MELT = 0.0022;    // ...melting back over roughly seven minutes
+  const SNOW_DRIVE = 0.055;    // a driven blizzard whitens on its own timescale
+  let pool = 0, poolAmb = 0, poolPeak = 0;
+  let cover = 0, coverPeak = 0;
+  let wetLook = 0;             // eased "how wet does the world look"
+
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+  function groundTick(dt) {
+    const mode = CBZ.game ? CBZ.game.mode : null;
+    // The gang city is the flag'd one: the island always accumulates (that is
+    // the mode whose whole subject is weather), the city does it because the
+    // owner asked for it and CITY_RAIN_POOLS is the one line that takes it out.
+    const ambOk = CFG.WEATHER_GROUND_WATER !== false &&
+      (mode === "survival" || CFG.CITY_RAIN_POOLS !== false);
+    const rainNow = intensity * (1 - snowMix);
+    if (ambOk) {
+      poolAmb += (rainNow > 0.05 ? RAIN_FILL * rainNow : -POOL_DRAIN) * dt;
+      if (poolAmb < 0) poolAmb = 0;
+      if (poolAmb > POOL_CAP_AMB) poolAmb = POOL_CAP_AMB;
+    } else poolAmb = 0;
+    const want = Math.max(ambOk ? poolAmb : 0, CFG.WEATHER_GROUND_WATER === false ? 0 : drv.pool);
+    const step = (want > pool ? POOL_RISE : POOL_FALL) * dt;
+    pool += Math.max(-step, Math.min(step, want - pool));
+    if (pool < 0.002) pool = 0;
+    if (pool > poolPeak) poolPeak = pool;
+    if (CBZ.groundWaterSet) CBZ.groundWaterSet(pool);
+    if (pool > 0 && mode === "survival") wrapSurvivalWater();
+
+    // ---- snow lying on the ground ----
+    if (CFG.WEATHER_SNOW_COVER === false) cover = 0;
+    else if (drv.cover >= 0) {
+      const d = drv.cover - cover;
+      const s = SNOW_DRIVE * dt;
+      cover = clamp01(cover + Math.max(-s, Math.min(s, d)));
+    } else {
+      const snowNow = intensity * snowMix;
+      cover = clamp01(cover + (snowNow > 0.05 ? SNOW_FILL * snowNow : -SNOW_MELT) * dt);
+    }
+    if (cover > coverPeak) coverPeak = cover;
+
+    // ---- the LOOK: wet is rain now, damp is rain lately ----
+    const wetWant = Math.max(rainNow, Math.min(1, pool * 3.2));
+    wetLook += (wetWant - wetLook) * Math.min(1, dt * 0.5);
+    if (wetLook < 0.002) wetLook = 0;
+  }
+  /* THE ISLAND ASKS A DIFFERENT ORACLE. city/swim.js answers "how deep is it
+     here" from CBZ.waterField in the city but from CBZ.survFloodDepthAt on the
+     survival island (world/disaster_arena.js owns a real height field there,
+     which is better than a synthetic shelf and should stay). That function
+     predates ground water by a wave, so without this the rain would fill the
+     gang city's streets and leave the island's dry.
+
+     So it is WRAPPED, once, lazily, the way city/killfeed.js wraps the kill
+     paths: chain-preserving, degrade-safe, and it can only ever report MORE
+     water — a dry point keeps its original (possibly negative) freeboard,
+     because the flash-flood def's own threat() reads that sign. */
+  let survWrapped = false;
+  function wrapSurvivalWater() {
+    if (survWrapped || !CBZ.survFloodDepthAt) return;
+    survWrapped = true;
+    const baseD = CBZ.survFloodDepthAt;
+    CBZ.survFloodDepthAt = function (x, z) {
+      const d = +baseD(x, z);
+      const g = CBZ.groundWaterAt ? CBZ.groundWaterAt(x, z) : 0;
+      return g > 0 ? Math.max(g, Number.isFinite(d) ? d : 0) : d;
+    };
+    const baseY = CBZ.survSeaHeightAt;
+    if (baseY) CBZ.survSeaHeightAt = function (x, z) {
+      const y = +baseY(x, z);
+      const g = CBZ.groundWaterSurfaceY ? CBZ.groundWaterSurfaceY(x, z) : -Infinity;
+      return g > y ? g : y;
+    };
+  }
+
+  // A new world (or a mode change) must not inherit the last one's puddles.
+  CBZ.weatherGroundReset = function () {
+    pool = poolAmb = 0; cover = 0; wetLook = 0;
+    if (CBZ.groundWaterSet) CBZ.groundWaterSet(0);
+    if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
+  };
+
+  /* ---- THE SURFACE COAT ---------------------------------------------------
+     ONE shared uniform block, chained onto whatever onBeforeCompile a material
+     already had (world/terrain_overhaul.js's terrainDayTint is the template
+     this copies). Three effects, all at the FRAGMENT level so nothing is
+     re-tessellated and no geometry is touched:
+
+       uCbzWetK    rain darkening on up-facing faces
+       uCbzPool    the WATERLINE — everything below the local pond surface is
+                   blended to water, which is why the flood visibly climbs the
+                   kerb instead of appearing as a flat sheet
+       uCbzSnowK   snow lying on up-facing faces — the mountain-cap look,
+                   engine-wide and animated
+
+     `vCbzUp` is the world-space upness of the surface, computed once in the
+     vertex program: snow and standing water land on horizontal faces and not
+     on walls, which is the whole reason this reads as weather instead of a
+     colour filter. Cost is a handful of fragment ops on big static surfaces
+     and NOTHING at all while every scalar is zero (the branches early-out). */
+  const uSnow = { value: 0 }, uWet = { value: 0 };
+  const uPool = { value: new THREE.Vector4(0, 0, 0, 0) };   // y, camX, camZ, radius
+  const uFront = { value: new THREE.Vector4(1, 0, 0, 0) };  // dx, dz, planeD, on
+  const uSky = { value: new THREE.Vector4(0.55, 0.63, 0.72, 0) };  // sky rgb + clock
+  /* WHY THE WATER IS NOT JUST A DARK PATCH. Three terms, all free:
+     · a FRESNEL sky reflection — water read at a grazing angle is mostly sky,
+       which is the single strongest cue that a surface is wet rather than
+       painted, and the sky colour is handed in live so it works at night too;
+     · a RIPPLE that modulates that reflection, so the sheet moves;
+     · FOAM in the first metres behind a flash-flood front, because the leading
+       edge of a run-up is whiter than the water behind it (the same asymmetry
+       world/water_spec.js's swash is built on). */
+  const COAT_FS =
+    "float cbzUp = vCbzUp * vCbzUp;\n" +
+    "if (uCbzWetK > 0.001) gl_FragColor.rgb *= 1.0 - 0.40 * uCbzWetK * cbzUp;\n" +
+    "if (uCbzPool.w > 0.0) {\n" +
+    // The camera cell's pond level is only honest NEAR the camera, so the
+    // effect fades out with distance — but the fade may only touch the BLEND,
+    // never the depth. Fading the depth walks the waterline back down to the
+    // ground and draws a curved false shoreline across the middle distance.
+    "  float cbzFade = 1.0 - smoothstep(uCbzPool.w * 0.72, uCbzPool.w, length(vCbzWP.xz - uCbzPool.yz));\n" +
+    "  float cbzD = uCbzPool.x - vCbzWP.y;\n" +
+    "  float cbzFd = 1e9;\n" +
+    "  if (uCbzFront.w > 0.5) {\n" +
+    "    cbzFd = uCbzFront.z - dot(vCbzWP.xz, uCbzFront.xy);\n" +
+    "    if (cbzFd < 0.0) cbzD = -1.0;\n" +
+    "  }\n" +
+    "  if (cbzD > 0.0) {\n" +
+    "    float cbzW = smoothstep(0.0, 0.05, cbzD) * cbzUp * cbzFade;\n" +
+    "    vec3 cbzV = normalize(cameraPosition - vCbzWP);\n" +
+    "    float cbzFres = pow(1.0 - clamp(cbzV.y, 0.0, 1.0), 3.0);\n" +
+    "    float cbzRip = 0.5 + 0.5 * sin(vCbzWP.x * 2.3 + uCbzSky.w * 2.6) * sin(vCbzWP.z * 1.7 - uCbzSky.w * 2.1);\n" +
+    "    vec3 cbzDeep = mix(gl_FragColor.rgb * 0.18, vec3(0.026, 0.048, 0.058), min(1.0, cbzD * 1.4));\n" +
+    // the sky term is CAPPED well under 1: water read at a grazing angle really
+    // is mostly sky, but letting it get there makes a flooded street read as a
+    // pale sheet against pale asphalt — the flood has to stay unmistakably
+    // DARKER than the road it covered.
+    "    vec3 cbzWater = mix(cbzDeep, uCbzSky.rgb, clamp(cbzFres * (0.26 + 0.34 * cbzRip), 0.0, 0.58));\n" +
+    "    if (cbzFd < 3.5) cbzWater = mix(cbzWater, vec3(0.88, 0.92, 0.95), (1.0 - cbzFd / 3.5) * 0.85);\n" +
+    "    gl_FragColor.rgb = mix(gl_FragColor.rgb, cbzWater, cbzW);\n" +
+    "  }\n" +
+    "}\n" +
+    "if (uCbzSnowK > 0.001) gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.93, 0.95, 0.99), clamp(uCbzSnowK * cbzUp, 0.0, 1.0));\n";
+
+  // EVERY COATED MATERIAL IS A SHADER RECOMPILE, and a storm that recompiles a
+  // thousand of them on the frame it starts is a freeze. So the sweep is
+  // bounded twice: only genuinely LARGE surfaces qualify (the ground plate, the
+  // road fields, the merged static batches, big facades — the things weather
+  // visibly lands on), and never more than COAT_MAX of them. Everything else
+  // still gets the fog/sky it always had.
+  // MEASURED, not guessed: at radius 20 the sweep found 355 materials in the
+  // gang city and the recompile burst wedged a headless renderer for minutes.
+  // At 34 it keeps what weather actually lands on — the ground plate, the road
+  // fields, the merged static batches, the big roofs — and drops the individual
+  // facades, which are vertical and therefore contribute nothing anyway.
+  const COAT_MIN_R = 34;     // metres of bounding radius to be worth coating
+  const COAT_MAX = 220;      // hard ceiling on recompiles
+  const coatQueue = [];      // materials found but not yet patched
+  const coated = [];         // materials carrying the uniforms
+  let coatScanned = false;
+
+  function coatMat(mat) {
+    if (!mat || mat.isShaderMaterial || mat.isRawShaderMaterial) return false;
+    if (mat.transparent || mat.userData && mat.userData._cbzCoat) return false;
+    const prev = mat.onBeforeCompile;
+    // r128 keys the program cache on onBeforeCompile.toString() — and OUR
+    // source is identical for every material, so without a key that carries
+    // the PREVIOUS hook, a plain material would silently reuse the compiled
+    // program of one that had also been fog-scaled or day-tinted.
+    const prevSrc = prev ? String(prev) : "none";
+    mat.onBeforeCompile = function (sh) {
+      if (prev) prev.call(this, sh);
+      let vs = sh.vertexShader;
+      if (vs.indexOf("#include <fog_vertex>") < 0) return;   // unknown shader: leave it alone
+      let fs = sh.fragmentShader;
+      const anchor = fs.indexOf("#include <tonemapping_fragment>") >= 0
+        ? "#include <tonemapping_fragment>"
+        : (fs.indexOf("#include <fog_fragment>") >= 0 ? "#include <fog_fragment>" : null);
+      if (!anchor) return;
+      sh.uniforms.uCbzSnowK = uSnow;
+      sh.uniforms.uCbzWetK = uWet;
+      sh.uniforms.uCbzPool = uPool;
+      sh.uniforms.uCbzFront = uFront;
+      sh.uniforms.uCbzSky = uSky;
+      sh.vertexShader = "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + vs.replace(
+        "#include <fog_vertex>",
+        "vCbzWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\n" +
+        // the raw `normal` ATTRIBUTE, not `objectNormal`: MeshBasicMaterial's
+        // vertex program never includes <beginnormal_vertex>, so objectNormal
+        // does not exist there — and city/biome_snow.js's whole massif is
+        // Basic. The attribute is declared in every non-raw shader prefix.
+        "vCbzUp = clamp(normalize(mat3(modelMatrix) * normal).y, 0.0, 1.0);\n" +
+        "#include <fog_vertex>");
+      sh.fragmentShader = "uniform float uCbzSnowK;\nuniform float uCbzWetK;\n" +
+        "uniform vec4 uCbzPool;\nuniform vec4 uCbzFront;\nuniform vec4 uCbzSky;\n" +
+        "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + fs.replace(anchor, COAT_FS + anchor);
+    };
+    mat.customProgramCacheKey = function () { return "cbzCoat|" + prevSrc; };
+    mat.needsUpdate = true;
+    mat.userData = mat.userData || {};
+    mat.userData._cbzCoat = 1;
+    coated.push(mat);
+    return true;
+  }
+
+  // ONE scan of the live scene, the first time weather actually has something
+  // to put on the ground. Candidates are BIG static surfaces — the ground
+  // plate, the road fields, merged building/prop batches, the island's hills —
+  // never a character rig (a person is not a surface snow lies on) and never
+  // the sea (it has its own shader and its own idea of white).
+  function coatScan() {
+    if (coatScanned || CFG.WEATHER_SURFACE_COAT === false) return;
+    coatScanned = true;
+    if (!scene || !scene.traverse) return;
+    const seen = new Set();
+    scene.traverse(function (o) {
+      // instanced batches carry their transform in instanceMatrix, which the
+      // injected modelMatrix maths cannot see — their waterline would be wrong
+      if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || !o.material) return;
+      if (o === CBZ.citySea) return;
+      const ud = o.userData;
+      if (ud && (ud.waterSurface || ud.noCoat)) return;
+      const g = o.geometry;
+      if (!g) return;
+      if (!g.attributes || !g.attributes.normal || !g.attributes.position) return;
+      if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch (e) { return; } }
+      const bs = g.boundingSphere;
+      if (!bs || !(bs.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.z)) >= COAT_MIN_R)) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (let i = 0; i < ms.length; i++) {
+        const m = ms[i];
+        if (!m || seen.has(m.uuid)) continue;
+        seen.add(m.uuid);
+        if (m.userData && m.userData._cbzCoat) continue;
+        if (coated.length + coatQueue.length >= COAT_MAX) return;
+        coatQueue.push(m);
+      }
+    });
+  }
+
+  function coatTick() {
+    if (CFG.WEATHER_SURFACE_COAT === false) return;
+    if (!coatScanned && (wetLook > 0.004 || cover > 0.004 || pool > 0.004)) coatScan();
+    // patched a FEW at a time: a material recompiles on needsUpdate, and
+    // recompiling four hundred of them on one frame is a visible stall.
+    for (let n = 0; n < 3 && coatQueue.length; n++) coatMat(coatQueue.pop());
+
+    uWet.value = wetLook;
+    uSnow.value = cover;
+    const cp = cam.position;
+    if (pool > 0.01 && CBZ.groundWaterLevelY) {
+      const y = +CBZ.groundWaterLevelY(cp.x, cp.z);
+      if (Number.isFinite(y)) uPool.value.set(y, cp.x, cp.z, 380);
+      else uPool.value.set(0, 0, 0, 0);
+    } else uPool.value.set(0, 0, 0, 0);
+    const F = CBZ.groundWaterFront ? CBZ.groundWaterFront() : null;
+    if (F) uFront.value.set(F.dx, F.dz, F.x * F.dx + F.z * F.dz + F.s, 1);
+    else uFront.value.set(1, 0, 0, 0);
+    // the sky the water reflects is whatever the sky IS this minute — the fog
+    // colour daynight.js writes every frame, so the flood goes dark at night
+    // instead of glowing like a lit pool.
+    const fc = scene.fog && scene.fog.color;
+    uSky.value.set(fc ? fc.r * 1.05 : 0.55, fc ? fc.g * 1.05 : 0.63, fc ? fc.b * 1.08 : 0.72,
+      (CBZ.now || 0) * 0.001);
+  }
+
+  /* ---- WHAT THE WATER DOES TO YOU ----------------------------------------
+     THE SCIENCE, priced (owner's brief): six inches of fast water knocks a
+     person down; two feet floats a vehicle; the killers are drowning,
+     blunt trauma in the current, hypothermia, and electrocution from
+     submerged utilities. Every one of those is a real state here, and none
+     of it is a special case for one disaster — it is what deep moving water
+     DOES, in any mode, whether a def asserted the level or the rain did. */
+  const KNOCK_D = 0.15;      // six inches
+  const KNOCK_V = 2.0;       // ...moving this fast
+  const FLOAT_D = 0.60;      // two feet: a car is off its tyres
+  const COLD_SECS = 26;      // immersion before the cold starts costing hp
+  let shinKnockdowns = 0, carsFloated = 0, electrocutions = 0, coldDeaths = 0;
+  const _fl = { x: 0, z: 0, speed: 0 };
+
+  function survOn() { return CBZ.game && CBZ.game.mode === "survival" && CBZ.surv; }
+  /* ONE HURT, FOUR ROSTERS. Each kind goes down the bus that owns it — the
+     survival mode's own hurt(), the city's player-damage path, the police
+     path, the ped path — so the killfeed reads the same cause whichever mode
+     the flood happened in and no roster is damaged behind its owner's back. */
+  function hurt(a, dmg, cause, kind) {
+    if (!a || a.dead) return;
+    if (kind === "player") {
+      if (survOn() && CBZ.surv.hurt) CBZ.surv.hurt(CBZ.surv.playerActor || a, dmg, { cause: cause });
+      else if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, a.pos.x, a.pos.z, cause, false, null, false);
+      return;
+    }
+    if (kind === "bot") { if (CBZ.surv && CBZ.surv.hurt) CBZ.surv.hurt(a, dmg, { cause: cause }); return; }
+    if (kind === "cop" && CBZ.cityHurtCop) {
+      CBZ.cityHurtCop(a, dmg, { fromX: a.pos.x, fromZ: a.pos.z, cause: cause });
+      return;
+    }
+    // systems/childsafe.js seals `hp` on children behind an accessor that
+    // silently swallows decreases, so a raw write here would not throw — it
+    // would just be a lie in the audit (damage counted, never applied).
+    // Refuse it out loud instead: children are not flood casualties.
+    if (a.child) return;
+    a.hp = (a.hp == null ? 100 : a.hp) - dmg;
+    if (a.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(a, { fromX: a.pos.x, fromZ: a.pos.z, force: 3 }, cause);
+  }
+  function eachActor(fn) {
+    if (survOn()) {
+      const b = CBZ.bots || [];
+      for (let i = 0; i < b.length; i++) if (!b[i].dead) fn(b[i], "bot");
+      const pa = CBZ.surv.playerActor;
+      if (pa && !pa.dead) fn(pa, "player");
+      return;
+    }
+    const p = CBZ.cityPeds || [];
+    for (let i = 0; i < p.length; i++) if (!p[i].dead && !p[i].inCar) fn(p[i], "ped");
+    const c = CBZ.cityCops || [];
+    for (let i = 0; i < c.length; i++) if (!c[i].dead) fn(c[i], "cop");
+    const me = CBZ.city && CBZ.city.playerActor;
+    if (me && !me.dead) fn(me, "player");
+  }
+
+  let hazT = 0, arcT = 0, arc = null, lampList = null, lampT = 0;
+  function hazardTick(dt) {
+    if (CFG.WEATHER_FLOOD_HAZARD === false || pool <= 0.02) {
+      if (arc) arc = null;
+      return;
+    }
+    const depthAt = CBZ.groundWaterAt;
+    const flowAt = CBZ.groundWaterFlowAt;
+    if (!depthAt || !flowAt) return;
+    // the crowd is priced a few times a second, the player every frame — he is
+    // the one who can feel the difference
+    hazT -= dt;
+    const crowd = hazT <= 0;
+    if (crowd) hazT = 0.2;
+    const P = CBZ.player;
+
+    eachActor(function (a, kind) {
+      const me = kind === "player";
+      if (!a.pos) return;
+      if (!me && !crowd) return;
+      if (!me && CBZ.body && CBZ.body.busy(a)) return;
+      const step = me ? dt : 0.2;
+      const d = depthAt(a.pos.x, a.pos.z);
+      if (d <= 0.02) { a._fwT = 0; return; }
+      const f = flowAt(a.pos.x, a.pos.z, _fl);
+      // SIX INCHES OF FAST WATER TAKES YOU OFF YOUR FEET
+      if (d >= KNOCK_D && f.speed >= KNOCK_V && CBZ.body) {
+        const p = Math.min(0.9, (f.speed - KNOCK_V) * 0.22 + (d - KNOCK_D) * 0.5) * step;
+        if (Math.random() < p) {
+          // FORCE MATTERS: systems/grapple.js reads >12 as a full launch with a
+          // violent ragdoll, and water does not throw people through the air —
+          // it takes their feet away. 4.5 + v/2 lands in the stagger/topple
+          // band even in a 10 m/s torrent, which is the real injury.
+          CBZ.body.hit(a, { dir: { x: f.x / (f.speed || 1), z: f.z / (f.speed || 1) },
+            force: 4.5 + f.speed * 0.5, knockdown: 1.0 + Math.random() * 0.6 });
+          shinKnockdowns++;
+        }
+      }
+      // and once you are in it, it carries you
+      if (d >= 0.25 && f.speed > 0.6) {
+        const drag = Math.min(1, (d - 0.2) * 1.6) * f.speed * 0.55;
+        if (me) {
+          const ph = (P && (P._phys || (P._phys = { kx: 0, kz: 0 }))) || null;
+          if (ph) { ph.kx = (ph.kx || 0) + f.x * drag * step; ph.kz = (ph.kz || 0) + f.z * drag * step; }
+        } else {
+          a.pos.x += f.x * drag * step * 0.5;
+          a.pos.z += f.z * drag * step * 0.5;
+          if (CBZ.collide) CBZ.collide(a.pos, 0.5);
+        }
+      }
+      // BLUNT TRAUMA: debris in a torrent, not a gentle drift
+      if (d >= 0.5 && f.speed >= 4.5 && Math.random() < 0.10 * step) {
+        hurt(a, 7 + Math.random() * 9, "swept away by the flash flood", kind);
+      }
+      // HYPOTHERMIA: immersion has a clock, and it is the flood's quiet killer
+      a._fwT = (a._fwT || 0) + (d >= FLOAT_D ? step : -step * 0.5);
+      if (a._fwT < 0) a._fwT = 0;
+      if (a._fwT > COLD_SECS) {
+        const before = me ? null : a.hp;
+        hurt(a, (2.2 + (a._fwT - COLD_SECS) * 0.12) * step, "died of hypothermia in the floodwater", kind);
+        if (before != null && a.hp != null && a.hp <= 0 && before > 0) coldDeaths++;
+      }
+    });
+
+    // THE CAR IS THE TRAP. vehicles.js already drowns the engine and tips you
+    // out when the water takes it — what it cannot know is that you went under
+    // with the cabin, so the air you surface with is the air you had left.
+    if (P && P.pos) {
+      const dCar = depthAt(P.pos.x, P.pos.z);
+      if (P.driving && dCar >= FLOAT_D) {
+        P._floodTrap = Math.min(6, (P._floodTrap || 0) + dt);
+        if (P.breath != null) P.breath = Math.max(0, P.breath - dt * 6);
+      } else if (P._floodTrap) {
+        P._floodTrap -= dt * 0.5;
+        if (P._floodTrap <= 0) P._floodTrap = 0;
+        // still under, and it was the car that put you there
+        if (dCar > 1.1 && P.breath != null && P.breath <= 0.2) {
+          hurt(CBZ.city && CBZ.city.playerActor || CBZ.surv && CBZ.surv.playerActor || P,
+            9 * dt, "drowned trapped in a car", "player");
+        }
+      }
+    }
+
+    // ELECTROCUTION — a submerged street-light base energises the water around
+    // it. RARE, and it announces itself: the sparking at the waterline is the
+    // tell, and it is the only warning there is.
+    if (!survOn()) {
+      lampT -= dt;
+      if (!lampList || lampT <= 0) {
+        lampT = 4;
+        lampList = [];
+        const A = CBZ.city && CBZ.city.arena;
+        const sp = (A && A.streetProps) || [];
+        const cp = cam.position;
+        for (let i = 0; i < sp.length && lampList.length < 40; i++) {
+          const s = sp[i];
+          if (!s || s.type !== "lamp") continue;
+          if (Math.abs(s.x - cp.x) > 90 || Math.abs(s.z - cp.z) > 90) continue;
+          lampList.push(s);
+        }
+      }
+      arcT -= dt;
+      if (arc) {
+        arc.t -= dt;
+        if (arc.t <= 0) arc = null;
+        else {
+          if (CBZ.bulletImpact && Math.random() < dt * 26) {
+            _v3a.set(arc.x + (Math.random() - 0.5) * 0.5, arc.y, arc.z + (Math.random() - 0.5) * 0.5);
+            _v3b.set(0, 1, 0);
+            try { CBZ.bulletImpact(_v3a, _v3b, { kind: "spark", power: 1.4 }); } catch (e) {}
+          }
+          eachActor(function (a, kind) {
+            if (!a.pos || a._zapped) return;
+            if (Math.hypot(a.pos.x - arc.x, a.pos.z - arc.z) > 3.6) return;
+            if (depthAt(a.pos.x, a.pos.z) < 0.2) return;
+            a._zapped = 1;
+            electrocutions++;
+            hurt(a, 260, "electrocuted in the floodwater", kind);
+          });
+        }
+      } else if (arcT <= 0 && lampList && lampList.length) {
+        arcT = 9 + Math.random() * 14;
+        const s = lampList[(Math.random() * lampList.length) | 0];
+        if (s && depthAt(s.x, s.z) >= 0.28) {
+          const gy = CBZ.floorAt ? CBZ.floorAt(s.x, s.z) : 0;
+          arc = { x: s.x, z: s.z, y: gy + depthAt(s.x, s.z), t: 1.6 };
+          if (CBZ.sfxAt) CBZ.sfxAt("shoot_pistol", s.x, s.z, { volume: 0.25 });
+          eachActor(function (a) { a._zapped = 0; });
+        }
+      }
+    }
+
+    // CARS FLOAT. vehicles.js sinks a car that finds itself over water and
+    // world/water_float.js adopts the hull — this only COUNTS it, so the audit
+    // can prove the two feet of water did something a flag could not fake.
+    const cars = CBZ.cityCars;
+    if (cars && crowd) for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !c.pos || c._gwFloated) continue;
+      if (depthAt(c.pos.x, c.pos.z) >= FLOAT_D && (c._flooded || c.dead)) { c._gwFloated = 1; carsFloated++; }
+    }
+  }
+  const _v3a = new THREE.Vector3(), _v3b = new THREE.Vector3();
+
   // ---- main tick ------------------------------------------------------
   // order 90: late, so we darken fog AFTER daynight (order 2) sets it and
   // adjust hemi AFTER daynight has written its baseline this frame.
   CBZ.onAlways(90, function (dt) {
     if (!dt || dt <= 0) return;
 
+    // WEATHER OUTLIVES ITSELF NOW: puddles have to drain and snow has to melt
+    // long after the last drop fell, so the dark path may only close when the
+    // GROUND is dry too — otherwise a storm would leave the streets flooded
+    // for the rest of the session.
+    const groundLive = pool > 0.0005 || cover > 0.0005 || wetLook > 0.0005 ||
+      drv.pool > 0.0005 || drv.cover >= 0 || coatQueue.length > 0;
     // DARK-PATH EARLY-OUT: with the ambient storm off and nothing driving,
     // the whole tick is skipped — the throttled indoor test used to scan
     // CBZ.platforms and raycast 5×/sec for a cloud that could never appear.
     if (!AUTO && drvHold <= 0 && intensity === 0 && drv.fog <= 0 &&
-        drv.lightning <= 0 && flashT <= 0 && pendingThunder <= 0) return;
+        drv.lightning <= 0 && flashT <= 0 && pendingThunder <= 0 && !groundLive) return;
 
     // camera forward (XZ) for seedDrop's lead bias — matrix z-basis, once per
     // tick. Looking straight down leaves the previous bearing standing.
@@ -382,6 +914,11 @@
       drv.rain -= drv.rain * k; drv.snow -= drv.snow * k;
       drv.wind -= drv.wind * k; drv.fog -= drv.fog * k;
       drv.lightning -= drv.lightning * k;
+      // the flood recedes with the storm that made it; the snow it laid down
+      // goes back to melting on its own clock rather than snapping away
+      drv.pool -= drv.pool * k;
+      if (drv.pool < 0.004) drv.pool = 0;
+      if (drv.cover >= 0) drv.cover = -1;
       if (drv.rain < 0.004 && drv.snow < 0.004) { drv.rain = drv.snow = 0; drv.fogColor = -1; }
     }
     const drvI = Math.max(drv.rain, drv.snow);
@@ -464,6 +1001,27 @@
 
     // ---- lightning (night only, unless a driver explicitly asks for it) ----
     tryLightning(dt);
+
+    // ---- and what the weather LEAVES: water on the ground, snow on it, and
+    //      the price of standing in either ----
+    groundTick(dt);
+    coatTick();
+    hazardTick(dt);
+  });
+
+  // Leaving a mode must put the ground back. The sea already does this
+  // (systems/disasters.js @28.05 zeroes the surge); the puddles are ours.
+  let lastMode = null;
+  CBZ.onAlways(28.06, function () {
+    const m = CBZ.game ? CBZ.game.mode : null;
+    if (m === lastMode) return;
+    lastMode = m;
+    if (CBZ.weatherGroundReset) CBZ.weatherGroundReset();
+    if (CBZ.groundWaterForget) CBZ.groundWaterForget();
+    // a new mode is a new WORLD: the survival island's ground did not exist
+    // when the city was scanned, so the sweep has to be allowed to run again.
+    // Already-coated materials are skipped by their own _cbzCoat tag.
+    coatScanned = false;
   });
 
   // ---- new-run / reset hygiene ---------------------------------------
@@ -491,6 +1049,11 @@
     get windZ() { return windZ; },
     get snow() { return snowMix; },
     get driven() { return drvHold > 0; },
+    // WHAT THE WEATHER LEFT BEHIND — the two scalars anything downstream
+    // needs to know the world is wet or white without asking three files.
+    get groundWater() { return pool; },
+    get snowCover() { return cover; },
+    get wetness() { return wetLook; },
   };
 
   // Evidence for the ratchet: is the shared weather actually carrying the load
@@ -506,6 +1069,30 @@
       windDir: [+windX.toFixed(3), +windZ.toFixed(3)],
       snowMix: +snowMix.toFixed(3),
       indoors: indoors,
+      /* ---- WEATHER LEAVES STATE ON THE GROUND: the evidence ----
+         Every one of these is measured from live state. `privateWaterPlanes`
+         is the ratchet that matters: the rain floods the city through the
+         shared water field, so the count of meshes anybody built to fake a
+         rising flood must stay at ZERO. */
+      groundWater: +pool.toFixed(3),
+      groundWaterPeak: +poolPeak.toFixed(3),
+      snowCover: +cover.toFixed(3),
+      snowCoverPeak: +coverPeak.toFixed(3),
+      wetness: +wetLook.toFixed(3),
+      coatedMaterials: coated.length,
+      coatPending: coatQueue.length,
+      shinKnockdowns: shinKnockdowns,
+      carsFloated: carsFloated,
+      electrocutions: electrocutions,
+      hypothermiaDeaths: coldDeaths,
+      privateWaterPlanes: CBZ.groundWaterAudit ? CBZ.groundWaterAudit().privateWaterPlanes : 0,
+      flags: {
+        groundWater: CFG.WEATHER_GROUND_WATER !== false,
+        cityPools: CFG.CITY_RAIN_POOLS !== false,
+        snowCover: CFG.WEATHER_SNOW_COVER !== false,
+        coat: CFG.WEATHER_SURFACE_COAT !== false,
+        hazard: CFG.WEATHER_FLOOD_HAZARD !== false,
+      },
     };
   };
 })();

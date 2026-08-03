@@ -144,11 +144,20 @@
       // bank-specific score config (only the BANK tier reads these):
       bank: true,
       vaultTotal: [120000, 250000],  // the cash vault's full holdings (research band)
-      drillTime: 9,                  // seconds to BREACH the vault before you can bag a cent
+      // `drillTime` IS GONE, AND ITS ABSENCE IS THE POINT. OWNER (2026-08-02):
+      // "gta is fake, you do the mini missions that are choreographed — this
+      // is real." A nine-second hold-still bar next to a prop was the single
+      // most choreographed thing in this file. What replaces it is not another
+      // timer: city/bank.js builds a REAL strongroom with a REAL door that has
+      // an armour pool, and the only things that open it are explosives and a
+      // bank officer with his hands up. This tier now supplies what it is
+      // actually good at — the silent alarm, the guards, the response, the
+      // dye pack, the crew — and WATCHES the physical door.
+      physical: true,
       getaway: 14,                   // dye-pack/bait window: clear LOS this fast or it burns
       dyeFrac: [0.14, 0.26],         // fraction of the bag rigged to burn if you're caught slow
       guards: 2,                     // armed security inside who resist
-      desc: "The big score. Drill the steel vault, bag the cash, beat the dye-pack clock. Silent alarm = cops already rolling; heavy 4★ response (5★ if you start dropping cops). Bring a crew.",
+      desc: "The big score. Blow the vault door or make somebody open it, then carry the bags out yourself and beat the dye-pack clock. Silent alarm = cops already rolling; heavy 4★ response (5★ if you start dropping cops). Bring a crew and bring explosives.",
     },
   ];
   function tierById(id) { return TIERS.find((t) => t.id === id) || null; }
@@ -216,6 +225,7 @@
     h.bag = 0; h.bagMax = 0; h.grabbed = 0; h.t = 0; h.heat = 0;
     h.crew = 0; h.cut = 0.7; h.downed = false; h.cooldown = 0;
     h.drilled = 0; h.vaultTotal = 0; h.getaway = 0; h.getawayMax = 0;
+    h.physical = false; h.vaultId = null; h.crewOwed = 0; h._sawOpen = false;
     h.dyeFrac = 0; h.dyed = false; h.silent = false;
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
     hideHud();
@@ -357,7 +367,19 @@
         "&nbsp;&nbsp;<span style='color:#ff9a9a'>[K]</span> back out</div>";
     } else if (h.phase === "execute") {
       const heatPct = Math.round(h.heat * 100);
-      if (tier && tier.bank) {
+      if (tier && tier.bank && h.physical) {
+        // THE PHYSICAL JOB HAS NO PROGRESS BAR TO SHOW, because there is no
+        // progress — there is a shut door or an open one, and then there is
+        // however much canvas you have picked up. The panel reports the WORLD.
+        const shut = h.drilled < 1;
+        html =
+          "<div style='font-size:16px;color:#ff9e6b'>" + tier.icon + (shut ? " THE DOOR IS SHUT" : " THE DOOR IS OPEN") + "</div>" +
+          (shut
+            ? "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>Blow it with explosives, or put a gun on a bank officer.<br>Behind it: <b style='color:#ffd479'>" + fmt$(h.vaultTotal) + "</b></div>"
+            : "<div style='margin-top:6px;font-weight:500'>" + fmt$(h.bag) + " carried out of " + fmt$(h.bagMax) + " on the floor</div>") +
+          bar("HEAT", heatPct, heatPct > 70 ? "#ff5b5b" : "#ffb347") +
+          "<div style='margin-top:6px;font-weight:500;color:#aeb8c6'>One bag at a time. <span style='color:#ffd479'>[H]</span> call it and RUN</div>";
+      } else if (tier && tier.bank) {
         // bank shows the live stage: DRILL bar until breached, then BAG bar.
         const drilling = h.drilled < 1;
         const pct = Math.round((drilling ? h.drilled : h.grabbed) * 100);
@@ -613,11 +635,17 @@
       // BANK: the take-zone is the real STEEL VAULT (bank.js exposes its spot),
       // not the lobby centre — you drill the vault where it actually stands.
       let tx = lot.cx, tz = lot.cz;
+      let vaultId = null, vaultTier = null;
       if (tier.bank && CBZ.cityBankVault) {
-        const v = CBZ.cityBankVault();
-        if (v) { tx = v.x; tz = v.z; }
+        // PASS THE LOT. This used to ask for "the" vault with no argument, and
+        // bank.js could only ever answer for the ONE branch its lazy lobby had
+        // attached to — so casing any other bank in the world drilled a spot in
+        // the wrong building. Every bank has a real strongroom now, and the
+        // question has to name which one.
+        const v = CBZ.cityBankVault(lot);
+        if (v) { tx = v.x; tz = v.z; vaultId = v.id || null; vaultTier = v.tier || null; }
       }
-      target = { x: tx, z: tz, name: name, lotKind: kind, lot: lot };
+      target = { x: tx, z: tz, name: name, lotKind: kind, lot: lot, vaultId: vaultId, vaultTier: vaultTier };
     }
 
     // WHAT IS ACTUALLY IN THERE, before a cent of setup is spent. A TAKE IS A
@@ -673,6 +701,13 @@
     // capped by how long you survive the response, not by the vault running dry.
     h.drilled = 0; h.getaway = 0; h.getawayMax = tier.getaway || 0;
     h.dyed = false; h.silent = false; h.guards = h.guards || [];
+    // A PHYSICAL BANK JOB DOES NOT OWN THE MONEY — city/bank.js's vault does.
+    // The ledger transfer happens the frame the door comes off, and the take is
+    // whatever you physically carried, so this file must NOT also `take()` from
+    // the till in grabAndGo (that would be the same dollars leaving twice).
+    h.physical = !!(tier.bank && tier.physical && CBZ.cityVaultState && target && target.vaultId);
+    h.vaultId = (target && target.vaultId) || null;
+    h.crewOwed = 0;
     if (tier.bank) {
       // the vault total is the branch's REAL holdings when the ledger can
       // answer; the researched $120k-$250k band is the fallback (and the
@@ -760,7 +795,8 @@
       // the wanted level (force to the engine's 4★ ceiling over a beat) and roll
       // an immediate response so the clock is real from second one.
       h.silent = true;
-      big("THIS IS A ROBBERY — DRILL THE VAULT!");
+      big(h.physical ? "THIS IS A ROBBERY — GET THAT DOOR OPEN!" : "THIS IS A ROBBERY — DRILL THE VAULT!");
+      if (h.physical) note("Blow the vault door, or put a gun on a bank officer and make him open it.", 3.2);
       if (CBZ.cityAlarm) CBZ.cityAlarm(x, z, 40, 1.8, CBZ.city.playerActor);
       if (CBZ.cityPanic) CBZ.cityPanic(x, z, 2.0, CBZ.city.playerActor);
       // a robbery report (caps at 2★ on its own) PLUS forceStars to push the
@@ -811,7 +847,14 @@
     // busted on the way out and the place still does NOT get it back (the
     // recovery is the police's, not the shop's) — which is what stops a
     // target being farmed by aborting the escape over and over.
-    if (h.tillSrc && CBZ.cityTill) {
+    // A PHYSICAL BANK JOB IS THE EXCEPTION, AND IT IS THE HONEST ONE: the
+    // dollars already left the ledger the instant city/bank.js's door came off
+    // (that is what put the duffels on the strongroom floor). Taking again here
+    // would be the same money leaving the branch twice — a printer.
+    if (h.physical) {
+      h.tillSrc = null;
+      if (CBZ.cashBags && h.vaultId) h.bag = CBZ.cashBags.heldFrom(h.vaultId);
+    } else if (h.tillSrc && CBZ.cityTill) {
       const moved = CBZ.cityTill.take(h.tillSrc, { point: h.tillPt || "best", max: Math.round(h.bag), by: "player", rob: true });
       h.bag = Math.min(h.bag, moved.taken);
       h.tillSrc = null;
@@ -830,44 +873,100 @@
     renderHud();
   }
 
+  /* PAY THE CREW — the ONE implementation, and it is now shared by both ends
+     of the loop. It was written inline in bankScore() for the abstract score;
+     the PHYSICAL score settles the same debt hours later at the warehouse
+     (city/cashstore.js takes the cut off the racks and calls this), and a
+     second copy of this routing over there would have been the parallel-
+     bookkeeping trap CLAUDE.md keeps catching.
+
+     Returns WHAT CAME BACK TO YOU: on two of the three branches the crew's
+     share ends up in your own pocket (you are the crew), and the mission card
+     has to report money that actually moved.
+
+     MIGRATED to the ONE membership query + the ONE contribution writer
+     (city/factions.js). Kicking the crew's share upstairs is the same call
+     every other "put in work" path makes, so it also counts toward the rank
+     ladder instead of quietly topping up a treasury field. The inline
+     g.playerGang read below is the degrade-safe fallback. */
+  function payCrew(amount) {
+    amount = Math.round(amount || 0);
+    if (!(amount > 0)) return 0;
+    const FX = CBZ.factions;
+    const inCrew = !!(FX && FX.isMember && FX.isMember("gang"));
+    if (inCrew) {
+      // credit the ladder either way — kicking up IS the work
+      FX.credit("gang", "contrib", amount);
+      // ...but the MONEY must still land somewhere. A player who FOUNDED a
+      // set has a treasury; a player patched into someone else's set does
+      // not, and the old code's `else if` fallback paid them the cut in cash.
+      // Keeping both branches is what stops this from being a money
+      // regression for every non-boss member.
+      if (g.playerGang) { g.playerGang.treasury = (g.playerGang.treasury || 0) + amount; return 0; }
+      CBZ.city.addCash(amount); return amount;
+    }
+    if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && g.playerGang) {
+      g.playerGang.treasury = (g.playerGang.treasury || 0) + amount; return 0;
+    }
+    // no gang yet — the crew share still comes to you (you ARE the crew)
+    CBZ.city.addCash(amount); return amount;
+  }
+  CBZ.cityHeistPayCrew = payCrew;
+
   // ------------------------------------------------------------ resolve
   function bankScore() {
     const h = ensure();
     const tier = tierById(h.tierId);
     const take = Math.round(h.bag);
     if (take <= 0) { abort("Nothing in the bag — score's a bust."); return; }
+
+    /* THE PHYSICAL BANK JOB PAYS NOTHING, AND THAT IS THE FEATURE.
+       The money is not a number waiting to be credited — it is canvas on your
+       shoulder and on the strongroom floor behind you. Crediting `take` here
+       would be paying you a second time for dollars you are already holding,
+       which is the exact double-count this whole wave exists to delete.
+
+       WHAT ABOUT THE CREW'S CUT? It is NAMED, not faked. Nobody skims a duffel
+       out of your hands, and inventing a cash deduction against a wallet the
+       money never entered would be bookkeeping fiction (the banned kind). So
+       the share is recorded as `crewOwed` on the score and settles when the
+       bags are actually converted — the warehouse/cargo wave that consumes
+       CBZ.cashBags is where that lands. Until then the crew got what a crew
+       really gets on the night: they were bodies in the gunfight. */
+    if (h.physical) {
+      h.crewOwed = Math.round(take * (1 - h.cut));
+      /* …AND THE DEBT NOW OUTLIVES THE SCORE. `h` is wiped by finish() four
+         lines below (and by every fresh run), so a promise recorded only on
+         the handle was a promise that evaporated before you had driven the
+         bags anywhere — the crew could never actually be paid. The obligation
+         is handed to the ledger that owns the other end of this loop:
+         city/cashstore.js settles it out of the warehouse racks the moment
+         the bags are really stored, by TAKING it off the shelf. Absent that
+         file the line is a no-op and the note below still tells the truth. */
+      if (h.crewOwed > 0 && CBZ.cashStore && CBZ.cashStore.oweCrew) {
+        try { CBZ.cashStore.oweCrew(h.crewOwed, tier ? tier.id : "score"); } catch (e) {}
+      }
+      const respP = (tier ? tier.tier : 5) * 6 + Math.round(take / 1200);
+      if (CBZ.city.addRespect) CBZ.city.addRespect(respP);
+      h.completed = (h.completed || 0) + 1;
+      if (take > (h.biggest || 0)) h.biggest = take;
+      big("CLEAN AWAY WITH " + fmt$(take) + " IN BAGS");
+      note("It's still in the bags — nothing was banked. +" + respP + " respect · biggest haul: " + fmt$(h.biggest), 3.2);
+      if (h.crewOwed > 0) note("The crew are owed " + fmt$(h.crewOwed) + " — they'll take it off your racks the day you store this.", 3.0);
+      if (CBZ.cityEvent) CBZ.cityEvent("heist-banked", { tier: tier ? tier.id : "?", take: take, crew: h.crew, physical: true }, { silent: true, noWanted: true });
+      scoreEnd("done", 0);
+      finish(tier ? 6 + tier.tier * 4 : 8);
+      return;
+    }
+
     const yourCut = Math.round(take * h.cut);
     const crewCut = take - yourCut;
     CBZ.city.addCash(yourCut);
     // what ACTUALLY lands in the player's wallet — the crew share below comes
     // back to you on two of its branches, and the mission card must report the
     // money that moved, not the money we planned to move.
-    let cashToYou = yourCut;
+    let cashToYou = yourCut + payCrew(crewCut);
     sfx("coin");
-    // crew cut → up to the player's gang treasury (funds wars/expansion)
-    // MIGRATED to the ONE membership query + the ONE contribution writer
-    // (city/factions.js). Kicking the crew's share upstairs is now the same
-    // call every other "put in work" path makes, so it also counts toward the
-    // rank ladder instead of quietly topping up a treasury field. The inline
-    // g.playerGang read below is the degrade-safe fallback.
-    const FX = CBZ.factions;
-    const inCrew = !!(crewCut > 0 && FX && FX.isMember && FX.isMember("gang"));
-    if (inCrew) {
-      // credit the ladder either way — kicking up IS the work
-      FX.credit("gang", "contrib", crewCut);
-      // ...but the MONEY must still land somewhere. A player who FOUNDED a
-      // set has a treasury; a player patched into someone else's set does
-      // not, and the old code's `else if` fallback paid them the cut in cash.
-      // Keeping both branches is what stops this from being a money
-      // regression for every non-boss member.
-      if (g.playerGang) g.playerGang.treasury = (g.playerGang.treasury || 0) + crewCut;
-      else { CBZ.city.addCash(crewCut); cashToYou += crewCut; }
-    } else if (crewCut > 0 && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && g.playerGang) {
-      g.playerGang.treasury = (g.playerGang.treasury || 0) + crewCut;
-    } else if (crewCut > 0) {
-      // no gang yet — the crew share still comes to you (you ARE the crew)
-      CBZ.city.addCash(crewCut); cashToYou += crewCut;
-    }
     // respect + lifetime stats scale with the tier
     const resp = (tier ? tier.tier : 1) * 6 + Math.round(take / 1200);
     if (CBZ.city.addRespect) CBZ.city.addRespect(resp);
@@ -922,6 +1021,7 @@
     h.phase = "idle"; h.tierId = null; h.target = null;
     h.bag = 0; h.bagMax = 0; h.grabbed = 0; h.t = 0; h.heat = 0; h.crew = 0; h.downed = false;
     h.drilled = 0; h.vaultTotal = 0; h.getaway = 0; h.getawayMax = 0;
+    h.physical = false; h.vaultId = null; h.crewOwed = 0; h._sawOpen = false;
     h.dyeFrac = 0; h.dyed = false; h.silent = false;
     if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0); } catch (e) {}
     h.cooldown = cooldown || 0;
@@ -933,7 +1033,9 @@
   CBZ.cityHeistState = function () {
     const h = ensure();
     return { phase: h.phase, tier: h.tierId, bag: Math.round(h.bag), bagMax: h.bagMax, grabbed: h.grabbed, heat: h.heat, crew: h.crew, cooldown: h.cooldown, completed: h.completed, biggest: h.biggest,
-             drilled: h.drilled, vaultTotal: h.vaultTotal, getaway: h.getaway, dyeFrac: h.dyeFrac, dyed: h.dyed, guards: (h.guards || []).filter(function (gd) { return gd && !gd.dead; }).length };
+             drilled: h.drilled, vaultTotal: h.vaultTotal, getaway: h.getaway, dyeFrac: h.dyeFrac, dyed: h.dyed,
+             physical: !!h.physical, vaultId: h.vaultId || null, crewOwed: h.crewOwed || 0,
+             guards: (h.guards || []).filter(function (gd) { return gd && !gd.dead; }).length };
   };
 
   // ------------------------------------------------------------ per-frame loop
@@ -979,13 +1081,57 @@
     //  BANK EXECUTE — a real two-stage vault crack (DRILL → GRAB), heavier
     //  response, and a dye-pack/bait rig that punishes a slow getaway.
     // ============================================================
+    /* ============================================================
+       THE PHYSICAL BANK JOB. No meter, no hold, no "stay in the zone".
+       city/bank.js's door is either shut or it is not, and the bag is
+       whatever weight of duffel you have actually picked up. This branch
+       therefore READS the world and never writes a progress number.
+       ============================================================ */
+    if (h.phase === "execute" && tier.bank && h.physical) {
+      const st = (h.target && h.target.lot && CBZ.cityVaultState) ? CBZ.cityVaultState(h.target.lot) : null;
+      h.drilled = (st && st.open) ? 1 : 0;
+      h.vaultTotal = st ? (st.holds || h.vaultTotal) : h.vaultTotal;
+      if (st && st.open && !h._sawOpen) {
+        h._sawOpen = true;
+        big("THE DOOR'S OFF — CARRY IT OUT.");
+        // the bag ceiling is now a fact about the room, not a tier constant
+        h.bagMax = Math.max(h.bagMax, st.bagged || 0);
+      }
+      // WHAT YOU HAVE GOT is what you have had your hands on. cashBags tracks
+      // it because the bags are the money; this file keeps no parallel total.
+      if (CBZ.cashBags && h.vaultId) {
+        h.bag = CBZ.cashBags.heldFrom(h.vaultId);
+        if (h.bag > h.bagMax) h.bagMax = h.bag;
+        h.grabbed = h.bagMax > 0 ? clamp(h.bag / h.bagMax, 0, 1) : 0;
+      }
+      // the response does not care whether you are standing still: the alarm
+      // went in when you went loud, and the heat runs on the CLOCK from there.
+      h.heat = clamp(h.heat + (tier.heatRate / 100) * dt * 0.5, 0, 1);
+      const wantTargetP = Math.min(4, 2 + Math.round(h.heat * 2));
+      if (CBZ.cityForceStars && (g.wanted | 0) < wantTargetP) CBZ.cityForceStars(wantTargetP);
+      if (Math.random() < dt * (0.45 + h.heat * 0.9) && CBZ.citySpawnCop) {
+        const angP = Math.random() * Math.PI * 2, rP = 26 + Math.random() * 16;
+        const sxP = tgt.x + Math.cos(angP) * rP, szP = tgt.z + Math.sin(angP) * rP;
+        CBZ.citySpawnCop(sxP, szP, h.heat > 0.55);
+        if (Math.random() < 0.5 && CBZ.sfxAt) CBZ.sfxAt("siren", sxP, szP);
+      }
+      if (Math.random() < dt * (0.5 + h.heat)) { if (CBZ.cityPanic) CBZ.cityPanic(tgt.x, tgt.z, 1.2, CBZ.city.playerActor); }
+      // NO HARD TIMEOUT AND NO AUTO-ADVANCE. You leave when you decide to
+      // leave, carrying what you decided to carry — [H] runs.
+      renderHud();
+      return;
+    }
+
     if (h.phase === "execute" && tier.bank) {
       const onVault = inZone;
       if (onVault) {
         const crewSpeed = 1 + 0.16 * h.crew;
         if (h.drilled < 1) {
           // STAGE 1 — DRILL the vault. Real seconds of exposure before a cent.
-          h.drilled = clamp(h.drilled + (dt / tier.drillTime) * crewSpeed, 0, 1);
+          // (LEGACY PATH: reached only when BANK_VAULT_V1 is off or the branch
+          // is too small to hold a real strongroom — see cityVaultRoom's
+          // `refused`. Kept byte-identical so the flag is a true one-line revert.)
+          h.drilled = clamp(h.drilled + (dt / (tier.drillTime || 9)) * crewSpeed, 0, 1);
           if (CBZ.cityBankVaultGlow) try { CBZ.cityBankVaultGlow(0.15 + 0.85 * h.drilled); } catch (e) {}
           if (CBZ.shake && Math.random() < dt * 2.0) CBZ.shake(0.1);
           if (Math.random() < dt * 0.8) sfx("report");   // drill bite
@@ -1069,9 +1215,23 @@
         if (seen) {
           h.getaway = Math.max(0, h.getaway - dt);
           if (h.getaway <= 0) {
-            // POP — the dye pack blows. The rigged share of the bag is ruined.
-            const burn = Math.round(h.bag * clamp(h.dyeFrac, 0, 0.5));
-            h.bag = Math.max(0, h.bag - burn);
+            // POP — the dye pack blows. A dye pack RUINS NOTES; it does not
+            // delete them from the universe, so on a physical job it stains the
+            // duffel you are actually holding (the bag stays, it is worth less,
+            // and it LOOKS ruined). On the legacy path it takes the abstract bag.
+            let burn = 0;
+            if (h.physical && CBZ.cashBags) {
+              const held = CBZ.cashBags.carried();
+              if (held) burn = CBZ.cashBags.dye(held, clamp(h.dyeFrac, 0, 0.5));
+              const list = CBZ.cashBags.list();
+              for (let q = 0; q < list.length && !held; q++) {
+                if (list[q].src === h.vaultId && !list[q].dyed) { burn = CBZ.cashBags.dye(list[q], clamp(h.dyeFrac, 0, 0.5)); break; }
+              }
+              h.bag = h.vaultId ? CBZ.cashBags.heldFrom(h.vaultId) : Math.max(0, h.bag - burn);
+            } else {
+              burn = Math.round(h.bag * clamp(h.dyeFrac, 0, 0.5));
+              h.bag = Math.max(0, h.bag - burn);
+            }
             h.dyed = true;
             big("DYE PACK! " + fmt$(burn) + " ruined red — " + fmt$(h.bag) + " left clean.");
             note("Stained money's worthless. Get the rest clear.", 2.6);

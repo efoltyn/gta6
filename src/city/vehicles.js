@@ -433,7 +433,13 @@
     const buckets = new Map();
     for (const mesh of grp.children.slice()) {
       if (!isMesh(mesh) || keep.has(mesh) || Array.isArray(mesh.material)) continue;
-      const key = [mesh.material.id, mesh.castShadow ? 1 : 0, mesh.receiveShadow ? 1 : 0].join("|");
+      // renderOrder joins the bucket key: playercars.js's markGlassOrder puts
+      // every transparent pane at 1 so the interior behind it is unambiguously
+      // drawn first, and a merge that dropped that would silently undo it (the
+      // merged mesh takes the PROTOTYPE's flags, and a bucket is only allowed
+      // to hold meshes that agree on every flag it will inherit).
+      const key = [mesh.material.id, mesh.castShadow ? 1 : 0, mesh.receiveShadow ? 1 : 0,
+        mesh.renderOrder | 0].join("|");
       (buckets.get(key) || buckets.set(key, []).get(key)).push(mesh);
     }
     buckets.forEach((meshes) => {
@@ -456,6 +462,8 @@
       const merged = new THREE.Mesh(mergedGeo, proto.material);
       merged.castShadow = proto.castShadow;
       merged.receiveShadow = proto.receiveShadow;
+      merged.renderOrder = proto.renderOrder;
+      if (proto.userData && proto.userData.carGlass) merged.userData.carGlass = true;
       merged.matrixAutoUpdate = false;
       grp.add(merged);
       meshes.forEach((mesh) => grp.remove(mesh));
@@ -490,6 +498,13 @@
     for (const o of root.children) {
       if (!o.geometry || !o.material || Array.isArray(o.material)) continue;
       if (o.userData && o.userData.playerWheel) continue;
+      // A CABIN PANEL IS AUTHORED, NOT APPROXIMATE. Hole-proofing inflates
+      // thin boxes and skirts wide flat ones downward, which is right for
+      // exterior panel work and wrong inside a room: it would hang the
+      // headliner 0.45 m into the cabin and eat the SCREEN LAW gap between a
+      // display and its bezel. playercars.js's dressCabin marks the pieces
+      // whose dimensions ARE the design.
+      if (o.userData && o.userData.noSeal) continue;
       const p = o.geometry.parameters;
       if (!p || p.width == null || p.height == null || p.depth == null) continue;   // boxes only
       const flat = !o.rotation.x && !o.rotation.y && !o.rotation.z;
@@ -534,10 +549,34 @@
     }
     const m = donor ? donor.material : fallbackMat;
     if (!m || top - 0.14 <= 0.05) return;
-    const shell = boxMesh(sw, top - 0.14, sd, m);
-    shell.position.set(0, (top + 0.14) / 2, 0);
-    if (donor) { shell.castShadow = donor.castShadow; shell.receiveShadow = donor.receiveShadow; }
-    root.add(shell);
+    function block(depth, z) {
+      if (depth <= 0.06) return;
+      const b = boxMesh(sw, top - 0.14, depth, m);
+      b.position.set(0, (top + 0.14) / 2, z);
+      if (donor) { b.castShadow = donor.castShadow; b.receiveShadow = donor.receiveShadow; }
+      root.add(b);
+    }
+    /* THE SHELL MUST NOT EAT THE ROOM (CAR_CABIN_V2).
+       This one box exists to stop a low camera seeing daylight through a
+       hairline panel seam, and for a car with no interior that was free. It is
+       not free any more: its top sits at ~0.55·H, i.e. ABOVE a driver's hip
+       point, so a solid slab through the middle of the car would bury the
+       seats, the console and the seated body from the chest down and leave a
+       flat dark plane where the footwell should be in first person.
+       A cabin that publishes its own z-extent gets the shell in TWO pieces,
+       nose and tail, and keeps its floor pan + door cards + bulkheads (which
+       playercars.js's dressCabin builds, and which seal the room properly
+       rather than by filling it). No cabin published → the single box, exactly
+       as before, so the legacy box rig and every open frame are untouched. */
+    const ci = root.userData && root.userData.cabinInfo;
+    const carve = ci && ci.dressed && ci.zFront != null && ci.zRear != null &&
+      (!CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V2 !== false);
+    if (!carve) { block(sd, 0); return; }
+    const half = sd / 2;
+    const zF = Math.min(half, Math.max(-half, ci.zFront));
+    const zR = Math.min(half, Math.max(-half, ci.zRear));
+    block(half - zF, (half + zF) / 2);        // nose block, ahead of the windscreen
+    block(zR + half, (zR - half) / 2);        // tail block, behind the backlight
   }
 
   function addWheels(grp, halfTrack, wz, r) {
@@ -686,7 +725,22 @@
   let OCC_MAT = null;
   function occMat() {
     if (!OCC_MAT) {
-      OCC_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+      // A BODY IN A ROOFED BOX GETS NO SUN. Same fault the cabin dressing has
+      // (playercars.js writes it up where the interior materials are built):
+      // this is a Lambert world with no bounce, the roof shadows every
+      // occupant completely, and the result then passes through a
+      // 0.35-opacity pane — so a driver who is unquestionably there renders as
+      // nothing at all. The lift is flat (vertexColors carries the shirt and
+      // skin; emissive cannot), which is exactly what a fill light is.
+      const lift = !CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V2 !== false;
+      OCC_MAT = new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        // sized against playercars.js's cabin lift, not guessed: an occupant
+        // that reads DARKER than the upholstery behind him is a silhouette
+        // nobody can find, and the first plate of this wave was exactly that.
+        emissive: lift ? 0x5a5f68 : 0x000000,
+        emissiveIntensity: lift ? 0.9 : 1,
+      });
       OCC_MAT._shared = true;
     }
     return OCC_MAT;
@@ -759,16 +813,151 @@
       w: (dims.width || 2) * 0.9,
     };
   }
+  /* ==========================================================================
+     OCCUPANCY IS A FACT, NOT A DRAW — CAR_OCCUPANCY_REAL
+
+     OWNER, verbatim: "no npc gets out of the backseat, which should be 1/10 or
+     whatever BUT NOT RANDOM CHANCE, REAL."
+
+     What this file used to do, and why it could never satisfy that: the visible
+     bodies were TWO meshes drawn at build time off a hash of the car's position
+     (`_occDriver` always, `_occPass` at hash < 0.3), and the only body that
+     could ever LEAVE a car was `car.npcDriver` — a field set exclusively by
+     `cityNpcCarjack`. Those two facts had nothing to do with each other. The
+     passenger you saw through the glass did not exist to any other system, so
+     jacking the car ejected a person who was never in it and left behind a
+     person who was.
+
+     THE MODEL. Every populated car carries ONE record, `car.occ`, decided once
+     from a LATCHED position hash (the point the car was populated at, kept even
+     as it drives, so the fact cannot drift), modulated by the district it was
+     populated in and the hour it was populated at:
+
+         car.occ = { hx, hz, seats: [ {slot, side, row, h, blob, ped, react}, … ] }
+
+     A seat is the SINGLE record for that person at every fidelity. Far away it
+     is a merged vertex-coloured blob (`seat.blob`, the cheap body traffic has
+     always used). Close up the SAME seat is promoted to a real rig through
+     `npcLife.attach` — reusing a body the world was already running wherever
+     one can be claimed (giglife.js's cabPassenger precedent), so a full crowd
+     of car occupants costs the sim almost nothing new. Jack the car and the
+     bodies that step out are exactly the seats you could see, on the side of
+     the car their seat is on, because there is only ever one list.
+
+     WHY A LATCHED HASH AND NOT A ROLL. `CBZ.hash01` over the populate point is
+     the same determinism channel worldgen uses: the same car in the same seed
+     is populated the same way on every client, on every reload, and — this is
+     the part the owner asked for — the SAME WAY EVERY TIME YOU LOOK AT IT. A
+     `rng() < 0.3` cannot promise any of that. Recycled traffic (traffic.js
+     teleports a far idle car to a fresh road) re-latches deliberately through
+     `CBZ.carOccupancyReseat`: it is a different car in a different place now,
+     and pretending its old crew rode along would be the same lie backwards.
+  ========================================================================== */
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CAR_OCCUPANCY_REAL == null) CBZ.CONFIG.CAR_OCCUPANCY_REAL = true;
+  if (CBZ.CONFIG.JACK_REACTIONS == null) CBZ.CONFIG.JACK_REACTIONS = true;
+  function occOn() { return CBZ.CONFIG.CAR_OCCUPANCY_REAL !== false; }
+
+  // how many bodies ride in THIS car, and who they are. Everything below is a
+  // threshold on a stable channel — no draw, no rng, no per-look re-decision.
+  const OCC_SLOTS = [
+    { slot: "driver",  side: -1, row: 0 },
+    { slot: "shotgun", side:  1, row: 0 },
+    { slot: "rearR",   side:  1, row: 1 },
+    { slot: "rearL",   side: -1, row: 1 },
+  ];
+  function occDistrictAt(c) {
+    if (c.road && c.road.district) return String(c.road.district);
+    if (CBZ.roadSegmentAt) { const r = CBZ.roadSegmentAt(c.pos.x, c.pos.z, 8); if (r && r.district) return String(r.district); }
+    return "core";
+  }
+  function occHour() { return CBZ.cityHour ? CBZ.cityHour() : 12; }
+  function occDecide(c) {
+    // LATCH the origin. A car's crew is decided where it was populated and
+    // travels with it; re-reading c.pos every frame would let the fact wobble.
+    const hx = c.pos.x, hz = c.pos.z;
+    const hour = occHour(), dist = occDistrictAt(c);
+    const rush = (hour >= 7 && hour < 9.5) || (hour >= 16 && hour < 19);
+    const night = hour >= 22 || hour < 5.5;
+    const outlying = dist === "town" || dist === "island" || dist === "farmland" ||
+                     dist === "desert" || dist === "snow" || dist === "forest";
+    // A FRONT PASSENGER is common; a BACK SEAT is the owner's one-in-ten. Both
+    // move with the hour the way real occupancy does — the commute runs two-up,
+    // the 3 a.m. street runs alone, and a family car out of town runs full.
+    let pFront = 0.20, pRear = 0.10;
+    if (rush) { pFront += 0.11; pRear += 0.05; }
+    if (night) { pFront -= 0.07; pRear -= 0.04; }
+    if (outlying) { pRear += 0.05; pFront += 0.03; }
+    if (dist === "highway") { pFront += 0.05; pRear += 0.03; }
+    const seats = [];
+    for (let i = 0; i < OCC_SLOTS.length; i++) {
+      const S = OCC_SLOTS[i];
+      const h = carHash(hx, hz, 601 + i * 7);
+      let want;
+      if (i === 0) want = true;                                   // somebody is driving it
+      else if (i === 1) want = h < pFront;
+      else if (i === 2) want = h < pRear;
+      else want = h < pRear * 0.34;                               // both rear seats filled is rare
+      if (!want) continue;
+      seats.push({
+        slot: S.slot, side: S.side, row: S.row, h: h,
+        variant: (carHash(hx, hz, 640 + i * 3) * 24) | 0,
+        blob: null, ped: null, spawned: false, react: null, armed: null,
+      });
+    }
+    c.occ = { hx: hx, hz: hz, hour: hour, district: dist, seats: seats, rigs: 0, jacked: false };
+    return c.occ;
+  }
+  // IS THIS SEAT'S PERSON CARRYING? Decided from the same stable channel, but
+  // read LAZILY — gangs.js publishes turf after vehicles.js loads, and a gun in
+  // a car is a fact about the neighbourhood, not about the chassis.
+  function occArmed(c, seat) {
+    if (seat.armed != null) return seat.armed;
+    let p = 0.07;
+    if (CBZ.cityGangOf) { try { if (CBZ.cityGangOf(c.occ.hx, c.occ.hz)) p = 0.21; } catch (e) {} }
+    if (c.occ.hour >= 22 || c.occ.hour < 5.5) p += 0.04;
+    if (seat.slot === "driver") p *= 0.72;                         // the wheel is busy
+    seat.armed = carHash(c.occ.hx, c.occ.hz, 660 + seat.row * 5 + (seat.side > 0 ? 1 : 0)) < p;
+    return seat.armed;
+  }
+  // where a seat SITS, in the car group's local frame — the one cabin query,
+  // so a blob, a promoted rig and a door-side step-out can never disagree.
+  function occSeatPose(c, seat) {
+    const f = c._occFrame; if (!f) return null;
+    return {
+      x: seat.side * f.seatX,
+      y: seat.row ? f.cushionY + 0.01 : f.cushionY,
+      z: seat.row ? f.rearZ : f.frontZ,
+    };
+  }
+
   function addOccupants(c) {
     if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS === false) return;
     const grp = c.group; if (!grp) return;
     // bikes model their own rider (moto_rider); boats/helis are open frames
     if (/motorcycle|helicopter|boat/.test(grp.userData && grp.userData.carStyle || "")) return;
-    const ci = occSeatAnchor(grp); if (!ci) return;
+    /* ONE SEAT ANCHOR, ALWAYS. This used to read the raw greenhouse box and
+       park the body a hand's width under the beltline at a scale guessed from
+       the headroom — which on a sedan put the head at y=1.47 with the roof cap
+       at 1.48, i.e. the driver's skull was INSIDE the roof and no camera on
+       earth could see him. The audit counted him the whole time; that is the
+       "an audit nobody has executed is not a measurement" trap, one level down
+       (it was executed, and it counted a mesh, and a counted mesh is not a
+       VISIBLE one). cabinFrame() is the one query that always answers with a
+       real cushion and a real eye — authored where playercars.js dressed the
+       cabin, derived from the greenhouse where it did not — so the body sits
+       ON the seat and is scaled so ITS eye (occGeo puts the head ~0.86 over
+       the seat surface) lands on the same eye height the player's own rig
+       uses. Flag off keeps the original two lines, byte for byte. */
+    const v2 = !CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V2 !== false;
+    const ci = (v2 ? cabinFrame(c) : null) || occSeatAnchor(grp); if (!ci) return;
+    const fit = v2 && ci.eye;
     const roomY = Math.max(0.3, ci.peakY + 0.08);              // seat surface → roofline
-    const s = Math.max(0.6, Math.min(1.0, roomY / 0.98));      // scale the body to fit the cabin
-    const seatY = ci.baseY - 0.1;
-    const seatX = Math.min(0.45, ci.w * 0.22);
+    const seatY = fit ? ci.cushionY : ci.baseY - 0.1;
+    const seatX = fit ? ci.seatX : Math.min(0.45, ci.w * 0.22);
+    const s = fit
+      ? Math.max(0.55, Math.min(1.0, (ci.eye.y - seatY) / 0.86))
+      : Math.max(0.6, Math.min(1.0, roomY / 0.98));
     const h = carHash(c.pos.x, c.pos.z, 101);
     function seatBody(x, z, variant) {
       const m = new THREE.Mesh(occGeo(variant), occMat());
@@ -779,21 +968,473 @@
       grp.add(m);
       return m;
     }
-    c._occDriver = seatBody(seatX, ci.cx + 0.12, (h * 24) | 0);
-    if (carHash(c.pos.x, c.pos.z, 102) < 0.3) {
-      c._occPass = seatBody(-seatX, ci.cx + 0.12, (carHash(c.pos.x, c.pos.z, 103) * 24) | 0);
+    const occZ = fit ? ci.seatZ : ci.cx + 0.12;
+    if (!occOn()) {
+      // ---- LEGACY (CAR_OCCUPANCY_REAL=false): the original two lines, byte
+      //      for byte. One driver, a 30% coin-flip passenger, no record. ----
+      c._occDriver = seatBody(seatX, occZ, (h * 24) | 0);
+      if (carHash(c.pos.x, c.pos.z, 102) < 0.3) {
+        c._occPass = seatBody(-seatX, occZ, (carHash(c.pos.x, c.pos.z, 103) * 24) | 0);
+      }
+      syncOccupants(c);
+      return;
     }
+    // THE CABIN FRAME IS PUBLISHED ONCE, and every occupant query reads it: the
+    // blob below, the promoted rig, and the door-side step-out all solve off
+    // these four numbers, so they can never drift apart.
+    c._occFrame = {
+      seatX: seatX, cushionY: seatY, frontZ: occZ, fit: s,
+      // the bench: behind the front cushion, ahead of the rear bulkhead. A
+      // dressed cabin publishes its own; a derived one gets the same
+      // proportion (a road car's rows sit ~0.74 m apart).
+      rearZ: (fit && ci.rearSeatZ != null) ? ci.rearSeatZ
+        : Math.max((ci.zRear != null ? ci.zRear + 0.30 : occZ - 0.95), occZ - 0.74),
+      halfW: Math.max(0.7, (ci.w || 1.8) * 0.5),
+    };
+    const occ = occDecide(c);
+    for (let i = 0; i < occ.seats.length; i++) {
+      const st = occ.seats[i];
+      const p = occSeatPose(c, st);
+      st.blob = seatBody(p.x, p.z, st.variant);
+      if (st.row) st.blob.position.y = p.y;
+    }
+    // the two legacy handles stay pointed at the real meshes: airside.js reads
+    // `_occDriver` directly and gangs.js clears both. A field other files use
+    // is part of the contract — it gets a new meaning, not a new name.
+    c._occDriver = occ.seats[0] ? occ.seats[0].blob : null;
+    c._occPass = occ.seats[1] ? occ.seats[1].blob : null;
     syncOccupants(c);
   }
   function occWanted(c) {
     return !!(c && !c.player && !c.dead && (c.ai || c.npcDriver));
   }
-  function syncOccupants(c) {
-    if (!c._occDriver) return;
-    const on = occWanted(c);
-    if (c._occDriver.visible !== on) c._occDriver.visible = on;
-    if (c._occPass && c._occPass.visible !== on) c._occPass.visible = on;
+
+  /* ---- REAL BODIES IN THE SEATS ------------------------------------------
+     Near the player a seat stops being a blob and becomes a person. The body
+     is CLAIMED wherever possible — npcLife.claimCity pulls somebody the world
+     was already simulating (giglife.js's cabPassenger does exactly this for a
+     fare) — so a street full of occupied cars adds bodies to seats, not to the
+     population. Only when nobody can be claimed do we spawn.
+
+     THE BUDGET IS THE WHOLE DESIGN. `OCC_RIG_D` is a hair past the
+     interaction reach plus a sprint, and `OCC_RIG_CARS` caps how many cars may
+     hold rigs at once, so the cost is bounded no matter how dense the jam.
+     Everything past that ring stays a blob and costs one small mesh. */
+  const OCC_RIG_D = 24, OCC_RIG_D2 = OCC_RIG_D * OCC_RIG_D;
+  const OCC_RIG_OFF2 = 40 * 40;                      // hysteresis: hand bodies back
+  const OCC_RIG_CARS = 3;
+  let occRigCars = 0, occStat = { promoted: 0, claimed: 0, spawned: 0, jacks: 0, hostages: 0,
+    react: { fight: 0, flee: 0, freeze: 0, beg: 0 } };
+  function occAnchorFor(c, seat) {
+    const p = occSeatPose(c, seat); if (!p) return null;
+    // A REAR passenger sits turned a few degrees into the cabin and a shotgun
+    // rider leans toward the window — the same anchor grammar gangs.js's
+    // DB_SEATS uses, which npclife re-asserts every frame.
+    return {
+      x: p.x, y: p.y, z: p.z,
+      pitch: 0.12, yaw: seat.row ? -seat.side * 0.16 : (seat.slot === "shotgun" ? -0.10 : 0),
+      roll: 0, pose: "sit", state: "sit",
+    };
   }
+  function occDraftOk(p, c) {
+    if (!CBZ.npcLife || !CBZ.npcLife.draftableCity) return false;
+    if (!CBZ.npcLife.draftableCity(p)) return false;
+    // NEVER LET THE PLAYER SEE A BODY LEAVE THE PAVEMENT. giglife.js's
+    // safeFareDraft is the shipped rule and this is it: far away is always
+    // fine, near is only fine behind the camera.
+    const P = CBZ.player; if (!P || !P.pos) return true;
+    const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d2 = dx * dx + dz * dz;
+    if (d2 > 90 * 90) return true;
+    if (d2 < 40 * 40) return false;
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, d = Math.sqrt(d2) || 1;
+    return (Math.sin(yaw) * (dx / d) + Math.cos(yaw) * (dz / d)) < -0.15;
+  }
+  // SEAT ONE REAL BODY. Exported (CBZ.carOccupancySeat) because gangs.js seats
+  // a drive-by crew into the same record — a crew rides in SEATS, not in a
+  // private array beside them, which is what makes a drive-by car jackable
+  // with the same reactions as any other occupied car.
+  function occSeatPed(c, seat, ped, opts) {
+    if (!c || !seat || !ped) return false;
+    const anchor = occAnchorFor(c, seat);
+    if (!anchor || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
+    if (!CBZ.npcLife.attach(ped, c.group, anchor)) return false;
+    seat.ped = ped; seat.spawned = !!(opts && opts.spawned);
+    ped.inCar = c; ped.controlled = true;
+    ped._occCar = c; ped._occSeat = seat;
+    if (seat.blob) seat.blob.visible = false;
+    c.occ.rigs++;
+    if (seat.slot === "driver" && !c.npcDriver) { c.npcDriver = ped; c._occOwnsDriver = true; }
+    return true;
+  }
+  function occPromoteSeat(c, seat) {
+    if (seat.ped || !CBZ.npcLife) return false;
+    const anchor = occAnchorFor(c, seat); if (!anchor) return false;
+    const place = { parent: c.group, anchor: anchor };
+    let ped = null, spawned = false;
+    if (CBZ.npcLife.claimCity) {
+      try { ped = CBZ.npcLife.claimCity("carOccupant", place, function (p) { return occDraftOk(p, c); }); } catch (e) { ped = null; }
+    }
+    if (ped) {
+      // claimCity already attached it; finish the seat bookkeeping by hand.
+      seat.ped = ped; ped.inCar = c; ped.controlled = true;
+      ped._occCar = c; ped._occSeat = seat;
+      if (seat.blob) seat.blob.visible = false;
+      c.occ.rigs++;
+      if (seat.slot === "driver" && !c.npcDriver) { c.npcDriver = ped; c._occOwnsDriver = true; }
+      occStat.claimed++;
+    } else if (CBZ.npcLife.spawnCity) {
+      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: c.group, anchor: anchor }); } catch (e) { ped = null; }
+      if (!ped) return false;
+      spawned = true;
+      seat.ped = ped; ped.inCar = c; ped.controlled = true;
+      ped._occCar = c; ped._occSeat = seat; seat.spawned = true;
+      if (seat.blob) seat.blob.visible = false;
+      c.occ.rigs++;
+      if (seat.slot === "driver" && !c.npcDriver) { c.npcDriver = ped; c._occOwnsDriver = true; }
+      occStat.spawned++;
+    } else return false;
+    if (occArmed(c, seat) && !ped.armed) {
+      ped.armed = true;
+      ped.weapon = ped.weapon || (carHash(c.occ.hx, c.occ.hz, 690 + seat.row) < 0.7 ? "Pistol" : "SMG");
+      ped.ammo = ped.ammo || 18;
+      // the gun stays out of sight until it is drawn — a glove-box pistol is
+      // not a threat display (actorweapons.js's own "gun away" intent flag).
+      ped._holstered = true;
+      if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(ped); } catch (e) {} }
+    }
+    occStat.promoted++;
+    return true;
+  }
+  function occPromote(c, all) {
+    if (!c.occ || !c.group) return 0;
+    // A FAILED CLAIM MUST NOT COST A SCAN PER FRAME. claimCity walks cityPeds;
+    // if nobody is draftable (a quiet street, everybody in view) the answer
+    // will not have changed by the next frame. Back off and try again shortly.
+    if (!all) {
+      const t = CBZ.now || 0;
+      if (t < (c._occTryT || 0)) return 0;
+      c._occTryT = t + 420;
+    }
+    let n = 0;
+    for (let i = 0; i < c.occ.seats.length; i++) {
+      const st = c.occ.seats[i];
+      // A SEAT SOMEBODY LEFT STAYS EMPTY. Without the `gone` test the promoter
+      // reads a vacated seat as an unfilled one and hands it a brand-new body —
+      // measured: a car jacked once quietly refilled itself, 29 promotions
+      // against 10 jacks, and the rig budget went to 12 cars against a cap of 3.
+      if (st.ped || st.gone) continue;
+      if (occPromoteSeat(c, st)) { n++; if (!all) break; }   // one seat per tick unless forced
+    }
+    if (n && !c._occRigged) { c._occRigged = true; occRigCars++; }
+    return n;
+  }
+  // HAND THE BODIES BACK. Only ever off-camera: a rig blinking back into a
+  // merged blob in view is the same lie as a spawn in view.
+  function occDemote(c) {
+    if (!c.occ || !c._occRigged) return false;
+    if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(c.pos.x, c.pos.z, { minDistance: 24, maxDistance: 400 })) return false;
+    for (let i = 0; i < c.occ.seats.length; i++) {
+      const st = c.occ.seats[i];
+      const p = st.ped; if (!p) continue;
+      if (p.dead || p.hostage || p._dbRole) return false;    // a body with a story stays
+      try {
+        if (st.spawned && CBZ.npcLife.destroyCity) CBZ.npcLife.destroyCity(p);
+        else if (CBZ.npcLife.release) CBZ.npcLife.release(p, { state: "walk" });
+      } catch (e) { return false; }
+      p.inCar = null; p.controlled = false; p._occCar = null; p._occSeat = null;
+      st.ped = null; st.spawned = false;
+      if (st.blob) st.blob.visible = true;
+      if (c.npcDriver === p && c._occOwnsDriver) { c.npcDriver = null; c._occOwnsDriver = false; }
+    }
+    c.occ.rigs = 0; c._occRigged = false; occRigCars = Math.max(0, occRigCars - 1);
+    return true;
+  }
+  function syncOccupants(c) {
+    if (!c._occDriver && !(c.occ && c.occ.seats.length)) return;
+    const on = occWanted(c);
+    if (!c.occ) {                                     // legacy path
+      if (c._occDriver && c._occDriver.visible !== on) c._occDriver.visible = on;
+      if (c._occPass && c._occPass.visible !== on) c._occPass.visible = on;
+      return;
+    }
+    const seats = c.occ.seats;
+    for (let i = 0; i < seats.length; i++) {
+      const st = seats[i];
+      if (!st.blob) continue;
+      // a promoted seat shows its rig, not its blob; a seat somebody LEFT is
+      // empty for good — the fact changed, so the glass must change with it.
+      const want = on && !st.ped && !st.gone;
+      if (st.blob.visible !== want) st.blob.visible = want;
+    }
+    if (!on) return;
+    // PROMOTION / DEMOTION. One seat per car per tick, bounded car count.
+    const cm = CBZ.camera && CBZ.camera.position; if (!cm) return;
+    const dx = c.pos.x - cm.x, dz = c.pos.z - cm.z, d2 = dx * dx + dz * dz;
+    if (d2 < OCC_RIG_D2 && CBZ.npcLife && CBZ.npcLife.attach) {
+      if (c._occRigged || occRigCars < OCC_RIG_CARS) occPromote(c, false);
+    } else if (d2 > OCC_RIG_OFF2 && c._occRigged) occDemote(c);
+  }
+
+  /* ============================================================
+     THE PLAYER AT THE WHEEL — CAR_DRIVER_VISIBLE
+
+     OWNER: "fix the appearance of how player driving car in third person like
+     if player was driving towards you." Today his car is EMPTY, and it is
+     empty on purpose: `occWanted` refuses `c.player`, and the drive loop
+     force-hid the real rig every single frame because FPS/view toggles kept
+     re-showing a STANDING body whose head came out through the roof.
+
+     Hiding the body was never the fix — SEATING it is. Two things had to exist
+     first, and now do: a cabin with a floor and a cushion to sit on
+     (playercars.js's dressCabin), and a pose that reads as driving rather than
+     as sitting at a desk (character.js's "drive" seat posture).
+
+     WHY THE REAL RIG AND NOT THE CHEAP BLOB. Outfits are the game — the
+     clothing store, the origins, the jewellery all land on THIS rig — and a
+     player who dressed himself must be the person visible at the wheel of his
+     own car. That is exactly ONE full rig, the one already built and animated
+     for him; traffic keeps the merged vertex-coloured blob it has always used
+     (addOccupants above), so a jam of sixty cars still costs sixty small
+     meshes and not sixty skeletons. Near = real, far = cheap, and the split
+     falls on the only body the player can inspect.
+
+     HOW IT HOLDS THE SEAT. Per-frame world write from the car's own matrix —
+     npclife.js's attach/syncAttached grammar minus the re-parent, because
+     clothes.js, wounds.js and the weapon sockets all assume this rig is a
+     direct child of the arena root. Everything else (the sink onto the
+     cushion, the fold of the legs, the hands) is the shared seat solve, told
+     `kind: "car"`.
+  ============================================================ */
+  // (this file guards every other CBZ.CONFIG read, because a headless harness
+  // can load it without config.js — so the flag has to create the bag, not
+  // assume it)
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CAR_DRIVER_VISIBLE == null) CBZ.CONFIG.CAR_DRIVER_VISIBLE = true;
+
+  const _drvV = new THREE.Vector3();
+  const drv = { car: null, fit: 1, steer: 0, fpHid: false };
+
+  /* THE ONE CABIN QUERY. Hands back playercars.js's authored cabin frame when
+     there is one, and derives an equivalent from the greenhouse box when there
+     is not (the legacy box rig, a registered custom group, CAR_CABIN_V2 off),
+     so no consumer ever has two code paths. null = this thing has no cabin at
+     all — a bike, an open boat — and every caller degrades to nothing. */
+  function cabinFrame(car) {
+    const grp = car && (car.group || car);
+    if (!grp || !grp.userData) return null;
+    if (/motorcycle|helicopter|boat/.test(grp.userData.carStyle || "")) return null;
+    const ci = occSeatAnchor(grp);
+    if (!ci) return null;
+    if (ci.dressed) return ci;
+    const beltY = ci.baseY, gh = Math.max(0.16, ci.peakY), w = ci.w || 1.8;
+    const roofY = beltY + gh;
+    const dims = grp.userData.vehicleDims;
+    const cl = Math.max(1.2, ((dims && dims.length) || 4.4) * 0.42);
+    const zF = ci.cx + cl * 0.5, zR = ci.cx - cl * 0.5;
+    const floorY = Math.max(0.05, beltY - Math.max(0.30, gh * 0.9));
+    const cushionY = floorY + Math.max(0.11, (beltY - floorY) * 0.26);
+    const seatX = Math.min(0.42, w * 0.24);
+    const seatZ = Math.max(zR + 0.34, zF - 0.86);
+    const eyeY = Math.max(beltY + 0.04,
+      Math.min(beltY + Math.max(0.12, Math.min(gh * 0.30, 0.42)), roofY - 0.20));
+    return {
+      baseY: beltY, peakY: gh, cx: ci.cx, w: w,
+      beltY: beltY, roofY: roofY, floorY: floorY, zRear: zR, zFront: zF, rows: 1,
+      cushionY: cushionY, seatX: seatX, seatZ: seatZ, rearSeatZ: null,
+      wheel: { x: seatX, y: Math.max(cushionY + 0.28, beltY + gh * 0.09), z: seatZ + 0.44,
+        r: Math.min(0.185, w * 0.108) },
+      eye: { x: seatX, y: eyeY, z: seatZ + 0.19 },
+      dressed: false, derived: true,
+    };
+  }
+  CBZ.carCabinInfo = function (car) { return cabinFrame(car); };
+
+  /* HOW BIG IS THE DRIVER? This rig is stylised — its head is 24% of its
+     height where a real one is 13% (character.js says so in its own comment) —
+     so a 1:1 adult folded into a real-sized cabin puts his crown ~0.2 m
+     through the headliner. The cars are not the thing to change: their
+     dimensions are published spec and the whole silhouette law hangs off them.
+     So solve the seat solve BACKWARDS for the one uniform scale that lands
+     this body's eye on the cabin's authored eye height, then cap it so the
+     crown still clears the roof. It lands near 0.6 on a sedan and near 0.75 in
+     a van, which is the same answer the merged blob has always reached by
+     eyeballing a constant — except this one is derived, and it is per-body, so
+     a woman or a teenager gets her own. */
+  function fitSeatedRig(ch, ci) {
+    const m = CBZ.charSeatMetrics ? CBZ.charSeatMetrics(ch) : null;
+    if (!m) return 0.6;
+    const cush = Math.max(0.02, ci.cushionY - ci.floorY);
+    function solve(target, over) {
+      if (!(target > 0)) return 1;
+      // world hip = max(cush + hipPad*s, hipFloor*s); world eye/top = hip + over*s
+      const a = (target - cush) / (m.hipPad + over);          // cushion branch
+      if (a > 0 && cush >= (m.hipFloor - m.hipPad) * a) return a;
+      return target / (m.hipFloor + over);                    // low-clamp branch
+    }
+    const s = Math.min(
+      solve(ci.eye.y - ci.floorY, m.eyeOverHip),
+      solve((ci.roofY - 0.05) - ci.floorY, m.topOverHip));
+    return Math.max(0.50, Math.min(1.0, s));
+  }
+
+  function driverWanted(car) {
+    if (CBZ.CONFIG.CAR_DRIVER_VISIBLE === false) return false;
+    const P = CBZ.player, ch = CBZ.playerChar;
+    if (!P || P.dead || P._aircraft) return false;            // cockpit_view owns aircraft
+    if (!ch || !ch.group || !car || car.dead) return false;
+    return true;
+  }
+
+  function seatDriver(car, dt) {
+    const ch = CBZ.playerChar;
+    const ci = cabinFrame(car);
+    if (!ci) return false;
+    const grp = car.group;
+    const vis = (grp.userData && grp.userData.carVisual) || grp;
+    if (drv.car !== car) { drv.car = car; drv.fit = fitSeatedRig(ch, ci); drv.steer = 0; }
+    const s = drv.fit;
+    vis.updateWorldMatrix(true, false);
+    _drvV.set(ci.seatX, ci.floorY, ci.seatZ).applyMatrix4(vis.matrixWorld);
+    ch.group.position.copy(_drvV);
+    // the rig faces its own local +Z and so does the car body, so the car's
+    // full attitude (terrain pitch, weight-transfer roll, heading) copies over
+    // one-for-one — the driver leans with the car, which is half of why a
+    // seated body reads as riding IN something rather than glued to it.
+    ch.group.rotation.set(grp.rotation.x, grp.rotation.y, grp.rotation.z, grp.rotation.order);
+    if (ch.group.scale.x !== s) ch.group.scale.setScalar(s);
+    ch.group.visible = true;
+    ch.sitting = true;
+    ch.crouch = false; ch.slidePose = false; ch.pronePose = false; ch.typing = false;
+    // cushion/floorBelow are GROUP-LOCAL (the seat solve runs inside the scaled
+    // group), so the world clearance is divided back out by the fit.
+    if (!ch.seatRef || ch.seatRef.kind !== "car" || ch.seatRef._fit !== s) {
+      ch.seatRef = { cushion: (ci.cushionY - ci.floorY) / s, floorBelow: 0, kind: "car", _fit: s };
+    }
+    // HANDS FOLLOW THE WHEEL. The sim keeps no steering angle of its own, so
+    // the honest signal is the heading RATE. +heading turns the nose toward
+    // local +X, which is the car's left, so the sign flips into driveSteer's
+    // "+1 is right" convention.
+    let dh = car.heading - (car._drvHeading == null ? car.heading : car._drvHeading);
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    car._drvHeading = car.heading;
+    const want = Math.max(-1, Math.min(1, -(dh / Math.max(0.001, dt)) * 1.35));
+    drv.steer += (want - drv.steer) * Math.min(1, dt * 8);
+    ch.driveSteer = drv.steer;
+    // FIRST PERSON: you are inside this body, so drop the two parts of it that
+    // are AT the camera — the head (with the face) and the chest — and keep
+    // everything the view exists to show: the arms on the wheel, the hands,
+    // the legs in the footwell, and whatever the player is wearing on them.
+    // cockpit_view.js hides its pilot outright; a car cannot, because the
+    // driver's own hands ARE the shot. The chest has to go with the head
+    // regardless of how far forward the eye is authored — a torso box is
+    // ~0.28 m deep and the near plane is 0.10, so a few centimetres of eye
+    // placement is the difference between a cabin and a wall of shirt.
+    const fp = !!(CBZ.carFpActive && CBZ.carFpActive());
+    if (drv.fpHid !== fp) {
+      drv.fpHid = fp;
+      if (ch.neck) ch.neck.visible = !fp;
+      const sk = ch.skinSlots;
+      if (sk) {
+        const near = (sk.torso || []).concat(sk.collar || []);
+        for (let i = 0; i < near.length; i++) if (near[i]) near[i].visible = !fp;
+      }
+    }
+    if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+    return true;
+  }
+
+  /* Everything the seat owns, handed back. Called on exit, on death, on any
+     frame the player is not driving (city/view.js's visibility pass) and
+     whenever the flag goes off mid-session — the rig must never be left scaled
+     down, folded, or missing its head. */
+  function releaseDriver() {
+    if (!drv.car) return false;
+    drv.car = null; drv.steer = 0; drv.fit = 1;
+    const ch = CBZ.playerChar;
+    if (ch) {
+      ch.sitting = false; ch.seatRef = null; ch.driveSteer = 0;
+      if (ch.group) {
+        ch.group.scale.setScalar(1);
+        ch.group.rotation.x = 0; ch.group.rotation.z = 0;
+      }
+      if (ch.neck) ch.neck.visible = true;
+      const sk = ch.skinSlots;
+      if (sk) {
+        const near = (sk.torso || []).concat(sk.collar || []);
+        for (let i = 0; i < near.length; i++) if (near[i]) near[i].visible = true;
+      }
+    }
+    drv.fpHid = false;
+    return true;
+  }
+  CBZ.carDriverRelease = releaseDriver;
+  CBZ.carDriverSeated = function () { return !!drv.car; };
+  CBZ.carDriverAudit = function () {
+    let occ = 0, cars = 0;
+    const list = CBZ.cityCars || [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.occ && c.occ.seats.length) {
+        cars++;
+        for (let k = 0; k < c.occ.seats.length; k++) if (!c.occ.seats[k].gone) occ++;
+        continue;
+      }
+      if (!c._occDriver) continue;
+      cars++; occ++; if (c._occPass) occ++;
+    }
+    return {
+      driverFlag: CBZ.CONFIG.CAR_DRIVER_VISIBLE !== false,
+      driverRigSeated: drv.car ? 1 : 0,
+      driverFit: drv.car ? +drv.fit.toFixed(3) : null,
+      npcOccupantCars: cars,
+      npcOccupantMeshes: occ,      // merged blobs, NEVER full rigs — the budget
+    };
+  };
+
+  /* THE RATCHET. `blobSeats` + `rigSeats` is the whole occupant budget; the
+     rate rows are MEASURED, not claimed (the doctrine's "an audit nobody has
+     executed is not a measurement"), so the back-seat number the owner asked
+     for can be checked against the world instead of against this comment. */
+  CBZ.carOccupancyAudit = function () {
+    const list = CBZ.cityCars || [];
+    let populated = 0, blobSeats = 0, rigSeats = 0, goneSeats = 0, armedSeats = 0;
+    let backseatCars = 0, frontPassCars = 0, live = 0, frozen = 0, held = 0, rigCars = 0;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c.occ || !c.occ.seats.length) continue;
+      const on = occWanted(c);
+      if (on) live++;
+      populated++;
+      if (c._occRigged) rigCars++;
+      let rear = 0, front = 0;
+      for (let k = 0; k < c.occ.seats.length; k++) {
+        const st = c.occ.seats[k];
+        if (st.gone) { goneSeats++; continue; }
+        if (st.ped) rigSeats++; else blobSeats++;
+        if (st.armed) armedSeats++;
+        if (st.frozen) frozen++;
+        if (st.hostage) held++;
+        if (st.row) rear++; else if (st.slot !== "driver") front++;
+      }
+      if (rear) backseatCars++;
+      if (front) frontPassCars++;
+    }
+    return {
+      flag: occOn(), reactFlag: CBZ.CONFIG.JACK_REACTIONS !== false,
+      cars: list.length, populated: populated, driving: live,
+      blobSeats: blobSeats, rigSeats: rigSeats, emptiedSeats: goneSeats,
+      rigCars: rigCars, rigCap: OCC_RIG_CARS, armedSeats: armedSeats,
+      // MEASURED occupancy rates over the live world (owner asked for ~1/10 in
+      // the back). These are read off the record, never off the constants.
+      backseatRate: populated ? +(backseatCars / populated).toFixed(3) : 0,
+      frontPassRate: populated ? +(frontPassCars / populated).toFixed(3) : 0,
+      meanOccupants: populated ? +((blobSeats + rigSeats) / populated).toFixed(2) : 0,
+      jacks: occStat.jacks, reactions: occStat.react,
+      promoted: occStat.promoted, claimed: occStat.claimed, spawned: occStat.spawned,
+      frozenSeated: frozen, hostagesHeld: held, hostagesTaken: occStat.hostages,
+    };
+  };
 
   // Per-model trim on the LEGACY BOX RIG. The branch table moved to
   // city/carparts.js (applyBoxIdentity) — the same file that owns the brand
@@ -1291,17 +1932,420 @@
     // magically knowing to target the player.
     car.roadRageTarget = target && target.pos ? target : null; car.roadRageT = car.roadRageTarget ? 12 : 0;
     ped.inCar = car; ped.group.visible = false; ped.controlled = true;
+    ped._njCarjack = true;                        // whose eject decrements the cap
     npcDrivers++;
     if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 24, "carjacking");
     return true;
   };
-  function ejectNpcDriver(car) {
-    const ped = car.npcDriver; if (!ped) return;
-    car.npcDriver = null; npcDrivers = Math.max(0, npcDrivers - 1);
-    ped.inCar = null; ped.controlled = false; ped.group.visible = true;
-    ped.pos.set(car.pos.x + 1.6, 0, car.pos.z); ped.target.copy(ped.pos);
-    if (CBZ.playerCharSync) {}
+
+  /* ==========================================================================
+     GETTING OUT OF A CAR — the door, the decision, and what it leaves behind.
+
+     `ejectNpcDriver` used to be five lines: null the field, show the body,
+     `pos.set(car.pos.x + 1.6, 0, car.pos.z)`. That single `+1.6` on X is the
+     whole bug the owner filmed — it ignores which way the car is pointing, so
+     half the time the driver materialised through his own door, into oncoming
+     traffic, or inside a wall; it ignores the ground (a literal y = 0, the
+     fault `seatCar` was written to end); and having no state to set, the man
+     who was just dragged out of his own car at a junction simply resumed
+     walking, with no fear, no gun, no memory and nothing filed.
+
+     Everything below replaces those five lines. NOTHING here is a new system:
+     the door side comes from the car's heading and the seat's own side, the
+     exit runs through `CBZ.cityUnseat` (the ONE sanctioned seat exit), the
+     decision runs through `CBZ.cityScare` + `CBZ.citySizeUp` (freeze-or-bolt
+     and "does this person dare", both stable per person), the weapon appears
+     through `CBZ.syncActorWeapon`, the crime and its witnesses through
+     `CBZ.cityCrime`, and what the person REMEMBERS through
+     `CBZ.cityRelShift` + `CBZ.cityTraitShift`.
+  ========================================================================== */
+  const _occOut = { x: 0, y: 0, z: 0 };
+  function occDoorSpot(c, side, row, out) {
+    out = out || _occOut;
+    const h = c.heading || 0;
+    const rx = Math.cos(h), rz = -Math.sin(h);          // car's local +X, in world
+    const fx = Math.sin(h), fz = Math.cos(h);           // car's local +Z (forward)
+    const dims = vehicleDims(c);
+    const half = c._occFrame ? c._occFrame.halfW : (((dims && dims.width) || 1.9) * 0.5);
+    const outD = half + 0.85;
+    const alongZ = row ? -0.75 : 0.25;                  // rear doors are behind the B-pillar
+    out.x = c.pos.x + rx * side * outD + fx * alongZ;
+    out.z = c.pos.z + rz * side * outD + fz * alongZ;
+    // A DOOR THAT OPENS INTO A WALL IS NOT AN EXIT. Same depenetration every
+    // NPC mover uses; if the near side is blocked the body slides clear of it
+    // rather than standing inside a facade.
+    if (CBZ.collide) {
+      out.y = 0;
+      try { CBZ.collide(out, 0.42, 0, 1.7); } catch (e) {}
+    }
+    return out;
   }
+  // put ONE body on the pavement beside its own door. Returns the ped.
+  function occStepOut(c, seat, opts) {
+    opts = opts || {};
+    const p = seat.ped; if (!p) return null;
+    const spot = occDoorSpot(c, seat.side, seat.row);
+    const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
+    if (p._npcAttached && CBZ.cityUnseat) {
+      try { CBZ.cityUnseat(p, { x: spot.x, z: spot.z, y: gy, state: p.dead ? "dead" : (opts.state || "walk") }); } catch (e) {}
+    } else if (p.pos && p.pos.set) {
+      p.pos.set(spot.x, gy, spot.z);
+      if (p.group) { p.group.position.copy(p.pos); p.group.visible = !p._spawnHidden; }
+      // a fleeing body already has a target it is running toward — never stomp it
+      if (!opts.keepTarget && p.target && p.target.set) p.target.set(spot.x, 0, spot.z);
+    }
+    p.inCar = null; p.controlled = false;
+    p._occCar = null; p._occSeat = null;
+    seat.ped = null; seat.spawned = false; seat.frozen = false;
+    seat.gone = true;                                   // THE SEAT IS EMPTY NOW
+    if (seat.blob) seat.blob.visible = false;
+    if (c.npcDriver === p && c._occOwnsDriver) { c.npcDriver = null; c._occOwnsDriver = false; }
+    if (c.occ) c.occ.rigs = Math.max(0, c.occ.rigs - 1);
+    // AN EMPTY CAR IS NOT A RIGGED CAR. The rig budget is a live count of cars
+    // holding real bodies; a car everybody has climbed out of must give its
+    // slot back or the cap silently strangles every promotion after it
+    // (measured: 14 "rigged" cars against a cap of 3, all of them empty).
+    if (c._occRigged && (!c.occ || c.occ.rigs <= 0)) { c._occRigged = false; occRigCars = Math.max(0, occRigCars - 1); }
+    // OUT OF BALANCE, not teleported: a body shoved out of a seat needs a beat
+    // to find its feet before its brain takes over.
+    if (!p.dead) { p.speed = 0; p.pause = Math.max(p.pause || 0, opts.stumble === false ? 0.2 : 0.42); }
+    return p;
+  }
+
+  /* ---- THE DECISION TABLE -------------------------------------------------
+     ONE decision per person, LATCHED on the seat, so the man who drew on you
+     is the man who is still drawn on you two seconds later. Nothing here rolls
+     a die: `citySizeUp` answers "does this person dare" off levels and backup,
+     `cityScare` draws freeze-vs-bolt from the person's own stable roleHash and
+     the live panic field, and `cityTraits` reads nerve/greed/loyalty off data
+     the ped already carried.
+
+        armed & dares & not bolting ............ FIGHT   (draws, turns on you)
+        loyal armed passenger, driver fighting . FIGHT   (he does not leave his man)
+        cityScare says bolt .................... FLEE    (out the far door, running)
+        greedy + shaky, or already afraid ...... BEG     (hands up, pleading)
+        otherwise .............................. FREEZE  (hands up, holds still)
+
+     FREEZE IS THE ONE THAT MATTERS FOR A PASSENGER: a frozen passenger does
+     not get out. Drive away with him and he is not a loose end, he is your
+     hostage — the fields `social.js`'s hostage system and `restrain.js` read
+     get set for real. */
+  function occReact(c, seat, by, driverKind) {
+    if (seat.react) return seat.react;
+    const p = seat.ped; if (!p) return null;
+    const T = CBZ.cityTraits ? CBZ.cityTraits(p) : null;
+    const nerve = T ? T.nerve : (p.aggr == null ? 0.4 : p.aggr);
+    const armed = !!p.armed;
+    const dares = CBZ.citySizeUp ? !!CBZ.citySizeUp(p, by) : nerve > 0.6;
+    // a steady person is harder to send running; cityScare adds this to its
+    // bolt odds, so nerve bends the SHARED decision instead of forking it. A
+    // passenger gets a little more, and it is not a thumb on the scale: he has
+    // a door nobody is standing at, which is exactly what the front seats do
+    // not have.
+    const bias = (0.5 - nerve) * 0.30 + (seat.slot === "driver" ? 0 : 0.10);
+    // HAND THE BODY BACK FOR THE LENGTH OF ONE QUESTION. `cityScare` refuses
+    // any actor flagged `controlled` — correctly, because that flag means some
+    // other system owns this body and a panic brain must not fight it for the
+    // wheel. A seated occupant carries it, so asking freeze-or-bolt while the
+    // flag was up returned "hold" EVERY TIME and the whole flee branch was
+    // dead code (measured: 0 of 14 jacked people ran). We are about to stop
+    // owning him either way, so we release him, ask, and only re-claim him if
+    // the answer was to sit still.
+    const wasCtl = p.controlled;
+    p.controlled = false;
+    const scare = CBZ.cityScare ? CBZ.cityScare(p, by, { seat: true, bias: bias })
+      : (nerve < 0.4 ? "bolt" : "hold");
+    if (scare !== "bolt") p.controlled = wasCtl;
+    let kind;
+    if (armed && dares && scare !== "bolt") kind = "fight";
+    else if (seat.slot !== "driver" && driverKind === "fight" && armed && T && T.loyalty > 0.62) kind = "fight";
+    else if (scare === "bolt") kind = "flee";
+    else if (T && T.greed > 0.62 && nerve < 0.46) kind = "beg";
+    else if (nerve < 0.28 || (p.fear || 0) > 6) kind = "beg";
+    else kind = "freeze";
+    seat.react = kind;
+    if (occStat.react[kind] != null) occStat.react[kind]++;
+    return kind;
+  }
+  // A GUN THAT DOES NOT APPEAR IS NOT A GUN. actorweapons.js sockets the prop;
+  // `_holstered` is its own "gun away" intent flag, so drawing is un-setting it.
+  function occDraw(p) {
+    if (!p) return false;
+    if (!p.armed) { p.armed = true; p.weapon = p.weapon || "Pistol"; p.ammo = p.ammo || 12; }
+    p._holstered = false; p._gunLowered = false; p._gunHidden = false;
+    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(p); } catch (e) {} }
+    return true;
+  }
+  function occHandsUp(p, secs) {
+    p.surrender = true;
+    p.surrenderT = Math.max(p.surrenderT || 0, secs);
+    p.poseHandsUp = true;
+    if (p.char) p.char.handsUp = true;
+    p.rage = null;
+  }
+  function occApply(c, seat, kind, by) {
+    const p = seat.ped; if (!p) return;
+    const isDriver = seat.slot === "driver";
+    if (kind === "fight") {
+      occStepOut(c, seat, { state: "walk", stumble: false });
+      occDraw(p);
+      p.rage = by || (CBZ.city && CBZ.city.playerActor) || null;
+      p.alarmed = Math.max(p.alarmed || 0, 8);
+      p.aggr = Math.max(p.aggr || 0, 0.75);
+      if (CBZ.cityTraitShift) CBZ.cityTraitShift(p, "nerve", +0.03);
+    } else if (kind === "flee") {
+      // cityScare's bolt branch has already unseated + aimed him; step-out only
+      // moves him to his own door and must not touch the flee target.
+      occStepOut(c, seat, { state: "flee", keepTarget: true });
+      p.fear = Math.max(p.fear || 0, 9);
+      p.alarmed = Math.max(p.alarmed || 0, 7);
+      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 1);
+    } else if (kind === "beg") {
+      occStepOut(c, seat, { state: "walk" });
+      occHandsUp(p, 5.5);
+      p.fear = 10;
+      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.6);
+    } else {                                                   // freeze
+      if (isDriver) {                                          // his seat is taken — he goes
+        occStepOut(c, seat, { state: "walk" });
+        occHandsUp(p, 4.0);
+        p.fear = Math.max(p.fear || 0, 8);
+      } else {
+        // HE DOES NOT MOVE. Still attached, still in the seat, still yours.
+        seat.frozen = true; seat.frozenT = 0;
+        occHandsUp(p, 6.0);
+        p.fear = Math.max(p.fear || 0, 9);
+      }
+    }
+    // WHAT IT LEAVES ON HIM. The relationship moves through the one shared
+    // ledger; the trait drift is the permanent half — a man dragged out of his
+    // own car at gunpoint is a little less brave for the rest of his life.
+    if (CBZ.cityRelShift) CBZ.cityRelShift(p, "carjacked", isDriver ? 1 : 0.6);
+    if (CBZ.cityTraitShift) {
+      CBZ.cityTraitShift(p, "nerve", kind === "fight" ? 0 : -0.06);
+      CBZ.cityTraitShift(p, "snitch", +0.05);
+    }
+  }
+
+  /* ---- THE JACK ---------------------------------------------------------- */
+  function occJack(c, by) {
+    if (!c) return 0;
+    // A PARKED CAR HAS NOBODY IN IT. The seat record is decided at build time
+    // for every car (it is a fact about the vehicle, not about this frame);
+    // `occWanted` is the one query for whether that crew is aboard RIGHT NOW,
+    // and it is the same query the glass reads, so the two cannot disagree.
+    if (!occWanted(c) && !c.npcDriver) return 0;
+    if (!occOn() || !c.occ || CBZ.CONFIG.JACK_REACTIONS === false) {
+      if (c.npcDriver) legacyEject(c);
+      return 0;
+    }
+    // WHAT YOU SAW IS WHAT GETS OUT. Force every decided seat to a real body
+    // before anybody reacts — a blob cannot draw a gun or remember you.
+    occPromote(c, true);
+    const seats = c.occ.seats;
+    let n = 0, driverKind = null;
+    // the driver answers first; his crew read his answer before they choose.
+    for (let i = 0; i < seats.length; i++) {
+      if (seats[i].slot !== "driver" || !seats[i].ped) continue;
+      driverKind = occReact(c, seats[i], by, null);
+      occApply(c, seats[i], driverKind, by); n++;
+    }
+    for (let i = 0; i < seats.length; i++) {
+      const st = seats[i];
+      if (st.slot === "driver" || !st.ped) continue;
+      const k = occReact(c, st, by, driverKind);
+      occApply(c, st, k, by); n++;
+    }
+    // a driver nobody decided for (a carjacker's own body, a scripted rider)
+    if (c.npcDriver) legacyEject(c);
+    if (n) {
+      c.occ.jacked = true; occStat.jacks++;
+      c._occJackX = c.pos.x; c._occJackZ = c.pos.z;
+      // TAKING AN OCCUPIED CAR IS A DIFFERENT CRIME THAN BOOSTING AN EMPTY ONE,
+      // and it happens in front of the people who were in it. cityCrime tags
+      // the witnesses itself — we never re-derive a witness list.
+      if (CBZ.cityCrime) CBZ.cityCrime(45, { x: c.pos.x, z: c.pos.z, type: "carjacking" });
+    }
+    return n;
+  }
+
+  // the ORIGINAL five lines, kept for a driver that never went through the
+  // occupancy record (a carjacker's own body, a gig driver, a scripted rider)
+  // — but with the door solved instead of a blind +1.6 on X.
+  function legacyEject(car) {
+    const ped = car.npcDriver; if (!ped) return;
+    car.npcDriver = null; car._occOwnsDriver = false;
+    if (ped._njCarjack) { ped._njCarjack = false; npcDrivers = Math.max(0, npcDrivers - 1); }
+    ped.inCar = null; ped.controlled = false;
+    const spot = occDoorSpot(car, -1, 0);
+    const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
+    if (ped._npcAttached && CBZ.cityUnseat) {
+      try { CBZ.cityUnseat(ped, { x: spot.x, z: spot.z, y: gy, state: ped.dead ? "dead" : "walk" }); } catch (e) {}
+    } else {
+      if (ped.group) ped.group.visible = !ped._spawnHidden;
+      ped.pos.set(spot.x, gy, spot.z);
+      if (ped.target && ped.target.copy) ped.target.copy(ped.pos);
+    }
+    if (!ped.dead) ped.pause = Math.max(ped.pause || 0, 0.4);
+  }
+  function ejectNpcDriver(car) {
+    // a seated occupant leaves through the seat record so the fact stays true
+    if (car.occ && car._occOwnsDriver && car.npcDriver) {
+      const seats = car.occ.seats;
+      for (let i = 0; i < seats.length; i++) {
+        if (seats[i].ped === car.npcDriver) { occStepOut(car, seats[i], {}); return; }
+      }
+    }
+    legacyEject(car);
+  }
+
+  /* ---- HOSTAGES, AND LETTING PEOPLE GO ------------------------------------
+     A passenger who froze is not scenery. Drive off with him aboard and it is
+     a kidnapping — filed through social.js's OWN hostage entry point, which
+     sets `ped.hostage`, claims `g.cityHostage` and reports the crime, so every
+     system that already reads those fields (restrain.js, police.js, vips.js,
+     tells.js, the ransom flow) picks this up with no code here. */
+  function occHostageTick(c, dt) {
+    const seats = c.occ.seats;
+    const jx = c._occJackX == null ? c.pos.x : c._occJackX;
+    const jz = c._occJackZ == null ? c.pos.z : c._occJackZ;
+    for (let i = 0; i < seats.length; i++) {
+      const st = seats[i], p = st.ped;
+      if (!p || !st.frozen) continue;
+      if (p.dead) { st.frozen = false; continue; }
+      if (!c.player) {
+        // YOU LEFT HIM THERE. Terror does not hold forever — he comes out of
+        // it, gets out, and remembers being let go.
+        st.frozenT = (st.frozenT || 0) + dt;
+        if (st.frozenT > 6 && !p.hostage) {
+          occStepOut(c, st, { state: "flee", keepTarget: true });
+          p.fear = Math.max(p.fear || 0, 8);
+          if (CBZ.cityRelShift) CBZ.cityRelShift(p, "spared", 0.7);
+          if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.8);
+        }
+        continue;
+      }
+      st.frozenT = 0;
+      if (p.hostage) continue;
+      const dx = c.pos.x - jx, dz = c.pos.z - jz;
+      if (dx * dx + dz * dz < 26 * 26) continue;                // still on the same corner
+      if (CBZ.cityTakeHostage) { try { CBZ.cityTakeHostage(p); } catch (e) {} }
+      p.hostage = true; p.controlled = true; p.inCar = c;
+      st.hostage = true; occStat.hostages++;
+      if (CBZ.cityRelShift) CBZ.cityRelShift(p, "passengerTaken", 1);
+      if (CBZ.cityTraitShift) CBZ.cityTraitShift(p, "nerve", -0.12);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("There's still somebody in the back.", 2.2);
+    }
+  }
+  // LET THEM OUT. The counterpart verb — interact.js surfaces it on your own
+  // car whenever somebody is still riding in it who did not choose to be.
+  CBZ.carOccupancyRelease = function (c) {
+    if (!c || !c.occ) return 0;
+    let n = 0;
+    for (let i = 0; i < c.occ.seats.length; i++) {
+      const st = c.occ.seats[i], p = st.ped;
+      if (!p || !(st.frozen || st.hostage)) continue;
+      const wasHostage = !!p.hostage;
+      occStepOut(c, st, { state: "flee", keepTarget: false });
+      p.hostage = false; p.surrender = false; p.surrenderT = 0;
+      if (p.char) p.char.handsUp = false;
+      p.fear = Math.max(p.fear || 0, 7);
+      if (wasHostage && CBZ.cityReleaseHostage) { try { CBZ.cityReleaseHostage(false); } catch (e) {} }
+      if (CBZ.cityRelShift) CBZ.cityRelShift(p, "spared", 1);
+      if (CBZ.cityTraitShift) CBZ.cityTraitShift(p, "snitch", -0.04);
+      n++;
+    }
+    return n;
+  };
+  CBZ.carOccupancyHeld = function (c) {
+    if (!c || !c.occ) return null;
+    for (let i = 0; i < c.occ.seats.length; i++) {
+      const st = c.occ.seats[i];
+      if (st.ped && (st.frozen || st.hostage)) return st.ped;
+    }
+    return null;
+  };
+
+  /* ---- THE PUBLIC SEAT API (gangs.js rides on this) ---------------------- */
+  // is anybody actually in this car right now?
+  CBZ.carOccupied = function (c) {
+    if (!c) return false;
+    if (c.npcDriver) return true;
+    if (!c.occ || !occWanted(c)) return false;
+    for (let i = 0; i < c.occ.seats.length; i++) if (!c.occ.seats[i].gone) return true;
+    return false;
+  };
+  CBZ.carOccupantCount = function (c) {
+    if (!c || !c.occ || !occWanted(c)) return c && c.npcDriver ? 1 : 0;
+    let n = 0;
+    for (let i = 0; i < c.occ.seats.length; i++) if (!c.occ.seats[i].gone) n++;
+    return n;
+  };
+  // EMPTY THIS CAR OUT (gangs.js taking one over): every blob unparented,
+  // every promoted rig handed back. The geometry is a shared per-variant cache
+  // — unparent it, never dispose it.
+  CBZ.carOccupancyClear = function (c) {
+    if (!c) return;
+    if (c.occ) {
+      for (let i = 0; i < c.occ.seats.length; i++) {
+        const st = c.occ.seats[i];
+        if (st.ped) {
+          const p = st.ped;
+          try {
+            if (st.spawned && CBZ.npcLife && CBZ.npcLife.destroyCity) CBZ.npcLife.destroyCity(p);
+            else if (CBZ.npcLife && CBZ.npcLife.release) CBZ.npcLife.release(p, { state: "walk" });
+          } catch (e) {}
+          p.inCar = null; p.controlled = false; p._occCar = null; p._occSeat = null;
+          st.ped = null;
+        }
+        if (st.blob && st.blob.parent) st.blob.parent.remove(st.blob);
+        st.blob = null; st.gone = true;
+      }
+      c.occ.seats.length = 0; c.occ.rigs = 0;
+    }
+    if (c._occRigged) { c._occRigged = false; occRigCars = Math.max(0, occRigCars - 1); }
+    const keys = ["_occDriver", "_occPass"];
+    for (let i = 0; i < keys.length; i++) {
+      const m = c[keys[i]];
+      if (m && m.parent) m.parent.remove(m);
+      c[keys[i]] = null;
+    }
+    if (c.npcDriver && c._occOwnsDriver) { c.npcDriver = null; c._occOwnsDriver = false; }
+  };
+  // seat a body the CALLER owns (a gang crew) into a named slot, so a drive-by
+  // car answers "who is in it" through the same record every other car uses.
+  CBZ.carOccupancySeat = function (c, slotName, ped, opts) {
+    if (!c || !ped) return false;
+    if (!c.occ) c.occ = { hx: c.pos.x, hz: c.pos.z, hour: occHour(), district: "core", seats: [], rigs: 0, jacked: false };
+    if (!c._occFrame) return false;                    // no cabin (bike/boat) — caller keeps its own
+    const S = OCC_SLOTS.filter(function (s) { return s.slot === slotName; })[0] || OCC_SLOTS[0];
+    let st = null;
+    for (let i = 0; i < c.occ.seats.length; i++) if (c.occ.seats[i].slot === S.slot) st = c.occ.seats[i];
+    if (!st) {
+      st = { slot: S.slot, side: S.side, row: S.row, h: 0, variant: 0, blob: null, ped: null,
+        spawned: false, react: null, armed: !!(opts && opts.armed) };
+      c.occ.seats.push(st);
+    }
+    st.gone = false; st.armed = opts && opts.armed != null ? !!opts.armed : st.armed;
+    if (st.blob && st.blob.parent) { st.blob.parent.remove(st.blob); st.blob = null; }
+    return occSeatPed(c, st, ped, opts);
+  };
+  CBZ.carOccupancySeatAnchor = function (c, slotName) {
+    if (!c || !c._occFrame) return null;
+    const S = OCC_SLOTS.filter(function (s) { return s.slot === slotName; })[0] || OCC_SLOTS[0];
+    return occAnchorFor(c, { slot: S.slot, side: S.side, row: S.row });
+  };
+  // THE CAR MOVED HOUSE. traffic.js teleports a far idle car onto a fresh road;
+  // it is a different car in a different place now, so its crew is re-decided
+  // from the NEW point rather than riding along as a stale fact.
+  CBZ.carOccupancyReseat = function (c) {
+    if (!c || !occOn() || !c.occ || !c._occFrame) return false;
+    if (c._occRigged || c.occ.jacked) return false;    // real bodies aboard: never
+    CBZ.carOccupancyClear(c);
+    addOccupants(c);
+    return true;
+  };
+  CBZ.carOccupancyJack = occJack;
 
   // ---- visible crash damage: permanently squash/cave the car mesh. Severity
   //      accumulates, so a worse hit (or a second one) deforms it further. Only
@@ -1843,6 +2887,9 @@
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
       syncOccupants(c);                      // driver body appears/vanishes with control state
+      // a passenger who froze in his seat: still there, still yours, and the
+      // moment you actually drive off with him it stops being a jack.
+      if (c.occ && c.occ.jacked) occHostageTick(c, dt);
       // A BURNT-OUT HULK still ages, on the reaper's own loop — no second
       // timer system. It is `dead`, so it falls out of every line below.
       if (c._husk) { if (!c._reap) stepHusk(c, dt); continue; }
@@ -2097,6 +3144,11 @@
   // ---- enter / exit ----
   CBZ.cityEnterVehicle = function (car) {
     if (!car || car.player) return false;
+    // THE PEOPLE IN IT ANSWER FIRST. occJack promotes every decided seat to a
+    // real body, runs each one's decision, and puts the ones who leave beside
+    // their OWN door. It degrades to the old single-driver eject when the flag
+    // is off or the car never carried an occupancy record.
+    const jacked = occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
     if (car.npcDriver) ejectNpcDriver(car);
     const P = CBZ.player;
     P.driving = true; P._vehicle = car;
@@ -2134,6 +3186,7 @@
       if (car.group) car.group.rotation.set(0, car.heading, 0);   // drop the weight-transfer lean
       if (CBZ.cityDemotePlayerCar) CBZ.cityDemotePlayerCar(car);
     }
+    releaseDriver();          // unfold, un-scale, give the head back
     CBZ.playerChar.group.visible = true;
     if (car) {
       const ox = Math.cos(car.heading) * 1.6, oz = -Math.sin(car.heading) * 1.6;
@@ -3004,8 +4057,16 @@
     }
     if (vmag > 6) runOver(car, vmag);
     P.pos.set(car.pos.x, rideY, car.pos.z);
-    CBZ.playerChar.group.position.copy(P.pos);
-    CBZ.playerChar.group.visible = false;   // keep the driver's body hidden every frame (FPS/view toggles kept re-showing it → head poked out the roof)
+    // THE DRIVER. CAR_DRIVER_VISIBLE seats the player's real, dressed rig at
+    // the wheel of his own car (see the block above); the `else` arm is the
+    // pre-wave behaviour and the one-line revert — park the rig at the car's
+    // ground point and hide it EVERY frame, because FPS/view toggles kept
+    // re-showing a standing body whose head came out through the roof.
+    if (!(driverWanted(car) && seatDriver(car, dt))) {
+      if (drv.car) releaseDriver();
+      CBZ.playerChar.group.position.copy(P.pos);
+      CBZ.playerChar.group.visible = false;
+    }
     P.speed = vmag;
     if (CBZ.cityUpdatePlayerCarVisual) CBZ.cityUpdatePlayerCarVisual(car, dt);
     if (CBZ.cam && vmag > 3 && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
@@ -3253,7 +4314,23 @@
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.inCar) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
-      if (dx * dx + dz * dz < 3.2) {
+      const _d2 = dx * dx + dz * dz;
+      /* THE ONE THAT MISSED. A car doing 15 m/s that passes a metre from
+         somebody is an event to that person even though nothing touched them —
+         it is most of what makes driving through a crowd FEEL like something,
+         and until now the only thing a pedestrian could notice was being hit.
+         Costs nothing: this loop was already walking every ped, and the latch
+         means one person can only be startled by you every few seconds. */
+      if (_d2 >= 3.2 && _d2 < 34 && car.player && vmag > 10 && !p.inCar &&
+          (p._nearMissT || 0) <= (CBZ.now || 0)) {
+        p._nearMissT = (CBZ.now || 0) + 4200;
+        p.fear = Math.min(10, (p.fear || 0) + 1.6);
+        p.alarmed = Math.max(p.alarmed || 0, 4);
+        if (CBZ.cityRelShift) CBZ.cityRelShift(p, "nearMiss", 1);
+        if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.35);
+        if (CBZ.cityScare && CBZ.city) CBZ.cityScare(p, CBZ.city.playerActor, { bias: 0.14 });
+      }
+      if (_d2 < 3.2) {
         if ((p._carHitUntil || 0) > (CBZ.now || 0)) continue;
         p._carHitUntil = (CBZ.now || 0) + 850;
         // Low-speed contact knocks a person over and makes them react. Only a
@@ -4091,6 +5168,11 @@
   }
   CBZ.cityVehiclesReset = function () {
     npcDrivers = 0;
+    // the occupant budget is a LIVE count, not a save — a fresh run starts with
+    // no rigged cars and no remembered jack tally.
+    occRigCars = 0;
+    occStat = { promoted: 0, claimed: 0, spawned: 0, jacks: 0, hostages: 0,
+      react: { fight: 0, flee: 0, freeze: 0, beg: 0 } };
     if (CBZ.cityCarDeformReset) CBZ.cityCarDeformReset();   // pristine fleet on a fresh run
     if (CBZ.carAudio) CBZ.carAudio.stop();   // a fresh run never inherits an orphaned motor
     // wipe the rubber: a new run starts on clean asphalt (zeroed quads are degenerate = invisible)

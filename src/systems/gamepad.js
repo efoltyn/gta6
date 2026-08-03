@@ -174,7 +174,10 @@
       const dpitch = curve(ry) * LOOK_PITCH * mul * dt * (INVERT_Y ? -1 : 1);
       // both conventions subtract the same delta (matches mouse + touch.js): a
       // right-stick pull DOWN tilts the view down in third AND first person.
-      CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch - dpitch));
+      // systems/camera.js owns the pitch envelope — a hand-typed copy here would
+      // stop the stick short of where a mouse can already look.
+      const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9];
+      CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - dpitch));
       if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - dpitch));
     }
 

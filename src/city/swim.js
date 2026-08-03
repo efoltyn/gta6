@@ -432,6 +432,16 @@
     // THE ISLAND has a real, queryable bed — the arena's own height field —
     // so no synthetic shelf is needed or wanted here.
     if (survOn()) return Math.max(0, CBZ.survFloodDepthAt(x, z));
+    return cityBedDepthAt(x, z);
+  }
+
+  // THE CITY SEA'S WATER COLUMN, published so the world can be DRAWN from the
+  // same model the swimmer is clamped against. world/terrain_overhaul.js reads
+  // it to shape the visual shelf and world/water_underwater.js reads it to
+  // grade the underwater colour, so "the bottom you can see" and "the bottom
+  // you stop at" are one surface instead of two guesses 60 m apart. Pure
+  // analytic field arithmetic — allocation-free, no rng.
+  function cityBedDepthAt(x, z) {
     const wf = CBZ.waterField;
     let shelf = 99;
     if (wf && wf.shoreAt) shelf = Math.max(0, -wf.shoreAt(x, z)) * SHELF_SLOPE;
@@ -439,6 +449,13 @@
     const d = Math.min(shelf, deep > 0 ? deep : 24);
     return Number.isFinite(d) ? Math.max(0, d) : 0;
   }
+  CBZ.citySeaBedDepthAt = cityBedDepthAt;
+  // World Y of that bed — what a renderer actually wants.
+  CBZ.citySeaBedYAt = function (x, z) {
+    const surf = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z)
+      : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48);
+    return surf - cityBedDepthAt(x, z);
+  };
 
   // 0..1 body submergence at a feet position. Prefers the shared field if a
   // neighbour has published one; the inline form is the same definition.

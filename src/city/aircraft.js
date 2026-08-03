@@ -419,6 +419,33 @@
       if (ok) { c.seated = true; c.actor.inCar = false; }
     }
   }
+  // A FAST JET IS FLOWN BY A PERSON TOO (owner: "you arent in the cockpit").
+  // The gunship's three seats are hand-authored because the island model is
+  // ONE known shape. A scrambled base fighter or bomber can be any of several
+  // airframes, so hand-authoring was never going to happen and its pilot was
+  // simply `group.visible = false` — an empty canopy doing Mach 0.8 over the
+  // city. The seat instead comes out of the COCKPIT GENERATOR
+  // (CBZ.airPilotSeat / airPilotNode, city/playeraircraft.js), which already
+  // solves an eye, a floor and a cushion for ANY model and costs a new
+  // airframe nothing. Everything after that is the same machinery the gunship
+  // crew use — npclife anchor, syncAttached hold, CHAR_SEATED_HITTABLE, and
+  // releaseMilitary's existing unseat/kill teardown.
+  function seatSolo(craft, actor) {
+    if (!crewOn() || !actor || actor.dead || !craft || !craft.group || !actor.group) return false;
+    if (!CBZ.airSeatActor) return false;
+    const rec = craft.sourceRec || null;
+    try {
+      return CBZ.airSeatActor({
+        group: craft.group,
+        airClass: "jet",
+        // the generator reads the NAME to tell a bomber from a fighter, so a
+        // B-2's pilot sits on the bomber deck without a branch here
+        displayName: (rec && rec.model && rec.model.name) || (rec && rec.milKind) || "",
+        modelYawOffset: (rec && rec.modelYawOffset) || 0,
+      }, actor);
+    } catch (e) { return false; }
+  }
+
   function claimMilitary(kind) {
     const rec = parkedMilitary(kind); if (!rec) return null;
     const pilot = militaryPilot(rec); if (!pilot) return null;
@@ -1831,7 +1858,7 @@
     const cx = aim ? aim.x : (arena && arena.center ? arena.center.x : 0);
     const cz = aim ? aim.z : (arena && arena.center ? arena.center.z : 0);
     const dir = new THREE.Vector3(Math.sin(claim.home.heading), 0, Math.cos(claim.home.heading));
-    return {
+    const j = {
       group: grp, burn, dir, pos: grp.position, life: 0, fired: false, target: { x: cx, z: cz },
       // shoot-down state — mirrors the gunship's (hp / downed / falling wreck).
       // Lighter than the heli: one rocket splash (90) or a sustained rifle rake
@@ -1841,15 +1868,23 @@
       phase: "spool", launchT: 3.2, heading: claim.home.heading,
       speed: 0, phaseT: 0,
     };
+    // put the man in the cockpit before the aeroplane moves
+    seatSolo(j, claim.pilot);
+    return j;
   }
 
   function despawnJet(j, crashed) {
     if (!j) return;
+    // UNSEAT BEFORE DISPOSING. releaseMilitary detaches the pilot's rig and
+    // puts him back on the ground; a body still parented into the airframe
+    // when disposeGroup ran would have its geometry freed underneath it. (The
+    // order used to be the other way round; it was only ever safe because a
+    // scrambled jet always has a sourceRec and so never took that branch.)
+    releaseMilitary(j, !!crashed);
     if (!j.sourceRec) {
       if (j.group && j.group.parent) j.group.parent.remove(j.group);
       disposeGroup(j.group);
     }
-    releaseMilitary(j, !!crashed);
   }
 
   function updateJets(dt, r) {

@@ -284,6 +284,9 @@
   // cap was indistinguishable from sky). A mushroom cloud stands ABOVE the
   // haze layer; it does not dissolve into it. false => the old fogged read.
   if (CBZ.CONFIG.NUKE_FX_FOGPROOF == null) CBZ.CONFIG.NUKE_FX_FOGPROOF = true;
+
+  // see solidOp() below — the arena's "slightly opaque" report
+  if (CBZ.CONFIG.NUKE_FX_SOLID_CLOUD == null) CBZ.CONFIG.NUKE_FX_SOLID_CLOUD = true;
   // Photographically-anchored formation size (see formationDims) instead of
   // the first coherent draft's R*3.6 cap, which measured ~3x smaller than the
   // Trinity/Nagasaki frame record for the same age. false => draft numbers.
@@ -1170,6 +1173,8 @@
 
     seedVolumes();
     function volumeMat(color, emissive, opacity, rimFloor) {
+      // (peak opacity is applied per frame — see solidOp() near the layer
+      //  writes; the constructor value only covers the first frame)
       const m = new THREE.MeshLambertMaterial({
         color: color, emissive: emissive, emissiveIntensity: 1,
         transparent: true, opacity: opacity, depthWrite: true,
@@ -1579,6 +1584,37 @@
   const CAP_DIA_20KT = 5500;     // m — Glasstone's 20 kt stabilised cap
   const CAP_THICK_20KT = 4300;   // m
   const STEM_OF_CAP = 1 / 3;     // owner's reference photograph
+  /* ============================================================
+     SOLIDITY — the arena bug, and it was never the far plane alone.
+
+     OWNER, 2026-08-03: the finale reads as "orange geometric fake smoke that
+     looks like slightly opaque orange floating rocks". The word doing the
+     work is SLIGHTLY OPAQUE, and it was literally true: every volume layer's
+     peak alpha was hand-set between 0.76 and 0.88, so the cloud never became
+     opaque at any point in its life. The lobes are InstancedMeshes, which
+     render in ONE unsorted pass — at 85% you see the far side of the cloud
+     through the near side, every lobe outlined against the lobe behind it,
+     and a coherent body falls apart into discrete floating solids. No colour,
+     count or geometry change can fix that, because the artifact IS the alpha.
+
+     This does not touch a single envelope. capIn/stemIn/surgeIn/endFade/near
+     all still shape exactly the same curve; the curve simply finishes at
+     solid instead of at 85%. NUKE_FX_SOLID_CLOUD=false restores the old
+     peaks byte for byte.
+     ============================================================ */
+  function solidOp(peak) {
+    /* 1.45, not 1.05, and the reason is NUKE_FX_SOFT_LOBES: its fragment
+       patch multiplies alpha by BOTH a rim fresnel AND a noise term whose
+       floor is 0.70 (see volumeMat). So a layer whose peak was 0.86 actually
+       reached ~0.60 in the MIDDLE of a lobe — well under half-opaque — which
+       is where the see-through came from. Over-driving the peak lets the
+       clamp do the work: lobe INTERIORS finish solid, while the rim fresnel
+       still dissolves the silhouette. Solid billows, soft edges, which is
+       what the soft-lobe patch was reaching for in the first place. */
+    return CBZ.CONFIG.NUKE_FX_SOLID_CLOUD === false ? peak : Math.min(1, peak * 1.45);
+  }
+
+
   function nukeDims(R) {
     const W = yieldKt(R);
     const k = Math.pow(W / 20, 1 / 3);          // width terms scale as W^(1/3)
@@ -2612,7 +2648,7 @@
         lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
         a * 0.35);
     }
-    cap.material.opacity = 0.86 * capIn * endFade * near;
+    cap.material.opacity = solidOp(0.86) * capIn * endFade * near;
     cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
     cap.visible = cap.material.opacity > 0.004;
     if (_volWrite) cap.instanceMatrix.needsUpdate = true;
@@ -2698,7 +2734,7 @@
           lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
           lobe * (isCrown ? 1.05 : 1.42), a * 0.5);
       }
-      crown.material.opacity = 0.88 * Math.max(collarIn, crownIn) * endFade * near;
+      crown.material.opacity = solidOp(0.88) * Math.max(collarIn, crownIn) * endFade * near;
       cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH, cloudCool, VOL_CROWN_EMBER);
       crown.visible = crown.material.opacity > 0.004;
       if (_volWrite) crown.instanceMatrix.needsUpdate = true;
@@ -2788,7 +2824,7 @@
     // loses 55% of its opacity, not all of it): the reference plate's whole
     // foreground is that thick roiling column, and it is the one part of the
     // cloud that genuinely is inside the frustum.
-    stem.material.opacity = 0.84 * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
+    stem.material.opacity = solidOp(0.84) * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
     cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH, cloudCool);
     stem.visible = stem.material.opacity > 0.004;
     if (_volWrite) stem.instanceMatrix.needsUpdate = true;
@@ -2831,7 +2867,7 @@
         lobe * 1.25, lobe * 0.38 * tall, lobe,
         a + spin);
     }
-    surge.material.opacity = (deep ? 0.76 : 0.82) * surgeIn * surgeFade;
+    surge.material.opacity = solidOp(deep ? 0.76 : 0.82) * surgeIn * surgeFade;
     cloudColor(surge.material, VOL_DUST_HOT_V[deep ? 1 : 0], VOL_DUST_ASH_V[deep ? 1 : 0],
       cloudCool * 0.85);
     surge.visible = surge.material.opacity > 0.004;

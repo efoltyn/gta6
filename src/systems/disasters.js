@@ -72,6 +72,28 @@
    false restores the legacy wall — see TSUNAMI_LEGACY below) ·
    SURV_SHOW_DONT_TELL · SURV_SHARED_WATER · SURV_SHARED_WEATHER ·
    SURV_SHARED_STRUCTURE (each a one-line revert to the old fork).
+
+   THE STRATOVOLCANO (2026-08-03). The eruption is no longer one hazard with
+   a see-through orange box on it. world/volcanofx.js owns four builders —
+   opaque crusted lava, the pyroclastic density current, the lahar and the
+   ash LOAD — all keyed on a position + a height field so a city-side
+   eruption calls the same code. Its flags (VOLCANO_V2 · VOLCANO_PYRO ·
+   VOLCANO_LAHAR · VOLCANO_ASH_LOAD) are declared THERE, in the owning file;
+   VOLCANO_V2=false (or the older SURV_VOLCANO_LAVA_V2=false) drops this file
+   back to the legacy additive streams, which are kept verbatim as the revert
+   path and counted by disasterAudit().lavaLegacy.
+
+   NUKE_FINALE_REAL (declared here, default on) is the finale's LENS: the
+   real cloud was always being drawn, it was being clipped at a 1 km far
+   plane and hung in front of a 220 m fog wall. See nukeFrustum().
+
+   THE SCARY WATER (2026-08-03). The tsunami's three new flags are declared in
+   city/tsunami.js, not here, because there is ONE tsunami design and two
+   places it happens and both read the same switch: TSU_FACE_V2 (the shared
+   turbid bore face, CBZ.tsuFaceBuild in world/water_spec.js), TSU_DEBRIS (the
+   entrained cars/logs/house panels that do the actual killing, through
+   CBZ.tsuDebrisField) and TSU_UNDERTOW (the drain's seaward pull, and the
+   drowning that follows it out to sea).
 ============================================================ */
 (function () {
   "use strict";
@@ -451,76 +473,13 @@
   // ============================================================
   const DEFS = {
 
-    // ---- EARTHQUAKE: shake + toppling buildings + crushing debris ----
-    quake: {
-      name: "EARTHQUAKE", emoji: "", warnSecs: 5, activeSecs: 15, gap: 7, cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
-      // THE FORESHOCK IS THE WARNING. A real quake announces itself by rattling
-      // everything loose in the room, so the telegraph is a rising tremor with
-      // the props visibly buzzing on it — no line of text can say "get out from
-      // under that" as fast as the building itself shivering.
-      warn(ctx) { narrate("hint", "The ground is rumbling…", 2.2); sound("rumble"); ctx.st.pre = 0; },
-      warnTick(dt, ctx) {
-        const k = 1 - dir.t / (this.warnSecs || 1);
-        if (CBZ.shake) CBZ.shake(0.02 + 0.10 * k * k);
-        rattleProps(ctx, 0.02 + 0.05 * k);
-        ctx.st.pre = (ctx.st.pre || 0) - dt;
-        if (ctx.st.pre <= 0) { ctx.st.pre = 1.4 - k; soundAt("rumble", ctx.cx, ctx.cz); }
-      },
-      // during the sirens the danger is ALREADY the buildings — bots start
-      // clearing the streets before the first collapse
-      warnThreat(x, z, ctx) { return DEFS.quake.threat(x, z, ctx); },
-      start(ctx) {
-        ctx.st.dust = CBZ.fx.particleCloud({ mode: "rise", color: 0xb6a892, count: 160, radius: ctx.R, top: 8, size: 0.32, opacity: 0.34, vMin: 1, vMax: 3 });
-        ctx.st.dust.setActive(0.7);
-        // only SOME buildings come down — a quake doesn't flatten the whole city.
-        // shuffle, then cap to a fraction so plenty are left standing.
-        const standing = ctx.arena.fragile.filter((b) => !b.fallen).sort(() => rnd() - 0.5);
-        ctx.st.order = standing.slice(0, Math.max(1, Math.ceil(standing.length * 0.3)));
-        ctx.st.next = 1.2;
-        // and EVERY standing structure takes load, so a survivor of this quake
-        // is a wounded building when the next disaster arrives
-        for (let i = 0; i < ctx.arena.fragile.length; i++) structureHit(ctx.arena.fragile[i], 0.22 + 0.2 * ctx.intensity, ctx, { kind: "quake" });
-        // a quake MIGHT crack the mountain open into an eruption — not guaranteed
-        ctx.st.eruptArmed = rnd() < 0.4;
-        ctx.st.eruptAt = 4 + rnd() * 5;     // seconds into the quake it would hit
-      },
-      active(dt, ctx) {
-        if (CBZ.shake) CBZ.shake(0.16 + 0.5 * ctx.intensity * (0.5 + ctx.prog * 0.5));
-        ctx.st.dust.setActive(0.7); ctx.st.dust.update(dt, camPos().x, 0, camPos().z);
-        if (rnd() < dt * 1.1) sound("rumble");
-        // spaced-out collapses (slower cadence; only the capped subset falls)
-        ctx.st.next -= dt;
-        if (ctx.st.next <= 0 && ctx.st.order.length) {
-          ctx.st.next = 1.5 - 0.6 * ctx.prog;
-          // through the ledger, never straight to collapse: a tower already
-          // spalled by an earlier disaster goes down on less than a fresh one
-          structureHit(ctx.st.order.pop(), 1.2, ctx, { kind: "quake" });
-        }
-        rattleProps(ctx, 0.10 + 0.10 * ctx.intensity);
-        // surprise eruption part-way through (if armed this quake)
-        if (ctx.st.eruptArmed && !ctx.st.erupting) {
-          ctx.st.eruptAt -= dt;
-          if (ctx.st.eruptAt <= 0) startEruption(ctx);
-        }
-        tickEruption(dt, ctx);
-        tick0(ctx, dt);
-      },
-      end(ctx) {
-        if (ctx.st.dust) ctx.st.dust.dispose();
-        endEruption(ctx);
-      },
-      threat(x, z, ctx) {
-        let t = 0.2; const f = ctx.arena.fragile;
-        for (let i = 0; i < f.length; i++) if (!f[i].fallen) { const d = Math.hypot(x - f[i].x, z - f[i].z); if (d < 8) t = Math.max(t, 0.9 * (1 - d / 8)); }
-        if (ctx.st.erupting) t = Math.max(t, eruptThreat(x, z, ctx));
-        return t;
-      },
-      safeDir(x, z, ctx) {
-        let bx = 0, bz = 0; const f = ctx.arena.fragile;
-        for (let i = 0; i < f.length; i++) if (!f[i].fallen) { const dx = x - f[i].x, dz = z - f[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } }
-        return (bx || bz) ? { x: bx, z: bz } : null;
-      },
-    },
+    // ---- EARTHQUAKE. The def is built by QUAKE_DEF(), in its own block
+    //      further down ("THE SUBDUCTION-ZONE EARTHQUAKE") — it is the one
+    //      disaster whose kill model, survival behaviour, secondary hazards
+    //      and CHAIN into the other two are large enough to read as a system
+    //      rather than a data row, and most of that system now lives in the
+    //      shared systems/quake.js so a city can run it too. ----
+    quake: QUAKE_DEF(),
 
     // ---- LIGHTNING STORM: telegraphed strikes that instakill ----
     storm: {
@@ -576,70 +535,138 @@
     //      CBZ.CONFIG.SURV_TSUNAMI_V2 (default true) picks the rebuilt
     //      real-event arc; false restores the legacy layered-plane wall. ----
 
-    // ---- FLASH FLOOD: torrential rain, and the water simply COMES UP.
-    //      Rebuilt as a consumer of the shared sea (SURV_SHARED_WATER): it
-    //      authors no mesh at all — it moves CBZ.waterSurgeSet through a
-    //      rise → stand → drain arc and every water consumer in the game
-    //      follows, exactly as city/tsunami.js does in the main world. The
-    //      rain is systems/weather.js's rain. What used to be ~55 lines of
-    //      private plane, private wall, private crest and a hand-rolled
-    //      drowning DOT is now the arc and nothing else.
-    //      Less wall-of-doom than the tsunami; the RISE is the threat, and
-    //      the answer is altitude you have to find before it gets there.
+    /* ---- FLASH FLOOD, REBUILT AS RAIN-FED (2026-08-03) -----------------------
+       OWNER: "rain makes flash flood which is gang city water slowly filling
+       the ground." The old arc was a storm TIDE — it raised the sea and let the
+       coast drown, which is a regional flood, not a flash flood. A flash flood
+       is what the RAIN does: it falls faster than the ground can take it, it
+       collects in the low channel, and it arrives there as a front with almost
+       no warning.
+
+       So the water now comes from two places at once and both are engine levers
+       this file does not own:
+         · CBZ.weatherDrive({rain, pool}) — the rain that is falling IS the rain
+           filling the streets. `pool` is metres of standing water; the level is
+           integrated by systems/weather.js and answered by city/waterfield.js's
+           mask, which is why swimming, the 28 s breath meter, drowning through
+           the killfeed, buoyancy, floating corpses and the gore medium all
+           arrive here with no code written for any of them.
+         · CBZ.waterSurgeSet — the sea, still, because a coastal island in a
+           storm genuinely gets both.
+       And a FRONT (CBZ.groundWaterFrontSet) races down the channel: dry ground
+       twenty metres ahead of a wall of water, which is the thing that actually
+       kills people in the real event. It is a term in the depth field, never a
+       mesh — CBZ.groundWaterAudit().privateWaterPlanes stays 0.
+
+       THE KILL MODES ARE PHYSICS, and they are priced in systems/weather.js so
+       the gang city gets every one of them too: six inches of moving water
+       knocks you flat, two feet floats a car, immersion runs a hypothermia
+       clock, and a submerged street light electrifies the water it stands in.
+       This def only sets the stage those read. -------------------------------- */
     flashflood: {
-      name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flood surge", tint: 0x59636b,
+      name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flash flood", tint: 0x59636b,
       // THE RAIN ARRIVES FIRST. That is the whole warning and it is honest:
-      // the sky opens, the light goes, and only then does the water start to
-      // climb. A player who reads it is already walking uphill.
+      // the sky opens, the light goes, and the gutters start to stand before
+      // anything else happens. A player who reads it is already walking uphill.
       warn(ctx) {
         narrate("hint", "FLASH FLOOD — water rising, get HIGH!", 3); sound("water");
-        const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
+        // THE CHANNEL, not a random bearing: water runs the way the ground
+        // falls. Sample a ring and take the LOWEST — that is where the front
+        // will run and where the water will stand deepest when it stops.
+        let lo = 1e9, la = 0;
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          const h = floor(ctx.cx + Math.cos(a) * ctx.R * 0.8, ctx.cz + Math.sin(a) * ctx.R * 0.8);
+          if (h < lo) { lo = h; la = a; }
+        }
+        ctx.st.wx = Math.cos(la); ctx.st.wz = Math.sin(la);
         // deliberately UNDER the smallest hill's peak (7) and every building
         // floor slab: the flood takes the streets, never the refuges
         ctx.st.peak = Math.min(5.6, 3.5 + scale(2.2, ctx));
+        // metres of standing water in the channel at the height of it: well
+        // over two feet, so cars float and the low streets genuinely swim
+        ctx.st.pool = Math.min(2.4, 1.15 + scale(0.62, ctx));
+        // The front STARTS just upstream of the middle, because the water has
+        // already taken the low ground it came from — a flash flood does not
+        // begin at the map edge, it arrives from the catchment that is already
+        // under. At ~10 m/s it sweeps the centre in the first seconds, which is
+        // the beat the player has to survive.
+        ctx.st.frontS = -40;
+        ctx.st.frontV = 9.5 + scale(2.5, ctx);   // m/s — a real flash-flood front
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
-        weather({ rain: 0.25 + k * 0.72, wind: 4 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.5, fogColor: 0x59636b });
+        // the sky opens AND the streets start to stand. `pool` is the second
+        // half of the telegraph and it is the half you can only read by
+        // looking DOWN — which is exactly where the danger is about to be.
+        weather({ rain: 0.25 + k * 0.72, wind: 4 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz },
+          fog: k * 0.5, fogColor: 0x59636b, pool: 0.02 + k * 0.16 });
         if (rnd() < dt * 3 * k) sound("water");
       },
       start(ctx) {
-        // NO MESH. The flood is the sea, and the sea is one number.
+        // NO MESH. The flood is a level and a front, and both are numbers.
         ctx.st.t = 0;
         ctx.st.level0 = CBZ.waterSurge ? CBZ.waterSurge() : 0;
         if (CBZ.shake) CBZ.shake(0.4);
+        sound("water");
       },
       active(dt, ctx) {
         ctx.env.fog = 0x59636b; ctx.env.fogNear = 22; ctx.env.fogFar = 150; ctx.env.sunInt = 0.55; ctx.env.hemiColor = 0x97a6b3;
-        weather({ rain: 1, wind: 8, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.55, fogColor: 0x59636b });
         ctx.st.t += dt;
         // rise (0.42) → stand (0.26) → drain (0.32). Water goes UP fast and
         // out slowly, which is what makes the drain the part that strands you.
         const u = Math.min(1, ctx.st.t / Math.max(1, ctx.activeSecs));
         const peak = ctx.st.peak;
-        let s;
-        if (u < 0.42) s = peak * ease(u / 0.42);
-        else if (u < 0.68) s = peak * (1 - 0.06 * ((u - 0.42) / 0.26));
-        else s = peak * 0.94 * (1 - ease((u - 0.68) / 0.32));
+        let s, pk;
+        // the rise CONTINUES from what the warning already put on the ground
+        // (0.18 m of standing rain) — starting the ramp at zero would drain the
+        // streets for a beat at the exact moment the flood arrives
+        if (u < 0.42) { const e = ease(u / 0.42); s = peak * e; pk = 0.18 + (ctx.st.pool - 0.18) * e; }
+        else if (u < 0.68) { s = peak * (1 - 0.06 * ((u - 0.42) / 0.26)); pk = ctx.st.pool; }
+        else { const e = 1 - ease((u - 0.68) / 0.32); s = peak * 0.94 * e; pk = ctx.st.pool * e; }
+        // THE STREETS AND THE SEA, moved together through the two sanctioned
+        // levers and nothing else.
+        weather({ rain: 1, wind: 8, windDir: { x: ctx.st.wx, z: ctx.st.wz },
+          fog: 0.55, fogColor: 0x59636b, pool: pk });
         surgeSet(s);
+        // THE FRONT crosses the arena in the first seconds and then stands
+        // down, leaving the level behind it — a wall, and then a lake.
+        if (CBZ.groundWaterFrontSet) {
+          ctx.st.frontS += ctx.st.frontV * dt;
+          // past the halfway mark the wall has done its work and the event is
+          // a lake: dropping the front lets the level stand everywhere
+          if (u > 0.55 || ctx.st.frontS > ctx.R + 60) CBZ.groundWaterFrontSet(null);
+          else CBZ.groundWaterFrontSet({
+            x: ctx.cx, z: ctx.cz, dx: ctx.st.wx, dz: ctx.st.wz,
+            s: ctx.st.frontS, width: 15, crest: 0.6, speed: ctx.st.frontV,
+          });
+        }
         // a real downhill current in the inundation, published on the ONE
         // water-event descriptor so the swimmer and the debris both feel it
-        publishSheetFlood(ctx, u < 0.42 ? "flooded" : (u < 0.68 ? "flooded" : "drain"), s, u < 0.68 ? 1.4 : -1.1);
+        publishSheetFlood(ctx, u < 0.68 ? "flooded" : "drain", s, u < 0.68 ? 1.4 : -1.1);
         floodActors(dt, ctx, u < 0.68 ? 1.4 : -1.1, "drowned in the floodwater");
-        // the surge shoves parked cars off the low ground as it comes up
+        // TWO FEET FLOATS A CAR — the same threshold the gang city uses, read
+        // off the same depth field, so a car in the channel is picked up and
+        // carried instead of sitting in a puddle looking bolted down.
+        const gw = CBZ.groundWaterAt;
         if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
           const car = ctx.arena.cars[i];
-          if (!car.flung && floodDepth(car.x, car.z) > 0.9) flingCar(car, ctx.st.wx, ctx.st.wz, 6 + scale(3, ctx), 2.5);
+          if (car.flung) continue;
+          const d = Math.max(floodDepth(car.x, car.z), gw ? gw(car.x, car.z) : 0);
+          if (d > 0.6) flingCar(car, ctx.st.wx, ctx.st.wz, 3.5 + scale(2.5, ctx), 1.2);
         }
         if (rnd() < dt * 5) sound("water");
       },
       end(ctx) {
         weatherOff(); surgeSet(0);
+        if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
         const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
         if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }   // the sea settles back down
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
       },
       threat(x, z, ctx) {
+        const gw = CBZ.groundWaterAt ? CBZ.groundWaterAt(x, z) : 0;
+        if (gw > 0.1) return Math.max(0.4, Math.min(1, 0.4 + gw * 0.35));
         const d = floodDepth(x, z);
         if (d > -1) return Math.max(0.35, Math.min(1, 0.4 + d * 0.25));
         return 0.18;                                    // it is still raining on you
@@ -882,11 +909,20 @@
     // ---- VOLCANO: ash-out, lava flows from the mountain, lava bombs ----
     volcano: {
       name: "VOLCANIC ERUPTION", emoji: "", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
-      // THE MOUNTAIN WAKES UP IN FRONT OF YOU. A rising rumble under your feet,
-      // the crater rim starting to glow, and the first ash beginning to fall —
-      // three physical facts that between them say everything the banner said,
-      // and unlike the banner they tell you WHICH mountain and WHICH way the
-      // ash is drifting.
+      /* THE MOUNTAIN WAKES UP IN FRONT OF YOU. A rising rumble under your
+         feet, the crater rim starting to glow, and the first ash beginning
+         to fall — three physical facts that between them say everything the
+         banner said, and unlike the banner they tell you WHICH mountain and
+         WHICH way the ash is drifting.
+
+         AND, NEW: WHICH WAY THE MOUNTAIN IS GOING TO FALL. A pyroclastic
+         flow is unsurvivable inside its lane, so a hazard the player cannot
+         read BEFORE it moves is not a hazard, it is a coin flip. The lane is
+         the fall line off the failing side of the cone, and it announces
+         itself the way a real one does: rock starts coming down it. Debris
+         trickles, then bounces, then rolls, all down the same corridor the
+         flow will take — plus the crowd, whose warnThreat now clears that
+         corridor first. Nothing is drawn that is not a physical object. */
       warn(ctx) {
         narrate("hint", "THE VOLCANO IS WAKING — off the mountain, out of the ash!", 3);
         sound("rumble"); if (CBZ.shake) CBZ.shake(0.5);
@@ -896,6 +932,15 @@
         ctx.st.preGlow.scale.set(4, 4, 1);
         ctx.st.preAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 200, radius: 26, top: 30, size: 0.24, opacity: 0.4, vMin: 5, vMax: 10 });
         const wa = rnd() * 6.28; ctx.st.wx = Math.cos(wa); ctx.st.wz = Math.sin(wa);
+        // the failing flank, chosen ONCE so the telegraph and the flow can
+        // never point at two different sides of the same mountain
+        ctx.st.pyroBear = rnd() * 6.28;
+        ctx.st.pyroLane = (vfx() && vfx().fallLine) ? vfx().fallLine({
+          x: h.x + Math.cos(ctx.st.pyroBear) * 3, z: h.z + Math.sin(ctx.st.pyroBear) * 3,
+          groundAt: gAt(ctx), bearing: ctx.st.pyroBear,
+          step: 6, count: Math.ceil((h.r + ctx.R * 0.95) / 6) + 1, turn: 0.4, wander: 0.1,
+        }) : null;
+        ctx.st.rockCd = 0.7;
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
@@ -908,14 +953,51 @@
         weather({ rain: 0, wind: 3 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.35, fogColor: 0x2e211c });
         ctx.st.rumbleCd = (ctx.st.rumbleCd || 0) - dt;
         if (ctx.st.rumbleCd <= 0) { ctx.st.rumbleCd = 1.8 - k; soundAt("rumble", h.x, h.z); }
+        // ROCKFALL DOWN THE LANE — the telegraph, and it accelerates
+        const lane = ctx.st.pyroLane;
+        if (lane) {
+          ctx.st.rockCd -= dt;
+          if (ctx.st.rockCd <= 0) {
+            ctx.st.rockCd = 0.55 - 0.36 * k;
+            const P = lane.pts;
+            const i = 1 + ((rnd() * Math.min(P.length - 1, 6)) | 0);
+            const p = P[i];
+            CBZ.fx.dropDebris({
+              x: p.x + (rnd() - 0.5) * 5, z: p.z + (rnd() - 0.5) * 5,
+              fromY: p.y + 3 + rnd() * 4, vy: -2 - rnd() * 3,
+              size: 0.4 + rnd() * 0.9, color: 0x4a4038, dmg: 0, linger: 5,
+            });
+          }
+        }
       },
-      // the crowd is already running OFF the mountain while it is still only
-      // rumbling — that stampede IS the warning for anyone who missed the glow
+      /* The crowd is already running OFF the mountain while it is still only
+         rumbling — and, first, OUT OF THE LANE. That stampede IS the warning
+         for anyone who missed the rockfall. */
       warnThreat(x, z, ctx) {
         const h = ctx.arena.hills[0], d = Math.hypot(x - h.x, z - h.z);
-        return d < h.r + 12 ? 0.9 * (1 - d / (h.r + 12)) : 0.05;
+        let t = d < h.r + 12 ? 0.9 * (1 - d / (h.r + 12)) : 0.05;
+        const lane = ctx.st.pyroLane;
+        if (lane && vfx()) {
+          const c = vfx().pathCoord(lane, x, z, lane.total);
+          if (c.perp < 26) t = Math.max(t, 0.95 * (1 - c.perp / 26));
+        }
+        return t;
       },
-      warnSafeDir(x, z, ctx) { return DEFS.volcano.safeDir(x, z, ctx); },
+      // out of the lane SIDEWAYS beats away-from-the-peak: you cannot outrun
+      // a density current down its own corridor, you can only leave it
+      warnSafeDir(x, z, ctx) {
+        const lane = ctx.st.pyroLane;
+        if (lane && vfx()) {
+          const c = vfx().pathCoord(lane, x, z, lane.total);
+          if (c.perp < 30) {
+            const V = new THREE.Vector3();
+            vfx().pathAt(lane, c.s, V);
+            const dx = x - V.x, dz = z - V.z, dl = Math.hypot(dx, dz);
+            if (dl > 0.4) return { x: dx / dl, z: dz / dl };
+          }
+        }
+        return DEFS.volcano.safeDir(x, z, ctx);
+      },
       start(ctx) {
         if (ctx.st.preGlow) { rmMesh(ctx.st.preGlow); ctx.st.preGlow = null; }
         if (ctx.st.preAsh) { ctx.st.preAsh.dispose(); ctx.st.preAsh = null; }
@@ -931,19 +1013,33 @@
       safeDir(x, z, ctx) { const h = ctx.arena.hills[0]; const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
     },
 
-    // ---- BLIZZARD: whiteout; freeze if you stop moving ----
+    /* ---- BLIZZARD: whiteout, freeze if you stop — AND THE SNOW LIES ---------
+       OWNER: "blizzard should fill ground with white slowly just like how the
+       top of the mountain tip in nat disaster has white."
+
+       That mountain tip is a second cone of white geometry bolted onto the
+       peak at build time — a look, permanently, that no weather can produce or
+       take away. The same LOOK is now a live coverage scalar: `cover` in
+       systems/weather.js drives one shared uniform that whitens every large
+       up-facing surface in the world, so the ground, the roofs and the props
+       go white progressively while the blizzard blows and melt back after it.
+       The def asserts the coverage it wants; it paints nothing itself. ------ */
     blizzard: {
       name: "BLIZZARD", emoji: "", warnSecs: 5, activeSecs: 17, gap: 6, cause: "frozen solid in the blizzard", tint: 0xdbe6f0,
       // VISIBILITY CLOSES IN. The horizon walks toward you over five seconds
       // and the first flakes start crossing the light. Nothing has to say
-      // "whiteout" — you can measure it by how much island you can still see.
+      // "whiteout" — you can measure it by how much island you can still see,
+      // and by how much of the grass has gone white under your feet.
       warn(ctx) {
         narrate("hint", "Blizzard incoming — get INDOORS or keep moving!", 2.8); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
-        weather({ rain: 0, snow: 0.2 + k * 0.7, wind: 5 + k * 9, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.8, fogColor: 0xdbe6f0 });
+        // the first flakes already start to settle: a dusting on the grass is
+        // the earliest honest warning a blizzard gives
+        weather({ rain: 0, snow: 0.2 + k * 0.7, wind: 5 + k * 9, windDir: { x: ctx.st.wx, z: ctx.st.wz },
+          fog: k * 0.8, fogColor: 0xdbe6f0, cover: 0.10 * k });
         // the fog wall closing: 380 m of visibility down to 120 m before it hits
         ctx.env.fogFar = 380 - 260 * k; ctx.env.fogNear = 80 - 60 * k;
         ctx.env.fog = lerpHex(ctx.env.fog, 0xdbe6f0, 0.7 * k);
@@ -952,10 +1048,17 @@
       // shelter is the answer, so the crowd converges on the town roofs
       warnThreat(x, z, ctx) { return 0.3; },
       warnSafeDir(x, z, ctx) { return null; },
-      start(ctx) {},
+      start(ctx) { ctx.st.t = 0; },
       active(dt, ctx) {
         ctx.env.fog = 0xdbe6f0; ctx.env.fogNear = 8; ctx.env.fogFar = 60; ctx.env.sunInt = 0.6; ctx.env.sunColor = 0xcfe0ff; ctx.env.hemiInt = 1.1; ctx.env.hemiColor = 0xeaf2ff;
-        weather({ rain: 0, snow: 1, wind: 16 + 6 * ctx.intensity, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.85, fogColor: 0xdbe6f0 });
+        // THE GROUND GOES WHITE AS THE EVENT RUNS. `cover` ramps with the
+        // progress of the storm rather than snapping to 1, so the arc reads
+        // green ground → half-whitened → buried, and a late-round blizzard
+        // (higher intensity) buries more of it than an early one.
+        ctx.st.t += dt;
+        const p = Math.min(1, ctx.st.t / Math.max(1, ctx.activeSecs));
+        weather({ rain: 0, snow: 1, wind: 16 + 6 * ctx.intensity, windDir: { x: ctx.st.wx, z: ctx.st.wz },
+          fog: 0.85, fogColor: 0xdbe6f0, cover: Math.min(1, (0.25 + 0.75 * p) * (0.7 + 0.3 * ctx.intensity)) });
         const cold = scale(12, ctx);
         surv().forEachActor(function (a) {
           if (sheltered(a)) return;                    // a roof overhead = warmth; shelter is physical
@@ -963,6 +1066,9 @@
         });
         if (rnd() < dt * 2) sound("wind");
       },
+      // weatherOff() drops the driven coverage back to the ambient integrator,
+      // which MELTS it over minutes instead of deleting it — the island stays
+      // white for a while after, which is the whole point of state on the ground.
       end(ctx) { weatherOff(); },
       threat() { return 0.25; },
       safeDir() { return null; }, // no safe direction — just don't stand still
@@ -1032,71 +1138,67 @@
     },
 
     /* ---- SINKHOLES: THE GROUND OPENS AND YOU GO DOWN IT ---------------------
-       This was the single worst offender in the roster: a flat BLACK DISC
-       painted on the grass that instakilled anyone standing on it. You did not
-       fall, nothing moved, and death arrived while you were still standing
-       upright on what looked like a puddle of ink.
+       It began as a flat BLACK DISC painted on the grass that instakilled
+       anyone standing on it; then it became a real 14-22 m shaft you fell into.
+       This is the third pass and it is the owner's reference photograph —
+       Guatemala City, 2010 — which changes three things about the ROSTER ENTRY
+       (the shaft itself now lives in world/groundshaft.js):
 
-       A hole is a hole. Each one now cuts a real shaft — walls, a floor 14-22 m
-       down, spoil around the rim — and REMOVES THE FLOOR over its mouth
-       (CBZ.survHoles, read by modes/survival.js's floorAt), so the ordinary
-       vertical physics does the rest: you drop, you accelerate, and the impact
-       at the bottom is what kills you. The telegraph is the ground CRACKING
-       and sagging for a second first, which is the beat that makes it a
-       hazard you can answer instead of a coin flip.                          */
+       FEWER, BIGGER, DEEPER. Six 4 m dimples scattered over the island read as
+       potholes. The reference is ONE shaft ~20 m across and twice that deep,
+       with everything around it untouched, and the untouched surroundings are
+       half of why it is frightening. So: one or two per event, r 7-11, depth
+       4.2x the radius, and never anywhere the ground is not flat.
+
+       THE WARNING HAPPENS WHERE THE HOLE WILL BE. The old warn scattered
+       cracks at random points across the whole island — information that could
+       not be acted on, which is the same fault as a banner. The site is now
+       chosen (by CBZ.groundShaftSite, which refuses any slope over the law) at
+       the START of the warning, and the cracks, the dust venting out of them
+       and the slabs tipping inward are AT it. warnThreat/warnSafeDir therefore
+       answer honestly, so the crowd runs off the ground that is about to go —
+       which is exactly the owner's own survival note: run to stable ground
+       outside the expanding radius.
+
+       AND THE HOLE STAYS. end() no longer fills it in.                       */
     sinkhole: {
-      name: "SINKHOLES", emoji: "", warnSecs: 5, activeSecs: 16, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
+      name: "SINKHOLES", emoji: "", warnSecs: 6, activeSecs: 20, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
       warn(ctx) {
         narrate("hint", "The ground is giving way!", 2.6); sound("rumble");
-        ctx.st.cracks = [];
+        ctx.st.holes = []; ctx.st.pending = []; ctx.st.seqs = [];
+        ctx.st.cd = 0;
+        sinkSite(ctx, this.warnSecs || 6);        // the first one is telegraphed for the whole warning
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
-        if (CBZ.shake) CBZ.shake(0.02 + 0.09 * k);
+        if (CBZ.shake) CBZ.shake(0.02 + 0.06 * k);
         rattleProps(ctx, 0.01 + 0.03 * k);
-        // hairline cracks open across the low ground before anything drops
-        ctx.st.crackCd = (ctx.st.crackCd || 0) - dt;
-        if (ctx.st.crackCd <= 0 && ctx.st.cracks.length < 9) {
-          ctx.st.crackCd = 0.45;
-          const p = ctx.arena.randomPoint(0, ctx.R * 0.92);
-          const m = disc(p.x, p.z, 0x2a1e14, 0.0, 0.05);
-          m.scale.set(1.4 + rnd() * 2.2, 0.22 + rnd() * 0.2, 1);
-          m.rotation.z = rnd() * 3.14;
-          ctx.st.cracks.push(m);
-        }
-        for (let i = 0; i < ctx.st.cracks.length; i++) ctx.st.cracks[i].material.opacity = Math.min(0.75, ctx.st.cracks[i].material.opacity + dt * 0.7);
         if (rnd() < dt * 1.4) soundAt("rumble", ctx.cx, ctx.cz);
       },
-      warnThreat() { return 0.25; },
-      start(ctx) { ctx.st.holes = []; ctx.st.pending = []; ctx.st.cd = 0.4; },
+      // the warning is a PLACE now, so the bots can act on it
+      warnThreat(x, z, ctx) { return sinkThreat(x, z, ctx, 1.35); },
+      warnSafeDir(x, z, ctx) { return sinkSafeDir(x, z, ctx); },
+      start(ctx) { ctx.st.cd = 7 + rnd() * 4; },
       active(dt, ctx) {
-        if (CBZ.shake) CBZ.shake(0.12);
+        // a second (and at high intensity a third) collapse somewhere else on
+        // the island, each with its own full warn→drop→grow arc
         ctx.st.cd -= dt;
-        if (ctx.st.cd <= 0) {
-          ctx.st.cd = 0.7 - 0.3 * ctx.prog;
-          const p = ctx.arena.randomPoint(0, ctx.R);
-          const r = 3 + scale(2, ctx);
-          // the SAG: the marker is the ground visibly dishing before it goes
-          ctx.st.pending.push({ x: p.x, z: p.z, r, t: 1.0, m: CBZ.fx.groundMarker(p.x, p.z, r, 0x5a3a20) });
+        if (ctx.st.cd <= 0 && (ctx.st.seqs || []).length < 1 + Math.round(ctx.intensity * 1.6)) {
+          ctx.st.cd = 9 + rnd() * 5;
+          sinkSite(ctx, 3.2);
         }
-        for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
-          const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t);
-          if (p.t <= 0) {
-            p.m.dispose();
-            ctx.st.holes.push(openHole(ctx, p.x, p.z, p.r));
-            ctx.st.pending.splice(i, 1);
-          }
-        }
+        sinkSync(ctx);
         tickHoles(dt, ctx);
       },
       end(ctx) {
-        (ctx.st.pending || []).forEach((p) => p.m.dispose());
+        // the telegraph goes; THE HOLE STAYS (closeHoles only clears the list —
+        // the shafts are the island's new terrain until the match resets)
+        (ctx.st.pending || []).forEach((p) => { if (p.m) p.m.dispose(); });
         (ctx.st.cracks || []).forEach((m) => rmMesh(m));
         closeHoles(ctx);
       },
-      threat(x, z, ctx) { let t = 0; (ctx.st.holes || []).forEach((h) => { const d = Math.hypot(x - h.x, z - h.z); if (d < h.r + 4) t = Math.max(t, 1 - d / (h.r + 4)); }); (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r + 2) t = Math.max(t, 0.8 * (1 - d / (p.r + 2))); }); return t; },
-      warnSafeDir() { return null; },
-      safeDir(x, z, ctx) { let bx = 0, bz = 0; const all = (ctx.st.holes || []).concat(ctx.st.pending || []); all.forEach((h) => { const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz); if (d < h.r + 4 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
+      threat(x, z, ctx) { return sinkThreat(x, z, ctx, 1.25); },
+      safeDir(x, z, ctx) { return sinkSafeDir(x, z, ctx); },
     },
 
     // ---- NUKE: the finale. Blinding flash, expanding lethal shockwave ----
@@ -1144,16 +1246,45 @@
            player is looking at an island. The blast the PLAYER stands in is
            priced below, against this mode's own roster and its own island. */
         weather({ rain: 0, wind: 30, windDir: { x: 1, z: 0 }, fog: 0.5, fogColor: 0x3a2a22 }, 12);
+        // OPEN THE LENS BEFORE THE BOMB, not after — the first frame is the
+        // one with the fireball in it. See nukeFrustum().
+        nukeFrustum();
         survBlast("nuke", ctx.st.gx, ctx.st.gz, {
           r: 0, up: 2, ctx: ctx, fxR: ctx.R * 0.5, color: 0xfff3d0,
           struct: 1.6, structR: ctx.R * 0.55, sfx: "explosion",
         });
-        CBZ.fx.flash(1, 0xffffff);
+        /* DID THE REAL CLOUD ACTUALLY RUN? Asked of nukefx's own live state
+           rather than assumed, because "the bus was called" and "the mushroom
+           exists" are different claims and only the second one is the one the
+           player can see. disasterAudit() reports it. */
+        let hasFlash = false;
+        ctx.st.nukeFx = false;
+        if (CBZ.nukeFxDebug) {
+          try {
+            const d = CBZ.nukeFxDebug();
+            ctx.st.nukeFx = !!(d && d.live);
+            hasFlash = !!(d && d.flash);
+          } catch (e) { ctx.st.nukeFx = false; }
+        }
+        nukeFxRuns += ctx.st.nukeFx ? 1 : 0;
+        // YOU SEE LIGHT, NOT GEOMETRY. nukefx's own sheet is the whiteout; we
+        // only raise one if it did not (the degrade path), and the mode's
+        // additive flash drops to a supporting bloom so two white sheets never
+        // fight over the same frame.
+        if (!hasFlash) incinerate(1, 3.2);
+        CBZ.fx.flash(ctx.st.nukeFx ? 0.5 : 1, 0xffffff);
         if (CBZ.shake) CBZ.shake(1.8);
         ctx.st.r = 2; ctx.st.maxR = ctx.R * 0.95; ctx.st.killed = false;
       },
       active(dt, ctx) {
-        ctx.env.fog = 0x3a2a22; ctx.env.fogNear = 30; ctx.env.fogFar = 220; ctx.env.sunInt = 0.5; ctx.env.sunColor = 0xff8a4a; ctx.env.hemiColor = 0xffae7a;
+        /* THE HAZE HAS TO LET YOU SEE THE THING. The old 30/220 m fog was
+           what turned the cloud into cut-outs: nukefx's lobes are fogproof by
+           design (NUKE_FX_FOGPROOF), so a 220 m fog wall dissolved the entire
+           world behind them and left unfogged geometry hanging in front of a
+           flat brown sheet. A nuclear column is seen from tens of kilometres;
+           the air after the flash is dirty, not opaque. */
+        ctx.env.fog = 0x3a2a22; ctx.env.fogNear = 90; ctx.env.fogFar = 2400; ctx.env.sunInt = 0.5; ctx.env.sunColor = 0xff8a4a; ctx.env.hemiColor = 0xffae7a;
+        nukeFrustum();
         // expanding lethal shockwave front — this is the ISLAND-scale pressure
         // wave, priced against the mode's roster (see start()'s note)
         const prev = ctx.st.r;
@@ -1161,13 +1292,21 @@
         const inner = ctx.st.r - 4;
         surv().forEachActor(function (a) {
           const d = Math.hypot(a.pos.x - ctx.st.gx, a.pos.z - ctx.st.gz);
-          if (d <= ctx.st.r && d >= inner) surv().hurt(a, 1e6, { fromX: ctx.st.gx, fromZ: ctx.st.gz, fling: 9 });   // caught by the front
-          else if (d < inner) surv().hurt(a, scale(8, ctx) * dt, { cause: "killed by nuclear fallout" });           // lingering radiation
+          if (d <= ctx.st.r && d >= inner) {
+            // the front reaching YOU is not a picture of an explosion, it is
+            // the last thing you see: the same whiteout, at full peak
+            if (a.isPlayer) incinerate(1, 2.2);
+            surv().hurt(a, 1e6, { fromX: ctx.st.gx, fromZ: ctx.st.gz, fling: 9 });   // caught by the front
+          } else if (d < inner) surv().hurt(a, scale(8, ctx) * dt, { cause: "killed by nuclear fallout" });           // lingering radiation
         });
         // the front takes the town down as it passes, through the ONE ledger
         if (ctx.st.r > prev) structureSweepRing(ctx, ctx.st.gx, ctx.st.gz, prev, ctx.st.r, 1.4);
         tick0(ctx, dt);
       },
+      /* The lens stays open. NUKE_FX_AFTERMATH keeps the cloud standing over
+         the island as a landmark for minutes after the blast, and clipping it
+         back off at the far plane the moment the 12-second "active" window
+         ends would undo the whole fix. The restore is on mode exit. */
       end(ctx) { weatherOff(); },
       threat(x, z, ctx) { const d = Math.hypot(x - (ctx.st.gx || 0), z - (ctx.st.gz || 0)); const front = ctx.st.r || 0; return d < front + 20 ? 1 : 0.4; },
       safeDir(x, z, ctx) { const dx = x - (ctx.st.gx || 0), dz = z - (ctx.st.gz || 0), d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
@@ -1330,8 +1469,26 @@
     [0.03, 0.12, 0.20], [0.05, 0.18, 0.30], [0.08, 0.28, 0.42], [0.12, 0.40, 0.55],
     [0.22, 0.55, 0.68], [0.42, 0.72, 0.82], [0.60, 0.83, 0.90], [0.72, 0.90, 0.95], [0.55, 0.80, 0.88],
   ];
+  /* THE FACE IS SHARED NOW. world/water_spec.js owns one bore — the turbid
+     gray-black Miyako soup at landfall, the towering blue-green curl in deep
+     water — and city/tsunami.js rides the same object, because a tsunami that
+     looks different in two modes is two tsunamis. Everything the audit and the
+     regression read (st.waveWall, st.waveBasePos, st.waveCols/Rows) is
+     re-exported from the handle, so nothing downstream can tell the difference
+     except by looking. TSU_FACE_V2=false falls through to the legacy ribbon
+     below, which is why it is still here. */
   function tsuBuildWave(ctx) {
     const st = ctx.st, H = st.H, W = ctx.R * 2.7, zs = H / 34;
+    if (CBZ.CONFIG.TSU_FACE_V2 !== false && CBZ.tsuFaceBuild) {
+      const h = CBZ.tsuFaceBuild({ width: W, height: H, rnd: rnd });
+      h.group.rotation.y = Math.atan2(st.dx, st.dz);
+      root().add(h.group);
+      st.face = h;
+      st.wave = h.group; st.waveWall = h.wall; st.waveBasePos = h.basePos;
+      st.waveCols = h.cols; st.waveRows = h.rows;
+      st.waveFoams = h.foams; st.waveStreaks = h.streaks;
+      return;
+    }
     const grp = new THREE.Group();
     const COLS = 30, ROWS = TSU_PROFILE.length;
     // per-column jitter so the front churns instead of reading as a ruler
@@ -1447,18 +1604,119 @@
   function tsuPublish(ctx, flow) {
     const st = ctx.st;
     const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-    if (W) { W.amp = st.waveAmp; W.chop = st.chopAmp; W.foam = st.foamGain; }
+    if (W) {
+      W.amp = st.waveAmp; W.chop = st.chopAmp; W.foam = st.foamGain;
+      /* THE SEDIMENT LOAD RIDES THE ARENA'S OWN WAVE RECORD, so the ocean
+         shader picks it up on the SAME 47.9 pass that already follows the
+         surge (world/disaster_arena.js) — no second drive call, and nothing
+         can render a clean blue sea on the frame the soup arrives. */
+      W.sediment = st.sediment || 0;
+      W.frontC = [ctx.cx, ctx.cz];
+      W.frontDir = [st.dx, st.dz];
+      W.frontS = st.frontS;
+      W.frontRun = 130;
+    }
     if (CBZ.waterEventSet) CBZ.waterEventSet({
       owner: "survival-tsunami", kind: "tsunami", phase: st.phase,
       cx: ctx.cx, cz: ctx.cz, dx: st.dx, dz: st.dz,
       frontS: st.frontS, frontWet: -2, frontWidth: 20,
       level: CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.level,
       waveAmp: st.waveAmp, chopAmp: st.chopAmp,
+      sediment: st.sediment || 0,
       flow: Number.isFinite(flow) ? flow : 0,
     });
   }
 
-  // ---- floating debris planks (pooled: one shared geometry, two materials)
+  /* ============================================================
+     THE DEBRIS IS THE KILLER (TSU_DEBRIS)
+
+     Owner's science, and it is the whole reason the old sixteen decorative
+     planks were not good enough: "tsunami deaths are rarely just drowning. The
+     wave is a churning high-speed soup of cars, trees, steel, building
+     fragments. Primary death: blunt force trauma — battered and crushed by
+     debris acting as battering rams."
+
+     So the front now PICKS UP THE ISLAND. The cars that were parked on the
+     seafront are ripped loose through the same flingCar() the wave always
+     used, and when they come down they do not stop being a hazard — they roll
+     inland inside the flow. The trees go with them as logs. The houses the
+     water takes come apart into panels that travel with it. Everything is a
+     REAL object that was standing there a second ago; nothing is spawned
+     scenery. And when the drain leaves, it leaves them where they stopped.
+
+     The motion, the tumble and the strike test are city/tsunami.js's
+     CBZ.tsuDebrisField — one kit, both tsunamis. This file only says which of
+     ITS objects the water has reached, and routes the strike into CBZ.surv's
+     kill bus with the cause the kit worked out.
+     ============================================================ */
+  /* The stranded wreckage outlives its own event on purpose, so exactly ONE
+     event's worth of it can be alive at a time: the next tsunami clears the
+     last one's before it starts making its own. Bounded, and the aftermath
+     still stands for the rest of the match you are playing. */
+  let tsuLastDebris = null;
+  function tsuDebris(ctx) {
+    const st = ctx.st;
+    if (st.debris !== undefined) return st.debris;
+    if (CBZ.CONFIG.TSU_DEBRIS === false || !CBZ.tsuDebrisField) { st.debris = null; return null; }
+    if (tsuLastDebris) { try { tsuLastDebris.dispose(); } catch (e) {} tsuLastDebris = null; }
+    const A = ctx.arena;
+    st.debris = CBZ.tsuDebrisField({
+      root: root(),
+      seaY: seaY,
+      groundY: floor,
+      // a body with a standing wall behind it has nowhere to give
+      againstWall(x, z) {
+        for (let i = 0; i < A.fragile.length; i++) {
+          const b = A.fragile[i];
+          if (b.fallen) continue;
+          if (Math.abs(x - b.x) < b.w * 0.5 + 2.4 && Math.abs(z - b.z) < b.d * 0.5 + 2.4) return true;
+        }
+        return false;
+      },
+      forEachActor(fn) { surv().forEachActor(fn); },
+      strike(a, info) {
+        if (CBZ.body) CBZ.body.hit(a, {
+          dir: { x: info.dirX, z: info.dirZ }, force: info.force,
+          fling: info.wall ? 0 : 3.5, knockdown: info.wall ? 1.4 : 0,
+        });
+        surv().hurt(a, scale(info.damage * 0.45, ctx), { cause: info.cause, dir: { x: info.dirX, z: info.dirZ } });
+        if (a.isPlayer && CBZ.shake) CBZ.shake(0.75);
+        CBZ.fx.blast(a.pos.x, a.pos.z, { maxR: 2.6, color: 0xcfe6ee, life: 0.32 });
+        soundAt("collapse", a.pos.x, a.pos.z);
+      },
+    });
+    tsuLastDebris = st.debris;
+    return st.debris;
+  }
+
+  /* THE CAR HANDOFF. flingCar() is the one verb for "a vehicle just got ripped
+     off the street" — it pulls the collider, registers the ballistic arc and
+     leaves the wreck settled. What it never knew is that a car in a BORE does
+     not stop when it lands: it keeps going, rolling, at the speed of the
+     water. So the wave watches its own flung cars and hands each one to the
+     debris field the moment its arc settles. No second physics bus; the two
+     integrators are strictly sequential and never both own the same group. */
+  function tsuWatchCar(ctx, car) {
+    const st = ctx.st;
+    const rec = flungCars.length ? flungCars[flungCars.length - 1] : null;
+    if (!rec || rec.car !== car) return;
+    (st.carWatch || (st.carWatch = [])).push(rec);
+  }
+  function tsuCarHandoff(ctx) {
+    const st = ctx.st, W = st.carWatch;
+    if (!W || !W.length) return;
+    const field = tsuDebris(ctx); if (!field) { st.carWatch = null; return; }
+    for (let i = W.length - 1; i >= 0; i--) {
+      const rec = W[i];
+      if (!rec.settled) continue;
+      W.splice(i, 1);
+      const g = rec.g; if (!g) continue;
+      // it stops being wreckage and becomes two tonnes of moving water
+      field.take(g, g.position.x, g.position.z, "car");
+    }
+  }
+
+  // ---- floating debris planks — the LEGACY path (TSU_DEBRIS=false) --------
   function tsuSpawnPlanks(ctx) {
     const st = ctx.st;
     st.plankGeo = new THREE.BoxGeometry(1.7, 0.22, 0.55);
@@ -1488,6 +1746,39 @@
       pl.m.rotation.y += pl.spin * dt;
       pl.m.rotation.z = Math.sin(CBZ.now * 0.003 + pl.ph) * 0.12;
     }
+  }
+
+  /* ONE CALL FOR EVERYTHING FLOATING. With TSU_DEBRIS on this is the real
+     entrained load (cars, logs, house panels, tumbling and striking); with it
+     off it is the sixteen legacy planks and nothing else changes. */
+  function tsuFlotsam(dt, ctx, current) {
+    const field = tsuDebris(ctx);
+    if (field) {
+      field.step(dt, { dx: ctx.st.dx, dz: ctx.st.dz, flow: current, sediment: ctx.st.sediment || 0 });
+      return;
+    }
+    tsuPlanks(dt, ctx, current);
+  }
+
+  /* THE DROWNING ARC, and it has its own words because it is its own death.
+     swim.js owns the air — the 28 s tank, the sink-unless-you-swim, the
+     surfacing. What it cannot know is WHY you ran out: you were taken past the
+     shoreline by water going the other way, and there was nothing left to
+     climb. So the cause is written here, and only once the tank is genuinely
+     failing over genuinely deep water, which is exactly the situation the flag
+     exists to create. */
+  function tsuUndertowDrown(dt, ctx, drainK) {
+    if (CBZ.CONFIG.TSU_UNDERTOW === false) return;
+    const st = ctx.st;
+    const sw = CBZ.citySwimState && CBZ.citySwimState();
+    if (!sw || !sw.swimming) return;
+    const P = CBZ.player;
+    if (!P || P.dead) return;
+    if (floor(P.pos.x, P.pos.z) > st.level - 3.2) return;     // still over the town
+    st.undertowT = (st.undertowT || 0) + dt;
+    if (sw.breath > 0.42) return;
+    const a = surv().playerActor;
+    if (a) surv().hurt(a, scale(26, ctx) * dt, { cause: "dragged out to sea by the undertow" });
   }
 
   // ---- the wave front catches everyone genuinely below the crest ----
@@ -1522,13 +1813,46 @@
 
   // ---- the front wrecks the low town: cars tumble, small buildings go
   //      down, big ones lose their glass. High ground is spared. ----
+  /* VERTICAL EVACUATION WORKS AND WOOD FRAMES DO NOT. This is the one piece of
+     real tsunami doctrine the event has to encode, because it is the answer to
+     the question the event asks: a light 1-3 storey frame in the flood path is
+     swept OFF ITS FOUNDATIONS (and its wreckage joins the water), while a
+     reinforced concrete tower loses its glass, spalls, leans — and STANDS, so
+     its upper floors and its roof are a place you can survive by climbing.
+     CONCRETE_CAP is what makes that a guarantee rather than a probability: the
+     wave alone can never walk a tall frame past 0.92 of the ledger, so the
+     refuge cannot be taken away from you while you are standing on it. */
+  const TSU_LIGHT_H = 12;        // metres — 1-3 storeys at FH 3.4: the town
+  const TSU_CONCRETE_CAP = 0.92; // the wave alone never collapses a tower
+
   function tsuSmash(ctx) {
     const st = ctx.st, A = ctx.arena;
+    const field = tsuDebris(ctx);
     if (A.cars) for (let i = 0; i < A.cars.length; i++) {
       const car = A.cars[i]; if (car.flung) continue;
       const s = tsuS(ctx, car.x, car.z);
-      if (s <= st.frontS + 2 && s >= st.frontS - 10 && floor(car.x, car.z) <= st.level + 4)
-        flingCar(car, st.dx, st.dz, 17 + scale(7, ctx), 9);
+      if (s <= st.frontS + 2 && s >= st.frontS - 10 && floor(car.x, car.z) <= st.level + 4) {
+        // a lower arc than the old one: a bore ROLLS a car, it does not punt
+        // it — and what it lands in is moving water, so it keeps travelling
+        flingCar(car, st.dx, st.dz, field ? 11 + scale(4, ctx) : 17 + scale(7, ctx), field ? 3.5 : 9);
+        if (field) tsuWatchCar(ctx, car);
+      }
+    }
+    /* THE TREES GO TOO, and they are the classic tsunami battering ram: a
+       whole pine, trunk-first, at the speed of the water. The tree stops
+       existing where it stood (its trunk collider leaves CBZ.colliders with
+       it) and re-enters the world as a log inside the flow. */
+    if (field && A.flammable) for (let i = 0; i < A.flammable.length; i++) {
+      const t = A.flammable[i];
+      if (t._tsuUproot || t.burnt) continue;
+      const s = tsuS(ctx, t.x, t.z);
+      if (s > st.frontS + 2 || s < st.frontS - 14) continue;
+      if (floor(t.x, t.z) > st.level + 3) continue;
+      t._tsuUproot = 1;
+      if (t.trunkCol) { const k = CBZ.colliders.indexOf(t.trunkCol); if (k >= 0) { CBZ.colliders.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); } }
+      if (t.trunk) t.trunk.visible = false;
+      if (t.foliage) t.foliage.visible = false;
+      field.shed(t.x, t.z, 1, "log");
     }
     for (let i = 0; i < A.fragile.length; i++) {
       const b = A.fragile[i];
@@ -1536,12 +1860,16 @@
       if (s > st.frontS + 2 || s < st.frontS - 12 || b._tsuHit === st.waveId) continue;
       b._tsuHit = st.waveId;
       if (floor(b.x, b.z) > st.level + 5) continue;        // on high ground — spared
-      // THROUGH THE ONE LEDGER. A low shed takes a load it cannot carry and
-      // goes; a tower takes the same load and loses its glass — and if the
-      // quake already spalled it, this is what finishes it. That difference
-      // used to be `rnd() < 0.65`.
-      const frontal = Math.max(0.15, 1.35 - b.h / 12);
-      structureHit(b, frontal * (0.7 + 0.5 * ctx.intensity), ctx, { kind: "kinetic", dirx: st.dx, dirz: st.dz });
+      // THROUGH THE ONE LEDGER, and the two classes take genuinely different
+      // loads rather than one formula with a soft edge.
+      if (b.h < TSU_LIGHT_H) {
+        structureHit(b, 1.25, ctx, { kind: "kinetic", dirx: st.dx, dirz: st.dz });
+        if (field && b.fallen) field.shed(b.x, b.z, 6, "panel");
+      } else {
+        const room = Math.max(0, TSU_CONCRETE_CAP - (b._dmg || 0));
+        const load = Math.min(room, 0.34 * (0.7 + 0.5 * ctx.intensity));
+        if (load > 0.001) structureHit(b, load, ctx, { kind: "kinetic", dirx: st.dx, dirz: st.dz });
+      }
     }
   }
 
@@ -1628,14 +1956,26 @@
       // submergence test all agree without any of them being told.
       st.spray = CBZ.fx.particleCloud({ mode: "fall", color: 0xeaf6ff, count: 320, radius: R * 0.8, top: 15, size: 0.26, opacity: 0.8, vMin: 11, vMax: 22, drift: st.dx * 9, driftZ: st.dz * 9 });
       st.spray.setActive(0.95);
-      tsuSpawnPlanks(ctx);
+      st.sediment = 0; st.undertowT = 0; st.carWatch = null;
+      st.debris = undefined;                    // built lazily on first contact
+      if (CBZ.CONFIG.TSU_DEBRIS === false || !CBZ.tsuDebrisField) tsuSpawnPlanks(ctx);
       tsuPublish(ctx, 2.2);
       if (CBZ.shake) CBZ.shake(0.5);
       sound("water"); sound("rumble");
     },
     active(dt, ctx) {
       const st = ctx.st;
-      ctx.env.fog = 0x35607e; ctx.env.fogNear = 40; ctx.env.fogFar = 300; ctx.env.sunInt = 0.7; ctx.env.hemiColor = 0x9fb6c8;
+      /* A LEADEN SKY, and it took a screenshot to learn why the old one was
+         not. modes/survival.js paints BOTH the fog and the sky dome from
+         env.fog, and the renderer is sRGB — so 0x35607e, which reads as a dark
+         slate in a hex picker, came out of the encoder as a pale cyan haze
+         that turned every tsunami shot white and drowned the water in it. The
+         values below are chosen for what leaves the renderer, not for what
+         they look like in the source: overcast, desaturated, and dark enough
+         that gray-black water can read as gray-black water. */
+      ctx.env.fog = 0x1c2b34; ctx.env.fogNear = 70; ctx.env.fogFar = 520;
+      ctx.env.sunInt = 0.50; ctx.env.sunColor = 0xc9d2d6;
+      ctx.env.hemiInt = 0.72; ctx.env.hemiColor = 0x707f88;
       if (st.phase === "sweep") {
         st.frontS += st.speed * dt;
         /* THE ARC IS MEASURED AGAINST THE ISLAND, NOT AGAINST THE WHOLE RUN.
@@ -1664,16 +2004,59 @@
                            : st.floodSurge * Math.pow(land, 0.75));
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0.8;
         const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
-        // ---- the CREST is presentation riding the shared surge front ----
+        /* ---- THE FACE IS SCALED BY THE WATER UNDER IT ---------------------
+           A tsunami in open water is long, low and barely visible; it stands
+           up when it FEELS THE BOTTOM, and it is at its tallest, steepest and
+           most overhung the instant before it breaks. Then it stops being a
+           wave at all and becomes a gray-black soup with an edge.
+
+           THE ARENA HAS NO BATHYMETRY, and pretending otherwise was wrong:
+           `groundHeightAt` returns a flat 0 everywhere outside the hills while
+           the sea rests at -0.8, so a literal depth query offshore reads
+           NEGATIVE and reported "fully shoaled, fully turbid" from the first
+           frame — the open-sea curl never existed. The honest signal in this
+           world is the water the bore still has in front of it: the 52 m of
+           open water between the wall's start and the beach, which is the same
+           span the APPROACH easing above already uses. One number, and it can
+           never disagree with the surge because it IS the surge's span. */
+        const toShore = -(st.frontS + ctx.R);          // m of open water left
+        const shoal = 1 - Math.max(0, Math.min(1, toShore / 52));
+        /* Clean out at sea and filthy by the time it is in the streets — and
+           the important half of that curve is that it is ALREADY DIRTY WHEN IT
+           BREAKS. A bore does not pick up its load after landfall; it scours
+           the shelf on the way in, which is why the wave that comes over the
+           seawall at Miyako is gray-black before it has touched a building.
+           So shoaling alone carries it to 0.62, and the town takes it to 1. */
+        let turbid = Math.max(0, Math.min(1, (st.frontS + ctx.R + 8) / 34));
+        turbid = Math.max(turbid, Math.pow(shoal, 1.5) * 0.62);
+        st.sediment = turbid;
+        st.shoal = shoal;
         const grp = st.wave;
-        grp.position.set(fx0, st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, fz0);
-        grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
-        grp.scale.y = 1 + 0.035 * Math.sin(CBZ.now * 0.007);
-        tsuAnimateWave(st, CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001);
-        const fo = st.waveFoams;
-        if (fo) for (let i = 0; i < fo.length; i++) fo[i].material.opacity = 0.55 + 0.3 * Math.abs(Math.sin(CBZ.now * 0.02 + i * 1.7));
-        const sk = st.waveStreaks;
-        if (sk) for (let i = 0; i < sk.length; i++) { const s = sk[i]; s.material.opacity = 0.16 + 0.2 * Math.abs(Math.sin(CBZ.now * 0.013 + i)); s.position.y = st.H * (0.42 + 0.05 * Math.sin(CBZ.now * 0.01 + i * 2)); }
+        if (st.face) {
+          // tallest at the instant it breaks (shoal 1), then falling away as
+          // it spends itself crossing the island
+          const hs = (0.46 + 0.68 * shoal) * (st.frontS > 0 ? Math.max(0.4, 1 - st.frontS / (ctx.R * 1.25)) : 1);
+          CBZ.tsuFaceUpdate(st.face, {
+            t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
+            height: st.H * hs, turbid: turbid,
+            curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62),
+            foam: st.foamGain,
+            x: fx0, y: st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0,
+            dirX: st.dx, dirZ: st.dz,
+          });
+          grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
+        } else {
+          grp.position.set(fx0, st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, fz0);
+          grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
+          grp.scale.y = 1 + 0.035 * Math.sin(CBZ.now * 0.007);
+          tsuAnimateWave(st, CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001);
+          const fo = st.waveFoams;
+          if (fo) for (let i = 0; i < fo.length; i++) fo[i].material.opacity = 0.55 + 0.3 * Math.abs(Math.sin(CBZ.now * 0.02 + i * 1.7));
+          const sk = st.waveStreaks;
+          if (sk) for (let i = 0; i < sk.length; i++) { const s = sk[i]; s.material.opacity = 0.16 + 0.2 * Math.abs(Math.sin(CBZ.now * 0.013 + i)); s.position.y = st.H * (0.42 + 0.05 * Math.sin(CBZ.now * 0.01 + i * 2)); }
+        }
+        // the spray-torn crest: thicker the harder the wave is curling
+        st.spray.setActive(0.6 + 0.4 * shoal);
         st.spray.update(dt, fx0, st.level + st.H * 0.9, fz0);
         tsuPublish(ctx, 2.2);
         if (!st.landfall && st.frontS > -(ctx.R - 6)) {
@@ -1689,17 +2072,20 @@
         if (rnd() < dt * 8) sound("water");
         tsuCatch(dt, ctx);
         tsuSmash(ctx);
+        tsuCarHandoff(ctx);
         floodActors(dt, ctx, 2.2, "drowned in the flood", st.dx, st.dz);
-        tsuPlanks(dt, ctx, 2.2);
+        tsuFlotsam(dt, ctx, 5.4);
         if (st.frontS > ctx.R + 52) tsuEnterFlood(ctx);
       } else if (st.phase === "flooded") {
         st.floodT += dt;
         surgeSet(st.floodSurge);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.floodSurge;
+        st.sediment = 0.95;
         tsuPublish(ctx, 1.6);
-        ctx.env.fog = 0x3a6a84; ctx.env.fogNear = 34; ctx.env.fogFar = 260; ctx.env.sunInt = 0.8; ctx.env.hemiColor = 0xaecbd8;
+        ctx.env.fog = 0x21323b; ctx.env.fogNear = 60; ctx.env.fogFar = 440; ctx.env.sunInt = 0.56; ctx.env.hemiInt = 0.78; ctx.env.hemiColor = 0x7a8992;
         floodActors(dt, ctx, 1.6, "drowned in the flood", st.dx, st.dz);
-        tsuPlanks(dt, ctx, 1.6);
+        tsuCarHandoff(ctx);
+        tsuFlotsam(dt, ctx, 1.6);
         if (rnd() < dt * 2.5) sound("water");
         if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING — move!", 2.4); }
       } else {  // drain — slow, and what it drags out with it is the memory
@@ -1709,14 +2095,30 @@
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
         const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, st.floodSurge)));
         st.waveAmp = 0.86 + 0.52 * drainK; st.chopAmp = 0.72 + 1.0 * drainK; st.foamGain = 0.34 + 0.28 * drainK;
-        tsuPublish(ctx, 0.7 * drainK);
-        floodActors(dt, ctx, -0.7, "drowned in the flood", st.dx, st.dz);
-        tsuPlanks(dt, ctx, -0.7);
+        // the water that leaves is the dirtiest water there has been — it is
+        // carrying the town out with it
+        st.sediment = Math.min(1, 0.55 + 0.45 * drainK);
+        /* ---- THE UNDERTOW (TSU_UNDERTOW) --------------------------------
+           Everything the wave brought in leaves through the same gap, faster
+           than it arrived, and this is the half that drowns the people who
+           survived the impacts. The number is deliberately past swim.js's
+           fast stroke (2.15 m/s): applyCurrent moves you 0.34 x flow, so at
+           drainK 1 the sea is taking you seaward at ~3.1 m/s and swimming
+           straight at it loses. The answer is not to swim — it is to be
+           holding on to something, or to already be high. */
+        const undertow = CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 * drainK : -(1.8 + 7.4 * drainK);
+        st.undertow = undertow;
+        tsuPublish(ctx, undertow);
+        floodActors(dt, ctx, CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 : -(1.1 + 2.4 * drainK),
+          "dragged out to sea by the undertow", st.dx, st.dz);
+        tsuCarHandoff(ctx);
+        tsuFlotsam(dt, ctx, undertow);
+        tsuUndertowDrown(dt, ctx, drainK);
       }
       // heavier fog with your face at the surface — city/swim.js owns the
       // swimmer now, so this reads its published state instead of a local flag
       const sw = CBZ.citySwimState && CBZ.citySwimState();
-      if (sw && sw.swimming) { ctx.env.fog = 0x1e5670; ctx.env.fogNear = 6; ctx.env.fogFar = 90; }
+      if (sw && sw.swimming) { ctx.env.fog = 0x101c22; ctx.env.fogNear = 4; ctx.env.fogFar = 42; }
     },
     end(ctx) {
       const st = ctx.st;
@@ -1724,13 +2126,25 @@
       // to delete and no swimmer to stand down.
       surgeSet(0);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; }
+      // the sediment goes with it — one match's soup must never tint the next
+      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; }
       const o = ctx.arena && ctx.arena.ocean;
-      if (o && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(o, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 });
+      if (o && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(o, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1, sediment: 0 });
       if (o) o.position.y = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
       if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
+      st.sediment = 0;
+      if (st.face) {
+        if (CBZ.tsuFaceDispose) CBZ.tsuFaceDispose(st.face);
+        st.face = null; st.wave = null; st.waveWall = null; st.waveBasePos = null;
+      }
       if (st.wave) { st.wave.traverse((ob) => { if (ob.geometry) ob.geometry.dispose(); if (ob.material && ob.material.dispose) ob.material.dispose(); }); root().remove(st.wave); st.wave = null; }
       if (st.spray) { st.spray.dispose(); st.spray = null; }
+      /* THE DEBRIS DOES NOT LEAVE WITH THE WATER. Everything the wave carried
+         is stranded exactly where the drain put it — a car on its roof in a
+         street, a pine across a doorway — and it stays there for the rest of
+         the match. That wreckage IS the aftermath, and deleting it would be
+         throwing away the only thing the event leaves behind. */
+      if (st.debris) { st.debris.strandAll(); st.carWatch = null; }
       if (st.planks) {
         for (let i = 0; i < st.planks.length; i++) root().remove(st.planks[i].m);
         if (st.plankGeo) st.plankGeo.dispose();
@@ -1782,25 +2196,156 @@
 
   function near(pos, r) { const c = CBZ.camera.position; const dx = pos.x - c.x, dz = pos.z - c.z; return dx * dx + dz * dz < r * r; }
 
-  // ============================================================
-  // VOLCANIC ERUPTION — a real eruption OUT OF THE SUMMIT of the
-  // central mountain: a lava fountain bursts up from the peak, a
-  // dark ash column towers above it, the crater glows, and glowing
-  // LAVA STREAMS pour DOWN the cone's slopes. Lethal ONLY on a
-  // stream (a narrow corridor) or at the crater or under an arcing
-  // lava bomb — standing on safe ground, even up the mountain, is
-  // fine. Shared by the standalone `volcano` disaster AND the
-  // earthquake's surprise eruption.
-  // ============================================================
-  const ERUPT_UP = window.THREE ? new THREE.Vector3(0, 1, 0) : null;
-  const STREAM_BASE_LEN = 1;     // local Y length of the stream box (scaled per frame)
-  const STREAM_HALF_W = 2.9;     // lethal corridor half-width (matches the wider visual)
+  /* ============================================================
+     VOLCANIC ERUPTION — THE STRATOVOLCANO (2026-08-03 wave).
 
+     OWNER: "lava in current game is dumb and see thru". It was, and the
+     reason was one line of material setup: the old streams were
+     MeshBasicMaterial + AdditiveBlending + opacity 0.95 BOXES. Additive
+     blending cannot be opaque — it only ever ADDS to what is behind it —
+     so grass showed through the lava, two crossing streams showed through
+     each other, and no amount of colour tuning was ever going to make that
+     read as rock. That material is now the FLAG REVERT and nothing else
+     (SURV_VOLCANO_LAVA_V2 / VOLCANO_V2 = false).
+
+     What replaces it lives in world/volcanofx.js, keyed on a position and
+     a height field so a city-side volcano can call exactly the same four
+     builders. And it stopped being one hazard, because a stratovolcano
+     is not one hazard. The owner's own science, implemented as the four
+     things that actually kill people:
+
+       LAVA          slow, and honestly the LEAST dangerous of the four —
+                     you walk away from lava. It is opaque crusted rock
+                     with an incandescent channel, it lights the hillside,
+                     and it kills only what stands in it.
+       PYROCLASTIC   THE killer. 400+ mph of 600 C rock and gas hugging
+                     the ground down the FALL LINE. Nobody in the path
+                     lives; there is no cover, no mitigation and no
+                     mechanic except being somewhere else. So the lane is
+                     telegraphed during the warning (rockfall trickles
+                     down it, the crowd runs out of it) and inside it the
+                     player gets the incineration WHITEOUT, not a health
+                     bar.
+       LAHAR         boiling ash + meltwater with the consistency of wet
+                     concrete, down the VALLEY rather than the fall line.
+                     Slower, relentless, drags you and crushes you, and
+                     when it stops it SETS — the scar stays for the match.
+       ASHFALL       microscopic glass. Unsheltered it shreds the lungs;
+                     indoors you are safe from it, which is the whole
+                     indoor/outdoor tension — until enough of it piles on
+                     the roof, and then the roof is what kills you. That
+                     load goes through the ONE structural ledger
+                     (structureHit), never a second collapse rule.
+
+     Shared by the standalone `volcano` disaster AND the earthquake's
+     surprise eruption.
+     ============================================================ */
+  // THE NUKE FINALE (and every "you were IN it" death) draws its light
+  // through city/nukefx.js's real whiteout sheet instead of a second one.
+  if (CBZ.CONFIG.NUKE_FINALE_REAL == null) CBZ.CONFIG.NUKE_FINALE_REAL = true;
+
+  /* THE ASH LADDER, in metres of deposited ash, and the three numbers are
+     deliberately close together: the whole point of ashfall is that the SAME
+     accumulation that starts hurting the people outside is on its way to
+     killing the people who correctly went inside. VISUAL_FULL is only when
+     the blanket stops thickening on screen; the depth keeps climbing. */
+  const ASH_DOT_DEPTH = 0.006;   // shreds unsheltered lungs
+  const ASH_VISUAL_FULL = 0.16;  // continuous grey blanket on screen
+  const ASH_ROOF_FAIL = 0.055;   // the roof starts failing under the load
+  let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, lavaLegacy = 0, whiteouts = 0;
+  let nukeFxRuns = 0;
+  const volScars = [];           // set lahar + ash blanket: they OUTLIVE the eruption
+
+  /* ---- THE LENS THE FINALE NEEDS -----------------------------------------
+     WHY THE ARENA NUKE READ AS "orange geometric fake smoke", and it was
+     never the fxR fallback. The real composer DOES run here: survBlast ->
+     CBZ.detonate -> the `nuke` row -> city/nukefx.js's composeNuke, which
+     registers itself lazily on the ALWAYS chain with no city gate anywhere
+     in the file. What was wrong was the CAMERA.
+
+       1. nukefx puts a researched cloud cap ~2.5 km up and ~1.4 km wide
+          (formationDims: capY = R*20, capW = R*11 at R=126 m). The survival
+          camera's far plane is 1000 m, because the pass that widens it
+          (city/mode.js@94) returns immediately unless mode === "city". So
+          the cap, the crown and the top of the stem were CLIPPED OFF at the
+          far plane every frame, and the only survivors were the low ground-
+          surge lobes sitting near the deck: detached orange blobs, no
+          mushroom silhouette. Exactly what the owner described.
+       2. This def then forced scene fog to 30/220 m. nukefx's lobes are
+          fogproof by design, so a 220 m fog wall dissolved the entire world
+          behind them and left unfogged geometry floating in front of a flat
+          brown sheet — the "slightly opaque" half of the complaint.
+
+     Both are lens settings, both belong to the caller, and both are fixed
+     here from the cloud's OWN reported size. Nothing in city/nukefx.js
+     changes. Degrade-safe: no debug hook, no camera, or the flag off, and
+     this is inert. */
+  let nukeFarSaved = null, nukeFarT = 0;
+  function nukeFrustum() {
+    if (CBZ.CONFIG.NUKE_FINALE_REAL === false || !CBZ.camera) return 0;
+    let need = 0;
+    if (CBZ.nukeFxDebug) {
+      try {
+        const d = CBZ.nukeFxDebug();
+        if (d && d.live) need = (d.live.capYNow || d.live.riseH || 0) + (d.live.capWNow || d.live.capW || 0) * 1.2 + 600;
+      } catch (e) { need = 0; }
+    }
+    if (!(need > 0)) need = 4200;      // the cloud is there whether or not the hook is
+    need = Math.min(14000, Math.max(2600, need));
+    if (CBZ.camera.far < need) {
+      if (nukeFarSaved == null) nukeFarSaved = CBZ.camera.far;
+      CBZ.camera.far = need;
+      CBZ.camera.updateProjectionMatrix();
+    }
+    return need;
+  }
+  function nukeFrustumRestore() {
+    if (nukeFarSaved == null || !CBZ.camera) return;
+    CBZ.camera.far = nukeFarSaved; nukeFarSaved = null;
+    CBZ.camera.updateProjectionMatrix();
+  }
+
+  function vfx() { return (CBZ.CONFIG.VOLCANO_V2 !== false && CBZ.CONFIG.SURV_VOLCANO_LAVA_V2 !== false) ? CBZ.volcanoFx : null; }
+  // 0 at deep night, 1 at midday — core/daynight.js's own clock, so a disaster
+  // tint can DIM the day without ever being able to invent one
+  function dayK() {
+    if (!CBZ.dayPhase) return 1;
+    const t = CBZ.dayPhase();
+    return Math.max(0, Math.min(1, Math.sin((t - 0.22) * Math.PI / 0.56)));
+  }
+  function gAt(ctx) { return ctx.arena.groundHeightAt; }
+  function vent(h, ang, r) { return { x: h.x + Math.cos(ang) * r, z: h.z + Math.sin(ang) * r }; }
+
+  /* ---- THE INCINERATION WHITEOUT -----------------------------------------
+     One grammar for every death where the answer to "what did you see" is
+     LIGHT, not geometry: the pyroclastic front, and the nuke you are
+     standing under. city/nukefx.js already owns that sheet (#nukeFlash) with
+     a researched double-pulse envelope, and it is DOM — so it works at any
+     camera distance, in any mode, and it still runs while the run is over.
+     Degrade-safe: no nukefx, and the mode's own additive survEnv flash
+     stands in exactly as it did before. */
+  function incinerate(peak, fade) {
+    if (CBZ.CONFIG.NUKE_FINALE_REAL !== false && CBZ.cityNukeWhiteout) {
+      try {
+        CBZ.cityNukeWhiteout(fade == null ? 2.4 : fade, peak == null ? 1 : peak, true);
+        whiteouts++;
+        return true;
+      } catch (e) { /* fall through to the mode's own flash */ }
+    }
+    CBZ.fx.flash(peak == null ? 1 : peak, 0xfff2e0);
+    return false;
+  }
+
+  // ---- THE FLAG REVERT: the old see-through additive stream, verbatim ----
+  const ERUPT_UP = window.THREE ? new THREE.Vector3(0, 1, 0) : null;
+  const STREAM_BASE_LEN = 1;
+  const STREAM_HALF_W = 2.9;
   function makeLavaStream(angle) {
-    const geo = new THREE.BoxGeometry(5.2, STREAM_BASE_LEN, 1.1);   // wide + thick: lava you can SEE from anywhere
+    const geo = new THREE.BoxGeometry(5.2, STREAM_BASE_LEN, 1.1);
     const mat = new THREE.MeshBasicMaterial({ color: 0xff5a18, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending });
     const m = new THREE.Mesh(geo, mat); m.renderOrder = 6;
     root().add(m);
+    lavaLegacy++;
     return { angle, len: 3, maxLen: 0, mesh: m };
   }
   function streamHit(ax, az, h, s) {
@@ -1814,6 +2359,7 @@
   function startEruption(ctx) {
     if (ctx.st.erupting) return; ctx.st.erupting = true;
     const h = ctx.arena.hills[0];
+    const V = vfx();
     narrate("banner", "VOLCANIC ERUPTION");
     narrate("hint", "THE MOUNTAIN ERUPTS — stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
@@ -1825,39 +2371,106 @@
     ctx.st.erAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 300, radius: 26, top: 30, size: 0.24, opacity: 0.45, vMin: 6, vMax: 12 }); ctx.st.erAsh.setActive(0.85);
     // the glowing crater rim sitting on the peak
     ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
-    // lava streams running down the slopes (cardinals + an offset set)
-    ctx.st.erStreams = [];
-    const base = rnd() * 6.28, n = 5;
-    for (let i = 0; i < n; i++) {
-      const s = makeLavaStream(base + (i / n) * 6.28 + (rnd() - 0.5) * 0.4);
-      s.maxLen = h.r * (0.82 + rnd() * 0.16);   // reach most of the way down
-      ctx.st.erStreams.push(s);
+
+    // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
+    // and drove it into systems/weather.js, so the ash falls the same way the
+    // rain would and there is no fourth wind field in this file.
+    const w0 = windVec();
+    const wa = (w0 && w0.speed > 0.5) ? Math.atan2(w0.z, w0.x)
+      : (ctx.st.wx != null ? Math.atan2(ctx.st.wz, ctx.st.wx) : rnd() * 6.28);
+    ctx.st.erWindX = Math.cos(wa); ctx.st.erWindZ = Math.sin(wa);
+    /* The collapse bearing: the side of the cone that fails. Chosen in warn()
+       so the telegraph and the flow cannot disagree about which way it goes —
+       but the EARTHQUAKE's surprise eruption has no warn phase of its own, so
+       the lane is built here too when it is missing. Without this the quake
+       path had a flow and no lane, which meant no minimap front and no
+       flee-the-corridor field: the same hazard, silently unreadable. */
+    if (ctx.st.pyroBear == null) ctx.st.pyroBear = rnd() * 6.28;
+    if (!ctx.st.pyroLane && V && V.fallLine) {
+      ctx.st.pyroLane = V.fallLine({
+        x: h.x + Math.cos(ctx.st.pyroBear) * 3, z: h.z + Math.sin(ctx.st.pyroBear) * 3,
+        groundAt: gAt(ctx), bearing: ctx.st.pyroBear,
+        step: 6, count: Math.ceil((h.r + ctx.R * 0.95) / 6) + 1, turn: 0.4, wander: 0.1,
+      });
     }
-    if (CBZ.CONFIG.SURV_VOLCANO_LAVA_V2 !== false) {
-      // LAVA POOLS: where each stream reaches the base it feeds a spreading,
-      // pulsing pool — the lava you can SEE is the lava that kills you.
+
+    ctx.st.erLava = null; ctx.st.erStreams = null; ctx.st.erPools = null;
+    if (V) {
+      /* ---- LAVA: opaque crusted flows down the fall line ---- */
+      const n = 4;
+      ctx.st.erLava = [];
+      for (let i = 0; i < n; i++) {
+        // never straight down the pyroclastic lane — the two hazards want
+        // separate faces of the cone so the mountain reads as having sides
+        const a = ctx.st.pyroBear + 1.1 + (i / n) * 5.0 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.3;
+        const p = vent(h, a, 2.8);
+        ctx.st.erLava.push(V.lavaFlow({
+          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
+          len: h.r * 1.35 + 16 * ctx.intensity,
+          width: 4.6 + 2.2 * ctx.intensity,
+          speed: 4.2 + 2.6 * ctx.intensity,
+          salt: 4700 + i * 137,
+          light: i < 2,        // BUDGET: two real lights for four flows
+        }));
+      }
+      /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
+      if (CBZ.CONFIG.VOLCANO_ASH_LOAD !== false) {
+        const F = ctx.arena.fragile || [];
+        const AL = V.ashLoad({
+          cx: ctx.cx, cz: ctx.cz, r: ctx.R, groundAt: gAt(ctx),
+          parent: root(), roofs: F.length + 8, salt: 6151, full: ASH_VISUAL_FULL,
+        });
+        ctx.st.erAshLoad = AL;
+        ctx.st.erRoofs = [];
+        for (let i = 0; i < F.length; i++) {
+          const b = F[i]; if (b.fallen) continue;
+          ctx.st.erRoofs.push({ b: b, id: AL.addRoof({ x: b.x, z: b.z, y: b.h + 0.05, w: b.w, d: b.d, ref: b }) });
+        }
+        ctx.st.erRoofT = 0;
+      }
+      /* ---- the two travelling hazards are SCHEDULED, not immediate: a
+              cone has to build a column before it can collapse one ---- */
+      ctx.st.pyro = null;
+      ctx.st.pyroCd = 4.5 - 2.2 * ctx.intensity;
+      ctx.st.lahar = null;
+      ctx.st.laharCd = 8.5 - 3.0 * ctx.intensity;
+    } else {
+      // ---- FLAG REVERT: the legacy additive streams + pulsing pool discs ----
+      ctx.st.erStreams = [];
+      const base = rnd() * 6.28, n = 5;
+      for (let i = 0; i < n; i++) {
+        const s = makeLavaStream(base + (i / n) * 6.28 + (rnd() - 0.5) * 0.4);
+        s.maxLen = h.r * (0.82 + rnd() * 0.16);
+        ctx.st.erStreams.push(s);
+      }
       ctx.st.erPools = ctx.st.erStreams.map(function (s) {
         const pm = disc(h.x + Math.cos(s.angle) * 6, h.z + Math.sin(s.angle) * 6, 0xff4a10, 0.9, 0.12);
         pm.material.blending = THREE.AdditiveBlending;
         pm.scale.set(0.6, 0.6, 1);
         return { s, m: pm, r: 0 };
       });
-      // ASH FALLOUT: the plume leans DOWNWIND; the wedge below it chokes
-      // anyone exposed. A roof overhead (underRoof) is the shelter.
-      // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
-      // and drove it into systems/weather.js, so the ash falls the same way
-      // the rain would and there is no fourth wind field in this file.
-      const w0 = windVec();
-      const wa = (w0 && w0.speed > 0.5) ? Math.atan2(w0.z, w0.x)
-        : (ctx.st.wx != null ? Math.atan2(ctx.st.wz, ctx.st.wx) : rnd() * 6.28);
-      ctx.st.erWindX = Math.cos(wa); ctx.st.erWindZ = Math.sin(wa);
     }
     ctx.st.erBombCd = 1.1;
   }
+
   function tickEruption(dt, ctx) {
     if (!ctx.st.erupting) return;
     const h = ctx.arena.hills[0];
-    ctx.env.fog = 0x2e211c; ctx.env.fogNear = 22; ctx.env.fogFar = 160; ctx.env.sunInt = 0.5; ctx.env.sunColor = 0xff6a3a; ctx.env.hemiInt = 0.6; ctx.env.hemiColor = 0xff7a4a;
+    const V = vfx();
+    /* AN ERUPTION DARKENS THE AIR; IT DOES NOT DELETE THE ISLAND. The old
+       22/160 m fog put the far side of a 240 m island inside the wall, so the
+       mountain you are supposed to be reading was the murkiest thing on
+       screen. 40/300 keeps the whole arena legible and still filthy.
+
+       AND IT MUST NOT TURN NIGHT INTO NOON. survEnv is a flat override, so
+       writing sunInt 0.5 unconditionally made a midnight eruption brighter
+       than the midnight around it — which is also precisely the condition
+       under which the lava's own light is supposed to be the thing you see.
+       dayK() is the sun's own elevation off core/daynight.js. */
+    const dk = dayK();
+    ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 40; ctx.env.fogFar = 300;
+    ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xff6a3a;
+    ctx.env.hemiInt = 0.14 + 0.46 * dk; ctx.env.hemiColor = 0xff7a4a;
     // the ash rains where the wind carries it — the fallout wedge is VISIBLE
     if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
     else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
@@ -1868,48 +2481,194 @@
     // wind everything else in the game reads
     weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.55, fogColor: 0x2e211c });
     if (rnd() < dt * 1.6) sound("rumble");
-    // grow + orient each lava stream down the cone, hugging the slope
-    for (let i = 0; i < ctx.st.erStreams.length; i++) {
-      const s = ctx.st.erStreams[i];
-      s.len = Math.min(s.maxLen, s.len + (5 + ctx.intensity * 3) * dt);
-      const ex = h.x + Math.cos(s.angle) * s.len, ez = h.z + Math.sin(s.angle) * s.len;
-      const ey = floor(ex, ez);
-      const dir = new THREE.Vector3(ex - h.x, ey - h.peak, ez - h.z);
-      const len3 = dir.length() || 1; dir.multiplyScalar(1 / len3);
-      s.mesh.position.set((h.x + ex) / 2, (h.peak + ey) / 2 + 0.45, (h.z + ez) / 2);
-      s.mesh.quaternion.setFromUnitVectors(ERUPT_UP, dir);
-      s.mesh.scale.set(1, len3 / STREAM_BASE_LEN, 1);
-      s.mesh.material.opacity = 0.8 + 0.18 * Math.sin(CBZ.now * 0.02 + i * 1.3);
+
+    // ---------------- LAVA ----------------
+    if (ctx.st.erLava) {
+      for (let i = 0; i < ctx.st.erLava.length; i++) ctx.st.erLava[i].update(dt);
+    } else if (ctx.st.erStreams) {
+      // legacy revert path: grow + orient each additive stream down the cone
+      for (let i = 0; i < ctx.st.erStreams.length; i++) {
+        const s = ctx.st.erStreams[i];
+        s.len = Math.min(s.maxLen, s.len + (5 + ctx.intensity * 3) * dt);
+        const ex = h.x + Math.cos(s.angle) * s.len, ez = h.z + Math.sin(s.angle) * s.len;
+        const ey = floor(ex, ez);
+        const dv = new THREE.Vector3(ex - h.x, ey - h.peak, ez - h.z);
+        const len3 = dv.length() || 1; dv.multiplyScalar(1 / len3);
+        s.mesh.position.set((h.x + ex) / 2, (h.peak + ey) / 2 + 0.45, (h.z + ez) / 2);
+        s.mesh.quaternion.setFromUnitVectors(ERUPT_UP, dv);
+        s.mesh.scale.set(1, len3 / STREAM_BASE_LEN, 1);
+        s.mesh.material.opacity = 0.8 + 0.18 * Math.sin(CBZ.now * 0.02 + i * 1.3);
+      }
+      if (ctx.st.erPools) for (let i = 0; i < ctx.st.erPools.length; i++) {
+        const P = ctx.st.erPools[i], s = P.s;
+        const ex = h.x + Math.cos(s.angle) * s.len, ez = h.z + Math.sin(s.angle) * s.len;
+        P.m.position.set(ex, floor(ex, ez) + 0.12, ez);
+        if (s.len >= s.maxLen - 0.5) P.r = Math.min(8, P.r + dt * 1.1);
+        else P.r = Math.max(P.r, 1.2);
+        P.m.scale.set(Math.max(0.6, P.r), Math.max(0.6, P.r), 1);
+        P.m.material.opacity = 0.6 + 0.3 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.014 + i * 2.1));
+      }
     }
-    // lava POOLS spread where the streams arrive at the base
-    if (ctx.st.erPools) for (let i = 0; i < ctx.st.erPools.length; i++) {
-      const P = ctx.st.erPools[i], s = P.s;
-      const ex = h.x + Math.cos(s.angle) * s.len, ez = h.z + Math.sin(s.angle) * s.len;
-      P.m.position.set(ex, floor(ex, ez) + 0.12, ez);
-      if (s.len >= s.maxLen - 0.5) P.r = Math.min(8, P.r + dt * 1.1);   // arrived: keep spreading
-      else P.r = Math.max(P.r, 1.2);
-      P.m.scale.set(Math.max(0.6, P.r), Math.max(0.6, P.r), 1);
-      P.m.material.opacity = 0.6 + 0.3 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.014 + i * 2.1));
+
+    /* ---------------- PYROCLASTIC DENSITY CURRENT ----------------
+       The column over-builds, loses buoyancy and DROPS — that is the
+       physical event, and it is why this arrives as a bang from the summit
+       rather than fading in. One at a time; the next one is armed while the
+       first is still running out. */
+    if (V && CBZ.CONFIG.VOLCANO_PYRO !== false) {
+      ctx.st.pyroCd -= dt;
+      if (!ctx.st.pyro && ctx.st.pyroCd <= 0) {
+        const a = ctx.st.pyroBear + (pyroRuns % 2 ? 0.55 : -0.35) * (pyroRuns > 0 ? 1 : 0);
+        const p = vent(h, a, 3.0);
+        ctx.st.pyro = V.pyroclastic({
+          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
+          speed: 36 + 16 * ctx.intensity,          // ~6x a sprinting bot
+          len: h.r + ctx.R * 0.95,
+          width: 20 + 14 * ctx.intensity,
+          height: 17 + 11 * ctx.intensity,
+          tail: 58, salt: 8100 + pyroRuns * 311,
+        });
+        pyroRuns++;
+        ctx.st.pyroCd = 7.5 - 2.5 * ctx.prog;
+        if (CBZ.shake) CBZ.shake(1.15);
+        soundAt("explosion", p.x, p.z); sound("rumble");
+      }
+      if (ctx.st.pyro) {
+        ctx.st.pyro.update(dt);
+        // the ground under the front is scoured and buried in one pass
+        const fp = ctx.st.pyro.frontPos();
+        if (CBZ.shake) {
+          const dpx = Math.hypot(camPos().x - fp.x, camPos().z - fp.z);
+          if (dpx < 70) CBZ.shake(0.5 * (1 - dpx / 70));
+        }
+        if (ctx.st.pyro.done) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
+      }
     }
-    // burn anyone standing ON a stream / IN a pool / at the crater — every
-    // lava death comes from a thing you can SEE glowing. Ash is the area
-    // denial: the downwind wedge chokes anyone without a roof overhead.
+
+    /* ---------------- LAHAR ----------------
+       Meltwater takes time to arrive, and it goes down the VALLEY, not the
+       face — `channel:true` on the fall-line walk is the whole difference. */
+    if (V && CBZ.CONFIG.VOLCANO_LAHAR !== false) {
+      ctx.st.laharCd -= dt;
+      if (!ctx.st.lahar && ctx.st.laharCd <= 0) {
+        const a = ctx.st.pyroBear + Math.PI * 0.62;
+        const p = vent(h, a, h.r * 0.45);
+        ctx.st.lahar = V.lahar({
+          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
+          len: ctx.R * 0.85, width: 10 + 5 * ctx.intensity,
+          speed: 9 + 5 * ctx.intensity, salt: 2600 + laharRuns * 197,
+        });
+        laharRuns++;
+        soundAt("water", p.x, p.z);
+        if (CBZ.shake) CBZ.shake(0.45);
+      }
+      if (ctx.st.lahar) ctx.st.lahar.update(dt);
+    }
+
+    /* ---------------- ASH AS A LOAD ---------------- */
+    const AL = ctx.st.erAshLoad;
+    if (AL) {
+      AL.update(dt, {
+        /* Metres of ash per second on the plume axis. Calibrated against the
+           ladder above so ONE 20 s eruption walks the whole arc: the ground
+           downwind is dusted within a second or two (the choke starts), the
+           blanket is continuous downwind near the end, and the downwind roofs
+           cross ASH_ROOF_FAIL at about two thirds — so "indoors saves you from
+           the ash until the roof goes" is something that HAPPENS inside one
+           event instead of a rule on paper. Upwind stays green, which is what
+           makes the wedge readable at all. */
+        rate: 0.014 + 0.024 * ctx.intensity,
+        windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
+        srcX: h.x, srcZ: h.z, spread: 0.16,
+      });
+      // ROOFS FAIL UNDER THE LOAD, through the ONE ledger. Wet ash is ~1000
+      // kg/m3: a quarter-metre on a flat roof is a quarter of a tonne per
+      // square metre, and light-frame roofs go at about that. Checked at 2 Hz
+      // — the ledger accumulates, so the cadence only sets how fast, not if.
+      ctx.st.erRoofT = (ctx.st.erRoofT || 0) - dt;
+      if (ctx.st.erRoofT <= 0 && ctx.st.erRoofs) {
+        ctx.st.erRoofT = 0.5;
+        const wasCause = surv()._cause;
+        for (let i = 0; i < ctx.st.erRoofs.length; i++) {
+          const R = ctx.st.erRoofs[i];
+          if (!R.b || R.b.fallen) continue;
+          const dep = AL.roofDepth(R.id);
+          if (dep < ASH_ROOF_FAIL) continue;
+          // the killfeed has to name the ROOF, not the volcano — collapse()
+          // crushes the footprint with the director's default cause
+          surv()._cause = "crushed by an ash-laden roof";
+          const stage = structureHit(R.b, 0.75 * (dep / ASH_ROOF_FAIL), ctx, { kind: "ashload" });
+          if (R.b.fallen) { ashRoofCollapses++; AL.clearCell(R.id); }
+          else if (stage >= 2) AL.clearCell(R.id);   // it shed its load as it spalled
+        }
+        surv()._cause = wasCause;
+      }
+    }
+
+    /* ---------------- THE ACTOR PASS ----------------
+       Ordered by how fast the thing kills you, which is also the order in
+       which the world gives you a chance: the flow first (none), then the
+       crater and the lava (see it, don't stand in it), then the lahar
+       (survivable if you get out of the channel), then the ash (survivable
+       indefinitely if you are indoors). */
+    const P = ctx.st.pyro, LH = ctx.st.lahar, LV = ctx.st.erLava;
     const wX = ctx.st.erWindX, wZ = ctx.st.erWindZ;
     surv().forEachActor(function (a) {
       const ax = a.pos.x, az = a.pos.z;
-      if (Math.hypot(ax - h.x, az - h.z) < 3.4) { surv().hurt(a, 1e6, { cause: "swallowed by the crater", fromX: h.x, fromZ: h.z }); return; }
-      for (let i = 0; i < ctx.st.erStreams.length; i++) if (streamHit(ax, az, h, ctx.st.erStreams[i])) { surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: h.x, fromZ: h.z }); return; }
-      if (ctx.st.erPools) for (let i = 0; i < ctx.st.erPools.length; i++) {
-        const P = ctx.st.erPools[i];
-        if (P.r > 0.7 && Math.hypot(ax - P.m.position.x, az - P.m.position.z) < P.r * 0.85) { surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: P.m.position.x, fromZ: P.m.position.z }); return; }
-      }
-      if (wX != null) {
-        const dx = ax - h.x, dz = az - h.z, d = Math.hypot(dx, dz);
-        if (d > 8 && d < 80 && (dx * wX + dz * wZ) / d > 0.72 && !sheltered(a)) {
-          surv().hurt(a, scale(6, ctx) * dt, { cause: "choked by volcanic ash" });
+      // 1) PYROCLASTIC FLOW — zero survival in the path, no exceptions.
+      //    A roof is not shelter from 600 C at 130 m/s and pretending it is
+      //    would be the worst lie in the file.
+      if (P) {
+        const zone = P.contains(ax, az);
+        if (zone) {
+          if (a.isPlayer) incinerate(1, zone === 1 ? 1.9 : 2.6);
+          const fp = P.frontPos();
+          surv().hurt(a, 1e6, {
+            cause: zone === 1 ? "incinerated by the pyroclastic flow" : "asphyxiated in the ash cloud",
+            fromX: fp.x, fromZ: fp.z, fling: zone === 1 ? 9 : 4,
+          });
+          return;
         }
       }
+      // 2) the vent itself
+      if (Math.hypot(ax - h.x, az - h.z) < 3.4) { surv().hurt(a, 1e6, { cause: "swallowed by the crater", fromX: h.x, fromZ: h.z }); return; }
+      // 3) LAVA — what kills you is exactly what glows
+      if (LV) {
+        for (let i = 0; i < LV.length; i++) if (LV[i].hitTest(ax, az)) {
+          const t = LV[i].tip;
+          surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: t.x, fromZ: t.z });
+          return;
+        }
+      } else if (ctx.st.erStreams) {
+        for (let i = 0; i < ctx.st.erStreams.length; i++) if (streamHit(ax, az, h, ctx.st.erStreams[i])) { surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: h.x, fromZ: h.z }); return; }
+        if (ctx.st.erPools) for (let i = 0; i < ctx.st.erPools.length; i++) {
+          const PL = ctx.st.erPools[i];
+          if (PL.r > 0.7 && Math.hypot(ax - PL.m.position.x, az - PL.m.position.z) < PL.r * 0.85) { surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: PL.m.position.x, fromZ: PL.m.position.z }); return; }
+        }
+      }
+      // 4) LAHAR — it CARRIES you, and then it sets around you
+      if (LH) {
+        const m = LH.hitTest(ax, az);
+        if (m) {
+          if (CBZ.body) CBZ.body.hit(a, { dir: { x: m.dirx, z: m.dirz }, force: 4 + 6 * m.depth, fling: 0 });
+          a.pos.x += m.dirx * (2.2 + 3.4 * m.depth) * dt;
+          a.pos.z += m.dirz * (2.2 + 3.4 * m.depth) * dt;
+          surv().hurt(a, scale(26, ctx) * m.depth * dt, { cause: "crushed in the lahar", fromX: ax - m.dirx, fromZ: az - m.dirz });
+          return;
+        }
+      }
+      // 5) ASHFALL — glass in the lungs, and a roof is a real answer to it
+      if (!sheltered(a)) {
+        let choke = 0;
+        if (AL && AL.depthAt(ax, az) > ASH_DOT_DEPTH) choke = 1;
+        else if (wX != null) {
+          const dx = ax - h.x, dz = az - h.z, d = Math.hypot(dx, dz);
+          if (d > 8 && d < 80 && (dx * wX + dz * wZ) / d > 0.72) choke = 0.7;
+        }
+        if (choke > 0) surv().hurt(a, scale(6, ctx) * choke * dt, { cause: "choked by volcanic ash" });
+      }
     });
+
     // lava bombs arc out of the summit and crash down across the island
     ctx.st.erBombCd -= dt;
     if (ctx.st.erBombCd <= 0) {
@@ -1931,6 +2690,7 @@
       });
     }
   }
+
   function endEruption(ctx) {
     if (!ctx.st.erupting) return;
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
@@ -1940,15 +2700,95 @@
     (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
     ctx.st.erStreams = null;
     (ctx.st.erPools || []).forEach((P) => rmMesh(P.m));
-    ctx.st.erPools = null; ctx.st.erWindX = ctx.st.erWindZ = null;
+    ctx.st.erPools = null;
+    // the lava cools and goes; the flows themselves are transient hazards
+    (ctx.st.erLava || []).forEach((f) => f.dispose());
+    ctx.st.erLava = null;
+    if (ctx.st.pyro) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
+    /* THE SCARS OUTLIVE THE EVENT, and that is the point: a lahar SETS, and
+       ash does not wash off between disasters. Both stay in the world for the
+       rest of the match and are cleared when the mode is torn down. */
+    if (ctx.st.lahar) { volScars.push(ctx.st.lahar.harden()); ctx.st.lahar = null; }
+    if (ctx.st.erAshLoad) { volScars.push(ctx.st.erAshLoad); ctx.st.erAshLoad = null; }
+    /* A SCAR IS A MEMORY, NOT A LEAK. Two eruptions can legitimately happen
+       in one match (the volcano, plus the earthquake's surprise one), and a
+       third would only be stacking a second full ash field on top of an
+       identical one. Oldest out at four. */
+    while (volScars.length > 4) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
+    ctx.st.erRoofs = null;
+    ctx.st.erWindX = ctx.st.erWindZ = null;
     ctx.st.erupting = false;
   }
+
+  /* The scars are the one thing here that survives its own disaster, so they
+     need their own teardown. 28.06 sits immediately after the mode-exit hook
+     that puts the sea and the weather back. */
+  CBZ.onAlways(28.06, function (dt) {
+    const inSurv = CBZ.game.mode === "survival" && !!(CBZ.surv && CBZ.surv.arena);
+    if (volScars.length) {
+      if (!inSurv) {
+        for (let i = 0; i < volScars.length; i++) { try { volScars[i].dispose(); } catch (e) {} }
+        volScars.length = 0;
+      } else {
+        // a set deposit still has to tick: it is finishing its colour walk
+        for (let i = 0; i < volScars.length; i++) { try { volScars[i].update(dt, null); } catch (e) {} }
+      }
+    }
+    /* THE FRUSTUM FOLLOWS THE CLOUD, NOT THE DISASTER. The nuke's active
+       window is 12 s; NUKE_FX_AFTERMATH keeps the cloud maturing over the
+       island for another seven MINUTES, and it is still climbing and
+       spreading the whole time. Widening the far plane only inside the 12 s
+       window froze it at the size the cloud had when it was young, and the
+       landmark got clipped off again exactly when it became a landmark. So
+       this re-asks every frame there is a live cloud, and only puts the lens
+       back when the mode ends. */
+    if (!inSurv) { nukeFrustumRestore(); return; }
+    // 4 Hz: nukeFxDebug() builds a fat report object, and a far plane that
+    // updates four times a second is four times more often than a cloud
+    // rising at 30 m/s can outgrow it.
+    nukeFarT -= dt;
+    if (nukeFarT > 0 || !CBZ.nukeFxDebug) return;
+    nukeFarT = 0.25;
+    let liveCloud = false;
+    try { const d = CBZ.nukeFxDebug(); liveCloud = !!(d && d.live); } catch (e) {}
+    if (liveCloud) nukeFrustum();
+  });
+
+  /* THE MAP MARKS THE LANE, because the lane is the only survival
+     information this disaster has. A travelling front for the density
+     current (the map already draws {line:true} for the tsunami's wall) and a
+     ring on the mud head. During the WARNING the lane is still marked — that
+     is the entire point of telegraphing an unsurvivable hazard. */
+  function pushEruptHazards(st, out) {
+    const V = vfx();
+    const lane = st.pyroLane;
+    if (V && lane) {
+      const s = st.pyro ? Math.min(st.pyro.frontS, lane.total) : 0;
+      const P = new THREE.Vector3();
+      V.pathAt(lane, s, P);
+      const i = Math.max(0, Math.min(lane.pts.length - 2, Math.floor(s / lane.seg)));
+      const a = lane.pts[i], b = lane.pts[i + 1];
+      const dx = b.x - a.x, dz = b.z - a.z, dl = Math.hypot(dx, dz) || 1;
+      out.push({ line: true, x: P.x, z: P.z, dx: dx / dl, dz: dz / dl });
+    }
+    if (st.lahar) {
+      const V2 = new THREE.Vector3();
+      if (V) { V.pathAt(st.lahar.path, st.lahar.length, V2); out.push({ x: V2.x, z: V2.z, r: 9, fill: false }); }
+    }
+  }
+
   // threat from an active eruption (shared by quake + volcano threat())
   function eruptThreat(x, z, ctx) {
     if (!ctx.st.erupting) return 0;
     const h = ctx.arena.hills[0];
     let t = 0.12;   // ambient: bombs can fall anywhere
     if (Math.hypot(x - h.x, z - h.z) < 6) t = Math.max(t, 0.9);
+    // THE FLOW OUTRANKS EVERYTHING. Nothing else on this mountain is worth
+    // fleeing while a density current is coming down your lane.
+    if (ctx.st.pyro) t = Math.max(t, ctx.st.pyro.threatAt(x, z));
+    if (ctx.st.erLava) {
+      for (let i = 0; i < ctx.st.erLava.length; i++) if (ctx.st.erLava[i].hitTest(x, z)) { t = Math.max(t, 0.97); break; }
+    }
     (ctx.st.erStreams || []).forEach((s) => {
       const dx = x - h.x, dz = z - h.z;
       const along = dx * Math.cos(s.angle) + dz * Math.sin(s.angle);
@@ -1957,11 +2797,292 @@
     (ctx.st.erPools || []).forEach((P) => {
       if (P.r > 0.7) { const d = Math.hypot(x - P.m.position.x, z - P.m.position.z); if (d < P.r + 3) t = Math.max(t, Math.min(0.95, 1 - (d - P.r * 0.85) / 3)); }
     });
+    if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
     if (ctx.st.erWindX != null) {
       const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1;
       if (d > 8 && d < 80 && (dx * ctx.st.erWindX + dz * ctx.st.erWindZ) / d > 0.72) t = Math.max(t, 0.45);
     }
     return t;
+  }
+
+  /* ============================================================
+     THE SUBDUCTION-ZONE EARTHQUAKE
+
+     OWNER: "connect earthquake volcano and tsunami LIKE THEY SHOULD BE
+     CONNECTED", and the science that goes with it: the shaking rarely kills.
+     People are killed by DEBRIS and by PANCAKING, and then, minutes later, by
+     the FIRES the ruptured gas mains started and the DOWNED CONDUCTORS lying
+     live in the street. So this def's job is no longer "shake the camera and
+     topple some boxes":
+
+       warn      pre-shocks. The props buzz on the ground while the horizon
+                 holds still, which is the only way a picture can say GROUND.
+       main      the mainshock. Every standing structure takes load through
+                 the ONE ledger, and every structure SHEDS — glass first, then
+                 masonry, hardest from the ones closest to going. A person
+                 pressed against a facade is in the kill zone; a person in the
+                 middle of the square is fine. Some bots run for open ground,
+                 some dive under the day-room tables, and WHICH ONES LIVE is
+                 the lesson, taught with no text at all.
+       aftermath 1-3 gas fires at the worst-hit buildings and two poles down
+                 across the open ground people just ran to.
+       tail      aftershocks, decaying, re-shedding the buildings the
+                 mainshock already weakened — which is when most of the
+                 remaining collapses actually happen.
+
+     THE CHAIN. A subduction megathrust is one fault doing two things: the
+     seaward half lifts the water column and the landward half loads the arc's
+     magma plumbing. So the rupture's position IS the branch — an offshore
+     break on a big quake hands off to the TSUNAMI (the drawdown begins while
+     the ground is still moving, which is what makes it one event and not two
+     in a row), and an inland one can crack the mountain open exactly as it
+     always could. The handoff is CBZ.disasters.force() — this def does not
+     know how to run a tsunami and must never learn.
+
+     Flag: CBZ.CONFIG.QUAKE_CHAIN (default on) — one line back to a quake
+     that ends and lets the shuffled arc pick whatever is next.
+     ============================================================ */
+  if (CBZ.CONFIG.QUAKE_CHAIN == null) CBZ.CONFIG.QUAKE_CHAIN = true;
+  const QK_MAIN = 14;              // seconds of mainshock inside activeSecs
+  const QK_SHOCKS = [3.4, 7.2, 11.0];   // aftershocks, seconds into the tail
+  let qkChained = 0, qkGasFires = 0, qkLines = 0;
+
+  // Does the shared core exist? Every call site below is `qk() ? … : <the old
+  // behaviour>`, so a build that never loaded systems/quake.js still plays the
+  // quake it always played — that is the degrade-safe rule, not a nicety.
+  function qk() { return CBZ.quake || null; }
+  // one field off the shared core's ratchet, degrade-safe (0 when absent)
+  function qkNum(k) {
+    if (!CBZ.quakeAudit) return 0;
+    try { const a = CBZ.quakeAudit(); return Number(a && a[k]) || 0; } catch (e) { return 0; }
+  }
+
+  /* THE STRUCTURAL STAGE, as one 0..1 number the shedder can read. It is the
+     SAME `_dmg` the ledger above accumulates, so a building the tsunami
+     already spalled sheds harder in the next quake without either event
+     knowing about the other. */
+  function qkSeverity(b) { return Math.max(0, Math.min(1, (b._dmg || 0) / 1.05)); }
+
+  /* DROP, COVER, HOLD ON — made VISIBLE.
+     A third of the crowd are "indoors" people and go for the nearest heavy
+     table; the rest keep their own brain, which fleeVector already steers into
+     the open. Two populations doing two correct things is what turns a rule
+     into a thing you watch happen. */
+  function qkTakeCover(dt, ctx) {
+    const Q = qk(); if (!Q) return;
+    const bots = CBZ.bots; if (!bots) return;
+    for (let i = 0; i < bots.length; i++) {
+      const a = bots[i];
+      if (!a || a.dead || !a.pos) continue;
+      if (CBZ.body && CBZ.body.busy(a)) continue;
+      if (i % 3 !== 0) continue;                       // the open-ground two thirds
+      let anchor = a._quakeAnchor;
+      if (anchor === undefined || anchor === null) {
+        anchor = Q.coverNear(a.pos.x, a.pos.z, a.pos.y, 18);
+        a._quakeAnchor = anchor || false;              // false = "looked, found none"
+      }
+      if (!anchor) continue;
+      Q.duckUnder(a, anchor, dt, 10);
+    }
+  }
+  function qkStandAll() {
+    const Q = qk(); if (!Q) return;
+    const bots = CBZ.bots; if (!bots) return;
+    for (let i = 0; i < bots.length; i++) { Q.standUp(bots[i]); if (bots[i]) bots[i]._quakeAnchor = null; }
+  }
+
+  /* THE AFTERMATH — the secondary killers, fired ONCE when the mainshock
+     stops. Both are delegated: the fire goes through CBZ.structure's BURNING
+     state where a real lot exists (so spread comes free and no second fire
+     model is written), and the pole comes down through the shared core. */
+  function qkAftermath(ctx) {
+    const Q = qk(); if (!Q) return;
+    const hurt = ctx.arena.fragile
+      .filter(function (b) { return !b.fallen && (b._dmg || 0) > 0.25; })
+      .sort(function (a, b) { return (b._dmg || 0) - (a._dmg || 0); });
+    const n = 1 + ((rnd() * 3) | 0);
+    for (let i = 0; i < Math.min(n, hurt.length); i++) {
+      if (Q.gasFire(hurt[i], { gy: hurt[i].gy })) qkGasFires++;
+    }
+    // TWO POLES, and they fall AWAY from the buildings — i.e. across exactly
+    // the open ground the sensible half of the crowd is standing on. That is
+    // the point: "get clear of the structures" is not the whole answer.
+    for (let i = 0; i < 2; i++) {
+      const px = ctx.cx + (rnd() - 0.5) * ctx.R * 1.6, pz = ctx.cz + (rnd() - 0.5) * ctx.R * 1.6;
+      const P = Q.poleNear(px, pz, 400);
+      if (P && Q.dropLine({ pole: P })) qkLines++;
+    }
+  }
+
+  function QUAKE_DEF() {
+    return {
+      name: "EARTHQUAKE", emoji: "", warnSecs: 5, activeSecs: 26, gap: 7,
+      cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
+      // THE FORESHOCK IS THE WARNING. A real quake announces itself by rattling
+      // everything loose in the room, so the telegraph is a rising tremor with
+      // the props visibly buzzing on it — no line of text can say "get out from
+      // under that" as fast as the building itself shivering.
+      warn(ctx) { narrate("hint", "The ground is rumbling…", 2.2); sound("rumble"); ctx.st.pre = 0; },
+      warnTick(dt, ctx) {
+        const k = 1 - dir.t / (this.warnSecs || 1);
+        if (CBZ.shake) CBZ.shake(0.02 + 0.10 * k * k);
+        rattleProps(ctx, 0.02 + 0.05 * k);
+        ctx.st.pre = (ctx.st.pre || 0) - dt;
+        if (ctx.st.pre <= 0) { ctx.st.pre = 1.4 - k; soundAt("rumble", ctx.cx, ctx.cz); }
+        // the sensible ones are already moving before the first pane falls
+        if (k > 0.45) qkTakeCover(dt, ctx);
+      },
+      // during the sirens the danger is ALREADY the buildings — bots start
+      // clearing the streets before the first collapse
+      warnThreat(x, z, ctx) { return DEFS.quake.threat(x, z, ctx); },
+      start(ctx) {
+        ctx.st.T = 0;
+        // per-EVENT counters: the audit answers "what did this quake do"
+        qkChained = qkGasFires = qkLines = 0;
+        ctx.st.dust = CBZ.fx.particleCloud({ mode: "rise", color: 0xb6a892, count: 160, radius: ctx.R, top: 8, size: 0.32, opacity: 0.34, vMin: 1, vMax: 3 });
+        ctx.st.dust.setActive(0.7);
+        // only SOME buildings come down — a quake doesn't flatten the whole city.
+        // shuffle, then cap to a fraction so plenty are left standing.
+        const standing = ctx.arena.fragile.filter((b) => !b.fallen).sort(() => rnd() - 0.5);
+        ctx.st.order = standing.slice(0, Math.max(1, Math.ceil(standing.length * 0.3)));
+        ctx.st.next = 1.2;
+        // and EVERY standing structure takes load, so a survivor of this quake
+        // is a wounded building when the next disaster arrives
+        for (let i = 0; i < ctx.arena.fragile.length; i++) structureHit(ctx.arena.fragile[i], 0.22 + 0.2 * ctx.intensity, ctx, { kind: "quake" });
+        // the shared core needs to know WHICH structures are shedding, so its
+        // facade-proximity test (the thing that makes standing next to a wall
+        // lethal and the open square safe) has something to measure against
+        if (qk()) {
+          qk().begin(ctx.arena.fragile);
+          // fire eats the building's OWN ledger — this file's, not the core's
+          qk().hooks.structDamage = function (b, amt) { structureHit(b, amt, ctx, { kind: "fire" }); };
+        }
+
+        /* ---- THE SUBDUCTION BRANCH ---------------------------------------
+           One rupture, two consequences, and WHERE it broke decides which.
+           Offshore + big → the sea. Inland → the magma. Neither is guaranteed,
+           because a quake that always ends in a tsunami stops being a quake. */
+        ctx.st.chain = null;
+        if (CBZ.CONFIG.QUAKE_CHAIN !== false) {
+          const ang = rnd() * 6.28, off = 0.3 + rnd() * 0.95;
+          ctx.st.epX = ctx.cx + Math.cos(ang) * ctx.R * off;
+          ctx.st.epZ = ctx.cz + Math.sin(ang) * ctx.R * off;
+          const offshore = off > 0.7;
+          if (offshore && ctx.intensity > 0.42 && rnd() < 0.7) ctx.st.chain = "tsunami";
+          else if (rnd() < 0.4) ctx.st.chain = "eruption";
+        } else if (rnd() < 0.4) ctx.st.chain = "eruption";
+        ctx.st.eruptArmed = ctx.st.chain === "eruption";
+        ctx.st.eruptAt = 4 + rnd() * 5;     // seconds into the quake it would hit
+        ctx.st.shockN = 0;
+      },
+      active(dt, ctx) {
+        ctx.st.T = (ctx.st.T || 0) + dt;
+        const T = ctx.st.T, tail = T - QK_MAIN;
+        // The mainshock runs at full amplitude; the tail is quiet ground with
+        // discrete aftershocks punched into it. A quake that shakes evenly for
+        // its whole duration reads as a machine, not as a fault.
+        let amp;
+        if (tail < 0) amp = 0.16 + 0.5 * ctx.intensity * (0.55 + (T / QK_MAIN) * 0.45);
+        else {
+          amp = 0.02;
+          for (let i = 0; i < QK_SHOCKS.length; i++) {
+            const d = tail - QK_SHOCKS[i];
+            if (d >= 0 && d < 2.2) amp = Math.max(amp, (0.42 - i * 0.11) * (1 - d / 2.2) * (0.6 + ctx.intensity));
+          }
+        }
+        if (CBZ.shake) CBZ.shake(amp);
+        ctx.st.dust.setActive(tail < 0 ? 0.7 : 0.3); ctx.st.dust.update(dt, camPos().x, 0, camPos().z);
+        if (rnd() < dt * (tail < 0 ? 1.1 : 0.25)) sound("rumble");
+
+        /* ---- SHEDDING: what actually kills people ------------------------
+           Every standing structure sheds in proportion to how close it is to
+           coming down, so the debris field IS the damage readout — and the
+           strip of ground next to a wounded tower is where you die. */
+        const Q = qk();
+        if (Q && amp > 0.05) {
+          const f = ctx.arena.fragile;
+          for (let i = 0; i < f.length; i++) {
+            const b = f[i];
+            if (b.fallen) continue;
+            Q.shedTick(b, dt, { sev: qkSeverity(b), gain: Math.min(1.6, amp * 2.6), gy: b.gy });
+          }
+        }
+        qkTakeCover(dt, ctx);
+
+        // spaced-out collapses (slower cadence; only the capped subset falls)
+        ctx.st.next -= dt;
+        if (ctx.st.next <= 0 && ctx.st.order.length) {
+          ctx.st.next = tail < 0 ? (1.5 - 0.6 * (T / QK_MAIN)) : 2.6;
+          // through the ledger, never straight to collapse: a tower already
+          // spalled by an earlier disaster goes down on less than a fresh one
+          structureHit(ctx.st.order.pop(), 1.2, ctx, { kind: "quake" });
+        }
+        rattleProps(ctx, (tail < 0 ? 0.10 : 0.02) + 0.10 * ctx.intensity * (amp > 0.2 ? 1 : 0.1));
+
+        // surprise eruption part-way through (if this rupture went inland)
+        if (ctx.st.eruptArmed && !ctx.st.erupting) {
+          ctx.st.eruptAt -= dt;
+          if (ctx.st.eruptAt <= 0) { startEruption(ctx); qkChained++; }
+        }
+        tickEruption(dt, ctx);
+        tick0(ctx, dt);
+
+        // ---- THE MAINSHOCK STOPS, AND THE SECOND WAVE OF DEATHS STARTS ----
+        if (tail >= 0 && !ctx.st.aftermath) { ctx.st.aftermath = 1; qkAftermath(ctx); }
+        // AFTERSHOCKS re-shed the weakened, which is when the rest go down
+        if (tail >= 0) {
+          while (ctx.st.shockN < QK_SHOCKS.length && tail >= QK_SHOCKS[ctx.st.shockN]) {
+            ctx.st.shockN++;
+            sound("rumble");
+            const decay = 1 - (ctx.st.shockN - 1) * 0.3;
+            const f2 = ctx.arena.fragile;
+            for (let i = 0; i < f2.length; i++) {
+              const b = f2[i];
+              if (b.fallen) continue;
+              structureHit(b, 0.14 * decay * (0.6 + ctx.intensity), ctx, { kind: "aftershock" });
+              if (Q) Q.shed(b, { sev: qkSeverity(b), count: 2 + ((qkSeverity(b) * 7) | 0), gy: b.gy });
+            }
+          }
+        }
+
+        /* ---- THE HANDOFF -------------------------------------------------
+           The drawdown starts while the ground is still moving: the sea pulls
+           back over the aftershocks, and only then does the director hand the
+           run to the tsunami. Forcing while `dir.t` still has slack is what
+           keeps the director's own endActive() from running against a def it
+           has already retired — so this is the LAST thing active() does. */
+        if (ctx.st.chain === "tsunami" && tail > 2.5) {
+          const u = Math.min(1, (tail - 2.5) / 5.5);
+          surgeSet(-2.8 * ease(u));
+          if (tail > 9.5 && !ctx.st.handed && dir.t > 1.4 && CBZ.disasters && CBZ.disasters.force) {
+            ctx.st.handed = 1; qkChained++;
+            CBZ.disasters.force("flood");
+            return;
+          }
+        }
+      },
+      end(ctx) {
+        if (ctx.st.dust) { ctx.st.dust.dispose(); ctx.st.dust = null; }
+        endEruption(ctx);
+        qkStandAll();
+        if (qk()) { qk().hooks.structDamage = null; qk().end(); }
+        // an armed chain that never fired must not leave the sea sucked out
+        if (ctx.st.chain === "tsunami" && !ctx.st.handed) surgeSet(0);
+      },
+      threat(x, z, ctx) {
+        let t = 0.2; const f = ctx.arena.fragile;
+        // THE KILL ZONE IS THE FACADE. 8 m of a standing building is where the
+        // glass and the masonry land, and the bots' flee vector reads this.
+        for (let i = 0; i < f.length; i++) if (!f[i].fallen) { const d = Math.hypot(x - f[i].x, z - f[i].z); if (d < 8) t = Math.max(t, 0.9 * (1 - d / 8)); }
+        if (ctx.st.erupting) t = Math.max(t, eruptThreat(x, z, ctx));
+        return t;
+      },
+      safeDir(x, z, ctx) {
+        let bx = 0, bz = 0; const f = ctx.arena.fragile;
+        for (let i = 0; i < f.length; i++) if (!f[i].fallen) { const dx = x - f[i].x, dz = z - f[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } }
+        return (bx || bz) ? { x: bx, z: bz } : null;
+      },
+    };
   }
 
   // ---- earthquake / wildfire helpers ----
@@ -2084,87 +3205,186 @@
   }
 
   /* ============================================================
-     A HOLE HAS A BOTTOM (the sinkhole rebuild)
+     A HOLE HAS A BOTTOM — AND THE HOLE NOW LIVES IN world/groundshaft.js
 
-     CBZ.survHoles is the ONE published record of "the ground is gone here".
-     modes/survival.js's floorAt subtracts it, so the floor over a hole's mouth
-     really is the hole's floor and nothing else in the engine has to be told:
-     the player's own vertical physics drops them, the bots' terrain-follow
-     drops them, a car parked over it falls in. The kill is the LANDING, priced
-     off the depth, not a radius test on a painted disc.
+     This file used to OWN the shaft: a cylinder, a disc and a dark ring, 30
+     lines, welded to this arena's root and this mode's actor list. That is
+     exactly the shape city/tsunami.js's header warns about — a hazard built
+     against one mode's private geometry can never leave it, which is why the
+     main world (the one with the intersections, the parked cars and the
+     buildings that make the owner's reference photograph work) could not have
+     a sinkhole at all.
 
-     The mouth is deliberately a hair smaller than the visible rim (0.86 R), so
-     the edge you can see is an edge you can stand on — a hole whose lethal
-     footprint is wider than its picture is the same lie the black disc was.
+     `CBZ.groundShaft` / `CBZ.groundShaftCollapse` are that shaft, promoted and
+     rebuilt to the reference: sheer stratified walls that go black with depth,
+     a torn overhanging lip where the surface was sheared, a talus cone with
+     WEDGED VOID POCKETS at the floor, a spiral of ledges you can climb out on,
+     and a collapse that is a SEQUENCE (cracks → the core drops → the radius
+     grows and takes what is standing on it) instead of a pop.
+
+     CBZ.survHoles is still the ONE published record of "the ground is gone
+     here" and modes/survival.js's floorAt still subtracts it — groundshaft.js
+     ADOPTED that array rather than opening a second one, so this mode needed
+     no edit for any of it. What is left here is the roster entry: WHERE and
+     WHEN, which is the only part that is this file's business.
      ============================================================ */
-  const HOLE_MIN_D = 14, HOLE_VAR_D = 8;
-  CBZ.survHoles = [];
+  CBZ.survHoles = CBZ.survHoles || [];
+  const HOLE_MIN_D = 14, HOLE_VAR_D = 8;   // legacy fallback depth (no groundshaft.js)
+  // Degrade-safe: with world/groundshaft.js absent the roster still runs, it
+  // just gets the old plain shaft back instead of the stratified one.
   function openHole(ctx, x, z, r) {
-    const gy = floor(x, z);
-    const depth = HOLE_MIN_D + rnd() * HOLE_VAR_D;
-    const bottom = gy - depth;
+    if (CBZ.groundShaft) {
+      return CBZ.groundShaft(x, z, { r: r, depth: r * 4.2, surface: "soil" });
+    }
+    const gy = floor(x, z), depth = HOLE_MIN_D + rnd() * HOLE_VAR_D, bottom = gy - depth;
     const grp = new THREE.Group();
-    // the shaft: an open-ended cylinder seen from inside, plus a floor of
-    // rubble-brown. DoubleSide so the walls read from above AND from in it.
     const wall = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.78, depth, 20, 1, true),
       new THREE.MeshLambertMaterial({ color: 0x3a2b1e, side: THREE.DoubleSide }));
     wall.position.y = gy - depth / 2;
-    const floorM = new THREE.Mesh(new THREE.CircleGeometry(r * 0.78, 20),
-      new THREE.MeshLambertMaterial({ color: 0x1a120c }));
+    const floorM = new THREE.Mesh(new THREE.CircleGeometry(r * 0.78, 20), new THREE.MeshLambertMaterial({ color: 0x1a120c }));
     floorM.rotation.x = -Math.PI / 2; floorM.position.y = bottom + 0.05;
-    // a dark mouth ring so the opening reads from a distance without being a
-    // flat black lid over live geometry
-    const lip = new THREE.Mesh(new THREE.RingGeometry(r * 0.86, r * 1.12, 24),
-      new THREE.MeshBasicMaterial({ color: 0x1e150e, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
-    lip.rotation.x = -Math.PI / 2; lip.position.y = gy + 0.06; lip.renderOrder = 4;
-    grp.add(wall, floorM, lip);
+    grp.add(wall, floorM);
     grp.position.set(x, 0, z);
     root().add(grp);
-    // spoil thrown up around the rim as it collapses
-    for (let i = 0; i < 10; i++) {
-      const a = rnd() * 6.28, d = r * (0.9 + rnd() * 0.5);
-      CBZ.fx.dropDebris({ x: x + Math.cos(a) * d, z: z + Math.sin(a) * d, fromY: gy + 1.2, vy: 3 + rnd() * 3, size: 0.5 + rnd() * 0.9, color: 0x4a3626, keep: true });
-    }
     if (CBZ.shake) CBZ.shake(0.3);
     sound("collapse");
     const h = { x, z, r, mouth: r * 0.86, gy, bottom, depth, grp, seen: {} };
     CBZ.survHoles.push(h);
     return h;
   }
+  /* THE COLLAPSE, STAGED. One call per sinkhole and the primitive drives its
+     own arc; all this passes is the seam only this file can supply — the
+     ENTRAINMENT of the arena's own cars, through the flingCar this file
+     already owns, aimed inward and down. */
+  function stageHole(ctx, x, z, r) {
+    if (!CBZ.groundShaftCollapse) { return { x: x, z: z, r: r, legacy: openHole(ctx, x, z, r) }; }
+    return CBZ.groundShaftCollapse(x, z, {
+      r: r, depth: r * 4.2, surface: "soil",
+      warnSecs: 3.4, growSecs: 4.2,
+      entrain(hx, hz, hr) {
+        const cars = ctx.arena.cars || [];
+        for (let i = 0; i < cars.length; i++) {
+          const c = cars[i];
+          if (!c || c.flung || !c.group) continue;
+          const dx = c.group.position.x - hx, dz = c.group.position.z - hz;
+          const d = Math.hypot(dx, dz);
+          if (d > hr * 1.15) continue;
+          const m = d || 1;
+          flingCar(c, -dx / m, -dz / m, 5 + rnd() * 4, -3);   // inward and DOWN
+        }
+      },
+    });
+  }
+  /* WHERE A SINKHOLE MAY OPEN. The law lives in world/groundshaft.js
+     (slope over the whole footprint, sampled off this arena's own ground) —
+     this only says how far apart they are and how big this round's is. A site
+     that fails is NOT relocated to somewhere flatter-looking: no site, no hole.
+     That is what keeps shaftAudit().holesOnSlopes at zero by construction. */
+  function sinkSite(ctx, warnSecs) {
+    if (!CBZ.groundShaftSite) {
+      const p = ctx.arena.randomPoint(0, ctx.R * 0.8);
+      const h = openHole(ctx, p.x, p.z, 4 + scale(2, ctx));
+      if (h) (ctx.st.holes = ctx.st.holes || []).push(h);
+      return null;
+    }
+    const r = 7 + scale(3.4, ctx);
+    const spec = {
+      cx: ctx.cx, cz: ctx.cz, R: ctx.R, r: r, rng: rnd, minDist: 14, tries: 90,
+      avoid(x, z) {
+        const S = CBZ.groundShafts || [];
+        for (let i = 0; i < S.length; i++) if (Math.hypot(x - S[i].x, z - S[i].z) < S[i].r + r + 12) return true;
+        const P = ctx.st.seqs || [];
+        for (let i = 0; i < P.length; i++) if (Math.hypot(x - P[i].x, z - P[i].z) < P[i].r + r + 12) return true;
+        /* THE BUILDINGS MUST BE STANDING AT THE LIP, NOT IN THE HOLE. That is
+           the whole read of the reference photograph — a tower whose footing
+           is inside the mouth is a floating tower, and this file's structural
+           ledger has no concept of "undermined". Close is the point; over is
+           the bug. */
+        const B = ctx.arena.fragile || [];
+        for (let i = 0; i < B.length; i++) {
+          const b = B[i];
+          const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+          if (bx == null) continue;
+          if (Math.hypot(x - bx, z - bz) < r * 0.85 + (b.w || 8) * 0.5) return true;
+        }
+        return false;
+      },
+    };
+    /* THE SLOPE LAW IS LAW; KEEPING CLEAR OF A BUILDING IS TASTE. If the
+       island cannot offer flat ground away from every tower, take flat ground
+       — a disaster that silently does nothing because its preferences went
+       unmet is worse than a hole beside a wall. The slope refusal is never
+       relaxed, which is what keeps holesOnSlopes at zero. */
+    let site = CBZ.groundShaftSite(spec);
+    if (!site) { spec.avoid = null; site = CBZ.groundShaftSite(spec); }
+    if (!site) return null;
+    const seq = stageHole(ctx, site.x, site.z, r);
+    if (seq && seq.warnSecs != null && warnSecs) seq.warnSecs = warnSecs;
+    if (seq) { (ctx.st.seqs = ctx.st.seqs || []).push(seq); (ctx.st.pending = ctx.st.pending || []).push(seq); }
+    return seq;
+  }
+  /* The minimap and the bot brain read ctx.st.holes / ctx.st.pending (this
+     file's own shapes). Promote a sequence from "pending" to "hole" the moment
+     its shaft actually exists — no second record, just the same object moving
+     lists as its state changes. */
+  function sinkSync(ctx) {
+    const P = ctx.st.pending || [], H = ctx.st.holes = ctx.st.holes || [];
+    for (let i = P.length - 1; i >= 0; i--) {
+      const s = P[i];
+      if (s && s.shaft) { P.splice(i, 1); if (H.indexOf(s.shaft) < 0) H.push(s.shaft); }
+    }
+  }
+  function sinkThreat(x, z, ctx, pad) {
+    let t = 0;
+    const H = ctx.st.holes || [], P = ctx.st.pending || [];
+    for (let i = 0; i < H.length; i++) { const h = H[i]; const d = Math.hypot(x - h.x, z - h.z); const R = h.r * pad + 5; if (d < R) t = Math.max(t, 1 - d / R); }
+    for (let i = 0; i < P.length; i++) { const p = P[i]; const d = Math.hypot(x - p.x, z - p.z); const R = p.r * pad + 6; if (d < R) t = Math.max(t, 0.9 * (1 - d / R)); }
+    return t;
+  }
+  function sinkSafeDir(x, z, ctx) {
+    let bx = 0, bz = 0;
+    const all = (ctx.st.holes || []).concat(ctx.st.pending || []);
+    for (let i = 0; i < all.length; i++) {
+      const h = all[i];
+      const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz);
+      if (d < h.r * 1.6 + 8 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; }
+    }
+    return (bx || bz) ? { x: bx, z: bz } : null;
+  }
   function tickHoles(dt, ctx) {
-    const holes = ctx.st.holes; if (!holes || !holes.length) return;
+    // the shaft primitive owns falling, crushing and burial on its own updater
+    // (order 28.6) in every mode; nothing is left to poll here.
+    if (!CBZ.groundShaft && ctx.st.holes) legacyHoleKill(ctx);
+  }
+  function legacyHoleKill(ctx) {
+    const holes = ctx.st.holes || [];
     surv().forEachActor(function (a) {
       for (let i = 0; i < holes.length; i++) {
         const h = holes[i];
-        if (Math.hypot(a.pos.x - h.x, a.pos.z - h.z) > h.mouth) continue;
-        // FALLING is a state, not an event. The floor is already gone under
-        // them (survHoles); all this does is notice the landing. The 1.6 m
-        // window is a frame budget, not a fudge: a body arriving at ~30 m/s
-        // covers 0.5 m per tick, so anything tighter can be stepped straight
-        // through between two runs of this pass. (survival has no fall damage
-        // — physics.js:993 — so this really is the only thing that kills you
-        // down here, and it must not be able to miss.)
-        if (a.pos.y <= h.bottom + 1.6) {
-          surv().hurt(a, 1e6, { cause: "swallowed by a sinkhole", fromX: h.x, fromZ: h.z });
-          if (a.isPlayer && CBZ.shake) CBZ.shake(1.0);
-        } else if (a.isPlayer && a.pos.y < h.gy - 2 && !h.seen.p) {
-          h.seen.p = 1;
-          if (CBZ.doSlowmo) CBZ.doSlowmo(0.45);          // the drop is the beat
-          if (CBZ.shake) CBZ.shake(0.4);
-        }
+        if (!h || h.legacy === undefined && h.mouth == null) continue;
+        const hh = h.legacy || h;
+        if (Math.hypot(a.pos.x - hh.x, a.pos.z - hh.z) > hh.mouth) continue;
+        if (a.pos.y <= hh.bottom + 1.6) surv().hurt(a, 1e6, { cause: "swallowed by a sinkhole", fromX: hh.x, fromZ: hh.z });
         return;
       }
     });
   }
+  /* THE HOLE STAYS. A sinkhole that heals when the round timer runs out is the
+     same lie the black disc was — the ground does not come back. The shafts are
+     disposed by the primitive when the MATCH resets (the director empties
+     CBZ.survHoles, which is groundshaft.js's own reset signal), not when the
+     disaster ends. All this closes is the telegraph. */
   function closeHoles(ctx) {
-    const holes = ctx.st.holes || [];
-    for (let i = 0; i < holes.length; i++) {
-      const h = holes[i];
-      const k = CBZ.survHoles.indexOf(h);
-      if (k >= 0) CBZ.survHoles.splice(k, 1);
-      if (h.grp) { h.grp.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(h.grp); }
+    if (!CBZ.groundShaft) {
+      const holes = ctx.st.holes || [];
+      for (let i = 0; i < holes.length; i++) {
+        const h = holes[i].legacy || holes[i];
+        const k = CBZ.survHoles.indexOf(h);
+        if (k >= 0) CBZ.survHoles.splice(k, 1);
+        if (h.grp) { h.grp.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(h.grp); }
+      }
     }
-    holes.length = 0;
+    (ctx.st.holes || []).length = 0;
   }
 
   /* ---- SKY STREAKS: the meteor shower's real warning -----------------------
@@ -2387,6 +3607,13 @@
       const og = A.ocean && A.ocean.geometry && A.ocean.geometry.userData.waterDisasterGrid;
       const mode = om && om.userData && om.userData.waterMode;
       const U = om && om.userData && om.userData.waterUniforms;
+      const dbg = st.debris ? st.debris.stats() : null;
+      const refuges = { total: 0, standing: 0, swept: 0 };
+      for (let i = 0; i < A.fragile.length; i++) {
+        const b = A.fragile[i];
+        if (b.h >= 12) { refuges.total++; if (!b.fallen) refuges.standing++; }
+        else if (b.fallen) refuges.swept++;
+      }
       return {
         ok: true, active: dir.curId === "flood", directorState: dir.state, phase: st.phase || null,
         eventOwner: ev && ev.owner, eventPhase: ev && ev.phase,
@@ -2405,6 +3632,24 @@
         amp: U ? U.uDisasterAmp.value : null, chop: U ? U.uDisasterChop.value : null,
         seaTime: U ? U.uSeaTime.value : null,
         privateSurfaces: root && CBZ.surv.arena.root.getObjectByName("tsunami-inundation-surface") ? 1 : 0,
+        /* ---- THE SCARY WATER: turbidity, the load it is carrying, and the
+           pull on the way out. Every one of these is read off live state, so a
+           run that never entrained anything reports zeros and cannot be
+           mistaken for a run that did. ---- */
+        faceShared: !!(CBZ.CONFIG.TSU_FACE_V2 !== false && st.face),
+        sediment: st.sediment != null ? +(+st.sediment).toFixed(3) : 0,
+        shaderSediment: U && U.uDwSediment ? +U.uDwSediment.value.toFixed(3) : null,
+        shoal: st.shoal != null ? +(+st.shoal).toFixed(3) : null,
+        debrisEntrained: dbg ? dbg.entrained : 0,
+        debrisLive: dbg ? dbg.live : 0,
+        debrisStrikes: dbg ? dbg.strikes : 0,
+        debrisKills: dbg ? dbg.kills : 0,
+        undertowPull: st.undertow != null ? +(+st.undertow).toFixed(2) : 0,
+        undertowSecs: st.undertowT != null ? +(+st.undertowT).toFixed(2) : 0,
+        // the refuge invariant, as a NUMBER: tall frames the wave may wound
+        // but may never take down, because they are the answer to the event
+        refugesStanding: refuges.standing, refugesTotal: refuges.total,
+        lightSwept: refuges.swept,
       };
     },
     // the name of the disaster that JUST finished, while its short "it's
@@ -2424,8 +3669,9 @@
         if (!warn && st.x != null) out.push({ x: st.x, z: st.z, r: 18 });
       } else if (id === "volcano") {
         const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 });
+        pushEruptHazards(st, out);
       } else if (id === "quake") {
-        if (st.erupting) { const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 }); }
+        if (st.erupting) { const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 }); pushEruptHazards(st, out); }
       } else if (id === "storm") {
         (st.pending || []).forEach((p) => out.push({ x: p.x, z: p.z, r: 5 }));
       } else if (id === "meteor") {
@@ -2500,8 +3746,15 @@
     // PRIVATE RAIN: the four disasters that used to each own a rain/snow cloud
     // now own none. `st.rain` / `st.snow` are the exact fields they used.
     const privateRain = (st.rain ? 1 : 0) + (st.snow ? 1 : 0);
+    // ONE read of the debris field, so every number below is from the same
+    // instant rather than from two calls that could straddle a strike
+    const dbgT = st.debris ? st.debris.stats() : null;
     // PRIVATE SWIM: the deleted player solve set these two on CBZ.player.
     const privateSwim = (CBZ.player && CBZ.player._tsuSwim ? 1 : 0);
+    // the sinkhole's own ratchet, exported by world/groundshaft.js
+    const shaftA = CBZ.shaftAudit ? CBZ.shaftAudit() : null;
+    // the volcano's own ratchet, exported by world/volcanofx.js
+    const volA = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
     const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
     return {
       // ---- SHOW DON'T TELL: lines this run actually spoke ----
@@ -2519,6 +3772,23 @@
       surge: CBZ.waterSurge ? +CBZ.waterSurge().toFixed(3) : 0,
       // ---- ONE SWIM ----
       privateSwim: privateSwim,
+      /* ---- THE TSUNAMI'S FOUR: what the water was carrying, what it hit
+         with, how dirty it was and how hard it pulled on the way out. Zero
+         unless a tsunami is actually running, which is the point.
+
+         THE `tsu` PREFIX IS LOad-BEARING, and it was earned: the first version
+         of these called themselves `debrisEntrained`/`debrisKills`, and a
+         sibling disaster in this same object literal already publishes a
+         `debrisKills` of its own further down. Later key wins in a JS object,
+         so the tsunami's number was silently replaced by the earthquake's and
+         the audit reported 0 debris kills on a run that had just made one.
+         One shared audit means one shared namespace. */
+      tsuDebrisEntrained: dbgT ? dbgT.entrained : 0,
+      tsuDebrisStrikes: dbgT ? dbgT.strikes : 0,
+      tsuDebrisKills: dbgT ? dbgT.kills : 0,
+      tsuUndertowPull: st.undertow != null ? +(+st.undertow).toFixed(2) : 0,
+      tsuSediment: st.sediment != null ? +(+st.sediment).toFixed(3) : 0,
+      tsuKitShared: !!(CBZ.tsuFaceBuild && CBZ.tsuDebrisField),
       swimShared: !!(CBZ.CONFIG.SURV_SHARED_SWIM !== false && CBZ.citySwimState && CBZ.survSeaHeightAt),
       swimming: !!(sw && sw.swimming),
       breath: sw && sw.breath != null ? sw.breath : null,
@@ -2531,6 +3801,75 @@
       // ---- the sinkhole actually has a bottom ----
       openHoles: CBZ.survHoles ? CBZ.survHoles.length : 0,
       holeDepth: CBZ.survHoles && CBZ.survHoles.length ? +CBZ.survHoles[0].depth.toFixed(1) : 0,
+      /* THE SHAFT IS SHARED NOW — world/groundshaft.js owns it and the numbers
+         that matter are ITS invariants, re-exported here so one audit call
+         still answers for the whole roster. holesOnSlopes is the owner's law
+         ("sinkholes should only happen on the ground not on sides of mountain")
+         measured on live shafts, and it may only ever read 0. deepOverWide is
+         the reference photograph as arithmetic: a shaft, not a crater. */
+      /* ---- THE STRATOVOLCANO ----
+         `lavaOpaque` is the owner's complaint as a boolean, and it is measured
+         off the LIVE materials by world/volcanofx.js (volcanoAudit walks every
+         live lava mesh and counts transparent/additive ones). `lavaLegacy`
+         counts additive stream boxes this run actually built — 0 unless a flag
+         was reverted. `nukeUsedNukefx` is asked of city/nukefx.js's own live
+         state, so "the finale drew the real mushroom" is a measurement and not
+         a claim about which function got called. */
+      volcanoV2: CBZ.CONFIG.VOLCANO_V2 !== false && !!CBZ.volcanoFx,
+      lavaOpaque: volA ? !!volA.lavaOpaque : true,
+      lavaTransparent: volA ? volA.lavaTransparent : 0,
+      lavaFlows: volA ? volA.lavaFlows : 0,
+      lavaLegacy: lavaLegacy,
+      pyroRuns: pyroRuns,
+      pyroLive: volA ? volA.pyroLive : 0,
+      laharRuns: laharRuns,
+      ashRoofCollapses: ashRoofCollapses,
+      // the two numbers that say WHY a roof did or did not go: how many roofs
+      // are actually carrying a load, and the heaviest load any of them has
+      ashRoofs: (st.erRoofs && st.erRoofs.length) || 0,
+      ashRoofMax: (function () {
+        const R = st.erRoofs, A = st.erAshLoad;
+        if (!R || !A) return 0;
+        let m = 0;
+        for (let i = 0; i < R.length; i++) m = Math.max(m, A.roofDepth(R[i].id));
+        return +m.toFixed(3);
+      })(),
+      ashPeakDepth: volA ? volA.ashPeakDepth : 0,
+      volcanoLights: volA ? volA.lights : 0,
+      nukeUsedNukefx: nukeFxRuns > 0,
+      nukeFxRuns: nukeFxRuns,
+      nukeWhiteouts: whiteouts,
+      cameraFar: CBZ.camera ? Math.round(CBZ.camera.far) : 0,
+      shaftShared: !!CBZ.groundShaft,
+      holesOnSlopes: shaftA ? shaftA.holesOnSlopes : 0,
+      holeSlopeMax: shaftA ? shaftA.holeSlopeMax : 0,
+      holeDeepOverWide: shaftA ? shaftA.deepOverWide : 0,
+      cityShaftReady: shaftA ? shaftA.cityShaftReady : false,
+      shaftFalls: shaftA ? shaftA.falls : 0,
+      shaftCrushed: shaftA ? shaftA.crushed : 0,
+      shaftBuried: shaftA ? shaftA.buried : 0,
+      shaftVoidSaves: shaftA ? shaftA.voidSaves : 0,
+      /* ---- THE QUAKE KILLS WITH DEBRIS, NOT WITH THE SHAKE ----
+         Read straight off the shared core (systems/quake.js), so a build that
+         merely shakes the camera reads debrisSpawned 0 and cannot pass as this
+         feature. `chained` counts the handoffs this run actually made — the
+         earthquake→tsunami force() and the earthquake→eruption call — which is
+         the evidence that the big three are connected and not three unrelated
+         rows in a roster. `quakeShared` false means the core never loaded and
+         the def fell back to the pre-2026-08-03 quake (which still plays). */
+      debrisSpawned: qkNum("debrisSpawned"),
+      debrisKills: qkNum("debrisKills"),
+      debrisHits: qkNum("debrisHits"),
+      coverAnchors: qkNum("coverAnchors"),
+      coverSaves: qkNum("coverSaves"),
+      ducked: qkNum("ducked"),
+      gasFires: qkGasFires,
+      gasFiresShared: qkNum("gasFiresShared"),
+      linesDown: qkLines,
+      lineKills: qkNum("lineKills"),
+      chained: qkChained,
+      quakeShared: !!CBZ.quake,
+      quakeChain: CBZ.CONFIG.QUAKE_CHAIN !== false,
       // ---- context so a no-op run cannot pass as a migrated one ----
       mode: CBZ.game.mode, state: dir.state, current: dir.curId, phase: st.phase || null,
     };

@@ -1475,4 +1475,514 @@
     placeChest, chestNear, openChest, closeChest,
     chests() { return chests; },
   };
+
+  /* ============================================================================
+     CASH_BAGS_V1 — MONEY IS A PHYSICAL OBJECT.   [CBZ.cashBags]
+
+     OWNER (2026-08-02, verbatim): "realistic amounts of money — even 10s or
+     100s of millions can be in these things — in BAGS that the player can pick
+     up and throw (interaction options) and put into the back of a truck…
+     this is interaction/animation options and physical assets, not
+     choreographed mini-missions. gta is fake, you do the mini missions that
+     are choreographed — this is real."
+
+     WHAT WAS WRONG. Every score in this game ended in `CBZ.city.addCash(n)`.
+     You blew a vault door open and a NUMBER went up. Nothing left the room,
+     nothing was in your hands, nothing could be dropped, stolen back, burned,
+     or loaded into anything. The armoured truck came closest — it spills real
+     duffel meshes on the tarmac — and then `grabLoot` walks over them and
+     converts them to wallet cash on contact, which is the same abstraction
+     wearing a mesh.
+
+     THE LAW HERE: a bag is a THING IN THE WORLD with a value riding on it.
+     It exists before you touch it, it exists after you drop it, it is still
+     there when you come back, and nothing anywhere auto-banks it. The ONLY
+     ways its value re-enters the wallet are a deliberate `deposit()` (a bank
+     counter) and, in a later wave, a warehouse that counts what you stored.
+
+     THE LEDGER IS STILL city/shops.js's CBZ.cityTill AND THAT IS THE WHOLE
+     NON-MINTING ARGUMENT. A bag is SPAWNED by a caller that has already
+     `take()`n the money out of a real balance — the vault is poorer by exactly
+     what is now sitting on its floor in canvas. `payout()` below is the one
+     call every such caller makes, so no site ever chooses between "physical"
+     and "abstract" again: under the bag threshold it is notes in your pocket
+     (a teller drawer IS notes in your pocket), over it, it is bags.
+
+     THE CARRY IS A REAL COST, and it is expressed in verbs the game already
+     owns rather than a new stat: you carry ONE duffel, it goes over your
+     shoulder on the real rig, you CANNOT SPRINT with it (`P.sprint = false`,
+     the exact line city/death.js writes for a blown leg), and RAISING A GUN
+     DROPS IT — a man cannot shoulder a rifle and a duffel at the same time.
+     That last rule is what makes a vault run a decision instead of a walk.
+
+     WHY *RAISING*, NOT *CARRYING*, A GUN. The first draft refused the pickup
+     while `cityHasGun()` was true, and that is a SOFT-LOCK: nothing in this
+     game gives the player a holster key — `g.cityHolstered` is written only by
+     wanted.js's surrender and by cinematics.js — so an armed player (i.e. any
+     player who just blew a vault) could never have picked a bag up at all. The
+     honest gate is the ACTION, not the inventory: `CBZ.isAimingWeapon()` is
+     something you are doing this frame and can stop doing, so the cost is a
+     decision instead of a wall.
+
+     COST: bags are few by construction (a vault materialises at most
+     BAG_CAP_ROOM of them) and the tick early-outs on an empty list. Thrown
+     bags integrate ballistically for the second or so they are in the air and
+     then go inert — no physics body, no per-frame cost once landed.
+     ========================================================================== */
+  const CFGB = CBZ.CONFIG || (CBZ.CONFIG = {});
+  if (CFGB.CASH_BAGS_V1 == null) CFGB.CASH_BAGS_V1 = true;
+  // Below this, money is NOTES IN YOUR HAND (a teller drawer, a register, a
+  // wallet off a corpse) and goes straight to the wallet exactly as it always
+  // did. At or above it, money is too bulky to pocket and becomes a BAG. The
+  // number is the physical fact, not a taste: $25,000 in used $20s is ~1.25 kg
+  // and about the volume of a house brick — the last amount a person plausibly
+  // walks out with in a jacket.
+  const BAG_MIN = 25000;
+  // What one duffel physically holds. $1M in $100 bills is ~10 kg and ~12 L;
+  // a 60 L holdall therefore tops out near $5M in hundreds and rather less in
+  // circulated fifties and twenties, which is what a bank vault actually
+  // stores. $500k is the honest working figure for a mixed-denomination bag.
+  const BAG_FILL = 500000;
+  // ...but a room full of duffels is a room full of draw calls, so a single
+  // haul is capped at this many bags and the per-bag value grows past
+  // BAG_FILL when it has to. A $20M reserve is 18 fat bags, not 40 thin ones.
+  const BAG_CAP_ROOM = 18;
+  const BAG_CAP_WORLD = 90;              // citywide ceiling on live bags
+  const BAG_REACH = 2.4;                 // how close you stand to pick one up
+  const THROW_V = 8.4, THROW_UP = 3.6;   // a two-handed heave, m/s
+  const BAG_G = 18.0;                    // the game's chunky gravity, not 9.81
+
+  const BAGS = [];
+  let _bagId = 1, _carried = null, _bagPose = false;
+  const BAG_TALLY = { spawned: 0, value: 0, picked: 0, thrown: 0, deposited: 0, lost: 0, dyed: 0 };
+
+  function bagsOn() { return CFGB.CASH_BAGS_V1 !== false; }
+  function fmtB(n) { return "$" + Math.round(n || 0).toLocaleString("en-US"); }
+
+  /* THE CARRY POSE, registered into the SHARED pose registry rather than
+     written as arm math here — entities/poses.js owns the vocabulary and
+     `CBZ.setCharPose` is the one entry point both peds.js and the packages
+     use. A duffel over the right shoulder: the right arm comes up and across
+     to grip the handle at the collarbone, the left hangs low and steadies the
+     bag's flank. Degrade-safe: no poses.js, no pose, and the bag still rides
+     the torso. */
+  function ensureHaulPose() {
+    const P = CBZ.charPoses;
+    if (!P || P.haul) return;
+    // (registered at LOAD, below — a pose that only appears once somebody has
+    // already picked a bag up is a pose the first pickup renders without.)
+    const damp = function (c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); };
+    P.haul = function (ch, dt) {
+      const J = ch.low || {}, r = 14;
+      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
+      // right arm reaches UP and IN to the strap on the shoulder
+      if (ra) { ra.rotation.x = damp(ra.rotation.x, -1.55, r, dt); ra.rotation.z = damp(ra.rotation.z, 0.62, r, dt); }
+      if (J.ra) J.ra.rotation.x = Math.min(0, damp(J.ra.rotation.x, -1.55, r, dt));
+      // left arm low and slightly out, taking the swing of the load
+      if (la) { la.rotation.x = damp(la.rotation.x, -0.22, r, dt); la.rotation.z = damp(la.rotation.z, -0.28, r, dt); }
+      if (J.la) J.la.rotation.x = Math.min(0, damp(J.la.rotation.x, -0.34, r, dt));
+    };
+  }
+  // entities/poses.js loads far above this file (index.html 412 vs 1026), so the
+  // registry is there at parse and the vocabulary is complete before the first
+  // body ever asks for it.
+  ensureHaulPose();
+
+  // the mesh. `dyed` swaps the canvas for the ruined red a burst pack leaves.
+  function bagMesh(bag) {
+    let m = null;
+    if (CBZ.itemAsset) {
+      try {
+        m = CBZ.itemAsset(null, null, {
+          kind: "moneybag",
+          canvas: bag.dyed ? 0x7a2a26 : (bag.tone != null ? bag.tone : 0x2f3a2c),
+          note: bag.dyed ? 0x8c4a44 : 0x6fae5a,
+          flash: bag.flash != null ? bag.flash : 0xc9a227,
+        });
+      } catch (e) { m = null; }
+    }
+    if (!m) {
+      // degrade: still a real bag-shaped object, never an invisible pickup
+      m = new THREE.Group();
+      const mat = sharedMat(bag.dyed ? "bagdye" : "bagcanvas", bag.dyed ? 0x7a2a26 : 0x2f3a2c);
+      propBox(m, 0.34, 0.30, 0.72, mat, 0, 0.16, 0);
+      propBox(m, 0.20, 0.05, 0.20, sharedMat("bagstrap", 0x171a16), 0, 0.36, 0);
+    }
+    // A FAT BAG IS A BIGGER BAG. Log-scaled so a $5M sack reads heavier than a
+    // $60k one without a $20M one becoming a shipping container.
+    const k = Math.max(0.86, Math.min(1.30, 0.86 + 0.13 * Math.log10(Math.max(1, bag.amount) / 50000 + 1) * 2));
+    m.userData._bagScale = k;
+    m.scale.setScalar(k);
+    m.userData.transient = true;
+    m.userData._cashBag = bag.id;
+    return m;
+  }
+  function disposeBagMesh(mesh) {
+    if (!mesh) return;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    mesh.traverse(function (o) {
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) o.geometry.dispose();
+      if (o.material && !o.material._shared && o.material.dispose) o.material.dispose();
+    });
+  }
+  function reskin(bag) {
+    const wasCarried = !!bag.carried;
+    const parent = bag.mesh && bag.mesh.parent;
+    disposeBagMesh(bag.mesh);
+    bag.mesh = bagMesh(bag);
+    if (wasCarried) mountOnBody(bag);
+    else if (parent) { parent.add(bag.mesh); seatMesh(bag); }
+    else { const root = arenaRoot(); if (root) { root.add(bag.mesh); seatMesh(bag); } }
+  }
+  function seatMesh(bag) {
+    if (!bag.mesh) return;
+    bag.mesh.position.set(bag.x, bag.y, bag.z);
+    bag.mesh.rotation.set(0, bag.rot || 0, 0);
+    const k = bag.mesh.userData._bagScale || 1;
+    bag.mesh.scale.setScalar(k);            // back in world metres
+  }
+  /* Ride the real rig's torso: the duffel sits on the RIGHT SHOULDER and leans
+     back across the spine, which is what a shouldered holdall does.
+
+     THE SHOULDER IS SOLVED, NOT TYPED. `ch.body`'s local origin is not the
+     chest and is not the same height on every rig (character.js builds from a
+     per-body `profile`, and a child rig is a different animal entirely), so a
+     hand-picked local offset put the bag on the FLOOR at the model's feet on
+     the first plate. The arm pivot `ch.parts.ra` IS the shoulder by
+     construction, so we ask where it is in world space and convert into the
+     host's frame — which is proportion-invariant and needs no rig table. */
+  const _mv = new THREE.Vector3(), _mp = new THREE.Vector3(), _mq = new THREE.Quaternion(), _ms = new THREE.Vector3();
+  function mountOnBody(bag) {
+    const ch = CBZ.playerChar;
+    const host = (ch && ch.body) || (ch && ch.group) || null;
+    if (!host || !bag.mesh) return false;
+    host.add(bag.mesh);
+    /* FORCE THE WHOLE RIG'S MATRICES FROM THE ROOT, not from the host. THREE's
+       `updateMatrixWorld` recomputes a node from `this.parent.matrixWorld` and
+       takes that as given — so calling it on `ch.body` while `ch.model`'s own
+       world matrix is still identity (a rig built this frame and never yet
+       rendered) silently reads the scale as 1. That is not hypothetical: it is
+       exactly what made the first two attempts at this mount look untouched. */
+    if (ch.group) ch.group.updateMatrixWorld(true); else host.updateMatrixWorld(true);
+    /* THE RIG'S INNER FRAME IS NOT METRES, AND THIS IS THE TRAP.
+       entities/character.js:720 does `model.scale.setScalar(humanScale)` — the
+       node's own comment calls it "the metre conversion" — so EVERYTHING under
+       `ch.model`, `ch.body` included, lives in a 0.70x space. A 0.76 m duffel
+       parented there rendered as a 0.3 m green blob beside the character's ear,
+       and no amount of nudging the offset would have fixed it, because the
+       UNITS were wrong rather than the position. `group.userData.humanScale` is
+       the repo's own published answer (character.js:618, read the same way at
+       :1394 and :1630); the matrix decomposition behind it covers a rig that
+       was scaled by something other than that node. */
+    host.matrixWorld.decompose(_mp, _mq, _ms);
+    const declared = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0;
+    const hostScale = declared > 0.01 ? declared : (Math.abs(_ms.x) > 1e-4 ? _ms.x : 1);
+    const k = (bag.mesh.userData._bagScale || 1) / hostScale;
+    bag.mesh.scale.setScalar(k);
+    const sh = ch && ch.parts && ch.parts.ra;
+    if (sh) {
+      sh.getWorldPosition(_mv);
+      host.worldToLocal(_mv);
+      // STRADDLE the joint, don't perch on top of it. The asset's origin is its
+      // BASE (the itemassets.js convention), so seating that base at shoulder
+      // height puts the whole bag ABOVE the shoulder. The offsets are in METRES
+      // and converted into the host's frame, for the same reason as the scale.
+      // OUTBOARD IS A SIGN, NOT A CONSTANT. Which way `+x` points from the
+      // torso's origin depends on the rig's own frame, so pushing a fixed
+      // +0.20 put the duffel through the middle of the character's chest.
+      // Reading the sign off the shoulder joint itself works on any rig and
+      // on either arm.
+      const side = _mv.x >= 0 ? 1 : -1;
+      bag.mesh.position.set(_mv.x + side * 0.12 / hostScale,
+                            _mv.y - 0.34 / hostScale,
+                            _mv.z - 0.20 / hostScale);
+    } else {
+      bag.mesh.position.set(0.30 / hostScale, 0.95 / hostScale, -0.10 / hostScale);
+    }
+    // long axis (Z) runs fore-and-aft down the back, tipped so the mass hangs
+    bag.mesh.rotation.set(0.08, -0.20, -0.46);
+    return true;
+  }
+
+  /* SPAWN — put `amount` dollars on the ground/shelf at (x,y,z). The CALLER
+     has already moved the money out of a real balance; this file never mints.
+     opts: {src, srcName, tone, flash, rot, dyed} */
+  function bagSpawn(x, y, z, amount, opts) {
+    if (!bagsOn()) return null;
+    amount = Math.max(0, Math.round(amount || 0));
+    if (amount <= 0) return null;
+    if (BAGS.length >= BAG_CAP_WORLD) return null;
+    opts = opts || {};
+    const bag = {
+      id: "bag" + (_bagId++), amount: amount, x: x, y: y, z: z,
+      rot: opts.rot != null ? opts.rot : ((x * 7.13 + z * 3.71) % 6.2832),
+      src: opts.src || null, srcName: opts.srcName || "cash",
+      tone: opts.tone, flash: opts.flash, dyed: !!opts.dyed,
+      carried: false, held: false, vy: 0, vx: 0, vz: 0, air: false, mesh: null,
+    };
+    bag.mesh = bagMesh(bag);
+    const root = arenaRoot() || CBZ.scene;
+    if (root) { root.add(bag.mesh); seatMesh(bag); }
+    BAGS.push(bag);
+    BAG_TALLY.spawned++; BAG_TALLY.value += amount;
+    return bag;
+  }
+
+  /* PAYOUT — THE ONE CALL every score makes. It is what stops each site
+     choosing for itself between "physical" and "a number", and it is why the
+     teller drawer and the reserve vault can share one line of code.
+     Returns {bags:[…], cash:N} so a caller can say what happened. */
+  function bagPayout(x, y, z, amount, opts) {
+    amount = Math.max(0, Math.round(amount || 0));
+    const out = { bags: [], cash: 0, total: amount };
+    if (amount <= 0) return out;
+    opts = opts || {};
+    if (!bagsOn() || amount < (opts.min != null ? opts.min : BAG_MIN)) {
+      // notes in your hand — the shipped path, byte-identical.
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amount); else g.cash = (g.cash || 0) + amount;
+      out.cash = amount;
+      return out;
+    }
+    const cap = Math.max(1, Math.min(BAG_CAP_ROOM, opts.cap || BAG_CAP_ROOM));
+    const n = Math.max(1, Math.min(cap, Math.ceil(amount / BAG_FILL)));
+    const per = Math.floor(amount / n);
+    let left = amount;
+    for (let i = 0; i < n; i++) {
+      const a = (i === n - 1) ? left : per;
+      left -= a;
+      // deterministic scatter around the drop point (a build path must never
+      // draw on Math.random — CLAUDE.md's determinism law).
+      const h = CBZ.hash01 ? CBZ.hash01(x + i * 0.37, z - i * 0.53, "cashbag") : ((i * 0.137) % 1);
+      const h2 = CBZ.hash01 ? CBZ.hash01(x - i * 0.71, z + i * 0.29, "cashbag2") : ((i * 0.311) % 1);
+      const ang = h * 6.2832, rad = (opts.spread != null ? opts.spread : 1.6) * (0.35 + h2 * 0.65);
+      const bx0 = x + Math.cos(ang) * rad, bz0 = z + Math.sin(ang) * rad;
+      const b = bagSpawn(bx0, opts.onFloor === false ? y : (CBZ.floorAt ? floorY(bx0, bz0) : y), bz0, a, opts);
+      if (b) out.bags.push(b); else { out.cash += a; if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(a); }
+    }
+    return out;
+  }
+
+  function bagNearest(px, pz, reach, py) {
+    if (!bagsOn() || !BAGS.length) return null;
+    const r = reach || BAG_REACH, r2 = r * r;
+    let best = null, bd = r2;
+    for (let i = 0; i < BAGS.length; i++) {
+      const b = BAGS[i];
+      if (b.carried || b.air) continue;
+      if (py != null && Math.abs(b.y - py) > 2.4) continue;
+      const dx = b.x - px, dz = b.z - pz, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+
+  function bagPickup(bag) {
+    if (!bagsOn() || !bag || bag.carried) return false;
+    if (_carried) { note("You've already got a bag on your shoulder — put it down first.", 1.8); return false; }
+    const P = CBZ.player; if (!P || P.dead) return false;
+    // A MAN CANNOT SHOULDER A RIFLE AND A DUFFEL. Lower the gun first — an
+    // action you can take, never a wall (see the header's soft-lock note).
+    if (CBZ.isAimingWeapon && CBZ.isAimingWeapon()) { note("Both hands. Lower the gun first.", 1.9); return false; }
+    if (bag.mesh && bag.mesh.parent) bag.mesh.parent.remove(bag.mesh);
+    bag.carried = true; bag.held = true; bag.air = false;
+    _carried = bag;
+    if (!mountOnBody(bag)) {
+      // no rig up (first person before the char exists): keep the record and
+      // re-mount on the next tick rather than dropping the money on the floor.
+      bag._needMount = true;
+    }
+    ensureHaulPose();
+    if (CBZ.setCharPose && CBZ.playerChar) { try { CBZ.setCharPose(CBZ.playerChar, "haul"); _bagPose = true; } catch (e) {} }
+    BAG_TALLY.picked++;
+    sfx("coin");
+    note("Hauling " + fmtB(bag.amount) + ". You can't sprint or shoot with this.", 2.2);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+
+  function releasePose() {
+    if (!_bagPose) return;
+    _bagPose = false;
+    if (CBZ.setCharPose && CBZ.playerChar) { try { CBZ.setCharPose(CBZ.playerChar, "stand"); } catch (e) {} }
+  }
+
+  // put the carried bag back into the world. `vel` makes it a THROW.
+  function bagRelease(vel, quiet) {
+    const bag = _carried;
+    if (!bag) return null;
+    const P = CBZ.player;
+    const yaw = (CBZ.cam && CBZ.cam.yaw) || 0;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const px = P ? P.pos.x : bag.x, pz = P ? P.pos.z : bag.z;
+    const py = P ? (P.pos.y || 0) : bag.y;
+    _carried = null;
+    bag.carried = false;
+    if (bag.mesh && bag.mesh.parent) bag.mesh.parent.remove(bag.mesh);
+    const root = arenaRoot() || CBZ.scene;
+    if (root && bag.mesh) root.add(bag.mesh);
+    releasePose();
+    if (vel) {
+      bag.x = px + fx * 0.7; bag.z = pz + fz * 0.7; bag.y = py + 1.15;
+      bag.vx = fx * THROW_V; bag.vz = fz * THROW_V; bag.vy = THROW_UP;
+      bag.air = true;
+      BAG_TALLY.thrown++;
+      if (!quiet) note("Heaved " + fmtB(bag.amount) + ".", 1.5);
+    } else {
+      bag.x = px + fx * 0.85; bag.z = pz + fz * 0.85;
+      bag.y = CBZ.floorAt ? floorY(bag.x, bag.z) : py;
+      bag.vx = bag.vy = bag.vz = 0; bag.air = false;
+      if (!quiet) note("Set down " + fmtB(bag.amount) + ".", 1.5);
+    }
+    seatMesh(bag);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return bag;
+  }
+
+  // CONSUME a bag into something else — a truck bed, a warehouse shelf, a
+  // stash. THE SEAM THE NEXT WAVE EATS: it returns the dollars and destroys
+  // the object, so a cargo hold can hold VALUE without this file knowing what
+  // a cargo hold is.
+  function bagTake(bag) {
+    if (!bag) return 0;
+    const amt = bag.amount | 0;
+    if (bag === _carried) { _carried = null; releasePose(); }
+    disposeBagMesh(bag.mesh);
+    bag.mesh = null; bag.amount = 0; bag.dead = true;
+    const i = BAGS.indexOf(bag); if (i >= 0) BAGS.splice(i, 1);
+    return amt;
+  }
+  // …and the ONE place a bag legitimately becomes wallet money: you handed it
+  // over a counter. Nothing calls this by walking near it.
+  function bagDeposit(bag) {
+    const amt = bagTake(bag);
+    if (amt > 0) {
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt); else g.cash = (g.cash || 0) + amt;
+      BAG_TALLY.deposited += amt;
+      sfx("coin");
+    }
+    return amt;
+  }
+  // A DYE PACK RUINS NOTES, IT DOES NOT DELETE THEM FROM THE UNIVERSE. The bag
+  // stays; it is worth less and it LOOKS ruined, which is the point.
+  function bagDye(bag, frac) {
+    if (!bag || bag.dyed) return 0;
+    const burn = Math.round(bag.amount * Math.max(0, Math.min(0.9, frac || 0.2)));
+    bag.amount = Math.max(0, bag.amount - burn);
+    bag.dyed = true;
+    BAG_TALLY.dyed++;
+    reskin(bag);
+    return burn;
+  }
+
+  function bagsClear() {
+    for (let i = BAGS.length - 1; i >= 0; i--) disposeBagMesh(BAGS[i].mesh);
+    BAGS.length = 0;
+    if (_carried) { _carried = null; releasePose(); }
+  }
+
+  // how much of a given source's money the player has physically had hold of.
+  // heists.js reads this instead of keeping its own abstract bag meter.
+  function bagsHeldFrom(src) {
+    let s = 0;
+    for (let i = 0; i < BAGS.length; i++) { const b = BAGS[i]; if (b.src === src && b.held) s += b.amount; }
+    return s;
+  }
+
+  let _bagElapsed = 0;
+  CBZ.onUpdate(37.42, function (dt) {
+    if (!bagsOn()) return;
+    // fresh-run rewind (the same g.elapsed trick armored.js/explosives.js use)
+    const el = g.elapsed || 0;
+    if (el + 0.001 < _bagElapsed) bagsClear();
+    _bagElapsed = el;
+    if (g.mode !== "city") { if (BAGS.length) bagsClear(); return; }
+    if (!BAGS.length) return;
+    const P = CBZ.player;
+    // ---- the carried bag ----------------------------------------------------
+    if (_carried) {
+      if (!P || P.dead) {
+        // you go down, the bag hits the deck where you did. It is not deleted:
+        // somebody can come back for it, and so can you.
+        bagRelease(false, true);
+      } else {
+        if (_carried._needMount && CBZ.playerChar) { if (mountOnBody(_carried)) _carried._needMount = false; }
+        // ENCUMBRANCE, expressed the way this codebase already expresses it
+        // (city/death.js's blown-leg line). No new stat, no new multiplier.
+        P.sprint = false;
+        // and RAISING the gun means the bag goes down — you chose the gun.
+        if (CBZ.isAimingWeapon && CBZ.isAimingWeapon()) {
+          note("Dropped the bag to bring the gun up.", 1.7);
+          bagRelease(false, true);
+        } else if (P.driving) {
+          // getting into a car with a duffel: it goes in with you (out of the
+          // world, into your hands) — the cargo wave gives it a boot to sit in.
+          bagRelease(false, true);
+        }
+      }
+    }
+    // ---- thrown bags: a second of ballistics, then inert --------------------
+    for (let i = 0; i < BAGS.length; i++) {
+      const b = BAGS[i];
+      if (!b.air) continue;
+      b.vy -= BAG_G * dt;
+      b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt;
+      const fy = CBZ.floorAt ? floorY(b.x, b.z) : 0;
+      if (b.y <= fy) {
+        b.y = fy; b.air = false; b.vx = b.vy = b.vz = 0;
+        sfx("thud");
+      }
+      seatMesh(b);
+    }
+  });
+
+  /* THE SEAM ANOTHER WAVE CONSUMES. Everything a truck bed, a plane hold or a
+     warehouse counter needs, and nothing it does not: list what exists, take
+     one out of the world for a value, and put one back. */
+  CBZ.cashBags = {
+    spawn: bagSpawn,
+    payout: bagPayout,
+    list: function () { return BAGS.slice(); },
+    count: function () { return BAGS.length; },
+    nearest: bagNearest,
+    pickup: bagPickup,
+    carried: function () { return _carried; },
+    drop: function () { return bagRelease(false, false); },
+    throw: function () { return bagRelease(true, false); },
+    take: bagTake,
+    deposit: bagDeposit,
+    dye: bagDye,
+    heldFrom: bagsHeldFrom,
+    clear: bagsClear,
+    value: function (b) { return b ? (b.amount | 0) : 0; },
+    // how loaded you are, 0..1 — for anything that wants to bend a number
+    // rather than read the boolean.
+    encumbrance: function () { return _carried ? Math.min(1, 0.55 + _carried.amount / 8e6) : 0; },
+    BAG_MIN: BAG_MIN, BAG_FILL: BAG_FILL,
+  };
+
+  /* RATCHET. `orphaned` is the honest failure mode of a physical-money system:
+     a bag whose mesh never made it into the scene is money the player can
+     never reach, and it is PINNED AT 0. `live`/`value` print beside it so a
+     "fix" that simply stops spawning bags cannot pass. `autoBanked` counts
+     dollars this file converted to wallet cash WITHOUT a deliberate deposit —
+     structurally 0, because the only such path is a sub-BAG_MIN payout, which
+     is counted separately as `pocketed`. */
+  CBZ.cashBagAudit = function () {
+    let live = 0, value = 0, orphaned = 0, carried = 0, dyed = 0;
+    for (let i = 0; i < BAGS.length; i++) {
+      const b = BAGS[i];
+      live++; value += b.amount;
+      if (!b.mesh || (!b.carried && !b.mesh.parent)) orphaned++;
+      if (b.carried) carried++;
+      if (b.dyed) dyed++;
+    }
+    return {
+      live: live, value: value, orphaned: orphaned, carried: carried, dyedLive: dyed,
+      spawned: BAG_TALLY.spawned, spawnedValue: BAG_TALLY.value,
+      picked: BAG_TALLY.picked, thrown: BAG_TALLY.thrown,
+      deposited: BAG_TALLY.deposited, dyed: BAG_TALLY.dyed,
+      cap: BAG_CAP_WORLD, bagMin: BAG_MIN, bagFill: BAG_FILL,
+      poseWired: !!(CBZ.charPoses && CBZ.charPoses.haul),
+    };
+  };
 })();

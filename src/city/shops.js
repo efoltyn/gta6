@@ -711,6 +711,10 @@
   if (CBZ.CONFIG.TILL_IS_BALANCE == null) CBZ.CONFIG.TILL_IS_BALANCE = true;
   if (CBZ.CONFIG.TILL_SAFE_POINTS == null) CBZ.CONFIG.TILL_SAFE_POINTS = true;
   if (CBZ.CONFIG.TILL_HIT_MEMORY == null) CBZ.CONFIG.TILL_HIT_MEMORY = true;
+  // ONE bank in the world is not a branch — see vaultTierOf() / reserveHolds().
+  // Off → every bank is an ordinary branch and the numbers are byte-identical
+  // to what shipped.
+  if (CBZ.CONFIG.TILL_RESERVE_VAULT == null) CBZ.CONFIG.TILL_RESERVE_VAULT = true;
 
   // LEGACY — the flat per-kind drawer. It is no longer the law: it survives
   // ONLY as (a) the membership test for "does this counter have a register at
@@ -1111,9 +1115,11 @@
     // rebuild, a loaded save, a fresh run resetting CBZ.now), so treat it as
     // never-robbed rather than trusting a stale reading.
     if (robbed != null && robbed > now) robbed = null;
+    // the vault's own cycle is a QUERY, not a constant: a reserve banks
+    // quarterly and a branch weekly (see vaultCycleH / the RESERVE header).
     const sched = pt === "register" ? boundary(now, dropHours(lot), lotPhase(lot, "tilldrop"))
                 : pt === "safe" ? boundary(now, bankHours(lot), lotPhase(lot, "tillbankph"))
-                : boundary(now, 24 * 7, lotPhase(lot, "tillvault"));
+                : boundary(now, vaultCycleH(lot), lotPhase(lot, "tillvault"));
     return robbed == null ? sched : Math.max(robbed, sched);
   }
   // which cash points does this place have?
@@ -1228,10 +1234,125 @@
   // single branch — which lands inside heists.js's own researched
   // $120k-$250k vault band. The research validates the derivation; it is no
   // longer the source of the number.
+  /* ==========================================================================
+     THE RESERVE — WHY ONE VAULT IN THE WORLD HOLDS TENS OF MILLIONS.
+
+     OWNER (2026-08-02): "realistic amounts of money — even 10s or 100s of
+     millions can be in these things."
+
+     A BRANCH cannot honestly hold that and this file already proves why: a
+     branch vault is the district's banked retail cash over a weekly pickup,
+     which lands at $120k-$250k, and that IS what a high-street branch holds.
+     Typing a bigger number on a branch would be the exact "dumb hardcoded
+     limit" the whole ledger exists to delete.
+
+     But a city does not only have branches. It has ONE cash-processing centre
+     — the place the armoured trucks actually drive to, where the notes of the
+     whole city sit between the tills and the shredder. That building can
+     honestly hold two orders of magnitude more, and the number is still
+     DERIVED from this ledger and nothing else.
+
+     THE DERIVATION, and it is checked two independent ways because a number
+     this big has to be defensible:
+
+       C = Σ over every district of districtCash(d).cash
+           = dollars of PHYSICAL CASH per average trading hour that the
+             businesses of this city take in. Every term is already in this
+             file and is already bounded by what the cohort sim spent.
+
+       (a) BY CYCLE. A cash centre banks on a quarterly armoured cycle, not a
+           weekly one, so it holds C × (24 × 90) average trading hours.
+       (b) BY FLOAT. Published US figures: currency in circulation (~$2.3T)
+           runs ~2.3x annual CASH retail sales (~$1T), and ~10-13% of currency
+           outstanding sits in Reserve Bank + commercial bank vaults rather
+           than in wallets and tills. So the vaulted note float is
+           C × 8760 × 2.3 × 0.12 = C × 2418.
+
+     (a) gives C × 2160 and (b) gives C × 2418 — within 12% of each other from
+     two unrelated anchors, which is the reason to believe either. We take the
+     CYCLE form, because it is the one that also has to be true of the refill:
+     empty the reserve and it takes a real quarter of the city's whole cash
+     intake to fill again. There is no cooldown here, exactly as there is none
+     anywhere else in this file — the emptiness IS the cooldown, and at this
+     scale the emptiness lasts.
+
+     WHAT THIS DOES *NOT* DO: it does not mint. Every dollar of C already
+     passed through a shop's drawer in this model, and the reserve is where
+     those dollars physically SIT afterwards. It also scales with the world
+     rather than with a constant: a 10x city (GAMEPLAN's scale pillar) has 10x
+     the shops, therefore 10x C, therefore a reserve in the hundreds of
+     millions — with no number in this file changed. The owner's upper figure
+     is a function of the map, not of a literal.
+     ========================================================================= */
+  const RESERVE_CYCLE_DAYS = 90;
+  // which cash cycle a vault runs on, in hours. A branch and a casino count
+  // room bank weekly; the reserve banks quarterly.
+  function vaultCycleH(lot) {
+    return vaultTierOf(lot) === "reserve" ? 24 * RESERVE_CYCLE_DAYS : 24 * 7;
+  }
+  // WHICH bank is the reserve. Deterministic and derived from the world, never
+  // authored: the biggest bank building in the city is its cash centre, ties
+  // broken by position hash so a seed always picks the same one. Cached per
+  // arena object, so a rebuild re-picks and a demolished reserve is re-elected.
+  let _resArena = null, _resLot = null;
+  function reserveLot() {
+    if (!CBZ.CONFIG.TILL_RESERVE_VAULT) return null;
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A) return null;
+    if (_resArena === A && _resLot && !_resLot.demolished) return _resLot;
+    _resArena = A; _resLot = null;
+    const lots = A.shopLots || A.lots || [];
+    let best = null, bw = -1;
+    for (let i = 0; i < lots.length; i++) {
+      const L = lots[i];
+      if (!L || L.demolished || L.kind !== "bank" || !L.building) continue;
+      // frontage is this file's own size measure; the hash is a stable
+      // tie-break, never a re-roll.
+      const w = frontage(L) + (CBZ.hash01 ? CBZ.hash01(L.cx, L.cz, "tillreserve") * 0.5 : 0);
+      if (w > bw) { bw = w; best = L; }
+    }
+    _resLot = best;
+    return _resLot;
+  }
+  // "branch" | "reserve" | "count" | "" — the ONE answer to "what grade of
+  // vault is this", so bank.js draws a strongroom or a blast-door cash centre
+  // off the same fact the money comes from.
+  function vaultTierOf(lot) {
+    if (!lot || lot._tillSpec) return "";
+    if (lot.kind === "casino") return "count";
+    if (lot.kind !== "bank") return "";
+    return (CBZ.CONFIG.TILL_RESERVE_VAULT && reserveLot() === lot) ? "reserve" : "branch";
+  }
+  // C — the city's physical cash intake, dollars per average trading hour.
+  // Summed over districts through the SAME districtCash() a branch vault and
+  // an armoured truck's load are derived from, so the three can never disagree.
+  function cityCashFlow() {
+    const A = CBZ.city && CBZ.city.arena, lots = (A && A.shopLots) || [];
+    const seen = {};
+    let c = 0;
+    for (let i = 0; i < lots.length; i++) {
+      const L = lots[i]; if (!L || L.demolished || !L.kind) continue;
+      const dk = tillDistrict(L);
+      if (seen[dk]) continue;
+      seen[dk] = 1;
+      c += districtCash(dk).cash;
+    }
+    return c;
+  }
+
   function vaultAmount(lot, hrs, fallback) {
     if (lot.kind !== "bank" && lot.kind !== "casino") return fallback;
     const A = CBZ.city && CBZ.city.arena, lots = (A && A.shopLots) || [];
     const dk = tillDistrict(lot);
+    if (vaultTierOf(lot) === "reserve") {
+      // THE CASH CENTRE. `hrs` is already integrated over the quarterly window
+      // (vaultCycleH), so this is C × the trading hours actually elapsed since
+      // the last pickup — the same arithmetic a branch runs, over a bigger
+      // scope and a longer cycle. A reserve you emptied yesterday is empty.
+      const c = cityCashFlow();
+      if (c > 0) return c * Math.max(0, hrs);
+      return fallback;
+    }
     if (lot.kind === "casino") {
       // THE CAGE / COUNT ROOM is the money players actually lost in this city:
       // sim/npcecon.js banks every cohort's entertainment spend into entPool,
@@ -1370,12 +1491,20 @@
     points: pointsOf, flow: flowOf, hits: hitsNow, districtCash: districtCash,
     districtOf: tillDistrict, demand: demandOf, clockReset: tillClockReset,
     now: absH,
+    // WHAT GRADE OF VAULT THIS IS, and the city-scale number behind it. Read by
+    // city/bank.js (a strongroom vs a cash centre — different door, different
+    // room, different guard) and city/casino.js (the count room). The MONEY and
+    // the ARCHITECTURE come from the same fact, so they can never disagree.
+    vaultTier: vaultTierOf,
+    reserveLot: reserveLot,
+    cityCashFlow: cityCashFlow,
+    vaultCycleH: vaultCycleH,
     // "when does this place next get cleared out on its own", in game hours —
     // exposed so a UI can say "bank run in 6 h" instead of inventing a timer.
     nextClear: function (lot, pt) {
       if (!lot || lot._tillSpec) return 0;
       const now = absH();
-      const per = pt === "safe" ? bankHours(lot) : pt === "vault" ? 24 * 7 : dropHours(lot);
+      const per = pt === "safe" ? bankHours(lot) : pt === "vault" ? vaultCycleH(lot) : dropHours(lot);
       const ph = lotPhase(lot, pt === "safe" ? "tillbankph" : pt === "vault" ? "tillvault" : "tilldrop");
       return boundary(now, per, ph) + per - now;
     },
@@ -1432,6 +1561,30 @@
       // the ledger's day clock, so a gate can say WHICH HOUR it measured at.
       // A $6 mean at 04:30 is correct; a $6 mean at 13:00 is a bug.
       hour: +(absH() % 24).toFixed(2),
+      // THE VAULT LADDER, as numbers, so "tens of millions" is a measurement
+      // and not a claim. `cityCashFlow` is C in the RESERVE header; `reserve`
+      // is what the cash centre holds RIGHT NOW (it fills over a quarter, so
+      // a freshly-built world reads a fraction of `reserveFull`); `branchHi`
+      // is the fattest ordinary branch, and the RATIO of the two is the whole
+      // point of the tier existing at all. NOT PINNED — measure and record.
+      cityCashFlow: Math.round(cityCashFlow()),
+      reserve: (function () { const L = reserveLot(); return L ? holds(L, { point: "vault" }).amount : 0; })(),
+      reserveFull: Math.round(cityCashFlow() * 24 * RESERVE_CYCLE_DAYS),
+      branchHi: (function () {
+        const A = CBZ.city && CBZ.city.arena, ls = (A && A.shopLots) || [];
+        let hi2 = 0;
+        for (let i = 0; i < ls.length; i++) {
+          const L = ls[i];
+          if (!L || L.kind !== "bank" || L.demolished || vaultTierOf(L) === "reserve") continue;
+          const v = holds(L, { point: "vault" }).amount; if (v > hi2) hi2 = v;
+        }
+        return hi2;
+      })(),
+      banks: (function () {
+        const A = CBZ.city && CBZ.city.arena, ls = (A && A.shopLots) || [];
+        let n = 0; for (let i = 0; i < ls.length; i++) if (ls[i] && ls[i].kind === "bank" && !ls[i].demolished) n++;
+        return n;
+      })(),
     };
   };
   // Σ over every shop of (its district's lean × its own gross trade) ÷ Σ gross

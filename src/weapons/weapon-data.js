@@ -34,6 +34,26 @@
    estimate (NOT a literal projectile — bullets stay hitscan per the owner's
    call — just a small "where would this round actually have arrived"
    correction at range, the bullet-equivalent of the RPG's true flight time).
+
+   HOW A GUN IS HELD (`bipod` / `hold`) — OWNER, 2026-08-03: "fix how character
+   holds guns, especially those like light machine gun that have a bipod."
+   Both fields are DATA the body reads; neither is a pose and neither names a
+   weapon anywhere else in the codebase:
+     bipod:true  — the appearance factory draws real legs (see
+                   weapons/appearances/lmg.js, which publishes
+                   userData.bipod{hinges,feet}). fpsmode's bipodActive() keys
+                   on THIS, not on `key === "lmg"`, so the day a second
+                   belt-fed gun or a bipod sniper ships it is one field, not a
+                   new branch. Prone counts as deployed: legs on the deck IS
+                   the stance the hardware exists for.
+     hold.heavy  — 0..1 "carry this with the weight low". entities/character.js
+                   blends it into the low-ready and present poses: the support
+                   hand moves FORWARD under the handguard, the elbow closes,
+                   and the gun hand rides lower. 0 (or absent) is exactly the
+                   pose every weapon has always had, so nothing regresses.
+     hold.support — extra metres of forward reach for the support hand, on the
+                   same 0..1 scale of the arm's travel. A launcher gets very
+                   little (it rides the shoulder); a belt-fed gun gets the most.
 ============================================================ */
 (function () {
   "use strict";
@@ -150,6 +170,7 @@
       // fired — the "real flight" feel — without making the round an actual
       // simulated projectile other systems would need to track).
       sniperDrop: { start: 90, perM: 0.0095, maxDrop: 1.6, flightPerM: 0.0011 },
+      hold: { heavy: 0.6, support: 0.24 },              // long heavy barrel, support hand well forward
     },
     {
       id: "lmg", key: "lmg", label: "M249 LMG", short: "LMG", slot: "auto",
@@ -161,6 +182,10 @@
       recenter: 0.22, rampMax: 2.0, yawWeave: 1.0,
       shake: 0.3, heat: 50, knock: 1.3, flash: 0.55,
       sfx: "shoot_lmg", tracer: 0.014, auto: true,      // dedicated belt-fed voice
+      // The legs in the model are hardware, not decoration: prone or braced
+      // they carry the gun, and the body rests it on them.
+      bipod: true,
+      hold: { heavy: 1.0, support: 0.34 },              // 7.5 kg belt-fed — the heaviest carry in the game
     },
     {
       id: "bazooka", key: "bazooka", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
@@ -197,6 +222,9 @@
       // projGravity stays a mild arc (real RPGs are near-flat over city
       // ranges, but zero gravity read as "still hitscan" in testing).
       projSpeed: 95, projGravity: 6,
+      // The tube rides the SHOULDER, so the support hand stays close to the
+      // body: heavy, but with almost none of the LMG's forward reach.
+      hold: { heavy: 0.8, support: 0.10 },
     },
     {
       id: "taser", key: "taser", label: "X26 TASER", short: "TASER", slot: "utility",

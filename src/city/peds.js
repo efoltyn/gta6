@@ -5688,7 +5688,18 @@
   }
 
   // ---- per-frame update ----
-  CBZ.onUpdate(34, function (dt) {
+  // PED_BRAIN_STAGGER (2026-08-03 slow-frame wave): this tick measured
+  // 14.9ms/frame avg at 560 peds (in-game perfReport, top updater in the
+  // whole game). Bodies beyond the 95m VIS_D2 draw band aren't rendered, so
+  // their think/walk runs every 3rd frame with the skipped frames' dt paid
+  // back in one compensated tick — same total simulated time, same walking
+  // speed, zero visible change. Alarmed/raging/controlled/reporting actors
+  // are exempt (a firefight at range must stay full-rate). `dt` becomes a
+  // per-ped local so the compensated value reaches every use below without
+  // touching the body of the loop.
+  if (CBZ.CONFIG.PED_BRAIN_STAGGER == null) CBZ.CONFIG.PED_BRAIN_STAGGER = true;
+  CBZ.onUpdate(34, function (dtFrame) {
+    let dt = dtFrame;
     if (g.mode !== "city") return;
     // A few specialist modules may cast their own actors after the canonical
     // roster was deferred. They remain parked logically until the street layer
@@ -5709,6 +5720,7 @@
     rebuildPedGrid();
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
+      dt = dtFrame;              // a prior ped's compensated tick must not leak
       // A PROP MUST NOT OUTLIVE ITS GESTURE. The tell block at the bottom of
       // this loop stamps `_phoneFrame` on every frame it wants the phone drawn;
       // anything that stops the gesture — the call landing, a bullet, a KO, an
@@ -5802,6 +5814,15 @@
         continue;
       }
       const dx = p.pos.x - camx, dz = p.pos.z - camz, d2 = dx * dx + dz * dz;
+      // FAR-BAND STAGGER — see the flag comment above the updater. Runs after
+      // the timer decrements (those stay full-rate/cheap) and before all
+      // think/walk/animate work. Skipped frames bank their dt; the think frame
+      // pays it back so distance never changes anybody's effective speed.
+      if (CBZ.CONFIG.PED_BRAIN_STAGGER && d2 > VIS_D2 &&
+          !(p.alarmed > 0 || p.npcHeat > 0 || p.rage || p.controlled || p.reportState)) {
+        if (((i + frame) % 3) !== 0) { p._dtBank = (p._dtBank || 0) + dt; continue; }
+        if (p._dtBank) { dt += p._dtBank; p._dtBank = 0; }
+      } else if (p._dtBank) { dt += p._dtBank; p._dtBank = 0; }
       // Names, levels and job titles belong in conversation/phone surfaces,
       // never as billboard prose over a person's head.
       if (p.tag) p.tag.visible = false;

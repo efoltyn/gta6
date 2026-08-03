@@ -355,6 +355,36 @@ Before building anything adjacent, wire into the existing system:
   in the survival arena for its whole life: a separate mesh has to be taught to
   every water consumer individually. `city/tsunami.js` is the whole main-world
   event and it authors no water, no flood damage model and no panic AI.
+- **WEATHER LEAVES STATE ON THE GROUND** — `CBZ.weatherDrive({… pool, cover})`
+  (`systems/weather.js`) + `CBZ.groundWaterSet / groundWaterAt / groundWaterFrontSet
+  / groundWaterLevelY / groundWaterFlowAt` (`city/waterfield.js`). OWNER: "rain
+  makes flash flood which is gang city water slowly filling the ground" and
+  "blizzard should fill ground with white slowly just like how the top of the
+  mountain tip in nat disaster has white." A surge moves the SEA, which can do
+  nothing for a street four kilometres inland — so rainfall now integrates into
+  a **ground-water** term folded into the same water MASK the whole game already
+  asks (`cityFloodDepthAt`, `isSurfaceWater`, `surfaceY`, `depthAt`), and
+  swimming, the 28 s breath meter, drowning through the killfeed, buoyancy,
+  floating corpses, the gore medium and the underwater view all arrive with no
+  file edited. Depth is measured above a **local drainage floor** (min `floorAt`
+  over a 54 m ring, cached per 12 m cell) — never a world-Y water table, or a
+  hilltop floods as deep as a hollow. A flash flood adds a **front** (dry ground
+  ahead of it) as a TERM IN THE DEPTH FIELD, so the wall is not a mesh:
+  `CBZ.groundWaterAudit().privateWaterPlanes` is pinned at **0**. The exported
+  `shoreAt` is flood-aware and `coastAt` is not — sea life navigates the coast,
+  everything that asks "am I in water" sees the flood, and the -depth/1.10
+  conversion is exactly `swim.js`'s `SHELF_SLOPE` so its own SWIM/STAND
+  thresholds decide when you swim. Snow lies the same way: `cover` drives one
+  shared uniform blend on up-facing faces (the mountain-cap look, but live and
+  meltable). Hazards are priced ONCE, mode-agnostically, in weather.js: six
+  inches of moving water knocks you flat, two feet floats a car, immersion runs
+  a hypothermia clock, a submerged street light electrifies its puddle. Flags
+  `WEATHER_GROUND_WATER` · `CITY_RAIN_POOLS` · `WEATHER_SNOW_COVER` ·
+  `WEATHER_SURFACE_COAT` · `WEATHER_FLOOD_HAZARD`. Ratchets:
+  `CBZ.weatherAudit()` → `privateWaterPlanes` (0) plus `groundWater`,
+  `snowCover`, `shinKnockdowns`, `carsFloated`, `coatedMaterials`.
+  **The coat is a shader recompile per material — it is bounded at 500 and to
+  surfaces ≥20 m; do not lift either without measuring the storm-start hitch.**
 - **THE GROUND YOU SEE IS THE GROUND YOU DRIVE ON** — `CBZ.countryReliefAt(x,z)`
   (`city/continent.js`) + `CBZ.cityCarGroundY` / the private `seatCar` in
   `city/vehicles.js`. OWNER, verbatim: "THE GREEN TERRAIN WAS MADE TO NOT BE FLAT
@@ -704,6 +734,78 @@ Before building anything adjacent, wire into the existing system:
   through the fuselage and replaying the airstairs (owner's bug, verbatim: "the
   door and steps open as if I'm hijacking from outside the plane — but i already
   boarded"). Flag: `AIRCRAFT_DOOR_SKIP_WHEN_ABOARD`.
+- **A VEHICLE CAN CONTAIN A ROOM** — `src/city/vehicle_hold.js`,
+  `CBZ.vehicleHold(rec, spec)`. OWNER, verbatim: *"a cargo plane where you can
+  open and close the back and even a tank can drive into the back — but like
+  elevators it must actually have a back of plane that exists, so other players
+  can be inside the plane like a room. this opens the door to rocketship
+  logic."* The second clause is the spec: not a boarding animation that puts a
+  tank icon on your plane, a ROOM that keeps existing while the vehicle moves.
+  **THE ADOPTION CONTRACT IS ONE CALL and it says nothing about aircraft** —
+  the semi-trailer/van wave, and a rocket's payload bay after it, adopt with
+  exactly this and write no code of their own:
+
+  ```js
+  const hold = CBZ.vehicleHold ? CBZ.vehicleHold(rec, {
+    id: "semi-trailer", label: "Trailer",
+    floor: { x: 0, z: -3.2, w: 2.5, d: 12.0, top: 1.15 },      // LOCAL metres
+    roof: 3.4,
+    walls: [ {x:-1.3, z:-3.2, w:0.2, d:12, y0:1.15, y1:3.4}, /* … */ ],
+    ramp:  { node: tailgateGroup, w: 2.4, len: 2.6, sillZ: -9.2,
+             sillTop: 1.15, closedRx: 1.45, openRx: -0.44, dir: -1 },
+  }) : null;
+  ```
+
+  `rec` is any boardable ({group, pos, heading}) or a bare Object3D; a
+  uniformly-scaled model is detected, not declared. Only `floor` is required,
+  every consumer writes `hold && hold.open()`, and the OFF path returns a full
+  inert handle. **For that one call you get**: a walk-in floor that stays
+  correct at any heading/pitch/roll, hull walls that stay solid while it turns,
+  a rear ramp with a phased arc AND its interaction verb AND its touch pill
+  (registered ONCE, here, for every hold that will ever exist — the truck wave
+  does not register a verb), vehicles that DRIVE IN and latch, loose cargo that
+  stays put, bodies aboard through `npcLife.attach`, and a line in
+  `CBZ.holdAudit()`. **A fleet joins with one line** — `CBZ.vehicleHoldWatch(fn)`
+  where `fn()` returns that fleet's records (the `CBZ.heliFleet` pattern;
+  `militaryvehicles.js` is the first).
+  **THE LATCH is the hard part and it has exactly two regimes**: LOOSE while
+  somebody has the controls (the machine owns its own pose; it climbs the ramp
+  because `militaryvehicles.js`'s ground query now consults `CBZ.mpGroundAt`,
+  the SAME query the player's feet use — no trigger volume, no boarding state),
+  and LATCHED the moment it comes to rest inside the volume (full pose recorded
+  in the host's LOCAL frame and re-asserted from the host's live world matrix,
+  so a chained tank rolls and pitches WITH the airframe). Taking the controls
+  unlatches it, which is also how you drive it back out — and `rec.taken` is
+  cleared on unload, because a load you strapped down yourself is not scenery.
+  **The group is never reparented**: `rec.pos` IS `rec.group.position` for every
+  boardable and a dozen systems read it as world space, so we write the world
+  pose instead — same picture, no liars.
+  **ORDERING IS THE CORRECTNESS ARGUMENT AND IT IS THREE BEATS** (`onUpdate`
+  priorities are how this engine says so): **9.4** the ramp arc + housekeeping,
+  before any floor is read; **12.7** the strapped freight, AFTER the car sim
+  (11), armour (11.6) and flight (12) have moved the host and before npclife's
+  `syncAttached` (33.8); **12.8** the deck and the body standing on it, which is
+  `platforms_moving.js`'s new `late: true` pass. That third beat was the live
+  half of the bug: that file latches at 9.5 because everything it was written
+  for (yachts 9.45, water hulls 9.4, marina 9.3) moves before it, and a HOST
+  VEHICLE does not — measured at 95 m/s, **1.58 m of deck slid out from under a
+  standing rider every frame**. Any future rig bolted to a vehicle sets `late`.
+  **The airframe is built from the inside out** (`island_military.js`
+  `makeCargoPlane`): the 4.4 × 19 × 3.0 m bay is authored first, off `makeTank`'s
+  real 3.5 m width, and the aeroplane is wrapped round it — which is why the
+  fuselage is four slabs and not one solid taperBox, why the wing is
+  shoulder-mounted, why the gear lives in sponsons, and why **the aft upsweep is
+  a hollow shell**: a solid box behind a cargo door is a plugged cargo door, and
+  that is exactly what the first plate of this feature photographed. It pushes
+  NO full-footprint collider — a static AABB over the whole aeroplane is the
+  wall that stops a tank driving up the ramp, and it is a lie the moment the
+  aeroplane turns; the hold rig's LOCAL walls are the strictly better answer.
+  Flags: `VEHICLE_HOLD_V1` (all of it) · `VEHICLE_HOLD_AUTOLATCH` (the sweep).
+  Ratchet: **`CBZ.holdAudit()`**, gated in `tools/math-gate.mjs` — `orphaned`
+  PINNED AT 0 (a hold whose host left the scene with freight still strapped)
+  and `holds - rigBacked` PINNED AT 0 (a declared hold with no rig is a room you
+  fall through); holds/ramps/latched/aboard print beside them so a "fix" that
+  stops declaring holds cannot pass.
 - **Seats of power stand on their own land** — `src/city/govcomplex.js`. OWNER:
   "add gov buildings but NOT inside cities, because when you do that it overlaps
   — like the pentagon and white house... those type of massive buildings that

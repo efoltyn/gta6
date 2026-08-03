@@ -317,6 +317,11 @@
       if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar) continue;   // never yank a police patrol cruiser
       if (c.abandoned || c.wreckT > 0 || c.turning || c.npcDriver || c.pullover || c.roadRageTarget || (c._rageT || 0) > 0) continue;
       if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;   // don't teleport visible wrecks
+      // NEVER TELEPORT A CAR WITH PEOPLE IN IT (vehicles.js CAR_OCCUPANCY_REAL).
+      // A car near enough to hold real seated rigs is by definition near the
+      // player, and a car somebody has already been dragged out of is a scene
+      // in progress, not spare rolling stock.
+      if (c._occRigged || (c.occ && c.occ.jacked)) continue;
       const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z, d = dx * dx + dz * dz;
       if (d > pd) { pd = d; pick = c; }
     }
@@ -333,7 +338,13 @@
       const spot = CBZ.roadPick({
         near: P, minDist: 50, maxDist: 120, camMin: 62, unseen: true, tries: 14, spread: 90,
       });
-      return spot ? CBZ.roadPlace(pick, spot) : false;
+      if (!spot || !CBZ.roadPlace(pick, spot)) return false;
+      // A RELOCATED CAR IS A DIFFERENT CAR. Its occupancy is a fact latched at
+      // the point it was populated (vehicles.js), so a car teleported across
+      // town re-decides its crew there rather than carrying a stale one — the
+      // hour and the district it now sits in are what should answer.
+      if (CBZ.carOccupancyReseat) CBZ.carOccupancyReseat(pick);
+      return true;
     }
     // find a destination road point that's out of sight but reachable soon
     for (let tries = 0; tries < 8; tries++) {
@@ -392,6 +403,7 @@
       if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar) continue;   // never yank a police patrol cruiser
       if (c.abandoned || c.wreckT > 0 || c.turning || c.npcDriver || c.pullover || c.roadRageTarget || (c._rageT || 0) > 0) continue;
       if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;
+      if (c._occRigged || (c.occ && c.occ.jacked)) continue;   // people in it — see recycleOne
       const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z, d = dx * dx + dz * dz;
       if (d > pd) { pd = d; pick = c; }
     }
@@ -409,8 +421,9 @@
     if (CBZ.roadPick && CBZ.roadPlace && CBZ.roadOpen) {
       if (!CBZ.roadOpen(r)) return false;                 // never seed a closed road
       const spot = CBZ.roadPick({ tries: 8, spread: 90, filter: function (s) { return s === r; } });
-      if (spot) return CBZ.roadPlace(c, spot);
-      return false;
+      if (!spot || !CBZ.roadPlace(c, spot)) return false;
+      if (CBZ.carOccupancyReseat) CBZ.carOccupancyReseat(c);   // new place, new crew — see recycleOne
+      return true;
     }
     const dir = Math.random() < 0.5 ? 1 : -1;
     const laneIdx = (Math.random() * lanesPerDir(r)) | 0;

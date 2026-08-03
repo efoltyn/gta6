@@ -263,6 +263,74 @@
     return 0.72;
   }
 
+  /* ---- WHERE A BODY IN THE WATER BELONGS -------------------------------
+     OWNER (2026-08-03): "sharks occasionally glitch — you see their fin poking
+     out of the water correctly, but then you see the full shark and another
+     fin above the fin, floating. It's an issue with all marine life and a
+     water issue in general."
+
+     ONE law, for every marine animal and every path that moves one — wander,
+     hunt, death. `draft` is how far the authored model origin sits under the
+     surface (aquaticBodyDepth above); `lift` is how far that origin stands
+     over the bed once the animal is AGROUND.
+
+     NEVER ASK CBZ.floorAt OUT HERE, and that is the whole bug. floorAt is the
+     WALKABLE floor; city/world.js clamps every provider through
+     `Math.max(0, real)`, so over the entire sea it answers 0 — about half a
+     metre ABOVE the waterline. A seabed clamp written against it cannot hold a
+     body down, it can only launch one, which is exactly the shark hovering
+     over its own (correctly placed) fin proxy. city/waterfield.js publishes
+     the real bed as CBZ.citySeaBedY.
+
+     AGROUND_MIN_SUB is the other half. Where the water is genuinely shallower
+     than the animal is deep, the bed is allowed to win — a stranded shark
+     SHOULD show its back, and that is the scarier read — but only until half
+     its authored draft is still wet. Past that line it has stopped being
+     stranded and started flying, and no clamp in this game may cross it. */
+  const AGROUND_MIN_SUB = 0.5;
+  function aquaticSurfY(x, z, t) {
+    if (CBZ.citySeaHeightAt) {
+      const s = +CBZ.citySeaHeightAt(x, z, t);
+      if (Number.isFinite(s)) return s;
+    }
+    if (CBZ.waterSeaY) { const s = +CBZ.waterSeaY(); if (Number.isFinite(s)) return s; }
+    return CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+  }
+  // The HIGHEST a body may be pushed by the bed at (x,z) — i.e. the aground
+  // rest height, capped so it can never leave the water. -Infinity when no bed
+  // is knowable, which degrades every caller to "no bed clamp at all".
+  function aquaticBedRestY(x, z, draft, lift, t, surf) {
+    const s = Number.isFinite(surf) ? surf : aquaticSurfY(x, z, t);
+    // Ask for the COLUMN, not the bed's world Y: this runs per sea creature per
+    // frame and the caller already has the surface, so going through
+    // citySeaBedY would evaluate the whole swell table a second time.
+    let bed;
+    if (CBZ.citySeaBedDepth) {
+      const col = +CBZ.citySeaBedDepth(x, z);
+      if (!(col > 0)) return -Infinity;           // no water column here at all
+      bed = s - col;
+    } else if (CBZ.citySeaBedY) {
+      bed = +CBZ.citySeaBedY(x, z, t);
+    } else return -Infinity;
+    if (!Number.isFinite(bed)) return -Infinity;
+    return Math.min(bed + (lift || 0), s - Math.max(0, draft) * AGROUND_MIN_SUB);
+  }
+  // ...and the complete answer: draft under the live surface, lifted onto the
+  // bed where the water is too shallow to float the animal.
+  function aquaticBodyY(x, z, draft, lift, t) {
+    const surf = aquaticSurfY(x, z, t);
+    const y = surf - Math.max(0, draft);
+    const rest = aquaticBedRestY(x, z, draft, lift, t, surf);
+    return y < rest ? rest : y;
+  }
+  // How far an animal's origin stands over the bed when it is aground. Derived
+  // from its own scale, so a new species costs no row (the 0.9 factor is the
+  // one wildlife_shark.js's bed clamp has always used).
+  function aquaticBedLift(sp) { return ((sp && sp.scale) || 1) * 0.9; }
+  CBZ.cityAquaticBedRestY = aquaticBedRestY;
+  CBZ.cityAquaticBodyY = aquaticBodyY;
+  CBZ.cityAquaticBedLift = aquaticBedLift;
+
   function oceanPoint(r, sp) {
     // Spawn from the same signed coast the visible sea uses. This is the
     // water equivalent of navmesh random-point sampling: a radius candidate
@@ -1247,6 +1315,22 @@
     return _kdir;
   }
 
+  // WHERE A CARCASS COMES TO REST. Land: the walkable floor, as it always was.
+  // Water: the SAME column its living body swam in (aquaticBodyY) — a dead
+  // shark stays a shark under the sea instead of a shark lying on top of it.
+  // systems/quadruped_ragdoll.js refuses aquatic species outright, so this
+  // tumble is the ONLY thing that ever settles a marine body, and it was
+  // settling every one of them on floorAt — flat 0, i.e. half a metre of air
+  // above the waterline. Measured 2026-08-03: a killed fish rested at y=+0.04
+  // with the surface at -0.53.
+  function carcassRestY(a, x, z, scale) {
+    const sp = (a && a.species) || {};
+    if (sp.aquatic) {
+      return aquaticBodyY(x, z, a.swimDepth || aquaticBodyDepth(sp), aquaticBedLift(sp));
+    }
+    return groundY(x, z) + 0.08 * scale;
+  }
+
   function wildlifeDeathTumble(a, dir, impulse, point) {
     if (!a || !a.group) return null;
     const grp = a.group, sp = a.species || {};
@@ -1275,7 +1359,7 @@
     };
     a._dieT = null;
     DEATHS.tumbles++;
-    grp.position.y = Math.max(groundY(grp.position.x, grp.position.z) + 0.08 * scale, grp.position.y);
+    grp.position.y = Math.max(carcassRestY(a, grp.position.x, grp.position.z, scale), grp.position.y);
     return a._deathPhys;
   }
   CBZ.wildlifeDeathTumble = wildlifeDeathTumble;
@@ -1300,7 +1384,7 @@
     grp.rotation.x += ph.wx * step;
     grp.rotation.y += ph.wy * step;
     grp.rotation.z += ph.wz * step;
-    const restY = groundY(grp.position.x, grp.position.z) + 0.08 * scale;
+    const restY = carcassRestY(a, grp.position.x, grp.position.z, scale);
     if (grp.position.y <= restY && ph.vy < 0) {
       grp.position.y = restY;
       ph.bounces++;
@@ -3216,8 +3300,13 @@
           a.heading = nav.heading;
           grp.position.x = nav.x; grp.position.z = nav.z;
           if (nav.blocked) { a.heading += 0.28; a.turnT = Math.min(a.turnT, 0.45); }
-          grp.position.y = wf.surfaceY(grp.position.x, grp.position.z, waterTime)
-            - (a.swimDepth || 1) + Math.sin(a.bob) * 0.055;
+          // The bob rides INSIDE the solved water column (it is a change of
+          // draft, not a change of Y after the fact), so nothing can bob its
+          // way out of the sea, and the shared law keeps a body out of the bed
+          // in the shallows without ever lifting it clear of the surface.
+          grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
+            (a.swimDepth || 1) - Math.sin(a.bob) * 0.055,
+            aquaticBedLift(sp), waterTime);
         } else {
           // Legacy radial-band fallback when this module is unit-loaded alone.
           const nx = grp.position.x + Math.cos(a.heading) * a.spd * dt * 6;
@@ -3239,14 +3328,12 @@
           //
           // The branch above (the navigable-water path) always had it right:
           // surface minus swimDepth. This fallback simply never got the same
-          // treatment. Same law both sides now — a shark is UNDER the sea by
-          // its own body depth, wherever the sea happens to be this frame,
-          // surge included (CBZ.waterSeaY is live).
-          const fbSurf = CBZ.citySeaHeightAt
-            ? CBZ.citySeaHeightAt(grp.position.x, grp.position.z)
-            : (CBZ.waterSeaY ? CBZ.waterSeaY() : -0.48);
-          grp.position.y = fbSurf - (a.swimDepth || aquaticBodyDepth(sp))
-            + Math.sin(a.bob) * 0.12 * (sp.scale || 1);
+          // treatment. Both sides now run the ONE shared law (aquaticBodyY),
+          // so a shark is UNDER the sea by its own body depth wherever the sea
+          // happens to be this frame, surge included.
+          grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
+            (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * (sp.scale || 1),
+            aquaticBedLift(sp));
         }
         faceAnimalHeading(grp, a.heading);
         if (LIVE()) animateSwim(a, dt);               // the shared tail/fluke beat

@@ -614,30 +614,64 @@
       return { x: cx + lx, z: cz + lz };
     }
 
-    // ---- THE TELLER LINE: a long counter near the back, with glass + screens.
-    // (the back wall is at depth ~2·halfIn − WT; seat the counter a little ahead.)
-    const counterDepth = 2 * halfIn - WT - 1.4;
+    // ---- THE TELLER LINE: a long counter, with glass + screens.
+    // WHERE IT GOES CHANGED WITH THE VAULT. The counter used to sit 1.4 m off
+    // the BACK WALL, because behind it was nothing. Behind it is now a
+    // strongroom (BANK_VAULT_V1 cuts a partition rd metres in from that wall),
+    // so a counter at the old depth would stand INSIDE the vault. It now seats
+    // itself 1.9 m in front of the partition — which is also what puts the
+    // teller posts the vault pass declared (1.15 m in front of the partition)
+    // BEHIND their own counter, where a teller stands.
+    const RVv = lot._vaultRoom;
+    let counterDepth = 2 * halfIn - WT - 1.4;
+    if (RVv) {
+      // the partition's depth measured in the same door-relative frame `at()`
+      // uses: project the vault's building-local plane onto the inward axis.
+      const bOx = (lot.building.ox != null) ? lot.building.ox : cx;
+      const bOz = (lot.building.oz != null) ? lot.building.oz : cz;
+      const pWx = bOx + RVv.plx, pWz = bOz + RVv.plz;
+      const partDepth = (pWx - cx) * inx + (pWz - cz) * inz + halfIn;
+      counterDepth = Math.max(2.6, Math.min(counterDepth, partDepth - 1.9));
+    }
     const cLen = Math.min(5.5, Math.max(2.6, 2 * halfTan - 3));
     const cwid = 0.7;
-    const cgw = Math.abs(tx) * cLen + Math.abs(tz) * cwid;
-    const cgd = Math.abs(tz) * cLen + Math.abs(tx) * cwid;
     const cc = at(counterDepth, 0);
-    const counter = box(cgw, 1.1, cgd, m.counter);
-    counter.position.set(cc.x, 0.55, cc.z);
-    counter.receiveShadow = true;
-    group.add(counter);
-    const cap = box(cgw + 0.08, 0.06, cgd + 0.08, m.brass);
-    cap.position.set(cc.x, 1.13, cc.z);
-    group.add(cap);
-    // keep the counter solid so you walk UP to it, never through (height-gated)
-    if (CBZ.colliders) CBZ.colliders.push({ minX: cc.x - cgw / 2, maxX: cc.x + cgw / 2, minZ: cc.z - cgd / 2, maxZ: cc.z + cgd / 2, y0: 0, y1: 1.15 });
-    // the GLASS partition above the counter — registered as real city glass so
-    // a heist round shatters it like any window (the bank's a target, after all).
-    if (CBZ.cityRegisterGlass) {
-      CBZ.cityRegisterGlass(group, cc.x + inx * 0.02, 1.75, cc.z + inz * 0.02, cgw - 0.1, 1.1, cgd - 0.1, 0, 0, null);
-    } else {
-      const gl = box(cgw - 0.1, 1.1, cgd - 0.1, m.glass);
-      gl.position.set(cc.x, 1.75, cc.z); group.add(gl);
+    /* THE STAFF GAP. A 1.1 m counter is a solid collider and the strongroom is
+       behind it, so an unbroken teller line is a wall between the player and
+       the only door in this building worth opening. A real banking hall has a
+       break at the end of the run that staff walk through, and putting ours in
+       line with the vault door is what turns "the vault is unreachable" into
+       "the vault is behind the counter" — which is the whole point of it being
+       back there. Drawn as TWO runs so the gap is a real hole with no collider,
+       never a decorative notch. */
+    const GAPW = 1.7;
+    const gapLat = RVv ? Math.max(-cLen / 2 + GAPW / 2, Math.min(cLen / 2 - GAPW / 2, RVv.lat || 0)) : null;
+    const runs = (gapLat == null)
+      ? [{ lat: 0, len: cLen }]
+      : [{ lat: (-cLen / 2 + (gapLat - GAPW / 2)) / 2, len: Math.max(0, (gapLat - GAPW / 2) - (-cLen / 2)) },
+         { lat: ((gapLat + GAPW / 2) + cLen / 2) / 2, len: Math.max(0, cLen / 2 - (gapLat + GAPW / 2)) }];
+    for (const run of runs) {
+      if (run.len < 0.35) continue;
+      const rgw = Math.abs(tx) * run.len + Math.abs(tz) * cwid;
+      const rgd = Math.abs(tz) * run.len + Math.abs(tx) * cwid;
+      const rc = at(counterDepth, run.lat);
+      const counter = box(rgw, 1.1, rgd, m.counter);
+      counter.position.set(rc.x, 0.55, rc.z);
+      counter.receiveShadow = true;
+      group.add(counter);
+      const cap = box(rgw + 0.08, 0.06, rgd + 0.08, m.brass);
+      cap.position.set(rc.x, 1.13, rc.z);
+      group.add(cap);
+      // keep the counter solid so you walk UP to it, never through (height-gated)
+      if (CBZ.colliders) CBZ.colliders.push({ minX: rc.x - rgw / 2, maxX: rc.x + rgw / 2, minZ: rc.z - rgd / 2, maxZ: rc.z + rgd / 2, y0: 0, y1: 1.15 });
+      // the GLASS partition above the counter — registered as real city glass so
+      // a heist round shatters it like any window (the bank's a target, after all).
+      if (CBZ.cityRegisterGlass) {
+        CBZ.cityRegisterGlass(group, rc.x + inx * 0.02, 1.75, rc.z + inz * 0.02, rgw - 0.1, 1.1, rgd - 0.1, 0, 0, null);
+      } else {
+        const gl = box(rgw - 0.1, 1.1, rgd - 0.1, m.glass);
+        gl.position.set(rc.x, 1.75, rc.z); group.add(gl);
+      }
     }
     // three teller screens glowing along the counter (the blue trust accent)
     for (let i = 0; i < 3; i++) {
@@ -689,29 +723,39 @@
     if (dlabel) { dlabel.position.set(deskPos.x, 1.35, deskPos.z); group.add(dlabel); }
     S.stations.push({ kind: "loan", x: deskPos.x, z: deskPos.z, reach: REACH + 0.3 });
 
-    // ---- THE VAULT door at the back corner (set dressing; the bank's anchor).
-    const vlat = (deskPos.x - cx) * tx + (deskPos.z - cz) * tz;   // OPPOSITE the desk side
-    const vaultPos = at(2 * halfIn - 1.0, vlat <= 0 ? Math.min(halfTan - 1.4, 2.2) : Math.max(-(halfTan - 1.4), -2.2));
-    const vbody = box(2.0, 2.4, 0.5, m.vault);
-    vbody.position.set(vaultPos.x, 1.2, vaultPos.z);
-    vbody.rotation.y = Math.atan2(-inx, -inz);
-    group.add(vbody);
-    // the vault DOOR gets its OWN fresh material (not the _shared cmat) so a
-    // heist can flash its emissive while drilling without bleeding the glow onto
-    // every other prop that happens to share the vault-grey tone.
-    const vdoorMat = (CBZ.mat ? CBZ.mat(0x6a7480) : m.vaultDoor);
-    const vdoor = box(1.5, 1.8, 0.14, vdoorMat);
-    vdoor.position.set(vaultPos.x + inx * 0.22, 1.1, vaultPos.z + inz * 0.22);
-    vdoor.rotation.y = vbody.rotation.y;
-    group.add(vdoor);
-    const hub = box(0.3, 0.3, 0.14, m.brass);
-    hub.position.set(vaultPos.x + inx * 0.28, 1.1, vaultPos.z + inz * 0.28);
-    hub.rotation.y = vbody.rotation.y;
-    group.add(hub);
-    // remember the vault world spot + its door material so heists.js can LOCATE
-    // the real vault to drill and glow it red while it's being cracked (the
-    // heist owns the score arc; the branch owns the prop — one hook bridges them).
-    S.vault = { x: vaultPos.x, z: vaultPos.z, door: vdoor, doorMat: vdoorMat, hub: hub };
+    // ---- THE VAULT.
+    // This used to be SET DRESSING and the file said so: a 2 m slab, a 1.5 m
+    // "door" that never moved, a brass hub, and a comment admitting the branch
+    // owned a prop while heists.js owned an abstract drill meter. The owner's
+    // ask deleted that arrangement — "real vaults in the back with massive
+    // amounts that you can bomb your way into, that OPEN AS ROOMS just like
+    // elevators and planes". So the vault is now a real strongroom built by the
+    // BANK_VAULT_V1 pass below (a partition, an opening, a door that swings,
+    // shelves, and money you carry out in your hands), and this lobby build
+    // only has to point S.vault at it so cityBankVault()/cityBankVaultGlow()
+    // keep answering for every existing consumer.
+    if (lot._vaultRoom) {
+      const RV = lot._vaultRoom;
+      S.vault = { x: RV.x, z: RV.z, door: RV.leaf, doorMat: RV.doorMat, hub: RV.wheel, room: RV };
+    } else if (CBZ.CONFIG.BANK_VAULT_V1 === false) {
+      // FLAG OFF: the shipped set-dressing vault, byte-for-byte.
+      const vlat = (deskPos.x - cx) * tx + (deskPos.z - cz) * tz;   // OPPOSITE the desk side
+      const vaultPos = at(2 * halfIn - 1.0, vlat <= 0 ? Math.min(halfTan - 1.4, 2.2) : Math.max(-(halfTan - 1.4), -2.2));
+      const vbody = box(2.0, 2.4, 0.5, m.vault);
+      vbody.position.set(vaultPos.x, 1.2, vaultPos.z);
+      vbody.rotation.y = Math.atan2(-inx, -inz);
+      group.add(vbody);
+      const vdoorMat = (CBZ.mat ? CBZ.mat(0x6a7480) : m.vaultDoor);
+      const vdoor = box(1.5, 1.8, 0.14, vdoorMat);
+      vdoor.position.set(vaultPos.x + inx * 0.22, 1.1, vaultPos.z + inz * 0.22);
+      vdoor.rotation.y = vbody.rotation.y;
+      group.add(vdoor);
+      const hub = box(0.3, 0.3, 0.14, m.brass);
+      hub.position.set(vaultPos.x + inx * 0.28, 1.1, vaultPos.z + inz * 0.28);
+      hub.rotation.y = vbody.rotation.y;
+      group.add(hub);
+      S.vault = { x: vaultPos.x, z: vaultPos.z, door: vdoor, doorMat: vdoorMat, hub: hub };
+    }
     if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("bank-lobby", lot.building, group);
   }
 
@@ -1031,6 +1075,909 @@
     actOn(S.cur);
   }, true);
 
+  /* ==========================================================================
+     BANK_VAULT_V1 — THE VAULT IS A ROOM.   [CBZ.cityVaultRoom]
+
+     OWNER (2026-08-02, verbatim): "banks need an overhaul so they have real
+     tellers with some amount and then real vaults in the back with massive
+     amounts that you can bomb your way into, THAT OPEN AS ROOMS just like
+     elevators and planes — all these small rooms coded. these real full vaults
+     should be in casinos too… ONLY NPCS OR PHYSICAL BOMBS CAN OPEN THEM… this
+     is interaction/animation options and physical assets, not choreographed
+     mini-missions. gta is fake, you do the mini missions that are
+     choreographed — this is real."
+
+     WHAT WAS THERE. Three boxes and a comment that called itself set dressing,
+     plus heists.js's `drillTime: 9` — a progress bar you stood next to. Nine
+     seconds of holding still, a number goes up, cash appears in your wallet.
+     That is precisely the choreography the owner is describing.
+
+     WHAT IT IS NOW, and every clause is a physical thing:
+       • A REAL ROOM. A partition wall is cut across the back of the banking
+         hall with ONE opening, the way city/interior_programs.js's divider()
+         already cuts a floorplate, and the space behind it is a strongroom you
+         can stand inside — shelving up the walls, banded bricks on the boards,
+         a caged trolley, a strip light. You walk into it.
+       • A DOOR THAT MOVES. A 0.42 m steel leaf on a hinge column, a boss, a
+         spoked handwheel, six radial bolt lugs that withdraw as it swings. It
+         has a COLLIDER while it is shut, and losing that collider is what
+         "open" physically means. The swing is the elevators.js/aircraft_doors
+         grammar the owner named: a phased arc, not a visibility toggle.
+       • TWO WAYS IN, AND THEY ARE THE OWNER'S TWO. (1) PHYSICAL BOMBS: the
+         door carries an armour pool and city/armored.js's crack pattern is
+         copied exactly — we wrap CBZ.cityExplosion and feed real blast energy
+         from an RPG, a grenade or a stack of C4 into it. Small arms do
+         nothing; there is no lockpick, no minigame, no hold-to-drill.
+         (2) AN NPC: a bank officer with his hands up at the door opens it,
+         because that is how a vault is actually opened in a robbery. The
+         PLAYER'S own claim goes through the ONE lock (CBZ.cityLock) and its
+         `verb: "vault"` — which loyalty.js's apex rung has GRANTED since it
+         shipped and which, until this line, nothing in the game consumed. A
+         granted verb with no door was a stat fiction; this is its door.
+       • MONEY YOU CARRY. Breaching does not pay you. It moves the branch's
+         real CBZ.cityTill balance out of the ledger and onto the floor of the
+         room as DUFFELS (city/inventory.js's CBZ.cashBags). You pick them up
+         one at a time, you cannot sprint or aim while you hold one, and you
+         walk them out yourself. Nothing auto-banks.
+
+     THREE GRADES OF ROOM, and the grade comes from the MONEY, not from taste:
+     shops.js's `cityTill.vaultTier(lot)` answers "branch | reserve | count"
+     and this file reads it for the room size, the door's armour and the number
+     of bags — so the city's cash centre is visibly the hardest door in the
+     world BECAUSE it is the one holding tens of millions. Asymmetric polish,
+     spent where doctrine LAW 1 says to spend it.
+
+     DETERMINISM: every dimension and every shelf comes from the lot's own
+     geometry and CBZ.hash01. No Math.random in this build path.
+     ========================================================================= */
+  if (CBZ.CONFIG.BANK_VAULT_V1 == null) CBZ.CONFIG.BANK_VAULT_V1 = true;
+  if (CBZ.CONFIG.BANK_TELLERS_V1 == null) CBZ.CONFIG.BANK_TELLERS_V1 = true;
+
+  const VAULTS = [];
+  const VTALLY = { built: 0, breached: 0, blasted: 0, insider: 0, bags: 0, bagged: 0, refused: 0 };
+  // armour pools, in the same units city/armored.js feeds its hull: one C4
+  // charge (power 1.4) couples ~308, an RPG ~1.4, a grenade ~1.0. So a branch
+  // strongroom is three charges, a casino count room four, and the city's cash
+  // centre is a six-charge siege you cannot carry in one trip (explosives.js
+  // tracks five planted at a time). The number IS the difficulty.
+  const VHP = { branch: 820, count: 1120, reserve: 1900 };
+  const VBLAST_TO_DOOR = 220;      // per unit of blast power, armored.js's rate
+  const VBLAST_RANGE = 7.5;        // a charge further than this is not on the door
+  const VSWING = 1.72;             // radians the leaf opens (~99 degrees)
+
+  let VM = null;
+  function vmats() {
+    if (VM) return VM;
+    VM = {
+      steel: CBZ.cmat(0x5d6672),        // door leaf / frame
+      steelD: CBZ.cmat(0x3c434d),       // shadowed steel
+      steelL: CBZ.cmat(0x8b97a6),       // machined highlight
+      brass: CBZ.cmat(0xcaa64a),        // wheel, plate
+      wall: CBZ.cmat(0x4a5058),         // strongroom concrete
+      shelf: CBZ.cmat(0x6d7681),        // steel shelving
+      note: CBZ.cmat(0x5f9c52),         // banded notes
+      band: CBZ.cmat(0xd8d2c0),
+      lite: CBZ.cmat(0xdfe9ff, { emissive: 0xbcd0ff, ei: 0.85 }),
+    };
+    return VM;
+  }
+  function vbox(parent, w, h, d, mat, x, y, z, rx, ry, rz) {
+    const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), mat);
+    m.position.set(x || 0, y || 0, z || 0);
+    if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
+    m.castShadow = false; m.receiveShadow = false;
+    parent.add(m);
+    return m;
+  }
+  function vcyl(parent, rt, rb, h, seg, mat, x, y, z, rx, ry, rz) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 16), mat);
+    m.position.set(x || 0, y || 0, z || 0);
+    if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
+    parent.add(m);
+    return m;
+  }
+
+  /* THE DOOR ASSEMBLY, in a local frame where +Z is OUT of the vault (toward
+     the room you stand in) and +X runs across the opening. It is built once
+     into a pivot group whose origin is the HINGE EDGE, so opening is one
+     rotation.y and the leaf sweeps out into the hall exactly like a real one.
+
+     WHY A SLAB AND NOT A DISC. A circular leaf is the icon, but a circular
+     leaf needs a circular hole cut in a rectangular partition, and this repo
+     draws with boxes — the corners would show daylight into the strongroom. So
+     the leaf FILLS the rectangular opening (which is what actually keeps the
+     room dark and the collider honest) and carries the round boss, the
+     handwheel and the radial boltwork on its face. Every cue that says VAULT
+     is on the part you look at; the part that has to seal, seals. */
+  function buildDoor(v) {
+    const M2 = vmats();
+    const pivot = new THREE.Group();
+    const DW = v.dw, DH = v.dh, T = v.tier === "reserve" ? 0.52 : 0.40;
+    // WHICH EDGE IT HANGS FROM is a per-lot fact, and it is authored by MOVING
+    // THE LEAF, never by a negative scale: `scale.x = -1` mirrors the group,
+    // which flips every child's face winding and lights the door inside-out
+    // under r128's default single-sided materials.
+    const S2 = v.hingeSign;                    // +1 hangs left, -1 hangs right
+    const leaf = new THREE.Group();
+    leaf.position.set(S2 * DW / 2, 0, 0);
+    pivot.add(leaf);
+    /* THE LEAF READS BY CONTRAST, NOT BY SIZE. The first pass drew the door in
+       the same grey as the partition it sits in and the whole assembly went
+       flat: a big slab you had to be told was a door. Real vault doors are
+       nearly black machined steel inside a BRIGHT polished architrave, so the
+       face goes dark, every edge that catches light gets a light bevel, and
+       the boss/wheel/plate stack rises off it in three steps. */
+    const doorMat = (CBZ.mat ? CBZ.mat(0x323a45) : M2.steelD);
+    vbox(leaf, DW - 0.06, DH - 0.06, T, doorMat, 0, DH / 2, 0);
+    // the bevel: a slightly larger, lighter plate BEHIND the face, so every
+    // silhouette edge of the leaf is outlined against the dark centre.
+    vbox(leaf, DW + 0.02, DH + 0.02, T - 0.10, M2.steelL, 0, DH / 2, -0.02);
+    vbox(leaf, DW + 0.10, 0.09, T + 0.06, M2.steelL, 0, DH - 0.03, 0);   // head cap
+    vbox(leaf, DW + 0.10, 0.09, T + 0.06, M2.steelL, 0, 0.05, 0);        // toe cap
+    // a recessed inner panel — the step every armoured door has around its boss
+    vbox(leaf, DW - 0.42, DH - 0.44, 0.06, M2.steel, 0, DH * 0.50, T / 2 + 0.02);
+    // THE BOSS + THE WHEEL — the two shapes that say "vault" at a glance.
+    const bossR = Math.min(0.86, DW * 0.40, DH * 0.30);
+    vcyl(leaf, bossR, bossR, 0.13, 24, M2.steelL, 0, DH * 0.52, T / 2 + 0.09, Math.PI / 2, 0, 0);
+    vcyl(leaf, bossR * 0.80, bossR * 0.80, 0.09, 24, M2.steel, 0, DH * 0.52, T / 2 + 0.16, Math.PI / 2, 0, 0);
+    vcyl(leaf, bossR * 0.58, bossR * 0.58, 0.08, 24, M2.steelD, 0, DH * 0.52, T / 2 + 0.21, Math.PI / 2, 0, 0);
+    const wheel = new THREE.Group();
+    wheel.position.set(0, DH * 0.52, T / 2 + 0.30);
+    const wr = bossR * 0.62;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(wr, 0.052, 6, 22), M2.brass);
+    wheel.add(ring);
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 4;
+      vbox(wheel, wr * 2, 0.055, 0.055, M2.brass, 0, 0, 0, 0, 0, a);
+    }
+    vcyl(wheel, 0.10, 0.10, 0.16, 12, M2.brass, 0, 0, -0.04, Math.PI / 2, 0, 0);
+    leaf.add(wheel);
+    // BOLTWORK: six lugs around the rim. They stand PROUD of the leaf edge, so
+    // when the door swings you see the bolts that were holding it — the single
+    // detail that makes an open vault door read as unlocked rather than ajar.
+    const lugs = [];
+    for (let i = 0; i < 6; i++) {
+      const t = (i / 5 - 0.5);
+      const side = i % 2 ? 1 : -1;
+      const lug = vcyl(leaf, 0.075, 0.075, 0.46, 10, M2.steelL,
+        side * (DW / 2 - 0.03), DH * (0.22 + 0.28 * Math.abs(t) + (i > 2 ? 0.22 : 0)), 0,
+        0, 0, Math.PI / 2);
+      lugs.push(lug);
+    }
+    // the hinge column: three barrels stacked up the pivot edge
+    for (let i = 0; i < 3; i++) {
+      vcyl(pivot, 0.16, 0.16, 0.34, 12, M2.steelD, 0, DH * (0.16 + i * 0.34), 0);
+    }
+    vbox(pivot, 0.26, DH, 0.26, M2.steelD, 0, DH / 2, 0);
+    // a recessed brass maker's plate down at handle height — the first draft
+    // floated it above the wheel where it read as a stray yellow stripe.
+    vbox(leaf, DW * 0.30, 0.11, 0.02, M2.steelD, 0, DH * 0.175, T / 2 + 0.005);
+    vbox(leaf, DW * 0.26, 0.075, 0.03, M2.brass, 0, DH * 0.175, T / 2 + 0.02);
+    v.leaf = leaf; v.wheel = wheel; v.doorMat = doorMat; v.lugs = lugs; v.pivot = pivot;
+    return pivot;
+  }
+
+  /* THE ARCHITRAVE — the static steel surround the leaf shuts against. Drawn
+     in the same world group as the pivot so the whole doorway is one object to
+     show/hide, and it is what makes the opening read as engineered rather than
+     as a hole somebody left in a wall. */
+  function buildFrame(v, grp) {
+    const M2 = vmats();
+    const DW = v.dw, DH = v.dh;
+    const f = new THREE.Group();
+    // A MASSIVE DOOR NEEDS A MASSIVE JAMB. 0.22 m of steel read as a white
+    // stick beside a 2.4 m leaf; the surround is now a 0.40 m stepped pier
+    // either side, which is what actually carries a tonne of hinged steel and
+    // what makes the doorway read as engineered rather than cut.
+    // The bright reveal is a CHAMFER ON the pier, not a rail in front of it:
+    // at z = 0.36 against a 0.58-deep pier it stood 0.17 m proud and the whole
+    // surround photographed as scaffolding round the door.
+    for (const s of [-1, 1]) {
+      vbox(f, 0.40, DH + 0.42, 0.58, M2.steel, s * (DW / 2 + 0.20), (DH + 0.42) / 2, 0);
+      vbox(f, 0.16, DH + 0.42, 0.16, M2.steelL, s * (DW / 2 + 0.20), (DH + 0.42) / 2, 0.26);
+      vbox(f, 0.44, 0.10, 0.62, M2.steelD, s * (DW / 2 + 0.20), DH + 0.36, 0);   // pier cap
+    }
+    vbox(f, DW + 1.00, 0.34, 0.58, M2.steel, 0, DH + 0.25, 0);
+    vbox(f, DW + 1.00, 0.14, 0.16, M2.steelL, 0, DH + 0.25, 0.26);
+    vbox(f, DW + 1.00, 0.08, 0.58, M2.steelL, 0, 0.04, 0);          // sill plate
+    grp.add(f);
+    return f;
+  }
+
+  /* THE ROOM — partition + strongroom fit-out, drawn through the building's own
+     b.lbox so it batches with the shell and gets real colliders, exactly the
+     way city/casino.js dresses a gaming floor. Local coordinates; world is
+     (b.ox + lx, ly, b.oz + lz). */
+  function buildRoom(v, b, floorY) {
+    const M2 = vmats();
+    const hsh = function (i, salt) { return CBZ.hash01 ? CBZ.hash01(v.lot.cx + i * 0.31, v.lot.cz - i * 0.17, salt) : ((i * 0.137) % 1); };
+    const nx = v.inx, nz = v.inz;              // unit INTO the room (away from the hall)
+    const tx = -nz, tz = nx;                   // across the opening
+    const WH = 3.0, WT2 = 0.30;                // partition height / thickness
+    const half = v.rw / 2;
+    const dw2 = v.dw / 2;
+    // helper: local coords from (deep along +n from the partition plane, lateral)
+    const P = function (deep, lat) {
+      return { x: v.plx + nx * deep + tx * lat, z: v.plz + nz * deep + tz * lat };
+    };
+    const along = Math.abs(nx) > 0.5;          // partition spans Z when we face ±X
+    const sizeAcross = function (across, thick) {
+      return along ? { w: thick, d: across } : { w: across, d: thick };
+    };
+    // ---- THE PARTITION: two piers and a header, leaving ONE opening ---------
+    const pier = half - dw2;
+    if (pier > 0.25) {
+      for (const s of [-1, 1]) {
+        const p = P(0, s * (dw2 + pier / 2));
+        const sz = sizeAcross(pier, WT2);
+        b.lbox(p.x, floorY + WH / 2, p.z, sz.w, WH, sz.d, 0x4a5058, { solid: true, los: true });
+      }
+    }
+    // the header over the doorway (so the opening is a hole, not a gap to the roof)
+    if (WH - v.dh - 0.34 > 0.2) {
+      const p = P(0, 0);
+      const sz = sizeAcross(v.dw + 0.7, WT2);
+      b.lbox(p.x, floorY + (v.dh + 0.34 + WH) / 2, p.z, sz.w, WH - v.dh - 0.34, sz.d, 0x4a5058, { solid: true, los: true });
+    }
+    // ---- THE SIDE WALLS: from the partition back to the building's own wall --
+    for (const s of [-1, 1]) {
+      const p = P(v.rd / 2, s * half);
+      const sz = sizeAcross(WT2, v.rd);
+      b.lbox(p.x, floorY + WH / 2, p.z, sz.w, WH, sz.d, 0x4a5058, { solid: true, los: true });
+    }
+    /* ---- FIT-OUT: shelving up the back and both flanks, loaded with bricks --
+       A strongroom that is empty when you finally get the door off is a
+       punchline, so the racks carry visible money BEFORE you touch anything —
+       that is what makes the door worth blowing rather than a marker worth
+       walking to.
+
+       THE UPRIGHTS ARE THE DIFFERENCE BETWEEN A RACK AND FOUR FLOATING PLANKS.
+       The first pass drew one post per side for the whole unit and the boards
+       read as levitating; real shelving stands on a post at every bay end, so
+       the posts are drawn per BAY and the boards land on them. */
+    const SHELF_Y = [0.44, 1.06, 1.68, 2.30];
+    const backD = v.rd - 0.55;
+    const BAY = 1.15;                                 // one shelving bay
+    let bricks = 0;
+    const nBays = Math.max(2, Math.round((v.rw - 0.7) / BAY));
+    // the back rack's posts, floor to top board
+    for (let i = 0; i <= nBays; i++) {
+      const lat = (i / nBays - 0.5) * (v.rw - 0.7);
+      const up = P(backD, lat);
+      const us = sizeAcross(0.075, 0.42);
+      b.lbox(up.x, floorY + (SHELF_Y[SHELF_Y.length - 1] + 0.1) / 2, up.z, us.w, SHELF_Y[SHELF_Y.length - 1] + 0.1, us.d, 0x828c99, { cast: false });
+    }
+    // ...and the flank racks' posts
+    for (const s of [-1, 1]) {
+      const nF = Math.max(1, Math.round((v.rd - 1.2) / BAY));
+      for (let i = 0; i <= nF; i++) {
+        const dd = v.rd / 2 + 0.1 + (i / nF - 0.5) * (v.rd - 1.3);
+        const up = P(dd, s * (half - 0.32));
+        const us = sizeAcross(0.40, 0.075);
+        b.lbox(up.x, floorY + (SHELF_Y[SHELF_Y.length - 1] + 0.1) / 2, up.z, us.w, SHELF_Y[SHELF_Y.length - 1] + 0.1, us.d, 0x828c99, { cast: false });
+      }
+    }
+    for (let si = 0; si < SHELF_Y.length; si++) {
+      const sy = SHELF_Y[si];
+      if (sy > WH - 0.4) break;
+      // the back run
+      const bp = P(backD, 0);
+      const bsz = sizeAcross(v.rw - 0.7, 0.44);
+      b.lbox(bp.x, floorY + sy, bp.z, bsz.w, 0.045, bsz.d, 0x6d7681, { cast: false });
+      // bricks are BUNDLES, so they are small and there are lots of them —
+      // three across a bay reads as money, one big block reads as a crate.
+      const per = Math.max(3, Math.min(14, Math.round((v.rw - 0.9) / 0.30)));
+      for (let i = 0; i < per; i++) {
+        if (hsh(si * 11 + i, "vshelf") < 0.16) continue;       // a gap here and there
+        const lat = (i / Math.max(1, per - 1) - 0.5) * (v.rw - 1.0);
+        const q = P(backD, lat);
+        const qs = sizeAcross(0.22, 0.26);
+        const stack = hsh(si * 31 + i, "vstack") < 0.42 ? 2 : 1;
+        for (let k = 0; k < stack; k++) {
+          b.lbox(q.x, floorY + sy + 0.075 + k * 0.13, q.z, qs.w, 0.12, qs.d, 0x5f9c52, { cast: false });
+          b.lbox(q.x, floorY + sy + 0.075 + k * 0.13, q.z, qs.w * 0.26, 0.125, qs.d * 1.03, 0xd8d2c0, { cast: false });
+          bricks++;
+        }
+      }
+      // the flank runs
+      for (const s of [-1, 1]) {
+        const fp = P(v.rd / 2 + 0.1, s * (half - 0.32));
+        const fsz = sizeAcross(0.40, v.rd - 1.3);
+        b.lbox(fp.x, floorY + sy, fp.z, fsz.w, 0.045, fsz.d, 0x6d7681, { cast: false });
+        const fper = Math.max(2, Math.min(9, Math.round((v.rd - 1.4) / 0.32)));
+        for (let i = 0; i < fper; i++) {
+          if (hsh(si * 23 + i * 3 + (s > 0 ? 1 : 0), "vflank") < 0.24) continue;
+          const dd = v.rd / 2 + 0.1 + (i / Math.max(1, fper - 1) - 0.5) * (v.rd - 1.5);
+          const q = P(dd, s * (half - 0.32));
+          const qs = sizeAcross(0.26, 0.22);
+          b.lbox(q.x, floorY + sy + 0.075, q.z, qs.w, 0.12, qs.d, 0x5f9c52, { cast: false });
+          b.lbox(q.x, floorY + sy + 0.075, q.z, qs.w * 1.03, 0.125, qs.d * 0.26, 0xd8d2c0, { cast: false });
+          bricks++;
+        }
+      }
+    }
+    v.bricks = bricks;
+    // a caged trolley parked mid-floor (the thing the notes actually move on)
+    const tp = P(v.rd * 0.45, (hsh(3, "vtroll") - 0.5) * Math.max(0, v.rw - 2.4));
+    const ts = sizeAcross(0.86, 0.60);
+    b.lbox(tp.x, floorY + 0.36, tp.z, ts.w, 0.06, ts.d, 0x6d7681, { cast: false });
+    b.lbox(tp.x, floorY + 0.70, tp.z, ts.w * 0.9, 0.62, ts.d * 0.9, 0x5f9c52, { cast: false });
+    // four castors under it — drawn in the WORLD axes the trolley's own top
+    // was drawn in, so they cannot walk off it when the room faces ±X.
+    for (let i = 0; i < 4; i++) {
+      b.lbox(tp.x + (i % 2 ? 0.30 : -0.30), floorY + 0.18, tp.z + (i < 2 ? -0.20 : 0.20),
+        0.06, 0.36, 0.06, 0x3c434d, { cast: false });
+    }
+    // the strip light: the reason the room is not a black hole when you open
+    // it. A HOUSING and a tube, not one glowing slab — a bare emissive plank on
+    // a ceiling reads as a hole in the roof.
+    const lp = P(v.rd * 0.55, 0);
+    const lw = Math.min(1.5, Math.max(0.7, v.rw - 1.4));
+    const lh = sizeAcross(lw, 0.20);
+    const lt2 = sizeAcross(lw - 0.14, 0.10);
+    b.lbox(lp.x, floorY + WH - 0.09, lp.z, lh.w, 0.10, lh.d, 0x9aa3ae, { cast: false });
+    b.lbox(lp.x, floorY + WH - 0.17, lp.z, lt2.w, 0.05, lt2.d, 0xdfe9ff, { emissive: 0xbcd0ff, ei: 0.95, cast: false });
+    v.roomTag = P(v.rd * 0.5, 0);
+  }
+
+  /* CBZ.cityVaultRoom(lot, spec) — THE ONE CALL. city/bank.js's own pass uses
+     it for every branch and for the reserve; city/casino.js uses it for the
+     count room behind the cage. A third caller (a jeweller's back room, an
+     evidence locker) costs a spec object and nothing else.
+       spec: { tier, kind, till:{src,point}, name, lat, guard } */
+  CBZ.cityVaultRoom = function (lot, spec) {
+    if (CBZ.CONFIG.BANK_VAULT_V1 === false) return null;
+    spec = spec || {};
+    const b = lot && lot.building;
+    if (!b || typeof b.lbox !== "function" || lot._vaultRoom) { if (b) VTALLY.refused++; return null; }
+    const w = b.w, d = b.d, wt = b.wt != null ? b.wt : 0.3;
+    const floorY = (b.floorTops && b.floorTops[0] != null) ? b.floorTops[0] : 0.14;
+    const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
+    const door = b.door || { nx: 0, nz: 1 };
+    // INTO the building from the street door, i.e. toward the back wall.
+    const inx = -(door.nx || 0), inz = -(door.nz || (door.nx ? 0 : 1));
+    const hx = w / 2 - wt, hz = d / 2 - wt;
+    const hDeep = Math.abs(inx) * hx + Math.abs(inz) * hz;    // door wall → back wall
+    const hTan = Math.abs(inx) * hz + Math.abs(inz) * hx;     // across
+    // A ROOM YOU CAN STAND IN, OR NO ROOM AT ALL. A 2 m strongroom you clip
+    // through is worse than the set dressing it replaces, so a building that
+    // cannot hold one is REFUSED and counted (the audit's `refused`).
+    const rd = Math.min(spec.tier === "reserve" ? 6.2 : 4.6, Math.max(2.9, hDeep * 0.55));
+    const rw = Math.min(spec.tier === "reserve" ? 8.4 : 6.4, Math.max(3.4, hTan * 0.86));
+    if (hDeep < rd + 2.6 || hTan < rw + 0.4) { VTALLY.refused++; return null; }
+    const tier = spec.tier || "branch";
+    const dw = Math.min(2.4, rw - 1.0), dh = tier === "reserve" ? 2.5 : 2.3;
+    // the partition plane, in building-local coords: rd back from the far wall.
+    // The lateral offset is CLAMPED to keep the whole room on the plate — a
+    // caller asking for a corner it cannot have gets the nearest one it can,
+    // never a strongroom hanging through the outside wall.
+    const latRoom = Math.max(0, hTan - rw / 2 - 0.3);
+    const lat = Math.max(-latRoom, Math.min(latRoom, spec.lat || 0));
+    const tx = -inz, tz = inx;
+    const plDeep = hDeep - rd;
+    const v = {
+      id: "vault:" + Math.round(lot.cx) + "," + Math.round(lot.cz),
+      lot: lot, tier: tier, kind: spec.kind || "bank",
+      name: spec.name || (b.name || "the vault"),
+      inx: inx, inz: inz, rw: rw, rd: rd, dw: dw, dh: dh, lat: lat,
+      plx: inx * plDeep + tx * lat, plz: inz * plDeep + tz * lat,
+      till: spec.till || { src: lot, point: "vault" },
+      hp0: VHP[tier] || VHP.branch, hp: VHP[tier] || VHP.branch,
+      open: false, swing: 0, opening: 0, breached: false, bagsOut: false,
+      bags: [], y: floorY, glow: 0,
+    };
+    v.x = ox + v.plx; v.z = oz + v.plz;
+    // the strongroom's own centre, for spawning bags and aiming a camera
+    v.rx = ox + v.plx + inx * (rd * 0.55);
+    v.rz = oz + v.plz + inz * (rd * 0.55);
+
+    // room shell + fit-out, clamped to the building's inner faces by the same
+    // planner every interior program runs through.
+    try {
+      if (CBZ.interiorBounded) CBZ.interiorBounded(b, function () { buildRoom(v, b, floorY); return 1; }, "bank-vault");
+      else buildRoom(v, b, floorY);
+    } catch (e) { /* a half-drawn strongroom still has a door */ }
+
+    // ---- the doorway: pivot + architrave, in world space so the leaf swings --
+    const grp = new THREE.Group();
+    grp.position.set(v.x, floorY, v.z);
+    // local +Z must point OUT of the vault (back toward the hall) = -inward
+    grp.rotation.y = Math.atan2(-inx, -inz);
+    // the hash picks which edge hangs, so a city has left- and right-hung
+    // vaults instead of one repeated prop.
+    const hingeLeft = (CBZ.hash01 ? CBZ.hash01(lot.cx, lot.cz, "vhinge") : 0.5) < 0.5;
+    v.hingeSign = hingeLeft ? 1 : -1;
+    const pivot = buildDoor(v);
+    pivot.position.set(-v.hingeSign * dw / 2, 0, 0.02);
+    grp.add(pivot);
+    buildFrame(v, grp);
+    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    if (root) root.add(grp);
+    v.group = grp;
+    if (CBZ.interiorTrackFixture) { try { CBZ.interiorTrackFixture("bank-vault", b, grp); } catch (e) {} }
+
+    // THE COLLIDER IS WHAT "SHUT" MEANS. Removing it is the whole mechanical
+    // difference between a locked vault and an open one — no flag anywhere else
+    // has to be told.
+    v.col = { minX: v.x - Math.abs(tx) * dw / 2 - Math.abs(inx) * 0.3,
+              maxX: v.x + Math.abs(tx) * dw / 2 + Math.abs(inx) * 0.3,
+              minZ: v.z - Math.abs(tz) * dw / 2 - Math.abs(inz) * 0.3,
+              maxZ: v.z + Math.abs(tz) * dw / 2 + Math.abs(inz) * 0.3,
+              y0: floorY, y1: floorY + dh };
+    if (CBZ.colliders) CBZ.colliders.push(v.col);
+
+    lot._vaultRoom = v;
+    VAULTS.push(v);
+    VTALLY.built++;
+    return v;
+  };
+
+  // ---- WHO IS IN THE ROOM WITH YOU -------------------------------------------
+  // "Only NPCs or physical bombs can open them." This is the NPC half: a member
+  // of this bank's own staff, within reach of the door, with their hands up.
+  // It reuses peds.js's EXISTING gunpoint/surrender grammar wholesale — there is
+  // no vault-specific duress state, and shaking somebody down at a vault is the
+  // same act as shaking them down on the street.
+  function insiderAt(v) {
+    const list = CBZ.cityPeds;
+    if (!list) return null;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p || p.dead || p.isPlayer || p.controlled || !p.pos) continue;
+      if (!(p._vaultStaff === v.id || p._venueStaff === "bank" || p._venueStaff === "casino")) continue;
+      if (!(p.surrender || p.gunpoint || p.poseHandsUp || (p.surrenderT || 0) > 0)) continue;
+      const dx = p.pos.x - v.x, dz = p.pos.z - v.z;
+      if (dx * dx + dz * dz > 9 * 9) continue;
+      if (Math.abs((p.pos.y || 0) - v.y) > 2.6) continue;
+      return p;
+    }
+    return null;
+  }
+
+  /* THE LOCK — ONE adoption of city/loyalty.js's CBZ.cityLock, and the first
+     consumer its `vault` grant has ever had. `have` is this door's own key
+     test (a bank officer under duress) and always wins, exactly as that
+     function's contract states; route 4 is the apex rung — at that point in
+     the game the manager opens the door because of who you are.
+     `wasOpen: false` is deliberate and is the documented trap: this door was
+     never open before this wave, so flipping LOYALTY_LOCKS off must leave it
+     SHUT (and therefore still bomb-able), not hand out the reserve. */
+  function vaultLock(v) {
+    const dur = insiderAt(v);
+    if (CBZ.cityLock) {
+      const L = CBZ.cityLock({ id: v.id, label: v.tier === "reserve" ? "The cash centre" : "The vault",
+                               verb: "vault", have: !!dur, wasOpen: false });
+      L.insider = dur;
+      return L;
+    }
+    return { open: !!dur, line: dur ? "" : "The vault is locked.", route: dur ? "key" : null, insider: dur };
+  }
+
+  // WHAT IS IN THERE right now, straight off the ONE ledger — never a number
+  // typed here.
+  function vaultHolds(v) {
+    const TL = CBZ.cityTill;
+    if (!TL || !TL.holds || !v.till || !v.till.src) return { amount: 0, of: 0 };
+    try { return TL.holds(v.till.src, { point: v.till.point || "vault" }); }
+    catch (e) { return { amount: 0, of: 0 }; }
+  }
+
+  /* THE MOMENT THE DOOR COMES OFF. Every consequence in here is a call to a
+     system that already exists — the alarm, the panic field, the crime report,
+     the building's own occupancy alarm — because a vault breach is not a new
+     kind of event, it is the loudest instance of one the game already models. */
+  function vaultBreach(v, how, by) {
+    if (!v || v.open) return false;
+    v.open = true; v.opening = 1; v.breached = (how !== "insider");
+    v.hp = 0;
+    VTALLY.breached++;
+    if (how === "insider") VTALLY.insider++; else VTALLY.blasted++;
+    // the leaf is free — drop the collider on the very frame it starts to move,
+    // so the swing can never trap the player inside its own arc.
+    if (v.col && CBZ.colliders) {
+      const i = CBZ.colliders.indexOf(v.col);
+      if (i >= 0) CBZ.colliders.splice(i, 1);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    // THE MONEY LEAVES THE LEDGER AND LANDS ON THE FLOOR. take() is the ONE
+    // transfer; cashBags.payout() is the ONE physicalisation. This file mints
+    // nothing and pays the player nothing.
+    const TL = CBZ.cityTill;
+    let moved = 0;
+    if (TL && TL.take && v.till && v.till.src) {
+      try { moved = TL.take(v.till.src, { point: v.till.point || "vault", by: "player", rob: true }).taken || 0; }
+      catch (e) { moved = 0; }
+    }
+    if (moved > 0 && CBZ.cashBags && CBZ.cashBags.payout) {
+      const r = CBZ.cashBags.payout(v.rx, v.y, v.rz, moved, {
+        src: v.id, srcName: v.name, spread: Math.min(1.9, v.rw * 0.28),
+        cap: v.tier === "reserve" ? 18 : 10,
+        flash: v.kind === "casino" ? 0xc9a227 : 0x5b8bff,
+      });
+      v.bags = r.bags; v.bagsOut = true;
+      VTALLY.bags += r.bags.length; VTALLY.bagged += moved;
+      big((v.tier === "reserve" ? "THE CASH CENTRE IS OPEN" : "VAULT OPEN") +
+          " — " + fmt$(moved) + " in bags. Carry it out.");
+    } else if (moved > 0) {
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(moved);
+      big("VAULT OPEN — " + fmt$(moved) + ".");
+    } else {
+      big("VAULT OPEN — and it's empty. Somebody got here first.");
+      note("They banked it. Come back when the branch has taken money in again.", 3);
+    }
+    // CONSEQUENCE. A blown vault door is the loudest thing that happens in a
+    // bank; an insider-opened one is quieter but still a robbery in progress.
+    const loud = how !== "insider";
+    if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(v.x, v.z, loud ? 55 : 30, loud ? 2.2 : 1.3, CBZ.city.playerActor);
+    if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(v.x, v.z, loud ? 1.8 : 1.0);
+    if (CBZ.cityPanic && CBZ.city) CBZ.cityPanic(v.x, v.z, loud ? 2.2 : 1.2, CBZ.city.playerActor);
+    if (CBZ.cityCrime) {
+      try { CBZ.cityCrime(loud ? 260 : 180, { instant: true, x: v.x, z: v.z, type: "armed-robbery" }); } catch (e) {}
+    }
+    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(v.tier === "reserve" ? 4 : 3); } catch (e) {} }
+    if (CBZ.cityOccupyAlarm && v.lot && v.lot._occupancy) { try { CBZ.cityOccupyAlarm(v.lot, by || CBZ.player, 0); } catch (e) {} }
+    if (CBZ.sfx) CBZ.sfx(loud ? "explosion" : "coin");
+    if (CBZ.shake) CBZ.shake(loud ? 0.55 : 0.15);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+
+  // BLAST COUPLING — city/armored.js's crackTruck pattern, applied to steel
+  // that does not drive. Bullets never arrive here; only cityExplosion does.
+  function vaultBlast(v, dmg, byPlayer) {
+    if (!v || v.open) return;
+    v.hp -= dmg;
+    v.glow = Math.max(v.glow, Math.min(1, 1 - v.hp / v.hp0));
+    if (v.hp <= 0) { vaultBreach(v, "blast", byPlayer ? CBZ.player : null); return; }
+    if (byPlayer) {
+      const pct = Math.max(0, Math.round(v.hp / v.hp0 * 100));
+      note("The door held (" + pct + "%). It needs more than that.", 1.8);
+    }
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { x: v.x, z: v.z, type: "bombing" }); } catch (e) {} }
+  }
+
+  function installVaultBlastWrap() {
+    const orig = CBZ.cityExplosion;
+    if (typeof orig !== "function" || orig._vaultWrapped) return;
+    const wrapped = function (x, z, opts) {
+      const r = orig.apply(this, arguments);
+      try {
+        const damages = !opts || !opts.noDamage;
+        if (damages && VAULTS.length && g.mode === "city") {
+          const power = (opts && opts.power) || 1;
+          const arm = VBLAST_RANGE * Math.max(1, power * 0.85);
+          for (let i = 0; i < VAULTS.length; i++) {
+            const v = VAULTS[i];
+            if (v.open) continue;
+            const dx = v.x - x, dz = v.z - z, dd = Math.hypot(dx, dz);
+            if (dd > arm) continue;
+            const falloff = 1 - dd / (arm + 0.01);
+            vaultBlast(v, VBLAST_TO_DOOR * power * Math.max(0.25, falloff), !!(opts && opts.byPlayer));
+          }
+        }
+      } catch (e) { /* a coupling failure must never break the shared blast chain */ }
+      return r;
+    };
+    // THE EXPLOSION-WRAPPER LAW (CLAUDE.md): copy EVERY *Wrapped marker
+    // forward, or the next sibling's idempotence guard fails and it re-wraps an
+    // already-wrapped chain.
+    for (const k in orig) if (/Wrapped$/.test(k)) wrapped[k] = orig[k];
+    wrapped._vaultWrapped = true;
+    wrapped._origVault = orig;
+    CBZ.cityExplosion = wrapped;
+  }
+
+  // ---- the public verbs (city/interact.js registers the card) -----------------
+  CBZ.cityVaultAt = function (px, pz, reach, py) {
+    if (!VAULTS.length) return null;
+    const r = reach || 3.4, r2 = r * r;
+    let best = null, bd = r2;
+    for (let i = 0; i < VAULTS.length; i++) {
+      const v = VAULTS[i];
+      if (v.open) continue;
+      if (py != null && Math.abs(v.y - py) > 2.6) continue;
+      const dx = v.x - px, dz = v.z - pz, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = v; }
+    }
+    return best;
+  };
+  CBZ.cityVaultLabel = function (v) {
+    if (!v) return "";
+    const L = vaultLock(v);
+    if (L.open) return L.insider ? "Make them open the vault" : "Open the vault";
+    return L.line || "The vault is locked";
+  };
+  CBZ.cityVaultCanOpen = function (v) { return !!(v && !v.open && vaultLock(v).open); };
+  CBZ.cityVaultTry = function (v) {
+    if (!v || v.open) return false;
+    const L = vaultLock(v);
+    if (!L.open) { note(L.line || "The vault is locked. Blow it, or find somebody who can open it.", 2.6); return false; }
+    if (L.insider) {
+      note("He works the timelock. It swings.", 2.0);
+      // the man who opened it under a gun is a witness, and the room knows.
+      if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(v.x, v.z, 0.9);
+    }
+    return vaultBreach(v, "insider", CBZ.player);
+  };
+  CBZ.cityVaultState = function (lot) {
+    const v = lot && lot._vaultRoom;
+    if (!v) return null;
+    const h = vaultHolds(v);
+    return { id: v.id, tier: v.tier, open: !!v.open, breached: !!v.breached,
+             hp: Math.max(0, Math.round(v.hp)), hp0: v.hp0,
+             holds: h.amount || 0, x: v.x, z: v.z, rx: v.rx, rz: v.rz,
+             bags: v.bags.length, bagged: CBZ.cashBags ? CBZ.cashBags.heldFrom(v.id) : 0 };
+  };
+  CBZ.cityVaults = function () { return VAULTS.slice(); };
+
+  /* ---- THE DRESS PASS --------------------------------------------------------
+     Order 90, the same landmass slot city/casino.js dresses its floors in, so
+     it sees every bank the mainland grid, the towns and the settlements built —
+     not just the one branch this file's lobby machinery attaches to. It also
+     runs BEFORE core/batch.js merges, which is the only reason the strongroom's
+     shelving costs no draw calls. */
+  function primaryBankLot(A) {
+    if (!A) return null;
+    let lot = A.bankLot || null;
+    if (lot && lot.building && lot.building.shop && lot.building.shop.kind === "bank") return lot;
+    const lots = A.lots || [];
+    for (let i = 0; i < lots.length; i++) {
+      const L = lots[i];
+      if (L && L.building && L.building.shop && L.building.shop.kind === "bank") return L;
+    }
+    return null;
+  }
+  // WHAT A TELLER'S DRAWER HOLDS. Derived, never typed: a teller works one
+  // hour of this branch's own share of the district's cash intake, floored at a
+  // real opening float and capped where a real drawer is emptied into the safe.
+  // The ATM cassette above is the same derivation over a day; this is over an
+  // hour, which is exactly the difference between a machine and a person.
+  function tellerFloat(lot) {
+    const TL = CBZ.cityTill;
+    if (!TL || !TL.districtCash || !TL.districtOf) return 2400;
+    try {
+      const dc = TL.districtCash(TL.districtOf(lot));
+      const share = dc.cash / Math.max(1, dc.branches);
+      return Math.max(1200, Math.min(25000, Math.round(share)));
+    } catch (e) { return 2400; }
+  }
+  // one declared cash point per teller window, so "some amount in the drawer"
+  // is a real balance on the ONE ledger and not a per-teller constant.
+  function declareDrawer(lot, i, x, z) {
+    const TL = CBZ.cityTill;
+    if (!TL || !TL.declare) return null;
+    const box2 = { _drawX: x, _drawZ: z };
+    const of = tellerFloat(lot);
+    box2._drawOf = of; box2._drawBal = of; box2._drawDay = -1;
+    TL.declare(box2, {
+      name: "teller drawer", kind: "bank", point: "register",
+      amount: function () {
+        // a drawer is counted out fresh each trading day — it reads the same
+        // clock the rest of the ledger banks on, never a timer of its own.
+        const day = (CBZ.dayCount ? CBZ.dayCount() : 0) | 0;
+        if (box2._drawDay !== day) { box2._drawDay = day; box2._drawBal = box2._drawOf; }
+        return box2._drawBal;
+      },
+      drain: function (n) { box2._drawBal = Math.max(0, box2._drawBal - n); },
+    });
+    return box2;
+  }
+
+  const DRAWERS = [];
+  CBZ.cityBankDrawers = function () { return DRAWERS.slice(); };
+  // THE DRAWER IS A REAL BALANCE OR IT IS A STAT FICTION. "Real tellers with
+  // some amount" only means anything if the amount can leave, so this is the
+  // verb (city/interact.js registers the card). It runs the SAME consequence
+  // grammar interior_programs.js's loot and shops.js's stick-up already run —
+  // cityScare on the person behind the glass, the contagious panic field, and
+  // a crime through cityCrime. Nothing new is invented for a bank.
+  CBZ.cityBankDrawerLabel = function (dr) {
+    const TL = CBZ.cityTill;
+    const h = (TL && dr) ? TL.holds(dr, {}) : null;
+    return (h && h.amount > 0) ? ("Clear the drawer ($" + Math.round(h.amount).toLocaleString() + ")")
+                               : "The drawer's been counted out";
+  };
+  CBZ.cityBankDrawerTake = function (dr) {
+    const TL = CBZ.cityTill;
+    if (!dr || !TL || !TL.take) return false;
+    const r = TL.take(dr, { by: "player", rob: true });
+    if (!(r.taken > 0)) { note("Empty. They already counted it out.", 1.7); return false; }
+    // notes in your hand, through the ONE physicalisation call: a drawer is
+    // always under the bag threshold, so this is wallet cash and the rule that
+    // decides that lives in exactly one place.
+    if (CBZ.cashBags && CBZ.cashBags.payout) CBZ.cashBags.payout(dr._drawX, 0, dr._drawZ, r.taken, { onFloor: false });
+    else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(r.taken);
+    // the person whose window it is makes the decision every clerk in this game
+    // already makes: freeze or bolt.
+    const list = CBZ.cityPeds;
+    if (list) for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p || p.dead || p.isPlayer || !p.pos || p._venueStaff !== "bank") continue;
+      const dx = p.pos.x - dr._drawX, dz = p.pos.z - dr._drawZ;
+      if (dx * dx + dz * dz > 12 * 12) continue;
+      if (p.job === "vault guard") { p.mem = CBZ.player; p.rage = CBZ.player; p.state = "fight"; p.alarmed = Math.max(p.alarmed || 0, 4); }
+      else if (CBZ.cityScare) { try { CBZ.cityScare(p, CBZ.player, { bias: 0.3 }); } catch (e) {} }
+    }
+    if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(dr._drawX, dr._drawZ, 1.1);
+    if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(dr._drawX, dr._drawZ, 34, 1.5, CBZ.city.playerActor);
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(190, { instant: true, x: dr._drawX, z: dr._drawZ, type: "armed-robbery" }); } catch (e) {} }
+    note("Took " + fmt$(r.taken) + " out of the window. The vault's where the money is.", 2.4);
+    return true;
+  };
+  CBZ.cityBankDrawerAt = function (px, pz, reach, py) {
+    const r = reach || 3.0, r2 = r * r;
+    let best = null, bd = r2;
+    for (let i = 0; i < DRAWERS.length; i++) {
+      const dr = DRAWERS[i];
+      if (py != null && Math.abs((dr.y || 0) - py) > 2.4) continue;
+      const dx = dr._drawX - px, dz = dr._drawZ - pz, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = dr; }
+    }
+    return best;
+  };
+
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
+    if (CBZ.CONFIG.BANK_VAULT_V1 === false) return;
+    const A = city || CBZ._settlementArena || (CBZ.city && CBZ.city.arena) || null;
+    if (!A) return;
+    VAULTS.length = 0; DRAWERS.length = 0;
+    VTALLY.built = VTALLY.breached = VTALLY.blasted = VTALLY.insider = 0;
+    VTALLY.bags = VTALLY.bagged = VTALLY.refused = 0;
+    if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("bank", { stations: 0, note: "a teller per window, a manager, a vault guard" });
+    const TL = CBZ.cityTill;
+    const primary = primaryBankLot(A);
+    const seen = new Set();
+    let stations = 0;
+    const scan = function (arr) {
+      if (!arr) return;
+      for (const lot of arr) {
+        if (!lot || lot.kind !== "bank" || !lot.building || lot.demolished) continue;
+        const key = Math.round(lot.cx) + "," + Math.round(lot.cz);
+        if (seen.has(key)) continue; seen.add(key);
+        const tier = (TL && TL.vaultTier) ? (TL.vaultTier(lot) || "branch") : "branch";
+        let v = null;
+        try {
+          // PUSH THE DOOR OFF THE CENTRELINE. The teller line runs across the
+          // middle of a banking hall, and a vault door directly behind the
+          // middle of it is a door you cannot walk to (the counter is a solid
+          // collider). Offsetting the strongroom and cutting a staff gap in the
+          // counter at the same lateral — see buildDisplays — is how a real
+          // bank is laid out and is what makes the door REACHABLE at all.
+          const side = (CBZ.hash01 ? CBZ.hash01(lot.cx, lot.cz, "vside") : 0.5) < 0.5 ? -1 : 1;
+          v = CBZ.cityVaultRoom(lot, { tier: tier, kind: "bank",
+                                       name: lot.building.name || "Meridian Trust",
+                                       lat: side * 2.2,
+                                       till: { src: lot, point: "vault" } });
+        } catch (e) { v = null; }
+        if (!v) continue;
+        // ---- THE PEOPLE. A hall with a counter, a vault and nobody in it is
+        // the "stage set" citystaff.js was written to end. These are POSTS —
+        // pure data until you are 170 m away — which is the only reason a real
+        // rig per teller window is affordable across every bank in the world.
+        if (CBZ.CONFIG.BANK_TELLERS_V1 !== false && CBZ.cityStaffPost) {
+          const b = lot.building;
+          const ox = b.ox != null ? b.ox : lot.cx, oz = b.oz != null ? b.oz : lot.cz;
+          const tx = -v.inz, tz = v.inx;
+          // the teller line stands one metre in FRONT of the partition, facing
+          // the way the public comes in — which is where the counter already is.
+          const nT = Math.max(2, Math.min(3, Math.round(v.rw / 2.6)));
+          for (let i = 0; i < nT; i++) {
+            const latT = (nT > 1 ? (i / (nT - 1) - 0.5) : 0) * Math.min(4.2, v.rw - 1.2);
+            const px = ox + v.plx - v.inx * 1.15 + tx * latT;
+            const pz = oz + v.plz - v.inz * 1.15 + tz * latT;
+            CBZ.cityStaffPost({
+              venue: "bank", id: v.id + ":teller" + i, job: "bank teller",
+              archetype: "merchant", x: px, z: pz,
+              face: Math.atan2(-v.inx, -v.inz), pose: "table",
+              opts: { wealth: 0.46, outfit: 0x2b3140, aggr: 0.08 },
+              after: function (ped) { ped._vaultStaff = v.id; },
+            });
+            const dr = declareDrawer(lot, i, px, pz);
+            if (dr) { dr.y = v.y; DRAWERS.push(dr); }
+            stations++;
+          }
+          // the officer who can legally open the door, at the desk beside it
+          const mx = ox + v.plx - v.inx * 2.6 + tx * (v.rw * 0.5 + 1.1);
+          const mz = oz + v.plz - v.inz * 2.6 + tz * (v.rw * 0.5 + 1.1);
+          CBZ.cityStaffPost({
+            venue: "bank", id: v.id + ":manager", job: "bank manager",
+            archetype: "professional", x: mx, z: mz,
+            face: Math.atan2(-v.inx, -v.inz), pose: "table",
+            opts: { wealth: 0.72, outfit: 0x1c2028, aggr: 0.14 },
+            after: function (ped) { ped._vaultStaff = v.id; },
+          });
+          stations++;
+          // and the man standing at the door itself. The reserve gets two.
+          const nG = tier === "reserve" ? 2 : 1;
+          for (let q = 0; q < nG; q++) {
+            const gx = ox + v.plx - v.inx * 1.9 + tx * (q ? -1 : 1) * (v.dw / 2 + 0.9);
+            const gz = oz + v.plz - v.inz * 1.9 + tz * (q ? -1 : 1) * (v.dw / 2 + 0.9);
+            CBZ.cityStaffPost({
+              venue: "bank", id: v.id + ":guard" + q, job: "vault guard",
+              archetype: "security", x: gx, z: gz,
+              face: Math.atan2(v.inx, v.inz), pose: "foldarms",
+              opts: { wealth: 0.4, outfit: 0x23262c, aggr: 0.55, armed: true, weapon: "Pistol", hp: 150 },
+              after: function (ped) { ped._vaultStaff = v.id; },
+            });
+            stations++;
+          }
+        }
+      }
+    };
+    scan(A.shopLots); scan(A.lots);
+    if (CBZ.cityStaffStations) CBZ.cityStaffStations("bank", stations);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }, 90);
+
+  /* ---- the vault tick: the swing, the heat glow, and nothing else ------------
+     It early-outs on an empty registry, and the visibility gate keeps a city's
+     worth of doorways off the draw list until you are near one. */
+  CBZ.onUpdate(38.45, function (dt) {
+    installVaultBlastWrap();       // cheap idempotent re-check (load order + hot reload)
+    if (!VAULTS.length) return;
+    if (!g || g.mode !== "city") return;
+    const P = CBZ.player;
+    const px = P ? P.pos.x : 0, pz = P ? P.pos.z : 0;
+    for (let i = 0; i < VAULTS.length; i++) {
+      const v = VAULTS[i];
+      const near = Math.abs(v.x - px) < 70 && Math.abs(v.z - pz) < 70;
+      if (v.group && v.group.visible !== near) v.group.visible = near;
+      if (!near) continue;
+      // THE ARC: a real vault door is slow and it is heavy. Ease out over ~2.6 s
+      // (the elevators.js grammar — phased, never a visibility flip), and spin
+      // the handwheel as the boltwork withdraws so the mechanism reads.
+      if (v.opening > 0 && v.swing < VSWING) {
+        v.swing = Math.min(VSWING, v.swing + dt * (0.55 + v.swing * 0.55));
+        if (v.pivot) v.pivot.rotation.y = -v.hingeSign * v.swing;
+        if (v.wheel) v.wheel.rotation.z -= dt * 5.2;
+        if (v.lugs && v.swing > 0.12) {
+          const back = Math.min(1, v.swing / 0.6);
+          for (let q = 0; q < v.lugs.length; q++) v.lugs[q].scale.x = 1 - 0.7 * back;
+        }
+        if (v.swing >= VSWING) v.opening = 0;
+      }
+      // the door heats where the charges went off — the same read the old
+      // drill glow gave, now driven by real damage instead of a timer.
+      if (v.glow > 0 && v.doorMat && v.doorMat.emissive) {
+        if (v.open) v.glow = Math.max(0, v.glow - dt * 0.35);
+        const a = v.glow;
+        try { v.doorMat.emissive.setRGB(0.42 * a, 0.13 * a, 0); } catch (e) {}
+      }
+    }
+  });
+
+  /* THE RATCHET (CLAUDE.md BLOCK LAW #5). `refused` is the honest failure of a
+     room-in-a-building system — a bank whose floorplate cannot hold a
+     strongroom you can stand in — and it may only ever go DOWN. `rooms` and
+     `bagged` print beside it so a "fix" that simply stops building vaults
+     cannot pass, and `holds`/`reserveHolds` are what make the owner's
+     "10s or 100s of millions" a measurement rather than a claim. */
+  CBZ.vaultAudit = function () {
+    let open = 0, shut = 0, holds = 0, bricks = 0, reserveHolds = 0, hi = 0;
+    const byTier = {};
+    for (let i = 0; i < VAULTS.length; i++) {
+      const v = VAULTS[i];
+      byTier[v.tier] = (byTier[v.tier] | 0) + 1;
+      bricks += v.bricks || 0;
+      if (v.open) open++; else shut++;
+      const h = vaultHolds(v).amount || 0;
+      holds += h;
+      if (h > hi) hi = h;
+      if (v.tier === "reserve") reserveHolds = h;
+    }
+    const CB = CBZ.cashBags;
+    return {
+      rooms: VAULTS.length, byTier: byTier, open: open, shut: shut,
+      refused: VTALLY.refused, built: VTALLY.built,
+      breached: VTALLY.breached, blasted: VTALLY.blasted, insider: VTALLY.insider,
+      bagsSpawned: VTALLY.bags, valueBagged: VTALLY.bagged,
+      bagsLive: CB ? CB.count() : 0,
+      holds: Math.round(holds), biggest: Math.round(hi), reserveHolds: Math.round(reserveHolds),
+      shelfBricks: bricks, drawers: DRAWERS.length,
+      hpBranch: VHP.branch, hpReserve: VHP.reserve,
+    };
+  };
+
   // ---- public storefront hook (contract [F]) + harness handles ----------------
   // is the bank live for this lot? interact.js feature-detects this to suppress
   // the dumb generic "Shop here" vendor verb when the branch self-prompts.
@@ -1049,11 +1996,25 @@
   // bank — which is why it lands inside the researched $120k-$250k band that
   // heists.js used to type by hand), and drilling it MOVES that balance. A
   // branch you emptied on Monday is a thin score on Tuesday.
-  CBZ.cityBankVault = function () {
+  //
+  // BANK_VAULT_V1 UPDATE: the branch no longer has to be BUILT (its lobby is
+  // lazy and only ever attaches to one lot) for this to answer — the vault
+  // rooms are dressed at world build for EVERY bank, so a heist cased at any
+  // branch in the world gets the real steel. `open`/`hp` are published so
+  // heists.js can watch the physical door instead of running a drill meter.
+  CBZ.cityBankVault = function (lot) {
+    const target = lot || (S.built && S.lot) || null;
+    const v = (target && target._vaultRoom) || (VAULTS.length ? VAULTS[0] : null);
+    if (v) {
+      const h = vaultHolds(v);
+      return { x: v.x, z: v.z, rx: v.rx, rz: v.rz, lot: v.lot, tier: v.tier,
+               holds: h.amount || 0, of: h.of || 0, open: !!v.open, hp: Math.max(0, Math.round(v.hp)),
+               hp0: v.hp0, bags: v.bags.length, id: v.id };
+    }
     if (!(S.built && S.vault)) return null;
     const TL = CBZ.cityTill;
     const h = (TL && S.lot) ? TL.holds(S.lot, { point: "vault" }) : null;
-    return { x: S.vault.x, z: S.vault.z, lot: S.lot || null, holds: h ? h.amount : 0, of: h ? h.of : 0 };
+    return { x: S.vault.x, z: S.vault.z, lot: S.lot || null, holds: h ? h.amount : 0, of: h ? h.of : 0, open: false };
   };
   // what is in the lobby machine right now (and what it holds when full) —
   // one read for a UI, a marker, or anybody who wants to crack it open.
@@ -1066,10 +2027,13 @@
   };
   // glow the vault door (0..1) while it's being drilled; 0 clears it. Safe no-op
   // if the branch isn't built (headless / not near a bank).
-  CBZ.cityBankVaultGlow = function (amt) {
-    if (!(S.built && S.vault && S.vault.doorMat && S.vault.doorMat.emissive)) return;
+  CBZ.cityBankVaultGlow = function (amt, lot) {
     amt = Math.max(0, Math.min(1, +amt || 0));
-    // a hot drilled-steel orange that ramps with progress
+    const v = (lot && lot._vaultRoom) || (S.lot && S.lot._vaultRoom) || (VAULTS.length ? VAULTS[0] : null);
+    // the real door owns its own heat now (vaultBlast writes `glow` off actual
+    // damage) — a caller can still force it, e.g. a scripted set piece.
+    if (v) { v.glow = amt; return; }
+    if (!(S.built && S.vault && S.vault.doorMat && S.vault.doorMat.emissive)) return;
     const r = Math.round(0x66 * amt), gC = Math.round(0x22 * amt);
     try { S.vault.doorMat.emissive.setRGB(r / 255, gC / 255, 0); } catch (e) {}
   };

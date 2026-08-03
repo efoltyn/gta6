@@ -10,6 +10,16 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+
+  /* CAR_CABIN_V2 — every drivable body style gets ONE real cabin: a sealed
+     interior tub (floor pan, door cards, firewall, rear bulkhead, headliner)
+     dressed with seats, a console, a dash and a wheel you can read through the
+     glass, plus the anchors a seated body and a first-person eye need. OFF →
+     the pre-V2 dressing (a seat deck and four slabs on the road cars, NOTHING
+     on the SUV, van and cybertruck) and no seat/eye anchors, which is the
+     one-line revert. See dressCabin() below for the why. */
+  if (CFG.CAR_CABIN_V2 == null) CFG.CAR_CABIN_V2 = true;
 
   const STYLE_ORDER = [
     "ferrari", "enzo", "veyron", "aventador", "porsche", "muscle", "lowrider",
@@ -657,6 +667,319 @@
     hatch:      { metalness: 0.48, roughness: 0.38, envMapIntensity: 1.0 },
   };
 
+  /* ============================================================
+     THE CABIN — one builder, every body style (CAR_CABIN_V2)
+
+     OWNER: "really make interior of car exist like how interior of building
+     with glass exists and you can see npcs from outside" — and, separately,
+     that his own car looks EMPTY coming toward the camera.
+
+     Two different faults were producing one symptom:
+
+     (1) THE ROOM WAS NOT A ROOM. The road cars had five loose slabs floating
+         inside a transparent tub — a seat deck, two seat backs, a bench, a
+         dash. Nothing enclosed anything, so a low camera looking through the
+         side glass saw the INSIDE of the far flank, which is a backface, which
+         is culled, which is daylight. The SUV had a single grey block; the van
+         and the cybertruck had nothing at all behind their windows.
+         A building interior does not read because it has furniture. It reads
+         because it is a SEALED BOX with a glass wall — city/buildings.js's
+         see-inside discipline. So this builds the box first (floor pan, two
+         door cards, a firewall, a rear bulkhead, a headliner) and only then
+         puts furniture in it. That is also what makes first person possible:
+         you cannot sit inside a room that has no floor and no walls.
+
+     (2) NOTHING WAS ANCHORED. `cabinInfo` carried four numbers, enough to
+         park a merged blob roughly in the middle of the greenhouse and no
+         more. This publishes the frame the rest of the wave needs — the two
+         front SEATS (cushion height and all), the WHEEL, the FLOOR, and the
+         EYE — so city/vehicles.js can seat the player's real dressed rig at
+         the wheel and city/view.js can put a camera in his head, both reading
+         the same authored numbers instead of each inventing their own.
+
+     PROPORTIONS ARE REAL, NOT EYEBALLED. The cabin is derived off the same
+     total-height law the silhouettes already obey: floor pan ~0.29·H, cushion
+     a hand's width above it, driver's eye ~0.81·H (a Model 3's eye ellipse
+     sits ~1.20 m up a 1.44 m car), headrest crown just under the eye — which
+     is why the reference photo shows a head ABOVE the headrests, not behind
+     them. Every number below falls out of the cabin box it is handed, so an
+     SUV gets an SUV's high hip point and a supercar gets a supercar's low one
+     with no per-style table to keep in sync.
+
+     COST. Everything uses the ONE shared interior material, so the whole cabin
+     merges into the interior bucket city/vehicles.js already makes — the car
+     gains geometry, not draw calls. The single exception is the instrument
+     face, which is emissive (a lit cluster is the whole reason a cabin reads
+     at dusk) and therefore one extra bucket; that is the price and it is
+     behind CAR_CABIN_V2 with everything else.
+  ============================================================ */
+  // Screens are authored 0.07 proud of their bezel, not the 0.025 SCREEN LAW
+  // minimum, because vehicles.js's sealSeams() inflates every box thinner than
+  // 0.09 on its thin axis by 0.04 — which eats 0.04 of any gap between two
+  // thin boxes. 0.07 authored is ~0.03 shipped, i.e. still legal after the
+  // seam pass. (Meshes that must NOT be inflated carry userData.noSeal.)
+  const SCREEN_GAP = 0.07;
+  const rings = new Map();
+  function ringGeo(r, tube) {
+    const key = r.toFixed(3) + "|" + tube.toFixed(3);
+    let geo = rings.get(key);
+    if (!geo) {
+      geo = new THREE.TorusGeometry(r, tube, 5, 14);
+      geo._shared = true;
+      rings.set(key, geo);
+    }
+    return geo;
+  }
+  function addRing(root, r, tube, x, y, z, material) {
+    const mesh = new THREE.Mesh(ringGeo(r, tube), material);
+    mesh.position.set(x || 0, y || 0, z || 0);
+    mesh.castShadow = false;
+    root.add(mesh);
+    return mesh;
+  }
+  /* WHY A CABIN NEEDS ITS OWN LIGHT.
+     The first plates of this work were geometrically correct and read as a
+     black void behind tinted glass — worse than the empty tub they replaced,
+     because at least the old floating slab caught the sun. The reason is the
+     same one world/carfx.js writes up at length about the glass itself: this
+     is a LAMBERT world with no bounce and no ambient occlusion budget, and a
+     cabin is a ROOFED ROOM. The sun physically cannot reach any surface in it,
+     so every one of them renders at the ambient floor, i.e. near black, and
+     then gets multiplied by a 0.35-opacity pane on the way out.
+     carfx's fix for the pane was an emissive LIFT, and the same fix works one
+     layer in: a small self-glow standing in for the bounce light a real cabin
+     gets off its own glass. Three tones, because a real interior is not one
+     colour and the read from outside depends entirely on contrast:
+       interior       dark structure — floor, door cards, bulkheads, console
+       interior-lite  upholstery and headliner: the big pale surfaces that ARE
+                      what you see through a window from above
+       interior-screen the one lit panel. It deliberately says NOTHING — no
+                      needle, no number — because the game does not simulate a
+                      value for it and a gauge that lies is worse than no gauge
+                      (city/carcluster.js's own rule). It is a backlit panel,
+                      and that is a true thing to be.
+     Cost: two shared materials for the whole fleet, i.e. two extra merged
+     buckets on an enclosed car, and only with CAR_CABIN_V2 on.
+
+     The lift is carried mostly by the EMISSIVE and only a little by the base
+     colour, on purpose. A pale base is the obvious way to make an interior
+     show and it is the wrong one: the windscreen lets direct sun onto the dash
+     roll, a pale Lambert under that sun clips to white, and the plate came
+     back with a glowing bar across every car in traffic. A mid base plus a
+     standing self-glow reads at the SAME level in sun and in shadow, which is
+     what "a room with its own light" actually means.
+
+     THE KEY IS "interior-v2", NOT "interior", AND THAT IS LOAD-BEARING.
+     sharedMat is a first-caller-wins cache keyed on a string, and the pre-V2
+     fallbacks below still ask for `sharedMat("interior", 0x2a2f36)` — one of
+     them on the line ABOVE the dressCabin call that was supposed to replace
+     it. So the flag-off material won the cache before the flag-on material
+     ever asked for it, and every cabin in the fleet was silently drawn in the
+     unlit dark tone while this file's own audit reported the lit one. It cost
+     an entire measured iteration to find, because nothing is wrong with the
+     geometry, the flag, the merge or the light — only with the NAME. A tone
+     that belongs to V2 gets a key that belongs to V2. */
+  const cabinMat = () => sharedMat("interior-v2", 0x333a44, { emissive: 0x1a202a, ei: 0.85 });
+  const cabinLiteMat = () => sharedMat("interior-lite", 0x545b66, { emissive: 0x343b46, ei: 0.85 });
+  const clusterMat = () => sharedMat("interior-screen", 0x0e141b, { emissive: 0x1d4560, ei: 0.9 });
+
+  /* dressCabin(root, o) -> cabinInfo (also written to root.userData.cabinInfo)
+       o.cabW    cabin base width (the glass tub's base width)
+       o.zR/zF   cabin base rear/front z
+       o.zTR/zTF roof rear/front z (optional; defaults to a 20% rake each end)
+       o.roofW   roof width (optional)
+       o.beltY   beltline: where the glass starts
+       o.roofY   headliner height
+       o.floorY  cabin floor pan top
+       o.rows    1 or 2 seat rows (optional; derived from cabin length)     */
+  function dressCabin(root, o) {
+    if (CFG.CAR_CABIN_V2 === false) return null;
+    const M = cabinMat(), L = cabinLiteMat(), SCRN = clusterMat();
+    const cabW = o.cabW, halfW = cabW * 0.5;
+    const zR = Math.min(o.zR, o.zF), zF = Math.max(o.zR, o.zF);
+    const cl = Math.max(0.60, zF - zR), cz = (zR + zF) * 0.5;
+    const beltY = o.beltY, roofY = o.roofY;
+    const gh = Math.max(0.16, roofY - beltY);
+    const roofW = o.roofW != null ? o.roofW : cabW * 0.86;
+    const zTR = o.zTR != null ? o.zTR : zR + cl * 0.20;
+    const zTF = o.zTF != null ? o.zTF : zF - cl * 0.20;
+    const floorY = Math.min(o.floorY, beltY - 0.26);
+    const wallH = Math.max(0.14, beltY - floorY);
+
+    // ---- the driving position, derived once and shared by everything -----
+    // THE COWL SITS AT THE SILL. This started at beltY + 0.20·gh — 8 cm PROUD
+    // of the window line — and it quietly wrecked the whole wave: a dash that
+    // stands above the sill is a wall across the bottom of the windscreen, and
+    // it ate the headrests and the driver's head in every traffic plate while
+    // the audit cheerfully reported them present. Real cowl point and real
+    // beltline are within a couple of centimetres of each other (that is what
+    // makes a modern car's glasshouse read as glass), and once they are, the
+    // things ABOVE the dash — heads, headrests, the top of the wheel rim — are
+    // exactly what an outside camera sees.
+    const dashTopY = beltY + gh * 0.05;
+    const dashZ = zF - 0.20;
+    const wheelZ = dashZ - 0.16;
+    const seatX = Math.min(0.42, cabW * 0.24);            // +X is the car's LEFT: LHD
+    // THE REACH. A driver's chest sits ~0.40 m off the rim and his EYE ~0.55 —
+    // and that second number is not cosmetic, it is the whole first-person
+    // view: the eye below is offset forward of the seat to where a face
+    // actually is, so a seat parked too close to the wheel puts the camera
+    // inside its own occupant's chest. (It did. The first live plate of the
+    // driver's seat was a wall of shirt at the near plane, and the cabin
+    // behind it was fine the whole time.)
+    const seatZ = Math.max(zR + 0.34, wheelZ - 0.60);
+    // THE HIP POINT. SAE calls it H30 — the cushion's height over the floor
+    // pan — and on a sedan it is ~0.10-0.15 m, not the third of the cabin wall
+    // the first pass used. Getting it wrong is not a detail: it decides where
+    // the seat BACK tops out, and a seat back that stops below the window sill
+    // is a seat nobody outside the car can see.
+    const cushionY = floorY + Math.max(0.10, wallH * 0.17);
+    // THE EYE. A driver's eye sits just above the beltline — a Model 3's eye
+    // ellipse is ~0.12 m over its window sill, an SUV's a little more, and NO
+    // car puts it halfway up the glass however tall the greenhouse is (which
+    // is why this is a clamped offset off the SILL and not a fraction of the
+    // greenhouse: a van's glass is twice a coupe's and its driver is not
+    // sitting twice as high). Clamped clear of the header at the top.
+    const eyeY = Math.max(beltY + 0.04,
+      Math.min(beltY + Math.max(0.12, Math.min(gh * 0.30, 0.42)), roofY - 0.20));
+    // A seat back reaches the SILL — that is what makes the shoulder line of a
+    // car interior, and it is the surface a high side camera actually lands on.
+    const backH = Math.max(0.30, Math.min(0.72, beltY + gh * 0.06 - cushionY));
+    const wheelR = Math.min(0.185, cabW * 0.108);
+    const wheelY = Math.max(cushionY + 0.28, dashTopY - 0.11);
+    const rearZ = Math.max(zR + 0.30, seatZ - 0.80);
+    const rows = o.rows || ((rearZ < seatZ - 0.55) ? 2 : 1);
+
+    // ---- THE BOX. Sealed on five sides; the sixth is the glass. -----------
+    addBox(root, cabW * 0.96, 0.06, cl, 0, floorY - 0.03, cz, M);              // floor pan
+    [1, -1].forEach(function (s) {
+      const dc = addBox(root, 0.06, wallH, cl * 0.96, s * (halfW - 0.05), floorY + wallH * 0.5, cz, M);
+      dc.userData.noSeal = true;                                              // exact door-card thickness
+      addBox(root, 0.05, 0.05, 0.20, s * (halfW - 0.11), beltY - 0.13, cz + cl * 0.14, M);   // door pull
+      addBox(root, 0.05, 0.10, cl * 0.5, s * (halfW - 0.10), beltY - 0.05, cz, M);           // armrest / beltline pad
+    });
+    const fwH = Math.max(0.12, dashTopY - 0.05 - floorY);
+    const fw = addBox(root, cabW * 0.94, fwH, 0.07, 0, floorY + fwH * 0.5, zF - 0.05, M);    // firewall
+    fw.userData.noSeal = true;
+    const rw = addBox(root, cabW * 0.94, wallH, 0.07, 0, floorY + wallH * 0.5, zR + 0.05, M);// rear bulkhead
+    rw.userData.noSeal = true;
+    // headliner: PALE. It is the single biggest surface a camera above the
+    // beltline sees through the glass, and a dark one turns the whole cabin
+    // into a hole.
+    const hl = addBox(root, roofW * 0.96, 0.035, Math.max(0.30, (zTF - zTR) * 0.98), 0,
+      roofY - 0.028, (zTR + zTF) * 0.5, L);
+    hl.userData.noSeal = true;
+
+    // ---- SEATS. Base, back, headrest — the three shapes that read as a car
+    //      seat from outside, and the crown of the headrest stops just under
+    //      the eye so a driver's head sits ABOVE it (the reference photo).
+    function seat(x, z, bh, hr) {
+      addBox(root, 0.46, 0.13, 0.48, x, cushionY - 0.065, z, L);
+      const back = addBox(root, 0.46, bh, 0.12, x, cushionY + bh * 0.5, z - 0.24, L);
+      back.rotation.x = -0.12;                                                 // recline
+      // bolsters: two dark uprights framing the pale back. Cheap, and the
+      // difference between "a slab" and "a seat" at any distance.
+      [0.20, -0.20].forEach(function (bx) {
+        const bo = addBox(root, 0.07, bh * 0.86, 0.16, x + bx, cushionY + bh * 0.5, z - 0.22, M);
+        bo.rotation.x = -0.12;
+      });
+      // HEADREST, in the PALE upholstery tone. A real one is ~0.25 m tall and
+      // it is the ONLY part of a seat that clears the window sill — so it is
+      // the entire outside read, the one shape a passing camera can use to
+      // tell a furnished cabin from an empty one. Its base sits on the sill
+      // and its crown stands a hand above, which puts it either side of the
+      // driver's head rather than under it.
+      if (hr) addBox(root, 0.25, 0.22, 0.13, x, cushionY + bh + 0.10, z - 0.27, L);
+    }
+    seat(seatX, seatZ, backH, true);
+    seat(-seatX, seatZ, backH, true);
+    if (rows > 1) {
+      const rbh = Math.max(0.24, backH * 0.80);
+      addBox(root, cabW * 0.80, 0.13, 0.44, 0, cushionY - 0.065, rearZ, L);
+      const rb = addBox(root, cabW * 0.80, rbh, 0.12, 0, cushionY + rbh * 0.5, rearZ - 0.22, L);
+      rb.rotation.x = -0.16;
+      [seatX, -seatX].forEach(function (x) {
+        addBox(root, 0.22, 0.14, 0.11, x, cushionY + rbh + 0.07, rearZ - 0.25, L);
+      });
+      // parcel shelf behind the bench, so the backlight has something under it
+      addBox(root, cabW * 0.86, 0.05, Math.max(0.12, (rearZ - 0.30) - (zR + 0.09)), 0,
+        beltY - 0.05, (rearZ - 0.30 + zR + 0.09) * 0.5, L);
+    }
+    // centre console + transmission tunnel between the front seats
+    addBox(root, Math.max(0.16, cabW * 0.14), Math.max(0.14, cushionY + 0.10 - floorY),
+      cl * 0.40, 0, floorY + (cushionY + 0.10 - floorY) * 0.5, seatZ - 0.06, M);
+
+    // ---- DASH. A slab, a MATTE top roll, a binnacle hood over the cluster,
+    //      two screens. The roll is deliberately the darkest thing in the
+    //      cabin: seen from outside through a raked windscreen it is a
+    //      1.8 x 0.34 m plate aimed at the sun, and the first plate of this
+    //      wave came back with it as the single brightest object in the
+    //      frame — a glowing bar across every car in traffic. Real dash tops
+    //      are matte black for exactly the same reason (windscreen veiling
+    //      glare), so the fix and the physics agree.
+    addBox(root, cabW * 0.92, 0.15, 0.34, 0, dashTopY - 0.075, dashZ, M);
+    addBox(root, cabW * 0.92, 0.04, 0.34, 0, dashTopY - 0.005, dashZ, M);
+    const cowl = addBox(root, 0.44, 0.11, 0.24, seatX, dashTopY + 0.015, dashZ - 0.03, M);
+    cowl.userData.noSeal = true;
+    // instrument cluster: bezel face at (dashZ - 0.03) - 0.12, screen SCREEN_GAP proud of it
+    const bezelFrontZ = dashZ - 0.15;
+    const cl1 = addBox(root, 0.34, 0.10, 0.03, seatX, dashTopY - 0.015, bezelFrontZ - SCREEN_GAP - 0.015, SCRN);
+    cl1.userData.noSeal = true;
+    cl1.userData.carScreen = SCREEN_GAP;
+    // centre stack screen, standing proud of the dash face
+    const cs = addBox(root, Math.min(0.34, cabW * 0.20), 0.19, 0.03, 0, dashTopY + 0.03,
+      dashZ - 0.17 - SCREEN_GAP - 0.015, SCRN);
+    cs.rotation.x = 0.10;
+    cs.userData.noSeal = true;
+    cs.userData.carScreen = SCREEN_GAP;
+
+    // ---- THE WHEEL. A real rim, a hub and three spokes, raked back at the
+    //      top the way a column puts it — the single most recognisable object
+    //      in a car interior, and the thing hands can be seen holding.
+    const col = addBox(root, 0.07, 0.07, 0.22, seatX, wheelY - 0.05, wheelZ + 0.11, M);
+    col.rotation.x = 0.42;
+    const rim = addRing(root, wheelR, 0.028, seatX, wheelY, wheelZ, M);
+    rim.rotation.x = 0.42;
+    addBox(root, 0.10, 0.09, 0.05, seatX, wheelY, wheelZ, M);                  // hub
+    [0, 2.094, -2.094].forEach(function (a) {
+      const sp = addBox(root, 0.035, wheelR * 0.92, 0.025,
+        seatX + Math.sin(a) * wheelR * 0.45,
+        wheelY + Math.cos(a) * wheelR * 0.45 * Math.cos(0.42),
+        wheelZ - Math.cos(a) * wheelR * 0.45 * Math.sin(0.42), M);
+      sp.rotation.set(0.42, 0, -a);
+      sp.userData.noSeal = true;
+    });
+
+    // ---- header furniture: mirror + two visors. Small, and the difference
+    //      between "a box with windows" and "a car you are sitting in".
+    const mir = addBox(root, 0.26, 0.075, 0.045, 0, roofY - 0.10, zTF - 0.02, M);
+    mir.userData.noSeal = true;
+    [1, -1].forEach(function (s) {
+      const vz = addBox(root, roofW * 0.34, 0.03, 0.17, s * roofW * 0.24, roofY - 0.075, zTF - 0.04, M);
+      vz.rotation.x = -0.5;
+      vz.userData.noSeal = true;
+    });
+
+    const info = {
+      // legacy four (city/vehicles.js occSeatAnchor has read these for ages)
+      baseY: beltY, peakY: gh, cx: cz, w: cabW,
+      // the V2 frame
+      floorY: floorY, roofY: roofY, beltY: beltY,
+      zRear: zR, zFront: zF, rows: rows,
+      cushionY: cushionY, seatX: seatX, seatZ: seatZ, rearSeatZ: rows > 1 ? rearZ : null,
+      wheel: { x: seatX, y: wheelY, z: wheelZ, r: wheelR },
+      // THE FIRST-PERSON EYE. Offset forward of the seat frame by the depth
+      // of a chest plus a face: entities/character.js puts the eye boxes
+      // 0.315 of a head in front of the neck axis, and the torso is ~0.14
+      // deep either side of it, so anything less than ~0.17 here seats the
+      // camera INSIDE the driver rather than behind his eyes.
+      eye: { x: seatX, y: eyeY, z: seatZ + 0.19 },
+      dressed: true,
+    };
+    root.userData.cabinInfo = info;
+    return info;
+  }
+
   function makeRoadCar(style) {
     const root = new THREE.Group();
     const flare = STYLE_FLARE[style] || STYLE_FLARE["tesla-3"];
@@ -749,24 +1072,32 @@
     // start the tumblehome at the beltline edge, so the tub base hugs it
     const cabBaseY = bodyTop - peakY * 0.08;
     addPrism(root, cabW, cabin, cabBaseY, dark);        // the glass tub
-    // CABIN INTERIOR: REAL furniture behind REAL glass (owner ask) — the old
-    // single "cockpit mass" block is now a legible interior you actually see
-    // through the transparent tub: a seat deck, two front seat BACKS, a rear
-    // bench back, a dash slab and a steering wheel. Everything uses the one
-    // shared interior material, so it all merges into the existing interior
-    // bucket — zero extra draw calls per car.
-    const interior = sharedMat("interior", 0x2a2f36);
-    addBox(root, cabW * 0.88, Math.max(0.06, peakY * 0.22), Math.max(0.3, (cb + ct)), 0, cabBaseY + peakY * 0.12, cabCx, interior);   // seat deck / floor mass
-    [1, -1].forEach(function (side) {
-      addBox(root, cabW * 0.3, peakY * 0.62, 0.1, side * cabW * 0.22, cabBaseY + peakY * 0.5, cabCx - 0.12, interior);               // front seat backs
-    });
-    addBox(root, cabW * 0.7, peakY * 0.5, 0.1, 0, cabBaseY + peakY * 0.42, cabCx - cb * 0.62, interior);                             // rear bench back
-    addBox(root, cabW * 0.8, 0.12, 0.24, 0, cabBaseY + peakY * 0.34, cabCx + cb * 0.62, interior);                                   // dash
-    const swheel = addBox(root, 0.3, 0.26, 0.05, cabW * 0.22, cabBaseY + peakY * 0.4, cabCx + cb * 0.42, interior);                  // steering wheel
-    swheel.rotation.x = -0.5;
-    // occupant anchor: vehicles.js seats a visible low-poly driver/passenger
-    // off this frame (baseY = tub base, peakY = tub height, cx = cabin centre)
-    root.userData.cabinInfo = { baseY: cabBaseY, peakY: peakY, cx: cabCx, w: cabW };
+    // CABIN INTERIOR (CAR_CABIN_V2): a sealed, dressed room behind the real
+    // glass — see dressCabin's header. The pre-V2 five loose slabs are the
+    // `else` arm below and remain the exact one-line revert.
+    if (!dressCabin(root, {
+      cabW: cabW, zR: cabin[0][0], zF: cabin[3][0],
+      zTR: cabin[1][0], zTF: cabin[2][0], roofW: cabW * flare.roofTuck,
+      beltY: cabBaseY, roofY: cabBaseY + peakY,
+      floorY: bodyY + baseH * 0.18,
+    })) {
+      // pre-V2 dressing. The material is minted HERE, inside the fallback,
+      // not above the dressCabin call — see the "interior-v2" note by the
+      // cabin materials: minting it early handed the flag-OFF tone to the
+      // flag-ON cabin through sharedMat's first-caller-wins cache.
+      const interior = sharedMat("interior", 0x2a2f36);
+      addBox(root, cabW * 0.88, Math.max(0.06, peakY * 0.22), Math.max(0.3, (cb + ct)), 0, cabBaseY + peakY * 0.12, cabCx, interior);   // seat deck / floor mass
+      [1, -1].forEach(function (side) {
+        addBox(root, cabW * 0.3, peakY * 0.62, 0.1, side * cabW * 0.22, cabBaseY + peakY * 0.5, cabCx - 0.12, interior);               // front seat backs
+      });
+      addBox(root, cabW * 0.7, peakY * 0.5, 0.1, 0, cabBaseY + peakY * 0.42, cabCx - cb * 0.62, interior);                             // rear bench back
+      addBox(root, cabW * 0.8, 0.12, 0.24, 0, cabBaseY + peakY * 0.34, cabCx + cb * 0.62, interior);                                   // dash
+      const swheel = addBox(root, 0.3, 0.26, 0.05, cabW * 0.22, cabBaseY + peakY * 0.4, cabCx + cb * 0.42, interior);                  // steering wheel
+      swheel.rotation.x = -0.5;
+      // occupant anchor: vehicles.js seats a visible low-poly driver/passenger
+      // off this frame (baseY = tub base, peakY = tub height, cx = cabin centre)
+      root.userData.cabinInfo = { baseY: cabBaseY, peakY: peakY, cx: cabCx, w: cabW };
+    }
 
     // Decklid behind the cabin (not on fastbacks).
     const fastback = /^(ferrari|enzo|aventador|veyron)$/.test(style);
@@ -939,6 +1270,14 @@
       const sw = addBox(root, 0.02, peakY * 0.72, (ct + cb), side * (w * 0.93 * 0.5 + 0.011), cabBaseY + peakY * 0.55, cabCx, glass);
       sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
     });
+    // CAR_CABIN_V2: the wedge had four panes and an empty stainless box behind
+    // them. Same cabin builder as every other body — the truck just gets a
+    // higher hip point out of its own taller floor.
+    dressCabin(root, {
+      cabW: w * 0.93, zR: rB[0], zF: fB[0], zTR: rT[0], zTF: fT[0], roofW: w * 0.80,
+      beltY: cabBaseY, roofY: cabBaseY + peakY,
+      floorY: bodyY + baseH * 0.18,
+    });
     [1, -1].forEach(function (side) {
       addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), bodyY + baseH * 0.3, 0, trim);
       addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), bodyTop - 0.08, len * 0.32, trim);   // mirrors
@@ -1025,10 +1364,19 @@
     const suvCab = [[cabCx - cb, 0, 1.0], [cabCx - ct, peakY, roofTuck], [cabCx + ct, peakY, roofTuck], [cabCx + cb, 0, 1.0]];
     addPrism(root, cabWs, suvCab, cabBaseY, dark);
     const rB = suvCab[0], rT = suvCab[1], fT = suvCab[2], fB = suvCab[3];
-    addBox(root, cabWs * 0.88, peakY * 0.45, cb + ct, 0, cabBaseY + peakY * 0.24, cabCx, sharedMat("interior", 0x2a2f36));
     const roofWs = cabWs * roofTuck;
     const sideMidZ = (rT[0] + fT[0]) * 0.5;
     const sideLen = (fT[0] - rT[0]) * 1.0;
+    // CAR_CABIN_V2: the SUV's whole interior used to be ONE grey block — the
+    // biggest greenhouse in the fleet with the least to look at inside it.
+    // Same builder as every road car; the block is the flag-off fallback.
+    if (!dressCabin(root, {
+      cabW: cabWs, zR: rB[0], zF: fB[0], zTR: rT[0], zTF: fT[0], roofW: roofWs,
+      beltY: cabBaseY, roofY: cabBaseY + peakY,
+      floorY: bodyY + baseH * 0.18, rows: 2,
+    })) {
+      addBox(root, cabWs * 0.88, peakY * 0.45, cb + ct, 0, cabBaseY + peakY * 0.24, cabCx, sharedMat("interior", 0x2a2f36));
+    }
     addBox(root, roofWs + 0.02, 0.08, sideLen + 0.08, 0, cabBaseY + peakY + 0.028, sideMidZ, paint);   // roof skin
     addBox(root, 0.07, 0.08, sideLen, w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);  // roof rails
     addBox(root, 0.07, 0.08, sideLen, -w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);
@@ -1092,29 +1440,63 @@
     const bodyY = +(wheelR * 0.58).toFixed(3);
     const boxH = +(0.82 * H).toFixed(3);              // ~1.60 very tall cargo box
     const boxTop = bodyY + boxH;
-    // big slab cargo box (the dominant tall mass)
-    addBox(root, w, boxH, len * 0.74, 0, bodyY + boxH * 0.5, -len * 0.1, paint);
+    /* ---- THE VAN GOT A CAB (CAR_CABIN_V2) -----------------------------
+       The old van had NO cab. Its cargo box ran forward to z = +0.27·len and
+       the hood was one long 55° rake from the nose straight up to the box
+       roof, so the entire volume where a driver sits was solid painted slab
+       with a 0.14·len porthole in each flank. There was nowhere to put an
+       interior, which is why it never had one.
+       The box now stops at +0.13·len (its REAR is untouched at −0.47·len, so
+       the doors, hinges and handle bar all still land) and the front body is
+       one prism carrying a flat cab roof back over the driver plus a 45°
+       Transit windscreen. Same silhouette read from 30 m — a tall white box
+       with a short nose — but there is a room in it now. Flag off: the two
+       ARE the same shape, minus the room. */
+    const vanBoxZ = -len * 0.17, vanBoxD = len * 0.60;     // rear stays at -0.47·len
+    const vanCabFrontZ = vanBoxZ + vanBoxD * 0.5;          // = +0.13·len, the box face
+    const vanRoofTopY = boxH * 0.965;                      // cab roof, local to the prism base
+    // A Transit's windscreen is ~26° off vertical over a SHORT bonnet, not a
+    // 45° sheet running the whole nose (which is what the first pass drew, and
+    // it read as a bus). Steep glass + a real bonnet in front of it is also
+    // what leaves a flat cab roof long enough to sit a driver under.
+    const vanWsBotY = boxH * 0.38, vanWsBotZ = len * 0.418, vanWsTopZ = len * 0.336;
+    const vanNoseY = boxH * 0.35;
+    addBox(root, w, boxH, vanBoxD, 0, bodyY + boxH * 0.5, vanBoxZ, paint);
     // sliding-door crease line + lower rocker trim down the slab
-    addBox(root, w + 0.02, 0.05, len * 0.7, 0, bodyY + boxH * 0.6, -len * 0.1, trim);
-    addBox(root, w + 0.02, 0.18, len * 0.72, 0, bodyY + 0.1, -len * 0.1, trim);
-    // sloped short hood up front (rises toward the cab, merging into the box)
-    addPrism(root, w * 0.96, [[len * 0.18, 0], [len * 0.18, boxH * 0.9], [len * 0.5, boxH * 0.55], [len * 0.5, 0.2]], bodyY + 0.06, paint);
-    // raked windshield: a dark panel LYING ON the hood's rake plane (the old
-    // vertical slab poked through the slope and floated off the nose —
-    // orbit-diagnosed). Face runs (len*0.5, boxH*0.55) -> (len*0.18, boxH*0.9).
+    addBox(root, w + 0.02, 0.05, vanBoxD * 0.95, 0, bodyY + boxH * 0.6, vanBoxZ, trim);
+    addBox(root, w + 0.02, 0.18, vanBoxD * 0.97, 0, bodyY + 0.1, vanBoxZ, trim);
+    // CAB + SHORT BONNET as one prism: flat roof over the driver from the box
+    // face forward, the windscreen rake, then the bonnet out to the nose.
+    addPrism(root, w * 0.96, [
+      [vanCabFrontZ, 0], [vanCabFrontZ, vanRoofTopY],
+      [vanWsTopZ, vanRoofTopY], [vanWsBotZ, vanWsBotY],
+      [len * 0.5, vanNoseY], [len * 0.5, 0.2],
+    ], bodyY + 0.06, paint);
+    // raked windscreen: a dark panel LYING ON the rake plane (the old vertical
+    // slab poked through the slope and floated off the nose — orbit-diagnosed).
     (function () {
-      const botZ = len * 0.5, botY = boxH * 0.55, topZ = len * 0.18, topY = boxH * 0.9;
+      const botZ = vanWsBotZ, botY = vanWsBotY, topZ = vanWsTopZ, topY = vanRoofTopY;
       const dz = topZ - botZ, dy = topY - botY, fl = Math.hypot(dz, dy);
       const nz = dy / fl, ny = -dz / fl;               // outward (up-forward) normal
-      const m = new THREE.Mesh(boxGeo(w * 0.84, fl * 0.72, 0.03), dark);
+      const m = new THREE.Mesh(boxGeo(w * 0.86, fl * 0.86, 0.03), dark);
       m.position.set(0, bodyY + 0.06 + (botY + topY) * 0.5 + ny * 0.02, (botZ + topZ) * 0.5 + nz * 0.02);
       m.rotation.x = Math.atan2(dz, dy);
       root.add(m);
     })();
+    const vanBeltY = bodyY + boxH * 0.58, vanCabRoofY = bodyY + 0.06 + vanRoofTopY;
     [1, -1].forEach(function (side) {
-      addBox(root, 0.03, boxH * 0.28, len * 0.14, side * (w * 0.505), bodyY + boxH * 0.62, len * 0.32, dark);  // cab side window
-      addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), bodyY + boxH * 0.51, -len * 0.1, trim);
+      // a REAL cab side window, sill to header, from the box face to the
+      // A-pillar — the thing you see the driver through from the kerb.
+      addBox(root, 0.03, vanCabRoofY - vanBeltY - 0.09, vanWsTopZ - vanCabFrontZ - 0.04,
+        side * (w * 0.485), (vanBeltY + vanCabRoofY) * 0.5, (vanCabFrontZ + vanWsTopZ) * 0.5, dark);
+      addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), bodyY + boxH * 0.51, vanBoxZ, trim);
       addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), bodyY + boxH * 0.66, len * 0.4, trim);  // mirrors
+    });
+    dressCabin(root, {
+      cabW: w * 0.92, zR: vanCabFrontZ + 0.07, zF: vanWsBotZ - 0.03,
+      zTR: vanCabFrontZ + 0.08, zTF: vanWsTopZ - 0.06, roofW: w * 0.86,
+      beltY: vanBeltY, roofY: vanCabRoofY - 0.03,
+      floorY: bodyY + boxH * 0.20, rows: 1,
     });
     // fleet livery band down both flanks — an accent lambert that is NOT
     // _bodyPaint, so a recoloured van keeps its working-fleet stripe.
@@ -1137,10 +1519,12 @@
     // (kills the "rolling fridge" read — the roofline gets a working-vehicle cue).
     const marker = sharedMat("van-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
     [-0.3, 0, 0.3].forEach(function (fx) {
-      addBox(root, 0.12, 0.06, 0.09, fx * w, bodyY + boxH - 0.06, len * 0.27, marker);
+      // on the CAB roof's leading edge now that there is a cab — the old z was
+      // the cargo box's old front face, which the box no longer reaches.
+      addBox(root, 0.12, 0.06, 0.09, fx * w, vanCabRoofY + 0.02, vanWsTopZ - 0.06, marker);
     });
     addWheels(root, w + 0.1, len, wheelR, 0.32, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.52);
-    root.userData.vehicleDims = { width: w, length: len, height: boxTop, wheelbase: len * 0.68 };
+    root.userData.vehicleDims = { width: w, length: len, height: Math.max(boxTop, vanCabRoofY), wheelbase: len * 0.68 };
     // Bison face anchors: lamps low on the nose, VERTICAL tails riding the tall
     // box rear corners (rearZ is the box face, not len/2 — the box is set back).
     root.userData.partCtx = {
@@ -1150,7 +1534,7 @@
       frontZ: len * 0.5, rearZ: -len * 0.47,
       baseY: wheelR + 0.12, headY: bodyY + 0.68, tailY: bodyY + boxH - 0.46,
       noseTopY: bodyY + boxH * 0.55, bodyY: bodyY, baseH: boxH,
-      roofY: boxTop, roofZ: -len * 0.1, roofW: w * 0.9, roofLen: len * 0.5,
+      roofY: boxTop, roofZ: vanBoxZ, roofW: w * 0.9, roofLen: vanBoxD * 0.8,
       paint: paint,
     };
     return root;
@@ -1542,6 +1926,30 @@
     });
   }
 
+  /* THE SEE-INSIDE DISCIPLINE, BORROWED FROM THE BUILDINGS.
+     city/buildings.js has one rule that makes a lit office read through a
+     curtain wall from the street: interior dressing at renderOrder 0, the
+     glass pane at renderOrder 1, the interior glow at -1. Car glass set no
+     render order at all — it survived on the sort three.js happens to do
+     (transparent after opaque, and CBZ.glass never writes depth), which is
+     correct today and is nobody's contract tomorrow. One traverse per STYLE
+     TEMPLATE — not per car — states it out loud: every transparent pane on a
+     vehicle draws after every opaque thing inside it. Object3D.copy carries
+     renderOrder, so all ~N clones of a style inherit it for free. */
+  function markGlassOrder(root) {
+    if (!root || !root.traverse) return 0;
+    let n = 0;
+    root.traverse(function (o) {
+      const m = o.material;
+      if (!m || Array.isArray(m) || !m.transparent) return;
+      o.renderOrder = 1;
+      o.userData.carGlass = true;
+      n++;
+    });
+    root.userData.glassPanes = n;
+    return n;
+  }
+
   function makeProcedural(style, color, model) {
     let template = procTemplates.get(style);
     if (!template) {
@@ -1558,6 +1966,7 @@
       else if (CBZ.marineHulls && CBZ.marineHulls.buildable(style)) template = CBZ.marineHulls.build(style);
       else if (style === "boat") template = makeBoat();
       else template = makeRoadCar(style);
+      markGlassOrder(template);
       procTemplates.set(style, template);
     }
     const clone = template.clone(true);
@@ -1868,6 +2277,48 @@
     glassMat, chromeMat, lightFrontMat, lightTailMat,
     boxGeo, prismGeo, addBox, addPrism, addSphere, slopeBox,
   };
+  /* ============================================================
+     CBZ.carCabinAudit() — THE RATCHET for this wave.
+
+     `bare` is the number that matters: enclosed body styles whose template
+     publishes NO dressed cabin. It read 3 before this change (suv, van,
+     cybertruck) plus every road car carrying only loose slabs; it must read 0
+     and may only ever go DOWN. Everything else here is evidence, not a
+     target: honest counts the orchestrator can photograph against.
+
+     Templates are built lazily by makeProcedural, so this BUILDS the enclosed
+     styles it has not seen yet — an audit that only measures what happened to
+     be driven this session is the "audit nobody has executed" trap in
+     doctrine.md. The cost is a handful of hidden groups, once. */
+  const OPEN_FRAME = /^(motorcycle|helicopter|boat)$/;
+  CBZ.carCabinAudit = function () {
+    const out = {
+      styles: 0, dressed: 0, bare: 0, bareStyles: [],
+      glassPanes: 0, seatAnchors: 0, eyeAnchors: 0, minScreenGap: null,
+    };
+    for (let i = 0; i < STYLE_ORDER.length; i++) {
+      const style = STYLE_ORDER[i];
+      if (OPEN_FRAME.test(style)) continue;               // no cabin by design
+      out.styles++;
+      let t = procTemplates.get(style);
+      if (!t) { try { t = makeProcedural(style, null, null); } catch (e) { t = null; } }
+      if (!t) { out.bare++; out.bareStyles.push(style); continue; }
+      const ci = t.userData.cabinInfo;
+      if (ci && ci.dressed) out.dressed++; else { out.bare++; out.bareStyles.push(style); }
+      if (ci && ci.seatX != null) out.seatAnchors++;
+      if (ci && ci.eye) out.eyeAnchors++;
+      t.traverse(function (o) {
+        if (o.userData && o.userData.carGlass) out.glassPanes++;
+        const g = o.userData && o.userData.carScreen;
+        if (g != null && (out.minScreenGap == null || g < out.minScreenGap)) out.minScreenGap = g;
+      });
+    }
+    // the two live halves of the same wave, folded in so the gate is ONE call
+    if (CBZ.carDriverAudit) { const d = CBZ.carDriverAudit(); for (const k in d) out[k] = d[k]; }
+    if (CBZ.carFpAudit) { const f = CBZ.carFpAudit(); for (const k in f) out[k] = f[k]; }
+    return out;
+  };
+
   // public handling-feel lookup so the driving sim / other systems can branch on
   // vehicle class (e.g. air/marine/twoWheel flags) and apply the multipliers.
   CBZ.cityPlayerCarFeel = function (style) {

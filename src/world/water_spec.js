@@ -803,7 +803,15 @@
     u.uMoon = { value: 0 };
     u.uSunDir = { value: new THREE.Vector3(-0.34, 0.84, 0.42).normalize() };
     u.uSunColor = { value: new THREE.Color(0xfff4e0) };
-    u.uShallowColor = { value: new THREE.Color(0x24a89a) };
+    // SHALLOW WATER SEEN FROM ABOVE. 0x24a89a was a saturated bottle-green
+    // teal — the colour of deep-ish water lit from within, not the colour of
+    // half a metre of water over pale sand. The owner's shallow reference
+    // (a diver on white sand, ~5 m) reads 0x7EC7D6 near the lens because most
+    // of what comes back up is the SAND, not the water; from above the surface
+    // that same bay is a pale aqua. Lighter and less saturated, so the near
+    // shore lightens toward the bottom instead of turning greener than the
+    // deep. The deep half of the ramp is untouched.
+    u.uShallowColor = { value: new THREE.Color(0x62c8c0) };
     u.uInlandColor = { value: new THREE.Color(0x2f5c46) };
     u.uFoamColor = { value: new THREE.Color(0xe2f1f3) };
     u.uSeaY = { value: CBZ.SEA_Y != null ? CBZ.SEA_Y : SEA_Y_FALLBACK };
@@ -1021,7 +1029,7 @@
       "  float shallow = pow(clamp(field.g, 0.0, 1.0), 2.1);",
       "  float open = clamp(field.b, 0.0, 1.0);",
       "  vec3 c = mix(deep * 0.80, deep, open);",
-      "  c = mix(c, uShallowColor, shallow * 0.78);",
+      "  c = mix(c, uShallowColor, shallow * 0.86);",   // ref 3: the shallows carry the bed's brightness
       "  c = mix(c, uInlandColor, inland * 0.72);",
       // A storm sea is GREY, not blue: overcast kills the sky tint it scatters
       // and airborne spray whitens it. Inert while uChop is 0 (the default,
@@ -1429,6 +1437,20 @@
     U.uDisasterNormalGain = { value: Number.isFinite(opts.normalGain) ? +opts.normalGain : 9.0 };
     U.uDisasterTint = { value: new THREE.Color(opts.color == null ? 0x155878 : opts.color) };
     U.uDisasterShallow = { value: new THREE.Color(opts.shallowColor == null ? 0x3198a9 : opts.shallowColor) };
+    /* ---- SEDIMENT LOAD (the Miyako term) --------------------------------
+       A tsunami that has crossed a beach is not water any more, it is a
+       suspension: sand, silt, sewage, ground-up timber and everything the
+       front has already demolished, and it reads GRAY-BLACK, not blue. That
+       is one number (uDwSediment) plus the front geometry, because the load
+       is not uniform — it is heaviest AT the leading edge, where the bore is
+       still scouring, and thins the further inland the same water has spread.
+       Zero by default, so every existing consumer renders exactly as before. */
+    U.uDwSediment = { value: 0 };
+    U.uDwFrontC = { value: new THREE.Vector2(0, 0) };     // event origin, world XZ
+    U.uDwFrontDir = { value: new THREE.Vector2(1, 0) };   // unit travel direction
+    U.uDwFrontS = { value: -1e9 };                        // signed front position along dir
+    U.uDwFrontRun = { value: 110 };                       // m the churn decays over, behind
+    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x171208 : opts.mudColor) };
 
     const vs = [
       "uniform float uSeaTime;",
@@ -1465,6 +1487,12 @@
       "uniform vec3 uDisasterShallow;",
       "uniform float uDisasterOpacity;",
       "uniform float uDisasterFoam;",
+      "uniform float uDwSediment;",
+      "uniform vec2 uDwFrontC;",
+      "uniform vec2 uDwFrontDir;",
+      "uniform float uDwFrontS;",
+      "uniform float uDwFrontRun;",
+      "uniform vec3 uDwMud;",
       "varying vec3 vDwWorld;",
       "varying vec3 vDwNormal;",
       "varying float vDwHeight;",
@@ -1505,6 +1533,32 @@
       // Restrained crest foam. Detail noise breaks it into patches; height and
       // analytic tilt keep it at the tipping apex instead of painting flanks.
       "  float n = (a.b + b.b) * 0.5;",
+      // ---- THE TURBID FRONT. Everything below is multiplied by uDwSediment,
+      //      which is 0 for every non-tsunami consumer, so this whole block
+      //      compiles to "no change" on the calm sea and the flash flood.
+      "  float fdS = dot(vDwWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
+      "  float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
+      // Dirty everywhere the bore has already been, filthiest at the edge. The
+      // floor is HIGH on purpose: an inundation does not clear behind the
+      // front, it stands there brown for hours, and the first pass's 0.52
+      // floor let the flooded town go back to reading as a clean lagoon.
+      "  float sed = uDwSediment * mix(1.0, 0.88, smoothstep(0.0, 1.0, behind)) * (1.0 - smoothstep(-1.0, 7.0, fdS));",
+      "  sed *= 0.72 + 0.46 * n;",
+      "  vec3 mud = uDwMud * (0.55 + ndl * 0.55);",
+      "  outColor = mix(outColor, mud, clamp(sed, 0.0, 0.94));",
+      // BOILING FOAM ON THE LEADING EDGE: a narrow band riding the front,
+      // broken up by the detail noise so it churns instead of ruling a line.
+      "  float boil = uDwSediment * exp(-abs(fdS) / 13.0) * (0.35 + 0.85 * n);",
+      "  outColor = mix(outColor, uFoamColor * 0.93, clamp(boil, 0.0, 0.90));",
+      // WHITEWATER STREAKS TRAILING BEHIND: the tile sampled stretched 6x along
+      // the travel axis and scrolled with it, so the wake reads as long torn
+      // ribbons pointing back at the sea rather than as generic surface noise.
+      "  vec2 axisXZ = vec2(-uDwFrontDir.y, uDwFrontDir.x);",
+      "  vec2 sq = vec2(dot(vDwWorld.xz - uDwFrontC, uDwFrontDir) * 0.019 - uSeaTime * 0.16,",
+      "                 dot(vDwWorld.xz, axisXZ) * 0.115);",
+      "  float streak = texture2D(uSeaNormal, sq).b;",
+      "  streak = smoothstep(0.58, 0.95, streak) * uDwSediment * (1.0 - behind) * (1.0 - smoothstep(-2.0, 4.0, fdS));",
+      "  outColor = mix(outColor, uFoamColor, clamp(streak * 0.62, 0.0, 0.62));",
       "  float tip = pow(clamp(vDwNormal.y, 0.0, 1.0), 18.0);",
       "  float foam = smoothstep(0.48, 0.90, vDwHeight + (n - 0.5) * 0.38) * tip * uDisasterFoam;",
       "  outColor = mix(outColor, uFoamColor, clamp(foam, 0.0, 0.88));",
@@ -1542,6 +1596,334 @@
       u.uDisasterOpacity.value = +state.opacity;
       mat.opacity = +state.opacity;
     }
+    // ---- the turbid-front block. Absent from `state` = untouched, so an
+    //      existing caller keeps its clean water without knowing this exists.
+    if (u.uDwSediment) {
+      if (Number.isFinite(state.sediment)) u.uDwSediment.value = Math.max(0, Math.min(1, +state.sediment));
+      if (state.frontC) u.uDwFrontC.value.set(+state.frontC[0] || 0, +state.frontC[1] || 0);
+      if (state.frontDir) {
+        const dx = +state.frontDir[0] || 0, dz = +state.frontDir[1] || 0;
+        const l = Math.hypot(dx, dz) || 1;
+        u.uDwFrontDir.value.set(dx / l, dz / l);
+      }
+      if (Number.isFinite(state.frontS)) u.uDwFrontS.value = +state.frontS;
+      if (Number.isFinite(state.frontRun)) u.uDwFrontRun.value = Math.max(1, +state.frontRun);
+      if (state.mud != null) u.uDwMud.value.set(state.mud);
+    }
+    return true;
+  };
+
+  /* ============================================================
+     THE BORE FACE — ONE CURLING WAVE, SHARED BY BOTH TSUNAMIS.
+
+     A breaking bore is the one water shape a height field genuinely cannot
+     express: it OVERHANGS, and you can see up into the barrel from under it.
+     So it stays a mesh. It carries no wetness truth, no collision and no
+     surge — the caller puts it on the front that water_spec's own event
+     descriptor already publishes, and this file only knows how to SHAPE it.
+
+     It lives here, and not in either tsunami, because there are two tsunamis
+     (systems/disasters.js on the survival island, city/tsunami.js in the real
+     world) and the owner's note is that they must look identical. One builder,
+     two consumers, and the second one costs three lines.
+
+     TWO FACES, ONE GEOMETRY, one parameter between them:
+       turbid 0  OPEN SEA — a towering blue-green curl with a spray-torn lip,
+                 tallest just before it feels the bottom.
+       turbid 1  LANDFALL — Miyako: a gray-black churning soup boiling over the
+                 seawall, foam shredding off the leading edge, no blue left.
+
+     CBZ.tsuFaceBuild({width, height, seed}) -> handle   (caller adds handle.group)
+     CBZ.tsuFaceUpdate(handle, {t, height, turbid, curl, foam, x, y, z, dirX, dirZ})
+     CBZ.tsuFaceDispose(handle)
+     ============================================================ */
+  // [forward z (m at H=34), height 0..1] — foot → face → apex → curl → lip
+  const TSU_PROFILE = [
+    [-8.0, 0.00], [-3.6, 0.30], [-1.4, 0.58], [0.4, 0.80], [2.2, 0.965],
+    [3.4, 1.00], [4.6, 0.945], [5.2, 0.80], [4.6, 0.62],
+  ];
+  // per row: open-sea colour, then landfall (sediment) colour. The landfall
+  // ramp is deliberately almost monochrome — a tsunami that has already eaten
+  // a town has no hue left in it, only value.
+  /* THE LANDFALL COLUMN IS DELIBERATELY VERY DARK AND WARM, and both of those
+     are corrections made by looking at the render rather than at the numbers:
+     the scene is lit by a blue-gray hemisphere and the output is sRGB-encoded,
+     so a value that reads "dark neutral" in this table comes out of the
+     renderer as a bright TEAL. Half the value and a warm bias is what actually
+     lands on Miyako's gray-black mud once the light and the encoding have had
+     their say. (The emissive and specular are faded out with turbidity for the
+     same reason — a blue emissive term is why the first pass had a teal wave
+     that the palette insisted was black.) */
+  const TSU_ROWCOL = [
+    [[0.03, 0.12, 0.20], [0.030, 0.026, 0.020]],
+    [[0.05, 0.18, 0.30], [0.048, 0.041, 0.031]],
+    [[0.08, 0.28, 0.42], [0.078, 0.067, 0.050]],
+    [[0.12, 0.40, 0.55], [0.115, 0.099, 0.075]],
+    [[0.22, 0.55, 0.68], [0.170, 0.150, 0.118]],
+    [[0.42, 0.72, 0.82], [0.250, 0.230, 0.195]],
+    [[0.60, 0.83, 0.90], [0.360, 0.340, 0.305]],
+    [[0.72, 0.90, 0.95], [0.500, 0.485, 0.455]],
+    [[0.55, 0.80, 0.88], [0.340, 0.328, 0.305]],
+  ];
+  const TSU_COLS = 30;
+
+  CBZ.tsuFaceBuild = function (opts) {
+    opts = opts || {};
+    const H = Number.isFinite(opts.height) ? +opts.height : 34;
+    const W = Number.isFinite(opts.width) ? +opts.width : 320;
+    const zs = H / 34;
+    const rnd = typeof opts.rnd === "function" ? opts.rnd : Math.random;
+    const grp = new THREE.Group();
+    const ROWS = TSU_PROFILE.length, COLS = TSU_COLS;
+    const geoms = [], mats = [];
+
+    // per-column jitter so the front churns instead of reading as a ruler
+    const zJit = [], hJit = [];
+    for (let c = 0; c <= COLS; c++) { zJit.push((rnd() - 0.5) * 4.5); hJit.push(0.9 + rnd() * 0.2); }
+    const n = ROWS * (COLS + 1);
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const colClean = new Float32Array(n * 3);
+    const colMud = new Float32Array(n * 3);
+    let vi = 0;
+    for (let r = 0; r < ROWS; r++) {
+      const rc = TSU_ROWCOL[r], up = r / (ROWS - 1);
+      for (let c = 0; c <= COLS; c++) {
+        pos[vi] = (c / COLS - 0.5) * W;
+        pos[vi + 1] = TSU_PROFILE[r][1] * H * hJit[c];
+        pos[vi + 2] = TSU_PROFILE[r][0] * zs + zJit[c] * up;
+        // a little per-column value noise so neither palette reads as a decal
+        const v = hJit[c];                       // 0.9 .. 1.1 about unity
+        colClean[vi] = rc[0][0] * v; colClean[vi + 1] = rc[0][1] * v; colClean[vi + 2] = rc[0][2] * v;
+        colMud[vi] = rc[1][0] * v; colMud[vi + 1] = rc[1][1] * v; colMud[vi + 2] = rc[1][2] * v;
+        col[vi] = colClean[vi]; col[vi + 1] = colClean[vi + 1]; col[vi + 2] = colClean[vi + 2];
+        vi += 3;
+      }
+    }
+    const idx = [];
+    for (let r = 0; r < ROWS - 1; r++) for (let c = 0; c < COLS; c++) {
+      const a0 = r * (COLS + 1) + c, b0 = a0 + 1, a1 = a0 + COLS + 1, b1 = a1 + 1;
+      idx.push(a0, a1, b0, b0, a1, b1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    geoms.push(geo);
+    const wallMat = new THREE.MeshPhongMaterial({
+      vertexColors: true, transparent: true, opacity: 0.94, side: THREE.DoubleSide, depthWrite: false,
+      shininess: 72, specular: 0x9fd9eb, emissive: 0x061b25, emissiveIntensity: 0.18,
+    });
+    mats.push(wallMat);
+    const wall = new THREE.Mesh(geo, wallMat);
+    wall.renderOrder = 3;
+    grp.add(wall);
+
+    /* Broken ribbons, not billboard rectangles. Each patch is an independent
+       sloped quad with deterministic gaps, so from below or above the crest
+       reads as churning white water rather than a white roof card. */
+    function foamRibbon(kind, color, opacity, blend) {
+      const fp = [], fi = [];
+      // The crest gets THREE TIMES the patch count of the first pass. At 48
+      // across a 320 m front each shred was seven metres wide, which from any
+      // camera close enough to matter read as a row of paper kites floating
+      // clear of the wave. Spray tears small.
+      const cnt = kind === "crest" ? 144 : (kind === "boil" ? 62 : 48);
+      for (let c = 0; c < cnt; c++) {
+        if ((c * 7 + (kind === "crest" ? 3 : 1)) % 11 < 2) continue;
+        const x0 = (c / cnt - 0.5) * W, x1 = ((c + 1.12) / cnt - 0.5) * W;
+        /* TWO OCTAVES, and the low one has to dominate. A single sin() at 2.31
+           rad per patch flips every neighbour to the opposite extreme, so at
+           144 patches the "torn" crest came out as a perfect origami sawtooth
+           — regular is the one thing spray never is. A slow swell carrying a
+           small chop reads as water tearing. */
+        const kph = kind === "crest" ? 0.7 : 2.1;
+        const w0 = Math.sin(c * 0.53 + kph) * 0.74 + Math.sin(c * 2.31 + kph * 3.1) * 0.26;
+        const w1 = Math.sin((c + 1) * 0.53 + kph) * 0.74 + Math.sin((c + 1) * 2.31 + kph * 3.1) * 0.26;
+        let y0, y1, z0, z1, depth;
+        if (kind === "crest") {
+          // A SPRAY-TORN LIP, not a white roof. The old patches lay nearly
+          // flat across the top of the wave, so from any elevated camera the
+          // crest read as a row of paper plates. These hang DOWN the front of
+          // the lip (drop > depth) and wander far more in height, so the
+          // silhouette is ragged from above and from below.
+          y0 = H * 0.975 + w0 * 1.25; y1 = H * 0.975 + w1 * 1.25;
+          z0 = 3.9 * zs + w0 * 0.8; z1 = 3.9 * zs + w1 * 0.8;
+          depth = 1.5 + ((c * 13) % 7) * 0.34;
+        } else if (kind === "boil") {
+          // THE BOILING LEADING EDGE. Low, wide, way out in FRONT of the foot,
+          // heaving up and down in big irregular blobs — the shredded white
+          // water a bore pushes ahead of itself as it scours the ground.
+          y0 = 0.55 + Math.abs(w0) * 2.2 * (H / 34); y1 = 0.55 + Math.abs(w1) * 2.2 * (H / 34);
+          z0 = (6.4 + Math.abs(w0) * 3.4) * zs; z1 = (6.4 + Math.abs(w1) * 3.4) * zs;
+          depth = 5.5 + ((c * 17) % 9) * 0.75;
+        } else {
+          y0 = 1.15 + w0 * 0.18; y1 = 1.15 + w1 * 0.18;
+          z0 = 4.8 * zs + w0 * 0.45; z1 = 4.8 * zs + w1 * 0.45;
+          depth = 4.0 + ((c * 13) % 7) * 0.32;
+        }
+        const drop = kind === "crest" ? depth * 0.85 : (kind === "boil" ? 0.35 : 0.05);
+        const q = fp.length / 3;
+        fp.push(x0, y0, z0, x1, y1, z1, x0, y0 - drop, z0 + depth, x1, y1 - drop, z1 + depth);
+        fi.push(q, q + 2, q + 1, q + 1, q + 2, q + 3);
+      }
+      const fg = new THREE.BufferGeometry();
+      fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3));
+      fg.setIndex(fi); fg.computeVertexNormals();
+      const fm = new THREE.MeshBasicMaterial({
+        color: color, transparent: true, opacity: opacity, side: THREE.DoubleSide,
+        depthWrite: false, blending: blend === false ? THREE.NormalBlending : THREE.AdditiveBlending,
+      });
+      geoms.push(fg); mats.push(fm);
+      const mesh = new THREE.Mesh(fg, fm); mesh.renderOrder = 5; return mesh;
+    }
+    const crest = foamRibbon("crest", 0xffffff, 0.82);
+    const foot = foamRibbon("foot", 0xeaf8ff, 0.66);
+    // Not additive: dirty foam over a dark sky must still read as WHITE MATTER,
+    // and additive white over a bright horizon just blows out to nothing.
+    const boil = foamRibbon("boil", 0xf1f4f2, 0.0, false);
+    grp.add(crest, foot, boil);
+
+    // FACE STREAKS: the vertical tears of aerated water down the wave's face.
+    const streaks = [];
+    for (let i = 0; i < 11; i++) {
+      const sg = new THREE.PlaneGeometry(0.55 + rnd() * 0.95, H * (0.26 + rnd() * 0.4));
+      const sm = new THREE.MeshBasicMaterial({
+        color: 0xdff1fb, transparent: true, opacity: 0.18, side: THREE.DoubleSide,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      geoms.push(sg); mats.push(sm);
+      const s = new THREE.Mesh(sg, sm);
+      s.position.set((rnd() - 0.5) * W * 0.9, H * 0.45, 1.6 * zs);
+      s.renderOrder = 4; grp.add(s); streaks.push(s);
+    }
+
+    /* THE WAKE: flat torn ribbons of whitewater lying on the surface BEHIND
+       the front and streaming back toward the sea. This is what tells you at a
+       glance which way the water is going — on the survival island the shader
+       draws it too, but the city ocean is a different material entirely and
+       this is what carries the same read into the real world. */
+    const wake = [];
+    for (let i = 0; i < 14; i++) {
+      const len = 26 + rnd() * 74, wid = 1.1 + rnd() * 3.2;
+      const wg = new THREE.PlaneGeometry(wid, len);
+      wg.rotateX(-Math.PI / 2);
+      const wm = new THREE.MeshBasicMaterial({
+        color: 0xe8eee9, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false,
+      });
+      geoms.push(wg); mats.push(wm);
+      const m = new THREE.Mesh(wg, wm);
+      m.position.set((rnd() - 0.5) * W * 0.94, 0.35, -(10 + rnd() * 70));
+      m.renderOrder = 4; grp.add(m);
+      wake.push({ m, ph: rnd() * 6.28, len: len, base: m.position.z, rate: 9 + rnd() * 22 });
+    }
+
+    return {
+      group: grp, wall: wall, basePos: new Float32Array(pos),
+      cols: COLS, rows: ROWS, baseH: H, width: W,
+      colClean: colClean, colMud: colMud, mudMix: -1,
+      foams: [crest, foot], boil: boil, streaks: streaks, wake: wake,
+      geoms: geoms, mats: mats,
+    };
+  };
+
+  /* Per-frame. Moves the face's 279 vertices in overlapping directional
+     phases and rebuilds the analytic normals; scales the whole profile with
+     the wave's live height; advances the overhang with `curl`; and cross-fades
+     the two palettes with `turbid`. The physical front is untouched — only the
+     visible water churns, so collision can never drift from presentation. */
+  CBZ.tsuFaceUpdate = function (h, s) {
+    if (!h || !h.wall) return false;
+    s = s || {};
+    const t = Number.isFinite(s.t) ? +s.t : 0;
+    const H = Number.isFinite(s.height) ? +s.height : h.baseH;
+    const hs = H / Math.max(0.001, h.baseH);
+    const turbid = Math.max(0, Math.min(1, Number.isFinite(s.turbid) ? +s.turbid : 0));
+    const curl = Math.max(0, Math.min(1.6, Number.isFinite(s.curl) ? +s.curl : 0.5));
+    const foamGain = Number.isFinite(s.foam) ? +s.foam : 0.7;
+
+    const a = h.wall.geometry.attributes.position, p = a.array, base = h.basePos;
+    const cols = h.cols, rows = h.rows;
+    // churn amplitude grows with the sediment load — clean open-sea swell is
+    // smooth, a debris soup is not
+    const chAmp = 1 + turbid * 1.35;
+    for (let r = 0; r < rows; r++) {
+      const up = r / Math.max(1, rows - 1);
+      for (let c = 0; c <= cols; c++) {
+        const q = (r * (cols + 1) + c) * 3, x = base[q];
+        const ph0 = t * 1.55 + x * 0.052 + r * 0.61;
+        const ph1 = t * -2.10 + x * 0.091 - r * 0.37;
+        p[q] = x + Math.sin(ph1) * up * 0.34 * chAmp;
+        p[q + 1] = base[q + 1] * hs + (Math.sin(ph0) * (0.16 + up * 0.72) + Math.sin(ph1) * up * 0.22) * chAmp;
+        // OVERHANG: the lip throws further forward the harder the wave curls,
+        // and it curls hardest just before it feels the bottom.
+        p[q + 2] = base[q + 2] * hs + Math.sin(ph0 * 0.77) * (0.08 + up * 0.78) * chAmp
+          + up * up * curl * 6.2 * hs;
+      }
+    }
+    a.needsUpdate = true;
+    h.wall.geometry.computeVertexNormals();
+    h.wall.geometry.attributes.normal.needsUpdate = true;
+
+    // palette cross-fade, only when it has actually moved (a full rewrite of
+    // 279 colours every frame for nothing is the kind of cost that adds up)
+    if (Math.abs(turbid - h.mudMix) > 0.012) {
+      h.mudMix = turbid;
+      const ca = h.wall.geometry.attributes.color, cp = ca.array;
+      for (let i = 0; i < cp.length; i++) cp[i] = h.colClean[i] + (h.colMud[i] - h.colClean[i]) * turbid;
+      ca.needsUpdate = true;
+      // and the water goes from translucent green glass to opaque mud: the
+      // glassy terms (specular sheen, the blue subsurface emissive) are what
+      // MAKE it read as water, so a debris soup has to lose all of them
+      const m = h.wall.material;
+      m.opacity = 0.90 + turbid * 0.09;
+      m.shininess = 72 - turbid * 62;
+      m.specular.setRGB(0.62 - turbid * 0.56, 0.85 - turbid * 0.78, 0.92 - turbid * 0.85);
+      m.emissiveIntensity = 0.18 * (1 - turbid);
+    }
+
+    const fl = h.foams;
+    for (let i = 0; i < fl.length; i++) {
+      fl[i].scale.set(1, hs, hs);
+      fl[i].material.opacity = (0.42 + 0.34 * Math.abs(Math.sin(t * 3.1 + i * 1.7))) * (0.6 + foamGain * 0.7);
+    }
+    if (h.boil) {
+      // the boil only exists once the bore is scouring something — in deep
+      // water there is nothing under it to tear up
+      h.boil.scale.set(1, hs, hs);
+      h.boil.position.y = Math.sin(t * 2.3) * 0.5 * hs;
+      h.boil.material.opacity = Math.min(0.95, turbid * (0.62 + 0.33 * Math.abs(Math.sin(t * 4.3))));
+      h.boil.visible = turbid > 0.03;
+    }
+    const sk = h.streaks;
+    for (let i = 0; i < sk.length; i++) {
+      sk[i].material.opacity = (0.13 + 0.2 * Math.abs(Math.sin(t * 2.0 + i))) * (1 - turbid * 0.35);
+      sk[i].position.y = H * (0.42 + 0.05 * Math.sin(t * 1.6 + i * 2));
+      sk[i].scale.y = hs;
+    }
+    const wk = h.wake;
+    for (let i = 0; i < wk.length; i++) {
+      const w = wk[i];
+      // ribbons stream back toward the sea and recycle at the front
+      w.base -= w.rate * (Number.isFinite(s.dt) ? +s.dt : 1 / 60);
+      if (w.base < -190) w.base = -(6 + Math.random() * 20);
+      w.m.position.z = w.base;
+      w.m.position.y = 0.28 + Math.sin(t * 2.4 + w.ph) * 0.16;
+      w.m.material.opacity = turbid * (0.16 + 0.26 * Math.abs(Math.sin(t * 1.3 + w.ph)));
+      w.m.visible = turbid > 0.05;
+    }
+    if (Number.isFinite(s.x) && Number.isFinite(s.z)) h.group.position.set(s.x, +s.y || 0, s.z);
+    if (Number.isFinite(s.dirX) && Number.isFinite(s.dirZ)) h.group.rotation.y = Math.atan2(s.dirX, s.dirZ);
+    return true;
+  };
+
+  CBZ.tsuFaceDispose = function (h) {
+    if (!h) return false;
+    if (h.group && h.group.parent) h.group.parent.remove(h.group);
+    for (let i = 0; i < h.geoms.length; i++) h.geoms[i].dispose();
+    for (let i = 0; i < h.mats.length; i++) if (h.mats[i].dispose) h.mats[i].dispose();
+    h.group = null; h.wall = null; h.geoms = []; h.mats = [];
     return true;
   };
 
@@ -1579,6 +1961,14 @@
     const flow = wet && Number.isFinite(e.flow) ? e.flow : 0;
     out.currentX = dx * flow; out.currentZ = dz * flow;
     out.foam = phase === "sweep" ? Math.max(0, 1 - Math.abs(fd) / Math.max(1, +e.frontWidth || 18)) : 0;
+    /* THE SEDIMENT LOAD AND THE UNDERTOW, on the same descriptor, because they
+       are the same water. `sediment` is what makes the front gray-black and is
+       also the honest "is this a debris soup" test for anything entrained in
+       it. `undertow` is the flow being NEGATIVE — the drain dragging seaward —
+       which is the half of a tsunami that actually drowns people, and it is a
+       sign, not a second field. */
+    out.sediment = wet && Number.isFinite(e.sediment) ? e.sediment : 0;
+    out.undertow = flow < 0 ? -flow : 0;
     return out;
   };
 

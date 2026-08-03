@@ -14,15 +14,20 @@
    forward WebGL1 r128 renderer, no depth pass), so every effect below is
    chosen to be affordable WITHOUT one:
 
-   1. BEER-LAMBERT EXTINCTION, through THREE.Fog. Water does not "get darker",
-      it eats the spectrum from the red end first — that colour shift is what
-      the eye reads as depth. The fog colour is now
-      `surfaceLight * exp(-EXT * depth * density)` with
-      EXT = (0.45, 0.09, 0.045) per metre, so red is gone by ~3m, green
-      survives to ~15m and blue carries the last of the light. `density` is the
-      murk knob: an inland lake (CBZ.waterInlandFactorAt) is greener and 2x
-      murkier than the open sea, and shallow water over a bright bed
-      (CBZ.cityWaterDepthAt) stays clearer than the deep.
+   1. THE WATER COLUMN'S COLOUR, through THREE.Fog. (REBUILT 2026-08-03 — see
+      "THE COLOUR OF WATER" below.) The old model was pure Beer-Lambert
+      extinction of one fixed surface light by the EYE's depth, and it had two
+      faults the owner's reference photographs make obvious. First, it knew
+      nothing about the water COLUMN: a metre under the surface over white sand
+      and a metre under the surface over a 60 m abyss came out the same colour,
+      when in life they are turquoise and near-black respectively. Second, its
+      murk term made SHALLOW water the murkiest ("shallow coastal water carries
+      more suspended sand"), so the one place you are supposed to see furthest
+      was the one place the fog closed in. Both are inverted now: the colour is
+      a ramp over the LOCAL SEABED DEPTH blended with the eye's own depth, and
+      visibility runs long in the shallows and short in the deep. Beer-Lambert
+      survives as a gentle spectral trim on top, because "red dies first" is
+      still what makes 4 m of water look like water.
       WHY LINEAR THREE.Fog AND NOT THREE.FogExp2: exponential falloff would be
       the better curve, but the save/restore machinery below is expressed in
       near/far — core/quality.js's tier change and city/mode.js's per-frame
@@ -40,9 +45,10 @@
       camera-following plane 6cm under the waterline — i.e. the dancing light
       you actually see on the ceiling of the water when you look up, which
       complements the Snell's-window underside branch world/waterfx.js already
-      renders. TRADE-OFF, stated plainly: real caustics also land on the
-      SEABED, and we do not draw one — the deep sea has no floor geometry to
-      receive them, so seabed caustics are deferred rather than faked badly.
+      renders. (The old note here said seabed caustics were deferred "because
+      the deep sea has no floor geometry to receive them". There is a floor
+      now — see THE FLOOR LAW — but the caustic ceiling still only paints the
+      surface: light that has travelled 20 m of water no longer dances.)
 
    3. GOD RAYS as billboarded shafts. True volumetrics are far out of budget.
       Seven additive soft-edged quads hang from the surface at world positions
@@ -131,19 +137,68 @@
     return CFG.WATER_UNDERWATER === false || CFG.WATER_V2 === false;
   }
 
-  // Depth (metres below the surface) at which the world is essentially black.
-  const BLACKOUT = 26;
-  // Fog range at the surface and at BLACKOUT. Linear THREE.Fog, so this is
-  // literally "how far can you see".
-  const FOG_FAR_NEAR_SURFACE = 46, FOG_FAR_DEEP = 9;
-  // Beer-Lambert extinction per metre, R/G/B. Red dies first — this ratio is
-  // what makes 4m of water look like water instead of blue tinted glass.
-  const EXT_R = 0.45, EXT_G = 0.09, EXT_B = 0.045;
-  // The light entering the surface, before any water eats it. Multiplied by
-  // the live day factor so a night dive really is black.
-  const SURFACE_LIGHT = { r: 0.62, g: 0.86, b: 0.95 };
-  const LAKE_LIGHT = { r: 0.50, g: 0.80, b: 0.62 };   // greener, for inland bodies
+  /* ============================================================
+     THE COLOUR OF WATER — anchors read off the owner's reference photographs.
+
+     ref 3 — SHALLOW (a diver kneeling on white sand, maybe 5 m down). The
+       bottom is a bright near-white shell floor, the water above it is a LIGHT
+       cyan-turquoise, brightest toward the surface, and the visibility is long:
+       thirty metres away the sand is still readable, just hazed toward blue.
+       Sampled: near water 0x7EC7D6, mid distance 0x4E8FAE, the top of frame
+       0x86B3C6, the sand itself 0xD9D4C2.
+     ref 4 — MID-DEPTH (a freediver and a shark, no bottom in frame). One
+       continuous gradient: a pale glow where the surface is, saturating down
+       through 0x3F8BAD into 0x1A5580 and 0x123F5E at the bottom of frame. No
+       floor, but the column itself is depth-graded, and that grading is the
+       only depth cue in the picture.
+     ref 5 — DEEP (open blue water). Rich, dark, desaturating navy — 0x0A2A5E
+       in the body, 0x04143A in the corners — under a BRIGHT rippling ceiling
+       around 0x2F79C4 with near-white highlights where the sun comes through.
+       Everything loses contrast with distance rather than getting foggier.
+
+     So the ramp below is the picture set, in order. `k` — how deep is this
+     water — is driven mostly by the LOCAL SEABED DEPTH (which is what makes a
+     shallow bay light and an offshore trench dark at the same eye depth) and
+     partly by the eye's own depth under the surface.
+  ============================================================ */
+  const RAMP = [
+    { r: 0.494, g: 0.780, b: 0.839 },   // 0x7EC7D6 — ref 3, over sand
+    { r: 0.306, g: 0.561, b: 0.682 },   // 0x4E8FAE — ref 3, hazing out
+    { r: 0.247, g: 0.545, b: 0.678 },   // 0x3F8BAD — ref 4, upper column
+    { r: 0.102, g: 0.333, b: 0.502 },   // 0x1A5580 — ref 4, body
+    { r: 0.039, g: 0.165, b: 0.369 },   // 0x0A2A5E — ref 5, deep body
+    { r: 0.016, g: 0.078, b: 0.227 },   // 0x04143A — ref 5, the dark corners
+  ];
+  // The bright ceiling toward the sun, seen from below (ref 5's surface).
+  // DELIBERATELY A SATURATED BLUE, not the pale cyan-white of the ripple
+  // highlights: those highlights are a few percent of ref 5's ceiling, and
+  // mixing a near-white into a navy medium turns the whole frame slate grey —
+  // measured, on the first pass of this file, as a #29456e wash where the
+  // reference is #2F79C4 over #0A2A5E.
+  const SURFACE_GLOW = { r: 0.306, g: 0.604, b: 0.878 };   // 0x4E9AE0
+  // An inland lake is a different liquid: green, and genuinely murkier.
+  const LAKE_LIGHT = { r: 0.306, g: 0.561, b: 0.416 };     // 0x4E8F6A
   const MURK_LAKE = 2.15;      // an inland body is this much murkier than open sea
+
+  // Depth (metres below the surface) at which the eye's own descent has taken
+  // the colour as far as it goes.
+  const BLACKOUT = 26;
+  // Where the SEABED-depth half of `k` runs from and to. 2 m of water is a
+  // sandbar; 40 m is offshore blue. Beyond that the ramp is already at its end.
+  const BASIN_LIGHT = 2, BASIN_DARK = 40;
+  // How far you can see, by `k`. Linear THREE.Fog, so this is literally "how
+  // far can you see" — long over sand (ref 3), short in the deep (ref 5).
+  const FOG_FAR_SHALLOW = 40, FOG_FAR_MID = 24, FOG_FAR_DEEP = 16;
+  // Beer-Lambert extinction per metre of EYE depth, R/G/B. Much gentler than
+  // the old (0.45, 0.09, 0.045) because the ramp above already carries the
+  // hue; this is only the trim that keeps red dying first.
+  const EXT_R = 0.075, EXT_G = 0.028, EXT_B = 0.013;
+
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function smoothstep(e0, e1, x) {
+    const t = clamp01((x - e0) / (e1 - e0 || 1));
+    return t * t * (3 - 2 * t);
+  }
 
   const _fogC = new THREE.Color();
   const _eye = new THREE.Vector3();
@@ -157,6 +212,8 @@
   let muffle = 0;                        // 0..1 eased muffle amount
   let lastBg = "", lastLine = -99;
   let breathPulse = 0;
+  let kDepth = 0;      // 0..1 "how deep is this water" — the one grading number
+  let glow = 0;        // 0..1 how much of the bright surface ceiling is in view
 
   // ============================================================
   //  DOM
@@ -482,6 +539,142 @@
     if (fxRoot) fxRoot.visible = false;
   }
 
+  /* ============================================================
+     THE FLOOR LAW — "there should ALWAYS be a bottom of water, even the
+     deepest part of the ocean" (owner, 2026-08-03).
+
+     MEASURED BEFORE (tools/probe.mjs, seed 90210, rays straight down through
+     the live scene from the coast at x=7159, z=-300):
+
+         200 m offshore   swimmable to 16 m   drawn floor  -1.86
+        1000 m offshore   swimmable to 62 m   drawn floor  -1.86
+        4000 m offshore   swimmable to 62 m   drawn floor -26.06
+        6000 m offshore   swimmable to 62 m   NO FLOOR — zero ray hits
+        8000 m offshore   swimmable to 62 m   NO FLOOR — zero ray hits
+
+     Two separate failures. The near/mid sea's only floor was the terrain
+     backdrop shelf sitting 1.4 m under the surface while the swimmer could
+     descend sixty; that one belongs to the surface that draws it and is fixed
+     there (world/terrain_overhaul.js, TERRAIN_SEABED_BATHY — the shelf now
+     follows the same bathymetry the swimmer is clamped to). The OPEN OCEAN
+     had no geometry at all: those tiles only span the live world plus a couple
+     of kilometres, and the sea is sixteen kilometres across.
+
+     This is that missing ground — one abyssal plain under the whole published
+     sea footprint, sitting just below the shelf's own clamp so the two never
+     fight for a pixel, with a long deterministic swell in it so it is a sea
+     floor and not a card. It is NOT decoration and it holds no props: it is
+     the bottom of the water, dark because it is 63 m down, and the thing that
+     makes a dive in open water end on ground instead of in nothing.
+
+     Cost: one Lambert draw call, ~4.2k triangles, built once inside the world
+     build. Deterministic (analytic sums, no rng draw), so the seeded stream is
+     untouched. WATER_SEABED=0 reverts to the void.
+  ============================================================ */
+  if (CFG.WATER_SEABED == null) CFG.WATER_SEABED = true;
+  const ABYSS_DROP = 63.2;     // metres below mean sea — under SHELF_MIN (62.5)
+  const ABYSS_RINGS = 44, ABYSS_SECT = 96;
+  let abyss = null;
+
+  function buildSeabed(city) {
+    // Deliberately NOT gated on WATER_UNDERWATER: the bottom of the sea is
+    // world geometry, not a camera effect, and turning off the submerged view
+    // must not delete the ground a diver lands on.
+    if (CFG.WATER_SEABED === false) return;
+    const root = city && city.root;
+    if (!root) return;
+    // A rebuilt city root orphans the old plain (waterfx.js's `!reflect.parent`
+    // test, same reason): keeping the stale reference would ship a world with
+    // no bottom and no error to say so.
+    if (abyss && abyss.parent === root) return;
+    if (abyss) {
+      if (abyss.parent) abyss.parent.remove(abyss);
+      try { abyss.geometry.dispose(); abyss.material.dispose(); } catch (e) {}
+      abyss = null;
+    }
+    const B = CBZ.SEA_WORLD_BOUNDS;
+    const seaY = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+    const cx = B && Number.isFinite(B.minX) ? (B.minX + B.maxX) / 2 : 310;
+    const cz = B && Number.isFinite(B.minZ) ? (B.minZ + B.maxZ) / 2 : -750;
+    // Reach the published sea's corners: half-span * sqrt(2), plus slack.
+    const half = B && Number.isFinite(B.minX) ? Math.max(B.maxX - B.minX, B.maxZ - B.minZ) / 2 : 8000;
+    const R = half * 1.5;
+
+    const verts = (ABYSS_RINGS + 1) * (ABYSS_SECT + 1);
+    const pos = new Float32Array(verts * 3);
+    const col = new Float32Array(verts * 3);
+    const idx = [];
+    // Sediment albedo. Dark, and slightly warmer in the shallower undulations
+    // so the relief reads at all once a diver's light-adapted eye reaches it.
+    const sedHi = { r: 0.086, g: 0.114, b: 0.145 };   // 0x161D25
+    const sedLo = { r: 0.027, g: 0.043, b: 0.078 };   // 0x070B14
+    let v = 0;
+    for (let i = 0; i <= ABYSS_RINGS; i++) {
+      // squared ring distribution: fine near the middle of the sea where a
+      // swimmer can actually get to it, coarse out at the horizon.
+      const rr = R * Math.pow(i / ABYSS_RINGS, 1.7);
+      for (let j = 0; j <= ABYSS_SECT; j++) {
+        const a = (j / ABYSS_SECT) * Math.PI * 2;
+        const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
+        // Long deterministic swell, DOWNWARD only — the plain may never rise
+        // above the shelf clamp or it would punch through the shelf tiles.
+        const dip = (Math.sin(x * 0.00062 + z * 0.00041) * 0.5 + 0.5) * 0.6 +
+                    (Math.sin(x * -0.00027 + z * 0.00089 + 1.7) * 0.5 + 0.5) * 0.4;
+        const y = seaY - ABYSS_DROP - dip * 9;
+        pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+        const t = 1 - dip;                     // 1 on the rises, 0 in the holes
+        col[v * 3] = sedLo.r + (sedHi.r - sedLo.r) * t;
+        col[v * 3 + 1] = sedLo.g + (sedHi.g - sedLo.g) * t;
+        col[v * 3 + 2] = sedLo.b + (sedHi.b - sedLo.b) * t;
+        v++;
+      }
+    }
+    const stride = ABYSS_SECT + 1;
+    for (let i = 0; i < ABYSS_RINGS; i++) {
+      for (let j = 0; j < ABYSS_SECT; j++) {
+        const a = i * stride + j, b = a + 1, c = a + stride, d = c + 1;
+        idx.push(a, c, b, b, c, d);           // upward-facing winding
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0xffffff, vertexColors: true, fog: true,
+      side: THREE.FrontSide, depthWrite: true,
+    });
+    // NEVER "water"/"ocean"/"sea" in the material name: the terrain-water gate
+    // asserts exactly one water SURFACE and matches on that name.
+    mat.name = "cbz-uw-bed";
+    abyss = new THREE.Mesh(geo, mat);
+    abyss.name = "cbz-uw-bed";
+    abyss.receiveShadow = false;
+    abyss.castShadow = false;
+    abyss.frustumCulled = true;
+    abyss.matrixAutoUpdate = false;
+    abyss.updateMatrix();
+    // terrain: batch.js + farcull.js exempt. underlay: the world-surface audit
+    // already honours it for a big flat surface that deliberately sits UNDER
+    // another one, which is exactly what the bottom of the sea is.
+    abyss.userData.terrain = true;
+    abyss.userData.underlay = true;
+    abyss.userData.seaFloor = true;
+    root.add(abyss);
+  }
+  // Registered the way world/terrain_overhaul.js registers its own tiles:
+  // straight onto the array, because city/worldmap.js (which publishes
+  // CBZ.addLandmass) may not have parsed yet. Order 98.5 = after the terrain
+  // shelf (98), before wildnature (99).
+  CBZ._landmassBuilders = CBZ._landmassBuilders || [];
+  CBZ._landmassBuilders.push({ fn: buildSeabed, order: 98.5 });
+  // A rebuilt city root orphans the old plain; forget it so the next build
+  // makes a fresh one instead of silently shipping a world with no bottom.
+  CBZ.waterSeabedForget = function () { abyss = null; };
+  CBZ.waterSeabedMesh = function () { return abyss; };
+
   // ============================================================
   //  FOG
   // ============================================================
@@ -489,7 +682,7 @@
     if (myFog || !scene || !scene.fog) return;
     savedFog = scene.fog;
     savedNear = savedFog.near; savedFar = savedFog.far;
-    myFog = new THREE.Fog(savedFog.color.getHex(), 0.6, FOG_FAR_NEAR_SURFACE);
+    myFog = new THREE.Fog(savedFog.color.getHex(), 0.6, FOG_FAR_SHALLOW);
     lastNear = myFog.near; lastFar = myFog.far;
     scene.fog = myFog;
   }
@@ -514,20 +707,47 @@
     return surf - _eye.y;
   }
 
-  // Beer-Lambert: what is left of the surface light after `d` metres of water
-  // at this murk. Writes into `out` (r,g,b in 0..1) — allocation-free.
-  const _tint = { r: 0, g: 0, b: 0 };
-  function extinction(d, density, inland, day, out) {
-    const base = inland > 0.5 ? LAKE_LIGHT : SURFACE_LIGHT;
-    const k = d * density;
-    out.r = base.r * Math.exp(-EXT_R * k) * day;
-    out.g = base.g * Math.exp(-EXT_G * k) * day;
-    out.b = base.b * Math.exp(-EXT_B * k) * day;
-    if (inland > 0) {   // an inland body pulls green even before the extinction
-      out.g += (LAKE_LIGHT.g - out.g) * inland * 0.25;
-      out.b -= out.b * inland * 0.18;
-    }
+  // Sample the reference ramp at 0..1. Allocation-free.
+  function rampAt(k, out) {
+    const t = clamp01(k) * (RAMP.length - 1);
+    const i = Math.min(RAMP.length - 2, Math.floor(t));
+    const f = t - i, a = RAMP[i], b = RAMP[i + 1];
+    out.r = a.r + (b.r - a.r) * f;
+    out.g = a.g + (b.g - a.g) * f;
+    out.b = a.b + (b.b - a.b) * f;
     return out;
+  }
+
+  /* THE MEDIUM. `k` is the one number the whole look hangs off:
+
+       k = 0.66 * (seabed depth here, 2m..40m) + 0.34 * (eye depth, 0..26m)
+
+     Weighted toward the SEABED because that is what the owner's photographs
+     actually differ by — ref 3 and ref 5 are both taken a few metres under the
+     surface, and the only reason one is turquoise and the other is navy is how
+     much water is underneath the photographer. The eye's own depth is the
+     second term so that descending in one place still darkens.
+
+     Then: the day factor (a night dive really is black), the inland-lake green
+     shift, and a gentle Beer-Lambert trim on the eye depth alone. Writes into
+     `out` (r,g,b in 0..1) — allocation-free. */
+  const _tint = { r: 0, g: 0, b: 0 };
+  function medium(eyeDepth, bedDepth, murk, inland, day, out) {
+    const basin = smoothstep(BASIN_LIGHT, BASIN_DARK, bedDepth);
+    const dive = clamp01(eyeDepth / BLACKOUT);
+    const k = clamp01(basin * 0.66 + dive * 0.34);
+    rampAt(k, out);
+    // spectral trim — red first, over the metres the eye itself has descended
+    const e = Math.max(0, eyeDepth) * murk;
+    out.r *= Math.exp(-EXT_R * e) * day;
+    out.g *= Math.exp(-EXT_G * e) * day;
+    out.b *= Math.exp(-EXT_B * e) * day;
+    if (inland > 0) {   // a lake is green water, not blue water
+      out.r += (LAKE_LIGHT.r * day - out.r) * inland * 0.55;
+      out.g += (LAKE_LIGHT.g * day - out.g) * inland * 0.55;
+      out.b += (LAKE_LIGHT.b * day - out.b) * inland * 0.55;
+    }
+    return k;
   }
 
   function rgb(t, a) {
@@ -607,20 +827,32 @@
     const d01 = Math.max(0, Math.min(1, depth / BLACKOUT));
     const day = CBZ.dayness != null ? (0.16 + 0.84 * CBZ.dayness) : 1;
     const inland = CBZ.waterInlandFactorAt ? CBZ.waterInlandFactorAt(_eye.x, _eye.z) : 0;
-    // MURK: a lake is siltier than the open sea, and shallow coastal water
-    // (where the bed is close) carries more suspended sand than the deep.
-    const bed = CBZ.cityWaterDepthAt ? CBZ.cityWaterDepthAt(_eye.x, _eye.z) : 24;
-    const shallowMurk = 1 + Math.max(0, 1 - bed / 12) * 0.55;
-    const density = shallowMurk * (1 + (MURK_LAKE - 1) * inland);
-    extinction(Math.max(0, depth), density, inland, day, _tint);
+    // THE WATER COLUMN UNDER THE EYE. This is the number the whole look is
+    // graded by, and it is the same one city/swim.js clamps the swimmer
+    // against and world/terrain_overhaul.js draws the bed from — so the
+    // colour, the floor and the collision are one story. (The old code asked
+    // cityWaterDepthAt directly and then made the shallows MURKIER, which is
+    // backwards: shallow water over sand is the clearest water there is.)
+    const bedDepth = CBZ.citySeaBedDepthAt ? CBZ.citySeaBedDepthAt(_eye.x, _eye.z)
+      : (CBZ.cityWaterDepthAt ? CBZ.cityWaterDepthAt(_eye.x, _eye.z) : 24);
+    // MURK is now ONLY the lake term. The open sea is clean water; how far you
+    // can see in it is the fog RANGE below, not a density fudge.
+    const density = 1 + (MURK_LAKE - 1) * inland;
+    kDepth = medium(Math.max(0, depth), bedDepth, density, inland, day, _tint);
+    // SURFACE-FROM-BELOW (ref 5): looking up toward the sun, the ceiling is
+    // bright and rippling; looking down or out, it is not. One dot product,
+    // faded out by the eye's own depth and by the day.
+    const el = clamp01(camElevation());
+    glow = Math.pow(el, 1.35) * (1 - d01 * 0.85) * day * (1 - inland * 0.6);
 
     if (overlay) {
       const vis = submerged || shown > 0.002;
       if (overlay.style.display !== (vis ? "block" : "none")) overlay.style.display = vis ? "block" : "none";
       if (vis) {
-        overlay.style.opacity = String((0.55 + d01 * 0.42) * shown);
+        // Shallow turquoise is a LIGHT veil; deep navy is a heavy one.
+        overlay.style.opacity = String((0.60 + kDepth * 0.36) * shown);
         if (rays) rays.style.opacity = String(Math.max(0, 0.34 - d01 * 0.34) * shown);
-        paintOverlay(depth, d01);
+        paintOverlay(depth, kDepth);
       }
     }
 
@@ -640,21 +872,71 @@
     }
 
     // Quality tiers scale the whole world's view distance; scale ours with it
-    // so a Fastest-tier machine is not paying for 46 metres of fogged water.
+    // so a Fastest-tier machine is not paying for 40 metres of fogged water.
     const q = CBZ.qScale ? CBZ.qScale(0.62, 1.0) : 1;
-    _fogC.setRGB(_tint.r, _tint.g, _tint.b);
+    // The FOG colour is the medium, warmed toward the surface glow by how far
+    // up you are looking. THREE.Fog carries one colour, so this is where the
+    // "bright ceiling" reaches the geometry — the DOM gradient in paintOverlay
+    // carries the part with a vertical shape. No post pass, no second render.
+    // Kept low ON PURPOSE. Fog colour is applied to EVERY distant fragment, so
+    // a large glow blend does not read as "a bright ceiling up there" — it
+    // reads as haze over the entire frame. The ceiling's shape belongs to the
+    // DOM gradient below; this is only the light it spills onto geometry.
+    const gm = glow * 0.30;
+    _fogC.setRGB(
+      _tint.r + (SURFACE_GLOW.r * day - _tint.r) * gm,
+      _tint.g + (SURFACE_GLOW.g * day - _tint.g) * gm,
+      _tint.b + (SURFACE_GLOW.b * day - _tint.b) * gm);
     myFog.color.copy(_fogC);
     myFog.near = 0.4;
-    myFog.far = (FOG_FAR_NEAR_SURFACE + (FOG_FAR_DEEP - FOG_FAR_NEAR_SURFACE) * d01) * q / density;
+    // Visibility by `k`, not by eye depth: a metre under the surface in a 60 m
+    // trench is already dark blue with the far wall gone, and ten metres down
+    // over a sandbar still reads the bottom (ref 3).
+    const farK = kDepth < 0.5
+      ? FOG_FAR_SHALLOW + (FOG_FAR_MID - FOG_FAR_SHALLOW) * (kDepth * 2)
+      : FOG_FAR_MID + (FOG_FAR_DEEP - FOG_FAR_MID) * ((kDepth - 0.5) * 2);
+    // LOOKING UP SEES FURTHER, and it is not a cheat: there is less water
+    // between the eye and the surface than between the eye and the horizon, so
+    // the same medium is measurably clearer straight up. Without this the deep
+    // dive is correct and boring — the surface sits past the fog limit and
+    // ref 5's whole subject, the bright rippling ceiling, is never drawn.
+    myFog.far = farK * (1 + glow * 0.9) * q / density;
     lastNear = myFog.near; lastFar = myFog.far;
   });
+
+  // How far UP the camera is looking: +1 straight at the surface, 0 level,
+  // -1 straight at the bed. The camera's world matrix third column is its
+  // +Z (backward) axis, so forward.y is -e[9].
+  function camElevation() {
+    const cam = CBZ.camera;
+    if (!cam) return 0;
+    return -cam.matrixWorld.elements[9];
+  }
+
+  // The screen row (0..100 %) of the eye-level HORIZON. Seen from under a flat
+  // surface this is exactly where the water ceiling stops and the open column
+  // begins, so it is the anchor the brightness gradient hangs on. Projecting a
+  // far point at the eye's OWN height gets it right for any pitch and roll
+  // without a single trigonometric assumption about the lens.
+  function horizonRow() {
+    const cam = CBZ.camera;
+    if (!cam) return 50;
+    const e = cam.matrixWorld.elements;
+    const fx = -e[8], fz = -e[10];
+    const fl = Math.hypot(fx, fz);
+    if (fl < 1e-4) return camElevation() > 0 ? 100 : -100;   // straight up/down
+    _probe.set(_eye.x + (fx / fl) * 900, _eye.y, _eye.z + (fz / fl) * 900);
+    _probe.project(cam);
+    if (!Number.isFinite(_probe.y)) return 50;
+    return (1 - _probe.y) * 50;
+  }
 
   // The tint gradient is rebuilt from the live extinction colour, and CLIPPED
   // at the projected waterline so straddling the surface reads as half in,
   // half out. Both writes are change-gated: a CSS background string is not
   // something to hand the style engine 60 times a second for no reason.
   const _c1 = { r: 0, g: 0, b: 0 }, _c2 = { r: 0, g: 0, b: 0 }, _c3 = { r: 0, g: 0, b: 0 };
-  function paintOverlay(depth, d01) {
+  function paintOverlay(depth, k) {
     const surfY = _eye.y + depth;
     // The projected waterline is only trustworthy while the eye is genuinely
     // AT the surface. Deeper (or looking straight down, where the probe falls
@@ -665,15 +947,40 @@
       const r = waterlineRow(surfY);
       if (r > 0 && r < 100 && _probe.z < 1) row = r;
     }
-    _c1.r = _tint.r * 1.5 + 0.18; _c1.g = _tint.g * 1.25 + 0.16; _c1.b = _tint.b * 1.2 + 0.16;
-    _c2.r = _tint.r * 0.7; _c2.g = _tint.g * 0.75; _c2.b = _tint.b * 0.85;
-    _c3.r = _tint.r * 0.22; _c3.g = _tint.g * 0.26; _c3.b = _tint.b * 0.42;
-    const bright = rgb(_c1, 0.30);
-    const mid = rgb(_c2, 0.44);
-    const deep = rgb(_c3, 0.82);
+    // THE VERTICAL SHAPE (refs 4 and 5). Every one of the photographs is a
+    // gradient, not a flat wash: bright where the surface is, saturating
+    // downward into the dark. The eye-level horizon is where that turn
+    // happens, so the gradient is anchored on the projected horizon row and
+    // the top stop is lifted toward the surface glow by how far up you look.
+    // Clamped into the visible band so a straight-down view still shows the
+    // ordinary bright-to-deep fall rather than a single flat colour.
+    let hz = horizonRow();
+    if (!(hz > row + 6)) hz = row + 6;
+    if (hz > 96) hz = 96;
+    // top: the ceiling. Lifted toward SURFACE_GLOW by `glow`, and always a
+    // little brighter than the medium so the column has a direction.
+    // The baseline lift is deliberately SMALL — a level gaze in ref 5 is
+    // nearly as dark at the top of frame as at the bottom, and the old
+    // 1.45x+0.18 constant was what kept the deep reading as a bright postcard
+    // blue no matter where you looked. Almost all of the brightening is now
+    // `gl`, i.e. actually pointing at the surface.
+    const gl = glow;
+    _c1.r = _tint.r * 1.16 + 0.040 + (SURFACE_GLOW.r - _tint.r) * gl * 0.70;
+    _c1.g = _tint.g * 1.14 + 0.050 + (SURFACE_GLOW.g - _tint.g) * gl * 0.70;
+    _c1.b = _tint.b * 1.12 + 0.070 + (SURFACE_GLOW.b - _tint.b) * gl * 0.70;
+    // mid: the medium itself, at the horizon.
+    _c2.r = _tint.r * 0.86; _c2.g = _tint.g * 0.90; _c2.b = _tint.b * 0.96;
+    // bottom: the column looking down — ref 5's corners.
+    _c3.r = _tint.r * 0.24; _c3.g = _tint.g * 0.28; _c3.b = _tint.b * 0.46;
+    // The veil is LIGHT over sand and heavy in the deep, on every stop.
+    const bright = rgb(_c1, (0.26 + k * 0.14 + gl * 0.14).toFixed(3));
+    const mid = rgb(_c2, (0.36 + k * 0.24).toFixed(3));
+    const deep = rgb(_c3, (0.54 + k * 0.32).toFixed(3));
     const top = row.toFixed(1);
+    const mid1 = (row + (hz - row) * 0.55).toFixed(1);
     const bg = "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) " + top + "%, " +
-      bright + " " + top + "%, " + mid + " " + (100 - (100 - +top) * 0.45).toFixed(1) + "%, " + deep + " 100%)";
+      bright + " " + top + "%, " + bright + " " + mid1 + "%, " +
+      mid + " " + hz.toFixed(1) + "%, " + deep + " 100%)";
     if (bg !== lastBg) { lastBg = bg; overlay.style.background = bg; }
     if (meniscus) {
       // Only while the eye is genuinely AT the surface — a straddle, not a dive.

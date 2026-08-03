@@ -1326,15 +1326,163 @@
     ped.inCar = car;            // findActorHit's seated-occupant path reads this
     ped.controlled = true;      // peds.js: we own the body while it rides
     ped._dbRole = role;
-    if (!CBZ.npcLife.attach(ped, car.group, DB_SEATS[seatKey] || DB_SEATS.rear)) {
+    if (!dbSeatCrew(car, ped, seatKey)) {
       if (ped.group) ped.group.visible = false;   // no seat: ride hidden, still hittable via inCar
     }
     return ped;
   }
 
+  /* ==========================================================================
+     A DRIVE-BY RIDES REAL TRAFFIC — DRIVEBY_TRAFFIC
+
+     OWNER, verbatim: "fix drive-bys — they are dumb and not connected to
+     traffic right now."
+
+     He is describing `car.road = null`. The previous wave made the drive-by car
+     a REAL car (in `CBZ.cityCars`, shootable, damageable, seated with real
+     people) — and then took it straight back out of the traffic system, because
+     `road:null` is precisely the flag vehicles.js's order-37 lane AI uses to
+     mean "not my problem". The car got ride height and wall collision and
+     nothing else: no lane, no light, no IDM headway, no queue. It flew at the
+     target in a straight line through a city full of cars obeying rules it did
+     not, which is exactly what "not connected to traffic" looks like.
+
+     THE FIX IS TO STOP DRIVING IT. The car is placed on a real segment through
+     `CBZ.roadPick`/`roadPlace` — the ONE sanctioned way to put a vehicle on a
+     road — with a live `road`/`lane`/`dirSign`/`heading`, and from that moment
+     vehicles.js drives it: lane keeping, red lights, IDM car-following,
+     junction turns, the deadlock valve, run-over, crumple, everything. This
+     file authors NO steering at all in the normal case.
+
+     BETTER STILL, IT USUALLY IS NOT A SPAWN. `dbClaimTrafficCar` converts a car
+     that was ALREADY driving toward the target — off camera, in its own lane —
+     so the crew were in traffic the whole time and you find out when the window
+     comes down. That is the same "bind to what the simulation was already
+     running" rule `contracts.js` is built on.
+
+     WHERE THE GANG BRAIN STILL SPEAKS, it speaks as a POSTURE OVERRIDE, and it
+     is one this file did not invent either: `car.roadRageTarget` is vehicles.js's
+     own pursuit branch (`advanceRoadRage` — leave the lane, run the target
+     down), already wired to npcDriver, slip, wall kick-back and run-over. A
+     drive-by that decides to chase you sets two fields and gets a pursuit.
+
+     AND IT DEGRADES INTO A CAR. When the pass is done or the shooters are down,
+     the posture is dropped and NOTHING is torn out: the car keeps its road, its
+     driver and its lane and simply drives away in traffic, and only becomes
+     ambient again (crew unposted, ordinary occupancy re-decided) once nobody
+     could be watching. Kill the driver and vehicles.js's own dead-at-the-wheel
+     branch abandons it. Jack it mid-pass and the crew answer with the shared
+     jack reactions — they are seated in the SAME `car.occ` record every other
+     occupied car uses (`CBZ.carOccupancySeat`), not in a private array.
+  ========================================================================== */
+  if (CFG.DRIVEBY_TRAFFIC == null) CFG.DRIVEBY_TRAFFIC = true;
+  function dbTrafficOk() {
+    return CFG.DRIVEBY_TRAFFIC !== false && !!CBZ.roadPick && !!CBZ.roadPlace;
+  }
+  // does this segment run past the aim point closely enough to be a route TO it?
+  function segNearAim(r, ax, az, maxPerp) {
+    if (!r) return false;
+    const perp = r.vertical ? Math.abs(ax - r.x) : Math.abs(az - r.z);
+    if (perp > maxPerp) return false;
+    const along = r.vertical ? az - r.z : ax - r.x;
+    return Math.abs(along) < (r.len || 0) * 0.5 + 40;
+  }
+  function headingAt(cx, cz, heading, ax, az) {
+    const dx = ax - cx, dz = az - cz, d = Math.hypot(dx, dz) || 1;
+    return (Math.sin(heading) * dx + Math.cos(heading) * dz) / d;
+  }
+  // CONVERT, DON'T SPAWN: an ambient car already rolling toward the target,
+  // out of sight, with nobody real aboard yet.
+  function dbClaimTrafficCar(ax, az) {
+    const cars = CBZ.cityCars; if (!cars) return null;
+    let best = null, bd = 1e9;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !c.ai || !c.road || c.player || c.owned || c.dead || c.npcDriver) continue;
+      if (c.abandoned || c.wreckT > 0 || c.turning || c._driveby || c._patrolCar || c._emergency) continue;
+      if (c._occRigged || (c.occ && c.occ.jacked)) continue;     // real people already in it
+      if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;
+      const dx = ax - c.pos.x, dz = az - c.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < 45 * 45 || d2 > 155 * 155) continue;
+      if (headingAt(c.pos.x, c.pos.z, c.heading || 0, ax, az) < 0.3) continue;
+      if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(c.pos.x, c.pos.z, { minDistance: 18, maxDistance: 400 })) continue;
+      if (d2 < bd) { bd = d2; best = c; }
+    }
+    return best;
+  }
+  // ...or put one INTO traffic, on a segment that actually runs past the target,
+  // in the lane pointing at it. roadPick is the only sanctioned placement query
+  // and it refuses water, keep-outs, closed segments and the view cone for us.
+  function dbSpawnIntoTraffic(gang, ax, az) {
+    if (CBZ.roadPickUsed) CBZ.roadPickUsed("gangs:driveby");
+    const econ = CBZ.cityEcon;
+    for (let k = 0; k < 8; k++) {
+      const spot = CBZ.roadPick({
+        rng: rng, tries: 10, spread: 120, unseen: true, camMin: 55,
+        near: { x: ax, z: az }, minDist: 50, maxDist: 150,
+        filter: function (r) { return segNearAim(r, ax, az, 34); },
+      });
+      if (!spot) continue;
+      if (headingAt(spot.x, spot.z, spot.heading, ax, az) < 0.3) continue;
+      let model = econ && econ.pickCar ? econ.pickCar(rng() < 0.12) : null;
+      model = Object.assign({}, model || {}, { color: gang.color || 0xb079ea });
+      const car = CBZ.cityMakeCar(spot.x, spot.z, spot.heading, !!spot.vertical, model, 0.9);
+      if (!car) return null;
+      CBZ.roadPlace(car, spot);          // road/lane/dirSign/heading — order 37 reads these
+      return car;
+    }
+    return null;
+  }
+  // SEAT THE CREW IN THE CAR'S OWN OCCUPANCY RECORD. One record per car means
+  // a jacked drive-by car reacts with the shared jack table instead of needing
+  // a second, private "who is in it" answer that would immediately disagree.
+  const DB_SLOT = { driver: "driver", shotgun: "shotgun", rear: "rearR" };
+  function dbSeatCrew(car, ped, seatKey) {
+    if (CBZ.carOccupancySeat) {
+      if (CBZ.carOccupancySeat(car, DB_SLOT[seatKey] || "rearR", ped, { armed: true, spawned: false })) return true;
+    }
+    return CBZ.npcLife.attach(ped, car.group, DB_SEATS[seatKey] || DB_SEATS.rear);
+  }
+
   function spawnRealDriveby(gang, aim, victimGang) {
     const A = CBZ.city && CBZ.city.arena; if (!A || !A.root) return null;
     const tx = aim.x, tz = aim.z;
+    // ---- THE TRAFFIC PATH (DRIVEBY_TRAFFIC): claim, else spawn into a lane --
+    if (dbTrafficOk()) {
+      const claimed = dbClaimTrafficCar(tx, tz);
+      const car = claimed || dbSpawnIntoTraffic(gang, tx, tz);
+      if (car) {
+        // A CLAIMED CAR KEEPS ITS OWN PAINT. They ride what they ride; a crew
+        // that repainted a stranger's sedan on the way to a hit would be the
+        // sillier lie, and an unremarkable car is the point of a drive-by.
+        if (CBZ.carOccupancyClear) CBZ.carOccupancyClear(car);
+        else dropProxyOccupants(car);
+        car._driveby = true; car.reckless = true;
+        car.baseV = Math.max(car.baseV || 0, 14);
+        car.driver = car.driver || { aggr: 0.9 }; car.driver.aggr = 0.9;
+        const driver = spawnDbCrew(gang, car, "driver", "driver");
+        if (!driver) {
+          car._driveby = false; car.reckless = false;
+          if (!claimed) dbRemoveCar(car);
+          else if (CBZ.carOccupancyReseat) CBZ.carOccupancyReseat(car);
+          return null;
+        }
+        car.npcDriver = driver;
+        const crew = [driver];
+        const shooter = spawnDbCrew(gang, car, "rear", "shooter");
+        if (shooter) crew.push(shooter);
+        if (rng() < 0.45) { const s2 = spawnDbCrew(gang, car, "shotgun", "shooter"); if (s2) crew.push(s2); }
+        return {
+          real: true, traffic: true, claimed: !!claimed,
+          car: car, crew: crew, driver: driver,
+          gang: gang, victimGang: victimGang || null,
+          aimX: tx, aimZ: tz, passes: 0, maxPasses: 1 + ((rng() * 2) | 0),
+          shootCD: 0, life: 22 + rng() * 8, state: "approach", fired: 0,
+        };
+      }
+      // no legal lane and no convertible car — fall through to the off-road
+      // stager below rather than refusing the event outright.
+    }
     // Approach from a road edge a comfortable distance out. ONE angle and ONE
     // radius are drawn — the same two draws the rail car made — and then six
     // FIXED rotations of that angle are tried, so we can honour the
@@ -1428,6 +1576,30 @@
   }
   CBZ.cityGangDriveby = spawnDriveby;
 
+  /* THE RATCHET. `offRoad` counts live drive-bys still driving themselves with
+     `road:null` and `railCars` counts the flagless placeholder — both may only
+     ever go DOWN, and `carsOnRoad`/`claimedFromTraffic` are printed beside them
+     so a run that simply staged no drive-bys cannot read as a win. */
+  CBZ.drivebyAudit = function () {
+    let inTraffic = 0, offRoad = 0, rail = 0, claimed = 0, onRoad = 0, crewSeated = 0, rounds = 0, chasing = 0;
+    for (let i = 0; i < drivebys.length; i++) {
+      const db = drivebys[i];
+      if (!db.real) { rail++; continue; }
+      if (db.traffic) { inTraffic++; if (db.claimed) claimed++; } else offRoad++;
+      if (db.car && db.car.road) onRoad++;
+      if (db.car && db.car.roadRageTarget) chasing++;
+      rounds += db.fired || 0;
+      for (let k = 0; k < db.crew.length; k++) if (db.crew[k] && db.crew[k]._npcAttached) crewSeated++;
+    }
+    return {
+      flag: CFG.DRIVEBY_TRAFFIC !== false, realFlag: CFG.DRIVEBY_REAL !== false,
+      active: drivebys.length, cap: MAX_DRIVEBYS(),
+      inTraffic: inTraffic, offRoad: offRoad, railCars: rail,
+      claimedFromTraffic: claimed, spawnedIntoTraffic: inTraffic - claimed,
+      carsOnRoad: onRoad, chasing: chasing, crewSeated: crewSeated, rounds: rounds,
+    };
+  };
+
   // where the record IS, whichever kind it is (the real one lives on its car).
   function dbAtX(db) { return db.real ? db.car.pos.x : db.x; }
   function dbAtZ(db) { return db.real ? db.car.pos.z : db.z; }
@@ -1439,7 +1611,13 @@
   // its true world pose and drops where it was sitting.
   function dbUnseatCrew(db, p) {
     if (!p) return;
+    // ALREADY OUT. The player jacked the car mid-pass and vehicles.js's shared
+    // jack reactions have already put this man on the pavement beside his own
+    // door, with a decision made and a grudge filed. Re-placing him here would
+    // teleport him back to a car he has walked away from.
+    if (!p._npcAttached && !p.inCar) return;
     p.inCar = null;
+    if (p._occSeat) { p._occSeat.ped = null; p._occSeat.gone = true; p._occSeat = null; p._occCar = null; }
     const car = db.car;
     let dx = null, dz = null;
     if (!p.dead && car && car.pos) {
@@ -1475,6 +1653,7 @@
   function dbUnpostCrew(db, p) {
     if (!p) return;
     p.inCar = null; p.controlled = false;
+    if (p._occSeat) { p._occSeat.ped = null; p._occSeat.gone = true; p._occSeat = null; p._occCar = null; }
     if (db.gang && db.gang.members) { const i = db.gang.members.indexOf(p); if (i >= 0) db.gang.members.splice(i, 1); }
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); return; } catch (e) {} }
     try {
@@ -1484,7 +1663,56 @@
     } catch (e) {}
   }
 
+  /* THE EVENT ENDS; THE CAR KEEPS DRIVING. A drive-by riding traffic must not
+     be "torn down" — everything that made it a car (road, lane, driver, IDM)
+     is exactly what an ordinary car is, so standing down is DROPPING THE
+     POSTURE and touching nothing else. It becomes a gang car in traffic, which
+     is a thing that should exist anyway. */
+  function dbStandDown(db) {
+    const car = db.car; if (!car || db.stoodDown) return;
+    db.stoodDown = true; db.state = "flee";
+    car.roadRageTarget = null; car.roadRageT = 0;
+    car.reckless = false; car._driveby = false;
+    car.baseV = Math.max(7, (car.baseV || 14) * 0.75);
+  }
+  // ...and only once nobody could be watching does the crew come off the books
+  // and the car go back to ordinary ambient occupancy.
+  function dbReturnToTraffic(db) {
+    const car = db.car;
+    for (let k = 0; k < db.crew.length; k++) dbUnpostCrew(db, db.crew[k]);
+    db.crew.length = 0; db.driver = null;
+    if (car && !car.dead && !car.player) {
+      car.npcDriver = null; car._driveby = false; car.reckless = false;
+      car.roadRageTarget = null; car.roadRageT = 0;
+      if (CBZ.carOccupancyReseat) CBZ.carOccupancyReseat(car);   // a car with people in it again
+    }
+  }
+
   function despawnDriveby(db, idx) {
+    if (db.real && db.traffic) {
+      const car = db.car;
+      const cam = CBZ.camera && CBZ.camera.position;
+      const far = !car || !cam ||
+        ((car.pos.x - cam.x) * (car.pos.x - cam.x) + (car.pos.z - cam.z) * (car.pos.z - cam.z)) > 150 * 150;
+      const anyDead = db.crew.some(function (p) { return p && p.dead; });
+      // A CAR IN A LANE IS NEVER PULLED OUT OF THE WORLD. Either the crew get
+      // off the books unseen and the car carries on as traffic, or they get out
+      // on the pavement where they stopped — there is no third state where a
+      // car in a lane blinks out of existence.
+      if (far && !anyDead && car && !car.player && !car.dead && !car._onFire && !car._smoking && car.road) {
+        dbReturnToTraffic(db);
+      } else {
+        for (let k = 0; k < db.crew.length; k++) dbUnseatCrew(db, db.crew[k]);
+        if (car && !car.dead && !car.player) {
+          car.npcDriver = null; car._driveby = false; car.reckless = false;
+          car.roadRageTarget = null; car.roadRageT = 0;
+          car.abandoned = true; car.ai = false; car.v = 0;
+        }
+        db.crew.length = 0; db.driver = null;
+      }
+      drivebys.splice(idx, 1); activeDrivebys = Math.max(0, activeDrivebys - 1);
+      return;
+    }
     if (db.real) {
       const car = db.car;
       const cam = CBZ.camera && CBZ.camera.position;
@@ -1646,6 +1874,69 @@
     return null;
   }
 
+  /* ---- THE TRAFFIC DRIVE-BY'S LOOP ---------------------------------------
+     Notice what is NOT here: no heading lerp, no throttle, no wall resolver,
+     no clamp, no keep-out refusal, no run-over call, no visibility cull, no
+     `y`. Every one of those lines existed in `dbAdvance`/`dbSteer` and every
+     one of them is vehicles.js's job for a car with a road. This function owns
+     three things only — the posture, the gun, and when to stop being an
+     event — because everything else is what an ordinary car already does. */
+  function stepTrafficDriveby(db, dt, idx) {
+    const car = db.car;
+    // the car left our hands: burnt out, reaped, or the player took the wheel
+    // (the jack reactions have already answered for the crew).
+    if (!car || car.dead || car._reap || car.player || !car.group || !car.group.parent) { despawnDriveby(db, idx); return; }
+    // somebody else took the driver out of the seat (cook-off bail, a jack, an
+    // arrest). A seat is only left by detaching; finish through despawn.
+    if (db.driver && !db.driver.dead && car.npcDriver !== db.driver) { despawnDriveby(db, idx); return; }
+    // SHOT AT THE WHEEL. vehicles.js's own dead-driver branch drops the body
+    // out and abandons the car — we do not duplicate one line of it.
+    if (db.driver && db.driver.dead) { despawnDriveby(db, idx); return; }
+
+    db.life -= dt; db.shootCD -= dt;
+    const P = CBZ.player, PA = playerActor();
+
+    // ---- POSTURE OVERRIDE: two fields, both vehicles.js's own ----
+    if (!db.stoodDown && db.huntPlayer && PA && P && !P.dead && P.pos) {
+      const dd = Math.hypot(P.pos.x - car.pos.x, P.pos.z - car.pos.z);
+      if (dd < 75) { car.roadRageTarget = PA; car.roadRageT = Math.max(car.roadRageT || 0, 5); }
+      else if (car.roadRageTarget === PA && dd > 120) { car.roadRageTarget = null; car.roadRageT = 0; }
+    }
+
+    // ---- THE GUN. The LANE decides when a target is alongside, not a script.
+    //      That is the whole difference: the car does not fly at the victim,
+    //      it drives past him, and the window comes down when it does. ----
+    let inRange = false;
+    if (!db.stoodDown) {
+      const sh = dbShooter(db);
+      const v = sh ? drivebyVictim(db) : null;
+      if (v && !v.dead) {
+        const dd = Math.hypot(v.pos.x - car.pos.x, v.pos.z - car.pos.z);
+        inRange = dd < 26;
+        if (inRange && db.shootCD <= 0) {
+          // THE ROUND LEAVES THE MAN. npclife synced his rig's world position at
+          // order 33.8, before us; push out past the door line and fire there.
+          const h = car.heading, rx = Math.cos(h), rz = -Math.sin(h);
+          const sp = sh.pos || car.pos;
+          const from = { x: sp.x + rx * 0.45, y: (sp.y || 0) + 0.5, z: sp.z + rz * 0.45 };
+          if (dbFire(db, v, from, sh)) {
+            db.shootCD = (sh.weapon === "Pistol" ? 0.34 : 0.22) + rng() * 0.18;
+            db.fired = (db.fired || 0) + 1;
+            if (db.state !== "strafe") { db.state = "strafe"; db.passes++; }
+          }
+        }
+      }
+    }
+    if (!inRange && db.state === "strafe") db.state = "approach";
+
+    // OUT OF THE EVENT: time up, passes made, or nobody left who can shoot.
+    if (!db.stoodDown && (db.life <= 0 || db.passes > db.maxPasses || !dbShooter(db))) dbStandDown(db);
+    if (db.stoodDown) {
+      const away = (!P || !P.pos) ? 999 : Math.hypot(car.pos.x - P.pos.x, car.pos.z - P.pos.z);
+      if (away > 130 || db.life < -28) despawnDriveby(db, idx);
+    }
+  }
+
   function stepRealDriveby(db, dt, idx) {
     const car = db.car;
     // the car left our hands — burnt out, reaped, or the player took the wheel.
@@ -1722,7 +2013,7 @@
   function updateDrivebys(dt) {
     for (let i = drivebys.length - 1; i >= 0; i--) {
       const db = drivebys[i];
-      if (db.real) { stepRealDriveby(db, dt, i); continue; }
+      if (db.real) { if (db.traffic) stepTrafficDriveby(db, dt, i); else stepRealDriveby(db, dt, i); continue; }
       db.life -= dt; db.shootCD -= dt;
       if (db.life <= 0 || db.passes > db.maxPasses) { despawnDriveby(db, i); continue; }
       // steer toward / past the aim point

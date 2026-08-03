@@ -279,14 +279,27 @@
   //  measure after attaching can never feed back on itself.
   // ============================================================
   const _mb = new THREE.Box3(), _tb = new THREE.Box3(), _mm = new THREE.Matrix4(), _mi = new THREE.Matrix4();
+  // Walk the model, PRUNING whole subtrees rather than filtering leaves. The
+  // difference matters now that a real seated body can be parented into the
+  // airframe (playeraircraft.js AIR_PILOT_VISIBLE): a character rig is ~40
+  // meshes of arms and legs, none of which carry the crew tag themselves, and
+  // an aeroplane must not measure its own occupant. (Object3D.traverse cannot
+  // prune, which is the only reason this is written out.)
+  // NOTE the root is never tested: the craft group's OWN userData is where
+  // `pilot` and `canopy` handles live, so testing it would prune the aeroplane.
+  function measureWalk(o, visit) {
+    const ud = o.userData;
+    if (ud && (ud.cockpit === true || ud.pilot === true)) return;
+    if (o.isMesh && o.geometry) visit(o);
+    const ch = o.children;
+    for (let i = 0; i < ch.length; i++) measureWalk(ch[i], visit);
+  }
   function measure(grp) {
     _mb.makeEmpty();
     grp.updateWorldMatrix(true, true);
     _mi.copy(grp.matrixWorld).invert();
-    grp.traverse(function (o) {
-      if (!o.isMesh || !o.geometry) return;
-      if (o.userData && o.userData.cockpit) return;
-      if (o.visible === false && o.userData && o.userData.pilot) return;
+    const kids = grp.children;
+    const visit = function (o) {
       const g2 = o.geometry;
       if (!g2.boundingBox) { try { g2.computeBoundingBox(); } catch (e) { return; } }
       if (!g2.boundingBox) return;
@@ -294,7 +307,8 @@
       _mm.copy(_mi).multiply(o.matrixWorld);
       _tb.applyMatrix4(_mm);
       if (Number.isFinite(_tb.min.x) && Number.isFinite(_tb.max.x)) _mb.union(_tb);
-    });
+    };
+    for (let i = 0; i < kids.length; i++) measureWalk(kids[i], visit);
     if (_mb.isEmpty()) return { len: 10, span: 8, hgt: 3, minY: -1, maxY: 2, minZ: -5, maxZ: 5, minX: -4, maxX: 4, ok: false };
     const dx = _mb.max.x - _mb.min.x, dz = _mb.max.z - _mb.min.z;
     return {
@@ -347,8 +361,18 @@
     return c;
   }
   function eyeFromPilot(grp, off) {
-    const pilot = grp.userData && grp.userData.pilot;
-    if (!pilot) return null;
+    const ud = grp.userData || {};
+    // THE SILHOUETTE, NEVER THE BODY. playeraircraft.js's AIR_PILOT_VISIBLE
+    // seats a real character rig and hangs it on `userData.pilot`, stashing
+    // whatever box silhouette was there at `userData.pilotBox`. That rig's
+    // seat is SOLVED FROM THIS EYE POINT, so reading the eye back off the rig
+    // would be a feedback loop — and a nested rig's `position.y` is
+    // parent-relative anyway, so "the highest mesh" below would pick a thigh.
+    // Prefer the artist's silhouette; refuse a character rig outright and let
+    // the canopy/bbox fallbacks answer, exactly as they did before a body
+    // existed.
+    const pilot = ud.pilotBox || ud.pilot;
+    if (!pilot || (pilot.userData && pilot.userData.charRig)) return null;
     // the head is the highest mesh in the silhouette
     let head = null, bestY = -Infinity;
     pilot.traverse(function (o) {
@@ -1042,21 +1066,51 @@
     }
     return true;
   }
+  //  props      — THE OWNER'S NUMBER. "when in first person in cockpit it
+  //               looks shit theres too many props": how many separate
+  //               objects are built around a seated pilot, per costume and in
+  //               total. Measured by building one of each costume off the
+  //               synthetic probes and counting the meshes that come back, so
+  //               it is the real build and not a table of intentions.
+  //               **MAY ONLY GO DOWN.** Baseline before COCKPIT_CLEAN_V2:
+  //               fighter 29 · heli 31 · airliner 30 · bomber 37 · prop 26,
+  //               total 153. With V2: 16 · 17 · 18 · 19 · 16, total 86.
+  //  overBudget — costumes above the V2 prop budget (cockpit_shapes CLEAN_MAX).
+  //               Pinned at ZERO: a new costume, or props growing back into an
+  //               old one, is what this catches.
+  const PROBES = [
+    { airClass: "jet", displayName: "PROBE JET" },
+    { airClass: "heli", displayName: "PROBE HELI" },
+    { airClass: "airliner", displayName: "PROBE LINER", modelYawOffset: -Math.PI / 2 },
+    { airClass: "jet", displayName: "B-2 SPIRIT" },
+    { airClass: "prop", displayName: "PROBE PROP" },
+  ];
   CBZ.cockpitAudit = function () {
     // synthetic proof: every costume must generate cleanly with NO model at
     // all (the hardest case — the generator has nothing to measure).
     let specFail = 0;
-    const probes = [
-      { airClass: "heli", displayName: "PROBE HELI" },
-      { airClass: "jet", displayName: "PROBE JET" },
-      { airClass: "jet", displayName: "B-2 SPIRIT" },
-      { airClass: "airliner", displayName: "PROBE LINER", modelYawOffset: -Math.PI / 2 },
-      { airClass: "prop", displayName: "PROBE PROP" },
-    ];
-    for (let i = 0; i < probes.length; i++) {
+    const SH = CBZ.cockpitShapes;
+    const budget = (SH && SH.CLEAN_MAX) || 22;
+    const props = {};
+    let propTotal = 0, overBudget = 0, worstProps = 0, worstId = null;
+    for (let i = 0; i < PROBES.length; i++) {
       let s = null;
-      try { s = CBZ.cockpitSpec(probes[i]); } catch (e) { s = null; }
-      if (!specIsFinite(s)) specFail++;
+      try { s = CBZ.cockpitSpec(PROBES[i]); } catch (e) { s = null; }
+      if (!specIsFinite(s)) { specFail++; continue; }
+      if (!SH || !SH.build) continue;
+      // build it, count what came back, bin it. Counting the MESHES rather
+      // than trusting userData.cockpitMeshCount means a part added outside
+      // the builder's own put() still shows up in the number.
+      let built = null;
+      try { built = SH.build(s, {}); } catch (e) { built = null; }
+      if (!built || !built.root) continue;
+      let n = 0;
+      built.root.traverse(function (o) { if (o.isMesh) n++; });
+      props[s.id] = n;
+      propTotal += n;
+      if (n > budget) overBudget++;
+      if (n > worstProps) { worstProps = n; worstId = s.id; }
+      if (SH.dispose) { try { SH.dispose(built.root); } catch (e) {} }
     }
     let eyeGuessed = 0;
     for (let i = 0; i < live.length; i++) if (live[i].spec.eyeSource === "bbox") eyeGuessed++;
@@ -1067,6 +1121,15 @@
       built: attachCount,
       classes: Object.keys(CLASS).length,
       baseBitmaps: baseCache.size,
+      // the prop census (see above) — propTotal may only go DOWN,
+      // overBudget is pinned at 0
+      props: props,
+      propTotal: propTotal,
+      propBudget: budget,
+      propWorst: worstId,
+      propWorstCount: worstProps,
+      overBudget: overBudget,
+      cleanV2: CFG.COCKPIT_CLEAN_V2 !== false,
     };
   };
 
@@ -1240,6 +1303,20 @@
     while (n && n !== stop) { if (n.visible === false) return false; n = n.parent; }
     return true;
   }
+  // ...and is it OUR furniture or a CREW MEMBER, anywhere up the chain? A
+  // seated body (AIR_PILOT_VISIBLE) is ~40 meshes hanging off a tagged node,
+  // and none of the leaves carry the tag. A pilot is not "forward structure"
+  // — measuring the view through your own shoulder would report an airframe
+  // that cannot see the runway because somebody is sitting in it.
+  function crewUp(o, stop) {
+    let n = o;
+    while (n && n !== stop) {
+      const ud = n.userData;
+      if (ud && (ud.cockpit === true || ud.pilot === true || ud.glass === true || ud.seeThrough === true)) return true;
+      n = n.parent;
+    }
+    return false;
+  }
   function hostBlockers(craft, anchor, eye) {
     const out = [];
     const grp = craft && craft.group;
@@ -1256,6 +1333,7 @@
       // are sitting in his head, and which the raycaster would happily hit
       // anyway because r128's raycast ignores `visible`.
       if (ud.cockpit || ud.glass || ud.seeThrough || ud.pilot) return;
+      if (crewUp(o, grp)) return;
       if (!litUp(o, grp)) return;
       const m = o.material, arr = Array.isArray(m) ? m : [m];
       for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].transparent && arr[i].opacity < 0.9) return;
@@ -1360,13 +1438,7 @@
     }
     if (!per.length && SH && SH.build) {
       // no aeroplane in the world: build one of each costume, measure, bin it.
-      const probes = [
-        { airClass: "jet", displayName: "PROBE JET" },
-        { airClass: "heli", displayName: "PROBE HELI" },
-        { airClass: "airliner", displayName: "PROBE LINER", modelYawOffset: -Math.PI / 2 },
-        { airClass: "jet", displayName: "B-2 SPIRIT" },
-        { airClass: "prop", displayName: "PROBE PROP" },
-      ];
+      const probes = PROBES;
       for (let i = 0; i < probes.length; i++) {
         let spec = null, built = null;
         try { spec = CBZ.cockpitSpec(probes[i]); built = SH.build(spec, {}); } catch (e) { built = null; }

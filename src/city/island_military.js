@@ -661,6 +661,384 @@
     return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
   }
 
+  // ========================================================================
+  //  CARGO LIFTER — the first airframe in this game with a ROOM in it.
+  //
+  //  OWNER: "a cargo plane where you can open and close the back and even a
+  //  tank can drive into the back — but like elevators it must actually have a
+  //  back of plane that exists, so other players can be inside the plane like a
+  //  room."
+  //
+  //  So the modelling brief is unusual and it drives every number below: this
+  //  airframe is built from the INSIDE OUT. The hold is authored first as a
+  //  4.4 m × 19 m × 3.0 m room — sized off makeTank()'s real footprint (3.5 m
+  //  wide, 6.4 m long, 2.7 m tall) with 0.45 m of shoulder each side and 0.3 m
+  //  over the turret — and the aeroplane is then wrapped around it. That is why
+  //  the fuselage is a four-slab box (floor · two walls · roof) instead of one
+  //  solid taperBox like every other model in this file: a solid hull would
+  //  make the interior a lie you can only look at through the back.
+  //
+  //  Consequences of building it that way, all deliberate:
+  //   · the wing is SHOULDER-mounted on the roof, because a wing spar through
+  //     the middle of the room is exactly what a real lifter refuses to have;
+  //   · the main gear lives in SPONSONS blistered onto the flanks rather than
+  //     retracting into the belly, which is what keeps the cargo deck at a flat
+  //     1.35 m and lets the ramp make a 17.5-degree slope a tank can climb;
+  //   · the aft fuselage SWEEPS UP so the ramp has sky to swing into.
+  //
+  //  The ramp is its own group (userData.cargoRamp) hinged at the deck sill, so
+  //  city/vehicle_hold.js poses it by rotating ONE node and the walkable slope
+  //  is solved from that node's live angle. Nose +Z, tyres on y=0, scale 1 —
+  //  the hold's local coordinates ARE metres, which is the whole reason this
+  //  model is not scaled like the bomber beside it.
+  // ========================================================================
+  const CARGO = {
+    deckY: 1.35,          // cargo floor top, model+world metres
+    roofY: 4.35,          // hold ceiling
+    halfW: 2.2,           // hold interior half-width (tank is 3.5 wide)
+    holdZ0: -11.5,        // aft sill (the aperture)
+    holdZ1: 7.5,          // forward bulkhead
+    rampLen: 3.7,
+    rampW: 3.9,
+    rampOpenRx: -0.3648,  // toe on the tarmac: asin((1.35-0.03)/3.7) = 20.9°
+    rampClosedRx: 1.24,   // stood up across the aperture (71°)
+  };
+  /* WHY 3.7 m AND NOT 4.2, WHICH IS WHAT A 17-DEGREE SLOPE WANTED.
+     Because a door has to have somewhere to GO. Stowed, this ramp swings up
+     through the aperture and its toe ends up 3.5 m above the sill and a metre
+     aft of it — i.e. inside the upswept tail — and the tail is now a hollow
+     shell precisely so that volume exists (see AFT UPSWEEP below). At 4.2 m
+     the toe came out through the crown of the aeroplane. Trading 2.6 degrees
+     of slope (18.3 → 20.9, still half of a tank's 40% gradeability) for a door
+     that closes into its own structure is the right trade, and it is the kind
+     of number that only falls out once the room is modelled instead of faked. */
+  function makeCargoPlane() {
+    const g = new THREE.Group();
+    const GLASS = vmat("glass", M.canopy), RUBBER = vmat("tire", M.tire), GUN = vmat("plastic", M.dark);
+    const HULL = cm(0x6d7681), SHADE = cm(0x4d545c), PANEL = cm(M.jetGrey);
+    // A HOLD IS A LIT ROOM, NOT A CAVE. There is no global illumination here,
+    // so an emissive strip does not brighten what is under it — the liner has
+    // to be painted as though it were lit, which is the same trick every
+    // interior in this repo uses. Measured on the third plate: the shipped
+    // greys read as a dark tunnel through the open ramp.
+    const BAY = cm(0x9aa1a9);                                    // lit cargo-bay interior grey
+    const DECKM = cm(0x666c74);                                  // deck plate
+    // A CEILING FACES DOWN, so no sun ever reaches it and a plain liner up
+    // there stays black however pale you paint it. The overhead panel carries
+    // its own emissive — the one place in this room where "lit" has to be in
+    // the material rather than in the light.
+    const CEIL = cm(0xb4bbc2, { emissive: 0x39434b, ei: 0.85 });
+    const STRIP = cm(0xeef3f6, { emissive: 0xcfe2ec, ei: 0.9 });  // overhead light strip
+    const WEB = cm(0x8a3f34);                                     // red troop webbing
+    const Z0 = CARGO.holdZ0, Z1 = CARGO.holdZ1;
+    const DY = CARGO.deckY, RY = CARGO.roofY, HW = CARGO.halfW;
+    const holdMidZ = (Z0 + Z1) / 2, holdLen = Z1 - Z0;
+
+    // ===================== FUSELAGE — FOUR SLABS AROUND A ROOM =============
+    // Outer skin sits 0.4 m outboard of the interior wall so the hull has real
+    // thickness where you see the cut at the aperture.
+    tbox(g, 0, (0.92 + DY) / 2, holdMidZ, 5.2, DY - 0.92, holdLen, { nz: 0.94, tz: 0.94, bot: 0.72, segD: 6 }, HULL);   // underfloor / keel
+    tbox(g, 0, (RY + 4.95) / 2, holdMidZ, 5.2, 0.60, holdLen, { nz: 0.94, tz: 0.94, top: 0.74, segD: 6 }, HULL);        // crown
+    [-1, 1].forEach(function (s) {
+      tbox(g, s * (HW + 0.2), (DY + RY) / 2, holdMidZ, 0.40, RY - DY, holdLen, { nz: 0.98, tz: 0.98, segD: 6 }, HULL);  // flank
+      // longeron strake down the outside — the line that stops a slab-sided
+      // fuselage reading as a shipping container
+      tbox(g, s * (HW + 0.42), 3.55, holdMidZ, 0.20, 0.26, holdLen - 1.2, { nz: 0.9, tz: 0.9, segD: 6 }, SHADE);
+    });
+
+    // ===================== THE HOLD ITSELF =================================
+    // Deck plate, roller rails, tie-downs, ribbed walls, fold-down webbing
+    // benches and two overhead light strips. This is the room; everything above
+    // is the aeroplane wrapped around it.
+    mbox(g, 0, DY - 0.06, holdMidZ, HW * 2, 0.12, holdLen, DECKM);              // deck plate
+    mbox(g, 0, DY + 0.012, holdMidZ, 0.30, 0.02, holdLen - 0.4, cm(M.warn));    // centreline load line
+    [-1.55, -0.55, 0.55, 1.55].forEach(function (rx) {
+      mbox(g, rx, DY + 0.035, holdMidZ, 0.16, 0.07, holdLen - 0.6, cm(M.steelD));   // roller/lock rails
+    });
+    for (let i = 0; i < 10; i++) {                                              // tie-down rings down both rails
+      const tz = Z0 + 1.2 + i * ((holdLen - 2.4) / 9);
+      [-1.9, 1.9].forEach(function (tx) { mbox(g, tx, DY + 0.05, tz, 0.20, 0.10, 0.20, GUN); });
+    }
+    [-1, 1].forEach(function (s) {
+      mbox(g, s * (HW - 0.03), (DY + RY) / 2, holdMidZ, 0.06, RY - DY, holdLen, BAY);      // inner wall liner
+      for (let i = 0; i < 11; i++) {                                            // frame ribs
+        const rz = Z0 + 0.9 + i * ((holdLen - 1.8) / 10);
+        mbox(g, s * (HW - 0.09), (DY + RY) / 2 + 0.1, rz, 0.10, RY - DY - 0.4, 0.16, SHADE);
+      }
+      // fold-down webbing bench + its back, the detail that says PEOPLE RIDE HERE
+      mbox(g, s * (HW - 0.32), DY + 0.50, holdMidZ + 0.5, 0.56, 0.09, holdLen - 4.5, WEB);
+      mbox(g, s * (HW - 0.07), DY + 0.92, holdMidZ + 0.5, 0.07, 0.75, holdLen - 4.5, WEB);
+      mbox(g, s * 1.02, RY - 0.09, holdMidZ, 0.30, 0.08, holdLen - 1.6, STRIP);            // overhead light strip
+      mbox(g, s * (HW - 0.04), RY - 0.30, holdMidZ, 0.10, 0.20, holdLen - 1.6, cm(0x3b4148)); // cable/duct run
+    });
+    mbox(g, 0, RY - 0.03, holdMidZ, HW * 2 - 0.1, 0.06, holdLen, CEIL);         // ceiling liner
+    
+    // forward bulkhead with a real doorway through to the flight deck, plus the
+    // loadmaster's station beside the ramp
+    mbox(g, 0, (DY + RY) / 2, Z1 + 0.18, HW * 2, RY - DY, 0.36, cm(0x767d85));
+    mbox(g, -1.25, DY + 1.0, Z1 - 0.02, 0.90, 2.0, 0.10, cm(0x2b3037));         // doorway aperture
+    mbox(g, 0.85, DY + 1.4, Z1 - 0.02, 1.5, 1.1, 0.10, cm(0x565d66));           // stowed pallet against it
+    mbox(g, -(HW - 0.14), DY + 1.5, Z0 + 1.6, 0.14, 0.60, 0.45, cm(0x2f353c));  // loadmaster panel
+    mbox(g, -(HW - 0.20), DY + 1.5, Z0 + 1.6, 0.04, 0.34, 0.30, cm(0x14343a, { emissive: 0x2f8f8a, ei: 0.55 }));
+
+    // aperture collar — the cut edge of the fuselage, so the opening reads as a
+    // door in a hull instead of a hole in a box
+    [-1, 1].forEach(function (s) { mbox(g, s * (HW + 0.20), (DY + RY) / 2, Z0 - 0.18, 0.42, RY - DY, 0.36, SHADE); });
+    mbox(g, 0, RY + 0.18, Z0 - 0.18, HW * 2 + 0.84, 0.42, 0.36, SHADE);
+    mbox(g, 0, DY - 0.20, Z0 - 0.18, HW * 2 + 0.84, 0.30, 0.36, SHADE);         // sill lip the ramp seats on
+
+    // ===================== AFT UPSWEEP + TAIL ==============================
+    // The hull sweeps UP behind the aperture so the ramp has sky to swing into
+    // and the tail clears the ground on rotation.
+    //
+    // AND IT IS A SHELL, NOT A SLAB — which is the whole difference between a
+    // cargo door and a picture of one. This was ONE solid tapered box, and a
+    // solid box immediately behind a cargo door is a PLUGGED cargo door:
+    // measured on the first plate of this feature, the box's front face stood
+    // across the entire 3 m aperture, so from the cargo deck the "open back"
+    // was a grey wall two metres away and from outside the room was invisible.
+    // Same silhouette, same taper, now built as a crown and two flanks around
+    // an OPEN TUNNEL — the identical four-slabs-around-a-room grammar the
+    // fuselage above is built with, and for the identical reason. The stowed
+    // ramp lives in that tunnel; with the ramp down you see sky through the
+    // back of the aeroplane from inside it.
+    //
+    // The flanks are hinged at the aperture and rotated inboard rather than
+    // slid inboard, because a taperBox tapers about its OWN centre: a slab
+    // that has been moved off the centreline cannot narrow toward the tail by
+    // tapering, only by turning. Their inner faces stand at ±2.11 m, which is
+    // what keeps the 3.9 m ramp clear of them through its whole swing.
+    const aftShell = new THREE.Group();
+    aftShell.position.set(0, 2.85, Z0);
+    aftShell.rotation.x = 0.34;
+    g.add(aftShell);
+    tbox(aftShell, 0, 1.945, -3.25, 5.00, 0.65, 6.60, { nz: 0.98, tz: 0.72, top: 0.62, segD: 8 }, HULL);   // upswept crown
+    [-1, 1].forEach(function (s) {
+      const fl = new THREE.Group();
+      fl.position.set(s * 2.36, 0, 0);
+      fl.rotation.y = s * 0.055;
+      aftShell.add(fl);
+      tbox(fl, 0, 0, -3.30, 0.50, 3.40, 6.60, { nz: 1.0, tz: 0.62, top: 0.66, bot: 0.70, segD: 8 }, HULL);
+    });
+    const aft2 = tbox(g, 0, 5.95, -18.10, 2.60, 2.20, 3.40, { nz: 0.90, tz: 0.45, top: 0.66, bot: 0.66, segD: 6 }, HULL);
+    aft2.rotation.x = 0.34;
+    mbox(g, 0, 6.60, -19.35, 0.90, 0.70, 0.60, SHADE);                           // tail-cone APU fairing
+
+    // T-TAIL: fin growing out of the upswept boom, stabilizer on top of it —
+    // the silhouette that says "this thing loads from the back".
+    wing(g, 0, 5.30, -15.60, 1, 6.90, 5.60, 0.58, 3.30, 0.52, 0.45, PANEL).rotation.z = Math.PI / 2;
+    tbox(g, 0, 12.35, -17.20, 1.20, 0.70, 3.60, { nz: 0.70, tz: 0.50, top: 0.7, bot: 0.7, segD: 4 }, SHADE);  // tip fairing
+    [-1, 1].forEach(function (s) {
+      wing(g, s * 0.55, 12.30, -17.10, s, 6.40, 3.60, 0.34, 2.10, 0.52, 0.45, PANEL, 0.0);
+    });
+
+    // ===================== FORWARD FUSELAGE + FLIGHT DECK ==================
+    tbox(g, 0, 2.95, 11.40, 5.10, 4.10, 7.30, { nz: 0.98, tz: 0.74, top: 0.60, bot: 0.70, segD: 8 }, HULL);
+    const noseCap = tbox(g, 0, 2.80, 16.20, 3.30, 3.10, 3.10, { nz: 0.72, tz: 0.36, top: 0.56, bot: 0.66, segD: 8 }, HULL);
+    noseCap.rotation.x = -0.05;                                                  // the nose droops a touch
+    const radome = new THREE.Mesh(new THREE.SphereGeometry(0.78, 10, 6), SHADE);
+    radome.scale.set(0.92, 0.94, 1.25); radome.position.set(0, 2.68, 17.55);
+    radome.castShadow = true; radome.receiveShadow = true; g.add(radome);
+    // the flight deck rides ON TOP — split roof/belly slabs around an OPEN
+    // window band (island_airport's buildCabin technique, the same one the
+    // bomber uses two hundred lines up), so there is genuine air behind the glass
+    // THE GREENHOUSE IS TALL ENOUGH FOR THIS GAME'S PEOPLE, and that is not a
+    // styling choice. `city/cockpit.js` DERIVES the design eye from what the
+    // artist modelled, in a fixed order of sources, and its last resort is the
+    // BOUNDING BOX — which on a 13-metre-tall T-tail freighter put the pilot's
+    // eye roughly ten metres above the aeroplane. `cockpitSightAudit()` counts
+    // exactly that failure as `eyeGuessed` and it may only go DOWN, so a brand
+    // new flyable airframe must not add one. The fix is the one the audit's
+    // own header names: model the chair. Two real crew seats are published on
+    // `userData.cabin.seats` (the highest-priority source, the same shape the
+    // airliner's flight deck uses) and the window band was opened from 0.70 m
+    // to 1.40 m so the eye that falls out of them — 0.83 m above the cushion,
+    // because this game's humans are big — is actually behind glass.
+    const BAND0 = 4.55, BAND1 = 5.95, ROOFT = 6.22;
+    tbox(g, 0, (BAND1 + ROOFT) / 2, 13.30, 2.90, ROOFT - BAND1, 4.60, { nz: 0.80, tz: 0.88, top: 0.66, segD: 6 }, HULL);   // deck roof
+    tbox(g, 0, (4.05 + BAND0) / 2, 13.30, 2.90, BAND0 - 4.05, 4.60, { nz: 0.80, tz: 0.88, segD: 6 }, HULL);      // deck sole
+    tbox(g, 0, (BAND0 + BAND1) / 2, 11.10, 2.80, BAND1 - BAND0, 0.34, { nz: 0.92, tz: 0.92, segD: 3 }, HULL);    // rear bulkhead
+    [-1, 1].forEach(function (s) {
+      tbox(g, s * 1.16, (BAND0 + BAND1) / 2, 12.10, 0.24, BAND1 - BAND0, 2.20, { nz: 0.9, tz: 0.96, segD: 3 }, HULL);
+      mbox(g, s * 1.24, (BAND0 + BAND1) / 2 + 0.10, 14.10, 0.14, 0.86, 1.90, GLASS);        // quarter lights
+    });
+    tbox(g, 0, (BAND0 + BAND1) / 2 + 0.06, 15.10, 2.10, 1.14, 1.10, { nz: 0.74, tz: 1.0, top: 0.62, bot: 0.90, segD: 4 }, GLASS);
+    tbox(g, 0, (BAND0 + BAND1) / 2 + 0.74, 15.05, 2.12, 0.26, 1.50, { nz: 0.74, tz: 1.0, top: 0.60, segD: 4 }, SHADE).rotation.x = 0.10;
+    // what you see through it — glareshield, coaming, pedestal…
+    const GLOW = cm(0x0c1a1c, { emissive: 0x2f6f6a, ei: 0.5 }), DECKI = vmat("interior", 0x0d0e10);
+    mbox(g, 0, BAND0 + 0.62, 14.72, 1.70, 0.40, 0.09, GLOW).rotation.x = -0.28;
+    mbox(g, 0, BAND0 + 0.88, 14.52, 1.66, 0.10, 0.32, DECKI);
+    mbox(g, 0, BAND0 + 0.38, 13.90, 0.34, 0.52, 0.72, DECKI);
+    // …AND TWO CHAIRS. Cushion top at SEATY; the eye cockpit.js derives from
+    // them lands at 5.73, which is 1.18 m over the flight-deck sole and inside
+    // the glass — a pilot looking out, not a pilot inside the floor.
+    const SEATY = 4.90;
+    [-1, 1].forEach(function (s) {
+      mbox(g, s * 0.46, SEATY - 0.06, 13.55, 0.52, 0.12, 0.54, DECKI);                        // cushion
+      mbox(g, s * 0.46, SEATY + 0.38, 13.24, 0.52, 0.86, 0.11, DECKI).rotation.x = -0.12;     // back
+      mbox(g, s * 0.46, SEATY - 0.28, 13.55, 0.18, 0.32, 0.18, cm(M.steelD));                 // pedestal
+    });
+    g.userData.cabin = {
+      seats: [
+        { id: "seat-captain", role: "pilot", cockpit: true, x: -0.46, y: SEATY, z: 13.55 },
+        { id: "seat-firstofficer", role: "copilot", cockpit: true, x: 0.46, y: SEATY, z: 13.55 },
+      ],
+    };
+    // crew door on the port side, forward — the way people who are not freight
+    // get in, and the reason the nose reads as inhabited
+    mbox(g, -2.58, 2.30, 9.60, 0.08, 2.00, 0.95, SHADE);
+    mbox(g, -2.63, 2.30, 9.60, 0.04, 1.70, 0.06, cm(M.dark));
+
+    // ===================== WINGS (SHOULDER-MOUNTED) ========================
+    [-1, 1].forEach(function (s) {
+      tbox(g, s * 1.70, 5.05, 1.60, 2.20, 1.70, 10.60, { nz: 0.42, tz: 0.52, top: 0.58, bot: 0.64, segD: 8 }, SHADE); // wing-body fairing
+      wing(g, s * 1.10, 5.45, 1.80, s, 19.60, 6.30, 0.74, 2.60, 0.52, 0.48, HULL, 0.34);
+      tbox(g, s * 20.10, 5.30, 0.20, 0.55, 1.60, 2.60, { nz: 0.55, tz: 0.40, top: 0.6, bot: 0.6, segD: 4 }, PANEL).rotation.z = -s * 0.16; // winglet
+      tbox(g, s * 8.40, 4.55, -2.60, 0.55, 0.52, 3.20, { nz: 0.80, tz: 0.20, top: 0.7, bot: 0.7, segD: 4 }, SHADE);   // flap-track fairing
+      tbox(g, s * 14.20, 4.60, -2.20, 0.48, 0.46, 2.80, { nz: 0.80, tz: 0.20, top: 0.7, bot: 0.7, segD: 4 }, SHADE);
+    });
+
+    // ===================== ENGINES — four pylon-hung turbofans =============
+    const ENG = [
+      // x, y, z, length, radius, pylonY, pylonZ, pylonH
+      [6.20, 3.85, 3.40, 4.30, 1.00, 4.70, 2.60, 1.60],
+      [11.60, 3.95, 2.30, 3.90, 0.88, 4.75, 1.60, 1.45],
+    ];
+    [-1, 1].forEach(function (s) {
+      ENG.forEach(function (e) {
+        const ex = s * e[0], ey = e[1], ez = e[2], eL = e[3], er = e[4];
+        const fz = ez + eL / 2, az = ez - eL / 2;
+        tbox(g, ex, e[5], e[6], 0.46, e[7], 2.70, { nz: 0.55, tz: 0.70, top: 0.80, bot: 0.85, segD: 4 }, SHADE);
+        cyl(g, ex, ey, ez, er, er * 0.82, eL, M.jetGrey, 14).rotation.x = Math.PI / 2;
+        const lip = new THREE.Mesh(new THREE.TorusGeometry(er * 0.90, er * 0.16, 6, 16), cm(M.steelD));
+        lip.position.set(ex, ey, fz - er * 0.10); lip.castShadow = true; lip.receiveShadow = true; g.add(lip);
+        mcyl(g, ex, ey, fz - er * 0.55, er * 0.85, er * 0.85, 0.12, GUN, 14).rotation.x = Math.PI / 2;
+        const hub = new THREE.Mesh(new THREE.ConeGeometry(er * 0.22, er * 0.80, 8), cm(M.steelD));
+        hub.rotation.x = Math.PI / 2; hub.position.set(ex, ey, fz - er * 0.55);
+        hub.castShadow = true; hub.receiveShadow = true; g.add(hub);
+        mcyl(g, ex, ey, az + 0.12, er * 0.78, er * 0.60, 0.80, GUN, 12).rotation.x = Math.PI / 2;
+      });
+    });
+
+    // ===================== GEAR — nose leg + sponson bogies ================
+    box(g, 0, 1.35, 13.20, 0.42, 2.20, 0.38, M.steelD);
+    box(g, 0, 1.70, 12.90, 0.24, 1.50, 0.24, M.steel).rotation.x = -0.42;
+    [-1, 1].forEach(function (s) {
+      mcyl(g, s * 0.32, 0.62, 13.20, 0.62, 0.62, 0.32, RUBBER, 12).rotation.z = Math.PI / 2;
+    });
+    [-1, 1].forEach(function (s) {
+      // the SPONSON: the blister that keeps the cargo deck flat and low
+      tbox(g, s * 3.05, 1.55, 1.20, 1.20, 1.90, 7.40, { nz: 0.62, tz: 0.62, top: 0.70, bot: 0.74, segD: 8 }, HULL);
+      box(g, s * 3.05, 0.98, 1.20, 0.60, 0.90, 6.20, M.steelD, { cast: false });
+      [-2.10, 0.00, 2.10].forEach(function (wz) {
+        mcyl(g, s * 3.42, 0.70, 1.20 + wz, 0.70, 0.70, 0.36, RUBBER, 12).rotation.z = Math.PI / 2;
+        mcyl(g, s * 2.68, 0.70, 1.20 + wz, 0.70, 0.70, 0.36, RUBBER, 12).rotation.z = Math.PI / 2;
+      });
+    });
+
+    // ===================== THE RAMP ========================================
+    // Hinged at the deck sill so vehicle_hold.js only ever rotates ONE node and
+    // solves the walkable slope from its live angle. Built lying flat aft
+    // (rotation.x 0 = horizontal) and stowed upright by the hold on declaration.
+    const ramp = new THREE.Group();
+    ramp.position.set(0, DY, Z0);
+    const RL = CARGO.rampLen, RW = CARGO.rampW;
+    mbox(ramp, 0, -0.10, -RL / 2, RW, 0.20, RL, DECKM);                        // the slab
+    mbox(ramp, 0, 0.02, -RL / 2, 0.30, 0.02, RL - 0.3, cm(M.warn));            // centre load line
+    [-1, 1].forEach(function (s) {
+      mbox(ramp, s * (RW / 2 - 0.14), 0.06, -RL / 2, 0.16, 0.10, RL - 0.2, cm(M.steelD));  // rails
+      mbox(ramp, s * (RW / 2 + 0.03), 0.14, -RL / 2, 0.08, 0.36, RL - 0.6, SHADE);         // side rail/guard
+      for (let i = 0; i < 4; i++) {                                            // underside ribs
+        mbox(ramp, s * 0.85, -0.24, -0.6 - i * 0.90, 0.14, 0.20, 0.80, SHADE);
+      }
+    });
+    for (let i = 0; i < 6; i++) {                                              // non-skid tread bands
+      mbox(ramp, 0, 0.015, -0.42 - i * 0.60, RW - 0.5, 0.02, 0.20, cm(0x3f454c));
+    }
+    mbox(ramp, 0, -0.13, -RL - 0.12, RW - 0.2, 0.10, 0.30, cm(M.steelD));      // toe lip
+    ramp.rotation.x = CARGO.rampClosedRx;
+    g.add(ramp);
+    g.userData.cargoRamp = ramp;
+
+    // nav lights: red port, green starboard, white on the tail cone
+    navBox(g, -20.30, 5.30, 0.20, 0.24, 0xff4a3d);
+    navBox(g, 20.30, 5.30, 0.20, 0.24, 0x37d67a);
+    navBox(g, 0, 6.70, -19.70, 0.22, 0xf2f4ff);
+    navBox(g, 0, 5.62, 15.05, 0.18, 0xf2f4ff);
+
+    const dims = { family: "cargo-lifter", length: 37.5, span: 42, height: 13.4 };
+    g.userData.aircraftDims = dims;
+    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims, ramp: ramp };
+  }
+
+  // ---- PLACE ONE, AND DECLARE ITS HOLD ------------------------------------
+  // Deliberately NOT placeModel(): that pushes one full-footprint world AABB,
+  // and a solid rectangle over the whole aeroplane is precisely the wall that
+  // stops a tank driving up the ramp. This airframe's solidity comes from the
+  // HOLD RIG instead (LOCAL walls on systems/platforms_moving.js), which is the
+  // strictly better answer anyway — a static AABB is a lie the moment the
+  // aeroplane turns, and this one is meant to fly with people inside it.
+  function placeCargoPlane(root, wx, wz, rotY, name) {
+    const made = makeCargoPlane();
+    made.group.position.set(wx, 0, wz);
+    made.group.rotation.y = rotY || 0;
+    made.group.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    root.add(made.group);
+    made.group.userData.milKind = "plane";
+    made.group.userData.milName = name || "Cargo Lifter";
+    made.group.userData.dynamic = true;
+    made.group.userData.aircraftDims = made.aircraftDims;
+    const rec = {
+      group: made.group, pos: made.group.position, heading: rotY || 0,
+      kind: "plane", model: { name: name || "Cargo Lifter" },
+      collider: null,                       // see the note above — the rig owns it
+      modelYawOffset: 0, groundOffset: 0,
+      aircraftDims: made.aircraftDims,
+      footW: made.footW, footL: made.footL, taken: false, hot: true,
+      cargoLifter: true,
+      // it flies like the heavy it is, and it carries no missiles — a freighter
+      // with air-to-air rails would be the "military = fighter" assumption the
+      // whole airframe exists to break (playeraircraft.js honours both fields)
+      airClass: "airliner", armed: false,
+    };
+    placed.push(rec);
+
+    // ---- ONE CALL. This is the whole adoption. --------------------------
+    if (CBZ.vehicleHold) {
+      const Z0 = CARGO.holdZ0, Z1 = CARGO.holdZ1, DY = CARGO.deckY, RY = CARGO.roofY, HW = CARGO.halfW;
+      const midZ = (Z0 + Z1) / 2, len = Z1 - Z0;
+      rec.hold = CBZ.vehicleHold(rec, {
+        id: "cargo-lifter-" + placed.length,
+        label: "Cargo hold",
+        scale: 1,
+        floor: { x: 0, z: midZ, w: HW * 2, d: len, top: DY },
+        roof: RY,
+        walls: [
+          { x: -(HW + 0.2), z: midZ, w: 0.45, d: len, y0: 0, y1: RY + 0.6 },     // port flank
+          { x: (HW + 0.2), z: midZ, w: 0.45, d: len, y0: 0, y1: RY + 0.6 },      // starboard flank
+          { x: 0, z: Z1 + 0.2, w: HW * 2 + 0.9, d: 0.5, y0: 0, y1: RY + 0.6 },   // forward bulkhead
+          { x: 0, z: 12.0, w: 5.2, d: 9.0, y0: 0, y1: 6.6 },                     // forward fuselage
+          { x: -3.05, z: 1.2, w: 1.3, d: 7.4, y0: 0, y1: 2.6 },                  // gear sponsons
+          { x: 3.05, z: 1.2, w: 1.3, d: 7.4, y0: 0, y1: 2.6 },
+          /* NO WALL FOR THE UPSWEPT TAIL, and this is a measured decision, not
+             an omission. A y-gated box at y0 4.7 over the ramp mouth is free
+             for a pedestrian (standing on the 1.35 m deck your head is at 3.15
+             — you can never touch it) and it is a SEALED DOOR for a tank:
+             systems/physics.js collide() documents that a caller omitting
+             feetY/headY gets every collider at FULL HEIGHT, and vehicles.js's
+             cityCollideVehicle omits both. Measured with the wall in: the tank
+             stopped dead 7 m short of the ramp toe at full throttle. */
+        ],
+        ramp: {
+          node: made.ramp, w: CARGO.rampW, len: CARGO.rampLen, x: 0,
+          sillZ: Z0, sillTop: DY, dir: -1,
+          closedRx: CARGO.rampClosedRx, openRx: CARGO.rampOpenRx, seconds: 3.0,
+        },
+      });
+    }
+    return rec;
+  }
+
   // HELICOPTER — sculpted cabin + glass greenhouse nose, tapered tail boom,
   // rotor mast/hub with 4 sculpted drooped blades in ONE spinnable group
   // (userData.rotor), a crossed tail rotor group (userData.tailRotor), skids,
@@ -1259,6 +1637,13 @@
       placeModel(root, makeJet, MINX + 90 + i * 34, jetZ, Math.PI, 1, "plane", "Fighter Jet");   // nose pointing -Z (toward runway)
     }
     placeModel(root, makeBomber, MAXX - 95, jetZ - 12, Math.PI, 1, "plane", "Heavy Bomber");      // the big one, set back
+    // THE CARGO LIFTER, on its own loading apron and facing the OTHER WAY on
+    // purpose: nose north up the strip, ramp pointing back down the taxiway
+    // toward the motor pool, because the tanks are the load. A base where the
+    // freighter is parked so its ramp faces a fence is a base nobody thought
+    // about. Placed by its own function — it declares a walk-in HOLD and
+    // deliberately pushes no full-footprint collider (see placeCargoPlane).
+    placeCargoPlane(root, MAXX - 150, jetZ - 34, 0, "Cargo Lifter");
 
     // ---- HELIPADS: a row, each with a parked helicopter ----
     const padZ = CEN_Z + 30;

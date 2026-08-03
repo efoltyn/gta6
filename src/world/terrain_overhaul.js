@@ -168,6 +168,39 @@
   // the horizon. Same provably-gate-safe construction as before — only the
   // number moved. `?cfg_TERRAIN_RING_AMP=1.18` is the exact old skyline.
   if (CFG.TERRAIN_RING_AMP == null) CFG.TERRAIN_RING_AMP = 4.5;
+  /* ==================================================================
+     TERRAIN_SEABED_BATHY — THE FLOOR LAW (owner, 2026-08-03: "there should
+     ALWAYS be a bottom of water — even the deepest part of the ocean should
+     have a floor; it just gets dark blue there").
+
+     MEASURED BEFORE (tools/probe.mjs raycast straight down, seed 90210, the
+     coast at x=7159 z=-300):
+
+        10 m offshore   game depth  1.9 m   drawn floor -1.86
+       200 m offshore   game depth 16.1 m   drawn floor -1.86
+      1000 m offshore   game depth 62.0 m   drawn floor -1.86
+      4000 m offshore   game depth 62.0 m   drawn floor -26.06  (SHELF_MIN)
+      6000 m offshore   game depth 62.0 m   NO FLOOR — zero ray hits
+      8000 m offshore   game depth 62.0 m   NO FLOOR — zero ray hits
+
+     So the sea had a floor 1.4 m under the surface everywhere a swimmer can
+     actually reach, and none at all in the deep. Diving 20 m offshore put the
+     eye straight through the drawn bottom into a void that the fog then
+     painted, which is precisely why the underwater view had no depth cue.
+
+     v3Visual's interior constant (-1.8) was a placeholder for "under the
+     playable world the plate/city/sea own the view" — true for LAND, wrong
+     for every metre of water. It now reads the SAME bathymetry the swimmer
+     is clamped against (city/swim.js's bed model, published as
+     CBZ.citySeaBedDepthAt), so the floor you can see is the floor you stand
+     on. SHELF_MIN moves with it: -26 could not express a 62 m water column.
+
+     Land is untouched — over dry ground the helper returns the old -1.8 and
+     the shelf stays buried exactly where it was. The PHYSICS oracle
+     (v3Height) is not involved at all; this is the visual field only.
+     `?cfg_TERRAIN_SEABED_BATHY=0` restores the flat -1.8 shelf and -26 clamp.
+  ================================================================== */
+  if (CFG.TERRAIN_SEABED_BATHY == null) CFG.TERRAIN_SEABED_BATHY = true;
 
   // originals (terrain.js loaded just before this file)
   const orig = {
@@ -743,8 +776,50 @@
     ALT_BASE: -0.42,           // open-sea baseline (below water)
     ALT_RING: 0.78,            // ring-of-ranges altitude lift at full mask
     AMP: 380,                  // world units per shaped-noise unit
-    SHELF_MIN: -26,            // visual seabed clamp (never a yawning trench)
+    // Visual seabed clamp. -26 predates the 62 m gameplay water column and was
+    // the reason the open ocean bottomed out at a quarter of its own depth;
+    // -62.5 is exactly SEA_Y - the bathymetry cap, so the drawn abyssal plain
+    // meets the depth a swimmer is actually clamped at. (TERRAIN_SEABED_BATHY
+    // off → the historical -26.)
+    SHELF_MIN: -62.5,
+    SHELF_MIN_LEGACY: -26,
   };
+  function shelfMin() {
+    return CFG.TERRAIN_SEABED_BATHY === false ? V3P.SHELF_MIN_LEGACY : V3P.SHELF_MIN;
+  }
+
+  /* ---- THE BATHYMETRY THE SHELF IS DRAWN FROM ---------------------------
+     ONE model, not a second one: city/swim.js publishes CBZ.citySeaBedDepthAt
+     (metres of water column) and clamps the swimmer against it, so reading it
+     here is what makes the drawn bottom and the swimmable bottom the same
+     surface. The inline fallback reproduces that model from the water field
+     for the case where swim.js has not parsed, and returns the historical flat
+     shelf over dry land (where the country plate owns every pixel anyway).
+
+     Pure analytic terrain arithmetic — no rng, no build-path draw, so the
+     determinism law is untouched. */
+  const SHELF_FLAT = -1.8;          // the historical under-the-world constant
+  function seabedVisualY(x, z) {
+    if (CFG.TERRAIN_SEABED_BATHY === false) return SHELF_FLAT;
+    const seaY = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+    let d = NaN;
+    if (CBZ.citySeaBedDepthAt) d = +CBZ.citySeaBedDepthAt(x, z);
+    if (!Number.isFinite(d)) {
+      const wf = CBZ.waterField;
+      if (!wf || !wf.shoreAt) return SHELF_FLAT;
+      const s = +wf.shoreAt(x, z);
+      if (!Number.isFinite(s) || s >= 0) return SHELF_FLAT;      // dry land
+      const shelf = Math.max(0, -s) * 1.10;                      // swim.js SHELF_SLOPE
+      const deep = CBZ.cityWaterDepthAt ? +CBZ.cityWaterDepthAt(x, z) : 24;
+      d = Math.min(shelf, deep > 0 ? deep : 24);
+    }
+    if (!(d > 0)) return SHELF_FLAT;                             // dry land
+    // Never ABOVE the old shelf: the country plate carves its own sandy rim
+    // down to ~-2.07 in the first metres of water and must keep owning it,
+    // and a bottom that rose over SHELF_FLAT would z-fight the plate.
+    const y = seaY - Math.max(1.45, d);
+    return y < SHELF_FLAT ? y : SHELF_FLAT;
+  }
 
   // ---- WHERE the ranges stand: an offshore ring around the live world.
   //      ringIn starts past the flat margin (the contract zone stays a calm
@@ -924,16 +999,24 @@
     const h = v3Field(x, z, _fld).h;
     return h > 0 ? h * fo : 0;
   }
-  // visual: sinks under the sea over the flat interior (plate/city/sea own
-  // the view there), eases through the shelf, meets the oracle as fo→1.
+  // visual: over the flat interior this is the SEA BED (seabedVisualY — the
+  // real water column where there is water, the old buried -1.8 under land),
+  // then eases through the shelf and meets the oracle as fo→1.
   function v3Visual(x, z) {
     const d = distOutsideFlat(x, z);
-    if (d <= MARGIN) return -1.8;
-    const fo = smooth(MARGIN, MARGIN + RAMP, d);
-    if (fo <= 0) return -1.8;
+    const lo = shelfMin();
+    const fo = d <= MARGIN ? 0 : smooth(MARGIN, MARGIN + RAMP, d);
+    // Past the ramp the bed term has zero weight, so the ~126k build-time
+    // vertex evaluations out there never pay for a shore-field query.
+    if (fo >= 1) {
+      const h1 = v3Field(x, z, _fld).h;
+      return h1 < lo ? lo : h1;
+    }
+    const base = seabedVisualY(x, z);
+    if (fo <= 0) return base < lo ? lo : base;
     const h = v3Field(x, z, _fld).h;
-    const v = lerp(-1.8, h, fo);
-    return v < V3P.SHELF_MIN ? V3P.SHELF_MIN : v;
+    const v = lerp(base, h, fo);
+    return v < lo ? lo : v;
   }
   function v3VisualNormal(x, z, out) {
     out = out || new THREE.Vector3();
@@ -952,6 +1035,20 @@
   const C3 = {
     deep: new THREE.Color(0x14364d), shallow: new THREE.Color(0x2e5a74),
     sand: new THREE.Color(0x8b7a5f),
+    /* ---- SEA BED ALBEDO, read off the reference photographs ------------
+       ref 3 (Tiger Beach, ~5 m): the bottom is near-WHITE shell sand, warm
+       and bright enough that the whole scene's light comes back up off it —
+       0x14364d/0x2e5a74 could never do that, which is why shallow water read
+       as a dark teal plate instead of a beach.
+       ref 5 (open ocean): whatever is down there is nearly black-navy; the
+       colour the eye reads at depth is the WATER, not the ground.
+       So the bed ramps sand → silt → shelf grey-teal → deep sediment BY
+       WATER COLUMN, and the underwater fog in world/water_underwater.js does
+       the rest. */
+    bedSand: new THREE.Color(0xb9b298),    // ref 3 — bright shell sand
+    bedSilt: new THREE.Color(0x7c8168),    // ref 3 middle distance
+    bedShelf: new THREE.Color(0x3d5c67),   // ref 4 — the shelf going over
+    bedDeep: new THREE.Color(0x101d2c),    // ref 5 — abyssal sediment
     dry: new THREE.Color(0x707252), moistV: new THREE.Color(0x4b6a49),
     forest: new THREE.Color(0x374f3a),
     granite: new THREE.Color(0x5f5b54), graniteD: new THREE.Color(0x293033),
@@ -968,8 +1065,17 @@
   // shading and — crucially — the snow LINE, not just its brightness.
   function bandColor3(x, z, y, slope, faceLight, wob, fld, out) {
     const snowY = fld.snowY;
-    if (y < -0.6) {                                     // the sea shelf
-      out.copy(C3.deep).lerp(C3.shallow, smooth(-20, -0.6, y));
+    if (y < -0.6) {                                     // the sea BED
+      if (CFG.TERRAIN_SEABED_BATHY === false) {
+        out.copy(C3.deep).lerp(C3.shallow, smooth(-20, -0.6, y));
+        return;
+      }
+      // metres of water standing over this vertex — the one thing the bed's
+      // colour should depend on (refs 3 and 5).
+      const col = (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48) - y;
+      out.copy(C3.bedSand).lerp(C3.bedSilt, smooth(1.8, 10, col));
+      out.lerp(C3.bedShelf, smooth(8, 26, col));
+      out.lerp(C3.bedDeep, smooth(22, 56, col));
       return;
     }
     if (y < 2.6) {                                      // shoreline sand

@@ -1099,6 +1099,13 @@
       fly.traverse((o) => { if (o !== fly && o.userData && o.userData.isSocket) stripQ.push(o); });
       for (let i = 0; i < stripQ.length; i++) { if (stripQ[i].parent) stripQ[i].parent.remove(stripQ[i]); }
       fly.visible = true;
+      // A SEVERED LIMB MUST BE VISIBLE EVEN WHEN ITS ORIGINAL IS INSTANCED.
+      // entities/pedinstance.js parks pooled body meshes on a private layer
+      // (the source keeps `visible` intact — this file's own visible-flag
+      // contract above depends on that), and Object3D.copy carries
+      // layers.mask into the clone, so an un-revealed gib would fly off
+      // invisible. One call, guarded: a no-op when the system is off.
+      if (CBZ.pedInstanceReveal) CBZ.pedInstanceReveal(fly);
       part.matrixWorld.decompose(fly.position, fly.quaternion, fly.scale);
       scene().add(fly);
       let dx = opts.dir ? opts.dir.x || 0 : 0, dz = opts.dir ? opts.dir.z || 0 : 0;
