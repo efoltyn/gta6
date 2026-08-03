@@ -125,13 +125,45 @@
     // doorway accent (local -Z → rides the group's rotation onto the gap side)
     const doorway = new THREE.Mesh(new THREE.BoxGeometry(gap * 2, y1 * 0.7, 0.08), cmat(0x1a140e));
     doorway.position.set(0, y1 * 0.35, -fhz + 0.05); g.add(doorway);
-    // a bedroll at the hut centre (rotation-invariant so the anchor matches the
-    // visual regardless of facing) — the reason a hut is a HOME, not a box.
+    // A MADE BEDROLL at the hut centre — the reason a hut is a HOME, not a box.
+    // Same three colours the hut already uses (no new material), same 1.9 lie
+    // axis, same 0.20 top, plus the two lines that make bedding read as
+    // bedding: a straw pallet UNDER it and a blanket with a turned-down fold
+    // pulled up over the legs. Drawn into the hut's own rotating group, which
+    // is why this cannot go through CBZ.furnish (that kit draws world-axis
+    // boxes; a hut is placed at a 90-degree-quantised rotation).
+    //
+    // THE HEAD END IS THE -X END. The roll is 1.9 long on the group's LOCAL X
+    // and 0.74 across, so the body lies along X — but the pillow was parked at
+    // local -Z 0.62, i.e. off the side of the mat, and the anchor declared the
+    // head at WORLD +Z regardless of how the hut was turned. The old comment
+    // claimed the anchor was "rotation-invariant"; a 1.9 by 0.74 mat is not.
+    // Pillow and head direction both come off the same local -X below.
+    const detail = !CBZ.CONFIG || CBZ.CONFIG.FURNISH_DETAIL !== false;
+    if (detail) {
+      const pallet = new THREE.Mesh(new THREE.BoxGeometry(2.06, 0.08, 0.88), cmat(0x8a7550));
+      pallet.position.set(0, 0.04, 0); pallet.receiveShadow = true; g.add(pallet);
+    }
     const roll = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, 0.74), cmat(0x6a5236));
     roll.position.set(0, 0.12, 0); roll.receiveShadow = true; g.add(roll);
-    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.42), cmat(0xd8c8a8));
-    pillow.position.set(0, 0.2, -0.62); g.add(pillow);
-    if (CBZ.propRegisterBed) CBZ.propRegisterBed(wx, 0, wz, 0, 1, 1.9, 0.2, "bedroll", null);
+    if (detail) {
+      // blanket over the foot half (the head half stays bare linen), then the
+      // fold where it is turned back on itself just below the pillow.
+      const blanket = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.07, 0.78), cmat(0x8a7550));
+      blanket.position.set(0.42, 0.235, 0); g.add(blanket);
+      const fold = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.78), cmat(0x6a5236));
+      fold.position.set(-0.11, 0.245, 0); g.add(fold);
+    }
+    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.66), cmat(0xd8c8a8));
+    pillow.position.set(-0.68, 0.2, 0); g.add(pillow);
+    // head direction = the group's LOCAL -X turned into world. A Y-rotation by
+    // `rot` sends local (1,0,0) to world (cos rot, 0, -sin rot), so local -X is
+    // (-cos rot, 0, +sin rot). Rounded to the same 90-degree quantisation the
+    // doorway gap already uses, so hx/hz are exactly one of the four cardinals
+    // and a sleeper never lands at an angle to a mat that has none.
+    // k = 0/1/2/3 → rot = 0/90/180/270 → local -X = (-1,0) / (0,1) / (1,0) / (0,-1).
+    const HD = [[-1, 0], [0, 1], [1, 0], [0, -1]][k];
+    if (CBZ.propRegisterBed) CBZ.propRegisterBed(wx, 0, wz, HD[0], HD[1], 1.9, 0.2, "bedroll", null);
   }
 
   // ============================================================

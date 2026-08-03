@@ -3992,9 +3992,53 @@
     // register sit/sleep spots for city/propuse.js (world = building-local +
     // b.ox/b.oz; y = this floor's Y). Feature-detected no-ops when absent.
     const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
-    function seatAt(x, z, face, kind) { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null); }
+    // `cushion` is propuse.js's 7th `geom` argument — the cushion top ABOVE
+    // this floor, and the ONLY thing that buys a seat the real feet-on-the-
+    // floor pose instead of the legacy squat. It is OPTIONAL on purpose: a
+    // caller may only declare it when its MESH actually has its sitting
+    // surface there (propSeatRef refuses to infer for exactly this reason), so
+    // a set that still draws a 0.90 block must keep passing nothing.
+    function seatAt(x, z, face, kind, cushion) {
+      if (CBZ.propRegisterSeat)
+        CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null,
+          cushion != null ? { cushion: cushion, floorBelow: 0 } : null);
+    }
     function bedAt(x, z, hx, hz, len, topLocalY) { if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + x, Y, abz + z, hx, hz, len, Y + topLocalY, "bed", null); }
-    return { W: W, D: D, FHl: FHl, Y: Y, xLo: xLo, xHi: xHi, zLo: zLo, zHi: zHi, put: put, glow: glow, wallX: wallX, wallZ: wallZ, seatAt: seatAt, bedAt: bedAt };
+    // `b` rides along so the furniture sets below can reach b.lbox / b.ox /
+    // b.oz / b.clearFloorPoint and hand a whole piece to CBZ.furnish (see
+    // kitPiece) instead of re-typing it out of raw boxes.
+    return { b: b, W: W, D: D, FHl: FHl, Y: Y, xLo: xLo, xHi: xHi, zLo: zLo, zHi: zHi, put: put, glow: glow, wallX: wallX, wallZ: wallZ, seatAt: seatAt, bedAt: bedAt };
+  }
+
+  // ---- THE KIT BRIDGE ------------------------------------------------------
+  // ONE line replaces the 5-8 raw boxes plus the hand-rolled k.seatAt that
+  // every furniture set below used to spell out: gate the piece's footprint on
+  // the building's own aisle predicate, then let city/furniture.js draw it
+  // THROUGH b.lbox (so it batch-folds into the buckets the shell already
+  // merges) and register its own propuse anchor carrying the cushion height it
+  // actually drew.
+  //
+  // Returns null when the kit is absent, the verb is unknown, the piece threw,
+  // or the spot is on the door/stair aisle — so `if (!kitPiece(...)) { …old
+  // boxes… }` is a complete, always-safe degrade path (BLOCK LAW #2), and
+  // FURNISH_KIT=false puts every set back byte-for-byte.
+  //
+  // `pad` is the clearFloorPoint radius, defaulted to the 0.9 the sets already
+  // use for a furniture-sized object: keeping the SAME pad is what stops a
+  // migration from growing a footprint into a walkway and pushing
+  // propUseAudit().blocked up (that counter may only go down).
+  function kitPiece(k, name, x, z, yaw, o, pad) {
+    const F = CBZ.furnish;
+    if (!F || typeof F[name] !== "function") return null;
+    const b = k && k.b;
+    if (!b || typeof b.lbox !== "function") return null;
+    if (b.clearFloorPoint && !b.clearFloorPoint(x, z, pad == null ? 0.9 : pad)) return null;
+    const oo = { box: b.lbox, ox: b.ox != null ? b.ox : 0, oz: b.oz != null ? b.oz : 0 };
+    if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
+    // F.lamp has no yaw (a lamp has no front) — furniture.js's one signature
+    // exception, mirrored here and in world/roombuild.js's executor.
+    try { return (name === "lamp") ? F.lamp(x, k.Y, z, oo) : F[name](x, k.Y, z, yaw, oo); }
+    catch (e) { return null; }
   }
 
   // ---- FURNITURE-SET VOCABULARY ------------------------------------------
@@ -4009,27 +4053,57 @@
     linen = linen || 0x6b7da0;
     const cx = rcx(r), z0 = r.z0;
     k.put(cx, 0.02, rcz(r), Math.min(r.x1 - r.x0 - 0.6, 3.2), 0.04, Math.min(r.z1 - r.z0 - 0.6, 3.0), 0x4a3f4a, 1.2);  // rug
-    // PROPS_PURPOSE: bed ENLARGED to fit a ~1.8u character (lie axis 1.7→2.2)
-    // and registered as a SLEEP anchor (head at the z0/headboard end).
-    k.put(cx, 0.35, z0 + 1.5, 2.0, 0.4, 2.2, 0x4a4036, 1.0);          // bed frame AGAINST wall
-    if (k.put(cx, 0.62, z0 + 1.5, 1.9, 0.2, 2.1, linen, 1.0))         // mattress
-      k.bedAt(cx, z0 + 1.5, 0, -1, 2.1, 0.72);
-    k.put(cx, 0.8, z0 + 0.6, 1.9, 0.22, 0.5, 0xe8e8ee, 1.0);          // pillows
-    k.put(cx, 1.15, z0 + 0.2, 2.1, 0.95, 0.16, 0x55606e, 1.0);        // headboard against wall
+    // THE BED IS THE KIT'S. F.bed's yaw runs from the mattress centre toward
+    // the PILLOW, so PI (forward = -z) puts the headboard against the r.z0
+    // wall — the same wall the hand-rolled version leaned on, at the same
+    // centre, at the same 0.55 mattress top, but with side rails, a duvet with
+    // a turn-down fold and two pillows instead of nine flat slabs. The linen
+    // colour the caller chose rides in as a literal tone so a migration never
+    // repaints a room.
+    const bedZ = z0 + 1.5;
+    const bedW = Math.max(1.2, Math.min(1.9, r.x1 - r.x0 - 1.4));
+    if (!kitPiece(k, "bed", cx, bedZ, Math.PI, { len: 2.2, wide: bedW, tone: { linen: linen } }, 1.0)) {
+      // PROPS_PURPOSE: bed ENLARGED to fit a ~1.8u character (lie axis 1.7→2.2)
+      // and registered as a SLEEP anchor (head at the z0/headboard end).
+      k.put(cx, 0.35, z0 + 1.5, 2.0, 0.4, 2.2, 0x4a4036, 1.0);          // bed frame AGAINST wall
+      if (k.put(cx, 0.62, z0 + 1.5, 1.9, 0.2, 2.1, linen, 1.0))         // mattress
+        k.bedAt(cx, z0 + 1.5, 0, -1, 2.1, 0.72);
+      k.put(cx, 0.8, z0 + 0.6, 1.9, 0.22, 0.5, 0xe8e8ee, 1.0);          // pillows
+      k.put(cx, 1.15, z0 + 0.2, 2.1, 0.95, 0.16, 0x55606e, 1.0);        // headboard against wall
+    }
     for (const s of [-1, 1]) { k.put(cx + s * 1.35, 0.4, z0 + 0.7, 0.5, 0.5, 0.5, 0x55452e, 0.9); }  // 2 nightstands
     k.glow(cx + 1.35, 0.8, z0 + 0.7, 0.36, 0.14, 0.36, 0xffe6b0, 0.5, 0.9);   // lamp
-    k.put(r.x1 - 0.6, 1.1, rcz(r), 0.6, 2.0, Math.min(r.z1 - r.z0 - 1.2, 2.4), 0x2e2620, 0.9);  // wardrobe against far wall
+    // the wardrobe on the far wall is a LOCKER run: doors, handles, the same
+    // 0.5 depth and the same corner. `n` is derived from the wall it has to
+    // fit, so it never grows past the footprint the flat box occupied.
+    const wardZ = Math.min(r.z1 - r.z0 - 1.2, 2.4);
+    const nDoor = Math.max(2, Math.min(6, Math.floor(wardZ / 0.42)));
+    if (!kitPiece(k, "locker", r.x1 - 0.6, rcz(r), -Math.PI / 2, { n: nDoor, h: 2.0 }, 0.9))
+      k.put(r.x1 - 0.6, 1.1, rcz(r), 0.6, 2.0, wardZ, 0x2e2620, 0.9);  // wardrobe against far wall
   }
   function setLiving(k, r, sofa) {
     sofa = sofa || 0x8a5a2b;
     const cx = rcx(r), cz = rcz(r);
     k.put(cx, 0.02, cz, Math.min(r.x1 - r.x0 - 0.6, 3.4), 0.04, Math.min(r.z1 - r.z0 - 0.8, 2.8), 0x4a3f55, 1.4);  // rug
-    if (k.put(cx, 0.45, r.z1 - 1.0, 2.6, 0.55, 0.9, sofa, 1.1)) {     // sofa FLOATED, back to +z, ≥0.9 walkway behind
-      // 3 SEAT anchors along the sofa, facing the TV wall (-z → face π)
-      for (const sx of [-0.85, 0, 0.85]) k.seatAt(cx + sx, r.z1 - 1.0, Math.PI, "sofa");
+    // THE SOFA IS THE KIT'S. It was TWO boxes — a 0.55-tall slab with a second
+    // slab behind it — and three seat anchors declaring nothing, which is what
+    // put every living room in the game in propUseAudit().noGeom and gave
+    // everybody who sat down the legacy squat. F.sofa is a plinth, a frame,
+    // three SEPARATE seat cushions with real seams, three back cushions and two
+    // padded arms, its cushion is the real 0.40, and it files its own anchors
+    // with that number. Back to +z, so the sitters look -z at the media wall.
+    if (!kitPiece(k, "sofa", cx, r.z1 - 1.0, Math.PI, { len: 2.6, tone: { cloth: sofa } }, 1.1)) {
+      if (k.put(cx, 0.45, r.z1 - 1.0, 2.6, 0.55, 0.9, sofa, 1.1)) {     // sofa FLOATED, back to +z, ≥0.9 walkway behind
+        // 3 SEAT anchors along the sofa, facing the TV wall (-z → face π)
+        for (const sx of [-0.85, 0, 0.85]) k.seatAt(cx + sx, r.z1 - 1.0, Math.PI, "sofa");
+      }
+      k.put(cx, 0.88, r.z1 - 0.7, 2.6, 0.5, 0.22, sofa, 1.1);          // sofa back
     }
-    k.put(cx, 0.88, r.z1 - 0.7, 2.6, 0.5, 0.22, sofa, 1.1);          // sofa back
-    k.put(cx, 0.34, cz, 1.4, 0.34, 0.8, 0x6b4a2a, 0.9);              // coffee table
+    // the coffee table was a 0.34-tall block whose top landed at 0.51 — HIGHER
+    // than the sofa cushion it serves. F.coffee tops out at 0.40, level with
+    // the cushion, on legs, with a magazine shelf under it.
+    if (!kitPiece(k, "coffee", cx, cz, 0, { len: 1.4, deep: 0.8 }, 0.9))
+      k.put(cx, 0.34, cz, 1.4, 0.34, 0.8, 0x6b4a2a, 0.9);              // coffee table
     k.put(cx, 0.4, r.z0 + 0.3, Math.min(r.x1 - r.x0 - 0.8, 3.2), 0.8, 0.4, 0x2a2f37, 0.9);  // media wall console
     k.put(cx, 1.4, r.z0 + 0.22, Math.min(r.x1 - r.x0 - 1.4, 2.6), 1.2, 0.1, 0x14171c, 0.9);  // TV on the media wall
     k.glow(cx, 1.4, r.z0 + 0.22 + 0.05 + SCREEN_GAP + 0.025,
@@ -4045,8 +4119,17 @@
     k.put(rcx(r), 1.95, r.z1 - 0.4, r.x1 - r.x0 - 1.0, 0.7, 0.4, 0x49505b, 0.9);   // upper cabinets
     k.put(rcx(r), 0.55, cz, 1.6, 1.0, 1.0, 0x49505b, 1.0);                          // island
     k.put(rcx(r), 1.08, cz, 1.7, 0.08, 1.1, 0xc8ccd4, 1.0);                         // island top
-    for (const s of [-1, 1]) if (k.put(rcx(r) + s * 0.55, 0.45, cz - 0.9, 0.38, 0.9, 0.38, 0x3a2b1e, 0.9))  // 2 stools
-      k.seatAt(rcx(r) + s * 0.55, cz - 0.9, Math.atan2(-s * 0.55, 0.9), "stool");   // face the island
+    // ISLAND STOOLS. The old pair were 0.9-tall blocks — top at 0.90, i.e. the
+    // height of the worktop they were parked at — filed as kind "stool" with no
+    // geometry, so propuse read them as undeclared and the rig squatted on the
+    // worktop line. F.stool is a real pedestal stool with its cushion at the
+    // 0.68 that goes with a 0.92 counter, and it declares it.
+    for (const s of [-1, 1]) {
+      const sx = rcx(r) + s * 0.55, face = Math.atan2(-s * 0.55, 0.9);
+      if (kitPiece(k, "stool", sx, cz - 0.9, face, null, 0.9)) continue;
+      if (k.put(sx, 0.45, cz - 0.9, 0.38, 0.9, 0.38, 0x3a2b1e, 0.9))  // 2 stools
+        k.seatAt(sx, cz - 0.9, face, "stool");   // face the island
+    }
     k.put(r.x0 + 0.6, 0.55, r.z1 - 0.55, 0.6, 1.0, 0.6, 0x2a2f37, 0.9);             // range/sink block
   }
   function setBath(k, r) {
@@ -4061,24 +4144,52 @@
   function setDining(k, r) {
     const cx = rcx(r), cz = rcz(r);
     k.put(cx, 0.02, cz, Math.min(r.x1 - r.x0 - 0.6, 3.4), 0.04, Math.min(r.z1 - r.z0 - 0.6, 3.0), 0x3a2f3a, 1.4);  // rug
-    k.put(cx, 0.5, cz, 1.4, 0.5, 2.4, 0x6b4a2a, 1.2);                                // table centred, ≥1.2 clearance
-    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) if (k.put(cx + s * 1.0, 0.45, cz + i * 0.85, 0.45, 0.9, 0.45, 0x49505b, 1.0))  // chairs
-      k.seatAt(cx + s * 1.0, cz + i * 0.85, Math.atan2(-s * 1.0, -i * 0.85), "chair");   // face the table
+    // THE DINING SET IS ONE KIT CALL. F.table rings its own chairs, all facing
+    // the centre, all declaring the 0.45 they actually draw — where the old set
+    // drew six 0.9-tall blocks (top at 0.90: a chair you sit on at worktop
+    // height) and filed six undeclared "chair" anchors. yaw = 90 degrees puts
+    // the table's LONG axis along z, exactly the 1.4 by 2.4 footprint it had,
+    // and 6 seats reproduces the 3-a-side ring. `deep` is 1.16, not the old
+    // block's 1.4, because F.table puts its ring at deep/2 + 0.42: 1.16 lands
+    // the six chairs on the ±1.0 the set already used, so not one anchor moves
+    // outward into a walkway (propUseAudit().blocked may only go DOWN).
+    if (!kitPiece(k, "table", cx, cz, Math.PI / 2, { len: 2.4, deep: 1.16, seats: 6 }, 1.2)) {
+      k.put(cx, 0.5, cz, 1.4, 0.5, 2.4, 0x6b4a2a, 1.2);                                // table centred, ≥1.2 clearance
+      for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) if (k.put(cx + s * 1.0, 0.45, cz + i * 0.85, 0.45, 0.9, 0.45, 0x49505b, 1.0))  // chairs
+        k.seatAt(cx + s * 1.0, cz + i * 0.85, Math.atan2(-s * 1.0, -i * 0.85), "chair");   // face the table
+    }
   }
   function setReception(k, r, accent) {
     accent = accent || 0x9fd8ee;
     const cx = rcx(r), cz = rcz(r);
     k.put(cx, 0.5, cz, 2.4, 1.0, 0.9, 0x49505b, 1.0);                                // reception desk
     k.put(cx, 1.08, cz, 2.5, 0.08, 1.0, 0xe6e8ee, 1.0);                              // desk top
-    for (const s of [-1, 1]) { if (k.put(cx + s * 1.8, 0.42, r.z1 - 0.9, 0.7, 0.4, 0.7, 0x2a2f37, 0.9)) k.seatAt(cx + s * 1.8, r.z1 - 0.9, Math.PI, "waiting"); k.put(cx + s * 1.8, 0.85, r.z1 - 0.6, 0.7, 0.5, 0.16, 0x2a2f37, 0.9); }  // 2 waiting chairs (face the desk, -z)
+    // 2 WAITING CHAIRS (face the desk, -z). Real armchairs now: the pair used
+    // to be a 0.4-tall pad at 0.62 plus a separate back slab, filed as kind
+    // "waiting" with no geometry — three ways of being wrong at once. F.armchair
+    // draws one seat cushion between two padded arms and declares the 0.42
+    // propuse already holds for that shape.
+    for (const s of [-1, 1]) {
+      const wx2 = cx + s * 1.8;
+      if (kitPiece(k, "armchair", wx2, r.z1 - 0.9, Math.PI, { len: 0.86 }, 0.9)) continue;
+      if (k.put(wx2, 0.42, r.z1 - 0.9, 0.7, 0.4, 0.7, 0x2a2f37, 0.9)) k.seatAt(wx2, r.z1 - 0.9, Math.PI, "waiting");
+      k.put(wx2, 0.85, r.z1 - 0.6, 0.7, 0.5, 0.16, 0x2a2f37, 0.9);
+    }
     k.glow(cx, 2.2, r.z0 + 0.18, 2.6, 0.9, 0.06, accent, 0.4, 0.9);                  // logo wall
   }
   function setMeeting(k, r) {
     const cx = rcx(r), cz = rcz(r);
     // a glass-wall conference room: table + chairs + a wall screen
     k.put(cx, 0.5, cz, Math.min(r.x1 - r.x0 - 1.6, 2.6), 0.5, Math.min(r.z1 - r.z0 - 1.6, 1.4), 0x3a2b1e, 1.0);  // table
-    for (const s of [-1, 1]) for (let i = -1; i <= 1; i++) if (k.put(cx + i * 0.9, 0.45, cz + s * 0.95, 0.42, 0.9, 0.42, 0x2a2f37, 0.9))  // chairs
-      k.seatAt(cx + i * 0.9, cz + s * 0.95, Math.atan2(-i * 0.9, -s * 0.95), "chair");   // face the table
+    // the ring stays hand-placed (the table above is a glass-room conference
+    // slab this set draws itself), but every chair is now a KIT chair with a
+    // real 0.45 cushion, thin legs and a raked back instead of a 0.9 block.
+    for (const s of [-1, 1]) for (let i = -1; i <= 1; i++) {
+      const chx = cx + i * 0.9, chz = cz + s * 0.95, face = Math.atan2(-i * 0.9, -s * 0.95);
+      if (kitPiece(k, "chair", chx, chz, face, null, 0.9)) continue;
+      if (k.put(chx, 0.45, chz, 0.42, 0.9, 0.42, 0x2a2f37, 0.9))  // chairs
+        k.seatAt(chx, chz, face, "chair");   // face the table
+    }
     k.put(cx, 1.5, r.z0 + 0.2, Math.min(r.x1 - r.x0 - 1.4, 2.2), 1.1, 0.1, 0x14171c, 0.9);  // wall screen
     k.glow(cx, 1.5, r.z0 + 0.2 + 0.05 + SCREEN_GAP + 0.025,
       Math.min(r.x1 - r.x0 - 1.8, 1.8), 0.8, 0.05, 0x39516a, 0.4, 0.9);
@@ -4088,9 +4199,14 @@
     k.put(cx, 0.55, r.z1 - 0.5, Math.min(r.x1 - r.x0 - 1.0, 2.4), 1.0, 0.7, 0x55606e, 0.9);  // counter
     k.put(cx, 1.08, r.z1 - 0.5, Math.min(r.x1 - r.x0 - 0.9, 2.5), 0.08, 0.8, 0xe6e8ee, 0.9); // counter top
     k.put(r.x0 + 0.7, 1.0, r.z1 - 0.5, 0.8, 1.8, 0.8, 0xd8dde6, 0.9);                // fridge
-    k.put(cx, 0.45, cz, 1.1, 0.5, 1.1, 0x6b4a2a, 0.9);                               // small table
-    for (const s of [-1, 1]) if (k.put(cx + s * 0.9, 0.42, cz, 0.42, 0.85, 0.42, 0x2a2f37, 0.9))  // chairs
-      k.seatAt(cx + s * 0.9, cz, -s * Math.PI / 2, "chair");   // face the little table
+    // the break table + its two chairs, as ONE kit call: F.table's ring is
+    // placed at deep/2 + 0.42, so deep 0.96 puts the pair back on the ±0.9 the
+    // set already used and nothing moves into the aisle.
+    if (!kitPiece(k, "table", cx, cz, Math.PI / 2, { len: 1.1, deep: 0.96, seats: 2 }, 0.9)) {
+      k.put(cx, 0.45, cz, 1.1, 0.5, 1.1, 0x6b4a2a, 0.9);                               // small table
+      for (const s of [-1, 1]) if (k.put(cx + s * 0.9, 0.42, cz, 0.42, 0.85, 0.42, 0x2a2f37, 0.9))  // chairs
+        k.seatAt(cx + s * 0.9, cz, -s * Math.PI / 2, "chair");   // face the little table
+    }
   }
   function setBackroom(k, r) {
     // SPACE DOCTRINE (owner): a separate back room is an OFFICE — ONE desk
@@ -4108,8 +4224,9 @@
     if (k.put(dx, 0.4, dz, dw, 0.8, dd, 0x6b4a2a, 0.8)) {
       k.glow(dx, 0.95, dz, hor ? 0.5 : 0.08, 0.3, hor ? 0.08 : 0.5, 0x9fd8ee, 0.5, 0.8);   // desk monitor (seated on the 0.8 desktop)
       const cx2 = hor ? dx : dx - 1.05, cz2 = hor ? dz - 1.05 : dz;
-      if (k.put(cx2, 0.45, cz2, 0.45, 0.9, 0.45, 0x2a2f37, 0.7))
-        k.seatAt(cx2, cz2, Math.atan2(dx - cx2, dz - cz2), "chair");   // face the desk
+      const cface = Math.atan2(dx - cx2, dz - cz2);
+      if (!kitPiece(k, "chair", cx2, cz2, cface, null, 0.7) && k.put(cx2, 0.45, cz2, 0.45, 0.9, 0.45, 0x2a2f37, 0.7))
+        k.seatAt(cx2, cz2, cface, "chair");   // face the desk
     }
   }
 
@@ -4223,8 +4340,34 @@
     // PROPS_PURPOSE anchors for the seats/beds this dresser places (ground
     // floor; world = building-local + b.ox/b.oz). Feature-detected no-ops.
     const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
-    function seatP(p, face, kind) { if (p && CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + p.x, 0, abz + p.z, face, kind, null); }
+    // `cushion` (optional) is propuse.js's `geom` — the cushion top above this
+    // floor. Pass it ONLY where the mesh drawn just above really does put its
+    // sitting surface there; a declared height that disagrees with the box
+    // buries the body in the furniture, which is why propSeatRef refuses to
+    // infer one from the kind. Every site below that passes one had its boxes
+    // rebuilt to the real height in the same edit.
+    function seatP(p, face, kind, cushion) {
+      if (p && CBZ.propRegisterSeat)
+        CBZ.propRegisterSeat(abx + p.x, 0, abz + p.z, face, kind, null,
+          cushion != null ? { cushion: cushion, floorBelow: 0 } : null);
+    }
     function bedP(p, hx, hz, len, topY) { if (p && CBZ.propRegisterBed) CBZ.propRegisterBed(abx + p.x, 0, abz + p.z, hx, hz, len, topY, "bed", null); }
+    // THE KIT BRIDGE for this dresser: hand a piece to city/furniture.js and it
+    // draws through the SAME b.lbox every box here uses (so it batch-folds and
+    // rides the interior clamp) and files its own anchor WITH geometry. `p` is
+    // already aisle-gated by pt(); null p, no kit or an unknown verb returns
+    // null, which is the `if (!kitP(...)) { …old boxes… }` degrade path.
+    function kitP(name, p, yaw, o) {
+      const F = CBZ.furnish;
+      if (!p || !F || typeof F[name] !== "function" || typeof b.lbox !== "function") return null;
+      const oo = { box: b.lbox, ox: abx, oz: abz };
+      if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
+      try { return (name === "lamp") ? F.lamp(p.x, 0, p.z, oo) : F[name](p.x, 0, p.z, yaw, oo); }
+      catch (e) { return null; }
+    }
+    // a point offset from `p` by `d` metres along the TANGENT (+ = the +t side)
+    // and `e` metres along IN — the two axes this whole dresser is written in.
+    function off(p, d, e) { return { x: p.x + tx * d + inx * (e || 0), z: p.z + tz * d + inz * (e || 0) }; }
 
     // ---- always-on dressing: floor mat + lit ceiling fixture ----
     const matP = pt(2.4, 0, 0.5);                  // just inside the doorway
@@ -4409,7 +4552,15 @@
         const np = pt(2 * halfIn - 2.0, 0, 0.6);
         if (np) glow(np, 2.3, along ? 0.06 : halfTan * 1.4, 0.14, along ? halfTan * 1.4 : 0.06, neon, 0.95);
         // a row of bar stools facing the back counter
-        for (let i = -1; i <= 1; i++) { const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (p) { decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); seatP(p, Math.atan2(inx, inz), "stool"); } }
+        // BAR STOOLS. They used to be 1.0-tall posts capped at 1.08 — a "stool"
+        // whose seat was ABOVE the bar — filed with no geometry. F.stool is a
+        // pedestal, a foot ring and a cushion at the real 0.68 that goes with a
+        // 0.92 counter, and it declares that number itself.
+        for (let i = -1; i <= 1; i++) {
+          const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (!p) continue;
+          if (kitP("stool", p, Math.atan2(inx, inz))) continue;
+          decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); seatP(p, Math.atan2(inx, inz), "stool");
+        }
         if (kind === "bar") {
           // ===== THE VELVET CLUB — a real VIP nightclub interior =====
           // a glowing multi-colour DANCE FLOOR mid-room, VIP velvet BOOTHS down
@@ -4436,9 +4587,23 @@
           for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
             const bp = pt(5.4 + i * 3.2, side * (halfTan - 1.1), 0.8);
             if (!bp) continue;
-            decor(bp, 0.5, 2.0, 0.9, 0.7, 0x6a1622);                          // velvet booth back+seat
-            decor(bp, 0.95, 2.0, 0.16, 0.7, 0x8a1f2b);                        // padded top trim
-            seatP(bp, Math.atan2(-side * tx, -side * tz), "booth");           // face the cocktail table
+            // A REAL BOOTH, not a 0.95-tall velvet block. Plinth → cushion at
+            // the 0.44 propuse holds for kind "booth" → a buttoned back against
+            // the wall behind the sitter, so the thing you sit ON and the thing
+            // you lean AGAINST are different boxes.
+            //
+            // THE BANQUETTE ALSO TURNED 90 DEGREES. The old block was 2.0 wide
+            // ACROSS the room and 0.7 along the wall — i.e. its long axis ran
+            // straight at the sitter's own face and 1.0 m of it stuck into the
+            // aisle. It is now 2.0 along the WALL and 0.72 deep, which is what
+            // a banquette is; that only ever frees aisle in front of the entry
+            // point, so no anchor can become unreachable (`blocked` may only go
+            // DOWN).
+            decor(bp, 0.19, 0.72, 0.38, 2.00, 0x6a1622);                      // booth plinth
+            decor(bp, 0.41, 0.76, 0.06, 2.00, 0x8a1f2b);                      // seat cushion → 0.44
+            decor(off(bp, side * 0.30), 0.74, 0.14, 0.62, 2.00, 0x6a1622);    // padded back → 1.05
+            decor(off(bp, side * 0.30), 1.09, 0.18, 0.08, 2.10, 0x8a1f2b);    // capping trim
+            seatP(bp, Math.atan2(-side * tx, -side * tz), "booth", 0.44);     // face the cocktail table
             const tp = pt(5.4 + i * 3.2, side * (halfTan - 2.3), 0.6);
             if (tp) { decor(tp, 0.55, 0.7, 0.1, 0.7, 0x1c1f24); glow({ x: tp.x, z: tp.z }, 0.62, 0.5, 0.05, 0.5, 0xffd166, 0.6); }   // lit cocktail table
           }
@@ -4482,7 +4647,18 @@
               decor(p, 0.45, 1.0, 0.1, 0.7, 0x9aa0a8); decor(p, 0.22, 0.6, 0.44, 0.06, 0x6b4a2a); decor(p, 0.55, 1.0, 0.08, 0.7, 0xe8e8ee);  // top
               // a red vinyl bench on the wall side of each booth
               const bp = pt(5.0 + i * 3.2, side * (halfTan - 0.7), 0.8);
-              if (bp) { decor(bp, 0.45, 1.2, 0.5, 0.4, 0xb23b3b); decor(bp, 0.95, 1.2, 0.5, 0.16, 0xc14b4b); seatP(bp, Math.atan2(-side * tx, -side * tz), "booth"); }  // face the booth table
+              // the red vinyl bench, rebuilt to REAL heights: the old seat
+              // block topped out at 0.70 (you sat level with the tabletop) and
+              // declared nothing. Base → cushion at 0.44 → a padded back above.
+              // Same rebuild as the club booths: base → 0.44 cushion → padded
+              // back behind the sitter, and the bench runs ALONG the wall
+              // instead of 1.2 m straight out into the walking line.
+              if (bp) {
+                decor(bp, 0.19, 0.42, 0.38, 1.20, 0xb23b3b);                    // bench base
+                decor(bp, 0.41, 0.46, 0.06, 1.20, 0xc14b4b);                    // cushion → 0.44
+                decor(off(bp, side * 0.22), 0.76, 0.14, 0.64, 1.20, 0xb23b3b);  // back → 1.08
+                seatP(bp, Math.atan2(-side * tx, -side * tz), "booth", 0.44);   // face the booth table
+              }
             }
           }
         }
@@ -4547,9 +4723,15 @@
           for (let r = 0; r < 2; r++) {
             const pw = pt(6.2 + r * 1.6, 0, 0.8);
             if (!pw) continue;
-            decor(pw, 0.42, Math.min(halfTan * 1.5, 5.4), 0.12, 0.5, 0x6b4a2a);       // pew seat
-            decor(pw, 0.85, Math.min(halfTan * 1.5, 5.4), 0.75, 0.10, 0x5a3f26);      // pew back
-            for (const sg of [-1, 1]) seatP({ x: pw.x + tx * sg * 1.3, z: pw.z + tz * sg * 1.3 }, Math.atan2(inx, inz), "chair");
+            // PEWS. The plank now tops out at the 0.45 SEAT_H holds for kind
+            // "pew" (it was 0.48 and filed as an undeclared "chair"), stands on
+            // real end legs, and the back is set BEHIND the seat rather than
+            // sharing its centreline — so a gallery row reads as benches.
+            const pewW = Math.min(halfTan * 1.5, 5.4);
+            for (const sg of [-1, 1]) decor(off(pw, sg * (pewW / 2 - 0.22)), 0.165, 0.10, 0.33, 0.42, 0x5a3f26);   // end legs
+            decor(pw, 0.39, pewW, 0.12, 0.5, 0x6b4a2a);                              // pew plank → 0.45
+            decor(off(pw, 0, -0.22), 0.85, pewW, 0.75, 0.10, 0x5a3f26);              // pew back, set aft
+            for (const sg of [-1, 1]) seatP(off(pw, sg * 1.3), Math.atan2(inx, inz), "pew", 0.45);
           }
         } else if (kind === "postoffice") {
           // a WALL OF PO BOXES (a real brass grid) + a sorting table
@@ -4579,8 +4761,11 @@
           for (const sg of [-1, 1]) {
             const bn = pt(4.2, sg * (halfTan - 1.0), 0.9);
             if (!bn) continue;
-            decor(bn, 0.44, 2.6, 0.12, 0.5, 0x59606a);
-            seatP(bn, Math.atan2(-tx * sg, -tz * sg), "chair");
+            // the waiting bench: a plank at the real 0.45 on two end legs,
+            // declared, instead of a 0.50-topped slab floating in mid-air.
+            for (const e2 of [-1, 1]) decor(off(bn, e2 * 1.08), 0.165, 0.10, 0.33, 0.42, 0x39424c);
+            decor(bn, 0.39, 2.6, 0.12, 0.5, 0x59606a);                    // plank → 0.45
+            seatP(bn, Math.atan2(-tx * sg, -tz * sg), "bench", 0.45);
           }
         } else if (kind === "federal" || kind === "cityannex") {
           // a SECURITY SCREENING lane just inside the door (metal detector arch
@@ -4625,9 +4810,12 @@
           decor(tb, 0.74, 2.6, 0.10, 1.2, 0x6b4a2a);                     // reading table
           glow({ x: tb.x, z: tb.z }, 1.05, 0.24, 0.28, 0.24, 0xffe0a0, 0.8);   // green-shade lamp
           for (const sg of [-1, 1]) {
-            const ch = { x: tb.x + tx * sg * 1.0, z: tb.z + tz * sg * 1.0 };
+            const ch = off(tb, sg * 1.0), cface = Math.atan2(-tx * sg, -tz * sg);
+            // reading chairs: the kit's, so they have legs and a raked back and
+            // declare their own 0.45 (they were a lone 0.10 pad in the air).
+            if (kitP("chair", ch, cface)) continue;
             decor(ch, 0.42, 0.5, 0.10, 0.5, 0x4a4033);
-            seatP(ch, Math.atan2(-tx * sg, -tz * sg), "chair");
+            seatP(ch, cface, "chair");
           }
         }
         const circ = pt(2 * halfIn - 3.2, 0, 0.6);
@@ -4707,9 +4895,20 @@
           for (const side of [-1, 1]) {
             const p = pt(6.0, side * (halfTan - 1.6), 0.9);
             if (!p) continue;
-            decor(p, 0.45, 0.7, 0.9, 0.7, 0x32363d);            // chair base
-            decor(p, 1.0, 0.6, 0.5, 0.6, 0x6b1f1f);            // seat
-            seatP(p, Math.atan2(side * tx, side * tz), "chair"); // face the mirror
+            // A BARBER CHAIR, built like one: a floor plate, a hydraulic
+            // column, a footrest, a leather cushion at 0.48 and a high back.
+            // The old pair was a 0.9-tall pedestal with a 0.5 block on top —
+            // a seat at 1.25, half a metre above where anyone can sit.
+            // The sitter faces +side along the TANGENT, so "behind" is -side on
+            // the tangent and the arms sit either side of them on the IN axis.
+            const bface = Math.atan2(side * tx, side * tz);
+            decor(p, 0.03, 0.70, 0.06, 0.70, 0x32363d);                            // floor plate
+            decor(p, 0.24, 0.20, 0.36, 0.20, 0x8a8f97);                            // chrome column
+            decor(p, 0.42, 0.62, 0.10, 0.62, 0x32363d);                            // seat frame
+            decor(p, 0.465, 0.58, 0.05, 0.58, 0x6b1f1f);                           // leather cushion → 0.49
+            decor(off(p, -side * 0.34), 0.86, 0.12, 0.74, 0.58, 0x6b1f1f);         // high back → 1.23
+            for (const a2 of [-1, 1]) decor(off(p, 0, a2 * 0.29), 0.60, 0.56, 0.10, 0.06, 0x8a8f97);  // chrome arms
+            seatP(p, bface, "chair", 0.49);                                        // face the mirror
             const mp = pt(6.0, side * (halfTan - 0.5), 0.9); if (mp) decor(mp, 1.4, along ? 0.04 : 1.4, 1.8, along ? 1.4 : 0.04, 0xb9e6f7);
           }
         }
@@ -4719,10 +4918,20 @@
         // trap house: a beat couch, a low table with baggies, stash shelves
         const cp = pt(2 * halfIn - 4.0, halfTan - 1.7, 0.9);
         if (cp) {
-          decor(cp, 0.4, along ? 0.9 : 2.4, 0.5, along ? 2.4 : 0.9, 0x4a423a); decor(cp, 0.75, along ? 0.9 : 2.4, 0.4, along ? 2.4 : 0.9, 0x3a352e);
-          // 2 SEATS along the couch (its long axis runs on the IN axis), both
-          // facing the room centre (-tangent side).
-          for (const e of [-0.6, 0.6]) seatP({ x: cp.x + inx * e, z: cp.z + inz * e }, Math.atan2(-tx, -tz), "couch");
+          // THE BEAT COUCH IS THE KIT'S. It was two stacked slabs — a 0.65-top
+          // "seat" with a 0.95-top "back" sharing one centreline — and two
+          // undeclared "couch" anchors, so everybody who flopped on it squatted
+          // in mid-air. F.sofa's long axis is its LATERAL axis and this couch's
+          // runs on IN, so yaw (the way the sitters look) is -tangent: exactly
+          // the face the old anchors already used. Same centre, same 2.4 length,
+          // real 0.40 cushion, declared.
+          const cface = Math.atan2(-tx, -tz);
+          if (!kitP("sofa", cp, cface, { len: 2.4, tone: { cloth: 0x4a423a, frame: 0x3a352e } })) {
+            decor(cp, 0.4, along ? 0.9 : 2.4, 0.5, along ? 2.4 : 0.9, 0x4a423a); decor(cp, 0.75, along ? 0.9 : 2.4, 0.4, along ? 2.4 : 0.9, 0x3a352e);
+            // 2 SEATS along the couch (its long axis runs on the IN axis), both
+            // facing the room centre (-tangent side).
+            for (const e of [-0.6, 0.6]) seatP({ x: cp.x + inx * e, z: cp.z + inz * e }, cface, "couch");
+          }
         }
         const tp = pt(2 * halfIn - 6.0, halfTan - 2.4, 0.9);
         if (tp) { decor(tp, 0.4, 1.2, 0.1, 0.8, 0x2a2f37); stockRow({ p: tp, top: 0.45, across: 1.0 }, [0x4caf6e, 0xffffff, 0x4caf6e], 4, 0.14, 0.1); }
@@ -4766,9 +4975,18 @@
         for (let i = 0; i < 2; i++) {
           const p = pt(5.6 + i * 3.2, -(halfTan - 1.9), 0.9);
           if (!p) continue;
-          decor(p, 0.45, 1.0, 0.16, 2.0, 0xe8e8ee);          // bed
-          decor(p, 0.75, 1.0, 0.25, 0.5, 0xbfd8e6);          // pillow end
-          bedP(p, inx, inz, 2.0, 0.53);                      // SLEEP anchor (lie axis = IN)
+          // WARD BEDS through the kit, in the clinic tone (pale frame + white
+          // linen, the palette this room already used). yaw points at the
+          // PILLOW, and the bedP fallback below already declares the head at
+          // +IN, so the yaw is +IN and a sleeper's head lands where it always
+          // did. Mattress top 0.55 against the old block's hand-typed 0.53 —
+          // 2 cm, and now it is a number the piece DECLARES off the box it
+          // drew rather than one retyped into a call that had drifted off it.
+          if (!kitP("bed", p, Math.atan2(inx, inz), { len: 2.0, wide: 1.0, tone: "clinic" })) {
+            decor(p, 0.45, 1.0, 0.16, 2.0, 0xe8e8ee);          // bed
+            decor(p, 0.75, 1.0, 0.25, 0.5, 0xbfd8e6);          // pillow end
+            bedP(p, inx, inz, 2.0, 0.53);                      // SLEEP anchor (lie axis = IN)
+          }
           const cp = pt(5.6 + i * 3.2, -(halfTan - 0.6), 0.9); if (cp) decor(cp, 1.4, along ? 0.05 : 2.2, 2.0, along ? 2.2 : 0.05, 0xbfe6d8);  // curtain
         }
         wallShelves({ body: 0xd8dde2, top: 0xffffff, h: 1.6, count: 2 });
@@ -4985,7 +5203,11 @@
           decor(od, 0.4, 0.8, 0.8, 1.6, 0x6b4a2a);                   // the ONE desk (long side on the wall)
           glow({ x: od.x, z: od.z }, 0.95, 0.08, 0.3, 0.5, 0x5b8bff, 0.5);   // desk screen (seated on the 0.8 desktop)
           const oc = pt(6.6, -(halfTan - 2.05), 0.7);
-          if (oc) { decor(oc, 0.45, 0.45, 0.9, 0.45, 0x2a2f37); seatP(oc, Math.atan2(-tx, -tz), "chair"); }  // chair faces the desk
+          // the office chair: a kit chair (real 0.45 cushion, declared) instead
+          // of a 0.9-tall block whose "seat" was the top of a waist-high post.
+          if (oc && !kitP("chair", oc, Math.atan2(-tx, -tz))) {
+            decor(oc, 0.45, 0.45, 0.9, 0.45, 0x2a2f37); seatP(oc, Math.atan2(-tx, -tz), "chair");   // chair faces the desk
+          }
         }
       } else if (kind === "hospital") {
         // partitioned EXAM ROOMS along one side wall (2-3 curtained bays)
@@ -5076,6 +5298,18 @@
     // PROPS_PURPOSE anchors (world = local + b.ox/b.oz, y = this floor)
     const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
     function seatH(x, z, face, kind) { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null); }
+    // the kit bridge for the tiered home: same contract as kitPiece/kitP —
+    // aisle-gate, draw through b.lbox, let the piece file its own anchor with
+    // real geometry, return null so the caller's old boxes take over.
+    function kitH(name, x, z, yaw, o, pad) {
+      const F = CBZ.furnish;
+      if (!F || typeof F[name] !== "function" || typeof b.lbox !== "function") return null;
+      if (b.clearFloorPoint && !b.clearFloorPoint(x, z, pad == null ? 1.0 : pad)) return null;
+      const oo = { box: b.lbox, ox: abx, oz: abz };
+      if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
+      try { return (name === "lamp") ? F.lamp(x, Y, z, oo) : F[name](x, Y, z, yaw, oo); }
+      catch (e) { return null; }
+    }
     function bedH(x, z, hx, hz, len, topLocalY) { if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + x, Y, abz + z, hx, hz, len, Y + topLocalY, "bed", null); }
     // emissive CEILING FIXTURE (warm) — homes read lit. Higher tiers add a second
     // back-of-room fixture so the bigger spaces aren't dark in the corners.
@@ -5153,14 +5387,21 @@
     const linen = [0x6b7da0, 0x6b7da0, 0x5a6f9a, 0x7a6f8c, 0x8a6f9c][Math.min(4, t)];
     // PROPS_PURPOSE: bed ENLARGED (lie axis 1.3→2.2 — it was far too short for
     // a 1.8u character) + registered as a SLEEP anchor, head at the -z pillow end.
-    decor(-W / 2 + 2.0, 0.35, -D / 2 + 2.6, 2.0, 0.4, 2.2, 0x4a4036, 1.1);   // frame
-    if (decor(-W / 2 + 2.0, 0.62, -D / 2 + 2.6, 1.9, 0.2, 2.1, linen, 1.1))  // mattress
-      bedH(-W / 2 + 2.0, -D / 2 + 2.6, 0, -1, 2.1, 0.72);
-    decor(-W / 2 + 2.0, 0.8, -D / 2 + 1.7, 1.9, 0.22, 0.5, 0xe8e8ee, 1.1);   // pillow
-    if (t >= 2) decor(-W / 2 + 2.0, 1.1, -D / 2 + 1.4, 2.0, 0.9, 0.16, [0x55606e, 0x6b4a2a, 0x5a1622][Math.min(2, t - 2)], 1.1);  // headboard (head end)
+    // THE PRIMARY BED IS THE KIT'S: yaw PI (forward = -z) points from the
+    // mattress centre at the PILLOW end, i.e. the -z wall, which is exactly
+    // where the hand-rolled pillow and headboard were. Same centre, same 2.2
+    // lie axis, same 0.55 mattress top — plus rails, a duvet with a turn-down
+    // and two pillows, and a bed anchor that declares its own mattress.
+    if (!kitH("bed", -W / 2 + 2.0, -D / 2 + 2.6, Math.PI, { len: 2.2, wide: 1.9, tone: { linen: linen } }, 1.1)) {
+      decor(-W / 2 + 2.0, 0.35, -D / 2 + 2.6, 2.0, 0.4, 2.2, 0x4a4036, 1.1);   // frame
+      if (decor(-W / 2 + 2.0, 0.62, -D / 2 + 2.6, 1.9, 0.2, 2.1, linen, 1.1))  // mattress
+        bedH(-W / 2 + 2.0, -D / 2 + 2.6, 0, -1, 2.1, 0.72);
+      decor(-W / 2 + 2.0, 0.8, -D / 2 + 1.7, 1.9, 0.22, 0.5, 0xe8e8ee, 1.1);   // pillow
+      if (t >= 2) decor(-W / 2 + 2.0, 1.1, -D / 2 + 1.4, 2.0, 0.9, 0.16, [0x55606e, 0x6b4a2a, 0x5a1622][Math.min(2, t - 2)], 1.1);  // headboard (head end)
+    }
     if (t >= 3) { decor(-W / 2 + 0.9, 0.45, -D / 2 + 2.2, 0.5, 0.5, 0.5, 0x55452e, 1.1); glowAt(-W / 2 + 0.9, 0.85, -D / 2 + 2.2, 0.4, 0.16, 0.4, 0xffe6b0, 0.5, 1.1); }  // nightstand + lamp
     // a SECOND bed for multi-bed tiers (same enlargement, head at the +z wall)
-    if (beds >= 2) {
+    if (beds >= 2 && !kitH("bed", -W / 2 + 2.0, D / 2 - 2.6, 0, { len: 2.2, wide: 1.7, tone: { linen: 0x7a6f8c } }, 1.1)) {
       decor(-W / 2 + 2.0, 0.35, D / 2 - 2.6, 1.8, 0.4, 2.2, 0x4a4036, 1.1);
       if (decor(-W / 2 + 2.0, 0.62, D / 2 - 2.6, 1.7, 0.2, 2.1, 0x7a6f8c, 1.1))
         bedH(-W / 2 + 2.0, D / 2 - 2.6, 0, 1, 2.1, 0.72);
@@ -5175,9 +5416,13 @@
 
     // ---- a STUDIO (t1) keeps it sparse: a single chair + a small rug + a lamp ----
     if (t <= 1) {
-      if (decor(W / 2 - 2.4, 0.45, -D / 2 + 2.6, 0.9, 0.5, 0.9, 0x6b5a4a, 1.0))      // armchair seat
-        seatH(W / 2 - 2.4, -D / 2 + 2.6, Math.PI, "chair");                          // back at +z → faces -z
-      decor(W / 2 - 2.4, 0.95, -D / 2 + 3.0, 0.9, 0.6, 0.16, 0x6b5a4a, 1.0);         // chair back
+      // the studio's ONE chair is now a real armchair (cushion 0.42, declared)
+      // rather than a 0.7-topped cube with a plank behind it.
+      if (!kitH("armchair", W / 2 - 2.4, -D / 2 + 2.6, Math.PI, { len: 0.9, tone: { cloth: 0x6b5a4a } }, 1.0)) {
+        if (decor(W / 2 - 2.4, 0.45, -D / 2 + 2.6, 0.9, 0.5, 0.9, 0x6b5a4a, 1.0))      // armchair seat
+          seatH(W / 2 - 2.4, -D / 2 + 2.6, Math.PI, "chair");                          // back at +z → faces -z
+        decor(W / 2 - 2.4, 0.95, -D / 2 + 3.0, 0.9, 0.6, 0.16, 0x6b5a4a, 1.0);         // chair back
+      }
       decor(W / 2 - 2.0, 0.02, -D / 2 + 2.8, 2.2, 0.04, 2.0, 0x5a4a4a, 1.2);         // small rug
       decor(W / 2 - 1.6, 0.7, -D / 2 + 1.4, 0.12, 1.4, 0.12, 0x2a2f37, 0.7);         // lamp pole
       glowAt(W / 2 - 1.6, 1.5, -D / 2 + 1.4, 0.42, 0.32, 0.42, 0xffe6b0, 0.6, 0.7);  // lamp shade
@@ -5187,18 +5432,31 @@
 
     // ---- t2+ : a full LIVING set (couch + coffee table + TV on a stand + rug) ----
     const sofaC = t >= 4 ? 0x5a4f6a : 0x8a5a2b;
+    const sofaTone = { cloth: sofaC };
     if (t >= 4) { // aerie gets an L-sectional
-      if (decor(W / 2 - 2.6, 0.45, -D / 2 + 2.6, 2.8, 0.6, 1.0, sofaC, 1.2))
+      // THE L IS A COMPOSITION, not one box bent round a corner: a full sofa on
+      // the main run plus a matching return. Both are kit pieces in the SAME
+      // cloth, so the L still reads as one sectional while every seat on it
+      // declares the real 0.40 cushion. Yaws are unchanged (main run looks +z,
+      // the return looks -x), so nobody's entry point moves.
+      if (!kitH("sofa", W / 2 - 2.6, -D / 2 + 2.6, 0, { len: 2.8, tone: sofaTone }, 1.2)
+        && decor(W / 2 - 2.6, 0.45, -D / 2 + 2.6, 2.8, 0.6, 1.0, sofaC, 1.2))
         for (const sx of [-0.8, 0.8]) seatH(W / 2 - 2.6 + sx, -D / 2 + 2.6, 0, "sofa");   // main run faces +z (the room)
-      if (decor(W / 2 - 1.4, 0.45, -D / 2 + 4.0, 1.0, 0.6, 2.4, sofaC, 1.2))
+      if (!kitH("sofa", W / 2 - 1.4, -D / 2 + 4.0, -Math.PI / 2, { len: 2.4, tone: sofaTone }, 1.2)
+        && decor(W / 2 - 1.4, 0.45, -D / 2 + 4.0, 1.0, 0.6, 2.4, sofaC, 1.2))
         seatH(W / 2 - 1.4, -D / 2 + 4.0, -Math.PI / 2, "sofa");                          // return faces -x
     } else {
-      if (decor(W / 2 - 2.4, 0.45, -D / 2 + 2.4, 2.4, 0.6, 1.0, sofaC, 1.2)) {           // couch
+      const cface = Math.atan2((W / 2 - 1.6) - (W / 2 - 2.4), 0 - (-D / 2 + 2.4));
+      if (!kitH("sofa", W / 2 - 2.4, -D / 2 + 2.4, cface, { len: 2.4, tone: sofaTone }, 1.2)
+        && decor(W / 2 - 2.4, 0.45, -D / 2 + 2.4, 2.4, 0.6, 1.0, sofaC, 1.2)) {           // couch
         // 2 SEATS facing the TV stand at (W/2-1.6, 0)
         for (const sx of [-0.7, 0.7]) seatH(W / 2 - 2.4 + sx, -D / 2 + 2.4, Math.atan2((W / 2 - 1.6) - (W / 2 - 2.4 + sx), 0 - (-D / 2 + 2.4)), "sofa");
       }
     }
-    decor(0, 0.4, 0, 1.4, 0.5, 0.9, t >= 4 ? 0xcaa64a : 0x9aa0a8, 1.0);             // coffee table (gold on aerie)
+    // the coffee table topped out at 0.65 — a foot ABOVE the cushion it serves.
+    // F.coffee lands at 0.40, level with it. Gold on the aerie, as before.
+    if (!kitH("coffee", 0, 0, 0, { len: 1.4, deep: 0.9, tone: { wood: t >= 4 ? 0xcaa64a : 0x9aa0a8 } }, 1.0))
+      decor(0, 0.4, 0, 1.4, 0.5, 0.9, t >= 4 ? 0xcaa64a : 0x9aa0a8, 1.0);             // coffee table (gold on aerie)
     decor(W / 2 - 1.4, 0.02, -D / 2 + 2.6, 3.0, 0.04, 2.6, [0,0,0x5a4a6a,0x4a3f55,0x4a3550][Math.min(4, t)], 1.4);  // rug
 
     // a TV on a low STAND / console facing the couch (dark screen + under-glow)
@@ -5221,9 +5479,13 @@
 
     // ---- t3+ : a DINING set + a second plant + extra art for the lived-in feel ----
     if (t >= 3) {
-      decor(0, 0.5, cz - 0.4, 1.2, 0.5, 2.6, 0x6b4a2a, 1.1);                          // dining table
-      for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) if (decor(0 + s * 0.95, 0.45, cz - 0.4 + i * 0.9, 0.45, 0.9, 0.45, 0x49505b, 1.1))  // chairs
-        seatH(s * 0.95, cz - 0.4 + i * 0.9, Math.atan2(-s * 0.95, -i * 0.9), "chair");   // face the table
+      // dining set as ONE kit call: long axis on z (yaw 90), `deep` 1.06 so the
+      // ring lands on the ±0.95 the six blocks already used — no anchor moves.
+      if (!kitH("table", 0, cz - 0.4, Math.PI / 2, { len: 2.6, deep: 1.06, seats: 6 }, 1.1)) {
+        decor(0, 0.5, cz - 0.4, 1.2, 0.5, 2.6, 0x6b4a2a, 1.1);                          // dining table
+        for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) if (decor(0 + s * 0.95, 0.45, cz - 0.4 + i * 0.9, 0.45, 0.9, 0.45, 0x49505b, 1.1))  // chairs
+          seatH(s * 0.95, cz - 0.4 + i * 0.9, Math.atan2(-s * 0.95, -i * 0.9), "chair");   // face the table
+      }
       decor(-W / 2 + 2.0, 0.4, D / 2 - 2.2, 0.8, 0.8, 0.8, 0x3f9a4f, 0.9);            // second planter
       glowAt(-W / 2 + 0.22, 2.0, 0, 0.05, 1.2, 2.0, 0xc792ea, 0.18, 0.4);            // side-wall art column
     }
@@ -5341,21 +5603,29 @@
     // PROPS_PURPOSE: bed enlarged (lie axis 1.3→2.2) + registered sleepable.
     const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
     const bx = W / 2 - 2.0, bz = -D / 2 + 2.6;
-    if (put(bx, 0.35, bz, 1.9, 0.4, 2.2, 0x4a4036, 1.1)) {
-      if (put(bx, 0.62, bz, 1.8, 0.2, 2.1, linen, 1.1) && CBZ.propRegisterBed)
-        CBZ.propRegisterBed(abx + bx, Y, abz + bz, 0, -1, 2.1, Y + 0.72, "bed", null);   // head at the -z pillow end
-      put(bx, 0.8, bz - 0.75, 1.8, 0.2, 0.5, 0xe8e8ee, 1.1);
+    // KIT BED, yaw PI so the pillow end is the -z end the old boxes used.
+    if (!kitPiece(k, "bed", bx, bz, Math.PI, { len: 2.2, wide: 1.8, tone: { linen: linen } }, 1.1)) {
+      if (put(bx, 0.35, bz, 1.9, 0.4, 2.2, 0x4a4036, 1.1)) {
+        if (put(bx, 0.62, bz, 1.8, 0.2, 2.1, linen, 1.1) && CBZ.propRegisterBed)
+          CBZ.propRegisterBed(abx + bx, Y, abz + bz, 0, -1, 2.1, Y + 0.72, "bed", null);   // head at the -z pillow end
+        put(bx, 0.8, bz - 0.75, 1.8, 0.2, 0.5, 0xe8e8ee, 1.1);
+      }
     }
     const kw = Math.min(W * 0.32, 3.6), kz = D / 2 - 1.6;
     if (put(W / 2 - 2.6, 0.5, kz, kw, 1.0, 0.9, 0x55606e, 1.0))
       put(W / 2 - 2.6, 1.06, kz, kw + 0.1, 0.08, 1.0, 0xe6e8ee, 1.0);
     put(1.2, 0.02, 0.2, 3.0, 0.04, 2.4, 0x4a3f55, 1.6);
-    if (put(1.2, 0.42, 1.0, 2.2, 0.55, 0.9, sofa, 1.2)) {
-      put(1.2, 0.85, 1.35, 2.2, 0.5, 0.22, sofa, 1.2);
-      if (CBZ.propRegisterSeat) for (const sx of [-0.65, 0.65])          // couch back at +z → faces -z
-        CBZ.propRegisterSeat(abx + 1.2 + sx, Y, abz + 1.0, Math.PI, "sofa", null);
+    // KIT SOFA (back at +z → the sitters look -z, unchanged) and a KIT coffee
+    // table at the real 0.40 instead of a 0.46-topped slab.
+    if (!kitPiece(k, "sofa", 1.2, 1.0, Math.PI, { len: 2.2, tone: { cloth: sofa } }, 1.2)) {
+      if (put(1.2, 0.42, 1.0, 2.2, 0.55, 0.9, sofa, 1.2)) {
+        put(1.2, 0.85, 1.35, 2.2, 0.5, 0.22, sofa, 1.2);
+        if (CBZ.propRegisterSeat) for (const sx of [-0.65, 0.65])          // couch back at +z → faces -z
+          CBZ.propRegisterSeat(abx + 1.2 + sx, Y, abz + 1.0, Math.PI, "sofa", null);
+      }
     }
-    put(1.2, 0.3, -0.5, 1.1, 0.32, 0.7, 0x6b4a2a, 0.9);
+    if (!kitPiece(k, "coffee", 1.2, -0.5, 0, { len: 1.1, deep: 0.7 }, 0.9))
+      put(1.2, 0.3, -0.5, 1.1, 0.32, 0.7, 0x6b4a2a, 0.9);
     if (put(W / 2 - 1.2, 0.7, -0.6, 0.12, 1.4, 0.12, 0x2a2f37, 0.7))
       put(W / 2 - 1.2, 1.5, -0.6, 0.42, 0.3, 0.42, 0xffe6b0, 0.7);
   }
@@ -5527,10 +5797,27 @@
       b.lbox(cx, Y + 1.04, monZ + dir * (0.03 + SCREEN_GAP + 0.01),
         0.58, 0.36, 0.02, panel, { cast: false });
       b.lbox(cx, Y + 0.74, monZ, 0.12, 0.12, 0.12, 0x14181e, { cast: false });   // stand
-      // chair: a swivel seat + a back, behind the desk on the seat side
-      b.lbox(cx, Y + 0.42, seatZ, 0.6, 0.12, 0.6, chair, { cast: false });        // seat pad
-      b.lbox(cx, Y + 0.78, seatZ + dir * 0.26, 0.6, 0.7, 0.12, chair, { cast: false });  // backrest
-      b.lbox(cx, Y + 0.2, seatZ, 0.1, 0.4, 0.1, 0x14181e, { cast: false });        // post
+      // CHAIR: a task chair, not two slabs. Star base + gas post + a pad that
+      // oversails its frame + a raked back (stacked panels stepped aft, the
+      // furniture.js rake trick — boxes here are never rotated) + armrests.
+      // The pad's TOP stays at exactly 0.48, which is the cushionH declared in
+      // the anchor below; move one and you must move the other.
+      const FD = CBZ.CONFIG.FURNISH_DETAIL !== false;
+      if (FD) {
+        b.lbox(cx, Y + 0.03, seatZ, 0.56, 0.06, 0.56, 0x14181e, { cast: false });         // star base
+        b.lbox(cx, Y + 0.22, seatZ, 0.09, 0.32, 0.09, 0x14181e, { cast: false });         // gas post
+        b.lbox(cx, Y + 0.41, seatZ, 0.50, 0.06, 0.50, 0x14181e, { cast: false });         // seat frame
+        b.lbox(cx, Y + 0.455, seatZ, 0.60, 0.05, 0.60, chair, { cast: false });           // pad → 0.48
+        b.lbox(cx, Y + 0.60, seatZ + dir * 0.24, 0.58, 0.20, 0.09, chair, { cast: false });  // lumbar
+        b.lbox(cx, Y + 0.82, seatZ + dir * 0.30, 0.58, 0.26, 0.09, chair, { cast: false });  // upper back, stepped aft
+        b.lbox(cx, Y + 1.00, seatZ + dir * 0.34, 0.60, 0.09, 0.10, chair, { cast: false });  // head rail
+        for (const a of [-1, 1])
+          b.lbox(cx + a * 0.31, Y + 0.62, seatZ + dir * 0.04, 0.06, 0.05, 0.34, 0x14181e, { cast: false });  // armrests
+      } else {
+        b.lbox(cx, Y + 0.42, seatZ, 0.6, 0.12, 0.6, chair, { cast: false });        // seat pad
+        b.lbox(cx, Y + 0.78, seatZ + dir * 0.26, 0.6, 0.7, 0.12, chair, { cast: false });  // backrest
+        b.lbox(cx, Y + 0.2, seatZ, 0.1, 0.4, 0.1, 0x14181e, { cast: false });        // post
+      }
       // SEAT ANCHOR (world coords): the chair point at floor height, facing the
       // monitor. The monitor sits straight across the desk in z, so the yaw is
       // atan2(dx,dz) toward it — the SAME facing convention peds use everywhere.
@@ -5629,6 +5916,17 @@
     // PROPS_PURPOSE anchors (world = local + b.ox/b.oz; y = the penthouse floor)
     const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
     const seatPH = (x, z, face, kind) => { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null); };
+    // THE KIT BRIDGE, and this room is the one that most deserves it: the
+    // penthouse is the apex interior in the game and every seat in it was a
+    // 0.90-topped velvet block declaring nothing. `lift` puts a piece on the
+    // master-bedroom plinth. Returns null → the caller's own boxes stand.
+    const kitPH = (name, x, z, yaw, o, lift) => {
+      const F = CBZ.furnish;
+      if (!F || typeof F[name] !== "function") return null;
+      const oo = { box: b.lbox, ox: abx, oz: abz };
+      if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
+      try { return F[name](x, Y + (lift || 0), z, yaw, oo); } catch (e) { return null; }
+    };
     const MARBLE = 0xe6e8ee, GOLD = 0xcaa64a, DARKWOOD = 0x3a2b1e, VELVET = 0x5a1622, STONE = 0x9aa0a8;
     // ---- a polished MARBLE floor slab covering the whole penthouse ----
     lb(0, 0.02, 0, W - 1.4, 0.04, D - 1.4, 0xc8ccd4);
@@ -5638,28 +5936,53 @@
     for (let a = 0; a < 8; a++) { const an = a / 8 * 6.283; glow(Math.cos(an) * 0.7, FHl - 0.5, Math.sin(an) * 0.7, 0.16, 0.3, 0.16, 0xffe6a0, 0.7); }  // chandelier drops
     // ---- MASTER BEDROOM on a raised marble plinth in the back corner ----
     lb(-W / 2 + 3.0, 0.08, -D / 2 + 3.2, 6.2, 0.16, 5.4, MARBLE);                   // plinth
-    lb(-W / 2 + 3.0, 0.55, -D / 2 + 3.2, 3.0, 0.5, 2.4, DARKWOOD);                  // king frame
-    lb(-W / 2 + 3.0, 0.9, -D / 2 + 3.2, 2.8, 0.26, 2.3, 0x6b7da0);                  // mattress
-    // PROPS_PURPOSE: the king is already character-sized — register it
-    // sleepable (head at the -z pillow end, mattress top 1.03).
-    if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + (-W / 2 + 3.0), Y, abz + (-D / 2 + 3.2), 0, -1, 2.3, Y + 1.03, "bed", null);
-    lb(-W / 2 + 3.0, 1.12, -D / 2 + 2.2, 2.8, 0.3, 0.6, 0xe8e8ee);                  // pillows
+    // THE KING, on the plinth (lift 0.16). yaw PI puts the pillows at the -z
+    // end, between the four-poster posts and under the velvet headboard wall,
+    // exactly where they were. It also drops the mattress from an absurd 1.03
+    // (chest height on a 1.8 u character — you would climb it) to 0.71 above
+    // the floor: 0.55 above the plinth it stands on, the real number.
+    if (!kitPH("bed", -W / 2 + 3.0, -D / 2 + 3.2, Math.PI,
+      { len: 2.4, wide: 2.8, tone: { linen: 0x6b7da0, frame: DARKWOOD } }, 0.16)) {
+      lb(-W / 2 + 3.0, 0.55, -D / 2 + 3.2, 3.0, 0.5, 2.4, DARKWOOD);                  // king frame
+      lb(-W / 2 + 3.0, 0.9, -D / 2 + 3.2, 2.8, 0.26, 2.3, 0x6b7da0);                  // mattress
+      // PROPS_PURPOSE: the king is already character-sized — register it
+      // sleepable (head at the -z pillow end, mattress top 1.03).
+      if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + (-W / 2 + 3.0), Y, abz + (-D / 2 + 3.2), 0, -1, 2.3, Y + 1.03, "bed", null);
+      lb(-W / 2 + 3.0, 1.12, -D / 2 + 2.2, 2.8, 0.3, 0.6, 0xe8e8ee);                  // pillows
+    }
     lb(-W / 2 + 3.0, 2.0, -D / 2 + 4.5, 3.2, 1.6, 0.2, VELVET);                     // velvet headboard wall
     for (const s of [-1, 1]) { lb(-W / 2 + 3.0 + s * 1.7, 1.4, -D / 2 + 2.0, 0.12, 2.6, 0.12, GOLD); }  // four-poster posts (front)
     for (const s of [-1, 1]) { lb(-W / 2 + 3.0 + s * 1.7, 0.45, -D / 2 + 4.4, 0.5, 0.7, 0.5, DARKWOOD); glow(-W / 2 + 3.0 + s * 1.7, 0.95, -D / 2 + 4.4, 0.4, 0.16, 0.4, 0xffe6b0, 0.5); }  // nightstands + lamps
     // ---- SUNKEN LOUNGE: wraparound sectional facing a wall-spanning media wall ----
     lb(0, 0.02, D / 2 - 5.0, 8.5, 0.04, 5.0, 0x4a3550);                             // luxe rug
-    lb(0, 0.5, D / 2 - 3.2, 7.0, 0.65, 1.2, 0x6b2230);                              // sofa back run (velvet)
-    for (const sx of [-2.2, 0, 2.2]) seatPH(sx, D / 2 - 3.2, 0, "sofa");            // main run faces the TV (+z)
-    for (const s of [-1, 1]) { lb(s * 3.4, 0.5, D / 2 - 4.6, 1.2, 0.65, 3.0, 0x6b2230); seatPH(s * 3.4, D / 2 - 4.6, -s * Math.PI / 2, "sofa"); }  // sectional returns face centre
-    lb(0, 0.42, D / 2 - 5.6, 2.6, 0.42, 1.1, GOLD);                                 // gold coffee table
+    // THE WRAPAROUND SECTIONAL, composed from three kit sofas in one velvet:
+    // a 7 m main run facing the media wall plus a return down each side. Same
+    // centres, same yaws, same colour — but arms, seat seams and a real 0.40
+    // cushion, and every anchor declares it.
+    const phSofa = { tone: { cloth: 0x6b2230, frame: DARKWOOD } };
+    if (!kitPH("sofa", 0, D / 2 - 3.2, 0, { len: 7.0, tone: phSofa.tone })) {
+      lb(0, 0.5, D / 2 - 3.2, 7.0, 0.65, 1.2, 0x6b2230);                            // sofa back run (velvet)
+      for (const sx of [-2.2, 0, 2.2]) seatPH(sx, D / 2 - 3.2, 0, "sofa");          // main run faces the TV (+z)
+    }
+    for (const s of [-1, 1]) {
+      if (kitPH("sofa", s * 3.4, D / 2 - 4.6, -s * Math.PI / 2, { len: 3.0, tone: phSofa.tone })) continue;
+      lb(s * 3.4, 0.5, D / 2 - 4.6, 1.2, 0.65, 3.0, 0x6b2230); seatPH(s * 3.4, D / 2 - 4.6, -s * Math.PI / 2, "sofa");   // sectional returns face centre
+    }
+    if (!kitPH("coffee", 0, D / 2 - 5.6, 0, { len: 2.6, deep: 1.1, tone: { wood: GOLD } }))
+      lb(0, 0.42, D / 2 - 5.6, 2.6, 0.42, 1.1, GOLD);                               // gold coffee table
     lb(0, 1.5, D / 2 - 0.3, 5.0, 2.2, 0.12, 0x101319);                             // wall-spanning TV
     glow(0, 1.5, D / 2 - 0.36 - SCREEN_GAP - 0.025,
       4.6, 1.8, 0.05, 0x39516a, 0.45);                                  // glass faces lounge
     // ---- MARBLE KITCHEN: island w/ waterfall counter + stools + back run ----
     lb(W / 2 - 3.4, 0.55, 0.4, 2.2, 1.0, 4.6, STONE);                              // island body
     lb(W / 2 - 3.4, 1.08, 0.4, 2.4, 0.1, 4.9, MARBLE);                             // waterfall worktop
-    for (let i = -1; i <= 1; i++) { const sz = 0.4 + i * 1.4; lb(W / 2 - 5.0, 0.45, sz, 0.5, 0.9, 0.5, DARKWOOD); glow(W / 2 - 5.0, 0.92, sz, 0.42, 0.1, 0.42, GOLD, 0.3); seatPH(W / 2 - 5.0, sz, Math.PI / 2, "stool"); }  // bar stools face the island (+x)
+    // bar stools face the island (+x). Kit stools: cushion at the real 0.68 for
+    // a 1.08 worktop, not a 0.90 post you would have to vault.
+    for (let i = -1; i <= 1; i++) {
+      const sz = 0.4 + i * 1.4;
+      if (kitPH("stool", W / 2 - 5.0, sz, Math.PI / 2, { tone: { cloth: GOLD } })) continue;
+      lb(W / 2 - 5.0, 0.45, sz, 0.5, 0.9, 0.5, DARKWOOD); glow(W / 2 - 5.0, 0.92, sz, 0.42, 0.1, 0.42, GOLD, 0.3); seatPH(W / 2 - 5.0, sz, Math.PI / 2, "stool");
+    }
     lb(W / 2 - 1.3, 0.6, -D / 2 + 3.4, 1.0, 1.1, 4.4, 0x49505b);                   // back counter run
     glow(W / 2 - 1.0, 1.7, -D / 2 + 3.4, 0.05, 0.9, 3.2, 0x9fe0ff, 0.3);           // backsplash glow
     // ---- a HOME BAR with a backlit bottle wall in the far corner ----
@@ -5669,7 +5992,13 @@
     // ---- a long DINING table with chairs ----
     lb(W / 2 - 7.5, 0.5, D / 2 - 4.5, 1.4, 0.5, 3.8, DARKWOOD);
     glow(W / 2 - 7.5, 0.78, D / 2 - 4.5, 0.9, 0.04, 3.2, 0xffe6c0, 0.18);          // candlelit runner
-    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) { lb(W / 2 - 7.5 + s * 1.1, 0.45, D / 2 - 4.5 + i * 1.2, 0.5, 0.9, 0.5, VELVET); seatPH(W / 2 - 7.5 + s * 1.1, D / 2 - 4.5 + i * 1.2, Math.atan2(-s * 1.1, -i * 1.2), "chair"); }  // chairs face the table
+    // chairs face the table. Kit chairs in the room's velvet: 0.45 cushion,
+    // raked back, declared — the old six were 0.9 blocks with a "chair" label.
+    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) {
+      const dcx = W / 2 - 7.5 + s * 1.1, dcz = D / 2 - 4.5 + i * 1.2, dface = Math.atan2(-s * 1.1, -i * 1.2);
+      if (kitPH("chair", dcx, dcz, dface, { tone: { cloth: VELVET } })) continue;
+      lb(dcx, 0.45, dcz, 0.5, 0.9, 0.5, VELVET); seatPH(dcx, dcz, dface, "chair");
+    }
     // ---- a GRAND PIANO near the lounge ----
     lb(-W / 2 + 3.0, 0.45, D / 2 - 4.0, 2.4, 0.5, 1.6, 0x14171c);                  // body
     lb(-W / 2 + 3.0, 0.78, D / 2 - 3.2, 2.4, 0.08, 0.4, 0x14171c);                 // open lid hint

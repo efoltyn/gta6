@@ -128,7 +128,10 @@
   // ---- armchair, angled at the TV ---------------------------------------
   const CHAIR_X = 24.5, CHAIR_Z = 41.5;
   const CHAIR_FACE = Math.atan2(TV_X - CHAIR_X, TV_Z - CHAIR_Z);   // look at the screen
-  const fChair = kit("chair", CHAIR_X, 0, CHAIR_Z, CHAIR_FACE, { solid: true, tone: 0x2b3a67, kind: "armchair" });
+  // F.armchair is the real piece since the interiors wave; older kits fall
+  // through kit()'s null to the raked chair, then to the authored block.
+  const fChair = kit("armchair", CHAIR_X, 0, CHAIR_Z, CHAIR_FACE, { solid: true, tone: 0x2b3a67 })
+    || kit("chair", CHAIR_X, 0, CHAIR_Z, CHAIR_FACE, { solid: true, tone: 0x2b3a67, kind: "armchair" });
   let chaired = false;
   if (fChair) {
     chaired = reseat(fChair.rec, CHAIR_FACE, "armchair");
@@ -137,11 +140,13 @@
   }
   if (!chaired) seat(CHAIR_X, CHAIR_Z, CHAIR_FACE, "armchair", 0.95);   // block top 0.60 + 0.35
 
-  // coffee table + mug. Left as authored boxes on purpose: CBZ.furnish has no
-  // low occasional table (its `table` is dining height) — see the report note.
-  // Now SOLID, and height-gated (y0/y1) so it's a shin-high obstacle in the
-  // walking line between the couch and the TV, not a full-height pillar.
-  addBox(25.5, 0.45, 37, 1.6, 0.12, 1.2, 0x3c424d, { solid: true, y0: 0, y1: 0.55 });
+  // coffee table + mug. F.coffee exists since the interiors wave (top 0.40,
+  // shin-high collider of its own); the authored boxes stay as the degrade
+  // path for a stale kit, height-gated (y0/y1) so it's a shin-high obstacle
+  // in the walking line between the couch and the TV, not a full-height pillar.
+  if (!kit("coffee", 25.5, 0, 37, 0, { len: 1.6, deep: 1.2 })) {
+    addBox(25.5, 0.45, 37, 1.6, 0.12, 1.2, 0x3c424d, { solid: true, y0: 0, y1: 0.55 });
+  }
   addBox(25.5, 0.62, 37, 0.18, 0.22, 0.18, 0xffffff, { cast: false });
 
   // wall-mounted TV (2.6 m up — over a body's head, stays open)

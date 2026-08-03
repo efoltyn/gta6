@@ -375,20 +375,51 @@
        is the STRUCTURE (partitions, grille, door) — the same call
        city/arena_venue.js made about its seat banks, for the same reason. */
   function bunkRig(c, x, z, along, dbl, blanket) {
-    const w = along === "z" ? 1.25 : 2.60, d = along === "z" ? 2.60 : 1.25;
-    const hw = along === "z" ? 1.05 : 2.35, hd = along === "z" ? 2.35 : 1.05;
-    addBox(x, 0.50, z, w, 0.30, d, C_BUNK, {});
-    addBox(x, 0.70, z, hw, 0.18, hd, C_MATT, { cast: false });
-    addBox(x, 0.80, z + (along === "z" ? 0.55 : 0), hw * 0.94, 0.10, along === "z" ? 1.30 : hd * 0.94, blanket, { cast: false });
-    addBox(x, 0.82, z - (along === "z" ? 1.00 : 0), along === "z" ? 0.90 : 0.42, 0.16, along === "z" ? 0.42 : 0.90, 0xe6e9ed, { cast: false }); // pillow
-    addBox(x - (along === "z" ? 0.55 : 1.25), 0.25, z - (along === "z" ? 1.25 : 0.55), 0.12, 0.50, 0.12, C_DARK, { cast: false });
-    addBox(x + (along === "z" ? 0.55 : 1.25), 0.25, z + (along === "z" ? 1.25 : 0.55), 0.12, 0.50, 0.12, C_DARK, { cast: false });
+    // ONE local frame instead of eleven `along === "z" ? … : …` ternaries.
+    // `lat` = across the bunk, `lon` = along the lie axis with the PILLOW at
+    // -lon. Writing it once is not tidiness: the old ternaries disagreed with
+    // each other — the blanket's 0.55 foot-ward shift and the pillow's -1.00
+    // head-ward shift were applied on the z axis ONLY, so every bunk laid out
+    // along X got a full-length blanket with no fold and a pillow parked in the
+    // middle of the mattress. In this frame both orientations are the same bunk.
+    const AZ = along === "z";
+    const DET = !CBZ.CONFIG || CBZ.CONFIG.FURNISH_DETAIL !== false;
+    function bb(lat, y, lon, wLat, h, wLon, col, o) {
+      addBox(x + (AZ ? lat : lon), y, z + (AZ ? lon : lat),
+        AZ ? wLat : wLon, h, AZ ? wLon : wLat, col, o || { cast: false });
+    }
+    const LAT = 1.25, LON = 2.60, MLAT = 1.05, MLON = 2.35;
+    bb(0, 0.50, 0, LAT, 0.30, LON, C_BUNK, {});                          // frame
+    bb(0, 0.70, 0, MLAT, 0.18, MLON, C_MATT);                            // mattress → 0.79
+    if (DET) {
+      // a TUCKED SHEET: a thin lip of linen overhanging the frame all round.
+      // It is the line that separates "mattress" from "slab on a shelf".
+      bb(0, 0.615, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);
+      bb(0, 0.42, LON / 2 - 0.05, LAT, 0.14, 0.10, C_DARK);              // foot rail
+    }
+    bb(0, 0.80, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);                 // blanket over the legs
+    if (DET) bb(0, 0.82, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);        // TURNED-DOWN fold
+    bb(0, 0.82, -1.00, 0.90, 0.16, 0.42, 0xe6e9ed);                      // pillow
+    // FOUR corner legs, not the two diagonal ones this used to draw (a bunk
+    // resting on opposite corners is a thing the eye reads as broken).
+    for (const a of [-1, 1]) for (const b2 of [-1, 1]) {
+      if (!DET && a !== b2) continue;
+      bb(a * 0.55, 0.25, b2 * 1.25, 0.12, 0.50, 0.12, C_DARK);
+    }
     if (dbl) {
-      addBox(x, 1.70, z, w, 0.28, d, C_BUNK, {});
-      addBox(x, 1.88, z, hw, 0.18, hd, C_MATT, { cast: false });
-      addBox(x, 1.98, z - (along === "z" ? 1.00 : 0), along === "z" ? 0.90 : 0.42, 0.14, along === "z" ? 0.42 : 0.90, 0xdfe3ea, { cast: false });
-      addBox(x - (along === "z" ? 0.60 : 1.28), 1.05, z - (along === "z" ? 1.28 : 0.60), 0.10, 1.40, 0.10, C_DARK, { cast: false });
-      addBox(x + (along === "z" ? 0.60 : 1.28), 1.05, z + (along === "z" ? 1.28 : 0.60), 0.10, 1.40, 0.10, C_DARK, { cast: false });
+      bb(0, 1.70, 0, LAT, 0.28, LON, C_BUNK, {});                        // upper frame
+      bb(0, 1.88, 0, MLAT, 0.18, MLON, C_MATT);                          // upper mattress → 1.97
+      if (DET) {
+        bb(0, 1.815, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);         // tucked sheet
+        bb(0, 1.98, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);             // the top bunk gets bedding too
+        bb(0, 2.00, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);             // turned-down fold
+        // GUARD RAIL down the open side + a two-rung ladder at the foot: the
+        // two fittings that say "somebody sleeps up there" rather than "shelf".
+        bb(LAT / 2 - 0.06, 2.16, 0.30, 0.08, 0.30, 1.60, C_DARK);
+        for (let r = 0; r < 2; r++) bb(0, 1.05 + r * 0.42, LON / 2 - 0.02, 0.60, 0.07, 0.07, C_DARK);
+      }
+      bb(0, 1.98, -1.00, 0.90, 0.14, 0.42, 0xdfe3ea);                    // upper pillow
+      for (const a of [-1, 1]) bb(a * 0.60, 1.05, a * 1.28, 0.10, 1.40, 0.10, C_DARK);   // corner posts
     }
     return { x: x, z: z, top: 0.79, along: along };
   }

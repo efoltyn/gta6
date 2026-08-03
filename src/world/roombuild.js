@@ -54,6 +54,11 @@
   const { addBox } = CBZ;
   const T = 0.5; // wall thickness
   const HALF = Math.PI / 2;
+  // Newest kit verb -> the closest verb an OLDER city/furniture.js has. Used
+  // only when the live kit does not implement the planned verb (see
+  // CBZ.roomExecute): the plan is data and outlives any one kit build, so a
+  // missing verb must degrade to a worse piece, never to an empty floor.
+  const KIT_FALLBACK = { coffee: "table", armchair: "chair" };
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   // ROOM_PLAN_V1 — owner: "the boss's office on the top floor of a gang
@@ -223,8 +228,13 @@
     const L = o.len != null ? +o.len : null;
     const sym = function (w, d) { return { w: w, d: d, bck: d / 2 }; };
     switch (fn) {
-      case "chair": return sym(0.50, 0.50);
+      case "chair": return sym(0.52, 0.55);
+      case "armchair": return sym(o.len != null ? +o.len : 0.94, 0.90);
       case "stool": return sym(0.42, 0.42);
+      // the LOW occasional table. Its footprint is its top and nothing else —
+      // no chair ring, which is exactly why the lounge program stopped
+      // borrowing `table` for the job.
+      case "coffee": return sym(L || 1.1, o.deep != null ? +o.deep : 0.60);
       case "bench": return sym(L || 1.8, o.back === false ? 0.48 : 0.56);
       case "sofa": return sym(L || 2.4, 0.85);
       case "bed": return sym(o.wide != null ? +o.wide : 1.4, (L || 2.1) + 0.12);
@@ -582,16 +592,24 @@
         if (sofa) { sofaWall = sw; media = mw; sofaLen = sl; }
       }
       if (sofa) {
-        // coffee table on the focal axis, one shin-gap in front of the sofa.
-        // seats:0 → the kit rings NO chairs around it (furniture.js F.table).
+        // Coffee table on the focal axis, one shin-gap in front of the sofa.
+        // NOW A REAL LOW TABLE: this used to be `table` with seats:0 — dining
+        // height (0.74) parked in front of a 0.40 cushion, so the sofa looked
+        // over a worktop at the screen. F.coffee tops out at 0.40, level with
+        // the cushion, which is the relationship a lounge actually has. The
+        // `seats:0` rides along so the F.table FALLBACK below (a kit too old to
+        // know `coffee`) still rings no chairs.
         const s = Math.sin(sofa.yaw), c = Math.cos(sofa.yaw);
         const gap = sofa.fwd + COFFEE_GAP + 0.45;
-        put("table", { x: sofa.x + s * gap, z: sofa.z + c * gap, yaw: sofa.yaw }, { seats: 0, len: 1.1 }, 6, "coffee");
-        // an armchair at 90 degrees to the sofa (the conversational L)
+        put("coffee", { x: sofa.x + s * gap, z: sofa.z + c * gap, yaw: sofa.yaw }, { seats: 0, len: 1.1 }, 6, "coffee");
+        // an ARMCHAIR at 90 degrees to the sofa (the conversational L). Also
+        // formerly a lie: an F.chair — a 0.45 dining chair — filed under the
+        // tag "armchair". F.armchair is a one-seat sofa and registers kind
+        // "armchair" at the 0.42 propuse already holds for that word.
         const rx = c, rz = -s, side = H(0x4) < 0.5 ? 1 : -1;
         const ax = sofa.x + rx * side * (sofaLen / 2 + 0.75) + s * 0.9;
         const az = sofa.z + rz * side * (sofaLen / 2 + 0.75) + c * 0.9;
-        put("chair", { x: ax, z: az, yaw: sofa.yaw - side * HALF }, {}, 4, "armchair");
+        put("armchair", { x: ax, z: az, yaw: sofa.yaw - side * HALF }, {}, 4, "armchair");
       }
       const rest = ["N", "S", "W", "E"].filter(function (s) { return s !== dside && s !== media && s !== sofaWall; });
       if (rest[0] && H(0x5) < 0.6) put("lamp", wallPos("lamp", null, rest[0], wallMid(rest[0]) + 1.0, 0), {}, 2, "lamp");
@@ -870,7 +888,15 @@
     const n = opts.max != null ? Math.min(plan.pieces.length, opts.max | 0) : plan.pieces.length;
     for (let i = 0; i < n; i++) {
       const p = plan.pieces[i];
-      const fn = F[p.fn];
+      // KIT-VERSION FALLBACK. A plan names a verb; a kit that predates that
+      // verb has no function for it and the piece used to vanish silently,
+      // which is how a lounge could plan a coffee table and draw an empty
+      // floor. Fall back to the nearest older verb the kit DOES have — the
+      // plan's opts already carry what that older verb needs (`seats:0` so a
+      // substituted F.table rings no chairs). Not a synonym table: it is a
+      // one-way degrade, newest verb first.
+      const name = (typeof F[p.fn] === "function") ? p.fn : (KIT_FALLBACK[p.fn] || p.fn);
+      const fn = F[name];
       if (typeof fn !== "function") continue;
       const px = p.x + dx, pz = p.z + dz;
       if (opts.accept && !opts.accept(px, pz, p)) continue;
@@ -895,7 +921,7 @@
       // (x, y, z, yaw, opts). Called through the namespace so a kit written
       // with `this` still works.
       try {
-        r = (p.fn === "lamp") ? F.lamp(px, y, pz, o) : F[p.fn](px, y, pz, p.yaw, o);
+        r = (name === "lamp") ? F.lamp(px, y, pz, o) : F[name](px, y, pz, p.yaw, o);
       } catch (e) { r = null; }
       p.result = r || null;
       out.executed++;
@@ -917,7 +943,7 @@
           const geom = st.cushion != null ? { cushion: st.cushion, floorBelow: 0 } : null;
           const sy = st.y != null ? st.y : y;
           CBZ.roomSeatAnchor(st.x != null ? st.x : px, sy, st.z != null ? st.z : pz,
-            face, st.kind || p.fn, o.lot || null, geom);
+            face, st.kind || name, o.lot || null, geom);
           // the boss office's approach corridor must stay EMPTY: report any
           // seat the kit landed inside a keepout instead of silently allowing it.
           // The anchor is WORLD, the keepout is the RECT's own space — subtract

@@ -64,7 +64,16 @@
   slab(0, 90, 88, 76, "#586069", "#4f5760", 14, 12, "concrete");   // lower-yard apron
   // path: 1x8 -> a ~9 m square tile. The old 2x16 repeated a 4.6 m cell
   // sixteen times down the corridor you walk the whole length of.
-  slab(0, 90, 9, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? 8 : 16, "asphalt"); // central path to the gate
+  // PRISON_ROAD_FIX (world/ground.js owns the flag and PUBLISHES the width).
+  // This is the southern 76 m of the SAME walkway ground.js draws; the two used
+  // to type "9" independently, which is exactly how a 132 m two-lane band ended
+  // up running the length of the compound. One number, read, never retyped.
+  const WALK = (CBZ.prisonWalkway && CBZ.prisonWalkway.w) || 9;
+  slab(0, 90, WALK, 76, CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, GV2 ? 1 : 2, GV2 ? 8 : 16, "asphalt"); // central path to the gate
+  // the kerb continues with it, so the path does not lose its edges at z=52
+  if (CBZ.prisonWalkway && CBZ.prisonWalkway.fixed) {
+    for (const sx of [-1, 1]) addBox(sx * (WALK / 2 + 0.09), 0.06, 90, 0.18, 0.12, 76, 0xa9a294, { cast: false });
+  }
 
   // a basketball half-court painted into the apron
   (function court() {
@@ -150,15 +159,42 @@
   addBox(42, 5.4, 96, 0.2, 0.9, 3.4, 0x2f9e6a, { cast: false }); // green cross band
   addBox(42.0, 5.4, 96, 0.22, 0.6, 0.2, 0xffffff, { emissive: 0xbfeada, ei: 0.5, cast: false });
   function bed(x, z) {
-    // FRAME is the collider; the sheet and pillow lie ON it and add nothing.
-    // Safe for propuse: entryOf() approaches a bed from its long side at
-    // >=0.95 m, clear of a 1.5 m-wide frame, and the settle beats deliberately
-    // skip collision (city/propuse.js) — a solid frame is the NORMAL case there
-    // (CBZ.furnish draws a 1.4 m one).
-    addBox(x, 0.45, z, 1.5, 0.2, 2.6, 0x9aa0a8, { solid: true });  // frame
-    addBox(x, 0.62, z, 1.3, 0.14, 2.4, 0xeef2f5, { cast: false }); // sheet
-    addBox(x, 0.78, z - 0.9, 1.1, 0.16, 0.5, 0xdfe6ec, { cast: false }); // pillow
+    // THE WARD BED IS THE SHARED KIT'S. It was three flat slabs — frame, sheet,
+    // pillow — and NO sleep anchor at all, so an infirmary full of beds was an
+    // infirmary nobody could lie down in. CBZ.furnish.bed draws rails, a duvet
+    // with a turned-down fold and a headboard, in the "clinic" tone (pale
+    // frame + white linen: the same two colours this room already used, no new
+    // batch bucket), and its own base box carries the collider the frame used
+    // to. yaw = PI points from the mattress centre at the PILLOW, which is the
+    // -z end the old pillow box sat on.
+    //
+    // KIT CALL, THEN FALL BACK (the world/lounge.js idiom — always through the
+    // namespace, always inside a try, null = draw the authored boxes instead).
+    const F = CBZ.furnish;
+    let kitTop = null;
+    if (F && typeof F.bed === "function") {
+      try { if (F.bed(x, 0, z, Math.PI, { len: 2.4, wide: 1.4, tone: "clinic" })) kitTop = 0.55; }
+      catch (e) { kitTop = null; }
+    }
+    if (kitTop == null) {
+      // FRAME is the collider; the sheet and pillow lie ON it and add nothing.
+      // Safe for propuse: entryOf() approaches a bed from its long side at
+      // >=0.95 m, clear of a 1.5 m-wide frame, and the settle beats deliberately
+      // skip collision (city/propuse.js) — a solid frame is the NORMAL case there
+      // (CBZ.furnish draws a 1.4 m one).
+      addBox(x, 0.45, z, 1.5, 0.2, 2.6, 0x9aa0a8, { solid: true });  // frame
+      addBox(x, 0.62, z, 1.3, 0.14, 2.4, 0xeef2f5, { cast: false }); // sheet
+      addBox(x, 0.78, z - 0.9, 1.1, 0.16, 0.5, 0xdfe6ec, { cast: false }); // pillow
+    }
     addBox(x - 0.95, 0.7, z, 0.08, 1.0, 2.4, 0xcfd6dc, { cast: false }); // privacy screen
+    // THE SLEEP ANCHOR THIS ROOM NEVER HAD. This file is parsed from the world
+    // block, LONG before city/propuse.js exists, so it goes through
+    // CBZ.roomBedAnchor — the queue-and-flush shim world/roombuild.js owns for
+    // exactly this load-order gap. Head at -z (hx,hz = 0,-1), mattress top from
+    // whichever body actually got drawn, never a retyped constant.
+    const topY = kitTop != null ? kitTop : 0.69;
+    if (CBZ.roomBedAnchor) CBZ.roomBedAnchor(x, 0, z, 0, -1, 2.4, topY, "bed", null);
+    else if (CBZ.propRegisterBed) CBZ.propRegisterBed(x, 0, z, 0, -1, 2.4, topY, "bed", null);
   }
   bed(30, 92); bed(30, 100); bed(38, 92); bed(38, 100);
   // a supply cabinet + a glowing monitor

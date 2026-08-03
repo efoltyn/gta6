@@ -65,8 +65,19 @@
 
    PROPORTIONS ARE REAL METRES and are the contract with the character rig:
      chair seat 0.45 · stool 0.68 · sofa cushion 0.40 (back 0.85) ·
-     bed mattress top 0.55 · desk/table worktop 0.74 · counter 0.92 ·
-     boss "throne" cushion 0.50 · deckchair seat 0.38 · lounger deck 0.34.
+     armchair cushion 0.42 · bed mattress top 0.55 · desk/table worktop 0.74 ·
+     coffee table top 0.40 · counter 0.92 · boss "throne" cushion 0.50 ·
+     deckchair seat 0.38 · lounger deck 0.34. Every one of these is also the
+     number city/propuse.js's SEAT_H holds for the same kind string, so the
+     drawn box and the pose solved against it can never disagree.
+
+   TWO FLAGS, not one. FURNISH_KIT is the existence switch (above). FURNISH_
+   DETAIL is the RICHNESS switch: with it off every piece still draws its
+   structure and its cushion/mattress/worktop at the IDENTICAL heights (so the
+   audit, the rig and every caller are untouched) and simply skips the
+   second-order boxes — cushion seams, arm pads, duvet folds, bed rails,
+   drawer faces, apron shadows, leg stretchers. That is the one-line revert if
+   the box count ever costs a frame; it is NOT a behaviour change.
 
    HARD INVARIANT (the ratchet, BLOCK LAW #5): a seat anchor's y is the FLOOR
    the sitter's feet rest on and `geom.cushion` is the cushion height ABOVE
@@ -111,6 +122,15 @@
   // `CBZ.furnish ? … : <old inline boxes>` guard falls back to the exact prior
   // behaviour — a true one-line revert.
   if (CBZ.CONFIG.FURNISH_KIT == null) CBZ.CONFIG.FURNISH_KIT = true;
+  // FURNISH_DETAIL — the SECOND-ORDER boxes only: per-seat cushion seams, arm
+  // pads, duvet folds, side rails, drawer faces, apron shadows. Every piece
+  // still draws its structural boxes (and the EXACT same cushion/mattress/
+  // worktop heights, so the audit and the rig are untouched) when this is off,
+  // which is the one-line revert if the added box count ever costs a frame.
+  // Read at CALL time, never captured, so ?cfg_FURNISH_DETAIL=0 works on a
+  // world rebuild without a reload.
+  if (CBZ.CONFIG.FURNISH_DETAIL == null) CBZ.CONFIG.FURNISH_DETAIL = true;
+  function det() { return CBZ.CONFIG.FURNISH_DETAIL !== false; }
 
   const HALF_PI = Math.PI / 2;
   const EPS_CUSHION = 0.02;          // 2cm — the audit's mismatch tolerance
@@ -319,20 +339,74 @@
   //  SEATING
   // ======================================================================
 
-  // CHAIR — seat pad, backrest, four legs. Cushion 0.45. Non-solid so a body
-  // can actually reach the anchor standing in its footprint.
+  // CHAIR — four THIN legs, a seat frame, a pad that OVERHANGS the frame, and a
+  // back RAKED by the deckchair stagger trick (boxes are never rotated here, so
+  // a lean is drawn as three stacked panels each set a little further aft).
+  // Cushion 0.45 — unchanged, and it is the pad's real top, so the audit and
+  // entities/character.js's chair solve see exactly what is drawn.
+  //
+  // WHY THIS SHAPE: the old chair was a 0.06 post at each corner under a slab
+  // and one vertical slab behind it — the silhouette of a box, not a chair. The
+  // three things the eye actually uses to read "chair" are (a) legs thin enough
+  // to see the floor between, (b) a pad whose edge oversails the frame so the
+  // seat casts its own line, and (c) a back that is NOT vertical.
   F.chair = function (x, y, z, yaw, opts) {
     const p = pen("chair", x, y, z, yaw, opts);
     const leg = P.chair, pad = p.col("cloth"), body = P.chair;
+    const D = det();
+    const legT = D ? 0.045 : 0.06;                                   // thinner legs read as legs
+    // Front legs stop under the seat; the REAR pair keep going as the back's
+    // uprights (one box each, not a leg plus a separate post 2 cm off it) —
+    // which is how a real chair is built and why the back never looks bolted on.
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * 0.19, 0, b * 0.19, 0.06, 0.41, 0.06, leg);
+      p.put(a * 0.205, 0, b * 0.205, legT, (D && b < 0) ? 0.89 : 0.37, legT, leg);
+    // the seat FRAME the pad sits proud of (0.44 vs the pad's 0.52 → a 4cm
+    // reveal on every side). It also ties the four legs together, which is what
+    // stops them reading as four unrelated sticks.
+    if (D) p.put(0, 0.37, 0, 0.44, 0.05, 0.44, leg);
     // The pad carries the collider (height-gated to the cushion, so a body can
     // still stand in the chair's footprint to reach the seat anchor) — a chair
     // you walk through is a decoy, and `opts.solid` used to be a no-op here.
-    const top = p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, colH: 0.08 });   // cushion → 0.45
-    p.put(0, 0.49, -0.21, 0.50, 0.55, 0.08, body);                   // backrest
+    const top = D
+      ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, colH: 0.06 })            // cushion → 0.45
+      : p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, colH: 0.08 });           // cushion → 0.45
+    if (D) {
+      // THREE staggered panels between the rear uprights = a raked back. Each
+      // step is 3.5cm further aft over 0.18 of rise, i.e. about an 11-degree
+      // lean — the real angle of a dining chair, drawn without rotating a box.
+      p.put(0, 0.50, -0.195, 0.46, 0.16, 0.05, body);                // lumbar panel
+      p.put(0, 0.68, -0.230, 0.46, 0.16, 0.05, body);                // mid panel, stepped aft
+      p.put(0, 0.86, -0.265, 0.50, 0.09, 0.07, body);                // top rail, capped
+    } else {
+      p.put(0, 0.49, -0.21, 0.50, 0.55, 0.08, body);                 // backrest (legacy slab)
+    }
     p.seat(0, 0, yaw, "chair", 0.45, top);
-    return p.done(0.50, 0.50, 1.04, top);
+    return p.done(0.52, D ? 0.55 : 0.50, 0.95, top);
+  };
+
+  // ARMCHAIR — a ONE-SEAT sofa, and the documented gap in this kit: world/
+  // lounge.js and world/roombuild.js's lounge program both wanted one and both
+  // had to spell it as F.chair with a lie for a kind ("armchair" seat anchor on
+  // a 0.45 dining chair). Cushion 0.42 — the number city/propuse.js's SEAT_H
+  // already holds for kind "armchair", so the rig's pose and the drawn box
+  // agree without anybody editing a table.
+  F.armchair = function (x, y, z, yaw, opts) {
+    opts = opts || {};
+    const W = Math.max(0.70, opts.len != null ? +opts.len : 0.94);
+    const p = pen("armchair", x, y, z, yaw, opts);
+    const cloth = p.col("cloth");
+    const D = det();
+    p.put(0, 0, 0, W - 0.10, 0.10, 0.82, P.chair);                            // plinth
+    p.put(0, 0.10, 0, W, 0.24, 0.88, cloth, { solid: true, colH: 0.74 });     // body
+    const top = p.put(0, 0.34, 0.04, W - 0.30, 0.08, 0.72, cloth);            // cushion → 0.42
+    p.put(0, 0.42, -0.34, W - 0.26, 0.40, 0.14, cloth);                       // back cushion → 0.82
+    p.put(0, 0.34, -0.42, W, 0.48, 0.06, cloth);                              // back frame → 0.82
+    for (let a = -1; a <= 1; a += 2) {
+      p.put(a * (W / 2 - 0.08), 0.34, 0.02, 0.16, 0.22, 0.84, cloth);         // arm
+      if (D) p.put(a * (W / 2 - 0.08), 0.56, 0.02, 0.18, 0.05, 0.80, cloth);  // soft arm pad → 0.61
+    }
+    p.seat(0, 0.04, yaw, "armchair", 0.42, top);
+    return p.done(W, 0.90, 0.82, top);
   };
 
   // STOOL — pedestal, foot ring, seat. Cushion 0.68 (counter height).
@@ -354,10 +428,30 @@
     const back = opts.back !== false;
     const p = pen("bench", x, y, z, yaw, opts);
     const wood = p.col("wood");
-    for (let a = -1; a <= 1; a += 2)
+    const DT = det();
+    for (let a = -1; a <= 1; a += 2) {
       p.put(a * (L / 2 - 0.22), 0, 0, 0.10, 0.35, 0.42, P.chair);    // end legs
-    const top = p.put(0, 0.35, 0, L, 0.10, 0.48, wood, { solid: true, colH: 0.10 });  // plank → 0.45
-    if (back) p.put(0, 0.55, -0.20, L, 0.42, 0.08, wood);            // backrest
+      if (DT) p.put(a * (L / 2 - 0.22), 0.16, 0, 0.14, 0.06, 0.50, P.chair);   // cast-iron foot
+    }
+    // A bench is SLATS. Two boards with a 4cm gap between them at the identical
+    // height read as a park bench; one 0.48-deep plank reads as a shelf. Both
+    // sit at 0.35→0.45, so the declared cushion is still the drawn top.
+    // The COLLIDER stays on ONE box either way (a seat frame under the slats,
+    // height-gated to the same 0.45 the plank used to reach) so slatting the
+    // seat cannot double the bench's collider count.
+    if (DT) p.put(0, 0.29, 0, L - 0.06, 0.06, 0.48, P.chair, { solid: true, colH: 0.16 });
+    const top = DT
+      ? p.put(0, 0.35, 0.11, L, 0.10, 0.22, wood)                                      // front slat → 0.45
+      : p.put(0, 0.35, 0, L, 0.10, 0.48, wood, { solid: true, colH: 0.10 });           // plank → 0.45
+    if (DT) p.put(0, 0.35, -0.13, L, 0.10, 0.22, wood);                                // rear slat → 0.45
+    if (back && DT) {
+      p.put(0, 0.50, -0.19, L, 0.16, 0.07, wood);                    // lower back rail
+      p.put(0, 0.72, -0.23, L, 0.16, 0.07, wood);                    // upper back rail, stepped aft
+      for (let a = -1; a <= 1; a += 2)
+        p.put(a * (L / 2 - 0.22), 0.45, -0.21, 0.09, 0.45, 0.09, P.chair);   // back uprights
+    } else if (back) {
+      p.put(0, 0.55, -0.20, L, 0.42, 0.08, wood);                    // backrest
+    }
     const n = Math.max(1, Math.floor(L / 0.75));
     for (let i = 0; i < n; i++)
       p.seat(-L / 2 + L * (i + 0.5) / n, 0, yaw, "bench", 0.45, top);
@@ -372,12 +466,33 @@
     const L = Math.max(1.2, opts.len != null ? +opts.len : 2.4);
     const p = pen("sofa", x, y, z, yaw, opts);
     const cloth = p.col("cloth");
+    const D = det();
     p.put(0, 0, 0, L - 0.10, 0.12, 0.78, P.chair);                          // plinth
     p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, colH: 0.73 });   // body
-    const top = p.put(0, 0.34, 0.03, L - 0.16, 0.06, 0.74, cloth);          // cushion → 0.40
-    p.put(0, 0.34, -0.335, L, 0.51, 0.18, cloth);                           // back → 0.85
-    for (let a = -1; a <= 1; a += 2)
-      p.put(a * (L / 2 - 0.09), 0.34, 0.02, 0.18, 0.24, 0.80, cloth);       // arms
+    // THE SEAM IS THE WHOLE READ. A sofa is three cushions, and one 2.24-long
+    // slab is a bench with upholstery on it. Draw the cushion ONCE PER SEAT
+    // with a 3cm gap between, all at the identical 0.34→0.40 band, so the
+    // declared cushion is still the drawn top and `mismatched` stays 0. The
+    // FIRST cushion is the one handed to the audit; the others are its clones.
+    const inner = L - 0.16, GAP = 0.03;
+    const cw = D ? (inner - GAP * 2) / 3 : inner;
+    let top = 0;
+    for (let i = -1; i <= 1; i++) {
+      const t = p.put(D ? i * (cw + GAP) : 0, 0.34, 0.03, cw, 0.06, 0.74, cloth);   // cushion → 0.40
+      if (i === -1) top = t;
+      if (!D) break;
+    }
+    // The BACK is a hard frame with soft cushions in front of it, not one slab:
+    // the frame is what the arms and the top edge belong to, the cushions are
+    // what the shoulders touch, and the 4cm they stand proud is the difference
+    // between "sofa" and "padded wall".
+    p.put(0, 0.34, -0.375, L, 0.51, 0.10, cloth);                           // back frame → 0.85
+    if (D) for (let i = -1; i <= 1; i++)
+      p.put(i * (cw + GAP), 0.40, -0.285, cw, 0.36, 0.10, cloth);           // back cushions → 0.76
+    for (let a = -1; a <= 1; a += 2) {
+      p.put(a * (L / 2 - 0.09), 0.34, 0.02, 0.18, 0.24, 0.80, cloth);       // arm frame → 0.58
+      if (D) p.put(a * (L / 2 - 0.09), 0.58, 0.02, 0.20, 0.05, 0.76, cloth); // soft arm pad → 0.63
+    }
     for (let i = -1; i <= 1; i++) p.seat(i * (L / 3), 0.03, yaw, "sofa", 0.40, top);
     return p.done(L, 0.85, 0.85, top);
   };
@@ -386,20 +501,56 @@
   //  SLEEPING
   // ======================================================================
 
-  // BED — yaw points from the mattress centre toward the PILLOW. Frame,
-  // mattress (visible sheet colour), folded blanket, pillow, headboard.
-  // opts.len (default 2.1) · opts.wide (default 1.4). Mattress top 0.55.
+  // BED — yaw points from the mattress centre toward the PILLOW. Base + side
+  // rails, mattress (visible sheet colour), a DUVET with a turned-down fold at
+  // the head end, one or two pillows depending on the width, and a shaped
+  // headboard (posts + panel + cap). opts.len (2.1) · opts.wide (1.4).
+  // Mattress top 0.55 — the contract with the lying-body solve, unchanged.
+  //
+  // WHY THE FOLD: a made bed reads as made because of ONE line — the turn-down
+  // where the duvet is folded back over itself near the pillows. Without it a
+  // blanket box is indistinguishable from a second mattress. It costs one box.
+  // PILLOW COUNT IS DERIVED, not a knob: a mattress ≥1.15 wide is a double and
+  // gets two, anything narrower is a single and gets one, so a bunk, a cell cot
+  // and a master bed all come out right from the size the caller already passed.
   F.bed = function (x, y, z, yaw, opts) {
     opts = opts || {};
     const L = Math.max(1.6, opts.len != null ? +opts.len : 2.1);
     const W = Math.max(0.8, opts.wide != null ? +opts.wide : 1.4);
     const p = pen("bed", x, y, z, yaw, opts);
-    const linen = p.col("linen");
-    p.put(0, 0, 0, W, 0.32, L, p.col("frame"), { solid: true });            // frame
-    const top = p.put(0, 0.32, 0, W - 0.08, 0.23, L - 0.10, linen);         // mattress → 0.55
-    p.put(0, 0.55, -L * 0.16, W - 0.04, 0.05, L * 0.55, P.blanket);         // folded blanket
-    p.put(0, 0.55, L / 2 - 0.34, W - 0.34, 0.14, 0.38, P.pillow);           // pillow
-    p.put(0, 0.12, L / 2 + 0.06, W + 0.10, 0.83, 0.12, P.head);             // headboard
+    const linen = p.col("linen"), frame = p.col("frame");
+    const D = det();
+    p.put(0, 0, 0, W, D ? 0.26 : 0.32, L, frame, { solid: true, colH: 0.32 });    // base
+    if (D) {
+      for (let a = -1; a <= 1; a += 2)
+        p.put(a * (W / 2 - 0.03), 0.26, 0, 0.06, 0.11, L, frame);                 // side rails
+      p.put(0, 0.26, -(L / 2 - 0.04), W, 0.17, 0.08, frame);                      // foot rail
+    }
+    const top = p.put(0, 0.32, 0, W - (D ? 0.14 : 0.08), 0.23, L - (D ? 0.16 : 0.10), linen);   // mattress → 0.55
+    if (D) {
+      // duvet from the foot up to just short of the pillows, then the fold.
+      p.put(0, 0.55, -L * 0.13, W - 0.16, 0.06, L * 0.60, P.blanket);             // duvet → 0.61
+      p.put(0, 0.55, L * 0.17, W - 0.16, 0.10, 0.16, linen);                      // TURNED-DOWN fold → 0.65
+    } else {
+      p.put(0, 0.55, -L * 0.16, W - 0.04, 0.05, L * 0.55, P.blanket);             // folded blanket
+    }
+    if (D && W >= 1.15) {
+      for (let a = -1; a <= 1; a += 2)
+        p.put(a * (W * 0.22), 0.55, L / 2 - 0.34, W * 0.40, 0.14, 0.38, P.pillow); // two pillows
+    } else {
+      p.put(0, 0.55, L / 2 - 0.34, W - 0.34, 0.14, 0.38, P.pillow);               // one pillow
+    }
+    if (D) {
+      // SHAPED headboard: a recessed panel between two proud posts under a cap
+      // rail. Three boxes instead of one slab, and the whole reason a bed reads
+      // as furniture rather than a plinth when you walk in the door.
+      p.put(0, 0.12, L / 2 + 0.05, W - 0.12, 0.72, 0.09, P.head);                 // panel → 0.84
+      for (let a = -1; a <= 1; a += 2)
+        p.put(a * (W / 2 + 0.01), 0.06, L / 2 + 0.06, 0.10, 0.86, 0.13, frame);   // posts → 0.92
+      p.put(0, 0.84, L / 2 + 0.05, W + 0.14, 0.09, 0.15, P.head);                 // cap rail → 0.93
+    } else {
+      p.put(0, 0.12, L / 2 + 0.06, W + 0.10, 0.83, 0.12, P.head);                 // headboard
+    }
     p.bed(L - 0.10, y + 0.55, "bed", top);
     return p.done(W, L + 0.12, 0.95, top);
   };
@@ -427,6 +578,12 @@
     // The deck carries the collider but only up to its own top, so the height
     // gate in propuse's entry solve still lets a body stand alongside it.
     const top = p.put(0, 0.28, 0, W - 0.06, 0.06, L - 0.08, canvas, { solid: true, colH: 0.06 });  // deck → 0.34
+    // SLAT SEAMS: three cross battens laid on the deck at the same 0.34, so a
+    // sun lounger reads as a slatted frame instead of one canvas plank. Derived
+    // from the length, never a magic spacing, so a long or short lounger both
+    // come out evenly slatted.
+    if (det()) for (let i = -1; i <= 1; i++)
+      p.put(0, 0.32, i * (L * 0.24), W - 0.10, 0.02, 0.05, frame);
     p.put(0, 0.34, L / 2 - 0.26, W - 0.20, 0.10, 0.34, P.pillow);                   // head bolster
     p.bed(L - 0.08, y + 0.34, "lounger", top);
     return p.done(W, L, 0.44, top);
@@ -463,10 +620,25 @@
     const L = Math.max(1.0, opts.len != null ? +opts.len : 1.5);
     const D = Math.max(0.6, opts.deep != null ? +opts.deep : 0.75);
     const p = pen("desk", x, y, z, yaw, opts);
+    const DT = det();
     p.put(-(L / 2 - 0.26), 0.02, 0, 0.46, 0.64, D - 0.10, P.desk, { solid: true, colH: 0.72 });
+    if (DT) {
+      // THREE DRAWER FACES on the pedestal, facing the worker (-forward), each
+      // with a handle. A pedestal with no lines on it is a filing box; the
+      // horizontal splits are what say "desk" from across a room.
+      for (let i = 0; i < 3; i++) {
+        p.put(-(L / 2 - 0.26), 0.08 + i * 0.19, -(D - 0.10) / 2 - 0.012, 0.40, 0.17, 0.03, P.metalD);
+        p.put(-(L / 2 - 0.26), 0.14 + i * 0.19, -(D - 0.10) / 2 - 0.035, 0.16, 0.03, 0.03, P.shelf);
+      }
+    }
     p.put(L / 2 - 0.05, 0.02, 0, 0.08, 0.66, D - 0.14, P.chair);           // end leg
     p.put(0, 0.16, D / 2 - 0.05, L - 0.14, 0.50, 0.06, P.desk);            // modesty panel
+    // APRON SHADOW: a dark recessed rail tucked under the worktop's front lip.
+    // The worktop already oversails it by 4cm, so the rail is never lit the way
+    // the top is and the top reads as a separate, floating slab.
+    if (DT) p.put(0, 0.62, D / 2 - 0.05, L - 0.08, 0.06, 0.06, P.chair);
     const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop);                  // worktop → 0.74
+    if (DT) p.put(0, 0.74, -0.02, 0.44, 0.02, 0.15, P.bezel);              // keyboard, worker side
     p.put(0, 0.74, D / 2 - 0.22, 0.12, 0.06, 0.14, P.bezel);               // monitor stand
     p.put(0, 0.78, D / 2 - 0.22, 0.62, 0.42, 0.05, P.bezel);               // monitor
     p.put(0, 0.80, D / 2 - (0.245 + SCREEN_GAP + 0.01), 0.52, 0.32, 0.02, P.screen,
@@ -487,9 +659,18 @@
     const n = Math.max(0, opts.seats != null ? (opts.seats | 0) : 4);
     const p = pen("table", x, y, z, yaw, opts);
     const wood = p.col("wood");
+    const DT = det();
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      p.put(a * (L / 2 - 0.12), 0, b * (D / 2 - 0.10), 0.08, 0.56, 0.08, wood);
-    p.put(0, 0.56, 0, L - 0.16, 0.10, D - 0.16, wood, { solid: true, colH: 0.18 });   // apron
+      p.put(a * (L / 2 - 0.12), 0, b * (D / 2 - 0.10), DT ? 0.07 : 0.08, 0.56, DT ? 0.07 : 0.08, wood);
+    // STRETCHERS between the legs down the long sides — the brace a real table
+    // has, and the thing that stops four posts reading as four separate sticks.
+    if (DT) for (let b = -1; b <= 1; b += 2)
+      p.put(0, 0.14, b * (D / 2 - 0.10), L - 0.24, 0.05, 0.05, wood);
+    // APRON, recessed 12cm on every side under a top that oversails it. Drawn in
+    // the dark-wood bucket so the recess reads as shadow rather than as a second
+    // slab of the same colour — no new hex, it is interior_programs' P.table.
+    p.put(0, 0.56, 0, L - (DT ? 0.28 : 0.16), 0.10, D - (DT ? 0.28 : 0.16),
+      DT ? P.darkwood : wood, { solid: true, colH: 0.18 });                           // apron
     const top = p.put(0, 0.66, 0, L, 0.08, D, wood);                                  // top → 0.74
     // ring: half the chairs down each long side, the remainder at the +x end
     const perSide = Math.floor(n / 2), ends = n - perSide * 2;
@@ -506,6 +687,36 @@
     for (let e = 0; e < ends; e++)
       place((e === 0 ? 1 : -1) * (L / 2 + 0.42), 0, yaw + (e === 0 ? -HALF_PI : HALF_PI));
     return p.done(L, D, 0.74, top);
+  };
+
+  // COFFEE — the LOW OCCASIONAL TABLE, and the second documented hole in this
+  // kit: world/lounge.js left its coffee table as authored boxes with a comment
+  // saying so, and world/roombuild.js's lounge program had to fake one with a
+  // DINING-height F.table (0.74) parked in front of a 0.40 sofa cushion — a
+  // table taller than the seat backs of the people using it.
+  //
+  // Top 0.40: shin height, level with the sofa cushion it serves, which is the
+  // real-world relationship (a coffee table is drawn at seat height, never at
+  // worktop height). NO seats — nothing sits at one — and no `opts.seats` knob,
+  // because the ring belongs to F.table. opts.len (1.1) · opts.deep (0.60).
+  // A lower magazine shelf gives it the two-plane silhouette that reads as a
+  // piece of furniture rather than a low platform.
+  F.coffee = function (x, y, z, yaw, opts) {
+    opts = opts || {};
+    const L = Math.max(0.6, opts.len != null ? +opts.len : 1.1);
+    const D = Math.max(0.4, opts.deep != null ? +opts.deep : 0.60);
+    const p = pen("coffee", x, y, z, yaw, opts);
+    const wood = p.col("wood");
+    const DT = det();
+    for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
+      p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), 0.06, 0.35, 0.06, wood);
+    if (DT) p.put(0, 0.13, 0, L - 0.30, 0.04, D - 0.26, P.darkwood);        // magazine shelf
+    // The top oversails the legs by 9cm and carries a SHIN-HIGH collider only:
+    // a coffee table between a sofa and a screen is an obstacle you step round,
+    // never a wall, and never something the body can stand on.
+    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, colH: 0.05 });   // top → 0.40
+    if (DT) p.put(0, 0.31, 0, L - 0.10, 0.04, D - 0.10, P.darkwood);        // apron shadow under the lip
+    return p.done(L, D, 0.40, top);
   };
 
   // COUNTER — a SERVED-FROM counter: worktop 0.92, kick recess, customer-side
