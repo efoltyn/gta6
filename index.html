@@ -1103,6 +1103,11 @@
      greetings, grief, homecoming. Loads after familypanel (reads the whole
      family cluster lazily; only hard dep is entities/poses.js far above). -->
 <script src="src/city/kinship.js?v=allmain1"></script>
+<!-- tells.js — body-language tells: maps already-tracked ped scalars (fear,
+     grudge, bond, wealth, aggr) onto CBZ.charPoses rows so internal state is
+     legible as posture. Loads after kinship (reuses kinWave; yields to kin
+     beats); only hard dep is entities/poses.js far above. -->
+<script src="src/city/tells.js?v=tells1"></script>
 
 <!-- B8: single-player persistence bridge for player building's piece
      geometry (localStorage ledger, arena-gated deferred apply) — see that

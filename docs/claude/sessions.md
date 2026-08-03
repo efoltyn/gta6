@@ -924,3 +924,62 @@ bug", improve jewellery/watches and how everything looks ON the player
   disguise blows (uniforms LAST); teleport once, grounded, holstered.
 - **MATHGATE: ok** on the merged tree (318/180/202, det ok, errors
   baseline-only). Shipped 84bdabf..7ca371d.
+
+## THE 2026-08-03 NPC BODY-LANGUAGE WAVE — tells, legible gestures, the npc-gestures storyboard
+
+Owner directive: NPCs "have tons of logic built like dogs in real life — they
+just need a way to express their statistics and reactions and needs and wants
+physically," mapped and improved with the before/after tool; gang city only,
+all three games reconned for later unification; "don't freak out and do too
+much — add and make it smarter and realer, not fake."
+
+- **THE "ONE HAND UP" MYSTERY, SOLVED**: it was FOUR different one-arm gestures
+  that all read identically from a distance — the 911 phone dial
+  (reportState="phone", nothing in the hand, read as a salute), kinWave between
+  acquaintances (thrown over a still-turning shoulder), posePoint (the grudge
+  witness's "that's the one"), and the cop shoulder-mic. Meaning existed;
+  legibility didn't.
+- **CITY_GESTURE_LEGIBILITY** (peds.js/kinship.js): a real phone prop
+  (shared geo/mat singletons tagged _shared, parented to ch.sockets.rightHand,
+  frame-stamp lifecycle so every exit path hides it without knowing it exists)
+  for the dial and the film gawk; the snitch half-turns AWAY (+-0.8-1.14 rad
+  off roleHash, stable per body) with a breath-clocked glance back; posePoint
+  holds facing on the player with a straight arm; the greet wave turns at 0.6
+  during the wave window so the face lands before the hand is up
+  (waveAimDeg 32 -> 3 in the report).
+- **CITY_NPC_TELLS** (city/tells.js, new): internal state made legible as
+  posture through the ONE seam — three new rows in CBZ.charPoses (tellWary
+  graded by ch._tellK, tellPockets, tellSwagger; arms-only, because body/neck
+  channels are overwritten post-pose by animChar) plus a driver at
+  onUpdate(36.6) mapping fear -> wary, grudge+proximity+LOS -> foldarms stare,
+  bond -> kinWave at the player, wealth/cash -> pockets, aggr -> swagger.
+  Stable personality via the roleHash idiom (no Math.random in the file);
+  free()/receipt discipline yields to kin beats, seats, attached bodies,
+  combat, witnesses; strayPoses pinned at 0 in the gate (a leaked receipt is
+  a person no other system can pose again). Counts stay evidence until
+  measured across seeds.
+- **NEW EYES**: visual-presets/npc-gestures.mjs (+ visual:npc-gestures,
+  --keep-going) — 9 subjects staged off the REAL state fields (witnessSev/
+  reportState, posePoint, surrender, fear band, grudge, cash=0, aggr), each
+  emitting poseApplied/driverApplied so the metrics page shows before 0 ->
+  after 1 on phone-prop, wary, stare, pockets, swagger. Every new name is
+  guarded so the deployed before side photographs an honest statue.
+- **UNIFICATION MAP (recon only, no jail/survival edits)**: all three games
+  share makeCharacter/animChar and the poses.js registry; jail guards drive
+  speed-only with zero poses (foldarms sits unused despite its own comment
+  naming guards), survival bots express urgency as speed only, jail duplicates
+  a crude rotation.z topple in npc.js+guards.js instead of the shared
+  deathPose, and grapple.js's CBZ.body explicitly excludes jail. Named seams
+  for the later wave: poses.js rows + setCharPose calls from guards.js/
+  survivorbot.js, deathPose adoption in jail, lockdown.js's hold() not
+  matching cellblock.js's bunk sit.
+- **MATHGATE: ok** on the merged tree (318/180/202, 400 ticks, det ok, errors
+  baseline-only) BEFORE the tells pin; driver liveness probed separately —
+  90 sim-seconds of unstaged city: firedTotal 7 (all pockets, 22 broke peds
+  citywide), strayPoses 0. Swagger fired 0 in that window and that is a
+  GEOGRAPHY fact, not a code fault: aggr is rolled off district means, the
+  scan is camera-local (46 u), and a hot ped near spawn is usually armed or
+  walking — both correctly refused by free(). The storyboard's driverApplied
+  was 0 on all four tells beats for the same class of reason (staged peds
+  hash-gated or cadence-missed; the preset's sanctioned fallback took the
+  picture). Watch fired.swagger in real play before believing it dead.

@@ -1036,3 +1036,28 @@ Before building anything adjacent, wire into the existing system:
   cityMayEnter/cityAccessAt + the divider() doorway gaps are the seams) and
   occupy.js presets for banks/casinos/courthouses so the loot ladder is
   reachable outside gang/power HQs.
+- **A STAT AN NPC CANNOT SHOW IS A SECRET, AND SECRETS READ AS STATUES** —
+  `CITY_NPC_TELLS` / `CBZ.cityTellsAudit()` in `city/tells.js`, plus
+  `CITY_GESTURE_LEGIBILITY` in `city/peds.js`. OWNER (2026-08-03): NPCs
+  "have tons of logic built like dogs in real life — they just need a way to
+  express their statistics and reactions and needs and wants physically."
+  The rule that shipped: **a tell is a ROW in `CBZ.charPoses` plus one
+  mapping line in tells.js — never a parallel animation system.** Three rows
+  exist (`tellWary` graded via `ch._tellK`, `tellPockets`, `tellSwagger`;
+  ARMS-ONLY, because `ch.body.rotation.x` and `ch.neck` are overwritten from
+  `ch.lean` AFTER the pose branch — a torso write in a pose row is a silent
+  no-op, documented in tells.js's header) and two REUSES (`foldarms` for the
+  grudge stare, `kinWave` for the bond greeting) — reuse before authoring.
+  The driver claims a body only through `free()` (yields to kin beats, seats,
+  attached bodies, combat, surrender, witness gestures) and clears only what
+  it set (`_tellPose` receipt); **`strayPoses` is pinned at 0 in the gate** —
+  a leaked receipt is a person kinship/medics/citystaff can never pose again.
+  The companion law: **a gesture must carry its meaning in the frame** — the
+  911 dial holds a real phone prop (shared `_shared`-tagged singletons on
+  `ch.sockets.rightHand`, frame-stamp lifecycle so every exit path hides it
+  without knowing it exists), the snitch turns AWAY while dialing, the greet
+  wave turns the face onto its target before the hand is up. Both flags are
+  one-line reverts. Jail and survival adoption seams are named in
+  sessions.md's 2026-08-03 NPC body-language entry (guards' unused
+  `foldarms`, survivorbot's speed-only urgency, jail's duplicated topple vs
+  `CBZ.deathPose`).

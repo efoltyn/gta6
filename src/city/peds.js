@@ -3643,6 +3643,113 @@
     if (ped.phoneSprite) { if (ped.phoneSprite.parent) ped.phoneSprite.parent.remove(ped.phoneSprite); ped.phoneSprite = null; }
   }
 
+  // ============================================================
+  //  GESTURE LEGIBILITY — one raised arm is FOUR different sentences on this
+  //  street: dialing 911, filming you, pointing you out to an officer, saying
+  //  hello to a friend. From ten metres they were the same silhouette, because
+  //  none of them CARRIED its meaning — nothing in the hand, nothing in the
+  //  body, nothing aimed at anybody. A gesture whose meaning you have to be
+  //  told is a gesture that isn't there.
+  //
+  //  This flag owns three answers, and they are all physical rather than
+  //  cosmetic: a phone that EXISTS in the dialing hand (so the arm is holding
+  //  something, not saluting), a snitch who gives you his SHOULDER while he
+  //  talks to the operator and checks back over it (which is what a person
+  //  reporting you actually does with their body), and a point-out that keeps
+  //  its aim on you for as long as the arm is out (a point that drifts off
+  //  mid-sentence is a man with a sore shoulder).
+  //
+  //  OFF = the exact arm rotations that shipped, no prop ever built, no facing
+  //  ever written. One-line revert.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_GESTURE_LEGIBILITY == null) CBZ.CONFIG.CITY_GESTURE_LEGIBILITY = true;
+  function legible() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_GESTURE_LEGIBILITY !== false; }
+
+  // ---- THE PHONE ITSELF ------------------------------------------------------
+  //  ONE geometry pair and ONE material pair for the entire city — a phone is a
+  //  phone — tagged `_shared` so the rig-disposal traversals (clearCityPeds,
+  //  removeVendor) skip them exactly the way they already skip every other
+  //  shared cache entry. CBZ.mat() hands back a FRESH material per call (cmat()
+  //  is the cached one), so these two are ours to keep and are never mutated
+  //  after they are built: no global cache is touched, and no other prop in the
+  //  city can be tinted by an emissive we set here.
+  //
+  //  The per-ped part is a Group parented under character.js's right-hand
+  //  SOCKET (`ch.sockets.rightHand`, a child of the elbow node), so it rides
+  //  whatever the arm pose does for free — no per-frame transform, no second
+  //  animation path, no chance of the prop and the hand disagreeing. Built once
+  //  on demand and then shown/hidden; a witness who dials twice builds once.
+  let _phGeo = null, _phScrGeo = null, _phMat = null, _phScrMat = null;
+  function phoneAssets() {
+    if (_phGeo) return;
+    // SIZED TO THE CHARACTER, NOT TO A TAPE MEASURE. A real 142 mm handset is
+    // correct and unreadable: these bodies are stylised up — the head alone is
+    // most of half a metre — so a life-size phone disappears inside a fist that
+    // is itself the size of a real forearm. The storyboard (visual:npc-gestures)
+    // caught it as a dark splinter you had to be told was a phone. Scaled to
+    // read at conversational distance instead, which is the only distance this
+    // gesture is ever seen from.
+    _phGeo = new THREE.BoxGeometry(0.150, 0.285, 0.034); _phGeo._shared = true;
+    _phScrGeo = new THREE.BoxGeometry(0.115, 0.225, 0.007); _phScrGeo._shared = true;
+    _phMat = CBZ.mat(0x15181e); _phMat._shared = true;
+    // a screen is a LIT surface, which is the whole reason a phone reads at
+    // dusk from across a street. Faint on purpose — this is a handset, not a
+    // torch, and the city's night look is not ours to brighten.
+    _phScrMat = CBZ.mat(0xbfe2ff, { emissive: 0x3f78a8, ei: 0.85 }); _phScrMat._shared = true;
+  }
+  function phoneOf(ped) {
+    const ch = ped.char;
+    const sock = ch && ch.sockets && (ch.sockets.rightHand || ch.sockets.weapon);
+    if (!sock) return null;                       // gore took the arm — no hand, no phone
+    const cur = ped._phoneProp;
+    if (cur && cur.parent === sock) return cur;   // same rig, same socket: reuse
+    phoneAssets();
+    const grp = new THREE.Group();
+    const shell = new THREE.Mesh(_phGeo, _phMat);
+    const screen = new THREE.Mesh(_phScrGeo, _phScrMat);
+    screen.position.z = 0.021;                    // proud of the shell face — never coplanar
+    grp.add(shell, screen);
+    // gripped in the fist and STRADDLING it, long axis continuing the forearm —
+    // the way a handset actually sits in a hand, earpiece proud of the knuckles
+    // and mouthpiece below them. At the ear that lands the phone against the
+    // head; in the two-handed film pose the same transform reads as a phone
+    // held up at you, which is why there is only one transform.
+    // …and carried further PROUD of the knuckles for the same reason: seated
+    // deep in the fist, the hand block ate everything but one edge of it.
+    grp.position.set(0.024, 0.000, 0.050);
+    // …and turned a quarter round in the grip. Growing it did nothing at first
+    // and the storyboard said why: with the slab's face along the socket's z,
+    // the hand-to-EAR rotation (ra -0.55/-0.55/-0.35, elbow -2.35) carries that
+    // face straight down the view axis, so a phone three times bigger was still
+    // photographed as a 3 cm dark splinter above a fist. A quarter turn puts
+    // the broad face across the head — the plate the whole gesture depends on —
+    // and the earpiece/mouthpiece axis is unchanged, so the grip still reads.
+    grp.rotation.y = Math.PI / 2;
+    grp.visible = false;
+    sock.add(grp);
+    ped._phoneProp = grp;
+    return grp;
+  }
+
+  // HEAD YAW IS A SHARED CHANNEL. systems/reactions.js (hyOff) and
+  // systems/facial.js (addYaw) both ADD their offset and subtract the same
+  // number back; anybody who assigns it absolutely bakes a permanent crick into
+  // whoever wrote it last. So the snitch's glance rides its own booked offset
+  // under the same contract — add ours, remember ours, back ours out.
+  // The booked offset remembers WHICH neck it was added to, so a rig that gets
+  // rebuilt under us can never be handed a refund it was never charged — the
+  // old head goes to the garbage collector wearing the crick, which is the only
+  // place a crick is free. `_glanceNk` is dropped the moment the offset is zero,
+  // so we never hold a disposed node alive.
+  function glanceAt(ped, want) {
+    const nk = ped.char && ped.char.neck;
+    if (!nk) { ped._glanceY = 0; ped._glanceNk = null; return; }
+    if (ped._glanceY && ped._glanceNk === nk) nk.rotation.y -= ped._glanceY;
+    ped._glanceY = want || 0;
+    ped._glanceNk = ped._glanceY ? nk : null;
+    if (ped._glanceY) nk.rotation.y += ped._glanceY;
+  }
+
   // nearest live cop to a point (for run-to-report)
   function nearestCop(x, z, maxd) {
     let best = null, bd = (maxd || 200) * (maxd || 200);
@@ -3712,8 +3819,12 @@
       if (CBZ.cityReport) CBZ.cityReport(sev, { x: ped.pos.x, z: ped.pos.z, type: type });
       if (ped._vendetta) {
         // a grudge witness reached the officer: they stop, turn, and POINT you
-        // out in person. (posePoint is set for reactions.js to raise the arm —
-        // a no-op until that hook lands; the turn + line carry it meanwhile.)
+        // out in person. `posePoint` is the GESTURE WINDOW, and the rig hook it
+        // was written for is live: the per-frame tell block at the bottom of
+        // this file raises the arm for as long as the timer runs (move() ticks
+        // it down). With CITY_GESTURE_LEGIBILITY the body also HOLDS this
+        // facing for the whole window instead of turning once and walking off
+        // — the turn below is where the aim starts, not where it ends.
         ped.posePoint = 1.4;
         const P = CBZ.player;
         if (P && !P.dead) ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
@@ -3730,12 +3841,14 @@
     ped.reportState = null; ped.reportTarget = null; ped.reportT = 0;
     ped.callT = 8;            // won't immediately re-report
     clearTell(ped);
+    glanceAt(ped, 0);         // give the head back (booked additive channel)
   }
 
   // abort an in-progress report (scared off, hurt, lost the cop, fled too far)
   function cancelReport(ped) {
     ped.reportState = null; ped.reportTarget = null; ped.reportT = 0; ped._vendetta = false;
     clearTell(ped);
+    glanceAt(ped, 0);
   }
   CBZ.cityCancelReport = cancelReport;   // combat.js can stop a snitch by force
 
@@ -3750,7 +3863,22 @@
       ped.state = "film"; ped.speed = 0;               // frozen, phone up (reuse film pose)
       // face roughly where the crime was (the player) for the tell to read
       const P = CBZ.player;
-      if (P) ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+      if (P) {
+        const face = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+        // SNITCH BODY LANGUAGE: nobody phones the police while staring the man
+        // down. They give you the SHOULDER — half turned away, talking low,
+        // checking back over it (the check is the per-frame glance in the tell
+        // block; this is the stance it glances FROM). Which shoulder is the
+        // body's own, not a coin flip: roleHash off the spawn point, so two
+        // clients turn the same man the same way with nothing sent between
+        // them, and he turns the same way every time he calls.
+        if (legible()) {
+          if (ped._snitchTurn == null) {
+            ped._snitchTurn = (roleHash(ped, 0x5117) < 0.5 ? -1 : 1) * (0.80 + roleHash(ped, 0x5118) * 0.34);
+          }
+          ped.group.rotation.y = face + ped._snitchTurn;
+        } else ped.group.rotation.y = face;
+      }
       if (ped.reportT <= 0) { landReport(ped); return false; }
       return true;
     }
@@ -4346,6 +4474,21 @@
         ped.state = "flee"; fleeFrom(ped, px, pz); return;       // scared off the call
       }
       if (tickReport(ped, dt)) return;
+    }
+
+    // ---- POINT-OUT HOLD: "Right there. That's the one." A point is a LINE,
+    //      and the line only exists while the body agrees with the arm. The
+    //      report has just landed, so the routine brain below would hand this
+    //      man a new destination on this very tick and walk him off mid-accusation
+    //      with his arm still out. Pin the stance for the gesture window: stand
+    //      still, target underfoot (so a later branch flipping the state can't
+    //      start the legs either), and let the per-frame tell block hold the aim.
+    //      Deliberately NOT a `return` — a bullet, a rage or a gunpoint below
+    //      still outranks a gesture on the very next tick.
+    if (legible() && ped.posePoint > 0 && !ped.rage && !ped.reportState && !ped._windup) {
+      ped.state = "idle"; ped.speed = 0; ped.path = null;
+      ped.target.set(ped.pos.x, 0, ped.pos.z);
+      ped.pause = Math.max(ped.pause, ped.posePoint);
     }
 
     // ---- if currently raging at someone, keep engaging until they're gone ----
@@ -5566,6 +5709,17 @@
     rebuildPedGrid();
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
+      // A PROP MUST NOT OUTLIVE ITS GESTURE. The tell block at the bottom of
+      // this loop stamps `_phoneFrame` on every frame it wants the phone drawn;
+      // anything that stops the gesture — the call landing, a bullet, a KO, an
+      // arm torn off, gunpoint, a cull, walking out of the visible band, or
+      // simply being skipped by one of the `continue`s below — stops the stamp,
+      // and the handset goes away on the next frame WITHOUT every one of those
+      // paths having to know a phone exists. Costs one truthy compare per ped
+      // for the whole crowd: a body that has never dialed carries no field.
+      // The mesh is never destroyed here — it is the same group we show again
+      // next time, and the rig-disposal traversal collects it with the body.
+      if (p._phoneProp && p._phoneProp.visible && p._phoneFrame !== frame - 1) p._phoneProp.visible = false;
       if (p._parked) continue;     // pooled crowd-promotion ped waiting off-map; not in play
       // A live-spawned rig stays suppressed until its moving position is safely
       // outside the padded camera view. It may simulate while hidden, so when
@@ -5728,18 +5882,61 @@
         if (!ch.surrender && !ch.handsUp && !ch.aimingPose && !p.armed) {
           // (armed peds skip these — their weapon-ready pose owns the arms,
           //  and an armed witness draws instead of dialing anyway)
+          const LEG = legible();
           if (p.reportState === "phone") {
             ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
             if (J.ra) J.ra.rotation.x = -2.35;
             if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+            if (LEG) {
+              // PUT A PHONE IN THE HAND. This arm has been going up empty since
+              // the day it shipped, which is why it read as a salute: an ear
+              // and an empty fist is not a phone call to anybody watching.
+              const ph = phoneOf(p);
+              if (ph) { ph.visible = true; p._phoneFrame = frame; }
+              // …and the glance back over the turned shoulder. ch.breath is
+              // animChar's own per-frame clock (already advanced this frame),
+              // and the phase is the body's own hash, so a street of callers
+              // never checks over its shoulder in unison. Mostly turned away,
+              // with a real look at you every few seconds — the thing you can
+              // FEEL when someone is describing you down a phone.
+              const t = (ch.breath || 0) + roleHash(p, 0x5119) * 6.28;
+              const s = Math.sin(t * 0.85);
+              const back = Math.max(0, s - 0.55) * 2.2;       // 0 most of the time, ~1 at the peak
+              glanceAt(p, -(p._snitchTurn || 0) * (0.18 + Math.min(1, back) * 0.42));
+            }
           } else if (p.posePoint > 0) {
             ch.parts.ra.rotation.set(-1.52, 0, 0);           // arm out: "that's the one"
             if (J.ra) J.ra.rotation.x = -0.04;
+            if (LEG) {
+              // AIM THE ACCUSATION. landReport turned him toward you ONCE; from
+              // that frame on the body drifted wherever the brain sent it while
+              // the arm stayed out, so the point landed on empty pavement as
+              // often as on you. Hold the line for the window instead, and
+              // straighten the elbow the rest of the way — a bent arm out to
+              // the side is a slap, a straight one down the sight line is a
+              // point. The shoulder rolls a touch inboard so the arm crosses
+              // onto the centre line rather than pointing past your ear.
+              const P2 = CBZ.player;
+              if (P2 && !P2.dead && !p._npcAttached && !p.inCar && !ch.sitting) {
+                p.group.rotation.y = lerpAngle(p.group.rotation.y,
+                  Math.atan2(P2.pos.x - p.pos.x, P2.pos.z - p.pos.z), 0.35);
+              }
+              ch.parts.ra.rotation.set(-1.55, 0, 0.08);
+              if (J.ra) J.ra.rotation.x = -0.02;             // arm straight to the fingertip
+              if (ch.neck) ch.neck.rotation.z = 0;           // head up, talking to the officer
+            }
           } else if (p.state === "film" && ch.parts.la) {
             ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
             if (J.ra) J.ra.rotation.x = -0.55;
             ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
             if (J.la) J.la.rotation.x = -0.75;
+            if (LEG) {
+              // the gawker's hands were cupped around nothing too. Same prop,
+              // same socket, same lifecycle — a phone held up at you IS the
+              // gesture, and there is no second one to maintain.
+              const ph = phoneOf(p);
+              if (ph) { ph.visible = true; p._phoneFrame = frame; }
+            }
           }
         }
       }

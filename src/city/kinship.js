@@ -632,12 +632,20 @@
 
   // face `p` at (x,z). We run after move(), so this write is the one that
   // renders — no lerp fight, no next-frame snap-back.
-  function faceAt(p, x, z) {
+  // A BODY ON A MOVING PARENT IS NOT OURS TO TURN: a seated passenger's yaw
+  // belongs to the seat, and writing group.rotation.y on one twists him out of
+  // his chair. claimed() already refuses every such actor at the door and
+  // tickBeat re-checks it every frame, so this can only ever be a belt on top
+  // of braces — but this is the ONE place this file turns a body, so the guard
+  // lives here where it cannot be forgotten.
+  function faceAt(p, x, z, rate) {
     if (!p.group) return;
+    if (p._npcAttached || p.inCar || p._propSeat || (p.char && p.char.sitting)) return;
     const dx = x - p.pos.x, dz = z - p.pos.z;
     if (dx * dx + dz * dz < 0.0004) return;
     const yaw = Math.atan2(dx, dz);
-    p.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(p.group.rotation.y, yaw, 0.35) : yaw;
+    const k = rate || 0.35;
+    p.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(p.group.rotation.y, yaw, k) : yaw;
   }
 
   function startBeat(a, b, kind, secs) {
@@ -715,11 +723,23 @@
     // entire difference between the two, and it is what makes being famous (or
     // notorious) something you can see happen to two strangers on a pavement.
     const look = (bt.kind === "notice" && CBZ.player && !CBZ.player.dead) ? CBZ.player : bt.other;
-    faceAt(p, look.pos.x, look.pos.z);
+    // A WAVE IS ADDRESSED TO SOMEBODY. The beat has always faced its partner
+    // here (this is the aim, and it is why a hello reads as two people) — but
+    // the turn ran at the same lazy 0.35 as the rest of the beat, so the arm
+    // came up while the shoulder was still swinging round and the first, most
+    // legible half of the wave was thrown over a shoulder at nobody. Two
+    // strangers passing at walking pace close ~3.4 m of it in well under a
+    // second, which is the whole window. So the greeting frames turn HARDER:
+    // by the time the hand is up, the face is on the person it is for.
+    // (CITY_GESTURE_LEGIBILITY, declared in city/peds.js — a config.js value or
+    // an explicit false gives back the single shared 0.35 exactly.)
+    const waving = bt.role === "open" && bt.kind === "greet" && bt.t > 1.1;
+    const sharp = waving && (!CBZ.CONFIG || CBZ.CONFIG.CITY_GESTURE_LEGIBILITY !== false);
+    faceAt(p, look.pos.x, look.pos.z, sharp ? 0.6 : 0.35);
     // The arms tell the beat's shape: whoever opened it waves first, whoever
     // answers listens first, and they both end up talking. That asymmetry is
     // the whole reason it reads as two people and not two idle animations.
-    if (bt.role === "open" && bt.kind === "greet" && bt.t > 1.1) setPose(p, "kinWave");
+    if (waving) setPose(p, "kinWave");
     else if (bt.role === "reply" && bt.t > 1.0) setPose(p, "kinListen");
     else setPose(p, "kinTalk");
     if (p._kinReplyIn != null) {

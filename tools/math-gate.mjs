@@ -295,6 +295,15 @@ const PASS = `(() => {
       out.interiorLoot = il.anchors + "a/" + il.safes + " safes cells=" + il.cells;
       if (il.refusedCap > 0) out.fails.push("INTERIOR LOOT REGISTRY OVERFLOWED: refusedCap " + il.refusedCap);
     }
+    // body-language tells (city/tells.js): counts are evidence until measured
+    // across seeds (the propUseAudit lesson). strayPoses is the one hard fact:
+    // a leaked pose receipt is a person kinship/medics/citystaff can never
+    // pose again, and the driver's standDown contract says it is always 0.
+    if (CBZ.cityTellsAudit) {
+      const tl = CBZ.cityTellsAudit();
+      out.tells = "fired=" + tl.firedTotal + " live=" + tl.telling + " stray=" + tl.strayPoses;
+      if (tl.strayPoses > 0) out.fails.push("TELLS LEAKED A POSE SLOT: strayPoses " + tl.strayPoses);
+    }
     // road rules: carcluster.js's district-of-the-nearest-lot stopgap must be
     // dead. True here means roadrules.js failed to load or loaded too late.
     if (CBZ.roadRulesAudit) {
