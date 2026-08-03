@@ -74,6 +74,14 @@
    kit, and `CBZ.propUseAudit().noGeom` counts what's left.
 
    NPC API (for the schedules / occupied-building / roles agents):
+     CBZ.propBedNpc(ped, r)     — the BED half of propSeatNpc. "Put this NPC
+                                  to bed at whatever is nearby." Exists because
+                                  propSeatNpc's `prefer` substring only ever
+                                  scans seats[], so the night sweep's
+                                  propSeatNpc(a, 6.5, "bed") could never reach
+                                  a real bed record — it matched a seat whose
+                                  kind happened to contain "bed" ("bedside") or
+                                  nothing at all.
      CBZ.propSeatNpc(ped, r, prefer) — THE ONE-LINER. "Seat this NPC at
                                   whatever is nearby, on its own floor."
                                   `prefer` is a kind substring tried first —
@@ -139,6 +147,26 @@
   // wake-up time as a dayPhase fraction: sun y = sin(t·2π)·95, noon = 0.25,
   // so 0.08 ≈ climbing morning sun (~7:50am), clearly lit.
   if (CBZ.CONFIG.PROPS_MORNING_PHASE == null) CBZ.CONFIG.PROPS_MORNING_PHASE = 0.08;
+  /* INTERIOR_SLEEP_STAKES — this file used to say it in one line, two lines
+     below the verb: "No heal, no heat change". Sleeping in a bed that was not
+     yours skipped the clock and did NOTHING else, which is one of the named
+     reasons interiors read as scenery: a verb with no payoff and no cost is a
+     button, not a decision.
+
+     ON, a bed you don't own becomes a real trade. PAYOFF: rough sleep patches
+     you back toward a CAP (a fraction of what the owned-safehouse reset gives
+     — realestate.js's sleepHeal restores hp/stamina/hunger to full, dresses
+     wounds AND bleeds heat; this gives you part of the first two and none of
+     the rest, so a safehouse is still worth buying). COST: it is somebody's
+     bedroom, and lying down in it is a break-in you slept through — charged
+     through CBZ.cityCrime's ordinary WITNESS path, so an empty house at 3am
+     costs nothing and a household that sees you is a trespass call.
+
+     Your own bed is untouched by all of it: an owned lot keeps today's
+     behaviour exactly, because the safehouse menu's full reset is the reward
+     this is deliberately worse than. Flip false (or ?cfg_INTERIOR_SLEEP_STAKES=0)
+     for the old no-heal / no-heat sleep. */
+  if (CBZ.CONFIG.INTERIOR_SLEEP_STAKES == null) CBZ.CONFIG.INTERIOR_SLEEP_STAKES = true;
 
   function on() { return CBZ.CONFIG.PROPS_PURPOSE !== false; }
   function arcOn() { return CBZ.CONFIG.PROPS_BODY_ARC !== false; }
@@ -211,14 +239,41 @@
   // CBZ.propUseAudit().noGeom counts what's left, which is the ratchet.
   //
   // A bare kind STRING is an explicit opt-in and does return the table value.
+  //
+  // ---- WHAT KIND OF SEAT IS THIS (added with CHAR_SEAT_POSTURE) ----------
+  // The record has always known whether it was a sofa or a stool — every
+  // registration site passes `kind`, and SEAT_H right above keys its cushion
+  // heights on it. The rig never saw it, so a throne, a bar stool, a park
+  // bench and an office chair all produced ONE identical upright pose. The
+  // two ADDITIVE fields below close that gap:
+  //   kind  — passed straight through; entities/character.js maps it to a
+  //           posture family via CBZ.charSeatPosture (one table, over there,
+  //           because that is where the pose lives). An unknown kind and a
+  //           missing one both mean "sit up straight", i.e. today's pose.
+  //   vary  — a stable 0..1 hashed off THIS ANCHOR's own coordinates, so five
+  //           people on one long sofa lean five slightly different ways and
+  //           the same chair always poses the same body the same way. Position
+  //           hash, not a stream: order-independent and identical per seed on
+  //           every client (the determinism law).
+  // Backward-compatible by construction: every existing consumer reads only
+  // cushion/floorBelow, and a consumer that never learns about kind gets
+  // exactly the object it got before plus two fields it ignores.
+  const SEAT_VARY_SALT = 0x5EA7;
+  function varyOf(rec) {
+    if (!CBZ.hash01) return 0.5;
+    return CBZ.hash01(rec.x || 0, rec.z || 0, SEAT_VARY_SALT);
+  }
   CBZ.propSeatRef = function (src) {
     if (!geomOn()) return null;
     if (src && typeof src === "object") {
       if (src.cushionH == null) return null;        // undeclared → legacy pose
-      return { cushion: src.cushionH, floorBelow: src.floorBelow || 0 };
+      return {
+        cushion: src.cushionH, floorBelow: src.floorBelow || 0,
+        kind: src.kind || null, vary: varyOf(src),
+      };
     }
     if (src == null) return null;
-    return { cushion: cushionOf(src), floorBelow: 0 };
+    return { cushion: cushionOf(src), floorBelow: 0, kind: String(src), vary: 0.5 };
   };
 
   // ---- registries -----------------------------------------------------------
@@ -247,6 +302,8 @@
     for (let i = arcs.length - 1; i >= 0; i--) endArc(arcs[i]);
     arcs.length = 0;
     claimed.length = 0;
+    if (CBZ.playerChar) CBZ.playerChar.lying = null;   // never carry a sleep pose into a new world
+    if (CBZ.player) { CBZ.player._propSleepS = null; }
     // ACTOR-SIDE RESIDUE (the owner's "people laying down under planes"):
     // the registries above die with the old world, but the CLAIM lived on
     // the actor — `_propLie`/`_propBed`/`_propSeat` plus the `_deskAnchor`
@@ -262,6 +319,9 @@
       const p = residuePeds[i];
       if (!p || (!p._propLie && !p._propBed && !p._propSeat)) continue;
       p._propLie = false; p._propBed = null; p._propSeat = null; p._deskAnchor = null;
+      // the SLEEP POSE is actor-side residue too: a rig left holding ch.lying
+      // through a rebuild would walk the new world curled up.
+      if (p.char) p.char.lying = null;
       if (!p.dead && !p._npcAttached && p.state === "sit") p.state = "walk";
     }
     // the furniture kit's own ledger rebuilds in lockstep. A direct feature-
@@ -664,6 +724,60 @@
   const LIE_SINK = 0.04;       // a real mattress takes this much of the shoulder
   const lieTmp = { x: 0, y: 0, z: 0 };
   const lieM = { len: 1.80, rise: 0.30 };     // scratch: this runs in the per-frame pin
+
+  /* ---- WHO SLEEPS HOW ---------------------------------------------------
+     THE SECOND HALF of the sleep pose: entities/character.js owns the joints,
+     this owns the CHOICE — back or side, near arm folded in or laid down —
+     because the choice belongs to the person, not to the animation frame.
+
+     Stable per BODY, so the same person always sleeps the same way and a
+     shared dorm still reads as five different people. The key is built from
+     numbers that exist the moment the rig is BUILT and never change after
+     (the tone it was painted with, the exact segment lengths its profile
+     produced), so it survives a despawn/respawn and never depends on where
+     the body happens to be standing. Hashed with CBZ.hash01 — the
+     order-independent position hash, never Math.random and never a shared
+     stream draw, so two clients on one seed put the same person to bed in
+     the same pose (the determinism law). */
+  const SLEEP_SALT_A = 0x51EE9, SLEEP_SALT_B = 0x1EEB;
+  function sleepStyle(actor) {
+    if (actor._propSleepS) return actor._propSleepS;
+    const ch = charOf(actor), pf = ch && ch.profile;
+    const k = (((ch && ch.skinTone) | 0) >>> 0)
+      + Math.round(((ch && ch.hipY) || 0.95) * 1000) * 7
+      + Math.round(((pf && pf.torsoW) || 0.90) * 1000) * 31
+      + Math.round(((pf && pf.armUp) || 0.46) * 1000) * 131;
+    const h1 = CBZ.hash01 ? CBZ.hash01(k * 0.1, (k >>> 7) * 0.1, SLEEP_SALT_A) : 0.5;
+    const h2 = CBZ.hash01 ? CBZ.hash01((k >>> 3) * 0.1, k * 0.1, SLEEP_SALT_B) : 0.5;
+    // ~38% back sleepers, the rest on their side — which is roughly what the
+    // sleep-posture surveys report, and it matters here because the two need
+    // DIFFERENT mattress clearances (see lieMetrics below).
+    const s = { back: h1 < 0.38, fold: h2 < 0.55, vary: h2, phase: h1 * 6.283 };
+    actor._propSleepS = s;
+    return s;
+  }
+  // THE ONE seam between "this body is in a bed" and the rig's sleep pose.
+  // Reuses the live record when there is one so the breathing phase keeps
+  // running across the frame the arc hands over to the hold.
+  function setLying(actor) {
+    const ch = charOf(actor);
+    if (!ch) return;
+    const s = sleepStyle(actor);
+    if (ch.lying) { ch.lying.back = s.back; ch.lying.fold = s.fold; ch.lying.vary = s.vary; }
+    else ch.lying = { back: s.back, phase: s.phase, fold: s.fold, vary: s.vary };
+    ch.sitting = false;
+  }
+  // Clearing is all the blend-out this needs: character.js's sleep branch
+  // publishes ch._stanceNk (the neck recovery every full-rig pose here arms)
+  // and refunds any seat solve it inherited, and every joint it writes is a
+  // channel the locomotion path damps back on its own the next frame — so a
+  // body that stands up walks off straight-legged, not bent.
+  function clearLying(actor) {
+    const ch = charOf(actor);
+    if (ch && ch.lying) ch.lying = null;
+  }
+  CBZ.propLieStyle = sleepStyle;     // read-only seam for presets/diagnostics
+
   function lieMetrics(actor) {
     const ch = charOf(actor);
     const m = ch && ch.metric;
@@ -671,7 +785,23 @@
     const hs = (ch && ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
     // feet -> crown, in metres (character.js publishes the metric per rig)
     lieM.len = (m && m.height > 0.6) ? m.height : 1.80;
-    lieM.rise = (pf && pf.torsoW > 0) ? Math.max(0.14, pf.torsoW * 0.5 * hs - LIE_SINK) : 0.30;
+    // VERTICAL — the group's 90° roll makes the body's LATERAL axis the up
+    // axis, so a SIDE sleeper presents half a shoulder to the mattress. A BACK
+    // sleeper does not: entities/character.js rolls his chest toward the
+    // ceiling INSIDE the rig (body.rotation.y about the body's own long axis),
+    // which turns half a shoulder into half a torso DEPTH — ~3cm of visible
+    // float if we kept quoting the shoulder at him. Half-extent of a box
+    // rotated by θ is (w·cosθ + d·sinθ)/2, and CBZ.charLieRoll publishes the
+    // two θ the pose actually uses, so the number can never drift from it.
+    const R = CBZ.charLieRoll;
+    const posed = !!(R && actor && CBZ.CONFIG.CHAR_SLEEP_POSE !== false);
+    if (pf && pf.torsoW > 0) {
+      const th = posed ? (sleepStyle(actor).back ? R.back : R.side) : 0;
+      const halfW = (pf.torsoW * Math.cos(th) + (pf.torsoD || pf.torsoW) * Math.sin(th)) * 0.5 * hs;
+      lieM.rise = Math.max(0.14, halfW - LIE_SINK);
+    } else {
+      lieM.rise = 0.30;
+    }
     return lieM;
   }
   // Returns {x,y,z} for the rig's ORIGIN (its feet) — pass `out` to avoid the
@@ -919,7 +1049,13 @@
         const side = ((ex - rec.x) * sx + (ez - rec.z) * sz) >= 0 ? 1 : -1;
         const px = rec.x + sx * side * 0.34, pz = rec.z + sz * side * 0.34;
         const e = eInOut(u);
-        if (ch.sitting && u > 0.16) { ch.sitting = false; ch.seatRef = null; }   // hold the perch a beat into the swing
+        // Hold the perch a beat into the swing, then hand the rig to the SLEEP
+        // pose (entities/character.js, ch.lying) at the same instant the seat
+        // is released — the knees never straighten in between, because the two
+        // full-rig branches are adjacent in animChar's precedence chain and a
+        // lying body outranks a seated one.
+        if (ch.sitting && u > 0.16) { ch.sitting = false; ch.seatRef = null; }
+        if (u > 0.16 && !ch.lying) setLying(actor);
         ch.crouch = false;
         // The target is the SHARED lie spot, never the anchor itself: the rig's
         // origin is its FEET, so the legs slide down toward the foot end as the
@@ -938,7 +1074,11 @@
         const px = rec.x + sx * side * 0.34, pz = rec.z + sz * side * 0.34;
         const outFace = Math.atan2(sx * side, sz * side);
         const e = eInOut(u);
+        // The body un-curls as it comes up: releasing ch.lying at the TOP of
+        // the unroll lets the locomotion damps straighten the knees over the
+        // same 0.46s the roll takes, so nobody ever stands up folded.
         ch.sitting = false; ch.crouch = false;
+        if (u > 0.10) clearLying(actor);
         const L = CBZ.propLiePlace(actor, rec);          // where the body actually IS
         place(actor, L.x + (px - L.x) * e, L.y + (rec.y - L.y) * e, L.z + (pz - L.z) * e,
           lerpA(rec.face, outFace, e));
@@ -984,6 +1124,7 @@
     if (!on() || !actor || !seat || !isFree(seat)) return false;
     if (actor.dead || (actor.ko | 0) > 0 || actor.driving) return false;
     CBZ.propSeatRelease(actor);            // moving off a previous seat/bed
+    clearLying(actor);                     // a body that was in a bed is not any more
     seat.occupant = actor;                 // the CLAIM is instant; only the body takes time
     markClaimed(seat);
     actor._propSeat = seat;
@@ -1022,6 +1163,7 @@
     const had = actor._propSeat || actor._propBed;
     const seat = actor._propSeat;
     CBZ.propSeatRelease(actor);
+    clearLying(actor);
     if (had) actor._deskAnchor = null;     // only clear OUR anchor, never an office desk claim
     if (actor !== CBZ.player && actor.state === "sit") actor.state = "walk";
     if (!(opts && opts.instant) && seat && beginArc(actor, "stand", seat)) return;
@@ -1047,6 +1189,61 @@
     CBZ.dayPhase(MORNING);
     return true;
   }
+  /* ---- IS THIS BED YOURS -------------------------------------------------
+     Three ways a lot can be the player's, asked in the order they cost:
+     the safehouse he sleeps in (realestate.js's g.cityHome), the ownership
+     flag realestate/housing write onto the building itself, and finally
+     CBZ.cityOwnsLot — zillow.js's declared source of truth for the deeds
+     (construction.js calls it "the one ownership source of truth"). All three
+     are READ-ONLY calls into files this one does not own, and every one is
+     guarded: with any of them absent the answer is "not yours", which is the
+     conservative direction — you get the weaker heal and the risk. */
+  function bedOwned(bed) {
+    const g = CBZ.game;
+    const lot = bed.lot || lotOf(bed);
+    if (!lot) return false;
+    if (g && g.cityHome && g.cityHome.lot === lot) return true;
+    const b = lot.building;
+    if (b && b.home && b.home.owned) return true;
+    if (CBZ.cityOwnsLot) { try { if (CBZ.cityOwnsLot(lot)) return true; } catch (e) {} }
+    return false;
+  }
+
+  /* ---- WHAT SLEEPING SOMEWHERE ELSE IS WORTH, AND WHAT IT COSTS ----------
+     Derived, not invented: realestate.js's sleepHeal is the FULL reset (hp and
+     stamina to max, hunger full, wounds dressed, heat bled) and it is the
+     reward for owning a roof. This is deliberately a fraction of it —
+     REST_FRAC of max HP as a CAP you are pulled UP to and never above, so a
+     healthy player gains nothing by napping in strangers' houses and a hurt
+     one gets a real but partial second chance. Nothing here dresses a wound,
+     feeds you, or touches heat DOWNWARD; those stay the safehouse's alone.
+     Returns the sentence to append to the wake-up note (never throws). */
+  const REST_FRAC = 0.60;        // rough sleep gets you 60% of the way a bed does
+  const REST_STAM = 0.85;        // you do rest, even badly
+  const TRESPASS_SEV = 30;       // wanted.js: "trespass" is a 1★ charge
+  function restPayoff(bed) {
+    if (CBZ.CONFIG.INTERIOR_SLEEP_STAKES === false) return "";
+    if (bedOwned(bed)) return "";              // your own bed keeps the full reset
+    const P = CBZ.player;
+    if (!P) return "";
+    let out = "";
+    const cap = Math.round((P.maxHp || 100) * REST_FRAC);
+    if ((P.hp | 0) < cap) { P.hp = cap; out = " Rough sleep — patched up, not fixed."; }
+    const sCap = Math.round((P.maxStamina || 100) * REST_STAM);
+    if ((P.stamina || 0) < sCap) P.stamina = sCap;
+    if (CBZ.cityHudDirty) { try { CBZ.cityHudDirty(); } catch (e) {} }
+    // THE RISK. This is somebody's bedroom. cityCrime's ORDINARY path (no
+    // `instant`) tags whoever is within 30m as a witness and only reports if a
+    // cop can see it — so an empty house at 3am genuinely costs nothing, and
+    // a household or a patrol that watches you climb into their bed is a
+    // trespass call. No new heat system, no new flag: one existing seam, the
+    // same one interior_programs.js's robbery uses.
+    if (CBZ.cityCrime) {
+      try { CBZ.cityCrime(TRESPASS_SEV, { x: bed.x, z: bed.z, type: "trespass" }); } catch (e) {}
+    }
+    return out;
+  }
+
   // the time-skip fires ONCE, and only when the body has actually finished
   // lying down — you sleep after you're in the bed, not on the way to it.
   function bedDown(actor, bed) {
@@ -1054,7 +1251,9 @@
     const skipped = skipToMorning();
     const g = CBZ.game;
     if (g && g.tired != null) g.tired = 0;                 // rested
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(skipped ? "Slept until morning." : "Resting…", 2.4);
+    let msg = skipped ? "Slept until morning." : "Resting…";
+    try { msg += restPayoff(bed); } catch (e) {}
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 2.6);
   }
   CBZ.propSleep = function (actor, bed, opts) {
     if (!on() || !actor || !bed || !isFree(bed)) return false;
@@ -1070,8 +1269,10 @@
       P.pos.set(L.x, L.y, L.z);
       P.vy = 0; P.grounded = true;
       if (ch) { ch.sitting = false; ch.group.position.set(L.x, L.y, L.z); ch.group.rotation.y = bed.face; }
-      // No heal, no heat change — the owned-safehouse sleepHeal stays the
-      // special full reset.
+      setLying(actor);
+      // The heal + the trespass risk ride inside bedDown → restPayoff
+      // (INTERIOR_SLEEP_STAKES); the owned-safehouse sleepHeal is still the
+      // one special FULL reset, and an owned bed here changes nothing.
       bedDown(actor, bed);
       return true;
     }
@@ -1088,6 +1289,7 @@
     if (!(opts && opts.instant) && beginArc(actor, "lie", bed)) return true;
     if (actor.pos && actor.pos.set) actor.pos.set(LN.x, LN.y, LN.z);
     if (actor.group) { actor.group.position.set(LN.x, LN.y, LN.z); actor.group.rotation.y = bed.face; }
+    setLying(actor);
     return true;
   };
   CBZ.propWake = function (actor, opts) {
@@ -1097,10 +1299,14 @@
     if (!(opts && opts.instant) && bed && beginArc(actor, "rise", bed)) {
       actor._propLie = false;
       actor._deskAnchor = null;
+      // ch.lying stays live for the first tenth of the unroll and is released
+      // inside that beat — the body must not snap straight the instant the
+      // verb is pressed, it has to un-curl as it rolls up.
       if (actor !== CBZ.player && actor.state === "sit") actor.state = "walk";
       return;
     }
     dropArc(actor);
+    clearLying(actor);
     if (actor === CBZ.player) {
       const ch = CBZ.playerChar;
       if (actor._propOwnsBody) { actor._doorArc = false; actor._propOwnsBody = false; }
@@ -1113,6 +1319,41 @@
     if (actor.state === "sit") actor.state = "walk";
     if (actor.char) { actor.char.sitting = false; actor.char.seatRef = null; actor.char.crouch = false; }
     if (actor.group) actor.group.rotation.z = 0;
+  };
+
+  /* ---- THE BED HALF OF THE ONE-LINE NPC VERB -----------------------------
+     "Put this NPC to bed at whatever is nearby, on its own floor."
+       CBZ.propBedNpc && CBZ.propBedNpc(ped, 6);
+     THE LATENT SEAM THIS CLOSES: propSeatNpc's `prefer` argument is a kind
+     substring matched against seats[] ONLY — beds live in their own registry
+     — so the night sweep's `propSeatNpc(a, 6.5, "bed")` could never once put
+     anybody in a bed. It either matched a SEAT whose kind contains "bed"
+     ("bedside" tables do) or fell through to the nearest chair. A caller
+     asking for a bed deserves a primitive that has one.
+
+     The guards are citystaff.js's willSeat test in the same order: a body
+     that is dead, driving, KO'd, already claimed by furniture or held by
+     npclife's attach() is not available to be put anywhere.
+
+     REFUSE, NEVER SNAP (this file's house rule, ARC_MAX): the radius is
+     CLAMPED to what the lie arc can honestly walk. Beyond it propSleep would
+     fall through to the instant commit and teleport a body into a bed across
+     the room, which is the exact defect the arc engine exists to delete — so
+     a far bed simply isn't offered, and the caller tries again next sweep
+     from wherever the ped's own brain has wandered to. Returns the bed taken,
+     or null. Degrade-safe: never throws, never leaves a broken ped. */
+  CBZ.propBedNpc = function (ped, radius) {
+    if (!on() || !ped || ped === CBZ.player || !ped.pos || !ped.group) return null;
+    if (ped.dead || ped.driving || (ped.ko | 0) > 0) return null;
+    if (ped._npcAttached || ped._propBed || ped._propSeat || ped._propLie) return null;
+    const r = Math.min(radius || 6, ARC_MAX);
+    const bed = nearestIn(beds, ped.pos.x, ped.pos.z, r, ped.pos.y);
+    if (!bed) return null;
+    const e = CBZ.propEntryPoint(bed);
+    if (e && !e.ok) return null;                // nothing can stand beside it
+    let ok = false;
+    try { ok = !!CBZ.propSleep(ped, bed); } catch (err) { ok = false; }
+    return ok ? bed : null;
   };
 
   // ---- THE RATCHET ------------------------------------------------------------
@@ -1131,11 +1372,26 @@
   // `noGeom` is an ADOPTION counter, nonzero by design
   // today: pin it at whatever the current build reports, and it may only ever
   // go DOWN as builders move onto CBZ.furnish. Do NOT pin noGeom at 0.
+  // TWO NEW COUNTERS, and they do NOT mean what noGeom/blocked mean — read
+  // this before pinning either:
+  //   postured — COVERAGE, not a defect. Seats that (a) declared a cushion, so
+  //     the V2 solve runs at all, and (b) carry a `kind` that
+  //     CBZ.charSeatPosture resolves to a real posture family. It is the count
+  //     of chairs in this world that are visibly a sofa/throne/stool/bench
+  //     rather than a generic chair, so it should RISE as furnishers pass
+  //     honest kinds. Do not pin it as a may-only-decrease ratchet.
+  //   sleepers — a LIVE gauge: bodies whose rig is in the sleep pose this
+  //     instant. Zero in a daytime world is correct; it exists so a probe can
+  //     prove the pose is reachable at all (the old bug was invisible because
+  //     the plank pose IS the KO pose and nothing ever counted it).
+  // noGeom and blocked are untouched in meaning and in arithmetic.
   CBZ.propUseAudit = function () {
-    let noGeom = 0, blocked = 0;
+    let noGeom = 0, blocked = 0, postured = 0, sleepers = 0;
+    const classify = CBZ.charSeatPosture;
     for (let i = 0; i < seats.length; i++) {
       const r = seats[i];
       if (r.cushionH == null) noGeom++;      // builder never declared its cushion
+      else if (classify && classify(r.kind)) postured++;
       if (!entryOf(r)._eok) blocked++;
     }
     for (let i = 0; i < beds.length; i++) {
@@ -1143,7 +1399,16 @@
       if (r.lieY == null || r.top == null) noGeom++;
       if (!entryOf(r)._eok) blocked++;
     }
-    return { seats: seats.length, beds: beds.length, noGeom: noGeom, blocked: blocked };
+    const pch = CBZ.playerChar;
+    if (pch && pch.lying) sleepers++;
+    for (let i = 0; i < claimed.length; i++) {
+      const o = claimed[i].occupant;
+      if (o && o !== CBZ.player && o.char && o.char.lying) sleepers++;
+    }
+    return {
+      seats: seats.length, beds: beds.length, noGeom: noGeom, blocked: blocked,
+      sleepers: sleepers, postured: postured,
+    };
   };
 
   // ---- the DEAD-MAN SWITCH ----------------------------------------------------
@@ -1164,7 +1429,7 @@
       const ch = charOf(A.actor);
       if (ch) {
         ch.crouch = false;
-        if (A.kind === "stand" || A.kind === "rise") { ch.sitting = false; ch.seatRef = null; }
+        if (A.kind === "stand" || A.kind === "rise") { ch.sitting = false; ch.seatRef = null; ch.lying = null; }
         if (ch.group && (A.kind === "stand" || A.kind === "rise")) { ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
       }
     }
@@ -1204,7 +1469,7 @@
         endArc(A);
         const cb = charOf(actor);
         if (cb) {
-          cb.sitting = false; cb.seatRef = null; cb.crouch = false;
+          cb.sitting = false; cb.seatRef = null; cb.crouch = false; cb.lying = null;
           if (cb.group) { cb.group.rotation.z = 0; cb.group.rotation.x = 0; }
         }
         if (actor._propSeat) CBZ.propStand(actor, { instant: true });
@@ -1227,7 +1492,7 @@
         if (A.onDone) { try { A.onDone(actor, A.rec); } catch (e) {} }
         if (A.kind === "stand" || A.kind === "rise") {
           const c2 = charOf(actor);
-          if (c2) { c2.sitting = false; c2.seatRef = null; c2.crouch = false; if (c2.group) { c2.group.rotation.z = 0; c2.group.rotation.x = 0; } }
+          if (c2) { c2.sitting = false; c2.seatRef = null; c2.crouch = false; c2.lying = null; if (c2.group) { c2.group.rotation.z = 0; c2.group.rotation.x = 0; } }
           if (actor === P) P.stun = 0;
         }
       }
@@ -1262,6 +1527,11 @@
           o.group.position.set(L.x, L.y, L.z);
           o.group.rotation.z = Math.PI / 2;
           if (o.char) o.char.sitting = false;
+          // Re-assert the sleep pose here, AFTER peds.js's own sit branch has
+          // run (34) and forced char.sitting — the same reason the transform
+          // is re-pinned at this order. A body someone else re-posed mid-night
+          // is back asleep on the next frame instead of lying to attention.
+          if (!o.char || !o.char.lying) setLying(o);
         }
       } else if (geomOn() && o.char && o.char.sitting && !o.char.seatRef) {
         // a seated NPC whose seat DECLARED its geometry gets the real chair
@@ -1301,8 +1571,11 @@
       if (!ch.seatRef) ch.seatRef = CBZ.propSeatRef(a);
     } else {
       ch.sitting = false;
-      // damp the roll toward the lie (the KO-lie look) — matches physics.js's
-      // own rotation.z ease so waking/KO transitions never pop.
+      if (!ch.lying) setLying(P);        // the sleep pose, re-asserted like the transform
+      // damp the roll toward the lie — matches physics.js's own rotation.z
+      // ease so waking/KO transitions never pop. The ORIENTATION is still
+      // this roll; entities/character.js poses the body INSIDE it, so the two
+      // never fight over the same channel.
       const k = 1 - Math.exp(-10 * (dt || 0.016));
       ch.group.rotation.z += (Math.PI / 2 - ch.group.rotation.z) * k;
       ch.group.rotation.x = 0;

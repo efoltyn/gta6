@@ -34,6 +34,22 @@
   const CBZ = window.CBZ;
   const mat = CBZ.mat, cmat = CBZ.cmat, boxGeom = CBZ.boxGeom;
 
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  /* CHAR_SLEEP_POSE — a body in a bed used to be the STANDING rig rolled 90°
+     about Z, i.e. the exact pose a KO'd corpse holds on the pavement: straight
+     legs, standing-idle arms, chin level. Every bedroom in the game therefore
+     contained a plank. On → `ch.lying` (city/propuse.js publishes it) runs a
+     real sleep pose inside that same roll: knees drawn up, spine curled, one
+     arm folded in, head settled, chest breathing. Flip false (or
+     ?cfg_CHAR_SLEEP_POSE=0) and the branch never runs — the plank comes back,
+     which is the one-line revert.
+     CHAR_SEAT_POSTURE — a sofa, a throne, a bar stool and an office chair all
+     produced ONE identical upright chair pose. On → the seat's own `kind`
+     (carried through CBZ.propSeatRef as seatRef.kind) picks a posture family.
+     Off → every seat gets today's single pose, byte-identical. */
+  if (CBZ.CONFIG.CHAR_SLEEP_POSE == null) CBZ.CONFIG.CHAR_SLEEP_POSE = true;
+  if (CBZ.CONFIG.CHAR_SEAT_POSTURE == null) CBZ.CONFIG.CHAR_SEAT_POSTURE = true;
+
   /* Two-segment limb. Pivot group at the hip/shoulder; upper box hangs to the
      joint; a `low` pivot group sits AT the joint with the lower box + cap
      inside it. The lower box's top is tucked 0.06 UP into the (wider) upper
@@ -1086,6 +1102,90 @@
     ch._hipCompX = nx; ch._hipCompY = ny; ch._hipCompZ = nz;
   }
 
+  /* ---- POSTURE FOLLOWS THE SEAT ---------------------------------------
+     ONE table, owned here, read by everybody: city/propuse.js's audit asks
+     this same function so the count and the pose can never disagree about
+     what a "sofa" is. A kind that is ABSENT (or explicitly null below) gets
+     the default upright chair pose — which is why the aircraft cabin, the
+     gate lounge, every desk and every plain chair are listed as null rather
+     than merely omitted: their uprightness is a DECISION, not an oversight,
+     and a future edit that adds "waiting" to the lounge row has to delete a
+     line that says otherwise.
+     The vocabulary is exactly the `kind` strings SEAT_H in propuse.js already
+     keys on, so no registration site has to learn a new word. */
+  const SEAT_POSTURE = {
+    // soft, deep, with something to fall back into
+    sofa: "lounge", couch: "lounge", armchair: "lounge", lounge: "lounge",
+    booth: "lounge", lounger: "lounge", recliner: "lounge",
+    deck: "lounge", deckchair: "lounge",
+    // a chair you sit UP in because of who is watching
+    throne: "throne", boss: "throne", exec: "throne",
+    // perched, no backrest, feet looking for the rail
+    stool: "stool", counter: "stool", bar: "stool",
+    // a plank you lean forward off, elbows toward the knees
+    bench: "bench", pew: "bench", park: "bench",
+    // DELIBERATELY UPRIGHT (see above) — these are not omissions.
+    chair: null, seat: null, dining: null, table: null, kitchen: null,
+    desk: null, office: null, work: null, terminal: null,
+    patio: null, patiochair: null, cabin: null, cell: null, bedside: null,
+    "aircraft-seat": null, aircraft: null, airline: null, economy: null,
+    "cockpit-seat": null, cockpit: null, flightdeck: null,
+    waiting: null, gate: null, lounge_gate: null,
+  };
+  // Degrade-safe classifier. null = "sit up straight", which is also what an
+  // unknown kind and a seat that declared no kind at all get.
+  CBZ.charSeatPosture = function (kind) {
+    if (kind == null) return null;
+    const k = String(kind).toLowerCase();
+    return Object.prototype.hasOwnProperty.call(SEAT_POSTURE, k) ? SEAT_POSTURE[k] : null;
+  };
+
+  /* ---- HOW FAR A SLEEPER IS ROLLED ------------------------------------
+     propuse.js parks a lying body with group.rotation.z = π/2, which puts the
+     rig's LATERAL axis (local +X, the body's right) straight up — i.e. every
+     sleeper is on their LEFT SIDE. Rolling further is done INSIDE the rig
+     (body.rotation.y, about the body's own feet→head axis) so the placement
+     machinery in propuse never has to change: +y turns the chest toward local
+     +X, which is up. These two numbers are the contract, and propuse reads
+     them to work out how far above the mattress the rig's origin belongs —
+     a side sleeper presents half a SHOULDER to the mattress, a back sleeper
+     half a torso DEPTH, and that difference is ~3cm of visible float. */
+  const LIE_ROLL_SIDE = 0.10;    // a hair onto the front, the way people actually lie
+  const LIE_ROLL_BACK = 1.15;    // ~66°: the recovery position, not a plank
+  CBZ.charLieRoll = { side: LIE_ROLL_SIDE, back: LIE_ROLL_BACK };
+  const BREATH_W = Math.PI * 0.5;   // 2π × 0.25 Hz — ~4 s per breath, sleeping rate
+
+  /* The V2 chair sit owns model.position.y (the sink onto the cushion) and
+     model.position.z (the lounge slouch), and the shin scale that makes a
+     short voxel shin reach the floor. NOTHING else in the game writes those
+     channels, so they need an explicit refund the moment the body leaves the
+     seat — otherwise a vacated chair leaves a rig walking around sunk into
+     the ground with stretched shins. Hoisted into one function because there
+     are now TWO exits from a seat: standing up (the blend-out below the sit
+     branch) and lying down (the sleep branch, which early-returns past it). */
+  function refundSeatSolve(ch, J, dt, rate) {
+    rate = rate || 10;
+    if (ch._seatSunk) {
+      const m = ch.model;
+      if (m) { m.position.y = damp(m.position.y, 0, rate, dt); m.position.z = damp(m.position.z, 0, rate, dt); }
+      if (!m || (Math.abs(m.position.y) < 0.005 && Math.abs(m.position.z) < 0.005)) {
+        if (m) { m.position.y = 0; m.position.z = 0; }
+        ch._seatSunk = 0;
+      }
+    }
+    if (ch._seatShinScaled) {
+      if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, 1, 12, dt);
+      if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, 1, 12, dt);
+      const lRest = !J.ll || Math.abs(J.ll.scale.y - 1) < 0.005;
+      const rRest = !J.rl || Math.abs(J.rl.scale.y - 1) < 0.005;
+      if (lRest && rRest) {
+        if (J.ll) J.ll.scale.y = 1;
+        if (J.rl) J.rl.scale.y = 1;
+        ch._seatShinScaled = 0;
+      }
+    }
+  }
+
   // Shared by full character rigs and the instanced jail crowd. Phase is in
   // radians; PI radians is one alternating footfall. Distance, not frame count,
   // owns cadence so a metre travelled looks the same at every refresh rate.
@@ -1358,6 +1458,147 @@
       return;                         // the mount pose owns the whole rig
     }
 
+    /* ---- ASLEEP: the pose a bed has never had ----------------------------
+       THE LIE THIS DELETES. city/propuse.js walks a body to the bedside,
+       perches it on the mattress edge and rolls it flat — a genuinely good
+       arc that ended in the WORST pose in the game: the standing rig, rolled
+       90° about Z. That is byte-for-byte the KO pose physics.js puts on a
+       corpse in the street. Straight legs, standing-idle arms, level chin,
+       and not one millimetre of movement. Every bedroom contained a plank.
+
+       WHERE THIS SITS IN THE CHAIN. A lying body OUTRANKS a seated one: the
+       lie arc holds `sitting` a beat INTO the roll (propuse's `swing`), so
+       for those frames both flags are live and the horizontal body must win
+       or the chair solve would sink a sideways rig into the mattress. Like
+       every full-rig state here it early-returns — a later branch that got a
+       frame would fight this one and the body would jitter between two poses.
+
+       WHAT COMPOSES AND WHAT DOESN'T. The group's 90° Z-roll stays propuse's
+       (it owns placement, and CBZ.propLiePlace solves the mattress clearance
+       off the same roll) — this pose never touches ch.group. Everything here
+       is INSIDE the rig, which is also how the side/back choice is made:
+       body.rotation.y spins the torso about its own feet→head axis, and since
+       local +X is world-up under that roll, +y turns the chest toward the
+       ceiling. A back sleeper is therefore the same placement, rolled from
+       the inside — no second transform for propuse to fight.
+
+       THE KNEES ARE SOLVED, NOT AUTHORED. A sleeper draws the heels back
+       until the ankle returns under the line of the hip: the leg stops being
+       a stick and becomes a shape. That is one equation on THIS rig's own
+       segments — THIGH·sin(a) + SHIN·sin(a−k) = 0 → k = a + asin(THIGH/SHIN ·
+       sin a) — so a long-femured adult folds deeper than a child does, and
+       nobody ever has to retune a magic angle when the profile table changes.
+
+       Everything is an absolute damp toward a target, so entering or leaving
+       mid-blend can never accumulate (the grapple brace-pose lesson). */
+    // The KO/knockdown crumple is the LAST layer in this function on purpose,
+    // which means every early-returning pose above it silently outranks it.
+    // For a chair that is harmless; for a BED it is not — somebody shot in
+    // their sleep must fall out of the sleep pose, not keep breathing through
+    // it. Two flags, checked here rather than in propuse, because the rig is
+    // the only thing that knows a crumple is running.
+    if (ch.lying && CBZ.CONFIG.CHAR_SLEEP_POSE !== false && !(ch.koT > 0) && !ch.koPose) {
+      const L = ch.lying, sr = 9;
+      const pf = ch.profile;
+      const THIGH = Math.max(0.05, pf ? pf.legUp : LEG_UP);
+      const SHIN = Math.max(0.05, pf ? pf.legLo : LEG_LO);
+      // Per-actor, published by propuse (stable per BODY, so the same person
+      // always sleeps the same way). Absent → a sensible middle sleeper.
+      const back = !!L.back;
+      const vary = (L.vary != null) ? L.vary : 0.5;
+      const dv = vary - 0.5;                      // −0.5..+0.5, the variance knob
+      // Near arm across the chest, or laid along the side. Left to the record
+      // when it says; otherwise a back sleeper lets the arm lie and a side
+      // sleeper hugs it in, which is what the sleep-posture literature and
+      // every photograph of a bed agree on.
+      const fold = (L.fold != null) ? !!L.fold : !back;
+
+      // BREATHING. ~0.25 Hz, i.e. one breath per four seconds — the sleeping
+      // rate, not the standing one. Amplitude is a fraction of THIS torso's
+      // depth so a child's chest doesn't heave like a linebacker's. The phase
+      // advances here rather than in propuse so the breath keeps running even
+      // if whoever published the record never touches it again.
+      L.phase = (L.phase || 0) + dt * BREATH_W;
+      const br = Math.sin(L.phase);
+      const brAmp = (pf ? pf.torsoD : 0.50) * 0.030;
+
+      // A seat solve that was live a beat ago (the perch on the mattress edge)
+      // is refunded here — this branch early-returns past the blend-out below.
+      refundSeatSolve(ch, J, dt, sr);
+      if (ch.typing) ch.typing = false;
+
+      const roll = back ? LIE_ROLL_BACK : LIE_ROLL_SIDE;
+      const curl = (back ? 0.05 : 0.13) + dv * 0.05;      // spine curls over the knees
+      ch.body.position.x = damp(ch.body.position.x, br * brAmp, sr, dt);   // chest RISE: +x is up under the roll
+      ch.body.position.y = damp(ch.body.position.y, -0.02, sr, dt);
+      ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+      ch.body.rotation.x = damp(ch.body.rotation.x, curl, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, roll, sr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, br * 0.012, sr, dt);
+
+      // LEGS. The TOP leg (rl — local +X is the body's right, which the roll
+      // points at the ceiling) draws up further and its knee falls forward
+      // across the other; the bottom leg stays long against the mattress.
+      const kneeFor = (a) => Math.max(0.10, Math.min(1.95,
+        a + Math.asin(Math.max(-1, Math.min(1, (THIGH / SHIN) * Math.sin(a))))));
+      const hipA = (back ? 0.22 : 0.44) + dv * 0.10;
+      const aTop = hipA * 1.25, aBot = hipA * 0.78;
+      const twist = back ? 0.22 : 0.05;            // a back sleeper's toes fall outward
+      if (ch.parts.rl) {
+        ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -aTop, sr, dt);
+        ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, twist, sr, dt);
+        ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.14, sr, dt);
+        ch.parts.rl.position.z = damp(ch.parts.rl.position.z, 0, sr, dt);
+        ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt);
+      }
+      if (ch.parts.ll) {
+        ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -aBot, sr, dt);
+        ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, -twist, sr, dt);
+        ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.04, sr, dt);
+        ch.parts.ll.position.z = damp(ch.parts.ll.position.z, 0, sr, dt);
+        ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt);
+      }
+      setKnee(J.rl, kneeFor(aTop), sr);
+      setKnee(J.ll, kneeFor(aBot), sr);
+
+      // ARMS. The NEAR arm is the upper one (ra, the body's right): folded in
+      // against the chest, or laid down the side. The FAR arm lies along the
+      // trunk with the forearm across the belly — it is the arm the body is
+      // resting ON, so it never gets a pose that would put it inside the
+      // mattress. Both shoulders ride the breath.
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, (fold ? -0.62 : -0.14) + br * 0.020, sr, dt);
+        ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, (fold ? -0.44 : -0.12) + dv * 0.06, sr, dt);
+        ch.parts.ra.position.z = damp(ch.parts.ra.position.z, fold ? 0.05 : 0.02, sr, dt);
+      }
+      setElbow(J.ra, fold ? -1.62 : -0.40, sr);
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.30 + br * 0.016, sr, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.10 - dv * 0.05, sr, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.04, sr, dt);
+      }
+      setElbow(J.la, -0.72, sr);
+
+      // HEAD. Chin tucks toward the chest (the universal sleeping curl) and
+      // the crown tips toward the mattress so the cheek actually meets the
+      // pillow: +z on the neck maps the head's top toward local −X, which is
+      // DOWN under the roll. A back sleeper is already face-up and only needs
+      // a whisker of it.
+      if (ch.neck) {
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.14 + br * 0.012, sr, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, (back ? 0.06 : 0.20) + dv * 0.05, sr, dt);
+      }
+      // Publish what we wrote, exactly as slidePose/pronePose do: the KO and
+      // death blends read these RELATIVELY, so a parked lean would bias a body
+      // that dies in its sleep, and the neck has no locomotion owner at all.
+      ch.bob = ch.body.position.y; ch.lean = ch.body.rotation.x; ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;
+      lockCharacterHips(ch);
+      return;   // the sleep pose owns the whole rig
+    }
+
     // ---- SEATED (office-jobs): full-rig pose that OWNS the body ----
     if (ch.sitting) {
       const sr = 12;
@@ -1395,7 +1636,75 @@
         const sink = hipF - hipYOf(ch) * hs - (ref.floorBelow || 0);
         ch.model.position.y = damp(ch.model.position.y, sink, sr, dt);
         ch._seatSunk = 1;
-        const drop = Math.max(0.05, hipF - 0.03 * hs);   // hip → sole, soles a hair above the floor
+
+        /* ---- POSTURE FOLLOWS THE SEAT (CHAR_SEAT_POSTURE) ---------------
+           A sofa, a throne, a bar stool and an office chair used to produce
+           the IDENTICAL upright pose — the same body, four times, in four
+           rooms that were supposed to feel different. Nothing lounged, and
+           the deep soft couch a furnisher spent geometry on read exactly like
+           a desk chair with the desk deleted.
+
+           The seat already knows what it is: every registration site passes a
+           `kind`, propuse.js's SEAT_H keys its cushion heights on it, and
+           CBZ.propSeatRef now carries it through to seatRef.kind. So this is
+           not new data — it is data that was being thrown away one function
+           short of the pose that needed it. CBZ.charSeatPosture (one table,
+           declared above, also read by propUseAudit) maps it to a family.
+
+           A kind we don't recognise, a seat that declared none, and every
+           anchor npclife's attach() builds (aircraft cabins, arena bowls)
+           resolve to null and take the branch below UNCHANGED — the defaults
+           here are the exact literals this solve has always used, so the
+           airliner row, the desk worker and the typing loop are untouched. */
+        const post = (CBZ.CONFIG.CHAR_SEAT_POSTURE !== false && CBZ.charSeatPosture)
+          ? CBZ.charSeatPosture(ref.kind) : null;
+        // Per-seat variance, deterministic from the anchor's own coordinates
+        // (propSeatRef hashes them) — a row of five sofa-sitters must not read
+        // as one body stamped five times. Zero unless a posture claimed the
+        // seat, so the default pose stays bit-for-bit what it was.
+        const sv = (post && ref.vary != null) ? (ref.vary - 0.5) : 0;
+        let leanX = 0.1, sitY = -0.06, slideZ = 0, yawY = 0;
+        let armX = -0.34, armZ = 0.12, elb = -0.72, neckX = 0.04, railF = 0;
+        if (post === "lounge") {
+          // You do not SIT on a couch, you fall back into one: the shoulders
+          // pitch ~14° behind the hips, the pelvis slides forward off the
+          // backrest by a quarter of its own depth (derived, so a child
+          // slouches a child's distance), and the forearms go out to where an
+          // armrest is — wider and straighter than hands-on-thighs.
+          leanX = -0.24 + sv * 0.06;
+          sitY = -0.09;
+          slideZ = (pf ? pf.pelvisD : 0.48) * 0.25 * hs;
+          armX = -0.20; armZ = 0.30 + sv * 0.05; elb = -0.95;
+          neckX = -0.06;                       // head back against the rest
+        } else if (post === "throne") {
+          // The opposite reading of the same soft chair: a boss chair is worn,
+          // not rested in. Spine vertical, both hands claiming the armrests.
+          leanX = 0.01 + sv * 0.03;
+          armX = -0.30; armZ = 0.34 + sv * 0.04; elb = -1.05;
+          neckX = -0.02;
+        } else if (post === "stool") {
+          // Nothing to lean on, so the spine holds itself up and the forearms
+          // find the counter. FEET FIND THE RAIL: a stool that a body's shins
+          // cannot reach the floor from is not a body dangling in the air —
+          // every counter stool in the world carries a footrail, and the
+          // standard one sits at ~40% of the stool's own height. Shortening
+          // the hip→sole drop by that much is the whole fix, and it falls out
+          // of the declared cushion instead of a new number.
+          leanX = 0.06 + sv * 0.04;
+          armX = -0.44; armZ = 0.10; elb = -0.90;
+          railF = 0.42;
+        } else if (post === "bench") {
+          // A bench is a plank: people perch forward on it and put their
+          // elbows toward their knees, which is the difference between
+          // waiting and sitting.
+          leanX = 0.22 + sv * 0.05;
+          armX = -0.52; armZ = 0.16; elb = -1.15;
+          neckX = 0.10;
+        }
+        if (post) yawY = sv * 0.10;            // a hair of torso yaw, per seat
+        ch.model.position.z = damp(ch.model.position.z, slideZ, sr, dt);
+        const railY = railF > 0 ? (ref.cushion != null ? ref.cushion : 0.45) * railF : 0;
+        const drop = Math.max(0.05, hipF - 0.03 * hs - railY);   // hip → sole, soles a hair above the floor/rail
         let th, fold, shinScale = 1;
         // A chair is read by its THIGH line. The old V2 solve began at 0.95 rad
         // (54° from vertical) solely to make the short voxel shin touch the
@@ -1419,10 +1728,10 @@
           th = Math.acos(Math.max(-0.45, Math.min(1, (drop - SHIN * Math.cos(a2)) / THIGH)));
           fold = Math.max(0.3, th - a2);
         }
-        ch.body.position.y = damp(ch.body.position.y, -0.06, sr, dt);  // small settle, torso stays stacked on the pelvis
-        ch.body.rotation.x = damp(ch.body.rotation.x, 0.1, sr, dt);
+        ch.body.position.y = damp(ch.body.position.y, sitY, sr, dt);  // small settle, torso stays stacked on the pelvis
+        ch.body.rotation.x = damp(ch.body.rotation.x, leanX, sr, dt);
         ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
-        ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+        ch.body.rotation.y = damp(ch.body.rotation.y, yawY, sr, dt);
         if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -th, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
         if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -th, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
         setKnee(J.ll, fold + 0.03, sr); setKnee(J.rl, fold, sr);       // hair of asymmetry so rows don't read cloned
@@ -1430,11 +1739,14 @@
         if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, shinScale, sr, dt);
         ch._seatShinScaled = !!((J.ll && Math.abs(J.ll.scale.y - 1) > 0.001) ||
           (J.rl && Math.abs(J.rl.scale.y - 1) > 0.001));
-        // forearms rest on the thighs/armrests (same relaxed carry as legacy)
-        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
-        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
-        setElbow(J.la, -0.72, sr); setElbow(J.ra, -0.72, sr);
-        if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+        // forearms rest on the thighs/armrests (same relaxed carry as legacy;
+        // armX/armZ/elb are the untouched literals unless a posture claimed
+        // this seat — an armrest pushes them out and straightens the elbow,
+        // a bench pulls them in over the knees).
+        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+        setElbow(J.la, elb, sr); setElbow(J.ra, elb, sr);
+        if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, neckX, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
         lockCharacterHips(ch);
         return;   // seated pose owns the whole rig
       }
@@ -1463,26 +1775,12 @@
       lockCharacterHips(ch);
       return;   // seated pose owns the whole rig
     }
-    // seat-sink blend-out: the V2 chair sit above owns model.position.y while
-    // seated and nothing else ever writes that channel — recover it here (a
+    // seat-sink blend-out: the V2 chair sit above owns model.position.y/z while
+    // seated and nothing else ever writes those channels — recover them here (a
     // few frames of damp) the moment the actor stands, so a vacated seat can't
     // leave a rig walking around sunk into the ground. Armed only by the V2
-    // sit; every other rig skips at one falsy check.
-    if (ch._seatSunk) {
-      if (ch.model) ch.model.position.y = damp(ch.model.position.y, 0, 10, dt);
-      if (!ch.model || Math.abs(ch.model.position.y) < 0.005) { if (ch.model) ch.model.position.y = 0; ch._seatSunk = 0; }
-    }
-    if (ch._seatShinScaled) {
-      if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, 1, 12, dt);
-      if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, 1, 12, dt);
-      const lRest = !J.ll || Math.abs(J.ll.scale.y - 1) < 0.005;
-      const rRest = !J.rl || Math.abs(J.rl.scale.y - 1) < 0.005;
-      if (lRest && rRest) {
-        if (J.ll) J.ll.scale.y = 1;
-        if (J.rl) J.rl.scale.y = 1;
-        ch._seatShinScaled = 0;
-      }
-    }
+    // sit; every other rig skips at one falsy check inside the helper.
+    refundSeatSolve(ch, J, dt, 10);
     if (ch.typing) ch.typing = false;   // typing exists only while seated (stale-flag guard)
 
     // ---- OBSTACLE TRAVERSAL (systems/physics.js) -------------------------
