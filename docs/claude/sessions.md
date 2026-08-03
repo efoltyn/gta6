@@ -672,3 +672,46 @@ below is NOT YET PINNED: whoever runs each audit first writes the number in
   at measured reality catches the NEXT regression; a permanently red gate
   catches nothing. Nobody may raise these numbers; lowering one is a wave
   deliverable.
+## THE 2026-08-02 SESSION — you wear what you skin
+
+- **THE PELT IS WORN, AND THE HOOD IS THE ANIMAL'S OWN HEAD** —
+  `src/city/pelts.js` (`CBZ.peltWear/peltUnwear/peltWorn/peltWearItem/
+  peltOnSkin/peltMountOn`). OWNER (with the Eastern-Wind-Studio bear-hood
+  photo): "When I kill and skin an animal I should get to wear it like this
+  automatically." Kill → skin → the fresh pelt goes straight ON you: the
+  species' head as a hood above the face (muzzle over the brow, pitched up
+  0.42 rad like the photo), cheek fur flaps, a fur mantle over both shoulders
+  and a cord + pewter clasp across the chest. **The hood is a photograph of
+  the asset, never a drawing** (the itemicons law applied to clothing): the
+  species' own `build(ctx)` model is rebuilt with a per-species seeded rng
+  (deterministic — the same buck always wears the same rack; biased low so
+  `r() < 0.5` trophy gates INCLUDE the antlers a hood exists to show) and its
+  head cluster harvested with `buildGaitRig`'s own shipped discovery (legs =
+  taller-than-wide ground-touchers, head = far-forward-and-up) — cloned
+  meshes share the cached cmat materials, so a brown-bear hood is
+  brown-bear-coloured BY CONSTRUCTION and a species added tomorrow is
+  wearable with **no edit and no species table**. Sizing is three clamps, no
+  per-species taste: width targets the discovered head box (0.5–0.95), then
+  length ≤ 1.15 (a croc stays wearable) and height ≤ 1.45 (a full rack is a
+  crown, not a mast). The mantle's fur is the model's dominant (largest-
+  volume) coat colour and every dimension rides `CBZ.cityArmorFit`'s
+  MEASUREMENT so it sits proud of whatever outfit/vest the rig wears — the
+  armour-sits-proud law one layer further out. **WORN, NOT CONSUMED**
+  (economy.js's own outfit grammar): wearing needs the hide in your pocket,
+  the hide still sells at a fence (the pocket verb hint keeps the price
+  visible), and the guard tick strips the mantle the moment the hide leaves
+  the pocket — one body, one hide, one worn pelt, no duplication fiction.
+  Hood rides `ch.neck` (turns with the head), mantle rides `ch.body`; FP is
+  safe because first person hides the whole player group. Three consumers in
+  the same change: `skin()` auto-wear (flag `PELT_WEAR_AUTO`), the pocket
+  Wear/Take-off toggle (itemicons routes hide rows to `peltWearItem` BEFORE
+  the clothing wardrobe), and worldstate rehydrate (pawnshop's one-shot
+  stamp/hydrate wrap → the pelt survives reload/respawn; the recolor wrap
+  re-fits it on outfit swaps, armor.js pattern). Fish fall out via the same
+  fur-is-food name test wildlife.js ships; snakes harvest no head cluster
+  and wear mantle-only (legitimately hoodless, reported). Flags `PELT_WEAR`
+  (master) · `PELT_WEAR_AUTO`. Ratchet: **`CBZ.peltAudit()`** → `{wearable,
+  hoodless, hoodlessIds, worn, mounted}` — NOT YET RUN, shipped without a
+  gate pass (owner: "no testing just build"); whoever runs it first writes
+  the numbers in (do not pin a guess).
+
