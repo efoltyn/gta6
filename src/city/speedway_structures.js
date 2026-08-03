@@ -45,7 +45,7 @@
 
   const _M = new THREE.Matrix4(), _Q = new THREE.Quaternion(),
     _V = new THREE.Vector3(), _V2 = new THREE.Vector3(), _SC = new THREE.Vector3(1, 1, 1),
-    _ZAX = new THREE.Vector3(0, 0, 1);
+    _ZAX = new THREE.Vector3(0, 0, 1), _YAX = new THREE.Vector3(0, 1, 0);
 
   // ------------------------------------------------------------------ //
   //  small shared helpers                                               //
@@ -769,20 +769,100 @@
   }
 
   // ================================================================== //
+  //  A FLAT SIGN FACE READS FROM ONE SIDE ONLY.                        //
+  //                                                                     //
+  //  board() above solves this for SWEPT ribbons. The park also carries  //
+  //  FLAT rigid signs — the start/finish gantry name, the scoring        //
+  //  pylon's position boards, the jumbotron — and every one of them was  //
+  //  a mapped BOX. A box carries the same map on its far face, where the //
+  //  U axis that ran to your right from the front runs to your LEFT: it  //
+  //  is the same mirrored text the owner photographed on the sponsor     //
+  //  bands, and `side: DoubleSide` produces it for free on one quad.     //
+  //                                                                     //
+  //  So a flat sign is ONE PlaneGeometry per read direction, one-sided,  //
+  //  yawed so its own +Z is the presented face — the pattern the venue   //
+  //  monument and the gatehouse title beam already use. Its own +X is    //
+  //  then the reader's right (F = -n, R = F x y_hat = local +X), and     //
+  //  r128's PlaneGeometry puts U = 0 at -X, U = 1 at +X and V = 1 on the //
+  //  TOP row, which is where a flipY CanvasTexture's first canvas row    //
+  //  lands. Both axes therefore come out right with no uv arithmetic at  //
+  //  the call site, exactly as boardFace() manages for a ribbon.         //
+  //                                                                     //
+  //  `proud` is the other half of the owner's report — the FLICKER. A    //
+  //  face bolted to a casing sits a few centimetres in FRONT of it AND   //
+  //  carries polygonOffset, because a positional nudge alone still ties  //
+  //  in the depth buffer at distance and a depth tie is what shimmers    //
+  //  when you move. That pairing is the house pattern (playercars.js's   //
+  //  cab glass, race_livery.js's door numbers, buildings.js's decals).   //
+  // ================================================================== //
+  const _signs = [];        // {mesh, nx, nz} — flat faces, audited from BUFFERS
+
+  function signOffset(m) {
+    // never on a cmat() material: those are SHARED across the whole world and
+    // a depth bias set here would follow them everywhere.
+    if (!m || m._shared || m.polygonOffset) return m;
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = -1;
+    m.polygonOffsetUnits = -1;
+    return m;
+  }
+
+  function signFace(parent, o) {
+    const yaw = o.yaw || 0;
+    const nx = Math.sin(yaw), nz = Math.cos(yaw);     // the presented face's normal
+    const proud = o.proud == null ? 0 : o.proud;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(o.w, o.h), signOffset(o.mat));
+    mesh.position.set(o.x + nx * proud, o.y, o.z + nz * proud);
+    mesh.rotation.y = yaw;
+    mesh.name = o.name || "speedway-sign-face";
+    mesh.userData.speedway = true;         // keep it out of the inert merge pass
+    if (parent) parent.add(mesh);
+    _signs.push({ mesh: mesh, nx: nx, nz: nz });
+    return mesh;
+  }
+
+  // ================================================================== //
   //  SCORING PYLON + JUMBOTRON                                          //
+  // ================================================================== //
+  //  THE LEGS STAND BEHIND THE BOARDS, NOT ACROSS THEM. Two independent //
+  //  faults put a 0.28 m lattice leg through the readable face:         //
+  //                                                                     //
+  //  (1) the lattice was laid out on the WORLD axes while the boards     //
+  //      were placed on the pylon's own heading, so how much leg crossed //
+  //      a board depended on where in the infield the thing happened to  //
+  //      be pointing. At heading 45 deg a leg projects 1.9*s*sqrt(2) —   //
+  //      2.33 m at the board's foot — onto a board face at 1.9 m, dead   //
+  //      centre. The legs are now built in the BOARDS' frame, so a leg   //
+  //      sits on the 45 deg diagonal BETWEEN two boards by construction  //
+  //      and its projection onto either normal is exactly its half-span. //
+  //  (2) even then the half-span (1.9*0.868 = 1.65 m at the foot, plus   //
+  //      0.14*sqrt(2) of strut corner) reached 1.85 m, INSIDE the        //
+  //      1.78-2.02 m the board casing occupied — an interpenetration,    //
+  //      i.e. a depth tie, i.e. the flicker. The base spread is trimmed  //
+  //      to 1.80 and the boards pushed out to 2.15, which buys 0.27 m of //
+  //      daylight at the worst point (the board's foot) and grows with   //
+  //      height as the taper closes. The silhouette loses 0.1 m of base  //
+  //      half-spread and the boards still overhang the lattice corners.  //
   // ================================================================== //
   function pylon(S, x, z, heading) {
     const grp = new THREE.Group(); grp.name = "speedway-scoring-pylon";
     S.root.add(grp);
     const steel = cmat(0x2b3138), dark = cmat(0x14181d);
     const H = 34;
-    // tapered lattice core: 4 legs + ring bracing
+    const LEGR = 1.80;                       // lattice half-spread at the foot
+    const BOARD_U = 2.15, BOARD_W = 3.6, BOARD_T = 0.24;
+    const BOARD_Y0 = 10, BOARD_H = 20;
+    // the pylon's own frame: aX is board 0's outward normal, bX board 1's.
+    const aX = Math.sin(heading), aZ = Math.cos(heading);
+    const bX = Math.cos(heading), bZ = -Math.sin(heading);
+    // tapered lattice core: 4 legs + ring bracing, on the board diagonals
     const legIM = makeIM(steel, 4 * 14 + 40);
-    const legs = [[-1.9, -1.9], [1.9, -1.9], [1.9, 1.9], [-1.9, 1.9]];
+    const legs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const RINGS = 12;
     function legXZ(i, h) {
-      const s = 1 - 0.45 * (h / H);
-      return [x + legs[i][0] * s, z + legs[i][1] * s];
+      const s = LEGR * (1 - 0.45 * (h / H));
+      const p = legs[i][0] * s, q = legs[i][1] * s;
+      return [x + aX * p + bX * q, z + aZ * p + bZ * q];
     }
     for (let i = 0; i < 4; i++) {
       for (let r = 0; r < RINGS; r++) {
@@ -795,17 +875,32 @@
       }
     }
     finishIM(grp, legIM);
-    // the position board: emissive faces on all four sides
+    // The position board: ONE emissive read face per side, standing proud of a
+    // plain dark casing. The casing is four instances of the shared unit cube,
+    // so the whole rack of housings is a single draw and no housing carries a
+    // map that could read backwards from inside the lattice.
     const boardTex = screenTex([
       { text: "1", right: "#7" }, { text: "2", right: "#22" }, { text: "3", right: "#4" },
       { text: "4", right: "#18" }, { text: "5", right: "#9" }, { text: "6", right: "#31" },
     ], 256, 512);
     const boardMat = new THREE.MeshLambertMaterial({ map: boardTex, emissive: 0xffffff, emissiveIntensity: 0.35, emissiveMap: boardTex });
+    const caseIM = makeIM(dark, 4);
+    const boardY = BOARD_Y0 + BOARD_H / 2;
     for (let s = 0; s < 4; s++) {
       const a = heading + s * Math.PI / 2;
-      const off = 1.9;
-      box(grp, boardMat, x + Math.sin(a) * off, 20, z + Math.cos(a) * off, 3.6, 20, 0.24, a);
+      const px = x + Math.sin(a) * BOARD_U, pz = z + Math.cos(a) * BOARD_U;
+      if (caseIM.count < caseIM.instanceMatrix.count) {
+        _Q.setFromAxisAngle(_YAX, a);
+        _V.set(px, boardY, pz); _SC.set(BOARD_W, BOARD_H, BOARD_T);
+        _M.compose(_V, _Q, _SC);
+        caseIM.setMatrixAt(caseIM.count++, _M);
+      }
+      signFace(grp, {
+        x: px, y: boardY, z: pz, yaw: a, w: BOARD_W, h: BOARD_H,
+        mat: boardMat, proud: BOARD_T / 2 + 0.04, name: "pylon-board-" + s,
+      });
     }
+    finishIM(grp, caseIM);
     box(grp, dark, x, H + 0.9, z, 5.2, 1.8, 5.2);
     box(grp, cmat(0xc23a36, { emissive: 0xc23a36, ei: 0.55 }), x, H + 2.6, z, 3.0, 1.6, 3.0);
     if (S.label) {
@@ -827,23 +922,41 @@
     const screen = new THREE.MeshLambertMaterial({
       map: tex, emissive: 0xffffff, emissiveIntensity: 0.55, emissiveMap: tex,
     });
-    box(grp, screen, x, BASE + Hh / 2, z, W, Hh, 0.4, heading);
-    box(grp, cmat(0x14181d), x - Math.sin(heading) * 0.35, BASE + Hh / 2, z - Math.cos(heading) * 0.35,
-      W + 1.2, Hh + 1.2, 0.5, heading);
+    // THE FRAME STANDS BEHIND THE SCREEN AND OUTSIDE IT. The two 0.55 m
+    // columns were placed 1.2 m INBOARD of a 22 m screen's edges and at the
+    // screen's own depth, so each one drew straight through 0.55 m of readable
+    // face for the screen's whole height; the rear rakers started on the same
+    // point. Everything structural now sits at local z = LEG_Z, which is
+    // BEHIND the casing's back face, and at |local x| = LEG_U, which is
+    // outboard of the casing's edge — so the screen is unobstructed from its
+    // read direction by construction rather than by luck.
+    //   local +X = across the screen, local +Z = the way it is READ.
+    const rx = Math.cos(heading), rz = -Math.sin(heading);
+    const fx = Math.sin(heading), fz = Math.cos(heading);
+    const CY = BASE + Hh / 2;
+    const CASE_D = 0.5, CASE_Z = -0.35;                  // casing centre, local +Z
+    const CASE_FRONT = CASE_Z + CASE_D / 2;              // -0.10
+    const CASE_BACK = CASE_Z - CASE_D / 2;               // -0.60
+    box(grp, cmat(0x14181d), x + fx * CASE_Z, CY, z + fz * CASE_Z,
+      W + 1.2, Hh + 1.2, CASE_D, heading);
+    signFace(grp, {
+      x: x + fx * CASE_FRONT, y: CY, z: z + fz * CASE_FRONT, yaw: heading,
+      w: W, h: Hh, mat: screen, proud: 0.06, name: "jumbotron-screen",
+    });
     // support frame
     const frameIM = makeIM(steel, 40);
-    const rx = Math.cos(heading), rz = -Math.sin(heading);
+    const LEG_U = W / 2 + 1.1;              // clear of the casing edge, (W+1.2)/2
+    const LEG_Z = CASE_BACK - 0.45;         // 0.175 m of daylight behind the casing
     for (const s of [-1, 1]) {
-      const lx = x + rx * s * (W / 2 - 1.2), lz = z + rz * s * (W / 2 - 1.2);
+      const lx = x + rx * s * LEG_U + fx * LEG_Z, lz = z + rz * s * LEG_U + fz * LEG_Z;
       pushStrut(frameIM, lx, 0, lz, lx, BASE + Hh, lz, 0.55);
       // rear raker holding the screen up against the wind
-      pushStrut(frameIM, lx, BASE + Hh * 0.8, lz,
-        lx - Math.sin(heading) * 7, 0, lz - Math.cos(heading) * 7, 0.35);
+      pushStrut(frameIM, lx, BASE + Hh * 0.8, lz, lx - fx * 7, 0, lz - fz * 7, 0.35);
     }
     for (let i = 0; i < 4; i++) {
       const y = BASE * (i / 3);
-      pushStrut(frameIM, x + rx * (W / 2 - 1.2), y, z + rz * (W / 2 - 1.2),
-        x - rx * (W / 2 - 1.2), y, z - rz * (W / 2 - 1.2), 0.24);
+      pushStrut(frameIM, x + rx * LEG_U + fx * LEG_Z, y, z + rz * LEG_U + fz * LEG_Z,
+        x - rx * LEG_U + fx * LEG_Z, y, z - rz * LEG_U + fz * LEG_Z, 0.24);
     }
     finishIM(grp, frameIM);
     S.solidBox(x - W / 2, x + W / 2, z - 4, z + 4, 0, 3.0);
@@ -958,10 +1071,19 @@
     const rows = face > 0
       ? [{ u: u, dy: hi, abs: abs, uv: 1 }, { u: u, dy: lo, abs: abs, uv: 0 }]
       : [{ u: u, dy: lo, abs: abs, uv: 0 }, { u: u, dy: hi, abs: abs, uv: 1 }];
+    // THE ONE CHOKE POINT FOR THE FLICKER, TOO. Every board in the park —
+    // fascias, pit wall, SAFER band, inner wall, hoardings — is a pair of
+    // faces `thick` apart with a cap rail bridging them, and the thinnest pair
+    // (the hoardings, 0.14 m) is thin enough to tie in the depth buffer once
+    // it is far enough away. The house pattern is a NEGATIVE polygon offset on
+    // the printed face (playercars.js's cab glass, race_livery.js's numbers),
+    // and putting it here fixes every board() consumer at once. signOffset()
+    // refuses to touch a shared cmat() material, so the plain backing panels
+    // and cap rails are left exactly as they were.
     const mesh = S.strip(rows, {
       t0: o.t0, t1: o.t1, closed: !!o.closed, step: o.step || 3.0,
       parent: o.parent, vLen: o.vLen || 11, swapUV: true, uFlip: face < 0,
-      mat: m, name: name, cast: !!o.cast,
+      mat: signOffset(m), name: name, cast: !!o.cast,
     });
     if (mesh) _boards.push({ mesh: mesh, face: face });
     return mesh;
@@ -976,22 +1098,21 @@
        o.salt / o.map / o.vLen     the artwork
        o.thick                     board depth; the back face sits at
                                    u - face*thick
-       o.back                      "read" (printed both sides) | "panel" (plain
-                                   backing) | "none" (a single DoubleSide quad)
+       o.back                      "read" (printed both sides, each face given
+                                   its OWN U direction) | "panel" (plain
+                                   backing). There is deliberately no
+                                   single-quad option: a mapped DoubleSide quad
+                                   reads MIRRORED from behind, which is the
+                                   exact defect this builder exists to end, and
+                                   the branch that offered one had no callers.
        o.capColor / o.cap:false    the capping rail across the top
      Returns {group, faces}. */
   function board(S, o) {
     const face = o.face == null ? (o.u > 0 ? -1 : 1) : (o.face < 0 ? -1 : 1);
     const tex = o.map || sponsorBand(o.salt == null ? 1 : o.salt, o.texH || 96);
     const back = o.back == null ? "panel" : o.back;
-    const faces = [];
-    if (back === "none") {
-      faces.push(boardFace(S, o, o.u, face,
-        new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }),
-        (o.name || "board") + "-face"));
-      return { group: o.parent, faces: faces };
-    }
     const thick = o.thick == null ? 0.12 : o.thick;
+    const faces = [];
     const uBack = o.u - face * thick;
     faces.push(boardFace(S, o, o.u, face, new THREE.MeshLambertMaterial({ map: tex }),
       (o.name || "board") + "-face"));
@@ -1022,15 +1143,22 @@
      double its prop counts. Called once, from where the S contract is declared. */
   function buildReset() {
     _boards.length = 0;
+    _signs.length = 0;
     PROPS.kept = 0; PROPS.cut = 0; PROPS.floating = 0;
   }
 
   /* THE RATCHET. Not a counter a build loop kept: it re-reads the POSITION and
-     UV buffers of every board actually in the scene and re-runs the two tests
-     the helper is built on, so a board that stops being upright fails even if
-     it was drawn by code that believes it is fine. `flipped` is pinned at 0. */
+     UV buffers of every board AND every flat sign face actually in the scene
+     and re-runs the tests the two helpers are built on, so a face that stops
+     being upright fails even if it was drawn by code that believes it is fine.
+     `flipped` is pinned at 0 and `faces` may only ever RISE.
+
+     The swept boards and the flat signs are audited separately because their
+     buffers are laid out differently — strip() emits (row, profile) pairs, a
+     PlaneGeometry emits its four corners top row first — and folding them into
+     one loop is how you get a test that is vacuously true for one of them. */
   function boardAudit() {
-    let flipped = 0, faces = 0, vFlip = 0, uFlip = 0;
+    let flipped = 0, faces = 0, vFlip = 0, uFlip = 0, twoSided = 0, offNormal = 0;
     for (let i = 0; i < _boards.length; i++) {
       const rec = _boards[i], g = rec.mesh && rec.mesh.geometry;
       if (!g || !g.attributes || !g.attributes.uv || !g.attributes.position) continue;
@@ -1046,8 +1174,35 @@
       if ((uv.getX(2) - uv.getX(0)) * (rec.face > 0 ? 1 : -1) <= 0) { uFlip++; bad = 1; }
       flipped += bad;
     }
-    return { boards: _boards.length, faces: faces, flipped: flipped,
-             vFlipped: vFlip, uFlipped: uFlip };
+    // --- the FLAT sign faces (gantry name, pylon boards, jumbotron) ---------
+    let signs = 0;
+    for (let i = 0; i < _signs.length; i++) {
+      const rec = _signs[i], mesh = rec.mesh, g = mesh && mesh.geometry;
+      if (!g || !g.attributes || !g.attributes.uv || !g.attributes.position) continue;
+      const p = g.attributes.position, uv = g.attributes.uv;
+      if (p.count < 4) continue;
+      faces++; signs++;
+      let bad = 0;
+      // r128's PlaneGeometry emits the TOP row first, so vertex 0 is the top
+      // left corner and vertex 2 the bottom left. V must rise with height.
+      if ((p.getY(0) - p.getY(2)) * (uv.getY(0) - uv.getY(2)) <= 0) { vFlip++; bad = 1; }
+      // U must rise along the reader's right, which for a plane presenting its
+      // own +Z is its own +X. A mirrored scale flips that in the MATRIX rather
+      // than in the buffer, so the sign of scale.x is part of the test.
+      const sx = mesh.scale.x < 0 ? -1 : 1;
+      if ((p.getX(1) - p.getX(0)) * (uv.getX(1) - uv.getX(0)) * sx <= 0) { uFlip++; bad = 1; }
+      // A DoubleSide text face IS the mirrored-text defect whatever its buffers
+      // say — the back of a mapped quad runs U the other way by definition.
+      const m = mesh.material;
+      if (m && m.side === THREE.DoubleSide) { twoSided++; bad = 1; }
+      // and the face must actually look the way its author said it does.
+      const yaw = mesh.rotation.y;
+      if (Math.sin(yaw) * rec.nx + Math.cos(yaw) * rec.nz <= 0.001) { offNormal++; bad = 1; }
+      flipped += bad;
+    }
+    return { boards: _boards.length, signs: signs, faces: faces, flipped: flipped,
+             vFlipped: vFlip, uFlipped: uFlip, twoSided: twoSided,
+             offNormal: offNormal };
   }
 
   // ================================================================== //
@@ -1747,7 +1902,8 @@
       screen: screenTex,
       tyre: tyreGeom,
     },
-    util: { box: box, makeIM: makeIM, pushStrut: pushStrut, finishIM: finishIM },
+    util: { box: box, makeIM: makeIM, pushStrut: pushStrut, finishIM: finishIM,
+            signFace: signFace },
     // the two ratchets. boardAudit re-reads the shipped BUFFERS (see above);
     // propAudit is the campus's own ledger of what it drew and what it refused.
     boardAudit: boardAudit,
@@ -1757,10 +1913,11 @@
   };
 
   /* CBZ.speedwayBoardAudit() — pin `flipped` at 0. It is a geometric re-test of
-     every board face actually in the scene, not a build-time counter, so a
-     regression anywhere (a new caller, a changed row order, a lost uFlip) fails
-     it. `boards`/`faces` are printed beside it so a "fix" that stops drawing
-     boards cannot pass. */
+     every board face AND every flat sign face actually in the scene, not a
+     build-time counter, so a regression anywhere (a new caller, a changed row
+     order, a lost uFlip, a DoubleSide quad, a mirrored scale) fails it.
+     `boards`/`signs`/`faces` are printed beside it so a "fix" that stops
+     drawing signage cannot pass, and `faces` may only ever RISE. */
   CBZ.speedwayBoardAudit = boardAudit;
   CBZ.speedwayPropAudit = CBZ.speedwayStructures.propAudit;
 })();

@@ -1369,7 +1369,7 @@
       const signTex = SU.tex.screen([
         { text: "DIAMOND SPEEDWAY", color: "#ffd451" },
       ], 1024, 128);
-      const signMat = new THREE.MeshLambertMaterial({ map: signTex, emissive: 0xffffff, emissiveIntensity: 0.28, emissiveMap: signTex, side: THREE.DoubleSide });
+      const signMat = new THREE.MeshLambertMaterial({ map: signTex, emissive: 0xffffff, emissiveIntensity: 0.28, emissiveMap: signTex });
       const span = Math.abs(uOut - uIn);
       const midU = (uIn + uOut) / 2;
       // THE SIGN SPANS THE BEAM, IT DOES NOT LIE ALONG THE TRACK. `box(...,
@@ -1379,10 +1379,38 @@
       // into a 40 m billboard lying down the straight, 0.2 m thin edge-on to
       // the cars that are supposed to read it. Same fault class as the
       // upside-down boards: a frame written by hand instead of derived.
-      U.box(grp, signMat, fG.x + fG.nx * midU, BEAM + 3.4, fG.z + fG.nz * midU,
-        span * 0.86, 2.4, 0.2, fG.heading);
-      U.box(grp, mat(0x22282f), fG.x + fG.nx * midU, BEAM + 3.4, fG.z + fG.nz * midU,
-        span * 0.9, 2.9, 0.34, fG.heading);
+      //
+      // THREE FAULTS LIVED ON THIS ONE SIGN AND ALL THREE ARE THE OWNER'S
+      // REPORT. (a) FLICKER: the artwork was a 0.20 m box nested INSIDE the
+      // 0.34 m casing box drawn on the same centre — a mapped surface entirely
+      // enclosed by an opaque one, i.e. a depth tie for its whole area. The
+      // artwork is now two flat faces standing 0.04 m PROUD of the casing,
+      // each carrying the house negative polygon offset (playercars.js's cab
+      // glass) so the pair cannot tie at distance either.
+      // (b) MIRRORED TEXT: one map on one box (or on one DoubleSide quad) is
+      // the same bug the sponsor bands had — the U axis that runs to your right
+      // from the front runs to your LEFT from behind. Two independent
+      // one-sided faces, each yawed so its own +Z is the side it is read from,
+      // is the pattern speedway_structures.js's monument() and gatehouse title
+      // beam already use; SU.util.signFace is that pattern, and it books each
+      // face into the ledger CBZ.speedwayBoardAudit() re-tests from buffers.
+      // (c) BLOCKED FACE: the truss's top chord runs at BEAM + 2.1 and is
+      // 0.30 thick, so its top surface stands at BEAM + 2.25 while the sign's
+      // foot sat at BEAM + 2.20 — the chord cut 0.05 m off the bottom of every
+      // letter, from +-1.5 m in front of the artwork. Lifting the sign 0.20 m
+      // puts its foot at BEAM + 2.40 and buys 0.15 m of daylight over the
+      // chord (and 0.20 m over the web diagonals, which peak at BEAM + 2.199).
+      const SIGN_Y = BEAM + 3.6, SIGN_CASE_D = 0.34;
+      U.box(grp, mat(0x22282f), fG.x + fG.nx * midU, SIGN_Y, fG.z + fG.nz * midU,
+        span * 0.9, 2.9, SIGN_CASE_D, fG.heading);
+      for (const face of [1, -1]) {
+        U.signFace(grp, {
+          x: fG.x + fG.nx * midU, y: SIGN_Y, z: fG.z + fG.nz * midU,
+          yaw: fG.heading + (face > 0 ? 0 : Math.PI),
+          w: span * 0.86, h: 2.4, mat: signMat,
+          proud: SIGN_CASE_D / 2 + 0.04, name: "speedway-gantry-sign",
+        });
+      }
       // THE LIGHT RIG: five columns, two lamps each, hung under the beam over
       // the racing surface. Kept addressable so the countdown can drive them.
       GANTRY.lamps.length = 0;
@@ -1738,11 +1766,14 @@
         let widest = 0;
         for (let i = 0; i < BL.length; i++) widest = Math.max(widest, BL[i].slots.length);
         // THE TWO NEW RATCHETS.
-        //  hoardingsFlipped — every sponsor board face in the park, re-tested
-        //    from its SHIPPED position/uv buffers: V must rise with world
-        //    height and U must rise toward the reader's right. PIN AT 0. It is
-        //    reported with `hoardings` (the face count) beside it so a "fix"
-        //    that simply stops drawing boards cannot pass.
+        //  hoardingsFlipped — every sponsor board face AND every flat sign face
+        //    in the park (the S/F gantry name, the four scoring-pylon boards,
+        //    the jumbotron), re-tested from its SHIPPED position/uv buffers: V
+        //    must rise with world height, U must rise toward the reader's
+        //    right, and no text face may be DoubleSide. PIN AT 0. It is
+        //    reported with `hoardings` (the total face count, which may only
+        //    RISE) and `signFaces` beside it so a "fix" that simply stops
+        //    drawing signage cannot pass.
         //  propsCut / propsKept — the campus's own decoration ledger.
         //    `propsCut` is what THIS build refused to draw (the vomitory boxes
         //    with no opening behind them, the surplus stair cores, three of
@@ -1758,6 +1789,7 @@
           gates: SITE ? SITE.gates : 0, fencePanels: SITE ? SITE.fencePanels : 0,
           hoardingsFlipped: BA ? BA.flipped : -1,
           hoardings: BA ? BA.faces : 0,
+          signFaces: BA ? (BA.signs || 0) : 0,
           propsCut: PA ? PA.propsCut : 0,
           propsKept: PA ? PA.propsKept : 0,
           propsFloating: PA ? PA.propsFloating : -1,
