@@ -2823,6 +2823,14 @@
   }
 
   function fireControl(down) {
+    // Mounted aquatic predators own the trigger before firearm state does.
+    // This covers mouse, keyboard and gamepad; touch also intercepts at its
+    // outer edge so third-person unarmed taps reach the same mouth action.
+    const animalDown = typeof down === "boolean" ? down : true;
+    if (CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(animalDown)) {
+      triggerHeld = false;
+      return;
+    }
     if (typeof down === "boolean") {
       triggerHeld = down;
       if (down) shoot();
@@ -3262,8 +3270,13 @@
   // style and measured milliseconds across a session (perf pass)
   CBZ.onAlways(52, function (dt) {
     checkReset();
+    const chutePresentation = !!((CBZ.cityChuteState && CBZ.cityChuteState()) ||
+      (CBZ.playerChar && CBZ.playerChar.skydiving));
+    // bailout.js owns a dedicated two-hand/riser viewmodel. Hide the generic
+    // fist/gun while it is active, then restore it automatically on landing.
+    if (ddT < 0) vm.visible = !!(fps.active && !chutePresentation);
     const aiming = fps.active || shoulderActive();
-    const crossShow = aiming && CBZ.game.state === "playing";
+    const crossShow = aiming && !chutePresentation && CBZ.game.state === "playing";
     if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }
 
     if (shotCD > 0) shotCD = Math.max(0, shotCD - dt);
@@ -3571,7 +3584,7 @@
       carriedGun.visible = false;
     } else {
       attachCarriedGun();
-      carriedGun.visible = armed() && !CBZ.player._swim;
+      carriedGun.visible = armed() && !CBZ.player._swim && !chutePresentation;
       const longGun = w.slot === "long" || w.slot === "rifle" || w.slot === "auto";
       const util = w.slot === "utility";
       // Two carry stances: a relaxed LOW-READY (gun lowered and tucked to

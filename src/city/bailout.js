@@ -79,6 +79,7 @@
   const CANOPY_SINK = -5.4;    // under a good canopy
   const CANOPY_FWD = 9.5;      // canopy forward airspeed
   const OPEN_SHOCK = 0.55;     // seconds of deceleration when it blooms
+  const CANOPY_HANG = 6.15;    // player root -> ram-air canopy centre
 
   function floorAt(x, z) {
     if (CBZ.cityCraftFloorY) { try { return CBZ.cityCraftFloorY(x, z); } catch (e) {} }
@@ -88,84 +89,329 @@
   }
 
   /* ================= THE FALLING BODY ================= */
-  const F = { active: false, phase: "", t: 0, yaw: 0, canopy: null, shock: 0 };
+  const F = {
+    active: false, phase: "", t: 0, yaw: 0, canopy: null, shock: 0,
+    opening: 0, flare: 0, harness: null, fpRig: null,
+  };
+
+  function cylinderBetween(parent, a, b, radius, material) {
+    const d = new THREE.Vector3().subVectors(b, a);
+    const len = d.length();
+    if (!(len > 0.0001)) return null;
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 6), material);
+    setCylinderBetween(mesh, a, b);
+    parent.add(mesh);
+    return mesh;
+  }
+
+  function setCylinderBetween(mesh, a, b) {
+    const d = new THREE.Vector3().subVectors(b, a);
+    const len = d.length();
+    if (!mesh || !(len > 0.0001)) return;
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+    mesh.scale.set(1, len, 1);
+  }
 
   function makeCanopy() {
     if (!THREE) return null;
     const g = new THREE.Group();
-    // ==================================================================
-    //  A PARACHUTE, NOT A CEILING (owner: "the canopy doesn't look like a
-    //  parachute at all, it's stupid").
-    //
-    //  The old one WAS a dome — but 3.1m across hanging 3.6m over your head,
-    //  which from underneath is not a canopy, it is a low roof: it fills the
-    //  whole sky, you never see its edge, and with no edge there is no
-    //  silhouette and no parachute. It was also MeshLambert, so its underside
-    //  — the only side you ever see — sat in its own shadow as a dark slab.
-    //  That is the flat maroon rectangle in the screenshot.
-    //
-    //  Three things make a canopy read from directly below, and it had none:
-    //    1. DISTANCE AND EDGE. A real canopy is ~7m across on ~5m of line. You
-    //       must be able to see past it to sky, or it is a roof.
-    //    2. BACKLIT FABRIC. Ripstop nylon is thin — daylight comes THROUGH it
-    //       and it glows, brightest at the crown. Unlit + slight transparency
-    //       is the honest model and it is also the cheapest.
-    //    3. GORES. The radial panel seams are THE recognisable parachute
-    //       pattern. Alternating gore colour is baked into vertex colour on the
-    //       one shared sphere, so it costs nothing.
-    //  Plus lines: many, long, converging. Four stubs read as nothing.
-    // ==================================================================
-    const R = 4.6, GORES = 12;
-    const domeGeo = new THREE.SphereGeometry(R, GORES * 2, 9, 0, Math.PI * 2, 0, Math.PI * 0.54);
-    // stripe alternating gores by azimuth, straight into vertex colour
-    const pos = domeGeo.attributes.position;
-    const col = new Float32Array(pos.count * 3);
-    const A = new THREE.Color(0xe8563a), B = new THREE.Color(0xf2f2ee);
-    for (let i = 0; i < pos.count; i++) {
-      const ang = Math.atan2(pos.getZ(i), pos.getX(i));
-      const gore = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * GORES);
-      const c = (gore & 1) ? B : A;
-      // the crown is brightest — that is where the sun comes through
-      const lift = 0.78 + 0.30 * (pos.getY(i) / R);
-      col[i * 3] = Math.min(1, c.r * lift);
-      col[i * 3 + 1] = Math.min(1, c.g * lift);
-      col[i * 3 + 2] = Math.min(1, c.b * lift);
+    g.name = "bailout-ram-air-canopy";
+    g.userData.bailoutCanopy = true;
+    const fabric = new THREE.Group();
+    fabric.name = "bailout-canopy-fabric";
+    g.add(fabric);
+    g._fabric = fabric;
+
+    // A modern sport parachute is a RAM-AIR WING, not a hemispherical umbrella:
+    // inflated rectangular cells, a shallow spanwise arch and a front/rear
+    // chord. Thirteen overlapping cell boxes fit this game's authored block
+    // language while preserving the silhouette in the reference photographs.
+    const WIDTH = 7.15, CHORD = 2.45, CELLS = 13;
+    const cellW = WIDTH / CELLS;
+    const red = new THREE.MeshStandardMaterial({ color: 0xdf3f31, roughness: 0.72, metalness: 0, side: THREE.DoubleSide });
+    const cream = new THREE.MeshStandardMaterial({ color: 0xf4efe5, roughness: 0.76, metalness: 0, side: THREE.DoubleSide });
+    const edge = new THREE.MeshStandardMaterial({ color: 0x811d24, roughness: 0.82, metalness: 0 });
+    const intake = new THREE.MeshBasicMaterial({ color: 0x241d24, side: THREE.DoubleSide });
+    const archAt = (x) => 0.24 + 0.92 * (1 - Math.pow((x / (WIDTH * 0.5)), 2));
+    const chordAt = (x) => CHORD * (0.84 + 0.16 * (1 - Math.pow((x / (WIDTH * 0.5)), 2)));
+    for (let i = 0; i < CELLS; i++) {
+      const x = -WIDTH * 0.5 + cellW * (i + 0.5);
+      const y = archAt(x);
+      const chord = chordAt(x);
+      const slope = Math.atan((-1.84 * x) / Math.pow(WIDTH * 0.5, 2));
+      const cell = new THREE.Mesh(new THREE.BoxGeometry(cellW * 1.035, 0.34, chord), (i & 1) ? cream : red);
+      cell.position.set(x, y, 0);
+      cell.rotation.z = slope;
+      cell.castShadow = true;
+      cell.receiveShadow = true;
+      fabric.add(cell);
+      // Dark open-cell mouths make the leading edge read as an inflated wing
+      // instead of a striped awning or a flat rectangle.
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(cellW * 0.78, 0.17, 0.035), intake);
+      mouth.position.set(x, y - 0.025, chord * 0.5 + 0.02);
+      mouth.rotation.z = slope;
+      fabric.add(mouth);
+      // A narrow trailing lip closes the planform when viewed from behind.
+      const lip = new THREE.Mesh(new THREE.BoxGeometry(cellW * 1.03, 0.08, 0.09), edge);
+      lip.position.set(x, y - 0.13, -chord * 0.5);
+      lip.rotation.z = slope;
+      fabric.add(lip);
     }
-    domeGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    const dome = new THREE.Mesh(domeGeo, new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide,
-      transparent: true, opacity: 0.94, depthWrite: true,
-    }));
-    dome.scale.set(1, 0.78, 1.12);        // deeper than before: curvature reads from below
-    g.add(dome);
-    // the seam lines themselves, dark against the lit fabric
-    const ribs = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.004, GORES, 5, 0, Math.PI * 2, 0, Math.PI * 0.54),
-      new THREE.MeshBasicMaterial({ color: 0x1c1c1c, wireframe: true, transparent: true, opacity: 0.30 })
-    );
-    ribs.scale.copy(dome.scale);
-    g.add(ribs);
-    // SUSPENSION LINES — twelve, running the full drop to the harness. These
-    // are most of what says "parachute" when the canopy is above your view.
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xdfe4ea, transparent: true, opacity: 0.55 });
-    const skirtY = R * 0.78 * Math.cos(Math.PI * 0.54);
-    const pts = [];
-    for (let i = 0; i < GORES; i++) {
-      const a = (i / GORES) * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * R * 0.97, skirtY, Math.sin(a) * R * 1.09 * 0.97));
-      pts.push(new THREE.Vector3(0, -6.0, 0));
+
+    // REAL LINE CASCADES. Upper lines fan from individual cells into four
+    // cascade junctions; only four load-bearing risers continue to two shoulder
+    // groups on the harness. No line touches the player's feet and no twelve
+    // independent strings converge on one impossible point.
+    const upperMat = new THREE.LineBasicMaterial({ color: 0xe8edf2, transparent: true, opacity: 0.72 });
+    const riserMat = new THREE.MeshBasicMaterial({ color: 0x20262d });
+    const upperPts = [];
+    const upperPairs = [];
+    const anchors = [];
+    const cascadeNodes = [];
+    const risers = [];
+    for (const side of [-1, 1]) {
+      for (const row of [-1, 1]) {
+        const node = new THREE.Vector3(side * 0.92, -2.52, row * 0.22);
+        const anchor = new THREE.Vector3(side * 0.36, -4.62, row * 0.10);
+        const nodeIndex = cascadeNodes.length;
+        cascadeNodes.push(node);
+        anchors.push(anchor);
+        for (let j = 0; j < 5; j++) {
+          const x = side * (0.52 + j * 0.62);
+          const chord = chordAt(x);
+          const top = new THREE.Vector3(x, archAt(x) - 0.19, row * chord * 0.34);
+          upperPts.push(top, node.clone());
+          upperPairs.push({ top, nodeIndex });
+        }
+        risers.push(cylinderBetween(g, node, anchor, 0.026, riserMat));
+      }
     }
-    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
-    // hung HIGHER, so you can see past its edge to sky — the thing that turns
-    // a roof back into a canopy.
-    g.position.y = 6.4;
+    const upperLines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(upperPts), upperMat);
+    upperLines.name = "canopy-cascaded-suspension-lines";
+    g.add(upperLines);
+
+    g.userData.cells = CELLS;
+    g.userData.upperLineCount = upperPts.length / 2;
+    g.userData.riserCount = anchors.length;
+    g.userData.cascadeNodes = cascadeNodes.map((point) => point.toArray());
+    g.userData.harnessAnchors = anchors.map((point) => point.toArray());
+    g.userData.hang = CANOPY_HANG;
+    g._lineLayout = {
+      upperLines, upperPairs, cascadeNodes, anchors, risers,
+      openingNodes: cascadeNodes.map((point) => point.clone()),
+    };
+    g.position.y = CANOPY_HANG;
+    setCanopyOpening(g, 1);
     return g;
   }
+
+  function setCanopyOpening(canopy, value) {
+    if (!canopy) return;
+    const o = Math.max(0, Math.min(1, value == null ? 1 : value));
+    const sx = 0.34 + o * 0.66;
+    const sy = 0.18 + o * 0.82;
+    const sz = 0.58 + o * 0.42;
+    const lift = -1.1 * (1 - o);
+    if (canopy._fabric) {
+      canopy._fabric.scale.set(sx, sy, sz);
+      canopy._fabric.position.y = lift;
+    }
+    const layout = canopy._lineLayout;
+    if (layout && layout.upperLines && layout.upperLines.geometry) {
+      for (let i = 0; i < layout.cascadeNodes.length; i++) {
+        const full = layout.cascadeNodes[i];
+        const tucked = layout.openingNodes[i];
+        tucked.set(
+          (full.x < 0 ? -0.46 : 0.46) + (full.x - (full.x < 0 ? -0.46 : 0.46)) * o,
+          -3.08 + (full.y + 3.08) * o,
+          (full.z < 0 ? -0.10 : 0.10) + (full.z - (full.z < 0 ? -0.10 : 0.10)) * o
+        );
+      }
+      const positions = layout.upperLines.geometry.attributes.position;
+      for (let i = 0; i < layout.upperPairs.length; i++) {
+        const pair = layout.upperPairs[i];
+        const top = pair.top;
+        const node = layout.openingNodes[pair.nodeIndex];
+        positions.setXYZ(i * 2, top.x * sx, top.y * sy + lift, top.z * sz);
+        positions.setXYZ(i * 2 + 1, node.x, node.y, node.z);
+      }
+      positions.needsUpdate = true;
+      layout.upperLines.geometry.computeBoundingSphere();
+      for (let i = 0; i < layout.risers.length; i++) {
+        setCylinderBetween(layout.risers[i], layout.openingNodes[i], layout.anchors[i]);
+      }
+    }
+    canopy.userData.opening = o;
+  }
+
+  // The harness is part of the PLAYER, not part of the canopy. It moves with
+  // the torso in freefall and remains visible after a cutaway; the pack,
+  // shoulder webbing, chest strap, hip belt and thigh loops make the load path
+  // physically readable before the first suspension line begins.
+  function ensureHarness(ch) {
+    if (!THREE || !ch || !ch.body || !ch.parts) return null;
+    if (ch._bailoutHarness) return ch._bailoutHarness;
+    const web = new THREE.MeshStandardMaterial({ color: 0x202832, roughness: 0.92, metalness: 0.02 });
+    const packMat = new THREE.MeshStandardMaterial({ color: 0x3c4653, roughness: 0.88, metalness: 0.01 });
+    const reserveMat = new THREE.MeshStandardMaterial({ color: 0x9f2e2b, roughness: 0.84, metalness: 0 });
+    const root = new THREE.Group();
+    root.name = "bailout-harness";
+    root.userData.bailoutHarness = true;
+    function box(parent, w, h, d, material, x, y, z) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+      mesh.position.set(x, y, z); mesh.castShadow = true; parent.add(mesh); return mesh;
+    }
+    box(root, 0.72, 0.78, 0.30, packMat, 0, 1.43, -0.40);       // main container
+    box(root, 0.54, 0.24, 0.34, reserveMat, 0, 1.77, -0.39);    // reserve flap
+    box(root, 0.10, 0.92, 0.07, web, 0.27, 1.43, 0.30);         // shoulder straps
+    box(root, 0.10, 0.92, 0.07, web, -0.27, 1.43, 0.30);
+    box(root, 0.66, 0.09, 0.07, web, 0, 1.37, 0.32);            // chest strap
+    box(root, 0.84, 0.11, 0.08, web, 0, 0.99, 0.28);           // hip belt
+    box(root, 0.09, 0.50, 0.09, web, 0.34, 1.83, 0.02);        // riser tabs
+    box(root, 0.09, 0.50, 0.09, web, -0.34, 1.83, 0.02);
+    ch.body.add(root);
+    const extra = [];
+    for (const leg of [ch.parts.ll, ch.parts.rl]) {
+      if (!leg) continue;
+      const loop = box(leg, 0.40, 0.10, 0.42, web, 0, -0.18, 0);
+      extra.push(loop);
+    }
+    ch._bailoutHarness = { root, extra };
+    return ch._bailoutHarness;
+  }
+
+  function setHarnessVisible(ch, visible) {
+    const h = ch && ch._bailoutHarness;
+    if (!h) return;
+    h.root.visible = !!visible;
+    for (const part of h.extra || []) part.visible = !!visible;
+  }
+
+  // First person needs its own near-camera read because city/view.js correctly
+  // hides the world body to prevent face clipping. These are not second physics
+  // arms: a small camera-child viewmodel mirrors the same phase record as the
+  // full character pose—simple block hands in the wind, then both hands on two risers.
+  function makeFirstPersonRig() {
+    if (!THREE) return null;
+    const rig = new THREE.Group();
+    rig.name = "bailout-first-person-rig";
+    rig.userData.bailoutFirstPerson = true;
+    rig.position.z = -0.42; // keep the hands readable without filling the lens
+    const skin = new THREE.MeshBasicMaterial({ color: 0xe7ae83, depthTest: false, depthWrite: false });
+    const sleeve = new THREE.MeshBasicMaterial({ color: 0x2d79ad, depthTest: false, depthWrite: false });
+    const web = new THREE.MeshBasicMaterial({ color: 0x1e2731, depthTest: false, depthWrite: false });
+    const line = new THREE.LineBasicMaterial({ color: 0xe9edf1, transparent: true, opacity: 0.86, depthTest: false, depthWrite: false });
+    const brakeLine = new THREE.LineBasicMaterial({ color: 0xe84b3d, transparent: true, opacity: 0.94, depthTest: false, depthWrite: false });
+    const toggleMat = new THREE.MeshBasicMaterial({ color: 0xd94134, depthTest: false, depthWrite: false });
+    function box(parent, w, h, d, material, x, y, z) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+      mesh.position.set(x, y, z); parent.add(mesh); return mesh;
+    }
+    function hand() {
+      const h = new THREE.Group();
+      box(h, 0.15, 0.13, 0.38, sleeve, 0, 0, 0.16);       // forearm recedes toward lens
+      // Match character.js: hands are one simple cap, never articulated digits.
+      box(h, 0.20, 0.10, 0.22, skin, 0, 0, -0.15);
+      const toggle = new THREE.Mesh(new THREE.TorusGeometry(0.057, 0.014, 5, 12), toggleMat);
+      toggle.position.set(0, 0.03, -0.22);
+      toggle.visible = false;
+      h.add(toggle);
+      h.userData.toggle = toggle;
+      rig.add(h);
+      return h;
+    }
+    const left = hand(), right = hand();
+    const risers = new THREE.Group();
+    const linePts = [];
+    for (const side of [-1, 1]) {
+      const lower = new THREE.Vector3(side * 0.34, -0.03, -0.82);
+      const splitA = new THREE.Vector3(side * 0.52, 0.38, -1.02);
+      const splitB = new THREE.Vector3(side * 0.78, 0.92, -1.32);
+      cylinderBetween(risers, lower, splitA, 0.022, web);
+      linePts.push(splitA.clone(), splitB.clone());
+      linePts.push(splitA.clone().add(new THREE.Vector3(side * 0.035, 0, 0.03)), splitB.clone().add(new THREE.Vector3(side * 0.13, 0.02, -0.03)));
+    }
+    const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(linePts), line);
+    risers.add(lines);
+    risers.visible = false;
+    rig.add(risers);
+    const brakeLines = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(), new THREE.Vector3(),
+        new THREE.Vector3(), new THREE.Vector3(),
+      ]),
+      brakeLine
+    );
+    brakeLines.visible = false;
+    rig.add(brakeLines);
+    rig._bailoutParts = { left, right, risers, brakeLines };
+    rig.traverse(function (o) { o.renderOrder = 1200; o.frustumCulled = false; });
+    rig.visible = false;
+    return rig;
+  }
+
+  function poseFirstPersonRig(rig, state) {
+    if (!rig || !rig._bailoutParts) return false;
+    state = state || {};
+    const canopy = state.phase === "canopy" || state.phase === "opening";
+    const flare = canopy ? Math.max(0, Math.min(1, state.flare || 0)) : 0;
+    const t = +state.t || 0;
+    const w = Math.sin(t * 2.2) * 0.018;
+    const p = rig._bailoutParts;
+    if (!canopy) {
+      p.left.position.set(-0.56, -0.29 + w, -0.82);
+      p.right.position.set(0.56, -0.29 - w, -0.82);
+      p.left.rotation.set(0.16, 0.20, -0.12);
+      p.right.rotation.set(0.16, -0.20, 0.12);
+      p.risers.visible = false;
+      p.brakeLines.visible = false;
+      p.left.userData.toggle.visible = p.right.userData.toggle.visible = false;
+    } else {
+      const down = flare * 0.34;
+      p.left.position.set(-0.46, -0.04 - down + w, -0.86);
+      p.right.position.set(0.46, -0.04 - down - w, -0.86);
+      p.left.rotation.set(-0.10 + flare * 0.28, 0.08, -0.05);
+      p.right.rotation.set(-0.10 + flare * 0.28, -0.08, 0.05);
+      p.risers.visible = true;
+      p.brakeLines.visible = true;
+      p.left.userData.toggle.visible = p.right.userData.toggle.visible = true;
+      const brakePositions = p.brakeLines.geometry.attributes.position;
+      const togglePoint = new THREE.Vector3(0, 0.03, -0.22);
+      const leftToggle = togglePoint.clone().applyEuler(p.left.rotation).add(p.left.position);
+      const rightToggle = togglePoint.clone().applyEuler(p.right.rotation).add(p.right.position);
+      brakePositions.setXYZ(0, leftToggle.x, leftToggle.y, leftToggle.z);
+      brakePositions.setXYZ(1, -0.78, 0.92, -1.32);
+      brakePositions.setXYZ(2, rightToggle.x, rightToggle.y, rightToggle.z);
+      brakePositions.setXYZ(3, 0.78, 0.92, -1.32);
+      brakePositions.needsUpdate = true;
+      p.brakeLines.geometry.computeBoundingSphere();
+    }
+    return true;
+  }
+
+  function ensureFirstPersonRig() {
+    if (!F.fpRig) {
+      F.fpRig = makeFirstPersonRig();
+      if (F.fpRig && CBZ.camera) CBZ.camera.add(F.fpRig);
+    }
+    return F.fpRig;
+  }
+
+  // Public builders are the same functions used by runtime. The visual loop
+  // and focused contracts therefore inspect the shipped geometry/poses instead
+  // of maintaining a lookalike test rig.
+  CBZ.cityBuildChuteCanopy = makeCanopy;
+  CBZ.citySetChuteOpening = setCanopyOpening;
+  CBZ.cityEnsureBailoutHarness = ensureHarness;
+  CBZ.cityBuildBailoutFirstPerson = makeFirstPersonRig;
+  CBZ.cityPoseBailoutFirstPerson = poseFirstPersonRig;
 
 
   function beginFall(fromCraft) {
     const P = CBZ.player; if (!P) return;
     F.active = true; F.phase = "freefall"; F.t = 0; F.shock = 0; F.rearm = false;
+    F.opening = 0; F.flare = 0;
     F.yaw = fromCraft ? (fromCraft.heading || 0) : 0;
     P.grounded = false;
     // Inherit the aircraft's momentum — you do not stop dead in the air.
@@ -174,7 +420,15 @@
       F.driftX = (fromCraft.vx || 0) * 0.55;
       F.driftZ = (fromCraft.vz || 0) * 0.55;
     } else { P.vy = 0; F.driftX = F.driftZ = 0; }
-    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
+    if (CBZ.playerChar && CBZ.playerChar.group) {
+      const ch = CBZ.playerChar;
+      ch.group.visible = true;
+      ch.group.rotation.x = 0; ch.group.rotation.z = 0;
+      ch.skydiving = { phase: "freefall", t: 0, opening: 0, flare: 0, bailout: true };
+      F.harness = ensureHarness(ch);
+      setHarnessVisible(ch, true);
+    }
+    ensureFirstPersonRig();
     if (CBZ.city && CBZ.city.note) {
       CBZ.city.note("Freefall. Pull to deploy.", 2.6, { from: "Rig", app: "messages" });
     }
@@ -184,9 +438,16 @@
   function deploy() {
     if (!F.active || F.phase !== "freefall") return false;
     if (CBZ.CONFIG.BAILOUT_CHUTE === false) return false;
-    F.phase = "canopy"; F.shock = OPEN_SHOCK;
+    F.phase = "canopy"; F.shock = OPEN_SHOCK; F.opening = 0.02; F.flare = 0;
     if (!F.canopy && CBZ.scene) { F.canopy = makeCanopy(); if (F.canopy) CBZ.scene.add(F.canopy); }
-    if (F.canopy) F.canopy.visible = true;
+    if (F.canopy) {
+      F.canopy.visible = true;
+      F.canopy.scale.set(1, 1, 1);
+      setCanopyOpening(F.canopy, F.opening);
+    }
+    if (CBZ.playerChar) CBZ.playerChar.skydiving = {
+      phase: "opening", t: F.t, opening: F.opening, flare: 0, bailout: true,
+    };
     if (CBZ.sfx) { try { CBZ.sfx("cloth"); } catch (e) {} }
     return true;
   }
@@ -200,9 +461,12 @@
   function cutAway() {
     if (!F.active || F.phase !== "canopy") return false;
     if (CBZ.CONFIG.BAILOUT_CUTAWAY === false) return false;
-    F.phase = "freefall"; F.shock = 0;
+    F.phase = "freefall"; F.shock = 0; F.opening = 0; F.flare = 0;
     F.rearm = true;                     // deploy key must be RELEASED before it pulls again
     if (F.canopy) F.canopy.visible = false;
+    if (CBZ.playerChar) CBZ.playerChar.skydiving = {
+      phase: "freefall", t: F.t, opening: 0, flare: 0, bailout: true,
+    };
     if (CBZ.sfx) { try { CBZ.sfx("cloth"); } catch (e) {} }
     return true;
   }
@@ -215,7 +479,9 @@
   }
 
   CBZ.cityChuteState = function () {
-    return F.active ? { phase: F.phase, agl: aglNow() } : null;
+    return F.active ? {
+      phase: F.phase, agl: aglNow(), opening: F.opening, flare: F.flare,
+    } : null;
   };
 
   function aglNow() {
@@ -225,7 +491,13 @@
 
   function endFall(landed) {
     F.active = false; F.phase = "";
+    F.opening = 0; F.flare = 0;
     if (F.canopy) F.canopy.visible = false;
+    if (F.fpRig) F.fpRig.visible = false;
+    if (CBZ.playerChar) {
+      if (CBZ.playerChar.skydiving && CBZ.playerChar.skydiving.bailout) CBZ.playerChar.skydiving = null;
+      setHarnessVisible(CBZ.playerChar, false);
+    }
     const P = CBZ.player;
     if (landed && P) { P.grounded = true; P.vy = 0; }
   }
@@ -366,9 +638,30 @@
       try { keep = tickGhost(ghosts[i], dt); } catch (e) { keep = false; }
       if (!keep) ghosts.splice(i, 1);
     }
-    if (!F.active) return;
-
     const P = CBZ.player;
+    const ch = CBZ.playerChar;
+    if (!F.active) {
+      // A long ordinary fall gets the same stable belly pose and first-person
+      // hands, but never a parachute pack. Small jumps remain ordinary jumps.
+      const generic = !!(P && !P.dead && !P.driving && !P._swim && !P._mountedAnimal &&
+        CBZ.game && CBZ.game.state === "playing" && !P.grounded && (P.vy || 0) < -8 &&
+        (P._fallPeak || 0) > 8);
+      if (ch) {
+        if (generic) ch.skydiving = {
+          phase: "freefall", t: (ch.skydiving && ch.skydiving.generic ? ch.skydiving.t : 0) + dt,
+          opening: 0, flare: 0, generic: true,
+        };
+        else if (ch.skydiving && ch.skydiving.generic) ch.skydiving = null;
+        setHarnessVisible(ch, false);
+      }
+      const fp = generic && CBZ.fps && CBZ.fps.active ? ensureFirstPersonRig() : F.fpRig;
+      if (fp) {
+        fp.visible = !!(generic && CBZ.fps && CBZ.fps.active);
+        if (fp.visible) poseFirstPersonRig(fp, ch && ch.skydiving);
+      }
+      return;
+    }
+
     if (!P || P.dead) { endFall(false); return; }
     F.t += dt;
     const k = CBZ.keys || {};
@@ -377,23 +670,27 @@
       // after a cut-away the pull key must come UP once before it pulls again
       if (F.rearm) { if (!k[" "] && !k["f"]) F.rearm = false; }
       else if (k[" "] || k["f"]) deploy();
+      F.opening = 0; F.flare = 0;
       P.vy = Math.max(TERMINAL, (P.vy || 0) - 9.81 * dt * 1.55);
       F.driftX *= (1 - dt * 0.55); F.driftZ *= (1 - dt * 0.55);
     } else if (F.phase === "canopy") {
       // Bloom: a hard but brief deceleration, then a steady sink.
       if (F.shock > 0) {
-        F.shock -= dt;
+        F.shock = Math.max(0, F.shock - dt);
         P.vy += (CANOPY_SINK - P.vy) * Math.min(1, dt * 9);
       } else {
         P.vy += (CANOPY_SINK - P.vy) * Math.min(1, dt * 3.4);
       }
+      const openRaw = Math.max(0, Math.min(1, 1 - F.shock / OPEN_SHOCK));
+      F.opening = openRaw * openRaw * (3 - 2 * openRaw);
       // Steer: turn with A/D, and trade forward speed with W/S the way toggles
       // do — pulling both hands down flares and slows you.
       if (k["a"]) F.yaw += dt * 1.25;
       if (k["d"]) F.yaw -= dt * 1.25;
-      const flare = k["s"] ? 0.25 : (k["w"] ? 1.15 : 1);
-      F.driftX = Math.sin(F.yaw) * CANOPY_FWD * flare;
-      F.driftZ = Math.cos(F.yaw) * CANOPY_FWD * flare;
+      F.flare += ((k["s"] ? 1 : 0) - F.flare) * Math.min(1, dt * 8);
+      const driveMul = k["s"] ? 0.25 : (k["w"] ? 1.15 : 1);
+      F.driftX = Math.sin(F.yaw) * CANOPY_FWD * driveMul;
+      F.driftZ = Math.cos(F.yaw) * CANOPY_FWD * driveMul;
       if (k["s"]) P.vy += dt * 1.6;      // flaring also arrests the sink briefly
 
       // THE CANOPY DISCARDS THE FALL. systems/physics.js scores a landing on
@@ -418,13 +715,28 @@
     P.grounded = false;
 
     if (F.canopy) {
-      F.canopy.position.set(P.pos.x, P.pos.y + 6.4, P.pos.z);   // matches makeCanopy's hang height
+      F.canopy.position.set(P.pos.x, P.pos.y + CANOPY_HANG, P.pos.z);
       F.canopy.rotation.y = F.yaw;
       F.canopy.visible = (F.phase === "canopy");
+      setCanopyOpening(F.canopy, F.opening);
     }
-    if (CBZ.playerChar && CBZ.playerChar.group) {
-      CBZ.playerChar.group.position.set(P.pos.x, P.pos.y, P.pos.z);
-      CBZ.playerChar.group.rotation.y = F.yaw;
+    if (ch && ch.group) {
+      ch.group.position.set(P.pos.x, P.pos.y, P.pos.z);
+      ch.group.rotation.y = F.yaw;
+      ch.group.rotation.x = 0; ch.group.rotation.z = 0;
+      ch.skydiving = {
+        phase: F.phase === "canopy" && F.opening < 0.98 ? "opening" : F.phase,
+        t: F.t, opening: F.opening, flare: F.flare, bailout: true,
+      };
+      F.harness = ensureHarness(ch);
+      setHarnessVisible(ch, true);
+    }
+    const fp = ensureFirstPersonRig();
+    if (fp) {
+      fp.visible = !!(CBZ.fps && CBZ.fps.active);
+      poseFirstPersonRig(fp, ch && ch.skydiving ? ch.skydiving : {
+        phase: F.phase, t: F.t, opening: F.opening, flare: F.flare,
+      });
     }
 
     // SPLASHDOWN. Over open water the ground test below is unreachable by

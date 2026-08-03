@@ -7,14 +7,16 @@
    stops fearing you, follows at heel (never teleports — it runs), and can be
    told to stay. Babies are tameable too (the cutest pets in the game).
 
-   And any animal LARGE ENOUGH TO CARRY A PERSON is RIDEABLE like a horse:
+   And every moving animal is RIDEABLE. Land animals use the shared grounded
+   player root; aquatic animals use the same ownership seam with a water-column
+   controller (rise/dive, momentum, shoreline avoidance and real breaches):
    horses and zebras obviously, but also elephants, rhinos, giraffes, bison,
    moose, elk, caribou, cows, all three bears, lions, tigers, cheetahs — even
    the legendary White Stag, White Lion and Snow Leopard if you manage to tame
    one instead of shooting it. Mount a tamed adult ([I] in the panel) and YOUR
-   movement becomes the mount's: the animal is glued under you with a gallop
-   bob, and your ground speed is multiplied by the species' gait (a cheetah is
-   the fastest thing on land; an elephant is a slow unstoppable platform).
+   movement becomes the mount's: the animal is glued under you with a gallop or
+   swim gait, and speed is derived from the species (a cheetah is the fastest
+   thing on land; a dolphin turns a surface run into a huge ballistic breach).
 
    AND A TAMED ANIMAL IS A COMPANION, NOT A FOLLOWER DOT. `CBZ.petFollow` (see
    THE AFFECTION LOOP, below) is the ONE heel/go-to/sit brain in the game —
@@ -23,13 +25,11 @@
    watch you, with the sit solved out of each species' own discovered leg rig
    and no species table anywhere in it.
 
-   HOW RIDING PLUGS IN (no parallel movement system): physics.js computes the
-   player step from walkSpeed × player._rideScale (a new one-line hook, same
-   pattern as the wound limp's _moveScale). While mounted we publish the
-   species' speed multiplier there and, AFTER physics has moved you (our
-   updater runs later in the frame), we place the animal under your feet and
-   seat you at saddle height. Dismount restores everything. Collision, swim,
-   regions, camera — all untouched; the mount IS the player, just faster/taller.
+   HOW RIDING PLUGS IN (no parallel ownership): physics.js owns land mounts and
+   delegates an aquatic mount to cityAquaticMountStep before on-foot collision.
+   The latter uses waterField's canonical shore oracle and swim.js takes the
+   body back on dismount. A late visual pass places both animal and rider from
+   that one shared root; camera, regions and input continue following player.
 ============================================================ */
 (function () {
   "use strict";
@@ -62,8 +62,9 @@
   const NAMES = ["Willow", "Atlas", "Clover", "Ember", "Biscuit", "Storm", "Maple", "Titan", "Pepper", "Juniper", "Boulder", "Honey", "Comet", "Sage", "Thunder", "Mochi"];
 
   // ============================================================
-  //  RIDEABLE — every species big enough to carry a person, with its saddle
-  //  height (where the rider sits) and gait (ground-speed multiplier).
+  //  RIDEABLE — every species big enough to carry a person, with its legacy
+  //  feet-height fallback and gait multiplier. The real seated socket is
+  //  discovered from the built animal geometry by animalSaddle() below.
   // ============================================================
   const RIDEABLE = {
     horse:            { y: 1.55, mult: 2.3 },
@@ -93,19 +94,141 @@
   // deer-class + the rest of the farm stock (ANIMALS_ALL_CONTROLLABLE): every
   // land animal big enough to take a rider is a mount — a whitetail is a
   // skittish fast ride, a pig/sheep a slow barnyard joke that still WORKS.
-  // Saddle heights read off each build's actual back line (× species scale).
+  // The y values remain compatibility fallbacks; live backs are measured.
   const RIDEABLE_EXTRA = {
     whitetail_deer: { y: 1.4,  mult: 2.15 },
     pig:            { y: 0.9,  mult: 1.35 },
     sheep:          { y: 1.2,  mult: 1.35 },
     goat:           { y: 0.95, mult: 1.55 },
   };
+  // AQUATIC RIDE PROFILES ARE GENERATED FROM THE SPECIES ROW. There must never
+  // be a second roster that lets a newly-authored fish move but makes it
+  // untouchable on iPad: `aquatic:true` is the capability declaration. Speed is
+  // the same authored `sp.spd` the wild swim mover reads, converted once into
+  // metres/second; scale slows turning instead of silently banning huge bodies.
+  const AQUATIC_RIDES = Object.create(null);
+  function aquaticRideDef(sp) {
+    if (!sp || !sp.aquatic || !ALLCTL()) return null;
+    if (AQUATIC_RIDES[sp.id]) return AQUATIC_RIDES[sp.id];
+    const id = String(sp.id || "aquatic");
+    const scale = Math.max(0.25, sp.scale || 1);
+    const cruise = Math.max(5.5, Math.min(16, (sp.spd || 1.5) * 4));
+    const hunter = !!(sp.bite > 0) || /shark|megalodon|orca|barracuda/.test(id);
+    return (AQUATIC_RIDES[sp.id] = {
+      y: Math.max(0.45, 0.92 * scale),
+      mult: cruise / (((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4)),
+      aquatic: true,
+      cruise: cruise,
+      sprint: cruise * (id === "dolphin" ? 1.78 : 1.56),
+      turn: Math.max(0.75, 3.8 / (0.65 + scale * 0.55)),
+      rise: Math.max(3.1, Math.min(6.5, cruise * 0.38)),
+      dive: Math.max(3.5, Math.min(7.2, cruise * 0.42)),
+      breach: id === "dolphin",
+      breachVel: id === "dolphin" ? 15.5 : 0,
+      attack: hunter,
+      shipBite: id === "megalodon",
+    });
+  }
   // THE one rideable lookup — every gate below goes through this, so the
-  // extra roster is a single-flag revert.
+  // extra roster and every current/future aquatic are a single-flag revert.
   function rideDef(sp) {
     if (!sp || !sp.id) return null;
-    return RIDEABLE[sp.id] || (ALLCTL() ? RIDEABLE_EXTRA[sp.id] : null) || null;
+    return RIDEABLE[sp.id] || (ALLCTL() ? RIDEABLE_EXTRA[sp.id] : null) || aquaticRideDef(sp) || null;
   }
+
+  // Mount jump impulse is species-owned. Light, athletic animals clear more;
+  // elephants/rhinos/bison produce a heavy hop instead of borrowing the exact
+  // human jump. The shared physics integrator still owns gravity/collision.
+  function rideJump(sp) {
+    if (!sp) return 6.2;
+    const water = aquaticRideDef(sp);
+    if (water) return water.breachVel || water.rise;
+    const id = sp.id || "", scale = Math.max(0.7, sp.scale || 1);
+    if (/elephant/.test(id)) return 3.7;
+    if (/giraffe|rhino|bison/.test(id)) return 4.8;
+    if (/cow|pig|sheep|goat|boar/.test(id)) return 5.4;
+    if (/lion|tiger|cheetah|leopard/.test(id)) return 7.4;
+    return Math.max(5.5, Math.min(7.2, 7.0 - Math.max(0, scale - 1) * 0.7));
+  }
+
+  // Discover the main back-bearing body in the ANIMAL'S local frame. The old
+  // RIDEABLE.y numbers were written for a WALKING avatar's feet; treating one
+  // as a seated hip socket buried the rider inside tall animals (completely
+  // under a giraffe's belly) and behind a bison's hump. A saddle is geometry:
+  // choose the longest substantial horizontal mesh, then use the centre of
+  // its actual top face for X/Y and its depth for leg spread. Long legs,
+  // antlers, necks and decorative stripes lose naturally because none has the
+  // body mesh's length-squared footprint.
+  function animalSaddle(group, sp, fallbackY) {
+    const fallbackScale = (sp && sp.scale) || 1;
+    const fallback = {
+      x: 0,
+      y: (fallbackY || 1.2) * fallbackScale,
+      width: 0.7 * fallbackScale,
+      length: 1.5 * fallbackScale,
+    };
+    if (!group || !THREE.Box3 || !THREE.Matrix4 || !THREE.Vector3) return fallback;
+    group.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+    const rel = new THREE.Matrix4(), local = new THREE.Box3();
+    let best = null;
+    group.traverse(function (o) {
+      if (!o.isMesh || !o.geometry) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      if (!o.geometry.boundingBox) return;
+      rel.multiplyMatrices(inv, o.matrixWorld);
+      local.copy(o.geometry.boundingBox).applyMatrix4(rel);
+      const dx = local.max.x - local.min.x;
+      const dy = local.max.y - local.min.y;
+      const dz = local.max.z - local.min.z;
+      if (dx < 0.3 || dy < 0.14 || dz < 0.22) return;
+      const score = dx * dx * dz;
+      if (best && score <= best.score) return;
+      const top = o.geometry.boundingBox.getCenter(new THREE.Vector3());
+      top.y = o.geometry.boundingBox.max.y;
+      top.applyMatrix4(rel);
+      best = { score: score, top: top, depth: dz, length: dx };
+    });
+    if (!best) return fallback;
+    const sx = Math.abs(group.scale.x) || fallbackScale;
+    const sy = Math.abs(group.scale.y) || fallbackScale;
+    const sz = Math.abs(group.scale.z) || fallbackScale;
+    return {
+      x: best.top.x * sx,
+      y: best.top.y * sy,
+      width: Math.max(0.48, best.depth * sz),
+      length: best.length * sx,
+    };
+  }
+
+  function rideVisualSpec(sp, group) {
+    const R = rideDef(sp);
+    if (!R) return null;
+    const socket = animalSaddle(group, sp, R.y);
+    // Aquatic bodies carry a dorsal exactly where the centre of the longest
+    // torso mesh lies. Move the socket toward the nose by a fraction of that
+    // measured torso length so a rider sits on the back in FRONT of the fin,
+    // rather than intersecting it. This remains geometry-derived for rays,
+    // turtles, fish, cetaceans and sharks—there is no per-species seat table.
+    const aquaticForward = R.aquatic ? Math.min(2.1, (socket.length || 0) * 0.19) : 0;
+    return {
+      x: socket.x + aquaticForward, y: socket.y, mult: R.mult, jump: rideJump(sp), width: socket.width,
+      aquatic: !!R.aquatic, cruise: R.cruise || 0, sprint: R.sprint || 0,
+      turn: R.turn || 0, rise: R.rise || 0, dive: R.dive || 0,
+      breach: !!R.breach, attack: !!R.attack, shipBite: !!R.shipBite,
+    };
+  }
+  CBZ.cityRideDefinition = function (sp) {
+    const R = rideDef(sp); return R ? {
+      y: R.y, mult: R.mult, jump: rideJump(sp), aquatic: !!R.aquatic,
+      cruise: R.cruise || 0, sprint: R.sprint || 0, breach: !!R.breach,
+      attack: !!R.attack, shipBite: !!R.shipBite,
+    } : null;
+  };
+  CBZ.cityRideVisualSpec = function (actorOrSpecies, group) {
+    const sp = actorOrSpecies && (actorOrSpecies.species || actorOrSpecies);
+    return rideVisualSpec(sp, group || (actorOrSpecies && actorOrSpecies.group));
+  };
 
   // ============================================================
   //  FEEDING / TAMING — predators take hunted MEAT, herbivores any food.
@@ -898,22 +1021,360 @@
   // ============================================================
   //  RIDING — mount/dismount + the per-frame glue.
   // ============================================================
-  const ride = { mount: null, head: 0, phase: 0, lx: 0, lz: 0 };
+  const ride = {
+    mount: null, head: 0, phase: 0, lx: 0, lz: 0, visual: null, water: null,
+    attackT: 0, attackDur: 0, attackCd: 0, attackHit: false, attackHitP: -1,
+    target: null, targetKind: null, attackPitch: 0, attackRoll: 0,
+  };
+  const seatV = new THREE.Vector3();
+  const riderHipV = new THREE.Vector3();
+  const jawV = new THREE.Vector3();
+  const biteV = new THREE.Vector3();
+  const biteBox = new THREE.Box3();
+  const biteNormal = new THREE.Vector3();
+  const AQUATIC_AUDIT = {
+    mounts: 0, breaches: 0, reentries: 0, attacks: 0, hits: 0, shipBites: 0,
+    lastSpecies: null, lastTarget: null,
+  };
+
+  function aquaticMounted(a) { return !!(a && a.species && a.species.aquatic && ride.water); }
+  function seaY(x, z) {
+    if (CBZ.citySeaHeightAt) {
+      const y = CBZ.citySeaHeightAt(x, z);
+      if (Number.isFinite(y)) return y;
+    }
+    return CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+  }
+  function waterDepth(x, z) {
+    if (CBZ.cityWaterDepthAt) {
+      const d = CBZ.cityWaterDepthAt(x, z);
+      if (Number.isFinite(d)) return Math.max(1.2, d);
+    }
+    return 18;
+  }
+  function shortestAngle(d) {
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  function aquaticSeatY(V, pitch) {
+    const ch = CBZ.playerChar;
+    const hs = (ch && ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
+    const hip = ((ch && ch.hipY) || 0.95) * hs;
+    return V.x * Math.sin(pitch || 0) + V.y * Math.cos(pitch || 0) - hip;
+  }
+
+  // Mouth position comes from creature_combat's geometry discovery; the matrix
+  // turns that authored +X jaw point into world space. This is sampled only on
+  // a trigger edge / strike frame, never in the ordinary swim hot path.
+  function jawWorld(a) {
+    const p = (CBZ.creatureJawPoint && CBZ.creatureJawPoint(a)) || { x: 1, y: 0.8, z: 0 };
+    a.group.updateMatrixWorld(true);
+    return jawV.set(p.x, p.y, p.z).applyMatrix4(a.group.matrixWorld);
+  }
+  function biteDistance(target, mouth) {
+    if (!target || !target.group || !target.group.parent) return Infinity;
+    target.group.updateMatrixWorld(true);
+    biteBox.setFromObject(target.group);
+    biteBox.clampPoint(mouth, biteV);
+    return biteV.distanceTo(mouth);
+  }
+  function inBiteFront(mouth, point) {
+    const dx = point.x - mouth.x, dz = point.z - mouth.z;
+    const d = Math.hypot(dx, dz);
+    return d < 0.25 || (dx * Math.cos(ride.head) + dz * Math.sin(ride.head)) / d > 0.08;
+  }
+  function marineCar(car) {
+    return !!(car && !car.dead && car.group &&
+      (car._yacht || (car.model && car.model.body === "boat") ||
+       (car.group.userData && car.group.userData.carStyle === "boat") ||
+       (car._playerCarFeel && car._playerCarFeel.marine)));
+  }
+  function considerBiteTarget(target, kind, mouth, maxD, best) {
+    if (!target || target.dead || target === ride.mount || !target.group) return best;
+    const d = biteDistance(target, mouth);
+    if (d > maxD || d >= best.d || !inBiteFront(mouth, biteV)) return best;
+    best.target = target; best.kind = kind; best.d = d;
+    return best;
+  }
+  function biteReach(a) {
+    return Math.max(3.0, Math.max(0.35, (a && a.species && a.species.scale) || 1) * 2.5);
+  }
+  function selectBiteTarget(a, R) {
+    const mouth = jawWorld(a);
+    const best = { target: null, kind: null, d: biteReach(a) };
+    const list = animals();
+    for (let i = 0; i < list.length; i++) considerBiteTarget(list[i], "animal", mouth, best.d, best);
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) considerBiteTarget(peds[i], "ped", mouth, best.d, best);
+    const cops = CBZ.cityCops || [];
+    for (let i = 0; i < cops.length; i++) considerBiteTarget(cops[i], "cop", mouth, best.d, best);
+    if (R.shipBite) {
+      const cars = CBZ.cityCars || [];
+      for (let i = 0; i < cars.length; i++) if (marineCar(cars[i])) considerBiteTarget(cars[i], "ship", mouth, best.d, best);
+    }
+    return best;
+  }
+
+  function damageBiteTarget(a, target, kind) {
+    if (!target || target.dead) return false;
+    const sp = a.species, scale = Math.max(0.35, sp.scale || 1);
+    const mouth = jawWorld(a);
+    const dist = biteDistance(target, mouth);
+    // Use the same envelope selection used. This especially matters for the
+    // megalodon's jaw below a surface hull: accepting a target at 6.5 m and
+    // then shrinking the strike to 5.1 m made the visible bite a fake miss.
+    if (dist > biteReach(a) || !inBiteFront(mouth, biteV)) return false;
+    const damage = Math.max(8, Math.round(sp.bite || 12));
+    if (kind === "animal") {
+      if (!CBZ.cityWildlifeHit) return false;
+      CBZ.cityWildlifeHit(target,
+        { head: false, point: biteV, dir: { x: Math.cos(ride.head), y: 0.12, z: Math.sin(ride.head) }, from: a.pos },
+        { damage: damage, by: a, cause: "eaten by a " + String(sp.name || sp.id).toLowerCase() });
+    } else if (kind === "cop") {
+      if (!CBZ.cityHurtCop) return false;
+      if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
+      CBZ.cityHurtCop(target, damage, {
+        fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
+        byPlayer: true,
+      });
+    } else if (kind === "ped") {
+      if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
+      target.hp = (target.hp == null ? 100 : target.hp) - damage;
+      if (target.hp <= 0 && CBZ.cityKillPed) {
+        CBZ.cityKillPed(target, {
+          fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
+          byPlayer: true,
+        }, "eaten by a " + String(sp.name || sp.id).toLowerCase());
+      } else if (CBZ.body && CBZ.body.hit) {
+        CBZ.body.hit(target, { fromX: a.pos.x, fromZ: a.pos.z, force: 4 + scale * 2, knockdown: 1.1 });
+      }
+    } else if (kind === "ship") {
+      if (!CBZ.cityDamageCar) return false;
+      const shipDamage = Math.max(145, Math.round(damage * 2.5));
+      biteNormal.set(-Math.cos(ride.head), 0, -Math.sin(ride.head));
+      CBZ.cityDamageCar(target, shipDamage, {
+        byPlayer: true, bite: true, crumple: true, point: biteV, normal: biteNormal,
+      });
+      target._megalodonBites = (target._megalodonBites || 0) + 1;
+      target.vx = (target.vx || 0) + Math.cos(ride.head) * (2.5 + scale);
+      target.vz = (target.vz || 0) + Math.sin(ride.head) * (2.5 + scale);
+      target.v = Math.max(0, (target.v || 0) * 0.35);
+      AQUATIC_AUDIT.shipBites++;
+    } else return false;
+    if (CBZ.waterSplashAt) CBZ.waterSplashAt(biteV.x, seaY(biteV.x, biteV.z), biteV.z, Math.min(3.8, 0.7 + scale));
+    if (CBZ.sfx) { try { CBZ.sfx("hit", { volume: Math.min(1.2, 0.55 + scale * 0.18) }); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(Math.min(0.85, 0.18 + scale * 0.18));
+    AQUATIC_AUDIT.hits++;
+    AQUATIC_AUDIT.lastTarget = kind;
+    return true;
+  }
+
+  function startAquaticAttack() {
+    const a = ride.mount, R = a && rideDef(a.species);
+    if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return false;
+    const pick = selectBiteTarget(a, R);
+    ride.target = pick.target; ride.targetKind = pick.kind;
+    ride.attackT = 0.0001; ride.attackDur = R.shipBite ? 0.72 : 0.56;
+    ride.attackHit = false; ride.attackHitP = -1; ride.attackCd = R.shipBite ? 0.85 : 0.62;
+    a._atkAnim = 0;
+    if (ride.water) ride.water.v = Math.max(ride.water.v || 0, (R.cruise || 8) * 0.82);
+    AQUATIC_AUDIT.attacks++;
+    return true;
+  }
+  CBZ.cityMountedAnimalAttack = function (down) {
+    const a = ride.mount, R = a && rideDef(a.species);
+    if (!a || !R || !R.aquatic) return false;
+    if (down !== false && R.attack) startAquaticAttack();
+    return true;                                      // mounted animal owns the trigger
+  };
+
+  function tickAquaticAttack(a, dt) {
+    if (ride.attackCd > 0) ride.attackCd = Math.max(0, ride.attackCd - dt);
+    ride.attackPitch = 0; ride.attackRoll = 0;
+    if (!(ride.attackT > 0)) return;
+    ride.attackT += dt;
+    const p = Math.min(1, ride.attackT / ride.attackDur);
+    a._atkAnim = p;
+    if (p < 0.42) ride.attackPitch = -0.20 * Math.min(1, p / 0.42);
+    else {
+      const q = (p - 0.42) / 0.58;
+      ride.attackPitch = Math.sin(Math.min(1, q * 1.4) * Math.PI) * 0.34;
+      ride.attackRoll = Math.sin(q * 9) * 0.09 * (1 - q);
+    }
+    // Contact is a WINDOW, not one magic animation frame. A fast shark can
+    // cross an entire target between two 60 Hz samples; retry while the jaw is
+    // open and let the geometry distance/front test decide the first real hit.
+    if (!ride.attackHit && p >= 0.38 && p <= 0.72) {
+      ride.attackHit = damageBiteTarget(a, ride.target, ride.targetKind);
+      if (ride.attackHit) ride.attackHitP = p;
+    }
+    // Open through the approach, then snap shut immediately AFTER real contact.
+    // Previously damage could resolve at p=.18 while the jaw stayed wide until
+    // p=.64, so the target was already hurt while the shark visibly held its
+    // mouth open through it. A miss still performs a full gape and recovery;
+    // a hit turns the geometry result into the clench trigger.
+    let open = p < 0.30 ? ease(p / 0.30) : 1;
+    if (ride.attackHit && ride.attackHitP >= 0) {
+      open = Math.max(0.08, 1 - ease((p - ride.attackHitP) / 0.16) * 0.92);
+    } else if (p > 0.70) {
+      open = 1 - ease((p - 0.70) / 0.30);
+    }
+    if (CBZ.swimJaw) CBZ.swimJaw(a, open);
+    if (p >= 1) {
+      ride.attackT = 0; ride.target = null; ride.targetKind = null;
+      ride.attackHitP = -1;
+      ride.attackPitch = 0; ride.attackRoll = 0; a._atkAnim = -1;
+      if (CBZ.swimJaw) CBZ.swimJaw(a, 0);
+    }
+  }
+
+  // The aquatic mount owns the same player root that physics.js hands to cars
+  // and snowboards, but integrates it in the water column. Horizontal travel
+  // goes through waterfield.moveInWater (the canonical shore oracle); vertical
+  // travel is momentum with a seabed floor. A dolphin breach is the one state
+  // transition: sprint + rise near the surface launches a ballistic body, then
+  // gravity returns that SAME root to the sea and the water takes it back.
+  CBZ.cityAquaticMountStep = function (dt) {
+    const a = ride.mount, P = CBZ.player;
+    if (!a || !P || !aquaticMounted(a) || P.dead || P.driving || a.dead) return false;
+    const R = rideDef(a.species), W = ride.water, V = ride.visual;
+    if (!R || !R.aquatic || !W || !V) return false;
+    let fdt = CBZ.feelDt != null ? CBZ.feelDt : dt;
+    if (!(fdt > 0)) fdt = dt || 0.016;
+    fdt = Math.max(0.001, Math.min(0.08, fdt));
+    const keys = CBZ.keys || {}, cam = CBZ.cam || { yaw: 0 };
+    const blockedInput = !!((CBZ.simView && CBZ.simView.active) || (CBZ.fullMap && CBZ.fullMap.active) ||
+      (CBZ.cineActive && CBZ.cineActive()) || P.stun > 0 || P._cityArrested);
+    const sy = Math.sin(cam.yaw || 0), cy = Math.cos(cam.yaw || 0);
+    let mx = 0, mz = 0;
+    if (!blockedInput) {
+      if (keys.w) { mx -= sy; mz -= cy; }
+      if (keys.s) { mx += sy; mz += cy; }
+      if (keys.d) { mx += cy; mz -= sy; }
+      if (keys.a) { mx -= cy; mz += sy; }
+    }
+    const len = Math.hypot(mx, mz);
+    if (len > 0.001) {
+      mx /= len; mz /= len;
+      const wantH = Math.atan2(mz, mx);
+      const maxTurn = (R.turn || 2.2) * fdt;
+      let d = shortestAngle(wantH - ride.head);
+      if (d > maxTurn) d = maxTurn; else if (d < -maxTurn) d = -maxTurn;
+      ride.head += d;
+    }
+    const sprint = !blockedInput && !!keys.shift && len > 0.001 && (P.stamina == null || P.stamina > 0);
+    const wantSpeed = len > 0.001 ? (sprint ? R.sprint : R.cruise) : 0;
+    const accel = wantSpeed > W.v ? 8.5 + R.cruise * 0.7 : 5.5 + R.cruise * 0.35;
+    const dv = Math.max(-accel * fdt, Math.min(accel * fdt, wantSpeed - W.v));
+    W.v = Math.max(0, W.v + dv);
+    P.sprint = sprint; P.speed = W.v;
+
+    const time = ((typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001) % 3600;
+    if (W.v > 0.001) {
+      const wf = CBZ.waterField;
+      if (wf && wf.moveInWater) {
+        const nav = wf.moveInWater(P.pos.x, P.pos.z, ride.head, W.v * fdt,
+          a.waterClearance || 8, time, W.nav);
+        P.pos.x = nav.x; P.pos.z = nav.z;
+        if (nav.blocked) W.v *= 0.35;
+        ride.head = nav.heading;
+      } else {
+        P.pos.x += Math.cos(ride.head) * W.v * fdt;
+        P.pos.z += Math.sin(ride.head) * W.v * fdt;
+      }
+    }
+
+    const surf = seaY(P.pos.x, P.pos.z);
+    const depth = waterDepth(P.pos.x, P.pos.z);
+    const vin = blockedInput ? 0 : (keys[" "] ? 1 : ((keys.control || keys.c) ? -1 : 0));
+    if (W.breachCd > 0) W.breachCd = Math.max(0, W.breachCd - dt);
+    if (W.airborne) {
+      W.vy -= 17.5 * fdt;
+      W.y += W.vy * fdt;
+      W.pitch = Math.max(-0.72, Math.min(1.18, Math.atan2(W.vy, Math.max(4, W.v))));
+      if (W.vy < 0 && W.y <= surf - Math.max(0.18, (a.swimDepth || 1) * 0.12)) {
+        W.airborne = false; W.y = surf - Math.max(0.22, (a.swimDepth || 1) * 0.18);
+        W.vy = -Math.min(3.8, Math.max(1.8, Math.abs(W.vy) * 0.22));
+        W.v *= 0.78; W.breachCd = 1.15;
+        AQUATIC_AUDIT.reentries++;
+        if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 2.8);
+        if (CBZ.sfx) { try { CBZ.sfx("water", { volume: 1.1, force: true }); } catch (e) {} }
+        if (CBZ.shake) CBZ.shake(0.62);
+      }
+    } else {
+      const wantVy = vin > 0 ? (R.rise || 4) : (vin < 0 ? -(R.dive || 4) : 0);
+      const va = vin ? 12 : 5.5;
+      W.vy += Math.max(-va * fdt, Math.min(va * fdt, wantVy - W.vy));
+      if (!vin) W.vy *= Math.exp(-2.8 * fdt);
+      W.y += W.vy * fdt;
+      const bedY = surf - depth + Math.max(0.35, (a.species.scale || 1) * 0.32);
+      const topY = surf - Math.max(0.28, (a.swimDepth || 1) * (R.breach ? 0.36 : 0.72));
+      if (W.y < bedY) { W.y = bedY; if (W.vy < 0) W.vy = 0; }
+      if (W.y > topY) { W.y = topY; if (W.vy > 0) W.vy *= 0.42; }
+      W.pitch += (Math.max(-0.62, Math.min(0.72, W.vy * 0.115)) - W.pitch) * Math.min(1, fdt * 4.2);
+      if (R.breach && sprint && vin > 0 && W.breachCd <= 0 && W.vy > 1.2 && W.y >= topY - 0.08) {
+        W.airborne = true; W.vy = R.breachVel || 15.5;
+        W.v = Math.max(W.v, R.sprint * 1.04); W.pitch = 0.78;
+        AQUATIC_AUDIT.breaches++;
+        if (CBZ.waterSplashAt) CBZ.waterSplashAt(P.pos.x, surf, P.pos.z, 2.2);
+        if (CBZ.sfx) { try { CBZ.sfx("water", { volume: 1, force: true }); } catch (e) {} }
+        if (CBZ.shake) CBZ.shake(0.42);
+      }
+    }
+    W.roll += ((shortestAngle(ride.head - W.lastHead) / fdt) * -0.065 - W.roll) * Math.min(1, fdt * 4);
+    W.roll = Math.max(-0.42, Math.min(0.42, W.roll)); W.lastHead = ride.head;
+    P.pos.y = W.y + aquaticSeatY(V, W.pitch + ride.attackPitch);
+    P.vy = W.vy; P.grounded = false; P._fallPeak = 0;
+    P._swim = false; P._aquaticMount = a;
+    return true;
+  };
 
   function canRide(a) {
-    return !!(a && a.tamed && !a.dead && rideDef(a.species) && a.grow == null);
+    return !!(a && !a.dead && rideDef(a.species) && a.grow == null &&
+      (a.tamed || (ALLCTL() && a.species && a.species.aquatic)));
   }
   function mount(a) {
     if (!canRide(a) || ride.mount) return;
     const P = CBZ.player;
+    // A mount cannot simultaneously be somebody else's seized victim/attacker.
+    // predator.js owns the only legal release path (camera, jaw pose, pins and
+    // Euler order all need refunding), so ask it before taking the body.
+    if (CBZ.predatorRelease) CBZ.predatorRelease(a, "mounted");
     ride.mount = a; a.ridden = true; a.stay = false; a.goTo = null;
     petRelease(a);                                    // never ride a seated animal
     ride.lx = P.pos.x; ride.lz = P.pos.z; ride.phase = 0;
-    ride.head = Math.atan2(P.pos.z - a.pos.z, P.pos.x - a.pos.x);
+    ride.visual = rideVisualSpec(a.species, a.group);
+    const aquatic = !!ride.visual.aquatic;
+    ride.head = aquatic ? (a.heading || 0) : Math.atan2(P.pos.z - a.pos.z, P.pos.x - a.pos.x);
     // step onto the animal (you walk to IT, it doesn't snap to you)
     P.pos.x = a.pos.x; P.pos.z = a.pos.z;
-    P._rideScale = rideDef(a.species).mult;
-    note("Riding " + (a.petName || a.species.name) + " — E to dismount.", 2.4);
+    ride.water = aquatic ? {
+      y: a.group.position.y,
+      v: 0, vy: 0, pitch: a.group.rotation.z || 0, roll: a.group.rotation.x || 0,
+      airborne: false, breachCd: 0, lastHead: ride.head,
+      nav: { x: a.pos.x, z: a.pos.z, heading: ride.head, blocked: false, shore: -999 },
+    } : null;
+    if (aquatic) {
+      P.pos.y = ride.water.y + aquaticSeatY(ride.visual, ride.water.pitch);
+      P.vy = 0; P.grounded = false; P._swim = false; P._aquaticMount = a;
+      AQUATIC_AUDIT.mounts++; AQUATIC_AUDIT.lastSpecies = a.species.id;
+    } else {
+      P.pos.y = groundY(P.pos.x, P.pos.z); P.vy = 0; P.grounded = true;
+      P._aquaticMount = null;
+    }
+    P._mountedAnimal = a;
+    P._rideScale = ride.visual.mult;
+    P._rideJump = ride.visual.jump;
+    if (CBZ.playerChar) CBZ.playerChar.riding = {
+      width: ride.visual.width, moving: false, airborne: false, phase: 0
+    };
+    ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
+    const help = aquatic
+      ? (ride.visual.breach ? " — hold sprint + rise near the surface to BREACH; E dismounts." :
+        (ride.visual.attack ? " — Fire bites; E dismounts." : " — rise/dive with Jump/C; E dismounts."))
+      : " — E to dismount.";
+    note("Riding " + (a.petName || a.species.name) + help, 2.8);
   }
   // One public route for direct-touch/controller helpers. Tamed animals mount
   // immediately; a wild animal can be attempted, but strength/danger matters.
@@ -921,8 +1382,12 @@
   // on the player. Success is deliberately uncommon for dangerous wildlife and
   // establishes the same persistent tame relationship as feeding.
   function attemptMount(a) {
-    if (!a || a.dead || a.external || a.species.aquatic || !rideDef(a.species) || a.grow != null) return false;
+    if (!a || a.dead || a.external || !rideDef(a.species) || a.grow != null) return false;
     if (ride.mount) { if (ride.mount === a) dismount(); return true; }
+    // The world object is the iPad button. Aquatic actors are already difficult
+    // to reach in a moving water column; tapping one mounts it immediately and
+    // does not silently turn a megalodon into a 3.5%-chance menu gamble.
+    if (a.species.aquatic && ALLCTL()) { mount(a); return ride.mount === a; }
     if (a.tamed) { mount(a); return ride.mount === a; }
 
     const level = Math.max(1, (g.level || g.cityLevel || 1) | 0);
@@ -961,37 +1426,81 @@
   function dismount() {
     const a = ride.mount; if (!a) return;
     const P = CBZ.player;
+    const wasAquatic = aquaticMounted(a), W = ride.water;
     ride.mount = null; a.ridden = false;
-    P._rideScale = 1;
-    // slide off beside the mount — a SIDE-step perpendicular to its facing,
-    // scaled by the species' bulk so you land next to an elephant's flank
-    // instead of inside it. Feet on the ground, no fall.
+    ride.visual = null; ride.water = null;
+    ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
+    ride.attackPitch = ride.attackRoll = 0;
+    a._atkAnim = -1;
+    if (CBZ.swimJaw) CBZ.swimJaw(a, 0);
+    P._mountedAnimal = null;
+    P._aquaticMount = null;
+    P._rideScale = 1; P._rideJump = 0;
+    if (CBZ.playerChar) {
+      CBZ.playerChar.riding = null;
+      if (CBZ.playerChar.group) { CBZ.playerChar.group.rotation.x = 0; CBZ.playerChar.group.rotation.z = 0; }
+    }
+    // Slide off beside the mount. Land can use either flank; water chooses a
+    // flank that remains navigable so a dolphin running parallel to a beach
+    // cannot deposit its rider six inches across the shoreline mask.
     if (ALLCTL()) {
       const side = ride.head + Math.PI / 2;
       const off = 1.1 + (a.species.scale || 1) * 0.55;
-      P.pos.x += Math.cos(side) * off; P.pos.z += Math.sin(side) * off;
+      if (wasAquatic) {
+        const wf = CBZ.waterField, x0 = P.pos.x, z0 = P.pos.z;
+        const lx = x0 + Math.cos(side) * off, lz = z0 + Math.sin(side) * off;
+        const rx = x0 - Math.cos(side) * off, rz = z0 - Math.sin(side) * off;
+        if (wf && wf.isNavigableWater && wf.isNavigableWater(lx, lz, 0)) { P.pos.x = lx; P.pos.z = lz; }
+        else if (wf && wf.isNavigableWater && wf.isNavigableWater(rx, rz, 0)) { P.pos.x = rx; P.pos.z = rz; }
+        // Both sides can be a harbour wall: remain at the known-valid animal
+        // root and let the swimmer move clear instead of guessing onto land.
+      } else {
+        P.pos.x += Math.cos(side) * off; P.pos.z += Math.sin(side) * off;
+      }
     } else P.pos.x += 1.4;                            // legacy fixed step (flag off)
-    P.pos.y = groundY(P.pos.x, P.pos.z); P.vy = 0; P.grounded = true;
-    a.group.position.set(a.pos.x, groundY(a.pos.x, a.pos.z), a.pos.z);
+    if (wasAquatic) {
+      // Hand the rider straight into the existing swimmer at the height they
+      // actually left the saddle. citySwimBegin owns buoyancy/breath from here;
+      // the tiny downward velocity lets its fallback entry seam catch this too.
+      P.vy = -0.15; P.grounded = false;
+      if (CBZ.citySwimBegin) CBZ.citySwimBegin({ y: P.pos.y, vx: Math.cos(ride.head) * ((W && W.v) || 0) * 0.35,
+        vz: Math.sin(ride.head) * ((W && W.v) || 0) * 0.35 });
+    } else {
+      P.pos.y = groundY(P.pos.x, P.pos.z); P.vy = 0; P.grounded = true;
+      a.group.position.set(a.pos.x, groundY(a.pos.x, a.pos.z), a.pos.z);
+    }
   }
   CBZ.cityDismount = dismount;   // other systems (death, cars) can force it
-  CBZ.cityCanRideAnimal = function (a) { return !!(a && !a.dead && !a.external && !a.species.aquatic && rideDef(a.species) && a.grow == null); };
+  CBZ.cityCanRideAnimal = function (a) { return !!(a && !a.dead && !a.external && rideDef(a.species) && a.grow == null); };
   CBZ.cityMountAnimal = attemptMount;
+  CBZ.cityMountedAnimal = function () { return ride.mount; };
 
-  // runs AFTER physics (order 10) each frame: seat the rider, glue the mount.
-  CBZ.onUpdate(47.2, function (dt) {
-    if (!dt || dt > 0.5) dt = 0.05;
+  // FINAL PRESENTATION OWNER. wildlife.js registers its numbered updater from
+  // inside the landmass build, after loop.js's one-time updater sort, so its
+  // nominal 47.1 actually runs at the tail of the updater array. An onUpdate
+  // saddle pass therefore got overwritten even at "47.6": the swim animator
+  // pitched the dolphin after the rider was seated. `always` is a separate,
+  // boot-sorted phase that runs after every updater; 49.8 seats the assembly
+  // after that late animal tick and immediately before camera.js at 50.
+  CBZ.onAlways(49.8, function (dt) {
+    const playing = g.state === "playing";
+    if (!playing) dt = 0;
+    else if (!dt || dt > 0.5) dt = 0.05;
     const a = ride.mount; if (!a) return;
     const P = CBZ.player;
     // forced dismount: death, cars, the mount dying under you
     if (!P || P.dead || P.driving || a.dead) { dismount(); return; }
     const R = rideDef(a.species);
     if (!R) { dismount(); return; }                     // roster flag flipped mid-ride
+    const V = ride.visual || (ride.visual = rideVisualSpec(a.species, a.group));
+    P._mountedAnimal = a;
     P._rideScale = R.mult;                              // republish (wounds etc. can't stick)
+    P._rideJump = V.jump;
     const gx = P.pos.x, gz = P.pos.z;
     const mdx = gx - ride.lx, mdz = gz - ride.lz;
-    const moving = (mdx * mdx + mdz * mdz) > 1e-6;
-    if (moving) {
+    const W = R.aquatic ? ride.water : null;
+    const moving = W ? W.v > 0.08 : (mdx * mdx + mdz * mdz) > 1e-6;
+    if (moving && !W) {
       if (ALLCTL()) {
         // the mount TURNS toward the travel direction at a clamped rate (big
         // animals swing slower) instead of pivot-snapping under the rider.
@@ -1004,16 +1513,82 @@
       } else ride.head = Math.atan2(mdz, mdx);        // legacy snap (flag off)
     }
     ride.lx = gx; ride.lz = gz;
-    // gallop bob only while moving
+    const airborne = W ? !!W.airborne : (!P.grounded || Math.abs(P.vy || 0) > 0.05);
+    // Gallop bob only while grounded and moving. Airborne motion is the shared
+    // ballistic root itself; adding a second sine there would make the animal
+    // detach visually from its collision trajectory.
     ride.phase += dt * (moving ? 9 : 0.6);
-    const bob = moving ? Math.abs(Math.sin(ride.phase)) * 0.09 * (a.species.scale || 1) : 0;
-    const gy = groundY(gx, gz);
-    a.group.position.set(gx, gy + bob, gz);
+    const bob = !W && moving && !airborne ? Math.abs(Math.sin(ride.phase)) * 0.09 * (a.species.scale || 1) : 0;
+    const rootY = W ? W.y : P.pos.y;
+    a.group.position.set(gx, rootY + bob, gz);
     faceAnimal(a, ride.head);
-    // seat the rider on the back (after physics grounded them at floor level)
-    P.pos.y = gy + R.y * 0.82 + bob;
-    P.vy = 0; P.grounded = true;
+    if (W) {
+      if (playing) tickAquaticAttack(a, dt);
+      a.group.rotation.x = W.roll + ride.attackRoll;
+      a.group.rotation.z = W.pitch + ride.attackPitch;
+    }
+    // Land keeps the physical player root at the animal's feet so ordinary
+    // gravity/collision carry both. Water keeps its physical animal root in W.y
+    // and publishes the rider-height root to P.pos.y for correct camera framing.
+    // In both cases the authored socket is transformed by the animal rotation,
+    // so the rider stays attached through a dive, bite and airborne breach.
+    const ch = CBZ.playerChar;
+    if (ch && ch.group) {
+      const hs = (ch.group.userData && ch.group.userData.humanScale) || 1;
+      const hip = (ch.hipY || 0.95) * hs;
+      seatV.set(V.x, V.y, 0).applyEuler(a.group.rotation);
+      // Rotate ABOUT THE HIPS, not the feet. Merely pitching a feet-rooted
+      // human after placing it on the socket sweeps the pelvis off the animal
+      // during a dive/breach (the focused contract caught a 20 cm separation).
+      ch.group.rotation.x = W ? (W.roll + ride.attackRoll) * 0.42 : 0;
+      ch.group.rotation.y = Math.PI / 2 - ride.head;
+      ch.group.rotation.z = W ? (W.pitch + ride.attackPitch) * 0.58 : 0;
+      riderHipV.set(0, hip, 0).applyEuler(ch.group.rotation);
+      ch._mountSocketX = gx + seatV.x;
+      ch._mountSocketY = rootY + bob + seatV.y;
+      ch._mountSocketZ = gz + seatV.z;
+      const charY = rootY + bob + seatV.y - riderHipV.y;
+      ch.group.position.set(gx + seatV.x - riderHipV.x, charY, gz + seatV.z - riderHipV.z);
+      if (W) P.pos.y = charY;                           // camera follows the rider, not a whale's belly
+      ch.riding = {
+        width: V.width,
+        moving: moving,
+        airborne: airborne,
+        phase: ride.phase,
+        speed: P.speed || 0,
+        aquatic: !!W,
+        attacking: ride.attackT > 0,
+      };
+      // physics.js normally animates the player before this late placement.
+      // Its aquatic-controller early return is intentional, so this owner runs
+      // the exact same canonical rig once here instead of leaving a frozen rider.
+      if (W && CBZ.animChar) CBZ.animChar(ch, P.speed || 0, dt);
+    }
   });
+
+  CBZ.aquaticMountAudit = function () {
+    const ids = [], S = CBZ.WILDLIFE_SPECIES || {};
+    for (const id in S) if (S[id] && S[id].aquatic && rideDef(S[id])) ids.push(id);
+    const a = ride.mount, W = ride.water;
+    return {
+      rideableSpecies: ids.length, species: ids,
+      mounted: !!(a && W), mountedSpecies: a && W ? a.species.id : null,
+      saddle: a && ride.visual ? { x: ride.visual.x, y: ride.visual.y, width: ride.visual.width } : null,
+      placedSocket: CBZ.playerChar && Number.isFinite(CBZ.playerChar._mountSocketX)
+        ? { x: CBZ.playerChar._mountSocketX, y: CBZ.playerChar._mountSocketY, z: CBZ.playerChar._mountSocketZ }
+        : null,
+      speed: W ? +(W.v || 0).toFixed(2) : 0,
+      verticalSpeed: W ? +(W.vy || 0).toFixed(2) : 0,
+      airborne: !!(W && W.airborne), attacking: ride.attackT > 0,
+      attackTarget: ride.targetKind,
+      attackTargetDistance: a && ride.target && ride.target.group
+        ? +biteDistance(ride.target, jawWorld(a)).toFixed(2) : null,
+      mounts: AQUATIC_AUDIT.mounts, breaches: AQUATIC_AUDIT.breaches,
+      reentries: AQUATIC_AUDIT.reentries, attacks: AQUATIC_AUDIT.attacks,
+      hits: AQUATIC_AUDIT.hits, shipBites: AQUATIC_AUDIT.shipBites,
+      lastSpecies: AQUATIC_AUDIT.lastSpecies, lastTarget: AQUATIC_AUDIT.lastTarget,
+    };
+  };
 
   // ============================================================
   //  INTERACTIONS — walk up to any live animal; the panel shows the verbs.
@@ -1046,6 +1621,10 @@
       const baby = a.grow != null ? "baby " : "";
       if (a.ridden) return { label: "Riding " + (a.petName || sp.name), note: "hold on" };
       if (a.tamed) return { label: "" + a.petName + " the " + baby + sp.name, note: rideDef(sp) ? (a.grow != null ? "too young to ride" : "your loyal mount") : "your companion" };
+      if (sp.aquatic && rideDef(sp)) return {
+        label: (a.legendary ? "★ " : "") + "A " + baby + sp.name,
+        note: a.grow != null ? "too young to ride" : "tap/press the animal to ride",
+      };
       return {
         label: (a.legendary ? "★ " : "") + "A " + baby + sp.name,
         note: feedItemFor(sp) ? ("hold food out to tame (" + (a.feeds || 0) + "/" + feedsNeeded(sp) + ")") : (isPredator(sp) ? "tameable — bring MEAT" : "tameable — bring food"),

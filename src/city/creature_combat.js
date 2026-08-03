@@ -455,7 +455,14 @@
   function jawPoint(actor) {
     if (actor._jawL) return actor._jawL;
     var g = actor.group, out = { x: 1, y: 0.9, z: 0 };
-    if (g && g.children) {
+    // Authored aquatic mouths publish the point at the front-centre of their
+    // actual tooth ring. Prefer that contract over the legacy "farthest direct
+    // mesh" guess, which cannot see nested hinged jaw groups and could put
+    // damage out at the snout while the visible mouth closed somewhere else.
+    var mouth = g && g.userData && g.userData.aquaticMouth;
+    if (mouth && mouth.bite) {
+      out.x = mouth.bite.x; out.y = mouth.bite.y; out.z = mouth.bite.z || 0;
+    } else if (g && g.children) {
       var kids = g.children, bx = -1e9, by = 0, seen = false;
       for (var i = 0; i < kids.length; i++) {
         var c = kids[i];
@@ -735,6 +742,7 @@
   CBZ.creatureStyleFor = creatureStyleFor;
   CBZ.creatureSeizeStyleFor = creatureSeizeStyleFor;
   CBZ.creatureJawPoint = jawPoint;      // group-LOCAL hold point, cached per actor
+  CBZ.creatureBiteWound = biteWound;    // mounted predators reuse the same paired wound owner
   CBZ.creatureRestY = restY;            // medium-aware rest height (land or water)
   // CANCEL A SWING IN FLIGHT, cleanly. Exported because this file is the only
   // one that can: it owns `_lungeAmt` (the un-applied forward offset), `_atkAnim`

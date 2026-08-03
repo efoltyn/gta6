@@ -1972,7 +1972,9 @@
       // Placement is 100% hash01-driven here, so removing/keeping instances
       // cannot re-deal anything: there is no sequential stream to disturb.
       const BIG_ROCKS = CFG.WILD_ROCK_SCATTER === true;
-      const SMALL_ROCK = BIG_ROCKS ? 1 : (CFG.WILD_SMALL_ROCKS !== false ? 0.30 : 0);
+      // Both sizes are opt-in. Empty country is preferable to a repeated field
+      // of geometric stones, especially where this underlay crosses the desert.
+      const SMALL_ROCK = BIG_ROCKS ? 1 : (CFG.WILD_SMALL_ROCKS === true ? 0.30 : 0);
       const rockG = (SMALL_ROCK && SMALL_ROCK !== 1 && CBZ.makeRock)
         ? CBZ.makeRock(0.8, 0x8CA117, 1, { scrapes: 9, depthMin: 0.06, depthMax: 0.34 })
         : new THREE.BoxGeometry(1.6, 1.1, 1.4);
@@ -2102,6 +2104,7 @@
           }
           ti++;
         } else {
+          if (!SMALL_ROCK) continue;
           if (SMALL_ROCK && SMALL_ROCK !== 1) {
             // SMALL FRACTURED FIELD STONE — 0.4-0.7 m across, squashed,
             // sitting partly IN the soil, standing at most ~0.35 m proud.

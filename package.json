@@ -11,7 +11,19 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:pages": "npm run build && node tools/test-pages-build-browser.mjs",
-    "test:interiors": "node tools/test-interior-containment-browser.mjs"
+    "test:interiors": "node tools/test-interior-containment-browser.mjs",
+    "test:wildlife-attachments": "node tools/test-wildlife-attachments.mjs",
+    "test:attachments": "node tools/test-reality-support.mjs && node tools/test-wildlife-attachments.mjs && node tools/test-authored-attachments.mjs",
+    "test:wildlife-mount": "node tools/test-wildlife-mount-browser.mjs",
+    "test:aquatic-mount": "node tools/test-aquatic-mount-browser.mjs",
+    "test:shark-mouth": "node tools/test-shark-mouth-browser.mjs",
+    "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
+    "visual:compare": "node tools/visual-compare.mjs",
+    "visual:wildlife": "node tools/visual-compare.mjs --preset wildlife-attachments --before https://efoltyn.github.io/gta6/",
+    "visual:mounted-riders": "node tools/visual-compare.mjs --preset mounted-riders --before https://efoltyn.github.io/gta6/",
+    "visual:sea-mounts": "node tools/visual-compare.mjs --preset sea-mounts --before https://efoltyn.github.io/gta6/",
+    "visual:shark-bites": "node tools/visual-compare.mjs --preset shark-bites --before https://efoltyn.github.io/gta6/",
+    "visual:parachute": "node tools/visual-compare.mjs --preset parachute-rig --before https://efoltyn.github.io/gta6/"
   },
   "devDependencies": {
     "three": "^0.164.1",

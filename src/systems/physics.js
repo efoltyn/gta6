@@ -1180,6 +1180,15 @@
     // The controller is installed by city/snowboard.js after this module.
     if (CBZ.citySnowboardStep && CBZ.citySnowboardStep(dt)) return;
 
+    // An aquatic animal is another physical vehicle, except its hull is a live
+    // creature and its road is the water column. wildlife_tame.js integrates
+    // the shared player/animal root through waterField; on-foot gravity and the
+    // ocean's phantom y=0 floor must not move that root a second time.
+    if (CBZ.cityAquaticMountStep && CBZ.cityAquaticMountStep(dt)) {
+      if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
+      return;
+    }
+
     // ---- physical reactions: thrown / knocked down by a disaster, throw,
     //      push or blast. Reads the shared body state (grapple.js / body). ----
     const ph = player._phys;
@@ -1301,7 +1310,8 @@
     // crouch becomes a press-toggled stance, a press mid-sprint slides, a
     // double press prones. It OWNS player.crouch/prone in these modes; escape
     // above keeps its hold-to-sneak, and with both flags off nothing here runs.
-    const stanceOn = !escape &&
+    const mountedAnimal = player._mountedAnimal || null;
+    const stanceOn = !escape && !mountedAnimal &&
       (CBZ.CONFIG.PLAYER_SLIDE !== false || CBZ.CONFIG.PLAYER_PRONE !== false);
     let sliding = false;
     if (stanceOn) {
@@ -1360,7 +1370,7 @@
         }
         // Running into registered solid geometry turns the SAME jump press into
         // traversal. A clear run line keeps the original ballistic jump exactly.
-        const traverse = (jumpWasSliding || len > 0.15) && CBZ.game.mode === "city"
+        const traverse = !mountedAnimal && (jumpWasSliding || len > 0.15) && CBZ.game.mode === "city"
           ? startTraversal(player, playerChar, jumpDirX, jumpDirZ, {
               speed: Math.max(player.speed, moveSpeed),
               radius: player.radius,
@@ -1378,7 +1388,12 @@
           stepTraversal(player, playerChar, (CBZ.feelDt != null ? CBZ.feelDt : dt), true);
           return;
         }
-        player.vy = T.jumpVel; player.grounded = false; CBZ.sfx("jump");
+        // A mounted jump is still integrated by the canonical collision/
+        // gravity path, but its impulse belongs to the animal. tame.js
+        // publishes a species-scaled value and carries animal+rider on this
+        // same physical root; the avatar never performs a human vault.
+        player.vy = mountedAnimal && player._rideJump > 0 ? player._rideJump : T.jumpVel;
+        player.grounded = false; CBZ.sfx("jump");
       }
     }
     if (stanceOn && !keys[" "]) st.spaceLatch = false;

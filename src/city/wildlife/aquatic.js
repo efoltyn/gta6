@@ -5,6 +5,196 @@
   const S = CBZ.defineSpecies;
   if (!S) return;
 
+  // A shark is a continuous hydrodynamic wedge, not a box with a pyramid glued
+  // to its face. Build the torso/head from elliptical cross-sections so the
+  // forehead flows into a BROAD, FLATTENED, BLUNT rostrum. The final ring keeps
+  // substantial width (the key fact in the user's front/side references), and
+  // the lower faces carry the countershaded belly in the SAME connected mesh.
+  function addSharkHull(g, T, o) {
+    const rings = o.rings || [], sides = Math.max(8, o.sides || 12);
+    if (rings.length < 2) return null;
+    const positions = [];
+    for (let i = 0; i < rings.length; i++) {
+      const r = rings[i];
+      for (let j = 0; j < sides; j++) {
+        const a = (j / sides) * Math.PI * 2;
+        positions.push(r.x, r.y + Math.sin(a) * r.ry, Math.cos(a) * r.rz);
+      }
+    }
+    const top = [], belly = [], bellyCut = o.bellyCut == null ? -0.16 : o.bellyCut;
+    function bucket(j) {
+      const a0 = (j / sides) * Math.PI * 2;
+      const a1 = (((j + 1) % sides) / sides) * Math.PI * 2;
+      let s = (Math.sin(a0) + Math.sin(a1)) * 0.5;
+      if (j === sides - 1) s = (Math.sin(a0) + Math.sin(Math.PI * 2)) * 0.5;
+      return s < bellyCut ? belly : top;
+    }
+    for (let i = 0; i < rings.length - 1; i++) {
+      for (let j = 0; j < sides; j++) {
+        const n = (j + 1) % sides;
+        const a = i * sides + j, b = (i + 1) * sides + j;
+        const c = (i + 1) * sides + n, d = i * sides + n;
+        bucket(j).push(a, b, d, b, c, d);
+      }
+    }
+    // Flat rear/front caps preserve the deliberately blunt nose instead of
+    // quietly turning the last ring back into another cone.
+    const rearCenter = positions.length / 3;
+    positions.push(rings[0].x, rings[0].y, 0);
+    const frontCenter = positions.length / 3;
+    const fr = rings[rings.length - 1];
+    positions.push(fr.x, fr.y, 0);
+    for (let j = 0; j < sides; j++) {
+      const n = (j + 1) % sides, dst = bucket(j);
+      dst.push(rearCenter, j, n);
+      const base = (rings.length - 1) * sides;
+      dst.push(frontCenter, base + n, base + j);
+    }
+    const indices = top.concat(belly);
+    const geom = new T.BufferGeometry();
+    geom.setAttribute("position", new T.Float32BufferAttribute(positions, 3));
+    geom.setIndex(indices);
+    geom.addGroup(0, top.length, 0);
+    geom.addGroup(top.length, belly.length, 1);
+    geom.computeVertexNormals(); geom.computeBoundingBox(); geom.computeBoundingSphere();
+    const hull = new T.Mesh(geom, [o.top, o.belly || o.top]);
+    hull.name = "sharkHull"; g.add(hull);
+    const maxWidth = rings.reduce(function (v, r) { return Math.max(v, r.rz * 2); }, 0);
+    g.userData.sharkShape = {
+      profile: o.profile || "broad-wedge",
+      noseWidth: fr.rz * 2, noseHeight: fr.ry * 2, headWidth: maxWidth,
+      noseWidthRatio: maxWidth > 0 ? (fr.rz * 2) / maxWidth : 0,
+    };
+    return hull;
+  }
+
+  // Eyes, nostrils, and vertical gill slots are tiny, but they are what turns a
+  // generic low-poly fish hull into a readable shark face from the side/front.
+  function addSharkFaceDetails(g, T, m, o) {
+    const dark = m(o.dark || 0x10161a);
+    const eyeGeom = o.eyeSize === 0 ? null : new T.SphereGeometry(o.eyeSize || 0.075, 7, 5);
+    [-1, 1].forEach(function (side) {
+      if (eyeGeom) {
+        const eye = new T.Mesh(eyeGeom, dark); eye.name = "sharkEye";
+        eye.position.set(o.eyeX, o.eyeY, side * o.eyeZ); eye.scale.z = 0.55; g.add(eye);
+      }
+      const nostril = new T.Mesh(new T.SphereGeometry(o.nostrilSize || 0.035, 6, 4), dark);
+      nostril.name = "sharkNostril";
+      nostril.position.set(o.noseX, o.noseY, side * o.noseZ); nostril.scale.set(1, 0.45, 0.55); g.add(nostril);
+      for (let i = 0; i < (o.gills || 4); i++) {
+        const slot = new T.Mesh(CBZ.boxGeom(o.gillWidth || 0.032, (o.gillHeight || 0.34) * (1 - i * 0.045), o.gillDepth || 0.025), dark);
+        slot.name = "sharkGill";
+        // gillZStep follows the hull's widening taper toward midships so every
+        // slot sits proud of the surface instead of drowning inside the mesh
+        slot.position.set(o.gillX - i * (o.gillStep || 0.09), o.gillY,
+          side * (o.gillZ + i * (o.gillZStep || 0)));
+        slot.rotation.z = -0.08; g.add(slot);
+      }
+    });
+  }
+
+  // One mouth grammar for every true shark in this catalogue. The jaw follows
+  // an elliptical U around the underside of the broad rostrum: short overlapping
+  // arc segments replace the old rectangular rails, while every segment and
+  // tooth remains parented to one physical lower-jaw hinge.
+  function addSharkMouth(g, T, m, o) {
+    const hingeX = o.hingeX, hingeY = o.hingeY, len = o.length, width = o.width;
+    const gap = o.gap, gumH = o.gumHeight || Math.max(0.05, gap * 0.17);
+    const railW = o.railWidth || Math.max(0.07, width * 0.13);
+    const toothH = o.toothHeight || gap * 0.48;
+    const toothR = o.toothRadius || toothH * 0.34;
+    const sideCount = o.sideTeeth || 5, frontCount = o.frontTeeth || 5;
+    const gum = m(o.gum || 0x54242b), tooth = m(o.tooth || 0xf4f1df);
+    const cavityMat = m(o.cavity || 0x10070a), skin = m(o.skin || 0xdfe4e6);
+    const upperSkin = m(o.upperSkin || o.skin || 0x6b7880);
+    function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
+
+    const cavity = new T.Mesh(new T.SphereGeometry(1, 10, 6), cavityMat);
+    cavity.name = "sharkMouthCavity";
+    cavity.position.set(hingeX + len * 0.58, hingeY, 0);
+    cavity.scale.set(len * 0.58, gap * 0.06, width * 0.38);
+    g.add(cavity);
+
+    const upper = new T.Group(); upper.name = "sharkUpperJaw";
+    const lower = new T.Group(); lower.name = "sharkLowerJaw";
+    upper.position.set(hingeX, hingeY, 0);
+    lower.position.set(hingeX, hingeY, 0); // this origin IS the physical hinge
+    g.add(upper); g.add(lower);
+
+    const upperY = gap * 0.27, lowerY = -gap * 0.27;
+    const arcSteps = Math.max(10, sideCount * 2);
+    const arc = [];
+    for (let i = 0; i <= arcSteps; i++) {
+      const a = -Math.PI * 0.48 + (i / arcSteps) * Math.PI * 0.96;
+      arc.push({ x: len * (0.18 + 0.82 * Math.cos(a)), z: width * 0.5 * Math.sin(a) });
+    }
+    // A small shared bite preload seats the mandible against the lip. The
+    // longer animation travel below preserves the authored full-open endpoint.
+    const restClose = 0.04;
+    lower.rotation.z = restClose;
+
+    function arcBar(parent, p0, p1, y, h, d, mm, name, outward) {
+      const dx = p1.x - p0.x, dz = p1.z - p0.z;
+      const seg = box(Math.hypot(dx, dz) * 1.12, h, d, mm);
+      const z0 = (p0.z + p1.z) * 0.5;
+      seg.name = name;
+      seg.position.set((p0.x + p1.x) * 0.5, y,
+        z0 + (outward ? (z0 < 0 ? -1 : 1) * outward : 0));
+      seg.rotation.y = Math.atan2(-dz, dx); parent.add(seg); return seg;
+    }
+    // The hull itself is the chin now: the mandible is a slim seat under the
+    // lower gum arc, not a slab — a thick mandible is exactly what made the
+    // old mouth read as a bolted-on box of dentures from the side.
+    const lipH = gumH + gap * 0.09;
+    for (let i = 0; i < arc.length - 1; i++) {
+      const p0 = arc[i], p1 = arc[i + 1];
+      arcBar(upper, p0, p1, upperY, gumH, railW, gum, "sharkUpperGum", 0);
+      arcBar(lower, p0, p1, lowerY, gumH, railW, gum, "sharkLowerGum", 0);
+      arcBar(lower, p0, p1, lowerY - gumH * 0.55, gumH * 0.95, railW * 1.15, skin, "sharkMandible", 0);
+      arcBar(upper, p0, p1, upperY, lipH, railW * 0.20, upperSkin, "sharkUpperLip", railW * 0.52);
+      arcBar(lower, p0, p1, lowerY, lipH, railW * 0.20, skin, "sharkLowerLip", railW * 0.52);
+    }
+
+    let upperTeeth = 0, lowerTeeth = 0;
+    function toothPair(parent, x, z, top) {
+      const t = new T.Mesh(new T.ConeGeometry(toothR, toothH, 3), tooth);
+      t.position.set(x, top
+        ? upperY - gumH * 0.5 - toothH * 0.10
+        : lowerY + gumH * 0.5 + toothH * 0.10, z);
+      if (top) t.rotation.x = Math.PI;
+      t.name = top ? "sharkUpperTooth" : "sharkLowerTooth";
+      parent.add(t);
+      if (top) upperTeeth++; else lowerTeeth++;
+    }
+    const toothCount = sideCount * 2 + frontCount;
+    for (let i = 0; i < toothCount; i++) {
+      const t = toothCount === 1 ? 0.5 : i / (toothCount - 1);
+      const a = -Math.PI * 0.43 + t * Math.PI * 0.86;
+      const x = len * (0.18 + 0.82 * Math.cos(a));
+      const z = width * 0.44 * Math.sin(a);
+      toothPair(upper, x, z, true);
+      toothPair(lower, x + len * 0.018, z, false);
+    }
+
+    const contract = {
+      version: 2,
+      shape: "arched-underside",
+      hinge: { x: hingeX, y: hingeY, z: 0 },
+      bite: { x: hingeX + len * 0.96, y: hingeY, z: 0 },
+      maxOpen: o.maxOpen || 0.58,
+      travel: (o.maxOpen || 0.58) + restClose,
+      restClose: restClose,
+      protrude: o.protrude == null ? len * 0.075 : o.protrude,
+      upperDrop: o.upperDrop == null ? gap * 0.08 : o.upperDrop,
+      upperTeeth: upperTeeth,
+      lowerTeeth: lowerTeeth,
+    };
+    // userData stays JSON-safe for clone/export; live Object3D references do not.
+    g.userData.aquaticMouth = contract;
+    g._aquaticMouth = { lower: lower, upper: upper, cavity: cavity, contract: contract };
+    return g._aquaticMouth;
+  }
+
   // ============================================================
   //  MACKEREL — Scomber scombrus.
   //  Reference: iridescent blue-green back, silvery-white belly, 20-30 wavy
@@ -62,33 +252,46 @@
       const T = ctx.THREE, m = ctx.mat;
       const g = new T.Group();
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
-      const grey = m(0x6b7880), white = m(0xe8ebec), gum = m(0x9aa4ac), tooth = m(0xf4f6f6), eye = m(0x14181c);
-      // torpedo body with abrupt white belly
-      const body = box(3.2, 1.05, 1.0, grey); body.position.set(0, 0.85, 0); g.add(body);
-      const belly = box(2.9, 0.42, 0.92, white); belly.position.set(0, 0.42, 0); g.add(belly);
-      const mid = box(1.2, 0.95, 0.92, grey); mid.position.set(1.1, 0.85, 0); g.add(mid);
-      // short conical snout above a gaping mouth
-      const head = box(0.9, 0.85, 0.8, grey); head.position.set(1.85, 0.9, 0); g.add(head);
-      const snout = new T.Mesh(new T.ConeGeometry(0.42, 0.7, 4), grey); snout.position.set(2.35, 1.05, 0); snout.rotation.z = -Math.PI / 2; g.add(snout);
-      const mouth = box(0.5, 0.3, 0.72, gum); mouth.position.set(2.2, 0.62, 0); g.add(mouth);
-      // rows of white triangular teeth, top and bottom
-      [0.24, 0.06, -0.12, -0.3].forEach(function (z) {
-        const tu = new T.Mesh(new T.ConeGeometry(0.06, 0.16, 3), tooth); tu.position.set(2.28, 0.7, z); g.add(tu);
-        const td = new T.Mesh(new T.ConeGeometry(0.06, 0.16, 3), tooth); td.position.set(2.28, 0.56, z); td.rotation.x = Math.PI; g.add(td);
+      const grey = m(0x6b7880), white = m(0xe8ebec);
+      // One continuous countershaded hull: max girth at the pectoral line, the
+      // forehead flowing into a broad, FLATTENED, blunt rostrum. The rostrum
+      // rings ride high (small ry, raised y) so the mouth hangs BELOW the
+      // underside of the snout instead of hiding inside it.
+      addSharkHull(g, T, {
+        top: grey, belly: white, sides: 14, bellyCut: -0.30,
+        rings: [
+          { x: -1.55, y: 0.86, ry: 0.22, rz: 0.15 },
+          { x: -0.85, y: 0.85, ry: 0.44, rz: 0.32 },
+          { x: 0.15, y: 0.85, ry: 0.60, rz: 0.47 },
+          { x: 1.05, y: 0.87, ry: 0.56, rz: 0.45 },
+          { x: 1.80, y: 0.92, ry: 0.44, rz: 0.40 },
+          { x: 2.30, y: 1.00, ry: 0.24, rz: 0.30 },
+          { x: 2.60, y: 1.02, ry: 0.12, rz: 0.19 },
+        ],
       });
-      [0.3, -0.3].forEach(function (z) {
-        const ey = box(0.09, 0.11, 0.09, eye); ey.position.set(2.05, 1.05, z); g.add(ey);
+      // subterminal mouth tucked up under the rostrum overhang
+      addSharkMouth(g, T, m, {
+        hingeX: 1.90, hingeY: 0.72, length: 0.60, width: 0.64, gap: 0.28,
+        toothHeight: 0.13, maxOpen: 0.62, skin: 0xe8ebec, upperSkin: 0x6b7880,
       });
-      // big triangular first dorsal fin breaching upward
-      const dorsal = new T.Mesh(new T.ConeGeometry(0.5, 1.15, 4), grey); dorsal.position.set(0.1, 1.75, 0); g.add(dorsal);
-      const dorsal2 = new T.Mesh(new T.ConeGeometry(0.18, 0.35, 4), grey); dorsal2.position.set(-1.3, 1.45, 0); g.add(dorsal2);
-      // crescent vertical tail at -X
-      const peduncle = box(0.5, 0.5, 0.4, grey); peduncle.position.set(-1.7, 0.85, 0); g.add(peduncle);
-      const tailUp = box(0.32, 1.2, 0.4, grey); tailUp.position.set(-2.05, 1.35, 0); tailUp.rotation.z = 0.35; g.add(tailUp);
-      const tailDn = box(0.28, 0.7, 0.38, grey); tailDn.position.set(-2.0, 0.45, 0); tailDn.rotation.z = -0.3; g.add(tailDn);
-      // broad pectoral fins
+      addSharkFaceDetails(g, T, m, {
+        eyeX: 2.16, eyeY: 1.00, eyeZ: 0.31, eyeSize: 0.05,
+        noseX: 2.50, noseY: 0.92, noseZ: 0.12,
+        gillX: 1.62, gillY: 0.90, gillZ: 0.405, gills: 5,
+        gillHeight: 0.30, gillStep: 0.095, gillDepth: 0.06, gillZStep: 0.012,
+      });
+      // big triangular first dorsal — a flattened blade, not a pyramid
+      const dorsal = new T.Mesh(new T.ConeGeometry(0.5, 1.15, 4), grey);
+      dorsal.position.set(0.1, 1.75, 0); dorsal.scale.z = 0.22; dorsal.rotation.z = 0.14; g.add(dorsal);
+      const dorsal2 = new T.Mesh(new T.ConeGeometry(0.18, 0.35, 4), grey);
+      dorsal2.position.set(-1.3, 1.32, 0); dorsal2.scale.z = 0.3; g.add(dorsal2);
+      // crescent vertical tail at -X, thin blades
+      const peduncle = box(0.5, 0.44, 0.26, grey); peduncle.position.set(-1.7, 0.85, 0); g.add(peduncle);
+      const tailUp = box(0.30, 1.2, 0.14, grey); tailUp.position.set(-2.05, 1.35, 0); tailUp.rotation.z = 0.35; g.add(tailUp);
+      const tailDn = box(0.26, 0.7, 0.13, grey); tailDn.position.set(-2.0, 0.45, 0); tailDn.rotation.z = -0.3; g.add(tailDn);
+      // broad swept pectoral fins
       [0.6, -0.6].forEach(function (z) {
-        const f = box(0.9, 0.12, 0.55, grey); f.position.set(0.9, 0.5, z); f.rotation.y = (z > 0 ? -0.5 : 0.5); f.rotation.x = (z > 0 ? 0.2 : -0.2); g.add(f);
+        const f = box(0.95, 0.09, 0.5, grey); f.position.set(0.95, 0.48, z); f.rotation.y = (z > 0 ? -0.62 : 0.62); f.rotation.x = (z > 0 ? 0.22 : -0.22); g.add(f);
       });
       return g;
     },
@@ -192,34 +395,46 @@
       const T = ctx.THREE, m = ctx.mat;
       const g = new T.Group();
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
-      const dark = m(0x4a5560), white = m(0xdfe4e6), gum = m(0x8b3a3a), tooth = m(0xf5f7f6), eye = m(0x0c0e10);
-      // colossal heavy body with abrupt white belly
-      const body = box(4.4, 1.7, 1.6, dark); body.position.set(0, 0.95, 0); g.add(body);
-      const belly = box(4.0, 0.7, 1.5, white); belly.position.set(0, 0.35, 0); g.add(belly);
-      const mid = box(1.7, 1.55, 1.5, dark); mid.position.set(1.6, 0.95, 0); g.add(mid);
-      // huge blunt head
-      const head = box(1.5, 1.5, 1.35, dark); head.position.set(2.7, 1.0, 0); g.add(head);
-      const snout = new T.Mesh(new T.ConeGeometry(0.7, 1.0, 4), dark); snout.position.set(3.4, 1.35, 0); snout.rotation.z = -Math.PI / 2; g.add(snout);
-      // enormous gaping jaws lined with big teeth top & bottom
-      const upperJaw = box(0.9, 0.4, 1.25, gum); upperJaw.position.set(3.25, 0.95, 0); g.add(upperJaw);
-      const lowerJaw = box(0.9, 0.4, 1.25, gum); lowerJaw.position.set(3.3, 0.3, 0); g.add(lowerJaw);
-      [0.5, 0.28, 0.06, -0.16, -0.38, -0.6].forEach(function (z) {
-        const tu = new T.Mesh(new T.ConeGeometry(0.11, 0.34, 3), tooth); tu.position.set(3.25, 0.72, z); tu.rotation.x = Math.PI; g.add(tu);
-        const td = new T.Mesh(new T.ConeGeometry(0.11, 0.34, 3), tooth); td.position.set(3.3, 0.52, z); g.add(td);
+      const dark = m(0x4a5560), white = m(0xdfe4e6);
+      // Colossal continuous hull. Heavier proportions than the great white:
+      // girth carried far forward, and the rostrum stays BROAD right to the
+      // blunt tip (a megalodon head is a battering ram, not a point).
+      addSharkHull(g, T, {
+        top: dark, belly: white, sides: 14, bellyCut: -0.30,
+        rings: [
+          { x: -2.05, y: 0.98, ry: 0.34, rz: 0.24 },
+          { x: -1.10, y: 0.95, ry: 0.72, rz: 0.55 },
+          { x: 0.20, y: 0.95, ry: 0.98, rz: 0.80 },
+          { x: 1.50, y: 0.98, ry: 0.92, rz: 0.76 },
+          { x: 2.60, y: 1.05, ry: 0.72, rz: 0.64 },
+          { x: 3.40, y: 1.18, ry: 0.36, rz: 0.48 },
+          { x: 3.85, y: 1.20, ry: 0.18, rz: 0.32 },
+        ],
       });
-      [0.52, -0.52].forEach(function (z) {
-        const ey = box(0.14, 0.16, 0.14, eye); ey.position.set(2.95, 1.35, z); g.add(ey);
+      // enormous subterminal jaws tucked up under the rostrum overhang
+      addSharkMouth(g, T, m, {
+        hingeX: 2.70, hingeY: 0.82, length: 1.02, width: 1.16, gap: 0.54,
+        toothHeight: 0.28, toothRadius: 0.095,
+        sideTeeth: 6, frontTeeth: 7, maxOpen: 0.60, skin: 0xdfe4e6, upperSkin: 0x4a5560,
       });
-      // towering dorsal fin
-      const dorsal = new T.Mesh(new T.ConeGeometry(0.75, 1.9, 4), dark); dorsal.position.set(0.1, 2.35, 0); g.add(dorsal);
-      const dorsal2 = new T.Mesh(new T.ConeGeometry(0.28, 0.55, 4), dark); dorsal2.position.set(-1.9, 1.75, 0); g.add(dorsal2);
-      // huge crescent vertical tail at -X
-      const pedun = box(0.8, 0.8, 0.6, dark); pedun.position.set(-2.4, 0.95, 0); g.add(pedun);
-      const tailUp = box(0.5, 2.0, 0.6, dark); tailUp.position.set(-2.95, 1.75, 0); tailUp.rotation.z = 0.35; g.add(tailUp);
-      const tailDn = box(0.45, 1.2, 0.55, dark); tailDn.position.set(-2.85, 0.35, 0); tailDn.rotation.z = -0.3; g.add(tailDn);
-      // massive pectoral fins
+      addSharkFaceDetails(g, T, m, {
+        eyeX: 3.30, eyeY: 1.20, eyeZ: 0.49, eyeSize: 0.075,
+        noseX: 3.74, noseY: 1.10, noseZ: 0.18, nostrilSize: 0.05,
+        gillX: 2.30, gillY: 0.98, gillZ: 0.69, gills: 5,
+        gillHeight: 0.52, gillStep: 0.15, gillDepth: 0.07, gillWidth: 0.05, gillZStep: 0.017,
+      });
+      // towering dorsal fin — a flattened blade, not a pyramid
+      const dorsal = new T.Mesh(new T.ConeGeometry(0.75, 1.9, 4), dark);
+      dorsal.position.set(0.1, 2.55, 0); dorsal.scale.z = 0.22; dorsal.rotation.z = 0.14; g.add(dorsal);
+      const dorsal2 = new T.Mesh(new T.ConeGeometry(0.28, 0.55, 4), dark);
+      dorsal2.position.set(-1.9, 1.68, 0); dorsal2.scale.z = 0.3; g.add(dorsal2);
+      // huge crescent vertical tail at -X, thin blades
+      const pedun = box(0.8, 0.72, 0.4, dark); pedun.position.set(-2.4, 0.95, 0); g.add(pedun);
+      const tailUp = box(0.48, 2.0, 0.24, dark); tailUp.position.set(-2.95, 1.75, 0); tailUp.rotation.z = 0.35; g.add(tailUp);
+      const tailDn = box(0.42, 1.2, 0.22, dark); tailDn.position.set(-2.85, 0.35, 0); tailDn.rotation.z = -0.3; g.add(tailDn);
+      // massive swept pectoral fins
       [0.9, -0.9].forEach(function (z) {
-        const f = box(1.5, 0.2, 0.9, dark); f.position.set(1.3, 0.5, z); f.rotation.y = (z > 0 ? -0.5 : 0.5); f.rotation.x = (z > 0 ? 0.25 : -0.25); g.add(f);
+        const f = box(1.6, 0.14, 0.85, dark); f.position.set(1.35, 0.45, z); f.rotation.y = (z > 0 ? -0.6 : 0.6); f.rotation.x = (z > 0 ? 0.25 : -0.25); g.add(f);
       });
       return g;
     },
@@ -307,8 +522,9 @@
       const d2 = new T.Mesh(new T.ConeGeometry(0.14, 0.28, 4), back); d2.position.set(-0.42, 1.32, 0); g.add(d2);
       // the yellow finlet row — the one detail that says "tuna" and nothing else
       for (let i = 0; i < 5; i++) {
-        const f = box(0.07, 0.09, 0.05, finlet); f.position.set(-0.72 - i * 0.16, 1.18 - i * 0.03, 0); g.add(f);
-        const fv = box(0.07, 0.09, 0.05, finlet); fv.position.set(-0.72 - i * 0.16, 0.33 + i * 0.03, 0); g.add(fv);
+        const tailward = i >= 3;
+        const f = box(0.07, 0.09, 0.05, finlet); f.position.set(-0.72 - i * 0.16, tailward ? 0.94 : 1.18 - i * 0.03, 0); g.add(f);
+        const fv = box(0.07, 0.09, 0.05, finlet); fv.position.set(-0.72 - i * 0.16, tailward ? 0.56 : 0.33 + i * 0.03, 0); g.add(fv);
       }
       // long sickle pectorals
       [0.38, -0.38].forEach(function (z) {
@@ -316,7 +532,7 @@
         f.rotation.y = (z > 0 ? -0.42 : 0.42); f.rotation.z = -0.24; g.add(f);
       });
       // thin keeled peduncle + a rigid crescent tail
-      const ped = box(0.36, 0.24, 0.16, flank); ped.position.set(-1.48, 0.75, 0); g.add(ped);
+      const ped = box(0.8, 0.4, 0.16, flank); ped.position.set(-1.36, 0.75, 0); g.add(ped);
       const tu = box(0.20, 0.80, 0.10, back); tu.position.set(-1.80, 1.10, 0); tu.rotation.z = 0.46; g.add(tu);
       const td = box(0.20, 0.80, 0.10, back); td.position.set(-1.80, 0.40, 0); td.rotation.z = -0.46; g.add(td);
       return g;
@@ -360,7 +576,7 @@
         const f = box(1.05, 0.07, 0.20, back); f.position.set(0.90, 0.62, z);
         f.rotation.y = (z > 0 ? -0.36 : 0.36); f.rotation.z = -0.20; g.add(f);
       });
-      const ped = box(0.40, 0.26, 0.16, flank); ped.position.set(-1.78, 0.85, 0); g.add(ped);
+      const ped = box(0.9, 0.26, 0.16, flank); ped.position.set(-1.65, 0.85, 0); g.add(ped);
       const tu = box(0.22, 1.05, 0.12, back); tu.position.set(-2.18, 1.34, 0); tu.rotation.z = 0.42; g.add(tu);
       const td = box(0.22, 1.05, 0.12, back); td.position.set(-2.18, 0.36, 0); td.rotation.z = -0.42; g.add(td);
       return g;
@@ -385,29 +601,49 @@
       const T = ctx.THREE, m = ctx.mat;
       const g = new T.Group();
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
-      const grey = m(0x7d8a8f), pale = m(0xe3e7e6), gum = m(0x93999c), tooth = m(0xf3f5f4), eye = m(0x0f1215);
-      const body = box(3.0, 1.00, 0.92, grey); body.position.set(0, 0.90, 0); g.add(body);
-      const belly = box(2.7, 0.40, 0.86, pale); belly.position.set(0, 0.48, 0); g.add(belly);
-      const mid = box(1.1, 0.92, 0.86, grey); mid.position.set(1.05, 0.90, 0); g.add(mid);
+      const grey = m(0x7d8a8f), pale = m(0xe3e7e6), eye = m(0x0f1215);
+      // slimmer continuous hull that narrows into the neck of the cephalofoil
+      addSharkHull(g, T, {
+        top: grey, belly: pale, sides: 14, bellyCut: -0.30,
+        rings: [
+          { x: -1.50, y: 0.90, ry: 0.20, rz: 0.14 },
+          { x: -0.75, y: 0.90, ry: 0.42, rz: 0.30 },
+          { x: 0.20, y: 0.90, ry: 0.52, rz: 0.38 },
+          { x: 1.00, y: 0.92, ry: 0.44, rz: 0.33 },
+          { x: 1.70, y: 0.94, ry: 0.28, rz: 0.24 },
+        ],
+      });
       // THE CEPHALOFOIL: a wide flat bar athwart the body, eyes at the tips
-      const foil = box(0.62, 0.34, 2.55, grey); foil.position.set(1.92, 0.92, 0); g.add(foil);
-      const foilU = box(0.58, 0.10, 2.45, pale); foilU.position.set(1.92, 0.74, 0); g.add(foilU);
-      [1.24, -1.24].forEach(function (z) { const e = box(0.20, 0.22, 0.20, eye); e.position.set(1.98, 0.94, z); g.add(e); });
-      // the mouth is UNDER the bar, well back — a hammerhead's is famously small
-      const mouth = box(0.42, 0.20, 0.62, gum); mouth.position.set(1.72, 0.66, 0); g.add(mouth);
-      [0.18, 0.0, -0.18].forEach(function (z) {
-        const tu = new T.Mesh(new T.ConeGeometry(0.05, 0.13, 3), tooth); tu.position.set(1.76, 0.72, z); tu.rotation.x = Math.PI; g.add(tu);
-        const td = new T.Mesh(new T.ConeGeometry(0.05, 0.13, 3), tooth); td.position.set(1.78, 0.58, z); g.add(td);
+      const foil = box(0.62, 0.30, 2.55, grey); foil.position.set(1.92, 0.94, 0); g.add(foil);
+      const foilU = box(0.58, 0.10, 2.45, pale); foilU.position.set(1.92, 0.77, 0); g.add(foilU);
+      [1.24, -1.24].forEach(function (z) {
+        const e = new T.Mesh(new T.SphereGeometry(0.11, 7, 5), eye);
+        e.name = "sharkEye"; e.position.set(2.02, 0.94, z); g.add(e);
+      });
+      addSharkFaceDetails(g, T, m, {
+        eyeSize: 0, eyeX: 0, eyeY: 0, eyeZ: 0,
+        noseX: 2.16, noseY: 0.84, noseZ: 0.85, nostrilSize: 0.045,
+        gillX: 1.36, gillY: 0.92, gillZ: 0.30, gills: 5,
+        gillHeight: 0.26, gillStep: 0.085, gillDepth: 0.06, gillZStep: 0.012,
+      });
+      // The mouth stays small and well back beneath the cephalofoil, but it is
+      // the same physically hinged anatomy as every other authored shark.
+      addSharkMouth(g, T, m, {
+        hingeX: 1.42, hingeY: 0.65, length: 0.52, width: 0.62, gap: 0.23,
+        toothHeight: 0.105, sideTeeth: 4, frontTeeth: 5,
+        maxOpen: 0.50, skin: 0xe3e7e6, upperSkin: 0x7d8a8f,
       });
       // the scythe dorsal — taller and thinner than a great white's
-      const dorsal = new T.Mesh(new T.ConeGeometry(0.34, 1.55, 4), grey); dorsal.position.set(0.20, 1.98, 0); dorsal.rotation.z = -0.22; g.add(dorsal);
-      const d2 = new T.Mesh(new T.ConeGeometry(0.14, 0.32, 4), grey); d2.position.set(-1.32, 1.50, 0); g.add(d2);
-      const ped = box(0.46, 0.44, 0.34, grey); ped.position.set(-1.70, 0.90, 0); g.add(ped);
-      const tu2 = box(0.28, 1.30, 0.34, grey); tu2.position.set(-2.10, 1.46, 0); tu2.rotation.z = 0.34; g.add(tu2);
-      const td2 = box(0.24, 0.62, 0.32, grey); td2.position.set(-2.02, 0.50, 0); td2.rotation.z = -0.30; g.add(td2);
+      const dorsal = new T.Mesh(new T.ConeGeometry(0.34, 1.55, 4), grey);
+      dorsal.position.set(0.20, 1.98, 0); dorsal.rotation.z = 0.18; dorsal.scale.z = 0.24; g.add(dorsal);
+      const d2 = new T.Mesh(new T.ConeGeometry(0.14, 0.32, 4), grey);
+      d2.position.set(-1.32, 1.30, 0); d2.scale.z = 0.3; g.add(d2);
+      const ped = box(0.46, 0.40, 0.22, grey); ped.position.set(-1.70, 0.90, 0); g.add(ped);
+      const tu2 = box(0.26, 1.30, 0.13, grey); tu2.position.set(-2.10, 1.46, 0); tu2.rotation.z = 0.34; g.add(tu2);
+      const td2 = box(0.22, 0.62, 0.12, grey); td2.position.set(-2.02, 0.50, 0); td2.rotation.z = -0.30; g.add(td2);
       [0.56, -0.56].forEach(function (z) {
-        const f = box(0.92, 0.10, 0.50, grey); f.position.set(0.86, 0.54, z);
-        f.rotation.y = (z > 0 ? -0.48 : 0.48); f.rotation.x = (z > 0 ? 0.20 : -0.20); g.add(f);
+        const f = box(0.92, 0.09, 0.46, grey); f.position.set(0.86, 0.52, z);
+        f.rotation.y = (z > 0 ? -0.56 : 0.56); f.rotation.x = (z > 0 ? 0.20 : -0.20); g.add(f);
       });
       return g;
     },
@@ -431,28 +667,43 @@
       const T = ctx.THREE, m = ctx.mat;
       const g = new T.Group();
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
-      const grey = m(0x7f8a90), white = m(0xeceeee), gum = m(0x9aa1a5), tooth = m(0xf4f6f6), eye = m(0x101317);
-      // STOCKY: deeper and shorter than a great white at the same length
-      const body = box(2.3, 1.05, 1.02, grey); body.position.set(0, 0.88, 0); g.add(body);
-      const belly = box(2.1, 0.46, 0.96, white); belly.position.set(0, 0.42, 0); g.add(belly);
-      const mid = box(0.95, 1.00, 0.98, grey); mid.position.set(0.92, 0.90, 0); g.add(mid);
-      // BLUNT, ROUNDED snout — no cone; that is the field mark
-      const head = box(0.80, 0.86, 0.84, grey); head.position.set(1.62, 0.92, 0); g.add(head);
-      const nose = box(0.34, 0.56, 0.62, grey); nose.position.set(2.06, 1.02, 0); g.add(nose);
-      const mouth = box(0.44, 0.26, 0.70, gum); mouth.position.set(1.94, 0.64, 0); g.add(mouth);
-      [0.22, 0.04, -0.14, -0.30].forEach(function (z) {
-        const tu = new T.Mesh(new T.ConeGeometry(0.055, 0.15, 3), tooth); tu.position.set(1.99, 0.72, z); g.add(tu);
-        const td = new T.Mesh(new T.ConeGeometry(0.055, 0.15, 3), tooth); td.position.set(1.99, 0.57, z); td.rotation.x = Math.PI; g.add(td);
+      const grey = m(0x7f8a90), white = m(0xeceeee);
+      // STOCKY continuous hull: deeper and shorter than a great white at the
+      // same length, and the rostrum stays wide right to the tip — the blunt
+      // rounded snout IS the field mark.
+      addSharkHull(g, T, {
+        top: grey, belly: white, sides: 14, bellyCut: -0.30,
+        rings: [
+          { x: -1.30, y: 0.88, ry: 0.22, rz: 0.16 },
+          { x: -0.65, y: 0.87, ry: 0.48, rz: 0.38 },
+          { x: 0.10, y: 0.88, ry: 0.62, rz: 0.50 },
+          { x: 0.90, y: 0.90, ry: 0.56, rz: 0.47 },
+          { x: 1.55, y: 0.96, ry: 0.40, rz: 0.40 },
+          { x: 1.95, y: 1.02, ry: 0.22, rz: 0.30 },
+          { x: 2.16, y: 1.02, ry: 0.13, rz: 0.23 },
+        ],
       });
-      [0.28, -0.28].forEach(function (z) { const e = box(0.07, 0.08, 0.07, eye); e.position.set(1.82, 1.06, z); g.add(e); });
-      const dorsal = new T.Mesh(new T.ConeGeometry(0.46, 0.95, 4), grey); dorsal.position.set(0.15, 1.62, 0); g.add(dorsal);
-      const d2 = new T.Mesh(new T.ConeGeometry(0.15, 0.30, 4), grey); d2.position.set(-1.05, 1.42, 0); g.add(d2);
-      const ped = box(0.44, 0.44, 0.36, grey); ped.position.set(-1.34, 0.88, 0); g.add(ped);
-      const tu2 = box(0.28, 1.00, 0.36, grey); tu2.position.set(-1.66, 1.32, 0); tu2.rotation.z = 0.34; g.add(tu2);
-      const td2 = box(0.24, 0.58, 0.34, grey); td2.position.set(-1.60, 0.48, 0); td2.rotation.z = -0.30; g.add(td2);
+      addSharkMouth(g, T, m, {
+        hingeX: 1.58, hingeY: 0.68, length: 0.55, width: 0.62, gap: 0.28,
+        toothHeight: 0.13, sideTeeth: 5, frontTeeth: 5,
+        maxOpen: 0.57, skin: 0xeceeee, upperSkin: 0x7f8a90,
+      });
+      addSharkFaceDetails(g, T, m, {
+        eyeX: 1.80, eyeY: 1.04, eyeZ: 0.32, eyeSize: 0.048,
+        noseX: 2.08, noseY: 0.94, noseZ: 0.10,
+        gillX: 1.30, gillY: 0.90, gillZ: 0.44, gills: 5,
+        gillHeight: 0.28, gillStep: 0.085, gillDepth: 0.06, gillZStep: 0.012,
+      });
+      const dorsal = new T.Mesh(new T.ConeGeometry(0.46, 0.95, 4), grey);
+      dorsal.position.set(0.15, 1.62, 0); dorsal.scale.z = 0.24; dorsal.rotation.z = 0.13; g.add(dorsal);
+      const d2 = new T.Mesh(new T.ConeGeometry(0.15, 0.30, 4), grey);
+      d2.position.set(-1.05, 1.28, 0); d2.scale.z = 0.3; g.add(d2);
+      const ped = box(0.44, 0.40, 0.24, grey); ped.position.set(-1.34, 0.88, 0); g.add(ped);
+      const tu2 = box(0.26, 1.00, 0.13, grey); tu2.position.set(-1.66, 1.32, 0); tu2.rotation.z = 0.34; g.add(tu2);
+      const td2 = box(0.22, 0.58, 0.12, grey); td2.position.set(-1.60, 0.48, 0); td2.rotation.z = -0.30; g.add(td2);
       [0.56, -0.56].forEach(function (z) {
-        const f = box(0.80, 0.11, 0.48, grey); f.position.set(0.76, 0.50, z);
-        f.rotation.y = (z > 0 ? -0.50 : 0.50); f.rotation.x = (z > 0 ? 0.20 : -0.20); g.add(f);
+        const f = box(0.80, 0.09, 0.44, grey); f.position.set(0.76, 0.48, z);
+        f.rotation.y = (z > 0 ? -0.58 : 0.58); f.rotation.x = (z > 0 ? 0.20 : -0.20); g.add(f);
       });
       return g;
     },
@@ -542,7 +793,7 @@
         r.rotation.y = (z > 0 ? -0.36 : 0.36); g.add(r);
       });
       // a short pointed tail — the swim rig needs SOMETHING behind the origin
-      const tail = box(0.24, 0.12, 0.12, skin); tail.position.set(-0.86, 0.44, 0); g.add(tail);
+      const tail = box(0.24, 0.12, 0.12, skin); tail.position.set(-0.8, 0.44, 0); g.add(tail);
       return g;
     },
   });
@@ -573,7 +824,7 @@
         const w1 = box(1.30, 0.22, 1.05, dark); w1.position.set(-0.12, 0.58, s2 * 1.15); w1.rotation.x = s2 * -0.10; g.add(w1);
         const u1 = box(1.15, 0.10, 0.95, pale); u1.position.set(-0.12, 0.46, s2 * 1.15); g.add(u1);
         const w2 = box(0.85, 0.14, 0.85, dark); w2.position.set(-0.36, 0.56, s2 * 2.00); w2.rotation.x = s2 * -0.18; g.add(w2);
-        const w3 = box(0.45, 0.09, 0.62, dark); w3.position.set(-0.62, 0.54, s2 * 2.62); w3.rotation.x = s2 * -0.26; g.add(w3);
+        const w3 = box(0.45, 0.09, 0.62, dark); w3.position.set(-0.62, 0.54, s2 * 2.5); w3.rotation.x = s2 * -0.26; g.add(w3);
         // gill slits, on the pale underside
         for (let i = 0; i < 4; i++) { const gs = box(0.06, 0.04, 0.26, m(0x171b1f)); gs.position.set(0.30 - i * 0.16, 0.39, s2 * 0.42); g.add(gs); }
       });
@@ -582,7 +833,7 @@
       const mouth = box(0.24, 0.14, 0.95, m(0x101317)); mouth.position.set(1.06, 0.50, 0); g.add(mouth);
       [0.52, -0.52].forEach(function (z) {
         const lobe = box(0.46, 0.16, 0.16, dark); lobe.position.set(1.28, 0.58, z); lobe.rotation.y = (z > 0 ? -0.22 : 0.22); g.add(lobe);
-        const e = box(0.08, 0.09, 0.08, eye); e.position.set(1.00, 0.62, z * 1.32); g.add(e);
+        const e = box(0.08, 0.09, 0.08, eye); e.position.set(1.00, 0.62, z * 1.18); g.add(e);
       });
       // the whip tail — thin, long, and what the swim rig will undulate
       const t1 = box(0.55, 0.10, 0.10, dark); t1.position.set(-1.05, 0.58, 0); g.add(t1);

@@ -786,8 +786,11 @@
     const spd = Math.hypot(vel.x, vel.z);
 
     if ((CBZ.meleeFocusT || 0) > 0) CBZ.meleeFocusT = Math.max(0, CBZ.meleeFocusT - dt);
-    const shoulder = !!(CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive());
-    const meleeFocus = !shoulder && (CBZ.meleeFocusT || 0) > 0;
+    const chuteState = (CBZ.cityChuteState && CBZ.cityChuteState()) ||
+      (CBZ.playerChar && CBZ.playerChar.skydiving) || null;
+    const chuteCanopy = !!(chuteState && (chuteState.phase === "canopy" || chuteState.phase === "opening"));
+    const shoulder = !chuteState && !!(CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive());
+    const meleeFocus = !chuteState && !shoulder && (CBZ.meleeFocusT || 0) > 0;
     // driving a car in the city → a wider, higher GTA-style chase (yaw is
     // auto-steered behind the car by city/vehicles.js).
     const driving = CBZ.game.mode === "city" && !!player.driving;
@@ -825,7 +828,9 @@
     // punch-in would re-create the very "the camera zooms on its own" complaint
     // the constant boom was written to answer.
     const tpZoomK = (CBZ.isADS && CBZ.isADS()) ? 1 : CBZ.camTouchTrim();
-    const desiredZoom = TP
+    const desiredZoom = chuteState
+      ? (chuteCanopy ? 10.8 : 7.2) * tpZoomK
+      : TP
       ? (CBZ.CONFIG.CAM_TP_V2
           // FORTNITE LOCK: the boom is a constant — DIST at rest and merely-
           // armed, DIST_AIM_ADS only while scoping (fixed targets; the fast
@@ -840,7 +845,8 @@
     // sprinting lifts it a touch more instead of letting it sag low.
     const surv = CBZ.game.mode === "survival";
     const sprinting = surv && !!player.sprint;
-    const baseHeight = player.prone ? 0.74 : (player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))))));
+    const baseHeight = chuteState ? (chuteCanopy ? 4.15 : 1.55)
+      : player.prone ? 0.74 : (player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))))));
     height = smoothDamp(height, baseHeight, heightV, 0.18, fdt);
     const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
     // city: the rig yaw lazily chases the input yaw (frame-rate independent),
@@ -889,8 +895,8 @@
     // flipping the whole side-offset family (framing AND aim offsets together
     // so the ADS punch-in lands over whichever shoulder is active).
     const sK = TP ? shoulderK : 1;
-    const targetSide = (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0))) * sK;
-    const camSide = (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0))) * sK;
+    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0)))) * sK;
+    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0)))) * sK;
     const baseX = tx + rightX * targetSide;
     const baseY = ty + (!TP && shoulder ? 0.08 : 0);
     const baseZ = tz + rightZ * targetSide;
@@ -967,7 +973,12 @@
     const tpADS = !!(TP && shoulder && CBZ.isADS && CBZ.isADS());
     // front view: the forward look-lead collapses with frontK so the camera
     // settles looking AT the character (LOOK_Y height), not past them.
-    const aimLead = (driving ? 8.5 : (shoulder ? (TP ? (tpADS ? 12.0 : TP.LEAD) : 12.0) : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))))) * (1 - frontK);
+    const aimLead = (chuteState ? 0.35
+      : driving ? 8.5
+      : shoulder ? (TP ? (tpADS ? 12.0 : TP.LEAD) : 12.0)
+      : meleeFocus ? 2.2
+      : TP ? TP.LEAD
+      : surv ? 2.4 : 3.6) * (1 - frontK);
     // The look target carries the VIEW DIRECTION via the aimLead·forward term.
     // Derive that forward/right from yawView (= live cam.yaw under feelCam) so
     // the aim tracks the mouse 1:1; off (or non-TP) yawView===yaw → identical.
@@ -994,13 +1005,14 @@
     // exactly the presenting-tier math the owner already liked. A partial
     // factor would be WORSE, not safer: below aimLead·pf = camDist (pf≈0.87)
     // the vertical response INVERTS (look-up pitches the view down).
-    const pitchFollow = (TP && (tpPresent || CBZ.CONFIG.CAM_TP_V2))
+    const pitchFollow = (!chuteState && TP && (tpPresent || CBZ.CONFIG.CAM_TP_V2))
       ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) * (1 - frontK)
       : 0;
     const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
     const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
     const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
-    const lty = player.pos.y + (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88)))))))
+    const lty = player.pos.y + (chuteState ? (chuteCanopy ? 3.45 : 0.92)
+      : (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))))
       + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
@@ -1137,14 +1149,14 @@
     // CAM_TP_V2: the lens is a CONSTANT (60 hip / 50 ADS) — Fortnite never
     // changes FOV with speed, and the ±5° sprint kick was half of the
     // "camera zooms on its own" complaint.
-    let targetFov = TP
+    let targetFov = chuteState ? 66 : TP
       ? (tpADS ? TP.FOV_AIM : (CBZ.CONFIG.CAM_TP_V2 ? TP.FOV : TP.FOV + Math.min(spd / 6, 1) * 5))
       : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
     // CAM_SPRINT_FOV (ships dark — flip to try): the Fortnite-style lens
     // breath — while genuinely sprinting the FOV swells +7° over ~0.4s and
     // eases back on stop. Decoupled from the collision clamp (the coupling was
     // what made the old speed-kick read as "zooms on its own"). Never during ADS.
-    if (TP && CBZ.CONFIG.CAM_SPRINT_FOV && !tpADS) {
+    if (!chuteState && TP && CBZ.CONFIG.CAM_SPRINT_FOV && !tpADS) {
       const sprintingNow = !!(CBZ.keys && CBZ.keys["shift"]) && spd > 4.2 && !player.crouch;
       sprintFovK += ((sprintingNow ? 1 : 0) - sprintFovK) * (1 - Math.exp(-6 * fdt));
       targetFov += 7 * sprintFovK;
@@ -1159,7 +1171,7 @@
     // honoring only cityScopeFov was the third-person half of the fake-scope
     // bug: overlay up, lens easing back to the 50° ADS chase every frame.
     const scopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
-    if (scopeF) targetFov = scopeF;
+    if (scopeF && !chuteState) targetFov = scopeF;
     // V2: snappier ADS lens punch (~0.12s, Fortnite's targeting transition)
     fov = smoothDamp(fov, targetFov, fovV, TP && CBZ.CONFIG.CAM_TP_V2 ? 0.12 : 0.18, fdt);
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }

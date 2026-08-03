@@ -1051,14 +1051,10 @@
         gatehouse(root, R.minX + 6, cz, false, M.concreteD);
         const main = civic(root, cx + 14, cz - 28, 34, 24, 2, M.brick, 1, null, "The House");
         c.main = main;
-        // the yard: a shed big enough to hide a truck in, a hardstanding, a
-        // stack of containers and floodlights that make the wall mean something
+        // the yard: a shed big enough to hide a truck in, open hardstanding and
+        // floodlights. Primitive container boxes do not substitute for detail.
         block(root, cx - 30, cz + 28, 36, 22, 1, M.steelD, 0, { facade: "office" });
         slab(root, cx + 18, cz + 24, 48, 32, M.asphalt, YG);
-        const cont = [];
-        for (let i = 0; i < 4; i++) cont.push({ x: cx + 44, z: cz - 6 + i * 7.0 });
-        repeat(root, bg(12.0, 2.8, 2.6), M.red, cont, function () { return 1.4; });
-        for (let i = 0; i < 4; i++) col(cx + 44, cz - 6 + i * 7.0, 12.0, 2.6, 0, 2.8);
         for (const p of [[R.minX + 14, R.minZ + 14], [R.maxX - 14, R.minZ + 14], [R.minX + 14, R.maxZ - 14], [R.maxX - 14, R.maxZ - 14]]) {
           floodMast(root, p[0], p[1], 9.0);
         }

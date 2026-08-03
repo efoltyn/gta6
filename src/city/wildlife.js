@@ -683,7 +683,12 @@
     }
     if (!parts.length) return;
     parts.sort(function (p, q) { return p.t - q.t; });   // base -> tip, so the wave travels
-    // JAW: the far-forward children that hang BELOW the mean of the head
+    // JAW: newly authored sharks expose one lower-jaw Group whose origin is the
+    // physical hinge. Older aquatics keep the geometric fallback below, so the
+    // shared animator remains backward-compatible and species-agnostic.
+    const authoredMouth = grp._aquaticMouth && grp._aquaticMouth.lower
+      ? grp._aquaticMouth : null;
+    // FALLBACK JAW: far-forward children that hang BELOW the mean of the head
     // cluster — i.e. the lower jaw and its tooth row, never the skull.
     const jawCut = maxX * 0.6;
     let sumY = 0, nY = 0;
@@ -692,11 +697,32 @@
       sumY += m.position.y; nY++;
     }
     const jaw = [];
-    if (nY >= 3) {
+    let jawBase = null, jawBaseScore = -1;
+    if (!authoredMouth && nY >= 3) {
       const meanY = sumY / nY;
       for (let i = 0; i < kids.length && jaw.length < 14; i++) {
         const m = kids[i]; if (!m || !m.isMesh || m.position.x < jawCut) continue;
-        if (m.position.y < meanY - 0.05) jaw.push({ m: m, bx: m.position.x, by: m.position.y, rz: m.rotation.z });
+        if (m.position.y < meanY - 0.05) {
+          const part = { m: m, bx: m.position.x, by: m.position.y, rz: m.rotation.z };
+          jaw.push(part);
+          // The mouth slab is the largest discovered lower-head part. Its actual
+          // rear/top edge is the physical jaw hinge. The old `maxX * .62`
+          // approximation sat well behind that edge: opening a great white was
+          // tolerable, but scaling the same error to a megalodon made the whole
+          // lower jaw orbit away like a detached pink board. This geometry solve
+          // works for every current/future flat aquatic build without species IDs.
+          if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+          if (m.geometry.boundingBox) {
+            m.updateMatrix();
+            const jb = new THREE.Box3().copy(m.geometry.boundingBox).applyMatrix4(m.matrix);
+            const jdx = jb.max.x - jb.min.x, jdy = jb.max.y - jb.min.y, jdz = jb.max.z - jb.min.z;
+            const score = jdx * jdy * jdz;
+            if (score > jawBaseScore) {
+              jawBaseScore = score;
+              jawBase = { x: jb.min.x, y: jb.max.y };
+            }
+          }
+        }
       }
     }
     const len = Math.max(0.5, maxX - minX);
@@ -710,12 +736,23 @@
       // world build. Position-hash instead (no stream state at all).
       ph: (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 71) : 0) * 6.283,
       k: 0,
-      jaw: jaw.length ? jaw : null, jawX: maxX * 0.62, jawY: 0, jawK: -1,
+      jaw: jaw.length ? jaw : null,
+      jawX: jawBase ? jawBase.x : maxX * 0.62,
+      jawY: jawBase ? jawBase.y : 0,
+      jawGroup: authoredMouth ? authoredMouth.lower : null,
+      jawUpper: authoredMouth ? authoredMouth.upper : null,
+      jawCavity: authoredMouth ? authoredMouth.cavity : null,
+      jawContract: authoredMouth ? authoredMouth.contract : null,
+      jawLowerRz: authoredMouth ? authoredMouth.lower.rotation.z : 0,
+      jawUpperX: authoredMouth ? authoredMouth.upper.position.x : 0,
+      jawUpperY: authoredMouth ? authoredMouth.upper.position.y : 0,
+      jawCavityScaleY: authoredMouth ? authoredMouth.cavity.scale.y : 1,
+      jawK: -1,
       px: null, pz: null, py: null, ph0: a.heading,
       roll: 0, pitch: 0,
     };
     // hinge height for the gape = the mean y of the jaw parts
-    if (jaw.length) {
+    if (jaw.length && !jawBase) {
       let s = 0;
       for (let i = 0; i < jaw.length; i++) s += jaw[i].by;
       a.swim.jawY = s / jaw.length;
@@ -726,10 +763,28 @@
   // the seize, so a shark's mouth actually opens on the thing it is biting.
   function swimJaw(actor, openness) {
     const rig = actor && actor.swim;
-    if (!rig || !rig.jaw) return;
+    if (!rig || (!rig.jaw && !rig.jawGroup)) return;
     let o = openness > 0 ? (openness > 1 ? 1 : openness) : 0;
     if (rig.jawK >= 0 && Math.abs(o - rig.jawK) < 0.01) return;   // nothing changed
     rig.jawK = o;
+    if (rig.jawGroup) {
+      const contract = rig.jawContract || {};
+      // The group origin never translates: its world position is therefore a
+      // testable invariant and the mandible cannot become floating physics.
+      rig.jawGroup.rotation.z = rig.jawLowerRz - o * (contract.travel || contract.maxOpen || 0.58);
+      if (rig.jawUpper) {
+        // Sharks protrude the upper jaw as they commit to a bite. The travel is
+        // deliberately small; the lower hinge remains the dominant motion.
+        rig.jawUpper.position.x = rig.jawUpperX + o * (contract.protrude || 0);
+        rig.jawUpper.position.y = rig.jawUpperY - o * (contract.upperDrop || 0);
+      }
+      if (rig.jawCavity) {
+        // Reveal the recessed dark cavity with the gape; at rest it remains a
+        // narrow mouth line instead of a coloured box stuck under the snout.
+        rig.jawCavity.scale.y = rig.jawCavityScaleY * (1 + o * 9);
+      }
+      return;
+    }
     const th = -o * 0.62;                       // drop the lower jaw about the hinge
     const c = Math.cos(th), s = Math.sin(th);
     for (let i = 0; i < rig.jaw.length; i++) {

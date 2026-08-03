@@ -37,16 +37,36 @@ state directly and steps the sim by hand. Use after EVERY change:
    `CBZ.stepSim(1/60)` bursts to advance time instantly instead of waiting.
    Minutes to write, seconds to run, tests the REAL game — never a mock.
 
-VISUAL TOOLS — owner-request only, NEVER in the default loop (the owner
-judges appearance by playing; do not spend loop time on screenshots):
-`tools/studio.mjs` (asset turntables), `tools/street-shot.mjs` (street
-scene), `tools/city-atlas.mjs` (top-down world), `tools/demolition-check.mjs`
-(destroy→rebuild arc; its FLOATING-GEOMETRY AABB-chain invariant is still a
-good pattern to copy for structure builders), `tools/smoke-play.mjs` (full
-RENDERED boot + screenshot — the only gate that exercises the real render
-path; run it once before a big deploy or when render-path code changed,
-otherwise skip). `tools/terrain-map-audit.mjs` is the deep-dive superset of
-the math gate's terrain sweep for terrain-focused work.
+TOOLS ARE YOUR EYES AND HANDS — USE THEM, AND MAKE THEM FASTER (owner,
+2026-08-02). An earlier version of this section said visual tools were
+"owner-request only, NEVER in the default loop." That was a misreading the
+owner has corrected: the rule was never "don't look" — it was BUILD MORE THAN
+TEST. Headless Claude is a blind man; the premade tools are his eyes and
+hands, and the standing directive is to use them freely AND dogfood them —
+every session should leave the instrument shelf faster, sharper or wider than
+it found it, so that looking costs seconds instead of a from-scratch harness
+every time. The real rules:
+
+- **Reach for a PREMADE tool before writing a throwaway harness.** The shelf:
+  `tools/probe.mjs --serve` (ONE live world answers many queries),
+  `tools/visual-compare.mjs` + `tools/visual-presets/` (matched before/after
+  screenshot sets, deployed site vs local, contact sheet + PDF — add a preset
+  instead of a bespoke shot script), `tools/studio.mjs` (asset turntables),
+  `tools/street-shot.mjs` (street scene), `tools/city-atlas.mjs` (top-down
+  world), `tools/demolition-check.mjs` (destroy→rebuild arc; its
+  FLOATING-GEOMETRY AABB-chain invariant is a good pattern to copy),
+  `tools/smoke-play.mjs` (full RENDERED boot — the only gate on the real
+  render path; run before a big deploy or when render code changed),
+  `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
+  (honest camera aiming from probes).
+- **A probe written twice becomes a tool.** If a task needs a bespoke CDP
+  script a second time, promote it into the shelf (or a visual-compare
+  preset) rather than retyping it. Tool speed is a feature: a shaved boot
+  path or a reused live world compounds across every future session.
+- **The cost discipline stays.** Numbers beat frames where a number answers
+  the question; don't re-prove what a ratchet already pins. And the final
+  call on how things LOOK is still the owner's, judged by playing. But a
+  screenshot that answers a real question is work, not waste.
 
 ## WHO VERIFIES — builders build, the orchestrator gates
 

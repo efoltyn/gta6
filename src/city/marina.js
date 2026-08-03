@@ -38,9 +38,9 @@
         · a Med-moor superyacht quay (stern-to: a 34m yacht occupies only its
           BEAM of quay, which is exactly how a big hull fits a small harbour)
         · fuel dock on its OWN pontoon near the entrance
-        · harbourmaster office, chandlery, yacht-club terrace, travel-lift
-          gantry over a lift well, hardstand yard with hulls on cradles
-        · rubble-mound breakwater arms with a walkable cap and a channel
+        · harbourmaster office, chandlery, yacht-club deck, travel-lift
+          gantry over a lift well and an open hardstand yard
+        · walkable breakwater caps with a channel
           entrance marked IALA REGION B ("red, right, returning": red cans to
           STARBOARD entering from seaward — this game reads American)
         · cleats every 4m, piles, fenders, mooring lines
@@ -346,7 +346,7 @@
 
   const WOOD_A = 0xb99a6b, WOOD_B = 0xa88a5e, WOOD_DK = 0x6f5a3c;
   const CONCRETE = 0x9aa0a6, CONCRETE_DK = 0x7c8288;
-  const PONTOON_C = 0xd6d9dc, ROCK = 0x6a7076, CLEAT = 0x2e3238;
+  const PONTOON_C = 0xd6d9dc, CLEAT = 0x2e3238;
 
   let site = null;                 // the resolved marina descriptor (or null)
   let pontoonGrp = null;           // the floating group (tracks the swell)
@@ -711,31 +711,14 @@
       door.position.set(sx + 5.05, QUAY_TOP + 1.5, sz); root.add(door);
       const eave = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.2, 7.6), m(0x7d848a));
       eave.position.set(sx, QUAY_TOP + 4.3, sz); root.add(eave);
-      const rack = [];
-      for (let i = 0; i < 6; i++) rack.push(boxGeoAt(sx + 6.2, QUAY_TOP + 0.6 + (i % 2) * 0.9, sz - 2.4 + i * 0.8, 0.4, 0.8, 0.4));
-      mergeAdd(rack, m(0x24272b));
     }
-    // -- yacht club terrace: a raised deck with tables and umbrellas --
+    // -- yacht club terrace: a raised, usable deck left deliberately open --
     {
       const tx = QX - 8, tz = BZ + 24, TW = 12, TD = 9, TT = QUAY_TOP + 0.4;
       const planks = [];
       for (let x = tx - TW / 2 + 0.6; x < tx + TW / 2; x += 1.1) planks.push(boxGeoAt(x, TT - 0.06, tz, 1.0, 0.12, TD));
       mergeAdd(planks, m(WOOD_A));
       plat(tx - TW / 2, tx + TW / 2, tz - TD / 2, tz + TD / 2, TT);
-      const rail = [];
-      rail.push(boxGeoAt(tx, TT + 0.95, tz - TD / 2 + 0.06, TW, 0.08, 0.08));
-      rail.push(boxGeoAt(tx + TW / 2 - 0.06, TT + 0.95, tz, 0.08, 0.08, TD));
-      for (let x = tx - TW / 2; x <= tx + TW / 2; x += 1.6) rail.push(boxGeoAt(x, TT + 0.5, tz - TD / 2 + 0.06, 0.07, 0.9, 0.07));
-      mergeAdd(rail, m(0xe4e7ea));
-      for (let i = 0; i < 3; i++) {
-        const ux = tx - 3.6 + i * 3.6, uz = tz + 1.4;
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.3, 0.12), m(0x9aa0a6));
-        post.position.set(ux, TT + 1.15, uz); root.add(post);
-        const canopy = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.12, 8), m(i % 2 ? 0xe8ebee : 0x2f6d8f));
-        canopy.position.set(ux, TT + 2.3, uz); root.add(canopy);
-        const table = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.08, 10), m(0xdfe3e6));
-        table.position.set(ux, TT + 0.74, uz); root.add(table);
-      }
     }
     // -- travel-lift gantry straddling the lift well (the well itself is the
     //    hole left in the quay slab above — real open water, no platform) --
@@ -762,28 +745,6 @@
       crewSpots.push({ x: (wx0 + wx1) / 2 - 2.0, z: WELL_Z - 5.6, face: 0, job: "boat mechanic",
         id: "lift", wealth: 0.32, outfit: 0x3a78c9, pose: "foldarms" });
     }
-    // -- hardstand yard: hulls out of the water, chocked on steel cradles --
-    {
-      const yx = QX - 15;
-      const cradles = [], hulls = [], hulled = [];
-      for (let i = 0; i < 5; i++) {
-        const yz = BZ - 38 + i * 6.4;
-        const len = 6.5 + CBZ.hash01(yx, yz, 771) * 5.5;
-        const bm = 1.9 + CBZ.hash01(yx, yz, 772) * 1.3;
-        const yaw = (CBZ.hash01(yx, yz, 773) - 0.5) * 0.12;
-        for (const dx of [-len * 0.28, len * 0.28]) {
-          cradles.push(boxGeoAt(yx + dx, QUAY_TOP + 0.55, yz, 0.5, 1.1, bm + 1.0, yaw));
-        }
-        hulls.push(boxGeoAt(yx, QUAY_TOP + 1.7, yz, len, 1.5, bm, yaw));
-        hulls.push(boxGeoAt(yx, QUAY_TOP + 2.5, yz - 0.1, len * 0.42, 0.9, bm * 0.7, yaw));
-        hulled.push({ x: yx, z: yz, w: len, d: bm + 0.6 });
-      }
-      mergeAdd(cradles, m(0x8a5f2e));
-      // colliders carry the MERGED mesh as their ref (batch.js/LOS/demolition
-      // all resolve a collider back to a real object — never leave ref null)
-      const hullMesh = mergeAdd(hulls, m(0xe2e5e8), root, true);
-      for (const h of hulled) solid(h.x, h.z, h.w, h.d, hullMesh, 0, QUAY_TOP + 2.4);
-    }
     // -- the brokerage building: the dealer's showroom, glass to the water.
     //    boatyard.js registers its sales desk at deskX/deskZ (exposed below).
     const DESK = { x: QX - 6.5, z: BZ + DEAL_Z + 4 };
@@ -804,48 +765,44 @@
     }
 
     // =====================================================================
-    //  5) BREAKWATER ARMS + THE CHANNEL — rubble mound with a walkable
-    //     concrete cap, hooking in to leave a 26m entrance. IALA REGION B:
+    //  5) BREAKWATER ARMS + THE CHANNEL — walkable concrete caps hooking in
+    //     to leave a 26m entrance. IALA REGION B:
     //     entering from seaward (heading WEST) starboard is the -z side, so
     //     RED goes on the SOUTH head and GREEN on the NORTH head, and the
     //     channel cans repeat the pair. "Red, right, returning."
     // =====================================================================
     const CAP_TOP = 1.6;
     function breakwater(z, hookZ) {
-      // The arms start clear of the quay's z-ends (QZ0/QZ1) so rip-rap never
-      // grows out of the apron, and clear of the Med quay face at MEDZ+5.
+      // The arms start clear of the quay's z-ends and the Med quay face.
       const x0 = QX + 8, x1 = QX + 80;
-      const rocks = [];
-      for (let x = x0; x <= x1; x += 3.2) {
-        const s = 1.6 + CBZ.hash01(x, z, 811) * 2.4;
-        rocks.push(boxGeoAt(x, SEA_Y + 0.2 + CBZ.hash01(x, z, 812) * 0.5, z + (CBZ.hash01(x, z, 813) - 0.5) * 2.2, s, s * 0.8, s * 1.15, CBZ.hash01(x, z, 814) * Math.PI));
-      }
       const hz0 = Math.min(z, hookZ), hz1 = Math.max(z, hookZ);
-      for (let zz = hz0; zz <= hz1; zz += 3.2) {
-        const s = 1.6 + CBZ.hash01(x1, zz, 815) * 2.4;
-        rocks.push(boxGeoAt(x1 + (CBZ.hash01(x1, zz, 816) - 0.5) * 2.2, SEA_Y + 0.2 + CBZ.hash01(x1, zz, 817) * 0.5, zz, s, s * 0.8, s * 1.15, CBZ.hash01(x1, zz, 818) * Math.PI));
-      }
-      mergeAdd(rocks, m(ROCK));
-      // the cap: a 2.2m concrete walkway along the crest, both legs
-      const cap = [];
-      cap.push(boxGeoAt((x0 + x1) / 2, CAP_TOP - 0.2, z, x1 - x0, 0.4, 2.2));
-      cap.push(boxGeoAt(x1, CAP_TOP - 0.2, (hz0 + hz1) / 2, 2.2, 0.4, hz1 - hz0));
-      mergeAdd(cap, m(CONCRETE_DK));
+      // One grounded concrete mole, not a thin cap floating where the deleted
+      // cube-riprap used to hide the gap. Its collision is the exact visible
+      // body and height, so the arm is solid without becoming an unseen wall.
+      const bodyBottom = -1.4, bodyH = CAP_TOP - bodyBottom;
+      const body = [];
+      body.push(boxGeoAt((x0 + x1) / 2, bodyBottom + bodyH / 2, z, x1 - x0, bodyH, 2.2));
+      body.push(boxGeoAt(x1, bodyBottom + bodyH / 2, (hz0 + hz1) / 2, 2.2, bodyH, hz1 - hz0));
+      const bodyMesh = mergeAdd(body, m(CONCRETE_DK));
+      solid((x0 + x1) / 2, z, x1 - x0, 2.2, bodyMesh, bodyBottom, CAP_TOP);
+      solid(x1, (hz0 + hz1) / 2, 2.2, hz1 - hz0, bodyMesh, bodyBottom, CAP_TOP);
       plat(x0, x1, z - 1.1, z + 1.1, CAP_TOP);
       plat(x1 - 1.1, x1 + 1.1, hz0, hz1, CAP_TOP);
       // A CAP 1.6m above the water is not climbable from a swim (STEP_UP is
-      // 0.45m), so the root of each arm gets three concrete steps down to the
+      // 0.45m), so the root of each arm gets five concrete steps down to the
       // waterline — you can get out of the sea onto the mole, which is what
       // makes the arms somewhere to go rather than scenery.
-      const steps = [];
+      const steps = [], stepSpots = [];
       const NSTEP = 5, RISE = 0.40;                       // each riser < STEP_UP (0.45)
       for (let s = 0; s < NSTEP; s++) {
         const top = SEA_Y + 0.38 + s * RISE;              // -0.10 .. 1.50, then the cap at 1.60
         const sx = x0 - 0.7 - (NSTEP - 1 - s) * 1.2;
-        steps.push(boxGeoAt(sx, top - 0.2, z, 1.2, 0.4, 2.0));
+        steps.push(boxGeoAt(sx, bodyBottom + (top - bodyBottom) / 2, z, 1.2, top - bodyBottom, 2.0));
+        stepSpots.push({ x: sx, top: top });
         plat(sx - 0.6, sx + 0.6, z - 1.0, z + 1.0, top);
       }
-      mergeAdd(steps, m(CONCRETE_DK));
+      const stepMesh = mergeAdd(steps, m(CONCRETE_DK));
+      for (const s of stepSpots) solid(s.x, z, 1.2, 2.0, stepMesh, bodyBottom, s.top);
       return { x1: x1, hookZ: hookZ };
     }
     const southArm = breakwater(BZ - 62, BZ - 14);
@@ -965,27 +922,6 @@
           a._marinaRole = p.role;
         }
       }
-      // liveaboard clutter: bicycles chained to the quay rail + potted plants
-      const clutter = [];
-      for (let i = 0; i < 4; i++) {
-        const bx = QX - 2.4, bz = BZ - 2 + i * 5.5;
-        clutter.push(boxGeoAt(bx, QUAY_TOP + 0.55, bz, 0.14, 0.9, 1.5));         // frame
-        clutter.push(boxGeoAt(bx, QUAY_TOP + 0.35, bz - 0.62, 0.1, 0.66, 0.66)); // wheels (read)
-        clutter.push(boxGeoAt(bx, QUAY_TOP + 0.35, bz + 0.62, 0.1, 0.66, 0.66));
-      }
-      mergeAdd(clutter, m(0x3d4145));
-      const pots = [];
-      for (let i = 0; i < 6; i++) {
-        const px = QX - 5.5 + (i % 2) * 1.4, pz = BZ + 14 + i * 1.6;
-        pots.push(boxGeoAt(px, QUAY_TOP + 0.24, pz, 0.5, 0.48, 0.5));
-      }
-      mergeAdd(pots, m(0xa8643c));
-      const leaves = [];
-      for (let i = 0; i < 6; i++) {
-        const px = QX - 5.5 + (i % 2) * 1.4, pz = BZ + 14 + i * 1.6;
-        leaves.push(boxGeoAt(px, QUAY_TOP + 0.75, pz, 0.7, 0.6, 0.7));
-      }
-      mergeAdd(leaves, m(0x3f7a3a));
     })();
 
     // A work anchor so the city's existing job brain routes dockhands here —
@@ -1012,7 +948,7 @@
        9) THE REST OF THE PEOPLE WHO WORK HERE.
 
        OWNER: "every place should have the people who work there." This marina
-       drew a travel-lift gantry, a hardstand yard, a Med-moor superyacht quay
+       drew a travel-lift gantry, an open hardstand yard, a Med-moor superyacht quay
        and a fuel dock and staffed NONE of them — the authored population above
        is nine bodies standing on the quay, and not one of them is a captain, a
        deckhand or a mechanic. These four are the missing trades, declared

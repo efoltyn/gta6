@@ -48,9 +48,6 @@
   // craft stay byte-for-byte on their old booms). false restores the old fixed
   // constants.
   if (CBZ.CONFIG && CBZ.CONFIG.CAM_AIRCRAFT_FIT == null) CBZ.CONFIG.CAM_AIRCRAFT_FIT = true;
-  // Keep aircraft out of the collision-free backdrop range. One-line revert.
-  if (CBZ.CONFIG && CBZ.CONFIG.AIR_RING_BOUND == null) CBZ.CONFIG.AIR_RING_BOUND = true;
-
   // ---- NEW MATERIAL API (carfx.js) — fake-reflection env-mapped vehicle mats
   // for instant shine. Falls back to the flat cached cmat() if carfx hasn't
   // loaded, so nothing here breaks at worldgen and it auto-upgrades at runtime.
@@ -96,14 +93,10 @@
   // flyJet/integrate below. The tunables here are the per-craft knobs that
   // feed that core (thrust, six-axis drag coefficients, ETL band, etc).
   const JET_PRICE   = 3000000;     // $3M for the F-22
-  // FLIGHT_SPEED_V2: the top-speed caps + altitude ceiling the owner asked for.
+  // FLIGHT_SPEED_V2: the top-speed caps the owner asked for.
   // Read at load (config.js runs first). The OLD numbers stay as the literal
   // fallbacks so CBZ.CONFIG.FLIGHT_SPEED_V2=false is a true one-line revert.
-  // CEILING stays inside the fog / far-cull view envelope (quality.js: fog
-  // 420–1400m, cull 230–700m) — flying much higher would just bury you in the
-  // fog wall, so 600m is the ceiling, not thousands.
   const FLIGHT_SPEED_V2 = !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_SPEED_V2 !== false;
-  const CEILING     = FLIGHT_SPEED_V2 ? 600 : 220;   // hard altitude clamp (m)
   const GROUND_PAD  = 1.2;         // never sink the belly below this over the floor
 
   // HELI feel
@@ -1117,7 +1110,7 @@
   // count of helicopters flying themselves rather than being poisoned by the
   // one rotorcraft that is definitionally occupied. The player's envelope is
   // deliberately NOT taken from heliSpec: that table describes AI air support,
-  // and HELI_TOP/CEILING here are the owner's own hand-tuned feel.
+  // and HELI_TOP here is the owner's own hand-tuned feel.
   CBZ.heliFleet = CBZ.heliFleet || [];
   CBZ.heliFleet.push(function () {
     const c = _aircraftFlying();
@@ -1429,96 +1422,13 @@
   //  FLIGHT UPDATE — runs AFTER physics (order 12, just past vehicles' 11) and
   //  OWNS the aircraft + player transform while flying.
   // ============================================================
-  // Aircraft own AIRSPACE, not the walkable-land union. The old land clamp
-  // snapped a plane back to the nearest island the instant it crossed a shore,
-  // making the surrounding ocean unflyable. Bound flight to the rendered sea
-  // instead (with a cached world AABB) so the whole archipelago and open water
-  // are usable while still preventing an endless flight into unloaded space.
-  let airspaceSea = null, airspaceBounds = null;
-  function clampToAirspace(craft, r) {
-    const pos = craft && craft.pos ? craft.pos : craft;
-    if (!pos) return;
-    r = r || 2;
-    const sea = CBZ.citySea;
-    if (sea && sea !== airspaceSea) {
-      airspaceSea = sea;
-      try {
-        sea.updateMatrixWorld(true);
-        airspaceBounds = new THREE.Box3().setFromObject(sea);
-      } catch (e) { airspaceBounds = null; }
-    }
-    // The overhaul sea is 7km centred (310,-750). This fallback also safely
-    // encloses the legacy 6.2km sea and every registered island.
-    const b = airspaceBounds || { min: { x: -3190, z: -4250 }, max: { x: 3810, z: 2750 } };
-    const minX = b.min.x + r, maxX = b.max.x - r, minZ = b.min.z + r, maxZ = b.max.z - r;
-    if (pos.x < minX) { pos.x = minX; if (craft && craft.vx < 0) craft.vx = 0; }
-    else if (pos.x > maxX) { pos.x = maxX; if (craft && craft.vx > 0) craft.vx = 0; }
-    if (pos.z < minZ) { pos.z = minZ; if (craft && craft.vz < 0) craft.vz = 0; }
-    else if (pos.z > maxZ) { pos.z = maxZ; if (craft && craft.vz > 0) craft.vz = 0; }
-
-    /* ---- AND OUT OF THE DECORATIVE MOUNTAINS -------------------------------
-       The box above protects the WORLD EDGE. Nothing protected the BACKDROP
-       RING, and the two are not the same circle: the sea box reaches ~3500-4000
-       from centre while world/terrain.js's ring starts at `near` (~1900), so
-       there was a 1600-2000 unit deep band where an aircraft was inside the
-       legal box and already flying THROUGH a 1441 m mountain range. On foot
-       you cannot reach it; in the air you fly through it.
-
-       That range is collision-free ON PURPOSE — CBZ.floorAt deliberately
-       excludes it, and floorAt is now called per car per frame, so making the
-       backdrop solid there would tax every ground query in the game to fix a
-       problem only aircraft have. So the check lives HERE, in the one update
-       that aircraft run, and nowhere else. That is the general shape for
-       "solid to one class of entity only": keep it local to that entity, and
-       resolve it against a number the terrain system already publishes.
-
-       The radius is NOT hard-coded: CBZ.terrainRingRadii() is the same
-       function terrain.js uses to place the ring, so if WORLD_ENLARGE_FLAT
-       ever grows the world again the boundary grows with it — which is the
-       failure this whole session kept hitting (a constant measured once
-       against a world that later moved).
-
-       TELEGRAPHED, NOT SILENT. A wall you hit with no warning reads as
-       arbitrary; the same wall with a beat of warning reads as a boundary.
-       Inside the warn band the craft gets a `_airspaceWarn` stamp the HUD can
-       surface; only past the hard line is position clamped and the OUTWARD
-       velocity component killed. */
-    if (CBZ.CONFIG && CBZ.CONFIG.AIR_RING_BOUND === false) return;
-    const RING = CBZ.terrainRingRadii ? CBZ.terrainRingRadii() : null;
-    if (!RING || !RING.near) return;
-    // centre on the same box the clamp above derives, so the two agree
-    const ccx = (b.min.x + b.max.x) / 2, ccz = (b.min.z + b.max.z) / 2;
-    const dx = pos.x - ccx, dz = pos.z - ccz;
-    const d2 = dx * dx + dz * dz;
-    const hard = RING.near - 90;          // stop short of the nearest rock face
-    const warn = hard - 260;              // ~4-6 s of warning at cruise
-    if (d2 <= warn * warn) { if (craft) craft._airspaceWarn = 0; return; }
-    const d = Math.sqrt(d2) || 1;
-    if (craft) craft._airspaceWarn = Math.min(1, (d - warn) / Math.max(1, hard - warn));
-    if (d <= hard) return;
-    const nx = dx / d, nz = dz / d;       // outward unit
-    pos.x = ccx + nx * hard; pos.z = ccz + nz * hard;
-    if (craft) {
-      const out = craft.vx * nx + craft.vz * nz;   // outward component only
-      if (out > 0) { craft.vx -= out * nx; craft.vz -= out * nz; }
-      craft._airspaceWarn = 1;
-    }
-  }
-
-  /* Evidence for the gate: how much clear air actually separates the flyable
-     box from the decorative range. `slackToRing` going NEGATIVE means an
-     aircraft can reach the rock again — which is exactly what happened when
-     the world grew and the boundary did not. */
+  // Flight has no hidden X/Z world box, backdrop-ring clamp or altitude
+  // ceiling. The audit remains as a compatibility surface for diagnostics.
   CBZ.airspaceAudit = function () {
     const RING = CBZ.terrainRingRadii ? CBZ.terrainRingRadii() : null;
-    const b = airspaceBounds || { min: { x: -3190, z: -4250 }, max: { x: 3810, z: 2750 } };
-    const half = Math.max((b.max.x - b.min.x) / 2, (b.max.z - b.min.z) / 2);
-    const hard = RING ? RING.near - 90 : 0;
     return {
       ringNear: RING ? RING.near : 0, ringFar: RING ? RING.far : 0,
-      boxHalfExtent: Math.round(half), hardRadius: Math.round(hard),
-      slackToRing: RING ? Math.round(RING.near - hard) : 0,
-      bounded: !!(RING && RING.near) && !(CBZ.CONFIG && CBZ.CONFIG.AIR_RING_BOUND === false),
+      boxHalfExtent: 0, hardRadius: 0, slackToRing: 0, bounded: false,
     };
   };
 
@@ -1783,7 +1693,7 @@
     craft.pos.x += craft.vx * dt;
     craft.pos.y += craft.vy * dt;
     craft.pos.z += craft.vz * dt;
-    // altitude ceiling + ground floor (never sink the belly through terrain)
+    // ground floor (never sink the belly through terrain)
     const gy = floorY(craft.pos.x, craft.pos.z);
     const minY = gy + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     if (craft.pos.y < minY) {
@@ -1801,13 +1711,10 @@
       // a jet that bottoms out keeps cruising level (no stall-crash); a heli rests
       if (craft.kind === "jet" && craft.pitch < 0) craft.pitch = 0;
     }
-    if (craft.pos.y > CEILING) { craft.pos.y = CEILING; if (craft.vy > 0) craft.vy = 0; }
     // retractable landing gear (jet): legs drop when skimming low, tuck away
     // with altitude — driven off the same AGL this integrator already knows.
     const udI = craft.group.userData;
     if (udI && udI.gear) udI.gear.visible = (craft.pos.y - gy) < 9;
-    // keep inside the world bounds
-    clampToAirspace(craft, 2.0);
     // apply transform
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
@@ -2546,13 +2453,11 @@
       if (craft.vy < 0) craft.vy = 0;
       craft.onGround = true;
     }
-    if (craft.pos.y > CEILING) { craft.pos.y = CEILING; if (craft.vy > 0) craft.vy = 0; }
     const ud = craft.group.userData;
     if (ud && ud.gear) ud.gear.visible = (craft.pos.y - surfY) < 9;
     // prop-spin hook: any craft whose builder tags a spinner (userData.prop,
     // spins about local Z) gets throttle-proportional prop animation for free
     if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
-    clampToAirspace(craft, 2.0);
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
   }

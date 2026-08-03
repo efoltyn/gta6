@@ -36,8 +36,8 @@
       const nose = box(0.1, 0.09, 0.11, black); nose.position.set(0.46, 0.36, 0); g.add(nose);
       // ENORMOUS upright ears, black-tipped
       [0.06, -0.06].forEach(function (z) {
-        const e = box(0.06, 0.36, 0.04, tan); e.position.set(0.3, 0.78, z); g.add(e);
-        const tip = box(0.06, 0.08, 0.04, black); tip.position.set(0.3, 0.98, z); g.add(tip);
+        const e = box(0.06, 0.36, 0.04, tan); e.position.set(0.3, 0.69, z); g.add(e);
+        const tip = box(0.06, 0.08, 0.04, black); tip.position.set(0.3, 0.9, z); g.add(tip);
       });
       // small front legs
       [[0.18, 0.1], [0.18, -0.1]].forEach(function (o) { const l = box(0.07, 0.2, 0.07, tan); l.position.set(o[0], 0.1, o[1]); g.add(l); });

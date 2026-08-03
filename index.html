@@ -406,7 +406,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=allmain3"></script>
+  <script src="src/entities/character.js?v=mount1chute1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=scale1y"></script>
 <script src="src/entities/coins.js"></script>
@@ -472,8 +472,8 @@
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=allmain1"></script>
-<script src="src/systems/physics.js?v=traversal2"></script>
+<script src="src/systems/camera.js?v=allmain1chute1"></script>
+<script src="src/systems/physics.js?v=seamount1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -533,13 +533,13 @@
 <script src="src/systems/state.js?v=arrest4w10"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
-<script src="src/systems/touch.js?v=allmain1"></script>
+<script src="src/systems/touch.js?v=seamount1"></script>
 <script src="src/systems/touch_vehicle.js?v=allmain1"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=rideexit2"></script>
-<script src="src/systems/fpsmode.js?v=allmain1"></script>
+<script src="src/systems/gamepad.js?v=seamount1"></script>
+<script src="src/systems/fpsmode.js?v=seamount1chute1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -678,23 +678,23 @@
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
-<script src="src/city/wildlife_species.js?v=wild1"></script>
-<script src="src/city/wildlife/forest_deer.js?v=wild1"></script>
-<script src="src/city/wildlife/bears.js?v=wild1"></script>
-<script src="src/city/wildlife/canines.js?v=wild1"></script>
-<script src="src/city/wildlife/bigcats.js?v=wild1"></script>
-<script src="src/city/wildlife/megafauna.js?v=wild1"></script>
-<script src="src/city/wildlife/farm.js?v=wild1"></script>
-<script src="src/city/wildlife/snow_ungulates.js?v=wild1"></script>
-<script src="src/city/wildlife/small_game.js?v=wild1"></script>
+<script src="src/city/wildlife_species.js?v=attach1"></script>
+<script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
+<script src="src/city/wildlife/bears.js?v=attach1"></script>
+<script src="src/city/wildlife/canines.js?v=attach1"></script>
+<script src="src/city/wildlife/bigcats.js?v=attach1"></script>
+<script src="src/city/wildlife/megafauna.js?v=attach1"></script>
+<script src="src/city/wildlife/farm.js?v=attach1"></script>
+<script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
+<script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=seawave1"></script>
-<script src="src/city/wildlife.js?v=allmain1"></script>
-<script src="src/city/wildlife_tame.js?v=allmain1"></script>
+<script src="src/city/wildlife/aquatic.js?v=sharkface1"></script>
+<script src="src/city/wildlife.js?v=sharkmouth2"></script>
+<script src="src/city/wildlife_tame.js?v=sharkmouth2"></script>
 <script src="src/city/dogs.js?v=allmain1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
-<script src="src/city/creature_combat.js?v=allmain1"></script>
+<script src="src/city/creature_combat.js?v=sharkmouth2"></script>
 <script src="src/city/companions.js?v=allmain1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
@@ -753,7 +753,7 @@
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=racedurable1"></script>
+<script src="src/city/vehicles.js?v=seamount1"></script>
 <script src="src/city/playerair.js?v=air3"></script>
 <script src="src/city/playeraircraft.js?v=swepthull3w9w11u"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -781,7 +781,7 @@
      is priced through CBZ.detonate so it damages buildings like any other
      impact of that mass and speed. After playeraircraft.js (uses the exported
      setCraftRotation) and after cockpit_view.js. Revert: ?cfg_BAILOUT=0. -->
-<script src="src/city/bailout.js?v=bail1"></script>
+<script src="src/city/bailout.js?v=bail1chute1"></script>
 <!-- elevator-grammar boarding doors for every flyable aircraft: the door
      visibly opens, you walk in through the opening, it closes, THEN flight
      control hands over (and the reverse on exit). Wired behind the existing
@@ -889,7 +889,7 @@
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=roles1"></script>
 <script src="src/city/restrain.js?v=weaponphysics1"></script>
-<script src="src/city/combat.js?v=punch2"></script>
+<script src="src/city/combat.js?v=seamount1"></script>
 <!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
      CBZ.CITY already loaded, and CBZ.cityEcon's new Wood/Stone/Scrap/
      Hatchet/Pickaxe entries above) + the [C] craft panel (needs
@@ -911,7 +911,7 @@
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
 <script src="src/city/family.js?v=allmain1"></script>
-<script src="src/city/swim.js?v=seawave1"></script>
+<script src="src/city/swim.js?v=seamount1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage

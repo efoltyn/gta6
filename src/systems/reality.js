@@ -279,6 +279,10 @@
     return found;
   }
 
+  // AABBs are the cheap broad phase. Rotated/slender parts can have touching
+  // AABBs while the actual solids are separated, so assembly audits may pass
+  // `touches(sourceA, sourceB, broadA, broadB, contactEps)`. Returning false
+  // rejects that broad-phase pair before it becomes a support-graph edge.
   R.supportAudit = function (input, opts) {
     opts = opts || {};
     var t0 = now();
@@ -307,7 +311,13 @@
         if (rank[ra] === rank[rb]) rank[ra]++;
       }
     }
-    var pairs = bp.visit(function (a, b) { union(a, b); });
+    var contacts = 0;
+    var pairs = bp.visit(function (a, b, boxA, boxB) {
+      if (opts.touches &&
+          opts.touches(boxA.source, boxB.source, boxA, boxB, contactEps) === false) return;
+      contacts++;
+      union(a, b);
+    });
 
     var directAnchors = 0;
     var groundY = opts.groundY != null && finite(+opts.groundY) ? +opts.groundY : null;
@@ -382,7 +392,8 @@
       components: components,
       unsupportedComponents: unsupportedComponents,
       directAnchors: directAnchors,
-      contacts: pairs.hits,
+      contacts: contacts,
+      nearPairs: pairs.hits,
       candidatePairs: pairs.candidates,
       buckets: bp.bucketCount,
       large: bp.largeCount,

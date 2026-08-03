@@ -219,9 +219,10 @@
       if (edge(pad, B.LB) && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); // next weapon
       if (edge(pad, B.RB) && CBZ.fpsPrevWeapon) CBZ.fpsPrevWeapon(); // prev weapon
       if (edge(pad, B.Y)) {
-        // Large-animal riding does not set P.driving, so dismount it directly;
+        // Animal riding does not set P.driving, so dismount it directly;
+        // capability state, not a speed multiplier, also covers slow turtles.
         // otherwise Y remains the normal binary interact/board button.
-        if (P && P._rideScale > 1 && CBZ.cityDismount) CBZ.cityDismount();
+        if (P && P._mountedAnimal && CBZ.cityDismount) CBZ.cityDismount();
         else tapKey("e");
       }
       if (edge(pad, B.DUP)) tapKey("m");                            // map

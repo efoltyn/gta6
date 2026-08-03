@@ -2039,9 +2039,21 @@
     // rule was to POP the car the same frame its engine hit zero. Every caller
     // already declared what it was in `opts`; nothing was ever reading it.
     // Flag off => the literal `true`, byte-identical.
-    damageEngine(car, amount, COOKOFF()
+    // A creature bite is structural impact, never gunfire: no fireball grows
+    // out of a shark's mouth, including when the cook-off feature is disabled.
+    damageEngine(car, amount, opts.bite ? false : (COOKOFF()
       ? (opts.direct ? "direct" : opts.blast ? "blast" : opts.fire ? "fire" : "gun")
-      : true);
+      : true));
+    // A megalodon-sized bite that guts a marine engine tears open the hull.
+    // Marking it dead hands that existing boat to water_float's wreck/sinking
+    // owner on the next frame; the mesh remains, takes on water and disappears
+    // below the surface instead of producing an unrelated Hollywood explosion.
+    if (opts.bite && car.engineHp <= 0 && !car.dead) {
+      car.dead = true; car.abandoned = true; car.ai = false; car.v = 0;
+      car._onFire = false; car._smoking = false;
+      if (car.npcDriver) killNpcDriverInCar(car);
+      if (car.player && CBZ.player.driving && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
+    }
     // a driver taking fire doesn't keep cruising the speed limit — they FLOOR it
     // (unless the round just took a tire: you can't floor it on a flat)
     if (!tire && opts.byPlayer && car.ai && !car.dead && !car.npcDriver) {
@@ -2933,13 +2945,9 @@
         if (P.dead) return;                  // death.js ejects + ragdolls the driver
       }
     }
-    // MARINE: skip the mainland-bounds clamp while out on open water (it would
-    // otherwise yank a boat leaving the harbor straight back onto the quay —
-    // the same clamp a pedestrian/road car needs to never sail off the map
-    // edge doesn't apply to something that's SUPPOSED to be out past it), and
-    // ride at the water surface instead of the flat car-height y=0 (this
-    // engine has no terrain-following suspension — every car sits at y=0 — so
-    // this is the one place a vehicle's Y ever moves off it).
+    // MARINE: a hull on open water rides the water surface instead of the flat
+    // car-height y=0. Position is never forced back into the walkable-land
+    // union; quays are enforced only by their visible collision geometry.
     const onWater = overWater(car.pos.x, car.pos.z);
     const marine = isMarineCar(car) && onWater;
     // ---- CARS_NO_WATER: a road car is not a boat. Past a grace window (a
@@ -2970,12 +2978,9 @@
         }
       }
     } else if (car._waterT) { car._waterT = 0; car._flooded = false; car._engineCutNoted = false; }
-    // clampToCity would yank a car back ashore the moment it's over water —
-    // resetting the grace timer every frame and making the flood unreachable
-    // (clamp's land union sits strictly INSIDE cityWaterAt's, so a clamped car
-    // can never stand on oracle-water). Once over water, the water mechanic
-    // owns the position: sink where you swamped, don't teleport to the quay.
-    if (!marine && !(noWater && onWater) && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
+    // The driven car has no region clamp. Visible colliders, terrain and the
+    // flood/swim path own the edge, so a quay or biome boundary can never act
+    // like an invisible wall. Autonomous traffic keeps its containment path.
     // VEHICLE_TERRAIN: the driven car stands on the ground under it — the same
     // CBZ.floorAt the player's own feet use — and PITCHES AND ROLLS over the
     // hills. Marine hulls still ride WATER_Y, a swamped hull still sinks and an

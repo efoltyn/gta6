@@ -23,14 +23,9 @@
    z-330, the circle center 470,-330 r200). Registered as its own
    thin walkable rect so you can drive/walk the land-bridge.
 
-   DRAW-CALL DISCIPLINE (owner rule #4 — this biome is BIG):
-   The ground/dunes/riverbed/road decks are each ONE merged
-   BufferGeometry mesh (matrixAutoUpdate off). EVERY repeated scatter
-   prop — dune mounds, saguaro trunks, saguaro arms, boulders, scrub
-   bushes, tumbleweeds, telephone poles, bleached bones — is a single
-   InstancedMesh sharing one cmat() material. Mesas + buildings are
-   the only individually-placed solids (they need colliders). The
-   whole biome adds on the order of ~20 draw calls, not thousands.
+   The terrain, roads, real buildings and authored saguaro field stay. The
+   former filler layer — rocks, scrub, tumbleweeds, poles and bones — is
+   opt-in; barren terrain between cacti is not a surface to fill with props.
 
    Local seeded RNG → the same desert every run.
 ============================================================ */
@@ -50,6 +45,10 @@
   // MESAS ARE NOT ROCKS IN THIS SENSE and stay: they are the basin's only
   // orientation cues and its only collidered landmarks.
   if (CFG.DESERT_ROCK_SCATTER == null) CFG.DESERT_ROCK_SCATTER = false;
+  // Saguaros are landscape identity, not generic prop scatter. Keep the
+  // existing authored field by default while the unrelated filler stays off.
+  if (CFG.DESERT_CACTI == null) CFG.DESERT_CACTI = true;
+  if (CFG.DESERT_PROP_SCATTER == null) CFG.DESERT_PROP_SCATTER = false;
   // ---- DESERT_DUNES_V3 (owner: "the desert region hills are varied in size
   // more, some massive like the dunes im saying") — see desertDuneHeightAt.
   if (CFG.DESERT_DUNES_V3 == null) CFG.DESERT_DUNES_V3 = true;
@@ -525,6 +524,7 @@
       CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: gy, y1: gy + (y1 == null ? 30 : y1) });
     }
 
+    CBZ.desertRockScatterCount = 0;
     // =====================================================================
     //  0) REGIONS — declare the walkable land FIRST so peds/swim/clamp see
     //     it the instant we start placing things.
@@ -703,6 +703,7 @@
     }
     mergeAdd(riverGeoms, cmat(SAND_DK), { receive: true });
 
+    if (CFG.DESERT_CACTI !== false) {
     // =====================================================================
     //  4) SAGUARO CACTI — instanced. Trunks (tall thin cylinders) in ONE
     //     InstancedMesh; arms (short cylinders, elbowed) in another. Shared
@@ -779,7 +780,9 @@
     trunkIM.instanceMatrix.needsUpdate = true; armIM.instanceMatrix.needsUpdate = true;
     trunkIM.matrixAutoUpdate = false; armIM.matrixAutoUpdate = false;
     root.add(trunkIM); if (armCount) root.add(armIM);
+    } // DESERT_CACTI
 
+    if (CFG.DESERT_PROP_SCATTER === true) {
     // =====================================================================
     //  5) BOULDER FIELDS — REMOVED BY OWNER ORDER ("the desert region little
     //     gray rocks are removed entirely"), behind DESERT_ROCK_SCATTER.
@@ -938,6 +941,7 @@
     }
     boneIM.instanceMatrix.needsUpdate = true; boneIM.matrixAutoUpdate = false;
     boneIM.castShadow = true; root.add(boneIM);
+    } // DESERT_PROP_SCATTER
 
     // =====================================================================
     //  8) RED-ROCK MESAS — the only big individually-placed solids. Each =
@@ -1031,6 +1035,7 @@
       root.add(cwDashIM);
     }
 
+    if (CFG.DESERT_PROP_SCATTER === true) {
     // =====================================================================
     // 10) TELEPHONE POLES — instanced posts + instanced crossarms running
     //     alongside the highway. Poles get thin colliders. WHY: a power line
@@ -1060,6 +1065,7 @@
     poleIM.instanceMatrix.needsUpdate = true; armIM2.instanceMatrix.needsUpdate = true;
     poleIM.matrixAutoUpdate = false; armIM2.matrixAutoUpdate = false;
     poleIM.castShadow = true; root.add(poleIM); root.add(armIM2);
+    } // DESERT_PROP_SCATTER
 
     // =====================================================================
     // 11) LANDMARKS — the WHY anchors. Built with cityMakeBuilding so the
@@ -1071,6 +1077,7 @@
       const gx = GAS_X, gz = GAS_Z;
       mk(root, gx, gz, 14, 11, 1, 0xded6c4, "north", { retail: true });            // station store (enterable)
       mk(root, gx + 26, gz + 2, 16, 12, 1, 0xc94f3a, "north", { retail: true });   // chrome diner (enterable)
+      if (CFG.DESERT_PROP_SCATTER === true) {
       // pump-canopy: a flat roof on 4 posts (merged) + 2 pump blocks (instanced)
       const canY = 4.2, cgx = gx, cgz = gz - 12;
       mergeAdd([(function () { const g = new THREE.BoxGeometry(16, 0.5, 9); g.translate(cgx, canY, cgz); return g; })()], cmat(0xe7e2d4), { cast: true });
@@ -1083,10 +1090,12 @@
       pumpIM.instanceMatrix.needsUpdate = true; pumpIM.matrixAutoUpdate = false; pumpIM.castShadow = true; root.add(pumpIM);
       if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("GAS"); if (s) { s.position.set(gx, 5.0, gz); s.scale.set(7, 1.8, 1); root.add(s); } }
       if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("DINER"); if (s) { s.position.set(gx + 26, 5.2, gz + 2); s.scale.set(8, 2.0, 1); root.add(s); } }
+      } // DESERT_PROP_SCATTER
 
       // -- ROADSIDE MOTEL (SHELTER: a place to hole up / lay low) ----------
       const mxr = MOTEL_X, mzr = MOTEL_Z;
       mk(root, mxr, mzr, 40, 12, 1, 0xd8b48a, "north", { retail: true });          // long unit row (enterable office shell)
+      if (CFG.DESERT_PROP_SCATTER === true) {
       if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("MOTEL"); if (s) { s.position.set(mxr, 5.6, mzr); s.scale.set(10, 2.4, 1); root.add(s); } }
       // a tall neon-ish sign pylon out by the road (merged post + board)
       mergeAdd([
@@ -1099,6 +1108,7 @@
       // The BOARD at 8-11 m stays open — it is over every roof in the basin.
       solid(mxr - 22, mzr - 10, 0.8, 0.8, 9);
       if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("VACANCY"); if (s) { s.position.set(mxr - 22, 9.5, mzr - 10.3); s.scale.set(5, 1.6, 1); root.add(s); } }
+      } // DESERT_PROP_SCATTER
 
       // -- ABANDONED MINING OUTPOST (a relic worth poking at) --------------
       // a weathered headframe (merged A-frame timbers) + an ore shed
@@ -1106,6 +1116,7 @@
       // ANYONE first cut a road into this basin — the dead source.
       const ox = CX - 230, oz = CZ + 60;
       mk(root, ox + 14, oz, 10, 9, 1, 0x8a7252, "south", { retail: true });        // ore shed (enterable)
+      if (CFG.DESERT_PROP_SCATTER === true) {
       const hf = 9;                                                                 // headframe height
       mergeAdd([
         (function () { const g = new THREE.BoxGeometry(0.5, hf, 0.5); g.rotateZ(0.18); g.translate(ox - 2.0, hf / 2, oz); return g; })(),
@@ -1124,16 +1135,17 @@
       [[-1.7, -1.7], [1.7, -1.7], [-1.7, 1.7], [1.7, 1.7]].forEach((c, i) => { dummy.position.set(tx + c[0], 3.5, tz + c[1]); dummy.scale.set(1, 1, 1); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); legIM.setMatrixAt(i, dummy.matrix); });
       legIM.instanceMatrix.needsUpdate = true; legIM.matrixAutoUpdate = false; legIM.castShadow = true; root.add(legIM);
       solid(tx, tz, 4, 4, 11);
+      } // DESERT_PROP_SCATTER
     }
 
     // =====================================================================
     // 11b) DRY GULCH — a real OLD-WEST main-street TOWN grown from the
     //      reusable CBZ.buildTown generator, strung ALONG the highway spine.
     //      FALLBACK: if the town generator (towngen.js / placement) is absent
-    //      this whole block no-ops and the scatter+landmarks above stand as
-    //      the desert — zero regression. The scatter loops already skipped the
-    //      TOWN rect (inTown), so cacti/boulders/brush don't grow in the
-    //      streets only WHEN the generator is present (HAS_TOWN gates inTown).
+    //      this whole block no-ops and the enterable landmarks above stand as
+    //      the desert. The cactus field, plus any explicitly enabled filler,
+    //      skips the TOWN rect so none of it grows in the streets
+    //      (HAS_TOWN gates inTown).
     // =====================================================================
     if (HAS_TOWN) {
       // reserve the existing landmark/road colliders so the generator's

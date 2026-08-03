@@ -645,7 +645,7 @@
   CBZ.onUpdate(9.9, function () {
     if (!v2On() || swimming) return;
     const A = arena(), P = CBZ.player;
-    if (!A || !P || A.minX == null || P.dead || P.driving || P._aircraft || P._doorArc) return;
+    if (!A || !P || A.minX == null || P.dead || P.driving || P._aircraft || P._doorArc || P._aquaticMount) return;
     if (P.grounded || (P.vy || 0) >= 0) return;
     if (!waterAt(A, P.pos.x, P.pos.z)) return;
     const surf = surfAt(P.pos.x, P.pos.z);
@@ -667,6 +667,10 @@
     const A = arena();
     const P = CBZ.player;
     if (!A || !P || A.minX == null) { bail(P, dt); return; }
+    // The mounted creature owns the water-column root until dismount. Clearing
+    // the swimmer's private state here prevents buoyancy from fighting it while
+    // preserving the ordinary swim owner for the instant the rider lets go.
+    if (P._aquaticMount) { bail(P, dt); P._swim = false; return; }
     if (P.dead || P.driving || P._aircraft) { bail(P, dt); return; }
     if (!v2On()) { legacyStep(A, P, dt); return; }
     v2Step(A, P, dt);
@@ -1139,6 +1143,21 @@
   //  PUBLIC SURFACE
   // ============================================================
   CBZ.citySwimming = function () { return swimming; };
+  // Explicit ownership hand-off from an aquatic mount. This is the same entry
+  // function used by bridge dives, with mount momentum carried into the swim;
+  // it is public only so riding does not grow a second buoyancy implementation.
+  CBZ.citySwimBegin = function (opts) {
+    const P = CBZ.player;
+    if (!P || !P.pos || P.dead || P._aquaticMount) return false;
+    const o = opts || {};
+    if (swimming) swimming = false;
+    const sy = surfAt(P.pos.x, P.pos.z);
+    const startY = Math.min(Number.isFinite(o.y) ? o.y : P.pos.y, sy - 0.05);
+    P.pos.y = startY;
+    enterWater(P, Math.max(0, -(P.vy || 0)), startY,
+      Number.isFinite(o.vx) ? o.vx : 0, Number.isFinite(o.vz) ? o.vz : 0);
+    return true;
+  };
 
   // THE neighbour seam. One allocation-free call with everything a predator,
   // a mission or a HUD needs. `depth` is measured from the surface down to the

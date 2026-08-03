@@ -59,7 +59,7 @@
       });
       // tufted tail
       const tail = box(0.1, 0.5, 0.1, white); tail.position.set(-1.05, 0.9, 0); tail.rotation.z = 0.3; g.add(tail);
-      const tuft = box(0.12, 0.16, 0.12, black); tuft.position.set(-1.16, 0.55, 0); g.add(tuft);
+      const tuft = box(0.12, 0.16, 0.12, black); tuft.position.set(-1.14, 0.6, 0); g.add(tuft);
       return g;
     },
   });
@@ -166,7 +166,7 @@
       // backward-curving horns (cones angled back)
       [0.09, -0.09].forEach(function (z) {
         const hn = new T.Mesh(new T.ConeGeometry(0.05, 0.34, 6), horn);
-        hn.position.set(0.74, 1.4, z); hn.rotation.z = 1.5; g.add(hn);
+        hn.position.set(0.74, 1.34, z); hn.rotation.z = 1.5; g.add(hn);
       });
       // chin beard hanging under the jaw
       const beard = box(0.1, 0.2, 0.1, beardC); beard.position.set(0.98, 0.86, 0); g.add(beard);

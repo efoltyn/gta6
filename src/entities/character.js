@@ -1105,6 +1105,147 @@
     return moving ? (speed * dt / stepLen) * Math.PI : dt * 0.9;
   }
 
+  /* ---- SKYDIVER / PARACHUTE BODY -----------------------------------------
+     city/bailout.js owns the trajectory and publishes only a small visual
+     record here.  The body still belongs to the canonical character rig:
+     freefall is a belly-to-earth arch (wide arms, bent knees, chin into the
+     relative wind), while an open canopy hangs the hips in the harness with
+     the thighs forward and both hands on the risers/toggles.  Keeping this in
+     character.js means the live player, visual-comparison studio and any later
+     NPC parachutist all solve the same elbows, knees and hip socket. */
+  function applySkydiverPose(ch, state, dt) {
+    state = state || {};
+    const canopy = state.phase === "canopy" || state.phase === "opening";
+    const flare = canopy ? clamp01(state.flare || 0) : 0;
+    const opening = canopy ? clamp01(state.opening == null ? 1 : state.opening) : 0;
+    const t = +state.t || 0;
+    const wave = Math.sin(t * 2.15) * 0.035;
+    const sr = canopy ? 18 : 13;
+    const J = ch.low || {};
+    const setKnee = (j, x) => {
+      if (!j) return;
+      j.rotation.x = damp(j.rotation.x, Math.max(0, x), sr, dt);
+      j.rotation.y = damp(j.rotation.y, 0, sr, dt);
+      j.rotation.z = damp(j.rotation.z, 0, sr, dt);
+      j.scale.y = damp(j.scale.y, 1, sr, dt);
+    };
+    const setElbow = (j, x) => {
+      if (!j) return;
+      j.rotation.x = damp(j.rotation.x, Math.min(0, x), sr, dt);
+      j.rotation.y = damp(j.rotation.y, 0, sr, dt);
+      j.rotation.z = damp(j.rotation.z, 0, sr, dt);
+    };
+
+    // Refund transforms owned by seated/traversal poses before taking the rig.
+    if (ch.model) {
+      ch.model.position.y = damp(ch.model.position.y, 0, sr, dt);
+      ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+      ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+      ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+    }
+    ch._seatSunk = 0;
+
+    if (!canopy) {
+      // Stable belly flight: chest and thighs form one shallow arch, lower legs
+      // ride in the burble, and the forearms make the recognisable box position.
+      ch.body.position.y = damp(ch.body.position.y, 0.015, sr, dt);
+      ch.body.position.z = damp(ch.body.position.z, -0.025, sr, dt);
+      ch.body.rotation.x = damp(ch.body.rotation.x, 1.16 + wave, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, wave * 0.45, sr, dt);
+      if (ch.parts.ll) {
+        ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, 0.92 - wave, sr, dt);
+        ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, -0.08, sr, dt);
+        ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.24, sr, dt);
+        ch.parts.ll.position.z = damp(ch.parts.ll.position.z, 0, sr, dt);
+        ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt);
+      }
+      if (ch.parts.rl) {
+        ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, 0.98 + wave, sr, dt);
+        ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0.08, sr, dt);
+        ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.24, sr, dt);
+        ch.parts.rl.position.z = damp(ch.parts.rl.position.z, 0, sr, dt);
+        ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt);
+      }
+      setKnee(J.ll, 0.92 + wave);
+      setKnee(J.rl, 1.02 - wave);
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34 + wave, sr, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.10, sr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 1.13, sr, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.08, sr, dt);
+      }
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.38 - wave, sr, dt);
+        ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.10, sr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -1.13, sr, dt);
+        ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.08, sr, dt);
+      }
+      setElbow(J.la, -0.58 - wave);
+      setElbow(J.ra, -0.62 + wave);
+      if (ch.neck) {
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.82, sr, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, -wave * 0.6, sr, dt);
+      }
+    } else {
+      // Harness hang: hips sit back, knees and boots come forward, hands meet
+      // two riser groups beside the head. Pulling S brings both toggles down for
+      // a flare instead of leaving the arms frozen overhead.
+      const pull = flare * 1.16;
+      ch.body.position.y = damp(ch.body.position.y, -0.07 - (1 - opening) * 0.05, sr, dt);
+      ch.body.position.z = damp(ch.body.position.z, -0.035, sr, dt);
+      ch.body.rotation.x = damp(ch.body.rotation.x, -0.16 - (1 - opening) * 0.10, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, wave * 0.30, sr, dt);
+      if (ch.parts.ll) {
+        ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -1.12 + flare * 0.12, sr, dt);
+        ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, -0.04, sr, dt);
+        ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, -0.16, sr, dt);
+        ch.parts.ll.position.z = damp(ch.parts.ll.position.z, 0, sr, dt);
+        ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt);
+      }
+      if (ch.parts.rl) {
+        ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -1.08 + flare * 0.12, sr, dt);
+        ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0.04, sr, dt);
+        ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, 0.16, sr, dt);
+        ch.parts.rl.position.z = damp(ch.parts.rl.position.z, 0, sr, dt);
+        ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt);
+      }
+      setKnee(J.ll, 1.28 + (1 - opening) * 0.12);
+      setKnee(J.rl, 1.24 + (1 - opening) * 0.12);
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -2.48 + pull, sr, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0.12, sr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.24 + flare * 0.12, sr, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.18 - flare * 0.06, sr, dt);
+      }
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -2.48 + pull, sr, dt);
+        ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, -0.12, sr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.24 - flare * 0.12, sr, dt);
+        ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.18 - flare * 0.06, sr, dt);
+      }
+      setElbow(J.la, -0.28 - flare * 0.48);
+      setElbow(J.ra, -0.28 - flare * 0.48);
+      if (ch.neck) {
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.08, sr, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, -wave * 0.5, sr, dt);
+      }
+    }
+    ch.bob = ch.body.position.y;
+    ch.lean = ch.body.rotation.x;
+    ch.sway = ch.body.rotation.z;
+    ch._stanceNk = 1;
+    lockCharacterHips(ch);
+  }
+
+  function poseSkydiver(ch, state, dt) {
+    if (!ch || !ch.parts || !ch.body) return false;
+    beginCharacterHipFrame(ch);
+    applySkydiverPose(ch, state, dt == null ? 1 / 60 : dt);
+    return true;
+  }
+
   /* ---- the layered animation update ----
      speed: current planar speed (units/s). dt: seconds.
 
@@ -1129,6 +1270,93 @@
     // prone blend — physics.js reads this to sink the rig group; damped ABOVE
     // every early-return branch so it always decays once pronePose clears.
     ch._proneB = damp(ch._proneB || 0, ch.pronePose ? 1 : 0, 9, dt);
+
+    // A falling/chuting body is neither a walk nor a jump animation. The
+    // bailout owner publishes the state; this shared rig owns the joints.
+    if (ch.skydiving) {
+      applySkydiverPose(ch, ch.skydiving, dt);
+      return;
+    }
+
+    // ---- MOUNTED RIDER: hips planted, thighs wrapped, shins hanging -------
+    // wildlife_tame.js owns the animal/root trajectory and publishes only a
+    // small visual record here. The ordinary walk cycle must never run while
+    // riding: a walking avatar translated above an animal reads as two actors
+    // occupying the same place, not one body carried by another.
+    if (ch.riding) {
+      const rr = ch.riding, sr = 18;
+      const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
+      const pf = ch.profile;
+      const thigh = Math.max(0.2, (pf ? pf.legUp : 0.48) * hs);
+      const mountHalf = Math.max(0.12, (rr.width || 0.7) * 0.46);
+      // Solve the hip abduction from the actual mount width and this body's
+      // own thigh length. Cap at a believable deep straddle for elephants and
+      // bison whose backs are wider than the stylised human femur can span.
+      const spread = Math.max(0.36, Math.min(0.92,
+        Math.asin(Math.max(0.18, Math.min(0.80, mountHalf / thigh)))));
+      const movingK = rr.moving ? 1 : 0;
+      const airK = rr.airborne ? 1 : 0;
+      const beat = movingK ? Math.sin(rr.phase || 0) : 0;
+      const thighForward = -1.18 - airK * 0.16;
+      const kneeFold = 1.20 + airK * 0.18;
+
+      // Any chair solve that was active before mounting is refunded here. A
+      // saddle owns hip placement in wildlife_tame, never model-level sinking.
+      if (ch.model) ch.model.position.y = damp(ch.model.position.y, 0, sr, dt);
+      ch._seatSunk = 0;
+      ch.body.position.y = damp(ch.body.position.y, -0.015 - movingK * 0.025, sr, dt);
+      ch.body.position.z = damp(ch.body.position.z, 0.015, sr, dt);
+      ch.body.rotation.x = damp(ch.body.rotation.x, 0.12 + movingK * 0.08 - airK * 0.04, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, beat * 0.035, sr, dt);
+
+      // Local -X is the visible left hip. Each thigh pitches forward and
+      // abducts OUTWARD; each knee then folds back so boots hang down the two
+      // flanks instead of pointing forward like a chair sitter's feet.
+      if (ch.parts.ll) {
+        ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, thighForward - beat * 0.035, sr, dt);
+        ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, -0.08, sr, dt);
+        ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, -spread, sr, dt);
+        ch.parts.ll.position.z = damp(ch.parts.ll.position.z, 0, sr, dt);
+        ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt);
+      }
+      if (ch.parts.rl) {
+        ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, thighForward + beat * 0.035, sr, dt);
+        ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0.08, sr, dt);
+        ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, spread, sr, dt);
+        ch.parts.rl.position.z = damp(ch.parts.rl.position.z, 0, sr, dt);
+        ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt);
+      }
+      setKnee(J.ll, kneeFold + beat * 0.04, sr);
+      setKnee(J.rl, kneeFold - beat * 0.04, sr);
+      if (J.ll) J.ll.scale.y = damp(J.ll.scale.y, 1, sr, dt);
+      if (J.rl) J.rl.scale.y = damp(J.rl.scale.y, 1, sr, dt);
+      ch._seatShinScaled = false;
+
+      // A relaxed two-hand hold toward the withers. The tiny alternating give
+      // follows the animal stride; the rider never pumps arms like a runner.
+      const reach = -0.72 - movingK * 0.07 + airK * 0.08;
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, reach + beat * 0.025, sr, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0.04, sr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.24, sr, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.05, sr, dt);
+      }
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, reach - beat * 0.025, sr, dt);
+        ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, -0.04, sr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.24, sr, dt);
+        ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.05, sr, dt);
+      }
+      setElbow(J.la, -0.62 - airK * 0.08, sr);
+      setElbow(J.ra, -0.62 - airK * 0.08, sr);
+      if (ch.neck) {
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.02 + airK * 0.05, sr, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, -beat * 0.02, sr, dt);
+      }
+      lockCharacterHips(ch);
+      return;                         // the mount pose owns the whole rig
+    }
 
     // ---- SEATED (office-jobs): full-rig pose that OWNS the body ----
     if (ch.sitting) {
@@ -2325,6 +2553,7 @@
     return false;
   };
   CBZ.animChar = animChar;
+  CBZ.poseSkydiver = poseSkydiver;
   CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;

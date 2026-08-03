@@ -40,7 +40,7 @@
       // ears
       [0.24, -0.24].forEach(function (z) { const e = box(0.12, 0.3, 0.1, hide); e.position.set(1.5, 2.9, z); g.add(e); });
       // dewlap / bell hanging under the throat
-      const bell = box(0.24, 0.55, 0.26, dark); bell.position.set(1.55, 1.95, 0); g.add(bell);
+      const bell = box(0.24, 0.55, 0.26, dark); bell.position.set(1.54, 1.97, 0); g.add(bell);
       // very long legs
       [[0.82, 0.36], [0.82, -0.36], [-0.82, 0.36], [-0.82, -0.36]].forEach(function (o) {
         const l = box(0.26, 1.8, 0.26, leg); l.position.set(o[0], 0.9, o[1]); g.add(l);
@@ -51,7 +51,10 @@
         // small tine cones along the outer edge of each palm
         [-0.3, 0.0, 0.3].forEach(function (dz) {
           const tine = new T.Mesh(new T.ConeGeometry(0.07, 0.32, 5), palm);
-          tine.position.set(1.55, 3.45, s * (0.9 + dz * 0.0) + dz); tine.rotation.x = s * -0.4; g.add(tine);
+          // Keep every cone seated into the rotated palm. The old ±1.02 outer
+          // coordinate left the rightmost tine beyond the solid after its
+          // mirrored tilt, even though the broad AABB still appeared to touch.
+          tine.position.set(1.55, 3.43, s * 0.78 + dz * 0.55); tine.rotation.x = s * -0.4; g.add(tine);
         });
       });
       const tail = box(0.14, 0.28, 0.12, dark); tail.position.set(-1.2, 1.9, 0); g.add(tail);
@@ -92,12 +95,12 @@
       [-1, 1].forEach(function (s) {
         const beam = box(0.08, 1.0, 0.08, antler); beam.position.set(1.3, 2.85, s * 0.18); beam.rotation.z = 0.4; g.add(beam);
         // forward-sweeping main branch
-        const fwd = box(0.06, 0.6, 0.06, antler); fwd.position.set(1.75, 3.1, s * 0.2); fwd.rotation.z = 1.0; g.add(fwd);
+        const fwd = box(0.06, 0.6, 0.06, antler); fwd.position.set(1.52, 2.97, s * 0.19); fwd.rotation.z = 1.0; g.add(fwd);
         // forward brow shovel (asymmetric — bigger on one side)
-        const brow = box(0.06, 0.4 + (s > 0 ? 0.12 : 0), 0.06, antler); brow.position.set(1.85, 2.5, s * 0.12); brow.rotation.z = 1.2; g.add(brow);
+        const brow = box(0.06, 0.4 + (s > 0 ? 0.12 : 0), 0.06, antler); brow.position.set(1.82, 2.48, s * 0.11); brow.rotation.z = 1.2; g.add(brow);
         // upper tines
         const t1 = box(0.05, 0.4, 0.05, antler); t1.position.set(1.1, 3.4, s * 0.24); t1.rotation.z = -0.2; g.add(t1);
-        const t2 = box(0.05, 0.34, 0.05, antler); t2.position.set(0.85, 3.35, s * 0.26); t2.rotation.z = -0.5; g.add(t2);
+        const t2 = box(0.05, 0.34, 0.05, antler); t2.position.set(0.98, 3.38, s * 0.25); t2.rotation.z = -0.5; g.add(t2);
       });
       const tail = box(0.14, 0.24, 0.1, pale); tail.position.set(-1.02, 1.45, 0); g.add(tail);
       return g;
@@ -164,7 +167,7 @@
       const g = new T.Group();
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
       // smaller hindquarters (rear third)
-      const rear = box(1.0, 0.9, 0.85, hair); rear.position.set(-0.85, 1.55, 0); g.add(rear);
+      const rear = box(1.45, 0.9, 0.85, hair); rear.position.set(-0.65, 1.55, 0); g.add(rear);
       // bulky, darker, shaggy front third
       const front = box(1.1, 1.15, 1.0, mane); front.position.set(0.55, 1.6, 0); g.add(front);
       // enormous shoulder hump
@@ -184,10 +187,10 @@
       });
       // sturdy legs — front legs heavier
       [[0.6, 0.34], [0.6, -0.34]].forEach(function (o) {
-        const l = box(0.26, 1.0, 0.26, dark); l.position.set(o[0], 0.5, o[1]); g.add(l);
+        const l = box(0.26, 1.05, 0.26, dark); l.position.set(o[0], 0.525, o[1]); g.add(l);
       });
       [[-0.7, 0.32], [-0.7, -0.32]].forEach(function (o) {
-        const l = box(0.22, 0.95, 0.22, dark); l.position.set(o[0], 0.47, o[1]); g.add(l);
+        const l = box(0.22, 1.12, 0.22, dark); l.position.set(o[0], 0.56, o[1]); g.add(l);
       });
       const tail = box(0.12, 0.5, 0.12, dark); tail.position.set(-1.35, 1.35, 0); g.add(tail);
       return g;

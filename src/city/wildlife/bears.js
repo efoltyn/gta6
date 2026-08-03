@@ -158,13 +158,13 @@
       [-1, 1].forEach(function (s) {
         const beam = box(0.08, 0.9, 0.08, antler); beam.position.set(1.26, 2.66, s * 0.16);
         beam.rotation.z = 0.25; beam.rotation.x = s * 0.2; g.add(beam);
-        const tine1 = box(0.06, 0.5, 0.06, antler); tine1.position.set(1.42, 2.9, s * 0.34);
+        const tine1 = box(0.06, 0.5, 0.06, antler); tine1.position.set(1.35, 2.8, s * 0.27);
         tine1.rotation.z = 0.7; tine1.rotation.x = s * 0.3; g.add(tine1);
-        const tine2 = box(0.06, 0.44, 0.06, antler); tine2.position.set(1.12, 3.0, s * 0.32);
+        const tine2 = box(0.06, 0.44, 0.06, antler); tine2.position.set(1.13, 2.98, s * 0.3);
         tine2.rotation.z = -0.5; tine2.rotation.x = s * 0.2; g.add(tine2);
-        const tine3 = box(0.06, 0.4, 0.06, antler); tine3.position.set(1.34, 3.24, s * 0.4);
+        const tine3 = box(0.06, 0.4, 0.06, antler); tine3.position.set(1.31, 3.16, s * 0.29);
         tine3.rotation.z = 0.4; tine3.rotation.x = s * 0.35; g.add(tine3);
-        const tine4 = box(0.055, 0.34, 0.055, antler); tine4.position.set(0.98, 3.28, s * 0.28);
+        const tine4 = box(0.055, 0.34, 0.055, antler); tine4.position.set(1.1, 3.18, s * 0.26);
         tine4.rotation.z = -0.35; g.add(tine4);
       });
       // thin elegant legs

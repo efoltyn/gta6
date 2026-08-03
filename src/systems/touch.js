@@ -341,6 +341,9 @@
   // The trigger itself: in first-person it shoots/punches via the FPS module;
   // otherwise it's the third-person panic-fire / unarmed melee (desktop L-click).
   function fireAction(down) {
+    // A mounted shark's mouth is its weapon. Consume both press and release so
+    // the same iPad FIRE touch can never also punch or discharge a held gun.
+    if (CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(down)) return;
     if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
     else if (down) {
       if (CBZ.game.mode === "survival") { if (CBZ.grapple) CBZ.grapple.punch(); }

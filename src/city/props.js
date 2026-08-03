@@ -1,6 +1,7 @@
 /* ============================================================
-   city/props.js — street furniture + traffic-light poles + a shared
-   billboard-label helper. Hooked by world.js via CBZ.cityProps(city).
+   city/props.js — traffic infrastructure plus an opt-in legacy street-prop
+   layer and shared billboard-label helper. Hooked by world.js via
+   CBZ.cityProps(city).
 
    Traffic lights are built here (one signal head per intersection
    approach) and attached to the intersection record; city/traffic.js
@@ -25,6 +26,10 @@
   // for mail (that verb lives in interact.js). One-line revert. Defaulted here
   // AND in interact.js — idempotent, whichever script loads first wins.
   CBZ.CONFIG = CBZ.CONFIG || {};
+  // Primitive street scatter is opt-in. Traffic signals, junction markings
+  // and working street lights below remain; random furniture, billboards,
+  // roof dressing and camps stay absent unless explicitly requested.
+  if (CBZ.CONFIG.CITY_STREET_CLUTTER == null) CBZ.CONFIG.CITY_STREET_CLUTTER = false;
   if (CBZ.CONFIG.PROPS_WIRED_V1 == null) CBZ.CONFIG.PROPS_WIRED_V1 = true;
   // JUNCTION_DETAIL (owner: "roads meet at intersections right now feeling very
   // unintentional") — kerb returns, junction resurfacing, stop lines and
@@ -567,7 +572,7 @@
     ["street:dumpster/crate/bollard/barrier", "solid", "street_furniture.js DK.solid"],
     ["street:utility-pole/pad-transformer/cabinet", "solid", "utility_lines.js DK.solid"],
     ["bunker:everything-but-the-ammo-crate", "solid", "best-collided file in the game"],
-    ["beach:pier/shack/stall/lifeguard/rowboat/palm", "solid", "several correctly y-gated"],
+    ["beach:pier/shack/stall/lifeguard/palm", "solid", "several correctly y-gated"],
     ["checkpoint:barrier-board", "solid", "y0/y1 gated, markCollidersDirty'd"],
     // ---- deliberately bare, and WHY (the decoy budget) -----------------
     ["street:traffic-cone", "decoy", "checkpoints.js: 'a cone that stops a car is a bollard'"],
@@ -575,7 +580,6 @@
     ["park:bench/hedge", "decoy", "buildings.js: 'brushable so chases never snag' (authored, and it contradicts clutter.js — flagged, not overruled)"],
     ["terrain:offshore-backdrop-range", "decoy", "'decorative mountains are not geography'; backdropAudit().onPlate pinned 0"],
     ["wildnature:backdrop-scatter", "decoy", "7500 trees + 2100 rocks, off-plate by construction"],
-    ["harbor:east-decor-hulls/rip-rap", "decoy", "world.js: outside the perimeter wall, over water"],
     ["street:litter/weeds/drains/bags/pallets/bikes", "decoy", "detail_kit.js's own fine-grain policy line"],
     ["roof:vent/dish/aerial/duct", "decoy", "sub-1 m, or dormant under PROPS_PURGE_V1"],
     ["facade:awning/shutter/downpipe/wall-lamp", "decoy", "lowest edge 3.1 m — you walk under it"],
@@ -584,8 +588,6 @@
     ["gov:perimeter-GATE-opening", "bare", "7 complexes have a 16-24 m gap with no gate leaf at all; that is a missing OBJECT, not a missing collider"],
     ["gov:hedge", "bare", "99 x 4.4-5.4 m parterres; hedges are the one class this pass deliberately did not decide"],
     ["gov:watchtower-deck-rail", "bare", "deck is unreachable (no ladder) AND unfenced — fix the ladder first"],
-    ["marina:breakwater-riprap", "bare", "~92 rocks; the CAP is a walkable platform sitting on a pass-through mound"],
-    ["marina:terrace-rail/umbrella/planter", "bare", "yacht-club terrace furniture"],
     ["bunker:ammo-crate-stack", "bare", "the single missing col() in an otherwise complete file"],
     ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up — but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
     ["forest:fallen-log/tent", "bare", "8 logs at 5-10 m, 3 tents at 4.8 m"],
@@ -1293,6 +1295,7 @@
     // index here covers all six scatter passes. Draws no rng.
     alleyIndex(city);
     const PURGED = CBZ.CONFIG.PROPS_PURGE_V1 !== false;
+    const STREET_CLUTTER = CBZ.CONFIG.CITY_STREET_CLUTTER === true;
     // fresh world: drop every shootable record/animation from the old one
     shootables = [];
     carKnockables.length = 0;
@@ -2723,7 +2726,7 @@
     //  a CBZ.hash01 position gate and never a lowered rng() threshold, and why
     //  a skipped builder replays the draws it would have taken itself.
     // =====================================================================
-    const lots = city.lots;
+    const lots = STREET_CLUTTER ? city.lots : [];
     let lotIdx = 0;
     for (const lot of lots) {
       lotIdx++;
@@ -2884,6 +2887,16 @@
     // world (sin yaw, cos yaw).
     const mnX = city.minX, mxX = city.maxX, mnZ = city.minZ, mxZ = city.maxZ;
     const bbStepX = (mxX - mnX) / 4, bbStepZ = (mxZ - mnZ) / 4;
+    // A board may not stand inside a lot footprint (it would clip the facade).
+    // This helper deliberately lives outside the STREET_CLUTTER block because
+    // both placement helpers close over it.
+    function insideLot(x, z) {
+      for (const lot of doorLots()) {
+        const hw = lot.w / 2 + 1.0, hd = (lot.d != null ? lot.d : lot.w) / 2 + 1.0;
+        if (Math.abs(x - lot.cx) < hw && Math.abs(z - lot.cz) < hd) return true;
+      }
+      return false;
+    }
     // place a board at base (bx,bz) facing `yaw`, sliding it INWARD along
     // (inX,inZ) AND laterally along the kerb (the board tangent) until its whole
     // footprint clears every road. The lateral slide matters because a mid-wall
@@ -2904,13 +2917,15 @@
       }
       return false;
     }
-    for (let k = 1; k <= 3; k++) {
-      // north & south walls (face inward: +z from the south wall, -z from north)
-      placePerimBoard(mnX + bbStepX * k, mnZ + 6, 0, true, 0, 1);
-      placePerimBoard(mnX + bbStepX * k, mxZ - 6, Math.PI, true, 0, -1);
-      // west & east walls (face inward: +x from west wall, -x from east)
-      placePerimBoard(mnX + 6, mnZ + bbStepZ * k, Math.PI / 2, true, 1, 0);
-      placePerimBoard(mxX - 6, mnZ + bbStepZ * k, -Math.PI / 2, k === 2 ? false : true, -1, 0);
+    if (STREET_CLUTTER) {
+      for (let k = 1; k <= 3; k++) {
+        // north & south walls (face inward: +z from the south wall, -z from north)
+        placePerimBoard(mnX + bbStepX * k, mnZ + 6, 0, true, 0, 1);
+        placePerimBoard(mnX + bbStepX * k, mxZ - 6, Math.PI, true, 0, -1);
+        // west & east walls (face inward: +x from west wall, -x from east)
+        placePerimBoard(mnX + 6, mnZ + bbStepZ * k, Math.PI / 2, true, 1, 0);
+        placePerimBoard(mxX - 6, mnZ + bbStepZ * k, -Math.PI / 2, k === 2 ? false : true, -1, 0);
+      }
     }
 
     // ----- CORE-AVENUE BILLBOARDS: the priciest faces in the city ----------
@@ -2923,14 +2938,6 @@
     for (const r of city.roads) {
       if (r.vertical) { const d = Math.abs(r.x - cAvX); if (d < bvd) { bvd = d; vAve = r; } }
       else { const d = Math.abs(r.z - cAvZ); if (d < bhd) { bhd = d; hAve = r; } }
-    }
-    // a board may not stand inside a lot footprint (it would clip the facade)
-    function insideLot(x, z) {
-      for (const lot of doorLots()) {
-        const hw = lot.w / 2 + 1.0, hd = (lot.d != null ? lot.d : lot.w) / 2 + 1.0;
-        if (Math.abs(x - lot.cx) < hw && Math.abs(z - lot.cz) < hd) return true;
-      }
-      return false;
     }
     // BUG FIX: the old coreBand = ROAD/2 + 2.6 only stood the board CENTRE clear
     // of the avenue, and inCrossRoad() only tested the centre — so a board whose
@@ -2955,7 +2962,7 @@
         }
       }
     }
-    for (const s of [-1, 1]) { coreBoard(vAve, s); coreBoard(hAve, s); }
+    if (STREET_CLUTTER) for (const s of [-1, 1]) { coreBoard(vAve, s); coreBoard(hAve, s); }
 
     // ----- PURPOSEFUL ROOFTOPS ---------------------------------------------
     // Generic AC/vent/tank/dish/mast clutter was pure silhouette noise and has

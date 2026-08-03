@@ -19,8 +19,8 @@
 
    WHY the coast + ground identity (this pass): the map edge used to be
    raw void — now ONE huge day/night-tinted sea plane sits under city +
-   island so every edge reads as coastline, the bridge gap reads as a
-   working harbor (sand, rip-rap, moored hulls), and the GROUND tells
+   island so every edge reads as coastline, the bridge gap carries real
+   moored vehicles rather than prop hulls, and the GROUND tells
    you where the money is without a map: grass yards (the island's own
    checker) in residential/projects, poured plazas downtown, stained
    sidewalks + work-yard dirt in projects/industrial, double-yellow
@@ -92,7 +92,7 @@
       g2.globalAlpha = 0.55; g2.fillStyle = "#26292e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
     });
     // ground stops just past the seawall line (bounds+26): the city meets the
-    // WATER, not an endless gray apron — the +29 edge tucks under the rip-rap
+    // WATER, not an endless gray apron — the +29 edge tucks under the shoreline
     const groundMat = baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45);
     // FOG-RATE HARMONY (owner, from the air: "city areas look bright and
     // rendered while the ground around them is grayer"): the continent plate
@@ -507,22 +507,17 @@
     // every grass yard in ONE textured mesh (the batch pass skips maps)
     if (grassRects.length) quadField(grassRects, grassMat, 0.10);
 
-    // ---- perimeter: a WATERFRONT, not a wall. The collider line is identical
-    //      (you still can't wander off the map) but the visual is a knee-high
-    //      concrete seawall cap with the sea right behind it — what a coastal
-    //      city actually has at its edge. No more 6m gray prison walls. ----
+    // ---- perimeter: a visible, jumpable waterfront cap. Its collider is the
+    //      exact box that is drawn — no hidden four-metre collision slab around
+    //      a 1.4m cap, and no mathematical boundary inside the quay. ----
     function wall(x, z, w, d) {
       // visible cap: full length along the seawall, 1.4m thick, knee-high.
-      // The collider is HEIGHT-GATED to the cap (y0/y1): walking into it stops
-      // you like any wall, but a JUMP clears it — over the lip and into the
-      // harbor (city/swim.js owns you from there). Peds/cops never jump, so
-      // the population still can't wander into the sea.
+      // The collider uses those same visible dimensions and height. Walking
+      // into it stops you like any wall, but a jump clears it into the harbor.
       const vw = w >= d ? w : 1.4, vd = d > w ? d : 1.4;
       const m = new THREE.Mesh(new THREE.BoxGeometry(vw, 0.55, vd), mat(0x9aa0a6));
       m.position.set(x, 0.275, z); m.castShadow = false; m.receiveShadow = true; root.add(m);
-      const pad = 22;
-      CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m, y0: 0, y1: 0.8 });
-      return pad;
+      CBZ.colliders.push({ minX: x - vw / 2, maxX: x + vw / 2, minZ: z - vd / 2, maxZ: z + vd / 2, ref: m, y0: 0, y1: 0.55 });
     }
     /* EVERY SEAWALL RUN GOES THROUGH THE SHARED ROAD-GAP LAW.
        (city/roadrules.js, CBZ.roadGapDefer.) The three authored gates below are
@@ -540,7 +535,7 @@
        run split here and now would be split against an empty road list. The
        closure is called back at order 98.6, once every road in the world
        exists, and draws exactly the pieces this file would have drawn. */
-    const EW = minX - 26, EE = maxX + 26, ES = minZ - 26, EN = maxZ + 26, T = 4;
+    const EW = minX - 26, EE = maxX + 26, ES = minZ - 26, EN = maxZ + 26, T = 1.4;
     function gapWall(x, z, w, d) {
       if (!CBZ.roadGapDefer) return wall(x, z, w, d);
       const horiz = w >= d;
@@ -703,6 +698,11 @@
       return { x: x + dx * s, z: z + dz * s };
     }
     function clampToCity(p, r) {
+      // This helper is containment for autonomous actors, not a player/world
+      // boundary. The player and their current vehicle must be allowed to leave
+      // every registered region; visible geometry, terrain and water own that.
+      const P = CBZ.player;
+      if (P && (p === P.pos || (P._vehicle && p === P._vehicle.pos))) return;
       r = r || 0.6;
       const x0 = minX - 22 + r, x1 = maxX + 22 - r;
       const z0 = minZ - 22 + r, z1 = maxZ + 22 - r;
@@ -1104,93 +1104,12 @@
         c.ai = false; c.v = 0; c.baseV = 0; c.road = null;   // moored — sits still until jacked
       }
     }
-    // ---- EAST HARBOR: the bridge-approach gap used to be bare void over
-    //      nothing. A sand shoulder under the seawall, rip-rap armour at the
-    //      waterline (it also hides the ground apron's hard edge) and a few
-    //      moored hulls make the crossing READ as a working harbor. Decor
-    //      only — it all sits OUTSIDE the perimeter wall, so no colliders.
-    //      LOCAL rng: the shared city/runtime stream stays untouched. ----
-    (function eastHarbor() {
-      const hrng = CBZ.seedStream ? CBZ.seedStream("harbor") : null;
-      let hs = 70707;
-      function hr() { if (hrng) return hrng(); hs = (hs * 1103515245 + 12345) & 0x7fffffff; return hs / 0x7fffffff; }
-      const hm = new Map();
-      function hmat(c) { let m = hm.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); hm.set(c, m); } return m; }
-      const EEx = maxX + 26;                  // the east seawall line
-      // sand shoulder either side of the bridge gate
-      const sand = new THREE.Mesh(new THREE.PlaneGeometry(20, 150), hmat(0xe6d49a));
-      sand.rotation.x = -Math.PI / 2; sand.position.set(EEx + 10, 0.02, cz);
-      sand.receiveShadow = true; root.add(sand);
-      // rip-rap: rock armour where the sand meets the water
-      const rockM = hmat(0x6a7076);
-      for (let i = 0; i < 16; i++) {
-        const s = 1.1 + hr() * 1.9;
-        const rx = EEx + 17.5 + hr() * 4.5, ry = -0.4 + hr() * 0.5;
-        const rz = cz - 72 + i * 9 + (hr() - 0.5) * 4;
-        const yaw = hr() * Math.PI, tilt = (hr() - 0.5) * 0.3;
-        if (Math.abs(rz - cz) < 12) continue;          // keep the bridge span clear
-        const r = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.8, s * 1.2), rockM);
-        r.position.set(rx, ry, rz); r.rotation.y = yaw; r.rotation.z = tilt;
-        r.castShadow = false; r.receiveShadow = true; root.add(r);
-      }
-      // moored hulls riding the gap, clear of the bridge's z-band
-      function boat(x, z, yaw, hullC) {
-        const b = new THREE.Group(); b.position.set(x, 0, z); b.rotation.y = yaw; root.add(b);
-        const hull = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.1, 7.0), hmat(hullC));
-        hull.position.y = -0.05; hull.castShadow = true; b.add(hull);
-        const deck = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.25, 6.2), hmat(0xd9d2bd));
-        deck.position.y = 0.55; b.add(deck);
-        const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 2.0), hmat(0xe8ebee));
-        cab.position.set(0, 1.15, -1.2); cab.castShadow = true; b.add(cab);
-      }
-      // these 3 east-harbor hulls are the ones the player actually passes
-      // close to crossing the bridge, so they're the ones promoted to REAL
-      // vehicles (see spawnHarborBoats above) instead of the old dead
-      // boat(...) box-mesh decor — recorded here, spawned once vehicles.js's
-      // cityMakeCar exists, at the exact spot/yaw the decor used to sit.
-      _harborBoatSpots.push({ x: EEx + 34, z: cz - 26, yaw: 0.35 });
-      _harborBoatSpots.push({ x: EEx + 46, z: cz + 24, yaw: -0.5 });
-      _harborBoatSpots.push({ x: EEx + 38, z: cz + 44, yaw: 0.15 });
-
-      // ---- THE WATERFRONT RING: the other three coasts get the same harbor
-      //      treatment (the east already has it) — rip-rap rock armour where
-      //      the quay meets the water, mooring bollards along the promenade,
-      //      a few hulls riding offshore. Decor only, outside the seawall
-      //      colliders; same shared materials, ~70 small meshes total. ----
-      const WQ = minX - 26, SQ = minZ - 26, NQ = maxZ + 26;   // seawall lines
-      const bollM = hmat(0x2e3238);
-      function bollard(x, z) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.42), bollM);
-        b.position.set(x, 0.35, z); b.castShadow = false; b.receiveShadow = true; root.add(b);
-      }
-      function riprap(x, z, count, vertical, skipX0, skipX1) {
-        for (let i = 0; i < count; i++) {
-          const s = 1.0 + hr() * 1.8;
-          const along = (i / count - 0.5) * (vertical ? (NQ - SQ) - 18 : (EEx - WQ) - 18);
-          const out = 1.6 + hr() * 3.2;
-          const rx = vertical ? x + (x < cx ? -out : out) : x + along;
-          const rz = vertical ? z + along : z + (z < cz ? -out : out);
-          if (skipX0 != null && rx > skipX0 && rx < skipX1) continue;   // the beach span: sand, not rock armour
-          const r = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.7, s * 1.15), rockM);
-          r.position.set(rx, -0.45 + hr() * 0.55, rz);
-          r.rotation.y = hr() * Math.PI; r.rotation.z = (hr() - 0.5) * 0.35;
-          r.castShadow = false; r.receiveShadow = true; root.add(r);
-        }
-      }
-      riprap(cx, SQ, 14, false, BX0, BX1);   // south shore (beach span stays bare sand)
-      riprap(cx, NQ, 14, false);   // north shore
-      riprap(WQ, cz, 14, true);    // west shore
-      for (let i = 0; i < 7; i++) {  // bollards every ~30m, set in from the cap
-        const t = (i / 6 - 0.5) * ((EEx - WQ) - 30);
-        if (cx + t < BX0 || cx + t > BX1) bollard(cx + t, SQ + 2.0);   // none on the beach
-        bollard(cx + t, NQ - 2.0);
-        const tz = (i / 6 - 0.5) * ((NQ - SQ) - 30);
-        bollard(WQ + 2.0, cz + tz);
-      }
-      boat(WQ - 18, cz - 40, 2.0, 0x2f5d8a);   // hulls riding the other coasts
-      boat(cx - 60, SQ - 16, 1.25, 0x9e3434);
-      boat(cx + 70, NQ + 17, -1.0, 0xd9a13a);
-    })();
+    // ---- EAST HARBOR: only real, boardable vehicles live here. The old sand
+    //      patch, cube rip-rap, bollards and box-built decoy boats are gone. ----
+    const EEx = maxX + 26;
+    _harborBoatSpots.push({ x: EEx + 34, z: cz - 26, yaw: 0.35 });
+    _harborBoatSpots.push({ x: EEx + 46, z: cz + 24, yaw: -0.5 });
+    _harborBoatSpots.push({ x: EEx + 38, z: cz + 44, yaw: 0.15 });
     // Install the respawn hook (buildCity() runs once at city-mode entry, well
     // after every script — incl. vehicles.js, which loads AFTER world.js in
     // index.html — has loaded, so CBZ.spawnCityTraffic is live by now despite
@@ -1201,9 +1120,8 @@
     wrapHarborBoatSpawn();
 
     // ---- THE WATERFRONT WITH A PURPOSE (city/beach.js): sand beach +
-    //      boardwalk + pier in the south seawall gap, parking lot + container
-    //      dockyard breaking up the rest of the gray apron. Runs LAST so the
-    //      seawall lines / harbor decor already exist around it. ----
+    //      boardwalk + pier in the south seawall gap and a painted parking
+    //      apron. Runs last, after the seawall and landmass builders. ----
     if (CBZ.cityBuildBeach) try { CBZ.cityBuildBeach(city); } catch (e) { console.error("[city beach]", e); }
 
     // =====================================================================
@@ -1232,9 +1150,8 @@
     //     ~9m a hundred metres out, ~100m at a kilometre) for FEWER total
     //     vertices than before. The disc is re-centred in the vertex program
     //     from `cameraPosition.xz`, so the mesh transform never moves: the
-    //     batch/farcull contract, Box3.setFromObject (city/playeraircraft.js
-    //     sizes the flyable airspace from it) and matrixAutoUpdate=false all
-    //     behave exactly as they did — and it stays correct inside the
+    //     batch/farcull contract and matrixAutoUpdate=false both behave exactly
+    //     as they did — and it stays correct inside the
     //     planar-mirror pass, because mirroring a camera through a horizontal
     //     plane leaves its XZ untouched.
     //

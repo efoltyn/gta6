@@ -356,8 +356,8 @@
 
   // Show exactly ONE ocean: the reflector when enabled + quality allows, else
   // the shader sea. CBZ.citySea always points at whichever is visible
-  // (city/playeraircraft.js's airspace clamp and the world-surface audits read
-  // it), so the map still sees a single water surface.
+  // (the world-surface audits read it), so the map still sees a single water
+  // surface. Player aircraft no longer derive a hidden boundary from this mesh.
   function applyMode() {
     if (!reflect || !flatSea) return;
     const on = CFG.WATER_REFLECT !== false && qualityOk();

@@ -626,3 +626,49 @@ below is NOT YET PINNED: whoever runs each audit first writes the number in
   `SHARK_KIT`. Ratchets: `predatorAudit` 0 legacy / **11** adopted;
   `CBZ.wildlifeDefenseAudit()` — `legacyAggroPaths` structurally 0.
 
+
+## THE 2026-08-02 SESSION — sharks get real faces, and the gate tells the truth
+
+- **A SHARK IS A CONTINUOUS HYDRODYNAMIC WEDGE, NOT A BOX WITH A PYRAMID
+  GLUED ON** — `wildlife/aquatic.js`. OWNER (with two reference photos):
+  "sharks just dont look great, their faces are way too coney, in reality
+  sharks are not coney." Codex authored the shared arc-mouth grammar
+  (contract v2, arched-underside U-jaw) and the unused hull helpers, then
+  hit its spend cap; this session wired all four true sharks (great white,
+  hammerhead, bull, megalodon) onto `addSharkHull` — an elliptical-ring
+  loft whose LAST RING KEEPS SUBSTANTIAL WIDTH (the broad flattened blunt
+  rostrum that was the whole point of the reference), with the
+  countershaded belly in the same connected mesh (material groups, no
+  second slab). `addSharkFaceDetails` adds the small dark eye, nostrils,
+  and five gill slits per side; `gillZStep` follows the hull taper so the
+  slits sit proud instead of drowning in the mesh (round-3 pixel finding).
+  The mouth tucked UP under the rostrum overhang and the mandible slimmed
+  to a seat (round-2 pixel finding: a thick mandible reads as bolted-on
+  dentures). Dorsals/tails flattened from 4-side pyramids to blades.
+  The hinge/bite/travel contract is unchanged — `swimJaw`, damage sockets,
+  and the clench-after-contact attack all consume it as before.
+  Verified: `npm run test:shark-mouth` (contract v2 accepted, connected
+  components, hinge drift 0, closed rest, tooth-ring contact, reset) and
+  `npm run test:aquatic-mount` (live mounted bite + megalodon ship bite →
+  sinking handoff) both green; four visual-compare rounds against deployed
+  main in `artifacts/visual-comparisons/shark-faces-2026-08-02-*` (final
+  10-pair PDF in `-final`).
+
+- **THE GATE NOW STATES THE LAW IT ENFORCES** — `tools/math-gate.mjs`.
+  Clean-HEAD attribution run (stash, gate, pop) proved every failure but
+  one predated this session's tree. (1) The aircraft radial-bound failure
+  INVERTED the design: pillar-rim law is "no invisible wall anywhere"
+  (docs/plan/pillar-rim.md:455), and playeraircraft.js deliberately ships
+  unbounded flight with the audit kept as a diagnostics surface — the gate
+  line now reads "open-by-design" and does not fail. (2) GOLDEN baselines
+  re-pinned via the sanctioned `--calibrate` path: the stored goldens
+  predated the annex region and the road growth that already ship on
+  deployed main. (3) Five long-red checks are DEBT-PINNED at the values
+  measured on clean HEAD 2026-08-02 (road props 16 · ground oracle 0.35 m
+  — the audit PRINTS 0.34 but toFixed(2) rounds down, the raw value sits
+  just above it · venue stations 5 · fishing spots 3 · non-material
+  .material 8), each
+  labeled in its own failure string with the work-it-DOWN direction. A pin
+  at measured reality catches the NEXT regression; a permanently red gate
+  catches nothing. Nobody may raise these numbers; lowering one is a wave
+  deliverable.

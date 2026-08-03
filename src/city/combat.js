@@ -1150,6 +1150,10 @@
   document.addEventListener("mousedown", function (e) {
     if (!active()) return;
     if (CBZ.cityMenuOpen) return;
+    if (e.button === 0 && CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(true)) {
+      e.preventDefault();
+      return;
+    }
     if (CBZ.cityHasGun()) return;            // a gun is out → the engine gun system owns the mouse
     if (e.button === 0) {
       if (fireCD > 0) return;

@@ -3,11 +3,10 @@
 
    WHY THIS EXISTS
    ---------------
-   Big empty clean surfaces are the #1 reason a procedural city reads as
-   fake. This file is the shared machinery for the four dressing passes
-   that follow it (utility_lines, street_furniture, world_grime,
-   building_dress): the layer of accumulated stuff a real place has —
-   poles and wires, litter and weeds, rooftop plant, wall stains.
+   This file is the shared machinery for four legacy dressing passes
+   (utility_lines, street_furniture, world_grime, building_dress). Bare
+   surfaces are now intentional by default: repeated poles, litter, crates
+   and facade fittings are available only as an explicit opt-in layer.
 
    THE PERFORMANCE CONTRACT (read before adding anything)
    ------------------------------------------------------
@@ -73,10 +72,10 @@
   const THREE = window.THREE;
   const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
 
-  // DETAIL_WORLD_V1 (owner: "make the world like 100x realer feeling"). On →
-  // the five world-dressing passes run at the end of buildCity. Flip false
-  // (or ?cfg_DETAIL_WORLD_V1=0) for a one-line revert to the bare city.
-  if (CFG.DETAIL_WORLD_V1 == null) CFG.DETAIL_WORLD_V1 = true;
+  // The dressing layer is opt-in. Empty space is intentional; thousands of
+  // utility poles, bins, crates, bollards, litter and facade fittings do not
+  // become detail just because they are batched cheaply.
+  if (CFG.DETAIL_WORLD_V1 == null) CFG.DETAIL_WORLD_V1 = false;
   // DETAIL_DENSITY — global multiplier on every authored count. 0.5 halves
   // the whole layer without touching a single pass. Revert = 1.
   if (CFG.DETAIL_DENSITY == null) CFG.DETAIL_DENSITY = 1;

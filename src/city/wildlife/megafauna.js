@@ -108,7 +108,7 @@
         const l = box(0.56, 1.4, 0.56, grey); l.position.set(o[0], 0.7, o[1]); g.add(l);
       });
 
-      const tail = box(0.12, 0.9, 0.12, dark); tail.position.set(-1.85, 1.4, 0); g.add(tail);
+      const tail = box(0.12, 0.9, 0.12, dark); tail.position.set(-1.75, 1.4, 0); g.add(tail);
       return g;
     },
   });
@@ -145,7 +145,7 @@
       });
       // ears
       [1, -1].forEach(function (s) {
-        const ear = box(0.3, 0.14, 0.09, tan); ear.position.set(1.78, 6.48, s * 0.34); g.add(ear);
+        const ear = box(0.3, 0.14, 0.09, tan); ear.position.set(1.78, 6.48, s * 0.31); g.add(ear);
       });
 
       // irregular brown patches laid over body & neck
@@ -195,7 +195,7 @@
       });
 
       // erect striped mane
-      [[0.45, 2.0], [0.72, 2.18], [0.98, 2.36]].forEach(function (o) {
+      [[0.42, 1.95], [0.72, 2.17], [0.98, 2.36]].forEach(function (o) {
         const mn = box(0.1, 0.26, 0.4, black); mn.position.set(o[0], o[1], 0); mn.rotation.z = -0.5; g.add(mn);
       });
 

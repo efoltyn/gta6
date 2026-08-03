@@ -146,8 +146,8 @@
     const S = CBZ.marineHulls && CBZ.marineHulls.specFor
       ? CBZ.marineHulls.specFor(car) : null;
     if (!S) return false;
-    // Beached / over land: the road path (wall resolver + clampToCity) is the
-    // correct owner of a hull sitting on sand, and it is how you nudge one off.
+    // Beached / over land: the road path (visible wall resolver + terrain seat)
+    // is the correct owner of a hull sitting on sand, and how you nudge one off.
     if (!overWater(car.pos.x, car.pos.z)) return false;
     if (!dt || dt <= 0) return true;                 // owned, but nothing to do
     dt = Math.min(dt, 0.05);                          // never integrate a stall

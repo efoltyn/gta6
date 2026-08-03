@@ -81,7 +81,7 @@
       if (r() < 0.5) {
         [-1, 1].forEach(function (s) {
           const beam = box(0.06, 0.5, 0.06, dark); beam.position.set(1.12, 2.28, s * 0.14); beam.rotation.z = 0.2; g.add(beam);
-          const t1 = box(0.05, 0.28, 0.05, dark); t1.position.set(1.22, 2.5, s * 0.2); t1.rotation.z = 0.6; g.add(t1);
+          const t1 = box(0.05, 0.28, 0.05, dark); t1.position.set(1.2, 2.44, s * 0.19); t1.rotation.z = 0.6; g.add(t1);
           const t2 = box(0.05, 0.22, 0.05, dark); t2.position.set(1.0, 2.5, s * 0.18); t2.rotation.z = -0.5; g.add(t2);
         });
       }

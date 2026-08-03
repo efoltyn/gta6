@@ -1422,10 +1422,10 @@
      to cut), never touching a declared `roadBarrier`. The visible mesh of an
      unmigrated run stays drawn; that is scenery, and the audit names it. */
   const RUN_MIN_LEN = 8;        // shorter than this is furniture, not a run
-  // 4.5, not 3.5: city/world.js's seawall collider is T = 4 m thick and would
-  // otherwise fall outside its own law — the net would have been blind to the
-  // single longest wall in the game. At 4.5 m the aspect gate (>= 3:1) still
-  // means nothing under 13.5 m long can qualify, so no slab or plinth does.
+  // Keep the safety net broad enough to catch other authored low wall runs.
+  // city/world.js's seawall now collides at its visible 1.4 m thickness, but
+  // older builders can still publish runs up to this limit. The aspect gate
+  // (>= 3:1) means nothing under 13.5 m long can qualify, so no slab does.
   const RUN_MAX_THICK = 4.5;
   /* TALLER THAN THIS IS NOT TRIMMED, AND THAT IS A DECISION, NOT AN OVERSIGHT.
      The owner's report is knee-to-chest geometry lying in a carriageway, and

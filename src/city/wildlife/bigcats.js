@@ -38,7 +38,7 @@
       [[0.55, 0.22], [0.55, -0.22], [-0.55, 0.22], [-0.55, -0.22]].forEach(function (o) {
         const l = box(0.19, 0.72, 0.19, c); l.position.set(o[0], 0.37, o[1]); g.add(l);
       });
-      const tail = box(0.9, 0.13, 0.13, c); tail.position.set(-1.05, 0.9, 0); tail.rotation.z = 0.45; g.add(tail);
+      const tail = box(0.9, 0.13, 0.13, c); tail.position.set(-1.05, 0.9, 0); tail.rotation.z = -0.45; g.add(tail);
       const tip = box(0.18, 0.15, 0.15, dk); tip.position.set(-1.42, 1.06, 0); g.add(tip);
       // bold black vertical stripes across body & legs:
       [0.55, 0.28, 0.02, -0.24, -0.5].forEach(function (x) {
@@ -62,7 +62,7 @@
       const T = ctx.THREE, m = ctx.mat, g = new T.Group();
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
       const c = m(0xc79a5b), belly = m(0xd9c39a), mane = m(0x5a3a1c), dk = m(0x3a2410);
-      const body = box(1.7, 0.64, 0.64, c); body.position.set(0, 0.88, 0); g.add(body);
+      const body = box(1.7, 0.64, 0.64, c); body.name = "lion:body"; body.userData.attachmentRoot = true; body.position.set(0, 0.88, 0); g.add(body);
       const under = box(1.6, 0.24, 0.54, belly); under.position.set(0, 0.62, 0); g.add(under);
       const head = box(0.52, 0.48, 0.5, c); head.position.set(1.02, 1.0, 0); g.add(head);
       const muzzle = box(0.24, 0.24, 0.34, belly); muzzle.position.set(1.36, 0.9, 0); g.add(muzzle);
@@ -74,8 +74,10 @@
       [[0.55, 0.22], [0.55, -0.22], [-0.55, 0.22], [-0.55, -0.22]].forEach(function (o) {
         const l = box(0.2, 0.78, 0.2, c); l.position.set(o[0], 0.39, o[1]); g.add(l);
       });
-      const tail = box(0.9, 0.12, 0.12, c); tail.position.set(-1.05, 0.96, 0); tail.rotation.z = 0.5; g.add(tail);
-      const tuft = box(0.16, 0.22, 0.16, dk); tuft.position.set(-1.4, 1.16, 0); g.add(tuft);
+      // Negative Z rotation raises the rear end into the tuft while the front
+      // still seats in the body. The old positive sign stranded the tuft.
+      const tail = box(0.9, 0.12, 0.12, c); tail.name = "lion:tail"; tail.position.set(-1.05, 0.96, 0); tail.rotation.z = -0.5; g.add(tail);
+      const tuft = box(0.16, 0.22, 0.16, dk); tuft.name = "lion:tail-tuft"; tuft.position.set(-1.4, 1.16, 0); g.add(tuft);
       return g;
     },
   });
@@ -103,7 +105,7 @@
       [[0.52, 0.16], [0.52, -0.16], [-0.52, 0.16], [-0.52, -0.16]].forEach(function (o) {
         const l = box(0.14, 0.86, 0.14, c); l.position.set(o[0], 0.43, o[1]); g.add(l);
       });
-      const tail = box(1.0, 0.11, 0.11, c); tail.position.set(-1.02, 0.94, 0); tail.rotation.z = 0.28; g.add(tail);
+      const tail = box(1.0, 0.11, 0.11, c); tail.position.set(-1.02, 0.94, 0); tail.rotation.z = -0.28; g.add(tail);
       const tip = box(0.16, 0.13, 0.13, dk); tip.position.set(-1.5, 1.08, 0); g.add(tip);
       // many small round black spots over the body:
       [[0.5, 0.24], [0.25, -0.2], [0.0, 0.24], [-0.25, -0.22], [-0.5, 0.2], [0.35, 0.0], [-0.15, 0.0]].forEach(function (o) {
@@ -134,7 +136,7 @@
         const l = box(0.2, 0.7, 0.2, c); l.position.set(o[0], 0.36, o[1]); g.add(l);
       });
       // very thick long fluffy tail, curling up at the tip:
-      const tail = box(1.1, 0.24, 0.24, c); tail.position.set(-1.1, 0.86, 0); tail.rotation.z = 0.3; g.add(tail);
+      const tail = box(1.1, 0.24, 0.24, c); tail.position.set(-1.1, 0.86, 0); tail.rotation.z = -0.3; g.add(tail);
       const tailUp = box(0.3, 0.22, 0.22, c); tailUp.position.set(-1.62, 1.14, 0); g.add(tailUp);
       // dark-grey rosettes / spots over body, legs & tail:
       [[0.5, 0.26], [0.2, -0.24], [-0.1, 0.26], [-0.4, -0.22], [0.3, 0.0], [-0.55, 0.24]].forEach(function (o) {
@@ -170,7 +172,7 @@
       [[0.58, 0.24], [0.58, -0.24], [-0.58, 0.24], [-0.58, -0.24]].forEach(function (o) {
         const l = box(0.22, 0.82, 0.22, c); l.position.set(o[0], 0.41, o[1]); g.add(l);
       });
-      const tail = box(0.95, 0.13, 0.13, c); tail.position.set(-1.1, 1.0, 0); tail.rotation.z = 0.5; g.add(tail);
+      const tail = box(0.95, 0.13, 0.13, c); tail.position.set(-1.1, 1.0, 0); tail.rotation.z = -0.5; g.add(tail);
       const tuft = box(0.17, 0.22, 0.17, mane); tuft.position.set(-1.46, 1.2, 0); g.add(tuft);
       return g;
     },

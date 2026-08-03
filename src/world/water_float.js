@@ -565,7 +565,7 @@
   // WHY THE RESTORE PASS EXISTS (do not delete it): peds.js's move() feeds
   // `ped.pos.y` to CBZ.collide as the body's feetY (peds.js:4212) BEFORE it
   // resets y to 0. A ped left sitting at y = -1.76 would therefore be tested
-  // against height-gated colliders — the seawall cap is gated at y1 = 0.8 —
+  // against height-gated colliders — the seawall cap is gated at y1 = 0.55 —
   // with a span that misses them entirely, and could drift straight through a
   // quay wall. So at order 33.9, immediately before the ped brain, we put
   // every lifted ped back on y = 0. The lift is purely what the frame RENDERS;

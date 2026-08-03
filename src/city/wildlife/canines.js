@@ -115,7 +115,7 @@
       [[0.4, 0.15], [0.4, -0.15], [-0.4, 0.15], [-0.4, -0.15]].forEach(function (o) {
         const l = box(0.12, 0.5, 0.12, rust); l.position.set(o[0], 0.25, o[1]); g.add(l);
       });
-      const tail = box(0.5, 0.2, 0.2, tan); tail.position.set(-0.72, 0.44, 0); tail.rotation.z = -0.35; g.add(tail);
+      const tail = box(0.5, 0.2, 0.2, tan); tail.position.set(-0.72, 0.44, 0); tail.rotation.z = 0.35; g.add(tail);
       const tailTip = box(0.16, 0.18, 0.18, tip); tailTip.position.set(-0.96, 0.28, 0); g.add(tailTip);
       g.rotation.y = (r() - 0.5) * 0.12;
       return g;

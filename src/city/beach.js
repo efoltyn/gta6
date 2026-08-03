@@ -5,12 +5,9 @@
    gray apron — 26 metres of nothing on every coast. A city's edge
    is where it SHOWS OFF. Now the south shore is a real beach:
    warm sand running straight into the water (the seawall opens
-   here — world.js gaps the wall + skips the rip-rap/bollards over
-   the span), palms, umbrellas, towels, a lifeguard chair, beached
-   rowboats, a raised boardwalk with a snack shack + vendor stalls,
-   and ONE pier reaching over the harbor with a bench + telescope
-   at the end — the quiet show-off spot, and the jump-off-the-end
-   dive (swim.js owns the water).
+   here), palms, umbrellas, towels, a lifeguard chair, a raised
+   boardwalk with a snack shack + vendor stalls, and ONE pier reaching
+   over the harbor to a jump-off-the-end dive (swim.js owns the water).
 
    THE PEOPLE WHO WORK IT ARE REAL TOO (2026-07-27). This beach built a
    lifeguard chair nobody sat in, two market stalls with no vendor and two
@@ -36,11 +33,9 @@
    stashes it's a quiet earner you have to KNOW about. Restocks
    after long minutes.
 
-   THE REST OF THE APRON stops reading abandoned: a striped
-   parking lot along the west quay (cars can reach it — the clamp
-   line is 4m inside the seawall) and a stacked container dockyard
-   in the south-east corner (climbable: tops are platforms — a
-   free vantage you jump up to).
+   THE REST OF THE APRON stays open: a striped parking lot along the
+   west quay, with no container stacks or filler geometry occupying
+   the south-east corner.
 
    THE WATERLINE MOVES. The wet-sand strip and the drowned slope used to be
    two static meshes in one fixed colour, so the sea's foam edge could run up
@@ -64,9 +59,8 @@
 
    Draw-call discipline: sand/boardwalk/pier planks/rails/stripes
    are MERGED (BufferGeometryUtils, guarded), palms/umbrellas/
-   towels/posts/containers are InstancedMesh, materials via the
-   shared CBZ.cmat pool. Solid things (shack, stalls, trunks,
-   boats, containers, pier rails) register CBZ.colliders the same
+   towels/posts are InstancedMesh, materials via the shared CBZ.cmat
+   pool. Solid things (shack, stalls, trunks and pier rails) register CBZ.colliders the same
    way props.js does; walkable decks register CBZ.platforms (the
    buildings.js pattern) so the pier is REALLY above the water.
    Deterministic LCG → same beach every run. Headless-guarded DOM.
@@ -550,20 +544,6 @@
       lifeguardPost = { x: lgx, z: lgz - 1.6, face: Math.PI };
     })();
 
-    // beached rowboats — hulls hauled up past the wet line, tipped on a chine
-    function rowboat(x, z, yaw, hullC) {
-      const b = new THREE.Group(); b.position.set(x, 0.32, z); b.rotation.set(0, yaw, 0.09); root.add(b);
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.75, 4.6), cmat(hullC));
-      hull.castShadow = false; hull.receiveShadow = true; b.add(hull);
-      const rim = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 4.7), cmat(0xd9d2bd));
-      rim.position.y = 0.42; b.add(rim);
-      const bench = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.45), cmat(WOOD_DK));
-      bench.position.y = 0.25; b.add(bench);
-      solid(x, z, 2.4, 4.2, hull, 1.1);
-    }
-    rowboat(BX0 + 7, ES - 0.5, 0.5, 0x9e3434);
-    rowboat(BX0 + 12, ES + 1.2, -0.25, 0x2f5d8a);
-
     // =====================================================================
     //  4) BOARDWALK — a raised plank promenade along the top of the sand.
     //  Planks merge into TWO meshes (alternating tones). It's a real
@@ -666,24 +646,7 @@
       }
       mergeAdd(rails, cmat(0xe8ebee));
 
-      // END PAYOFF: a bench facing the open sea + a coin-op telescope — the
-      // quiet show-off spot (sunset over the water, the city at your back)
-      const benchZ = headZ1 + 1.6;
-      const bench = [];
-      bench.push(boxGeoAt(pierX - 2.2, top + 0.46, benchZ, 2.4, 0.09, 0.55));
-      bench.push(boxGeoAt(pierX - 2.2, top + 0.86, benchZ - 0.26, 2.4, 0.55, 0.09));
-      bench.push(boxGeoAt(pierX - 3.2, top + 0.23, benchZ, 0.12, 0.46, 0.5));
-      bench.push(boxGeoAt(pierX - 1.2, top + 0.23, benchZ, 0.12, 0.46, 0.5));
-      mergeAdd(bench, cmat(WOOD_DK), { cast: true });
-      solid(pierX - 2.2, benchZ, 2.5, 0.7, null, top + 1.0);
-      const tBase = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.5), cmat(0x2e3238));
-      tBase.position.set(pierX + 2.4, top + 0.08, headZ1 + 1.4); root.add(tBase);
-      const tPole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.1, 0.14), cmat(0x9aa0a6));
-      tPole.position.set(pierX + 2.4, top + 0.65, headZ1 + 1.4); root.add(tPole);
-      const tHead = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.7), cmat(0xc23434));
-      tHead.position.set(pierX + 2.4, top + 1.3, headZ1 + 1.2); tHead.rotation.x = 0.18; root.add(tHead);
-      solid(pierX + 2.4, headZ1 + 1.4, 0.6, 0.6, tPole, top + 1.5);
-      // a couple of rods leaning on the head rail — the fishing-scene read.
+      // A couple of rods leaning on the head rail mark real fishing stations.
       // THEY ARE NO LONGER PROPS OF AN ABSENT PERSON: each rod gets an angler
       // standing behind it (city/citystaff.js) and registers a FISHING STATION
       // (city/fishing.js) so the same spot the NPC works is the spot the player
@@ -702,8 +665,6 @@
           });
         }
       }
-      const tackle = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.4), cmat(0x4a5232));
-      tackle.position.set(pierX + headW / 2 - 2.0, top + 0.2, headZ1 + 1.6); root.add(tackle);
     })();
 
     // =====================================================================
@@ -813,9 +774,8 @@
     })();
 
     // =====================================================================
-    //  6) THE REST OF THE APRON — west quay PARKING LOT (paint only: cars
-    //  CAN reach it, the drive clamp is 4m inside the seawall) and a SE
-    //  CONTAINER DOCKYARD (instanced, solid, tops are climbable platforms).
+    //  6) THE REST OF THE APRON — west quay PARKING LOT, paint only. The
+    //  south-east corner is intentionally open instead of filled with props.
     // =====================================================================
     (function parking() {
       const stripes = [];
@@ -826,32 +786,6 @@
       }
       stripes.push(boxGeoAt(sx1, 0.03, cz - 38 + 7 * 5.4, 0.22, 0.012, 14 * 5.4));   // aisle line
       mergeAdd(stripes, cmat(0xd8dce0), { receive: false });
-      const stops = [];
-      for (let i = 0; i < 14; i++) stops.push(boxGeoAt(sx0 + 1.0, 0.07, cz - 38 + (i + 0.5) * 5.4, 1.8, 0.14, 0.3));
-      mergeAdd(stops, cmat(0x9aa0a6));
-    })();
-    (function dockyard() {
-      const CONT_COLS = [0x8a3a2e, 0x2f5d8a, 0x3f7a4a, 0xb8862e];
-      const CH = 2.3;                                      // jump-climbable (apex 1.53 + STEP_UP 0.9)
-      const rows = [];
-      for (let i = 0; i < 3; i++) rows.push({ x: maxX - 32 + i * 7.1, z: ES + 5, y: CH / 2 });
-      for (let i = 0; i < 3; i++) rows.push({ x: maxX - 29 + i * 7.1, z: ES + 9.6, y: CH / 2 });
-      rows.push({ x: maxX - 28.5, z: ES + 5, y: CH * 1.5 });          // second tier
-      rows.push({ x: maxX - 21.4, z: ES + 5, y: CH * 1.5 });
-      rows.push({ x: maxX - 25.1, z: ES + 9.6, y: CH * 1.5 });
-      const contMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); contMat._shared = true;
-      const contIM = new THREE.InstancedMesh(new THREE.BoxGeometry(6.1, CH, 2.44), contMat, rows.length);
-      rows.forEach((r, i) => {
-        dummy.position.set(r.x, r.y, r.z); dummy.rotation.set(0, (rng() - 0.5) * 0.04, 0); dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix(); contIM.setMatrixAt(i, dummy.matrix);
-        if (contIM.setColorAt) contIM.setColorAt(i, new THREE.Color(CONT_COLS[(rng() * CONT_COLS.length) | 0]));
-        if (r.y < CH) solid(r.x, r.z, 6.1, 2.44, contIM, null);       // ground tier blocks
-        CBZ.platforms.push({ minX: r.x - 3.05, maxX: r.x + 3.05, minZ: r.z - 1.22, maxZ: r.z + 1.22, top: r.y + CH / 2 });
-      });
-      contIM.instanceMatrix.needsUpdate = true;
-      if (contIM.instanceColor) contIM.instanceColor.needsUpdate = true;
-      contIM.castShadow = true; contIM.receiveShadow = true;
-      root.add(contIM);
     })();
 
     // =====================================================================

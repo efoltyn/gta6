@@ -46,9 +46,9 @@
       if (r() < 0.55) {
         [-1, 1].forEach(function (s) {
           const beam = box(0.08, 0.95, 0.08, dark); beam.position.set(1.28, 3.0, s * 0.16); beam.rotation.z = 0.55; g.add(beam);
-          const t1 = box(0.06, 0.4, 0.06, dark); t1.position.set(1.55, 3.15, s * 0.22); t1.rotation.z = 0.3; g.add(t1);
+          const t1 = box(0.06, 0.4, 0.06, dark); t1.position.set(1.4, 3.06, s * 0.19); t1.rotation.z = 0.3; g.add(t1);
           const t2 = box(0.06, 0.4, 0.06, dark); t2.position.set(1.2, 3.45, s * 0.24); t2.rotation.z = -0.15; g.add(t2);
-          const t3 = box(0.06, 0.34, 0.06, dark); t3.position.set(0.95, 3.35, s * 0.26); t3.rotation.z = -0.5; g.add(t3);
+          const t3 = box(0.06, 0.34, 0.06, dark); t3.position.set(1.005, 3.295, s * 0.244); t3.rotation.z = -0.5; g.add(t3);
         });
       }
       const tail = box(0.16, 0.3, 0.12, rump); tail.position.set(-1.02, 1.5, 0); g.add(tail);
@@ -152,7 +152,7 @@
       const head = box(0.24, 0.24, 0.24, fur); head.position.set(0.3, 0.42, 0); g.add(head);
       const snout = box(0.1, 0.1, 0.12, dark); snout.position.set(0.44, 0.38, 0); g.add(snout);
       // tall upright ears
-      [0.07, -0.07].forEach(function (z) { const e = box(0.08, 0.32, 0.05, fur); e.position.set(0.26, 0.72, z); g.add(e); });
+      [0.07, -0.07].forEach(function (z) { const e = box(0.08, 0.32, 0.05, fur); e.position.set(0.26, 0.7, z); g.add(e); });
       // legs — small front, chunky hind
       [[0.16, 0.11], [0.16, -0.11]].forEach(function (o) { const l = box(0.08, 0.2, 0.08, fur); l.position.set(o[0], 0.1, o[1]); g.add(l); });
       [[-0.14, 0.12], [-0.14, -0.12]].forEach(function (o) { const l = box(0.12, 0.24, 0.14, fur); l.position.set(o[0], 0.12, o[1]); g.add(l); });
