@@ -377,6 +377,17 @@
       if (CBZ.survWaterAt(nx, nz)) { P.pos.x = nx; P.pos.z = nz; }
       return;
     }
+    // a live disaster-water event (a CITY tsunami's undertow) outranks the
+    // ambient coastal drift — same seam the island uses, one current model
+    if (CBZ.waterEventSample) {
+      const s = CBZ.waterEventSample(P.pos.x, P.pos.z, null, _curSample);
+      if (s && s.active && s.wet && (s.currentX || s.currentZ)) {
+        const nx = P.pos.x + (s.currentX || 0) * step * 0.34;
+        const nz = P.pos.z + (s.currentZ || 0) * step * 0.34;
+        if (!CBZ.waterField || !CBZ.waterField.isSurfaceWater || CBZ.waterField.isSurfaceWater(nx, nz, 0.5) || (CBZ.cityWaterAt && CBZ.cityWaterAt(nx, nz))) { P.pos.x = nx; P.pos.z = nz; }
+        return;
+      }
+    }
     if (!CBZ.waterField || !CBZ.waterField.currentAt) return;
     const cur = CBZ.waterField.currentAt(P.pos.x, P.pos.z, undefined, swimCurrent);
     const nx = P.pos.x + cur.x * step * 0.34, nz = P.pos.z + cur.z * step * 0.34;

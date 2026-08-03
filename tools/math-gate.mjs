@@ -208,6 +208,23 @@ const PASS = `(() => {
     if (ta.unseatedTrunks) out.fails.push("UNSEATED TRUNKS: " + ta.unseatedTrunks);
     if (ta.floatingCanopies) out.fails.push("FLOATING TREE PARTS: " + ta.floatingCanopies + " across " + ta.brokenChains + " trees");
   } catch (e) { out.fails.push("treeAudit threw: " + (e && e.message)); } }
+  // ---- weather ground-state (waterfield.js + weather.js): rain pools and
+  // snow cover ride the ONE water mask; a private water plane anywhere is the
+  // exact anti-pattern the SEA LEVEL MOVES law bans - pinned at zero.
+  if (CBZ.groundWaterAudit) { try { const gw = CBZ.groundWaterAudit();
+    out.groundWater = "stage=" + gw.stage + " cells=" + gw.cells + " planes=" + gw.privateWaterPlanes;
+    if (gw.privateWaterPlanes > 0) out.fails.push("PRIVATE WATER PLANE: " + gw.privateWaterPlanes);
+  } catch (e) { out.fails.push("groundWaterAudit threw: " + (e && e.message)); } }
+  // ---- volcano block (volcanofx.js): lava is OPAQUE crusted rock, never a
+  // translucent box - transparent lava and legacy stream paths pinned at 0.
+  if (CBZ.volcanoAudit) { try { const va = CBZ.volcanoAudit();
+    out.volcano = "flows=" + va.lavaFlows + " transparent=" + va.lavaTransparent;
+    if (va.lavaTransparent > 0) out.fails.push("TRANSPARENT LAVA: " + va.lavaTransparent);
+  } catch (e) { out.fails.push("volcanoAudit threw: " + (e && e.message)); } }
+  if (CBZ.weatherAudit) { try { const wa = CBZ.weatherAudit();
+    out.weatherGround = "pool=" + wa.groundWater + " snow=" + wa.snowCover + " coated=" + wa.coatedMaterials;
+    if (wa.privateWaterPlanes > 0) out.fails.push("weatherAudit privateWaterPlanes " + wa.privateWaterPlanes);
+  } catch (e) { out.fails.push("weatherAudit threw: " + (e && e.message)); } }
   // ---- weapon latency ledger (fpsmode.js): press→boom as a NUMBER. Derived
   // from tuning constants (no world state, seed-independent), so it is safe
   // to pin hard. overheadMs is flight time ABOVE dist/speed — the artificial

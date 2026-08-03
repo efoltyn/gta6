@@ -18,11 +18,12 @@
    open central channel. That is two meshes, and neither of them is
    transparent:
 
-     CRUST    MeshLambertMaterial, vertexColors, flatShading, OPAQUE.
-              Dark basalt at the levees, scorched red-brown at the
-              margins. It is LIT, so it takes the scene's sun and reads
-              as ground, and it THICKENS with age (the levees build up
-              and the flow stands proud of the grass).
+     CRUST    MeshPhongMaterial (shininess 0 — Lambert's look; r128's
+              Lambert cannot flat-shade), vertexColors, flatShading,
+              OPAQUE. Dark basalt at the levees, scorched red-brown at
+              the margins. It is LIT, so it takes the scene's sun and
+              reads as ground, and it THICKENS with age (the levees
+              build up and the flow stands proud of the grass).
      CHANNEL  MeshBasicMaterial, vertexColors, OPAQUE. Unlit on
               purpose — an unlit material IS incandescence: it ignores
               the sun, so at night it stays exactly as bright as it was
@@ -280,8 +281,14 @@
     crustGeo.setAttribute("position", new THREE.BufferAttribute(cPos, 3));
     crustGeo.setAttribute("color", new THREE.BufferAttribute(cCol, 3));
     crustGeo.setIndex(new THREE.BufferAttribute(cIdx, 1));
-    const crustMat = new THREE.MeshLambertMaterial({
-      vertexColors: true, flatShading: true, side: THREE.DoubleSide,
+    /* r128 FACT: MeshLambertMaterial does NOT support flatShading — it warns
+       and silently ignores it (flatShading lives on Phong/Standard/Normal).
+       A crust that is not faceted is not a crust, so this is Phong with the
+       specular term switched off: Lambert's diffuse look, with the flat
+       normals that make the levees read as broken rock. */
+    const crustMat = new THREE.MeshPhongMaterial({
+      vertexColors: true, flatShading: true, shininess: 0, specular: 0x000000,
+      side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     });
     const crust = new THREE.Mesh(crustGeo, crustMat);
@@ -688,8 +695,11 @@
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
-    const mat = new THREE.MeshLambertMaterial({
-      vertexColors: true, flatShading: true, side: THREE.DoubleSide,
+    // Phong, not Lambert — see the crust material: r128 ignores flatShading
+    // on Lambert, and a smooth mud river reads as a tarmac ramp.
+    const mat = new THREE.MeshPhongMaterial({
+      vertexColors: true, flatShading: true, shininess: 0, specular: 0x000000,
+      side: THREE.DoubleSide,
       // same neutral floor the ash deposit uses, and for the same reason: an
       // eruption's sun is 0xff6a3a and mud is not peach
       emissive: 0x14161a, emissiveIntensity: 1,
@@ -705,8 +715,8 @@
     const rideN = o.debris === false ? 0 : qi(3, 11);
     const bGeo = new THREE.DodecahedronGeometry(1, 0);
     const lGeo = new THREE.CylinderGeometry(0.34, 0.4, 4.4, 6);
-    const bMat = new THREE.MeshLambertMaterial({ color: 0x585047, flatShading: true });
-    const lMat = new THREE.MeshLambertMaterial({ color: 0x4a3a28, flatShading: true });
+    const bMat = new THREE.MeshPhongMaterial({ color: 0x585047, flatShading: true, shininess: 0, specular: 0x000000 });
+    const lMat = new THREE.MeshPhongMaterial({ color: 0x4a3a28, flatShading: true, shininess: 0, specular: 0x000000 });
     const riders = [];
     for (let i = 0; i < rideN; i++) {
       const log = i % 3 === 2;
@@ -902,9 +912,16 @@
       idx[k] = v; idx[k + 1] = v + 2; idx[k + 2] = v + 1;
       idx[k + 3] = v; idx[k + 4] = v + 3; idx[k + 5] = v + 2;
     }
+    /* EVERY ASH QUAD IS HORIZONTAL, FOREVER. So its normal is a constant, and
+       recomputing 18,000 of them every rewrite is pure waste — it was the
+       single most expensive thing in the ash field. Written once here, and
+       the update path never calls computeVertexNormals() again. */
+    const nrm = new Float32Array(MAXC * 4 * 3);
+    for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     /* OPAQUE. Ash is a solid deposit; the fade-in is coverage, not alpha.
        The small cool emissive is not decoration: an eruption drives the scene
@@ -1009,7 +1026,6 @@
           geo.attributes.position.needsUpdate = true;
           geo.attributes.color.needsUpdate = true;
           geo.setDrawRange(0, cells.length * 6);
-          geo.computeVertexNormals();
         }
         return handle;
       },

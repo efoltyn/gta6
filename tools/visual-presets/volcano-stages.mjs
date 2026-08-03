@@ -167,6 +167,13 @@ async function stageVolcano(input) {
     if (!CBZ.player) return;
     CBZ.player.hp = 100; CBZ.player.dead = false;
     if (CBZ.player.stamina != null) CBZ.player.stamina = 100;
+    /* AND PUT THE RUN BACK. Healing the player is not enough: a pyroclastic
+       flow that reaches him flips CBZ.game.state out of "playing" on the same
+       tick, and core/loop.js only ticks the UPDATER chain while playing — so
+       the disaster director silently froze at idle and every later beat
+       photographed an empty island. Restoring hp without restoring the run
+       state looks like it works right up until something actually kills you. */
+    if (CBZ.game && CBZ.game.state !== "playing") CBZ.game.state = "playing";
   };
   let ticks = 0, totalMs = 0, maxMs = 0, over33 = 0;
   const step = (secs) => {

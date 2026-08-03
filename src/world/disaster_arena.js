@@ -849,6 +849,7 @@
         // back is one call, not a mesh to reposition and a sheet to delete
         if (CBZ.waterSurgeSet) CBZ.waterSurgeSet(0);
         arenaWave.amp = 0.86; arenaWave.chop = 0.72; arenaWave.foam = 0.34; arenaWave.opacity = 1;
+        arenaWave.sediment = 0;   // a match abandoned mid-sweep must not stay muddy
         ocean.position.y = OCEAN_Y;
         if (CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
