@@ -1063,6 +1063,41 @@
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     return geo;
   }
+  // ---- SHARED lbox RESOURCES (2026-08-03 slow-boot wave) -------------------
+  // lbox built a FRESH BoxGeometry + Lambert material for every box, and once
+  // interiors started building mid-play that measured ~960 new materials in
+  // 20s (heap churn, GC pressure, and a program-cache-key string computed per
+  // material on its first rendered frame). Plain boxes now share unit-cube
+  // geometry — dimensions live in mesh.scale; batch.js clones/toNonIndexed()s
+  // before baking matrixWorld, so merged output is byte-identical — and
+  // cmat()-cached materials. shadeGeo's colours depend only on normals plus
+  // the ground-ring flag, never on box dimensions, so los boxes share one of
+  // two pre-shaded unit cubes. Emissive boxes keep FRESH materials: the sign
+  // glow pulse (interior_programs.js) mutates emissiveIntensity per mesh and
+  // a shared material would bleed the pulse across every same-colour box.
+  let _lboxGeoLos = null, _lboxGeoLosGround = null;
+  function unitBoxGeo(los, ground) {
+    if (!los) { const g = unitBox(); g._shared = true; return g; }
+    const make = (shadeGround) => {
+      const g = new THREE.BoxGeometry(1, 1, 1);
+      shadeGeo(g, shadeGround);
+      g._shared = true;
+      return g;
+    };
+    if (ground) return _lboxGeoLosGround || (_lboxGeoLosGround = make(true));
+    return _lboxGeoLos || (_lboxGeoLos = make(false));
+  }
+  const _vcMats = new Map();
+  function vcMat(col) {
+    let m = _vcMats.get(col);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({ color: col, vertexColors: true });
+      m._shared = true;
+      _vcMats.set(col, m);
+    }
+    return m;
+  }
+
   // a darkened wall-colour variant (plinths/cornices/pilasters) — derived from
   // the shared palettes so trim colours bucket together for the batcher.
   function shadeHex(hex, f) {
@@ -2610,13 +2645,16 @@
 
     function lbox(lx, ly, lz, bw, bh, bd, col, o) {
       o = o || {};
-      const g = new THREE.BoxGeometry(bw, bh, bd);
-      const mm = mat(col, o.emissive ? { emissive: o.emissive, ei: o.ei || 0.5 } : null);
       // fake-AO vertex shading on structural LOS surfaces (walls/roofs/rims) —
       // exactly the meshes batch.js spares, so the colour attribute survives
-      if (o.los) { shadeGeo(g, ly - bh / 2 <= 0.2); mm.vertexColors = true; }
-      const m = new THREE.Mesh(g, mm);
+      let mm;
+      if (o.emissive) {
+        mm = mat(col, { emissive: o.emissive, ei: o.ei || 0.5 });
+        if (o.los) mm.vertexColors = true;
+      } else mm = o.los ? vcMat(col) : CBZ.cmat(col);
+      const m = new THREE.Mesh(unitBoxGeo(!!o.los, ly - bh / 2 <= 0.2), mm);
       m.position.set(lx, ly, lz);
+      m.scale.set(bw, bh, bd);
       m.castShadow = o.cast !== false; m.receiveShadow = true;
       bgroup.add(m);
       if (o.solid) {

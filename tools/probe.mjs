@@ -101,8 +101,12 @@ async function boot(seed, quiet) {
   const origin = `http://127.0.0.1:${port}/`;
   for (let i = 0, up = false; i < 80 && !up; i++) { try { await fetch(origin); up = true; } catch (_) { await sleep(100); } }
   const dbg = await claimPort(12000, 400, (p) => fetch(`http://127.0.0.1:${p}/json/version`));
-  const profile = `/tmp/cbz-probe-${dbg}`;
-  await rm(profile, { recursive: true, force: true });
+  // A dying chrome from an earlier run can still be flushing this dir; if the
+  // stale profile won't delete (ENOTEMPTY race), mint a fresh path instead of
+  // crashing the boot.
+  let profile = `/tmp/cbz-probe-${dbg}`;
+  try { await rm(profile, { recursive: true, force: true }); }
+  catch (_) { profile = `/tmp/cbz-probe-${dbg}-${process.pid}`; await rm(profile, { recursive: true, force: true }).catch(() => {}); }
   const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin"
     ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     : "/opt/pw-browsers/chromium");
@@ -236,7 +240,14 @@ if (own) {
   try { process.kill(-own.server.pid); } catch (_) {}
   await sleep(150);
   // Only the exact profile this boot minted is eligible for recursive cleanup.
-  if (own.profile && own.profile.startsWith("/tmp/cbz-probe-"))
-    await rm(own.profile, { recursive: true, force: true });
+  // Chrome can still be flushing its caches when the kill lands, and an rm
+  // racing those writes throws ENOTEMPTY — which used to crash the probe
+  // AFTER it had already printed its answer, making callers (the interior
+  // containment test) read a healthy run as "could not run". Best-effort
+  // only: retry once, then leave the dir for the next boot's sweep.
+  if (own.profile && own.profile.startsWith("/tmp/cbz-probe-")) {
+    try { await rm(own.profile, { recursive: true, force: true }); }
+    catch (_) { await sleep(400); try { await rm(own.profile, { recursive: true, force: true }); } catch (_) {} }
+  }
 }
 process.exit(process.exitCode || 0);

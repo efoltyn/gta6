@@ -339,12 +339,38 @@
     // HALF-RATE mirror: skip the whole-scene mirror render every other frame
     // and reuse the cached target. Wrapping (not editing the addon) keeps the
     // vendor port faithful.
+    //
+    // SKY-ONLY MIRROR (2026-08-03 slow-boot wave): the full-scene mirror
+    // measured as the single largest cost in the whole game — it re-rendered
+    // the entire world (~7k draw calls PLUS a full 150k-object projectObject
+    // walk) into the target every other frame AND forced a Linear-encoding
+    // twin of every lit shader program (62 of 196 boot programs). r128
+    // compiles programs with a synchronous CPU↔GPU stall, so the twins alone
+    // were ~20s of a ~35s city boot; the A/B (?cfg_WATER_REFLECT=0) went
+    // 2.3→11 fps and 30s→15s title→city. The mirror pass now renders a
+    // MINI-SCENE holding just the sky rig (reparented in for the pass, back
+    // out after): the ocean keeps sky, clouds, sun and Fresnel shine — only
+    // unlit sky materials ever compile a Linear twin, and the mirror's scene
+    // walk is ~dozens of objects instead of 150k. The mirrored skyline is
+    // the only loss, and it read as ripple noise in a 256px target anyway.
+    // ?cfg_WATER_REFLECT_SCENE=1 restores the full mirror.
+    if (CFG.WATER_REFLECT_SCENE == null) CFG.WATER_REFLECT_SCENE = false;
     const mirror = water.onBeforeRender;
+    const miniSky = new THREE.Scene();
+    miniSky.name = "mirror-sky-scene";
     let parity = 0;
     water.onBeforeRender = function (renderer, scene, camera) {
       parity ^= 1;
       if (parity === 0) return;               // reuse last mirror frame
-      mirror.call(this, renderer, scene, camera);
+      let rig = !CFG.WATER_REFLECT_SCENE && CBZ.skyDome && (CBZ.skyDome.parent || CBZ.skyDome);
+      if (rig && rig.isScene) rig = CBZ.skyDome;   // dome parented straight to the scene
+      if (rig && rig !== miniSky) {
+        const home = rig.parent || null;
+        miniSky.fog = scene.fog || null;      // keep the horizon melt exact
+        miniSky.add(rig);
+        try { mirror.call(this, renderer, miniSky, camera); }
+        finally { if (home) home.add(rig); else miniSky.remove(rig); }
+      } else mirror.call(this, renderer, scene, camera);
     };
 
     parent.add(water);
