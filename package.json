@@ -25,8 +25,12 @@
     "visual:shark-bites": "node tools/visual-compare.mjs --preset shark-bites --before https://efoltyn.github.io/gta6/",
     "visual:parachute": "node tools/visual-compare.mjs --preset parachute-rig --before https://efoltyn.github.io/gta6/",
     "visual:nuke": "node tools/visual-compare.mjs --preset nuke-sequence --before https://efoltyn.github.io/gta6/",
+    "visual:b2-spawn": "node tools/visual-compare.mjs --preset b2-spawn --before https://efoltyn.github.io/gta6/",
+    "visual:jail": "node tools/visual-compare.mjs --preset jail-scene --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:disasters": "node tools/visual-compare.mjs --preset disaster-sequence --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:race-stadium": "node tools/visual-compare.mjs --preset race-stadium --before https://efoltyn.github.io/gta6/",
-    "visual:interiors": "node tools/visual-compare.mjs --preset interiors --before https://efoltyn.github.io/gta6/"
+    "visual:interiors": "node tools/visual-compare.mjs --preset interiors --before https://efoltyn.github.io/gta6/",
+    "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/"
   },
   "devDependencies": {
     "three": "^0.164.1",

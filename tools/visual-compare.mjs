@@ -49,6 +49,7 @@ if (args.help) {
     `  --subjects a,b,c     capture only these subject ids\n` +
     `  --limit N            capture only the first N subjects\n` +
     `  --no-open            do not open the generated PDF\n` +
+    `  --keep-going         a failed subject becomes an error page instead of aborting the run\n` +
     `  --width N --height N capture viewport (defaults: preset or 960x600)\n` +
     `  --only before|after  capture one side only, skip the report (fast look iteration)\n`);
   process.exit(0);
@@ -238,12 +239,22 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       // returned by the matching before capture. Presets opt in by reading it.
       referenceStage: referenceResult?.captures?.[index]?.stage || null,
     };
-    const stageResult = await evaluate(
-      `(${preset.stage.toString()})(${JSON.stringify(stageInput)})`,
-      Number(preset.stageTimeoutMs) || 60000
-    );
-    if (!stageResult || stageResult.ok !== true) {
-      throw new Error(`${side}/${subject.id} could not be staged: ${JSON.stringify(stageResult)}`);
+    let stageResult;
+    try {
+      stageResult = await evaluate(
+        `(${preset.stage.toString()})(${JSON.stringify(stageInput)})`,
+        Number(preset.stageTimeoutMs) || 60000
+      );
+      if (!stageResult || stageResult.ok !== true) {
+        throw new Error(`${side}/${subject.id} could not be staged: ${JSON.stringify(stageResult)}`);
+      }
+    } catch (err) {
+      // --keep-going: one broken beat becomes an error page, the rest of the
+      // storyboard still ships. The failing state is still photographed —
+      // a picture of the wreck beats an empty slot.
+      if (!args["keep-going"]) throw err;
+      process.stdout.write(`[${side}] ${subject.id} FAILED (kept going): ${err.message}\n`);
+      stageResult = { ok: false, error: String(err.message || err) };
     }
     await evaluate(`(() => {
       if (window.__cbzVisualCompare && window.__cbzVisualCompare.render) window.__cbzVisualCompare.render();
@@ -319,13 +330,18 @@ function metricsPageHtml(before, after) {
     const beforeValue = Number(row.before);
     const afterValue = Number(row.after);
     let deltaCell = "<td>—</td>";
-    if (Number.isFinite(beforeValue) && Number.isFinite(afterValue) && beforeValue !== 0) {
-      const pct = ((afterValue - beforeValue) / Math.abs(beforeValue)) * 100;
-      const sign = pct > 0 ? "+" : "";
+    if (Number.isFinite(beforeValue) && Number.isFinite(afterValue)) {
+      const diff = afterValue - beforeValue;
       let tone = "";
-      if (row.spec.better === "lower") tone = pct < 0 ? "good" : (pct > 0 ? "bad" : "");
-      if (row.spec.better === "higher") tone = pct > 0 ? "good" : (pct < 0 ? "bad" : "");
-      deltaCell = `<td class="${tone}">${sign}${Math.round(pct)}%</td>`;
+      if (row.spec.better === "lower") tone = diff < 0 ? "good" : (diff > 0 ? "bad" : "");
+      if (row.spec.better === "higher") tone = diff > 0 ? "good" : (diff < 0 ? "bad" : "");
+      if (beforeValue !== 0) {
+        const pct = (diff / Math.abs(beforeValue)) * 100;
+        deltaCell = `<td class="${tone}">${pct > 0 ? "+" : ""}${Math.round(pct)}%</td>`;
+      } else {
+        // a zero baseline has no percentage; the absolute move still matters
+        deltaCell = `<td class="${tone}">${diff > 0 ? "+" : ""}${formatMetric(diff)}</td>`;
+      }
     }
     return `<tr><td>${htmlEscape(row.subject.label || row.subject.id)}</td>` +
       `<td>${htmlEscape(row.spec.label || row.key)}${row.spec.unit ? ` <small>${htmlEscape(row.spec.unit)}</small>` : ""}</td>` +
@@ -342,13 +358,21 @@ function reportHtml(before, after) {
   const pairNote = preset.pairNote || "Same model recipe · seed · camera · light · viewport";
   const method = preset.method || "Every pair uses the actual registered model builder from its source URL. The runner holds subject, random seed, viewport, camera framing, backdrop, and lighting constant so the source change is the variable.";
   const pages = subjects.map((subject, index) => {
-    const filename = before.captures[index].filename;
     const focus = subject.focus || preset.defaultFocus || "Compare silhouette, seams, and physical continuity.";
+    const side = (result, cls, caption, sub) => {
+      const capture = result.captures[index];
+      const stageError = capture?.stage?.ok !== true ? (capture?.stage?.error || "stage failed") : null;
+      const body = capture?.filename
+        ? `<img src="shots/${cls}/${htmlEscape(capture.filename)}">`
+        : `<div class="stageError">NOT CAPTURED</div>`;
+      const note = stageError ? `<div class="stageError">${htmlEscape(stageError)}</div>` : "";
+      return `<figure class="${cls}"><figcaption>${caption} <small>${sub}</small></figcaption>${body}${note}</figure>`;
+    };
     return `<section class="page detail">
       <header><div><span class="number">${String(index + 1).padStart(2, "0")}</span><h2>${htmlEscape(subject.label || subject.id)}</h2></div><p>${htmlEscape(focus)}</p></header>
       <div class="pair">
-        <figure class="before"><figcaption>BEFORE <small>DEPLOYED PAGE</small></figcaption><img src="shots/before/${htmlEscape(filename)}"></figure>
-        <figure class="after"><figcaption>AFTER <small>LOCAL REPAIR</small></figcaption><img src="shots/after/${htmlEscape(filename)}"></figure>
+        ${side(before, "before", "BEFORE", "DEPLOYED PAGE")}
+        ${side(after, "after", "AFTER", "LOCAL REPAIR")}
       </div>
       <footer><span>${htmlEscape(subject.id)}</span><span>${htmlEscape(pairNote)}</span></footer>
     </section>`;
@@ -379,6 +403,7 @@ function reportHtml(before, after) {
     figcaption { height:11mm; padding:2.4mm 4mm; font-weight:850; font-size:13px; letter-spacing:.09em; }
     figcaption small { float:right; color:#9babb8; font-size:9px; line-height:16px; }
     figure img { width:100%; display:block; aspect-ratio:${width}/${height}; object-fit:cover; }
+    .stageError { padding:4mm; color:#ffb3b3; font:11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap:anywhere; }
     footer { position:absolute; left:14mm; right:14mm; bottom:6mm; display:flex; justify-content:space-between; color:#6f8496; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .metrics table { width:100%; border-collapse:collapse; margin-top:4mm; font-size:11.5px; }
     .metrics th { text-align:left; color:#80c9ff; letter-spacing:.08em; font-size:10px; text-transform:uppercase; padding:1.6mm 3mm; border-bottom:1px solid #35485a; }
@@ -433,6 +458,28 @@ try {
   await send("Page.enable");
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 
+  // --print-only: re-print an existing run's report.html to PDF without
+  // re-shooting anything (Page.printToPDF is the one step that can time out
+  // after 20 good captures; the shots are already on disk).
+  if (args["print-only"]) {
+    const htmlPath = path.join(outputDir, "report.html");
+    pdfPath = path.join(outputDir, "before-after.pdf");
+    await send("Page.navigate", { url: pathToFileURL(htmlPath).href }, 90000);
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      if (await evaluate("document.readyState === 'complete' && Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)")) break;
+      await sleep(100);
+    }
+    const pdf = await send("Page.printToPDF", {
+      printBackground: true, landscape: true, preferCSSPageSize: true,
+      paperWidth: 11.69, paperHeight: 8.27,
+      marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0,
+    }, 600000);
+    await writeFile(pdfPath, Buffer.from(pdf.data, "base64"));
+    process.stdout.write(`\nPDF reprinted: ${pdfPath}\n`);
+    throw { _earlyExit: true };
+  }
+
   const onlySide = args.only ? String(args.only) : null;
   if (onlySide === "after") {
     afterResult = await captureSide("after", afterUrl);
@@ -471,8 +518,9 @@ try {
     if (await evaluate("document.readyState === 'complete' && Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)")) break;
     await sleep(100);
   }
-  // 300s: sixteen-plus full-viewport PNGs can outlast the old 120s budget on
-  // a machine that is also simulating two cities.
+  // 600s: sixteen-plus full-viewport PNGs can outlast the old budgets on a
+  // machine that is also simulating two cities (a 300s print once timed out
+  // AFTER 20 good captures — hence --print-only above).
   const pdf = await send("Page.printToPDF", {
     printBackground: true,
     landscape: true,
@@ -483,7 +531,7 @@ try {
     marginBottom: 0,
     marginLeft: 0,
     marginRight: 0,
-  }, 300000);
+  }, 600000);
   await writeFile(pdfPath, Buffer.from(pdf.data, "base64"));
 
   process.stdout.write(`\nVisual report complete\nPDF: ${pdfPath}\nHTML: ${htmlPath}\nShots: ${shotDir}\n`);
