@@ -307,6 +307,9 @@
   }
 
   function syncLegacyGunItem() {
+    // the shared weapon strip already shows every held gun; mirroring a "Gun"
+    // proxy into the 9-slot bag would double-report the same fact
+    if (CBZ.CONFIG.WEAPON_STRIP_SHARED !== false) return;
     if (CBZ.econ && CBZ.weaponInventory.length && !CBZ.econ.hasItem("Gun")) {
       CBZ.econ.addItem("Gun", 1);
     }

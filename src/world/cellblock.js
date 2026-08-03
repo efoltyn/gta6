@@ -175,6 +175,50 @@
   const C_STEEL_D = 0x9aa0a8;
   const C_DARK = 0x3c424d;
 
+  /* ==========================================================
+     EVERY PROP IS INTERACTABLE OR LOAD-BEARING (PRISON_REAL_PROPS).
+
+     OWNER: "there's fake props." world/_template.js states the law and this
+     wing was breaking it in the one place it matters most: the BUNK IN YOUR OWN
+     CELL. It is drawn beautifully — frame, tucked sheet, turned-down fold,
+     guard rail, ladder — and it was a shelf. Thirteen of them. The inmates
+     could sit on theirs (the leash below sets `char.seatRef` by hand); the
+     player could not do anything with his at all.
+
+     The cure is not a bed system. city/propuse.js already owns "a place a body
+     can lie down or sit", and its two registrars take a coordinate and a top
+     height — which this file has always computed and thrown away. So the
+     existing geometry is registered rather than re-drawn: `bunkRig` already
+     returns its own mattress top, and `dayTable` already knows where its four
+     stools are.
+
+     Degrade: no propuse.js → nothing registers and every mesh is exactly what
+     it was. Counted on CBZ._prisonProps so one audit can answer for the whole
+     wave (games/jail.js's CBZ.prisonPropAudit merges it).
+     ========================================================== */
+  if (CFG.PRISON_REAL_PROPS == null) CFG.PRISON_REAL_PROPS = true;
+  const PP = (CBZ._prisonProps = CBZ._prisonProps || { props: 0, seats: 0, beds: 0, plain: 0 });
+  function propsOn() { return CFG.PRISON_REAL_PROPS !== false; }
+  // a bunk you can lie on. (hx,hz) is the lie-axis heading, `top` the mattress.
+  function useBed(x, z, along, top, len) {
+    PP.props++;
+    if (!propsOn() || !CBZ.propRegisterBed) { PP.plain++; return null; }
+    const hx = along === "z" ? 0 : 1, hz = along === "z" ? 1 : 0;
+    let rec = null;
+    try { rec = CBZ.propRegisterBed(x, 0, z, hx, hz, len, top, "bunk", null); } catch (e) { rec = null; }
+    if (rec) PP.beds++; else PP.plain++;
+    return rec;
+  }
+  // a stool you can sit on. `face` looks at the table.
+  function useSeat(x, z, face, cushion) {
+    PP.props++;
+    if (!propsOn() || !CBZ.propRegisterSeat) { PP.plain++; return null; }
+    let rec = null;
+    try { rec = CBZ.propRegisterSeat(x, 0, z, face, "stool", null, { cushion: cushion, floorBelow: 0 }); } catch (e) { rec = null; }
+    if (rec) PP.seats++; else PP.plain++;
+    return rec;
+  }
+
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
   function pick(list, x, z, salt) { return list[(h01(x, z, salt) * list.length) | 0] || list[0]; }
 
@@ -472,6 +516,9 @@
     const bx = north ? c.x - (c.hx - 0.70) : c.x - c.dx * (c.hx - 0.70);
     const bz = north ? c.z - c.dz * (c.hz - 1.55) : c.z - (c.hz - 1.40);
     c.bunk = bunkRig(c, bx, bz, "z", north, blanket);
+    // THE BUNK IS A BED. Its own returned mattress top (0.79) is the declared
+    // cushion, so the anchor can never drift off the mesh it belongs to.
+    c.bed = useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60);
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -663,6 +710,13 @@
   }
   dayTable(-6.6, -26.0);
   dayTable(6.6, -26.0);
+  // ...and its four stools are seats. The day room is where a block SITS; two
+  // tables with eight bolted stools nobody could use is the fake-prop fault in
+  // its purest form. Stool cushion is 0.48 (the 0.44-thick pad on a 0.22 post,
+  // matching dayTable's own numbers) and each looks at the table centre.
+  for (const tx of [-6.6, 6.6]) for (const i of [-1, 1]) for (const j of [-1, 1]) {
+    useSeat(tx + i * 0.85, -26.0 + j * 0.85, Math.atan2(-i * 0.85, -j * 0.85), 0.48);
+  }
   // a painted centre line down the spine — the walk everybody in here knows
   for (let z = -36; z <= -12; z += 3) addBox(0, 0.025, z, 0.2, 0.02, 1.8, 0xe2c049, { cast: false });
 

@@ -202,10 +202,42 @@
     player.captureT = t || 0;
   }
 
+  // ============================================================
+  //  SHOW DON'T TELL (CBZ.CONFIG.JAIL_SHOW_DONT_TELL) — declared in
+  //  entities/ai.js, consumed here. OWNER: "the HUD is cluttered with 4th-wall
+  //  breakers — summaries of events when the events should just HAPPEN."
+  //
+  //  This file was the worst offender in the prison because it had the classic
+  //  shape: every capture beat already SHOWED itself — the screen flashes red,
+  //  the camera shakes, the body goes prone, the cell door racks shut, tracers
+  //  stitch past your head — and then a toast was printed BESIDE the thing that
+  //  had just happened, telling you it had happened. "TASED — you hit the
+  //  floor!" was printed on the same frame the player hit the floor.
+  //
+  //  Every one of those is deleted below. Nothing that carried real state is
+  //  lost: the sentence still rides CBZ.setObjective (a bounded readout, not a
+  //  popup), a death still rides city/killfeed.js, and the physical beats keep
+  //  every shake, flash, stun and sound they always had. `tell()` is what the
+  //  flag reverts through, so the popups come back in one line.
+  //  Ratchet: CBZ.jailShowAudit() at the bottom of this file.
+  // ============================================================
+  function showing() { return CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false; }
+  let toldToasts = 0, toldHints = 0;
+  // Both return TRUE when the line was SUPPRESSED, so a caller that has a
+  // diegetic replacement can do `if (tellHint(old)) { say it over his head }`
+  // and still revert to the exact popup with the flag off.
+  function tellToast(m) { if (showing()) { toldToasts++; return true; } if (CBZ.flashToast) CBZ.flashToast(m); return false; }
+  function tellHint(m, s) { if (showing()) { toldHints++; return true; } if (CBZ.flashHint) CBZ.flashHint(m, s); return false; }
+  // THE ONE GATE, shared with every other file in the prison's territory
+  // (lockdown · killstreaks · detection · gunroom · games/jail). One-line
+  // adoption, degrade-safe: a consumer that loads before this file falls
+  // straight through to the popup it used to write.
+  CBZ.jailTell = { toast: tellToast, hint: tellHint, on: showing };
+
   // instant version (tower shot) — quick red flash, straight to cell
   function haulToCell(msg) {
     if (CBZ.killstreakBreak) CBZ.killstreakBreak(msg || "Captured");
-    CBZ.flashToast(msg || "BACK TO YOUR CELL");
+    tellToast(msg || "BACK TO YOUR CELL");
     // HAUL SITE 1 — land in the real cell when there is one, else the old spot
     if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; }
     player.stun = 0; player.subdue = 0;
@@ -237,7 +269,9 @@
     if (pipeOn() && (+g.jailSentence || 0) > 0) {
       g.jailSentence = (+g.jailSentence || 0) + STRIKE_TIME;
       sentShown = -1;
-      if (CBZ.flashHint) CBZ.flashHint("+" + STRIKE_TIME + "s on your sentence.", 2.2);
+      // no "+45s" popup: the number the popup announced is the number already
+      // standing in the objective readout, and it visibly jumps.
+      tellHint("+" + STRIKE_TIME + "s on your sentence.", 2.2);
     }
 
     // shakedown: the screws pocket half your cigs on every strike
@@ -264,40 +298,82 @@
       g.detection = Math.max(g.detection, g.strikeHeatFloor);
       g.cellWatch = true;               // extra sweeps past your cell (below)
       confineT = 7;
-      CBZ.flashToast(campaign && strike >= 3 ? "STRIKE — THE WARDEN KEEPS YOU" : "STRIKE 2 — FINAL WARNING");
-      CBZ.flashHint(campaign && strike >= 3
+      tellToast(campaign && strike >= 3 ? "STRIKE — THE WARDEN KEEPS YOU" : "STRIKE 2 — FINAL WARNING");
+      tellHint(campaign && strike >= 3
         ? `The warden blocks your transfer${taken ? ` — but the screws take ${taken} cigs` : ""} and the block stays hot.`
         : `${taken ? taken + " cigs confiscated. " : ""}One more capture = TRANSFER TO MAX SECURITY. Guards now sweep your block.`, 3.4);
     } else {
       confineT = 4;
-      CBZ.flashToast("STRIKE 1 — SHAKEDOWN");
-      CBZ.flashHint(`${taken ? taken + " cigs confiscated. " : ""}Two more strikes and you're shipped to max security.`, 3.2);
+      tellToast("STRIKE 1 — SHAKEDOWN");
+      tellHint(`${taken ? taken + " cigs confiscated. " : ""}Two more strikes and you're shipped to max security.`, 3.2);
+    }
+    // THE SHAKEDOWN IS A THING THAT HAPPENS TO YOU, not a sentence about a
+    // thing. Cigs already left your pocket above (the counter drops in front of
+    // you); the strike now also lands ON the body — a shove into the cell and a
+    // hard flash — so a capture reads as being handled rather than being told.
+    if (showing()) {
+      if (CBZ.shake) CBZ.shake(strike >= 2 ? 0.85 : 0.6);
+      if (CBZ.sfx) { try { CBZ.sfx(taken > 0 ? "coin" : "punch"); } catch (e) {} }
+      if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
     }
     // the confinement beat is safe time: guards can't re-grab you in the cell
     g.invuln = Math.max(g.invuln || 0, confineT + 0.5);
   }
 
-  // An NPC (or a tower) lands a hit on the player. Escape mode has no death
-  // screen — getting "got" means captured — so a shot stings (stun + heat +
-  // red flash + shake), and enough lead drops you and drags you to your cell.
-  // Returns true if this shot put you down.
-  CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
+  // ============================================================
+  //  THE ONE WAY THE PLAYER IS HURT IN THIS MODE (CBZ.hurtPlayer).
+  //
+  //  OWNER: "don't say you're getting beat up — have an NPC punch the player
+  //  and health go down." The pen had exactly one damage entry and it was
+  //  called `shootPlayer`, so a FIST had nowhere to go: entities/ai.js's
+  //  jump-you wrote `player.stun = 0.5` by hand and printed a sentence, because
+  //  the only function that could take health off you was named after a bullet.
+  //
+  //  Same body, honest name, one added seam (`opts.melee` picks the sound and a
+  //  softer sting). `CBZ.shootPlayer` stays exactly what it was — it is the
+  //  gun-shaped call and towers/guards.js still make it — so nothing migrates
+  //  and nothing can break. Anything that lands a HIT calls this.
+  //  Hurt counter is exported through CBZ.jailShowAudit().playerHits, which is
+  //  what proves the beating is real damage rather than another caption.
+  // ============================================================
+  let playerHits = 0;
+  CBZ.hurtPlayer = function (dmg, fromX, fromZ, opts) {
     opts = opts || {};
     if (player.dead || (g.invuln || 0) > 0) return false;
     if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return false;
+    playerHits++;
     player.hp = (player.hp == null ? 100 : player.hp) - (dmg || 30);
     player.stun = Math.max(player.stun || 0, opts.stun || 0.25);
     if (CBZ.addHeat) CBZ.addHeat(opts.heat != null ? opts.heat : 10);
     if (CBZ.shake) CBZ.shake(opts.shake || 0.6);
     if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-    CBZ.sfx && CBZ.sfx("hit");
+    // a fist is not a rifle round: it gets the punch report, and it ROCKS the
+    // head rather than punching a hole. (systems/wounds.js is deliberately NOT
+    // called: bodyWound wants an actor with a `.char` and a world impact point,
+    // and the player here is a bare `pos` — a call that would silently return
+    // on its first guard is a dead path, not a wound system.)
+    CBZ.sfx && CBZ.sfx(opts.sfx || (opts.melee ? "punch" : "hit"));
+    // The NECK is the rig's head joint (character.js's head layer damps it back
+    // to level over ~9/s), so a shove here reads as the head snapping and
+    // recovering without fighting the animator for ownership.
+    if (opts.melee && CBZ.playerChar && CBZ.playerChar.neck) {
+      CBZ.playerChar.neck.rotation.x += 0.34;
+      CBZ.playerChar.neck.rotation.z += (Math.random() < 0.5 ? -1 : 1) * 0.22;
+    }
     if (player.hp <= 0) {
       player.hp = 100;
-      haulToCell(opts.haulMsg || "SHOT — DRAGGED TO YOUR CELL");
+      haulToCell(opts.haulMsg || (opts.melee ? "BEATEN DOWN" : "SHOT — DRAGGED TO YOUR CELL"));
       return true;
     }
-    CBZ.flashHint && CBZ.flashHint(opts.hint || "You're hit — get to cover!", 1.1);
+    // NO "You're hit — get to cover!". The red flash IS the hit, and the health
+    // bar you can see falling is the report.
+    tellHint(opts.hint || "You're hit — get to cover!", 1.1);
     return false;
+  };
+  // An NPC (or a tower) lands a SHOT on the player. Unchanged contract; it is
+  // now one word of configuration on the shared entry above.
+  CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
+    return CBZ.hurtPlayer(dmg, fromX, fromZ, opts || {});
   };
 
   // cuffed-escort version: hands behind back, fade to black, wake in cell
@@ -308,7 +384,7 @@
     escortT = 1.9; escorted = false;
     CBZ.playerChar.cuffed = true; player.stun = 2.2;
     setCaptureState("cuffed", 1.9);
-    CBZ.flashToast("CUFFED — BACK TO YOUR CELL");
+    tellToast("CUFFED — BACK TO YOUR CELL");
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
   }
 
@@ -318,21 +394,62 @@
   function spray(sec) { sprayT = sec; }
 
   // called from guards.js when a hunting guard is right on top of you.
-  // less-lethal escalation: pepper spray → taser → hauled off.
+  // less-lethal escalation: baton → taser → TACKLE → hauled off.
+  //
+  // THE TEXT WAS DOING THE WORK THE ANIMATION SHOULD HAVE DONE. "TASED — you
+  // hit the floor!" was printed on the exact frame the body went prone and the
+  // camera shook; the sentence added nothing except a fourth wall. All three
+  // beats keep their physics and lose their captions, and the THIRD one — the
+  // one that used to jump straight from a string to a fade-to-black — is now a
+  // real grab: CBZ.predatorSeize's wind → strike → hold arc with its ONE
+  // telegraphed break-free press, style "pin" (a screw kneeling on you; the
+  // stillness is the beat), nonLethal because a guard inside the wire is
+  // taking you IN. Break the hold and you are loose with a stun to run off;
+  // lose it and the escort starts, exactly as before.
+  //
+  // Degrade: no predator.js, no seize — startEscort() fires directly and this
+  // file behaves byte-for-byte the way it always did.
+  let seizedBy = null;
   CBZ.tryCapture = function (gd, dt) {
     if (player.dead) return;
     if (g.role === "cop") return;
     if (player.captureState && player.captureState !== "normal" && player.captureT > 0) return;
+    if (gd._seizing) return;                       // this screw already has you
     gd.capCD = (gd.capCD || 0) - dt;
     if (gd.capCD > 0) return;
     gd.capCD = 1.6;
     player.subdue = (player.subdue || 0) + 1;
     if (player.subdue === 1) {
       player.stun = 1.85; setCaptureState("tased", 1.35);
-      CBZ.flashHint("TASED — you hit the floor!", 1.6); CBZ.sfx("tase"); CBZ.shake && CBZ.shake(0.55);
+      tellHint("TASED — you hit the floor!", 1.6);
+      CBZ.sfx("tase"); CBZ.shake && CBZ.shake(0.55);
+      if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
     } else if (player.subdue === 2) {
       player.stun = 2.05; setCaptureState("tackled", 1.55);
-      CBZ.flashHint("TACKLED — cuffs coming out!", 1.6); CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.7);
+      tellHint("TACKLED — cuffs coming out!", 1.6);
+      CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.7);
+      spray(1.1);                                   // the OC goes in your eyes — an overlay, not a line
+    } else if (showing() && CBZ.predatorSeize && !seizedBy) {
+      const h = CBZ.predatorSeize(gd, player, {
+        style: "pin", nonLethal: true, hold: 2.4, dps: 4, thrash: 0.55, escape: 0.5,
+        cause: "restrained by a guard",
+        // predator.js resolves a hold as "escaped" (you made the window),
+        // "taken"/"killed" (it ran out — nonLethal maps killed→taken) or
+        // "aborted" (the grab became invalid: the screw died, the distance blew
+        // out, the mode changed). ONLY a completed hold cuffs you — an aborted
+        // one must not, or a guard shot off you mid-grab would still book you.
+        onEnd: function (res) {
+          seizedBy = null;
+          if (res === "taken" || res === "killed") { startEscort(); return; }
+          // YOU GOT OUT OF IT. That is the reward for the press: he is on the
+          // floor for a beat and the escalation resets, so the run continues.
+          player.subdue = 0; gd.capCD = 3.2;
+          if (res === "escaped") gd.ko = Math.max(gd.ko || 0, 1.2);
+          setCaptureState("normal", 0);
+        },
+      });
+      if (h) { seizedBy = h; setCaptureState("tackled", 2.4); }
+      else startEscort();
     } else startEscort();
   };
 
@@ -355,7 +472,10 @@
       else { best.dead = true; best.ko = 0; best.hp = 0; best.hunt = 0; best.alert = 0; }
       if (g.koLog && best.data && best.data.name) g.koLog[best.data.name] = true;
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(best, "panic-fire");
-      CBZ.flashHint(`You dropped ${best.data.name}!`, 1.6);
+      // a kill has ONE surface in this game and it is the corner feed.
+      if (CBZ.cityLogDeath && best.data) {
+        try { CBZ.cityLogDeath(best.data.name, "shot", { by: "You" }); } catch (e) {}
+      } else tellHint(`You dropped ${best.data.name}!`, 1.6);
     }
     CBZ.addHeat(45); // gunfire brings the whole block down on you
   }
@@ -433,7 +553,9 @@
     const s = Math.ceil(g.jailSentence);
     if (s !== sentShown) {
       sentShown = s;
-      if (s === 60 || s === 30 || s === 10) CBZ.flashHint && CBZ.flashHint("Sentence: " + s + "s left.", 2.0);
+      // the countdown lives in the objective line below — printing it twice was
+      // the whole disease.
+      if (s === 60 || s === 30 || s === 10) tellHint("Sentence: " + s + "s left.", 2.0);
     }
     // the mode's OWN readout — state.js already writes this line on reset, so
     // the sentence rides the surface the prison run already has.
@@ -452,7 +574,24 @@
       beatI++;
       beatT = b.t;
       sentCall = b.s.split(" —")[0];
-      if (CBZ.flashHint) CBZ.flashHint(b.s, 2.4);
+      // THE CALL IS A CALL. A yard call is a thing an officer SHOUTS across a
+      // block and a thing the block then physically does (muster() below walks
+      // them); it is not a caption. So it goes over the nearest screw's head
+      // (diegetic) and the phase name rides the objective readout — never a
+      // popup. With nobody in earshot it is silent, which is correct: you
+      // missed the call, and that is information you get by being somewhere
+      // else, not information the HUD owes you.
+      tellHint(b.s, 2.4);
+      if (showing() && CBZ.citySay && CBZ.guards) {
+        let crier = null, cd = 34 * 34;
+        for (const gd of CBZ.guards) {
+          if (!gd || gd.dead || gd.ko > 0 || !gd.group) continue;
+          const dx = gd.group.position.x - player.pos.x, dz = gd.group.position.z - player.pos.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < cd) { cd = d2; crier = gd; }
+        }
+        if (crier) { try { CBZ.citySay(crier, "“" + sentCall + "!”", "#ffd27b", 2.4); } catch (e) {} }
+      }
       // LOCKUP puts the screws on your block — the cell-watch sweep the
       // strike-2 rule already drives, reused rather than re-authored.
       g.cellWatch = b.lock ? true : !!(g.caughtCount >= 2);
@@ -468,7 +607,8 @@
     if (beatLock) muster(true);
     if (g.jailSentence <= 0) {
       g.jailSentence = 0;
-      if (CBZ.flashToast) CBZ.flashToast("TIME SERVED — GATE'S OPEN");
+      // the gate opening is the announcement.
+      tellToast("TIME SERVED — GATE'S OPEN");
       beatLock = false;
       releasePlayerCell(); muster(false);   // nothing of ours stays shut past the gate
       if (CBZ.cityJailRelease) { try { CBZ.cityJailRelease("served"); return; } catch (e) {} }
@@ -511,11 +651,14 @@
     g.invuln = Math.max(g.invuln || 0, INTAKE_T + 0.5);
     sealPlayerCell();
     beatT = INTAKE_T + 2;                         // first yard call AFTER the count
-    if (CBZ.flashToast) CBZ.flashToast("BOOKED — YOUR CELL");
-    if (CBZ.flashHint) {
-      CBZ.flashHint("Intake. The door stays shut for the count — " +
-        Math.ceil(+g.jailSentence) + "s to serve.", 3.0);
-    }
+    // YOU WAKE UP IN A CELL WITH THE DOOR SHUT. That is the intake. The two
+    // lines that used to say so are gone; what is left is the room, the bars
+    // racking across in front of you (sealPlayerCell, above) and the sentence
+    // standing in the objective readout the pipe already writes.
+    tellToast("BOOKED — YOUR CELL");
+    tellHint("Intake. The door stays shut for the count — " +
+      Math.ceil(+g.jailSentence) + "s to serve.", 3.0);
+    if (showing() && CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
   }
 
   // per-frame bookkeeping
@@ -548,13 +691,18 @@
         const s = Math.ceil(confineT);
         if (s !== confineShown) {
           confineShown = s;
-          CBZ.showHint(heldDoor != null ? `Cell door locked — ${s}s` : `Confined to your cell — ${s}s`);
+          // the SHUT DOOR is the confinement. A per-second countdown line was a
+          // caption on a locked cell you are standing inside.
+          if (!showing()) CBZ.showHint(heldDoor != null ? `Cell door locked — ${s}s` : `Confined to your cell — ${s}s`);
+          else toldHints++;
         }
       } else {
         confineT = 0; confineShown = -1;
         const wasShut = releasePlayerCell();
         CBZ.hideHint();
-        CBZ.flashHint(wasShut ? "The door racks open. Yard time." : "The screws lose interest. Yard time.", 1.6);
+        // the leaf sliding into its pocket + the rack is the "yard time" line.
+        tellHint(wasShut ? "The door racks open. Yard time." : "The screws lose interest. Yard time.", 1.6);
+        if (showing() && wasShut && CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
       }
     }
 
@@ -661,14 +809,14 @@
       if (towerSeq === 1 && towerShotCD <= 0) {
         towerBurst(towerSrc, 6.0, 3);                                   // warning shots, WIDE
         CBZ.shake && CBZ.shake(0.3);
-        CBZ.flashHint && CBZ.flashHint("TOWER — WARNING SHOTS! TURN BACK!", 1.6);
+        tellHint("TOWER — WARNING SHOTS! TURN BACK!", 1.6);
         towerShotCD = 1.1;
         if (towerT > 1.4) towerSeq = 2;
       } else if (towerSeq === 2 && towerShotCD <= 0) {
         towerBurst(towerSrc, 2.4, 4);                                   // final volley, CLOSE
         CBZ.shake && CBZ.shake(0.5);
         if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-        CBZ.flashHint && CBZ.flashHint("LAST WARNING — GET OUT OF THE OPEN!", 1.6);
+        tellHint("LAST WARNING — GET OUT OF THE OPEN!", 1.6);
         towerShotCD = 1.3;
         if (towerT > 3.2) towerSeq = 3;
       } else if (towerSeq === 3 && towerShotCD <= 0) {
@@ -677,8 +825,83 @@
         towerSeq = 0; towerT = 0;
       }
     } else if (towerSeq !== 0) {
-      if (towerSeq >= 2) CBZ.flashHint && CBZ.flashHint("Tower holds fire.", 1.0);
+      if (towerSeq >= 2) tellHint("Tower holds fire.", 1.0);
       towerSeq = 0; towerT = 0;
     }
   });
+
+  /* ==========================================================
+     THE RATCHET (BLOCK LAW rule 5) — CBZ.jailShowAudit().
+
+     `toasts`, `hints` and `narrations` are the count of RAW emitters still
+     standing in the prison's territory: a `CBZ.flashToast` / `CBZ.flashHint`
+     that narrates an event instead of routing through this file's tell*()
+     gate or entities/ai.js's nar() sink. Every file in the territory that
+     could not convert one declares it on CBZ._jailShowRaw, so the number is
+     read off the code rather than asserted. ALL THREE MAY ONLY GO DOWN.
+
+     Everything beside them is printed so a "fix" that just stops drawing
+     cannot pass:
+       seizeAdopted  — capture paths running the SHARED grab arc
+                       (CBZ.predatorSeize) rather than jumping from a string to
+                       a fade. May only go UP.
+       playerHits    — real damage taken through CBZ.hurtPlayer this run. A
+                       beating that prints nothing and also does nothing is
+                       not a fix; this is what proves it lands.
+       sittableProps / ventsAnchored / roadsInPrison — the other three owner
+                       complaints, answered by their own files and surfaced
+                       here so one call answers the whole wave.
+     ========================================================== */
+  CBZ._jailShowRaw = CBZ._jailShowRaw || { toasts: [], hints: [], narrations: [] };
+  CBZ.jailShowAudit = function () {
+    const raw = CBZ._jailShowRaw;
+    const vents = (CBZ.ventAudit && CBZ.ventAudit()) || null;
+    const props = (CBZ.prisonPropAudit && CBZ.prisonPropAudit()) || null;
+    const road = (CBZ.prisonRoadAudit && CBZ.prisonRoadAudit()) || null;
+    const nar = (CBZ.aiNarrationAudit && CBZ.aiNarrationAudit()) || null;
+    return {
+      on: showing(),
+      // ---- the three that may only go DOWN ----
+      toasts: raw.toasts.length,
+      hints: raw.hints.length,
+      narrations: raw.narrations.length,
+      // ---- the four that may only go UP / must hold ----
+      seizeAdopted: SEIZE_SITES.length,
+      sittableProps: props ? (props.sittable | 0) : 0,
+      ventsAnchored: vents ? (vents.anchored | 0) : 0,
+      roadsInPrison: road ? (road.roadsInPrison | 0) : 0,
+      // ---- evidence the replacement is live, not just the deletion ----
+      suppressedToasts: toldToasts,
+      suppressedHints: toldHints,
+      droppedNarrations: nar ? (nar.dropped | 0) : 0,
+      playerHits: playerHits,
+      seizesStarted: seizesStarted,
+      chests: (CBZ.crateAudit && CBZ.crateAudit().containers) | 0,
+      vents: vents ? (vents.vents | 0) : 0,
+      ventHubs: vents ? (vents.hubs | 0) : 0,
+      props: props ? (props.props | 0) : 0,
+      walkwayW: road ? road.walkwayW : 0,
+      regions: road ? (road.regions | 0) : 0,
+    };
+  };
+  // the capture paths that have adopted the shared grab. Declared, not counted
+  // at runtime, so an audit taken before anybody was ever tackled is honest.
+  const SEIZE_SITES = ["capture:tryCapture", "ai:huntPlayer"];
+  let seizesStarted = 0;
+  CBZ.jailSeizeCount = function () { return seizesStarted; };
+  // capture.js's own seize bumps the counter (ai.js's runs through predator.js
+  // directly and is counted by CBZ.predatorAudit).
+  const _seizeWrapT = setInterval(function () {
+    if (typeof CBZ.predatorSeize !== "function" || CBZ.predatorSeize._jailWrapped) { clearInterval(_seizeWrapT); return; }
+    const orig = CBZ.predatorSeize;
+    const wrapped = function (a, v, o) {
+      const h = orig.apply(this, arguments);
+      if (h && v === player) seizesStarted++;
+      return h;
+    };
+    for (const k in orig) { if (/Wrapped$/.test(k)) wrapped[k] = orig[k]; }
+    wrapped._jailWrapped = true;
+    CBZ.predatorSeize = wrapped;
+    clearInterval(_seizeWrapT);
+  }, 0);
 })();

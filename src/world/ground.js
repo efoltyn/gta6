@@ -66,22 +66,62 @@
   yard.receiveShadow = true;
   scene.add(yard);
 
+  // ============================================================
+  //  THERE IS NO ROAD THROUGH THE JAIL (CBZ.CONFIG.PRISON_ROAD_FIX).
+  //
+  //  OWNER: "there's a road going through the jail." He is looking at THIS, and
+  //  he is right — it is not a city road record, it is the compound's own
+  //  paving, and it was built at road dimensions:
+  //
+  //      NINE METRES WIDE, 132 m long (this 56 m run plus world/southblock.js's
+  //      76 m continuation), dark bitumen, with a CONTINUOUS WHITE LINE painted
+  //      down each edge at x = ±4.15.
+  //
+  //  Nine metres is two full traffic lanes. A continuous white edge line on a
+  //  9 m bitumen band IS a carriageway — that is what the marking MEANS — so
+  //  from the tower, or from the air, the compound reads as bisected by a
+  //  highway. Nothing was wrong with the code; the NUMBER was a road's number.
+  //
+  //  A prison walkway is a supervised FOOTPATH: two men abreast with an escort,
+  //  which is 2.8 m, kerbed so the yard cannot spill onto it. So the width goes
+  //  to 2.8, the two lane lines become a real KERB (a low concrete edge, the
+  //  thing that actually separates a path from a yard), and 6.2 m of asphalt
+  //  goes back to being exercise yard. NOT ONE COLLIDER MOVES — the path was
+  //  never solid — and the kerb is deliberately not solid either: an escort
+  //  walks over it and a man tripping on scenery is the other kind of bug.
+  //
+  //  The width is PUBLISHED (CBZ.prisonWalkway) because world/southblock.js
+  //  draws the other 76 m of the same path and the two must never disagree
+  //  again. Flag off restores the 9 m band and both lane lines exactly.
+  // ============================================================
+  if (CBZ.CONFIG.PRISON_ROAD_FIX == null) CBZ.CONFIG.PRISON_ROAD_FIX = true;
+  const ROADFIX = CBZ.CONFIG.PRISON_ROAD_FIX !== false;
+  const WALK_W = ROADFIX ? 2.8 : 9;
+  CBZ.prisonWalkway = { w: WALK_W, fixed: ROADFIX, legacyW: 9 };
+
   // central asphalt walkway from the cell door toward the exit
   const asphalt = V2
     ? CBZ.prisonGroundTex("asphalt")
     : checkerTex(CBZ.COL.ASPHALT_A, CBZ.COL.ASPHALT_B, 2);
-  // 1 x 6 -> a ~9 m square tile on a 9 x 56 walkway. The old 2 x 12 repeated
-  // a 4.6 m cell twelve times down a corridor you walk the length of, which
-  // is the one place a repeat is most visible.
-  if (V2) asphalt.repeat.set(1, 6); else asphalt.repeat.set(2, 12);
+  // the tile stays SQUARE as the path narrows — the repeat is derived from the
+  // width rather than retyped, so a future width change cannot stretch it.
+  if (V2) asphalt.repeat.set(1, Math.max(1, Math.round(56 / WALK_W) / 1)); else asphalt.repeat.set(2, 12);
+  if (V2 && ROADFIX) asphalt.repeat.set(1, 20);
   const path = new THREE.Mesh(
-    new THREE.PlaneGeometry(9, 56),
+    new THREE.PlaneGeometry(WALK_W, 56),
     new THREE.MeshLambertMaterial({ map: asphalt })
   );
   path.rotation.x = -Math.PI / 2;
   path.position.set(0, 0.01, 24);
   path.receiveShadow = true;
   scene.add(path);
+  // THE KERB — what tells you this is a path and not a lane. 0.12 high, one
+  // 56 m box a side, cast:false and NOT solid.
+  if (ROADFIX) {
+    for (const sx of [-1, 1]) {
+      addBox(sx * (WALK_W / 2 + 0.09), 0.06, 24, 0.18, 0.12, 56, 0xa9a294, { cast: false });
+    }
+  }
 
   // cell-block concrete floor
   // DELIBERATELY UNTOUCHED. It is not a checker, and world/cellblock.js is
@@ -153,10 +193,14 @@
     }
 
     // ---- walkway edge lines ------------------------------------------------
-    // The 9 m path already tells you where to walk; the paint is what makes it
-    // read as a supervised route rather than a strip of darker ground.
-    paint(-4.15, 24, 0.14, 55, PAINT);
-    paint(4.15, 24, 0.14, 55, PAINT);
+    // ONLY on the legacy 9 m band. A continuous white line down each side of a
+    // nine-metre bitumen strip is the marking that made this read as a road;
+    // with PRISON_ROAD_FIX on, the kerb above does the job that paint was
+    // failing to do, and no lane markings are drawn inside a prison at all.
+    if (!ROADFIX) {
+      paint(-4.15, 24, 0.14, 55, PAINT);
+      paint(4.15, 24, 0.14, 55, PAINT);
+    }
 
     // ---- the dead line -----------------------------------------------------
     // The painted limit an inmate may not cross. The WEST wall is the

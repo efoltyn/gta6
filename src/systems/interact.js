@@ -159,9 +159,26 @@
     detain:   "Drop them without an arrest meter",
     search:   "Confiscate pocket loot",
   };
-  let learned = {}, helpOn = true;
+  // TIPS ARE OFF UNTIL ASKED FOR (JAIL_SHOW_DONT_TELL, declared entities/ai.js).
+  //
+  // OWNER: "the HUD is cluttered with 4th-wall breakers." Measured on the
+  // deployed build: walking up to a guard raised a card carrying FOUR verbs,
+  // each with an explainer line under it ("Slip 10 to look away · Spend cigs to
+  // make authority look away" — the second half restates the first), plus an
+  // "[H] Tips: ON" footer. 433 characters of HUD text at that moment against
+  // 141 idle. The GRAMMAR LAW this repo already enforces on the booking panel
+  // is the same one: a button is a bare VERB.
+  //
+  // Nothing is deleted. `helpOn` simply defaults OFF instead of ON, so the
+  // teaching layer is exactly where the footer always said it was — behind H —
+  // and a player who wants it back gets it in one keypress, persisted. Flag off
+  // restores the old default.
+  let learned = {}, helpOn = !(CBZ.CONFIG && CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false);
   try { learned = JSON.parse(localStorage.getItem("cbz_learned") || "{}"); } catch (e) {}
-  try { helpOn = localStorage.getItem("cbz_help") !== "0"; } catch (e) {}
+  try {
+    const saved = localStorage.getItem("cbz_help");
+    if (saved != null) helpOn = saved !== "0";        // an explicit choice always wins
+  } catch (e) {}
   function persist() {
     try { localStorage.setItem("cbz_learned", JSON.stringify(learned)); localStorage.setItem("cbz_help", helpOn ? "1" : "0"); } catch (e) {}
   }

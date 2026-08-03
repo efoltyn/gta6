@@ -26,6 +26,7 @@ const playerChar = {
 const updaters = [];
 const CBZ = {
   game: { mode: "escape", _oocHunger: 0, invuln: 1 },
+  CONFIG: {},   // physics.js reads feature flags (PLAYER_SLIDE etc.) unguarded
   player, playerChar,
   keys: { w: true, shift: true },
   TUNE: { walkSpeed: 2, crouchSpeed: 1.2, jumpVel: 8.2, gravity: 22 },

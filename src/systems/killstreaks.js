@@ -6,6 +6,11 @@
 ============================================================ */
 (function () {
   "use strict";
+  // SHOW DON'T TELL (JAIL_SHOW_DONT_TELL, declared in entities/ai.js, gated by
+  // systems/capture.js). Returns true when the line was suppressed.
+  function tellToast(m) { if (CBZ.jailTell) return CBZ.jailTell.toast(m); if (CBZ.flashToast) try { CBZ.flashToast(m); } catch (e) {} return false; }
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
@@ -162,7 +167,9 @@
     pop("nuke");
     setMeter();
 
-    CBZ.flashToast && CBZ.flashToast("TACTICAL NUKE");
+    // the streak panel above already reads TACTICAL NUKE INBOUND; a toast
+    // saying the same words beside it is the clutter, not the drama.
+    tellToast("TACTICAL NUKE");
     CBZ.shake && CBZ.shake(2.4);
     CBZ.doSlowmo && CBZ.doSlowmo(1.2);
     if (CBZ.el && CBZ.el.flash) {
@@ -180,7 +187,9 @@
       };
       CBZ.guards.forEach(drop);
       CBZ.npcs.forEach(drop);
-      CBZ.flashHint && CBZ.flashHint("TACTICAL NUKE: " + dropped + " targets dropped.", 3.0);
+      // every body dropped went through CBZ.aiKill, and city/killfeed.js owns
+      // the ONE popup a death is allowed. A tally line is a second scoreboard.
+      tellHint("TACTICAL NUKE: " + dropped + " targets dropped.", 3.0);
       CBZ.shake && CBZ.shake(3.0);
       if (CBZ.winGame) setTimeout(() => CBZ.winGame("nuke"), 700);
     }, 900);

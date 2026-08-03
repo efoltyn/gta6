@@ -63,6 +63,10 @@
 ============================================================ */
 (function () {
   "use strict";
+  // SHOW DON'T TELL (JAIL_SHOW_DONT_TELL, declared in entities/ai.js, gated by
+  // systems/capture.js). Returns true when the line was suppressed.
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+
   const CBZ = window.CBZ;
   const THREE = window.THREE;
   const { addBox, roomShell } = CBZ;
@@ -317,7 +321,12 @@
     if (owned && CBZ.setCurrentWeapon) CBZ.setCurrentWeapon(slot.id);
     refreshSlotVisual(slot);
     CBZ.sfx(first ? "pickup" : "equip");
-    CBZ.flashHint((first ? "Picked up " : "Equipped ") + slot.name + " — Q/wheel swaps.", 1.8);
+    // THE QUIET PICKUP NOTE, not a shout. systems/hud.js:130-151 records the
+    // owner hating "LUXURY WATCH in red huge on screen"; a rifle off a rack is
+    // the same event. The boxed hotbar chip lighting up IS "equipped", so that
+    // half of the line is deleted outright.
+    if (CBZ.pickupNote) { try { CBZ.pickupNote(slot.name, { rare: true }); } catch (e) {} }
+    else tellHint((first ? "Picked up " : "Equipped ") + slot.name + " — Q/wheel swaps.", 1.8);
   }
 
   // ==================================================================
@@ -630,8 +639,13 @@
           armory.lamp.material.color.setHex(0x39ff88);
           armory.lamp.material.emissive.setHex(0x14c258);
           if (CBZ.sfx) CBZ.sfx("door_open");
-          CBZ.flashHint("The armory rack's open — take what you need.", 2.6);
+          // the cage swinging open in front of you is the line.
+          tellHint("The armory rack's open — take what you need.", 2.6);
         } else {
+          // KEPT, and it is the one hint in this file that earns its place: a
+          // locked door's REASON is not visible from outside it, and this is
+          // the whole keycard gradient the owner ran the jail hundreds of times
+          // for (doctrine LAW 1). Declared on the audit so the number is honest.
           CBZ.flashHint(L.line || "The armory door won't budge — it wants a keycard.", 1.4);
         }
       }
@@ -656,7 +670,8 @@
               : { open: keyed, line: "" };
             if (L.open) {
               inner.setOpen(true);
-              CBZ.flashHint("The Warden's key turns. There's a rifle in there.", 2.6);
+              // the lock turning and the door opening say both halves of this.
+              tellHint("The Warden's key turns. There's a rifle in there.", 2.6);
             } else {
               // ROUTE TWO — graft. A hacksaw blade is the only item in the
               // prison's tool list that had never had a verb; it has one now,
@@ -674,18 +689,22 @@
                 if (CBZ.shake && inner.saw % 0.5 < dt) CBZ.shake(0.03);
                 if (inner.sawMsg <= 0) {
                   inner.sawMsg = 0.9;
+                  // KEPT: a hold-to-saw with no readout is a hold with no
+                  // feedback, and there is no diegetic surface for "how far
+                  // through the shackle am I". Declared on the audit.
                   CBZ.flashHint("Sawing the padlock… " + Math.round((inner.saw / 6) * 100) + "%", 1.0);
                 }
                 if (inner.saw >= 6) {
                   if (econ && econ.takeItem) econ.takeItem("Hacksaw Blade");   // the blade snaps
                   inner.setOpen(true);
-                  CBZ.flashHint("The padlock drops. The blade's finished — worth it.", 2.6);
+                  // the shackle falling off the hasp is the event.
+                  tellHint("The padlock drops. The blade's finished — worth it.", 2.6);
                 }
               } else {
                 inner.saw = Math.max(0, inner.saw - dt * 2);
                 if (inner.sawMsg <= 0) {
                   inner.sawMsg = 1.6;
-                  CBZ.flashHint(saw
+                  tellHint(saw
                     ? "Padlocked. Hold [E] to saw through it."
                     : (L.line || "Padlocked — the Warden carries that key. Or something that cuts."), 1.5);
                 }
@@ -759,4 +778,11 @@
   );
 
   CBZ.armory = armory;
+  /* THE TWO LINES THIS FILE KEEPS, DECLARED. CBZ.jailShowAudit().hints reads
+     this list, so the ratchet reports 2 rather than pretending the prison has
+     no hint text left. Both are state a player cannot see from where he is
+     standing: WHY a locked door is locked, and how far through a padlock a
+     hacksaw has cut. Either one becoming diegetic drops the number. */
+  (CBZ._jailShowRaw = CBZ._jailShowRaw || { toasts: [], hints: [], narrations: [] })
+    .hints.push("gunroom:locked-reason", "gunroom:saw-progress");
 })();

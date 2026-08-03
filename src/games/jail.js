@@ -208,8 +208,40 @@
   function bag() { return S || (S = C.state(() => ({ stints: 0, served: 0, bribed: 0, escapes: 0, shifts: 0, catches: 0, breaksStopped: 0, wagesEarned: 0 }))); }
   function save() { if (C) C.saveState(); }
   function fmt(n) { return "$" + Math.round(n || 0).toLocaleString("en-US"); }
-  function feed(m, col) { if (C) C.hud.feed(m, col); }
-  function big(m) { if (CBZ.city && CBZ.city.big) CBZ.city.big(m); else feed(m, "#ffd166"); }
+  // ============================================================
+  //  SHOW DON'T TELL (JAIL_SHOW_DONT_TELL — declared in entities/ai.js, gated
+  //  by systems/capture.js's CBZ.jailTell).
+  //
+  //  OWNER: "the HUD is cluttered with 4th-wall breakers — summaries of events
+  //  when the events should just HAPPEN." This file had two private popup
+  //  wrappers — `feed` (a coloured line in the package log) and `big` (the
+  //  city's full-screen banner) — and between them they narrated EVERY beat of
+  //  a booking that the player was standing inside: "BOOKING" while the booking
+  //  sheet opened in front of him, "TIME SERVED" while the cell door swung,
+  //  "OVER THE WALL — MANHUNT" while four stars lit up and the sirens started.
+  //
+  //  Both wrappers survive, and both now go through the shared gate. What is
+  //  KEPT is the booking sheet itself (a bounded modal with bare verbs — the
+  //  one sanctioned panel here) and anything a PERSON says, which goes over
+  //  that person's head through CBZ.citySay. Everything else is deleted and
+  //  the world does the talking.
+  // ============================================================
+  function telling() { return !(CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false); }
+  let toldFeeds = 0, toldBigs = 0;
+  function feed(m, col) { if (!telling()) { toldFeeds++; return true; } if (C) C.hud.feed(m, col); return false; }
+  function big(m) {
+    if (!telling()) { toldBigs++; return true; }
+    if (CBZ.city && CBZ.city.big) CBZ.city.big(m); else feed(m, "#ffd166");
+    return false;
+  }
+  // a line somebody SAYS, over their head. This is what a narration turns into
+  // when it carried something the player genuinely could not otherwise know.
+  function say(h, text, col, secs) {
+    const ped = h && h.ped ? h.ped : h;
+    if (!ped || !CBZ.citySay) return false;
+    try { CBZ.citySay(ped, text, col || "#ffd27b", secs || 2.2); return true; } catch (e) { return false; }
+  }
+  function anyGuard() { return (V && (V.sarge || V.guards[0])) || null; }
   function respect(n) { if (CBZ.city && CBZ.city.addRespect) { try { CBZ.city.addRespect(n); } catch (e) {} } }
   function stars() { return (CBZ.cityStars ? CBZ.cityStars() : (g.wanted | 0)) | 0; }
   function W(lx, lz) { return { x: V.origin.x + lx, z: V.origin.z + lz }; }
@@ -304,6 +336,7 @@
     const gp = venue.group;
     const box = (x, y, z, w, h, d, m, ry) => ctx.box(gp, x, y, z, w, h, d, ctx.mat(m), ry);
     const WALL_H = 3.2, WALL_T = 0.6;
+    claimLand(venue);            // ROADS DO NOT GO THROUGH A JAIL (see below)
 
     // ---- FLOOR pad (reads as a yard; also the visual footprint) -------------
     box(0, 0.02, 0, 21.2, 0.12, 17.2, MAT.floor);
@@ -333,7 +366,11 @@
     for (const dz of dividers) wall(cellX, dz, 3.4, WALL_H - 0.4, WALL_T);   // run along X
     for (let i = 0; i < 3; i++) {
       const cz = cellZ[i];
-      box(-9.1, 0.55, cz, 1.3, 0.35, 2.0, MAT.bunk);      // a bunk — it reads as a cell
+      // A BUNK YOU CAN LIE ON. Same place, same silhouette, but it registers a
+      // propuse BED, so "there is a bed in the cell" is a verb and not a claim.
+      if (!fur("bed", gp, ctx, -9.1, 0, cz, 0, { len: 2.0, wide: 1.3, tone: "auto" })) {
+        box(-9.1, 0.55, cz, 1.3, 0.35, 2.0, MAT.bunk); propPlain++;
+      }
       // the barred DOOR: a real y0/y1 gate collider across the doorway (X=doorX),
       // plus the visual bars we toggle off when it swings open.
       const dc = ctx.solid(doorX - 0.18, cz - cellHalf, doorX + 0.18, cz + cellHalf, 0.0, doorH);
@@ -490,7 +527,11 @@
     for (let i = 0; i < N; i++) {
       const c = bl(x0 + CELL_D / 2, zBase + pitch * (i + 0.5)), half = pitch / 2 - 0.16;
       const dx = BX + doorX;
-      box(BX + x0 + 1.15, FY + 0.55, c.z, 1.9, 0.34, 0.92, MAT.bunk);          // the bunk
+      // the bunk runs ALONG X (head to the west wall), so the kit is yawed a
+      // quarter turn and its `len` is the 1.9 that used to be the box's width.
+      if (!fur("bed", gp, ctx, BX + x0 + 1.15, FY, c.z, Math.PI / 2, { len: 1.9, wide: 0.92, tone: "auto" })) {
+        box(BX + x0 + 1.15, FY + 0.55, c.z, 1.9, 0.34, 0.92, MAT.bunk); propPlain++;
+      }
       box(BX + x0 + 0.62, FY + 0.28, c.z + half - 0.62, 0.5, 0.56, 0.5, MAT.wire);   // the pan
       box(BX + x0 + 0.62, FY + 0.72, c.z - half + 0.55, 0.42, 0.06, 0.42, MAT.wallD); // the shelf
       // the barred DOOR: the y0/y1 gate collider setDoor pushes and pops, plus
@@ -521,12 +562,18 @@
       for (let i = 0; i < 2; i++) {
         const tz = z0 + 3.0 + i * Math.max(4.0, (SEC_Z - z0 - 6.0));
         const t = bl(cxd, tz);
-        box(t.x, FY + 0.72, t.z, 2.4, 0.1, 1.1, MAT.deskD);
-        for (const s of [-1, 1]) {
-          box(t.x, FY + 0.35, t.z + s * 0.95, 2.4, 0.1, 0.4, MAT.wallD);
-          box(t.x, FY + 0.18, t.z + s * 0.95, 2.2, 0.36, 0.12, MAT.wallD);
+        // THE DAY ROOM IS WHERE THE BLOCK SITS. Six boxes that nobody could sit
+        // at become one kit table with its own bench seats registered — the
+        // same call city/beach.js and world/roombuild.js already make.
+        if (!fur("table", gp, ctx, t.x, FY, t.z, Math.PI / 2, { len: 2.4, deep: 1.1, seats: 4, tone: "auto" })) {
+          box(t.x, FY + 0.72, t.z, 2.4, 0.1, 1.1, MAT.deskD);
+          for (const s of [-1, 1]) {
+            box(t.x, FY + 0.35, t.z + s * 0.95, 2.4, 0.1, 0.4, MAT.wallD);
+            box(t.x, FY + 0.18, t.z + s * 0.95, 2.2, 0.36, 0.12, MAT.wallD);
+          }
+          for (const s of [-1, 1]) box(t.x + s * 1.0, FY + 0.36, t.z, 0.12, 0.72, 0.12, MAT.bar);
+          propPlain++;
         }
-        for (const s of [-1, 1]) box(t.x + s * 1.0, FY + 0.36, t.z, 0.12, 0.72, 0.12, MAT.bar);
       }
     }
 
@@ -544,8 +591,13 @@
     // the bench you wait on
     for (let i = 0; i < 2; i++) {
       const B = bl(x0 + 2.2, z1 - 3.0 - i * 2.4);
-      box(B.x, FY + 0.44, B.z, 1.0, 0.12, 1.8, MAT.wallD);
-      box(B.x - 0.42, FY + 0.22, B.z, 0.14, 0.44, 1.7, MAT.wallD);
+      // THE BENCH YOU WAIT ON, and now you can actually wait on it. Facing the
+      // booking counter, which is the only direction a man on this bench looks.
+      if (!fur("bench", gp, ctx, B.x, FY, B.z, 0, { len: 1.8, back: true, tone: "auto" })) {
+        box(B.x, FY + 0.44, B.z, 1.0, 0.12, 1.8, MAT.wallD);
+        box(B.x - 0.42, FY + 0.22, B.z, 0.14, 0.44, 1.7, MAT.wallD);
+        propPlain++;
+      }
     }
 
     // ---- THE PATROL RING. Four posts, three guards, one slot always empty and
@@ -595,6 +647,86 @@
     return true;
   }
 
+  /* ==========================================================
+     ROADS CONNECT PLACES, THEY DO NOT OVERLAP THEM (PRISON_ROAD_FIX).
+
+     OWNER: "there's a road going through the jail." On the COUNTY_JAIL_V2 path
+     the land is city/govcomplex.js's and comes with a region, a keep-out and
+     its own access road, so the shared law (CBZ.roadClearance / roadClamp,
+     city/roadrules.js) already refuses every other builder's deck.
+
+     THE DEGRADE PATH HAD NONE OF THAT, and it is the one this file's own header
+     complains about: `resolve()` sites the legacy yard on
+     `cityPoliceStation() + 24 m` — i.e. 24 metres off a DOWNTOWN lot, inside a
+     grid whose roads recur every ~52 m — and then registered nothing. There was
+     no record in `city.regions` for a road to be blocked by and no `noSpawn`
+     rect for props to be refused from, so the grid simply ran through the yard.
+     Not one of the ~20 files that push to `city.roads` was at fault: the jail
+     had never told the world it existed.
+
+     Two registrations and one retro-clamp, all of them the sanctioned API and
+     none of them new machinery. The clamp is what matters for a venue that
+     mounts AFTER buildCity(): roadClamp never deletes a record (it keeps an
+     8 m stub), so running it over the whole list is safe, and it is the same
+     order-98 pass roadrules.js already applies to everybody else.
+     ========================================================== */
+  const YARD_HX = 12.5, YARD_HZ = 11.5;      // the legacy yard's own footprint + a kerb
+  let claimed = null;
+  function claimLand(venue) {
+    const A = (CBZ.city && CBZ.city.arena) || null;
+    const O = venue && venue.origin;
+    if (!A || !O || claimed) return null;
+    const R = { minX: O.x - YARD_HX, maxX: O.x + YARD_HX, minZ: O.z - YARD_HZ, maxZ: O.z + YARD_HZ };
+    claimed = { rect: R, region: false, keepOut: false, clamped: 0 };
+    try {
+      if (CBZ.registerCityRegion) {
+        const reg = CBZ.registerCityRegion(A, {
+          name: "County Jail", subtitle: "Sheriff's Detention Facility", kind: "rect",
+          minX: R.minX, maxX: R.maxX, minZ: R.minZ, maxZ: R.maxZ, pad: 6, terrainGrade: true,
+        });
+        // ownsPlace() reads `_govOwner` on both sides, which is how the jail's
+        // OWN access road stays legal while everyone else's is clamped out.
+        if (reg) { reg._govOwner = "countyjail"; claimed.region = true; }
+      }
+    } catch (e) {}
+    try {
+      if (CBZ.registerNoSpawnZone) {
+        CBZ.registerNoSpawnZone(A, { minX: R.minX, maxX: R.maxX, minZ: R.minZ, maxZ: R.maxZ,
+          label: "gov-countyjail", civ: true });   // posted deputies belong; the public does not
+        claimed.keepOut = true;
+      }
+    } catch (e) {}
+    // the grid roads PRE-DATE this venue, so the law has to be applied backwards
+    // once. Anything already legal costs nothing and reports 0.
+    try {
+      if (A.roads && CBZ.roadClamp) {
+        for (let i = 0; i < A.roads.length; i++) {
+          const cut = CBZ.roadClamp(A.roads[i], { city: A, dest: { x: O.x, z: O.z } });
+          if (cut > 0) claimed.clamped++;
+        }
+      }
+    } catch (e) {}
+    return claimed;
+  }
+  // how many city road segments still cross the legacy yard. MUST be 0.
+  CBZ.countyJailRoadAudit = function () {
+    const A = (CBZ.city && CBZ.city.arena) || null;
+    if (!claimed || !A || !A.roads) return { claimed: !!claimed, crossing: 0, clamped: claimed ? claimed.clamped : 0,
+      region: !!(claimed && claimed.region), keepOut: !!(claimed && claimed.keepOut) };
+    const R = claimed.rect;
+    let crossing = 0;
+    for (let i = 0; i < A.roads.length; i++) {
+      const r = A.roads[i];
+      if (!r) continue;
+      const hw = (+r.w || 12) / 2, hl = (+r.len || 0) / 2;
+      const minX = r.vertical ? r.x - hw : r.x - hl, maxX = r.vertical ? r.x + hw : r.x + hl;
+      const minZ = r.vertical ? r.z - hl : r.z - hw, maxZ = r.vertical ? r.z + hl : r.z + hw;
+      if (maxX > R.minX && minX < R.maxX && maxZ > R.minZ && minZ < R.maxZ) crossing++;
+    }
+    return { claimed: true, crossing: crossing, clamped: claimed.clamped,
+      region: claimed.region, keepOut: claimed.keepOut, rect: R };
+  };
+
   /* ---- ZONES (stable interactions), shared by both sitings. GRAMMAR LAW
      (owner): a zone label is a BUTTON — one or two words, no key glyphs, no
      names, no sentences. The card title comes from the venue (packages.js
@@ -637,6 +769,83 @@
   // ---- geometry helpers (chunky members, ≥0.3u, grounded) -----------------
   // a solid wall box centred at (cx,cz) with size (w,h,d) + a matching world
   // collider spanning y0=0..h (the y0/y1 gate shape used for cell doors too).
+  /* ==========================================================
+     REAL PROPS (CBZ.CONFIG.PRISON_REAL_PROPS).
+
+     OWNER: "there's fake props." world/_template.js's law is the same one:
+     "every prop is interactable or load-bearing. No garnish." Everything this
+     file called a bunk, a table or a bench was a `box()` — a coloured slab with
+     no verb, standing where a thing you can USE ought to be. You could not sit
+     on the day-room bench you were sentenced to eat at, and the bunk in your
+     own cell was a shelf.
+
+     They are now drawn by CBZ.furnish (city/furniture.js) — the shared kit that
+     ALREADY answers this, with ≥3 consumers — which draws the same silhouettes
+     AND registers the propuse SEAT / BED anchor, so the walk→perch→swing arc,
+     the sit prompt and `CBZ.propSit`/`propSleep` come free and no seating code
+     is authored here at all.
+
+     TWO THINGS THE KIT NEEDS FROM A VENUE and both are documented in its own
+     header: `box` (our ctx.box, because CBZ.addBox parents into the PRISON root
+     captured at parse time and this venue lives in the city) and `ox/oz`, so
+     the registered anchors land in WORLD coordinates while the meshes stay
+     venue-local. Get either wrong and you furnish another world.
+
+     Degrade: no CBZ.furnish (FURNISH_KIT off, or an older merge) → the exact
+     boxes this file used to draw, which is why `plainBox` still exists.
+     ========================================================== */
+  if (CBZ.CONFIG.PRISON_REAL_PROPS == null) CBZ.CONFIG.PRISON_REAL_PROPS = true;
+  let propsMade = 0, propSeats = 0, propBeds = 0, propPlain = 0;
+  function realProps() { return CBZ.CONFIG.PRISON_REAL_PROPS !== false && !!CBZ.furnish; }
+  // the kit bundle for THIS venue. `y` is the floor the piece stands on.
+  function furOpts(gp, ctx, extra) {
+    // ctx.box draws; ctx.solid is what makes a thing you can lean on. The kit
+    // hands us the y0/y1 it wants on `oo`, so a bunk frame is a real obstacle
+    // and a duvet is not — the same split city/furniture.js makes for a
+    // building's own lbox.
+    const o = {
+      box: function (x, y, z, w, h, d, color, oo) {
+        const m = ctx.box(gp, x, y, z, w, h, d, ctx.mat(color), 0);
+        if (oo && oo.solid) ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2,
+          oo.y0 != null ? oo.y0 : y - h / 2, oo.y1 != null ? oo.y1 : y + h / 2);
+        return m;
+      },
+      ox: V.origin.x, oz: V.origin.z, solid: true,
+    };
+    if (extra) for (const k in extra) o[k] = extra[k];
+    return o;
+  }
+  // place one piece; count what it registered so CBZ.prisonPropAudit() can tell
+  // a real bunk from a slab. Never throws into a world build.
+  function fur(kind, gp, ctx, x, y, z, yaw, opts) {
+    if (!realProps() || typeof CBZ.furnish[kind] !== "function") return null;
+    let r = null;
+    try { r = CBZ.furnish[kind](x, y, z, yaw, furOpts(gp, ctx, opts)); } catch (e) { r = null; }
+    if (!r) return null;
+    propsMade++;
+    propSeats += (r.seats && r.seats.length) | 0;
+    propBeds += (r.beds && r.beds.length) | 0;
+    return r;
+  }
+  // THE RATCHET for "no fake props": `plain` counts pieces still drawn as bare
+  // boxes with no verb, and may only go DOWN; `sittable` may only go UP.
+  CBZ.prisonPropAudit = function () {
+    // ONE ANSWER FOR THE WHOLE WAVE. world/cellblock.js registers the escape
+    // mode's bunks and day-room stools onto the same accumulator, so this
+    // reports the prison and the county jail together and neither can hide
+    // behind the other's number.
+    const W = CBZ._prisonProps || { props: 0, seats: 0, beds: 0, plain: 0 };
+    return {
+      on: realProps(), kit: !!CBZ.furnish,
+      props: propsMade + W.props,
+      sittable: propSeats + W.seats,      // may only go UP
+      sleepable: propBeds + W.beds,       // may only go UP
+      plain: propPlain + W.plain,         // may only go DOWN
+      venue: { props: propsMade, sittable: propSeats, sleepable: propBeds, plain: propPlain },
+      wing: { props: W.props, sittable: W.seats, sleepable: W.beds, plain: W.plain },
+    };
+  };
+
   function wallSeg(box, ctx, cx, cz, w, h, d) {
     box(cx, h / 2, cz, w, h, d, MAT.wall);
     ctx.solid(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, 0.0, h);
@@ -762,6 +971,7 @@
       if (CBZ.arrestCount) CBZ.arrestCount("legacyTeleports");
     }
     const s = bag(); s.stints++; save();
+    // the charge sheet coming up in front of you IS the booking.
     big("BOOKING");
     openBooking();
     return true;
@@ -813,9 +1023,13 @@
     teleportPlayer(wc.x, wc.z);          // one pace through a door you are standing at
     setDoor(cell, true);
     panelMode = null; menuLock(false); if (C) C.hud.closePanel();
+    // the door racking shut behind you is the "holding cell" line. What a
+    // player genuinely cannot see is WHEN THE VAN COMES — so a screw tells him,
+    // out loud, once, standing there. Not a HUD card.
     feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s — " +
       INM.prison + "s to serve inside.", "#ffd166");
     feed("That plate's still loose. Last chance.", "#cfd6e6");
+    say(anyGuard(), "\u201cVan's here in " + Math.ceil(INM.transportT) + ". Sit tight.\u201d", "#ffd27b", 3.0);
   }
 
   // THE TRANSPORT — the sealed handoff into the real prison. The van's door
@@ -854,9 +1068,10 @@
     const s = bag();
     setDoor(V.cells[1], false);                          // door swings open
     holdPlayer(false);
-    if (reason === "served") { s.served++; respect(2); big("TIME SERVED"); feed("You did your time. Back to the streets.", "#cfe8b0"); }
+    if (reason === "served") { s.served++; respect(2); big("TIME SERVED"); feed("You did your time. Back to the streets.", "#cfe8b0"); say(anyGuard(), "\u201cTime served. Out you go.\u201d", "#cfe8b0", 2.4); }
     else if (reason === "bailed" || reason === "bribed") {
       s.bribed++; big("RELEASED ON BAIL");
+      say(V && V.sarge, "\u201cBond's posted. Door's that way.\u201d", "#ffd166", 2.4);
       // BAIL BUYS YOUR PROPERTY BACK TOO. Escaping does not — the locker keeps it.
       const back = CBZ.cityEvidenceReturn ? CBZ.cityEvidenceReturn() : 0;
       feed("Bond posted. You walk." + (back ? " Property returned (" + back + ")." : ""), "#ffd166");
@@ -873,6 +1088,9 @@
       g.escapedConvict = true;
       if (CBZ.cityAddStars) { try { CBZ.cityAddStars(4, "Jailbreak"); } catch (e) {} }
       else if (CBZ.cityForceStars) { try { CBZ.cityForceStars(4); } catch (e) {} }
+      // FOUR STARS AND EVERY SIREN IN THE CITY IS THE ANNOUNCEMENT. A banner
+      // reading "OVER THE WALL — MANHUNT" over the top of a live manhunt is
+      // exactly the caption the owner is describing.
       big("OVER THE WALL — MANHUNT");
       // YOUR GUNS ARE STILL IN THE PROPERTY ROOM. Breaking out does not open
       // the locker; you are loose, broke of hardware, and hunted.
@@ -939,9 +1157,12 @@
     INM.prison += RECAP_PENALTY * PRISON_SCALE;
     INM.transportT = Math.min(INM.transportT, 16);
     INM.pry = 0; INM._pryMark = 0;      // they bolt a fresh plate on the door
+    // being physically put back in the cell with the bars shut is "CAUGHT".
     big("CAUGHT");
     feed((byName ? byName + " drags you back. " : "Dragged back. ") + "+" +
       Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside, and the van's early.", "#ff9a9a");
+    if (CBZ.shake) { try { CBZ.shake(0.7); } catch (e) {} }
+    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
   }
 
   /* ---- the PRY: physical escape, gated by real guard sightlines ---------- */
@@ -1036,6 +1257,8 @@
     if (runner.ped) { runner.ped.staffPost = null; runner.ped.npcWanted = Math.max(1, runner.ped.npcWanted | 0); }
     if (runner.ped && CBZ.citySay) { try { CBZ.citySay(runner.ped, "“See you around, screw!”", "#ff9a9a", 2.0); } catch (e) {} }
     JOB.escape = { h: runner, t: 0 };
+    // the man is RUNNING, in front of you, and he already shouted on his way
+    // past (citySay, above). That is the alarm.
     feed("Runner loose from the cells!", "#ff9a9a");
     return runner;
   }
@@ -1142,7 +1365,10 @@
         const mark = Math.ceil(INM.transportT);
         if (INM._tMark !== mark && (mark === 20 || mark === 10 || mark === 5)) {
           INM._tMark = mark;
-          feed("Transport in " + mark + "s.", mark <= 5 ? "#ff9a9a" : "#ffd27b");
+          // the van is a THING that arrives; a deputy calls the count down the
+          // corridor rather than the HUD ticking at you.
+          if (feed("Transport in " + mark + "s.", mark <= 5 ? "#ff9a9a" : "#ffd27b") && mark <= 10)
+            say(anyGuard(), "\u201c" + mark + " seconds!\u201d", "#ff9a9a", 1.6);
         }
         if (INM.transportT <= 0) { toPrison(); return; }
       }
@@ -1539,6 +1765,12 @@
       setPry: (x) => { if (INM) { INM.pry = +x || 0; return true; } return false; },
       _pryComplete: () => { if (INM && (INM.phase === "prying" || INM.phase === "held")) { INM.pry = PRY_TIME; popDoor(); return INM.phase === "breakout"; } return false; },
       liftKeys: () => { if (canLiftKeys()) { takeKeys(); return INM.phase === "breakout"; } return false; },
+      // TEARDOWN, for a probe that has to run many arrests in one page.
+      // This is the file's OWN sweeper — the same one core/mission.js's
+      // onInterrupt calls on a death or a mode exit — so a suite cleaning up
+      // between sections exercises the real teardown instead of inventing a
+      // second one. Idempotent: abortAll on nothing is a no-op.
+      _abort: () => { abortAll(); return !INM && !JOB; },
       reachGap: () => { if (INM && INM.phase === "breakout") { const wg = W(V.gap.x, V.gap.z); teleportPlayer(wg.x, wg.z); releaseInmate("escaped"); return true; } return false; },
       phase: () => (INM ? INM.phase : null),
 

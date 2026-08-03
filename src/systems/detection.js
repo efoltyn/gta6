@@ -12,6 +12,11 @@
 ============================================================ */
 (function () {
   "use strict";
+  // SHOW DON'T TELL (JAIL_SHOW_DONT_TELL, declared in entities/ai.js, gated by
+  // systems/capture.js). Returns true when the line was suppressed.
+  function tellToast(m) { if (CBZ.jailTell) return CBZ.jailTell.toast(m); if (CBZ.flashToast) try { CBZ.flashToast(m); } catch (e) {} return false; }
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+
   const CBZ = window.CBZ;
   const { player, el, guardSees } = CBZ;
   const g = CBZ.game;
@@ -581,7 +586,13 @@
         } else if (CBZ.sendNpcToSnitch && !CBZ.sendNpcToSnitch(n, amount, witnessMeta)) continue;
         if (!CBZ.sendNpcToSnitch && copCrime) CBZ.addComplaint(amount * 0.28);
         else if (!CBZ.sendNpcToSnitch) CBZ.addHeat(amount * 0.6);
-        CBZ.flashHint(`${n.data.name.replace(/^the |^a |^an /, "")} ${witness.heardOnly ? "heard that" : "saw that"}.`, 1.6);
+        // A WITNESS IS A PERSON REACTING, NOT A LINE OF TEXT. He already
+        // startles, turns and walks off to report; the line said so a second
+        // time on the HUD. It goes over HIS head now, where a thing a person
+        // notices belongs.
+        if (!tellHint(`${n.data.name.replace(/^the |^a |^an /, "")} ${witness.heardOnly ? "heard that" : "saw that"}.`, 1.6) && CBZ.citySay) {
+          try { CBZ.citySay(n, witness.heardOnly ? "“…the hell was that?”" : "“Hey! HEY!”", "#ffd27b", 1.6); } catch (e) {}
+        }
         return true;
       }
     }
@@ -672,7 +683,9 @@
         (!player.captureState || player.captureState === "normal") &&
         CBZ.litBySearchlight && CBZ.litBySearchlight(player.pos, player.crouch)) {
       CBZ.addHeat((player.crouch ? 16 : 30) * dt);
-      if (!litNow && CBZ.flashHint) CBZ.flashHint("SEARCHLIGHT — you're lit up!", 1.5);
+      // the beam is ON you and your shadow is thirty feet long. Saying so is
+      // the definition of telling.
+      if (!litNow) tellHint("SEARCHLIGHT — you're lit up!", 1.5);
       litNow = true;
       if (litPingT <= 0) {
         litPingT = 3.0;

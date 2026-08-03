@@ -2053,6 +2053,10 @@
       }
       return baseBust.apply(this, arguments);
     };
+    // doctrine: copy EVERY *Wrapped marker forward — games/jail.js's lazy
+    // retry re-wraps any cityBust it can't see its own marker on, and a
+    // double jail intercept books every arrest twice.
+    for (const k in baseBust) if (/Wrapped$/.test(k)) wrappedBust[k] = baseBust[k];
     wrappedBust._campaignWrapped = true;
     CBZ.cityBust = wrappedBust;
   }

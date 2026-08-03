@@ -80,6 +80,45 @@
   const { COL } = CBZ;
   const g = CBZ.game;
 
+  /* ============================================================
+     THE CRATES ARE NOT CHESTS (CBZ.CONFIG.PRISON_NO_CHESTS).
+
+     OWNER, this wave, verbatim: "there's chests still for some reason."
+
+     A previous pass MUTED these — greyer lumber, a steel chip instead of a gold
+     one — and left the mechanic standing, which is why they are still here. The
+     mute was treating a doctrine violation as a colour problem. The doctrine is
+     the ITEM EXISTENCE TEST (docs/claude/doctrine.md): "everything in inventory
+     is a physical asset", "the WORLD is the inventory", and the owner's own
+     corollary that glowing floor pickups make it Subway Surfers. A box you walk
+     up to, hold E on for 0.9 s, and receive a randomised payout from IS A LOOT
+     CHEST. It does not matter that it is drawn as a crate.
+
+     So the CONTAINER dies and the CRATE lives, because they were never the same
+     thing. What a crate is actually for in this yard is stated in this file's
+     own first line: it BREAKS GUARD LINE OF SIGHT and creates the stealth
+     routes. That is load-bearing — five LOS blockers, five colliders, unchanged,
+     in the same five places. What dies is the lid, the pry beat, the prompt
+     chip, the rng payout and the "+4 cigs" that taught the player boxes were
+     the point when the point was the armory across the yard.
+
+     THE TWO TOOLS SURVIVE AS OBJECTS. The Hacksaw Blade is the second route
+     through world/gunroom.js's inner cage and the first verb that item has ever
+     had; the Lockpick is the other. They are now LYING ON the crates that used
+     to contain them — real prop instances through CBZ.prisonPlaceItem
+     (systems/prisondrops.js), with the same quiet pickupNote, the same "reached
+     for" hold animation a blade already gets, and no lid in between. You see
+     the blade from across the yard because it is on top of the box, which is
+     strictly more discoverable than a container that looked like every other
+     container.
+
+     Flag off (?cfg_PRISON_NO_CHESTS=0) restores the pry interaction, the chip
+     and the payout exactly, with the same rng draw order.
+     ============================================================ */
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.PRISON_NO_CHESTS == null) CBZ.CONFIG.PRISON_NO_CHESTS = true;
+  const NOCHEST = CBZ.CONFIG.PRISON_NO_CHESTS !== false;
+
   const REACH = 2.2;          // [E] pry reach — a hair tighter than roofloot (ground-level, tighter yard)
   const CRACK_T = 0.9;        // the SAME pry-beat timing roofloot.js's CRACK_T uses
 
@@ -128,6 +167,9 @@
         // `lid` so crackOpen can swap it dark once busted open (roofloot's
         // "material SWAP reads looted" trick) — cloned mat so the swap never
         // repaints every crate sharing the cached CBZ.mat instance.
+        // With PRISON_NO_CHESTS the "lid" is just a corner bracket — the piece
+        // of hardware a real packing case has. It is no longer a state readout
+        // for "already looted", because there is nothing to loot.
         const bracket = new THREE.Mesh(new THREE.BoxGeometry(s * 1.02, 0.08, s * 1.02), CBZ.mat(C_LID, {}).clone());
         bracket.position.set(0, s * 0.42, 0);
         bracket.castShadow = false;
@@ -152,6 +194,29 @@
   // "Hacksaw Blade" was an item with a fence price and no verb anywhere.
   crate(11, 17, 2.6, "Hacksaw Blade");
   crate(0, 11, 2.2, "Lockpick");
+
+  // ---- THE TOOLS, LYING ON THE CRATES THEY USED TO BE INSIDE ---------------
+  // Deferred one frame: systems/prisondrops.js parses at index.html:446 but its
+  // prop TYPE registers on the first tick, the same deferral world/cellblock.js
+  // uses for its cast. A failure here costs nothing — the crates are still
+  // cover, and the armory's padlock still has the keycard route.
+  if (NOCHEST) {
+    let laid = false;
+    CBZ.onUpdate(41.9, function () {
+      if (laid || !CBZ.prisonPlaceItem) return;
+      if (!CBZ.game || CBZ.game.mode !== "escape") return;
+      laid = true;
+      for (let i = 0; i < crateList.length; i++) {
+        const ct = crateList[i];
+        if (!ct.tool) continue;
+        // ON the crate: its own top, plus a couple of centimetres so the model
+        // rests rather than intersects. Offset a hair off-centre so it reads as
+        // something somebody PUT DOWN, not as a spawn point.
+        try { CBZ.prisonPlaceItem(ct.tool, ct.x + 0.28, ct.s + 0.06, ct.z - 0.22); } catch (e) {}
+        ct.placed = true;
+      }
+    });
+  }
 
   // ---- CRACKING ONE OPEN (mirrors roofloot.js's crackOpen exactly) ----------
   // TOOL FLAVOUR: a line that points at the door the tool opens, not at the
@@ -229,6 +294,11 @@
   let cracking = null;   // { ct, t }
   let _promptT = 0;
   CBZ.onUpdate(42, function (dt) {
+    // A CRATE IS COVER. With PRISON_NO_CHESTS there is no container verb at
+    // all: no prompt, no pry beat, no payout, and the chip node is never even
+    // created. Everything below this line is the legacy container mechanic,
+    // kept whole so the flag is a true one-line revert.
+    if (NOCHEST) { if (_chipLast) chipText(null); return; }
     if (_chipHoldT > 0) { _chipHoldT -= dt; if (_chipHoldT <= 0) chipText(null); }
     if (g.mode !== "escape" || g.state !== "playing") { cracking = null; return; }
     const P = CBZ.player;
@@ -265,6 +335,7 @@
   // [E] starts the pry — same document-level + stopPropagation pattern
   // roofloot.js uses so systems/interact.js's own key handling never double-fires.
   function onKey(e) {
+    if (NOCHEST) return;
     if (g.mode !== "escape" || g.state !== "playing" || cracking) return;
     if ((e.key || "").toLowerCase() !== "e") return;
     const ct = crateNear();
@@ -279,12 +350,27 @@
      whose payout FEEDS the keycard→armory spine rather than competing with it,
      and may only go UP; `crates` is printed beside it so a "fix" that deletes
      boxes cannot pass (the owner asked for quieter crates, not fewer). */
+  /* RATCHET. `containers` is the owner's complaint stated as a number: crates
+     that still behave like a loot chest. PINNED AT 0. `crates` and `losBlockers`
+     are printed beside it so a "fix" that deleted the cover — which is what the
+     yard's whole stealth layer is built on — cannot pass, and `worldTools`
+     proves the two items that mattered are still reachable, as objects. */
   CBZ.crateAudit = function () {
-    let tools = 0, cracked = 0;
+    let tools = 0, cracked = 0, laidOut = 0;
     for (let i = 0; i < crateList.length; i++) {
       if (crateList[i].tool) tools++;
       if (crateList[i].cracked) cracked++;
+      if (crateList[i].placed) laidOut++;
     }
-    return { spine: SPINE, crates: crateList.length, toolCrates: tools, cracked: cracked, muted: SPINE };
+    const pl = (CBZ.prisonPlacedAudit && CBZ.prisonPlacedAudit()) || null;
+    return {
+      spine: SPINE, noChests: NOCHEST,
+      crates: crateList.length,
+      containers: NOCHEST ? 0 : crateList.length,   // MUST be 0
+      losBlockers: crateList.length,                // cover is load-bearing — must hold
+      toolCrates: tools, worldTools: laidOut,
+      placedStanding: pl ? pl.standing : 0,
+      cracked: cracked, muted: SPINE,
+    };
   };
 })();

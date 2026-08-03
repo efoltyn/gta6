@@ -39,6 +39,11 @@
 ============================================================ */
 (function () {
   "use strict";
+  // SHOW DON'T TELL (JAIL_SHOW_DONT_TELL, declared in entities/ai.js, gated by
+  // systems/capture.js). Returns true when the line was suppressed.
+  function tellToast(m) { if (CBZ.jailTell) return CBZ.jailTell.toast(m); if (CBZ.flashToast) try { CBZ.flashToast(m); } catch (e) {} return false; }
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+
   const CBZ = window.CBZ;
   if (!CBZ || typeof CBZ.onUpdate !== "function" || typeof CBZ.onAlways !== "function") return;
   const g = CBZ.game;
@@ -106,7 +111,10 @@
     const grace = playerAtCount();
     if (grace !== graceSaid) {
       graceSaid = grace;
-      if (grace && CBZ.flashHint) try { CBZ.flashHint("Count time — stay in your cell and they walk past.", 2.2); } catch (e) {}
+      // SHOW DON'T TELL: the grace IS the screws walking past your door
+      // without stopping. Printing "they walk past" over the top of them
+      // walking past is the caption track the owner asked us to delete.
+      if (grace) tellHint("Count time — stay in your cell and they walk past.", 2.2);
     }
     for (const gd of CBZ.guards) {
       if (!able(gd)) continue;
@@ -389,7 +397,10 @@
 
     ensureOverlay();
 
-    if (CBZ.flashToast) try { CBZ.flashToast("LOCKDOWN"); } catch (e) {}
+    // the siren, the red flash, the shake and the doors racking shut ARE the
+    // lockdown. The objective line below carries the one piece of state a
+    // player cannot see (what lifts it).
+    tellToast("LOCKDOWN");
     if (CBZ.shake) try { CBZ.shake(0.7); } catch (e) {}
     // hard red flash via the shared #flash overlay, if present
     try {
@@ -417,13 +428,13 @@
     musterRelease();     // ALL CLEAR reopens every door WE racked shut
     graceSaid = false;
 
-    if (CBZ.flashToast) try { CBZ.flashToast("ALL CLEAR"); } catch (e) {}
+    tellToast("ALL CLEAR");
     if (CBZ.setObjective) try { CBZ.setObjective("The block calms down. Keep your head low."); } catch (e) {}
 
     // re-open the yard door ONLY if the player actually has the keycard
     if (g && g.hasKey && CBZ.openDoor) {
       try { CBZ.openDoor(); } catch (e) {}
-      if (CBZ.flashHint) try { CBZ.flashHint("Your keycard pops the gate back open.", 2.0); } catch (e) {}
+      tellHint("Your keycard pops the gate back open.", 2.0);   // the gate opening says it
     }
   }
 

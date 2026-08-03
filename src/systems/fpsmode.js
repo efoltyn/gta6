@@ -1347,6 +1347,23 @@
   }
   CBZ.fpsHitMarker = flashHitMarker;
 
+  // THE BAR TRACKS THE BAG. setAmmoHud (which drives the strip) only fires on a
+  // weapon swap / reload / mode change, so a gun picked up off a body would not
+  // appear until you next changed weapons. A 5 Hz poll of the inventory's shape
+  // is enough and costs one string compare.
+  let _stripSig = "", _stripT = 0;
+  if (CBZ.onAlways) CBZ.onAlways(71, function (dt) {
+    _stripT -= dt || 0;
+    if (_stripT > 0) return;
+    _stripT = 0.2;
+    const inv = CBZ.weaponInventory || [];
+    const sig = CBZ.game.mode + "|" + CBZ.game.state + "|" + inv.join(",") + "|" +
+      (CBZ.currentWeaponId || "") + "|" + (CBZ.game.cityMeleeWeapon || "");
+    if (sig === _stripSig) return;
+    _stripSig = sig;
+    try { setWeaponStrip(); } catch (e) {}
+  });
+
   function setAmmoHud() {
     if (!ammoEl) return;
     syncAmmo();
@@ -1358,7 +1375,11 @@
       // City play is always instrumentation-only.  This cannot depend on a
       // campaign mission being active: sandbox/side-job weapons were still
       // writing weapon names, RELOADING and RES over the world.
-      const campaignMinimal = CBZ.game.mode === "city" ||
+      // THE PRISON IS MINIMAL TOO. This used to read "AK-47\n30 / 30   RES 120"
+      // over the world in escape mode — the weapon's NAME and the word RES,
+      // beside a boxed hotbar chip that already shows which gun is in your
+      // hands. Numbers stay; the words were the clutter.
+      const campaignMinimal = CBZ.game.mode === "city" || CBZ.game.mode === "escape" ||
         !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
       const rocketSpec = w.explosive ? rocketAmmoSpec(w) : null;
       const rocketMode = rocketSpec ? (rocketSpec.label || rocketSpec.id || "").toUpperCase() : "";
@@ -1378,18 +1399,88 @@
     setWeaponStrip();
   }
 
+  // ============================================================
+  //  THE PRISON GETS THE CITY'S INVENTORY BAR (WEAPON_STRIP_SHARED).
+  //
+  //  OWNER: "only one gun at a time shows in inventory unlike gang city."
+  //
+  //  What this used to draw was a row of WORDS — `9MM / 12G / 762` — right-
+  //  aligned under the ammo readout, which is why the prison's visible bag (the
+  //  9-slot bar systems/inventory.js draws) showed exactly one gun chip: that
+  //  bag carries weapon-data.js's single legacy "Gun" proxy item, and the
+  //  actual inventory was over here as text.
+  //
+  //  There is now ONE renderer for the weapon bar in this game and it is
+  //  city/hud.js's icon hotbar (CBZ.weaponSlotsHTML). This is its second
+  //  consumer. Same chips, same boxes, same held highlight, same dry marker,
+  //  driven off the same CBZ.weaponInventory — so a prisoner holding three
+  //  pieces sees three boxes, exactly like the city.
+  //
+  //  The styling is INJECTED FROM HERE (css/hud.css belongs to another
+  //  territory and #weaponStrip was authored for a text row). It is one rule
+  //  set, scoped to #weaponStrip, and it deliberately mirrors the city's slot
+  //  metrics rather than inventing a second look.
+  //
+  //  Degrade: no CBZ.weaponSlotsHTML (an older merge, or WEAPON_STRIP_SHARED
+  //  off) → the original word row, byte for byte.
+  // ============================================================
+  let stripStyled = false;
+  function styleStrip() {
+    if (stripStyled || typeof document === "undefined" || !document.head) return;
+    stripStyled = true;
+    const st = document.createElement("style");
+    st.id = "weaponStripSlots";
+    st.textContent =
+      "#weaponStrip.slots{white-space:normal;text-transform:none;letter-spacing:0;padding:6px 8px;" +
+      "display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap;max-width:min(360px,80vw)}" +
+      "#weaponStrip.slots .cSlot{position:relative;display:flex;align-items:center;justify-content:center;" +
+      "width:44px;height:44px;box-sizing:border-box;padding:2px;border-radius:3px;background:rgba(10,12,16,.66);" +
+      "border:2px solid #0a0c10;box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),inset -2px -2px 0 rgba(255,255,255,.10),0 2px 6px rgba(0,0,0,.45)}" +
+      "#weaponStrip.slots .cSlot.held{border-color:#e8ecf2;box-shadow:0 0 0 2px rgba(232,236,242,.85);transform:scale(1.08);z-index:1}" +
+      "#weaponStrip.slots .cSlot .key{position:absolute;left:3px;top:1px;font-size:8px;font-weight:800;color:#8b95a1;line-height:1}" +
+      "#weaponStrip.slots .cSlot .s{font-size:11px;font-weight:700;color:#d7e4f3;letter-spacing:0}" +
+      "#weaponStrip.slots .cSlot>.ic{font-size:18px;line-height:1}" +
+      "#weaponStrip.slots .cSlot .ic.gun{font-size:20px;line-height:1;color:#e8ecf2;transform:scaleX(1.25)}" +
+      "#weaponStrip.slots .cSlot .gunModel{display:block;width:40px;height:26px;object-fit:contain;" +
+      "pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
+      "#weaponStrip.slots .cSlot .a{position:absolute;right:2px;bottom:1px;font-size:9px;color:#8b95a1;line-height:1}" +
+      "#weaponStrip.slots .cSlot .a.dry{color:#ff7a6a;font-weight:700}" +
+      "@media (max-width:820px){#weaponStrip.slots .cSlot{width:36px;height:36px}" +
+      "#weaponStrip.slots .cSlot .gunModel{width:32px;height:21px}}";
+    document.head.appendChild(st);
+  }
+
   function setWeaponStrip() {
     if (!stripEl) return;
-    // The city owns one unified boxed inventory/hotbar.  The engine strip was
-    // a second row of FIST / 9MM / 556 / RPG words, and inline display writes
-    // could resurrect it despite the city stylesheet.
+    // The city draws the SAME component into its own #cSlots bar, so drawing it
+    // here as well would put two identical hotbars on one screen.
     if (CBZ.game.mode === "city") {
       stripEl.innerHTML = "";
+      stripEl.className = "panel";
       stripEl.style.display = "none";
       return;
     }
-    if (!(fps.active || shoulderActive()) || !armed()) {
+    const shared = CBZ.CONFIG.WEAPON_STRIP_SHARED !== false && typeof CBZ.weaponSlotsHTML === "function";
+    // THE BAG IS ALWAYS THE BAG. The old row appeared only while first-person
+    // AND armed, which is another reason the prison read as having one gun: put
+    // the rifle away and the whole inventory vanished. It now behaves like the
+    // city's — visible whenever you are playing and carrying something.
+    const carrying = armed() || !!CBZ.game.cityMeleeWeapon ||
+      !!(CBZ.weaponInventory && CBZ.weaponInventory.length);
+    if (!shared && (!(fps.active || shoulderActive()) || !armed())) {
       stripEl.style.display = "none";
+      return;
+    }
+    if (shared && (!carrying || CBZ.game.state !== "playing")) {
+      stripEl.style.display = "none";
+      return;
+    }
+    if (shared) {
+      styleStrip();
+      const html = CBZ.weaponSlotsHTML({ icons: true });
+      stripEl.className = "panel slots";
+      stripEl.innerHTML = html;
+      stripEl.style.display = html ? "flex" : "none";
       return;
     }
     const html = availableIndices().map((idx) => {
@@ -1397,6 +1488,7 @@
       const active = idx === fps.weapon ? " class=\"active\"" : "";
       return `<span${active}>${w.short}</span>`;
     }).join("  /  ");
+    stripEl.className = "panel";
     stripEl.innerHTML = html;
     stripEl.style.display = html ? "block" : "none";
   }
@@ -2186,7 +2278,11 @@
     const ptp = !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
     const touch = !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch")));
     const dry = ptp && touch ? "Empty - tap RELOAD" : "Empty - press R";
-    CBZ.flashHint && CBZ.flashHint(fps.reserve > 0 ? dry : "No reserve ammo", 1.0);
+    // THE CHIP ALREADY SAYS IT. The shared hotbar draws a dry gun with the
+    // empty marker, and a dry-fire click is the other half. Both were on
+    // screen while this line printed the same fact in words.
+    if (CBZ.jailTell) CBZ.jailTell.hint(fps.reserve > 0 ? dry : "No reserve ammo", 1.0);
+    else if (CBZ.flashHint) CBZ.flashHint(fps.reserve > 0 ? dry : "No reserve ammo", 1.0);
   }
 
   function shoot() {
@@ -2195,7 +2291,12 @@
       if (CBZ.game.mode === "city") return;   // city/combat.js owns unarmed melee in the city
       const hit = aimedActor(MELEE);
       triggerFistPunch();
-      if (CBZ.punch) { const r = CBZ.punch(hit && hit.actor); if (r && r.msg) CBZ.flashHint(r.msg, 2.4); }
+      // A PUNCH IS A PUNCH. The swing animates, the body reacts, the health
+      // moves; the returned sentence describing all three was the caption.
+      if (CBZ.punch) {
+        const r = CBZ.punch(hit && hit.actor);
+        if (r && r.msg) { if (CBZ.jailTell) CBZ.jailTell.hint(r.msg, 2.4); else if (CBZ.flashHint) CBZ.flashHint(r.msg, 2.4); }
+      }
       else CBZ.sfx && CBZ.sfx("step");
       return;
     }
@@ -2857,7 +2958,11 @@
     carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     muzzle.position.copy(weaponModels[fps.weapon].userData.muzzle);
     CBZ.sfx && CBZ.sfx("switch");
-    CBZ.flashHint && CBZ.flashHint(weapon().label, 0.85);
+    // the boxed hotbar highlights the slot you just switched to, which is the
+    // whole point of having a boxed hotbar. Naming it in text as well was the
+    // second readout the shared renderer exists to remove.
+    if (CBZ.jailTell) CBZ.jailTell.hint(weapon().label, 0.85);
+    else if (CBZ.flashHint) CBZ.flashHint(weapon().label, 0.85);
     setAmmoHud();
     if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -2881,7 +2986,11 @@
     carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     if (weaponModels[fps.weapon] && weaponModels[fps.weapon].userData.muzzle) muzzle.position.copy(weaponModels[fps.weapon].userData.muzzle);
     CBZ.sfx && CBZ.sfx("switch");
-    CBZ.flashHint && CBZ.flashHint(weapon().label, 0.85);
+    // the boxed hotbar highlights the slot you just switched to, which is the
+    // whole point of having a boxed hotbar. Naming it in text as well was the
+    // second readout the shared renderer exists to remove.
+    if (CBZ.jailTell) CBZ.jailTell.hint(weapon().label, 0.85);
+    else if (CBZ.flashHint) CBZ.flashHint(weapon().label, 0.85);
     setAmmoHud();
     if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;

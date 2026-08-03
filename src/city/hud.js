@@ -1115,6 +1115,100 @@
     if (/pistol|sidearm|9mm/.test(id)) return "◒";
     return "◆";
   }
+  /* ============================================================
+     ONE BOXED WEAPON HOTBAR, TWO MODES (CBZ.CONFIG.WEAPON_STRIP_SHARED).
+
+     OWNER: "only one gun at a time shows in inventory unlike gang city."
+
+     He is right, and the cause is that the two modes were drawing from two
+     different things over the same array. There is ONE truth — CBZ.weaponInventory
+     (weapons/weapon-data.js) — and there were TWO renderers over it:
+
+       · this file's icon hotbar, which walks the whole inventory and gives each
+         gun its own boxed chip with a real rendered silhouette. This is the one
+         the owner means by "gang city";
+       · systems/fpsmode.js's `setWeaponStrip`, a row of bare WORDS
+         ("9MM / 12G / 762") that the city explicitly disables — and which is
+         all the prison ever had.
+
+     Meanwhile the 9-slot bag the prison DOES show (systems/inventory.js) carries
+     the legacy single "Gun" item that weapon-data.js keeps pointed at whatever
+     is currently in your hands. So three guns rendered as one chip. Not a bug in
+     any one file: two renderers and a proxy item, and nobody owning the answer.
+
+     BLOCK LAW: promote the better renderer, delete the worse one. This is that
+     component. One call, no ceremony, no state of its own — it reads the same
+     globals both callers already read — and it is degrade-safe by construction:
+     a caller that cannot find it keeps whatever it drew before.
+
+       CBZ.weaponSlotsHTML({icons})  ->  the .cSlot chip row for the FULL
+                                         inventory, held slot marked.
+
+     Consumers migrated in this same change: this file's legacy path (above) and
+     systems/fpsmode.js's strip, which now draws boxes instead of words — so the
+     prison gets the city's inventory bar and the text strip is gone.
+     Ratchet: CBZ.weaponStripAudit().renderers, pinned at 1.
+     ============================================================ */
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.WEAPON_STRIP_SHARED == null) CBZ.CONFIG.WEAPON_STRIP_SHARED = true;
+  CBZ.weaponSlotsHTML = function (opts) {
+    opts = opts || {};
+    const icons = !!opts.icons;
+    const fps2 = CBZ.fps;
+    const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
+    const melee = CBZ.game.cityMeleeWeapon || null;   // Bat/Knife — held melee, not a gun
+    const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
+    let html = "";
+    let slot = 1;
+    const key = function () { return "<span class='key'>" + (slot++) + "</span>"; };
+    // FISTS is the baseline, and it is a real slot: unarmed is a thing you can
+    // deliberately be, not the absence of a bar.
+    const fistsHeld = !melee && !heldGun;
+    if (!inv.length && !melee) {
+      html += "<div class='cSlot held'>" + key() + (icons ? "<span class='ic'></span>" : "<span class='s'>Fists</span>") + "</div>";
+    } else {
+      if (melee) {
+        html += "<div class='cSlot melee held'>" + key() +
+          (icons ? "<span class='ic'></span>" : "<span class='s'>" + esc(melee) + "</span>") + "</div>";
+      } else if (fistsHeld) {
+        html += "<div class='cSlot held'>" + key() + (icons ? "<span class='ic'></span>" : "<span class='s'>Fists</span>") + "</div>";
+      }
+      for (let k = 0; k < inv.length; k++) {
+        const id = inv[k];
+        const m = weaponMetaById(id);
+        if (!m) continue;
+        const lbl = m.w.short || m.w.label || id;
+        const held = (id === heldGun);
+        // ONE source of truth for ammo: the big line under the bar carries the
+        // HELD gun's live mag/reserve; slots stay clean. The only count that
+        // still matters at a glance is a stone-dry gun.
+        let ammoTxt = "";
+        if (!held && fps2 && fps2.rounds && fps2.reserves) {
+          const cur = (fps2.rounds[m.i] != null) ? fps2.rounds[m.i] : (m.w.mag || 0);
+          const res = (fps2.reserves[m.i] != null) ? fps2.reserves[m.i] : (m.w.reserve || 0);
+          if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (icons ? "∅" : "DRY") + "</span>";
+        }
+        html += "<div class='cSlot" + (held ? " held" : "") + "'>" + key() +
+          (icons ? hotbarGunFace(m, id) : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
+      }
+    }
+    return html;
+  };
+  // how many guns the bar can actually SEE. `shown` must equal `held` — that
+  // equality IS the owner's complaint, as a number.
+  CBZ.weaponStripAudit = function () {
+    const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
+    let shown = 0;
+    for (let k = 0; k < inv.length; k++) if (weaponMetaById(inv[k])) shown++;
+    return {
+      on: CBZ.CONFIG.WEAPON_STRIP_SHARED !== false,
+      renderers: 1,                       // pinned: this function is the only one
+      held: inv.length, shown: shown,     // must be equal
+      melee: !!CBZ.game.cityMeleeWeapon,
+      textStrip: false,                   // fpsmode's word row is gone
+    };
+  };
+
   function hotbarGunFace(meta, directId) {
     const w = meta && meta.w;
     // Unified hotbar entries already carry the canonical engine id. Prefer it
@@ -1207,51 +1301,12 @@
         return;
       }
     }
-    // ---- LEGACY path (non-city, or the API not yet loaded) — unchanged. -----------
+    // ---- LEGACY path (non-city, or the API not yet loaded) — now the SHARED
+    //      renderer, which the prison also draws through. See CBZ.weaponSlotsHTML.
+    slotsEl.innerHTML = CBZ.weaponSlotsHTML({ icons: g.mode === "city" });
     const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
     const melee = g.cityMeleeWeapon || null;        // Bat/Knife — a held melee, not a gun
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
-    const minimalCity = g.mode === "city";
-    let html = "";
-    // a Fists slot is the baseline — shown when you own no guns, or as the unarmed
-    // fallback. It's the HELD slot only when you're carrying neither gun nor melee.
-    const fistsHeld = !melee && !heldGun;
-    if (!inv.length && !melee) {
-      html += minimalCity
-        ? "<div class='cSlot held'><span class='ic'></span></div>"
-        : "<div class='cSlot held'><span class='s'>Fists</span></div>";
-    } else {
-      // melee chip first (it's the one in hand when set) so the loadout reads L→R
-      if (melee) {
-        html += minimalCity
-          ? "<div class='cSlot melee held'><span class='ic'></span></div>"
-          : "<div class='cSlot melee held'><span class='s'>" + esc(melee) + "</span></div>";
-      } else if (fistsHeld) {
-        html += minimalCity
-          ? "<div class='cSlot held'><span class='ic'></span></div>"
-          : "<div class='cSlot held'><span class='s'>Fists</span></div>";
-      }
-      for (let k = 0; k < inv.length; k++) {
-        const id = inv[k];
-        const m = weaponMetaById(id);
-        if (!m) continue;
-        const lbl = m.w.short || m.w.label || id;
-        const held = (id === heldGun);
-        // ONE source of truth for ammo: the big line under the bar carries the
-        // HELD gun's live mag/reserve; slots stay clean (the old per-slot
-        // "11/265"-style mini counts tripled the numbers on screen). The only
-        // count that still matters at a glance is a stone-dry gun → DRY.
-        let ammoTxt = "";
-        if (!held && fps && fps.rounds && fps.reserves) {
-          const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
-          const res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-          if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (minimalCity ? "∅" : "DRY") + "</span>";
-        }
-        html += "<div class='cSlot" + (held ? " held" : "") + "'>" +
-          (minimalCity ? hotbarGunFace(m, id) : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
-      }
-    }
-    slotsEl.innerHTML = html;
     // the prominent equipped-weapon ammo line (jail-style big mag / reserve). For a
     // gun we read fps live state for the CURRENT weapon; melee/fists show no ammo.
     if (heldGun) {

@@ -581,6 +581,54 @@
     dropGone(victim);
   }
 
+  /* ============================================================
+     CBZ.prisonPlaceItem(item, x, y, z) — A THING LYING WHERE IT WOULD LIE.
+
+     OWNER: "there's chests still for some reason." The doctrine behind that is
+     the ITEM EXISTENCE TEST: an item must have a physical asset and the WORLD
+     must be the inventory — "glowing floor pickups make it Subway Surfers",
+     and a loot CONTAINER is the same sin one step removed. world/crates.js had
+     five boxes you pried open for a payout; the crates were cover the yard
+     genuinely needs, but the CHEST was a menu with a lid on it.
+
+     Everything needed to answer that already lived in this file: a real prop
+     instance, a real mesh, the gun/blade "reached for" hold, the quiet
+     pickupNote and the E prompt. The only thing missing was a way to place one
+     that nobody had DIED for. That is this — the drop routine with no corpse.
+
+     `world:true` marks it as a PLACED item rather than loot: it survives the
+     new-run sweep below (a hacksaw on a workbench does not vanish because you
+     restarted) and it never counts against the death-drop cap.
+     ============================================================ */
+  const placed = [];
+  CBZ.prisonPlaceItem = function (item, x, y, z) {
+    if (!item) return null;
+    for (let i = 0; i < placed.length; i++) {                 // idempotent per spot
+      const p = placed[i];
+      if (p.item === item && Math.abs(p.x - x) < 0.05 && Math.abs(p.z - z) < 0.05 && p.inst && !p.inst.data.taken) return p.inst;
+    }
+    const inst = spawnDrop(item, 0, x, y == null ? 0.12 : y, z, 0, 0, 0);
+    if (!inst || !inst.data) return null;
+    inst.data.world = true;
+    inst.data.rest = true;                                    // it is ON the thing, not falling
+    inst.data.life = Infinity;                                // a placed item does not despawn
+    placed.push({ item: item, x: x, y: y, z: z, inst: inst });
+    return inst;
+  };
+  // re-lay every placed item (called after the new-run sweep)
+  function replaceWorldItems() {
+    for (let i = 0; i < placed.length; i++) {
+      const p = placed[i];
+      p.inst = spawnDrop(p.item, 0, p.x, p.y == null ? 0.12 : p.y, p.z, 0, 0, 0);
+      if (p.inst && p.inst.data) { p.inst.data.world = true; p.inst.data.rest = true; p.inst.data.life = Infinity; }
+    }
+  }
+  CBZ.prisonPlacedAudit = function () {
+    let live2 = 0;
+    for (let i = 0; i < placed.length; i++) if (placed[i].inst && !placed[i].inst.data.taken) live2++;
+    return { placed: placed.length, standing: live2 };
+  };
+
   CBZ.prisonDropClear = function () {
     for (let i = live.length - 1; i >= 0; i--) { CBZ.removeProp && CBZ.removeProp(live[i]); }
     live.length = 0;
@@ -606,6 +654,7 @@
       CBZ.prisonDropClear();
       CBZ.econ && CBZ.econ.resetLoadouts && CBZ.econ.resetLoadouts();
       spawned = 0; taken = 0; expired = 0; evicted = 0; bodies = 0; gunsDropped = 0;
+      replaceWorldItems();      // a placed tool is part of the world, not of the run
     }
     lastEl = el;
 
