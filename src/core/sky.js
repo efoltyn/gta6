@@ -45,6 +45,61 @@
   }
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
+  /* ---------------- 0a. THE SKY AT ALTITUDE (SKY_ALTITUDE) -------------
+     OWNER (with a screenshot from the pilot origin's B-2 at 1,750 m):
+     "when too high sky goes black and the fake sky doesn't show… sun acts
+     strange, rising from looking like its coming from the ground instead
+     of coming from horizon."
+
+     Both symptoms were ONE line. The rig followed the camera in x/z only
+     (`rig.position.set(cam.x, 0, cam.z)`), so:
+       • the r=850 BackSide dome was centred on SEA LEVEL. Above y=850 the
+         camera is OUTSIDE the sphere, a back-faced sphere seen from
+         outside draws nothing, and the sky is a black void. At 1,750 m
+         you are twice the dome's radius above its centre.
+       • the sun/moon/halo/glare sprites sit at radius 795 on that same
+         rig, so their apparent direction was measured from a point
+         1,750 m BELOW the eye. The sun at true elevation 0° appeared at
+         asin(795·sin(0°) − 1750)/795 → far under the airframe: a glow
+         coming up out of the terrain instead of a disc on the horizon.
+
+     THE SUN IS AT INFINITY. Its apparent direction is the SAME from a
+     kerb and from 5 km up, and that is exactly what centring the rig on
+     the camera in all three axes restores — the disc lands on the real
+     `CBZ.sun` direction at every altitude, for free, with no per-altitude
+     correction of any kind. Nothing else has to move.
+
+     This is only safe because the dome is a pure background: MeshBasic,
+     depthWrite:false, depthTest:false, renderOrder −10000. It cannot
+     occlude, depth-reject or z-fight with world geometry no matter where
+     its centre sits, so wrapping it around the camera costs nothing.
+
+     THE HORIZON LINE DOES NOT MOVE, AND THAT IS DERIVED, NOT LAZY. Our
+     world is FLAT (docs/claude/doctrine.md — the true sphere was refused
+     on arithmetic). On a flat sea the horizon is the vanishing line of
+     the water plane, which sits at EXACTLY eye level at every altitude
+     (atan(h/d) → 0 as d → ∞); only a curved earth dips it. So the
+     painted horizon stays at v=0.5 and everything below it stays the
+     pure fog colour — which is also what closes the seam at altitude:
+     the water plate is clipped at camera.far (≥7000 m airborne), so
+     between 0° and asin(1750/7000) = 14.5° of depression there is no
+     geometry at all and the dome IS the distant sea. Painting a
+     "horizon dip" there would be a fake band, and fake bands are banned
+     by the same owner order as the skyline rings.
+  --------------------------------------------------------------------- */
+  if (CBZ.CONFIG.SKY_ALTITUDE == null) CBZ.CONFIG.SKY_ALTITUDE = true;
+
+  // Barometric scale height of Earth's atmosphere. Pressure — and with it
+  // the Rayleigh column that IS the blue of the sky — falls as exp(-h/H).
+  const AIR_SCALE_H = 8500;   // m
+  // Aerosol (haze/dust/water-vapour) scale height. Much lower than the gas
+  // column: this is the layer that makes the bright band hugging the horizon.
+  const HAZE_SCALE_H = 1200;  // m
+  // What the sky tends toward once you have climbed out of the air that lit
+  // it: not grey, but a deep violet-black — high-altitude skies desaturate
+  // toward space, they do not fade toward the fog.
+  const SPACE = new THREE.Color(0x040814);
+
   // Everything sky-distance lives on one rig that FOLLOWS the camera, so
   // the sky surrounds the player in all three worlds (escape z≈0,
   // survival z≈600, city z≈-700) — a dome pinned to origin showed as a
@@ -113,7 +168,11 @@
   const skyCtx = skyCanvas.getContext("2d");
   const skyTex = new THREE.CanvasTexture(skyCanvas);
   const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(850, 32, 20),
+    // 48x32 rather than 32x20: at altitude the horizon ramp compresses to a
+    // few degrees (see hazeK below) and a 9°-tall latitude band was wide
+    // enough to facet it. One dome, 1536 quads — free, and it buys a clean
+    // horizon line from an aircraft.
+    new THREE.SphereGeometry(850, 48, 32),
     // This is a background, never world geometry. The old depth-tested sphere
     // sat only 850 m from the camera; once aircraft draw distance grew to
     // kilometres its lower hemisphere passed the depth test in front of dry
@@ -156,12 +215,22 @@
   }
 
   // frame state the painter reads (computed each frame, painted throttled)
-  const frame = { glowU: 0, glowK: 0, photoK: 1, duskW: 0 };
+  const frame = { glowU: 0, glowK: 0, photoK: 1, duskW: 0, spaceK: 0, hazeK: 1 };
   const _zen = new THREE.Color(), _mid = new THREE.Color(), _top = new THREE.Color();
   const _hot = new THREE.Color(), _gmid = new THREE.Color();
 
   function paintSky(fog, tint) {
     const hz = horizonCss(fog, tint);
+    // THE HAZE BAND IS AN AEROSOL LAYER, SO IT THINS AS YOU LEAVE IT.
+    // Sea-level band is 52 px of a 512 px / 180° canvas = 18.3°, shortened
+    // at dusk so the burn reaches the waterline. `frame.hazeK` is the share
+    // of the aerosol column still ABOVE the camera (exp(-h/1200): 1.00 on
+    // the deck, 0.23 at 1,750 m, 0.015 at 5 km) — that is how much air a
+    // near-horizontal sight line still has to cross, so it is how tall the
+    // band should be. The 0.30 floor keeps ~5.5° of softness: a real
+    // horizon from a jetliner is CRISP, never a hard cut, and a hard cut
+    // here would read as exactly the painted band the owner banned.
+    const fadeTop = HORIZON_Y - (52 - 26 * frame.duskW) * (0.30 + 0.70 * frame.hazeK);
     // 1) multi-stop vertical gradient: zenith → mid → fog-horizon. The
     //    zenith keeps its own colour while only the low sky approaches the
     //    fog — the one thing a whole-dome tint could never do.
@@ -179,12 +248,32 @@
       skyCtx.drawImage(photoLayer, 0, 0);
       skyCtx.globalAlpha = 1;
     }
+    // 2b) ALTITUDE. Drawn AFTER the photo on purpose: assets/sky/day.jpg was
+    //    shot from the ground and would otherwise paste a sea-level sky over
+    //    the whole upper hemisphere at 5 km. `frame.spaceK` is the share of
+    //    the air column already BELOW the camera (1 - exp(-h/8500) — 0.00 on
+    //    the deck, 0.19 at 1,750 m, 0.45 at 5 km), i.e. exactly how much of
+    //    the sky's own scattering source you have climbed out of, times how
+    //    lit the sky is at all. It fades to zero at the top of the fog band,
+    //    so the seam texel is untouched by construction.
+    if (frame.spaceK > 0.008) {
+      const gsp = skyCtx.createLinearGradient(0, 0, 0, fadeTop);
+      gsp.addColorStop(0, cssA(SPACE, frame.spaceK));
+      gsp.addColorStop(0.55, cssA(SPACE, frame.spaceK * 0.45));
+      gsp.addColorStop(1, cssA(SPACE, 0));
+      skyCtx.fillStyle = gsp; skyCtx.fillRect(0, 0, SKY_W, Math.ceil(fadeTop));
+    }
     // 3) THE BURN: a wide warm glow pinned to the sun's azimuth (canvas u),
     //    so the horizon goes hot orange/pink on the sun's side while the
     //    far side and zenith stay cool. Drawn 3× for the u=0/1 seam wrap;
     //    only above the horizon — below it the fog band owns everything.
     if (frame.glowK > 0.015) {
-      const gx = frame.glowU * SKY_W, ry = SKY_H * 0.44;
+      // The burn is sunlight scattered by the LOW atmosphere, so its vertical
+      // reach shrinks with the same aerosol column that sets the haze band:
+      // from the deck it floods 79° of sky, from 1,750 m about 40°, from 5 km
+      // about 28°. That is what turns a flat pink wash over the whole
+      // windscreen into a burn that hugs the horizon the sun is rising out of.
+      const gx = frame.glowU * SKY_W, ry = SKY_H * 0.44 * (0.35 + 0.65 * frame.hazeK);
       for (let i = -1; i <= 1; i++) {
         skyCtx.save();
         skyCtx.translate(gx + i * SKY_W, HORIZON_Y);
@@ -201,11 +290,18 @@
     // 4) the fog band: sky melts into EXACTLY the fog colour at the horizon,
     //    and everything below the horizon IS the fog colour (no seam, ever).
     //    The band gets SHORTER at dusk so the burn reaches the waterline.
-    const fadeTop = HORIZON_Y - (52 - 26 * frame.duskW);
-    const fade = skyCtx.createLinearGradient(0, fadeTop, 0, HORIZON_Y + 4);
+    // THE RAMP MUST REACH ALPHA 1 EXACTLY AT THE HORIZON ROW. It used to end
+    // at HORIZON_Y + 4, so at the horizon itself the fade was only
+    // (band)/(band+4) opaque — 87% at sea level, and 75% once the band thins
+    // at altitude — while the row immediately below is the solid fog fill at
+    // 100%. That step let a quarter of the sunset burn survive on one side of
+    // a line and none on the other: a hard horizontal edge straight across
+    // the sky, i.e. exactly the painted band this file bans. It was always
+    // there; at sea level real geometry covers the row it happens on.
+    const fade = skyCtx.createLinearGradient(0, fadeTop, 0, HORIZON_Y);
     fade.addColorStop(0, hz.replace("rgb", "rgba").replace(")", ",0)"));
     fade.addColorStop(1, hz.replace("rgb", "rgba").replace(")", ",1)"));
-    skyCtx.fillStyle = fade; skyCtx.fillRect(0, fadeTop, SKY_W, HORIZON_Y + 4 - fadeTop);
+    skyCtx.fillStyle = fade; skyCtx.fillRect(0, fadeTop, SKY_W, HORIZON_Y - fadeTop);
     skyCtx.fillStyle = hz; skyCtx.fillRect(0, HORIZON_Y, SKY_W, SKY_H - HORIZON_Y);
     skyTex.needsUpdate = true;
   }
@@ -485,14 +581,26 @@
   let forcePaint = true, lastPaintAt = -1e9;
   const lastFog = new THREE.Color(-1, -1, -1), lastTint = new THREE.Color(-1, -1, -1);
   let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1;
+  let lastSpaceK = -1, lastHazeK = -1;
   const _fogFallback = new THREE.Color(0xb6c4c8);
   function moved(a, b) {
     return Math.abs(a.r - b.r) > 0.006 || Math.abs(a.g - b.g) > 0.006 || Math.abs(a.b - b.b) > 0.006;
   }
 
-  CBZ.onAlways(99, function (dt) {
+  // The rig carries everything that is "at infinity" — the dome, the sun,
+  // the moon, the halo and the veiling glare. Centring it on the CAMERA (not
+  // on sea level) is what keeps the sky around you and the sun on the real
+  // horizon at any altitude. See section 0a.
+  let altY = 0;
+  function syncRig() {
     const cam = CBZ.camera.position;
-    rig.position.set(cam.x, 0, cam.z);
+    const hi = !!CBZ.CONFIG.SKY_ALTITUDE;
+    rig.position.set(cam.x, hi ? cam.y : 0, cam.z);
+    altY = hi ? Math.max(0, cam.y) : 0;   // metres above mean sea level
+  }
+
+  function skyFrame(dt) {
+    syncRig();
 
     const fog = scene.fog ? scene.fog.color : _fogFallback;
     const tint = dome.material.color;
@@ -514,6 +622,17 @@
     frame.duskW = duskness;
     frame.glowK = duskness;
     frame.photoK = clamp01((up - 0.3) * 4); // photo fades out entering golden hour
+    // ---- altitude terms (section 0a) --------------------------------
+    // spaceK: the share of the atmosphere already below you, scaled by how
+    // lit the sky is at all — a night sky is black without any help, and
+    // darkening the dusk burn would just mute the one thing worth seeing.
+    // The 0.30 ceiling is a real limit, not taste: this ONE canvas carries
+    // both the sky and the photo layer's cloud TOPS, and a cloud top at 5 km
+    // is lit as brightly as one at sea level. The uncapped column term (0.45
+    // at 5 km) would paint them grey, so the deepening stops where the sky
+    // stops being the only thing it is darkening.
+    frame.spaceK = Math.min(0.30, 1 - Math.exp(-altY / AIR_SCALE_H)) * kDay * (1 - duskness * 0.6);
+    frame.hazeK = Math.exp(-altY / HAZE_SCALE_H);
     // sun azimuth → canvas u (r128 SphereGeometry: x=-cos(2πu)·s, z=sin(2πu)·s)
     let gu = Math.atan2(-10, -Math.cos(a) * 80) / (Math.PI * 2);
     frame.glowU = gu - Math.floor(gu);
@@ -524,11 +643,14 @@
     const palMoved = Math.abs(kDay - lastKDay) > 0.02 ||
       Math.abs(frame.glowK - lastGlowK) > 0.02 ||
       (frame.glowK > 0.02 && Math.min(du, 1 - du) > 0.01) ||
-      Math.abs(frame.photoK - lastPhotoK) > 0.03;
+      Math.abs(frame.photoK - lastPhotoK) > 0.03 ||
+      Math.abs(frame.spaceK - lastSpaceK) > 0.015 ||
+      Math.abs(frame.hazeK - lastHazeK) > 0.02;
     if (forcePaint || (CBZ.now - lastPaintAt > 100 && (moved(fog, lastFog) || moved(tint, lastTint) || palMoved))) {
       paintSky(fog, tint);
       lastFog.copy(fog); lastTint.copy(tint);
       lastKDay = kDay; lastGlowK = frame.glowK; lastGlowU = frame.glowU; lastPhotoK = frame.photoK;
+      lastSpaceK = frame.spaceK; lastHazeK = frame.hazeK;
       lastPaintAt = CBZ.now; forcePaint = false;
     }
 
@@ -570,6 +692,13 @@
         CBZ.camera.getWorldDirection(_camFwd);
         const align = clamp01(_camFwd.dot(_sunDirV));
         gop = Math.pow(align, 5) * clamp01(sunY * 3 + 0.15) * (0.42 + duskness * 0.5);
+        // Veiling glare is light scattered toward you by the air BETWEEN you
+        // and the sun, so it thins with the same aerosol column as the haze
+        // band (halved by 1,750 m). The 0.30 floor is not atmosphere — it is
+        // the glare a lens or an eye makes on its own, which altitude cannot
+        // take away. Without this the sunrise shot from the cockpit was one
+        // flat cream wash with no horizon left in it.
+        gop *= 0.30 + 0.70 * frame.hazeK;
       }
       glareSpr.visible = gop > 0.008;
       if (glareSpr.visible) {
@@ -596,5 +725,52 @@
       bcMat.color.multiplyScalar(1 - rainI * 0.35);
       bcMat.opacity = 0.9 - rainI * 0.15;
     }
-  });
+  }
+
+  CBZ.onAlways(99, skyFrame);
+
+  /* ---------------- the seam: CBZ.skySync() --------------------------
+     Frozen-loop tools (tools/visual-compare.mjs presets stub out
+     requestAnimationFrame and call renderer.render by hand) move the
+     camera between renders with nothing left to follow it. Four presets
+     had each hand-rolled `CBZ.skyDome.parent.position.set(cam.x, 0,
+     cam.z)` — a private detail of this file, copied five times, and now
+     WRONG at altitude. One call re-runs the whole frame sync (rig,
+     palette, forced repaint, sun/moon/glare placement) against the
+     camera as it stands right now. Degrade-safe by shape: a caller that
+     does not have it falls back to its old inline line. */
+  CBZ.skySync = function () {
+    forcePaint = true;
+    try { skyFrame(0); } catch (_) {}
+    return altY;
+  };
+
+  // Numbers for the gate: everything a screenshot could only guess at.
+  function elevDeg(x, y, z) {
+    const L = Math.hypot(x, y, z);
+    return L > 1e-6 ? Math.asin(Math.max(-1, Math.min(1, y / L))) * 180 / Math.PI : 0;
+  }
+  CBZ.skyAudit = function () {
+    return {
+      flag: !!CBZ.CONFIG.SKY_ALTITUDE,
+      altY: +altY.toFixed(1),
+      rigY: +rig.position.y.toFixed(1),
+      camY: +CBZ.camera.position.y.toFixed(1),
+      // must stay 0 — the eye is inside the dome at every altitude
+      camOutsideDome: rig.position.distanceTo(CBZ.camera.position) >= 850 ? 1 : 0,
+      spaceK: +frame.spaceK.toFixed(3),
+      hazeK: +frame.hazeK.toFixed(3),
+      // apparent elevation of the sun disc AS DRAWN, measured from the
+      // camera, vs. the elevation of the light that is actually shading the
+      // world. These two must AGREE at every altitude — they differed by
+      // tens of degrees from an aircraft, and that difference is the whole
+      // "sun rising out of the ground" bug.
+      sunElevDeg: +(elevDeg(
+        sunSpr.position.x + rig.position.x - CBZ.camera.position.x,
+        sunSpr.position.y + rig.position.y - CBZ.camera.position.y,
+        sunSpr.position.z + rig.position.z - CBZ.camera.position.z)).toFixed(2),
+      lightElevDeg: +(elevDeg(Math.cos(CBZ.sunAngle == null ? 0 : CBZ.sunAngle) * 80,
+        Math.sin(CBZ.sunAngle == null ? 0 : CBZ.sunAngle) * 95, -10)).toFixed(2),
+    };
+  };
 })();

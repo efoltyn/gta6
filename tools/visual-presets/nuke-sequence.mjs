@@ -196,10 +196,16 @@ async function stageNuke(input) {
   camera.position.set(camX, S.gy + Number(input.subject.alt), camZ);
   camera.lookAt(S.gx, S.gy + Number(input.subject.aim), S.gz);
   camera.updateProjectionMatrix();
-  // The sky lives on a rig that follows the camera at y=0 (core/sky.js);
-  // recenter it by hand because the loop that normally does this is frozen.
-  const skyRig = CBZ.skyDome && CBZ.skyDome.parent;
-  if (skyRig && skyRig.position) skyRig.position.set(camX, 0, camZ);
+  // The loop that normally keeps the sky under the camera is frozen. Use
+  // core/sky.js's own seam so the shot gets the SAME rig placement, palette
+  // and sun elevation the live game would have written; the y=0 line below
+  // is the pre-SKY_ALTITUDE fallback and is wrong for any camera high enough
+  // to matter (it measures the sun's elevation from sea level, not the eye).
+  if (typeof CBZ.skySync === "function") CBZ.skySync();
+  else {
+    const skyRig = CBZ.skyDome && CBZ.skyDome.parent;
+    if (skyRig && skyRig.position) skyRig.position.set(camX, 0, camZ);
+  }
   hideHud();
   if (CBZ.renderer.info && CBZ.renderer.info.reset) CBZ.renderer.info.reset();
   CBZ.renderer.render(CBZ.scene, camera);

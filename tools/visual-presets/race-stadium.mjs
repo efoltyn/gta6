@@ -354,10 +354,14 @@ async function stageRaceStadium(input) {
   camera.position.set(camPos.x, camPos.y, camPos.z);
   camera.lookAt(camTarget.x, camTarget.y, camTarget.z);
   camera.updateProjectionMatrix();
-  // core/sky.js: the sky rides a rig that the (frozen) loop normally keeps
-  // under the camera at y = 0. Recentre it by hand or the sky is a ball.
-  const skyRig = CBZ.skyDome && CBZ.skyDome.parent;
-  if (skyRig && skyRig.position) skyRig.position.set(camPos.x, 0, camPos.z);
+  // core/sky.js: the sky rides a rig the (frozen) loop normally keeps under
+  // the camera. Use the file's own seam so the shot matches the live game;
+  // the y=0 follow is the degrade path for a build that predates it.
+  if (typeof CBZ.skySync === "function") CBZ.skySync();
+  else {
+    const skyRig = CBZ.skyDome && CBZ.skyDome.parent;
+    if (skyRig && skyRig.position) skyRig.position.set(camPos.x, 0, camPos.z);
+  }
   if (CBZ.renderer.info && CBZ.renderer.info.reset) CBZ.renderer.info.reset();
   CBZ.renderer.render(CBZ.scene, camera);
   const render = (CBZ.renderer.info || {}).render || {};
