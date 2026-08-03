@@ -885,3 +885,42 @@ prob slop as is." Findings and what shipped:
   promoting: farcull hides far buildings behind box proxies but the instanced
   trim pools are frustum-culled only — no distance term — so far trim renders
   over its own proxy. Nobody has eyeballed it. Not slop; left untouched.
+
+## 2026-08-03 — outfits, jewellery, and the stores that sell them (fable orchestrating 3 opus builders + 3 sonnet scouts)
+
+Owner: suits "just off", collar "blue and geometric, not painted — clearly a
+bug", improve jewellery/watches and how everything looks ON the player
+(including the front, which third person never shows), then the stores.
+
+- **THE COLLAR BUG WAS TWO COLOR SOURCES** — the shoulder-yoke box tinted
+  from static `CAT.suit.colors` (navy 0x1c2030) while the jacket texture
+  painted from `SUIT_STYLES[style].body`; nothing synced them, so every one
+  of the 22 suits wore a navy slab (measured collarD 195 tan / 207 powder /
+  335 all-white). Police could not drift — painter and yoke read the same
+  value — which is exactly why "police looks great, suits are ass". Fix is
+  DERIVED: `CBZ.cityPaintedBodyHex` reads the modal pixel off the painted
+  atlas itself, the yoke wears its own painted 64x16 atlas
+  (`CLOTH_YOKE_PAINT`), and `cityOutfitYokeAudit().worst` is the ratchet —
+  0 after, over every catalog fit and all 22 styles.
+- **JEWELLERY V2** (`BLING_V2`) — real watch anatomy (band/case/bezel/dial;
+  AP octagon, Patek, RM tonneau for loot pieces), linked chains, ring
+  band+stone; repetition merges into cached geometries so a strand stays one
+  draw call. Three holes closed: Earrings rendered NOTHING on the player
+  while peds wore them as a RING (one classifier now, blingLook-first);
+  the diamond grill was authored 0.035 INSIDE the skull; tiara had no look.
+  `cityBlingAudit().holes` is the ratchet: 1 → 0. charpanel deleted its
+  fourth drifted copy of the tables and mounts from bling's exports.
+- **STORES** (`STORE_DRESS_V2`) — real display forms (was a 4-box bust),
+  four hanging runs sized by length (garments stopped intersecting), street
+  window, fitting alcove out of the clerk's counter spot, section/price
+  cards; jewellery cases got velvet risers, mounts that stay when a piece is
+  stolen, spot bars, Phong metals. No theft mechanic touched.
+- **NEW EYES**: `visual-presets/outfit-gallery.mjs` (live player from FRONT/
+  back/collar/chest/wrist/head, collarD + bling counts as metrics) and
+  `store-dress.mjs` (both store floors + dress-audit metrics). Staging
+  lessons IN the preset comments: a sub-meter game camera during stepSim
+  flips first-person and hides the rig (park it at 6 m before settling);
+  wearing the cop uniform mid-storyboard gets the player killed when the
+  disguise blows (uniforms LAST); teleport once, grounded, holstered.
+- **MATHGATE: ok** on the merged tree (318/180/202, det ok, errors
+  baseline-only). Shipped 84bdabf..7ca371d.
