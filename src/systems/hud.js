@@ -80,11 +80,17 @@
   const objEl = document.getElementById("objective");
   const objTag = objEl ? objEl.querySelector(".tag") : null;
   let feed = [];
+  // RESET MEANS EMPTY, NOT "OPEN AN EMPTY PANEL". This used to stamp the
+  // .killfeed class on at survival start, which is the ONLY thing that made
+  // the objective panel visible in that mode (hud.css fades #objective
+  // :not(.killfeed) whenever the minimap is up) — so a match began with a
+  // titled, permanently-empty "Casualties" box in the corner. Survival's
+  // deaths go to city/killfeed.js's corner feed now; this whole panel is a
+  // degrade-safe fallback and only opens when something is actually pushed.
   function killFeedReset() {
     feed = [];
     if (el.objText) el.objText.innerHTML = "";
-    if (objTag) objTag.textContent = "Casualties";
-    if (objEl) objEl.classList.add("killfeed");
+    if (objEl) objEl.classList.remove("killfeed");
   }
   function pushKill(text, color, big) {
     // City deaths are recorded by city/killfeed.js and delivered to News. The
@@ -92,6 +98,8 @@
     // the city HUD.
     if (CBZ.game && CBZ.game.mode === "city") return;
     if (!el.objText) return;
+    if (objTag) objTag.textContent = "Casualties";
+    if (objEl) objEl.classList.add("killfeed");
     const line = document.createElement("div");
     line.className = "kfeed" + (big ? " kfeed-you" : "");
     line.textContent = text;

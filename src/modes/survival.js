@@ -54,13 +54,33 @@
     if (/beaten|thrown|debris|tornado/.test(c)) return "#ffd06b";
     return "#e6ecf5";
   }
-  // push a death into the kill feed + spray cinematic gore at the body
+  /* ---- ONE DEATH BUS ------------------------------------------------------
+     OWNER DOCTRINE (docs/claude/engine-systems.md): every death funnels
+     through city/killfeed.js, and it owns the ONLY sanctioned HUD popup —
+     the corner feed. This mode used to run a FIFTH parallel text channel
+     instead: CBZ.pushKill (systems/hud.js) rewriting the prison objective
+     panel into a "Casualties" list, with its own colours, its own ageing and
+     its own DOM. So a survival death never reached the bus every other death
+     in the game uses, and the mode carried a killfeed nobody else could read.
+
+     CBZ.cityLogDeath is the migration. The one thing we do NOT accept from it
+     is the cause NORMALISATION — its label table is written for the city, so
+     "incinerated by lava" comes back as "explosion" and "burned alive in the
+     wildfire" comes back the same, which throws away exactly the detail that
+     makes a disaster death readable. It returns the record it pushed, so the
+     precise cause goes straight back on. */
   function reportDeath(actor, cause, imp) {
     if (!actor) return;
     const who = actor.isPlayer ? "You" : (actor.name || "A survivor");
-    const verb = actor.isPlayer ? "were" : "was";
     const label = cause || "eliminated";
-    if (CBZ.pushKill) CBZ.pushKill(who + " " + verb + " " + label, actor.isPlayer ? "#ff6b6b" : causeColor(cause), actor.isPlayer);
+    if (CBZ.cityLogDeath) {
+      const e = CBZ.cityLogDeath(who, label, { you: !!actor.isPlayer });
+      if (e) { e.cause = label; e.name = who; }
+    } else if (CBZ.pushKill) {
+      // degrade-safe: the old panel, byte-identical, if killfeed.js is absent
+      const verb = actor.isPlayer ? "were" : "was";
+      CBZ.pushKill(who + " " + verb + " " + label, actor.isPlayer ? "#ff6b6b" : causeColor(cause), actor.isPlayer);
+    }
     if (CBZ.gore && actor.pos) {
       let dir = null;
       if (imp && (imp.fromX != null || imp.dir)) {
@@ -130,12 +150,14 @@
     document.body.appendChild(overlay);
     resultsBtn.addEventListener("click", finishRound);
   }
-  // the live spectate status line (refreshed while the field keeps dying)
+  // The live spectate status line. It carries GAME STATE only — placement and
+  // how many are left — never how you died: that already went to the killfeed
+  // (the one sanctioned popup), and repeating it under a giant "ELIMINATED"
+  // was the death screen telling you what the screen had just shown you.
   function spectateLine() {
     const s = surv.stats;
-    const how = surv._deathCause ? "You were " + surv._deathCause + "  ·  " : "";
-    return how + "Placement #" + (s.placement || 1) + " of " + (s.total || "?") +
-      "  ·  " + surv.aliveCount() + " still alive  ·  spectating…";
+    return "#" + (s.placement || 1) + " of " + (s.total || "?") +
+      "  ·  " + surv.aliveCount() + " left";
   }
   function showSpectateOverlay() {
     buildOverlay();
@@ -191,8 +213,25 @@
     playerActor,
     stats: { total: 0, placement: 0, disastersSurvived: 0 },
 
+    /* THE GROUND YOU SEE IS THE GROUND YOU STAND ON — INCLUDING WHERE IT IS
+       GONE. A sinkhole is a hole in the FLOOR, not a black disc with an
+       instakill radius painted on the grass (which is exactly what it was).
+       systems/disasters.js publishes CBZ.survHoles; subtracting them here is
+       the whole implementation, because everything that moves in this mode —
+       the player's vertical physics, the bots' terrain follow, a thrown car —
+       already asks this one function where the ground is. You fall in because
+       there is nothing to stand on, and the landing is what kills you. */
     floorAt(x, z) {
-      return (g.mode === "survival" && surv.arena) ? surv.arena.groundHeightAt(x, z) : 0;
+      if (g.mode !== "survival" || !surv.arena) return 0;
+      const holes = CBZ.survHoles;
+      if (holes && holes.length) {
+        for (let i = 0; i < holes.length; i++) {
+          const h = holes[i];
+          const dx = x - h.x, dz = z - h.z;
+          if (dx * dx + dz * dz < h.mouth * h.mouth) return h.bottom;
+        }
+      }
+      return surv.arena.groundHeightAt(x, z);
     },
     liveBots,
     aliveCount() { return (CBZ.player.dead ? 0 : 1) + liveBots(); },
@@ -399,9 +438,11 @@
       // purged outright; the flag (defaulted in disasters.js) only governs
       // the shelter checks now.
       if (CBZ.disasters) CBZ.disasters.start();
-      // the prison "objective" panel becomes the survival KILL FEED instead of
-      // a static paragraph — it fills in as people start dying. (survival's
-      // own reset export — CBZ.killFeedReset belongs to city/killfeed.js.)
+      // ONE FEED. Deaths go to city/killfeed.js's corner feed like every other
+      // death in the game, so the reset is ITS reset. The old prison-objective
+      // "Casualties" panel is no longer written to at all; clearing it too
+      // keeps a stale line from a previous match off the screen.
+      if (CBZ.killFeedReset) CBZ.killFeedReset();
       if (CBZ.survKillFeedReset) CBZ.survKillFeedReset();
     },
     winStats(game) {

@@ -97,7 +97,10 @@
     // Deaths stay available as diegetic city news. The population counter still
     // pulses immediately, while the old red/white kill prose never paints over
     // the world. Your own death is already communicated by the WASTED card.
-    if (!e.you && typeof CBZ.cityPhoneNotify === "function") {
+    // City deaths only: a survival match is 99 eliminations in ten minutes and
+    // routing those to the phone's news app would bury every real notification
+    // the player has under a casualty list they are already watching happen.
+    if (!e.you && g && g.mode === "city" && typeof CBZ.cityPhoneNotify === "function") {
       CBZ.cityPhoneNotify({
         app: "news",
         from: "City Desk",
@@ -307,8 +310,13 @@
     // no attributed killer → environmental / unknown cause
     return '<span class="kf-t">' + vic + '</span><span class="kf-m">' + esc(cause) + '</span>';
   }
+  // SURVIVAL RENDERS HERE TOO. modes/survival.js used to run a fifth parallel
+  // kill channel (CBZ.pushKill into the prison objective panel) purely because
+  // this renderer was gated to the city. It logs through CBZ.cityLogDeath now,
+  // so the mode that is ENTIRELY about people dying gets the one sanctioned
+  // popup instead of its own.
   CBZ.onAlways(47.5, function () {
-    if (!g || g.mode !== "city" || CBZ.CONFIG.CITY_KILLFEED_HUD === false) {
+    if (!g || (g.mode !== "city" && g.mode !== "survival") || CBZ.CONFIG.CITY_KILLFEED_HUD === false) {
       if (feedEl && feedEl.childElementCount) { feedEl.innerHTML = ""; feedFP = ""; }
       return;
     }

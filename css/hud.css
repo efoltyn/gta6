@@ -638,7 +638,14 @@ body.full-map-open #citySpeech{opacity:0!important;}
    SURVIVAL (natural-disaster) mode HUD — shown only when the body
    carries .mode-survival; the prison-specific panels are hidden.
 ============================================================ */
-#survTop, #survStatus, #survBars, #disasterBanner { display:none; }
+/* SHOW DON'T TELL (2026-08-02): #survStatus and #disasterBanner are DEAD.
+   Nothing writes to them any more (systems/survivalhud.js dropped both
+   channels) and they are force-hidden in EVERY mode, survival included, so a
+   stale string can never surface. The elements themselves live in index.html
+   and are left there deliberately — this file cannot edit it, and an empty
+   div costs nothing. Their styling is deleted below. */
+#survTop, #survBars { display:none; }
+#survStatus, #disasterBanner { display:none !important; }
 #survFlash{ position:fixed; inset:0; pointer-events:none; background:#fff; opacity:0; z-index:25; transition:opacity .05s linear; }
 
 body.mode-survival #cigs,
@@ -650,9 +657,7 @@ body.mode-survival #compass,
 body.mode-survival #dashBtn { display:none !important; }
 
 body.mode-survival #survTop{ display:flex; }
-body.mode-survival #survStatus{ display:flex; }
 body.mode-survival #survBars{ display:block; }
-body.mode-survival #disasterBanner{ display:block; }
 
 /* alive counter — top centre */
 #survTop{
@@ -662,14 +667,6 @@ body.mode-survival #disasterBanner{ display:block; }
 #survTop b{ font-size:26px; color:#ff7a1a; font-variant-numeric:tabular-nums; }
 #survTop span{ font-size:13px; letter-spacing:2px; opacity:.85; }
 
-/* zone / disaster status — just under the alive counter */
-#survStatus{
-  position:absolute; top:62px; left:50%; transform:translateX(-50%);
-  padding:6px 14px; font-size:13px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#ffd451;
-  justify-content:center; min-height:0; white-space:nowrap;
-}
-#survStatus:empty, #survStatusText:empty{ opacity:0; }
-
 /* HP + stamina bars — bottom centre */
 #survBars{ position:absolute; left:50%; bottom:24px; transform:translateX(-50%); width:min(360px,72vw); }
 #survBars .sbar{ display:flex; align-items:center; gap:9px; margin-top:7px; }
@@ -678,16 +675,6 @@ body.mode-survival #disasterBanner{ display:block; }
 #hpBar{ height:100%; width:100%; border-radius:10px; background:#3ad17a; transition:width .12s linear, background .2s; }
 #stamBar{ height:100%; width:100%; border-radius:10px; background:#5bc8ff; transition:width .12s linear; }
 /* X2: survival/escape hunger meter (city mode already has its own #cFood bar) */
-
-/* big disaster warning banner — centre */
-#disasterBanner{
-  position:absolute; left:50%; top:24%; transform:translate(-50%,-50%) scale(.8);
-  font-size:clamp(28px,5vw,52px); font-weight:700; letter-spacing:3px; text-align:center; color:#fff;
-  text-shadow:0 3px 0 #b11226, 0 6px 0 #7c0c1a, 0 14px 28px rgba(0,0,0,.6);
-  opacity:0; pointer-events:none; white-space:nowrap; transition:opacity .25s, transform .25s;
-}
-#disasterBanner.show{ opacity:1; transform:translate(-50%,-50%) scale(1); animation:disasterpulse 1s ease-in-out infinite; }
-@keyframes disasterpulse{ 0%,100%{ transform:translate(-50%,-50%) scale(1); } 50%{ transform:translate(-50%,-50%) scale(1.06); } }
 
 /* ============================================================
    survival KILL FEED — the objective panel turns into a running

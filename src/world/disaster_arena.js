@@ -28,6 +28,42 @@
   const THREE = window.THREE;
 
   let arena = null;
+  // Live roughness of the arena sea, mirrored from whatever a disaster is
+  // driving into the shader so the CPU height query matches the displacement.
+  const arenaWave = { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 };
+  let arena_meanY = function () { return -0.8; };
+
+  /* ---- THE SURVIVAL WATER QUERIES ---------------------------------------
+     One surface, three questions, all answered off world/water_spec.js's
+     canonical swell table — the same one the shader displaces by. These are
+     what let city/swim.js (the real swimmer: sink-unless-you-swim, the 28 s
+     breath meter, the drown through the kill bus) work on this island without
+     knowing an island exists. Never build a second water height model.       */
+  CBZ.survSeaMeanY = function () { return arena_meanY(); };
+  CBZ.survSeaWave = function () { return arenaWave; };
+  CBZ.survSeaHeightAt = function (x, z) {
+    const mean = arena_meanY();
+    return CBZ.waterDisasterSurfaceY
+      ? CBZ.waterDisasterSurfaceY(x, z, mean, arenaWave.amp, arenaWave.chop)
+      : mean;
+  };
+  /* Metres of water standing over the ground at (x,z) — the survival twin of
+     CBZ.cityFloodDepthAt. Negative/zero means dry land.
+
+     SCOPE, DELIBERATELY: this answers FLOOD water, not open ocean. The arena's
+     walkable floor is a flat 0 everywhere outside the four hills — including
+     out to sea — which is why you have always been able to walk off this
+     island onto nothing. Making the sea beyond the beach swimmable means
+     giving the arena a real bathymetry, and that is a terrain change, not a
+     water one; doing it here would put the swimmer and the walk floor in a
+     fight over the same body. So: the sea rises, and when it is over your
+     ground you are in it. */
+  CBZ.survFloodDepthAt = function (x, z) {
+    if (!arena) return 0;
+    return CBZ.survSeaHeightAt(x, z) - arena.groundHeightAt(x, z);
+  };
+  // "is this point in the water" — the survival twin of CBZ.cityWaterAt.
+  CBZ.survWaterAt = function (x, z) { return CBZ.survFloodDepthAt(x, z) > 0.3; };
 
   // deterministic-ish RNG so the map is the same each match (learnable)
   let _s = 1337;
@@ -92,9 +128,33 @@
     ocean.userData.waterSurface = true;
     ocean.userData.surfaceOwner = "survival-water";
     ocean.userData.waterMode = sharedWater ? "shared-disaster-fresnel" : "lambert-fallback";
-    if (sharedWater && CBZ.onUpdate) CBZ.onUpdate(27.85, function () {
-      if (!arena || !ocean.visible || !CBZ.game || CBZ.game.mode !== "survival") return;
-      CBZ.waterDriveDisasterSurface(ocean);
+
+    /* ---- THE ARENA'S SEA *IS* THE GAME'S SEA (SURV_SHARED_WATER) ----------
+       CBZ.waterSurgeSet(m) (world/water_spec.js) is the ONE way water rises in
+       this game, and until now the survival island was the one place that did
+       not obey it: the tsunami and the flash flood each wrote ocean.position.y
+       by hand and then built a SECOND private flood plane on top, so the
+       island had two water surfaces and neither of them was the sea.
+
+       Now the ocean plane simply tracks mean sea level plus the live surge,
+       every frame, and a disaster's whole job is to move that one number. The
+       consequences fall out for free: raising it floods the island (no flood
+       sheet to build), CBZ.survSeaHeightAt below answers with the SAME swell
+       table the shader displaces by, and city/swim.js can therefore own the
+       swimmer here exactly as it does in the city.
+       `waveAmp/chopAmp` are mirrored onto the descriptor so the CPU query and
+       the GPU displacement can never disagree about how rough the sea is. */
+    arenaWave.amp = 0.86; arenaWave.chop = 0.72;
+    arena_meanY = function () { return OCEAN_Y + (CBZ.waterSurge ? CBZ.waterSurge() : 0); };
+    // 47.9: AFTER the disaster director (28) has set this frame's surge and
+    // after swim.js's main pass (45.8) has resolved the swimmer against it,
+    // but before the camera (50). Following the surge at 27.85 would have
+    // rendered the sea one frame behind the level everything else used — and
+    // would have left the mesh a frame high on the tick a tsunami ends.
+    if (CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
+      if (!arena || !CBZ.game || CBZ.game.mode !== "survival") return;
+      ocean.position.y = arena_meanY();
+      if (sharedWater) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
     });
 
     // the SEABED shelf under the sea: invisible in normal play (the opaque
@@ -785,10 +845,17 @@
       // restore the island between matches: un-collapse buildings (re-show the
       // group, re-register its walls/floors/roof), regrow trees, clear craters.
       reset() {
-        ocean.position.y = OCEAN_Y;   // a match can end mid-tsunami-warning with the sea pulled out
-        if (CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(ocean, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 });
+        // a match can end mid-tsunami — the sea is ONE number, so putting it
+        // back is one call, not a mesh to reposition and a sheet to delete
+        if (CBZ.waterSurgeSet) CBZ.waterSurgeSet(0);
+        arenaWave.amp = 0.86; arenaWave.chop = 0.72; arenaWave.foam = 0.34; arenaWave.opacity = 1;
+        ocean.position.y = OCEAN_Y;
+        if (CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
         for (const b of fragile) {
+          // clear the shared structural ledger (systems/disasters.js) so a new
+          // match starts on undamaged towers, not on last match's spalling
+          b._dmg = 0; b._lean = 0; b._tsuHit = null;
           if (b.fallen) {
             b.group.visible = true;
             b.group.position.set(b.ox, b.gy, b.oz);

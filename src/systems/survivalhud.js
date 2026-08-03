@@ -1,14 +1,26 @@
 /* ============================================================
    systems/survivalhud.js — the SURVIVAL disaster HUD.
 
-   Alive-count pill ("87 ALIVE"), HP + stamina bars, the big disaster
-   warning banner, a disaster status line (incoming / active / over),
-   the screen white-out (lightning/nuke), and a minimap drawn to the
+   Alive-count pill ("87 ALIVE"), HP + stamina bars, a BREATH bar while
+   you are in the water, the screen white-out (lightning/nuke), and a
+   minimap drawn to the
    existing #minimap canvas (the prison minimap is gated off in this
    mode): terrain, survivors, you — and the ACTUAL location of the
    live hazard (CBZ.disasters.hazards(): tornado funnel, strike
    markers, sinkholes, lava vent, the advancing wave front, the nuke
    shockwave). There are no zones in this mode — just disasters.
+
+   SHOW DON'T TELL (2026-08-02). Two channels were DELETED here, not
+   hidden: the giant pulsing #disasterBanner ("EARTHQUAKE — INCOMING")
+   and the #survStatusText countdown that re-stated the same disaster's
+   name and remaining seconds every single frame. Between them and the
+   flashHints in systems/disasters.js the mode was narrating itself four
+   ways at once, and every one of those lines named an event that now
+   HAPPENS in front of you instead: the ground rattles, the sea goes
+   out, the sky closes in. What is left on screen is game STATE (how
+   many are alive, your health, your air) and the map, which shows the
+   hazard WHERE IT REALLY IS. Deaths go to the killfeed, which is the
+   one sanctioned popup.
 
    Most elements are hidden in escape mode via the body.mode-survival
    class (see hud.css), so this only writes data while survival is live.
@@ -21,21 +33,18 @@
     alive: document.getElementById("aliveCount"),
     hp: document.getElementById("hpBar"),
     stam: document.getElementById("stamBar"),
-    banner: document.getElementById("disasterBanner"),
-    status: document.getElementById("survStatusText"),
     flash: document.getElementById("survFlash"),
   };
   const cv = document.getElementById("minimap");
   const ctx = cv ? cv.getContext("2d") : null;
   const W = cv ? cv.width : 0, H = cv ? cv.height : 0;
 
-  CBZ.survHud = {
-    banner(html, on) {
-      if (!el.banner) return;
-      if (on && html) { el.banner.innerHTML = html; el.banner.classList.add("show"); }
-      else el.banner.classList.remove("show");
-    },
-  };
+  // The banner() API is GONE. It is named here so the next author looking for
+  // it finds the reason rather than re-adding it: a full-screen pulsing title
+  // is the loudest possible way to tell somebody something the world could
+  // have shown them, and every one of its nine call sites now drives a
+  // physical telegraph in systems/disasters.js instead.
+  CBZ.survHud = {};
 
   function drawMinimap() {
     if (!ctx) return;
@@ -121,17 +130,22 @@
     const surv = CBZ.surv;
     if (el.alive) el.alive.textContent = surv.aliveCount();
     if (el.hp) { const h = Math.max(0, CBZ.player.hp); el.hp.style.width = h + "%"; el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d"); }
-    if (el.stam) el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
-
-    // status line: which disaster is coming / raging / just ended. That's the
-    // whole loop — announcement, the disaster, "it's over". Nothing else.
-    if (el.status) {
-      const D = CBZ.disasters;
-      let s = "";
-      if (D && D.state() === "warn" && D.current()) s = "" + D.current() + " incoming · " + Math.ceil(D.timeLeft()) + "s";
-      else if (D && D.state() === "active" && D.current()) s = D.current() + " · " + Math.ceil(D.timeLeft()) + "s";
-      else if (D && D.justEnded && D.justEnded()) s = "✓ " + D.justEnded() + " is over";
-      el.status.textContent = s;
+    // THE STAMINA BAR BECOMES AN AIR BAR IN THE WATER. city/swim.js owns the
+    // island's swimmer now, and its 28 s breath tank is the one number that
+    // decides whether you make the roof — so the bar the player is already
+    // watching shows it, in a colour that says "this one is different",
+    // instead of the mode growing a second meter. Out of the water it is the
+    // stamina bar again, byte-identical.
+    if (el.stam) {
+      const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
+      if (sw && sw.swimming && CBZ.player.breathMax) {
+        const air = Math.max(0, Math.min(1, (CBZ.player.breath || 0) / CBZ.player.breathMax));
+        el.stam.style.width = (air * 100).toFixed(1) + "%";
+        el.stam.style.background = air > 0.3 ? "#5bc8ff" : "#ff4d4d";
+      } else {
+        el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
+        el.stam.style.background = "#5bc8ff";
+      }
     }
 
     // screen flash (lightning / nuke white-out)

@@ -308,11 +308,95 @@
   let touchVert = 0, touchVertT = -9;  // touch-driven dive/rise, with a stale sweep
   const swimCurrent = { x: 0, z: 0 };
 
-  function arena() { return g.mode === "city" ? (CBZ.city && CBZ.city.arena) : null; }
+  /* ============================================================
+     THE DISASTER ISLAND IS WATER TOO (SURV_SHARED_SWIM).
+
+     This module was gated to `g.mode === "city"` for its whole life, so the
+     survival mode — the one whose headline event is a TSUNAMI — had no
+     swimmer at all. systems/disasters.js had therefore hand-rolled a second
+     one: a private buoyancy step, stamina-as-air, a duplicate stroke pose at
+     order 46.5, and an 18 hp/s damage-over-time on anyone standing in more
+     than 1.5 m of water. The owner's verdict on that was "when in water you
+     just insta die it's so dumb", and he was describing a DOT with no breath
+     meter, no surface to reach for and no decision in it.
+
+     Nothing here is re-implemented for the island. The arena publishes the
+     same three answers the city's waterfield publishes — CBZ.survSeaHeightAt
+     (the shared swell table), CBZ.survFloodDepthAt, CBZ.survWaterAt — and the
+     four seams below route to them. Everything else (graduated submergence,
+     carried velocity, the buoyancy oscillator, SWIM_SINK, the 28 s breath
+     tank, the climb-out) is the code the city already runs, untouched.
+
+     SURV_SHARED_SWIM=false restores the old gate: no swimmer on the island.
+     ============================================================ */
+  if (CFG.SURV_SHARED_SWIM == null) CFG.SURV_SHARED_SWIM = true;
+  function survOn() {
+    return CFG.SURV_SHARED_SWIM !== false && g.mode === "survival" &&
+      !!(CBZ.surv && CBZ.surv.arena && CBZ.survSeaHeightAt);
+  }
+  // A descriptor with the shape the rest of this file expects. `minX` must be
+  // finite (every gate tests `A.minX == null`); the rect is the island's own
+  // bounding box, and `surv` is what routes the four seams below.
+  const _survA = { surv: true, minX: 0, maxX: 0, minZ: 0, maxZ: 0, A: null };
+  function survArena() {
+    const A = CBZ.surv.arena, c = A.center, r = A.radius;
+    _survA.A = A;
+    _survA.minX = c.x - r; _survA.maxX = c.x + r;
+    _survA.minZ = c.z - r; _survA.maxZ = c.z + r;
+    return _survA;
+  }
+  function arena() {
+    if (survOn()) return survArena();
+    return g.mode === "city" ? (CBZ.city && CBZ.city.arena) : null;
+  }
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+  /* DROWNING GOES THROUGH THE MODE'S OWN DEATH PIPELINE, and there is exactly
+     one of those per mode. In the city that is cityHurtPlayer -> death.js ->
+     cityKillPlayer (which killfeed.js wraps). On the island it is
+     CBZ.surv.hurt, which owns placement, the ragdoll death-cam and the
+     spectate handover — routing an island drowning through cityHurtPlayer
+     would kill the player without any of that. The CAUSE STRING is identical
+     either way, because "drown" is what city/death.js's wound filter and
+     modes/survival.js's feed colouring both pattern-match on. */
+  /* A MOVING BODY OF WATER MOVES YOU. The city's current comes from
+     waterfield.js (coastline-aware, so it drifts you along a beach but never
+     conveyor-belts you through it). The island's comes from the ONE published
+     disaster-water descriptor (water_spec.js's waterEventSample) — which is
+     the tsunami's own flow, so being swept downstream in the inundation is
+     the same code path as being carried by a tide. Neither one is a second
+     current model; this function only chooses which field is speaking. */
+  const _curSample = {};
+  function applyCurrent(P, step) {
+    if (survOn()) {
+      if (!CBZ.waterEventSample) return;
+      const s = CBZ.waterEventSample(P.pos.x, P.pos.z, null, _curSample);
+      if (!s.active || !s.wet) return;
+      const nx = P.pos.x + (s.currentX || 0) * step * 0.34;
+      const nz = P.pos.z + (s.currentZ || 0) * step * 0.34;
+      if (CBZ.survWaterAt(nx, nz)) { P.pos.x = nx; P.pos.z = nz; }
+      return;
+    }
+    if (!CBZ.waterField || !CBZ.waterField.currentAt) return;
+    const cur = CBZ.waterField.currentAt(P.pos.x, P.pos.z, undefined, swimCurrent);
+    const nx = P.pos.x + cur.x * step * 0.34, nz = P.pos.z + cur.z * step * 0.34;
+    if (CBZ.waterField.isSurfaceWater(nx, nz, 0.5)) { P.pos.x = nx; P.pos.z = nz; }
+  }
+
+  function hurtDrowning(P, dmg) {
+    if (survOn() && CBZ.surv && CBZ.surv.hurt) {
+      CBZ.surv.hurt(CBZ.surv.playerActor, dmg, { cause: "drowned" });
+      return;
+    }
+    if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, P.pos.x, P.pos.z, "drowned", false, null, false);
+  }
 
   // is (x,z) over open water? (outside every walkable land mass)
   function waterAt(A, x, z) {
+    // THE ISLAND: "water" is not a coastline test at all — the sea LEVEL moves
+    // (CBZ.waterSurgeSet), so the only honest question is whether there is
+    // water standing over the ground here. A flooded street answers yes.
+    if (A && A.surv) return !!(CBZ.survWaterAt && CBZ.survWaterAt(x, z));
     // waterfield.js owns the rendered continent's exact signed coast.  Keep
     // the rect/circle branch only as a boot/legacy fallback.
     if (CBZ.waterField && CBZ.waterField.isSurfaceWater) {
@@ -334,6 +418,7 @@
   // Live surface Y at a point — the same crest the shader displaces and the
   // boats ride (world/water_spec.js owns the one swell table).
   function surfAt(x, z) {
+    if (survOn()) return CBZ.survSeaHeightAt(x, z);
     return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z)
       : (CBZ.waterSeaY ? CBZ.waterSeaY() : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48));
   }
@@ -344,6 +429,9 @@
   // is flat 0 over the whole sea, which is exactly the phantom floor this
   // module exists to stop you standing on.
   function bedDepthAt(x, z) {
+    // THE ISLAND has a real, queryable bed — the arena's own height field —
+    // so no synthetic shelf is needed or wanted here.
+    if (survOn()) return Math.max(0, CBZ.survFloodDepthAt(x, z));
     const wf = CBZ.waterField;
     let shelf = 99;
     if (wf && wf.shoreAt) shelf = Math.max(0, -wf.shoreAt(x, z)) * SHELF_SLOPE;
@@ -366,7 +454,51 @@
   // swimmer presses against the seawall collider and can never get closer
   // than that), but the LANDING point steps well past the wall's own collider
   // box so the haul-up can't be shoved straight back off the lip.
+  /* THE ISLAND'S WAY OUT. The city's climb-out is closed-form because its land
+     is a handful of declared rectangles; the island's is a height field over
+     which the sea can stand at any level, so the answer has to be SAMPLED.
+     Sixteen bearings x four ranges = 64 probes, run only while you are
+     actually swimming and only against a cheap analytic height field.
+     CBZ.groundAt is preferred over the bare terrain so a building floor, a
+     stairwell landing or a roof standing clear of the flood is a way out —
+     which is what makes climbing INTO a tower the answer to a tsunami. */
+  // 12 bearings x 4 ranges is 48 probes; the answer is CACHED for a fifth of a
+  // second and against movement, the same discipline city/tsunami.js's
+  // nearestWaterDir uses. A haul-out point does not move quickly and being one
+  // beat stale costs nothing.
+  let _scT = -1e9, _scX = 0, _scZ = 0, _scR = null;
+  function survClimbSpot(A, x, z, reach) {
+    const now = CBZ.now || 0;
+    if (now - _scT < 200 && Math.abs(x - _scX) < 1.2 && Math.abs(z - _scZ) < 1.2) return _scR;
+    _scT = now; _scX = x; _scZ = z;
+    const ground = A.A.groundHeightAt;
+    const surf = surfAt(x, z);
+    const step = Math.max(0.9, reach / 4);
+    let best = null, bd = 1e9;
+    for (let a = 0; a < 12; a++) {
+      const th = (a / 12) * Math.PI * 2, dx = Math.cos(th), dz = Math.sin(th);
+      for (let d = 1.2; d <= reach; d += step) {
+        const sx = x + dx * d, sz = z + dz * d;
+        let top = ground(sx, sz);
+        // Only ask the platform stack where the bare terrain has NOT already
+        // answered — a building floor, stairwell landing or roof standing
+        // clear of the flood is a way out, and that is what makes climbing
+        // INTO a tower the right answer to a tsunami.
+        if (top < surf + 0.15 && CBZ.groundAt) {
+          const t2 = CBZ.groundAt(sx, sz, surf + 1.2);
+          if (t2 > top) top = t2;
+        }
+        if (top < surf + 0.15 || top > surf + DECK_REACH_UP) continue;
+        if (d < bd) { bd = d; best = { x: sx + dx * 0.8, z: sz + dz * 0.8, y: top, deck: true }; }
+        break;                        // this bearing has answered; try the next
+      }
+    }
+    _scR = best;
+    return best;
+  }
+
   function climbSpot(A, x, z, reach) {
+    if (A && A.surv) return survClimbSpot(A, x, z, reach);
     let best = null, bd = reach;
     function consider(ex, ez2, lx, lz) {
       const d = Math.hypot(ex - x, ez2 - z);
@@ -593,7 +725,10 @@
     // is the real one, and its sample list already includes splash1.mp3.
     if (CBZ.sfx) { try { CBZ.sfx("water", { volume: Math.min(1.2, 0.7 + fall * 0.06), force: true }); } catch (e) {} }
     if (CBZ.shake) CBZ.shake(Math.min(0.6, 0.3 + fall * 0.02));
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("In the drink — swim to the seawall before you tire out", 2.6);
+    // The island says nothing. In survival the water arriving IS the message
+    // (SHOW DON'T TELL) — the splash, the shake and the breath bar are the
+    // whole readout, and a line of prose over a tsunami is noise.
+    if (!survOn() && CBZ.city && CBZ.city.note) CBZ.city.note("In the drink — swim to the seawall before you tire out", 2.6);
   }
 
   function exitWater(P, spot) {
@@ -859,11 +994,7 @@
     // A weak coastline-aware current makes the sea feel like a moving body of
     // water. waterfield removes any shoreward component near land, so it can
     // drift a swimmer along a beach but never conveyor-belt them through it.
-    if (CBZ.waterField && CBZ.waterField.currentAt) {
-      const cur = CBZ.waterField.currentAt(P.pos.x, P.pos.z, undefined, swimCurrent);
-      const nx = P.pos.x + cur.x * fdt * 0.34, nz = P.pos.z + cur.z * fdt * 0.34;
-      if (CBZ.waterField.isSurfaceWater(nx, nz, 0.5)) { P.pos.x = nx; P.pos.z = nz; }
-    }
+    applyCurrent(P, fdt);
     if (CBZ.collideSlide) CBZ.collideSlide(P.pos, P.radius || 0.55, S.y + 0.25, S.y + BODY_H);
     else if (CBZ.collide) CBZ.collide(P.pos, P.radius || 0.55, S.y + 0.25, S.y + BODY_H);
     // If a wall ate the step, the velocity has to lose it too — otherwise you
@@ -1035,11 +1166,9 @@
       // ONE pipeline: cityHurtPlayer -> death.js -> cityKillPlayer, which
       // killfeed.js wraps. "drowned" survives normCause verbatim, so the corner
       // feed reads "You — drowned" with no bespoke toast of any kind here.
-      if (CBZ.cityHurtPlayer) {
-        const wasDead = !!P.dead;
-        CBZ.cityHurtPlayer(DROWN_DPS * 0.5, P.pos.x, P.pos.z, "drowned", false, null, false);
-        if (!wasDead && P.dead) drownDeaths++;
-      }
+      const wasDead = !!P.dead;
+      hurtDrowning(P, DROWN_DPS * 0.5);
+      if (!wasDead && P.dead) drownDeaths++;
     }
   }
 
@@ -1051,11 +1180,9 @@
     S.hurtT += dt;
     if (S.hurtT >= 1) {
       S.hurtT = 0;
-      if (CBZ.cityHurtPlayer) {
-        const wasDead = !!P.dead;
-        CBZ.cityHurtPlayer(DROWN, P.pos.x, P.pos.z, "drowned", false, null, false);
-        if (!wasDead && P.dead) drownDeaths++;
-      }
+      const wasDead = !!P.dead;
+      hurtDrowning(P, DROWN);
+      if (!wasDead && P.dead) drownDeaths++;
     }
   }
 
@@ -1114,11 +1241,7 @@
 
     P.pos.x = px + (P.pos.x - px) * 0.45;
     P.pos.z = pz + (P.pos.z - pz) * 0.45;
-    if (CBZ.waterField && CBZ.waterField.currentAt) {
-      const cur = CBZ.waterField.currentAt(P.pos.x, P.pos.z, undefined, swimCurrent);
-      const nx = P.pos.x + cur.x * dt * 0.34, nz = P.pos.z + cur.z * dt * 0.34;
-      if (CBZ.waterField.isSurfaceWater(nx, nz, 0.5)) { P.pos.x = nx; P.pos.z = nz; }
-    }
+    applyCurrent(P, dt);
     px = P.pos.x; pz = P.pos.z;
     P._swimPhase = (P._swimPhase || 0) + dt * (2.6 + Math.min(3, P.speed || 0) * 0.22);
     S.stroke = P._swimPhase; S.mood = 0;
@@ -1132,7 +1255,7 @@
     const spot = climbSpot(A, P.pos.x, P.pos.z, 4.6);
     if (spot) {
       legacyHintT -= dt;
-      if (legacyHintT <= 0 && CBZ.city && CBZ.city.note) { legacyHintT = 1.6; CBZ.city.note("[Space] climb out", 1.4); }
+      if (legacyHintT <= 0 && !survOn() && CBZ.city && CBZ.city.note) { legacyHintT = 1.6; CBZ.city.note("[Space] climb out", 1.4); }
       if (CBZ.keys && CBZ.keys[" "]) exitWater(P, spot);
     }
     climbPress = false;
