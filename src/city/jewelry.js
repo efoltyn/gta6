@@ -63,6 +63,17 @@
   const ALARM_TIME = 18;     // how long the alarm screams after a smash
   const CASE_W = 1.35, CASE_D = 0.85;   // glass case footprint (long side faces the aisle)
 
+  // STORE_DRESS_V2 — the DRESSED case. OWNER: "all stores have weird interior
+  // walls and random shit." The cases were a velvet slab with jewellery sitting
+  // flat on it and a floating price sticker hovering over the glass, which is
+  // exactly the "random shit" read: a jeweller's case is a lit, tiered display
+  // where every piece stands on the mount built for it. Declared HERE, in the
+  // owning file, so the revert is one line and local. Nothing about the THEFT
+  // model is behind this flag — glass registration, the clerk's line of sight,
+  // the night pry and the alarm are all untouched by anything below.
+  if (CBZ.CONFIG && CBZ.CONFIG.STORE_DRESS_V2 == null) CBZ.CONFIG.STORE_DRESS_V2 = true;
+  function v2() { return !(CBZ.CONFIG && CBZ.CONFIG.STORE_DRESS_V2 === false); }
+
   // What each case HOLDS, value-tiered front → vault. Two kinds of slot:
   //   { id }   — a BUYABLE catalog piece (visualId from cityEcon jewelry tag):
   //              [E] Buy it (clerk-watched + intact case), it equips on your body
@@ -131,6 +142,17 @@
 
   // ---- shared geometries + materials (one each, flagged _shared) ------------
   let M = null, GEO = null;
+  // METAL IS A HIGHLIGHT, NOT A COLOUR. Lambert has no specular term at all, so
+  // "gold" and "steel" differed only in hue: a flat mustard box beside a flat
+  // grey box. Phong gives every piece a highlight that MOVES as you walk the
+  // aisle, which is the whole difference between a yellow shape and a gold
+  // watch — and it is what makes a case read as worth breaking. Same colours
+  // either way; STORE_DRESS_V2=false hands back the exact old Lambert set.
+  function metal(color, emissive, ei, shininess, spec) {
+    if (!v2()) return new THREE.MeshLambertMaterial({ color: color, emissive: emissive, emissiveIntensity: ei });
+    return new THREE.MeshPhongMaterial({ color: color, emissive: emissive, emissiveIntensity: ei,
+                                         specular: spec, shininess: shininess });
+  }
   function mats() {
     if (M) return M;
     M = {
@@ -142,10 +164,16 @@
       // metal finishes match bling.js's player-worn tones, so the case piece and
       // the wrist it lands on read as the SAME metal: gold 0xc9a44a, silver
       // 0xb9c0c8, ice 0xeaf6ff. (case versions glow a touch more for the display.)
-      gold: new THREE.MeshLambertMaterial({ color: 0xc9a44a, emissive: 0x7a5c1c, emissiveIntensity: 0.4 }),
-      silver: new THREE.MeshLambertMaterial({ color: 0xc6cdd6, emissive: 0x70798a, emissiveIntensity: 0.32 }),
-      ice: new THREE.MeshLambertMaterial({ color: 0xeaf6ff, emissive: 0xa6d6ff, emissiveIntensity: 0.78 }),  // diamonds READ from the door
-      glint: new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xdff0ff, emissiveIntensity: 0.95 }), // a single hot sparkle
+      gold: metal(0xc9a44a, 0x7a5c1c, 0.4, 90, 0xfff0c0),
+      silver: metal(0xc6cdd6, 0x70798a, 0.32, 110, 0xffffff),
+      ice: metal(0xeaf6ff, 0xa6d6ff, 0.78, 150, 0xffffff),   // diamonds READ from the door
+      glint: metal(0xffffff, 0xdff0ff, 0.95, 180, 0xffffff), // a single hot sparkle
+      // ---- display hardware (the case INTERIOR) ---------------------------
+      velvetDark: new THREE.MeshLambertMaterial({ color: 0x1b1016 }),                              // the vault's near-black velvet
+      cushion: new THREE.MeshLambertMaterial({ color: 0x5d1a26 }),                                 // raised velvet pad / watch roll
+      ivory: new THREE.MeshLambertMaterial({ color: 0xe6e0d2 }),                                   // neck forms + ring cones (jeweller's ivory)
+      card: new THREE.MeshLambertMaterial({ color: 0xf4f1e8 }),                                    // price card stock
+      spot: new THREE.MeshLambertMaterial({ color: 0xfff2d0, emissive: 0xffdfa0, emissiveIntensity: 0.95 }), // the lit bar / the vault's single beam
       dial: new THREE.MeshLambertMaterial({ color: 0x14171d, emissive: 0x0a0c10, emissiveIntensity: 0.12 }),  // dark sunburst dial
       blueDial: new THREE.MeshLambertMaterial({ color: 0x1c3a66, emissive: 0x0c2244, emissiveIntensity: 0.25 }), // diver blue dial
       lume: new THREE.MeshLambertMaterial({ color: 0xd8ffe6, emissive: 0x8fffba, emissiveIntensity: 0.7 }),   // glowing lume markers
@@ -177,6 +205,10 @@
       bandSeg: new THREE.BoxGeometry(0.085, 0.052, 0.022),               // bracelet link segment
       icegem: new THREE.OctahedronGeometry(0.012, 0),                    // pavé stone (tiny)
       tile: new THREE.BoxGeometry(0.014, 0.012, 0.006),                  // grill tooth tile
+      // ---- the MOUNTS a jeweller stands stock on ---------------------------
+      cuff: new THREE.CylinderGeometry(0.058, 0.058, 0.15, 10),          // watch roll (a watch is worn on an arm, so it lies on one)
+      cone: new THREE.CylinderGeometry(0.011, 0.022, 0.085, 6),          // ring finger
+      pillow: new THREE.CylinderGeometry(0.075, 0.075, 0.035, 10),       // flat velvet cushion (grill / tiara)
     };
     Object.keys(GEO).forEach((k) => { GEO[k]._shared = true; });
     return GEO;
@@ -197,7 +229,14 @@
     const GG = geos(), m = mats();
     // common: the display stand + an upright case the dial sits on. We stand the
     // case on its edge (rotate the cylinder so its flat face points at the door).
-    const stand = mesh(GG.stand, m.body); stand.position.y = 0.06; grp.add(stand);
+    if (v2()) {
+      // a watch is worn on an ARM, so a jeweller shows one lying over a velvet
+      // ROLL — not balancing on a wooden wedge. The roll's axis runs along the
+      // case's long side (the caller yaws the group), so it reads as a cuff.
+      const roll = mesh(GG.cuff, m.cushion); roll.rotation.z = Math.PI / 2; roll.position.y = 0.06; grp.add(roll);
+    } else {
+      const stand = mesh(GG.stand, m.body); stand.position.y = 0.06; grp.add(stand);
+    }
     const caseY = 0.21;
     const place = function (mh, y) { mh.rotation.x = Math.PI / 2; mh.position.set(0, y == null ? caseY : y, 0); return mh; };
 
@@ -267,9 +306,13 @@
       const link = mesh(GG.link, iced ? m.ice : m.gold, 1.05);
       link.rotation.x = Math.PI / 2; link.position.y = 0.02; grp.add(link);
       const pend = mesh(GG.gem, iced ? m.glint : m.gold, iced ? 1.1 : 0.9); pend.position.set(0, 0.03, 0.085); grp.add(pend);
+      // two hot studs either side of the pendant — a stone is a POINT of light,
+      // and two of them is what stops a chain reading as bent wire.
+      if (v2()) for (const s of [-1, 1]) { const st = mesh(GG.icegem, m.glint, 0.9); st.position.set(s * 0.045, 0.03, 0.072); grp.add(st); }
     } else if (kind === "ring_diamond") {                                 // composable diamond ring
       const r = mesh(GG.ring, m.silver); const gm = mesh(GG.gem, m.glint, 0.95); gm.position.y = 0.078;
       grp.add(r); grp.add(gm);
+      if (v2()) for (const s of [-1, 1]) { const st = mesh(GG.icegem, m.glint, 0.8); st.position.set(s * 0.036, 0.058, 0); grp.add(st); }   // shoulder stones
     } else if (kind === "grill_diamond") {                                // composable diamond grill: a row of iced teeth
       const base = mesh(GG.box, m.silver, 0.14, 0.04, 0.06); base.position.y = 0.028; grp.add(base);
       for (let i = -2; i <= 2; i++) { const t = mesh(GG.tile, m.glint); t.position.set(i * 0.026, 0.055, 0.022); grp.add(t); }
@@ -291,7 +334,49 @@
     return grp;
   }
 
+  // ---- THE CASE INTERIOR: mounts, light and cards -----------------------------
+  // A jeweller's case is a TIERED, LIT display and every piece stands on the
+  // mount built for it: a watch lies on a roll, a chain hangs on a neck form, a
+  // ring is pushed onto a finger cone. Jewellery lying flat on a velvet slab is
+  // a tray of loose stock in a back room, not a shop window — and the whole WHY
+  // of this store is that you walk past your next score every day and WANT it.
+  // Mounts stay behind when a piece is taken: an empty cone under broken glass
+  // says what happened here better than any popup could.
+  const MOUNT = { chain_gold: "neck", chain_iced: "neck", ring_diamond: "finger",
+                  "Engagement Ring": "finger", "Diamond Tiara": "pillow", grill_diamond: "pillow" };
+  const MOUNT_H = { neck: 0.2, finger: 0.055, pillow: 0.035 };
+  function buildMount(host, kind, x, y, z, faceY) {
+    const GG = geos(), m = mats();
+    const k = MOUNT[kind];
+    if (!k) return 0;                                 // watches carry their own roll; the necklace draws its own bust
+    const grp = new THREE.Group();
+    grp.position.set(x, y, z); grp.rotation.y = faceY;
+    host.add(grp);
+    if (k === "neck") { const b = mesh(GG.bust, m.ivory); b.position.y = 0.12; grp.add(b); }
+    else if (k === "finger") { const c = mesh(GG.cone, m.ivory); c.position.y = 0.043; grp.add(c); }
+    else { const p = mesh(GG.pillow, m.cushion); p.position.y = 0.018; grp.add(p); }
+    return MOUNT_H[k] || 0;
+  }
+  // a blank card standing at the front edge of the case, angled at the shopper.
+  // No text: PROPS_PURPOSE (owner order) keeps words off merchandise — the
+  // walk-up prompt already carries the name, the price and the drip line.
+  function buildPriceCard(host, x, y, z, faceY) {
+    const GG = geos(), m = mats();
+    const grp = new THREE.Group();
+    grp.position.set(x, y, z); grp.rotation.y = faceY;
+    host.add(grp);
+    const card = mesh(GG.box, m.card, 0.12, 0.075, 0.012);
+    card.rotation.x = -0.55;
+    grp.add(card);
+    return grp;
+  }
+
   function tagSprite(text, color, sx, sy) {
+    // PROPS_PURPOSE (owner order): no floating words hovering over the stock.
+    // The physical price cards below carry the "this is priced merchandise"
+    // read and the [E] prompt carries the actual number. All call sites
+    // null-guard, so returning null degrades cleanly.
+    if (v2()) return null;
     if (!CBZ.makeLabelSprite) return null;
     const s = CBZ.makeLabelSprite(text, { color: color || "#ffd166" });
     s.scale.set(sx || 1.6, sy || 0.4, 1);
@@ -321,12 +406,32 @@
       const rim = mesh(GG.box, m.brass, gw + 0.06, 0.05, gd + 0.06);
       rim.position.set(anchor.x, 0.975, anchor.z);
       group.add(rim);
-      const pad = mesh(GG.box, m.velvet, gw - 0.1, 0.05, gd - 0.1);
+      // the VAULT gets near-black velvet: the crown set is not merchandised the
+      // way the retail floor is, it is EXHIBITED, and the drop in light level is
+      // what tells you which case you actually came here for.
+      const pad = mesh(GG.box, (v2() && vault) ? m.velvetDark : m.velvet, gw - 0.1, 0.05, gd - 0.1);
       pad.position.set(anchor.x, 1.02, anchor.z);
       group.add(pad);
       const glowStrip = mesh(GG.box, m.glow, gw - 0.16, 0.03, gd - 0.16);
       glowStrip.position.set(anchor.x, 1.045, anchor.z);
       group.add(glowStrip);
+      // a raised velvet riser down the long axis — the tier the stock stands on.
+      let props = 0;
+      const lw = function (l, s) { return Math.abs(tx) * l + Math.abs(tz) * s; };   // world X extent (l = along the case)
+      const ld = function (l, s) { return Math.abs(tz) * l + Math.abs(tx) * s; };   // world Z extent
+      if (v2()) {
+        const riser = mesh(GG.box, vault ? m.velvetDark : m.cushion, lw(CASE_W - 0.44, CASE_D - 0.34), 0.07, ld(CASE_W - 0.44, CASE_D - 0.34));
+        riser.position.set(anchor.x, 1.085, anchor.z);
+        group.add(riser); props++;
+        if (!vault) {
+          // a warm spotlight bar tucked under the glass top, over the riser.
+          const hous = mesh(GG.box, m.body, lw(CASE_W - 0.3, 0.09), 0.05, ld(CASE_W - 0.3, 0.09));
+          hous.position.set(anchor.x, 1.545, anchor.z); group.add(hous);
+          const lens = mesh(GG.box, m.spot, lw(CASE_W - 0.42, 0.05), 0.02, ld(CASE_W - 0.42, 0.05));
+          lens.position.set(anchor.x, 1.512, anchor.z); group.add(lens);
+          props += 2;
+        }
+      }
       // the GLASS TOP — registered as REAL city glass: bullets crack-then-burst
       // it (cityShatterRay), blasts/crashes pop it (cityShatter), a new run
       // re-glazes it (cityGlassReset). No bespoke shatter code at all.
@@ -349,19 +454,35 @@
       resolved.forEach((r, i) => {
         const lat = (i - (resolved.length - 1) / 2) * ((CASE_W - 0.35) / Math.max(resolved.length - 1, 1));
         const px = anchor.x + tx * lat, pz = anchor.z + tz * lat;
+        const faceDoor = Math.atan2(-jw.inx, -jw.inz);     // pieces face the door
+        // the mount first, then the piece standing ON it
+        const baseY = v2() ? 1.12 : 1.07;
+        const mh = v2() ? buildMount(group, r.kind, px, baseY, pz, faceDoor) : 0;
+        if (v2() && MOUNT[r.kind]) props++;
         const model = buildPiece(r.kind);
-        model.position.set(px, 1.07, pz);
-        model.rotation.y = Math.atan2(-jw.inx, -jw.inz);   // pieces face the door
+        model.position.set(px, baseY + mh, pz);
+        model.rotation.y = faceDoor;
         group.add(model);
+        // the VAULT's drama is one hard beam per jackpot piece instead of a bar
+        let card = null;
+        if (v2()) {
+          if (vault) {
+            const beam = mesh(GG.box, m.spot, 0.05, 0.02, 0.05);
+            beam.position.set(px, 1.53, pz); group.add(beam); props++;
+          }
+          card = buildPriceCard(group, px - jw.inx * (CASE_D / 2 - 0.16), 1.09, pz - jw.inz * (CASE_D / 2 - 0.16), faceDoor);
+          props++;
+        }
         // crisp two-line sticker: the NAME up top, the PRICE below (+ a BUY/VAULT
         // accent) — gold for retail, warm amber for the vault crown set.
         const sub = r.buyable ? fmt$(r.value) + "  · BUY" : fmt$(r.value);
         const tag = tagSprite(r.label + " · " + sub, cs.vault ? "#ffe08a" : (r.buyable ? "#bfe6ff" : "#ffd166"), 1.6, 0.36);
         if (tag) { tag.position.set(px, 1.8 + (i % 2) * 0.3, pz); group.add(tag); }
         cs.pieces.push({ name: r.name, label: r.label, value: r.value, drip: r.drip, visualId: r.visualId,
-                         buyable: !!r.buyable, model, tag, taken: false,
+                         buyable: !!r.buyable, model, tag, card, taken: false,
                          showpiece: !!r.showpiece });   // the rotating $5M exhibit
       });
+      cs.props = props;
       S.cases.push(cs);
     });
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -373,6 +494,10 @@
     p.taken = !!on;
     if (p.model) p.model.visible = !on;
     if (p.tag) p.tag.visible = false;
+    // the card goes with the piece and comes BACK with the re-stock — a priced
+    // card standing over an empty mount would be advertising stock that is on
+    // your neck. The MOUNT deliberately stays either way.
+    if (p.card) p.card.visible = !on;
   }
   function piecesLeft(cs) { let n = 0; for (const p of cs.pieces) if (!p.taken) n++; return n; }
   function caseEmptied(cs) { cs.restockT = RESTOCK * (0.9 + Math.random() * 0.3); }
@@ -766,6 +891,29 @@
         smashed: !!(cs.pane && cs.pane.shattered), left: piecesLeft(cs), restockT: cs.restockT,
         pieces: cs.pieces.map((p) => ({ name: p.name, label: p.label, value: p.value, drip: p.drip,
           visualId: p.visualId, buyable: !!p.buyable, taken: !!p.taken })) })),
+    };
+  };
+  // EXPORT ONLY (a gate/probe calls this; nothing in the game does). What each
+  // case actually STANDS — pieces, display props (riser, mounts, lamp, cards) —
+  // plus the group's real mesh count, which is the perf ceiling this showroom
+  // has to live under. The theft block re-states the mechanics this must never
+  // have touched: every case still owns a registered pane, and the vault still
+  // sits at the clerk's back.
+  CBZ.cityJewelryDressAudit = function () {
+    if (!S.built) return null;
+    let meshes = 0, sprites = 0;
+    if (S.group) S.group.traverse(function (o) { if (o.isMesh) meshes++; else if (o.isSprite) sprites++; });
+    let panes = 0, cards = 0;
+    S.cases.forEach(function (cs) {
+      if (cs.pane) panes++;
+      cs.pieces.forEach(function (p) { if (p.card) cards++; });
+    });
+    return {
+      v2: v2(), meshes: meshes, sprites: sprites, cards: cards,
+      cases: S.cases.map(function (cs) {
+        return { tier: cs.tier, vault: !!cs.vault, pieces: cs.pieces.length, props: cs.props | 0 };
+      }),
+      theft: { panes: panes, cases: S.cases.length, clerkAlive: clerkAlive() },
     };
   };
 })();
