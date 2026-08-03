@@ -84,13 +84,17 @@
     line(-11, 85.2, 16, 0.16); line(-11, 96, 5.0, 5.0); line(-3.2, 96, 0.16, 22);
   })();
 
-  // running-track oval outline around the infield (just painted lines)
+  // running-track oval outline around the infield (just painted lines).
+  // WHITE and small: the old 0.7 m yellow dabs read as road dashes from the
+  // air and chained with the walkway into a phantom carriageway (owner:
+  // "yellow dotted road going through the middle of it"). A track is lined
+  // in white; nothing painted in this compound is yellow-dashed.
   (function track() {
-    const seg = 26, R = 30;
+    const seg = 40, R = 30;
     for (let i = 0; i < seg; i++) {
       const a = (i / seg) * Math.PI * 2;
       const x = Math.cos(a) * (R * 0.9), z = 94 + Math.sin(a) * (R * 0.62);
-      addBox(x, 0.03, z, 0.7, 0.02, 0.7, 0xe2c049, { cast: false });
+      addBox(x, 0.03, z, 0.42, 0.02, 0.42, 0xcfd5d8, { cast: false });
     }
   })();
 

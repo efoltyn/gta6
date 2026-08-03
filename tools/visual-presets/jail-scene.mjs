@@ -68,16 +68,16 @@ const subjects = [
     act: { arm: ["sidearm", "shotgun", "ak47"], secs: 1 },
     cam: { player: true, back: 8, up: 3 } },
   { id: "inmate-punch", label: "Getting jumped — the punch", hud: true,
-    focus: "An inmate hunting the player, 1.1s in. Before: a toast SAYS 'x is jumping you'. After: he squares up and a real punch lands — health drops, head snaps, no words.",
-    act: { jump: true, secs: 1.1 },
+    focus: "An inmate hunting the player. Before: a toast SAYS 'x is jumping you'. After: he squares up and a real punch lands — health drops, head snaps, no words. The frame is shot the moment hp first falls.",
+    act: { jump: true, untilHpDrop: true, budget: 6 },
     cam: { player: true, back: 6, up: 2.2 } },
   { id: "inmate-grab", label: "Getting jumped — the grab", hud: true,
     focus: "Two seconds later: the third blow is a grab (predator seize, drag style). The beating is the message.",
-    act: { secs: 2.1 },
+    act: { secs: 2.1, holdJumper: true },
     cam: { player: true, back: 6, up: 2.2 } },
   { id: "guard-tackle", label: "Getting caught", hud: true,
-    focus: "A hunting guard reaches the player. Before: a teleport, a red flash, and a toast SAYING you were caught. After: a physical pin with one timed BREAK FREE press.",
-    act: { deliver: true, secs: 3.6 },
+    focus: "A hunting guard reaches the player. Before: a teleport, a red flash, and a toast SAYING you were caught. After: a physical pin with one timed BREAK FREE press. The frame is shot the moment capture state changes.",
+    act: { deliver: true, untilCapture: true, budget: 9 },
     cam: { player: true, back: 7, up: 2.6 } },
 ];
 
@@ -187,6 +187,7 @@ async function stageJail(input) {
       p.set(gp.x + 1.0, gp.y, gp.z + 0.4);
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(p);
       best.hunt = 12;
+      window.__jailSeq.mark = best;
       if (CBZ.game) CBZ.game.detection = 1;
     }
   }
@@ -209,7 +210,28 @@ async function stageJail(input) {
   } else if (window.__jailSeq && window.__jailSeq.jumper) {
     window.__jailSeq.jumper.huntPlayer = 12; // keep the assault alive across beats
   }
+  // event-shot beats: hold the two actors in contact range and stop stepping
+  // the instant the event lands, so the frame IS the event — a punch mid-hp
+  // drop, a pin mid-capture — instead of a timer's guess at it.
+  const holdNear = (actor) => {
+    if (!actor || !actor.group || !CBZ.player) return;
+    const p = CBZ.player.pos, ap = actor.group.position;
+    const d = Math.hypot(ap.x - p.x, ap.z - p.z);
+    if (d > 1.3) p.set(ap.x + (p.x - ap.x) / d * 1.1, ap.y, ap.z + (p.z - ap.z) / d * 1.1);
+  };
+  if (act.untilHpDrop || act.untilCapture) {
+    const budget = Math.round((act.budget || 6) * 10);
+    const hp0 = CBZ.player ? CBZ.player.hp : 100;
+    for (let i = 0; i < budget; i++) {
+      holdNear(act.untilCapture ? (window.__jailSeq.mark || null) : window.__jailSeq.jumper);
+      step(0.1);
+      if (act.untilHpDrop && CBZ.player && CBZ.player.hp < hp0 - 1) break;
+      if (act.untilCapture && CBZ.player &&
+        (CBZ.player.captureState !== "normal" || CBZ.playerChar && CBZ.playerChar.cuffed)) break;
+    }
+  }
   if (act.secs) step(act.secs);
+  if (act.holdJumper && window.__jailSeq.jumper) holdNear(window.__jailSeq.jumper);
 
   // ---- measure HUD pressure with the HUD as the game left it ------------
   setHud(true);

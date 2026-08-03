@@ -717,8 +717,11 @@
   for (const tx of [-6.6, 6.6]) for (const i of [-1, 1]) for (const j of [-1, 1]) {
     useSeat(tx + i * 0.85, -26.0 + j * 0.85, Math.atan2(-i * 0.85, -j * 0.85), 0.48);
   }
-  // a painted centre line down the spine — the walk everybody in here knows
-  for (let z = -36; z <= -12; z += 3) addBox(0, 0.025, z, 0.2, 0.02, 1.8, 0xe2c049, { cast: false });
+  // NO centre line down the spine. The dashed yellow one that lived here was
+  // road grammar — from the air it joined the walkway and the track oval into
+  // the owner's "yellow dotted road going through the middle of the jail".
+  // The aisle already reads as the walk; nothing on a prison floor should
+  // read as a carriageway.
 
   // ---- caged ceiling lamps, one per stretch of cells ----------------------
   // CBZ.ceilingLamp is a PUBLISHED handle: systems/interactions.js's breaker
