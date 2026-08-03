@@ -829,3 +829,59 @@ as evidence, not pins, per the propUseAudit lesson.
   the only screen in the repo that skipped the SCREEN_GAP convention. Fixed
   structurally (real-depth box, map+emissiveMap one mesh, 0.055 m air), pinned
   in the gate via `CBZ.govBoardAudit()` (gap >= 0.02 when built).
+
+## THE 2026-08-03 SESSION — the campaign ships, crafting dies, weather is repaired
+
+Owner directive: "the hitman campaign probably sucks and does too much when
+really the game is already built for it — make it good and put it on main;
+weather prob sucks; crafting can be deleted; local instancing prob cool but
+prob slop as is." Findings and what shipped:
+
+- **THE CONTRACT IS A STORY CARD, NOT A TAKEOVER** — the campaign director
+  (`city/campaign.js`, 2k lines) was already well-built: it casts existing
+  peds, reuses family.js kidnaps, the vehicles.js npcDriver contract,
+  outfits.js disguises, `cityForceArrestSetup`/`cityBust`, seedStream
+  determinism, and five endless-contract archetypes. The actual "does too
+  much" sin was ACTIVATION: flag-on rewrote the whole title screen to "THE
+  CONTRACT", suppressed all ten sandbox origins via a `cityOriginApply`
+  early-return, and its `winGame` wrap would hijack standalone Prison Escape
+  wins. It is now RUN-SCOPED: `contract` is a real row in the origins
+  registry (empty grants/scene — the director owns the beats), the campaign's
+  `cityOriginApply` wrap CALLS THROUGH first so the character vault and
+  `w.origin`/`originPlayed` stamping work untouched, activation is
+  `g.cityOrigin === "contract"` (city) / `g._campaignEscape` (escape mode,
+  stamped only by the campaign's own `goToPrison`, cleared at title), and the
+  old title hijack moved behind `CAMPAIGN_CANONICAL_TITLE` (default false,
+  embed-only). `CITY_HITMAN_CAMPAIGN` default flipped to TRUE as a master
+  enable. Eleventh title card added (`.origin-btn-contract`, dark/gold).
+  Contract: `node tools/test-campaign-contract.mjs` — inert-by-default,
+  card registered, prologue stages on pick, ledger stamps for resume, rooftop
+  arrest hands off to a campaign-owned prison chapter, standalone escape
+  reads inactive.
+- **CRAFTING IS DELETED, NOT DARK** — `systems/craft.js` removed per the
+  standing owner mandate ("kill crafting"). Its ONE live organ — the
+  mode-aware item store that buildmode placement costs and baseclaim upkeep
+  read even with crafting off — moved to `CBZ.econ.itemStore`
+  (systems/economy.js); deleting without the move would have made building
+  silently free and base upkeep permanently unpayable. `CRAFTING_ENABLED` is
+  gone (nothing left to gate). Wood/Stone/Scrap/Hatchet/Pickaxe all stay —
+  they are harvest/build/loot items independent of crafting.
+- **WEATHER WAS TWO ARITHMETIC BUGS, NOT SLOP** — the driven layer
+  (`WEATHER_DRIVE`) already powers four disasters; only the ambient storm is
+  dark. The two faults that got it flagged off are fixed: drops seeded on a
+  FULL DISC put them centimetres from the eye (sizeAttenuation → giant blob
+  glued to screen centre — the owner's "white dots stuck to the HUD"); now an
+  ANNULUS (inner edge 2.6) with a 4 u look-direction lead. And `testIndoors`
+  hard-excluded escape mode, so it rained in the jail; escape now reads
+  indoors, period (the cellblock registers no platforms, so geometry cannot
+  answer there). Also: weather drew ~3,200 values off `CBZ.econ.rng` — a
+  SHARED stream, the exact order-fragility the determinism law bans — now
+  `CBZ.seedStream("weather")`; and the tick early-outs when nothing is
+  driving. `DYNAMIC_WEATHER` stays FALSE until the owner auditions the look
+  (`?cfg_DYNAMIC_WEATHER=1`).
+- **LOCAL INSTANCING: keep dark, promote-ready** — measured −30% draw calls
+  across two seeds, demolition-safe by exact test, complementary to batch.js
+  (disjoint target sets, mirrored exclusion policies). The ONE gap before
+  promoting: farcull hides far buildings behind box proxies but the instanced
+  trim pools are frustum-culled only — no distance term — so far trim renders
+  over its own proxy. Nobody has eyeballed it. Not slop; left untouched.
