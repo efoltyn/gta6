@@ -715,3 +715,89 @@ below is NOT YET PINNED: whoever runs each audit first writes the number in
   gate pass (owner: "no testing just build"); whoever runs it first writes
   the numbers in (do not pin a guess).
 
+
+## THE 2026-08-02 NUKE SESSION — the before/after tool got eyes, the nuke got real
+
+Owner directives, verbatim: "use the before after tool on Nukes... Nukes are
+like a storyboard of different states... there's also an issue where it kinda
+breaks the game, a huge domino effect of explosions... show me the Nuke
+improving, not only the visual improvement but also the loading improvement" ·
+"It should follow Hiroshima and Nagasaki... I want decent nuclear realism" ·
+"it looks too much like rocks... when an RPG blows up it actually looks real
+as fuck, but your shit looks geometric." Everything below shipped to main
+(8cb9bd5, 545df7f, e5c3f35, 2473fec) and passed the gate after merge
+(MATHGATE: ok, 318/180/202, det ok).
+
+- **THE NUKE IS VISIBLE, PERSISTENT AND SMOKE, NOT ROCKS** — four flags in
+  nukefx.js, each a one-line revert: `NUKE_FX_BIG_FORMATION` (the 34s cloud
+  was 3x smaller than the Trinity/Nagasaki frame record — capY R*5.2 -> R*20,
+  capW R*3.6 -> R*11, handoff-youth contract still holds because the curves
+  start near zero); `NUKE_FX_FOGPROOF` (scene fog reached ~100% inside 5km and
+  ERASED the biggest spectacle in the game from exactly the distances a
+  fleeing player watches it — lobes now fog:false); `NUKE_FX_AFTERMATH` (the
+  cloud no longer endSequence-hides at t=34s mid-formation: it matures toward
+  the researched nukeDims — 5.1km cap, centre 8km — over ~170s, stands as a
+  landmark, thins from t=200s, gone at 420s); `NUKE_FX_SOFT_LOBES` (the
+  rocks fix: onBeforeCompile on the shared Lambert lobe material injects a
+  view-space fresnel rim-dissolve + two octaves of ~450m/1.5km world-space
+  value noise — the RPG looks real because NOTHING in it has a polygon
+  silhouette, and now neither does the cloud). Stem laws that fell out:
+  stations are STRATIFIED (raw-random s.f clustered — half the column empty
+  at low tier), lobes span ~2.7 stations (geometric overlap alone pinches:
+  probed live at t=90, 327m spacing / 480m spans still read as beads because
+  rim fade meets faint-on-faint), per-role rim floors (cap 0.22 / surge 0.45 /
+  stem 0.60) via explicit customProgramCacheKey (r128 keys programs on
+  onBeforeCompile SOURCE, identical across closures — two floors would have
+  silently shared one shader), and the camFar*0.82 stem clamp applies only to
+  the legacy impostor tier (in coherent mode it left a VOID under the mature
+  cap — the column must reach its own head).
+- **THE WAVE IS TIME-BUDGETED** — `NUKE_DRAIN_BUDGET_MS` (impactbus.js,
+  default 5): the nuclear drains' per-frame item caps (32 peds / 96 crowd /
+  24 cars) bound EFFECT rate but not COST — one crowd kill is gore + ragdoll
+  + drops, and the first frame whose shock front reached dense downtown
+  applied a full budget of every category at once: measured 392ms in ONE tick
+  (tools/probe-nuke-perf.mjs, seed 90210, M-series). The drains now share a
+  5ms/frame deadline with rotating category order; nothing is discarded,
+  cursors resume next frame. Measured after: worst blast-window tick 99ms.
+  Structural+thermal drains restored to the doctrine's EIGHT-hits-per-frame
+  law (drift had 16; the thermal drain also marks the ledger so it lives
+  under the same law). Known and left: peds.js panic sim sustains
+  ~760-830ms/s from s6+ (the city dying — it is the honest cost, and it is
+  the next perf target if the owner feels it), and interact.js's scanner
+  spikes s1-3 choking on mass corpse loot.
+- **BOTH NUKE CONTRACTS WERE RED ON CLEAN HEAD** — stale since the analytic
+  field rebuild; the first regex died so their runtime halves NEVER RAN
+  (the gate-was-not-running lesson again). Repaired to current truth:
+  test-nukefx-phases.mjs (lobe field owns post-flash, new flags pinned,
+  storyboard table runs the real two-stage model to t=210), and
+  test-nuke-freeze-node.mjs (2psi structural pin DERIVED: the stress world
+  holds ~1925 lots inside 2016m and the ledger measures 1923 — the old >4000
+  pin described the removed 1psi behaviour; zero polling sweeps asserted —
+  the analytic field snapshots rosters once). Both green.
+- **THE STORYBOARD LOOP IS THE DELIVERABLE THE OWNER ASKED FOR** —
+  tools/visual-presets/nuke-sequence.mjs: ten time-beats of one real
+  detonation at the city centroid through the full game path, deterministic
+  on both sides (freeze rAF after boot — core/loop.js self-schedules, so the
+  stub kills it — then CBZ.stepSim is the only clock; nukefx is pure-dt with
+  a seeded LCG). Staging laws: recenter CBZ.skyDome.parent to the tripod
+  (the sky rig follows the camera at y=0, dome r=850 — tripods stay under
+  ~650m), whitelist #nukeFlash in the HUD hide, teleport + per-tick heal the
+  player (WASTED ends the storyboard), setQualityLevel(3) so shots match
+  real play, dt=1/20 past t=40 for the minutes-long beats.
+  tools/visual-compare.mjs upgrades: async stages + per-preset
+  stageTimeoutMs, preset urlParams (pinned seed), --only before|after (half
+  cost look iterations), and a Measurements page (stage results carry
+  metrics; report shows before/after deltas). tools/probe-nuke-perf.mjs
+  attributes per-second sim cost to updater order numbers (u:34=peds,
+  u:34.4=impactbus wave, u:8.55=fracture; NEVER pipe its JSON through tail —
+  the baseline is in the head). CAVEAT for the next reader: the report's
+  metrics rider is machine-noisy when both worlds run in one long Chrome
+  session — the isolated probe is the perf evidence; the report is the
+  visual evidence.
+- The look loop that worked, for the record: edit -> --only after --subjects
+  <beat> (one boot, ~3 min) -> Read the PNG and JUDGE -> iterate. Five
+  rounds: rocks -> ghost (proved the shader hook worked; a missing \n before
+  #ifdef had killed all four lobe materials into invisibility, leaving only
+  the white additive glow) -> mottled -> beads diagnosed by live instance
+  probe -> connected. The screenshot caught what every green contract
+  missed, which is the owner's whole point about giving the blind man eyes.
