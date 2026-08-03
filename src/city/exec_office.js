@@ -89,7 +89,22 @@
     const oz = b.oz != null ? b.oz : (lot ? lot.cz : 0);
     const lb = (x, y, z, w, h, d, c, o) => b.lbox(x, Y + y, z, w, h, d, c, o || { cast: false });
     const glow = (x, y, z, w, h, d, c, ei) => b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
-    const seatAt = (x, z, face, kind) => { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(ox + x, Y, oz + z, face, kind, null); };
+    // A SEAT THAT DOES NOT DECLARE ITS CUSHION IS A SQUATTING BODY. propuse.js's
+    // last argument is the whole difference between character.js's real chair
+    // solve (sink the model so the pelvis lands ON the cushion, then fold a hip/
+    // knee chain until the soles reach the floor) and the compressed legacy
+    // pose. This floor is the flagship "one man's firm" suite and every one of
+    // its fifteen seats was registered with NO geometry, so every body sitting
+    // in it squatted. `cushion` is metres of the pad's TOP above this floor and
+    // it is READ OFF the boxes drawn beside each call — pad centre y plus half
+    // its height — NEVER copied from propuse.js's SEAT_H table: the mesh is
+    // truth there and here, and declaring 0.45 for a pad whose top is at 0.51
+    // buries the rig in the leather. `kind` stays an honest word ("chair",
+    // "bench", "armchair") because the posture layer reads it.
+    const seatAt = (x, z, face, kind, cushion) => {
+      if (!CBZ.propRegisterSeat) return;
+      CBZ.propRegisterSeat(ox + x, Y, oz + z, face, kind, null, { cushion: cushion, floorBelow: 0 });
+    };
     const cfp = (x, z, pad) => !b.clearFloorPoint || b.clearFloorPoint(x, z, pad == null ? 0.7 : pad);
     // nudge a cluster anchor off the (2D, all-floors) door-aisle stamp: try the
     // ideal spot, then small deterministic shifts; worst case keep the ideal.
@@ -178,14 +193,24 @@
     const rec = { x: core.x, z: core.z - 5.6 };
     lb(rec.x, 0.5, rec.z, 2.6, 0.92, 0.85, WALNUT);                   // desk body
     lb(rec.x, 0.99, rec.z, 2.8, 0.07, 1.0, STONE);                    // stone top
-    lb(rec.x, 0.42, rec.z + 1.05, 0.56, 0.14, 0.56, LEATHER);         // receptionist chair (faces the lift)
-    lb(rec.x, 0.82, rec.z + 1.28, 0.56, 0.62, 0.12, LEATHER);
-    seatAt(rec.x, rec.z + 1.05, 0, "chair");
+    // THE RECEPTIONIST SITS BEHIND HER OWN DESK. The chair used to stand on the
+    // +z (lift) side with face 0, i.e. on the VISITORS' side of the counter with
+    // her back to it; the lift is at +z, so the working seat is the -z one and
+    // face 0 (+z, ped convention) now looks across the desk at whoever arrives.
+    lb(rec.x, 0.42, rec.z - 1.05, 0.56, 0.14, 0.56, LEATHER);         // pad top 0.49
+    lb(rec.x, 0.82, rec.z - 1.28, 0.56, 0.62, 0.12, LEATHER);         // backrest
+    lb(rec.x, 0.2, rec.z - 1.05, 0.1, 0.4, 0.1, BEZEL);               // post
+    seatAt(rec.x, rec.z - 1.05, 0, "chair", 0.49);
+    // her terminal, facing her across the stone top (bezel front face -0.325,
+    // the lit pane SCREEN_GAP proud of it — the same idiom as the desk cluster)
+    lb(rec.x - 0.7, 1.20, rec.z - 0.30, 0.5, 0.34, 0.05, BEZEL);
+    glow(rec.x - 0.7, 1.20, rec.z - 0.36, 0.42, 0.26, 0.02, SCREEN, 0.4);
+    lb(rec.x + 0.9, 1.06, rec.z - 0.10, 0.18, 0.08, 0.22, BEZEL);     // desk phone
     // one visitor bench off to the -x side, facing the desk
     if (cfp(rec.x - 3.8, rec.z + 0.4, 0.8)) {
-      lb(rec.x - 3.8, 0.36, rec.z + 0.4, 0.7, 0.16, 2.2, LEATHER);
+      lb(rec.x - 3.8, 0.36, rec.z + 0.4, 0.7, 0.16, 2.2, LEATHER);    // pad top 0.44
       lb(rec.x - 4.06, 0.72, rec.z + 0.4, 0.14, 0.6, 2.2, LEATHER);
-      seatAt(rec.x - 3.8, rec.z + 0.4, Math.PI / 2, "bench");
+      seatAt(rec.x - 3.8, rec.z + 0.4, Math.PI / 2, "bench", 0.44);
     }
     // two planters flanking the arrival walk
     for (const s of [-1, 1]) {
@@ -222,19 +247,28 @@
         Y + 1.03, oz + dsk.z + mz, 1, 0);
     lb(dsk.x - 0.02, 0.81, dsk.z, 0.34, 0.03, 0.9, PALE);             // keyboard slab
     lb(dsk.x + 0.34, 0.86, dsk.z - 1.2, 0.16, 0.22, 0.16, BEZEL);     // phone dock
+    // THE ONE MAN WORKS HERE. The desk read "expensive but never used": a lamp
+    // head floating a clear 0.27 above the stone with no stem under it, and not
+    // one piece of paper on 3.3 m² of worktop. A stem, a squared stack of
+    // signature pages with a second sheet pulled out of it, and a pen — three
+    // boxes in buckets this file already owns, cast:false like the rest.
+    lb(dsk.x + 0.3, 0.90, dsk.z + 1.22, 0.05, 0.24, 0.05, BEZEL);     // lamp stem (0.78 → 1.02)
     glow(dsk.x + 0.3, 1.06, dsk.z + 1.22, 0.2, 0.34, 0.2, WARM, 0.45);// desk lamp
+    lb(dsk.x - 0.06, 0.795, dsk.z - 0.86, 0.30, 0.025, 0.40, PALE);   // signature stack
+    lb(dsk.x + 0.16, 0.792, dsk.z - 1.16, 0.26, 0.006, 0.34, PALE);   // one page pulled out
+    lb(dsk.x + 0.30, 0.797, dsk.z - 0.70, 0.02, 0.02, 0.13, GOLD);    // pen
     // HIS chair — behind the desk, facing the monitors (-x → toward the room)
     const chr = { x: dsk.x + 1.15, z: dsk.z };
-    lb(chr.x, 0.44, chr.z, 0.62, 0.14, 0.62, LEATHER);
+    lb(chr.x, 0.44, chr.z, 0.62, 0.14, 0.62, LEATHER);                // pad top 0.51 (a real exec chair rides high)
     lb(chr.x + 0.26, 0.95, chr.z, 0.14, 0.95, 0.62, LEATHER);         // high back
     lb(chr.x, 0.2, chr.z, 0.1, 0.4, 0.1, BEZEL);
-    seatAt(chr.x, chr.z, -Math.PI / 2, "chair");
+    seatAt(chr.x, chr.z, -Math.PI / 2, "chair", 0.51);
     // TWO guest chairs across the desk — and that is all the seating there is
     for (const s of [-1, 1]) {
       const gz = dsk.z + s * 1.0, gx = dsk.x - 2.0;
-      lb(gx, 0.42, gz, 0.56, 0.14, 0.56, 0x23272e);
+      lb(gx, 0.42, gz, 0.56, 0.14, 0.56, 0x23272e);                   // pad top 0.49
       lb(gx - 0.26, 0.82, gz, 0.12, 0.66, 0.56, 0x23272e);
-      seatAt(gx, gz, Math.PI / 2, "chair");
+      seatAt(gx, gz, Math.PI / 2, "chair", 0.49);
     }
     // one low credenza against the partition + a decanter accent
     if (cfp(offX0 + 0.75, offCz - 3.6, 0.7)) {
@@ -266,16 +300,20 @@
       // eight chairs: three a side + one at each end, all facing the table
       for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) {
         const cx2 = mcx + i * (TL / 2 - 0.7), cz2 = mcz + s * 1.05;
-        lb(cx2, 0.42, cz2, 0.5, 0.14, 0.5, LEATHER);
+        lb(cx2, 0.42, cz2, 0.5, 0.14, 0.5, LEATHER);                  // pad top 0.49
         lb(cx2, 0.8, cz2 + s * 0.24, 0.5, 0.6, 0.12, LEATHER);
-        seatAt(cx2, cz2, s > 0 ? Math.PI : 0, "chair");
+        seatAt(cx2, cz2, s > 0 ? Math.PI : 0, "chair", 0.49);
       }
       for (const e of [-1, 1]) {
         const cx2 = mcx + e * (TL / 2 + 0.75);
-        lb(cx2, 0.42, mcz, 0.5, 0.14, 0.5, LEATHER);
+        lb(cx2, 0.42, mcz, 0.5, 0.14, 0.5, LEATHER);                  // pad top 0.49
         lb(cx2 + e * 0.24, 0.8, mcz, 0.12, 0.6, 0.5, LEATHER);
-        seatAt(cx2, mcz, e > 0 ? -Math.PI / 2 : Math.PI / 2, "chair");
+        seatAt(cx2, mcz, e > 0 ? -Math.PI / 2 : Math.PI / 2, "chair", 0.49);
       }
+      // the table is SET: a pad in front of every seat and one carafe centred.
+      for (let i = -1; i <= 1; i++) for (const s of [-1, 1])
+        lb(mcx + i * (TL / 2 - 0.7), 0.535, mcz + s * 0.42, 0.30, 0.01, 0.22, PALE);
+      lb(mcx, 0.65, mcz, 0.11, 0.24, 0.11, STONE);                    // water carafe
       // one wall screen on the back partition + one light line over the table
       lb(mcx, 1.62, mr.z1 - 0.16, 2.3, 1.15, 0.08, BEZEL);
       glow(mcx, 1.62, mr.z1 - 0.2 - SCREEN_GAP - 0.02,
@@ -288,10 +326,19 @@
     // ========================================================================
     const lng = { x: CX - W * 0.13, z: zHi - 2.5 };
     if (cfp(lng.x, lng.z, 1.0)) {
+      // THE ARMCHAIRS WERE A LIE ABOUT THEIR OWN HEIGHT. Each was ONE 0.5 m
+      // block whose top face sat at 0.67 — nobody sits at 0.67, and the anchor
+      // called it a "sofa" (propuse.js's table says 0.40) on top of declaring no
+      // geometry at all. Drawn honestly now as the three-part piece an armchair
+      // is: plinth, cushion, back, with arms. Cushion top 0.43, which is the
+      // real-world armchair figure, and that is the number the anchor declares.
       for (const s of [-1, 1]) {
-        lb(lng.x + s * 1.15, 0.42, lng.z, 0.85, 0.5, 0.85, 0x23272e); // armchair
-        lb(lng.x + s * 1.15, 0.88, lng.z - 0.36, 0.85, 0.55, 0.14, 0x23272e);
-        seatAt(lng.x + s * 1.15, lng.z, 0, "sofa");                   // both face +z: the view
+        const ax = lng.x + s * 1.15;
+        lb(ax, 0.16, lng.z, 0.85, 0.32, 0.85, 0x23272e);              // plinth   0.00 → 0.32
+        lb(ax, 0.375, lng.z, 0.76, 0.11, 0.76, 0x23272e);             // cushion  0.32 → 0.43
+        lb(ax, 0.75, lng.z - 0.36, 0.85, 0.66, 0.14, 0x23272e);       // back     0.42 → 1.08
+        for (const a of [-1, 1]) lb(ax + a * 0.36, 0.55, lng.z, 0.13, 0.22, 0.78, 0x23272e);  // arms
+        seatAt(ax, lng.z, 0, "armchair", 0.43);                       // both face +z: the view
       }
       lb(lng.x, 0.3, lng.z, 0.8, 0.3, 0.8, GOLD);                     // low brass table
     }

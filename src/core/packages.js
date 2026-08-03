@@ -23,6 +23,11 @@
      })
      ctx services — the ONLY surface a package should touch:
        ctx.THREE ctx.mat/pmat/emat ctx.box/cyl ctx.canvasTex     geometry/materials
+       ctx.canvasTexLive(w,h) -> {canvas, cc, tex, w, h, paint()} A BOARD THAT CHANGES:
+                                                                 canvasTex paints once and drops the
+                                                                 2d context; this keeps it. paint() is
+                                                                 the only needsUpdate — event-driven,
+                                                                 never per frame.
        ctx.solid(x1,z1,x2,z2[,y0,y1])                            colliders (#3: auto markCollidersDirty)
        ctx.light(x,y,z,color,i,dist)                             budgeted PointLights (≤8/venue)
        ctx.npc(spec) -> handle                                   REAL city ped: brain+outfit+gunpoint+cityKillPed. USE THIS.
@@ -61,7 +66,13 @@
   const live = [];        // mounted instances {def, ctx, venue}
   const api = {};         // def.api exposure for probes/tools
 
-  /* ---------------- shared materials (one cache for every package) -------- */
+  /* ---------------- shared materials (one cache for every package) --------
+     TRAP, and it has bitten: these three caches are keyed ONLY by colour and
+     shared by every mounted venue in the world. NEVER mutate what they hand
+     back — hanging a map/emissiveMap on ctx.mat(0x11161d), or dialling its
+     opacity, repaints every same-coloured box in every package. A SCREEN is
+     always a FRESH material instance (see games/racing.js's timing tower and
+     games/government.js's tally board). */
   const mats = {};
   function mat(c) { return mats["l" + c] || (mats["l" + c] = new THREE.MeshLambertMaterial({ color: c })); }
   function pmat(c, s) { const k = "p" + c + "_" + (s || 6); return mats[k] || (mats[k] = new THREE.MeshPhongMaterial({ color: c, shininess: s || 6, specular: 0x1c1c1c })); }
@@ -81,6 +92,30 @@
     const t = new THREE.CanvasTexture(c);
     if (rx || ry) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx || 1, ry || 1); }
     return t;
+  }
+  /* canvasTexLive(w,h) — the LIVE sibling of canvasTex.
+     WHY IT EXISTS: canvasTex paints ONCE and throws the 2d context away, which
+     is exactly right for a sign and useless for a board that CHANGES. So every
+     package with a changing board hand-rolled the same four lines instead —
+     government's tally board, police's duty roster and cage nameplate, boxing's
+     judges' scorecards — because the shared helper could not hand the context
+     back. This returns the shape all four had already invented, so adoption is
+     one line and every draw function downstream is untouched:
+         const b = ctx.canvasTexLive(512, 320);
+         b.cc.fillRect(0, 0, b.w, b.h);   // …draw…
+         b.paint();                       // upload, once, when the data changed
+     paint() is the ONE place needsUpdate is set, and that is the contract: a
+     CanvasTexture re-upload is real per-frame GPU cost, so a live board redraws
+     on EVENTS (a vote flipped, a shift changed), never per frame. */
+  function canvasTexLive(w, h) {
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const tex = new THREE.CanvasTexture(canvas);
+    const rec = {
+      canvas: canvas, cc: canvas.getContext("2d"), tex: tex, w: w, h: h,
+      paint: function () { tex.needsUpdate = true; return rec; },
+    };
+    return rec;
   }
 
   /* ---------------- DEPRECATED bare voxel dummy ---------------------------
@@ -275,7 +310,7 @@
     const stateKey = "cbzPkg:" + def.id;
     let bag = null;
     const ctx = {
-      THREE, mat, pmat, emat, box, cyl, canvasTex, rig,
+      THREE, mat, pmat, emat, box, cyl, canvasTex, canvasTexLive, rig,
       venue,
       solid(x1, z1, x2, z2, y0, y1) {
         const o = venue.origin;

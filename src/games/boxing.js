@@ -500,7 +500,7 @@
     const g = venue.group;
     g.position.y = DECK_Y;                        // sit the whole rig on the arena plaza deck
     V = { origin: venue.origin, fA: null, fB: null, ref: null, judges: [], bookie: null, cutman: null,
-      cardMesh: null, cardCanvas: null, beltLid: null, beltOpen: 0, pending: [], _venue: venue };
+      cardMesh: null, card: null, cardCanvas: null, beltLid: null, beltOpen: 0, pending: [], _venue: venue };
 
     const MAT = { post: 0x8a919e, red: 0xc22333, blue: 0x2246c2, neutral: 0xdfe3ea, wood: 0x4a2e1c,
       woodD: 0x33200f, steel: 0x39404c, rope: 0xe8e4da, dark: 0x1a1d24, gold: 0xe8b64c, felt: 0x2a6cc0 };
@@ -553,12 +553,17 @@
     for (let i = 0; i < 3; i++) { box(jx - 0.05, 0.35, (i - 1) * 1.7, 1.0, 0.7, 0.3, MAT.woodD);   // seat block
       box(jx - 0.9, 0.35, (i - 1) * 1.7, 0.7, 0.7, 0.7, MAT.steel); }                              // chair
     ctx.solid(jx - 0.75, -2.7, jx + 0.75, 2.7, DECK_Y, DECK_Y + 0.95);
-    // a scorecard board on the table, texture-swapped between rounds (their held cards)
-    V.cardCanvas = document.createElement("canvas"); V.cardCanvas.width = 384; V.cardCanvas.height = 128;
-    const boardTex = new THREE.CanvasTexture(V.cardCanvas);
-    V.cardMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.8), new THREE.MeshBasicMaterial({ map: boardTex, transparent: true }));
-    V.cardMesh.position.set(jx + 0.75, 1.5, 0); V.cardMesh.rotation.y = Math.PI / 2; g.add(V.cardMesh);
-    V.boardTex = boardTex; drawCards(null);
+    // a scorecard board on the table, redrawn between rounds (their held cards).
+    // ctx.canvasTexLive is the shared LIVE-board helper (core/packages.js) —
+    // ctx.canvasTex paints once and drops the 2d context, which is why this,
+    // government's tally and police's roster each used to hand-roll the same
+    // four lines. 768x256 is 3.00, exactly the 2.4 x 0.8 mesh, so no stretch.
+    V.card = ctx.canvasTexLive(768, 256);
+    V.cardCanvas = V.card.canvas; V.boardTex = V.card.tex;
+    V.cardMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.8), new THREE.MeshBasicMaterial({ map: V.boardTex, transparent: true }));
+    V.cardMesh.position.set(jx + 0.75, 1.5, 0); V.cardMesh.rotation.y = Math.PI / 2;
+    V.cardMesh.castShadow = false; V.cardMesh.receiveShadow = false; g.add(V.cardMesh);
+    drawCards(null);
 
     // ---- BELT CASE (the GOAL, by the entry +Z, visible on the walk in) -------
     const bx = half + 2.4, bz = half + 1.6;
@@ -902,17 +907,26 @@
   // redraw the judges' held scorecards onto the ringside board (per round)
   function drawCards(bout) {
     if (!V.cardCanvas) return;
-    const cc = V.cardCanvas.getContext("2d"), w = V.cardCanvas.width, h = V.cardCanvas.height;
+    const cc = V.card ? V.card.cc : V.cardCanvas.getContext("2d");
+    const w = V.cardCanvas.width, h = V.cardCanvas.height;
+    cc.textBaseline = "alphabetic";
     cc.clearRect(0, 0, w, h); cc.fillStyle = "rgba(12,15,22,.82)"; cc.fillRect(0, 0, w, h);
-    cc.strokeStyle = "#e8b64c"; cc.lineWidth = 3; cc.strokeRect(4, 4, w - 8, h - 8);
-    cc.fillStyle = "#e8b64c"; cc.font = "bold 20px Arial"; cc.textAlign = "center";
-    cc.fillText("JUDGES' SCORECARDS", w / 2, 26);
-    cc.font = "bold 26px Arial"; cc.fillStyle = "#fff6e2";
+    cc.strokeStyle = "#e8b64c"; cc.lineWidth = 6; cc.strokeRect(8, 8, w - 16, h - 16);
+    cc.fillStyle = "rgba(232,182,76,.16)"; cc.fillRect(8, 8, w - 16, 62);        // title band
+    cc.fillStyle = "#e8b64c"; cc.font = "bold 38px Arial"; cc.textAlign = "center";
+    cc.fillText("JUDGES' SCORECARDS", w / 2, 54);
     if (bout && bout.cards[0].length) {
       const r = bout.cards[0].length - 1;
-      for (let j = 0; j < 3; j++) cc.fillText(bout.cards[j][r][0] + " - " + bout.cards[j][r][1], w / 2, 60 + j * 22);
-    } else { cc.fillStyle = "#8a929c"; cc.fillText("— fight night —", w / 2, 78); }
-    if (V.boardTex) V.boardTex.needsUpdate = true;
+      // one line per judge, numbered, so a split decision READS as a split
+      for (let j = 0; j < 3; j++) {
+        const y = 116 + j * 46;
+        cc.textAlign = "left"; cc.fillStyle = "#8a929c"; cc.font = "bold 24px Arial";
+        cc.fillText("JUDGE " + (j + 1), 34, y);
+        cc.textAlign = "right"; cc.fillStyle = "#fff6e2"; cc.font = "bold 40px Arial";
+        cc.fillText(bout.cards[j][r][0] + " - " + bout.cards[j][r][1], w - 34, y + 4);
+      }
+    } else { cc.textAlign = "center"; cc.fillStyle = "#8a929c"; cc.font = "bold 40px Arial"; cc.fillText("— fight night —", w / 2, 168); }
+    if (V.card) V.card.paint(); else if (V.boardTex) V.boardTex.needsUpdate = true;
   }
 
   /* ==========================================================

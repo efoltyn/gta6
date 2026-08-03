@@ -228,7 +228,8 @@
       CBZ.worldLayout.reserve("pkg:precinct13", venue.anchor.bounds, { pad: 3, kind: "venue", source: "games/police" });
     }
     V = { origin: venue.origin, _venue: venue, pending: [], staff: {}, decker: null, lou: null, rex: null,
-      rosterCanvas: null, rosterTex: null, plateCanvas: null, plateTex: null, cageGate: null, fireDoor: null,
+      roster: null, rosterCanvas: null, rosterTex: null, plate: null, plateCanvas: null, plateTex: null,
+      cageGate: null, fireDoor: null,
       flickTubes: [], detLamp: null, coffeeLamp: null };
     const B = (x, y, z, w, h, d, col, ry) => ctx.box(g, x, y, z, w, h, d, ctx.mat(col), ry);
     const wallRun = (x, y, z, w, h, d, col) => { B(x, y, z, w, h, d, col || PAL.wall); ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2); };
@@ -282,11 +283,21 @@
     // Reyes' desk + the case FILE tray (the case number lives here)
     deskCluster(ctx, g, -10, -6, 0);
     B(-10.6, 0.98, -6.4, 0.7, 0.22, 0.5, 0xb8a06a);         // file-tray on the desk
-    // DUTY ROSTER board (redrawn per shift phase) on the west wall
-    V.rosterCanvas = document.createElement("canvas"); V.rosterCanvas.width = 320; V.rosterCanvas.height = 200;
-    V.rosterTex = new THREE.CanvasTexture(V.rosterCanvas);
+    // ---- DUTY ROSTER board (redraws per shift phase) on the west wall ------
+    // A LIVE BOARD IS A SLAB, NOT PAINT. The west wall is centred at x = -16
+    // with thickness T, so its inner face is at -15.70; the old bare quad hung
+    // at -15.65, i.e. 0.05 of air — legal, but with nothing between the board
+    // and the wall it read as a decal. It now gets a real bezel with the
+    // codebase's SCREEN_GAP (0.025) on BOTH seams: bezel back face -15.675 is
+    // 0.025 off the wall, and the roster face at -15.60 stands 0.025 proud of
+    // the bezel front at -15.625. Neither pair can ever share a depth value.
+    // Thickness runs along x here, so no ry: the board faces the bullpen (+x).
+    V.roster = ctx.canvasTexLive(512, 320);       // 1.600 == the 2.4 x 1.5 mesh
+    V.rosterCanvas = V.roster.canvas; V.rosterTex = V.roster.tex;
+    ctx.box(g, -15.65, 2.6, -8, 0.05, 1.72, 2.62, ctx.mat(PAL.trim));           // bezel
     { const m = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.5), new THREE.MeshBasicMaterial({ map: V.rosterTex }));
-      m.position.set(-15.65, 2.6, -8); m.rotation.y = Math.PI / 2; g.add(m); }
+      m.position.set(-15.60, 2.6, -8); m.rotation.y = Math.PI / 2;
+      m.castShadow = false; m.receiveShadow = false; g.add(m); }
     drawRoster(0);
 
     // ---- EVIDENCE CAGE (north-west): chain-look walls + gate + clerk + plate --
@@ -302,10 +313,14 @@
     // clerk desk facing the gate + the NAMEPLATE (swaps PYE/MERCER — READ IT)
     B(-5.4, 0.7, -13, 1.5, 1.4, 2.2, PAL.desk); B(-5.4, 1.46, -13, 1.8, 0.12, 2.5, PAL.desktop);
     ctx.solid(-6.15, -14.1, -4.65, -11.9);
-    V.plateCanvas = document.createElement("canvas"); V.plateCanvas.width = 256; V.plateCanvas.height = 80;
-    V.plateTex = new THREE.CanvasTexture(V.plateCanvas);
+    // The nameplate is the tell you have to READ, so it gets an easel instead
+    // of hanging in mid-air: two posts carry it off the desktop (top y 1.52) to
+    // the plate's bottom edge at 1.68. Transparent → batch.js never merges it.
+    V.plate = ctx.canvasTexLive(512, 160);        // 3.20 == the 1.4 x 0.44 mesh
+    V.plateCanvas = V.plate.canvas; V.plateTex = V.plate.tex;
+    for (const px of [-0.55, 0.55]) ctx.box(g, -5.4 + px, 1.60, -12.0, 0.04, 0.16, 0.04, ctx.mat(PAL.steel));
     { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.44), new THREE.MeshBasicMaterial({ map: V.plateTex, transparent: true }));
-      m.position.set(-5.4, 1.9, -12.0); g.add(m); }
+      m.position.set(-5.4, 1.9, -12.0); m.castShadow = false; m.receiveShadow = false; g.add(m); }
     drawPlate("PYE");
     // the flickering fluorescent over the gate (the stealth mechanic light)
     for (let k = -1; k <= 1; k += 2) {
@@ -433,40 +448,55 @@
     return mesh;
   }
 
-  // roster board — redraws the on-post list per shift phase (the heist is read
-  // off this: who's at the cage, who's away at coffee).
+  // The heist is READ off this board — who is at the cage, who is away at
+  // coffee — so at 512x320 it gets the layout that read demands: a header band
+  // carrying the shift clock, then one striped row per post with the post on
+  // the left and the name (green = manned, red = a hole you can walk through)
+  // on the right. Event-driven: the update loop redraws it on a shift phase
+  // change, never per frame.
   function drawRoster(t) {
     if (!V || !V.rosterCanvas) return;
     const r = rosterAt(t, S && S.lawyered);
-    const cc = V.rosterCanvas.getContext("2d"), w = V.rosterCanvas.width, h = V.rosterCanvas.height;
+    const cc = V.roster ? V.roster.cc : V.rosterCanvas.getContext("2d");
+    const w = V.rosterCanvas.width, h = V.rosterCanvas.height;
+    cc.textBaseline = "alphabetic";
     cc.fillStyle = "#0c1118"; cc.fillRect(0, 0, w, h);
-    cc.strokeStyle = "#e8b23a"; cc.lineWidth = 3; cc.strokeRect(5, 5, w - 10, h - 10);
-    cc.fillStyle = "#e8b23a"; cc.font = "bold 20px Arial"; cc.textAlign = "left";
-    cc.fillText("DUTY ROSTER", 16, 30);
-    cc.font = "bold 13px Arial"; cc.fillStyle = "#9fb2c4";
-    cc.fillText("SHIFT CHANGE " + fmtT(SHIFT_LEN - t), 16, 52);
+    cc.fillStyle = "#141c27"; cc.fillRect(0, 0, w, 74);                        // header band
+    cc.fillStyle = "#e8b23a"; cc.fillRect(0, 74, w, 3);
+    cc.strokeStyle = "#e8b23a"; cc.lineWidth = 4; cc.strokeRect(6, 6, w - 12, h - 12);
+    cc.fillStyle = "#e8b23a"; cc.font = "bold 34px Arial"; cc.textAlign = "left";
+    cc.fillText("DUTY ROSTER", 24, 46);
+    cc.font = "bold 19px Arial"; cc.fillStyle = "#9fb2c4"; cc.textAlign = "right";
+    cc.fillText("SHIFT CHANGE " + fmtT(SHIFT_LEN - t), w - 24, 46);
     const rows = [["CAGE", r.cage || "— AT COFFEE"], ["FRONT DESK", r.frontDesk], ["BAIL", r.bail || "— WINDOW SHUT"],
       ["BULLPEN", r.bullpenDesk || "— OUT"], ["INTERROGATION", r.interrogation || "— EMPTY"], ["LOBBY", r.lobby], ["K-9", r.k9]];
-    cc.font = "14px Arial";
-    rows.forEach((row, i) => { const y = 78 + i * 17;
-      cc.fillStyle = "#cdd8e2"; cc.fillText(row[0], 16, y);
-      cc.fillStyle = row[1][0] === "—" ? "#e88a7a" : "#7fe8a8"; cc.textAlign = "right"; cc.fillText(row[1], w - 16, y); cc.textAlign = "left"; });
-    if (V.rosterTex) V.rosterTex.needsUpdate = true;
+    const top = 92, rh = 31;
+    rows.forEach((row, i) => {
+      const y = top + i * rh;
+      if (i % 2 === 0) { cc.fillStyle = "rgba(255,255,255,.035)"; cc.fillRect(14, y - 20, w - 28, rh - 4); }
+      cc.textAlign = "left"; cc.fillStyle = "#8fa0b2"; cc.font = "bold 17px Arial";
+      cc.fillText(row[0], 26, y);
+      cc.textAlign = "right"; cc.fillStyle = row[1][0] === "—" ? "#e88a7a" : "#7fe8a8"; cc.font = "20px Arial";
+      cc.fillText(row[1], w - 26, y, w * 0.55);
+    });
+    if (V.roster) V.roster.paint(); else if (V.rosterTex) V.rosterTex.needsUpdate = true;
   }
   // nameplate at the cage — the tell: PYE (rookie, escort badge OK) vs
   // SGT. MERCER (veteran, real star only). READ IT before you sign out.
   function drawPlate(clerk) {
     if (!V || !V.plateCanvas) return;
-    const cc = V.plateCanvas.getContext("2d"), w = V.plateCanvas.width, h = V.plateCanvas.height;
+    const cc = V.plate ? V.plate.cc : V.plateCanvas.getContext("2d");
+    const w = V.plateCanvas.width, h = V.plateCanvas.height;
     cc.clearRect(0, 0, w, h); cc.fillStyle = "#12161d"; cc.fillRect(0, 0, w, h);
-    cc.strokeStyle = "#84765a"; cc.lineWidth = 4; cc.strokeRect(3, 3, w - 6, h - 6);
+    cc.strokeStyle = "#84765a"; cc.lineWidth = 8; cc.strokeRect(6, 6, w - 12, h - 12);
+    cc.fillStyle = "rgba(232,178,58,.55)"; cc.fillRect(18, h - 30, w - 36, 3);   // engraved rule
     cc.textAlign = "center"; cc.textBaseline = "middle";
-    if (clerk === "MERCER") { cc.fillStyle = "#e8b23a"; cc.font = "bold 30px Arial"; cc.fillText("SGT. MERCER", w / 2, h / 2 - 8);
-      cc.fillStyle = "#9fb2c4"; cc.font = "13px Arial"; cc.fillText("EVIDENCE · 22 YRS", w / 2, h / 2 + 20); }
-    else if (clerk === "PYE") { cc.fillStyle = "#cdd8e2"; cc.font = "bold 30px Arial"; cc.fillText("OFC. PYE", w / 2, h / 2 - 8);
-      cc.fillStyle = "#9fb2c4"; cc.font = "13px Arial"; cc.fillText("EVIDENCE · PROBATIONARY", w / 2, h / 2 + 20); }
-    else { cc.fillStyle = "#6d7f91"; cc.font = "bold 22px Arial"; cc.fillText("— POST EMPTY —", w / 2, h / 2); }
-    if (V.plateTex) V.plateTex.needsUpdate = true;
+    if (clerk === "MERCER") { cc.fillStyle = "#e8b23a"; cc.font = "bold 58px Arial"; cc.fillText("SGT. MERCER", w / 2, h / 2 - 16, w - 44);
+      cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE · 22 YRS", w / 2, h / 2 + 38); }
+    else if (clerk === "PYE") { cc.fillStyle = "#cdd8e2"; cc.font = "bold 58px Arial"; cc.fillText("OFC. PYE", w / 2, h / 2 - 16, w - 44);
+      cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE · PROBATIONARY", w / 2, h / 2 + 38); }
+    else { cc.fillStyle = "#6d7f91"; cc.font = "bold 44px Arial"; cc.fillText("— POST EMPTY —", w / 2, h / 2); }
+    if (V.plate) V.plate.paint(); else if (V.plateTex) V.plateTex.needsUpdate = true;
   }
 
   /* ==========================================================

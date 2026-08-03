@@ -98,6 +98,13 @@
   const JAM_CHANCE = 0.30;        // shredder jam (runtime FX)
   const COOLDOWN_DAYS = 1;
   const AUDITOR_SPEED = 1.4, GUARD_SPEED = 1.6;
+  // THE TALLY BOARD, in metres. BOARD_W/BOARD_H are 1.600 to the canvas's
+  // 1024x640 (see makeBoard). BOARD_GAP is the real air between the board's
+  // BACK face and the backing frame's FRONT face — the SCREEN_GAP convention
+  // (0.025 elsewhere) opened up for a 4.6 m pane read from across the chamber.
+  const BOARD_W = 4.64, BOARD_H = 2.90, BOARD_T = 0.06;
+  const BOARD_GAP = 0.055;
+  const BOARD_EI = 0.65;          // emissiveIntensity — a lit board, not a painted one
 
   /* ---------------- flavor tables (indexed by seeded picks) --------------- */
   const WANT_ITEMS = [
@@ -291,35 +298,109 @@
   }
   function ensureCouncil() { if (COUNCIL.length) return true; if (canDrain()) drainCast(C); return !!COUNCIL.length; }
 
-  /* ---------------- tally board (canvas texture) -------------------------- */
-  function makeBoard() {
-    const canvas = document.createElement("canvas"); canvas.width = 512; canvas.height = 320;
-    const cc = canvas.getContext("2d");
-    const tex = new THREE.CanvasTexture(canvas);
-    return { canvas: canvas, cc: cc, tex: tex };
+  /* ================= THE TALLY BOARD ======================================
+     The one readout in the room: seven names, seven stances, and the number
+     you are trying to move. It is the ONLY prop here that tells you whether
+     the evening is being won, so it is worth drawing properly.
+
+     TWO RULES GOVERN IT AND NEITHER IS TASTE:
+     (1) EVENT-DRIVEN ONLY. redrawBoard() runs when a FACT changed (the cast
+         seated, a member flipped, a leak landed, the gavel fell) — never per
+         frame. A CanvasTexture upload is a real GPU cost and nothing on this
+         board ticks (the session clock deliberately lives on the panel, not
+         here, precisely so the board never needs a per-frame repaint).
+     (2) THE CANVAS ASPECT IS THE MESH ASPECT. 1024x640 is 1.600, and the
+         board mesh is 4.64 x 2.90 = 1.600 exactly, so no glyph is stretched.
+         Move one and you move the other.
+     ---------------------------------------------------------------------- */
+  const BOARD_CW = 1024, BOARD_CH = 640;   // canvas px (1.600, == the mesh aspect)
+  const BC = {
+    bg: "#0b1119", head: "#16273a", rule: "#8fc1ff", dim: "#6f88a6",
+    name: "#e8eef5", sub: "#7d8ca3", foot: "#0e1722", stripe: "rgba(255,255,255,.030)",
+    for: "#5fd08a", against: "#ff6a5e", undecided: "#c9a24a", none: "#7e8aa3",
+  };
+  const FONT = "'Trebuchet MS',Verdana,sans-serif";
+  function stanceCol(s) { return s === "for" ? BC.for : s === "against" ? BC.against : BC.undecided; }
+  function rrect(cc, x, y, w, h, r) {
+    cc.beginPath();
+    cc.moveTo(x + r, y); cc.lineTo(x + w - r, y); cc.quadraticCurveTo(x + w, y, x + w, y + r);
+    cc.lineTo(x + w, y + h - r); cc.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    cc.lineTo(x + r, y + h); cc.quadraticCurveTo(x, y + h, x, y + h - r);
+    cc.lineTo(x, y + r); cc.quadraticCurveTo(x, y, x + r, y); cc.closePath();
   }
+  function makeBoard() { return C.canvasTexLive(BOARD_CW, BOARD_CH); }
   function redrawBoard() {
     if (!V || !V.board) return;
-    const cc = V.board.cc, W = 512, H = 320;
-    cc.fillStyle = "#0e141c"; cc.fillRect(0, 0, W, H);
-    cc.fillStyle = "#8fc1ff"; cc.font = "700 25px 'Trebuchet MS',Verdana,sans-serif"; cc.textAlign = "center";
-    cc.fillText("DOCKLANDS REZONING — THE VOTE", W / 2, 33);
-    cc.font = "600 20px 'Trebuchet MS',Verdana,sans-serif";
-    if (!COUNCIL.length) { cc.fillStyle = "#7e8aa3"; cc.fillText("the council has not yet been seated", W / 2, 170); V.board.tex.needsUpdate = true; return; }
+    const cc = V.board.cc, W = V.board.w, H = V.board.h;
+    cc.textBaseline = "alphabetic";
+    cc.fillStyle = BC.bg; cc.fillRect(0, 0, W, H);
+
+    // ---- header: what this board is, and where the evening stands ----------
+    cc.fillStyle = BC.head; cc.fillRect(0, 0, W, 92);
+    cc.fillStyle = BC.rule; cc.fillRect(0, 92, W, 4);
     cc.textAlign = "left";
-    for (let i = 0; i < COUNCIL.length; i++) {
-      const m = COUNCIL[i], y = 74 + i * 30;
-      cc.fillStyle = "#cfd6dd"; cc.fillText((i + 1) + ". " + shortName(m.name) + (m.real ? "" : " *"), 22, y);
-      const st = m.stance, col = st === "for" ? "#5fd08a" : st === "against" ? "#ff6a5e" : "#c9a24a";
-      cc.fillStyle = col; cc.textAlign = "right"; cc.fillText(st.toUpperCase(), W - 22, y); cc.textAlign = "left";
+    cc.fillStyle = "#dce8f6"; cc.font = "700 42px " + FONT;
+    cc.fillText("DOCKLANDS REZONING", 34, 52);
+    cc.fillStyle = BC.dim; cc.font = "600 19px " + FONT;
+    cc.fillText("COUNCIL ROLL · LIVE WHIP COUNT", 36, 79);
+    cc.textAlign = "right";
+    cc.fillStyle = G.result === "win" ? BC.for : (G.result ? BC.against : BC.dim);
+    cc.font = "700 22px " + FONT;
+    cc.fillText(G.result ? resultLine().toUpperCase() : (G.active ? "SESSION IN PROGRESS" : "CHAMBER STANDING BY"), W - 34, 50);
+    cc.fillStyle = G.scandal >= SCANDAL_CAP * 0.6 ? BC.against : BC.dim;
+    cc.font = "600 18px " + FONT;
+    cc.fillText("SCANDAL " + Math.min(100, Math.round(G.scandal)) + "%  ·  LEDGER " + G.ledger.length, W - 34, 79);
+
+    if (!COUNCIL.length) {
+      cc.textAlign = "center"; cc.fillStyle = BC.none; cc.font = "600 30px " + FONT;
+      cc.fillText("the council has not yet been seated", W / 2, H / 2 + 10);
+      V.board.paint(); return;
     }
-    const t = tallyOf(COUNCIL);
-    cc.fillStyle = G.result === "win" ? "#5fd08a" : G.scandal >= SCANDAL_CAP ? "#ff6a5e" : "#9aa6bd";
-    cc.font = "700 18px 'Trebuchet MS',Verdana,sans-serif"; cc.textAlign = "center";
-    const foot = G.result ? resultLine().toUpperCase()
-      : "FOR " + t.for + "   AGAINST " + t.against + "   ABSTAIN " + t.abstain + "   (need FOR > AGAINST)";
-    cc.fillText(foot, W / 2, 300);
-    V.board.tex.needsUpdate = true;
+
+    // ---- one row per seat: rank · name · office · stance chip --------------
+    const TOP = 108, ROWH = 60, CHIPW = 208, CHIPX = W - 34 - CHIPW;
+    for (let i = 0; i < COUNCIL.length; i++) {
+      const m = COUNCIL[i], y = TOP + i * ROWH, col = stanceCol(m.stance);
+      if (i % 2 === 0) { cc.fillStyle = BC.stripe; cc.fillRect(24, y, W - 48, ROWH - 4); }
+      cc.fillStyle = col; cc.fillRect(24, y + 6, 6, ROWH - 16);        // stance edge
+      cc.textAlign = "right"; cc.fillStyle = BC.sub; cc.font = "700 21px " + FONT;
+      cc.fillText(String(i + 1), 70, y + 38);
+      cc.textAlign = "left";
+      cc.fillStyle = BC.name; cc.font = "700 27px " + FONT;
+      cc.fillText(shortName(m.name), 88, y + 29, CHIPX - 108);
+      // The stand-in note is SPELLED OUT: the old asterisk needed a legend the
+      // board never had room to print, and this line was already free.
+      cc.fillStyle = BC.sub; cc.font = "500 17px " + FONT;
+      cc.fillText(m.title + (m.real ? "" : " · stand-in") + (m.flippedBy ? "  —  " + m.flippedBy : ""), 90, y + 50, CHIPX - 110);
+      cc.globalAlpha = 0.16; cc.fillStyle = col; rrect(cc, CHIPX, y + 12, CHIPW, 34, 8); cc.fill(); cc.globalAlpha = 1;
+      cc.strokeStyle = col; cc.lineWidth = 2; rrect(cc, CHIPX, y + 12, CHIPW, 34, 8); cc.stroke();
+      cc.textAlign = "center"; cc.fillStyle = col; cc.font = "700 21px " + FONT;
+      cc.fillText(m.stance.toUpperCase(), CHIPX + CHIPW / 2, y + 36);
+    }
+
+    // ---- footer: the count, as a bar you can read from the bench ----------
+    const t = tallyOf(COUNCIL), n = COUNCIL.length || 1;
+    cc.fillStyle = BC.foot; cc.fillRect(0, 536, W, H - 536);
+    cc.fillStyle = "rgba(143,193,255,.28)"; cc.fillRect(0, 536, W, 2);
+    let bx = 34; const BW = W - 68;
+    const segs = [[t.for, BC.for], [t.abstain, BC.undecided], [t.against, BC.against]];
+    for (const s of segs) {
+      const sw = (BW * s[0]) / n; if (sw <= 0) continue;
+      cc.fillStyle = s[1]; cc.fillRect(bx, 556, Math.max(0, sw - 2), 12); bx += sw;
+    }
+    cc.textAlign = "left"; cc.font = "700 24px " + FONT;
+    let tx = 34;
+    const legend = [["FOR", t.for, BC.for], ["UNDECIDED", t.abstain, BC.undecided], ["AGAINST", t.against, BC.against]];
+    for (const L of legend) {
+      cc.fillStyle = L[2]; cc.beginPath(); cc.arc(tx + 7, 601, 7, 0, Math.PI * 2); cc.fill();
+      const txt = L[0] + " " + L[1];
+      cc.fillText(txt, tx + 22, 609);
+      tx += 22 + cc.measureText(txt).width + 42;
+    }
+    cc.textAlign = "right"; cc.font = "700 22px " + FONT;
+    cc.fillStyle = G.result ? (G.result === "win" ? BC.for : BC.against) : BC.dim;
+    cc.fillText(G.result ? resultLine().toUpperCase() : "NEED FOR > AGAINST", W - 34, 609);
+    V.board.paint();
   }
 
   /* ---------------- panel UI (engine panel, data-act delegation) ---------- */
@@ -845,11 +926,43 @@
       }
     }
 
-    // ---- the tally board (canvas texture) on the wall behind the bench ----
+    // ---- the tally board on the wall behind the bench ----------------------
+    // THE GLITCH, AND WHY IT WAS ARITHMETIC AND NOT TASTE. This board used to
+    // be a ZERO-THICKNESS PlaneGeometry parked at z = -hz*0.9 while its backing
+    // frame was a CENTRED box at -hz*0.9 - 0.06 with depth 0.12 — so the frame's
+    // front face landed at exactly -hz*0.9 too. Two surfaces, one depth value,
+    // no epsilon: the depth buffer cannot choose, so which one wins is decided
+    // per pixel per frame by float noise, and the blue board uplight below is
+    // aimed straight at the seam. That shimmer is the owner's "glitchy screen".
+    //
+    // THE FIX IS THE ONE EVERY OTHER SCREEN IN THIS CODEBASE ALREADY USES: a
+    // screen is a SLAB WITH AIR BEHIND IT, not paint on a wall. BOARD_T gives
+    // it real depth (so it cannot fight itself) and BOARD_GAP is honest air in
+    // front of the frame — the same SCREEN_GAP convention as
+    // interior_programs.js, buildings.js, exec_office.js and furniture.js, only
+    // bigger, because this pane is 4.6 m wide and read from across a chamber.
+    // Measured by CBZ.govBoardAudit().gap; the gate pins it >= 0.02.
+    const frameZ = -hz * 0.9 - 0.06, frameD = 0.12;
+    const frameFace = frameZ + frameD / 2;                                      // the frame's front plane
+    V.frameMesh = ctx.box(g, 0, 2.75, frameZ, 4.9, 3.2, frameD, ctx.mat(0x11161d));   // backing frame
     V.board = makeBoard();
-    const bmesh = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.9), new THREE.MeshBasicMaterial({ map: V.board.tex }));
-    bmesh.position.set(0, 2.75, -hz * 0.9); g.add(bmesh);
-    ctx.box(g, 0, 2.75, -hz * 0.9 - 0.06, 4.9, 3.2, 0.12, ctx.mat(0x11161d));   // backing frame
+    // ONE mesh carries the map AND the emissiveMap (games/racing.js's timing
+    // tower is the pattern), so the lit face and its glow are structurally
+    // incapable of separating. It was the only big screen in the game with no
+    // emissive term at all — an unlit MeshBasic pane reads as a painted board,
+    // not a lit one. NEVER ctx.emat/ctx.mat here: those caches are keyed by
+    // COLOUR and shared world-wide, so hanging a map on one repaints every
+    // same-coloured box in every venue. A screen is always a fresh material.
+    const bmat = new THREE.MeshLambertMaterial({
+      color: 0xffffff, map: V.board.tex,
+      emissive: 0xffffff, emissiveMap: V.board.tex, emissiveIntensity: BOARD_EI,
+    });
+    const bmesh = new THREE.Mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T), bmat);
+    bmesh.position.set(0, 2.75, frameFace + BOARD_GAP + BOARD_T / 2);
+    bmesh.castShadow = false; bmesh.receiveShadow = false;
+    g.add(bmesh);
+    V.boardMesh = bmesh;
+    V.screens = [bmesh];
 
     // ---- the chair / podium (the session hub) ----
     ctx.box(g, 0, 0.55, hz * 0.14, 0.95, 1.1, 0.72, ctx.mat(COL.woodD));
@@ -1020,4 +1133,32 @@
       _gavel: function (why) { gavel(why || "test"); },
     },
   });
+
+  /* ---------------- RATCHET: the board can never go coplanar again ---------
+     EXPORT ONLY — tools/math-gate.mjs calls this, this file never does.
+       gap      metres of real air between the board's BACK face and the backing
+                frame's FRONT face, MEASURED off the two live meshes (their own
+                geometry parameters), not read back off the constants that
+                positioned them. Pin >= 0.02: at 0 the two surfaces share a
+                depth value and the wall shimmers, which is the bug this fixes.
+       emissive the board's emissiveIntensity — 0 means it went back to being an
+                unlit painted panel.
+       screens  how many lit screen surfaces this venue carries.
+     `built` is false until the package has actually mounted a venue; the gate
+     should read gap/emissive only when it is true, because an unmounted package
+     has no geometry to measure and reporting the DESIGN numbers as if they were
+     measured is precisely the "audit nobody ran" failure the doctrine names. */
+  CBZ.govBoardAudit = function () {
+    const out = { gap: 0, emissive: 0, screens: 0, built: false };
+    if (!V || !V.boardMesh || !V.frameMesh) return out;
+    const b = V.boardMesh, f = V.frameMesh;
+    const bp = (b.geometry && b.geometry.parameters) || {};
+    const fp = (f.geometry && f.geometry.parameters) || {};
+    const bd = bp.depth || 0, fd = fp.depth || 0;
+    out.gap = Math.round(((b.position.z - bd / 2) - (f.position.z + fd / 2)) * 10000) / 10000;
+    out.emissive = (b.material && b.material.emissiveIntensity != null) ? b.material.emissiveIntensity : 0;
+    out.screens = V.screens ? V.screens.length : 0;
+    out.built = true;
+    return out;
+  };
 })();
