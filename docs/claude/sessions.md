@@ -1051,3 +1051,53 @@ room. this opens the door to rocketship logic."*
 - **FLAGS**: `VEHICLE_HOLD_V1` (all of it — every hold goes inert and the
   aeroplanes fly with an empty back) · `VEHICLE_HOLD_AUTOLATCH` (the sweep
   only). Both defaulted in-file.
+
+## THE 2026-08-03 RDR2 CAMERA + WEAPON-HOLDS WAVE (fable orchestrating 2 opus builders, each running its own before/after loop)
+
+- **THE CAMERA WAS CANCELLING ITSELF**: the TP look target moved with
+  `+sin(pitch)·LEAD` while the boom orbits `+sin(pitch)·DIST` — near-equal, so
+  the net view gain was **~0.028** and asking for 45.8° up delivered **+27.29°
+  DOWN** (measured on the deployed build via the preset's geometry metrics).
+  The in-file comment claiming "pitches ~1:1" sat exactly on the inversion
+  boundary. Fix (`CAM_RDR2_ORBIT`, default ON): pure orbit — pitch clamps the
+  ARM against the floor, not `dy`; per-tier `frameTilt` solved from each
+  tier's own resting constants so every tier frames byte-identical at rest.
+  Up-range now 78° (`VIEW_UP_MAX 1.36`); plates: sky 0% → **100%**, character
+  below-axis 4.7/5.1/6.0° across the whole sweep (was 4.7/−65/−88).
+- **ROOM-AWARE BOOM** (`CAM_ROOM_BOOM`, default ON, city-on-foot only):
+  5 swept-AABB probes at 12 Hz sense enclosure; boom damps 4.35 m ↔ 1.5 m
+  over-shoulder (τ 0.30 s), pivot drops to the shoulder indoors. Doorway plate
+  caught mid-blend at 2.99 m / enclosure 0.40 — eases, never snaps.
+  `CBZ.camAudit()` exported for the gate.
+- **ONE ENVELOPE, FIVE WRITERS**: `CBZ.camPitchRange()` (legacy `[-1.0,0.9]`
+  while `fps.active`) adopted at gamepad.js, three fpsmode clamp sites, and
+  touch.js:741 (aim magnetism — missed by the census comment, now listed).
+  `grep` proves zero hand-typed copies of the envelope remain in `src/`.
+- **PRONE GUNS WERE 0.45 m UNDERGROUND**: prone shoulder pitches `-1.32/-1.40`
+  hang both arms straight down through the deck, and holsterprops' direction-
+  only solve could then only point the barrel at the sky (measured 80°).
+  Fix: pose (`CHAR_PRONE_GUN_POSE`) + `gunGroundRest` (`CHAR_GUN_GROUND_REST`)
+  — a POSITION solve on the socket, run before `beginCharacterHipFrame`,
+  keyed by `userData.weaponId` not `visible`, target `prevLift + need` (raw
+  `need` is a feedback loop converging on half). Ground sampled under the GUN,
+  so a 34% slope plates level. Sunk 79.9/85.8/69.9/53.7 cm → **0** across
+  LMG/sniper/carbine/slope. `CBZ.charGunRestAudit().residual` is the gate
+  number (0.009 m measured — pose-transition frames only).
+- **BIPOD IS A CLASS, PRONE IS DEPLOYED** (`WEAPON_BIPOD_PRONE`): `bipodActive`
+  keys on `w.bipod` (lmg/sniper/bazooka carry `hold:{heavy,support}` in
+  weapon-data now), prone counts as deployed — support 0.45 → 0.34, cone
+  ×0.32, and the only case `gunGroundRest` may settle DOWN. Heavy carry
+  (`CHAR_HEAVY_CARRY`): support hand cradles the receiver, weight low.
+- **NEW EYES**: `tools/visual-presets/camera-rdr2.mjs` (6 subjects incl. a
+  bit-exact return-from-sky hysteresis check) and `weapon-holds.mjs`
+  (7 subjects incl. the 34% grade). Builders ran their own loops per the
+  2026-08-03 division; orchestrator ran ONE math gate on the merged state —
+  green (90210:318/180/204, det ok, errors baseline-only) — on a machine at
+  load 100+ under a parallel session's fleet (detached nohup + log polling;
+  harness-background gate runs get killed).
+- **DEBT LEFT NAMED**: crouch low-ready still poses the gun ~0.39 m under
+  before the solve rescues it (carryPose isn't stance-aware; the pose is
+  another session's screenshot-tuned work). holsterprops' `MUZZLE_CLEAR` is a
+  bare 0.05 with no belly-depth term; `playerProneSteady` still keys on
+  `w.key === "lmg"`; death.js/weather.js/camera.js now hold THREE copies of
+  the "under a roof" probe — promotion candidate with real consumers.
