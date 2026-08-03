@@ -69,14 +69,24 @@
                  colors: { legs: 0x23262e, torso: 0x6e1f2b, collar: 0xe9eaec, arms: 0x1d1f26, shoes: 0xe9eaec } },
     // ---- NEW WORK UNIFORMS (jobFit casts these; painted in clothes.js when
     //      present, else flat fallback) ----
+    // torso/collar SYNCED to what clothes.js PAINT.chef actually draws: the
+    // jacket white it fills with, and the RED neckerchief it reads off collar.
+    // The record used to say cream for both, which put an invisible cream
+    // neckerchief on a cream jacket — and, because "chef" is a single-atlas
+    // key, whichever of this record and the shop composable built first won.
     chef:      { id: "chef",      name: "Chef Whites",      tier: "work",   who: "line cooks",       price: 0,    drip: 0,
-                 colors: { legs: 0x2b2f36, torso: 0xf0ead8, collar: 0xe2dcc8, arms: 0xf0ead8, shoes: 0xd8d8d8 } },
+                 colors: { legs: 0x2b2f36, torso: 0xf0efe9, collar: 0x9a2a2a, arms: 0xf0efe9, shoes: 0xd8d8d8 } },
     waiter:    { id: "waiter",    name: "Waiter Blacks",    tier: "work",   who: "wait staff",       price: 0,    drip: 1,
                  colors: { legs: 0x141519, torso: 0x16171c, collar: 0xe9eaec, arms: 0x16171c, shoes: 0x101216 } },
     mailman:   { id: "mailman",   name: "Mail Carrier Blues", tier: "work", who: "mail carriers",    price: 0,    drip: 0,
                  colors: { legs: 0x2f4a6b, torso: 0x3a6a96, collar: 0x274056, arms: 0x3a6a96, shoes: 0x2b241c } },
+    // A CAPTAIN WEARS A WHITE SHIRT. clothes.js PAINT.pilot paints one (that is
+    // the whole look: white shirt, black tie, gold epaulettes) while this record
+    // said navy — so the flat fallback described a different uniform and the
+    // shoulder yoke stamped a navy band across a white shirt. Same class as the
+    // suit collar, one row up the file.
     pilot:     { id: "pilot",     name: "Captain's Stripes", tier: "work",  who: "pilots",           price: 0,    drip: 2,
-                 colors: { legs: 0x141826, torso: 0x16203a, collar: 0xe9eaec, arms: 0x16203a, shoes: 0x101216 } },
+                 colors: { legs: 0x1a1c24, torso: 0xeef0f2, collar: 0xd6d9dd, arms: 0xeef0f2, shoes: 0x101216 } },
     janitor:   { id: "janitor",   name: "Custodian Greys",  tier: "work",   who: "custodians",       price: 0,    drip: 0,
                  colors: { legs: 0x3a3f46, torso: 0x4a5560, collar: 0x363b42, arms: 0x4a5560, shoes: 0x2b2b2b } },
     valet:     { id: "valet",     name: "Valet Vest",       tier: "work",   who: "valets",           price: 0,    drip: 1,
@@ -180,8 +190,12 @@
     // True-black jacket, CHARCOAL-SATIN collar (lapel read, not a priest's
     // band), gloss shoes; the white lives in the SHIRT-FRONT panel + square
     // (formal kit meshes), never the collar — that was the priest look.
+    // torso/legs SYNCED to PAINT.tuxedo's own values (0x16171c body, 0x14151a
+    // trousers). Its comment says the body is deliberately "lifted off true
+    // black so shading reads" — so the painter was right and the record was
+    // wrong by 0x0c, which is enough to see as a band when the yoke wears it.
     tuxedo:    { id: "tuxedo",    name: "Midnight Tuxedo",  tier: "apex",   who: "old money",        price: 7500, drip: 28, formal: "tux",
-                 colors: { legs: 0x0a0b0e, torso: 0x0a0b0e, collar: 0x24262e, arms: 0x0a0b0e, shoes: 0x08090c, gloss: true } },
+                 colors: { legs: 0x14151a, torso: 0x16171c, collar: 0x24262e, arms: 0x16171c, shoes: 0x08090c, gloss: true } },
   };
 
   // per-gang colors, generated off the live config so every crew's flag exists
@@ -372,6 +386,11 @@
   // ============================================================
   function pinSuitStyle(rec, style) {
     if (!rec) return rec;
+    // ONLY A SUIT HAS A SUIT STYLE. cityWear routes every painted composable
+    // through here — including the tuxedo, whose record must never come back
+    // wearing the charcoal two-piece's colours now that the style pin carries
+    // colours with it. (Harmless before; a real bug the moment it does.)
+    if (rec.id !== "suit") return rec;
     if (rec.style != null && style == null) return rec;          // already pinned
     // honour, in order: an explicit request, the legacy misspelled field, the
     // shop's default. NEVER mutate a CAT entry — it is shared with every other
@@ -382,6 +401,31 @@
     const out = {};
     for (const k in rec) out[k] = rec[k];
     out.style = s;
+    // …AND THE COLOURS COME WITH IT. This function used to pin ONLY the index,
+    // leaving CAT.suit's static navy sitting in out.colors — so every consumer
+    // that reads the record instead of the atlas (the flat fallback when no
+    // painter is present, the shoulder yoke, a corpse sample) described a navy
+    // suit while the body wore a tan one. The style table IS the suit; derive
+    // from it. Guarded: no exported table (a partial clothes.js) leaves the
+    // record exactly as it was.
+    out.colors = suitColorsFor(s, rec.colors);
+    return out;
+  }
+  // the colour record a SUIT_STYLES entry implies. Mirrors clothes.js PAINT.suit
+  // ("legs = st.legs, else a shade under the body") so the flat fallback lands
+  // on the same suit the painter would have drawn, and returns the ORIGINAL
+  // record untouched when the table is unavailable.
+  function suitColorsFor(idx, base) {
+    const tbl = CBZ.citySuitStyles;
+    const st = tbl && tbl[idx];
+    if (!st || st.body == null) return base;
+    const body = st.body | 0;
+    const legs = st.legs != null ? (st.legs | 0) : tone(body, -0.08);
+    const out = {};
+    for (const k in (base || {})) out[k] = base[k];
+    out.torso = body; out.arms = body; out.legs = legs;
+    out.collar = tone(body, 0.12);            // the flat-path accent, in the suit's own family
+    out.gloss = !!st.tux;                     // patent shoes belong to the STYLE, not the wearer
     return out;
   }
   // the style a composable's paintRec asked for ({style:N} from clothes.js's
@@ -446,7 +490,12 @@
       // fell back to the rig-id branch. One word; it is the difference between
       // "mob captains wear pinstripe" and "mob captains wear a coin flip".
       formal: tux ? "tux" : "suit", style: style,
-      colors: { legs: body, torso: body, collar: tone(body, 0.12), arms: body, shoes: 0x0c0d10, gloss: tux },
+      // THE RECORD DESCRIBES THE SUIT IT PICKED. This used to hand back a colour
+      // taken from SUIT_FALLBACK_HEX (an ARCHETYPE guess) beside a style index
+      // chosen independently — two answers to one question, and the shoulder
+      // yoke read the wrong one. suitColorsFor derives from the style itself and
+      // keeps the archetype hex as the fallback for a clothes.js with no table.
+      colors: suitColorsFor(style, { legs: body, torso: body, collar: tone(body, 0.12), arms: body, shoes: 0x0c0d10, gloss: tux }),
     };
   }
   // tiny hex tone helper (lighten/darken) for the suit collar/lapel read.
@@ -467,7 +516,17 @@
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
       if (!m) continue;
-      if (color != null && m.material && m.material.color && m.material.color.setHex) {
+      // A PAINTED GARMENT HAS NO FLAT COLOUR TO SET. clothes.js tags every mesh
+      // it dressed with userData._cbzPart, and a Lambert color on a mapped
+      // material MULTIPLIES the map — so tinting one does not recolour the
+      // garment, it darkens the artwork. recolorRig already guards its own
+      // calls with pp; the OTHER callers of this exported function (crowd
+      // promotion, the VIP / racer / millionaire fits) do not, and now that the
+      // shoulder yoke is canvas cloth too they would smear a drafted VIP's
+      // house colour over a painted collar. Visibility is still honoured — that
+      // is a different question and always answerable.
+      if (color != null && !(m.userData && m.userData._cbzPart) &&
+          m.material && m.material.color && m.material.color.setHex) {
         if (m.material._shared) m.material = m.material.clone();
         m.material.color.setHex(color);
       }
@@ -543,11 +602,31 @@
     // colour and disappears into it; a flat (unpainted) fit keeps its accent,
     // which is the only place a collar band was ever the design.
     // One-line revert: CBZ.CONFIG.CITY_YOKE_GARMENT = false.
+    //
+    // TWO THINGS CHANGED HERE, and both are the same owner bug ("the collar of
+    // the player shirt is blue and geometric, not painted like the rest of the
+    // shirt"):
+    //  (a) c.torso is the CATALOG RECORD's colour, and for a painted garment
+    //      that is not necessarily the colour the garment is painted. CAT.suit
+    //      says navy 0x1c2030 while clothes.js paints from SUIT_STYLES[n].body,
+    //      so EVERY suit — Tan, Powder-Blue, All-White — wore a navy slab. Ask
+    //      the garment what it painted (CBZ.cityPaintedBodyHex reads the atlas
+    //      itself, so a 23rd suit style is right without being told), and fall
+    //      back to c.torso exactly as before when it cannot answer.
+    //  (b) when clothes.js DRESSES the yoke (its CLOTH_YOKE_PAINT canvas gives
+    //      the slab a collar stand, a neckline and lapels), pp.collar is set and
+    //      we must not tint it at all — a colour on a textured Lambert
+    //      multiplies the map and would darken the paint.
     const yokeGarment = !CBZ.CONFIG || CBZ.CONFIG.CITY_YOKE_GARMENT !== false;
-    const yokeHex = (yokeGarment && pp && pp.torso && c.torso != null)
-      ? c.torso
-      : (c.collar != null ? c.collar : c.torso);
-    paint(s.collar, yokeHex);
+    if (!pp || !pp.collar) {
+      let yokeHex = (c.collar != null ? c.collar : c.torso);
+      if (yokeGarment && pp && pp.torso) {
+        const painted = CBZ.cityPaintedBodyHex ? CBZ.cityPaintedBodyHex(rec, ch) : null;
+        if (painted != null) yokeHex = painted;
+        else if (c.torso != null) yokeHex = c.torso;
+      }
+      paint(s.collar, yokeHex);
+    }
     paint(s.shoes, c.shoes != null ? c.shoes : 0x2b2b2b);
     sheen(s.shoes, !!c.gloss);
     // GANG colors = a SOLID shirt (painted above by the flat path) + a small
@@ -1194,6 +1273,78 @@
       }
     }
     return bad;
+  };
+
+  /* ---- RATCHET (Block Law #5): CBZ.cityOutfitYokeAudit() ------------------
+     THE COLLAR AND THE CLOTH ARE ONE COLOUR, OR THE FIT IS BROKEN.
+
+     OWNER: "the collar of the player shirt is blue and geometric, not painted
+     like the rest of the shirt — clearly a bug." Measured here rather than
+     argued: for every painted outfit in the catalog (and every SUIT_STYLES
+     index, since the suit is where the fault actually lived), compare
+
+       paintedBody — what clothes.js's atlas ACTUALLY paints the torso with
+                     (CBZ.cityPaintedBodyHex, read off the canvas), and
+       yokeHex     — what the shoulder yoke ends up wearing: the yoke atlas's
+                     own body colour when clothes.js dresses it, else the exact
+                     hex recolorRig's flat path would stamp on it.
+
+     delta is the RGB distance between them (0-441). Pin worst at 0: a
+     painted garment whose collar is a different colour from its own cloth is
+     the bug, and the number can only go down. flat counts outfits with no
+     painted look at all — those keep a DESIGNED accent collar (the varsity's
+     cream trim, the tracksuit's white) and are excluded from worst on purpose.
+     Reported beside it: painted (how many outfits have a painted look) so a
+     "fix" that simply stops painting cannot pass.
+
+     EXPORT ONLY — this file never calls it; the gate does. It builds every
+     atlas it touches, so it wants a real canvas (browser/CDP), and it degrades
+     to {ok:false} rather than throwing anywhere else. */
+  CBZ.cityOutfitYokeAudit = function () {
+    buildGangOutfits();
+    const out = { rows: [], painted: 0, flat: 0, worst: 0, ok: !!CBZ.cityPaintedBodyHex };
+    if (!out.ok) return out;
+    const yokeGarment = !CBZ.CONFIG || CBZ.CONFIG.CITY_YOKE_GARMENT !== false;
+    const dist = function (a, b) {
+      const dr = ((a >> 16) & 255) - ((b >> 16) & 255);
+      const dg = ((a >> 8) & 255) - ((b >> 8) & 255);
+      const db = (a & 255) - (b & 255);
+      return Math.round(Math.sqrt(dr * dr + dg * dg + db * db));
+    };
+    const rowFor = function (id, rec) {
+      let painted = null, parts = null;
+      try {
+        painted = CBZ.cityPaintedBodyHex(rec, null);
+        const set = CBZ.cityClothesTex ? CBZ.cityClothesTex(rec, null) : null;
+        parts = set ? (set.partsY || set.parts) : null;
+      } catch (e) { return null; }
+      const c = rec.colors || {};
+      if (painted == null) {                       // no painted look — the flat accent is the design
+        out.flat++;
+        return { id: id, paintedBody: null, yokeHex: (c.collar != null ? c.collar : c.torso), delta: 0 };
+      }
+      out.painted++;
+      // what the yoke actually ends up wearing, by the same two branches the
+      // dresser takes: the yoke atlas's own colour, or recolorRig's flat tint.
+      const yokeHex = (parts && parts.collar) ? painted
+        : (yokeGarment && parts && parts.torso && c.torso != null) ? c.torso
+        : (c.collar != null ? c.collar : c.torso);
+      const d = (yokeHex == null) ? 0 : dist(painted, yokeHex);
+      if (d > out.worst) out.worst = d;
+      return { id: id, paintedBody: painted, yokeHex: yokeHex, delta: d };
+    };
+    for (const id in CAT) {
+      const r = rowFor(id, CAT[id]);
+      if (r) out.rows.push(r);
+    }
+    // EVERY suit style, not just the catalog row — the catalog has one "suit"
+    // and the wardrobe casts twenty-two of them.
+    const styles = CBZ.citySuitStyles || [];
+    for (let i = 0; i < styles.length; i++) {
+      const r = rowFor("suit|" + i, pinSuitStyle(CAT.suit, i));
+      if (r) out.rows.push(r);
+    }
+    return out;
   };
   function teenFit(spec, seed) {
     const roll = rollBy(seed, 73);
