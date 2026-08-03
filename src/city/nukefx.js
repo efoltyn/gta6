@@ -276,6 +276,23 @@
   // The coherent cloud carries its own soot; opt this legacy foreground layer
   // back in only for an A/B.
   if (CBZ.CONFIG.NUKE_FX_ASH == null) CBZ.CONFIG.NUKE_FX_ASH = false;
+  // THE CLOUD MUST BE VISIBLE FROM ACROSS THE MAP. The cold lobes used to mix
+  // toward scene.fog like ordinary geometry, and the city's white haze reaches
+  // ~100% inside 5 km — so the biggest spectacle in the game was fog-erased
+  // from exactly the distances a fleeing player watches it from (measured
+  // 2026-08-02 with tools/visual-presets/nuke-sequence.mjs: at 5 km the t=8 s
+  // cap was indistinguishable from sky). A mushroom cloud stands ABOVE the
+  // haze layer; it does not dissolve into it. false => the old fogged read.
+  if (CBZ.CONFIG.NUKE_FX_FOGPROOF == null) CBZ.CONFIG.NUKE_FX_FOGPROOF = true;
+  // Photographically-anchored formation size (see formationDims) instead of
+  // the first coherent draft's R*3.6 cap, which measured ~3x smaller than the
+  // Trinity/Nagasaki frame record for the same age. false => draft numbers.
+  if (CBZ.CONFIG.NUKE_FX_BIG_FORMATION == null) CBZ.CONFIG.NUKE_FX_BIG_FORMATION = true;
+  // The cloud OUTLIVES the 34 s sequence: it keeps growing toward the mature
+  // researched dimensions (nukeDims) over ~3 minutes, stands as a landmark,
+  // thins, and only then fades — instead of vanishing mid-formation at 34 s.
+  // false => the sequence ends and hides at STYLE.nuke.dur exactly as before.
+  if (CBZ.CONFIG.NUKE_FX_AFTERMATH == null) CBZ.CONFIG.NUKE_FX_AFTERMATH = true;
   // THE ATMOSPHERE DRIVE — the single cheapest "this is nuclear" cue there is.
   // Lerps scene.fog.color along the timeline (white-out -> orange -> ash grey);
   // core/sky.js@99 paints its horizon band from scene.fog.color, so the whole
@@ -1148,7 +1165,11 @@
       const m = new THREE.MeshLambertMaterial({
         color: color, emissive: emissive, emissiveIntensity: 1,
         transparent: true, opacity: opacity, depthWrite: true,
-        depthTest: true, fog: true, side: THREE.FrontSide, flatShading: false,
+        depthTest: true,
+        // fog:false under NUKE_FX_FOGPROOF — the cloud stands above the haze
+        // layer; scene fog erased it completely past ~5 km (see the flag).
+        fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
+        side: THREE.FrontSide, flatShading: false,
       });
       m._shared = true;
       return m;
@@ -1168,7 +1189,7 @@
       volumeMat(0x5b4030, 0x301208, 0.88), 5.2);
     const hotMat = new THREE.MeshBasicMaterial({
       color: 0xff8a20, transparent: true, opacity: 0,
-      depthWrite: false, depthTest: true, fog: true,
+      depthWrite: false, depthTest: true, fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
       side: THREE.FrontSide, blending: THREE.AdditiveBlending,
     });
     hotMat._shared = true;
@@ -1192,7 +1213,7 @@
        front of a cloud". Retired by ~11 s, long before the cloud is. */
     const glowMat = new THREE.MeshBasicMaterial({
       color: 0xffd27a, transparent: true, opacity: 0,
-      depthWrite: false, depthTest: true, fog: true,
+      depthWrite: false, depthTest: true, fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
       side: THREE.FrontSide, blending: THREE.AdditiveBlending,
     });
     glowMat._shared = true;
@@ -1531,9 +1552,33 @@
      cap/stem proportion. It grows toward the mature dimensions after this
      sequence ends; it does not pretend to have reached them already. */
   function formationDims(R) {
-    const capW = R * 3.6;
+    if (!CBZ.CONFIG.NUKE_FX_BIG_FORMATION) {
+      // first-draft numbers, kept verbatim as the one-line revert
+      const capW0 = R * 3.6;
+      const capH0 = capW0 * 0.78;
+      const capY0 = R * 5.2;
+      return {
+        capW: capW0, capH: capH0, capY: capY0,
+        top: capY0 + capH0 * 0.5 * CAP_FLAT,
+        stemW: capW0 * STEM_OF_CAP,
+        base: R * 4.0,
+      };
+    }
+    /* Anchored to the frame record, not taste: Trinity (21 kt) reads ~3.3 km
+       to the cloud top at ~25 s in Mack's published sequence, and the
+       Nagasaki column is ~3-4 km tall inside the first minute. Scaled by
+       W^(1/3) to this file's 16 kt that is a ~3.0 km top at the end of the
+       26 s rise window. With R = 126 m:
+         capY = R*20.0 -> 2,520 m cap centre; top ~= 3.1 km  (was R*5.2 = 655 m)
+         capW = R*11.0 -> 1,386 m, xBLOOM_MAX -> ~1.95 km wide at t=34 s
+                                                              (was R*3.6 = 454 m)
+       The draft numbers made a 34-second, 16 kt cloud the size of a stadium
+       roof — honest YOUTH, dishonest SCALE. The handoff-youth contract in
+       tools/test-nukefx-phases.mjs still holds because the rise/bloom curves
+       start near zero: at t=1.47 s this cap is ~110 m wide and ~120 m up. */
+    const capW = R * 11.0;
     const capH = capW * 0.78;
-    const capY = R * 5.2;
+    const capY = R * 20.0;
     return {
       capW: capW, capH: capH, capY: capY,
       top: capY + capH * 0.5 * CAP_FLAT,
@@ -1996,6 +2041,14 @@
       live.surgeDraw = F.base;
       live.impW = F.capW;                      // legacy/fallback tier only
       live.impH = F.top;
+      if (CBZ.CONFIG.NUKE_FX_AFTERMATH) {
+        // The 34 s STYLE window stays the FORMATION sequence (audit beats,
+        // early layers, glass ladder all keep their times); the cloud itself
+        // then matures toward nukeDims and lingers as a landmark. See
+        // matureStep() for the per-frame walk and the thinning law.
+        live.matureFrom = P.dur;
+        live.dur = 420;
+      }
     }
 
     // ---- shells -----------------------------------------------------------
@@ -2456,7 +2509,11 @@
     const capY = capYAt(rise, L) - L.y;
     const bloom = bloomAt(t, L);
     const cloudCool = clamp((t - 0.7) / 11, 0, 1);
-    const endFade = Math.max(0, 1 - ease((t - (L.dur - 8)) / 8));
+    let endFade = Math.max(0, 1 - ease((t - (L.dur - 8)) / 8));
+    // Aftermath thinning: a stabilised cloud goes grey and translucent long
+    // before it disperses. Starts after the maturation walk, halves the body
+    // by the end, and the final 8 s fade above still closes it out.
+    if (L.matureFrom) endFade *= 1 - 0.5 * ease((t - 200) / Math.max(60, L.dur - 208));
     const roll = CBZ.CONFIG.NUKE_FX_ROLL
       ? t * (0.11 + 0.22 * Math.exp(-Math.max(0, t - 1) / 8))
       : t * 0.08;
@@ -3041,6 +3098,23 @@
     const mix = L.coherentCloud ? 0 : (real() ? impostorMix(L) : 0);
     L.mix = mix;
     stepImpostor(t, L, mix);
+    /* ---- AFTERMATH MATURATION (NUKE_FX_AFTERMATH) -------------------------
+       After the 34 s formation sequence the SAME lobe field keeps growing
+       toward the researched mature cloud (nukeDims: 5.1 km cap, centre at
+       8 km) over ~3 minutes — a real 16 kt cloud takes 4-6 minutes to
+       stabilise, and the drawn one stops pretending to be finished at 34 s.
+       This mutates the live targets the volume writers already read
+       (capW/riseH/stemW), so stepVolumes costs exactly what it did; the
+       12 Hz matrix-write gate in stepVolumes bounds the aftermath's cost. */
+    if (L.matureFrom && t > L.matureFrom && L.drawDims && L.dims) {
+      const F = L.drawDims, D = L.dims;
+      const k = ease(clamp((t - L.matureFrom) / 170, 0, 1));
+      L.capW = (F.capW + (D.capW - F.capW) * k) / BLOOM_MAX;
+      L.capH = F.capH + (D.capH - F.capH) * k;
+      L.capThick = L.capH / Math.max(1, L.capW * BLOOM_MAX);
+      L.riseH = F.capY + (D.capY - F.capY) * k;
+      L.stemW = (F.stemW + (D.stemW - F.stemW) * k) * 0.5;
+    }
     // The 3D volumes carry the actual mushroom silhouette from every angle.
     stepVolumes(t, L, mix);
 

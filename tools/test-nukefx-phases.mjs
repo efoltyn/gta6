@@ -44,10 +44,22 @@ assert.match(textureSource, /const structure = Math\.max\(capField, collarField,
 assert.doesNotMatch(textureSource, /ctx\.arc|createRadialGradient/,
   "no circles may define post-flash nuclear smoke");
 match(/const nBills = oneCloud \? 0/, "coherent nuke must allocate zero detail planes");
-match(/live\.volume = !!P\.volume && !live\.coherentCloud/,
-  "coherent nuke must not animate the six solid-lobe fields");
-match(/const mix = L\.coherentCloud \? 1/,
-  "coherent density field must own the whole post-flash timeline");
+// Since the d186a55 rebuild the coherent cloud IS the depth-writing 3D lobe
+// field (the baked far-card is the flag-off legacy tier), so the volumes run
+// and the impostor mix is pinned to 0 — the exact inverse of the density-field
+// era this contract was first written against.
+match(/const mix = L\.coherentCloud \? 0/,
+  "the 3D lobe field must own the whole coherent post-flash timeline");
+match(/NUKE_FX_FOGPROOF == null\) CBZ\.CONFIG\.NUKE_FX_FOGPROOF = true/,
+  "the cloud must default to punching through distance fog");
+match(/fog: !CBZ\.CONFIG\.NUKE_FX_FOGPROOF/,
+  "lobe materials must gate their fog mix on the fogproof flag");
+match(/NUKE_FX_BIG_FORMATION == null\) CBZ\.CONFIG\.NUKE_FX_BIG_FORMATION = true/,
+  "photographic formation scale must default on");
+match(/NUKE_FX_AFTERMATH == null\) CBZ\.CONFIG\.NUKE_FX_AFTERMATH = true/,
+  "the maturing aftermath cloud must default on");
+match(/live\.matureFrom = P\.dur;[\s\S]{0,40}live\.dur = 420/,
+  "the aftermath must extend the sequence instead of hiding it at 34 s");
 match(/noVisual: \(row\.id \|\| "nuke"\) === "nuke" && coherentCloud\(\)/,
   "nuke must suppress the redundant generic airstrike picture");
 assert.match(crashfx, /if \(opts\.noVisual !== true\) \{[\s\S]*?const nSmoke =/,
@@ -99,9 +111,17 @@ function keyed(u, keys) {
   return keys.at(-1)[1];
 }
 function sample(t) {
+  // Mirrors the code's two-stage model: formationDims (NUKE_FX_BIG_FORMATION)
+  // carries the 34 s sequence, then the NUKE_FX_AFTERMATH walk lerps the live
+  // targets toward the mature nukeDims over 170 s starting at t=34.
   const R = 126;
-  const capMature = 5106;
-  const capCentre = 8004;
+  const formCapW = R * 11.0;               // 1,386 m
+  const formCapY = R * 20.0;               // 2,520 m
+  const matureCapW = 5106;
+  const matureCapY = 8004;
+  const k = ease(clamp((t - 34) / 170, 0, 1));
+  const capWTarget = formCapW + (matureCapW - formCapW) * k;
+  const capYTarget = formCapY + (matureCapY - formCapY) * k;
   const rise = keyed((t - 0.9) / RISE_T, riseKeys);
   const bloom = keyed((t - 0.55) / RISE_T, bloomKeys);
   const phase = clamp(
@@ -112,8 +132,8 @@ function sample(t) {
   return {
     t,
     rise,
-    capW: (capMature / BLOOM_MAX) * bloom,
-    capY: R * 0.6 + (capCentre - R * 0.6) * rise,
+    capW: (capWTarget / BLOOM_MAX) * bloom,
+    capY: R * 0.6 + (capYTarget - R * 0.6) * rise,
     phase,
   };
 }
@@ -123,7 +143,7 @@ assert.ok(handoff.capW < 1000, `handoff cap is too wide: ${handoff.capW.toFixed(
 assert.ok(handoff.capY < 500, `handoff cap is too high: ${handoff.capY.toFixed(0)}m`);
 assert.ok(handoff.phase < 0.10, `handoff texture is too mature: ${handoff.phase.toFixed(3)}`);
 
-const times = [0.55, 1.05, 1.47, 3.5, 8, 15, 26.9];
+const times = [0.55, 1.05, 1.47, 3.5, 8, 15, 26.9, 60, 210];
 const rows = times.map(sample).map((s) => ({
   seconds: s.t.toFixed(2),
   rise: s.rise.toFixed(3),
@@ -140,5 +160,6 @@ for (let i = 1; i < rows.length; i++) {
 console.table(rows);
 console.log(
   "nukefx phase contract: OK " +
-  "(1 coherent post-flash draw, 0 lobe fields, 0 detail planes, 0 generic nuclear puff events)"
+  "(3D lobe cloud owns post-flash, fogproof, photographic formation + 420s maturing aftermath, " +
+  "0 detail planes, 0 generic nuclear puff events)"
 );

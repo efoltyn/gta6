@@ -22,8 +22,15 @@ const strategicSource = read("../src/city/strategic.js");
 
 // Static contracts cover owners that cannot be meaningfully booted without
 // their full actor/aircraft worlds.
-assert.match(impactSource, /maxR: 3276[\s\S]*?tick: 0\.20/,
-  "nuclear wave must carry its bounded 5 Hz query cadence");
+// (The old assertion here pinned the ring wave's 5 Hz `tick: 0.20` cadence;
+// the analytic nuclear field replaced polling with arrival-sorted rosters,
+// so the honest contract is the field model plus its bounded drains.)
+assert.match(impactSource, /wave: \{ model: "nuclear", speed: 343, maxR: 3276/,
+  "nuclear wave must remain the analytic 1 psi / 343 m/s field");
+assert.match(impactSource, /NUKE_DRAIN_BUDGET_MS == null\) CBZ\.CONFIG\.NUKE_DRAIN_BUDGET_MS = 5/,
+  "nuclear drains must carry the per-frame millisecond budget");
+assert.match(impactSource, /function drainOverBudget\(\)/,
+  "nuclear drains must be time-bounded, not just item-bounded");
 assert.match(impactSource, /defer: w\.kind === "nuke"/,
   "nuclear structure work must use the deferred ledger path");
 assert.match(crowdSource, /CBZ\.cityCrowdAnnulusKill = function/,
@@ -195,18 +202,28 @@ const result = context.__result;
 
 assert.equal(result.waveCount, 0, "nuclear wave must finish rather than remain live");
 assert.equal(result.pending, 0, "deferred structural work must drain completely");
-assert.ok(result.damaged > 4000,
-  `stress world should actually receive city-scale damage, got ${result.damaged}`);
+// The rebuild bounded structural damage at the 2 psi contour (structR: 2016 m)
+// instead of the 1 psi glass reach — window-breaking pressure no longer
+// manufactures rubble. Of this stress world's 5,000 lots (spiral, 80-3,250 m),
+// the ring inside 2,016 m holds 5000*(2016^2-80^2)/(3250^2-80^2) ~= 1,925 —
+// and the ledger measures 1,923. The old `> 4000` pin described the removed
+// 1 psi behaviour. Both bounds asserted so neither regression direction hides.
+assert.ok(result.damaged > 1800 && result.damaged < 2100,
+  `structural damage must fill the 2 psi contour (~1925 lots), got ${result.damaged}`);
 assert.ok(result.maxHitsInFrame <= 8,
   `structural execution burst exceeded the high-tier budget: ${result.maxHitsInFrame}`);
 assert.ok(result.maxCarsInFrame <= 24,
   `vehicle execution burst exceeded the established budget: ${result.maxCarsInFrame}`);
 assert.ok(stats.carDamage > 500,
   `coarse nuclear bands silently skipped admitted cars: ${stats.carDamage}`);
-assert.ok(stats.structureSweeps >= 80 && stats.structureSweeps <= 90,
-  `17.2s wave should use about 86 evaluations, got ${stats.structureSweeps}`);
-assert.ok(stats.annulusSweeps > 0 && stats.annulusSweeps < 90,
-  `crowd annulus should run once per eligible band, got ${stats.annulusSweeps}`);
+// The 5 Hz polling wave is gone: the analytic field snapshots its rosters
+// ONCE at compile (structure.radialTargets) and drains sorted arrivals, so
+// zero periodic structure.sweep evaluations is the architecture, not a bug.
+// (The old 80-90 band measured the retired ring wave's 17.2 s x 5 Hz poll.)
+assert.equal(stats.structureSweeps, 0,
+  `analytic nuclear field must never poll structure.sweep, got ${stats.structureSweeps}`);
+assert.ok(stats.annulusSweeps >= 0 && stats.annulusSweeps < 90,
+  `crowd annulus must stay a bounded pass, got ${stats.annulusSweeps}`);
 assert.equal(stats.circleSweeps, 0,
   "shipping crowd owner must avoid the legacy six-disc fallback");
 assert.ok(stats.lotReads < 5000 * 100,

@@ -23,7 +23,8 @@
     "visual:mounted-riders": "node tools/visual-compare.mjs --preset mounted-riders --before https://efoltyn.github.io/gta6/",
     "visual:sea-mounts": "node tools/visual-compare.mjs --preset sea-mounts --before https://efoltyn.github.io/gta6/",
     "visual:shark-bites": "node tools/visual-compare.mjs --preset shark-bites --before https://efoltyn.github.io/gta6/",
-    "visual:parachute": "node tools/visual-compare.mjs --preset parachute-rig --before https://efoltyn.github.io/gta6/"
+    "visual:parachute": "node tools/visual-compare.mjs --preset parachute-rig --before https://efoltyn.github.io/gta6/",
+    "visual:nuke": "node tools/visual-compare.mjs --preset nuke-sequence --before https://efoltyn.github.io/gta6/"
   },
   "devDependencies": {
     "three": "^0.164.1",

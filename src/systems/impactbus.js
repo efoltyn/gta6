@@ -1306,9 +1306,34 @@
     }
   }
 
+  /* THE DRAINS ARE TIME-BUDGETED, NOT JUST ITEM-BUDGETED. The per-frame item
+     caps (32 peds / 96 crowd / 24 cars / 16 structures) bound the EFFECT rate
+     but not the COST: one crowd kill is gore + ragdoll + drops and one car is
+     a vertex crater, so the first frame whose shock front reaches dense
+     downtown used to apply a full budget of every category in one tick —
+     measured 392 ms on an M-series Mac (tools/probe-nuke-perf.mjs,
+     2026-08-02, seed 90210, second 2 of the wave). Nothing is ever
+     discarded: an over-budget frame leaves the cursors where they are and
+     the next frame continues, so the same queued truth lands a few frames
+     later with no 1/3-second stall. The wave takes ~17 s to cross the city,
+     so the slack is invisible. NUKE_DRAIN_BUDGET_MS = 0 restores the pure
+     item-count behaviour (and tools/test-nuke-freeze-node.mjs's stubbed
+     applies never reach the budget, so its contract is unchanged). */
+  if (CBZ.CONFIG.NUKE_DRAIN_BUDGET_MS == null) CBZ.CONFIG.NUKE_DRAIN_BUDGET_MS = 5;
+  // performance.now with a Date.now fallback — headless VM harnesses
+  // (tools/test-nuke-freeze-node.mjs) don't inject `performance`.
+  const drainNow = (typeof performance !== "undefined" && performance.now)
+    ? function () { return performance.now(); }
+    : function () { return Date.now(); };
+  let drainDeadline = 0;
+  function drainOverBudget() {
+    return drainDeadline > 0 && drainNow() > drainDeadline;
+  }
+
   function drainNuclearJobs(key, headKey, budget, apply) {
     let advanced = true;
     while (budget > 0 && advanced) {
+      if (drainOverBudget()) return;
       advanced = false;
       for (let i = 0; i < nuclearFields.length && budget > 0; i++) {
         const w = nuclearFields[i], a = w[key], h = w[headKey] | 0;
@@ -1316,6 +1341,7 @@
         w[headKey] = h + 1;
         try { apply(w, a[h]); } catch (e) {}
         budget--; advanced = true;
+        if (drainOverBudget()) return;
       }
     }
   }
@@ -1323,6 +1349,7 @@
   function drainNuclearThermal(budget) {
     let advanced = true;
     while (budget > 0 && advanced) {
+      if (drainOverBudget()) return;
       advanced = false;
       for (let i = 0; i < nuclearFields.length && budget > 0; i++) {
         const w = nuclearFields[i];
@@ -1330,6 +1357,7 @@
         const job = w.structures[w.thermalHead++];
         try { applyNuclearThermal(w, job); } catch (e) {}
         budget--; advanced = true;
+        if (drainOverBudget()) return;
       }
     }
   }
@@ -1360,12 +1388,26 @@
 
     // Global budgets, shared by every simultaneous detonation. More bombs add
     // finite queued truth, not a larger per-frame spike and not discarded waves.
-    drainNuclearThermal(16);
-    drainNuclearJobs("peds", "pedHead", 32, applyNuclearPed);
-    drainNuclearJobs("crowd", "crowdHead", 96, applyNuclearCrowd);
-    drainNuclearJobs("cars", "carHead", 24, applyNuclearCar);
-    drainNuclearJobs("structures", "structHead", 16, applyNuclearStructure);
-    drainNuclearJobs("glass", "glassHead", 2, applyNuclearGlass);
+    // The category ORDER rotates each frame so the shared ms budget cannot
+    // permanently starve whichever drain happens to be listed last.
+    const budgetMs = Number(CBZ.CONFIG.NUKE_DRAIN_BUDGET_MS) || 0;
+    drainDeadline = budgetMs > 0 ? drainNow() + budgetMs : 0;
+    const DRAINS = [
+      // thermal also marks the structural ledger, so it lives under the same
+      // eight-per-frame law as the pressure hits below.
+      () => drainNuclearThermal(8),
+      () => drainNuclearJobs("peds", "pedHead", 32, applyNuclearPed),
+      () => drainNuclearJobs("crowd", "crowdHead", 96, applyNuclearCrowd),
+      () => drainNuclearJobs("cars", "carHead", 24, applyNuclearCar),
+      // 8, not 16: the doctrine's "maximum eight structural hits per frame"
+      // law — tools/test-nuke-freeze-node.mjs measures the ledger delta and
+      // this drain marks damage at admission, so its budget IS the burst.
+      () => drainNuclearJobs("structures", "structHead", 8, applyNuclearStructure),
+      () => drainNuclearJobs("glass", "glassHead", 2, applyNuclearGlass),
+    ];
+    const start = frameNo % DRAINS.length;
+    for (let i = 0; i < DRAINS.length; i++) DRAINS[(start + i) % DRAINS.length]();
+    drainDeadline = 0;
 
     for (let i = nuclearFields.length - 1; i >= 0; i--) {
       const w = nuclearFields[i];
