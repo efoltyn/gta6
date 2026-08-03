@@ -34,10 +34,10 @@
       if (legacyFlags[i] != null) { CFG.CITY_HITMAN_CAMPAIGN = !!legacyFlags[i]; break; }
     }
   }
-  // config.js defaults to sandbox for rapid world testing. Preserve that when
-  // this director is embedded without the normal config load; an explicit true
-  // still enables the complete story.
-  if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = false;
+  // The flag is a MASTER ENABLE, not an activation: with it on (the default),
+  // the campaign runs only when the player picks "The Contract" on the title
+  // screen. false is the one-line kill switch for the whole story.
+  if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = true;
   // Endless-line archetypes (sniper/disguise/vehicle/high-value contracts).
   if (CFG.CAMPAIGN_CONTRACT_VARIETY == null) CFG.CAMPAIGN_CONTRACT_VARIETY = true;
   // Ambient scenedirector set-pieces during ENDLESS free time (scripted phases
@@ -89,7 +89,21 @@
     contract: null,
   };
 
-  function active() { return CFG.CITY_HITMAN_CAMPAIGN !== false; }
+  // RUN-SCOPED ACTIVATION. The flag is only the master enable; what actually
+  // turns the director on is the PLAYER PICKING "The Contract" on the title
+  // screen (origins.js registry row "contract" — a real vaulted character, so
+  // resume and the [U] wheel work like every other life). The old behavior —
+  // flag true meant the campaign hijacked the whole game (title rewrite, all
+  // origins suppressed, standalone Prison Escape wins captured) — was written
+  // for a dedicated embed and lives on behind CAMPAIGN_CANONICAL_TITLE.
+  // Escape mode is owned only when the campaign itself sent the player there
+  // (g._campaignEscape, stamped by goToPrison), so standalone Prison Escape
+  // never sees a warden offer or a hijacked winGame.
+  function campaignRun() {
+    if (g.mode === "escape") return !!g._campaignEscape;
+    return g.cityOrigin === "contract";
+  }
+  function active() { return CFG.CITY_HITMAN_CAMPAIGN !== false && campaignRun(); }
   CBZ.cityCampaignActive = active;
   CBZ.cityCampaignEnabled = active;   // canonical flag read (campaign_ui + siblings delegate here)
   CBZ.cityCampaignOwnsMission = function () { return active(); };
@@ -744,6 +758,10 @@
   function goToPrison() {
     if (g.mode === "escape") return;
     cleanupRuntime();
+    // The ownership stamp: escape mode belongs to the campaign ONLY while this
+    // flag stands. It is session state, cleared on leaving prison and at the
+    // title screen, so a standalone Prison Escape run is never hijacked.
+    g._campaignEscape = true;
     if (CBZ.setMode) CBZ.setMode("escape"); else g.mode = "escape";
     if (CBZ.setRole) CBZ.setRole("inmate"); else g.role = "inmate";
     if (CBZ.startRun) CBZ.startRun();
@@ -813,6 +831,7 @@
     }
     commit();
     cleanupRuntime();
+    g._campaignEscape = false;
     // The warden's authored release is clean; every later return from jail is
     // a real breakout and must retain the active phase plus the convict floor.
     g.escapedConvict = !!resumePhase || c.branch !== "spy";
@@ -1964,11 +1983,19 @@
     return false;
   };
 
-  // ---- integration: origin retirement, city reset, escape completion -------
+  // ---- integration: origin routing, city reset, escape completion ----------
+  // CALL THROUGH FIRST, then override. origins.js's apply owns the character
+  // vault (parking the outgoing ledger, minting/adopting this one) and the
+  // w.origin/originPlayed stamp — the "contract" registry row makes those work
+  // for the campaign untouched. Its scene is a cheap safe-spawn no-op; the
+  // director re-stages the real opening (helipad, loadout) in the reset wrap
+  // below. Returning our own result keeps introActive false so no sandbox
+  // origin cinematic ever plays over a campaign beat.
   const originalOriginApply = CBZ.cityOriginApply;
   CBZ.cityOriginApply = function (game) {
+    const base = originalOriginApply ? originalOriginApply.apply(this, arguments) : null;
     if (active()) return { introActive: false, campaign: true };
-    return originalOriginApply ? originalOriginApply.apply(this, arguments) : null;
+    return base;
   };
   const originalOriginActive = CBZ.cityOriginIntroActive;
   CBZ.cityOriginIntroActive = function () {
@@ -2013,6 +2040,23 @@
     cityMode.reset = wrappedReset;
   }
 
+  // ARREST OWNERSHIP: the prologue arrest (and any mid-campaign bust) reaches
+  // prison through wanted.js's OWN bust overlay — its callback performs the
+  // mode switch, so goToPrison never runs and the escape-ownership stamp
+  // would be missed. Stamp it at the one seam every city arrest passes
+  // through, before wanted.js's setMode("escape")/startRun read it.
+  if (typeof CBZ.cityBust === "function" && !CBZ.cityBust._campaignWrapped) {
+    const baseBust = CBZ.cityBust;
+    const wrappedBust = function () {
+      if (CFG.CITY_HITMAN_CAMPAIGN !== false && g.mode === "city" && g.cityOrigin === "contract") {
+        g._campaignEscape = true;
+      }
+      return baseBust.apply(this, arguments);
+    };
+    wrappedBust._campaignWrapped = true;
+    CBZ.cityBust = wrappedBust;
+  }
+
   // Sniper fieldcraft attribution: stamp player kills on the body itself.
   // g._cityKillDetail is consumed + nulled SYNCHRONOUSLY by promotion.js's
   // addKill wrapper, so a poll one frame later (tickEndless) never sees it.
@@ -2044,6 +2088,26 @@
 
   if (g.cityCampaignPending) CBZ.cityCampaignRestore(g.cityCampaignPending);
   state();
+  // Boot-time picker sync. origins.js's own peekLedger runs before the preset
+  // and contract rows register (its IDS test sees only the three hand-written
+  // originals at that moment), so a save on record as the campaign would land
+  // on the default card. This file loads last — every registry row is live —
+  // so sync the title picker to the saved life here.
+  (function syncContractPick() {
+    if (CFG.CITY_HITMAN_CAMPAIGN === false) return;
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem("CBZ_CITY_WORLD_V2")); } catch (e) { p = null; }
+    if (p && p.version === 2 && p.originPlayed && p.origin === "contract") {
+      g.cityOrigin = "contract";
+      if (CBZ.setCityOrigin) CBZ.setCityOrigin("contract");   // picker sync only — no "picked" intent
+    }
+  })();
+  // A campaign prison chapter ends at the title screen (death, quit) — release
+  // the escape-mode ownership stamp there so the player's next standalone
+  // Prison Escape run is the pure escape game, never a warden beat.
+  if (CBZ.onAlways) CBZ.onAlways(999.6, function () {
+    if (g._campaignEscape && g.state === "title") g._campaignEscape = false;
+  });
   // The scene director is no longer hard-disabled here: scenedirector.js asks
   // CBZ.cityCampaignScenesBlocked() per tick, so ambient set-pieces run during
   // ENDLESS free time (CFG.CAMPAIGN_AMBIENT_SCENES) and stay silent through

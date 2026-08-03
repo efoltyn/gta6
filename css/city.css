@@ -43,6 +43,15 @@ body.mode-city .mode-survival-only { display: none; }
 /* the generated story reads as the odd one out on purpose */
 .origin-btn-roll { border-style: dashed; }
 .origin-btn-roll.active { border-style: solid; }
+/* THE CONTRACT — the one authored story on the shelf: dark card, gold ink,
+   so the campaign is legible as a different kind of thing than a sandbox
+   start without shouting over the picker. */
+.origin-btn-contract { background: #201c18; border-color: #4a3c26; color: #f2e2bc; }
+.origin-btn-contract span { color: #b99a5e; }
+.origin-btn-contract.active {
+  border-color: #d9a63f; box-shadow: 0 0 0 3px rgba(217,166,63,.25);
+  background: linear-gradient(180deg,#2a241c,#201c18); color: #ffe9b3;
+}
 
 /* PILOT sub-select: the airframe list, filled at runtime from the LIVE
    aircraft registry (CBZ.cityOriginPlanes) — never a hand-kept list. Compact

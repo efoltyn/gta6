@@ -1665,6 +1665,23 @@
     };
     IDS.random = 1;
 
+    // THE CONTRACT — the authored hitman campaign (city/campaign.js). It is a
+    // real registry character so the vault, the [U] wheel, the ledger origin
+    // stamp and the title picker treat it like any other life. Its grants and
+    // scene are deliberately empty: campaign.js wraps cityOriginApply and owns
+    // every beat (prologue helipad, loadout, prison handoff). Registering here
+    // is what makes the pick addressable and resumable, not what stages it —
+    // and with CITY_HITMAN_CAMPAIGN off this row degrades to a plain safe
+    // street spawn instead of a broken card.
+    ORIGINS.contract = {
+      meta: { icon: "", name: "The Contract", blurb: "the authored hitman story" },
+      get tuning() { return { missedLotFeed: "" }; },
+      findSpawn: function () { return null; },
+      grants: function () {},
+      scene: function () { genericSafeSpawn(); return { compact: true }; },
+    };
+    IDS.contract = 1;
+
     // YOUR PREVIOUS LIFE — the pre-origin save parked by parkPreviousLife().
     // A real, switchable character with a full ledger; it simply has no
     // opening scene, because it predates the idea of one. Registering it here
@@ -1995,6 +2012,12 @@
       // what the number is for. It measures openings that resisted the
       // generator; a character with no opening cannot be one of those.
       if (k === PREV_ID) { resumeOnly++; continue; }
+      // `contract` is a DELEGATION, not an opening: its scene is a safe-spawn
+      // stub and city/campaign.js stages the real prologue. The ratchet
+      // measures openings that resisted the generator; a story whose opening
+      // lives in its own director is not one of those (same reasoning as the
+      // parked previous-life character above).
+      if (k === "contract") { resumeOnly++; continue; }
       if (ORIGINS[k].composition) composed++; else bespoke++;
     }
     return {

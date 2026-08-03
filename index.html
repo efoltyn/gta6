@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=allmain3">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
 <link rel="stylesheet" href="css/inventory.css?v=ctrl1">
-<link rel="stylesheet" href="css/city.css?v=city2w10">
+<link rel="stylesheet" href="css/city.css?v=contractcard1">
 <link rel="stylesheet" href="css/campaign.css?v=sasubtitle1">
 <link rel="stylesheet" href="css/interact_touch.css?v=allmain3">
 </head>
@@ -163,6 +163,7 @@
            applies the pick at run-start — see that file's header). -->
       <div class="origin-label">CHOOSE YOUR STORY</div>
       <div id="originSelect" class="origin-select" aria-label="Choose your story">
+        <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Contract</b><span>The authored story. A roof, a prison, a Director.</span></button>
         <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b><span>Top floor. Crash. Street. Jail if you slip.</span></button>
         <button class="origin-btn" type="button" data-origin="hitman"><b>The Hitman</b><span>A motel, a silencer, and one name.</span></button>
         <button class="origin-btn" type="button" data-origin="pilot"><b>The Pilot</b><span>You start airborne. Pick the airframe.</span></button>
@@ -334,7 +335,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=weaponphysics1"></script>
+<script src="src/config.js?v=campaignon1"></script>
 <script src="src/core/seed.js"></script>
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
@@ -421,7 +422,7 @@
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=nukefield1"></script>
 <script src="src/systems/hud.js?v=allmain3"></script>
-<script src="src/systems/economy.js?v=pick1"></script>
+<script src="src/systems/economy.js?v=itemstore1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=homing4"></script>
@@ -509,7 +510,7 @@
 <script src="src/systems/reactions.js?v=traversal1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=samples1"></script>
+<script src="src/systems/weather.js?v=annulus1"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/minimap.js?v=route1"></script>
 <script src="src/systems/dashboard.js?v=ranks1"></script>
@@ -636,13 +637,13 @@
      which loads much later in this file) are wired LAZILY on first
      sight of CBZ.interactions, so relative order to THAT file doesn't
      matter — only relative to building.js/structdamage.js does. -->
-<script src="src/systems/baseclaim.js?v=bld1"></script>
+<script src="src/systems/baseclaim.js?v=itemstore1"></script>
 <!-- B2 — the walking skeleton: CBZ.buildMode ghost preview + hotbar strip
      + confirm/rotate/level/demolish/undo, all calling B1's place()/remove().
      Loads right after building.js (needs CBZ.building.CATALOG/validate/
      place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
      camera.js, systems/pieces.js — both load earlier in this file). -->
-<script src="src/systems/buildmode.js?v=bm1"></script>
+<script src="src/systems/buildmode.js?v=itemstore1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->
@@ -890,14 +891,14 @@
 <script src="src/city/roleverbs.js?v=roles1"></script>
 <script src="src/city/restrain.js?v=weaponphysics1"></script>
 <script src="src/city/combat.js?v=seamount1"></script>
-<!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
-     CBZ.CITY already loaded, and CBZ.cityEcon's new Wood/Stone/Scrap/
-     Hatchet/Pickaxe entries above) + the [C] craft panel (needs
-     CBZ.cityGiveWeapon, just above, to auto-equip a freshly-crafted tool).
-     Loads right after city/combat.js, whose lightAttack/heavyAttack call
-     CBZ.resourceHarvestSwing when a swing finds no ped in the cone. -->
+<!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
+     already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
+     entries above). Loads right after city/combat.js, whose lightAttack/
+     heavyAttack call CBZ.resourceHarvestSwing when a swing finds no ped in
+     the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
+     its one live organ, the mode-aware item store, moved to
+     CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/resources.js?v=allmain1"></script>
-<script src="src/systems/craft.js?v=bld1"></script>
 <script src="src/city/explosives.js?v=c4-2"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
 <script src="src/city/death.js?v=arrest4"></script>
@@ -1040,11 +1041,11 @@
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=seawave1"></script>
+<script src="src/city/origins.js?v=contractrow1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=sasubtitle1"></script>
-<script src="src/city/campaign.js?v=story9"></script>
+<script src="src/city/campaign_ui.js?v=contractcard1"></script>
+<script src="src/city/campaign.js?v=story10"></script>
 <script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=traversal1"></script>
 <script src="src/systems/navigation.js?v=route1"></script>

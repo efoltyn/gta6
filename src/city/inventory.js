@@ -8,7 +8,7 @@
    death drops the guns (the existing NPC/cop drops stay; this module
    adds the PLAYER's death drop by wrapping CBZ.cityKillPlayer), and
    CHESTS can be placed in the world to stash excess loot. Crafting is
-   killed separately (systems/craft.js behind CBZ.CONFIG.CRAFTING_ENABLED).
+   DELETED outright (owner mandate; systems/craft.js is gone).
 
    DESIGN: a slot-grid VIEW over the two existing truth stores — never a
    third store. g.cityInv ({name:count}, CBZ.cityEcon add/take/count) is

@@ -346,16 +346,16 @@
   }
   // depositUpkeep(rec) -> {ok, reason?, cost, upkeepUntil?} — the real verb
   // logic, factored out so both the city-zone UI option below AND a harness/
-  // console caller can drive it identically. Spends through CBZ.craft's
-  // shared item-store bridge (systems/craft.js) — the SAME accessor
-  // buildmode.js's own cost gate and craft.js's tool recipes already use,
-  // so there's one source of truth for "what item store is the current
-  // mode's economy" (this verb only ever fires from the CITY zone, so the
-  // store always resolves to CBZ.cityEcon's Wood count).
+  // console caller can drive it identically. Spends through
+  // CBZ.econ.itemStore() (systems/economy.js) — the SAME mode-aware accessor
+  // buildmode.js's cost gate uses, so there's one source of truth for "what
+  // item store is the current mode's economy" (this verb only ever fires
+  // from the CITY zone, so the store always resolves to CBZ.cityEcon's Wood
+  // count).
   function depositUpkeep(rec) {
     if (!rec) return { ok: false, reason: "no base" };
     const cost = upkeepCost(rec);
-    const store = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
+    const store = CBZ.econ && CBZ.econ.itemStore ? CBZ.econ.itemStore() : null;
     if (!store || store.count("Wood") < cost) return { ok: false, reason: "insufficient Wood", cost: cost };
     store.take("Wood", cost);
     rec.upkeepUntil = Math.max(rec.upkeepUntil || 0, playClock) + UPKEEP_GRANT;

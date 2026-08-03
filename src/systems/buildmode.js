@@ -113,9 +113,9 @@
 
   /* ================= B7: RESOURCE COSTS =====================
      CATALOG.cost{Wood:N} (data-only since B1) becomes real: tryPlace()
-     below checks affordability against CBZ.craft.itemStore() (systems/
-     craft.js's ONE store accessor for whichever mode is live) before
-     calling B.place(), and deducts only on a SUCCESSFUL placement — a
+     below checks affordability against CBZ.econ.itemStore() (the ONE
+     mode-aware store accessor, systems/economy.js) before calling
+     B.place(), and deducts only on a SUCCESSFUL placement — a
      placement B.place() rejects for some other reason (occupied cell,
      out of span, etc.) never costs you anything (check-then-place).
 
@@ -146,7 +146,7 @@
   function affordability(kind) {
     const def = B.CATALOG[kind];
     if (!def || !def.cost || !costsApply(kind)) return { ok: true, cost: null };
-    const S = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
+    const S = CBZ.econ && CBZ.econ.itemStore ? CBZ.econ.itemStore() : null;
     if (!S) return { ok: true, cost: def.cost };   // store not loaded yet — never hard-block on a load-order fluke
     for (const mat in def.cost) if (S.count(mat) < def.cost[mat]) return { ok: false, cost: def.cost, short: mat };
     return { ok: true, cost: def.cost };
@@ -446,7 +446,7 @@
     const piece = B.place(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot, { ownerId: CBZ.netPid ? CBZ.netPid() : null });
     if (piece) {
       if (afford.cost) {
-        const S = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
+        const S = CBZ.econ && CBZ.econ.itemStore ? CBZ.econ.itemStore() : null;
         if (S) for (const mat in afford.cost) S.take(mat, afford.cost[mat]);
         // E1: placing consumes Wood — signal materials demand to the living
         // economy shim (sim/market.js), guarded (may not be loaded yet).

@@ -329,8 +329,8 @@
   // hands (or the wrong tool) are 1x. "Equipped" reads the SAME slot
   // city/combat.js's melee weapons already occupy (CBZ.cityCurrentWeaponName
   // → g.cityMeleeWeapon) — see city/economy.js's Hatchet/Pickaxe entries,
-  // which carry melee:true so CBZ.cityGiveWeapon (systems/craft.js calls it
-  // right after crafting one) puts them there with zero special-casing.
+  // which carry melee:true so CBZ.cityGiveWeapon puts them there with zero
+  // special-casing (tools are bought/looted; crafting is deleted).
   function toolMult(kind, tool) {
     if (kind === "tree" && tool === "Hatchet") return 3;
     if (kind === "rock" && tool === "Pickaxe") return 3;

@@ -133,8 +133,19 @@
   }
 
   function canonicalizeTitle() {
-    if (titleCanonicalized || !campaignEnabled() || !document.body) return;
+    // EMBED-ONLY. This rewrite turns the whole title screen into "THE
+    // CONTRACT" and force-selects city mode — correct when the campaign IS the
+    // product (a dedicated embed), wrong on main where the campaign is one
+    // story card among eleven. CAMPAIGN_CANONICAL_TITLE restores the takeover
+    // in one line for embeds; it is deliberately opt-in, never a default.
+    const CFG = CBZ.CONFIG || {};
+    if (CFG.CAMPAIGN_CANONICAL_TITLE !== true) return;
+    if (titleCanonicalized || !document.body) return;
     titleCanonicalized = true;
+    // The embed has no picker — the campaign is the game, so select its
+    // character directly (campaign.js's run-scope reads g.cityOrigin).
+    g.cityOrigin = "contract";
+    if (CBZ.setCityOrigin) { try { CBZ.setCityOrigin("contract"); } catch (e) {} }
     document.body.classList.add("campaign-canonical-title");
 
     // The campaign is the game, not another tile in a mode picker. state.js is

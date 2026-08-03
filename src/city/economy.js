@@ -87,27 +87,34 @@
     "Ripped Jeans":  { value: 80,   tag: "wearable", slot: "bottom",  drip: 2 },
     Sneakers:      { value: 220,  tag: "wearable", slot: "shoes",   drip: 3 },
     Jordans:         { value: 280,  tag: "wearable", slot: "shoes",   drip: 4 },
-    Sunglasses:    { value: 140,  tag: "wearable", slot: "glasses", drip: 2 },
-    Earrings:      { value: 320,  tag: "wearable", slot: "chain",   drip: 3 },
+    // `blingLook` NAMES THE LOOK bling.js mounts (its LOOK_SLOT table also
+    // decides which body slot it hangs on). Declared here rather than left to
+    // bling.js's keyword fallback because a keyword ladder cannot tell a grill
+    // from a pair of shades or an EARRING from a ring — and that last one shipped
+    // as a real bug: the player wore nothing and a ped wore a stray ring glint.
+    Sunglasses:    { value: 140,  tag: "wearable", slot: "glasses", drip: 2, blingLook: "shades" },
+    Earrings:      { value: 320,  tag: "wearable", slot: "chain",   drip: 3, blingLook: "earrings" },
     //   DESIGNER — mid drip (a full designer fit clears CLUB_DRIP, not VIP):
     "Bomber Jacket": { value: 650,  tag: "wearable", slot: "outer",   drip: 6 },
     "Silk Shirt":    { value: 520,  tag: "wearable", slot: "top",     drip: 6 },
     "Designer Jeans":{ value: 480,  tag: "wearable", slot: "bottom",  drip: 5 },
     Loafers:         { value: 560,  tag: "wearable", slot: "shoes",   drip: 6 },
-    "Designer Shades":{ value: 420, tag: "wearable", slot: "glasses", drip: 5 },
+    "Designer Shades":{ value: 420, tag: "wearable", slot: "glasses", drip: 5, blingLook: "shadesDesigner" },
     "Fedora":        { value: 380,  tag: "wearable", slot: "hat",     drip: 5 },
     "Designer Jacket": { value: 450, tag: "wearable", slot: "outer", drip: 5 },
-    "Gold Chain":  { value: 600,  tag: "wearable", slot: "chain",   drip: 7 },
-    "Diamond Ring":{ value: 1500, tag: "wearable", slot: "ring",    drip: 10 },
+    "Gold Chain":  { value: 600,  tag: "wearable", slot: "chain",   drip: 7,  blingLook: "chainGold" },
+    "Diamond Ring":{ value: 1500, tag: "wearable", slot: "ring",    drip: 10, blingLook: "ring" },
     //   LUXURY — high drip (only a luxury fit reaches VIP_DRIP):
     "Tailored Suit": { value: 4200, tag: "wearable", slot: "outer",   drip: 18 },
     "Velvet Blazer": { value: 3200, tag: "wearable", slot: "outer",   drip: 15 },
     "Dress Shoes":   { value: 1100, tag: "wearable", slot: "shoes",   drip: 9 },
-    Rolex:         { value: 2200, tag: "wearable", slot: "watch",   drip: 14 },
-    "Iced Watch":    { value: 12000,tag: "wearable", slot: "watch",   drip: 24 },
-    "Iced Chain":    { value: 8500, tag: "wearable", slot: "chain",   drip: 22 },
-    "Diamond Grill": { value: 1800, tag: "wearable", slot: "glasses",drip: 12 },
-    "Diamond Pinky": { value: 9000, tag: "wearable", slot: "ring",    drip: 20 },
+    Rolex:         { value: 2200, tag: "wearable", slot: "watch",   drip: 14, blingLook: "watchGold" },
+    "Iced Watch":    { value: 12000,tag: "wearable", slot: "watch",   drip: 24, blingLook: "watchIced" },
+    "Iced Chain":    { value: 8500, tag: "wearable", slot: "chain",   drip: 22, blingLook: "chainIced" },
+    // the grill's econ slot is "glasses" (it is a FACE piece) but it hangs on
+    // the mouth — the declared look is what keeps it off the eyes.
+    "Diamond Grill": { value: 1800, tag: "wearable", slot: "glasses",drip: 12, blingLook: "grill" },
+    "Diamond Pinky": { value: 9000, tag: "wearable", slot: "ring",    drip: 20, blingLook: "ringPinky" },
     Fur:             { value: 6000, tag: "wearable", slot: "outer",   drip: 16 },
     // --- valuables (loot → fence at pawn) ---
     Wallet:        { value: 40,   tag: "valuable" },
@@ -119,6 +126,11 @@
     // tag:"valuable" with a real pawn `value`. `luxe:true` marks the >=$90k
     // mega-items so other systems can gate their rarity + flag them as jackpots.
     // Watches climb from the everyday Omega up to the obscene Richard Mille.
+    // These are LOOT rows, not wardrobe rows, so they carry no `blingLook`:
+    // bling.js's keyword fallback is what puts them on a body, and it is
+    // written against exactly these names (Omega = steel, Audemars = Royal-Oak
+    // octagon, Patek = gold dress, Richard Mille = carbon tonneau, Tiara = the
+    // head arc, Engagement Ring = the rock). Rename one and it goes plain.
     "Designer Bag":      { value: 6000,    tag: "valuable" },
     Omega:               { value: 4000,    tag: "valuable" },
     // (note: "Rolex" also exists as a wearable wristpiece; this valuable is the
@@ -144,8 +156,8 @@
     Medkit:        { value: 150,  tag: "tool", medkit: 40 },
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
     // --- B7: RESOURCES (harvested from city nodes — trees/rocks/scrap piles;
-    // see systems/resources.js) + the two gathering TOOLS that craft against
-    // them (systems/craft.js). Hatchet/Pickaxe also carry melee:true/dmg so
+    // see systems/resources.js) + the two gathering TOOLS (bought/looted —
+    // crafting is deleted). Hatchet/Pickaxe also carry melee:true/dmg so
     // equipping one routes through the EXACT SAME slot city/combat.js already
     // uses for Bat/Knife (CBZ.cityGiveWeapon → g.cityMeleeWeapon) with zero
     // special-casing — weaponFeel() just doesn't recognize their name, so
@@ -278,23 +290,27 @@
   clothing("sundress_blue", "outer", 6,  140, "Blue Sundress",   0xbcd6ea);
 
   // ---- JEWELRY (composable; renders via bling.js real meshes) --------------
-  // watches (slot watch). steel = everyday case; diver = sport tool watch; gold
-  // = a precious-metal case; iced = a fully diamond-paved bust-down. bling.js
-  // has watchSilver/watchGold/watchIced looks — steel+diver share the silver
-  // look, gold the gold look, iced the iced look (see deviations).
-  jewel("watch_steel", "watch", 6,  1200,  "Steel Watch",        "watchSilver");
-  jewel("watch_diver", "watch", 9,  8000,  "Diver Watch",        "watchSilver");
+  // `look` is bling.js's LOOK NAME and bling.js reads it FIRST — before any
+  // keyword guess — so this column is the contract, not a hint. Every name
+  // below exists in bling.js's look table (see LOOK_SLOT there); a typo shows
+  // up as an unclassified row in CBZ.cityBlingAudit().
+  // watches (slot watch). steel = everyday case; diver = sport tool watch (dark
+  // bezel + lume pip — it has its OWN look and used to be pointed at the steel
+  // one); gold = a precious-metal case; iced = a diamond-paved bust-down.
+  jewel("watch_steel", "watch", 6,  1200,  "Steel Watch",        "watchSteel");
+  jewel("watch_diver", "watch", 9,  8000,  "Diver Watch",        "watchDiver");
   jewel("watch_gold",  "watch", 14, 18000, "Gold Watch",         "watchGold");
   jewel("watch_iced",  "watch", 26, 45000, "Iced-Out Watch",     "watchIced");
   // chains (slot chain). bling.js chainGold / chainIced looks map 1:1.
   jewel("chain_gold",  "chain", 7,  600,   "Gold Chain (Composable)",  "chainGold");
   jewel("chain_iced",  "chain", 22, 8500,  "Iced Chain (Composable)",  "chainIced");
-  // ring (slot ring). bling.js `ring` glint-dot look.
+  // ring (slot ring). bling.js `ring` = a band round the finger with a stone.
   jewel("ring_diamond", "ring", 10, 1500,  "Diamond Ring (Composable)", "ring");
   // grill (slot glasses — the mouth piece rides the face slot like the legacy
-  // Diamond Grill). bling.js has NO grill look (see deviations) → falls back to
-  // the `ring` glint until clothes.js/bling.js add a dedicated grill mesh.
-  jewel("grill_diamond", "glasses", 12, 4000, "Diamond Grill (Composable)", "ring");
+  // Diamond Grill, and the look is what sends it to the MOUTH). bling.js has a
+  // real grill (six teeth) — this row used to claim it did not and fall back to
+  // the ring glint, which is why a $4,000 grill showed up as a dot on a hand.
+  jewel("grill_diamond", "glasses", 12, 4000, "Diamond Grill (Composable)", "grill");
 
   const SHOP_STOCK = {
     guns:        ["Pistol", "Revolver", "Desert Eagle", "SMG", "Uzi", "Shotgun", "Rifle", "AK-47", "LMG", "Sniper", "Bazooka", "Rocket Launcher", "Grenade Launcher", "Grenade", "Ammo Box", "Body Armor", "Knife", "Bat"],

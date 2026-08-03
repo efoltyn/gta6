@@ -50,10 +50,9 @@
     "Gun-Room Key":    { value: 40, tag: "key",       rarity: "rare" },
     Gun:               { value: 50, tag: "key",       rarity: "epic" },
     // --- B7: catalog parity with city/economy.js's harvest-node resources +
-    // tools (systems/resources.js / systems/craft.js are CITY-only — no
-    // gather nodes in the yard/disaster arena — so these entries exist just
-    // to keep the two item stores in sync; no shop/loot table references them
-    // here, kept minimal per the task). ---
+    // tools (systems/resources.js is CITY-only — no gather nodes in the
+    // yard/disaster arena — so these entries exist just to keep the two item
+    // stores in sync; no shop/loot table references them here). ---
     Wood:              { value: 2,  tag: "resource",  rarity: "common" },
     Stone:             { value: 3,  tag: "resource",  rarity: "common" },
     Scrap:             { value: 4,  tag: "resource",  rarity: "common" },
@@ -700,5 +699,38 @@
     };
   }
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, resetLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed };
+  // itemStore() — the ONE mode-aware item-store accessor: city → CBZ.cityEcon,
+  // escape/survival → g.inventory with an explicit COUNT (takeItem above only
+  // ever removes one at a time). Consumers: buildmode.js placement costs,
+  // baseclaim.js upkeep. Lived in systems/craft.js until crafting was deleted
+  // (owner mandate "kill crafting", 2026-08-03); the accessor was the only
+  // live organ in that file.
+  function itemStore() {
+    if (g.mode === "city") {
+      const E = CBZ.cityEcon;
+      return {
+        count: function (n) { return E ? E.count(n) : 0; },
+        take: function (n, c) { return E ? E.take(n, c) : false; },
+        add: function (n, c) { if (E) E.add(n, c); },
+      };
+    }
+    return {
+      count: function (n) { return (g.inventory && g.inventory[n]) || 0; },
+      take: function (n, c) {
+        const have = (g.inventory && g.inventory[n]) || 0;
+        if (have < c) return false;
+        g.inventory[n] -= c;
+        if (g.inventory[n] <= 0) delete g.inventory[n];
+        if (CBZ.refreshInventory) CBZ.refreshInventory();
+        return true;
+      },
+      add: function (n, c) {
+        g.inventory = g.inventory || {};
+        g.inventory[n] = (g.inventory[n] || 0) + c;
+        if (CBZ.refreshInventory) CBZ.refreshInventory();
+      },
+    };
+  }
+
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, resetLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed };
 })();

@@ -681,16 +681,20 @@
   // (or ?cfg_TERRAIN_EROSION_V3=0) → exactly the shipped no-backdrop world.
   if (CBZ.CONFIG.TERRAIN_EROSION_V3 == null) CBZ.CONFIG.TERRAIN_EROSION_V3 = true;
   if (CBZ.CONFIG.TERRAIN_EROSION_V3) { CBZ.PROC_TERRAIN = true; CBZ.WILD_NATURE = true; }
-  // DYNAMIC WEATHER (systems/weather.js). Default OFF: the pooled rain Points
-  // cloud read as bright white dots stuck to the HUD, and because weather ticks
-  // globally it also appeared inside jail. Flip true (or ?cfg_DYNAMIC_WEATHER=1)
-  // to restore rain, storm fog, lightning and wet-road grip as one coherent set.
+  // DYNAMIC WEATHER (systems/weather.js). The two bugs that got this turned
+  // off are FIXED (2026-08-03): drops seed on an annulus with a look-direction
+  // lead, so nothing sticks to the lens; escape mode reads as indoors, so the
+  // jail stays dry. The DRIVEN layer (WEATHER_DRIVE) powers disasters
+  // regardless of this flag. Ambient storms stay OFF until the owner approves
+  // the look in play — flip true or ?cfg_DYNAMIC_WEATHER=1 to audition.
   if (CBZ.CONFIG.DYNAMIC_WEATHER == null) CBZ.CONFIG.DYNAMIC_WEATHER = false;
-  // Sandbox/testing is the default: start directly at the configured city
-  // spawn (Halloran Airport) instead of forcing the helicopter arrest and a
-  // jail chapter on every fresh run. The complete authored campaign remains
-  // available by setting this flag true before Play.
-  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+  // THE CONTRACT (city/campaign.js). Master enable only — the campaign is
+  // RUN-SCOPED now: it activates when the player picks "The Contract" on the
+  // title screen (an origins.js registry character like any other), and never
+  // touches sandbox origins or standalone Prison Escape. false is the one-line
+  // kill switch for the whole authored story. The old flag-true-hijacks-the-
+  // title embed behavior moved behind CAMPAIGN_CANONICAL_TITLE (campaign_ui.js).
+  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
   // GTA convention: dying closes the manhunt. On player death the wanted
   // stars, the heat AND the escaped-convict floor (g.escapedConvict) all
   // clear — a corpse is as caught as it gets. city/wanted.js reads this at
@@ -768,11 +772,12 @@
   // (go back for them). Flip false: charpanel reverts to its read-only grid,
   // chests/death-drops/ground-pickups inert, death keeps your guns again.
   if (CBZ.CONFIG.INVENTORY_V2 == null) CBZ.CONFIG.INVENTORY_V2 = true;
-  // CRAFTING (systems/craft.js) — owner's call: crafting is dead. Default OFF;
-  // the [C] panel won't open and craft()/canCraft() refuse. CBZ.craft.itemStore
-  // stays live (buildmode/baseclaim placement costs read it). Flip true to
-  // re-enable the whole system in one line.
-  if (CBZ.CONFIG.CRAFTING_ENABLED == null) CBZ.CONFIG.CRAFTING_ENABLED = false;
+  // CRAFTING IS DELETED (2026-08-03), not just dark: systems/craft.js is gone
+  // per the standing owner mandate "kill crafting" — acquisition is
+  // buy/steal/loot in the world, never a recipe UI. The mode-aware item store
+  // it carried lives on as CBZ.econ.itemStore (systems/economy.js), which
+  // buildmode/baseclaim placement costs read. No CRAFTING_ENABLED flag
+  // remains because there is nothing left for it to gate.
 
   // SMART TEAM COMBAT (city/squadai.js + city/loyalty.js): armed NPCs that were
   // engaged would all sprint to ~9m and trade shots in a scrum. With this ON, a
