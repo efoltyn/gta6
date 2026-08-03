@@ -973,3 +973,66 @@ Before building anything adjacent, wire into the existing system:
   needs a config bundle, ship the thing that WRITES the bundle, or the block will
   sit at one consumer forever.**
 
+
+- **FURNITURE IS THE KIT, AND THE KIT HAS EVERY PIECE** (2026-08-02 interiors
+  wave). `CBZ.furnish` gained `F.coffee` (low table, top 0.40 — the documented
+  gap every lounge hand-rolled around) and `F.armchair` (one-seat sofa, cushion
+  0.42, kind "armchair"), and every piece got real geometry behind
+  `FURNISH_DETAIL` (furniture.js, default true — gates only second-order boxes;
+  cushion heights are byte-identical either way, so the rig and furnishAudit
+  never see the flag). buildings.js's legacy sets (setBedroom/setLiving/
+  setDining/setKitchen/setReception, furnishInteriorBody, apartment tiers,
+  penthouse) now bridge to the kit with degrade-safe old-box fallbacks, and
+  every seat they register DECLARES its cushion — the noGeom count is the
+  migration's headline and may only go DOWN. The at-risk one-consumer status of
+  furnish is over: consumers now include buildings.js, roombuild.js, lounge.js,
+  cafeteria.js, southblock.js, beach.js, arena_fights.js. Seat KIND strings are
+  a contract now (see posture entry): pass the truthful kind, never "chair" for
+  a pew.
+- **POSTURE FOLLOWS THE SEAT, AND SLEEP IS A POSE** — `CBZ.charSeatPosture(kind)`
+  + the `ch.lying` branch in entities/character.js (flags `CHAR_SEAT_POSTURE`,
+  `CHAR_SLEEP_POSE`). `propSeatRef` carries `kind` + `vary` into `ch.seatRef`;
+  four posture families (lounge / throne / stool-with-footrail / bench-perch)
+  branch inside the V2 sit solve, with aircraft/desk/arena kinds explicitly
+  mapped to null so their uprightness is a decision, not an omission. A body in
+  a bed is no longer the standing rig rolled 90 degrees: knees are SOLVED from
+  the rig's own leg proportions (proportion-invariant down to a child rig),
+  side/back style is a stable per-body hash, breathing runs at 0.25 Hz on dt.
+  `CBZ.propBedNpc(ped, r)` is the ONE way to put an NPC in a real bed (the
+  seats-registry substring hack could never reach one); radius clamps to
+  ARC_MAX — REFUSE, NEVER SNAP. Sleep in a NON-owned bed now pays (heal toward
+  0.60 maxHp cap) and risks (trespass crime on the witness path) under
+  `INTERIOR_SLEEP_STAKES` — the owned-safehouse full reset is untouched.
+  Evidence counters: `propUseAudit().sleepers/postured`.
+- **A SCREEN STANDS PROUD OF ITS FRAME, AND A LIVE BOARD USES canvasTexLive** —
+  `ctx.canvasTexLive(w, h)` in core/packages.js returns `{canvas, cc, tex,
+  paint()}` (the live sibling of one-shot `ctx.canvasTex`; paint() is the single
+  needsUpdate site). Consumers: government tally board, police roster + cage
+  nameplate, boxing scorecards. The LAW that came with it: an unlit or emissive
+  screen face must sit >= SCREEN_GAP (0.025) in front of its bezel/backing —
+  games/government.js's tally board was the one screen in the repo drawn
+  coplanar with its frame and it read as the owner's "glitchy screen" (per-pixel
+  z-fight under the uplight). Best pattern for a big board is racing.js's:
+  ONE real-depth box with map + emissiveMap on the same mesh — structurally
+  incapable of fighting itself. Never mutate ctx.mat/pmat/emat cached
+  materials (colour-keyed GLOBAL caches); a screen material is always a fresh
+  instance. Gate: `CBZ.govBoardAudit()`, gap >= 0.02 when built.
+- **AN INTERIOR IS SEARCHABLE, AND A WITNESS IS THE PRICE** —
+  `INTERIOR_LOOT_V1` in city/interior_programs.js + one `zone-interior-loot`
+  in interact.js. The programs' own anchors (desks, racks, footlockers,
+  weapons lockers, drinks cabinets, kitchenettes, the bosssuite floor safe)
+  register into a loot registry (`CBZ.interiorLootAt/Take`, no mesh userData,
+  deterministic placement via hash01, runtime payouts may roll). The gradient
+  is the design: desk pocket change -> lockers -> a 10% real gun via
+  cityGiveWeapon -> the floor safe ($3.7k-16.6k by tower wealth), which cracks
+  quietly if the suite's guards are dead and otherwise takes a LOUD 7 s hold
+  that files the crime up front. Looting with a living clerk/staffer in range
+  runs the SAME cityScare + cityPanicRaise + heat the shop robbery uses — an
+  empty afterhours floor is free, and that contrast is the gameplay. ROB_CAP
+  derives from city size (ceil(shopLots/40), 1..3) and the sweep rolls office
+  lots at 22% weight. Ratchet-in-waiting: `CBZ.interiorLootAudit()`
+  (refusedCap pinned at 0 in the gate; anchors/safes evidence until measured
+  across seeds). NEXT OWED: lockable doors (keycard.js has no consuming door;
+  cityMayEnter/cityAccessAt + the divider() doorway gaps are the seams) and
+  occupy.js presets for banks/casinos/courthouses so the loot ladder is
+  reachable outside gang/power HQs.

@@ -273,6 +273,27 @@ const PASS = `(() => {
       // pinned on one sample is not a measurement either. 90210 reads 3, 1337
       // reads 5; the pin is 5.
       if (pa.blocked > 5) out.fails.push("UNREACHABLE FURNITURE ANCHORS rose to " + pa.blocked + " (ratchet 5)");
+      // Evidence only (interiors wave 2026-08-02): sleepers/postured are live
+      // pose adoption counts, noGeom direction is the migration's headline.
+      if (pa.sleepers != null) out.poseAdopt = "sleepers=" + pa.sleepers + " postured=" + pa.postured;
+    }
+    // government tally board: the screen must stand PROUD of its frame (the
+    // coplanar plane was the owner's "glitchy screen"). built is false until
+    // the venue mounts, so the gap is only a fact when built reads true —
+    // asserting it unconditionally would re-create the audit-nobody-ran bug.
+    if (CBZ.govBoardAudit) {
+      const gb = CBZ.govBoardAudit();
+      out.govBoard = gb.built ? ("gap=" + gb.gap + " ei=" + gb.emissive) : "unbuilt";
+      if (gb.built && !(gb.gap >= 0.02)) out.fails.push("GOV BOARD COPLANAR AGAIN: gap " + gb.gap + " under 0.02");
+    }
+    // interior loot layer: evidence only until measured across seeds (the
+    // propUseAudit lesson — never pin a number the gate has not read).
+    // refusedCap is the one hard fact: the registry must never overflow its
+    // own budget silently.
+    if (CBZ.interiorLootAudit) {
+      const il = CBZ.interiorLootAudit();
+      out.interiorLoot = il.anchors + "a/" + il.safes + " safes cells=" + il.cells;
+      if (il.refusedCap > 0) out.fails.push("INTERIOR LOOT REGISTRY OVERFLOWED: refusedCap " + il.refusedCap);
     }
     // road rules: carcluster.js's district-of-the-nearest-lot stopgap must be
     // dead. True here means roadrules.js failed to load or loaded too late.

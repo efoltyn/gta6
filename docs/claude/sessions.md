@@ -801,3 +801,31 @@ as fuck, but your shit looks geometric." Everything below shipped to main
   the white additive glow) -> mottled -> beads diagnosed by live instance
   probe -> connected. The screenshot caught what every green contract
   missed, which is the owner's whole point about giving the blind man eyes.
+
+## THE 2026-08-02 INTERIORS WAVE — five territories: furniture, poses, screens, loot, preset
+
+Five opus builders in parallel (recon first: four sonnet scouts with file:line
+evidence), orchestrator briefed with prescribed seam names so the wave composed
+without cross-talk (`ch.lying`, `seatRef.kind`, `propBedNpc`, `F.coffee`,
+`F.armchair`, `ctx.canvasTexLive` were all named in the briefs before anyone
+built). Ratchet numbers measured at the gate run below; adoption counters left
+as evidence, not pins, per the propUseAudit lesson.
+
+- **WHY INTERIORS FELT POINTLESS (the owner's question, answered with code).**
+  Furnishing was never the missing variable — interior_programs.js had had
+  repeated dressing passes (its own headers quote older versions of the same
+  complaint). The cause: the interior programs were a pure geometry generator
+  with ZERO entries in the interaction registry; "Sleep til morning" in a
+  non-owned bed was a documented no-op; ONE ambient robbery per city, shops
+  only; clerks were `char.typing` statues; and the doctrine's own gun-room
+  grammar was violated by "nothing in this engine has a lockable door yet"
+  (occupy.js's admission). The wave shipped the loot/witness layer
+  (`INTERIOR_LOOT_V1`), the sleep payoff (`INTERIOR_SLEEP_STAKES`), and the
+  posture/sleep poses; LOCKABLE DOORS and OCCUPY-BEYOND-HQS remain the two
+  named next capabilities (seams documented in the 2026-08-02 interiors-wave
+  builder reports; keycard.js still has no consuming door).
+- **The gov-building "glitchy screen" was a coplanar z-fight**: the tally
+  board plane sat at exactly the frame's front face z in games/government.js —
+  the only screen in the repo that skipped the SCREEN_GAP convention. Fixed
+  structurally (real-depth box, map+emissiveMap one mesh, 0.055 m air), pinned
+  in the gate via `CBZ.govBoardAudit()` (gap >= 0.02 when built).
