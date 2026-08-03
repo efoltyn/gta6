@@ -112,13 +112,11 @@
       if ((g.cityInv[name] | 0) <= 0) continue;
       const it = items[name];
       if (!it || (it.tag !== "wearable" && it.tag !== "valuable" && it.tag !== "jewelry")) continue;
-      const s = name.toLowerCase();
-      let slot = null;
-      if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) slot = "neck";
-      else if (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
-               s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0) slot = "wristL";
-      else if (s.indexOf("earring") < 0 && (s.indexOf("ring") >= 0 || s.indexOf("pinky") >= 0)) slot = "ring";
-      if (slot !== slotKey) continue;
+      // the ladder that used to live here was a drifted copy of bling.js's
+      // classifier (it still hand-excepted "earring") — one classifier, one
+      // answer, for the street, the audit and this panel alike.
+      const cl = CBZ.cityBlingClassify && CBZ.cityBlingClassify(name);
+      if (!cl || cl.slot !== slotKey) continue;
       const v = it.value || 0;
       if (v > bestV) { bestV = v; best = name; }
     }
@@ -138,7 +136,7 @@
   }
 
   // ============================================================
-  //  WORN JEWELLERY ON THE PORTRAIT — chains / watch / ring.
+  //  WORN JEWELLERY ON THE PORTRAIT — every slot the street mounts.
   //  clothes.js dresses the rig's FABRIC (cityApplyComposite); the
   //  worn jewellery is mounted SEPARATELY by bling.js onto the LIVE
   //  player rig (CBZ.playerChar) and so never reaches the portrait's
@@ -146,108 +144,45 @@
   //  (a ped-shaped { char, valuables, gang, ... } → its .char gets the
   //  shared pooled meshes), but that path is camera-distance gated and
   //  pushes onto bling.js's global "dressed" roster — wrong for an
-  //  isolated offscreen rig. So we mount the SAME pieces here directly,
-  //  reusing the engine's shared CBZ.boxGeom / CBZ.cmat primitives, at
-  //  the EXACT local transforms bling.js uses (character.js rig space:
-  //  torso front face z≈0.25, yoke ≈ y1.75; the wrist and the knuckle line
-  //  come from CBZ.charArmLandmarks, never from a literal — watchParts below).
-  //  Meshes are built once and re-pointed on
-  //  change — no per-frame allocation, no global state touched.
+  //  isolated offscreen rig. Meshes are built once and re-pointed on
+  //  change — no per-frame allocation, no street pool touched.
   // ============================================================
-  const JG = {};                                   // shared jewellery geometry by kind
-  function jgeo(kind) {
-    if (JG[kind]) return JG[kind];
-    const B = CBZ.boxGeom;
-    let gm = null;
-    if (!B) return null;
-    if (kind === "link") gm = B(0.30, 0.035, 0.03);
-    else if (kind === "linkThin") gm = B(0.30, 0.026, 0.024);
-    else if (kind === "linkThick") gm = B(0.30, 0.055, 0.035);
-    else if (kind === "pendant") gm = B(0.07, 0.07, 0.03);
-    else if (kind === "cuff") gm = B(0.32, 0.05, 0.32);
-    else if (kind === "face") gm = B(0.10, 0.07, 0.03);
-    else if (kind === "ring") gm = B(0.05, 0.04, 0.05);
-    JG[kind] = gm;
-    return gm;
-  }
-  let _jmats = null;                               // shared finishes (mirror bling.js)
-  function jmats() {
-    if (_jmats) return _jmats;
-    const C = CBZ.cmat;
-    if (!C) return null;
-    _jmats = {
-      gold: C(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),
-      silver: C(0xb9c0c8, { emissive: 0x7e8790, ei: 0.35 }),
-      ice: C(0xeaf6ff, { emissive: 0x9fd8ff, ei: 0.65 }),
-      glint: C(0xffffff, { emissive: 0xcfeaff, ei: 0.95 }),
-    };
-    return _jmats;
-  }
-
-  // part lists per worn piece (kind + finish + local transform) — copied 1:1
-  // from bling.js looks() so the portrait reads identically to the live body.
-  const JCHAIN_Y = 1.65, JCHAIN_Z = 0.268, JCHAIN_TILT = 0.83;
-  function chainParts(name) {
-    const M = jmats(); if (!M) return null;
-    const s = String(name).toLowerCase();
-    let link = "link", pmat = M.gold;
-    if (s.indexOf("necklace") >= 0 || s.indexOf("diamond") >= 0) { link = "linkThin"; pmat = M.glint; }
-    else if (s.indexOf("iced") >= 0) { link = "linkThick"; pmat = M.ice; }
-    const lmat = (link === "linkThin") ? M.silver : (link === "linkThick" ? M.ice : M.gold);
-    return [
-      { kind: link, mat: lmat, x: -0.10, y: JCHAIN_Y, z: JCHAIN_Z, rz: -JCHAIN_TILT },
-      { kind: link, mat: lmat, x: 0.10, y: JCHAIN_Y, z: JCHAIN_Z, rz: JCHAIN_TILT },
-      { kind: "pendant", mat: pmat, x: 0, y: 1.515, z: 0.272 },
-    ];
-  }
-  // THE WRIST AND THE HAND ARE NOT TYPED HERE EITHER. This portrait is the
-  // third file that hangs hardware in the ELBOW frame, and it had its own copy
-  // of a constant the live body had already moved twice (owner: "watches are on
-  // HANDS now"). Both landmarks come off the rig being drawn, so the portrait
-  // and the street can no longer disagree about where a wrist is — and a
-  // portrait of a woman or a child puts the watch on HER wrist. Degrade-safe:
-  // no export (or CHAR_WRIST_LANDMARK=false) → the adult-male literals.
+  // The geometry table, finish table, part lists and slot ladder that used to
+  // live here were a FOURTH copy of bling.js's answer, and they had drifted
+  // (hand-typed earring exception; a watch cuff the street had already moved).
+  // bling.js now exports the one answer: cityBlingParts resolves a catalog name
+  // through the same classifier and look table the street mounts from, and
+  // cityBlingBuild raises FRESH meshes (never the street pool — this rig strips
+  // without releasing) from the same shared geometry + materials. The portrait
+  // and the street can no longer disagree about what a piece looks like.
+  //
+  // THE WRIST AND THE HAND ARE STILL NOT TYPED HERE. Both landmarks come off
+  // the rig being drawn (CBZ.charArmLandmarks), so a portrait of a woman or a
+  // child puts the watch on HER wrist. Degrade-safe: no export → the
+  // adult-male literals.
   function armLM(rig) {
     return (CBZ.charArmLandmarks && CBZ.charArmLandmarks(rig)) || { wrist: -0.22, hand: -0.34 };
   }
-  function watchParts(name, rig) {
-    const M = jmats(); if (!M) return null;
-    const s = String(name).toLowerCase();
-    let band = M.gold, face = M.gold;
-    if (s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0) { band = M.ice; face = M.glint; }
-    else if (s.indexOf("omega") >= 0) { band = M.silver; face = M.silver; }
-    const w = armLM(rig).wrist;
-    return [
-      { kind: "cuff", mat: band, x: 0, y: w, z: 0 },
-      { kind: "face", mat: face, x: 0, y: w, z: 0.165 },
-    ];
-  }
-  function ringParts(rig) {
-    const M = jmats(); if (!M) return null;
-    return [{ kind: "ring", mat: M.glint, x: 0.10, y: armLM(rig).hand, z: 0.17 }];
-  }
 
-  // a stable signature of the player's WORN jewellery — chains/watch/ring re-mount
-  // only when this changes (keeps the redraw-on-change perf contract).
+  // every body-jewel slot the street can mount (eyes stays on the eyewear
+  // axis — the panel's shades ride the fabric path, not this one).
+  const JEWEL_SLOTS = ["neck", "wristL", "wristR", "ring", "mouth", "ears", "crown"];
+
+  // a stable signature of the player's WORN jewellery — pieces re-mount only
+  // when this changes (keeps the redraw-on-change perf contract).
   function jewelSig() {
-    return (blingWornIn("neck") || "") + "|" + (blingWornIn("wristL") || "") + "|" + (blingWornIn("ring") || "");
+    let sig = "";
+    for (let i = 0; i < JEWEL_SLOTS.length; i++) sig += (blingWornIn(JEWEL_SLOTS[i]) || "") + "|";
+    return sig;
   }
 
-  // mount one part list onto a rig anchor; the created meshes are tracked so the
-  // next change can strip them. Anchors mirror bling.js: neck→body, watch→la, ring→ra.
-  function mountJewelParts(parts, anchor, out) {
-    if (!parts || !anchor || !anchor.add || !THREE) return;
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const geo = jgeo(p.kind);
-      if (!geo || !p.mat) continue;
-      const m = new THREE.Mesh(geo, p.mat);
-      m.castShadow = false; m.receiveShadow = false;
-      m.position.set(p.x, p.y, p.z);
-      m.rotation.set(p.rx || 0, 0, p.rz || 0);
-      anchor.add(m);
-      out.push(m);
-    }
+  // anchors mirror bling.js SLOTS: neck→body, wrist/ring→the ELBOW groups on
+  // two-segment rigs, head-level pieces (grill/earrings/tiara)→the neck group.
+  function jewelAnchor(rig, slot) {
+    if (slot === "neck") return rig.body;
+    if (slot === "wristL") return (rig.low && rig.low.la) || (rig.parts && rig.parts.la);
+    if (slot === "wristR" || slot === "ring") return (rig.low && rig.low.ra) || (rig.parts && rig.parts.ra);
+    return rig.neck;
   }
 
   // (re)dress the portrait rig's worn jewellery to match the player. Idempotent:
@@ -262,16 +197,14 @@
       }
       rig._cpJewel = null;
     }
-    if (!jmats()) return;                           // engine primitives not up yet
-    const neck = blingWornIn("neck"), wrist = blingWornIn("wristL"), ring = blingWornIn("ring");
-    if (!neck && !wrist && !ring) return;           // nothing worn — fabric only
+    if (!CBZ.cityBlingParts || !CBZ.cityBlingBuild) return; // engine not up yet
+    const lm = armLM(rig);
     const out = [];
-    // wrist jewellery rides the ELBOW group (forearm frame) on two-segment rigs
-    const la = rig.low && rig.low.la || (rig.parts && rig.parts.la);
-    const ra = rig.low && rig.low.ra || (rig.parts && rig.parts.ra);
-    if (neck) mountJewelParts(chainParts(neck), rig.body, out);
-    if (wrist) mountJewelParts(watchParts(wrist, rig), la, out);
-    if (ring) mountJewelParts(ringParts(rig), ra, out);
+    for (let i = 0; i < JEWEL_SLOTS.length; i++) {
+      const name = blingWornIn(JEWEL_SLOTS[i]);
+      if (!name) continue;
+      CBZ.cityBlingBuild(CBZ.cityBlingParts(name), jewelAnchor(rig, JEWEL_SLOTS[i]), out, lm);
+    }
     if (out.length) rig._cpJewel = out;
   }
 
@@ -531,7 +464,16 @@
     // clothing that actually includes a collar/jacket keeps it; a bare tee does
     // not. This is the portrait-only copy — the player's worn record remains
     // the single clothing source of truth.
-    const structuredCollar = portraitHasStructuredCollar(w);
+    // A DRESSED YOKE IS A GARMENT, NOT A RING. clothes.js paints the shoulder
+    // yoke with the outfit's own cloth now (collar stand, neckline, lapel
+    // wedges) and tags the mesh userData._cbzPart = "yoke". Hiding THAT would
+    // take the collar off a suit in the portrait while the body in the world
+    // still wears one — the same two-sources split this panel already closed
+    // once by dressing through cityRecolorRig. So the name test only has to
+    // answer for looks that were never painted at all; a painted yoke wins.
+    const yokeDressed = !!(s.collar && s.collar[0] && s.collar[0].userData &&
+                           s.collar[0].userData._cbzPart === "yoke");
+    const structuredCollar = yokeDressed || portraitHasStructuredCollar(w);
     setP(s.stripes, null, false);          // no city fit has jail stripes
     setP(s.belt, beltHex, true);
     setP(s.collar, null, structuredCollar);
