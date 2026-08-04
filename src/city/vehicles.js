@@ -162,15 +162,41 @@
      repo keeps finding in itself.
      fromY also gates it honestly — mpGroundAt only offers support within
      STEP_UP of where you already are, so a car cannot levitate onto a deck it
-     never touched. It has to come at the ramp from the bottom. */
-  function groundY(x, z, fromY) {
+     never touched. It has to come at the ramp from the bottom.
+
+     …EXCEPT FROM ITS OWN CARGO FLOOR, WHICH IS THE ONE DECK THAT TRAVELS WITH
+     THE CAR ASKING. `self` is what closes that, and it is not a hypothetical:
+     a freight body's hold is a moving-platform rig anchored to its own group,
+     so the deck is ALWAYS exactly deckTop() above the car, and "within STEP_UP
+     of where you already are" is therefore permanently true for any hold
+     shallower than 0.45 m. MEASURED on a live van (deck 0.26): the two REAR
+     terrain corners sit inside the cargo box — the box runs to −0.47·len and
+     the corners are sampled at ±0.45·len — and each came back 0.259 m high, so
+     a van somebody was DRIVING was being held up by the floor of its own load
+     space and settled ~0.13 m off the road, tail high. The semi measured 0.000
+     on all four corners and always will: its deck is 0.95, which STEP_UP
+     cannot reach from the ground, so it can never bootstrap. This was a
+     van-only fault and it is the only body the flag ships shallow enough.
+     The test is done in the ASKING CAR'S OWN FRAME, not by height, because
+     height cannot tell the two cases apart: driving a van up a semi's ramp,
+     the support is at the van's own feet (local y ≈ 0, well under its 0.26
+     deck) and is taken; its own floor is at local y = deckTop and is refused.
+     `self` omitted → byte-identical to the two-argument contract above. */
+  const _ownLo = {};
+  function ownCargoFloor(car, x, y, z) {
+    const h = car && car.hold;
+    if (!h || h.inert || !h.localOf) return false;
+    const l = h.localOf(x, y, z, _ownLo);
+    return !!l && l.y > h.deckTop() - 0.06;
+  }
+  function groundY(x, z, fromY, self) {
     if (!TERRAIN_ON()) return 0;
     const y = +CBZ.floorAt(x, z);
     let b = Number.isFinite(y) ? y : 0;
     if (fromY != null && CBZ.mpGroundAt) {
       try {
         const t = CBZ.mpGroundAt(x, z, fromY, b);
-        if (t > b && isFinite(t)) b = t;
+        if (t > b && isFinite(t) && !ownCargoFloor(self, x, t, z)) b = t;
       } catch (e) {}
     }
     return b;
@@ -191,10 +217,10 @@
     if (near) {
       // right vector = (fz, -fx) with this file's (sin,cos) forward convention
       const rx = fz, rz = -fx;
-      const fL = groundY(car.pos.x + fx * half + rx * halfW, car.pos.z + fz * half + rz * halfW, fromY);
-      const fR = groundY(car.pos.x + fx * half - rx * halfW, car.pos.z + fz * half - rz * halfW, fromY);
-      const bL = groundY(car.pos.x - fx * half + rx * halfW, car.pos.z - fz * half + rz * halfW, fromY);
-      const bR = groundY(car.pos.x - fx * half - rx * halfW, car.pos.z - fz * half - rz * halfW, fromY);
+      const fL = groundY(car.pos.x + fx * half + rx * halfW, car.pos.z + fz * half + rz * halfW, fromY, car);
+      const fR = groundY(car.pos.x + fx * half - rx * halfW, car.pos.z + fz * half - rz * halfW, fromY, car);
+      const bL = groundY(car.pos.x - fx * half + rx * halfW, car.pos.z - fz * half + rz * halfW, fromY, car);
+      const bR = groundY(car.pos.x - fx * half - rx * halfW, car.pos.z - fz * half - rz * halfW, fromY, car);
       gy = (fL + fR + bL + bR) * 0.25;
       // nose-up is NEGATIVE rotation.x with this rig (see the airborne pitch,
       // which uses -vy), so climbing (front higher than back) pitches negative.
@@ -203,7 +229,7 @@
       if (pitch > TERRAIN_MAX_TILT) pitch = TERRAIN_MAX_TILT; else if (pitch < -TERRAIN_MAX_TILT) pitch = -TERRAIN_MAX_TILT;
       if (roll > TERRAIN_MAX_TILT) roll = TERRAIN_MAX_TILT; else if (roll < -TERRAIN_MAX_TILT) roll = -TERRAIN_MAX_TILT;
     } else {
-      gy = groundY(car.pos.x, car.pos.z, fromY);
+      gy = groundY(car.pos.x, car.pos.z, fromY, car);
     }
     // suspension damping. A car that has never been seated snaps to the ground
     // on its first frame (no drop-in from y=0 when it spawns on a hill).
