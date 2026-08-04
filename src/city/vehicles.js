@@ -4087,6 +4087,7 @@
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
   }
   const _sweepPt = { x: 0, y: 0, z: 0 };   // scratch — zero per-call allocation
+  const _agroundN = { x: 0, z: 0 };        // ditto, for the aground shore normal
   function collideVehicle(car) {
     if (!CBZ.collide || !car || !car.pos) return 0;
     // MARINE: a boat out on open water has no buildings/seawall to bump — skip
@@ -4550,6 +4551,50 @@
     // union; quays are enforced only by their visible collision geometry.
     const onWater = overWater(car.pos.x, car.pos.z);
     const marine = isMarineCar(car) && onWater;
+    // ---- BOAT_NO_LAND: the exact mirror of CARS_NO_WATER below. A road car
+    // in the sea floods; a boat on the sand is AGROUND. water_helm.js keeps a
+    // hull UNDER WAY from ever crossing the waterline, but a hull can still
+    // ARRIVE on land another way — spawned there, launched off a stunt ramp,
+    // left high and dry by a retreating surge — and from here the road path
+    // would hand it tyre grip, a gearbox and a terrain seat: a speedboat
+    // touring the city on its keel. Aground it keeps walking-pace way and no
+    // more, which is enough to shove itself back off the beach and never
+    // enough to drive anywhere. It is a clamp, not a stop: a boat you can't
+    // refloat is a boat you've lost, and that punishes the wrong thing.
+    // The waterline is a wall on THIS path too. water_helm.js owns the resolver
+    // when it owns the frame; this is the same one call for the frames it does
+    // not own (WATER_HELM off, a hull with no registered spec), so "a boat
+    // cannot be driven onto land" holds whichever physics has the helm.
+    if (marine && CBZ.marineShoreBlock) {
+      try { CBZ.marineShoreBlock(car, car._hullSpec, dt); } catch (e) {}
+    }
+    if (isMarineCar(car) && !onWater
+        && (!CBZ.CONFIG || CBZ.CONFIG.BOAT_NO_LAND !== false) && !car._airborne) {
+      const AGROUND_MS = 2.2;                        // ~8 km/h — a shove, not a drive
+      car.v *= Math.pow(0.30, dt);                   // sand and shingle, not tarmac
+      car.v = Math.max(-AGROUND_MS, Math.min(AGROUND_MS, car.v));
+      const gm = Math.hypot(car.vx || 0, car.vz || 0);
+      if (gm > AGROUND_MS) { const f = AGROUND_MS / gm; car.vx *= f; car.vz *= f; }
+      // AND ONLY TOWARD THE WATER. A crawl is still a drive — at 2.2 m/s a
+      // patient player walks a speedboat across the map. The one way off a
+      // beach is OFF it: way that carries the hull seaward is allowed (drive
+      // off bow-first, or back off stern-first), way that would carry it
+      // further up the sand is refused outright. Not damped — REFUSED. A held
+      // throttle re-applies its acceleration every single frame, so any decay
+      // gentle enough to feel like friction just finds an equilibrium and the
+      // boat keeps crawling; the number this must beat is the throttle, not
+      // the momentum. The shore gradient points water -> land, so the whole
+      // test is one dot product.
+      if (CBZ.waterField && CBZ.waterField.shoreGradient) {
+        const gn = CBZ.waterField.shoreGradient(car.pos.x, car.pos.z, 6, _agroundN);
+        const nose = Math.sin(car.heading) * gn.x + Math.cos(car.heading) * gn.z;
+        if (!(-nose * car.v > 0)) { car.v = 0; car.vx = 0; car.vz = 0; }
+      }
+      if (!car._agroundNoted) {
+        car._agroundNoted = true;
+        CBZ.city && CBZ.city.note("Aground — back her off the beach.", 1.8);
+      }
+    } else if (car._agroundNoted) car._agroundNoted = false;
     // ---- CARS_NO_WATER: a road car is not a boat. Past a grace window (a
     // quick nose-dip can still reverse straight back out), open water floods
     // the engine: throttle dies (cut at the top of this loop), all momentum
