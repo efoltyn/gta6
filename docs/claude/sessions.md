@@ -2212,3 +2212,91 @@ rest: build-only-near-spawn, the ~148k-object `minicities` count,
 `LOCAL_INSTANCING` (still off pending the owner's parity call), shader
 precompile, and `defer` on the 467 tags (measure first — the inline block at
 `index.html:354` must still run before `config.js`).
+
+## THE 2026-08-04 PRISON PHONE PASS — the HUD, the cell camera, the armory
+
+Owner, playing Cell Block Z on a phone: *"The prison game is really good. Work
+on the prison game."* Then a list, and the through-line of most of it is one
+sentence: ***"hud is being completely disrespected with dumb shit wasted
+inputting in it — SHOW WITH NPC ACTION DONT TELL."*** New gate:
+**`tools/prison-polish-check.mjs`** (22 assertions, escape + gungame; boot
+boilerplate from jail-check).
+
+**A ZERO IS NOT NEWS — three panels now exist only while they have a reading.**
+- `#gangHud` (`JAIL_GANG_HUD_LIVE`, systems/hud.js) read `RESPECT · REDS 0 ·
+  BLUES 0 · CREW NONE` on every frame of a fresh run — four cells saying
+  "nothing has happened yet", wrapping the one live cell onto a second line.
+  Standings draw as coloured `R 42` only past ±1, crew only when you are in
+  one, and nothing live at all = no panel. Every branch above it is untouched;
+  it also stopped running `innerHTML` with identical markup every frame.
+- `#detectWrap` (`JAIL_WANTED_HUD_LIVE`, systems/detection.js) is 40vw of
+  `WANTED · CLEAR` over an empty green bar for the entire quiet half of a
+  stealth game. It fades out while `label === "Clear"`, so its return reads as
+  an alarm. On a phone the caption goes entirely and the live state takes the
+  row (they were rendering ON TOP of each other: "WANTEDSEARCHING: TOWER").
+- Gun game (`GUNGAME_HUD_TERSE`): `RUNG 3/9 — COMPACT SMG / NEXT: 12G PUMP /
+  LEADER: You` is 51 characters of which 31 never change in any match ever
+  played. One row now: `3/9  ▲ 12G PUMP`, and the leader cell exists only while
+  somebody is actually ahead. `#objective`'s 22-word rules paragraph and
+  `#survBars`' HEALTH/STAMINA labels are off in that mode for the same reason;
+  `#ammo` joins city/escape's minimal readout (the docked chip already names
+  the gun).
+- **TIPS ARE GONE, not defaulted off** (`PRISON_TIPS`, default false). Defaulting
+  `helpOn` false had left the SWITCH on screen forever — a rail row, a phone
+  pill and an `[H] Tips: OFF` footer, all visible in the owner's screenshot.
+
+**ONE GUN BAR IN GUN GAME.** *"gun game still shows 2 places of gun inventory,
+one on the right bottom of screen needs to go."* `JAIL_HUD_UNIFIED`'s dock was
+gated to `mode === "escape"`, so gun game got the hotbar AND the floating
+`#weaponStrip`. The dock covers gungame now and, since that mode carries no
+contraband, the nine empty cells and BAG come off with it.
+
+**THE ARMORY IS THE ARMORY** (`PRISON_ARMORY_FULL_RACK`, `PRISON_RACK_EMPTIES`).
+`CBZ.FPS_WEAPONS` declares 13; the room carried 6. The rack's LOWER shelf run
+has existed since day one and never held anything — it holds the four missing
+sidearms/autos now, so no board, bracket or original position moved; the M249,
+the RPG and the 40mm join the sniper behind the cage, because REACH and
+EXPLOSIVES are the categorical tier. And *"when I take a gun it turns green
+under it, instead of just removing the gun from the wall as it should do"* —
+the mesh leaves the wall and the bracket goes dark. `gunroomAudit().rackSlots`
+13, `gatedSlots` 4 (may only go UP).
+
+**"INVISIBLE DOOR LEFT BEHIND ARMORY DOOR WHEN OPEN SO YOU CAN'T SHOOT THRU."**
+Real, and worse than one door: `core/losgrid.js` BAKES each blocker's world AABB
+into its XZ grid and only rebuilds when the `losBlockers` array's identity or
+length changes. A door that opens changes neither — so the armory gate, the yard
+door and **368 city shop-door leaves** kept blocking line of fire from their
+closed positions forever. Movers now go to the `exact` list (live raycast), which
+self-heals for any future door. That took the exact list from 4 to 372 meshes and
+per-cast cost from 8.3 to 73-93 µs, so the exact list got a broadphase of its
+own — a cached world AABB per entry, re-derived only when its matrixWorld
+actually changes — landing at **19.3 µs/cast**, i.e. ~0.05 ms/frame.
+
+**A CELL IS FIRST PERSON** (`CAM_TIGHT_FP`) — the owner's own idea: *"third
+person mixed with first person for when they are in small rooms or cells etc
+where 3rd person gets messed up. maybe that's dumb but we will try it."* It is
+not dumb, it is the only answer the geometry allows: a cell is 2.4 m across and
+a third-person boom needs its length plus the camera's radius BEHIND the
+character, so every such camera either clips the wall or photographs the inside
+of a head. Two findings on the way: `CAM_ROOM_BOOM`'s room probes were gated on
+`TP`, the CITY on-foot tier — so the mode with the smallest interiors in the game
+never ran them at all; and its `minCam` lerp toward `INT_MIN_CAM` was written
+against city floors (1.5-3.0) and would have PUSHED the prison's 0.28 floor out
+to 0.75 in the very cells it exists to let the lens into. Both fixed. The rule
+itself calls `CBZ.setFPS` exactly the way [V] does — FIRST PERSON IS SACRED, so
+fpsmode is untouched and unaware, and the switch inherits the existing
+`CAM_TOGGLE_BLEND` dolly. Hysteresis 3.6 m in / 5.2 m out (measured: a cell
+probes 3.20 span / 1.90 ceiling, the wing's hall 18.0), and **the player
+outranks it** — any hand toggle drops the claim until the room opens up.
+Prerequisite: `world/cellblock.js`'s cell roof slabs are LOS blockers now. They
+are 30 cm of concrete, the wing is open-topped, and they are therefore the ONLY
+lid in the prison — with none the probe could only ever answer "outdoors".
+
+**THE PHONE ANCHOR.** *"moving pad is too close to middle needs to be lower and
+left."* `left:88px` on a 168px disc is the corner of an iPad and 44% across a
+393px phone. Phones get their own anchor (140px disc at 10/44, centre x=80) plus
+`#hotbar` in touch.js's `UI_SEL` so a slot tap under the ring reaches the slot.
+The bottom-left cluster moved out from under it: the compass above the ring, the
+gang chips up to the free wall under the minimap. Also fixed while looking:
+the fifth interaction verb was spilling off the LEFT edge (row-reverse overflow
+on a row that refuses to shrink) and `Romance` was breaking to `Romanc / e`.

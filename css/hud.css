@@ -118,7 +118,19 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
   position:absolute; left:50%; top:14px; transform:translateX(-50%);
   width:min(300px,40vw); padding:8px 14px 10px;
 }
-#detectWrap .lab{display:flex; justify-content:space-between; font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; margin-bottom:7px; opacity:.85;}
+/* gap + min-width-0: a long state ("Searching: Tower") used to butt straight
+   into the "WANTED" label with space-between giving it nothing to distribute,
+   so a phone read "WANTEDSEARCHING: TOWER" on two lines. */
+#detectWrap .lab{display:flex; justify-content:space-between; gap:10px; font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; margin-bottom:7px; opacity:.85;}
+#detectWrap .lab > span{ min-width:0; }
+#detectState{ text-align:right; }
+/* JAIL_WANTED_HUD_LIVE (systems/detection.js): CLEAR is not a reading, so the
+   panel is not on screen while it is clear. It fades rather than cuts, because
+   the moment it comes BACK is a real event and a fade both directions reads as
+   one control rather than a popup. pointer-events off so an invisible 40vw
+   panel can never eat a tap on the world behind it. */
+#detectWrap{ transition:opacity .22s ease; }
+#detectWrap.quiet{ opacity:0; pointer-events:none; }
 #detectBarBg{height:14px; border-radius:10px; background:rgba(0,0,0,.4); overflow:hidden; box-shadow:inset 0 2px 4px rgba(0,0,0,.45);}
 #detectBar{height:100%; width:0%; border-radius:10px; background:var(--green); transition:width .08s linear, background .18s;}
 #detectState{font-weight:600;}

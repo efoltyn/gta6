@@ -55,6 +55,13 @@
   let minX, minY, minZ, maxX, maxY, maxZ; // Float64Array AABBs
   let objs = [];                   // index -> mesh (for hit.object)
   let exact = [];                  // meshes the fast path must not approximate
+  // ---- exact-list BROADPHASE (see the note beside exactHits) --------------
+  // parallel to `exact`: a world AABB per entry and the matrixWorld it was
+  // measured at, so a mover's box is re-derived only when the mover moves.
+  let exAabb = null;               // Float64Array(6 * exact.length)
+  let exMat = null;                // Float64Array(16 * exact.length)
+  let exSeen = null;               // Uint8Array — has this entry ever been measured
+  const exList = [];               // per-call survivors handed to the real raycast
   let cells = new Map();           // cellKey -> int[] blocker indices
   let stamps = null;               // Uint32Array dedupe stamps
   let stamp = 0;
@@ -74,6 +81,39 @@
            e[0] > 0 && e[5] > 0 && e[10] > 0;
   }
 
+  /* ---- A DOOR IS NOT A WALL, AND THE GRID CANNOT TELL (the armory bug).
+     OWNER: "armory door when open I shoot from armory out and there's invisible
+     door left behind armory door when open so you can't shoot thru."
+
+     Exactly that, and it is arithmetic. build() BAKES each blocker's world AABB
+     into the parallel arrays and files it into the XZ cells it covered AT THAT
+     MOMENT, and the rebuild trigger is the losBlockers array's identity/length.
+     A door that OPENS changes neither: world/gunroom.js slides the armory gate
+     from y=3 to y=9 and world/door.js does the same to the yard door — the mesh
+     is metres in the air, the array is the same array, and the grid still has a
+     6 m slab standing in the doorway. Every LOS consumer then agrees the shot is
+     blocked: clearLineOfFire refuses to let a guard shoot out, the camera pulls
+     in on nothing, and a bullet fired through an open door stops in mid-air.
+     Removing the COLLIDER (which both files correctly do) never touched this,
+     because colliders and losBlockers are two different lists.
+
+     A mover's AABB is by definition not knowable at build time, so a mover has
+     no business in a baked grid: it joins `exact`, the list that still runs the
+     real THREE raycast against the live matrix every call. That is the same
+     escape hatch rotated and non-box blockers already use, and it self-heals —
+     any future door, gate or lift inherits the fix by being tagged the way
+     core/batch.js and core/staticfreeze.js already require it to be tagged.
+
+     Cost: `exact` grows by the number of moving LOS blockers in the world,
+     which is two in the prison (the armory gate, the yard door) and zero in the
+     city. LOS_GRID=false still bypasses this whole file. */
+  function isMover(m) {
+    for (let o = m, i = 0; o && i < 6; o = o.parent, i++) {
+      if (o.userData && (o.userData.mover || o.userData.dynamic)) return true;
+    }
+    return false;
+  }
+
   function build(blk) {
     builtFor = blk; builtLen = blk.length; dirty = false;
     n = 0; objs.length = 0; exact.length = 0; cells = new Map();
@@ -87,7 +127,7 @@
       const mat = Array.isArray(m.material) ? m.material[0] : m.material;
       const geoOk = m.geometry.parameters && m.geometry.parameters.width != null; // Box(Buffer)Geometry
       const sideOk = !mat || (mat.side || 0) === 0;   // FrontSide only
-      if (!geoOk || !sideOk || !isIdentityRot(m.matrixWorld)) { exact.push(m); continue; }
+      if (!geoOk || !sideOk || !isIdentityRot(m.matrixWorld) || isMover(m)) { exact.push(m); continue; }
       const g = m.geometry;
       if (!g.boundingBox) g.computeBoundingBox();
       _box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
@@ -108,7 +148,85 @@
     }
     stamps = new Uint32Array(n);
     stamp = 0;
+    exAabb = new Float64Array(exact.length * 6);
+    exMat = new Float64Array(exact.length * 16);
+    exSeen = new Uint8Array(exact.length);
     CBZ.losGridStats = { blockers: blk.length, gridded: n, exact: exact.length, cells: cells.size };
+  }
+
+  /* ---- THE EXACT LIST NEEDS A BROADPHASE TOO -------------------------------
+     Treating movers as exact (above) is what makes an opened door stop
+     blocking, but it moved a real cost with it: the exact list went from ~4
+     meshes to ~372 in the city (every shop door leaf is a mover), and each one
+     used to eat a full Mesh.raycast — matrix inverse plus twelve triangles —
+     on EVERY query, whether or not the ray went anywhere near it.
+
+     So the exact list gets the same treatment the grid gives everything else: a
+     cheap conservative reject first. Each entry keeps a WORLD AABB and a copy of
+     the matrixWorld it was measured at; a ray whose slab test misses that box
+     cannot possibly hit the mesh, so only the survivors reach THREE. The box is
+     re-derived only when the matrix actually changes, which for a door is the
+     handful of frames it is swinging.
+
+     Correctness is unchanged in both directions: the AABB of a rotated leaf is
+     LOOSE (it can only ever admit too many, never reject a real hit), and the
+     surviving meshes are still intersected by the real raycast, so hit points,
+     normals and distances are r128's own. Like Mesh.raycast itself this reads
+     `matrixWorld` without forcing an update — the same matrix THREE would have
+     used, so a stale one is stale identically.
+
+     MEASURED (city seed 90210, 2000 warmed casts, best of three):
+       before the mover rule   8.3 us/cast   exact 6
+       movers exact, no filter 73-93 us/cast exact 372   <- unshippable
+       with this broadphase   19.3 us/cast   exact 372
+     i.e. ~11 us/cast, and the game issues single-digit LOS casts per frame —
+     ~0.05 ms/frame for doors that stop being ghosts. The refresh is deliberately
+     per-CALL rather than cached against a frame token: a token that failed to
+     tick would reintroduce exactly the staleness bug this whole block exists to
+     kill, and 11 us is a cheaper price than that risk. */
+  const _exBox = new THREE.Box3();
+  function exactRefresh(i) {
+    const m = exact[i];
+    const e = m.matrixWorld.elements, mo = i * 16;
+    if (exSeen[i]) {
+      let same = true;
+      for (let k = 0; k < 16; k++) { if (exMat[mo + k] !== e[k]) { same = false; break; } }
+      if (same) return true;
+    }
+    const g = m.geometry;
+    if (!g) return false;
+    if (!g.boundingBox) { try { g.computeBoundingBox(); } catch (_) { return false; } }
+    if (!g.boundingBox) return false;
+    _exBox.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
+    const ao = i * 6;
+    exAabb[ao] = _exBox.min.x; exAabb[ao + 1] = _exBox.min.y; exAabb[ao + 2] = _exBox.min.z;
+    exAabb[ao + 3] = _exBox.max.x; exAabb[ao + 4] = _exBox.max.y; exAabb[ao + 5] = _exBox.max.z;
+    for (let k = 0; k < 16; k++) exMat[mo + k] = e[k];
+    exSeen[i] = 1;
+    return true;
+  }
+  // does the segment [near,far] along (o,d) touch entry i's AABB at all? Plain
+  // slab overlap — unlike slab() above this does NOT cull a ray that starts
+  // inside, because the real raycast that follows is the one allowed to decide.
+  function exHitsBox(i, ox, oy, oz, dx, dy, dz, near, far) {
+    const a = i * 6;
+    let tmin = near, tmax = far;
+    if (dx !== 0) {
+      const inv = 1 / dx; let t1 = (exAabb[a] - ox) * inv, t2 = (exAabb[a + 3] - ox) * inv;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+      if (t1 > tmin) tmin = t1; if (t2 < tmax) tmax = t2; if (tmin > tmax) return false;
+    } else if (ox < exAabb[a] || ox > exAabb[a + 3]) return false;
+    if (dy !== 0) {
+      const inv = 1 / dy; let t1 = (exAabb[a + 1] - oy) * inv, t2 = (exAabb[a + 4] - oy) * inv;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+      if (t1 > tmin) tmin = t1; if (t2 < tmax) tmax = t2; if (tmin > tmax) return false;
+    } else if (oy < exAabb[a + 1] || oy > exAabb[a + 4]) return false;
+    if (dz !== 0) {
+      const inv = 1 / dz; let t1 = (exAabb[a + 2] - oz) * inv, t2 = (exAabb[a + 5] - oz) * inv;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+      if (t1 > tmin) tmin = t1; if (t2 < tmax) tmax = t2; if (tmin > tmax) return false;
+    } else if (oz < exAabb[a + 2] || oz > exAabb[a + 5]) return false;
+    return true;
   }
 
   // pooled hits (reused per call — see header)
@@ -240,12 +358,22 @@
       }
     }
 
-    // exact-list stragglers (rotated/non-box/DoubleSide) — real THREE raycast
+    // exact-list stragglers (rotated / non-box / DoubleSide / MOVERS) — broad-
+    // phased by their own cached AABB, then the real THREE raycast on whatever
+    // survives. In the common case nothing does and this costs one slab test
+    // per entry.
     if (exact.length) {
-      _ray.ray.origin.copy(o); _ray.ray.direction.copy(d);
-      _ray.near = near; _ray.far = far;
-      const ex = _ray.intersectObjects(exact, false);
-      for (let i = 0; i < ex.length; i++) outHits[nHits++] = ex[i];
+      exList.length = 0;
+      for (let i = 0; i < exact.length; i++) {
+        if (!exactRefresh(i)) { exList.push(exact[i]); continue; }   // unmeasurable → never reject
+        if (exHitsBox(i, ox, oy, oz, dx, dy, dz, near, far)) exList.push(exact[i]);
+      }
+      if (exList.length) {
+        _ray.ray.origin.copy(o); _ray.ray.direction.copy(d);
+        _ray.near = near; _ray.far = far;
+        const ex = _ray.intersectObjects(exList, false);
+        for (let i = 0; i < ex.length; i++) outHits[nHits++] = ex[i];
+      }
     }
     outHits.length = nHits;
     if (nHits > 1) outHits.sort(byDist);

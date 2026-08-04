@@ -59,6 +59,84 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   border-radius: 50%; background: rgba(255,255,255,.32);
   box-shadow: 0 2px 8px rgba(0,0,0,.4);
 }
+/* ---- THE PHONE ANCHOR (owner, 2026-08-04, playing on a phone): "moving pad
+   is too close to middle needs to be lower and left."
+
+   He is right, and the arithmetic says why the iPad anchor above cannot also
+   be the phone anchor. `left:88px` on a 168px disc puts the stick's CENTRE at
+   88+84 = 172px. On an iPad that is 15% across a 1180px screen — the corner.
+   On a 393px phone the SAME anchor is 44% across: the thumb has to reach into
+   the middle of the world to walk, and the disc's top edge (64+168 = 232px)
+   climbs into the interaction row. Neither number changed; the screen did.
+
+   So the phone gets its own anchor rather than a compromise that ruins the
+   tablet: a smaller 140px disc pinned into the corner at 10/44, centre
+   (80, 114) — 92px further left and 34px lower than the tablet anchor.
+
+   It now overlaps the bottom of the hotbar row, which is deliberate and is
+   why systems/touch.js's UI_SEL gained `#hotbar` in the same change: a tap
+   BORN on a slot reaches the slot natively and never starts the stick. The
+   ring is 35% opacity and pointer-events:none, so what is left is a faint
+   circle behind two cells. ---- */
+@media (max-width: 560px), (max-height: 480px) {
+  #tstick { width: 140px; height: 140px; margin: -70px 0 0 -70px; }
+  #tstick.tfixed {
+    margin: 0;
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    bottom: calc(44px + env(safe-area-inset-bottom, 0px));
+  }
+  #tknob { width: 62px; height: 62px; margin: -31px; }
+  /* THE CORNER IS THE THUMB'S NOW. hud.css parks the prison's two bottom-left
+     readouts at bottom:26 (#compass) and bottom:86 (#gangHud) — both inside
+     the new ring footprint (44 -> 184). They stack ABOVE it instead of behind
+     it; #pickupFeed's touch floor (244, derived from the TABLET ring) is
+     raised past the pair for the same reason. #gangHud is usually not on
+     screen at all now (systems/hud.js: a zero is not news), so most of the
+     time this column is just the compass. */
+  body.touch #compass {
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    bottom: calc(196px + env(safe-area-inset-bottom, 0px));
+  }
+  /* …and #gangHud goes UP, not just out of the ring. The bottom of a phone in
+     this game has four tenants already (ring · hotbar · verb squares · fire
+     cluster) and the pressure chips are the least urgent of the five, so they
+     take the one piece of free wall left: under the minimap, top-left. It is
+     usually empty (systems/hud.js: a zero is not news) and never overlaps the
+     interaction block, which owns the whole bottom-right quadrant. */
+  body.touch #gangHud {
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    top: calc(200px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    max-width: 62vw;
+  }
+  body.touch #pickupFeed {
+    bottom: max(var(--pickup-floor), calc(244px + env(safe-area-inset-bottom, 0px)));
+  }
+  /* THE PANEL'S OWN NAME IS NOT ITS READOUT. The meter gets 46vw = ~180px on a
+     phone, and "SEARCHING: TOWER" alone is wider than that — with
+     space-between and nothing able to shrink, the two labels rendered ON TOP of
+     each other ("WANTEDSEARCHING: TOWER"), which is what the owner's screenshot
+     shows. Truncating the state instead ("SEARCHI…") trades a collision for a
+     word nobody can read.
+     The right answer is the same one the rest of this wave applies: the static
+     half goes. Since JAIL_WANTED_HUD_LIVE only puts this panel on screen when
+     there IS heat, "WANTED" is a caption on a bar that is self-evidently the
+     heat bar — so on a phone the live state gets the whole row. */
+  /* …and it stops being CENTRED. At 62vw a centred panel starts at 19vw, which
+     on a phone is underneath the minimap (left:18, 86 wide) — the first letter
+     of the state was behind the map. Anchored to the right edge instead: the
+     row above it (#topright) is the only other tenant of that corner and it
+     stops at y=58, one pixel above this panel's top:60. */
+  #detectWrap {
+    width: min(300px, 62vw);
+    left: auto; transform: none;
+    right: calc(14px + env(safe-area-inset-right, 0px));
+  }
+  #detectWrap .lab { letter-spacing: 1.2px; }
+  #detectWrap .lab > span:first-child { display: none; }
+  #detectState { flex: 1 1 auto; min-width: 0; text-align: left;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 /* stick-press (L3) crouch latch: amber knob says "you're crouched" */
 #tstick.tcrouch #tknob { background: rgba(255,209,102,.55); }
 #tstick.tcrouch { border-color: rgba(255,209,102,.45); }
@@ -542,13 +620,29 @@ body.touch{
 body.touch .world-subtitle{
   width: max(46vw, min(640px, calc(100vw - 512px)));
 }
+/* …EXCEPT ON A PHONE, WHERE THAT CHANNEL IS 181px. The formula above measures
+   the gap between the two touch clusters, which is the right question on an
+   iPad and an impossible one on a 393px handset: max(46vw, 100vw-512px)
+   collapses to 46vw = 181px, and an ordinary line ("Officer #2: I heard so and
+   so...") runs out of both ends of it. The rule's own comment already accepts
+   type passing BEHIND the joystick ring rather than shrinking to a two-word
+   column — this simply follows that trade the whole way on the screen where it
+   actually bites. The 1.6px black stroke is what makes it legible over the
+   35%-opacity ring. */
+@media (max-width: 560px), (max-height: 480px) {
+  body.touch .world-subtitle{ width: calc(100vw - 24px); }
+}
 
 /* ---- responsive scaling for small / portrait screens ---- */
 @media (max-width: 820px) {
   #objective { font-size: 14px; max-width: 56vw; padding: 9px 12px; }
   #topright .pill { font-size: 15px; padding: 8px 11px; }
   #inventory { font-size: 12px; max-width: 200px; }
-  #detectWrap { width: min(240px, 46vw); top: 60px; }
+  /* 46vw -> 62vw: the phone block above drops the "WANTED" caption and gives
+     the row to the live state, which needs room to say "Searching: Tower"
+     rather than "SEARCHI…". Kept here (not only in the narrow query) so a
+     560-820px tablet in portrait gets the same fit. */
+  #detectWrap { width: min(300px, 62vw); top: 60px; }
   #hitfx { font-size: 42px; }
   #toast { font-size: 44px; }
   .card-box { padding: 24px 20px 22px; }

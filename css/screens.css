@@ -249,6 +249,38 @@ body.mode-gungame #dashBtn,
 body.mode-gungame #minimap{ display:none !important; }
 body.mode-gungame #survBars{ display:block; }
 
+/* ---- THE WORDS THAT NEVER CHANGE (owner: "gun game has MASSIVE HUD SPACE
+   WASTED ON FUCKING WORDS THAT DONT EVER CHANGE LOL COMPLETELY BREAKS FOURTH
+   WALL"). Two more of them live outside gungamehud.js's own panel:
+
+   · #objective — "GUN GAME on The Jail — every kill advances the ladder; the
+     final rung is bare fists. First through wins." Twenty-two words of rules
+     text, written once at match start and then parked in the top-left corner
+     for the entire match. The rung counter and the NEXT gun are the objective;
+     a paragraph restating the mode's name to a player who chose it off the
+     title screen is the definition of a fourth-wall break. modes/gungame.js
+     still calls setObjective (the string is the win/lose flow's too) — it is
+     simply not a permanent sign in this mode.
+   · #survBars .slab — "HEALTH" and "STAMINA" printed beside a red-to-green bar
+     and a blue one. The bars ARE the words. */
+body.mode-gungame #objective{ display:none !important; }
+body.mode-gungame #survBars .slab{ display:none; }
+body.mode-gungame #survBars .sbar{ gap:0; }
+
+/* ---- ONE GUN BAR, NOT TWO (owner: "gun game still shows 2 places of gun
+   inventory — one on the right bottom of screen needs to go").
+
+   He is describing the exact HUD the prison already fixed. systems/inventory.js
+   docks fpsmode's floating #weaponStrip into the #hotbar as its leftmost cells
+   (JAIL_HUD_UNIFIED), and that dock was gated to `mode === "escape"` — so gun
+   game got the bottom-CENTRE hotbar AND the free-floating strip bottom-right,
+   two readouts of the same one gun. The dock now covers gun game too (see
+   dockWeaponStrip), and since a gun-game player carries no contraband at all,
+   the nine empty item cells and the BAG button come off with it: what is left
+   is a single chip showing the rung you are holding. */
+body.mode-gungame #hotbar .islot,
+body.mode-gungame #invBagBtn{ display:none !important; }
+
 /* the ladder panel (gungamehud.js builds it; the NEXT line is the gradient) */
 #gungameHud{
   position:fixed; left:50%; transform:translateX(-50%); bottom:96px; z-index:12;
@@ -265,3 +297,33 @@ body.mode-gungame.state-playing #gungameHud{ display:block; }
 #gungameHud .gg-lead{ font-size:11px; color:#9fb4cc; margin-top:2px; }
 #gungameHud .gg-spawn{ font-size:14px; font-weight:700; color:#ff6b6b; margin-top:2px; }
 #gungameHud .gg-spawn:empty{ display:none; }
+
+/* ---- GUNGAME_HUD_TERSE (systems/gungamehud.js stamps .gg-terse) -----------
+   The labelled five-line stack above becomes ONE row of cells, sized by what
+   each one is worth: the NEXT gun is the whole reason to keep playing, so it
+   is the biggest thing here; the rung fraction and the leader are quiet grey
+   supporting numbers; an empty cell simply is not there. The strip is
+   deliberately narrower than the panel it replaces AND shorter, which is the
+   HUD space the owner asked for back. */
+#gungameHud.gg-terse{
+  display:none; padding:5px 12px 6px;
+  align-items:baseline; gap:11px; white-space:nowrap;
+}
+body.mode-gungame.state-playing #gungameHud.gg-terse{ display:flex; }
+#gungameHud.gg-terse > div:empty{ display:none; }
+#gungameHud.gg-terse .gg-now{
+  font-size:13px; font-weight:700; letter-spacing:.4px; color:#9fb4cc;
+  font-variant-numeric:tabular-nums;
+}
+#gungameHud.gg-terse .gg-pips{ margin:0; }
+#gungameHud.gg-terse .gg-next{
+  font-size:16px; font-weight:700; letter-spacing:.5px; color:#ffd451; margin:0;
+}
+#gungameHud.gg-terse .gg-lead{
+  font-size:12px; font-weight:700; color:#ff9a7a; margin:0;
+  text-transform:uppercase; letter-spacing:.6px;
+}
+#gungameHud.gg-terse .gg-spawn{
+  font-size:20px; font-weight:700; color:#ff6b6b; margin:0;
+  font-variant-numeric:tabular-nums;
+}

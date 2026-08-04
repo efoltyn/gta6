@@ -338,6 +338,14 @@
     el.invList.textContent = parts.length ? parts.join("  ·  ") : "—";
   }
 
+  // see the JAIL_GANG_HUD_LIVE block at the foot of refreshGangHud
+  if (CFG.JAIL_GANG_HUD_LIVE == null) CFG.JAIL_GANG_HUD_LIVE = true;
+  let gangSig = "";
+  function gangHide() {
+    if (gangSig === " ") return;
+    gangSig = " ";                    // never equal to any real markup
+    el.gangHud.style.display = "none";
+  }
   function refreshGangHud() {
     if (!el.gangHud) return;
     const g = CBZ.game || {};
@@ -346,10 +354,7 @@
     // (measured: a full string build + 3 .find()/.filter() passes EVERY frame
     // for an invisible element).
     if (g.mode === "city") return;
-    if (g.role === "cop" || g.state !== "playing") {
-      el.gangHud.style.display = "none";
-      return;
-    }
+    if (g.role === "cop" || g.state !== "playing") { gangHide(); return; }
     const standing = g.gangStanding || [0, 0];
     const cover = g.gangProtection || [0, 0];
     const debt = g.gangDebt || [0, 0];
@@ -426,16 +431,65 @@
     if ((g.snitchIntelT || 0) > 0) pressureBits.push(chip("good", `Snitch named ${Math.ceil(g.snitchIntelT)}s`));
     if (buzz && buzz.score > 24) pressureBits.push(chip(buzz.score > 45 ? "hot" : "warn", `Buzz ${buzz.kind}`));
     pressureBits.length = Math.min(pressureBits.length, 6);
+
+    // ============================================================
+    //  A ZERO IS NOT NEWS (JAIL_GANG_HUD_LIVE).
+    //
+    //  OWNER (2026-08-04, phone screenshot): "the respect reds 0 blues 0 that
+    //  whole thing in bottom of hud — look at what that is, don't kill the
+    //  logic but kill the hud space waste."
+    //
+    //  What it was: a two-line block reading RESPECT · REDS 0 · BLUES 0 · CREW
+    //  NONE · BUZZ FEAR. Four of those five cells said the same thing every
+    //  frame of a fresh run — "nothing has happened yet" — in 33 characters,
+    //  and they wrapped the one cell that WAS live onto a second line. The
+    //  label "RESPECT" is the panel's own name printed inside the panel; the
+    //  words "REDS"/"BLUES" repeat what the red and blue INK already says.
+    //
+    //  Not one number below is dropped and not one branch above is touched.
+    //  What changes is that a cell only exists while it carries news:
+    //    · standing  — drawn as coloured `R 42` / `B -18`, and only once the
+    //                  gang has an opinion at all (|standing| >= 1).
+    //    · crew      — only when you are IN one. "Crew None" is the absence of
+    //                  a fact, and the absence of a fact is not a HUD row.
+    //    · cover/debt/pressure/job — unchanged; they were already conditional,
+    //                  which is exactly why they are the ones worth the space.
+    //  Nothing live at all → the panel is not on screen. The bottom-left of a
+    //  quiet prison is now empty, which is what a quiet prison looks like.
+    //
+    //  Also fixes a real cost: this ran innerHTML EVERY frame with identical
+    //  markup. It now writes only when the string changes (the same rule
+    //  systems/gungamehud.js and city/hud.js's bar already follow).
+    //  Flag false = the old five-cell block, byte for byte.
+    // ============================================================
+    const live = CFG.JAIL_GANG_HUD_LIVE !== false;
+    let html;
+    if (!live) {
+      html = '<span class="tag">Respect</span>' +
+        `<span class="red">Reds ${Math.round(standing[0] || 0)}</span>` +
+        `<span class="blue">Blues ${Math.round(standing[1] || 0)}</span>` +
+        `<span class="crew">Crew ${crew}</span>` +
+        (coverBits.length ? chip("good", `Cover ${coverBits.join(" ")}`) : "") +
+        (debtBits.length ? chip("hot", `Debt ${debtBits.join(" ")}`) : "") +
+        (pressureBits.length ? pressureBits.join("") : "") +
+        (jobText ? chip("good", `Job ${jobText}`) : "");
+    } else {
+      const rN = Math.round(standing[0] || 0), bN = Math.round(standing[1] || 0);
+      html =
+        (Math.abs(rN) >= 1 ? `<span class="red">R ${rN}</span>` : "") +
+        (Math.abs(bN) >= 1 ? `<span class="blue">B ${bN}</span>` : "") +
+        (CBZ.player && CBZ.player.gang != null && CBZ.player.gang >= 0
+          ? `<span class="crew">${crew}</span>` : "") +
+        (coverBits.length ? chip("good", `Cover ${coverBits.join(" ")}`) : "") +
+        (debtBits.length ? chip("hot", `Debt ${debtBits.join(" ")}`) : "") +
+        (pressureBits.length ? pressureBits.join("") : "") +
+        (jobText ? chip("good", jobText) : "");
+      if (!html) { gangHide(); return; }
+    }
+    if (html === gangSig) return;                 // identical markup: no DOM work
+    gangSig = html;
     el.gangHud.style.display = "flex";
-    el.gangHud.innerHTML =
-      '<span class="tag">Respect</span>' +
-      `<span class="red">Reds ${Math.round(standing[0] || 0)}</span>` +
-      `<span class="blue">Blues ${Math.round(standing[1] || 0)}</span>` +
-      `<span class="crew">Crew ${crew}</span>` +
-      (coverBits.length ? chip("good", `Cover ${coverBits.join(" ")}`) : "") +
-      (debtBits.length ? chip("hot", `Debt ${debtBits.join(" ")}`) : "") +
-      (pressureBits.length ? pressureBits.join("") : "") +
-      (jobText ? chip("good", `Job ${jobText}`) : "");
+    el.gangHud.innerHTML = html;
   }
 
   CBZ.onAlways(91, refreshGangHud);

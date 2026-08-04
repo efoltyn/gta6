@@ -312,13 +312,27 @@ body.tveh-on #pinteract{ display: none !important; }
   #pinteractWho .piw-note, #pinteractWho .piw-tip{ font-size: 11px; }
 }
 @media (max-width: 520px){
-  :root{ --pv-size: 48px; --pv-gap: 6px; --pi-left-guard: 12px; }
+  /* 58, not 48: "Romance" at 9px is ~48px of type and a 48px button (46px of
+     inner width) broke it to "Romanc / e". Four 58s + three 6s = 250px, which
+     still clears the ~111px right cluster on a 393px handset. */
+  :root{ --pv-size: 58px; --pv-gap: 6px; --pi-left-guard: 12px; }
   #pverbs .pv-btn{ border-radius: 13px; }
   #pverbs .pv-btn .pi-lab{ font-size: 9px; }
   #pverbs .pv-btn .pi-sub{ font-size: 8.5px; }
   #poptions{ gap: 6px; }
   #poptions .po-pill{ min-height: 34px; padding: 5px 10px; }
   #poptions .po-pill .pi-lab{ font-size: 11.5px; }
+  /* ---- THE PILLS GET THEIR OWN LINE (phone screenshot, 2026-08-04).
+     `.pi-row` is row-reverse and #pverbs is `flex: 0 0 auto`, i.e. four
+     squares that refuse to shrink. Four 52px squares (=210px) plus one
+     overflow pill does not fit in the 269px this row actually has on a 393px
+     handset, and a row-reverse overflow spills off the LEFT EDGE: the fifth
+     verb was half off screen, unreadable and only half tappable.
+     wrap-reverse lets #poptions break onto its own line ABOVE the squares
+     (away from the thumb, the same direction the pills already spill), so a
+     context with five or six verbs stays whole. */
+  #pinteract .pi-row{ flex-wrap: wrap-reverse; justify-content: flex-start; }
+  #pinteract .pi-row > #poptions{ max-width: 100%; }
 }
 
 /* ============================================================

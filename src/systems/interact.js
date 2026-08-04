@@ -173,12 +173,35 @@
   // teaching layer is exactly where the footer always said it was — behind H —
   // and a player who wants it back gets it in one keypress, persisted. Flag off
   // restores the old default.
+  //
+  // ---- 2026-08-04: TIPS ARE GONE, NOT DEFAULTED OFF (PRISON_TIPS) ----------
+  // OWNER, playing on a phone: "tips on off button and tips in general need to
+  // be removed from the game — see how it takes up HUD."
+  //
+  // Defaulting `helpOn` to false (above) left the SWITCH on screen forever: a
+  // whole extra row in the docked iPad rail ("Teaching tips · Explain
+  // unfamiliar actions beside their buttons · TIPS OFF"), a "Tips OFF" pill in
+  // the phone overflow, and an "[H] Tips: OFF" footer on the desktop card. That
+  // is a permanent control that says OFF, which is more fourth wall than the
+  // teaching line it was hiding — it is visible in the owner's own screenshot,
+  // parked over the world at the left edge.
+  //
+  // PRISON_TIPS is the whole layer's master switch and it defaults FALSE:
+  // `tipsAllowed()` false means helpOn can never be true, no toggle is drawn on
+  // any of the three surfaces, [H] does nothing and the localStorage choice is
+  // ignored. Set CBZ.CONFIG.PRISON_TIPS = true and every one of them comes back
+  // exactly as it shipped, including the saved preference. `learned` keeps
+  // being recorded either way, so turning tips on does not re-teach verbs the
+  // player has already used.
+  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_TIPS == null) CBZ.CONFIG.PRISON_TIPS = false;
+  function tipsAllowed() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_TIPS); }
   let learned = {}, helpOn = !(CBZ.CONFIG && CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false);
   try { learned = JSON.parse(localStorage.getItem("cbz_learned") || "{}"); } catch (e) {}
   try {
     const saved = localStorage.getItem("cbz_help");
     if (saved != null) helpOn = saved !== "0";        // an explicit choice always wins
   } catch (e) {}
+  if (!tipsAllowed()) helpOn = false;
   function persist() {
     try { localStorage.setItem("cbz_learned", JSON.stringify(learned)); localStorage.setItem("cbz_help", helpOn ? "1" : "0"); } catch (e) {}
   }
@@ -610,19 +633,24 @@
     if (docked) {
       const order = core.concat(rest);
       for (let i = 0; i < order.length; i++) btns += optChoice(i, a, order[i]);
-      pills = '<div class="pi-choice pi-tips-choice">' +
-        '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span>' +
-        '<span class="pi-choice-detail">Explain unfamiliar actions beside their buttons</span></span>' +
-        '<button type="button" class="pi-action pi-tips-action' + (helpOn ? " on" : "") +
-        '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") + '">' +
-        (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
+      // PRISON_TIPS off (the default): no toggle row at all. The rail is verbs.
+      if (tipsAllowed()) {
+        pills = '<div class="pi-choice pi-tips-choice">' +
+          '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span>' +
+          '<span class="pi-choice-detail">Explain unfamiliar actions beside their buttons</span></span>' +
+          '<button type="button" class="pi-action pi-tips-action' + (helpOn ? " on" : "") +
+          '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") + '">' +
+          (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
+      }
     } else {
       for (let i = 0; i < core.length; i++) btns += optButton("pv-btn", i, a, core[i], 12);
       for (let i = 0; i < rest.length; i++) pills += optButton("po-pill", core.length + i, a, rest[i], 18);
       // the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach
-      pills += '<button type="button" class="po-pill po-tips' + (helpOn ? " on" : "") +
-        '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
-        '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
+      if (tipsAllowed()) {
+        pills += '<button type="button" class="po-pill po-tips' + (helpOn ? " on" : "") +
+          '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
+          '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
+      }
     }
 
     // renderPanel runs EVERY frame while somebody is in range; only touch the
@@ -665,7 +693,10 @@
     el.interact.classList.toggle("pi-quiet", q);
     if (q) el.interactOpts.innerHTML = "";
   }
-  function tipsToggle() { helpOn = !helpOn; persist(); piSig = ""; }
+  // PRISON_TIPS off → [H] and every tips control are inert (there is nothing to
+  // toggle and nothing drawing the state). Still exported, so a build that turns
+  // the flag on gets the key back with no other edit.
+  function tipsToggle() { if (!tipsAllowed()) return; helpOn = !helpOn; persist(); piSig = ""; }
 
   let current = null, cooldown = 0;
 
@@ -737,7 +768,7 @@
       const tip = (showTips && !learned[v] && desc) ? `<div class="idesc">${desc}</div>` : "";
       return row + tip;
     }).join("");
-    if (!dockedTouch) html += `<div class="ihelp">[H] Tips: ${helpOn ? "ON" : "OFF"}</div>`;
+    if (!dockedTouch && tipsAllowed()) html += `<div class="ihelp">[H] Tips: ${helpOn ? "ON" : "OFF"}</div>`;
     el.interactOpts.innerHTML = html;
   }
 

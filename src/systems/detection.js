@@ -27,6 +27,22 @@
   // CBZ.litBySearchlight; the visual red-flush lives there too).
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
 
+  // the wanted meter only exists while it has a reading — see the long note at
+  // the `wantedShown(...)` call at the foot of updateDetection. The class (not a
+  // style write) so css/hud.css owns the transition and city.css's
+  // display:none!important can still out-rank us in the city.
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_WANTED_HUD_LIVE == null) CBZ.CONFIG.JAIL_WANTED_HUD_LIVE = true;
+  const detectWrap = typeof document !== "undefined" ? document.getElementById("detectWrap") : null;
+  let wantedOn = null;
+  function wantedShown(on) {
+    if (!detectWrap) return;
+    if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_WANTED_HUD_LIVE)) on = true;
+    on = !!on;
+    if (on === wantedOn) return;                     // one class write per change
+    wantedOn = on;
+    detectWrap.classList.toggle("quiet", !on);
+  }
+
   // restricted zones — being seen here is itself a crime
   function zoneOf(p) {
     if (p.x > 18.5 && p.x < 29.5 && p.z > -6.5 && p.z < 8.5) return "the armory";
@@ -642,6 +658,7 @@
         if (CBZ.updateGuardFlashlight) CBZ.updateGuardFlashlight(gd, dt);
       }
       const complaints = g.complaints || 0;
+      wantedShown(complaints > 1);
       el.detectLabel.textContent = "Badge";
       el.bar.style.width = complaints.toFixed(1) + "%";
       el.bar.style.background = complaints >= 65 ? "#ffb020" : complaints > 18 ? "#ffe14d" : "#3ad17a";
@@ -733,6 +750,26 @@
     else if (zone) { col = "#ffe14d"; label = (trace && trace.mode !== "clear") ? trace.label : "Trespassing"; }
     el.bar.style.background = col;
     el.dstate.textContent = label;
+    // ============================================================
+    //  A CLEAR METER IS NOT NEWS (JAIL_WANTED_HUD_LIVE).
+    //
+    //  OWNER: "hud is being completely disrespected with dumb shit wasted
+    //  inputting in it." The single biggest block on the prison HUD is this
+    //  panel — 40vw across the top of the screen — and in his screenshot it
+    //  reads WANTED · CLEAR over an empty green bar. That is a 300-pixel-wide
+    //  announcement that nothing is happening, made of a word that is the
+    //  panel's own name and a word that means "ignore me", and it is on screen
+    //  for the entire quiet half of a stealth game.
+    //
+    //  The meter's whole job is the moment it is NOT clear, so that is when it
+    //  exists. Nothing about detection, heat, cases or the vignette changes —
+    //  only whether a panel with no reading in it takes up the top of the
+    //  screen. `label !== "Clear"` is the condition already computed above, so
+    //  there is no second opinion about what "clear" means. The instant a guard
+    //  glances at you it is back, which makes it read as an ALARM instead of
+    //  wallpaper. Flag false = always on, exactly as it shipped.
+    // ============================================================
+    wantedShown(label !== "Clear" || g.detection > 5);
 
     const vig = g.detection > 60 ? (g.detection - 60) / 40 : 0;
     el.vignette.style.boxShadow = `inset 0 0 200px 40px rgba(220,30,40,${(vig * 0.7).toFixed(2)})`;

@@ -341,7 +341,16 @@
     const on = unifiedOn();
     if (document.body) document.body.classList.toggle("jail-hud-unified", on);
     if (!stripEl || !hudRoot) return;
-    const wantDock = on && CBZ.game && CBZ.game.mode === "escape";
+    // GUN GAME DOCKS TOO (owner: "gun game still shows 2 places of gun
+    // inventory — one on the right bottom of screen needs to go"). It is the
+    // same fault this flag was written for: the floating strip bottom-right
+    // plus a second bar bottom-centre. Gun game carries no contraband, so
+    // css/screens.css hides the nine item cells and the BAG under
+    // body.mode-gungame and the docked chip is the whole bar.
+    // Survival still never docks (mode-survival hides the hotbar outright, so
+    // the strip has to keep floating there or the weapon readout vanishes).
+    const m = CBZ.game && CBZ.game.mode;
+    const wantDock = on && (m === "escape" || m === "gungame");
     if (wantDock) { if (stripEl.parentNode !== bar) bar.insertBefore(stripEl, bar.firstChild); }
     else if (stripEl.parentNode !== hudRoot) hudRoot.appendChild(stripEl);
   }
