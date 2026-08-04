@@ -23,10 +23,20 @@ Before building anything adjacent, wire into the existing system:
   writers must yield to `CBZ.fpsScopeFov()` (precedence: fitted optic >
   lockon scope) — a scope-blind FOV writer re-creates the "fake scope" bug.
 - **Touch layer** — `src/systems/touch.js` + `touch_vehicle.js`. Fixed
-  stick (rim = sprint, press = crouch), slide-holds (aim/scope→fire),
-  verb pills (words for interactions, icons for combat), stale-touch
-  sweepers. New on-screen controls join THIS layer; never add a parallel
-  touch handler. Interaction popups on touch are tappable pills, and
+  stick (rim = sprint, press = crouch), **AIM/SCOPE latches** (tap on,
+  tap off, lit — `TOUCH_AIM_TOGGLE`; the old hold+slide-onto-fire
+  grammar is the flag-off revert), a **trigger that is also a stick**
+  (hold FIRE and drag the SAME finger to keep aiming mid-burst —
+  `TOUCH_FIRE_PAD`), verb pills (words for interactions, icons for
+  combat), stale-touch sweepers. THE LAW A THUMB IMPOSES: a hold owns
+  the thumb it is under, and the right thumb is the only one that can
+  reach the trigger — so any control that wants to be held at the same
+  time as FIRE must be a LATCH, and any control held *while* aiming
+  must do the aiming itself. New on-screen controls join THIS layer;
+  never add a parallel touch handler. A latch has two obligations the
+  hold never had: it must READ the game's own truth each frame
+  (`fpsAimHeld`/`fpsScoped`) rather than remember its own, and it must
+  be released the moment its button leaves the glass or the page blurs. Interaction popups on touch are tappable pills, and
   single-verb rides are SILENT (press/tap to take — see
   `interactions.js` SILENT_RIDE; the airliner BOARD/HIJACK card is the
   one sanctioned exception).
