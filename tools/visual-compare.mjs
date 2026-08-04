@@ -51,7 +51,10 @@ if (args.help) {
     `  --no-open            do not open the generated PDF\n` +
     `  --keep-going         a failed subject becomes an error page instead of aborting the run\n` +
     `  --width N --height N capture viewport (defaults: preset or 960x600)\n` +
-    `  --only before|after  capture one side only, skip the report (fast look iteration)\n`);
+    `  --only before|after  capture one side only, skip the report (fast look iteration)\n` +
+    `  --before-label S     override the BEFORE banner/caption (for flag-A/B runs\n` +
+    `                       where --before is the same local build with ?cfg_X=0)\n` +
+    `  --after-label S      override the AFTER banner/caption\n`);
   process.exit(0);
 }
 
@@ -233,8 +236,10 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       sourceUrl: nav.final,
       width,
       height,
-      beforeLabel: preset.beforeLabel || "BEFORE · DEPLOYED",
-      afterLabel: preset.afterLabel || "AFTER · LOCAL",
+      // CLI overrides so a flag-A/B run (--before "…?cfg_X=0" against the same
+      // local build) does not stamp its shots with a lying "DEPLOYED" banner.
+      beforeLabel: String(args["before-label"] || preset.beforeLabel || "BEFORE · DEPLOYED"),
+      afterLabel: String(args["after-label"] || preset.afterLabel || "AFTER · LOCAL"),
       // The after side can reuse exact staging data (especially the camera)
       // returned by the matching before capture. Presets opt in by reading it.
       referenceStage: referenceResult?.captures?.[index]?.stage || null,
@@ -371,8 +376,8 @@ function reportHtml(before, after) {
     return `<section class="page detail">
       <header><div><span class="number">${String(index + 1).padStart(2, "0")}</span><h2>${htmlEscape(subject.label || subject.id)}</h2></div><p>${htmlEscape(focus)}</p></header>
       <div class="pair">
-        ${side(before, "before", "BEFORE", "DEPLOYED PAGE")}
-        ${side(after, "after", "AFTER", "LOCAL REPAIR")}
+        ${side(before, "before", "BEFORE", htmlEscape(String(args["before-label"] || "DEPLOYED PAGE")))}
+        ${side(after, "after", "AFTER", htmlEscape(String(args["after-label"] || "LOCAL REPAIR")))}
       </div>
       <footer><span>${htmlEscape(subject.id)}</span><span>${htmlEscape(pairNote)}</span></footer>
     </section>`;

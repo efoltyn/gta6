@@ -231,6 +231,41 @@
     return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   }
 
+  // ============================================================
+  //  THE FORMAL NECK, V2 — the reference-suit collar and the top of the tie.
+  //
+  //  OWNER (2026-08-04, with reference images): "the issue rn is with the
+  //  collar and top of tie." Two measured faults, both geometry, not taste:
+  //   (1) the shoulder-yoke slab overlaps the chest box's top ~0.145 and sits
+  //       ~1 cm PROUD of it (character.js: yoke centre neckY-0.04, H 0.18;
+  //       chest top neckY+0.015) — so the knot/bow painted on the chest's top
+  //       0.115 of the torso row has NEVER been visible. Every suit read as a
+  //       knotless blade emerging from under a slab, and the tuxedo showed no
+  //       bow tie at all (verified in outfit-gallery shots, 2026-08-04).
+  //   (2) the painted jacket V pinched at the throat (±0.035) and swung OPEN
+  //       toward the hem — the reverse of a worn suit, which is wide open at
+  //       the collar and converges to the fastened button. Nothing at the
+  //       collar could ever read through a 7%-wide slit.
+  //  V2, in three moves that keep every piece on the box it is seen on:
+  //   • the painter DECLARES its neckwear in its parts return (parts.neck =
+  //     {tie:hex, w:bladeWidth} or {bow:hex}) — suit, tuxedo, waiter, office,
+  //     police and pilot all declare in this change;
+  //   • the yoke atlas draws the collar leaves and the KNOT/BOW (the slab IS
+  //     the collar zone), the knot running to the slab's bottom edge;
+  //   • the chest carries only the BLADE, from row 0, so it runs continuously
+  //     under the slab on every body profile and emerges below the seam with
+  //     no gap — alignment by construction, not by per-profile arithmetic.
+  //  One-line revert: CBZ.CONFIG.CLOTH_FORMAL_NECK_V2 = false — every painter
+  //  takes its exact old branch (evaluated when an atlas is built, like
+  //  CLOTH_YOKE_PAINT). The yoke atlas keeps its 128x32 size either way: the
+  //  same fractions paint the same look, just not on 3px-wide texels.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CLOTH_FORMAL_NECK_V2 == null) CBZ.CONFIG.CLOTH_FORMAL_NECK_V2 = true;
+  function neckV2() {
+    const C = CBZ.CONFIG;
+    return !C || C.CLOTH_FORMAL_NECK_V2 == null || !!C.CLOTH_FORMAL_NECK_V2;
+  }
+
   // ---- per-row painter: draws in 0-1 coords of a column region --------------
   function rowPainter(ctx, rowName) {
     const ry0 = ROWS[rowName][0], ry1 = ROWS[rowName][1], rh = ry1 - ry0;
@@ -343,21 +378,36 @@
   // shared formal-wear front: white shirt V + studs/tie + open jacket shell.
   // opts may carry: bow, tie(hex), belt, square, gap, lapel(width), lapelType
   // ('notch'|'peak'|'shawl'), pattern, db(double-breasted), vest(hex|true),
-  // ctx (canvas ctx for pattern overlays).
+  // vTop (V2 half-opening at the collar), ctx (canvas ctx for pattern
+  // overlays). Under CLOTH_FORMAL_NECK_V2 it RETURNS the neckwear record the
+  // yoke atlas must draw ({tie,w} / {bow}) — the caller attaches it to its
+  // parts return; null (and the exact old paint) when the flag is off.
   function formalTorso(T, J, jacketHex, lapelCss, opts) {
     const jc = hx(jacketHex), shirt = "#f1f2ec", shirtLow = "#dddfd6";
     const ctx = opts.ctx, lt = opts.lapelType || "notch";
+    const v2 = neckV2(), db = !!opts.db;
     T.fill(jc);
     // 3-PIECE: the open jacket reveals a buttoned WAISTCOAT, not bare shirt.
     if (opts.vest) {
-      const vest = hx(opts.vest === true ? jacketHex : opts.vest);
-      T.rect("front", 0.28, 0, 0.44, 0.9, vest);                   // vest panel
-      // narrow shirt sliver + collar above the vest
-      T.rect("front", 0.42, 0, 0.16, 0.18, shirt);
-      T.rect("front", 0.49, 0.5, 0.02, 0.4, tone(opts.vest === true ? jacketHex : opts.vest, -0.25)); // vest button placket
-      for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.34 + i * 0.13, 0.012, tone(opts.vest === true ? jacketHex : opts.vest, 0.25)); // buttons
-      T.poly("front", [[0.34, 0], [0.5, 0.34], [0.66, 0]], jc);    // vest V opening (jacket-color gap above buttons)
-      T.rect("front", 0.42, 0, 0.16, 0.16, shirt);                 // shirt at the very top
+      const vhex = opts.vest === true ? jacketHex : opts.vest;
+      const vest = hx(vhex);
+      if (v2) {
+        // the reference three-piece: shirt V at the collar, and the TIE runs
+        // DOWN THE WAISTCOAT (drawn later, over the buttons) instead of the
+        // old jacket-colour wedge that severed it at the chest.
+        T.rect("front", 0.28, 0, 0.44, 0.9, vest);                 // vest panel
+        T.poly("front", [[0.35, 0], [0.5, 0.32], [0.65, 0]], shirt); // shirt V above the vest
+        T.rect("front", 0.49, 0.34, 0.02, 0.5, tone(vhex, -0.25)); // vest button placket
+        for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.4 + i * 0.12, 0.012, tone(vhex, 0.25));
+      } else {
+        T.rect("front", 0.28, 0, 0.44, 0.9, vest);                 // vest panel
+        // narrow shirt sliver + collar above the vest
+        T.rect("front", 0.42, 0, 0.16, 0.18, shirt);
+        T.rect("front", 0.49, 0.5, 0.02, 0.4, tone(vhex, -0.25)); // vest button placket
+        for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.34 + i * 0.13, 0.012, tone(vhex, 0.25)); // buttons
+        T.poly("front", [[0.34, 0], [0.5, 0.34], [0.66, 0]], jc);  // vest V opening (jacket-color gap above buttons)
+        T.rect("front", 0.42, 0, 0.16, 0.16, shirt);               // shirt at the very top
+      }
     } else {
       // the shirt panel the open jacket reveals (full front — the gap crops it)
       T.rect("front", 0.3, 0, 0.4, 0.84, shirt);
@@ -365,27 +415,41 @@
     }
     // THE COLLAR LEAVES. A shirt front with no collar is a white strip; two
     // small angled facets at the throat are what make it read as a SHIRT at
-    // three metres. Same two polys PAINT.office already draws — the office
-    // worker had a collar and the man in the tailored suit did not.
+    // three metres. Under V2 the collar a camera can SEE lives on the yoke
+    // slab (these chest rows hide behind it on every body) — the facets stay
+    // for any rig without a yoke slot, and they cost nothing.
     T.poly("front", [[0.395, 0], [0.5, 0.105], [0.452, 0.012]], shirtLow);
     T.poly("front", [[0.605, 0], [0.5, 0.105], [0.548, 0.012]], shirtLow);
-    if (opts.bow) {                                                // black bow tie at the collar line
-      T.rect("front", 0.38, 0.025, 0.24, 0.085, "#0b0c10");
-      T.rect("front", 0.465, 0.035, 0.07, 0.065, "#15161c");      // knot
+    if (opts.bow) {
+      if (!v2) {                                                   // black bow tie at the collar line
+        T.rect("front", 0.38, 0.025, 0.24, 0.085, "#0b0c10");      // (V2 draws the bow on the yoke —
+        T.rect("front", 0.465, 0.035, 0.07, 0.065, "#15161c");     //  this chest bow was behind the slab)
+      }
       T.dot("front", 0.5, 0.21, 0.018, "#15161a");                // stud dots
       T.dot("front", 0.5, 0.33, 0.018, "#15161a");
       T.dot("front", 0.5, 0.45, 0.018, "#15161a");
     } else if (opts.tie && !opts.vest) {
-      // THE KNOT IS THE READ. It is wider than the blade and a shade darker,
-      // with a dimple under it: three flat values, no gradient, still a tie
-      // when the body is 3 m away and 40 px tall.
-      T.poly("front", [[0.43, 0.015], [0.57, 0.015], [0.545, 0.115], [0.455, 0.115]], tone(opts.tie, -0.3));
-      T.rect("front", 0.487, 0.052, 0.026, 0.05, tone(opts.tie, -0.5));   // the dimple
-      T.rect("front", 0.455, 0.11, 0.09, 0.5, hx(opts.tie));              // blade
-      T.rect("front", 0.455, 0.11, 0.09, 0.02, tone(opts.tie, 0.2));      // fold catches the light
-      T.poly("front", [[0.455, 0.61], [0.545, 0.61], [0.5, 0.7]], hx(opts.tie));  // pointed tip
-    } else if (opts.tie && opts.vest) {                            // a glimpse of tie at the vest V
-      T.rect("front", 0.47, 0.04, 0.06, 0.22, hx(opts.tie));
+      if (v2) {
+        // BLADE ONLY — the knot lives on the yoke (the slab IS the collar
+        // zone). Starting at row 0 keeps the blade continuous under the slab
+        // on every body profile, so it emerges below the seam with no gap.
+        T.rect("front", 0.455, 0, 0.09, 0.58, hx(opts.tie));
+        T.poly("front", [[0.455, 0.58], [0.545, 0.58], [0.5, 0.68]], hx(opts.tie)); // pointed tip at the button stance
+      } else {
+        // THE KNOT IS THE READ. It is wider than the blade and a shade darker,
+        // with a dimple under it: three flat values, no gradient, still a tie
+        // when the body is 3 m away and 40 px tall.
+        T.poly("front", [[0.43, 0.015], [0.57, 0.015], [0.545, 0.115], [0.455, 0.115]], tone(opts.tie, -0.3));
+        T.rect("front", 0.487, 0.052, 0.026, 0.05, tone(opts.tie, -0.5));   // the dimple
+        T.rect("front", 0.455, 0.11, 0.09, 0.5, hx(opts.tie));              // blade
+        T.rect("front", 0.455, 0.11, 0.09, 0.02, tone(opts.tie, 0.2));      // fold catches the light
+        T.poly("front", [[0.455, 0.61], [0.545, 0.61], [0.5, 0.7]], hx(opts.tie));  // pointed tip
+      }
+    } else if (opts.tie && opts.vest) {
+      if (v2) {                                                    // the tie lies ON the waistcoat (ref look)
+        T.rect("front", 0.455, 0, 0.09, 0.4, hx(opts.tie));
+        T.poly("front", [[0.455, 0.4], [0.545, 0.4], [0.5, 0.48]], hx(opts.tie));
+      } else T.rect("front", 0.47, 0.04, 0.06, 0.22, hx(opts.tie)); // a glimpse of tie at the vest V
     }
     if (!opts.belt && !opts.vest) T.rect("front", 0.3, 0.78, 0.4, 0.1, "#0d0e12"); // tux cummerbund break
     if (ctx) patternRow(T, ctx, jacketHex, opts.pattern);
@@ -393,8 +457,70 @@
     // ---- the OPEN JACKET shell: alpha-cut V gap + satin lapel wedges ----
     J.fill(jc);
     J.clear("cap", 0, 0, 1, 1);                                    // open top/bottom — see the shirt inside
+    if (v2) {
+      // THE REFERENCE V: wide open at the collar, converging to the fastened
+      // button — the reverse of the old cut, and the whole reason a collar
+      // and a knot can now read through it. Single-breasted keeps a relaxed
+      // slit below the button; a double-breasted front fastens FLAT.
+      const tw = opts.vTop != null ? opts.vTop : 0.115;             // half-opening at the collar
+      const bw = db ? 0.012 : 0.03;                                 // half-opening at the button stance
+      const yb = db ? 0.52 : (opts.bow || opts.vest ? 0.68 : 0.62); // where the front fastens
+      const hw = 0.05;                                              // the relaxed slit below (sb only)
+      if (db) J.clearPoly("front", [[0.5 - tw, 0], [0.5 + tw, 0], [0.5 + bw, yb], [0.5 - bw, yb]]);
+      else J.clearPoly("front", [[0.5 - tw, 0], [0.5 + tw, 0], [0.5 + bw, yb], [0.5 + hw, 1], [0.5 - hw, 1], [0.5 - bw, yb]]);
+      // lapels run ALONGSIDE the V from the shoulder line to the fastening,
+      // with a rolled kink just above the button.
+      const lwT = lt === "notch" ? 0.12 : lt === "peak" ? 0.14 : 0.15;
+      const lwB = 0.05;
+      const xit = 0.5 - tw, xot = xit - lwT, xib = 0.5 - bw, xob = xib - lwB, yk = yb - 0.12;
+      const mirror = (pts) => pts.map((p) => [1 - p[0], p[1]]);
+      if (lt === "shawl") {
+        // one continuous facet, outer edge bowed outward, and NO notch at all
+        // — which is exactly what makes a shawl read as a shawl.
+        const shl = [[xot, 0], [xit, 0], [xib, yb], [xob - 0.012, yk - 0.03], [xot - 0.014, 0.34]];
+        J.poly("front", shl, lapelCss);
+        J.poly("front", mirror(shl), lapelCss);
+      } else {
+        const lap = [[xot, 0], [xit, 0], [xib, yb], [xob, yk]];
+        J.poly("front", lap, lapelCss);
+        J.poly("front", mirror(lap), lapelCss);
+        if (lt === "peak") {
+          // the peak sweeps UP AND OUT past the collar line
+          const pk = [[xit - lwT * 0.25, 0.055], [xot - 0.055, 0.02], [xot - 0.02, 0.16]];
+          J.poly("front", pk, lapelCss);
+          J.poly("front", mirror(pk), lapelCss);
+        } else {
+          // THE NOTCH — the step where collar meets lapel, cut back out in
+          // jacket colour, high on the chest where a real gorge sits.
+          const ny = 0.11, xe = xot + (xob - xot) * (ny / yk);
+          const nc = [[xe - 0.014, ny - 0.065], [xe + lwT * 0.5, ny + 0.005], [xe - 0.014, ny + 0.075]];
+          J.poly("front", nc, jc);
+          J.poly("front", mirror(nc), jc);
+        }
+      }
+      if (opts.satin) {
+        // SATIN FACING — one lighter strip down the fold of the lapel; still
+        // the only distance-read difference between a tuxedo and a black suit.
+        const sc = tone(jacketHex, 0.34);
+        const st = [[xit - lwT * 0.45, 0], [xit, 0], [xib, yb], [xob + lwB * 0.45, yk - 0.02]];
+        J.poly("front", st, sc);
+        J.poly("front", mirror(st), sc);
+      }
+      if (db) {                                                    // six buttons on the flat wrap + its edge seam
+        for (let i = 0; i < 3; i++) {
+          J.dot("front", 0.4, 0.4 + i * 0.16, 0.018, lapelCss);
+          J.dot("front", 0.6, 0.4 + i * 0.16, 0.018, lapelCss);
+        }
+        J.rect("front", 0.615, yb, 0.012, 1 - yb, tone(jacketHex, -0.2));
+      } else if (opts.bow) {                                       // dinner jacket: the one-button stance
+        J.dot("front", 0.5 + hw + 0.028, yb + 0.06, 0.02, tone(jacketHex, -0.45));
+      } else {                                                     // the two-button stance, below the V point
+        J.dot("front", 0.5 + hw + 0.028, yb + 0.05, 0.02, tone(jacketHex, -0.45));
+        J.dot("front", 0.5 + hw + 0.028, yb + 0.17, 0.02, tone(jacketHex, -0.45));
+      }
+    } else {
     const g = opts.gap || 0.13;                                    // half-width of the gap at the hem
-    const db = !!opts.db, overlap = db ? 0.07 : 0.035;            // double-breasted = wider overlap
+    const overlap = db ? 0.07 : 0.035;                             // double-breasted = wider overlap
     J.clearPoly("front", [[0.5 - overlap, 0], [0.5 + overlap, 0], [0.5 + g, 1], [0.5 - g, 1]]);
     // lapels: notch (default angled wedge), peak (an upswept point), shawl
     // (one smooth continuous curve-ish facet, tux). width at the shoulder.
@@ -432,6 +558,7 @@
       J.dot("front", 0.5 + g - 0.025, 0.5, 0.02, tone(jacketHex, -0.45));
       J.dot("front", 0.5 + g - 0.025, 0.66, 0.02, tone(jacketHex, -0.45));
     }
+    }
     // A JACKET HAS POCKETS, and a welt is one dark line — the cheapest possible
     // structure and the one that survives mipping. Breast welt high on the
     // chest, two hip welts at the hem, both clear of the alpha-cut gap.
@@ -449,6 +576,11 @@
     if (opts.square) J.rect("front", 0.16, 0.21, 0.12, 0.04, "#f1f2ec"); // square sits ON the welt
     if (ctx) patternRow(J, ctx, jacketHex, opts.pattern);
     J.shade();
+    // V2: hand the caller the neckwear the YOKE must now draw (the collar zone
+    // is the slab's, not the chest's). Flag off → null → old yoke, old paint.
+    if (!v2) return null;
+    if (opts.bow) return { bow: 0x0b0c10 };
+    return opts.tie != null ? { tie: opts.tie | 0, w: 0.09 } : null;
   }
   function formalLimbs(A, L, jacketHex, legHex, cuff, opts) {
     opts = opts || {};
@@ -480,9 +612,11 @@
     st = st || {};
     const body = st.body != null ? st.body : 0x16171c;            // lifted off true black so shading reads
     const lapel = st.lapelCss || tone(body, 0.16);
-    formalTorso(P.T, P.J, body, lapel, { bow: true, square: true, satin: st.satin !== false, gap: 0.12, lapel: 0.15, lapelType: st.lapel || "shawl", db: !!st.db, ctx: P.ctx, pattern: st.pattern });
+    const nk = formalTorso(P.T, P.J, body, lapel, { bow: true, square: true, satin: st.satin !== false, gap: 0.12, lapel: 0.15, lapelType: st.lapel || "shawl", db: !!st.db, ctx: P.ctx, pattern: st.pattern });
     formalLimbs(P.A, P.L, body, st.legs != null ? st.legs : 0x14151a, true, { ctx: P.ctx, pattern: st.pattern, stripe: true });
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    if (nk) parts.neck = nk;
+    return parts;
   };
   // suit accepts a STYLE record (SUIT_STYLES entry) OR a raw colors record. The
   // style drives pattern/db/vest/lapel/tie; raw {torso,legs} still works.
@@ -492,7 +626,7 @@
     const body = st.body != null ? st.body : (c && c.torso != null ? c.torso : 0x1c2030);
     const legs = st.legs != null ? st.legs : ((c && c.legs != null) ? c.legs : tone2(body, -0.08));
     const lapelCss = st.lapelCss || tone(body, st.pattern && st.pattern !== "solid" ? 0.1 : 0.16);
-    formalTorso(P.T, P.J, body, lapelCss, {
+    const nk = formalTorso(P.T, P.J, body, lapelCss, {
       tie: st.tie != null ? st.tie : 0x7a1f2b, belt: !st.vest && !st.db, gap: st.db ? 0.13 : 0.1,
       lapel: st.lapel === "peak" ? 0.12 : 0.09, lapelType: st.lapel || "notch",
       pattern: st.pattern, db: !!st.db, vest: st.vest, ctx: P.ctx,
@@ -502,7 +636,9 @@
       square: st.square != null ? !!st.square : (!!st.vest || !!st.db || st.lapel === "shawl"),
     });
     formalLimbs(P.A, P.L, body, legs, false, { ctx: P.ctx, pattern: st.pattern });
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    if (nk) parts.neck = nk;
+    return parts;
   };
 
   PAINT.police = function (P, c) {
@@ -511,7 +647,8 @@
     // torso = the SHIRT layer (shows through the duty jacket's open front)
     T.fill(uc);
     T.rect("front", 0.3, 0, 0.4, 0.86, shirt);
-    T.rect("front", 0.47, 0.02, 0.06, 0.6, hx(0x16264a));          // dark tie
+    if (neckV2()) T.rect("front", 0.47, 0, 0.06, 0.62, hx(0x16264a)); // dark tie — blade from row 0, knot on the yoke
+    else T.rect("front", 0.47, 0.02, 0.06, 0.6, hx(0x16264a));     // dark tie
     T.shade();
     // duty jacket: badge, breast pockets w/ flap lines, belt + holster block
     J.fill(uc);
@@ -534,7 +671,9 @@
     L.fill(hx((c && c.legs != null) ? c.legs : 0x1b2a44));
     L.rect("side", 0.35, 0, 0.3, 1, tone(uni, -0.35));             // trouser side stripe
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    if (neckV2()) parts.neck = { tie: 0x16264a, w: 0.06 };
+    return parts;
   };
 
   PAINT.swat = function (P, c) {
@@ -839,12 +978,21 @@
     T.poly("front", [[0.4, 0], [0.5, 0.1], [0.46, 0.02]], tone(shirt, -0.2));  // collar L
     T.poly("front", [[0.6, 0], [0.5, 0.1], [0.54, 0.02]], tone(shirt, -0.2));  // collar R
     T.rect("front", 0.49, 0.06, 0.02, 0.86, tone(shirt, -0.12));             // button placket
-    T.poly("front", [[0.45, 0.02], [0.55, 0.02], [0.53, 0.1], [0.47, 0.1]], tone(tieHex, -0.2)); // tie knot
-    T.rect("front", 0.47, 0.1, 0.06, 0.56, hx(tieHex));                        // tie body
-    T.poly("front", [[0.47, 0.66], [0.53, 0.66], [0.5, 0.74]], hx(tieHex));
+    if (neckV2()) {
+      // knot on the yoke (the visible collar zone); the blade starts at row 0
+      // so it runs continuously under the slab and out below it.
+      T.rect("front", 0.47, 0, 0.06, 0.66, hx(tieHex));
+      T.poly("front", [[0.47, 0.66], [0.53, 0.66], [0.5, 0.74]], hx(tieHex));
+    } else {
+      T.poly("front", [[0.45, 0.02], [0.55, 0.02], [0.53, 0.1], [0.47, 0.1]], tone(tieHex, -0.2)); // tie knot
+      T.rect("front", 0.47, 0.1, 0.06, 0.56, hx(tieHex));                      // tie body
+      T.poly("front", [[0.47, 0.66], [0.53, 0.66], [0.5, 0.74]], hx(tieHex));
+    }
     T.shade();
     A.fill(sc); A.rect("front", 0, 0.88, 1, 0.06, tone(shirt, -0.18)); A.rect("side", 0, 0.88, 1, 0.06, tone(shirt, -0.18)); A.shade();
-    return { torso: 1, arms: 1 };
+    const parts = { torso: 1, arms: 1 };
+    if (neckV2()) parts.neck = { tie: tieHex, w: 0.06 };
+    return parts;
   };
 
   // ---- SHERIFF: county khaki shirt over brown, with a star badge ----------
@@ -1246,9 +1394,13 @@
 
   // WAITER — black vest + white shirt + black bow tie (reuses formal helpers).
   PAINT.waiter = function (P, c) {
-    formalTorso(P.T, P.J, 0x16171c, "rgb(30,31,37)", { bow: true, gap: 0.05, lapel: 0.07, lapelType: "notch", vest: 0x141519, ctx: P.ctx });
+    // vTop keeps the server's front BUTTONED-UP: a slimmer collar opening than
+    // the tailored suits, the V2 sibling of the old narrow gap 0.05.
+    const nk = formalTorso(P.T, P.J, 0x16171c, "rgb(30,31,37)", { bow: true, gap: 0.05, lapel: 0.07, lapelType: "notch", vest: 0x141519, vTop: 0.085, ctx: P.ctx });
     formalLimbs(P.A, P.L, 0x16171c, 0x141519, false, { ctx: P.ctx });
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    if (nk) parts.neck = nk;
+    return parts;
   };
 
   // PILOT — crisp white shirt, black tie, gold EPAULETTES + wings.
@@ -1257,8 +1409,11 @@
     const T = P.T, A = P.A, L = P.L;
     T.fill(white);
     T.rect("front", 0.49, 0, 0.02, 0.9, lo);                       // placket
-    T.poly("front", [[0.42, 0.02], [0.58, 0.02], [0.55, 0.1], [0.45, 0.1]], "#15161c"); // tie knot
-    T.rect("front", 0.47, 0.1, 0.06, 0.5, "#15161c");             // tie
+    if (neckV2()) T.rect("front", 0.47, 0, 0.06, 0.6, "#15161c"); // tie — blade from row 0, knot on the yoke
+    else {
+      T.poly("front", [[0.42, 0.02], [0.58, 0.02], [0.55, 0.1], [0.45, 0.1]], "#15161c"); // tie knot
+      T.rect("front", 0.47, 0.1, 0.06, 0.5, "#15161c");           // tie
+    }
     T.rect("front", 0.06, 0, 0.18, 0.1, lo); T.rect("front", 0.76, 0, 0.18, 0.1, lo); // epaulette base
     for (const x of [0.08, 0.14, 0.2]) T.rect("front", x, 0.02, 0.03, 0.06, "#e8c454"); // gold bars L
     for (const x of [0.78, 0.84, 0.9]) T.rect("front", x, 0.02, 0.03, 0.06, "#e8c454"); // gold bars R
@@ -1266,7 +1421,9 @@
     T.shade();
     A.fill(white); A.rect("front", 0, 0.86, 1, 0.06, lo); A.rect("side", 0, 0.86, 1, 0.06, lo); A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x1a1c24)); L.rect("side", 0.4, 0, 0.2, 1, "#0d0e12"); L.shade(); // black slacks w/ stripe
-    return { torso: 1, arms: 1, legs: 1 };
+    const parts = { torso: 1, arms: 1, legs: 1 };
+    if (neckV2()) parts.neck = { tie: 0x15161c, w: 0.06 };
+    return parts;
   };
 
   // DRESS — an A-line dress: fitted bodice, FLARED hem painted onto the LEG row
@@ -1612,10 +1769,13 @@
   //      That is not an approximation of the garment colour, it IS the garment
   //      colour, for every painter that exists or ever will. Exported as
   //      CBZ.cityPaintedBodyHex(rec) for outfits.js's flat fallback.
-  //   2. THE YOKE WEARS CLOTH. A second tiny canvas (64x16, four columns, one
+  //   2. THE YOKE WEARS CLOTH. A second tiny canvas (128x32, four columns, one
   //      per box face) gives the slab a collar stand, a neckline in the shirt's
   //      own sampled colour, lapel wedges when the look has an open jacket, and
   //      a darker top face so the shoulder line stops reading as a lit box.
+  //      Under CLOTH_FORMAL_NECK_V2 it also carries the COLLAR LEAVES and the
+  //      TIE KNOT / BOW the painter declared (see THE FORMAL NECK, V2 above) —
+  //      the slab is the collar zone, and the chest rows it covers can't.
   //      One texture per outfit KEY, cached beside the atlas — never per wearer.
   //
   //  The sample points are chosen to sit where shade() is transparent (its
@@ -1651,14 +1811,17 @@
     }
     return best;
   }
-  // the yoke's own micro-atlas: four columns, one per box face.
-  const YW = 64, YH = 16;
-  const YCOLS = { front: [0, 24], back: [24, 40], side: [40, 52], cap: [52, 64] };
+  // the yoke's own micro-atlas: four columns, one per box face. 128x32 (it was
+  // 64x16): the slab now carries the collar leaves and the KNOT — the whole
+  // formal-neck read — and at 24px a knot was 3px wide. Still a 16 KB texture,
+  // no mips, sampled at level 0 forever.
+  const YW = 128, YH = 32;
+  const YCOLS = { front: [0, 48], back: [48, 80], side: [80, 104], cap: [104, 128] };
   const YFACE = ["side", "side", "cap", "cap", "front", "back"];   // +x -x +y -y +z -z
   // the ONE look that must not get lapels: a plate carrier has none, and a
   // shirt-notch on a SWAT yoke would read as a tie under body armour.
   const YOKE_NO_LAPEL = { swat: 1 };
-  function yokeCanvas(bodyHex, neckHex, lapels) {
+  function yokeCanvas(bodyHex, neckHex, lapels, neck) {
     if (typeof document === "undefined" || !document.createElement) return null;
     const cv = document.createElement("canvas");
     cv.width = YW; cv.height = YH;
@@ -1679,6 +1842,7 @@
       }
       ctx.closePath(); ctx.fill();
     }
+    const hasNeck = !!(neck && (neck.tie != null || neck.bow != null));
     const bc = hx(bodyHex);
     ctx.fillStyle = bc; ctx.fillRect(0, 0, YW, YH);
     // TOP FACE. The whole complaint about this box is that it is flat-lit and
@@ -1693,13 +1857,54 @@
     R("back", 0, 0.9, 1, 0.1, tone(bodyHex, -0.18));
     R("front", 0, 0, 1, 0.3, tone(bodyHex, 0.1));                  // collar stand catches the light
     R("front", 0, 0.86, 1, 0.14, tone(bodyHex, -0.2));             // chest seam shadow
-    Q("front", [[0.34, 0], [0.66, 0], [0.6, 1], [0.4, 1]], hx(neckHex));   // the neckline / shirt
+    // the neckline / shirt band — wider at its base under neckwear, so the
+    // knot never meets a body-colour corner at the slab's bottom edge
+    if (hasNeck) Q("front", [[0.33, 0], [0.67, 0], [0.615, 1], [0.385, 1]], hx(neckHex));
+    else Q("front", [[0.34, 0], [0.66, 0], [0.6, 1], [0.4, 1]], hx(neckHex));
+    // ---- NECKWEAR ON THE SLAB (CLOTH_FORMAL_NECK_V2) ----------------------
+    // The slab IS the collar zone: it overlaps the chest's top ~0.145 and
+    // sits proud of it, so nothing painted up there can ever be seen. The
+    // collar leaves and the KNOT/BOW are drawn HERE, the knot running to the
+    // slab's bottom edge where the chest's blade continues it.
+    if (hasNeck && neck.tie != null) {
+      const w = neck.w != null ? neck.w : 0.09;
+      const kb = w / 2;                              // knot base = the blade's half-width
+      const kt = Math.min(0.08, w * 0.78);           // knot top, ~1.55x the blade
+      const leaf = tone(neckHex, -0.13);
+      // collar leaves: two facets folding down-and-out around the knot — the
+      // outer tips run under the jacket lapels, exactly where a collar goes.
+      const lf = [[0.355, 0.05], [0.5 - kt + 0.015, 0.1], [0.5 - kt - 0.005, 0.44], [0.415, 0.68]];
+      Q("front", lf, leaf);
+      Q("front", lf.map((p) => [1 - p[0], p[1]]), leaf);
+      // THE KNOT IS THE READ (the chest painter's own grammar, moved to the
+      // box a camera can see): wider than the blade, a shade darker, dimpled.
+      Q("front", [[0.5 - kt, 0.14], [0.5 + kt, 0.14], [0.5 + kb, 1], [0.5 - kb, 1]], tone(neck.tie, -0.28));
+      R("front", 0.5 - kt + 0.01, 0.14, 2 * (kt - 0.01), 0.09, tone(neck.tie, -0.08)); // top fold catches the light
+      R("front", 0.487, 0.78, 0.026, 0.2, tone(neck.tie, -0.5));   // the dimple
+    } else if (hasNeck) {
+      // BOW at the collar band: two wings + a lighter centre knot.
+      const bw2 = hx(neck.bow);
+      const wing = [[0.375, 0.26], [0.478, 0.42], [0.478, 0.7], [0.375, 0.88]];
+      Q("front", wing, bw2);
+      Q("front", wing.map((p) => [1 - p[0], p[1]]), bw2);
+      R("front", 0.462, 0.36, 0.076, 0.38, tone(neck.bow, 0.22));
+    }
     if (lapels) {
       const lc = tone(bodyHex, 0.16);
-      Q("front", [[0.24, 0], [0.4, 0], [0.44, 1], [0.2, 1]], lc);
-      Q("front", [[0.6, 0], [0.76, 0], [0.8, 1], [0.56, 1]], lc);
-      Q("front", [[0.27, 0], [0.36, 0], [0.315, 0.46]], bc);       // the notch step, cut back out
-      Q("front", [[0.64, 0], [0.73, 0], [0.685, 0.46]], bc);
+      if (hasNeck) {
+        // pulled OUTBOARD so the collar + knot own the centre; through the V2
+        // shell's wide collar opening these read as the jacket collar rolling
+        // over the shirt collar's tips.
+        Q("front", [[0.13, 0], [0.32, 0], [0.37, 1], [0.1, 1]], lc);
+        Q("front", [[0.87, 0], [0.68, 0], [0.63, 1], [0.9, 1]], lc);
+        Q("front", [[0.17, 0], [0.27, 0], [0.225, 0.42]], bc);     // the notch step, cut back out
+        Q("front", [[0.83, 0], [0.73, 0], [0.775, 0.42]], bc);
+      } else {
+        Q("front", [[0.24, 0], [0.4, 0], [0.44, 1], [0.2, 1]], lc);
+        Q("front", [[0.6, 0], [0.76, 0], [0.8, 1], [0.56, 1]], lc);
+        Q("front", [[0.27, 0], [0.36, 0], [0.315, 0.46]], bc);     // the notch step, cut back out
+        Q("front", [[0.64, 0], [0.73, 0], [0.685, 0.46]], bc);
+      }
     }
     return cv;
   }
@@ -1956,19 +2161,25 @@
     if (bodyHex == null) bodyHex = (c.torso != null ? c.torso | 0 : (key.split("|")[1] | 0) || 0x444444);
     // …and the THROAT: whatever the painter put at the top-centre of the torso
     // column is the collar/neckline this garment shows — a white dress shirt, a
-    // hood gathered at the neck, a scrub V, a crew band. Sampled above every
-    // tie knot and bow in the file (they all start at y 0.02 or lower down).
-    let neckHex = modalHex(ctx, "torso", "front", 0.42, 0.58, 0, 0.018);
+    // hood gathered at the neck, a scrub V, a crew band. When the painter
+    // DECLARED neckwear (V2), the blade occupies the top-centre from row 0, so
+    // the shirt sample steps LEFT of the placket/blade; painters with no
+    // declared neckwear keep the exact centre sample (the chef's kerchief IS
+    // the neckline and must stay what the yoke wears).
+    const neck = neckV2() && parts.neck ? parts.neck : null;
+    let neckHex = neck
+      ? modalHex(ctx, "torso", "front", 0.3, 0.42, 0, 0.018)
+      : modalHex(ctx, "torso", "front", 0.42, 0.58, 0, 0.018);
     if (neckHex == null) neckHex = bodyHex;
     set.bodyHex = bodyHex; set.neckHex = neckHex;
     if (yokePaint()) {
-      const cv2 = yokeCanvas(bodyHex, neckHex, !!parts.jacket && !YOKE_NO_LAPEL[kind]);
+      const cv2 = yokeCanvas(bodyHex, neckHex, !!parts.jacket && !YOKE_NO_LAPEL[kind], neck);
       if (cv2) {
         const yt = new THREE.CanvasTexture(cv2);
         yt.magFilter = THREE.LinearFilter;
         // NO MIPS. The yoke is a 0.18-tall slab, so it is always deep in the mip
-        // chain — and at 64x16 with four adjacent face columns, mipping blends
-        // the front's neckline into the side and the back. A 4 KB texture costs
+        // chain — and at 128x32 with four adjacent face columns, mipping blends
+        // the front's neckline into the side and the back. A 16 KB texture costs
         // nothing to sample at level 0 forever.
         yt.generateMipmaps = false;
         yt.minFilter = THREE.LinearFilter;
