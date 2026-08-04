@@ -143,6 +143,21 @@ async function boot(seed, quiet) {
       window.__probeStopRaf = function () { left = 0; window.__probeRafFrozen = true; };
     })();`,
   });
+  // CBZ_PRELOAD runs a script in EVERY new document, before one line of game
+  // code. CBZ_URL_EXTRA can only set CONFIG; this reaches the layer underneath
+  // it — the environment the game feature-detects. The case it was built for:
+  // systems/touch.js builds the whole iPad control layer only when
+  // `(pointer: coarse)` matches, which no CONFIG flag and no headless Chrome
+  // switch can make true, so every touch-layout question was previously
+  // unaskable headless and any DOM assertion about a touch control was a false
+  // negative dressed as a pass. CBZ_PRELOAD=tools/preload/ipad.js is that fix.
+  // Value is a PATH when it resolves to a readable file, else raw JS.
+  if (process.env.CBZ_PRELOAD) {
+    const v = process.env.CBZ_PRELOAD;
+    const p = path.isAbsolute(v) ? v : path.join(ROOT, v);
+    const source = existsSync(p) ? readFileSync(p, "utf8") : v;
+    await c.send("Page.addScriptToEvaluateOnNewDocument", { source });
+  }
   await c.send("Page.navigate", { url: target });
   log("booted, starting the run…");
   for (let i = 0, r = false; i < 500 && !r; i++) { try { r = !!(await c.evl("!!(window.CBZ&&CBZ.game&&CBZ.stepSim&&document.getElementById('playBtn'))")); } catch (_) {} if (!r) await sleep(150); }

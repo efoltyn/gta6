@@ -272,7 +272,9 @@
     // has to drag back across the whole screen, which is why every console
     // third-person game binds this to a stick click. Camera-owned verb, so it
     // calls the camera agent's hook and this file writes no pitch of its own.
-    tapBtn(document.getElementById("trecen"), () => {
+    // Wired only when it was BUILT (TOUCH_RECENTER, default off) — the two
+    // gates must read the same flag or one of them is wiring a ghost.
+    if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) tapBtn(document.getElementById("trecen"), () => {
       if (CBZ.camRecenter) CBZ.camRecenter();
       glide.vx = glide.vy = 0;
       if (CBZ.sfx) CBZ.sfx("key", { volume: 0.22, pitch: 1.1 });
@@ -344,6 +346,13 @@
   // stateless verb (swap / reload / recenter) there is no other confirmation.
   // The vehicle layer's tapBtn has always flashed; this is the cluster catching up.
   function tapBtn(b, fn) {
+    // A MISSING BUTTON MUST NOT COST THE ONES AFTER IT. Every control in
+    // enable() is wired in one straight line, so a null element here threw
+    // and abandoned the REST of the wiring — measured 2026-08-04, when
+    // TOUCH_RECENTER's button stopped being built and #trecen's tapBtn took
+    // aim, scope and fire down with it. Any flag that can remove a control is
+    // a flag that can silently unbind the whole cluster below it.
+    if (!b) return;
     const flash = () => { b.classList.add("on"); setTimeout(() => b.classList.remove("on"), 110); };
     b.addEventListener("touchstart", (e) => { e.preventDefault(); flash(); fn(); }, { passive: false });
     b.addEventListener("mousedown", (e) => { e.preventDefault(); flash(); fn(); });
