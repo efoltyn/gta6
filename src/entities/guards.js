@@ -441,7 +441,13 @@
           snitch.playerGrudge = Math.min(14, (snitch.playerGrudge || 0) + 1);
           if (CBZ.npcEmote) CBZ.npcEmote(snitch, "!");
           if (CBZ.addHeat) CBZ.addHeat(-5);
-          if (CBZ.game) CBZ.game.snitchIntelT = Math.max(CBZ.game.snitchIntelT || 0, 30);
+          // THIS IS WHAT THE CIGS ACTUALLY BUY NOW (JAIL_SNITCH_KNOWLEDGE).
+          // Before, the purchase set a 30-second countdown that was read by one
+          // HUD chip and nothing else, while the snitch verbs were already
+          // offered on every reporter for free — you were paying a bent screw
+          // for information the HUD gave away. `learnSnitch` is the fact: this
+          // name, permanently, and the verbs that go with it.
+          if (CBZ.learnSnitch) CBZ.learnSnitch(snitch, "paid");
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
@@ -554,7 +560,6 @@
       return { ok: false, msg: `${nameOf(g)} reaches for the radio.` };
     }
     if (action === "refuse") {
-      if (a.kind === "snitchIntel" && CBZ.game) CBZ.game.snitchIntelT = 0;
       expireGuardApproach(g, "refuse");
       return { ok: false, msg: `${nameOf(g)} smiles like that was the wrong answer.` };
     }

@@ -7,6 +7,20 @@
 One conversation-long push turned several one-offs into shared grammar.
 Before building anything adjacent, wire into the existing system:
 
+- **The prison's ONE mouth** — `CBZ.prisonSay(actor, line, {rank, secs})`
+  (`src/systems/interact.js`). Anything the PRISON simulation wants the
+  player to learn — a debt, a threat, a rat naming you to a screw — is a
+  thing a PERSON says, and this is the only surface that says it.
+  `city/social.js`'s `CBZ.citySay` **cannot be used in escape mode**: it
+  reads `ped.pos.x` and prison actors keep position on `.group.position`,
+  so it throws (this is why the prison was silent for a whole wave —
+  47 dropped narrations, one `say()`, and that one broken). Rules it
+  enforces so a caller does not have to: RANGE (16 u, 24 u mid-approach),
+  RANK (`answer` > `act` > `ambient`; a louder live line is never
+  stomped), SILENCE (dead/KO'd/cuffed say nothing). In `entities/ai.js`
+  the one-line adoption is `nar(text, secs, actor, "what they say")`, and
+  `CBZ.aiNarrationAudit().mute` — events resolved with nobody saying or
+  doing anything — is the ratchet that may only go DOWN.
 - **Death/kill bus** — `src/city/killfeed.js`. EVERY death funnels through it
   (it wraps `cityKillPed`/`cityCrowdKill`/player death; lazy-retry hooks).
   New death sources call `CBZ.cityLogDeath(name, cause, {by})` or

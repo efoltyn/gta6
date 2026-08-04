@@ -109,7 +109,10 @@
     g.socialProfile = { paid: 0, threatened: 0, refused: 0, helped: 0, listened: 0, bargained: 0, exploited: 0, last: "" };
     g.witnessReportT = 0; g.snitchReports = 0; g.lastKnown = null; g.caseSearchCD = 0;
     g.caseFile = { heat: 0, reports: [], lastSource: "", lastType: "", corrupt: 0 };
-    g.snitchIntelT = 0;
+    // g.snitchIntelT is GONE (2026-08-04). It was a 30-second countdown whose
+    // only reader was a #gangHud chip; the fact it stood in for — WHICH inmate
+    // you have made as a rat — lives on the actor as `snitchKnown` now
+    // (entities/ai.js, JAIL_SNITCH_KNOWLEDGE) and is reset with the roster.
     g.inventory = {}; g.koLog = {}; g.stealsDone = 0;
     g.kos = 0; g.deaths = 0; g.gossipNoticeT = 0; g.gangNoticeT = 0;
     if (CBZ.econ.reseed) CBZ.econ.reseed();   // fresh prison every run (no identical carnage)

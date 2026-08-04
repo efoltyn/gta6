@@ -2300,3 +2300,68 @@ The bottom-left cluster moved out from under it: the compass above the ring, the
 gang chips up to the free wall under the minimap. Also fixed while looking:
 the fifth interaction verb was spilling off the LEFT edge (row-reverse overflow
 on a row that refuses to shrink) and `Romance` was breaking to `Romanc / e`.
+
+### …and the second pass: the logic behind those panels, connected and off the HUD
+
+Owner, on the same day: *"Don't clear up the logic behind the HUD space wasters.
+Improve that logic, connect it all, and make it real logic, but remove it from
+the HUD."* Right on both counts, and the audit that came out of it is the
+finding of the wave.
+
+**THE PRISON WAS MUTE, AND HAD BEEN SINCE THE LAST SHOW-DON'T-TELL PASS.** That
+wave deleted 47 narration popups out of `entities/ai.js` — correctly — and
+documented `CBZ.citySay` as the sanctioned replacement: "a thing a person SAYS
+goes over that person's head." Counted this time: **47 narrations dropped, ONE
+`say()` call, and that one could not work either.** `city/social.js`'s say()
+reads `ped.pos.x` for its range gate; a prison actor keeps its position on
+`.group.position` and its name on `.data.name`, so every prison citySay threw a
+TypeError straight into the caller's own try/catch and returned false. Proved,
+not guessed (`CBZ.citySay(CBZ.npcs[0], …)` → *Cannot read properties of
+undefined*). So the debt, the dues, the cover, the snitch runs and the crew
+reactions all still RAN and the only evidence any of it existed was the corner
+chip strip. Delete the strip first and you get a simulation with no output at
+all — which is why "remove it from the HUD" had to come with the rest.
+
+**THE BLOCK — `CBZ.prisonSay(actor, line, opts)`** (systems/interact.js). Not a
+new UI: this file already owned a working speech surface (`sayResult` →
+`.pi-subtitle`, the shared world-subtitle grammar, enrolled in hud.css's
+subtitle ladder) — it is what answers every interaction verb today. Published
+with the three rules ambient speech needs and verb answers never did: RANGE
+(16 u, 24 u mid-approach — a line is overheard, not broadcast), RANK (a verb
+answer cannot be stomped by block chatter), SILENCE (the dead, the KO'd and the
+cuffed do not talk). `nar()` gained two arguments — *who is doing this* and
+*what they say* — so a site migrates in one line and `CBZ.aiNarrationAudit()`
+now reports `{spoken, mute}`, where **mute may only go DOWN**. 26 sites carry a
+mouth in this change: the collector says `"That's 14 now. It goes up every time
+I walk away."`, the man you stiffed says `"I covered for you. That's going on
+your tab."`, the crew that backed you says `"Go on, do the work. Nobody's
+touching you."`
+
+**THE ONE REAL STAT FICTION, KILLED.** `snitchIntelT`. A bent guard sold you the
+name of your snitch for cigs and the entire effect was a 30-second countdown
+read by exactly one HUD chip — while `systems/interact.js` already offered
+Confront / Pay silence / Threaten on ANY reporter, so you were paying a corrupt
+screw for information the HUD gave away free. Both halves fixed each other:
+knowing who ratted is now a per-actor FACT (`snitchKnown`, `JAIL_SNITCH_KNOWLEDGE`)
+with three honest routes — **SEEN** (you were there when they walked up to a
+screw; the rat now says *"He was over by the yard gate. I watched him."* and
+overhearing it IS the knowledge), **PAID** (the guard's name-drop, finally worth
+cigs), **TOLD** (your own crew hands you the name). The global is deleted
+outright; `CBZ.snitchKnowledgeAudit()` reports `{reported, known, gated}`.
+
+**WHERE YOU STAND** — a fourth page on the Ranks board (`systems/dashboard.js`).
+A real system the player can never inspect is only half a system, so the ledger
+gets a page you OPEN rather than a strip you cannot turn off — and it is the
+only place the four families are shown together, which is the "connect it all"
+half: your standing with each crew beside what you owe them, what they are still
+covering, who is walking at you about it, every rat you have actually made, and
+the live job. Nothing on it computes; every cell reads a field some system
+already owned.
+
+**AND THE STRIP IS GONE** (`JAIL_GANG_HUD`, default false — the whole build is
+skipped, not hidden, which also retires an innerHTML rebuild plus three full
+`CBZ.npcs` scans every frame). Not one number was deleted: `gangStanding` still
+drives 61 branches in ai.js, debt still sends collectors, cover still decides
+who steps in front of you.
+
+Gate: `tools/prison-polish-check.mjs` 33/33, and MATHGATE ok.

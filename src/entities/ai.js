@@ -43,25 +43,64 @@
      Ratchet: CBZ.jailShowAudit().narrations (systems/capture.js) counts what is
      still routed here, and may only ever go DOWN.
      ============================================================ */
+  /* ---- 2026-08-04: A NARRATION NOW NEEDS A MOUTH -------------------------
+     OWNER: "Don't clear up the logic behind the HUD space wasters. Improve
+     that logic, connect it all, and make it real logic, but remove it from the
+     HUD."
+
+     The block above was only half done and the count proves it: 47 nar() sites,
+     ONE say() — and that one could not work either, because city/social.js's
+     citySay reads `ped.pos.x` and a prison actor keeps its position on
+     `.group.position`. Every prison citySay threw straight into the try/catch
+     below and returned false. So this file deleted its caption track and put
+     nothing in its place: the debt, the dues, the cover, the snitch runs and
+     the crew reactions all still RAN, and the only evidence any of it existed
+     was the #gangHud chip strip the owner is now (rightly) deleting.
+
+     `nar` therefore takes two more arguments and neither is optional in
+     spirit: WHO is doing this, and what that person SAYS. Given both, the line
+     goes over their head through systems/interact.js's CBZ.prisonSay — the
+     prison's one real, working, ranged, ranked speech surface. Given neither,
+     the event is silent exactly as it is today, and CBZ.aiNarrationAudit()
+     counts it as MUTE so the number is honest and can only be paid down.
+
+       nar(text, secs)                    -> silent (legacy; counted mute)
+       nar(text, secs, actor, "line")     -> that actor says "line"
+
+     `text` survives untouched as the JAIL_SHOW_DONT_TELL=false popup, so the
+     flag is still a byte-identical one-line revert to the old caption track.
+     ------------------------------------------------------------------------ */
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.JAIL_SHOW_DONT_TELL == null) CBZ.CONFIG.JAIL_SHOW_DONT_TELL = true;
-  let narDropped = 0;
-  function nar(text, secs) {
+  let narDropped = 0, narSpoken = 0, narMute = 0;
+  function nar(text, secs, actor, spoken) {
     if (CBZ.CONFIG.JAIL_SHOW_DONT_TELL === false) {
       if (CBZ.flashHint) CBZ.flashHint(text, secs);
       return false;
     }
     narDropped++;
+    if (actor && spoken && say(actor, spoken, null, secs)) { narSpoken++; return true; }
+    narMute++;
     return true;
   }
-  // a line somebody SAYS belongs over their head, not on the HUD. This is the
-  // sanctioned replacement for a narration that carried real information.
+  // a line somebody SAYS belongs over their head, not on the HUD. Routed to the
+  // prison's own surface first (interact.js) and only then to the city's, which
+  // is the one that cannot read a prison actor's position.
   function say(actor, text, color, secs) {
-    if (!actor || !CBZ.citySay) return false;
+    if (!actor || !text) return false;
+    if (CBZ.prisonSay) return CBZ.prisonSay(actor, text, { secs: Math.max(1.6, secs || 2.0) });
+    if (!CBZ.citySay) return false;
     try { CBZ.citySay(actor, text, color || "#cfd6e6", secs || 1.8); return true; } catch (e) { return false; }
   }
+  /* THE RATCHET (BLOCK LAW rule 5). `mute` is the count of world events this
+     file resolved with NOBODY saying or showing anything — the honest size of
+     the hole the show-don't-tell wave left. It may only ever go DOWN. `spoken`
+     may only go UP. Pinned in tools/math-gate.mjs is the wrong home for a
+     counter that only moves during play, so tools/prison-polish-check.mjs
+     drives real approaches and asserts on it instead. */
   CBZ.aiNarrationAudit = function () {
-    return { sink: true, dropped: narDropped, on: CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false };
+    return { sink: true, dropped: narDropped, spoken: narSpoken, mute: narMute,
+      on: CBZ.CONFIG.JAIL_SHOW_DONT_TELL !== false };
   };
   // GANG_NAMES is indexed by a gang id that is -1 for every unaffiliated body,
   // and eighteen call sites read it straight — which is where the photographed
@@ -648,6 +687,10 @@
     job.t = job.t || 45;
     job.progress = 0;
     job.source = actor && actor.data ? actor.data.name.replace(/^the |^a |^an /, "") : gangName(job.gang);
+    // WHO GAVE YOU THE JOB IS WHO PAYS YOU FOR IT. Keeping the actor (not just
+    // their name) is what lets completeGangJob/failGangJob put the payout and
+    // the blame in a real mouth instead of a HUD line.
+    job.actor = actor || null;
     CBZ.game.gangJob = job;
     if (actor) {
       actor.playerTrust = Math.min(14, (actor.playerTrust || 0) + 1);
@@ -655,6 +698,24 @@
     }
     CBZ.setObjective && CBZ.setObjective(jobObjective(job));
     return { ok: true, msg: `${gangName(job.gang)} job accepted: ${job.label}.` };
+  }
+
+  // THE MOUTH A JOB SPEAKS THROUGH. The man who gave it to you if he is alive
+  // and in earshot; otherwise the nearest member of the same crew, because a
+  // crew paying you out is the crew's business and any of them can say it. Null
+  // when nobody from that crew is anywhere near — and then the payout is silent
+  // rather than shouted from across the yard, which is the whole point.
+  function jobVoice(job) {
+    if (!job) return null;
+    const a = job.actor;
+    if (a && alive(a) && playerDist(a) < 16) return a;
+    let best = null, bd = 16;
+    for (const n of CBZ.npcs) {
+      if (!alive(n) || n.gang !== job.gang) continue;
+      const d = playerDist(n);
+      if (d < bd) { bd = d; best = n; }
+    }
+    return best;
   }
 
   function completeGangJob(job) {
@@ -665,7 +726,10 @@
     addGangProtection(job.gang, 22 + Math.max(0, job.standing || 0));
     if (job.rival != null) addGangStanding(job.rival, -3);
     CBZ.sfx && CBZ.sfx("coin");
-    nar && nar(`${gangName(job.gang)} pay ${job.reward || 4} cigs. Respect ${gangStanding(job.gang)}.`, 2.4);
+    // THE PAYER IS A PERSON. `job.actor` is whoever handed the job over
+    // (startGangJob records it) — they pay you, out loud, in front of you.
+    nar && nar(`${gangName(job.gang)} pay ${job.reward || 4} cigs. Respect ${gangStanding(job.gang)}.`, 2.4,
+      jobVoice(job), `That's ${job.reward || 4}. You're solid with us now.`);
     CBZ.setObjective && CBZ.setObjective("Job done. Keycard checkpoints or tunnels can still get you out.");
     CBZ.game.gangJob = null;
   }
@@ -675,7 +739,8 @@
     addGangStanding(job.gang, -7);
     addGangDebt(job.gang, 3);
     if (reason === "heat" && job.gang >= 0) provokeGang({ gang: job.gang, huntPlayer: 0 }, 4);
-    nar && nar(`${gangName(job.gang)} job failed. Debt ${gangDebt(job.gang)}.`, 2.2);
+    nar && nar(`${gangName(job.gang)} job failed. Debt ${gangDebt(job.gang)}.`, 2.2,
+      jobVoice(job), `You blew it. That's ${gangDebt(job.gang)} you owe us.`);
     CBZ.setObjective && CBZ.setObjective("Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
     CBZ.game.gangJob = null;
   }
@@ -697,13 +762,15 @@
           if (rival) {
             job.rivalWarned = true;
             provokeGang(rival, 4.5);
-            nar && nar(`${gangName(job.rival)} notice you working their turf.`, 1.5);
+            nar && nar(`${gangName(job.rival)} notice you working their turf.`, 1.5, rival,
+              "You're a long way from your side of the yard.");
           }
         }
-        if (job.ping == null || job.ping <= 0) {
-          job.ping = 3.5;
-          nar && nar(`${job.label}: ${Math.ceil(Math.max(0, job.need - job.progress))}s left.`, 1.1);
-        }
+        // NO COUNTDOWN CAPTION. A repeating "18s left" line is the purest
+        // form of the thing being deleted here — it is a timer read aloud, it
+        // has no mouth, and systems/markers.js already draws the job marker.
+        // The clock lives on the Ranks board's STANDING page now.
+        job.ping = 0;
       }
       job.ping = Math.max(0, (job.ping || 0) - dt);
       if (job.progress >= job.need) completeGangJob(job);
@@ -753,7 +820,8 @@
       emote(ally, "+");
       if (!job.allyHinted && playerDist(ally) < 14 && nar) {
         job.allyHinted = true;
-        nar(`${gangName(job.gang)} send backup while you work.`, 1.7);
+        nar(`${gangName(job.gang)} send backup while you work.`, 1.7, ally,
+          "Go on, do the work. Nobody's touching you.");
       }
     }
 
@@ -862,7 +930,8 @@
       const lastKnown = n.memory && n.memory.lastKnown;
       clearApproach(n);
       n.memory = null;
-      if (near && nar) nar(`${who} got tired of waiting and runs to snitch.`, 1.8);
+      if (near && nar) nar(`${who} got tired of waiting and runs to snitch.`, 1.8, n,
+        "You had your chance. I'll find someone who listens.");
       sendNpcToSnitch(n, heat, { copCrime, lastKnown });
       return;
     }
@@ -872,7 +941,8 @@
       clearApproach(n);
       addGangDebt(gang, Math.max(2, a.cost || 3));
       addGangStanding(gang, -8);
-      if (near && nar) nar(`${gangName(gang)} mark you as unpaid.`, 1.8);
+      if (near && nar) nar(`${gangName(gang)} mark you as unpaid.`, 1.8, n,
+        `Then you owe. ${gangName(gang)} don't forget.`);
       if (gang >= 0 && gangStanding(gang) < -12) provokeGang(n, 7);
       return;
     }
@@ -882,7 +952,8 @@
       clearApproach(n);
       const debt = addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.5)));
       addGangStanding(gang, -6);
-      if (near && nar) nar(`${gangName(gang)} add interest. Debt ${debt}.`, 1.8);
+      if (near && nar) nar(`${gangName(gang)} add interest. Debt ${debt}.`, 1.8, n,
+        `That's ${debt} now. It goes up every time I walk away.`);
       if (gang >= 0 && debt > 10) provokeGang(n, 6);
       return;
     }
@@ -892,7 +963,8 @@
       clearApproach(n);
       addGangDebt(gang, 2);
       addGangStanding(gang, reason === "walkedAway" ? -3 : -5);
-      if (near && nar) nar(`${gangName(gang)} take the disrespect personally.`, 1.8);
+      if (near && nar) nar(`${gangName(gang)} take the disrespect personally.`, 1.8, n,
+        "Walk off again and it stops being talk.");
       if (gang >= 0 && gangStanding(gang) < -10) provokeGang(n, 5);
       return;
     }
@@ -902,7 +974,8 @@
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       addGangStanding(gang, -3);
-      if (near && nar) nar(`${gangName(gang)} see you ducking work.`, 1.7);
+      if (near && nar) nar(`${gangName(gang)} see you ducking work.`, 1.7, n,
+        "Nobody eats free in here. Remember that.");
       return;
     }
 
@@ -912,7 +985,8 @@
       clearApproach(n);
       addGangStanding(gang, -3);
       provokeGang(n, 4.5);
-      if (near && nar) nar(`${gangName(gang)} move to spoil the job.`, 1.7);
+      if (near && nar) nar(`${gangName(gang)} move to spoil the job.`, 1.7, n,
+        "You're not finishing that. Not today.");
       return;
     }
 
@@ -920,7 +994,8 @@
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       if (n.gang >= 0) addGangStanding(n.gang, -1);
-      if (near && nar) nar(`${who} stops covering for you.`, 1.5);
+      if (near && nar) nar(`${who} stops covering for you.`, 1.5, n,
+        "I'm done lying for you. Tell your own story.");
       return;
     }
 
@@ -932,7 +1007,8 @@
       if (n.gang >= 0) addGangStanding(n.gang, -1);
       if (CBZ.addCasePressure) CBZ.addCasePressure(5 + (a.cost || 2), { type: "ignored cover debt", heardOnly: true, source: who }, n);
       addBuzz("heat", 4, "ignored-cover-debt");
-      if (near && nar) nar(`${who} decides that cover should cost you later.`, 1.5);
+      if (near && nar) nar(`${who} decides that cover should cost you later.`, 1.5, n,
+        "I covered for you. That's going on your tab.");
       return;
     }
 
@@ -940,7 +1016,8 @@
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       if (n.gang >= 0) addGangStanding(n.gang, -1);
-      if (near && nar) nar(`${who} stops waiting to back you up.`, 1.5);
+      if (near && nar) nar(`${who} stops waiting to back you up.`, 1.5, n,
+        "Stood here like a fool waiting on you. Find your own backup.");
       return;
     }
 
@@ -950,7 +1027,8 @@
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       const debt = addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.65)));
       addGangStanding(gang, -4);
-      if (near && nar) nar(`${gangName(gang)} mark dues unpaid. Debt ${debt}.`, 1.7);
+      if (near && nar) nar(`${gangName(gang)} mark dues unpaid. Debt ${debt}.`, 1.7, n,
+        `Dues are dues. You're down ${debt} with us.`);
       if (gang >= 0 && debt > 12 && gangStanding(gang) < -8) provokeGang(n, 5);
       return;
     }
@@ -966,14 +1044,16 @@
         if (n.gang >= 0) addGangStanding(n.gang, -3);
         if (n.role === "thief") n.huntPlayer = Math.max(n.huntPlayer || 0, 3.5);
         else if (n.gang >= 0 && (a.rivalGang || gangStanding(n.gang) < -10)) provokeGang(n, 4.5);
-      if (near && nar) nar(a.racketGuard ? `${who} leaves the racket tab open.` : `${who} stops asking and starts watching your pockets.`, 1.6);
+      if (near && nar) nar(a.racketGuard ? `${who} leaves the racket tab open.` : `${who} stops asking and starts watching your pockets.`, 1.6, n,
+        a.racketGuard ? "The boss hears you stiffed his runner." : "Fine. I'll just take it off you later.");
       return;
     }
 
     if (a.kind === "infoSell") {
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      if (near && nar) nar(`${who} sells the guard rumor to somebody else.`, 1.6);
+      if (near && nar) nar(`${who} sells the guard rumor to somebody else.`, 1.6, n,
+        "Someone else will pay for what I know.");
       return;
     }
 
@@ -985,7 +1065,8 @@
       n.reportedPlayerDoubt = Math.max(0, 1 - n.reportedPlayerCred);
       if (CBZ.addCasePressure) CBZ.addCasePressure(amount * 0.18, { type: "ignored recant", lastKnown: n.reportedPlayerLastKnown, credibility: n.reportedPlayerCred }, n);
       addBuzz("snitch", 4, "ignored-recant");
-      if (near && nar) nar(`${who} keeps the report alive.`, 1.5);
+      if (near && nar) nar(`${who} keeps the report alive.`, 1.5, n,
+        "Then my statement stands. Every word of it.");
       return;
     }
 
@@ -997,7 +1078,8 @@
       if (n.gang >= 0) addGangStanding(n.gang, -1);
       if (reporter && rng() < 0.35) reporter.reportedPlayerT = Math.max(reporter.reportedPlayerT || 0, 16);
       addBuzz("snitch", 3, "ignored-fixer");
-      if (near && nar) nar(`${who} leaves ${reporterName(reporter)} talking.`, 1.5);
+      if (near && nar) nar(`${who} leaves ${reporterName(reporter)} talking.`, 1.5, n,
+        `Your problem. ${reporterName(reporter)} is still talking.`);
       return;
     }
 
@@ -1007,17 +1089,20 @@
       addBuzz("snitch", 4, "ignored-alibi");
       if (a.memoryType && n.memory && (CBZ.game.cigs || 0) > 0 && rng() < 0.42) {
         sendNpcToSnitch(n, a.heat || 12, { copCrime: a.memoryType === "copCrime", lastKnown: n.memory.lastKnown, type: "ignored alibi" });
-        if (near && nar) nar(`${who} sells the story to a guard instead.`, 1.6);
+        if (near && nar) nar(`${who} sells the story to a guard instead.`, 1.6, n,
+          "You wouldn't buy it. The screws will.");
         return;
       }
-      if (near && nar) nar(`${who} stops offering the alibi.`, 1.4);
+      if (near && nar) nar(`${who} stops offering the alibi.`, 1.4, n,
+        "Offer's off. Good luck explaining yourself.");
       return;
     }
 
     if (a.kind === "heatWarning") {
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
-      if (near && nar) nar(`${who} stops warning you.`, 1.4);
+      if (near && nar) nar(`${who} stops warning you.`, 1.4, n,
+        "I tried to tell you. Not my problem now.");
       return;
     }
 
@@ -1025,7 +1110,8 @@
       clearApproach(n);
       n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
       if (CBZ.addComplaint) CBZ.addComplaint(5);
-      if (near && nar) nar(`${who} tells the block you ignored the problem.`, 1.8);
+      if (near && nar) nar(`${who} tells the block you ignored the problem.`, 1.8, n,
+        "Everyone's going to hear you did nothing.");
       return;
     }
 
@@ -1427,8 +1513,105 @@
     };
     n.reportedPlayerCount = (n.reportedPlayerCount || 0) + 1;
     n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 1);
+    // KNOWING WHO RATTED IS A FACT YOU HAVE TO ACQUIRE — see learnSnitch.
+    if (sawItHappen(n)) learnSnitch(n, "seen");
     spreadReportGossip(n, amount || 12, meta);
   }
+
+  /* ==========================================================================
+     WHO RATTED IS A FACT, NOT A HUD CHIP (JAIL_SNITCH_KNOWLEDGE).
+
+     OWNER: "Improve that logic, connect it all, and make it real logic."
+
+     This was the one genuine STAT FICTION behind the deleted #gangHud strip, by
+     CLAUDE.md's own definition. A bent guard sells you `snitchIntel` for cigs
+     and the entire effect was `g.snitchIntelT = 30` — a number read by NOTHING
+     except the chip that printed "Snitch named 30s" and the tick that counted it
+     down. Meanwhile systems/interact.js offered Confront / Pay silence /
+     Threaten on ANY actor with `reportedPlayerT > 0`, so the player already had
+     every snitch verb on every reporter for free. You were paying a corrupt
+     screw for information the HUD had given you at no charge.
+
+     Both halves are wrong and they fix each other. The verbs now need
+     `n.snitchKnown`, and there are three honest ways to get it:
+       SEEN  — you were close enough to watch them walk up to a screw and talk.
+               That is how you learn it in a real yard, and it is free.
+       PAID  — the bent guard's name-drop (entities/guards.js), which is now
+               worth cigs precisely because SEEN is the only alternative.
+       TOLD  — an ally who witnessed it passes the name to you.
+     A snitch you have not made is just another inmate, which is what makes the
+     paranoia real: the block is full of people who might have done it.
+
+     Flag false → knowledge is universal and the verbs behave exactly as they
+     shipped, so the whole gate is a one-line revert.
+     ========================================================================== */
+  if (CBZ.CONFIG.JAIL_SNITCH_KNOWLEDGE == null) CBZ.CONFIG.JAIL_SNITCH_KNOWLEDGE = true;
+  let snitchLearned = 0;
+  // could the player have WATCHED this happen? Close enough to make out who,
+  // and not blind (dead / mid-blackout). Deliberately generous on angle — you
+  // do not have to be staring at them, you have to be there.
+  function sawItHappen(n) {
+    if (!n || !CBZ.player || CBZ.player.dead) return false;
+    if (CBZ.player.captureState && CBZ.player.captureState !== "normal") return false;
+    return playerDist(n) < 20;
+  }
+  /* WHERE A RAT SAYS HE SAW YOU. A witness report has always carried a real
+     `lastKnown` coordinate — guards investigate it, systems/detection.js's
+     Searching state is built on it — and that coordinate has never been spoken
+     by anybody. Turning it into a PLACE NAME is what makes an overheard report
+     actionable: "try the laundry" tells you which way the sweep is about to
+     go, and it is information you could not have had any other way. The list is
+     the prison's own named ground (world/yard.js, world/cellblock.js,
+     world/gunroom.js, systems/detection.js's restricted zones); anything that
+     matches nothing is simply "yard", which is where most of this world is. */
+  const LANDMARKS = [
+    { name: "armory door", x: 19, z: 1, r: 16 },
+    { name: "staff lounge", x: 24, z: 37, r: 14 },
+    { name: "exit corridor", x: 0, z: 52, r: 20 },
+    { name: "cell block", x: 0, z: -28, r: 22 },
+    { name: "yard gate", x: 0, z: -8, r: 10 },
+    { name: "Reds' corner", x: -22, z: 30, r: 13 },
+    { name: "Blues' corner", x: 22, z: 16, r: 13 },
+  ];
+  function nearestLandmark(x, z) {
+    if (!(isFinite(x) && isFinite(z))) return null;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < LANDMARKS.length; i++) {
+      const L = LANDMARKS[i], d = Math.hypot(x - L.x, z - L.z);
+      if (d < L.r && d < bd) { bd = d; best = L.name; }
+    }
+    return best || "yard";
+  }
+  CBZ.jailLandmark = nearestLandmark;
+
+  function learnSnitch(n, how) {
+    if (!n || n.snitchKnown) return false;
+    n.snitchKnown = how || "seen";
+    snitchLearned++;
+    return true;
+  }
+  // THE ONE ANSWER to "does the player know this person reported him". Every
+  // consumer asks here; nobody re-derives it. Degrade-safe and flag-reverted.
+  CBZ.playerKnowsSnitch = function (n) {
+    if (!n || !((n.reportedPlayerT || 0) > 0)) return false;
+    if (CBZ.CONFIG.JAIL_SNITCH_KNOWLEDGE === false) return true;
+    return !!n.snitchKnown;
+  };
+  CBZ.learnSnitch = learnSnitch;
+  /* RATCHET: `known` must never exceed `reported` (you cannot know about a
+     report that never happened), and `gated` — reporters you have NOT made — is
+     the whole point of the mechanic: it may only ever be > 0 in a world where
+     the player has not seen everything. */
+  CBZ.snitchKnowledgeAudit = function () {
+    let reported = 0, known = 0;
+    for (const n of CBZ.npcs || []) {
+      if (!((n.reportedPlayerT || 0) > 0)) continue;
+      reported++;
+      if (n.snitchKnown) known++;
+    }
+    return { on: CBZ.CONFIG.JAIL_SNITCH_KNOWLEDGE !== false, reported: reported,
+      known: known, gated: reported - known, learned: snitchLearned };
+  };
 
   function spreadReportGossip(reporter, amount, meta) {
     if (!reporter || !reporter.group || !CBZ.npcs) return 0;
@@ -3656,24 +3839,32 @@
           const amount = n.snitchHeat || 12;
           const reportMeta = n.snitchMeta || { copCrime: n.snitchCop };
           let lead = null;
+          // WHAT A RAT ACTUALLY SAYS TO A SCREW. This is the beat the whole
+          // snitch system turns on and it had no output at all: a dropped
+          // caption. Overhearing it IS how you find out who did it
+          // (markPlayerReported -> sawItHappen -> learnSnitch), so the line and
+          // the knowledge are the same event rather than a chip and a number.
+          const spot = n.reportedPlayerLastKnown || (reportMeta && reportMeta.lastKnown) || null;
+          const where = spot ? nearestLandmark(spot.x, spot.z) : null;
           if (CBZ.recordWitnessReport) {
             lead = CBZ.recordWitnessReport(amount, reportMeta, n, g);
             markPlayerReported(n, amount, reportMeta, g, lead);
-            if (Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 22)
-              nar(n.snitchCop ? `${n.data.name.replace(/^the |^a |^an /, "")} filed a complaint.` : `${n.data.name.replace(/^the |^a |^an /, "")} gave a guard your last location.`, 1.7);
+            nar(n.snitchCop ? `${n.data.name.replace(/^the |^a |^an /, "")} filed a complaint.` : `${n.data.name.replace(/^the |^a |^an /, "")} gave a guard your last location.`, 1.7, n,
+              n.snitchCop ? "Boss, I want that on the record."
+                : (where ? `He was over by the ${where}. I watched him.` : "He was right there. I watched him."));
           } else if (n.snitchCop) {
             CBZ.addComplaint && CBZ.addComplaint(amount * 0.55);
             markPlayerReported(n, amount, reportMeta, g, null);
-            if (Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 22)
-              nar(`${n.data.name.replace(/^the |^a |^an /, "")} filed a complaint.`, 1.7);
+            nar(`${n.data.name.replace(/^the |^a |^an /, "")} filed a complaint.`, 1.7, n,
+              "I'm making a complaint. Write it down.");
           } else {
             CBZ.addHeat && CBZ.addHeat(amount * 0.78);
             CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 12);
             CBZ.game.snitchReports = (CBZ.game.snitchReports || 0) + 1;
             markPlayerReported(n, amount, reportMeta, g, null);
             if (g) { g.alert = 1.4; g.hunt = 2.2; }
-            if (Math.hypot(CBZ.player.pos.x - n.group.position.x, CBZ.player.pos.z - n.group.position.z) < 22)
-              nar(`${n.data.name.replace(/^the |^a |^an /, "")} gave a guard your description.`, 1.7);
+            nar(`${n.data.name.replace(/^the |^a |^an /, "")} gave a guard your description.`, 1.7, n,
+              where ? `Orange top, moving fast. Try the ${where}.` : "Orange top, moving fast. You'll know him.");
           }
           n.aiState = "flee"; n.fleeT = 2.0 + rng() * 2; n.snitchHeat = 0; n.snitchCop = false; n.snitchMeta = null;
         }
@@ -3690,7 +3881,14 @@
             other.snitchMeta = null;
             emote(n, ""); emote(other, "!");
             addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
-            if (nar && playerDist(n) < 16) nar(`${n.data.name.replace(/^the |^a |^an /, "")} scares off a snitch.`, 1.5);
+            if (nar && playerDist(n) < 16) {
+              // TOLD: your man saw it and hands you the name. That is the third
+              // way into snitchKnown, and the only one that costs you nothing
+              // but having a friend.
+              learnSnitch(other, "told");
+              nar(`${n.data.name.replace(/^the |^a |^an /, "")} scares off a snitch.`, 1.5, n,
+                `${other.data ? other.data.name.replace(/^the |^a |^an /, "") : "That one"} was running to a screw about you.`);
+            }
             break;
           }
           if (other.huntPlayer > 0 && dist(n, other) < 8 && other.gang !== n.gang) {

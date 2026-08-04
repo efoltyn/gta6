@@ -644,7 +644,6 @@
       CBZ.addHeat(-2 * dt);
     }
     if (g.witnessReportT > 0) g.witnessReportT = Math.max(0, g.witnessReportT - dt);
-    if (g.snitchIntelT > 0) g.snitchIntelT = Math.max(0, g.snitchIntelT - dt);
     if ((g.caseSearchCD || 0) > 0) g.caseSearchCD = Math.max(0, g.caseSearchCD - dt);
     if (g.lastKnown && g.lastKnown.t > 0) {
       g.lastKnown.t = Math.max(0, g.lastKnown.t - dt);

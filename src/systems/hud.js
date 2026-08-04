@@ -338,6 +338,34 @@
     el.invList.textContent = parts.length ? parts.join("  ·  ") : "—";
   }
 
+  /* ==========================================================================
+     THE PANEL IS GONE (JAIL_GANG_HUD, default FALSE).
+
+     OWNER (2026-08-04, second pass): "Don't clear up the logic behind the HUD
+     space wasters. Improve that logic, connect it all, and make it real logic,
+     but remove it from the HUD."
+
+     The first pass made this strip CONDITIONAL — a cell only drew while it
+     carried news. That was the wrong half of the answer, because a chip that
+     appears when something happens is still a chip reporting an event you are
+     standing next to. The event has a mouth now: entities/ai.js's narrations
+     run through CBZ.prisonSay (systems/interact.js), so the collector TELLS you
+     the number, the man you stiffed TELLS you the cover is off, and the rat
+     TELLS the screw where you were — which is also how you learn it was him.
+
+     NOT ONE NUMBER IS DELETED. gangStanding, gangProtection, gangDebt, gangJob,
+     the racket ledger, the case file and the block buzz all still run and still
+     drive the AI exactly as before (entities/ai.js reads gangStanding in 61
+     places and not one of them was this panel). What changes is that they are
+     read off the WORLD, and off the Ranks board's STANDING page when you want
+     the ledger — never off a strip welded to the corner of the screen.
+
+     The whole build is skipped rather than hidden: this ran an innerHTML
+     rebuild plus three full CBZ.npcs scans EVERY frame, so switching it off is
+     also the cheapest change in this file. Flag true = the panel returns, live
+     rules and all.
+     ========================================================================== */
+  if (CFG.JAIL_GANG_HUD == null) CFG.JAIL_GANG_HUD = false;
   // see the JAIL_GANG_HUD_LIVE block at the foot of refreshGangHud
   if (CFG.JAIL_GANG_HUD_LIVE == null) CFG.JAIL_GANG_HUD_LIVE = true;
   let gangSig = "";
@@ -348,6 +376,7 @@
   }
   function refreshGangHud() {
     if (!el.gangHud) return;
+    if (!CFG.JAIL_GANG_HUD) { gangHide(); return; }
     const g = CBZ.game || {};
     // CITY: #gangHud is display:none!important (css/city.css) — this is the
     // prison-gang panel. Skip the whole innerHTML rebuild + npc scans there
@@ -428,7 +457,11 @@
       }
       if (sources[1]) pressureBits.push(chip(sources[1].weak ? "warn" : "hot", `Src ${shortSource(sources[1].source)} ${credWord(sources[1])}`));
     }
-    if ((g.snitchIntelT || 0) > 0) pressureBits.push(chip("good", `Snitch named ${Math.ceil(g.snitchIntelT)}s`));
+    // (JAIL_GANG_HUD revert path only.) Reads the real fact now — how many
+    // reporters the player has actually MADE — instead of the deleted
+    // g.snitchIntelT countdown, which was this chip and nothing else.
+    const rats = CBZ.snitchKnowledgeAudit ? CBZ.snitchKnowledgeAudit().known : 0;
+    if (rats > 0) pressureBits.push(chip("good", rats === 1 ? "Rat made" : `${rats} rats made`));
     if (buzz && buzz.score > 24) pressureBits.push(chip(buzz.score > 45 ? "hot" : "warn", `Buzz ${buzz.kind}`));
     pressureBits.length = Math.min(pressureBits.length, 6);
 

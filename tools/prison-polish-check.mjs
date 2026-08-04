@@ -238,6 +238,114 @@ async function moveTo(expr, ticks) {
   await evl("CBZ.setFPS(false); return true;");
 }
 
+// ---- 3b. THE WORLD SAYS IT (the gang HUD's logic, off the HUD) -----------
+// The #gangHud strip is gone; these assert that what it used to print now
+// HAPPENS instead — a working mouth, narrations routed into it, and a snitch
+// you have to actually make.
+{
+  // put the player somewhere open and quiet first
+  await evl("CBZ.player.pos.set(0,0,30); return true;");
+  await step(60);
+  const r = await evl(`
+    var e = document.getElementById("gangHud");
+    return { flag: CBZ.CONFIG.JAIL_GANG_HUD,
+             shown: !!e && getComputedStyle(e).display !== "none",
+             html: e ? e.innerHTML : null };
+  `);
+  if (bad(r)) check("world: gang panel reads", false, why(r));
+  else check("world: the gang HUD strip is gone", r.flag === false && r.shown === false, JSON.stringify(r));
+}
+{
+  // THE MOUTH. Before this wave every prison citySay threw (prison actors keep
+  // position on .group, not .pos), so this asserts BOTH that prisonSay works
+  // and that it is not the old broken path.
+  const r = await evl(`
+    var n = null;
+    for (var i = 0; i < CBZ.npcs.length; i++) { var c = CBZ.npcs[i]; if (c && !c.dead && c.group) { n = c; break; } }
+    if (!n) return { no: true };
+    CBZ.player.pos.set(n.group.position.x + 1.5, 0, n.group.position.z);
+    var far = null, near = null, threwCity = null;
+    try { CBZ.citySay(n, "x", "#fff", 1); } catch (e) { threwCity = String(e).split("\\n")[0]; }
+    near = CBZ.prisonSay(n, "TEST LINE NEAR", { secs: 4 });
+    var el = document.getElementById("pinteractSay");
+    var shown = el ? { cls: el.className, line: (el.querySelector(".pi-subtitle-line") || {}).textContent,
+                       who: (el.querySelector(".pi-subtitle-speaker") || {}).textContent } : null;
+    // …and out of range it must refuse rather than broadcast
+    CBZ.player.pos.set(n.group.position.x + 60, 0, n.group.position.z + 60);
+    far = CBZ.prisonSay(n, "TEST LINE FAR", { secs: 4 });
+    return { near: near, far: far, shown: shown, threwCity: threwCity, audit: CBZ.prisonSayAudit() };
+  `);
+  if (bad(r) || r.no) check("world: the prison has a mouth", false, why(r));
+  else {
+    check("world: an inmate beside you can speak", r.near === true && !!r.shown && /TEST LINE NEAR/.test(r.shown.line || ""), JSON.stringify(r.shown));
+    check("world: the speaker is named", !!r.shown && !!r.shown.who, JSON.stringify(r.shown && r.shown.who));
+    check("world: a line is overheard, not broadcast", r.far === false, JSON.stringify({ far: r.far, audit: r.audit }));
+    // the old path is still broken — that is WHY prisonSay exists, and if it
+    // ever starts working this assertion is the thing that tells us.
+    check("world: (context) citySay still cannot read a prison actor", !!r.threwCity, String(r.threwCity));
+  }
+}
+{
+  // A NARRATION NOW HAS A MOUTH. Drive a real debt-collector approach to
+  // EXPIRY beside the player and assert ai.js spoke instead of going mute.
+  const r = await evl(`
+    var n = null;
+    for (var i = 0; i < CBZ.npcs.length; i++) { var c = CBZ.npcs[i]; if (c && !c.dead && c.gang >= 0) { n = c; break; } }
+    if (!n) return { no: true };
+    CBZ.player.pos.set(n.group.position.x + 1.2, 0, n.group.position.z);
+    var before = CBZ.aiNarrationAudit();
+    n.aiState = "approachPlayer";
+    n.approach = { kind: "debtCollect", t: 0.05, cost: 6, gang: n.gang };
+    for (var k = 0; k < 40; k++) CBZ.stepSim(1/60);
+    var el = document.getElementById("pinteractSay");
+    return { before: before, after: CBZ.aiNarrationAudit(),
+             line: el ? (el.querySelector(".pi-subtitle-line") || {}).textContent : null };
+  `);
+  if (bad(r) || r.no) check("world: a narration finds a mouth", false, why(r));
+  else {
+    check("world: the collector SAYS the debt", r.after.spoken > r.before.spoken, JSON.stringify({ spoken: r.after.spoken, mute: r.after.mute, line: r.line }));
+    check("world: the spoken line is a person talking", !!r.line && !/^the (Reds|Blues|block)\b/.test(r.line), JSON.stringify(r.line));
+  }
+}
+{
+  // A SNITCH YOU HAVE NOT MADE IS JUST ANOTHER INMATE.
+  const r = await evl(`
+    var n = null;
+    for (var i = CBZ.npcs.length - 1; i >= 0; i--) { var c = CBZ.npcs[i]; if (c && !c.dead && c.data) { n = c; break; } }
+    if (!n) return { no: true };
+    // report lodged with the player nowhere near: he cannot have seen it
+    CBZ.player.pos.set(n.group.position.x + 80, 0, n.group.position.z + 80);
+    n.snitchKnown = null;
+    n.reportedPlayerT = 40; n.reportedPlayerCred = 0.7; n.reportedPlayerGuard = "a guard";
+    var blindKnows = CBZ.playerKnowsSnitch(n);
+    CBZ.learnSnitch(n, "paid");
+    var paidKnows = CBZ.playerKnowsSnitch(n);
+    return { blindKnows: blindKnows, paidKnows: paidKnows, how: n.snitchKnown,
+             audit: CBZ.snitchKnowledgeAudit() };
+  `);
+  if (bad(r) || r.no) check("world: snitch knowledge gate", false, why(r));
+  else {
+    check("world: an unseen report names nobody", r.blindKnows === false, JSON.stringify({ knows: r.blindKnows }));
+    check("world: the bought name is the knowledge", r.paidKnows === true && r.how === "paid", JSON.stringify({ knows: r.paidKnows, how: r.how }));
+    check("world: the audit counts what you have made", r.audit.reported >= 1 && r.audit.known >= 1, JSON.stringify(r.audit));
+  }
+}
+{
+  // THE LEDGER HAS A PAGE. Open the Ranks board on WHERE YOU STAND.
+  const r = await evl(`
+    CBZ.ui.dashboard = true; CBZ.ui.dashTab = 3;
+    if (CBZ.renderDashboard) CBZ.renderDashboard(); else for (var i=0;i<4;i++) CBZ.stepSim(1/60);
+    var d = document.getElementById("dashboard");
+    var txt = d ? d.textContent : "";
+    var rows = d ? d.querySelectorAll(".dledger .drow").length : 0;
+    CBZ.ui.dashboard = false;
+    return { rows: rows, reds: /the Reds/.test(txt), blues: /the Blues/.test(txt),
+             ledger: !!(d && d.querySelector(".dledger")), head: /Where You Stand/.test(txt) };
+  `);
+  if (bad(r)) check("world: the standing page", false, why(r));
+  else check("world: WHERE YOU STAND lists both crews", r.ledger && r.head && r.reds && r.blues && r.rows >= 2, JSON.stringify(r));
+}
+
 // ---- 4. GUN GAME SHOWS ONE GUN BAR AND NO DEAD WORDS ---------------------
 {
   let ok = false;

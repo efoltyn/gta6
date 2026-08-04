@@ -121,3 +121,27 @@
   #dashboard .dcols, #dashboard .drow{ grid-template-columns:24px minmax(70px,1.4fr) 56px 92px 80px 46px 70px; gap:6px; font-size:12px; }
   #dashboard .dcap-t, #dashboard .dcap-s, #dashboard .drec{ display:none; }
 }
+
+/* ============================================================
+   WHERE YOU STAND (systems/dashboard.js's fourth tab) — the ledger that used
+   to be the #gangHud strip. Six columns, not ten, and every one of them is a
+   fact some system already owned: standing · read · owed · cover · who is
+   acting on it. The roster grid would leave four empty cells per row, so the
+   page declares its own template off .dledger and nothing else on the panel
+   has to know a second layout exists.
+============================================================ */
+#dashboard .dledger .dcols, #dashboard .dledger .drow{
+  grid-template-columns:minmax(120px,1.3fr) 78px 104px 92px 86px minmax(120px,1.5fr);
+}
+#dashboard .dledger .dfac{ font-variant-numeric:tabular-nums; font-weight:700; }
+#dashboard .dledger .dpow, #dashboard .dledger .drec{
+  font-size:12px; font-weight:600; color:#c6d3e2; font-variant-numeric:tabular-nums;
+}
+#dashboard .dledger .dbeh{ font-size:11.5px; color:#9fb0c4; }
+#dashboard .dledger .drow.gone .dname{ color:#8da0b6; font-style:italic; }
+@media (max-width:900px),(max-height:560px){
+  #dashboard .dledger .dcols, #dashboard .dledger .drow{
+    grid-template-columns:minmax(88px,1.2fr) 56px 78px 72px 66px minmax(88px,1.3fr);
+    gap:6px; font-size:12px;
+  }
+}

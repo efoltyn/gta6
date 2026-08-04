@@ -336,7 +336,14 @@
       if (a.approach.kind === "deal" && a.data && a.data.offer) return ["listen", "trade", "refuse"];
       return ["listen", "refuse"];
     }
-    if (CBZ.game.role !== "cop" && (a.reportedPlayerT || 0) > 0) {
+    // A SNITCH YOU HAVE NOT MADE IS JUST ANOTHER INMATE (JAIL_SNITCH_KNOWLEDGE,
+    // entities/ai.js). These three verbs used to appear on ANY reporter, which
+    // both handed the player the answer for free and made the bent guard's
+    // paid name-drop worth nothing. You get them once you actually know — by
+    // seeing the report happen, buying the name, or being told by your own
+    // crew. Flag off (or no ai.js) → every reporter, exactly as it shipped.
+    const knowsRat = CBZ.playerKnowsSnitch ? CBZ.playerKnowsSnitch(a) : (a.reportedPlayerT || 0) > 0;
+    if (CBZ.game.role !== "cop" && knowsRat) {
       return ["confrontReport", "paySilence", "threatenSnitch"];   // fight = left-click
     }
     if (CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden")) {
@@ -483,7 +490,7 @@
   //  .pi-subtitle, so this file owns its own element and never reaches into a
   //  city module for one.
   // ===========================================================================
-  let sayEl = null, sayLine = null, saySpeaker = null, sayT = 0;
+  let sayEl = null, sayLine = null, saySpeaker = null, sayT = 0, sayRank = 0;
   function ensureSay() {
     if (sayEl) return sayEl;
     sayEl = document.createElement("div");
@@ -501,10 +508,11 @@
   }
   // EVERY verb result goes through here. Flag off → the legacy CBZ.flashHint
   // panel, byte-identical to what shipped.
-  function sayResult(who, msg, secs) {
+  function sayResult(who, msg, secs, rank) {
     if (!msg) return;
     if (!subtitleOn()) { if (CBZ.flashHint) CBZ.flashHint(msg, secs || 2.8); return; }
     ensureSay();
+    sayRank = rank != null ? rank : SAY_ANSWER;
     saySpeaker.textContent = who || "";
     sayLine.textContent = String(msg).replace(/^[“"]|[”"]$/g, "");
     sayEl.classList.add("show");
@@ -516,7 +524,7 @@
     document.body.classList.add("interact-subtitle-active");
   }
   function saySilence() {
-    sayT = 0;
+    sayT = 0; sayRank = 0;
     if (sayEl) sayEl.classList.remove("show");
     document.body.classList.remove("interact-subtitle-active");
   }
@@ -525,6 +533,80 @@
     sayT -= dt;
     if (sayT <= 0) saySilence();
   }
+
+  /* ===========================================================================
+     CBZ.prisonSay(actor, line, opts) — THE ONE MOUTH IN THE PRISON.
+
+     OWNER (2026-08-04): "Don't clear up the logic behind the HUD space wasters.
+     Improve that logic, connect it all, and make it real logic, but remove it
+     from the HUD."
+
+     THE STATE THIS ANSWERS, and it is worse than a cluttered HUD. The
+     JAIL_SHOW_DONT_TELL wave deleted 47 narration popups out of entities/ai.js
+     — correctly; they were captions over a world that was already acting — and
+     documented `CBZ.citySay` as "the sanctioned replacement: a thing a person
+     SAYS goes over that person's head". Counted afterwards: 47 narrations
+     dropped, ONE say() call, and that one call could not work either.
+     city/social.js's say() reads `ped.pos.x` for its range gate and prison
+     actors keep their position on `.group.position` and their name on
+     `.data.name` — so every prison citySay threw a TypeError into the caller's
+     own try/catch and returned silently. The prison has been MUTE since that
+     wave: the whole gang/debt/cover/snitch simulation ran with no output at all
+     except the corner HUD chips the owner is now asking to remove. Take the
+     chips away first and the systems become invisible rather than diegetic.
+
+     So the replacement is real this time, and it is not a new UI: this file
+     ALREADY owns a working speech surface (`sayResult` -> .pi-subtitle, the
+     shared world-subtitle grammar, enrolled in hud.css's subtitle ladder) which
+     is what answers every interaction verb today. It is published here with the
+     three rules ambient speech needs and verb answers never did:
+
+       RANGE   — a line is a thing you overhear, not a broadcast. 16 u normally,
+                 24 u for somebody mid-approach (they are walking at you and
+                 started talking on the way, exactly like citySay's own
+                 engaged-speaker slack).
+       RANK    — a louder line cannot be stomped by a quieter one while it is
+                 still on screen. The answer to a verb the player just pressed
+                 (SAY_ANSWER) outranks a person acting on you (SAY_ACT), which
+                 outranks block chatter (SAY_AMBIENT).
+       SILENCE — the dead, the knocked-out and the cuffed do not talk.
+
+     One-line adoption, degrade-safe: a caller that has no actor, or whose actor
+     is out of range, gets `false` and behaves exactly as it does today. Named
+     in docs/claude/, counted by CBZ.aiNarrationAudit().
+     =========================================================================== */
+  const SAY_AMBIENT = 0, SAY_ACT = 1, SAY_ANSWER = 2;
+  const SAY_NEAR = 16, SAY_ENGAGED = 24;
+  let saidLines = 0, sayRefused = 0;
+  function actorSpot(a) {
+    if (!a) return null;
+    if (a.group && a.group.position) return a.group.position;
+    return a.pos || null;
+  }
+  function prisonSay(actor, line, opts) {
+    opts = opts || {};
+    const rank = opts.rank != null ? +opts.rank : SAY_ACT;
+    if (!line || !actor || CBZ.game.state !== "playing") { sayRefused++; return false; }
+    if (actor.dead || actor.escaped || (actor.ko || 0) > 0) { sayRefused++; return false; }
+    const p = actorSpot(actor);
+    const P = CBZ.player;
+    if (!p || !P || !P.pos) { sayRefused++; return false; }
+    const lim = (actor.approach && (actor.approach.t || 0) > 0) ? SAY_ENGAGED : SAY_NEAR;
+    if (Math.hypot(P.pos.x - p.x, P.pos.z - p.z) > lim) { sayRefused++; return false; }
+    // a live line only yields to an equal or louder one
+    if (sayT > 0 && rank < sayRank) { sayRefused++; return false; }
+    sayResult(cleanName(actor), line, opts.secs || 2.2, rank);
+    saidLines++;
+    return true;
+  }
+  CBZ.prisonSay = prisonSay;
+  CBZ.PRISON_SAY = { ambient: SAY_AMBIENT, act: SAY_ACT, answer: SAY_ANSWER };
+  // said = lines that reached the screen; refused = calls the rules turned down
+  // (out of range, downed, out-ranked). Both are diagnostics, not ratchets — the
+  // ratchet that matters is CBZ.aiNarrationAudit().mute.
+  CBZ.prisonSayAudit = function () {
+    return { said: saidLines, refused: sayRefused, near: SAY_NEAR, engaged: SAY_ENGAGED };
+  };
 
   // ===========================================================================
   //  THE TOUCH ROW (PRISON_INTERACT_TOUCH)
