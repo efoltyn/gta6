@@ -1349,6 +1349,9 @@
         if (c && !c.dead && c._boatKey === FLAG_KEY && c.owned) { boat = c; rigFlagship(c); crewBoat(c); break; }
       }
     } else if (boat.dead || !boat.group || !boat.group.parent) {
+      // vehicle_hold's own 9.4 housekeeping releases freight from a dead host;
+      // disposing the handle here just makes the teardown immediate.
+      if (hold) { try { hold.dispose(); } catch (e) {} }
       boat = null; hold = null; chartGrp = null; helm = null; crew.length = 0;
       // the posts died with her (their alive() reads the hull) — zero the
       // venue's declared count NOW, or venueStaffAudit's shared unstaffed pin
