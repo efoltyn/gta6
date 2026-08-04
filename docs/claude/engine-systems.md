@@ -355,6 +355,20 @@ Before building anything adjacent, wire into the existing system:
   in the survival arena for its whole life: a separate mesh has to be taught to
   every water consumer individually. `city/tsunami.js` is the whole main-world
   event and it authors no water, no flood damage model and no panic AI.
+- **A BOAT CANNOT BE DRIVEN ONTO LAND** — `CBZ.marineShoreBlock(car, spec, dt)`
+  (`world/water_helm.js`, flag `BOAT_NO_LAND`). ONE shoreline resolver, and every
+  path that moves a hull calls it: the player's helm (`marineHelm` §11.5), the AI
+  helmsman (`piracy.js`'s `marineAutopilot`, whose own centre-only step-back it
+  replaced) and `vehicles.js`'s road path for the frames the helm does not own.
+  It probes BOW, CENTRE AND STERN — a 34 m yacht grounds its bow long before its
+  centre — pushes out by `waterField.shoreAt()`'s own signed metres, and strips
+  only the LANDWARD velocity, so a hull running a beach at an angle slides along
+  it and steers off. The pushes SUM, so in a channel narrower than the hull the
+  two banks cancel instead of firing it at one. Do NOT add a second shoreline
+  test: the reason a boat could tour the city was that `marineHelm` bailed the
+  instant the hull's centre went dry and handed the frame to tyre physics, and
+  the other half of that fix is `vehicles.js`'s AGROUND clamp (a boat already on
+  land keeps 2.2 m/s — enough to back itself off, never enough to drive).
 - **THE SEA'S SURFACE LOOK IS ONE SET OF FUNCTIONS** — `WATER_SURFACE_LOOK`
   (`world/water_spec.js`, gated on the `WATER_V2` master; `?cfg_WATER_SURFACE_LOOK=0`
   reverts everything at once). The spec owns `CBZ.WATER_TONES` (deep TEAL body

@@ -1324,3 +1324,42 @@ orchestrator only orchestrates + one merged math-gate.
   split between playercars/vehicles (+) and OCC_SLOTS/DB_SEATS (−) documented
   in boarding.js header; two session-limit interruptions mid-wave were
   resumed by audit-then-finish agents (the resume-file pattern in memory).
+
+## 2026-08-04 — BOATS CANNOT BE DRIVEN ONTO LAND (BOAT_NO_LAND)
+
+Owner: "boats can go on land right now… make it so boats can't go on land."
+They could, and the reason was a seam, not a missing feature. `marineHelm`
+integrated position with no waterline test at all, and its own `overWater`
+bail handed the frame straight to `vehicles.js`'s road physics the instant the
+hull's CENTRE went dry — so a beached speedboat picked up tyre grip, a friction
+circle, a five-speed gearbox and a terrain seat and drove into town on its keel.
+
+- **ONE SHORELINE RESOLVER** — `CBZ.marineShoreBlock(car, spec, dt)`
+  (`world/water_helm.js`, flag `BOAT_NO_LAND`), shaped like the quay resolver it
+  sits beside. Probes BOW, CENTRE AND STERN (a 34 m yacht grounds its bow long
+  before its centre), pushes out by `waterField.shoreAt()`'s own signed metres —
+  no new distance field — and strips ONLY the landward velocity, so a hull
+  running a beach at an angle slides along it and steers off. Pushes SUM, so in
+  a channel narrower than the hull the two banks cancel. THREE consumers in the
+  same change: the player's helm (§11.5), `piracy.js`'s `marineAutopilot` (whose
+  own centre-only step-back it DELETED), and `vehicles.js`'s road path for the
+  frames the helm does not own — so the guarantee survives `WATER_HELM=false`
+  and hulls with no registered spec.
+- **AGROUND** (`vehicles.js`, the exact mirror of `CARS_NO_WATER` beside it): a
+  hull that arrives on land another way (spawn, stunt ramp, retreating surge)
+  keeps 2.2 m/s and may only make way SEAWARD. Refused, not damped — the first
+  attempt used a friction-shaped decay and a held throttle simply found an
+  equilibrium at the clamp and kept crawling (measured 12.5 m per 5 s). The
+  number to beat is the throttle, not the momentum.
+- **MEASURED**, all 11 registered hulls, throttle pinned, aimed square at a
+  beach 140 m off, 40 s each, driving `marineHelm` directly:
+  worst penetration past the waterline **−1.2 m to −0.14 m (i.e. never)**,
+  centre-dry frames **0**, helm-owned frames **2400/2400** (the road-physics
+  handover never fires). A/B with `BOAT_NO_LAND=false` on the same run
+  reproduces the fault on 10 of 11: penetration **+1.8 m to +33 m**, centre dry
+  for up to 1776 of 2400 frames, helm losing up to 74% of its frames.
+  (yacht156 is too slow to reach the beach in 40 s — a non-result either way.)
+  Aground, through the REAL driven loop: wide-open throttle pointed inland gives
+  **0.0 m/s and 1.6 m travelled in 5 s**; astern from the same spot backs 15.2 m
+  and REFLOATS — it is a clamp, not a trap.
+- **GATE**: `MATHGATE: ok` (90210: 318/180/204, det ok, errors baseline-only).

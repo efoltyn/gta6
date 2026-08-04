@@ -67,6 +67,9 @@
    FLAGS
      CBZ.CONFIG.WATER_HELM        (default true)  the whole model. false ->
                                   vehicles.js's road physics owns boats again.
+     CBZ.CONFIG.BOAT_NO_LAND      (default true)  the waterline is a wall —
+                                  CBZ.marineShoreBlock below. false -> boats
+                                  drive up the beach and into town again.
      CBZ.CONFIG.BOAT_QUAY_COLLIDE (default true)  hulls stop at quays/seawalls
      CBZ.CONFIG.BOAT_SLAM         (default true)  crest re-entry slams
      CBZ.CONFIG.BOAT_CURRENT      (default true)  ocean current carries hulls
@@ -80,6 +83,7 @@
   if (!CBZ) return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.WATER_HELM == null) CFG.WATER_HELM = true;
+  if (CFG.BOAT_NO_LAND == null) CFG.BOAT_NO_LAND = true;
   if (CFG.BOAT_QUAY_COLLIDE == null) CFG.BOAT_QUAY_COLLIDE = true;
   if (CFG.BOAT_SLAM == null) CFG.BOAT_SLAM = true;
   if (CFG.BOAT_CURRENT == null) CFG.BOAT_CURRENT = true;
@@ -98,6 +102,7 @@
   // Scratch — this runs every frame for the driven hull; zero allocation.
   const _cur = { x: 0, z: 0 };
   const _probe = { x: 0, y: 0, z: 0 };
+  const _shoreN = { x: 0, z: 0 };
 
   // ============================================================
   //  THE DRAG LAW  (research §A)
@@ -132,6 +137,103 @@
     if (fn < 1.05) return S.trimHump + (S.trimPlane - S.trimHump) * ((fn - 0.5) / 0.55);
     return S.trimPlane;
   }
+
+  // ============================================================
+  //  THE WATERLINE IS A WALL   (CBZ.marineShoreBlock, BOAT_NO_LAND)
+  // ============================================================
+  // You could drive a boat up the beach and into town, and nothing in the game
+  // objected. The helm below integrates position freely, and the instant the
+  // hull's CENTRE left the water its `overWater` bail handed the frame back to
+  // vehicles.js — where a speedboat picks up tyre grip, a friction circle, a
+  // five-speed gearbox and a terrain seat and drives inland like a van.
+  //
+  // The quay resolver (§13) already says "a hull stops at a wall". This is the
+  // same sentence about the other edge of the water, and it is a resolver for
+  // the same reason: a shoreline you bounce off reads as a shoreline, while a
+  // shoreline that merely cuts the throttle reads as a bug.
+  //
+  // WHY NO NEW DISTANCE FIELD. waterField.shoreAt() is already a SIGNED
+  // DISTANCE in metres (negative = water), so a probe reading +3.2 is exactly
+  // 3.2 m inland and the push is that number. There is nothing to derive and
+  // no second shoreline to keep in sync with the one swim.js, the autopilot
+  // and the wildlife already read.
+  //
+  // BOW, CENTRE AND STERN, SUMMED — the quay resolver's own shape. A 34 m
+  // yacht is not a point: it grounds its bow long before its centre. And in a
+  // channel narrower than the hull the two banks push back against each other
+  // and CANCEL, so a boat threading a creek is squared up rather than fired at
+  // one bank. Only the LANDWARD component of the velocity is removed, so a
+  // hull running the beach at an angle slides along it and drives off under
+  // its own power; head-on, it stops.
+  //
+  // Returns the metres actually pushed (0 when the hull is clear), and leaves
+  // car.v / vx / vz / heading in the shape every caller already re-reads. `S`
+  // is optional: a hull with no registered spec (WATER_HELM off, an old save,
+  // a boat visual nothing ever measured) still gets a shoreline, sized like
+  // the runabout — the guarantee must not depend on the registry being there.
+  // Per-frame push cap. The quay resolver uses 0.35 because a hull can spawn
+  // INSIDE a dock and must crawl out rather than fire across the harbour. A
+  // shoreline penetration is bounded by one frame of travel instead, and the
+  // fastest hull in the fleet covers 0.19 m in a frame — so 1.2 m clears any
+  // legitimate overshoot the same frame it happens, which is the whole point:
+  // the hull's CENTRE must never be allowed to go dry, because that is the
+  // condition that hands the frame to the road physics.
+  const SHORE_MAX_PUSH = 1.2;
+  const SHORE_ANY = { draft: 0.5, loa: 6.2, massT: 1.6 };
+  CBZ.marineShoreBlock = function (car, S, dt) {
+    if (CFG.BOAT_NO_LAND === false) return 0;
+    const WF = CBZ.waterField;
+    if (!car || !car.pos || !WF || !WF.shoreAt || !WF.shoreGradient) return 0;
+    S = S || SHORE_ANY;
+    if (car._shoreCD > 0) car._shoreCD -= (dt || 0);
+    // A deep hull grounds a little sooner than a tender. Capped hard at 1.2 m:
+    // this is a nod to draft, not a bathymetry claim, and a generous cap would
+    // strand a yacht outside its own berth.
+    const clear = clamp((S.draft || 0.4) * 0.5, 0, 1.2);
+    const half = (S.loa || 6) * 0.40;
+    const h = car.heading || 0, fx = Math.sin(h), fz = Math.cos(h);
+    let pushX = 0, pushZ = 0, aground = false;
+    for (let i = -1; i <= 1; i++) {
+      const px = car.pos.x + fx * half * i, pz = car.pos.z + fz * half * i;
+      const sd = WF.shoreAt(px, pz) + clear;          // > 0 -> this end is aground
+      if (!(sd > 0)) continue;
+      aground = true;
+      const n = WF.shoreGradient(px, pz, 6, _shoreN); // points water -> land
+      pushX -= n.x * sd; pushZ -= n.z * sd;
+    }
+    if (!aground) return 0;
+    const pm = Math.hypot(pushX, pushZ);
+    if (pm < 1e-3) return 0;                          // opposing banks cancelled
+    const scale = Math.min(1, SHORE_MAX_PUSH / pm);
+    car.pos.x += pushX * scale; car.pos.z += pushZ * scale;
+    const nx = pushX / pm, nz = pushZ / pm;           // unit normal, seaward
+    const into = -((car.vx || 0) * nx + (car.vz || 0) * nz);
+    if (into > 0) {
+      // Strip the landward component, then scrub the surviving alongshore
+      // slide: sand and shingle take way off a hull that is dragging through
+      // them, which is what stops a boat "coasting" along a beach forever.
+      const cx = (car.vx || 0) + nx * into, cz = (car.vz || 0) + nz * into;
+      const rx = fz, rz = -fx;
+      const u = (cx * fx + cz * fz) * 0.86;
+      const w = (cx * rx + cz * rz) * 0.86;
+      car.v = u;
+      car.vx = fx * u + rx * w; car.vz = fz * u + rz * w;
+      car._yawRate = (car._yawRate || 0) * 0.9;
+      // A grounding at speed READS — one shove and one spray burst, on their
+      // own cooldown so a hull scraping a beach does not machine-gun the FX
+      // layer. Never a fireball: putting a boat on the sand is embarrassing,
+      // not fatal.
+      if (car.player && into > 2.5 && !(car._shoreCD > 0)) {
+        car._shoreCD = 0.5;
+        if (CBZ.shake) CBZ.shake(Math.min(0.7, into * 0.09));
+        if (CBZ.waterHit) {
+          CBZ.waterHit(car.pos.x, surfaceAt(car.pos.x, car.pos.z), car.pos.z,
+            { speed: into, mass: (S.massT || 1) * 1000, kind: "vehicle" });
+        }
+      }
+    }
+    return pm * scale;
+  };
 
   // ============================================================
   //  THE HELM
@@ -317,6 +419,17 @@
       const carry = 1 - 0.78 * Math.min(1, spd / 6);
       car.pos.x += cu.x * carry * dt;
       car.pos.z += cu.z * carry * dt;
+    }
+
+    // ---- 11.5 THE WATERLINE ----------------------------------------------
+    // Last thing to touch position before the seat, so the hull the camera and
+    // the buoyancy pass see this frame is one that is actually in the water.
+    // The resolver rewrites car.v/vx/vz, so surge and sway are re-read from it
+    // rather than kept — everything below (quay, slam, transforms, audio)
+    // works off the CORRECTED velocity, not the one that drove ashore.
+    if (CBZ.marineShoreBlock(car, S, dt) > 0) {
+      u = car.vx * fx + car.vz * fz;
+      w = car.vx * rx + car.vz * rz;
     }
 
     // ---- 12. RIDE HEIGHT -------------------------------------------------

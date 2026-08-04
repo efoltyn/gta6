@@ -1381,8 +1381,14 @@
     car._steerInput = clamp(err, -1, 1);
 
     // A hull that has been steered onto rock or sand hands itself back rather
-    // than grinding across a beach.
-    if (!waterAt(car.pos.x, car.pos.z)) {
+    // than grinding across a beach. water_helm.js's CBZ.marineShoreBlock is
+    // the ONE shoreline resolver now — it probes BOW AND STERN (this check saw
+    // only the centre, so a 34 m hull buried half its length in the sand
+    // before it noticed) and strips just the landward velocity, so a boat
+    // under autopilot slides along a beach and steers off it instead of
+    // stopping dead on it. Feature-detected; the old step-back is the degrade.
+    if (CBZ.marineShoreBlock) CBZ.marineShoreBlock(car, S, dt);
+    else if (!waterAt(car.pos.x, car.pos.z)) {
       car.pos.x -= car.vx * dt; car.pos.z -= car.vz * dt;
       car.v = u * 0.2; car.vx = fx * car.v; car.vz = fz * car.v;
     }
