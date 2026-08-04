@@ -93,6 +93,11 @@
   // alone: WORLD_SCALE_V4 rides on top of WORLD_LAYOUT_V2, so reading the raw
   // flag would re-derive this deck in a world that is otherwise stage 2.
   const _CW_DERIVE = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 4;
+  // WORLD_SCALE_V5 — the 10x basin. Read the same way (the STAGE, never the
+  // raw flag). Four things in this file answer to it and each says so where it
+  // stands: this deck's inland corner, the corridor gate, the erg mesh, and
+  // the natural-scatter density.
+  const _V5 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 5;
   const CW_Z = _CW_DERIVE
     ? Math.max(MINZ + 45, Math.min(MAXZ - 45, -300 + _SPOFF.dz))
     : (-300 + _SPOFF.dz);                 // causeway centerline z
@@ -100,7 +105,26 @@
   const CW_X0 = _CW_DERIVE
     ? (_SPD_CX + _CW_CHORD - 34)          // noses 34u inside the speedway's east rim at THIS z
     : ((490 + _SPOFF.dx) + 170);          // authored: rim-at-the-equator + a guess
-  const CW_X1 = MINX + 6;                 // tuck into the desert's west edge
+  // Inland end of the deck. 6 u is a tuck into the shore and nothing more,
+  // which was fine while the basin's spine sat 700 m away. On the 10x basin
+  // the spine is 2.3 km south of this dock (see the layout header: the erg
+  // grows east and south so its north-west corner can stay put), so the deck
+  // TURNS here and runs down to the highway — and a corner needs to be far
+  // enough inside the shore that a 24 m deck plus its region pad is on land.
+  const CW_X1 = _V5 ? (MINX + 30) : (MINX + 6);
+
+  // NATURAL SCATTER RIDES THE AREA on the 10x basin, and only there. The
+  // saguaro field, the brush and the tumbleweeds are fixed candidate counts
+  // (90 / 110 / 24) laid over whatever rect this biome happens to have, so
+  // their DENSITY has silently fallen with every footprint scale — 109 per
+  // km^2 as authored, 42 by stage 4, and 4 per km^2 on a 21 km^2 erg, which
+  // is one saguaro every 490 m: not a desert, a beach. Holding the STAGE-4
+  // density rather than the authored one is deliberate — it leaves today's
+  // world untouched, which is what makes the flag a real one-line revert.
+  // Everything here is instanced, so 900 saguaros cost the same draw call as
+  // 90, and the counts stay deterministic (build-time constants over the
+  // biome's own seeded stream, replayed whole on every rebuild).
+  const SCAT = _V5 ? Math.max(1, Math.round((FSC / 1.60) * (FSC / 1.60))) : 1;
 
   // ---- palette (warm tan basin; one shared material per color) -------------
   const SAND      = 0xcdb486;             // sun-worn ochre, not yellow plastic
@@ -340,23 +364,75 @@
   // ends 600 m inside our north shore) rather than waiting for a record that
   // does not exist yet. Null when the farm county is absent.
   const _FARM = (CBZ.worldFoot && CBZ.worldFoot("farmland")) || null;
-  const COYLE_X = _FARM ? _FARM.cx : null, COYLE_Z1 = MINZ + 600;
+  const COYLE_X = _FARM ? _FARM.cx : null;
+  // …AND IT ENDS WHERE THE DECK ENDS, WHICH IS NOT "600 m IN". biome_farmland
+  // runs that deck to `max(our MINZ + 600, our HWY_Z + 30)` — it aims at the
+  // SPINE, not at a fixed depth — so the 600 was only ever right while the two
+  // happened to coincide. On the 10x basin the spine is 2.3 km inside the
+  // shore and the old literal would have flattened the first 600 m and left
+  // the remaining 1.7 km of a real, drivable highway buried under 55 m draa.
+  // Same expression as the deck's, so the flat band cannot fall short of it
+  // again. Held at the literal below stage 5 (that world's deck overruns by
+  // 142 m and the 150 m fade covers it, so nothing there changes).
+  const COYLE_Z1 = _V5 ? Math.max(MINZ + 600, HWY_Z + 30) : (MINZ + 600);
+  // (c) THE SALTLANDS APPROACH — the leg the deck turns onto at CW_X1 and
+  // runs south to the spine. Only exists on the 10x basin; see CW_X1.
+  const APPROACH_Z0 = Math.min(CW_Z, HWY_Z), APPROACH_Z1 = Math.max(CW_Z, HWY_Z);
   function bandGate(d) {
     if (d <= CORRIDOR_FLAT) return 0;
     if (d >= CORRIDOR_FLAT + CORRIDOR_FADE) return 1;
     return smooth01((d - CORRIDOR_FLAT) / CORRIDOR_FADE);
   }
+  // A DECK IS A SEGMENT, NOT A LINE, and on the 10x basin that stops being a
+  // pedantic distinction. Gating on |x - lineX| inside a z window puts a CLIFF
+  // at the window's edge — full relief on one side of an invisible line, dead
+  // flat on the other, with no road within 150 m of it — and a 40 m draa flank
+  // standing on nothing is exactly the kind of thing the corridor gate exists
+  // to prevent. Point-to-segment distance rounds the cap instead, so a
+  // corridor ENDS where its deck ends. Same grammar CBZ.highwayNetReliefGate
+  // uses; stage <= 4 keeps the infinite-line form byte for byte.
+  function segDist(x, z, ax, az, bx, bz) {
+    const vx = bx - ax, vz = bz - az;
+    const L2 = vx * vx + vz * vz;
+    let t = L2 > 0 ? ((x - ax) * vx + (z - az) * vz) / L2 : 0;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    const px = ax + vx * t - x, pz = az + vz * t - z;
+    return Math.sqrt(px * px + pz * pz);
+  }
+  const CW_XMIN = Math.min(CW_X0, CW_X1), CW_XMAX = Math.max(CW_X0, CW_X1);
+  const CORRIDOR_REACH = CORRIDOR_FLAT + CORRIDOR_FADE;   // past this a deck cannot matter
   function corridorGate(x, z) {
     if (CFG.DESERT_DUNES_V3 === false) return 1;
-    // (a) the Saltlands causeway: horizontal, docking on our west shore
     let g = 1;
-    if (x > Math.min(CW_X0, CW_X1) - CORRIDOR_FADE) {
+    // (a) the Saltlands causeway: horizontal, docking on our west shore.
+    //     Unbounded in x, this band was a dead-flat strip running the FULL
+    //     width of the erg at the causeway's z — 1.4 km of it hidden against
+    //     the shore falloff, and 4.5 km of it not hidden at all.
+    if (_V5) {
+      if (x > CW_XMIN - CORRIDOR_REACH && x < CW_XMAX + CORRIDOR_REACH &&
+          z > CW_Z - CORRIDOR_REACH && z < CW_Z + CORRIDOR_REACH) {
+        g = bandGate(segDist(x, z, CW_XMIN, CW_Z, CW_XMAX, CW_Z));
+        if (g <= 0) return 0;
+      }
+    } else if (x > CW_XMIN - CORRIDOR_FADE) {
       g = bandGate(Math.abs(z - CW_Z));
       if (g <= 0) return 0;
     }
-    // (b) the Coyle causeway: vertical, dropping in from the north
-    if (COYLE_X != null && z < COYLE_Z1 + CORRIDOR_FADE) {
-      const t = bandGate(Math.abs(x - COYLE_X));
+    // (b) the Coyle causeway: vertical, dropping in from the north. Its north
+    //     end is off our shore (the deck comes from the farm county), so the
+    //     segment starts outside the basin where our height field is 0 anyway.
+    if (COYLE_X != null && z < COYLE_Z1 + CORRIDOR_REACH) {
+      const t = _V5
+        ? bandGate(segDist(x, z, COYLE_X, MINZ - 400, COYLE_X, COYLE_Z1))
+        : (z < COYLE_Z1 + CORRIDOR_FADE ? bandGate(Math.abs(x - COYLE_X)) : 1);
+      if (t <= 0) return 0;
+      if (t < g) g = t;
+    }
+    // (c) the Saltlands approach: the leg the deck turns onto at CW_X1 and
+    //     runs south to the spine. It is what makes the basin's only land
+    //     entrance reach the only road in it.
+    if (_V5 && z > APPROACH_Z0 - CORRIDOR_REACH && z < APPROACH_Z1 + CORRIDOR_REACH) {
+      const t = bandGate(segDist(x, z, CW_X1, APPROACH_Z0, CW_X1, APPROACH_Z1));
       if (t <= 0) return 0;
       if (t < g) g = t;
     }
@@ -557,58 +633,161 @@
     // footprint the cap binds and the cells come out 5.3 x 5.7 m, which still
     // puts 13 vertices across the shortest (72 m) ridge. At the authored size
     // the floors bind and the expressions return 176/188 exactly.
-    const GSEG_X = Math.min(264, Math.max(176, Math.round(HX * 2 / 5)));
-    const GSEG_Z = Math.min(264, Math.max(188, Math.round(HZ * 2 / 5)));
-    const groundGeo = CFG.DESERT_TERRAIN_V2 !== false
-      ? new THREE.PlaneGeometry(HX * 2, HZ * 2, GSEG_X, GSEG_Z)
-      : plane(CX, CZ, HX * 2, HZ * 2, 0.02);
-    if (CFG.DESERT_TERRAIN_V2 !== false) {
-      groundGeo.rotateX(-Math.PI / 2);
-      const pa = groundGeo.attributes.position;
-      const colors = new Float32Array(pa.count * 3);
-      const c = new THREE.Color(), edgeC = new THREE.Color(), sand = new THREE.Color(SAND), crest = new THREE.Color(SAND_PALE);
-      const lee = new THREE.Color(SAND_DK), red = new THREE.Color(RED_ROCK), redDk = new THREE.Color(RED_DK);
-      const desertEdge = new THREE.Color(0x9b8b5f);
-      const n = new THREE.Vector3(), sun = new THREE.Vector3(-0.55, 0.74, 0.39).normalize();
-      for (let i = 0; i < pa.count; i++) {
-        const wx = CX + pa.getX(i), wz = CZ + pa.getZ(i);
-        const y = desertHeightAt(wx, wz), mesaY = desertMesaHeightAt(wx, wz);
-        pa.setY(i, y);
-        desertNormalAt(wx, wz, n);
-        const light = Math.max(0, n.dot(sun)), slope = 1 - n.y;
-        if (mesaY > 2.2) {
-          c.copy(red).lerp(redDk, smooth01((slope - 0.08) / 0.5));
-          c.multiplyScalar(0.90 + 0.08 * Math.sin(y * 0.42));
-        } else {
-          c.copy(lee).lerp(sand, 0.42 + light * 0.44);
-          c.lerp(crest, smooth01((n.y - 0.72) / 0.25) * 0.24);
-        }
-        // The dune sea dies into dry sage over a broad interior band. The
-        // continent continues this exact hue through its organic influence,
-        // so the allocation rectangle has no visible colour seam from above.
-        const edgeDist = Math.min(wx - MINX, MAXX - wx, wz - MINZ, MAXZ - wz);
-        edgeC.copy(desertEdge).lerp(c, smooth01(edgeDist / 105));
-        c.copy(edgeC);
-        colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
-      }
-      pa.needsUpdate = true;
-      groundGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      groundGeo.computeVertexNormals();
-      groundGeo.computeBoundingSphere();
-    }
+    //
+    //   WORLD_SCALE_V5 BREAKS BOTH ENDS OF THAT SENTENCE, so the 10x basin
+    // takes a different bake — same field, same colours, three changes:
+    //
+    //   (1) IT IS TILED. One 4453 x 4756 m plane is a single mesh with a 3.3 km
+    //       bounding sphere: it is either fully drawn or not drawn, so standing
+    //       at the gas station costs every triangle in the erg. 6x6 tiles of
+    //       742 x 793 m frustum-cull to the four or nine you can actually see.
+    //       36 draw calls buys back ~85% of the triangles at any ground camera.
+    //   (2) ONE height eval per vertex, not five. The four extra bought a
+    //       2.4 m central-difference normal used ONLY to shade the baked
+    //       vertex COLOUR — the LIT normal came from computeVertexNormals,
+    //       i.e. from the grid, so the two never agreed anyway. Each tile now
+    //       samples a one-cell HALO and central-differences the grid it
+    //       already has, and that single normal serves both: colour and
+    //       lighting agree by construction, and because the halo is the
+    //       neighbouring tile's REAL ground the normals are continuous across
+    //       a seam (computeVertexNormals per tile would have drawn 10 lighting
+    //       creases across the erg). 440k vertices now cost less to bake than
+    //       today's 70k did — measured at 1.15 us per height eval.
+    //   (3) THE CELL GIVES A LITTLE: 7.0 m, not 5.3. That is 10 vertices
+    //       across the shortest (72 m) ridge instead of 13, on a basin with
+    //       ten times the area — 437k verts / 863k tris total. The draa the
+    //       owner asked for are 620-880 m landforms and do not notice.
+    //
+    // Vertices carry ABSOLUTE world coordinates and every tile sits at the
+    // origin: a tile's edge column must be bit-identical to its neighbour's or
+    // the erg cracks, and `centre + half` vs `centre + width - half` is not.
+    // One global formula, one answer. UVs are global for the same reason —
+    // the grain sheet is ONE sheet over the basin, not 36 copies of one.
+    const ERG_TILES = _V5 ? 6 : 1;
+    const GSEG_X = _V5
+      ? Math.max(8, Math.round(HX * 2 / ERG_TILES / 7))
+      : Math.min(264, Math.max(176, Math.round(HX * 2 / 5)));
+    const GSEG_Z = _V5
+      ? Math.max(8, Math.round(HZ * 2 / ERG_TILES / 7))
+      : Math.min(264, Math.max(188, Math.round(HZ * 2 / 5)));
+    const GRID_X = GSEG_X * ERG_TILES, GRID_Z = GSEG_Z * ERG_TILES;   // cells across the whole basin
+    const STEP_X = (HX * 2) / GRID_X, STEP_Z = (HZ * 2) / GRID_Z;
     const duneMat = makeDuneRippleMaterial(SAND);
-    const groundMesh = new THREE.Mesh(groundGeo, duneMat);
-    groundMesh.castShadow = false; groundMesh.receiveShadow = true;
-    // Freeze only after applying the world translation. Updating the matrix at
-    // local origin and then mutating position left the renderer/build audit
-    // disagreeing about where this 880x940m floor lived, carving a blue-looking
-    // dry hole beside Diamond Speedway.
-    if (CFG.DESERT_TERRAIN_V2 !== false) groundMesh.position.set(CX, 0, CZ);
-    groundMesh.matrixAutoUpdate = false; groundMesh.updateMatrix();
-    groundMesh.userData.terrain = true; groundMesh.userData.worldSurface = true;
-    groundMesh.userData.realGround = true;
-    groundMesh.name = "saltlands-desert-surface";
-    root.add(groundMesh);
+    const ergSun = new THREE.Vector3(-0.55, 0.74, 0.39).normalize();
+    const ergC = new THREE.Color(), ergEdgeC = new THREE.Color();
+    const ergSand = new THREE.Color(SAND), ergCrest = new THREE.Color(SAND_PALE);
+    const ergLee = new THREE.Color(SAND_DK), ergRed = new THREE.Color(RED_ROCK), ergRedDk = new THREE.Color(RED_DK);
+    const ergEdge = new THREE.Color(0x9b8b5f);
+    const ergN = new THREE.Vector3();
+    // The colour of one erg vertex, given its world position, its height and
+    // its surface normal. Identical maths in both bakes — only where `n` comes
+    // from differs, and that is the whole point of (2) above.
+    function ergVertexColor(wx, wz, y, n, out) {
+      const mesaY = desertMesaHeightAt(wx, wz);
+      const light = Math.max(0, n.dot(ergSun)), slope = 1 - n.y;
+      if (mesaY > 2.2) {
+        out.copy(ergRed).lerp(ergRedDk, smooth01((slope - 0.08) / 0.5));
+        out.multiplyScalar(0.90 + 0.08 * Math.sin(y * 0.42));
+      } else {
+        out.copy(ergLee).lerp(ergSand, 0.42 + light * 0.44);
+        out.lerp(ergCrest, smooth01((n.y - 0.72) / 0.25) * 0.24);
+      }
+      // The dune sea dies into dry sage over a broad interior band. The
+      // continent continues this exact hue through its organic influence,
+      // so the allocation rectangle has no visible colour seam from above.
+      const edgeDist = Math.min(wx - MINX, MAXX - wx, wz - MINZ, MAXZ - wz);
+      ergEdgeC.copy(ergEdge).lerp(out, smooth01(edgeDist / 105));
+      out.copy(ergEdgeC);
+      return out;
+    }
+    // ---- the ONE-PLANE bake (stage <= 4 and the flag-off world) -------------
+    function buildErgSinglePlane() {
+      const geo = CFG.DESERT_TERRAIN_V2 !== false
+        ? new THREE.PlaneGeometry(HX * 2, HZ * 2, GSEG_X, GSEG_Z)
+        : plane(CX, CZ, HX * 2, HZ * 2, 0.02);
+      if (CFG.DESERT_TERRAIN_V2 !== false) {
+        geo.rotateX(-Math.PI / 2);
+        const pa = geo.attributes.position;
+        const colors = new Float32Array(pa.count * 3);
+        for (let i = 0; i < pa.count; i++) {
+          const wx = CX + pa.getX(i), wz = CZ + pa.getZ(i);
+          const y = desertHeightAt(wx, wz);
+          pa.setY(i, y);
+          desertNormalAt(wx, wz, ergN);
+          ergVertexColor(wx, wz, y, ergN, ergC);
+          colors[i * 3] = ergC.r; colors[i * 3 + 1] = ergC.g; colors[i * 3 + 2] = ergC.b;
+        }
+        pa.needsUpdate = true;
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        geo.computeVertexNormals();
+        geo.computeBoundingSphere();
+      }
+      const m = new THREE.Mesh(geo, duneMat);
+      // Freeze only after applying the world translation. Updating the matrix at
+      // local origin and then mutating position left the renderer/build audit
+      // disagreeing about where this 880x940m floor lived, carving a blue-looking
+      // dry hole beside Diamond Speedway.
+      if (CFG.DESERT_TERRAIN_V2 !== false) m.position.set(CX, 0, CZ);
+      return [m];
+    }
+    // ---- the TILED bake (WORLD_SCALE_V5) ------------------------------------
+    function buildErgTiles() {
+      const out = [];
+      const hw = GSEG_X + 3, hh = GSEG_Z + 3;      // halo grid: one ring outside
+      const H = new Float32Array(hw * hh);
+      for (let tj = 0; tj < ERG_TILES; tj++) {
+        for (let ti = 0; ti < ERG_TILES; ti++) {
+          const g0 = ti * GSEG_X, h0 = tj * GSEG_Z;        // this tile's origin in global cells
+          // (a) heights over the halo — the ONLY place the field is evaluated
+          for (let b = 0; b < hh; b++) {
+            const wz = MINZ + (h0 + b - 1) * STEP_Z;
+            for (let a = 0; a < hw; a++) {
+              H[b * hw + a] = desertHeightAt(MINX + (g0 + a - 1) * STEP_X, wz);
+            }
+          }
+          const geo = new THREE.PlaneGeometry(HX * 2 / ERG_TILES, HZ * 2 / ERG_TILES, GSEG_X, GSEG_Z);
+          geo.rotateX(-Math.PI / 2);
+          const pa = geo.attributes.position, ua = geo.attributes.uv;
+          const colors = new Float32Array(pa.count * 3);
+          const normals = geo.attributes.normal;
+          for (let row = 0; row <= GSEG_Z; row++) {
+            for (let col = 0; col <= GSEG_X; col++) {
+              const i = row * (GSEG_X + 1) + col;
+              const gi = g0 + col, gj = h0 + row;
+              const wx = MINX + gi * STEP_X, wz = MINZ + gj * STEP_Z;
+              const hI = (row + 1) * hw + (col + 1);
+              const y = H[hI];
+              pa.setXYZ(i, wx, y, wz);
+              // central difference on the grid we already have (the halo is
+              // why the tile's own edge is not a special case)
+              ergN.set(-(H[hI + 1] - H[hI - 1]) / (2 * STEP_X), 1,
+                       -(H[hI + hw] - H[hI - hw]) / (2 * STEP_Z)).normalize();
+              normals.setXYZ(i, ergN.x, ergN.y, ergN.z);
+              ua.setXY(i, gi / GRID_X, 1 - gj / GRID_Z);
+              ergVertexColor(wx, wz, y, ergN, ergC);
+              colors[i * 3] = ergC.r; colors[i * 3 + 1] = ergC.g; colors[i * 3 + 2] = ergC.b;
+            }
+          }
+          pa.needsUpdate = true; ua.needsUpdate = true; normals.needsUpdate = true;
+          geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+          geo.computeBoundingSphere();
+          out.push(new THREE.Mesh(geo, duneMat));
+        }
+      }
+      return out;
+    }
+    const ergMeshes = (_V5 && CFG.DESERT_TERRAIN_V2 !== false)
+      ? buildErgTiles() : buildErgSinglePlane();
+    for (let mi = 0; mi < ergMeshes.length; mi++) {
+      const groundMesh = ergMeshes[mi];
+      groundMesh.castShadow = false; groundMesh.receiveShadow = true;
+      groundMesh.matrixAutoUpdate = false; groundMesh.updateMatrix();
+      groundMesh.userData.terrain = true; groundMesh.userData.worldSurface = true;
+      groundMesh.userData.realGround = true;
+      groundMesh.name = ergMeshes.length > 1
+        ? ("saltlands-desert-surface-" + mi) : "saltlands-desert-surface";
+      root.add(groundMesh);
+    }
     if (CFG.DESERT_TERRAIN_V2 !== false && CBZ.registerCityGroundHeight) {
       CBZ.registerCityGroundHeight(desertHeightAt, { name: "Saltlands dunes and mesas", biome: "desert" });
       CBZ.desertTerrainHeightAt = desertHeightAt;
@@ -711,7 +890,7 @@
     //     saguaro). Kept away from the highway corridor + buildings later.
     // =====================================================================
     const cactusSpots = [];
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 90 * SCAT; i++) {
       const x = rr(MINX + 18, MAXX - 18), z = rr(MINZ + 18, MAXZ - 18);
       const h = rr(2.6, 5.2), arms = (rng() < 0.7 ? 1 : 0) + (rng() < 0.4 ? 1 : 0);   // draw rng FIRST (determinism)
       if (inTown(x, z) || !claimNature(x, z, 1.15)) continue;                           // no saguaros in streets, roads, or future landmarks
@@ -798,7 +977,7 @@
     // =====================================================================
     const ROCKS = CFG.DESERT_ROCK_SCATTER === true;
     const boulders = [];
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < 140 * SCAT; i++) {
       const x = rr(MINX + 12, MAXX - 12), z = rr(MINZ + 12, MAXZ - 12);
       const s = rr(0.5, 3.4);                       // draw rng FIRST (determinism)
       if (inTown(x, z) || !claimNature(x, z, Math.max(0.8, s * 0.8))) continue; // no boulders on authored space or each other
@@ -882,8 +1061,8 @@
     //     colliders (you brush right through dry brush).
     // =====================================================================
     const scrubGeo = new THREE.IcosahedronGeometry(0.6, 0);
-    const scrubIM = new THREE.InstancedMesh(scrubGeo, cmat(SCRUB), 110);
-    for (let i = 0; i < 110; i++) {
+    const scrubIM = new THREE.InstancedMesh(scrubGeo, cmat(SCRUB), 110 * SCAT);
+    for (let i = 0; i < 110 * SCAT; i++) {
       const sx = rr(MINX + 8, MAXX - 8), sz = rr(MINZ + 8, MAXZ - 8);
       const s = rr(0.5, 1.3); const rot = rng() * Math.PI;       // draw rng FIRST
       // Keep the instance count/rng stream stable, but hide any candidate that
@@ -897,8 +1076,8 @@
     scrubIM.castShadow = true; root.add(scrubIM);
 
     const tumbleGeo = new THREE.IcosahedronGeometry(0.7, 1);
-    const tumbleIM = new THREE.InstancedMesh(tumbleGeo, cmat(TUMBLE), 24);
-    for (let i = 0; i < 24; i++) {
+    const tumbleIM = new THREE.InstancedMesh(tumbleGeo, cmat(TUMBLE), 24 * SCAT);
+    for (let i = 0; i < 24 * SCAT; i++) {
       const tx = rr(MINX + 10, MAXX - 10), tz = rr(MINZ + 10, MAXZ - 10);
       const s = rr(0.6, 1.1); const rx = rng() * Math.PI, ry = rng() * Math.PI, rz = rng() * Math.PI;   // draw rng FIRST
       dummy.position.set(tx, (inTown(tx, tz) || !openNature(tx, tz, s * 0.8)) ? -50 : (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(tx, tz) : 0) + 0.6, tz);
@@ -1015,8 +1194,17 @@
     if (CBZ.buildHighway) {
       // heightAt: grade-follow world/terrain.js relief (0 over this rect's
       // flat playable footprint — a free, safe hook for the backdrop rim).
+      // THE APPROACH LEG. On the 10x basin the deck does not stop at the
+      // shore: it turns south at CW_X1 and runs to the spine, because the
+      // basin grew away from this dock (the layout header explains why it had
+      // to) and a 2.3 km walk over open draa is not an entrance. Three points,
+      // no fillet — this is a T onto the highway, and buildHighway registers
+      // the new leg as a drivable segment for free (HWY-3), deduping the
+      // horizontal one this file already pushed in section 0.
+      const cwPath = [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }];
+      if (_V5) cwPath.push({ x: CW_X1, z: HWY_Z });
       CBZ.buildHighway(root, {
-        path: [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }],
+        path: cwPath,
         width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
         guardrail: false, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
