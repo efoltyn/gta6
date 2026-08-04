@@ -43,9 +43,16 @@
   // Ambient scenedirector set-pieces during ENDLESS free time (scripted phases
   // always suppress them — see CBZ.cityCampaignScenesBlocked below).
   if (CFG.CAMPAIGN_AMBIENT_SCENES == null) CFG.CAMPAIGN_AMBIENT_SCENES = true;
+  // THE MERGED OPENING (owner 2026-08-03, "make them one"): the campaign now
+  // opens on the retired Hitman preset's texture — the motel room, the
+  // suppressed pistol, ONE NAME bound to a real ped — and the roof is the
+  // PAYMENT HANDOFF that turns out to be the trap. false = one-line revert to
+  // the old helicopter-first prologue (and the plain sidearm kit).
+  if (CFG.HITMAN_ONE_CARD == null) CFG.HITMAN_ONE_CARD = true;
 
   const VERSION = 1;
   const PHASE = {
+    MOTEL: "motel_name",
     DROP: "prologue_drop",
     PRISON: "prison_arrival",
     PRISON_ESCAPE: "prison_escape",
@@ -101,7 +108,10 @@
   // never sees a warden offer or a hijacked winGame.
   function campaignRun() {
     if (g.mode === "escape") return !!g._campaignEscape;
-    return g.cityOrigin === "contract";
+    // `hitman` is the RETIRED id of the merged card (origins.js maps it to
+    // `contract` everywhere it can persist); accepting it here too means a
+    // stale in-memory value from an old save can never strand the run.
+    return g.cityOrigin === "contract" || g.cityOrigin === "hitman";
   }
   function active() { return CFG.CITY_HITMAN_CAMPAIGN !== false && campaignRun(); }
   CBZ.cityCampaignActive = active;
@@ -112,10 +122,11 @@
     return {
       version: VERSION,
       chapter: 0,
-      phase: PHASE.DROP,
+      phase: CFG.HITMAN_ONE_CARD !== false ? PHASE.MOTEL : PHASE.DROP,
       branch: null,
       contractNo: 0,
       flags: {
+        markName: null,
         dropped: false,
         arrested: false,
         wardenSpoke: false,
@@ -617,10 +628,120 @@
     activatePhase(true);
   }
 
+  // ---- THE MERGED OPENING (HITMAN_ONE_CARD): the motel and the one name ----
+  // The retired Hitman preset's whole texture, run as the campaign's first
+  // beat: wake in the room the world built (origins' own motel finder, staged
+  // as a real annex by city/hitman.js), read ONE NAME off the wall, and the
+  // mark is a ped the simulation was already running — hitman.js's tier-0
+  // binder, so the dossier (job, shift, where he sleeps) is READ, not written.
+  // No target is ever spawned: a world that cannot supply the name skips
+  // straight to the handoff with the fiction intact.
+  function stageMotelMark() {
+    R.kind = "motel_name";
+    g.escapedConvict = false; g.wanted = 0; g.heat = 0;   // clean opening; the purse is the character's
+    const room = CBZ.hitmanRoom ? CBZ.hitmanRoom() : null;
+    const P = player();
+    if (P && P.pos) {
+      const A = arena();
+      const sx = room && room.spawn ? room.spawn.x : (A && A.spawn ? A.spawn.x : 0);
+      const sz = room && room.spawn ? room.spawn.z : (A && A.spawn ? A.spawn.z : 0);
+      P.driving = false; P._vehicle = null;
+      P.pos.set(sx, floorY(sx, sz), sz);
+      P.speed = 0; P.crouch = false; P.vy = 0; P.grounded = true;
+      if (room && room.spawn && CBZ.cam) CBZ.cam.yaw = room.spawn.heading || 0;
+      if (CBZ.playerChar && CBZ.playerChar.group) {
+        CBZ.playerChar.group.position.copy(P.pos);
+        CBZ.playerChar.group.visible = true;
+      }
+    }
+    if (CBZ.setFPS) CBZ.setFPS(false);
+    // BIND WITH A RETRY WINDOW. The reset wrap stages this phase before the
+    // crowd systems have necessarily populated the street, so a one-shot bind
+    // could skip the whole motel beat on every fresh run. tickMotelMark
+    // retries ~once a second for the window; only then does the beat degrade
+    // to the handoff (never a spawned mark — the world supplies or it does not).
+    R.transitionT = 12;
+    R.lastProgress = -1;
+    const where = room ? room.name : "A rented room";
+    if (!motelBindTry(where)) {
+      setMission({
+        id: "the-name",
+        title: "THE NAME",
+        briefing: "The room came furnished: a wall, a locked case, and an envelope that promises one photograph. It has not been pinned yet.",
+        location: where,
+        status: "active",
+        objectives: [{ id: "wall", text: "Check the wall", done: false }],
+      });
+      notify("personal", "GHOSTLINE", "The room is yours. The first name is being pulled now.");
+    }
+  }
+
+  function motelBindTry(where) {
+    let con = null;
+    try { con = CBZ.hitmanBind ? CBZ.hitmanBind(0, { salt: 77, minDist: 70 }) : null; } catch (e) { con = null; }
+    if (!con || !con.ped) return false;
+    R.target = con.ped;
+    R.target._campaignTarget = true;
+    R.target._campaignRole = "the first name";
+    if (R.actors.indexOf(R.target) < 0) R.actors.push(R.target);
+    makeMarker(R.target, null, 0xffc766);
+    const c = state();
+    c.flags.markName = R.target.name || null;
+    commit();
+    setMission({
+      id: "the-name",
+      title: "THE NAME",
+      briefing: "The room came furnished: a wall, a locked case, and one photograph. " +
+        (con.dossier ? con.dossier + " " : "") +
+        "Quiet is worth more than fast — a witnessed kill costs the margin.",
+      target: R.target.name,
+      location: where || "A rented room",
+      reward: 6500,
+      status: "active",
+      objectives: [{ id: "hit", text: "Eliminate " + (R.target.name || "the mark"), done: false }],
+    });
+    notify("personal", "GHOSTLINE", "One name, half up front. The wall has his picture; the case stays shut until you matter.");
+    return true;
+  }
+
+  function tickMotelMark(dt) {
+    if (!R.target) {
+      R.t += dt;
+      R.transitionT -= dt;
+      if (R.transitionT <= 0) {
+        notify("personal", "GHOSTLINE", "No name tonight. Your last fee is waiting at the handoff.");
+        transition(PHASE.DROP, 0, null);
+        return;
+      }
+      // retry the world binder about once a second inside the window
+      if ((R.t | 0) !== R.lastProgress) {
+        R.lastProgress = R.t | 0;
+        const room = CBZ.hitmanRoom ? CBZ.hitmanRoom() : null;
+        motelBindTry(room ? room.name : "A rented room");
+      }
+      return;
+    }
+    // the trail can honestly go cold (crowd recycling a far ped) — degrade to
+    // the handoff rather than wait on a body that no longer exists.
+    if (!R.target.dead && (!R.target.group || !R.target.group.parent)) {
+      notify("personal", "GHOSTLINE", "The name dropped off the wire. Keep the advance; the handoff stands.");
+      transition(PHASE.DROP, 0, null);
+      return;
+    }
+    if (!R.target.dead) return;
+    const quiet = (g.wanted | 0) === 0;
+    notify("personal", "GHOSTLINE", quiet
+      ? "Clean. Full fee plus the quiet margin. The pilot is already up — payment handoff is on the Spire helipad."
+      : "Loud. The fee stands, the margin does not. The pilot is already up — payment handoff is on the Spire helipad.");
+    transition(PHASE.DROP, quiet ? 9000 : 6500, "The first name");
+  }
+
   function stagePrologue() {
     R.kind = "prologue";
     R.transportReleased = false;
-    g.cash = 0; g.cityBank = 0; g.escapedConvict = false; g.wanted = 0; g.heat = 0;
+    g.escapedConvict = false; g.wanted = 0; g.heat = 0;
+    // (pre-merge this beat also zeroed cash/bank — the character now arrives
+    // with the hitman's purse and the motel fee, and keeps them to the roof.)
     R.pad = helipad();
     const h = makeHelicopter();
     h.position.set(R.pad.x, R.pad.y + 19, R.pad.z);
@@ -640,13 +761,13 @@
     if (CBZ.setFPS) CBZ.setFPS(false);
     setMission({
       id: "drop-point",
-      title: "DROP POINT",
-      briefing: "The pilot has one instruction: step onto the tallest roof and wait for the handoff.",
+      title: "THE HANDOFF",
+      briefing: "The client's pilot has one instruction: step onto the tallest roof and collect the payment handoff.",
       location: "The Spire — helipad",
       status: "active",
       objectives: [{ id: "land", text: "Exit the helicopter", done: false }],
     });
-    notify("personal", "PILOT", "Thirty seconds out. No luggage. No questions.");
+    notify("personal", "PILOT", "Thirty seconds out. Your fee is on the roof. No luggage. No questions.");
     say("PILOT", "Hold tight. Setting down on the Spire now.", 3.0);
   }
 
@@ -823,7 +944,11 @@
   function leavePrisonForCity(branch, resumePhase) {
     const c = state();
     // Once the warden answer is recorded no later handoff may rewrite it.
-    c.branch = c.branch || branch || "rogue";
+    // A MID-CAMPAIGN detention (resumePhase set) that predates the warden
+    // offer must NOT decide it either: a bust during the motel opening jails
+    // you before chapter 1, and breaking out of THAT is not refusing a deal
+    // nobody has made yet.
+    c.branch = c.branch || branch || (resumePhase ? null : "rogue");
     if (resumePhase) c.phase = resumePhase;
     else {
       c.phase = c.branch === "spy" ? PHASE.SPY_INSERTION : PHASE.STUDIO_ONE;
@@ -1819,7 +1944,11 @@
       return;
     }
     if (g.mode !== "city") return;
-    if (c.phase === PHASE.DROP) stagePrologue();
+    if (c.phase === PHASE.MOTEL) {
+      if (CFG.HITMAN_ONE_CARD === false) { c.phase = PHASE.DROP; commit(); stagePrologue(); }
+      else stageMotelMark();
+    }
+    else if (c.phase === PHASE.DROP) stagePrologue();
     else if (c.phase === PHASE.PRISON || c.phase === PHASE.PRISON_ESCAPE || c.phase === PHASE.PRISON_SPY_EXIT) {
       // A persisted prison checkpoint was launched from the canonical city
       // title. Switch only after startRun reaches playing so state.js can finish.
@@ -1849,7 +1978,8 @@
     if (R.kind === "return_to_prison") { goToPrison(); return; }
     if (g.mode === "escape") { tickPrison(dt); return; }
     if (g.mode !== "city") return;
-    if (R.kind === "prologue") tickPrologue(dt);
+    if (R.kind === "motel_name") tickMotelMark(dt);
+    else if (R.kind === "prologue") tickPrologue(dt);
     else if (R.kind === "spy_insertion") tickSpyInsertion(dt);
     else if (R.kind === "spy_intel") tickSpyIntel(dt);
     else if (R.kind === "studio_one" || R.kind === "studio_two") tickStudio();
@@ -2026,8 +2156,18 @@
         // worldstate may have restored a legacy sandbox arsenal after mode.js's
         // initial campaign loadout pass. Reassert the authored kit at the final
         // reset seam so the opening is a hitman story, not an RPG test bench.
+        // The merged kit IS the retired Hitman preset's: a genuinely
+        // suppressed sidearm (the fitted-mod store is keyed by FPS id —
+        // "sidearm" — which is what fpsmode's gunModsSuppressed reads).
         if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
         if (CBZ.unlockWeapon) CBZ.unlockWeapon("sidearm", { select: true });
+        if (CFG.HITMAN_ONE_CARD !== false) {
+          g.cityGunMods = g.cityGunMods || {};
+          const fit = g.cityGunMods.sidearm || { scope: null, mag: null, muzzle: null, under: null };
+          fit.muzzle = "suppressor";
+          g.cityGunMods.sidearm = fit;
+          if (CBZ.gunModsDressAll) { try { CBZ.gunModsDressAll(); } catch (e) {} }
+        }
         if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
         if (CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(48, "sidearm");
         if (CBZ.setFPS) CBZ.setFPS(false);
@@ -2048,7 +2188,8 @@
   if (typeof CBZ.cityBust === "function" && !CBZ.cityBust._campaignWrapped) {
     const baseBust = CBZ.cityBust;
     const wrappedBust = function () {
-      if (CFG.CITY_HITMAN_CAMPAIGN !== false && g.mode === "city" && g.cityOrigin === "contract") {
+      if (CFG.CITY_HITMAN_CAMPAIGN !== false && g.mode === "city" &&
+          (g.cityOrigin === "contract" || g.cityOrigin === "hitman")) {
         g._campaignEscape = true;
       }
       return baseBust.apply(this, arguments);
@@ -2080,7 +2221,9 @@
     if (active() && g.mode === "escape") {
       const c = state();
       const resumePhase = openingPrisonPhase(c.phase) ? null : c.phase;
-      if (!c.branch) c.branch = "rogue";
+      // escaping the OPENING prison chapter is refusing the warden; escaping a
+      // pre-chapter-1 detention (motel bust) decides nothing about him.
+      if (!c.branch && !resumePhase) c.branch = "rogue";
       if (CBZ.cityEvent) {
         try { CBZ.cityEvent("jail-escape", { respect: 4, panic: 2 }, { noWanted: true, silent: true }); } catch (e) {}
       }
@@ -2101,7 +2244,10 @@
     if (CFG.CITY_HITMAN_CAMPAIGN === false) return;
     let p = null;
     try { p = JSON.parse(localStorage.getItem("CBZ_CITY_WORLD_V2")); } catch (e) { p = null; }
-    if (p && p.version === 2 && p.originPlayed && p.origin === "contract") {
+    // `hitman` is the retired id of the merged card — a save on record as the
+    // old Hitman preset IS this character now (origins.js's alias re-stamps
+    // the ledger itself on the first apply).
+    if (p && p.version === 2 && p.originPlayed && (p.origin === "contract" || p.origin === "hitman")) {
       g.cityOrigin = "contract";
       if (CBZ.setCityOrigin) CBZ.setCityOrigin("contract");   // picker sync only — no "picked" intent
     }

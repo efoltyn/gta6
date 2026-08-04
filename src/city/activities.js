@@ -51,8 +51,8 @@
     { id: "disaster", cat: "Emergency", label: "City Disaster Event", cost: 0, time: 4, reward: 260, desc: "Fire, flood, panic, evacuation, destruction, repairs, and emergency politics." },
     { id: "survival-island", cat: "Emergency", label: "Deploy To Disaster Island", cost: 0, time: 0, reward: 0, desc: "Launch the disaster survival activity while writing deployment consequences to City." },
 
-    { id: "hitman", cat: "Crime", label: "Street Hitman Contract", cost: 0, time: 0, reward: 650, desc: "Pick a real city target. Completion affects money, wanted level, factions, and hitman rep." },
-    { id: "official-contract", cat: "Crime", label: "Protected Official Contract", cost: 0, time: 4.5, reward: 2200, desc: "Fictional high-risk contract with major police, political, media, and public panic fallout." },
+    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "Take a name off the network. The mark is a person the city already runs — a job, a shift, a habit. Quiet pays more than loud." },
+    { id: "official-contract", cat: "Crime", label: "Protected Contract", cost: 0, time: 0, reward: 15000, desc: "The upper wall: protected principals and sitting officeholders. The network only hands these to a proven reputation." },
     { id: "jail", cat: "Crime", label: "Turn Yourself In", cost: 0, time: 0, reward: 0, desc: "Route into the jail/prison activity. Your city ledger keeps the arrest history." },
   ];
 
@@ -137,7 +137,13 @@
       if (CBZ.cityBust) CBZ.cityBust({ peaceful: true });
       return;
     }
-    if (def.id === "hitman") { startHitman(false); hide(); return; }
+    // THE ONE CONTRACT PIPE (Block Law): both Crime doors are thin routes into
+    // city/hitman.js — the marks ladder that binds real peds / power.js
+    // principals / the sitting officeholder and runs through CBZ.mission. The
+    // old parallel generator (its own target pick, completion tick and payout)
+    // is DELETED, not dark.
+    if (def.id === "hitman") { hide(); if (CBZ.hitmanStart) CBZ.hitmanStart(); else note("The network is quiet.", 2); return; }
+    if (def.id === "official-contract") { hide(); if (CBZ.hitmanStart) CBZ.hitmanStart({ min: 1 }); else note("The network is quiet.", 2); return; }
 
     // ---- rich interactive sub-modals (no entry-fee gate here; they take stakes inside) ----
     if (def.id === "casino-table") { openCasino(); return; }
@@ -212,14 +218,10 @@
       profit = win ? def.reward : 0; payout(profit);
       CBZ.cityEvent && CBZ.cityEvent("disaster", { panic: 16, damage: win ? 5 : 14, fire: 1, flood: Math.random() < 0.4 ? 1 : 0, emergency: 20, political: 1, confidence: -5, message: "City disaster response logged." });
       crashNearPlayer(16);
-    } else if (def.id === "official-contract") {
-      profit = def.reward; payout(profit);
-      CBZ.cityEvent && CBZ.cityEvent("assassination", {
-        cash: 0, hitman: 10, panic: 24, damage: 4, emergency: 22, political: -8, heat: 5,
-        crimeHeat: 900, instant: true, crimeType: "protected-official-assassination", factions: { police: -10, political: -12, public: -10 },
-        label: "Protected official contract", message: "Major fictional political fallout hit the city.",
-      });
     }
+    // (the old "official-contract" branch — $2,200 and city-wide fallout for a
+    // 4.5s timer with NO target — was a stat fiction; that door now routes to
+    // the one contract pipe in start(), where the officeholder is real.)
 
     active = null;
     g.cityActivity = null;
@@ -253,20 +255,10 @@
     note(dst ? ("Transit dropped you at " + (dst.building.name || "a stop") + ".") : "Transit route complete.", 2);
   }
 
-  function startHitman(highValue) {
-    const pool = (CBZ.cityPeds || []).filter((p) => !p.dead && !p.vendor && !p.gang);
-    const target = pool.length ? pool[(Math.random() * pool.length) | 0] : null;
-    if (!target) { note("No viable target in the city right now.", 1.8); return; }
-    const reward = highValue ? 2200 : 650 + ((Math.random() * 450) | 0);
-    g.cityJob = {
-      type: "hitman", target, reward,
-      desc: (highValue ? "HIGH VALUE CONTRACT: " : "HITMAN CONTRACT: ") + target.name,
-      highValue: !!highValue,
-    };
-    CBZ.cityEvent && CBZ.cityEvent("hitman-contract", { highValue, label: g.cityJob.desc, hitman: 2, message: "Contract target marked on the HUD." });
-    note("Contract accepted: " + target.name + ".", 2.4);
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-  }
+  // (startHitman is DELETED — the parallel "Street Hitman Contract" system.
+  //  It picked its own target, ran its own completion tick and paid itself;
+  //  city/hitman.js is the one pipe now and CBZ.hitmanAudit() pins
+  //  legacyStreetHitmanSites at 0.)
 
   /* =========================================================
      Shared modal scaffolding for the interactive minigames.
@@ -328,7 +320,10 @@
     // timed activity + its HUD job line
     active = null;
     if (g.cityActivity) g.cityActivity = null;
-    if (g.cityJob && (g.cityJob.type === "activity" || g.cityJob.type === "hitman")) g.cityJob = null;
+    // ("hitman" no longer appears here: nothing mints that g.cityJob type any
+    //  more — contracts run through CBZ.mission, whose own interrupt sweeper
+    //  fails them on death/bust/mode-exit.)
+    if (g.cityJob && g.cityJob.type === "activity") g.cityJob = null;
     // any sub-modal (fight night, casino, sportsbook) and the board itself
     fight = null;
     try { closeModal(); } catch (e) {}
@@ -1300,18 +1295,8 @@
       if (g.cityActivity) g.cityActivity.t = Math.max(0, active.t);
       if (active.t <= 0) resolve(defById(active.id));
     }
-    const j = g.cityJob;
-    if (j && j.type === "hitman" && j.target) {
-      if (j.target.dead) {
-        CBZ.cityEvent && CBZ.cityEvent(j.highValue ? "assassination" : "hitman-complete", {
-          cash: j.reward, respect: j.highValue ? 12 : 5, hitman: j.highValue ? 8 : 4,
-          panic: j.highValue ? 18 : 5, emergency: j.highValue ? 10 : 2,
-          crimeHeat: j.highValue ? 720 : 260, instant: !!j.highValue, crimeType: j.highValue ? "protected-target-hit" : "murder-for-hire",
-          label: j.desc, message: "Contract complete.",
-        });
-        if (CBZ.city && CBZ.city.big) CBZ.city.big("CONTRACT PAID + $" + j.reward);
-        g.cityJob = null;
-      }
-    }
+    // (the hitman completion tick is DELETED with its generator — the one
+    //  contract pipe completes, pays and prices quiet-vs-loud through
+    //  core/mission.js + city/hitman.js's settle().)
   });
 })();
