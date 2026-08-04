@@ -1131,6 +1131,17 @@ room. this opens the door to rocketship logic."*
 **Gate:** each builder green independently; orchestrator's final gate ran on the exact committed tree (temp worktree, boarding wave co-resident but excluded from the commit).
 
 **DEBT LEFT NAMED (cross-territory, next wave's menu):** `biome_snow.js` still hand-scatters 130 pines and has no treeline gradient — the subalpine wood into alpine meadow is one `closure`/`storey` call away and is the reference's best shot. Forest floor under closed canopy is still the terrain plate's pale sage (wants a dark duff tone — terrain material). Snow-biome `registerBiomeBlend` catchments still near-white around now-green mountain feet. Seabed albedo in the 0–20 m band + `city/world.js` 22 m shore-channel saturation cap the above-water turquoise band. Clouds hugging ridgelines = sky/weather territory. `TERRAIN_DARK_RANGE` stays off (owner order): green-out-of-the-sea is GEOGRAPHY (nearest open water to Mercy summit 2.7 km), not shading.
+
+## THE 2026-08-03 JAIL ONE-BAR WAVE — three inventory surfaces become one (solo)
+
+**Mandate (owner):** "in jail game there is tons of different inventory shown on HUD… unite all these inventory into one, and clean the hud up." The three surfaces: the 9-slot item hotbar (systems/inventory.js — where a warden-loot "Gun" proxy shows exactly one gun), fpsmode's floating #weaponStrip chip row bottom-right (every gun), and the #keycard chip top-right.
+
+- **Flag `JAIL_HUD_UNIFIED`** (default true, declared in systems/inventory.js — the owning file). The move is a **DOCK, not a fourth renderer**: fpsmode keeps drawing #weaponStrip through `CBZ.weaponSlotsHTML` (`weaponStripAudit().renderers` stays pinned at 1); the bag reparents the element as its leftmost cells each always-tick, and css/inventory.css (off `body.jail-hud-unified` + the `#hotbar #weaponStrip` docked position) sheds the floating-panel skin and re-cuts chips to the bag's 50px islot cell. Survival never docks (mode-survival hides the hotbar, the strip must keep floating); city hides both (its own #cSlots bar).
+- **One keymap**: digits 1..N equip the docked guns (they carry the printed numbers — dispatched via new `CBZ.fpsSelectWeaponId(id)`, fpsmode.js, which owns the weaponInventory-order ↔ availableIndices-order mapping); remaining digits select item slots. Chip click/tap equips too. **One cursor**: while a gun chip is held, the item cells drop their orange `.sel` (two orange boxes read as two selections); the armed-bit rides the existing held-weapon repaint signature because `heldWeaponId()`'s empty-bag fallback answers "sidearm" on both sides of a first-sidearm pickup.
+- **The keycard is a bag item**: interactions.js pickup grants a real `"Keycard"` item (ICON row existed since the icon wave); the chip is css-hidden but its `.have` class still toggles, so flag-off is byte-identical. `game.hasKey` stays the door/AI truth — the item is display, never a second key check.
+- **Measured** (isolated probe world, city boot → `setMode("escape")` → live run): `CBZ.jailHudAudit()` = `{docked:true, stripCells:2==guns:2, keycardChipHidden:true, keycardItem:true==hasKey:true}`; select-by-id flipped held smg→shotgun with exactly 1 held cell; keycard label present in a bar cell; flag-off LIVE re-floated the strip (`position:absolute`) and re-showed the chip. Visual: jail-scene preset `hud-idle` + `hud-arsenal` after-shots (artifacts/visual-comparisons/jail-scene-2026-08-04T02-47-24-275Z) — three docked gun chips + nine item cells as one bar, top-right reduced to timer+cigs. MATHGATE ok (90210:318/180/204 | det ok | errors baseline-only, boarding wave co-resident).
+- **Ratchet:** `CBZ.jailHudAudit()` — in a unified escape run `docked` must be true, `stripCells` must equal `guns` whenever armed, and `keycardItem === hasKey` from pickup on. Renderer count still pinned at 1 via `weaponStripAudit()`.
+- **Known edges (pre-existing, named not fixed):** live city→escape `setMode` switching leaves a broken searchlight rig spamming `searchlight.js:79` intensity errors — title-path escape boots are clean; out of this wave's territory. `#ammo` still floats alone at right:22px/bottom:210px — candidate to dock beside the bar in a future pass.
 ## THE 2026-08-04 SESSION — the modes wave: six territories in one parallel push
 
 Owner directive, compressed: massively deepen the racer; the two hitman
@@ -1249,3 +1260,67 @@ it, and committed by territory.
   (values matched builder predictions exactly) and only then pinned;
   MATHGATE re-run green WITH the pins; CONTRACT ok end-to-end. The
   verification.md "rooftop prologue" note is updated to the motel opening.
+
+## 2026-08-03/04 — Vehicles become PLACES, money becomes an OBJECT (8 opus waves)
+
+Owner briefs, verbatim spine: "fix the appearance of how player driving car in
+third person… first person like person driving the car… too many props [in the
+cockpit]… really make interior of car exist like how interior of building with
+glass exists… cargo plane where you can open and close the back and even a tank
+can drive in… banks… real vaults in the back with massive amounts that you can
+bomb your way into, that open as rooms just like elevators… in bags that player
+can pick up… drive to a warehouse they can buy on a plot like the fake
+pentagon… not random chance, real… really making this game smart." Process
+directive mid-session: EACH builder runs its OWN before/after visual loop; the
+orchestrator only orchestrates + one merged math-gate.
+
+- **CARS (CAR_CABIN_V2 / CAR_DRIVER_VISIBLE / CAR_FP_VIEW)**: dressCabin makes
+  every body style a sealed readable room publishing a frame (floorY/cushion/
+  seats/wheel/eye); the real dressed player rig drives visibly (occWanted's
+  player-exclusion deleted); [V] + touch VIEW pill mount an in-cabin first
+  person (cam height 10m→1.19m) inside the ONE camera writer. carCabinAudit:
+  bare 0 (was 3), glass renderOrder 1 (buildings' law adopted).
+- **COCKPITS (COCKPIT_CLEAN_V2 / AIR_PILOT_VISIBLE)**: props 153→86 total
+  (fighter 29→16) by welding what is one machine into one mesh; one-piece
+  ellipsoidal canopy; sillDrop puts the sill under the eye (the real "mail
+  slot" fault); sight audit unchanged (worst 15.93°). Every airframe shows a
+  real dressed pilot through the glass; NPC roster pilots via airSeatActor.
+- **BANKS/CASINOS (BANK_VAULT_V1 / CASH_BAGS_V1 / TILL_RESERVE_VAULT /
+  CASINO_VAULT_V1)**: cityVaultRoom at EVERY bank lot + casino count rooms;
+  the leaf swings, the collider IS the lock; entry is C4 (armored.js blast-
+  wrap pattern; 3/4/6 charges by tier) or an insider — closing the stat
+  fiction that loyalty's apex rung granted "vault" with no consumer. Reserve
+  vault = Σ districtCash × 90-day cycle (derived two ways, 12% agreement).
+  Money is bags: one-at-a-time shoulder carry, no sprint, dye stains the bag;
+  heists.js bank tier physical (drill bar deleted, crew cut recorded owed).
+- **OCCUPANTS (CAR_OCCUPANCY_REAL / DRIVEBY_TRAFFIC / JACK_REACTIONS)**:
+  occupancy is a FACT stamped at population — the passenger seen through the
+  glass is the one who reacts at jack time (fight/flee/freeze from citySizeUp
+  + trait hash; frozen passenger = your hostage); drive-bys claim real
+  traffic cars (lanes, lights, IDM) with hunt as posture; eject is heading-
+  aware with crime/witness/relShift filed.
+- **HOLDS (VEHICLE_HOLD_V1 / CARGO_PLANE_V1 + SEMI_TRUCK_V1 / VAN_HOLD_V1)**:
+  CBZ.vehicleHold — a walk-in room in a moving vehicle (platforms rig for the
+  player, npclife for bodies, latch for vehicles/cargo); cargo airframe with
+  phased rear ramp (tank drives in); semi + van adopt with rear-door arcs;
+  bags latch aboard (per-hold counts: groundBags beside world bagsAboard).
+- **WAREHOUSE (WAREHOUSE_COMPLEX_V1 / CASH_STORE_V1, cashstore.js)**: own-land
+  COMPLEXES row + buyable; deposited bags are VISIBLE shelf stock — the room
+  is the bank statement; deposit settles heists' crewOwed; [Z] houses take a
+  home-safe count.
+- **BOARDING (COMPANION_BOARDING_V1 / FOLLOWER_ORDERS_V1 / CAR_DOOR_ARC,
+  boarding.js)**: aircraft_doors grammar generalized — followers walk/run to
+  their door, open a real hinged leaf (built per seat, painted from the body's
+  own material), step through in vehicle-local space, seat via npcLife.attach;
+  [O] "With you" orders (in/out/wait/grab bags/drive to warehouse) for all
+  FIVE follower kinds; restrain's trunk-hack is now a visible back seat.
+  GATE-PINNED: companionBoardAudit().teleports = 0.
+- **GATE**: MATHGATE ok on the merged tree (90210: 318/180/204, det ok,
+  errors baseline-only), run twice (pre-deploy state and final merge).
+- **DEBT NAMED, NOT FIXED**: companion movers reach only ~20-45% of intended
+  speed through clutter (speedWanted 2.61 / actual 1.09 measured) — owed its
+  own wave; occupy presets for banks/casinos still open; fpsmode's no-shoot-
+  while-driving gate untouched (player drive-bys owed); seatX sign convention
+  split between playercars/vehicles (+) and OCC_SLOTS/DB_SEATS (−) documented
+  in boarding.js header; two session-limit interruptions mid-wave were
+  resumed by audit-then-finish agents (the resume-file pattern in memory).
