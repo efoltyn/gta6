@@ -103,7 +103,13 @@
   //                          camTouchPitchRange for the whole argument)
   if (CBZ.CONFIG.TOUCH_TP_CAMERA_V2 == null) CBZ.CONFIG.TOUCH_TP_CAMERA_V2 = true;
   if (CBZ.CONFIG.CAM_TP_TOUCH_ZOOM == null) CBZ.CONFIG.CAM_TP_TOUCH_ZOOM = true;
-  if (CBZ.CONFIG.CAM_TOUCH_RECENTER == null) CBZ.CONFIG.CAM_TOUCH_RECENTER = true;
+  // DEFAULT OFF as of 2026-08-04 (owner: take the recenter button off the
+  // iPad). This flag owns the MANUAL action and its two buttons only; the
+  // vehicle's automatic recenter is a different writer (camRecenterSuspended,
+  // in vehicles/playeraircraft/water_helm) and still runs. camRecenter() is
+  // called from nowhere but #trecen and #tvRecen, so off = the buttons are
+  // gone and the seam refuses, rather than a live control that no-ops.
+  if (CBZ.CONFIG.CAM_TOUCH_RECENTER == null) CBZ.CONFIG.CAM_TOUCH_RECENTER = false;
   if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL == null) CBZ.CONFIG.CAM_TOUCH_PITCH_FULL = true;
   const tpTouch = () => CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false && !!CBZ.touchMode;
 

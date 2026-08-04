@@ -447,7 +447,9 @@
           pill("tvTrimR", tw + " ▶", "tv-sm") + "</div>";
       }
     }
-    h += pill("tvRecen", "RECENTER", "tv-sm");
+    // Same rule as the on-foot #trecen: when the flag is off the pill is not
+    // built, not merely hidden by the show() sweep below.
+    if (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false) h += pill("tvRecen", "RECENTER", "tv-sm");
     auxWrap.innerHTML = h;
     const q = (id) => auxWrap.querySelector("#" + id);
     // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
@@ -889,7 +891,14 @@
     V("armor-fire", { ctx: "armor", key: "LMB", hook: "cityArmorFire" }); W("armor-fire", "#tvFire");
     V("mount", { ctx: "foot", key: "I / panel", hook: "cityMountAnimal" }); W("mount", "world tap");
     V("dismount", { ctx: "mount", key: "E", hook: "cityDismount" }); W("dismount", "#tvDismount");
-    V("vehicle-recenter", { ctx: "drive/air/armor/mount", key: "—", hook: "camRecenter" }); W("vehicle-recenter", "#tvRecen");
+    // The RECENTER pill follows its own flag (default off since 2026-08-04,
+    // owner's call) — declared as skipped rather than wired when it is not
+    // drawn, so the ledger reports the glass as it actually is.
+    if (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false) {
+      V("vehicle-recenter", { ctx: "drive/air/armor/mount", key: "—", hook: "camRecenter" }); W("vehicle-recenter", "#tvRecen");
+    } else {
+      V("vehicle-recenter", { ctx: "drive/air/armor/mount", key: "—", skip: "owner asked the recenter button off the iPad glass (CAM_TOUCH_RECENTER=0); the vehicle's own auto-recenter still takes the yaw back on its own" });
+    }
     // Declared and deliberately NOT drawn — the reason travels with the row so
     // the skipped list can never quietly absorb a real gap:
     V("hangar-buy", { ctx: "foot", key: "B", skip: "playeraircraft's [B] at a hangar only ever prints the steal-it notice; the F-22 is not buyable and a pill for a refusal is a lie" });

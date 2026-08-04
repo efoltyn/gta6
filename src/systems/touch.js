@@ -86,6 +86,13 @@
                           cluster; a RECENTER pill in the vehicle layer).
                           On foot it SHOWS ITSELF only when the view is
                           actually off-level, so the cluster stays calm.
+                          DEFAULT OFF as of 2026-08-04: the owner asked for
+                          the button off the iPad glass. A thumb still
+                          levels the view by dragging, and the vehicle's
+                          own auto-recenter (camRecenterSuspended, a
+                          different writer) is untouched — what goes away
+                          is only the manual shortcut. Restore the pair
+                          with ?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1.
 ============================================================ */
 (function () {
   "use strict";
@@ -106,7 +113,7 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_TP_CAMERA_V2 == null) CBZ.CONFIG.TOUCH_TP_CAMERA_V2 = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_ACCEL == null) CBZ.CONFIG.TOUCH_LOOK_ACCEL = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_LOOK_GLIDE == null) CBZ.CONFIG.TOUCH_LOOK_GLIDE = true;
-  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER == null) CBZ.CONFIG.TOUCH_RECENTER = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER == null) CBZ.CONFIG.TOUCH_RECENTER = false;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const TPV2 = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
@@ -236,7 +243,11 @@
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
       btn("thoming", "tbtn tsm", SVG.homing, "Homing on/off") +
-      btn("trecen", "tbtn tsm", SVG.level, "Recenter the view") +
+      // Not built at all when TOUCH_RECENTER is off (default), rather than
+      // built and permanently hidden: a node nobody can see is still a tap
+      // target the moment some other rule un-hides it.
+      ((!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false)
+        ? btn("trecen", "tbtn tsm", SVG.level, "Recenter the view") : "") +
       '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" +
       "</div>";
     document.body.appendChild(wrap);
@@ -1430,7 +1441,13 @@
   CBZ.touchVerb("view-toggle", { ctx: "foot", key: "V", hook: "toggleFPS" });
   CBZ.touchVerb("homing", { ctx: "foot", key: "H", hook: "lockonHomingSet" });
   CBZ.touchVerb("interact", { ctx: "foot", key: "E", hook: null });
-  CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", hook: "camRecenter" });
+  // cam-recenter is DRAWN ONLY WHEN ITS FLAG IS ON (default off since
+  // 2026-08-04). A skipped row carries its reason and cannot hide inside the
+  // covered count; a wired row would be a lie once the button is not built.
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER !== false)
+    CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", hook: "camRecenter" });
+  else
+    CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", skip: "owner asked the recenter button off the iPad glass (TOUCH_RECENTER=0); the look drag still levels the view, it just takes a drag instead of a tap" });
   CBZ.touchVerb("cam-zoom", { ctx: "any", key: "wheel", hook: "camZoom" });
   // Declared and NOT drawn, each with the reason, so the count cannot launder them:
   CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check — the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
@@ -1449,6 +1466,6 @@
   CBZ.touchVerbWired("view-toggle", "#tview");
   CBZ.touchVerbWired("homing", "#thoming");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
-  CBZ.touchVerbWired("cam-recenter", "#trecen");
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER !== false) CBZ.touchVerbWired("cam-recenter", "#trecen");
   CBZ.touchVerbWired("cam-zoom", "pinch");
 })();
