@@ -1324,3 +1324,46 @@ orchestrator only orchestrates + one merged math-gate.
   split between playercars/vehicles (+) and OCC_SLOTS/DB_SEATS (−) documented
   in boarding.js header; two session-limit interruptions mid-wave were
   resumed by audit-then-finish agents (the resume-file pattern in memory).
+
+## 2026-08-04 — THE PHONE GOES IN THE BAG (CAMPAIGN_PHONE_IN_HOTBAR)
+
+OWNER: *"in hitman mode there's a phone in the right corner of the screen.
+Click to press. Instead, that should just be like a gun. It should just be in
+the inventory."* Doctrine already said so — the item existence test names the
+pocket contents outright: "cash, PHONE, keys/keycards, medkit, grenades,
+bricks". The handset was the one carried object in the game with its own
+bespoke floating button.
+
+- **THE SLOT REPLACES THE BUTTON.** `city/campaign_ui.js` no longer BUILDS
+  `.campaign-phone-peek` at all (the CSS stays as the flag-off revert path);
+  `systems/fpsmode.js`'s `cityHotbar()` appends a `{kind:"phone"}` entry after
+  the guns and usable items, and `cityHotbarSelect()` raises/stows through it.
+  One bar contract, so the phone inherited a number key, a click target, an
+  `active` highlight and the charpanel mirror without a line of new UI plumbing
+  — the Block Law shape: promote the shared renderer, delete the bespoke one.
+- **TWO READ-ONLY SEAMS, NOTHING ELSE CROSSES.** `CBZ.campaignPhoneChip()` →
+  `{on, available, open, unread, buzz}` and `CBZ.campaignPhoneToggle()`.
+  campaign_ui keeps every bit of handset state; fpsmode keeps every bit of bar
+  layout. `available` is the same `livePlay()` gate the old button's
+  `.available` class used, so the slot appears and vanishes on the same beats.
+- **THE BUZZ IS DATA NOW.** `pulsePeek()` stamps `buzzUntil` instead of poking
+  a DOM class; the chip renderers poll it and shake their own chip. The stowed
+  phone's signal is unchanged in KIND (glyph shake + LED, owner rule) — it just
+  rides the slot. Both bar signatures (`hud.js unifiedBarSig`, `inventory.js`'s
+  fallback sig) gained the unread/buzz bits or the chip would never repaint.
+- **THE CAMPAIGN GETS ITS REAL BAR BACK.** `css/campaign.css` hid `#cSlots`
+  under the declutter — which never removed a hotbar from the campaign, it just
+  demoted it: `city/inventory.js`'s `#invHotbar` fallback measured `#cSlots`
+  invisible and drew the SAME `CBZ.cityHotbar()` at `bottom:14px`. The restore
+  (gated on `body.campaign-phone-slot`) puts one bar back in its designed home
+  inside `#cWpn`, chips over the live ammo line — the same "instrument, not
+  narration" carve-out the wanted stars and the minimap already have.
+- **RATCHET**: `CBZ.campaignPhoneAudit()`. MEASURED on seed 90210 with
+  `cityOrigin="contract"`: `{on:true, live:true, peekEl:false,
+  peekAvailable:false, inHotbar:true, barIndex:1, key:2, barLen:2}` — the
+  owner's complaint as numbers, and `peekEl`/`peekAvailable` may never go back
+  to true while `on`. Probed live: chip renders itemicons' photographed phone
+  (not the word), `active` flips true only while raised, a push sets
+  `unread`+`buzz` on the entry, a chip click AND the digit both raise the
+  handset, flag-off restores `#cSlots:none` + the fallback bar + no slot.
+- **GATE**: MATHGATE ok (90210: 318/180/204, det ok, errors baseline-only).

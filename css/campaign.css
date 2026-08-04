@@ -600,6 +600,16 @@ body:not(.wanted-stars-v2).campaign-active.mode-city #cityHud #cHud > #cTopRight
 body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
 body.campaign-active.mode-city #cityHud #cLoot,
 body.campaign-active.mode-city #cityHud #cSlots { display: none !important; }
+/* CAMPAIGN_PHONE_IN_HOTBAR (campaign_ui.js stamps body.campaign-phone-slot):
+   the phone is carried like a gun, so the weapon hotbar it rides is an
+   INSTRUMENT the declutter keeps — the same carve-out the wanted stars and the
+   minimap above already have, and it is the bar's designed home inside #cWpn
+   (chips over the live ammo line). Hiding it never removed a hotbar from the
+   campaign anyway: city/inventory.js's #invHotbar fallback measured #cSlots as
+   invisible and drew the SAME CBZ.cityHotbar() bar at bottom:14px instead. So
+   this restores one bar in its right place rather than adding one. Flag off →
+   class off → hidden again and the fallback takes over exactly as before. */
+body.campaign-active.campaign-phone-slot.mode-city #cityHud #cSlots { display: flex !important; }
 body.campaign-active.mode-city #cityHud #cAmmo { display: block !important; }
 /* PHONE_NOTIS_V2: the bottom-left minimap survives the declutter — it is an
    instrument, not narration, and lives in the opposite corner from the phone

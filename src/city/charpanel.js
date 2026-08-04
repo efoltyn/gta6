@@ -901,7 +901,9 @@
     for (let i = 0; i < bar.length; i++) {
       const e = bar[i];
       const short = e.short || e.label || "?";
-      const sub = e.kind === "holster" ? "fists" : (e.kind === "item" ? "use" : "gun");
+      const sub = e.kind === "holster" ? "fists"
+        : e.kind === "item" ? "use"
+        : e.kind === "phone" ? "phone" : "gun";
       html += "<div class='cpHs" + (e.active ? " active" : "") + "' data-bar='" + i + "'>" +
         (e.count != null && e.count > 1 ? "<div class='ct'>" + (e.count | 0) + "</div>" : "") +
         "<div class='s'>" + esc(short) + "</div><div class='a'>" + sub + "</div></div>";

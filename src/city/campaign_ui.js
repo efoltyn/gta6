@@ -19,6 +19,18 @@
    ONLY signal is the handset buzz (glyph shake + LED) — notification copy
    never renders beside the stowed phone (owner rule). Flag off restores the
    pre-V2 behavior (plain lists, no in-glass banners).
+
+   CAMPAIGN_PHONE_IN_HOTBAR (CBZ.CONFIG flag, default ON): the stowed phone is
+   a SLOT on the unified city hotbar, not a floating button in the screen
+   corner. OWNER (2026-08-04): "in hitman mode there's a phone in the right
+   corner of the screen, click to press. Instead that should just be like a
+   gun — it should just be in the inventory." So the corner `.campaign-phone-
+   peek` button is not built at all; systems/fpsmode.js's CBZ.cityHotbar()
+   appends a { kind:"phone" } entry read from CBZ.campaignPhoneChip() below,
+   and every bar renderer (city/hud.js #cSlots, city/inventory.js #invHotbar,
+   charpanel) draws it beside the guns. The stowed-phone signal is unchanged
+   in KIND — glyph shake + LED, owner rule — it just rides the slot now.
+   Flag off rebuilds the corner button and drops the slot: a one-line revert.
 ============================================================ */
 (function () {
   "use strict";
@@ -78,6 +90,12 @@
   let bannerEl = null;                      // in-phone banner (drops from screen top)
 
   function notisV2() { return !!(CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2); }
+  // ---- the phone lives in the bag, like a gun (see the header note) --------
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.CAMPAIGN_PHONE_IN_HOTBAR == null) CBZ.CONFIG.CAMPAIGN_PHONE_IN_HOTBAR = true;
+  function phoneSlotOn() { return CBZ.CONFIG.CAMPAIGN_PHONE_IN_HOTBAR !== false; }
+  const BUZZ_MS = 900;                      // matches campaignPhonePulse's .82s
+  let buzzUntil = 0;                        // the stowed-phone shake, as data
   function appTab(app) { return app === "news" ? "news" : (app === "missions" ? "missions" : "messages"); }
   function resolveSender(app, from) {
     if (from != null && from !== "") return String(from);
@@ -264,7 +282,13 @@
     return !!(state.unread.missions || state.unread.messages || state.unread.news);
   }
 
+  // THE BUZZ, ONCE. `buzzUntil` is the whole signal: the hotbar slot polls it
+  // through campaignPhoneChip() and shakes its own chip. The legacy corner
+  // button keeps its DOM class path for the flag-off revert — it simply does
+  // not exist while the phone is a bag slot.
   function pulsePeek() {
+    buzzUntil = Date.now() + BUZZ_MS;
+    if (phoneSlotOn()) return;
     ensureDom();
     if (!peek) return;
     peek.classList.remove("campaign-phone-pulse");
@@ -274,7 +298,7 @@
     pulseTimer = setTimeout(function () {
       if (peek) peek.classList.remove("campaign-phone-pulse");
       pulseTimer = 0;
-    }, 900);
+    }, BUZZ_MS);
   }
 
   function syncUnread() {
@@ -445,14 +469,20 @@
   function ensureDom() {
     if (root || !document.body) return root;
 
-    peek = make("button", "campaign-phone-peek");
-    peek.id = "campaignPhonePeek";
-    peek.type = "button";
-    peek.setAttribute("aria-label", "Open phone");
-    peek.innerHTML = "<span class='campaign-phone-peek-icon' aria-hidden='true'>▯</span><i class='campaign-phone-led' aria-hidden='true'></i>";
-    led = peek.querySelector(".campaign-phone-led");
-    peek.addEventListener("click", function () { open(); });
-    document.body.appendChild(peek);
+    // The corner button is BUILT ONLY on the flag-off revert path. With the
+    // phone in the bag there is exactly one place it can be reached from —
+    // its hotbar slot — so a second floating affordance would be the "two
+    // renderers for one thing" the Block Law exists to delete.
+    if (!phoneSlotOn()) {
+      peek = make("button", "campaign-phone-peek");
+      peek.id = "campaignPhonePeek";
+      peek.type = "button";
+      peek.setAttribute("aria-label", "Open phone");
+      peek.innerHTML = "<span class='campaign-phone-peek-icon' aria-hidden='true'>▯</span><i class='campaign-phone-led' aria-hidden='true'></i>";
+      led = peek.querySelector(".campaign-phone-led");
+      peek.addEventListener("click", function () { open(); });
+      document.body.appendChild(peek);
+    }
 
     root = make("div", "campaign-phone-layer");
     root.id = "campaignPhone";
@@ -571,6 +601,56 @@
     }
     return true;
   }
+
+  /* ---- THE PHONE'S HOTBAR SLOT -------------------------------------------
+     Two read-only seams, and nothing else crosses the line: the bar owner
+     (systems/fpsmode.js) asks WHAT to draw, the renderers ask the bar, and a
+     tap/number key comes back through the toggle. campaign_ui.js keeps every
+     bit of handset state; the hotbar keeps every bit of bar layout.
+
+       CBZ.campaignPhoneChip()   -> { on, available, open, unread, buzz }
+       CBZ.campaignPhoneToggle() -> raise/stow, true when it acted
+
+     `available` is livePlay() — the exact gate the corner button used for its
+     `.available` class, so the slot appears and disappears on the same beats
+     the button did. -------------------------------------------------------- */
+  CBZ.campaignPhoneChip = function () {
+    const live = livePlay();
+    return {
+      on: phoneSlotOn(),
+      available: phoneSlotOn() && live,
+      open: !!state.open,
+      unread: hasUnread(),
+      buzz: Date.now() < buzzUntil,
+    };
+  };
+  CBZ.campaignPhoneToggle = function () {
+    if (state.open) return close();
+    return open();
+  };
+
+  /* RATCHET — CBZ.campaignPhoneAudit(). The owner's complaint as numbers: in
+     live campaign play with the flag on, `peekEl` and `peekAvailable` are
+     both FALSE (no corner button exists at all) while `inHotbar` is TRUE and
+     `key` names the digit that raises it. Those three may never regress. */
+  CBZ.campaignPhoneAudit = function () {
+    let bar = [];
+    try { bar = (typeof CBZ.cityHotbar === "function" && CBZ.cityHotbar()) || []; } catch (e) { bar = []; }
+    let idx = -1;
+    for (let i = 0; i < bar.length; i++) if (bar[i] && bar[i].kind === "phone") { idx = i; break; }
+    return {
+      on: phoneSlotOn(),
+      live: livePlay(),
+      peekEl: !!peek,
+      peekAvailable: !!(peek && peek.classList.contains("available")),
+      inHotbar: idx >= 0,
+      barIndex: idx,
+      key: idx >= 0 && idx < 9 ? idx + 1 : 0,
+      barLen: bar.length,
+      open: !!state.open,
+      unread: hasUnread(),
+    };
+  };
 
   function setMission(def) {
     if (!def) {
@@ -1034,6 +1114,10 @@
     // V2 body stamp: campaign.css gates the map/minimap restore + banner styles
     // on this class so CBZ.CONFIG.PHONE_NOTIS_V2 stays a one-line revert.
     document.body.classList.toggle("notis-v2", notisV2());
+    // CAMPAIGN_PHONE_IN_HOTBAR body stamp: campaign.css gates the weapon-bar
+    // restore on this class, so the flag stays a one-line revert of BOTH the
+    // corner button's removal and the bar the phone's slot lives on.
+    document.body.classList.toggle("campaign-phone-slot", phoneSlotOn());
     // banner upkeep: flush queued notices once suppression (takeover, pause)
     // clears; drop the flow if suppression starts mid-hold.
     if (bannerState === "hold" && bannerSuppressed()) dropBanners();
