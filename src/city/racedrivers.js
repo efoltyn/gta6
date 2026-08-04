@@ -659,6 +659,16 @@
     spawn: spawn,
     despawn: despawn,
     despawnAll: despawnAll,
+    // Detach a driver from the brain WITHOUT destroying the machine. despawn()
+    // disposes the car; a PINK-SLIP transfer (city/racecareer.js) needs the
+    // actual car the rival drove to survive its driver — the whole stake is
+    // that you win HIS machine, not a copy of it. The record stays a normal
+    // member of CBZ.cityCars (enterable, damageable, ownable).
+    release: function (m) {
+      const i = D.list.indexOf(m);
+      if (i >= 0) D.list.splice(i, 1);
+      return (m && m.car) || null;
+    },
     setState: setState,
     progressOf: progressOf,
     modelForStyle: modelForStyle,

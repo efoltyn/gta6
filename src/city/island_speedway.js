@@ -359,6 +359,12 @@
   const TRACK_DZ = 12;                // centreline bbox centre, offset in Z from CZ
   const SF_T = 0.0;                   // start/finish = the tri-oval front-stretch apex
 
+  // ---- pit complex cross-section (module scope: the builder AND the
+  //      CBZ.speedwayPlaces export both read these — one copy, no drift) ----
+  const PIT_WALL_U0 = -26.0;
+  const PIT_LANE_OUT0 = -26.7, PIT_LANE_IN0 = -36.5;
+  const GARAGE_FRONT0 = -38.5, GARAGE_DEPTH0 = 15;
+
   // ---- the curvature diagram (lap fractions, measured from the S/F line) ----
   const CV_A1 = 0.105;                // end of the constant tri-oval bulge
   const CV_SP = 0.043;                // TRANSITION SPIRAL length at each turn end
@@ -754,9 +760,9 @@
     const SKIRT_END = HALFW + SHOULDER_W + SKIRT_W;  // toe of the embankment
     const APRON_EDGE = -(HALFW + APRON_W);           // inside edge of the apron
     const PIT_T = 78 / L;                            // pit lane half-length (laps)
-    const PIT_WALL_U = -26.0;
-    const PIT_LANE_OUT = -26.7, PIT_LANE_IN = -36.5;
-    const GARAGE_FRONT = -38.5, GARAGE_DEPTH = 15;
+    const PIT_WALL_U = PIT_WALL_U0;
+    const PIT_LANE_OUT = PIT_LANE_OUT0, PIT_LANE_IN = PIT_LANE_IN0;
+    const GARAGE_FRONT = GARAGE_FRONT0, GARAGE_DEPTH = GARAGE_DEPTH0;
     const GATE_T = 0.5, GATE_HALF = 6.5 / L;         // service gate in the outer wall
     const TURN1 = [0.12, 0.42], TURN2 = [0.58, 0.88];
 
@@ -2210,6 +2216,11 @@
 
   function startRace() {
     if (RACE.active) { note("You're already racing!", 1.5); return; }
+    // a live pink-slip duel (city/racecareer.js) holds the oval — one race
+    // surface, one race at a time.
+    if (CBZ.raceLadder && CBZ.raceLadder.pinkSlip && CBZ.raceLadder.pinkSlip().active) {
+      note("The oval is settling a pink slip — wait for the flag.", 2.2); return;
+    }
     const P = CBZ.player;
     if (!P || !P.driving) { note("Get in a car to race.", 1.8); return; }
     if (useRD()) { startRaceRD(); return; }
@@ -2328,6 +2339,31 @@
     startT: SF_T,
   };
   (CBZ._raceCourseConsumers || (CBZ._raceCourseConsumers = Object.create(null)))["speedway-weekend"] = true;
+
+  // ---- THE VENUE'S PLACES, published (consumed by city/racecareer.js) -----
+  // The paddock rect + gate mirror the SU.paddock(...) call below and the
+  // paddock fence's own gap formula (half = width * 0.06); the pit constants
+  // mirror the pitComplex call. They are exported from THIS file because these
+  // numbers are authored here — a consumer typing its own copy of CX/CZ is the
+  // drift bug the "two frames kept identical by comment" note above documents.
+  CBZ.speedwayPlaces = function () {
+    let Ln = 0;
+    try { Ln = ensureTable().L; } catch (e) { return null; }
+    if (!(Ln > 0)) return null;
+    const px0 = CX - 120, px1 = CX + 120;
+    return {
+      cx: CX, cz: CZ, siteR: R,
+      structures: CBZ.CONFIG.SPEEDWAY_STRUCTURES !== false,
+      paddock: {
+        x0: px0, x1: px1, z0: CZ - 156, z1: CZ - 127,
+        gate: { x: (px0 + px1) / 2, z: CZ - 156, half: (px1 - px0) * 0.06 },
+      },
+      pit: { t0: -78 / Ln, t1: 78 / Ln, boxes: 12, wallU: PIT_WALL_U0,
+             laneOut: PIT_LANE_OUT0, laneIn: PIT_LANE_IN0,
+             garageFront: GARAGE_FRONT0, garageDepth: GARAGE_DEPTH0 },
+      campus: { x: CX, z: CZ - 169 },
+    };
+  };
 
   function startRaceRD() {
     const P = CBZ.player, car = P._vehicle;

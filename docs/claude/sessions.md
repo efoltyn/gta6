@@ -1131,3 +1131,121 @@ room. this opens the door to rocketship logic."*
 **Gate:** each builder green independently; orchestrator's final gate ran on the exact committed tree (temp worktree, boarding wave co-resident but excluded from the commit).
 
 **DEBT LEFT NAMED (cross-territory, next wave's menu):** `biome_snow.js` still hand-scatters 130 pines and has no treeline gradient — the subalpine wood into alpine meadow is one `closure`/`storey` call away and is the reference's best shot. Forest floor under closed canopy is still the terrain plate's pale sage (wants a dark duff tone — terrain material). Snow-biome `registerBiomeBlend` catchments still near-white around now-green mountain feet. Seabed albedo in the 0–20 m band + `city/world.js` 22 m shore-channel saturation cap the above-water turquoise band. Clouds hugging ridgelines = sky/weather territory. `TERRAIN_DARK_RANGE` stays off (owner order): green-out-of-the-sea is GEOGRAPHY (nearest open water to Mercy summit 2.7 km), not shading.
+## THE 2026-08-04 SESSION — the modes wave: six territories in one parallel push
+
+Owner directive, compressed: massively deepen the racer; the two hitman
+things are confusing — make them ONE and better; a PRESIDENT mode (sand-city
+terror orgs, a buildable wall, falls to king/dictator/prisoner) built off the
+core engine while dogfooding it; a BOAT CAPTAIN mode; a GUN GAME mode with a
+map choice (jail / natural disaster / others); and the watch dial belongs on
+TOP of the left wrist. All considering the WHY (keycard→gun-room grammar),
+building more than testing. Six fenced builders ran concurrently in one tree;
+the orchestrator stubbed the index.html seams first, gated ONCE on the merged
+state (MATHGATE ok, seeds + determinism; CONTRACT ok after updating the
+tool's stage B for the merged opening), probed every new audit before pinning
+it, and committed by territory.
+
+- **WATCH (bling.js)**: every `at:"wrist"` part now rolls s·90° about the
+  forearm's long axis at the ONE mount seam — `(x,y,z) → (s·z, y, −s·x)`,
+  `ry += s·π/2`, s read off the rig's shoulder x (+1 left / −1 right). Dial
+  lands dorsal, 12 o'clock proximal for free, bracelets invariant, both
+  factories + all three mount sites share `placePart` so they cannot drift.
+- **ONE HITMAN (`city/hitman.js` NEW · campaign.js · activities.js ·
+  origins.js)**: surviving id `contract`, card reads "The Hitman";
+  `ORIGIN_ALIASES` + vault migration keep old saves; the campaign opens in
+  the motel room (PHASE.MOTEL, one world-bound name, quiet/loud priced, the
+  old rooftop is now THE HANDOFF that is the trap) and the AXES `quiet`
+  suppressor bug (dead `pistol` key) is fixed. activities' parallel street
+  pipe is DELETED — two thin doors call `CBZ.hitmanStart()`; marks are bound,
+  never spawned, on a 3-tier ladder (street role-holder → power.js principal
+  → the officeholder via contracts' own `_official` binder). The motel annex
+  is the hitman's gun room: wall-of-marks live board, locked gear case with
+  the next tier's tool visible and priced in rep. Flags HITMAN_ONE_CARD /
+  _PIPE / _BOARD. `CBZ.hitmanAudit()` GATE-PINNED: cards=1,
+  legacyStreetHitmanSites=0, tiers>=3. test-campaign-contract.mjs stage B now
+  drives motel→kill→handoff→arrest; stages A/C unchanged.
+- **RACE LADDER (`city/racecareer.js` NEW · racing.js · island_speedway.js ·
+  racedrivers.js)**: Diamond Racing League via factions.declare — five rungs,
+  every rung a verb (race/paddock/pitbay+crew/pinkslip/champgarage),
+  promotion DERIVED from the worldstate race ledger (no parallel career
+  store). Three doors that refuse you by name: paddock gate + steward,
+  BAY 12's RESERVED roller door, and the glass-fronted CHAMPION'S GARAGE
+  holding the one-per-world Aurum GT-1 (visible from the racing line day
+  one; minted as a real owned car only at APEX). Pink slips transfer the
+  rival's ACTUAL liveried car both ways; street races run on real roads
+  (roadPick + cityNav routes, checkpoints sampled from the driven route,
+  $200 antes through the one wallet, cops file at exactly 1★); the pit crew
+  are killable staffed bodies you ORDER (service / three modshop tune
+  stages / league livery); trophies are physical cups minted from the
+  ledger; the reigning champion walks as a power.js principal. Flags
+  RACE_LADDER/_PINKSLIP/_CREW/_TROPHIES/RACE_STREET. `CBZ.raceAudit()`
+  GATE-PINNED: verblessRungs=0, placesBuilt>=3.
+- **THE PRESIDENT (`city/presidency.js` NEW · statecraft/regimes/crown/
+  candidacy/militia/construction/civic/officialdom/games-government seams)**:
+  origin `president` swears in through candidacy's new `swearIn()` — the
+  exact bookkeeping elections.js performs on a won ballot, so the seat stays
+  ordinary (salary, incumbent defense, succession, assassination board) and
+  winnable by election. The SITUATION ROOM is a collider-doored room only
+  the head of state opens: 9 button pads, each an existing system with state
+  read back — ADDRESS / EMERGENCY (regimes' ladder) / CRACKDOWN (militia's
+  new rankKnows-guarded `orderCrackdown`) / THE WALL / BUREAU raids /
+  PARDON / ONE STATE + THE MARKET (`regimeDeclareDoctrine` — the fascism/
+  communism stat-fiction gates now have a reachable PRODUCER) / THE CROWN
+  (pad exists only under dictatorship → crown.js's new gated `selfCrown`).
+  Sons of the Dune: one factions org homed in the Saltlands (9 ledger
+  identities, occupy.js safehouses, attacks staged through aigoals' rampage
+  + panic + killfeed; kill or arrest every Bomber/Emir and attacks STOP);
+  terror feeds emergencyPowers. `CBZ.stateWall` (construction.js): 12 m
+  collider segments rise over days out of rec.treasury, road gaps become
+  manned border posts (third `_post` consumer), coverage() starves the
+  cell's nightly resupply, three wrapped blasts breach it, crews repair.
+  Falls: regimes ladder → DICTATOR; selfCrown → KING; impeachment/coup →
+  marshals → the real jail transport → PRISONER. Political title ladder
+  migrated 8 files → 3 (officials.js owns; contracts.js + elections.js
+  named as the remaining debt). Flags PRESIDENCY_V1/_SITROOM/_TERROR/
+  _RAIDS/_FALLS, STATE_WALL_V1. `CBZ.presidencyAudit()` GATE-PINNED:
+  buttonsMoveless=0, ladderCopies<=3, buttons>=9 when built. KNOWN SOFT
+  EDGE: the terror roster mints on the first sim day, not at boot (audit
+  reads terrorMembers=0 until then); govcomplex's mansion seat-actor
+  re-stamping `_sid` to a player holder predates this wave.
+- **THE CAPTAIN (`city/captain.js` NEW · piracy.js seams)**: origin spawns
+  you at the helm of a real afloat trawler (yachts fleet adopted, boatyard
+  delivery fallback) through the ONE vehicle-enter path — marine helm owns
+  every driven frame, ownership is a boatyard-shaped garage record. Crew
+  are citystaff bodies on seacrew's own shipco ladder; orders are
+  interactions ON the crew: CAST LINES (real fishing items), TAKE THE HELM
+  (mate holds course via piracy's marineAutopilot while you walk your own
+  moving deck), ARM UP (the loyalty+weapons atom afloat). Voyages through
+  mission stages, world-supplied: charters (a real sim passenger boards,
+  sits, disembarks), cargo (physical crates into a `vehicleHold` walk-in
+  cargo deck that latches and rides the hull), fishing, salvage bound only
+  to already-derelict hulls. Piracy both ways: `pirateProvoke` pulls raids
+  onto a loaded manifest through piracy's own scheduler (menace law
+  intact); your own black-flag raids pay only in what you take. Gun-room
+  instances: the broker's prize hull behind a locked walkable fence, the
+  harbourmaster's premium board readable by anyone and openable only by a
+  captain; the wheelhouse chart table IS the voyage menu. Flags CAPTAIN_V1
+  + _ORIGIN/_ORDERS/_VOYAGES/_HOLD/_PIRATES/_YARD. `CBZ.captainAudit()`
+  GATE-PINNED: ordersLive>=3, boatLadderRungs>=4.
+- **GUN GAME (`modes/gungame.js` rebuilt · systems/gungamehud.js NEW ·
+  state.js plumbing)**: fourth title mode; 9-rung ladder (sidearm → … →
+  deagle → BARE FISTS, final rung always one kill), full heal per rung.
+  Maps are BORROWED, never authored: the jail (prisonRoot, cast group-
+  hidden and restored, spawn pool harvested from where the cast stands)
+  and the disaster island through survival's OWN build() so `surv.built`
+  stays the one truth; the MAPS seam documents how a future map joins.
+  Bots register into CBZ.npcs (fpsmode's own scan makes them shootable
+  with zero fpsmode edits) + CBZ.bots (shared body physics); fire drives
+  actorweapons + clearLineOfFire + tracer; every death through ONE funnel
+  and the killfeed (an `aiKill` wrap intercepts only `_ggBot` victims so
+  prison side effects never run). state.js: gungame joins the arena result
+  cards, world-root visibility per chosen map, floorAt chain wrapper,
+  clean exit restores everything. Flags GUNGAME_V1/_BOTS/_KILLS_PER_RUNG/
+  _RESPAWN_SEC/_LADDER. `CBZ.gungameAudit()` GATE-PINNED: maps>=2,
+  rungs>=5. Cosmetic residue documented in-file: Tab rankings + M map show
+  prison furniture in-mode; killstreak popups run by design.
+- **GATE**: MATHGATE ok (90210: 318/180/204, 400 ticks, det ok, errors
+  baseline-only) BEFORE the new pins; all five new audits probed live
+  (values matched builder predictions exactly) and only then pinned;
+  MATHGATE re-run green WITH the pins; CONTRACT ok end-to-end. The
+  verification.md "rooftop prologue" note is updated to the motel opening.

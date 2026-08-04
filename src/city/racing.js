@@ -529,6 +529,17 @@
     p._drip = null; p._dripKey = null;
     p.baseSpeed = 1.7; p.snitch = 0.3;
     paintFit(p, racer.teamColor);
+    // FAME IS A POWER GRADIENT (owner Law 2): the reigning champion — the
+    // standings leader with wins — walks as a power.js PRINCIPAL: a small
+    // entourage, the Lv pill, a detail that answers for him. One declaration;
+    // power.js does all the work. Dissolved on release/death below.
+    if (CBZ.powerPrincipal && (racer.wins | 0) > 0) {
+      const lead = cityRacing.standings()[0];
+      if (lead === racer) {
+        try { p._racerPrincipal = CBZ.powerPrincipal(p, { tier: 2, org: "racing", role: "Racing Champion" }); }
+        catch (e) { p._racerPrincipal = null; }
+      }
+    }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
     // PERMANENCE: mint (or reuse) a stable identity for this roster entry so a
     // death sticks city-wide. Feature-detected — no cityIdentities loaded (older
@@ -543,6 +554,10 @@
   }
   function releaseRacer(rec) {
     const p = rec.ped;
+    if (p && p._racerPrincipal) {
+      try { p._racerPrincipal.dissolve(); } catch (e) { /* power absent */ }
+      p._racerPrincipal = null;
+    }
     if (p && !p.dead) {
       p._racer = null; p._racerTagText = null; p._racerTagMat = null;
       restoreFit(p);
@@ -601,7 +616,11 @@
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         const pos = cityRacing.positionOf(r);
-        note("" + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ").", 3.0);
+        // rivals remember: pink-slip history reads on the man himself
+        const slip = r.slips && (r.slips.won || r.slips.lost)
+          ? (r.slips.won > r.slips.lost ? " Holds YOUR pink slip." : " You hold HIS pink slip.")
+          : "";
+        note("" + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ")." + slip, 3.2);
       },
     });
     // challenge to a street race → route to the speedway join flow if it exists,
@@ -683,5 +702,372 @@
       if (!p || p.dead) continue;
       if (camD2(p.pos.x, p.pos.z) < 70 * 70) stampTag(p);
     }
+
+    // 3) RIVALS REMEMBER — a racer with pink-slip history barks it at you on
+    // the street (CBZ.citySay speech bubble, the shared budgeted pool).
+    const PP = CBZ.player;
+    if (PP && PP.pos && CBZ.citySay) {
+      for (let i = 0; i < R.list.length; i++) {
+        const rec = R.list[i]; const p = rec.ped; const rc = rec.racer;
+        if (!p || p.dead || !rc || !rc.slips) continue;
+        if ((p._grudgeT || 0) > CBZ.now) continue;
+        const dx = p.pos.x - PP.pos.x, dz = p.pos.z - PP.pos.z;
+        if (dx * dx + dz * dz > 12 * 12) continue;
+        p._grudgeT = (CBZ.now || 0) + 30;
+        const line = rc.slips.won > rc.slips.lost
+          ? "“Still walking? I still DRIVE yours.”"
+          : rc.slips.lost > 0
+            ? "“Enjoy my car. I'm taking it back on the oval.”"
+            : "“Slips again whenever you're brave.”";
+        CBZ.citySay(p, line, "#ffd1c4", 2.6);
+      }
+    }
   });
+
+  // ============================================================
+  //  STREET RACING — CBZ.cityStreetRacing. Point-to-point sprints and loop
+  //  circuits laid on REAL roads: the route comes from CBZ.cityNav.routeTo
+  //  over the city's own street graph, the destination from CBZ.roadPick
+  //  (the ONLY sanctioned way to put racing on a road), checkpoints are
+  //  samples of that driven route. The field is named championship drivers
+  //  in real cars via CBZ.raceDrivers (the ONE driving brain — no new AI
+  //  loop); scoring via CBZ.raceKit; readout via CBZ.raceHud (no new
+  //  objective UI). It is ILLEGAL: launching in front of a cop is a
+  //  reported crime through the one wanted pipeline, and the ledger books
+  //  it with `illegal: true` (worldstate files the charge). The pot moves
+  //  through the ONE wallet: everybody antes, the winner takes it.
+  //  Flag: RACE_STREET (one-line revert).
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.RACE_STREET == null) CBZ.CONFIG.RACE_STREET = true;
+
+  const SR = {
+    active: false, phase: "idle", kind: "sprint",
+    course: null, cps: [], cpTotal: 0, cpPassed: 0, startPt: null,
+    kit: null, pot: 0, ante: 200, countT: 0, graceT: 0,
+    ring: null, beam: null,
+    races: 0, wins: 0, planned: 0, potPaid: 0,
+  };
+
+  function srOn() { return CBZ.CONFIG.RACE_STREET !== false; }
+  function srBig(t) {
+    if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(t); return; } catch (e) { /* */ } }
+    note(t, 4.0);
+  }
+
+  // ---- route planning on the real street graph ---------------------------
+  function srLegs(kind) {
+    const P = CBZ.player;
+    if (!P || !CBZ.roadPick || !CBZ.cityNav || !CBZ.cityNav.routeTo) return null;
+    const seg = CBZ.roadSegmentAt ? CBZ.roadSegmentAt(P.pos.x, P.pos.z, 10) : null;
+    if (!seg) { note("Get on a road — street races start from the tarmac.", 2.2); return null; }
+    const from = { x: P.pos.x, z: P.pos.z };
+    const pts = [from];
+    if (kind === "circuit") {
+      const a = CBZ.roadPick({ near: from, minDist: 260, maxDist: 620, cls: "ambient", tries: 18 });
+      const b = CBZ.roadPick({ near: from, minDist: 260, maxDist: 620, cls: "ambient", tries: 18,
+        filter: function (r) { return !a || !a.road || r !== a.road; } });
+      if (!a || !b) return null;
+      pts.push({ x: a.x, z: a.z }, { x: b.x, z: b.z }, { x: from.x, z: from.z });
+    } else {
+      const d = CBZ.roadPick({ near: from, minDist: 520, maxDist: 1500, cls: "ambient", tries: 20 });
+      if (!d) return null;
+      pts.push({ x: d.x, z: d.z });
+    }
+    return pts;
+  }
+  function srPlan(kind) {
+    const legs = srLegs(kind);
+    if (!legs) return null;
+    const NAV = CBZ.cityNav;
+    const path = [];
+    for (let i = 0; i + 1 < legs.length; i++) {
+      const out = [];
+      try { NAV.routeTo(legs[i].x, legs[i].z, legs[i + 1].x, legs[i + 1].z, out); } catch (e) { return null; }
+      if (!out.length) return null;
+      for (let k = 0; k < out.length; k++) {
+        const w = out[k];
+        if (w && w.x != null) path.push({ x: w.x, z: w.z, cp: null });
+      }
+    }
+    if (path.length < 4) return null;
+    // checkpoints: every ~90 m of driven route + always the finish line
+    const cps = [];
+    let acc = 0, cpN = 0;
+    for (let i = 1; i < path.length; i++) {
+      acc += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+      const last = i === path.length - 1;
+      if (acc >= 90 || last) {
+        acc = 0;
+        path[i].cp = cpN++;
+        cps.push({ x: path[i].x, z: path[i].z });
+      }
+    }
+    if (cps.length < 2) return null;
+    const course = CBZ.raceKit && CBZ.raceKit.pathCourse
+      ? CBZ.raceKit.pathCourse("street-run", cps, path, { register: false })
+      : null;
+    if (!course) return null;
+    SR.planned++;
+    return { course: course, cps: cps, path: path, from: legs[0] };
+  }
+
+  // ---- checkpoint marker: ONE ring + ONE light beam, moved cp to cp ------
+  function srMarker(show, x, z) {
+    const A = arena();
+    // a world rebuild replaced the root: the old marker died with it
+    if (SR.ring && (!A || SR.ring.parent !== A.root)) { SR.ring = null; SR.beam = null; }
+    if (!SR.ring && show && A && A.root && window.THREE) {
+      const T = window.THREE;
+      const m = new T.MeshBasicMaterial({ color: 0x36e0ff, transparent: true, opacity: 0.85 });
+      SR.ring = new T.Mesh(new T.TorusGeometry(4.4, 0.32, 8, 22), m);
+      SR.ring.rotation.x = Math.PI / 2;
+      SR.ring.userData.streetRace = true;
+      SR.beam = new T.Mesh(new T.CylinderGeometry(0.5, 0.5, 42, 8, 1, true),
+        new T.MeshBasicMaterial({ color: 0x36e0ff, transparent: true, opacity: 0.22, side: T.DoubleSide }));
+      SR.beam.userData.streetRace = true;
+      A.root.add(SR.ring); A.root.add(SR.beam);
+    }
+    if (!SR.ring) return;
+    SR.ring.visible = !!show; SR.beam.visible = !!show;
+    if (show) {
+      const y = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+      SR.ring.position.set(x, y + 0.9, z);
+      SR.beam.position.set(x, y + 21, z);
+    }
+  }
+
+  function srProgress(pos, passed) {
+    if (passed >= SR.cpTotal) return 1;
+    const cp = SR.cps[passed];
+    const prev = passed > 0 ? SR.cps[passed - 1] : SR.startPt;
+    const legLen = Math.max(1, hyp(cp.x - prev.x, cp.z - prev.z));
+    const d = hyp(cp.x - pos.x, cp.z - pos.z);
+    const frac = Math.max(0, Math.min(0.95, 1 - d / legLen));
+    return (passed + frac) / SR.cpTotal;
+  }
+
+  function srStart(opts) {
+    opts = opts || {};
+    if (!srOn() || SR.active) return false;
+    const P = CBZ.player;
+    if (!P || !P.driving || !P._vehicle || P._vehicle.dead) { note("You race what you drive — get in a car.", 2.2); return false; }
+    if (!CBZ.raceDrivers || !CBZ.raceKit) return false;
+    if (CBZ.speedwayRaceState && CBZ.speedwayRaceState().active) { note("You're already on a grid.", 1.8); return false; }
+    if (CBZ.raceLadder && CBZ.raceLadder.pinkSlip && CBZ.raceLadder.pinkSlip().active) { note("Settle the pink slip first.", 1.8); return false; }
+    const plan = srPlan(opts.kind || "sprint");
+    if (!plan) { note("No clean route from here — roll a few blocks and call it again.", 2.4); return false; }
+    const ante = Math.max(50, opts.ante || SR.ante);
+    if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(ante))) { note("The grid wants " + ante + " a head. You're short.", 2.2); return false; }
+
+    // the field: named championship drivers, drawn from mid-table so a rookie
+    // has a race and not an execution. Their cars appear ON the start road,
+    // formed up behind you.
+    const RD = CBZ.raceDrivers;
+    const st = cityRacing.standings();
+    const field = [];
+    for (let i = 2; i < st.length && field.length < 3; i++) {
+      if (Math.random() < 0.6 || st.length - i <= 3 - field.length) field.push(st[i]);
+    }
+    const p0 = plan.path[0], p1 = plan.path[Math.min(3, plan.path.length - 1)];
+    let dxn = p1.x - p0.x, dzn = p1.z - p0.z;
+    const dl = hyp(dxn, dzn) || 1; dxn /= dl; dzn /= dl;
+    const heading = Math.atan2(dxn, dzn);
+    const drivers = [];
+    for (let i = 0; i < field.length; i++) {
+      const racer = field[i];
+      const back = 7 + (i >> 1) * 7, side = (i % 2 === 0 ? 1 : -1) * 2.6;
+      const m = RD.spawn({
+        x: P.pos.x - dxn * back - dzn * side,
+        z: P.pos.z - dzn * back + dxn * side,
+        heading: heading,
+        style: racer.homeStyle || "muscle", color: racer.teamColor,
+        livery: cityRacing.liveryFor(racer),
+        name: racer.name, number: racer.number,
+        skill: Math.min(0.93, (racer.skill || 0.75)),
+        aggr: 0.5, consistency: 0.5 + (racer.skill || 0.75) * 0.4,
+        tag: "street", course: plan.course,
+        playerProgress: function () { return srProgress(CBZ.player.pos, SR.cpPassed); },
+      });
+      if (m) { m._racer = racer; drivers.push(m); }
+    }
+    if (!drivers.length) {
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(ante);   // refund through the same wallet
+      note("Nobody showed. Keep your money.", 2.0);
+      return false;
+    }
+
+    SR.active = true; SR.phase = "grid"; SR.kind = opts.kind || "sprint";
+    SR.course = plan.course; SR.cps = plan.cps; SR.cpTotal = plan.cps.length;
+    SR.cpPassed = 0; SR.startPt = { x: P.pos.x, z: P.pos.z };
+    SR.pot = ante * (drivers.length + 1); SR.countT = 3.4; SR.graceT = 0;
+    SR.races++;
+    const entrants = drivers.map(function (m) {
+      return {
+        id: "n" + m.number, name: m.name, number: m.number, color: m._racer.teamColor, driver: m,
+        progress: function () { return srProgress(m.car ? m.car.pos : SR.startPt, m.cpPassed | 0); },
+        speed: function () { return Math.abs((m.car && m.car.v) || 0); },
+      };
+    });
+    entrants.push({
+      id: "you", name: "YOU", number: null, color: null, isPlayer: true,
+      progress: function () { return srProgress(CBZ.player.pos, SR.cpPassed); },
+      speed: function () { const c = CBZ.player && CBZ.player._vehicle; return Math.abs((c && c.v) || 0); },
+    });
+    SR.kit = CBZ.raceKit.create({ course: plan.course, laps: 1, trackLen: CBZ.raceKit.courseLength(plan.course) || 900, entrants: entrants });
+    if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
+    srMarker(true, SR.cps[0].x, SR.cps[0].z);
+    note((SR.kind === "circuit" ? "STREET CIRCUIT" : "STREET SPRINT") + " — " + SR.cpTotal +
+      " gates, " + drivers.length + " runners, pot $" + SR.pot + ". Lights…", 3.2);
+    return true;
+  }
+
+  function srEnd(result) {
+    const kitOrder = SR.kit ? SR.kit.order.slice() : [];
+    if (CBZ.raceDrivers) CBZ.raceDrivers.despawnAll("street");
+    srMarker(false);
+    if (CBZ.raceHud) CBZ.raceHud.hide();
+    const win = result === "win";
+    let place = 1;
+    if (SR.kit) {
+      const row = SR.kit.playerRow();
+      place = row ? row.pos : kitOrder.length || 1;
+    }
+    if (result === "bail") {
+      note("You stepped out — the pot rides away with the field.", 2.8);
+    } else {
+      if (win) {
+        SR.wins++; SR.potPaid += SR.pot;
+        if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(SR.pot);
+        srBig("STREET WIN — POT $" + SR.pot);
+      } else {
+        note("P" + place + " — the pot goes up the road.", 3.0);
+      }
+      if (CBZ.raceHud) {
+        CBZ.raceHud.results(kitOrder.map(function (e, i) {
+          return { pos: i + 1, name: e.name, number: e.number, color: e.color,
+            time: "", pts: null, purse: (i === 0 && e.isPlayer) ? SR.pot : 0, you: !!e.isPlayer };
+        }), {
+          title: win ? "STREET RACE — YOURS" : "STREET RACE",
+          sub: (SR.kind === "circuit" ? "loop circuit" : "point to point") + " · " + SR.cpTotal + " gates",
+          foot: "Drive off to continue",
+        });
+      }
+      if (CBZ.cityEvent) CBZ.cityEvent("race-finish", {
+        race: "street", illegal: true,
+        place: place, win: win, podium: place <= 3, dnf: false,
+        profit: win ? SR.pot - SR.ante : -SR.ante,
+        driver: win ? 6 : 2, respect: win ? 8 : 1,
+        message: win ? "Won a street race." : "Street race, P" + place + ".",
+      });
+    }
+    SR.active = false; SR.phase = "idle"; SR.kit = null; SR.course = null;
+  }
+
+  // the race tick — event scoring only; every car is DRIVEN by the existing
+  // racedrivers brain (order 37.3), so this adds no AI loop.
+  CBZ.onUpdate(34.55, function (dt) {
+    if (!SR.active || g.mode !== "city") return;
+    if (dt > 0.12) dt = 0.12;
+    const P = CBZ.player;
+    if (!P || !P.driving || !P._vehicle || P._vehicle.dead) { srEnd("bail"); return; }
+
+    if (SR.phase === "grid") {
+      SR.countT -= dt;
+      const c = SR.countT;
+      if (c > 0) { if (CBZ.raceHud) CBZ.raceHud.lights(c > 2.3 ? 1 : c > 1.1 ? 2 : 3); return; }
+      SR.phase = "run"; SR.lightsT = 1.3;
+      if (CBZ.raceHud) CBZ.raceHud.lights("go");
+      if (CBZ.raceDrivers) CBZ.raceDrivers.setState("race", "street");
+      note("GO GO GO!", 1.4);
+      // ILLEGAL: launch in front of the law and it is called in through the
+      // one wanted pipeline (witness model, mask rules and all).
+      const cops = CBZ.cityCops || [];
+      for (let i = 0; i < cops.length; i++) {
+        const cop = cops[i];
+        if (!cop || cop.dead || !cop.pos) continue;
+        const dx = cop.pos.x - P.pos.x, dz = cop.pos.z - P.pos.z;
+        if (dx * dx + dz * dz < 70 * 70) {
+          const sev = (CBZ.CITY && CBZ.CITY.starHeat && CBZ.CITY.starHeat[1] != null) ? CBZ.CITY.starHeat[1] + 5 : 120;
+          if (CBZ.cityReport) CBZ.cityReport(sev, { type: "red-light", x: P.pos.x, z: P.pos.z });
+          break;
+        }
+      }
+      return;
+    }
+    if (SR.lightsT > 0) { SR.lightsT -= dt; if (SR.lightsT <= 0 && CBZ.raceHud) CBZ.raceHud.lights(-1); }
+
+    // player gate check
+    if (SR.cpPassed < SR.cpTotal) {
+      const cp = SR.cps[SR.cpPassed];
+      if (hyp(cp.x - P.pos.x, cp.z - P.pos.z) < 11) {
+        SR.cpPassed++;
+        if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
+        if (SR.cpPassed < SR.cpTotal) srMarker(true, SR.cps[SR.cpPassed].x, SR.cps[SR.cpPassed].z);
+        else srMarker(false);
+      }
+    }
+    if (SR.kit) {
+      SR.kit.update(dt);
+      const cx = SR.kit.playerContext();
+      if (cx && CBZ.raceHud) {
+        CBZ.raceHud.update({
+          pos: cx.row.pos, count: SR.kit.entrants.length,
+          lap: Math.min(SR.cpTotal, SR.cpPassed + 1), laps: SR.cpTotal,
+          lapT: SR.kit.time, best: 0,
+          gapA: cx.ahead ? { name: cx.ahead.name, s: cx.gapA } : null,
+          gapB: cx.behind ? { name: cx.behind.name, s: cx.gapB } : null,
+        });
+      }
+    }
+    // finish conditions: you cross, or a rival crossed and your grace runs out
+    if (SR.cpPassed >= SR.cpTotal) {
+      const anyAhead = SR.kit && SR.kit.order.some(function (e) { return !e.isPlayer && e.total >= 1 - 1e-6; });
+      srEnd(anyAhead && SR.kit.order[0] && !SR.kit.order[0].isPlayer ? "lose" : "win");
+      return;
+    }
+    const rivalDone = SR.kit && SR.kit.order.some(function (e) { return !e.isPlayer && e.total >= 1 - 1e-6; });
+    if (rivalDone) {
+      SR.graceT += dt;
+      if (SR.graceT > 25) { srEnd("lose"); return; }
+    }
+  });
+
+  // ---- the impromptu grid: order a walking named racer onto it -----------
+  function registerStreetInteractions() {
+    const I = CBZ.interactions; if (!I || !I.register) return;
+    I.register("ped:civ", {
+      id: "racer-street", slot: "k", prio: 5,
+      canShow: (p) => srOn() && isRacer(p) && !SR.active,
+      label: () => "Street race — $" + SR.ante + " a head, winner takes the pot",
+      onSelect: (p) => {
+        const r = p._racer; if (!r) return;
+        if (!CBZ.player || !CBZ.player.driving) {
+          note("" + r.name + ": “Come back IN something. We race what we drive.”", 2.6);
+          return;
+        }
+        // he calls two more names onto the grid — real cars form up behind you
+        if (srStart({ kind: Math.random() < 0.45 ? "circuit" : "sprint" })) {
+          if (CBZ.citySay) CBZ.citySay(p, "“Grid up. Money where your mouth is.”", "#ffe9a8", 2.4);
+        }
+      },
+    });
+  }
+  CBZ.onUpdate(35.86, function () {
+    if (g.mode !== "city" || R._streetWired) return;
+    R._streetWired = true;
+    registerStreetInteractions();
+  });
+
+  CBZ.cityStreetRacing = {
+    start: srStart,
+    plan: srPlan,                      // probe surface: route/cp generation alone
+    state: function () {
+      return { active: SR.active, phase: SR.phase, kind: SR.kind, cpTotal: SR.cpTotal,
+        cpPassed: SR.cpPassed, pot: SR.pot, races: SR.races, wins: SR.wins };
+    },
+    audit: function () {
+      return { races: SR.races, wins: SR.wins, planned: SR.planned,
+        active: SR.active, cpTotal: SR.cpTotal, potPaid: SR.potPaid };
+    },
+  };
 })();

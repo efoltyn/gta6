@@ -126,6 +126,14 @@
 body.mode-survival .mode-escape-only{display:none;}
 body.mode-survival .mode-survival-only{display:block;}
 
+/* GUN GAME title copy — the exact .mode-survival-only pattern */
+.mode-gungame-only{display:none;}
+body.mode-gungame .mode-escape-only{display:none;}
+body.mode-gungame .mode-gungame-only{display:block;}
+/* the campaign's canonical title shows ONLY the city block (campaign.css
+   hides escape/survival the same way) — keep gungame out of it too */
+body.campaign-canonical-title #title .mode-gungame-only{display:none !important;}
+
 /* ============================================================
    settings panel (src/systems/settings.js) — pause-screen overlay with
    performance + population controls. Mirrors city/phone.js's dark-modal
@@ -196,3 +204,64 @@ body.mode-survival .mode-survival-only{display:block;}
   margin-top: 8px; text-align: center; font-size: 12px; color: #9a8f80;
 }
 @media (max-width: 560px) { .controls .keys { grid-template-columns: 1fr; } }
+
+
+/* ============================================================
+   GUN GAME (modes/gungame.js + systems/gungamehud.js)
+   All gungame chrome lives HERE (screens.css is the mode's fenced style
+   file): the title-card map picker, the in-match ladder HUD, and the
+   per-mode HUD panel gating. The panel-hide list mirrors hud.css's
+   body.mode-survival set — this file loads after hud.css, so these
+   equal-specificity rules take effect the same way.
+============================================================ */
+
+/* map picker (the .role-btn family look, two-up like the role select) */
+.gg-map-label{
+  margin:14px 0 0; color:#7c5a3a; font-size:11px; font-weight:700;
+  letter-spacing:1.5px; text-transform:uppercase;
+}
+.gg-map-select{
+  display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
+  width:min(430px,100%); margin:8px auto 0;
+}
+.gg-map-btn{
+  pointer-events:auto; cursor:pointer; font-family:inherit; text-align:left;
+  border:2px solid #2a2622; border-bottom-width:5px; border-radius:12px;
+  background:#fff; color:#2a2622; padding:11px 13px 10px;
+  transition:transform .08s, border-color .12s, box-shadow .12s;
+}
+.gg-map-btn span{display:block; font-weight:700; font-size:16px; letter-spacing:.5px; text-transform:uppercase;}
+.gg-map-btn small{display:block; margin-top:3px; color:#7c5a3a; font-weight:600;}
+.gg-map-btn.active{
+  border-color:var(--orange-d); box-shadow:0 0 0 3px rgba(255,122,26,.2);
+  background:linear-gradient(180deg,#fff6ee,#ffe9d6);
+}
+.gg-map-btn:active{transform:translateY(3px); border-bottom-width:2px;}
+
+/* in-match HUD: prison panels off, the shared arena bars on */
+body.mode-gungame #cigs,
+body.mode-gungame #keycard,
+body.mode-gungame #inventory,
+body.mode-gungame #detectWrap,
+body.mode-gungame #gangHud,
+body.mode-gungame #compass,
+body.mode-gungame #dashBtn,
+body.mode-gungame #minimap{ display:none !important; }
+body.mode-gungame #survBars{ display:block; }
+
+/* the ladder panel (gungamehud.js builds it; the NEXT line is the gradient) */
+#gungameHud{
+  position:fixed; left:50%; transform:translateX(-50%); bottom:96px; z-index:12;
+  display:none; text-align:center; pointer-events:none;
+  font-family:Fredoka,system-ui,sans-serif; color:#e8eef7;
+  background:rgba(10,14,22,.58); border-radius:12px; padding:7px 16px 8px;
+  text-shadow:0 1px 2px rgba(0,0,0,.6);
+}
+body.mode-gungame.state-playing #gungameHud{ display:block; }
+#gungameHud .gg-now{ font-size:15px; font-weight:700; letter-spacing:.6px; }
+#gungameHud .gg-pips{ font-size:11px; letter-spacing:3px; color:#ffd451; min-height:0; }
+#gungameHud .gg-pips:empty{ display:none; }
+#gungameHud .gg-next{ font-size:12px; font-weight:600; color:#ffd451; margin-top:1px; }
+#gungameHud .gg-lead{ font-size:11px; color:#9fb4cc; margin-top:2px; }
+#gungameHud .gg-spawn{ font-size:14px; font-weight:700; color:#ff6b6b; margin-top:2px; }
+#gungameHud .gg-spawn:empty{ display:none; }

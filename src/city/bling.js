@@ -179,7 +179,8 @@
     if (gm.rotateX) gm.rotateX(Math.PI / 2);
     return gm;
   }
-  // a disc facing the camera (+Z): watch case / dial / medallion.
+  // a disc facing the camera (+Z): watch case / dial / medallion. Wrist parts
+  // STAY authored +Z — the mount seam rolls the whole stack dorsal (placePart).
   function disc(r, depth, seg) {
     if (!THREE.CylinderGeometry) return new THREE.BoxGeometry(r * 2, r * 2, depth);
     const gm = new THREE.CylinderGeometry(r, r, depth, seg || 8);
@@ -365,9 +366,11 @@
   // the meet. WATCH: band ON THE WRIST + a face plate on the outer front.
   // RING: a dot on the front edge of the hand, at the knuckle line.
   const CHAIN_Y = 1.65, CHAIN_Z = 0.268, CHAIN_TILT = 0.83;
-  // WZ — the watch stack's z on the wrist: the band torus's front centre, so
+  // WZ — the watch stack's AUTHORED z on the wrist: the band torus's rim, so
   // the case sits ON the band and every plate above it is an offset FROM that
-  // one number instead of six independently-typed z's that drift apart.
+  // one number instead of six independently-typed z's that drift apart. (At
+  // mount time placePart rolls the stack about the forearm axis, so this z
+  // lands DORSAL — outboard — not on the front of the wrist.)
   const WZ = 0.185;
   let _looks = null, _looksFlag = null;
   function looks() {
@@ -676,24 +679,62 @@
     const f = CBZ.charArmLandmarks && CBZ.charArmLandmarks(ch);
     return f || LM_FALLBACK;
   }
+  /* THE DIAL GOES DORSAL (owner: "watch dial is on right side of the left
+     wrist… the dial faces forward instead of facing the left of the player").
+     Every wrist part is AUTHORED facing +Z — disc() faces the camera — but in
+     the ELBOW group's frame +Z is the FRONT of a hanging forearm, the inner
+     wrist line, and a real watch sits on the BACK of the wrist with the dial
+     facing laterally OUT. So the mount seam rolls the whole assembled stack a
+     quarter turn about the forearm's LONG axis (local Y): +90° on the LEFT arm
+     and -90° on the right, because the rig's left IS +X (character.js mirrors
+     the roots: `la.position.set(P.armX…)`, armX positive) so outboard/dorsal
+     is +X on the left wrist and -X on the right. WHICH arm is read off the rig
+     — the shoulder pivot's x sign, one hop up from the elbow anchor — never
+     typed, so both watch factories, the bracelet and the portrait all take the
+     same roll on any body. The bracelet is unchanged by construction (its
+     torus and 8-fold stone ring are symmetric under 90°), y is untouched so
+     12 o'clock keeps pointing up the forearm toward the elbow, and `at:"hand"`
+     (the rings) stays in the authored frame. Wrist parts may author ry/rz but
+     never rx: the roll composes as Euler-XYZ ry + 90°, exact only while rx is
+     0 (today no wrist part authors any rotation at all). */
+  function wristSide(parent) {
+    // elbow anchor → its own x is 0, its parent is the shoulder pivot at
+    // ±armX; a legacy shoulder-pivot anchor carries the sign itself. The value
+    // is only ever CONSUMED for `at:"wrist"` parts, which mount on those two
+    // anchors alone — whatever a body/neck anchor's chain reads is never used.
+    // Harness-safe: stub rigs with no positions read +1.
+    const own = (parent && parent.position) ? parent.position.x : 0;
+    const up = (parent && parent.parent && parent.parent.position) ? parent.parent.position.x : 0;
+    return (own || up) < 0 ? -1 : 1;
+  }
+  // one placer for the pooled street path AND the portrait's fresh-mesh path
+  // (cityBlingBuild), so the dorsal roll can never drift between them.
+  // `s` scales a shared part instead of authoring a second geometry for it (a
+  // pinky ring is a ring, a lume pip is a small stone) — always written, never
+  // defaulted, because pooled meshes come back wearing the last wearer's scale.
+  function placePart(mesh, p, lm, side) {
+    const base = (p.at && lm && lm[p.at] != null) ? lm[p.at] : 0;
+    if (p.at === "wrist") {   // dorsal roll: ±90° about Y swaps the authored x/z
+      mesh.position.set(side * p.z, base + p.y, -side * p.x);
+      mesh.rotation.set(p.rx || 0, (p.ry || 0) + side * Math.PI / 2, p.rz || 0);
+    } else {
+      mesh.position.set(p.x, base + p.y, p.z);
+      mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
+    }
+    const s = p.s == null ? 1 : p.s;
+    mesh.scale.set(s, s, s);
+  }
   // mount one slot's parts onto an anchor; pushes the pooled meshes into `out`.
   // `lm` resolves a part's `at:` landmark — its y is then an OFFSET from that
   // point on THIS body, instead of an absolute authored for the adult male.
-  // `s` scales a shared part instead of authoring a second geometry for it (a
-  // pinky ring is a ring, a lume pip is a small stone) — always written, never
-  // defaulted, because these meshes come back out of a pool wearing the last
-  // wearer's scale.
   function mountParts(parts, parent, out, lm) {
     if (!parts || !parent || !parent.add) return;   // harness rigs have empty parts — skip slot
+    const side = wristSide(parent);
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       const mesh = acquire(p.kind);
       mesh.material = p.mat;
-      const base = (p.at && lm && lm[p.at] != null) ? lm[p.at] : 0;
-      mesh.position.set(p.x, base + p.y, p.z);
-      mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
-      const s = p.s == null ? 1 : p.s;
-      mesh.scale.set(s, s, s);
+      placePart(mesh, p, lm, side);
       parent.add(mesh);
       out.push(mesh);
     }
@@ -981,17 +1022,14 @@
   CBZ.cityBlingBuild = function (parts, parent, out, lm) {
     if (!parts || !parent || !parent.add) return out || null;
     out = out || [];
+    const side = wristSide(parent);   // portrait wrists take the same dorsal roll
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       const geo = geoFor(p.kind);
       if (!geo || !p.mat) continue;
       const m = new THREE.Mesh(geo, p.mat);
       m.castShadow = false; m.receiveShadow = false;
-      const base = (p.at && lm && lm[p.at] != null) ? lm[p.at] : 0;
-      m.position.set(p.x, base + p.y, p.z);
-      m.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
-      const s = p.s == null ? 1 : p.s;
-      m.scale.set(s, s, s);
+      placePart(m, p, lm, side);
       parent.add(m);
       out.push(m);
     }

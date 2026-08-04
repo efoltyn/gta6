@@ -755,6 +755,25 @@
     MILITIA_HEADCOUNT,
     tryEscalate, tick: tickAll, list, isMilitia, reset,
     ARMY_ID: ARMY_ID,
+    // ORDER A CRACKDOWN — the public door on the verb the General's rung
+    // already grants (city/presidency.js's Situation Room presses it; the
+    // head of state outranks the General, but the ORDER still needs a
+    // living holder to carry it out). Degrade-safe guard is rankKnows,
+    // never a bare rankCan null-check (doctrine): an undeclared ladder
+    // stands the gate DOWN; a declared ladder with an empty General's
+    // chair REFUSES — the brass are people you can find, and kill.
+    orderCrackdown: function (gid, opts) {
+      const S = state();
+      const mrec = S.byGangId[gid];
+      const gang = CBZ.cityGangById ? CBZ.cityGangById(gid) : null;
+      if (!mrec || !gang || mrec.disbanded) return { ok: false, why: "No such militia stands." };
+      if (CBZ.rankKnows && CBZ.rankHolder && CBZ.rankKnows(ARMY_ID, "crackdown") && !CBZ.rankHolder(ARMY_ID, "crackdown")) {
+        return { ok: false, why: "Nobody alive holds the authority to carry it out." };
+      }
+      crackdown(gid, gang, mrec);
+      void opts;
+      return { ok: true, why: "", gangId: gid };
+    },
     // harness/test-only hooks — not part of the public contract (mirrors
     // regimes.js's own _forceGov/_st precedent).
     _state: state, _anchorFor: anchorFor, _govFor: govFor, _countryRecFor: countryRecFor,

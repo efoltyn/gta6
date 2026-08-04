@@ -6,9 +6,13 @@
      A. Fresh boot, flag at its default (true): the campaign is INERT —
         cityCampaignActive() false, sandbox origins untouched — and the
         "contract" story card is registered (DOM + origins registry).
-     B. Picking The Contract and pressing Play stages the authored prologue
-        (DROP phase, drop-point mission, player on the Spire helipad), the
-        ledger records origin "contract" (resume path), and the scripted
+     B. Picking The Hitman card (id "contract") and pressing Play stages the
+        MERGED opening (HITMAN_ONE_CARD, 2026-08-04): the motel room first —
+        MOTEL phase, "the-name" mission, player at ground level, ledger
+        records origin "contract" (resume path). The probe then finishes the
+        beat the player would (kills the world-bound mark, or rides the
+        no-name degrade), which stages THE HANDOFF on the Spire helipad —
+        drop-point mission, player teleported to the roof — and the scripted
         rooftop arrest hands off to the prison chapter with the campaign
         owning escape mode (g._campaignEscape).
      C. Standalone Prison Escape is never hijacked: with the ownership stamp
@@ -98,30 +102,60 @@ say("contract run playing");
 
 const b1 = await evl(`(() => {
   const out = { fails: [] }, g = CBZ.game;
-  // settle the first frames so the reset wrap has staged the prologue
+  // settle the first frames so the reset wrap has staged the motel opening
   for (let i = 0; i < 30; i++) CBZ.stepSim(1/60);
   if (g.cityOrigin !== "contract") out.fails.push("cityOrigin=" + g.cityOrigin);
   if (!CBZ.cityCampaignActive()) out.fails.push("campaign inactive on a contract run");
   const c = g.cityCampaign;
   out.phase = c && c.phase;
-  if (!c || c.phase !== "prologue_drop") out.fails.push("phase=" + (c && c.phase));
+  if (!c || c.phase !== "motel_name") out.fails.push("phase=" + (c && c.phase));
   const m = CBZ.campaignUI && CBZ.campaignUI.state().mission;
   out.mission = m && m.id;
-  if (!m || m.id !== "drop-point") out.fails.push("mission=" + (m && m.id));
+  // "the-name" once the binder lands; "drop-point" is the honest no-name degrade
+  if (!m || (m.id !== "the-name" && m.id !== "drop-point")) out.fails.push("mission=" + (m && m.id));
   const P = CBZ.player;
   out.py = P && P.pos && Math.round(P.pos.y * 10) / 10;
-  if (!P || !P.pos || P.pos.y < 6) out.fails.push("player not on a rooftop helipad (y=" + out.py + ")");
+  if (!P || !P.pos || P.pos.y >= 6) out.fails.push("player not at the ground-level motel (y=" + out.py + ")");
   let w = null;
   try { w = JSON.parse(localStorage.getItem("CBZ_CITY_WORLD_V2")); } catch (e) {}
   if (!w || w.origin !== "contract" || !w.originPlayed) out.fails.push("ledger origin not stamped contract");
+  return out;
+})()`);
+fails.push(...(b1 && b1.fails || ["stage B1 eval failed"]));
+say("B1 done: " + JSON.stringify(b1));
+
+// finish the motel beat the way a player would: the one name dies (the mark is
+// a ped the world already ran — campaign's binder retries ~12 sim-s, so hunt
+// inside that window), then the motel tick stages THE HANDOFF on the roof.
+const b1b = await evl(`(() => {
+  const out = { fails: [] }, g = CBZ.game;
+  let mark = null;
+  for (let i = 0; i < 900 && !mark; i++) {
+    CBZ.stepSim(1/60);
+    if (g.cityCampaign && g.cityCampaign.phase !== "motel_name") break;   // no-name degrade already moved on
+    mark = (CBZ.cityPeds || []).find((p) => p && p._campaignTarget && !p.dead) || null;
+  }
+  out.bound = !!mark;
+  if (mark) { try { CBZ.cityKillPed(mark, {}, "executed"); } catch (e) { out.fails.push("mark kill threw: " + e.message); } }
+  let staged = false;
+  for (let i = 0; i < 900 && !staged; i++) { CBZ.stepSim(1/60); staged = !!(g.cityCampaign && g.cityCampaign.phase === "prologue_drop"); }
+  out.phase = g.cityCampaign && g.cityCampaign.phase;
+  if (!staged) { out.fails.push("motel beat never reached the handoff (phase=" + out.phase + ")"); return out; }
+  for (let i = 0; i < 30; i++) CBZ.stepSim(1/60);
+  const m = CBZ.campaignUI && CBZ.campaignUI.state().mission;
+  out.mission = m && m.id;
+  if (!m || m.id !== "drop-point") out.fails.push("handoff mission=" + (m && m.id));
+  const P = CBZ.player;
+  out.py = P && P.pos && Math.round(P.pos.y * 10) / 10;
+  if (!P || !P.pos || P.pos.y < 6) out.fails.push("player not on the rooftop handoff (y=" + out.py + ")");
   // drive the scripted rooftop beat well past the 9.4s arrest
   for (let i = 0; i < 720; i++) CBZ.stepSim(1/60);
   out.busted = !!g.busted;
   if (!g.busted) out.fails.push("rooftop arrest never landed after 12 sim-s");
   return out;
 })()`);
-fails.push(...(b1 && b1.fails || ["stage B1 eval failed"]));
-say("B1 done: " + JSON.stringify(b1));
+fails.push(...(b1b && b1b.fails || ["stage B1b eval failed"]));
+say("B1b done: " + JSON.stringify(b1b));
 
 // the bust overlay's mode switch is a real 2.6s wall-clock setTimeout, and the
 // prison world build takes a few seconds of real time after it fires

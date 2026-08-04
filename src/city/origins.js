@@ -157,7 +157,14 @@
   // hard-wired to the registry's own keys (defect #5) — no second literal
   // id list to keep in sync when a 4th protagonist ships.
   const IDS = Object.keys(ORIGINS).reduce(function (o, k) { o[k] = 1; return o; }, {});
-  function normOrigin(id) { return IDS[id] ? id : "exec"; }
+  // RETIRED IDS (owner, 2026-08-03: "make them one"). The Hitman preset card
+  // and The Contract campaign card were the same professional-hit fantasy on
+  // one picker; `contract` survives carrying the hitman texture (motel, the
+  // suppressed pistol, one name) and `hitman` maps onto it everywhere a saved
+  // id can surface — ledger, vault, picker, campaign activation.
+  const ORIGIN_ALIASES = { hitman: "contract" };
+  function unalias(id) { return ORIGIN_ALIASES[id] || id; }
+  function normOrigin(id) { id = unalias(id); return IDS[id] ? id : "exec"; }
   CBZ.cityOriginNormalize = normOrigin;
 
   // ---- boot-time ledger peek --------------------------------------------
@@ -179,9 +186,14 @@
     let p = null;
     try { p = JSON.parse(raw); } catch (e) { return; }
     if (!p || p.version !== 2) return;
-    if (p.originPlayed && IDS[p.origin]) {
-      if (CBZ.game) CBZ.game.cityOrigin = p.origin;
-      if (CBZ.setCityOrigin) CBZ.setCityOrigin(p.origin);   // picker sync only — no "picked" intent
+    // Retired-id saves (`hitman`) sync the picker to the surviving card. Note
+    // the composed/contract rows are NOT in IDS yet at peek time (they
+    // register further down this file), so those saves fall through here and
+    // campaign.js's own boot sync covers them — same as `contract` always has.
+    const savedOrigin = unalias(p.origin);
+    if (p.originPlayed && IDS[savedOrigin]) {
+      if (CBZ.game) CBZ.game.cityOrigin = savedOrigin;
+      if (CBZ.setCityOrigin) CBZ.setCityOrigin(savedOrigin);   // picker sync only — no "picked" intent
       return;
     }
     const startCash = (CBZ.CITY && CBZ.CITY.econ && CBZ.CITY.econ.startCash) || 30;
@@ -234,9 +246,28 @@
   function loadVault() {
     try {
       const raw = localStorage.getItem(VAULT_KEY);
-      if (raw) { const v = JSON.parse(raw); if (v && v.chars) return v; }
+      if (raw) { const v = JSON.parse(raw); if (v && v.chars) return migrateVault(v); }
     } catch (e) {}
     return { active: null, chars: {} };
+  }
+  // A parked ledger under a RETIRED id would be unreachable — the wheel walks
+  // ORIGINS keys and `hitman` is no longer one. Idempotent, nothing destroyed:
+  // the parked hitman life becomes the merged character (or, if that slot is
+  // taken, the recoverable `previous` life; if both are taken it stays parked
+  // under its old key — unlisted but intact, never overwritten).
+  function migrateVault(v) {
+    for (const from in ORIGIN_ALIASES) {
+      if (!v.chars[from]) { if (v.active === from) v.active = ORIGIN_ALIASES[from]; continue; }
+      const to = ORIGIN_ALIASES[from];
+      const dest = !v.chars[to] ? to : (!v.chars[PREV_ID] ? PREV_ID : null);
+      if (dest) {
+        v.chars[dest] = v.chars[from];
+        v.chars[dest].origin = dest;
+        delete v.chars[from];
+      }
+      if (v.active === from) v.active = to;
+    }
+    return v;
   }
   function saveVault(v) {
     try { localStorage.setItem(VAULT_KEY, JSON.stringify(v)); } catch (e) {}
@@ -1087,6 +1118,25 @@
 
   // A site resolver is the ground-origin equivalent of a lot finder: it asks a
   // world capability for a spawn, never types another venue coordinate.
+  // The President wakes in the Executive Mansion's motor court — the complex
+  // govcomplex.js placed on its own land (CBZ.govComplexes). Never null: a
+  // world without the complex degrades to the arena spawn so the swear-in
+  // verb still runs (the SEAT is this story, not the address).
+  function mansionSpawn() {
+    const L = CBZ.govComplexes;
+    if (Array.isArray(L)) {
+      for (let i = 0; i < L.length; i++) {
+        const s = L[i];
+        if (!s || s.id !== "execmansion" || !s.rect) continue;
+        const x = s.cx, z = s.cz + 10;                       // the motor court
+        const dx = s.cx - x, dz = (s.cz - 17) - z;           // face the front door
+        return { x: x, z: z, y: CBZ.floorAt ? CBZ.floorAt(x, z) : 0.14, heading: Math.atan2(dx, dz) };
+      }
+    }
+    const A = arena();
+    const sp = (A && A.spawn) || { x: 0, z: 0 };
+    return { x: sp.x, z: sp.z, y: CBZ.floorAt ? CBZ.floorAt(sp.x, sp.z) : 0.14, heading: 0 };
+  }
   function speedwaySpawn() {
     const c = (CBZ.raceKit && CBZ.raceKit.course && CBZ.raceKit.course("speedway")) || CBZ.speedwayCourse;
     if (!c || typeof c.line !== "function") return null;
@@ -1110,6 +1160,8 @@
       debtor:  { name: "The Debtor",    outfit: "street",     title: "Mark",          blurb: "you are three weeks late" },
       wick:    { name: "The Marked",    outfit: "suit",       title: "Open Contract", blurb: "every single person wants the money" },
       racer:   { name: "The Racer",     outfit: "coveralls",  title: "Rookie",        blurb: "a loaner, a back-row start, one way up" },
+      president: { name: "The President", outfit: "suit",     title: "President",     blurb: "sworn in this morning; the country is yours" },
+      captain: { name: "The Captain",   outfit: "coveralls",  title: "Skipper",       blurb: "a diesel trawler, a crew of three, open water" },
     },
 
     // ---- WHERE: a lot the CITY BUILT. Never a room this file authors. ----
@@ -1130,6 +1182,8 @@
       // purely the DEGRADE path: a world that could not field a race stands
       // you at the gate and prints the feed, which is the old opening.
       speedway:   { resolve: speedwaySpawn, feed: "The paddock is closed. You wait at the Speedway gate." },
+      // never fails (internal degrade to the arena spawn — the seat is the story)
+      mansion:    { resolve: mansionSpawn,  feed: "The Mansion is dark. The motorcade never came." },
     },
 
     // ---- PURSE: cash / bank / debt. The three numbers a start is made of.
@@ -1155,7 +1209,11 @@
     arms: {
       none:     { guns: [] },
       pistol:   { guns: ["Pistol"] },
-      quiet:    { guns: ["Pistol"], mods: { pistol: { muzzle: "suppressor" } } },
+      // the fitted-mod store is keyed by the FPS weapon id (gunmods.js
+      // store()[id]; combat.js GUN_MAP maps "Pistol" -> "sidearm"). The old
+      // `pistol` key wrote a record gunModsSuppressed("sidearm") never read,
+      // so the quiet start's suppressor never actually fit.
+      quiet:    { guns: ["Pistol"], mods: { sidearm: { muzzle: "suppressor" } } },
       sidearms: { guns: ["Pistol", "SMG"] },
       full:     { guns: ["Pistol", "SMG", "Shotgun"] },
     },
@@ -1182,6 +1240,22 @@
         id: "origin_racer_career", title: "Rookie to APEX Champion", goal: "custom", reward: 0,
         start: function () { return CBZ.cityRacerCareer && CBZ.cityRacerCareer.start(); },
       },
+      // the President: the verb IS taking office. presidencyBegin() runs the
+      // swear-in through candidacy.js's own write path (the same bookkeeping
+      // a won election performs) and arms the walk-to-the-Situation-Room
+      // mission through core/mission.js. city/presidency.js owns the rest.
+      govern: {
+        id: "origin_govern", title: "Govern", goal: "custom", reward: 0,
+        start: function () { return CBZ.presidencyBegin && CBZ.presidencyBegin(); },
+      },
+      // the Captain: the verb IS putting to sea. captainStart() defers until
+      // the fleet exists (the pilot's own pendingAir pattern) and then hands
+      // the player the helm of a real working trawler through the one enter
+      // path. city/captain.js owns the rest — crew, orders, voyages.
+      voyage: {
+        id: "origin_voyage", title: "Take her to sea", goal: "custom", reward: 0,
+        start: function () { return CBZ.captainStart && CBZ.captainStart(); },
+      },
       none:    null,
     },
   };
@@ -1200,6 +1274,9 @@
     }
     return motel || home;
   }
+  // the ONE motel finder — city/hitman.js (the room annex) and city/campaign.js
+  // (the merged opening) resolve the same address this file's presets use.
+  CBZ.cityFindMotelLot = findMotelLot;
 
   /* ---- THE PRESETS ------------------------------------------------------
      Frozen rolls. Read one row and you know the whole story — which is the
@@ -1214,6 +1291,8 @@
     debtor:  { who: "debtor",  where: "motel",     purse: "underwater", arms: "none",     heat: "shark",    verb: "settle" },
     wick:    { who: "wick",    where: "unit",      purse: "warchest",   arms: "full",     heat: "everyone", verb: "survive" },
     racer:   { who: "racer",   where: "speedway",  purse: "rookie",     arms: "none",     heat: "none",     verb: "racecareer" },
+    president: { who: "president", where: "mansion", purse: "wages",    arms: "none",     heat: "none",     verb: "govern" },
+    captain: { who: "captain", where: "corner",    purse: "wages",      arms: "none",     heat: "none",     verb: "voyage" },
   };
 
   /* ---- THE ROLL ---------------------------------------------------------
@@ -1238,7 +1317,9 @@
     if (comp.who === "pilot") comp.where = "airborne";
     else if (comp.who === "exec") comp.where = "tower_top";
     else if (comp.who === "racer") comp.where = "speedway";
+    else if (comp.who === "president") comp.where = "mansion";   // a head of state has an address
     else if (comp.where === "airborne") comp.where = "corner";   // only a pilot starts in the air
+    else if (comp.where === "mansion") comp.where = "corner";    // only the President wakes in the Mansion
     // 2. hunted people are armed
     const h = AXES.heat[comp.heat];
     if (h.hunters >= 3 && comp.arms === "none") comp.arms = h.hunters >= 12 ? "full" : "sidearms";
@@ -1249,6 +1330,8 @@
     if (comp.verb === "landit" && comp.where !== "airborne") comp.verb = "earn";
     if (comp.verb === "contract" && comp.arms === "none") comp.arms = "quiet";
     if (comp.verb === "racecareer") { comp.who = "racer"; comp.where = "speedway"; }
+    if (comp.verb === "govern") { comp.who = "president"; comp.where = "mansion"; }   // only a President governs
+    if (comp.who === "captain" || comp.verb === "voyage") { comp.who = "captain"; comp.verb = "voyage"; }   // a captain sails, and only a captain has a boat waiting
     return comp;
   }
   CBZ.cityOriginRoll = rollOrigin;             // exposed for the title screen's re-roll
@@ -1624,7 +1707,11 @@
   // originals keep their hand-written scenes (they are better than a generated
   // one and the owner likes them); the new stories run the generator.
   (function registerComposed() {
-    const NEW = ["hitman", "pilot", "hustler", "debtor", "wick", "racer"];
+    // `hitman` is deliberately NOT here: that preset merged into the campaign
+    // character (ORIGINS.contract below carries its composition; the alias at
+    // the top maps saved ids). PRESETS.hitman stays as DATA — the merged row
+    // and the random roll both still read it.
+    const NEW = ["pilot", "hustler", "debtor", "wick", "racer", "president", "captain"];
     for (let i = 0; i < NEW.length; i++) {
       const id = NEW[i], comp = PRESETS[id], W = AXES.who[comp.who];
       ORIGINS[id] = {
@@ -1665,20 +1752,33 @@
     };
     IDS.random = 1;
 
-    // THE CONTRACT — the authored hitman campaign (city/campaign.js). It is a
-    // real registry character so the vault, the [U] wheel, the ledger origin
-    // stamp and the title picker treat it like any other life. Its grants and
-    // scene are deliberately empty: campaign.js wraps cityOriginApply and owns
-    // every beat (prologue helipad, loadout, prison handoff). Registering here
-    // is what makes the pick addressable and resumable, not what stages it —
-    // and with CITY_HITMAN_CAMPAIGN off this row degrades to a plain safe
-    // street spawn instead of a broken card.
+    // THE HITMAN (id `contract`) — the ONE professional-hit character. The
+    // owner's 2026-08-03 merge: the old preset card ("a motel, a silencer,
+    // one name") and the authored campaign card ("a roof, a prison, a
+    // Director") were the same fantasy twice, so the preset's TEXTURE is now
+    // this row's GRANTS (pro purse, suit, genuinely suppressed pistol) and
+    // the campaign supplies the beats — its new opening IS the motel and the
+    // one name (city/campaign.js PHASE.MOTEL). A real registry character, so
+    // the vault, the [U] wheel, the ledger stamp and the title picker treat
+    // it like any other life. With CITY_HITMAN_CAMPAIGN off the row degrades
+    // to exactly the old hitman preset opening — nothing orphaned.
+    const HITCOMP = PRESETS.hitman;
     ORIGINS.contract = {
-      meta: { icon: "", name: "The Contract", blurb: "the authored hitman story" },
-      get tuning() { return { missedLotFeed: "" }; },
-      findSpawn: function () { return null; },
-      grants: function () {},
-      scene: function () { genericSafeSpawn(); return { compact: true }; },
+      meta: { icon: "", name: "The Hitman", blurb: "a motel, a silencer, one name — then the Director" },
+      get tuning() { return { missedLotFeed: (AXES.where[HITCOMP.where] || {}).feed || "" }; },
+      findSpawn: function () { const f = (AXES.where[HITCOMP.where] || {}).find; return f ? f() : null; },
+      grants: function (game) { applyGrants(HITCOMP, game); armHeat(game); },
+      scene: function (game) {
+        // Campaign on: the director stages the real opening (the room, the
+        // name, the handoff) from its reset wrap — a cheap safe spawn is all
+        // this scene should do, and no origin cinematic plays over it.
+        if (CBZ.cityCampaignEnabled && CBZ.cityCampaignEnabled()) { genericSafeSpawn(); return { compact: true }; }
+        // Campaign off (the one-line kill switch): the classic preset opening.
+        let o = null;
+        try { o = placeComposition(HITCOMP, game); } catch (e) { o = null; }
+        if (o) { try { startVerb(HITCOMP); } catch (e) {} }
+        return o;
+      },
     };
     IDS.contract = 1;
 
@@ -1745,7 +1845,13 @@
          lands in resume, forever, whatever you click. That is exactly the
          owner's "I always have the same one life regardless of story."
          Claiming it for the default character makes it addressable again, so
-         the ordinary switch below can move off it. */
+         the ordinary switch below can move off it. A RETIRED id is not an
+         unknown one: a saved `hitman` life IS the merged `contract` character
+         (the alias), never a fallback to the exec. */
+      // (in-memory only: the next natural autosave persists it, and the alias
+      // re-applies on every boot — committing HERE would let the ledger wrap
+      // stamp the mid-reset default spawn over the character's saved lastPos.)
+      if (w.originPlayed && ORIGIN_ALIASES[w.origin]) w.origin = ORIGIN_ALIASES[w.origin];
       if (w.originPlayed && !IDS[w.origin]) w.origin = "exec";
 
       /* ---- DEFECT 2: THE ADOPTION THAT ATE YOUR CHOICE ------------------
@@ -2012,10 +2118,11 @@
       // what the number is for. It measures openings that resisted the
       // generator; a character with no opening cannot be one of those.
       if (k === PREV_ID) { resumeOnly++; continue; }
-      // `contract` is a DELEGATION, not an opening: its scene is a safe-spawn
-      // stub and city/campaign.js stages the real prologue. The ratchet
-      // measures openings that resisted the generator; a story whose opening
-      // lives in its own director is not one of those (same reasoning as the
+      // `contract` is a DELEGATION, not an opening: with the campaign on its
+      // scene is a safe-spawn stub and city/campaign.js stages the real
+      // prologue; with it off the row runs the GENERATOR (the merged hitman
+      // composition) — either way no hand-written scene resisted the
+      // generator, so it never counts toward `bespoke` (same reasoning as the
       // parked previous-life character above).
       if (k === "contract") { resumeOnly++; continue; }
       if (ORIGINS[k].composition) composed++; else bespoke++;

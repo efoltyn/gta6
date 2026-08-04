@@ -148,8 +148,9 @@ behavior/systems work needs all three. Never commit on (1) alone.
 - Probes sending synthetic keys: create ONE KeyboardEvent per press and
   dispatch it ONCE — dispatching the same event object twice throws silently
   and the key never registers.
-- Probes that need free play: the campaign boots into a rooftop prologue;
-  jump straight to free play with
+- Probes that need free play: the campaign boots into the MOTEL opening
+  (2026-08-04 merge — phase `motel_name`, then the rooftop handoff); jump
+  straight to free play with
   `CBZ.game.cityCampaign.phase = "endless_contracts"`.
 - **Baseline console noise**: exactly one `ProgressEvent` error is
   pre-existing and acceptable; rare seed-dependent `computeBoundingSphere`

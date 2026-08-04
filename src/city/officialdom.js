@@ -117,20 +117,16 @@
   // somehow loads without it; the deputy prefix is the one thing genuinely
   // ours, because officials.js has no notion of a deputy's title.
   function titleOf(rec, deputy) {
-    let t;
+    // THE LADDER LIVES IN ONE FILE (doctrine's "next migration owed": the
+    // political title ladder was hand-typed in EIGHT files). officials.js's
+    // exported titleFor() is the one declaration; this file no longer carries
+    // a copy. Degrade (officials.js absent, which no shipped build is):
+    // neutral "Official" prose — cosmetic only, never a break.
+    let t = null;
     if (CBZ.officials && CBZ.officials.titleFor) {
       try { t = CBZ.officials.titleFor(rec); } catch (e) { t = null; }
     }
-    if (!t) {
-      t = "Official";
-      if (!rec) return t;
-      // "Monarch" is a title officials.js has NEVER produced — it says Queen
-      // or King by the holder's rolled gender. A fallback that disagrees with
-      // its owner is a bug waiting for the owner to be absent.
-      if (rec.kind === "country") t = rec.govType === "monarchy" ? "Queen" : "President";
-      else if (rec.kind === "state" || rec.kind === "federal") t = "Governor";
-      else if (rec.kind === "city") t = rec.tier === "village" ? "Chief" : "Mayor";
-    }
+    if (!t) t = "Official";
     return deputy ? "Deputy " + t : t;
   }
   function nameOf(sid) {

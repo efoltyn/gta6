@@ -679,6 +679,21 @@
       try { return lineOf(countryId).length > 0; } catch (e) { return false; }
     },
     serialize: serialize, apply: apply, reset: reset,
+    // THE PUBLIC CORONATION — the dictator self-coronation transition, with
+    // its real precondition enforced (only a DICTATORSHIP crowns its holder;
+    // a republic refuses). city/presidency.js's Situation Room presses this;
+    // the daily tickDictatorWatch above remains the NPC path to the same
+    // door. Everything downstream (the house, the bloodline, the legitimacy
+    // drift, the relations insults) is selfCrown()'s existing machinery.
+    selfCrown: function (countryId) {
+      const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(countryId) : null;
+      if (!rec) return { ok: false, why: "No such country." };
+      if (rec.govType === "monarchy") return { ok: false, why: "The crown already sits on a head." };
+      if (rec.govType !== "dictatorship") return { ok: false, why: "Only a dictator crowns himself." };
+      if (!rec.office || !rec.office.holder) return { ok: false, why: "The seat is empty — there is nobody to crown." };
+      const h = selfCrown(rec, CBZ.worldDay ? CBZ.worldDay() : 0);
+      return h ? { ok: true, why: "", dynasty: h.dynastyName } : { ok: false, why: "The coronation did not happen." };
+    },
     // harness/test hooks only — not part of the public contract.
     _succeed: succeed,
     _selfCrown: function (countryId, day) {

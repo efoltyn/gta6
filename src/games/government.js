@@ -219,22 +219,14 @@
   }
 
   /* ---------------- casting FROM the real officials sim ------------------- */
-  // officials.js OWNS this derivation and now exports it — call the owner
-  // rather than keeping a third private copy of the same five branches. The
-  // local fallback stays only so this package still casts a council if it is
-  // ever mounted without officials.js underneath it.
+  // officials.js OWNS this derivation and exports it — call the owner.
   function officeTitle(rec) {
+    // THE LADDER LIVES IN ONE FILE. officials.js's exported titleFor() is
+    // the one declaration; this file's hand-typed kind->title branches (one
+    // of the EIGHT copies doctrine counts) are deleted. Degrade: "Official".
     if (CBZ.officials && CBZ.officials.titleFor) {
       try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {}
     }
-    // Two disagreements with the owner, both corrected: "Monarch" (which
-    // officials.js never returns — it says Queen/King) and "Councilmember" as
-    // the null/unknown default, where every other copy in the repo says
-    // "Official". This was the only file in 264k lines using that word.
-    if (!rec) return "Official";
-    if (rec.kind === "country") return rec.govType === "monarchy" ? "Queen" : "President";
-    if (rec.kind === "state" || rec.kind === "federal") return "Governor";
-    if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
     return "Official";
   }
   // real officeholders + deputies, in a sensible seniority order, deduped.

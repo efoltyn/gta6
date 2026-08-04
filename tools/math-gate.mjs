@@ -392,6 +392,46 @@ const PASS = `(() => {
         out.fails.push("RACER CAREER CONTRACT DRIFT: " + JSON.stringify(rc));
       }
     } else out.fails.push("racerCareerAudit missing");
+    // THE 2026-08-04 MODES WAVE (one hitman card / race ladder of locked
+    // places / the presidency / the captain / gun game). Every pin below was
+    // MEASURED via probe on seed 90210 before being written (the propUseAudit
+    // lesson) and each is structural, not taste: a second hitman pipe site, a
+    // race rung with no verb, or a Situation Room button with no world effect
+    // is a regression. Counts print beside the pins so a fix that simply
+    // stops declaring things cannot pass. (No backticks in this block.)
+    if (CBZ.hitmanAudit) {
+      const ha = CBZ.hitmanAudit();
+      out.hitman = ha.cards + "card " + ha.pipes + "pipe tiers=" + ha.marksLadderTiers + " legacy=" + ha.legacyStreetHitmanSites + " room=" + (ha.room ? 1 : 0);
+      if (ha.legacyStreetHitmanSites !== 0) out.fails.push("LEGACY STREET-HITMAN SITES BACK: " + ha.legacyStreetHitmanSites);
+      if (ha.cards !== 1) out.fails.push("hitman title cards=" + ha.cards + " (the merge law: exactly one)");
+      if (ha.marksLadderTiers < 3) out.fails.push("hitman mark ladder shrank to " + ha.marksLadderTiers);
+    }
+    if (CBZ.raceAudit) {
+      const rl = CBZ.raceAudit();
+      out.raceLadder = rl.rungs + "rungs verbed=" + rl.verbedRungs + " doors=" + rl.doors + "(" + rl.lockedDoors + " locked) built=" + rl.placesBuilt;
+      if (rl.verblessRungs !== 0) out.fails.push("RACE LADDER GREW A VERBLESS RUNG: " + rl.verblessRungs);
+      if (rl.placesBuilt < 3) out.fails.push("race locked places fell to " + rl.placesBuilt + " (paddock gate, bay 12, champion garage)");
+    }
+    if (CBZ.presidencyAudit) {
+      const pa = CBZ.presidencyAudit();
+      out.presidency = pa.sitRoomButtons + "btn moveless=" + pa.buttonsMoveless + " terror=" + pa.terrorOrgs + " ladderCopies=" + pa.ladderCopies + " producers=" + pa.govTypeProducers;
+      if (pa.buttonsMoveless !== 0) out.fails.push("SITUATION ROOM BUTTON WITH NO WORLD EFFECT: " + pa.buttonsMoveless);
+      if (pa.ladderCopies > 3) out.fails.push("political title ladder copies rose to " + pa.ladderCopies + " (ratchet 3, down from 8)");
+      if (pa.sitRoomBuilt && pa.sitRoomButtons < 9) out.fails.push("situation room buttons fell to " + pa.sitRoomButtons);
+    }
+    if (CBZ.captainAudit) {
+      const cpt = CBZ.captainAudit();
+      out.captain = "orders=" + cpt.ordersLive + " ladder=" + cpt.boatLadderRungs + " yard=" + (cpt.yardBuilt ? 1 : 0) + " locks=" + cpt.lockedDoors;
+      if (cpt.ordersLive < 3) out.fails.push("captain crew orders fell to " + cpt.ordersLive);
+      if (cpt.boatLadderRungs < 4) out.fails.push("boat ladder shrank to " + cpt.boatLadderRungs + " rungs");
+    }
+    if (CBZ.gungameAudit) {
+      const gga = CBZ.gungameAudit();
+      const ggm = gga.maps ? gga.maps.length : 0;
+      out.gungame = gga.rungs + "rungs maps=" + ggm;
+      if (ggm < 2) out.fails.push("gungame maps fell to " + ggm + " (jail + island are the floor)");
+      if (gga.rungs < 5) out.fails.push("gungame ladder shrank to " + gga.rungs + " rungs");
+    }
     // WAR BAND'S REPLACEMENT. The package was DELETED 2026-07-29 — owner:
     // "the whole war band code, it was a dumb idea, but it's really what this
     // whole game's point is". Its two good rules were promoted to world
@@ -880,6 +920,8 @@ async function runSeed(seed, label) {
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
   tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
+  tmark(`${label}: hitman ${r.hitman || "-"} | raceLadder ${r.raceLadder || "-"}`);
+  tmark(`${label}: presidency ${r.presidency || "-"} | captain ${r.captain || "-"} | gungame ${r.gungame || "-"}`);
   tmark(`${label}: loyalty ${r.loyalty || "-"}`);
   tmark(`${label}: take ${r.take || "-"}`);
   tmark(`${label}: till ${r.till || "-"}`);
