@@ -1324,3 +1324,56 @@ orchestrator only orchestrates + one merged math-gate.
   split between playercars/vehicles (+) and OCC_SLOTS/DB_SEATS (−) documented
   in boarding.js header; two session-limit interruptions mid-wave were
   resumed by audit-then-finish agents (the resume-file pattern in memory).
+
+## THE 2026-08-04 BUTTON-GRAMMAR FIX — "I hate yes buttons"
+
+Owner report on an iPad screenshot of a live gun stop: YES and REFUSE floating
+as bare unstyled text over the officer's chest, ~440 px left of their own name
+plate ("there's two dialogues on iPad"), neither of them pressable — against
+the jail rail, which the owner named as the good one ("we moved those
+interaction buttons on iPad all the way to the right, right next to the other
+buttons so I can press with my right thumb"). Two separate faults, one root.
+
+- **A BUTTON IS THE VERB, NEVER A DECISION.** Owner's law, verbatim: *"I hate
+  yes buttons… yes buttons usually can be switched for the actual thing that is
+  next to the button. It'll say, like, mount and then yes. It should just be a
+  mount button."* `city/interactions.js` had shipped the proposal in the note
+  line (and, on the iPad rail, in the copy bar) with the literal string `"YES"`
+  on the thumb target. Now the row carries `verbHead(proposal)` and the docked
+  button carries the WHOLE proposal whenever it fits a thumb target
+  (`ACTION_MAX` 24 chars) — so the copy bar's say-it-once `dup` test fires and
+  most cards collapse to a single MOUNT / TALK / ROB AT GUNPOINT / HOLSTER THE
+  WEAPON button. The question line is gone on every surface; only a pinned
+  SPOKEN line (`rows.note`) still gets the slot, because that is content rather
+  than a restated control. Desktop reads `[E] ZIP WRISTS` with no note.
+- **AND THERE IS NEVER A REFUSE BUTTON.** Owner: *"there's never a need for a
+  refuse button. Refusing is just walking away."* `police.js`'s gun stop lost
+  its REFUSE row. The refusal's teeth did NOT go with it — they moved onto the
+  act, in `stopWalkOff` (`CITY_GUNSTOP_WALKOFF_REFUSES`): breaking contact
+  (d > 16) with the gun still out ratchets exactly as the row did, and the
+  strike count now lives on the OFFICER (`_stopRefused`, seeded back into
+  `STOP.susp` by `beginStop`, cleared by complying and by the roadblock pool's
+  recycle). The old three-strikes-and-you're-arrested arithmetic is intact,
+  spent across contacts instead of inside one, and the note reads the ladder
+  out loud: "Open carry — he wants it away" → "Officer is losing patience" →
+  "FINAL WARNING · walk off now and he calls it in". Before this, walking off
+  was free, which is half of why the row existed at all.
+- **THE ROOT: A SECOND RENDERER.** The stand-off hand-rolled legacy `.iopt`
+  markup in three places while `mobile.css`'s iPad dock styles `#interact` to
+  transparent / `pointer-events:none` and only lights up `.iopt.tverb >
+  .itouch-act`. So the legacy rows were invisible AND untappable inside the
+  dock, and the name plate flying to the right rail while the text sat at the
+  far left is what read as two dialogues. Block Law applied: one renderer,
+  `CBZ.cityInteractRowsHTML` (interactions.js), read by both files.
+- **A TAP-EATER FOUND ON THE WAY.** police.js's order-40 re-assert rewrote
+  `#interactOpts.innerHTML` ten times a second; a finger needs ~100 ms between
+  touchstart and click, so it destroyed the button being pressed. Now stamped
+  and idempotent (`stopStampRows`, marker on a CHILD so an interact.js clobber
+  is still detected). Probed: the button node survives 2 s of re-asserts and a
+  synthesized tap stows the gun and ends the stop.
+- **GATE**: `MATHGATE: ok` (90210: 318/180/204, det ok, errors baseline-only).
+  Probes: renderer output on all three surfaces (no "YES"/"REFUSE" anywhere),
+  live stop → one real `<button>HOLSTER THE WEAPON</button>` → tap → stowed;
+  three consecutive walk-offs on one officer → called in on the third.
+- **NOT TOUCHED (owner's instruction)**: the black-material character in the
+  screenshot — someone else owns that.

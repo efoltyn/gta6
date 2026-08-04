@@ -73,6 +73,11 @@
   // lethal force needs a reason (4★+, being fired upon, or SWAT out of
   // patience at 3★+). false = the legacy shoot-from-2★ logic, kept intact.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST == null) CBZ.CONFIG.CITY_ARREST_FIRST = true;
+  // GUN-STOP WALK-OFF (2026-08-04): the stand-off card lost its REFUSE row —
+  // refusing is walking away — so breaking contact with the gun still out is
+  // now what carries the refusal's consequences. false = the legacy behaviour,
+  // where turning your back ended the stop free of charge.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_GUNSTOP_WALKOFF_REFUSES == null) CBZ.CONFIG.CITY_GUNSTOP_WALKOFF_REFUSES = true;
   // SWAT REDESIGN (city-swat-redesign): olive/graphite silhouette with the
   // helmet/carrier kit owned by armor.js.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_REDESIGN == null) CBZ.CONFIG.CITY_SWAT_REDESIGN = true;
@@ -596,10 +601,11 @@
   // ============================================================
   //  GUN STOP — a cop spots an openly-carried firearm on a CLEAN record and
   //  walks up to CHALLENGE you (GTA: drawing on the law spikes heat; brandishing
-  //  draws a stop). Reuses the #interact HUD panel + I/J/K/L plumbing (the same
-  //  rows interact.js uses) without breaking pointer-lock, so the stand-off is
-  //  LIVE and tense: you can talk your way out, COMPLY (put it away), or EXECUTE
-  //  (draw and drop the officer → instant heat).
+  //  draws a stop). Reuses the #interact HUD panel and the shared city row
+  //  grammar (interactions.js's rowsHTML) without breaking pointer-lock, so the
+  //  stand-off is LIVE and tense. ONE row — HOLSTER. Everything else you might
+  //  do is done with the world, not with a button: walk off (the refusal, see
+  //  stopWalkOff), stand there and let him lose patience, or shoot him.
   // ============================================================
   const STOP = { cop: null, t: 0, susp: 0, asked: 0, panel: null, name: null, note: null, opts: null, optList: null, key: "" };
 
@@ -623,33 +629,85 @@
     return Math.max(0.05, base - STOP.susp * 0.18 - STOP.asked * 0.12 + respect);
   }
 
+  /* ONE ROW, AND IT IS THE VERB (owner, 2026-08-04). This card used to offer
+     YES / REFUSE. Both were wrong:
+       • YES answered a question the note had to ask. The button now says the
+         thing that happens — HOLSTER — and the note is free to carry the
+         officer's temper instead of restating the control.
+       • REFUSE was never an action. Refusing is turning around and walking
+         off, which the stand-off already tracks (the d > 16 branch in
+         updateGunStop) — so the refusal's teeth moved onto the act itself in
+         `stopWalkOff` and the row is gone.
+     `proposal` is the prose the docked iPad rail prints beside the button;
+     `label` is the button word. The markup is rendered by the shared city
+     grammar (interactions.js's rowsHTML), which is what makes it a real,
+     visible, tappable 52px button inside the iPad dock instead of the bare
+     unstyled text in the owner's screenshot. */
   function stopOpts() {
-    return [
-      { key: "e", label: "YES", fn: stopComply },
-      { key: "i", label: "REFUSE", bad: true, fn: stopRefuse },
-    ];
+    return [{ key: "e", label: "Holster", proposal: "Holster the weapon", fn: stopComply }];
   }
+  // The note is the OFFICER, not a restated button: how close he is to calling
+  // it in, and (once he is impatient) what walking off will now cost.
   function stopNote() {
     const s = STOP.susp;
-    if (s >= 2.2) return "Put the weapon down and surrender? · FINAL WARNING";
-    if (s >= 1.2) return "Holster the weapon and comply? · Officer is losing patience";
-    return "Holster the weapon and comply?";
+    if (s >= 2.2) return "FINAL WARNING · walk off now and he calls it in";
+    if (s >= 1.2) return "Officer is losing patience";
+    return "Open carry — he wants it away";
+  }
+  // The ordinary city card now HIDES #interactNote (it has no question line to
+  // print any more), and it shares this element with us. Writing textContent
+  // alone would leave the officer's temper invisible behind that display:none
+  // for as long as the stand-off lasts, so re-assert the slot with the text.
+  function stopSetNote(text) {
+    STOP.note.textContent = text;
+    STOP.note.style.display = "";
+  }
+  function stopRowsHTML() {
+    if (CBZ.cityInteractRowsHTML) return CBZ.cityInteractRowsHTML(STOP.optList);
+    return STOP.optList.map((o, i) =>                      // pre-interactions.js load only
+      `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
+      `<span class="ilab">${o.proposal || o.label}</span></div>`
+    ).join("");
+  }
+  // NEVER REWRITE ROWS THAT ARE ALREADY OURS. The @40 re-assert below runs ten
+  // times a second, and a finger needs ~100 ms between touchstart and click: an
+  // unconditional innerHTML write destroys the very button being pressed before
+  // the click can land, so the tap silently does nothing. The stamp rides on a
+  // CHILD, not on #interactOpts itself — interact.js clobbers the children and
+  // leaves the container, so a marker on the container would never notice.
+  function stopStampRows(force) {
+    if (!STOP.opts) return;
+    const want = STOP.key + "|" + STOP.optList.length;
+    const first = STOP.opts.firstElementChild;
+    if (!force && first && first.dataset && first.dataset.gunstop === want) return;
+    STOP.opts.innerHTML = stopRowsHTML();
+    const el = STOP.opts.firstElementChild;
+    if (el) el.dataset.gunstop = want;
   }
   function stopRefreshPanel() {
     const c = STOP.cop; if (!c) return;
     STOP.optList = stopOpts();
     const note = stopNote();
     if (STOP.name) STOP.name.textContent = "" + (c.name || "Officer");
-    if (STOP.note) STOP.note.textContent = note;
-    if (STOP.opts) STOP.opts.innerHTML = STOP.optList.map((o, i) =>
-      `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
-      `<span class="ilab"${o.bad ? " style=\"color:#ff9a9a\"" : ""}>${o.label}</span></div>`
-    ).join("");
+    if (STOP.note) stopSetNote(note);
     STOP.key = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
+    stopStampRows(true);
   }
 
   function beginStop(cop) {
-    STOP.cop = cop; STOP.t = 0; STOP.susp = 0; STOP.asked = 1; STOP.key = "";
+    STOP.cop = cop; STOP.t = 0; STOP.asked = 1; STOP.key = "";
+    // THE OFFICER REMEMBERS. The REFUSE row's real weight was that it could be
+    // pressed twice and the third one got you arrested. With refusal moved onto
+    // walking away, that repetition lives ACROSS stops instead of inside one:
+    // every walk-off you owe this officer seeds the next stop's suspicion, so
+    // the second contact opens already impatient and the third gets called in
+    // (see stopWalkOff for the arithmetic — it is the old row's, unchanged).
+    // The ladder the player can READ off stopNote(): first contact is a plain
+    // "he wants it away", the second opens at "losing patience", the third
+    // opens at "FINAL WARNING · walk off now and he calls it in" — and walking
+    // off then does exactly that. Capped below 3 so re-contact alone can never
+    // open a stop that is already over; only the refusal itself crosses.
+    STOP.susp = Math.min(2.4, (cop._stopRefused || 0) * 1.25);
     cop.state = "gunstop"; cop.gunstop = true; cop.npcTarget = null; cop.curTarget = null;
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
@@ -697,12 +755,20 @@
   function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed — I carry legal.”"); }
   function stopExcuseRange()   { stopAttempt(stopTalkChance(0.5), "“On my way to the range, that's all.”"); }
 
-  // The stop uses the same binary grammar as every other interaction.  NO is
-  // not a cosmetic close button: the officer remembers the refusal, shortens
-  // the next warning, and turns a repeated refusal into a real armed arrest.
-  function stopRefuse() {
-    const c = STOP.cop; if (!c) return;
-    STOP.asked++;
+  // REFUSING IS WALKING AWAY. The REFUSE row is gone, but the refusal it stood
+  // for was never a cosmetic close button — the officer remembered it and a
+  // hard enough one became a real armed arrest. Those exact teeth now hang off
+  // the ACT: break contact (d > 16) with the gun still out and this runs, with
+  // the same ratchet and the same >= 3 threshold the row used. The strikes
+  // count on the OFFICER (`_stopRefused`, seeded back into STOP.susp by
+  // beginStop), so the ladder is walk off → he shouts → walk off → he shouts
+  // harder → walk off → HANDS. Standing there instead is a different ending:
+  // STOP.t > 16 below already has him force it. Before this, walking off was
+  // FREE, which is the other half of why the row existed at all.
+  function stopWalkOff() {
+    const c = STOP.cop;
+    if (!c || CBZ.CONFIG.CITY_GUNSTOP_WALKOFF_REFUSES === false) { endStop(true); return; }
+    c._stopRefused = (c._stopRefused || 0) + 1;      // he will open harder next time
     STOP.susp += STOP.susp >= 1.2 ? 1.25 : 1.05;
     if (STOP.susp >= 3) {
       if (CBZ.city) CBZ.city.note("“Refusing a lawful order — HANDS!”", 1.8);
@@ -711,8 +777,8 @@
       endStop(false);
       return;
     }
-    if (CBZ.city) CBZ.city.note("“That was not a request. Holster it.”", 1.7);
-    stopRefreshPanel();
+    if (CBZ.city) CBZ.city.note("“Walking away from me with that thing out. Noted.”", 1.7);
+    endStop(true);
   }
 
   // COMPLY — actually put the shared engine loadout away. You still own the
@@ -729,6 +795,7 @@
   }
   function stopComply() {
     const c = STOP.cop;
+    if (c) c._stopRefused = 0;                       // you did what he asked — the ledger clears
     stowGuns();
     if (CBZ.city) CBZ.city.note("You put the piece away. “Good. Stay out of trouble.” · Q re-draw", 2.6);
     if (c) { c._gunLowered = true; }
@@ -804,14 +871,15 @@
     }
   });
 
-  // capture-phase key handler: while a stop is live, E/I drive the stop FIRST
-  // (and we swallow the event so interact.js doesn't also act on it). Cheap; only
-  // does anything when a stop is actually on screen.
+  // capture-phase key handler: while a stop is live, the stop's own key drives
+  // it FIRST (and we swallow the event so interact.js doesn't also act on it).
+  // Read off optList rather than a hard-coded letter, so the card and the
+  // keyboard can never disagree about which keys exist. Cheap; only does
+  // anything when a stop is actually on screen.
   addEventListener("keydown", function (e) {
     if (!stopActive() || g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.player.driving || CBZ.cityMenuOpen) return;
     const k = (e.key || "").toLowerCase();
-    if (k !== "e" && k !== "i") return;
     const o = STOP.optList && STOP.optList.find((x) => x.key === k);
     if (o) { e.preventDefault(); e.stopImmediatePropagation(); o.fn(); }
   }, true);
@@ -844,7 +912,11 @@
       // the stop dies if you get wanted some OTHER way, holster, drive off, die, or
       // simply walk away far enough that he gives up the contact.
       const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z, d = Math.hypot(dx, dz);
-      if ((g.wanted | 0) >= 1 || !openCarry() || P.driving || P.dead || c.dead || d > 16) { endStop((g.wanted | 0) >= 1 ? false : true); return; }
+      if ((g.wanted | 0) >= 1 || !openCarry() || P.driving || P.dead || c.dead) { endStop((g.wanted | 0) >= 1 ? false : true); return; }
+      // BREAKING CONTACT IS THE REFUSAL — the only one the card offers now.
+      // It lands after the checks above on purpose: holstering, dying or
+      // getting wanted some other way are their own endings, not a snub.
+      if (d > 16) { stopWalkOff(); return; }
       // approach to challenge distance and square up on you (gun lowered, not aimed)
       STOP.t += dt;
       c._gunLowered = true;                     // muzzle DOWN — he's challenging, not firing
@@ -904,11 +976,8 @@
     _stopReassertT = 0.1;
     // re-stamp the rows + force-show (interact.js @39 may have overwritten them)
     if (STOP.name) STOP.name.textContent = "" + (STOP.cop.name || "Officer");
-    if (STOP.note) STOP.note.textContent = stopNote();
-    if (STOP.opts && STOP.optList) STOP.opts.innerHTML = STOP.optList.map((o, i) =>
-      `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
-      `<span class="ilab"${o.bad ? " style=\"color:#ff9a9a\"" : ""}>${o.label}</span></div>`
-    ).join("");
+    if (STOP.note) stopSetNote(stopNote());
+    if (STOP.optList) stopStampRows(false);
     stopShow();
   });
 
@@ -2872,6 +2941,7 @@
       // future path that recycles a dead record would silently produce an armed
       // officer who can never drop his weapon again. Clear it where the other
       // corpse stamps are cleared, not in a comment somewhere.
+      c._stopRefused = 0;        // a recycled record must not inherit a grudge
       c._deathDropped = false; c._dropPending = false; c._morgueSeen = false;
       c._morgueKeep = false; c._morgueClaimed = false; c._armorTaken = false;
       c._clothesTaken = false; c.collected = false; c.needsPickup = false;
