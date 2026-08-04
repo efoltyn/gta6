@@ -236,6 +236,17 @@ const PASS = `(() => {
       " orders=" + cb.ordersServed + " leaves=" + cb.doorLeaves + " tele=" + cb.teleports;
     if (cb.teleports > 0) out.fails.push("BOARDING TELEPORTS: " + cb.teleports);
   } catch (e) { out.fails.push("companionBoardAudit threw: " + (e && e.message)); } }
+  // ---- instanced people (pedinstance.js): NOBODY RENDERS BLACK. A pool whose
+  // material has vertexColors on but whose geometry carries no white color
+  // attribute multiplies every instance by the WebGL generic default (0,0,0),
+  // and the whole city walks around as silhouettes. That shipped once; the
+  // count is pinned at ZERO so it cannot ship twice. poolsTotal prints beside
+  // it so a run that instanced nobody at all cannot pass by doing no work.
+  if (CBZ.pedInstanceAudit) { try { const pi = CBZ.pedInstanceAudit();
+    out.pedInst = "pools=" + pi.poolsTotal + " live=" + pi.instancesLive +
+      " saved=" + pi.drawCallsSaved + " fallback=" + pi.fallbackMeshes + " black=" + pi.blackPools;
+    if (pi.blackPools > 0) out.fails.push("BLACK PED POOLS: " + pi.blackPools);
+  } catch (e) { out.fails.push("pedInstanceAudit threw: " + (e && e.message)); } }
   // ---- weapon latency ledger (fpsmode.js): press→boom as a NUMBER. Derived
   // from tuning constants (no world state, seed-independent), so it is safe
   // to pin hard. overheadMs is flight time ABOVE dist/speed — the artificial
@@ -989,6 +1000,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: clearance ${r.clearance || "-"}`);
   tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
   tmark(`${label}: holds ${r.holds || "-"}`);
+  tmark(`${label}: pedInst ${r.pedInst || "-"}`);
   tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
   if (r.ranksEmpty) tmark(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
   if (r.ranksVerbless) tmark(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);

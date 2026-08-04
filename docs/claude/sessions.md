@@ -1325,6 +1325,59 @@ orchestrator only orchestrates + one merged math-gate.
   in boarding.js header; two session-limit interruptions mid-wave were
   resumed by audit-then-finish agents (the resume-file pattern in memory).
 
+## THE 2026-08-04 BLACK-BODY FIX — one attribute, the whole city's people
+
+OWNER REPORT: "the NPCs in Gang City just became black." They had. Every
+civilian and cop in the city rendered as a flat black silhouette; only the few
+parts instancing REFUSED (the fallback meshes) kept their colour, which is why
+a ped read as a black body wearing one correctly-painted hair shell.
+
+CAUSE — `entities/pedinstance.js` (shipped 2026-08-03 with the shadow-rig
+instancing wave, `PED_INSTANCED` default ON). The pool material is a clone with
+`vertexColors = true`, which is genuinely required: r128's `color_fragment`
+applies `vColor` only under `USE_COLOR`, so `instanceColor` is uploaded and
+ignored without it. But `USE_COLOR` also switches on the vertex-shader half —
+
+    color_vertex : vColor = vec3(1.0);  #ifdef USE_COLOR vColor *= color;
+    color_fragment: diffuseColor.rgb *= vColor;
+
+— so the pool geometry must carry a white `color` attribute. The file carried
+none, and its comment said `THREE.Material.defaultAttributeValues` would supply
+`{color:[1,1,1]}` for the missing one. It does not: in the vendored r128 build
+that field is assigned in the **ShaderMaterial constructor and nowhere else**,
+so `WebGLBindingStates`' fallback branch (`else if (void 0 !== defaultAttribute
+Values)`) never runs for a MeshLambertMaterial and `color` keeps the WebGL
+generic default (0,0,0,1). Every pooled ped part was multiplied by ZERO.
+
+THE HOUSE ANSWER ALREADY EXISTED. `entities/crowd.js` hit this exact bug, named
+it "the black faces", and fixed it by baking a white colour attribute into its
+`tintUnit` geometry — the file pedinstance.js cites as its pattern, on the one
+lesson it did not copy.
+
+FIX — `tintGeo(g)`: a companion geometry that REFERENCES the source's own
+attribute objects (same GPU buffers, no vertex data copied) plus a white
+`color` attribute, cached on the source, one per geometry ever. Deliberately
+NOT a mutation of the shared geometry: adding an attribute to a `CBZ.boxGeom`
+cache entry would hand a stray `color` to every static prop built from that box
+and could fail a mid-play BufferGeometryUtils merge on mismatched attribute
+sets.
+
+MEASURED (seed 90210, `probe.mjs --step 300`): before — 51/51 live pools had
+`vertexColors` with no colour attribute; after — 62/62 carry one (`colorAttr
+Len` == `posLen`), `blackPools: 0`, and 578 of 931 sampled instances carry a
+real non-white tint (the skin and garment colours that were being multiplied to
+nothing). Instancing itself is untouched: `drawCallsSaved` 2281 → 2330.
+Pictures: `npc-gestures` preset, same seed and beat, black silhouette before /
+fully painted ped after.
+
+GATE-PINNED: `pedInstanceAudit().blackPools = 0` in `tools/math-gate.mjs`, with
+`poolsTotal` printed beside it so a run that instanced nobody cannot pass by
+doing no work.
+
+LESSON: the bug was not in the reasoning, it was in a factual claim about the
+renderer that nobody checked against the vendored build — and the correction
+was 40 lines away in the file the header names as its own pattern. Grep the
+sibling before trusting a remembered API.
 ## 2026-08-04 — the invisible chest, third producer: an audit that could not measure
 
 **Report:** owner, verbatim: "There are guys in the game, NPCs with no outfit
