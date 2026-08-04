@@ -592,6 +592,14 @@
       const px = -dz / dist, pz = dx / dist;
       b.target.set(b.pos.x + px * b.strafe * 4, 0, b.pos.z + pz * b.strafe * 4);
     }
+    // ISLAND: never chase into the sea — clamp the waypoint inside the shore
+    // ring (a bot on the seabed is a bot the match forgot).
+    if (curMap().id === "island" && CBZ.surv && CBZ.surv.arena) {
+      const A = CBZ.surv.arena;
+      const ox = b.target.x - A.center.x, oz = b.target.z - A.center.z;
+      const od = Math.hypot(ox, oz), lim = A.radius * 0.9;
+      if (od > lim) { b.target.x = A.center.x + (ox / od) * lim; b.target.z = A.center.z + (oz / od) * lim; }
+    }
   }
 
   function botFire(b, dt) {
@@ -811,7 +819,13 @@
     // borrowed roots: exactly one visible (state.js's setMode lines agree via CBZ.gungameWorlds)
     if (CBZ.prisonRoot) CBZ.prisonRoot.visible = map.id === "jail";
     const A = CBZ.surv && CBZ.surv.arena;
-    if (A) A.root.visible = map.id === "island";
+    if (A) {
+      A.root.visible = map.id === "island";
+      // a fresh arena every match: the island's OWN restore puts back any
+      // towers/trees/cars a prior survival round wrecked (idempotent; holes
+      // were already emptied by the survival director on mode exit).
+      if (map.id === "island" && A.reset) { try { A.reset(); } catch (e) { console.error("[gungame arena reset]", e); } }
+    }
     // spawn pool BEFORE the cast disappears (their spots outlive their bodies)
     gg.spawnPool = map.id === "jail" ? harvestJailSpawns() : [];
     if (map.id === "jail") hidePrisonCast();
