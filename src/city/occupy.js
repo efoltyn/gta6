@@ -146,6 +146,11 @@
   if (CFG.OCCUPY_ALARM_SPREAD == null) CFG.OCCUPY_ALARM_SPREAD = 2.2;   // seconds per floor
   // Shared lift ride (the fade+relocate the census found hand-rolled 3x).
   if (CFG.OCCUPY_LIFT == null) CFG.OCCUPY_LIFT = true;
+  // OCCUPY_BATCH — merge the furniture THIS occupation just minted into one
+  // static mesh per material class, parented under the building group. Off →
+  // the boxes stay as individual draw calls exactly as they did before this
+  // existed (originals visible, nothing merged, no ledger written).
+  if (CFG.OCCUPY_BATCH == null) CFG.OCCUPY_BATCH = true;
 
   /* ---------------- small shared helpers --------------------------------- */
   function arenaRoot() {
@@ -672,6 +677,284 @@
     return used;
   }
 
+  /* ======================================================================
+     THE PER-BUILDING STATIC MERGE (OCCUPY_BATCH).
+
+     THE COST THIS PAYS OFF. A building occupied MID-PLAY (a gang HQ takeover,
+     a power struggle flipping a ministry) is furnished right here, and every
+     desk, sandbag, rack and sofa is an individual THREE.Mesh — dozens per
+     floor. The city's one-shot batch pass (mode.js's batchStaticUnder) ran
+     long before and is permanently a no-op afterwards (batch.js's
+     root.userData._batched guard), so those boxes stay individual draw calls
+     for the rest of the session. Ten takeovers in a long session is the
+     draw-call creep the RE-FREEZE note below already confesses to.
+
+     WHY THIS IS NOT "just re-run the batcher". It still isn't, and the note at
+     the bottom of cityOccupyBuilding still stands: core/batch.js ledgers merged
+     vertex RANGES per top-level group so batchHideGroup/demolition can reverse
+     them, and re-merging a subtree it already ledgered is unrecoverable. So
+     this pass never touches groupRanges, never re-merges anything the arena
+     pass saw, and owns a ledger of its own:
+         b._occupyMerged[floorKey] = [mergedMesh, ...]
+     keyed by the SAME floor key as b._occupyProgrammed, and only ever written
+     for meshes minted by the call that is running. A floor merges exactly once
+     in the life of a building, because a floor is furnished exactly once
+     (b._occupyProgrammed is what guarantees that).
+
+     WHAT IT MERGES — the batcher's own exclusion instincts, copied verbatim
+     from core/batch.js's `consider`/`mergeableKeyV2` rather than re-derived:
+       • nothing a collider, platform or LOS blocker points at (those refs ARE
+         the physics/vision identity — buildings.js's lbox registers them when
+         a piece asks for solid/plat/los, so a sittable sofa or a walkable
+         tread keeps its own mesh)
+       • nothing carrying userData (interactive props stash refs there)
+       • opaque, untextured, non-emissive Lambert/Basic only (glass, lit
+         screens, lamp bulbs and Standard/Phong keep their look)
+     In practice that is exactly what interior_programs.js promises it draws:
+     "an opaque cast:false box with no userData and no collider".
+
+     WHY THE MERGED MESH LIVES UNDER b.group AND NOT THE CITY ROOT — this is
+     the load-bearing safety property. Demolition and structural collapse hide
+     a building with `b.group.visible = false` (demolition.js:427,
+     structural.js:1182) and farcull hides whole top-level groups; every one of
+     those is a group-level flag, so an interior merged UNDER the building
+     vanishes with it for free and comes back with it on rebuild. A merged copy
+     parented to the city root would keep a demolished tower's furniture
+     hanging in the air, which is precisely the bug the batcher's groupRanges
+     ledger exists to avoid — we avoid it by construction instead.
+
+     WHY visible=false AND NOT A LAYERS MASK for the originals. batch.js's wall
+     pass already established the fact this rests on: r128's Raycaster tests
+     `layers` and does NOT test `visible`, so an invisible original still
+     answers every LOS/bullet ray and every collider.ref backpointer, while a
+     layers-masked one would go dark to rays too. Nothing in the interior stack
+     reads a furniture mesh's `.visible`: loot containers are pure coordinates
+     (interior_programs.js's lootReg), seat/prop anchors are pure coordinates
+     (roombuild.js's roomSeatAnchor, and furniture.js's own note that "no record
+     ever touches a mesh's userData"), and core/farcull.js only ever flips
+     direct children of the arena root — it never descends into a building
+     group, so it can never resurrect one of these. (pedinstance.js's HIDE_MASK
+     is the opposite case: for a PED `.visible` is gameplay state, so it must
+     use layers. For a desk it is not.)
+     ====================================================================== */
+  const MERGED = { buildings: 0, meshes: 0, hidden: 0, skipped: 0, solo: 0, refused: 0 };
+  const _occMats = new Map();          // merge-class key -> shared white vertexColors material
+  const _m4 = { inv: null, rel: null };
+
+  // gfx.js hands out TWO material bodies per cmat key (a Lambert and a
+  // Standard twin) and swaps the live one as the quality tier moves. Merge
+  // from the LAMBERT body — that is the world core/batch.js has always merged,
+  // and it lets gfx's own promotion pass (which keys on the mesh NAME
+  // "batch-inert") re-promote our output for free.
+  function mergeSrcMat(mat) {
+    return (mat && mat._cbzPbr && mat._cbzTwin) ? mat._cbzTwin : mat;
+  }
+
+  // The bucket key. Colour is deliberately NOT in it: the source colour gets
+  // baked into a vertex `color` attribute (lambert = light x matColor x vColor
+  // either way), so a whole palette collapses into ONE merged mesh — the same
+  // arithmetic BATCH_V2 uses. Returns null for anything not provably plain.
+  function mergeKey(m) {
+    const mat = mergeSrcMat(m.material);
+    if (!mat || Array.isArray(mat)) return null;
+    if (mat.map || mat.transparent || mat.opacity < 1) return null;
+    if (mat.emissive && mat.emissive.getHex() !== 0) return null;
+    if (!(mat.isMeshLambertMaterial || mat.isMeshBasicMaterial)) return null;
+    const g = m.geometry;
+    if (!g || !g.attributes || !g.attributes.position) return null;
+    // a bucket must be attribute-HOMOGENEOUS or the merge helper refuses it,
+    // so the (colour-less) attribute signature is part of the key.
+    const sig = [];
+    for (const a in g.attributes) if (a !== "color") sig.push(a);
+    sig.sort();
+    return [mat.isMeshBasicMaterial ? "B" : "L", m.castShadow ? 1 : 0,
+      m.receiveShadow ? 1 : 0, mat.side || 0, mat.fog === false ? 0 : 1,
+      sig.join(",")].join("|");
+  }
+  function mergeMat(key) {
+    let mt = _occMats.get(key);
+    if (mt) return mt;
+    const THREE = window.THREE;
+    const p = key.split("|");
+    const o = { color: 0xffffff, vertexColors: true, side: (+p[3]) || 0, fog: p[4] !== "0" };
+    mt = p[0] === "B" ? new THREE.MeshBasicMaterial(o) : new THREE.MeshLambertMaterial(o);
+    mt._shared = true;                 // shared cache — never dispose (buildings.js idiom)
+    _occMats.set(key, mt);
+    return mt;
+  }
+
+  /* ---- THE MINT WINDOW -------------------------------------------------
+     "Which meshes did THIS call create" is not a question the scene graph can
+     answer after the fact (peds land in the same group, and a previous
+     occupation's furniture is indistinguishable by position). So we ask it the
+     way interior_programs.js's own SHELL-IS-THE-LAW clamp does: by wrapping
+     `b.lbox` for the duration of the program call. Every box any dresser draws
+     — this kit's own, roombuild.js's planner, furniture.js's kit — goes
+     through that one function, so one wrap sees all three and nothing minted
+     by an earlier occupation can leak in. The wrap NESTS correctly: the clamp
+     installs itself outside ours and restores `b.lbox` to our wrapper in its
+     own finally, so we only ever see boxes the clamp accepted.        */
+  function mintOpen(b) {
+    if (!CFG.OCCUPY_BATCH || !b || typeof b.lbox !== "function") return null;
+    if (!window.THREE) return null;
+    const w = { b: b, raw: b.lbox, got: [], fn: null };
+    w.fn = function () {
+      const m = w.raw.apply(this, arguments);
+      if (m && m.isMesh) w.got.push(m);
+      return m;
+    };
+    b.lbox = w.fn;
+    return w;
+  }
+  function mintClose(w) {
+    if (!w) return null;
+    // only unwind OUR wrapper: if some other pass wrapped and failed to
+    // restore, stomping b.lbox here would delete its clamp instead.
+    if (w.b.lbox === w.fn) w.b.lbox = w.raw;
+    return w.got.length ? w.got : null;
+  }
+
+  /* ---- THE MERGE -------------------------------------------------------
+     `minted` is {floorKey: [mesh, ...]} in draw order, which is deterministic
+     (the programs are pure functions of the room rect + position hashes, and
+     Object3D child order is insertion order), so the merged buffer is
+     byte-identical per seed across clients. Returns the number of merged
+     meshes added.                                                        */
+  function mergeMinted(b, minted) {
+    if (!CFG.OCCUPY_BATCH || !b || !b.group || !minted) return 0;
+    const THREE = window.THREE;
+    const BGU = THREE && THREE.BufferGeometryUtils;
+    // The vendored r128 helper (src/vendor/BufferGeometryUtils.js, loaded at
+    // index.html:292) is the repo's ONE exposed merge function — core/batch.js
+    // splices by hand only to stay dependency-free, and its splicer is module
+    // -private. No helper → no merge, originals untouched. Degrade-safe.
+    if (!BGU || typeof BGU.mergeBufferGeometries !== "function") return 0;
+
+    // every mesh the physics/vision layers point at keeps its identity, exactly
+    // as core/batch.js's refSet/losSet do. Built once per occupation (a rare
+    // event), never per floor.
+    const spared = new Set();
+    const cs = CBZ.colliders || [];
+    for (let i = 0; i < cs.length; i++) if (cs[i] && cs[i].ref) spared.add(cs[i].ref);
+    const ps = CBZ.platforms || [];
+    for (let i = 0; i < ps.length; i++) if (ps[i] && ps[i].ref) spared.add(ps[i].ref);
+    const ls = CBZ.losBlockers || [];
+    for (let i = 0; i < ls.length; i++) if (ls[i]) spared.add(ls[i]);
+
+    // matrices must be CURRENT before anything is baked. This runs BEFORE the
+    // re-freeze below, so the freshly-minted boxes still carry
+    // matrixAutoUpdate=true and force-updating recomputes their local matrix
+    // from position/scale; already-frozen ancestors keep their baked one.
+    b.group.updateMatrixWorld(true);
+    if (!_m4.inv) { _m4.inv = new THREE.Matrix4(); _m4.rel = new THREE.Matrix4(); }
+    // bake into the BUILDING's frame, not the world's — the merged mesh is a
+    // child of b.group (see the header), so it must ride b.group's translation.
+    _m4.inv.copy(b.group.matrixWorld).invert();
+
+    b._occupyMerged = b._occupyMerged || Object.create(null);
+    let added = 0, hid = 0;
+    for (const k in minted) {
+      if (b._occupyMerged[k]) continue;            // this floor is already merged — never twice
+      const src = minted[k];
+      if (!src || !src.length) continue;
+      const buckets = new Map();
+      for (let i = 0; i < src.length; i++) {
+        const m = src[i];
+        if (!m || !m.isMesh || !m.parent) { MERGED.skipped++; continue; }
+        if (m.userData && Object.keys(m.userData).length > 0) { MERGED.skipped++; continue; }
+        if (spared.has(m)) { MERGED.skipped++; continue; }
+        const key = mergeKey(m);
+        if (!key) { MERGED.skipped++; continue; }
+        let bk = buckets.get(key);
+        if (!bk) { bk = []; buckets.set(key, bk); }
+        bk.push(m);
+      }
+      const out = [];
+      buckets.forEach(function (list, key) {
+        // one mesh alone in its class has nothing to gain from a merge — and it
+        // is NOT "not plain", so it is counted on its own line in the audit.
+        if (list.length < 2) { MERGED.solo += list.length; return; }
+        const geos = [];
+        for (let i = 0; i < list.length; i++) {
+          const m = list[i], gsrc = m.geometry;
+          // r128 BoxGeometry is INDEXED and ships SIX face groups; a naive
+          // groups.length>1 guard would reject every box in the game (the
+          // lesson pedinstance.js paid for). Non-index it, drop the groups,
+          // and merge with useGroups=false so the output has none.
+          const g = gsrc.index ? gsrc.toNonIndexed() : gsrc.clone();
+          _m4.rel.multiplyMatrices(_m4.inv, m.matrixWorld);
+          g.applyMatrix4(_m4.rel);                  // transforms normals too
+          if (g.clearGroups) g.clearGroups();
+          // bake the material colour into a vertex `color` attribute so one
+          // shared white material renders the whole palette identically.
+          const tint = (mergeSrcMat(m.material) || {}).color || null;
+          const pos = g.attributes.position, had = g.attributes.color;
+          const tr = tint ? tint.r : 1, tg = tint ? tint.g : 1, tb = tint ? tint.b : 1;
+          const col = new Float32Array(pos.count * 3);
+          for (let v = 0, n = pos.count * 3; v < n; v += 3) {
+            col[v] = (had ? had.array[v] : 1) * tr;
+            col[v + 1] = (had ? had.array[v + 1] : 1) * tg;
+            col[v + 2] = (had ? had.array[v + 2] : 1) * tb;
+          }
+          g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+          geos.push(g);
+        }
+        let merged = null;
+        try { merged = BGU.mergeBufferGeometries(geos, false); } catch (e) { merged = null; }
+        for (let i = 0; i < geos.length; i++) if (geos[i].dispose) geos[i].dispose();
+        if (!merged) { MERGED.refused++; return; }  // helper refused → originals stay drawn
+        if (merged.clearGroups) merged.clearGroups();
+        merged.computeBoundingSphere();             // or frustum culling can't reject it
+        const proto = list[0];
+        const mesh = new THREE.Mesh(merged, mergeMat(key));
+        // "batch-inert" IS a contract, not a label: core/gfx.js's promoteMerged
+        // checks that exact name to promote merged output to PBR and to demote
+        // it when the tier falls. Naming it anything else would leave this
+        // furniture Lambert while the wall it stands against went Standard.
+        mesh.name = "batch-inert";
+        mesh.castShadow = proto.castShadow;         // invisible originals can't cast
+        mesh.receiveShadow = proto.receiveShadow;
+        mesh.userData.occupyMerged = true;          // also: non-empty userData = every
+        mesh.userData.interiorAuditIgnore = true;   // later batch/spill pass skips the COPY
+        mesh.matrixAutoUpdate = false;              // identity; geometry is pre-baked
+        mesh.updateMatrix();
+        b.group.add(mesh);
+        // r128 TRAP: a matrixAutoUpdate=false child added to an ALREADY-FROZEN
+        // parent is never visited by the renderer's non-forced updateMatrixWorld
+        // cascade, so its matrixWorld would stay IDENTITY and the whole floor
+        // would draw at the world origin. Compose it once, here, off the parent
+        // matrix mergeMinted force-updated a few lines up.
+        mesh.updateMatrixWorld(true);
+        for (let i = 0; i < list.length; i++) if (list[i].visible) { list[i].visible = false; hid++; }
+        out.push(mesh);
+        added++;
+      });
+      if (out.length) b._occupyMerged[k] = out;
+    }
+    MERGED.meshes += added;
+    MERGED.hidden += hid;
+    if (added) MERGED.buildings++;
+    return added;
+  }
+
+  /* THE RATCHET SEAM for this pass. buildingsMerged/mergedMeshes/hiddenOriginals
+     are the win (hiddenOriginals - mergedMeshes = draw calls reclaimed);
+     skippedNotPlain is the honest other half — every mesh the exclusion filters
+     spared, which is the number that must NOT quietly grow. */
+  CBZ.occupyBatchAudit = function () {
+    return {
+      enabled: !!CFG.OCCUPY_BATCH,
+      buildingsMerged: MERGED.buildings,
+      mergedMeshes: MERGED.meshes,
+      hiddenOriginals: MERGED.hidden,
+      skippedNotPlain: MERGED.skipped,
+      soloClass: MERGED.solo,          // plain, but the only mesh of its class on that floor
+      refusedMerges: MERGED.refused,
+      reclaimed: MERGED.hidden - MERGED.meshes,
+      classes: _occMats.size,
+    };
+  };
+
   CBZ.cityOccupyBuilding = function (lot, spec) {
     if (!CFG.OCCUPY_V1) return null;
     spec = spec || {};
@@ -729,6 +1012,10 @@
       alarmThreat: null, tres: false, tresT: 0,
     };
 
+    // OCCUPY_BATCH: {floorKey: [mesh, ...]} of the furniture THIS call mints,
+    // collected floor by floor and merged once at the end (see mergeMinted).
+    const minted = Object.create(null);
+
     const cityUsed = liveBudget();
     const HERE = CFG.OCCUPY_MAX_PER_BUILDING | 0;
     // two ceilings, one number: whichever runs out first stops the casting.
@@ -785,6 +1072,11 @@
           if (room && fs.program && CFG.OCCUPY_PROGRAMS && CBZ.interiorProgram
               && !fr.program && !b._occupyProgrammed[k]) {
             b._occupyProgrammed[k] = fs.program;
+            // OCCUPY_BATCH: watch b.lbox for the duration of the program so we
+            // know EXACTLY which meshes this call minted on this floor. See
+            // mergeMinted's header — nothing an earlier occupation drew, and
+            // nothing the ped cast adds, can enter this window.
+            const mint = mintOpen(b);
             try {
               const out = CBZ.interiorProgram(fs.program,
                 { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y },
@@ -806,6 +1098,7 @@
                 };
               });
             } catch (e) { fr.program = fs.program; fr.anchors = []; }
+            finally { const got = mintClose(mint); if (got) minted[k] = got; }
           }
         }
         fr.y = room ? room.y : (CBZ.floorAt && door ? CBZ.floorAt(door.x, door.z) : 0);
@@ -913,6 +1206,12 @@
     lot._occupancy = rec;
     REG.push(rec);
 
+    // ---- MERGE what this occupation just drew (OCCUPY_BATCH) -------------
+    // Runs BEFORE the re-freeze on purpose: the merge needs live matrices on
+    // the boxes it is baking, and the freeze below then covers the originals,
+    // the merged copies and the stair core in one pass.
+    if (b && b.group) { try { mergeMinted(b, minted); } catch (e) {} }
+
     // ---- RE-FREEZE this building ----------------------------------------
     // Occupancy runs AFTER mode.js's one-shot batch+freeze pass over the arena
     // (mode.js:503 vs the ped/gang spawn at :585), so every stair tread,
@@ -920,15 +1219,19 @@
     // recompute forever. freezeStaticUnder is per-root and idempotent, so
     // re-running it over just this building costs one pass and reclaims that.
     //
-    // We deliberately do NOT re-run batchStaticUnder here. The batcher ledgers
-    // merged vertex ranges per TOP-LEVEL group so batchHideGroup/demolition can
-    // reverse them; re-merging a sub-tree that the arena pass already ledgered
-    // would put two ledgers on the same geometry, and a wrong merge is
-    // unrecoverable. Draw-call cost is therefore real but bounded — see the
-    // per-program mesh caps in interior_programs.js, which exist for exactly
-    // this reason. (Cheapest true fix, for whoever owns mode.js: move the
-    // gang/occupancy spawn ahead of mode.js:503 so the normal batch pass
-    // swallows the fortresses for free.)
+    // We STILL deliberately do NOT re-run batchStaticUnder here, and that has
+    // not changed: the batcher ledgers merged vertex ranges per TOP-LEVEL group
+    // so batchHideGroup/demolition can reverse them; re-merging a sub-tree that
+    // the arena pass already ledgered would put two ledgers on the same
+    // geometry, and a wrong merge is unrecoverable. What HAS changed is the
+    // second half of this note, which used to end "draw-call cost is therefore
+    // real but bounded": mergeMinted above now collapses the boxes this call
+    // minted into one mesh per material class under b.group, with a ledger of
+    // its own (b._occupyMerged) that never touches groupRanges. The
+    // per-program mesh caps in interior_programs.js still apply and are still
+    // the reason the un-mergeable remainder stays small. (Cheapest true fix,
+    // for whoever owns mode.js, is still: move the gang/occupancy spawn ahead
+    // of mode.js:503 so the normal batch pass swallows the fortresses.)
     if (b && b.group) { try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(b.group); } catch (e) {} }
     return rec;
   };
@@ -1004,6 +1307,20 @@
     return ped;
   }
 
+  /* Unoccupying takes the CAST down and deliberately leaves the ROOM standing
+     — and OCCUPY_BATCH's merged copies stay with it, on purpose.
+
+     Disposing them here looks like free memory and is a gameplay bug: the
+     furniture ledger (b._occupyProgrammed / b._occupyAnchors) is what stops a
+     re-occupation stacking a second set of sandbags, so a re-occupied building
+     never re-draws its furniture — it REUSES the authored anchors. Dispose the
+     merged meshes without clearing that ledger and the next crew moves into a
+     room whose desks are invisible but whose seats, colliders and loot are all
+     still there. Clearing both ledgers coherently instead would mean re-running
+     the programs (paying the whole draw cost again) AND un-hiding the originals
+     we hid, i.e. undoing this pass every time a gang loses a building.
+     Bounded-forever beats broken: the geometry is capped per floor, merged, and
+     dies with b.group when the building is demolished. */
   CBZ.cityUnoccupyBuilding = function (lot) {
     const rec = lot && lot._occupancy;
     if (!rec) return false;

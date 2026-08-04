@@ -110,7 +110,11 @@ async function boot(seed, quiet) {
   const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin"
     ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     : "/opt/pw-browsers/chromium");
-  const target = `${origin}?seed=${seed}`;
+  // CBZ_URL_EXTRA appends raw query params ("cfg_FLAG=0&cfg_OTHER=1") — the
+  // only way to A/B one-shot build passes (batch/instancing) that read CONFIG
+  // before boot; live toggling can't reach those.
+  const extra = process.env.CBZ_URL_EXTRA ? `&${process.env.CBZ_URL_EXTRA.replace(/^[?&]/, "")}` : "";
+  const target = `${origin}?seed=${seed}${extra}`;
   const chrome = spawn(CHROME, ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
     "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl",
     "--mute-audio", "--window-size=480,300", `--remote-debugging-port=${dbg}`,

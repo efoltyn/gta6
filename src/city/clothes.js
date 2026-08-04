@@ -2112,7 +2112,13 @@
   function buildSet(key, rec) {
     const cv = document.createElement("canvas");
     cv.width = W; cv.height = H;
-    const ctx = cv.getContext("2d");
+    // willReadFrequently: modalHex reads pixels back off this atlas after
+    // painting (cityPaintedBodyHex / yoke sampling). On an accelerated canvas
+    // every getImageData is a full GPU pipeline flush — measured 60+ms/tick
+    // during crowd-promotion prewarm when many outfit keys build in a burst.
+    // The CPU-side canvas paints marginally slower and reads for free; the
+    // texture upload path (texImage2D from canvas) is unchanged.
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
     const P = { T: rowPainter(ctx, "torso"), J: rowPainter(ctx, "jacket"), A: rowPainter(ctx, "arm"), L: rowPainter(ctx, "leg"), ctx: ctx };
     const c = (rec && rec.colors) || {};
     const kind = key.split("|")[0];

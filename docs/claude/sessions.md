@@ -1102,6 +1102,24 @@ room. this opens the door to rocketship logic."*
   `w.key === "lmg"`; death.js/weather.js/camera.js now hold THREE copies of
   the "under a roof" probe — promotion candidate with real consumers.
 
+## THE 2026-08-03 PERF WAVE — measured bottlenecks, no visual cost (fable orchestrating 4 opus builders + 2 sonnet recons)
+
+**Mandate:** "make it run faster without making it less HD, no spawn-closer cheats; find the bottlenecks." Everything below is flag-gated, visual-neutral, and engine-wide (city/escape/arena share the loop).
+
+**Measured (paired 300-tick perfab probes, seed 90210, calm then nuke-stress in one boot):**
+- Calm sim: **79.5 → 25.3 ms/tick (−68%)**. The dominant edge was NOT in any prior ledger: `clothes.js buildSet` painted its outfit atlas on an accelerated canvas, then `modalHex` pixel-read it — every `getImageData` = full GPU pipeline flush, **62.7 ms/tick (63% of frame)** during crowd-promotion prewarm bursts (CDP caller-attributed profile). Fix: `getContext("2d", {willReadFrequently:true})` at the buildSet atlas only. u:23.7's scary 51 ms/tick was this, not crowd sim.
+- `PED_SCAN_GRID` (peds.js+interact.js): peds.js rebuilt a whole-crowd spatial grid every frame and almost nothing used it. Corpse-loot scan (u:38, was O(peds×corpses)/frame) → event-kept `lootableCorpses` list; gunpoint sweep/clear, groupReact, gang-fear, attackerOf, nearestActor → grid/candidate lists; `cityPanic`/`cityTagWitnesses` stay linear ON PURPOSE (seeded-rng visit order + 289-bucket radii). Audit: `CBZ.pedScanAudit()` — linear ped-visits fell 3.29M → 0.32M per 600 ticks (−90%).
+- `WAVE_DRAIN_BUDGET_MS=5` (impactbus): ordinary-explosion ring waves now share the nuke path's ms-budget with lossless resume (deferral ≡ slow frame arithmetically; who-dies is position-hashed). Win is worst-tick, not average — averages stay flat by design. WAVE_MAX=2 bounds the old blowup.
+- `OCCUPY_BATCH` (occupy.js): mid-play furnished interiors (gang HQ/power takeovers) merge per-building-per-floor under `b.group` (demolition/farcull semantics inherit), own ledger, batch.js groupRanges untouched, colliders/emissive strips spared via refSet. Live audit after one 10-min sim: **8 buildings, 2,523 draw calls reclaimed**. `CBZ.occupyBatchAudit().reclaimed` is the ratchet number — pin it (up-only) when math-gate.mjs is free (another wave holds it).
+- `CCTV_FEED_SCOPED` (cctv.js): feeds rendered the ENTIRE scene into 256×144 (the waterfx-mirror disease). Now far-plane = per-tier cityCullRadius + conservative union-sphere subtree hiding (try/finally restore; can't change a monitor pixel — every skipped mesh was individually frustum-rejected anyway). Layers masks proven useless in r128 (projectObject recurses children outside the layers test). Feeds are pixels only — no detection code reads them (verified repo-wide).
+- lightpin.js: the every-300-frames full 150k-object `scene.traverse` (light re-registration) is gone — one hook on `Object3D.prototype.add` (the single funnel; vendored-source proof incl. clone()/attach()) catches every light path the ctor Proxy misses.
+- hud.js `#cCross` querySelector+display write and turf/homeLine clears latched; compass transform write guarded. All followed the file's own signature-guard pattern.
+- `LOCAL_INSTANCING` **default ON** (config.js:555 — the localinst.js null-check is dead code when config.js declares first; both now true). Evidence: ROUND 3b −30% draw calls (two seeds) + fresh pixel-parity pass (artifacts/visual-comparisons/localinst-parity2) where the ONLY deltas (truss lightening, gun barrel) reproduced in an OFF-vs-OFF control (localinst-control) = boot noise (day-clock/weapon staging), not the flag.
+
+**Gate:** MATHGATE ok on the merged state (90210:318/180/204 | det ok | errors baseline-only) with the OTHER session's boarding/vehicle wave co-resident in the tree. peds.js/interact.js left uncommitted (interleaved with that wave) — no cross-file deps, ships with whoever commits next.
+
+**Deep-review honesty:** u:38 under 457 corpses is ~5 ms/tick EITHER WAY — the remaining cost is the loot-ITEM scan, not the corpse scan; named follow-up. childsafe.js `isProtectedActor` costs ~2 ms/tick and is deliberately untouched (safety layer; not worth risk). CCTV feed still pays r128's unconditional full-scene updateMatrixWorld inside render() — `scene.autoUpdate=false` around the feed is a researched-but-unshipped follow-up (one-frame-stale-matrix flash risk wants its own flag). Probe tools: attribute.mjs + probe.mjs now honor CBZ_CHROME/darwin and CBZ_URL_EXTRA (the only way to A/B one-shot build passes).
+
 ## 2026-08-04 — THE FORMAL NECK: the collar and the top of the tie (reference images from the owner)
 
 OWNER (with two reference renders of suited blocky characters): "the issue rn
