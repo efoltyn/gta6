@@ -56,6 +56,32 @@
   if (CBZ.CONFIG.PRISON_ITEM_ICONS == null) CBZ.CONFIG.PRISON_ITEM_ICONS = true;
   function iconsOn() { return CBZ.CONFIG.PRISON_ITEM_ICONS !== false; }
 
+  /* ---- ONE BAR (JAIL_HUD_UNIFIED) -----------------------------------------
+     OWNER: "unite all these inventory into one, and clean the hud up." The
+     jail screen reported "what am I carrying" three ways at once: this bag's
+     hotbar (where a warden-loot "Gun" proxy shows exactly one gun), fpsmode's
+     floating #weaponStrip chip row bottom-right (every gun), and the #keycard
+     chip top-right (one specific key).
+
+     The unify move is a DOCK, not a fourth renderer: fpsmode.js keeps drawing
+     #weaponStrip through CBZ.weaponSlotsHTML — the ONE weapon renderer
+     (city/hud.js; weaponStripAudit().renderers stays pinned at 1) — and this
+     bag adopts the element as its leftmost cells, so guns and items read as a
+     single bar. css/inventory.css sheds the strip's floating-panel skin and
+     re-cuts its chips to this bag's islot cell off body.jail-hud-unified.
+     Digits then span the bar left to right: 1..N equip the docked guns (they
+     carry the printed numbers), the rest select item slots. The keycard
+     becomes a real "Keycard" bag item (systems/interactions.js grants it; the
+     ICON table below already draws a card) and the chip is css-hidden —
+     game.hasKey stays the door/AI truth either way.
+
+     Survival never docks (mode-survival hides this hotbar, so the strip must
+     keep floating) and the city never shows the strip at all (its own #cSlots
+     bar). Flag false = class off + no dock + no item grant: all three
+     surfaces exactly as they shipped. ------------------------------------ */
+  if (CBZ.CONFIG.JAIL_HUD_UNIFIED == null) CBZ.CONFIG.JAIL_HUD_UNIFIED = true;
+  function unifiedOn() { return CBZ.CONFIG.JAIL_HUD_UNIFIED !== false; }
+
   function itemMeta(name) { const IT = CBZ.econ && CBZ.econ.ITEMS; return (IT && IT[name]) || null; }
   function itemTag(name) { const it = itemMeta(name); return (it && it.tag) || null; }
 
@@ -307,6 +333,36 @@
   document.body.appendChild(screen);
   document.body.appendChild(cursorEl);
 
+  // ---- the docked weapon strip (see ONE BAR above) ----
+  const hudRoot = document.getElementById("hud");
+  const stripEl = document.getElementById("weaponStrip");
+  function stripDocked() { return !!(stripEl && stripEl.parentNode === bar); }
+  function dockWeaponStrip() {
+    const on = unifiedOn();
+    if (document.body) document.body.classList.toggle("jail-hud-unified", on);
+    if (!stripEl || !hudRoot) return;
+    const wantDock = on && CBZ.game && CBZ.game.mode === "escape";
+    if (wantDock) { if (stripEl.parentNode !== bar) bar.insertBefore(stripEl, bar.firstChild); }
+    else if (stripEl.parentNode !== hudRoot) hudRoot.appendChild(stripEl);
+  }
+  // a docked gun chip is a hotbar cell: click/tap = equip that gun. The row is
+  // drawn in CBZ.weaponInventory order; a leading fists/melee chip (never
+  // present while a gun is held) just offsets the map, so index from the tail.
+  if (stripEl) stripEl.addEventListener("mousedown", function (e) {
+    if (!stripDocked()) return;
+    const c = e.target.closest && e.target.closest(".cSlot"); if (!c) return;
+    e.preventDefault(); e.stopPropagation();
+    const cells = stripEl.querySelectorAll(".cSlot");
+    const winv = CBZ.weaponInventory || [];
+    const i = Array.prototype.indexOf.call(cells, c) - (cells.length - winv.length);
+    if (i >= 0 && winv[i] && CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(winv[i]);
+  });
+  // how many digit keys the docked guns claim ahead of the item slots
+  function dockedGunKeys() {
+    if (!stripDocked() || stripEl.style.display === "none") return 0;
+    return (CBZ.weaponInventory || []).length;
+  }
+
   // ---------- touch access (merge seam, rides PRISON_TOUCH_PROMPTS) ----------
   // CBZ.toggleInventory existed with ZERO touch surfaces calling it — on an
   // iPad the 27-slot stash was unreachable. The BAG cell is a CHILD of the
@@ -398,9 +454,14 @@
     } else { cell.innerHTML = ""; cell.title = ""; }
   }
   function render() {
+    // ONE cursor on the unified bar: while a docked gun chip carries the held
+    // highlight, the item cells drop theirs — two orange boxes read as two
+    // selections. The stash overlay's own hotbar row keeps its cursor (that
+    // screen has no gun chips to disambiguate against).
+    const gunHeld = stripDocked() && (CBZ.weaponInventory || []).length > 0 && !!CBZ.currentWeaponId;
     for (let i = 0; i < N_HOT; i++) {
       fill(barCells[i], slots[N_MAIN + i]);
-      barCells[i].classList.toggle("sel", i === selIdx);
+      barCells[i].classList.toggle("sel", !gunHeld && i === selIdx);
       fill(hbCells[i], slots[N_MAIN + i]);
       hbCells[i].classList.toggle("sel", i === selIdx);
     }
@@ -506,9 +567,15 @@
     if (k === "b") { toggle(); return; }
     if (k === "escape" && invOpen) { close(); return; }
     if (!invOpen) {
-      // number keys ALWAYS drive the hotbar now (interaction options moved to IJKL)
+      // number keys ALWAYS drive the hotbar now (interaction options moved to IJKL).
+      // Unified bar: the digits span the DOCKED gun chips first — they carry
+      // the printed 1..N — then this bag's item slots. One bar, one keymap.
       const n = "123456789".indexOf(e.key);
-      if (n >= 0) { selIdx = n; render(); }
+      if (n >= 0) {
+        const guns = dockedGunKeys();
+        if (n < guns) { CBZ.fpsSelectWeaponId && CBZ.fpsSelectWeaponId(CBZ.weaponInventory[n]); return; }
+        if (n - guns < N_HOT) { selIdx = n - guns; render(); }
+      }
     }
   });
 
@@ -526,6 +593,7 @@
   // hide hotbar / close stash on menus; reset selection on a new run
   let lastEl = 0, lastHeld = "";
   CBZ.onAlways(97, function () {
+    dockWeaponStrip();
     const playing = CBZ.game.state === "playing";
     bar.style.display = playing ? "flex" : "none";
     if (!playing && invOpen) close();
@@ -537,11 +605,29 @@
     // change (the item COUNT never moves), and wrapping
     // CBZ.onWeaponInventoryChanged would fight fpsmode.js for a single-owner
     // hook — one string compare a frame is cheaper and owns nothing.
-    if (iconsOn()) {
-      const held = heldWeaponId();
-      if (held !== lastHeld) { lastHeld = held; render(); }
-    }
+    // The armed bit rides the same signature: render()'s one-cursor rule
+    // (gunHeld) flips on the FIRST gun and on losing the last one, and
+    // heldWeaponId alone can't see either edge (its empty-bag fallback answers
+    // "sidearm" both before and after a sidearm pickup).
+    const held = heldWeaponId() + ((CBZ.weaponInventory || []).length ? "|armed" : "");
+    if (held !== lastHeld) { lastHeld = held; render(); }
   });
+
+  /* ---- RATCHET: CBZ.jailHudAudit() — the ONE-BAR claim as numbers. In a
+     unified escape run: docked=true, keycardChipHidden=true, and once the
+     player holds the keycard, keycardItem === hasKey. stripCells counts what
+     the docked row actually draws (0 while unarmed, when the strip hides). */
+  CBZ.jailHudAudit = function () {
+    return {
+      on: unifiedOn(),
+      docked: stripDocked(),
+      stripCells: stripEl ? stripEl.querySelectorAll(".cSlot").length : 0,
+      guns: (CBZ.weaponInventory || []).length,
+      keycardChipHidden: !!(document.body && document.body.classList.contains("jail-hud-unified")),
+      keycardItem: !!(CBZ.game && CBZ.game.inventory && CBZ.game.inventory["Keycard"] > 0),
+      hasKey: !!(CBZ.game && CBZ.game.hasKey),
+    };
+  };
 
   resync();
 })();

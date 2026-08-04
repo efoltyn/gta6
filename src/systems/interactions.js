@@ -227,6 +227,11 @@
         keycard.collected = true; g.hasKey = true;
         keycard.group.visible = false; keycard.ring.visible = false;
         el.keycard.classList.add("have");
+        // JAIL_HUD_UNIFIED (systems/inventory.js): the keycard rides the bag
+        // like every other pickup — the chip is css-hidden, and the class add
+        // above keeps the flag-off revert byte-identical. hasKey stays the
+        // door/AI truth; the item is display, never a second key check.
+        if (CBZ.CONFIG && CBZ.CONFIG.JAIL_HUD_UNIFIED !== false && CBZ.econ && CBZ.econ.addItem) CBZ.econ.addItem("Keycard", 1);
         CBZ.sfx("key"); CBZ.flashToast("KEYCARD!");
         CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
       }

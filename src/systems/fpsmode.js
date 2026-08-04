@@ -3017,6 +3017,16 @@
     return true;
   }
   CBZ.fpsSelectSlot = selectWeaponSlot;
+  // Select by WEAPON ID. systems/inventory.js's docked jail bar speaks ids:
+  // it renders CBZ.weaponInventory order (via weaponSlotsHTML) while slots
+  // here index availableIndices' catalog order, and the mapping between the
+  // two belongs to the file that owns both orderings — this one.
+  CBZ.fpsSelectWeaponId = function (id) {
+    const idx = weaponIndex(id);
+    if (idx < 0) return false;
+    const s = availableIndices().indexOf(idx);
+    return s >= 0 ? selectWeaponSlot(s) : false;
+  };
 
   // ---- UNIFIED CITY HOTBAR (shared with HOTBAR + CHARPANEL) -----------------
   // CITY-ONLY. The single source of truth for the in-world bar AND the mirrored

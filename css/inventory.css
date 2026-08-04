@@ -121,3 +121,29 @@ body.touch #invBagBtn{ display:flex; }
 }
 body.touch .invClose{ display:flex; }
 .invPanel.card-box{ position:relative; }
+
+/* ---- ONE BAR (CBZ.CONFIG.JAIL_HUD_UNIFIED, systems/inventory.js) ----------
+   The jail HUD said "inventory" three ways: this hotbar, fpsmode's floating
+   #weaponStrip, and the #keycard chip. Unified, the strip DOCKS as the bar's
+   leftmost cells (JS reparents it; these rules shed its floating-panel skin
+   and re-cut its chips to this bag's 50px islot cell) and the keycard is a
+   bag item, so the chip hides. Two ids out-rank both hud.css's #weaponStrip
+   block and fpsmode's injected #weaponStrip.slots rules, and every selector
+   needs the docked position or the unified class — flag off means no dock,
+   no class, and all three surfaces exactly as they shipped. */
+body.jail-hud-unified #keycard{ display:none !important; }
+#hotbar #weaponStrip.slots{
+  position:static; background:none; border:none; box-shadow:none;
+  backdrop-filter:none; padding:0; margin:0 6px 0 0; max-width:none;
+  pointer-events:auto; gap:6px; flex-wrap:nowrap;
+}
+#hotbar #weaponStrip.slots .cSlot{
+  width:50px; height:50px; border-radius:11px; cursor:pointer;
+  background:rgba(36,48,66,.72); border:2px solid rgba(255,255,255,.16);
+  box-shadow:0 4px 0 rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
+}
+#hotbar #weaponStrip.slots .cSlot.held{
+  border-color:var(--orange); transform:none;
+  box-shadow:0 0 0 3px rgba(255,122,26,.30), 0 4px 0 rgba(0,0,0,.25);
+}
+#hotbar #weaponStrip.slots .cSlot .gunModel{ width:42px; height:30px; }
