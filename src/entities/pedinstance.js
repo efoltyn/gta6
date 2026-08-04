@@ -215,6 +215,51 @@
     return _unit;
   }
 
+  /* ---- THE WHITE COLOUR ATTRIBUTE — WITHOUT IT EVERY BODY IS BLACK -------
+     This file's first cut set `vertexColors = true` on the pool material (it
+     has to: r128's color_fragment applies vColor only under USE_COLOR, so
+     instanceColor is uploaded and IGNORED without it) and then trusted
+     Material.defaultAttributeValues to stand in for the missing `color`
+     attribute. It does not exist on a MeshLambertMaterial — in the vendored
+     r128 build that field is assigned in the ShaderMaterial constructor and
+     NOWHERE else, so WebGLBindingStates' fallback branch
+         else if ( void 0 !== defaultAttributeValues ) { ...vertexAttrib3fv... }
+     never runs and `color` keeps the WebGL generic default (0,0,0,1). Then
+         color_vertex : vColor = vec3(1.0);  #ifdef USE_COLOR vColor *= color;
+         color_fragment: diffuseColor.rgb *= vColor;
+     multiplies every pooled ped part by ZERO. Every instanced NPC in the city
+     rendered as a black silhouette; only the parts instancing REFUSED (the
+     fallback meshes) kept their colour.
+
+     The house answer is city/crowd.js's `tintUnit` — that file hit this exact
+     bug, named it "the black faces", and fixed it by baking a white `color`
+     attribute into the geometry it instances. Same fix here, with one
+     difference: a pool may draw a SHARED game geometry (the "G" bucket), and
+     mutating a CBZ.boxGeom cache entry would hand a stray `color` attribute
+     to every static prop built from that box — enough to make a mid-play
+     BufferGeometryUtils merge (occupy.js) fail on mismatched attribute sets.
+     So the white attribute goes on a companion geometry that REFERENCES the
+     source's own attribute objects (same GPU buffers, no vertex data copied)
+     and is cached on the source, one per geometry ever. */
+  function tintGeo(g) {
+    if (!g || !g.attributes || !g.attributes.position) return g;
+    if (g.attributes.color) return g;                    // already tintable
+    if (g._cbzTintGeo) return g._cbzTintGeo;
+    let t;
+    try {
+      t = new THREE.BufferGeometry();
+      for (const name in g.attributes) t.setAttribute(name, g.attributes[name]);
+      if (g.index) t.setIndex(g.index);
+      const white = new Float32Array(g.attributes.position.count * 3);
+      white.fill(1);
+      t.setAttribute("color", new THREE.BufferAttribute(white, 3));
+      t.name = (g.name || "pedinst") + "~tint";
+      t._shared = true;            // the rig teardown sweeps must never dispose it
+    } catch (e) { t = g; }         // degrade-safe: worst case is today's behaviour
+    g._cbzTintGeo = t;
+    return t;
+  }
+
   let poolRoot = null;
   const pools = new Map();          // key -> pool
   const rigs = new Map();           // rig root Group -> rig record
@@ -346,19 +391,21 @@
          and gfx.js both key behaviour off `_shared`), and
        - in r128 the fragment multiply by vColor is gated on USE_COLOR,
          which comes from material.vertexColors. Without it instanceColor
-         is uploaded and ignored. The geometry has no `color` attribute,
-         and THREE.Material.defaultAttributeValues supplies {color:[1,1,1]}
-         for the missing one, so the product is white * instanceColor.
-         (This is precisely why city/crowd.js's tinted parts are built with
-         vertexColors:true on plain BoxGeometry.) */
+         is uploaded and ignored.
+       vertexColors alone is HALF the contract: USE_COLOR also makes the
+       vertex shader multiply by the `color` attribute, so the pool geometry
+       must carry a white one or every instance renders black. That is what
+       tintGeo() above supplies, and it is the same fix city/crowd.js's
+       tintUnit carries for the same reason. */
     const mat = src.clone();
     if (mat.color) mat.color.setRGB(1, 1, 1);
     mat.vertexColors = true;
     mat._shared = false;              // ours alone; never handed to the caches
     const p = {
       // A box pool draws the SHARED unit cube; every other pool draws the
-      // exact geometry its members carry.
-      key: key, geo: L ? unitBox() : o.geometry, mat: mat,
+      // exact geometry its members carry. Both go through tintGeo so the
+      // instance tint has a white attribute to multiply (see above).
+      key: key, geo: tintGeo(L ? unitBox() : o.geometry), mat: mat, box: !!L,
       cast: !!o.castShadow, recv: !!o.receiveShadow, order: o.renderOrder | 0,
       mesh: null, cap: 0, next: 0, free: [],
       recs: [], active: false, mDirty: false, cDirty: false, live: 0,
@@ -733,13 +780,15 @@
      remap has stopped matching and every part is falling into its own
      exact-geometry pool again. */
   CBZ.pedInstanceAudit = function () {
-    let active = 0, capacity = 0, live = 0, boxPools = 0;
-    const ub = _unit;
+    let active = 0, capacity = 0, live = 0, boxPools = 0, blackPools = 0;
     pools.forEach(function (p) {
       capacity += p.cap;
+      // THE BLACK-BODY GUARD: vertexColors with no `color` attribute paints
+      // the whole pool black (see tintGeo). Must stay 0, forever.
+      if (p.mat && p.mat.vertexColors && p.geo && p.geo.attributes && !p.geo.attributes.color) blackPools++;
       if (p.active && p.mesh && p.next > 0) {
         active++; live += p.live;
-        if (ub && p.geo === ub) boxPools++;
+        if (p.box) boxPools++;          // drawing the shared unit cube
       }
     });
     return {
@@ -747,6 +796,7 @@
       layer: HIDE_LAYER,
       pools: active,
       boxPools: boxPools,               // active pools drawing the shared unit cube
+      blackPools: blackPools,           // RATCHET: pools that would render black. Pin at 0.
       poolsTotal: pools.size,
       instancesLive: live,
       // Every source mesh currently parked on the hide layer, INCLUDING the
