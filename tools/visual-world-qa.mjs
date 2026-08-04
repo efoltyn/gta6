@@ -113,7 +113,10 @@ try {
     await sleep(500);
   }
   // The IFC is a large local model. Give it time to finish without making it a
-  // precondition for the rest of the world screenshots.
+  // precondition for the rest of the world screenshots. Under OFFICIAL_IFC_LAZY
+  // (default on) the fetch only fires when the player walks near Goldspire, so
+  // ask for it explicitly — this pass photographs the campus from a fixed pose.
+  if (!only.size) await evaluate("!!(CBZ.loadOfficialIfcNow && CBZ.loadOfficialIfcNow())");
   if (!only.size) for (let i = 0; i < 80; i++) {
     const s = await evaluate("CBZ.officialAssetState && CBZ.officialAssetState.ifc");
     if (s === "ready" || s === "error") break;

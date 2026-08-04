@@ -318,7 +318,10 @@
         g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
         if (CBZ.arrestCount) CBZ.arrestCount("escapes");
         if (CBZ.setMode) CBZ.setMode("city");
-        if (CBZ.startRun) CBZ.startRun();
+        // Human-facing button: same full rebuild, so it gets the boot card too
+        // (falls back to the raw call if the presented form isn't up yet).
+        if (CBZ.startRunPresented) CBZ.startRunPresented();
+        else if (CBZ.startRun) CBZ.startRun();
       });
     }
     streetsBtn.classList.toggle("hidden", !show);
@@ -493,12 +496,92 @@
     CBZ.requestLock();
   }
   CBZ.startRun = startRun;
-  bindButton("playBtn", startRun);
+
+  // =======================================================================
+  //  BOOT SCREEN — CITY_BOOT_SCREEN
+  // =======================================================================
+  // Measured 2026-08-04 (tools/load-profile.mjs, desktop, no CPU throttle):
+  // a CITY start is ONE synchronous 26-31 s main-thread task — buildCity plus
+  // the 39 landmass builders that city/worldmap.js runs in a single unyielding
+  // for-loop — followed by ~13 s more before the first frame, where three
+  // compiles ~107 programs. Until that build is sliced (LOAD-NOTES.md has the
+  // teardown and the plan) the tab is genuinely frozen, and with NOTHING
+  // painted it reads as a hung page — which is exactly what a phone kills.
+  //
+  // This does not make the build one millisecond faster. It paints an honest
+  // card FIRST and hands the thread over only after that card is on screen,
+  // so the freeze happens behind a screen that says what is happening. The
+  // spinner animates `transform` and `opacity` ONLY, which Chrome keeps
+  // running on the compositor thread while the main thread is blocked — so it
+  // is still visibly moving during the 26 s, and the page never looks dead.
+  //
+  // CBZ.startRun itself is UNTOUCHED and still fully synchronous: every tool,
+  // probe and gate in tools/ calls it and asserts on the world immediately
+  // after it returns. Only the human-facing buttons route through here.
+  // `?cfg_CITY_BOOT_SCREEN=0` → the buttons call startRun() directly, as before.
+  if (CBZ.CONFIG.CITY_BOOT_SCREEN == null) CBZ.CONFIG.CITY_BOOT_SCREEN = true;
+
+  let bootCard = null, bootBusy = false;
+  function bootScreenEl() {
+    if (bootCard) return bootCard;
+    const style = document.createElement("style");
+    // Compositor-only keyframes on purpose — see the note above.
+    style.textContent =
+      "@keyframes cbzBootSpin{to{transform:rotate(360deg)}}" +
+      "@keyframes cbzBootPulse{0%,100%{opacity:.45}50%{opacity:1}}";
+    document.head.appendChild(style);
+    bootCard = document.createElement("div");
+    bootCard.id = "bootload";
+    bootCard.style.cssText =
+      // 200 is above every existing layer (the highest in css/ is 140) — the
+      // card must cover the title screen and the HUD while the thread is gone.
+      "position:fixed;inset:0;z-index:200;display:none;flex-direction:column;" +
+      "align-items:center;justify-content:center;gap:18px;background:#0f1622;" +
+      "color:#fff7ec;font-family:Fredoka,system-ui,sans-serif;text-align:center;padding:24px";
+    bootCard.innerHTML =
+      '<div style="width:54px;height:54px;border:5px solid rgba(255,122,26,.25);' +
+      'border-top-color:#ff7a1a;border-radius:50%;animation:cbzBootSpin 1s linear infinite"></div>' +
+      '<div style="font-size:22px;font-weight:700;letter-spacing:.5px">BUILDING THE WORLD</div>' +
+      '<div style="font-size:14px;max-width:34ch;line-height:1.5;opacity:.75;' +
+      'animation:cbzBootPulse 2.2s ease-in-out infinite">Generating terrain, cities and traffic. ' +
+      'The first load is the slow one — keep this tab open.</div>';
+    document.body.appendChild(bootCard);
+    return bootCard;
+  }
+  function showBootScreen(on) { bootScreenEl().style.display = on ? "flex" : "none"; }
+
+  // The presented start: paint, then build. Same guards as startRun so a tap
+  // during boot still can't build a half-registered world.
+  function startRunPresented() {
+    if (!CBZ.bootComplete || bootBusy) return;
+    if (CBZ.CONFIG.CITY_BOOT_SCREEN === false) { startRun(); return; }
+    bootBusy = true;
+    showBootScreen(true);
+    // Two frames, not one: the first flushes style/layout, the second only
+    // runs after the compositor has actually PAINTED the card. Handing the
+    // thread over on the first frame draws nothing and we are back to a white
+    // freeze. ~32 ms, so pointer-lock user activation is unaffected.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        try { startRun(); }
+        finally {
+          // Hold the card across the first post-build frames too — that is
+          // where the shader compile lives and the thread is still blocked.
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () { showBootScreen(false); bootBusy = false; });
+          });
+        }
+      });
+    });
+  }
+  CBZ.startRunPresented = startRunPresented;
+
+  bindButton("playBtn", startRunPresented);
   bindButton("resumeBtn", () => { CBZ.requestLock(); });
-  bindButton("againBtn", startRun);
+  bindButton("againBtn", startRunPresented);
   // survival result screens
-  bindButton("survAgainBtn", startRun);
-  bindButton("loseAgainBtn", startRun);
+  bindButton("survAgainBtn", startRunPresented);
+  bindButton("loseAgainBtn", startRunPresented);
   bindButton("survMenuBtn", () => setState("title"));
   bindButton("loseMenuBtn", () => setState("title"));
   CBZ.canvas.addEventListener("click", () => {

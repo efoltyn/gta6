@@ -1819,3 +1819,64 @@ Verified by A/B: default → button absent, cluster 8/8, console clean; the
 documented revert `?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1` → button
 present, cluster 8/8. The B run is what makes A evidence rather than a
 photograph of an empty pavement.
+
+## THE 2026-08-04 LOAD-COST TEARDOWN — the jail vs the city, measured
+
+Owner: *"Figure out why the prison escape game loads fucking amazing, I can
+literally play it on my phone. And why the gang city game is so heavy and takes
+so long to load even on a computer."* Full teardown and the ranked plan for
+what's still owed: **`LOAD-NOTES.md`**. The short version and the two ratchets:
+
+**NEW INSTRUMENT — `tools/load-profile.mjs`.** Every other gate on the shelf
+measures the world once it EXISTS; this one measures what it costs to get there,
+which is the number the owner feels on a phone. Four phases: BOOT (requests,
+bytes, V8 ScriptDuration at DCL), BUILD (`CBZ.startRun` timed — that number is
+how long the tab is FROZEN, `--builders` breaks it down per landmass builder,
+`--profile` adds a V8 CPU profile), FRAME, WEIGHT (objects/geometries/heap plus
+every request the PLAY press issued, with any asset over 4 MB named). `--cpu 4`
+models a phone; `--cfg NAME=0` A/Bs a build flag through `?cfg_`.
+
+**THE MEASUREMENT.** Cell Block Z: 4 requests, 604 KB, playable in **1.07 s**
+(5.6 s at `--cpu 4`), 3.5 MB heap. The city: 486 requests, 23.2 MB, **3.5 s to
+the title screen but 16.8 s at `--cpu 4`**, then `CBZ.startRun()` is **ONE
+synchronous 21–31 s main-thread task** — `cityWorldGeo`'s 39 landmass builders
+in a single unyielding loop (18.2 s) plus `buildCity` — ending at ~142k
+Object3D, 123k colliders and **442 MB of JS heap**. The freeze, not the
+download, is the story. Worst builders: `biome_snow` 4.6 s, `continent` 3.3 s,
+`minicities` 2.8 s (+148k objects by itself). Profile: 18% of the build is
+`getProgramParameter` (shader link, ~107 programs), 8.7% `batch.js`
+`mergeGeometriesV2`, 6% `core/seed.js` noise, 4.4% GC.
+
+**TWO FIXES SHIPPED, BOTH FLAGGED.** `OFFICIAL_IFC_LAZY` (default on): the
+64.8 MB baked-BIM GLB was fetched from a landmass builder on EVERY run for one
+civic annex most sessions never walk to — it now waits until the player is
+within 900 u. The pad, plaza link, road record and region still build
+synchronously, so **the world is byte-identical and the math gate agrees**;
+PLAY drops to 2 `assets/official` requests and the boot path has no asset over
+4 MB left. `CITY_BOOT_SCREEN` (default on): **makes nothing faster** — it paints
+a card and waits two frames for it to actually PAINT before handing the thread
+to the build, so the freeze sits behind a screen instead of a blank page (the
+spinner animates `transform`/`opacity` only, so the compositor keeps it moving
+while the main thread is gone). `CBZ.startRun` is untouched and still fully
+synchronous — every tool asserts on the world the instant it returns, so only
+the human buttons route through `CBZ.startRunPresented`.
+
+**THE CORRECTION WORTH KEEPING.** 64.8 MB is the FILE; GitHub Pages serves it
+gzipped (checked against the live site, not assumed) so the wire cost was
+8.3 MB. Still ~50x the entire Cell Block Z payload, on the critical path, for
+scenery — but quote the right number. Same discipline caught a bug in the new
+tool itself: `loadingFinished.encodedDataLength` comes back **0** for large
+streamed responses, so the first version silently counted the GLB as zero
+bytes. It now takes the larger of `dataReceived` and `loadingFinished` per
+request and labels anything still in flight as partial.
+
+**NOT DONE, AND WHY.** Slicing the build is the real fix for the freeze, and
+`cityWorldGeo`'s sorted-builder loop is already the right shape to yield
+between — but it is called from deep inside `buildCity` (`world.js:1052`) which
+does more work after it, and `settlements.js` wraps it as a keystone. That is a
+boot-path refactor needing the owner's eyes, not a patch, so this pass shipped
+the honest loading card rather than faking progress. `LOAD-NOTES.md` ranks the
+rest: build-only-near-spawn, the ~148k-object `minicities` count,
+`LOCAL_INSTANCING` (still off pending the owner's parity call), shader
+precompile, and `defer` on the 467 tags (measure first — the inline block at
+`index.html:354` must still run before `config.js`).

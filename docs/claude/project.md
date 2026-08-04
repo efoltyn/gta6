@@ -36,6 +36,9 @@ not `index.html` loads it.** Build-time-only sources go in `vite.config.js`'s
   water. Copy its shape; that last assertion is the pattern (prove the flood is
   real to the game's own queries, not just to the shader).
 - `tools/STUDIO.md` — studio.mjs subjects/modes/flags in full.
+- `LOAD-NOTES.md` — what it costs to GET to the world (boot bytes, the one
+  synchronous 21–31 s world build, the ranked plan to slice it), measured with
+  `tools/load-profile.mjs`. `PERF-NOTES.md` is the sibling for frame cost.
 - `PROCGEN.md` — the method behind generation (seed tree, fields, roadmap).
 - `INFINITE-WORLD.md` — chunked-world migration plan (M0–M8).
 

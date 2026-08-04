@@ -22,6 +22,24 @@
   let truckSourcePromise = null;
   let ifcSourcePromise = null;
 
+  // ---- LOAD-COST FLAGS (declared here, not config.js — index.html/config.js
+  //      are the documented Edit-race files) ------------------------------
+  // OFFICIAL_IFC_LAZY: the baked BIM is a 64.8 MB GLB and buildIfcCampus used
+  // to kick its fetch off from inside the landmass build, i.e. on the critical
+  // path of EVERY run. Measured 2026-08-04: pressing PLAY issued 64.8 MB of
+  // GLB before the first frame, for one civic annex at (-100, 470) that most
+  // sessions never walk to — on a phone that is the single largest byte in the
+  // boot. With the flag ON the campus PAD, plaza link, road record and region
+  // are still built synchronously (cheap, deterministic, and lot/region counts
+  // depend on them); only the MODEL FILL waits until the player is actually
+  // within OFFICIAL_IFC_RADIUS of it. Nothing seeded moves, so the world is
+  // byte-identical either way. `?cfg_OFFICIAL_IFC_LAZY=0` restores the eager
+  // fetch verbatim; CBZ.loadOfficialIfcNow() forces it for tools.
+  if (CBZ.CONFIG) {
+    if (CBZ.CONFIG.OFFICIAL_IFC_LAZY == null) CBZ.CONFIG.OFFICIAL_IFC_LAZY = true;
+    if (CBZ.CONFIG.OFFICIAL_IFC_RADIUS == null) CBZ.CONFIG.OFFICIAL_IFC_RADIUS = 900;
+  }
+
   function fail(kind, err) {
     state[kind] = "error";
     state.errors.push(kind + ": " + ((err && err.message) || String(err || "unknown error")));
@@ -151,6 +169,16 @@
     holder.position.set(CX, 0.035, CZ);
     holder.userData.officialAsset = "threejs IFC advanced sample";
     root.add(holder);
+    // Eager (flag off) fetches now, exactly as before. Lazy hands the holder
+    // to the proximity watcher below and returns immediately.
+    if (CBZ.CONFIG && CBZ.CONFIG.OFFICIAL_IFC_LAZY === false) fillIfcCampus(holder);
+    else armIfcCampus(holder, CX, CZ);
+  }
+
+  // ---- the model fill, split out so it can run now OR on approach --------
+  function fillIfcCampus(holder) {
+    if (!holder || holder._ifcFilling) return;
+    holder._ifcFilling = true;
     loadIfcSource().then(function (source) {
       if (!holder.parent) return;
       const model = fitObject(source.clone(true), { x: 238, y: 18, z: 114 }, false);
@@ -170,6 +198,37 @@
       if (holder.parent && !holder.children.length) holder.parent.remove(holder);
     });
   }
+
+  // ---- proximity stream ---------------------------------------------------
+  // ONE watcher for the page (onAlways has no unregister, so registering per
+  // world build would leak a tick per run). Each build re-arms `pending` with
+  // its fresh holder; loadIfcSource() memoizes, so a second run that reaches
+  // the campus re-clones an already-parsed source instead of re-downloading.
+  let pendingCampus = null;
+  function armIfcCampus(holder, cx, cz) { pendingCampus = { holder: holder, cx: cx, cz: cz }; }
+  function tickIfcCampus() {
+    const p = pendingCampus;
+    if (!p) return;
+    if (!p.holder.parent) { pendingCampus = null; return; }   // world was rebuilt
+    const P = CBZ.player && CBZ.player.pos;
+    if (!P) return;
+    const R = +(CBZ.CONFIG && CBZ.CONFIG.OFFICIAL_IFC_RADIUS) || 900;
+    const dx = P.x - p.cx, dz = P.z - p.cz;
+    if (dx * dx + dz * dz > R * R) return;
+    pendingCampus = null;
+    fillIfcCampus(p.holder);
+  }
+  // PRESENTATION band: this is a visual-only asset stream — it must never sit
+  // in front of physics or AI, and a dropped tick costs nothing but latency.
+  if (CBZ.onAlways) CBZ.onAlways((CBZ.PRIO && CBZ.PRIO.PRESENTATION) || 60, tickIfcCampus);
+
+  // Escape hatch for tools/probes that need the campus present regardless of
+  // where the player is standing (tools/visual-world-qa.mjs's ifc-campus pose).
+  CBZ.loadOfficialIfcNow = function () {
+    const p = pendingCampus;
+    if (p) { pendingCampus = null; fillIfcCampus(p.holder); return true; }
+    return state.ifc !== "idle";
+  };
   if (CBZ.addLandmass) CBZ.addLandmass(buildIfcCampus, 34.6);
 
   // Use the supplied HDR as physically based reflection LIGHTING only. Keeping
