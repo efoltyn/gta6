@@ -1453,7 +1453,7 @@
   // cam-recenter is DRAWN ONLY WHEN ITS FLAG IS ON (default off since
   // 2026-08-04). A skipped row carries its reason and cannot hide inside the
   // covered count; a wired row would be a lie once the button is not built.
-  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER !== false)
+  if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false)
     CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", hook: "camRecenter" });
   else
     CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", skip: "owner asked the recenter button off the iPad glass (TOUCH_RECENTER=0); the look drag still levels the view, it just takes a drag instead of a tap" });
@@ -1475,6 +1475,6 @@
   CBZ.touchVerbWired("view-toggle", "#tview");
   CBZ.touchVerbWired("homing", "#thoming");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
-  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_RECENTER !== false) CBZ.touchVerbWired("cam-recenter", "#trecen");
+  if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) CBZ.touchVerbWired("cam-recenter", "#trecen");
   CBZ.touchVerbWired("cam-zoom", "pinch");
 })();
