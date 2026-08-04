@@ -120,7 +120,7 @@
 
   const holds = [];
   const watchers = [];          // census fns -> [vehicleRec, ...] eligible to latch
-  let arcsRun = 0, latchTally = 0, cargoTally = 0, orphaned = 0;
+  let arcsRun = 0, latchTally = 0, cargoTally = 0, orphaned = 0, hostsGone = 0;
 
   // ---- scratch (zero per-frame allocation in the tick) ----------------------
   const _m = new THREE.Matrix4();
@@ -496,10 +496,26 @@
     for (let i = holds.length - 1; i >= 0; i--) {
       const H = holds[i];
       if (!H.grp || !H.grp.parent) {
-        // A landmass rebuild took the host out of the scene. Release everything
-        // rather than re-asserting poses off a dead matrix, and drop the rig.
+        /* A landmass rebuild took the host out of the scene. Release everything
+           rather than re-asserting poses off a dead matrix, and drop the rig.
+
+           `orphaned` COUNTS WHAT ITS NAME AND ITS PIN CLAIM, WHICH IT DID NOT.
+           It used to increment for EVERY host that left the scene, loaded or
+           empty — and that was invisible for as long as the only consumer was a
+           cargo aeroplane on a static military island, whose host never leaves.
+           The ground fleet does: an arena rebuild tears down every car group in
+           the world, so the counter fired on ordinary housekeeping and the math
+           gate's `orphaned` pin — documented as "freight abandoned on a dead
+           matrix" — would have failed on a world reload. MEASURED: 1 after a
+           single probe --reset, with nothing wrong.
+           Freight abandoned on a dead matrix is still a real fault and still
+           counts. An empty room going away with the vehicle it was inside is
+           not, and now reads on `hostsGone` instead, printed beside it so the
+           teardown path stays visible rather than silent. */
         if (H.alive) {
-          H.alive = false; orphaned++;
+          H.alive = false;
+          hostsGone++;
+          if (H.vehicles.length || H.cargo.length) orphaned++;
           releaseFrom(H, null);
           if (H.rig && H.rig.release) H.rig.release();
         }
@@ -564,13 +580,39 @@
       if (!list || !list.length) continue;
       for (let i = 0; i < list.length; i++) {
         const rec = list[i];
-        if (!rec || rec === H.rec || rec._heldBy || rec.destroyed) continue;
+        /* `dead` JOINED `destroyed` WHEN THE GROUND FLEET ADOPTED THIS.
+           This file was written aircraft-first and `destroyed` is the word
+           militaryvehicles.js uses; a city car says `dead` (and `_husk` for a
+           standing burnt-out wreck, which is a thing you can push but not a
+           thing you chain down). Nothing in vehicles.js has ever set
+           `destroyed`, so without this a hulk would strap itself into any
+           trailer that parked over it. The census provider filters its own
+           list too — this is the belt, not the braces: a fleet owner should
+           not be able to break the hold by forgetting. */
+        if (!rec || rec === H.rec || rec._heldBy || rec.destroyed || rec.dead || rec._husk) continue;
         const grp = rec.group; if (!grp || !grp.parent || grp === H.grp) continue;
         if (driverOf(rec)) continue;
         if (Math.abs(rec.v || 0) > 0.4) continue;
         const p = rec.pos || grp.position;
-        if (!containsLocal(H, p.x, p.y, p.z, -0.35)) continue;
-        latchVehicle(H, rec);
+        const lp = containsLocal(H, p.x, p.y, p.z, -0.35);
+        if (!lp) continue;
+        const sunk = lp.y < H.floor.top - 0.05;
+        if (!latchVehicle(H, rec)) continue;
+        /* THE LOAD FELL THROUGH THE DECK, AND THIS IS THE SAME REPAIR THE
+           DUFFELS BELOW GET, for the same reason one revision later. A ground
+           vehicle is re-seated onto the TERRAIN by vehicles.js's parkSeat at
+           order 37 — after the 12.7 latch — so a car that rolls to a stop in a
+           trailer is written down to the yard on the very frame before it is
+           strapped, and the pose the latch records is the yard's, not the
+           deck's. MEASURED: a vehicle latched at local y = 0 inside a hold
+           whose floor is at 0.95, i.e. buried to the axles in its own trailer.
+           The DRIVEN path does not need this (the driver's ground query now
+           consults CBZ.mpGroundAt and it climbs the ramp onto the real deck) —
+           it is the come-to-rest path that needs it, which is most of them. */
+        if (sunk) {
+          const e = H.vehicles[H.vehicles.length - 1];
+          if (e && e.rec === rec) { e.local.p.y = H.floor.top + 0.02; reassert(H, e); }
+        }
         note(((rec.model && rec.model.name) || "The vehicle") + " is chained down in the " + H.label.toLowerCase() + ".", 2.2);
       }
     }
@@ -815,24 +857,70 @@
   // while it still had loads strapped to it. It is structurally 0 because the
   // tick releases before it drops the rig — pin it there. `holds`/`latched`
   // print beside it so a "fix" that simply stops declaring holds cannot pass.
+  /* GROUND vs AIR IS DERIVED, NEVER AUTHORED. The adoption contract says
+     nothing about aircraft on purpose, and adding a `kind:"ground"` field to it
+     for the sake of an audit line would put a taxonomy in a spec that has
+     managed without one — the same mistake as authoring a junction. A hold's
+     host is a wheeled vehicle if its record is in the city's car registry, and
+     that fact is already true; we just read it. */
+  function isGround(H) {
+    return !!(H.rec && CBZ.cityCars && CBZ.cityCars.indexOf(H.rec) >= 0);
+  }
+
   CBZ.holdAudit = function () {
     let decks = 0, ramps = 0, openN = 0, veh = 0, crg = 0, act = 0, plr = 0;
+    let ground = 0, groundRamps = 0, groundOpen = 0, groundLoads = 0;
+    let bags = 0, bagValue = 0, noDoor = 0, gBags = 0, gBagValue = 0;
     const P = CBZ.player;
     for (let i = 0; i < holds.length; i++) {
       const H = holds[i];
       decks++;
-      if (H.ramp) ramps++;
+      if (H.ramp) ramps++; else noDoor++;
       if (H.rampT > 0.98) openN++;
       veh += H.vehicles.length; crg += H.cargo.length; act += H.actors.length;
       if (P && P.pos && containsLocal(H, P.pos.x, P.pos.y, P.pos.z, 0)) plr++;
+      /* THE MONEY IN THE BACK IS THE HALF OF THIS THE OWNER ASKED FOR TWICE, so
+         it gets its own line rather than hiding inside `cargoLatched`. A cash
+         duffel is duck-typed exactly as latchCargo takes it — inventory.js's
+         record carries `amount`, and nothing else strapped in here does.
+         COUNTED PER HOLD, not folded straight into the total, because the total
+         is not the number a truck plate wants: a cargo aeroplane parked on the
+         military island with two duffels aboard would have a photograph of an
+         EMPTY trailer captioned "2 bags". Same fact, two scopes, both printed. */
+      let hb = 0, hbv = 0;
+      for (let k = 0; k < H.cargo.length; k++) {
+        const o = H.cargo[k].obj;
+        if (o && typeof o.amount === "number") { hb++; hbv += o.amount | 0; }
+      }
+      bags += hb; bagValue += hbv;
+      if (isGround(H)) {
+        ground++;
+        if (H.ramp) groundRamps++;
+        if (H.rampT > 0.98) groundOpen++;
+        groundLoads += H.vehicles.length + H.cargo.length + H.actors.length;
+        gBags += hb; gBagValue += hbv;
+      }
     }
     return {
       holds: holds.length, decks: decks, ramps: ramps, rampsOpen: openN,
       vehiclesLatched: veh, cargoLatched: crg, actorsAboard: act,
       playerAboard: plr, watchers: watchers.length,
       rampArcs: arcsRun, latchesEver: latchTally, cargoLatchesEver: cargoTally,
-      carriedFrames: carriedFrames, orphaned: orphaned,
+      carriedFrames: carriedFrames, orphaned: orphaned, hostsGone: hostsGone,
       rigBacked: holds.filter(function (H) { return H.rig && !H.rig.inert; }).length,
+      // ---- ground fleet (semi / van), all derived above ----
+      ground: ground, groundRamps: groundRamps, groundRampsOpen: groundOpen,
+      groundLoads: groundLoads,
+      // `noDoor` is a permanently-open room. The contract ALLOWS it (a hold with
+      // no `ramp` is a legal declaration) so it is evidence, not a target — but
+      // every consumer that exists declares a door, so a non-zero reading means
+      // somebody's art and spec have drifted apart.
+      noDoor: noDoor,
+      bagsAboard: bags, bagValueAboard: bagValue,
+      // …and the same two numbers scoped to the WHEELED fleet, so "the money is
+      // in the truck" is answerable without an aeroplane on the other side of
+      // the map adding to it.
+      groundBags: gBags, groundBagValue: gBagValue,
     };
   };
 })();

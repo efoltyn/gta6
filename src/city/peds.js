@@ -48,22 +48,170 @@
   // The nearest-N insertion below is also smarter than the old first-N-in-array
   // cap: steering always reacts to the closest bodies, independent of spawn
   // order.
+  //
+  // PED_SCAN_GRID widens that one index into the crowd's SCAN INDEX, because a
+  // dozen other bounded-radius questions ("who is inside the muzzle cone", "who
+  // is raging at my brother", "is an armed ganger near me", "which body at my
+  // feet still has loot") were each answering themselves by walking all ~560
+  // bodies. Two shapes replace those walks:
+  //   • THE GRID now holds EVERY body. A corpse, a passenger and a body
+  //     mid-doorway are all legitimate answers to "who is within 11m of the
+  //     muzzle", and the old membership filter would have silently dropped
+  //     them — so membership is unconditional and each CONSUMER re-applies its
+  //     own predicate. Steering keeps the old filter locally (see gatherNbrs),
+  //     which is why its neighbour set is unchanged.
+  //   • CANDIDATE LISTS — tiny supersets refreshed in the SAME pass (peds that
+  //     hold a rage, peds wearing a set's colours) or kept by event (corpses
+  //     that still carry loot, bodies frozen at gunpoint). A list is only ever
+  //     a superset: the caller still runs its full old predicate, so the answer
+  //     is the one the whole-crowd scan would have produced.
+  // Everything is behind ONE flag; OFF restores the original linear scans.
   let _pedGrid = null;
   const _pedGridList = [];
+  const CELL = 4;                  // grid cell size in metres — makeGrid(CELL)
+  // Bodies that MOVED between this frame's rebuild and a mid-loop query. A ped
+  // walks well under 0.3m per frame (and at most ~3 frames' worth in one
+  // compensated PED_BRAIN_STAGGER tick), so 2m is several times the worst case
+  // — it is what makes a cell query a guaranteed SUPERSET of the radius query.
+  const SCAN_MARGIN = 2;
+  // Candidate supersets, refreshed in cityPeds ORDER so a first-match-wins scan
+  // over one of them lands on exactly the body the old whole-crowd scan did.
+  const _rageList = [];            // .rage truthy as of this frame's rebuild
+  const _gangList = [];            // .kind === "gang" as of this frame's rebuild
+  const _corpseList = [];          // rolled deadLoot, kept by event (see _corpseAdd)
+  const _coverList = [];           // ._covered — bodies held in a gunpoint pose
+  const _scanBuf = [];             // nearestActor candidate scratch (reused, never re-alloc'd)
+  const _gpBuf = [];               // gunpointSweep candidate scratch (separate: the sweep
+                                   // bolts bodies, which re-enters other scans)
+  let _scanOn = false;             // PED_SCAN_GRID, latched once per frame
+  const _audit = {
+    gridRoutedCalls: 0, listRoutedCalls: 0, linearFallbackCalls: 0,
+    candidatesVisited: 0, linearVisited: 0,
+  };
   const _nbrD2 = new Float32Array(8);
   const _nbrX = new Float32Array(8), _nbrZ = new Float32Array(8);
   function _pedVec(p) { return p.pos; }
   function rebuildPedGrid() {
-    if (!_pedGrid && CBZ.makeGrid) _pedGrid = CBZ.makeGrid(4);
+    if (!_pedGrid && CBZ.makeGrid) _pedGrid = CBZ.makeGrid(CELL);
+    // No spatialgrid.js → no index → every consumer must stay on its linear
+    // path. Latched once per frame so a mid-frame flag flip can never leave
+    // half the crowd reading an index the other half didn't build.
+    _scanOn = !!_pedGrid && !!(CBZ.CONFIG && CBZ.CONFIG.PED_SCAN_GRID);
     if (!_pedGrid) return;
     _pedGridList.length = 0;
+    if (!_scanOn) {
+      const peds = CBZ.cityPeds;
+      for (let i = 0; i < peds.length; i++) {
+        const p = peds[i];
+        if (!p.dead && !p.inCar && !p._parked && p.enterT <= 0) _pedGridList.push(p);
+      }
+      _pedGrid.rebuild(_pedGridList, _pedVec);
+      return;
+    }
+    _rageList.length = 0;
+    _gangList.length = 0;
     const peds = CBZ.cityPeds;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
-      if (!p.dead && !p.inCar && !p._parked && p.enterT <= 0) _pedGridList.push(p);
+      p._gi = i;                     // cityPeds order — the tie-break a linear scan got for free
+      _pedGridList.push(p);          // EVERY body: consumers filter, the index does not
+      if (p.rage) _rageList.push(p);
+      if (p.kind === "gang") _gangList.push(p);
     }
     _pedGrid.rebuild(_pedGridList, _pedVec);
   }
+  // How many cells each side cover a radius query. A cell spans [CELL*g,
+  // CELL*g+CELL), so visiting g-C..g+C guarantees CELL*C metres of coverage in
+  // every direction from ANY point inside the centre cell — hence the ceil.
+  function _cellR(radius, margin) { return Math.ceil((radius + margin) / CELL); }
+  // Fill `buf` with every body whose cell can hold a hit for a `radius` query at
+  // (x,z), IN cityPeds ORDER. The order is not cosmetic: several of these scans
+  // are first-match-wins, and the ones that can bolt a body feed the shared
+  // PANIC field and the seeded rng inside fleeFrom — visiting bodies in bucket
+  // order instead of roster order would change that stream, and determinism is
+  // doctrine. Candidate counts are single digits to low tens, so the insertion
+  // is cheaper than any allocation-bearing sort. Returns false when there is no
+  // index (caller falls back to its linear scan).
+  function _collect(buf, x, z, radius, margin) {
+    buf.length = 0;
+    if (!_pedGrid) return false;
+    const C = _cellR(radius, margin);
+    const gx = _pedGrid.cellIndex(x), gz = _pedGrid.cellIndex(z);
+    for (let cx = gx - C; cx <= gx + C; cx++) for (let cz = gz - C; cz <= gz + C; cz++) {
+      const cell = _pedGrid.bucket(cx, cz); if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        const p = cell[i];
+        let at = buf.length;
+        buf.push(p);
+        while (at > 0 && buf[at - 1]._gi > p._gi) { buf[at] = buf[at - 1]; at--; }
+        buf[at] = p;
+      }
+    }
+    _audit.candidatesVisited += buf.length;
+    return true;
+  }
+  // ---- the lootable-corpse list ----------------------------------------------
+  // A body only becomes lootable in rollDeadLoot and only stops being lootable
+  // by being looted, culled or recycled — four events, versus the whole crowd
+  // being re-walked every frame (and once more per body in a pile, which is why
+  // a massacre used to cost peds×corpses). The list is a SUPERSET: the query
+  // re-runs the original predicate, so a body culled by another module (gangs.js
+  // reaps its own) is still skipped exactly as before.
+  function _corpseAdd(ped) {
+    if (!ped || ped._inCorpseList) return;
+    ped._inCorpseList = true;
+    _corpseList.push(ped);
+  }
+  function _corpseDrop(ped) {
+    if (!ped || !ped._inCorpseList) return;
+    ped._inCorpseList = false;
+    const i = _corpseList.indexOf(ped);
+    if (i >= 0) _corpseList.splice(i, 1);
+  }
+  function _corpseClear() {
+    for (let i = 0; i < _corpseList.length; i++) _corpseList[i]._inCorpseList = false;
+    _corpseList.length = 0;
+  }
+  // ---- the gunpoint-pose list ------------------------------------------------
+  // Only gunpointSweep raises _covered, and a raised body has to be RELAXED
+  // every frame it isn't being aimed at — including the frames it has walked out
+  // of the cells the sweep looks at, and every frame the player is holding no
+  // gun at all. Both used to be a whole-crowd walk; both are this list.
+  function _coverAdd(ped) {
+    if (ped._inCoverList) return;
+    ped._inCoverList = true;
+    _coverList.push(ped);
+  }
+  function _coverDrop(ped) {
+    if (!ped || !ped._inCoverList) return;
+    ped._inCoverList = false;
+    const i = _coverList.indexOf(ped);
+    if (i >= 0) _coverList.splice(i, 1);
+  }
+  // Live counters for the orchestrator's probe. CUMULATIVE since load; pass
+  // true to zero the call counters (the population fields are always current).
+  CBZ.pedScanAudit = function (reset) {
+    const out = {
+      on: !!_scanOn,
+      flag: !!(CBZ.CONFIG && CBZ.CONFIG.PED_SCAN_GRID),
+      gridRoutedCalls: _audit.gridRoutedCalls,
+      listRoutedCalls: _audit.listRoutedCalls,
+      linearFallbackCalls: _audit.linearFallbackCalls,
+      candidatesVisited: _audit.candidatesVisited,
+      linearVisited: _audit.linearVisited,
+      lootableCorpses: _corpseList.length,
+      coveredPeds: _coverList.length,
+      ragingPeds: _rageList.length,
+      gangPeds: _gangList.length,
+      indexedPeds: _pedGridList.length,
+      population: CBZ.cityPeds ? CBZ.cityPeds.length : 0,
+    };
+    if (reset) {
+      _audit.gridRoutedCalls = 0; _audit.listRoutedCalls = 0; _audit.linearFallbackCalls = 0;
+      _audit.candidatesVisited = 0; _audit.linearVisited = 0;
+    }
+    return out;
+  };
   // fleeFrom runs on a STATE TRANSITION (not the per-frame hot loop), so it may
   // build its short ped.path array there — cityNav.routeTo writes into the caller
   // array we hand it (ped owns ped.path; move() shifts it as the ped advances).
@@ -106,6 +254,11 @@
   if (CBZ.spawnFromDoors == null) CBZ.spawnFromDoors = true;
   // HOBO NIGHT JUMPSCARE (hobo-night-jumpscare): owner-toggleable fright loop.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_HOBO_SCARE == null) CBZ.CONFIG.CITY_HOBO_SCARE = true;
+  // PED_SCAN_GRID: route the crowd's bounded-radius questions through the
+  // per-frame ped index + the small candidate lists above instead of walking all
+  // ~560 bodies per question (see the SCAN INDEX block at the top of the file).
+  // OFF restores every original linear scan verbatim.
+  if (CBZ.CONFIG && CBZ.CONFIG.PED_SCAN_GRID == null) CBZ.CONFIG.PED_SCAN_GRID = true;
 
   // ============================================================
   //  FINITE, NON-REGENERATING POPULATION (the "headcount").
@@ -2263,6 +2416,8 @@
       });
     }
     CBZ.cityPeds.length = 0;
+    _corpseClear();            // the roster is gone; so is every body on it
+    _coverList.length = 0;
     CBZ.cityDrops.length = 0;
     if (CBZ.citySecurity) CBZ.citySecurity.length = 0;
     // the garrison's chain of command rebuilds with the world — badge zero
@@ -2321,6 +2476,8 @@
   function removeVendor(ped) {
     const i = CBZ.cityPeds.indexOf(ped);
     if (i >= 0) CBZ.cityPeds.splice(i, 1);
+    _corpseDrop(ped);          // off the roster ⇒ off every index built from it
+    _coverDrop(ped);
     if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
     if (ped.group) ped.group.traverse(function (o) {
       if (o.isSprite) return;   // sprites share an r128 geometry singleton — never dispose
@@ -2402,8 +2559,17 @@
   // the violent/raging back off the blast SEAT for a beat — nobody, however
   // fearless, walks INTO a fresh fireball — so a bazooka never gets a suicidal
   // charge. Without it the old behaviour stands (bold peds just get jumpy).
+  // STAYS LINEAR ON PURPOSE (PED_SCAN_GRID wave). Three independent reasons, any
+  // one of which is decisive: (1) the radius reaches 32m, and a 9-cells-a-side
+  // query touches more cells than the city has bodies; (2) it bolts people, and
+  // fleeFrom draws on the SEEDED rng — visiting the crowd in bucket order instead
+  // of roster order would reorder that stream, and determinism is doctrine;
+  // (3) it deliberately reaches bodies the steering index used to exclude. The
+  // scan is O(crowd) once per gunshot/blast, not per frame, so it is not the cost.
   CBZ.cityPanic = function (x, z, power, offender, blast) {
     power = power || 1;
+    _audit.linearFallbackCalls++;
+    _audit.linearVisited += CBZ.cityPeds.length;
     const radius = 16 + power * 10, r2 = radius * radius;
     // close-in "blast danger" ring: inside this even the fearless retreat
     const dangerR = blast ? (8 + power * 4) : 0, dangerR2 = dangerR * dangerR;
@@ -2444,7 +2610,12 @@
 
   // tag everyone in sight of a crime as a witness who can phone it in (the
   // ONLY way the player gets stars — RDR2 style). `sev` = crime weight.
+  // Also STAYS LINEAR: 30m is 8 cells a side (289 buckets) against a crowd of
+  // ~560, so the index would cost more than it saved — and a witness in a car or
+  // in a doorway is exactly the witness that matters. Per crime, not per frame.
   CBZ.cityTagWitnesses = function (x, z, sev, type) {
+    _audit.linearFallbackCalls++;
+    _audit.linearVisited += CBZ.cityPeds.length;
     const r2 = 30 * 30;
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.vendor) continue;
@@ -2756,12 +2927,16 @@
       if (rng() < 0.3) items.push(["Phone", "Wallet", "Cash Stack", "Sunglasses"][(rng() * 4) | 0]);
     }
     ped.deadLoot = { cash: Math.round(cash), items, looted: false };
+    _corpseAdd(ped);          // the ONE place a body becomes lootable
   }
 
   // loot a corpse (interact.js [I] near a body): take the whole haul
   CBZ.cityLootCorpse = function (ped) {
     if (!ped || !ped.dead || !ped.deadLoot || ped.deadLoot.looted) return null;
     const dl = ped.deadLoot; dl.looted = true;
+    _corpseDrop(ped);         // auto-loot re-asks for the nearest body in the same
+                              // frame until it runs dry; drop it here and that loop
+                              // shrinks its own search instead of re-walking the crowd
     const econ = CBZ.cityEcon;
     if (dl.cash > 0 && CBZ.city) CBZ.city.addCash(dl.cash);
     // E4 CIRCULATION: same debit as a live robbery (see cityRobPed) — a
@@ -2775,8 +2950,27 @@
     CBZ.city && CBZ.city.note("Looted body: $" + dl.cash + (got.length ? " + " + got.join(", ") : ""), 2);
     return dl;
   };
+  // Nearest LOOTABLE body. The auto-loot scanner (interact.js) asks every frame
+  // and re-asks once per body in a pile, so this used to be the single most
+  // re-walked list in the game. PED_SCAN_GRID answers it from the corpse list —
+  // bounded by how many bodies are lying around, not by how many people are
+  // alive — with the ORIGINAL predicate re-run per candidate so a looted/culled
+  // body is skipped exactly as before. The _gi tie-break reproduces the linear
+  // scan's first-in-roster-wins on an exact distance tie (two bodies dropped on
+  // the same spot).
   CBZ.cityNearestCorpse = function (x, z, maxd) {
     let best = null, bd = (maxd || 3) * (maxd || 3);
+    if (CBZ.CONFIG && CBZ.CONFIG.PED_SCAN_GRID) {
+      _audit.listRoutedCalls++;
+      for (let i = 0; i < _corpseList.length; i++) {
+        const p = _corpseList[i];
+        if (!p.dead || !p.deadLoot || p.deadLoot.looted || p.culled) continue;
+        const dd = (p.pos.x - x) * (p.pos.x - x) + (p.pos.z - z) * (p.pos.z - z);
+        if (dd < bd || (dd === bd && best && (p._gi | 0) < (best._gi | 0))) { bd = dd; best = p; }
+      }
+      return best;
+    }
+    _audit.linearFallbackCalls++;
     for (const p of CBZ.cityPeds) { if (!p.dead || !p.deadLoot || p.deadLoot.looted || p.culled) continue; const dd = (p.pos.x - x) * (p.pos.x - x) + (p.pos.z - z) * (p.pos.z - z); if (dd < bd) { bd = dd; best = p; } }
     return best;
   };
@@ -3036,12 +3230,59 @@
     return best;
   }
 
-  // nearest other actor matching a test (peds + cops)
+  // ---- nearestActor predicates, at MODULE scope --------------------------
+  // These were inline arrows at the call sites, so every rate-gated brain tick
+  // in the cast built two fresh closures (the caller's arrow + the scan arrow
+  // below) and threw them away. `test(p, self)` hands the predicate the caller
+  // it used to capture, which is the only thing any of them closed over.
+  function _naChatMate(p) { return p.kind === "civilian" && !p.vendor && p.state !== "flee"; }
+  function _naIdleCivilian(p) { return p.kind === "civilian" && !p.vendor && (p.state === "walk" || p.state === "idle"); }
+  function _naCop(p) { return p.kind === "cop"; }
+  function _naCopHuntingMe(p, self) { return p.kind === "cop" && p.npcTarget === self; }
+  function _naWeakerCivilian(p, self) { return !p.vendor && p.kind === "civilian" && p.aggr < self.aggr - 0.15; }
+  function _naRivalGang(p, self) { return !!p.gang && p.gang !== self.gang; }
+  function _naRampageVictim(p) {
+    return !p.dead && !p.rampage && (p.kind === "cop" || (p.kind === "civilian" && !p.companion && !p.controlled));
+  }
+  // nearest other actor matching a test (peds + cops). Past this radius a cell
+  // query touches more cells than the crowd has bodies, so the wide scans
+  // (rampage target at 60m, cop calls at 22/30m) stay linear on purpose.
+  const NA_GRID_R = 12;
   function nearestActor(self, maxd, test) {
     let best = null, bd = maxd * maxd;
-    const scan = (p) => { if (p === self || p.dead) return; if (!test(p)) return; const dd = (p.pos.x - self.pos.x) * (p.pos.x - self.pos.x) + (p.pos.z - self.pos.z) * (p.pos.z - self.pos.z); if (dd < bd) { bd = dd; best = p; } };
-    for (const p of CBZ.cityPeds) scan(p);
-    for (const c of CBZ.cityCops) scan(c);
+    const sx = self.pos.x, sz = self.pos.z;
+    if (_scanOn && maxd <= NA_GRID_R && _collect(_scanBuf, sx, sz, maxd, SCAN_MARGIN)) {
+      _audit.gridRoutedCalls++;
+      for (let i = 0; i < _scanBuf.length; i++) {
+        const p = _scanBuf[i];
+        if (p === self || p.dead) continue;
+        if (!test(p, self)) continue;
+        const dd = (p.pos.x - sx) * (p.pos.x - sx) + (p.pos.z - sz) * (p.pos.z - sz);
+        // strict <, plus the roster-order tie-break the linear scan got for free
+        if (dd < bd || (dd === bd && best && (p._gi | 0) < (best._gi | 0))) { bd = dd; best = p; }
+      }
+    } else {
+      _audit.linearFallbackCalls++;
+      const peds = CBZ.cityPeds;
+      _audit.linearVisited += peds.length;
+      for (let i = 0; i < peds.length; i++) {
+        const p = peds[i];
+        if (p === self || p.dead) continue;
+        if (!test(p, self)) continue;
+        const dd = (p.pos.x - sx) * (p.pos.x - sx) + (p.pos.z - sz) * (p.pos.z - sz);
+        if (dd < bd) { bd = dd; best = p; }
+      }
+    }
+    // COPS are their own roster and are not in the ped index — always linear,
+    // always AFTER the peds, always strict < : a cop tying a ped still loses.
+    const cops = CBZ.cityCops;
+    for (let i = 0; i < cops.length; i++) {
+      const c = cops[i];
+      if (c === self || c.dead) continue;
+      if (!test(c, self)) continue;
+      const dd = (c.pos.x - sx) * (c.pos.x - sx) + (c.pos.z - sz) * (c.pos.z - sz);
+      if (dd < bd) { bd = dd; best = c; }
+    }
     return best;
   }
 
@@ -3051,7 +3292,10 @@
   // the player if the player is mid-fight near them). Cheap bounded scan.
   function attackerOf(who) {
     if (!who || who.dead) return null;
-    const peds = CBZ.cityPeds;
+    // Only a body that HOLDS a rage can be the answer, so the candidate list is
+    // the whole scan: same roster order, same predicate, first match wins.
+    const peds = _scanOn ? _rageList : CBZ.cityPeds;
+    if (_scanOn) _audit.listRoutedCalls++; else { _audit.linearFallbackCalls++; _audit.linearVisited += peds.length; }
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       if (p === who || p.dead) continue;
@@ -3095,7 +3339,11 @@
     // 2) cluster mob: ≥3 bold peds already raging at the SAME threat near me →
     //    pile on the shared target (only if I'm bold and not already engaged).
     if (ped.aggr >= (B.bold || 0.5) && !ped.rage) {
-      const peds = CBZ.cityPeds, R2 = 14 * 14;
+      // Same superset trade as attackerOf: every body this loop can count is
+      // one that holds a rage, and _rageList carries them in roster order — so
+      // the `if (!shared)` first-match still picks the same shared threat.
+      const peds = _scanOn ? _rageList : CBZ.cityPeds, R2 = 14 * 14;
+      if (_scanOn) _audit.listRoutedCalls++; else { _audit.linearFallbackCalls++; _audit.linearVisited += peds.length; }
       let shared = null, n = 0;
       for (let i = 0; i < peds.length; i++) {
         const o = peds[i];
@@ -3377,7 +3625,7 @@
     if (role === "panhandler" && ped._beg) {
       // linger and beg: barely moves, faces passers-by, occasional bark via social.
       ped.pause = Math.max(ped.pause, 2.5 + rng() * 2.5); ped.speed = 0;
-      const mate = nearestActor(ped, 6, (p) => p.kind === "civilian" && !p.vendor && p.state !== "flee");
+      const mate = nearestActor(ped, 6, _naChatMate);
       if (mate) ped.group.rotation.y = Math.atan2(mate.pos.x - ped.pos.x, mate.pos.z - ped.pos.z);
       return true;
     }
@@ -3597,6 +3845,12 @@
   }
   function companionThink(ped, dt, active) {
     const P = CBZ.player;
+    // BOARDING / ORDERS OWN THE BODY (city/boarding.js). A companion walking to
+    // a car door, sitting in a seat, holding a spot you told him to hold or
+    // hauling a duffel is not "following you" — and the old radial hold would
+    // fight every one of those for `target` at 15 Hz. One line, feature-
+    // detected: with boarding.js absent this reads exactly as it always did.
+    if (CBZ.boardingHolds && CBZ.boardingHolds(ped)) return;
     ped.fear = 0; ped.alarmed = 0; ped.surrender = false; ped.rage = null;   // never panic/flee
     if (!ped.armed) { ped.armed = true; ped.weapon = ped.weapon || "Pistol"; ped.ammo = ped.ammo || 999; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); }
     if (ped.ammo < 6) ped.ammo = 999;                          // crew never runs dry (they're on payroll)
@@ -3616,7 +3870,22 @@
     } else {
       ped.state = "walk";
       const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
-      if (d > 60) ped.pos.set(P.pos.x + 3, 0, P.pos.z);        // teleport if hopelessly lost
+      /* THE CATCH-UP WARP, AND WHY IT IS NO LONGER ALLOWED TO LAND ON YOU.
+         This was `ped.pos.set(P.pos.x + 3, 0, P.pos.z)` — three metres from
+         the player, unconditionally. While you DRIVE, `P.pos` is the car's
+         position, so a crew member who fell behind rematerialised inside the
+         car you were sitting in, in full view, every time. That is one of the
+         three things the owner filmed as "glitch into car".
+         Two rules now: never while the player is in a vehicle at all (get in
+         properly, through city/boarding.js, or stay where you are and follow),
+         and never inside the padded screen projection — `npcTransitionSafe` is
+         the shared contract for "the player could watch this happen" and it is
+         strictly stronger than a yaw cone. A refused warp simply retries. */
+      if (d > 60 && !P.driving && !P._aircraft) {
+        const wx = P.pos.x + 3, wz = P.pos.z;
+        const safe = CBZ.npcTransitionSafe ? CBZ.npcTransitionSafe(wx, wz) : true;
+        if (safe) ped.pos.set(wx, 0, wz);
+      }
       if (d > 4.5) { const fp = companionFollowPoint(ped, P); ped.target.set(fp.x, 0, fp.z); }
       else { ped.target.set(ped.pos.x, 0, ped.pos.z); ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z); }
     }
@@ -4333,7 +4602,7 @@
       ped._rampT = 0.4 + rng() * 0.4;
       const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
       // prefer the closest of: any nearby civilian/cop, or the player if right here
-      let tgt = nearestActor(ped, 60, (p) => !p.dead && !p.rampage && (p.kind === "cop" || (p.kind === "civilian" && !p.companion && !p.controlled)));
+      let tgt = nearestActor(ped, 60, _naRampageVictim);
       if (P && !P.dead && PA) {
         const dP = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
         if (dP < 20 && (!tgt || dP < Math.hypot(tgt.pos.x - ped.pos.x, tgt.pos.z - ped.pos.z))) tgt = PA;
@@ -4549,7 +4818,11 @@
         ped.aggr < (B.bold || 0.5) && (ped._gangFearT || 0) <= 0) {
       ped._gangFearT = 0.4 + rng() * 0.25;
       let gx = 0, gz = 0, gd2 = 16 * 16, sawGang = false;
-      const crowd = CBZ.cityPeds;
+      // Only a ganger can be the answer. 16m is wide enough that a cell query
+      // would touch more cells than the set has members, so this one takes the
+      // candidate LIST, not the grid: same roster order, same predicate below.
+      const crowd = _scanOn ? _gangList : CBZ.cityPeds;
+      if (_scanOn) _audit.listRoutedCalls++; else { _audit.linearFallbackCalls++; _audit.linearVisited += crowd.length; }
       for (let gi = 0; gi < crowd.length; gi++) {
         const p = crowd[gi];
         if (p === ped || p.kind !== "gang" || !p.armed || p.dead) continue;
@@ -4731,7 +5004,7 @@
       const roll = rng();
       // 2) the truly violent take on cops / carjack / rampage
       if (ped.aggr >= (B.violent || 0.88)) {
-        if (roll < 0.10) { const cop = nearestActor(ped, 22, (p) => p.kind === "cop"); if (cop) { ped.rage = cop; ped.state = "fight"; return; } }
+        if (roll < 0.10) { const cop = nearestActor(ped, 22, _naCop); if (cop) { ped.rage = cop; ped.state = "fight"; return; } }
         if (roll < 0.16 && CBZ.cityNpcCarjack && !ped.inCar) { if (CBZ.cityNpcCarjack(ped)) return; }
       }
       // 3) crooks mug / brawl a nearby weaker civilian. A SNATCH-AND-RUN now moves
@@ -4741,7 +5014,7 @@
       //    autonomy beat lands the grab once in range. The offense is logged ONCE,
       //    inside npcMug on success (no double-count from the old fight branch).
       if (roll < 0.14) {
-        const victim = nearestActor(ped, 12, (p) => !p.vendor && p.kind === "civilian" && p.aggr < ped.aggr - 0.15);
+        const victim = nearestActor(ped, 12, _naWeakerCivilian);
         if (victim) {
           if (npcMug(ped, victim)) return;                 // snatched + fled
           ped.path = null; ped.finalGoal = { x: victim.pos.x, z: victim.pos.z };
@@ -4754,7 +5027,7 @@
 
     // ---- being hunted by cops for your OWN crimes: flee or fight ----
     if (active && (ped.npcWanted | 0) >= 1) {
-      const cop = nearestActor(ped, 30, (p) => p.kind === "cop" && p.npcTarget === ped);
+      const cop = nearestActor(ped, 30, _naCopHuntingMe);
       if (cop) {
         if (ped.aggr >= (B.violent || 0.88)) { ped.rage = cop; ped.state = "fight"; return; }
         ped.state = "flee"; fleeFrom(ped, cop.pos.x, cop.pos.z); return;
@@ -4810,7 +5083,7 @@
 
     // social: idle peds near each other pause to chat
     if (ped.chatT <= 0 && rng() < 0.04) {
-      const mate = nearestActor(ped, 3.2, (p) => p.kind === "civilian" && !p.vendor && (p.state === "walk" || p.state === "idle"));
+      const mate = nearestActor(ped, 3.2, _naIdleCivilian);
       if (mate) { ped.state = "chat"; ped.chatT = 2 + rng() * 3; ped.speed = 0; ped.group.rotation.y = Math.atan2(mate.pos.x - ped.pos.x, mate.pos.z - ped.pos.z); return; }
     }
     // cheap archetype micro-flavour (linger at a food stall, rest near a bench) so
@@ -4901,6 +5174,7 @@
   // (cityNav absent / no route) AND reproduces TODAY's behaviour exactly when
   // citynav.js isn't loaded. (The scream now lives in fleeFrom so it fires once
   // per panic regardless of which branch ran.)
+  const FLEE_OFFS = [0, 0.5, -0.5, 1.0, -1.0, 1.7, -1.7, 2.6];
   function _fleeFallback(ped, x, z) {
     ped.path = null;
     const ax = ped.pos.x - x, az = ped.pos.z - z, m = Math.hypot(ax, az) || 1;
@@ -4935,10 +5209,11 @@
       }
     }
     // try the straight-away heading, then progressively wider sidesteps
-    const offs = [0, 0.5, -0.5, 1.0, -1.0, 1.7, -1.7, 2.6];
+    // (module-level and READ-ONLY: at panic onset most of the street calls this
+    // in the same frame, and a fresh literal each time is pure garbage)
     let bx = ped.pos.x + Math.sin(baseAng) * 22, bz = ped.pos.z + Math.cos(baseAng) * 22, found = false;
-    for (let k = 0; k < offs.length; k++) {
-      const a = baseAng + offs[k];
+    for (let k = 0; k < FLEE_OFFS.length; k++) {
+      const a = baseAng + FLEE_OFFS[k];
       const ux = Math.sin(a), uz = Math.cos(a);
       if (dirClear(ped, ux, uz, 7)) { bx = ped.pos.x + ux * 22; bz = ped.pos.z + uz * 22; found = true; break; }
     }
@@ -4977,6 +5252,11 @@
       for (let i = 0; i < cell.length; i++) {
         const o = cell[i];
         if (o === ped) continue;
+        // PED_SCAN_GRID puts EVERY body in the index (a corpse and a passenger
+        // are real answers to other questions). Steering only ever avoided live,
+        // on-foot bodies, so the old membership test lives HERE now — same
+        // neighbour set, same nearest-N, byte for byte.
+        if (_scanOn && (o.dead || o.inCar || o._parked || o.enterT > 0)) continue;
         const ox = o.pos.x - ped.pos.x, oz = o.pos.z - ped.pos.z, od2 = ox * ox + oz * oz;
         if (od2 > NBR_R2 || od2 < 0.0004) continue;
         // Keep the closest N neighbours. This bounded insertion is allocation
@@ -5128,7 +5408,7 @@
       return CBZ.city.playerActor;
     }
     // a rival gangster in turf
-    const rival = nearestActor(ped, 12, (p) => p.gang && p.gang !== ped.gang);
+    const rival = nearestActor(ped, 12, _naRivalGang);
     if (rival) {
       const dr = (rival.pos.x - G.x) * (rival.pos.x - G.x) + (rival.pos.z - G.z) * (rival.pos.z - G.z);
       if (dr < R2 * 1.6) {
@@ -5285,6 +5565,43 @@
   //  This sets the pose flags reactions.js consumes; the existing think() gunpoint
   //  branch (surrender/fight decision) is preserved untouched.
   // ============================================================
+  // ONE body's answer to the levelled gun. Shared by both routes below so the
+  // grid path cannot drift from the linear one.
+  function _gunpointOne(ped, dt, px, pz, fx, fz, B, P) {
+    if (!ped || ped.dead || ped.vendor || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) return;
+    const dx = ped.pos.x - px, dz = ped.pos.z - pz, d2 = dx * dx + dz * dz;
+    if (d2 > 121) {                                  // out of 11m gunpoint range → relax
+      if (ped._covered) { _relaxGunpoint(ped, dt); }
+      return;
+    }
+    const d = Math.sqrt(d2) || 1;
+    const aimedAtMe = (dx / d) * fx + (dz / d) * fz > 0.66;   // ped inside the aim cone
+    if (aimedAtMe) {
+      ped._coverGrace = 0.6;                          // hold the pose for a beat after look-away
+      ped._covered = true;
+      _coverAdd(ped);                                 // so the relax pass can find it anywhere
+      // ANYONE holding a gun squares up and levels it BACK — a guy with a gun
+      // never throws his hands up. A fearless unarmed bruiser also stands his
+      // ground. Everyone else (unarmed, not fearless) throws their hands up.
+      const drawsBack = ped.armed || ped.aggr >= (B.violent || 0.88);
+      if (drawsBack) {
+        if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
+      } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit") {
+        // A HELD BODY GETS THE BRANCH, NOT THE FREEZE. Everyone in a seat used
+        // to land on markGunpoint alone, which is why a stadium, a gate lounge
+        // and an office floor all reacted to a levelled gun by sitting
+        // perfectly still: the freeze was the ONLY option a seated body had.
+        // cityScare decides freeze-vs-bolt from the read and, when it is bolt,
+        // is the one thing that can actually get them out of the chair.
+        CBZ.cityScare(ped, CBZ.city && CBZ.city.playerActor ? CBZ.city.playerActor : P, { seat: true });
+      } else {
+        // meek/scared: throw hands up + freeze. markGunpoint owns the full state.
+        markGunpoint(ped, 0.4);
+      }
+    } else if (ped._covered) {
+      _relaxGunpoint(ped, dt);
+    }
+  }
   function gunpointSweep(dt) {
     const P = CBZ.player;
     if (!P || P.dead || P.driving) { _clearGunpointPoses(); return; }
@@ -5293,42 +5610,36 @@
     const B = A0();
     const cy = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(cy), fz = -Math.cos(cy);
     const px = P.pos.x, pz = P.pos.z;
-    const peds = CBZ.cityPeds;
-    for (let i = 0; i < peds.length; i++) {
-      const ped = peds[i];
-      if (!ped || ped.dead || ped.vendor || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) continue;
-      const dx = ped.pos.x - px, dz = ped.pos.z - pz, d2 = dx * dx + dz * dz;
-      if (d2 > 121) {                                  // out of 11m gunpoint range → relax
-        if (ped._covered) { _relaxGunpoint(ped, dt); }
-        continue;
+    // GRID ROUTE. This runs immediately after rebuildPedGrid and before a single
+    // body has moved this frame, so the index holds the EXACT positions the old
+    // whole-crowd walk would have read — margin 0, no staleness, and 11m needs
+    // ceil(11/4)=3 cells each side. The index deliberately holds passengers and
+    // bodies mid-doorway too: a gun levelled through a windscreen is still a gun.
+    if (_scanOn && _collect(_gpBuf, px, pz, 11, 0)) {
+      _audit.gridRoutedCalls++;
+      for (let i = 0; i < _gpBuf.length; i++) {
+        const ped = _gpBuf[i];
+        ped._gpSeen = frame;                       // claimed by the in-range pass
+        _gunpointOne(ped, dt, px, pz, fx, fz, B, P);
       }
-      const d = Math.sqrt(d2) || 1;
-      const aimedAtMe = (dx / d) * fx + (dz / d) * fz > 0.66;   // ped inside the aim cone
-      if (aimedAtMe) {
-        ped._coverGrace = 0.6;                          // hold the pose for a beat after look-away
-        ped._covered = true;
-        // ANYONE holding a gun squares up and levels it BACK — a guy with a gun
-        // never throws his hands up. A fearless unarmed bruiser also stands his
-        // ground. Everyone else (unarmed, not fearless) throws their hands up.
-        const drawsBack = ped.armed || ped.aggr >= (B.violent || 0.88);
-        if (drawsBack) {
-          if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
-        } else if (ped._npcAttached || ped._propSeat || ped._deskAnchor || ped.state === "sit") {
-          // A HELD BODY GETS THE BRANCH, NOT THE FREEZE. Everyone in a seat used
-          // to land on markGunpoint alone, which is why a stadium, a gate lounge
-          // and an office floor all reacted to a levelled gun by sitting
-          // perfectly still: the freeze was the ONLY option a seated body had.
-          // cityScare decides freeze-vs-bolt from the read and, when it is bolt,
-          // is the one thing that can actually get them out of the chair.
-          CBZ.cityScare(ped, CBZ.city && CBZ.city.playerActor ? CBZ.city.playerActor : P, { seat: true });
-        } else {
-          // meek/scared: throw hands up + freeze. markGunpoint owns the full state.
-          markGunpoint(ped, 0.4);
-        }
-      } else if (ped._covered) {
+      // RELAX TAIL: the old walk reached every held body wherever it stood. The
+      // cells only reach the near ones, so anybody still holding a pose that the
+      // cells did NOT reach is by definition out of range and relaxes here —
+      // exactly once per frame, which matters because _relaxGunpoint is what
+      // ticks _coverGrace down. Compacts the list in place as poses release.
+      for (let i = _coverList.length - 1; i >= 0; i--) {
+        const ped = _coverList[i];
+        if (!ped._covered) { ped._inCoverList = false; _coverList.splice(i, 1); continue; }
+        if (ped._gpSeen === frame) continue;
+        if (ped.dead || ped.vendor || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) continue;
         _relaxGunpoint(ped, dt);
       }
+      return;
     }
+    _audit.linearFallbackCalls++;
+    const peds = CBZ.cityPeds;
+    _audit.linearVisited += peds.length;
+    for (let i = 0; i < peds.length; i++) _gunpointOne(peds[i], dt, px, pz, fx, fz, B, P);
   }
   // ease a ped out of a gunpoint pose once you stop aiming at it (after a grace
   // window), letting it return to whatever it was doing.
@@ -5351,12 +5662,32 @@
       if (ped.state === "surrender") ped.state = "walk";
     }
   }
+  // Drop every held pose. This is the branch the sweep takes whenever you are
+  // NOT holding a gun — i.e. most frames of most sessions — so walking the whole
+  // crowd here cost more over a session than the aimed path ever did. The only
+  // bodies it can act on are the ones holding a pose, and that is the list.
   function _clearGunpointPoses() {
+    if (_scanOn) {
+      _audit.listRoutedCalls++;
+      for (let i = 0; i < _coverList.length; i++) {
+        const ped = _coverList[i];
+        ped._inCoverList = false;
+        if (ped && ped._covered) { ped._coverGrace = 0; _relaxGunpoint(ped, 999); }
+      }
+      _coverList.length = 0;      // 999 forces the release, so nothing stays covered
+      return;
+    }
+    _audit.linearFallbackCalls++;
     const peds = CBZ.cityPeds;
+    _audit.linearVisited += peds.length;
     for (let i = 0; i < peds.length; i++) {
       const ped = peds[i];
       if (ped && ped._covered) { ped._coverGrace = 0; _relaxGunpoint(ped, 999); }
     }
+    // keep the bookkeeping honest on the legacy path too, so flipping the flag
+    // back ON never inherits a list full of bodies that let go long ago.
+    for (let i = 0; i < _coverList.length; i++) _coverList[i]._inCoverList = false;
+    _coverList.length = 0;
   }
 
   // ---- movement / engagement ----
@@ -5463,6 +5794,13 @@
     // a jogger keeps a brisk clip on its normal walk (derived from the role, so it
     // costs nothing to clean up — never persisted onto baseSpeed).
     if (spd > 0 && (st === "walk" || st === "wander") && ped._role === "jogger") spd *= 1.5;
+    // SOMEBODY CALLED YOU AND YOU ARE ACROSS THE STREET. city/boarding.js sets
+    // this while a body is walking to a vehicle door (or to a dropped bag) far
+    // enough away that a stroll would be absurd. It is a MULTIPLIER on the
+    // shared mover, not a second one: the steering, the vault probe, the
+    // depenetration and animChar's own run layer all still run, which is the
+    // whole reason this is a flag and not a bespoke locomotion path.
+    if (ped._boardRun && spd > 0) spd = Math.max(spd, ped.baseSpeed * 1.9);
 
     // ---- engagement ---------------------------------------------------------
     // WHY THIS LIVES IN move() AND NOT think(): think() is time-sliced (stride 4
@@ -5676,8 +6014,18 @@
         ped._stuck = (ped._stuck || 0) + dt;
         if (ped._stuck > 0.45) {
           ped._stuck = 0;
-          if (ped.state === "fight" || ped.state === "flee") {
-            // wall in the way of a chase/flee — sidestep to slip around it
+          /* A BODY ON AN ERRAND MAY ABANDON ITS GOAL. A BODY ON AN ORDER MAY NOT.
+             `pickRoutineGoal` replaces `ped.target` with a random shop or
+             sidewalk point, and it fired every 0.45 s for anything grinding on
+             a kerb — including a companion walking to a car door, whose goal
+             city/boarding.js then rewrote the next frame. The two writers
+             fought at 30 Hz and the body crawled at a third of its speed while
+             both of them believed they were steering. The fix is the one the
+             chase/flee branch already uses: SIDESTEP and keep the goal. You
+             don't forget where you were going because you clipped a bollard. */
+          const held = !!(CBZ.boardingHolds && CBZ.boardingHolds(ped));
+          if (ped.state === "fight" || ped.state === "flee" || held) {
+            // wall in the way of a chase/flee/order — sidestep to slip around it
             const a = ped.group.rotation.y + (rng() < 0.5 ? 1.5 : -1.5);
             ped.target.set(ped.pos.x + Math.sin(a) * 6, 0, ped.pos.z + Math.cos(a) * 6);
           } else { ped.path = null; pickRoutineGoal(ped); }   // abandon the blocked goal, pick a reachable one
@@ -5711,13 +6059,19 @@
     frame++;
     // advance the cheap internal day clock (loops 0..24); drives loose schedules
     _dayClock = (_dayClock + (dt * 24 / DAY_LEN)) % 24;
+    // SCAN INDEX first (see the block at the top of the file). It has to lead the
+    // frame because gunpointSweep is the first thing that asks it a question, and
+    // nothing has moved yet at this point — so the index holds the same positions
+    // the sweep's old whole-crowd walk read, and its answers are not stale by so
+    // much as a millimetre. The later, mid-loop consumers (group/mob, gang-fear,
+    // nearestActor) carry SCAN_MARGIN for the bodies that move under them.
+    rebuildPedGrid();
     // GUNPOINT: raise hands across the near crowd the moment you aim a gun at them
     // (every frame, so it's instant + covers everyone, not just one per think pass).
     gunpointSweep(dt);
     panicDecay(dt);            // the contagion field forgets (cityScare)
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
-    rebuildPedGrid();
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       dt = dtFrame;              // a prior ped's compensated tick must not leak
@@ -5759,6 +6113,13 @@
       if (p.dead) {
         if (p.tag) p.tag.visible = false;
         p.deadT += dt;
+        // SELF-HEALING corpse list. rollDeadLoot is the one place a body becomes
+        // lootable, but `.dead` is a plain flag other modules set directly and
+        // crowd.js recycles a pooled rig by clearing dead/culled without touching
+        // deadLoot. This costs a couple of loads per BODY (not per ped) and makes
+        // the list answer for every one of those paths within a frame, so the
+        // index can never be a way to lose a haul the linear scan would have found.
+        if (p.deadLoot && !p.deadLoot.looted && !p.culled && !p._inCorpseList) _corpseAdd(p);
         // A CORPSE IS DRAWN LIKE ANY OTHER BODY. The dead branch used to skip
         // the render LOD entirely, so a body that died on screen kept drawing
         // at any range forever — harmless when it was deleted after 75 s, and
@@ -5778,7 +6139,12 @@
         // morgue.js and this is the exact pair of timers it always was.
         if (!CBZ.corpseMayReap && p.deadT > 4) p.needsPickup = true;
         const mayCull = CBZ.corpseMayReap ? CBZ.corpseMayReap(p) : (p.collected || p.deadT > 75);
-        if (mayCull && !p.culled) { p.culled = true; if (p.group.parent) p.group.parent.remove(p.group); }
+        // A culled body was already invisible to cityNearestCorpse (`p.culled`);
+        // dropping it here just keeps the corpse list bounded by the bodies that
+        // are actually still lootable. crowd.js only ever clears `culled` while
+        // it also clears `dead`, and that body re-enters through rollDeadLoot the
+        // next time it dies — so this can never hide a lootable corpse.
+        if (mayCull && !p.culled) { p.culled = true; if (p.group.parent) p.group.parent.remove(p.group); _corpseDrop(p); }
         continue;
       }
       // A reusable placement owns actors seated on a moving parent (currently
@@ -5811,6 +6177,27 @@
         const hx = p.pos.x - camx, hz = p.pos.z - camz, hd2 = hx * hx + hz * hz;
         p.group.visible = !p._spawnHidden && hd2 < VIS_D2;
         if (hd2 < ANIM_D2) animChar(p.char, p.speed || 0, dt);
+        continue;
+      }
+      /* A BODY GOING THROUGH A DOOR IS OWNED BY THE DOOR (city/boarding.js).
+         Same contract as _bumHunt above and dogs.js's FSM: while another
+         system holds the transform, the ordinary wander must not fight it for
+         it. That file drives the pose AND calls animChar itself off the
+         distance the body actually covered, so we do neither here — only the
+         render LOD, because a companion you cannot SEE climbing into your car
+         is the whole feature missing.
+
+         WHY THIS EXISTS AND `inCar` DOES NOT DO IT. The first cut of the arc
+         set `p.inCar` for these beats, reasoning that it is already the "skip
+         this body" latch. It is not: `inCar` means RIDING IN THAT CAR, and
+         vehicles.js acts on it — it snapped the walker straight to the car's
+         origin, a measured 5.84 m in one tick, which is precisely the glitch
+         the boarding arcs were written to delete. A latch that says "somebody
+         else is moving this" has to be a different word from one that says
+         "this person is in a car". */
+      if (p._boardOwn) {
+        const bx = p.pos.x - camx, bz = p.pos.z - camz;
+        p.group.visible = !p._spawnHidden && bx * bx + bz * bz < VIS_D2;
         continue;
       }
       const dx = p.pos.x - camx, dz = p.pos.z - camz, d2 = dx * dx + dz * dz;

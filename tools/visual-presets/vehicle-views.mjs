@@ -119,8 +119,8 @@ const subjects = [
   {
     id: "companion-boarding",
     label: "09 · Companion boarding",
-    kind: "stub",
-    focus: "Reserved for a later wave. This plate is deliberately blank on BOTH sides so the slot exists in the storyboard before the feature does.",
+    kind: "boarding",
+    focus: "THE SLOT IS NO LONGER EMPTY. Two crew are recruited in the live world, walked away from the player, and then the player takes a car — the game's own cityEnterVehicle, nothing staged. The sim is stepped tick by tick and every follower's position is sampled EVERY tick, which turns the owner's complaint into two numbers that cannot be argued with: pathWalked (how far each body actually travelled on its legs) and maxJump (the largest single-tick displacement any of them made). A body that glitches into a car has maxJump of several metres and pathWalked near zero; a body that walked to a door has the reverse. Beside them: how many followers ended up inside the cabin volume, how many of those are still VISIBLE (the whole point of glass), and how many door leaves exist on the car at all.",
   },
   {
     id: "cargo-ramp",
@@ -1101,6 +1101,276 @@ async function stageVehicleViews(input) {
   }
 
   // ==========================================================================
+  //  SUBJECT: boarding — DID THEY WALK, OR DID THEY GLITCH IN?
+  //
+  //  Both builds run this identical stage. Nothing about it knows whether
+  //  boarding.js exists: it recruits with the game's own cityRecruit, boards
+  //  with the game's own cityEnterVehicle, and then MEASURES. The measurement
+  //  is per-tick, which is the only way to tell a walk from a warp — a summed
+  //  distance hides a teleport inside it, but a per-tick maximum cannot.
+  // ==========================================================================
+  if (kind === "boarding") {
+    const L = await bootLiveWorld();
+    liveMode();
+    if (L.failed) {
+      bigText = "WORLD NEVER BOOTED";
+      stateText = String(L.failed).toUpperCase();
+      paint();
+      return { ok: true, subject: S.id, staged: false, error: L.failed };
+    }
+    const notes = [];
+    const P = CBZ.player;
+    const px = (P && P.pos) ? P.pos.x : 0, pz = (P && P.pos) ? P.pos.z : 0;
+    const dismissHelp = function () {
+      try {
+        const all = document.querySelectorAll("div");
+        for (let i = 0; i < all.length; i++) {
+          const t = all[i].textContent || "";
+          // THE BOUND WAS THE BUG. The "Driving" card's full text — every key
+          // row plus the fuel note — runs past 400 characters, so the guard
+          // that was meant to avoid hiding a whole ancestor hid nothing at all
+          // and the card sat dead centre over the subject. Match on two of its
+          // own strings instead of trusting a length.
+          if (t.indexOf("Accelerate / brake") >= 0 && t.indexOf("Handbrake") >= 0 && t.length < 3000) {
+            all[i].style.display = "none";
+          }
+        }
+      } catch (e) {}
+    };
+
+    // ---- a car we are allowed to just get into -----------------------------
+    let car = null, bd = 1e9;
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || c.player || c.dead || !c.pos || !c.group) continue;
+      // A CAR WITH NO CABIN HAS NO SEATS AND NO DOORS — a bike or an open boat
+      // is not a subject for a boarding plate. carCabinInfo ships on BOTH
+      // builds, so this narrows the sample identically on each side.
+      if (typeof CBZ.carCabinInfo === "function" && !CBZ.carCabinInfo(c)) continue;
+      const dx = c.pos.x - px, dz = c.pos.z - pz, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; car = c; }
+    }
+    if (!car) {
+      bigText = "NO CAR IN THE WORLD";
+      stateText = "cityCars " + cars.length;
+      paint();
+      return { ok: true, subject: S.id, staged: false, error: "no car" };
+    }
+    const HEAD = 0;
+    car.owned = true; car.ai = false; car.road = null;
+    car.pos.x = px + 4.2; car.pos.z = pz;
+    car.heading = HEAD; car.v = 0; car.vx = 0; car.vz = 0; car.baseV = 0;
+    if (car.group) { car.group.position.set(car.pos.x, car.group.position.y || 0, car.pos.z); car.group.rotation.y = HEAD; }
+    liveTick(L, 10);
+
+    // ---- two followers, put DELIBERATELY far from the door ------------------
+    // The ask is "walk or run from WHERE THEY ARE", so the plate has to make
+    // that distance real. 11 m off the far flank is a walk you can see.
+    const crew = [];
+    const peds = CBZ.cityPeds || [];
+    const cands = [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || p.vendor || p.recruited || p.companion || p.controlled || !p.pos) continue;
+      const dx = p.pos.x - px, dz = p.pos.z - pz;
+      cands.push({ p: p, d2: dx * dx + dz * dz });
+    }
+    cands.sort(function (a, b) { return a.d2 - b.d2; });
+    for (let i = 0; i < cands.length && crew.length < 2; i++) {
+      const p = cands[i].p;
+      try { if (typeof CBZ.cityRecruit === "function") CBZ.cityRecruit(p); } catch (e) { notes.push("recruit " + msg(e)); }
+      if (p.companion || p.recruited) {
+        /* A STAGED POSITION MUST BE A STANDABLE ONE, AND "I RAN collide() ON IT"
+           IS NOT A PROOF OF THAT. The first three runs of this plate dropped
+           the crew on a fixed ±9.5 m offset and measured them covering 3.75 m
+           of a 9.5 m walk in eight seconds. The wanted-vs-actual pair added
+           above is what settled it: the mover INTENDED 3.16 m/s and the body
+           achieved 0.41 — and the DEPLOYED build, which has no boarding code
+           at all, showed the same 15% on the same spot. The bodies were inside
+           geometry, and the plate was photographing a wall.
+           So candidates are SCORED: `collide` is a depenetration, so how far it
+           shoves a point is a direct measure of how buried that point was, and
+           the least-shoved candidate wins. The player's own feet are the
+           guaranteed-clear fallback, because he is standing there. */
+        const base = crew.length ? 1 : -1;
+        let best = null, bestPush = 1e9;
+        for (let k = 0; k < 6; k++) {
+          const ang = Math.atan2(px - car.pos.x, pz - car.pos.z) + base * (0.35 + k * 0.42);
+          const cx = px + Math.sin(ang) * 6.5, cz = pz + Math.cos(ang) * 6.5;
+          const probe = { x: cx, y: 0, z: cz };
+          try { if (CBZ.collide) CBZ.collide(probe, 0.5, 0, 1.7); } catch (e) {}
+          const push = Math.hypot(probe.x - cx, probe.z - cz);
+          if (push < bestPush) { bestPush = push; best = { x: probe.x, z: probe.z }; }
+          if (push < 0.02) break;                       // genuinely clear — take it
+        }
+        if (!best || bestPush > 0.45) { best = { x: px + base * 1.6, z: pz - 1.2 }; notes.push("fell back to the player's feet"); }
+        p.pos.set(best.x, 0, best.z);
+        if (p.group) p.group.position.set(p.pos.x, 0, p.pos.z);
+        if (p.target) p.target.set(p.pos.x, 0, p.pos.z);
+        p.path = null; p.finalGoal = null; p.pause = 0; p.state = "walk";
+        crew.push(p);
+      }
+    }
+    if (!crew.length) notes.push("no recruitable civilians in reach");
+    liveTick(L, 6);
+
+    // ---- the measurement rig: sample EVERY follower EVERY tick --------------
+    const track = crew.map(function (p) {
+      return { ped: p, lx: p.pos.x, lz: p.pos.z, path: 0, jump: 0, start: { x: p.pos.x, z: p.pos.z },
+               wanted: 0, ticks: 0, phases: {}, moving: 0 };
+    });
+    /* THE PLATE MEASURES ITS OWN SUBJECT'S DRIVETRAIN, not just the outcome.
+       peds.js writes `ped.speed` to the speed it INTENDED this frame and then
+       integrates the position separately, so wanted-vs-actual is a direct read
+       of whether the shared steering clamped the step (its blocked case cuts
+       the forward move to a quarter). Without this pair, a body that crawls
+       and a body that is standing still look identical in a summed distance,
+       and you end up guessing at which system is holding it. */
+    const sample = function () {
+      for (let i = 0; i < track.length; i++) {
+        const t = track[i], p = t.ped;
+        if (!p || !p.pos) continue;
+        // an attached body's `pos` is npclife's world mirror, which is exactly
+        // the number we want: where the body IS, whatever it is parented to.
+        const d = Math.hypot(p.pos.x - t.lx, p.pos.z - t.lz);
+        t.path += d;
+        // A NUMBER WITHOUT A PROVENANCE IS A RUMOUR. The first run to reach a
+        // seat also reported a 5.8 m single-tick jump while the file's own
+        // audit reported zero teleports, and the two cannot both be describing
+        // the same write. Recording the phase either side of the biggest jump
+        // is what tells you WHICH system moved the body.
+        if (d > t.jump) {
+          t.jump = d;
+          t.jumpAt = t.ticks;
+          t.jumpFrom = t.lastPhase || "?";
+          t.jumpTo = p._cbzArc ? ("arc:" + p._cbzArc.phase) : (p._cbzSeat ? "seated" : ("st:" + (p.state || "?")));
+          t.jumpAttached = !!p._npcAttached;
+        }
+        t.lx = p.pos.x; t.lz = p.pos.z;
+        t.ticks++;
+        t.wanted += (p.speed || 0);
+        if (d > 1e-4) t.moving++;
+        const ph = p._cbzArc ? ("arc:" + p._cbzArc.phase) : (p._cbzSeat ? "seated" : ("st:" + (p.state || "?")));
+        t.phases[ph] = (t.phases[ph] || 0) + 1;
+        t.lastPhase = ph;
+      }
+    };
+
+    // ---- take the car. The game's own verb, from beside the driver's door. --
+    if (P && P.pos) P.pos.set(car.pos.x - 2.4, P.pos.y, car.pos.z);
+    try { if (typeof CBZ.cityEnterVehicle === "function") CBZ.cityEnterVehicle(car); } catch (e) { notes.push("enter " + msg(e)); }
+    dismissHelp();
+    /* 12 s of sim, one tick at a time. THE BUDGET IS THE SUBJECT: a body ten
+       metres away walking to a door is supposed to take several seconds, and a
+       plate that only waits four is measuring its own impatience. Sampling
+       every tick (rather than stepping in bursts) is what makes maxJump mean
+       anything — a burst hides a warp inside it. */
+    let arcsLive = 0;
+    const hasAudit = (typeof CBZ.companionBoardAudit === "function");
+    for (let i = 0; i < 480; i++) {
+      liveTick(L, 1); sample();
+      // THE CARD APPEARS WHEN THE BOARDING COMMITS, AND ON THE LOCAL BUILD THAT
+      // IS ~1.5 s LATE — the player now walks to his own door first, so a
+      // single dismissal fired right after the call ran before the card
+      // existed. Sweep it periodically instead of guessing at one moment.
+      if ((i % 45) === 0) dismissHelp();
+      // the audit is a full scan of cityPeds + cityCars; polling it every tick
+      // is what pushed the DEPLOYED side past the stage budget, and a peak
+      // does not need 60 Hz to be a peak.
+      if (hasAudit && (i % 20) === 0) {
+        try { arcsLive = Math.max(arcsLive, CBZ.companionBoardAudit().arcsLive || 0); } catch (e) {}
+      }
+    }
+
+    // ---- what ended up where ----------------------------------------------
+    const ci = (typeof CBZ.carCabinInfo === "function") ? CBZ.carCabinInfo(car) : null;
+    const dimsCar = (car.group && car.group.userData && car.group.userData.vehicleDims) || null;
+    const vis = (car.group && car.group.userData && car.group.userData.carVisual) || car.group;
+    let inside = 0, visibleInside = 0, attached = 0;
+    const inv = new T.Matrix4();
+    if (vis) { vis.updateWorldMatrix(true, false); inv.copy(vis.matrixWorld).invert(); }
+    for (let i = 0; i < track.length; i++) {
+      const p = track[i].ped;
+      if (!p || !p.pos || !vis) continue;
+      const lp = new T.Vector3(p.pos.x, p.pos.y || 0, p.pos.z).applyMatrix4(inv);
+      const inBox = ci
+        ? (Math.abs(lp.x) <= (ci.w * 0.5 + 0.45) && lp.z <= ci.zFront + 0.5 && lp.z >= ci.zRear - 0.5)
+        : (Math.abs(lp.x) <= 1.4 && Math.abs(lp.z) <= 2.2);
+      if (inBox) {
+        inside++;
+        if (p.group && p.group.visible !== false) visibleInside++;
+      }
+      if (p._npcAttached) attached++;
+      track[i].endLocal = { x: round(lp.x, 2), z: round(lp.z, 2) };
+    }
+    // door hardware actually present on this car, counted off the scene graph
+    let leaves = 0;
+    if (vis) vis.traverse(function (o) { if (o.userData && o.userData._cbzDoorLeaf) leaves++; });
+    dismissHelp();
+    const audit = (typeof CBZ.companionBoardAudit === "function") ? CBZ.companionBoardAudit() : null;
+    const maxJump = track.reduce(function (m, t) { return Math.max(m, t.jump); }, 0);
+    const walked = track.reduce(function (m, t) { return m + t.path; }, 0);
+
+    // ---- frame it on the PASSENGER flank at window height -------------------
+    // The owner's second sentence is about seeing people through the glass, so
+    // the camera stands where a pedestrian stands: shoulder height, off the
+    // side of the car, looking at the greenhouse.
+    // STAND WHERE A PEDESTRIAN STANDS, AND FAR ENOUGH BACK TO SEE THE CAR.
+    // The first framing put the lens 5.4 m off a full-size van at fov 36 and
+    // photographed a wheel arch. Distance is derived from the vehicle's own
+    // published length so a coupe and a box van both fit the frame, and the
+    // azimuth looks along -X, which is the flank the shotgun and rear-right
+    // doors are on (the seats a companion actually takes).
+    const vlen = (dimsCar && dimsCar.length) || 4.6;
+    const aim = { x: car.pos.x, y: ci ? Math.max(0.95, ci.beltY + 0.10) : 1.15, z: car.pos.z };
+    const cam = applyLiveCamera(tripod(aim, 242, 2.35, Math.max(7.0, vlen * 1.75), 40));
+    ST.render();
+
+    stateText = (crew.length ? crew.length : 0) + " FOLLOWERS · " + inside + " ENDED INSIDE THE CABIN" +
+      " (" + visibleInside + " VISIBLE) · maxJump " + round(maxJump, 2) + " m/tick" +
+      " · walked " + round(walked, 1) + " m · " + leaves + " DOOR LEAVES";
+    // wanted-vs-actual: the drivetrain read. Equal = the mover ran free;
+    // actual well under wanted = the shared steering was clamping every step.
+    const dt60 = 1 / 60;
+    const wantAvg = track.length ? track.reduce(function (m, t) { return m + (t.ticks ? t.wanted / t.ticks : 0); }, 0) / track.length : 0;
+    const actAvg = track.length ? track.reduce(function (m, t) { return m + (t.ticks ? t.path / (t.ticks * dt60) : 0); }, 0) / track.length : 0;
+    const phaseText = track.map(function (t) {
+      const ks = Object.keys(t.phases).sort(function (a, b) { return t.phases[b] - t.phases[a]; });
+      return ks.slice(0, 3).map(function (k) { return k + "x" + t.phases[k]; }).join(",");
+    }).join(" | ");
+    detailText = "seats " + (CBZ.boarding && CBZ.boarding.seatsOf ? (CBZ.boarding.seatsOf(car) || []).length : "n/a") +
+      " · attached " + attached +
+      " · speed wanted " + round(wantAvg, 2) + " actual " + round(actAvg, 2) + " m/s" +
+      " · phases " + (phaseText || "-") +
+      " · ends " + (track.map(function (t) { return t.endLocal ? ("(" + t.endLocal.x + "," + t.endLocal.z + ")") : "-"; }).join(" ") || "-") +
+      (audit ? " · audit boarded " + audit.boarded + " arcs " + audit.arcsRun + " teleports " + audit.teleports
+             : " · NO BOARDING AUDIT ON THIS BUILD") +
+      (notes.length ? " · NOTE " + notes.join(" | ") : "");
+    paint();
+    return {
+      ok: true, subject: S.id, staged: true, notes: notes, camera: cam, features: feat,
+      audit: audit,
+      jumps: track.map(function (t) {
+        return { m: round(t.jump, 2), atTick: t.jumpAt || 0, from: t.jumpFrom || "-", to: t.jumpTo || "-", attached: !!t.jumpAttached };
+      }),
+      metrics: {
+        followers: crew.length,
+        endedInsideCabin: inside,
+        visibleInsideCabin: visibleInside,
+        maxJumpPerTick: round(maxJump, 3),
+        metresWalked: round(walked, 1),
+        arcsStillRunning: (typeof CBZ.companionBoardAudit === "function") ? (CBZ.companionBoardAudit().arcsLive | 0) : 0,
+        peakArcsLive: arcsLive,
+        speedWanted: round(wantAvg, 2),
+        speedActual: round(actAvg, 2),
+        doorLeaves: leaves,
+        seatedAttached: attached,
+      },
+    };
+  }
+
+  // ==========================================================================
   //  SUBJECT: dbtraffic — IS THE DRIVE-BY CAR IN TRAFFIC AT ALL
   // ==========================================================================
   if (kind === "dbtraffic") {
@@ -1785,7 +2055,10 @@ export default {
   // missing one leaves an honest plate instead of killing the run.
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG && typeof CBZ.cityBuildPlayerCarVisual === 'function'",
   urlParams: { seed: 90210 },
-  stageTimeoutMs: 480000,
+  // Raised from 480000 for the boarding plate: it steps 8 s of sim ONE TICK AT
+  // A TIME (a burst would hide a teleport inside it) on top of the world boot,
+  // and headless runs the sim ~60x slow.
+  stageTimeoutMs: 700000,
   defaultFocus: "Compare what is inside the glass: cabin furniture, an occupant body, and where the camera sits relative to it.",
   pairNote: "Same seed · same builder · same tripod · same viewport",
   method: "Every plate is built by the photographed build's own code — the car visual builder, the traffic spawner, the cockpit generator, the aircraft builder — inside this file's studio renderer. Tripods are resolved on the BEFORE side and copied verbatim to the AFTER side, so the source change is the only variable. The one exception is fp-car, where the camera IS the subject: that plate boots the real world with requestAnimationFrame frozen, advances only through CBZ.stepSim, probes for an in-car first person BEHAVIOURALLY (press the game's own [V], then every candidate verb the build exposes, judging each by whether the camera lands inside the cabin box), and falls back to the real chase rig at its published drive numbers.",
@@ -1817,6 +2090,18 @@ export default {
     pilotVisible: { label: "Pilot visible", better: "higher" },
     canopyVolumeMeshes: { label: "Meshes under the canopy", better: "higher" },
     airframeMeshes: { label: "Airframe meshes" },
+    // ---- companion boarding: the walk-vs-warp pair is the headline ----
+    followers: { label: "Followers with you" },
+    endedInsideCabin: { label: "Followers who ended up in the cabin", better: "higher" },
+    visibleInsideCabin: { label: "…and are VISIBLE through the glass", better: "higher" },
+    maxJumpPerTick: { label: "Largest single-tick jump", unit: "m", better: "lower" },
+    metresWalked: { label: "Distance actually walked", unit: "m", better: "higher" },
+    doorLeaves: { label: "Openable door leaves on the car", better: "higher" },
+    seatedAttached: { label: "Bodies held by a real seat anchor", better: "higher" },
+    peakArcsLive: { label: "Boarding arcs running at once", better: "higher" },
+    speedWanted: { label: "Speed the mover intended", unit: "m/s" },
+    speedActual: { label: "Speed the body achieved", unit: "m/s", better: "higher" },
+    arcsStillRunning: { label: "Arcs unfinished after 12 s", better: "lower" },
     camInCabin: { label: "Camera inside cabin box", better: "higher" },
     carFirstPerson: { label: "In-car first person found", better: "higher" },
     camHeightOverCar: { label: "Camera above the car", unit: "m", better: "lower" },

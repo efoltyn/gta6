@@ -146,10 +146,34 @@
   const TERRAIN_EASE = 9;          // 1/s exponential approach on ride height
   const TERRAIN_ATT_EASE = 6;      // 1/s on pitch/roll
   const TERRAIN_MAX_TILT = 0.55;   // rad — a car never stands on its nose
-  function groundY(x, z) {
+  /* `fromY` IS WHAT LETS A CAR DRIVE ONTO STEEL. Passed, this consults
+     CBZ.mpGroundAt — the SAME query the player's feet make (physics.js's
+     groundAt calls it right after its static-platform loop) — so a car and a
+     body agree about what the floor is on a trailer ramp, a boat deck, a lift,
+     or anything any future rig declares. It is militaryvehicles.js's floorY,
+     verbatim in shape, because that file already solved "even a tank can drive
+     into the back" and a second answer would be a second answer.
+     OMITTED, this is byte-identical to the terrain-only line it replaces, which
+     is what keeps CBZ.cityCarGroundY's two-argument contract intact for every
+     external caller and what keeps the cost off the ~240 probes a frame the
+     ambient fleet makes. Only the car somebody is STEERING passes it: an AI
+     lane-follower is never going to be driven up a ramp, and paying six rig
+     tests per corner per car per frame so it could would be the quiet cost this
+     repo keeps finding in itself.
+     fromY also gates it honestly — mpGroundAt only offers support within
+     STEP_UP of where you already are, so a car cannot levitate onto a deck it
+     never touched. It has to come at the ramp from the bottom. */
+  function groundY(x, z, fromY) {
     if (!TERRAIN_ON()) return 0;
     const y = +CBZ.floorAt(x, z);
-    return Number.isFinite(y) ? y : 0;
+    let b = Number.isFinite(y) ? y : 0;
+    if (fromY != null && CBZ.mpGroundAt) {
+      try {
+        const t = CBZ.mpGroundAt(x, z, fromY, b);
+        if (t > b && isFinite(t)) b = t;
+      } catch (e) {}
+    }
+    return b;
   }
   CBZ.cityCarGroundY = groundY;
   // Sample the four corners and fold them into ride height + terrain attitude.
@@ -162,13 +186,15 @@
     const half = Math.max(1, (d && d.length ? d.length : 4.2) * 0.45);
     const halfW = Math.max(0.6, (d && d.width ? d.width : 1.9) * 0.45);
     let gy, pitch = 0, roll = 0;
+    // the DRIVEN car — and only the driven car — asks about moving decks too
+    const fromY = car.player ? (car._terrY != null ? car._terrY : (car.pos.y || 0)) : null;
     if (near) {
       // right vector = (fz, -fx) with this file's (sin,cos) forward convention
       const rx = fz, rz = -fx;
-      const fL = groundY(car.pos.x + fx * half + rx * halfW, car.pos.z + fz * half + rz * halfW);
-      const fR = groundY(car.pos.x + fx * half - rx * halfW, car.pos.z + fz * half - rz * halfW);
-      const bL = groundY(car.pos.x - fx * half + rx * halfW, car.pos.z - fz * half + rz * halfW);
-      const bR = groundY(car.pos.x - fx * half - rx * halfW, car.pos.z - fz * half - rz * halfW);
+      const fL = groundY(car.pos.x + fx * half + rx * halfW, car.pos.z + fz * half + rz * halfW, fromY);
+      const fR = groundY(car.pos.x + fx * half - rx * halfW, car.pos.z + fz * half - rz * halfW, fromY);
+      const bL = groundY(car.pos.x - fx * half + rx * halfW, car.pos.z - fz * half + rz * halfW, fromY);
+      const bR = groundY(car.pos.x - fx * half - rx * halfW, car.pos.z - fz * half - rz * halfW, fromY);
       gy = (fL + fR + bL + bR) * 0.25;
       // nose-up is NEGATIVE rotation.x with this rig (see the airborne pitch,
       // which uses -vy), so climbing (front higher than back) pitches negative.
@@ -177,7 +203,7 @@
       if (pitch > TERRAIN_MAX_TILT) pitch = TERRAIN_MAX_TILT; else if (pitch < -TERRAIN_MAX_TILT) pitch = -TERRAIN_MAX_TILT;
       if (roll > TERRAIN_MAX_TILT) roll = TERRAIN_MAX_TILT; else if (roll < -TERRAIN_MAX_TILT) roll = -TERRAIN_MAX_TILT;
     } else {
-      gy = groundY(car.pos.x, car.pos.z);
+      gy = groundY(car.pos.x, car.pos.z, fromY);
     }
     // suspension damping. A car that has never been seated snaps to the ground
     // on its first frame (no drop-in from y=0 when it spawns on a hill).
@@ -569,13 +595,40 @@
        rather than by filling it). No cabin published → the single box, exactly
        as before, so the legacy box rig and every open frame are untouched. */
     const ci = root.userData && root.userData.cabinInfo;
+    const hs = root.userData && root.userData.holdSpec;
     const carve = ci && ci.dressed && ci.zFront != null && ci.zRear != null &&
       (!CBZ.CONFIG || CBZ.CONFIG.CAR_CABIN_V2 !== false);
-    if (!carve) { block(sd, 0); return; }
     const half = sd / 2;
+    /* THE CABIN-OFF PATH HAD TO LEARN THE SAME LESSON. With CAR_CABIN_V2 off
+       there is no published cabin to carve against, so the shell was ONE box
+       spanning the whole car — which on a freight body is a dark slab filling
+       the load space, and the two flags are independently revertible, so that
+       combination is a real build somebody can ask for. A hold publishes its
+       own forward bulkhead, so the block simply stops there: the nose still
+       gets its hole-proofing and the room stays a room under either flag. */
+    const holdF = hs && hs.floor ? Math.min(half, +hs.floor.z + Math.abs(+hs.floor.d) / 2) : null;
+    if (!carve) {
+      if (holdF == null) block(sd, 0);
+      else block(half - holdF, (half + holdF) / 2);
+      return;
+    }
     const zF = Math.min(half, Math.max(-half, ci.zFront));
     const zR = Math.min(half, Math.max(-half, ci.zRear));
     block(half - zF, (half + zF) / 2);        // nose block, ahead of the windscreen
+    /* A WALK-IN HOLD IS A ROOM, AND THE TAIL BLOCK WOULD FILL IT.
+       Exactly the fault the paragraph above describes, one body back: on a van
+       the published cabin covers only the CAB, so `zRear` sits at the cargo
+       box's front face and the tail block is a solid dark slab spanning the
+       whole load space from 0.14 m to 0.55·H. That was free when the box was a
+       painted slab. It is not free now — it would bury the deck, the duffels
+       and anybody standing on them, and the first plate of this feature would
+       have photographed a black wall.
+       Skipping it costs nothing the block was there to buy: its ONLY job is to
+       stop a low camera seeing daylight through a hairline panel seam, and a
+       hold is five real panels with real thickness, which seals the tail
+       properly rather than by filling it. Same argument, same shape, as the
+       cabin carve itself. */
+    if (hs) return;
     block(zR + half, (zR - half) / 2);        // tail block, behind the backlight
   }
 
@@ -1473,6 +1526,13 @@
     else if (bk === "suv") { mass = 1.36; armor = 0.16; repair = 1.12; }
     else if (bk === "pickup") { mass = 1.44; armor = 0.2; repair = 0.98; }
     else if (bk === "van") { mass = 1.5; armor = 0.18; repair = 0.94; }
+    // AN ARTIC OUTWEIGHS EVERYTHING ELSE ON THE ROAD AND THE DEPENETRATION
+    // SOLVER IS WHERE THAT HAS TO BE TRUE. resolveCars weights separation by
+    // `mass`, so this one number is the difference between a semi shouldering a
+    // hatchback aside and the pair of them splitting the impulse like two
+    // sedans. 4.2 is the real ratio of a loaded tractor-trailer to a saloon,
+    // not a feel knob.
+    else if (bk === "semi") { mass = 4.2; armor = 0.34; repair = 0.72; }
     else if (bk === "hatch") { mass = 0.96; armor = 0.04; repair = 0.9; }
     if (s > 1.35) { mass *= 0.94; repair *= 1.25; }     // exotics are lighter and expensive to fix
     return { mass, armor, repair };
@@ -1860,6 +1920,437 @@
     if (CBZ.cityCars.indexOf(c) < 0) CBZ.cityCars.push(c);
     return c;
   };
+
+  /* ============================================================
+     FREIGHT BODIES — a cargo box that is a ROOM
+     ============================================================
+     OWNER: "a semi truck with a cargo back that you can press on ipad or
+     interact with E on desktop to open the back of the truck — and like
+     elevators it is a space that can be filled by things. say you rob a bank:
+     you bring a van and open the back of it... and drive to your warehouse."
+
+     THIS FILE WRITES NO ROOM, NO DOOR, NO VERB AND NO LATCH. All of that is
+     city/vehicle_hold.js, whose adoption contract is one call and which
+     registers the E verb and the touch pill ONCE for every hold that will ever
+     exist. What lives here is the three things only vehicles.js can know:
+
+       (1) WHEN a car record exists to hang a hold on          — adoptHold
+       (2) WHICH cars are eligible to be strapped down inside  — cargoCensus
+       (3) WHERE the trucks are                                — the fleet placer
+
+     ADOPTION IS LAZY, AND THAT IS A BUDGET, NOT AN OPTIMISATION. Every van in
+     the city publishes a holdSpec, and a city holds dozens of vans. A hold is a
+     moving-platform rig with decks and walls plus a 0.3 s latch sweep over the
+     whole car list, and thirty of those idling for vans nobody is near is
+     exactly the quiet cost this repo keeps finding in itself. So a hold is
+     minted inside HOLD_NEAR and given back past HOLD_FAR — and NOTHING VISIBLE
+     CHANGES either way, because a hold draws nothing: the box, the doors and
+     the deck are art that is always there. That is what makes this budget free
+     where the occupancy rig's (OCC_RIG_CARS) had to be careful.
+
+     A LOADED HOLD IS NEVER RETIRED. retireHold refuses while the ramp is open
+     or anything at all is aboard, so the van you filled with bank money keeps
+     its room for as long as the money is in it, however far you drive. */
+  const HOLD_NEAR2 = 90 * 90, HOLD_FAR2 = 200 * 200, HOLD_LIVE_MAX = 10;
+  let holdAdopted = 0, holdRetired = 0, holdWatched = false, holdSweepT = 0;
+  let holdDoorless = 0;
+
+  /* WHERE THE SPEC ACTUALLY LIVES, and it is TWO places for one honest reason.
+     A registered custom group (the semi) IS its own visual — cityRegisterVehicle
+     sets `carVisual = grp` — so the spec is on the record's group. A catalogue
+     car (the van) is built by buildCar(), which wraps playercars.js's template
+     clone in a FRESH group and copies only the four fields it knows about; the
+     holdSpec stays on the clone. Both frames are identical (the visual is added
+     at the origin with no rotation and no scale), so the LOCAL METRES the
+     contract asks for mean the same thing either way — but the lookup has to
+     know about the wrapper or every van in the city is invisible to this wave.
+     MEASURED: without the second clause, cityFreightAudit read `vans: 0` in a
+     world holding 264 cars. */
+  function holdSpecOf(c) {
+    const ud = c && c.group && c.group.userData;
+    if (!ud) return null;
+    if (ud.holdSpec) return ud.holdSpec;
+    const v = ud.carVisual;
+    return (v && v !== c.group && v.userData && v.userData.holdSpec) || null;
+  }
+
+  /* THE ONE ADOPTION SITE. Everything that can ever carry freight goes through
+     here — a van built by makeCar off the catalog, a semi registered by the
+     fleet placer, anything a future builder publishes a holdSpec on. */
+  function adoptHold(c) {
+    if (!c || !c.group || !c.group.parent || c.dead) return null;
+    if (c.hold && !c.hold.inert) return c.hold;
+    if (!CBZ.vehicleHold) return null;
+    const spec = holdSpecOf(c);
+    if (!spec || !spec.floor) return null;
+    /* RE-RESOLVE THE DOOR OFF THIS INSTANCE. playercars.js caches ONE template
+       per silhouette and hands out clone(true)s that share userData BY
+       REFERENCE (its own comment says so, and it is why the rotor/prop handles
+       are re-resolved by name). A live Object3D stashed in a holdSpec would
+       therefore be the TEMPLATE's door on every van in the city — one node,
+       forty vans, and opening any of them would animate a mesh nobody can see.
+       So the spec carries a NAME and the node is looked up here, every time. */
+    let ramp = null;
+    const R = spec.ramp;
+    if (R && R.nodeName) {
+      const node = c.group.getObjectByName(R.nodeName);
+      // No node = the flag that draws it is off, or a merge ate it. A hold with
+      // a declared-but-missing door would be a permanently sealed room, which
+      // is worse than no hold: refuse, and let holdAudit count the absence.
+      if (!node) { holdDoorless++; return null; }
+      ramp = {
+        node: node, w: R.w, len: R.len, x: R.x,
+        sillZ: R.sillZ, sillTop: R.sillTop,
+        closedRx: R.closedRx, openRx: R.openRx, dir: R.dir, seconds: R.seconds,
+      };
+    }
+    const h = CBZ.vehicleHold(c, {
+      id: spec.id, label: spec.label, floor: spec.floor,
+      roof: spec.roof, walls: spec.walls, ramp: ramp, scale: spec.scale,
+    });
+    // vehicleHold stamps `c.hold` itself for a record host — never mirror it.
+    if (!h || h.inert) return null;
+    holdAdopted++;
+    return h;
+  }
+
+  /* HOW MANY GROUND HOLDS ARE LIVE — COUNTED, NEVER TRACKED. The first draft
+     kept a `holdLive` counter that adoptHold incremented and retireHold
+     decremented, and it drifted within one probe run: vehicle_hold.js disposes
+     a hold ITSELF when its host leaves the scene (an arena rebuild), which no
+     decrement here can see. Measured: the counter read 5 against 4 real holds,
+     and since the budget gate reads it, a long session would have quietly
+     stopped minting holds altogether.
+     That is the parallel-bookkeeping trap this repo's own doctrine names, and
+     the answer is the one factions.js uses: do not mirror state somebody else
+     owns — ask. It costs one pass over the car list per 0.4 s sweep, once, not
+     once per car. */
+  function liveGroundHolds() {
+    let n = 0;
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (c && c.hold && !c.hold.inert && holdSpecOf(c)) n++;
+    }
+    return n;
+  }
+  CBZ.cityVehicleHoldAdopt = adoptHold;
+
+  function retireHold(c) {
+    const h = c && c.hold;
+    if (!h || h.inert || !h.dispose) return false;
+    if (!h.closed) return false;                       // a door left open stays open
+    const o = h.occupants();
+    if (o.vehicles || o.cargo || o.actors || o.player) return false;
+    h.dispose();
+    c.hold = null;
+    if (c.group && c.group.userData) c.group.userData.cargoHold = null;
+    holdRetired++;
+    return true;
+  }
+
+  /* WHAT MAY BE CHAINED DOWN IN A TRAILER. The census contract is
+     CBZ.vehicleHoldWatch's (the CBZ.heliFleet pattern): a fleet owner pushes
+     ONE function and every hold in the world can strap its machines down.
+     Four refusals, and each is a decision:
+       · dead / husk — vehicle_hold's own sweep filters `rec.destroyed`, which
+         nothing in this file has ever set. A city car says `dead` (+ `_husk`
+         for a standing wreck), so without this line a burnt-out hulk would
+         chain itself into any trailer that parked over it.
+       · player / ai / npcDriver — a machine somebody is driving owns its own
+         pose, and an AMBIENT car is somebody driving. Latching a traffic car
+         that happened to stop inside a trailer would put the hold and the AI
+         lane-follower in a fight over the same transform every frame. What you
+         CAN load is a car nobody is driving: parked, abandoned, or the one you
+         drove up the ramp yourself and stepped out of.
+       · a freight body — a hold inside a hold is a moving platform anchored to
+         a group whose own pose is written by another moving platform. That may
+         well work; it is not something this wave measured, and shipping an
+         untested nesting is how a bug with no owner starts. */
+  const _census = [];
+  function cargoCensus() {
+    _census.length = 0;
+    const cars = CBZ.cityCars;
+    if (!cars) return _census;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || c.dead || c._husk || c.player || c.ai || c.npcDriver) continue;
+      if (!c.group || !c.group.parent) continue;
+      if (holdSpecOf(c)) continue;
+      _census.push(c);
+    }
+    return _census;
+  }
+
+  CBZ.onUpdate(14.64, function (dt) {
+    if (g.mode !== "city" || !CBZ.vehicleHold) return;
+    if (!holdWatched && CBZ.vehicleHoldWatch) { CBZ.vehicleHoldWatch(cargoCensus); holdWatched = true; }
+    holdSweepT -= dt || 0;
+    if (holdSweepT > 0) return;
+    holdSweepT = 0.4;
+    const cm = CBZ.camera && CBZ.camera.position; if (!cm) return;
+    const cars = CBZ.cityCars; if (!cars) return;
+    let live = liveGroundHolds();
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !c.group || !holdSpecOf(c)) continue;
+      const dx = c.pos.x - cm.x, dz = c.pos.z - cm.z, d2 = dx * dx + dz * dz;
+      if (!c.hold || c.hold.inert) {
+        if (d2 < HOLD_NEAR2 && live < HOLD_LIVE_MAX && adoptHold(c)) live++;
+      } else if (d2 > HOLD_FAR2) {
+        if (retireHold(c)) live--;
+      }
+    }
+  });
+
+  /* ============================================================
+     THE FLEET — where the trucks are
+     ============================================================
+     TWO PLACES, AND BOTH ARE PLACES THE WORLD ALREADY BUILT. This wave spawns
+     no scenery and invents no coordinate: the Freeport's own published
+     warehouse record says where its loading dock is and WHICH WAY IS OUT
+     (govcomplex.js authored `out` for exactly this — its comment names "a
+     parked truck, a spawn"), and the city's own lot grid says which blocks are
+     industrial. If neither exists in a build, no truck exists in it, and that
+     is the honest answer rather than a truck in a field.
+
+     DETERMINISM: every choice is a position hash (carHash → CBZ.hash01), never
+     the shared rng() stream, which is the same rule cityAddParkedCar states —
+     an order-fragile draw here would move every car in the city. */
+  const SEMI_MODEL = { name: "Bison Longhauler", value: 96000, rarity: 0.30, body: "semi", s: 1 };
+  let fleetRoot = null, fleetDockDone = false, fleetWait = 0, fleetCount = 0;
+
+  function placeSemi(x, z, heading, tag) {
+    const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    if (!root || !CBZ.cityBuildPlayerCarVisual) return null;
+    if (CBZ.cityWaterAt) { try { if (CBZ.cityWaterAt(x, z)) return null; } catch (e) {} }
+    let v = null;
+    // SEMI_TRUCK_V1 off → makeProcedural answers null and the yard stays empty.
+    try { v = CBZ.cityBuildPlayerCarVisual("semi", null, null, SEMI_MODEL); } catch (e) { v = null; }
+    if (!v) return null;
+    /* THE SAME HOLE-PROOFING AND THE SAME MERGE buildCar() gives every other
+       car, applied by hand because a registered custom group does not pass
+       through it. This is not optional book-keeping — an unmerged semi is
+       ~130 source meshes (five shell panels, twenty-eight corrugation ribs,
+       twenty wheel parts, the whole cab), and the city is draw-call bound
+       (core/profile.js). Merged, it is a handful of buckets.
+       WHAT IS SPARED: the tyres, tagged playerWheel so the drive loop can spin
+       them — and the tailgate, which needs no sparing at all because it is a
+       GROUP and mergeStaticCarParts only ever bakes direct MESH children. That
+       is the same property playercars.js's wheel-arch comment relies on, and it
+       is exactly why the door was authored as a group. */
+    const dims = v.userData.vehicleDims || { width: 2.5, length: 14.5, height: 3.31, wheelbase: 8.6 };
+    const keep = new Set();
+    v.traverse(function (o) { if (o.userData && o.userData.playerWheel) keep.add(o); });
+    try {
+      sealSeams(v, dims);
+      addInteriorShell(v, dims, null);
+      if (mergeStaticCarParts) mergeStaticCarParts(v, keep);
+    } catch (e) { /* a lightweight test renderer without geometry baking */ }
+    v.position.set(x, 0, z);
+    v.rotation.y = heading;
+    root.add(v);
+    const c = CBZ.cityRegisterVehicle(v, {
+      body: "semi", style: "semi", heading: heading, persist: true,
+      color: 0xd8dde3, model: SEMI_MODEL, dims: dims,
+    });
+    if (!c) return null;
+    c.ai = false; c.v = 0; c.baseV = 0; c.stolen = false;
+    c._propParked = true; c._arenaRoot = root; c._cargoFleet = tag || "yard";
+    parkSeat(c);                       // sit it on the real ground, not at y = 0
+    fleetCount++;
+    return c;
+  }
+
+  function freeportYard() {
+    const L = CBZ.govComplexes;
+    if (!L || !L.length) return null;
+    for (let i = 0; i < L.length; i++) {
+      const s = L[i];
+      if (s && s.id === "freeport" && s.warehouse && s.warehouse.dock && s.warehouse.out) return s.warehouse;
+    }
+    return null;
+  }
+
+  /* BACKED ONTO THE DOCK. The rig's REAR is what has to face the shed, so its
+     nose points along `out` — and forward at heading h is (sin h, cos h) in
+     this engine, which makes the heading atan2(out.x, out.z) and nothing else.
+     Two of the shed's three roller doors get a trailer (they are 9.4 m apart,
+     govcomplex.js's own pitch); the middle one is left clear because a dock you
+     cannot walk up to is a dock you cannot unload at. */
+  function spawnDockFleet() {
+    const W = freeportYard();
+    if (!W) return false;
+    const ox = W.out.x, oz = W.out.z;
+    const h = Math.atan2(ox, oz);
+    const px = oz, pz = -ox;                       // the dock face's own lateral axis
+    let n = 0;
+    for (const k of [-1, 1]) {
+      // origin = dock point + out·(half the rig) so the trailer's tail sits at
+      // the lip and the tailgate lands ON the deck when it drops.
+      const x = W.dock.x + ox * 7.25 + px * (k * 9.4);
+      const z = W.dock.z + oz * 7.25 + pz * (k * 9.4);
+      if (!spotClear(x, z, h, 7.25, 1.6)) continue;
+      if (placeSemi(x, z, h, "freeport-dock")) n++;
+    }
+    // and the van the owner actually named, on the apron beside them, through
+    // the SHARED parked-car placer rather than a second one of our own.
+    if (CBZ.cityAddParkedCar) {
+      try {
+        CBZ.cityAddParkedCar(W.apron.x - px * 6, W.apron.z - pz * 6, h, { modelName: "Bison Hauler" });
+      } catch (e) {}
+    }
+    return n > 0;
+  }
+
+  /* IS THERE ROOM FOR SIXTEEN METRES OF TRUCK HERE? Asked of CBZ.collide — the
+     SAME static-collider query collideVehicle makes for a driven car — at three
+     points down the rig's own length. collide() resolves in place, so a probe
+     that came back moved is a probe that was inside something. This is what
+     lets a placement be authored as an intention ("a row along the yard") and
+     still be safe in a world that was laid out by somebody else. */
+  const _clearProbe = new THREE.Vector3();
+  function spotClear(x, z, heading, halfLen, rad) {
+    if (CBZ.cityWaterAt) { try { if (CBZ.cityWaterAt(x, z)) return false; } catch (e) {} }
+    /* Nothing already PARKED here — a fixture on top of a fixture is a bug you
+       only see from one angle. Deliberately only FIXTURES (`_propParked` /
+       `_cargoFleet`), never ambient traffic: an AI car's position depends on
+       how many frames have elapsed when this pass happens to run, so testing
+       against one would make placement depend on the clock and the same seed
+       would lay the yard out differently on every load. A parked fixture is
+       placed by a position hash and is in the same place forever. */
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !c.pos || !(c._propParked || c._cargoFleet)) continue;
+      const dx = c.pos.x - x, dz = c.pos.z - z;
+      if (dx * dx + dz * dz < 12 * 12) return false;
+    }
+    if (!CBZ.collide) return true;
+    const fx = Math.sin(heading), fz = Math.cos(heading);
+    for (let t = -1; t <= 1; t++) {
+      const ox = x + fx * halfLen * t, oz = z + fz * halfLen * t;
+      _clearProbe.set(ox, 1.2, oz);
+      try { CBZ.collide(_clearProbe, rad); } catch (e) { return true; }
+      if (Math.abs(_clearProbe.x - ox) > 0.03 || Math.abs(_clearProbe.z - oz) > 0.03) return false;
+    }
+    return true;
+  }
+
+  /* THE YARD ROW — tractor units standing in the Freeport's own hardstanding.
+     WHY NOT INDUSTRIAL LOTS, which is where a first draft put them: because
+     there are none free. MEASURED on seed 90210 — 318 lots, of which 8 resolve
+     to the industrial districts (7 and 8), and every one of the 8 carries a
+     building. `lot.district` is an INDEX into arena.districts, not the string
+     the first draft compared against, so that scan matched nothing and would
+     have matched nothing even spelled correctly. Shipping the scan anyway
+     because it "might find something on another seed" is exactly the dead
+     branch doctrine bans.
+     So the trucks go where the world actually built a place for trucks: the
+     Freeport yard is 178 × 96 m of asphalt inside a fence with a shed, a dock
+     and a racking hall, and govcomplex.js published its origin and its OUT
+     direction. Every spot is still probed against the real colliders, so a
+     future change to that yard's furniture cannot silently park a semi inside
+     a container stack. */
+  function spawnYardFleet() {
+    const W = freeportYard();
+    if (!W) return 0;
+    const ox = W.out.x, oz = W.out.z, px = oz, pz = -ox;
+    const h = Math.atan2(ox, oz);
+    let n = 0;
+    // A ROW, nose-out toward the gate, well clear of the dock lane (which runs
+    // to +18.5 m out from the origin) and on the far side of the yard from it.
+    for (let k = 0; k < 3; k++) {
+      const lat = -46 + k * 15;
+      const x = W.origin.x + ox * 34 + px * lat;
+      const z = W.origin.z + oz * 34 + pz * lat;
+      // hashed, so a seed that wants a busier or emptier yard gets one and it
+      // is the SAME yard every time you load it
+      if (carHash(x, z, 613) < 0.30) continue;
+      if (!spotClear(x, z, h, 7.25, 1.6)) continue;
+      if (placeSemi(x, z, h, "freeport-yard")) n++;
+    }
+    return n;
+  }
+
+  /* ============================================================
+     CBZ.cityFreightAudit() — THE RATCHET for the ground half
+     ============================================================
+     holdAudit() owns the ROOM's numbers; this owns the FLEET's, because they
+     are different facts with different authors and an audit that answered both
+     could not be pinned by either.
+
+     `doorless` IS THE NUMBER THAT MATTERS and it is pinned at 0: it counts
+     freight bodies whose holdSpec named a hinged door node that the built group
+     does not contain. That is a spec and its art disagreeing — a sealed room —
+     and it is the one failure this design can produce silently, because the
+     hold simply never appears and nothing looks broken.
+
+     `overBudget` is the second invariant: live ground holds may never exceed
+     HOLD_LIVE_MAX, or the lazy budget above is not a budget. Everything else is
+     evidence printed beside them, so a "fix" that stops declaring freight
+     bodies (bodies -> 0) cannot pass either number. */
+  CBZ.cityFreightAudit = function () {
+    let bodies = 0, semis = 0, vans = 0, withHold = 0, open = 0, loads = 0, fleet = 0;
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !holdSpecOf(c)) continue;
+      bodies++;
+      if (c._bk === "semi") semis++; else vans++;
+      if (c._cargoFleet) fleet++;
+      const h = c.hold;
+      if (h && !h.inert) {
+        withHold++;
+        if (h.open) open++;
+        const o = h.occupants();
+        loads += o.vehicles + o.cargo + o.actors;
+      }
+    }
+    return {
+      bodies: bodies, semis: semis, vans: vans, fleetPlaced: fleet,
+      holds: withHold, rampsOpen: open, loads: loads,
+      adopted: holdAdopted, retired: holdRetired,
+      budget: HOLD_LIVE_MAX,
+      overBudget: Math.max(0, withHold - HOLD_LIVE_MAX),
+      doorless: holdDoorless,
+    };
+  };
+
+  // ONE ENTRY POINT. The dock row goes down FIRST so the yard row's clearance
+  // probe can see it — order is the only coupling between the two.
+  function spawnCargoFleet() {
+    if (!freeportYard()) return 0;
+    const before = fleetCount;
+    spawnDockFleet();
+    spawnYardFleet();
+    return fleetCount - before;
+  }
+  CBZ.citySpawnCargoFleet = spawnCargoFleet;
+
+  /* ONE SHOT PER ARENA, AND IT RETRIES. govcomplex.js publishes the Freeport
+     during world build, but a landmass rebuild re-runs both passes and the
+     order between them is not ours to assume — asking once and giving up would
+     make the fleet's existence depend on a race. Twelve seconds of sim, then we
+     stop asking: a build with no Freeport is a legitimate build, and it gets no
+     trucks rather than trucks in a field. */
+  CBZ.onUpdate(55.2, function (dt) {
+    if (g.mode !== "city") return;
+    const A = CBZ.city && CBZ.city.arena, root = A && A.root;
+    if (!root || !CBZ.cityBuildPlayerCarVisual) return;
+    if (root !== fleetRoot) {
+      fleetRoot = root; fleetDockDone = false; fleetWait = 0;
+      // drop fixtures belonging to a torn-down arena, exactly as the parked-car
+      // placer does — a stale record keeps a dead group's hold alive
+      for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
+        const old = CBZ.cityCars[i];
+        if (old && old._cargoFleet && old._arenaRoot !== root) CBZ.cityCars.splice(i, 1);
+      }
+    }
+    if (fleetDockDone) return;
+    fleetWait += dt || 0;
+    if (spawnCargoFleet() > 0 || fleetWait > 12) fleetDockDone = true;
+  });
 
   // ---- EVERY CAR CONTROLLABLE (owner law: no dumb props) -------------------
   // A deterministic PARKED-but-REAL car for world/template builders: a full
@@ -3153,6 +3644,16 @@
   // ---- enter / exit ----
   CBZ.cityEnterVehicle = function (car) {
     if (!car || car.player) return false;
+    /* TAKING THE WHEEL UNCHAINS IT. vehicle_hold.js's law is that a latched
+       machine is released the instant somebody claims its controls — that is
+       what makes driving one back OUT of a trailer possible at all, and
+       militaryvehicles.js's driveArmor says it for armour. A city car has no
+       equivalent controller, and this is the one door into its driver's seat:
+       every path to driving (the interact verb, the touch pill, a jack, a
+       mission) comes through here, so no future path can skip it. */
+    if (car._heldBy && CBZ.vehicleHoldRelease) {
+      try { CBZ.vehicleHoldRelease(car); } catch (e) {}
+    }
     // THE PEOPLE IN IT ANSWER FIRST. occJack promotes every decided seat to a
     // real body, runs each one's decision, and puts the ones who leave beside
     // their OWN door. It degrades to the old single-driver eject when the flag
@@ -3393,12 +3894,22 @@
     else if (bk === "suv") { accel = 26; top = 31; turn = 2.1; grip = 5.6; brake = 27; }
     else if (bk === "pickup") { accel = 27; top = 32; turn = 2.0; grip = 5.2; brake = 26; }
     else if (bk === "van") { accel = 23; top = 29; turn = 1.85; grip = 4.8; brake = 24; }
+    else if (bk === "semi") { accel = 14; top = 25; turn = 1.05; grip = 3.6; brake = 15; }
     else if (bk === "hatch") { accel = 29; top = 31; turn = 2.85; grip = 7.2; brake = 31; wheelbase = 2.42; steerLock = 0.6; }
     if (bk === "coupe") { wheelbase = 2.48; steerLock = 0.58; drag = 0.0055; rolling = 0.9; }
     else if (bk === "muscle") { wheelbase = 2.78; steerLock = 0.52; rolling = 1.05; }
     else if (bk === "suv") { wheelbase = 2.9; steerLock = 0.48; drag = 0.008; rolling = 1.4; }
     else if (bk === "pickup") { wheelbase = 3.08; steerLock = 0.46; drag = 0.0085; rolling = 1.5; }
     else if (bk === "van") { wheelbase = 3.18; steerLock = 0.44; drag = 0.009; rolling = 1.6; }
+    /* THE TURNING CIRCLE IS THE WHOLE CHARACTER OF A TRUCK, and in a bicycle
+       model it is `wheelbase / tan(steerLock)` — nothing else. 8.6 m of
+       wheelbase against a 0.30 rad lock gives ~28 m, which is a real artic's
+       kerb-to-kerb and is why you cannot take a downtown corner in one bite.
+       Authoring a small `turn` and leaving the wheelbase at a car's would have
+       made it feel sluggish rather than LONG: the yaw rate would be low but the
+       swept path still a hatchback's, so the trailer would pivot on its own
+       middle and the corner would come out fine. It has to be the geometry. */
+    else if (bk === "semi") { wheelbase = 8.6; steerLock = 0.30; drag = 0.0165; rolling = 2.6; }
     // Performance follows the model's market tier, not its visual length. The
     // old use of `s` accidentally made long vans faster than short sports cars.
     top *= 0.88 + rarity * 0.28;
@@ -3425,6 +3936,7 @@
       else if (bk === "suv") { roll = 1.1; drift = 1.05; }
       else if (bk === "pickup") { roll = 1.0; drift = 1.05; }
       else if (bk === "van") { roll = 1.3; drift = 1.1; }
+      else if (bk === "semi") { roll = 1.5; drift = 1.25; }
     }
     // DAMAGE degrades it: a smoking/burning car is gutless and squirrelly
     const d = carDmg(car);
@@ -3483,7 +3995,7 @@
     const bk = bodyKind(car);
     if (bk === "coupe") return "sports";
     if (bk === "muscle") return "muscle";
-    if (bk === "suv" || bk === "pickup" || bk === "van") return "truck";
+    if (bk === "suv" || bk === "pickup" || bk === "van" || bk === "semi") return "truck";
     return "sedan";
   }
   // top-of-gear points as fractions of the car's own top speed: revs climb
@@ -4242,8 +4754,14 @@
   function resolveCars(dt) {
     const cars = CBZ.cityCars, n = cars.length;
     carGrid.clear();
+    /* A LOAD IN A HOLD IS NOT IN THE DEPENETRATION SOLVE. It is standing
+       INSIDE another car's OBB on purpose — that is what "drove into the back"
+       means — so leaving it in would make the trailer and its own cargo shove
+       each other apart at 37.6 every frame, against a latch re-asserted at
+       12.7. Nothing else can reach it (it is inside a box), so removing it from
+       the grid entirely is both correct and free. */
     for (let i = 0; i < n; i++) {
-      const a = cars[i]; if (!solidCar(a)) continue;
+      const a = cars[i]; if (!solidCar(a) || a._heldBy) continue;
       if (a._crashCD > 0) a._crashCD -= dt;
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
       // numeric key (no per-frame string alloc; gx/gz are small at CELL=9) — packs
@@ -4252,7 +4770,7 @@
       if (bucket) bucket.push(i); else carGrid.set(key, [i]);
     }
     for (let i = 0; i < n; i++) {
-      const a = cars[i]; if (!solidCar(a)) continue;
+      const a = cars[i]; if (!solidCar(a) || a._heldBy) continue;
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
       for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
         const bucket = carGrid.get(((gx + ox) + 1024) * 4096 + ((gz + oz) + 1024)); if (!bucket) continue;
@@ -4267,6 +4785,19 @@
           const nx = d2 < 1e-6 ? (i & 1 ? 1 : -1) : dx / d, nz = d2 < 1e-6 ? 0 : dz / d;
           const hit = collisionSupport(a, nx, nz) + collisionSupport(b, nx, nz);
           if (d >= hit) continue;
+          /* A CAR BEING DRIVEN INTO A TRAILER IS NOT CRASHING INTO IT. Once its
+             nose is past the aperture it is standing INSIDE the truck's own OBB
+             on purpose, and separating them is not just wrong-looking — a semi
+             is mass 4.2 against a saloon's 1.05, so the depenetration weighting
+             shoves the car straight back down the ramp and the load can never
+             be driven aboard at all. That was the measured symptom: the ramp
+             worked, the ground query worked, and the car bounced out.
+             Asked only AFTER the broad phase has already said these two
+             overlap, so the common case pays nothing. (Once it comes to REST it
+             latches, `_heldBy` is set, and the grid loops above drop it from the
+             solve entirely — this clause covers only the drive-in itself.) */
+          if ((a.hold && !a.hold.inert && a.hold.contains(b.pos.x, b.pos.y + 0.4, b.pos.z)) ||
+              (b.hold && !b.hold.inert && b.hold.contains(a.pos.x, a.pos.y + 0.4, a.pos.z))) continue;
           const overlap = hit - d;
         // SOLID separation — they cannot occupy the same space
           const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1), tm = am + bm;
@@ -4596,6 +5127,15 @@
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
     for (const c of CBZ.cityCars) {
       dt = baseDt;     // reset each car (a strided far car overrides this below)
+      /* A CHAINED-DOWN LOAD HAS NO GROUND UNDER IT. This pass runs at 37 and
+         vehicle_hold.js writes strapped freight at 12.7, so anything this loop
+         does to a latched car is the LAST word — and what it does to a car with
+         no `road` is parkSeat(), which re-seats it on the TERRAIN. Measured
+         before the guard: a car driven into a trailer sat on the tarmac under
+         the truck for exactly as long as the truck stood still, and slid along
+         the road when it moved. `_heldBy` is the hold's own back-pointer, so
+         there is nothing to keep in sync. */
+      if (c._heldBy) continue;
       if (c.player || c.dead || !c.ai || !c.road) { if (!c.player && !c.dead) parkSeat(c); continue; }
       // off-screen, non-critical cars: skip 2 of every 3 frames, banking dt so
       // they still cover the same ground when they do tick.

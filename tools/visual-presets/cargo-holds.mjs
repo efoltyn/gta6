@@ -60,6 +60,49 @@ const subjects = [
     label: "Airborne, load still aboard",
     focus: "The proof that the room MOVES. The same hold at altitude with the tank still chained where it stopped — the floor, the walls and the freight all carried by the airframe's own pose.",
   },
+  /* ---- THE GROUND FLEET (wave T) --------------------------------------
+     OWNER: "a semi truck with a cargo back that you can press on ipad or
+     interact with E on desktop to open the back of the truck… say you rob a
+     bank: you bring a van and open the back of it, or bring a truck and open
+     the back, and put the money in it… and drive to your warehouse."
+
+     Same live world, same page, after the aeroplane plates — these subjects
+     leave the apron and find the trucks where the world actually parks them.
+     They are a SEQUENCE like the plates above: the semi is found and framed,
+     its back is opened and waited out, we stand inside it, and then bank
+     duffels are dropped in and chained to the deck. A later plate failing
+     means an earlier beat did not happen.
+
+     The deployed side has NO freight bodies at all — no semi anywhere in the
+     world and a van whose cargo box is one solid slab — so its plates
+     photograph the same real place (the Freeport loading dock, which both
+     builds have, because govcomplex.js shipped it) and the state line says so
+     rather than showing an error card. */
+  {
+    id: "semi-exterior",
+    label: "Semi at the Freeport dock",
+    focus: "Three-quarter view off the near side, backed onto the shed. A day-cab tractor with twin stacks and a step-deck box trailer, at the dock govcomplex.js already built — DEPLOYED: the same dock, with nothing standing at it.",
+  },
+  {
+    id: "semi-back-open",
+    label: "The back of the truck, open",
+    focus: "THE ASK, LITERALLY. Dead astern at a man's height after the real arc: the tailgate is down on the concrete, it is a continuous walkable slope from the yard to the deck, and there is a LIT ROOM behind it — not a painted rear panel.",
+  },
+  {
+    id: "semi-hold-interior",
+    label: "Standing inside the trailer",
+    focus: "Eye height ON the cargo deck, looking out through the open back. Ribbed walls, a steel floor, a bulkhead behind you: 2.28 m of clear width and 2.25 m of headroom that exist whether or not the truck is moving.",
+  },
+  {
+    id: "van-back-open",
+    label: "Van, back open",
+    focus: "The other half of the sentence. A Bison Hauler — the SAME van the whole city already drives — with its tailgate down. DEPLOYED: that box is one solid slab with three decals painted on the back of it and nothing inside.",
+  },
+  {
+    id: "bags-in-hold",
+    label: "Bank money chained to the deck",
+    focus: "Duffels dropped in the back of the truck. inventory.js rests a dropped bag on TERRAIN, so they fall through to the yard — the hold catches them, lifts them onto the deck and straps them down. That is the money going to the warehouse.",
+  },
 ];
 
 async function stageHolds(input) {
@@ -153,10 +196,26 @@ async function stageHolds(input) {
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-state></div><div data-detail></div><div data-source></div>";
     document.body.appendChild(overlay);
 
+    /* THE GROUND FLEET'S ANCHOR. govcomplex.js's Freeport publishes its own
+       loading dock and, deliberately, WHICH WAY IS OUT — its comment names "a
+       parked truck, a spawn" as the readers. BOTH builds have it, which is what
+       lets the deployed side photograph the real place a truck is missing from
+       instead of an error card. */
+    const yard = (function () {
+      const L = CBZ.govComplexes;
+      if (!L || !L.length) return null;
+      for (let i = 0; i < L.length; i++) {
+        const s = L[i];
+        if (s && s.id === "freeport" && s.warehouse && s.warehouse.dock && s.warehouse.out) return s.warehouse;
+      }
+      return null;
+    })();
+
     S = window.__cargoHolds = {
-      plane, bomber, origin, overlay,
+      plane, bomber, origin, overlay, yard,
       hold: plane ? plane.hold : null,
       tankIn: false, crewIn: false, bagsIn: false, airborne: false, tankRec: null, crew: [],
+      semi: null, van: null, semiBags: false, leftPlane: false,
     };
     window.__cbzVisualCompare = { render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} } };
   }
@@ -176,6 +235,90 @@ async function stageHolds(input) {
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   const state = [];
+
+  // ======================================================================
+  //  THE GROUND FLEET (wave T) — the semi and the van
+  // ======================================================================
+  const GROUND = { "semi-exterior": 1, "semi-back-open": 1, "semi-hold-interior": 1,
+                   "van-back-open": 1, "bags-in-hold": 1 };
+  const isGround = !!GROUND[id];
+
+  // Local -> world in ANY vehicle record's own frame. rotation.y = heading and
+  // this engine's forward is +Z, so world = (x·cos + z·sin, y, −x·sin + z·cos)
+  // — the same matrix vehicles.js drives on, not a re-derivation.
+  const recWorld = (rec, lx, ly, lz) => {
+    const h = rec.heading || 0, c = Math.cos(h), s = Math.sin(h);
+    const p = rec.group ? rec.group.position : rec.pos;
+    return new T.Vector3(p.x + lx * c + lz * s, p.y + ly, p.z - lx * s + lz * c);
+  };
+  // THE FALLBACK FRAME, and it is not a guess: it is the exact pose the fleet
+  // placer parks a trailer in — dock point + out·7.25, heading atan2(out.x,
+  // out.z). So a build with no semi frames the identical volume of concrete the
+  // semi occupies in the build that has one.
+  const dockPose = () => {
+    const W = S.yard; if (!W) return null;
+    const ox = W.out.x, oz = W.out.z, px = oz, pz = -ox;
+    return {
+      heading: Math.atan2(ox, oz),
+      group: { position: new T.Vector3(W.dock.x + ox * 7.25 + px * -9.4, 0, W.dock.z + oz * 7.25 + pz * -9.4) },
+    };
+  };
+  const nearestSemi = () => {
+    const W = S.yard, cars = CBZ.cityCars || [];
+    let best = null, bd = Infinity;
+    for (const c of cars) {
+      if (!c || c.dead || c._bk !== "semi" || !c.group) continue;
+      const d = W ? Math.hypot(c.pos.x - W.dock.x, c.pos.z - W.dock.z) : 0;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  };
+  // ONE van, put in ONE place, through the SHARED parked-car placer both builds
+  // already export, with the catalog name both builds already carry. That is
+  // what makes the two van plates the same van at the same spot, differing only
+  // in whether its back opens.
+  const stageVan = () => {
+    if (S.van) return S.van;
+    const W = S.yard; if (!W || !CBZ.cityAddParkedCar) return null;
+    const ox = W.out.x, oz = W.out.z, px = oz, pz = -ox;
+    const x = W.apron.x + px * 4.0, z = W.apron.z + pz * 4.0;
+    try { S.van = CBZ.cityAddParkedCar(x, z, Math.atan2(ox, oz), { modelName: "Bison Hauler" }); } catch (_) { S.van = null; }
+    if (S.van) steps(4);
+    return S.van;
+  };
+  /* GET TO THE TRUCK BEFORE ASKING IT ANYTHING. The aeroplane plates leave the
+     player flying at 900 m, and vehicles.js mints a ground hold LAZILY — only
+     for a freight body within 90 m of the CAMERA, on a 0.4 s sweep. So being
+     next to the truck is a precondition of these plates, and so is giving the
+     sweep enough sim to run: the first version moved the player three ticks
+     before reading `rec.hold`, which is under one sweep interval, so every
+     ground plate photographed a shut door and captioned itself "NO SEMI TRUCK
+     IN THIS BUILD" in a build that had four of them.
+     The CAMERA is moved too, not just the body — it is the camera the budget
+     measures from, and `look()` overwrites it a few lines later anyway. */
+  const goToTruck = (rec) => {
+    const P = CBZ.player; if (!rec) return;
+    const at = recWorld(rec, 5.0, 0, -7.0);
+    const gy = CBZ.floorAt ? CBZ.floorAt(at.x, at.z) : 0;
+    if (P && P.pos) {
+      P.driving = false; P._vehicle = null; P._aircraft = null;
+      P.pos.set(at.x, gy, at.z);
+      if (P.vel) { P.vel.x = P.vel.y = P.vel.z = 0; }
+    }
+    CBZ.camera.position.set(at.x, gy + 2.0, at.z);
+    steps(45);                     // two full 0.4 s adoption sweeps, and then some
+  };
+
+  if (isGround) {
+    if (!S.leftPlane) { S.leftPlane = true; if (CBZ.player) { CBZ.player.driving = false; CBZ.player._vehicle = null; CBZ.player._aircraft = null; } }
+    if (id === "van-back-open") stageVan();
+    if (!S.semi) S.semi = nearestSemi();
+    // walk over FIRST, then read the hold — in that order, always
+    const focus = id === "van-back-open" ? (S.van || S.semi) : (S.semi || S.van);
+    if (focus && !(focus.hold && !focus.hold.inert)) goToTruck(focus);
+  }
+  const semi = S.semi, semiHold = semi && semi.hold && !semi.hold.inert ? semi.hold : null;
+  const van = S.van, vanHold = van && van.hold && !van.hold.inert ? van.hold : null;
 
   // ---------------- advance the storyboard --------------------------------
   if (have) {
@@ -255,6 +398,34 @@ async function stageHolds(input) {
     }
   }
 
+  /* ---------------- advance the GROUND storyboard --------------------------
+     Deliberately OUTSIDE the `have` block above: the truck plates do not
+     depend on there being a cargo aeroplane in the build, which is the whole
+     reason they can say something true on the deployed side. */
+  if (isGround) {
+    if (id === "semi-back-open" || id === "semi-hold-interior" || id === "bags-in-hold") {
+      if (semiHold && !semiHold.open) { semiHold.openRamp(); steps(200); }
+    } else if (id === "semi-exterior") {
+      if (semiHold) { semiHold.closeRamp(); steps(200); }
+    } else if (id === "van-back-open") {
+      if (vanHold && !vanHold.open) { vanHold.openRamp(); steps(130); }
+    }
+    if (id === "bags-in-hold" && semiHold && !S.semiBags && CBZ.cashBags && CBZ.cashBags.payout) {
+      // NO onFloor override, for the same reason the aeroplane plate refuses
+      // one: inventory.js rests a dropped bag with CBZ.floorAt — TERRAIN, which
+      // knows nothing about a deck 0.95 m up — so the money lands on the yard
+      // UNDER the trailer. The hold's own sweep is what puts it on the steel,
+      // and photographing that is the point.
+      const drop = [[-0.70, -1.4], [0.65, -2.6], [-0.10, -4.0]];
+      for (const d of drop) {
+        const wpt = recWorld(semi, d[0], semiHold.deckTop() + 0.35, d[1]);
+        try { CBZ.cashBags.payout(wpt.x, wpt.y, wpt.z, 120000, { spread: 0.5, srcName: "bank haul" }); } catch (_) {}
+      }
+      steps(70);                          // two 0.3 s latch sweeps, then settle
+      S.semiBags = true;
+    }
+  }
+
   // ---------------- pose the camera ---------------------------------------
   // Every position is in the airframe's own frame, so the shots are repeatable
   // and the deployed side frames the identical volume of empty apron.
@@ -295,6 +466,37 @@ async function stageHolds(input) {
     // where the loadmasters are standing.
     if (have && S.airborne) look(world(0.0, 4.02, -11.2), world(0, 1.95, 2.5), 68);
     else look(world(-25, 11.5, -41), world(2.5, 3.4, -2), 46);
+  } else if (isGround) {
+    // Every ground camera is in the TRUCK'S own frame — or, when the build has
+    // no truck, in the pose the truck would be parked in — so the two sides of
+    // the report frame the identical volume and the difference in the plate is
+    // the difference in the game.
+    const semiFrame = semi || dockPose();
+    const T3 = (rec, lx, ly, lz) => (rec ? recWorld(rec, lx, ly, lz) : new T.Vector3(lx, ly, lz));
+    if (id === "semi-exterior") {
+      // three-quarter off the near side, ahead of the steer axle: the one angle
+      // that holds the cab, the fifth-wheel gap and the whole trailer at once,
+      // which is what makes it read as an artic rather than as a long box.
+      look(T3(semiFrame, -12.5, 6.4, 15.0), T3(semiFrame, 0.4, 1.9, -0.5), 46);
+    } else if (id === "semi-back-open") {
+      // dead astern at a man's height. The plate is about the OPENING and the
+      // slope into it — you cannot read either from above the roofline.
+      look(T3(semiFrame, 1.3, 2.35, -13.4), T3(semiFrame, 0, 1.25, -6.2), 52);
+    } else if (id === "semi-hold-interior") {
+      // standing ON the cargo deck (0.95 m) at eye height (1.62 m), looking out
+      // through the open back down the length of the room.
+      look(T3(semiFrame, 0.22, 0.95 + 1.62, 1.45), T3(semiFrame, 0, 1.15, -9.0), 72);
+    } else if (id === "van-back-open") {
+      // further back and a touch higher than the semi's: a van is a third the
+      // length, so the same standoff reads as a face pressed to the door.
+      const vf = van || semiFrame;
+      look(T3(vf, 2.30, 1.85, -7.6), T3(vf, 0, 0.80, -1.4), 46);
+    } else if (id === "bags-in-hold") {
+      // inside the trailer, over the load, looking aft at the money and the
+      // open door beyond it: "the bank job is in the truck and the truck can
+      // leave" has to be one frame or it is two claims.
+      look(T3(semiFrame, 0.55, 2.10, 1.55), T3(semiFrame, -0.10, 0.98, -6.2), 70);
+    }
   }
 
   hideHud();
@@ -307,7 +509,68 @@ async function stageHolds(input) {
   const audit = (CBZ.holdAudit && CBZ.holdAudit()) || null;
   const metrics = { drawCalls: Number(info.calls || 0) };
   let detail;
-  if (have) {
+  if (isGround) {
+    /* THE GROUND PLATES MEASURE THE GROUND FLEET. Reading the aeroplane's
+       numbers under a photograph of a truck would be the stale-claim problem
+       this repo keeps catching itself in, so these plates take their own
+       branch and every number below is about what is in the frame. */
+    const fr = (CBZ.cityFreightAudit && CBZ.cityFreightAudit()) || null;
+    const focusHold = id === "van-back-open" ? vanHold : semiHold;
+    metrics.freightBodies = fr ? fr.bodies : 0;
+    metrics.semisInWorld = fr ? fr.semis : 0;
+    metrics.groundHolds = audit && audit.ground != null ? audit.ground : 0;
+    // `groundBags`, NOT `bagsAboard`: the latter is every hold in the world, and
+    // the aeroplane storyboard above straps two duffels into a C-17 on the
+    // military island before these plates run. A truck photograph captioned with
+    // an aeroplane's money is exactly the stale-claim problem this branch exists
+    // to avoid. (Both are printed by holdAudit; this one is scoped to wheels.)
+    metrics.bagsAboard = audit && audit.groundBags != null ? audit.groundBags : 0;
+    if (focusHold) {
+      metrics.deckHeight = round(focusHold.deckTop());
+      // THE ROOM, MEASURED THROUGH THE HOLD'S OWN TRANSFORM rather than read
+      // off the art: worldOf on the two inside faces and on floor-vs-roof is
+      // the same query a standing body's feet make, so a number that agrees
+      // with the drawing proves the drawing and the collision agree.
+      const spec = focusHold._hold;
+      if (spec && spec.floor) {
+        metrics.holdClearW = round(spec.floor.w);
+        metrics.holdClearLen = round(spec.floor.d);
+        metrics.holdHeadroom = round(spec.roof - spec.floor.top);
+      }
+      // the ramp slope off the LIVE walk surface (CBZ.mpGroundAt), not declared
+      if (CBZ.mpGroundAt && semi && focusHold === semiHold) {
+        const a = recWorld(semi, 0, 0, -8.2), b = recWorld(semi, 0, 0, -9.2);
+        const ya = CBZ.mpGroundAt(a.x, a.z, 2.0, 0), yb = CBZ.mpGroundAt(b.x, b.z, 2.0, 0);
+        if (isFinite(ya) && isFinite(yb)) metrics.rampSlopeDeg = round(Math.atan2(ya - yb, 1.0) * 180 / Math.PI, 1);
+      }
+      const verb = !!(CBZ.interactions && CBZ.interactions.hasOption && CBZ.interactions.hasOption("vehhold-ramp"));
+      metrics.rampVerb = verb ? 1 : 0;
+      state.push((id === "van-back-open" ? "van bay " : "trailer ") + focusHold.phase,
+                 "door " + Math.round(focusHold.rampT * 100) + "%");
+      state.push(verb ? "E / touch pill registered" : "NO DOOR VERB");
+      const occ = focusHold.occupants();
+      state.push(occ.cargo + " loads · " + metrics.bagsAboard + " bags aboard" + (occ.player ? " · PLAYER INSIDE" : ""));
+      detail = "CBZ.vehicleHold ✓ · freight bodies " + metrics.freightBodies +
+        " (semi " + metrics.semisInWorld + ") · ground holds " + metrics.groundHolds +
+        " · deck " + metrics.deckHeight + " m · clear " + metrics.holdClearW + " × " +
+        metrics.holdHeadroom + " × " + metrics.holdClearLen + " m" +
+        (metrics.rampSlopeDeg != null ? " · ramp " + metrics.rampSlopeDeg + "°" : "") +
+        " · doorless " + (fr ? fr.doorless : "?");
+    } else {
+      // The honest deployed reading, and it is different for the two bodies:
+      // there is no semi in that build AT ALL, and there IS a van — with a
+      // solid slab where this one has a room.
+      const missing = id === "van-back-open"
+        ? (van ? "THE VAN'S CARGO BOX IS A SOLID SLAB" : "NO VAN PLACED")
+        : "NO SEMI TRUCK IN THIS BUILD";
+      state.push(missing);
+      state.push("no rear door, no walk-in hold, no latch");
+      detail = "CBZ.vehicleHold " + (typeof CBZ.vehicleHold) +
+        " · CBZ.cityFreightAudit " + (typeof CBZ.cityFreightAudit) +
+        " · framed on the Freeport loading dock both builds share" +
+        (S.yard ? " (dock " + Math.round(S.yard.dock.x) + ", " + Math.round(S.yard.dock.z) + ")" : " — NO FREEPORT EITHER");
+    }
+  } else if (have) {
     metrics.holds = audit ? audit.holds : 0;
     metrics.vehiclesLatched = audit ? audit.vehiclesLatched : 0;
     metrics.actorsAboard = audit ? audit.actorsAboard : 0;
@@ -398,6 +661,14 @@ export default {
     altitude: { label: "Altitude with load", unit: "m" },
     loadDrift: { label: "Load drift off the deck", unit: "m", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },
+    // ---- the ground fleet ----
+    freightBodies: { label: "Freight bodies in the world", better: "higher" },
+    semisInWorld: { label: "Semi trucks parked", better: "higher" },
+    groundHolds: { label: "Ground holds live", better: "higher" },
+    bagsAboard: { label: "Cash duffels chained in a truck", better: "higher" },
+    holdClearW: { label: "Load space — clear width", unit: "m" },
+    holdHeadroom: { label: "Load space — headroom", unit: "m" },
+    holdClearLen: { label: "Load space — length", unit: "m" },
   },
   subjects,
   stage: stageHolds,

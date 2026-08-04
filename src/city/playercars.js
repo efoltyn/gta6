@@ -21,6 +21,48 @@
      one-line revert. See dressCabin() below for the why. */
   if (CFG.CAR_CABIN_V2 == null) CFG.CAR_CABIN_V2 = true;
 
+  /* ============================================================
+     FREIGHT YOU CAN WALK INTO — SEMI_TRUCK_V1 / VAN_HOLD_V1
+     ============================================================
+     OWNER, verbatim: "a semi truck with a cargo back that you can press on
+     ipad or interact with E on desktop to open the back of the truck — and
+     like elevators it is a space that can be filled by things. say you rob a
+     bank: you bring a van and open the back of it, or bring a truck and open
+     the back, and put the money in it... and drive to your warehouse."
+
+     Both flags author ART AND A DECLARATION, nothing else. The room, the door
+     arc, the verb, the touch pill, the latch and the audit line all come from
+     city/vehicle_hold.js, which was written aircraft-first and says in its own
+     adoption contract that a truck adopts "with exactly this and nothing else".
+     This file's whole contribution is a `root.userData.holdSpec` — plain
+     JSON-safe numbers plus the NAME of the hinged door node — and vehicles.js
+     hands it to CBZ.vehicleHold when the record is built. No consumer here
+     knows what a moving platform is.
+
+     SEMI_TRUCK_V1 off  → makeSemi is never dispatched and the fleet placer
+                          finds no builder, so no semi exists. One line.
+     VAN_HOLD_V1  off   → makeVan draws the solid cargo box it always drew and
+                          publishes no holdSpec, so the van is byte-identical
+                          to the shipped one (the silhouette is identical
+                          EITHER way — the shell's outer faces sit exactly
+                          where the slab's did; only the inside changes).
+
+     WHY THE SEMI IS RIGID, AND WHY THAT IS THE HONEST CALL. A real tractor and
+     trailer articulate about a kingpin. This engine's car sim is a single-body
+     bicycle model: ONE `heading`, ONE `pos`, ONE OBB half-extent pair derived
+     from `vehicleDims` (vehicles.js collisionSupport), and ONE moving-platform
+     rig per hold anchored to ONE group. An articulated trailer needs a second
+     body, a hitch constraint, its own collider and its own rig — a parallel
+     physics system, which is precisely what the Block Law forbids. So the
+     tractor and the trailer are drawn as separate sub-assemblies of ONE group
+     with a real fifth-wheel gap between them: the silhouette, the stacks, the
+     catwalk and the swing clearance are all there, and it turns like a long
+     rigid truck rather than jack-knifing. That is a stated limitation, not an
+     accident — and if a kingpin solver is ever written, this art needs no
+     change: the trailer sub-group is already its own node. */
+  if (CFG.SEMI_TRUCK_V1 == null) CFG.SEMI_TRUCK_V1 = true;
+  if (CFG.VAN_HOLD_V1 == null) CFG.VAN_HOLD_V1 = true;
+
   const STYLE_ORDER = [
     "ferrari", "enzo", "veyron", "aventador", "porsche", "muscle", "lowrider",
     "tesla-s", "tesla-3", "tesla-x", "tesla-y", "hatch", "suv", "van",
@@ -48,6 +90,15 @@
     motorcycle: "Superbike",
     helicopter: "Helicopter",
     boat: "Speedboat",
+    // DELIBERATELY LABELLED BUT NOT IN STYLE_ORDER. `semi` is a buildable
+    // silhouette (makeProcedural dispatches it, feelFor answers for it) and it
+    // needs a name for the HUD and the chop shop — but STYLE_ORDER is the [C]
+    // style-cycler's ring AND is exported as CBZ.cityPlayerCarStyles, which
+    // racing/modshop/net code indexes into. Adding a row would renumber every
+    // index in a saved game and would let the cycler turn a hatchback into a
+    // 14 m artic in place. A truck is a vehicle you go and find, not a paint
+    // job you toggle.
+    semi: "Bison Longhauler",
   };
 
   // ---- per-style HANDLING FEEL hooks (GTA vehicle-class inspired) ----
@@ -75,6 +126,13 @@
     motorcycle: { class: "motorcycle", accel: 1.22, top: 1.14, turn: 1.4, grip: 0.84, brake: 0.9, drift: 1.5, roll: 1.0, twoWheel: true },
     helicopter: { class: "helicopter", accel: 1.0, top: 1.3, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.0, air: true },
     boat:       { class: "boat",   accel: 1.0, top: 1.1, turn: 1.0, grip: 1.0, brake: 0.7, drift: 1.4, roll: 0.6, marine: true },
+    // A loaded artic is the heaviest thing on the road and every number says
+    // so. `class: "van"` is not laziness — engineFlavor(vehicles.js) reads the
+    // FEEL class first and maps van/suv onto the "truck" engine voice, so the
+    // motor sounds like a diesel with no audio file and no new voice. The
+    // handling multipliers are what make it drive like sixteen metres: it will
+    // not stop, it will not turn, and the tail rolls.
+    semi:       { class: "van",    accel: 0.58, top: 0.74, turn: 0.52, grip: 0.70, brake: 0.62, drift: 1.25, roll: 1.5 },
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
   // (d) THE ONE FEEL LOOKUP. FEEL above covers the road silhouettes; a
@@ -1428,6 +1486,362 @@
     return root;
   }
 
+  /* ============================================================
+     THE HOLD SHELL — the one primitive both freight bodies are made of.
+     ============================================================
+     A cargo box the player can stand inside cannot be a solid slab, and it
+     cannot be a single box flipped to DoubleSide either: r128 lights a
+     back-face with the front face's normal, so an inside-out box is a room lit
+     from the wrong side with no thickness at the door reveal. It is FIVE thin
+     solid panels — floor, two sides, roof, front bulkhead — whose OUTER faces
+     sit exactly where the old slab's faces sat, so the silhouette from thirty
+     metres is unchanged and the inside is a room.
+
+     Every panel is marked `noSeal`. vehicles.js's sealSeams inflates thin
+     boxes and skirts wide flat ones 0.45 m DOWNWARD to hole-proof exterior
+     panel work — correct on a wing mirror, catastrophic on a headliner, which
+     is exactly why dressCabin already marks its own pieces. A roof panel
+     dragged 0.45 m into the bay would hang through the cargo it is meant to
+     cover. (`noSeal` is read by vehicles.js:507.)
+
+     Returns nothing: it draws into `root` and the caller owns the numbers. */
+  function addHoldShell(root, o) {
+    const t = o.wall == null ? 0.11 : o.wall;              // panel thickness
+    const halfW = o.w / 2, zC = (o.zFront + o.zBack) / 2, len = o.zFront - o.zBack;
+    const mark = function (m) { m.userData.noSeal = true; m.userData.holdShell = true; return m; };
+    // FLOOR — the deck you stand on. Its TOP is the hold's declared floor.
+    mark(addBox(root, o.w, t, len, 0, o.floorTop - t / 2, zC, o.deckMat || o.mat));
+    // SIDES, inner faces at ±(halfW - t)
+    [1, -1].forEach(function (s) {
+      mark(addBox(root, t, o.roofY - o.floorTop, len, s * (halfW - t / 2), (o.floorTop + o.roofY) / 2, zC, o.mat));
+    });
+    // ROOF
+    mark(addBox(root, o.w, t, len, 0, o.roofY + t / 2, zC, o.mat));
+    // FRONT BULKHEAD — the wall the load stops against under braking.
+    mark(addBox(root, o.w, o.roofY - o.floorTop + t * 2, t, 0, (o.floorTop + o.roofY) / 2, o.zFront - t / 2, o.bulkMat || o.mat));
+  }
+
+  /* ============================================================
+     THE TAILGATE — a bottom-hinged door that IS the ramp.
+     ============================================================
+     city/vehicle_hold.js's ramp is ONE slab hinged at the sill, rotating about
+     local X: standing up it seals the aperture, laid down aft it is a real
+     walk surface the ground query (CBZ.mpGroundAt) serves to feet AND to the
+     drive sim. So a drop tailgate gives us the door and the ramp for one node
+     and one arc — which is also what a moving truck, a step-deck trailer and a
+     livestock float actually have. Barn doors would need a second hinge axis,
+     a second arc and would still leave nothing to walk up.
+
+     GEOMETRY CONTRACT (the sign convention is vehicle_hold's, not ours): the
+     node's ORIGIN is the hinge, on the sill; the leaf hangs from it toward -Z
+     and -Y at rotation 0 (lying flat, pointing aft). rotation.x = +closedRx
+     stands it up across the opening; rotation.x = openRx lays it down with the
+     toe on the ground. The node is a GROUP so vehicles.js's mergeStaticCarParts
+     — which only ever bakes direct MESH children of the root — cannot swallow
+     it, and it is NAMED because makeProcedural caches one template per style
+     and hands out clone(true)s that share userData BY REFERENCE (its own
+     comment, line ~1973): the live node is always re-resolved off the instance
+     with getObjectByName, exactly as the rotor/prop handles are. */
+  function addTailgate(root, name, o) {
+    const node = new THREE.Group();
+    node.name = name;
+    node.position.set(0, o.sillTop, o.sillZ);
+    const t = o.leafT == null ? 0.09 : o.leafT;
+    // the leaf, hanging aft of the hinge and half a thickness BELOW it, so at
+    // rotation 0 its top face is the sill plane and it is a flush deck
+    const leaf = addBox(node, o.w, t, o.len, 0, -t / 2, -o.len / 2, o.mat);
+    leaf.userData.noSeal = true;
+    // ribs across the leaf: grip when it is a ramp, strength when it is a door
+    const ribs = Math.max(3, Math.round(o.len / 0.42));
+    for (let i = 0; i < ribs; i++) {
+      const rz = -o.len * (i + 0.5) / ribs;
+      addBox(node, o.w * 0.94, 0.035, 0.06, 0, -t - 0.012, rz, o.ribMat || o.mat).userData.noSeal = true;
+    }
+    // the hardware you already saw on the shut door, now ON the door
+    if (o.trimMat) {
+      addBox(node, 0.05, 0.05, o.len * 0.9, 0, -t - 0.02, -o.len / 2, o.trimMat).userData.noSeal = true;
+      [1, -1].forEach(function (s) {
+        addBox(node, 0.05, 0.05, o.len * 0.86, s * (o.w * 0.46), -t - 0.02, -o.len / 2, o.trimMat).userData.noSeal = true;
+      });
+      // handle bar, at what is head height when the door is shut
+      addBox(node, o.w * 0.34, 0.05, 0.05, 0, -t - 0.05, -o.len * 0.72, o.trimMat).userData.noSeal = true;
+    }
+    node.rotation.x = o.closedRx;                    // shut until somebody opens it
+    root.add(node);
+    return node;
+  }
+
+  /* ============================================================
+     THE SEMI — a day-cab tractor and a step-deck box trailer.
+     ============================================================
+     BUILT FROM THE INSIDE OUT, the same discipline island_military.js's cargo
+     plane was built with, and for the same reason: the point of the object is
+     the room, so the room is authored first and the truck is wrapped round it.
+
+     THE BED HEIGHT IS SOLVED, NOT PICKED. The tailgate must reach the ground
+     from the sill, and the arc that lays it there is asin(sillTop / leafLen) —
+     but the leaf ALSO has to be tall enough to cover the aperture when it
+     stands up, so leafLen is pinned by the interior height, not free. A
+     standard 1.45 m fifth-wheel deck with a 2.3 m leaf lands the toe 0.4 m in
+     the AIR (asin overflows: 1.45 > 2.3·sin is fine, but the slope is 39°, and
+     the shipped cargo-plane ramp — the steepest surface the ground sim has
+     ever been asked to drive — is 25°). So this is a STEP-DECK: bed at 0.95 m,
+     which is the real answer the freight industry reached for exactly this
+     problem, and the ramp comes out at 24°. Choose the trailer that fits the
+     ramp, do not fight the arithmetic.
+
+     Numbers, once, in metres, local frame, nose at +Z (this engine's forward:
+     vehicles.js drives toward +Z at heading 0). */
+  const SEMI = (function () {
+    const w = 2.50, len = 14.5, wallT = 0.11;
+    const noseZ = len / 2, tailZ = -len / 2;              // +7.25 / -7.25
+    const cabBackZ = 2.85, gapZ = 2.35;                   // sleeper rear / trailer nose
+    const floorTop = 0.95, roofY = 3.20;                  // THE ROOM: 2.25 m of headroom
+    const boxTop = roofY + wallT;                         // 3.31 — the trailer's outside
+    const holdFrontZ = gapZ - wallT;                      // inner face of the bulkhead
+    const holdW = w - wallT * 2;                          // 2.28 clear width
+    const leaf = 2.30;                                    // tailgate leaf length
+    // asin, not a guess: this is the angle at which the toe touches y = 0.
+    const openRx = -Math.asin(Math.min(0.98, floorTop / leaf));
+    return {
+      w: w, len: len, noseZ: noseZ, tailZ: tailZ, cabBackZ: cabBackZ, gapZ: gapZ,
+      wallT: wallT, floorTop: floorTop, roofY: roofY, boxTop: boxTop,
+      holdFrontZ: holdFrontZ, holdW: holdW, leaf: leaf, openRx: openRx,
+      // 1.53 rad, not π/2: a leaf standing DEAD vertical is coplanar with the
+      // trailer's rear face and z-fights it down the whole 2.3 m seam. Three
+      // hundredths of a radian leans the top 3 cm proud and the fight is gone.
+      closedRx: 1.53,
+      cabRoofY: 3.15, wheelR: 0.52,
+    };
+  })();
+
+  function makeSemi() {
+    const S = SEMI;
+    const root = new THREE.Group();
+    const paint = paintMat("semi", 0xd8dde3, { metalness: 0.46, roughness: 0.42, envMapIntensity: 0.9 });
+    const boxPaint = paintMat("semi-box", 0xeceff2, { metalness: 0.30, roughness: 0.60, envMapIntensity: 0.6 });
+    const dark = glassMat();
+    const trim = roleMat("semi-trim", "plastic", 0x1b1f24);
+    const chrome = chromeMat();
+    // scuffed steel — the bed, and the tailgate. It has to be a DIFFERENT tone
+    // from the body: photographed on the Freeport's concrete, a ramp painted in
+    // the trailer's own white lay on pale hardstanding and vanished, so the one
+    // plate that is entirely about "the back is open and you can walk up it"
+    // showed no ramp at all. Bare steel is also what a real load ramp is.
+    // …and the ROLE is "plastic", not "metal", for the same reason. carfx's
+    // metal role carries the fake-reflection env map, and a dark metal under
+    // the Freeport's midday sun renders BRIGHTER than the white body it is
+    // supposed to contrast with — the first re-shoot changed the colour and the
+    // ramp stayed pale. "plastic" is the matte family, so the number authored
+    // here is the tone that appears. It is also what makes the load space read
+    // as a room: a dark floor under pale walls, instead of a white tunnel.
+    const deck = roleMat("semi-deck", "plastic", 0x41474f);
+    const w = S.w, wheelR = S.wheelR;
+
+    /* ---- 1. THE ROOM ------------------------------------------------------
+       Authored before anything it is inside of. */
+    addHoldShell(root, {
+      w: w, zFront: S.gapZ, zBack: S.tailZ, floorTop: S.floorTop, roofY: S.roofY,
+      wall: S.wallT, mat: boxPaint, deckMat: deck, bulkMat: paint,
+    });
+    // corrugation: vertical ribs down both flanks, which is what makes a
+    // trailer read as a trailer and not as a shipping crate
+    const ribN = 14;
+    for (let i = 0; i < ribN; i++) {
+      const rz = S.tailZ + (S.gapZ - S.tailZ) * (i + 0.5) / ribN;
+      [1, -1].forEach(function (s) {
+        addBox(root, 0.03, S.roofY - S.floorTop - 0.12, 0.11, s * (w / 2 + 0.012), (S.floorTop + S.roofY) / 2, rz, trim);
+      });
+    }
+    // skirt + underride bar: the two things that stop a trailer looking like a
+    // box on stilts, and the bar is where the tail lamps live
+    [1, -1].forEach(function (s) {
+      addBox(root, 0.05, 0.62, (S.gapZ - S.tailZ) * 0.62, s * (w / 2 - 0.03), S.floorTop - 0.42, S.tailZ + (S.gapZ - S.tailZ) * 0.46, trim);
+    });
+    addBox(root, w * 0.92, 0.14, 0.10, 0, 0.42, S.tailZ - 0.16, trim);
+    [1, -1].forEach(function (s) {
+      addBox(root, 0.10, 0.46, 0.10, s * (w * 0.40), 0.66, S.tailZ - 0.14, trim);
+    });
+    // mudflaps behind the bogie
+    [1, -1].forEach(function (s) {
+      addBox(root, 0.42, 0.44, 0.03, s * (w * 0.36), 0.28, S.tailZ + 1.30, trim);
+    });
+    // roof rail + three clearance markers across the trailer's leading edge
+    const marker = sharedMat("semi-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
+    [-0.34, 0, 0.34].forEach(function (fx) {
+      addBox(root, 0.13, 0.06, 0.10, fx * w, S.boxTop + 0.04, S.gapZ - 0.14, marker);
+    });
+
+    /* ---- 2. THE TAILGATE (the door AND the ramp) --------------------------- */
+    addTailgate(root, "semi_tailgate", {
+      w: S.holdW, len: S.leaf, sillZ: S.tailZ, sillTop: S.floorTop,
+      closedRx: S.closedRx, mat: deck, ribMat: chrome, trimMat: trim, leafT: 0.09,
+    });
+
+    /* ---- 3. THE TRACTOR ---------------------------------------------------
+       A conventional long-nose: bumper, bonnet, a day cab with a flat roof and
+       a wind fairing, twin stacks, and a catwalk over the fifth wheel. The
+       fifth-wheel GAP between cab and trailer is what reads as articulation
+       even though the group is rigid — leave it out and this is a bus. */
+    const cabF = 5.55, cabRoof = S.cabRoofY, frameY = 0.78;
+    // chassis rails, cab to bogie, so the truck has something to be built on
+    [1, -1].forEach(function (s) {
+      addBox(root, 0.14, 0.26, S.len * 0.82, s * (w * 0.28), frameY - 0.10, -0.4, trim);
+    });
+    // fifth-wheel plate + catwalk under the trailer nose
+    addBox(root, w * 0.72, 0.12, 1.30, 0, frameY + 0.10, S.gapZ + 0.55, trim);
+    addBox(root, w * 0.86, 0.06, 0.70, 0, frameY + 0.22, S.cabBackZ + 0.32, deck);
+    // the cab: a prism so the roof rakes forward into the windscreen instead of
+    // sitting on it as a lid
+    addPrism(root, w * 0.97, [
+      [S.cabBackZ, 0], [S.cabBackZ, cabRoof - frameY],
+      [cabF - 0.42, cabRoof - frameY], [cabF - 0.06, cabRoof - frameY - 1.02],
+      [cabF, cabRoof - frameY - 1.18], [cabF, 0],
+    ], frameY, paint);
+    // the bonnet: a long sloped hood forward of the screen, the whole point of
+    // a conventional tractor's silhouette
+    addPrism(root, w * 0.88, [
+      [cabF, 0], [cabF, 1.32],
+      [S.noseZ - 0.62, 1.16], [S.noseZ - 0.12, 0.98], [S.noseZ - 0.12, 0],
+    ], frameY, paint);
+    // windscreen, lying ON the cab's own rake plane (a vertical slab here pokes
+    // through the prism — the van's own orbit-diagnosed bug, not repeated)
+    (function () {
+      const botZ = cabF - 0.06, botY = frameY + cabRoof - frameY - 1.18 + 0.16;
+      const topZ = cabF - 0.42, topY = frameY + cabRoof - frameY - 0.04;
+      const dz = topZ - botZ, dy = topY - botY, fl = Math.hypot(dz, dy);
+      const nz = dy / fl, ny = -dz / fl;
+      const m = new THREE.Mesh(boxGeo(w * 0.80, fl * 0.96, 0.03), dark);
+      m.position.set(0, (botY + topY) * 0.5 + ny * 0.02, (botZ + topZ) * 0.5 + nz * 0.02);
+      m.rotation.x = Math.atan2(dz, dy);
+      root.add(m);
+    })();
+    const beltY = frameY + 1.28;
+    [1, -1].forEach(function (s) {
+      // door glass, sill to header
+      addBox(root, 0.03, cabRoof - beltY - 0.22, 1.28, s * (w * 0.478), (beltY + cabRoof) * 0.5 - 0.06, S.cabBackZ + 0.92, dark);
+      // door cut + grab handle
+      addBox(root, 0.03, cabRoof - frameY - 0.30, 0.04, s * (w * 0.492), frameY + (cabRoof - frameY) * 0.5, S.cabBackZ + 0.08, trim);
+      addBox(root, 0.06, 0.07, 0.30, s * (w * 0.50), beltY - 0.22, S.cabBackZ + 0.55, chrome);
+      // west-coast mirror on a bracket, out where a truck's mirror lives
+      addBox(root, 0.05, 0.82, 0.05, s * (w * 0.56), beltY + 0.28, cabF - 0.30, trim);
+      addBox(root, 0.05, 0.62, 0.22, s * (w * 0.585), beltY + 0.30, cabF - 0.30, chrome);
+      // EXHAUST STACK — vertical chrome behind the cab, the identity cue
+      addBox(root, 0.15, 2.05, 0.15, s * (w * 0.44), frameY + 1.05, S.cabBackZ + 0.14, chrome);
+      // fuel tank, chrome cylinder-ish, under the door
+      addBox(root, 0.34, 0.56, 1.50, s * (w * 0.40), frameY - 0.22, S.cabBackZ + 0.70, chrome);
+      // step into the cab
+      addBox(root, 0.42, 0.05, 0.34, s * (w * 0.38), frameY - 0.56, S.cabBackZ + 0.72, trim);
+    });
+    // grille + bumper + air dam
+    addBox(root, w * 0.70, 0.86, 0.06, 0, frameY + 0.66, S.noseZ - 0.10, trim);
+    addBox(root, w * 0.99, 0.34, 0.16, 0, frameY + 0.02, S.noseZ - 0.02, chrome);
+    // roof fairing over the cab, angled back toward the trailer's leading edge
+    addPrism(root, w * 0.88, [
+      [S.cabBackZ - 0.10, 0], [S.cabBackZ - 0.10, S.boxTop - cabRoof],
+      [cabF - 0.55, 0.06], [cabF - 0.55, 0],
+    ], cabRoof, paint);
+    addLightsSemi(root, w, frameY, S);
+
+    /* ---- 4. THE CABIN, through the ONE shared solver ----------------------
+       dressCabin is what publishes cushionY / seatX / eye / wheel, which is
+       what puts the player's real dressed rig at the wheel (CAR_DRIVER_VISIBLE)
+       and what view.js reads for the first-person eye. A truck that skipped it
+       would be the fourth body style with no cabin — the exact defect
+       carCabinAudit()'s `bare` counter exists to drive to zero. */
+    dressCabin(root, {
+      cabW: w * 0.90, zR: S.cabBackZ + 0.16, zF: cabF - 0.22,
+      zTR: S.cabBackZ + 0.18, zTF: cabF - 0.48, roofW: w * 0.84,
+      beltY: beltY, roofY: cabRoof - 0.06,
+      floorY: frameY + 0.30, rows: 1,
+    });
+
+    /* ---- 5. WHEELS — six axles' worth, hand-placed ------------------------
+       addWheels() lays exactly four at ±length·0.32, which is a car's axle
+       pattern. A tractor-trailer is a steer axle, a drive TANDEM and a trailer
+       BOGIE, and the tandem is most of what makes it read as heavy. Each tire
+       is makeWheel's, so it is tagged playerWheel, spared by the static merge
+       and spun by the drive loop like every other wheel in the city. */
+    const axles = [S.noseZ - 1.55, S.cabBackZ - 0.15, S.cabBackZ - 1.55, S.tailZ + 1.15, S.tailZ + 2.55];
+    axles.forEach(function (az, ai) {
+      /* THE TRAILER BOGIE RUNS SMALLER RUBBER, AND IT IS ARITHMETIC, NOT STYLE.
+         The step-deck's floor panel spans 0.84 to 0.95; a 0.52 m tyre tops out
+         at 1.04, so on the first render the two rear axles — INCLUDING their
+         inboard duals at x ±0.77, which is well inside a 2.28 m clear width —
+         stood 9 cm through the cargo deck. The interior plate photographed
+         eight dark slabs lying on the floor of the room and they were the
+         wheels. 0.40 tops out at 0.80, under the deck, with no wheel wells to
+         draw and no change to how it sits on the road (every wheel's contact
+         patch is y = 0 either way). */
+      const trailer = ai >= 3;
+      const r = trailer ? 0.40 : wheelR;
+      const outer = ai === 0 ? w / 2 - 0.06 : w / 2 - 0.14;   // duals inboard of the steer
+      [1, -1].forEach(function (s) {
+        const wheel = makeWheel(r, 0.30, "sixlug", 0.62);
+        wheel.rotation.z = -s * Math.PI / 2;
+        wheel.position.set(s * outer, r, az);
+        root.add(wheel);
+        if (ai > 0) {          // DUALS: a second tire inboard on every axle but the steer
+          const twin = makeWheel(r, 0.28, "sixlug", 0.62);
+          twin.rotation.z = -s * Math.PI / 2;
+          twin.position.set(s * (outer - 0.34), r, az);
+          root.add(twin);
+        }
+      });
+    });
+    // landing gear: the legs a trailer stands on, dropped because the tractor
+    // is permanently attached — they are down, which is what a parked rig shows
+    [1, -1].forEach(function (s) {
+      addBox(root, 0.12, S.floorTop - 0.34, 0.12, s * (w * 0.30), (S.floorTop - 0.34) / 2 + 0.10, S.gapZ - 1.35, trim);
+      addBox(root, 0.24, 0.10, 0.30, s * (w * 0.30), 0.10, S.gapZ - 1.35, trim);
+    });
+
+    /* ---- 6. THE DECLARATIONS ---------------------------------------------- */
+    root.userData.vehicleDims = { width: w, length: S.len, height: S.boxTop, wheelbase: S.cabBackZ - S.tailZ - 1.15 };
+    root.userData.partCtx = {
+      w: w, len: S.len, style: "semi",
+      frontZ: S.noseZ, rearZ: S.tailZ,
+      baseY: frameY + 0.02, headY: frameY + 0.52, tailY: 0.66,
+      noseTopY: frameY + 1.20, bodyY: frameY, baseH: S.roofY - S.floorTop,
+      roofY: S.boxTop, roofZ: (S.gapZ + S.tailZ) / 2, roofW: w * 0.9, roofLen: (S.gapZ - S.tailZ) * 0.8,
+      paint: paint,
+    };
+    /* THE HOLD DECLARATION. Plain numbers plus a NAME — nothing here is a
+       THREE object, because makeProcedural's clones share userData by
+       reference and a live node stashed in it would be the template's. Every
+       coordinate is this group's own local frame, which is exactly the frame
+       CBZ.vehicleHold's contract asks for. vehicles.js hands this over; this
+       file never calls the hold API and does not need to know it exists. */
+    root.userData.holdSpec = {
+      id: "semi-trailer", label: "Trailer",
+      floor: { x: 0, z: (S.holdFrontZ + S.tailZ) / 2, w: S.holdW, d: S.holdFrontZ - S.tailZ, top: S.floorTop },
+      roof: S.roofY,
+      walls: [
+        { x: -(w / 2 - S.wallT / 2), z: (S.holdFrontZ + S.tailZ) / 2, w: S.wallT, d: S.holdFrontZ - S.tailZ, y0: S.floorTop, y1: S.roofY },
+        { x: (w / 2 - S.wallT / 2), z: (S.holdFrontZ + S.tailZ) / 2, w: S.wallT, d: S.holdFrontZ - S.tailZ, y0: S.floorTop, y1: S.roofY },
+        { x: 0, z: S.gapZ - S.wallT / 2, w: w, d: S.wallT, y0: S.floorTop, y1: S.roofY },
+      ],
+      ramp: {
+        nodeName: "semi_tailgate", w: S.holdW, len: S.leaf,
+        sillZ: S.tailZ, sillTop: S.floorTop,
+        closedRx: S.closedRx, openRx: S.openRx, dir: -1, seconds: 2.4,
+      },
+    };
+    return root;
+  }
+
+  // headlamps low on the bonnet + marker lamps along the cab roof. Kept out of
+  // addLights() because that one places a car's lamp bar off len/2, and a
+  // conventional's lamps live on the FENDERS, ahead of a two-metre bonnet.
+  function addLightsSemi(root, w, frameY, S) {
+    const head = vmat("lightFront", 0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
+    const tail = vmat("lightTail", 0xff3038, { emissive: 0xff2630, ei: 0.8 });
+    [1, -1].forEach(function (s) {
+      addBox(root, 0.34, 0.20, 0.06, s * (w * 0.33), frameY + 0.44, S.noseZ - 0.06, head);
+      addBox(root, 0.16, 0.34, 0.06, s * (w * 0.34), 0.72, S.tailZ - 0.20, tail);
+    });
+  }
+
   // --- a tall long cargo van: flat slab sides (sliding-door crease), short hood. ---
   function makeVan() {
     const root = new THREE.Group();
@@ -1461,7 +1875,34 @@
     // what leaves a flat cab roof long enough to sit a driver under.
     const vanWsBotY = boxH * 0.38, vanWsBotZ = len * 0.418, vanWsTopZ = len * 0.336;
     const vanNoseY = boxH * 0.35;
-    addBox(root, w, boxH, vanBoxD, 0, bodyY + boxH * 0.5, vanBoxZ, paint);
+    /* ---- THE BOX IS A ROOM NOW (VAN_HOLD_V1) ---------------------------
+       OWNER: "you bring a van and open the back of it, and put the money in
+       it." That box was ONE SOLID SLAB — the single most-photographed cargo
+       volume in the game and there was nothing inside it, not even air.
+
+       The slab becomes five thin panels whose OUTER faces sit exactly where
+       the slab's faces sat: 0 mm of silhouette change at any distance, and a
+       2.08 × 1.39 × 3.14 m room behind the doors. It is not a room you can
+       stand up straight in — a Transit is 1.4 m inside and this one honours
+       that. It is a room you can crouch in, walk duffels into, and drive away
+       with, and its floor is a real moving platform, so the money is still
+       there at the other end.
+       Flag off → the original slab, byte for byte. */
+    const vanHold = CFG.VAN_HOLD_V1 !== false;
+    const vanWallT = 0.05;
+    const vanFloorTop = bodyY + vanWallT;
+    const vanRoofY = bodyY + boxH - vanWallT;
+    const vanHoldW = w - vanWallT * 2;
+    const vanBoxBackZ = vanBoxZ - vanBoxD / 2, vanBoxFrontZ = vanBoxZ + vanBoxD / 2;
+    if (vanHold) {
+      addHoldShell(root, {
+        w: w, zFront: vanBoxFrontZ, zBack: vanBoxBackZ,
+        floorTop: vanFloorTop, roofY: vanRoofY, wall: vanWallT,
+        mat: paint, deckMat: roleMat("van-deck", "metal", 0x4e545c), bulkMat: paint,
+      });
+    } else {
+      addBox(root, w, boxH, vanBoxD, 0, bodyY + boxH * 0.5, vanBoxZ, paint);
+    }
     // sliding-door crease line + lower rocker trim down the slab
     addBox(root, w + 0.02, 0.05, vanBoxD * 0.95, 0, bodyY + boxH * 0.6, vanBoxZ, trim);
     addBox(root, w + 0.02, 0.18, vanBoxD * 0.97, 0, bodyY + 0.1, vanBoxZ, trim);
@@ -1508,13 +1949,28 @@
     addBox(root, 0.025, boxH * 0.52, 0.035, w * 0.505, bodyY + boxH * 0.40, len * 0.02, trim);
     addBox(root, 0.02, 0.035, len * 0.28, w * 0.505, bodyY + boxH * 0.10, -len * 0.06, trim);
     addBox(root, 0.03, 0.05, 0.15, w * 0.508, bodyY + boxH * 0.42, len * 0.09, trim);
-    addBox(root, 0.035, boxH * 0.74, 0.04, 0, bodyY + boxH * 0.5, -len * 0.47, trim);   // split rear doors
-    [1, -1].forEach(function (side) {                                                   // rear-door hinges + handle bar
-      [0.30, 0.72].forEach(function (fy) {
-        addBox(root, 0.035, 0.09, 0.05, side * (w * 0.5 - 0.05), bodyY + boxH * fy, -len * 0.47 - 0.02, trim);
+    /* THE REAR DOOR. It used to be three decals painted on a solid slab: a
+       split seam, four hinge blocks and a handle bar, all stuck to a face
+       nothing was behind. They now ride the door LEAF, so the same hardware you
+       always saw is the hardware that swings — and the hinges are on the hinge.
+       A bottom-hinged tailgate rather than the barn doors the decals implied,
+       because vehicle_hold's door IS the ramp (see addTailgate): one node, one
+       arc, and a surface the money goes up. */
+    const vanLeaf = 1.50;
+    if (vanHold) {
+      addTailgate(root, "van_tailgate", {
+        w: vanHoldW, len: vanLeaf, sillZ: vanBoxBackZ, sillTop: vanFloorTop,
+        closedRx: 1.552, mat: paint, ribMat: trim, trimMat: trim, leafT: 0.06,
       });
-    });
-    addBox(root, 0.03, 0.26, 0.04, 0.11, bodyY + boxH * 0.45, -len * 0.47 - 0.025, trim);
+    } else {
+      addBox(root, 0.035, boxH * 0.74, 0.04, 0, bodyY + boxH * 0.5, -len * 0.47, trim);   // split rear doors
+      [1, -1].forEach(function (side) {                                                   // rear-door hinges + handle bar
+        [0.30, 0.72].forEach(function (fy) {
+          addBox(root, 0.035, 0.09, 0.05, side * (w * 0.5 - 0.05), bodyY + boxH * fy, -len * 0.47 - 0.02, trim);
+        });
+      });
+      addBox(root, 0.03, 0.26, 0.04, 0.11, bodyY + boxH * 0.45, -len * 0.47 - 0.025, trim);
+    }
     // trucker jewellery: three amber clearance markers along the front roof edge
     // (kills the "rolling fridge" read — the roofline gets a working-vehicle cue).
     const marker = sharedMat("van-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
@@ -1537,6 +1993,27 @@
       roofY: boxTop, roofZ: vanBoxZ, roofW: w * 0.9, roofLen: vanBoxD * 0.8,
       paint: paint,
     };
+    // THE VAN'S HOLD. Same declaration shape as the semi's and read by the same
+    // three lines in vehicles.js, which is the point: a second freight body
+    // cost a spec object, not a system. See makeSemi for the contract notes.
+    if (vanHold) {
+      root.userData.holdSpec = {
+        id: "van-box", label: "Cargo bay",
+        floor: { x: 0, z: vanBoxZ, w: vanHoldW, d: vanBoxD - vanWallT * 2, top: vanFloorTop },
+        roof: vanRoofY,
+        walls: [
+          { x: -(w / 2 - vanWallT / 2), z: vanBoxZ, w: vanWallT, d: vanBoxD - vanWallT * 2, y0: vanFloorTop, y1: vanRoofY },
+          { x: (w / 2 - vanWallT / 2), z: vanBoxZ, w: vanWallT, d: vanBoxD - vanWallT * 2, y0: vanFloorTop, y1: vanRoofY },
+          { x: 0, z: vanBoxFrontZ - vanWallT / 2, w: w, d: vanWallT, y0: vanFloorTop, y1: vanRoofY },
+        ],
+        ramp: {
+          nodeName: "van_tailgate", w: vanHoldW, len: vanLeaf,
+          sillZ: vanBoxBackZ, sillTop: vanFloorTop,
+          closedRx: 1.552, openRx: -Math.asin(Math.min(0.98, vanFloorTop / vanLeaf)),
+          dir: -1, seconds: 1.5,
+        },
+      };
+    }
     return root;
   }
 
@@ -1956,6 +2433,11 @@
       if (style === "cybertruck") template = makeCybertruck();
       else if (style === "suv") template = makeSUV();
       else if (style === "van") template = makeVan();
+      // SEMI_TRUCK_V1 off → no builder answers, so the fleet placer below finds
+      // nothing to place and no semi exists. Deliberately NOT a fallback to a
+      // road car: a truck spawn that quietly becomes a hatchback is worse than
+      // an empty yard, because it hides the revert.
+      else if (style === "semi") { if (CFG.SEMI_TRUCK_V1 === false) return null; template = makeSemi(); }
       else if (style === "motorcycle") template = makeMotorcycle();
       else if (style === "helicopter") template = makeHelicopter();
       // (c) REGISTERED MARINE HULLS build themselves (world/water_hulls.js).
@@ -2189,6 +2671,17 @@
   // the [C] style-cycler AND any system that re-skins a car in place.
   function setUnifiedVisual(car, style) {
     const grp = car && car.group; if (!grp) return false;
+    /* A BODY WITH A ROOM IN IT CANNOT BE RE-BODIED. This function's whole job
+       is `grp.remove(old)` followed by a fresh silhouette — which for a freight
+       vehicle destroys the hinged door node city/vehicle_hold.js is holding a
+       reference to, and the five shell panels that ARE the room, while leaving
+       the hold's rig (anchored to `grp`, which survives) quietly carrying
+       whatever was strapped inside a body that no longer exists.
+       Every route in — the [C] cycler, the mod shop, the net re-skin — passes
+       through here, so the refusal lives here rather than at three call sites.
+       It is the same law as "one author per object": the load space is part of
+       the vehicle, not a paint job over it. */
+    if (grp.userData && grp.userData.holdSpec) return false;
     const ud = grp.userData;
     const old = ud.carVisual;
     if (old) {
@@ -2238,6 +2731,12 @@
 
   CBZ.cityCyclePlayerCarStyle = function () {
     if (!active) return;
+    // setUnifiedVisual refuses a freight body outright (see its note); say so
+    // rather than silently doing nothing when somebody presses the key.
+    if (active.group && active.group.userData && active.group.userData.holdSpec) {
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("The load space is part of this body — no restyle.", 1.4);
+      return;
+    }
     const at = Math.max(0, STYLE_ORDER.indexOf(active.detailStyle));
     const style = STYLE_ORDER[(at + 1) % STYLE_ORDER.length];
     // unified path when the car carries a permanent visual; else legacy overlay.

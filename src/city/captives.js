@@ -112,13 +112,19 @@
     switch (state) {
       case "cuffed": return "Cuffed";
       case "escorted": return "Marching";
-      case "in_vehicle": return "In the trunk";
+      // "In the trunk" was true of the old hidden rig snapped to the car's
+      // origin. city/boarding.js walks him to a door and sits him on the rear
+      // bench, where he is visible through the glass and shootable — so the
+      // ledger now says where he actually is.
+      case "boarding": return "Getting in";
+      case "in_vehicle": return "In the back seat";
       case "grappled": return "In a clinch";
       default: return "Held";
     }
   }
   function holdIcon(state) {
     switch (state) {
+      case "boarding": return "";
       case "in_vehicle": return "";
       case "escorted": return "";
       case "grappled": return "";
@@ -418,7 +424,7 @@
     var inVehNow = 0;
     for (var i = 0; i < held.length; i++) if (held[i].state === "in_vehicle") inVehNow++;
     if (inVehNow > lastInVehicle) {
-      toast("Captive in the trunk — press [" + KEY_LABEL + "] to track them.", 4.5);
+      toast("Captive in the back — press [" + KEY_LABEL + "] to track them.", 4.5);
     }
     lastInVehicle = inVehNow;
     lastHeldCount = held.length;

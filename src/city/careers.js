@@ -1083,6 +1083,17 @@
       CBZ.city.note(ped.name + " is on your payroll (" + (ped.kind === "crew" ? "shooter" : ped.kind) + "). Crew: " + g.cityCrew +
         (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " That's enough muscle to found your own gang. · O" : ""), 2.6);
     }
+    /* HIRED FROM THE DRIVER'S SEAT — so get in. Recruiting through the car
+       window used to hand you a shooter who then jogged after your bumper for
+       the rest of the game, because nothing in the recruit path knew you were
+       in a vehicle. city/boarding.js walks him round to a free door and seats
+       him; with no seat left he simply stays on the pavement, which is the
+       honest outcome and reads as one. Feature-detected, one call. */
+    if (ped.kind === "crew" && CBZ.followerOrder && CBZ.player && CBZ.player.driving && CBZ.player._vehicle) {
+      if (!CBZ.followerOrder(ped, "board", { veh: CBZ.player._vehicle, role: "crew", run: true })) {
+        CBZ.city.note("No seat for " + ped.name + " — he'll catch up.", 1.8);
+      }
+    }
   };
 
   // count live hostile rival members standing on/near a block (used by TAKE).

@@ -286,7 +286,7 @@
   function release(ped, opts) {
     if (!ped || !ped.restraint) return false;
     const r = ped.restraint;
-    if (r.state === "in_vehicle") unseatBody(ped, r.vehicle);
+    if (r.state === "in_vehicle" || r.state === "boarding") unseatBody(ped, r.vehicle);
     ped.restraint = null;
     untrack(ped);
     removeCuffs(ped);
@@ -297,14 +297,57 @@
     return true;
   }
 
+  /* ---- STUFFING SOMEBODY IN THE BACK ---------------------------------------
+     This used to be four lines and every one of them was the bug the owner
+     filmed: `group.visible = false` (the body stops existing), `pos.set(car.pos)`
+     (it teleports to the car's ORIGIN, which is the middle of the engine bay),
+     `inCar = true` (peds.js skips it entirely — "the seat IS the freeze"), and
+     a hard cap of ONE because there was exactly one hiding place.
+
+     A real back seat has two, and city/boarding.js knows where both of them
+     are because `CBZ.carCabinInfo` publishes the bench. So the cap is lifted to
+     the SEAT COUNT rather than to a number, `_captive` keeps meaning "the first
+     captive in this car" for the five places that read it, and the body walks
+     to the door under its own legs and is put in the chair by npclife —
+     visible, shootable through the glass, holding its seat while the car moves.
+     The old snap survives underneath as the flag-off path, unchanged. */
+  function captives(car) { return (car && car._captives) || null; }
+  function noteCaptive(car, ped) {
+    const a = car._captives || (car._captives = []);
+    if (a.indexOf(ped) < 0) a.push(ped);
+    car._captive = a[0] || null;                     // legacy single-slot view
+  }
+  function dropCaptive(car, ped) {
+    if (!car) return;
+    const a = car._captives;
+    if (a) { const i = a.indexOf(ped); if (i >= 0) a.splice(i, 1); }
+    if (car._captive === ped) car._captive = (a && a[0]) || null;
+  }
+  function boardingUp() {
+    return !!(CBZ.boarding && CBZ.boarding.board && CBZ.CONFIG &&
+              CBZ.CONFIG.COMPANION_BOARDING_V1 !== false);
+  }
   function seat(ped, car) {
     if (!ped || !car || car.dead) return false;
     const s = st(ped);
     if (s !== "escorted" && s !== "cuffed") return false;
+    if (boardingUp()) {
+      // a real seat, reached on foot. `role: "captive"` is what sends him to
+      // the BACK — the seat picker puts a tied man behind the driver, which is
+      // both where he goes and why the one-body cap could be lifted at all.
+      if (CBZ.boarding.freeSeats && CBZ.boarding.freeSeats(car) <= 0) return false;
+      ped.restraint.state = "boarding";
+      ped.restraint.vehicle = car;
+      const ok = CBZ.boarding.board(ped, car, { role: "captive", run: false });
+      if (ok) { noteCaptive(car, ped); I.refresh(); return true; }
+      ped.restraint.state = s;                       // refused — nothing moved
+      ped.restraint.vehicle = null;
+      return false;
+    }
     if (car._captive) return false;                  // one body per back seat
     ped.restraint.state = "in_vehicle";
     ped.restraint.vehicle = car;
-    car._captive = ped;
+    noteCaptive(car, ped);
     ped.inCar = true;                                // peds.js fully skips them (the seat IS the freeze)
     ped.group.visible = false;
     ped.pos.set(car.pos.x, 0, car.pos.z);
@@ -312,10 +355,16 @@
     return true;
   }
   function unseatBody(ped, car) {
+    dropCaptive(car, ped);
+    // a body city/boarding.js seated leaves through CBZ.cityUnseat, which is
+    // the ONE sanctioned exit; only the legacy hidden rig is un-hidden here.
+    if (ped._cbzSeat && CBZ.boarding && CBZ.boarding.alight) {
+      CBZ.boarding.alight(ped);
+      return;
+    }
     ped.inCar = false;
     ped.group.visible = true;
     if (car) {
-      if (car._captive === ped) car._captive = null;
       const h = car.heading || 0;
       ped.pos.set(car.pos.x - Math.cos(h) * 1.8, 0, car.pos.z + Math.sin(h) * 1.8);
     }
@@ -323,7 +372,8 @@
     if (CBZ.collide) CBZ.collide(ped.pos, 0.5, 0, 1.7);
   }
   function unseat(ped) {
-    if (st(ped) !== "in_vehicle") return false;
+    const s = st(ped);
+    if (s !== "in_vehicle" && s !== "boarding") return false;
     const car = ped.restraint.vehicle;
     unseatBody(ped, car);
     ped.restraint.state = "cuffed";
@@ -394,7 +444,7 @@
   function turnIn(ped) {
     if (!ped || !ped.restraint || ped.dead) return false;
     const r = ped.restraint;
-    if (r.state === "in_vehicle") unseatBody(ped, r.vehicle);
+    if (r.state === "in_vehicle" || r.state === "boarding") unseatBody(ped, r.vehicle);
     const wanted = isWanted(ped);
     const pay = wanted ? bountyFor(ped) : 0;
     const tag = ped.bountyTag || "";
@@ -449,6 +499,23 @@
       if (!r || ped.dead) { if (ped) release(ped, { silent: true }); continue; }
       r.t += dt;
 
+      /* MARCHING HIM TO THE DOOR IS A WALK, NOT A SNAP. While city/boarding.js
+         is walking a cuffed body to a car door, easing it through the aperture
+         or handing it back out at the kerb, that file owns the transform — this
+         tick must not drag him back to your shoulder every frame. A CLINCH is
+         deliberately excluded: you cannot be holding somebody in a headlock and
+         have him politely walking to a car at the same time, so a grapple wins
+         and the arc's own `arcInvalid` drops it. Feature-detected. */
+      if (r.state === "boarding") {
+        if (CBZ.boardingHolds && CBZ.boardingHolds(ped)) continue;
+        // the arc ended: seated → riding, refused → still tied, standing there
+        r.state = ped._cbzSeat ? "in_vehicle" : "cuffed";
+        if (r.state === "cuffed") { r.vehicle = null; ped.target.set(ped.pos.x, 0, ped.pos.z); }
+        I.refresh();
+        continue;
+      }
+      if (r.state !== "grappled" && CBZ.boardingHolds && CBZ.boardingHolds(ped) && ped._cbzArc) continue;
+
       if (r.state === "grappled") {
         // player death / driving off mid-clinch = they're loose
         if (P.dead || P.driving) { breakFree(ped); continue; }
@@ -495,6 +562,14 @@
           r.state = "cuffed"; r.vehicle = null;
           ped.ko = Math.max(ped.ko || 0, 2);
           if (CBZ.body) CBZ.body.hit(ped, { dir: { x: Math.random() - 0.5, z: Math.random() - 0.5 }, force: 6, knockdown: 1.2 });
+        } else if (ped._cbzSeat && ped._cbzSeat.veh === car) {
+          /* HE IS IN A SEAT, VISIBLY, BEHIND THE GLASS. npclife's syncAttached
+             re-asserts that seat every frame and the rig is parented to the
+             car, so there is nothing to write here — writing anything would be
+             the 41-files bug the shared re-assert exists to defeat. The old
+             `pos.set(car.pos)` on a HIDDEN rig is the legacy path below, kept
+             for the flag-off case. */
+          ped.speed = 0;
         } else {
           ped.pos.set(car.pos.x, 0, car.pos.z);   // riding along (LOS/map stay honest)
         }
@@ -632,11 +707,19 @@
   });
 
   // ---- the back seat: drag a seated captive back out (on foot, your car) ----
+  // A BENCH HOLDS TWO. `_captives` is the real list (`_captive` stays the
+  // first of them for every legacy read); the label counts the bodies and the
+  // verb empties the seat row, because pulling one man out of a car that has
+  // two tied men in it and calling the job done is not an exit.
+  function seatedCaptives(car) {
+    const a = (car && car._captives) || (car && car._captive ? [car._captive] : []);
+    return a.filter(function (p) { return p && !p.dead && st(p) === "in_vehicle"; });
+  }
   I.register("vehicle", {
     id: "rs-unseat", slot: "i", prio: 85, bad: true,
-    canShow: (car, ctx) => !ctx.driving && !!car._captive && st(car._captive) === "in_vehicle",
-    label: "Drag out",
-    onSelect: (car) => { if (car._captive) unseat(car._captive); },
+    canShow: (car, ctx) => !ctx.driving && seatedCaptives(car).length > 0,
+    label: (car) => { const n = seatedCaptives(car).length; return n > 1 ? "Drag them out (" + n + ")" : "Drag out"; },
+    onSelect: (car) => { const a = seatedCaptives(car); for (let i = a.length - 1; i >= 0; i--) unseat(a[i]); },
   });
 
   // ---- THE DESK: hand-over zone at the precinct (police.js owns the point) ----

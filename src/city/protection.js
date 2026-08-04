@@ -410,6 +410,15 @@
     for (let i = 0; i < n; i++) {
       const gd = det.memberPedRefs[i]; if (!gd || gd.dead) continue;
       if ((gd._subornT || 0) > 0) { gd.state = "idle"; gd.speed = 0; continue; }
+      /* YOUR SECURITY RIDES WITH YOU. The owner named this detail first — "if
+         they are my security, when i get into a car ... they also go to car and
+         open door". city/boarding.js walks them to a real door and seats them;
+         while it owns the body this escort keeps its hands off, exactly as
+         social.js's follow closure now does. Without it the guard whose seat we
+         had just filled was dragged back out of the car by this line every
+         frame, because `moveToward` writes `pos` directly. One line,
+         feature-detected. */
+      if (CBZ.boardingHolds && CBZ.boardingHolds(gd)) continue;
       const o = offsetFor(i, n);
       const fx = P.pos.x + dx * o.f + lx * o.s, fz = P.pos.z + dz * o.f + lz * o.s;
       moveToward(gd, fx, fz, GUARD_SPEED, dt);

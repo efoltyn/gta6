@@ -1135,6 +1135,37 @@
           add("allyrival", "ALLY with " + shortGang(rivalNear.name), "#9be564");
       }
     }
+    /* ---- THE PEOPLE WHO ARE ACTUALLY WITH YOU ------------------------------
+       This menu only ever spoke to a FOUNDED GANG, which meant that the crew
+       you recruited before founding one, the security you are paying by the
+       hour, the partner walking beside you and the man you have at gunpoint
+       could all be standing at your shoulder with nothing you could say to
+       them. city/boarding.js counts all five kinds as one squad, so the orders
+       that apply to a body — get in, get out, hold this spot, pick up that
+       money, run this to the lockup — live here, above the gang politics, and
+       show only when somebody is there to hear them. */
+    const sq = (CBZ.followerSquad && CBZ.CONFIG.FOLLOWER_ORDERS_V1 !== false) ? CBZ.followerSquad() : [];
+    if (sq.length) {
+      const P = CBZ.player;
+      const ride = (P && (P._aircraft || P._vehicle)) || null;
+      let seated = 0, waiting = 0;
+      for (let i = 0; i < sq.length; i++) { if (sq[i].ped._cbzSeat) seated++; if (sq[i].ped._cbzWait) waiting++; }
+      html += "<div style='color:#7fd0ff;font-weight:700;margin:8px 0 2px'>With you — " + sq.length +
+        (seated ? " (" + seated + " aboard)" : "") + (waiting ? " (" + waiting + " holding)" : "") + "</div>";
+      if (ride) {
+        const free = CBZ.boarding && CBZ.boarding.freeSeats ? CBZ.boarding.freeSeats(ride) : 0;
+        if (seated < sq.length && free > 0) add("sq-in", "GET IN — everyone to a door (" + free + " free)", "#9be564");
+        if (seated) add("sq-out", "GET OUT — everyone off", "#ffd166");
+        if (seated) add("sq-drive", "DRIVE this to my warehouse", "#7fd0ff");
+      } else if (seated) {
+        add("sq-out", "GET OUT — everyone off", "#ffd166");
+      }
+      if (waiting < sq.length) add("sq-wait", "WAIT HERE — hold this spot");
+      if (waiting) add("sq-follow", "ON ME — fall back in");
+      if (CBZ.cashBags && CBZ.cashBags.count && CBZ.cashBags.count() > 0) {
+        add("sq-bags", "GRAB THE BAGS — carry the money", "#ffd166");
+      }
+    }
     html += "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
     menuEl.innerHTML = html;
     menuEl.style.display = "block";
@@ -1169,6 +1200,42 @@
     else if (act === "jumpin") { const rec = gangRecById(prospecting && prospecting.gangId); if (rec) startJumpIn(rec); }
     else if (act === "putwork") { const rec = gangRecById(prospecting && prospecting.gangId); if (rec) startWork(rec); }
     else if (act === "leavegang") { CBZ.cityLeaveGang(); }
+    // ---- squad orders (city/boarding.js owns the verbs; this is the surface) ----
+    else if (act.indexOf("sq-") === 0) doSquad(act.slice(3));
+  }
+  /* Every one of these is ONE call into CBZ.followerOrderAll, and every one of
+     them REPORTS WHAT ACTUALLY HAPPENED rather than what was asked for — "two
+     of four got a seat" is the honest sentence when a sedan has two chairs
+     left, and it is the sentence that tells you to take a second car. */
+  function doSquad(verb) {
+    if (!CBZ.followerOrderAll) return;
+    const P = CBZ.player;
+    const sq = CBZ.followerSquad ? CBZ.followerSquad() : [];
+    if (verb === "drive") {
+      // the nearest crew member ALREADY aboard takes the wheel; nobody else can
+      // be handed a wheel they would have to walk to across the map.
+      let who = null;
+      for (let i = 0; i < sq.length; i++) {
+        const p = sq[i].ped;
+        if (sq[i].role === "captive" || sq[i].role === "hostage") continue;   // you do not hand a hostage your truck
+        if (p._cbzSeat || Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z) < 12) { who = p; break; }
+      }
+      if (!who) { CBZ.city.note("Nobody close enough to take the wheel.", 1.8); return; }
+      CBZ.followerOrder(who, "drive", {});
+      return;
+    }
+    const map = { in: "board", out: "alight", wait: "wait", follow: "follow", bags: "bags" };
+    const v = map[verb]; if (!v) return;
+    const n = CBZ.followerOrderAll(v, v === "wait" ? { x: P.pos.x, z: P.pos.z } : {});
+    const words = {
+      board: [" head for a door.", "Nobody could get a seat."],
+      alight: [" step out.", "Nobody to put out."],
+      wait: [" hold here.", ""],
+      follow: [" fall back in.", ""],
+      bags: [" go for the money.", "No money on the ground."],
+    }[v];
+    if (n) CBZ.city.note(n + (n === 1 ? " of them" : " of them") + words[0], 1.9);
+    else if (words[1]) CBZ.city.note(words[1], 1.7);
   }
 
   // ============================================================

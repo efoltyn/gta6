@@ -225,6 +225,17 @@ const PASS = `(() => {
     out.weatherGround = "pool=" + wa.groundWater + " snow=" + wa.snowCover + " coated=" + wa.coatedMaterials;
     if (wa.privateWaterPlanes > 0) out.fails.push("weatherAudit privateWaterPlanes " + wa.privateWaterPlanes);
   } catch (e) { out.fails.push("weatherAudit threw: " + (e && e.message)); } }
+  // ---- companion boarding (boarding.js): A BODY REACHES A SEAT ON ITS OWN
+  // LEGS. The whole point of the boarding arcs is that nobody snaps into a
+  // vehicle any more, so the audit counts every position write the file makes
+  // that jumped further than a stride in one tick. TELEPORTS ARE PINNED AT 0.
+  // arcsRun/boarded print beside it so a fix that stops running arcs at all
+  // cannot pass by doing nothing.
+  if (CBZ.companionBoardAudit) { try { const cb = CBZ.companionBoardAudit();
+    out.boarding = "arcs=" + cb.arcsRun + " boarded=" + cb.boarded + " alighted=" + cb.alighted +
+      " orders=" + cb.ordersServed + " leaves=" + cb.doorLeaves + " tele=" + cb.teleports;
+    if (cb.teleports > 0) out.fails.push("BOARDING TELEPORTS: " + cb.teleports);
+  } catch (e) { out.fails.push("companionBoardAudit threw: " + (e && e.message)); } }
   // ---- weapon latency ledger (fpsmode.js): press→boom as a NUMBER. Derived
   // from tuning constants (no world state, seed-independent), so it is safe
   // to pin hard. overheadMs is flight time ABOVE dist/speed — the artificial
@@ -826,6 +837,15 @@ const PASS = `(() => {
     //               releases every load BEFORE it drops the rig), so it is
     //               PINNED AT 0: a non-zero reading means a vehicle is being
     //               posed off a dead matrix.
+    //               CORRECTED 2026-08-03: it used to count EVERY host that left
+    //               the scene, empty or loaded, which was invisible while the
+    //               only consumer was a cargo aeroplane on a static island and
+    //               fired on ordinary housekeeping the moment ground vehicles
+    //               adopted (an arena rebuild tears down every car group in the
+    //               world — measured 1 after a single world reload with nothing
+    //               wrong). hostsGone now carries the teardown count and
+    //               prints beside it, so the pin means what it says and the
+    //               path stays visible instead of going silent.
     //   holds - rigBacked — a declared hold that got no moving-platform rig.
     //               That hold has no floor, no walls and no ramp surface: it is
     //               a room you fall through. PINNED AT 0.
@@ -836,9 +856,39 @@ const PASS = `(() => {
       out.holds = hd.holds + " holds ramps=" + hd.ramps + " rigBacked=" + hd.rigBacked +
                   " veh=" + hd.vehiclesLatched + " cargo=" + hd.cargoLatched +
                   " aboard=" + hd.actorsAboard + " watchers=" + hd.watchers +
-                  " arcs=" + hd.rampArcs + " orphaned=" + hd.orphaned;
+                  " arcs=" + hd.rampArcs + " orphaned=" + hd.orphaned +
+                  " hostsGone=" + hd.hostsGone;
       if (hd.orphaned > 0) out.fails.push("HOLD ORPHANED WITH FREIGHT ABOARD: " + hd.orphaned);
       if (hd.holds !== hd.rigBacked) out.fails.push("HOLD WITH NO MOVING-PLATFORM RIG (a room you fall through): " + (hd.holds - hd.rigBacked));
+      // the GROUND half (semi trailer / van cargo bay), all derived from the
+      // car registry rather than declared — evidence, printed not asserted
+      out.holdsGround = hd.ground + " ground holds ramps=" + hd.groundRamps +
+                        " open=" + hd.groundRampsOpen + " loads=" + hd.groundLoads +
+                        " bags=" + hd.bagsAboard + " ($" + hd.bagValueAboard + ")" +
+                        " noDoor=" + hd.noDoor;
+    }
+    /* THE FREIGHT FLEET (CBZ.cityFreightAudit, city/vehicles.js). holdAudit
+       owns the ROOM's numbers; this owns the BODIES' and the budget's, because
+       they have different authors.
+         doorless — a freight body whose holdSpec named a hinged door node the
+                    built group does not contain, i.e. a spec and its art that
+                    disagree. The hold is then refused outright and the truck
+                    looks completely normal with a sealed back, which makes this
+                    the one failure mode of the design that is silent.
+                    PINNED AT 0.
+         overBudget — live ground holds above HOLD_LIVE_MAX. The lazy adoption
+                    budget is only a budget if this is 0. PINNED AT 0.
+       bodies/semis/vans/holds/loads print beside them, so a "fix" that stops
+       declaring freight bodies drives the body count to zero in plain sight. */
+    if (CBZ.cityFreightAudit) {
+      const fr = CBZ.cityFreightAudit();
+      out.freight = fr.bodies + " freight bodies (semi=" + fr.semis + " van=" + fr.vans +
+                    " placed=" + fr.fleetPlaced + ") holds=" + fr.holds + "/" + fr.budget +
+                    " open=" + fr.rampsOpen + " loads=" + fr.loads +
+                    " adopted=" + fr.adopted + " retired=" + fr.retired +
+                    " doorless=" + fr.doorless;
+      if (fr.doorless > 0) out.fails.push("FREIGHT BODY WITH A NAMED DOOR THAT DOES NOT EXIST (a sealed room): " + fr.doorless);
+      if (fr.overBudget > 0) out.fails.push("GROUND HOLDS OVER THE LIVE BUDGET: " + fr.overBudget);
     }
     // ARMOR SITS CLEAR OF THE CLOTH (CBZ.armorFitAudit, city/armor.js).
     // coplanar = same-facing armor/garment face pairs sharing a plane — the

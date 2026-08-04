@@ -1569,6 +1569,14 @@
     // partner / hostage follow the player (a few steps behind)
     const follow = (ped, offset) => {
       if (!ped || ped.dead) return;
+      /* A HOSTAGE DOES NOT JOG AFTER A MOVING CAR. This closure integrates a
+         position directly off `P.pos`, and while you drive `P.pos` IS the car
+         — so a partner or a hostage sprinted after your bumper forever, into
+         walls, until you stopped. city/boarding.js now walks them to a real
+         door and seats them; while it owns the body (walking to the door,
+         sitting in it, or told to wait) this tick keeps its hands off.
+         One line, feature-detected — with boarding.js absent nothing changes. */
+      if (CBZ.boardingHolds && CBZ.boardingHolds(ped)) return;
       const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
       const bx = P.pos.x + Math.sin(yaw) * offset, bz = P.pos.z + Math.cos(yaw) * offset;
       ped.target.set(bx, 0, bz); ped.state = "walk";
@@ -1585,6 +1593,27 @@
     };
     if (g.cityPartner && g.cityPartner.companion && !g.cityPartner.kidnapped) follow(g.cityPartner, 2.6);
     if (g.cityHostage) follow(g.cityHostage, 1.2);
+
+    /* YOU DROVE OFF WITHOUT HIM, SO HE IS NOT YOUR HOSTAGE ANY MORE.
+       restrain.js already settles this exact question the same way for a
+       clinch ("player death / driving off mid-clinch = they're loose",
+       restrain.js:454) and it is the only honest answer: a man at gunpoint
+       whose gunman is a hundred metres up the road in a car is a free man.
+       city/boarding.js gives you the alternative — he gets in the back with
+       you — so the hold now ENDS in one of two legible ways instead of
+       becoming a flag with a rig sprinting after a bumper. */
+    if (g.cityHostage) {
+      const h = g.cityHostage;
+      const aboard = !!(h._cbzSeat || h._cbzArc);
+      if (!aboard && (P.driving || P._aircraft)) {
+        const d = Math.hypot(h.pos.x - P.pos.x, h.pos.z - P.pos.z);
+        if (d > 22) {
+          CBZ.cityReleaseHostage(false);
+          if (CBZ.cityScare) { try { CBZ.cityScare(h, CBZ.city.playerActor || P, { bias: 0.5 }); } catch (e) {} }
+          CBZ.city.note("Your hostage broke away.", 2);
+        }
+      }
+    }
 
     // kidnap director: when you're hot near a provoked gang, they may snatch
     // your partner and drag them back to a turf building (rescue mission).

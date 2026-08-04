@@ -1075,6 +1075,57 @@
     return { label: "Freeport loading dock", note: "Racks " + s.bags + "/" + s.cap + " · back a load up and unload it" };
   });
 
+  /* ==================================================================
+     UNLOAD THE TRUCK WHERE YOU ARE STANDING — one option on the
+     `vehhold` layer city/vehicle_hold.js already registers.
+
+     OWNER: "put the money in it... and drive to your warehouse." The
+     drive-to-the-warehouse half already worked: cashstore.js's
+     unloadHere() has been hold-aware since it shipped (it releases any
+     duffel strapped within a truck's length of the dock), and
+     zone-freeport above offers it. What it offered it from was the DOCK
+     PAD — so having backed a trailer up to the shed and walked round to
+     open the back, you had to walk away from the open trailer to a
+     patch of concrete to unload it.
+
+     This is that same verb, on the panel that is already up while you
+     stand at the tailgate. It is a CONVENIENCE and never a capability:
+     it calls the identical function, which does its own ownership,
+     position and shelf-space checks, and every bag it moves is one you
+     could have carried in by hand. No hold in the build, no cashstore in
+     the build, or a truck parked anywhere but the dock — the option
+     simply is not there, and the two shipped verbs are byte-identical.
+     ================================================================== */
+  function holdBagCount(h) {
+    const CBg = CBZ.cashBags;
+    if (!CBg || !CBg.list || !h || !h._hold) return 0;
+    let n = 0;
+    let list = null;
+    try { list = CBg.list(); } catch (e) { return 0; }
+    for (let i = 0; list && i < list.length; i++) {
+      const b = list[i];
+      if (b && b._heldBy === h._hold) n++;
+    }
+    return n;
+  }
+  if (I.register) {
+    I.register("vehhold", {
+      id: "vehhold-unload", slot: "i", prio: 100,
+      canShow: function (h) {
+        const CS = CBZ.cashStore;
+        if (!CS || !CS.owned || !CS.atDock || !CS.owned()) return false;
+        const P = CBZ.player; if (!P || !P.pos) return false;
+        if (!CS.atDock(P.pos.x, P.pos.z) && !(CS.inside && CS.inside(P.pos.x, P.pos.z))) return false;
+        return holdBagCount(h) > 0;
+      },
+      label: function (h) {
+        const n = holdBagCount(h);
+        return "Unload " + n + " bag" + (n === 1 ? "" : "s") + " onto the racks";
+      },
+      onSelect: function () { if (CBZ.cashStore && CBZ.cashStore.unloadHere) CBZ.cashStore.unloadHere(); },
+    });
+  }
+
   // seated/asleep: the "get up" verb rides its own zero-distance source so it
   // always wins the panel while the pose holds (physics stun hides nothing here).
   I.registerSource({
@@ -1444,6 +1495,94 @@
     canShow: (car, ctx) => !!gig() && !!gigWaitingFare(ctx.pos.x, ctx.pos.z),
     label: "Pick up the fare",
     onSelect: (car, ctx) => { const p = gigWaitingFare(ctx.pos.x, ctx.pos.z); if (p) gigHailFare(p); },
+  });
+
+  /* ============================================================
+     TELLING THE PEOPLE WITH YOU WHAT TO DO (city/boarding.js).
+
+     OWNER: "also add the ability for me to tell them to get out."  There was
+     no way to say ANYTHING to a specific follower — the [O] menu spoke only to
+     a founded gang, and the ped card's one companion verb was "Follow me".
+     A hostage in your back seat could only be let out by killing him.
+
+     These are the per-BODY half of the surface (the [O] menu is the group
+     half): five verbs, all of them additive, all of them gated on the person
+     in front of you actually being one of yours, and every one of them a
+     single call into `CBZ.followerOrder`. Feature-detected end to end — with
+     boarding.js absent not one of these rows can appear.
+  ============================================================ */
+  const ordersOn = () => !!(CBZ.followerOrder && (!CBZ.CONFIG || CBZ.CONFIG.FOLLOWER_ORDERS_V1 !== false));
+  const mine = (p) => {
+    if (!ordersOn() || !p || p.dead) return false;
+    if (p._cbzSeat || p._cbzWait || p._cbzArc) return true;
+    if (p.companion || p.hostage) return true;
+    if (p.restraint && (p.restraint.state === "cuffed" || p.restraint.state === "escorted")) return true;
+    if (p.job === "hired security" && p.controlled) return true;
+    return false;
+  };
+  const rideNear = (ctx) => {
+    const P = CBZ.player;
+    if (P && P._aircraft) return P._aircraft;
+    if (P && P.driving && P._vehicle) return P._vehicle;
+    const c = CBZ.cityNearestCar && CBZ.cityNearestCar(ctx.pos.x, ctx.pos.z, 18);
+    return (c && (c.owned || c.stolen || c.player)) ? c : null;
+  };
+  I.register("ped:civ", {
+    id: "fol-out", slot: "j", prio: 76,
+    canShow: (p) => mine(p) && !!p._cbzSeat,
+    label: (p) => (p.hostage || p.restraint) ? "Pull them out" : "Get out",
+    onSelect: (p) => { CBZ.followerOrder(p, "alight"); },
+  });
+  I.register("ped:civ", {
+    id: "fol-in", slot: "j", prio: 74,
+    canShow: (p, ctx) => mine(p) && !p._cbzSeat && !!rideNear(ctx),
+    label: (p, ctx) => { const v = rideNear(ctx); const n = (CBZ.boarding && CBZ.boarding.freeSeats) ? CBZ.boarding.freeSeats(v) : 1; return n > 0 ? "Get in" : "Get in (no seats)"; },
+    onSelect: (p, ctx) => {
+      const v = rideNear(ctx);
+      if (!CBZ.followerOrder(p, "board", { veh: v, run: true })) CBZ.city.note("No seat left for them.", 1.6);
+    },
+  });
+  I.register("ped:civ", {
+    id: "fol-wait", slot: "k", prio: 74,
+    canShow: (p) => mine(p) && !p._cbzSeat && !p._cbzWait,
+    label: "Wait here",
+    onSelect: (p) => { CBZ.followerOrder(p, "wait", {}); CBZ.city.note(((p && p.name) || "They") + " holds this spot.", 1.6); },
+  });
+  I.register("ped:civ", {
+    id: "fol-onme", slot: "k", prio: 75,
+    canShow: (p) => mine(p) && !!p._cbzWait,
+    label: "On me",
+    onSelect: (p) => { CBZ.followerOrder(p, "follow", {}); },
+  });
+  I.register("ped:civ", {
+    id: "fol-bags", slot: "i", prio: 44,
+    canShow: (p) => mine(p) && !p._cbzSeat && !p._cbzHeldBag &&
+      !!(CBZ.cashBags && CBZ.cashBags.count && CBZ.cashBags.count() > 0),
+    label: "Grab a bag",
+    onSelect: (p) => { if (!CBZ.followerOrder(p, "bags", {})) CBZ.city.note("No loose money in reach.", 1.6); },
+  });
+
+  // ---- BEHIND THE WHEEL, TALKING TO THE CABIN BEHIND YOU ----
+  const aboardCrew = (car) => (CBZ.boarding && CBZ.boarding.aboard) ? CBZ.boarding.aboard(car) : [];
+  I.register("vehicle:inside", {
+    id: "car-crew-out", slot: "k", prio: 60,
+    canShow: (car, ctx) => ordersOn() && ctx.driving && aboardCrew(car).length > 0,
+    label: (car) => { const n = aboardCrew(car).length; return n > 1 ? "Everyone out (" + n + ")" : "Tell them to get out"; },
+    onSelect: (car) => { const n = CBZ.boarding.squadAlight(car); if (n) CBZ.city.note(n > 1 ? "They pile out." : "They step out.", 1.6); },
+  });
+  I.register("vehicle:inside", {
+    id: "car-crew-drive", slot: "l", prio: 60,
+    canShow: (car, ctx) => ordersOn() && ctx.driving && !car.airClass && aboardCrew(car).length > 0,
+    label: "Have them run it to the warehouse",
+    onSelect: (car) => {
+      const crew = aboardCrew(car);
+      for (let i = 0; i < crew.length; i++) {
+        const p = crew[i];
+        if (p.restraint || p.hostage) continue;      // you do not hand a hostage your truck
+        if (CBZ.followerOrder(p, "drive", { veh: car })) return;
+      }
+      CBZ.city.note("Nobody aboard you'd trust with it.", 1.8);
+    },
   });
 
   // ---- YOUR POCKETS (the no-target fallback): old bare-E eat + X drugs ----
